@@ -79,7 +79,7 @@ Rocks의 외적, Hamilton 곱, quaternion 벡터 회전, quaternion → 행렬 �
 - **삼각형 메시 앞면.** det A = +1이라 정점 순서를 바꾸지 않아도 법선이 A로 대응한다. 남는 것은 앞면 규약의 차이다. Rocks 기하 `Triangle`·`Plane` 앞면 법선은 `Cross(b − a, c − a)`(UE `FPlane`·Chaos `FTriangle`과 같은 식, `Core/Public/Math/Plane.h:441-446`, `Experimental/Chaos/Public/Chaos/Triangle.h:120-122`)이고, 렌더 메시 앞면은 `(C − A) × (B − A)`다(`MeshDescription/Private/MeshDescription.cpp:1311-1313`). UE는 정적 메시 충돌을 쿠킹할 때 `bFlipNormals = true`로 v0·v1을 바꿔 렌더 메시 순서를 Chaos 앞면 순서로 맞춘다(`Engine/Private/StaticMesh.cpp:9343`, `Engine/Private/PhysicsEngine/Experimental/ChaosCooking.cpp:41-42`). Rocks 물리 쿠킹도 렌더 메시 입력을 같은 교환으로 기하 앞면 순서로 바꾼다. Jolt 메시 앞면의 수치 식(J5)이 `(B − A) × (C − A)`이면 기하 앞면 순서를 그대로 넘기고, 반대면 쿠킹에서 한 번 더 바꾼다. 교환은 쿠킹의 한 곳에서만 한다.
 - **음수 행렬식 scale(거울 인스턴스).** 정점에 거울 변환이 들어가면 법선 식의 부호가 뒤집히므로 앞면을 보정해야 한다. Jolt가 음수 scale을 형상 scale로 받는지, 받으면 winding을 어떻게 다루는지(J8)를 확인하기 전에는 거울 인스턴스를 쿠킹 단계에서 별도 형상으로 만든다.
 - **비균일 scale.** Rocks `Transform` scale은 형상 scale로 넘긴다(Jolt scaled shape의 지원 범위 J8). 비균일 scale 부모 아래 회전한 자식의 shear는 Rocks `Transform` 합성이 Unsupported로 거부하므로 물리에 들어오지 않는다(수학 구현 2절).
-- **캡슐·실린더.** UE 캡슐은 로컬 Z축이 캡슐 축이다(`Engine/Classes/PhysicsEngine/SphylElem.h:13`). Rocks 물리 캡슐도 로컬 +Z축이다. Jolt 캡슐·실린더 축(J6)이 +Y이면 기본안 A가 Rocks +Z를 Jolt +Y로 옮기므로 형상 회전이 필요 없다. 아니면 고정 회전으로 감싼다.
+- **캡슐·실린더.** UE 캡슐은 로컬 Z축이 캡슐 축이다(`Engine/Classes/PhysicsEngine/SphylElem.h:13`). Rocks 물리 캡슐도 로컬 +Z축이다. Jolt 캡슐·실린더 축(J6)이 +Y이면 기본안 A가 Rocks +Z를 Jolt +Y로 옮기므로 형상 회전이 필요 없다. 아니면 고정 회전으로 감싼다. Rocks cylinder(UE에는 없는 단순 충돌·질의 형상)의 사상, convex radius 정책, 안정성 경고는 [Cylinder 형상 설계](CylinderShape.ko.md) 4절(CY2)을 따른다.
 - **heightfield.** Rocks(UE landscape)의 표본 격자는 XY 평면이고 높이는 +Z다. 기본안 A에서 Rocks X는 Jolt Z, Rocks Y는 Jolt X가 되므로 Jolt 격자가 XZ 평면(J7)이면 표본 배열을 전치해 넘기고 높이는 `CentimetersToMeters`로 바꾼다. 칸마다 나누는 대각선 방향, 표본 색인 순서, 구멍 표시(J7)와 UE landscape 충돌의 대각선 선택(U3)이 맞지 않으면 같은 높이 표본에서 다른 표면이 나온다. 시험 PA07이 이를 고정한다.
 - **convex·compound.** convex 점은 A와 cm → m로 바꾸고, compound 자식의 상대 변환은 이동을 A·(cm → m), 회전을 (A·v, w)로 바꾼다.
 
@@ -124,6 +124,10 @@ Rocks의 외적, Hamilton 곱, quaternion 벡터 회전, quaternion → 행렬 �
 | J13 | ray·shape cast 방향 벡터 길이의 의미와 hit 분수 | 5절 |
 | J14 | 공개 header의 표준 라이브러리 사용, 예외·RTTI, allocator·job·로그·assert hook | 전체 구현 계획 2.1·16.4절 |
 | J15 | 고정 version과 license 고지 | 전체 구현 계획 16.4절 |
+| J16 | `NarrowPhaseQuery::CastShape`·`CollideShape`가 cylinder를 질의 형상으로 받는지, 결과 법선·거리 의미(J11 연동), cylinder 대 mesh·heightfield의 활성 모서리 처리 | Cylinder 형상 설계 4절 |
+| J17 | `RayCylinder`의 정확성(끝면·모서리·시작점이 안), convex radius가 ray 판정에 주는 영향 | Cylinder 형상 설계 4절 |
+| J18 | cylinder 반높이·반경과 convex radius의 관계(잘림인지 거부인지), 0 근처 동작, 얇은 cylinder 접촉 품질(v5.3.0 이후), convex radius 0 sensor의 침투 깊이 안정성 | Cylinder 형상 설계 4절 |
+| J19 | cylinder 질량·관성 계산식과 단위 변환, 부력(`GetSubmergedVolume`) 근사, 캐릭터(`CharacterVirtual`) 형상으로 쓸 수 있는지 | Cylinder 형상 설계 4절 |
 | U1 | UE `AddForce`·`AddImpulse`·`AddTorqueInRadians`·`AddAngularImpulseInRadians`의 실제 단위. 소스 주석에 단위가 없다("Magnitude indicates strength of force" — `Engine/Classes/Components/PrimitiveComponent.h:1753-1759`). 확인 방법(미실행): UE 5.8에서 질량 m body에 매 tick `AddForce(0, 0, 980·m)`를 걸어 중력 −980에서 정지가 유지되면 kg·cm/s², `AddImpulse(0, 0, 100·m)` 뒤 속도 변화가 100 cm/s면 kg·cm/s, 관성 I(kg·cm²)의 주축에 `AddTorqueInRadians` τ를 걸어 각가속도 τ/I면 kg·cm²/s² | 3절 |
 | U2 | UE 에디터의 물리량 표시 단위 | Rocks 에디터 표시 |
 | U3 | UE landscape 충돌의 칸 대각선 선택 | 4절, PA07 |

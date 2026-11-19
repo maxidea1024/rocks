@@ -202,8 +202,10 @@ Result<void> ConfigContext::RegisterHandles(Span<const VarDefinition* const> def
     }
 
     // 1단계: 모두 검사하고 설정 상태(기본값 포함)를 만든다. 여기까지는 문맥을 바꾸지
-    // 않는다(하나라도 거부하면 아무것도 등록하지 않는다). added는 새로 등록할 정의다.
+    // 않는다(하나라도 거부하면 아무것도 등록하지 않는다). added는 새로 등록할 변수 정의, commands는
+    // 새로 등록할 명령 정의다.
     Array<const VarDefinition*> added(*allocator_);
+    Array<const VarDefinition*> commands(*allocator_);
     // 핸들은 정적 저장 기간이어야 한다(번호·주소가 정체성이고 문맥보다 오래 살아야 한다). 이
     // 스레드의 스택 범위를 한 번 구해 모든 정의에 쓴다.
     [[maybe_unused]] platform::ThreadStackRange stack;
@@ -222,6 +224,36 @@ Result<void> ConfigContext::RegisterHandles(Span<const VarDefinition* const> def
 
         if (!HasKnownRegion(*state, definition->name)) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        // 콘솔 명령(ConsoleCommand)은 값 칸이 없고 명령 표에 든다(CVar 13·15절).
+        if (definition->kind == HandleKind::Command) {
+            const usize existingCommand = state->FindCommand(definition->name);
+            if (existingCommand != IndexNone &&
+                state->commands[existingCommand]->definition == definition) {
+                continue;
+            }
+
+            if (existingCommand != IndexNone || state->FindSetting(definition->name) != IndexNone) {
+                return Result<void>::Failure(ErrorCode::AlreadyExists);
+            }
+
+            bool repeatedCommand = false;
+            for (const VarDefinition* other : commands) {
+                if (other == definition) {
+                    repeatedCommand = true;
+                } else if (other->name == definition->name) {
+                    return Result<void>::Failure(ErrorCode::AlreadyExists);
+                }
+            }
+
+            if (!repeatedCommand) {
+                if (auto pushed = commands.TryPushBack(definition); !pushed) {
+                    return pushed;
+                }
+            }
+
+            continue;
         }
 
         const usize existing = state->FindSetting(definition->name);
@@ -257,7 +289,68 @@ Result<void> ConfigContext::RegisterHandles(Span<const VarDefinition* const> def
         }
     }
 
+    for (const VarDefinition* command : commands) {
+        for (const VarDefinition* variable : added) {
+            if (variable->name == command->name) {
+                return Result<void>::Failure(ErrorCode::AlreadyExists);
+            }
+        }
+    }
+
+    // 명령 상태를 만들어 둔다(넣기는 실패하지 않는 마지막 단계).
+    Array<UniquePtr<detail::ConsoleCommandState>> madeCommands(*allocator_);
+    for (const VarDefinition* definition : commands) {
+        auto made = UniquePtr<detail::ConsoleCommandState>::TryMake(*allocator_, *allocator_);
+        if (!made) {
+            return Result<void>::Failure(made.Error());
+        }
+
+        made.Value()->definition = static_cast<const cvar::detail::CommandDefinition*>(definition);
+        Result<void> filled = made.Value()->name.TryAssign(definition->name);
+        if (filled) {
+            filled = made.Value()->help.TryAssign(definition->help);
+        }
+
+        if (filled) {
+            filled = madeCommands.TryPushBack(Move(made.Value()));
+        }
+
+        if (!filled) {
+            return filled;
+        }
+    }
+
+    if (auto reserved = state->commands.TryReserve(state->commands.Size() + madeCommands.Size());
+        !reserved) {
+        return reserved;
+    }
+
+    // 명령을 넣는다(실패하지 않는다).
+    auto commitCommands = [&]() noexcept {
+        for (UniquePtr<detail::ConsoleCommandState>& command : madeCommands) {
+            static_cast<void>(state->commands.TryPushBack(Move(command))); // 예약했다
+        }
+    };
+
+    // 등록은 바로 보인다: 게시하는 snapshot의 콘솔 이름 색인에 아직 넣지 않은 새 이름도 든다.
+    auto publishNames = [&](Span<const UniquePtr<ConsoleSettingState>> settings,
+                            Span<const detail::SlotWrite> writes,
+                            Span<const detail::SlotWrite> bootWrites) noexcept {
+        state->namesChanged = true;
+        state->registeringSettings = settings;
+        state->registeringCommands = madeCommands.View();
+        auto published = detail::PublishSnapshot(*state, nullptr, writes, bootWrites);
+        state->registeringSettings = {};
+        state->registeringCommands = {};
+        return published;
+    };
+
     if (added.IsEmpty()) {
+        if (auto published = publishNames({}, {}, {}); !published) {
+            return published;
+        }
+
+        commitCommands();
         return Result<void>::Success();
     }
 
@@ -348,8 +441,7 @@ Result<void> ConfigContext::RegisterHandles(Span<const VarDefinition* const> def
         }
     }
 
-    if (auto published = detail::PublishSnapshot(*state, nullptr, writes.View(), bootWrites.View());
-        !published) {
+    if (auto published = publishNames(made.View(), writes.View(), bootWrites.View()); !published) {
         state->diagnostics.Rewind(mark);
         return published;
     }
@@ -369,6 +461,8 @@ Result<void> ConfigContext::RegisterHandles(Span<const VarDefinition* const> def
 
         state->dirty = true;
     }
+
+    commitCommands();
 
     // 묶음과 항목 변수가 둘 다 등록된 코드 프리셋 값을 검사한다(진단만 — 등록은 이미 끝났으므로
     // 진단을 남기지 못해도 등록은 성공이다).

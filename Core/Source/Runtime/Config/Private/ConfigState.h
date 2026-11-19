@@ -84,8 +84,12 @@ struct ConfigEntry {
 // 스레드에서 다시 검사하고(진단을 남긴다) 거부되면 항목 전체를 버린다(다른 스레드에서 넣은 쓰기
 // — 6.2절). entry가 없으면 빼기다. allTags면 층 전체, 아니면 (층, 태그)이고 path가 있으면 그 콘솔
 // 이름 입력만 뺀다(`CVar::Clear`·`ClearLayer`·Unset).
+// output은 그 입력을 낸 콘솔 sink다(다른 스레드의 콘솔 입력 — 꺼낼 때 거부하면 여기에 알린다).
+// line이 있으면 쓰기가 아니라 게임 lane이 실행할 콘솔 입력 한 줄이다(다른 스레드의 `<이름>`·`<이름>
+// ?`·명령 — CVar 15절).
 struct QueuedChange {
-    explicit QueuedChange(Allocator& allocator) noexcept : tag(allocator), path(allocator) {
+    explicit QueuedChange(Allocator& allocator) noexcept
+        : tag(allocator), path(allocator), line(allocator) {
     }
 
     UniquePtr<ConfigEntry> entry;
@@ -95,6 +99,8 @@ struct QueuedChange {
     bool replace = false;
     bool allTags = false;
     bool validateAtApply = false;
+    SharedPtr<ConsoleSink> sink;
+    String line;
 };
 
 // 문맥의 쓰기 통로다(10.1절 — 다른 스레드가 문맥에 들어오는 길은 이것 하나다). 문맥과 그 문맥이
@@ -121,6 +127,8 @@ struct WriteChannel {
     bool open = true;
     // 문맥 옵션의 사본(다른 스레드의 쓰기 검사가 읽는다 — 만든 뒤 바뀌지 않는다).
     bool releaseRules = false;
+    // 네트워크 역할(NetworkRole 값 — 원자, 소유 스레드가 SetNetworkRole로 쓴다).
+    uint8 networkRole = 0;
     // 살아 있는 cvar::SnapshotBinding 수(원자 — 문맥 파괴 때 0이어야 한다).
     uint64 bindings = 0;
 };
@@ -176,24 +184,29 @@ struct ConsoleSettingState {
     const cvar::detail::VarDefinition* definition = nullptr;
 };
 
-// 콘솔 명령 하나다. args.create가 있으면 인자 struct 스키마가 있다.
+// 콘솔 명령 하나다(ConsoleCommand 핸들 — CVar 13·15절). target은 BindCommand로 묶은 대상이다.
 struct ConsoleCommandState {
     explicit ConsoleCommandState(Allocator& allocator) noexcept : name(allocator), help(allocator) {
     }
 
     String name;
     String help;
-    ConsoleCommandFunction execute = nullptr;
-    void* context = nullptr;
-    TypeLease lease;
-    SettingsTypeOps args;
+    const cvar::detail::CommandDefinition* definition = nullptr;
+    void* target = nullptr;
+    // 묶은 대상의 타입 표지(cvar::detail::TargetTypeTag<T>의 주소)다.
+    const void* targetType = nullptr;
 };
 
-// 다음 Sync에 실행할 명령 하나다(인자 값은 args.create로 만들었다).
+// 다음 Sync 5단계에 게임 lane이 할 콘솔 일 하나다: 명령 실행(command — 인자는 arguments 텍스트를
+// 실행 때 다시 읽는다), 또는 다른 스레드가 낸 콘솔 입력 한 줄(command가 IndexNone — line을 게임
+// lane에서 처리한다).
 struct PendingCommand {
-    usize command = 0;
-    void* arguments = nullptr;
-    ConsoleOutput output;
+    explicit PendingCommand(Allocator& allocator) noexcept : arguments(allocator) {
+    }
+
+    usize command = IndexNone;
+    String arguments;
+    SharedPtr<ConsoleSink> sink;
 };
 
 // 재시작 대기 값 하나다(시작 뒤 RestartRequired 값이 바뀐 것 — 8절). name은 콘솔 설정 이름이거나
@@ -295,6 +308,18 @@ struct ConfigState {
     Array<UniquePtr<ConsoleSettingState>> settings;
     Array<UniquePtr<ConsoleCommandState>> commands;
     Array<PendingCommand> pendingCommands;
+    // 네트워크 역할(CVar 13.2절)과, 등록이 바뀌어 다음 게시가 콘솔 이름 색인을 다시 만들어야
+    // 하는지다.
+    NetworkRole networkRole = NetworkRole::Standalone;
+    bool namesChanged = true;
+    // 이 상태를 가진 문맥이다(명령 실행 문맥 CommandContext가 준다 — 문맥은 옮길 수 없다).
+    ConfigContext* self = nullptr;
+    // Register가 게시하는 동안 아직 넣지 않은 새 설정·명령이다(그 게시의 콘솔 이름 색인에 넣는다).
+    Span<const UniquePtr<ConsoleSettingState>> registeringSettings{};
+    Span<const UniquePtr<ConsoleCommandState>> registeringCommands{};
+    // 입력을 넣기 전 검사 중이다(ValidateEntry — 봉인 뒤 바로 쓰는 층의 부팅 필드 거부는 이때만
+    // 한다. Sync의 다시 합치기는 아니다).
+    bool validatingWrite = false;
     Array<Subscription> subscriptions;
     uint64 nextSubscription = 1;
     // 쓰기 통로(문맥과 snapshot들이 공유)와 마지막으로 게시한 snapshot이다.
@@ -396,11 +421,13 @@ Result<void> Report(ConfigState& state, ConfigDiagnosticCode code, ConfigSeverit
                     ConfigLayer layer, StringView source, const JsonPosition* position,
                     StringView path, StringView message) noexcept;
 
-// 설정 필드의 층 허용 판정이다(UserConfig·DevelopmentOnly). 쓸 수 없으면 거부 사유 문장을, 쓸 수
-// 있으면 빈 view를 돌려준다. 시작 뒤 StartupOnly·RestartRequired 값의 변경은 여기서 거부하지 않고
-// Sync가 지금 값을 지킨다(HoldBootSections).
-StringView CheckLayerAllowed(const ConfigState& state, ConfigLayer layer,
-                             uint32 settingsFlags) noexcept;
+// 설정 필드의 층 허용 판정이다(UserConfig·DevelopmentOnly). 쓸 수 없으면 거부 사유 문장과 code를,
+// 쓸 수 있으면 빈 view를 돌려준다. 넣을 때의 검사(state.validatingWrite)이고 봉인 뒤면 부팅 필드
+// (StartupOnly·RestartRequired)의 바로 쓰는 층(콘솔·코드·범위 임시 변경) 쓰기를 BootSealed로
+// 거부한다(CVar 20절 CVR6 결정). 그 밖의 시작 뒤 변경은 여기서 거부하지 않고 Sync가 지금 값을
+// 지킨다(HoldBootSections).
+StringView CheckLayerAllowed(const ConfigState& state, ConfigLayer layer, uint32 settingsFlags,
+                             ConfigDiagnosticCode& code) noexcept;
 
 // 봉인 뒤 부팅 변수에 바로 쓰려 할 때의 안내 문구다(이름 뒤에 붙인다 — CVar 9절, 콘솔이 쓴다).
 // 지금 진단 형식(`error BootSealed <이름>: <문구>`)과 스펙 콘솔 형식(`<이름> <문구>`)의 차이는 CVR6
@@ -587,6 +614,14 @@ struct SnapshotAccess {
         return snapshot.bootChunks_;
     }
 
+    static SharedPtr<const ConsoleNameIndex>& Names(ConfigSnapshot& snapshot) noexcept {
+        return snapshot.names_;
+    }
+
+    static const SharedPtr<const ConsoleNameIndex>& Names(const ConfigSnapshot& snapshot) noexcept {
+        return snapshot.names_;
+    }
+
     static void Seal(ConfigSnapshot& snapshot, bool sealed) noexcept {
         snapshot.sealed_ = sealed;
     }
@@ -639,6 +674,57 @@ Result<void> DrainQueue(ConfigState& state) noexcept;
 // 부른다.
 void RunCommandsAndCallbacks(ConfigState& state, Span<const bool> sectionChanged,
                              Span<const bool> settingChanged) noexcept;
+
+// ---- 콘솔 입력·명령(CVar 13·15절 — ConsoleInput.cpp) ----
+
+// 콘솔 이름 색인을 새로 만든다(콘솔 설정·명령 — 이름 순서). 오류: 할당 실패.
+Result<SharedPtr<const ConsoleNameIndex>> BuildConsoleNameIndex(ConfigState& state) noexcept;
+
+// 콘솔 층 쓰기의 권한(치트 허용 상태·네트워크 역할)이다. cheats는 판정에 쓸 `cheat.enabled` 값,
+// role은 역할이다. 거부면 code·사유, 받으면 빈 view다.
+StringView CheckConsolePermission(uint32 varFlags, bool cheats, NetworkRole role,
+                                  ConfigDiagnosticCode& code) noexcept;
+
+// 문맥의 지금 `cheat.enabled` 값이다(등록되지 않았으면 true — 단독 실행 기본).
+bool CheatsAllowed(const ConfigState& state) noexcept;
+
+// snapshot의 `cheat.enabled` 값이다(칸이 없으면 기본값 true — 다른 스레드의 쓰기 검사가 쓴다).
+bool SnapshotCheatsAllowed(const ConfigSnapshot* snapshot) noexcept;
+
+// 문맥이 스스로 등록하는 핸들(`cheat.enabled`·`cvar.find`·`cvar.explain`·`cvar.dump`)을 등록한다
+// (Initialize). 오류: Register와 같다.
+Result<void> RegisterBuiltinConsoleHandles(ConfigContext& context) noexcept;
+
+// 꺼낸 쓰기 하나의 콘솔 권한을 적용 때 다시 본다(콘솔 층만 — 6.2절 "적용 때 판정"). 거부하면 진단을
+// 남기고 그 입력의 sink에 알린다. 반환: 받는지. 오류: 할당 실패.
+Result<bool> RecheckConsolePermission(ConfigState& state, const QueuedChange& change,
+                                      bool cheats) noexcept;
+
+// 콘솔 층 입력 하나(콘솔 이름 대입·`Settings` 문서)의 권한(치트·복제)이다. cheats는 판정에 쓸
+// `cheat.enabled` 값이다. 거부하면 진단을 남기고 sink에 `<이름> <사유>`를 쓴다. 반환: 받는지.
+// 오류: 할당 실패.
+Result<bool> CheckEntryPermission(ConfigState& state, const ConfigEntry& entry, bool cheats,
+                                  ConsoleSink* sink) noexcept;
+
+// 큐 항목 하나를 적용 입력 목록(plan)에 반영한다(빼기·바꾸기 뒤 더하기 — Sync 1단계와 드레인의 치트
+// 추적이 같이 쓴다). 오류: 할당 실패.
+Result<void> ApplyQueuedChange(Array<ConfigEntry*>& plan, const QueuedChange& change) noexcept;
+
+// 입력이 `cheat.enabled` 값을 바꿀 수 있는지다(그 이름의 대입·`Settings` 멤버, 빼기).
+bool ChangeTouchesCheats(const QueuedChange& change) noexcept;
+
+// plan(적용 입력, 순서 무관)으로 계산한 `cheat.enabled` 값이다(등록되지 않았으면 true). 오류: 할당
+// 실패.
+Result<bool> CheatsOfPlan(ConfigState& state, Span<ConfigEntry* const> plan) noexcept;
+
+// 꺼낸 콘솔 입력 한 줄(다른 스레드 — QueuedChange::line)을 다음 명령 실행 차례에 게임 lane이
+// 처리하게 pendingCommands에 넣는다. 오류: 할당 실패.
+Result<void> QueueConsoleLine(ConfigState& state, QueuedChange& change) noexcept;
+
+// 콘솔 명령 하나를 실행한다(Sync 5단계 — 인자를 다시 읽고 권한을 보고 부른다). 실패는 sink와 로그에
+// 남긴다.
+void RunPendingCommand(ConfigContext& context, ConfigState& state,
+                       PendingCommand& pending) noexcept;
 
 // ---- 프리셋 묶음(CVar 10·11절 — CVarGroups.cpp) ----
 

@@ -1,6 +1,6 @@
 # Rocks Cylinder 형상 설계
 
-기준일: 2026-11-19, 개정 2.
+기준일: 2026-11-19, 개정 4.
 
 이 문서는 기본 형상에 cylinder(원기둥)를 더하는 설계다. Core 수학의 형상·판정(CY1)과 물리 어댑터의 충돌·질의 형상(CY2) 두 층을 정한다. 문서 전체가 설계이며 구현된 항목은 없다.
 
@@ -74,13 +74,13 @@ struct Cylinder {
 
 | 분류 | 함수 | 계산 방식 |
 |---|---|---|
-| 경계 | `Bounds(cylinder)` → `Box<T>` | 축별 반폭 e_i = r·√(d_j² + d_k²) / \|d\|(i, j, k는 서로 다른 축). 반폭에 상대 여유를 곱하고 끝점 ± 반폭을 바깥쪽 한 ulp 보정한다(3.4절). radius 0이면 두 끝점의 AABB |
+| 경계 | `TryBounds(cylinder)` → `Result<Box<T>>`(잘못된 입력과 좌표 overflow를 실패로 구분) | 축별 반폭 e_i = r·√(d_j² + d_k²) / \|d\|(i, j, k는 서로 다른 축)을 최대 성분으로 크기를 맞춰 계산한다. 반폭에 상대 여유를 곱하고 끝점 ± 반폭을 바깥쪽 한 ulp 보정한다(3.4절). radius 0이면 두 끝점의 AABB |
 | 점 포함 | `ContainsPoint(cylinder, point)` | t = (p − s)·a ∈ [0, H], 수직 벡터 v = (p − s) − t·a에 대해 \|v\|² ≤ r² |
 | 최근접점·거리 | `TryClosestPoint(cylinder, point)`, `TryDistanceSquared(cylinder, point)` | t를 [0, H]로 자르고, v의 길이를 r로 자른다(곱집합의 성분별 투영이라 끝면 모서리 영역에서도 정확) |
 | 광선 | `Raycast(ray, cylinder, maxDistance)` → `RayHit` | 구간 교집합(3.5절) |
 | 선분 | `SegmentCast(segment, cylinder)` → `SegmentHit` | 광선 판정을 선분 매개변수로 |
 | 겹침 | `Overlap(cylinder, sphere)`, `Overlap(cylinder, plane)`, `Overlap(segment, cylinder)`과 반대 순서 | 구는 최근접점 거리² ≤ r_s², 평면은 support 반폭, 선분은 `SegmentCast` 적중 |
-| 평면 분류 | `ClassifyPlaneSide(plane, cylinder)` | 중심의 부호 거리와 support 반폭 h_n = (H/2)·\|n·a\| + r·\|n × a\| 비교 |
+| 평면 분류 | `ClassifyPlaneSide(plane, cylinder)` | 두 끝면 중심의 부호 거리 최소·최대에 원판 support r·\|n × a\|를 빼고 더한 범위로 판정한다(수학적으로 중심 ± (H/2)·\|n·a\| + r·\|n × a\|와 같다. 중심 반올림이 없고 끝점이 평면 위면 거리가 정확히 0) |
 | 볼록 영역 | `ClassifyContainment(volume, cylinder)`, `Overlap(volume, cylinder)`과 반대 순서 | 평면마다 위 support로 최저·최고 거리를 구해 Box·Sphere와 같은 규칙(밖은 엄격, 접촉은 교차, 안은 경계 포함) |
 
 모든 겹침 판정은 양방향으로 둔다(기존 관례).
@@ -89,7 +89,7 @@ struct Cylinder {
 
 ### 3.3 퇴화
 
-- **원판(radius > 0이고 축 정규화 실패)**: 거부한다. `start == end`뿐 아니라 d가 0이 아닌데 |d|²가 언더플로해 정규화에 실패하는 경우(예: 성분 1e−200)도 같다. 두 끝점 표현으로는 원판의 normal이 없기 때문이다. 원판이 필요하면 결정 3의 대안 표현을 다시 본다.
+- **원판(radius > 0이고 축 정규화 실패)**: 거부한다. 두 끝점 표현으로는 원판의 normal이 없기 때문이다. `TryNormalize`가 가장 큰 성분으로 먼저 나누므로 0이 아닌 유한 차이는 성분이 1e−200이어도 정규화된다(IEEE 점진적 언더플로에서 서로 다른 끝점의 차는 0이 되지 않는다). 그래서 실제로 거부되는 것은 `start == end`와 차의 overflow뿐이며, 아주 짧은 축은 유효하고 모든 계산을 크기 조정으로 안전하게 한다. 원판이 필요하면 결정 3의 대안 표현을 다시 본다.
 - **선분·점(radius == 0)**: 허용한다. 축을 정규화하지 않고 `Capsule` radius 0과 같은 선분 경로로 계산한다(정규화 실패를 피함).
 - 축이 아주 짧거나 반경이 아주 작은 경우는 일반 경로이며 3.4절 정밀도 계약을 따른다.
 
@@ -97,9 +97,9 @@ struct Cylinder {
 
 - 다른 Core 판정과 같이 닫힌 집합, 접촉 = Hit, 숨은 허용치 없음을 원칙으로 하고, "접촉 = Hit은 반올림 한계 안에서 성립한다"는 단서를 단다(Intersection.h 기존 판정 주석과 같은 문구).
 - **`√(1 − x²)` 꼴을 쓰지 않는다.** 축 a의 성분이나 n·a가 ±1에 가까우면 정규화·내적 반올림으로 값이 정확히 1이 되어 정보가 사라지고, 1을 넘으면 NaN이 된다. 리뷰 반례: start = (0, 0, 0), end = (1000, 1e−6, 0), r = 1e4 cm이면 a_x = 1이 되어 x 반폭이 0으로 계산되지만 실제 반폭은 1e−5 cm다. `√((1 − x)(1 + x))`도 x가 이미 1로 반올림된 뒤라 막지 못한다.
-- **경계 반폭**: e_i = r·√(d_j² + d_k²) / |d|. d 성분의 뺄셈 오차는 결과 대비 ε 규모라 큰 좌표에서도 방향 오차가 ε 규모다. 남는 오차(정규화·√·곱의 몇 ε, 끝점 ± 반폭 덧셈의 반 ulp)는 반폭에 (1 + 8ε)를 곱하고, 최종 min·max를 `NextDown`·`NextUp`으로 한 ulp 바깥쪽 보정해 덮는다. 원점에서 10⁹ cm에서는 덧셈의 반 ulp(약 6e−8 cm)만으로도 포함이 깨지므로 보정이 필요하다.
+- **경계 반폭**: e_i = r·√(d_j² + d_k²) / |d|. 구현은 가장 큰 성분 L로 나눈 비율로 계산해 성분 제곱의 underflow·overflow를 없앤다. d 성분의 뺄셈 오차는 결과 대비 ε 규모라 큰 좌표에서도 방향 오차가 ε 규모다. 계산 단계의 상대 오차 합은 약 12.5u(u = ε/2)이며, 반폭에 여유 M = 1 + 8ε(= 1 + 16u, 이름 있는 상수에서 유도)를 곱해 덮는다. 축 비율이 비정규 범위로 작아질 때의 절대 오차는 비율 하한(2 × 형식 최소 정규값)으로, 마지막 곱의 비정규 절대 오차는 반폭 자체의 `NextUp` 한 번으로 덮는다. 최종 min·max는 `NextDown`·`NextUp`으로 한 ulp 바깥쪽 보정한다(원점에서 10⁹ cm에서는 덧셈의 반 ulp 약 6e−8 cm만으로도 포함이 깨진다). 반폭이 정확히 0인 축은 끝점 좌표를 그대로 쓴다.
 - **경계 포함은 계산으로 보장한다.** 표면 표본 점도 반올림되므로 표본 시험으로는 포함 위반을 검출할 수 없다. 시험은 정확 산술(정수·dyadic 좌표) oracle로 반폭 하한을 대조한다(3.6절).
-- **support 반폭**: h_n = (H/2)·|n·a| + r·|n × a|. 비단위 normal에도 정확한 support이고, 평행에 가까워도 소거가 없다(위 예에서 |n × a| = 1e−9). `Plane::IsValid`가 normal 길이 오차 1e−5를 허용하므로 n·a > 1이 되어도 NaN이 나지 않는다.
+- **support 반폭**: h_n = (H/2)·|n·a| + r·|n × a|. 구현은 두 끝면 중심의 부호 거리 최소·최대 ∓ r·|n × a|로 같은 값을 계산한다. 비단위 normal에도 정확한 support이고, 평행에 가까워도 소거가 없다(위 예에서 |n × a| = 1e−9). |n × a|는 성분 제곱 underflow를 막는 안정한 길이 계산으로 구한다.
 - **수직 거리**: v = (p − s) − t·a(`Capsule` 코드 방식) 또는 |(p − s) × a|로 구한다. |p − s|² − t²은 긴 cylinder에서 소거로 망가진다(H = 1e9, r = 1이면 오차 약 100 > r²).
 - **공간 인덱스와의 관계**: cylinder는 `LooseOctree`·`FlatBoundsSet`의 질의 형상이 아니므로 그쪽 보수성 논증의 대상이 아니다. 대신 `Bounds`가 공간 인덱스 등록 경계로 쓰이므로, 위 포함 보장이 컬링 누락을 막는 역할을 한다.
 
@@ -126,6 +126,18 @@ struct Cylinder {
 - 경계 사례: 축 평행·대각 축, −0 성분, 끝면·옆면·모서리 접촉, 선분·점 퇴화, 거부되는 원판(언더플로 포함), 아주 짧은 축과 아주 긴 축(수직 거리 소거), 시작점이 안·경계 위인 ray, maxDistance가 정확히 진입 거리, 끝면 안을 스치는 ray.
 - 모든 겹침 쌍의 대칭. Capsule 보강 판정도 같은 기준.
 - 입력 오류: 비유한·음수 반경, 무효 값 생성자 입력.
+- 판정 사이 일관성: 거리 0 ⇔ `ContainsPoint`(반경 0 구 겹침 포함), Raycast `startedInside` ⇔ `ContainsPoint`(시작점), 최근접점이 형상 안.
+
+**판정 사이 일관성 계약(CY1 리뷰 반영).**
+
+- `ContainsPoint` Hit ⇔ `TryDistanceSquared` == 0 ⇔ `Overlap(cylinder, Sphere(p, 0))` Hit ⇔ 그 점에서 시작한 `Raycast`·`SegmentCast`의 `startedInside`. 모두 하나의 포함 식(축 좌표 두 부호 판정 + 수직 거리² ≤ r²)을 쓴다. 포함 식이 밖이면 거리²는 형식 최소 정규값(`NumericLimits<T>::Min()`) 이상으로 올려 0이 되지 않게 한다(실제 거리²가 그보다 작은 점은 결과가 실제보다 크다).
+- radius 0의 포함 판정은 `CastCapsule` 시작 판정과 같은 두 식(선분 거리² ≤ r², 또는 수직 성분 판정 + 축 범위)이다. 그래서 `ContainsPoint(Capsule radius 0)`(선분 거리 식 하나)과는 반올림 경계에서 다를 수 있다.
+- `TryClosestPoint`는 자른 점이 포함 식 밖이면 안쪽 기준점(중심, 중심이 밖이면 start)과의 이분 탐색(상한 64단계, 이름 있는 상수)으로 안으로 판단되는 가장 바깥 점을 돌려준다. radius > 0이면 결과에 대한 `ContainsPoint`가 항상 Hit이다. radius 0은 선분 위 근사점이다.
+- 밖에서 출발했는데 진입 거리가 0으로 언더플로하면 거리 0 접촉(`startedInside` 아님)이다.
+- 접선에 가까운 옆면 진입의 법선은 근사다(normal·direction이 1e−9 … 7e−8 정도 양수일 수 있다).
+- 시험의 정확 산술과 기하 oracle 도우미는 공용 시험 지원(`Core/Source/Developer/TestSupport/Public/TestSupport/ExactArithmetic.h`, `GeometryOracles.h`)으로 옮겼고 기존 Intersection 시험도 이를 쓴다.
+
+**CY1 검증(2026-11-19).** 구현 시험 13개(float·double)에 더해 독립 리뷰가 Python 정확 산술(`Fraction`, 90자리 `Decimal`) 판정기로 대조했다: `TryBounds` 포함 double 30만 + float 20만 cylinder(축 117만 개, 축 성분 1e−6 … 4e−320 비정규, 좌표 1e−3 … 1e9) 위반 0, Raycast 17만 ray(축 평행·접선·끝면 위 시작·maxDistance = 진입 거리) 누락 0, 평면 분류 여유 밖 불일치 0. 판정 사이 일관성 결함(거리 0인데 포함 Miss, 반경 0 시작점, 최근접점의 포함)은 리뷰에서 찾아 고쳤다.
 
 ## 4. 물리 어댑터(CY2)
 
@@ -163,7 +175,7 @@ struct Cylinder {
 | 단계 | 내용 | 시점 | 완료 기준 |
 |---|---|---|---|
 | CY0 | 이 문서 | 지금 | 교차검증 반영(개정 2) |
-| CY1 | Core `Cylinder<T>`와 3.2절 판정, Capsule 보강, 시험 | 지금(별도 브랜치 `feature/cylinder-shape`) | 시험 통과, Foundation·format·policy, 수학 구현 2.1절·Core 상세 명세 G04·G05·G06 갱신 |
+| CY1 | Core `Cylinder<T>`와 3.2절 판정, Capsule 보강, 시험, `Intersection.h` 기능별 분리 — **구현**(2026-11-19) | 지금(별도 브랜치 `feature/cylinder-shape`) | 시험 통과, Foundation·format·policy, 수학 구현 2.1절·Core 상세 명세 G04·G05·G06 갱신 |
 | CY2 | 물리 어댑터 cylinder 충돌·질의 형상 | 물리 어댑터 구현 단계 | J16–J19 확인, 어댑터 시험 |
 
 ## 6. 결정 사항
@@ -177,7 +189,13 @@ struct Cylinder {
 - Jolt `RayCylinder` 본문, 질의 경로의 cylinder 지원 세부, convex radius와 크기의 관계, master와 v5.7.0 태그의 일치(J16–J19).
 - UE에서 Chaos cylinder를 엔진 충돌 에셋으로 만드는 경로는 찾지 못했다(직렬화 경로만 확인).
 
-## 8. 개정 이력
+## 8. 파일 배치
+
+`Intersection.h`는 기능별 헤더의 묶음 헤더다(2026-11-19 분리, 동작 불변 이동): `IntersectionTypes.h`(결과 형식·공통 계약), `IntersectionDetail.h`·`IntersectionCastDetail.h`·`IntersectionCylinderDetail.h`(내부 구현), `IntersectionCast.h`(광선·선분), `IntersectionContainment.h`(점 포함·평면 분류·볼록 영역), `IntersectionOverlap.h`(겹침), `IntersectionDistance.h`(최근접점·거리), `ShapeBounds.h`(경계). 각 헤더는 단독 include로 컴파일된다.
+
+## 9. 개정 이력
 
 - 개정 1(2026-11-19): 초안.
 - 개정 2(2026-11-19): 교차검증(치명 2, 중요 6, 경미 6) 반영. 경계 반폭과 support를 소거 없는 꼴로 바꾸고 경계 포함을 계산(상대 여유 + 한 ulp 바깥 보정)과 정확 산술 시험으로 보장하게 했다. 퇴화 규칙(radius > 0이면 축 정규화 필수, radius 0은 선분 경로)과 `IsValid`·`TryMake` 일치, 수직 거리 계산 꼴, 광선 구간 교집합 알고리즘과 규칙, 평면·선분 겹침, Capsule 평면·볼록 영역 판정 보강, UE 인용 정정(`FCylinder`, `#if 0` 블록, 보수적 bounds), 물리 계약 조건부 문구와 J18 수정·J19 추가, 결정 1–3 확정.
+- 개정 3(2026-11-19): CY1 구현을 반영했다. `TryBounds`(Result 반환)와 크기 조정·비정규 보정을 포함한 반폭 오차 예산, 끝면 중심 거리 기반 support, 원판 거부가 실제로는 `start == end`와 overflow뿐이라는 점, 판정 사이 일관성 시험, 정확 산술 독립 검증 결과, `Intersection.h` 파일 배치(8절)를 적었다.
+- 개정 4(2026-11-19): CY1 리뷰 반영 결과로 판정 사이 일관성 계약, radius 0 포함 식, 최근접점 안쪽 보정, 언더플로 진입, 접선 법선 근사, 공용 시험 도구 위치를 3.6절에 적었다.

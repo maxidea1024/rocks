@@ -230,14 +230,14 @@
       "name": "rocks::config_fixture::ReloadArgs::count",
       "id": "efc5379203d14fc98a01a2105a66a2a0",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "field",
       "name": "rocks::config_fixture::ReloadArgs::target",
       "id": "92459a1534954ae1a196ad9de3a1e9c9",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "field",
@@ -314,7 +314,7 @@
       "name": "rocks::config_fixture::ReloadArgs",
       "id": "e27d8970abcc4c7cace3fa293346be4e",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "type",

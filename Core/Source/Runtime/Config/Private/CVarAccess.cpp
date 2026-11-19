@@ -98,18 +98,55 @@ Result<void> DrainQueue(ConfigState& state) noexcept {
     // 넣은 순서대로 입력 순번을 매기고, 다른 스레드에서 넣은 쓰기를 소유 스레드에서 다시 검사한다
     // (진단을 남긴다 — 거부되면 버린다). 검사가 할당 실패로 끝나면 남은 것은 다음 Sync가 이어서
     // 본다.
+    // 치트 허용 상태는 큐 순서로 따라간다(CVar 13.1절 — 앞에서 치트를 끈 변경 뒤의 치트 쓰기는
+    // 거부한다). 적용 입력 목록을 큐 순서로 흉내 내며 `cheat.enabled`를 바꿀 수 있는 항목 뒤에 다시
+    // 계산한다.
+    Array<ConfigEntry*> plan(state.allocator);
+    for (UniquePtr<ConfigEntry>& entry : state.entries) {
+        if (auto pushed = plan.TryPushBack(entry.Get()); !pushed) {
+            return pushed;
+        }
+    }
+
+    bool cheats = CheatsAllowed(state);
     usize kept = 0;
     Result<void> status = Result<void>::Success();
     for (usize index = 0; index < state.queue.Size(); ++index) {
         SharedPtr<QueuedChange>& change = state.queue[index];
         bool keep = true;
-        if (status && change->entry.Get() != nullptr && change->validateAtApply) {
+        // 다른 스레드의 콘솔 입력 한 줄은 쓰기가 아니라 게임 lane이 처리할 일이다(CVar 15절).
+        if (status && !change->line.IsEmpty()) {
+            status = QueueConsoleLine(state, *change);
+            keep = !status;
+        } else if (status && change->entry.Get() != nullptr && change->validateAtApply) {
+            const usize before = state.diagnostics.Count();
             auto valid = ValidateEntry(state, *change->entry);
             if (!valid) {
                 status = Result<void>::Failure(valid.Error());
             } else {
                 keep = valid.Value();
                 change->validateAtApply = false;
+                // 거부한 다른 스레드 콘솔 입력은 그 입력의 sink에 알린다.
+                for (usize at = before; !keep && at < state.diagnostics.Count(); ++at) {
+                    const ConfigDiagnostic item = state.diagnostics.Get(at);
+                    StringBuilder<192> line(state.allocator);
+                    static_cast<void>(
+                        line.TryAppendFormat("{} {}\n", change->path.View(), item.message));
+                    if (change->sink.Get() != nullptr && line.Status()) {
+                        static_cast<void>(change->sink->Write(line.View()));
+                    }
+                }
+            }
+        }
+
+        // 콘솔 층 쓰기의 권한(치트·복제)은 적용 때 큐 순서의 치트 상태로 다시 본다(6.2·13.1절).
+        if (status && keep && change->entry.Get() != nullptr &&
+            change->entry->layer == ConfigLayer::Console) {
+            auto allowed = RecheckConsolePermission(state, *change, cheats);
+            if (!allowed) {
+                status = Result<void>::Failure(allowed.Error());
+            } else {
+                keep = allowed.Value();
             }
         }
 
@@ -123,6 +160,18 @@ Result<void> DrainQueue(ConfigState& state) noexcept {
             // 봉인 상태가 넣은 때의 상태다.
             change->entry->sealedDirectWrite =
                 state.startupComplete && IsDirectWriteLayer(change->entry->layer);
+        }
+
+        if (status && change->line.IsEmpty()) {
+            status = ApplyQueuedChange(plan, *change);
+            if (status && ChangeTouchesCheats(*change)) {
+                auto recomputed = CheatsOfPlan(state, plan.View());
+                if (recomputed) {
+                    cheats = recomputed.Value();
+                } else {
+                    status = Result<void>::Failure(recomputed.Error());
+                }
+            }
         }
 
         if (kept != index) {
@@ -257,6 +306,24 @@ Result<void> MakeSet(WriteChannel& channel, const cvar::detail::VarDefinition& d
                            ConsoleFlagsOfDefinition(definition), code, false)
              .IsEmpty()) {
         return Reject(options, code);
+    }
+
+    // 콘솔 층 쓰기의 권한(치트 허용 상태·네트워크 역할)은 이 스레드가 보는 snapshot으로 지금 한 번
+    // 보고, 적용 때 다시 본다(CVar 13절).
+    if (options.layer == ConfigLayer::Console) {
+        SharedPtr<const ConfigSnapshot> current;
+        {
+            platform::LockGuard lock(channel.mutex);
+            current = channel.current;
+        }
+
+        const auto role = static_cast<NetworkRole>(
+            platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&channel.networkRole));
+        if (!CheckConsolePermission(definition.flags, SnapshotCheatsAllowed(current.Get()), role,
+                                    code)
+                 .IsEmpty()) {
+            return Reject(options, code);
+        }
     }
 
     // `Clamp()` 변수는 보정해 받는다. 넣는 값은 원래 값이다(적용 때 다시 보정하고 Clamped를

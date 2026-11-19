@@ -7,6 +7,7 @@
 #include <RenderBase/RenderHandle.h>
 #include <RenderGraph/GraphPassAccesses.h>
 #include <RenderGraph/GraphResourcePool.h>
+#include <RenderGraph/GraphSharedData.h>
 #include <RenderGraph/GraphTypes.h>
 #include <TraceCapture/TraceCpuScope.h>
 
@@ -35,6 +36,15 @@ public:
     // handle이면 null handle이다(그 그리기는 장치가 무시하거나 흰 텍스처를 쓴다).
     graphics::TextureHandle Texture(GraphTexture texture) const noexcept;
     graphics::BufferHandle Buffer(GraphBuffer buffer) const noexcept;
+
+    // 이 pass가 TextureView로 선언한 view의 장치 view다(읽기는 SetTexture, 쓰기는
+    // SetWritableTexture로 묶는다). 선언하지 않은 view는 null이다.
+    graphics::TextureHandle View(GraphTextureView view) const noexcept;
+
+    // view의 기준 mip이다(graphics::TextureViewBaseMip: 범위 view를 지원하는 장치는 0, OpenGL ES는
+    // view의 첫 mip). 셰이더는 이 값을 그리기별 상수로 받아 명시 LOD로 읽는다(7.5절). 선언하지 않은
+    // view는 0이다.
+    uint32 ViewBaseMip(GraphTextureView view) const noexcept;
 
     GraphPass Pass() const noexcept {
         return GraphPass{pass_};
@@ -169,10 +179,10 @@ RenderGraphDesc MakeRenderGraphDesc(RenderFrameContext& frame, GraphResourcePool
 //   없고 UAV → UAV는 생략 표시가 없을 때만 UAV barrier다. 전이는 그 pass 기록 함수 앞에 낸다.
 //   Deferred는 같은 장치 기록 안에서 생산 pass와 소비 pass 사이에 다른 pass가 있으면 생산 pass
 //   끝에 begin하고 소비 pass 앞에서 end한다(분리 전이, CommandContext::BeginTransitions). Raster
-//   pass의 렌더 타깃 전이는 장치 BeginOffscreen이 낸다(attachment).
-// - 실행: Raster pass마다 장치 기록(BeginOffscreen·BeginFrame … EndFrame)을 하나 연다. Compute·Copy
-//   pass는 열린 기록에 이어 쓴다(기록 없는 그래프 앞부분의 Compute·Copy pass는 GX4 전까지
-//   Unsupported). pass마다 CPU 구간과(trace가 있으면) GpuScope 구간을 둔다.
+//   pass의 attachment subresource 전이는 장치 BeginPass가 낸다.
+// - 실행: Raster pass마다 장치 기록(BeginPass·BeginFrame … EndFrame)을 하나 연다. Compute·Copy
+//   pass는 열린 기록에 이어 쓰고, 열린 기록이 없으면 attachment 없는 BeginPass로 연다. pass마다 CPU
+//   구간과(trace가 있으면) GpuScope 구간을 둔다.
 // - 검증(항상): 생산 전 읽기, 한 pass 안 같은 subresource의 상충 접근, Raster pass의 UAV, pass
 // 종류에
 //   맞지 않는 접근, Retire된 자원 import, 생산 전 export, 다른 그래프의 handle. 실패한 호출은
@@ -193,13 +203,34 @@ public:
     // --- 자원 ---
 
     // 그래프 수명 텍스처를 선언한다. 장치 자원은 첫 사용 pass 직전에 받는다(같은 그래프 안 재사용
-    // 자리 또는 풀). usage는 둘 가운데 하나다:
-    // - RenderTarget: GPU가 채운다. 형식은 번호표 안의 비압축 PixelFormat이다.
+    // 자리 또는 풀). desc는 graphics::ValidateTextureDesc 규칙을 따르며(모든 차원·mip 사슬·
+    // sampleCount) usage는 넷 가운데 하나다:
+    // - RenderTarget: GPU가 색 attachment로 채운다. 형식은 비압축 PixelFormat이다.
+    // - DepthStencil: 깊이 attachment(GraphPassAccesses::DepthTarget)다.
+    // - Storage: compute UAV(TextureViewDesc::access ReadWrite)로 채운다.
     // - Sampled: 내용을 UploadTexture로만 받는다(모든 mip, pass는 읽기만). 압축 형식도 된다.
+    // GPU가 채우는 셋은 처음 내용이 정해지지 않는다(생산 전 읽기는 검증 오류다).
     // name은 정적 수명 문자열(진단)이다. 실패: 잘못된 desc InvalidArgument, arena 할당 실패는 그
     // 오류다. 장치가 지원하지 않는 형식은 풀 할당 때 장치 오류(Unsupported)로 Execute가 실패한다.
     Result<GraphTexture> CreateTexture(const graphics::TextureDesc& desc,
                                        const char* name) noexcept;
+
+    // 그래프 텍스처(또는 import 텍스처)의 view를 선언한다(7.5절 mip view 그래프 자원). desc는
+    // graphics::TextureViewDesc 규칙(mip·slice 범위, 개수 0 = 끝까지, access Read·ReadWrite, 형식·
+    // plane·swizzle)이며 범위는 이 텍스처에 맞춰 푼다. pass는 GraphPassAccesses::TextureView로 그
+    // 범위의 subresource만 접근하므로, 한 pass가 같은 텍스처의 mip k 읽기 view와 mip k + 1 쓰기
+    // view를 함께 가질 수 있다(범위가 겹치면 상충 접근 검증 오류). 장치 view는 그 view를 처음 쓰는
+    // pass 직전에 만들고 그래프 끝에 Retire한다. 실패: 다른 그래프 handle·범위 밖·쓰기 view 규칙
+    // 위반(Storage 아님·mip 둘 이상)·형식 불일치 InvalidArgument(검증 오류), arena 할당 실패는 그
+    // 오류다. import 텍스처의 용도·형식은 장치 view 생성이 확인한다.
+    //
+    // 사용 예(HZB):
+    //   graphics::TextureViewDesc read;
+    //   read.firstMip = k;
+    //   read.mipCount = 1;
+    //   auto mipK = graph.CreateTextureView(hzb, read);
+    Result<GraphTextureView> CreateTextureView(GraphTexture texture,
+                                               const graphics::TextureViewDesc& desc) noexcept;
 
     // 그래프 수명 버퍼를 선언한다. 풀에서 새로 만든 버퍼는 0으로 채워져 있고, 다시 쓰는 버퍼의
     // 내용은 정해지지 않는다(업로드하거나 pass가 쓴다).
@@ -257,8 +288,7 @@ public:
 
     // pass를 넣는다. execute는 void(GraphPassContext&) noexcept 람다이며 프레임 arena에 옮겨
     // 담는다. Immediate 모드면 이 안에서 실행까지 한다. 실패: 검증 오류 InvalidArgument, 아직
-    // 지원하지 않는 형태(AsyncCompute, Load, 기록 없는 Compute·Copy) Unsupported, 장치·풀 실패는 그
-    // 오류다.
+    // 지원하지 않는 형태(AsyncCompute) Unsupported, 장치·풀 실패는 그 오류다.
     template <class Execute>
     Result<GraphPass> AddPass(TraceScopeName& name, GraphPassKind kind, GraphPassFlags flags,
                               const GraphPassAccesses& accesses, Execute&& execute) noexcept;
@@ -293,9 +323,16 @@ public:
         return arena_;
     }
 
+    // 그래프 공유 값이다(7.5절, UE FRDGBlackboard 대응). 값은 그래프가 파괴될 때 소멸한다.
+    GraphSharedData& SharedData() noexcept {
+        return sharedData_;
+    }
+
 private:
     friend class GraphPassContext;
     friend class GraphExecutionAccess;
+    friend class GraphSharedData;
+    friend class GraphViewTableStorage;
 
     // 실행기를 arena에 만든다. 실패하면 null이다.
     template <class Execute>
@@ -303,6 +340,7 @@ private:
 
     FrameArena& arena_;
     detail::GraphState* state_ = nullptr;
+    GraphSharedData sharedData_{*this};
 };
 
 template <class Execute>

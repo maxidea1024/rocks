@@ -11,11 +11,10 @@ namespace {
 using namespace rocks;
 using namespace rocks::graphics;
 
-// HZB 시험 텍스처의 한 변과 mip 수다(8, 4, 2, 1).
-constexpr uint32 PyramidExtent = 8;
-constexpr uint32 PyramidMips = 4;
-// 줄이기 compute의 그룹 한 변이다(셰이더 numthreads와 같다).
-constexpr uint32 ReduceGroup = 4;
+constexpr uint32 PyramidExtent = hzb::Extent;
+constexpr uint32 PyramidMips = hzb::Mips;
+constexpr uint32 ReduceGroup = hzb::ReduceGroup;
+using hzb::LevelConstants;
 // PS가 읽은 값을 색으로 낼 때 나누는 수다(mip 0의 최댓값 63 + 1).
 constexpr float ValueScale = 64.0f;
 // 셰이더로 읽은 값과 기대값의 허용 차이(8-bit 단위)다.
@@ -45,11 +44,6 @@ bool Near(uint8 actual, int expected) noexcept {
     const int delta = static_cast<int>(actual) - expected;
     return delta <= ColorTolerance && delta >= -ColorTolerance;
 }
-
-// 그리기별 상수 하나(float4)다. x는 view 기준 mip, y는 출력 한 변이다.
-struct LevelConstants {
-    float values[4] = {};
-};
 
 #define TEXTURE_VIEW_GLSL_HEAD "#version 320 es\nprecision highp float;\nprecision highp int;\n"
 
@@ -228,13 +222,8 @@ TextureViewDesc MipView(uint32 mip, ViewAccess access) noexcept {
 // mip 0을 채우고 mip k → k + 1로 줄인 뒤 모든 mip을 읽어 대조한다. pyramid는 만든 Storage
 // 텍스처다.
 void RunPyramid(Device& device, Allocator& allocator, TextureHandle pyramid) noexcept {
-    ComputePipelineDesc fillDesc;
-    fillDesc.shader = {Text(FillHlsl), Text(FillGlsl)};
-    ComputePipelineDesc reduceDesc;
-    reduceDesc.shader = {Text(ReduceHlsl), Text(ReduceGlsl)};
-    reduceDesc.drawConstantBytes = sizeof(LevelConstants);
-    auto fill = device.CreateComputePipeline(fillDesc);
-    auto reduce = device.CreateComputePipeline(reduceDesc);
+    auto fill = device.CreateComputePipeline(hzb::FillPipelineDesc());
+    auto reduce = device.CreateComputePipeline(hzb::ReducePipelineDesc());
     Check(fill && reduce, "fill and reduce compute pipelines");
     if (!fill || !reduce) {
         PrintLastError(device);
@@ -291,30 +280,8 @@ void RunPyramid(Device& device, Allocator& allocator, TextureHandle pyramid) noe
     Check(frame && device.EndFrame(), "pyramid pass submits");
     Check(device.IgnoredDraws() - ignoredBefore == 1,
           "a dispatch without its writable texture is ignored");
-    for (uint32 mip = 0; mip < PyramidMips; ++mip) {
-        const uint32 size = PyramidExtent >> mip;
-        Array<uint8> bytes(allocator);
-        const bool read = bytes.TryResize(static_cast<usize>(size) * size * sizeof(float)).IsOk() &&
-                          device.ReadTexture(pyramid, mip, 0, bytes.View()).IsOk();
-        bool same = read;
-        for (uint32 y = 0; same && y < size; ++y) {
-            for (uint32 x = 0; same && x < size; ++x) {
-                float value = 0.0f;
-                platform::MemoryCopy(&value, bytes.Data() + (y * size + x) * sizeof(float),
-                                     sizeof(float));
-                same = value == Expected(mip, x, y);
-                if (!same) {
-                    printf("    mip %u (%u, %u) = %f, expected %f\n", mip, x, y,
-                           static_cast<double>(value), static_cast<double>(Expected(mip, x, y)));
-                }
-            }
-        }
-
-        char what[96];
-        snprintf(what, sizeof(what), "mip %u of the reduced pyramid matches the CPU reference",
-                 mip);
-        Check(same, what);
-    }
+    Check(hzb::CountMismatchedMips(device, allocator, pyramid) == 0,
+          "every mip of the reduced pyramid matches the CPU reference");
 
     // PS가 mip 범위 view(mip 2부터)를 view 기준 mip으로 읽는다. mip 2 (0, 0)은 27이다.
     Canvas canvas(device);
@@ -410,17 +377,70 @@ void RunLayerView(Device& device) noexcept {
 
 } // namespace
 
+namespace hzb {
+
+TextureDesc PyramidDesc() noexcept {
+    TextureDesc desc;
+    desc.width = Extent;
+    desc.height = Extent;
+    desc.format = PixelFormat::R32Float;
+    desc.usage = TextureUsage::Storage;
+    desc.mipLevels = Mips;
+    desc.sampler.filter = Filter::Point;
+    return desc;
+}
+
+ComputePipelineDesc FillPipelineDesc() noexcept {
+    ComputePipelineDesc desc;
+    desc.shader = {Text(FillHlsl), Text(FillGlsl)};
+    return desc;
+}
+
+ComputePipelineDesc ReducePipelineDesc() noexcept {
+    ComputePipelineDesc desc;
+    desc.shader = {Text(ReduceHlsl), Text(ReduceGlsl)};
+    desc.drawConstantBytes = sizeof(LevelConstants);
+    return desc;
+}
+
+uint32 CountMismatchedMips(Device& device, Allocator& allocator, TextureHandle pyramid) noexcept {
+    uint32 mismatched = 0;
+    for (uint32 mip = 0; mip < Mips; ++mip) {
+        const uint32 size = Extent >> mip;
+        Array<uint8> bytes(allocator);
+        const bool read = bytes.TryResize(static_cast<usize>(size) * size * sizeof(float)).IsOk() &&
+                          device.ReadTexture(pyramid, mip, 0, bytes.View()).IsOk();
+        bool same = read;
+        if (!read) {
+            printf("    mip %u could not be read\n", mip);
+        }
+
+        for (uint32 y = 0; same && y < size; ++y) {
+            for (uint32 x = 0; same && x < size; ++x) {
+                float value = 0.0f;
+                platform::MemoryCopy(&value, bytes.Data() + (y * size + x) * sizeof(float),
+                                     sizeof(float));
+                same = value == Expected(mip, x, y);
+                if (!same) {
+                    printf("    mip %u (%u, %u) = %f, expected %f\n", mip, x, y,
+                           static_cast<double>(value), static_cast<double>(Expected(mip, x, y)));
+                }
+            }
+        }
+
+        mismatched += same ? 0u : 1u;
+    }
+
+    return mismatched;
+}
+
+} // namespace hzb
+
 uint32 RunTextureViewChecks(const char* name, Device& device, Allocator& allocator) noexcept {
     failures = 0;
     backendName = name;
     const uint64 validationBefore = device.ValidationErrorCount();
-    TextureDesc desc;
-    desc.width = PyramidExtent;
-    desc.height = PyramidExtent;
-    desc.format = PixelFormat::R32Float;
-    desc.usage = TextureUsage::Storage;
-    desc.mipLevels = PyramidMips;
-    desc.sampler.filter = Filter::Point;
+    const TextureDesc desc = hzb::PyramidDesc();
     const bool capable =
         HasPixelFormatCaps(device.GetPixelFormatCaps(desc.format), RequiredPixelFormatCaps(desc));
     const bool compute = device.Caps().features.computeShaders;

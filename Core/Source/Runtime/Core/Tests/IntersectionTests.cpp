@@ -1,5 +1,6 @@
 #include <Core/Math/Intersection.h>
 #include <Core/Math/RandomStream.h>
+#include <TestSupport/GeometryOracles.h>
 #include <TestSupport/Test.h>
 #include <Platform/Memory.h>
 #include <Platform/PlatformMath.h>
@@ -7,6 +8,10 @@
 using namespace rocks;
 
 namespace {
+
+using test::MinimizeConvex;
+using test::OracleHit;
+using test::OracleRaycast;
 
 // ---- 공용 도우미 ----
 template <typename T>
@@ -160,34 +165,6 @@ double MinD(double a, double b) noexcept {
     return a < b ? a : b;
 }
 
-// 볼록 함수의 최솟값을 황금분할 탐색으로 찾는다. f(m1) == f(m2)이면 [m1, m2]에 최소가 있으므로
-// high를 줄여도 된다. 90회 축소 후 구간 폭은 처음의 1e-18 수준이다.
-template <typename Function>
-double MinimizeConvex(double low, double high, Function function, double& argument) noexcept {
-    const double ratio = 0.61803398874989484820;
-    double m1 = high - (high - low) * ratio;
-    double m2 = low + (high - low) * ratio;
-    double f1 = function(m1);
-    double f2 = function(m2);
-    for (int iteration = 0; iteration < 90; ++iteration) {
-        if (f1 <= f2) {
-            high = m2;
-            m2 = m1;
-            f2 = f1;
-            m1 = high - (high - low) * ratio;
-            f1 = function(m1);
-        } else {
-            low = m1;
-            m1 = m2;
-            f1 = f2;
-            m2 = low + (high - low) * ratio;
-            f2 = function(m2);
-        }
-    }
-    argument = (low + high) * 0.5;
-    return function(argument);
-}
-
 // 무게중심 좌표 (u, v)에 대한 볼록 2차 함수를 중첩 삼분 탐색으로
 // 최소화한다(삼각형 위 최근접 oracle).
 double OracleTriangleDistanceSquared(const Vec3d& point, const Vec3d& a, const Vec3d& b,
@@ -259,53 +236,6 @@ double BoxSignedDistance(const Vec3d& local, const Vec3d& half) noexcept {
     const Vec3d outside(MaxD(q.x, 0.0), MaxD(q.y, 0.0), MaxD(q.z, 0.0));
     const double inside = MinD(MaxD(q.x, MaxD(q.y, q.z)), 0.0);
     return outside.Length() + inside;
-}
-
-struct OracleHit {
-    enum Kind {
-        Miss,
-        Hit,
-        Inside,
-        Ambiguous
-    };
-    Kind kind;
-    double distance;
-};
-
-// signed distance 함수가 볼록이면 ray 위에서도 볼록이다. 최소값의 부호로 Hit/Miss를 정하고 첫 근을
-// 이분법으로 찾는다. 경계에서 margin 이내인 경우는 판정하지 않는다(Ambiguous).
-template <typename Sdf>
-OracleHit OracleRaycast(const Vec3d& origin, const Vec3d& direction, double maxDistance,
-                        double margin, Sdf sdf) noexcept {
-    auto along = [&](double t) { return sdf(origin + direction * t); };
-    const double startValue = along(0.0);
-    if (startValue < -margin) {
-        return {OracleHit::Inside, 0.0};
-    }
-    if (startValue <= margin) {
-        return {OracleHit::Ambiguous, 0.0};
-    }
-
-    double nearest = 0.0;
-    const double minimum = MinimizeConvex(0.0, maxDistance, along, nearest);
-    if (minimum > margin) {
-        return {OracleHit::Miss, 0.0};
-    }
-    if (minimum >= -margin) {
-        return {OracleHit::Ambiguous, 0.0};
-    }
-
-    double low = 0.0;
-    double high = nearest;
-    for (int iteration = 0; iteration < 100; ++iteration) {
-        const double middle = (low + high) * 0.5;
-        if (along(middle) > 0.0) {
-            low = middle;
-        } else {
-            high = middle;
-        }
-    }
-    return {OracleHit::Hit, (low + high) * 0.5};
 }
 
 // 두 OrientedBox의 15개 후보 축(면 6, 모서리 외적 9)에 꼭짓점을 직접 투영해 최대 간격을 구한다.

@@ -35,16 +35,13 @@ TraceSessionSettings ManualSettings(Allocator& allocator) noexcept {
 }
 
 // 콘솔 출력을 모은다.
-struct ConsoleText {
+// 콘솔 출력을 모으는 sink다(참조 계수).
+struct ConsoleText final : config::ConsoleSink {
     explicit ConsoleText(Allocator& allocator) noexcept : text(allocator) {
     }
 
-    static Result<void> Write(void* context, StringView line) noexcept {
-        return static_cast<ConsoleText*>(context)->text.TryAppend(line);
-    }
-
-    config::ConsoleOutput Output() noexcept {
-        return {&ConsoleText::Write, this};
+    Result<void> Write(StringView line) noexcept override {
+        return text.TryAppend(line);
     }
 
     String text;
@@ -129,19 +126,21 @@ TEST(TraceControl_ConsoleCommandsDriveSession) {
     {
         TraceController control(allocator, session, settings);
         REQUIRE(control.RegisterConsoleCommands());
-        ConsoleText console(allocator);
+        auto made = SharedPtr<ConsoleText>::TryMake(allocator, allocator);
+        REQUIRE(made);
+        SharedPtr<ConsoleText> console = Move(made.Value());
         auto run = [&](StringView line) noexcept {
-            auto queued = settings.ExecuteConsoleLine(line, console.Output());
+            auto queued = settings.ExecuteConsoleLine(line, console);
             REQUIRE(queued);
             CHECK(queued.Value() == config::ConsoleLineResult::CommandQueued);
             REQUIRE(settings.Sync());
         };
 
-        run("trace.enable channels=cpu,counter");
+        run("trace.enable cpu,counter");
         CHECK(TraceCpuChannel.IsEnabled());
         CHECK(TraceCounterChannel.IsEnabled());
         StringBuilder<192> fileCommand(allocator);
-        REQUIRE(fileCommand.TryAppendFormat("trace.file path={}", StringView(file.path)));
+        REQUIRE(fileCommand.TryAppendFormat("trace.file {}", StringView(file.path)));
         run(fileCommand.View());
         {
             CpuScope scope(ControlScope);
@@ -151,16 +150,15 @@ TEST(TraceControl_ConsoleCommandsDriveSession) {
         run("trace.stop");
         CHECK(control.CloseFile().Error() == ErrorCode::NotFound);
         StringBuilder<192> snapshotCommand(allocator);
-        REQUIRE(
-            snapshotCommand.TryAppendFormat("trace.snapshot path={}", StringView(snapshot.path)));
+        REQUIRE(snapshotCommand.TryAppendFormat("trace.snapshot {}", StringView(snapshot.path)));
         run(snapshotCommand.View());
-        run("trace.disable channels=counter");
+        run("trace.disable counter");
         CHECK(!TraceCounterChannel.IsEnabled());
         CHECK(
-            console.text.View().Contains("2 channel(s) enabled", StringComparison::CaseSensitive));
-        CHECK(console.text.View().Contains("Trace file output stopped",
-                                           StringComparison::CaseSensitive));
-        CHECK(console.text.View().Contains("complete)", StringComparison::CaseSensitive));
+            console->text.View().Contains("2 channel(s) enabled", StringComparison::CaseSensitive));
+        CHECK(console->text.View().Contains("Trace file output stopped",
+                                            StringComparison::CaseSensitive));
+        CHECK(console->text.View().Contains("complete)", StringComparison::CaseSensitive));
     }
 
     session.Stop();

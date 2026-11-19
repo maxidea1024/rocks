@@ -34,15 +34,17 @@ struct Index {
 };
 
 // 핸들 종류다. 정의의 공통 머리(VarDefinition)에 있어 ConfigContext::Register가 타입을 지운 정의를
-// 종류대로 다룬다(Group이면 GroupDefinition — Config/CVarGroup.h). ConsoleCommand(CVR6)는 같은 표에
-// 종류를 더한다.
+// 종류대로 다룬다(Group이면 GroupDefinition — Config/CVarGroup.h, Command면 CommandDefinition —
+// Config/CVarCommand.h).
 enum class HandleKind : uint8 {
     // 실행 중 바꿀 수 있는 변수(`CVar<T>`).
     Var,
     // 이번 실행 동안 고정인 변수(`BootCVar<T>` — 9절).
     Boot,
     // 프리셋 묶음(`CVarGroup` — 11절). 값은 int32 등급이고 정의는 GroupDefinition이다.
-    Group
+    Group,
+    // 콘솔 명령(`ConsoleCommand` — 13·15절). 값이 없고 정의는 CommandDefinition이다.
+    Command
 };
 
 // 빌더가 정의에 남기는 성질 비트다(4.2절).

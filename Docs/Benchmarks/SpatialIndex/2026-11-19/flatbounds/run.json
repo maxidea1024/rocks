@@ -1,0 +1,328 @@
+{
+  "tool": "FB2 (RunBench.ps1 Measure-Load and Invoke-Bench)",
+  "startedUtc": "2026-11-19T04:41:10.2663710Z",
+  "machine": {
+    "cpu": "13th Gen Intel(R) Core(TM) i5-13600KF",
+    "logicalProcessors": 20,
+    "os": "Microsoft Windows 11 Pro 10.0.26200",
+    "powerPlan": "381b4222-f694-41f0-9685-ff5bb260df2e (Balanced)",
+    "coreAffinity": "none (not pinned)"
+  },
+  "gitHead": "5798476fe69b8cc6d9d1b05aab722027cd59d8d7",
+  "gitDirty": "?? Docs/Benchmarks/SpatialIndex/2026-11-19/flatbounds/",
+  "runs": [
+    {
+      "name": "flat-1e4",
+      "command": "SpatialIndexBench.exe --group F --profile flat --dists uniform,clustered,size-varied,wide-sparse --sizes 10000 --out C:\\work\\rocks\\.claude\\worktrees\\spatial-index\\Docs\\Benchmarks\\SpatialIndex\\2026-11-19\\flatbounds\\flat-1e4.json",
+      "exitCode": 0,
+      "seconds": 3.1,
+      "loadBefore": {
+        "utc": "2026-11-19T04:41:16.9213431Z",
+        "totalCpuPercent": 100.0,
+        "busiest": [
+          {
+            "name": "GcBench",
+            "id": 48592,
+            "cpuPercentOfMachine": 15.42
+          },
+          {
+            "name": "cpptools",
+            "id": 17620,
+            "cpuPercentOfMachine": 10.0
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 9.43
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 6.72
+          },
+          {
+            "name": "clang-cl",
+            "id": 37208,
+            "cpuPercentOfMachine": 5.39
+          },
+          {
+            "name": "EngineTests",
+            "id": 14616,
+            "cpuPercentOfMachine": 5.31
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-19T04:41:23.0996013Z",
+        "totalCpuPercent": 99.97,
+        "busiest": [
+          {
+            "name": "GcBench",
+            "id": 48592,
+            "cpuPercentOfMachine": 7.79
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 7.76
+          },
+          {
+            "name": "cpptools",
+            "id": 17620,
+            "cpuPercentOfMachine": 5.05
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.57
+          },
+          {
+            "name": "dotnet",
+            "id": 29252,
+            "cpuPercentOfMachine": 3.33
+          },
+          {
+            "name": "clang-cl",
+            "id": 47080,
+            "cpuPercentOfMachine": 3.26
+          }
+        ]
+      }
+    },
+    {
+      "name": "flat-1e5",
+      "command": "SpatialIndexBench.exe --group F --profile flat --dists uniform,clustered,size-varied,wide-sparse --sizes 100000 --out C:\\work\\rocks\\.claude\\worktrees\\spatial-index\\Docs\\Benchmarks\\SpatialIndex\\2026-11-19\\flatbounds\\flat-1e5.json",
+      "exitCode": 0,
+      "seconds": 7.3,
+      "loadBefore": {
+        "utc": "2026-11-19T04:41:26.2017473Z",
+        "totalCpuPercent": 99.97,
+        "busiest": [
+          {
+            "name": "GcBench",
+            "id": 48592,
+            "cpuPercentOfMachine": 12.29
+          },
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 9.92
+          },
+          {
+            "name": "cpptools",
+            "id": 17620,
+            "cpuPercentOfMachine": 5.1
+          },
+          {
+            "name": "EngineTests",
+            "id": 14616,
+            "cpuPercentOfMachine": 3.49
+          },
+          {
+            "name": "explorer",
+            "id": 10444,
+            "cpuPercentOfMachine": 3.49
+          },
+          {
+            "name": "clang-cl",
+            "id": 37208,
+            "cpuPercentOfMachine": 3.41
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-19T04:41:36.5890105Z",
+        "totalCpuPercent": 98.83,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 14.04
+          },
+          {
+            "name": "cpptools",
+            "id": 17620,
+            "cpuPercentOfMachine": 5.1
+          },
+          {
+            "name": "GcBench",
+            "id": 57424,
+            "cpuPercentOfMachine": 4.9
+          },
+          {
+            "name": "clang-cl",
+            "id": 16656,
+            "cpuPercentOfMachine": 4.87
+          },
+          {
+            "name": "FoundationTests",
+            "id": 40548,
+            "cpuPercentOfMachine": 4.79
+          },
+          {
+            "name": "clang-cl",
+            "id": 1652,
+            "cpuPercentOfMachine": 4.77
+          }
+        ]
+      }
+    },
+    {
+      "name": "flat-1e6",
+      "command": "SpatialIndexBench.exe --group F --profile flat --dists uniform,clustered,size-varied,wide-sparse --sizes 1000000 --out C:\\work\\rocks\\.claude\\worktrees\\spatial-index\\Docs\\Benchmarks\\SpatialIndex\\2026-11-19\\flatbounds\\flat-1e6.json",
+      "exitCode": 0,
+      "seconds": 45.48,
+      "loadBefore": {
+        "utc": "2026-11-19T04:41:39.6628023Z",
+        "totalCpuPercent": 98.73,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 14.09
+          },
+          {
+            "name": "cpptools",
+            "id": 17620,
+            "cpuPercentOfMachine": 5.08
+          },
+          {
+            "name": "EngineTests",
+            "id": 14616,
+            "cpuPercentOfMachine": 4.9
+          },
+          {
+            "name": "clang-cl",
+            "id": 16656,
+            "cpuPercentOfMachine": 4.87
+          },
+          {
+            "name": "clang-cl",
+            "id": 49984,
+            "cpuPercentOfMachine": 4.79
+          },
+          {
+            "name": "clang-cl",
+            "id": 52196,
+            "cpuPercentOfMachine": 4.79
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-19T04:42:28.1791627Z",
+        "totalCpuPercent": 80.74,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 19.06
+          },
+          {
+            "name": "clang-cl",
+            "id": 55976,
+            "cpuPercentOfMachine": 5.0
+          },
+          {
+            "name": "clang-cl",
+            "id": 28136,
+            "cpuPercentOfMachine": 4.97
+          },
+          {
+            "name": "FoundationTests",
+            "id": 40548,
+            "cpuPercentOfMachine": 4.97
+          },
+          {
+            "name": "clang-cl",
+            "id": 34324,
+            "cpuPercentOfMachine": 4.95
+          },
+          {
+            "name": "clang-cl",
+            "id": 47492,
+            "cpuPercentOfMachine": 4.92
+          }
+        ]
+      }
+    },
+    {
+      "name": "flat-1e6-r1",
+      "command": "SpatialIndexBench.exe --group F --profile flat --dists uniform,clustered,size-varied,wide-sparse --sizes 1000000 --out C:\\work\\rocks\\.claude\\worktrees\\spatial-index\\Docs\\Benchmarks\\SpatialIndex\\2026-11-19\\flatbounds\\flat-1e6-r1.json",
+      "exitCode": 0,
+      "seconds": 32.89,
+      "loadBefore": {
+        "utc": "2026-11-19T04:42:31.2107949Z",
+        "totalCpuPercent": 75.33,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 18.44
+          },
+          {
+            "name": "cpptools",
+            "id": 17620,
+            "cpuPercentOfMachine": 5.03
+          },
+          {
+            "name": "EngineTests",
+            "id": 14616,
+            "cpuPercentOfMachine": 5.03
+          },
+          {
+            "name": "clang-cl",
+            "id": 34324,
+            "cpuPercentOfMachine": 4.97
+          },
+          {
+            "name": "clang-cl",
+            "id": 55976,
+            "cpuPercentOfMachine": 4.95
+          },
+          {
+            "name": "clang-cl",
+            "id": 28136,
+            "cpuPercentOfMachine": 4.9
+          }
+        ]
+      },
+      "loadAfter": {
+        "utc": "2026-11-19T04:43:07.1285662Z",
+        "totalCpuPercent": 93.67,
+        "busiest": [
+          {
+            "name": "qemu-system-x86_64-headless",
+            "id": 10580,
+            "cpuPercentOfMachine": 12.37
+          },
+          {
+            "name": "cpptools",
+            "id": 17620,
+            "cpuPercentOfMachine": 5.05
+          },
+          {
+            "name": "EngineTests",
+            "id": 14616,
+            "cpuPercentOfMachine": 4.9
+          },
+          {
+            "name": "clang-cl",
+            "id": 52576,
+            "cpuPercentOfMachine": 4.84
+          },
+          {
+            "name": "clang-cl",
+            "id": 25984,
+            "cpuPercentOfMachine": 4.69
+          },
+          {
+            "name": "FoundationTests",
+            "id": 40548,
+            "cpuPercentOfMachine": 4.51
+          }
+        ]
+      }
+    }
+  ],
+  "finishedUtc": "2026-11-19T04:43:07.1289281Z"
+}

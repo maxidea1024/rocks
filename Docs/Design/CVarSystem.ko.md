@@ -1,6 +1,6 @@
 # CVar·치트 명령 설계
 
-기준일: 2026-11-19, 개정 11(결정 확정, CVR1·CVR2·CVR4·CVR5 구현). 실행 중 이름으로 읽고 바꾸는 타입 있는 설정 변수 **CVar**와, 개발 빌드에서 게임 상태를 직접 바꾸는 **치트 명령**을 정한다.
+기준일: 2026-11-19, 개정 13(결정 확정, CVR1·CVR2·CVR4·CVR5·CVR6 구현). 실행 중 이름으로 읽고 바꾸는 타입 있는 설정 변수 **CVar**와, 개발 빌드에서 게임 상태를 직접 바꾸는 **치트 명령**을 정한다.
 
 이 문서는 [설정 계층과 콘솔 설정](ConfigSystem.ko.md)(이하 Config)의 5절 "콘솔 설정과 명령"을 대체하는 상세 스펙이다. 값 저장소·층·출처 스택·sync 지점·JSON 파일·`--set`·설정 struct는 Config를 그대로 쓰고, 이 문서는 그 위에 다음을 더한다.
 - 한 문장으로 정의하고 `.Get()`으로 읽는 타입 있는 핸들(`CVar<T>`·`BootCVar<T>`·`CVarGroup`·`ConsoleCommand`)
@@ -53,7 +53,7 @@ void SetupShadows(const World& world) noexcept {
 ```cpp
 Result<void> Teleport(cvar::CommandContext& context, Vec3 location) noexcept;
 
-ConsoleCommand TeleportCommand = cvar::Command("cheat.teleport", &Teleport)
+ConsoleCommand TeleportCommand = cvar::Command<&Teleport>("cheat.teleport")
     .Help("Teleport the local player").Cheat();
 ```
 
@@ -119,9 +119,9 @@ namespace rocks::cvar {
 template <class T> constexpr VarBuilder<T> Var(StringView name, T defaultValue) noexcept;
 template <class T> constexpr BootVarBuilder<T> Boot(StringView name, T defaultValue) noexcept;
 constexpr GroupBuilder Group(StringView name, int32 defaultLevel) noexcept;
-template <class... Args>
-constexpr CommandBuilder<Args...> Command(StringView name,
-                                          Result<void> (*function)(CommandContext&, Args...) noexcept) noexcept;
+// 명령 함수는 템플릿 인자다(아래 4.2절 끝 — 함수 포인터 값은 상수 평가에서 타입을 지울 수 없다).
+template <auto Function>
+constexpr CommandBuilder<Function> Command(StringView name) noexcept;
 
 template <class T>
 class VarBuilder {
@@ -163,7 +163,7 @@ public:
 - **핸들은 정적 저장 기간이어야 한다**(namespace 범위나 static 멤버). 핸들 타입은 `operator new`·`new[]`(placement 포함)를 지워 힙 생성이 컴파일 오류다. 함수 안 지역 핸들도 컴파일은 되므로 `Register`가 Debug·Development 빌드에서 핸들 주소가 호출 스레드 스택 범위 안이면 `InvalidArgument`로 거부한다. Policy `cvar-registration`은 함수 본문 안의 핸들 정의, 비정적 멤버 핸들, `thread_local` 핸들, `const`·`constexpr` 핸들(내부 링크라 헤더에 두면 TU마다 별개 핸들이 된다), 핸들 타입 별칭(`using`·`typedef` — 정의를 lexical하게 따라갈 수 없다)을 거부한다.
 - **정의 텍스트 규칙**(컴파일 때 검사): 이름은 소문자 점 경로이고 `MaxVarNameBytes`(128) 이하, 도움말·분류·String 기본값은 NUL 없는 유효 UTF-8이고 각 한도(`MaxVarHelpBytes` 1024·`MaxVarCategoryBytes` 64·`MaxVarDefaultTextBytes` 4096) 이하다. Name 기본값은 출력 가능한 ASCII(0x20–0x7E)이고 1,023 byte 이하다. NFC 판정(consteval에서 할 수 없다)을 ASCII 한정으로 대신한다 — 이름과 Name 기본값은 ASCII라 늘 NFC다. 위반은 `CVarError_TextTooLong`·`CVarError_InvalidUtf8`·`CVarError_NameDefaultNotAscii`다.
 - `&&` 체인과 복사·이동 삭제는 `auto b = cvar::Var(...).Help(...)`를 막는다. 진입점 하나만 받는 `auto b = cvar::Var(...)`는 prvalue 생략으로 컴파일되지만, 빌더에는 `Get`·`Set`이 없고 `Register`는 핸들만 받으므로 쓰는 순간 오류다.
-- `GroupBuilder`·`CommandBuilder`는 11절·13절이다.
+- `GroupBuilder`는 11절이다. `CommandBuilder<Function>`은 `Help`(필수)·`Category`·`Cheat`를 가진다. 명령 함수는 `Result<void> (*)(cvar::CommandContext&, Args...) noexcept`이고 `Args`는 bool·int32·int64·float·double·`StringView`·이름 표가 있는 enum이다(`MaxCommandArguments` 8개까지). 함수를 템플릿 인자(`cvar::Command<&Teleport>("cheat.teleport")`)로 받는 까닭: `ConsoleCommand`는 상수 초기화되는 타입 하나여야 하는데, 함수 포인터 값을 실행 시 인자로 받으면 그 서명을 지우는 변환(`reinterpret_cast`)을 상수 평가에서 할 수 없다. 템플릿 인자면 서명대로 만든 호출 함수(`InvokeCommand<&Teleport>`)의 포인터 하나를 담으면 된다. 지원하지 않는 매개변수 타입은 `static_assert`(`Command parameters must be bool, int32, int64, float, double, StringView or a named enum class`)다. 리플렉션 struct·수학 타입 인자는 함수 리플렉션(CU2)과 함께 더한다(20절 CVR6 메모).
 
 ### 4.3 컴파일 때 잡는 오류
 
@@ -326,7 +326,7 @@ cvar::Index Index() const noexcept;
 
 | 들어온 길 | 처리 | 진단 |
 |---|---|---|
-| 이번 실행에 바로 쓰는 쓰기(콘솔·코드·범위 임시 변경 층 — 콘솔 입력·이름으로 하는 대입·`Set`·`ScopedOverride`) | 쓰기 때 거부한다. 부른 쪽이 바로 효력을 기대하므로 결과로 알린다. 이 층의 문서 입력(`AddLayerText`)에 부팅 값이 하나라도 있으면 문서 전체를 거부한다. 봉인 뒤 아직 등록되지 않은 이름이라 받은 쓰기는 그 이름을 등록할 때 받지 않는다 | Error `BootSealed` |
+| 이번 실행에 바로 쓰는 쓰기(콘솔·코드·범위 임시 변경 층 — 콘솔 입력·이름으로 하는 대입·`Set`·`ScopedOverride`, 설정 struct 필드의 콘솔 이름·필드 경로 포함 — 개정 12) | 쓰기 때 거부한다. 부른 쪽이 바로 효력을 기대하므로 결과로 알린다. 이 층의 문서 입력(`AddLayerText`)에 부팅 값이 하나라도 있으면 문서 전체를 거부한다. 봉인 뒤 아직 등록되지 않은 이름이라 받은 쓰기는 그 이름을 등록할 때 받지 않는다 | Error `BootSealed` |
 | 파일 층(엔진·엔진 플랫폼·프로젝트·프로젝트 플랫폼 파일의 hot reload, `UserSetting()` 변수의 사용자 층) | 층에는 받아 두고 Sync가 지금 값과 출처를 유지한다. (이름, 대기 값, 지금 값)을 재시작 대기 목록(`ConfigContext::GetPendingRestarts`)에 남긴다. 다음 실행에 같은 파일이 다시 읽히기 때문이다. 되돌리면 대기가 없어진다 | Note `RestartRequired` |
 | 그 밖의 층(기기 프로필·품질·기능 묶음 같은 파생 층, 핫픽스·세션·서버(`Server`) 같은 휘발 층) | 지금 값을 유지하고 대기를 만들지 않는다 | Warning `BootValueIgnored`(같은 이름·층·출처에 한 번) |
 
@@ -451,18 +451,18 @@ CVarGroup ShadowGroup = cvar::Group("quality.shadow", 2)
   - 출시용 쿠킹(Config CF5)은 허용 목록으로 치트 변수 값을 빼므로 출시 config 파일에 치트 이름이 남지 않는다(`UnresolvedName`이 생기지 않는다).
 - 개발 빌드에서 시험하는 출시 규칙: `ConfigContextOptions::releaseRules`(지금 있는 시험 옵션)를 켜면 `Register`가 `Cheat()` 변수를 숨김·쓰기 불가 칸으로 등록한다. 칸에는 기본값만 있으므로 `Get()`에 따로 분기가 없다. Debug 시험으로 출시 동작을 확인한다(지금의 `DevelopmentOnly` 동작과 같다).
 - 개발 빌드에서는 **치트 허용 상태**가 꺼져 있으면 콘솔 층 쓰기·명령 실행을 `CheatsDisabled`로 거부한다. 파일·`--set`은 막지 않는다(개발자 입력이다).
-- 치트 허용 상태는 엔진이 정의하는 CVar 하나 `cheat.enabled`(bool, `Replicated()`, 범위 값 허용)뿐이다. 따로 둔 원자 값은 없다.
-  - 기본값 true(단독 실행). 게임 규칙 객체(UE `AGameModeBase::AllowCheats`)가 Code 층에 쓰고, `--set=cheat.enabled=false`로도 바꾼다.
+- 치트 허용 상태는 Config 모듈이 정의하는 CVar 하나 `cheat.enabled`(`cvar::CheatsEnabled` — bool, `Replicated()`, `ConsoleReadOnly()`, 범위 값 허용)뿐이다. 따로 둔 원자 값은 없다. `ConfigContext::Initialize`가 등록한다.
+  - 기본값 true(단독 실행). 게임 규칙 객체(UE `AGameModeBase::AllowCheats`)가 Code 층에 쓰고, `--set=cheat.enabled=false`·서버(Server 층)로도 바꾼다. 콘솔 층으로는 바꿀 수 없다(개정 13 — 콘솔 층은 Code 층보다 강하므로 콘솔로 켜면 게임 규칙의 false를 이겨 치트 규칙이 뚫린다).
   - 복제 변수이므로 클라이언트는 서버가 준 값(Server 층)을 따르고 콘솔에서 켤 수 없다.
   - 플레이어마다 다르게 하려면 그 플레이어 범위에 값을 둔다(14.3절). 판정은 쓰기를 낸 범위의 값이다(`CheatsEnabled.Get(scope)` — 핸들 이름 `CheatsEnabled`).
-  - 판정은 쓰기를 받을 때 한 번, Sync 적용 때 한 번 한다(6.2절).
+  - 판정은 쓰기를 받을 때 한 번, Sync 적용 때 한 번 한다(6.2절). 받을 때는 그 스레드가 보는 snapshot의 값이다. 적용 때는 **큐 순서**로 판정한다: Sync가 큐를 꺼내며 `cheat.enabled`를 바꾸는 입력(Code·`--set`·Server import 등)을 따라 그 시점의 실효값을 갱신하므로, 큐에서 치트를 끄는 변경 뒤에 놓인 치트 쓰기는 거부되고 앞에 놓인 것은 받는다(개정 13). 콘솔 층의 `Settings` 문서 입력(`AddLayerText(Console, …)`)도 같은 판정을 받는다. 네트워크 역할은 큐에 들지 않는 즉시 상태라 적용 때의 역할로 판정한다. 범위 값 판정은 CVR3 범위와 함께 더한다.
 
 ### 13.2 복제
 
-- 문맥은 네트워크 역할(`Standalone`·`Server`·`Client`)을 가진다.
+- 문맥은 네트워크 역할(`NetworkRole` — `Standalone`·`Server`·`Client`, 기본 `Standalone`)을 가진다. `ConfigContext::SetNetworkRole`로 정한다(넷 모듈이 접속 상태에 따라 부른다 — 지금은 호스트·시험이 부른다, 게임 lane). `GetNetworkRole`은 원자 사본을 읽어 어느 스레드에서나 부른다. 역할은 권한 판정에만 쓰이고, 역할을 정한다고 값이 전송되지는 않는다.
 - `Replicated()` 변수는 `Client` 역할에서 콘솔 쓰기를 `ReplicatedOnClient`로 거부한다.
-- `ExportReplicated()`(서버)는 복제 변수 중 기본값과 다른 것을 이름 순서의 (이름, 값 표기) 목록으로 낸다. `ImportReplicated(목록)`(클라이언트)은 Server 층에 쓰고, 목록에 없는 복제 변수는 Server 층에서 지운다. 모르는 이름은 진단 후 건너뛴다.
-- 전송은 네트워크 모듈이 맡는다(아직 없다). 이 문서는 목록 형식과 층만 정한다.
+- `ExportReplicated()`(서버)는 복제 변수 **전부**(기본값이어도)를 이름 순서의 (이름, 값 표기) 목록으로 낸다(개정 13 — 기본값을 빼면 클라이언트의 파일·`--set`·Code 층 값이 남아 서버 값과 갈린다). `ImportReplicated(목록)`(클라이언트)은 Server 층을 통째로 바꾸고, 목록에 없는 복제 변수는 Server 층에서 지운다. 모르는 이름은 진단 후 건너뛴다.
+- 전송은 네트워크 모듈이 맡는다(아직 없다). 이 문서는 목록 형식과 층만 정한다: 목록은 `ReplicatedValue`(이름, 값 표기 — 콘솔 표기) 배열이다. `ImportReplicated`는 서버 층(태그 `server`)을 통째로 바꾸고 다음 Sync에 적용된다. 넷 모듈이 생기기 전까지 Export/Import는 시험과 도구에서만 부른다(자리표시 전송 동작은 두지 않는다).
 
 ## 14. 객체 시스템과의 연결
 
@@ -540,7 +540,17 @@ public:
 | `cvar.explain <이름>` | Explain |
 | `cvar.dump` · `cvar.dump overrides` | 전체 값 / 기본값과 다른 값만(JSON) |
 | `<명령> <인자…>` | 명령 실행 |
+| 이름 접두 | 자동완성(`CompleteConsoleName`) |
 
+- **구현 규칙**(CVR6):
+  - 값 표기는 ReflectionText 명령행 단일 값 표기 하나다. enum은 이름(대소문자 무시) 또는 수를 받는다 — 수는 Config가 그 enum 스키마의 열거자로 바꿔 넘긴다(ReflectionText enum 표기는 이름만이다. 수 입력은 CVar 값 규칙(4.4절)이라 Config 값 검사 한 곳에 둔다 — 콘솔·`--set`·파일이 같다). 표시는 `3 (High)`다.
+  - `cvar.find`·`cvar.explain`·`cvar.dump`는 문맥이 등록하는 `ConsoleCommand`다(영역 `cvar`). 명령이므로 Sync 5단계에 실행되고 출력은 입력 때 받은 sink로 간다. `<이름>`·`<이름> ?`는 게임 lane이면 바로 출력한다.
+  - 다른 스레드의 입력은 `ConsoleInputPort`(`ConfigContext::MakeConsoleInputPort` — 쓰기 통로를 참조 계수로 쥔다)로 넣는다. 10.1절 "다른 스레드가 들어오는 길은 쓰기 큐 하나" 원칙 그대로, 입구는 문맥 상태를 건드리지 않고 통로와 그 통로의 최신 snapshot만 본다. 문맥이 없어진 뒤의 입력은 `ShuttingDown`이다(정의된 동작). 통로는 문맥의 allocator에서 오므로 마지막 입구는 그 allocator보다 먼저 없어져야 한다. `ConfigContext::ExecuteConsoleLine`은 게임 lane 전용이다(다른 스레드면 `WrongThread`). 입구는 snapshot의 이름 색인(snapshot과 함께 게시되는 불변 표 — 이름·종류·플래그)으로 이름을 해석하고 권한(콘솔 읽기 전용·치트·복제·부팅 봉인)을 본다. 쓰기·`reset`은 쓰기 큐에 넣고(값 형식은 Sync가 꺼낼 때 검사해 거부하면 그 입력의 sink에 알린다), `<이름>`·`<이름> ?`·명령은 큐에 넣어 Sync 5단계에 게임 lane이 실행한다. 명령 도움말(`<명령> ?`)은 치트가 꺼져 있어도 받는다(게임 lane과 같다).
+  - 출력 sink는 참조 계수 `ConsoleSink`(`SharedPtr<ConsoleSink>`)다. 큐에 든 일은 sink를 쥐고 있어 입력한 쪽이 먼저 놓아도 산다. 큐에 든 일의 출력은 게임 lane(Sync)이 쓰므로, 입력한 스레드와 동시에 sink를 쓰는 경우 sink가 스레드 안전해야 한다.
+  - 인자와 `<이름> <값>`의 구분은 공백·탭이다. 따옴표 묶음은 없다(ReflectionText 단일 값 표기와 같다 — 공백이 든 값은 마지막 `StringView` 매개변수로 받거나 파일·`--set`으로 쓴다).
+  - `cvar.explain`은 이름 토큰 하나만 받는다(그 밖은 `cvar.explain takes one name`).
+  - 오류 문구는 `<이름> <사유>` 한 줄이다(예: `render.backend is a boot variable; set it in a config file or with --set and restart`). 그 밖의 진단은 `error <코드> <이름>: <사유>`다.
+  - 출력 줄: `<이름> = <값> [boot]`, 재시작 대기면 `  pending restart: <값>`, 품질 묶음이면 `  quality.shadow@1 (requested 3, lowered: <사유>)`, 이어서 출처 스택(강한 것부터 `<층> <값> <출처>`, 마지막 `Default <값> code`).
 - **Explain(name, scope)** 예:
   ```
   render.shadow.distance = 1200 (float, range 500..20000, clamp)
@@ -552,7 +562,7 @@ public:
                     Project   5000   Game/Config/Render.json:12:5
                     Default   8000   code
   ```
-- **DumpOverrides()**: 기본값과 다른 유효값만 Config 파일 형식(`{"Settings": {...}}`)으로 내고, 값마다 출처를 `//` 주석으로 단다. `BootCVar`는 `// [boot]`를 붙인다. 이 출력을 빈 문맥의 **세션 층**(`--config`·`AddLayerText(ConfigLayer::Session, ...)`)으로 다시 읽으면 같은 유효값이 나온다. 세션 층은 품질·기기 프로필 층보다 강하므로 그 층에서 온 값도 그대로 재현된다. 범위 값은 dump에 넣지 않는다(범위는 실행 중 객체다).
+- **DumpOverrides()**: 기본값과 다른 유효값만 Config 파일 형식(`{"Settings": {...}}`)으로 내고, 값마다 출처를 `//` 주석으로 단다. `BootCVar`는 `// [boot]`를 붙인다. 구현은 `ConfigContext::DumpConsoleValues(out, overridesOnly)`다(CVar·독립 콘솔 설정·설정 struct 필드의 콘솔 이름 — 이름 순서, JSON 값은 `Settings` 값 모양: bool·수·문자열, enum은 이름 문자열). 형식은 Config 층 문서(줄 주석 JSON — Config D1, JSON5 2단계 전)와 같다. 개발 빌드의 `Cheat()` 값도 넣는다(개발 도구다 — 출시 규칙에서는 숨긴 설정이라 나오지 않고, 출시 쿠킹은 허용 목록이 뺀다). 이 출력을 빈 문맥의 **세션 층**(`--config`·`AddLayerText(ConfigLayer::Session, ...)`)으로 다시 읽으면 같은 유효값이 나온다. 세션 층은 품질·기기 프로필 층보다 강하므로 그 층에서 온 값도 그대로 재현된다. 범위 값은 dump에 넣지 않는다(범위는 실행 중 객체다).
 - 출시 빌드의 `--set`은 Config D5대로 서버 대상만 받는다.
 - 콘솔 이름 영역 표(Config 5.1)에 `cvar`·`cheat`·`obj`를 더한다.
 
@@ -710,6 +720,23 @@ public:
 - 등급 요구·비용을 어디서 정하는지(Config 6.1 CVR5 항목): 코드(호스트가 `QualityGroupRule`을 넘긴다)로 정했다. 기기 조건·예산은 기기 특성에 기대는 플랫폼별 조정이라 묶음 정의(consteval — 할당 없는 상수)에 넣기 어렵고, 데이터 파일 형식은 기기 프로필 조건과 함께 정할 일이라 미룬다(아래 후속).
 - 후속: 규칙의 데이터 파일 형식(`Quality.json`이나 기기 프로필에 둘지), `ScopedOverride`의 묶음 판(CVR3 범위와 함께), 묶음 Explain·`cvar.find` 표시(CVR6).
 
+**CVR6 구현(2026-11-19, `feature/cvar`)**
+- 명령: `Config/CVarCommand.h` — `cvar::Command<&Function>(name)` → `CommandBuilder`(`Help`·`Category`·`Cheat`) → `ConsoleCommand`(정의 `CommandDefinition` = 공통 머리 `VarDefinition`의 `HandleKind::Command` + 매개변수 표 + 호출 함수). `Register`가 받고 Policy `cvar-registration` 대상이다. 출시 빌드의 `Cheat()` 명령은 이름·호출 함수를 버리고 등록되지 않는다. 명령이 객체(제어기 등)를 다뤄야 하면 `ConfigContext::BindCommand(command, target)`로 대상을 묶고 함수는 `CommandContext::Target<T>()`로 받는다(핸들은 정적이고 대상은 실행 중 객체라 묶음이 따로다). 인자는 공백으로 나눈 토큰을 매개변수마다 ReflectionText 단일 값 표기로 읽고, 마지막 `StringView` 매개변수는 줄의 나머지(비어도 된다)를 받는다. 게임 lane 입력은 넣을 때 인자를 검사한다. CF2 `ConsoleCommandDefinition`·인자 struct `<경로>=<값>` 방식은 없앴다(TraceControl `trace.*` 명령을 옮겼다 — `trace.enable cpu,gpu`·`trace.file <경로>`).
+- 콘솔 도구: 15절 표 전부(`<이름>`·`?`·`<값>`·`reset`·`cvar.find`·`cvar.explain`·`cvar.dump [overrides]`·명령·자동완성). 다른 스레드 입력은 snapshot 이름 색인(`ConfigSnapshot` — 등록 뒤 다음 Sync가 게시하는 snapshot부터)으로 해석한다.
+- 치트·복제: `cvar::CheatsEnabled`(`cheat.enabled`), `NetworkRole`·`SetNetworkRole`, `CheatsDisabled`·`ReplicatedOnClient`를 넣을 때(콘솔 입력·`Set({.layer = Console})`)와 Sync가 큐를 꺼낼 때 판정한다. `ExportReplicated`·`ImportReplicated`(서버 층).
+- 덤프: `DumpConsoleValues(out, overridesOnly)` — 빈 문맥의 세션 층으로 다시 읽으면 같은 유효값이다(시험).
+- 결정(CVR4 결정 항목): 설정 struct 필드의 콘솔 이름·필드 경로에 봉인 뒤 바로 쓰는 층(콘솔·코드·범위 임시 변경)으로 부팅 값(`RestartRequired`·`StartupOnly`)을 쓰면 독립 설정과 같이 넣을 때 `BootSealed`로 거부한다(Config 8절 개정 13). 콘솔 경험을 하나로 맞추고, Config 8절이 피하려던 것(기기 프로필 재적용의 거부 오류)은 파생 층이라 그대로 `BootValueIgnored`다. 설정 struct는 시작 전에 등록하므로 봉인 뒤 늦은 섹션 등록에 봉인 뒤 쓰기를 거르는 처리는 두지 않았다(독립 설정의 늦은 등록 처리와 다른 점 — 늦은 섹션 등록이 생기면 같은 규칙을 더한다).
+- 넘긴 것: 리플렉션 struct·수학 타입 명령 인자(CU2 함수 리플렉션과 함께), 범위 값의 치트 판정(CVR3), 실제 복제 전송(넷 모듈), Release 구성의 컴파일 시점 제거 확인(19절 — 출시 구성 빌드에서, 출시 빌드 Cheat 명령의 Bind/Unbind 무동작 포함), 객체 콘솔·`CheatSet`(CVR8).
+
+**CVR6 리뷰 반영(개정 13)**
+- `cvar.explain`은 이름 하나만 받고 설명만 쓴다(값 쓰기·명령 실행으로 새지 않는다).
+- 다른 스레드 입구 `ConsoleInputPort`와 참조 계수 sink `ConsoleSink`(위 15절 구현 규칙).
+- 적용 때 치트 판정은 큐 순서(13.1절). 콘솔 층 문서 입력도 입력 때·적용 때 치트·복제 판정을 받는다.
+- `ExportReplicated`는 복제 변수 전부(13.2절).
+- 명령 대상 묶음: `BindCommand`가 대상 타입 표지를 기록하고 `CommandContext::Target<T>()`가 확인한다(다르면 Fatal). `UnbindCommand(command, expectedTarget)`은 자기 대상일 때만 지운다. 묶기·풀기는 게임 lane 전용이고 다른 스레드면 Fatal이다(대상의 파괴는 게임 lane에서 해야 한다). 문맥은 묶인 대상보다 오래 살아야 하고, 묶인 대상이 남은 채 문맥을 파괴하면 Fatal이다(대상이 소멸 때 풀어야 한다 — TraceController가 그렇게 한다). 출시 빌드의 `Cheat()` 명령은 등록되지 않으므로 Bind·Unbind는 성공하는 무동작이다.
+- float·double 값의 NaN·무한대는 모든 입력 경로(CVar·독립 콘솔 설정·설정 struct 필드의 콘솔 이름)가 같은 판정으로 거부한다(4.2절). 덤프의 출처 주석은 제어 문자를 escape한다.
+- `cheat.enabled`는 `ConsoleReadOnly()`(13.1절). `GetNetworkRole`은 어느 스레드에서나 부른다.
+
 **CVR1 이후 결정·후속 항목**
 - `Register`는 타입을 지운 `const cvar::detail::VarDefinition*`만 받는다. CVR5 `CVarGroup`·CVR6 `ConsoleCommand`가 같은 경로로 오려면 종류(`HandleKind`)를 가진 공통 정의 머리가 필요하다(지금 `VarDefinition`을 머리로 쓰고 종류별 꼬리를 덧붙이는 모양).
 - 플러그인(모듈)을 내릴 때의 처리가 스펙에 없다: 문맥이 핸들 정의 포인터를 쥐므로, 모듈 코드가 내려가면 포인터가 dangling이 된다. `Unregister` 또는 모듈 언로드 때 그 모듈 핸들을 문맥에서 빼는 규칙을 정해야 한다(결정 필요).
@@ -748,6 +775,8 @@ public:
 
 ## 23. 개정 이력
 
+- 개정 13(2026-11-19): CVR6 리뷰 반영. 13.1절(`cheat.enabled` 콘솔 읽기 전용, 적용 때 판정의 큐 순서·콘솔 층 문서), 13.2절(Export는 복제 변수 전부, `GetNetworkRole` 어느 스레드나), 15절 구현 규칙(다른 스레드 입구 `ConsoleInputPort`·참조 계수 sink·스레드 안전 요건, 공백·탭 구분·따옴표 없음, `cvar.explain` 이름 하나), 20절 CVR6 리뷰 반영 메모(명령 대상 묶음 규칙·수명, NaN·무한대, 덤프 주석 escape).
+- 개정 12(2026-11-19): CVR6. 명령 정의를 `cvar::Command<&Function>(name)`으로(4.2절 — 까닭), `BindCommand`·`CommandContext::Target`, 콘솔 구현 규칙(15절 — enum 수 입력은 Config 값 검사, 내장 `cvar.*` 명령, 다른 스레드 입력의 이름 색인, 오류 문구 형식), 치트 허용 상태의 정의 위치·판정 시점(13.1절), 네트워크 역할·복제 목록 경계(13.2절), 덤프 구현(15절), 20절 CVR6 메모(설정 struct 필드의 봉인 뒤 직접 쓰기 `BootSealed` 결정 포함).
 - 개정 11(2026-11-19): CVR5 리뷰 반영. 묶음의 묶음은 DAG(순환·자기 참조 `Register` 거부), 항목 겹침 금지(11절), 10절 2단계를 위상 순서 펼침·검증 낮춤 때만 다시 펼치기·같은 상태에 한 번 `GroupNoConverge`로, 코드 프리셋 값의 등록 검사, `Quality.json` 정규 등급 키·잘못된 값만 건너뛰기, `QualityRequest::levels`(`QualityGroupRule::levels` 없앰), 19절 프리셋 시험, 20절 CVR5 메모를 고쳤다.
 - 개정 10(2026-11-19): CVR5 구현 결과를 20절에 적었다(`CVarGroup`·묶음 해결 반복·`Quality.json` 값 덮어쓰기·조합 검증 연결·`QualityMember` 대체). 11절의 항목 생성자(`SetArg<T>`)·정적 데이터 크기·Quality 층 직접 쓰기 거부, 12절 `QualityLowered`를 고쳤다.
 - 개정 9(2026-11-19): CVR4 리뷰 반영. 9절(봉인 Busy, 늦은 등록의 `BootSealed`, 문서 입력 전체 거부, 서버 층 분류, 봉인 전 snapshot assert 범위, 부팅 값 "같다"), 10.1절 부팅 블록 행(봉인 뒤 등록의 copy-on-write), 12절(`Register`가 바로 적용, 편집 거리 OSA), 20절 리뷰 반영 메모·CVR6 후속(콘솔 문구 형식, 설정 struct 필드 콘솔 쓰기 결정 항목).

@@ -387,13 +387,19 @@ void D3D12Device::SetTexture(TextureHandle handle) noexcept {
 
         // 명시 전이 없이 셰이더 읽기 상태가 아닌 텍스처를 읽으면 암묵 전이로 메운다(GX5. 렌더
         // 그래프를 거치지 않는 그리기용이다). view는 자기 mip·slice 범위만 본다(텍스처 GX2 A부).
+        // 읽기 상태는 묶인 파이프라인 종류를 따른다: compute는 NON_PIXEL(SrvCompute), 그 밖은
+        // PIXEL(SrvGraphics)이다. 그래서 compute 파이프라인을 먼저 묶어야 그래프가 낸 SrvCompute를
+        // 다시 바꾸지 않는다(RG1 남은 것 B부).
+        const PipelineRecord* pipeline = pipelines_.Find(boundPipeline_);
+        const D3D12_RESOURCE_STATES readState = pipeline != nullptr && pipeline->compute
+                                                    ? D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE
+                                                    : D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
         const ResolvedSubresourceRange& range = record->viewRange;
         bool readable = true;
         for (uint32 slice = range.firstSlice;
              owner != nullptr && slice < range.firstSlice + range.sliceCount; ++slice) {
             for (uint32 mip = range.firstMip; mip < range.firstMip + range.mipCount; ++mip) {
-                readable = readable && (owner->current.At(mip, slice) &
-                                        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE) != 0;
+                readable = readable && (owner->current.At(mip, slice) & readState) != 0;
             }
         }
 

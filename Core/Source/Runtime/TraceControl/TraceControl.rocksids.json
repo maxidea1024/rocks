@@ -48,14 +48,14 @@
       "name": "rocks::trace_control::TraceChannelArguments::channels",
       "id": "6a2fb308e1e541eaa6113484dd505b07",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "field",
       "name": "rocks::trace_control::TracePathArguments::path",
       "id": "ab323a756ecd4f48b97573c40145c089",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "field",
@@ -76,14 +76,14 @@
       "name": "rocks::trace_control::TraceChannelArguments",
       "id": "b617083faf764a5b9b6540b0aeda8877",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "type",
       "name": "rocks::trace_control::TracePathArguments",
       "id": "8d2e8fcacd3d49efab8f991d8a2b3ba3",
       "aliases": [],
-      "retired": false
+      "retired": true
     },
     {
       "kind": "type",

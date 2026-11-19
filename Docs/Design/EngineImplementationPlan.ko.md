@@ -971,7 +971,7 @@ AAA01/AAA02의 지속 월드 상태·PCG provenance와 AAA08의 이동 환경 sn
 
 | 소비자 | 구조·소유 | 규약 |
 |---|---|---|
-| 이동 primitive·skeletal mesh·광원·decal·capture·최상위 level 초과 대상의 렌더 판정 | RenderScene의 평면 SoA bounds | view별 병렬 SIMD frustum·거리·LOD 판정. 계층에 등록하지 않으므로 이동에 따른 cell 변경이 없다. CPU 판정 장치의 기본 경로 |
+| 이동 primitive·skeletal mesh·광원·decal·capture·최상위 level 초과 대상의 렌더 판정 | RenderScene의 평면 SoA bounds([평면 경계 판정](FlatBounds.ko.md) `FlatBoundsSet`) | view별 병렬 SIMD frustum·거리·LOD 판정. 계층에 등록하지 않으므로 이동에 따른 cell 변경이 없다. CPU 판정 장치의 기본 경로 |
 | 정적 mesh·instanced·foliage의 렌더 판정 | RenderScene의 계층 공간 해시(HierarchicalSpatialHash) | WP cell 단위로 cook한 cell·chunk를 활성화 시 연결. GPU-driven 장치는 GPU에서, 그 밖의 장치는 worker가 block→cell→chunk 순으로 판정 |
 | 이동 primitive–local light 상호작용(그림자 cache 무효화), CPU 판정 경로의 그림자 caster 수집 | RenderScene의 Loose Octree 두 인스턴스: primitive 옥트리(광원 범위로 질의), local light 옥트리(primitive 범위로 질의) | [공간 인덱스 설계](SpatialIndex.ko.md). 그림자 수집은 노드 묶음 단위로 worker에 분배한다. GPU-driven 경로의 caster 판정은 GPU에서 하며 옥트리를 쓰지 않는다 |
 | 충돌 형상 trace·sweep·overlap·trigger, 형상 기반 게임플레이 질의(지점 주변·team/tag·zone) | 16절 물리 adapter의 Jolt scene query | collision channel·query filter·QueryReadScope(16.3절). 충돌하지 않는 대상은 query 전용 body로 등록한다. 결과는 (거리, stable EntityId)로 정렬해 반환한다. 별도 인덱스 없음 |
@@ -1576,7 +1576,7 @@ CharacterMovement는 경사·계단·ground snap·jump·moving platform·crouch�
 
 QueryReadScope는 해당 physics world가 step·구조 변경을 수행하지 않는 읽기 phase의 gate다. 외부 worker는 gate 안에서만 live broadphase를 조회하고 scope를 저장·yield하지 않는다. step과 겹쳐야 하는 async query는 step 경계에 batch 실행하여 값 결과를 전달한다. Jolt에서 QueryReadScope는 step 완료와 broadphase 갱신 반영 이후 열리고 다음 command 적용·step·원점 이동 전에 닫힌다(Jolt의 질의·수정 동시성 규약은 검증 항목). 쓰기는 Physics lane의 command 단계에서만 수행하며 debug build는 adapter가 위반을 검출한다. UE 5.8 Chaos는 game thread 질의를 위한 별도 acceleration structure를 frame 끝에 physics 결과로 갱신한다(`FChaosScene::EndFrame`이 `CopySolverAccelerationStructure`로 solver 구조를 통째 복사 — PhysicsCore/Private/ChaosScene.cpp 559행). [S92](https://github.com/EpicGames/UnrealEngine/tree/5.8.4-release) immutable QuerySnapshot이라는 이름만으로 vendor broadphase가 복제되어 있다고 가정하지 않는다. 독립 snapshot broadphase는 필요 시 별도 메모리·정합 비용을 검증한다.
 
-collision channel·object type·query filter·trigger·ignore pair·physical material/surface·friction combine·complex/simple collision을 data schema로 제공한다. body mass/inertia·COM·constraint editor·physics asset·debug recorder를 포함한다. fracture·vehicle·cloth·rope·buoyancy는 지원표와 sample을 갖고 rigid-body 지원으로 완료 처리하지 않는다. soft body·vehicle은 Jolt가 제공하는 범위를 별도 모듈 단계에서 평가해 gameplay 계층 뒤에 두며, 차량 바퀴의 좌우처럼 이름이 붙은 방향은 수치 방향으로 대응한다([물리 어댑터 경계](PhysicsJoltAdapter.ko.md) 5절). fracture 구현 방식은 별도 모듈 단계에서 결정한다.
+collision channel·object type·query filter·trigger·ignore pair·physical material/surface·friction combine·complex/simple collision을 data schema로 제공한다. 단순 충돌 형상과 씬 질의 형상은 UE의 Box·Sphere·Capsule(질의는 Line 포함)·Convex에 Cylinder를 더한다(사용자 결정 2026-11-19, [Cylinder 형상 설계](CylinderShape.ko.md) 4절 CY2: Jolt `CylinderShape` 사상, 질의·trigger convex radius 0, 동적 body 경고, 검증 J16–J19). Core 수학의 `Cylinder<T>`(CY1)는 구현되었다. body mass/inertia·COM·constraint editor·physics asset·debug recorder를 포함한다. fracture·vehicle·cloth·rope·buoyancy는 지원표와 sample을 갖고 rigid-body 지원으로 완료 처리하지 않는다. soft body·vehicle은 Jolt가 제공하는 범위를 별도 모듈 단계에서 평가해 gameplay 계층 뒤에 두며, 차량 바퀴의 좌우처럼 이름이 붙은 방향은 수치 방향으로 대응한다([물리 어댑터 경계](PhysicsJoltAdapter.ko.md) 5절). fracture 구현 방식은 별도 모듈 단계에서 결정한다.
 
 ### 16.4 Jolt 버전·빌드·결정성 범위
 
@@ -2781,7 +2781,7 @@ RHI·UI 툴킷·언어·전문 빌드 도구의 본격 구현은 Foundation Gate
 | 전체 post·upscale·HDR | 26절 catalog·두 경로·FSR/DLSS/XeSS·volume/shot·history | 필수 M4–M9 |
 | Skeletal·animation·rig·retarget·morph | blend/montage/sync/socket·IK/warp·pose search·skin/velocity | 필수 M4–M8, 고급 cloth/groom P3 |
 | Physics·collision·query·nav | Jolt 단일 버전(개정 1.12)·좌표·단위 adapter 경계·channel/material·constraint·character·async query·tile snapshot. Chaos 고유 기능은 참고 | 필수 M4–M7(M4 전 PJG gate); 파괴/softbody/vehicle 개별 P3 |
-| World 공간 인덱스·visibility 판정 | 평면 SoA·SceneCulling 유사 계층 공간 해시·physics scene query·2D gameplay 해시 분담, 보수성·결정성 규약 | 필수 M3 CPU 경로, M4–M5 GPU-driven·WP 연동(제안); 10.4절 SI gate |
+| World 공간 인덱스·visibility 판정 | 평면 SoA(`FlatBoundsSet`, 구현됨)·Loose Octree(광원 상호작용·CPU 경로 그림자 caster, 구현됨)·SceneCulling 유사 계층 공간 해시·physics scene query 분담(개정 1.13), 보수성·결정성 규약 | 필수 M3 CPU 경로, M4–M5 GPU-driven·WP 연동(제안); 10.4절 SI gate. 네트워크 관심·대량 군중용 2D 격자는 네트워크 복제(관련성 판정)나 군중 시스템을 설계할 때 그 단계의 선행 작업으로 넣는다 |
 | AI·EQS·State/Behavior·SmartObject·Mass | task budget·script predicate·예약·SoA/Entity bridge | 필수 M4–M7 |
 | Gameplay Ability·effect·cue | 태그·속성·stack·cost·duration·prediction·취소 | 필수 M5–M6 |
 | Network·subobject·replay·online | authority/conditions·spawn/fixup·travel/reconnect·provider | 필수 M5–M7, 서비스 운영 통합 별도 gate |

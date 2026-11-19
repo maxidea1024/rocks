@@ -108,11 +108,20 @@ Result<void> Report(ConfigState& state, ConfigDiagnosticCode code, ConfigSeverit
     return state.diagnostics.Add(diagnostic);
 }
 
-StringView CheckLayerAllowed(const ConfigState& state, ConfigLayer layer,
-                             uint32 settingsFlags) noexcept {
+StringView CheckLayerAllowed(const ConfigState& state, ConfigLayer layer, uint32 settingsFlags,
+                             ConfigDiagnosticCode& code) noexcept {
+    code = ConfigDiagnosticCode::LayerNotAllowed;
     if (state.releaseRules && HasFlag(settingsFlags, SettingsFieldFlags::DevelopmentOnly) &&
         layer != ConfigLayer::CodeDefault) {
         return "a DevelopmentOnly value keeps its code default under release rules";
+    }
+
+    // 봉인 뒤 부팅 필드에 바로 쓰는 층은 넣을 때 거부한다(독립 설정과 같다 — CVar 9절).
+    if (state.validatingWrite && state.startupComplete && IsDirectWriteLayer(layer) &&
+        (HasFlag(settingsFlags, SettingsFieldFlags::StartupOnly) ||
+         HasFlag(settingsFlags, SettingsFieldFlags::RestartRequired))) {
+        code = ConfigDiagnosticCode::BootSealed;
+        return BootSealedMessage;
     }
 
     if (layer == ConfigLayer::User && !HasFlag(settingsFlags, SettingsFieldFlags::UserConfig)) {
@@ -239,6 +248,10 @@ Result<bool> ValidateConsoleValue(ConfigState& state, const ConfigEntry& entry, 
 // 입력 하나를 검사한다(큐에 넣기 전): Document의 모양(섹션 키·`Settings` 섹션), 닿는 섹션마다 코드
 // 기본값 위 적용, 독립 콘솔 설정 값. 반환: true면 문제없음.
 Result<bool> ValidateEntry(ConfigState& state, const ConfigEntry& entry) noexcept {
+    // 넣기 전 검사 동안만 켠다(봉인 뒤 부팅 필드의 바로 쓰는 층 거부 — CheckLayerAllowed).
+    const bool validating = state.validatingWrite;
+    state.validatingWrite = true;
+    auto restore = MakeScopeExit([&]() noexcept { state.validatingWrite = validating; });
     // `Quality.json`은 설정 struct 섹션이 아니라 묶음 → 등급 → 항목 값이다(CVar 11절).
     if (IsQualityDocument(state, entry)) {
         return ValidateQualityDocument(state, entry);
@@ -504,6 +517,15 @@ ConfigContext::~ConfigContext() {
         platform::Fatal("ConfigContext destroyed on a thread other than its owner");
     }
 
+    // 묶인 명령 대상이 남았으면 대상보다 문맥이 먼저 없어지는 것이다(대상이 소멸 때 풀어야 한다 —
+    // CVar 20절 CVR6 리뷰 반영).
+    for (const UniquePtr<detail::ConsoleCommandState>& command : state->commands) {
+        if (command->target != nullptr) {
+            platform::Fatal("ConfigContext destroyed while a console command is still bound to a "
+                            "target; unbind it before the context goes away");
+        }
+    }
+
     detail::WriteChannel& channel = *state->channel;
     if (platform::AtomicLoad<platform::MemoryOrder::Acquire>(&channel.bindings) != 0) {
         platform::Fatal(
@@ -612,6 +634,13 @@ Result<void> ConfigContext::Initialize() noexcept {
     options_.userDataDir = {};
     options_.savedDir = {};
     state_ = Move(made.Value());
+    state_->self = this;
+    // 문맥이 스스로 갖는 핸들(치트 허용 상태·`cvar.*` 콘솔 도구 — CVar 13·15절)이다.
+    if (auto registered = detail::RegisterBuiltinConsoleHandles(*this); !registered) {
+        state_ = nullptr;
+        return registered;
+    }
+
     return Result<void>::Success();
 }
 
@@ -715,6 +744,7 @@ Result<void> ConfigContext::RegisterSettingsType(const detail::SettingsTypeOps& 
     }
 
     state->dirty = true;
+    state->namesChanged = true;
     return Result<void>::Success();
 }
 
@@ -738,6 +768,32 @@ const void* ConfigContext::FindSettings(TypeId type) const noexcept {
 }
 
 namespace detail {
+
+Result<void> ApplyQueuedChange(Array<ConfigEntry*>& plan, const QueuedChange& change) noexcept {
+    // 빼기(Unset·Clear·ClearLayer)와 바꾸기(Set — 같은 자리의 이전 쓰기를 뺀다)다.
+    if (change.entry.Get() == nullptr || change.replace) {
+        usize kept = 0;
+        for (usize index = 0; index < plan.Size(); ++index) {
+            const ConfigEntry& entry = *plan[index];
+            const bool removed =
+                entry.layer == change.layer &&
+                (change.allTags || entry.tag.View() == change.tag.View()) &&
+                (change.path.IsEmpty() ||
+                 (entry.kind == EntryKind::Console && entry.path.View() == change.path.View()));
+            if (!removed) {
+                plan[kept++] = plan[index];
+            }
+        }
+
+        static_cast<void>(plan.TryResize(kept)); // 줄이기는 할당하지 않는다
+    }
+
+    if (change.entry.Get() != nullptr) {
+        return plan.TryPushBack(change.entry.Get());
+    }
+
+    return Result<void>::Success();
+}
 
 Result<void> QueueLayerText(ConfigState& owner, ConfigLayer layer, StringView tag,
                             StringView branch, StringView sourceName, StringView text,
@@ -818,6 +874,18 @@ Result<void> QueueLayerText(ConfigState& owner, ConfigLayer layer, StringView ta
 
     if (!valid.Value()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 콘솔 층 문서도 치트·복제 권한을 넣을 때 본다(적용 때 다시 본다 — CVar 13절).
+    if (layer == ConfigLayer::Console) {
+        auto allowed = CheckEntryPermission(*state, added, CheatsAllowed(*state), nullptr);
+        if (!allowed) {
+            return Result<void>::Failure(allowed.Error());
+        }
+
+        if (!allowed.Value()) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
     }
 
     queued.Value()->entry = Move(entry.Value());
@@ -916,6 +984,17 @@ Result<void> PrepareAssignment(ConfigState& owner, ConfigLayer layer, StringView
 
         if (!valid.Value()) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (layer == ConfigLayer::Console) {
+            auto allowed = CheckEntryPermission(*state, added, CheatsAllowed(*state), nullptr);
+            if (!allowed) {
+                return Result<void>::Failure(allowed.Error());
+            }
+
+            if (!allowed.Value()) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
         }
 
         queued.Value()->entry = Move(entry.Value());
@@ -1121,29 +1200,12 @@ Result<void> ConfigContext::Sync() noexcept {
 
     uint64 firstNew = state->nextSequence;
     for (SharedPtr<QueuedChange>& change : state->queue) {
-        // 빼기(Unset·Clear·ClearLayer)와 바꾸기(Set — 같은 자리의 이전 쓰기를 뺀다)다.
-        if (change->entry.Get() == nullptr || change->replace) {
-            usize kept = 0;
-            for (usize index = 0; index < plan.Size(); ++index) {
-                const ConfigEntry& entry = *plan[index];
-                const bool removed =
-                    entry.layer == change->layer &&
-                    (change->allTags || entry.tag.View() == change->tag.View()) &&
-                    (change->path.IsEmpty() || (entry.kind == EntryKind::Console &&
-                                                entry.path.View() == change->path.View()));
-                if (!removed) {
-                    plan[kept++] = plan[index];
-                }
-            }
-
-            static_cast<void>(plan.TryResize(kept)); // 줄이기는 할당하지 않는다
-        }
-
         if (change->entry.Get() != nullptr) {
             firstNew = firstNew < change->entry->sequence ? firstNew : change->entry->sequence;
-            if (auto pushed = plan.TryPushBack(change->entry.Get()); !pushed) {
-                return pushed;
-            }
+        }
+
+        if (auto applied = detail::ApplyQueuedChange(plan, *change); !applied) {
+            return applied;
         }
     }
 
@@ -1368,7 +1430,8 @@ Result<void> ConfigContext::Sync() noexcept {
         return reserved;
     }
 
-    if (named.Get() != nullptr || !writes.IsEmpty()) {
+    // 등록이 바뀌었으면 값이 그대로여도 게시한다(콘솔 이름 색인 — 다른 스레드의 콘솔 입력).
+    if (named.Get() != nullptr || !writes.IsEmpty() || state->namesChanged) {
         if (auto published = detail::PublishSnapshot(
                 *state, named.Get() != nullptr ? &named : nullptr, writes.View());
             !published) {

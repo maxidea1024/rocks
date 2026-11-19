@@ -2,6 +2,7 @@
 
 #include <Config/CVarAccess.h>
 #include <Config/CVarBuilder.h>
+#include <Config/CVarCommand.h>
 #include <Config/CVarGroup.h>
 #include <Config/ConfigContext.h>
 
@@ -27,10 +28,20 @@
 //
 // UE 대응: CVar<T>는 TAutoConsoleVariable<T>, BootCVar<T>는 ECVF_ReadOnly + 시작 시 값, CVarGroup은
 // scalability group이다(3절 표 — Config/CVarGroup.h).
+namespace rocks::cvar {
+
+// 치트 허용 상태다(CVar 13.1절 — `cheat.enabled`, bool, Replicated, 기본 true). ConfigContext::
+// Initialize가 등록한다. 꺼져 있으면 `Cheat()` 변수의 콘솔 쓰기와 치트 명령 실행을 CheatsDisabled로
+// 거부한다. 게임 규칙 객체가 Code 층에, 서버가 Server 층에 쓴다.
+extern CVar<bool> CheatsEnabled;
+
+} // namespace rocks::cvar
+
 namespace rocks {
 
 // 정의 문장을 짧게 하려고 핸들 타입을 rocks 바로 아래에도 둔다(4절).
 using cvar::BootCVar;
+using cvar::ConsoleCommand;
 using cvar::CVar;
 using cvar::CVarGroup;
 

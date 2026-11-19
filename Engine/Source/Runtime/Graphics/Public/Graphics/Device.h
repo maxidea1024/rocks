@@ -35,7 +35,9 @@ public:
     // 텍스처 슬롯 0에 묶는다(그래픽은 PS t0·s0, compute는 CS t0·s0, GLSL ES는 텍스처 유닛 0). null
     // handle이면 1x1 흰색 텍스처를 쓴다. Read view(CreateTextureView)면 그 mip·slice 범위만 셰이더
     // 읽기 상태로 바꾼다(같은 텍스처의 다른 범위를 SetWritableTexture로 함께 묶을 수 있다).
-    // ReadWrite view는 흰 텍스처로 대신한다.
+    // ReadWrite view는 흰 텍스처로 대신한다. 범위가 이미 묶인 파이프라인 종류의 읽기 상태(compute는
+    // SrvCompute, 그 밖은 SrvGraphics)면 바꾸지 않으므로, 명시 전이(렌더 그래프)와 함께 쓰는
+    // compute pass는 SetPipeline을 먼저 부른다.
     virtual void SetTexture(TextureHandle texture) noexcept = 0;
 
     // 버퍼 view slot(0 – MaxDrawBufferViews-1)에 읽기 view를 묶는다(PipelineDesc 고정 배치, GX2).

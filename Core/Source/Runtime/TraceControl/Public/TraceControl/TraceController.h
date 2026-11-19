@@ -62,13 +62,15 @@ public:
     TraceController(const TraceController&) = delete;
     TraceController& operator=(const TraceController&) = delete;
 
-    // 콘솔 명령 다섯을 등록한다.
-    //   trace.enable channels=<목록>   채널·묶음 켜기
-    //   trace.disable channels=<목록>  채널·묶음 끄기
-    //   trace.file path=<경로>         파일 출력 시작(이미 있으면 바꾼다)
-    //   trace.stop                     trace.file이 붙인 파일 출력 끝내기
-    //   trace.snapshot path=<경로>     스냅샷 쓰기(최근 기록 고리, 8절)
-    // 실패: RegisterConsoleCommand의 오류(이름 중복 AlreadyExists 등). 한 번만 부른다.
+    // 콘솔 명령 다섯(ConsoleCommand 핸들)을 등록하고 이 제어기에 묶는다(ConfigContext::BindCommand
+    // — CVar 15절). 인자는 줄의 나머지다.
+    //   trace.enable <목록>     채널·묶음 켜기(쉼표로 나눈 이름)
+    //   trace.disable <목록>    채널·묶음 끄기
+    //   trace.file <경로>       파일 출력 시작(이미 있으면 바꾼다)
+    //   trace.stop              trace.file이 붙인 파일 출력 끝내기
+    //   trace.snapshot <경로>   스냅샷 쓰기(최근 기록 고리, 8절)
+    // 제어기가 없어질 때 묶음을 푼다(그 뒤의 명령은 "no trace controller"를 쓴다). 실패:
+    // Register·BindCommand의 오류(이름 중복 AlreadyExists 등). 한 번만 부른다.
     Result<void> RegisterConsoleCommands() noexcept;
 
     // 이름 목록의 채널을 켜거나 끈다(위 "이름 목록"). 실패: 세션이 실행 중이 아니면 WrongContext,
@@ -91,8 +93,6 @@ public:
     Result<TraceSnapshotInfo> WriteSnapshot(StringView path) noexcept;
 
 private:
-    friend struct TraceControllerAccess;
-
     // 이름 하나(채널 또는 묶음)를 적용한다.
     Result<void> ApplyName(StringView name, bool enabled, TraceChannelChange& change) noexcept;
     Result<void> SetChannel(StringView name, bool enabled, bool fromPreset,
