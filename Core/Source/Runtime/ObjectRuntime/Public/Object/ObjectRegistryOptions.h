@@ -53,7 +53,7 @@ struct RegistryOptions {
     // GarbageCollectionScale.ko.md 4절). 슬롯 저장소는 쓰는 만큼만 chunk·GC 페이지 단위로 늘어난다.
     uint32 maxSlots = 2097152;
     uint32 maxGeneration = NumericLimits<uint32>::Max();
-    // 기본값은 scope 없는 객체 자체 호출에 Registry의 문맥을 사용한다. World/PIE dispatcher가
+    // 기본값은 scope 없는 객체 자체 호출에 Registry의 문맥을 사용한다. World/Tryout dispatcher가
     // 실행 문맥을 설정하는 구성은 true로 하여 무인자 생명주기·타입 조회 API의 scope 누락을
     // 거부한다. 명시적 ObjectAccessContext를 받는 Registry API의 검증에는 영향을 주지 않는다.
     bool requireLifecycleScope = false;

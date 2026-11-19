@@ -39,11 +39,11 @@ internal sealed record PropertySpec(bool Transient, bool ReadOnly, string Catego
     public bool Required { get; init; }
 
     // 필드 플래그 지정자다(리플렉션 B9h1 — Docs/Design/ReflectionExtensions.ko.md 9.1절): 복제 저장·복사 텍스트에서 뺀다
-    // (DuplicateTransient), PIE가 아닌 복제·텍스트에서 뺀다(NonPIEDuplicateTransient), 세이브게임 저장 포함 필터(SaveGame — 멤버마다
+    // (DuplicateTransient), Tryout이 아닌 복제·텍스트에서 뺀다(NonTryoutDuplicateTransient), 세이브게임 저장 포함 필터(SaveGame — 멤버마다
     // 표시), 복사 텍스트에서 뺀다(TextExportTransient).
     public bool DuplicateTransient { get; init; }
 
-    public bool NonPIEDuplicateTransient { get; init; }
+    public bool NonTryoutDuplicateTransient { get; init; }
 
     public bool SaveGame { get; init; }
 
@@ -207,7 +207,7 @@ internal static class Specifiers
         Dictionary<string, Value?> values = Parse(text, symbol);
         foreach ((string key, Value? value) in values)
         {
-            bool flag = key is "Transient" or "ReadOnly" or "EditorOnly" or "Required" or "DuplicateTransient" or "NonPIEDuplicateTransient" or
+            bool flag = key is "Transient" or "ReadOnly" or "EditorOnly" or "Required" or "DuplicateTransient" or "NonTryoutDuplicateTransient" or
                 "SaveGame" or "TextExportTransient" or "UserConfig" or "RestartRequired" or "StartupOnly" or "RenderRead" or "DevelopmentOnly";
             bool label = key is "Category" or "DisplayName" or "Name" or "ConsoleName";
             bool number = key is "MaxElements";
@@ -244,7 +244,7 @@ internal static class Specifiers
             EditorOnly = values.ContainsKey("EditorOnly"),
             Required = values.ContainsKey("Required"),
             DuplicateTransient = values.ContainsKey("DuplicateTransient"),
-            NonPIEDuplicateTransient = values.ContainsKey("NonPIEDuplicateTransient"),
+            NonTryoutDuplicateTransient = values.ContainsKey("NonTryoutDuplicateTransient"),
             SaveGame = values.ContainsKey("SaveGame"),
             TextExportTransient = values.ContainsKey("TextExportTransient"),
             // 필드 이름과 같은 Name은 지정하지 않은 것과 같다(모듈 사이 상속 필드의 도구 이름이 같은 바이트가 되게).

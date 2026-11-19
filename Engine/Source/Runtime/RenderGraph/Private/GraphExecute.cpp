@@ -1,5 +1,7 @@
 #include "RenderGraphInternal.h"
 
+#include <TraceCapture/TraceMark.h>
+
 // 그래프 실행이다: 그래프 시작 업로드, 첫 사용 pass 직전 할당(같은 그래프 안 재사용 자리 또는 풀),
 // Raster pass마다 장치 기록 열기, prologue 즉시 전이, pass 기록 함수와 CPU·GPU 구간, 그래프 끝
 // 마무리(Docs/Design/RenderBase.ko.md 7.1절 실행·업로드 행, 8절 RG2, UE
@@ -126,9 +128,28 @@ Result<void> ExecuteUploads(FrameArena& arena, GraphState& state) noexcept {
 namespace {
 
 // 열린 장치 기록을 제출한다.
+// 그래프 구간 marker를 이 기록에 다시 push한다(기록을 열 때, marker는 기록 안에서 짝이 맞아야
+// 한다).
+void RestoreScopeMarkers(GraphState& state) noexcept {
+    state.scopeMarkers = 0;
+    if (state.trace == nullptr || !state.trace->MarkersEnabled() || state.commands == nullptr) {
+        return;
+    }
+
+    for (const OpenScopeEntry& entry : state.openScopes) {
+        state.commands->PushMarker(StringView(state.scopes[entry.scope].name->Name()));
+        ++state.scopeMarkers;
+    }
+}
+
 Result<void> CloseRecording(GraphState& state) noexcept {
     if (state.commands == nullptr) {
         return Result<void>::Success();
+    }
+
+    // 열린 구간의 marker는 이 기록 안에서 닫는다(다음 기록이 다시 push한다).
+    for (; state.scopeMarkers > 0; --state.scopeMarkers) {
+        state.commands->PopMarker();
     }
 
     state.commands = nullptr;
@@ -299,6 +320,96 @@ public:
 
 namespace rocks::render::detail {
 
+namespace {
+
+// ancestor가 scope 사슬(자신 포함)에 있는지다.
+bool IsWithinScope(const GraphState& state, uint32 scope, uint32 ancestor) noexcept {
+    for (uint32 current = scope; current != GraphIndexNone;
+         current = state.scopes[current].parent) {
+        if (current == ancestor) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool IsScopeOpen(const GraphState& state, uint32 scope) noexcept {
+    for (const OpenScopeEntry& entry : state.openScopes) {
+        if (entry.scope == scope) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// scope와 아직 열지 않은 바깥 구간을 바깥부터 연다.
+void EnterScopeChain(FrameArena& arena, GraphState& state, uint32 scope) noexcept {
+    if (scope == GraphIndexNone || IsScopeOpen(state, scope)) {
+        return;
+    }
+
+    const ScopeRecord& record = state.scopes[scope];
+    EnterScopeChain(arena, state, record.parent);
+    OpenScopeEntry entry;
+    entry.scope = scope;
+    if (TraceCpuChannel.IsEnabled()) {
+        entry.cpuSerial = rocks::detail::BeginCpuScope(*record.name);
+    }
+
+    if (state.trace != nullptr && state.commands != nullptr) {
+        if (state.trace->MarkersEnabled()) {
+            state.commands->PushMarker(StringView(record.name->Name()));
+            ++state.scopeMarkers;
+        }
+
+        entry.gpuSpan = state.trace->BeginSpan(*state.commands, *record.name);
+    }
+
+    // 번호가 있는 구간은 연 직후 trace 표지로 번호를 남긴다(7.5절).
+    if (record.hasIndex) {
+        ROCKS_TRACE_MARK("Graph scope {} {}", StringView(record.name->Name()), record.index);
+    }
+
+    auto pushed = state.openScopes.TryPushBack(arena, entry);
+    (void)pushed;
+}
+
+} // namespace
+
+void LeaveScopes(GraphState& state, uint32 scope) noexcept {
+    while (!state.openScopes.IsEmpty()) {
+        const OpenScopeEntry entry = state.openScopes.Back();
+        if (IsWithinScope(state, scope, entry.scope)) {
+            break;
+        }
+
+        if (state.trace != nullptr) {
+            if (state.commands != nullptr) {
+                state.trace->EndSpan(*state.commands, entry.gpuSpan);
+            } else {
+                state.trace->DropSpan(entry.gpuSpan);
+            }
+        }
+
+        if (state.commands != nullptr && state.scopeMarkers > 0) {
+            state.commands->PopMarker();
+            --state.scopeMarkers;
+        }
+
+        if (entry.cpuSerial != 0) {
+            rocks::detail::EndCpuScope(entry.cpuSerial);
+        }
+
+        state.openScopes.PopBack();
+    }
+}
+
+void EnterScopes(FrameArena& arena, GraphState& state, uint32 scope) noexcept {
+    EnterScopeChain(arena, state, scope);
+}
+
 Result<void> ExecutePass(RenderGraph& graph, FrameArena& arena, GraphState& state,
                          uint32 pass) noexcept {
     PassRecord& record = state.passes[pass];
@@ -358,8 +469,10 @@ Result<void> ExecutePass(RenderGraph& graph, FrameArena& arena, GraphState& stat
         }
     }
 
-    // Raster pass는 자기 렌더 타깃으로 장치 기록을 연다. 그 밖은 열린 기록에 이어 쓴다.
+    // Raster pass는 자기 렌더 타깃으로 장치 기록을 연다. 그 밖은 열린 기록에 이어 쓴다. 이 pass의
+    // 구간 사슬 밖 구간은 지금 기록에서 닫는다(GPU 구간 끝이 앞 기록에 남는다).
     if (record.kind == GraphPassKind::Raster) {
+        LeaveScopes(state, record.scope);
         auto closed = CloseRecording(state);
         if (!closed) {
             return closed;
@@ -385,6 +498,12 @@ Result<void> ExecutePass(RenderGraph& graph, FrameArena& arena, GraphState& stat
                 attachment.clear = color.clear;
                 attachment.mipLevel = color.mipLevel;
                 attachment.slice = color.slice;
+                if (!color.resolveTarget.IsNull()) {
+                    attachment.resolveTarget =
+                        graphics::TextureHandle{state.resources[color.resolveTarget.index].device};
+                    attachment.resolveMipLevel = color.resolveMipLevel;
+                    attachment.resolveSlice = color.resolveSlice;
+                }
             }
 
             if (record.target.hasDepth) {
@@ -417,6 +536,8 @@ Result<void> ExecutePass(RenderGraph& graph, FrameArena& arena, GraphState& stat
             state.trace->BeginFrame(*state.device, *state.commands, state.frame);
             state.traceFrameOpen = true;
         }
+
+        RestoreScopeMarkers(state);
     } else if (state.commands == nullptr) {
         // 렌더 타깃이 없는 Compute·Copy pass는 attachment 없는 기록을 연다.
         auto begun = state.device->BeginPass(graphics::PassDesc{});
@@ -433,8 +554,13 @@ Result<void> ExecutePass(RenderGraph& graph, FrameArena& arena, GraphState& stat
             state.trace->BeginFrame(*state.device, *state.commands, state.frame);
             state.traceFrameOpen = true;
         }
+
+        RestoreScopeMarkers(state);
     }
 
+    // 그래프 구간(GraphScope)을 이 pass의 사슬에 맞춘다(전이도 구간 안이다).
+    LeaveScopes(state, record.scope);
+    EnterScopes(arena, state, record.scope);
     IssueTransitions(arena, state, pass);
     GraphExecutionAccess::Run(graph, *record.executor, *state.commands, pass);
     IssueSplitBegins(arena, state, pass);
@@ -463,6 +589,8 @@ Result<void> FinishGraph(FrameArena& arena, GraphState& state, bool success) noe
         IssueTransitions(arena, state, GraphIndexNone);
     }
 
+    // 열린 그래프 구간을 모두 닫는다(마지막 기록 안에서, 프레임 끝 timestamp 앞).
+    LeaveScopes(state, GraphIndexNone);
     if (state.traceFrameOpen && state.commands != nullptr) {
         state.trace->EndFrame(*state.commands);
     }

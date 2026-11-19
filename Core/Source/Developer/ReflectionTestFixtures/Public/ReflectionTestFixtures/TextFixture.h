@@ -101,7 +101,7 @@ struct TextHolder final : Object {
     ROCKS_PROPERTY(Transient) int32 cache = 0;
     ROCKS_PROPERTY(ReadOnly) int32 locked = 0;
     ROCKS_PROPERTY(TextExportTransient) int32 exportOnly = 0;
-    ROCKS_PROPERTY(NonPIEDuplicateTransient) Guid instance {};
+    ROCKS_PROPERTY(NonTryoutDuplicateTransient) Guid instance {};
     ROCKS_PROPERTY(DuplicateTransient) TextPoint copied;
 };
 

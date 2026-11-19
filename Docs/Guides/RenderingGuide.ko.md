@@ -40,7 +40,7 @@
 - 그래픽 backend의 주력은 Vulkan이다. OpenGL ES는 구형 Android 기기와 Windows의 모바일 미리보기용이다. 데스크톱 OpenGL은 지원하지 않는다.
 - 지금의 최소 렌더러(내장 메시 둘, 원문 셰이더 하나)는 Sandbox 샘플로 옮긴다. 정식 렌더러는 RenderBase·RenderGraph·쿠킹 셰이더 위에 처음부터 새로 쓴다.
 
-근거 문서: [엔진 구현 계획](EngineImplementationPlan.ko.md) 3절, [엔진 런타임](EngineRuntime.ko.md) 3절, [렌더 기반](RenderBase.ko.md) 1·3절.
+근거 문서: [엔진 구현 계획](../Design/EngineImplementationPlan.ko.md) 3절, [엔진 런타임](../Design/EngineRuntime.ko.md) 3절, [렌더 기반](../Design/RenderBase.ko.md) 1·3절.
 
 ## 2. 엔진 한 프레임
 
@@ -63,7 +63,7 @@
    - **지금 코드**: 게임 스레드가 장치에 직접 그리고 present한다.
    - **바뀔 구조**(진행 중): 게임 lane은 렌더 lane에 프레임 packet만 넘기고 곧바로 다음 프레임으로 간다(4절).
 
-근거 문서: [엔진 런타임](EngineRuntime.ko.md) 5–8절, 계획 8.2–8.3절.
+근거 문서: [엔진 런타임](../Design/EngineRuntime.ko.md) 5–8절, 계획 8.2–8.3절.
 
 ## 3. 스레드와 lane
 
@@ -100,7 +100,7 @@
 - 기록 객체는 기록하는 스레드마다 하나씩 둔다.
 - 자원 생성이 스레드 안전한지는 backend가 공개한다. D3D12·Vulkan·Metal은 어느 스레드에서도 만들 수 있다. OpenGL ES는 context가 스레드에 묶이므로 렌더 lane에서만 만든다.
 
-근거 문서: [렌더 기반](RenderBase.ko.md) 5절, 계획 8.1절.
+근거 문서: [렌더 기반](../Design/RenderBase.ko.md) 5절, 계획 8.1절.
 
 ## 4. 프레임 하나가 화면에 나오기까지
 
@@ -154,7 +154,7 @@
 
 생성에 실패하면 `BuiltinReady`를 게시하지 않고 시작이 실패한다.
 
-근거 문서: [렌더 기반](RenderBase.ko.md) 6·11절, 계획 9.6·11.2절.
+근거 문서: [렌더 기반](../Design/RenderBase.ko.md) 6·11절, 계획 9.6·11.2절.
 
 ## 7. 렌더 그래프
 
@@ -178,7 +178,7 @@
   | RG4 | async compute |
   | RG5 | transient aliasing |
 
-근거 문서: [렌더 기반](RenderBase.ko.md) 7·8절, 계획 11.3절.
+근거 문서: [렌더 기반](../Design/RenderBase.ko.md) 7·8절, 계획 11.3절.
 
 ## 8. 셰이더: 원문에서 그리기까지
 
@@ -216,7 +216,7 @@
   - 인스턴스 stream
   - 셰이더 입력 대조
 
-근거 문서: [셰이더 시스템](ShaderSystem.ko.md), [렌더 기반](RenderBase.ko.md) 9·10절.
+근거 문서: [셰이더 시스템](../Design/ShaderSystem.ko.md), [렌더 기반](../Design/RenderBase.ko.md) 9·10절.
 
 ## 9. 렌더 경로와 GI
 
@@ -257,7 +257,7 @@
   - 요청은 (asset revision, device generation, 요청 generation)으로 식별하고, 늦게 온 결과는 대조해 버린다. 재임포트·장치 교체로 생긴 취소는 절대 게시하지 않는다.
   - 그리기는 논리 handle만 든다. descriptor를 제자리에서 덮어쓰지 않는다.
 
-근거 문서: [텍스처 스트리밍](TextureStreaming.ko.md), [렌더 기반](RenderBase.ko.md) 6.5절(쿠킹 텍스처 데이터 계약).
+근거 문서: [텍스처 스트리밍](../Design/TextureStreaming.ko.md), [렌더 기반](../Design/RenderBase.ko.md) 6.5절(쿠킹 텍스처 데이터 계약).
 
 ## 11. 시작과 종료
 
@@ -307,10 +307,10 @@
 
 | 문서 | 다루는 것 |
 |---|---|
-| [엔진 런타임](EngineRuntime.ko.md) | 엔진 상태 기계·World·Tick·입력·Graphics 최소 경로 |
-| [렌더 기반](RenderBase.ko.md) | 렌더 lane·자원 수명·렌더 그래프·셰이더 런타임·정점 입력·화면 마일스톤 범위 |
-| [셰이더 시스템](ShaderSystem.ko.md) | 셰이더 언어·형식·바인딩 규약·도구·워커·키·라이브러리 |
-| [텍스처 스트리밍](TextureStreaming.ko.md) | 상주 계획·mip 전송 |
-| [픽셀 형식](PixelFormat.ko.md) | 형식 번호표·정보 표·형식 능력·backend 형식 대응·sRGB·깊이/스텐실 |
-| [엔진 구현 계획](EngineImplementationPlan.ko.md) | 8절 실행 규약, 11절 렌더러·RHI·렌더 그래프, 14절 조명·GI |
-| [에셋 시스템](AssetSystem.ko.md) | 에셋·쿠킹·텍스처 설정 |
+| [엔진 런타임](../Design/EngineRuntime.ko.md) | 엔진 상태 기계·World·Tick·입력·Graphics 최소 경로 |
+| [렌더 기반](../Design/RenderBase.ko.md) | 렌더 lane·자원 수명·렌더 그래프·셰이더 런타임·정점 입력·화면 마일스톤 범위 |
+| [셰이더 시스템](../Design/ShaderSystem.ko.md) | 셰이더 언어·형식·바인딩 규약·도구·워커·키·라이브러리 |
+| [텍스처 스트리밍](../Design/TextureStreaming.ko.md) | 상주 계획·mip 전송 |
+| [픽셀 형식](../Design/PixelFormat.ko.md) | 형식 번호표·정보 표·형식 능력·backend 형식 대응·sRGB·깊이/스텐실 |
+| [엔진 구현 계획](../Design/EngineImplementationPlan.ko.md) | 8절 실행 규약, 11절 렌더러·RHI·렌더 그래프, 14절 조명·GI |
+| [에셋 시스템](../Design/AssetSystem.ko.md) | 에셋·쿠킹·텍스처 설정 |

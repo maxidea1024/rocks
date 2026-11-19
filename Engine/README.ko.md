@@ -18,4 +18,4 @@ Engine/
 ```
 
 Engine 모듈은 Core 모듈에 의존할 수 있지만 Core 모듈은 Engine 모듈을 참조하지 않는다. 전체 구성은
-[저장소 구성](../Docs/Design/RepositoryLayout.ko.md)을 참고한다.
+[저장소 구성](../Docs/Guides/RepositoryLayout.ko.md)을 참고한다.

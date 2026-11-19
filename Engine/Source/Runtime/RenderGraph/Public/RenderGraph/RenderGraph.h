@@ -324,6 +324,16 @@ public:
         return arena_;
     }
 
+    // --- 그래프 구간(GraphScope) ---
+
+    // 이름 구간을 연다. 뒤에 넣는 pass는 PopScope까지 이 구간(중첩이면 가장 안쪽)에 속한다. 보통
+    // GraphScope 스택 객체로 쓴다. index가 있으면 실행 때 구간을 연 직후 trace 표지로 남긴다(view
+    // 번호 등). 실패(arena 할당)는 그래프 오류로 남긴다.
+    void PushScope(TraceScopeName& name) noexcept;
+    void PushScope(TraceScopeName& name, uint32 index) noexcept;
+    // 가장 안쪽 구간을 닫는다. 열린 구간이 없으면 검증 오류다.
+    void PopScope() noexcept;
+
     // 그래프 공유 값이다(7.5절, UE FRDGBlackboard 대응). 값은 그래프가 파괴될 때 소멸한다.
     GraphSharedData& SharedData() noexcept {
         return sharedData_;
@@ -342,6 +352,43 @@ private:
     FrameArena& arena_;
     detail::GraphState* state_ = nullptr;
     GraphSharedData sharedData_{*this};
+};
+
+// 그래프 구간이다(UE RDG_EVENT_SCOPE·RDG_EVENT_SCOPE_STAT 대응, RenderBase 7.5절·8절 RG1 남은 것
+// 설계 2). 생성 때 PushScope, 소멸 때 PopScope다. 실행 때 구간 안의 pass 묶음이 CPU trace 구간,
+// GPU 구간(RenderGraphDesc::trace), debug marker로 함께 남는다. 제거된 pass만 있는 구간은 남지
+// 않는다. 장치 기록이 Raster pass마다 열리므로 marker는 기록마다 다시 push한다(캡처 도구에서
+// 구간이 기록마다 나뉘어 보인다). 이름은 정적 TraceScopeName이다.
+//
+// 사용 예:
+//   static TraceScopeName ViewName("View");
+//   static TraceScopeName ShadowsName("Shadows");
+//   GraphScope view(graph, ViewName, viewIndex);   // 번호는 trace 표지로 남는다
+//   {
+//       GraphScope shadows(graph, ShadowsName);
+//       graph.AddPass(...);
+//   }
+//
+// 스레드·수명: 그래프와 같은 스레드에서 스택 객체로 쓰고 그래프보다 먼저 소멸한다.
+class GraphScope {
+public:
+    GraphScope(RenderGraph& graph, TraceScopeName& name) noexcept : graph_(graph) {
+        graph_.PushScope(name);
+    }
+
+    GraphScope(RenderGraph& graph, TraceScopeName& name, uint32 index) noexcept : graph_(graph) {
+        graph_.PushScope(name, index);
+    }
+
+    ~GraphScope() noexcept {
+        graph_.PopScope();
+    }
+
+    GraphScope(const GraphScope&) = delete;
+    GraphScope& operator=(const GraphScope&) = delete;
+
+private:
+    RenderGraph& graph_;
 };
 
 template <class Execute>

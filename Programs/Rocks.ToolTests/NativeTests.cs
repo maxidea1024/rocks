@@ -28,6 +28,7 @@ internal static class NativeTests
         AlgorithmsCompilerTests.Register(suite, options, environment);
         LogCompilerTests.Register(suite, options, environment);
         CVarCompilerTests.Register(suite, options, environment);
+        ModuleEntryCompilerTests.Register(suite, options, environment);
         string executable = Path.GetFullPath(options.Required("native-executable"));
         if (!File.Exists(executable))
         {
@@ -460,6 +461,7 @@ internal static class NativeTests
                 ("delegate-rebind-during-target-destruction", "Delegate rebound while its target is being destroyed"),
                 ("unique-ptr-null-deleter", "UniquePtr adopted an object with a null deleter"),
                 ("delegate-execute-unbound", "Delegate::Execute called on an unbound delegate"),
+                ("module-loader-shutdown-during-load", "ModuleLoader::ShutdownGroup called while a module load is in progress"),
                 ("delegate-rebind-during-execution", "Delegate rebound during its own execution"),
                 ("span-slice-out-of-bounds", "Span slice out of bounds"),
                 ("random-invalid-0", "RandomStream::NextUInt32Below requires bound > 0"),

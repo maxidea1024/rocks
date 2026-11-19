@@ -17,12 +17,17 @@ public sealed class OpenGLGraphics : EngineModuleRules
         return new()
         {
             Name = ModuleName,
-            Sources = context.Platform switch
-            {
-                NativePlatform.Windows => context.Sources($"{backend}/Win64", $"{backend}/Common"),
-                NativePlatform.Android => context.Sources($"{backend}/Android", $"{backend}/Common"),
-                _ => context.Sources($"{backend}/Unsupported")
-            },
+            // The entry point (Private/OpenGLGraphicsModule.cpp) is built on every platform.
+            Sources =
+            [
+                ModuleEntrySource(context),
+                .. context.Platform switch
+                {
+                    NativePlatform.Windows => context.Sources($"{backend}/Win64", $"{backend}/Common"),
+                    NativePlatform.Android => context.Sources($"{backend}/Android", $"{backend}/Common"),
+                    _ => context.Sources($"{backend}/Unsupported")
+                }
+            ],
             PublicIncludeDirectories = [context.PathInRoot($"{ModuleDirectory}/Public")],
             Dependencies = RequiredModules,
             // Windows: WGL and the GL 1.0/1.1 entry points come from opengl32; every other GL function is obtained at
