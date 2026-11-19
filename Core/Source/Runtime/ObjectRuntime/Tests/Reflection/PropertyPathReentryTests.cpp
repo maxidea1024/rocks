@@ -273,6 +273,7 @@ void path_reentry::Box::Trace(TraceVisitor& visitor) const noexcept {
     detail::TraceArrayField(entries, visitor);
     detail::TraceArrayField(refs, visitor);
 }
+namespace property_path_reentry_tests_file {
 
 namespace {
 
@@ -1397,3 +1398,4 @@ TEST(PropertyPathReentry_EveryAllocationFailureLeavesContentsUnchanged) {
         CHECK(AllocationFree(operation) ? failures == 0 : failures > 0);
     }
 }
+} // namespace property_path_reentry_tests_file

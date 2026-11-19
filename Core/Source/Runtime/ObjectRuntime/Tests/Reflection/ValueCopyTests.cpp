@@ -11,6 +11,8 @@
 // 버퍼·같은 내용), 할당 실패 때 destination·source 불변, 교환의 무할당(할당 시도 계수), 생성 struct
 // 복사의 NATIVE 멤버 포함과 참조 struct의 복사 없음.
 using namespace rocks;
+namespace value_copy_tests_file {
+
 using reflection_fixture::StructHolder;
 using reflection_fixture::StructLeaf;
 using reflection_fixture::StructMiddle;
@@ -279,3 +281,4 @@ TEST(ValueCopy_GeneratedStructCopiesNativeMembers) {
 
     CHECK(registration.Unregister());
 }
+} // namespace value_copy_tests_file

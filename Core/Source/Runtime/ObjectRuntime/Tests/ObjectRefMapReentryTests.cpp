@@ -10,6 +10,8 @@
 // 할당 실패 지점은 컨테이너를 바꾸지 않는다. 관찰자 계수는 편집은 Registry API, Commit·Discard는
 // Trace로 센다.
 using namespace rocks;
+namespace object_ref_map_reentry_tests_file {
+
 using namespace refmap_fixture;
 
 namespace {
@@ -419,6 +421,7 @@ TEST(ConstructionContext_AssignMapReferencesReentryIsBusy) {
 
     CHECK(allocator.backing.Stats().liveAllocations == 0);
 }
+} // namespace object_ref_map_reentry_tests_file
 
 namespace refmap_observer {
 
@@ -523,6 +526,8 @@ bool Is(const ReferenceEdgeDelta& change, ObjectHandle owner, ObjectHandle targe
 }
 
 } // namespace refmap_observer
+
+namespace object_ref_map_reentry_tests_file {
 
 // 관찰자 계수(RuntimeTypeOps.h의 규칙 — 편집은 Registry API, Commit·Discard는 Trace): 새 키·교체·
 // 지우기는 단일 간선(옛 대상 키 먼저, 같은 패키지·null은 기록 없음), 비우기는 쌍별로 먼저 합친다.
@@ -765,3 +770,4 @@ TEST(ObjectRefMap_WriteLimitRejectsNewKeysAtTheLimit) {
 
     CHECK(allocator.backing.Stats().liveAllocations == 0);
 }
+} // namespace object_ref_map_reentry_tests_file

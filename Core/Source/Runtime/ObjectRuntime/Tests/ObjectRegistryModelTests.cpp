@@ -15,6 +15,7 @@
 // 목록)의 성질을 시간이 아니라 잠금 안 탐색 계수로 본다 — 생성·회수 한 번이 보는 슬롯 수가 저장소
 // 크기와 무관하다. 관찰자 누계 대조는 ReferenceObserverModelTests.cpp다.
 using namespace rocks;
+namespace object_registry_model_tests_file {
 
 namespace {
 
@@ -1194,3 +1195,6 @@ TEST(ObjectRegistryModel_ReleaseDuringReclaimRevisitsSkippedSlots) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace object_registry_model_tests_file
+
+#undef MODEL_EXPECT

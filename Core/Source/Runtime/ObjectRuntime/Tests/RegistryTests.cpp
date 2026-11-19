@@ -5,6 +5,8 @@
 #include <Object/ObjectRegistry.h>
 #include <Object/TypeRegistry.h>
 
+namespace registry_tests_file {
+
 namespace {
 
 using namespace rocks;
@@ -244,3 +246,4 @@ TEST(ObjectReferenceRejectsWrongOwnerAndForeignTargetWithoutChangingEdge) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace registry_tests_file

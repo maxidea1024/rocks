@@ -5,6 +5,8 @@
 #include <Object/TypeRegistry.h>
 #include <Platform/Clock.h>
 
+namespace gc_reclaim_tests_file {
+
 // 묶음 회수, 회수를 미루는 정지형 수집, 예산 회수의 시험이다(GC 설계 17.1·17.2절 —
 // Docs/Design/GarbageCollectionScale.ko.md).
 namespace {
@@ -282,3 +284,4 @@ TEST(ObjectGcReclaim_DestructorReleasingHoldIsReclaimedInTheSameDrain) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace gc_reclaim_tests_file

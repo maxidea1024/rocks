@@ -11,6 +11,7 @@
 // 색인·고리 해제, 회수 조건(firstChild), 이름 색인 rebuild·성장, 잠금 밖 할당 지점의 실패 원자성을
 // 본다.
 using namespace rocks;
+namespace object_identity_gc_tests_file {
 
 namespace {
 
@@ -642,3 +643,4 @@ TEST(ObjectIdentityGc_ConstructionJournalGrowsGeometricallyAndAtomically) {
 
     CHECK(system.Stats().liveAllocations == 0);
 }
+} // namespace object_identity_gc_tests_file

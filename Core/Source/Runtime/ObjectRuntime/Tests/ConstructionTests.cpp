@@ -5,6 +5,8 @@
 #include <Object/ConstructionContext.h>
 #include <Object/TypeRegistry.h>
 
+namespace construction_tests_file {
+
 namespace {
 
 using namespace rocks;
@@ -231,3 +233,4 @@ TEST(ObjectCreationAllocationFailureRollsBackAndPermitsRetry) {
         CHECK(allocator.Stats().liveAllocations == 0);
     }
 }
+} // namespace construction_tests_file

@@ -6,6 +6,8 @@
 #include <Object/ObjectRegistry.h>
 #include <Object/TypeRegistry.h>
 
+namespace gc_tests_file {
+
 namespace {
 
 using namespace rocks;
@@ -257,3 +259,4 @@ TEST(ObjectGcAllocationFailureCannotSweepFromIncompleteMark) {
         CHECK(allocator.Stats().liveAllocations == 0);
     }
 }
+} // namespace gc_tests_file

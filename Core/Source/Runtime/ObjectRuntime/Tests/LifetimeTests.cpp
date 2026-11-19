@@ -5,6 +5,8 @@
 #include <Object/ObjectRegistry.h>
 #include <Object/TypeRegistry.h>
 
+namespace lifetime_tests_file {
+
 namespace {
 
 using namespace rocks;
@@ -303,3 +305,4 @@ TEST(ObjectDestructorRunsOutsideGateAndRejectsNestedCollection) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+} // namespace lifetime_tests_file

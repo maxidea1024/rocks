@@ -6,6 +6,7 @@
 #include <ObjectSerialization/ObjectGraph.h>
 
 using namespace rocks;
+namespace auto_identity_compatibility_tests_file {
 
 namespace {
 constexpr Guid SavedTypeId{0xc010000000000000ull, 1};
@@ -137,3 +138,4 @@ TEST(AutoIdentityRenamedClassAndFieldPreserveSavedObjectGraphWire) {
     CHECK(allocator.Stats().liveAllocations == 0);
     CHECK(allocator.Stats().liveBytes == 0);
 }
+} // namespace auto_identity_compatibility_tests_file
