@@ -1,6 +1,6 @@
 # 텍스처 스트리밍 설계
 
-기준일: 2026-11-19, 개정 4. [엔진 구현 계획](EngineImplementationPlan.ko.md) 9.5절 "필수 Texture Streaming"을 구현 스펙으로 정한다. 계획 9.5절은 요구와 수용 시험(TX01–TX08)을 정하고, 이 문서는 구조·계산식·실행 단계·Graphics 요구·단계를 정한다. 사용자 분담 결정(2026-11-16 "이것도 니가해")에 따라 렌더 세션이 맡는다. 압축·색 보정은 에셋 세션 몫이다.
+기준일: 2026-11-20, 개정 6. [엔진 구현 계획](EngineImplementationPlan.ko.md) 9.5절 "필수 Texture Streaming"을 구현 스펙으로 정한다. 계획 9.5절은 요구와 수용 시험(TX01–TX08)을 정하고, 이 문서는 구조·계산식·실행 단계·Graphics 요구·단계를 정한다. 사용자 분담 결정(2026-11-16 "이것도 니가해")에 따라 렌더 세션이 맡는다. 압축·색 보정은 에셋 세션 몫이다.
 
 UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275b`, 로컬 클론)의 현재 기본 경로다. 경로는 `Engine/Source/Runtime/` 기준이며 다음 약어를 쓴다.
 - `ES/` = `Engine/Private/Streaming/`
@@ -259,6 +259,21 @@ UE가 하위 호환으로 남긴 옛 지표 경로와 deprecated 경로는 보�
 - 결과(요청 목록)는 프레임 packet으로 렌더 lane에 넘긴다.
 - **결정성 계약**: "같은 고정 입력 snapshot이면 한 프레임 계산과 N프레임 분할 계산의 결과가 같고, 호스트 사이에도 같다". 입력이 주기 중에 바뀌는 경우는 이 계약 밖이다. 시험은 고정 snapshot으로 단언한다.
 
+### 4.9 메시 LOD(결정 T9)
+
+2026-11-20 권장안으로 확정했다(사용자 지시 "MA2 전 결정 사항들도 권장안대로"). 메시 에셋 스펙의 요구 MR3([메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets.ko.md) 5.3·6.3절)을 받는다. 구조는 UE 5.8과 같다.
+- **UE 5.8.** 텍스처와 메시가 같은 스트리밍 관리자를 쓴다(`FRenderAssetStreamingManager`가 `UStreamableRenderAsset`을 다룬다 — `Engine/Classes/Engine/StreamableRenderAsset.h:405`). 메시 풀은 기본으로 텍스처 풀과 공유한다(`r.Streaming.PoolSizeForMeshes` 기본 −1 = 공유 — `Engine/Private/Streaming/TextureStreamingHelpers.cpp:125–129`). 메시마다 플랫폼별 스트리밍 LOD 수 상한이 있고(`NumStreamedLODs`, `Engine/Classes/Engine/StaticMesh.h:708`), 메시 LOD 그룹이 기본값(`DefaultMaxNumStreamedLODs`)과 지원 여부(`bSupportLODStreaming`)를 준다(`Engine/Public/StaticMeshResources.h:58`). 켜고 끄는 설정은 `r.MeshStreaming`이다.
+
+Rocks 규칙:
+- **같은 상주 계획.** 메시는 이 문서의 상주 계획·전송·예산을 그대로 쓴다. 기록 대상이 `StreamableRenderAsset`이므로 텍스처와 메시가 같은 표에 든다(9절 표의 handle은 이미 이 기반 클래스에 있다 — AssetSystem 12.1절). "mip"에 해당하는 단위가 메시에서는 LOD다. LOD 0이 가장 자세하고, 상주는 낮은 쪽(덜 자세한 LOD)부터 채운다.
+- **스트리밍 단위와 묶음.** LOD 하나가 덩어리 하나다. 그 LOD의 정점 stream·index·skinned 영향·morph 목록 bulk를 한 덩어리로 이어 둔다. 정렬(4 KiB)·덩어리 hash 메타는 텍스처 mip 덩어리와 같은 규칙이다(RenderBase 6.5절 입력 계약, 4.3절 상주 꼬리). 쿠킹이 메타에 기록한다.
+- **상주 LOD(최소).** 스트리밍하는 LOD 수 = min(메시의 플랫폼별 `numStreamedLods`(없으면 LOD 그룹 기본값), 쿠킹 LOD 수 − 1)이다. 나머지 낮은 LOD들은 늘 상주한다. 적어도 가장 낮은 LOD 하나는 늘 상주한다. 그룹이 스트리밍을 지원하지 않거나 메시 스트리밍 설정이 꺼져 있으면 전체 상주다.
+- **요청 LOD.** 텍스처의 화면 크기 입력(4.1·4.2절, 관찰 지점·확정 보임 신호)으로 메시 bounds의 투영 화면 크기를 구하고, LOD별 `screenSize` 문턱과 비교해 원하는 LOD를 정한다. 렌더러의 LOD 선택식과 같은 식을 쓴다(같은 함수를 공유한다). 내림은 텍스처와 같은 hysteresis로 늦춘다. 최소 LOD(`minLod`, 플랫폼별)보다 자세한 LOD는 요청하지 않는다.
+- **예산.** 기본은 텍스처와 같은 상주 풀이다(UE 기본과 같다). 메시 전용 풀 크기 설정(음수 = 공유, 기본 −1)을 두어 나눌 수 있게 한다. 나누면 메시 상주분은 메시 풀에서만 센다. 이름은 CVar 규칙(CVarSystem)을 따라 TS5에서 정한다.
+- **전송.** 텍스처처럼 전체 재할당이 아니라 LOD별 장치 버퍼를 따로 만들고 버린다. 메시는 LOD마다 별도 정점·index 버퍼라서 그렇다(UE도 LOD별 버퍼다). 올림은 새 LOD 버퍼 생성 → 업로드 → 프레임 경계 snapshot에서 그리기 대상 LOD 하한 변경(결정 T7)이다. 내림은 하한 변경 → fence 뒤 버퍼 반납이다. 렌더러는 상주 하한보다 자세한 LOD를 고르지 않는다.
+- **비스트리밍.** 그룹이 지원하지 않음, LOD 1개, 메시 스트리밍 꺼짐, CPU 접근이 필요한 메시(충돌 쿠킹용 CPU 사본 등은 쿠킹 데이터가 따로 가진다).
+- **단계.** 메시 LOD 스트리밍은 TS5다(10절). 그 전까지 메시는 전체 상주다.
+
 ## 5. mip 전송
 
 ### 5.1 단계
@@ -393,11 +408,12 @@ UE가 하위 호환으로 남긴 옛 지표 경로와 deprecated 경로는 보�
 | TS2 | mip 전송(재할당, 2D·2DArray·Volume), staging pool, hash 검증, 바인딩 snapshot·논리 handle 해석, 셰이더 helper | TS1, GX1·GX4·GX5·GX7·GX8, Core AsyncIoContext 완료 게시 보류(시험에서 IO 완료를 gate로 막는다, `feature/render-base` 7b9395a) | TX01(손상 mip의 `CorruptEntry`), TX04(IO·업로드 취소·revision·device 교체의 stale 게시 0, 부분 성공 조건), TX05(늦은 제출·작은 staging에서 fence 전 재사용 0), mip별 색 텍스처로 올림·내림 픽셀 대조(D3D12·Vulkan·GLES 미리보기), 명시 LOD·Load 변환 시험, 게시 전후 그래프 import lease |
 | TS3 | 예산 항목 분리, 임시 peak 승인·상한 검증, 전환 여유분, pin 승인·철회, 포화 시 builtin 교체, 장치 할당 실패, fallback·`TargetReady` 구분, 장치 손실 복구 | TS2 | TX03(pin·요청 포화에서 상주·임시 peak 준수, 예산 강제 감소 뒤 진척·pin 철회 통지), TX06(cold·누락·폭주에서 fallback 유지, `TargetReady` 오표시 0), TX08(이동·언로드 누수 0, mip 진동·IO·CPU·GPU 비용 계측) |
 | TS4 | 시네마틱 look-ahead·기한 pin·준비 gate·job residency 기록, capture·split-screen·World 가중, 보이는 mip 먼저 분할 요청, 텍스처별 예산 bias, 진단 보기 | TS3 | TX07(Forward+·Deferred·upscale·컷씬·offscreen 준비 gate 회귀) |
-| 후속 | copy queue 비동기 생성, Cube·CubeArray 스트리밍, optional mip, 레벨 정적 빌드 데이터, bindless descriptor 버전, 부분 상주, 가상 텍스처, 메시 LOD 스트리밍과 풀 공유 | — | — |
+| TS5 | 메시 LOD 스트리밍(4.9절): LOD 덩어리 메타·상주 LOD·요청 LOD·LOD별 버퍼 생성·반납·메시 전용 풀 설정 | TS3, 메시 에셋 MA2(정적)·MA5(skinned), Renderer RS0 | 텍스처와 같은 시험 틀: IO 완료 gate, 상주 하한보다 자세한 LOD를 그리지 않음, 풀 공유·분리 두 경우의 예산 회계, 결정성 |
+| 후속 | copy queue 비동기 생성, Cube·CubeArray 스트리밍, optional mip, 레벨 정적 빌드 데이터, bindless descriptor 버전, 부분 상주, 가상 텍스처 | — | — |
 
 ## 11. 결정 사항
 
-2026-11-19 T1–T8을 권장안대로 확정했다(사용자 지시 "결정사항들은 권장안대로 하면됨"). T9는 권장안이 "후속에서 정한다"이므로 보류로 남긴다.
+2026-11-19 T1–T8을 권장안대로 확정했다(사용자 지시 "결정사항들은 권장안대로 하면됨"). T9는 그때 보류였고 2026-11-20 권장안으로 확정했다(사용자 지시 "MA2 전 결정 사항들도 권장안대로", 4.9절).
 
 | ID | 결정 | 내용 | 상태 |
 |---|---|---|---|
@@ -409,7 +425,7 @@ UE가 하위 호환으로 남긴 옛 지표 경로와 deprecated 경로는 보�
 | T6 | 명시 LOD·`Load` 처리 | 셰이더 helper(`textureSize`로 상주 base 계산) + helper 없는 사용은 진단하고 전체 상주로 돌린다(5.3절) | 확정(2026-11-19) |
 | T7 | 교체 게시 단위 | 프레임 경계 snapshot(계획 9.5절, 결정성). 지연이 한 프레임 늘어난다 | 확정(2026-11-19) |
 | T8 | 상주 꼬리 기본값 | max(1, 형식 mip tail, 7) + 블록 4×4 규칙(UE와 같다) | 확정(2026-11-19) |
-| T9 | 메시 LOD 스트리밍과 풀 공유 | 후속에서 정한다 | 보류(후속) |
+| T9 | 메시 LOD 스트리밍과 풀 공유 | 같은 상주 계획·전송·예산을 쓰고 LOD가 스트리밍 단위(LOD당 덩어리 하나), 스트리밍 LOD 수는 메시별 플랫폼 값·LOD 그룹 기본값, 가장 낮은 LOD는 늘 상주, 요청 LOD는 렌더러 LOD 선택식과 같은 식, 예산은 기본 공유 + 메시 전용 풀 크기 설정(음수 = 공유), LOD별 버퍼 생성·반납(4.9절, UE 5.8과 같다) | 확정(2026-11-20) |
 
 ## 12. 다른 문서 개정
 
@@ -419,7 +435,7 @@ UE가 하위 호환으로 남긴 옛 지표 경로와 deprecated 경로는 보�
 | RenderBase | 4.4절 GX1·GX4·GX5·GX7·GX8 | 6절 요구를 더한다 | GX 구현 때 함께(TS2) |
 | RenderBase | 6.5절 상주 꼬리 기본값, 메타 hash | 4.3절 값으로 확정(T8), 덩어리 hash를 메타에 넣는다 | 반영됨(6.5절에 기본값 7·덩어리 hash가 이미 있다) |
 | RenderBase | 5.2절 완료 통지 | 보임 신호(T3)와 전송 완료 통지 | 반영(렌더 기반 개정 25) |
-| AssetSystem | A5 플랫폼 데이터 메타, 12.5절 LOD bias | 덩어리 hash, 상주 꼬리 계산 규칙(4.3절), 시네마틱 mip을 남겨 두는 쿠킹 규칙(4.3절), 메시 UV 밀도(메시 에셋 단계) | 에셋 세션에 전달(A5 착수 전 반영) |
+| AssetSystem | A5 플랫폼 데이터 메타, 12.5절 LOD bias | 덩어리 hash, 상주 꼬리 계산 규칙(4.3절), 시네마틱 mip을 남겨 두는 쿠킹 규칙(4.3절), 메시 UV 밀도(메시 에셋 단계) | 에셋 세션에 전달(A5 착수 전 반영). 메시 UV 밀도는 메시 에셋 스펙에 반영(MeshAnimationAssets 4.3절 `MeshUvDensity`, 2026-11-20) |
 | ShaderSystem | 셰이더 helper | 스트리밍 텍스처의 명시 LOD·Load 변환 helper와 진단(T6) | 반영(셰이더 시스템 개정 20, 5.2절) |
 
 ## 13. 개정 이력
@@ -462,3 +478,5 @@ UE가 하위 호환으로 남긴 옛 지표 경로와 deprecated 경로는 보�
     - D3D12 bindless의 새 heap 할당
 - 개정 3(2026-11-17): 9절에 실행 중 스트리밍 상태의 위치를 적었다. 자산 객체에는 표 handle만 두고, 상주 mip 수·전송·요청 세대·갱신 대기·통지는 이 모듈의 표에 둔다(AssetSystem 개정 8의 `StreamableRenderAsset` 도입에 맞춤).
 - 개정 4(2026-11-19): 11절 결정 T1–T8을 권장안대로 확정했다(T9는 보류). 12절 다른 문서 개정에 상태 열을 두고 계획 9.5절(표본 해상도, 개정 1.14)·렌더 기반 5.2절(보임 신호·전송 완료 통지)·셰이더 시스템 5.2절(명시 LOD·`Load` helper와 진단)을 반영했다. 렌더 기반 6.5절은 이미 반영돼 있었고, AssetSystem A5 메타 요구는 에셋 세션에 전달한다.
+- 개정 5(2026-11-20): 메시 에셋 스펙(MeshAnimationAssets 개정 2)의 요구 MR3을 11절 T9에 적었다(메시 LOD를 스트리밍 단위로, 정할 것 세 가지, MA2 전에 정함). 12절 AssetSystem 행의 메시 UV 밀도를 메시 스펙 4.3절로 연결했다.
+- 개정 6(2026-11-20): T9를 권장안으로 확정했다(사용자 지시 "MA2 전 결정 사항들도 권장안대로"). 4.9절 메시 LOD(UE 5.8 근거, 같은 상주 계획·LOD 덩어리·상주 LOD·요청 LOD·예산 공유와 메시 전용 풀 설정·LOD별 버퍼 전송), 10절 TS5를 더했다.

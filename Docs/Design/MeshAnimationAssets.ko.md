@@ -1,6 +1,6 @@
 # 메시·스켈레톤·애니메이션 에셋 설계
 
-기준일: 2026-11-20, 개정 2(교차 검증 반영 — 17절). 정적 메시·스켈레톤·스킨 메시·애니메이션 클립의 에셋 자료구조를 정한다. 범위는 원본 데이터(에디터 데이터), 저장 설정, 빌드 계약, 쿠킹 데이터, 모듈 배치다. [엔진 구현 계획](EngineImplementationPlan.ko.md) 13.1절(StaticMeshAsset)·15절(Skeleton·SkeletalMesh·AnimationClip)의 개요를 구현할 수 있는 수준으로 구체화한다. 텍스처는 [에셋 시스템](AssetSystem.ko.md) 12절, 머티리얼은 [머티리얼 시스템](MaterialSystem.ko.md) 4절이 이미 정했으므로 이 문서는 그 둘을 참조만 한다.
+기준일: 2026-11-20, 개정 4(MA2 전 결정 반영 — index 형식·통합 bone map·메시 LOD 스트리밍). 개정 3(15절 요구를 다른 문서에 반영하고 상태 열을 더함). 개정 2(교차 검증 반영 — 17절). 정적 메시·스켈레톤·스킨 메시·애니메이션 클립의 에셋 자료구조를 정한다. 범위는 원본 데이터(에디터 데이터), 저장 설정, 빌드 계약, 쿠킹 데이터, 모듈 배치다. [엔진 구현 계획](EngineImplementationPlan.ko.md) 13.1절(StaticMeshAsset)·15절(Skeleton·SkeletalMesh·AnimationClip)의 개요를 구현할 수 있는 수준으로 구체화한다. 텍스처는 [에셋 시스템](AssetSystem.ko.md) 12절, 머티리얼은 [머티리얼 시스템](MaterialSystem.ko.md) 4절이 이미 정했으므로 이 문서는 그 둘을 참조만 한다.
 
 - 배경: 사용자 지시(2026-11-19). 엔진 시험용으로 UE에서 텍스처·정적 메시·머티리얼·애니메이션을 가져오는 기능을 넣는다. Rocks에 메시·애니메이션 자료구조가 아직 없으므로 함께 정한다. 가져오는 경로는 [Unreal 교환 형식](UnrealExchange.ko.md)이 정한다. 이 문서의 자료구조는 그 경로와 상관없이 쓰는 엔진 기반이며, 뒤에 올 glTF·FBX 임포터도 같은 구조로 들어온다.
 - UE 근거: UE 5.8.4(`release`, commit `f45729c0b6f0`, 로컬 클론 `C:\github\UnrealEngine`)를 읽어 확인했다. 경로 약어는 다음과 같다. `E/` = `Engine/Source/Runtime/Engine`, `RT/` = `Engine/Source/Runtime`, `Dev/` = `Engine/Source/Developer`. UE 이름은 대응표와 근거에만 쓰고, 타입 이름은 Rocks 이름으로 짓는다. 빌드 설정·축소 설정처럼 업계 공용 서술 이름은 그대로 쓴다.
@@ -18,7 +18,7 @@
 | 스킨 메시 | `SkinnedAsset : StreamableRenderAsset`(추상) → `SkeletalMesh`. 메시는 자기 본 계층을 갖고 Skeleton을 Hard로 참조한다. 스킨 가중치·morph target의 원본은 `MeshSource` 속성이다 | UE 5.8은 LOD별 MeshDescription이 원본이고 `UMorphTarget`은 빌드 결과다(6절) |
 | 애니메이션 | `AnimationAsset`(추상, Skeleton Hard + Build 참조) → `AnimationClip`. 원본은 프레임 균일 간격의 본 트랙(이동·회전·크기, float), 커브(`TangentCurve`), 이벤트, 동기 마커, 설정이다 | UE 5.8 데이터 모델은 회전을 float Euler 채널로 저장한다. 원본 quaternion이 따로 없고 프레임별 평가값이 받을 수 있는 최선이다(7.2절) |
 | 머티리얼 연결 | 메시의 머티리얼 슬롯이 `ObjectRef<MaterialBase>`를 Hard로 갖는다. 슬롯 배열은 `StructRefArray` | MaterialSystem 4.2·4.4절. 참조 struct의 배열은 `StructRefArray`만 허용된다(ReflectionExtensions 1.3절 표) |
-| 정점 형식 | 쿠킹 정점 stream은 GraphicsTypes `VertexFormat` 번호로 기록한다. index 폭은 Mesh 모듈의 자체 열거(`MeshIndexWidth`)로 둔다 | RenderBase GX3a(10.4절)에서 정점 원소 형식 20종이 구현되었다. `IndexFormat`은 Graphics 모듈(`DeviceTypes.h:324`)에 있어 에셋 모듈이 RHI에 의존하게 된다(요구 MR7) |
+| 정점 형식 | 쿠킹 정점 stream은 GraphicsTypes `VertexFormat` 번호로 기록한다. index 형식도 GraphicsTypes `IndexFormat` 번호로 기록한다 | RenderBase GX3a(10.4절)에서 정점 원소 형식 20종이 구현되었다. `IndexFormat`은 MA2 전에 Graphics에서 GraphicsTypes로 옮기고 고정 번호표를 붙인다(RenderBase 결정 R20) |
 | tangent 계산 | MikkTSpace 참조 구현을 ThirdParty로 쓰되, CRT 초월 함수를 Core 결정적 수학으로 바꾸는 패치를 둔다 | UE와 같은 tangent를 내야 노멀맵 베이크 결과와 맞는다. 쿠킹 중 CRT 초월 함수는 금지다(AssetSystem 10절). 결정 MA-D5 |
 | 축소 LOD·Nanite·lightmap UV 생성·거리장·Lumen 카드 | 설정은 보존한다. 빌드는 후속 단계에서 하고, 그때까지는 `UnsupportedSetting` 경고를 낸다 | 해당 기능의 소비자(축소기·GI·VirtualGeometry)가 아직 없다 |
 | 애니메이션 압축 | 쿠킹 v1은 비압축(상수 트랙 접기만)이다. ACL은 후속이다 | 계획 15절 |
@@ -315,7 +315,8 @@ MeshRenderLod {
   tangentBasis    : MeshStream { format = Byte4Snorm × 2 | Short4Snorm × 2 }   // tangent·법선(w = 쌍법선 부호)
   texCoords       : Array<MeshStream>              // UV 두 채널을 한 속성에 묶음(Half4 | Float4), 홀수 채널의 마지막은 Half2 | Float2
   colors          : MeshStream { format = 프로필별(Bgra8Unorm | UByte4Unorm) }   // 정점 색이 모두 흰색이면 없음
-  indices         : { width MeshIndexWidth { Bits16 = 1, Bits32 = 2 }, data BulkDataRef }
+  indices         : { indexFormat uint32,        // GraphicsTypes IndexFormat 번호(UInt16 = 1, UInt32 = 2), 로드 때 검증
+                      data BulkDataRef }
   sections        : Array<MeshRenderSection { materialIndex, firstIndex, triangleCount, minVertex, maxVertex, castShadow }>
 }
 MeshStream { uint32 vertexFormat;  // GraphicsTypes VertexFormat 번호. 로드 때 범위 검증
@@ -403,8 +404,8 @@ SkeletalMesh : SkinnedAsset
 - 축소 LOD·bone 제거·bake pose는 **보존**이다.
 
 **쿠킹 렌더 데이터.** 정적 메시의 `MeshRenderLod`에 다음을 더한 `SkinnedRenderLod`다.
-- `boneInfluences`: 정점당 영향 `MeshCookedInfluencesLow`(= 4) 또는 `MeshCookedInfluencesHigh`(= 8)개(빌드 설정 `boneInfluenceLimit`에 따라 올림). 번호 `UByte4`/`UShort4`, 가중치 `UByte4Unorm`/`UShort4Unorm`(`useHighPrecisionSkinWeights`).
-- 섹션별 본 palette(`Array<uint16>`, 메시 본 번호) — 셰이더 상수 한도에 맞춰 섹션을 나눈다. 한도는 렌더 쪽 요구(MR2)로 정한다.
+- `boneInfluences`: 정점당 영향 `MeshCookedInfluencesLow`(= 4) 또는 `MeshCookedInfluencesHigh`(= 8)개(빌드 설정 `boneInfluenceLimit`에 따라 올림). 번호는 아래 LOD 통합 bone map의 위치이고, 통합 본이 `MeshBoneIndex8Limit`(= 256)개 이하면 `UByte4`, 넘으면 `UShort4`다. 가중치 `UByte4Unorm`/`UShort4Unorm`(`useHighPrecisionSkinWeights`).
+- LOD 통합 bone map(`Array<uint16>`, 메시 본 번호의 정렬 목록) — LOD의 모든 섹션이 같이 쓴다. 섹션을 본 수로 나누지 않는다(RenderBase 결정 R18, UE 5.8과 같다 — 섹션당 최대 본 설정이 5.8에서 deprecated). 본 행렬은 렌더러가 typed buffer로 넘긴다.
 - LOD별 필요 본 목록(`requiredBones`, 부모 포함 정렬)과 메시 본별 inverse-bind 행렬(기준 pose의 component 공간 역).
 - morph target: 이름별 희소 (렌더 정점 번호, 위치 변화량 `Half4`, 법선 변화량 `Half4`) 목록. `morphThresholdPosition` 미만의 변화량은 뺀다.
 
@@ -582,11 +583,11 @@ ID는 이 문서가 부여한다(MA). 착수는 사용자가 정하고, 고정 �
 | 단계 | 내용 | 선행 |
 |---|---|---|
 | MA1 | `MeshSource` 모듈: 저장 형식·검증·위상 조회·값 정리, 시험 | A1(패키지·Bulk) |
-| MA2 | `Mesh` 정적 메시 클래스·설정 타입, `MeshTools` 빌드(5.2절 중 구현 상태 항목)·쿠킹 렌더 데이터·임포트 서비스, MikkTSpace ThirdParty(패치) | MA1, A2–A4, `Material` 에셋 클래스(MaterialSystem MS3) |
+| MA2 | `Mesh` 정적 메시 클래스·설정 타입, `MeshTools` 빌드(5.2절 중 구현 상태 항목)·쿠킹 렌더 데이터·임포트 서비스, MikkTSpace ThirdParty(패치), CoreTypeBindings `Box<double>` 미러(MR8), `IndexFormat` GraphicsTypes 이동 확인(MR7) | MA1, A2–A4, `Material` 에셋 클래스(MaterialSystem MS3) |
 | MA3 | 단순 충돌 데이터·검증 | MA2 |
 | MA4 | `Animation` 본 계층·스켈레톤·병합 | A1–A4 |
 | MA5 | 스킨 메시: 원본 스킨 가중치·morph, 빌드·쿠킹 | MA2, MA4 |
-| MA6 | 애니메이션 클립: 원본·이벤트·설정, 쿠킹 v1 | MA4, Curve 단계(완료) |
+| MA6 | 애니메이션 클립: 원본·이벤트·설정, 쿠킹 v1, CoreTypeBindings `FrameRate` 미러(MR8) | MA4, Curve 단계(완료) |
 | MA7 | 명령행·문서·검증 보고 | MA1–MA6 |
 
 렌더 쪽 소비: Renderer RS0(정적 메시)가 MA2 결과를, RS12(skinned)가 MA5 결과를 쓴다(Renderer 17절 RQ19).
@@ -604,27 +605,29 @@ ID는 이 문서가 부여한다(MA). 착수는 사용자가 정하고, 고정 �
 | MA-D7 | 축소·lightmap UV·Nanite 등은 설정만 보존 | 지금 무시하고 빼기: 교환 형식으로 가져온 UE 설정이 사라져 나중에 다시 가져와야 한다 |
 | MA-D8 | 퇴화 삼각형 판정·용접 임계값은 UE와 같은 식 | 면적 0 판정: 일직선 위의 서로 다른 세 점을 지워 UE와 위상이 달라진다 |
 | MA-D9 | 위치 비유한값은 오류(UE는 0으로 고침) | UE처럼 고치기: 형상이 조용히 망가진다. 정상 콘텐츠에서는 나오지 않는다 |
-| MA-D10 | index 폭은 Mesh 자체 열거 | Graphics `IndexFormat` 사용: 에셋 모듈이 RHI 모듈에 의존한다. GraphicsTypes로 옮기면(MR7) 그것으로 바꾼다 |
+| MA-D10 | index 형식은 GraphicsTypes `IndexFormat` 번호(MA2 전 이동, RenderBase R20 — 개정 4에서 바꿈) | Graphics `IndexFormat` 그대로 사용: 에셋 모듈이 RHI 모듈에 의존한다. Mesh 자체 열거(개정 2–3의 `MeshIndexWidth`): 같은 뜻의 열거가 둘이 된다 |
 
 ## 15. 다른 문서에 반영할 요구
 
-| ID | 대상 | 요구 |
-|---|---|---|
-| MR1 | [렌더 기반](RenderBase.ko.md) 10절 | 정적 메시 정점 입력 타입: stream 집합(위치 Float3, tangent 기저 Byte4Snorm×2 또는 Short4Snorm×2, UV 쌍 Half4/Float4 × 1–4, 색 프로필별 선택). 고정밀 형식은 퍼뮤테이션 축이 아니라 stream 형식 차이로 처리할지 정한다 |
-| MR2 | 렌더 기반 10절, [렌더러](Renderer.ko.md) RS12 | skinned 정점 입력: 영향 4/8개, 번호 8/16비트, 가중치 8/16비트, 섹션 본 palette 크기 한도 |
-| MR3 | [텍스처 스트리밍](TextureStreaming.ko.md) | 메시 LOD 스트리밍(StreamableRenderAsset 공유): LOD별 bulk 묶음, 상주 LOD 규칙 |
-| MR4 | [머티리얼 시스템](MaterialSystem.ko.md) 8.4절 | 메시 정점 입력 타입 이름(정적·skinned)을 사용 대상 집합에 등록. morph 사용 여부 표시 |
-| MR5 | [물리 어댑터](PhysicsJoltAdapter.ko.md) | `SimpleCollision` 형상 → Jolt 형상 대응, `CollisionComplexity`, 볼록 형상 쿠킹 |
-| MR6 | [엔진 구현 계획](EngineImplementationPlan.ko.md) 13.1·15절 | 이 문서를 가리키는 연결(개정 1에서 반영) |
-| MR7 | 렌더 기반(GraphicsTypes) | `IndexFormat`을 Graphics에서 GraphicsTypes로 옮긴다(직렬화하는 쪽이 장치 없는 모듈을 쓰게) |
-| MR8 | Core 리플렉션 미러 | `FrameRate`·`Box<double>`·`Rotator<double>`·`Transform`·`LinearColor`의 Binds 미러가 있는지 확인하고 없으면 더한다(필드 타입으로 쓴다) |
-| MR9 | [에셋 시스템](AssetSystem.ko.md) 12.4.5절·TargetProfile | 메시 LOD 그룹 표(screenSize·minLod 기본값)를 텍스처 LOD 그룹과 나란히 둔다 |
-| MR10 | 에셋 시스템 3·4.6절 | 모듈 그래프에 8절 다섯 모듈 추가, 11절 진단 코드 등록 |
+| ID | 대상 | 요구 | 상태 |
+|---|---|---|---|
+| MR1 | [렌더 기반](RenderBase.ko.md) 10절 | 정적 메시 정점 입력 타입: stream 집합(위치 Float3, tangent 기저 Byte4Snorm×2 또는 Short4Snorm×2, UV 쌍 Half4/Float4 × 1–4, 색 프로필별 선택). 고정밀 형식은 퍼뮤테이션 축이 아니라 stream 형식 차이로 처리할지 정한다 | 반영(RenderBase 개정 29, 10.4절 끝) |
+| MR2 | 렌더 기반 10절, [렌더러](Renderer.ko.md) RS12 | skinned 정점 입력: 영향 4/8개, 번호 8/16비트, 가중치 8/16비트, 섹션 본 palette 크기 한도 | 반영·결정(RenderBase 개정 30 결정 R18·R19: 섹션 분할 없음·LOD 통합 bone map·256 기준 번호 폭·typed buffer 본 행렬, 고정밀은 stream 형식 차이) |
+| MR3 | [텍스처 스트리밍](TextureStreaming.ko.md) | 메시 LOD 스트리밍(StreamableRenderAsset 공유): LOD별 bulk 묶음, 상주 LOD 규칙 | 반영·결정(TextureStreaming 개정 6 결정 T9·4.9절·TS5) |
+| MR4 | [머티리얼 시스템](MaterialSystem.ko.md) 8.4절 | 메시 정점 입력 타입 이름(정적·skinned)을 사용 대상 집합에 등록. morph 사용 여부 표시 | 반영(MaterialSystem 개정 6, 8.4절) |
+| MR5 | [물리 어댑터](PhysicsJoltAdapter.ko.md) | `SimpleCollision` 형상 → Jolt 형상 대응, `CollisionComplexity`, 볼록 형상 쿠킹 | 반영(PhysicsJoltAdapter 개정 1, 4절·J20·J21) |
+| MR6 | [엔진 구현 계획](EngineImplementationPlan.ko.md) 13.1·15절 | 이 문서를 가리키는 연결(개정 1에서 반영) | 반영(개정 1) |
+| MR7 | 렌더 기반(GraphicsTypes) | `IndexFormat`을 Graphics에서 GraphicsTypes로 옮긴다(직렬화하는 쪽이 장치 없는 모듈을 쓰게) | 반영·결정(RenderBase 개정 30 결정 R20 — 고정 번호표 UInt16 = 1·UInt32 = 2, 이동은 MA2 착수 전) |
+| MR8 | Core 리플렉션 미러 | `FrameRate`·`Box<double>`·`Rotator<double>`·`Transform`·`LinearColor`의 Binds 미러가 있는지 확인하고 없으면 더한다(필드 타입으로 쓴다) | 확인함: `Rotator<double>`·`LinearColor`·`Transform` 미러는 있다(CoreTypeBindings/CoreValueTypes.h). `FrameRate`·`Box<double>`는 없어 MA2(Box)·MA6(FrameRate)에서 CoreTypeBindings에 더한다 |
+| MR9 | [에셋 시스템](AssetSystem.ko.md) 12.4.5절·TargetProfile | 메시 LOD 그룹 표(screenSize·minLod 기본값)를 텍스처 LOD 그룹과 나란히 둔다 | 반영(AssetSystem 개정 10, 12.4.5절 — UE `FStaticMeshLODGroup` 멤버 대응) |
+| MR10 | 에셋 시스템 3·4.6절 | 모듈 그래프에 8절 다섯 모듈 추가, 11절 진단 코드 등록 | 반영(AssetSystem 개정 10, 3·4.6절) |
 
 ## 16. 개정 이력
 
 - 개정 1(2026-11-20): 초안. 사용자 지시(2026-11-19 "언리얼에서 텍스쳐·스테이틱메시·매터리얼·애니메이션을 임포트하는 기능 … 관련 자료구조 잡는것도 같이")에 따라 작성했다. UE 5.8.4 조사 세 갈래(텍스처·정적 메시 원본 / 스켈레톤·스킨 메시·애니메이션 / 머티리얼 그래프·플러그인 기반)를 근거로 했다.
 - 개정 2(2026-11-20): 교차 검증(설계 반례 리뷰, UE 사실 확인) 반영. 17절.
+- 개정 3(2026-11-20): 15절 요구 MR1–MR10을 대상 문서에 반영했다(RenderBase 29, Renderer 10, TextureStreaming 5, MaterialSystem 6, PhysicsJoltAdapter 1, AssetSystem 10). MR8은 확인 결과 `FrameRate`·`Box<double>` 미러만 없어 MA2·MA6 단계에 넣었다. 15절에 상태 열을 더했다.
+- 개정 4(2026-11-20): MA2 전 결정을 권장안으로 확정해 반영했다(사용자 지시 "MA2 전 결정 사항들도 권장안대로"). index 형식은 GraphicsTypes `IndexFormat` 번호(자체 `MeshIndexWidth` 삭제, MA-D10 개정), skinned 쿠킹 데이터는 섹션별 palette 대신 LOD 통합 bone map과 256 기준 번호 폭(RenderBase R18), 메시 LOD 스트리밍은 TextureStreaming 4.9절(T9). 15절 MR2·MR3·MR7 상태를 고쳤다.
 
 ## 17. 교차 검증 기록(개정 2)
 

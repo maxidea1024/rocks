@@ -685,7 +685,7 @@ LG11–LG19의 검증도 같다: Debug 빌드, format, policy, 바뀐 부분 시
   - 끝나면 앞 filter를 부르고 그 결과를 돌려준다(없으면 `EXCEPTION_CONTINUE_SEARCH`).
 - **POSIX:** SIGSEGV·SIGBUS·SIGILL·SIGFPE·SIGABRT에 `sigaction`(`SA_ONSTACK`)으로 설치하고 앞 동작을 보관한다.
   - 엔진 스레드와 주 스레드는 `sigaltstack`을 가진다.
-  - 처리기는 미리 만든 flush 전용 스레드를 `sem_post`(async-signal-safe)로 깨우고, 완료 원자 표시를 단조 시계로 제한 시간까지 확인한다.
+  - 처리기는 미리 만든 flush 전용 스레드를 self-pipe `write`(async-signal-safe, 쓰는 쪽 non-blocking·양쪽 `FD_CLOEXEC`)로 깨우고, 완료 원자 표시를 단조 시계로 제한 시간까지 확인한다.
   - 끝나면 앞 동작을 되돌리고 신호를 다시 낸다.
   - **신호 처리기 안의 flush는 최선 노력이다.** flush 스레드가 쓰는 경로(TryLock·원자 대기)는 async-signal-safe 보장 밖이다. 깨진 스레드가 쥔 lock은 TryLock 실패로 건너뛴다.
 - **flush 전용 스레드**는 `FlushForTermination`을 부르고 완료를 알린다. 깨진 스레드가 출력 스레드 자신이면 큐를 비울 주체가 없으므로 비상 출력만 남긴다.
@@ -815,7 +815,7 @@ LG11–LG19 중 다른 세션 소유 모듈을 고쳐야 하는 곳이다. 그 �
 | L22 | 시간 기준 회전은 벽시계 날짜가 아니라 그 파일 첫 기록 뒤 경과 시간(기록의 단조 시각)으로 판정한다 | 결정됨(2026-11-18, 권장안) |
 | L23 | 압축은 flush 묶음마다 독립 zstd frame(Compression 모듈, `.log.zst`)이다. 암호화와 함께면 압축한 뒤 봉인한다. 닫힌 파일 후처리 압축은 하지 않는다. 무할당을 위해 Compression에 고정 작업 공간 문맥을 요청한다 | 결정됨(2026-11-18, 권장안 — Compression 세션 합의 필요) |
 | L24 | `platform::SetTerminationHook(const char*, usize)`를 두어 Log를 거치지 않는 Fatal도 flush한다. `LogInstallScope`가 처음 걸 때 앞 hook을 기억해 해제 때 되돌리고, 로그 hook은 flush 뒤 앞 hook에 연쇄한다. `FlushForTermination`은 막히는 lock 없이 TryLock·원자 완료 확인·제한 시간 대기만 쓰고, 중복은 `fatalInProgress`로 판정하며, 종료를 부른 스레드(`platform::TerminatingThreadId`)가 출력 스레드 자신이면 기다리지 않고 비상 경로로 알린다. 겹쳐 크래시한 스레드도 같은 제한 시간까지 기다린다. 개정 8의 16절 밖, 새 범위(2026-11-18 사용자 진행 지시·L25 선택으로 확정) | 결정됨(2026-11-18) |
-| L25 | OS 예외·치명 신호에서 로그를 flush한다(A). Windows unhandled exception filter는 미리 만든 flush 전용 스레드에 커널 이벤트로 넘기고(stack overflow 대응, 엔진 스레드는 `SetThreadStackGuarantee`), POSIX는 `sigaltstack`·`sem_post`로 같은 스레드를 깨운다(신호 처리기 쪽은 최선 노력). 앞 처리기로 연쇄한다. 비용은 기록당 0, 프로세스당 대기 스레드 하나, 스레드당 여유 stack 32 KiB, 크래시 때 최대 `fatalFlushTimeoutMilliseconds` | 결정됨(2026-11-18, 사용자 선택 A) |
+| L25 | OS 예외·치명 신호에서 로그를 flush한다(A). Windows unhandled exception filter는 미리 만든 flush 전용 스레드에 커널 이벤트로 넘기고(stack overflow 대응, 엔진 스레드는 `SetThreadStackGuarantee`), POSIX는 `sigaltstack`·self-pipe `write`로 같은 스레드를 깨운다(신호 처리기 쪽은 최선 노력). 이름 없는 POSIX 세마포어(`sem_init`)는 macOS가 지원하지 않아(deprecated, 실행 때 실패) 쓰지 않는다. 앞 처리기로 연쇄한다. 비용은 기록당 0, 프로세스당 대기 스레드 하나, 스레드당 여유 stack 32 KiB, 크래시 때 최대 `fatalFlushTimeoutMilliseconds` | 결정됨(2026-11-18, 사용자 선택 A) |
 | L26 | 로그 보기는 Commandlet `log view`(거르기·여러 파일·평문·zst·봉인)까지 한다. 전문 viewer는 Lens(M3). 개정 8의 16절 밖, 새 범위(2026-11-18 사용자 진행 지시·L25 선택으로 확정) | 결정됨(2026-11-18) |
 | L27 | WorkerScheduler 지연·포화 진단은 단계로 두지 않는다. Engine의 스케줄러 소유와 스케줄러 통계 확장이 선행 조건이다(16절) | 결정됨(2026-11-18, 권장안) |
 

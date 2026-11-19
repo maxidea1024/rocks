@@ -6,11 +6,13 @@
 #include <Platform/Clock.h>
 #include <Platform/Thread.h>
 
+#include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <sched.h>
-#include <semaphore.h>
 #include <signal.h>
 #include <time.h>
+#include <unistd.h>
 
 namespace rocks::platform {
 
@@ -33,7 +35,13 @@ constinit uint32 timeoutMilliseconds = 0;
 constinit char crashMessage[CrashMessageBytes] = {};
 constinit usize crashMessageBytes = 0;
 struct sigaction previousActions[CrashSignalCount];
-sem_t wakeSemaphore;
+// flush 스레드를 깨우는 self-pipe다. 이름 없는 POSIX 세마포어는 macOS가 지원하지 않아(deprecated,
+// 실행 때 실패) write(async-signal-safe)로 깨운다. 쓰는 쪽은 non-blocking이라 처리기가 막히지
+// 않는다.
+constexpr int WakeReadEnd = 0;
+constexpr int WakeWriteEnd = 1;
+constexpr int NoDescriptor = -1;
+constinit int wakePipe[2] = {NoDescriptor, NoDescriptor};
 pthread_t flushThread;
 
 // 스레드마다 처리기용 대체 stack이다. 정적 TLS(모든 스레드가 32 KiB를 차지하고 dlopen 정적 TLS가
@@ -71,11 +79,58 @@ int64 MonotonicNow() noexcept {
     return static_cast<int64>(now.tv_sec) * NanosecondsPerSecond + now.tv_nsec;
 }
 
+// flush 스레드를 깨운다. 처리기에서 부르므로 async-signal-safe 호출만 쓴다. pipe가 차 있으면
+// (EAGAIN) 이미 깨울 byte가 있으므로 그대로 둔다.
+void WakeFlushThread() noexcept {
+    const char byte = 0;
+    while (write(wakePipe[WakeWriteEnd], &byte, 1) < 0 && errno == EINTR) {
+    }
+}
+
+// 깨울 byte가 올 때까지 막혀 기다린다. 신호로 끊기면(EINTR) 다시 기다린다.
+void WaitForWake() noexcept {
+    char byte = 0;
+    while (read(wakePipe[WakeReadEnd], &byte, 1) < 0 && errno == EINTR) {
+    }
+}
+
+void CloseWakePipe() noexcept {
+    for (int& descriptor : wakePipe) {
+        if (descriptor != NoDescriptor) {
+            (void)close(descriptor);
+            descriptor = NoDescriptor;
+        }
+    }
+}
+
+// pipe를 만들고 양쪽에 FD_CLOEXEC, 쓰는 쪽에 O_NONBLOCK을 건다. pipe2는 macOS에 없어 fcntl로 건다.
+bool OpenWakePipe() noexcept {
+    if (pipe(wakePipe) != 0) {
+        wakePipe[WakeReadEnd] = NoDescriptor;
+        wakePipe[WakeWriteEnd] = NoDescriptor;
+        return false;
+    }
+
+    for (const int descriptor : wakePipe) {
+        if (fcntl(descriptor, F_SETFD, FD_CLOEXEC) < 0) {
+            CloseWakePipe();
+            return false;
+        }
+    }
+
+    const int flags = fcntl(wakePipe[WakeWriteEnd], F_GETFL);
+    if (flags < 0 || fcntl(wakePipe[WakeWriteEnd], F_SETFL, flags | O_NONBLOCK) < 0) {
+        CloseWakePipe();
+        return false;
+    }
+
+    return true;
+}
+
 // 크래시를 기다리다가 종료 hook을 부르는 스레드다.
 void* FlushThreadMain(void*) noexcept {
     PrepareThreadForCrashHandling();
-    while (sem_wait(&wakeSemaphore) != 0) {
-    }
+    WaitForWake();
 
     if (AtomicLoad<MemoryOrder::Acquire>(&stopping) == 0) {
         detail::RunTerminationHook(crashMessage, crashMessageBytes);
@@ -95,7 +150,7 @@ usize SignalIndex(int signal) noexcept {
     return CrashSignalCount;
 }
 
-// 신호 처리기다. flush 스레드를 깨우고(sem_post는 async-signal-safe) 완료 표시를 제한 시간까지
+// 신호 처리기다. flush 스레드를 깨우고(pipe write는 async-signal-safe) 완료 표시를 제한 시간까지
 // 확인한다. 그 뒤 앞 동작을 되돌리고 신호를 다시 낸다(최선 노력).
 void CrashSignalHandler(int signal, siginfo_t*, void*) noexcept {
     // 처음 들어온 스레드가 flush 스레드를 깨운다. 겹쳐 들어온 스레드도 같은 제한 시간까지 기다린 뒤
@@ -103,7 +158,7 @@ void CrashSignalHandler(int signal, siginfo_t*, void*) noexcept {
     if (AtomicExchange<MemoryOrder::AcquireRelease>(&crashing, 1u) == 0) {
         detail::RecordTerminatingThread(CurrentThreadId());
         FormatCrashMessage(signal);
-        (void)sem_post(&wakeSemaphore);
+        WakeFlushThread();
     }
 
     const int64 deadline =
@@ -131,12 +186,12 @@ bool InstallCrashHandler(const CrashHandlerOptions& options) noexcept {
 
     AtomicStore<MemoryOrder::Relaxed>(&timeoutMilliseconds, options.flushTimeoutMilliseconds);
     AtomicStore<MemoryOrder::Relaxed>(&stopping, 0u);
-    if (sem_init(&wakeSemaphore, 0, 0) != 0) {
+    if (!OpenWakePipe()) {
         return false;
     }
 
     if (pthread_create(&flushThread, nullptr, &FlushThreadMain, nullptr) != 0) {
-        (void)sem_destroy(&wakeSemaphore);
+        CloseWakePipe();
         return false;
     }
 
@@ -163,9 +218,9 @@ void RemoveCrashHandler() noexcept {
     }
 
     AtomicStore<MemoryOrder::Release>(&stopping, 1u);
-    (void)sem_post(&wakeSemaphore);
+    WakeFlushThread();
     (void)pthread_join(flushThread, nullptr);
-    (void)sem_destroy(&wakeSemaphore);
+    CloseWakePipe();
 }
 
 void PrepareThreadForCrashHandling() noexcept {
