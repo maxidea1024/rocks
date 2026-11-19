@@ -18,7 +18,7 @@ using reflection_text::TextDiagnostics;
 using reflection_text::TextScalarType;
 using reflection_text::TextSource;
 
-StringView ToView(Span<const char> text) noexcept {
+StringView ConsoleSettingsToView(Span<const char> text) noexcept {
     return StringView(text.Data(), text.Size());
 }
 
@@ -142,7 +142,7 @@ StringView CheckConsoleLayer(bool releaseRules, ConfigLayer layer, uint32 consol
 
 usize ConsoleFieldOf(const SectionState& section, StringView name) noexcept {
     for (const SettingsFieldSchema& field : section.ops.settings->fields) {
-        if (field.consoleName.Size() != 0 && ToView(field.consoleName) == name) {
+        if (field.consoleName.Size() != 0 && ConsoleSettingsToView(field.consoleName) == name) {
             return section.lease.FieldIndex(field.field);
         }
     }
@@ -355,8 +355,9 @@ Result<StringView> CheckConsoleValue(ConfigState& state, const ConsoleSettingSta
             StringView named;
             for (const EnumeratorSchema& enumerator : setting.enumSchema->values) {
                 if (enumerator.value == number.Value()) {
-                    named = enumerator.toolName.Size() != 0 ? ToView(enumerator.toolName)
-                                                            : ToView(enumerator.name);
+                    named = enumerator.toolName.Size() != 0
+                                ? ConsoleSettingsToView(enumerator.toolName)
+                                : ConsoleSettingsToView(enumerator.name);
                 }
             }
 
@@ -594,7 +595,7 @@ Result<void> RegisterFieldSettings(ConfigState& state, usize sectionIndex) noexc
             continue;
         }
 
-        const StringView name = ToView(field.consoleName);
+        const StringView name = ConsoleSettingsToView(field.consoleName);
         StringView region;
         StringView rest;
         if (!IsConsoleSettingName(name) ||
@@ -636,11 +637,11 @@ Result<void> RegisterFieldSettings(ConfigState& state, usize sectionIndex) noexc
         setting.kind = schema.value.kind;
         setting.enumSchema = section.lease.FieldEnum(setting.field);
         setting.flags = ConsoleFlagsOfField(field.flags);
-        Result<void> filled = setting.name.TryAssign(ToView(field.consoleName));
+        Result<void> filled = setting.name.TryAssign(ConsoleSettingsToView(field.consoleName));
         if (filled) {
             filled = setting.help.TryAssign(schema.displayName.Size() != 0
-                                                ? ToView(schema.displayName)
-                                                : ToView(EffectiveToolName(schema)));
+                                                ? ConsoleSettingsToView(schema.displayName)
+                                                : ConsoleSettingsToView(EffectiveToolName(schema)));
         }
 
         if (filled) {
@@ -767,7 +768,7 @@ Result<void> PrepareNamedBlock(ConfigState& state, Span<const UniquePtr<SettingR
             StringBuilder<128> name(state.allocator);
             static_cast<void>(name.TryAppendFormat(
                 "{}.{}.{}", state.branches[section.branch].View(), section.section.View(),
-                ToView(EffectiveToolName(section.lease.Schema().fields[index]))));
+                ConsoleSettingsToView(EffectiveToolName(section.lease.Schema().fields[index]))));
             if (auto status = name.Status(); !status) {
                 return status;
             }
