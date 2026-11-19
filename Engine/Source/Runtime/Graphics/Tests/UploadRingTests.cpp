@@ -4,6 +4,8 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace upload_ring_tests_file {
+
 using namespace rocks::graphics;
 
 namespace {
@@ -188,3 +190,4 @@ TEST(StagingPool_BudgetTrimsFreeStagingFirst) {
     pool.Clear();
     CHECK(source.destroyed == 3);
 }
+} // namespace upload_ring_tests_file

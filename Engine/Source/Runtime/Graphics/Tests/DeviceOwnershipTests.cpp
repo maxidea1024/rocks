@@ -3,6 +3,8 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace device_ownership_tests_file {
+
 using namespace rocks::graphics;
 
 namespace {
@@ -63,3 +65,4 @@ TEST(DeviceOwnership_ReleaseAcquireAndChecks) {
     CHECK(ownership.Acquire());
     CHECK(ownership.IsOwner());
 }
+} // namespace device_ownership_tests_file

@@ -3,6 +3,8 @@
 #include <TestSupport/Test.h>
 
 using namespace rocks;
+namespace timestamp_ring_tests_file {
+
 using namespace rocks::graphics;
 
 namespace {
@@ -128,3 +130,4 @@ TEST(TimestampRing_CalibrationMapsGpuTicksToCpuTime) {
     calibration.gpuFrequency = 0;
     CHECK(GpuTicksToCpuNanoseconds(calibration, 77) == 0);
 }
+} // namespace timestamp_ring_tests_file
