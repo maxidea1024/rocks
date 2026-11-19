@@ -952,11 +952,12 @@ TEST(AssetPackage_NonClassTypeHasNoCurrentVersion) {
     }
 }
 
-// 패키지 정책 없는 Registry(AS 5.7절 19): 패키지는 패키지 정책 Registry에만 로드한다 — 정책 없는
-// Registry로 연 트랜잭션은 InstantiatePackages 인자 InvalidArgument(진단 없음)이고 객체를 만들지
-// 않는다. 처음 구현은 그래프 생성 단계까지 가서 Objects CorruptPackage로 거부했다(파일 손상이
-// 아니다). 판정 리뷰가 든 "RequestDestroy만 받은 import 대상" 경로(정책 없는 Registry에서만
-// 생긴다)는 이 검사가 먼저 막는다.
+// 패키지 정책이 Package가 아닌 Registry(AS 5.7절 19): 패키지는 packageNativeType = Package인
+// Registry에만 로드한다 — 정책 없는 Registry와 다른 타입(TestPart)을 패키지 타입으로 둔 Registry로
+// 연 트랜잭션은 InstantiatePackages 인자 InvalidArgument(진단 없음)이고 객체를 만들지 않는다. 처음
+// 구현은 그래프 생성 단계까지 가서 Objects CorruptPackage로 거부했다(파일 손상이 아니다). 판정
+// 리뷰가 든 "RequestDestroy만 받은 import 대상" 경로(정책 없는 Registry에서만 생긴다)는 이 검사가
+// 먼저 막는다.
 TEST(AssetPackage_LoadRequiresPackagePolicyRegistry) {
     AssetEnv env;
     REQUIRE(env.Ready());
@@ -967,25 +968,32 @@ TEST(AssetPackage_LoadRequiresPackagePolicyRegistry) {
     REQUIRE(!Make<TestAsset>(source, TestAssetType(), package.Value().Handle(), "").IsNull());
     const Array<uint8> file = Write(allocator, source, package.Value().Handle(), CookedOptions());
     REQUIRE(!file.IsEmpty());
-    RegistryOptions options;
-    options.names = &env.names;
-    auto made = UniquePtr<ObjectRegistry>::TryMake(allocator, allocator, env.types,
-                                                   ContextId{0x4153534554ull, 40}, options);
-    REQUIRE(made);
-    ObjectRegistry& target = *made.Value();
-    const ObjectAccessContext owner = target.OwnerAccess();
-    PackageLoadState state(allocator, target, env.types, owner, LoadOptions(PackageKind::Cooked));
-    AssetDiagnostic failure;
-    REQUIRE(state.Prepare(Copy(allocator, file.View()), &failure));
-    const uint64 before = target.Stats().liveObjects;
-    ConstructionContext transaction(target, owner);
-    PackageLoadState* states[1] = {&state};
-    ObjectHandle handles[1];
-    CHECK(InstantiatePackages(transaction, states, nullptr, handles, &failure).Error() ==
-          ErrorCode::InvalidArgument);
-    CHECK(failure.code == AssetDiagnosticCode::None);
-    transaction.Rollback();
-    CHECK(target.Stats().liveObjects == before);
+    // 정책 없음, 다른 타입을 패키지 타입으로 둔 정책.
+    const void* const packageTypes[] = {nullptr, NativeTypeKey<TestPart>()};
+    uint64 instance = 40;
+    for (const void* packageType : packageTypes) {
+        RegistryOptions options;
+        options.names = &env.names;
+        options.policy.packageNativeType = packageType;
+        auto made = UniquePtr<ObjectRegistry>::TryMake(
+            allocator, allocator, env.types, ContextId{0x4153534554ull, instance++}, options);
+        REQUIRE(made);
+        ObjectRegistry& target = *made.Value();
+        const ObjectAccessContext owner = target.OwnerAccess();
+        PackageLoadState state(allocator, target, env.types, owner,
+                               LoadOptions(PackageKind::Cooked));
+        AssetDiagnostic failure;
+        REQUIRE(state.Prepare(Copy(allocator, file.View()), &failure));
+        const uint64 before = target.Stats().liveObjects;
+        ConstructionContext transaction(target, owner);
+        PackageLoadState* states[1] = {&state};
+        ObjectHandle handles[1];
+        CHECK(InstantiatePackages(transaction, states, nullptr, handles, &failure).Error() ==
+              ErrorCode::InvalidArgument);
+        CHECK(failure.code == AssetDiagnosticCode::None);
+        transaction.Rollback();
+        CHECK(target.Stats().liveObjects == before);
+    }
 }
 
 namespace {
@@ -1078,5 +1086,160 @@ TEST(AssetPackage_TypeRegistryClosesDuringPrepare) {
 
         CHECK(closings > 0);
         CHECK(atRepresentative > 0);
+    }
+}
+
+namespace {
+
+// 로컬 TypeRegistry를 쓰는 패키지 정책 Registry다(TypeRegistry를 닫는 시험 — 그래프 Stage는 같은
+// TypeRegistry를 쓰는 Registry를 요구한다).
+UniquePtr<ObjectRegistry> MakeClosableRegistry(AssetEnv& env, TypeRegistry& types,
+                                               uint64 instance) noexcept {
+    RegistryOptions options;
+    options.names = &env.names;
+    options.policy.packageNativeType = NativeTypeKey<Package>();
+    options.policy.rejectWorldOnly = true;
+    auto made = UniquePtr<ObjectRegistry>::TryMake(env.allocator, env.allocator, types,
+                                                   ContextId{0x4153534554ull, instance}, options);
+    return made ? Move(made.Value()) : UniquePtr<ObjectRegistry>();
+}
+
+// files를 registry에 한 트랜잭션으로 로드한다(상태 allocator는 allocator — LoadAll과 같다).
+Result<void> LoadWith(Allocator& allocator, ObjectRegistry& registry, TypeRegistry& types,
+                      const Array<uint8>* const* files, usize count, PackageKind kind,
+                      PackageImportResolver* resolver, Span<RootRef<Object>> roots,
+                      Span<ObjectHandle> handles) noexcept {
+    constexpr usize MaxFiles = 2;
+    UniquePtr<PackageLoadState> states[MaxFiles];
+    PackageLoadState* pointers[MaxFiles] = {};
+    if (count > MaxFiles) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    for (usize index = 0; index < count; ++index) {
+        auto made = UniquePtr<PackageLoadState>::TryMake(allocator, allocator, registry, types,
+                                                         registry.OwnerAccess(), LoadOptions(kind));
+        if (!made) {
+            return Result<void>::Failure(made.Error());
+        }
+
+        states[index] = Move(made.Value());
+        pointers[index] = states[index].Get();
+        if (auto prepared = states[index]->Prepare(Copy(allocator, files[index]->View()));
+            !prepared) {
+            return prepared;
+        }
+    }
+
+    ConstructionContext transaction(registry, registry.OwnerAccess());
+    if (auto made = InstantiatePackages(transaction, Span<PackageLoadState* const>(pointers, count),
+                                        resolver, handles);
+        !made) {
+        return made;
+    }
+
+    return transaction.Commit(handles, roots);
+}
+
+} // namespace
+
+// InstantiatePackages 도중 닫히는 TypeRegistry(AS 5.3절, 5.7절 19): 상태
+// allocator(ClosingAllocator)가 Prepare 뒤 n번째 할당에서 TypeRegistry::Shutdown을 부르게 해(모든 n
+// — 첫 할당은 import 해석 전의 targets 예약) 결과가 성공이거나 진단 None의 ShuttingDown임을 본다.
+// Shutdown은 lease가 남아 Busy여도 closed_를 먼저 세우므로 찾은 import 대상의 AcquireType(lease
+// 복제)이 ShuttingDown이다. 두 장면이 로드의 두 조회 지점에 닿는다:
+// - resolver 장면(쿠킹): A가 공개된 B의 대표 에셋을 Hard로 가리킨다 — Hard 의존의 대표 에셋 대조.
+// - 묶음 장면(에디터): A가 같은 묶음의 B 대표 에셋을 EditorOnly 참조로만 가리킨다 — expectedType이
+//   없어 대조를 건너뛰고 import 대상 조회에 닿는다.
+TEST(AssetPackage_TypeRegistryClosesDuringInstantiate) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    ObjectRegistry& source = *env.source;
+    Allocator& allocator = env.allocator;
+    const ObjectAccessContext access = source.OwnerAccess();
+    // 장면: 0 resolver(쿠킹, Hard), 1 묶음(에디터, EditorOnly).
+    constexpr usize SceneCount = 2;
+    for (usize scene = 0; scene < SceneCount; ++scene) {
+        const bool bundle = scene == 1;
+        const PackageKind kind = bundle ? PackageKind::Editor : PackageKind::Cooked;
+        auto b = NewPackage(source, access, FixedId(1631 + 2 * scene), kind);
+        auto a = NewPackage(source, access, FixedId(1630 + 2 * scene), kind);
+        REQUIRE(a && b);
+        const ObjectHandle bAsset =
+            Make<TestAsset>(source, TestAssetType(), b.Value().Handle(), "");
+        const ObjectHandle aAsset =
+            Make<TestAsset>(source, TestAssetType(), a.Value().Handle(), "");
+        REQUIRE(!bAsset.IsNull() && !aAsset.IsNull());
+        TestAsset* pointer = Pointer<TestAsset>(source, aAsset);
+        REQUIRE(pointer != nullptr);
+        REQUIRE(source.SetReference(access, aAsset, bundle ? pointer->editorRef : pointer->hard,
+                                    bAsset));
+        const PackageWriteOptions options = bundle ? EditorOptions() : CookedOptions();
+        const Array<uint8> aFile = Write(allocator, source, a.Value().Handle(), options);
+        const Array<uint8> bFile = Write(allocator, source, b.Value().Handle(), options);
+        REQUIRE(!aFile.IsEmpty() && !bFile.IsEmpty());
+        uint32 closings = 0;
+        uint32 atImports = 0;
+        for (uint64 attempt = 1;; ++attempt) {
+            TypeRegistry types(allocator);
+            ModuleRegistration modules(types, allocator);
+            REQUIRE(RegisterAssetTestTypes(modules));
+            UniquePtr<ObjectRegistry> made = MakeClosableRegistry(env, types, 60 + scene);
+            REQUIRE(made.Get() != nullptr);
+            ObjectRegistry& target = *made;
+            const ObjectAccessContext owner = target.OwnerAccess();
+            // resolver 장면은 B를 먼저 공개한다.
+            RootRef<Object> bRoot[1];
+            ObjectHandle bHandle[1];
+            TestResolver resolver;
+            if (!bundle) {
+                const Array<uint8>* bOnly[1] = {&bFile};
+                REQUIRE(
+                    LoadWith(allocator, target, types, bOnly, 1, kind, nullptr, bRoot, bHandle));
+                resolver.Add(FixedId(1631), bHandle[0]);
+            }
+
+            // Prepare까지는 닫지 않고, Instantiate의 n번째 상태 할당에서 닫는다.
+            ClosingAllocator closing(allocator, types, 0);
+            PackageLoadState aState(closing, target, types, owner, LoadOptions(kind));
+            PackageLoadState bState(closing, target, types, owner, LoadOptions(kind));
+            REQUIRE(aState.Prepare(Copy(allocator, aFile.View())));
+            if (bundle) {
+                REQUIRE(bState.Prepare(Copy(allocator, bFile.View())));
+            }
+
+            closing.attempts = 0;
+            closing.closeAt = attempt;
+            ConstructionContext transaction(target, owner);
+            PackageLoadState* both[2] = {&bState, &aState};
+            const Span<PackageLoadState* const> states =
+                bundle ? Span<PackageLoadState* const>(both, 2)
+                       : Span<PackageLoadState* const>(both + 1, 1);
+            ObjectHandle handles[2];
+            AssetDiagnostic failure;
+            auto result = InstantiatePackages(transaction, states, bundle ? nullptr : &resolver,
+                                              Span<ObjectHandle>(handles, states.Size()), &failure);
+            transaction.Rollback();
+            if (bRoot[0].IsValid()) {
+                CHECK(target.Discard(owner, bHandle[0]));
+                bRoot[0].Reset();
+            }
+
+            if (!closing.closed) {
+                REQUIRE(result);
+                break;
+            }
+
+            ++closings;
+            CHECK(result || (result.Error() == ErrorCode::ShuttingDown &&
+                             failure.code == AssetDiagnosticCode::None));
+            if (!result &&
+                failure.section == static_cast<uint32>(PackageSectionKind::ObjectImports)) {
+                ++atImports;
+            }
+        }
+
+        CHECK(closings > 0);
+        CHECK(atImports > 0);
     }
 }

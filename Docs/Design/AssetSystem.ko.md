@@ -273,7 +273,7 @@ A1a 구현(`Engine/Source/Runtime/AssetRuntime` — `PackageFormat.h`·`PackageW
 17. **ImportOwner·Tags**: ImportRecord의 내용 스키마(ownerAssetId 포함)는 A2(AssetDatabase)가 정하므로 ImportOwner 의존과 ImportRecord의 로드 대조는 A2로 미룬다(지금은 ImportOwner·Build 의존을 쓰고 읽되 대조하지 않는다 — `AssetPackage_ImportOwnerCrossCheckDeferredToA2`). 여러 ImportOwner 항목과 required의 뜻도 A2가 ImportRecord 스키마와 함께 정한다. Tags는 Record envelope·TLV 구조와 키(필드 ID) 엄격 오름차순을 reader와 writer 옵션 검증이 같이 본다(값 스키마는 A2 — `AssetPackage_TagsKeysAreSorted`).
 18. **에디터 읽기 전용 열기의 기대 결과**: 더 새 데이터(모르는 필드·더 새 타입·커스텀 버전·Required가 아닌 모르는 섹션)를 담은 에디터 파일은 `Prepare`가 읽기 전용으로 받고 `InstantiatePackages`·Commit까지 간다. 모르는 필드는 건너뛰므로 그 안의 Hard·Soft·bulk 참조는 기본값(null·빈 값)으로 남고, Dependencies는 부분집합만, 쓰이지 않는 import·bulk entry는 검사하지 않으며, Package는 bulk entry를 그대로 가진다(`AssetPackage_EditorReadOnlyLoadsEndToEnd`). 현재 클래스가 없는 export 타입(미등록, 또는 등록됐지만 클래스가 아닌 타입 id)은 reader가 읽기 전용으로 표시하고(헤더·인덱스 도구) `PackageContents::unavailableExportType`에 남긴다. 객체를 만들 클래스가 없으므로 `Prepare`는 그래프 1단계 전에 이 reader 판정으로 Summary `UnsupportedVersion`(`Unsupported`)을 낸다. 그래프 1단계의 TypeMismatch로 분류하지 않는 것은 그 오류가 노드 Record 손상에서도 나기 때문이다(처음 구현은 미등록은 그래프 NotFound → `UnsupportedVersion`, 클래스가 아닌 타입은 그래프 TypeMismatch → `CorruptPackage`로 갈렸다 — `AssetPackage_NonClassTypeHasNoCurrentVersion`). 미등록 클래스의 자리표시 객체(UE의 누락 클래스 처리)는 그래프 복원에 노드 생략·참조 null화를 더해야 하는 설계 변경이라 이 단계에서 하지 않는다(5.7절 9의 "에디터는 읽기 전용"은 reader 판정의 뜻이다).
 19. **로드의 타입·객체 조회 실패**(판정 리뷰 반영): 로드가 찾은 객체·등록 저장소에 다시 묻는 조회의 실패는 단언하지 않고 진단 None + 원래 오류로 돌려준다.
-    - import 대상(대표 에셋·하위 객체)의 `AcquireType`: 조회 계약상 실패할 수 있으므로(`ConstructionContext::AcquireType`은 `RequestDestroy`만 받은 객체·GC cutoff 객체에 `StaleHandle`) 단언하지 않고 진단 None으로 그 오류를 돌려준다. 파생 판정은 그 lease(`TypeLease::IsA`)로 해 등록 저장소를 다시 묻지 않는다. 다만 지금 엔진에서 이 실패에 닿는 로드 경로는 없다: 패키지는 패키지 정책 Registry에만 로드하고(`InstantiatePackages` 인자 `InvalidArgument` — `AssetPackage_LoadRequiresPackagePolicyRegistry`), 그 Registry의 소속 객체는 `RequestDestroy`가 `Unsupported`이며 `Discard`는 이름 색인에서 즉시 빼므로 이름으로 찾은 대상은 생존이다. 판정 리뷰가 든 경로(정책 없는 Registry의 `RequestDestroy`만 받은 대상)는 정책 없는 Registry에 패키지를 로드할 수 없어 닿지 않는다(처음 구현은 그런 Registry로 연 트랜잭션도 받아 그래프 생성 단계가 Objects `CorruptPackage`로 거부했다 — 파일 손상이 아니므로 인자 검사로 바꿨다).
+    - import 대상(대표 에셋·하위 객체)의 `AcquireType`: 단언하지 않고 진단 None으로 그 오류를 돌려준다. 파생 판정은 그 lease(`TypeLease::IsA`)로 해 등록 저장소를 다시 묻지 않는다. 닿는 경로는 `InstantiatePackages` 도중 닫히는 TypeRegistry다: `FindObject`·`FindChild`·`Resolve`는 ObjectRegistry의 종료만 보지만 `AcquireType`은 객체의 타입 lease를 복제하고(`AcquireTypeChecked` → `TypeLease::Clone`), 그 복제는 TypeRegistry가 닫혔으면 `ShuttingDown`이다. `TypeRegistry::Shutdown`은 lease가 남아 `Busy`를 돌려줄 때도 닫힘 표시를 먼저 세운다. 시험 `AssetPackage_TypeRegistryClosesDuringInstantiate`는 상태 allocator가 Prepare 뒤 n번째 할당(첫 할당은 import 해석 전의 대상 표 예약)에서 Shutdown을 부르게 해(모든 n) 결과가 성공이거나 진단 None + `ShuttingDown`임을 보고, resolver 장면(Hard 의존의 대표 에셋 대조)과 묶음 장면(EditorOnly 참조만 — 대조 없이 import 대상 조회) 양쪽에서 ObjectImports 지점에 닿음을 센다. 처음 이 항목은 "지금 엔진에서 닿는 로드 경로가 없다"고 적었는데 이 경로를 놓쳤다. 판정 리뷰가 처음 든 경로(정책 없는 Registry의 `RequestDestroy`만 받은 대상)는 그런 Registry에 패키지를 로드할 수 없어 닿지 않는다 — 패키지는 `packageNativeType = Package`인 Registry에만 로드한다(`InstantiatePackages` 인자 `InvalidArgument` — 정책 없음·다른 타입 모두, `AssetPackage_LoadRequiresPackagePolicyRegistry`; 처음 구현은 그런 Registry로 연 트랜잭션도 받아 그래프 생성 단계가 Objects `CorruptPackage`로 거부했다).
     - Prepare의 대표 에셋 Asset 파생 판정: 그래프 1단계 전에 export 1 타입의 lease를 잡아 그 lease로 판정한다. lease를 잡는 조회가 실패하면(Prepare가 worker에서 도는 동안 `TypeRegistry::Shutdown`이 `closed_`를 먼저 세운 경우의 `ShuttingDown` 등) 그 오류를 그대로 돌려준다(5.3절). 처음 구현은 `types_.IsA`를 그래프 뒤에 불러 그 사이 Shutdown이면 단언이 걸렸다. 시험 `AssetPackage_TypeRegistryClosesDuringPrepare`는 Prepare의 상태 allocator가 n번째 할당에서 TypeRegistry를 닫게 해(모든 n) 결과가 성공이거나 `ShuttingDown`(진단 None)임을 보고, 대표 에셋 lease 지점에도 닿는다.
     - writer 쪽 같은 계열 단언(Admit hook의 `GetOutermost`·`AcquireType`, `ImportBuilder::Add`의 Outer 사슬 `GetOuter`·`AcquireType`)은 안전하다. 그래프 저장이 Exclude 정책에서 외부 참조마다 `WriteUnsaveable`로 대상과 조상을 `AcquireType`으로 먼저 확인하므로 hook·import 빌더가 보는 대상은 방금 생존·타입이 확인된 객체다(같은 소유 스레드, 그 사이 Registry 변경 없음). 대상은 언제나 대표 에셋이거나 그 아래이므로 이 확인이 대표 에셋까지 덮는다: 대표 자식(빈 이름)이 있는 Outer는 이름 있는 자식을 가질 수 없고(정체성 규칙 8 — [ObjectFoundations](ObjectFoundations.ko.md) 1.5절), 대표 에셋이 없는 패키지의 객체를 가리키면 import 빌더가 대표 에셋 조회에서 `NotFound`로 먼저 끝난다(`AssetPackage_WriterEdgeRejections`). 그래서 export 순회의 "첫 export가 아니면 부모가 export"와 import 빌더의 "사슬이 패키지에 닿기 전에 대표 에셋을 지남"도 단언이다.
 
@@ -731,7 +731,7 @@ nugget-gc --max-bytes=<n> --unused-days=<n>
 
 #### 14.1.1 요구 대조표(A1a — 패키지 포맷 v1)
 
-항목마다 그것을 확인하는 시험이다(EngineTests, `Engine/Source/Runtime/AssetRuntime/Tests` — 정의된 시험 78개(AssetPackage 70·FixtureAsset 8)를 모두 표가 인용한다, ObjectRuntime `ConstructionFindChild_FindsOneComponentUnderAnyVisibleOuter`, ToolTests meta 다섯). "범위 밖"은 A1a가 만들지 않는 것(다른 단계가 맡는다), "시험 불가"는 이유를 적은 것이다. 시험이 없는 항목은 0개다.
+항목마다 그것을 확인하는 시험이다(EngineTests, `Engine/Source/Runtime/AssetRuntime/Tests` — 정의된 시험 79개(AssetPackage 71·FixtureAsset 8)를 모두 표가 인용한다, ObjectRuntime `ConstructionFindChild_FindsOneComponentUnderAnyVisibleOuter`, ToolTests meta 다섯). "범위 밖"은 A1a가 만들지 않는 것(다른 단계가 맡는다), "시험 불가"는 이유를 적은 것이다. 시험이 없는 항목은 0개다.
 
 | 요구(절) | 항목 | 시험 |
 |---|---|---|
@@ -827,7 +827,7 @@ nugget-gc --max-bytes=<n> --unused-days=<n>
 | | 에디터 읽기 전용 끝까지(원인 넷 — 모르는 필드(안의 Hard·Soft·bulk는 기본값)·더 새 타입 버전·모르는 커스텀 버전·Required가 아닌 모르는 섹션 — 마다 Instantiate·Commit), 현재 클래스가 없는 export 타입(미등록·클래스가 아닌 타입 id — reader 읽기 전용·Prepare가 reader 판정으로 Summary UnsupportedVersion — 5.7-18) | `AssetPackage_EditorReadOnlyLoadsEndToEnd`, `AssetPackage_NonClassTypeHasNoCurrentVersion` |
 | | export 이름 규칙(제어 문자·'.'·예약 이름·65 byte·대소문자만 다른 형제 — Objects 손상) | `AssetPackage_ExportNameRulesOnLoad` |
 | | import 해석(묶음 안·resolver·NotFound MissingDependency·그 밖 오류·경로 없음·TypeMismatch) | `AssetPackage_InstantiateArgumentsAndResolver`, `AssetPackage_HardCycleLoadsInOneTransaction`, `AssetPackage_ImportTypeMismatchAndDependencyCrossCheck` |
-| | 조회 실패 전달(5.7-19): 패키지 정책 없는 Registry 거부(InstantiatePackages 인자 InvalidArgument, 진단 없음, 객체 없음), Prepare 도중 닫히는 TypeRegistry(모든 할당 지점에서 Shutdown — 성공 또는 진단 None + ShuttingDown, 대표 에셋 lease 지점 포함) | `AssetPackage_LoadRequiresPackagePolicyRegistry`, `AssetPackage_TypeRegistryClosesDuringPrepare` |
+| | 조회 실패 전달(5.7-19): 패키지 정책이 Package가 아닌 Registry 거부(정책 없음·다른 타입 — InstantiatePackages 인자 InvalidArgument, 진단 없음, 객체 없음), Prepare·Instantiate 도중 닫히는 TypeRegistry(모든 할당 지점에서 Shutdown — 성공 또는 진단 None + ShuttingDown; Prepare는 대표 에셋 lease 지점, Instantiate는 Hard 대표 에셋 대조·import 대상 조회 지점 포함) | `AssetPackage_LoadRequiresPackagePolicyRegistry`, `AssetPackage_TypeRegistryClosesDuringPrepare`, `AssetPackage_TypeRegistryClosesDuringInstantiate` |
 | | SCC 한 트랜잭션(2노드·3노드 모든 순서·다이아몬드·자기 참조), 실패 전파(부분 공개 없음) | `AssetPackage_HardCycleLoadsInOneTransaction`, `AssetPackage_ThreeNodeCycleLoadsInAnyOrder`, `AssetPackage_DiamondDependencies`, `AssetPackage_SelfReferencesMakeNoDependency`, `AssetPackage_FailurePropagatesThroughBatch` |
 | | 스레드(Prepare 다른 스레드, 쓰기 소유 스레드 — WrongThread) | `AssetPackage_ThreadRules` |
 | | 취소 지점 | 범위 밖(A1c 로더 — `CancelToken`) |
@@ -865,31 +865,30 @@ pwsh Build/MeasureCoverage.ps1 -Target EngineTests -Filter AssetPackage,FixtureA
 - `uncovered.txt`: 줄·분기 실행 횟수
 - `summary.json`
 
-측정 결과(2026-11-20, 검증 worktree — origin/feature/engine-runtime 493f9a0d(GC 1–5·생성 소스 분리 GS1 포함) 위에 판정 리뷰 반영; AssetRuntime Private·Public 13개 파일, AssetPackage 70개·FixtureAsset 8개 시험 모두 통과): 줄 99.66%(2618/2627), 분기 96.98%(1544/1592), 함수 100%(122/122). 리뷰 전 측정(줄 95.13%, 분기 93.15%, 닿지 않은 분기 쪽 110)에서 빈틈 리뷰(51)·재리뷰(51 — 그 가운데 45는 불변식 검사)·판정 리뷰를 거쳤다.
+측정 결과(2026-11-20, 검증 worktree — origin/feature/engine-runtime 493f9a0d(GC 1–5·생성 소스 분리 GS1 포함) 위에 판정 리뷰 반영; AssetRuntime Private·Public 13개 파일, AssetPackage 71개·FixtureAsset 8개 시험 모두 통과): 줄 99.89%(2624/2627), 분기 97.11%(1546/1592), 함수 100%(122/122). 리뷰 전 측정(줄 95.13%, 분기 93.15%, 닿지 않은 분기 쪽 110)에서 빈틈 리뷰(51)·재리뷰(51 — 그 가운데 45는 불변식 검사)·판정 리뷰를 거쳤다.
 
 | 파일 | 줄 | 분기 |
 |---|---|---|
 | Package.cpp | 37/37 | 22/24 |
 | PackageAccess.h | 13/13 | - |
 | PackageInternal.h | 34/34 | 18/18 |
-| PackageLoad.cpp | 447/453 | 268/276 |
+| PackageLoad.cpp | 453/453 | 270/276 |
 | PackageReader.cpp | 947/947 | 650/667 |
 | PackageWriter.cpp | 1055/1057 | 557/576 |
 | Public 7개(AssetDiagnostic.h·BulkData.h·Package.h·PackageFormat.h·PackageLoad.h·PackageReader.h·PackageWriter.h) | 85/86 | 29/31 |
 
-닿지 않은 분기 쪽 48개 가운데 42개는 불변식 검사 `ROCKS_ASSERT`(Core/Assert.h)의 실패 쪽이다(Package.cpp 2, PackageLoad.cpp 6, PackageReader.cpp 16, PackageWriter.cpp 18). 매크로 전개 안의 분기라 `uncovered.txt`(전개를 펼치지 않은 `llvm-cov show`)에는 보이지 않고 합계에만 든다(`-show-expansions`로 확인). 나머지 6개는 아래에 적었다. 닿지 않은 줄 9개는 아래 1번의 오류 반환 두 곳(PackageLoad.cpp 6줄)과 2번(PackageWriter.cpp 2줄)·3번(PackageFormat.h 1줄)이다.
+닿지 않은 분기 쪽 46개 가운데 42개는 불변식 검사 `ROCKS_ASSERT`(Core/Assert.h)의 실패 쪽이다(Package.cpp 2, PackageLoad.cpp 6, PackageReader.cpp 16, PackageWriter.cpp 18). 매크로 전개 안의 분기라 `uncovered.txt`(전개를 펼치지 않은 `llvm-cov show`)에는 보이지 않고 합계에만 든다(`-show-expansions`로 확인). 나머지 4개는 아래에 적었다. 닿지 않은 줄 3개는 아래 1번(PackageWriter.cpp 2줄)·2번(PackageFormat.h 1줄)이다.
 
 빌드 주의: Rocks.Build는 시험 소스가 상대 경로로 include한 Private 헤더(`Tests/PackageEditing.h` → `../Private/PackageInternal.h`)의 변경으로 그 시험 번역 단위를 다시 컴파일하지 않는다(헤더 의존 추적 — UnityBuildPch UB0 선행 과제). 측정 전에 Coverage 구성의 EngineTests·AssetRuntime 오브젝트를 지운다(옛 inline 함수의 기록이 남으면 함수 수가 틀린다).
 
 닿지 않던 분기는 먼저 입력 변조·실패 주입으로 닿게 했고, 닿을 수 없는 것은 이유를 확인해 불변식 검사로 바꾸거나 아래에 사유를 적었다.
 - 입력 변조로 닿음(재리뷰): Summary Record의 wire 종류는 맞고 payload 크기만 틀린 필드(Record reader는 payload 크기를 wire 종류와 대조하지 않는다, `AssetPackage_SummaryFields`), Zstd가 아닌(LZ4) 블록 컨테이너와 블록 저장 byte 손상(`AssetPackage_DecodeBulk`), 저장 불가 객체 아래의 저장 가능한 자식(`AssetPackage_CookedRoundTrip`), Tags의 같은 키 둘(`AssetPackage_TagsKeysAreSorted`), 클래스가 아닌 export 타입 id(`AssetPackage_NonClassTypeHasNoCurrentVersion`).
-- 실패 주입으로 닿음: Tags 검사의 할당 실패(쓰기·읽기 sweep), 종료된 TypeRegistry(`AssetPackage_ClosedTypeRegistryIsNotVersionVerdict`), Prepare 도중 닫히는 TypeRegistry(`AssetPackage_TypeRegistryClosesDuringPrepare` — 모든 할당 지점, 대표 에셋 lease 지점 포함), 패키지 정책 없는 Registry(`AssetPackage_LoadRequiresPackagePolicyRegistry`).
+- 실패 주입으로 닿음: Tags 검사의 할당 실패(쓰기·읽기 sweep), 종료된 TypeRegistry(`AssetPackage_ClosedTypeRegistryIsNotVersionVerdict`), Prepare 도중 닫히는 TypeRegistry(`AssetPackage_TypeRegistryClosesDuringPrepare` — 모든 할당 지점, 대표 에셋 lease 지점 포함), Instantiate 도중 닫히는 TypeRegistry(`AssetPackage_TypeRegistryClosesDuringInstantiate` — 로드 import 대상의 `AcquireType` 실패 두 곳: Hard 의존의 대표 에셋 대조와 import 대상 조회. 앞 측정은 이 두 곳을 "닿는 로드 경로가 없다"로 적었는데 틀렸다), 패키지 정책이 Package가 아닌 Registry(`AssetPackage_LoadRequiresPackagePolicyRegistry`).
 - 불변식 검사: 표 섹션 `ArchiveReader::Create`(섹션 표 검증이 크기 상한을 먼저 확인), resolver 검증 뒤 `Get`, 쿠킹의 읽기 전용(reader는 쿠킹을 읽기 전용으로 표시하지 않고 그래프 1단계 쿠킹 정책은 모르는 필드·더 새 버전을 실패로 끝낸다), 검증한 Package의 대표 에셋 조회 실패 = NotFound(빈 이름은 이름 검사·키 할당이 없다), writer 쪽 조회(그래프 저장이 생존·타입을 먼저 확인한 대상 — 5.7-19), writer 대표 에셋 타입 표 조회(Hard 의존은 모두 `ImportBuilder::Add`를 거친다), 블록 인덱스 완성(`TryFinishIndex`), export 순회의 경로 pop·첫 export의 부모·나머지 export의 부모가 export(정체성 규칙 8 — 대표 자식이 있는 패키지는 이름 있는 자식을 가질 수 없다), import 빌더의 사슬이 패키지에 닿기 전에 대표 에셋을 지남(같은 규칙), Dependencies·BulkIndex 앞 칸 읽기, `StoredVersion`, Zstd 설정.
 
-닿지 않은 분기 6개(위치는 `uncovered.txt`):
-1. **로드 import 대상의 타입 조회 실패**(PackageLoad.cpp 두 곳 — 대표 에셋 대조와 import 대상): 조회 계약상 가능한 실패라 단언하지 않고 진단 None으로 돌려주지만(판정 리뷰 결정, 5.7-19), 지금 엔진에서 닿는 로드 경로가 없다. 패키지는 패키지 정책 Registry에만 로드하고, 그 Registry의 소속 객체는 `RequestDestroy`가 `Unsupported`이며 `Discard`는 이름 색인에서 즉시 빼므로 `FindObject`·`FindChild`로 찾은 대상은 생존이다. 판정 리뷰가 든 "정책 없는 Registry의 RequestDestroy만 받은 대상"은 정책 없는 Registry에 패키지를 로드할 수 없어(인자 검사 — `AssetPackage_LoadRequiresPackagePolicyRegistry`) 닿지 않는다. GC cutoff 객체(cutoff 뒤 이름 색인에 남은 white)는 resolver 검증(`Resolve<Package>`)이 먼저 거부한다.
-2. **물리적으로 만들 수 없는 크기**: bulk entry 2³²−1개(PackageWriter.cpp — 메모리에 만들 수 없다).
-3. **컴파일 시간 상수·완전한 switch**: `PackageFormat.h`의 `PackageSectionRequiredFlags` switch 밖과 `IsKnownPackageSection`의 한쪽(실행 시간 호출의 모르는 kind는 `AssetPackage_PackageArgumentErrors`), reader 섹션 switch의 열거자 밖(알려진 kind만 들어온다).
+닿지 않은 분기 4개(위치는 `uncovered.txt`):
+1. **물리적으로 만들 수 없는 크기**: bulk entry 2³²−1개(PackageWriter.cpp — 메모리에 만들 수 없다).
+2. **컴파일 시간 상수·완전한 switch**: `PackageFormat.h`의 `PackageSectionRequiredFlags` switch 밖과 `IsKnownPackageSection`의 한쪽(실행 시간 호출의 모르는 kind는 `AssetPackage_PackageArgumentErrors`), reader 섹션 switch의 열거자 밖(알려진 kind만 들어온다).
 
 규모 시험(`AssetPackage_ImportScale`)의 두 Registry는 시험 안의 `ScaleAllocator`(플랫폼 정렬 할당·살아 있는 수만 셈)를 쓴다. SystemAllocator는 살아 있는 할당의 선형 원장이라 객체 13만 개 Registry의 종료 회수가 제곱 시간이었다(GC 병합 뒤 시험 하나가 약 11분 — 대부분 Registry 종료). 남은 시험 시간(Debug 약 70초)의 대부분은 그래프 저장이 외부 참조마다 Outer 사슬(깊이 2042)을 걸으며 저장 불가 조상을 찾는 비용이다(ObjectSerialization `GraphEncodeContext::WriteUnsaveable` — 참조 수 × 깊이, Core 쪽 과제).
 
