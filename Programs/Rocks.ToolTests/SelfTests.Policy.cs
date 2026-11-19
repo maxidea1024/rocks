@@ -561,6 +561,66 @@ internal static partial class SelfTests
 
             NoFailures(PolicyChecks.ModuleGeneratedHeaderIncludes(temporary.Root));
         });
+        // 유니티 묶음 충돌(Docs/Design/UnityBuildPch.ko.md 9.2절): 유니티를 켠 모듈의 어느 두 .cpp가 한 번역 단위에 들어가도 안전해야 한다.
+        // 규칙마다 통과와 위반을 본다.
+        suite.Add("Policy.UnityCollisionsRejectEachRule", () =>
+        {
+            using TemporaryDirectory temporary = new();
+            const string module = "Engine/Source/Runtime/Probe/Private/";
+            string[] Sources(params (string Name, string Text)[] files)
+            {
+                foreach ((string name, string text) in files)
+                {
+                    temporary.Write(module + name, text);
+                }
+
+                return files.Select(file => Path.Combine(temporary.Root, module + file.Name)).ToArray();
+            }
+
+            HashSet<(string Path, int Line, string Rule)> Check(params (string Name, string Text)[] files) =>
+                PolicyChecks.UnityModuleCollisions(temporary.Root, "Probe", Sources(files)).Select(failure => (failure.Path, failure.Line, failure.Rule)).ToHashSet();
+
+            // 파일 지역 이름. 통과: 이름이 다르다, 이름공간이 다르다, 한 파일 안의 overload, 클래스 멤버·함수 지역 이름, 외부 링크 정의,
+            // 묶이지 않는 파일(C 소스, 첫 include 앞의 #define).
+            Verify.That(Check(
+                ("A.cpp", "#include <a.h>\nnamespace rocks {\nnamespace {\nint HelperA(int value) { return value; }\nint HelperA(long value) { return 1; }\n" +
+                    "struct CaseA { int Same; static int Count(); };\nconstexpr int LimitA = 4;\n}\nint Public() { int Local = 1; return HelperA(Local); }\n}\n"),
+                ("B.cpp", "#include <a.h>\nnamespace rocks {\nnamespace {\nint HelperB(int value) { return value; }\nstruct CaseB { int Same; };\n}\n" +
+                    "int Other() { int Local = 2; return HelperB(Local); }\n}\nnamespace rocks::detail {\nnamespace {\nint HelperA(int value) { return value; }\n}\n}\n"),
+                ("C.c", "static int HelperA(int value) { return value; }\n"),
+                ("D.cpp", "#define SETTING 1\n#include <a.h>\nnamespace rocks {\nnamespace {\nint HelperA(int value) { return value; }\n}\n}\n")).Count == 0,
+                "distinct file-local names were rejected");
+            // 위반: 익명 namespace의 함수(overload 차이도), 형식, 변수, namespace 범위 static·constexpr·const, 템플릿, 별칭.
+            var collisions = Check(
+                ("A.cpp", "#include <a.h>\nnamespace rocks {\nnamespace {\nint Helper(int value) { return value; }\nstruct Case { int x; };\n" +
+                    "int counter = 0;\ntemplate <class T> T Clamp(T value) { return value; }\nusing Alias = int;\nenum class Kind : int { A };\n}\n" +
+                    "static int Free() { return 1; }\nconstexpr int Limit = 4;\nconst int Size = 2;\n}\n"),
+                ("B.cpp", "#include <a.h>\nnamespace rocks {\nnamespace {\n\nint Helper(long value) { return 2; }\nstruct Case final : Base { int y; };\n" +
+                    "int counter{1};\ntemplate <class T> T Clamp(T value, T low) { return value; }\nusing Alias = long;\nenum class Kind : int { B };\n}\n" +
+                    "static int Free() { return 2; }\nconstexpr int Limit = 5;\nconst int Size = 3;\n}\n"));
+            var expected = Enumerable.Range(5, 6).Concat(Enumerable.Range(12, 3)).Select(line => (module + "B.cpp", line, "unity-file-local-name")).ToHashSet();
+            Verify.That(collisions.SetEquals(expected), "file-local name collisions: " + string.Join("; ", collisions.Order()));
+
+            // 파일 범위 using: rocks와 그 하위만 통과한다. namespace·함수 안의 지시문은 대상이 아니다.
+            Verify.That(Check(("U.cpp", "#include <a.h>\nusing namespace rocks;\nusing namespace ::rocks::detail;\nnamespace rocks { using namespace detail; }\n" +
+                "void F() { using namespace std; }\n")).Count == 0, "allowed using directives were rejected");
+            Verify.That(Check(("U.cpp", "#include <a.h>\nusing namespace std;\n\nusing namespace fixture_local;\n")).SetEquals(
+                [(module + "U.cpp", 2, "unity-file-scope-using"), (module + "U.cpp", 4, "unity-file-scope-using")]), "file-scope using directives");
+
+            // .cpp 매크로: #undef하면 통과, 남기면 위반이다(정의한 줄).
+            Verify.That(Check(("M.cpp", "#include <a.h>\n#define LOCAL_CHECK(x) (x)\nint V = LOCAL_CHECK(1);\n#undef LOCAL_CHECK\n")).Count == 0,
+                "an undefined macro was rejected");
+            Verify.That(Check(("M.cpp", "#include <a.h>\n\n#define LOCAL_CHECK(x) \\\n    (x)\nint V = LOCAL_CHECK(1);\n")).SetEquals(
+                [(module + "M.cpp", 3, "unity-source-macro")]), "a leaked macro");
+
+            // pragma 균형: push마다 같은 파일에서 pop한다.
+            Verify.That(Check(("P.cpp", "#include <a.h>\n#pragma warning(push)\n#pragma warning(disable : 4996)\n#pragma warning(pop)\n" +
+                "#pragma clang diagnostic push\n#pragma clang diagnostic pop\n#pragma pack(push, 1)\n#pragma pack(pop)\n#pragma once\n")).Count == 0,
+                "balanced pragmas were rejected");
+            Verify.That(Check(("P.cpp", "#include <a.h>\n#pragma warning(push)\n#pragma clang diagnostic pop\n#pragma pack(push, 1)\n")).SetEquals(
+                [(module + "P.cpp", 2, "unity-pragma-balance"), (module + "P.cpp", 3, "unity-pragma-balance"), (module + "P.cpp", 4, "unity-pragma-balance")]),
+                "unbalanced pragmas");
+        });
         // MetaCompiler가 보지 않는 리플렉션 필드 annotation — ROCKS_NATIVE_TYPE 클래스 안, 어느 모듈 Metadata에도 없는 파일 — 은
         // attribute로만 남아 GC가 추적하지도 저장하지도 않으므로 거부하고, 읽을 수 없는(리터럴이 아닌) Metadata 목록은 규칙 파일
         // 위치에 보고한다(Docs/Design/ReflectionFoundations.ko.md 9.1절 B8a).

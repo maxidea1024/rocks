@@ -200,6 +200,12 @@ public static class InstalledSdk
 
     public static async Task<int> BuildGameAsync(Dictionary<string, string> options, CancellationToken cancellationToken)
     {
+        // 값이 틀린 빌드 방식 옵션은 출력을 만들기 전에 거부한다.
+        foreach (string mode in BuildCommand.BuildModeOptions)
+        {
+            BuildCommand.Switch(options, mode);
+        }
+
         var sdk = Path.GetFullPath(options["sdk"]);
         var project = Path.GetFullPath(options["project"]);
         var output = Path.GetFullPath(options.GetValueOrDefault("output", Path.Combine(project, "out", BuildCommand.Configuration(options).ToString())));
@@ -382,6 +388,8 @@ public static class InstalledSdk
             Targets = targets,
             ContextFingerprint = "rocks-installed-sdk-v1",
             MaxParallelism = BuildCommand.Jobs(options),
+            Unity = BuildCommand.Switch(options, BuildCommand.UnityOption),
+            Pch = BuildCommand.Switch(options, BuildCommand.PchOption),
             // 도구 빌드 ID의 sdk: 경로 키 기준이다(SDK 헤더·라이브러리가 설치 위치와 무관한 키를 갖는다).
             SdkDirectory = sdk,
             EngineVersion = engineVersion

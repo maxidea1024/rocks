@@ -1,3 +1,5 @@
+using Rocks.Tooling.Common;
+
 namespace Rocks.Build;
 
 /// <summary>
@@ -31,6 +33,12 @@ public sealed class NativeBuildEngine
         var prepared = BuildInfoGenerator.Prepare(request);
         request = prepared.Request;
         var plan = prepared.Plan ?? ActionGraph.Create(request);
+        // 묶음 파일을 쓴다(Docs/Design/UnityBuildPch.ko.md 6.3절 — 출력 잠금 아래, 구성이 같으면 다시 쓰지 않는다). compile action의
+        // 입력이므로 첫 InputSnapshot 전에 있어야 한다.
+        foreach (UnityBatch batch in plan.UnityBatches)
+        {
+            AtomicFile.WriteIfChanged(batch.File, new System.Text.UTF8Encoding(false).GetBytes(batch.Content));
+        }
         string compilationDatabase = CompilationDatabase.Write(request.OutputDirectory, request.RootDirectory, plan);
         var store = new IncrementalStore(request.OutputDirectory);
         string toolchainKey = Fingerprints.Toolchain(request.Toolchain);
@@ -78,6 +86,10 @@ public sealed class NativeBuildEngine
         }
 
         bool succeeded = stable && results.All(value => value.Succeeded);
+        if (succeeded)
+        {
+            RemoveStaleOutputs(request, plan);
+        }
         // 도구 빌드 ID는 link가 성공한(실행했거나 재사용한) 실행 파일만 알린다. 입력이 바뀐 빌드는 어떤 ID도 확정하지 않는다.
         var toolBuildIds = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach ((string module, string id) in prepared.ToolBuildIds)
@@ -97,6 +109,8 @@ public sealed class NativeBuildEngine
             ModuleOutputs = plan.ModuleOutputs,
             Actions = results,
             CompilationDatabasePath = compilationDatabase,
+            UnityDefineExcluded = plan.UnityDefineExcluded,
+            UnityBatches = plan.UnityBatches.Count,
             Failure = !stable ? "Source/toolchain inputs changed during the build." :
                 results.FirstOrDefault(value => !value.Succeeded)?.StdErr,
             ToolchainFingerprint = prepared.ToolchainFingerprint,
@@ -138,6 +152,51 @@ public sealed class NativeBuildEngine
             .Distinct(NativeToolchains.PathComparer).Order(StringComparer.Ordinal).ToArray();
         return Fingerprints.Strings([Fingerprints.Paths(files, memo: memo, skip: Skip),
             Fingerprints.Paths(headers, true, request.OutputDirectory, request.RootDirectory, memo, Skip)]);
+    }
+
+    // 빌드가 성공하면 이번 변형의 object 디렉터리(obj/<모듈>/<변형>)와 묶음 디렉터리(Unity/<모듈>)에서 이 계획이 만들지 않은 파일을
+    // 지운다(Docs/Design/UnityBuildPch.ko.md 6.4절 — 낡은 묶음·object가 검사 도구와 디스크에 남지 않게). 다른 변형 디렉터리는 건드리지
+    // 않는다. 변형 디렉터리를 쓰기 전 배치(obj/<모듈> 바로 아래의 object)의 파일도 지운다 — 어느 계획도 그 자리에 쓰지 않는다. 지우지
+    // 못한 파일은 다음 성공한 빌드가 다시 시도한다(입력이 아니므로 빌드를 실패시키지 않는다).
+    private static void RemoveStaleOutputs(NativeBuildRequest request, NativePlan plan)
+    {
+        var produced = plan.Actions.SelectMany(action => action.Outputs).ToHashSet(NativeToolchains.PathComparer);
+        var batches = plan.UnityBatches.Select(batch => batch.File).ToHashSet(NativeToolchains.PathComparer);
+        foreach ((string module, string directory) in plan.ObjectDirectories)
+        {
+            Remove(directory, produced, SearchOption.AllDirectories);
+            Remove(Path.GetDirectoryName(directory)!, produced, SearchOption.TopDirectoryOnly);
+            // 묶음 디렉터리는 유니티를 켠 변형만 쓴다. 끈 빌드(검증 변형)가 켠 빌드의 묶음 파일을 지우지 않는다.
+            if (request.Unity)
+            {
+                Remove(UnityBuild.DirectoryOf(request.OutputDirectory, module), batches, SearchOption.AllDirectories);
+            }
+        }
+
+        static void Remove(string directory, HashSet<string> keep, SearchOption depth)
+        {
+            if (!Directory.Exists(directory))
+            {
+                return;
+            }
+
+            foreach (string file in Directory.EnumerateFiles(directory, "*", depth).ToArray())
+            {
+                if (keep.Contains(file))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    File.Delete(file);
+                }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                {
+                    Console.Error.WriteLine($"Build outputs: warning: cannot delete the stale file {file}: {error.Message}");
+                }
+            }
+        }
     }
 
     private static async Task<FileStream> AcquireOutputLockAsync(string output, CancellationToken cancellationToken)

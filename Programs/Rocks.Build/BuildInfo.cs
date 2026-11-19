@@ -410,8 +410,9 @@ internal static class BuildInfoGenerator
         IReadOnlyList<string> closure = plan.Closures[executable];
         var reached = closure.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var produced = plan.Actions.SelectMany(action => action.Outputs).ToHashSet(NativeToolchains.PathComparer);
+        // object마다 그 번역 단위를 이루는 원본 소스다(단독 TU면 하나, 묶음이면 구성원 전부).
         var objectSources = plan.Actions.Where(action => action.Kind == "Compile")
-            .ToDictionary(action => action.Outputs[0], action => action.Source!, NativeToolchains.PathComparer);
+            .ToDictionary(action => action.Outputs[0], action => action.SourceMembers, NativeToolchains.PathComparer);
         NativeAction[] actions = plan.Actions.Where(action => reached.Contains(action.Module) &&
             action.Kind is "Compile" or "Archive" or "Link").ToArray();
         // 외부 include 루트 순번은 도달 집합 순서(실행 파일, 그다음 의존 순서)와 각 액션의 header 디렉터리 순서로 정한다.
@@ -434,9 +435,22 @@ internal static class BuildInfoGenerator
         {
             var text = new StringBuilder();
             text.Append("action: ").Append(kind).Append(' ').Append(order).Append('\n');
+            // archive·link의 object 인자는 원본 소스 키 목록(obj:<소스 키>, ordinal 순)으로 대신 적는다(8.7절). 묶음 object는 구성이
+            // 바뀌면 이름과 개수가 바뀌므로, 물리 object가 아니라 그 object들이 담는 원본 소스의 집합을 적어야 유니티 모드와 묶음 구성이
+            // ID를 바꾸지 않는다. 목록은 첫 object 인자의 자리에 둔다.
+            var objectKeys = new List<string>();
+            int objectPosition = -1;
+            var lines = new List<string>();
             foreach (string argument in arguments)
             {
-                string normalized = NormalizeArgument(argument, paths, objectSources);
+                if (objectSources.TryGetValue(argument, out IReadOnlyList<string>? members))
+                {
+                    objectPosition = objectPosition < 0 ? lines.Count : objectPosition;
+                    objectKeys.AddRange(members.Select(member => "obj:" + paths.Key(member)));
+                    continue;
+                }
+
+                string normalized = NormalizeArgument(argument, paths);
                 foreach (string rootString in rootStrings)
                 {
                     if (ContainsHostPath(normalized, rootString, OperatingSystem.IsWindows()))
@@ -446,14 +460,25 @@ internal static class BuildInfoGenerator
                     }
                 }
 
-                text.Append("arg: ").Append(normalized).Append('\n');
+                lines.Add(normalized);
+            }
+
+            if (objectPosition >= 0)
+            {
+                objectKeys.Sort(StringComparer.Ordinal);
+                lines.InsertRange(objectPosition, objectKeys);
+            }
+
+            foreach (string line in lines)
+            {
+                text.Append("arg: ").Append(line).Append('\n');
             }
 
             blocks.Add((kind, order, module.Name, text.ToString()));
         }
 
-        // compile 부분은 물리 action이 아니라 원본 소스마다의 논리 명령으로 만든다(Docs/Design/UnityBuildPch.ko.md 8.7절 — depfile 같은
-        // 실행 전용 인자가 ID를 바꾸지 않는다). archive·link 부분은 물리 action이다.
+        // compile 부분은 물리 action이 아니라 원본 소스마다의 논리 명령으로 만든다(Docs/Design/UnityBuildPch.ko.md 8.7절 — 유니티 모드,
+        // 묶음 구성, depfile 같은 실행 전용 인자가 ID를 바꾸지 않는다). archive·link 부분은 물리 action이다.
         foreach (LogicalCompile compile in plan.LogicalCompiles.Where(compile => reached.Contains(compile.Module)))
         {
             NativeModuleInput module = modules[compile.Module];
@@ -499,9 +524,15 @@ internal static class BuildInfoGenerator
             }
         }
 
+        // compile action의 입력은 원본 소스다(묶음 파일은 구성에 따라 바뀌는 생성물이라 넣지 않는다 — 위 논리 명령과 같은 이유다).
+        foreach (LogicalCompile compile in plan.LogicalCompiles.Where(compile => reached.Contains(compile.Module)))
+        {
+            Add(compile.Source);
+        }
+
         foreach (NativeAction action in actions)
         {
-            foreach (string input in action.Inputs)
+            foreach (string input in action.Kind == "Compile" ? [] : action.Inputs)
             {
                 Add(input);
             }
@@ -628,16 +659,11 @@ internal static class BuildInfoGenerator
             "} // namespace rocks::build\n";
     }
 
-    // 인자 정규화 (2)·(3): object는 obj:<소스 키>, 전체가 절대 경로이거나 /I·-I·/WHOLEARCHIVE: 뒤가 절대 경로면 경로 키, 접두 매핑
+    // 인자 정규화 (2)·(3): object는 호출자가 obj:<소스 키> 목록으로 바꾼다(Manifest의 AddBlock). 전체가 절대 경로이거나 /I·-I·/WHOLEARCHIVE: 뒤가 절대 경로면 경로 키, 접두 매핑
     // (-fmacro-prefix-map=<루트>=)은 루트를 경로 키로. 경로 키는
     // PortablePaths.Key가 이미 인코딩했으므로 다시 인코딩하지 않고, 경로가 아닌 인자만 여기서 한 번 인코딩한다.
-    private static string NormalizeArgument(string argument, PortablePaths paths, IReadOnlyDictionary<string, string> objectSources)
+    private static string NormalizeArgument(string argument, PortablePaths paths)
     {
-        if (objectSources.TryGetValue(argument, out string? source))
-        {
-            return "obj:" + paths.Key(source);
-        }
-
         if (Path.IsPathFullyQualified(argument))
         {
             return paths.Key(argument);

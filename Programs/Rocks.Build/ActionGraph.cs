@@ -7,8 +7,12 @@ internal sealed record NativeAction(string Id, string Module, string Kind, strin
     IReadOnlyList<string> Arguments, IReadOnlyList<string> Outputs, IReadOnlyList<string> Inputs,
     IReadOnlyList<string> HeaderDirectories, IReadOnlyList<string> DeclaredInputs,
     IReadOnlyList<string> Dependencies, IReadOnlyList<string> Identity, string? Source = null, string? FailureNote = null,
-    string? DependencyRecord = null)
+    string? DependencyRecord = null, IReadOnlyList<string>? Members = null)
 {
+    // Source는 compile action이 컴파일러에 넘기는 파일이다(단독 번역 단위면 그 소스, 묶음이면 묶음 파일). Members는 이 번역 단위를
+    // 이루는 원본 소스다(단독이면 null — Source 하나).
+    public IReadOnlyList<string> SourceMembers => Members ?? (Source is null ? [] : [Source]);
+
     // 실행 때 컴파일러가 depfile을 쓸 경로로 바뀌는 인자 자리 표시다(Executor — action 임시 디렉터리 안이라 key에 들지 않는다).
     public const string DepfilePlaceholder = "{DEPFILE}";
 
@@ -82,9 +86,12 @@ internal sealed record LogicalCompile(string Module, string Source, string Tool,
 
 // Closures: 계획에 든 모듈마다 도달 집합(자기 자신, 그다음 의존 순서)이다. BuildInfo가 실행 파일의 액션을 고를 때 쓴다.
 // LogicalCompiles: 원본 소스마다의 논리 compile 명령이다(계획의 compile action 순서).
+// UnityBatches: 이 계획의 묶음 파일이다(엔진이 action을 돌리기 전에 쓴다). UnityDefineExcluded: 첫 #include 앞의 #define 때문에 묶음에서
+// 뺀 소스다. ObjectDirectories: 모듈마다 이번 변형의 object 디렉터리다(빌드 뒤 이 계획이 만들지 않은 파일을 지운다).
 internal sealed record NativePlan(IReadOnlyList<NativeAction> Actions,
     IReadOnlyDictionary<string, string> ModuleOutputs, IReadOnlyDictionary<string, IReadOnlyList<string>> Closures,
-    IReadOnlyList<LogicalCompile> LogicalCompiles);
+    IReadOnlyList<LogicalCompile> LogicalCompiles, IReadOnlyList<UnityBatch> UnityBatches, IReadOnlyList<string> UnityDefineExcluded,
+    IReadOnlyDictionary<string, string> ObjectDirectories);
 
 internal static class ActionGraph
 {
@@ -162,6 +169,14 @@ internal static class ActionGraph
         string Absolute(string path) => Path.GetFullPath(path, root);
         var actions = new List<NativeAction>();
         var logicalCompiles = new List<LogicalCompile>();
+        var unityBatches = new List<UnityBatch>();
+        var unityDefineExcluded = new List<string>();
+        var objectDirectories = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        // object 변형이다(Docs/Design/UnityBuildPch.ko.md 6.4절): 유니티·PCH 모드 조합마다 다른 디렉터리를 써서 일반 빌드와 검증 빌드가
+        // 서로의 object를 덮어쓰지 않는다.
+        string variant = "u" + (request.Unity ? "1" : "0") + "p" + (request.Pch ? "1" : "0");
+        // 규칙 생성 TU·모듈 표 TU가 있는 디렉터리다(BuildInfo TU의 디렉터리는 아래 buildInfo). 이 아래 소스는 묶지 않는다.
+        string generatedSources = Path.TrimEndingDirectorySeparator(Path.Combine(output, GeneratedSources.DirectoryName));
         var outputs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var terminalActions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var closures = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
@@ -251,12 +266,11 @@ internal static class ActionGraph
                 .Select(Absolute).Distinct(NativeToolchains.PathComparer).ToArray();
             var objectPaths = new List<string>();
             var compileIds = new List<string>();
-            foreach (string source in sources)
+            string objectDirectory = Path.Combine(output, "obj", module.Name, variant);
+            objectDirectories[module.Name] = objectDirectory;
+            // 번역 단위 인자의 공통 부분이다(모듈 인자·프로필·타깃 인자·정의·include). 언어마다 프로필이 다르다.
+            List<string> Common(NativeLanguage language)
             {
-                string identity = Fingerprints.Strings([source])[..20];
-                string objectPath = Path.Combine(output, "obj", module.Name, identity + (windows ? ".obj" : ".o"));
-                string id = module.Name + ":compile:" + identity;
-                NativeLanguage language = LanguageOf(source);
                 var arguments = new List<string>();
                 arguments.AddRange(module.AdditionalCompileArguments);
                 // 계측을 끈 모듈은 sanitizer 인자만 빠진다(프레임 포인터 등 나머지 Asan 프로필은 같다).
@@ -282,27 +296,105 @@ internal static class ActionGraph
                 {
                     arguments.Add((windows ? "/I" : "-I") + include);
                 }
-                // macOS·Android의 compiler는 clang++ driver라서 C 소스에는 언어를 명시한다(없으면 C++로 처리하며 -Werror에서 경고가
-                // 오류가 된다).
-                string[] translationUnit = windows ? ["/c", language == NativeLanguage.C ? "/TC" : "/TP", source, "/Fo{OUTPUT0}"]
-                    : language == NativeLanguage.C ? ["-c", "-x", "c", source, "-o", "{OUTPUT0}"]
-                    : ["-c", source, "-o", "{OUTPUT0}"];
-                // 물리 action은 depfile을 쓰게 한다(의존 기록의 원천 — Docs/Design/UnityBuildPch.ko.md 4.1절). 논리 명령(compile DB·
-                // BuildInfo)에는 넣지 않는다. clang-cl은 -MD·-MF를 /clang:로만 받는다(실측).
-                string[] depfile = windows ? ["/clang:-MD", "/clang:-MF" + NativeAction.DepfilePlaceholder]
-                    : ["-MD", "-MF", NativeAction.DepfilePlaceholder];
+
+                return arguments;
+            }
+
+            // macOS·Android의 compiler는 clang++ driver라서 C 소스에는 언어를 명시한다(없으면 C++로 처리하며 -Werror에서 경고가 오류가
+            // 된다).
+            string[] TranslationUnit(string file, NativeLanguage language) =>
+                windows ? ["/c", language == NativeLanguage.C ? "/TC" : "/TP", file, "/Fo{OUTPUT0}"]
+                : language == NativeLanguage.C ? ["-c", "-x", "c", file, "-o", "{OUTPUT0}"]
+                : ["-c", file, "-o", "{OUTPUT0}"];
+            // 물리 action은 depfile을 쓰게 한다(의존 기록의 원천 — Docs/Design/UnityBuildPch.ko.md 4.1절). 논리 명령(compile DB·
+            // BuildInfo)에는 넣지 않는다. clang-cl은 -MD·-MF를 /clang:로만 받는다(실측).
+            string[] depfile = windows ? ["/clang:-MD", "/clang:-MF" + NativeAction.DepfilePlaceholder]
+                : ["-MD", "-MF", NativeAction.DepfilePlaceholder];
+            string ObjectOf(string file) => Path.Combine(objectDirectory, Fingerprints.Strings([file])[..20] + (windows ? ".obj" : ".o"));
+
+            // 묶음 구성(6절). 손으로 쓴 C++ 소스와 리플렉션 생성 소스는 따로 묶는다(생성 소스는 파일 지역 이름 없이 나오므로 모듈의
+            // 충돌 정리와 무관하게 묶을 수 있다 — GSD9). 묶지 않는 소스는 모두 단독 번역 단위다.
+            var excluded = new HashSet<string>(module.UnityExclude.Select(Absolute), NativeToolchains.PathComparer);
+            var candidates = new List<string>();
+            var reflectionCandidates = new List<string>();
+            var singles = new List<string>();
+            bool unity = UnityBuild.Enabled(request, module);
+            foreach (string source in sources)
+            {
+                if (reflectionSet.Contains(source))
+                {
+                    (request.Unity && module.ReflectionUnity ? reflectionCandidates : singles).Add(source);
+                }
+                else if (!unity || LanguageOf(source) != NativeLanguage.Cpp || excluded.Contains(source) ||
+                    Fingerprints.IsUnder(source, buildInfo) || Fingerprints.IsUnder(source, generatedSources))
+                {
+                    singles.Add(source);
+                }
+                else if (UnityBuild.DefinesBeforeFirstInclude(File.ReadAllText(source)))
+                {
+                    unityDefineExcluded.Add(source);
+                    singles.Add(source);
+                }
+                else
+                {
+                    candidates.Add(source);
+                }
+            }
+
+            var batches = new List<UnityBatch>();
+            foreach (List<string> group in new[] { candidates, reflectionCandidates })
+            {
+                if (group.Count == 0)
+                {
+                    continue;
+                }
+
+                UnityGroupPlan grouped = UnityBuild.Plan(module.Name, group, root, output, module.UnityAnchorFiles, module.UnityBatchBytes,
+                    source => new FileInfo(source).Length);
+                batches.AddRange(grouped.Batches);
+                singles.AddRange(grouped.Singles);
+            }
+
+            unityBatches.AddRange(batches);
+            // 번역 단위: 컴파일러에 넘기는 파일, 구성원, 묶음 TU 전용 include 루트. object 순서가 구성과 무관하게 정해지도록 첫 구성원
+            // 경로 순으로 둔다.
+            var units = singles.Select(source => (File: source, Members: new[] { source }, Roots: Array.Empty<string>()))
+                .Concat(batches.Select(batch => (batch.File, Members: batch.Members.ToArray(), Roots: batch.IncludeRoots.ToArray())))
+                .OrderBy(unit => unit.Members[0], StringComparer.Ordinal).ToArray();
+            foreach (var unit in units)
+            {
+                bool batch = unit.Members.Length != 1 || !NativeToolchains.PathComparer.Equals(unit.File, unit.Members[0]);
+                NativeLanguage language = LanguageOf(unit.File);
+                List<string> arguments = Common(language);
+                string objectPath = ObjectOf(unit.File);
+                // Id에 변형을 넣는다: 증분 기록은 Id로 찾으므로, 넣지 않으면 일반 빌드와 검증 빌드를 번갈아 돌릴 때 서로의 기록을 덮어써
+                // 매번 전부 다시 컴파일한다.
+                string id = module.Name + ":compile:" + variant + ":" + Path.GetFileNameWithoutExtension(objectPath);
                 string recordPath = objectPath + DependencyRecord.Extension;
-                // identity는 이 번역 단위의 구성(단독 TU면 소스 하나)이다. 모듈의 전체 소스 목록은 넣지 않는다 — 소스 하나를 더하거나
-                // 지워도 다른 번역 단위는 다시 컴파일하지 않는다(4.2절. 소스 옆 header가 생기거나 사라지는 변화는 소스 디렉터리의 헤더
-                // 이름 목록이 잡는다).
-                actions.Add(new(id, module.Name, "Compile", request.Toolchain.CompilerPath, [.. arguments, .. depfile, .. translationUnit],
-                    [objectPath, recordPath], [source], headers, extraInputs, [],
-                    [request.ContextFingerprint, request.Configuration.ToString(), module.Optimization.ToString(), source], source,
-                    FailureNote: reflectionSet.Contains(source) ? reflectionNote : null, DependencyRecord: recordPath));
-                logicalCompiles.Add(new(module.Name, source, request.Toolchain.CompilerPath, [.. arguments, .. translationUnit], objectPath, id));
+                // 묶음 TU에만 구성원 철자(루트 기준 경로)를 푸는 include 루트를 맨 뒤에 붙인다(6.3절). 구성원 안의 include는 기존
+                // 목록에서 먼저 풀리고, 맨 뒤 루트는 다른 곳에서 못 찾는 철자에만 걸린다.
+                string[] roots = unit.Roots.Select(directory => (windows ? "/I" : "-I") + directory).ToArray();
+                // identity는 이 번역 단위의 구성(단독 TU면 소스 하나, 묶음이면 구성원 목록)이다. 모듈의 전체 소스 목록은 넣지 않는다 —
+                // 소스 하나를 더하거나 지워도 다른 번역 단위는 다시 컴파일하지 않는다(4.2절. 소스 옆 header가 생기거나 사라지는 변화는
+                // 소스 디렉터리의 헤더 이름 목록이 잡는다).
+                string? note = unit.Members.Any(reflectionSet.Contains) ? reflectionNote : null;
+                actions.Add(new(id, module.Name, "Compile", request.Toolchain.CompilerPath,
+                    [.. arguments, .. roots, .. depfile, .. TranslationUnit(unit.File, language)],
+                    [objectPath, recordPath], batch ? [unit.File, .. unit.Members] : [unit.File], headers, extraInputs, [],
+                    [request.ContextFingerprint, request.Configuration.ToString(), module.Optimization.ToString(), .. unit.Members], unit.File,
+                    FailureNote: note, DependencyRecord: recordPath, Members: batch ? unit.Members : null));
+                foreach (string member in unit.Members)
+                {
+                    // 논리 명령은 묶음과 무관하게 원본 소스 하나의 단독 컴파일이다(8.6절). 출력은 그 소스가 단독 TU일 때의 object 경로다.
+                    logicalCompiles.Add(new(module.Name, member, request.Toolchain.CompilerPath,
+                        [.. batch ? Common(LanguageOf(member)) : arguments, .. TranslationUnit(member, LanguageOf(member))],
+                        batch ? ObjectOf(member) : objectPath, id));
+                }
+
                 objectPaths.Add(objectPath);
                 compileIds.Add(id);
             }
+
             // Base/MetaSchema 같은 header-only 모듈은 설정만 전파하고 가짜 빈 archive를 만들지 않는다. 리플렉션 생성 소스만 있는
             // 모듈은 그 object로 archive를 만든다.
             if (sources.Length == 0)
@@ -449,7 +541,8 @@ internal static class ActionGraph
             }
         }
 
-        return new(actions, outputs, closures, logicalCompiles);
+        unityDefineExcluded.Sort(StringComparer.Ordinal);
+        return new(actions, outputs, closures, logicalCompiles, unityBatches, unityDefineExcluded, objectDirectories);
     }
 
     /// <summary>

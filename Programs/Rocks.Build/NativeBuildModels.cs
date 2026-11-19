@@ -300,6 +300,25 @@ public sealed record NativeModuleInput
     // DescriptorModuleSet.Apply가 넣고, 엔진 모듈은 기본 Default다(엔진 모듈 규칙의 단계는 ML1).
     public Descriptors.LoadingPhase LoadingPhase { get; init; } = Descriptors.LoadingPhase.Default;
 
+    // 유니티 빌드 설정이다(Docs/Design/UnityBuildPch.ko.md 6.1절). 켜면 이 모듈의 손으로 쓴 C++ 소스를 묶음 번역 단위로 컴파일한다.
+    // C 소스, BuildInfo·규칙 생성 TU, UnityExclude, 첫 #include 앞에서 #define하는 파일, UnityBatchBytes보다 큰 파일은 언제나 단독
+    // 번역 단위다. 켠 모듈은 묶음 충돌 정책 검사(파일 지역 이름·using·매크로·pragma)의 대상이다. dependency로 전파하지 않는다.
+    public UnityMode Unity { get; init; } = UnityMode.Default;
+
+    // 묶음 하나의 구성원 바이트 합 상한이다(실제 파일 크기). 구간이 이 값을 넘으면 파일 수로 균등 분할한다.
+    public int UnityBatchBytes { get; init; } = UnityBuild.DefaultBatchBytes;
+
+    // 구간의 기대 파일 수다(경로 해시를 이 값으로 나눈 나머지가 0인 파일이 새 구간을 연다).
+    public int UnityAnchorFiles { get; init; } = UnityBuild.DefaultAnchorFiles;
+
+    // 묶지 않고 단독 번역 단위로 컴파일할 소스다(Sources의 항목과 같은 경로 — 큰 파일, 특수한 설정이 필요한 파일, object 단위로 검사하는
+    // 파일).
+    public IReadOnlyList<string> UnityExclude { get; init; } = [];
+
+    // 리플렉션 생성 소스(ReflectionSources)를 자기들끼리 묶는가. 생성 소스는 파일 지역 이름·매크로 없이 나오므로 기본으로 묶는다
+    // (Docs/Design/ReflectionGeneratedSources.ko.md GSD9). 손으로 쓴 소스의 Unity 설정과 따로이고, 요청이 유니티를 끄면 묶지 않는다.
+    public bool ReflectionUnity { get; init; } = true;
+
     // 규칙이 저장소 입력(예: Engine 루트 ThirdParty manifest)에서 만든 생성 번역 단위다(Docs/Design/ShaderSystem.ko.md 9절 도구 표).
     // 빌드가 출력 잠금 아래에서 <out>/GeneratedSources/<모듈>/<FileName>에 내용이 바뀔 때만 쓰고(BuildInfo 생성 TU와 같은 방식) 이
     // 모듈 소스로 컴파일한다. 내용은 호스트 경로를 담지 않아야 한다(도구 빌드 ID가 호스트 무관이다). 규칙은 이 목록을 매 실행 다시
@@ -349,6 +368,14 @@ public sealed record NativeBuildRequest
     // 쓰지 않는다.
     public EngineVersion? EngineVersion { get; init; }
 
+    // 유니티 묶기를 쓰는가(명령 옵션 --unity on|off, Docs/Design/UnityBuildPch.ko.md 11절). false면 모든 소스가 단독 번역 단위다(검증
+    // 변형). object 변형 디렉터리 이름(obj/<모듈>/<변형>)에 반영되어 일반 빌드와 검증 빌드가 서로의 object를 덮어쓰지 않는다. 도구 빌드
+    // ID와 compile_commands.json에는 반영되지 않는다.
+    public bool Unity { get; init; } = true;
+
+    // PCH를 쓰는가(명령 옵션 --pch on|off). Unity와 같이 object 변형 디렉터리 이름에 반영된다.
+    public bool Pch { get; init; } = true;
+
     // response file 사용 방식이다(NativeCommandLine). 기본 Auto이며 시험만 Always·Never로 경로를 강제한다. key에 들어가지 않는다.
     internal ResponseFileMode ResponseFiles { get; init; } = ResponseFileMode.Auto;
 }
@@ -375,6 +402,13 @@ public sealed record NativeBuildResult
     public required IReadOnlyList<NativeActionResult> Actions { get; init; }
 
     public required string CompilationDatabasePath { get; init; }
+
+    // 유니티 묶기에서 자동으로 뺀 소스다: 첫 #include 앞에서 #define하는 파일(Docs/Design/UnityBuildPch.ko.md 6.1절 — 단독 번역 단위로
+    // 컴파일하고 PCH도 쓰지 않는다). 경로 ordinal 순이다.
+    public IReadOnlyList<string> UnityDefineExcluded { get; init; } = [];
+
+    // 이 빌드의 묶음 번역 단위 수다.
+    public int UnityBatches { get; init; }
 
     public string? Failure { get; init; }
 

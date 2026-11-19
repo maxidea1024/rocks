@@ -42,9 +42,9 @@ namespace Rocks.Build.Cli
             var options = Parse(args.Skip(1).ToArray());
             var allowed = args[0] switch
             {
-                "game" => new HashSet<string>(["sdk", "project", "target", "configuration", "output", "compiler", "jobs", MetadataLayout.VerifySourcesOption], StringComparer.Ordinal),
-                "sdk" => new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination", MetadataLayout.VerifySourcesOption], StringComparer.Ordinal),
-                "build" or "test" => new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "platform", "android-abi", "android-api", "android-ndk", "adb", MetadataLayout.VerifySourcesOption], StringComparer.Ordinal),
+                "game" => new HashSet<string>(["sdk", "project", "target", "configuration", "output", "compiler", "jobs", MetadataLayout.VerifySourcesOption, .. BuildModeOptions], StringComparer.Ordinal),
+                "sdk" => new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination", MetadataLayout.VerifySourcesOption, .. BuildModeOptions], StringComparer.Ordinal),
+                "build" or "test" => new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "platform", "android-abi", "android-api", "android-ndk", "adb", MetadataLayout.VerifySourcesOption, .. BuildModeOptions], StringComparer.Ordinal),
                 // 미리 빌드한 바이너리를 사용자 저장소에 받는다(build·test는 받지 않는다, Docs/Design/ShaderSystem.ko.md 8절 2항).
                 "bootstrap" => new HashSet<string>(["root", "library", "store", "mirror", "offline", "windows-sdk"], StringComparer.Ordinal),
                 _ => throw new ArgumentException($"Unknown command: {args[0]}")
@@ -82,6 +82,12 @@ namespace Rocks.Build.Cli
 
             var root = Path.GetFullPath(options.GetValueOrDefault("root", Directory.GetCurrentDirectory()));
             var configuration = Configuration(options);
+            // 값이 틀린 빌드 방식 옵션은 출력을 만들기 전에 거부한다.
+            foreach (string mode in BuildModeOptions)
+            {
+                Switch(options, mode);
+            }
+
             var targetName = options.GetValueOrDefault("target", args[0] == "sdk" ? "Engine" : "Foundation");
             // --platform android면 NDK로 교차 빌드한다(--android-abi arm64|x86_64, --android-api, --android-ndk).
             var platform = options.GetValueOrDefault("platform", "host");
@@ -224,7 +230,9 @@ namespace Rocks.Build.Cli
                     Targets = targets,
                     MaxParallelism = Jobs(options),
                     ContextFingerprint = "rocks-build-rules-v1",
-                    EngineVersion = engineVersion
+                    EngineVersion = engineVersion,
+                    Unity = Switch(options, UnityOption),
+                    Pch = Switch(options, PchOption)
                 }, cancellationToken);
                 Print(result);
                 AtomicFile.WriteIfChanged(Path.Combine(output, "action-report.json"), JsonSerializer.Serialize(result, JsonOptions));
@@ -379,6 +387,25 @@ namespace Rocks.Build.Cli
             value > 0 && value <= ProcessRunner.MaximumConcurrentProcesses
                 ? value : throw new ArgumentException($"jobs must be between 1 and {ProcessRunner.MaximumConcurrentProcesses}.");
 
+        // 빌드 방식 옵션이다(Docs/Design/UnityBuildPch.ko.md 11절). 값은 on|off이고 기본은 모두 on이다. --unity off와 --pch off는 유니티
+        // 묶기와 PCH를 끈 검증 변형이고(object는 변형마다 다른 디렉터리 obj/<모듈>/<변형>에 둔다), --adaptive off는 작업 파일 분리를
+        // 끈다(CI). 도구 빌드 ID와 compile_commands.json에는 반영되지 않는다.
+        internal const string UnityOption = "unity";
+
+        internal const string PchOption = "pch";
+
+        internal const string AdaptiveOption = "adaptive";
+
+        internal static readonly string[] BuildModeOptions = [UnityOption, PchOption, AdaptiveOption];
+
+        internal static bool Switch(Dictionary<string, string> options, string name) =>
+            options.GetValueOrDefault(name, "on") switch
+            {
+                "on" => true,
+                "off" => false,
+                _ => throw new ArgumentException($"{name} must be on or off.")
+            };
+
         // --verify-metadata-sources on|off(기본 off): on이면 MetaCompiler가 게시 전에 생성 소스도 컴파일한다. 본문 계약 위반을 빌드의
         // compile action 대신 메타 단계가 원본 위치와 함께 알린다(Docs/Design/ReflectionGeneratedSources.ko.md 7절).
         internal static bool VerifyMetadataSources(Dictionary<string, string> options) =>
@@ -391,7 +418,7 @@ namespace Rocks.Build.Cli
 
         internal static Dictionary<string, string> Parse(string[] args)
         {
-            var allowed = new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination", "sdk", "project", "platform", "android-abi", "android-api", "android-ndk", "adb", "library", "store", "mirror", "offline", MetadataLayout.VerifySourcesOption, "windows-sdk"], StringComparer.Ordinal);
+            var allowed = new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination", "sdk", "project", "platform", "android-abi", "android-api", "android-ndk", "adb", "library", "store", "mirror", "offline", MetadataLayout.VerifySourcesOption, .. BuildModeOptions, "windows-sdk"], StringComparer.Ordinal);
             var values = new Dictionary<string, string>(StringComparer.Ordinal);
             for (var index = 0; index < args.Length; index += 2)
             {
@@ -414,7 +441,17 @@ namespace Rocks.Build.Cli
                 Console.Error.Write(action.StdErr);
             }
 
-            Console.WriteLine($"Native build: {(result.Succeeded ? "PASS" : "FAIL")}; executed={result.ExecutedActions}; cached={result.SkippedActions}");
+            // 첫 #include 앞의 #define 때문에 묶음에서 뺀 파일을 알린다(Docs/Design/UnityBuildPch.ko.md 6.1절 — 단독 번역 단위로 컴파일한다).
+            if (result.UnityDefineExcluded.Count != 0)
+            {
+                Console.WriteLine($"Unity: {result.UnityDefineExcluded.Count} source file(s) define macros before their first #include and compile as standalone translation units:");
+                foreach (string source in result.UnityDefineExcluded)
+                {
+                    Console.WriteLine("  " + source);
+                }
+            }
+
+            Console.WriteLine($"Native build: {(result.Succeeded ? "PASS" : "FAIL")}; executed={result.ExecutedActions}; cached={result.SkippedActions}; unity-batches={result.UnityBatches}");
             if (result.Failure is not null)
             {
                 Console.Error.WriteLine(result.Failure);

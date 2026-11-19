@@ -779,6 +779,19 @@ try
 
     Pass("game-running-evidence-and-completion", timer.Elapsed);
 
+    // 빌드 방식 옵션(--unity·--pch·--adaptive)은 on|off만 받고, 틀린 값은 출력을 건드리기 전에 거부한다. 검증 변형(--unity off)은 같은
+    // 출력에서 다른 object 변형 디렉터리를 쓴다.
+    timer.Restart();
+    var invalidMode = await Cli("game", "--sdk", sdk, "--project", game, "--configuration", "Debug", "--unity", "maybe");
+    Require(invalidMode.ExitCode != 0 && invalidMode.StdErr.Contains("unity must be on or off", StringComparison.Ordinal),
+        "An invalid --unity value was accepted: " + invalidMode.StdErr);
+    var verification = await Cli("game", "--sdk", sdk, "--project", game, "--configuration", "Debug", "--unity", "off", "--adaptive", "off");
+    Require(verification.ExitCode == 0 && verification.StdOut.Contains("unity-batches=0", StringComparison.Ordinal) &&
+        Directory.Exists(Path.Combine(output, "obj/SampleGame/u0p1")) && Directory.Exists(Path.Combine(output, "obj/SampleGame/u1p1")),
+        "The verification variant (--unity off) did not build into its own object directory: " + verification.StdOut + verification.StdErr);
+    Require((await Game()).ExitCode == 0, "Game did not build after the verification variant");
+    Pass("game-build-mode-options-and-verification-variant", timer.Elapsed);
+
     timer.Restart();
     var invalidOutput = await Cli("game", "--sdk", sdk, "--project", game, "--configuration", "Debug", "--output", game);
     Require(invalidOutput.ExitCode != 0 && !File.Exists(Path.Combine(game, "action-report.json")),

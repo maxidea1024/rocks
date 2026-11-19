@@ -52,13 +52,24 @@ cache hit은 key와 모든 출력 파일이 기록과 일치할 때만 인정한
 
 한 output directory의 writer는 프로세스 간 파일 잠금으로 직렬화한다. 다른 directory는 독립 실행한다. 실행 슬롯을 얻기 전에 dependency를 기다리므로 작은 worker 예산에서도 DAG가 진척한다. 취소는 공통 ProcessRunner로 compiler/linker 자식 트리를 종료하고 join한 뒤 임시 출력과 잠금을 반환한다. source/toolchain 변경을 실행 전후에 검출한 결과는 성공이 아니며 이번 action cache를 폐기한다.
 
+## 유니티 빌드
+
+[유니티 빌드·PCH](../../Docs/Design/UnityBuildPch.ko.md) 6절(UB1). 모듈 규칙 `Unity = UnityMode.On`이면 그 모듈의 손으로 쓴 C++ 소스를 묶음 번역 단위로 컴파일한다(`Default`는 빌드 기본값 — 지금은 끔, 외부 라이브러리 모듈은 언제나 끔). 리플렉션 생성 소스는 모듈 설정과 무관하게 자기들끼리 묶는다(`ReflectionUnity = false`로 끈다).
+
+- 구성(`UnityBuild.Plan`): 루트 기준 경로 순으로 정렬하고, 경로 해시를 `UnityAnchorFiles`(기본 16)로 나눈 나머지가 0인 파일 앞에서 구간을 나눈다. 구간의 바이트 합이 `UnityBatchBytes`(기본 384 KiB)를 넘으면 파일 수로 균등 분할한다. 구성원 하나는 단독 번역 단위다. 파일 하나의 추가·삭제·편집은 그 구간만 바꾼다.
+- 묶지 않는 것: C 소스, BuildInfo·규칙 생성 TU·모듈 표 TU, `UnityExclude`, 상한보다 큰 파일, 첫 `#include` 앞에서 `#define`하는 파일(빌드 결과 `UnityDefineExcluded`와 CLI 출력으로 알린다).
+- 묶음 파일: `<out>/Unity/<모듈>/<모듈>.Unity.<첫 구성원 경로 해시 12자리>.cpp`, 내용은 구성원마다 루트 기준 `#include "…"`다. 묶음 TU에만 `/I<root>`(출력 아래 구성원이면 `/I<out>`)를 include 목록 맨 뒤에 붙인다. `__FILE__`은 단독 TU와 같다.
+- object: `obj/<모듈>/<변형>/<해시>.obj`(+ 의존 기록 `.deps`). 변형은 `u<유니티>p<PCH>`(예: `u1p1`, 검증 빌드 `--unity off --pch off`는 `u0p0`)이고 compile action의 Id에도 들어간다 — 일반 빌드와 검증 빌드를 번갈아 돌려도 서로의 object와 기록을 덮어쓰지 않는다. 빌드가 성공하면 이번 변형 디렉터리와 묶음 디렉터리에서 이번 계획이 만들지 않은 파일을 지운다.
+- `compile_commands.json`은 원본 소스마다 논리 명령 하나이고(`output`은 그 소스가 단독 TU일 때의 object 경로다 — 묶인 소스의 그 파일은 없다), 도구 빌드 ID는 유니티 켬·끔과 묶음 구성에 따라 바뀌지 않는다(archive·link의 object는 원본 소스 키 목록으로 적는다).
+- 명령 옵션: `--unity on|off`, `--pch on|off`, `--adaptive on|off`(기본 on). 켠 모듈은 묶음 충돌 정책 검사(`Rocks.ToolTests policy` — 파일 지역 이름, 파일 범위 using, `.cpp` 매크로, pragma 균형)의 대상이다. `Rocks.ToolTests unity-audit`는 설정과 무관하게 모든 엔진 모듈의 충돌을 센다.
+
 ## 긴 명령줄(response file)
 
 Windows는 프로세스 명령줄을 CreateProcessW 한계(끝 NUL 포함 UTF-16 32,767자) 안에 넣어야 한다. 깊은 경로의 작업 사본에서는 object가 많은 link·archive(실측: 루트 127자에서 FoundationTests link 약 39,000자, PublicHeaderChecks archive 약 35,000자 — 루트 13자에서도 약 18,000자)와 include가 많은 compile이 이를 넘어 `파일 이름이나 확장명이 너무 깁니다`로 시작조차 못 했다. Executor는 펼친 인자로 만든 명령이 호스트 한계를 넘으면(`NativeCommandLine.ExceedsHostLimit` — Windows는 .NET이 실제로 만드는 명령줄 길이 + NUL이 32,767 초과, `.cmd`·`.bat` wrapper 도구는 cmd.exe 한계 8,191자에서 cmd.exe 몫 512자를 남긴 7,679 초과, POSIX는 인자 영역이 128 KiB 초과) 인자 전체를 action 임시 디렉터리의 `arguments+.rsp`에 쓰고 도구를 `@<파일>` 인자 하나로 실행한다. 한계 안의 명령은 지금처럼 그대로 넘긴다(macOS는 CI에서만 확인하므로 실제로 필요할 때만 경로가 바뀐다).
 
 - 도구별 문법(`NativeCommandLine.QuotingOf`, 인용·인코딩은 `Rocks.Tooling.Common/ResponseFile`): clang-cl·llvm-lib·lib.exe는 Windows 규칙(CommandLineToArgvW — 역슬래시는 큰따옴표 앞에서만 특별)이고 전체를 한 줄로 쓴다. clang-cl은 response file의 줄 끝에서 `/link` 뒤 인자 묶음을 끊기 때문이다(실측: 여러 줄이면 `/link` 다음 줄의 링커 옵션이 컴파일러 입력이 된다). clang 드라이버(macOS clang++, NDK clang++)는 Windows 호스트에서도 GNU 규칙(역슬래시 escape, 작은따옴표도 인용, 인자마다 한 줄)이고, llvm-ar는 호스트 기본 규칙(Windows 호스트는 Windows 규칙, macOS는 GNU — 실측)이다. 인코딩은 Windows 규칙이 BOM 있는 UTF-16LE(LLVM 도구와 MSVC 도구가 모두 읽는다), GNU 규칙이 BOM 없는 UTF-8이다. 공백·큰따옴표·역슬래시·한글 경로와 define 값이 그대로 전달된다. GNU 규칙은 빈 인자를 나타낼 수 없어(LLVM이 빈 토큰을 버린다) 거부한다.
 - Apple `/usr/bin/ar`처럼 response file 문법을 모르는 도구(toolchain의 컴파일러·archiver가 아닌 도구 포함)는 쓰지 않는다. 그런 명령이 한계를 넘어 시작하지 못하면 진단에 명령 길이와 이유를 붙인다(종료 코드 실패에는 붙이지 않는다). toolchain의 `CompileArguments`·`LinkArguments`에 빈 인자·NUL이 있으면 빌드 전에 거부한다.
-- 결정성: action key·`compile_commands.json`·BuildInfo manifest는 모두 `NativeAction.Arguments`(펼친 인자, 출력은 `{OUTPUTn}` 자리 표시)로 만든다. response file 경로·임시 디렉터리 이름은 어디에도 들어가지 않으므로 response file 사용 여부가 증분 key·툴체인 지문·도구 빌드 ID를 바꾸지 않고, 같은 인자면 response file byte도 같다. `compile_commands.json`은 언제나 펼친 인자라 clangd와 정책 감사(`@` 인자를 펼치지 않은 response file로 거부)가 실제 인자를 본다.
+- 결정성: action key는 물리 action의 인자로, `compile_commands.json`과 BuildInfo manifest의 compile 부분은 원본 소스마다의 논리 명령(`NativePlan.LogicalCompiles` — 유니티 묶음·depfile 인자가 없다)으로 만든다. 둘 다 `NativeAction.Arguments`와 같은 꼴(펼친 인자, 출력은 `{OUTPUTn}` 자리 표시)로 만든다. response file 경로·임시 디렉터리 이름은 어디에도 들어가지 않으므로 response file 사용 여부가 증분 key·툴체인 지문·도구 빌드 ID를 바꾸지 않고, 같은 인자면 response file byte도 같다. `compile_commands.json`은 언제나 펼친 인자라 clangd와 정책 감사(`@` 인자를 펼치지 않은 response file로 거부)가 실제 인자를 본다.
 - 수명: 파일은 invocation마다 고유한 `<out>/.native-tmp/<guid>/`에 있어 병렬 action끼리 겹치지 않고, 이름의 `+`로 같은 디렉터리의 staged 출력(16진 object, 모듈 이름 기반 lib·exe·pdb)과도 겹치지 않는다. 임시 디렉터리 정리가 성공·실패·취소 모두에서 함께 지운다. 자식 정리가 끝나지 않으면(ProcessCleanupException) 자식이 아직 읽을 수 있으므로 디렉터리째 보존하고 경로를 알린다.
 - 진단: response file로 실행한 action이 실패하면 도구 출력 뒤에 `Command (arguments passed in arguments+.rsp; shown expanded with final output paths): …`로 펼친 명령을 붙인다(출력은 `compile_commands.json`처럼 최종 경로).
 - clang-cl이 lld-link를, clang++가 ld.lld·ld64를 부를 때의 긴 명령은 clang 드라이버가 스스로 response file로 넘긴다.
