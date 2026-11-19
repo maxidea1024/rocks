@@ -53,13 +53,21 @@ void GlesDevice::ResolveAttachments() noexcept {
             continue;
         }
 
+        // 대상의 resolve mip·slice를 resolve framebuffer에 붙인다(텍스처 GX2 C부).
+        if (resolveFramebuffer_ == 0) {
+            gl_.GenFramebuffers(1, &resolveFramebuffer_);
+        }
+
         const auto width = static_cast<GLint>(pass_.width);
         const auto height = static_cast<GLint>(pass_.height);
         gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, pass_.framebuffer);
         gl_.ReadBuffer(GL_COLOR_ATTACHMENT0 + index);
-        gl_.BindFramebuffer(GL_DRAW_FRAMEBUFFER, resolved->framebuffer);
+        gl_.BindFramebuffer(GL_DRAW_FRAMEBUFFER, resolveFramebuffer_);
+        AttachTextureLevel(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, *resolved,
+                           pass_.resolveMips[index], pass_.resolveSlices[index]);
         gl_.BlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT,
                             GL_NEAREST);
+        gl_.FramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
     }
 
     gl_.BindFramebuffer(GL_READ_FRAMEBUFFER, 0);
@@ -508,9 +516,15 @@ Result<void> GlesDevice::CopyPassTarget(TextureHandle destination) noexcept {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
+    // 패스 대상은 2D mip 0 attachment여야 한다(텍스처 GX2 C부).
+    const TextureRecord* passTexture = textures_.Find(pass_.texture.slot);
+    // 창 패스(pass_.texture가 null)는 중간 2D 텍스처다.
+    const bool wholeTarget =
+        passTexture == nullptr || (passTexture->framebuffer != 0 && pass_.firstColorMip == 0);
     if (pass_.colorCount == 0 || record->framebuffer == 0 || record->sampleCount > 1 ||
-        pass_.sampleCount > 1 || destination == pass_.texture || record->width != pass_.width ||
-        record->height != pass_.height || record->format != pass_.format) {
+        pass_.sampleCount > 1 || !wholeTarget || destination == pass_.texture ||
+        record->width != pass_.width || record->height != pass_.height ||
+        record->format != pass_.format) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 

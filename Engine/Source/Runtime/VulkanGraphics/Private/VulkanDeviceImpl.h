@@ -254,6 +254,16 @@ struct FramebufferEntry {
     VkFramebuffer framebuffer = VK_NULL_HANDLE;
 };
 
+// attachment (이미지, mip, layer) 하나의 2D view다(텍스처 GX2 C부). 2D 텍스처의 mip 0은 텍스처의
+// 기본·attachment view를 그대로 쓰고 이 표에 넣지 않는다. 3D는 layer가 깊이 면이다
+// (2D_ARRAY_COMPATIBLE 이미지). 텍스처를 놓을 때 그 view의 framebuffer와 함께 회수한다.
+struct AttachmentViewEntry {
+    VkImage image = VK_NULL_HANDLE;
+    uint32 mipLevel = 0;
+    uint32 layer = 0;
+    VkImageView view = VK_NULL_HANDLE;
+};
+
 // 창 출력 하나다. 패스는 중간 이미지(target)에 그리고 EndFrame이 swapchain 이미지로 blit한다.
 struct SwapChainRecord {
     NativeSurface native;
@@ -550,6 +560,13 @@ private:
         TextureHandle resolves[MaxColorTargets];
         // attachment 표본 수다(1이면 MSAA가 아니다).
         uint32 sampleCount = 1;
+        // attachment마다 붙인 mip·slice와 resolve 대상의 mip·slice다(텍스처 GX2 C부).
+        uint32 colorMips[MaxColorTargets] = {};
+        uint32 colorSlices[MaxColorTargets] = {};
+        uint32 resolveMips[MaxColorTargets] = {};
+        uint32 resolveSlices[MaxColorTargets] = {};
+        uint32 depthMip = 0;
+        uint32 depthSlice = 0;
     };
 
     struct BoundVertexBuffer {
@@ -701,6 +718,14 @@ private:
     bool AttachmentsReady() const noexcept;
     // 텍스처가 지금 패스의 attachment인지다.
     bool IsPassAttachment(SlotHandle slot) const noexcept;
+    // range가 지금 패스 attachment의 subresource와 겹치는지다(SetTexture 암묵 전이 판단).
+    bool OverlapsPassAttachment(SlotHandle slot,
+                                const ResolvedSubresourceRange& range) const noexcept;
+    // attachment (mip, slice)의 2D view다(attachmentViews_, 없으면 만든다. 잠금 안).
+    Result<VkImageView> AttachmentViewFor(const TextureRecord& record, uint32 mipLevel,
+                                          uint32 slice) noexcept;
+    // image의 attachment view와 그 framebuffer를 회수 대기로 넘긴다(잠금 안).
+    void RetireAttachmentViews(VkImage image) noexcept;
 
     // --- VulkanCompute.cpp ---
     // 그리기 직전 조건(파이프라인 종류·attachment·stream·view·읽기 전용 깊이)을 보고 descriptor를
@@ -880,6 +905,9 @@ private:
     uint32 samplerCount_ = 0;
     Array<RenderPassEntry> renderPasses_;
     Array<FramebufferEntry> framebuffers_;
+    Array<AttachmentViewEntry> attachmentViews_;
+    // 2D_ARRAY_COMPATIBLE로 만든 3D 렌더 타깃 이미지다(barrier layer 수를 REMAINING으로 둔다).
+    Array<VkImage> volumeAttachmentImages_;
     VkDescriptorSetLayout emptySetLayout_ = VK_NULL_HANDLE;
     // 공용 layout(두 set 모두 빈 layout + push constant)이다. 그리기 상수를 올릴 때 쓴다.
     VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;

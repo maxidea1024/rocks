@@ -471,10 +471,6 @@ public:
         return sections_.View();
     }
 
-    PackageSink& Sink() noexcept {
-        return sink_;
-    }
-
 private:
     PackageSink& sink_;
     Array<PackageSectionEntry> sections_;

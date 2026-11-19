@@ -2,7 +2,7 @@
 
 STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-driven 렌더러
 
-**설계 기준일 2026.11.18 · 개정 1.13 · 상태: 구현 제안 / 성능 미측정**
+**설계 기준일 2026.11.19 · 개정 1.14 · 상태: 구현 제안 / 성능 미측정**
 
 **추가 요구 반영:** Deferred·Forward 정식 지원, 업스케일링, 태깅·컴포넌트·프리팹, Unreal 참고 체계 확대, 컷씬 제작 핵심화, Blueprint 제외·자체 언어 채택, 하이엔드 포스트이펙트 전체 기능군, UBT 계열 자체 빌드 도구·분산 빌드·반복 개발 최적화, 정식 헤드리스 모드, 필수 노드 기반 머티리얼 에디터.
 
@@ -27,6 +27,8 @@ STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-d
 **1.12 좌표·단위 UE 전환과 물리 Jolt 복귀:** 사용자 요구(2026-11-17)에 따라 공간 좌표계·방향·회전 의미·행렬·Transform 규약·월드 단위와 물리량 단위를 UE 5.8과 같게 정한다(왼손 +X 전방·+Y 오른쪽·+Z 위, cm, `Rotator` 도, 행 벡터 `p·M`, `Local * Parent`). 이전 기본안(오른손·+Y 왼쪽·미터·라디안·column vector)은 요구와 달랐으며 Core 수학·World의 코드 전환을 마쳤다. 사용자 결정으로 물리 middleware 기준을 PhysX 5에서 Jolt로 되돌리고, Rocks와 Jolt 사이의 좌표·단위 변환 계약을 [물리 어댑터 경계](PhysicsJoltAdapter.ko.md)에 둔다. 2.1·2.2·2.3·3.1·3.3·10.2·10.4·16·17.2·23.1·28.1·31·33.2·33.11·33.13·34절을 개정하고 33.17절에 기록한다.
 
 **1.13 공간 질의 전략:** 사용자 결정(2026-11-18)으로 공간 질의를 UE 5.8.4와 같은 방식으로 나눈다. 형상 기반 게임플레이 질의(trace·sweep·overlap)는 Jolt scene query를 쓰고, 비충돌 2D 해시 SpatialQueryService는 폐기한다. 이동 primitive–local light 상호작용과 CPU 판정 경로의 그림자 caster 수집은 [공간 인덱스 설계](SpatialIndex.ko.md)의 Loose Octree(primitive 인스턴스와 local light 인스턴스)로 한다. 매 프레임 가시성은 평면 SoA, 정적·대량 instance는 계층 공간 해시를 유지하며, 네트워크 관심·대량 군중용 2D 격자는 필요해질 때 도입한다. 3.1·10.4·31(R21)·33.10·33.18절을 개정한다.
+
+**1.14 텍스처 스트리밍 표본 해상도:** [텍스처 스트리밍](TextureStreaming.ko.md) 결정 T1(2026-11-19 확정)에 따라 9.5절의 desired mip 입력 "render resolution"을 표본 해상도(렌더 폭 × 2^(−텍스처 mip bias))로 바꾼다. temporal upscale에서는 출력 해상도, Native·Spatial에서는 렌더 해상도와 같아진다. 개정 범위는 9.5절이다.
 
 ## 1. 목표와 실행 전략
 
@@ -856,7 +858,7 @@ ReadyMask는 target capability의 부분집합이어야 한다. DedicatedServer 
 
 Rocks는 **일반 mip streaming을 M3/M4 필수 기능**으로 구현한다. M3에 mip cook·비동기 IO·상주 교체, M4에 다중 view·예산·취소·회귀를 완료한다. VirtualTexture의 tile/page streaming은 후속이다. Core/Object는 `rocks::AssetId`·lease·취소·세대 계약과 CPU fake만 구현하며 실제 GPU는 RHI 착수 이후 연결한다.
 
-cooker는 dimension·format·색공간·mip 수·크기/offset/hash·압축 단위·resident tail과 색/normal/mask 필터·alpha coverage를 기록한다. UV density·material UV scale·bounds·view 거리/투영·render resolution으로 desired mip을 산정한다. 동적 UV는 명시 scale/bias와 보수적 상한을 사용한다. editor/game/capture/split-screen 수요는 priority·hysteresis로 조정한다. 공개 개요를 참고한 자체 설계다. [S65](https://dev.epicgames.com/documentation/en-us/unreal-engine/texture-streaming-overview-for-unreal-engine)
+cooker는 dimension·format·색공간·mip 수·크기/offset/hash·압축 단위·resident tail과 색/normal/mask 필터·alpha coverage를 기록한다. UV density·material UV scale·bounds·view 거리/투영·표본 해상도(렌더 폭 × 2^(−텍스처 mip bias), [텍스처 스트리밍](TextureStreaming.ko.md) 결정 T1)로 desired mip을 산정한다. 동적 UV는 명시 scale/bias와 보수적 상한을 사용한다. editor/game/capture/split-screen 수요는 priority·hysteresis로 조정한다. 공개 개요를 참고한 자체 설계다. [S65](https://dev.epicgames.com/documentation/en-us/unreal-engine/texture-streaming-overview-for-unreal-engine)
 
 GPU 상주·pin 예약분, IO/decode staging, upload bandwidth·동시 요청, 구/신 allocation의 **temporary peak**를 각각 제한한다. sampler LOD clamp를 메모리 회수로 집계하지 않는다. reduced-mip allocation 교체 또는 backend residency를 사용하고 minLOD/SRV·descriptor snapshot을 frame 경계에서 갱신한다. IO 완료만으로 GPU resident를 선언하지 않는다.
 

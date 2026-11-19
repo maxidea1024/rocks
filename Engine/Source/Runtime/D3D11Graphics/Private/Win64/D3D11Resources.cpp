@@ -341,33 +341,19 @@ Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
     }
 
     if (renderTarget) {
-        D3D11_RENDER_TARGET_VIEW_DESC view = {};
-        view.Format = mapping.rtv;
-        view.ViewDimension = record.sampleCount > 1 ? D3D11_RTV_DIMENSION_TEXTURE2DMS
-                                                    : D3D11_RTV_DIMENSION_TEXTURE2D;
-        result = device_->CreateRenderTargetView(record.texture.Get(), &view, record.rtv.Out());
+        result = CreateAttachmentView(record, 0, 0, record.rtv);
         if (FAILED(result)) {
             return FailWith<TextureHandle>("CreateRenderTargetView", result);
         }
     }
 
     if (depthTarget) {
-        D3D11_DEPTH_STENCIL_VIEW_DESC view = {};
-        view.Format = mapping.dsv;
-        view.ViewDimension = record.sampleCount > 1 ? D3D11_DSV_DIMENSION_TEXTURE2DMS
-                                                    : D3D11_DSV_DIMENSION_TEXTURE2D;
-        result = device_->CreateDepthStencilView(record.texture.Get(), &view, record.dsv.Out());
+        result = CreateAttachmentView(record, 0, 0, false, record.dsv);
         if (FAILED(result)) {
             return FailWith<TextureHandle>("CreateDepthStencilView", result);
         }
 
-        view.Flags = D3D11_DSV_READ_ONLY_DEPTH;
-        if (GetPixelFormatInfo(desc.format).stencilBits != 0) {
-            view.Flags |= D3D11_DSV_READ_ONLY_STENCIL;
-        }
-
-        result =
-            device_->CreateDepthStencilView(record.texture.Get(), &view, record.readOnlyDsv.Out());
+        result = CreateAttachmentView(record, 0, 0, true, record.readOnlyDsv);
         if (FAILED(result)) {
             return FailWith<TextureHandle>("CreateDepthStencilView (read-only)", result);
         }
@@ -396,6 +382,58 @@ Result<TextureHandle> D3D11Device::CreateTexture(const TextureDesc& desc,
     }
 
     return Result<TextureHandle>::Success(TextureHandle{added.Value()});
+}
+
+HRESULT D3D11Device::CreateAttachmentView(const TextureRecord& record, uint32 mipLevel,
+                                          uint32 slice,
+                                          ComRef<ID3D11RenderTargetView>& out) noexcept {
+    D3D11_RENDER_TARGET_VIEW_DESC view = {};
+    view.Format = MappingOf(record.format).rtv;
+    if (record.sampleCount > 1) {
+        view.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DMS;
+    } else if (record.dimension == TextureDimension::Texture3D) {
+        view.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE3D;
+        view.Texture3D.MipSlice = mipLevel;
+        view.Texture3D.FirstWSlice = slice;
+        view.Texture3D.WSize = 1;
+    } else if (record.dimension == TextureDimension::Texture2D) {
+        view.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+        view.Texture2D.MipSlice = mipLevel;
+    } else {
+        view.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DARRAY;
+        view.Texture2DArray.MipSlice = mipLevel;
+        view.Texture2DArray.FirstArraySlice = slice;
+        view.Texture2DArray.ArraySize = 1;
+    }
+
+    return device_->CreateRenderTargetView(record.texture.Get(), &view, out.Out());
+}
+
+HRESULT D3D11Device::CreateAttachmentView(const TextureRecord& record, uint32 mipLevel,
+                                          uint32 slice, bool readOnly,
+                                          ComRef<ID3D11DepthStencilView>& out) noexcept {
+    D3D11_DEPTH_STENCIL_VIEW_DESC view = {};
+    view.Format = MappingOf(record.format).dsv;
+    if (record.sampleCount > 1) {
+        view.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2DMS;
+    } else if (record.dimension == TextureDimension::Texture2D) {
+        view.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+        view.Texture2D.MipSlice = mipLevel;
+    } else {
+        view.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2DARRAY;
+        view.Texture2DArray.MipSlice = mipLevel;
+        view.Texture2DArray.FirstArraySlice = slice;
+        view.Texture2DArray.ArraySize = 1;
+    }
+
+    if (readOnly) {
+        view.Flags = D3D11_DSV_READ_ONLY_DEPTH;
+        if (GetPixelFormatInfo(record.format).stencilBits != 0) {
+            view.Flags |= D3D11_DSV_READ_ONLY_STENCIL;
+        }
+    }
+
+    return device_->CreateDepthStencilView(record.texture.Get(), &view, out.Out());
 }
 
 HRESULT D3D11Device::CreatePlaneView(const TextureRecord& record, DXGI_FORMAT format, uint32 plane,

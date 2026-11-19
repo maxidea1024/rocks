@@ -42,6 +42,8 @@ Result<RootRef<Package>> NewPackage(ObjectRegistry& registry, const ObjectAccess
     }
 
     detail::PackageAccess::SetIdentity(*package.Value(), id, kind);
+    // Commit의 root를 typed root를 얻을 때까지 쥔다(그 사이 GC가 패키지 정책 객체를 Discard 없이
+    // 거두지 않게). typed root를 얻지 못하면 Discard해 패키지를 남기지 않는다.
     auto committed = transaction.Commit();
     if (!committed) {
         return Result<RootRef<Package>>::Failure(committed.Error());
@@ -49,6 +51,7 @@ Result<RootRef<Package>> NewPackage(ObjectRegistry& registry, const ObjectAccess
 
     auto typed = registry.TryPin<Package>(access, created.Value());
     if (!typed) {
+        (void)registry.Discard(access, created.Value());
         return Result<RootRef<Package>>::Failure(typed.Error());
     }
 
