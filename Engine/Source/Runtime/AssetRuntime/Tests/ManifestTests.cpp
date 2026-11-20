@@ -20,7 +20,9 @@ bool MakeBase(CookedManifest& manifest) noexcept {
     FillManifestHeader(manifest);
     CookedManifestEntry* a =
         AddEntry(manifest, 10, "Hero", static_cast<uint32>(CookedManifestFlags::PrimaryAsset));
-    if (a == nullptr || !AddBundle(*a, "Core") || !AddBundle(*a, "Hud") ||
+    // Core의 구성원은 Hard 대상 11과 Soft 대상 12(둘 다 쿠킹됨), Hud는 구성원이 없다.
+    const uint64 coreMembers[] = {11, 12};
+    if (a == nullptr || !AddBundle(*a, "Core", coreMembers) || !AddBundle(*a, "Hud") ||
         !AddDependency(*a, 11, PackageDependencyKind::Hard) ||
         !AddDependency(*a, 12, PackageDependencyKind::Soft) ||
         !AddDependency(*a, 99, PackageDependencyKind::Soft)) {
@@ -47,7 +49,12 @@ bool SameEntry(const CookedManifestEntry& left, const CookedManifestEntry& right
                 left.flags == right.flags && left.bundles.Size() == right.bundles.Size() &&
                 left.dependencies.Size() == right.dependencies.Size();
     for (usize index = 0; same && index < left.bundles.Size(); ++index) {
-        same = left.bundles[index].View() == right.bundles[index].View();
+        const CookedManifestBundle& a = left.bundles[index];
+        const CookedManifestBundle& b = right.bundles[index];
+        same = a.name.View() == b.name.View() && a.members.Size() == b.members.Size();
+        for (usize member = 0; same && member < a.members.Size(); ++member) {
+            same = a.members[member] == b.members[member];
+        }
     }
 
     for (usize index = 0; same && index < left.dependencies.Size(); ++index) {
@@ -219,6 +226,35 @@ const Violation Violations[] = {
      [](CookedManifest& m) { m.entries[1].packageBytes = PackageMaxFileBytes + 1; },
      F::PackageBytes, 1, 11, NoId},
     {"undefined flag", [](CookedManifest& m) { m.entries[2].flags = 2; }, F::Flags, 2, 12, NoId},
+    {"null bundle member",
+     [](CookedManifest& m) { m.entries[0].bundles[0].members[0] = AssetId{}; }, F::BundleMember, 0,
+     10, NoId},
+    {"self bundle member",
+     [](CookedManifest& m) { m.entries[0].bundles[0].members[0] = FixedId(10); }, F::BundleMember,
+     0, 10, 10},
+    {"descending bundle members",
+     [](CookedManifest& m) {
+         m.entries[0].bundles[0].members[0] = FixedId(12);
+         m.entries[0].bundles[0].members[1] = FixedId(11);
+     },
+     F::BundleMember, 0, 10, 11},
+    {"duplicate bundle member",
+     [](CookedManifest& m) { m.entries[0].bundles[0].members[1] = FixedId(11); }, F::BundleMember,
+     0, 10, 11},
+    {"bundle member not a dependency",
+     [](CookedManifest& m) { m.entries[0].bundles[0].members[1] = FixedId(13); }, F::BundleMember,
+     0, 10, 13},
+    {"uncooked bundle member",
+     [](CookedManifest& m) { m.entries[0].bundles[0].members[1] = FixedId(99); }, F::BundleMember,
+     0, 10, 99},
+    {"too many bundle members",
+     [](CookedManifest& m) {
+         Array<AssetId>& members = m.entries[0].bundles[1].members;
+         for (uint32 index = 0; index <= CookedManifestMaxBundleMembers; ++index) {
+             (void)members.TryPushBack(FixedId(1000 + index));
+         }
+     },
+     F::BundleMemberCount, 0, 10, NoId},
     {"bundles without PrimaryAsset", [](CookedManifest& m) { m.entries[0].flags = 0; },
      F::BundleCount, 0, 10, NoId},
     {"too many bundles",
@@ -617,8 +653,9 @@ TEST(CookedManifest_StructureTampering) {
 
 // 항목 칸 잘림(AS 10.1절 2·3): 항목 둘인 매니페스트를 항목 1 안의 모든 위치로 자르고 CRC를 다시
 // 맞추면, 자른 위치가 속한 칸의 CorruptPackage(항목 1)다. 칸 범위는 아래 표이고, 개수 칸은 남은
-// byte 검사를 포함한다 — bundle 개수 칸은 첫 bundle 길이 칸까지(개수 1 × 최소 8 byte가 남지 않으면
-// 개수 칸에서 거부), 의존 개수 칸은 의존 byte 전부(개수를 남은 byte로 묶어 의존 칸은 잘리지
+// byte 검사를 포함한다 — bundle 개수 칸은 bundle 최소 byte(이름 길이 칸 8 + 구성원 개수 칸 4)까지
+// (개수 1 × 12 byte가 남지 않으면 개수 칸에서 거부 — 이름 앞 4 byte까지 덮는다), 구성원 개수 칸은
+// 구성원 byte 전부, 의존 개수 칸은 의존 byte 전부(개수를 남은 byte로 묶어 구성원·의존 칸은 잘리지
 // 않는다). 항목 0의 경로·bundle을 길게 해 항목 1 안에서 잘라도 항목 수 칸 검사(항목 2개 × 최소
 // byte)를 넘는다.
 TEST(CookedManifest_EntryTruncation) {
@@ -633,7 +670,8 @@ TEST(CookedManifest_EntryTruncation) {
     REQUIRE(first != nullptr && AddBundle(*first, "CoreBundleWithALongName"));
     CookedManifestEntry* second =
         AddEntry(manifest, 11, "Sword", static_cast<uint32>(CookedManifestFlags::PrimaryAsset));
-    REQUIRE(second != nullptr && AddBundle(*second, "Blade") &&
+    const uint64 bladeMembers[] = {10};
+    REQUIRE(second != nullptr && AddBundle(*second, "BladeBundle", bladeMembers) &&
             AddDependency(*second, 10, PackageDependencyKind::Hard) &&
             AddDependency(*second, 99, PackageDependencyKind::Soft));
     Array<uint8> valid(allocator);
@@ -644,6 +682,7 @@ TEST(CookedManifest_EntryTruncation) {
     constexpr usize LengthBytes = sizeof(uint64);
     constexpr usize CountBytes = sizeof(uint32);
     constexpr usize DependencyBytes = GuidBytes + sizeof(uint32);
+    constexpr usize MinBundleBytes = LengthBytes + CountBytes;
     const CookedManifestEntry& entry = manifest.entries[1];
     struct Range {
         CookedManifestField field;
@@ -658,8 +697,9 @@ TEST(CookedManifest_EntryTruncation) {
         {F::BulkRawBytes, sizeof(uint64)},
         {F::CookKey, DigestBytes},
         {F::Flags, sizeof(uint32)},
-        {F::BundleCount, CountBytes + LengthBytes},
-        {F::Bundle, entry.bundles[0].View().ByteCount()},
+        {F::BundleCount, CountBytes + MinBundleBytes},
+        {F::Bundle, LengthBytes + entry.bundles[0].name.View().ByteCount() - MinBundleBytes},
+        {F::BundleMemberCount, CountBytes + entry.bundles[0].members.Size() * GuidBytes},
         {F::DependencyCount, CountBytes + entry.dependencies.Size() * DependencyBytes},
     };
     usize entryBytes = 0;

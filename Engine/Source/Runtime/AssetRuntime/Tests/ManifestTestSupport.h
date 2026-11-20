@@ -51,9 +51,21 @@ inline CookedManifestEntry* AddEntry(CookedManifest& manifest, uint64 low, Strin
     return ok ? &entry : nullptr;
 }
 
-inline bool AddBundle(CookedManifestEntry& entry, StringView name) noexcept {
+// bundle을 더한다(구성원은 low 값 목록 — 그대로 순서로 넣는다).
+inline bool AddBundle(CookedManifestEntry& entry, StringView name,
+                      Span<const uint64> members = {}) noexcept {
     auto added = entry.bundles.TryEmplaceBack(entry.bundles.GetAllocator());
-    return added && added.Value()->TryAssign(name).IsOk();
+    if (!added || !added.Value()->name.TryAssign(name)) {
+        return false;
+    }
+
+    for (uint64 member : members) {
+        if (!added.Value()->members.TryPushBack(FixedId(member))) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 inline bool AddDependency(CookedManifestEntry& entry, uint64 low,
@@ -133,8 +145,12 @@ inline Array<uint8> EncodeManifest(Allocator& allocator, const CookedManifest& m
                                     ? raw.bundleCount
                                     : static_cast<uint32>(entry.bundles.Size()))
                        .IsOk();
-        for (const String& bundle : entry.bundles) {
-            ok = ok && out.WriteString(bundle.View()).IsOk();
+        for (const CookedManifestBundle& bundle : entry.bundles) {
+            ok = ok && out.WriteString(bundle.name.View()).IsOk() &&
+                 out.WriteU32(static_cast<uint32>(bundle.members.Size())).IsOk();
+            for (AssetId member : bundle.members) {
+                ok = ok && out.WriteGuid(member.value).IsOk();
+            }
         }
 
         ok = ok && out.WriteU32(first && raw.overrideDependencyCount
