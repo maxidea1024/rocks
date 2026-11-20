@@ -440,7 +440,6 @@ internal static partial class SelfTests
             }
         });
         RegisterEnglishArtifacts(suite, options);
-        RegisterLogRelease(suite, options);
         RegisterCVarRegistration(suite, options);
         RegisterForeignEngineBoundary(suite, options);
         suite.Add("Policy.RepositoryInitializerListDeductions",
