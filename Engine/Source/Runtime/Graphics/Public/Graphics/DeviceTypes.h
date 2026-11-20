@@ -78,6 +78,12 @@ struct DeviceDesc {
     // API 검증 계층(D3D12·D3D11 debug layer, Vulkan VK_LAYER_KHRONOS_validation, GL debug
     // context)을 켠다. 없으면 켜지 않고 계속한다.
     bool enableValidation = false;
+    // GPU 기반 검증(D3D12 GPU-based validation)을 켠다. 켜면 enableValidation도 켠 것으로 본다(UE
+    // 5.8 `-gpuvalidation`과 같다, D3D12Adapter.cpp CreateRootDevice). 셰이더에 검사 코드를 넣어
+    // GPU 실행 중 자원 상태·초기화 안 된 placed 자원 접근·descriptor 오류를 잡으므로 아주 느리다.
+    // 진단 실행 전용이다. 지금은 D3D12만 쓰고 다른 backend는 무시한다. debug layer 쪽 기능이
+    // 없으면(ID3D12Debug1 없음) 켜지 않고 경고를 남긴 뒤 계속한다.
+    bool enableGpuValidation = false;
     // 하드웨어 대신 소프트웨어 장치를 쓴다(D3D12·D3D11 WARP, Vulkan CPU 장치 — lavapipe·SwiftShader
     // 같은 소프트웨어 ICD). 헤드리스 CI 검증용이다. Vulkan은 CPU 장치가 없으면 Unsupported다.
     // OpenGL은 무시한다.
@@ -1119,6 +1125,8 @@ struct DeviceInfo {
     // 이 장치의 incarnation 번호다(GpuFencePoint::deviceEpoch).
     uint64 deviceEpoch = 0;
     bool validationEnabled = false;
+    // GPU 기반 검증이 켜졌는지다(DeviceDesc::enableGpuValidation, D3D12만).
+    bool gpuValidationEnabled = false;
     bool software = false;
     // 자원·파이프라인 생성(Create*)을 소유 스레드가 아닌 스레드에서도 부를 수 있는지다(RenderBase
     // 5.4절 GX11). false면 소유 스레드 전용이고 다른 스레드의 생성 요청은 렌더 lane 작업으로

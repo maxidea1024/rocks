@@ -6,7 +6,10 @@
 #include <stdio.h>
 
 // Sandbox 진입점이다.
-//   Sandbox [--self-test]          창 없이 그래픽 backend·엔진 호스트 검사(종료 코드 0 = 통과)
+//   Sandbox [--self-test] [--gpu-validation]
+//                                  창 없이 그래픽 backend·엔진 호스트 검사(종료 코드 0 = 통과).
+//                                  --gpu-validation은 D3D12 장치를 GPU 기반 검증으로 만든다(UE
+//                                  -gpuvalidation, 아주 느리다)
 //   Sandbox --engine [--frames N] [--config <Engine.json>] [--set=<target>=<value>]...
 //                  [--trace=<목록>]... [--trace-file <path>]
 //                                  헤드리스 엔진을 N 프레임(기본 60) 돌린다. 엔진 층 설정
@@ -30,9 +33,11 @@ using rocks::Span;
 using rocks::StringView;
 
 int Usage() noexcept {
-    fprintf(stderr, "usage: Sandbox [--self-test] | --engine [--frames N] [--config <file>] "
-                    "[--set=<target>=<value>]... [--trace=<channels>]... "
-                    "[--trace-file <path>]\n");
+    fprintf(
+        stderr,
+        "usage: Sandbox [--self-test] [--gpu-validation] | --engine [--frames N] [--config <file>] "
+        "[--set=<target>=<value>]... [--trace=<channels>]... "
+        "[--trace-file <path>]\n");
     return 2;
 }
 
@@ -62,8 +67,9 @@ bool ParseFrames(StringView text, rocks::uint64& frames) noexcept {
 
 // 자체 검사(Launch 도구 로그가 설치된 상태)다. 도구 로그를 시작하지 못했어도 검사는 돈다(Warning
 // 이상은 비상 경로로 stderr에 간다).
-int RunSelfTest(rocks::Allocator& allocator, rocks::ModuleLoader& modules) noexcept {
-    const int graphics = sandbox::RunGraphicsSelfTest(allocator, modules);
+int RunSelfTest(rocks::Allocator& allocator, rocks::ModuleLoader& modules,
+                bool gpuValidation) noexcept {
+    const int graphics = sandbox::RunGraphicsSelfTest(allocator, modules, gpuValidation);
     const rocks::uint32 engine = sandbox::RunEngineHostSelfTest();
     return graphics == 0 && engine == 0 ? 0 : 1;
 }
@@ -89,6 +95,7 @@ int Run(rocks::launch::ApplicationContext& context) noexcept {
     constexpr rocks::usize MaxSettingArguments = 64;
     StringView settingArguments[MaxSettingArguments];
     rocks::usize settingCount = 0;
+    bool gpuValidation = false;
     for (rocks::usize index = 0; index < arguments.Size(); ++index) {
         const StringView argument = arguments[index];
         const bool hasValue = index + 1 < arguments.Size();
@@ -98,6 +105,8 @@ int Run(rocks::launch::ApplicationContext& context) noexcept {
 
         if (Is(argument, "--engine")) {
             engine = true;
+        } else if (Is(argument, "--gpu-validation")) {
+            gpuValidation = true;
         } else if (Is(argument, "--frames") && hasValue &&
                    ParseFrames(arguments[index + 1], options.frames)) {
             ++index;
@@ -119,7 +128,7 @@ int Run(rocks::launch::ApplicationContext& context) noexcept {
 
     options.arguments = Span<const StringView>(settingArguments, settingCount);
     return engine ? sandbox::RunEngineHost(context, options)
-                  : RunSelfTest(context.DefaultAllocator(), context.Modules());
+                  : RunSelfTest(context.DefaultAllocator(), context.Modules(), gpuValidation);
 }
 
 const rocks::launch::ApplicationDescription& Describe() noexcept {

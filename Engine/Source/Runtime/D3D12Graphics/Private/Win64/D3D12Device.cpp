@@ -53,12 +53,25 @@ D3D12Device::~D3D12Device() {
 
 Result<void> D3D12Device::Initialize(const DeviceDesc& desc) noexcept {
     UINT factoryFlags = 0;
-    if (desc.enableValidation) {
+    // GPU 기반 검증은 debug layer를 함께 켠다(UE 5.8 D3D12Adapter.cpp CreateRootDevice와 같다).
+    // 장치를 만들기 전에 켜야 한다.
+    if (desc.enableValidation || desc.enableGpuValidation) {
         ComRef<ID3D12Debug> debug;
         if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(debug.Out())))) {
             debug->EnableDebugLayer();
             validation_ = true;
             factoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
+            if (desc.enableGpuValidation) {
+                ComRef<ID3D12Debug1> debug1;
+                if (SUCCEEDED(debug.TryQueryAs(debug1))) {
+                    debug1->SetEnableGPUBasedValidation(TRUE);
+                    gpuValidation_ = true;
+                } else {
+                    Log::Warning(LogGraphicsD3D12,
+                                 "D3D12 GPU-based validation was requested but ID3D12Debug1 is not "
+                                 "available; continuing with the debug layer only");
+                }
+            }
         }
     }
 
@@ -276,6 +289,7 @@ DeviceInfo D3D12Device::Info() const noexcept {
     // 생성·갱신은 내부 잠금 아래 업로드 기록에 쌓이고 소유 스레드의 다음 제출이 실행한다.
     info.concurrentResourceCreation = true;
     info.validationEnabled = validation_;
+    info.gpuValidationEnabled = gpuValidation_;
     info.software = software_;
     // graphics queue timestamp와 clock calibration이다. queue timestamp는 끊기지 않으므로
     // disjoint 감지는 해당 없다.
@@ -581,11 +595,13 @@ void D3D12Device::KeepUntilDestruction(ComRef<ID3D12Resource>&& object) noexcept
 
 void D3D12Device::ConfigureValidationQueues() noexcept {
     if (SUCCEEDED(device_.TryQueryAs(infoQueue_))) {
-        // 오류만 저장해 저장 한도(기본 1024개)를 경고가 채우지 않게 한다.
+        // 오류만 저장해 저장 한도(기본 1024개)를 경고가 채우지 않게 한다. GPU 기반 검증 실행은
+        // 진단 실행이라 경고도 저장해 남긴다(세지는 않는다).
         D3D12_MESSAGE_SEVERITY severities[] = {D3D12_MESSAGE_SEVERITY_CORRUPTION,
-                                               D3D12_MESSAGE_SEVERITY_ERROR};
+                                               D3D12_MESSAGE_SEVERITY_ERROR,
+                                               D3D12_MESSAGE_SEVERITY_WARNING};
         D3D12_INFO_QUEUE_FILTER filter = {};
-        filter.AllowList.NumSeverities = 2;
+        filter.AllowList.NumSeverities = gpuValidation_ ? 3 : 2;
         filter.AllowList.pSeverityList = severities;
         (void)infoQueue_->PushStorageFilter(&filter);
     }
@@ -613,7 +629,8 @@ void D3D12Device::DrainValidationMessages() const noexcept {
             if (message == nullptr || FAILED(infoQueue_->GetMessage(index, message, &length)) ||
                 message->Severity == D3D12_MESSAGE_SEVERITY_ERROR ||
                 message->Severity == D3D12_MESSAGE_SEVERITY_CORRUPTION) {
-                // 읽지 못한 메시지도 오류로 센다(필터가 오류만 저장한다).
+                // 읽지 못한 메시지도 오류로 센다(필터가 오류만 저장한다. 경고도 저장하는 GPU 기반
+                // 검증 실행에서는 읽지 못한 경고도 오류로 센다).
                 ++validationErrors_;
             }
 
@@ -769,8 +786,11 @@ Result<UniquePtr<Device>> CreateD3D12Device(Allocator& allocator, const DeviceDe
     }
 
     const DeviceInfo info = created.Value()->Info();
-    Log::Info(LogGraphicsD3D12, "Created {Backend} device on {Adapter} (validation {Validation})",
-              BackendName(info.backend), info.adapterName, info.validationEnabled);
+    Log::Info(LogGraphicsD3D12,
+              "Created {Backend} device on {Adapter} (validation {Validation}, GPU-based "
+              "validation {GpuValidation})",
+              BackendName(info.backend), info.adapterName, info.validationEnabled,
+              info.gpuValidationEnabled);
     return Result<UniquePtr<Device>>::Success(UniquePtr<Device>(Move(created.Value())));
 }
 

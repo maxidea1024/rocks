@@ -1292,6 +1292,8 @@ private:
     SplitTransitionTracker splits_;
     bool recording_ = false;
     bool validation_ = false;
+    // GPU 기반 검증이 켜졌다(DeviceDesc::enableGpuValidation). 검증 queue가 경고도 저장한다.
+    bool gpuValidation_ = false;
     bool software_ = false;
     // D3D12_HEAP_FLAG_CREATE_NOT_ZEROED를 받는 런타임이다(ID3D12Device8, UE D3D12Adapter.cpp와
     // 같다).
