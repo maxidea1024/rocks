@@ -243,12 +243,31 @@ void D3D12Device::ResetBindings() noexcept {
     stencilReference_ = 0;
 }
 
+namespace {
+
+// 텍스처가 attachment 하나(mip 1, slice 1, 3D면 깊이 1)로 전부 덮이는지다. 그러면 패스의 attachment
+// clear가 자원 전체를 초기화한다(placed 획득의 Discard 생략, GX12).
+bool IsSingleSubresource(const TextureRecord& record) noexcept {
+    return record.mipLevels == 1 && record.slices == 1 &&
+           (record.dimension != TextureDimension::Texture3D || record.depth == 1);
+}
+
+} // namespace
+
 void D3D12Device::StartPass(const PassDesc& pass) noexcept {
     // attachment 전이다(GX5): offscreen 대상은 추적한 상태에서, 스왑체인 백버퍼는 present에서
     // 렌더 타깃으로 바꾼다. 깊이는 DepthWrite(읽기 전용이면 DepthRead)다.
     for (uint32 index = 0; index < target_.colorCount; ++index) {
         TextureRecord* color = textures_.Find(target_.colors[index].slot);
         if (color != nullptr) {
+            // placed 텍스처의 attachment 획득은 attachment 전이 전에 한다(GX12, placed가 아니면
+            // 무시한다).
+            if (pass.colors[index].acquire && !color->heap.IsNull()) {
+                AcquireTexture(*color, target_.colors[index].slot,
+                               pass.colors[index].load == LoadAction::Clear &&
+                                   IsSingleSubresource(*color));
+            }
+
             // attachment의 subresource 하나만 바꾼다(텍스처 GX2 C부).
             TrackTransition(*color, target_.colors[index].slot,
                             AttachmentSubresource(color->dimension, target_.colorMips[index],
@@ -263,6 +282,14 @@ void D3D12Device::StartPass(const PassDesc& pass) noexcept {
 
     TextureRecord* depth = textures_.Find(target_.depth.slot);
     if (depth != nullptr) {
+        if (pass.depth.acquire && !depth->heap.IsNull()) {
+            const bool stencil = GetPixelFormatInfo(depth->format).stencilBits != 0;
+            AcquireTexture(*depth, target_.depth.slot,
+                           !target_.depthReadOnly && pass.depth.depthLoad == LoadAction::Clear &&
+                               (!stencil || pass.depth.stencilLoad == LoadAction::Clear) &&
+                               IsSingleSubresource(*depth));
+        }
+
         TrackTransition(
             *depth, target_.depth.slot,
             AttachmentSubresource(depth->dimension, target_.depthMip, target_.depthSlice),
@@ -654,13 +681,19 @@ void D3D12Device::TransitionLocked(Span<const ResourceTransition> transitions) n
             continue;
         }
 
-        // 내용 버림은 지금 낮출 것이 없다(aliasing은 RG5·GX12).
+        // 내용 버림은 지금 낮출 것이 없다(aliasing 획득은 다음 사용의 전이가 한다, GX12).
         if (transition.after == ResourceAccess::Discard) {
             continue;
         }
 
-        if (validation_ && transition.before != ResourceAccess::Unknown &&
-            transition.before != ResourceAccess::Discard) {
+        // placed 텍스처의 aliasing 획득이다(GX12, placed가 아니면 무시한다). 그 뒤 추적한
+        // 상태에서 after로 바꾼다.
+        const bool acquire = transition.acquire && !record->heap.IsNull();
+        if (acquire) {
+            CheckAcquireBefore(transition);
+            AcquireTexture(*record, slot);
+        } else if (validation_ && transition.before != ResourceAccess::Unknown &&
+                   transition.before != ResourceAccess::Discard) {
             const D3D12_RESOURCE_STATES declared = StatesFor(transition.before);
             bool matched = true;
             for (uint32 slice = range.firstSlice;
@@ -699,6 +732,12 @@ void D3D12Device::LowerBufferTransition(const ResourceTransition& transition) no
     if (record == nullptr) {
         ++ignoredDraws_;
         return;
+    }
+
+    // placed 버퍼의 aliasing 획득이다(GX12, placed가 아니면 무시한다). 버퍼는 초기화가 필요 없다.
+    if (transition.acquire && !record->heap.IsNull()) {
+        CheckAcquireBefore(transition);
+        AcquireBuffer(*record, transition.buffer.slot);
     }
 
     RequireBufferState(record->resource.Get(), StatesFor(transition.after));
@@ -859,6 +898,17 @@ void D3D12Device::SettleTracking(bool executed) noexcept {
 
     touchedTextures_.Clear();
     touchedOverflow_ = false;
+    // 제출하지 못한 기록의 aliasing barrier는 GPU가 보지 못했다. 활성 추적을 믿을 수 없으므로 모든
+    // placed 구간을 비활성으로 돌려 다음 획득이 barrier를 다시 내게 한다(GX12).
+    if (!executed && placedActivated_) {
+        for (TransientHeapRecord& heap : heaps_) {
+            for (PlacedRange& range : heap.ranges) {
+                range.active = false;
+            }
+        }
+    }
+
+    placedActivated_ = false;
 }
 
 } // namespace rocks::graphics::d3d12

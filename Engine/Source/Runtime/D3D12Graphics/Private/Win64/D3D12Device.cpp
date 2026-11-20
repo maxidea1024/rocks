@@ -6,9 +6,10 @@ namespace rocks::graphics::d3d12 {
 
 D3D12Device::D3D12Device(Allocator& allocator) noexcept
     : adapterName_(allocator), lastError_(allocator), buffers_(allocator), textures_(allocator),
-      pipelines_(allocator), swapChains_(allocator), retired_(allocator), rtvs_(allocator),
-      dsvs_(allocator), srvs_(allocator), samplers_(allocator), allocators_(allocator),
-      messageScratch_(allocator), timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics),
+      pipelines_(allocator), swapChains_(allocator), heaps_(allocator), retired_(allocator),
+      rtvs_(allocator), dsvs_(allocator), srvs_(allocator), samplers_(allocator),
+      allocators_(allocator), messageScratch_(allocator),
+      timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics),
       computeTimeline_(allocator, timeline_.DeviceEpoch(), QueueKind::AsyncCompute),
       computeAllocators_(allocator), computeTimestamps_(allocator), allocator_(allocator),
       readbacks_(allocator), ring_(allocator), timestamps_(allocator), touchedTextures_(allocator),
@@ -40,6 +41,8 @@ D3D12Device::~D3D12Device() {
     pipelines_.Clear();
     bufferViews_.Clear();
     buffers_.Clear();
+    // placed 자원을 모두 놓은 뒤 heap을 놓는다(GX12).
+    heaps_.Clear();
     if (fenceEvent_ != nullptr) {
         CloseHandle(fenceEvent_);
     }
@@ -103,6 +106,11 @@ Result<void> D3D12Device::Initialize(const DeviceDesc& desc) noexcept {
         }
         software_ = true;
     }
+
+    // transient heap(GX12)의 CREATE_NOT_ZEROED는 그 flag를 아는 런타임(ID3D12Device8)에서만
+    // 쓴다(UE D3D12Adapter.cpp:1101–1107).
+    ComRef<ID3D12Device8> device8;
+    heapNotZeroed_ = SUCCEEDED(device_.TryQueryAs(device8));
 
     // 이름은 진단용이라 읽지 못해도(빈 이름) 장치 생성은 계속한다.
     auto named = dxgi::AssignAdapterName(adapter.Get(), adapterName_);
@@ -656,8 +664,8 @@ void* D3D12Device::Scratch(SIZE_T length) const noexcept {
     return reinterpret_cast<void*>((address + 15u) & ~static_cast<uptr>(15u));
 }
 
-void D3D12Device::RetireObject(ComRef<IUnknown>&& object, int64 srv, int64 rtv,
-                               int64 dsv) noexcept {
+void D3D12Device::RetireObject(ComRef<IUnknown>&& object, int64 srv, int64 rtv, int64 dsv,
+                               SlotHandle heap) noexcept {
     Retired entry;
     entry.object = Move(object);
     // 제출된 작업은 모두 signal 뒤에 있으므로 마지막 signal 값이 끝나면 더 쓰지 않는다. 기록
@@ -674,6 +682,7 @@ void D3D12Device::RetireObject(ComRef<IUnknown>&& object, int64 srv, int64 rtv,
     entry.srv = srv;
     entry.rtv = rtv;
     entry.dsv = dsv;
+    entry.heap = heap;
     // 용량은 자원을 만들 때 미리 확보했으므로(ReserveRetireCapacity) 실패하지 않는다.
     auto pushed = retired_.TryPushBack(Move(entry));
     if (!pushed) {
@@ -686,7 +695,7 @@ void D3D12Device::RetireObject(ComRef<IUnknown>&& object, int64 srv, int64 rtv,
 Result<void> D3D12Device::ReserveRetireCapacity(usize extra) noexcept {
     const usize live = buffers_.Size() + bufferViews_.Size() + textures_.Size() +
                        pipelines_.Size() + readbacks_.Size() +
-                       swapChains_.Size() * SwapChainRetireEntries;
+                       swapChains_.Size() * SwapChainRetireEntries + heaps_.Size();
     return retired_.TryEnsureCapacity(retired_.Size() + live + extra);
 }
 
@@ -719,8 +728,13 @@ void D3D12Device::ProcessRetired() noexcept {
         if (entry.dsv >= 0) {
             dsvs_.Free(static_cast<uint32>(entry.dsv));
         }
+        // placed 자원을 놓은 뒤 heap의 placed 수를 줄인다(GX12, 마지막이면 heap도 놓는다).
+        const SlotHandle heap = entry.heap;
         auto removed = retired_.TryRemoveAtSwap(index - 1);
         (void)removed;
+        if (!heap.IsNull()) {
+            ReleasePlacement(heap);
+        }
     }
 }
 

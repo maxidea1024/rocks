@@ -125,8 +125,23 @@ Result<void> D3D12Device::ResizeSwapChain(SwapChainHandle handle, uint32 width,
 // 복사를 기록한다. 소유 스레드의 다음 제출이 실행한다.
 Result<BufferHandle> D3D12Device::CreateBuffer(const BufferDesc& desc,
                                                Span<const uint8> initial) noexcept {
+    return CreateBufferIn(desc, initial, nullptr);
+}
+
+D3D12_RESOURCE_DESC D3D12Device::BufferResourceFor(const BufferDesc& desc) noexcept {
+    D3D12_RESOURCE_DESC resource = BufferResource(desc.size);
+    if (HasAnyBufferUsage(desc.usage, BufferUsage::ShaderWrite)) {
+        resource.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+    }
+
+    return resource;
+}
+
+Result<BufferHandle> D3D12Device::CreateBufferIn(const BufferDesc& desc, Span<const uint8> initial,
+                                                 const Placement* placement) noexcept {
+    // placed 버퍼는 초기 데이터가 없다(내용은 획득 뒤 쓴다).
     auto valid = ValidateBufferDesc(desc);
-    if (!valid || initial.Size() != desc.size) {
+    if (!valid || initial.Size() != (placement != nullptr ? 0u : desc.size)) {
         return Result<BufferHandle>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -136,36 +151,59 @@ Result<BufferHandle> D3D12Device::CreateBuffer(const BufferDesc& desc,
                                       "buffer size exceeds the device limit (bufferBytes)");
     }
 
-    BufferRecord record;
-    const D3D12_HEAP_PROPERTIES heap = HeapProperties(D3D12_HEAP_TYPE_DEFAULT);
-    D3D12_RESOURCE_DESC resource = BufferResource(desc.size);
-    if (HasAnyBufferUsage(desc.usage, BufferUsage::ShaderWrite)) {
-        resource.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-    }
-
-    // 버퍼는 COMMON에서 복사·정점·index·셰이더 읽기로 암묵 승격되고 제출이 끝나면 COMMON으로
-    // 돌아온다.
-    if (FAILED(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &resource,
-                                                D3D12_RESOURCE_STATE_COMMON, nullptr,
-                                                IID_PPV_ARGS(record.resource.Out())))) {
-        return FailWith<BufferHandle>("buffer creation failed");
-    }
-    record.address = record.resource->GetGPUVirtualAddress();
-    record.size = desc.size;
-    record.desc = desc;
-
     auto reserved = ReserveRetireCapacity(1);
     if (!reserved) {
         return Result<BufferHandle>::Failure(reserved.Error());
     }
-    auto copied = RecordBufferUpload(record.resource.Get(), 0, initial);
-    if (!copied) {
-        return Result<BufferHandle>::Failure(copied.Error());
+
+    BufferRecord record;
+    const D3D12_RESOURCE_DESC resource = BufferResourceFor(desc);
+    // 버퍼는 COMMON에서 복사·정점·index·셰이더 읽기로 암묵 승격되고 제출이 끝나면 COMMON으로
+    // 돌아온다(placed 버퍼도 같다).
+    uint64 placedBytes = 0;
+    if (placement != nullptr) {
+        auto heap = CheckPlacement(*placement, TransientHeapKind::Buffers, resource, placedBytes);
+        if (!heap) {
+            return Result<BufferHandle>::Failure(heap.Error());
+        }
+
+        const HRESULT created = device_->CreatePlacedResource(
+            heap.Value()->heap.Get(), placement->offset, &resource, D3D12_RESOURCE_STATE_COMMON,
+            nullptr, IID_PPV_ARGS(record.resource.Out()));
+        if (FAILED(created)) {
+            return FailWith<BufferHandle>("CreatePlacedResource (buffer)", created);
+        }
+
+        record.heap = placement->heap;
+    } else {
+        const D3D12_HEAP_PROPERTIES heap = HeapProperties(D3D12_HEAP_TYPE_DEFAULT);
+        if (FAILED(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &resource,
+                                                    D3D12_RESOURCE_STATE_COMMON, nullptr,
+                                                    IID_PPV_ARGS(record.resource.Out())))) {
+            return FailWith<BufferHandle>("buffer creation failed");
+        }
     }
+
+    record.address = record.resource->GetGPUVirtualAddress();
+    record.size = desc.size;
+    record.desc = desc;
+    // placed 버퍼는 업로드하지 않는다(heap 구간을 다른 자원이 쓰는 중일 수 있다).
+    if (placement == nullptr) {
+        auto copied = RecordBufferUpload(record.resource.Get(), 0, initial);
+        if (!copied) {
+            return Result<BufferHandle>::Failure(copied.Error());
+        }
+    }
+
     auto added = buffers_.TryAdd(Move(record));
     if (!added) {
         return Result<BufferHandle>::Failure(added.Error());
     }
+
+    if (placement != nullptr) {
+        TrackPlaced(placement->heap, added.Value(), placement->offset, placedBytes);
+    }
+
     return Result<BufferHandle>::Success(BufferHandle{added.Value()});
 }
 
@@ -271,6 +309,7 @@ Result<BufferViewHandle> D3D12Device::CreateBufferView(BufferHandle handle,
     record.shaderType = desc.kind == BufferViewKind::Typed
                             ? GetPixelFormatInfo(desc.format).shaderType
                             : PixelShaderType::None;
+    record.heap = buffer->heap;
     auto added = bufferViews_.TryAdd(Move(record));
     if (!added) {
         srvs_.Free(descriptor.Value());
@@ -280,6 +319,12 @@ Result<BufferViewHandle> D3D12Device::CreateBufferView(BufferHandle handle,
         return Result<BufferViewHandle>::Failure(added.Error());
     }
 
+    // placed 버퍼의 view는 버퍼 자원을 붙들므로 heap의 placed 수에 든다(view 회수 때 줄인다).
+    TransientHeapRecord* heap = heaps_.Find(buffer->heap);
+    if (heap != nullptr) {
+        ++heap->placedCount;
+    }
+
     return Result<BufferViewHandle>::Success(BufferViewHandle{added.Value()});
 }
 
@@ -287,6 +332,12 @@ Result<BufferViewHandle> D3D12Device::CreateBufferView(BufferHandle handle,
 // 형식·용도 지원은 장치 능력(GetPixelFormatCaps)으로 판정한다(PixelFormat.ko.md 8.3절).
 Result<TextureHandle> D3D12Device::CreateTexture(const TextureDesc& desc,
                                                  Span<const uint8> pixels) noexcept {
+    return CreateTextureIn(desc, pixels, nullptr);
+}
+
+D3D12Device::TextureDescCheck D3D12Device::CheckTextureDesc(const TextureDesc& desc,
+                                                            usize pixelBytes) const noexcept {
+    TextureDescCheck check;
     const bool renderTarget = HasTextureUsage(desc.usage, TextureUsage::RenderTarget);
     const bool depthTarget = HasTextureUsage(desc.usage, TextureUsage::DepthStencil);
     const bool storage = HasTextureUsage(desc.usage, TextureUsage::Storage);
@@ -294,39 +345,100 @@ Result<TextureHandle> D3D12Device::CreateTexture(const TextureDesc& desc,
     // 형식·용도·차원 능력을 먼저 본다(능력 밖은 다른 인자 검사보다 앞서 Unsupported다).
     if (IsValidPixelFormat(desc.format) && IsValidTextureDimension(desc.dimension) &&
         !HasPixelFormatCaps(FormatCaps(desc.format), RequiredPixelFormatCaps(desc))) {
-        platform::LockGuard lock(gate_);
-        return UnsupportedFormat<TextureHandle>(desc.format);
+        check.code = ErrorCode::Unsupported;
+        check.unsupportedFormat = true;
+        return check;
     }
+
     auto valid = ValidateTextureDesc(desc);
     if (!valid) {
-        return Result<TextureHandle>::Failure(valid.Error());
+        check.code = valid.Error();
+        return check;
     }
+
     if (desc.sampleCount > 1 &&
         (GetPixelFormatSampleCounts(desc.format) & SampleCountBit(desc.sampleCount)) == 0) {
-        platform::LockGuard lock(gate_);
-        return FailCode<TextureHandle>(ErrorCode::Unsupported,
-                                       "MSAA sample count is not supported for this format by the "
-                                       "D3D12 device");
+        check.code = ErrorCode::Unsupported;
+        check.detail = "MSAA sample count is not supported for this format by the D3D12 device";
+        return check;
     }
+
     if (!CheckTextureLimits(caps_, desc)) {
-        platform::LockGuard lock(gate_);
-        return FailCode<TextureHandle>(ErrorCode::Unsupported,
-                                       "texture size, slice count or dimension exceeds the D3D12 "
-                                       "device limits");
+        check.code = ErrorCode::Unsupported;
+        check.detail = "texture size, slice count or dimension exceeds the D3D12 device limits";
+        return check;
     }
+
     const bool depth =
         info.kind == PixelFormatKind::Depth || info.kind == PixelFormatKind::DepthStencil;
     const uint64 size = TextureDataBytes(desc);
-    const bool attachment = renderTarget || depthTarget;
     // 렌더 타깃·깊이·Storage는 초기 픽셀이 없다(업로드하지 않는다).
-    const bool empty = attachment || storage;
+    const bool empty = renderTarget || depthTarget || storage;
     // BC는 최상위 크기가 블록 배수여야 한다(D3D12 요구, PixelFormatInfo::topLevelBlockAligned).
     const bool aligned = !info.topLevelBlockAligned ||
                          (desc.width % info.blockWidth == 0 && desc.height % info.blockHeight == 0);
     if (size == 0 || !aligned || desc.mipLevels > MaxMipLevels ||
-        (empty ? pixels.Size() != 0 : pixels.Size() != size) || (depthTarget && !depth)) {
-        return Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
+        (empty ? pixelBytes != 0 : pixelBytes != size) || (depthTarget && !depth)) {
+        check.code = ErrorCode::InvalidArgument;
     }
+
+    return check;
+}
+
+D3D12_RESOURCE_DESC D3D12Device::TextureResourceFor(const TextureDesc& desc) noexcept {
+    const PixelFormatInfo& info = GetPixelFormatInfo(desc.format);
+    const bool depth =
+        info.kind == PixelFormatKind::Depth || info.kind == PixelFormatKind::DepthStencil;
+    const bool volume = desc.dimension == TextureDimension::Texture3D;
+    D3D12_RESOURCE_DESC resource = {};
+    // cube·배열은 2D 배열 자원이다(cube 면은 UE·D3D 순서대로 slice 0–5).
+    resource.Dimension =
+        volume ? D3D12_RESOURCE_DIMENSION_TEXTURE3D : D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    resource.Width = desc.width;
+    resource.Height = desc.height;
+    resource.DepthOrArraySize = static_cast<UINT16>(volume ? desc.depth : TextureSliceCount(desc));
+    resource.MipLevels = static_cast<UINT16>(desc.mipLevels);
+    resource.Format = d3d12::MappingOf(desc.format).resource;
+    resource.SampleDesc.Count = desc.sampleCount;
+    // 깊이 형식은 늘 DEPTH_STENCIL 플래그로 만든다(typeless 깊이 자원의 DSV·복사 조건).
+    // 렌더 타깃 + Storage는 두 flag를 함께 둔다(용도 비트 묶음, 텍스처 GX2 나머지 A부).
+    resource.Flags = D3D12_RESOURCE_FLAG_NONE;
+    if (HasTextureUsage(desc.usage, TextureUsage::RenderTarget)) {
+        resource.Flags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+    } else if (depth) {
+        resource.Flags |= D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+    }
+
+    if (HasTextureUsage(desc.usage, TextureUsage::Storage)) {
+        resource.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+    }
+
+    return resource;
+}
+
+Result<TextureHandle> D3D12Device::CreateTextureIn(const TextureDesc& desc,
+                                                   Span<const uint8> pixels,
+                                                   const Placement* placement) noexcept {
+    const TextureDescCheck check = CheckTextureDesc(desc, pixels.Size());
+    if (check.code != ErrorCode::None) {
+        if (check.unsupportedFormat) {
+            platform::LockGuard lock(gate_);
+            return UnsupportedFormat<TextureHandle>(desc.format);
+        }
+
+        if (check.detail != nullptr) {
+            platform::LockGuard lock(gate_);
+            return FailCode<TextureHandle>(check.code, check.detail);
+        }
+
+        return Result<TextureHandle>::Failure(check.code);
+    }
+
+    const bool renderTarget = HasTextureUsage(desc.usage, TextureUsage::RenderTarget);
+    const bool depthTarget = HasTextureUsage(desc.usage, TextureUsage::DepthStencil);
+    const bool storage = HasTextureUsage(desc.usage, TextureUsage::Storage);
+    // 렌더 타깃·깊이·Storage는 초기 픽셀이 없다(업로드하지 않는다).
+    const bool empty = renderTarget || depthTarget || storage;
     platform::LockGuard lock(gate_);
     auto sampler = SamplerFor(desc.sampler);
     if (!sampler) {
@@ -350,41 +462,41 @@ Result<TextureHandle> D3D12Device::CreateTexture(const TextureDesc& desc,
     record.viewRange = {0, record.mipLevels, 0, record.slices};
     record.sampler = sampler.Value();
     record.comparison = desc.sampler.comparison;
-    const bool volume = desc.dimension == TextureDimension::Texture3D;
-    D3D12_RESOURCE_DESC resource = {};
-    // cube·배열은 2D 배열 자원이다(cube 면은 UE·D3D 순서대로 slice 0–5).
-    resource.Dimension =
-        volume ? D3D12_RESOURCE_DIMENSION_TEXTURE3D : D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-    resource.Width = desc.width;
-    resource.Height = desc.height;
-    resource.DepthOrArraySize = static_cast<UINT16>(volume ? desc.depth : record.slices);
-    resource.MipLevels = static_cast<UINT16>(desc.mipLevels);
-    resource.Format = mapping.resource;
-    resource.SampleDesc.Count = desc.sampleCount;
-    // 깊이 형식은 늘 DEPTH_STENCIL 플래그로 만든다(typeless 깊이 자원의 DSV·복사 조건).
-    // 렌더 타깃 + Storage는 두 flag를 함께 둔다(용도 비트 묶음, 텍스처 GX2 나머지 A부).
-    resource.Flags = D3D12_RESOURCE_FLAG_NONE;
-    if (renderTarget) {
-        resource.Flags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-    } else if (depth) {
-        resource.Flags |= D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
-    }
-
-    if (storage) {
-        resource.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-    }
-    const D3D12_HEAP_PROPERTIES heap = HeapProperties(D3D12_HEAP_TYPE_DEFAULT);
+    const D3D12_RESOURCE_DESC resource = TextureResourceFor(desc);
     // 최적화 clear 값은 두지 않는다. 패스마다 clear 색이 다르므로 값을 두면 매번 불일치 경고가
     // 쌓인다.
     // 렌더 타깃·깊이 타깃은 셰이더 읽기 상태(ResourceAccess::SrvGraphics와 같은 PSR|NPSR)로
     // 만든다. 업로드로 채우는 텍스처가 업로드 뒤 놓이는 상태와 같아 import 선언이 생성 경로와
-    // 무관하게 맞는다.
-    const D3D12_RESOURCE_STATES initialState =
-        empty ? ShaderReadStates : D3D12_RESOURCE_STATE_COPY_DEST;
-    if (FAILED(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &resource,
-                                                initialState, nullptr,
-                                                IID_PPV_ARGS(record.resource.Out())))) {
-        return FailWith<TextureHandle>("texture creation failed");
+    // 무관하게 맞는다. placed 텍스처는 첫 사용이 획득 전이(before Discard)이므로 획득의 초기화
+    // 상태(렌더 타깃 RENDER_TARGET, 깊이 DEPTH_WRITE, 그 밖 COMMON)로 만든다(GX12).
+    D3D12_RESOURCE_STATES initialState = empty ? ShaderReadStates : D3D12_RESOURCE_STATE_COPY_DEST;
+    uint64 placedBytes = 0;
+    if (placement != nullptr) {
+        initialState = (resource.Flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) != 0
+                           ? D3D12_RESOURCE_STATE_RENDER_TARGET
+                       : (resource.Flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL) != 0
+                           ? D3D12_RESOURCE_STATE_DEPTH_WRITE
+                           : D3D12_RESOURCE_STATE_COMMON;
+        auto heap = CheckPlacement(*placement, TransientHeapKindOf(desc), resource, placedBytes);
+        if (!heap) {
+            return Result<TextureHandle>::Failure(heap.Error());
+        }
+
+        const HRESULT created = device_->CreatePlacedResource(
+            heap.Value()->heap.Get(), placement->offset, &resource, initialState, nullptr,
+            IID_PPV_ARGS(record.resource.Out()));
+        if (FAILED(created)) {
+            return FailWith<TextureHandle>("CreatePlacedResource (texture)", created);
+        }
+
+        record.heap = placement->heap;
+    } else {
+        const D3D12_HEAP_PROPERTIES heap = HeapProperties(D3D12_HEAP_TYPE_DEFAULT);
+        if (FAILED(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &resource,
+                                                    initialState, nullptr,
+                                                    IID_PPV_ARGS(record.resource.Out())))) {
+            return FailWith<TextureHandle>("texture creation failed");
+        }
     }
     auto committed =
         record.committed.Reset(allocator_, record.mipLevels, record.slices, initialState);
@@ -423,7 +535,13 @@ Result<TextureHandle> D3D12Device::CreateTexture(const TextureDesc& desc,
     if (!views) {
         return Result<TextureHandle>::Failure(views.Error());
     }
-    return AddTextureRecord(Move(record));
+
+    auto added = AddTextureRecord(Move(record));
+    if (added && placement != nullptr) {
+        TrackPlaced(placement->heap, added.Value().slot, placement->offset, placedBytes);
+    }
+
+    return added;
 }
 
 // 기본 SRV(형식이 Sampled일 때, plane 0)·RTV·DSV를 만든다(잠금 안). 실패하면 이미 잡은 칸을
@@ -794,7 +912,9 @@ void D3D12Device::Retire(BufferHandle handle) noexcept {
     if (record == nullptr) {
         return;
     }
-    Defer(Move(record->resource), -1, -1);
+    // placed 버퍼는 heap 구간 목록에서 빼고, 자원을 놓은 뒤 heap의 placed 수를 줄인다(GX12).
+    ForgetPlaced(record->heap, handle.slot);
+    Defer(Move(record->resource), -1, -1, -1, record->heap);
     auto removed = buffers_.TryRemove(handle.slot);
     (void)removed;
 }
@@ -814,7 +934,7 @@ void D3D12Device::Retire(BufferViewHandle handle) noexcept {
     if (record->cpuDescriptor >= 0) {
         cpuUavs_.Free(static_cast<uint32>(record->cpuDescriptor));
     }
-    Defer(Move(record->resource), record->descriptor, -1);
+    Defer(Move(record->resource), record->descriptor, -1, -1, record->heap);
     auto removed = bufferViews_.TryRemove(handle.slot);
     (void)removed;
 }
@@ -847,9 +967,11 @@ void D3D12Device::Retire(TextureHandle handle) noexcept {
 
 // 텍스처 기록 하나를 회수 대기로 넘기고 표에서 뺀다(잠금 안).
 void D3D12Device::RetireTextureRecord(SlotHandle slot, TextureRecord& record) noexcept {
+    // placed 텍스처는 heap 구간 목록에서 빼고, 자원을 놓은 뒤 heap의 placed 수를 줄인다(GX12).
+    ForgetPlaced(record.heap, slot);
     Defer(Move(record.resource), record.hasSrv ? static_cast<int64>(record.srv) : int64{-1},
           record.renderTarget ? static_cast<int64>(record.rtv) : int64{-1},
-          record.depthTarget ? static_cast<int64>(record.dsv) : int64{-1});
+          record.depthTarget ? static_cast<int64>(record.dsv) : int64{-1}, record.heap);
     auto removed = textures_.TryRemove(slot);
     (void)removed;
 }
