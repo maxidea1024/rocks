@@ -14,6 +14,7 @@
 // 사용 예:
 //   ROCKS_STRUCT(Settings(Branch = "Render", Section = "RenderGraph"))
 //   struct RenderGraphSettings {
+//       ROCKS_GENERATED_BODY()
 //       ROCKS_PROPERTY(ConsoleName = "render.graph.immediate", RenderRead) bool immediate = false;
 //       ROCKS_PROPERTY(UserConfig) int32 maxPasses = 64;
 //   };

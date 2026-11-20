@@ -1,5 +1,6 @@
 #include "AssetManagerInternal.h"
 
+#include <AssetRuntime/Package.generated.h>
 #include <Core/Move.h>
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>

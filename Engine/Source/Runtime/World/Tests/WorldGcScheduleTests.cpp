@@ -6,6 +6,9 @@
 #include <Object/TypeRegistry.h>
 #include <Task/WorkerScheduler.h>
 #include <World/Actor.generated.h>
+#include <World/Component.generated.h>
+#include <World/Level.generated.h>
+#include <World/SceneComponent.generated.h>
 #include <World/World.h>
 
 namespace world_gc_schedule_tests_file {

@@ -2,6 +2,10 @@
 #include <Core/Diagnostics/LogContext.h>
 #include <Core/Text/StringBuilder.h>
 #include <Platform/Clock.h>
+#include <World/Actor.generated.h>
+#include <World/Component.generated.h>
+#include <World/Level.generated.h>
+#include <World/SceneComponent.generated.h>
 #include <World/World.h>
 #include <World/WorldLog.h>
 

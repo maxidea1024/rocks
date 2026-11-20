@@ -63,6 +63,7 @@
 // 사용 예:
 //   ROCKS_STRUCT(Version = 2)
 //   struct BulkDataRef {
+//       ROCKS_GENERATED_BODY()
 //       ROCKS_PROPERTY() uint32 bulkId = 0;
 //       ROCKS_PROPERTY() uint64 rawBytes = 0;
 //       ROCKS_PROPERTY() Sha256Digest digest;
@@ -70,6 +71,7 @@
 //
 //   ROCKS_STRUCT(Atomic)      // 두 끝을 한 단위로 기준과 비교·저장·덮어쓴다
 //   struct LodRange {
+//       ROCKS_GENERATED_BODY()
 //       ROCKS_PROPERTY() float minScreenSize = 0;
 //       ROCKS_PROPERTY() float maxScreenSize = 1;
 //   };

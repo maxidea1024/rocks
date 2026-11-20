@@ -230,12 +230,17 @@ internal static partial class ModuleMetaTests
             using Layout layout = new(options, environment);
             Verify.Equal(0, (await layout.RunLowerAsync()).ExitCode, "lower module");
             Directory.CreateDirectory(layout.Generated("Absent", "Public"));
-            (string Path, string Include, bool Private)[] inputs = [(layout.Source("Upper/Public/Upper/Value.h"), "Upper/Value.h", false)];
+            // 타입 생성 소스는 컴파일되고 모듈 생성 소스(없는 의존 모듈의 집계 헤더를 include한다)만 실패하도록 의존 모듈 타입을 쓰지 않는
+            // 입력을 쓴다(다른 모듈 클래스를 base·참조 대상으로 두면 타입 생성 소스가 그 생성 헤더를 include해 먼저 실패한다 — BS8b).
+            layout.Write("Upper/Public/Upper/Solo.h", "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\nnamespace probe {\n" +
+                "ROCKS_CLASS()\nstruct Solo : public rocks::Object {\nROCKS_GENERATED_BODY()\nROCKS_PROPERTY() rocks::int32 count = 0;\n};\n}\n");
+            layout.Manifest("Upper", ["probe::Solo"], ["probe::Solo::count"]);
+            (string Path, string Include, bool Private)[] inputs = [(layout.Source("Upper/Public/Upper/Solo.h"), "Upper/Solo.h", false)];
             ProcessResult rejected = await layout.RunUpperInputsAsync(inputs, dependencyModule: "Absent");
             Verify.That(rejected.ExitCode != 0, "--verify-sources accepted a module generated source that does not compile");
             Verify.Contains("RMC3000", rejected.StdErr, "module source verification code");
             Verify.Contains("Source/Upper.module.generated.cpp", rejected.StdErr, "module source verification names the generated source");
-            Verify.That(!File.Exists(layout.ModuleSource("Upper")) && !File.Exists(layout.Generated("Upper", "Public/Upper/Value.generated.h")) &&
+            Verify.That(!File.Exists(layout.ModuleSource("Upper")) && !File.Exists(layout.Generated("Upper", "Public/Upper/Solo.generated.h")) &&
                 !File.Exists(layout.Generated("Upper", "Public/Upper/Upper.module.generated.h")) && !File.Exists(layout.Descriptor("Upper")),
                 "a rejected module generated source published output");
 
@@ -246,6 +251,36 @@ internal static partial class ModuleMetaTests
 
             // 옵션은 한 번만 준다(--check와 같다).
             await Reject(layout.RunUpperAsync(extra: [MetaCompilerArguments.VerifySources]), "RMC1000", "duplicate option --verify-sources");
+        });
+
+        // 생성 소스의 native 키(Docs/Design/BuildTargets.ko.md 3.8절 BS8b): 헤더는 GeneratedType<X>::NativeKey()를 모듈 API 매크로로
+        // 선언하고(빌드 밖 fallback 정의 포함) 생성 소스가 정의한다. 생성 소스는 클래스 대상의 생성 헤더를 include한다 — 다른 모듈
+        // base에서 물려받은 필드의 대상은 이름 없이 ID로만 이어지므로(import 클래스 대상) ID 경로가 Lower/Target.generated.h를 찾아야
+        // 한다. 대상이 ROCKS_GENERATED_BODY 타입이라 빠지면 NativeTypeKey의 static_assert로 검증 컴파일이 실패한다.
+        suite.Add("Meta.GeneratedSourceDefinesNativeKeyAndIncludesClassTargets", async () =>
+        {
+            using Layout layout = new(options, environment);
+            layout.Write("Lower/Public/Lower/Target.h", "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\nnamespace probe {\n" +
+                "ROCKS_CLASS()\nstruct Target : public rocks::Object {\nROCKS_GENERATED_BODY()\nROCKS_PROPERTY() rocks::int32 value = 0;\n};\n}\n");
+            layout.Write("Lower/Public/Lower/Parent.h", "#pragma once\n#include <Lower/Target.h>\n#include <Object/ObjectRefs.h>\nnamespace probe {\n" +
+                "ROCKS_CLASS()\nstruct Parent : public rocks::Object {\nROCKS_GENERATED_BODY()\nROCKS_PROPERTY() rocks::int32 value = 0;\n" +
+                "ROCKS_PROPERTY() rocks::ObjectRef<Target> target;\n};\n}\n");
+            layout.Manifest("Lower", ["probe::Target"], ["probe::Target::value", "probe::Parent::target"]);
+            Verify.Equal(0, (await layout.RunLowerAsync(extraInputs: [("Lower/Target.h", "Lower/Target.h")])).ExitCode, "lower module");
+            layout.Write("Upper/Public/Upper/Child.h", "#pragma once\n#include <Lower/Parent.h>\nnamespace probe {\n" +
+                "ROCKS_CLASS()\nstruct Child : public Parent {\nROCKS_GENERATED_BODY()\nROCKS_PROPERTY() rocks::int32 extra = 0;\n};\n}\n");
+            layout.Manifest("Upper", ["probe::Child"], ["probe::Child::extra"]);
+            ProcessResult upper = await layout.RunUpperInputsAsync([(layout.Source("Upper/Public/Upper/Child.h"), "Upper/Child.h", false)]);
+            Verify.Equal(0, upper.ExitCode, "upper module with an inherited imported class target: " + upper.StdErr);
+
+            string header = File.ReadAllText(layout.Generated("Upper", "Public/Upper/Child.generated.h"));
+            string source = File.ReadAllText(layout.Generated("Upper", "Source/Public/Upper/Child.generated.cpp"));
+            Verify.Contains("#ifndef ROCKS_UPPER_API", header, "API macro fallback");
+            Verify.Contains("static ROCKS_UPPER_API const void* NativeKey() noexcept;", header, "native key declaration");
+            Verify.That(!header.Contains("Target.generated.h", StringComparison.Ordinal), "class targets are not included by the generated header");
+            Verify.Contains("const void* GeneratedType<::probe::Child>::NativeKey() noexcept {", source, "native key definition");
+            Verify.Contains("#include <Lower/Parent.generated.h>", source, "class base generated header");
+            Verify.Contains("#include <Lower/Target.generated.h>", source, "inherited imported class target found by ID");
         });
 
         // 생성물 검증 컴파일은 소비자와 같은 include 순서를 쓴다. 작성자 디렉터리의 낡은 .generated.h가 생성 헤더보다 먼저
@@ -322,7 +357,7 @@ internal static partial class ModuleMetaTests
             using Layout layout = new(options, environment);
             layout.Write("Lower/Public/Lower/Parent.h", "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\n" +
                 "#include <Object/AssetId.h>\n#include <Object/SoftObjectRef.h>\n#include <Core/Encoding/Sha256.h>\nnamespace probe {\n" +
-                "ROCKS_CLASS()\nstruct Parent : public rocks::Object {\n" +
+                "ROCKS_CLASS()\nstruct Parent : public rocks::Object {\nROCKS_GENERATED_BODY()\n" +
                 "explicit Parent(rocks::Allocator& allocator) noexcept : icon(allocator), any(allocator) {}\n" +
                 "ROCKS_PROPERTY() rocks::int32 value = 0;\nROCKS_PROPERTY() rocks::AssetId source;\nROCKS_PROPERTY() rocks::Sha256Digest hash;\n" +
                 "ROCKS_PROPERTY(Required) rocks::SoftObjectRef<Parent> icon;\nROCKS_PROPERTY() rocks::SoftObjectRef<> any;\n};\n}\n");
@@ -375,8 +410,8 @@ internal static partial class ModuleMetaTests
             layout.Write("Lower/Public/Lower/Parent.h", "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\n" +
                 "#include <Core/Optional.h>\n#include <Core/Text/String.h>\nnamespace probe {\n" +
                 "ROCKS_ENUM()\nenum class Mode : rocks::uint8 { First = 1, Second = 2 };\n" +
-                "ROCKS_STRUCT()\nstruct Leaf {\nROCKS_PROPERTY() rocks::Optional<rocks::String> note;\n};\n" +
-                "ROCKS_CLASS()\nstruct Parent : public rocks::Object {\n" +
+                "ROCKS_STRUCT()\nstruct Leaf {\nROCKS_GENERATED_BODY()\nROCKS_PROPERTY() rocks::Optional<rocks::String> note;\n};\n" +
+                "ROCKS_CLASS()\nstruct Parent : public rocks::Object {\nROCKS_GENERATED_BODY()\n" +
                 "ROCKS_PROPERTY() rocks::int32 value = 0;\nROCKS_PROPERTY() rocks::Optional<rocks::int32> count;\n" +
                 "ROCKS_PROPERTY() rocks::Optional<Mode> mode;\nROCKS_PROPERTY() rocks::Optional<Leaf> leaf;\n};\n}\n");
             layout.Manifest("Lower", ["probe::Mode", "probe::Leaf"], ["probe::Leaf::note", "probe::Parent::count", "probe::Parent::mode", "probe::Parent::leaf"]);
@@ -412,8 +447,8 @@ internal static partial class ModuleMetaTests
             layout.Write("Lower/Public/Lower/Parent.h", "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\n" +
                 "#include <Core/Containers/OrderedMap.h>\n#include <Core/Containers/OrderedSet.h>\n#include <Core/Text/String.h>\nnamespace probe {\n" +
                 "ROCKS_ENUM()\nenum class Mode : rocks::uint8 { First = 1, Second = 2 };\n" +
-                "ROCKS_STRUCT()\nstruct Leaf {\nROCKS_PROPERTY() rocks::int32 x = 0;\n};\n" +
-                "ROCKS_CLASS()\nstruct Parent : public rocks::Object {\n" +
+                "ROCKS_STRUCT()\nstruct Leaf {\nROCKS_GENERATED_BODY()\nROCKS_PROPERTY() rocks::int32 x = 0;\n};\n" +
+                "ROCKS_CLASS()\nstruct Parent : public rocks::Object {\nROCKS_GENERATED_BODY()\n" +
                 "explicit Parent(rocks::Allocator& allocator) noexcept : leaves(allocator), modes(allocator) {}\n" +
                 "ROCKS_PROPERTY() rocks::int32 value = 0;\nROCKS_PROPERTY(MaxElements = 4) rocks::OrderedMap<Mode, Leaf> leaves;\n" +
                 "ROCKS_PROPERTY() rocks::OrderedSet<Mode> modes;\n};\n}\n");
@@ -421,7 +456,7 @@ internal static partial class ModuleMetaTests
             ProcessResult lower = await layout.RunLowerAsync();
             Verify.Equal(0, lower.ExitCode, "lower module: " + lower.StdErr);
             layout.Write("Upper/Public/Upper/Value.h", "#pragma once\n#include <Lower/Parent.h>\n#include <Object/ObjectRefs.h>\nnamespace probe {\n" +
-                "ROCKS_CLASS()\nstruct Value : public Parent {\nusing Parent::Parent;\nROCKS_PROPERTY() rocks::ObjectRef<Parent> next;\n};\n}\n");
+                "ROCKS_CLASS()\nstruct Value : public Parent {\nROCKS_GENERATED_BODY()\nusing Parent::Parent;\nROCKS_PROPERTY() rocks::ObjectRef<Parent> next;\n};\n}\n");
             ProcessResult upper = await layout.RunUpperInputsAsync([(layout.Source("Upper/Public/Upper/Value.h"), "Upper/Value.h", false)]);
             Verify.Equal(0, upper.ExitCode, "upper module: " + upper.StdErr);
 

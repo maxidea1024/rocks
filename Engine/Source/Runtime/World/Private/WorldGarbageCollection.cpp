@@ -1,6 +1,10 @@
 #include <Core/Diagnostics/Log.h>
 #include <Platform/Atomics.h>
 #include <Platform/Fatal.h>
+#include <World/Actor.generated.h>
+#include <World/Component.generated.h>
+#include <World/Level.generated.h>
+#include <World/SceneComponent.generated.h>
 #include <World/World.h>
 #include <World/WorldLog.h>
 

@@ -239,6 +239,8 @@ struct FieldSchema {
 ```cpp
 ROCKS_STRUCT(Version = 1)
 struct BulkDataRef {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() uint32 bulkId = 0;
     ROCKS_PROPERTY() uint64 rawBytes = 0;
     ROCKS_PROPERTY() Sha256Digest digest;

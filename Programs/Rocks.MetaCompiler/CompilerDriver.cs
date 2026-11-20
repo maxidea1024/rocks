@@ -223,7 +223,7 @@ internal static class CompilerDriver
         List<(string Path, string Text, GeneratedRoot Root)> outputs = [];
         foreach (ModuleInput input in options.Inputs)
         {
-            (string header, string source) = CppEmitter.Emit(schema, input);
+            (string header, string source) = CppEmitter.Emit(schema, input, options.Module);
             outputs.Add((options.OutputPath(input), header, input.Private ? GeneratedRoot.Private : GeneratedRoot.Public));
             outputs.Add((options.SourcePath(input), source, GeneratedRoot.Source));
         }
