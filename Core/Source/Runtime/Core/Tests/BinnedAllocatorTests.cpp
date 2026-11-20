@@ -1,3 +1,4 @@
+#include <Base/Compiler.h>
 #include <Core/Containers/Array.h>
 #include <Core/Memory/BinnedAllocator.h>
 #include <Core/Memory/SystemAllocator.h>
@@ -5,13 +6,25 @@
 #include <PlatformBase/Private/Common/VirtualMemoryTestAccess.h>
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
+#include <Platform/Process.h>
 #include <Platform/Thread.h>
+#include <TestSupport/HostFailure.h>
 #include <TestSupport/NFailAllocator.h>
+#include <TestSupport/ProcessProbe.h>
 #include <TestSupport/Test.h>
+#include <cstdlib>
+#include <string.h>
 
 // BinnedAllocator의 계약·소유 판정·slab 수명·실패 경로다(Docs/Design/GarbageCollectionScale.ko.md
 // 18.4·18.5·18.9절).
 using namespace rocks;
+
+// 시험 실행기가 "--process-probe <모드> ..."로 다시 띄운 자식에서 부를 함수를 건다(실행기 쪽 정의).
+namespace rocks::test {
+bool RegisterProcessProbe(const char* mode,
+                          int (*function)(int, const char* const*) noexcept) noexcept;
+} // namespace rocks::test
+
 namespace binned_allocator_tests_file {
 
 using rocks::detail::BinnedAllocatorTestAccess;
@@ -282,17 +295,116 @@ void RunReturnWork(void* context) noexcept {
     }
 }
 
-struct DuplicateWork {
-    BinnedAllocator* allocator;
-    StartGate* gate;
-    void* address;
-    ErrorCode result = ErrorCode::None;
+// ---- 내줄 때의 표지 검사(Fatal 대조 — 자식 프로세스) ----
+
+constexpr char LostMarkerProbeMode[] = "binned-lost-marker";
+constexpr char LostMarkerDuplicate[] = "duplicate-cached";
+constexpr char LostMarkerOverwriteCached[] = "overwrite-cached";
+constexpr char LostMarkerOverwriteLocked[] = "overwrite-locked";
+constexpr char LostMarkerMessage[] = "BinnedAllocator free block lost its return marker";
+constexpr usize LostMarkerRequest = 48;
+// 반환한 블록의 둘째 word에 쓰는 값이다(표지가 아닌 아무 값).
+constexpr uptr UseAfterFreeValue = 0x5a5a5a5a5a5a5a5aULL;
+// probe가 시나리오 이름을 받는 인자 위치다(실행 파일, --process-probe, 모드, 시나리오).
+constexpr int LostMarkerScenarioArgument = 3;
+// probe의 종료 코드다(Fatal이 아니라 준비 단계에서 돌아온 경우 — 부모는 메시지가 없어 실패로 본다).
+constexpr int LostMarkerBadArguments = 20;
+constexpr int LostMarkerSetupFailed = 21;
+
+// 반환한 블록의 둘째 word를 쓴다(use-after-free). ASan 구성에서는 반환한 블록이 닫혀 있으므로
+// 계측에서 뺀다 — ASan이 아니라 할당자의 검사가 잡는 것을 본다.
+ROCKS_NO_SANITIZE_ADDRESS void OverwriteSecondWord(void* block, uptr value) noexcept {
+    static_cast<uptr*>(block)[1] = value;
+}
+
+// 자식 쪽이다. Fatal이 나면 돌아오지 않는다. 돌아오면 검출이 빠졌다는 뜻이므로 0으로 끝내 부모가
+// 실패로 본다.
+int LostMarkerProbe(int argc, const char* const* argv) noexcept {
+    rocks::test::PrepareFatalTestProcess();
+    if (argc <= LostMarkerScenarioArgument) {
+        return LostMarkerBadArguments;
+    }
+
+    const char* scenario = argv[LostMarkerScenarioArgument];
+    const bool duplicate = strcmp(scenario, LostMarkerDuplicate) == 0;
+    const bool overwriteLocked = strcmp(scenario, LostMarkerOverwriteLocked) == 0;
+    if (!duplicate && !overwriteLocked && strcmp(scenario, LostMarkerOverwriteCached) != 0) {
+        return LostMarkerBadArguments;
+    }
+
+    SystemAllocator system;
+    BinnedAllocatorConfig config;
+    config.threadCaches = !overwriteLocked;
+    BinnedAllocator allocator(system, config);
+    // 같은 slab에 살아 있는 블록을 남겨 둔다(등급 잠금 경로에서 slab이 비어 다시 떼이면 표지가 새로
+    // 쓰인다).
+    auto anchor = allocator.Allocate(LostMarkerRequest, 16);
+    auto block = allocator.Allocate(LostMarkerRequest, 16);
+    if (!anchor || !block || !allocator.Deallocate(block.Value())) {
+        return LostMarkerSetupFailed;
+    }
+
+    if (duplicate) {
+        // 겹친 중복 반환의 결과다: 같은 블록이 자유 목록에 두 번 든다.
+        if (!BinnedAllocatorTestAccess::ReturnAgainIgnoringMarker(allocator, block.Value())) {
+            return LostMarkerSetupFailed;
+        }
+    } else {
+        OverwriteSecondWord(block.Value(), UseAfterFreeValue);
+    }
+
+    // 방금 반환한 블록이 먼저 다시 나온다. 덮어쓴 블록은 첫 할당이 Fatal이다. 두 번 든 블록은 첫
+    // 할당이 표지를 지우며 지나가고, 같은 블록을 다시 꺼내는 둘째 할당이 Fatal이다.
+    (void)allocator.Allocate(LostMarkerRequest, 16);
+    (void)allocator.Allocate(LostMarkerRequest, 16);
+    // Fatal이 아니면 여기에 온다(파괴의 "남은 할당" Fatal로 넘어가지 않게 바로 끝낸다).
+    std::_Exit(0);
+}
+
+const bool LostMarkerProbeRegistered =
+    rocks::test::RegisterProcessProbe(LostMarkerProbeMode, &LostMarkerProbe);
+
+struct LostMarkerRun {
+    bool ran = false;
+    bool abnormal = false;
+    char error[4096] = {};
 };
 
-void RunDuplicateWork(void* context) noexcept {
-    auto& work = *static_cast<DuplicateWork*>(context);
-    work.gate->Arrive();
-    work.result = work.allocator->Deallocate(work.address).Error();
+// 자식을 띄워 끝날 때까지 기다린다(시간 한도를 두지 않는다 — 기계 부하로 결과가 바뀌지 않게).
+LostMarkerRun RunLostMarkerProbe(const char* scenario) noexcept {
+    LostMarkerRun result;
+    char executable[4096];
+    usize executableBytes = 0;
+    if (!platform::GetExecutablePath(executable, sizeof(executable), executableBytes)) {
+        return result;
+    }
+
+    constexpr char ProbeSwitch[] = "--process-probe";
+    const platform::ProcessArgument arguments[] = {
+        {ProbeSwitch, sizeof(ProbeSwitch) - 1},
+        {LostMarkerProbeMode, sizeof(LostMarkerProbeMode) - 1},
+        {scenario, strlen(scenario)}};
+    platform::ProcessStartInfo info;
+    info.executable = executable;
+    info.executableBytes = executableBytes;
+    info.arguments = arguments;
+    info.argumentCount = sizeof(arguments) / sizeof(arguments[0]);
+    info.output = platform::ProcessStreamMode::Null;
+    info.error = platform::ProcessStreamMode::Pipe;
+    platform::ProcessRunOptions options;
+    options.error = result.error;
+    options.errorCapacity = sizeof(result.error) - 1;
+    const platform::ProcessRunResult run = platform::RunProcess(info, options);
+    if (!run.status || run.timedOut) {
+        return result;
+    }
+
+    result.ran = true;
+    result
+        .error[run.errorBytes < sizeof(result.error) ? run.errorBytes : sizeof(result.error) - 1] =
+        '\0';
+    result.abnormal = run.exit.kind != platform::ProcessExitKind::Exited || run.exit.code != 0;
+    return result;
 }
 
 } // namespace
@@ -1274,9 +1386,8 @@ TEST(CoreBinnedConcurrentAllocationStress) {
     CheckConcurrentAllocationStress(true);
 }
 
-// 한 스레드가 할당한 블록을 다른 스레드가 반환한다. 같은 주소를 두 스레드가 함께 반환하면 한쪽만
-// 성공한다.
-static void CheckCrossThreadAndConcurrentDuplicateReturn(bool threadCaches) {
+// 한 스레드가 할당한 블록(작은 것과 큰 것)을 다른 스레드가 반환한다.
+static void CheckCrossThreadReturn(bool threadCaches) {
     SystemAllocator system;
     {
         BinnedAllocatorConfig config;
@@ -1303,43 +1414,34 @@ static void CheckCrossThreadAndConcurrentDuplicateReturn(bool threadCaches) {
         }
 
         CHECK(allocator.Stats().liveAllocations == 0);
-        constexpr uint32 Rounds = 64;
-        for (uint32 round = 0; round < Rounds; ++round) {
-            // 같은 slab에 살아 있는 블록을 남겨 둔다(중복 반환이 slab 풀기와 겹치지 않게 — 18.4절
-            // 한계 2).
-            auto anchor = allocator.Allocate(25, 8);
-            auto result = allocator.Allocate(25, 8);
-            REQUIRE(anchor);
-            REQUIRE(result);
-            StartGate gate;
-            DuplicateWork duplicates[2]{{&allocator, &gate, result.Value()},
-                                        {&allocator, &gate, result.Value()}};
-            for (usize index = 0; index < 2; ++index) {
-                StartWorker(threads[index], RunDuplicateWork, &duplicates[index]);
-            }
-
-            gate.OpenWhenArrived(2);
-            for (auto& thread : threads) {
-                JoinWorker(thread);
-            }
-
-            CHECK((duplicates[0].result == ErrorCode::None &&
-                   duplicates[1].result == ErrorCode::NotFound) ||
-                  (duplicates[1].result == ErrorCode::None &&
-                   duplicates[0].result == ErrorCode::NotFound));
-            CHECK(allocator.Stats().liveAllocations == 1);
-            REQUIRE(allocator.Deallocate(anchor.Value()));
-        }
-
-        CHECK(allocator.Stats().liveAllocations == 0);
     }
 
     CHECK(system.Stats().liveAllocations == 0);
 }
 
 // 스레드 캐시를 끈 구성(등급 잠금 경로)과 켠 구성에서 같은 계약을 본다.
-TEST(CoreBinnedCrossThreadAndConcurrentDuplicateReturn) {
-    CheckCrossThreadAndConcurrentDuplicateReturn(false);
-    CheckCrossThreadAndConcurrentDuplicateReturn(true);
+TEST(CoreBinnedCrossThreadReturn) {
+    CheckCrossThreadReturn(false);
+    CheckCrossThreadReturn(true);
+}
+
+// 내주려는 블록의 반환 표지가 서 있지 않으면 Fatal이다(설계 18.4절 "겹친 중복 반환"): 같은 블록이
+// 자유 목록에 두 번 든 경우(두 스레드가 겹쳐 반환한 결과 — 시험 통로로 만든다)와, 반환한 블록의
+// 둘째 word를 덮어쓴 경우(스레드 캐시 경로와 등급 잠금 경로). 위반은 이 실행 파일을 다시 띄운
+// 자식에서 확인한다.
+TEST(CoreBinnedIssuingBlockWithoutMarkerIsFatal) {
+    if (!rocks::test::ProcessSpawnExpected()) {
+        return;
+    }
+
+    REQUIRE(LostMarkerProbeRegistered);
+    const char* const scenarios[] = {LostMarkerDuplicate, LostMarkerOverwriteCached,
+                                     LostMarkerOverwriteLocked};
+    for (const char* scenario : scenarios) {
+        const LostMarkerRun run = RunLostMarkerProbe(scenario);
+        REQUIRE(run.ran);
+        CHECK(run.abnormal);
+        CHECK(strstr(run.error, LostMarkerMessage) != nullptr);
+    }
 }
 } // namespace binned_allocator_tests_file

@@ -379,49 +379,6 @@ void RunIdleCacheWork(void* context) noexcept {
     }
 }
 
-// 같은 주소를 두 스레드가 함께 반환한다. round마다 주 스레드가 주소를 걸고 번호를 올리면 두
-// worker가 그 번호를 보고 곧바로 반환한다(스레드를 round마다 만들지 않아 두 반환이 가깝게 겹친다).
-constexpr uint32 DuplicateRounds = 4096;
-constexpr uint32 DuplicateWorkers = 2;
-
-struct DuplicateRace {
-    BinnedAllocator* allocator = nullptr;
-    // 지금 round 번호(1부터)와 그 round에 반환할 주소다.
-    uint32 round = 0;
-    void* address = nullptr;
-    // round를 끝낸 worker 수다.
-    uint32 finished = 0;
-    uint32 successes[DuplicateWorkers]{};
-    uint32 notFound[DuplicateWorkers]{};
-    uint32 other[DuplicateWorkers]{};
-};
-
-struct DuplicateRaceWork {
-    DuplicateRace* race = nullptr;
-    uint32 worker = 0;
-};
-
-void RunDuplicateRace(void* context) noexcept {
-    auto& work = *static_cast<DuplicateRaceWork*>(context);
-    DuplicateRace& race = *work.race;
-    for (uint32 round = 1; round <= DuplicateRounds; ++round) {
-        while (platform::AtomicLoad<platform::MemoryOrder::Acquire>(&race.round) != round) {
-            platform::YieldThread();
-        }
-
-        const ErrorCode result = race.allocator->Deallocate(race.address).Error();
-        if (result == ErrorCode::None) {
-            ++race.successes[work.worker];
-        } else if (result == ErrorCode::NotFound) {
-            ++race.notFound[work.worker];
-        } else {
-            ++race.other[work.worker];
-        }
-
-        platform::AtomicFetchAdd<platform::MemoryOrder::AcquireRelease>(&race.finished, 1);
-    }
-}
-
 } // namespace
 
 // 캐시는 처음 쓸 때 생기고, 묶음 단위로 slab에서 떼어 온다: 떼었지만 내준 적 없는 블록(표지)과 아직
@@ -852,60 +809,6 @@ TEST(CoreBinnedExitedThreadUsesLockedPath) {
         CHECK(allocator.Usage().committedBytes == 0);
         // 이 스레드는 종료 정리를 돌리지 않았다.
         CHECK(!BinnedAllocatorTestAccess::IsCurrentThreadExited());
-    }
-
-    CHECK(system.Stats().liveAllocations == 0);
-}
-
-// 같은 주소를 두 스레드가 함께 반환하면 round마다 정확히 한쪽만 성공한다(캐시 켬·끔 모두 — 표지를
-// 비교 교환으로 세운다).
-TEST(CoreBinnedConcurrentDuplicateReturnHasOneWinner) {
-    SystemAllocator system;
-    for (uint32 mode = 0; mode < 2; ++mode) {
-        BinnedAllocatorConfig config;
-        config.threadCaches = mode != 0;
-        BinnedAllocator allocator(system, config);
-        // 같은 slab에 살아 있는 블록을 남겨 둔다(중복 반환이 slab 풀기와 겹치지 않게 — 18.4절 한계
-        // 2).
-        auto anchor = allocator.Allocate(SmallRequest, 16);
-        REQUIRE(anchor);
-        DuplicateRace race;
-        race.allocator = &allocator;
-        DuplicateRaceWork work[DuplicateWorkers]{{&race, 0}, {&race, 1}};
-        platform::Thread threads[DuplicateWorkers];
-        for (uint32 index = 0; index < DuplicateWorkers; ++index) {
-            StartWorker(threads[index], RunDuplicateRace, &work[index]);
-        }
-
-        uint32 allocationFailures = 0;
-        for (uint32 round = 1; round <= DuplicateRounds; ++round) {
-            auto block = allocator.Allocate(SmallRequest, 16);
-            if (!block) {
-                ++allocationFailures;
-            }
-
-            race.address = block ? block.Value() : nullptr;
-            platform::AtomicStore<platform::MemoryOrder::Release>(&race.finished, 0);
-            platform::AtomicStore<platform::MemoryOrder::Release>(&race.round, round);
-            while (platform::AtomicLoad<platform::MemoryOrder::Acquire>(&race.finished) !=
-                   DuplicateWorkers) {
-                platform::YieldThread();
-            }
-        }
-
-        for (uint32 index = 0; index < DuplicateWorkers; ++index) {
-            JoinWorker(threads[index]);
-        }
-
-        CHECK(allocationFailures == 0);
-        CHECK(race.successes[0] + race.successes[1] == DuplicateRounds);
-        CHECK(race.notFound[0] + race.notFound[1] == DuplicateRounds);
-        CHECK(race.other[0] + race.other[1] == 0);
-        CHECK(allocator.Stats().liveAllocations == 1);
-        CHECK(allocator.Stats().totalAllocations == DuplicateRounds + 1);
-        REQUIRE(allocator.Deallocate(anchor.Value()));
-        allocator.Trim();
-        CHECK(allocator.Usage().committedBytes == 0);
     }
 
     CHECK(system.Stats().liveAllocations == 0);

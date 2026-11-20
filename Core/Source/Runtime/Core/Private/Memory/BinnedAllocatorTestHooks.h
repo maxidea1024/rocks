@@ -41,6 +41,11 @@ struct BinnedAllocator::TestHooks {
     // 않으므로 곧 끝날 worker 스레드에서만 부른다. 종료 정리 뒤에 도는 코드(다른 종료 정리)가
     // allocator를 쓰는 경로를 본다.
     static void RunCurrentThreadExitHook() noexcept;
+    // 겹친 중복 반환의 결과를 만든다: 방금 반환한 작은 블록 address를 표지 검사 없이 호출 스레드의
+    // 캐시에 한 번 더 넣는다(같은 블록이 자유 목록에 두 번 든다). 그 뒤의 할당이 그 블록을 두
+    // 번째로 꺼낼 때 Fatal이어야 한다 — Fatal 대조 프로그램(자식 프로세스)에서만 부른다. 호출
+    // 스레드의 캐시가 없거나 작은 블록이 아니면 거짓이다.
+    static bool ReturnAgainIgnoringMarker(BinnedAllocator& allocator, void* address) noexcept;
     // 호출 스레드가 "종료한 스레드"로 표시됐는지다.
     static bool IsCurrentThreadExited() noexcept;
     // 호출 스레드의 thread_local 포인터만 지운다(기록과 종료 칸의 값은 그대로다). 스레드가 끝나는
