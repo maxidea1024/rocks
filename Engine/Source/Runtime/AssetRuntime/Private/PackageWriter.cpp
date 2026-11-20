@@ -1,6 +1,7 @@
 #include "PackageInternal.h"
 
 #include <AssetRuntime/BulkData.generated.h>
+#include <AssetRuntime/Package.generated.h>
 #include <AssetRuntime/Package.h>
 #include <AssetRuntime/PackageWriter.h>
 #include <Compression/CompressedBlocks.h>

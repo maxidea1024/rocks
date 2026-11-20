@@ -265,6 +265,7 @@ GS2(타입별 본문 분리)는 소비 코드를 고치지 않는다.
 | `ReflectedStructField<S>::Supported`(`Object/GeneratedFieldAccess.h`) | 거짓이 되어 필드 형질이 struct가 아닌 길로 간다 | **조용히 갈림** |
 | `GeneratedFieldVisitor`·`GeneratedLogFields`(같은 파일) | 로그 구조 특수화가 빠진다 | **조용히 갈림** |
 | `render::CheckRenderTransfer<T>`(`RenderBase/RenderTransfer.h`) | 스키마 검사를 건너뛴다 | **조용히 갈림** |
+| `NativeTypeKey<T>`(`Object/Object.h`) | 리플렉션 클래스의 키는 생성 `.cpp`의 `GeneratedType<T>::NativeKey()`다([빌드 타깃](BuildTargets.ko.md) 3.8절 BS8b) — `ReflectedDeclarationV`와 Object 파생으로 고르고 생성 헤더가 없으면 `static_assert`(struct는 inline 키 유지) | 컴파일 오류(BS8b) |
 | `ReflectedEnumField<E>::Supported`(`Object/GeneratedFieldAccess.h`) | 거짓이 된다 | 표지 없음(아래 한계) |
 
 **규칙**

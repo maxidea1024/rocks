@@ -5,6 +5,7 @@
 #include <ReflectionTestFixtures/CoreValueFixture.generated.h>
 #include <ReflectionTestFixtures/ReflectionFixture.generated.h>
 #include <ReflectionTestFixtures/ReflectionTestFixtures.module.generated.h>
+#include <ReflectionTestFixtures/StructFixture.generated.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Object/NativeClass.h>
 #include <Object/PropertyPath.h>
@@ -163,6 +164,27 @@ static_assert(IsSameV<detail::ReflectedAncestor<NativeWorldLeaf>, WorldFixture>)
 static_assert(IsSameV<detail::ReflectedAncestor<NativeSceneActor>, SceneFixture>);
 static_assert(IsSameV<detail::ReflectedAncestor<NativePlain>, void>);
 static_assert(NativeClassType<NativeWorldActor> && !NativeClassType<WorldFixture>);
+
+// NativeTypeKey의 리플렉션 판정(Docs/Design/BuildTargets.ko.md 3.8절 BS8b): ROCKS_GENERATED_BODY를
+// 직접 선언한 class·struct만 리플렉션 타입이다. 리플렉션 base를 물려받은 native 파생은 base의 본문
+// 선언(struct라 public이어도)을 물려받지만, 그 표지가 base 자신을 가리키므로 리플렉션 타입이
+// 아니다.
+struct NativeStructExtension : reflection_fixture::StructLeaf {
+    int32 extra = 0;
+};
+
+struct NativePlainValue {
+    int32 value = 0;
+};
+
+static_assert(ReflectedDeclarationV<WorldFixture>);
+static_assert(ReflectedDeclarationV<SceneFixture>);
+static_assert(ReflectedDeclarationV<reflection_fixture::StructLeaf>);
+static_assert(!ReflectedDeclarationV<NativeWorldActor>);
+static_assert(!ReflectedDeclarationV<NativeWorldLeaf>);
+static_assert(!ReflectedDeclarationV<NativeStructExtension>);
+static_assert(!ReflectedDeclarationV<NativePlainValue>);
+static_assert(!ReflectedDeclarationV<Object>);
 
 template <class T>
 T* Get(Borrow<T>& borrow) noexcept {
@@ -875,4 +897,69 @@ TEST(NativeClass_PrivateAndProtectedTraceAreVisited) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+
+// 리플렉션 클래스의 NativeTypeKey는 생성 .cpp가 정의한 키(GeneratedType<T>::NativeKey)다. 타입마다
+// 다르고 부를 때마다 같다. 리플렉션 struct·native 파생·리플렉션하지 않는 타입은 inline 표지 주소,
+// Object는 null이다.
+TEST(NativeReflectedBase_NativeTypeKeyUsesGeneratedKeyForReflectedTypes) {
+    const void* world = NativeTypeKey<WorldFixture>();
+    const void* scene = NativeTypeKey<SceneFixture>();
+    const void* leaf = NativeTypeKey<reflection_fixture::StructLeaf>();
+    CHECK(world != nullptr);
+    CHECK(world == GeneratedType<WorldFixture>::NativeKey());
+    CHECK(scene == GeneratedType<SceneFixture>::NativeKey());
+    // struct 키는 리플렉션 struct도 inline 표지다(BS8b 한계 — StructRefArray 상수 연산표와 같은
+    // 주소).
+    CHECK(leaf == &NativeTypeIdentity<reflection_fixture::StructLeaf>);
+    CHECK(world == NativeTypeKey<WorldFixture>());
+    CHECK(world != scene);
+    CHECK(world != leaf);
+    CHECK(scene != leaf);
+
+    CHECK(NativeTypeKey<NativeWorldActor>() == &NativeTypeIdentity<NativeWorldActor>);
+    CHECK(NativeTypeKey<NativeStructExtension>() == &NativeTypeIdentity<NativeStructExtension>);
+    CHECK(NativeTypeKey<NativeWorldActor>() != world);
+    CHECK(NativeTypeKey<NativeStructExtension>() != leaf);
+    CHECK(NativeTypeKey<NativePlainValue>() == &NativeTypeIdentity<NativePlainValue>);
+    CHECK(NativeTypeKey<Object>() == nullptr);
+}
+
+// 등록(생성 .cpp가 RuntimeTypeOps·StructElementOps에 넣는 키)과 조회(이 번역 단위의
+// NativeTypeKey)가 같은 키다: 리플렉션 클래스 lease는 자기 키와 base 키 모두에 IsNativeA가 참이고,
+// struct는 native 키로 연 lease가 그 struct다. native 파생은 리플렉션 base 키를 base 사슬로
+// 이어받는다.
+TEST(NativeReflectedBase_RegisteredKeysMatchLookupKeys) {
+    SystemAllocator allocator;
+    TypeRegistry types(allocator);
+    {
+        ModuleRegistration registration(types, allocator);
+        REQUIRE(generated::ReflectionTestFixtures::RegisterModuleTypes(registration));
+        auto actorToken = RegisterNativeClass<NativeWorldActor>(types);
+        REQUIRE(actorToken);
+        {
+            auto world = types.Acquire(TypeIdOf<WorldFixture>());
+            auto scene = types.Acquire(TypeIdOf<SceneFixture>());
+            auto actor = types.Acquire(ObjectTypeIdOf<NativeWorldActor>());
+            REQUIRE(world && scene && actor);
+            CHECK(world.Value().IsNativeA(NativeTypeKey<WorldFixture>()));
+            CHECK(!world.Value().IsNativeA(NativeTypeKey<SceneFixture>()));
+            CHECK(scene.Value().IsNativeA(NativeTypeKey<SceneFixture>()));
+            CHECK(actor.Value().IsNativeA(NativeTypeKey<NativeWorldActor>()));
+            CHECK(actor.Value().IsNativeA(NativeTypeKey<WorldFixture>()));
+
+            auto leaf =
+                types.AcquireStructByNative(NativeTypeKey<reflection_fixture::StructLeaf>());
+            REQUIRE(leaf);
+            CHECK(leaf.Value().Id() == TypeIdOf<reflection_fixture::StructLeaf>());
+            CHECK(types.AcquireStructByNative(NativeTypeKey<NativeStructExtension>()).Error() ==
+                  ErrorCode::NotFound);
+        }
+
+        REQUIRE(types.Unregister(actorToken.Value()));
+        REQUIRE(registration.Unregister());
+    }
+
+    CHECK(types.Shutdown());
+}
+
 } // namespace native_reflected_base_tests_file

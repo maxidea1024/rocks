@@ -1,5 +1,6 @@
 #pragma once
 
+#include <AssetRuntime/Package.generated.h>
 #include <AssetRuntime/Package.h>
 #include <AssetRuntime/PackageLoad.h>
 #include <AssetRuntime/PackageWriter.h>

@@ -28,6 +28,7 @@
 //   #include <Core/Math/Transform.h>
 //   ROCKS_CLASS()
 //   struct Marker : rocks::Object {
+//       ROCKS_GENERATED_BODY()
 //       ROCKS_PROPERTY() rocks::Vec3 offset;           // 미러 Vec3Binding으로 리플렉션된다
 //       ROCKS_PROPERTY() rocks::Transform placement;    // 중첩 미러(Vec3d·Quat·Vec3)
 //       ROCKS_PROPERTY() rocks::Transform3f pose;       // float TRS(Atomic)

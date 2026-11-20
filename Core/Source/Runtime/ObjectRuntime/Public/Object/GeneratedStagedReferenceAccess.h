@@ -25,8 +25,13 @@ struct ReferenceArrayStage {
                                             PreparedReferencesAccess::Elements(stage).View());
     }
 
-    static constexpr ReferenceStageOps Ops{&NativeTypeIdentity<T>, nullptr, nullptr, &Publish,
+    // 대상 타입 키는 NativeTypeKey<T>()다. 리플렉션 클래스의 키는 생성 .cpp가 정의해 상수식이
+    // 아니므로 처음 쓸 때 한 번 만든다(Docs/Design/BuildTargets.ko.md 3.8절 BS8b).
+    static const ReferenceStageOps& Ops() noexcept {
+        static const ReferenceStageOps ops{NativeTypeKey<T>(), nullptr, nullptr, &Publish,
                                            &PublishStaged};
+        return ops;
+    }
 };
 
 // ObjectRefMap<K, T> 준비 사본의 연산 표다(사본은 컨테이너 allocator의 OrderedMap<K,
@@ -99,8 +104,12 @@ struct ReferenceMapStage {
         return transaction.AssignMapReferences(owner, target, keys.View(), values.View());
     }
 
-    static constexpr ReferenceStageOps Ops{&NativeTypeIdentity<T>, &DestroyClone, &Collect,
-                                           &Publish, &PublishStaged};
+    // 대상 타입 키는 ReferenceArrayStage::Ops와 같이 처음 쓸 때 NativeTypeKey<T>()로 만든다.
+    static const ReferenceStageOps& Ops() noexcept {
+        static const ReferenceStageOps ops{NativeTypeKey<T>(), &DestroyClone, &Collect, &Publish,
+                                           &PublishStaged};
+        return ops;
+    }
 };
 
 inline ObjectHandle NormalizedReference(ObjectHandle handle) noexcept {
@@ -111,7 +120,7 @@ inline ObjectHandle NormalizedReference(ObjectHandle handle) noexcept {
 // 사본(handle 목록)에서 한다. 오류 규칙은 객체 갈래(PathContainer)와 같다.
 template <class T>
 Result<void> PathStagedReferenceArray(PathCursor& cursor, ObjectRefArray<T>& array) noexcept {
-    if (auto bound = cursor.BindReferences(&array, ReferenceArrayStage<T>::Ops,
+    if (auto bound = cursor.BindReferences(&array, ReferenceArrayStage<T>::Ops(),
                                            array.GetAllocator(), array.View(), nullptr);
         !bound) {
         return bound;
@@ -218,7 +227,7 @@ Result<void> PathStagedReferenceMap(PathCursor& cursor, ObjectRefMap<K, T>& map)
         clone = made;
     }
 
-    if (auto bound = cursor.BindReferences(&map, Stage::Ops, map.GetAllocator(), {}, clone);
+    if (auto bound = cursor.BindReferences(&map, Stage::Ops(), map.GetAllocator(), {}, clone);
         !bound) {
         return bound;
     }
