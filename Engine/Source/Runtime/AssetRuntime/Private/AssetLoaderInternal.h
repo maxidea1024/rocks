@@ -367,8 +367,6 @@ struct AssetLoader::Impl {
     // 단위 칸 하나를 꺼낸다(용량은 호출자가 미리 잡았다 — 할당하지 않는다).
     uint32 TakeUnitSlot() noexcept;
 
-    static bool IsBeforePublish(AssetLoaderUnitPhase phase) noexcept;
-
     // 단위가 건 공개 보유를 놓는다(공개·실패·버림·칸 반납 — 한 번만, 11.7절 2).
     void ReleasePublishedHolds(LoaderUnit& unit) noexcept;
 

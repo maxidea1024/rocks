@@ -92,6 +92,11 @@ Result<void> AssetManager::Impl::ResolvePrimary(AssetId asset, Span<const String
 
 Result<uint32> AssetManager::Impl::TakePrimary() noexcept {
     if (freePrimary == ManagerNoIndex) {
+        // 전달 목록 용량은 TakeTicket과 같은 규칙이다.
+        if (auto reserved = deliver.TryReserve(primaries.Size() + 1); !reserved) {
+            return Result<uint32>::Failure(reserved.Error());
+        }
+
         if (auto added = primaries.TryEmplaceBack(allocator); !added) {
             return Result<uint32>::Failure(added.Error());
         }
@@ -138,9 +143,8 @@ void AssetManager::Impl::EndPrimary(uint32 index, ErrorCode reason) noexcept {
         EndTicket(ticket, reason);
     }
 
-    if (record.stop == ErrorCode::None) {
-        record.stop = reason;
-    }
+    // 묶음 하나는 한 번만 앞당겨 끝난다(놓기는 끝낸 묶음 칸을 비우고, 회수는 칸을 회수 표시한다).
+    record.stop = reason;
 }
 
 // 묶음 티켓 객체가 소멸했다(해제 큐): 끝나기 전이면 취소, 끝났으면 관심을 놓는다.
@@ -180,8 +184,9 @@ uint32 AssetManager::Impl::DeliverPrimary() noexcept {
             done = done && tickets[ticket].done;
         }
 
-        if (done || record.stop != ErrorCode::None) {
-            // 용량은 Pump가 묶음 표 크기로 잡았다.
+        // 앞당겨 끝낸 묶음(EndPrimary)도 구성 티켓이 모두 끝나 있다.
+        if (done) {
+            // 용량은 묶음 표가 자랄 때 잡았다(TakePrimary).
             (void)deliver.TryPushBack(static_cast<uint32>(index));
         }
     }

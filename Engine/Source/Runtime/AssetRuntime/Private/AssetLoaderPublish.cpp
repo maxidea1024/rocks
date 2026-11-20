@@ -150,8 +150,9 @@ void AssetLoader::Impl::FinishUnit(uint32 unit) noexcept {
         LoaderUnit& dependent = units[other];
         RemoveValue(dependent.dependencies, unit);
         // 아직 공개 전인 기대는 단위는 이 단위의 패키지를 공개 보유로 이어서 붙잡는다(11.7절 2 —
-        // 단위가 사라져도 import 대상이 Discard되지 않게). 용량은 해석 때 잡았다.
-        if (dependent.publishedHeld && IsBeforePublish(dependent.phase)) {
+        // 단위가 사라져도 import 대상이 Discard되지 않게). 보유 표시는 공개·해제 때 내리므로 표시가
+        // 있으면 공개 전이다. 용량은 해석 때 잡았다.
+        if (dependent.publishedHeld) {
             for (uint32 member : target.members) {
                 (void)dependent.publishedDeps.TryPushBack(member);
                 ++publishedHolds[member];

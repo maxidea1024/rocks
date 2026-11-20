@@ -751,6 +751,12 @@ TEST(CookedManifest_AllocationFailures) {
     SetPath(manifest, 4, "/Content/O\xE1\xBA\xA1\xCC\x81");
     SetBundles(manifest, "Core", "Expansion1");
     REQUIRE(AddBundle(manifest.entries[0], "G\xE1\xBA\xA1\xCC\x81"));
+    // 구성원 목록 할당(읽기의 구성원 예약)에도 닿는다.
+    const uint64 coreMembers[] = {11, 12};
+    for (uint64 member : coreMembers) {
+        REQUIRE(manifest.entries[0].bundles[0].members.TryPushBack(FixedId(member)));
+    }
+
     Array<uint8> bytes(allocator);
     REQUIRE(WriteCookedManifest(allocator, manifest, bytes));
     test::NFailAllocator failing(allocator);

@@ -181,6 +181,20 @@ struct ManagerRig {
             .IsOk();
     }
 
+    // owner의 hardList를 비운다(쿠킹한 하드 간선을 모두 지운다).
+    bool ClearHardList(uint64 owner) noexcept {
+        ObjectRegistry& registry = manager->Registry();
+        const ObjectAccessContext access = registry.OwnerAccess();
+        const ObjectHandle ownerObject = AssetObject(owner);
+        auto borrow = registry.ResolveForWrite<TestAsset>(access, ownerObject);
+        if (!borrow) {
+            return false;
+        }
+
+        return registry.ClearReferences(access, ownerObject, borrow.Value().Get().Value()->hardList)
+            .IsOk();
+    }
+
     ObjectHandle AssetObject(uint64 id) noexcept {
         ObjectRegistry& registry = manager->Registry();
         auto package = manager->Loader().FindPackage(FixedId(id));

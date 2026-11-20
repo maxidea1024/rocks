@@ -15,9 +15,12 @@ namespace rocks {
 
 constexpr uint32 ManagerNoIndex = NumericLimits<uint32>::Max();
 // handle 슬롯 블록 하나의 슬롯 수와 블록 표 크기다(11.7절 6 — 블록은 옮기지 않고 표는 고정 크기라
-// 다른 스레드의 소멸자가 Game 스레드의 확장과 경쟁하지 않는다). 최대 handle 수 = 둘의 곱.
+// 다른 스레드의 소멸자가 Game 스레드의 확장과 경쟁하지 않는다). 최대 handle 수 = 둘의 곱
+// (AssetManagerMaxLiveHandles).
 constexpr uint32 ManagerSlotsPerBlock = 256;
-constexpr uint32 ManagerMaxSlotBlocks = 4096;
+constexpr uint32 ManagerMaxSlotBlocks = AssetManagerMaxLiveHandles / ManagerSlotsPerBlock;
+static_assert(ManagerMaxSlotBlocks * ManagerSlotsPerBlock == AssetManagerMaxLiveHandles,
+              "AssetManagerMaxLiveHandles must be a whole number of slot blocks");
 
 enum class ManagerSlotKind : uint8 {
     Free,
