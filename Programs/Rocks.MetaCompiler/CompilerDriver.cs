@@ -242,9 +242,9 @@ internal static class CompilerDriver
 
         string formatter = NativeEnvironment.FindExecutable(Environment.GetEnvironmentVariable("ROCKS_CLANG_FORMAT") ?? "clang-format", environment);
         ProcessResult version = await ProcessRunner.RunAsync(new(formatter, ["--version"], root, environment, Timeout: TimeSpan.FromSeconds(20)));
-        if (version.ExitCode != 0 || !version.StdOut.Contains("version 21.1.6", StringComparison.Ordinal))
+        if (version.ExitCode != 0 || !ToolchainTable.IsClangFormatVersion(version.StdOut))
         {
-            throw new MetadataException("Rocks requires clang-format 21.1.6", "RMC3100", "Set ROCKS_CLANG_FORMAT to the pinned formatter executable.");
+            throw new MetadataException("Rocks requires clang-format " + ToolchainTable.ClangFormatVersion, "RMC3100", "Set ROCKS_CLANG_FORMAT to the pinned formatter executable.");
         }
 
         UTF8Encoding utf8 = new(false, true);

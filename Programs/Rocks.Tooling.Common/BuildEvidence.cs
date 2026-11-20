@@ -159,6 +159,12 @@ public sealed class BuildEvidenceDocument
 
     public string? CompilerVersion { get; set; }
 
+    // 컴파일러가 검증한 도구 모음 목록(Build/Toolchain.json)에 있는지다(빌드 CLI가 채운다 — Docs/Design/ClangVersionSupport.ko.md 6.2절).
+    public bool? ToolchainVerified { get; set; }
+
+    // Windows에서 고른 MSVC STL이 요구하는 최소 Clang 확인 결과다("requires Clang 22" 또는 "not checked: 이유" — 6.2절).
+    public string? StlClangCheck { get; set; }
+
     public bool SourceStableDuringRun { get; set; }
 
     public string Status { get; set; } = "NOT RUN";
@@ -270,6 +276,14 @@ public sealed class BuildEvidence
         {
             document.Architecture = architecture;
         }
+    }
+
+    /// <summary>컴파일러가 검증한 도구 모음인지(toolchainVerified)와 STL 최소 Clang 확인 결과(stlClangCheck — Windows 밖은 null)를 남긴다.</summary>
+    public void SetToolchainVerified(bool verified, string? stlClangCheck)
+    {
+        EnsureOpen();
+        document.ToolchainVerified = verified;
+        document.StlClangCheck = stlClangCheck;
     }
 
     /// <summary>직전 실행 report를 제거한다. 이 evidence의 out/preset 내부 파일만 지정할 수 있다.</summary>

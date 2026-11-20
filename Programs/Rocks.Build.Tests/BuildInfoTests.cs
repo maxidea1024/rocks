@@ -28,6 +28,7 @@ internal static class BuildInfoTests
         pass("BuildInfo: fingerprint canonical text golden, MSVC suffix removal, identity changes");
 
         CompilerVersionAndTriple(toolchain);
+        ToolchainVersionChecks(toolchain);
         pass("BuildInfo: version line brackets, effective triple checks, real discovery identity without host paths");
 
         await EnvironmentHygieneAsync(request, root);
@@ -213,6 +214,76 @@ internal static class BuildInfoTests
         Check(ToolchainFingerprint.PortableTarget("x86_64-pc-windows-msvc") == "x86_64-pc-windows-msvc" &&
             ToolchainFingerprint.PortableTarget("x86_64-pc-windows-msvc19.29.30159") == "x86_64-pc-windows-msvc" &&
             ToolchainFingerprint.PortableTarget("arm64-apple-macosx13.0.0") == "arm64-apple-macosx13.0.0", "MSVC suffix removal");
+    }
+
+    // 도구 모음 버전 확인(Docs/Design/ClangVersionSupport.ko.md 6.2절): 제조사별 최소 미만과 MSVC STL이 요구하는 Clang 미달은 거부하고,
+    // 검증 목록(Build/Toolchain.json — 정규화한 첫 줄 전체) 밖은 거부하지 않고 미검증으로 둔다. 실제 discovery는 로컬 도구 모음이라 검증
+    // 여부가 아니라 표 판정과 같은지만 단언한다. --require-verified-toolchain의 값 읽기와 적용도 본다.
+    private static void ToolchainVersionChecks(NativeToolchain toolchain)
+    {
+        Check(toolchain.ToolchainVerified == ToolchainCheck.Verify(toolchain.Platform, toolchain.CompilerVersion, null),
+            $"discovered toolchain '{toolchain.CompilerVersion}' verification does not match Build/Toolchain.json");
+        const string Stl1452 = "#elif defined(__clang__)\n#if __clang_major__ < 22\n#error STL1000: Unexpected compiler version, expected Clang 22.0.0 or newer.\n";
+        const string Stl1429 = "#elif defined(__clang__)\r\n#if __clang_major__ < 11\r\n#error STL1000: Unexpected compiler version, expected Clang 11.0.0 or newer.\r\n";
+        const string OtherCondition = "#if defined(__clang__)\n#if __clang_major__ < 19\n#define _STL_OLD_CLANG 1\n#endif\n#endif\n";
+        Check(ToolchainTable.ParseStlClangMinimum(Stl1452) == 22 && ToolchainTable.ParseStlClangMinimum(Stl1429) == 11 &&
+            ToolchainTable.ParseStlClangMinimum("#define _MSVC_STL_VERSION 143\n") is null && ToolchainTable.ParseStlClangMinimum(OtherCondition) is null,
+            "STL minimum Clang is read only from the STL1000 condition of yvals_core.h");
+        Check(ToolchainCheck.StlStatus(Stl1452, null) == "requires Clang 22" &&
+            ToolchainCheck.StlStatus(OtherCondition, null).StartsWith("not checked:", StringComparison.Ordinal) &&
+            ToolchainCheck.StlStatus(null, "cannot read yvals_core.h") == "not checked: cannot read yvals_core.h", "STL check status for build evidence");
+        Check(ToolchainCheck.Verify(NativePlatform.Windows, "clang version 22.1.8 (ca7933e47d3a3451d81e72ac174dcb5aa28b59d1)", Stl1452),
+            "LLVM 22.1.8 with STL 14.52 is verified");
+        Check(ToolchainCheck.Verify(NativePlatform.MacOS, "Apple clang version 17.0.0 (clang-1700.0.13.5)", null), "Apple clang 17.0.0 (Xcode 16.4) is verified");
+        // 검증 목록은 첫 줄 전체로 대조한다: 같은 번호의 다른 Xcode 빌드·다른 commit의 빌드는 미검증이다.
+        Check(!ToolchainCheck.Verify(NativePlatform.MacOS, "Apple clang version 17.0.0 (clang-1700.3.19.1)", null), "another Xcode build of Apple clang 17.0.0 is unverified");
+        Check(!ToolchainCheck.Verify(NativePlatform.Windows, "clang version 22.1.8 (0123456789abcdef0123456789abcdef01234567)", Stl1452),
+            "a fork or distribution build with the same number is unverified");
+        Check(!ToolchainCheck.Verify(NativePlatform.Windows, "clang version 23.1.0", Stl1452), "a newer major is unverified, not rejected");
+        Check(!ToolchainCheck.Verify(NativePlatform.MacOS, "Homebrew clang version 22.1.8", null), "Homebrew LLVM above the upstream minimum is unverified, not rejected");
+        Check(!ToolchainCheck.Verify(NativePlatform.Android, "Android (13065274, based on r547379) clang version 20.0.0 (b718bcaf8c198c82f3021447d943401e3ab5bd54)", null),
+            "Android has a minimum only (no CI), so NDK clang is unverified");
+        Check(ToolchainCheck.Notice(toolchain with { ToolchainVerified = false })?.Contains("not a verified", StringComparison.Ordinal) == true &&
+            ToolchainCheck.Notice(toolchain with { ToolchainVerified = true }) is null, "unverified toolchain notice");
+        foreach ((NativePlatform platform, string version, string? stl, string reason) in new[]
+                 {
+                     (NativePlatform.Windows, "clang version 20.1.8", (string?)null, "minimum"),
+                     (NativePlatform.Windows, "clang version 21.1.6", Stl1452, "STL1000"),
+                     (NativePlatform.MacOS, "Apple clang version 16.0.0 (clang-1600.0.26.6)", null, "minimum Apple clang"),
+                     // Apple clang 번호와 업스트림 번호는 다른 계열이다: Homebrew LLVM 18은 Apple 최소 17이 아니라 업스트림 최소로 본다.
+                     (NativePlatform.MacOS, "Homebrew clang version 18.1.8", null, "minimum Clang"),
+                     // 러너 이미지의 기본 NDK(27.3, clang 18.0.4)는 Android 최소 미만이다. 거부 문구는 고정 NDK를 안내한다.
+                     (NativePlatform.Android, "Android (12285214, +pgo, +bolt, +lto, +mlgo, based on r522817b) clang version 18.0.4 (d8003a456d14a3deb8054cdaa529ffbf02d9b262)",
+                         null, "android.ndk.version")
+                 })
+        {
+            try
+            {
+                ToolchainCheck.Verify(platform, version, stl);
+                throw new InvalidOperationException($"toolchain accepted: {platform} {version}");
+            }
+            catch (InvalidOperationException error) when (error.Message.Contains(reason, StringComparison.Ordinal))
+            {
+            }
+        }
+
+        // --require-verified-toolchain: 없거나 off면 거짓, on이면 참, 그 밖은 거부한다. on이면 미검증 도구 모음만 실패 문구를 낸다.
+        Check(!ToolchainCheck.RequireVerified(null) && !ToolchainCheck.RequireVerified("off") && ToolchainCheck.RequireVerified("on"), "require-verified-toolchain values");
+        try
+        {
+            ToolchainCheck.RequireVerified("maybe");
+            throw new InvalidOperationException("require-verified-toolchain accepted 'maybe'");
+        }
+        catch (ArgumentException error) when (error.Message.Contains("must be on or off", StringComparison.Ordinal))
+        {
+        }
+
+        Check(ToolchainCheck.Enforce(toolchain with { ToolchainVerified = true }, true) is null &&
+            ToolchainCheck.Enforce(toolchain with { ToolchainVerified = false }, false) is null &&
+            ToolchainCheck.Enforce(toolchain with { ToolchainVerified = false }, true)?.Contains("accepts only verified toolchains", StringComparison.Ordinal) == true,
+            "require-verified-toolchain on rejects only unverified toolchains");
+        Check(ToolchainTable.IsClangFormatVersion("clang-format version " + ToolchainTable.ClangFormatVersion + "\n") &&
+            !ToolchainTable.IsClangFormatVersion("clang-format version " + ToolchainTable.ClangFormatVersion + "0\n"), "clang-format version is matched exactly");
     }
 
     // 2. 버전 줄 괄호 규칙과 effective triple 검사, 실제 discovery 신원.
