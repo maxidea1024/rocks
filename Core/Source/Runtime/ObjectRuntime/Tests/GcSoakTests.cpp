@@ -166,7 +166,8 @@ TEST(GcSoak_ClusterWorldStaysWithinModelLimit) {
 
 // 같은 장기 smoke를 BinnedAllocator 위에서 돈다(Docs/Design/GarbageCollectionScale.ko.md 18.9절).
 // 객체 저장소와 Registry의 작은 할당은 스레드 캐시·slab을, GC 페이지·Slot chunk는 큰 경로를 지난다.
-// 끝나면 남은 할당이 없고, Trim 뒤 commit된 slab이 없으며, 작은 요청이 큰 경로로 밀려나지 않았다.
+// 끝나면 남은 할당이 없고, TrimMemory 뒤 commit된 slab이 없으며, 작은 요청이 큰 경로로 밀려나지
+// 않았다.
 TEST(GcSoak_SerialCollectionOnBinnedAllocator) {
     SystemAllocator system;
     {
@@ -188,7 +189,7 @@ TEST(GcSoak_SerialCollectionOnBinnedAllocator) {
         CHECK(allocator.Stats().liveBytes == 0);
         CHECK(allocator.Stats().totalAllocations > report.reclaimed);
         CHECK(allocator.Usage().fallbackAllocations == 0);
-        allocator.Trim();
+        allocator.TrimMemory();
         CHECK(allocator.Usage().committedBytes == 0);
     }
 
@@ -222,7 +223,7 @@ TEST(GcSoak_SchedulerCollectionOnBinnedAllocator) {
         CHECK(allocator.Usage().fallbackAllocations == 0);
         // worker 스레드는 끝났으므로 그 캐시는 이미 돌아와 있다. 이 스레드의 캐시와 이전 칸을
         // 비운다.
-        allocator.Trim();
+        allocator.TrimMemory();
         CHECK(allocator.Usage().committedBytes == 0);
     }
 
@@ -247,7 +248,7 @@ TEST(GcSoak_ClusterWorldOnBinnedAllocator) {
         CHECK(report.destroys > 20);
         CHECK(allocator.Stats().liveAllocations == 0);
         CHECK(allocator.Usage().fallbackAllocations == 0);
-        allocator.Trim();
+        allocator.TrimMemory();
         CHECK(allocator.Usage().committedBytes == 0);
     }
 

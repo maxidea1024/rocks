@@ -308,8 +308,11 @@ struct ClassState {
     uint64 freed = 0;
     // 이전 칸이다: 가득 찬 묶음(블록 수는 그 등급의 한도)의 첫 블록 또는 null. 넣기는 빈 칸에 비교
     // 교환, 꺼내기는 null과 교환이다(묶음을 통째로 주고받아 ABA가 없다).
-    alignas(TransferSlotCount * sizeof(void*)) void* transfer[TransferSlotCount]{};
+    alignas(CacheLineSize) void* transfer[TransferSlotCount]{};
 };
+
+static_assert(TransferSlotCount * sizeof(void*) <= CacheLineSize,
+              "the transfer slots of a class must fit one cache line");
 
 // 스레드 캐시의 묶음이다(블록의 첫 word로 이은 목록).
 struct Bundle {
@@ -318,7 +321,7 @@ struct Bundle {
 };
 
 // 스레드 캐시의 등급 하나다(한 캐시 줄).
-struct alignas(64) ClassCache {
+struct alignas(CacheLineSize) ClassCache {
     // 할당이 꺼내고 반환이 넣는 묶음이다.
     Bundle partial;
     // 비었거나 가득 찬(블록 수 = 등급의 한도) 예비 묶음이다.
@@ -329,11 +332,27 @@ struct alignas(64) ClassCache {
     uint64 freed = 0;
 };
 
-// 스레드 하나 × 인스턴스 하나의 캐시다. 인스턴스가 소유하고(등록 목록) 소유 스레드만 묶음을 만진다.
+static_assert(sizeof(ClassCache) == CacheLineSize, "a class cache must be one cache line");
+
+// 스레드 캐시의 상태다(ThreadCache::state — 설계 18.11.4절). 쓰는 중 ↔ 쉬는 중은 소유 스레드만,
+// 쉬는 중 ↔ 비우는 중은 등록부 잠금을 쥔 스레드만 바꾼다(모두 비교 교환).
+// 소유 스레드가 쓴다(기본). 소유 스레드만 묶음을 만진다.
+constexpr uint32 CacheActive = 0;
+// 소유 스레드가 쉰다고 표시했다(MarkThreadIdle). TrimMemory가 대신 비울 수 있다.
+constexpr uint32 CacheIdle = 1;
+// TrimMemory가 등록부 잠금을 쥐고 묶음을 비우는 중이다. 소유 스레드는 MarkThreadActive에서
+// 기다린다.
+constexpr uint32 CacheTrimming = 2;
+
+// 스레드 하나 × 인스턴스 하나의 캐시다. 인스턴스가 소유하고(등록 목록) 묶음은 소유 스레드만
+// 만진다 — 쉬는 중인 캐시만 TrimMemory를 부른 스레드가 대신 비운다(state).
 struct ThreadCache {
     // 인스턴스의 캐시 목록이다(등록부 잠금).
     ThreadCache* next = nullptr;
     ThreadCache* previous = nullptr;
+    // 위 상태 값이다(원자 접근). 묶음의 주인이 넘어가는 순서를 이 값의 비교 교환이 만든다. 등급
+    // 칸(뜨거운 캐시 줄)과 다른 줄에 있다.
+    uint32 state = CacheActive;
     ClassCache classes[ClassCount];
 };
 
@@ -446,8 +465,11 @@ struct BinnedAllocator::State {
     // 안에서 부른다).
     void ReturnChain(uint32 sizeClass, void* chain) noexcept;
     void ReturnChainLocked(ClassState& group, void* chain) noexcept;
-    // 소유 스레드가 자기 캐시의 블록을 모두 slab으로 돌려준다(계수는 캐시에 남는다).
+    // 캐시의 블록을 모두 slab으로 돌려준다(계수는 캐시에 남는다). 소유 스레드가 자기 캐시에, 또는
+    // 등록부 잠금을 쥔 스레드가 "비우는 중"으로 바꾼 캐시에 부른다.
     void FlushCache(ThreadCache& cache) noexcept;
+    // 쉰다고 표시한 스레드의 캐시를 모두 비운다(등록부 잠금을 잡는다 — 설계 18.11.4절).
+    void FlushIdleCaches() noexcept;
     // 이전 칸의 묶음을 모두 slab으로 돌려준다.
     void DrainTransfer() noexcept;
     // 등록부 잠금 안에서 부른다. 캐시의 블록을 돌려주고(가득 묶음은 useTransfer면 이전 칸 먼저)
@@ -457,7 +479,8 @@ struct BinnedAllocator::State {
     void CollectCounters(uint64* allocated, uint64* freed) noexcept;
     Result<void*> AllocateLarge(usize bytes, usize alignment, uint32 tag, bool fallback) noexcept;
     Result<void> DeallocateLarge(void* address) noexcept;
-    void Trim() noexcept;
+    // 보관 중인 빈 slab을 모두 decommit한다(범위 잠금을 잡는다).
+    void DecommitRetained() noexcept;
 
     Allocator& backing;
     // 인스턴스 번호다(프로세스에서 재사용하지 않는다). 0이면 스레드 캐시를 쓰지 않는다.
@@ -466,6 +489,9 @@ struct BinnedAllocator::State {
     State* registryNext = nullptr;
     State* registryPrevious = nullptr;
     ThreadCache* caches = nullptr;
+    // 시험 통로(TestHooks::SetTrimHook)다. 제품에서는 null이다. 느린 경로만 읽는다.
+    TestHooks::TrimHook trimHook = nullptr;
+    void* trimHookContext = nullptr;
 
     // ---- 주소 범위(생성 뒤 바뀌지 않는다) ----
     platform::VirtualMemoryRegion region;
@@ -589,7 +615,7 @@ bool BinnedAllocator::State::CommitSlab(usize slabIndex) noexcept {
 
 bool BinnedAllocator::State::DecommitSlab(usize slabIndex) noexcept {
     // 실패하면 slab은 그대로다(접근을 열어 둔 예약 — 접근과 내용이 유지된다). 호출자가 commit된 채
-    // 보관해 다시 쓰고, 다음 Trim이 다시 시도한다.
+    // 보관해 다시 쓰고, 다음 TrimMemory가 다시 시도한다.
     return static_cast<bool>(region.Decommit(slabIndex << SlabShift, SlabBytes));
 }
 
@@ -670,7 +696,7 @@ void BinnedAllocator::State::ReleaseSlab(SlabHeader* slab) noexcept {
     MarkReleased(slabIndex);
 }
 
-void BinnedAllocator::State::Trim() noexcept {
+void BinnedAllocator::State::DecommitRetained() noexcept {
     platform::LockGuard lock(rangeMutex);
     SlabHeader* kept = nullptr;
     uint32 keptCount = 0;
@@ -679,7 +705,8 @@ void BinnedAllocator::State::Trim() noexcept {
         retained = slab->next;
         const usize slabIndex = SlabIndexOf(slab);
         if (!DecommitSlab(slabIndex)) {
-            // 이번에는 풀지 못했다. 보관해 두고 나머지를 계속 푼다(다음 Trim이 다시 시도한다).
+            // 이번에는 풀지 못했다. 보관해 두고 나머지를 계속 푼다(다음 TrimMemory가 다시
+            // 시도한다).
             slab->next = kept;
             kept = slab;
             ++keptCount;
@@ -782,6 +809,13 @@ uint32 BinnedAllocator::State::TakeBlocks(ClassState& group, uint32 sizeClass, u
 
 void BinnedAllocator::State::ReturnBlock(ClassState& group, void* block) noexcept {
     SlabHeader* slab = SlabAt(SlabIndexOf(block));
+    // 나가 있는 블록이 없는 slab에 블록이 또 돌아왔다: 같은 블록이 두 번 돌아온 것이다(겹친 중복
+    // 반환이 캐시를 거쳐 slab까지 온 경우 — 설계 18.4절). 계수를 음수로 돌리면 이 slab의 살아 있는
+    // 블록이 다시 나간다.
+    if (slab->usedBlocks == 0) {
+        platform::Fatal("BinnedAllocator slab block count underflow");
+    }
+
     WriteLink(block, slab->freeList);
     slab->freeList = block;
     --slab->usedBlocks;
@@ -951,6 +985,13 @@ ThreadCache* BinnedAllocator::State::FindOrCreateCache() noexcept {
         }
 
         if (ThreadCache* cache = FindCurrentCache()) {
+            // 쉰다고 표시한 사이의 호출이다(대기 구현이 할당하는 경우 등): 캐시를 내주지 않고
+            // 지름길도 세우지 않는다 — 호출자는 등급 잠금 경로로 가서 TrimMemory와 경쟁하지 않는다.
+            // 상태를 쓰는 중으로 바꾸는 것은 소유 스레드뿐이라 읽은 값이 쓰는 중이면 그대로다.
+            if (platform::AtomicLoad<MemoryOrder::Relaxed>(&cache->state) != CacheActive) {
+                return nullptr;
+            }
+
             record->lastId = id;
             record->lastCache = cache;
             return cache;
@@ -1137,6 +1178,37 @@ void BinnedAllocator::State::FlushCache(ThreadCache& cache) noexcept {
             ReturnChain(sizeClass, slot.partial.head);
             slot.partial = Bundle{};
         }
+    }
+}
+
+void BinnedAllocator::State::FlushIdleCaches() noexcept {
+    if (id == 0) {
+        return;
+    }
+
+    // 등록부 잠금 아래에서 돈다: 캐시 목록이 바뀌지 않고(스레드 종료·인스턴스 파괴와 겹치지
+    // 않는다), 깨어난 소유 스레드가 이 잠금으로 끝을 기다린다(MarkThreadActive).
+    Registry& registry = GetRegistry();
+    platform::LockGuard lock(registry.mutex);
+    for (ThreadCache* cache = caches; cache != nullptr; cache = cache->next) {
+        // 쉬는 캐시만 가져온다. 쓰는 중이면 소유 스레드가 묶음을 만지고 있다.
+        uint32 expected = CacheIdle;
+        if (!platform::AtomicCompareExchangeStrong<MemoryOrder::AcquireRelease,
+                                                   MemoryOrder::Relaxed>(&cache->state, expected,
+                                                                         CacheTrimming)) {
+            continue;
+        }
+
+        if (trimHook != nullptr) {
+            trimHook(trimHookContext, TestHooks::TrimPoint::CacheClaimed);
+        }
+
+        FlushCache(*cache);
+        if (trimHook != nullptr) {
+            trimHook(trimHookContext, TestHooks::TrimPoint::CacheFlushed);
+        }
+
+        platform::AtomicStore<MemoryOrder::Release>(&cache->state, CacheIdle);
     }
 }
 
@@ -1488,16 +1560,68 @@ Result<void> BinnedAllocator::Deallocate(void* address) noexcept {
     return Result<void>::Success();
 }
 
-void BinnedAllocator::Trim() noexcept {
+void BinnedAllocator::TrimMemory() noexcept {
     State& state = *state_;
-    // 호출 스레드의 캐시와 이전 칸을 slab으로 돌려준 뒤에 빈 slab을 푼다. 다른 스레드의 캐시는
-    // 건드리지 않는다(그 스레드만 자기 묶음을 만진다).
-    if (ThreadCache* cache = state.FindCurrentCache()) {
+    // 호출 스레드의 캐시, 쉰다고 표시한 스레드의 캐시, 이전 칸을 slab으로 돌려준 뒤에 빈 slab을
+    // 푼다. 쓰는 중인 다른 스레드의 캐시는 건드리지 않는다(그 스레드가 자기 묶음을 만지고 있다).
+    // 호출 스레드의 캐시가 쉬는 중이면(표시한 사이에 부른 경우) 여기서 만지지 않고 아래 단계가
+    // 등록부 잠금 아래에서 비운다 — 다른 스레드의 TrimMemory와 겹치지 않게 한다.
+    if (ThreadCache* cache = state.FindCurrentCache();
+        cache != nullptr &&
+        platform::AtomicLoad<MemoryOrder::Relaxed>(&cache->state) == CacheActive) {
         state.FlushCache(*cache);
     }
 
+    state.FlushIdleCaches();
     state.DrainTransfer();
-    state.Trim();
+    state.DecommitRetained();
+}
+
+void BinnedAllocator::MarkThreadIdle() noexcept {
+    State& state = *state_;
+    ThreadCache* cache = state.FindCurrentCache();
+    if (cache == nullptr) {
+        return;
+    }
+
+    // 빠른 경로의 지름길을 지운다: 쉬는 사이의 호출은 느린 경로로 가서 캐시 없이 처리된다. 지름길이
+    // 다른 인스턴스를 가리키면 그대로 둔다(이 인스턴스의 지름길은 느린 경로만 세운다).
+    ThreadRecord* record = threadRecord;
+    if (record != nullptr && record->lastId == cacheId_) {
+        record->lastId = 0;
+        record->lastCache = nullptr;
+    }
+
+    // 쓰는 중일 때만 바꾼다. 이미 쉬는 중이거나 비우는 중이면(두 번 알린 경우) 그대로 둔다 —
+    // 비우는 중을 덮어쓰면 비우는 쪽과 깨어난 소유 스레드가 겹친다.
+    uint32 expected = CacheActive;
+    (void)platform::AtomicCompareExchangeStrong<MemoryOrder::AcquireRelease, MemoryOrder::Relaxed>(
+        &cache->state, expected, CacheIdle);
+}
+
+void BinnedAllocator::MarkThreadActive() noexcept {
+    State& state = *state_;
+    ThreadCache* cache = state.FindCurrentCache();
+    if (cache == nullptr) {
+        return;
+    }
+
+    uint32 expected = CacheIdle;
+    if (platform::AtomicCompareExchangeStrong<MemoryOrder::AcquireRelease, MemoryOrder::Acquire>(
+            &cache->state, expected, CacheActive) ||
+        expected == CacheActive) {
+        return;
+    }
+
+    // 비우는 중이다. 비우는 쪽은 등록부 잠금을 쥔 채 일하고 풀기 전에 쉬는 중으로 되돌리므로, 그
+    // 잠금을 얻으면 묶음은 다시 이 스레드의 것이다.
+    if (state.trimHook != nullptr) {
+        state.trimHook(state.trimHookContext, TestHooks::TrimPoint::OwnerWaiting);
+    }
+
+    State::Registry& registry = State::GetRegistry();
+    platform::LockGuard lock(registry.mutex);
+    platform::AtomicStore<MemoryOrder::Release>(&cache->state, CacheActive);
 }
 
 AllocationStats BinnedAllocator::Stats() const noexcept {
@@ -1613,6 +1737,23 @@ bool BinnedAllocator::TestHooks::ReturnAgainIgnoringMarker(BinnedAllocator& allo
     return true;
 }
 
+bool BinnedAllocator::TestHooks::ReturnToSlabAgain(BinnedAllocator& allocator,
+                                                   void* address) noexcept {
+    BinnedAllocator::State& state = *allocator.state_;
+    const uptr offset = reinterpret_cast<uptr>(address) - state.base;
+    if (offset >= state.reservedBytes) {
+        return false;
+    }
+
+    // 등급은 slab 머리에서 읽는다(빈 slab은 표에서 지워져 있다).
+    const SlabHeader* slab = state.SlabAt(offset >> SlabShift);
+    const uint32 sizeClass = ClassOfRequest(slab->blockBytes, BlockGranularity);
+    ClassState& group = state.classes[sizeClass];
+    platform::LockGuard lock(group.mutex);
+    state.ReturnBlock(group, address);
+    return true;
+}
+
 bool BinnedAllocator::TestHooks::IsCurrentThreadExited() noexcept {
     return threadRecord == &exitedRecord;
 }
@@ -1651,6 +1792,49 @@ uint32 BinnedAllocator::TestHooks::ThreadCacheCount(BinnedAllocator& allocator) 
     }
 
     return count;
+}
+
+uint32 BinnedAllocator::TestHooks::IdleThreadCacheCount(BinnedAllocator& allocator) noexcept {
+    BinnedAllocator::State& state = *allocator.state_;
+    if (state.id == 0) {
+        return 0;
+    }
+
+    BinnedAllocator::State::Registry& registry = BinnedAllocator::State::GetRegistry();
+    platform::LockGuard lock(registry.mutex);
+    uint32 count = 0;
+    for (ThreadCache* cache = state.caches; cache != nullptr; cache = cache->next) {
+        count += platform::AtomicLoad<MemoryOrder::Relaxed>(&cache->state) == CacheIdle ? 1u : 0u;
+    }
+
+    return count;
+}
+
+usize BinnedAllocator::TestHooks::CurrentThreadCacheBlockBytes(
+    BinnedAllocator& allocator) noexcept {
+    const ThreadCache* cache = allocator.state_->FindCurrentCache();
+    if (cache == nullptr) {
+        return 0;
+    }
+
+    usize bytes = 0;
+    for (uint32 sizeClass = 0; sizeClass < rocks::ClassCount; ++sizeClass) {
+        const ClassCache& slot = cache->classes[sizeClass];
+        bytes += (usize{slot.partial.count} + slot.full.count) * Classes.blockBytes[sizeClass];
+    }
+
+    return bytes;
+}
+
+bool BinnedAllocator::TestHooks::IsCurrentThreadShortcut(BinnedAllocator& allocator) noexcept {
+    return threadRecord != nullptr && allocator.cacheId_ != 0 &&
+           threadRecord->lastId == allocator.cacheId_;
+}
+
+void BinnedAllocator::TestHooks::SetTrimHook(BinnedAllocator& allocator, TrimHook hook,
+                                             void* context) noexcept {
+    allocator.state_->trimHook = hook;
+    allocator.state_->trimHookContext = context;
 }
 
 usize BinnedAllocator::TestHooks::ThreadCacheBlockBytes(BinnedAllocator& allocator) noexcept {

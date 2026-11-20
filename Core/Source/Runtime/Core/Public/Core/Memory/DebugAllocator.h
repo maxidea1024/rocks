@@ -77,6 +77,20 @@ public:
     // 게시된 사용자 요청과 quarantine payload 크기의 한 시점 snapshot이다.
     DebugAllocatorStats Stats() const noexcept;
 
+    // 상위 allocator에 그대로 넘긴다(Allocator.h). quarantine은 비우지 않는다(FlushQuarantine이
+    // 따로 있다). 이 래퍼의 잠금을 잡지 않는다.
+    void TrimMemory() noexcept override {
+        backing_.TrimMemory();
+    }
+
+    void MarkThreadIdle() noexcept override {
+        backing_.MarkThreadIdle();
+    }
+
+    void MarkThreadActive() noexcept override {
+        backing_.MarkThreadActive();
+    }
+
 private:
     struct Record;
     struct EntryScope;
