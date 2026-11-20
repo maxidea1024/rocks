@@ -27,6 +27,23 @@ if (args.Length == 1 && args[0] == "--platform-path-header")
     }
 }
 
+// unity-profile 명령의 입력 거부만 돈다(현재 디렉터리가 저장소 루트여야 한다).
+if (args.Length == 1 && args[0] == "--unity-profile-command")
+{
+    var temporary = Path.Combine(Path.GetTempPath(), "Rocks unity profile " + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(temporary);
+    try
+    {
+        await UnityProfileCommandTests.RunAsync(Path.GetFullPath("."), temporary);
+        Console.WriteLine("[PASS] unity-profile-command-rejections");
+        return 0;
+    }
+    finally
+    {
+        Directory.Delete(temporary, recursive: true);
+    }
+}
+
 var options = new Dictionary<string, string>(StringComparer.Ordinal);
 
 for (var index = 0; index < args.Length; index += 2)
@@ -59,6 +76,8 @@ try
     MetadataLayoutTests.Run();
     MetadataTemporaryCleanupTests.Run();
     await PlatformPrivateHeaderTests.RunAsync(toolchain, Path.Combine(fixture, "platform-header"));
+    await UnityProfileCommandTests.RunAsync(root, Directory.CreateDirectory(Path.Combine(fixture, "unity-profile-command")).FullName,
+        options.GetValueOrDefault("--compiler"));
     Pass("output-invocation-lock-and-platform-header-incremental", timer.Elapsed);
     timer.Restart();
     var exported = await Cli("sdk", "--root", root, "--target", "Engine", "--configuration", "Debug", "--destination", sdk);

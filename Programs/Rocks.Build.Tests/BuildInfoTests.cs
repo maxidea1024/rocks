@@ -1037,7 +1037,7 @@ internal static class BuildInfoTests
     }
 
     // 가짜 Core(header-only, 표지·BuildInfo.h·최소 Sha256Digest·EngineVersion) ← Engine(정적 라이브러리) ← Game(실행 파일, TU 2개).
-    private static void WriteFixture(string fixture)
+    internal static void WriteFixture(string fixture)
     {
         void Write(string relative, string text)
         {
@@ -1210,7 +1210,7 @@ internal static class BuildInfoTests
         Check((await Succeeded(builder, mixed, "build with only the root respelled")).ExecutedActions == 0, "a respelled root alone must not run actions");
     }
 
-    private static NativeBuildRequest FixtureRequest(NativeBuildRequest template, string fixture, string output) => template with
+    internal static NativeBuildRequest FixtureRequest(NativeBuildRequest template, string fixture, string output) => template with
     {
         RootDirectory = fixture,
         OutputDirectory = output,

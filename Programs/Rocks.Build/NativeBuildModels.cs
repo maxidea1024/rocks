@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Rocks.Build;
 
 // Android는 Windows·macOS host에서 NDK로 교차 빌드한다(그 밖의 host/target 조합은 거부).
@@ -524,7 +526,7 @@ public sealed record NativeBuildRequest
     public string? TimingLabel { get; init; }
 
     // 실행한 action의 프로세스마다 CPU 시간과 최대 메모리를 재는가(Docs/Design/UnityBuildPch.ko.md 12절 "묶음 크기 실측" — 명령
-    // unity-profile이 켠다). 값은 NativeActionResult의 CpuMilliseconds·PeakMemoryBytes·ProcessMeasured에 실린다. 측정값이라 action
+    // unity-profile이 켠다). 값은 NativeActionResult의 CpuMilliseconds·PeakMemoryBytes·PeakCommitBytes·ProcessMeasured에 실린다. 측정값이라 action
     // key·도구 빌드 ID·compile_commands.json에는 들어가지 않는다(켜고 꺼도 cache가 그대로 맞는다).
     public bool MeasureProcesses { get; init; }
 
@@ -544,12 +546,19 @@ public sealed record NativeActionResult(string Id, string Module, string Kind, b
     // 실패)은 0이다. 측정값이라 action key·도구 빌드 ID·compile_commands.json에는 들어가지 않고 action-report.json에만 실린다.
     public long DurationMilliseconds { get; init; }
 
-    // 이 action이 실행한 프로세스의 CPU 시간(ms, 사용자 + 커널)과 최대 working set(byte)이다. NativeBuildRequest.MeasureProcesses를
-    // 켜고 실행했고 호스트가 값을 줄 때만 ProcessMeasured가 참이고, 그 밖에는(cache hit 포함) 둘 다 0이다.
+    // 이 action이 실행한 프로세스의 CPU 시간(ms, 사용자 + 커널)과 최대 working set·최대 commit(byte)이다.
+    // NativeBuildRequest.MeasureProcesses를 켜고 실행했고 호스트가 값을 줄 때만 ProcessMeasured가 참이고, 그 밖에는(cache hit 포함) 모두
+    // 기본값이다. 기본값이면 action-report.json에 쓰지 않는다(평소 빌드의 보고서는 이 필드가 없다).
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public long CpuMilliseconds { get; init; }
 
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public long PeakMemoryBytes { get; init; }
 
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public long PeakCommitBytes { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool ProcessMeasured { get; init; }
 }
 
