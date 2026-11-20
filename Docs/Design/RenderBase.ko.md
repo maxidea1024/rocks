@@ -1194,7 +1194,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
 
 `GpuScope` 중첩이 캡처 도구(PIX·RenderDoc)에서 pass 이름으로 보이는지(수동 확인 기록), timestamp 링 회수가 GPU 완료 이벤트 뒤에만 값을 내는지(gate), GLES 확장 없음에서 "없음" 공개, calibration pair로 CPU·GPU 구간이 같은 시간축에 놓이는지.
 
-**구현(2026-11-17).** `RenderBase/GpuTrace.h`에 `GpuTrace`(queue 하나의 계측 장부)·`GpuScope`(스택 객체)·`GpuTraceSettings`·`RegisterGpuTraceTypes`·`GpuTicksToTraceTicks`를 두었다. RenderBase가 TraceCapture에 의존한다.
+**구현(2026-11-17).** `RenderBase/GpuTrace.h`에 `GpuTrace`(queue 하나의 계측 장부)·`GpuScope`(스택 객체)·`GpuTraceSettings`·`RegisterGpuTraceTypes`·`GpuTicksToTraceTicks`를 두었다. RenderBase가 TraceCapture에 의존한다. 2026-11-20부터 RenderBase 모듈 수명 객체의 `Startup`이 호스트 trace 세션 서비스에 등록하고 `Shutdown`이 `UnregisterGpuTraceTypes`로 푼다([모듈 로더](ModuleLoader.ko.md) 3.12절).
 - 흐름: 렌더 lane이 프레임 기록 안에서 `GpuTrace::BeginFrame`(queue 정의·calibration·프레임 시작 timestamp) → `GpuScope`(marker push + 시작 timestamp, 소멸 때 끝 timestamp + marker pop) → `EndFrame`(프레임 끝 timestamp)를 부른다. 완료 통지를 받는 쪽(보통 게임 lane)이 `Consume(notices)`로 `GpuTimestamp` 통지를 짝지어, 두 끝이 모두 온 구간만 trace tick으로 바꿔 채널 `gpu`에 쓴다. 완료 전 구간은 pending이고 trace에 나가지 않는다. 끊김(`Cancelled`) 통지가 하나라도 있으면 그 구간은 버리고 `invalid`로 센다.
 - GPU 시간은 채널 `gpu`·설정 `timestamps`·장치 `timestamps`·`clockCalibration`이 모두 참일 때만 잰다. 아니면 queue 정의(`Trace.GpuQueue`)의 GPU 시간 칸을 0으로 공개하고 timestamp를 쓰지 않는다(추정값 없음). marker는 설정 `markers`만 따른다. 기본값은 둘 다 Release에서 꺼짐이다(설정으로 켠다).
 - calibration: `ClockCalibration`에 `cpuTicks`(`platform::MonotonicTicks`, trace 시간축)와 `uncertaintyNanoseconds`를 더했다. D3D12는 queue clock calibration이 한 번에 읽은 QPC 값과 CPU tick 하나 길이, OpenGL은 `GL_TIMESTAMP` 조회를 CPU tick 두 번으로 감싼 가운데 값과 조회 지연의 절반이다. 쌍은 세션 첫 프레임과 `calibrationIntervalFrames`(기본 60)마다 다시 얻어 정의 기록(`Trace.GpuCalibration`)으로 남기고, 그 사이 구간은 가장 최근 쌍으로 바꾼다(두 시계의 drift는 보정하지 않는다).

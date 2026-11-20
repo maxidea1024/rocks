@@ -90,6 +90,10 @@ Windows는 프로세스 명령줄을 CreateProcessW 한계(끝 NUL 포함 UTF-16
 - 진단: response file로 실행한 action이 실패하면 도구 출력 뒤에 `Command (arguments passed in arguments+.rsp; shown expanded with final output paths): …`로 펼친 명령을 붙인다(출력은 `compile_commands.json`처럼 최종 경로).
 - clang-cl이 lld-link를, clang++가 ld.lld·ld64를 부를 때의 긴 명령은 clang 드라이버가 스스로 response file로 넘긴다.
 
+## 경로 철자
+
+빌드는 받은 경로를 디스크에 있는 철자로 바꿔서 쓴다(`PathSpelling.OnDisk` — [설계](../../Docs/Design/UnityBuildPch.ko.md) 4.4절). 드라이브 문자는 대문자로, 있는 성분은 파일 시스템이 알려 주는 이름으로 바꾸고, 없는 성분부터는 받은 그대로 둔다. symlink·junction·`subst`는 풀지 않는다. `NativeBuildEngine.BuildAsync`가 요청의 루트·출력·SDK 디렉터리와 모듈의 경로 목록, 도구 경로를 한 번 바꾸고, CLI는 `--root`·`--output`·`--sdk`·`--project`·`--destination`을 읽을 때 바꾼다. 그래서 같은 트리를 `c:\`와 `C:\`처럼 철자만 다르게 실행해도 action key, `compile_commands.json`, 도구 빌드 ID가 같다(무변경이면 0 action).
+
 ## 경로 포함 판정과 드라이브 루트
 
 작업 사본·설치 SDK·게임 프로젝트가 드라이브 루트(`subst X: <경로>` 뒤 `X:\`)여도 된다. build·test·sdk의 출력은 증거 위치 때문에 `<작업 사본>/out` 아래여야 하고(밖이면 출력을 만들기 전에 거부한다), 엔진 입력 검사는 소스 루트를 담는 출력(드라이브 루트 포함)을 거부한다. 저장소 도구의 "이 경로가 그 루트 안인가" 판정은 `Rocks.Tooling.Common/DirectoryPath`(`IsAtOrUnder`·`IsStrictlyUnder`·`WithTrailingSeparator`)로 한다. 예전처럼 `TrimEndingDirectorySeparator(root) + 구분자`로 접두를 만들면 드라이브 루트·POSIX `/`·장치 경로 루트(`\\?\X:\`)에서 `X:\\`가 되어 그 아래 어떤 경로와도 맞지 않았다(실측: 드라이브 루트의 설치 SDK로 게임을 빌드하면 `SDK path escapes its root`, 소스 루트를 담는 드라이브 루트 출력을 거부하지 못함). 판정은 철자 비교다(symlink·junction·8.3 이름은 풀지 않고, macOS에서도 대소문자를 구분한다). 루트 기준 상대 경로 키는 `Path.GetRelativePath`로 계산한다(BuildInfo `PortablePaths`). 끝 구분자가 붙은 디렉터리 인자도 받는다: CLI `--output`·`sdk --destination`과 MetaCompiler `--output-root`는 끝 구분자를 떼고(그대로 두면 증거 preset이 빈 조각을 갖거나 stage·검증 디렉터리가 대상 안에 생겼다), 파일시스템 루트인 SDK 대상·MetaCompiler 출력 루트는 거부한다. `Rocks.proj`는 따옴표로 감싸 넘기는 디렉터리 속성(`NativeOutput`·`AndroidNdk`·`SdkDestination`·`SdkDirectory`·`GameDirectory`)의 끝 역슬래시를 두 개로 맞춘다 — `-p:GameDirectory=X:\`가 `"X:\"`로 넘어가 `\"`가 따옴표 escape로 읽히고 뒤 인자가 모두 한 인자로 붙던 문제다. 작업 사본 루트는 전처럼 `"<루트>."`로 넘긴다. 확인한 드라이브 루트는 subst·매핑 디렉터리다 — 실제 볼륨 루트(`System Volume Information`·`$RECYCLE.BIN`이 있는 VHD·USB 등)의 재귀 열거는 확인하지 않았다.

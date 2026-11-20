@@ -191,6 +191,26 @@ struct LoaderUnit {
     AssetDiagnostic failDiagnostic;
 };
 
+// 바깥 코드를 부르는 동안 "콜백 중" 표시를 세우고 끝나면 이전 값으로 되돌린다(11.6절 18 — 호출마다
+// 하나, 겹쳐도 바깥 표시를 먼저 풀지 않는다).
+class LoaderCallbackScope {
+public:
+    explicit LoaderCallbackScope(bool& flag) noexcept : flag_(flag), previous_(flag) {
+        flag_ = true;
+    }
+
+    ~LoaderCallbackScope() {
+        flag_ = previous_;
+    }
+
+    LoaderCallbackScope(const LoaderCallbackScope&) = delete;
+    LoaderCallbackScope& operator=(const LoaderCallbackScope&) = delete;
+
+private:
+    bool& flag_;
+    bool previous_;
+};
+
 // Tarjan 반복 구현의 틀 하나다.
 struct LoaderTarjanFrame {
     uint32 entry = 0;
@@ -237,9 +257,9 @@ struct AssetLoader::Impl {
     uint64 ownerThread = 0;
     StringBuilder<LoaderPathInlineBytes> root;
     bool shutDown = false;
-    // PostLoad handler·관찰자·시험 hook이 불리는 중인지다(11.6절 18 — 상태를 바꾸는 공개 함수는
-    // WrongContext).
-    // (시계는 const 조회 안에서도 불리므로 mutable이다.)
+    // 바깥 코드(PostLoad handler·관찰자·시험 hook·IO·worker·시계·프레임 판정·공개 트랜잭션)가
+    // 불리는 중인지다(11.6절 18 — 상태를 바꾸는 공개 함수는 WrongContext). LoaderCallbackScope로만
+    // 바꾼다. (시계는 const 조회 안에서도 불리므로 mutable이다.)
     mutable bool inCallback = false;
 
     // 매니페스트 항목마다 진행 중 단위 번호와 공개 번호(없으면 LoaderNoIndex)다.
@@ -299,11 +319,8 @@ struct AssetLoader::Impl {
             return LoaderDefaultClock(nullptr);
         }
 
-        const bool previous = inCallback;
-        inCallback = true;
-        const uint64 now = config.clock(config.clockContext);
-        inCallback = previous;
-        return now;
+        LoaderCallbackScope scope(inCallback);
+        return config.clock(config.clockContext);
     }
 
     bool OnOwnerThread() const noexcept {
@@ -1000,9 +1017,12 @@ struct AssetLoader::Impl {
         job->asyncPending = true;
         job->readBegun = true;
         ++asyncInFlight;
-        inCallback = true;
-        Result<void> begun = config.io->Begin(read);
-        inCallback = false;
+        Result<void> begun = Result<void>::Success();
+        {
+            LoaderCallbackScope scope(inCallback);
+            begun = config.io->Begin(read);
+        }
+
         if (!begun) {
             job->asyncPending = false;
             job->readBegun = false;
@@ -1101,9 +1121,11 @@ struct AssetLoader::Impl {
         const LoaderCompletion completion = job->completion;
         // IO 완료만 readBegun이 남아 있다(worker 완료 때는 이미 놓았다).
         if (job->readBegun) {
-            inCallback = true;
-            config.io->Release(job->read);
-            inCallback = false;
+            {
+                LoaderCallbackScope scope(inCallback);
+                config.io->Release(job->read);
+            }
+
             job->readBegun = false;
         }
 
@@ -1140,9 +1162,12 @@ struct AssetLoader::Impl {
             SetPhase(*job, AssetLoaderPackagePhase::Preparing);
             job->asyncPending = true;
             ++asyncInFlight;
-            inCallback = true;
-            Result<void> run = config.worker->Run(RunLoaderPrepare, job);
-            inCallback = false;
+            Result<void> run = Result<void>::Success();
+            {
+                LoaderCallbackScope scope(inCallback);
+                run = config.worker->Run(RunLoaderPrepare, job);
+            }
+
             if (!run) {
                 job->asyncPending = false;
                 --asyncInFlight;
@@ -1257,24 +1282,36 @@ struct AssetLoader::Impl {
             (void)states.TryPushBack(job->state.Get());
         }
 
+        // 트랜잭션은 생성부터 소멸(실패면 롤백)까지 사용자 코드(클래스 생성자·소멸자, 필드 codec·
+        // Validate hook·Required 검사, Registry allocator)를 부르므로 그 전체를 콜백 중 표시 안에
+        // 둔다(11.6절 18). 실패 처리는 표시를 푼 뒤에 한다.
+        AssetDiagnostic made;
+        ErrorCode instantiateError = ErrorCode::None;
+        ErrorCode commitError = ErrorCode::None;
         {
+            LoaderCallbackScope scope(inCallback);
             ConstructionContext transaction(*config.registry, access);
-            AssetDiagnostic made;
             if (auto instantiated = InstantiatePackages(
                     transaction, Span<PackageLoadState* const>(states.Data(), states.Size()),
                     &owner, handles.View(), &made);
                 !instantiated) {
-                FailUnit(unit, FailedMember(units[unit], made.asset), instantiated.Error(), made);
-                return;
+                instantiateError = instantiated.Error();
+            } else if (auto committed = transaction.Commit(
+                           Span<const ObjectHandle>(handles.Data(), handles.Size()), roots.View());
+                       !committed) {
+                commitError = committed.Error();
             }
+        }
 
-            if (auto committed = transaction.Commit(
-                    Span<const ObjectHandle>(handles.Data(), handles.Size()), roots.View());
-                !committed) {
-                diagnostic.error = committed.Error();
-                FailUnit(unit, units[unit].members[0], committed.Error(), diagnostic);
-                return;
-            }
+        if (instantiateError != ErrorCode::None) {
+            FailUnit(unit, FailedMember(units[unit], made.asset), instantiateError, made);
+            return;
+        }
+
+        if (commitError != ErrorCode::None) {
+            diagnostic.error = commitError;
+            FailUnit(unit, units[unit].members[0], commitError, diagnostic);
+            return;
         }
 
         LoaderUnit& target = units[unit];
@@ -1349,9 +1386,11 @@ struct AssetLoader::Impl {
     // 바꾸는 재진입 거부), 단위 참조를 쥐지 않는다(돌아온 뒤 다시 찾는다).
     void PostLoadNext(uint32 unit) noexcept {
         const uint32 member = units[unit].members[units[unit].postLoadNext++];
-        inCallback = true;
-        config.postLoad->PostLoad(loadedHandles[entryLoaded[member]], EntryAsset(member));
-        inCallback = false;
+        {
+            LoaderCallbackScope scope(inCallback);
+            config.postLoad->PostLoad(loadedHandles[entryLoaded[member]], EntryAsset(member));
+        }
+
         if (units[unit].postLoadNext == units[unit].members.Size()) {
             FinishUnit(unit);
         }
@@ -1453,9 +1492,8 @@ struct AssetLoader::Impl {
         queue.mutex.Lock();
         while (queue.head == nullptr && asyncInFlight > 0) {
             if (config.waitEntered != nullptr) {
-                inCallback = true;
+                LoaderCallbackScope scope(inCallback);
                 config.waitEntered(config.waitEnteredContext);
-                inCallback = false;
             }
 
             (void)queue.changed.Wait(queue.mutex);
@@ -1909,9 +1947,8 @@ Result<AssetLoadStatus> AssetLoader::WaitFor(AssetLoadHandle handle, const char*
 
     bool framing = false;
     if (config_.inFrame != nullptr) {
-        impl.inCallback = true;
+        LoaderCallbackScope scope(impl.inCallback);
         framing = config_.inFrame(config_.inFrameContext);
-        impl.inCallback = false;
     }
 
     if (framing) {
@@ -1945,9 +1982,8 @@ Result<AssetLoadStatus> AssetLoader::WaitFor(AssetLoadHandle handle, const char*
     ++impl.syncWaits;
     impl.syncWaitNanoseconds += elapsed;
     if (config_.observer != nullptr) {
-        impl.inCallback = true;
+        LoaderCallbackScope scope(impl.inCallback);
         config_.observer->OnSyncWait(wait);
-        impl.inCallback = false;
     }
 
     return Status(handle);

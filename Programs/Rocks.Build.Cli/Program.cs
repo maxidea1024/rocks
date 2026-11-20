@@ -80,7 +80,9 @@ namespace Rocks.Build.Cli
                 throw new ArgumentException($"Unknown command: {args[0]}");
             }
 
-            var root = Path.GetFullPath(options.GetValueOrDefault("root", Directory.GetCurrentDirectory()));
+            // 받은 경로는 디스크에 있는 철자로 맞춘다(Docs/Design/UnityBuildPch.ko.md 4.4절). 규칙 평가와 메타 생성이 빌드 엔진보다 먼저
+            // 이 경로로 파일을 쓰므로 여기서 한다.
+            var root = PathSpelling.OnDisk(Path.GetFullPath(options.GetValueOrDefault("root", Directory.GetCurrentDirectory())));
             var configuration = Configuration(options);
             // 값이 틀린 빌드 방식 옵션은 출력을 만들기 전에 거부한다.
             foreach (string mode in BuildModeOptions.Where(mode => mode != TimingOption))
@@ -119,8 +121,8 @@ namespace Rocks.Build.Cli
                 : throw new ArgumentException("android-api must be an integer.");
             string platformName = android ? "android-" + androidAbi : OperatingSystem.IsWindows() ? "windows" : "macos";
             // 끝 구분자를 뗀다(out\custom\이면 아래 증거 preset이 빈 조각을 가져 거부됐다).
-            var output = Path.TrimEndingDirectorySeparator(Path.GetFullPath(options.GetValueOrDefault("output",
-                Path.Combine(root, "out", $"dotnet-{platformName}-{targetName.ToLowerInvariant()}-{configuration.ToString().ToLowerInvariant()}"))));
+            var output = PathSpelling.OnDisk(Path.TrimEndingDirectorySeparator(Path.GetFullPath(options.GetValueOrDefault("output",
+                Path.Combine(root, "out", $"dotnet-{platformName}-{targetName.ToLowerInvariant()}-{configuration.ToString().ToLowerInvariant()}")))));
             // build·test·sdk의 증거는 <root>/out/<preset>에 쓰므로 출력은 그 아래여야 한다. 출력·잠금을 만들기 전에 알린다.
             if (!DirectoryPath.IsStrictlyUnder(output, Path.Combine(root, "out")))
             {

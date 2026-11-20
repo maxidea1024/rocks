@@ -80,7 +80,7 @@ public static class InstalledSdk
 
         // 끝 구분자를 떼야 stage가 destination 옆(같은 부모 아래)에 생긴다(C:\sdk\v1\이면 stage가 destination 안에 생겨 Move가
         // 실패했다). TrimEndingDirectorySeparator는 루트를 그대로 두므로 루트는 따로 거부한다.
-        destination = Path.TrimEndingDirectorySeparator(Path.GetFullPath(destination));
+        destination = PathSpelling.OnDisk(Path.TrimEndingDirectorySeparator(Path.GetFullPath(destination)));
         if (Path.GetDirectoryName(destination) is null)
         {
             throw new IOException("SDK destination must not be a filesystem root. Use a new versioned directory.");
@@ -203,9 +203,10 @@ public static class InstalledSdk
 
         BuildCommand.Timing(options);
 
-        var sdk = Path.GetFullPath(options["sdk"]);
-        var project = Path.GetFullPath(options["project"]);
-        var output = Path.GetFullPath(options.GetValueOrDefault("output", Path.Combine(project, "out", BuildCommand.Configuration(options).ToString())));
+        var sdk = PathSpelling.OnDisk(Path.GetFullPath(options["sdk"]));
+        var project = PathSpelling.OnDisk(Path.GetFullPath(options["project"]));
+        var output = PathSpelling.OnDisk(
+            Path.GetFullPath(options.GetValueOrDefault("output", Path.Combine(project, "out", BuildCommand.Configuration(options).ToString()))));
         if (Inside(sdk, output) || Inside(sdk, project) || Inside(output, project) || Inside(output, sdk))
         {
             throw new ArgumentException("Game output cannot overlap or contain the project or installed SDK.");
@@ -260,10 +261,11 @@ public static class InstalledSdk
 
     private static async Task<int> BuildGameCoreAsync(Dictionary<string, string> options, CancellationToken cancellationToken)
     {
-        var sdk = Path.GetFullPath(options["sdk"]);
-        var project = Path.GetFullPath(options["project"]);
+        // 받은 경로는 디스크에 있는 철자로 맞춘다(Docs/Design/UnityBuildPch.ko.md 4.4절).
+        var sdk = PathSpelling.OnDisk(Path.GetFullPath(options["sdk"]));
+        var project = PathSpelling.OnDisk(Path.GetFullPath(options["project"]));
         var configuration = BuildCommand.Configuration(options);
-        var output = Path.GetFullPath(options.GetValueOrDefault("output", Path.Combine(project, "out", configuration.ToString())));
+        var output = PathSpelling.OnDisk(Path.GetFullPath(options.GetValueOrDefault("output", Path.Combine(project, "out", configuration.ToString()))));
         if (Inside(sdk, output) || Inside(sdk, project) || Inside(output, project) || Inside(output, sdk))
         {
             throw new ArgumentException("Game output cannot overlap or contain the project or installed SDK.");

@@ -44,6 +44,7 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
         using JsonDocument document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 2048 });
         IndexLocations(document.RootElement);
         IndexRecords(document.RootElement, []);
+        IndexClosure(document.RootElement);
         try
         {
             BindPrefixMarkers(document.RootElement);
@@ -925,18 +926,9 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
                             throw new MetadataException($"{symbol}: private/protected NATIVE requires ROCKS_GENERATED_BODY");
                         }
 
+                        // 강한 참조(RMC2205)·WorldOnly 소유자 형질 경로는 정규 형식 탐침 뒤 레코드 닫힘이 본다(VerifyNativeMembersAsync —
+                        // Docs/Design/ClangVersionSupport.ko.md 4.4절). 여기 철자는 탐침이 정규 철자로 바꾼다.
                         string nativeType = TypeSpelling(member);
-                        if (StrongReferencePath(nativeType, []) is string path)
-                        {
-                            throw new MetadataException($"{symbol}: ROCKS_NATIVE member holds a strong object reference ({path})", "RMC2205",
-                                "Native members are not traced; store ObjectRef/RootRef/Object pointers in ROCKS_PROPERTY fields or use WeakObjectRef/ObjectHandle.");
-                        }
-
-                        if (RequiresWorldOnlyOwnerPath(nativeType, []) is string worldOnlyPath)
-                        {
-                            model.WorldOnlyNatives.Add((symbol, worldOnlyPath, currentSite));
-                        }
-
                         model.NativeMembers.Add(new NativeMemberModel { Name = memberName, Spelling = nativeType, Site = currentSite, Bitfield = nativeBitfield });
                         continue;
                     }

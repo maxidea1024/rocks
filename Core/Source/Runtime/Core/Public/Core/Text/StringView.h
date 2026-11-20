@@ -86,6 +86,14 @@ public:
     // ValidateUtf8와 같은 검사의 constexpr 판정이다(overlong·surrogate·U+10FFFF 초과·잘린
     // sequence는 false). 컴파일 타임 검증(로그 메시지 템플릿 등)과 ValidateUtf8이 같은 구현을 쓴다.
     constexpr bool IsValidUtf8() const noexcept {
+        return FindInvalidUtf8() == IndexNone;
+    }
+
+    // 처음 잘못된 UTF-8 sequence가 시작하는 byte 위치다. 모두 유효하면 IndexNone이다. 위치는 해독을
+    // 시작한 leading byte다(잘못된 continuation byte가 뒤에 있어도 그 sequence의 첫 byte를
+    // 가리킨다). 컴파일러·검증기가 "몇 번째 byte가 잘못됐는지"를 사용자에게 보일 때 쓴다(예: Sparks
+    // 원문 검사 S0101). 판정 규칙은 ValidateUtf8과 같다.
+    constexpr usize FindInvalidUtf8() const noexcept {
         usize offset = 0;
         while (offset < bytes_) {
             const auto leading = static_cast<uint8>(data_[offset]);
@@ -110,18 +118,18 @@ public:
                 scalar = leading & 0x07u;
                 minimum = 0x10000u;
             } else {
-                return false;
+                return offset;
             }
 
             // 남은 길이부터 검사하여 잘린 입력에서 continuation byte를 범위 밖으로 읽지 않는다.
             if (width > bytes_ - offset) {
-                return false;
+                return offset;
             }
 
             for (usize index = 1; index < width; ++index) {
                 const auto next = static_cast<uint8>(data_[offset + index]);
                 if ((next & 0xC0u) != 0x80u) {
-                    return false;
+                    return offset;
                 }
 
                 scalar = (scalar << 6u) | (next & 0x3Fu);
@@ -131,13 +139,13 @@ public:
             // 않는다.
             if (scalar < minimum || scalar > 0x10FFFFu ||
                 (scalar >= 0xD800u && scalar <= 0xDFFFu)) {
-                return false;
+                return offset;
             }
 
             offset += width;
         }
 
-        return true;
+        return IndexNone;
     }
 
     // maxBytes byte 이하이면서 UTF-8 문자 중간에서 끊기지 않는 가장 긴 앞부분이다. 잘라야 할 때
@@ -223,6 +231,19 @@ public:
     StringView TrimAsciiStart() const noexcept;
     StringView TrimAsciiEnd() const noexcept;
     StringView TrimAscii() const noexcept;
+
+    // byte 순 비교다(음수: left가 앞, 0: 같음, 양수: left가 뒤). 앞부분이 같으면 짧은 쪽이 앞이다.
+    // 유효한 UTF-8끼리는 code point 순과 같다. 경로·이름을 결정적인 순서로 정렬할 때 쓴다
+    // (locale·대소문자 접기 없음). 할당하지 않는다.
+    static int CompareBytes(StringView left, StringView right) noexcept {
+        const usize shared = left.bytes_ < right.bytes_ ? left.bytes_ : right.bytes_;
+        const int prefix = platform::MemoryCompare(left.data_, right.data_, shared);
+        if (prefix != 0 || left.bytes_ == right.bytes_) {
+            return prefix;
+        }
+
+        return left.bytes_ < right.bytes_ ? -1 : 1;
+    }
 
     friend constexpr bool operator==(StringView left, StringView right) noexcept {
         if (left.bytes_ != right.bytes_) {

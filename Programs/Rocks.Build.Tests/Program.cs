@@ -118,8 +118,11 @@ try
                 await ReflectionSourceTests.RunAsync(request, root);
                 Pass("module table and reflection sources");
                 break;
+            case "buildinfo":
+                await BuildInfoTests.RunAsync(request, root, Pass);
+                break;
             default:
-                throw new ArgumentException($"Unknown test group '{group}'. Groups: dependency, unity, pch, dynamic, module-table.");
+                throw new ArgumentException($"Unknown test group '{group}'. Groups: dependency, unity, pch, dynamic, module-table, buildinfo.");
         }
 
         Console.WriteLine($"Native build regression groups ({group} only): {passed}, failed: 0");

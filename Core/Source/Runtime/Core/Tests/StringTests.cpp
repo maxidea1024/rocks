@@ -121,6 +121,54 @@ TEST(StringUtf8ScalarBoundariesAndByteCounts) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
+// FindInvalidUtf8는 처음 잘못된 sequence의 leading byte 위치를 돌려주고, 유효하면 IndexNone이다.
+// 컴파일러 진단이 이 위치로 줄·열을 계산하므로 sequence 중간이 아니라 시작을 가리켜야 한다.
+TEST(StringViewFindInvalidUtf8ReportsTheLeadingByte) {
+    CHECK(StringView("").FindInvalidUtf8() == IndexNone);
+    CHECK(StringView(Korean).FindInvalidUtf8() == IndexNone);
+    CHECK(StringView(Emoji).FindInvalidUtf8() == IndexNone);
+
+    struct Case {
+        StringView text;
+        usize offset;
+    };
+    const Case cases[] = {
+        {StringView("\x80"), 0},                     // 홀로 선 continuation
+        {StringView("ab\xFF"), 2},                   // 잘못된 leading
+        {StringView("ab\xC0\x80"), 2},               // overlong
+        {StringView("\xED\x95\x9C\xED\xA0\x80"), 3}, // 유효한 글자 뒤의 surrogate
+        {StringView("a\xE1\x80"), 1},                // 끝에서 잘림
+        {StringView("a\xE1\x80"
+                    "Z"),
+         1},                                                 // continuation 자리에 ASCII
+        {StringView("\xF0\x9F\x8E\xAE\xF4\x90\x80\x80"), 4}, // U+10FFFF 초과
+    };
+    for (const Case& item : cases) {
+        CHECK(item.text.FindInvalidUtf8() == item.offset);
+        CHECK(!item.text.IsValidUtf8());
+        CHECK(!item.text.ValidateUtf8());
+    }
+
+    // 컴파일 타임에도 같은 판정이다.
+    static_assert(StringView("\xC3\xA9x\xFF").FindInvalidUtf8() == 3, "invalid byte offset");
+    static_assert(StringView("\xC3\xA9x").FindInvalidUtf8() == IndexNone, "valid text");
+}
+
+// CompareBytes는 byte 순이며 앞부분이 같으면 짧은 쪽이 앞이다(locale·대소문자 접기 없음).
+TEST(StringViewCompareBytesOrdersByBytes) {
+    CHECK(StringView::CompareBytes("", "") == 0);
+    CHECK(StringView::CompareBytes("abc", "abc") == 0);
+    CHECK(StringView::CompareBytes("", "a") < 0);
+    CHECK(StringView::CompareBytes("a", "") > 0);
+    CHECK(StringView::CompareBytes("ab", "abc") < 0);
+    CHECK(StringView::CompareBytes("abd", "abc") > 0);
+    CHECK(StringView::CompareBytes("B", "a") < 0); // 대문자가 소문자보다 앞(byte 값)
+    CHECK(StringView::CompareBytes("Bom.expect", "Bom.lf.expect") < 0);
+    // ASCII 밖 byte는 부호 없는 값으로 비교한다(UTF-8 code point 순).
+    CHECK(StringView::CompareBytes("z", "\xED\x95\x9C") < 0);
+    CHECK(StringView::CompareBytes(StringView("a\0b", 3), StringView("a\0c", 3)) < 0);
+}
+
 TEST(StringRejectsMalformedUtf8WithoutMutation) {
     const StringView malformed[] = {
         "\xC0\x80",
