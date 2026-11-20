@@ -1,12 +1,11 @@
 #include "TraceSessionInternal.h"
 
 #include <Base/Endian.h>
+#include <Base/PlacementNew.h>
 #include <Core/Guid.h>
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
-
-#include <new>
 
 namespace rocks {
 

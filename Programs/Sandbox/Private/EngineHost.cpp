@@ -2,6 +2,7 @@
 
 #include "GraphicsDeviceTraits.h"
 
+#include <Base/PlacementNew.h>
 #include <Core/Containers/Array.h>
 #include <Core/Diagnostics/Log.h>
 #include <Core/Memory/SystemAllocator.h>
@@ -21,7 +22,6 @@
 #include <TraceControl/TraceController.h>
 #include <TraceControl/TraceSettings.generated.h>
 #include <stdio.h>
-#include <new>
 #include <stdlib.h>
 
 namespace sandbox {

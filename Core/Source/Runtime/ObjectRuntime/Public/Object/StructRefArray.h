@@ -1,12 +1,12 @@
 #pragma once
 
+#include <Base/PlacementNew.h>
 #include <Base/TypeTraits.h>
 #include <Core/Memory/Allocator.h>
 #include <Meta/GeneratedType.h>
 #include <Object/Object.h>
 #include <Object/RuntimeTypeOps.h>
 #include <Platform/Fatal.h>
-#include <new>
 
 namespace rocks {
 

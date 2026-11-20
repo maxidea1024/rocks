@@ -1,3 +1,4 @@
+#include <Base/PlacementNew.h>
 #include <Base/Types.h>
 #include <Core/Containers/Array.h>
 #include <Core/Memory/StackAllocator.h>
@@ -7,7 +8,6 @@
 #include <TestSupport/HostFailure.h>
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
-#include <new>
 
 using namespace rocks;
 

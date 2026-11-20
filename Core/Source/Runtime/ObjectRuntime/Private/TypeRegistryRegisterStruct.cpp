@@ -1,11 +1,11 @@
 #include "TypeRegistryInternal.h"
 #include "TypeRegistryRegisterInternal.h"
 
+#include <Base/PlacementNew.h>
 #include <Object/TypeRegistry.h>
 #include <Core/Algorithms.h>
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
-#include <new>
 
 // TypeRegistry struct 등록(RegisterStruct)과 클래스·struct 필드의 값 타입 레코드 해석
 // (ResolveValueTypes — Enum·Struct 대상과 Map 키 enum의 native 대조·WorldOnly 소유자·Optional

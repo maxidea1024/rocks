@@ -31,6 +31,20 @@
     },
     {
       "kind": "field",
+      "name": "rocks::core_type_bindings::FrameRateBinding::denominator_",
+      "id": "1bf362a0621b4bb1a6f3925664af3ff5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::core_type_bindings::FrameRateBinding::numerator_",
+      "id": "f242bfb7d2244dbcadbd527a388dc27b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::core_type_bindings::IntVec2Binding::x",
       "id": "48e75cf65ef441349947bb9c8c8b352f",
       "aliases": [],
@@ -663,6 +677,13 @@
       "kind": "type",
       "name": "rocks::core_type_bindings::ColorBinding",
       "id": "e535f8241b9d46c1ab64d11bc975daef",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::core_type_bindings::FrameRateBinding",
+      "id": "09460cc6e09a4f358630b75617a54bef",
       "aliases": [],
       "retired": false
     },

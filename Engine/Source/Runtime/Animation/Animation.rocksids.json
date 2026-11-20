@@ -3,6 +3,34 @@
   "entries": [
     {
       "kind": "field",
+      "name": "rocks::AdditiveSettings::basePose",
+      "id": "e66e54e3abfa4500a263f720bc31fd20",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AdditiveSettings::basePoseClip",
+      "id": "5d97067977244cc48e56156f798d5719",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AdditiveSettings::basePoseFrame",
+      "id": "9ed488890b1647ea8941cec542e00c73",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AdditiveSettings::type",
+      "id": "2a9b9e23a3574772872004128e96f594",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::AnimSlotGroup::name",
       "id": "1802d5f5383644e7a6052e0d97e25d1f",
       "aliases": [],
@@ -12,6 +40,97 @@
       "kind": "field",
       "name": "rocks::AnimSlotGroup::slots",
       "id": "8c1faf25e2cd4ff6b11a0d352f1af4c3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AnimationAsset::skeleton",
+      "id": "f7b1f8c35f18432793934b8c6afc0e8e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AnimationClip::additive",
+      "id": "cdd7d3075762475391804af189af1698",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AnimationClip::eventTracks",
+      "id": "203fb962cb29458eb5a27af965266899",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AnimationClip::events",
+      "id": "7a8d5e9df3c54653910e5f624f9ee0c5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AnimationClip::interpolation",
+      "id": "c9bce9d60baa45fe8326e7817a802167",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AnimationClip::loop",
+      "id": "31058837ec0747f1af956fac27c49a53",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AnimationClip::playback",
+      "id": "052ce41345b6412e809aa4a849e70292",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AnimationClip::rateScale",
+      "id": "de0a21a3d9bd435b89bf7c77dfbdbe0c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AnimationClip::retargetSource",
+      "id": "14127c1f0fa347c599efcccc5ebcbfe7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AnimationClip::rootMotion",
+      "id": "730174fa2197448aa636a0b6bc777d17",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AnimationClip::source",
+      "id": "ce20ee9bc44a4190bd78d8891863e9ae",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AnimationClip::syncMarkers",
+      "id": "d88c6ba04d1049c9a4d4e117b648f4b3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AnimationClip::targetFrameRate",
+      "id": "c8b729e890fa4ee5a3918791a4b63584",
       "aliases": [],
       "retired": false
     },
@@ -94,6 +213,251 @@
     },
     {
       "kind": "field",
+      "name": "rocks::ClipBoneTrack::bone",
+      "id": "386ea4e9cdce49b0a0fdaad9804edcb2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipBoneTrack::rotation",
+      "id": "3f6a6c2f7f8d4bc09b41f43e5edf18c5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipBoneTrack::scale",
+      "id": "045835b3137b42d6ba3c702385925953",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipBoneTrack::translation",
+      "id": "2b5c3bf0651146818b22557ad58930ec",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipCurve::curve",
+      "id": "47d03becc8994cf1b56b9a850b6de1f1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipCurve::disabled",
+      "id": "4f102326cd0547baa11b8c33b1e813eb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipCurve::editable",
+      "id": "0f794b884a524017a480eebd1520bc42",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipCurve::metadata",
+      "id": "d8fdca9403f84f0486340f1e2f6f6fea",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipCurve::name",
+      "id": "b02ad9472f2f47b9b536ea3113db7510",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipEvent::duration",
+      "id": "755affcaddee4fdbbcc5492ab9f7ed6c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipEvent::name",
+      "id": "f3158ced6fc448c79bd8f198255d720a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipEvent::time",
+      "id": "70d5d7c07e0241168800c854c87d875a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipEvent::track",
+      "id": "88c31c8c429f4cf28e325ce52d342418",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipEvent::triggerChance",
+      "id": "3c2fd26e0896403881651fe5acc3f1e1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipEvent::triggerOnDedicatedServer",
+      "id": "93e36ffce7524d00afad5d098e9f3ed5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipEvent::triggerOnFollower",
+      "id": "7b6e8dd8d3504af687b82abf9f1b801a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipEvent::type",
+      "id": "f6b95d88a42d44f0b0393699a4dd7073",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipPlaybackData::curves",
+      "id": "2eb69ffff71e49cd8626e54d880dc568",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipPlaybackData::sampleCount",
+      "id": "645fd0a25fdc4a98800713844c340217",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipPlaybackData::sampleRate",
+      "id": "ad5007e115084f98802ef80bfd9c2ba8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipPlaybackData::trackToBone",
+      "id": "d8bc1bc4da8944d7a55c925fc3f2937e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipPlaybackData::tracks",
+      "id": "9981f59b89b14342906cf6ef87f2cf36",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipSourceData::boneTracks",
+      "id": "c547d26eb12248aaa71838f53bd7e106",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipSourceData::curves",
+      "id": "d4797245d39a46c997c26c90787c909f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipSourceData::frameCount",
+      "id": "6f751cae5bce4a0ca143b71b5fac79ef",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipSourceData::frameRate",
+      "id": "c5cada6e3b9f415181c9d3561944ea7e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipSourceData::transformCurves",
+      "id": "b0ef62609e284df88e262edf56c6f7b8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipSyncMarker::name",
+      "id": "4e3ce625353d4ebd8de857ba5dea1bf2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipSyncMarker::time",
+      "id": "18adf4200c1640eda2c3319c4428858e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipSyncMarker::track",
+      "id": "e8a894e294ea433584e44e6971811487",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipTransformCurve::channels",
+      "id": "4e7fc192f9af4b998aa9fcc652a4ecb0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipTransformCurve::disabled",
+      "id": "45231b784e2147b7a9e0d24766f70a54",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipTransformCurve::editable",
+      "id": "2674872e62f54b779e8e44ae956c96b7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipTransformCurve::metadata",
+      "id": "661c88ef512b48daa1014befc5408f64",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::ClipTransformCurve::name",
+      "id": "9b249a6667e042c793b85a23ac1d0fa4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::NamedReferencePose::name",
       "id": "e55bb8ea1c7a4d1abc603a60471a5463",
       "aliases": [],
@@ -103,6 +467,48 @@
       "kind": "field",
       "name": "rocks::NamedReferencePose::pose",
       "id": "0e7cd3b01fc0423695e0ae1373940785",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PlatformFrameRate::defaultRate",
+      "id": "4fc226806c844cc8a54f6165bc356d1a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::PlatformFrameRate::overrides",
+      "id": "8a2fe7e96ab9460c9f6d337d700a22a7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::RootMotionSettings::enable",
+      "id": "f1544cecb2904174aef2e59adc651f0d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::RootMotionSettings::forceRootLock",
+      "id": "58b1b9c9596649c98e26e25ea4d73055",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::RootMotionSettings::rootLock",
+      "id": "8be5a190c3a0473ba18444448d63c94e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::RootMotionSettings::useNormalizedScale",
+      "id": "d26e67f35ab345939493d84328457e31",
       "aliases": [],
       "retired": false
     },
@@ -227,8 +633,43 @@
     },
     {
       "kind": "type",
+      "name": "rocks::AdditiveBasePose",
+      "id": "60a956a3c5464a66839d5ba0dd215ca2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::AdditiveSettings",
+      "id": "ffda015c0a8d44fba3e1266baf10cd85",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::AdditiveType",
+      "id": "ca6a8ee2542e4e9dba0567fc23fadd49",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::AnimSlotGroup",
       "id": "755480bc2caf45afb454b6439c2edb0a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::AnimationAsset",
+      "id": "48d968c3d8784dedba0ec2861d30d3f1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::AnimationClip",
+      "id": "8afe9a85d2d8455ea9b7de9b167ff1a0",
       "aliases": [],
       "retired": false
     },
@@ -262,8 +703,85 @@
     },
     {
       "kind": "type",
+      "name": "rocks::ClipBoneTrack",
+      "id": "3d7e706dbb024c50985fa0399628d600",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ClipCurve",
+      "id": "ec5b389710b749ad85ab6bb0bddedd8e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ClipEvent",
+      "id": "efe0dd4799104c18b0549f2bf4bc3a82",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ClipInterpolation",
+      "id": "0bacfc03cd8b485e90d6ff464360026b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ClipPlaybackData",
+      "id": "6a58c79cb4004fc6a21e2d519ea8641f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ClipSourceData",
+      "id": "af7564f8f70f4a028e2563504398ef47",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ClipSyncMarker",
+      "id": "f93ca22d2c1f41f2b15890016639060e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::ClipTransformCurve",
+      "id": "91277614b7c842f6815e785ccca78f4a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
       "name": "rocks::NamedReferencePose",
       "id": "2926ca70c2ef46c18d18f2f5361524aa",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::PlatformFrameRate",
+      "id": "f8c32d3e25834b66ad2fec41709105d4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::RootMotionRootLock",
+      "id": "fc6dae4e79914853ad80da5314557293",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::RootMotionSettings",
+      "id": "fce553bcc6f8443795e24527f1aac6d9",
       "aliases": [],
       "retired": false
     },

@@ -1,6 +1,7 @@
 #include "../Common/DirectoryWatchInternal.h"
 #include "../Posix/PosixFileError.h"
 
+#include <Base/PlacementNew.h>
 #include <Platform/Clock.h>
 #include <Platform/Memory.h>
 #include <Platform/Sync.h>
@@ -10,8 +11,6 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <sys/stat.h>
-
-#include <new>
 
 // macOS FSEvents backend다. 파일 단위 이벤트(kFSEventStreamCreateFlagFileEvents)를 전용 직렬
 // dispatch queue로 받아 mutex로 보호한 큐에 쌓고, Poll·Wait가 그 큐를 비운다. FSEvents는 같은

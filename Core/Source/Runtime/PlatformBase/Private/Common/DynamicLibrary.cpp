@@ -1,10 +1,10 @@
 #include "DynamicLibraryInternal.h"
 #include "FileInternal.h"
 
+#include <Base/PlacementNew.h>
 #include <Platform/Atomics.h>
 #include <Platform/Memory.h>
 
-#include <new>
 #include <string.h>
 
 namespace rocks::platform {

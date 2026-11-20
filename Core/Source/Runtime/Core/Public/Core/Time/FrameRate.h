@@ -22,6 +22,11 @@
 // 끝으로 포화한다.
 namespace rocks {
 
+// 리플렉션 생성 코드의 접근점이다(정의는 MetaSchema Meta/GeneratedType.h — Core는 앞 선언만 한다).
+// FrameRate의 private 멤버를 CoreTypeBindings 미러(Binds)의 생성 코드가 읽고 쓴다.
+template <class>
+struct GeneratedType;
+
 // 프레임 번호다(UE FFrameNumber). 정수 하나이고 프레임 속도와 함께 써야 시간이 된다.
 // 연산자(+, -, +=, -=, ++)는 int32를 넘으면 Fatal로 끝낸다. 외부 데이터에서 온 값은 TryAdd·
 // TrySubtract로 다루고 Overflow를 처리한다.
@@ -178,6 +183,12 @@ private:
 // fps는 30000/1001. 분자·분모는 둘 다 양수다(TryCreate가 확인한다). 기본값은 UE와 같은
 // 60000/1이다(프레임 속도를 고르지 않은 시간 표현의 정밀도용 — 표시용 속도가 아니다).
 class FrameRate {
+    // 리플렉션 미러(CoreTypeBindings FrameRate 미러 — Docs/Design/MeshAnimationAssets.ko.md 7.5절
+    // 3)의 생성 코드가 private 멤버(numerator_·denominator_)에 닿는다. 생성 코드는 decode한 값을
+    // 게시하기 전에 미러의 Validate(두 값이 양수)를 부르므로 불변식이 깨진 값을 게시하지 않는다.
+    template <class>
+    friend struct ::rocks::GeneratedType;
+
 public:
     constexpr FrameRate() noexcept = default;
 

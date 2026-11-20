@@ -1,10 +1,9 @@
 #include "TraceSessionInternal.h"
 
 #include <Base/Endian.h>
+#include <Base/PlacementNew.h>
 #include <Core/FileError.h>
 #include <Platform/Clock.h>
-
-#include <new>
 
 // 스냅샷이다(Docs/Design/TraceSystem.ko.md 8절 "스냅샷"). 순서: 머리 → 스키마 전체 → 정의 저장소 →
 // 최근 기록 고리 → 동기 표지. writer 잠금은 제한 시간 안에서만 시도한다.

@@ -1,6 +1,6 @@
 # 메시·스켈레톤·애니메이션 에셋 설계
 
-기준일: 2026-11-21, 개정 10(MA5a 구현 — 6.5절·12.4절). 개정 9(MA3·MA5·MA6을 a·b로 나눔). 개정 8(MA4a 구현 — 6.4절·12.3절). 개정 7(MA2a 구현 — 5.4절·12.2절). 개정 6(MA2a·MA4a 분리). 개정 5(MA1 구현 — 3.7절). 개정 4(MA2 전 결정 반영 — index 형식·통합 bone map·메시 LOD 스트리밍). 개정 3(15절 요구를 다른 문서에 반영하고 상태 열을 더함). 개정 2(교차 검증 반영 — 17절). 정적 메시·스켈레톤·스킨 메시·애니메이션 클립의 에셋 자료구조를 정한다. 범위는 원본 데이터(에디터 데이터), 저장 설정, 빌드 계약, 쿠킹 데이터, 모듈 배치다. [엔진 구현 계획](EngineImplementationPlan.ko.md) 13.1절(StaticMeshAsset)·15절(Skeleton·SkeletalMesh·AnimationClip)의 개요를 구현할 수 있는 수준으로 구체화한다. 텍스처는 [에셋 시스템](AssetSystem.ko.md) 12절, 머티리얼은 [머티리얼 시스템](MaterialSystem.ko.md) 4절이 이미 정했으므로 이 문서는 그 둘을 참조만 한다.
+기준일: 2026-11-21, 개정 11(MA6a 구현 — 7.5절·12.5절). 개정 10(MA5a 구현 — 6.5절·12.4절). 개정 9(MA3·MA5·MA6을 a·b로 나눔). 개정 8(MA4a 구현 — 6.4절·12.3절). 개정 7(MA2a 구현 — 5.4절·12.2절). 개정 6(MA2a·MA4a 분리). 개정 5(MA1 구현 — 3.7절). 개정 4(MA2 전 결정 반영 — index 형식·통합 bone map·메시 LOD 스트리밍). 개정 3(15절 요구를 다른 문서에 반영하고 상태 열을 더함). 개정 2(교차 검증 반영 — 17절). 정적 메시·스켈레톤·스킨 메시·애니메이션 클립의 에셋 자료구조를 정한다. 범위는 원본 데이터(에디터 데이터), 저장 설정, 빌드 계약, 쿠킹 데이터, 모듈 배치다. [엔진 구현 계획](EngineImplementationPlan.ko.md) 13.1절(StaticMeshAsset)·15절(Skeleton·SkeletalMesh·AnimationClip)의 개요를 구현할 수 있는 수준으로 구체화한다. 텍스처는 [에셋 시스템](AssetSystem.ko.md) 12절, 머티리얼은 [머티리얼 시스템](MaterialSystem.ko.md) 4절이 이미 정했으므로 이 문서는 그 둘을 참조만 한다.
 
 - 배경: 사용자 지시(2026-11-19). 엔진 시험용으로 UE에서 텍스처·정적 메시·머티리얼·애니메이션을 가져오는 기능을 넣는다. Rocks에 메시·애니메이션 자료구조가 아직 없으므로 함께 정한다. 가져오는 경로는 [Unreal 교환 형식](UnrealExchange.ko.md)이 정한다. 이 문서의 자료구조는 그 경로와 상관없이 쓰는 엔진 기반이며, 뒤에 올 glTF·FBX 임포터도 같은 구조로 들어온다.
 - UE 근거: UE 5.8.4(`release`, commit `f45729c0b6f0`, 로컬 클론 `C:\github\UnrealEngine`)를 읽어 확인했다. 경로 약어는 다음과 같다. `E/` = `Engine/Source/Runtime/Engine`, `RT/` = `Engine/Source/Runtime`, `Dev/` = `Engine/Source/Developer`. UE 이름은 대응표와 근거에만 쓰고, 타입 이름은 Rocks 이름으로 짓는다. 빌드 설정·축소 설정처럼 업계 공용 서술 이름은 그대로 쓴다.
@@ -571,6 +571,24 @@ ClipPlaybackData {
 - 재샘플링의 회전 보간(slerp)은 Core 결정적 수학으로 한다(AssetSystem 10절 쿠킹 결정성).
 - 압축(ACL)은 후속이고, 압축이 생기면 이 구조의 `tracks`가 코덱 표시와 압축 바이트로 바뀐다. 오차 목표는 계획 15절(끝 효과기 1 cm, 회전 0.5°)이다.
 
+### 7.5 구현에서 정한 점(MA6a)
+
+MA6a 구현(`Animation` 모듈의 클립 클래스·원본·쿠킹 데이터, CoreTypeBindings `FrameRate` 미러) 중 7.1–7.4절이 정하지 않았거나 다르게 정한 점이다. 모두 권장안으로 확정했다. UE 근거는 E/Private/Animation/AnimDataModel.cpp(`Evaluate`), AnimationRuntime.cpp(`GetKeyIndicesFromTime`), AnimSequence.cpp(`CalculateNumberOfSampledKeys`·`SortSyncMarkers`), RT/Core/Public/Math/TransformNonVectorized.h(`Blend`)·Quat.h(`FastLerp`), E/Public/Animation/AnimTypes.h(`FAnimNotifyEvent::operator<`)다.
+
+1. **파일과 의존.** 리플렉션 헤더 `Animation/AnimationClip.h`(열거·값 struct·`ClipSourceData`·`ClipPlaybackData`·`AnimationAsset`·`AnimationClip`)와 메모리 형태·순수 함수 헤더 `Animation/ClipSource.h`(`ClipSource`·`ClipPlayback`, 검증, Load·Store, 샘플링, 쿠킹 변환)를 둔다. `Animation`은 `Curves`(`TangentCurve`)에 public으로 의존한다(8절). 진단은 `AnimationDiagnostic.h`의 `ClipIssue`·`ClipDiagnostic{code, error, issue, index, related}`이다.
+2. **`AnimationAsset`·Build 의존.** `AnimationAsset`은 `ROCKS_CLASS(Abstract)`이고 `skeleton`은 `ObjectRef<Skeleton>`(Hard)이다. 7.1절의 Build 의존은 필드 플래그가 아니라 `DependencyDeclarer`(AssetSystem 16.2절 — A2 이후)가 선언하므로 쿠킹 처리기와 함께 MA6b에서 더한다.
+3. **`FrameRate` 미러(MR8).** CoreTypeBindings에 `ROCKS_STRUCT(Binds = "rocks::FrameRate", Atomic, Version = 1)`을 두고 private 멤버(`numerator_`·`denominator_`, 도구 이름 `numerator`·`denominator`)를 InterpCurve 미러와 같은 방식(`GeneratedType` friend)으로 리플렉션한다. 검증 hook이 두 값이 양수인지 본다(0·음수 값은 게시하지 않는다 — `TryCreate`와 같은 불변식).
+4. **플랫폼별 목표 비율.** `targetFrameRate`는 `PlatformFrameRate{defaultRate, overrides OrderedMap<Name, FrameRate>}`(UE `FPerPlatformFrameRate`)이고 `Resolve(platform)`이 덮어쓰기 표에 없으면 기본값을 준다. 기본값은 UE `UAnimationSettings::DefaultFrameRate`와 같은 30/1이다. 공용 플랫폼별 값 타입이 생기면 그것으로 옮긴다.
+5. **커브 표시.** `ClipCurveFlags`는 bool 필드 셋(`editable` 기본 참 — UE `AACF_DefaultCurve`, `metadata`, `disabled`)으로 둔다(UE bit 값을 저장 형식으로 끌고 오지 않는다). `ClipTransformCurve`의 TangentCurve 9개는 `Array<TangentCurve> channels`(이동 x·y·z, 회전 x·y·z, 크기 x·y·z 순, 길이 정확히 `ClipTransformCurveChannels` = 9)다 — 할당기를 받는 struct의 정적 배열 필드는 리플렉션이 받지 않는다.
+6. **원본 bulk 배치.** 성분마다 bulk 하나이고 little-endian float, 패딩 없음이다(이동·크기 Vec3 12 byte, 회전 Quat x·y·z·w 16 byte). 원소 수는 1 또는 키 수(`frameCount + 1`)이고 0개·나머지 byte·다른 개수는 손상(로드 `CorruptPackage`)이다. 메모리 형태 `ClipSource`는 트랙마다 성분 배열을 갖고, `Store`가 상수 성분(모든 키 bit 같음)을 1키로 접고 트랙을 본 이름 원문 순으로 정렬해 쓴다. 순서는 원문을 ASCII 소문자로 접은 byte 비교다(9.2절의 NFC UTF-8 byte 순에 Name 비교 규칙을 겹쳐, 대소문자만 다른 두 이름이 같은 자리가 되어 중복이 한 규칙으로 드러난다). `Load`는 엄격 증가가 아니면(정렬 위반·중복) 손상으로 본다. 쿠킹 데이터와 같이 원본 커브는 `ClipSourceData`에 리플렉션 값으로 그대로 있고 `Store`·`Load`는 본 트랙만 다룬다.
+7. **원본 검증(`ValidateClipSource`).** 차례로 비율 ≤ `ClipMaxFrameRate`(1000 fps — `FrameRate`는 이미 양수), `frameCount` ≤ `ClipMaxFrames`, 트랙 수 ≤ `MeshMaxBones`, 트랙마다(이름 None 아님, 성분 원소 수 1 또는 키 수, 값 유한, 회전 |길이² − 1| ≤ `BoneRotationNormalizedTolerance`), 이름 중복(Name 비교 규칙 — 두 번째 트랙 번호가 가장 작은 쌍)이다. 순서는 `Store`가 정하므로 보지 않는다(pool이 필요 없다). 위반은 `InvalidClipData`, 할당 실패는 그 오류다. 커브 키(시간 순·유한)는 `TangentCurve` API와 리플렉션 검증 hook이 이미 지키므로 다시 보지 않는다.
+8. **샘플링 규칙(UE `UAnimDataModel::Evaluate`).** 시간 t(초, double)가 0 이하이거나 키가 하나면 키 0, `FrameRate::AsFrameTime(t)`가 마지막 키 이상이면 마지막 키, 아니면 키 = 프레임, α = subframe이다. Step이면 α = 0이고, α < `ClipKeySnapThreshold`(1e-4, UE `KINDA_SMALL_NUMBER`)면 앞 키, α > 1 − 그 값이면 다음 키, 그 밖은 UE `FTransform::Blend`처럼 이동·크기는 선형, 회전은 `FastLerp`(내적 부호로 최단 경로를 고른 nlerp) 뒤 정규화(제곱합 < 1e-8이면 단위)다. 성분이 1키면 그 값이다. **7.4절의 slerp 대신 UE와 같은 nlerp를 쓴다** — UE 평가·재샘플링이 nlerp이고 초월 함수가 없어 결정성도 쉽다.
+9. **쿠킹 변환(`BuildClipPlayback`).** 목표 비율이 원본과 같으면(`FrameRate` ==) 키를 그대로 옮긴다. 다르면 표본 수 N = frameCount × 목표/원본이 정수여야 한다(정수 연산으로 확인 — 아니면 `InvalidClipData`·`IncompatibleTargetFrameRate`. UE는 `ensure`만 하고 내림해 끝 프레임을 잃는다), N ≤ `ClipMaxFrames`이다. 키 k는 목표 비율의 k 프레임 시간(초)에서 8의 규칙(클립 보간 방식)으로 원본을 평가한 값이다(UE도 시간으로 평가한다). 그다음 성분마다 상수 접기를 한다. 트랙은 원본 순서대로 스켈레톤 원본 본 이름(`FindBoneIndex`)과 맞추고 없는 트랙은 뺀다. 원본 본도 가상 본도 아닌 이름은 `UnknownBoneTrack` 경고(index = 원본 트랙), 가상 본 트랙은 경고 없이 뺀다(가상 본은 평가가 계산한다). 커브는 그대로 복사하고, 변환 커브는 쿠킹 v1에 들어가지 않는다(UE는 본 트랙에 bake한다 — bake는 후속) — 사용 중(disabled 아님)인 수를 결과 `skippedTransformCurves`로 돌려준다. 전체를 `RunWithDeterministicFloatingPoint` 안에서 한다.
+10. **쿠킹 bulk 배치.** `tracks` bulk 하나에 트랙마다 원소 수 `uint32` 셋(이동·회전·크기, 각 1 또는 `sampleCount`)과 그 값들을 잇는다(6과 같은 원소 배치). `trackToBone` 길이 = 트랙 수, `sampleCount` = 표본 수(키 수)다. 로드는 배치·길이·값 유한을 보고 어기면 `CorruptPackage`다. 쿠킹 데이터 샘플링은 8과 같은 규칙에 `sampleRate`·`sampleCount`를 쓴다.
+11. **클립 검증(`ValidateAnimationClip`).** 에디터 데이터가 있는 클립을 본다(원본 머리·커브 이름(None·중복)·변환 커브 채널 수 + 설정 + 이벤트). 길이 = frameCount / 원본 비율(UE `GetPlayLength`). 이벤트: 시간 유한·[0, 길이], duration 유한·0 이상·끝 ≤ 길이, `triggerChance` ∈ [0, 1], track ≥ 0이고 `eventTracks`가 있으면 그 범위, 정렬(시간 오름차순, 같으면 track 오름차순 — UE `operator<`의 근사 비교 대신 정확 비교). 동기 마커: 이름 None 아님, 시간 [0, 길이], track 규칙 같음, 시간 오름차순(UE `SortSyncMarkers`. UE는 범위 밖을 잘라 넣지만 Rocks는 거부한다). `rateScale` 유한, `basePoseFrame` ≥ 0, 목표 비율(기본·덮어쓰기)이 `ClipMaxFrameRate` 이하. 정렬 도우미 `SortClipEvents`·`SortClipSyncMarkers`(안정 정렬)를 둔다. 쿠킹 클립의 검증은 쿠킹 로드(MA6b)가 한다.
+12. **진단 등록.** `AssetDiagnosticCode`에 `InvalidClipData`·`UnknownBoneTrack`·`EventPropertiesDropped`(임포터가 내는 경고 — MA6b·UX 임포터가 쓴다)를 더했다.
+13. **결정성.** 정렬은 원문 byte·정확 비교로 입력만으로 정해지고, 부동소수점은 √(정확 반올림)와 사칙연산뿐이다. 스레드를 쓰지 않는다.
+
 ## 8. 모듈 배치
 
 | 모듈 | 계층 | 책임 | 의존 |
@@ -833,6 +851,39 @@ Coverage(2026-11-21, clang source-based — `Build/MeasureCoverage.ps1`, 필터 
 
 측정 중 닿을 수 없음을 확인한 구조는 고쳤다: morph 재계산 판정의 "위치 속성 있음" 조건(MorphNormal이 없는 target은 늘 위치 속성이 있다), 원본 사본의 가중치 접두 속성 요소 검사(원본 검증이 보장한다).
 
+### 12.5 요구 대조표(MA6a — 애니메이션 클립 핵심)
+
+시험은 EngineTests의 `Clip_*`(`Engine/Source/Runtime/Animation/Tests`, 17개)다. 진단 이름표는 `AssetPackage_DiagnosticNames`가 새 코드까지 본다. `FrameRate` 미러는 클립 패키지 왕복(원본·쿠킹 비율, 덮어쓰기 표)으로 확인한다.
+
+| 요구 | 시험 |
+|---|---|
+| 7.1 `AnimationAsset`·`AnimationClip` 저장 → 로드 → 재저장 byte 일치(에디터·쿠킹), 두 번 쓴 byte 일치, 쿠킹 패키지의 EditorOnly 제외 | `Clip_PackageRoundTripResaveIdentical` |
+| 7.2 원본 상한(비율·프레임·트랙 수)·트랙 규칙(이름·원소 수·유한·회전 정규화 경계·대소문자만 다른 중복) | `Clip_ValidateSourceRules` |
+| 7.2·7.5절 6 상수 트랙 접기의 bit 보존·이름 순 정렬(접은 byte, 접두·숫자)·본 트랙 bulk 왕복 | `Clip_PackageRoundTripResaveIdentical`, `Clip_StoreOrdersAndFolds` |
+| 7.5절 6 원본 bulk 변조(원소 크기·개수, 순서·중복, 비유한·정규화 안 된 키, 빈 ref 셋, 프레임·트랙 수 상한, 다른 pool 이름) | `Clip_LoadRejectsSourceBytes`, `Clip_StoreRejectsInvalidSource` |
+| 7.2 커브 왕복(TangentCurve 키 bit), 변환 커브 채널 9개 | `Clip_PackageRoundTripResaveIdentical`, `Clip_ValidateClipRules` |
+| 7.3 이벤트·동기 마커 규칙(시간·길이·NaN·확률·track·정렬)과 정렬 도우미(안정 정렬) | `Clip_ValidateClipRules` |
+| 7.5절 4 플랫폼별 목표 비율 | `Clip_PlatformFrameRate`, `Clip_ValidateClipRules` |
+| 7.5절 8 샘플링 규칙(0 이하·NaN·끝 이후, 선형·nlerp 최단 경로, α 문턱, Step, 상수·1키, 0 길이 회전) | `Clip_SampleSourceRules`, `Clip_SamplePlaybackRules` |
+| 7.5절 9 쿠킹 변환: 원본 비율 = 목표 비율이면 키 그대로(bit), 상수 접기, 트랙 대응·가상 본·`UnknownBoneTrack`, 커브 복사·변환 커브 수, 쿠킹 샘플링 = 원본 샘플링 | `Clip_BuildSameRateKeepsKeys` |
+| 7.5절 9 재샘플링(30 → 60 짝수 표본 = 원본 키, 홀수 = 중간, Step, NTSC, 정수가 아닌 표본 수·상한 초과 `IncompatibleTargetFrameRate`, 0 프레임) | `Clip_BuildResamples` |
+| 7.5절 10 쿠킹 bulk 변조(원소 수, 짧은 bulk, 성분별 비유한, trackToBone 길이, sampleCount 0·상한, 비율 상한, 빈 ref, 트랙 수 상한)와 저장 인자 오류 | `Clip_LoadRejectsPlaybackBytes` |
+| 7.5절 13 결정성(두 번, 호출 전 FTZ, 비정규 값, 저장 SHA-256) | `Clip_DeterministicBuild`, `Clip_FuzzSources` |
+| 할당 실패 주입(쿠킹 변환·원본·쿠킹 저장·검증·트랙 찾기·원본·쿠킹 로드 — 결과 그대로·같은 결과) | `Clip_AllocationFailures`, `Clip_LoadAllocationFailures` |
+| 고정 seed 퍼징(무작위 원본 300개 — 검증, 쿠킹 불변식, 두 번 변환 일치) | `Clip_FuzzSources` |
+| 11 `InvalidClipData`·`UnknownBoneTrack`·`EventPropertiesDropped` 등록·이름·4.6절 변환 | `Clip_DiagnosticNames`, `AssetPackage_DiagnosticNames` |
+
+Coverage(2026-11-21, clang source-based — `Build/MeasureCoverage.ps1`, 필터 `Clip_`·`Skeleton_`): 시험 32개 모두 통과. Animation Private·Public 전체는 줄 1618/1618(100%), 분기 819/826(99.15%), 함수 126/126이다. 클립 파일만 보면 다음과 같다.
+
+| 파일 | 줄 | 분기 |
+|---|---|---|
+| ClipSource.cpp | 418/418 | 170/174 |
+| ClipPlayback.cpp | 315/315 | 154/155 |
+| AnimationClip.cpp | 215/215 | 160/161 |
+| AnimationInternal.h·AnimationClip.h·ClipSource.h | 49/49 | 6/6 |
+
+닿지 않은 분기 7개 가운데 6개는 `ROCKS_ASSERT`의 실패 쪽이다(용량을 미리 잡은 뒤의 추가 넷 — 트랙 이름 표·정렬 표·저장 트랙·로드 트랙, 커브 이름 표 하나, 상수 접기의 줄이는 크기 조정 하나). 나머지 하나는 12.3절에 적은 MA4a의 `FindNamed` 다른 pool 비교다. 측정 중 닿을 수 없음을 확인한 구조는 고쳤다: 커브 키 재검증(TangentCurve API·검증 hook이 이미 지킨다 — 7.5절 7), 샘플링의 `TryAsFrameTime` 실패·음수 프레임(양수 시간만 그 경로로 간다), 유한 판정의 성분별 단락(v − v 합 한 번), 쿠킹 로드의 원소별 유한 단락(개수 세기), 상수 접기의 빈 배열.
+
 ## 13. 단계
 
 ID는 이 문서가 부여한다(MA). 착수는 사용자가 정하고, 고정 구현 순서를 바꾸지 않는다. 단, 사용자 지시(2026-11-21 "진행 가능한거부터")에 따라 에셋 DB·쿠커·머티리얼 클래스에 기대지 않는 부분을 a 단계(MA2a·MA3a·MA4a·MA5a·MA6a)로 떼어 먼저 한다. 떼어 낸 부분은 순수 함수·값 타입·A1 수준 에셋 클래스뿐이라, 뒤 단계(MA2b·MA4b)가 그 위에 쿠킹 처리기·임포트 서비스를 얹을 때 바꿀 계약이 없다.
@@ -847,7 +898,7 @@ ID는 이 문서가 부여한다(MA). 착수는 사용자가 정하고, 고정 �
 | MA4b | 스켈레톤 임포트 서비스·기존 스켈레톤 병합 저장·너겟 무효화 | MA4a, A2–A4 |
 | MA5a | 스킨 빌드 핵심(순수 함수): `SkinnedMeshBuildSettings`, 원본 스킨 가중치를 렌더 정점까지 옮기기(용접 비교에 영향 포함), 영향 줄이기·8/16비트 정규화(`InfluencesTrimmed`), LOD 통합 bone map·필요 본 목록·inverse-bind 행렬(MA4a `BoneHierarchy`), morph target 희소 변화량 빌드(`morphThresholdPosition`) — 메모리 결과까지. **구현(2026-11-21, 미커밋)**: `Mesh`의 `SkinnedMeshBuildSettings`(리플렉션 파생 struct), `MeshTools`의 `BuildSkinnedMeshLod`·`ReduceBoneInfluences`·`QuantizeSkinWeights8`(5.2절 단계 함수는 공용 파일로 옮김), 진단 코드 `InfluencesTrimmed`·`MissingInfluences`, 시험 16개(12.4절 대조표·coverage), 정한 점은 6.5절 | MA2a, MA4a |
 | MA5b | `SkinnedAsset`·`SkeletalMesh` 클래스, 쿠킹 렌더 데이터 패킹(`SkinnedRenderLod`), 쿠킹 처리기·임포트 서비스, 스켈레톤 병합 저장 연결 | MA5a, MA2b, MA4b |
-| MA6a | 애니메이션 클립 핵심: `AnimationAsset`·`AnimationClip` 클래스(저장·로드 왕복), `ClipSourceData`·이벤트·동기 마커·설정 검증(`InvalidClipData`·`UnknownBoneTrack`), 원본 샘플링, 쿠킹 데이터 v1로 바꾸는 순수 함수(상수 트랙 접기·재샘플링)와 쿠킹 데이터 샘플링, CoreTypeBindings `FrameRate` 미러(MR8) | MA4a, Curve 단계(완료) |
+| MA6a | 애니메이션 클립 핵심: `AnimationAsset`·`AnimationClip` 클래스(저장·로드 왕복), `ClipSourceData`·이벤트·동기 마커·설정 검증(`InvalidClipData`·`UnknownBoneTrack`), 원본 샘플링, 쿠킹 데이터 v1로 바꾸는 순수 함수(상수 트랙 접기·재샘플링)와 쿠킹 데이터 샘플링, CoreTypeBindings `FrameRate` 미러(MR8). **구현(2026-11-21, 미커밋)**: `Animation`의 `AnimationClip.h`(리플렉션)·`ClipSource.h`(메모리 형태·검증·Load·Store·샘플링·`BuildClipPlayback`), CoreTypeBindings `FrameRate` 미러, 진단 코드 `InvalidClipData`·`UnknownBoneTrack`·`EventPropertiesDropped`, 시험 15개(12.5절 대조표·coverage), 정한 점은 7.5절 | MA4a, Curve 단계(완료) |
 | MA6b | 클립 쿠킹 처리기·임포트 서비스·스켈레톤 병합 뒤 재쿠킹(너겟 무효화) | MA6a, MA4b |
 | MA7 | 명령행·문서·검증 보고 | MA1–MA6b |
 
@@ -879,7 +930,7 @@ ID는 이 문서가 부여한다(MA). 착수는 사용자가 정하고, 고정 �
 | MR5 | [물리 어댑터](PhysicsJoltAdapter.ko.md) | `SimpleCollision` 형상 → Jolt 형상 대응, `CollisionComplexity`, 볼록 형상 쿠킹 | 반영(PhysicsJoltAdapter 개정 1, 4절·J20·J21) |
 | MR6 | [엔진 구현 계획](EngineImplementationPlan.ko.md) 13.1·15절 | 이 문서를 가리키는 연결(개정 1에서 반영) | 반영(개정 1) |
 | MR7 | 렌더 기반(GraphicsTypes) | `IndexFormat`을 Graphics에서 GraphicsTypes로 옮긴다(직렬화하는 쪽이 장치 없는 모듈을 쓰게) | 반영·결정(RenderBase 개정 30 결정 R20 — 고정 번호표 UInt16 = 1·UInt32 = 2, 이동은 MA2 착수 전) |
-| MR8 | Core 리플렉션 미러 | `FrameRate`·`Box<double>`·`Rotator<double>`·`Transform`·`LinearColor`의 Binds 미러가 있는지 확인하고 없으면 더한다(필드 타입으로 쓴다) | 확인함: `Rotator<double>`·`LinearColor`·`Transform` 미러는 있다(CoreTypeBindings/CoreValueTypes.h). `FrameRate`·`Box<double>`는 없어 MA2(Box)·MA6(FrameRate)에서 CoreTypeBindings에 더한다 |
+| MR8 | Core 리플렉션 미러 | `FrameRate`·`Box<double>`·`Rotator<double>`·`Transform`·`LinearColor`의 Binds 미러가 있는지 확인하고 없으면 더한다(필드 타입으로 쓴다) | 확인함: `Rotator<double>`·`LinearColor`·`Transform` 미러는 있다(CoreTypeBindings/CoreValueTypes.h). `FrameRate`는 MA6a에서 더했다(7.5절 3). `Box<double>`는 MA2b에서 더한다 |
 | MR9 | [에셋 시스템](AssetSystem.ko.md) 12.4.5절·TargetProfile | 메시 LOD 그룹 표(screenSize·minLod 기본값)를 텍스처 LOD 그룹과 나란히 둔다 | 반영(AssetSystem 개정 10, 12.4.5절 — UE `FStaticMeshLODGroup` 멤버 대응) |
 | MR10 | 에셋 시스템 3·4.6절 | 모듈 그래프에 8절 다섯 모듈 추가, 11절 진단 코드 등록 | 반영(AssetSystem 개정 10, 3·4.6절) |
 
@@ -900,6 +951,8 @@ ID는 이 문서가 부여한다(MA). 착수는 사용자가 정하고, 고정 �
 - 개정 9(2026-11-21): MA3·MA5·MA6도 같은 방식으로 a·b로 나눴다(MA3a 충돌 값·검증, MA5a 스킨 빌드 핵심, MA6a 클립 핵심 — 에셋 DB·쿠커 없이 되는 부분). UX1a는 엔진 플러그인 빌드 지원(BuildTargets BS4 엔진 쪽)이 없어 보류했다.
 
 - 개정 10(2026-11-21): MA5a 구현에서 정한 점을 6.5절에 적었다(API·결과 형태, 설정 struct 상속과 필드 번호, 스킨 빌드의 buildScale 보존, 설정 검사와 영향 상한 기본값, 가중치를 담은 원본 사본, 스킨 임계값과 번호가 겹친 삼각형 제외, 영향 줄이기와 루트 본 대체(`MissingInfluences` — 새 경고), 용접의 스킨 항목(영향·프로필·morph), 가중치 프로필 빌드, 쿠킹 칸 수와 8비트 잔차, bone map과 필요 본, inverse-bind와 `SingularBindPose`, morph target 짝·법선 재계산·담는 조건, 경고 순서, 정적 빌드와의 단계 공유, 진단 등록, 결정성). 11절 표에 `MissingInfluences`를 더하고 12.4절 대조표, 13절 MA5a 상태를 고쳤다.
+
+- 개정 11(2026-11-21): MA6a 구현에서 정한 점을 7.5절에 적었다(파일·의존, `AnimationAsset`과 Build 의존 시점, CoreTypeBindings `FrameRate` 미러와 검증 hook, 플랫폼별 목표 비율 `PlatformFrameRate`, 커브 표시 bool과 변환 커브 채널 배열, 원본 bulk 배치·정렬·상수 접기, 원본 검증, UE `Evaluate`와 같은 샘플링 규칙(7.4절의 slerp를 UE nlerp로 바꿈), 쿠킹 변환의 정수 표본 수·트랙 대응·변환 커브 제외, 쿠킹 bulk 배치, 클립 검증·정렬, 진단 등록, 결정성). 13절 MA6a 상태, 15절 MR8 상태, 12.5절 대조표를 고쳤다.
 
 ## 17. 교차 검증 기록(개정 2)
 

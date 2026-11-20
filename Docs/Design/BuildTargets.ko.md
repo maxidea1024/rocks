@@ -1,6 +1,6 @@
 # 빌드 타깃·모듈 의존·플러그인 조건 설계
 
-기준일: 2026-11-21, 개정 7. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
+기준일: 2026-11-21, 개정 8. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
 - **타깃 종류 확장**: Editor·Client·Server 타깃과, 타깃 종류에 따라 코드·데이터를 컴파일에서 빼는 매크로.
 - **모듈 의존 공개 범위**: 의존마다 Public(소비자에게 include·정의를 넘김)과 Private(이 모듈 안에서만 씀)을 나눈다.
 - **플러그인 활성 조건**: 프로젝트가 플러그인을 특정 타깃·플랫폼·구성에서만 켠다.
@@ -231,7 +231,7 @@ type 값은 `{ Runtime, Developer, Editor, ServerOnly, ClientOnly }`다(BD4). �
 - 빈 목록, 중복 값, 모르는 값은 오류다.
 - 프로젝트 `targetPlatforms` 밖의 플랫폼을 적어도 오류다.
 
-**첫 엔진 플러그인**(Unreal 교환 UXR7, 2026-11-20 — 설계, 구현은 UnrealExchange UX1). `Engine/Plugins/Importers/UnrealExchange/`([Unreal 교환 형식](UnrealExchange.ko.md) 10.1절)가 엔진 저장소의 첫 플러그인이 된다. 엔진 규칙 프로젝트가 이미 `Engine/Plugins/**`의 규칙을 모으고(Build/Rules/Rocks.Engine.Rules.csproj:15) PluginCatalog가 그 경로를 찾는다.
+**첫 엔진 플러그인**(Unreal 교환 UXR7, 2026-11-20 — 설계. 플러그인 골격은 BS9d(3.9절), 내용은 UnrealExchange UX1a·UX1b). `Engine/Plugins/Importers/UnrealExchange/`([Unreal 교환 형식](UnrealExchange.ko.md) 10.1절)가 엔진 저장소의 첫 플러그인이 된다. 엔진 규칙 프로젝트가 이미 `Engine/Plugins/**`의 규칙을 모으고(Build/Rules/Rocks.Engine.Rules.csproj:15) PluginCatalog가 그 경로를 찾는다.
 - 모듈은 `UnrealExchange` 하나이고 종류는 Developer다. 그래서 3.1절 표대로 Release 구성의 Game·Client·Server에 들어가지 않고 Program(commandlet)·Editor에만 들어간다. 이 문단의 활성 조건 필드를 쓰지 않아도 Shipping에서 빠진다.
 - 기본 비활성이다. 명령행 도구(`Programs/Commandlet`)가 이 플러그인을 켜서 `asset-import-unreal` 명령을 등록한다. 플러그인 모듈이 Commandlet 명령을 더하는 확장점은 UX1에서 Commandlet 쪽과 함께 정한다.
 - 플러그인 콘텐츠(엔진 `/Engine` 마운트가 생기기 전까지 둘 "구운 표면" 머티리얼 — MaterialSystem 11.3절)의 마운트 규칙도 UX1에서 정한다.
@@ -362,6 +362,47 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 - 그래서 게임의 Editor 타깃은 엔진 모듈의 컴파일 환경(define·컴파일 옵션)을 바꿀 수 없다. 바꾸는 타깃 설정은 규칙 로드 때 오류다. 설치 엔진의 UE도 같다(UE 소스 빌드는 그때 고유 환경으로 바꾸지만, Rocks 게임은 설치 SDK만 쓴다).
 - SDK 변형 key(BD5)에 링크 방식을 더한다. Editor 변형은 `Modular`이고, 다른 변형은 `Monolithic`이다.
 
+### 3.9 엔진 플러그인 빌드
+
+엔진 저장소의 타깃(EngineTests·Commandlet·Engine)이 `Engine/Plugins` 아래 플러그인을 찾고, 타깃이 켠 플러그인의 모듈만 빌드·링크한다(2026-11-21, 사용자 지시 "진행 가능한거부터" — Unreal 교환 리더 UX1a의 선행 조건). 3.6절의 프로젝트 쪽 활성 조건(BS4)과 별개로, 프로젝트가 없는 엔진 타깃의 경로를 정한다. 지금은 규칙 어셈블리가 `Engine/Plugins/**/*.Build.cs`를 이미 모으지만(Rocks.Engine.Rules.csproj) 엔진 빌드 경로 어디에도 `PluginCatalog`·`DescriptorModuleSet`이 없다. 그래서 플러그인 모듈이 이름 참조만으로 빌드되고, 활성·모듈 종류·Release 배제가 적용되지 않는다.
+
+**탐색(BD32).** 엔진 저장소의 모든 규칙 평가(빌드 CLI, Release 배제·유니티·PCH 정책 검사)는 `Engine/Plugins`를 `PluginCatalog.Discover`로 찾는다. 켜지 않은 플러그인도 기술자 검증과 규칙 대조(선언한 모듈마다 규칙이 하나, 규칙마다 선언이 하나)를 한다. 끈 플러그인의 규칙도 Configure가 성공해야 한다. UE도 엔진 플러그인을 늘 찾는다(`UBT/System/Plugins.cs` `ReadEnginePlugins`, 탐색 규칙 `EpicGames.Build/System/EnumeratePlugins.cs` — `.uplugin`이 있는 폴더 아래는 더 찾지 않는다. Rocks `PluginCatalog`와 같다).
+
+**타깃이 켜기(BD33·BD34).** `TargetRules.Plugins : IReadOnlyList<PluginReference>`를 더한다. 형식과 의미는 `.rocksproject`의 `plugins[]`와 같다(`enabled` true·false, 3.6절 조건 필드는 BS4가 넓힌다). 같은 이름을 프로젝트도 적으면 타깃 참조가 이긴다(UE `UEBuildTarget.SetupPlugins`가 타깃 `EnablePlugins`·`DisablePlugins`를 먼저 처리하고, 프로젝트 참조는 이미 적힌 이름을 건너뛴다). `enabledByDefault`는 Program 타깃에 적용하지 않는다. Program은 명시한 것만 켠다(UE는 `bCompileAgainstEngine || bCompileWithPluginSupport`일 때만 기본 활성을 더하고, Program은 보통 둘 다 꺼져 있다). Game에는 적용한다. 의존 플러그인 자동 활성과 "끈 플러그인을 켠 플러그인이 요구하면 오류"는 3.6절 규칙 그대로다.
+
+**모듈 포함(BD35).** 켠 플러그인 모듈은 기술자 모듈 종류로 거른다.
+
+| 종류 | 들어가는 문맥 | UE 5.8 대응(`ModuleDescriptor.IsCompiledInConfiguration`) |
+|---|---|---|
+| Runtime | 모든 타깃 | `Runtime`·`RuntimeAndProgram`(Rocks Runtime은 Program에도 들어간다 — 7절) |
+| Developer | Game의 Release를 뺀 모든 문맥 | `DeveloperTool`(`bBuildDeveloperTools` = Editor·Program, 또는 Test·Shipping이 아닌 구성) |
+| Editor | BS2가 Editor 타깃을 만들기 전까지 빠짐 | `Editor` |
+
+지금 게임 빌드 규칙(Developer는 Release면 무조건 뺌)은 Program Release(명령행 도구)에서 Developer 플러그인을 빼므로 이 표로 고친다. 플랫폼 규칙은 지금과 같다.
+
+**링크와 모듈 표(BD36).** 켠 플러그인의 모듈은 타깃의 주 실행 파일(`Modules[0]`)에 링크하고, 모듈 표에 기술자 `loadingPhase`의 보통 행(단계 실행 대상)으로 싣는다. 실행 파일이 직접 의존하지 않아도 링크된다. UE도 켠 플러그인 모듈을 주 binary에 넣는다(`UEBuildTarget.PreBuildSetup`의 `AddModuleToBinary`, Monolithic이면 `LaunchModuleName`으로 만든 `Binaries[0]`). 부 실행 파일(시험 실행기의 probe 등)에는 링크하지 않는다. 실행 파일이 없는 타깃(Engine)은 빌드만 한다.
+
+게임 빌드에도 같은 규칙을 적용한다. 지금 게임 빌드는 켠 플러그인 모듈을 빌드만 하고, 실행 파일이 참조한 모듈만 링크한다([저장소 배치](../Guides/RepositoryLayout.ko.md)). 그래서 플러그인이 명령을 등록하려면 실행 파일이 정적으로 의존해야 했고, 그러면 플러그인을 끈 타깃이 깨졌다. 이 결정은 [모듈 로더](ModuleLoader.ko.md) ML5 "기술자 모듈 행" 중 Monolithic 부분을 당겨 온다.
+
+**규칙 기반 클래스(BD37).** 플러그인 모듈 규칙은 `PluginModuleRules`를 상속한다. `ModuleDirectory`는 `<플러그인>/Source/<모듈>`이다(UE 플러그인 규약 — `RulesCompiler`가 `<플러그인>/Source` 아래 규칙을 그 플러그인 소유로 등록한다). 위치·종류·`loadingPhase`·`platforms`의 단일 출처는 기술자이고, 기반 클래스가 `BuildContext.Plugins`에서 모듈 이름으로 찾는다. 기술자에 선언 없는 모듈의 규칙은 오류다. 정책 검사 `plugin-module-rules-base`가 `Engine/Plugins/**/*.Build.cs`의 기반 클래스를 확인한다.
+
+**모듈 종류 칸(BD38).** `NativeModuleInput.Type`(Runtime·Developer·Editor)을 더한다. 엔진 모듈은 `SourceModuleRules`의 Group 폴더에서 오고(BS2가 생기면 그 규칙 값이 덮어쓴다), 플러그인 모듈은 기술자에서 온다. Release 배제 정책 검사는 경로(`Source/Developer`) 대신 이 칸으로 판정하고, Game 타깃의 도달 집합에 BD36 링크 모듈을 넣는다.
+
+**계층 의존(BD39).** Core·`Engine/Source` 모듈은 플러그인 모듈에 의존할 수 없다. 링크 의존과 `DynamicModules` 모두 해당한다(UE도 엔진 모듈이 플러그인 모듈을 참조하면 동적 적재까지 오류다 — `UEBuildTarget`의 scope 검사). Programs·플러그인 모듈은 이번 타깃에서 켜진 플러그인의 모듈에만 의존할 수 있다(위반은 오류, UE는 경고). 플러그인이 다른 플러그인 모듈에 의존하려면 `.rocksplugin` `plugins`에 적어야 한다. [모듈 로더](ModuleLoader.ko.md)의 "Engine이 `DynamicModules`로 둔 렌더러·플러그인 모듈" 문장은 이 규칙에 맞게 고친다(BS9b에서 함께).
+
+**플러그인 시험(BD40).** 플러그인 모듈 시험은 `<플러그인>/Source/<모듈>/Tests/`에 둔다. EngineTests 규칙이 `PluginTestModules` 목록(`플러그인/모듈`)으로 모으고, EngineTests 타깃이 그 플러그인을 켠다. `Private/` include 루트는 `<플러그인>/Source`다. UE는 플러그인마다 `<플러그인>/Tests` 시험 타깃을 둘 수 있지만 Rocks는 시험 실행기를 하나로 유지한다.
+
+**거부(BD41).** SDK export 타깃은 엔진 플러그인을 켤 수 없다(설치 SDK는 엔진 플러그인을 싣지 않는다). `Modular` 타깃이 플러그인을 켜면 ML4(플러그인 binary manifest) 전까지 거부한다.
+
+**정책 경로(BD42).** `crt-number-conversion` 검사 루트에 `Engine/Plugins`를 더한다(교환 리더가 JSON 숫자를 읽는다). 시험 소스·시험 fixture 판정에 플러그인 경로 모양(`Engine/Plugins/**/Source/<모듈>/Tests`)을 더한다.
+
+**바뀌는 계약.**
+- `PluginCatalog.ResolveEnabled(참조 목록, 참조 출처, available, applyDefaults)` — `ProjectDescriptor` 필수를 없앤다.
+- `DescriptorModuleSet.Resolve(소유자, available, platform, configuration, targetType)`. `Apply`는 플러그인 소유 모듈만 대조하고 엔진 모듈은 통과시킨다.
+- `TargetRules.Plugins`, `BuildContext.Plugins`(RuleLoader가 Configure 전에 채운다).
+- `NativeModuleInput.Type`, 실행 파일의 플러그인 링크 칸(빌드가 채우는 칸이며, 규칙이 채우면 입력 오류).
+- 모듈 표: 플러그인 모듈 행은 실행 파일 링크 폐포 행 뒤, 동적 행 앞의 보통 행이다.
+
 ## 4. 결정 요약
 
 1. 타깃 종류는 UE와 같은 다섯 가지다(Game·Editor·Client·Server·Program).
@@ -373,6 +414,7 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 7. 프로젝트의 플러그인 참조에 허용 목록(타깃·플랫폼·구성)을 두고, 조건 참조가 그 플러그인의 상태를 정한다(UE 의미론). 거부 목록과 optional은 두지 않는다.
 8. 전용 서버는 필수다(구현은 네트워크 단계). Server 타깃은 Windows·macOS·Linux에서 빌드하고, Linux x64를 빌드 플랫폼(서버·기반 시험 전용)으로 더한다.
 9. Editor 타깃은 UE와 같이 모듈마다 공유 라이브러리로 링크하고(사용자 결정), 나머지 타깃은 단일 실행 파일이다. 모듈 API 매크로·리플렉션 타입 정보 export·공개 헤더 정적 저장소 금지로 두 방식이 같은 소스로 동작하게 하고, 모듈 수명·로더는 별도 스펙으로 정한다.
+10. 엔진 타깃은 `Engine/Plugins`를 늘 찾아 검증하고, 타깃 규칙 `Plugins`로 켠 플러그인의 모듈만 기술자 종류대로 걸러 주 실행 파일에 링크한다(3.9절). 엔진 모듈은 플러그인 모듈에 의존하지 않는다.
 
 ## 5. 결정 사항
 
@@ -409,6 +451,17 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 | BD29 | 공개 헤더에 쓰기 가능한 정적 저장소(const 아닌 inline 변수·inline/템플릿 함수의 static 지역 변수·헤더 정의 정적 데이터 멤버), `thread_local` 변수, 주소를 식별자로 쓰는 정적 객체를 두지 않는다(정책 `public-header-static-storage`, 링크 방식과 무관하게 검사). 서드파티는 UE와 같이 소비 모듈마다 링크하고, `HasGlobalState` 서드파티만 직접 소비 모듈을 하나로 제한한다 | 권장안 |
 | BD30 | 모듈 수명 객체·로더는 별도 스펙 [모듈 로더](ModuleLoader.ko.md)로 정한다(ML0–ML4는 BS5 전, ML5는 BS5와 함께). Modular 실행 파일은 부트 모듈만 import한다(MD21). 요구 계약은 3.8절 네 항목이다. 게임의 Editor 타깃은 설치 SDK의 엔진 모듈 공유 라이브러리를 공유하며 엔진 컴파일 환경을 바꿀 수 없다 | 권장안 |
 | BD31 | Editor보다 먼저 `Modular` Program 시험 빌드(FoundationTests)를 검사 체인에 넣어 export 누락과 공유 상태 위반을 잡는다(Windows·macOS). 대상 모듈의 `Private/`를 받는 시험 묶음(BD22)은 `Modular`에서 그 모듈의 공유 라이브러리에 함께 링크한다(UE도 모듈의 `Private/Tests` 시험을 모듈 바이너리에 컴파일한다 — 예 `Runtime/Core/Private/Tests`). 시험 등록 표는 Core가 한 벌 가진다 | 권장안 |
+| BD32 | 엔진 저장소의 규칙 평가는 `Engine/Plugins`를 늘 찾고, 끈 플러그인까지 기술자 검증·규칙 대조를 한다(3.9절) | 권장안 |
+| BD33 | 타깃 규칙 `Plugins`(프로젝트 `plugins[]`와 같은 형식), 타깃 참조가 프로젝트 참조를 이긴다. 버린 안: 문자열 목록 둘(형식이 둘이 됨), 플러그인 쪽 지원 프로그램 목록(UE `SupportedPrograms` — 이중 등록) | 권장안 |
+| BD34 | `enabledByDefault`는 Program 타깃에 적용하지 않는다(명시만). Game에는 적용한다 | 권장안 |
+| BD35 | 플러그인 모듈 포함: Runtime은 모두, Developer는 Game Release만 뺌, Editor는 BS2 전까지 뺌(3.9절 표). 버린 안: 지금 규칙(Program Release에서 Developer가 빠짐) | 권장안 |
+| BD36 | 켠 플러그인 모듈은 주 실행 파일에 링크하고 기술자 단계의 보통 모듈 행으로 싣는다. 게임 빌드도 같다. 버린 안: 참조된 것만 링크(정적 의존이 필요해 끄고 켜는 의미가 없어짐), `DynamicModules` 재사용(요청 시 적재 행이라 단계로 시작하지 않음), 모든 실행 파일에 링크 | 권장안 |
+| BD37 | 플러그인 모듈 규칙 기반 클래스 `PluginModuleRules`, 위치·종류·단계의 단일 출처는 기술자. 버린 안: 규칙에 경로 직접 기입(중복), `Source/Developer` 흉내 | 권장안 |
+| BD38 | `NativeModuleInput.Type`을 두고, Release 배제는 경로 대신 이 칸으로 판정한다 | 권장안 |
+| BD39 | 엔진 모듈 → 플러그인 모듈 의존 금지(동적 포함), 끈 플러그인 모듈 의존은 오류(UE는 경고), 플러그인 사이는 `plugins` 선언 필요 | 권장안 |
+| BD40 | 플러그인 시험은 `<플러그인>/Source/<모듈>/Tests/`에 두고 EngineTests가 `PluginTestModules`로 모은다. 버린 안: 플러그인마다 시험 실행 파일 | 권장안 |
+| BD41 | SDK export 타깃의 엔진 플러그인 켜기 거부, `Modular` 타깃의 플러그인은 ML4 전까지 거부 | 권장안 |
+| BD42 | 정책 경로에 `Engine/Plugins` 모양 추가(`crt-number-conversion`·시험 소스·fixture 판정), 새 검사 `plugin-module-rules-base` | 권장안 |
 
 ## 6. 단계
 
@@ -425,8 +478,12 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 | BS6 | Linux x64 빌드 플랫폼(3.7절 2): `NativePlatform.Linux`, clang++·lld 툴체인 탐색과 fingerprint, 플랫폼 매크로, `Private/Linux/` 규칙, 정책 검사의 플랫폼 폴더 목록, Linux에서 허용 타깃 제한 | Core 모듈과 FoundationTests가 Linux x64에서 빌드·통과(전체 계획 M3 "Core CPU/headless suite") |
 | BS7 | Server 타깃 첫 실행 파일(3.7절 1·3·4) — 네트워크 단계: 게임 템플릿의 Server 타깃 규칙, 그래픽 backend ClientOnly 표시와 비링크 검사, Android Server 타깃 거부, headless 부트·종료 | Windows·macOS·Linux에서 Server 실행 파일이 부트·종료한다(전체 계획 M4 "server service boot/shutdown") |
 | BS8 | 모듈식 링크 기반(3.8절) — 선행: BS0. `LinkType`·`ROCKS_MONOLITHIC`·Android 거부·파일 이름, 모듈 API 매크로 주입과 `ROCKS_DLLEXPORT`·`ROCKS_DLLIMPORT`, 숨김 가시성, 예약 매크로 검사, 가시성·`-fPIC`·rpath·install name, 생성 `.cpp`와 `NativeTypeKey` 교체(BD28), 상속 export 진단과 모듈별 export 수 진단, 기존 모듈의 모듈 사이 API에 매크로 붙이기, 정책 `public-header-static-storage`와 지금 위반 정리, `HasGlobalState` 표시와 단일 소비 검사, `Private/` 시험 묶음의 모듈 내 링크와 `Modular` FoundationTests 검사 체인(BD31), 실행 파일 생성 TU가 정의하던 빌드 정보(`ToolchainFingerprint`·`ToolBuildId`)의 Modular 정의 위치(Core 공유 라이브러리에 미해결 기호가 남지 않게) | `Modular` FoundationTests가 Windows·macOS에서 빌드·통과한다. `Monolithic` 빌드 결과(object 인자)는 매크로 값 외에 바뀌지 않는다. 공개 헤더의 `thread_local`·쓰기 가능한 inline 정적 저장소를 정책이 거부한다 |
+| BS9a | 엔진 플러그인 해석(3.9절): `ResolveEnabled`·`Resolve` 소유자 일반화, `targetType` 인자, BD34·BD35, `TargetRules.Plugins`, `BuildContext.Plugins`, RuleLoader 탐색 | 기술자 시험(엔진 소유자 해석, 타깃 참조 우선, Program 기본 활성 미적용, Developer의 Program Release 포함·Game Release 제외, 없는 참조·끈 플러그인 요구·순환 오류), 게임 빌드 동작 불변(Program Release의 Developer만 바뀜) |
+| BS9b | `PluginModuleRules`, `NativeModuleInput.Type`, Release 배제 정책 전환, BD39 계층 검사, BD42 정책 | 규칙 시험(디렉터리 일치, 선언 없는 규칙·규칙 없는 선언·대소문자 이름 오류, 끈 플러그인 규칙 Configure 성공), 계층 위반 시험, 플러그인 Developer 모듈을 Release 정책이 잡는 음성 대조 |
+| BS9c | 엔진 타깃 연결(CLI), BD36 링크·모듈 표 행(게임 빌드 포함), BD41 거부 | 의존 없는 주 실행 파일에 켠 플러그인 모듈이 링크되고 기술자 단계로 시작, probe에는 없음, 끈 플러그인 모듈은 빌드되지 않음, 실행 파일 없는 타깃은 빌드만, SDK export·Modular 거부 시험 |
+| BS9d | 첫 엔진 플러그인 `Engine/Plugins/Importers/UnrealExchange`(기술자와 진입점만 있는 모듈), Commandlet·EngineTests가 켬, 플러그인 시험 수집(BD40) | EngineTests가 플러그인 Tests를 실행, 다른 타깃에는 모듈 없음 — Unreal 교환 UX1a 선행 조건 충족 |
 
-순서: BS0 → BS1(UB0 depfile 파서 뒤) → BS3. BS2는 BS0 뒤가 쉽다(규칙 기반 클래스를 한 번에 고친다). BS4는 BS2 뒤다(`targets` 값 검증과 문맥별 해석에 다섯 값 `TargetType`이 필요하다). BS6은 다른 단계와 독립이다. BS7은 BS2·BS6 뒤이고, 렌더·오디오·입력 backend를 서버에서 빼는 범위는 BS7 전에 네트워크 단계 스펙이 정한다.
+순서: BS0 → BS1(UB0 depfile 파서 뒤) → BS3. BS2는 BS0 뒤가 쉽다(규칙 기반 클래스를 한 번에 고친다). BS4는 BS2 뒤다(`targets` 값 검증과 문맥별 해석에 다섯 값 `TargetType`이 필요하다). BS6은 다른 단계와 독립이다. BS7은 BS2·BS6 뒤이고, 렌더·오디오·입력 backend를 서버에서 빼는 범위는 BS7 전에 네트워크 단계 스펙이 정한다. BS9a → BS9b → BS9c → BS9d는 BS2·BS4와 독립이다(타깃 종류 두 값, 프로젝트 없는 엔진 타깃만으로 동작). BS2·BS4가 나중에 종류 표와 조건 필드를 넓힌다.
 
 ## 7. UE와 다르게 정한 점
 
@@ -450,6 +507,9 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 | 리플렉션 타입 정보 export | 클래스를 export하지 않으면 `MinimalAPI`가 있어야 타입 정보가 export된다 | 생성 코드가 항상 export한다(BD28) | 지정자를 빠뜨려 Editor 빌드에서만 다른 모듈 참조가 깨지는 일을 없앤다 |
 | 공개 헤더의 정적 저장소 | 관례에 맡긴다 | 정책으로 막는다(BD29) | 모듈마다 상태가 갈라지는 오류는 Editor(`Modular`)에서만, 그것도 실행 중에만 드러난다 |
 | 서드파티 정적 라이브러리 소비 | 소비 모듈의 바이너리마다 링크된다 | 같다. 단 `HasGlobalState` 서드파티는 직접 소비 모듈을 하나로 제한한다(BD29) | 전역 상태가 두 벌이 되지 않게 |
+| 플러그인을 켜는 타깃 목록 | `EnablePlugins`·`DisablePlugins`·`OptionalPlugins`·`BuildPlugins` 목록 넷 | `Plugins` 하나(`enabled` 값) | 프로젝트 `plugins[]`와 형식을 하나로 맞춘다 |
+| 플러그인의 지원 프로그램 | `.uplugin` `SupportedPrograms`에 없으면 Program이 무시 | 없음. 타깃이 켜면 들어간다 | 켜는 쪽 한 곳에서 정한다(이중 등록 없음) |
+| 끈 플러그인 모듈 의존 | 경고 | 오류 | 조용히 빌드되는 모듈을 막는다 |
 
 ## 8. 다른 문서 개정
 
@@ -509,3 +569,4 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 | 5 | 2026-11-20 | BS0 구현 세부(3.5절): 두 목록과 `AllDependencies`, 규칙 `PublicDependencies`·`PrivateDependencies`, 보임 계산 `ModuleVisibility` 한 곳, 도달은 두 목록, 두 목록 중복 거부, SDK manifest 12, 완료 기준을 모든 타깃 `compile_commands.json` 동일로 확인 |
 | 6 | 2026-11-20 | BS8을 BS8a(빌드 기반)·BS8b(생성 코드 키)·BS8c(공유 상태)·BS8d(export와 검사 체인)로 나눴다. BS8a 구현 세부: API 매크로는 모듈 정의 헤더(보이는 C++ 모듈마다), 공유 PCH 공유 정의에 import 값, 예약 매크로 거부, Modular 공유 라이브러리 파일·링크·rpath·가시성, 완료 기준(Monolithic 인자는 `ROCKS_MONOLITHIC=1`만 더해짐, Modular fixture 링크·실행) |
 | 7 | 2026-11-21 | BS8b 구현 세부(사용자 결정 — UE 방식): `ROCKS_GENERATED_BODY()` 의무(리플렉션 쪽 RMC2211·`ReflectedDeclarationV`를 씀), `GeneratedType<X>::NativeKey()`(생성 `.cpp` 저장소, API 매크로), `NativeTypeKey<T>()`는 리플렉션 클래스면 그것을 쓰고(클래스 키 연산표는 함수 안 정적 표) 생성 헤더가 없으면 `static_assert`, 생성 소스는 클래스 대상 생성 헤더 include, struct·enum·native 등록 타입은 inline 키 유지(한계 — struct는 헤더 템플릿 상수 연산표). 버린 안: 리플렉션 헤더의 생성 헤더 include, 이름 해시 키 |
+| 8 | 2026-11-21 | 3.9절 엔진 플러그인 빌드를 더했다(BD32–BD42, BS9a–BS9d, 4절 10항, 7절 세 행). 사용자 지시 "진행 가능한거부터"에 따라 Unreal 교환 리더(UX1a)를 막는 빈 곳을 메운다. rocks-07과 조율해 rocks-ff가 맡는다. UE 근거는 5.8.4 UBT(`Plugins.cs`·`EnumeratePlugins.cs`·`UEBuildTarget.SetupPlugins`·`PreBuildSetup`·`ModuleDescriptor.IsCompiledInConfiguration`·`TargetRules`의 플러그인 목록과 `bBuildDeveloperTools`·`RulesCompiler`) |
