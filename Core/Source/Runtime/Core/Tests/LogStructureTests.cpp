@@ -23,7 +23,8 @@ using namespace rocks;
 
 namespace rocks::test {
 uint64 OperatorNewCalls() noexcept;
-bool RegisterProcessProbe(const char* mode, int (*function)(int, char**) noexcept) noexcept;
+bool RegisterProcessProbe(const char* mode,
+                          int (*function)(int, const char* const*) noexcept) noexcept;
 } // namespace rocks::test
 
 namespace {
@@ -1408,7 +1409,7 @@ namespace {
 
 // 설치 전(LogSystem 없음) Warning의 비상 출력 경로에서 펼치기를 렌더한다. 자식 프로세스에서만
 // 부른다.
-int LogStructureEmergencyProbe(int, char**) noexcept {
+int LogStructureEmergencyProbe(int, const char* const*) noexcept {
     Log::Warning(LogStructureTests, "pre-install {@P} {@E}", Point{3, -4}, Empty{});
     return 0;
 }
