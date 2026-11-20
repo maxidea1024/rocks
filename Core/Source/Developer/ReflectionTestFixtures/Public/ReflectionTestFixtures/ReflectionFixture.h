@@ -11,12 +11,16 @@ namespace rocks::reflection_fixture {
 
 ROCKS_CLASS()
 struct Base : Object {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() Guid key {};
     ROCKS_PROPERTY() int32 count = 0;
 };
 
 ROCKS_CLASS()
 struct Node final : Base {
+    ROCKS_GENERATED_BODY()
+
     explicit Node(Allocator& allocator) noexcept : label(allocator) {
     }
 
@@ -86,6 +90,8 @@ private:
 // C++ concrete 타입도 선언 정책 Abstract이면 생성할 수 없다.
 ROCKS_CLASS(Abstract)
 struct AbstractByPolicy : Object {
+    ROCKS_GENERATED_BODY()
+
     static inline uint32 constructions = 0;
 
     AbstractByPolicy() noexcept {
@@ -110,6 +116,8 @@ public:
 // 멤버.
 ROCKS_CLASS(Version = 2, WorldOnly)
 struct WorldFixture : Object {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY(EditorOnly, Name = "Label") int32 note = 0;
     ROCKS_PROPERTY(Required) ObjectRef<Node> target;
     ROCKS_NATIVE() int32 runtimeCache = 0;
@@ -117,12 +125,16 @@ struct WorldFixture : Object {
 
 ROCKS_CLASS()
 struct WorldChild final : WorldFixture {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() int32 depth = 0;
 };
 
 // B3a 값 종류: 에셋 ID, SHA-256 digest, 소프트 객체 참조(기대 타입 있음·없음).
 ROCKS_CLASS()
 struct AssetFields final : Object {
+    ROCKS_GENERATED_BODY()
+
     explicit AssetFields(Allocator& allocator) noexcept : icon(allocator), anyAsset(allocator) {
     }
 
@@ -174,6 +186,8 @@ enum class Channels : uint16 {
 
 ROCKS_CLASS()
 struct EnumFields final : Object {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() TextureGroup group = TextureGroup::World;
     ROCKS_PROPERTY() Bias bias = Bias::Zero;
     ROCKS_PROPERTY() Channels channels = Channels::None;

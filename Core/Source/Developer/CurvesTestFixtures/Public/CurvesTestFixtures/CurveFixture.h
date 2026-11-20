@@ -19,6 +19,8 @@ namespace rocks::curves_fixture {
 // 담는다.
 ROCKS_CLASS()
 class CurveHolder : public Object {
+    ROCKS_GENERATED_BODY()
+
 public:
     explicit CurveHolder(Allocator& allocator) noexcept
         : tangent(allocator), plain(allocator), tangents(allocator), byKey(allocator) {
@@ -36,6 +38,8 @@ public:
 // 있어 Registry에 NamePool이 필요하다 — CurveHolder와 나눈 까닭이다).
 ROCKS_CLASS()
 class StepCurveHolder : public Object {
+    ROCKS_GENERATED_BODY()
+
 public:
     explicit StepCurveHolder(Allocator& allocator) noexcept
         : integers(allocator), names(allocator), strings(allocator), stringList(allocator),
@@ -54,6 +58,8 @@ public:
 // 압축 커브(CV8)를 필드·Array 원소·Optional 내부에 담는다(검증 hook·Bytes wire 시험).
 ROCKS_CLASS()
 class PackedCurveHolder : public Object {
+    ROCKS_GENERATED_BODY()
+
 public:
     explicit PackedCurveHolder(Allocator& allocator) noexcept : packed(allocator), list(allocator) {
     }
@@ -67,6 +73,8 @@ public:
 // 커브를 Optional 내부에 담는다(리플렉션 왕복·hook 시험).
 ROCKS_CLASS()
 class InterpCurveHolder : public Object {
+    ROCKS_GENERATED_BODY()
+
 public:
     explicit InterpCurveHolder(Allocator& allocator) noexcept
         : floats(allocator), vectors2(allocator), vectors(allocator), rotations(allocator),

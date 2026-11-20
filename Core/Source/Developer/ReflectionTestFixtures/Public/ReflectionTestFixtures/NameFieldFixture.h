@@ -18,6 +18,8 @@ namespace rocks::reflection_fixture {
 // 마이그레이션 결과에서 읽은 Name(1단계가 보관본을 빌리고 2단계가 같은 순서로 소비)을 본다.
 ROCKS_STRUCT()
 struct NameSocket {
+    ROCKS_GENERATED_BODY()
+
     explicit NameSocket(Allocator& allocator) noexcept : aliases(allocator) {
     }
 
@@ -28,6 +30,8 @@ struct NameSocket {
 
 ROCKS_STRUCT()
 struct NameGroup {
+    ROCKS_GENERATED_BODY()
+
     explicit NameGroup(Allocator& allocator) noexcept : sockets(allocator) {
     }
 
@@ -36,11 +40,15 @@ struct NameGroup {
 
 ROCKS_STRUCT()
 struct NamePlain {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() uint32 value = 0;
 };
 
 ROCKS_STRUCT()
 struct NameWrapper {
+    ROCKS_GENERATED_BODY()
+
     explicit NameWrapper(Allocator& allocator) noexcept : socket(allocator) {
     }
 
@@ -49,12 +57,16 @@ struct NameWrapper {
 
 ROCKS_STRUCT(Version = 2)
 struct NameVersioned {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() Name tag;
     ROCKS_PROPERTY() uint32 extra = 0;
 };
 
 ROCKS_CLASS(Version = 2)
 struct NameMigrated final : Object {
+    ROCKS_GENERATED_BODY()
+
     explicit NameMigrated(Allocator& allocator) noexcept : names(allocator) {
     }
 
@@ -65,6 +77,8 @@ struct NameMigrated final : Object {
 
 ROCKS_CLASS()
 struct NameFields final : Object {
+    ROCKS_GENERATED_BODY()
+
     explicit NameFields(Allocator& allocator) noexcept
         : socket(allocator), names(allocator), group(allocator), texts(allocator) {
     }

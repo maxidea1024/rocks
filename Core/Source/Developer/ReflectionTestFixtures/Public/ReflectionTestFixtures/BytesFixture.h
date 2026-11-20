@@ -16,6 +16,8 @@ namespace rocks::reflection_fixture {
 // 담는다.
 ROCKS_STRUCT()
 struct BytesBlob {
+    ROCKS_GENERATED_BODY()
+
     explicit BytesBlob(Allocator& allocator) noexcept : data(allocator) {
     }
 
@@ -25,6 +27,8 @@ struct BytesBlob {
 
 ROCKS_CLASS()
 class BytesHolder : public Object {
+    ROCKS_GENERATED_BODY()
+
 public:
     explicit BytesHolder(Allocator& allocator) noexcept
         : payload(allocator), small(allocator), blob(allocator), blobs(allocator),

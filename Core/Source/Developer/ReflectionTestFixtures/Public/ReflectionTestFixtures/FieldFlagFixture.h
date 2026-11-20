@@ -20,18 +20,24 @@ namespace rocks::reflection_fixture {
 // 집합·includeFlags 저장·로드 대칭·Required 실효 값 검사로 시험한다(FieldFlagGraphTests).
 ROCKS_STRUCT()
 struct FlagSlot {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY(SaveGame) int32 kept = 0;
     ROCKS_PROPERTY() int32 dropped = 0;
 };
 
 ROCKS_STRUCT(Atomic)
 struct FlagAtom {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() int32 a = 0;
     ROCKS_PROPERTY() int32 b = 0;
 };
 
 ROCKS_CLASS()
 struct FlagHolder final : Object {
+    ROCKS_GENERATED_BODY()
+
     explicit FlagHolder(Allocator& allocator) noexcept : slots(allocator), source(allocator) {
     }
 
@@ -53,11 +59,15 @@ struct FlagHolder final : Object {
 // struct는 멤버를 보지 않아 성공).
 ROCKS_CLASS()
 struct FlagSaveSlot final : Object {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY(SaveGame) FlagSlot slot;
 };
 
 ROCKS_CLASS()
 struct FlagSaveList final : Object {
+    ROCKS_GENERATED_BODY()
+
     explicit FlagSaveList(Allocator& allocator) noexcept : slots(allocator) {
     }
 
@@ -66,6 +76,8 @@ struct FlagSaveList final : Object {
 
 ROCKS_CLASS()
 struct FlagSaveAtom final : Object {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY(SaveGame) FlagAtom atom;
 };
 
@@ -73,6 +85,8 @@ struct FlagSaveAtom final : Object {
 // 플래그).
 ROCKS_CLASS()
 struct FlagContainers final : Object {
+    ROCKS_GENERATED_BODY()
+
     explicit FlagContainers(Allocator& allocator) noexcept : byId(allocator) {
     }
 

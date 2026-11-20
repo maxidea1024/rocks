@@ -29,18 +29,24 @@ enum class FixedMode : uint8 {
 
 ROCKS_STRUCT()
 struct FixedPoint {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() int32 x = 0;
     ROCKS_PROPERTY() int16 pair[2] = {};
 };
 
 ROCKS_STRUCT()
 struct FixedLink {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() ObjectRef<FixedOwner> target;
     ROCKS_PROPERTY() uint32 weight = 0;
 };
 
 ROCKS_CLASS()
 struct FixedOwner final : Object {
+    ROCKS_GENERATED_BODY()
+
     explicit FixedOwner(Allocator& allocator) noexcept
         : labels{String(allocator), String(allocator)},
           softs{SoftObjectRef<>(allocator), SoftObjectRef<>(allocator)} {
@@ -81,11 +87,15 @@ struct FixedOwner final : Object {
 // Required 멤버를 담은 값 struct다(정적 배열 원소 안 Required — 진단 경로 [f[i].m]).
 ROCKS_STRUCT()
 struct FixedNeed {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY(Required) ClassRef<FixedOwner> kind;
 };
 
 ROCKS_CLASS()
 struct FixedRequired final : Object {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY(Required) ObjectRef<FixedOwner> anchors[2];
     ROCKS_PROPERTY(Required) ClassRef<FixedOwner> kinds[1];
     ROCKS_PROPERTY() FixedNeed needs[2];

@@ -15,19 +15,29 @@ namespace rocks::reflection_fixture {
 // WithinOuter 또는 파생이어야 한다, 파생 WithinInnerChild가 이어받는다)를 담는다
 // (ClassFlagGraphTests).
 ROCKS_CLASS()
-struct KindBase : Object {};
+struct KindBase : Object {
+    ROCKS_GENERATED_BODY()
+};
 
 ROCKS_CLASS(Transient)
-struct TransientThing : KindBase {};
+struct TransientThing : KindBase {
+    ROCKS_GENERATED_BODY()
+};
 
 ROCKS_CLASS()
-struct TransientChild final : TransientThing {};
+struct TransientChild final : TransientThing {
+    ROCKS_GENERATED_BODY()
+};
 
 ROCKS_CLASS(Deprecated)
-struct DeprecatedThing final : KindBase {};
+struct DeprecatedThing final : KindBase {
+    ROCKS_GENERATED_BODY()
+};
 
 ROCKS_CLASS()
 struct ClassFlagHolder final : Object {
+    ROCKS_GENERATED_BODY()
+
     explicit ClassFlagHolder(Allocator& allocator) noexcept : kinds(allocator) {
     }
 
@@ -39,15 +49,23 @@ struct ClassFlagHolder final : Object {
 };
 
 ROCKS_CLASS()
-struct WithinOuter : Object {};
+struct WithinOuter : Object {
+    ROCKS_GENERATED_BODY()
+};
 
 ROCKS_CLASS()
-struct WithinOuterChild final : WithinOuter {};
+struct WithinOuterChild final : WithinOuter {
+    ROCKS_GENERATED_BODY()
+};
 
 ROCKS_CLASS(Within = "rocks::reflection_fixture::WithinOuter")
-struct WithinInner : Object {};
+struct WithinInner : Object {
+    ROCKS_GENERATED_BODY()
+};
 
 ROCKS_CLASS()
-struct WithinInnerChild final : WithinInner {};
+struct WithinInnerChild final : WithinInner {
+    ROCKS_GENERATED_BODY()
+};
 
 } // namespace rocks::reflection_fixture

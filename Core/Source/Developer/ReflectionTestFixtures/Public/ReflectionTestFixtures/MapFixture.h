@@ -35,13 +35,19 @@ enum class MapColor : uint8 {
 };
 
 ROCKS_CLASS()
-struct MapKeyBase : Object {};
+struct MapKeyBase : Object {
+    ROCKS_GENERATED_BODY()
+};
 
 ROCKS_CLASS()
-struct MapKeyDerived final : MapKeyBase {};
+struct MapKeyDerived final : MapKeyBase {
+    ROCKS_GENERATED_BODY()
+};
 
 ROCKS_STRUCT()
 struct MapPoint {
+    ROCKS_GENERATED_BODY()
+
     explicit MapPoint(Allocator& allocator) noexcept : label(allocator) {
     }
 
@@ -52,12 +58,16 @@ struct MapPoint {
 
 ROCKS_STRUCT(Version = 2)
 struct MapVersioned {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() int32 value = 0;
     ROCKS_PROPERTY() int32 extra = 0;
 };
 
 ROCKS_STRUCT()
 struct MapLink {
+    ROCKS_GENERATED_BODY()
+
     explicit MapLink(Allocator& allocator) noexcept : asset(allocator) {
     }
 
@@ -67,6 +77,8 @@ struct MapLink {
 
 ROCKS_STRUCT()
 struct MapBag {
+    ROCKS_GENERATED_BODY()
+
     explicit MapBag(Allocator& allocator) noexcept : points(allocator), words(allocator) {
     }
 
@@ -77,6 +89,8 @@ struct MapBag {
 // Name 원소 Set 멤버 struct다(관찰 struct 제한 — Name 담김 형질이 Set 원소로 전파된다).
 ROCKS_STRUCT()
 struct MapTagBag {
+    ROCKS_GENERATED_BODY()
+
     explicit MapTagBag(Allocator& allocator) noexcept : tags(allocator) {
     }
 
@@ -87,6 +101,8 @@ struct MapTagBag {
 // 전파된다).
 ROCKS_STRUCT()
 struct MapPerPlatform {
+    ROCKS_GENERATED_BODY()
+
     explicit MapPerPlatform(Allocator& allocator) noexcept : perPlatform(allocator) {
     }
 
@@ -96,6 +112,8 @@ struct MapPerPlatform {
 
 ROCKS_CLASS()
 struct MapHolder final : Object {
+    ROCKS_GENERATED_BODY()
+
     explicit MapHolder(Allocator& allocator) noexcept
         : counts(allocator), ratios(allocator), perPlatform(allocator), colorNames(allocator),
           guidColors(allocator), digests(allocator), digestFlags(allocator), small(allocator),
@@ -144,10 +162,14 @@ enum class MapAccess : uint8 {
 };
 
 ROCKS_CLASS()
-struct MapKeyLeaf final : MapKeyBase {};
+struct MapKeyLeaf final : MapKeyBase {
+    ROCKS_GENERATED_BODY()
+};
 
 ROCKS_CLASS()
 struct MapPathHolder final : Object {
+    ROCKS_GENERATED_BODY()
+
     explicit MapPathHolder(Allocator& allocator) noexcept
         : byAccess(allocator), classValues(allocator), limitedSet(allocator), texts(allocator),
           softs(allocator), nested(allocator) {
@@ -166,6 +188,8 @@ struct MapPathHolder final : Object {
 // 비우기를 막고 struct 필드의 ReadOnly는 멤버 Map으로 전파된다. 조회·원소 수는 막지 않는다).
 ROCKS_CLASS()
 struct MapLockedHolder final : Object {
+    ROCKS_GENERATED_BODY()
+
     explicit MapLockedHolder(Allocator& allocator) noexcept
         : locked(allocator), lockedWords(allocator), lockedBag(allocator) {
     }

@@ -29,6 +29,8 @@ namespace rocks::config {
 // (조건이 하나도 없으면 특성이 있기만 하면 참). 특성이 없으면 거짓이다.
 ROCKS_STRUCT()
 struct DeviceCondition {
+    ROCKS_GENERATED_BODY()
+
     explicit DeviceCondition(Allocator& allocator) noexcept
         : trait(allocator), equals(allocator), contains(allocator) {
     }
@@ -48,6 +50,8 @@ struct DeviceCondition {
 // 대상 → 값 표기 묶음이다(기기 프로필의 메모리 등급별 값).
 ROCKS_STRUCT()
 struct ConfigValueSet {
+    ROCKS_GENERATED_BODY()
+
     explicit ConfigValueSet(Allocator& allocator) noexcept : values(allocator) {
     }
 
@@ -57,6 +61,8 @@ struct ConfigValueSet {
 // 기기 프로필 하나의 정의다(UE UDeviceProfile에 대응 — 콘솔 변수 대신 설정 값 묶음 전체, 결정 D4).
 ROCKS_STRUCT()
 struct DeviceProfileDefinition {
+    ROCKS_GENERATED_BODY()
+
     explicit DeviceProfileDefinition(Allocator& allocator) noexcept
         : parent(allocator), platforms(allocator), match(allocator), values(allocator),
           memoryValues(allocator) {
@@ -80,6 +86,8 @@ struct DeviceProfileDefinition {
 // 메모리 등급 하나다.
 ROCKS_STRUCT()
 struct MemoryBucketDefinition {
+    ROCKS_GENERATED_BODY()
+
     explicit MemoryBucketDefinition(Allocator& allocator) noexcept : name(allocator) {
     }
 
@@ -91,6 +99,8 @@ struct MemoryBucketDefinition {
 // 기기 프로필 정의와 선택이다(섹션 `DeviceProfiles`).
 ROCKS_STRUCT(Settings(Branch = "DeviceProfiles", Section = "DeviceProfiles"))
 struct DeviceProfileSettings {
+    ROCKS_GENERATED_BODY()
+
     explicit DeviceProfileSettings(Allocator& allocator) noexcept
         : profiles(allocator), profile(allocator), platformDefaults(allocator),
           memoryBuckets(allocator) {

@@ -61,6 +61,8 @@ enum class ComboMask : uint16 {
 // 값 struct 종류의 원소다(검증 hook 없음).
 ROCKS_STRUCT()
 struct ComboPoint {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboPoint(Allocator& allocator) noexcept : label(allocator) {
     }
 
@@ -71,6 +73,8 @@ struct ComboPoint {
 // 검증 hook struct다(low ≤ high가 아니면 쓰기·로드가 거부한다).
 ROCKS_STRUCT()
 struct ComboChecked {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() int32 low = 0;
     ROCKS_PROPERTY() int32 high = 0;
 
@@ -83,6 +87,8 @@ struct ComboChecked {
 // InstancedStruct에 담는 hook 없는 struct다.
 ROCKS_STRUCT()
 struct ComboPayload {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() float factor = 0.0f;
     ROCKS_PROPERTY() int64 steps = 0;
 };
@@ -90,6 +96,8 @@ struct ComboPayload {
 // bitfield bool 멤버다(부호 없는 정수 폭 셋, 같은 byte를 나누는 일반 멤버).
 ROCKS_STRUCT()
 struct ComboBits {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() uint8 first : 1 = 0;
     ROCKS_PROPERTY() uint8 second : 1 = 0;
     ROCKS_PROPERTY() uint16 wide : 1 = 0;
@@ -101,6 +109,8 @@ struct ComboBits {
 
 ROCKS_STRUCT()
 struct ComboBool {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboBool(Allocator& allocator) noexcept
         : array(allocator), keyed(allocator), mapped(allocator), set(allocator) {
     }
@@ -116,6 +126,8 @@ struct ComboBool {
 
 ROCKS_STRUCT()
 struct ComboUInt8 {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboUInt8(Allocator& allocator) noexcept
         : array(allocator), keyed(allocator), mapped(allocator), set(allocator) {
     }
@@ -131,6 +143,8 @@ struct ComboUInt8 {
 
 ROCKS_STRUCT()
 struct ComboUInt16 {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboUInt16(Allocator& allocator) noexcept
         : array(allocator), keyed(allocator), mapped(allocator), set(allocator) {
     }
@@ -146,6 +160,8 @@ struct ComboUInt16 {
 
 ROCKS_STRUCT()
 struct ComboUInt32 {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboUInt32(Allocator& allocator) noexcept
         : array(allocator), keyed(allocator), mapped(allocator), set(allocator) {
     }
@@ -161,6 +177,8 @@ struct ComboUInt32 {
 
 ROCKS_STRUCT()
 struct ComboUInt64 {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboUInt64(Allocator& allocator) noexcept
         : array(allocator), keyed(allocator), mapped(allocator), set(allocator) {
     }
@@ -176,6 +194,8 @@ struct ComboUInt64 {
 
 ROCKS_STRUCT()
 struct ComboInt8 {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboInt8(Allocator& allocator) noexcept
         : array(allocator), keyed(allocator), mapped(allocator), set(allocator) {
     }
@@ -191,6 +211,8 @@ struct ComboInt8 {
 
 ROCKS_STRUCT()
 struct ComboInt16 {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboInt16(Allocator& allocator) noexcept
         : array(allocator), keyed(allocator), mapped(allocator), set(allocator) {
     }
@@ -206,6 +228,8 @@ struct ComboInt16 {
 
 ROCKS_STRUCT()
 struct ComboInt32 {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboInt32(Allocator& allocator) noexcept
         : array(allocator), keyed(allocator), mapped(allocator), set(allocator) {
     }
@@ -221,6 +245,8 @@ struct ComboInt32 {
 
 ROCKS_STRUCT()
 struct ComboInt64 {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboInt64(Allocator& allocator) noexcept
         : array(allocator), keyed(allocator), mapped(allocator), set(allocator) {
     }
@@ -237,6 +263,8 @@ struct ComboInt64 {
 // 실수는 Map 키·Set 원소가 아니다(성질 표).
 ROCKS_STRUCT()
 struct ComboFloat {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboFloat(Allocator& allocator) noexcept : array(allocator), mapped(allocator) {
     }
 
@@ -249,6 +277,8 @@ struct ComboFloat {
 
 ROCKS_STRUCT()
 struct ComboDouble {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboDouble(Allocator& allocator) noexcept : array(allocator), mapped(allocator) {
     }
 
@@ -261,6 +291,8 @@ struct ComboDouble {
 
 ROCKS_STRUCT()
 struct ComboGuid {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboGuid(Allocator& allocator) noexcept
         : array(allocator), keyed(allocator), mapped(allocator), set(allocator) {
     }
@@ -276,6 +308,8 @@ struct ComboGuid {
 
 ROCKS_STRUCT()
 struct ComboString {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboString(Allocator& allocator) noexcept
         : value(allocator), array(allocator), fixed{String(allocator), String(allocator)},
           keyed(allocator), mapped(allocator), set(allocator) {
@@ -292,6 +326,8 @@ struct ComboString {
 
 ROCKS_STRUCT()
 struct ComboName {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboName(Allocator& allocator) noexcept
         : array(allocator), keyed(allocator), mapped(allocator), set(allocator) {
     }
@@ -307,6 +343,8 @@ struct ComboName {
 
 ROCKS_STRUCT()
 struct ComboAssetId {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboAssetId(Allocator& allocator) noexcept
         : array(allocator), keyed(allocator), mapped(allocator), set(allocator) {
     }
@@ -322,6 +360,8 @@ struct ComboAssetId {
 
 ROCKS_STRUCT()
 struct ComboDigest {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboDigest(Allocator& allocator) noexcept
         : array(allocator), keyed(allocator), mapped(allocator), set(allocator) {
     }
@@ -337,6 +377,8 @@ struct ComboDigest {
 
 ROCKS_STRUCT()
 struct ComboEnum {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboEnum(Allocator& allocator) noexcept
         : array(allocator), keyed(allocator), mapped(allocator), set(allocator) {
     }
@@ -353,6 +395,8 @@ struct ComboEnum {
 // Flags enum(값 0은 빈 조합)이다.
 ROCKS_STRUCT()
 struct ComboFlags {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboFlags(Allocator& allocator) noexcept
         : array(allocator), keyed(allocator), mapped(allocator), set(allocator) {
     }
@@ -369,6 +413,8 @@ struct ComboFlags {
 // ClassRef는 Optional 내부가 아니다(null이 이미 "없음").
 ROCKS_STRUCT()
 struct ComboClassRef {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboClassRef(Allocator& allocator) noexcept
         : array(allocator), keyed(allocator), mapped(allocator), set(allocator) {
     }
@@ -384,6 +430,8 @@ struct ComboClassRef {
 // Soft는 Optional 내부가 아니다.
 ROCKS_STRUCT()
 struct ComboSoft {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboSoft(Allocator& allocator) noexcept
         : value(allocator), array(allocator),
           fixed{SoftObjectRef<Object>(allocator), SoftObjectRef<Object>(allocator)},
@@ -401,6 +449,8 @@ struct ComboSoft {
 // WeakObjectRef는 키·Set 원소·Optional 내부가 아니다.
 ROCKS_STRUCT()
 struct ComboWeak {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboWeak(Allocator& allocator) noexcept : array(allocator), mapped(allocator) {
     }
 
@@ -413,6 +463,8 @@ struct ComboWeak {
 // 값 struct는 키·Set 원소가 아니다.
 ROCKS_STRUCT()
 struct ComboStruct {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboStruct(Allocator& allocator) noexcept
         : value(allocator), array(allocator), fixed{ComboPoint(allocator), ComboPoint(allocator)},
           mapped(allocator) {
@@ -428,6 +480,8 @@ struct ComboStruct {
 // InstancedStruct는 키·Set 원소·Optional 내부가 아니다. 내용은 ComboPayload·ComboChecked(hook)다.
 ROCKS_STRUCT()
 struct ComboInstanced {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboInstanced(Allocator& allocator) noexcept : array(allocator), mapped(allocator) {
     }
 
@@ -440,6 +494,8 @@ struct ComboInstanced {
 // Text는 키·Set 원소·Optional 내부가 아니다(비어 있음·Invariant·Localized 형태).
 ROCKS_STRUCT()
 struct ComboText {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboText(Allocator& allocator) noexcept : array(allocator), mapped(allocator) {
     }
 
@@ -453,6 +509,8 @@ struct ComboText {
 // InstancedStruct 내용 자리는 ComboInstanced가 덮는다.
 ROCKS_STRUCT()
 struct ComboCheckedSlots {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboCheckedSlots(Allocator& allocator) noexcept
         : array(allocator), mapped(allocator) {
     }
@@ -468,6 +526,8 @@ struct ComboCheckedSlots {
 
 ROCKS_STRUCT()
 struct ComboLeaf {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboLeaf(Allocator& allocator) noexcept : values(allocator), tags(allocator) {
     }
 
@@ -478,6 +538,8 @@ struct ComboLeaf {
 
 ROCKS_STRUCT()
 struct ComboMiddle {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboMiddle(Allocator& allocator) noexcept
         : leaf(allocator), leaves(allocator), byKey(allocator) {
     }
@@ -490,6 +552,8 @@ struct ComboMiddle {
 
 ROCKS_STRUCT()
 struct ComboTop {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboTop(Allocator& allocator) noexcept : middle(allocator), middles(allocator) {
     }
 
@@ -501,6 +565,8 @@ struct ComboTop {
 // struct가 struct 멤버 자리에도, 중첩 struct 안에도 놓인다).
 ROCKS_STRUCT()
 struct ComboValues {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboValues(Allocator& allocator) noexcept
         : cBool(allocator), cUInt8(allocator), cUInt16(allocator), cUInt32(allocator),
           cUInt64(allocator), cInt8(allocator), cInt16(allocator), cInt32(allocator),
@@ -545,6 +611,8 @@ struct ComboValues {
 // 강한 참조 하나를 담은 참조 struct다(필드·멤버·StructRefArray 원소·정적 배열 원소).
 ROCKS_STRUCT()
 struct ComboRefLink {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() ObjectRef<Object> target;
     ROCKS_PROPERTY() int32 weight = 0;
 };
@@ -553,6 +621,8 @@ struct ComboRefLink {
 // 값 = ObjectRefMap). Registry 컨테이너를 담으므로 클래스 필드·struct 멤버로만 놓인다.
 ROCKS_STRUCT()
 struct ComboObjectRefs {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboObjectRefs(Allocator& allocator) noexcept
         : array(allocator), mapped(allocator), links(allocator) {
     }
@@ -572,6 +642,8 @@ struct ComboObjectRefs {
 // Optional), 조합 struct 묶음(values), ObjectRef 자리 묶음(refs), bulk, 클래스 bitfield를 담는다.
 ROCKS_CLASS()
 struct ComboAsset final : Asset {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboAsset(Allocator& allocator) noexcept
         : fString(allocator), fSoft(allocator), fStruct(allocator), fArray(allocator),
           fMap(allocator), fSet(allocator), fRefArray(allocator), fRefMap(allocator),
@@ -627,6 +699,8 @@ struct ComboAsset final : Asset {
 // 빠진다.
 ROCKS_CLASS()
 struct ComboEditorAsset final : Asset {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboEditorAsset(Allocator& allocator) noexcept
         : fString(allocator), fSoft(allocator), fStruct(allocator), fArray(allocator),
           fMap(allocator), fSet(allocator), fRefArray(allocator), fRefMap(allocator),
@@ -680,6 +754,8 @@ struct ComboEditorAsset final : Asset {
 // Required 멤버를 담은 값 struct(ClassRef·Soft)와 참조 struct(ObjectRef)다.
 ROCKS_STRUCT()
 struct ComboNeed {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboNeed(Allocator& allocator) noexcept : asset(allocator) {
     }
 
@@ -689,6 +765,8 @@ struct ComboNeed {
 
 ROCKS_STRUCT()
 struct ComboNeedLink {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY(Required) ObjectRef<Object> target;
 };
 
@@ -697,6 +775,8 @@ struct ComboNeedLink {
 // 쿠킹 로드는 실효 누락을 CorruptPackage로 거부한다.
 ROCKS_CLASS()
 struct ComboRequiredAsset final : Asset {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboRequiredAsset(Allocator& allocator) noexcept
         : refArray(allocator), refMap(allocator), classArray(allocator), classMap(allocator),
           classSet(allocator), soft(allocator), softArray(allocator),
@@ -728,6 +808,8 @@ struct ComboRequiredAsset final : Asset {
 // 대표 에셋 아래 하위 객체다. 같은 패키지·다른 패키지 대상을 가리키는 참조 묶음을 가진다.
 ROCKS_CLASS()
 struct ComboPart : Object {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboPart(Allocator& allocator) noexcept : refs(allocator) {
     }
 
@@ -739,6 +821,8 @@ struct ComboPart : Object {
 // 상속한 하위 객체다(기반 필드 + 파생 필드).
 ROCKS_CLASS()
 struct ComboPartDerived final : ComboPart {
+    ROCKS_GENERATED_BODY()
+
     explicit ComboPartDerived(Allocator& allocator) noexcept
         : ComboPart(allocator), note(allocator) {
     }

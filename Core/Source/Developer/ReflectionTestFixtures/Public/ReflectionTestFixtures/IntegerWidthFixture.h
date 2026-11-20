@@ -57,6 +57,8 @@ enum class HugeMask : uint64 {
 // int8·int16 struct 멤버(경로 thunk)와 int8 underlying enum 멤버다. 배열 원소(Array<S>)로도 쓴다.
 ROCKS_STRUCT()
 struct IntegerWidthPair {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() int8 tiny = 0;
     ROCKS_PROPERTY() int16 narrow = 0;
     ROCKS_PROPERTY() ByteOffset offset = ByteOffset::Zero;
@@ -64,6 +66,8 @@ struct IntegerWidthPair {
 
 ROCKS_CLASS()
 struct IntegerWidthFields final : Object {
+    ROCKS_GENERATED_BODY()
+
     explicit IntegerWidthFields(Allocator& allocator) noexcept
         : tinies(allocator), narrows(allocator), wideOffsets(allocator), pairs(allocator) {
     }

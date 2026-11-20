@@ -28,6 +28,8 @@ enum class OptionalMode : uint8 {
 
 ROCKS_STRUCT()
 struct OptionalPoint {
+    ROCKS_GENERATED_BODY()
+
     explicit OptionalPoint(Allocator& allocator) noexcept : label(allocator) {
     }
 
@@ -39,6 +41,8 @@ struct OptionalPoint {
 
 ROCKS_STRUCT()
 struct OptionalSlot {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() Optional<uint32> count;
     ROCKS_PROPERTY() Optional<String> note;
     ROCKS_PROPERTY() Optional<OptionalPoint> point;
@@ -47,6 +51,8 @@ struct OptionalSlot {
 // 버전 2 struct다(옛 버전 1 내부 Record의 struct 마이그레이션 시험).
 ROCKS_STRUCT(Version = 2)
 struct OptionalVersioned {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() int32 value = 0;
     ROCKS_PROPERTY() int32 extra = 0;
 };
@@ -54,12 +60,16 @@ struct OptionalVersioned {
 // Optional<Name> 멤버 struct다(관찰 struct 제한 — Name 담김 형질이 Optional 내부로 전파된다).
 ROCKS_STRUCT()
 struct OptionalTag {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() Optional<Name> tag;
 };
 
 // Required 멤버를 담는 값 struct다(Optional<struct> 안의 Required 검사 — 저장·복원 2c).
 ROCKS_STRUCT()
 struct OptionalLink {
+    ROCKS_GENERATED_BODY()
+
     explicit OptionalLink(Allocator& allocator) noexcept : asset(allocator) {
     }
 
@@ -69,10 +79,14 @@ struct OptionalLink {
 
 // 멤버가 없는 struct다(Optional<struct>의 set 여부를 멤버 없이 조회 — PathIsOptionalSet).
 ROCKS_STRUCT()
-struct OptionalEmpty {};
+struct OptionalEmpty {
+    ROCKS_GENERATED_BODY()
+};
 
 ROCKS_CLASS()
 struct OptionalHolder final : Object {
+    ROCKS_GENERATED_BODY()
+
     explicit OptionalHolder(Allocator& allocator) noexcept : slots(allocator) {
         preset.Emplace(7u);
         presetPoint.Emplace(allocator);

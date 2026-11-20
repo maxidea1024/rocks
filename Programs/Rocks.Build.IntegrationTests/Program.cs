@@ -374,6 +374,8 @@ try
 
         ROCKS_STRUCT()
         struct Socket {
+            ROCKS_GENERATED_BODY()
+
             explicit Socket(rocks::Allocator& allocator) noexcept : name(allocator) {
             }
 
@@ -383,6 +385,8 @@ try
 
         ROCKS_CLASS()
         struct CoreThing : rocks::reflection_fixture::Base {
+            ROCKS_GENERATED_BODY()
+
             explicit CoreThing(rocks::Allocator& allocator) noexcept
                 : levels(allocator), links(allocator), path(allocator), sockets(allocator), fixtureSlots(allocator) {
             }
@@ -410,7 +414,9 @@ try
         namespace sample {
 
         ROCKS_CLASS()
-        struct Extra final : rocks::Object {};
+        struct Extra final : rocks::Object {
+            ROCKS_GENERATED_BODY()
+        };
 
         } // namespace sample
 
@@ -426,6 +432,8 @@ try
 
         ROCKS_CLASS()
         struct FixtureChild final : CoreThing {
+            ROCKS_GENERATED_BODY()
+
             explicit FixtureChild(rocks::Allocator& allocator) noexcept : CoreThing(allocator) {
             }
 

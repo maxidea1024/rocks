@@ -13,6 +13,8 @@ namespace rocks::asset_fixture {
 
 ROCKS_CLASS()
 struct TestMeshAsset final : Asset {
+    ROCKS_GENERATED_BODY()
+
     explicit TestMeshAsset(Allocator& allocator) noexcept
         : mesh(allocator), lods(allocator), editorMesh(allocator) {
     }
