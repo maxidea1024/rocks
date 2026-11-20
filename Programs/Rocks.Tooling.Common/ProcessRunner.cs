@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
+using Microsoft.Win32.SafeHandles;
 
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Rocks.ToolTests")]
 
@@ -14,9 +16,20 @@ public sealed record ProcessSpec(
     TimeSpan? Timeout = null,
     Encoding? StandardOutputEncoding = null,
     Encoding? StandardErrorEncoding = null,
-    Encoding? StandardInputEncoding = null);
+    Encoding? StandardInputEncoding = null,
+    // 끝난 프로세스의 CPU 시간과 최대 메모리를 읽어 ProcessResult.Usage에 싣는가. 측정이 필요한 호출자만 켠다(빌드의 묶음 크기 실측).
+    bool MeasureUsage = false);
 
-public sealed record ProcessResult(int ExitCode, string StdOut, string StdErr);
+/// <summary>
+/// 프로세스 하나가 쓴 자원이다. <c>CpuTime</c>은 사용자·커널 CPU 시간의 합, <c>PeakWorkingSetBytes</c>는 실행 중 가장 컸던 working set이다.
+/// </summary>
+public sealed record ProcessUsage(TimeSpan CpuTime, long PeakWorkingSetBytes);
+
+public sealed record ProcessResult(int ExitCode, string StdOut, string StdErr)
+{
+    // ProcessSpec.MeasureUsage로 청했고 호스트가 줄 수 있을 때만 있다(지금은 Windows 호스트). 그 밖에는 null이다.
+    public ProcessUsage? Usage { get; init; }
+}
 
 // 호출자가 정리 실패와 원래 프로세스 실패를 구분해 후속 리소스 삭제를 보류할 수 있다.
 public sealed class ProcessCleanupException(string message, Exception? innerException = null)
@@ -115,7 +128,10 @@ public static class ProcessRunner
 
             await process.WaitForExitAsync(linked.Token);
             await Task.WhenAll(stdout, stderr).WaitAsync(linked.Token);
-            var result = new ProcessResult(process.ExitCode, stdout.Result, stderr.Result);
+            var result = new ProcessResult(process.ExitCode, stdout.Result, stderr.Result)
+            {
+                Usage = spec.MeasureUsage ? ProcessUsageReader.Read(process) : null
+            };
             // child가 끝났고 두 pipe의 EOF까지 읽었으므로 결과는 확정이다. 남은 handle 정리가 늦어도(바쁜
             // CI 러너에서 3초를 넘긴 적이 있다) 결과를 버리지 않는다 — 정리는 예약을 쥔 채 끝까지 진행하고
             // (finally의 ReleaseAfter), 끝나지 않은 정리가 쌓이면 다음 실행이 용량 부족으로 거부된다.
@@ -286,4 +302,49 @@ public static class ProcessRunner
 
         return new CleanupOutcome(string.Join("; ", failures), cleanup);
     }
+}
+
+// 끝난 프로세스의 자원 사용량을 읽는다. Windows는 종료한 프로세스도 handle이 살아 있는 동안 CPU 시간과 메모리 계수를 준다. 다른
+// 호스트는 종료 뒤에 읽을 수 있는 프로세스별 값이 없어 null을 돌려준다(시간에 맞춰 표본을 뜨는 방식은 쓰지 않는다).
+internal static class ProcessUsageReader
+{
+    public static ProcessUsage? Read(Process process)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return null;
+        }
+
+        try
+        {
+            TimeSpan cpu = process.TotalProcessorTime;
+            return GetProcessMemoryInfo(process.SafeHandle, out MemoryCounters counters, (uint)Marshal.SizeOf<MemoryCounters>())
+                ? new(cpu, checked((long)counters.PeakWorkingSetSize))
+                : null;
+        }
+        catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
+        {
+            return null;
+        }
+    }
+
+    // PROCESS_MEMORY_COUNTERS(psapi.h)다. 필드 순서와 크기가 OS 구조체와 같아야 한다.
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MemoryCounters
+    {
+        public uint Size;
+        public uint PageFaultCount;
+        public nuint PeakWorkingSetSize;
+        public nuint WorkingSetSize;
+        public nuint QuotaPeakPagedPoolUsage;
+        public nuint QuotaPagedPoolUsage;
+        public nuint QuotaPeakNonPagedPoolUsage;
+        public nuint QuotaNonPagedPoolUsage;
+        public nuint PagefileUsage;
+        public nuint PeakPagefileUsage;
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "K32GetProcessMemoryInfo", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetProcessMemoryInfo(SafeProcessHandle process, out MemoryCounters counters, uint size);
 }

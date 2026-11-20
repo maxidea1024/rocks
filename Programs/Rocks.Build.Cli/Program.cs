@@ -33,11 +33,25 @@ namespace Rocks.Build.Cli
 {
     public static class BuildCommand
     {
-        public static async Task<int> RunAsync(string[] args, CancellationToken cancellationToken)
+        public static Task<int> RunAsync(string[] args, CancellationToken cancellationToken) => RunAsync(args, cancellationToken, null);
+
+        // profile이 있으면 묶음 크기 실측의 조합 하나를 도는 build다(UnityProfileCommand가 부른다 — Docs/Design/UnityBuildPch.ko.md 12절).
+        // 그 모듈에만 조합을 재정의로 얹고, 빌드 대상을 그 모듈로 줄이고, 그 모듈의 object를 지워 처음부터 컴파일한 뒤 결과 행을 채운다.
+        internal static async Task<int> RunAsync(string[] args, CancellationToken cancellationToken, UnityProfileRun? profile)
         {
             if (args.Length == 0)
             {
-                throw new ArgumentException("Expected build, test, sdk, game, or bootstrap command.");
+                throw new ArgumentException("Expected build, test, sdk, game, bootstrap, or unity-profile command.");
+            }
+
+            if (args[0] == UnityProfileCommand.Name)
+            {
+                return await UnityProfileCommand.RunAsync(args.Skip(1).ToArray(), cancellationToken);
+            }
+
+            if (profile is not null && args[0] != "build")
+            {
+                throw new ArgumentException("A unity profile run is a build.");
             }
 
             var options = Parse(args.Skip(1).ToArray());
@@ -211,7 +225,26 @@ namespace Rocks.Build.Cli
 
                 var modules = plan.Modules.ToList();
                 var targets = buildRoots.ToList();
-                if (rules.Target.CheckPublicHeaders)
+                if (profile is not null)
+                {
+                    int index = modules.FindIndex(module => string.Equals(module.Name, profile.Module, StringComparison.OrdinalIgnoreCase));
+                    if (index < 0)
+                    {
+                        throw new ArgumentException($"Module {profile.Module} is not built by target {targetName}.");
+                    }
+
+                    modules[index] = UnityProfile.Apply(modules[index], profile.Case);
+                    targets = [modules[index].Name];
+                    // 조합마다 처음부터 컴파일하게 그 모듈의 object와 묶음 파일을 지운다(의존 모듈은 cache hit으로 남는다).
+                    foreach (string directory in UnityProfile.ModuleOutputDirectories(output, modules[index].Name))
+                    {
+                        if (Directory.Exists(directory))
+                        {
+                            Directory.Delete(directory, recursive: true);
+                        }
+                    }
+                }
+                else if (rules.Target.CheckPublicHeaders)
                 {
                     var sources = new List<string>();
                     // 실행 중 적재 모듈도 빌드하므로 공개 헤더 검사 대상이다(Docs/Design/ModuleLoader.ko.md 3.8절).
@@ -275,7 +308,8 @@ namespace Rocks.Build.Cli
                     Adaptive = Switch(options, AdaptiveOption),
                     Timing = Timing(options),
                     TimingLabel = targetName,
-                    PlanOnly = planOnly
+                    PlanOnly = planOnly,
+                    MeasureProcesses = profile is not null
                 }, cancellationToken);
                 if (result.PlanOnly)
                 {
@@ -291,6 +325,11 @@ namespace Rocks.Build.Cli
                 {
                     await evidence.FinishAsync(result.Failure);
                     return 1;
+                }
+
+                if (profile is not null)
+                {
+                    profile.Row = UnityProfile.Row(profile.Case, result, targets[0], System.Diagnostics.Stopwatch.GetElapsedTime(nativeStart));
                 }
 
                 if (args[0] == "sdk")
@@ -488,7 +527,7 @@ namespace Rocks.Build.Cli
 
         internal static Dictionary<string, string> Parse(string[] args)
         {
-            var allowed = new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination", "sdk", "project", "platform", "android-abi", "android-api", "android-ndk", "adb", "library", "store", "mirror", "offline", MetadataLayout.VerifySourcesOption, PlanOnlyOption, .. BuildModeOptions, "windows-sdk", RequireVerifiedToolchainOption], StringComparer.Ordinal);
+            var allowed = new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination", "sdk", "project", "platform", "android-abi", "android-api", "android-ndk", "adb", "library", "store", "mirror", "offline", MetadataLayout.VerifySourcesOption, PlanOnlyOption, .. BuildModeOptions, "windows-sdk", RequireVerifiedToolchainOption, .. UnityProfileCommand.Options], StringComparer.Ordinal);
             var values = new Dictionary<string, string>(StringComparer.Ordinal);
             for (var index = 0; index < args.Length; index += 2)
             {

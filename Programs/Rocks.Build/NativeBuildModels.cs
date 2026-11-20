@@ -523,6 +523,11 @@ public sealed record NativeBuildRequest
     // 집계 파일 이름에 쓰는 이름이다(보통 타깃 이름). null이면 "Build"다.
     public string? TimingLabel { get; init; }
 
+    // 실행한 action의 프로세스마다 CPU 시간과 최대 메모리를 재는가(Docs/Design/UnityBuildPch.ko.md 12절 "묶음 크기 실측" — 명령
+    // unity-profile이 켠다). 값은 NativeActionResult의 CpuMilliseconds·PeakMemoryBytes·ProcessMeasured에 실린다. 측정값이라 action
+    // key·도구 빌드 ID·compile_commands.json에는 들어가지 않는다(켜고 꺼도 cache가 그대로 맞는다).
+    public bool MeasureProcesses { get; init; }
+
     // 계획만 세우는가(명령 옵션 --plan-only on). true면 생성 TU·묶음 파일·compile_commands.json까지 쓰고 action은 하나도 실행하지 않는다
     // (증분 기록도 건드리지 않는다). clangd 입력이나 묶음 구성을 빌드 없이 얻을 때 쓴다. 결과의 Actions는 비어 있고 PlanOnly가 참이다.
     public bool PlanOnly { get; init; }
@@ -538,6 +543,14 @@ public sealed record NativeActionResult(string Id, string Module, string Kind, b
     // 임시 디렉터리 정리까지를 잰다(실행 슬롯을 기다린 시간은 빼고, 병렬 action끼리는 겹친다). 실행하지 않은 action(cache hit, 선행 action
     // 실패)은 0이다. 측정값이라 action key·도구 빌드 ID·compile_commands.json에는 들어가지 않고 action-report.json에만 실린다.
     public long DurationMilliseconds { get; init; }
+
+    // 이 action이 실행한 프로세스의 CPU 시간(ms, 사용자 + 커널)과 최대 working set(byte)이다. NativeBuildRequest.MeasureProcesses를
+    // 켜고 실행했고 호스트가 값을 줄 때만 ProcessMeasured가 참이고, 그 밖에는(cache hit 포함) 둘 다 0이다.
+    public long CpuMilliseconds { get; init; }
+
+    public long PeakMemoryBytes { get; init; }
+
+    public bool ProcessMeasured { get; init; }
 }
 
 public sealed record NativeBuildResult

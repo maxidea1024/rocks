@@ -143,12 +143,15 @@ try
                 DescriptorTests.Run(root, repository);
                 Pass("project and plugin descriptors parse strictly and resolve plugins");
                 break;
+            case "unity-profile":
+                await UnityProfileTests.RunAsync(request, root, Pass);
+                break;
             case "windows-headers":
                 await WindowsHeaderPairTests.RunAsync(request, root, repository, Pass);
                 break;
             default:
                 throw new ArgumentException(
-                    $"Unknown test group '{group}'. Groups: dependency, unity, pch, dynamic, module-table, modular, buildinfo, descriptors, plugins, windows-headers.");
+                    $"Unknown test group '{group}'. Groups: dependency, unity, pch, dynamic, module-table, modular, buildinfo, descriptors, plugins, unity-profile, windows-headers.");
         }
 
         Console.WriteLine($"Native build regression groups ({group} only): {passed}, failed: 0");
@@ -359,6 +362,9 @@ try
     await PchTests.RunAsync(request, root, Pass);
 
     await WindowsHeaderPairTests.RunAsync(request, root, repository, Pass);
+
+    // 묶음 크기 실측(unity-profile)의 조합·프로세스 계측·행 계산.
+    await UnityProfileTests.RunAsync(request, root, Pass);
 
     await ReflectionSourceTests.RunAsync(request, root);
     Pass("reflection generated sources: source-less module archive, registration through the declaration, entry module and module types marker, incremental, validation");
