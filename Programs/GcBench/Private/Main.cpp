@@ -43,7 +43,10 @@
 //                                    --allocator-memory는 요청 크기 분포를 더 낸다(통과 allocator를
 //                                    끼우므로 그 실행의 시간은 비교에 쓰지 않는다)
 //   GcBench --allocator-micro [--allocator-kind K]
-//                                    할당자 작은 벤치(쌍·묶음·스레드 사이·동시 —
+//   GcBench --allocator-trim-idle [--workers W]   쉬는 worker W개가 캐시를 쥔 상태에서 TrimMemory
+//   전후의
+//                                    commit(BinnedAllocator — 쉬는 표시를 넘긴 경우와 넘기지 않은
+//                                    대조) 할당자 작은 벤치(쌍·묶음·스레드 사이·동시 —
 //                                    AllocatorMicroBench.h)
 //   GcBench --soak 200000 [--seed 7] [--soak-objects 4000] [--soak-workers --workers 4]
 //                  [--soak-time-budget]
@@ -490,6 +493,8 @@ struct Options {
     bool allocatorKindSet = false;
     // 할당자 비교에서 요청 크기 분포를 낸다(--allocator-memory).
     bool allocatorMemory = false;
+    // 쉬는 worker의 캐시와 TrimMemory를 잰다(--allocator-trim-idle, worker 수는 --workers).
+    bool allocatorTrimIdle = false;
     bool clusters = false;
     bool packages = false;
     // 참조 위치 표(M3)를 끈다(RegistryOptions::referenceTables — 비교 측정).
@@ -2168,6 +2173,8 @@ bool Parse(Span<const StringView> arguments, Options& options) noexcept {
             options.allocatorMicro = true;
         } else if (platform::CStringEquals(argument, "--allocator-memory")) {
             options.allocatorMemory = true;
+        } else if (platform::CStringEquals(argument, "--allocator-trim-idle")) {
+            options.allocatorTrimIdle = true;
         } else if (platform::CStringEquals(argument, "--clusters")) {
             options.clusters = true;
         } else if (platform::CStringEquals(argument, "--packages")) {
@@ -2274,6 +2281,11 @@ int Run(const Options& options) noexcept {
         return RunAllocatorMicro(options);
     }
 
+    if (options.allocatorTrimIdle) {
+        printf("\n== allocator idle trim bench ==\n");
+        return gc_bench::RunIdleTrimBench(options.workers);
+    }
+
     if (options.allocators) {
         return RunAllocatorComparison(options);
     }
@@ -2325,7 +2337,8 @@ int RunMain(launch::ApplicationContext& context) noexcept {
     Options options;
     if (!Parse(context.Arguments(), options)) {
         printf("usage: GcBench [--objects N] [--refs K] [--leaf P] [--reps R] [--workers W] "
-               "[--allocators [--allocator-kind K]] [--allocator-micro] [--clusters] "
+               "[--allocators [--allocator-kind K]] [--allocator-micro] "
+               "[--allocator-trim-idle] [--clusters] "
                "[--soak TICKS [--seed S] [--soak-objects N] "
                "[--soak-workers] [--soak-time-budget]] [--cluster-soak TICKS [--packages]] "
                "[--no-tables]\n");
