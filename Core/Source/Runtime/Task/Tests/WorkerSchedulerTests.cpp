@@ -965,6 +965,10 @@ namespace {
 thread_local bool threadMarkedIdle = false;
 thread_local bool threadCountedIdle = false;
 
+// 표시를 기다리는 감시 시한이다.
+constexpr uint64 NanosecondsPerMillisecond = 1000000;
+constexpr uint64 MarkWatchNanoseconds = 10000 * NanosecondsPerMillisecond;
+
 // worker의 쉬는 표시를 세는 allocator다(할당은 상위로 넘긴다).
 class IdleMarkAllocator final : public Allocator {
 public:
@@ -996,12 +1000,23 @@ public:
         ++activeMarks_;
     }
 
-    // 서로 다른 스레드 count개가 쉰다고 알릴 때까지 기다린다.
-    void WaitForIdleThreads(uint32 count) noexcept {
+    // 서로 다른 스레드 count개가 쉰다고 알릴 때까지 기다린다. 시한은 알리지 않는 구현에서 시험이
+    // 멈추지 않게 하는 감시다(알리는 구현에서는 결과가 시간과 무관하다). 시한을 넘기면 거짓이다.
+    bool WaitForIdleThreads(uint32 count) noexcept {
+        const uint64 deadline = MonotonicNanoseconds() + MarkWatchNanoseconds;
         LockGuard lock(mutex_);
         while (idleThreads_ < count) {
-            (void)changed_.Wait(mutex_);
+            const uint64 now = MonotonicNanoseconds();
+            if (now >= deadline) {
+                return false;
+            }
+
+            const auto remaining =
+                static_cast<uint32>((deadline - now) / NanosecondsPerMillisecond + 1);
+            (void)changed_.Wait(mutex_, remaining);
         }
+
+        return true;
     }
 
     uint64 IdleMarks() noexcept {
@@ -1036,7 +1051,7 @@ TEST(WorkerSchedulerWorkersMarkIdleAroundTheirWait) {
         WorkerScheduler scheduler(allocator);
         REQUIRE(scheduler.Start({Workers, 32, 8}));
         // 작업이 없으므로 모든 worker가 대기에 들어가며 쉰다고 알린다.
-        allocator.WaitForIdleThreads(Workers);
+        REQUIRE(allocator.WaitForIdleThreads(Workers));
         // 0·1 값이다(본문이 쓰고 이 스레드가 읽는다).
         uint32 idleInBody = 1;
         auto body = Body::TryCreate(allocator, [&idleInBody](WorkerTaskContext&) noexcept {
