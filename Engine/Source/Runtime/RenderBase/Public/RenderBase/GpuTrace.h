@@ -17,9 +17,15 @@ namespace rocks::render {
 extern TraceChannel GpuTraceChannel;
 
 // 채널 "gpu"와 GPU 기록 형(Trace.GpuQueue·Trace.GpuCalibration·Trace.GpuScope·Trace.GpuFrame,
-// TraceStandardFormat)을 세션에 등록한다. 엔진(또는 시험)이 세션을 시작한 뒤 RenderBase 등록
-// 단계에서 부른다. 실패: TraceSession::RegisterChannel·RegisterEventType의 오류다.
+// TraceStandardFormat)을 세션에 등록한다. RenderBase 모듈의 Startup이 호스트 서비스의 trace 세션에
+// 부른다(Docs/Design/ModuleLoader.ko.md 3.12절). 시험은 직접 부른다. 실패: TraceSession::
+// RegisterChannel·RegisterEventType의 오류다. 실패하면 이 호출이 등록한 것을 되돌린다.
 Result<void> RegisterGpuTraceTypes(TraceSession& session) noexcept;
+
+// RegisterGpuTraceTypes의 등록을 형부터, 채널은 마지막에 푼다(RenderBase 모듈 Shutdown). 등록되지
+// 않은 것은 건너뛴다. 실패: TraceSession::UnregisterEventType·UnregisterChannel의 NotFound 밖 첫
+// 오류다(나머지는 계속 푼다).
+Result<void> UnregisterGpuTraceTypes(TraceSession& session) noexcept;
 
 // GPU tick을 calibration 쌍으로 trace tick(platform::MonotonicTicks, traceFrequency)으로 옮긴다.
 // 기준보다 앞선 tick은 그만큼 앞선 trace tick이다(0 아래는 0). 1초 미만 부분만 double로 계산해 중간

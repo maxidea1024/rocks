@@ -1599,3 +1599,5 @@ ConfigDiagnostics& ConfigContext::Diagnostics() noexcept {
 }
 
 } // namespace rocks::config
+
+ROCKS_DEFINE_HOST_SERVICE(rocks::config::ConfigContext)

@@ -71,6 +71,17 @@ private:
     uint64 pumped_ = 0;
 };
 
+// 호스트 서비스를 등록한다(Docs/Design/ModuleLoader.ko.md 3.12절). 서비스는 선택이라 실패하면
+// Warning을 남기고 모듈은 서비스 없이 시작한다.
+template <class Service>
+void RegisterHostService(HostServices& services, Service& service) noexcept {
+    if (auto registered = services.Register(service); !registered) {
+        Log::Warning(LogSandboxHost, "Host service {Service} could not be registered: {Error}",
+                     StringView(HostServiceTraits<Service>::Key().name),
+                     ErrorCodeName(registered.Error()));
+    }
+}
+
 // 엔진을 World 하나로 frames만큼 돌린다. 실패 원인은 엔진이 한 번 기록한다(호스트는 다시 기록하지
 // 않는다).
 int RunEngine(Allocator& allocator, uint64 frames, uint64 requestTerminationAtFrame,
@@ -435,8 +446,16 @@ int RunEngineHost(launch::ApplicationContext& context, const EngineHostOptions& 
                 }
             }
 
-            // 8) 호스트 단계 모듈(설정·로그·trace 뒤 — UE PostConfigInit) → 엔진 루프(프레임마다
-            // sync 지점) → 호스트 묶음 종료(trace·LogHost가 아직 살아 있을 때 — 3.7절).
+            // 8) 호스트 서비스 등록(3.12절 — 로그·설정 문맥·실행 중인 trace 세션) → 호스트 단계
+            // 모듈(UE PostConfigInit) → 엔진 루프(프레임마다 sync 지점) → 호스트 묶음 종료(trace·
+            // LogHost가 아직 살아 있을 때 — 3.7절) → 서비스 떼기.
+            HostServices& services = modules.Services();
+            RegisterHostService(services, host.System());
+            RegisterHostService(services, settings.Context());
+            if (trace.IsRunning()) {
+                RegisterHostService(services, trace);
+            }
+
             const ModuleLoadReport hostModules = modules.StartPhase(LoadingPhase::PostConfigInit);
             if (hostModules.IsOk()) {
                 exitCode = RunEngine(allocator, options.frames, options.requestTerminationAtFrame,
@@ -450,6 +469,9 @@ int RunEngineHost(launch::ApplicationContext& context, const EngineHostOptions& 
             }
 
             modules.ShutdownGroup(ModuleGroup::Host);
+            (void)services.Unregister(trace);
+            (void)services.Unregister(settings.Context());
+            (void)services.Unregister(host.System());
             // 출력 스레드에 남은 기록이 trace에 닿게 한 뒤 sink를 뺀다(trace 출력이 닫히기 전에).
             if (traceLogAdded) {
                 (void)host.System().Flush(TraceLogFlushTimeoutMilliseconds);

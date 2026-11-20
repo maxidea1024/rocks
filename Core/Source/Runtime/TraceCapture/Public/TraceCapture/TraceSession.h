@@ -4,6 +4,7 @@
 #include <Base/Types.h>
 #include <Core/Containers/Span.h>
 #include <Core/Memory/Allocator.h>
+#include <Core/Module/HostServiceKey.h>
 #include <Core/Result.h>
 #include <Core/Text/StringView.h>
 #include <Platform/File.h>
@@ -217,7 +218,8 @@ public:
     Result<void> RegisterChannel(TraceChannel& channel, bool enabled = false) noexcept;
 
     // 채널 등록을 푼다(모듈을 내리기 전). 끄고 id를 없앤다. 이 채널을 쓰는 이벤트 형이 등록되어
-    // 있으면 Busy다. 등록되지 않은 채널은 NotFound다.
+    // 있으면 Busy다. 등록되지 않은 채널은 NotFound다. 같은 이름 채널을 다시 등록하면 이 id를 다시
+    // 쓴다(Docs/Design/TraceSystem.ko.md 5절).
     Result<void> UnregisterChannel(TraceChannel& channel) noexcept;
 
     // 켜짐을 바꾸고 정의 기록(ChannelState)을 남긴다. 읽기 전용 채널은 Unsupported, 이 세션에
@@ -234,7 +236,8 @@ public:
     Result<void> RegisterEventType(TraceEventType& type) noexcept;
 
     // 이벤트 형 등록을 푼다. 스키마는 세션에 남아 늦게 붙은 출력도 해석할 수 있다. 등록되지 않은
-    // 형은 NotFound다.
+    // 형은 NotFound다. 같은 이름·같은 스키마를 다시 등록하면 이 형 id와 스키마를 다시
+    // 쓴다(Docs/Design/TraceSystem.ko.md 4절).
     Result<void> UnregisterEventType(TraceEventType& type) noexcept;
 
     // 파일 출력을 붙인다(CreateAlways, 확장자는 보통 .rtrace). 붙는 즉시 파일 머리, 지금까지 내보낸
@@ -282,3 +285,7 @@ private:
 };
 
 } // namespace rocks
+
+// 호스트 서비스다(Docs/Design/ModuleLoader.ko.md 3.12절). 엔진 호스트가 모듈 단계 실행 전에
+// 등록하고 호스트 묶음을 내린 뒤 뗀다.
+ROCKS_DECLARE_HOST_SERVICE(rocks::TraceSession)
