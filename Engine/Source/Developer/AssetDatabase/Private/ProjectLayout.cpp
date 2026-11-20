@@ -1,7 +1,11 @@
 #include "AssetDatabaseInternal.h"
 
 #include <AssetDatabase/ProjectLayout.h>
+#include <Core/Containers/Array.h>
+#include <Core/FileError.h>
+#include <Core/Text/Path.h>
 #include <Core/Text/StringBuilder.h>
+#include <Platform/Path.h>
 
 // 프로젝트 배치와 경로 대응이다(Docs/Design/AssetSystem.ko.md 4.2절, 7.1절 10 — A2a).
 namespace rocks {
@@ -42,22 +46,49 @@ Result<void> ProjectLayout::Initialize(StringView root) noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    // '\'를 '/'로 바꾸고 끝 구분자를 뺀다(루트 하나뿐이면 남긴다).
-    StringBuilder<LayoutScratchBytes> cleaned(*allocator_);
-    for (char c : root) {
-        const char separator = '/';
-        const char text[1] = {c == '\\' ? separator : c};
-        if (auto appended = cleaned.TryAppend(StringView(text, 1)); !appended) {
-            return appended;
+    // 절대 경로로 바꾼다(UE FPaths::ConvertRelativePathToFull — 상대 경로는 현재 작업 디렉터리
+    // 기준). Windows의 현재 드라이브 루트("/x")·드라이브 상대("C:x")는 뜻이 실행 상태에 달려
+    // 거부한다.
+    auto kind = Path::Root(root);
+    if (!kind) {
+        return Result<void>::Failure(kind.Error());
+    }
+
+    Result<String> absolute = Result<String>::Failure(ErrorCode::InvalidArgument);
+    switch (kind.Value()) {
+    case PathRoot::Relative: {
+        Array<char> working(*allocator_);
+        if (auto sized = working.TryResize(MaxNativePathBytes() + 1); !sized) {
+            return sized;
         }
+
+        usize bytes = 0;
+        if (auto got = platform::GetStandardDirectory(platform::StandardDirectory::Working,
+                                                      working.Data(), working.Size(), bytes);
+            !got) {
+            return Result<void>::Failure(FileErrorCode(got));
+        }
+
+        absolute = Path::MakeAbsolute(*allocator_, StringView(working.Data(), bytes), root);
+        break;
+    }
+    case PathRoot::WindowsCurrentDriveRoot:
+    case PathRoot::WindowsDriveRelative:
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    default:
+        absolute = Path::Normalize(*allocator_, root);
+        break;
     }
 
-    usize length = cleaned.View().ByteCount();
-    while (length > 1 && cleaned.View().Data()[length - 1] == '/') {
-        --length;
+    if (!absolute) {
+        return Result<void>::Failure(absolute.Error());
     }
 
-    const StringView base(cleaned.View().Data(), length);
+    // 정규화 결과의 구분자는 '/'다(Core Path — POSIX에서 '\'는 이름의 문자다). 루트뿐인
+    // 경로("C:/"·"/")는 끝 '/'를 남기고 자식은 그 뒤에 붙인다.
+    const StringView base = absolute.Value().View();
+    const bool rootOnly = base.EndsWith("/");
+    const StringView prefix(base.Data(), rootOnly ? base.ByteCount() - 1 : base.ByteCount());
     String newRoot(*allocator_);
     String newContent(*allocator_);
     String newConfig(*allocator_);
@@ -67,8 +98,6 @@ Result<void> ProjectLayout::Initialize(StringView root) noexcept {
         return made;
     }
 
-    // 루트가 "/"면 자식은 "/Content"처럼 구분자를 겹치지 않는다.
-    const StringView prefix = base == "/" ? StringView() : base;
     String* const outs[] = {&newContent, &newConfig, &newIntermediate, &newSaved};
     const StringView names[] = {ContentName, ConfigName, IntermediateName, SavedName};
     for (usize index = 0; index < sizeof(names) / sizeof(names[0]); ++index) {
@@ -86,6 +115,10 @@ Result<void> ProjectLayout::Initialize(StringView root) noexcept {
 }
 
 Result<void> ProjectLayout::TryMakeFilePath(const LogicalPath& path, String& out) const noexcept {
+    if (root_.View().IsEmpty()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
     const usize bytes = content_.View().ByteCount() + 1 + path.Relative().ByteCount() +
                         EditorPackageExtension.ByteCount();
     if (bytes + TemporaryFileSuffixBytes > MaxNativePathBytes()) {
@@ -111,10 +144,11 @@ Result<LogicalPath> ProjectLayout::TryMakeLogicalPath(StringView contentRelative
         *failure = LogicalPathFailure{};
     }
 
+    // 확장자는 ASCII 대소문자를 무시한다(UE FPackageName::IsAssetPackageExtension — 대소문자를
+    // 무시하는 파일 시스템에서 "Hero.RASSET"도 같은 패키지 자리다. 실제 이름은 색인이 가진다).
     const usize extension = EditorPackageExtension.ByteCount();
     if (contentRelative.ByteCount() <= extension ||
-        StringView(contentRelative.Data() + contentRelative.ByteCount() - extension, extension) !=
-            EditorPackageExtension) {
+        !contentRelative.EndsWith(EditorPackageExtension, StringComparison::IgnoreAsciiCase)) {
         return Result<LogicalPath>::Failure(ErrorCode::InvalidArgument);
     }
 

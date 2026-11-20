@@ -140,11 +140,22 @@ TEST(AssetDatabaseLock_SameProcess) {
     second.Release();
     // 놓은 뒤 다시 놓아도 아무것도 하지 않는다.
     second.Release();
+    // 놓인 잠금은 대기가 있어도 바로 잡는다.
+    REQUIRE(first.Acquire(layout, 60000));
+    first.Release();
+    // Initialize 전 배치는 잠그지 않는다.
+    ProjectLayout empty(allocator);
+    CHECK(second.Acquire(empty, 0).Error() == ErrorCode::InvalidArgument);
 }
 
 // 다른 프로세스(8절): 자식이 잡고 있으면 부모는 Busy, 자식이 gate를 받아 놓은 뒤에는 잡는다. 부모가
 // 잡고 있으면 자식이 Busy로 끝난다.
 TEST(AssetDatabaseLock_OtherProcess) {
+    // Android는 자식 프로세스를 시작하지 않는다(platform::Process — Unsupported).
+    if constexpr (IsAndroid) {
+        return;
+    }
+
     REQUIRE(LockProbeRegistered);
     TempProject project("lock-process");
     REQUIRE(project.made);
@@ -165,6 +176,19 @@ TEST(AssetDatabaseLock_OtherProcess) {
         platform::Process blocked;
         REQUIRE(StartLockChild(blocked, project.Root()));
         CHECK(ExitCode(blocked) == ProbeBusyExit);
+        lock.Release();
+    }
+
+    // 쥔 자식이 비정상 종료하면(Terminate) OS가 잠금을 풀어 부모가 대기 없이 잡는다(8절).
+    {
+        platform::Process child;
+        REQUIRE(StartLockChild(child, project.Root()));
+        REQUIRE(WaitHeld(child));
+        AssetDatabaseLock lock;
+        CHECK(lock.Acquire(layout, 0).Error() == ErrorCode::Busy);
+        REQUIRE(child.Terminate());
+        CHECK(child.Wait() == platform::WaitResult::Signaled);
+        CHECK(lock.Acquire(layout, 0));
     }
 }
 
@@ -181,7 +205,7 @@ TEST(AssetDatabaseLock_Failures) {
     REQUIRE(file.Close());
     AssetDatabaseLock lock;
     const auto acquired = lock.Acquire(layout, 0);
-    CHECK(!acquired && acquired.Error() != ErrorCode::Busy);
+    CHECK(!acquired && acquired.Error() == ErrorCode::InvalidArgument);
     CHECK(!lock.IsHeld());
     String root(allocator);
     while (root.View().ByteCount() < MaxNativePathBytes()) {

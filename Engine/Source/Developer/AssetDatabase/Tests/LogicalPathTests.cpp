@@ -65,6 +65,16 @@ TEST(LogicalPath_ValidPaths) {
          "/Game/Characters"},
         {"/GAME/a_b-1/Z9", "/Game/a_b-1/Z9", "game/a_b-1/z9", "Z9", "/Game/a_b-1"},
         {"/Game/9Lives", "/Game/9Lives", "game/9lives", "9Lives", "/Game"},
+        // 비ASCII 숫자(N* — U+0663 ARABIC-INDIC DIGIT THREE)가 첫 문자.
+        {"/Game/\xd9\xa3"
+         "abc",
+         "/Game/\xd9\xa3"
+         "abc",
+         "game/\xd9\xa3"
+         "abc",
+         "\xd9\xa3"
+         "abc",
+         "/Game"},
         // 한글(L*) 구성 요소.
         {"/Game/\xed\x95\x9c\xea\xb8\x80/\xec\x98\x81\xec\x9b\x85",
          "/Game/\xed\x95\x9c\xea\xb8\x80/\xec\x98\x81\xec\x9b\x85",
@@ -119,6 +129,14 @@ TEST(LogicalPath_InvalidPaths) {
     // "/Game"(5) + 4 × (1 + 64) = 265 byte(구성 요소는 모두 64 byte — 각자는 규칙을 지킨다).
     RepeatedPath(longTotal, sizeof(longTotal), 4, MaxNameComponentBytes, 'b');
     const char nul[] = {'/', 'G', 'a', 'm', 'e', '/', 'A', 0, 'B'};
+    // "/Game" + 4 × (1 + 64) + "/_x" = 268 byte이고 마지막 구성 요소가 InvalidFirst다.
+    char tooLongAndInvalid[512];
+    RepeatedPath(tooLongAndInvalid, sizeof(tooLongAndInvalid), 4, MaxNameComponentBytes, 'h');
+    const usize invalidAt = strlen(tooLongAndInvalid);
+    tooLongAndInvalid[invalidAt] = '/';
+    tooLongAndInvalid[invalidAt + 1] = '_';
+    tooLongAndInvalid[invalidAt + 2] = 'x';
+    tooLongAndInvalid[invalidAt + 3] = 0;
     const InvalidCase cases[] = {
         {"", 0, LogicalPathError::Empty, 0, NameComponentError::None},
         {"Game/Hero", 0, LogicalPathError::MissingLeadingSlash, 0, NameComponentError::None},
@@ -151,6 +169,10 @@ TEST(LogicalPath_InvalidPaths) {
          NameComponentError::InvalidCharacter},
         {longComponent, 0, LogicalPathError::InvalidComponent, 1, NameComponentError::TooLong},
         {longTotal, 0, LogicalPathError::TooLong, 0, NameComponentError::None},
+        // 첫 문자가 결합 문자(M* — U+0301)면 InvalidFirst다(NFC로도 합쳐질 앞 글자가 없다).
+        {"/Game/\xcc\x81"
+         "A",
+         0, LogicalPathError::InvalidComponent, 1, NameComponentError::InvalidFirst},
         // 겹친 위반: 앞 규칙이 이긴다.
         {"Game\\Hero", 0, LogicalPathError::MissingLeadingSlash, 0, NameComponentError::None},
         {"/Engine//Hero", 0, LogicalPathError::EmptyComponent, 1, NameComponentError::None},
@@ -158,6 +180,10 @@ TEST(LogicalPath_InvalidPaths) {
         {"/Engine/CON", 0, LogicalPathError::UnknownMount, 0, NameComponentError::None},
         {"/Game/CON/_x", 0, LogicalPathError::InvalidComponent, 1,
          NameComponentError::ReservedDeviceName},
+        {"/Game\\/", 0, LogicalPathError::Backslash, 0, NameComponentError::None},
+        // 규칙 4가 5보다 앞선다: 전체가 256을 넘어도 구성 요소 위반이면 InvalidComponent다.
+        {tooLongAndInvalid, 0, LogicalPathError::InvalidComponent, 5,
+         NameComponentError::InvalidFirst},
     };
     for (const InvalidCase& c : cases) {
         LogicalPathFailure failure;
@@ -174,10 +200,16 @@ TEST(LogicalPath_InvalidPaths) {
         CHECK(same);
     }
 
-    // 공백의 위치는 그 구성 요소 안 byte offset이다.
+    // 위반 위치는 NFC로 정규화한 구성 요소 안의 byte offset이다(입력이 NFD면 입력의 위치와 다를 수
+    // 있다 — 진단은 정규화한 이름 기준이다).
     LogicalPathFailure failure;
     CHECK(!ParseLogicalPath(allocator, "/Game/Hero/He ro", &failure));
     CHECK(failure.offset == 2);
+    CHECK(!ParseLogicalPath(allocator, "/Game/He.ro", &failure));
+    CHECK(failure.offset == 2);
+    // NFD "e + U+0301"(3 byte)가 NFC "U+00E9"(2 byte)로 줄어 공백 위치가 앞당겨진다.
+    CHECK(!ParseLogicalPath(allocator, "/Game/Cafe\xcc\x81 x", &failure));
+    CHECK(failure.componentError == NameComponentError::InvalidCharacter && failure.offset == 5);
 }
 
 // 경계(4.2절): 구성 요소 64 byte·전체 256 byte는 받고 하나 넘으면 거부한다. 정규화 뒤 길이로 센다
@@ -218,6 +250,42 @@ TEST(LogicalPath_LengthBoundaries) {
     auto parsed = ParseLogicalPath(allocator, nfd);
     REQUIRE(parsed);
     CHECK(parsed.Value().Text().ByteCount() == 6 + 42);
+    // 조합 제외 문자 U+0958(3 byte)은 NFC에서 U+0915 U+093C(6 byte)로 길어진다. 입력 63 byte 구성
+    // 요소가 NFC 126 byte가 되어 구성 요소 TooLong이다.
+    char grow[512] = "/Game/";
+    usize growAt = strlen(grow);
+    for (usize index = 0; index < 21; ++index) {
+        grow[growAt++] = static_cast<char>(0xe0);
+        grow[growAt++] = static_cast<char>(0xa5);
+        grow[growAt++] = static_cast<char>(0x98);
+    }
+
+    grow[growAt] = 0;
+    LogicalPathFailure growFailure;
+    CHECK(!ParseLogicalPath(allocator, grow, &growFailure));
+    CHECK(growFailure.error == LogicalPathError::InvalidComponent &&
+          growFailure.componentError == NameComponentError::TooLong);
+    // 구성 요소 다섯(각 10 × U+0958 = 입력 30 byte → NFC 60 byte): 입력 160 byte가 NFC 310 byte로
+    // 전체 TooLong이다. 넷이면 NFC 249 byte로 받는다.
+    char total[512] = "/Game";
+    usize totalAt = strlen(total);
+    for (usize component = 0; component < 5; ++component) {
+        total[totalAt++] = '/';
+        for (usize index = 0; index < 10; ++index) {
+            total[totalAt++] = static_cast<char>(0xe0);
+            total[totalAt++] = static_cast<char>(0xa5);
+            total[totalAt++] = static_cast<char>(0x98);
+        }
+
+        total[totalAt] = 0;
+        LogicalPathFailure totalFailure;
+        auto grown = ParseLogicalPath(allocator, total, &totalFailure);
+        if (component < 4) {
+            CHECK(grown);
+        } else {
+            CHECK(!grown && totalFailure.error == LogicalPathError::TooLong);
+        }
+    }
 }
 
 // 접근자·복사·이름(7.1절 10): TryClone은 같은 경로, 사유 이름은 모두 고유하고 범위 밖은 "Unknown".
@@ -239,6 +307,12 @@ TEST(LogicalPath_CloneAndNames) {
     }
 
     CHECK(StringView(LogicalPathErrorName(static_cast<LogicalPathError>(Last + 1))) == "Unknown");
+    // 옮겨 간 값은 비어 있고 접근자는 빈 view를 준다(범위 밖을 읽지 않는다).
+    LogicalPath moved = Move(copy.Value());
+    CHECK(moved.Text() == "/Game/A/B/C");
+    CHECK(copy.Value().Text().IsEmpty() && copy.Value().Key().IsEmpty());
+    CHECK(copy.Value().Name().IsEmpty() && copy.Value().Relative().IsEmpty());
+    CHECK(copy.Value().Directory().IsEmpty());
 }
 
 namespace {

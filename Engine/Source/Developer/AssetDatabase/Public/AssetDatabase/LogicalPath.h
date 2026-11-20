@@ -65,8 +65,6 @@ const char* LogicalPathErrorName(LogicalPathError error) noexcept;
 // 검증·정규화한 논리 경로다. 값 타입이고 문자열은 allocator가 가진다.
 class LogicalPath {
 public:
-    explicit LogicalPath(Allocator& allocator) noexcept;
-
     LogicalPath(LogicalPath&&) noexcept = default;
     LogicalPath& operator=(LogicalPath&&) noexcept = default;
     LogicalPath(const LogicalPath&) = delete;
@@ -99,6 +97,10 @@ public:
     }
 
 private:
+    // 빈 경로는 ParseLogicalPath·TryClone 안에서만 만든다(공개 생성자가 없다 — 모든 공개 값은
+    // 검증한 경로다). 옮겨 간 값은 비어 있고 접근자는 빈 view를 준다.
+    explicit LogicalPath(Allocator& allocator) noexcept;
+
     friend Result<LogicalPath> ParseLogicalPath(Allocator&, StringView,
                                                 LogicalPathFailure*) noexcept;
 

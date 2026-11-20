@@ -20,6 +20,11 @@ Result<void> AssetDatabaseLock::Acquire(const ProjectLayout& layout,
         return Result<void>::Failure(ErrorCode::AlreadyExists);
     }
 
+    // Initialize 전 배치는 파일 시스템 루트 아래 경로를 만들 수 있으므로 거부한다.
+    if (layout.Root().IsEmpty()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
     const StringView directory = layout.IntermediateDirectory();
     if (directory.ByteCount() + 1 + AssetDatabaseLockFileName.ByteCount() > MaxNativePathBytes()) {
         return Result<void>::Failure(ErrorCode::CapacityExceeded);

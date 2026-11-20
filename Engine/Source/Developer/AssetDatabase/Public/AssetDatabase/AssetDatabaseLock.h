@@ -32,7 +32,8 @@ public:
 
     // layout의 잠금을 잡는다. 다른 쪽이 잡고 있으면 waitMilliseconds까지 다시 시도한다(0이면 한
     // 번). 오류: 못 잡으면 Busy, 이 객체가 이미 잡고 있으면 AlreadyExists, Intermediate를 만들 수
-    // 없거나 잠금 파일 오류는 그 파일 오류(FileErrorCode), 경로가 너무 길면 CapacityExceeded.
+    // 없거나 잠금 파일 오류는 그 파일 오류(FileErrorCode), 경로가 너무 길면 CapacityExceeded,
+    // Initialize 전 배치는 InvalidArgument.
     Result<void> Acquire(const ProjectLayout& layout, uint32 waitMilliseconds) noexcept;
 
     // 잠금을 푼다. 잡고 있지 않으면 아무것도 하지 않는다.

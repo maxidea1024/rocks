@@ -102,13 +102,21 @@ StringView LogicalPath::Mount() const noexcept {
 
 StringView LogicalPath::Relative() const noexcept {
     const StringView text = text_.View();
+    if (text.IsEmpty()) {
+        return StringView();
+    }
+
     return StringView(text.Data() + mountBytes_ + 1, text.ByteCount() - mountBytes_ - 1);
 }
 
 StringView LogicalPath::Name() const noexcept {
     const StringView text = text_.View();
+    if (text.IsEmpty()) {
+        return StringView();
+    }
+
     usize begin = text.ByteCount();
-    // 정규 경로는 '/'로 시작하고 구성 요소가 둘 이상이라 시작 전에 '/'를 만난다.
+    // 비지 않은 정규 경로는 '/'로 시작하고 구성 요소가 둘 이상이라 시작 전에 '/'를 만난다.
     while (text.Data()[begin - 1] != Separator) {
         --begin;
     }
@@ -118,6 +126,10 @@ StringView LogicalPath::Name() const noexcept {
 
 StringView LogicalPath::Directory() const noexcept {
     const StringView text = text_.View();
+    if (text.IsEmpty()) {
+        return StringView();
+    }
+
     return StringView(text.Data(), text.ByteCount() - Name().ByteCount() - 1);
 }
 
@@ -196,7 +208,13 @@ Result<LogicalPath> ParseLogicalPath(Allocator& allocator, StringView text,
             // 잘못된 UTF-8 — 규칙 검사가 같은 판정과 위치를 준다.
             NameComponentError reason{};
             usize offset = 0;
-            (void)ValidateNameComponent(component, allocator, &reason, &offset);
+            auto valid = ValidateNameComponent(component, allocator, &reason, &offset);
+            if (reason == NameComponentError::None) {
+                // 규칙 검사가 잘못된 UTF-8을 받아들이면(정규화와 판정이 어긋남) 사유 없는 거부가
+                // 되지 않게 그 결과를 그대로 돌려준다.
+                return FailResource(failure, valid ? ErrorCode::InvalidArgument : valid.Error());
+            }
+
             return Fail(failure, LogicalPathError::InvalidComponent, index, reason, offset);
         }
 
