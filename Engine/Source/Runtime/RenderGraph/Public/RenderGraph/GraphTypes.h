@@ -11,6 +11,10 @@ namespace rocks::render {
 // "없음" 번호다(pass·자원 번호 자리).
 inline constexpr uint32 GraphIndexNone = NumericLimits<uint32>::Max();
 
+// "그래프 시작" 자리다(GraphTransitionRecord::forkPass: async compute fork 전이를 그래프 시작의
+// graphics 기록에서 낸다, UE prologue pass).
+inline constexpr uint32 GraphProloguePass = GraphIndexNone - 1;
+
 // 그래프 자원 종류다.
 enum class GraphResourceKind : uint8 {
     Texture,
@@ -75,7 +79,9 @@ struct GraphPass {
 // - Compute: SRV·UAV·Constant·IndirectArgs. 렌더 타깃 없음(열린 기록이 없으면 attachment 없는
 //   기록을 연다).
 // - Copy: CopySource·CopyDestination만(그래픽 pipe, 기록은 Compute와 같다).
-// - AsyncCompute: RG4에서 연다. 지금은 Unsupported다.
+// - AsyncCompute: Compute와 같은 접근이고 compute queue에서 graphics와 겹쳐 실행한다(RenderBase 8절
+//   RG4). 그래프 설정(RenderGraphDesc::asyncCompute)·장치가 허락하지 않으면 graphics pipe의
+//   Compute pass로 실행한다(UE와 같은 낮추기). 실행 pipe는 RenderGraph::PassPipe다.
 enum class GraphPassKind : uint8 {
     Raster,
     Compute,
@@ -106,6 +112,23 @@ enum class GraphAccessFlags : uint8 {
     // ERDGUnorderedAccessViewFlags::SkipBarrier). 연속한 두 UAV 접근이 모두 이 표시를 가지면 그
     // 사이 UAV barrier를 생략한다.
     NoUavBarrier = 1u << 0
+};
+
+// pass가 실행되는 pipe다(RenderGraph::PassPipe).
+enum class GraphPassPipe : uint8 {
+    Graphics,
+    AsyncCompute
+};
+
+// async compute 사용 설정이다(RenderGraphDesc::asyncCompute, RenderBase 8절 RG4).
+enum class GraphAsyncCompute : uint8 {
+    // 장치가 겹침 이득이 난다고 볼 때(DeviceFeatures::efficientAsyncCompute)만 compute queue를
+    // 쓴다.
+    Auto,
+    // 장치에 compute queue(DeviceFeatures::asyncCompute)가 있으면 늘 쓴다(시험·측정용).
+    Always,
+    // 늘 graphics pipe다.
+    Disabled
 };
 
 // 그래프 실행 방식이다.
@@ -168,6 +191,11 @@ struct GraphImportOptions {
 // 다른 pass가 하나 이상 있을 때만 나눈다(Raster pass는 새 기록을 열므로 Compute·Copy pass가
 // end한다).
 //
+// forkPass가 GraphIndexNone이 아니면 graphics → async compute 전이다(RG4): async compute 기록은
+// graphics 상태 barrier를 낼 수 없으므로 fork 자리의 graphics 기록에서 낸다. forkPass는 그 graphics
+// pass(epilogue에서 낸다)이거나 GraphProloguePass(그래프 시작의 graphics 기록)다. pass는 여전히 그
+// 전이를 기다리는 async pass다.
+//
 // 만든 자원의 첫 전이 before는 Unknown(내용 불필요, 장치가 추적한 상태에서 바꾼다)이고, 같은 그래프
 // 안에서 앞 자원이 놓은 장치 객체를 이어 쓰는 자원(GraphLifetime::reusedWithinGraph)은 Discard다
 // (이전 내용 무효, backend는 Unknown처럼 추적 상태에서 바꾼다).
@@ -184,10 +212,15 @@ struct GraphTransitionRecord {
     graphics::ResourceAccess after = graphics::ResourceAccess::Unknown;
     bool attachment = false;
     uint32 beginPass = GraphIndexNone;
+    uint32 forkPass = GraphIndexNone;
 
     bool operator==(const GraphTransitionRecord&) const noexcept = default;
 };
 
+// async compute pass가 쓰는 자원은 수명이 fork pass(그래프 시작이면 첫 실행 pass)부터 join
+// pass(그래프 끝이면 마지막 실행 pass)까지로 넓다(RG4, 두 pipe가 나란히 돌므로 그 구간 안에서 놓지
+// 않는다).
+//
 // 그래프 자원의 수명이다(참조 수 기준, 7.1절 수명·할당). firstPass에서 할당하고 lastPass 뒤에
 // 해제한다. 해제한 장치 객체는 같은 그래프의 뒤 pass에서 처음 쓰는 같은 desc 자원이 이어 쓰고(RG2
 // 프레임 안 재사용, Deferred 모드), 그래프 끝에 풀로 돌아간다. 쓰는 pass가 모두 제거됐으면 둘 다
@@ -225,6 +258,11 @@ struct GraphStats {
     uint32 validationErrors = 0;
     // worker에서 기록 목록으로 기록한 pass 수다(RG3 병렬 기록, 직렬이면 0).
     uint32 parallelPasses = 0;
+    // compute queue에서 실행한 pass 수, 연 compute queue 기록 수, queue 사이 대기(fork·join의
+    // Device::QueueWait) 수다(RG4).
+    uint32 asyncComputePasses = 0;
+    uint32 computeRecordings = 0;
+    uint32 queueWaits = 0;
 };
 
 } // namespace rocks::render

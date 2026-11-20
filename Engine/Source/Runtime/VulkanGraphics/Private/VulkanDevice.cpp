@@ -634,6 +634,32 @@ Result<void> VulkanDevice::CreateLogicalDevice() noexcept {
         enabled[enabledCount++] = VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME;
     }
 
+    // async compute queue 조건이다(RG4, UE VulkanDevice.cpp:355–372·472와 같다): graphics와 다른
+    // family의 compute queue, synchronization2, VK_KHR_maintenance9(버퍼는 queue family 소유권 이전
+    // 없이 다른 family에서 쓸 수 있다). 하나라도 없으면 async compute를 끄고 graphics pipe로
+    // 낮춘다. 조건을 갖춘 장치의 compute queue 경로는 maintenance9 장치에서 검증과 함께
+    // 넣는다(RenderBase 8절 RG4 남은 것). 그때까지 asyncCompute는 늘 거짓이고 조건만 로그로 남긴다.
+    {
+        constexpr uint32 MaxQueueFamilies = 16;
+        VkQueueFamilyProperties families[MaxQueueFamilies] = {};
+        uint32 familyCount = MaxQueueFamilies;
+        functions_.vkGetPhysicalDeviceQueueFamilyProperties(physical_, &familyCount, families);
+        bool computeFamily = false;
+        for (uint32 candidate = 0; candidate < familyCount; ++candidate) {
+            computeFamily =
+                computeFamily || (candidate != queueFamily_ &&
+                                  (families[candidate].queueFlags & VK_QUEUE_COMPUTE_BIT) != 0);
+        }
+
+        const bool maintenance9 =
+            HasExtension(extensions, extensionCount, VK_KHR_MAINTENANCE_9_EXTENSION_NAME);
+        Log::Info(LogGraphicsVulkan,
+                  "Vulkan async compute: separate compute family {ComputeFamily}, "
+                  "synchronization2 {Sync2}, VK_KHR_maintenance9 {Maintenance9}; async compute "
+                  "work runs on the graphics queue",
+                  computeFamily, sync2Feature, maintenance9);
+    }
+
     VkPhysicalDeviceShaderImageAtomicInt64FeaturesEXT imageAtomicEnabled = {};
     imageAtomicEnabled.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_IMAGE_ATOMIC_INT64_FEATURES_EXT;
@@ -808,8 +834,13 @@ DeviceInfo VulkanDevice::Info() const noexcept {
     return info;
 }
 
-GpuFencePoint VulkanDevice::LastSubmittedFence() const noexcept {
-    return timeline_.LastSubmitted();
+// compute queue가 없다(DeviceFeatures::asyncCompute 거짓, asyncComputeEligible_ 주석).
+GpuFencePoint VulkanDevice::LastSubmittedFence(QueueKind queue) const noexcept {
+    return queue == QueueKind::Graphics ? timeline_.LastSubmitted() : GpuFencePoint{};
+}
+
+Result<void> VulkanDevice::QueueWait(QueueKind queue, GpuFencePoint point) noexcept {
+    return SingleQueueWait(timeline_, queue, point);
 }
 
 Result<bool> VulkanDevice::IsFenceComplete(GpuFencePoint point) const noexcept {

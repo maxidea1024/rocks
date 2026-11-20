@@ -127,6 +127,11 @@ struct RenderGraphDesc {
     WorkerScheduler* scheduler = nullptr;
     Allocator* scratch = nullptr;
     bool parallelRecording = true;
+    // async compute(RG4, RenderBase 8절 "RG4 async compute 설계")다. 즉시 실행 모드는 늘 끈다.
+    // 켜지면 AsyncCompute pass를 compute queue 기록에 내고, fork(그 pass가 기대는 마지막 graphics
+    // pass 뒤)·join(그 결과를 처음 쓰는 graphics pass 앞)에서 Device::QueueWait로 두 queue를
+    // 맞춘다. 그래프의 마지막 제출은 늘 graphics다(남은 compute 제출을 그래프 끝에서 기다린다).
+    GraphAsyncCompute asyncCompute = GraphAsyncCompute::Auto;
 };
 
 // 렌더 lane 프레임 작업에서 그래프 설정을 만든다: 장치·handle 표·그 slot의 프레임 arena·프레임
@@ -136,8 +141,8 @@ RenderGraphDesc MakeRenderGraphDesc(RenderFrameContext& frame, GraphResourcePool
                                     GraphMode mode = GraphMode::Deferred) noexcept;
 
 // 렌더 그래프다. 한 프레임(또는 offscreen 작업 하나)의 pass를 모아 선언 순서대로 실행한다(결정 R5:
-// 재배치 없음). 범위(RG1·RG2 A부): 단일 graphics queue, aliasing·render pass 병합 끔, 단일 스레드
-// 기록, 같은 그래프 안 풀 재사용, 그래프 안 업로드. begin·end 분리 전이는 RG2 B부다.
+// 재배치 없음). 범위: graphics queue와 async compute queue(RG4), aliasing·render pass 병합 끔,
+// 병렬 기록(RG3), 같은 그래프 안 풀 재사용, 그래프 안 업로드, begin·end 분리 전이(RG2).
 //
 // 사용 예(렌더 lane 프레임 작업):
 //   static TraceScopeName SceneName("Scene");
@@ -323,6 +328,8 @@ public:
 
     // pass가 미사용 제거되었는지다(Deferred는 Execute 뒤에 확정).
     bool IsCulled(GraphPass pass) const noexcept;
+    // pass가 실행된(Deferred는 Execute 뒤 확정) pipe다. compute queue를 쓰지 않으면 늘 Graphics다.
+    GraphPassPipe PassPipe(GraphPass pass) const noexcept;
     GraphLifetime Lifetime(GraphTexture texture) const noexcept;
     GraphLifetime Lifetime(GraphBuffer buffer) const noexcept;
     // 계산한 전이 열이다(pass 순서, 같은 pass 안은 접근 선언 순서). Immediate는 실행한 순서다.

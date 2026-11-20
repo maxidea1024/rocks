@@ -120,10 +120,14 @@ usize D3D11Device::CollectTimestamps(Span<TimestampSample> out) noexcept {
 // D3D11에는 queue clock calibration이 없다. 제출한 GPU 작업이 끝나기를 기다린 뒤 CPU 시각 t0을
 // 읽고, timestamp(disjoint로 감쌈)와 event query를 넣어 내보낸 다음 event가 끝난 것을 본 CPU 시각
 // t1을 읽는다. timestamp는 t0과 t1 사이에 찍혔으므로 가운데를 같은 순간으로, 반폭을 오차로 둔다.
-Result<ClockCalibration> D3D11Device::CalibrateClocks() noexcept {
+Result<ClockCalibration> D3D11Device::CalibrateClocks(QueueKind queue) noexcept {
     auto owner = ownership_.Check();
     if (!owner) {
         return Result<ClockCalibration>::Failure(owner.Error());
+    }
+
+    if (queue != QueueKind::Graphics) {
+        return Result<ClockCalibration>::Failure(ErrorCode::Unsupported);
     }
 
     if (timestampFrequency_ == 0) {

@@ -255,6 +255,8 @@ struct OpenScopeEntry {
     uint32 scope = GraphIndexNone;
     uint64 gpuSpan = 0;
     uint64 cpuSerial = 0;
+    // GPU 구간을 graphics 기록에서 열었다(compute 기록에서 연 구간은 GPU 구간이 없다, RG4).
+    bool gpuOpened = false;
 };
 
 // 버퍼 업로드 하나다(데이터는 프레임 arena에 복사해 둔다).
@@ -289,6 +291,23 @@ struct PassRecord {
     bool opensRecording = false;
     // 이 pass가 기대는 생산자 pass다(GraphState::producers의 연결 목록 머리).
     uint32 firstProducer = GraphIndexNone;
+    // --- async compute(RG4, Deferred 컴파일이 정한다) ---
+    // compute queue에서 실행한다(AsyncCompute pass이고 그래프가 compute queue를 쓴다).
+    bool async = false;
+    // async pass: 이 pass가 속한 run(이어진 async pass 묶음 = compute 기록 하나)이 기다릴 graphics
+    // fork pass다. GraphIndexNone이면 그래프 시작(prologue 지점)이다.
+    uint32 runFork = GraphIndexNone;
+    // async pass: run의 첫 pass다(compute 기록을 열고 fork 지점을 기다린다).
+    bool startsRun = false;
+    // async pass: 결과를 처음 쓰는 graphics pass(join)다. GraphIndexNone이면 그래프 끝이다.
+    uint32 joinPass = GraphIndexNone;
+    // graphics pass: 어느 run의 fork다(실행 뒤 fork 전이를 내고 기록을 닫아 지점을 남긴다).
+    bool forks = false;
+    // graphics pass: 어느 async pass의 join이다(새 기록을 열기 전에 compute 지점을 기다린다).
+    bool joins = false;
+    // 실행 중 정한 지점이다: fork pass는 그 기록의 graphics 제출, async pass는 그 compute 기록의
+    // 제출이다.
+    graphics::GpuFencePoint submitted;
     // 부수 효과·외부 출력 pass다(culling 뿌리).
     bool root = false;
     bool culled = true;
@@ -366,8 +385,24 @@ struct GraphState {
     Allocator* scratch = nullptr;
     bool parallelRecording = false;
 
+    // async compute를 쓴다(Deferred, RenderGraphDesc::asyncCompute와 장치 능력, RG4).
+    bool asyncEnabled = false;
+    // 컴파일이 compute queue에 둔 pass가 있다.
+    bool hasAsyncPasses = false;
+
     // 실행 상태다.
     graphics::CommandContext* commands = nullptr;
+    // 지금 장치 기록의 queue다.
+    graphics::QueueKind recordingQueue = graphics::QueueKind::Graphics;
+    // 지금 compute 기록을 연 async pass다(제출 지점을 run의 pass들에 적는다).
+    uint32 computeRunStart = GraphIndexNone;
+    // 그래프 시작의 graphics 지점이다(prologue fork가 기다린다).
+    graphics::GpuFencePoint prologuePoint;
+    // 마지막 compute 제출과 graphics queue가 이미 기다린 compute 값이다(그래프 끝 join 판단).
+    graphics::GpuFencePoint lastComputePoint;
+    uint64 joinedComputeValue = 0;
+    // compute queue가 이미 기다린 graphics 값이다(같은 fork를 다시 기다리지 않는다).
+    uint64 forkWaitedValue = 0;
     bool traceFrameOpen = false;
     // 지금 장치 기록을 연 Raster pass다(attachment 없는 기록·기록 없음이면 None).
     uint32 recordingPass = GraphIndexNone;
@@ -451,8 +486,16 @@ Result<void> CollectTransitions(FrameArena& arena, GraphState& state, usize firs
 // 두 자원이 같은 풀 키(desc)인지다.
 bool SameResourceKey(const ResourceRecord& left, const ResourceRecord& right) noexcept;
 
-// Deferred 컴파일: export 뿌리 culling, 수명, 같은 그래프 안 재사용 계획, 전이.
+// Deferred 컴파일: export 뿌리 culling, 수명, async compute fork·join과 수명 연장, 같은 그래프 안
+// 재사용 계획, 전이.
 Result<void> CompileGraph(FrameArena& arena, GraphState& state) noexcept;
+
+// 두 pass가 같은 pipe에서 실행되는지다(pass 하나가 None이면 true).
+bool SamePipe(const GraphState& state, uint32 left, uint32 right) noexcept;
+
+// Deferred 실행 앞부분(async compute가 있을 때): 그래프 업로드를 제출하고 prologue fork 전이를
+// graphics 기록 하나에서 낸 뒤 그래프 시작 지점을 정한다.
+Result<void> ExecutePrologue(FrameArena& arena, GraphState& state) noexcept;
 
 // 자원의 장치 객체를 정한다: 자리가 이미 풀에서 받았으면 이어 쓰고, 아니면 풀에서 받는다(자리가
 // 없으면 새로 만든다). 업로드 대상이면 이때 올린다.

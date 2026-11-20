@@ -9,9 +9,10 @@ D3D12Device::D3D12Device(Allocator& allocator) noexcept
       pipelines_(allocator), swapChains_(allocator), retired_(allocator), rtvs_(allocator),
       dsvs_(allocator), srvs_(allocator), samplers_(allocator), allocators_(allocator),
       messageScratch_(allocator), timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics),
-      allocator_(allocator), readbacks_(allocator), ring_(allocator), timestamps_(allocator),
-      touchedTextures_(allocator), bufferViews_(allocator), cpuUavs_(allocator),
-      bufferStates_(allocator), splits_(allocator) {
+      computeTimeline_(allocator, timeline_.DeviceEpoch(), QueueKind::AsyncCompute),
+      computeAllocators_(allocator), computeTimestamps_(allocator), allocator_(allocator),
+      readbacks_(allocator), ring_(allocator), timestamps_(allocator), touchedTextures_(allocator),
+      bufferViews_(allocator), cpuUavs_(allocator), bufferStates_(allocator), splits_(allocator) {
 }
 
 D3D12Device::~D3D12Device() {
@@ -28,6 +29,7 @@ D3D12Device::~D3D12Device() {
     // 모든 제출이 끝났거나(WaitIdle) 장치가 제거되어 관찰 스레드가 곧 빠져나온다.
     timeline_.StopWatcher();
     timeline_.Close();
+    ShutdownComputeQueue();
     if (staging_) {
         staging_->Clear();
     }
@@ -129,9 +131,10 @@ Result<void> D3D12Device::Initialize(const DeviceDesc& desc) noexcept {
     // 저장소 하나에는 열린 list가 하나만 붙을 수 있으므로 만들자마자 닫는다.
     if (FAILED(device_->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
                                           allocators_[0].allocator.Get(), nullptr,
-                                          IID_PPV_ARGS(list_.Out())))) {
+                                          IID_PPV_ARGS(graphicsList_.Out())))) {
         return Fail("CreateCommandList failed");
     }
+    list_ = graphicsList_.Get();
     list_->Close();
     if (FAILED(device_->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
                                           allocators_[0].allocator.Get(), nullptr,
@@ -241,6 +244,7 @@ Result<void> D3D12Device::Initialize(const DeviceDesc& desc) noexcept {
     }
     staging_ = Move(pool.Value());
     InitializeTimestamps();
+    InitializeComputeQueue();
 
     // 텍스처를 묶지 않은 그리기가 쓸 1x1 흰색 텍스처다.
     const uint8 white[4] = {255, 255, 255, 255};
@@ -316,6 +320,11 @@ Result<void> D3D12Device::WaitIdleLocked() noexcept {
         return Result<void>::Failure(signaled.Error());
     }
     auto waited = WaitFenceOwner(signaled.Value());
+    // compute queue의 제출도 기다린다(RG4).
+    if (waited && computeQueue_ && computeFenceValue_ != 0) {
+        waited = WaitComputeOwner(computeFenceValue_);
+    }
+
     // 기록 중인 프레임의 보류 항목은 아직 제출되지 않았으므로 남긴다.
     ProcessRetired();
     if (!waited) {
@@ -324,22 +333,26 @@ Result<void> D3D12Device::WaitIdleLocked() noexcept {
     return Result<void>::Success();
 }
 
-GpuFencePoint D3D12Device::LastSubmittedFence() const noexcept {
+GpuFencePoint D3D12Device::LastSubmittedFence(QueueKind queue) const noexcept {
+    if (queue == QueueKind::AsyncCompute) {
+        return computeQueue_ ? computeTimeline_.LastSubmitted() : GpuFencePoint{};
+    }
+
     return timeline_.LastSubmitted();
 }
 
 Result<bool> D3D12Device::IsFenceComplete(GpuFencePoint point) const noexcept {
-    return timeline_.IsComplete(point);
+    return TimelineOf(point).IsComplete(point);
 }
 
 Result<platform::WaitResult> D3D12Device::WaitFence(GpuFencePoint point,
                                                     uint32 timeoutMs) noexcept {
-    return timeline_.Wait(point, timeoutMs);
+    return const_cast<FenceTimeline&>(TimelineOf(point)).Wait(point, timeoutMs);
 }
 
 Result<void> D3D12Device::NotifyFence(GpuFencePoint point, FenceCallback callback,
                                       void* context) noexcept {
-    return timeline_.Notify(point, callback, context);
+    return const_cast<FenceTimeline&>(TimelineOf(point)).Notify(point, callback, context);
 }
 
 bool D3D12Device::IsLost() const noexcept {
@@ -651,7 +664,10 @@ void D3D12Device::RetireObject(ComRef<IUnknown>&& object, int64 srv, int64 rtv,
     // 중이면 아직 제출하지 않은 프레임이 쓸 수 있으므로 그 프레임의 signal 값을 EndFrame에서
     // 정한다.
     entry.fenceValue = fenceValue_;
-    entry.pending = recording_;
+    entry.pending = recording_ && !computeRecording_;
+    // compute queue도 같은 규칙이다(RG4): 마지막 compute 제출, 기록 중이면 그 기록의 값.
+    entry.computeFenceValue = computeFenceValue_;
+    entry.computePending = recording_ && computeRecording_;
     // 아직 제출하지 않은 업로드 기록(생성 초기 데이터·갱신·readback 복사)이 이 자원을 쓸 수
     // 있다. 그 묶음이 제출될 때 fence를 받는다.
     entry.uploadPending = uploadOpen_;
@@ -685,11 +701,13 @@ void D3D12Device::AssignPendingRetires(uint64 value) noexcept {
 
 void D3D12Device::ProcessRetired() noexcept {
     const uint64 completed = fence_->GetCompletedValue();
+    const uint64 computeCompleted = ComputeCompletedValue();
     ring_.Reclaim(completed);
     staging_->Reclaim(completed);
     for (usize index = retired_.Size(); index > 0; --index) {
         Retired& entry = retired_[index - 1];
-        if (entry.pending || entry.uploadPending || entry.fenceValue > completed) {
+        if (entry.pending || entry.uploadPending || entry.fenceValue > completed ||
+            entry.computePending || entry.computeFenceValue > computeCompleted) {
             continue;
         }
         if (entry.srv >= 0) {

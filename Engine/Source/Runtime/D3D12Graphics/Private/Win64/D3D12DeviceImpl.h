@@ -38,6 +38,7 @@
 // - D3D12Commands.cpp: 패스 attachment·compute·간접 명령·복사·UAV clear·버퍼 상태 추적(GX3·GX4)
 // - D3D12Upload.cpp: 업로드 기록·ring·staging·readback
 // - D3D12Timing.cpp: timestamp·calibration·marker
+// - D3D12Compute.cpp: async compute queue(RG4): queue·fence·기록 저장소·제출·queue 사이 대기
 namespace rocks::graphics::d3d12 {
 
 // "stage failed (HRESULT 0x...)" 진단 한 줄의 버퍼 byte 수다.
@@ -284,6 +285,10 @@ struct Retired {
     // 기록 중인(아직 제출하지 않은) 프레임이 쓸 수 있는 자원이다. EndFrame이 그 프레임의 signal
     // 값을 정할 때까지 해제하지 않는다.
     bool pending = false;
+    // compute queue의 마지막 사용이다(RG4): 그 queue에 Retire 때까지 제출한 마지막 값, 기록 중인
+    // compute 기록이 쓸 수 있으면 그 기록의 값(computePending, 제출이 정한다).
+    uint64 computeFenceValue = 0;
+    bool computePending = false;
     int64 srv = -1;
     int64 rtv = -1;
     int64 dsv = -1;
@@ -548,6 +553,8 @@ public:
 
     Result<GpuFencePoint> EndFrame() noexcept override;
 
+    Result<void> QueueWait(QueueKind queue, GpuFencePoint point) noexcept override;
+
     Result<void> ReadPixels(TextureHandle handle, Span<uint8> out) noexcept override;
 
     // --- 업로드·readback(GX8) ---
@@ -600,7 +607,7 @@ public:
 
     Result<void> WaitIdleLocked() noexcept;
 
-    GpuFencePoint LastSubmittedFence() const noexcept override;
+    GpuFencePoint LastSubmittedFence(QueueKind queue = QueueKind::Graphics) const noexcept override;
 
     Result<bool> IsFenceComplete(GpuFencePoint point) const noexcept override;
 
@@ -627,7 +634,8 @@ public:
 
     usize CollectTimestamps(Span<TimestampSample> out) noexcept override;
 
-    Result<ClockCalibration> CalibrateClocks() noexcept override;
+    Result<ClockCalibration>
+    CalibrateClocks(QueueKind queue = QueueKind::Graphics) noexcept override;
 
     uint64 ValidationErrorCount() const noexcept override;
 
@@ -823,6 +831,42 @@ private:
     void CloseMarkers() noexcept;
 
     Result<void> BeginRecording() noexcept;
+
+    // 기록 시작 때 묶기·상수·버퍼 상태를 비운다(graphics·compute 기록 공용).
+    void ResetBindings() noexcept;
+
+    // --- async compute queue(RG4, D3D12Compute.cpp) ---
+
+    // compute queue·fence·관찰 스레드·list·timestamp를 만든다. 실패하면 compute queue 없이
+    // 계속한다(DeviceFeatures::asyncCompute 거짓).
+    void InitializeComputeQueue() noexcept;
+
+    // compute queue 관찰 스레드를 멈추고 timeline을 닫는다(소멸, WaitIdle 뒤).
+    void ShutdownComputeQueue() noexcept;
+
+    // compute 기록 저장소를 고른다(graphics의 PickCommandAllocator와 같은 규칙).
+    Result<uint32> PickComputeAllocator() noexcept;
+
+    // 소유 스레드가 compute fence value 완료를 직접 기다린다.
+    Result<void> WaitComputeOwner(uint64 value) noexcept;
+
+    // compute 기록을 연다(BeginPass의 queue = AsyncCompute, 잠금 안).
+    Result<CommandContext*> BeginComputeRecording() noexcept;
+
+    // compute 기록을 compute queue에 제출한다(EndFrame, 잠금 안).
+    Result<GpuFencePoint> EndComputeRecording() noexcept;
+
+    void AssignPendingComputeRetires(uint64 value) noexcept;
+
+    // compute queue의 완료 값이다(없으면 graphics 완료와 무관하게 늘 끝난 것으로 본다).
+    uint64 ComputeCompletedValue() const noexcept;
+
+    // 지점의 queue timeline이다.
+    const FenceTimeline& TimelineOf(GpuFencePoint point) const noexcept;
+
+    // 지금 compute 기록이면 상태에서 픽셀 셰이더 읽기 비트를 빼고, compute queue가 받지 않는
+    // 상태(렌더 타깃·깊이·resolve·index 등)가 남으면 false다. graphics 기록이면 그대로 true다.
+    bool AdaptForQueue(D3D12_RESOURCE_STATES& states) const noexcept;
 
     void StartPass(const PassDesc& pass) noexcept;
 
@@ -1028,7 +1072,10 @@ private:
     ComRef<ID3D12Device> device_;
     ComRef<ID3D12InfoQueue> infoQueue_;
     ComRef<ID3D12CommandQueue> queue_;
-    ComRef<ID3D12GraphicsCommandList> list_;
+    // graphics 프레임 기록 list다. list_는 지금 기록의 list(graphics 또는 compute)를 가리킨다.
+    ComRef<ID3D12GraphicsCommandList> graphicsList_;
+    // 지금 기록의 list다(graphicsList_ 또는 computeList_가 소유한다, RG4).
+    ID3D12GraphicsCommandList* list_ = nullptr;
     ComRef<ID3D12GraphicsCommandList> uploadList_;
     ComRef<ID3D12RootSignature> rootSignature_;
     // compute root signature(b0 상수, t1–t4 SRV table, u0–u3 UAV table)와 간접 명령 signature다.
@@ -1065,6 +1112,10 @@ private:
     mutable Array<uint8> messageScratch_;
     D3D12FenceSource fenceSource_;
     FenceTimeline timeline_;
+    // async compute queue(RG4)의 timeline·기록 저장소·timestamp 장부다(아래 compute 멤버와 함께).
+    FenceTimeline computeTimeline_;
+    Array<AllocatorRecord> computeAllocators_;
+    TimestampRing computeTimestamps_;
     DeviceOwnership ownership_;
     Allocator& allocator_;
     // 장치 내부 잠금이다. 자원 생성·갱신이 다른 스레드에서 올 수
@@ -1120,6 +1171,23 @@ private:
     bool recording_ = false;
     bool validation_ = false;
     bool software_ = false;
+    // --- async compute queue(RG4) ---
+    // compute queue와 그 fence·list다. 만들지 못했으면 queue가 없다.
+    ComRef<ID3D12CommandQueue> computeQueue_;
+    ComRef<ID3D12Fence> computeFence_;
+    ComRef<ID3D12GraphicsCommandList> computeList_;
+    HANDLE computeEvent_ = nullptr;
+    HANDLE computeWatcherEvent_ = nullptr;
+    D3D12FenceSource computeFenceSource_;
+    uint32 computeRecordingAllocator_ = 0;
+    // 마지막으로 신호한 compute queue fence 값이다.
+    uint64 computeFenceValue_ = 0;
+    ComRef<ID3D12QueryHeap> computeTimestampHeap_;
+    ComRef<ID3D12Resource> computeTimestampReadback_;
+    D3D12TimestampSource computeTimestampSource_;
+    uint64 computeTimestampFrequency_ = 0;
+    // 지금 기록이 compute queue 기록이다.
+    bool computeRecording_ = false;
 };
 
 } // namespace rocks::graphics::d3d12

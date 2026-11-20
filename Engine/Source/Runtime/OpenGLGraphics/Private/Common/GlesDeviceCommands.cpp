@@ -279,6 +279,10 @@ Result<CommandContext*> GlesDevice::BeginPass(const PassDesc& pass) noexcept {
         auto rejected = Reject(message, code);
         return Result<CommandContext*>::Failure(rejected.Error());
     };
+    if (pass.queue != QueueKind::Graphics) {
+        return fail(ErrorCode::Unsupported, "OpenGL ES has no async compute queue");
+    }
+
     if (pass.colorCount > MaxColorTargets) {
         return fail(ErrorCode::InvalidArgument,
                     "pass has more color attachments than MaxColorTargets");

@@ -91,11 +91,13 @@ TEST(RenderGraph_RejectsUavInRasterPasses) {
     GraphPassAccesses noTarget(graph);
     CHECK(graph.AddPass(WriteName, GraphPassKind::Raster, GraphPassFlags::None, noTarget, Draw())
               .Error() == ErrorCode::InvalidArgument);
+    // AsyncCompute pass(RG4)도 Compute와 같은 접근 규칙이다: 렌더 타깃을 묶을 수 없다.
     GraphPassAccesses async(graph);
-    async.Buffer(buffer.Value(), ResourceAccess::UavCompute);
+    async.Buffer(buffer.Value(), ResourceAccess::UavCompute).RenderTarget(target.Value());
     CHECK(
         graph.AddPass(ComputeName, GraphPassKind::AsyncCompute, GraphPassFlags::None, async, Draw())
-            .Error() == ErrorCode::Unsupported);
+            .Error() == ErrorCode::InvalidArgument);
+    CHECK(ContainsText(graph.LastError(), "async compute pass"));
 }
 
 // (e) Retire된 자원 import는 lease를 얻지 못해 실패한다. 다른 그래프의 handle도 거부한다.

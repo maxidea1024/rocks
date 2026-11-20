@@ -59,8 +59,22 @@ public:
         // 텍스처 view 생성이다. value는 (첫 mip << ViewOpMipShift) | mip 수다.
         CreateTextureView,
         // value는 묶은 view의 첫 mip이다(모르는 view면 NumericLimits<uint32>::Max()).
-        SetWritableTexture
+        SetWritableTexture,
+        // async compute 기록 시작(PassDesc::queue = AsyncCompute)과 제출이다. EndCompute의 value는
+        // compute queue fence 값이다.
+        BeginCompute,
+        EndCompute,
+        // Device::QueueWait다. value는 QueueWaitValue(queue, point)다.
+        QueueWait
     };
+
+    // Op::QueueWait의 value다: 기다리는 queue가 AsyncCompute면 맨 위 bit, 아래는 기다릴 지점의
+    // 값이다.
+    static constexpr uint64 QueueWaitComputeBit = 1ull << 63;
+
+    static constexpr uint64 QueueWaitValue(graphics::QueueKind queue, uint64 pointValue) noexcept {
+        return pointValue | (queue == graphics::QueueKind::AsyncCompute ? QueueWaitComputeBit : 0);
+    }
 
     // 기록한 전이의 단계다. Full은 Transition, Begin·End는 분리 전이의 두 끝이다.
     enum class TransitionPhase : uint8 {
@@ -107,8 +121,21 @@ public:
     void HoldCompletions(bool hold) noexcept;
 
     // value까지의 제출을 끝낸다(부른 스레드에서 fence 통지가 불린다). 어느 스레드에서나 부를 수
-    // 있다.
+    // 있다. CompleteCompute는 compute queue의 제출이다.
     void Complete(uint64 value) noexcept;
+    void CompleteCompute(uint64 value) noexcept;
+
+    // compute queue(DeviceFeatures::asyncCompute·efficientAsyncCompute)를 공개한다(RenderBase 8절
+    // RG4). 기본은 없음이다. 장치를 쓰기 전에 부른다.
+    //
+    // compute queue 검사(결정적 경쟁 검출): 텍스처·버퍼마다 마지막으로 접근한 (queue, 그 기록의
+    // fence 값)을 기억하고, 다른 queue가 그 자원에 접근할 때 그 queue가 QueueWait로 앞 접근의
+    // 제출을 기다리지 않았으면 검증 오류다. async compute 기록의 그리기와 compute 상태 밖 전이도
+    // 검증 오류다(실제 장치는 무시한다).
+    void SetAsyncCompute(bool available, bool efficient = true) noexcept;
+
+    // compute queue에 제출한 마지막 값이다.
+    uint64 SubmittedCompute() const noexcept;
 
     // 지금까지 제출한 모든 제출을 끝낸다.
     void CompleteAll() noexcept;
@@ -246,13 +273,17 @@ public:
     Result<bool> TryReadback(graphics::ReadbackHandle readback, Span<uint8> out) noexcept override;
     void ReleaseReadback(graphics::ReadbackHandle readback) noexcept override;
     usize CollectTimestamps(Span<graphics::TimestampSample> out) noexcept override;
-    Result<graphics::ClockCalibration> CalibrateClocks() noexcept override;
+    Result<graphics::ClockCalibration>
+    CalibrateClocks(graphics::QueueKind queue = graphics::QueueKind::Graphics) noexcept override;
 
     // readback이 돌려줄 byte 값이다(시험이 결과를 알아본다).
     void SetReadbackFill(uint8 value) noexcept {
         readbackFill_ = value;
     }
-    graphics::GpuFencePoint LastSubmittedFence() const noexcept override;
+    graphics::GpuFencePoint LastSubmittedFence(
+        graphics::QueueKind queue = graphics::QueueKind::Graphics) const noexcept override;
+    Result<void> QueueWait(graphics::QueueKind queue,
+                           graphics::GpuFencePoint point) noexcept override;
     Result<bool> IsFenceComplete(graphics::GpuFencePoint point) const noexcept override;
     Result<platform::WaitResult> WaitFence(graphics::GpuFencePoint point,
                                            uint32 timeoutMs) noexcept override;
@@ -269,9 +300,18 @@ public:
     usize PendingRetireCount() const noexcept override;
 
 private:
+    // 회수 대기 하나다: queue마다 마지막 사용 값과, 열린 기록이 그 queue였는지다.
     struct Retired {
         uint64 fenceValue = 0;
         bool pending = false;
+        uint64 computeFenceValue = 0;
+        bool computePending = false;
+    };
+
+    // 자원 하나를 마지막으로 접근한 기록의 queue와 fence 값이다(0이면 아직 없음).
+    struct QueueUse {
+        graphics::QueueKind queue = graphics::QueueKind::Graphics;
+        uint64 value = 0;
     };
 
     struct Readback {
@@ -313,6 +353,17 @@ private:
     };
 
     uint64 SubmitInternal() noexcept;
+
+    // 지점 point의 queue 타임라인이다(compute queue가 없으면 compute 지점은 null).
+    const graphics::FenceTimeline* TimelineOf(graphics::GpuFencePoint point) const noexcept;
+
+    // 열린 기록이 slot index의 자원에 접근한다(compute queue 경쟁 검사, 위 SetAsyncCompute).
+    void TouchResource(Array<QueueUse>& uses, uint32 index) noexcept;
+    void TouchTexture(SlotHandle texture) noexcept;
+    void TouchBuffer(SlotHandle buffer) noexcept;
+
+    // async compute 기록에서 그리기 계열 호출이 오면 검증 오류를 센다. 그 기록이면 true다.
+    bool RejectOnComputeQueue() noexcept;
 
     // --- CommandContext ---
     void SetPipeline(graphics::PipelineHandle pipeline) noexcept override;
@@ -362,6 +413,15 @@ private:
     void Defer() noexcept;
 
     graphics::FenceTimeline timeline_;
+    graphics::FenceTimeline computeTimeline_;
+    graphics::DeviceCaps caps_;
+    uint64 computeFenceValue_ = 0;
+    // 지금 기록의 queue다.
+    graphics::QueueKind recordingQueue_ = graphics::QueueKind::Graphics;
+    // queue마다 QueueWait로 기다린 상대 queue 값의 최댓값이다(QueueKind 순번).
+    uint64 waited_[2] = {};
+    Array<QueueUse> textureUses_;
+    Array<QueueUse> bufferUses_;
     graphics::DeviceOwnership ownership_;
     SlotArray<graphics::ResourceAccess> buffers_;
     Allocator& allocator_;
