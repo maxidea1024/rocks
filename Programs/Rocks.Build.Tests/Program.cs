@@ -119,11 +119,14 @@ try
                 await ReflectionSourceTests.RunAsync(request, root);
                 Pass("module table and reflection sources");
                 break;
+            case "modular":
+                await ModularLinkTests.RunAsync(request, root, Pass);
+                break;
             case "buildinfo":
                 await BuildInfoTests.RunAsync(request, root, Pass);
                 break;
             default:
-                throw new ArgumentException($"Unknown test group '{group}'. Groups: dependency, unity, pch, dynamic, module-table, buildinfo.");
+                throw new ArgumentException($"Unknown test group '{group}'. Groups: dependency, unity, pch, dynamic, module-table, modular, buildinfo.");
         }
 
         Console.WriteLine($"Native build regression groups ({group} only): {passed}, failed: 0");
@@ -334,6 +337,7 @@ try
     // 정밀 헤더 의존(UB0): depfile 파서, 2단 key, 의존 기록, compile identity, 출력 검증 memo. 하위 묶음마다 PASS를 센다.
     await DependencyTests.RunAsync(request, root, Pass);
     DependencyScopeTests.Run(request, root, Pass);
+    await ModularLinkTests.RunAsync(request, root, Pass);
 
     // 유니티 묶기(UB1): 구성 결정성, include 앞 #define 판정, 실제 빌드(__FILE__·제외·논리 명령·변형 디렉터리·정리), 리플렉션 생성 소스 묶기.
     await UnityTests.RunAsync(request, root, Pass);

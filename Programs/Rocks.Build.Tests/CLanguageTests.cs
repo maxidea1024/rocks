@@ -24,17 +24,17 @@ internal static class CLanguageTests
             [
                 "/nologo", "/utf-8", "/W4", "/WX", "/GR-", "/EHs-c-", "/Zc:__cplusplus", "/clang:-std=c++23",
                 "/clang:-ffp-contract=off", "/DWIN32", "/D_WINDOWS", "/DNOMINMAX", "/DWIN32_LEAN_AND_MEAN",
-                "/DROCKS_PLATFORM_WINDOWS=1", "/DROCKS_BUILD_DEBUG=1", "/MDd", "/Od", "/Z7"
+                "/DROCKS_PLATFORM_WINDOWS=1", "/DROCKS_BUILD_DEBUG=1", "/DROCKS_MONOLITHIC=1", "/MDd", "/Od", "/Z7"
             ],
             NativePlatform.Android =>
             [
                 "-std=c++23", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-fno-rtti", "-fno-exceptions", "-ffp-contract=off",
-                "-fPIC", "-DROCKS_PLATFORM_ANDROID=1", "-DROCKS_BUILD_DEBUG=1", "-O0", "-g"
+                "-fPIC", "-DROCKS_PLATFORM_ANDROID=1", "-DROCKS_BUILD_DEBUG=1", "-DROCKS_MONOLITHIC=1", "-O0", "-g"
             ],
             _ =>
             [
                 "-std=c++23", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-fno-rtti", "-fno-exceptions", "-ffp-contract=off",
-                "-DROCKS_PLATFORM_MAC=1", "-DROCKS_BUILD_DEBUG=1", "-O0", "-g"
+                "-DROCKS_PLATFORM_MAC=1", "-DROCKS_BUILD_DEBUG=1", "-DROCKS_MONOLITHIC=1", "-O0", "-g"
             ]
         };
         string[] cpp = ActionGraph.CompileFlags(toolchain, NativeConfiguration.Debug).ToArray();
@@ -47,17 +47,17 @@ internal static class CLanguageTests
             [
                 "/nologo", "/utf-8", "/W4", "/WX", "/GR-", "/EHs-c-", "/Zc:__cplusplus", "/clang:-std=c++23",
                 "/clang:-ffp-contract=off", "/DWIN32", "/D_WINDOWS", "/DNOMINMAX", "/DWIN32_LEAN_AND_MEAN",
-                "/DROCKS_PLATFORM_WINDOWS=1", "/DROCKS_BUILD_RELEASE=1", "/MD", "/O2", "/DNDEBUG", "/Z7", "-flto=thin"
+                "/DROCKS_PLATFORM_WINDOWS=1", "/DROCKS_BUILD_RELEASE=1", "/DROCKS_MONOLITHIC=1", "/MD", "/O2", "/DNDEBUG", "/Z7", "-flto=thin"
             ],
             NativePlatform.Android =>
             [
                 "-std=c++23", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-fno-rtti", "-fno-exceptions", "-ffp-contract=off",
-                "-fPIC", "-DROCKS_PLATFORM_ANDROID=1", "-DROCKS_BUILD_RELEASE=1", "-O2", "-DNDEBUG", "-g", "-flto=thin"
+                "-fPIC", "-DROCKS_PLATFORM_ANDROID=1", "-DROCKS_BUILD_RELEASE=1", "-DROCKS_MONOLITHIC=1", "-O2", "-DNDEBUG", "-g", "-flto=thin"
             ],
             _ =>
             [
                 "-std=c++23", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-fno-rtti", "-fno-exceptions", "-ffp-contract=off",
-                "-DROCKS_PLATFORM_MAC=1", "-DROCKS_BUILD_RELEASE=1", "-O2", "-DNDEBUG", "-g", "-flto=thin"
+                "-DROCKS_PLATFORM_MAC=1", "-DROCKS_BUILD_RELEASE=1", "-DROCKS_MONOLITHIC=1", "-O2", "-DNDEBUG", "-g", "-flto=thin"
             ]
         };
         NativeModuleInput engine = request.Modules.Single(module => module.Name == "Engine");
@@ -66,10 +66,14 @@ internal static class CLanguageTests
         // 물리 action은 include 뒤, 번역 단위 인자 앞에 depfile 인자를 둔다(의존 기록의 원천 — Docs/Design/UnityBuildPch.ko.md 4.1절).
         // 논리 명령(compile_commands.json·BuildInfo)에는 없다.
         string[] depfile = windows ? ["/clang:-MD", "/clang:-MF{DEPFILE}"] : ["-MD", "-MF", "{DEPFILE}"];
+        // 모듈 정의 헤더(이제 모든 C++ 모듈이 API 매크로를 받는다 — Docs/Design/BuildTargets.ko.md 3.8절 BS8a)는 include 뒤에 강제
+        // include한다.
+        string definitions = ModuleDefinitions.PathOf(Path.GetFullPath(request.OutputDirectory, root), "Engine");
+        string[] forced = windows ? ["/FI" + definitions] : ["-include", definitions];
         string[] logicalTail = windows
-            ? ["/I" + headerInclude, "/c", "/TP", engineSource, "/Fo{OUTPUT0}"]
-            : ["-I" + headerInclude, "-c", engineSource, "-o", "{OUTPUT0}"];
-        string[] tail = [logicalTail[0], .. depfile, .. logicalTail[1..]];
+            ? ["/I" + headerInclude, .. forced, "/c", "/TP", engineSource, "/Fo{OUTPUT0}"]
+            : ["-I" + headerInclude, .. forced, "-c", engineSource, "-o", "{OUTPUT0}"];
+        string[] tail = [logicalTail[0], .. forced, .. depfile, .. logicalTail[(1 + forced.Length)..]];
         foreach ((NativeConfiguration configuration, string[] profile) in new[] { (NativeConfiguration.Debug, cppGolden), (NativeConfiguration.Release, releaseProfile) })
         {
             NativePlan plan = ActionGraph.Create(request with { Configuration = configuration });

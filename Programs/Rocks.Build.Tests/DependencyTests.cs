@@ -71,7 +71,9 @@ internal static class DependencyTests
         IReadOnlyList<DependencyEntry> recorded = DependencyRecord.Read(alphaAction.DependencyRecord!) ??
             throw new InvalidOperationException("the dependency record is unreadable");
         string[] recordedPaths = recorded.Select(entry => entry.Path).ToArray();
-        Check(recordedPaths.Order(NativeToolchains.PathComparer).SequenceEqual(new[] { alphaSource, alphaHeader, outsideHeader }.Order(NativeToolchains.PathComparer),
+        // 모듈 정의 헤더도 강제 include된 프로젝트 파일이다(모든 C++ 모듈이 API 매크로를 받는다 — Docs/Design/BuildTargets.ko.md 3.8절 BS8a).
+        string libDefinitions = ModuleDefinitions.PathOf(build.OutputDirectory, "DepLib");
+        Check(recordedPaths.Order(NativeToolchains.PathComparer).SequenceEqual(new[] { alphaSource, alphaHeader, outsideHeader, libDefinitions }.Order(NativeToolchains.PathComparer),
                 NativeToolchains.PathComparer),
             "the dependency record must list exactly the opened project files: " + string.Join(", ", recordedPaths));
         Check(recorded.All(entry => entry.Hash == Hashing.Sha256File(entry.Path)), "the dependency record must carry content hashes");
