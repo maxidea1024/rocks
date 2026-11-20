@@ -3,25 +3,13 @@
 #include <Base/Types.h>
 #include <Core/Containers/Array.h>
 #include <Core/Memory/Allocator.h>
+#include <Core/Module/HostServiceKey.h>
 #include <Core/Result.h>
 
 namespace rocks {
 
-// 호스트 서비스 형식 하나의 식별자다. 주소가 식별자이므로 형식마다 한 벌만 있어야 한다. 그래서
-// 서비스 형식을 가진 모듈의 cpp에 ROCKS_DEFINE_HOST_SERVICE로 한 번만 정의한다(공개 헤더에 정의하면
-// Modular에서 공유 라이브러리마다 다른 주소가 된다 — Docs/Design/BuildTargets.ko.md BD29).
-struct HostServiceKey {
-    // 진단용 형식 이름(ROCKS_DEFINE_HOST_SERVICE에 쓴 철자)이다.
-    const char* name = nullptr;
-};
-
-// 서비스 형식 T의 키를 찾는 traits다. 기본 템플릿은 정의하지 않는다. ROCKS_DECLARE_HOST_SERVICE로
-// 특수화하지 않은 형식을 Register·Find에 쓰면 컴파일 오류다.
-template <class T>
-struct HostServiceTraits;
-
-// Launch와 엔진 호스트가 단계마다 등록하는 호스트 서비스 표다(Docs/Design/ModuleLoader.ko.md 3.1절,
-// ConfigContext·LogSystem·TraceSession·Engine 등). 모듈은 전역 접근자 대신
+// 엔진 호스트가 모듈 단계 실행 전에 등록하는 호스트 서비스 표다(Docs/Design/ModuleLoader.ko.md 3.1·
+// 3.12절, 지금은 LogSystem·ConfigContext·TraceSession). 모듈은 전역 접근자 대신
 // ModuleStartContext::Services() 로 찾는다. 로더가 하나를 소유한다(ModuleLoader::Services()).
 //
 // 사용 예:
@@ -41,6 +29,8 @@ struct HostServiceTraits;
 // - 형식마다 하나만 등록한다. 키는 형식 그대로다(파생 형식으로 등록하면 기반 형식 Find로 찾지
 // 않는다).
 // - 내부 동기화가 없다. 등록·해제·조회는 로더 스레드에서 한다.
+// - 서비스를 Startup 뒤에도 쥐는 모듈은 서비스가 등록된 기간 안에 시작·종료하는 묶음이어야 한다.
+//   호스트는 서비스 등록 기간에 그런 모듈을 프로세스 묶음으로 Load하지 않는다(3.12절).
 class HostServices final {
 public:
     // allocator는 표 저장소용이며 이 객체보다 오래 살아야 한다.
@@ -88,20 +78,3 @@ private:
 };
 
 } // namespace rocks
-
-// 서비스 형식 Type의 키 조회를 선언한다. Type의 공개 헤더에서 전역 namespace에 한 번 쓴다. 정의는
-// 소유 모듈 cpp의 ROCKS_DEFINE_HOST_SERVICE(Type)다.
-#define ROCKS_DECLARE_HOST_SERVICE(Type)                                                           \
-    template <>                                                                                    \
-    struct rocks::HostServiceTraits<Type> {                                                        \
-        static const ::rocks::HostServiceKey& Key() noexcept;                                      \
-    };
-
-// 서비스 형식 Type의 키를 정의한다. Type을 가진 모듈의 cpp 하나에서 전역 namespace에 한 번 쓴다. 키
-// 저장소는 링커가 같은 내용의 상수끼리 합치지 않게(ICF) const가 아닌 정적 객체다(상수 초기화라 전역
-// 생성자는 없다).
-#define ROCKS_DEFINE_HOST_SERVICE(Type)                                                            \
-    const ::rocks::HostServiceKey& rocks::HostServiceTraits<Type>::Key() noexcept {                \
-        static ::rocks::HostServiceKey key{#Type};                                                 \
-        return key;                                                                                \
-    }

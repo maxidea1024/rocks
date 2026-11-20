@@ -523,6 +523,9 @@ struct TraceTypeEntry {
     usize schemaOffset = 0;
     usize schemaBytes = 0;
     bool present = false;
+    // 사용자 형의 등록을 풀었다. 같은 이름·같은 스키마를 다시 등록하면 이 id를 다시 쓴다
+    // (Docs/Design/TraceSystem.ko.md 4절 개정 9).
+    bool released = false;
 };
 
 // 고리에서 스냅샷으로 옮긴 결과다.
@@ -625,6 +628,10 @@ struct TraceSessionState {
     // ---- 등록 표(registryMutex) ----
     platform::Mutex registryMutex;
     TraceChannel* channels[TraceFormat::MaxChannels] = {};
+    // id마다 처음 등록한 채널 이름의 복사본이다(NUL 종료). 등록을 푼 같은 이름 채널을 다시
+    // 등록하면 그 id를 다시 쓴다(Docs/Design/TraceSystem.ko.md 5절 개정 9). 모듈 코드가 내려간
+    // 뒤에도 비교할 수 있게 복사한다.
+    char channelNames[TraceFormat::MaxChannels][TraceFormat::MaxNameBytes + 1] = {};
     uint16 nextChannelId = 0;
     // 색인 = 형 id - 1.
     Array<TraceTypeEntry> types;

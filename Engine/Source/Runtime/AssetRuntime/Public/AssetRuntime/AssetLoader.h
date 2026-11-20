@@ -30,6 +30,12 @@
 // 스레드: 모든 공개 함수는 Initialize를 부른 스레드(에셋 객체 Registry의 소유 스레드 — Game)
 // 전용이다. 다른 스레드에서 부르면 WrongThread다. IO 완료와 worker 단계는 다른 스레드에서 돌고
 // 결과는 완료 큐로 Pump에 넘어온다.
+//
+// 재진입(11.6절 18): 로더가 Game 스레드에서 부르는 바깥 코드 — PostLoad handler·관찰자·시험 hook·
+// IO Begin·Release·worker Run·시계·프레임 판정·공개 트랜잭션(InstantiatePackages·Commit·롤백 안의
+// 클래스 생성자·소멸자, 필드 codec·Validate hook·Required 검사) — 안에서 상태를 바꾸는 공개 함수는
+// WrongContext이고 읽기는 된다. 로더 allocator는 그 밖이다(스레드를 가리지 않는 메모리 서비스 —
+// 호출자에게 재진입하지 않는다).
 namespace rocks {
 
 class WorkerScheduler;

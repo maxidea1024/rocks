@@ -10,6 +10,7 @@
 #include <Core/Delegate.h>
 #include <Core/Lifetime/ModuleLease.h>
 #include <Core/Memory/UniquePtr.h>
+#include <Core/Module/HostServiceKey.h>
 #include <Meta/GeneratedType.h>
 #include <Meta/SettingsSchema.h>
 #include <Object/GeneratedFieldAccess.h>
@@ -729,3 +730,7 @@ private:
 };
 
 } // namespace rocks::config
+
+// 호스트 서비스다(Docs/Design/ModuleLoader.ko.md 3.12절). 엔진 호스트가 모듈 단계 실행 전에
+// 등록하고 호스트 묶음을 내린 뒤 뗀다.
+ROCKS_DECLARE_HOST_SERVICE(rocks::config::ConfigContext)

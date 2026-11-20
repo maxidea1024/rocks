@@ -2642,6 +2642,13 @@
     },
     {
       "kind": "field",
+      "name": "rocks::asset_fixture::TestHookAsset::typed",
+      "id": "185dc68d22f74976b4b5909d61027314",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::asset_fixture::TestMeshAsset::editorMesh",
       "id": "5e21b3f96886475cab035022c0a5aee7",
       "aliases": [],
@@ -3211,6 +3218,13 @@
       "kind": "type",
       "name": "rocks::asset_fixture::TestAsset",
       "id": "985f83177cf2447d9e089bee68fb04a8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::asset_fixture::TestHookAsset",
+      "id": "be5c6dbcf1a346efbd2e866fffb494ec",
       "aliases": [],
       "retired": false
     },
