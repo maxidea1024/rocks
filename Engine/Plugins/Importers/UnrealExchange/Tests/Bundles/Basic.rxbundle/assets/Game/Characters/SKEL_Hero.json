@@ -1,0 +1,17 @@
+{
+  "objectPath": "/Game/Characters/SKEL_Hero.SKEL_Hero",
+  "class": "Skeleton",
+  "ueClass": "/Script/Engine.Skeleton",
+  "dependencies": [],
+  "diagnostics": [],
+  "settings": {},
+  "data": {
+    "boneNames": {
+      "blob": "891a7759619cd724ac7511a7cf6ecf04d4858191cfb90a48794039bc16bfd787",
+      "bytes": 18,
+      "layout": "names",
+      "components": 1,
+      "count": 2
+    }
+  }
+}

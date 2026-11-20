@@ -1,0 +1,19 @@
+{
+  "objectPath": "/Game/Materials/MI_Rock.MI_Rock",
+  "class": "MaterialInstanceConstant",
+  "ueClass": "/Script/Engine.MaterialInstanceConstant",
+  "dependencies": [
+    {
+      "objectPath": "/Game/Materials/M_Base.M_Base",
+      "class": "Material",
+      "kind": "hard"
+    }
+  ],
+  "diagnostics": [],
+  "settings": {
+    "Parent": {
+      "objectPath": "/Game/Materials/M_Base.M_Base"
+    }
+  },
+  "data": {}
+}

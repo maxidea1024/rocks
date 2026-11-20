@@ -1,0 +1,43 @@
+{
+  "objectPath": "/Game/Meshes/SM_Rock.SM_Rock",
+  "class": "StaticMesh",
+  "ueClass": "/Script/Engine.StaticMesh",
+  "dependencies": [
+    {
+      "objectPath": "/Game/Meshes/SM_Rock_Collision.SM_Rock_Collision",
+      "class": "StaticMesh",
+      "kind": "hard"
+    },
+    {
+      "objectPath": "/Game/Old/MI_Old.MI_Old",
+      "class": "MaterialInstanceConstant",
+      "kind": "hard"
+    },
+    {
+      "objectPath": "/Game/Textures/T_Rock.T_Rock",
+      "class": "Texture2D",
+      "kind": "soft"
+    }
+  ],
+  "diagnostics": [],
+  "settings": {
+    "LightMapResolution": 64,
+    "DistanceFieldResolutionScale": "inf"
+  },
+  "data": {
+    "positions": {
+      "blob": "4fb8f2852abd9d09c1bffa387cb002163d2be61141df31898e80fe15aaf76148",
+      "bytes": 36,
+      "layout": "f32",
+      "components": 3,
+      "count": 3
+    },
+    "slotNames": {
+      "blob": "0f88646c73f1452bd75860b1581d665ce9d289117aa4da99bc4e27a237467769",
+      "bytes": 16,
+      "layout": "names",
+      "components": 1,
+      "count": 2
+    }
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "objectPath": "/Game/Characters/SK_Hero.SK_Hero",
+  "class": "SkeletalMesh",
+  "ueClass": "/Script/Engine.SkeletalMesh",
+  "dependencies": [
+    {
+      "objectPath": "/Game/Characters/SKEL_Hero.SKEL_Hero",
+      "class": "Skeleton",
+      "kind": "hard"
+    },
+    {
+      "objectPath": "/Game/Materials/MI_Rock.MI_Rock",
+      "class": "MaterialInstanceConstant",
+      "kind": "hard"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "GeneratedLodBaked",
+      "severity": "info",
+      "message": "LOD 1 was generated"
+    }
+  ],
+  "settings": {
+    "skeleton": {
+      "objectPath": "/Game/Characters/SKEL_Hero.SKEL_Hero"
+    }
+  },
+  "data": {
+    "positions": {
+      "blob": "4fb8f2852abd9d09c1bffa387cb002163d2be61141df31898e80fe15aaf76148",
+      "bytes": 36,
+      "layout": "f32",
+      "components": 3,
+      "count": 3
+    },
+    "weights": {
+      "blob": "1b078469a70f9e779ea345e02680569039df190587576cf015d8982f000083ad",
+      "bytes": 24,
+      "layout": "boneInfluences",
+      "components": 1,
+      "count": 2
+    },
+    "morphs": [
+      {
+        "name": "Smile",
+        "deltas": {
+          "blob": "c294a05b48d2de3f1d3b6458ce3357fb7189ce3b728c07308eb6e0cbaa30f68a",
+          "bytes": 20,
+          "layout": "sparseVec3",
+          "components": 1,
+          "count": 2
+        }
+      }
+    ]
+  }
+}
