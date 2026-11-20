@@ -63,7 +63,7 @@
 - **플랫폼.** 이 기계는 Windows만 빌드한다. macOS는 CI로, Android는 NDK 구문 검사로만 봤다.
 - **검증의 한계.** origin을 충돌 없이 병합한 뒤에는 다시 검증하지 않는다(작업 규칙). 양쪽이 같은 고정 크기 등록부에 더하는 변경은 충돌 없이도 깨진다 — 시험 실행기의 자식 probe 등록부(8칸)에서 AL5의 probe와 다른 세션의 probe가 병합으로 만나 아홉이 됐고, EngineTests의 시험 넷이 dd157ca6부터 실패했다. AL6의 전체 실행에서 찾아 고쳤다(16칸). 같은 실행에서 엔진 단계 크래시 시험의 자식 하나가 120초 시한에 걸린 것을 한 번 봤다 — 재현되지 않았고 멈춘 자리를 가르지 못했다(25.10절).
 - **4절 gate 가운데 남은 것.** 일반 그래프의 STW 병렬 표식(×8 16.7–17.2ms — 목표 15ms의 1.1–1.15배), 증분 Step p99(부하 아래 판정 불가 — 재측정 필요), Slot 정보 합계(hot 64B는 충족, 전체 192.3B — 설계 11절 결정 5).
-- **리뷰의 후속 목록**(25.9·25.10·25.11절): 겹친 중복 반환에서 캐시 보유와 slab 보유의 표지 값 나누기, 종료 hook의 전역 잠금 구간, `System` 종류의 남은 할당 검사 자리, 주소 범위 예약을 첫 호출 때 만들기, `MaxThreadExitSlots` 초과 시험, 예약이 거부되는 환경에 기대는 단언(`smallInSystem=0`·`fallbackAllocations == 0`), UE식 epoch, 표시하지 않는 엔진 스레드의 캐시 등.
+- **리뷰의 후속 목록**(25.9·25.10·25.11절): 겹친 중복 반환에서 캐시 보유와 slab 보유의 표지 값 나누기, 종료 hook의 전역 잠금 구간, `System` 종류의 남은 할당 검사 자리, 주소 범위 예약을 첫 호출 때 만들기, `MaxThreadExitSlots` 초과 시험, 예약이 거부되는 환경에 기대는 단언(`smallInSystem=0`·`fallbackAllocations == 0`), UE식 epoch와 named thread broadcast, 표시하지 않는 엔진 스레드의 캐시, `TrimMemory`가 전역 등록부 잠금을 쥐는 시간(worker 수에 비례), World 여러 개를 한 번에 파괴할 때의 Trim 묶기, 쉬는 캐시의 스레드 종료·인스턴스 파괴·동시 `TrimMemory`의 시험 등.
 
 ## 1. 측정 환경
 
@@ -1990,6 +1990,50 @@ gate 확정(설계 18.8절, 개정 13):
 
   표시를 넘긴 경우에 남는 256 KiB는 scheduler 자신의 살아 있는 할당이 든 slab이다. 대조에서 남는 것은 worker 캐시의 블록이 붙든 slab이다(이 측정이 채운 등급에서의 값이다).
 
-검증(반복 중 — 바뀐 시험만): Foundation `CoreBinned` 34개(새 시험 7개 포함)·`CoreAllocatorWrappers` 1개·`WorkerScheduler` 22개·`ThreadExitSlot` 5개·`GcSoak` 9개, EngineTests `Engine_` 25개(새 시험 2개 포함), `Native.Launch` 15개, Commandlet 시험(`Rocks.Commandlet.Tests`) 51개 통과. 리뷰와 마지막 전체 검증은 아래에 적는다.
+검증(반복 중 — 바뀐 시험만): Foundation `CoreBinned` 34개(새 시험 7개 포함)·`CoreAllocatorWrappers` 1개·`WorkerScheduler` 22개·`ThreadExitSlot` 5개·`GcSoak` 9개, EngineTests `Engine_` 25개(새 시험 2개 포함), `Native.Launch` 15개, Commandlet 시험(`Rocks.Commandlet.Tests`) 51개 통과. 리뷰와 마지막 전체 검증은 아래 "리뷰"와 "마지막 검증"에 적는다.
 
 후속(넣지 않은 것): UE식 epoch(Trim 때 깨어 있던 스레드가 다음에 쉴 때 스스로 비움), 표시하지 않는 엔진 스레드(로그 출력·비동기 파일·trace)의 캐시, 메모리 압박 신호에 따른 Trim, 작업 본문 안에서 막히는 대기의 표시, 25.9절 I3(종료 hook의 등록부 잠금 범위)·I1의 나머지(표지 값 나누기)·I6의 나머지(`MaxThreadExitSlots` 초과 시험), 25.10절 I4·I5·I6·I7·I9·I10.
+
+리뷰(리뷰어 1명, 읽기 전용 — ccd2b800..d5e449ca의 코드와 설계 18.11절·이 절): blocker는 없었고 코드 동작의 결함도 나오지 않았다. 결함으로 분류된 다섯은 문서·주석의 틀린 진술이고 모두 반영했다. 개선 제안은 주석과 시험 한 군데만 넣고 나머지는 후속 목록에 적었다.
+
+| 지적(결함) | 내용 | 반영 |
+|---|---|---|
+| D1 | 설계 18.11.6절이 "보유(lease)로 회수가 밀린 객체가 남아 있는 동안은 Trim도 밀린다"고 적었는데 코드는 반대다 — `HasPendingReclaim`은 지연 목록을 세지 않아, 그런 객체가 있어도 나머지 회수가 끝난 프레임에 부르고 그 객체가 나중에 회수될 때는 다시 부르지 않는다 | 문장을 코드에 맞게 고쳤다(동작은 그대로 — 어느 쪽도 시험이 고정하지 않는다) |
+| D2 | UE 서술에서 Trim의 named thread broadcast(`MallocBinnedCommonUtils.h:172–188`)가 빠져 데스크톱 서술이 부정확했고, "호출 스레드와 표시한 스레드만 비운다"는 실제 차이가 목록에 없었다 | 설계 18.11.2절·18.11.4절에 더했다 |
+| D3 | "상태 전이는 모두 비교 교환이다"가 사실이 아니다(등록부 잠금 아래의 되돌림과 기다린 소유 스레드의 쓰기는 단순 대입 — 동작은 안전하다) | 설계와 소스 주석을 고쳤다 |
+| D4 | GcBench 사용법 주석이 서식 정리로 깨졌다 | 고쳤다 |
+| D5 | AL7 뒤로 틀린 말이 된 진술: 설계 18.4절 계약의 "다른 스레드의 캐시는 건드리지 않는다", 시험 주석의 "쉬는 스레드의 캐시는 돌려받지 못한다"(표시하지 않고 막힌 스레드를 뜻했다), 할당기 문서의 옛 이름 | 표시를 달고 고쳤다 |
+
+리뷰가 읽어서 확인했다고 적은 것(실행은 아님): 상태 전이의 주인과 겹침 없음(두 번 표시, 비우는 쪽 둘, 스레드 종료·인스턴스 파괴·캐시 만들기·`Stats`), 잠금 순서(등록부 → 등급 → 범위 — 등록부 잠금을 쥔 채 scheduler gate를 요구하는 경로 없음), 묶음 인계의 메모리 순서, "쉬는 사이의 할당은 안전하다"(지름길을 이 인스턴스로 세우는 곳은 쓰는 중 검사 뒤의 느린 경로와 캐시 만들기 둘뿐), 빠른 경로 불변, `WorkerScheduler`의 gate 풀기와 다시 잡기(깬 뒤 다시 훑으므로 신호를 놓치지 않고, 쉬는 중으로 끝나거나 본문을 도는 경로가 없다), World의 호출이 수집마다 한 번인 것(회수할 것 없음·여러 프레임·겹친 수집·사이에 낀 증분 cycle·Busy), Commandlet의 이른 반환, 래퍼 여섯, 인용한 UE 줄 번호 전부.
+
+개선 제안 가운데 넣은 것: I1(쉬는 사이의 할당이 캐시에서 나오지 않는 것을 할당과 반환 사이에서도 본다 — 꺼냈다 도로 넣는 구현을 가린다), I5(`WorkerScheduler.h`에 "worker가 scheduler 잠금을 쥔 채 `MarkThreadIdle`을 부른다 — 구현은 오래 막히거나 scheduler를 다시 부르면 안 된다"를 적음), I11(일괄 개명으로 어긋난 조사, 빈 줄, "전체 수집마다 한 번" 문구).
+
+후속 목록(넣지 않았다):
+
+- I2 "`MarkThreadActive`는 gate 밖에서 부른다"를 고정하는 시험이 없다(gate를 쥔 채 불러도 지금 시험은 통과한다).
+- I3 시험이 고정하지 않는 동작: 쉬는 스레드가 살아 있는 블록을 쥔 채 비워졌을 때의 내용·통계, 쉬는 중·비우는 중 캐시의 스레드 종료, 쉬는 캐시가 있는 인스턴스 파괴, 두 스레드의 동시 `TrimMemory`, 모듈 안 adapter 셋의 전달, World의 겹친 전체 수집·사이에 낀 증분 cycle·Busy·보유 객체(D1), Engine의 종료·지연 파괴 경로의 Trim.
+- I4 음성 대조 N2의 한계(위 표).
+- I7 World 여러 개를 한 번에 파괴하면 World마다 Trim한다(엔진 종료 포함) — 고리 뒤 한 번으로 묶거나 종료 중에는 생략할 수 있다.
+- I8 `TrimMemory`가 프로세스 전역 등록부 잠금을 쥔 채 쉬는 캐시를 모두 비운다(worker 8개에 0.9–1.3 ms, worker 수에 비례 — 그동안 모든 인스턴스의 첫 할당·종료 정리·`Stats`가 기다린다).
+- I9 GcBench의 측정용 통과 래퍼(`RequestCountingAllocator`)는 셋을 넘기지 않는다. 새 래퍼가 넘기는지를 강제하는 수단은 없다(헤더 주석뿐이다).
+- I10 `BinnedAllocator::TrimMemory`는 자기 상위의 `TrimMemory`를 부르지 않는다(지금 상위인 `SystemAllocator`는 무동작이다).
+
+리뷰가 짚은 가능성 둘은 확인하거나 미리 막았다:
+
+- **Apple의 `errno`.** `CoreBinnedFirstUseOnThreadKeepsSystemError`가 macOS에서 할당자 밖의 까닭으로 실패할 수 있는 자리 하나 — slab commit의 `madvise(MADV_FREE_REUSE)`(실패를 무시한다)가 `errno`를 남기는 경우 — 를 저장·복원으로 막았다(`PlatformBase/Private/Apple/ApplePosix.cpp`의 `PosixOpenCommit`). Apple 소스는 이 기계에서 컴파일하지 못하므로 macOS CI가 첫 컴파일·실행이다.
+- **`WorkerScheduler` 쪽 비용(I6).** 깨어날 때마다 gate를 한 번 더 얻고 가상 호출 둘이 들며 깬 뒤 첫 할당이 느린 경로다. 병렬 표식에 보이는지 AL7 앞의 실행 파일과 같은 round에서 번갈아 쟀다(1M · 간선 4, 4 round — 다른 세션의 부하가 걸린 때라 절대값은 gate 측정 때보다 크다): STW 병렬 표식 ×8이 23.4–24.0 대 23.0–24.4 ms(중앙값 23.5 대 23.7), ×16이 14.0–14.7 대 14.3–14.6 ms, 증분 ×8의 표식 합이 27.8–29.1 대 26.9–30.4 ms, 증분 slice p99가 1,077–1,106 대 1,057–1,090 µs다. 잡음 안에서 차이가 없다.
+
+origin 병합에서 맞물린 것(마지막 병합 — 7173e9c3):
+
+- 모듈 로더 ML1이 `EngineConfig::modules`를 필수로 바꿨다. 이쪽이 더한 엔진 시험 둘은 충돌 없이 병합되지만 그대로는 엔진 초기화가 실패한다 — `test::ProcessModules()`를 넘기게 고쳤다(0.3절 "검증의 한계"와 같은 종류다. 병합 뒤에 다시 빌드해 돌려서 확인했다).
+- 게임 템플릿의 같은 한 줄 변경이 origin에 먼저 들어와 있었다(075ef227). 코드는 같고 이쪽의 주석 두 줄이 남았다.
+- Launch 설계 문서의 개정 번호가 다시 겹쳐(양쪽 모두 개정 10) 이쪽을 개정 11로 옮겼다.
+
+마지막 검증(리뷰 반영과 origin 병합 뒤 한 번 — Debug, 작업 파일 분리 끔): Foundation 2,674개 가운데 실패 0, EngineTests 3,208개 가운데 실패 0, `Native.Launch` 15개 통과. Sandbox `--self-test`는 19개 통과·1개 미실행(Vulkan 소프트웨어 기기 없음 — 환경), `--engine --frames 3`은 종료 코드 0이다. Commandlet 시험(`Rocks.Commandlet.Tests`) 51개, 통합 시험(`Rocks.Build.IntegrationTests` — 설치 SDK와 외부 게임 빌드, 템플릿 포함) 23개 통과. NDK `-fsyntax-only`(`BinnedAllocator.cpp`·`WorkerScheduler.cpp`·`BinnedAllocatorIdleTrimTests.cpp`·`WorkerSchedulerTests.cpp`), format·policy 통과. GcBench는 Development로 빌드했다.
+
+실행하지 못했거나 건너뛴 검증(AL7):
+
+- AddressSanitizer — 로컬에서는 돌리지 않았다(CI가 돈다). 쉬는 캐시를 다른 스레드가 비우는 경로는 CI의 그 단계가 첫 실행이다.
+- macOS·Android 실행 — `CacheLineSize`가 128인 Apple Silicon에서의 캐시 배치, POSIX에서의 `CoreBinnedFirstUseOnThreadKeepsSystemError`, `PosixOpenCommit`의 `errno` 보존은 macOS CI가 첫 컴파일·실행이다. Android는 구문 검사뿐이다.
+- Release·Development 구성의 시험 실행(GcBench만 Development로 빌드했다).
+- 음성 대조는 리뷰 반영과 마지막 병합 앞의 트리에서 돌렸다(그 뒤의 변경은 주석, 시험 보강 한 군데, 엔진 시험의 모듈 로더 인자다).

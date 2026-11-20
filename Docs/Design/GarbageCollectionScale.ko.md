@@ -62,7 +62,7 @@ UE 소스는 설계 사실의 대조에만 쓰고 코드를 옮기지 않는다.
 - **플랫폼.** 이 기계는 Windows만 빌드한다. macOS는 CI로, Android는 NDK 구문 검사로만 봤다.
 - **검증의 한계.** origin을 충돌 없이 병합한 뒤에는 다시 검증하지 않는다(작업 규칙). 양쪽이 같은 고정 크기 등록부에 더하는 변경은 충돌 없이도 깨진다 — 시험 실행기의 자식 probe 등록부(8칸)에서 AL5의 probe와 다른 세션의 probe가 병합으로 만나 아홉이 됐고, EngineTests의 시험 넷이 dd157ca6부터 실패했다. AL6의 전체 실행에서 찾아 고쳤다(16칸). 같은 실행에서 엔진 단계 크래시 시험의 자식 하나가 120초 시한에 걸린 것을 한 번 봤다 — 재현되지 않았고 멈춘 자리를 가르지 못했다(실험 25.10절).
 - **4절 gate 가운데 남은 것.** 일반 그래프의 STW 병렬 표식(×8 16.7–17.2ms — 목표 15ms의 1.1–1.15배), 증분 Step p99(부하 아래 판정 불가 — 재측정 필요), Slot 정보 합계(hot 64B는 충족, 전체 192.3B — 11절 결정 5).
-- **리뷰의 후속 목록**(실험 25.9·25.10·25.11절): 겹친 중복 반환에서 캐시 보유와 slab 보유의 표지 값 나누기, 종료 hook의 전역 잠금 구간, `System` 종류의 남은 할당 검사 자리, 주소 범위 예약을 첫 호출 때 만들기, `MaxThreadExitSlots` 초과 시험, 예약이 거부되는 환경에 기대는 단언(`smallInSystem=0`·`fallbackAllocations == 0`), UE식 epoch, 표시하지 않는 엔진 스레드의 캐시 등.
+- **리뷰의 후속 목록**(실험 25.9·25.10·25.11절): 겹친 중복 반환에서 캐시 보유와 slab 보유의 표지 값 나누기, 종료 hook의 전역 잠금 구간, `System` 종류의 남은 할당 검사 자리, 주소 범위 예약을 첫 호출 때 만들기, `MaxThreadExitSlots` 초과 시험, 예약이 거부되는 환경에 기대는 단언(`smallInSystem=0`·`fallbackAllocations == 0`), UE식 epoch와 named thread broadcast, 표시하지 않는 엔진 스레드의 캐시, `TrimMemory`가 전역 등록부 잠금을 쥐는 시간(worker 수에 비례), World 여러 개를 한 번에 파괴할 때의 Trim 묶기, 쉬는 캐시의 스레드 종료·인스턴스 파괴·동시 `TrimMemory`의 시험 등.
 
 ## 1. 결정 요약
 
@@ -1007,3 +1007,5 @@ UE 5.8.4의 작은 블록 할당자(`Runtime/Core` — `Public/HAL/MallocBinned2
 - **시험 통로.** 비우는 쪽을 캐시를 가져간 직후에 세우는 hook(`TestHooks::SetTrimHook` — 지점 셋)과 조회(`IdleThreadCacheCount`·`CurrentThreadCacheBlockBytes`·`IsCurrentThreadShortcut`)를 더했다. slab 블록 수 underflow의 Fatal은 `ReturnToSlabAgain`으로 만든다(자식 프로세스).
 - **Commandlet의 설정 할당자도 범용 할당자다.** 진입점에서 할당자를 넘기게 되면서 따로 둘 까닭이 없어졌다(엔진 호스트와 같은 부트를 같은 할당자 위에서 돈다).
 - **다른 세션 파일.** 래퍼 전달을 넣느라 ObjectSerialization(`GraphInternal.h`·`GraphLoad.cpp`)과 SpatialIndex(`LooseOctreeInternal.h`)의 모듈 안 adapter에 세 함수를 더했다(동작 변화 없음 — 상위로 넘기기만 한다).
+- **Apple의 commit 힌트는 `errno`를 남기지 않는다(리뷰가 짚은 가능성).** slab commit이 부르는 `PosixOpenCommit`(Apple — `madvise(MADV_FREE_REUSE)`, 실패를 무시한다)이 `errno`를 저장·복원한다. 무시하는 실패가 호출 스레드의 `errno`를 바꾸면, 할당자의 느린 경로가 실패한 OS 호출과 그 `errno`를 읽는 코드 사이에 끼었을 때 값이 바뀐다(`ThreadExitSlot`의 OS 오류 값 보존과 같은 까닭 — 18.4절).
+- **`WorkerScheduler`의 표시 비용.** 깨어날 때마다 gate를 한 번 더 얻고 가상 호출 둘이 들며 깬 뒤 첫 할당이 느린 경로다. 병렬 표식에 보이는지 AL7 앞의 실행 파일과 같은 round에서 번갈아 쟀다(1M · 간선 4, 4 round — 다른 세션의 부하가 걸린 때라 절대값은 gate 측정 때보다 크다): STW 병렬 표식 ×8이 23.4–24.0 대 23.0–24.4 ms(중앙값 23.5 대 23.7), ×16이 14.0–14.7 대 14.3–14.6 ms, 증분 ×8의 표식 합이 27.8–29.1 대 26.9–30.4 ms, 증분 slice p99가 1,077–1,106 대 1,057–1,090 µs다. 잡음 안에서 차이가 없다.
