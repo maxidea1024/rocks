@@ -224,9 +224,11 @@ public static class NativeToolchains
             throw new ArgumentException("android-api must be between 26 and 39.");
         }
 
+        // NDK 설정이 아예 없을 때만 AndroidNdkNotConfiguredException이다(시험은 이것만 건너뛴다). 설정했는데 망가진 NDK(source.properties·
+        // 도구 없음)는 FileNotFoundException으로 실패한다.
         string root = ndk ?? Environment.GetEnvironmentVariable("ANDROID_NDK_HOME")
             ?? Environment.GetEnvironmentVariable("ANDROID_NDK_ROOT") ?? FindDefaultNdk()
-            ?? throw new FileNotFoundException("Android NDK not found. Pass --android-ndk or set ANDROID_NDK_HOME.");
+            ?? throw new AndroidNdkNotConfiguredException();
         root = PathSpelling.OnDisk(Path.GetFullPath(root));
         string properties = Path.Combine(root, "source.properties");
         if (!File.Exists(properties))
@@ -514,6 +516,7 @@ public static class NativeToolchains
         string sdk = OperatingSystem.IsWindows()
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Android", "Sdk")
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library", "Android", "sdk");
+        // ANDROID_HOME을 먼저 본다(Build/SelectAndroidNdk.ps1과 같은 순서).
         sdk = Environment.GetEnvironmentVariable("ANDROID_HOME") ?? Environment.GetEnvironmentVariable("ANDROID_SDK_ROOT") ?? sdk;
         string ndkRoot = Path.Combine(sdk, "ndk");
         if (!Directory.Exists(ndkRoot))

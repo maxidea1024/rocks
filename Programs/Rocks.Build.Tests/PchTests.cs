@@ -38,9 +38,9 @@ internal static class PchTests
         {
             android = await NativeToolchains.DiscoverAndroidAsync("arm64", AndroidApiLevel);
         }
-        catch (FileNotFoundException)
+        catch (AndroidNdkNotConfiguredException)
         {
-            pass("PCH with the Android NDK clang++ skipped (NDK not found)");
+            pass("PCH with the Android NDK clang++ skipped (NDK not configured)");
             return;
         }
 
