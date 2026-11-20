@@ -488,15 +488,51 @@ private:
 // PostLoad 호출 순서를 적는 handler다.
 class RecordingPostLoad final : public AssetPostLoadHandler {
 public:
-    explicit RecordingPostLoad(Allocator& allocator) noexcept : order(allocator) {
+    explicit RecordingPostLoad(Allocator& allocator) noexcept
+        : order(allocator), packages(allocator) {
     }
 
     void PostLoad(ObjectHandle package, AssetId asset) noexcept override {
-        (void)package;
         (void)order.TryPushBack(asset);
+        (void)packages.TryPushBack(package);
+    }
+
+    // 넘어온 package handle이 모두 그 에셋의 FindPackage 결과와 같은지다(공개한 패키지가 남아 있을
+    // 때).
+    bool PackagesMatch(AssetLoader& loader) const noexcept {
+        for (usize index = 0; index < order.Size(); ++index) {
+            auto found = loader.FindPackage(order[index]);
+            if (!found || !(found.Value() == packages[index])) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    // asset의 기록 위치다(없으면 order 크기).
+    usize IndexOf(AssetId asset) const noexcept {
+        for (usize index = 0; index < order.Size(); ++index) {
+            if (order[index] == asset) {
+                return index;
+            }
+        }
+
+        return order.Size();
+    }
+
+    // asset이 몇 번 기록됐는지다.
+    usize CountOf(AssetId asset) const noexcept {
+        usize count = 0;
+        for (const AssetId& recorded : order) {
+            count += recorded == asset ? 1 : 0;
+        }
+
+        return count;
     }
 
     Array<AssetId> order;
+    Array<ObjectHandle> packages;
 };
 
 // id 요청이다(우선순위 Normal, 취소 없음).

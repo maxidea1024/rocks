@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/Compiler.h>
 #include <Platform/File.h>
 #include <Platform/Sync.h>
 #include <Platform/Thread.h>
@@ -52,7 +53,8 @@ using AsyncReadResult = AsyncIoResult; // 읽기 전용 시절의 이름
 using AsyncIoCallback = void (*)(const AsyncIoResult& result, void* context) noexcept;
 using AsyncReadCallback = AsyncIoCallback; // 읽기 전용 시절의 이름
 
-// 결과 주입 지점이다(AsyncIoContext::InjectFault).
+#if !ROCKS_BUILD_RELEASE
+// 결과 주입 지점이다(AsyncIoContext::InjectFault — 개발·시험 전용, Release 구성에는 없다).
 enum class AsyncIoFaultPoint : uint8 {
     // AsyncReadFile·AsyncWriteFile::Size가 OS를 부르지 않고 status를 돌려준다.
     Size,
@@ -68,6 +70,7 @@ struct AsyncIoFault {
     FileStatus status{FileCode::SystemError, 0};
     uint32 skip = 0;
 };
+#endif
 
 // 비동기 I/O 완료 처리기다. 파일과 요청보다 오래 살아야 한다.
 // 사용 예(텍스처 mip 읽기):
@@ -136,7 +139,10 @@ public:
     // OS·worker에서 끝나 게시를 기다리는 결과 수다(진단·시험용, 읽는 순간의 값).
     uint64 HeldCompletionCount() const noexcept;
 
+#if !ROCKS_BUILD_RELEASE
     // ---- 결과 주입(Rocks 고유, UE 5.8 IoDispatcher·IAsyncReadFileHandle에는 대응 없음) ----
+    // 개발·시험 전용이라 Release 구성(UE Shipping)에는 없다. skip은 그 지점의 모든 작업을 완료·호출
+    // 순서로 세므로 지점 작업이 정해진 순서로 일어날 때만 대상이 결정적이다.
     // OS·장치 오류(읽기 실패·크기 조회 실패)와 계약상 만들 수 없는 즉시 제출 실패를 결정적으로
     // 재현해 상위 계층의 처리를 시험한다(Docs/Design/PlatformLayer.ko.md 결과 주입).
     //
@@ -149,6 +155,7 @@ public:
     void InjectFault(const AsyncIoFault& fault) noexcept;
     // 걸어 둔 주입을 지운다(없으면 아무것도 하지 않는다).
     void ClearFault() noexcept;
+#endif
 
 private:
     friend class AsyncReadFile;
