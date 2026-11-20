@@ -61,6 +61,36 @@ struct MeshBuildSettings {
     ROCKS_PROPERTY() bool supportFaceRemap = false;
 };
 
+// 스킨 메시 LOD 하나의 빌드 설정이다(6.3·6.5절, UE FSkeletalMeshBuildSettings — EngineTypes.h).
+// MeshBuildSettings를 물려받아 스킨 빌드만 쓰는 여섯 필드를 더한다(모두 "구현"). 기본값은 UE
+// 생성자와 같다. 스킨 빌드는 buildScale을 쓰지 않는다(보존 — 크기는 임포터가 메시와 본에 함께
+// 적용한다, 6.5절 3).
+//
+// 사용 예:
+//   SkinnedMeshBuildSettings settings;
+//   settings.boneInfluenceLimit = 4;              // 정점마다 영향 4개까지(쿠킹 칸 4)
+//   settings.useHighPrecisionSkinWeights = true;  // 가중치 16비트(합 65535)
+//
+// 스레드: 값 타입이다(동기화 없음).
+ROCKS_STRUCT()
+struct SkinnedMeshBuildSettings : public MeshBuildSettings {
+    ROCKS_GENERATED_BODY()
+
+    // 쿠킹 가중치를 16비트(합 65535)로 둔다. 거짓이면 8비트(합 255)다.
+    ROCKS_PROPERTY() bool useHighPrecisionSkinWeights = false;
+    // 렌더 정점 용접에서 두 위치가 같다고 보는 축별 거리다(removeDegenerates면 퇴화 판정도 이 값).
+    // 유한한 0 이상이어야 한다.
+    ROCKS_PROPERTY() float thresholdPosition = 0.00002f;
+    // 렌더 정점 용접에서 두 법선·tangent·쌍법선이 같다고 보는 축별 거리다.
+    ROCKS_PROPERTY() float thresholdTangentNormal = 0.00002f;
+    // 렌더 정점 용접에서 두 UV가 같다고 보는 축별 거리다(UE 0.0009765625 = 1/1024).
+    ROCKS_PROPERTY() float thresholdUV = 0.0009765625f;
+    // morph 위치 변화량 길이가 이 값 이하인 렌더 정점은 그 morph target에서 뺀다.
+    ROCKS_PROPERTY() float morphThresholdPosition = 0.015f;
+    // 정점마다 남길 최대 영향 수다. 0이면 기본 상한(8)이고, 8을 넘는 값도 8이다. 0 이상이어야 한다.
+    ROCKS_PROPERTY() int32 boneInfluenceLimit = 0;
+};
+
 // 빌드 설정 필드 하나를 가리키는 번호다(UnsupportedSetting 진단의 위치 — MeshDiagnostic::index).
 // 값은 저장 형식이 아니다(순서를 바꿔도 된다).
 enum class MeshBuildSettingField : uint32 {
@@ -80,26 +110,46 @@ enum class MeshBuildSettingField : uint32 {
     GenerateDistanceFieldAsIfTwoSided,
     DistanceFieldResolutionScale,
     MaxLumenMeshCards,
-    SupportFaceRemap
+    SupportFaceRemap,
+    // SkinnedMeshBuildSettings가 더한 필드(스킨 빌드만 쓴다).
+    UseHighPrecisionSkinWeights,
+    ThresholdPosition,
+    ThresholdTangentNormal,
+    ThresholdUV,
+    MorphThresholdPosition,
+    BoneInfluenceLimit
 };
 
-// MeshBuildSettingField 값의 수다.
+// MeshBuildSettings 필드 수다(MeshBuildSettingField의 앞 부분 —
+// RecomputeNormals..SupportFaceRemap).
 inline constexpr uint32 MeshBuildSettingFieldCount = 17;
+
+// SkinnedMeshBuildSettings 필드 수다(MeshBuildSettingField 전체).
+inline constexpr uint32 SkinnedMeshBuildSettingFieldCount = 23;
 
 // 필드 이름이다(리플렉션 필드 이름과 같다 — 예: GenerateLightmapUVs → "generateLightmapUVs").
 // 모르는 값은 "Unknown"이다. 반환 문자열은 정적 수명이다(진단 줄·로그가 쓴다).
 const char* MeshBuildSettingFieldName(MeshBuildSettingField field) noexcept;
 
-// 4.1절 "보존" 필드인지다(빌드가 소비하지 않고 기본값이 아니면 UnsupportedSetting). 모르는 값은
-// false다.
+// 정적 메시 빌드에서 4.1절 "보존" 필드인지다(빌드가 소비하지 않고 기본값이 아니면
+// UnsupportedSetting). 스킨 필드와 모르는 값은 false다.
 bool IsPreservedMeshBuildSetting(MeshBuildSettingField field) noexcept;
 
+// 스킨 메시 빌드에서 보존 필드인지다: 정적 메시의 보존 필드에 buildScale을 더한다(6.5절 3). 스킨
+// 필드와 모르는 값은 false다.
+bool IsPreservedSkinnedMeshBuildSetting(MeshBuildSettingField field) noexcept;
+
 // settings의 field가 기본값(MeshBuildSettings{}의 값)과 다른지다. 실수 필드는 비트 단위로 비교한다
-// (-0.0도 기본값 +0.0과 다르다 — 저장 byte가 다르다). 모르는 값은 false다.
+// (-0.0도 기본값 +0.0과 다르다 — 저장 byte가 다르다). 스킨 필드와 모르는 값은 false다.
 bool IsMeshBuildSettingChanged(const MeshBuildSettings& settings,
                                MeshBuildSettingField field) noexcept;
 
-// Mesh 리플렉션 타입(MeshBuildSettings)을 등록한다(생성 집계 함수
+// settings의 field가 기본값(SkinnedMeshBuildSettings{}의 값)과 다른지다(공통 필드는 위 함수와
+// 같고 스킨 필드도 본다). 모르는 값은 false다.
+bool IsMeshBuildSettingChanged(const SkinnedMeshBuildSettings& settings,
+                               MeshBuildSettingField field) noexcept;
+
+// Mesh 리플렉션 타입(MeshBuildSettings·SkinnedMeshBuildSettings)을 등록한다(생성 집계 함수
 // generated::Mesh::RegisterModuleTypes를 부른다 — 의존 모듈 타입도 함께). 도구·시험은 직접, 엔진은
 // 메시 에셋 모듈이 부른다.
 Result<void> RegisterMeshTypes(ModuleRegistration& registration) noexcept;

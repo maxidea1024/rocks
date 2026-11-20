@@ -121,9 +121,58 @@
       "retired": false
     },
     {
+      "kind": "field",
+      "name": "rocks::SkinnedMeshBuildSettings::boneInfluenceLimit",
+      "id": "bf5399a89531429fb51f4b8348807418",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedMeshBuildSettings::morphThresholdPosition",
+      "id": "2f0da8e091ac4350a2fa240589a3901e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedMeshBuildSettings::thresholdPosition",
+      "id": "514b9d84f5054432bbfaf2b0a1526733",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedMeshBuildSettings::thresholdTangentNormal",
+      "id": "5148d126e8fb4e05a56db845c22e8685",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedMeshBuildSettings::thresholdUV",
+      "id": "bd5cfc2be0024841a33e0a08acb71ed8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedMeshBuildSettings::useHighPrecisionSkinWeights",
+      "id": "5267afbf6f7740fcaa0b77fdff82ca74",
+      "aliases": [],
+      "retired": false
+    },
+    {
       "kind": "type",
       "name": "rocks::MeshBuildSettings",
       "id": "5a5e1138c19c41fa870a58eeb11173ba",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SkinnedMeshBuildSettings",
+      "id": "aa7f91f544414a35a12c42342829cf8c",
       "aliases": [],
       "retired": false
     }

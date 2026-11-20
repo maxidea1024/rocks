@@ -1,6 +1,6 @@
 # 메시·스켈레톤·애니메이션 에셋 설계
 
-기준일: 2026-11-21, 개정 9(MA3·MA5·MA6을 a·b로 나눔). 개정 8(MA4a 구현 — 6.4절·12.3절). 개정 7(MA2a 구현 — 5.4절·12.2절). 개정 6(MA2a·MA4a 분리). 개정 5(MA1 구현 — 3.7절). 개정 4(MA2 전 결정 반영 — index 형식·통합 bone map·메시 LOD 스트리밍). 개정 3(15절 요구를 다른 문서에 반영하고 상태 열을 더함). 개정 2(교차 검증 반영 — 17절). 정적 메시·스켈레톤·스킨 메시·애니메이션 클립의 에셋 자료구조를 정한다. 범위는 원본 데이터(에디터 데이터), 저장 설정, 빌드 계약, 쿠킹 데이터, 모듈 배치다. [엔진 구현 계획](EngineImplementationPlan.ko.md) 13.1절(StaticMeshAsset)·15절(Skeleton·SkeletalMesh·AnimationClip)의 개요를 구현할 수 있는 수준으로 구체화한다. 텍스처는 [에셋 시스템](AssetSystem.ko.md) 12절, 머티리얼은 [머티리얼 시스템](MaterialSystem.ko.md) 4절이 이미 정했으므로 이 문서는 그 둘을 참조만 한다.
+기준일: 2026-11-21, 개정 10(MA5a 구현 — 6.5절·12.4절). 개정 9(MA3·MA5·MA6을 a·b로 나눔). 개정 8(MA4a 구현 — 6.4절·12.3절). 개정 7(MA2a 구현 — 5.4절·12.2절). 개정 6(MA2a·MA4a 분리). 개정 5(MA1 구현 — 3.7절). 개정 4(MA2 전 결정 반영 — index 형식·통합 bone map·메시 LOD 스트리밍). 개정 3(15절 요구를 다른 문서에 반영하고 상태 열을 더함). 개정 2(교차 검증 반영 — 17절). 정적 메시·스켈레톤·스킨 메시·애니메이션 클립의 에셋 자료구조를 정한다. 범위는 원본 데이터(에디터 데이터), 저장 설정, 빌드 계약, 쿠킹 데이터, 모듈 배치다. [엔진 구현 계획](EngineImplementationPlan.ko.md) 13.1절(StaticMeshAsset)·15절(Skeleton·SkeletalMesh·AnimationClip)의 개요를 구현할 수 있는 수준으로 구체화한다. 텍스처는 [에셋 시스템](AssetSystem.ko.md) 12절, 머티리얼은 [머티리얼 시스템](MaterialSystem.ko.md) 4절이 이미 정했으므로 이 문서는 그 둘을 참조만 한다.
 
 - 배경: 사용자 지시(2026-11-19). 엔진 시험용으로 UE에서 텍스처·정적 메시·머티리얼·애니메이션을 가져오는 기능을 넣는다. Rocks에 메시·애니메이션 자료구조가 아직 없으므로 함께 정한다. 가져오는 경로는 [Unreal 교환 형식](UnrealExchange.ko.md)이 정한다. 이 문서의 자료구조는 그 경로와 상관없이 쓰는 엔진 기반이며, 뒤에 올 glTF·FBX 임포터도 같은 구조로 들어온다.
 - UE 근거: UE 5.8.4(`release`, commit `f45729c0b6f0`, 로컬 클론 `C:\github\UnrealEngine`)를 읽어 확인했다. 경로 약어는 다음과 같다. `E/` = `Engine/Source/Runtime/Engine`, `RT/` = `Engine/Source/Runtime`, `Dev/` = `Engine/Source/Developer`. UE 이름은 대응표와 근거에만 쓰고, 타입 이름은 Rocks 이름으로 짓는다. 빌드 설정·축소 설정처럼 업계 공용 서술 이름은 그대로 쓴다.
@@ -471,6 +471,28 @@ SkeletalMesh : SkinnedAsset
 
 영향 개수 줄이기: 원본 영향(최대 12)을 가중치 내림차순(같으면 본 번호 오름차순)으로 정렬해 쿠킹 상한(최대 8)까지 남기고 다시 정규화한다. 버린 영향이 있으면 정점 수를 세어 `InfluencesTrimmed` 정보 진단을 낸다. 8비트 가중치는 비례 배분 후 반올림하고 잔차(255와의 차)를 가장 큰 영향에 더한다. 모두 결정적이다.
 
+### 6.5 구현에서 정한 점(MA5a)
+
+MA5a 구현(`Mesh`의 `SkinnedMeshBuildSettings`, `MeshTools`의 스킨 빌드) 중 6.3절이 정하지 않았거나 다르게 정한 점이다. 모두 권장안으로 확정했다. UE 근거는 Dev/MeshUtilities/Private/MeshUtilities.cpp(`GenerateSkeletalRenderMesh`), SkeletalMeshTools.cpp(`BuildSkeletalMeshChunks`·`AreSkelMeshVerticesEqual`), Dev/SkeletalMeshUtilitiesCommon/Private/LODUtilities.cpp(morph 변화량·대체 가중치), RT/AnimationCore/Public/BoneWeights.h, E/Private/SkeletalMesh.cpp(`CalculateInvRefMatrices`·`CalculateRequiredBones`)다.
+
+1. **API.** `MeshTools/SkinnedMeshBuilder.h`의 순수 함수 `BuildSkinnedMeshLod(const SkinnedMeshBuildInput&, SkinnedMeshBuildResult&, MeshDiagnostic*)`다. 입력은 원본 메시, 메시 본 계층(`BoneHierarchy` — 6.1절), `SkinnedMeshBuildSettings`, 슬롯 이름·섹션 정보·bounds 확장(5.4절 1과 같다), 임시 할당기다. 결과는 정적 메시와 같은 `StaticMeshBuildResult`(`mesh` — 렌더 정점 속성·index·섹션·bounds·경고)에 정점당 영향 칸 수, 가중치 합(255 또는 65535), 영향 배열(정점 × 칸, 본 번호는 bone map 위치), 가중치 프로필별 영향, LOD 통합 bone map, 필요 본 목록, 메시 본별 inverse-bind 행렬(`Mat4d`), morph target별 희소 변화량을 더한다. 프로필·morph target은 원본 속성 번호로 가리킨다(이름 원문은 원본에서 얻는다). 실패하면 결과는 그대로다. `MeshTools`는 `Animation`에 public으로 의존한다(본 계층이 공개 입력이다).
+2. **설정 struct.** `SkinnedMeshBuildSettings`는 `MeshBuildSettings`의 리플렉션 파생 struct다(struct 상속 — ReflectionExtensions 12절). 여섯 필드의 기본값은 UE와 같다(`thresholdPosition` 0.00002, `thresholdTangentNormal` 0.00002, `thresholdUV` 1/1024, `morphThresholdPosition` 0.015, `boneInfluenceLimit` 0, `useHighPrecisionSkinWeights` 거짓 — EngineTypes.h:3167-3183). 진단용 필드 번호는 `MeshBuildSettingField` 뒤에 이어 붙인다(`SkinnedMeshBuildSettingFieldCount` = 23). 버린 대안: 공통 설정을 멤버로 담기(필드 경로가 한 단 깊어지고 공통 필드 판정 함수를 다시 써야 한다), UE처럼 따로 된 struct(공통 필드를 두 번 정의한다).
+3. **스킨 빌드의 `buildScale`은 보존이다.** UE `FSkeletalMeshBuildSettings`에는 BuildScale이 없다. 정점만 키우면 본 기준 pose와 맞지 않아 inverse-bind가 틀어지므로 크기는 임포터가 메시와 본에 함께 적용할 일이다. 스킨 빌드는 크기 1로 빌드하고 `buildScale`이 기본값이 아니면 다른 보존 필드처럼 `UnsupportedSetting`을 낸다(`NegativeBuildScale`은 내지 않는다).
+4. **설정 검사.** 네 임계값은 유한한 0 이상, `boneInfluenceLimit`은 0 이상이어야 한다. 어기면 `InvalidSetting`(issue `InvalidSettingValue`, index = 필드 번호)·InvalidArgument다. `boneInfluenceLimit` 0은 기본 상한이다: UE는 0이면 프로젝트 기본값을 쓰고 그것도 0이면 `MAX_TOTAL_INFLUENCES`인데 unlimited influence 모드가 없으면 `EXTRA_BONE_INFLUENCES`(8)로 자른다(GPUSkinVertexFactory.cpp `GetBoneInfluenceLimitForAsset`, MeshUtilities.cpp `GenerateSkeletalRenderMesh`). Rocks는 프로젝트 설정·unlimited 모드가 없으므로 0과 8을 넘는 값은 모두 `MeshCookedInfluencesHigh`(8)다.
+5. **원본 사본과 검증.** 5.4절 3의 사본에 정점 `SkinWeights`·`SkinWeights-<profile>`도 담아 값 정리가 가중치를 정규화하게 한다(`NonNormalizedWeights` 경고, 합 0은 `InvalidMeshData`·`ZeroWeightSum` 실패 — 진단의 속성 번호는 원본 번호로 바꾼다). 원본 검증은 `boneCount` = 본 수로 해서 범위 밖 boneIndex를 거부한다. 본 계층은 `ValidateBoneHierarchy`로 보고, 어기면 `InvalidSkeletonData`(issue `InvalidBoneHierarchy`, index = 그 진단의 본 번호 — 세부 규칙은 `ValidateBoneHierarchy`를 다시 불러 얻는다), 본이 없으면 `InvalidSkeletonData`·`EmptyBoneHierarchy`다(영향 없는 정점이 루트 본을 쓰므로 루트가 있어야 한다).
+6. **임계값.** 렌더 정점 용접은 위치 `thresholdPosition`, 법선·tangent·쌍법선 `thresholdTangentNormal`, UV `thresholdUV`로 비교한다(UE `AreSkelMeshVerticesEqual`). UE 스킨 빌드는 용접 위치 임계값을 `bRemoveDegenerates`와 무관하게 쓰므로 Rocks도 그렇게 한다. 퇴화 삼각형 판정과 삼각형 기저의 위치 임계값은 5.4절 4와 같은 규칙에 스킨 임계값을 넣는다(`removeDegenerates`면 `thresholdPosition`, 아니면 0). 그에 더해 용접 뒤 세 렌더 정점 번호가 서로 다르지 않은 삼각형도 뺀다(UE `BuildSkeletalMeshChunks` — 그 삼각형이 만든 렌더 정점은 남는다, UE와 같다). 법선·tangent 계산은 5.2절 3–5단계 그대로다. UE의 스킨 경로는 옛 import data 기반의 다른 tangent 구현이라 비트 일치는 원래 보장하지 않는다(5.2절).
+7. **영향 줄이기(원본 정점마다 한 번).** 가중치 0인 영향을 빼고(UE `FBoneWeights`의 기본 문턱), 가중치 내림차순·같으면 본 번호 오름차순으로 정렬해 상한까지 남기고, 버린 것이 있으면 MA1 정규화(`NormalizeBoneWeights` — 내림 비례 배분 + 잔차를 가장 큰 영향에)로 다시 합을 65535로 맞춘 뒤 다시 정렬한다. 영향이 없는 정점(속성이 없거나 빈 목록)은 루트 본 0에 65535다(UE "Missing influence … weighting to root"). 그런 정점이 있으면 가중치 속성마다 새 경고 `MissingInfluences`(index = 첫 정점, count = 정점 수 — 속성이 없으면 attribute = `MeshNoAttribute`), 버린 정점이 있으면 `InfluencesTrimmed`(정보, 같은 형식)다. 둘 다 삼각형이 쓰지 않는 정점까지 원본 정점 전체를 센다.
+8. **용접 비교의 스킨 항목.** 같은 원본 정점의 두 코너는 영향·morph 위치 변화량이 늘 같으므로 `MorphNormal-` 값만 비교한다. 다른 원본 정점이면 줄인 16비트 영향(기본·프로필 모두)과 모든 morph target의 위치 변화량(비트 단위), `MorphNormal-` 값을 비교한다. UE는 영향만 비교해 위치가 겹치는 서로 다른 정점의 morph 변화량이 다르면 하나를 잃는다 — Rocks는 손실을 막는다. 아래 10의 재계산 법선 변화량은 용접 뒤에 정해지므로 비교하지 않는다(렌더 정점을 만든 코너의 값을 쓴다).
+9. **가중치 프로필도 빌드한다.** `SkinWeights-<profile>`마다 같은 규칙으로 줄여 렌더 정점별 영향을 만든다. UE는 대체 가중치를 렌더 정점의 원본 점에서 가져오고 용접에는 넣지 않는다(LODUtilities.cpp `GenerateImportedSkinWeightProfileData`). bone map에 프로필 본을 넣는 것은 UE와 같다(`AlternateBoneIDs`).
+10. **쿠킹 칸과 가중치 부호화.** 정점당 칸 수는 렌더 정점의 (기본·프로필) 영향 수 최댓값이 4 이하면 `MeshCookedInfluencesLow`(4), 아니면 `MeshCookedInfluencesHigh`(8)다(UE 섹션 `MaxBoneInfluences`의 extra influence 판정과 같다 — 상한은 자르는 값이고 칸 수는 실제 최댓값의 올림). 빈 칸은 (0, 0)이다. `useHighPrecisionSkinWeights`면 16비트(합 65535) 그대로, 아니면 8비트로 `(w × 255 + 32767) / 65535`(반올림) 후 잔차(255 − 합, 음수일 수 있다)를 첫 영향(가장 큰 것, 같으면 본 번호가 작은 것)에 더하고 다시 정렬한다. UE는 8비트를 `w >> 8`로 잘라 합이 255보다 작아질 수 있다(SkinWeightVertexBuffer.cpp `SetBoneWeight`) — Rocks는 6.3절대로 합을 맞춘다. 반올림으로 0이 된 영향도 칸과 본을 유지한다.
+11. **bone map과 필요 본.** bone map은 렌더 정점이 쓰는 (기본·프로필) 영향 본의 정렬된 중복 없는 목록이다(빠진 삼각형만 쓰던 정점은 넣지 않는다). 필요 본 목록은 UE `CalculateRequiredBones`(제거 본이 없을 때)와 같이 메시 본 전체다 — 본 제거(`bonesToRemove`)는 보존 설정이라 MA5b 이후에 뺀다. 버린 대안: bone map + 조상(스킨에 안 쓰는 소켓·IK 본이 평가되지 않아 UE와 달라진다).
+12. **inverse-bind.** 본 번호 순으로 component[b] = local[b].ToMatrix() × component[부모](`Mat4d`, UE `CalculateInvRefMatrices`와 같은 곱 순서)를 만들고 `Mat4d::TryInverse`로 뒤집는다. UE는 float(`FMatrix44f`)로 저장하는데 그 변환은 쿠킹 패킹(MA5b) 몫이다. 행렬식이 0이라 역이 없으면(크기 0 축) `InvalidSkeletonData`·`SingularBindPose`(index = 본) 실패다 — UE는 경고만 남기고 쓸 수 없는 행렬을 둔다.
+13. **morph target.** `Morph-<이름>` 속성마다 하나(원본 속성 순서)이고 같은 이름(Name 비교 규칙)의 `MorphNormal-<이름>`을 짝으로 쓴다. 짝이 없는 `MorphNormal-`도 그 뒤에 위치 변화량 0인 target으로 둔다. 렌더 정점 번호 오름차순으로 Δp = 그 정점을 만든 코너의 원본 정점 변화량, Δn = 같은 코너의 `MorphNormal-` 값이다. `MorphNormal-`이 없으면 UE처럼 법선을 다시 계산한다: Δp가 0이 아닌 정점을 옮긴 위치로, 그 정점을 쓰는 삼각형의 세 정점에 붙은 코너 법선만 0으로 두고 5.2절 3·5단계(법선만, 같은 가중 설정)를 다시 돌려 Δn = (새 법선의 렌더 정규화) − (렌더 법선)이다. UE는 한 고리 더 넓게 0으로 두고(바뀌지 않은 면만 쓰는 코너까지) 원본 점 하나의 법선을 모든 렌더 정점에 쓰는데, Rocks는 실제로 바뀌는 코너만 다시 계산하고 렌더 정점마다 자기 코너 값을 쓴다. 담는 조건은 UE `ComputeMorphDeltas`와 같다: |Δp|² > `morphThresholdPosition`² 이거나, 법선을 추적하는 경우(`MorphNormal-`이 있거나 `recomputeNormals`) |Δn|² > `MorphNormalDeltaThresholdSquared`(0.01). 변화량이 하나도 없는 target도 빈 목록으로 남는다. morph 속성 값은 3.3절 정리 대상이 아니므로 비유한 항목은 0으로 보고 속성마다 `NonFiniteAttribute`(issue `NonFiniteMorph`, count = 항목 수) 경고를 낸다.
+14. **경고 순서.** 값 정리(NonFiniteAttribute·UvOutOfRange·NonNormalizedWeights) → `UnsupportedSetting`(필드 순) → 가중치 속성 순(기본 먼저, 프로필은 원본 순서)으로 `MissingInfluences`·`InfluencesTrimmed` → morph target 순으로 `NonFiniteAttribute`(morph) → `MaterialSlotFallback`(묶음 순)이다.
+15. **정적 빌드와 공유.** 5.2절 단계 함수(원본 사본·값 정리 경고·설정 경고·렌더 정점·섹션·bounds)를 MeshTools 내부 공용 파일로 옮기고 렌더 정점 구성에 용접 임계값·삼각형 번호 붕괴 제외·추가 비교 함수·렌더 정점을 만든 코너 목록을 매개변수로 더했다. 정적 빌드 결과 byte는 그대로다(기존 시험).
+16. **진단 등록.** `AssetDiagnosticCode`에 `InfluencesTrimmed`(11절에 있던 이름)와 `MissingInfluences`(새 경고 — 11절 표에 더했다)를, `MeshIssue`에 `InfluencesTrimmed`·`MissingInfluences`·`NonFiniteMorph`·`InvalidSettingValue`·`InvalidBoneHierarchy`·`EmptyBoneHierarchy`·`SingularBindPose`를 더했다. MeshSource에 접두 판정 `MatchesMeshAttributePrefix`(3.7절 5와 같은 ASCII 대소문자 무시, 접두 뒤가 비면 거짓)를 공개해 빌드가 이름 판정을 다시 구현하지 않게 했다.
+17. **결정성.** 빌드 전체가 `RunWithDeterministicFloatingPoint` 안이고 스레드를 쓰지 않는다. 정수 규칙(정렬·정규화·부호화)은 입력만으로 정해지고, morph 법선 재계산은 기본 빌드와 같은 결정적 수학을 쓴다.
+
 ## 7. 애니메이션 클립
 
 ### 7.1 클래스
@@ -618,6 +640,7 @@ AssetSystem 4.6절 진단 표에 등록한다(요구 MR10).
 | `NonNormalizedWeights` | 경고 | 스킨 가중치 합이 `BoneWeightTotal`이 아님 |
 | `TooManyInfluences` | 오류 | 정점 영향이 `MeshMaxSourceInfluences` 초과(원본 상한) |
 | `InfluencesTrimmed` | 정보 | 쿠킹 상한으로 영향을 버림 |
+| `MissingInfluences` | 경고 | 스킨 메시 정점에 영향이 없어 루트 본에 붙임(6.5절 7 — MA5a에서 더함) |
 | `MaterialSlotFallback` | 경고 | 다각형 묶음 이름과 맞는 슬롯 없음 |
 | `NegativeBuildScale` | 경고 | buildScale 음수 성분 홀수 개(winding 반전 없음) |
 | `UnsupportedSetting` | 경고 | 보존 상태 설정이 기본값이 아님 |
@@ -764,6 +787,52 @@ Coverage(2026-11-21, clang source-based — `Build/MeasureCoverage.ps1`과 같�
 
 Coverage(2026-11-21, clang source-based — `Build/MeasureCoverage.ps1`): 시험 `Skeleton_`(15개) 모두 통과. Animation Private·Public 8개 파일 줄 627/627(100%), 분기 333/334(99.70%), 함수 47/47. 닿지 않은 분기 1개는 이름 표 이진 탐색(`FindNamed`)의 "다른 pool 이름" 비교 쪽이다 — 병합·검증의 이름 조회는 같은 pool이라는 전제(6.4절 6) 안에서만 부르므로 domain이 다른 키가 오지 않는다(정렬 쪽 domain 비교는 다른 pool 이름을 섞은 계층 시험이 닿는다). 측정 중 닿을 수 없음을 확인한 구조는 고쳤다: 중복 이름 찾기의 "묶음 첫 원소까지 거슬러 오르기"(묶음 안이 번호 순이라 두 번째 원소의 바로 앞이 첫 원소다), 검증 단계 사이에 이름 표를 다시 써 용량이 남아 할당이 일어나지 않던 경로(단계마다 새 표).
 
+### 12.4 요구 대조표(MA5a — 스킨 빌드 핵심)
+
+시험은 EngineTests의 `SkinnedMeshBuild_*`(`Engine/Source/Developer/MeshTools/Tests`, 16개)다. 정적 빌드 시험(`StaticMeshBuild_*` 26개)은 단계 함수를 옮긴 뒤에도 그대로 통과한다(결과 byte 불변). 진단 이름표는 `MeshSource_DiagnosticNames`·`AssetPackage_DiagnosticNames`가 새 코드까지 본다.
+
+| 요구 | 시험 |
+|---|---|
+| 6.3 `SkinnedMeshBuildSettings` 여섯 필드·UE 기본값·리플렉션 필드(상속 펼침)·보존 판정(buildScale 포함) | `SkinnedMeshBuild_SettingFieldTable`, `SkinnedMeshBuild_PreservedSettingsWarn`, `StaticMeshBuild_SettingFieldTable` |
+| 6.5절 3 스킨 빌드의 buildScale 미적용·`UnsupportedSetting`·`NegativeBuildScale` 없음 | `SkinnedMeshBuild_PreservedSettingsWarn` |
+| 6.5절 4·5 설정·본 계층·원본 입력 오류(임계값 NaN·무한·음수, 상한 음수, 본 없음·계층 위반·boneIndex 범위·합 0, 실패 시 결과 그대로) | `SkinnedMeshBuild_RejectsInvalidInputs` |
+| 6.5절 5 값 정리 경고의 원본 속성 번호(기본·프로필) | `SkinnedMeshBuild_RejectsInvalidInputs` |
+| 6.5절 6 스킨 임계값(위치·UV·법선 경계 안·밖, 위치 0)·번호가 겹친 삼각형 제외(세 쌍)·removeDegenerates와 정적 빌드의 차이 | `SkinnedMeshBuild_ThresholdsAndCollapsedTriangles` |
+| 6.5절 7 영향 줄이기(가중치 0 제외, 동률은 본 번호, 잔차는 가장 큰 영향, 상한 1·4·8·100, 12개 원본, 루트 대체) | `SkinnedMeshBuild_ReduceInfluences`, `SkinnedMeshBuild_InfluencesAndBoneMap` |
+| 6.5절 7 `MissingInfluences`·`InfluencesTrimmed`(정점 수·첫 정점·속성 번호·순서) | `SkinnedMeshBuild_InfluencesAndBoneMap`, `SkinnedMeshBuild_WeightProfiles` |
+| 6.5절 8 용접의 스킨 항목(기본·프로필 영향 값과 개수, morph 위치 변화량, MorphNormal, 비유한 morph를 0으로) | `SkinnedMeshBuild_WeldComparesSkinData` |
+| 6.5절 9 가중치 프로필(원본 순서, 프로필 본이 bone map에, 빠진 정점은 루트) | `SkinnedMeshBuild_WeightProfiles` |
+| 6.5절 10 칸 수 4/8, 8비트 잔차(양·음)·0이 된 영향 유지, 16비트 그대로, 빈 칸 (0, 0) | `SkinnedMeshBuild_QuantizeWeights8`, `SkinnedMeshBuild_InfluencesAndBoneMap` |
+| 6.5절 11 bone map(오름차순·map 위치 번호)·필요 본(메시 본 전체) | `SkinnedMeshBuild_InfluencesAndBoneMap`, `SkinnedMeshBuild_BindPose` |
+| 6.5절 12 inverse-bind(독립 계산과 bit 일치, 역 × component ≈ 단위)·`SingularBindPose` | `SkinnedMeshBuild_BindPose`, `SkinnedMeshBuild_RejectsInvalidInputs` |
+| 6.5절 13 morph 법선 재계산(옮긴 메시를 처음부터 빌드한 법선과 bit 일치, 가중 법선, 위치 문턱으로 법선만 담기) | `SkinnedMeshBuild_MorphTargets` |
+| 6.5절 13 MorphNormal 짝(대소문자 무시)·짝 없는 MorphNormal·문턱 경계(같으면 뺌)·법선 추적 여부·빈 target·비유한 항목 경고 | `SkinnedMeshBuild_MorphAttributesAndThreshold` |
+| 6.5절 15 정적 빌드와 렌더 부분 일치(정육면체·구·공유 메시, 설정 8가지) | `SkinnedMeshBuild_RenderPartMatchesStaticBuild` |
+| 6.5절 17 결정성(두 번, 호출 전 FTZ, 임시 할당기 따로) | `SkinnedMeshBuild_DeterministicBytes`, `SkinnedMeshBuild_FuzzSourceMeshes` |
+| 할당 실패 주입(결과 그대로·같은 결과, 경고를 처음 할당하는 단계 7가지) | `SkinnedMeshBuild_AllocationFailures` |
+| 고정 seed 퍼징(MA1 생성기 400개 — 원본 진단 일치, 영향·bone map·morph 순서 불변식, 두 번 빌드 byte 일치) | `SkinnedMeshBuild_FuzzSourceMeshes` |
+| 11 `InfluencesTrimmed`·`MissingInfluences` 등록·이름, 접두 판정 `MatchesMeshAttributePrefix` | `MeshSource_DiagnosticNames`, `AssetPackage_DiagnosticNames` |
+
+Coverage(2026-11-21, clang source-based — `Build/MeasureCoverage.ps1`, 필터 `SkinnedMeshBuild`·`StaticMeshBuild`): 시험 42개 모두 통과. 대상은 Mesh·MeshTools Private·Public이다.
+
+| 파일 | 줄 | 분기 |
+|---|---|---|
+| SkinnedMeshBuilder.cpp | 664/666 | 320/328 |
+| MeshLodBuild.cpp | 432/434 | 249/250 |
+| StaticMeshBuilder.cpp | 157/159 | 62/64 |
+| MeshTangentBasis.cpp | 442/442 | 217/220 |
+| MeshBuildInternal.h | 81/81 | 34/36 |
+| MeshMikkTSpace.cpp·MeshOverlappingCorners.cpp | 149/149 | 48/49 |
+| MeshBuildSettings.cpp·MeshModule.cpp·공개 헤더 둘 | 176/176 | 168/168 |
+| 합계(Mesh·MeshTools) | 2101/2107(99.72%) | 1098/1115(98.48%), 함수 125/125 |
+
+닿지 않은 분기 17개의 사유:
+- 6개는 `ROCKS_ASSERT`의 실패 쪽이다(`ReduceBoneInfluences`의 인자 계약 넷, `QuantizeSkinWeights8`의 잔차 범위 둘 — 합이 65535이고 영향이 8개 이하면 첫 영향은 32 이상이고 잔차는 ±4 안이다).
+- 5개는 메모리 상한이다: 두 빌드의 삼각형 수 상한(index 수 uint32·`MeshMikkTSpaceMaxTriangles`) 넷, 원본 사본의 `AddPolygonGroup` 실패 하나(12.2절과 같다).
+- 6개는 12.2절에 적은 MA2a 그대로다(`BasisWithUv`의 UE 식 셋, `IsFiniteVector`의 y·z 성분 단락 둘, MikkTSpace 단언 하나).
+
+측정 중 닿을 수 없음을 확인한 구조는 고쳤다: morph 재계산 판정의 "위치 속성 있음" 조건(MorphNormal이 없는 target은 늘 위치 속성이 있다), 원본 사본의 가중치 접두 속성 요소 검사(원본 검증이 보장한다).
+
 ## 13. 단계
 
 ID는 이 문서가 부여한다(MA). 착수는 사용자가 정하고, 고정 구현 순서를 바꾸지 않는다. 단, 사용자 지시(2026-11-21 "진행 가능한거부터")에 따라 에셋 DB·쿠커·머티리얼 클래스에 기대지 않는 부분을 a 단계(MA2a·MA3a·MA4a·MA5a·MA6a)로 떼어 먼저 한다. 떼어 낸 부분은 순수 함수·값 타입·A1 수준 에셋 클래스뿐이라, 뒤 단계(MA2b·MA4b)가 그 위에 쿠킹 처리기·임포트 서비스를 얹을 때 바꿀 계약이 없다.
@@ -776,7 +845,7 @@ ID는 이 문서가 부여한다(MA). 착수는 사용자가 정하고, 고정 �
 | MA3a | 단순 충돌 값 타입(4.6절 `SimpleCollision`·형상 struct·`CollisionComplexity`)과 검증(유한값·양의 크기·볼록 형상 bulk 길이·index 범위), `UnsupportedCollisionShape` 등록 — `Mesh` 모듈, `StaticMesh` 필드 연결은 MA2b | MA2a |
 | MA4a | `Animation` 모듈: `BoneHierarchy`(불변식 검증)·`Skeleton` 에셋 클래스(저장·로드 왕복), 병합 판정 함수(부모 사슬 대조, `SkeletonMismatch`)까지 — 에셋 DB 없이 되는 부분. **구현(2026-11-21, 미커밋)**: 모듈 `Engine/Source/Runtime/Animation`, 진단 코드 `InvalidSkeletonData`·`SkeletonMismatch`, 시험 15개(12.3절 대조표·coverage), 정한 점은 6.4절 | A1 |
 | MA4b | 스켈레톤 임포트 서비스·기존 스켈레톤 병합 저장·너겟 무효화 | MA4a, A2–A4 |
-| MA5a | 스킨 빌드 핵심(순수 함수): `SkinnedMeshBuildSettings`, 원본 스킨 가중치를 렌더 정점까지 옮기기(용접 비교에 영향 포함), 영향 줄이기·8/16비트 정규화(`InfluencesTrimmed`), LOD 통합 bone map·필요 본 목록·inverse-bind 행렬(MA4a `BoneHierarchy`), morph target 희소 변화량 빌드(`morphThresholdPosition`) — 메모리 결과까지 | MA2a, MA4a |
+| MA5a | 스킨 빌드 핵심(순수 함수): `SkinnedMeshBuildSettings`, 원본 스킨 가중치를 렌더 정점까지 옮기기(용접 비교에 영향 포함), 영향 줄이기·8/16비트 정규화(`InfluencesTrimmed`), LOD 통합 bone map·필요 본 목록·inverse-bind 행렬(MA4a `BoneHierarchy`), morph target 희소 변화량 빌드(`morphThresholdPosition`) — 메모리 결과까지. **구현(2026-11-21, 미커밋)**: `Mesh`의 `SkinnedMeshBuildSettings`(리플렉션 파생 struct), `MeshTools`의 `BuildSkinnedMeshLod`·`ReduceBoneInfluences`·`QuantizeSkinWeights8`(5.2절 단계 함수는 공용 파일로 옮김), 진단 코드 `InfluencesTrimmed`·`MissingInfluences`, 시험 16개(12.4절 대조표·coverage), 정한 점은 6.5절 | MA2a, MA4a |
 | MA5b | `SkinnedAsset`·`SkeletalMesh` 클래스, 쿠킹 렌더 데이터 패킹(`SkinnedRenderLod`), 쿠킹 처리기·임포트 서비스, 스켈레톤 병합 저장 연결 | MA5a, MA2b, MA4b |
 | MA6a | 애니메이션 클립 핵심: `AnimationAsset`·`AnimationClip` 클래스(저장·로드 왕복), `ClipSourceData`·이벤트·동기 마커·설정 검증(`InvalidClipData`·`UnknownBoneTrack`), 원본 샘플링, 쿠킹 데이터 v1로 바꾸는 순수 함수(상수 트랙 접기·재샘플링)와 쿠킹 데이터 샘플링, CoreTypeBindings `FrameRate` 미러(MR8) | MA4a, Curve 단계(완료) |
 | MA6b | 클립 쿠킹 처리기·임포트 서비스·스켈레톤 병합 뒤 재쿠킹(너겟 무효화) | MA6a, MA4b |
@@ -829,6 +898,8 @@ ID는 이 문서가 부여한다(MA). 착수는 사용자가 정하고, 고정 �
 - 개정 8(2026-11-21): MA4a 구현에서 정한 점을 6.4절에 적었다(모듈 의존, 계층 불변식의 순서와 경계, pose 정규화 함수, 스켈레톤 필드 규칙, 새 진단 코드 `InvalidSkeletonData`와 `SkeletonDiagnostic`, UE 기본 경로를 옮긴 병합 판정과 대소문자 이름 바꾸기, 결정성, 시험 환경). 11절 표에 `InvalidSkeletonData`를 더하고 12.3절 대조표, 13절 MA4a 상태를 고쳤다.
 
 - 개정 9(2026-11-21): MA3·MA5·MA6도 같은 방식으로 a·b로 나눴다(MA3a 충돌 값·검증, MA5a 스킨 빌드 핵심, MA6a 클립 핵심 — 에셋 DB·쿠커 없이 되는 부분). UX1a는 엔진 플러그인 빌드 지원(BuildTargets BS4 엔진 쪽)이 없어 보류했다.
+
+- 개정 10(2026-11-21): MA5a 구현에서 정한 점을 6.5절에 적었다(API·결과 형태, 설정 struct 상속과 필드 번호, 스킨 빌드의 buildScale 보존, 설정 검사와 영향 상한 기본값, 가중치를 담은 원본 사본, 스킨 임계값과 번호가 겹친 삼각형 제외, 영향 줄이기와 루트 본 대체(`MissingInfluences` — 새 경고), 용접의 스킨 항목(영향·프로필·morph), 가중치 프로필 빌드, 쿠킹 칸 수와 8비트 잔차, bone map과 필요 본, inverse-bind와 `SingularBindPose`, morph target 짝·법선 재계산·담는 조건, 경고 순서, 정적 빌드와의 단계 공유, 진단 등록, 결정성). 11절 표에 `MissingInfluences`를 더하고 12.4절 대조표, 13절 MA5a 상태를 고쳤다.
 
 ## 17. 교차 검증 기록(개정 2)
 

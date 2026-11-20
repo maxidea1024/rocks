@@ -1,6 +1,10 @@
 #include "LaunchProbe.h"
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
 
 // Rocks를 내장한 호스트 프로세스의 시험판이다(설계 8.8절). 호스트가 자기 진입점(wmain)과 처리되지
 // 않은 예외 filter를 갖고, Rocks는 내장 진입(RunEmbeddedApplication)으로 부른다. Rocks는 호스트의

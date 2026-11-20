@@ -5,13 +5,15 @@
 #include <Core/Math/MathUtility.h>
 #include <Core/Math/Vector2.h>
 #include <Core/Math/Vector3.h>
+#include <Core/Math/Color.h>
+#include <MeshSource/MeshSourceValidation.h>
 #include <MeshSource/MeshTopologyIndex.h>
 #include <MeshTools/StaticMeshBuilder.h>
 
-// 정적 메시 빌드의 모듈 내부 공용 부분이다(Docs/Design/MeshAnimationAssets.ko.md 5.2·5.4절). 벡터
-// 도우미는 UE TVector의 같은 이름 함수와 같은 식·같은 임계값으로 둔다(연산 순서가 결과 bit를
-// 정하므로 Core Vector3 함수 대신 여기서 식을 고정한다). 제곱근은 IEEE 정확 반올림
-// 명령(math::Sqrt)이라 결정적이다.
+// 정적·스킨 메시 빌드의 모듈 내부 공용
+// 부분이다(Docs/Design/MeshAnimationAssets.ko.md 5.2·5.4·6.5절). 벡터 도우미는 UE TVector의 같은
+// 이름 함수와 같은 식·같은 임계값으로 둔다(연산 순서가 결과 bit를 정하므로 Core Vector3 함수 대신
+// 여기서 식을 고정한다). 제곱근은 IEEE 정확 반올림 명령(math::Sqrt)이라 결정적이다.
 namespace rocks::mesh_build {
 
 // UE 수치 상수(UnrealMathUtility.h): SMALL_NUMBER·KINDA_SMALL_NUMBER·DELTA·MIN_flt.
@@ -55,11 +57,6 @@ inline bool IsNearlyZero(const Vec3& value, float tolerance) noexcept {
 inline bool PointsEqual(const Vec3& a, const Vec3& b, float threshold) noexcept {
     return math::Abs(a.x - b.x) <= threshold && math::Abs(a.y - b.y) <= threshold &&
            math::Abs(a.z - b.z) <= threshold;
-}
-
-inline bool UvsEqual(const Vec2& a, const Vec2& b) noexcept {
-    return math::Abs(a.x - b.x) <= MeshUvsSameThreshold &&
-           math::Abs(a.y - b.y) <= MeshUvsSameThreshold;
 }
 
 // UE GetSafeNormal(Tolerance): 제곱합이 정확히 1이면 그대로, tolerance 미만이면 0 벡터, 아니면
@@ -196,5 +193,132 @@ Result<void> ComputeCornerBases(const MeshSource& mesh, const MeshTopologyIndex&
 // 남는다(UE와 같다). 오류: MikkTSpace 내부 할당 실패는 그 할당기 오류다.
 Result<void> ComputeMikkTSpaceTangents(const MeshSource& mesh, Allocator& scratch,
                                        CornerBasis& basis) noexcept;
+
+// 5.2절 1–5·8–10·12단계의 단계 함수다(정적 빌드와 스킨 빌드가 함께 쓴다 — 6.5절 15, 구현은
+// MeshLodBuild.cpp).
+
+// 사본이 담는 코너 속성 수다(Normal·Tangent·BinormalSign·Color·TexCoord).
+inline constexpr uint32 CopiedCornerAttributes = 5;
+
+enum CopiedSlot : uint32 {
+    NormalSlot,
+    TangentSlot,
+    SignSlot,
+    ColorSlot,
+    TexCoordSlot
+};
+
+// 원본 사본의 속성 번호와 원본 번호의 대응이다(없으면 MeshNoAttribute). weights는 스킨 빌드가 담는
+// 정점 가중치 속성(기본 SkinWeights 먼저, 그다음 SkinWeights-<profile>을 원본 순서로)이다.
+struct WorkAttributes {
+    explicit WorkAttributes(Allocator& allocator) noexcept
+        : weightWork(allocator), weightSource(allocator) {
+    }
+
+    uint32 work[CopiedCornerAttributes] = {MeshNoAttribute, MeshNoAttribute, MeshNoAttribute,
+                                           MeshNoAttribute, MeshNoAttribute};
+    uint32 source[CopiedCornerAttributes] = {MeshNoAttribute, MeshNoAttribute, MeshNoAttribute,
+                                             MeshNoAttribute, MeshNoAttribute};
+    Array<uint32> weightWork;
+    Array<uint32> weightSource;
+
+    // 사본 속성 번호의 원본 번호다(대응이 없으면 그대로).
+    uint32 ToSource(uint32 attribute) const noexcept;
+};
+
+// 경고 하나를 만든다(code·issue·요소·위치·수).
+MeshDiagnostic MakeWarning(AssetDiagnosticCode code, MeshIssue issue, MeshElement element,
+                           uint32 attribute, uint32 index, uint64 count) noexcept;
+
+// 원본의 위상과 빌드가 쓰는 코너 속성만 담은 사본을 만든다(5.4절 3). copyWeights면 정점
+// SkinWeights·SkinWeights-<profile>도 담는다(6.5절 5). 오류: 할당 실패.
+Result<void> CopyBuildMesh(const MeshSource& source, bool copyWeights, MeshSource& work,
+                           WorkAttributes& attributes) noexcept;
+
+// 사본에 값 정리(SanitizeMeshSource)를 하고 경고를 원본 속성 번호로 바꿔 out 뒤에 붙인다. 실패
+// 진단(failure — 늘 있다)의 속성 번호도 원본 번호로 바꾼다. options.scratch는 null이 아니어야 한다.
+// 오류: 값 정리 실패(가중치 합 0), 할당 실패.
+Result<void> SanitizeWorkMesh(MeshSource& work, const WorkAttributes& attributes,
+                              const MeshValidateOptions& options, Array<MeshDiagnostic>& out,
+                              MeshDiagnostic* failure) noexcept;
+
+// 5.2절 3·5단계 결과다. basis의 span은 work의 코너 속성 값을 가리킨다.
+struct LodBases {
+    explicit LodBases(Allocator& allocator) noexcept : triangles(allocator), topology(allocator) {
+    }
+
+    CornerBasis basis;
+    TriangleBases triangles;
+    MeshTopologyIndex topology;
+    // 변마다의 IsHard 값(원본 속성 — 없으면 비어 있다).
+    Span<const uint8> hardness;
+    CornerBasisOptions options;
+    bool hasUv = false;
+};
+
+// 5.2절 3·5단계: 삼각형 기저(위치 임계값 threshold) → 위상 조회 → 코너 법선·tangent(설정의 재계산·
+// 가중·MikkTSpace 플래그). 오류: 할당 실패, MikkTSpace 할당 실패.
+Result<void> ComputeLodBases(const MeshSource& source, MeshSource& work,
+                             const WorkAttributes& attributes, const MeshBuildSettings& settings,
+                             float threshold, Allocator& scratch, LodBases& out) noexcept;
+
+// 렌더 정점 용접 규칙이다(5.4절 4·10, 6.5절 6·8).
+struct WeldOptions {
+    // 퇴화 삼각형 판정의 위치 임계값이다(두 꼭짓점이 이 안에서 같으면 뺀다).
+    float degenerateThreshold = 0.0f;
+    // 용접 비교의 위치·법선(tangent·쌍법선 포함)·UV 임계값이다.
+    float positionThreshold = 0.0f;
+    float normalThreshold = MeshNormalsSameThreshold;
+    float uvThreshold = MeshUvsSameThreshold;
+    // 용접 뒤 세 렌더 정점 번호가 서로 다르지 않은 삼각형도 뺀다(UE 스킨 빌드).
+    bool dropCollapsedTriangles = false;
+    // 위 항목이 모두 같을 때 더 비교한다(두 코너 번호 — a는 지금 코너, b는 후보 렌더 정점을 만든
+    // 코너). null이면 비교하지 않는다.
+    bool (*sameExtra)(const void* context, uint32 a, uint32 b) noexcept = nullptr;
+    const void* context = nullptr;
+};
+
+// 렌더 정점을 만드는 중의 보조 배열이다(UE FMeshBuildVertexData). 빌드가 끝난 뒤 스킨 빌드가
+// wedgeVertices·vertexCorners·triangleKept를 읽는다.
+struct VertexBuffers {
+    explicit VertexBuffers(Allocator& allocator) noexcept
+        : tangentY(allocator), colorKeys(allocator), uvs(allocator), wedgeVertices(allocator),
+          vertexCorners(allocator), triangleKept(allocator) {
+    }
+
+    // 용접 비교에 쓰는 쌍법선과 8비트 sRGB 색(UE는 FColor로 비교한다)이다.
+    Array<Vec3> tangentY;
+    Array<Color> colorKeys;
+    // 정점 우선 UV(정점마다 채널 수만큼) — 끝에 채널 우선으로 옮긴다.
+    Array<Vec2> uvs;
+    // wedge마다의 렌더 정점 번호(퇴화로 빠진 삼각형은 NoRenderVertex).
+    Array<uint32> wedgeVertices;
+    // 렌더 정점마다 그것을 만든 코너 번호다.
+    Array<uint32> vertexCorners;
+    // 삼각형마다 index에 남는지(1) 빠졌는지(0)다.
+    Array<uint8> triangleKept;
+};
+
+// 법선 하나를 렌더 법선으로 바꾼다(UE ScaleStaticMeshVertex의 법선: 크기로 나눈 뒤 정규화, 비유한은
+// 0 벡터). 렌더 정점 구성과 morph 법선 변화량(6.5절 13)이 같은 식을 쓴다.
+Vec3 RenderNormal(const Vec3& normal, const Vec3& scale) noexcept;
+
+// 5.2절 8·9단계: 삼각형 순서로 코너를 렌더 정점으로 옮긴다(UE BuildVertexBuffer·
+// BuildSkeletalMeshChunks). 오류: 할당 실패.
+Result<void> BuildRenderVertices(const MeshSource& work, const CornerBasis& basis,
+                                 const WorkAttributes& attributes,
+                                 const OverlappingWedges& overlaps, const Vec3& scale,
+                                 const WeldOptions& weld, StaticMeshBuildResult& result,
+                                 VertexBuffers& buffers) noexcept;
+
+// 5.2절 10단계: 묶음 순서 섹션과 index, 슬롯 대응·MaterialSlotFallback 경고. 오류: 할당 실패.
+Result<void> BuildSections(const MeshSource& source, Span<const StringView> slotNames,
+                           Span<const MeshBuildSectionInfo> sectionInfo,
+                           const VertexBuffers& buffers, Allocator& scratch,
+                           StaticMeshBuildResult& result) noexcept;
+
+// 5.2절 12단계: 렌더 정점 위치의 상자·구 bounds와 확장.
+MeshBuildBounds ComputeBounds(Span<const Vec3> positions, const Vec3d& positiveExtension,
+                              const Vec3d& negativeExtension) noexcept;
 
 } // namespace rocks::mesh_build

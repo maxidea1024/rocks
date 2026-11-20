@@ -1,6 +1,11 @@
 #include "CommandletHost.h"
 #include <Platform/Win64/WideString.h>
+
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
 
 // Windows 표준 출력 채널이다. 콘솔이면 UTF-16 WriteConsoleW, 리디렉션이면 UTF-8 byte 그대로다.
 namespace {

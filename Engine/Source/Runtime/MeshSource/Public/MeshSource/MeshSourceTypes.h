@@ -136,8 +136,22 @@ enum class MeshIssue : uint8 {
     MaterialSlotFallback, // 묶음의 슬롯 이름과 맞는 슬롯이 없음
     NegativeBuildScale,   // buildScale 음수 성분이 홀수 개(count = 그 수)
     UnsupportedSetting,   // 보존 설정(MeshBuildSettingField)이 기본값이 아님
-    InvalidBuildScale     // buildScale 축이 0·비유한이거나 역수가 비유한
+    InvalidBuildScale,    // buildScale 축이 0·비유한이거나 역수가 비유한
+    // 스킨 빌드(MeshTools BuildSkinnedMeshLod — 6.5절). 경고 셋은 같은 이름의 코드(NonFiniteMorph는
+    // NonFiniteAttribute), InvalidSettingValue는 InvalidSetting, 나머지는 InvalidSkeletonData다.
+    InfluencesTrimmed,    // 쿠킹 상한으로 영향을 버린 정점이 있음(count = 정점 수)
+    MissingInfluences,    // 영향이 없어 루트 본에 붙인 정점이 있음(count = 정점 수)
+    NonFiniteMorph,       // morph 변화량 비유한 항목을 0으로 봄(count = 항목 수)
+    InvalidSettingValue,  // 스킨 임계값이 음수·비유한이거나 boneInfluenceLimit이 음수(index = 필드)
+    InvalidBoneHierarchy, // 메시 본 계층이 ValidateBoneHierarchy를 통과하지 못함(index = 본)
+    EmptyBoneHierarchy,   // 메시 본 계층에 본이 없음
+    SingularBindPose      // 본의 component 공간 기준 pose 행렬에 역이 없음(index = 본)
 };
+
+// name이 prefix(엔진 접두 이름 — MeshAttributeName::SkinWeightsPrefix·MorphPrefix·
+// MorphNormalPrefix)로 시작하고 접두 뒤가 비어 있지 않은지다. 접두 비교는 ASCII 대소문자를
+// 무시한다(3.7절 5 — ValidateMeshSource의 판정과 같다). 빌드가 프로필·morph 속성을 고를 때 쓴다.
+bool MatchesMeshAttributePrefix(StringView name, StringView prefix) noexcept;
 
 // 진단 세부 규칙의 이름이다(예: DuplicateEdge → "DuplicateEdge"). 모르는 값은 "Unknown"이다. 반환
 // 문자열은 정적 수명이다(로그·명령행 진단 줄이 쓴다).

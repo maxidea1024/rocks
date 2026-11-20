@@ -50,6 +50,18 @@ const char* MeshBuildSettingFieldName(MeshBuildSettingField field) noexcept {
         return "maxLumenMeshCards";
     case MeshBuildSettingField::SupportFaceRemap:
         return "supportFaceRemap";
+    case MeshBuildSettingField::UseHighPrecisionSkinWeights:
+        return "useHighPrecisionSkinWeights";
+    case MeshBuildSettingField::ThresholdPosition:
+        return "thresholdPosition";
+    case MeshBuildSettingField::ThresholdTangentNormal:
+        return "thresholdTangentNormal";
+    case MeshBuildSettingField::ThresholdUV:
+        return "thresholdUV";
+    case MeshBuildSettingField::MorphThresholdPosition:
+        return "morphThresholdPosition";
+    case MeshBuildSettingField::BoneInfluenceLimit:
+        return "boneInfluenceLimit";
     }
 
     return "Unknown";
@@ -75,10 +87,20 @@ bool IsPreservedMeshBuildSetting(MeshBuildSettingField field) noexcept {
     case MeshBuildSettingField::UseHighPrecisionTangentBasis:
     case MeshBuildSettingField::UseFullPrecisionUVs:
     case MeshBuildSettingField::BuildScale:
+    case MeshBuildSettingField::UseHighPrecisionSkinWeights:
+    case MeshBuildSettingField::ThresholdPosition:
+    case MeshBuildSettingField::ThresholdTangentNormal:
+    case MeshBuildSettingField::ThresholdUV:
+    case MeshBuildSettingField::MorphThresholdPosition:
+    case MeshBuildSettingField::BoneInfluenceLimit:
         return false;
     }
 
     return false;
+}
+
+bool IsPreservedSkinnedMeshBuildSetting(MeshBuildSettingField field) noexcept {
+    return field == MeshBuildSettingField::BuildScale || IsPreservedMeshBuildSetting(field);
 }
 
 bool IsMeshBuildSettingChanged(const MeshBuildSettings& settings,
@@ -123,9 +145,37 @@ bool IsMeshBuildSettingChanged(const MeshBuildSettings& settings,
         return settings.maxLumenMeshCards != defaults.maxLumenMeshCards;
     case MeshBuildSettingField::SupportFaceRemap:
         return settings.supportFaceRemap != defaults.supportFaceRemap;
+    case MeshBuildSettingField::UseHighPrecisionSkinWeights:
+    case MeshBuildSettingField::ThresholdPosition:
+    case MeshBuildSettingField::ThresholdTangentNormal:
+    case MeshBuildSettingField::ThresholdUV:
+    case MeshBuildSettingField::MorphThresholdPosition:
+    case MeshBuildSettingField::BoneInfluenceLimit:
+        return false;
     }
 
     return false;
+}
+
+bool IsMeshBuildSettingChanged(const SkinnedMeshBuildSettings& settings,
+                               MeshBuildSettingField field) noexcept {
+    const SkinnedMeshBuildSettings defaults;
+    switch (field) {
+    case MeshBuildSettingField::UseHighPrecisionSkinWeights:
+        return settings.useHighPrecisionSkinWeights != defaults.useHighPrecisionSkinWeights;
+    case MeshBuildSettingField::ThresholdPosition:
+        return !SameBits(settings.thresholdPosition, defaults.thresholdPosition);
+    case MeshBuildSettingField::ThresholdTangentNormal:
+        return !SameBits(settings.thresholdTangentNormal, defaults.thresholdTangentNormal);
+    case MeshBuildSettingField::ThresholdUV:
+        return !SameBits(settings.thresholdUV, defaults.thresholdUV);
+    case MeshBuildSettingField::MorphThresholdPosition:
+        return !SameBits(settings.morphThresholdPosition, defaults.morphThresholdPosition);
+    case MeshBuildSettingField::BoneInfluenceLimit:
+        return settings.boneInfluenceLimit != defaults.boneInfluenceLimit;
+    default:
+        return IsMeshBuildSettingChanged(static_cast<const MeshBuildSettings&>(settings), field);
+    }
 }
 
 } // namespace rocks
