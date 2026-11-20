@@ -451,19 +451,20 @@ public:
     //
     // 실패: 지원하지 않는 장치 Unsupported(기본 구현), 크기 0·종류 불일치·정렬·범위 밖
     // InvalidArgument, 장치 메모리 부족 OutOfMemory·DependencyFailed.
-    virtual Result<TransientHeapHandle> CreateTransientHeap(const TransientHeapDesc& desc) noexcept {
+    virtual Result<TransientHeapHandle>
+    CreateTransientHeap(const TransientHeapDesc& desc) noexcept {
         (void)desc;
         return Result<TransientHeapHandle>::Failure(ErrorCode::Unsupported);
     }
 
-    // heap을 회수 대기로 넘긴다. 그 heap의 placed 자원이 모두 회수되고 heap의 마지막 사용(두 queue)이
-    // 끝난 뒤 해제한다. 모르는 handle은 무시한다.
+    // heap을 회수 대기로 넘긴다. 그 heap의 placed 자원이 모두 회수되고 heap의 마지막 사용(두
+    // queue)이 끝난 뒤 해제한다. 모르는 handle은 무시한다.
     virtual void RetireTransientHeap(TransientHeapHandle heap) noexcept {
         (void)heap;
     }
 
-    // desc 텍스처·버퍼를 heap에 둘 때의 크기·정렬·heap 종류다. 실패: desc 규칙 위반 InvalidArgument,
-    // 지원하지 않으면 Unsupported. 스레드 안전.
+    // desc 텍스처·버퍼를 heap에 둘 때의 크기·정렬·heap 종류다. 실패: desc 규칙 위반
+    // InvalidArgument, 지원하지 않으면 Unsupported. 스레드 안전.
     virtual Result<TransientPlacement> GetTexturePlacement(const TextureDesc& desc) const noexcept {
         (void)desc;
         return Result<TransientPlacement>::Failure(ErrorCode::Unsupported);

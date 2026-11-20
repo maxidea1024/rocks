@@ -642,6 +642,7 @@ void RenderLane::PublishTimestamps() noexcept {
             notice.frame = samples[index].query;
             notice.value = samples[index].ticks;
             notice.error = samples[index].disjoint ? ErrorCode::Cancelled : ErrorCode::None;
+            notice.queue = samples[index].queue;
             notices_.Push(notice);
         }
 

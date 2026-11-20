@@ -65,8 +65,18 @@ public:
         BeginCompute,
         EndCompute,
         // Device::QueueWait다. value는 QueueWaitValue(queue, point)다.
-        QueueWait
+        QueueWait,
+        // transient heap·placed 자원(GX12)이다. CreatePlaced의 value는 heap 안 offset, Acquire의
+        // value는 획득한 자원의 slot 번호(버퍼면 AcquireBufferBit을 더한다)다.
+        CreateTransientHeap,
+        CreatePlaced,
+        Acquire
     };
+
+    // Op::Acquire value에서 버퍼 표시 bit다.
+    static constexpr uint64 AcquireBufferBit = 1ull << 32;
+    // 기록 장치 placed 자원의 정렬(byte)이다.
+    static constexpr uint64 TransientAlignment = 256;
 
     // Op::QueueWait의 value다: 기다리는 queue가 AsyncCompute면 맨 위 bit, 아래는 기다릴 지점의
     // 값이다.
@@ -133,6 +143,15 @@ public:
     // 제출을 기다리지 않았으면 검증 오류다. async compute 기록의 그리기와 compute 상태 밖 전이도
     // 검증 오류다(실제 장치는 무시한다).
     void SetAsyncCompute(bool available, bool efficient = true) noexcept;
+
+    // transient heap(DeviceFeatures::transientHeaps)을 공개한다(RenderBase 8절 GX12). 기본은
+    // 없음이다. 장치를 쓰기 전에 부른다.
+    //
+    // alias 겹침 검출: placed 자원마다 (heap, 구간, 활성)을 두고, 획득(ResourceTransition::acquire,
+    // attachment acquire)이 그 자원을 활성으로, 같은 heap에서 구간이 겹치는 다른 자원을 비활성으로
+    // 바꾼다. 비활성 placed 자원을 쓰면(전이·묶기·attachment·복사) 검증 오류다. 처음 만든 placed
+    // 자원도 획득 전에는 비활성이다.
+    void SetTransientHeaps(bool available) noexcept;
 
     // compute queue에 제출한 마지막 값이다.
     uint64 SubmittedCompute() const noexcept;
@@ -233,6 +252,19 @@ public:
     GetTextureSubresources(graphics::TextureHandle texture) const noexcept override;
     Result<graphics::TextureHandle> CreateTexture(const graphics::TextureDesc& desc,
                                                   Span<const uint8> pixels) noexcept override;
+    Result<graphics::TransientHeapHandle>
+    CreateTransientHeap(const graphics::TransientHeapDesc& desc) noexcept override;
+    void RetireTransientHeap(graphics::TransientHeapHandle heap) noexcept override;
+    Result<graphics::TransientPlacement>
+    GetTexturePlacement(const graphics::TextureDesc& desc) const noexcept override;
+    Result<graphics::TransientPlacement>
+    GetBufferPlacement(const graphics::BufferDesc& desc) const noexcept override;
+    Result<graphics::TextureHandle>
+    CreatePlacedTexture(graphics::TransientHeapHandle heap, uint64 offset,
+                        const graphics::TextureDesc& desc) noexcept override;
+    Result<graphics::BufferHandle>
+    CreatePlacedBuffer(graphics::TransientHeapHandle heap, uint64 offset,
+                       const graphics::BufferDesc& desc) noexcept override;
     // 범위·access 규칙만 본다(ResolveTextureViewRange, 차원은 2D·2D 배열로 본다). 형식은 보지
     // 않는다.
     Result<graphics::TextureHandle>
@@ -308,6 +340,19 @@ private:
         bool computePending = false;
     };
 
+    // placed 자원 하나의 heap 구간과 활성 여부다(slot 번호로 찾는다, heap이 null이면 placed 아님).
+    struct PlacedState {
+        SlotHandle heap;
+        uint64 offset = 0;
+        uint64 bytes = 0;
+        bool active = false;
+    };
+
+    struct HeapState {
+        graphics::TransientHeapKind kind = graphics::TransientHeapKind::Buffers;
+        uint64 bytes = 0;
+    };
+
     // 자원 하나를 마지막으로 접근한 기록의 queue와 fence 값이다(0이면 아직 없음).
     struct QueueUse {
         graphics::QueueKind queue = graphics::QueueKind::Graphics;
@@ -364,6 +409,19 @@ private:
 
     // async compute 기록에서 그리기 계열 호출이 오면 검증 오류를 센다. 그 기록이면 true다.
     bool RejectOnComputeQueue() noexcept;
+
+    // placed 자원 표(textures·buffers의 slot 번호)다. 없는 칸은 placed 아님이다.
+    PlacedState* PlacedOf(Array<PlacedState>& table, uint32 index) noexcept;
+    // placed 자원을 만들 때 그 칸을 채운다(heap 검사 뒤).
+    Result<void> MarkPlaced(Array<PlacedState>& table, uint32 index, SlotHandle heap, uint64 offset,
+                            uint64 bytes) noexcept;
+    // 획득: 그 자원을 활성으로, 같은 heap의 겹치는 다른 자원을 비활성으로 바꾼다.
+    void AcquirePlaced(bool buffer, uint32 index) noexcept;
+    // 비활성 placed 자원을 쓰면 검증 오류를 센다.
+    void CheckPlacedActive(Array<PlacedState>& table, uint32 index) noexcept;
+    // placement 검사(heap·종류·정렬·범위)다.
+    Result<void> CheckPlacement(graphics::TransientHeapHandle heap, uint64 offset,
+                                const graphics::TransientPlacement& placement) const noexcept;
 
     // --- CommandContext ---
     void SetPipeline(graphics::PipelineHandle pipeline) noexcept override;
@@ -422,6 +480,9 @@ private:
     uint64 waited_[2] = {};
     Array<QueueUse> textureUses_;
     Array<QueueUse> bufferUses_;
+    SlotArray<HeapState> heaps_;
+    Array<PlacedState> placedTextures_;
+    Array<PlacedState> placedBuffers_;
     graphics::DeviceOwnership ownership_;
     SlotArray<graphics::ResourceAccess> buffers_;
     Allocator& allocator_;

@@ -210,6 +210,31 @@ struct ResourceRecord {
     bool renderTarget = false;
     // Sampled 텍스처 업로드의 초기 데이터(TextureDataBytes, 프레임 arena)다.
     uint8* uploadPixels = nullptr;
+    // --- transient aliasing(RG5) ---
+    // transient heap에 둔다(컴파일이 정한다). heap은 GraphState::transientHeaps 번호다.
+    bool transient = false;
+    uint32 transientHeap = GraphIndexNone;
+    uint64 transientOffset = 0;
+    // 장치가 준 크기와, 할당이 차지한 구간(정렬 앞 빈틈 포함, 놓을 때 이 구간을 돌려준다)이다.
+    uint64 transientBytes = 0;
+    uint64 regionBegin = 0;
+    uint64 regionEnd = 0;
+};
+
+// 그래프 안 transient heap 하나(컴파일 계획)다. pool은 실행 때 받은 풀 heap 번호다.
+struct TransientHeapPlan {
+    graphics::TransientHeapKind kind = graphics::TransientHeapKind::Buffers;
+    uint64 capacity = 0;
+    uint64 highWater = 0;
+    uint32 pool = GraphIndexNone;
+};
+
+// transient heap의 빈 구간 하나다(offset 순, 앞 자원이 놓은 구간이면 resource가 그 자원이다).
+struct TransientRange {
+    uint32 heap = GraphIndexNone;
+    uint64 offset = 0;
+    uint64 size = 0;
+    uint32 resource = GraphIndexNone;
 };
 
 // 그래프 자원이 쓰는 장치 객체 자리 하나다(같은 그래프 안 재사용 단위, RG2). 수명이 겹치지 않는
@@ -333,6 +358,8 @@ struct ChainEntry {
     bool attachment = false;
     // 앞 구간을 마지막으로 쓴 pass다(없으면 None).
     uint32 previousUser = GraphIndexNone;
+    // transient 자원의 첫 전이(aliasing 획득)다.
+    bool acquire = false;
 };
 
 // 분리 전이 묶음 하나다: beginPass epilogue에서 begin한 전이 가운데 endPass에서 end하는 것들이다.
@@ -351,6 +378,9 @@ struct GraphState {
     RenderHandleTable* handles = nullptr;
     GraphResourcePool* pool = nullptr;
     GpuTrace* trace = nullptr;
+    // compute queue 장부와 그 GPU 프레임이 열렸는지다(RG4).
+    GpuTrace* computeTrace = nullptr;
+    bool computeFrameOpen = false;
     uint64 frame = 0;
     GraphMode mode = GraphMode::Deferred;
     uint32 serial = 0;
@@ -387,6 +417,12 @@ struct GraphState {
 
     // async compute를 쓴다(Deferred, RenderGraphDesc::asyncCompute와 장치 능력, RG4).
     bool asyncEnabled = false;
+    // transient aliasing을 쓴다(Deferred, RenderGraphDesc::transientAliasing와 장치 능력, RG5)와
+    // async compute 자원도 aliasing하는지다.
+    bool transientEnabled = false;
+    bool asyncComputeAliasing = false;
+    ArenaArray<TransientHeapPlan> transientHeaps;
+    ArenaArray<TransientRange> transientRanges;
     // 컴파일이 compute queue에 둔 pass가 있다.
     bool hasAsyncPasses = false;
 
@@ -492,6 +528,9 @@ Result<void> CompileGraph(FrameArena& arena, GraphState& state) noexcept;
 
 // 두 pass가 같은 pipe에서 실행되는지다(pass 하나가 None이면 true).
 bool SamePipe(const GraphState& state, uint32 left, uint32 right) noexcept;
+
+// transient heap을 풀에서 받는다(컴파일 계획의 heap마다, Deferred 실행 앞부분).
+Result<void> AcquireTransientHeaps(GraphState& state) noexcept;
 
 // Deferred 실행 앞부분(async compute가 있을 때): 그래프 업로드를 제출하고 prologue fork 전이를
 // graphics 기록 하나에서 낸 뒤 그래프 시작 지점을 정한다.

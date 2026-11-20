@@ -38,6 +38,9 @@ struct GpuTraceSettings {
     // queue 정의(Trace.GpuQueue)의 id와 이름이다. 이름은 정적 수명 문자열이다.
     uint16 queueId = 0;
     const char* queueName = "Graphics";
+    // 이 장부가 맡는 장치 queue다(async compute queue 구간은 따로 장부 하나를 둔다, RenderBase 8절
+    // RG4). calibration은 CalibrateClocks(queue)이고 Consume은 이 queue의 timestamp 통지만 쓴다.
+    graphics::QueueKind queue = graphics::QueueKind::Graphics;
 };
 
 struct GpuTraceStats {

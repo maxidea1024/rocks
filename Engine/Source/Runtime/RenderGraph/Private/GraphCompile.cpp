@@ -106,7 +106,8 @@ Result<void> PlanResourceReuse(FrameArena& arena, GraphState& state) noexcept {
         const uint32 endUse = record.firstUse + record.useCount;
         const auto acquire = [&](uint32 index) noexcept -> Result<void> {
             ResourceRecord& resource = state.resources[index];
-            if (resource.imported || resource.physical != GraphIndexNone) {
+            // transient 자원은 장치 객체 자리가 아니라 heap 구간을 쓴다(RG5).
+            if (resource.imported || resource.transient || resource.physical != GraphIndexNone) {
                 return Result<void>::Success();
             }
 
@@ -351,6 +352,260 @@ Result<void> PlanAsyncCompute(FrameArena& arena, GraphState& state) noexcept {
     return Result<void>::Success();
 }
 
+// transient aliasing 계획이다(RG5, RenderBase 8절 "GX12·RG5 transient aliasing 설계", UE
+// RHICore/Private/RHICoreTransientResourceAllocator.cpp:132–296과 같은 first fit).
+// - 대상: 그래프가 만든 RenderTarget·DepthStencil·Storage 텍스처와 쓰기 용도 버퍼(import·export·
+//   업로드 대상·Sampled 제외, asyncComputeAliasing이 꺼져 있으면 async pass가 쓰는 자원 제외).
+//   장치가 placement를 주지 않으면 풀로 둔다.
+// - 남은 pass를 선언 순서로 훑어 pass p에서 수명이 시작하는 자원을 할당하고, p에서 끝나는 자원을
+//   p 뒤에 놓는다. 그래서 할당은 앞 pass들이 놓은 구간만 받는다(같은 queue 순서, async 자원은 RG4로
+//   넓힌 fork·join 수명이라 graphics 순서 안이다).
+// - heap 종류마다 heap 목록이 있고 빈 구간 목록(offset 순)을 처음부터 훑어 붙어 있는 구간을 이어
+//   붙인다. 앞 자원이 놓은 구간을 받으면 aliasing이다. 맞는 자리가 없으면 그 종류의 heap을 하나
+//   더 둔다(크기는 풀 설정의 transientHeapBytes와 자원 크기 가운데 큰 것).
+// - 앞 자원이 놓은 구간을 이웃과 합치지 않는다(UE와 같다, 그래프 끝에 목록을 버린다).
+Result<void> PlanTransientResources(FrameArena& arena, GraphState& state) noexcept {
+    if (!state.transientEnabled) {
+        return Result<void>::Success();
+    }
+
+    // async pass가 쓰는 자원 표시다.
+    ArenaArray<uint8> usedByAsync;
+    auto assigned = usedByAsync.TryAssign(arena, state.resources.Size(), 0);
+    if (!assigned) {
+        return assigned;
+    }
+
+    for (const PassRecord& record : state.passes) {
+        // attachment resolve 대상은 BeginPass가 쓰는데 획득 자리(attachment acquire)가 없으므로
+        // 풀로 둔다.
+        for (uint32 color = 0; color < record.target.colorCount; ++color) {
+            const GraphTexture resolve = record.target.colors[color].resolveTarget;
+            if (!resolve.IsNull() && resolve.index < usedByAsync.Size()) {
+                usedByAsync[resolve.index] = 2;
+            }
+        }
+
+        if (!record.async) {
+            continue;
+        }
+
+        for (uint32 use = record.firstUse; use < record.firstUse + record.useCount; ++use) {
+            uint8& mark = usedByAsync[state.uses[use].resource];
+            mark = mark == 2 ? mark : 1;
+        }
+    }
+
+    ArenaArray<graphics::TransientPlacement> placements;
+    assigned = placements.TryAssign(arena, state.resources.Size(), graphics::TransientPlacement{});
+    if (!assigned) {
+        return assigned;
+    }
+
+    for (uint32 index = 0; index < state.resources.Size(); ++index) {
+        ResourceRecord& resource = state.resources[index];
+        const bool live = resource.references != 0 && resource.firstPass != GraphIndexNone;
+        // usedByAsync: 1은 async pass, 2는 resolve 대상(늘 제외)이다.
+        bool eligible = live && !resource.imported && !resource.exported &&
+                        !resource.uploadTarget && usedByAsync[index] != 2 &&
+                        (state.asyncComputeAliasing || usedByAsync[index] == 0);
+        if (eligible && resource.kind == GraphResourceKind::Texture) {
+            eligible = resource.textureDesc.usage != graphics::TextureUsage::Sampled;
+        } else if (eligible) {
+            eligible = graphics::HasAnyBufferUsage(resource.bufferDesc.usage,
+                                                   graphics::BufferUsage::ShaderWrite);
+        }
+
+        if (!eligible) {
+            continue;
+        }
+
+        auto placement = resource.kind == GraphResourceKind::Texture
+                             ? state.device->GetTexturePlacement(resource.textureDesc)
+                             : state.device->GetBufferPlacement(resource.bufferDesc);
+        if (!placement || placement.Value().bytes == 0 || placement.Value().alignment == 0) {
+            continue;
+        }
+
+        placements[index] = placement.Value();
+        resource.transient = true;
+        resource.transientBytes = placement.Value().bytes;
+    }
+
+    const uint64 heapBytes = state.pool->Config().transientHeapBytes;
+    const auto allocate = [&](uint32 index) noexcept -> Result<void> {
+        ResourceRecord& resource = state.resources[index];
+        const graphics::TransientPlacement& placement = placements[index];
+        for (uint32 heap = 0; heap <= state.transientHeaps.Size(); ++heap) {
+            if (heap == state.transientHeaps.Size()) {
+                // 맞는 자리가 없다: 이 종류의 heap을 하나 더 둔다(빈 구간 하나).
+                TransientHeapPlan plan;
+                plan.kind = placement.kind;
+                plan.capacity = placement.bytes > heapBytes ? placement.bytes : heapBytes;
+                auto pushed = state.transientHeaps.TryPushBack(arena, plan);
+                if (!pushed) {
+                    return pushed;
+                }
+
+                TransientRange whole;
+                whole.heap = heap;
+                whole.size = plan.capacity;
+                pushed = state.transientRanges.TryPushBack(arena, whole);
+                if (!pushed) {
+                    return pushed;
+                }
+            }
+
+            if (state.transientHeaps[heap].kind != placement.kind) {
+                continue;
+            }
+
+            // 이 heap의 빈 구간을 offset 순으로 훑어 붙어 있는 구간을 이어 붙인다.
+            usize runFirst = GraphIndexNone;
+            uint64 runBegin = 0;
+            uint64 allocBegin = 0;
+            uint64 allocEnd = 0;
+            uint64 next = 0;
+            for (usize range = 0; range < state.transientRanges.Size(); ++range) {
+                const TransientRange& candidate = state.transientRanges[range];
+                if (candidate.heap != heap) {
+                    continue;
+                }
+
+                const uint64 candidateEnd = candidate.offset + candidate.size;
+                if (runFirst == GraphIndexNone || candidate.offset != next) {
+                    const uint64 aligned = (candidate.offset + placement.alignment - 1) /
+                                           placement.alignment * placement.alignment;
+                    if (aligned >= candidateEnd) {
+                        runFirst = GraphIndexNone;
+                        continue;
+                    }
+
+                    runFirst = range;
+                    runBegin = candidate.offset;
+                    allocBegin = aligned;
+                    allocEnd = aligned + placement.bytes;
+                }
+
+                next = candidateEnd;
+                if (allocEnd > candidateEnd) {
+                    continue;
+                }
+
+                // 자리를 찾았다: [runFirst, range] 구간을 쓰고 마지막 구간의 남은 끝을 남긴다.
+                bool aliased = false;
+                usize removed = 0;
+                for (usize used = runFirst; used <= range; ++used) {
+                    TransientRange& taken = state.transientRanges[used - removed];
+                    if (taken.heap != heap) {
+                        continue;
+                    }
+
+                    aliased = aliased || taken.resource != GraphIndexNone;
+                    if (used == range && candidateEnd > allocEnd) {
+                        taken.offset = allocEnd;
+                        taken.size = candidateEnd - allocEnd;
+                        taken.resource = GraphIndexNone;
+                        continue;
+                    }
+
+                    for (usize shift = used - removed; shift + 1 < state.transientRanges.Size();
+                         ++shift) {
+                        state.transientRanges[shift] = state.transientRanges[shift + 1];
+                    }
+
+                    state.transientRanges.PopBack();
+                    ++removed;
+                }
+
+                resource.transientHeap = heap;
+                resource.transientOffset = allocBegin;
+                resource.regionBegin = runBegin;
+                resource.regionEnd = allocEnd;
+                TransientHeapPlan& plan = state.transientHeaps[heap];
+                plan.highWater = allocEnd > plan.highWater ? allocEnd : plan.highWater;
+                ++state.stats.transientResources;
+                state.stats.transientBytes += placement.bytes;
+                state.stats.aliasedResources += aliased ? 1u : 0u;
+                return Result<void>::Success();
+            }
+        }
+
+        return Result<void>::Failure(ErrorCode::OutOfMemory);
+    };
+    const auto release = [&](uint32 index) noexcept -> Result<void> {
+        const ResourceRecord& resource = state.resources[index];
+        TransientRange freed;
+        freed.heap = resource.transientHeap;
+        freed.offset = resource.regionBegin;
+        freed.size = resource.regionEnd - resource.regionBegin;
+        freed.resource = index;
+        // offset 순 자리에 끼운다(같은 heap 안에서).
+        usize at = state.transientRanges.Size();
+        for (usize range = 0; range < state.transientRanges.Size(); ++range) {
+            const TransientRange& existing = state.transientRanges[range];
+            if (existing.heap == freed.heap && existing.offset > freed.offset) {
+                at = range;
+                break;
+            }
+        }
+
+        auto pushed = state.transientRanges.TryPushBack(arena, freed);
+        if (!pushed) {
+            return pushed;
+        }
+
+        for (usize shift = state.transientRanges.Size() - 1; shift > at; --shift) {
+            state.transientRanges[shift] = state.transientRanges[shift - 1];
+        }
+
+        state.transientRanges[at] = freed;
+        return Result<void>::Success();
+    };
+
+    for (uint32 pass = 0; pass < state.passes.Size(); ++pass) {
+        if (state.passes[pass].culled) {
+            continue;
+        }
+
+        for (uint32 index = 0; index < state.resources.Size(); ++index) {
+            if (state.resources[index].transient && state.resources[index].firstPass == pass) {
+                auto allocated = allocate(index);
+                if (!allocated) {
+                    return allocated;
+                }
+            }
+        }
+
+        for (uint32 index = 0; index < state.resources.Size(); ++index) {
+            if (state.resources[index].transient && state.resources[index].lastPass == pass) {
+                auto released = release(index);
+                if (!released) {
+                    return released;
+                }
+            }
+        }
+    }
+
+    for (const TransientHeapPlan& plan : state.transientHeaps) {
+        state.stats.transientPeakBytes += plan.highWater;
+    }
+
+    state.stats.transientHeaps = static_cast<uint32>(state.transientHeaps.Size());
+    // transient 자원의 subresource는 첫 전이가 Discard(획득)다.
+    for (const ResourceRecord& resource : state.resources) {
+        if (!resource.transient) {
+            continue;
+        }
+
+        for (uint32 subresource = 0; subresource < resource.subresources; ++subresource) {
+            state.tracks[resource.firstTrack + subresource].access = ResourceAccess::Discard;
+        }
+    }
+
+    return Result<void>::Success();
+}
+
 } // namespace
 
 Result<void> UncullPass(FrameArena& arena, GraphState& state, uint32 pass) noexcept {
@@ -417,6 +672,8 @@ Result<void> TrackPassTransitions(FrameArena& arena, GraphState& state, uint32 p
         entry.afterFlags = use.flags;
         // attachment subresource의 전이는 장치 BeginPass가 낸다.
         entry.attachment = use.attachment;
+        // transient 자원의 첫 전이는 aliasing 획득이다(RG5).
+        entry.acquire = resource.transient && previousUser == GraphIndexNone;
         auto pushed = state.chains.TryPushBack(arena, entry);
         if (!pushed) {
             return pushed;
@@ -506,7 +763,7 @@ bool SameTransitionGroup(const GraphTransitionRecord& record, const ChainEntry& 
     return record.pass == entry.pass && record.kind == kind && record.resource == entry.resource &&
            record.before == entry.before && record.after == entry.after &&
            record.attachment == entry.attachment && record.beginPass == beginPass &&
-           record.forkPass == forkPass;
+           record.forkPass == forkPass && record.acquire == entry.acquire;
 }
 
 // graphics 쪽에서 내야 하는 async compute 전이의 fork 자리다(RG4): async pass의 전이 가운데 앞
@@ -537,7 +794,8 @@ void MergeSliceRuns(GraphState& state) noexcept {
         previous.resource == last.resource && previous.before == last.before &&
         previous.after == last.after && previous.attachment == last.attachment &&
         previous.beginPass == last.beginPass && previous.forkPass == last.forkPass &&
-        previous.firstMip == last.firstMip && previous.mipCount == last.mipCount &&
+        previous.acquire == last.acquire && previous.firstMip == last.firstMip &&
+        previous.mipCount == last.mipCount &&
         previous.firstSlice + previous.sliceCount == last.firstSlice) {
         previous.sliceCount += last.sliceCount;
         state.transitions.PopBack();
@@ -586,6 +844,7 @@ Result<void> CollectTransitions(FrameArena& arena, GraphState& state, usize firs
         record.attachment = entry.attachment;
         record.beginPass = beginPass;
         record.forkPass = forkPass;
+        record.acquire = entry.acquire;
         MergeSliceRuns(state);
         auto pushed = state.transitions.TryPushBack(arena, record);
         if (!pushed) {
@@ -660,6 +919,11 @@ Result<void> CompileGraph(FrameArena& arena, GraphState& state) noexcept {
     auto async = PlanAsyncCompute(arena, state);
     if (!async) {
         return async;
+    }
+
+    auto transient = PlanTransientResources(arena, state);
+    if (!transient) {
+        return transient;
     }
 
     auto planned = PlanResourceReuse(arena, state);

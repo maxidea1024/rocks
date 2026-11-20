@@ -111,7 +111,8 @@ GpuTrace::GpuTrace(Allocator& allocator, const GpuTraceSettings& settings) noexc
 void GpuTrace::WriteQueueDefinition(bool timing) noexcept {
     FixedRecord<Format::GpuQueueFixedBytes> fixed;
     StoreLittleEndian<uint16>(fixed.bytes + Format::GpuQueueIdOffset, settings_.queueId);
-    fixed.bytes[Format::GpuQueueKindOffset] = 0;
+    // 종류 칸은 장치 queue 번호다(0 graphics, 1 async compute).
+    fixed.bytes[Format::GpuQueueKindOffset] = static_cast<uint8>(settings_.queue);
     fixed.bytes[Format::GpuQueueTimingOffset] = timing ? 1 : 0;
     const TraceVariablePart parts[] = {TraceVariablePart::FromString(
         StringView(settings_.queueName != nullptr ? settings_.queueName : ""))};
@@ -152,7 +153,7 @@ void GpuTrace::BeginFrame(graphics::Device& device, graphics::CommandContext& co
 
     if (timing &&
         (!haveCalibration_ || frame >= calibratedFrame_ + settings_.calibrationIntervalFrames)) {
-        auto calibrated = device.CalibrateClocks();
+        auto calibrated = device.CalibrateClocks(settings_.queue);
         if (calibrated) {
             calibration_ = calibrated.Value();
             calibratedFrame_ = frame;
@@ -304,7 +305,7 @@ void GpuTrace::Emit(const Pending& entry) noexcept {
 void GpuTrace::Consume(Span<const RenderNotice> notices) noexcept {
     platform::LockGuard lock(gate_);
     for (const RenderNotice& notice : notices) {
-        if (notice.kind != RenderNoticeKind::GpuTimestamp) {
+        if (notice.kind != RenderNoticeKind::GpuTimestamp || notice.queue != settings_.queue) {
             continue;
         }
 

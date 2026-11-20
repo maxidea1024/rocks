@@ -814,8 +814,8 @@ struct ColorAttachment {
     uint32 slice = 0;
     uint32 resolveMipLevel = 0;
     uint32 resolveSlice = 0;
-    // placed 텍스처의 aliasing 획득이다(ResourceTransition::acquire와 같은 뜻, RenderBase 8절 GX12).
-    // 패스 시작의 attachment 전이 전에 한다. load는 Load일 수 없다(이전 내용이 없다).
+    // placed 텍스처의 aliasing 획득이다(ResourceTransition::acquire와 같은 뜻, RenderBase 8절
+    // GX12). 패스 시작의 attachment 전이 전에 한다. load는 Load일 수 없다(이전 내용이 없다).
     bool acquire = false;
 };
 

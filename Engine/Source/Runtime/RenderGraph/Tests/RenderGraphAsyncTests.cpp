@@ -1,6 +1,8 @@
 #include "GraphTestSupport.h"
 
+#include <RenderBase/GpuTrace.h>
 #include <TestSupport/Test.h>
+#include <TraceCapture/TraceSession.h>
 
 // RG4 async compute 시험이다(Docs/Design/RenderBase.ko.md 8절 "RG4 async compute 설계"). 기록
 // 장치에 compute queue를 공개하고 fork·join 구조(QueueWait 열, compute 기록, fork 전이 자리, 넓힌
@@ -393,6 +395,52 @@ TEST(RenderGraph_AsyncComputeRecordingDeviceDetectsMissingWaits) {
     compute.queue = QueueKind::AsyncCompute;
     CHECK(bench.device.BeginPass(compute).Error() == ErrorCode::Unsupported);
     CHECK(bench.device.QueueWait(QueueKind::AsyncCompute, {}).Error() == ErrorCode::Unsupported);
+}
+
+// compute queue GPU 구간(RG4 남은 것): computeTrace가 있으면 compute 기록에 그 장부의 GPU 프레임
+// 시작·끝과 async pass마다 구간 시작·끝 timestamp가 있다(graphics 장부는 graphics 기록에만 쓴다).
+TEST(RenderGraph_AsyncComputePassesUseTheComputeTrace) {
+    GraphBench bench;
+    bench.device.SetAsyncCompute(true);
+    TraceSession session;
+    TraceSessionSettings sessionSettings;
+    sessionSettings.allocator = &bench.allocator;
+    sessionSettings.writerMode = TraceWriterMode::Manual;
+    REQUIRE(session.Start(sessionSettings));
+    REQUIRE(RegisterGpuTraceTypes(session));
+    REQUIRE(session.SetChannelEnabled(GpuTraceChannel, true));
+    GpuTraceSettings graphicsSettings;
+    graphicsSettings.timestamps = true;
+    GpuTraceSettings computeSettings = graphicsSettings;
+    computeSettings.queue = QueueKind::AsyncCompute;
+    computeSettings.queueId = 1;
+    computeSettings.queueName = "AsyncCompute";
+    GpuTrace graphicsTrace(bench.allocator, graphicsSettings);
+    GpuTrace computeTrace(bench.allocator, computeSettings);
+    {
+        RenderGraphDesc desc = bench.Next(GraphMode::Deferred, &graphicsTrace);
+        desc.computeTrace = &computeTrace;
+        desc.asyncCompute = GraphAsyncCompute::Always;
+        RenderGraph graph(desc);
+        BuildGraphA(graph, GraphPassKind::AsyncCompute);
+        REQUIRE(graph.Execute());
+    }
+
+    const usize computeBegin = bench.IndexOf(Op::BeginCompute);
+    const usize computeEnd = bench.IndexOf(Op::EndCompute);
+    REQUIRE(computeBegin < computeEnd);
+    usize stamps = 0;
+    Span<const RecordingDevice::Call> calls = bench.device.Calls();
+    for (usize index = computeBegin; index < computeEnd; ++index) {
+        stamps += calls[index].op == Op::WriteTimestamp ? 1u : 0u;
+    }
+
+    // 프레임 시작·끝 둘과 async pass 둘의 구간 시작·끝 넷이다.
+    CHECK(stamps == 6);
+    CHECK(computeTrace.Stats().timing);
+    CHECK(bench.device.Calibrations() >= 2);
+    CHECK(bench.device.ValidationErrorCount() == 0);
+    session.Stop();
 }
 
 } // namespace render_graph_async_tests_file

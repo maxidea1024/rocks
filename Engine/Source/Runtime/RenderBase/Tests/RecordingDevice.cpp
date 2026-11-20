@@ -11,9 +11,11 @@ using namespace rocks::graphics;
 RecordingDevice::RecordingDevice(Allocator& allocator) noexcept
     : timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics),
       computeTimeline_(allocator, timeline_.DeviceEpoch(), QueueKind::AsyncCompute),
-      textureUses_(allocator), bufferUses_(allocator), buffers_(allocator), allocator_(allocator),
-      textures_(allocator), transitions_(allocator), splits_(allocator), pendingSplits_(allocator),
-      pipelines_(allocator), swapChains_(allocator), retired_(allocator), readbacks_(allocator),
+      textureUses_(allocator), bufferUses_(allocator), heaps_(allocator),
+      placedTextures_(allocator), placedBuffers_(allocator), buffers_(allocator),
+      allocator_(allocator), textures_(allocator), transitions_(allocator), splits_(allocator),
+      pendingSplits_(allocator), pipelines_(allocator), swapChains_(allocator), retired_(allocator),
+      readbacks_(allocator),
       staging_(allocator, stagingSource_, graphics::DefaultStagingBudgetBytes),
       timestamps_(allocator), timestampPool_(allocator) {
     stagingSource_.allocator = &allocator;
@@ -251,13 +253,222 @@ void RecordingDevice::TouchTexture(SlotHandle texture) noexcept {
         return;
     }
 
-    TouchResource(textureUses_, state->view ? state->source.index : texture.index);
+    const uint32 index = state->view ? state->source.index : texture.index;
+    TouchResource(textureUses_, index);
+    if (recording_) {
+        CheckPlacedActive(placedTextures_, index);
+    }
 }
 
 void RecordingDevice::TouchBuffer(SlotHandle buffer) noexcept {
     if (buffers_.IsValid(buffer)) {
         TouchResource(bufferUses_, buffer.index);
+        if (recording_) {
+            CheckPlacedActive(placedBuffers_, buffer.index);
+        }
     }
+}
+
+// --- transient heap(GX12) ---
+
+void RecordingDevice::SetTransientHeaps(bool available) noexcept {
+    caps_.features.transientHeaps = available;
+}
+
+RecordingDevice::PlacedState* RecordingDevice::PlacedOf(Array<PlacedState>& table,
+                                                        uint32 index) noexcept {
+    if (index >= table.Size() || table[index].heap.IsNull()) {
+        return nullptr;
+    }
+
+    return &table[index];
+}
+
+Result<void> RecordingDevice::MarkPlaced(Array<PlacedState>& table, uint32 index, SlotHandle heap,
+                                         uint64 offset, uint64 bytes) noexcept {
+    if (index >= table.Size()) {
+        auto resized = table.TryResize(static_cast<usize>(index) + 1);
+        if (!resized) {
+            return resized;
+        }
+    }
+
+    PlacedState placed;
+    placed.heap = heap;
+    placed.offset = offset;
+    placed.bytes = bytes;
+    table[index] = placed;
+    return Result<void>::Success();
+}
+
+void RecordingDevice::AcquirePlaced(bool buffer, uint32 index) noexcept {
+    PlacedState* acquired = PlacedOf(buffer ? placedBuffers_ : placedTextures_, index);
+    if (acquired == nullptr) {
+        return;
+    }
+
+    const auto deactivate = [acquired](Array<PlacedState>& table) noexcept {
+        for (PlacedState& other : table) {
+            if (&other != acquired && other.heap == acquired->heap &&
+                other.offset < acquired->offset + acquired->bytes &&
+                acquired->offset < other.offset + other.bytes) {
+                other.active = false;
+            }
+        }
+    };
+    deactivate(placedTextures_);
+    deactivate(placedBuffers_);
+    acquired->active = true;
+    Record(Op::Acquire, index + (buffer ? AcquireBufferBit : 0));
+}
+
+void RecordingDevice::CheckPlacedActive(Array<PlacedState>& table, uint32 index) noexcept {
+    const PlacedState* placed = PlacedOf(table, index);
+    if (placed != nullptr && !placed->active) {
+        ++validationErrors_;
+    }
+}
+
+Result<TransientHeapHandle>
+RecordingDevice::CreateTransientHeap(const TransientHeapDesc& desc) noexcept {
+    if (!caps_.features.transientHeaps) {
+        return Result<TransientHeapHandle>::Failure(ErrorCode::Unsupported);
+    }
+
+    if (desc.bytes == 0) {
+        return Result<TransientHeapHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    HeapState heap;
+    heap.kind = desc.kind;
+    heap.bytes = desc.bytes;
+    auto added = heaps_.TryAdd(heap);
+    if (!added) {
+        return Result<TransientHeapHandle>::Failure(added.Error());
+    }
+
+    Record(Op::CreateTransientHeap, desc.bytes);
+    return Result<TransientHeapHandle>::Success(TransientHeapHandle{added.Value()});
+}
+
+void RecordingDevice::RetireTransientHeap(TransientHeapHandle heap) noexcept {
+    if (heaps_.TryRemove(heap.slot)) {
+        Defer();
+    }
+}
+
+namespace {
+
+uint64 AlignTransient(uint64 bytes) noexcept {
+    const uint64 alignment = RecordingDevice::TransientAlignment;
+    return (bytes + alignment - 1) / alignment * alignment;
+}
+
+} // namespace
+
+Result<TransientPlacement>
+RecordingDevice::GetTexturePlacement(const TextureDesc& desc) const noexcept {
+    if (!caps_.features.transientHeaps) {
+        return Result<TransientPlacement>::Failure(ErrorCode::Unsupported);
+    }
+
+    if (desc.usage == TextureUsage::Sampled || !ValidateTextureDesc(desc)) {
+        return Result<TransientPlacement>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    TransientPlacement placement;
+    placement.bytes = AlignTransient(TextureDataBytes(desc));
+    placement.alignment = TransientAlignment;
+    placement.kind = TransientHeapKindOf(desc);
+    return Result<TransientPlacement>::Success(placement);
+}
+
+Result<TransientPlacement>
+RecordingDevice::GetBufferPlacement(const BufferDesc& desc) const noexcept {
+    if (!caps_.features.transientHeaps) {
+        return Result<TransientPlacement>::Failure(ErrorCode::Unsupported);
+    }
+
+    if (!ValidateBufferDesc(desc)) {
+        return Result<TransientPlacement>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    TransientPlacement placement;
+    placement.bytes = AlignTransient(desc.size);
+    placement.alignment = TransientAlignment;
+    placement.kind = TransientHeapKind::Buffers;
+    return Result<TransientPlacement>::Success(placement);
+}
+
+Result<void> RecordingDevice::CheckPlacement(TransientHeapHandle heap, uint64 offset,
+                                             const TransientPlacement& placement) const noexcept {
+    const HeapState* state = heaps_.Find(heap.slot);
+    if (state == nullptr) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+
+    if (state->kind != placement.kind || offset % placement.alignment != 0 ||
+        offset > state->bytes || state->bytes - offset < placement.bytes) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return Result<void>::Success();
+}
+
+Result<TextureHandle> RecordingDevice::CreatePlacedTexture(TransientHeapHandle heap, uint64 offset,
+                                                           const TextureDesc& desc) noexcept {
+    auto placement = GetTexturePlacement(desc);
+    if (!placement) {
+        return Result<TextureHandle>::Failure(placement.Error());
+    }
+
+    auto checked = CheckPlacement(heap, offset, placement.Value());
+    if (!checked) {
+        return Result<TextureHandle>::Failure(checked.Error());
+    }
+
+    auto created = CreateTexture(desc, {});
+    if (!created) {
+        return created;
+    }
+
+    auto marked = MarkPlaced(placedTextures_, created.Value().slot.index, heap.slot, offset,
+                             placement.Value().bytes);
+    if (!marked) {
+        return Result<TextureHandle>::Failure(marked.Error());
+    }
+
+    Record(Op::CreatePlaced, offset);
+    return created;
+}
+
+Result<BufferHandle> RecordingDevice::CreatePlacedBuffer(TransientHeapHandle heap, uint64 offset,
+                                                         const BufferDesc& desc) noexcept {
+    auto placement = GetBufferPlacement(desc);
+    if (!placement) {
+        return Result<BufferHandle>::Failure(placement.Error());
+    }
+
+    auto checked = CheckPlacement(heap, offset, placement.Value());
+    if (!checked) {
+        return Result<BufferHandle>::Failure(checked.Error());
+    }
+
+    // placed 버퍼는 초기 데이터가 없다(CreateBuffer의 초기 데이터 크기 검사를 거치지 않는다).
+    auto added = buffers_.TryAdd(ResourceAccess::VertexOrIndex);
+    if (!added) {
+        return Result<BufferHandle>::Failure(added.Error());
+    }
+
+    Record(Op::CreateBuffer, desc.size);
+    auto marked =
+        MarkPlaced(placedBuffers_, added.Value().index, heap.slot, offset, placement.Value().bytes);
+    if (!marked) {
+        return Result<BufferHandle>::Failure(marked.Error());
+    }
+
+    Record(Op::CreatePlaced, offset);
+    return Result<BufferHandle>::Success(BufferHandle{added.Value()});
 }
 
 bool RecordingDevice::RejectOnComputeQueue() noexcept {
@@ -556,6 +767,17 @@ Result<CommandContext*> RecordingDevice::BeginPass(const PassDesc& pass) noexcep
 
     recording_ = true;
     recordingQueue_ = QueueKind::Graphics;
+    // placed attachment의 획득(GX12)이 attachment 사용보다 먼저다.
+    for (uint32 index = 0; index < pass.colorCount; ++index) {
+        if (pass.colors[index].acquire) {
+            AcquirePlaced(false, pass.colors[index].texture.slot.index);
+        }
+    }
+
+    if (!pass.depth.texture.IsNull() && pass.depth.acquire) {
+        AcquirePlaced(false, pass.depth.texture.slot.index);
+    }
+
     for (uint32 index = 0; index < pass.colorCount; ++index) {
         TouchTexture(pass.colors[index].texture.slot);
         if (!pass.colors[index].resolveTarget.IsNull()) {
@@ -828,6 +1050,10 @@ void RecordingDevice::Retire(BufferHandle buffer) noexcept {
         return;
     }
 
+    if (buffer.slot.index < placedBuffers_.Size()) {
+        placedBuffers_[buffer.slot.index] = PlacedState{};
+    }
+
     Defer();
     Record(Op::RetireBuffer);
 }
@@ -835,6 +1061,10 @@ void RecordingDevice::Retire(BufferHandle buffer) noexcept {
 void RecordingDevice::Retire(TextureHandle texture) noexcept {
     if (!ownership_.Check() || !textures_.TryRemove(texture.slot)) {
         return;
+    }
+
+    if (texture.slot.index < placedTextures_.Size()) {
+        placedTextures_[texture.slot.index] = PlacedState{};
     }
 
     Defer();
@@ -1142,6 +1372,20 @@ void RecordingDevice::ApplyTransitions(Span<const ResourceTransition> transition
         if (recordingQueue_ == QueueKind::AsyncCompute &&
             (!IsComputeQueueAccess(transition.before) || !IsComputeQueueAccess(transition.after))) {
             ++validationErrors_;
+        }
+
+        // placed 자원의 획득(GX12)은 사용 검사보다 먼저다. before는 Discard여야 한다.
+        if (transition.acquire) {
+            if (transition.before != ResourceAccess::Discard) {
+                ++validationErrors_;
+            }
+
+            const TextureState* view =
+                transition.buffer.IsNull() ? textures_.Find(transition.texture.slot) : nullptr;
+            AcquirePlaced(!transition.buffer.IsNull(),
+                          !transition.buffer.IsNull()     ? transition.buffer.slot.index
+                          : view != nullptr && view->view ? view->source.index
+                                                          : transition.texture.slot.index);
         }
 
         if (!transition.buffer.IsNull()) {
