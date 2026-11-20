@@ -221,6 +221,7 @@ TEST(AssetLoader_LoadsFromDiskWithWorkers) {
         AsyncCookedPackageIo halves(env.allocator, io, half);
         rig.config.io = &halves;
         REQUIRE(rig.Start());
+#if !ROCKS_BUILD_RELEASE
         const platform::FileStatus osFailure{platform::FileCode::SystemError, 0};
         struct FaultCase {
             uint64 id;
@@ -230,7 +231,6 @@ TEST(AssetLoader_LoadsFromDiskWithWorkers) {
         const FaultCase faults[] = {{7, platform::AsyncIoFaultPoint::Size, 0},
                                     {8, platform::AsyncIoFaultPoint::Submit, 1},
                                     {9, platform::AsyncIoFaultPoint::Completion, 0}};
-#if !ROCKS_BUILD_RELEASE
         for (const FaultCase& fault : faults) {
             io.InjectFault({fault.point, osFailure, fault.skip});
             const AssetLoadHandle handle = rig.Request(fault.id);
