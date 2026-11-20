@@ -1,6 +1,6 @@
 # 공통 실행 진입점과 네이티브 크래시 수집 설계
 
-기준일: 2026-11-20, 개정 6(macOS CI 두 건: 14.1절 굳힌 뿌리 상한을 플랫폼 공통으로, 8.7·17절 POSIX abort 재진입의 기대값). 개정 5(19.6절: 로깅 쪽 반영 완료 — 로깅 문서 개정 번호 재정리, LogFile·LogDirectory 칸). 개정 4(LC1–LC7 구현 반영, LC8 문서 마무리). 결정은 22절, 단계는 23절, 미확인 사실은 24절, 바뀐 점과 단계별로 설계와 다르게 정한 점은 25절에 있다. 사용법은 [공통 실행 진입점과 크래시 수집 사용 안내](../Implementation/CrashHandlingAndLaunch.ko.md)에 있다.
+기준일: 2026-11-20, 개정 9(11.5절: 프로세스 안 덤프를 자기 snapshot에서 써서 마감 집행 스레드가 멈추지 않게 함). 개정 8(7.4·8.1·8.2·18절: 범용 할당자 — `ApplicationSettings::defaultAllocator`·`ApplicationContext::DefaultAllocator()`, 기본은 Launch의 `SystemAllocator` 위에 둔 `BinnedAllocator`. GC 규모 세션의 AL6, 사용자 지시). 개정 7(10.5·13.2절: Asan 구성의 stack 보장분을 ASan stack overflow 보고에 맞춰 키움). 개정 6(macOS CI 두 건: 14.1절 굳힌 뿌리 상한을 플랫폼 공통으로, 8.7·17절 POSIX abort 재진입의 기대값). 개정 5(19.6절: 로깅 쪽 반영 완료 — 로깅 문서 개정 번호 재정리, LogFile·LogDirectory 칸). 개정 4(LC1–LC7 구현 반영, LC8 문서 마무리). 결정은 22절, 단계는 23절, 미확인 사실은 24절, 바뀐 점과 단계별로 설계와 다르게 정한 점은 25절에 있다. 사용법은 [공통 실행 진입점과 크래시 수집 사용 안내](../Implementation/CrashHandlingAndLaunch.ko.md)에 있다.
 
 이 문서는 두 가지를 정한다.
 - **공통 실행 진입점(Launch).** 실행 파일마다 흩어진 `main`·`wmain`의 시작·종료 처리를 한 계층으로 모은다. 플랫폼 진입점 연결, 이른 크래시 처리 설치, 인자 전달, 공통 서비스 시작·종료, 프로그램 본문 호출, 종료 코드 전달, 크래시 처리 해제 시점이 대상이다. 엔진 수명(`Engine::Initialize`·`Run`·`Shutdown`)은 다시 만들지 않는다.
@@ -484,6 +484,8 @@ enum class ApplicationKind : uint8 {
 
 enum class ToolLogging : uint8 { None, Stderr };  // Stderr: Sync LogSystem + stderr sink + LogInstallScope
 
+enum class DefaultAllocatorKind : uint8 { Binned, System };  // 범용 할당자(개정 8). Binned: SystemAllocator 위의 BinnedAllocator
+
 enum class CrashReportingMode : uint8 {
     Full,       // OS 처리기 + 도우미(실패하면 fallback)
     InProcess,  // OS 처리기 + 프로세스 안 덤프
@@ -506,13 +508,16 @@ struct ApplicationSettings {
     bool suppressSystemErrorDialogs = false;  // TestRunner 기본 true
     bool handleTerminationRequests = false;   // Ctrl-C·SIGINT·SIGTERM을 원자 표시로(첫 번째만)
     ToolLogging toolLogging = ToolLogging::None;
+    // 범용 할당자의 종류(개정 8). Binned: SystemAllocator 위의 BinnedAllocator, System: SystemAllocator 그대로.
+    DefaultAllocatorKind defaultAllocator = DefaultAllocatorKind::Binned;
 };
 
 class ApplicationContext {
 public:
     Span<const StringView> Arguments() const noexcept;
     StringView ExecutablePath() const noexcept;
-    Allocator& SystemAllocator() noexcept;  // Launch가 소유한 SystemAllocator
+    Allocator& DefaultAllocator() noexcept;  // 프로세스의 범용 할당자(개정 8). 엔진·모듈에 넘긴다
+    Allocator& SystemAllocator() noexcept;  // Launch가 소유한 SystemAllocator(범용 할당자의 상위, 도구 로그)
     LogSystem* ToolLog() noexcept;          // ToolLogging::Stderr일 때만
     void SetStage(platform::RunPhase phase, const char* stageName) noexcept;  // 정적 문자열
     // 본문이 정적 소멸·CRT 종료를 돌리면 안 된다고 판단했을 때(멈춘 로그 출력 스레드 등). Launch가 정리 뒤
@@ -563,6 +568,12 @@ bool IsTerminationRequested() noexcept;
   - 진입점 매크로와 맞지 않으면 링크 오류(진입 기호 없음)로 드러난다.
   - 기존 도구는 모두 Console로 남는다(요구 4절).
 - **본문 서명이 `ApplicationContext&` 하나인 이유.** 인자·할당기·도구 로그·단계 표시를 모두 거기서 얻는다. 그래서 프로그램마다 시작 코드를 되풀이하지 않는다.
+- **범용 할당자(개정 8 — GC 규모 설계 18.10절, 사용자 지시 "엔진에 BinnedAllocator 연결해").** Launch가 프로세스의 범용 할당자를 소유한다(UE가 프로세스 기본 할당자를 Binned로 두는 자리).
+  - `ApplicationSettings::defaultAllocator`가 `DefaultAllocatorKind::Binned`(기본)이면 Launch가 자기 `SystemAllocator`를 상위로 `BinnedAllocator`를 하나 만들고 `ApplicationContext::DefaultAllocator()`가 그것을 돌려준다. `System`이면 `DefaultAllocator()`가 `SystemAllocator()`와 같은 객체다(문제를 가를 때의 비교 수단). `configure`가 바꿀 수 있다. 명령줄 옵션은 두지 않는다.
+  - 본문은 엔진·모듈·컨테이너에 `DefaultAllocator()`를 넘긴다. `SystemAllocator()`는 범용 할당자의 상위이고 Launch의 도구 로그가 쓴다 — 본문이 직접 쓸 일은 비교·진단뿐이다.
+  - 수명: 설정 적용 뒤·도구 로그 앞에 만들고, 도구 로그를 멈춘 뒤에 파괴한다(8.2절). 본문이 범용 할당자의 할당을 남긴 채 돌아오면 파괴가 Fatal이다(`SystemAllocator`의 남은 할당 계약과 같다). `RequestExitWithoutStaticTeardown`이면 파괴하지 않고 `_Exit`한다(내장 진입은 그 요청을 무시하므로 파괴한다). 내장 진입은 실행마다 인스턴스 하나다.
+  - 비용: 주소 범위 예약(16 GiB — Android 4 GiB, commit 아님)과 약 290 KB의 표가 Launch를 쓰는 모든 실행 파일에 든다. 범용 할당자를 쓴 스레드마다 캐시가 최대 약 2.25 MiB(`BinnedAllocator::MaxThreadCacheBytes`)다.
+  - 지금 쓰는 곳은 Sandbox 엔진 호스트다. Commandlet·벤치 도구와 게임 템플릿(`Templates/Game/Foundation/Source/Main.cpp` — 아직 `context.SystemAllocator()`)은 후속이다.
 
 ## 8. 흐름
 
@@ -577,12 +588,13 @@ bool IsTerminationRequested() noexcept;
 | 4 | `configure(arguments, settings)`(선택) | — |
 | 5 | 설정 적용: 대화상자 억제, 크래시 모드·예산 변경, 출력 폴더, **도우미 시작**(Full). 수집 방식·예산이 바뀌면 새 옵션을 `ValidateCrashReportingOptions`로 먼저 검사하고(잘못되면 지금 설치 유지), 1단계를 뗀 뒤 다시 건다. 다시 걸기가 실패하면 이전 설정·이전 폴더로 되돌려 건다. 폴더만 바뀌었거나 되돌린 경우의 새 폴더는 `SetCrashOutputDirectory`로 바꾼다(실패하면 이전 폴더 유지). `Off`면 1단계를 뗀다(도우미는 아직 없으므로 알릴 것이 없다). 내장 여부는 진입 함수가 정하므로 이 단계에서 바뀌지 않는다 | 검사 실패·재설치 실패·폴더 실패·도우미 시작 실패는 `Log::Warning` 뒤 계속한다(fallback) |
 | 6 | 종료 요청 처리기(선택) | 실패는 경고만 |
+| 6a | 범용 할당자(개정 8 — `defaultAllocator`가 `Binned`면 `SystemAllocator` 위에 `BinnedAllocator`를 만든다. 번호를 밀지 않으려고 6a로 둔다) | 실패하지 않는다(내부 상태를 할당하지 못하면 Fatal) |
 | 7 | 도구 로그 서비스(`ToolLogging::Stderr`) | stderr 한 줄, 로그 없이 계속(D22) |
 | 8 | `SetRunPhase(Running, "Main")` → `run(context)` | 본문의 반환값 |
-| 9 | 7 → 6 역순 정리, `SetRunPhase(Shutdown, ...)` | 정리 실패는 stderr. 종료 코드는 본문 값을 유지한다 |
+| 9 | 7 → 6a → 6 역순 정리, `SetRunPhase(Shutdown, ...)` | 정리 실패는 stderr. 종료 코드는 본문 값을 유지한다 |
 | 10 | 보호 프레임을 나와 `RemoveCrashReporting`(도우미에 `Shutdown`을 먼저 쓴다) → 종료 코드 반환(또는 `_Exit`) | — |
 
-- **초기화 실패는 성공한 단계만 역순으로 정리한다.** Launch의 단계는 3–7뿐이다. 각 단계의 정리는 "시작됐는지" 표시로 판단한다. 엔진 호스트의 내부 단계(HostSettings·LogHost·Trace·Engine)는 지금처럼 본문의 범위 객체와 `Engine`의 역순 정리가 맡는다.
+- **초기화 실패는 성공한 단계만 역순으로 정리한다.** Launch의 단계는 3–7뿐이다(6a 포함). 각 단계의 정리는 "시작됐는지" 표시로 판단한다. 엔진 호스트의 내부 단계(HostSettings·LogHost·Trace·Engine)는 지금처럼 본문의 범위 객체와 `Engine`의 역순 정리가 맡는다.
 - **크래시 처리를 설정보다 먼저 건다(요구 10절).** 설정 로딩·LogHost·Engine 초기화는 모두 8단계 본문 안이다.
 - **모듈 로더(ML1, 아직 없음).** [모듈 로더](ModuleLoader.ko.md) 3.9절은 7단계 뒤·8단계 전에 로더 생성·`Prepare`·부트 모듈과 `EarliestPossible` 시작을, 9단계에서 도구 로그 정리 전에 프로세스 묶음 종료를 넣는다. 지금(ML0)은 Launch가 로더를 만들지 않는다. 모듈 진입점(`ROCKS_IMPLEMENT_MODULE`)은 상수 기술과 함수뿐이라 실행 순서가 없고, 프로세스 진입점(`ROCKS_IMPLEMENT_APPLICATION`)과 겹치지 않는다(21절).
 - **정상 종료 정리는 한 번만 한다.** `RunApplication`은 반환 경로가 하나다. 크래시 종료는 이 경로를 타지 않는다(8.3절).
@@ -590,7 +602,7 @@ bool IsTerminationRequested() noexcept;
 ### 8.2 정상 종료
 
 1. 본문이 반환한다. 엔진 호스트는 그 전에 `Engine::Shutdown` → trace 정지 → `LogHost::Stop`을 마쳤다.
-2. Launch가 도구 로그를 멈추고 종료 요청 처리기를 뗀다.
+2. Launch가 도구 로그를 멈추고, 범용 할당자가 `BinnedAllocator`면 파괴하고(남은 할당이 있으면 Fatal — 개정 8. `RequestExitWithoutStaticTeardown`이면 파괴하지 않는다), 종료 요청 처리기를 뗀다.
 3. `RemoveCrashReporting`이 다음 순서로 정리한다.
    1. `crashOwner`를 sentinel(`ShutdownOwner`)로 CAS한다. 실패하면 이미 보고가 진행 중이라는 뜻이다. 그때는 돌아오지 않고 기다리며, 종료는 소유자 T가 한다(B11).
    2. 교환 블록 상태를 `Shutdown`으로 쓰고 도우미를 깨운다.
@@ -831,7 +843,8 @@ Rocks가 다른 호스트 프로세스 안에 라이브러리로 들어간 경�
 
 ### 10.5 stack overflow
 
-- 주 스레드(설치 때)와 모든 `platform::Thread`(시작 때)가 `SetThreadStackGuarantee(32 KiB)`를 부른다. 보장분은 그 스레드에만 적용된다(요구 9절). 이미 더 크면 줄이지 않는다.
+- 주 스레드(설치 때)와 모든 `platform::Thread`(시작 때)가 `SetThreadStackGuarantee(CrashStackReserveBytes)`를 부른다. 보장분은 그 스레드에만 적용된다(요구 9절). 이미 더 크면 줄이지 않는다.
+- **크기(개정 7).** 일반 구성은 32 KiB, Asan 구성은 128 KiB다. 일반 구성에서 넘친 스레드는 복사·신호·대기만 한다. 보장분을 줄여 잰 결과 4 KiB로도 주 스레드·`platform::Thread` stack overflow의 보고·덤프가 끝난다(Debug, 2026-11-20). Asan 구성에서는 ASan이 넘친 스레드에서 자기 보고(stack trace 수집·기호 해석)를 한 뒤 death callback으로 공통 경로에 온다(13.2절). 그 보고가 약 29 KiB를 쓴다(공식 LLVM 21.1.6, 보장분 28 KiB면 `ERROR: AddressSanitizer: stack-overflow` 줄 바로 뒤에서 접근 위반으로 끝나고 29 KiB부터 끝까지 간다 — 이 기계의 XSAVE 기능 0x807, AVX-512 없음). 32 KiB는 여유가 3 KiB뿐이다. 예외 전달마다 CONTEXT·XSAVE 영역을 stack에 쌓으므로 AVX-512·AMX가 있는 CPU(CI 러너)에서는 그만큼 더 쓴다. 그래서 Asan 구성은 측정값의 4배 이상인 128 KiB를 잡는다. 보장분은 그 스레드의 쓸 수 있는 stack을 줄이지만(기본 1 MiB 예약에서 128 KiB) Asan 구성 시험 전체가 통과한다.
 - 크래시 스레드는 복사·신호·대기만 하므로 보장분 안에서 끝난다. 덤프는 도우미(또는 W)가 쓴다. 실패 스레드의 남은 stack에 기대지 않는다.
 - 외부 스레드에는 보장분이 없다. filter가 넘치면 OS가 프로세스를 `0xC00000FD` 등으로 끝낸다. 이때는 도우미의 `UnreportedExit` 기록만 남는다(15절 한계).
 
@@ -948,7 +961,13 @@ Rocks가 다른 호스트 프로세스 안에 라이브러리로 들어간 경�
 | 캡처 뒤 도우미가 죽거나 덤프가 실패함 | 부모는 이미 끝났을 수 있다 | fallback 하지 않는다(부모가 없다). 예비 `CrashInfo.json`이 남는다 | `"complete": false` |
 | 덤프 마감 초과 | CancelCallback | 취소된 파일은 지운다. 추가 덤프가 취소돼도 기본 덤프는 남는다 | `dump.status`·`detailDump.status = "Cancelled"` |
 
-- **프로세스 안 덤프의 한계를 결과에 표시한다.** 다른 스레드가 heap·loader lock을 쥔 채 멈춰 있으면 `MiniDumpWriteDump`와 파일 API가 막힐 수 있다. 예산이 끝을 보장한다.
+- **프로세스 안 덤프의 한계를 결과에 표시한다.** 다른 스레드가 heap·loader lock을 쥔 채 멈춰 있으면 `MiniDumpWriteDump`와 파일 API가 막힐 수 있다. 크래시한 스레드의 마감 대기(`TotalWaitMilliseconds`)가 끝을 보장한다. 단, 그 스레드가 멈추지 않아야 한다(아래).
+- **프로세스 안 덤프는 자기 snapshot에서 쓴다(개정 9).** 살아 있는 자기 프로세스를 `MiniDumpWriteDump`로 덤프하면 dbghelp가 스레드 목록 단계(IncludeThreadCallback) 뒤 호출 스레드 밖의 모든 스레드를 덤프가 끝날 때까지 suspend한다. 여기에는 마감을 집행하는 크래시한 스레드도 들어간다. 그 순간 heap lock·loader lock을 쥐고 있던 스레드가 함께 멈추고 dbghelp가 그 lock을 기다리면, 덤프도 마감 집행도 영원히 멈춘다. CancelCallback은 dbghelp가 부를 때만 돌므로 이것을 끊지 못한다.
+  - 확인(2026-11-20, 시험 프로그램): (1) 덤프 callback 안에서 다른 스레드의 `SuspendThread` 이전 횟수가 스레드 목록 단계 뒤로 계속 1이다(dbghelp가 멈춰 둠). (2) 덤프의 스레드 목록 단계 callback에서 다른 스레드가 heap lock(`HeapLock`)이나 loader lock(`LdrLockLoaderLock`)을 잡게 gate로 맞추면, 덤프가 멈추고 5초 마감을 가진 스레드도 끝내 돌지 않는다(20초 넘게 멈춤). (3) 같은 장면에서 `PssCaptureSnapshot`(VA clone)으로 자기를 캡처한 뒤 snapshot을 덤프하면 dbghelp가 살아 있는 스레드를 멈추지 않아 마감 스레드가 제때 프로세스를 끝낸다.
+  - 그래서 W는 `PssCaptureSnapshot`으로 자기 프로세스를 캡처하고(도우미와 같은 플래그), 덤프를 그 snapshot에서 쓴다. 캡처는 커널이 짧게 하므로 사용자 공간 lock에 기대지 않는다. 캡처가 실패하면 살아 있는 프로세스를 덤프하지 않고 `dump.status = "Failed"`(캡처 오류 코드, 사유 "process snapshot unavailable")로 남긴다. 덤프를 잃는 쪽이 끝나지 않는 쪽보다 낫다.
+  - 남는 한계: snapshot 덤프도 dbghelp가 자기 프로세스의 heap·loader lock을 쓴다. 그 lock을 쥔 스레드가 멈춰 있으면 W는 덤프에서 막힌다. 이때는 크래시한 스레드가 마감에 프로세스를 끝내고 예비 `CrashInfo.json`(`"complete": false`)이 남는다.
+  - 시험 `Native.Crash.inprocess-dump-lock-holder`: 시험용 hook이 덤프의 스레드 목록 단계에서 다른 스레드가 프로세스 heap lock을 잡고 멈추게 한다(gate). 크래시한 스레드가 마감에 원래 코드로 끝내고, 예비 `CrashInfo.json`이 남는지 본다. 살아 있는 프로세스를 덤프하던 이전 코드에서는 이 시험이 끝나지 않는다.
+  - 도우미 경로(`Full`)는 이 문제가 없다. 덤프는 도우미 프로세스가 snapshot에서 쓰고, 부모의 스레드를 멈추는 것은 캡처 순간뿐이다.
 - **외부 프로세스를 쓴다고 모든 크래시를 잡는다고 주장하지 않는다.** 도우미가 캡처하려면 부모의 처리기가 먼저 돌아야 한다. fast-fail·외부 강제 종료·정적 초기화 크래시는 9절 표대로 잡지 못한다.
 
 ### 11.6 DbgHelp 직렬화
@@ -1014,6 +1033,7 @@ Rocks가 다른 호스트 프로세스 안에 라이브러리로 들어간 경�
     - `ASAN_OPTIONS=handle_abort=1`은 지원하지 않는다. Fatal 경로의 abort와 abort()의 SIGABRT를 ASan이 다시 보고하므로 보고가 두 번 남고 종료 코드가 ASan 종료 코드(기본 1)가 된다(실행 확인 없음). 기본값(`handle_abort=0`)에서는 SIGABRT를 Rocks가 보고한다.
   - **death callback 칸은 프로세스 전역이다.** 설치 때 Rocks 콜백으로 덮어쓰고 해제 때 nullptr로 둔다(다른 코드가 건 콜백을 이어 부르지 않는다). 내장 진입은 걸지 않는다.
   - **최종 filter(LC5 리뷰).** Asan 구성에서 보호 프레임·힙 손상 VEH는 하드웨어 예외를 넘기고(ASan이 먼저 본다), 최종 unhandled filter는 보고한다. ASan은 `SetUnhandledExceptionFilter`를 가로채 자기 처리기를 최종 filter로 두고, 치명으로 보는 코드만 보고한 뒤 나머지를 가로챈 사용자 filter(Rocks)로 넘긴다. 그래서 사용자 예외 코드·잘못된 핸들·`handle_segv=0`의 접근 위반은 Rocks가 보고한다(시험 `Native.Crash.asan-policy-user-exception`, 종료 코드는 그 예외 코드).
+  - **stack overflow와 보장분(개정 7).** ASan의 stack overflow 보고는 넘친 스레드의 stack 보장분 안에서 돈다. 보장분이 모자라면 ASan이 `ERROR: AddressSanitizer: stack-overflow … T0` 줄을 쓴 직후(stack trace 전) 다시 넘쳐 프로세스가 `0xC0000005`로 끝나고, death callback·`CrashInfo.json`이 없다. Windows CI(run 44657190704·44656731971)의 `asan-policy-main-stack-overflow`·`log-crash-stack-overflow`가 이렇게 실패했다. 로컬에서 보장분만 28 KiB로 줄이면 같은 출력·종료 코드가 재현된다. 그래서 Asan 구성의 보장분을 128 KiB로 키웠다(10.5절). POSIX Asan은 ASan이 스레드마다 자기 대체 stack을 걸고 Rocks는 이미 있는 대체 stack을 덮어쓰지 않으므로 이 값과 무관하다.
   - **LC5 확인(Windows Asan 구성).** filter가 넘긴 접근 위반·stack overflow는 ASan이 `AddressSanitizer: access-violation`·`stack-overflow`로 보고하고, 그 뒤 death callback이 공통 Fatal 경로(reason `Sanitizer`)로 종료 콜백·`CrashInfo.json`(덤프 없음, limitations `sanitizer build`, helper null)을 남긴다. 그래서 Asan 구성의 하드웨어 예외 종료 코드는 예외 코드가 아니라 Rocks Fatal 코드(`0xE0524B46`)다. use-after-free도 같다. Fatal은 ASan과 무관하게 공통 경로다. 내장 진입은 death callback을 걸지 않으므로(호스트 정책) Asan 구성의 내장 호스트에서는 ASan이 호스트 filter보다 먼저 보고하고 끝낸다.
 - **지원하지 않는 조합.** ASan과 덤프, ASan과 도우미. capability와 메타데이터에 표시한다.
 - **확인할 것.** ASan 구성 시험(LC5)으로 다음을 실행해 확인한다. ASan 일반 실행은 하지 않는다.
@@ -1245,7 +1265,7 @@ Rocks는 이 값을 쓰지 않는다.
 |---|---|---|
 | 프레임마다 | 없음. 할당·전역 lock·원자 연산을 더하지 않는다. `SetRunPhase`는 단계가 바뀔 때만 부른다 | Release Sandbox `--engine` 프레임 시간 비교(앞뒤 차이가 측정 잡음 안) |
 | 스레드 시작마다 | `SetThreadStackGuarantee` 한 번(32 KiB가 그 스레드 stack 안에서 예약된다). SEH 보호는 x64 표 기반이라 실행 비용이 없다 | `platform::Thread` 시작·join 왕복 시간 비교 |
-| 프로세스당 | W 스레드 하나(256 KiB 예약, 실제 commit은 수 KiB), 이벤트 둘(도우미가 있으면 다섯 더), 정적 저장소 약 40 KiB(BSS), 교환 블록 64 KiB(Full), dbghelp.dll 로드, 도우미 프로세스 하나(Full) | 시작 시간(설치~본문 진입), 도우미 작업 집합, FoundationTests 전체 시간 비교 |
+| 프로세스당 | W 스레드 하나(256 KiB 예약, 실제 commit은 수 KiB), 이벤트 둘(도우미가 있으면 다섯 더), 정적 저장소 약 40 KiB(BSS), 교환 블록 64 KiB(Full), dbghelp.dll 로드, 도우미 프로세스 하나(Full). 개정 8: 범용 할당자의 주소 범위 예약 16 GiB(Android 4 GiB — commit 아님)와 표 약 290 KB(시작 시간은 다시 재지 않았다) | 시작 시간(설치~본문 진입), 도우미 작업 집합, FoundationTests 전체 시간 비교 |
 | 시작 지연 | 도우미 `CreateProcessW` 한 번(기다리지 않는다), dbghelp 로드 | 같음. 시험 실행기의 자식 probe는 `Off`라 비용이 없다 |
 | 크래시 때 | 부모 최대 총 대기(도우미 있음 13 s, fallback 35 s). 도우미의 덤프 작성은 부모 종료 뒤에도 종류별 마감까지 이어진다 | 시험에서 예산 안 종료를 단언 |
 
@@ -1799,3 +1819,15 @@ bool SetCrashAnnotation(CrashAnnotation slot, const char* text, usize bytes) noe
   - **`Native.Crash.callback-abort`(시험 결함).** POSIX에서 처음 abort는 SIGABRT 신호 경로(`CrashSignalHandler` → `ReportAsOwner`, 사유 "Fatal signal 6")라 stderr에 사유 줄을 쓰지 않는다. Windows만 SIGABRT 처리기가 Fatal 경로로 "abort() was called"를 쓴다. 시험이 그 Windows 문구를 모든 플랫폼에 기대했다. 수집기 동작(처리 스레드의 두 번째 abort → `FailReporter` → 남은 콜백 포기·파일 단계 계속)은 macOS 출력과 일치하므로 맞다. 시험을 플랫폼별 정확한 기대값으로 고쳤다(POSIX는 `signal` 6·`message`).
   - **`Native.Launch.settings-rollback`(수집기 결함).** POSIX는 굳힌 뿌리의 길이를 보지 않아 macOS에서 만들 수 없는 긴 폴더를 받아들였다(14.1절). POSIX `BuildFolder`가 굳힌 뿌리를 `MaxOutputDirectoryBytes`로 제한하게 고쳤다. 시험은 그대로다(어느 플랫폼이든 작업 폴더 + 1,019 byte가 상한을 넘는다).
   - **같은 가정 훑기.** 경로 길이로 실패를 유도하는 시험은 이것 하나다. 콜백 재진입 시험 셋 가운데 플랫폼 고정 문구를 기대한 것은 callback-abort뿐이다(callback-fault는 공통 문구, callback-fatal은 두 플랫폼 모두 Fatal 경로).
+- Windows CI Asan 두 건(2026-11-20, run 44657190704, 개정 7).
+  - **원인(수집기 설정).** `asan-policy-main-stack-overflow`·`log-crash-stack-overflow`가 `0xC0000005`로 끝났다. ASan은 stack overflow를 넘친 스레드에서 보고하는데, 그 보고가 Rocks가 잡은 stack 보장분 32 KiB 가운데 약 29 KiB를 쓴다(로컬 측정). CI에서는 ASan 보고가 `ERROR` 줄 직후 다시 넘쳤다. 로컬에서 보장분을 28 KiB로 줄이면 같은 출력(ERROR 줄에서 끝)과 종료 코드가 재현되고, 29 KiB부터는 death callback까지 간다. 공식 LLVM 21.1.6과 Foundation 대상으로 빌드해도 32 KiB에서는 로컬에서 통과했으므로, CI와의 차이는 남은 여유 3 KiB를 넘는 추가 stack 사용이다(CPU의 XSAVE 영역 크기 등 기계 차이). 유니티·PCH나 할당자 변경과는 무관하다(Debug 시험·Asan 시험 2,659건은 CI에서도 통과했다).
+  - **수정.** `CrashStackReserveBytes`를 Asan 구성에서 128 KiB로 키웠다(일반 구성 32 KiB 그대로, 10.5절). 일반 구성은 보장분 4 KiB로도 stack overflow 보고·덤프가 끝나 여유가 충분하다(Debug 측정).
+- 개정 8(2026-11-20): 범용 할당자(GC 규모 세션의 AL6 — 사용자 지시 "엔진에 BinnedAllocator 연결해", GC 규모 설계 18.10절).
+  - `ApplicationSettings::defaultAllocator`(`DefaultAllocatorKind` — 기본 `Binned`, `System`)와 `ApplicationContext::DefaultAllocator()`를 더했다(7.4절). `SystemAllocator()`는 그대로다.
+  - 실행 단계에 "Launch.DefaultAllocator"를 더했다(종료 요청 처리기 뒤, 도구 로그 앞 — 8.2절의 역순 정리에서 도구 로그 다음에 파괴된다).
+  - Sandbox 엔진 호스트가 `DefaultAllocator()`를 모듈 로더·설정 문맥·LogHost·엔진에 넘기고, self-test는 그래픽 self-test(창·그래픽 장치·worker scheduler)에 넘긴다.
+  - 8.1절 표에 6a단계, 7.4절 목록에 `DefaultAllocatorKind`, 18절 표에 예약 비용을 더했다(리뷰 반영).
+- 크래시 처리 멈춤 분석(2026-11-20, 개정 9, rocks-73 관찰: EngineTests 전체 실행 중 `Engine_CrashDuringInitializeAndShutdownRecordsTheStage`의 shutdown 자식이 120초 제한에 한 번 걸림).
+  - **경로.** 그 probe(`engine-crash-stage`)는 `CrashHelperPolicy::InProcess`로 설치한다. 그래서 W가 종료 콜백 뒤 프로세스 안 덤프를 쓴다. 크래시 때 엔진의 worker 스레드가 살아 있다(`BeginShutdown`은 executor를 멈추기 전이다).
+  - **유일한 무기한 대기.** 크래시한 스레드의 대기(`HandleCrash`의 `WaitForSingleObject(reportFinished, TotalWaitMilliseconds)` 뒤 `TerminateProcess`)와 겹친 스레드의 대기(`WaitForOwner`, 마감 + 여유 뒤 종료)는 모두 유한하다. 종료 콜백은 공용 마감을 지키고 로그 flush는 막히는 lock을 쓰지 않는다. 마감 집행을 무력하게 만드는 곳은 살아 있는 자기 프로세스의 `MiniDumpWriteDump`뿐이었다(11.5절: dbghelp가 마감 스레드까지 suspend). 그 순간 worker가 heap 할당 중(`SystemAllocator` → 프로세스 heap)이거나 스레드 생성·종료(loader lock) 중이면 영원히 멈춘다. 부하가 큰 전체 실행에서만 드물게 나는 관찰과 맞는다.
+  - **수정.** 프로세스 안 덤프를 자기 snapshot에서 쓴다(11.5절). gate로 결정적으로 재현하는 시험을 더했다.

@@ -172,6 +172,9 @@ inline constexpr uint32 MaxThreadExitSlots = 8;
 //   있다) 이 구현이 걸러 낸다. 프로세스 수명과 같은 자원은 OS가 거둔다.
 // - OS가 칸을 주지 않거나 MaxThreadExitSlots를 넘으면 IsValid가 거짓이고 Get은 nullptr, Set은
 //   거짓이다.
+// - Get·Set은 호출 스레드의 OS 오류 값(Windows last-error, POSIX errno)을 바꾸지 않는다. 할당자처럼
+//   어디서나 불리는 코드가 이 칸을 읽어도, 실패한 OS 호출과 그 오류 값을 읽는 코드 사이에 끼어
+//   값을 지우지 않는다.
 // - fiber에서 쓰지 않는다. Windows의 값은 fiber마다 따로이고(스레드를 fiber로 바꾸면 그 스레드의
 //   값이 그 fiber의 것이 된다) 정리 함수는 fiber를 지우는 스레드에서 불린다. 값을 둔 스레드와 정리
 //   함수가 도는 스레드가 달라지면 "그 스레드에서 불린다"가 깨진다. 엔진은 fiber를 쓰지 않는다.

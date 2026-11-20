@@ -45,6 +45,9 @@ constexpr uint32 ConcurrentCallbackBudgetMilliseconds = 10000;
 // 겹친 실패 스레드의 여유와 프로세스 안 덤프 마감이다(설계 17절의 시험용 짧은 예산).
 constexpr uint32 ProbeConcurrentGraceMilliseconds = 1000;
 constexpr uint32 ProbeDumpTimeoutMilliseconds = 20000;
+// inprocess-dump-lock-holder의 프로세스 안 덤프 마감이다. 덤프가 heap lock에서 막히므로 크래시한
+// 스레드가 이 마감과 남은 예산 뒤 프로세스를 끝낸다(짧게 잡아 시험이 빨리 끝난다).
+constexpr uint32 ProbeLockedDumpTimeoutMilliseconds = 2000;
 // 도우미 캡처 마감이다(시험용 짧은 예산). 고장 난 도우미 시험이 이만큼 기다린다.
 constexpr uint32 ProbeCaptureTimeoutMilliseconds = 5000;
 // Full 덤프 마감 시험: 추가 덤프 마감 1 ms와 그보다 훨씬 오래 걸릴 큰 메모리(쓴 페이지)다.
@@ -351,10 +354,13 @@ void ConfigureCrashProbe(const char* mode, const char* directory,
     settings.captureHeapCorruption =
         CrashModeIs(mode, "heap-corruption") || CrashModeIs(mode, "process-heap-corruption");
     settings.crashReporting = launch::CrashReportingMode::Full;
-    if (CrashModeIs(mode, "inprocess-access-violation") ||
-        CrashModeIs(mode, "files-blocked-inprocess") ||
-        CrashModeIs(mode, "dump-blocked-inprocess") ||
-        CrashModeIs(mode, "inprocess-platform-fatal")) {
+    if (CrashModeIs(mode, "inprocess-dump-lock-holder")) {
+        settings.crashReporting = launch::CrashReportingMode::InProcess;
+        settings.inProcessDumpTimeoutMilliseconds = ProbeLockedDumpTimeoutMilliseconds;
+    } else if (CrashModeIs(mode, "inprocess-access-violation") ||
+               CrashModeIs(mode, "files-blocked-inprocess") ||
+               CrashModeIs(mode, "dump-blocked-inprocess") ||
+               CrashModeIs(mode, "inprocess-platform-fatal")) {
         settings.crashReporting = launch::CrashReportingMode::InProcess;
     } else if (CrashModeIs(mode, "helper-start-failure")) {
         FixedStringBuilder path{Span<char>(missingHelper)};
@@ -406,6 +412,15 @@ int RunCrashProbe(const char* mode, const char* directory) noexcept {
         CrashModeIs(mode, "helper-exit-during-capture") ||
         CrashModeIs(mode, "helper-gate-parent-first") || IsJobMode(mode)) {
         // 도우미 시험은 C#이 고장 난 도우미를 환경 변수로 고른다.
+        FaultAccess();
+    } else if (CrashModeIs(mode, "inprocess-dump-lock-holder")) {
+        // 프로세스 안 덤프가 스레드 목록 단계에 들어오면 다른 스레드가 프로세스 heap lock을 쥐고
+        // 멈춘다(설계 11.5절). 덤프는 그 lock에서 막히지만, 덤프가 살아 있는 스레드를 멈추지
+        // 않으므로 이 스레드(크래시한 스레드)가 마감에 프로세스를 끝낸다.
+        if (!HoldProcessHeapDuringDump()) {
+            return SetupFailed;
+        }
+
         FaultAccess();
     } else if (CrashModeIs(mode, "job-after-helper")) {
         // 도우미를 띄운 뒤 부모만 breakaway 허용 KILL_ON_JOB_CLOSE job에 들어간다(harness가 띄운 뒤

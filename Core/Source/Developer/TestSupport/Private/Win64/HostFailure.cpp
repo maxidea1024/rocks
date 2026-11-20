@@ -324,4 +324,57 @@ bool EnterBreakawayBlockingJob() noexcept {
     return true;
 }
 
+namespace {
+
+// HoldProcessHeapDuringDump의 상태다. 덤프 callback(크래시 처리 스레드)이 holder에게 heap lock을
+// 잡게 청하고, 잡았다는 신호를 받을 때까지 기다린다.
+constinit HANDLE dumpHeapLockRequest = nullptr;
+constinit HANDLE dumpHeapLockHeld = nullptr;
+constinit HANDLE dumpHeapHolderStarted = nullptr;
+constinit LONG dumpHeapGateUsed = 0;
+
+DWORD WINAPI DumpHeapHolder(void*) noexcept {
+    SetEvent(dumpHeapHolderStarted);
+    (void)WaitForSingleObject(dumpHeapLockRequest, INFINITE);
+    (void)HeapLock(GetProcessHeap());
+    SetEvent(dumpHeapLockHeld);
+    // lock을 쥔 채 영원히 기다린다(프로세스는 크래시한 스레드의 마감에 끝난다).
+    for (;;) {
+        (void)SleepEx(INFINITE, FALSE);
+    }
+}
+
+void DumpHeapGate(ULONG callbackType) noexcept {
+    if (callbackType != IncludeThreadCallback ||
+        InterlockedCompareExchange(&dumpHeapGateUsed, 1, 0) != 0) {
+        return;
+    }
+
+    SetEvent(dumpHeapLockRequest);
+    (void)WaitForSingleObject(dumpHeapLockHeld, INFINITE);
+}
+
+} // namespace
+
+bool HoldProcessHeapDuringDump() noexcept {
+    dumpHeapLockRequest = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    dumpHeapLockHeld = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    dumpHeapHolderStarted = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (dumpHeapLockRequest == nullptr || dumpHeapLockHeld == nullptr ||
+        dumpHeapHolderStarted == nullptr) {
+        return false;
+    }
+
+    const HANDLE holder = CreateThread(nullptr, 0, &DumpHeapHolder, nullptr, 0, nullptr);
+    if (holder == nullptr) {
+        return false;
+    }
+
+    CloseHandle(holder);
+    // holder가 실제로 돌기 시작한 뒤에 hook을 건다(새 스레드 시작은 heap·loader lock이 필요하다).
+    (void)WaitForSingleObject(dumpHeapHolderStarted, INFINITE);
+    platform::detail::SetCrashDumpCallbackHookForTest(&DumpHeapGate);
+    return true;
+}
+
 } // namespace rocks::test

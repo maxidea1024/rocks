@@ -122,4 +122,8 @@ bool EnterBreakawayBlockingJob() noexcept {
     return false;
 }
 
+bool HoldProcessHeapDuringDump() noexcept {
+    return false;
+}
+
 } // namespace rocks::test

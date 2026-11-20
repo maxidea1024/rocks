@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/Compiler.h>
 #include <Base/NumericLimits.h>
 #include <Base/Types.h>
 
@@ -308,8 +309,14 @@ const char* CurrentRunStage() noexcept;
 using GuardedBody = int (*)(void* context) noexcept;
 int RunWithCrashGuard(GuardedBody body, void* context) noexcept;
 
-// 처리기용 여유 stack 크기다(Windows SetThreadStackGuarantee, POSIX sigaltstack).
-inline constexpr usize CrashStackReserveBytes = 32 * 1024;
+// 처리기용 여유 stack 크기다(Windows SetThreadStackGuarantee, POSIX sigaltstack). Asan 구성은
+// ASan이 넘친 스레드에서 stack overflow 보고(stack trace 수집·기호 해석, 측정 약 29 KiB)를 한 뒤
+// death callback으로 공통 경로에 오므로 크게 잡는다(설계 10.5·13.2절). 일반 구성은 보고·덤프가 4
+// KiB 안에서 끝난다.
+inline constexpr usize CrashStackReserveDefaultBytes = 32 * 1024;
+inline constexpr usize CrashStackReserveSanitizerBytes = 128 * 1024;
+inline constexpr usize CrashStackReserveBytes =
+    ROCKS_ADDRESS_SANITIZER ? CrashStackReserveSanitizerBytes : CrashStackReserveDefaultBytes;
 
 // 호출 스레드가 처리기를 돌릴 여유 stack을 확보한다. platform::Thread가 시작 때, 설치가 설치한
 // 스레드에 부른다. 외부 라이브러리 스레드는 직접 부를 수 있다. 실패는 무시한다.

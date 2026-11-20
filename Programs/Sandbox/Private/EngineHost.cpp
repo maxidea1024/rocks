@@ -339,7 +339,8 @@ bool CheckDeviceTraitsFromCaps(Allocator& allocator) noexcept {
 // 문맥이 모듈 lease를 잡은 채 남으므로 호출자는 로더를 내리지 않는다).
 int RunEngineHostWithModules(launch::ApplicationContext& context, const EngineHostOptions& options,
                              ModuleLoader& modules, bool& writerAbandoned) noexcept {
-    Allocator& allocator = context.SystemAllocator();
+    // 프로세스의 범용 할당자다(기본 BinnedAllocator — Launch가 소유한다).
+    Allocator& allocator = context.DefaultAllocator();
     writerAbandoned = false;
     char engineDir[4096] = {};
     HostSettingsOptions boot;
@@ -470,7 +471,7 @@ int RunEngineHostWithModules(launch::ApplicationContext& context, const EngineHo
 int RunEngineHost(launch::ApplicationContext& context, const EngineHostOptions& options) noexcept {
     // 남은 lease를 진단할 때 이름을 기록할 모듈 수의 상한이다(넘는 모듈은 수만 기록한다).
     constexpr usize MaxLeaseReportNames = 16;
-    Allocator& allocator = context.SystemAllocator();
+    Allocator& allocator = context.DefaultAllocator();
     auto created = ModuleLoader::TryCreate(allocator, GeneratedModuleTable());
     if (!created) {
         Log::Error(LogSandboxHost, "The module loader could not be created: {Error}",

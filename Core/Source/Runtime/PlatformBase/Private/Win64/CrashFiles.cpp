@@ -65,6 +65,7 @@ constinit wchar_t directoryPath[FolderUnits] = {};
 constinit uint64 dumpDeadline = 0;
 constinit bool dumpCancelled = false;
 constinit bool dumpFromSnapshot = false;
+constinit CrashDumpCallbackHook dumpCallbackHook = nullptr;
 constinit const CrashMemoryRange* memoryRanges = nullptr;
 constinit usize memoryRangeCount = 0;
 constinit usize memoryRangeIndex = 0;
@@ -316,6 +317,10 @@ BOOL CALLBACK DumpCallback(PVOID, PMINIDUMP_CALLBACK_INPUT input,
                            PMINIDUMP_CALLBACK_OUTPUT output) noexcept {
     if (input == nullptr || output == nullptr) {
         return TRUE;
+    }
+
+    if (dumpCallbackHook != nullptr) {
+        dumpCallbackHook(input->CallbackType);
     }
 
     switch (input->CallbackType) {
@@ -681,6 +686,35 @@ bool CanWriteInProcessDump() noexcept {
     return writeMiniDump != nullptr;
 }
 
+DWORD CaptureCrashSnapshot(HANDLE process, CrashDumpDetail detail, HPSS& snapshot) noexcept {
+    const DWORD base = PSS_CAPTURE_VA_CLONE | PSS_CAPTURE_THREADS | PSS_CAPTURE_THREAD_CONTEXT;
+    // 핸들 데이터 덤프(Detailed·Full)는 핸들 캡처가 있어야 한다(없으면 ERROR_NOT_FOUND).
+    const DWORD flags = detail == CrashDumpDetail::Standard
+                            ? base
+                            : base | PSS_CAPTURE_HANDLES | PSS_CAPTURE_HANDLE_NAME_INFORMATION |
+                                  PSS_CAPTURE_HANDLE_BASIC_INFORMATION |
+                                  PSS_CAPTURE_HANDLE_TYPE_SPECIFIC_INFORMATION;
+    snapshot = nullptr;
+    DWORD captured = PssCaptureSnapshot(
+        process, static_cast<PSS_CAPTURE_FLAGS>(flags | PSS_CREATE_BREAKAWAY_OPTIONAL), CONTEXT_ALL,
+        &snapshot);
+    if (captured == ERROR_INVALID_PARAMETER) {
+        snapshot = nullptr;
+        captured = PssCaptureSnapshot(process, static_cast<PSS_CAPTURE_FLAGS>(flags), CONTEXT_ALL,
+                                      &snapshot);
+    }
+
+    if (captured != ERROR_SUCCESS) {
+        snapshot = nullptr;
+    }
+
+    return captured;
+}
+
+void SetCrashDumpCallbackHookForTest(CrashDumpCallbackHook hook) noexcept {
+    dumpCallbackHook = hook;
+}
+
 void WriteCrashFiles(EXCEPTION_POINTERS* pointers, const CrashInProcessReport& request,
                      const CrashHelperOutcome& helper) noexcept {
     CrashMetadataInput input;
@@ -740,13 +774,30 @@ void WriteCrashFiles(EXCEPTION_POINTERS* pointers, const CrashInProcessReport& r
         return;
     }
 
-    if (dumping) {
+    // 살아 있는 자기 프로세스를 덤프하지 않고 자기 snapshot을 덤프한다. 살아 있는 프로세스를
+    // 덤프하면 dbghelp가 이 스레드 밖의 모든 스레드(마감을 집행하는 크래시한 스레드 포함)를 덤프가
+    // 끝날 때까지 suspend하고, 그때 heap·loader lock을 쥔 스레드가 있으면 덤프도 마감도 영원히
+    // 멈춘다(설계 11.5절). snapshot 덤프는 살아 있는 스레드를 멈추지 않는다. 캡처가 실패하면 덤프를
+    // 쓰지 않는다.
+    HPSS snapshot = nullptr;
+    const DWORD captured =
+        dumping ? CaptureCrashSnapshot(GetCurrentProcess(), detail, snapshot) : ERROR_SUCCESS;
+    if (dumping && captured != ERROR_SUCCESS) {
+        input.dump.status = "Failed";
+        input.dump.error = captured;
+        input.dump.file = nullptr;
+        input.dump.reason = "process snapshot unavailable";
+    }
+
+    if (dumping && snapshot != nullptr) {
         CrashRecordRanges(inProcessRanges);
         FormatCrashComment(inProcessComment, sizeof(inProcessComment), inProcessRecord);
         CrashDumpSource source;
-        source.process = GetCurrentProcess();
+        source.process = reinterpret_cast<HANDLE>(snapshot);
         source.processId = GetCurrentProcessId();
+        source.snapshot = true;
         source.failingThreadId = static_cast<DWORD>(inProcessRecord.failingThreadId);
+        // 예외 포인터는 이 프로세스의 정적 사본이다(ClientPointers FALSE — 호출 프로세스 주소).
         source.pointers = pointers;
         source.ranges = inProcessRanges;
         source.rangeCount = CrashRecordRangeCount;
@@ -777,6 +828,10 @@ void WriteCrashFiles(EXCEPTION_POINTERS* pointers, const CrashInProcessReport& r
                 input.detailDump.reason = nullptr;
             }
         }
+    }
+
+    if (snapshot != nullptr) {
+        (void)PssFreeSnapshot(GetCurrentProcess(), snapshot);
     }
 
     if (report.current == nullptr) {

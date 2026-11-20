@@ -31,8 +31,8 @@
 | 증분 cycle | ≤ 60프레임 | 기본 예산 30,941 Step(60fps 약 8.6분) | 직렬 49–51, 병렬 ×8 기본 28·2ms 14 Step(20절) | 3–5 Step | 충족 |
 | 증분 Step p99 | ≤ 2ms | 2ms 예산 2.02ms(cycle 669ms) | p95 2.1ms, p99는 부하 아래 판정 불가 | — | 재측정 필요 |
 | Slot 정보 | ≤ 64B | 192B | hot 64B(슬롯 전체 192.3B) + 20.8B | 장부 + 24B | hot 충족(17절), 슬롯 전체는 192B |
-| churn 회수(약 98K) | — | 17.8ms | 묶음 회수로 같은 round 5–9% 감소(22.3–24.1ms), 회수를 미루면 프레임 2ms 예산으로 12–16프레임(24절) | — | 회수 예산 충족. 객체당 비용은 할당자를 바꿔도 줄지 않았다(gate A7 미충족 — 플랫폼 168.9 대 `BinnedAllocator` 163.3 ns/객체, 잡음 안: 25.8절) |
-| 1M 생성·회수(System·Binned 할당자) | — | 측정 불가(100K 이상이 끝나지 않음) | `SystemAllocator` 생성 1,954 · churn 회수 344 · 종료 회수 383 ns/객체(플랫폼 할당의 1.37–1.45배 · 3.8–4.3배 · 2.1–2.8배), `BinnedAllocator` 1,341 · 66.5 · 139 ns/객체(0.97배 · 0.81배 · 0.75배) — 25.8절 | — | 끝난다. 할당자 gate A1–A6 충족, A7 미충족(0.3절). 제품 경로는 아직 `SystemAllocator` |
+| churn 회수(약 98K) | — | 17.8ms | 묶음 회수로 같은 round 5–9% 감소(22.3–24.1ms), 회수를 미루면 프레임 2ms 예산으로 12–16프레임(24절) | — | 회수 예산 충족. 객체당 회수는 `BinnedAllocator`에서 플랫폼 할당의 0.89배, `SystemAllocator`의 0.37배다(중앙값 170.0 · 414.3 · 151.5 ns/객체 — 25.10절) |
+| 1M 생성·회수(System·Binned 할당자) | — | 측정 불가(100K 이상이 끝나지 않음) | `SystemAllocator` 생성 1,954 · churn 회수 344 · 종료 회수 383 ns/객체(플랫폼 할당의 1.37–1.45배 · 3.8–4.3배 · 2.1–2.8배), `BinnedAllocator` 1,341 · 66.5 · 139 ns/객체(0.97배 · 0.81배 · 0.75배) — 25.8절 | — | 끝난다. 할당자 gate A1–A4·A6·A7 충족, A5 경계(0.3절). Sandbox 엔진 호스트는 `BinnedAllocator`를 쓴다(25.10절) |
 
 처음에는 1M에서 표식 0.8초, 증분 cycle 8.6분, 병렬이 직렬보다 6배 느려 사실상 쓸 수 없었다. 지금은 cycle이 1초 안에 끝나고 Begin·sweep 판정이 1ms 아래이며, 클러스터가 맞는 그래프는 표식 gate를 모두 충족한다. Phase 4 측정은 부하 100% 아래라 병렬·p99 수치는 판정용이 아니다.
 
@@ -44,24 +44,25 @@
 |---|---|---|---|
 | A1 `SystemAllocator`(1M 생성·회수) | 끝난다. 플랫폼 할당 대비 생성 2배·종료 회수 3배·churn 회수 4.5배 이내 | 생성 1.37–1.45배, 종료 회수 2.1–2.8배, churn 회수 3.8–4.3배(1,954 · 383 · 344 ns/객체) | 충족 |
 | A2 `BinnedAllocator`(같은 측정) | 객체당 시간이 플랫폼 할당 이하 | 생성 0.97배, churn 생성 0.96배, churn 회수 0.81배, 종료 회수 0.75배(1,341 · 1,289 · 66.5 · 139 ns/객체) | 충족 |
-| A3 할당·반환 쌍 | 40 ns 이하 | 12.4–13.0 ns(부하가 걸린 round. 부하 없는 round의 검사 없는 변형은 7.2–7.3 ns) | 충족 |
-| A4 다른 스레드가 반환 | 같은 스레드의 3배 이내 | 2.1–2.9배(부하가 걸린 round 하나는 3.7배) | 충족 |
-| A5 8 스레드 처리량 | 1 스레드의 4배 이상 | 4.0–4.7배(부하 없는 round의 검사 없는 변형) | 충족 |
+| A3 할당·반환 쌍 | 40 ns 이하 | 7.2–7.4 ns | 충족 |
+| A4 다른 스레드가 반환 | 같은 스레드의 3배 이내 | 2.2–2.6배 | 충족 |
+| A5 8 스레드 처리량 | 1 스레드의 4배 이상 | round별 3.6–6.9배, 중앙 4.0배(다섯 round 가운데 둘이 4배 미만 — 다른 세션의 부하가 30% 안팎인 기계) | 경계 |
 | A6 메모리 | 요청 byte 대비 +20% 이하 | +6.8%(churn 뒤 +9.7%) | 충족 |
-| A7 GC churn 회수 | 플랫폼 할당보다 줄어든다 | 같은 수준(168.9 대 163.3 ns/객체 — 잡음 안) | 미충족 |
+| A7 GC churn 회수 | 플랫폼 할당보다 줄어든다 | 다섯 round 모두 낮다 — 중앙값 151.5 대 170.0 ns/객체(0.89배, round별 0.85–0.97배) | 충족 |
 
 남은 한계(설계 0절과 같다):
 
-- **제품 경로 미연결.** 지금 제품 코드는 엔진에 `SystemAllocator`를 넘긴다(`launch::ApplicationContext` → Sandbox `EngineHost`). `BinnedAllocator`를 엔진·응용 프로그램에 연결하는 일은 후속 작업(결정 대기)이다. 그때까지 1M 규모의 제품 경로에는 `SystemAllocator`의 배수(churn 회수가 플랫폼 할당의 3.8–4.3배)가 걸린다.
-- **ASan 미실행.** `BinnedAllocator`의 수동 poison 경로는 Asan 구성의 구문 검사와 리뷰의 경로 추적만 거쳤다. 실행한 적이 없고, CI의 AddressSanitizer 단계도 다른 세션의 실패로 그 앞에서 멈춰 아직 돌지 못했다.
+- **제품 연결은 Sandbox 엔진 호스트까지다(25.10절).** 실행 진입점(Launch)이 `SystemAllocator` 위에 `BinnedAllocator`를 하나 두고 범용 할당자(`ApplicationContext::DefaultAllocator()`)로 내주며 Sandbox의 엔진 호스트가 그것을 엔진에 넘긴다. Commandlet·벤치 도구와 게임 템플릿(`Templates/Game/Foundation/Source/Main.cpp`)은 아직 `SystemAllocator`를 쓴다(후속). `Trim`을 부르는 시점은 아직 어디에도 없다. 큰 블록(8 KB 초과)은 원장을 두 번 지난다.
+- **ASan은 로컬에서 돌리지 않았다.** `BinnedAllocator`의 수동 poison 경로는 Windows CI의 AddressSanitizer 단계(run 44656731971, dd157ca6 — Asan 구성 Foundation)에서 처음 실행돼 통과했다(메인 세션 확인: 2,659개 가운데 실패 0 — `CoreBinned` 27·`GcSoak` 9·`ThreadExitSlot` 4 포함. 그 단계 자체는 다른 세션의 크래시 시험 둘로 실패했다). macOS에서는 그 단계가 아직 돌지 못했다(앞 단계의 다른 세션 실패). 그 앞의 efd940ac에서는 같은 단계가 `TryMarkReturned`의 비교 교환을 use-after-poison으로 잡았다 — 중복 반환 경쟁 시험에서 한 스레드가 블록을 닫은 뒤 다른 스레드가 계측되는 원자 연산으로 읽었다. 그 코드와 시험은 개정 13에서 없어졌다. 개정 15(AL6)의 코드는 그 단계에서 아직 돌지 않았다.
 - **다른 스레드 캐시의 `Trim`은 후속.** `Trim`은 호출 스레드의 캐시만 비운다. 쉬는 스레드가 쥘 수 있는 상한은 스레드 × 인스턴스당 2,361,856 byte(`BinnedAllocator::MaxThreadCacheBytes`)이고, 그 블록이 붙드는 commit은 가장 나쁜 경우 195 MiB다(설계 18.8절).
 - **스레드 종료 순서의 남는 경우**(설계 18.4절). 할당자의 종료 hook이 지나간 뒤 같은 스레드의 뒤 순번 종료 정리가 allocator를 쓰는 경우와, 스레드의 첫 allocator 사용이 자기 종료 정리 안인 경우 — 기록 하나가 새고 그 캐시는 인스턴스 파괴 때 회수된다(해제된 메모리를 만지지는 않는다). fiber에서는 `ThreadExitSlot`을 쓰지 않는다.
 - **겹친 중복 반환**(설계 18.4절). 같은 블록을 두 스레드가 같은 순간에 반환하면 둘 다 성공으로 돌아올 수 있다. 그 블록을 두 번째로 내줄 때 Fatal로 잡지만, 그 사이에 다시 반환되거나 slab으로 돌아가면 놓치고 slab 계수가 어긋날 수 있다. 오용 검출은 그 slab의 decommit·재사용과 겹치면 보장되지 않는다(한계 2).
-- **GC churn 회수는 줄지 않았다**(gate A7). 일반 그래프의 churn 회수는 `BinnedAllocator`에서도 플랫폼 할당과 같은 수준이다. 할당자만 바꿔 잰 객체 비교에서는 churn 회수 0.81배·종료 회수 0.75배이고, 큰 이득은 뜨거운 쌍·여러 스레드 쪽이다.
-- **측정의 한계.** 개정 13 구현의 작은 벤치와 A7은 다른 세션의 빌드로 기계가 100% 찬 채로만 쟀다(판정에는 부하 없는 round의 값을 썼다). 실제 엔진의 객체 크기 분포는 재지 않았다(메모리 +6.8%는 벤치의 객체 크기에서의 값이다). 3M 객체 시나리오는 재지 않았다.
+- **GC churn 회수의 이득은 작다**(gate A7). 일반 그래프의 churn 회수는 `BinnedAllocator`에서 플랫폼 할당의 0.89배다(개정 13 구현 — 비교 교환 구현에서는 같은 수준이었다). `SystemAllocator`에 견주면 0.37배다(25.10절). 할당자만 바꿔 잰 객체 비교에서는 churn 회수 0.81배·종료 회수 0.75배이고, 큰 이득은 뜨거운 쌍·여러 스레드 쪽이다.
+- **측정의 한계.** 측정은 다른 세션의 빌드 부하가 드나드는 기계에서 했다(판정에는 round의 최솟값·중앙값을 썼고, 마지막 재측정 때의 부하는 30% 안팎이었다). gate A5(8 스레드 배수)는 경계다. 실제 엔진의 객체 크기 분포는 재지 않았다(메모리 +6.8%는 벤치의 객체 크기에서의 값이다). 3M 객체 시나리오는 재지 않았다.
 - **플랫폼.** 이 기계는 Windows만 빌드한다. macOS는 CI로, Android는 NDK 구문 검사로만 봤다.
+- **검증의 한계.** origin을 충돌 없이 병합한 뒤에는 다시 검증하지 않는다(작업 규칙). 양쪽이 같은 고정 크기 등록부에 더하는 변경은 충돌 없이도 깨진다 — 시험 실행기의 자식 probe 등록부(8칸)에서 AL5의 probe와 다른 세션의 probe가 병합으로 만나 아홉이 됐고, EngineTests의 시험 넷이 dd157ca6부터 실패했다. AL6의 전체 실행에서 찾아 고쳤다(16칸). 같은 실행에서 엔진 단계 크래시 시험의 자식 하나가 120초 시한에 걸린 것을 한 번 봤다 — 재현되지 않았고 멈춘 자리를 가르지 못했다(25.10절).
 - **4절 gate 가운데 남은 것.** 일반 그래프의 STW 병렬 표식(×8 16.7–17.2ms — 목표 15ms의 1.1–1.15배), 증분 Step p99(부하 아래 판정 불가 — 재측정 필요), Slot 정보 합계(hot 64B는 충족, 전체 192.3B — 설계 11절 결정 5).
-- **리뷰의 후속 목록**(실험 25.9절): 겹친 중복 반환의 slab 경로 보강, 캐시 줄 크기, 종료 hook의 전역 잠금 구간, 시험이 없는 경로 넷, `FlsGetValue`의 last-error 등.
+- **리뷰의 후속 목록**(25.9·25.10절): 겹친 중복 반환의 slab 경로 보강, 캐시 줄 크기, 종료 hook의 전역 잠금 구간, 시험이 없는 경로, 엔진 시험의 변별력, 내장 진입의 파괴 경로 시험 등.
 
 ## 1. 측정 환경
 
@@ -1657,7 +1658,7 @@ ASan 수동 poison(설계 18.4절 "ASan"):
 - 닫힌 블록 안의 관리 word(연결·표지)는 `ROCKS_NO_SANITIZE_ADDRESS`(`Base/Compiler.h`에 추가)를 붙인 작은 내부 함수 `ReadLink`·`WriteLink`·`WriteMarker`로만 읽고 쓴다. 계측에서 빠지는 것은 그 함수 본문의 직접 접근뿐이다.
 - 표지를 세우는 비교 교환(`TryMarkReturned`)은 계측되는 원자 함수(`Platform/Atomics.h`)를 지나므로 그 word(8 byte)만 열고 한다. 성공하면 호출자가 블록 전체를 닫고, 실패하면(이미 닫힌 블록) 그 word를 다시 닫는다. (개정 13에서 표지를 단순 대입으로 되돌리면서 이 처리는 없어졌다 — 표지의 비교·대입·검사는 모두 계측 제외 함수의 직접 접근이다.)
 - 주소 범위를 풀 때는 쓴 적 있는 slab을 모두 연다(같은 주소를 OS가 다른 용도로 다시 내줄 수 있다).
-- **실행 검증은 하지 않았다**(이 작업은 Asan을 돌리지 않는다). Asan 구성의 컴파일 명령으로 `BinnedAllocator.cpp`의 구문 검사(`-fsyntax-only`, `/fsanitize=address`)만 통과를 확인했다. poison·unpoison의 짝이 실제 ASan 실행에서 맞는지는 Asan 구성을 돌리는 쪽에서 확인해야 한다. CI의 AddressSanitizer 단계도 아직 이 코드를 돌리지 못했다 — 다른 세션의 실패로 그 앞 단계에서 job이 멈춘다(2026-11-20).
+- **실행 검증은 하지 않았다**(이 작업은 Asan을 돌리지 않는다). Asan 구성의 컴파일 명령으로 `BinnedAllocator.cpp`의 구문 검사(`-fsyntax-only`, `/fsanitize=address`)만 통과를 확인했다. poison·unpoison의 짝이 실제 ASan 실행에서 맞는지는 Asan 구성을 돌리는 쪽에서 확인해야 한다. 그 뒤의 경과(메인 세션 확인): Windows CI의 AddressSanitizer 단계가 efd940ac에서 처음 돌아 `TryMarkReturned`의 비교 교환을 use-after-poison으로 잡았다(중복 반환 경쟁 시험 — 한 스레드가 블록을 닫은 뒤 다른 스레드가 계측되는 원자 연산으로 읽었다). 그 코드와 시험은 개정 13에서 없어졌고(25.8절), dd157ca6에서는 같은 단계의 할당자 시험이 모두 통과했다(run 44656731971 — `CoreBinned` 27·`GcSoak` 9·`ThreadExitSlot` 4). macOS에서는 그 단계가 아직 돌지 못했다.
 
 장기 smoke(`GcSoakTests.cpp` 3개 추가 — `GcSoak` 9개):
 
@@ -1679,7 +1680,7 @@ ASan 수동 poison(설계 18.4절 "ASan"):
 - **기준 정정.** 할당자 비교의 `platform`을 계수 없는 플랫폼 할당(`RawPlatformAllocator`)으로 바로잡고, 옛 기준(`BenchAllocator`)은 `platform-counted`(종류 4)로 남겼다(설계 18.2절). 계기는 gate A7이다 — 같은 계수를 `BinnedAllocator` 위에 얹어 돌리자 객체 비교에서 보이던 차이(111 대 75 ns)가 사라졌다. 옛 기준은 실제보다 생성 1.04–1.10배, churn 회수 1.26–1.39배, 종료 회수 1.18–1.24배 비쌌다(세 실행).
 - **표지 방식(메인 세션 판정).** 반환 표지를 비교 교환에서 비교 뒤 단순 대입으로 되돌리고, 블록을 내주는 두 지점(스레드 캐시, 등급 잠금 경로)에서 표지가 서 있는지 본다. 서 있지 않으면 Fatal `BinnedAllocator free block lost its return marker`다(설계 18.4절 "겹친 중복 반환").
 - **gate.** A1을 새 기준으로 다시 정하고(생성 2배·종료 회수 3배·churn 회수 4.5배 이내), A2에서 "몫이 플랫폼의 절반 이하"를 뺐다(잘못된 기준 위의 제안값이었다).
-- **사실 정정.** 지금 제품 코드는 엔진에 `SystemAllocator`를 넘긴다(`launch::ApplicationContext` → Sandbox `EngineHost`). `BinnedAllocator`를 엔진·응용 프로그램에 연결하는 일은 이 단계 범위에 없었고 후속 작업(결정 대기)이다. 25.2절과 설계 개정 11의 "1M 작은 객체의 제품 경로는 `BinnedAllocator`"는 틀린 말이었다.
+- **사실 정정.** 지금 제품 코드는 엔진에 `SystemAllocator`를 넘긴다(`launch::ApplicationContext` → Sandbox `EngineHost`). `BinnedAllocator`를 엔진·응용 프로그램에 연결하는 일은 이 단계 범위에 없었고 후속 작업(결정 대기)이다(그 뒤 25.10절에서 Sandbox 엔진 호스트를 연결했다). 25.2절과 설계 개정 11의 "1M 작은 객체의 제품 경로는 `BinnedAllocator`"는 틀린 말이었다.
 - 벤치: `--allocators`의 메모리 줄과 요청 크기 분포(`--allocator-memory`, gate A6), 일반 그래프 시나리오의 `--allocator-kind`(gate A7). 코드: `BinnedAllocator::MaxThreadCacheBytes`.
 
 측정 방법: Development 빌드(유니티 빌드, 작업 파일 분리 끔 — 변형 사이에 번역 단위 구성이 같게), 높은 우선순위, 같은 round 안에서 할당자와 변형을 번갈아 돈다. 변형(커밋하지 않음)은 둘이다 — "검사 없음"(내줄 때 표지를 지우기만 한다)과 "비교 교환"(개정 9의 구현: 검사 없음 + 반환 표지를 비교 교환으로). 기계에 다른 세션의 빌드 부하가 드나들어 round의 최솟값을 쓰고, 부하가 걸린 채로만 잰 값은 그렇게 적는다.
@@ -1756,7 +1757,7 @@ GC churn 회수(gate A7 — 일반 그래프 시나리오 1M · 간선 4 · `--c
 | 비교 교환 구현, 부하 없는 3 round | 197.4 · 170.3 · 168.9 | 163.3 · 175.3 · 171.5 |
 | 개정 13 구현, 부하 걸린 5 round | 242.1 · 238.4 · 406.2 · 408.8 · 386.0 | 259.5 · 276.0 · 264.0 · 203.1 · 200.1 |
 
-- 같은 수준이다(부하 없는 실행의 최솟값 168.9 대 163.3, 중앙값 170.3 대 171.5). "플랫폼 할당보다 줄어든다"를 채웠다고 할 수 없다. 개정 13 구현은 기계가 100% 찬 채로만 쟀고 round 사이 흔들림(200–409 ns)이 할당자 차이보다 커서 판정에 쓰지 않는다 — 객체 비교에서 본 표지 방식의 이득(객체당 6–12 ns)은 이 시나리오의 잡음 안이다.
+- (25.10절에서 개정 13 구현을 부하가 적을 때 다시 쟀다 — 다섯 round 모두 `BinnedAllocator`가 낮아 판정을 충족으로 고쳤다. 아래는 AL5 때의 판단이다.) 같은 수준이다(부하 없는 실행의 최솟값 168.9 대 163.3, 중앙값 170.3 대 171.5). "플랫폼 할당보다 줄어든다"를 채웠다고 할 수 없다. 개정 13 구현은 기계가 100% 찬 채로만 쟀고 round 사이 흔들림(200–409 ns)이 할당자 차이보다 커서 판정에 쓰지 않는다 — 객체 비교에서 본 표지 방식의 이득(객체당 6–12 ns)은 이 시나리오의 잡음 안이다.
 - 실험 24절의 235–250 ns보다 부하 없는 실행이 낮은 것은 기계 부하와 빌드 구성(유니티)이 달라서이고 할당자 때문이 아니다.
 - 이 시나리오에서는 `BenchAllocator`가 머리 16 byte를 더해 요청하므로 `BinnedAllocator`의 등급이 한 칸씩 올라간다(48 → 64 등). 끝난 뒤 `BinnedAllocator`의 commit은 5.8 MiB(보관한 빈 slab 64개 4 MiB와 주 스레드 캐시의 블록이 붙든 slab)이고 큰 경로로 밀린 작은 요청은 0이다.
 
@@ -1779,20 +1780,20 @@ gate 확정(설계 18.8절, 개정 13):
 |---|---|---|---|
 | A1 `SystemAllocator` | 끝난다. 플랫폼 대비 생성 2배·종료 회수 3배·churn 회수 4.5배 이내 | 생성 1.37–1.45배, 종료 회수 2.1–2.8배, churn 회수 3.8–4.3배 | 충족(할당자는 그대로이고 잣대가 바뀌어 다시 정한 값이다) |
 | A2 `BinnedAllocator` | 객체당 시간이 플랫폼 이하 | 0.97 · 0.96 · 0.81 · 0.75배(몫은 churn 회수 64%, 종료 회수 44%) | 충족 |
-| A3 쌍 | 40 ns 이하 | 부하 걸린 round 12.4–13.0 ns(부하 없는 round의 검사 없는 변형 7.2–7.3 ns) | 충족 |
-| A4 다른 스레드 반환 | 같은 스레드의 3배 이내 | 2.1–2.9배(부하 걸린 round 하나 3.7배), 부하 없는 round의 검사 없는 변형 2.3–2.7배 | 충족(부하 없는 round 기준) |
-| A5 8 스레드 | 1 스레드의 4배 이상 | 부하 없는 round의 검사 없는 변형 4.0–4.7배(부하 걸린 round 6.7–7.2배) | 충족 |
+| A3 쌍 | 40 ns 이하 | 7.2–7.4 ns(25.10절의 재측정. AL5 때는 부하가 걸린 round의 12.4–13.0 ns뿐이었다) | 충족 |
+| A4 다른 스레드 반환 | 같은 스레드의 3배 이내 | 2.2–2.6배(25.10절의 재측정) | 충족 |
+| A5 8 스레드 | 1 스레드의 4배 이상 | round별 3.6–6.9배, 중앙 4.0배(25.10절의 재측정 — 다섯 round 가운데 둘이 4배 미만) | 경계(AL5 때는 검사 없는 변형의 4.0–4.7배로 충족이라 적었다) |
 | A6 메모리 | 요청 대비 +20% 이하 | +6.8%(churn 뒤 +9.7%) | 충족 |
-| A7 GC churn 회수 | 플랫폼보다 줄어든다 | 같은 수준(168.9 대 163.3 ns — 잡음 안) | 미충족 — 줄지 않는다 |
+| A7 GC churn 회수 | 플랫폼보다 줄어든다 | 다섯 round 모두 낮다 — 중앙값 151.5 대 170.0 ns/객체(25.10절의 재측정) | 충족(AL5 때는 비교 교환 구현의 값으로 "같은 수준 — 미충족"이라 적었다) |
 
 남은 한계와 후속:
 
-- 제품 경로 미연결: 엔진에는 `SystemAllocator`가 넘어가므로 지금 1M 규모의 제품 경로에는 A1의 배수(churn 회수가 플랫폼의 3.8–4.3배)가 걸린다. `BinnedAllocator` 연결은 후속 작업(결정 대기)이다.
-- ASan 경로는 실행 검증이 없다(25.7절). CI의 AddressSanitizer 단계도 아직 돌지 못했다.
+- 제품 경로: AL5 때는 엔진에 `SystemAllocator`가 넘어갔다. 25.10절에서 Sandbox 엔진 호스트를 `BinnedAllocator`에 연결했다(Commandlet·벤치 도구는 후속).
+- ASan 경로: 로컬에서는 돌리지 않았다. Windows CI의 AddressSanitizer 단계(dd157ca6)에서 실행돼 통과했다(0.3절).
 - 다른 스레드 캐시의 `Trim`은 후속이다(쉬는 스레드가 쥐는 상한 2,361,856 byte).
 - 스레드 종료 순서의 남는 경우(25.6절): hook 뒤 회차의 종료 정리, 스레드의 첫 allocator 사용이 자기 종료 정리 안인 경우 — 기록 하나가 새고 캐시는 인스턴스 파괴 때 회수된다.
 - 겹친 중복 반환은 둘 다 성공으로 돌아올 수 있다(두 번째로 내줄 때 Fatal. 그 사이 다시 반환되거나 slab으로 돌아가면 놓치고 slab 계수가 어긋날 수 있다).
-- 개정 13 구현의 작은 벤치와 A7은 부하가 걸린 채로만 쟀다(위). 조용한 기계에서 다시 재면 표의 "부하 걸린 round" 줄이 바뀐다.
+- 개정 13 구현의 작은 벤치와 A7은 AL5 때 부하가 걸린 채로만 쟀다. 25.10절에서 다시 쟀다(부하 30% 안팎).
 - 실제 엔진의 크기 분포는 재지 않았다(벤치의 객체 크기에서 +6.8%).
 
 검증: Debug `Core` 대상 `CoreBinned` 27개 통과, NDK `-fsyntax-only`(`BinnedAllocator.cpp`, 두 시험 파일)와 Asan 구성 구문 검사 통과, format·policy 통과. 전체 Foundation·EngineTests는 8단계 끝에 한 번 돌린다(아래 25.9절).
@@ -1822,14 +1823,100 @@ gate 확정(설계 18.8절, 개정 13):
 - I6 시험이 없는 곳: 스레드 기록의 항목 표 늘리기(한 스레드가 인스턴스 다섯 개 이상의 캐시를 가질 때), `ThreadExitSlot`의 "프로세스 종료 때는 부르지 않는다", `MaxThreadExitSlots` 초과, 큰 경로의 Fatal 둘(게시 전 블록의 반환 거부, 기록 되돌리기 실패).
 - I7 시험의 환경 의존: `ReservedBytes() == DefaultReserveBytes`(예약이 축소되는 환경에서 실패), worker 감시 시한 60초(부하가 큰 기계에서 Fatal이 될 수 있다 — sleep이나 경쟁 운에 기댄 단언은 없다).
 - I8 `<cstdlib>`의 `std::_Exit`(저장소의 다른 곳은 `<stdlib.h>`의 `_Exit`).
-- S1 Windows `FlsGetValue`가 last-error를 바꿀 수 있다(`ThreadExitSlot::Get` — 스레드의 첫 호출 경로). 제품에 연결할 때 `Get`에서 보존할지 확인한다(이 기계에서 확인하지 않았다).
+- S1 Windows `FlsGetValue`가 last-error를 바꿀 수 있다(`ThreadExitSlot::Get` — 스레드의 첫 호출 경로). 25.10절에서 확인하고 반영했다(성공해도 0으로 지운다 — `Get`·`Set`이 보존한다).
 - 벤치: `RunAllocatorComparison`의 오류 반환 경로는 살아 있는 할당을 남긴 채 allocator 파괴 Fatal로 끝날 수 있다(도구 한정).
 
 전체 검증(8단계 끝에 한 번 — Debug, 리뷰 반영 뒤): Foundation 2,629개 가운데 실패 0, EngineTests 3,054개 가운데 실패 0. `Core` 대상 `CoreBinned` 27개, NDK `-fsyntax-only`(`BinnedAllocator.cpp`와 두 시험 파일), Asan 구성 구문 검사, format·policy 통과.
 
 실행하지 못했거나 건너뛴 검증:
 
-- AddressSanitizer 실행(수동 poison 경로) — 이 작업의 규칙으로 돌리지 않았고 CI의 그 단계도 아직 돌지 못했다.
+- AddressSanitizer 실행(수동 poison 경로) — 이 작업의 규칙으로 로컬에서는 돌리지 않았다. Windows CI의 그 단계가 dd157ca6에서 처음 돌아 할당자 시험이 통과했다(메인 세션 확인 — run 44656731971). macOS의 그 단계는 아직 돌지 못했다.
 - macOS·Android 실행 — macOS는 push의 CI로만 본다(D1의 고침, 개정 13의 Fatal 대조는 이 push의 CI가 첫 실행이다). Android는 구문 검사뿐이다(자식 프로세스 Fatal 대조는 Android에서 건너뛴다 — 프로세스 생성 미지원).
-- 조용한 기계에서의 재측정 — 개정 13 구현의 작은 벤치와 A7은 부하가 걸린 채로만 쟀다(25.8절).
+- 조용한 기계에서의 재측정 — 25.10절에서 했다(부하 30% 안팎. 완전히 빈 기계는 아니다).
+- Release·Development 구성의 시험 실행(벤치만 Development로 빌드했다).
+
+### 25.10 AL6: 제품 연결과 재측정 (설계 개정 15, 2026-11-20)
+
+사용자 지시 "엔진에 BinnedAllocator 연결해"로 설계 11절 결정 8을 확정하고 연결했다(설계 18.10절, Launch 설계 개정 8).
+
+한 것:
+
+- **Launch.** `ApplicationSettings::defaultAllocator`(`DefaultAllocatorKind` — 기본 `Binned`, `System`)와 `ApplicationContext::DefaultAllocator()`를 더했다. 실행 단계 "Launch.DefaultAllocator"(종료 요청 처리기 뒤, 도구 로그 앞)가 Launch의 `SystemAllocator` 위에 `BinnedAllocator`를 하나 만들고, 역순 정리에서 도구 로그를 멈춘 뒤에 파괴한다. 본문이 할당을 남기면 그 파괴가 Fatal이다. `RequestExitWithoutStaticTeardown`이면(내장 진입 제외) 파괴하지 않는다. `System` 설정이면 만들지 않고 `DefaultAllocator()`가 `SystemAllocator()`와 같은 객체다.
+- **Sandbox.** 엔진 호스트의 두 경로(`RunEngineHost`, `RunEngineHostWithModules`)와 self-test가 `context.DefaultAllocator()`를 쓴다 — 모듈 로더, 설정 문맥, LogHost, 엔진이 그 할당자를 받는다. 같은 파일의 지역 `SystemAllocator` 둘(self-test가 trace 파일을 읽는 버퍼, 기기 특성 확인)은 엔진으로 가지 않아 그대로 뒀다.
+- **`ThreadExitSlot`의 OS 오류 값 보존**(리뷰 S1). 탐침으로 확인했다(Windows 11 26200): `FlsGetValue`는 값이 있든 없든 성공하면 last-error를 0으로 지우고, `FlsSetValue`는 성공하면 그대로 둔다. Windows 구현의 `Get`·`Set`이 호출 앞뒤로 last-error를 보존하고, 계약(`Thread.h`)에 "OS 오류 값을 바꾸지 않는다"를 적었다. 시험 지원에 `test::SetSystemError`·`SystemError`(Windows last-error, POSIX `errno`)를 더했다.
+- **빌드 규칙.** 시험 지원 소스 둘을 더하자 FoundationTests의 유니티 묶음 경계가 옮겨져 `WindowsComRefTests.cpp`가 Compression 시험과 한 묶음의 앞에 놓였고, Windows COM 헤더의 매크로(`small`)가 뒤 소스로 새어 컴파일이 깨졌다(작업 파일 분리를 꺼도 같았다). 그 시험 소스를 유니티 단독 소스로 뺐다(`Programs/FoundationTests/FoundationTests.Build.cs`). 다른 세션(빌드)의 파일이라 한 줄만 더했다.
+
+시험:
+
+- `Native.Launch.default-allocator`(Rocks.ToolTests — `LaunchProbe`를 자식으로 다섯 번 띄운다): 기본 설정에서 범용 할당자가 시스템 할당자와 다른 객체이고 작은 블록 64개는 시스템 할당자의 살아 있는 할당 수를 늘리지 않으며 큰 블록 하나는 하나 늘린다(`kind=binned distinct=1 smallInSystem=0 largeInSystem=1 clean=1`). `--system-allocator`면 같은 객체다(`distinct=0 smallInSystem=64`). 할당을 남기면 비정상 종료이고 stderr에 `BinnedAllocator destroyed with live allocations`(System 설정은 `SystemAllocator destroyed with live allocations`)가 있다. `RequestExitWithoutStaticTeardown`이면 Fatal 없이 본문의 종료 코드로 끝난다.
+- `EngineBinnedAllocatorTests.cpp` 3개(EngineTests): GC worker 둘이 있는 엔진(전체 수집을 요청해 돌린다), scheduler 없는 엔진(직렬 표식·증분 일정), 같은 할당자 위에서 엔진을 두 번 살리기. Actor 512개를 만들어 절반을 파괴하고 프레임을 돌린다. 엔진이 살아 있는 동안 받은 할당자에 살아 있는 할당이 있고(엔진이 그 할당자를 쓴다), 끝에 남은 할당 0, 큰 경로로 밀린 작은 요청 0, `Trim` 뒤 commit 0, 상위 `SystemAllocator`도 남은 할당 0.
+- `ThreadExitSlot_GetAndSetKeepTheSystemErrorValue`: 빈 칸의 `Get`, `Set`, 값이 든 칸의 `Get`, 지우는 `Set`, 유효하지 않은 칸의 `Get`·`Set` 뒤에 OS 오류 값이 그대로다.
+- 음성 대조 3종이 모두 잡혔다(Debug Foundation, `Native.Launch.default-allocator`): L1 Launch가 `BinnedAllocator`를 만들고도 시스템 할당자를 내줌, L2 설정을 무시하고 언제나 `BinnedAllocator`를 만듦, L3 정적 소멸 없이 끝내는 경로에서도 파괴함.
+
+측정 — 일반 그래프 시나리오(1M · 간선 4 · `--churn-only`, 5 round를 할당자마다 번갈아. 모두 `BenchAllocator`의 계수 아래이고 다른 세션의 부하는 30% 안팎이었다. 값은 중앙값(최솟값)):
+
+| 할당자 | 생성 ms | 연결 ms | churn 생성+연결 ms | churn 회수 ns/객체 | churn Collect 전체 ms | 미룬 회수의 프레임(2 ms 예산) |
+|---|---|---|---|---|---|---|
+| platform | 492(473) | 844(815) | 130(124) | 170.0(165.3) | 86.5(83.0) | 10–12 |
+| `SystemAllocator`(연결 전의 제품 경로) | 824(787) | 1,106(1,044) | 175(167) | 414.3(401.9) | 107.5(106.6) | 23–25 |
+| `BinnedAllocator`(연결 뒤) | 441(436) | 818(787) | 127(122) | 151.5(145.1) | 81.5(77.7) | 9–10 |
+
+- 연결로 바뀌는 것(`SystemAllocator` → `BinnedAllocator`, 중앙값): 생성 0.54배, 연결 0.74배, churn 생성+연결 0.72배, churn 회수 0.37배, churn Collect 전체 0.76배, 미룬 회수의 프레임 수 24 → 10.
+- 종료 회수는 이 시나리오가 재지 않는다. 할당자 비교의 값은 383–501 → 139–142 ns/객체다(25.8절).
+- gate A7(플랫폼 대 `BinnedAllocator`): round별 168.1 · 170.0 · 165.3 · 179.4 · 170.6 대 163.7 · 145.1 · 149.4 · 159.4 · 151.5 ns/객체 — 다섯 round 모두 `BinnedAllocator`가 낮다(0.85–0.97배, 중앙값 0.89배). AL5 때의 "같은 수준"은 비교 교환 구현으로 잰 값이었고, 개정 13 구현은 그때 부하가 걸린 채로만 쟀다. 판정을 충족으로 고친다.
+
+작은 벤치의 재측정(개정 13 구현, 같은 조건 — gate A3·A4·A5. 5 round의 가장 좋은 값(중앙값)):
+
+| 할당자 | 쌍(16–8192 B) | 묶음 4096×64 B | 인계: 다른 스레드 / 같은 스레드 | 동시 1 스레드 | 동시 8 스레드 |
+|---|---|---|---|---|---|
+| platform | 24.5–25.3 ns(25.0–31.2) | 25.4 ns/op | 97.6 / 30.8 ns/쌍 | 38.2 M쌍/s(31.3) | 175.2 M쌍/s(129.5) — 같은 round 비 4.0–4.7배 |
+| `BinnedAllocator` | 7.2–7.4 ns(7.3–8.9) | 5.3 ns/op | 17.6 / 7.9 ns/쌍 — 같은 round 비 2.2–2.6배 | 123.5 M쌍/s(118.5) | 637.3 M쌍/s(455.2) — 같은 round 비 3.6 · 3.8 · 4.0 · 5.2 · 6.9배 |
+
+- A3 7.2–7.4 ns, A4 2.2–2.6배는 충족이다.
+- A5는 경계다: round별 배수의 중앙값이 4.0배이고 다섯 가운데 둘이 4배 미만이다(6.9배는 그 round의 1 스레드 값이 66 M쌍/s로 눌린 것). 비교 교환을 뺀 뒤 1 스레드 값이 104 → 120 M쌍/s로 오른 만큼 배수가 내려갔다 — 8 스레드의 처리량 자체는 416–637 M쌍/s로 비교 교환 때(359–510)보다 높다. AL5 때 "충족"이라 적은 4.0–4.7배는 검사 없는 변형을 다른 때에 잰 값이었다.
+
+검증: Debug Foundation·EngineTests·Sandbox 빌드(작업 파일 분리 끔 — CI와 같은 묶음 구성). 바뀐 시험: Foundation `ThreadExitSlot` 5개, EngineTests `Engine_` 23개(새 시험 3개 포함), `Native.Launch.default-allocator` 통과. Sandbox `--self-test`는 19개 통과·1개 미실행(Vulkan 소프트웨어 기기 없음 — 환경), `--engine --frames 3`은 종료 코드 0이다(범용 할당자에 남은 할당이 없어 Launch의 정리가 Fatal 없이 끝난다). 전체 실행과 리뷰 결과는 아래 "리뷰"와 "마지막 검증"에 적는다.
+
+후속(넣지 않은 것): `Trim`을 부르는 시점(레벨을 내린 뒤, 메모리 압박), 다른 스레드 캐시의 `Trim`, Commandlet·벤치 도구와 게임 템플릿의 연결, 범용 할당자를 고르는 명령줄 옵션, 큰 블록이 원장을 두 번 지나는 것.
+
+리뷰(리뷰어 1명, 읽기 전용 — c8f15009..3cbf5d85의 코드와 두 설계 절·이 절): blocker는 없었다. Launch의 수명·순서, Sandbox 연결, Windows `ThreadExitSlot` 코드에서는 동작 결함이 나오지 않았다. 결함으로 분류된 여섯은 문서·계약 문장 쪽이고 모두 반영했다. 개선 제안은 넣지 않고 아래 후속 목록에 적었다.
+
+| 지적(결함) | 내용 | 반영 |
+|---|---|---|
+| D1 | 게임 템플릿(`Templates/Game/Foundation/Source/Main.cpp` — 엔진 호스트 종류)이 `context.SystemAllocator()`를 쓰는데 "남은 한계"는 연결 안 된 곳을 Commandlet·벤치 도구로만 적었다 | 세 문서의 목록에 넣었다. 템플릿을 바꾸는 일은 연결 범위(Sandbox) 밖이라 후속이다 |
+| D2 | Launch 설계 8.1절 단계 표, 7.4절 목록의 `DefaultAllocatorKind` 선언, 18절 비용 표와 사용 안내 2·3절이 새 단계·설정을 반영하지 않았다 | 반영했다(8.1절 6a행, 선언, 비용 한 줄, 사용 안내의 설정과 엔진 호스트 사용법·수명 계약) |
+| D3 | `Thread.h`의 "Get·Set은 OS 오류 값을 바꾸지 않는다"가 POSIX 구현보다 넓었다(POSIX에는 보존 코드가 없었다 — `pthread_setspecific`이 실패할 때 `errno`를 바꾸는 libc가 있을 수 있다) | POSIX `Get`·`Set`도 `errno`를 저장·복원한다. Android NDK 구문 검사만 했다(실행은 macOS CI) |
+| D4 | `FlsGetValue`의 last-error가 세 곳에 "후속"으로 남아 18.4절·이 절과 어긋났다 | "반영했다"로 고쳤다 |
+| D5 | 설계 18.10절의 "`SystemAllocator`를 쓸 때의 Fatal과 같은 자리"는 사실과 달랐다 — `BinnedAllocator`의 Fatal은 보호 프레임 안의 정리 단계에서, `SystemAllocator`의 Fatal은 크래시 수집기를 뗀 뒤 runner 파괴에서 난다 | "계약은 같고 자리는 다르다"로 고쳤다. 동작을 맞추는 일은 I5다 |
+| D6 | 낡은 문구: 25.8절·설계 18.6절의 "지금 제품 코드는 `SystemAllocator`", 설계 18절 제목의 "개정 7–13", 18.9절 단계 표에 AL6 없음, Launch 설계의 self-test 서술, `Application.h` 주석 줄바꿈, 이 절의 "아래에 덧붙인다" | 고쳤다. `Docs/Implementation/Logging.ko.md`의 엔진 호스트 예제(`context.SystemAllocator()`)는 로깅 세션의 문서라 손대지 않았다(알림 대상) |
+
+후속 목록(개선 제안 — 이번에 넣지 않았다):
+
+- I1 엔진 시험 셋의 변별력. 반영한 것: 세 시험 모두 엔진이 살아 있는 동안 받은 할당자에 살아 있는 할당이 있는지 본다(엔진이 할당자를 무시하면 실패한다). 첫 시험의 주석에서 단언 없는 "파괴한 Actor가 회수된다"를 뺐다. 남은 것: 수집 전후를 `InspectLifecycle`로 보기, "worker가 같은 할당자를 쓴다"·"재시작이 slab을 다시 쓴다"의 단언.
+- I2 내장 진입의 파괴 경로 시험(`RequestExitWithoutStaticTeardown`을 내장 진입이 무시하고 파괴한다 — 그 조건을 지워도 지금 시험은 잡지 못한다).
+- I3 할당자 수준의 OS 오류 값 시험(새 스레드의 첫 `Allocate`·`Deallocate`가 last-error·`errno`를 보존). 지금 시험은 칸 수준이다. slab commit 실패 뒤 상위로 넘어가 성공하는 드문 경로는 last-error를 바꾼다(계약에 없다).
+- I4 환경 의존: `smallInSystem=0`과 `fallbackAllocations == 0`은 주소 범위 예약이 성공해야 참이다(25.9절 I7과 같은 종류).
+- I5 `System` 종류의 남은 할당 검사를 같은 정리 단계에서 하기(두 종류의 진단 자리를 맞춘다 — D5).
+- I6 쓰지 않는 실행 파일의 비용: 시험 실행기와 그 자식 probe 전부가 예약 16 GiB와 표 약 290 KB를 만든다. 첫 호출 때 만들기, 실행 파일 종류별 기본값.
+- I7 시험의 이름 없는 수(`1.0e9`, `gcWorkers = 2` — `EngineGcTests.cpp`의 관례를 따른 것).
+- I8 `Native.Launch.default-allocator`의 Fatal 판정을 "0도 9도 아님"이 아니라 Fatal 종료 코드와 견주기.
+- I9 유니티 단독 소스의 사유(플랫폼 헤더의 매크로가 묶음의 뒤 소스로 샌다)를 `Docs/Design/UnityBuildPch.ko.md`에 적기 — 빌드 세션의 문서라 알림 대상이다.
+- I10 `RunEngineHostSelfTest`의 지역 `SystemAllocator` 둘이 범용 할당자를 받게 하기(일관성뿐이다).
+
+마지막 검증(리뷰 반영 뒤 한 번 — Debug, 작업 파일 분리 끔): Foundation 2,661개 가운데 실패 0, EngineTests 3,089개 가운데 실패 0, `Native.Launch` 15개 통과. NDK `-fsyntax-only`(`PlatformBase/Private/Posix/Concurrency.cpp`), format·policy 통과. Sandbox의 빌드와 `--self-test`·`--engine`은 리뷰 반영 앞에 돌렸다(그 뒤 Sandbox가 쓰는 소스의 변경은 `Application.h`의 주석 줄바꿈뿐이다).
+
+마지막 검증에서 나온 것:
+
+- **자식 probe 등록부 넘침.** 리뷰 반영 앞의 첫 전체 EngineTests에서 `LooseOctree_LO11_*IsFatal` 넷이 `CHECK FAILED: SpatialIndexProbeRegistered`로 실패했다. 시험 실행기의 등록부(`Programs/FoundationTests/Private/Main.cpp`의 `MaxRegisteredProcessProbes`)가 8칸인데 EngineTests에 등록되는 probe가 아홉이었다 — AL5의 `binned-lost-marker`와 로깅 세션의 `log-structure-emergency`가 병합(4a1f13ff)에서 만났다. 넘친 등록은 false라서 아홉 번째로 등록되는 `spatial-index`가 자리를 얻지 못했다. dd157ca6부터 origin에서 깨져 있었다 — 충돌 없는 병합 뒤에는 다시 검증하지 않는 규칙대로 해서 그때 보지 못했다. 고침(메인 세션 판단): 상한을 16으로 올렸다. 넘칠 때의 동작(등록 false → 그 probe를 쓰는 시험의 검사 실패)은 그대로다.
+- **엔진 단계 크래시 시험의 120초 시한 — 한 번 관찰, 재현 안 됨.** 같은 실행에서 `Engine_CrashDuringInitializeAndShutdownRecordsTheStage`의 "shutdown" 자식이 120초 시한에 걸렸다(시험 전체 120.29초 — "init" 자식은 정상이었다). 그때 리뷰어가 같은 트리를 읽고 있었고 다른 세션의 부하도 있었다. 원인을 부하라고 단정할 근거는 없다.
+  - 읽어서 본 것: 그 자식(`EngineCrashStageProbe`)의 엔진은 지역 `SystemAllocator` 위에서 돈다. Launch의 `BinnedAllocator`는 자식에도 만들어지지만(시험 실행기 진입) 아무도 거기서 할당하지 않는다 — 실행기 본문은 `DefaultAllocator()`를 부르지 않고 도구 로그는 Launch의 `SystemAllocator`로 만든다. 남는 것은 주소 예약 하나와 인스턴스 등록부 항목 하나이고, 그 잠금을 쥔 채 남는 스레드가 없다. 크래시 처리 경로(크래시한 스레드의 문맥 복사 → 처리 스레드의 종료 콜백 → 폴더·예비본 → 프로세스 안 덤프 → 최종본)는 정적 버퍼와 Win32 호출만 쓰고 Rocks 할당자를 부르지 않는다. 끝은 `TerminateProcess`라 스레드 종료 hook과 정적 소멸이 돌지 않는다. 할당자의 등급·등록부·원장 잠금과 크래시 처리·종료 정리가 맞물리는 경로는 찾지 못했다.
+  - 읽어서 본, 시간으로 묶이지 않는 자리(AL6과 무관 — Launch·크래시 수집 쪽): 크래시한 스레드는 처리 스레드를 약 35초(기본값 — 콜백 2 + 덤프 30 + 메타데이터 2 + 여유 1) 기다린 뒤 프로세스를 끝낸다. 120초를 넘기려면 그 스레드가 끝내지 못해야 한다. 프로세스 안 덤프는 살아 있는 자기 프로세스를 대상으로 `MiniDumpWriteDump`를 부른다(`CrashFiles.cpp`의 `source.process = GetCurrentProcess()`). 그 호출이 쓰는 동안 다른 스레드를 멈춘다면(알려진 동작 — 이 저장소에서 확인하지 않았다) 시한을 집행할 스레드도 멈추고, 멈춘 스레드 가운데 하나가 heap·loader 잠금을 쥐고 있으면 덤프가 끝나지 않는다. Launch 설계 19.5절이 적은 "프로세스 안 덤프는 다른 스레드가 쥔 heap·loader lock 때문에 막힐 수 있다"의 한 모양이다. 이것이 그때 일어났다는 증거는 없다(추측).
+  - 재현 시도: "shutdown" 자식을 따로 300번(각 30초 시한) 띄웠다 — 300번 모두 크래시로 끝났고 멈춤은 0이다. 조용한 상태의 전체 EngineTests 한 번 — 통과(그 시험 0.17초). 두 실행 동안 20초 넘게 사는 그 자식이 나오면 모든 스레드의 호출 스택·덤프·크래시 폴더를 남기는 감시(cdb)를 함께 돌렸고, 잡힌 것은 없다.
+  - 못 본 것: 멈춘 자식의 호출 스택·덤프·크래시 폴더(첫 실행 때는 감시가 없었고 시험이 폴더를 지운다). 그래서 멈춘 자리가 크래시 앞(엔진 초기화·한 프레임)인지, 크래시 처리 안인지, 부모의 대기인지 가르지 못했다. 부하를 일부러 걸고 돌려 보지는 않았다.
+
+실행하지 못했거나 건너뛴 검증(AL6):
+
+- AddressSanitizer — 로컬에서는 돌리지 않았다. AL6의 코드(Launch의 범용 할당자, Sandbox가 `BinnedAllocator` 위에서 도는 경로)는 CI의 그 단계에서 아직 돈 적이 없다(이 push의 CI가 처음이다).
+- macOS·Android 실행 — POSIX `ThreadExitSlot`의 `errno` 보존과 `test::SetSystemError`·`SystemError`의 POSIX 구현은 macOS CI가 첫 실행이다. Android는 구문 검사뿐이다.
+- 게임 템플릿 빌드(`Rocks.Build.IntegrationTests`) — 템플릿을 바꾸지 않아 돌리지 않았다.
 - Release·Development 구성의 시험 실행(벤치만 Development로 빌드했다).

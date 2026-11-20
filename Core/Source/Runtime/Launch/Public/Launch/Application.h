@@ -57,6 +57,13 @@ enum class CrashReportingMode : uint8 {
     Off,       // 설치하지 않는다(의도적 크래시 probe 등). Fatal은 비상 출력 뒤 바로 끝난다
 };
 
+// 프로세스의 범용 할당자 종류다(Docs/Design/GarbageCollectionScale.ko.md 18.10절). 문제를 가를 때
+// System으로 바꿔 같은 프로그램을 두 할당자에서 비교한다.
+enum class DefaultAllocatorKind : uint8 {
+    Binned, // Launch의 SystemAllocator 위에 둔 BinnedAllocator(크기 등급 slab·스레드 캐시)
+    System, // SystemAllocator 그대로(DefaultAllocator()가 SystemAllocator()와 같은 객체다)
+};
+
 // 실행 설정이다. ApplicationDescription::settings가 기본값이고, configure가 명령줄을 본 뒤 고칠 수
 // 있다.
 struct ApplicationSettings {
@@ -88,6 +95,9 @@ struct ApplicationSettings {
     // 않는다.
     bool handleTerminationRequests = false;
     ToolLogging toolLogging = ToolLogging::None;
+    // 범용 할당자(ApplicationContext::DefaultAllocator)의 종류다. 범용 할당자를 만들기 전에(본문
+    // 전에) 정해지므로 description의 기본값이나 configure에서 바꾼다.
+    DefaultAllocatorKind defaultAllocator = DefaultAllocatorKind::Binned;
 };
 
 // 본문이 받는 실행 문맥이다. Launch가 만들고 본문이 돌아갈 때까지 유효하다(복사하지 않는다). 본문을
@@ -104,7 +114,26 @@ public:
     // 실행 파일의 절대 경로(UTF-8)다.
     StringView ExecutablePath() const noexcept;
 
-    // Launch가 소유한 시스템 할당기다(본문 수명 동안 유효).
+    // 프로세스의 범용 할당자다. 엔진·모듈 로더·컨테이너처럼 본문이 만드는 것에 넘긴다. 기본은
+    // Launch의 SystemAllocator 위에 둔 BinnedAllocator이고(여러 스레드에서 함께 부를 수 있다),
+    // ApplicationSettings::defaultAllocator가 System이면 SystemAllocator()와 같은 객체다.
+    // - 수명: 본문이 돌아갈 때까지 유효하다. 본문은 돌아가기 전에 여기서 받은 할당을 모두 반환하고
+    //   이 할당자를 쓰는 스레드를 끝낸다. 할당을 남기면 Launch의 정리가 Fatal로
+    //   끝난다(BinnedAllocator "destroyed with live allocations" — SystemAllocator를 쓸 때와 같은
+    //   계약이다).
+    // - RequestExitWithoutStaticTeardown을 불렀으면 Launch가 할당자를 파괴하지 않고 끝내므로 남은
+    //   할당을 검사하지 않는다(내장 진입은 그 요청을 무시하므로 검사한다).
+    // - 이 할당자를 쓴 스레드마다 캐시가 생기고(최대 BinnedAllocator::MaxThreadCacheBytes, 약
+    //   2.25 MiB) 그 스레드가 끝날 때 돌아간다.
+    //
+    // 사용 예:
+    //   Allocator& memory = context.DefaultAllocator();
+    //   auto loader = ModuleLoader::TryCreate(memory, GeneratedModuleTable());
+    Allocator& DefaultAllocator() noexcept;
+
+    // Launch가 소유한 시스템 할당기다(본문 수명 동안 유효). 범용 할당자의 상위이고 Launch의 도구
+    // 로그가 쓴다. 본문은 보통 DefaultAllocator()를 쓰고, 이것은 두 할당자를 비교하거나 진단할 때
+    // 쓴다.
     Allocator& SystemAllocator() noexcept;
 
     // ToolLogging::Stderr이고 도구 로그를 시작했으면 그 LogSystem(설치된 상태)이고, 아니면
@@ -131,6 +160,7 @@ private:
     ApplicationContext() noexcept = default;
 
     Allocator* allocator_ = nullptr;
+    Allocator* defaultAllocator_ = nullptr;
     LogSystem* toolLog_ = nullptr;
     const ApplicationSettings* settings_ = nullptr;
     bool exitWithoutStaticTeardown_ = false;
@@ -160,8 +190,8 @@ struct ApplicationDescription {
 
 // 진입점 공통 본문이다. 실행 파일은 직접 부르지 않고 EntryPoint.h의 매크로를 쓴다.
 // 순서(설계 8.1절): 도우미 모드 분기 → 이른 크래시 수집 설치 → 보호 프레임 안에서 명령줄 캡처 →
-// configure → 설정 적용(대화상자·크래시 설정·도우미 시작) → 종료 요청 처리기 → 도구 로그 → 본문 →
-// 시작한 단계만 역순 정리 → 보호 프레임 밖에서 크래시 수집 해제 → 종료 코드.
+// configure → 설정 적용(대화상자·크래시 설정·도우미 시작) → 종료 요청 처리기 → 범용 할당자 → 도구
+// 로그 → 본문 → 시작한 단계만 역순 정리 → 보호 프레임 밖에서 크래시 수집 해제 → 종료 코드.
 // 초기화 실패(명령줄 캡처)는 성공한 단계만 역순으로 정리하고 종료 코드는
 // description.commandLineFailureExitCode다(stderr 한 줄에 원인과 상한을 적는다). 정리는 반환 경로
 // 하나에서 한 번만 한다. 크래시 종료는 이 경로를 타지 않는다. description.name이나 run이 없으면

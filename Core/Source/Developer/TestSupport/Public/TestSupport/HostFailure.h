@@ -75,6 +75,13 @@ bool EnterKillOnCloseJob(bool allowBreakaway) noexcept;
 // 닫지 않는다. Windows만이고 다른 플랫폼은 false다.
 bool EnterBreakawayBlockingJob() noexcept;
 
+// 프로세스 안 덤프가 스레드 목록 단계에 들어오면(IncludeThreadCallback) 다른 스레드가 프로세스 heap
+// lock(HeapLock)을 잡고 영원히 멈추게 한다(gate로 순서를 맞춘다). 덤프가 다른 스레드를 멈추는 순간
+// heap lock이 쥐어져 있는 장면을 결정적으로
+// 만든다(Docs/Design/CrashHandlingAndLaunch.ko.md 11.5절). 크래시 수집 설치 뒤, 크래시 전에 부른다.
+// Windows만이고 다른 플랫폼은 false다.
+bool HoldProcessHeapDuringDump() noexcept;
+
 // 처리되지 않은 예외 filter 교환 확인(platform::CheckUnhandledCrashFilter) 시험용이다(Windows).
 // Replace는 시험 filter로 바꾸고 바꾸기 전 filter를 기억한다. IsCurrent는 시험 filter가 지금
 // filter인지 교환으로 확인한다(확인 뒤 그대로 둔다). Restore는 기억한 filter로 되돌린다. 다른
