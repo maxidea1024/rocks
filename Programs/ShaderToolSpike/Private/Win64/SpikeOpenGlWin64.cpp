@@ -4,8 +4,12 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
 #include <GL/gl.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
 
 // 측정 S12(데스크톱, Docs/Design/ShaderSystem.ko.md 5.4절·P11): 이 기계의 GL 드라이버가
 // SPIRV-Cross가 만든 `#version 320 es` 원문(GLES31_PC)을 받는지 본다. 숨김 창에 GL core context를

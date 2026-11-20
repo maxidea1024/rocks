@@ -168,15 +168,15 @@ compile action identity에서 모듈 전체 소스 목록을 빼고 그 action�
 모듈의 C++ 소스(`NativeLanguage.Cpp`) 중 다음을 뺀 나머지를 묶는다.
 - C 소스(`.c`). 언어가 다르다.
 - BuildInfo TU와 규칙 생성 TU(`GeneratedSources`). 생성 시점과 빈도가 다르다.
-- 규칙이 단독으로 지정한 파일(`UnityExclude`). 큰 파일이나 특수 플래그 파일이다. **뒤 소스로 새는 매크로를 정의하는 헤더를 include하는데 감쌀 수 없는 파일**도 여기다. Windows COM 헤더는 `small`·`interface` 같은 매크로를 남기고, 묶음에서 그 파일 뒤에 오는 소스가 묶음 경계에 따라 달라지므로, 상관없는 소스를 더하기만 해도 빌드가 깨진다(2026-11-20, rocks-73이 EngineTests 묶음 경계가 바뀌며 발견 — 그때는 `TestSupport/Private/Win64/WindowsComRefTests.cpp`를 단독으로 뺐다). 이 누출은 아래 "매크로를 남기는 헤더"의 규칙과 정책 검사가 막는다. 그 규칙이 생기면서 `WindowsComRefTests.cpp`는 묶음으로 돌아왔다.
+- 규칙이 단독으로 지정한 파일(`UnityExclude`). 큰 파일이나 특수 플래그 파일이다. **뒤 소스로 새는 매크로를 정의하는 헤더를 include하는데 감쌀 수 없는 파일**도 여기다(Windows SDK 헤더는 예외 없이 감싼다 — 아래). Windows COM 헤더는 `small`·`interface` 같은 매크로를 남기고, 묶음에서 그 파일 뒤에 오는 소스가 묶음 경계에 따라 달라지므로, 상관없는 소스를 더하기만 해도 빌드가 깨진다(2026-11-20, rocks-73이 EngineTests 묶음 경계가 바뀌며 발견 — 그때는 `TestSupport/Private/Win64/WindowsComRefTests.cpp`를 단독으로 뺐다). 이 누출은 아래 "매크로를 남기는 헤더"의 규칙과 정책 검사가 막는다. 그 규칙이 생기면서 `WindowsComRefTests.cpp`는 묶음으로 돌아왔다.
 - **첫 `#include` 앞에서 `#define`하는 파일**(예: `Core/Tests/StlCompatibilityTests.cpp`의 `_HAS_EXCEPTIONS 0`). 같은 묶음의 앞 파일이나 PCH가 그 헤더를 이미 처리했으면 설정이 조용히 무효가 된다. 빌드가 토큰 단위로 찾아내 단독 TU로 컴파일하고 PCH도 끈다. 빌드 보고에 파일 목록을 남긴다.
 - 상한보다 큰 파일. 단독 TU다.
 
 모듈 규칙 `Unity`가 `Off`면 묶지 않는다. 외부 라이브러리 모듈(`Core/Source/ThirdParty`)의 기본은 `Off`다. upstream이 유니티를 전제하지 않는다.
 
 **매크로를 남기는 헤더**
-- Windows SDK 헤더는 평범한 이름의 매크로를 번역 단위 끝까지 남긴다. `windef.h`의 `near`·`far`, `rpcndr.h`의 `small`, `combaseapi.h`의 `interface`, 그리고 `CreateDirectory`·`GetObject`·`IsMinimized` 같은 A/W 함수 이름 매크로다. 묶음에서는 이 매크로가 그 파일 뒤의 구성원까지 살아남아, 같은 이름을 변수·멤버·함수로 쓰는 소스를 깨뜨린다. 어느 소스가 뒤에 오는지는 묶음 경계에 달려 있다.
-- 규칙: 유니티를 켠 모듈에서 묶이는 소스와 그 소스가 include하는 저장소 헤더는 이런 헤더를 **감싸서** include한다.
+- Windows SDK 헤더는 평범한 이름의 매크로를 번역 단위 끝까지 남긴다. `minwindef.h`의 `near`·`far`·`pascal`·`cdecl`, `rpcndr.h`의 `small`·`hyper`, `combaseapi.h`의 `interface`, 그리고 `CreateDirectory`·`GetObject`·`RegisterClass` 같은 A/W 함수 이름 매크로다. 묶음에서는 이 매크로가 그 파일 뒤의 구성원까지 살아남아, 같은 이름을 변수·멤버·함수로 쓰는 소스를 깨뜨린다. 어느 소스가 뒤에 오는지는 묶음 경계에 달려 있다.
+- 규칙: Windows에서 빌드하는 모든 모듈의 소스, 그 소스가 include하는 저장소 헤더, 모듈 PCH 헤더는 Windows SDK 헤더를 **감싸서** include한다. 외부 라이브러리 원본(`ThirdParty`)만 대상이 아니다.
   ```cpp
   #include <Platform/Win64/WindowsHeadersBegin.h>
 
@@ -185,23 +185,44 @@ compile action identity에서 모듈 전체 소스 목록을 빼고 그 action�
 
   #include <Platform/Win64/WindowsHeadersEnd.h>
   ```
-  - `WindowsHeadersBegin.h`는 두 가지를 한다.
-    - `Windows.h`를 열고 A/W 함수 이름 매크로를 지운다(번역 단위에서 처음일 때). 그래서 감싼 구간의 헤더는 언제나 그 매크로가 없는 상태로 파싱된다. `ID3D12InfoQueue::GetMessage`나 `ID2D1RenderTarget::DrawText` 같은 COM 메서드가 include 순서와 상관없이 제 이름으로 선언된다. 구간에 `Windows.h`를 따로 적지 않아도 된다(적어도 해가 없다).
-    - 앞선 End가 숨긴 `near`·`far`·`small`·`interface`·`min`·`max`·`FAR`·`NEAR`를 `#pragma pop_macro`로 되돌린다. Windows 헤더는 include guard 때문에 이것들을 다시 정의하지 않는데, 뒤에 처음 include되는 COM·DirectX 헤더는 있어야 파싱되기 때문이다.
-  - `WindowsHeadersEnd.h`는 `near`·`far`·`small`·`interface`·`min`·`max`를 `#pragma push_macro`로 저장하고 `#undef`한다. `FAR`·`NEAR`는 저장하고 빈 매크로로 바꾼다. `DEFINE_GUID`나 `FD_SET` 같은 SDK 매크로는 쓰는 자리에서 `FAR`로 펼쳐지는데, 원래 정의(`#define FAR far`)는 `far`를 숨긴 뒤에는 컴파일되지 않는다. A/W 함수 이름 매크로는 `#undef`하고 되돌리지 않는다. 목록은 UE가 `Windows/PostWindowsApi.h`에서 지우는 것과 같다.
-  - 두 헤더는 `#pragma once` 없이 여러 번 include하는 조각이다. `Platform/Win64/`에 있고 Windows native backend 소스만 include한다(정책 `platform-boundary`). 그 정책은 `Platform/Win64/` 헤더의 틀(`#pragma once`, `#include <Base/Compiler.h>`, `#if ROCKS_PLATFORM_WINDOWS` … `#endif`)에서 이 둘만 `#pragma once`를 빼고 받는다(`#pragma once`가 있으면 오히려 거부한다 — 두 번째 include가 비어 버린다).
-  - 감싼 구간 안에는 Windows SDK 헤더만 둔다(저장소 헤더를 넣으면 그 헤더가 매크로가 살아 있는 상태로 파싱된다).
+  - 유니티를 끈 모듈과 `UnityExclude`의 소스도 대상이다. 쌍이 매크로를 숨긴 뒤에는 같은 번역 단위에서 뒤에 여는 SDK 헤더도 쌍 안이어야 파싱되기 때문이다. `Platform/Win64/ComRef.h`처럼 쌍으로 끝나는 헤더를 include한 소스가 그 뒤에 `<d3d12.h>`를 쌍 밖에서 열면 `interface`가 없어 깨진다. 묶음과 상관없는 일이므로 예외를 두지 않는다.
+  - `WindowsHeadersEnd.h`는 아래 이름을 `#undef`한다. 상태를 저장하지 않는다.
+    - 평범한 이름: `near`·`far`·`small`·`interface`·`pascal`·`cdecl`·`hyper`·`min`·`max`. `FAR`·`NEAR`는 빈 매크로로 바꾼다. `DEFINE_GUID`나 `FD_SET` 같은 SDK 매크로는 쓰는 자리에서 `FAR`로 펼쳐지는데, 원래 정의(`#define FAR far`)는 `far`를 지운 뒤에는 컴파일되지 않는다.
+    - A/W 함수 이름: UE가 `Windows/PostWindowsApi.h`에서 지우는 A/W 이름 33개와, 엔진 식별자와 실제로 겹친 `RegisterClass`·`FindFirstFile`이다.
+  - `WindowsHeadersBegin.h`는 `Windows.h`를 열고 End를 거친 뒤(A/W 이름을 지운다) 평범한 이름을 SDK와 같은 정의로 다시 `#define`한다(`near`·`far`·`cdecl`은 빈 매크로, `pascal`은 `__stdcall`, `small`은 `char`, `hyper`는 `__int64`, `interface`는 `__STRUCT__`, `FAR`·`NEAR`는 `far`·`near`). 그래서 감싼 구간의 헤더는 언제나 A/W 이름 매크로가 없고 평범한 이름 매크로는 있는 상태로 파싱된다.
+    - `ID3D12InfoQueue::GetMessage`나 `ID2D1RenderTarget::DrawText` 같은 COM 메서드가 include 순서와 상관없이 제 이름으로 선언된다.
+    - Windows 헤더는 include guard 때문에 `interface`나 `far`를 다시 정의하지 않는데, 뒤에 처음 include되는 COM·DirectX 헤더는 그것이 있어야 파싱된다. SDK 헤더가 같은 이름을 다시 정의해도 토큰이 같아 경고가 없다.
+    - 구간에 `Windows.h`를 따로 적지 않아도 된다(적어도 해가 없다).
+    - `min`·`max`는 되돌리지 않는다. 빌드가 `NOMINMAX`를 전역으로 정의하므로 처음부터 없다. End의 `#undef`는 안전장치다.
+  - 두 헤더는 `#pragma push_macro`/`pop_macro`를 쓰지 않는다. clang의 PCH는 push 스택을 저장하지 않아서, PCH 안에서 End가 저장한 것을 PCH를 쓰는 번역 단위의 Begin이 되돌리지 못한다(경고 뒤 `interface`가 없어 SDK 헤더가 깨진다). 정의를 직접 다시 쓰면 번역 단위나 PCH 경계를 넘는 상태가 없다. 쌍은 PCH 헤더 안에 있어도 되고 PCH를 쓰는 소스에 있어도 된다.
+  - 두 헤더는 `#pragma once` 없이 여러 번 include하는 조각이다. `Platform/Win64/`에 있고 Windows native backend 소스만 include한다(정책 `platform-boundary`). 그 정책은 `Platform/Win64/` 헤더의 틀(`#pragma once`, `#include <Base/Compiler.h>`, `#if ROCKS_PLATFORM_WINDOWS` … `#endif`)에서 이 둘만 `#pragma once`를 빼고 받는다. 이 둘에 `#pragma once`가 있으면 어느 줄이든 거부한다(두 번째 include가 비어 버린다).
+  - 감싼 구간 안에는 Windows SDK 헤더와, SDK 헤더를 여는 외부 라이브러리 헤더만 둔다(저장소 헤더를 넣으면 그 헤더가 매크로가 살아 있는 상태로 파싱된다).
   - 감싼 뒤의 코드는 숨긴 매크로를 쓸 수 없다. A/W 함수는 `W` 이름을 직접 쓴다(`CreateDirectoryW`). `Windows.h` 자신이 선언하는 struct의 멤버 이름이 함수 이름 매크로와 겹치면(`FILE_DISPOSITION_INFO::DeleteFile`은 선언될 때 `DeleteFileA`/`DeleteFileW`가 된다) 이름 없이 초기화한다(`FILE_DISPOSITION_INFO{TRUE}`).
-- 감쌀 수 없는 소스는 `UnityExclude`로 단독 번역 단위로 둔다(위 목록).
-- 정책 검사 `unity-macro-leak`(9.2절)이 감싸지 않은 include를 거부한다. 대상 헤더는 이름 목록으로 판정한다(Windows SDK·COM·DirectX 계열 — `Rocks.Tooling.Checks`의 목록). 저장소 헤더로 찾아지는 include는 이름이 그 계열과 겹쳐도(`D3D12Caps.h`) 대상이 아니라 따라가서 읽을 헤더다. 모듈 PCH 헤더도 읽는다. `vulkan/vulkan.h`는 `VK_USE_PLATFORM_WIN32_KHR`을 정의했을 때만 `windows.h`를 여는데, 저장소는 그 매크로를 정의하지 않으므로 목록에 없다. 목록에 없는 새 Windows 헤더는 잡지 못하므로, 새 헤더를 쓰기 시작하면 목록에 더한다.
-- UE 대응: UE는 `Windows/WindowsHWrapper.h`(Pre·MinWindows·Post)로만 `windows.h`를 열어 함수 이름 매크로를 바로 지우고, 다른 Windows 헤더는 `AllowWindowsPlatformTypes.h`/`HideWindowsPlatformTypes.h` 쌍으로 감싼다. Rocks는 쌍 하나로 둘을 겸하고(Begin이 `Windows.h`를 열고 지우는 순서가 같다), 감싸지 않은 include를 정책 검사가 거부한다(UE는 관례다). UE 5.8은 `near`·`far`·`small`·`interface`를 남긴다(그 이름을 식별자로 쓰지 않는 관례로 피한다). Rocks는 그것들도 숨긴다.
+- 정책 검사 `windows-macro-leak`(9.2절)이 쌍 밖의 include를 거부한다. Windows 플랫폼의 모듈 규칙만 평가한다(다른 플랫폼의 소스는 Windows 헤더를 열지 않는다).
+  - 읽는 범위: 모듈의 C++ 소스와 PCH 헤더, 거기서 include로 닿는 저장소 헤더다. 줄 이음(`\`)을 먼저 잇고, 전처리 조건은 평가하지 않고 두 갈래를 모두 읽는다.
+  - 쌍 밖에 둘 수 있는 include는 셋뿐이다: 저장소 헤더, 생성 헤더(`*.generated.h`), **깨끗한 시스템 헤더 목록**에 있는 헤더(C·C++ 표준 헤더, CRT, 컴파일러 intrinsic 헤더 — `Rocks.Tooling.Checks`의 목록). 그 밖의 include는 Windows SDK 헤더로 보고 쌍 안에 있어야 한다. 처음 쓰는 SDK 헤더는 이름을 몰라도 걸린다. 매크로를 남기지 않는 새 시스템 헤더는 목록에 더한다.
+  - 외부 라이브러리 헤더(저장소의 `ThirdParty`)는 따라가서 읽는다. 그 헤더나 그 헤더가 include하는 외부 라이브러리 헤더가 알려진 Windows SDK 헤더 이름(`windows.h`, `winsock2.h`, `unknwn.h`, `d3d*.h` 등)을 include하면, 저장소 소스가 그 외부 헤더를 include하는 줄이 쌍 안에 있어야 한다. 전처리 조건을 평가하지 않으므로, SDK include가 저장소가 정의하지 않는 매크로의 갈래에만 있다고 확인한 헤더는 정책의 목록에 경로로 적어 봐준다(`zconf.h`의 `ZLIB_WINAPI` 갈래, `vulkan/vulkan.h`의 `VK_USE_PLATFORM_WIN32_KHR` 갈래). 경로에 버전이 들어 있어, 라이브러리를 올리면 다시 걸리고 그때 갈래를 다시 확인한다.
+  - 꺾쇠나 따옴표가 아닌 include(`#include HEADER_MACRO`)는 판정할 수 없으므로 쌍 밖에서는 거부한다.
+  - 쌍이 어긋난 것(Begin 없는 End, 닫지 않은 Begin, 이미 연 Begin)과 쌍 안의 저장소 헤더도 거부한다. 쌍은 파일마다 스스로 닫아야 한다.
+- UE 대응: UE는 `Windows/WindowsHWrapper.h`(Pre·MinWindows·Post)로만 `windows.h`를 열어 A/W 이름 매크로를 바로 지우고, 다른 Windows 헤더는 `AllowWindowsPlatformTypes.h`/`HideWindowsPlatformTypes.h` 쌍으로 감싼다.
+  - Rocks는 쌍 하나로 둘을 겸한다(Begin이 `Windows.h`를 열고 지우는 순서가 같다). 감싸지 않은 include는 정책 검사가 거부한다(UE는 관례다).
+  - UE의 `push_macro`/`pop_macro`는 Pre/Post 한 쌍 안에서 끝난다(`PreWindowsApi.h`가 저장한 `TEXT`·`TRUE`·`FALSE` 등을 `PostWindowsApi.h`가 되돌린다). `WindowsHWrapper.h` 한 헤더 안에서 열고 닫으므로 PCH 경계를 넘지 않는다. Rocks가 처음 쓴 방식은 End가 저장하고 다음 Begin이 되돌려서 경계를 넘었다.
+  - `PostWindowsApi.h`는 A/W 이름 말고도 `INT`·`UINT`·`DWORD`·`FLOAT`와 `InterlockedIncrement` 같은 atomics 매크로도 지운다. Rocks는 A/W 이름만 따른다. UE는 같은 이름의 자기 타입과 함수가 있어서 지우는데, Rocks에는 그 이름의 식별자가 없고(정수 타입은 `i32`·`u32`, atomics는 `Platform/Atomics.h`), Windows backend 소스는 쌍 뒤에서 SDK의 `DWORD`·`InterlockedIncrement`를 그대로 쓴다.
+  - UE 5.8은 `near`·`far`·`small`·`interface`를 남긴다(그 이름을 식별자로 쓰지 않는 관례로 피한다). Rocks는 그것들도 숨긴다.
 - 버린 대안:
-  - End가 함수 이름 매크로까지 저장하고 Begin이 되돌리는 방식. `Windows.h`와 같은 구간에서 파싱된 COM 헤더는 메서드를 `GetMessageA`로 선언하고, 뒤 구간에서 파싱된 헤더는 `GetMessage`로 선언한다. 같은 호출이 include 순서와 묶음 구성에 따라 컴파일되거나 깨진다.
+  - End가 `#pragma push_macro`로 저장하고 다음 Begin이 `pop_macro`로 되돌리는 방식(처음 구현). 저장한 스택이 PCH 경계를 넘지 못한다(위). A/W 이름까지 되돌리면 `Windows.h`와 같은 구간에서 파싱된 COM 헤더는 메서드를 `GetMessageA`로 선언하고 뒤 구간에서 파싱된 헤더는 `GetMessage`로 선언해서, 같은 호출이 include 순서와 묶음 구성에 따라 컴파일되거나 깨진다.
+  - 정책이 누출 헤더를 이름 목록으로 고르는 방식(처음 구현). `fileapi.h`·`rpcndr.h`·`dxcore.h`·`xaudio2.h`·`commctrl.h`처럼 목록에 없는 SDK 헤더가 통과한다. 깨끗한 헤더 목록으로 뒤집으면 모르는 헤더가 걸린다.
+  - include가 툴체인의 Windows Kits 디렉터리로 해석되는지로 판정하는 방식. 정책 검사는 Linux·macOS CI에서도 도는데 그 기기에는 Windows SDK가 없어, 같은 위반이 기기에 따라 통과한다.
+  - 유니티를 켠 모듈의 묶이는 소스만 검사하는 방식(처음 구현). 유니티를 끈 모듈(`ShaderToolSpike`)이 쌍으로 끝나는 `ComRef.h` 뒤에 `<d3d12.h>`를 쌍 밖에서 열어 빌드가 깨졌고, CI가 빌드하지 않는 모듈이라 드러나지 않았다.
   - 빌드가 묶음 구성원 사이에 `#ifdef near` → `#error` 검사를 끼우는 방식. 묶음일 때만 잡고, 단독 번역 단위 검증 빌드와 정책 검사 단계에서는 보이지 않는다.
-  - Windows 소스를 모두 `UnityExclude`에 두는 방식. Windows backend 모듈(D3D11·D3D12·PlatformBase)은 소스 대부분이 Windows 헤더를 써서 묶음 이득을 잃는다.
+  - Windows 소스를 모두 `UnityExclude`에 두는 방식. Windows backend 모듈(D3D11·D3D12·PlatformBase)은 소스 대부분이 Windows 헤더를 써서 묶음 이득을 잃고, 숨긴 뒤의 include 문제는 그대로다.
 - 한계:
-  - 숨기는 이름은 고정 목록이다. 목록에 없는 A/W 매크로(`CreateFile`, `CreateWindow`, `GetModuleHandle` 등)는 End 뒤에도 남는다. 엔진 식별자와 겹치는 것이 나오면 End의 목록에 더한다.
-  - 검사는 include 줄의 철자와 순서만 본다. 전처리 조건은 평가하지 않고 두 갈래를 모두 읽으며, 저장소 밖 헤더(외부 라이브러리)가 안에서 Windows 헤더를 여는 것은 보지 못한다. 그런 헤더는 목록에 이름을 올려 감싸게 한다.
+  - 숨기는 이름은 고정 목록이다. 목록에 없는 A/W 매크로(`CreateFile`, `CreateWindow`, `GetModuleHandle` 등 수백 개)와 대문자 매크로(`DELETE`, `ERROR`, `IN`, `OUT`), `uuid_t`·`lstrlen` 같은 소문자 매크로는 End 뒤에도 남는다. 엔진 식별자와 겹치는 것이 나오면 End의 목록에 더한다. 2026-11-21에 SDK 10.0.22621의 매크로 덤프(쌍 뒤에 남는 이름 중 소문자가 섞인 1,733개)를 저장소 소스의 식별자와 대조해 겹치는 셋(`pascal`·`RegisterClass`·`FindFirstFile`)을 더했다.
+  - 검사는 include 줄의 철자와 순서만 본다. 전처리 조건을 평가하지 않으므로, 외부 라이브러리 헤더가 쓰이지 않는 갈래에서만 `windows.h`를 열어도 걸린다(확인한 뒤 위 목록에 적는다). 외부 라이브러리 헤더 안의 SDK include는 알려진 이름으로만 알아보므로, 낯선 SDK 헤더만 여는 외부 헤더는 놓친다.
+  - C 소스(`.c`)는 보지 않는다. 묶지 않고, 쌍은 C++ 헤더(`Base/Compiler.h`)를 거친다.
+- 시험:
+  - 쌍: native 시험 `TestSupport/Private/Win64/WindowsHeadersTests.cpp`(숨긴 이름을 식별자로 쓰기, A/W 매크로가 지워졌는지, COM 메서드가 제 이름인지)와 빌드 시험 `Rocks.Build.Tests`의 `windows-headers` 묶음(쌍으로 끝나는 PCH 헤더를 `/Yc`·`/Yu`로 쓰는 소스, PCH를 끄고 `/FI`로 받는 변형, `Windows.h`가 쌍보다 먼저 쌍 밖에서 열린 소스).
+  - 정책: `Policy.WindowsMacroLeaksRejectIncludesOutsideThePair`(양성·음성 대조)와 `Policy.WindowsPublicHeadersStayNarrow`(쌍 헤더의 틀).
 
 UB1 동안 모든 모듈의 기본은 `Off`다. UB2·UB3에서 충돌을 정리한 모듈부터 켠다(9.3절).
 
@@ -428,7 +449,7 @@ README의 "action key·`compile_commands.json`·BuildInfo manifest는 모두 `Na
 | 파일 범위 using | 파일 범위 `using namespace`는 `rocks`와 그 하위 namespace만 허용한다. 2026-11-18 기준 322개 파일이 `using namespace rocks`를 쓴다. 그 밖은 함수나 namespace 안으로 옮긴다 |
 | `.cpp` 매크로 | `.cpp`에서 `#define`한 매크로는 그 파일 끝까지 `#undef`해야 한다. 첫 include 앞의 `#define`은 6.1절 자동 제외 대상이므로 이 검사에서 뺀다 |
 | pragma 균형 | `#pragma warning(push)`, `clang diagnostic push`, `pack(push)`는 같은 파일에서 pop해야 한다 |
-| 매크로를 남기는 헤더(`unity-macro-leak`) | 묶이는 소스와 그 소스가 include하는 저장소 헤더가 Windows SDK 계열 헤더를 `WindowsHeadersBegin.h`/`WindowsHeadersEnd.h` 쌍 밖에서 include하면 오류. 쌍이 맞지 않아도(Begin 없는 End, 닫지 않은 Begin) 오류. 쌍 안에 저장소 헤더를 두어도 오류. 모듈 PCH 헤더도 읽는다. `UnityExclude`의 소스와 그 소스만 include하는 헤더는 대상이 아니다(6.1절) |
+| 매크로를 남기는 헤더(`windows-macro-leak`) | Windows 플랫폼의 모든 모듈(외부 라이브러리 원본 제외)에서, C++ 소스·PCH 헤더와 거기서 닿는 저장소 헤더가 `WindowsHeadersBegin.h`/`WindowsHeadersEnd.h` 쌍 밖에서 include할 수 있는 것은 저장소 헤더, 생성 헤더, 깨끗한 시스템 헤더 목록의 헤더뿐이다. 그 밖의 include(Windows SDK 헤더, SDK 헤더를 여는 외부 라이브러리 헤더, 리터럴이 아닌 include)가 쌍 밖에 있으면 오류. 쌍이 맞지 않아도(Begin 없는 End, 닫지 않은 Begin), 쌍 안에 저장소 헤더를 두어도 오류. 유니티를 끈 모듈과 `UnityExclude`의 소스도 본다(6.1절) |
 
 - 검사는 토큰 단위 근사다. 주석, 문자열, 전처리 조건을 처리하지만 컴파일러 AST 수준의 정확성은 요구하지 않는다. 놓친 것은 드러나는 경우 컴파일 오류로 남는다.
 - 이름 충돌은 파일마다 고유한 이름의 namespace로 옮기거나(예: `namespace rocks::detail::JsonReaderLocal`) 이름을 바꿔서 푼다. 익명 namespace 자체는 금지하지 않는다.
@@ -579,3 +600,4 @@ UB6에서 묶음 TU와 PCH action의 최대 메모리를 실측해, 동시 실�
 | 1(경로 철자) | 2026-11-20 | 4.4절을 더했다: 빌드가 받은 경로를 디스크에 있는 철자로 맞춘다(`PathSpelling`). 같은 트리를 `c:\`와 `C:\`처럼 철자만 다르게 실행하면 전부 다시 컴파일되던 문제다. UE `FindCorrectCase`와 같은 방식(성분마다 부모 디렉터리에서 이름을 찾음)이고 링크는 풀지 않는다. |
 | 1(macOS 유니티) | 2026-11-20 | macOS에서도 유니티 빌드를 켰다(`RepositoryUnity.VerifiedPlatforms`에 macOS). POSIX 공통 소스는 NDK 묶음 문법 검사로 먼저 보고, macOS 전용 소스(PlatformBase의 `Mac`·`Apple`, ShaderToolLoader의 `Mac`)는 CI macOS job으로 확인했다. 로컬 macOS 툴체인이 없으므로 macOS 전용 소스를 고치면 CI로 확인한다 |
 | 1(매크로 누출) | 2026-11-21 | 6.1절에 "매크로를 남기는 헤더"의 규칙을 더했다: Windows SDK 계열 헤더는 `Platform/Win64/WindowsHeadersBegin.h`/`WindowsHeadersEnd.h` 쌍으로 감싼다. Begin이 `Windows.h`를 열고 A/W 함수 이름 매크로를 지운 뒤 앞서 숨긴 `near`·`far`·`small`·`interface`·`min`·`max`를 되돌리고, End가 다시 숨긴다. 정책 검사 `unity-macro-leak`(9.2절)이 감싸지 않은 include를 거부하고, `platform-boundary`는 이 쌍을 `#pragma once` 없는 조각으로 받는다. 유니티를 켠 모듈의 기존 Windows 소스·헤더 39개를 감쌌고, 누출 때문에 단독이던 `WindowsComRefTests.cpp`를 묶음으로 되돌렸다. 쌍 자체의 시험은 `TestSupport/Private/Win64/WindowsHeadersTests.cpp`다(동작은 그대로다. `CrashFiles.cpp`의 `FILE_DISPOSITION_INFO::DeleteFile` 대입 두 곳은 이름 없는 초기화로 바꿨다) |
+| 1(매크로 누출 리뷰 반영) | 2026-11-21 | 6.1절 "매크로를 남기는 헤더"를 고쳤다. (1) 규칙과 정책 검사의 범위를 유니티를 켠 모듈에서 Windows 플랫폼의 모든 모듈로 넓혔다(숨긴 뒤 쌍 밖에서 SDK 헤더를 여는 `ShaderToolSpike` 빌드가 깨졌다). 정책 이름은 `windows-macro-leak`이다. (2) 쌍이 `push_macro`/`pop_macro` 대신 정의를 직접 다시 쓴다(clang PCH가 push 스택을 저장하지 않는다). (3) 정책이 이름 목록 대신 깨끗한 시스템 헤더 목록으로 판정하고, 외부 라이브러리 헤더를 따라가며, 줄 이음과 리터럴이 아닌 include를 다룬다. Windows 플랫폼만 평가하고 파일 해석을 캐시한다. (4) 숨기는 이름에 `pascal`·`cdecl`·`hyper`·`RegisterClass`·`FindFirstFile`을 더했다. (5) UE 대응 서술을 바로잡았다(A/W 이름만 같다) |

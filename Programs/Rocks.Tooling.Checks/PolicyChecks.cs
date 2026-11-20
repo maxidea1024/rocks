@@ -319,13 +319,13 @@ public static partial class PolicyChecks
     ];
 
     // reincluded면 #pragma once 없이 #include <Base/Compiler.h>로 시작해야 한다(#pragma once가 있으면 두 번째 include가 비어
-    // 매크로를 되돌리거나 숨기지 못한다).
+    // 매크로를 되돌리거나 숨기지 못한다). #pragma once는 어느 줄에 있어도(#if 안이어도) 파일 전체에 듣는다.
     private static bool HasWindowsOnlyGuard(string text, bool reincluded)
     {
         string[] lines = WithoutComments(text).Split('\n').Select(line => line.Trim()).Where(line => line.Length != 0).ToArray();
         int include = reincluded ? 0 : 1;
-        return lines.Length >= include + 3 && (reincluded || PragmaOnceLine.IsMatch(lines[0])) && CompilerIncludeLine.IsMatch(lines[include]) &&
-            WindowsGuardLine.IsMatch(lines[include + 1]) && EndifLine.IsMatch(lines[^1]);
+        return lines.Length >= include + 3 && (reincluded ? !lines.Any(PragmaOnceLine.IsMatch) : PragmaOnceLine.IsMatch(lines[0])) &&
+            CompilerIncludeLine.IsMatch(lines[include]) && WindowsGuardLine.IsMatch(lines[include + 1]) && EndifLine.IsMatch(lines[^1]);
     }
 
     /// <summary>shell 문자열을 실행하지 않는다. flags 검증에는 가능한 한 실제 ArgumentList를 전달한다.</summary>

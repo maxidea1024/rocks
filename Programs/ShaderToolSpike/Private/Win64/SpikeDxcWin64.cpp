@@ -9,12 +9,17 @@
 #include <Platform/Win64/ComRef.h>
 #include <Platform/Win64/WideString.h>
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
 #include <Unknwn.h>
 #include <objidl.h>
 #include <d3dcompiler.h>
 #include <d3d11shader.h>
 #include <d3d12shader.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
+
 #include <dxc/dxcapi.h>
 
 namespace rocks::spike {
