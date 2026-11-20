@@ -1,6 +1,6 @@
 # Rocks GC 대규모 처리 보강 설계
 
-기준일: 2026-11-16, 개정 1(초안). 개정 15(2026-11-20, 사용자 지시 "엔진에 BinnedAllocator 연결해"): 18.10절 제품 연결(AL6) — 실행 진입점(Launch)이 `SystemAllocator` 위에 `BinnedAllocator`를 하나 두고 범용 할당자로 내주며 Sandbox 엔진 호스트가 그것을 엔진에 넘긴다, 11절 결정 8 확정, 0절·18절 머리 갱신, `ThreadExitSlot`의 OS 오류 값 보존(18.4절). 개정 14(2026-11-20, 마무리): 0절 "현재 상태"를 더함(단계별 상태, 8단계 결과, 남은 한계), 4절 gate 표에 현재 값 열, 6절 GC-S6·11절 결정 8(`BinnedAllocator`의 제품 연결 — 결정 대기), 18절 리뷰 반영(겹친 중복 반환의 slab 경로 한계, 수치 맞춤). 개정 13(2026-11-20, 메인 세션 판정): 18.4절 — 반환 표지를 비교 교환에서 비교 뒤 단순 대입으로 되돌리고(개정 9의 결정을 뒤집음 — 측정한 비용), 대신 블록을 내줄 때 표지가 서 있는지 검사해 Fatal로 잡음. 18.2·18.6·18.8절 — 할당자 비교의 플랫폼 기준을 바로잡고(AL0–AL4의 platform은 계수 장치가 섞인 `BenchAllocator`였다) gate A1을 새 기준으로 다시 정함, gate A2에서 "몫이 절반 이하"를 뺌. 18절·18.6절 — 사실 정정: 지금 제품 코드는 엔진에 `SystemAllocator`를 넘긴다(`BinnedAllocator` 연결은 결정 대기). 18.8절 — 쉬는 스레드의 캐시 상한. 개정 12(2026-11-20): 18.4절 — `ThreadExitSlot`의 `thread_local` 계약을 좁힘(macOS CI: callback 안에서 읽은 `thread_local`은 초기값 — 값이 남아 있다는 보장이 없다), 할당자는 스레드 종료 칸의 값을 기준으로 삼음(`thread_local` 포인터는 사본), 남는 한계와 플랫폼별 순서, fiber 한계, 종료 칸에 걸지 못한 스레드(메인 세션 검토 AL3). 개정 11(2026-11-20): 18.6절 — 원장의 지역성 hash를 버린 대안으로 옮김(메인 세션 판정: 군집이 표의 채움 비율에 따라 절벽으로 커진다), 18.8절 gate A1 확정(churn 회수 3.5배 이내). 개정 10(2026-11-20): 18.4절 주소 범위 — POSIX에서 slab마다 보호를 바꾸지 않는 접근을 열어 둔 예약(`VirtualMemoryAccess::Open`, UE 5.8 방식), commit·decommit 실패가 주소 범위를 닫지 않음(메인 세션 검토 AL2b). 18.6절 — `HashMap`의 0개 비우기 규칙 고침, 원장의 지역성 hash(AL1b). 개정 9(2026-11-20): 18절을 구현 전에 보강 — 예약·commit·decommit 실패의 처리, 표지 비밀값의 최상위 비트와 비교 교환(동시 중복 반환), 캐시 없는 구성(`threadCaches`), 큰 경로의 상위 주소 검증, `ThreadExitSlot`의 API 모양과 등록부 수명, `Trim`·`Usage` API. 개정 8(2026-11-20): 18절 보강(메인 세션 검토 F1–F7) — 반환 표지 불변식(떼어 묶음에 넣을 때 세움), 오용 검출의 동시성 한계와 완전한 대안, 스레드 종료 hook(`platform::ThreadExitSlot`), 예약 실패 때의 축소·큰 경로, ASan에서의 내부 접근, 주소 원장을 공용 내부 구현 하나로(Core `HashMap`), 이전 칸은 가득 묶음만. 개정 7(2026-11-20): GC-S6 공용 할당자 설계(18절 — `SystemAllocator` 원장을 주소 hash로, `BinnedAllocator`를 예약 주소 범위·크기 등급 slab·스레드 캐시 구조로 다시 만듦, UE 5.8 Binned2·3·4 대조, gate·시험 계획). 설계만이며 구현은 다른 세션의 빌드 작업 병합 뒤 시작한다. 개정 6(2026-11-19): GC-S5 수집 일정과 파괴 예산(17절 — 묶음 회수, 회수를 미루는 STW 수집과 예산 회수, World 수집 일정, 엔진이 소유하는 GC scheduler), 6절 GC-S5·11절 결정 3 갱신. 리뷰 반영(17절): 회수의 최소 진척과 묶음 안 시간 한도, 회수 대기 질의, 회수 없이 cycle 끝내기, 실시간 간격, 프로세스가 쓸 수 있는 프로세서 수, 요청의 스레드 계약, worker 상한. 개정 5(2026-11-19): 병렬 marker의 FIFO 미리 읽기 고리와 일반 그래프 표식 gate의 남은 차이(16절), 간선 제거의 장부 감소를 미루는 기록(13.4절 — 리뷰 반영: 기록 256칸(꼬리 지연), 적용 대상 검사를 모든 빌드 Fatal로, 세대에 더해 상태 검사), 5단계 판단: 지정 클러스터를 경계 비율 안전장치 밖에 두는 근거·해체된 패키지를 다시 묶지 않는 근거(13.5절), 장부 고리 칸 16비트 번호안 기각(13.9절). 개정 4(2026-11-18): Registry 규모 점검 반영(14절), 소스 파일 구성(15절), Slot hot·cold 분리(6절 GC-S3 "Slot hot·cold 분리", 4절 gate, 11절 결정 5). 개정 2(2026-11-17): 클러스터·영구 영역 상세 설계(13절), 열린 결정 4 확정, 열린 결정 6 해소, UE 클러스터 사실 정정. 개정 3(2026-11-18): 장부 배치·클러스터 표식 경로를 측정에 맞춰 바꾸고 패키지 클러스터의 경계 비율 안전장치를 더함(13.4·13.5·13.9절).
+기준일: 2026-11-16, 개정 1(초안). 개정 16(2026-11-20, 사용자 지시 "남은작업 진행"): 18.11절 남은 연결과 Trim(AL7) — 게임 템플릿·Commandlet 연결, `Allocator`의 `TrimMemory`·`MarkThreadIdle`·`MarkThreadActive`, 쉬는 스레드 캐시를 `TrimMemory`가 비움, `WorkerScheduler`의 표시, 엔진의 호출 자리 둘과 `WorldGcSchedule::trimMemory`, 리뷰 후속 가운데 작은 것. 개정 15(2026-11-20, 사용자 지시 "엔진에 BinnedAllocator 연결해"): 18.10절 제품 연결(AL6) — 실행 진입점(Launch)이 `SystemAllocator` 위에 `BinnedAllocator`를 하나 두고 범용 할당자로 내주며 Sandbox 엔진 호스트가 그것을 엔진에 넘긴다, 11절 결정 8 확정, 0절·18절 머리 갱신, `ThreadExitSlot`의 OS 오류 값 보존(18.4절). 개정 14(2026-11-20, 마무리): 0절 "현재 상태"를 더함(단계별 상태, 8단계 결과, 남은 한계), 4절 gate 표에 현재 값 열, 6절 GC-S6·11절 결정 8(`BinnedAllocator`의 제품 연결 — 결정 대기), 18절 리뷰 반영(겹친 중복 반환의 slab 경로 한계, 수치 맞춤). 개정 13(2026-11-20, 메인 세션 판정): 18.4절 — 반환 표지를 비교 교환에서 비교 뒤 단순 대입으로 되돌리고(개정 9의 결정을 뒤집음 — 측정한 비용), 대신 블록을 내줄 때 표지가 서 있는지 검사해 Fatal로 잡음. 18.2·18.6·18.8절 — 할당자 비교의 플랫폼 기준을 바로잡고(AL0–AL4의 platform은 계수 장치가 섞인 `BenchAllocator`였다) gate A1을 새 기준으로 다시 정함, gate A2에서 "몫이 절반 이하"를 뺌. 18절·18.6절 — 사실 정정: 지금 제품 코드는 엔진에 `SystemAllocator`를 넘긴다(`BinnedAllocator` 연결은 결정 대기). 18.8절 — 쉬는 스레드의 캐시 상한. 개정 12(2026-11-20): 18.4절 — `ThreadExitSlot`의 `thread_local` 계약을 좁힘(macOS CI: callback 안에서 읽은 `thread_local`은 초기값 — 값이 남아 있다는 보장이 없다), 할당자는 스레드 종료 칸의 값을 기준으로 삼음(`thread_local` 포인터는 사본), 남는 한계와 플랫폼별 순서, fiber 한계, 종료 칸에 걸지 못한 스레드(메인 세션 검토 AL3). 개정 11(2026-11-20): 18.6절 — 원장의 지역성 hash를 버린 대안으로 옮김(메인 세션 판정: 군집이 표의 채움 비율에 따라 절벽으로 커진다), 18.8절 gate A1 확정(churn 회수 3.5배 이내). 개정 10(2026-11-20): 18.4절 주소 범위 — POSIX에서 slab마다 보호를 바꾸지 않는 접근을 열어 둔 예약(`VirtualMemoryAccess::Open`, UE 5.8 방식), commit·decommit 실패가 주소 범위를 닫지 않음(메인 세션 검토 AL2b). 18.6절 — `HashMap`의 0개 비우기 규칙 고침, 원장의 지역성 hash(AL1b). 개정 9(2026-11-20): 18절을 구현 전에 보강 — 예약·commit·decommit 실패의 처리, 표지 비밀값의 최상위 비트와 비교 교환(동시 중복 반환), 캐시 없는 구성(`threadCaches`), 큰 경로의 상위 주소 검증, `ThreadExitSlot`의 API 모양과 등록부 수명, `Trim`·`Usage` API. 개정 8(2026-11-20): 18절 보강(메인 세션 검토 F1–F7) — 반환 표지 불변식(떼어 묶음에 넣을 때 세움), 오용 검출의 동시성 한계와 완전한 대안, 스레드 종료 hook(`platform::ThreadExitSlot`), 예약 실패 때의 축소·큰 경로, ASan에서의 내부 접근, 주소 원장을 공용 내부 구현 하나로(Core `HashMap`), 이전 칸은 가득 묶음만. 개정 7(2026-11-20): GC-S6 공용 할당자 설계(18절 — `SystemAllocator` 원장을 주소 hash로, `BinnedAllocator`를 예약 주소 범위·크기 등급 slab·스레드 캐시 구조로 다시 만듦, UE 5.8 Binned2·3·4 대조, gate·시험 계획). 설계만이며 구현은 다른 세션의 빌드 작업 병합 뒤 시작한다. 개정 6(2026-11-19): GC-S5 수집 일정과 파괴 예산(17절 — 묶음 회수, 회수를 미루는 STW 수집과 예산 회수, World 수집 일정, 엔진이 소유하는 GC scheduler), 6절 GC-S5·11절 결정 3 갱신. 리뷰 반영(17절): 회수의 최소 진척과 묶음 안 시간 한도, 회수 대기 질의, 회수 없이 cycle 끝내기, 실시간 간격, 프로세스가 쓸 수 있는 프로세서 수, 요청의 스레드 계약, worker 상한. 개정 5(2026-11-19): 병렬 marker의 FIFO 미리 읽기 고리와 일반 그래프 표식 gate의 남은 차이(16절), 간선 제거의 장부 감소를 미루는 기록(13.4절 — 리뷰 반영: 기록 256칸(꼬리 지연), 적용 대상 검사를 모든 빌드 Fatal로, 세대에 더해 상태 검사), 5단계 판단: 지정 클러스터를 경계 비율 안전장치 밖에 두는 근거·해체된 패키지를 다시 묶지 않는 근거(13.5절), 장부 고리 칸 16비트 번호안 기각(13.9절). 개정 4(2026-11-18): Registry 규모 점검 반영(14절), 소스 파일 구성(15절), Slot hot·cold 분리(6절 GC-S3 "Slot hot·cold 분리", 4절 gate, 11절 결정 5). 개정 2(2026-11-17): 클러스터·영구 영역 상세 설계(13절), 열린 결정 4 확정, 열린 결정 6 해소, UE 클러스터 사실 정정. 개정 3(2026-11-18): 장부 배치·클러스터 표식 경로를 측정에 맞춰 바꾸고 패키지 클러스터의 경계 비율 안전장치를 더함(13.4·13.5·13.9절).
 
 **이 문서의 작업은 반드시 해야 하는 작업이다.** 현재 `ObjectRegistry` GC는 AAA급 규모(살아 있는 객체 100만 개 이상)의 게임에서 쓸 수 없는 상태다(2026-11-16 사용자 판단). 이 문서의 GC-S 단계는 선택 최적화가 아니며 성능 미달을 "측정 결과로 관리"하는 대상도 아니다. 단계를 모두 마치고 4절의 성능 gate를 통과해야 GC를 대규모 콘텐츠에 쓸 수 있다고 본다.
 
@@ -410,7 +410,7 @@ GC slice는 `processing_` 아래에서 실행되며, 그동안 생성·간선 �
 | 5 | Slot 정보 64B 목표의 달성 방법 | 개정 4: hot·cold 분리로 hot 64B 달성(6절 GC-S3). 합계(192B)는 cold 고리 번호화·Outer·identity 레코드 분리로 약 80–100B까지 가능 — 4절 gate를 "hot ≤ 64B"와 별도 합계 목표로 나누기를 제안 |
 | 6 | 배타 소유 하위 객체의 표시 방식(M6) | **해소(개정 2).** 패키지·Level 소속으로 경계를 정하므로 표시가 필요 없다(13.3절) |
 | 7 | slice 중 루트 해제의 루트 목록 반영 시점 | 즉시 반영 / 다음 Begin까지 지연. GC-S3에서 정한다 |
-| 8 | `BinnedAllocator`를 엔진·응용 프로그램에 연결(개정 13) | **확정(개정 15, 2026-11-20 — 사용자 지시): 연결한다.** 소유는 실행 진입점(Launch)이고 Sandbox 엔진 호스트가 엔진에 넘긴다(18.10절). Commandlet·벤치 도구의 연결, `Trim` 시점, 다른 스레드 캐시의 `Trim`은 후속이다 |
+| 8 | `BinnedAllocator`를 엔진·응용 프로그램에 연결(개정 13) | **확정(개정 15, 2026-11-20 — 사용자 지시): 연결한다.** 소유는 실행 진입점(Launch)이고 Sandbox 엔진 호스트가 엔진에 넘긴다(18.10절). Commandlet·벤치 도구의 연결, `Trim` 시점, 다른 스레드 캐시의 `Trim`은 후속이다. **개정 16(18.11절)**: 게임 템플릿과 Commandlet을 연결했고 벤치 도구는 바꾸지 않기로 정했다. Trim 시점과 쉬는 스레드 캐시도 넣었다 |
 
 ## 12. 다른 문서 정정
 
@@ -679,7 +679,7 @@ GC 구현(`Core/Source/Runtime/ObjectRuntime/Private/`)을 기능별 파일로 �
 - 주기 간격의 실시간 기준(R3 결정)은 일시정지 중에도 수집을 멈추지 않는다. 일시정지 중 수집을 막아야 하는 앱은 `Incremental` 모드나 요청만 쓴다.
 - GC 전용 scheduler와 다른 작업 스레드의 코어 공유(17.4절)는 엔진 범용 작업 scheduler가 생길 때 정한다.
 
-## 18. 공용 할당자 (GC-S6, 8단계, 개정 7–15, 2026-11-20)
+## 18. 공용 할당자 (GC-S6, 8단계, 개정 7–16, 2026-11-20)
 
 6절 GC-S6의 상세 설계다. 코드는 Core(`Core/Source/Runtime/Core` Memory)이고 ObjectRuntime 전용 할당자는 두지 않는다. 다른 세션이 할당자를 맡고 있지 않음을 확인했다(2026-11-19: 원격·로컬 브랜치와 worktree, Core/Memory의 최근 변경은 FrameArena와 개명뿐). 이 절의 설계는 AL0–AL5로 구현하고 쟀다(18.9절 단계, 실험 25절).
 
@@ -874,6 +874,7 @@ UE 5.8.4의 작은 블록 할당자(`Runtime/Core` — `Public/HAL/MallocBinned2
 | AL4 | `Trim`·통계(`ReservedBytes`·`fallbackAllocations`)·ASan(`ROCKS_NO_SANITIZE_ADDRESS` 내부 접근)·범위 소진 경로 |
 | AL5 | 측정(18.8절)·GC churn 재측정·문서(실험 25절, 0절 갱신) |
 | AL6 | 제품 연결(18.10절 — 개정 15): Launch의 범용 할당자, Sandbox 엔진 호스트, `ThreadExitSlot`의 OS 오류 값 보존 |
+| AL7 | 남은 연결과 Trim(18.11절 — 개정 16): 게임 템플릿·Commandlet, `Allocator::TrimMemory`·쉬는 표시, 쉬는 스레드 캐시 비우기, `WorkerScheduler`, 엔진의 호출 자리, 리뷰 후속 |
 
 시험(단계마다 음성 대조와 함께):
 
@@ -905,3 +906,90 @@ UE 5.8.4의 작은 블록 할당자(`Runtime/Core` — `Public/HAL/MallocBinned2
 - **시험.** Launch probe(자식 프로세스): 기본이 `BinnedAllocator`인지(범용 할당자가 시스템 할당자와 다른 객체이고, 작은 요청은 시스템 할당자의 살아 있는 할당 수를 늘리지 않으며 큰 요청은 하나 늘린다), `System` 설정이면 같은 객체인지, 본문이 할당을 남기면 Fatal인지, `RequestExitWithoutStaticTeardown`이면 남겨도 Fatal 없이 끝나는지. EngineTests: 엔진을 `BinnedAllocator` 위에서 초기화·프레임·GC·종료(끝에 남은 할당 0, `Trim` 뒤 commit 0). `ThreadExitSlot`: `Get`·`Set`이 OS 오류 값을 바꾸지 않는다. 음성 대조: Launch가 설정과 무관하게 시스템 할당자를 내줌, 설정을 무시하고 언제나 `BinnedAllocator`를 만듦.
 - **측정(실험 25.10절).** `GcBench`의 일반 그래프 시나리오(1M · 간선 4)를 `SystemAllocator`와 `BinnedAllocator` 위에서 같은 round에 번갈아 쟀다(5 round의 중앙값): 생성 824 → 441 ms(0.54배), 연결 1,106 → 818 ms(0.74배), churn 생성+연결 175 → 127 ms(0.72배), churn 회수 414 → 152 ns/객체(0.37배), churn Collect 전체 107.5 → 81.5 ms(0.76배), 회수를 미뤘을 때 2 ms 예산의 프레임 수 24 → 10. 종료 회수는 이 시나리오가 재지 않아 할당자 비교의 값을 쓴다(383 → 139 ns/객체 — 25.8절).
 - **구현에서 정한 것.** Sandbox `EngineHost.cpp`의 지역 `SystemAllocator` 둘은 그대로 뒀다 — 하나는 self-test 단계가 trace 파일을 읽어 들이는 버퍼이고 다른 하나는 self-test의 기기 특성 확인(`CheckDeviceTraitsFromCaps`)이라 엔진·모듈 로더로 가지 않는다. 시험 지원에 OS 오류 값을 쓰고 읽는 `test::SetSystemError`·`SystemError`를 더했다. 그 소스를 더하자 FoundationTests의 유니티 묶음 경계가 옮겨져 `WindowsComRefTests.cpp`(Windows COM 헤더의 `small` 같은 매크로)가 Compression 시험과 한 묶음의 앞에 놓여 컴파일이 깨졌다 — 그 시험 소스를 유니티 단독 소스로 뺐다(`FoundationTests.Build.cs`).
+
+### 18.11 남은 연결과 Trim (AL7, 개정 16)
+
+사용자 지시(2026-11-20 "남은작업 진행")로 18.10절이 후속으로 남긴 것을 한 묶음으로 넣는다. 범위는 이 절로 고정하고 여기 없는 탐색·보강은 하지 않는다.
+
+#### 18.11.1 나머지 연결
+
+- **게임 템플릿.** `Templates/Game/Foundation/Source/Main.cpp`가 `context.DefaultAllocator()`를 쓴다. 엔진 호스트 종류의 본보기라서(Launch 설계 16절 "새 실행 프로그램은 템플릿을 따른다") 범용 할당자를 쓰는 모습이어야 한다.
+- **Commandlet(`Programs/Commandlet`).** 진입점이 `context.DefaultAllocator()`를 `commandlet_host::Run`에 넘기고, 명령은 등록할 때 건 문맥 포인터로 그 할당자를 받는다. 지역 `SystemAllocator` 자리별 결정:
+
+  | 자리 | 먹이는 것 | 결정 |
+  |---|---|---|
+  | `Run`의 설정 할당자(`HostSettings`) | 설정 문맥 — 엔진 호스트와 같은 부트 | 범용 할당자. 엔진 호스트와 같은 할당자 위에서 같은 부트를 돈다 |
+  | `trace-report` | trace 파일 전체, `TraceModel`, JSON 출력 | 범용 할당자. 명령의 실제 일이고 입력 크기에 비례한다 |
+  | `log decode`·`seal`·`pack`·`view` | 키·파일·복호·압축 풀기 버퍼, `JsonDocument` | 범용 할당자. 같은 까닭이다 |
+  | `core-check` | `SystemAllocator`의 할당·반환 수명 자체 | 그대로 둔다. 그 명령이 점검하는 대상이 `SystemAllocator`다 |
+
+  `log keygen`은 할당자를 쓰지 않는다. 명령이 할당을 남긴 채 돌아오면 Launch의 정리에서 Fatal이다(지역 `SystemAllocator`의 파괴 Fatal과 계약은 같고 자리가 다르다 — 18.10절).
+- **벤치 도구는 바꾸지 않는다(결정).** CompressionBench·CryptoBench·LogBench·GcBench는 지역 할당자를 그대로 쓴다. 측정 도구는 무엇을 재는지에 맞춰 할당자를 일부러 고른다 — GcBench는 `--allocator-kind`로 고르고, 나머지는 할당자 몫을 재지 않는 측정이다.
+
+#### 18.11.2 UE 5.8 확인 (Trim)
+
+로컬 클론(5.8.4)에서 읽은 것이다. 경로는 `Engine/Source/Runtime` 아래다.
+
+- **부르는 시점.** `FMemory::Trim(bool bTrimThreadCaches = true)`(`Core/Public/HAL/UnrealMemory.h:229`, `Core/Private/HAL/UnrealMemory.cpp:559`)은 trim delegate를 알린 뒤 `GMalloc->Trim`을 부른다. `FMalloc::Trim`의 기본 구현은 무동작이다(`Core/Public/HAL/MemoryBase.h:166`). 엔진이 부르는 곳은 GC의 purge가 끝나는 자리 셋뿐이다(`CoreUObject/Private/UObject/GarbageCollection.cpp`).
+  - `:5933` `PostCollectGarbageImpl` — 전체 purge(`bPerformFullPurge`) 직후.
+  - `:4822` `IncrementalPurgeGarbage` — 증분 purge가 끝난 다음 호출("if the purge was completed last tick, perform the trim to finalize this incremental purge").
+  - `:5772` `PreCollectGarbageImpl` — 새 GC가 남은 증분 purge를 마저 끝낸 뒤(전체 purge가 아닐 때).
+  - 맵 로드는 `UEngine::LoadMap`(`Engine/Private/UnrealEngine.cpp:16078`)이 `UEngine::TrimMemory`(`:16716`)를 부르고, 그것이 전체 purge GC(`CollectGarbage(..., true)` — `:16729`)를 불러 `:5933`으로 간다. World 파괴에 직접 붙은 Trim은 없다.
+- **쉬는 스레드의 캐시.** 스레드 캐시(`FPerThreadFreeBlockLists` — `Core/Public/HAL/MallocBinnedCommon.h:500`)마다 mutex가 있고 소유 스레드가 쓰는 동안 쥔다(`bLockedByOwnerThread` — `:642`).
+  - worker는 막히는 대기 앞뒤에서 표시한다: `FMemory::MarkTLSCachesAsUnusedOnCurrentThread()` → 대기 → `MarkTLSCachesAsUsedOnCurrentThread()`(`Core/Private/Async/Fundamental/WaitingQueue.cpp:119–125`). 앞의 것이 mutex를 풀고(`UnlockTLS` — `MallocBinnedCommon.h:535`) 뒤의 것이 다시 잠근다(`LockTLS` — `:544`, 비우는 쪽이 쥐고 있으면 기다린다).
+  - 빠른 경로의 `Get()`(`:504`)은 `bLockedByOwnerThread`가 거짓이면 null을 돌려준다 — 쉰다고 표시한 사이의 할당(대기 구현이 할당할 때)은 캐시 없이 간다.
+  - `Trim`(`Core/Public/HAL/MallocBinnedCommonUtils.h:143`)은 epoch(`MemoryTrimEpoch`)를 올린다. 비데스크톱에서는 등록된 캐시를 돌며 `TryLock`에 성공한 것(쉬는 스레드의 것)을 그 자리에서 비운다(`:152–170`). 데스크톱에서는 그 순회를 건너뛴다("we may have too many threads and this could cause some hitches") — 깨어 있던 스레드가 다음에 쉴 때 epoch가 올랐으면 스스로 비운다(`MarkTLSCachesAsUnusedOnCurrentThread` → `FlushCurrentThreadCacheInternal(bNewEpochOnly)` — `MallocBinnedCommon.h:809`).
+
+#### 18.11.3 `Allocator` 인터페이스
+
+`Allocator`만 가진 코드(엔진, `WorkerScheduler`)가 부를 수 있게 기본 인터페이스에 가상 함수 셋을 더한다(UE `FMalloc::Trim`·`MarkTLSCachesAs…`와 같은 구조). 기본 구현은 모두 무동작이다.
+
+- `void TrimMemory() noexcept` — 쥐고만 있고 쓰지 않는 메모리를 OS·상위 allocator에 돌려준다. 살아 있는 할당은 건드리지 않는다. 어느 스레드에서나 부른다.
+- `void MarkThreadIdle() noexcept` — 호출 스레드가 지금부터 이 allocator를 쓰지 않고 쉰다고 알린다. 막히지 않고 호출자 쪽으로 재진입하지 않는다(호출자가 자기 잠금을 쥔 채 부를 수 있다).
+- `void MarkThreadActive() noexcept` — 다시 쓴다고 알린다. 그 스레드의 캐시를 다른 스레드의 `TrimMemory`가 비우는 중이면 끝날 때까지 막힐 수 있다.
+- 표시는 세지 않는 상태다: 쉰다고 두 번 알려도 한 번 깨우면 쓰는 중이다. 표시하지 않은 스레드는 언제나 쓰는 중이다.
+- **이름.** 가상 함수는 `Trim`이 아니라 `TrimMemory`다. `ArenaAllocator`·`PoolAllocator`·`StackAllocator`에 이미 `Result<void> Trim()`(살아 있는 할당이 없을 때만 chunk를 돌려주고 아니면 `Busy`, 단일 스레드 계약)이 있어서 같은 이름의 가상 함수를 둘 수 없고, 그 셋의 고유 계약(표시 무효화·`Busy`)을 `Allocator&`로 새게 하지 않는다. `BinnedAllocator::Trim()`은 재정의 `TrimMemory()`로 개명한다(이름 둘을 두지 않는다 — 이 문서와 실험 문서의 앞 절들은 그때의 이름 `Trim`으로 적혀 있다).
+- **래퍼.** 상위 allocator 하나에 `Allocate`·`Deallocate`를 그대로 넘기는 래퍼는 이 셋도 그대로 넘긴다: Core `BudgetAllocator`·`DebugAllocator`, TestSupport `NFailAllocator`, 모듈 안의 adapter(ObjectSerialization `BudgetAllocator`·`ObservationAllocator`, SpatialIndex `CountingAllocator`). 래퍼를 끼우는 순간 Trim과 쉬는 표시가 조용히 사라지지 않게 한다. 상위가 없거나 넘기는 것이 뜻에 맞지 않는 allocator(`ArenaAllocator`·`PoolAllocator`·`StackAllocator`·`ExternalAllocator`·`SystemAllocator`)는 기본 무동작 그대로다.
+
+#### 18.11.4 `BinnedAllocator`
+
+- **캐시 상태.** 스레드 캐시마다 상태 하나를 둔다(원자 word, 뜨거운 등급 칸과 다른 캐시 줄): 쓰는 중 · 쉬는 중 · 비우는 중. 쓰는 중 ↔ 쉬는 중은 소유 스레드만, 쉬는 중 ↔ 비우는 중은 등록부 잠금을 쥔 스레드만 바꾼다. 모두 비교 교환이다.
+- **`MarkThreadIdle`.** 호출 스레드의 이 인스턴스 캐시(없으면 아무것도 안 한다)를 쓰는 중 → 쉬는 중으로 바꾸고, 스레드 기록의 "마지막에 쓴 인스턴스" 지름길이 이 인스턴스면 지운다. 잠금을 잡지 않는다.
+- **`TrimMemory`.** 순서: 호출 스레드의 캐시가 쓰는 중이면 비운다 → 등록부 잠금 아래에서 이 인스턴스의 캐시 목록을 돌며 쉬는 중 → 비우는 중으로 바꾼 캐시의 묶음을 slab으로 돌려주고 쉬는 중으로 되돌린다 → 이전 칸을 비운다 → 보관한 빈 slab을 decommit한다. 쓰는 중인 다른 스레드의 캐시는 건드리지 않는다. 계수(내준·돌려받은 누적 수)는 캐시에 그대로 둔다 — 블록만 옮긴다.
+- **`MarkThreadActive`.** 쉬는 중 → 쓰는 중 비교 교환이 되면 끝이다(잠금 없음). 비우는 중이면 등록부 잠금을 얻어(비우는 쪽이 그 잠금을 쥐고 있으므로 끝날 때까지 기다린다) 쓰는 중으로 둔다.
+- **쉬는 중의 할당·반환은 안전하다(빠른 경로 비용 0).** 빠른 경로는 "마지막에 쓴 인스턴스" 지름길만 본다. 쉰다고 표시할 때 그 지름길을 지우므로 그 뒤의 호출은 느린 경로(`FindOrCreateCache`)로 가고, 느린 경로는 캐시가 쓰는 중이 아니면 캐시 없이 등급 잠금 경로로 보낸다(지름길도 다시 세우지 않는다). 지름길이 애초에 다른 인스턴스를 가리키고 있었어도 같다 — 이 인스턴스의 지름길은 느린 경로만 세운다. 그래서 대기 구현이 할당해도 비우는 쪽과 경쟁하지 않는다(UE `Get()`의 `bLockedByOwnerThread` 검사와 같은 결과다. 검사가 느린 경로에만 있다).
+- **잠금 순서**는 그대로다(등록부 → 등급 → 범위). `MarkThreadActive`가 등록부 잠금을 잡을 수 있으므로, 그것을 부르는 쪽이 쥔 잠금은 등록부 잠금의 앞 순서가 된다 — 등록부 잠금을 쥔 채 allocator 밖으로 나가는 경로는 없다.
+- **비용.** 빠른 경로(할당·반환)는 바뀌지 않는다(쌍 벤치로 확인한다). 깨어난 뒤의 첫 호출만 느린 경로 한 번이다. `TrimMemory`는 등록부 잠금을 쥔 채 쉬는 캐시를 모두 비우므로 그동안 스레드의 캐시 만들기·종료 hook·`Stats`·깨어나는 스레드가 기다린다(캐시 하나에 블록 최대 3,120개).
+- **한계.**
+  - 표시하지 않고 쉬는 스레드(엔진의 다른 스레드 — 로그 출력, 비동기 파일, trace 등)와 Trim 때 깨어 있던 스레드의 캐시는 그대로 남는다(18.8절의 상한 그대로). UE의 epoch(Trim 때 깨어 있던 스레드가 다음에 쉴 때 스스로 비움)는 넣지 않았다(후속).
+  - 한 스레드가 여러 인스턴스의 캐시를 가지면 표시한 인스턴스의 캐시만 쉰다.
+  - UE 데스크톱과 다르다: UE는 데스크톱에서 쉬는 캐시를 Trim이 직접 비우지 않는다(스레드 수가 많아 hitch를 우려). 여기서는 플랫폼을 가르지 않고 직접 비운다 — 표시하는 스레드가 `WorkerScheduler`의 worker뿐이고 캐시 상한이 2.25 MiB라 비용이 작다(측정은 실험 25.11절).
+
+#### 18.11.5 `WorkerScheduler`
+
+- worker는 작업이 없어 막히는 대기(`changed.Wait(gate)`) 바로 앞에서 `MarkThreadIdle`을, 깨어난 바로 뒤에 `MarkThreadActive`를 scheduler가 받은 allocator에 부른다.
+- 앞의 표시는 gate를 쥔 채 부른다(풀었다 잡으면 그 사이에 들어온 작업의 신호를 놓친다 — `MarkThreadIdle`이 막히지 않는 계약인 까닭). 뒤의 표시는 gate를 풀고 부른 뒤 다시 잡는다: 비우는 중이라 막혀도 그동안 다른 스레드의 `Submit`을 붙잡지 않고, 깨어난 worker는 어차피 gate 아래에서 작업을 다시 훑는다.
+- 한계: scheduler가 받은 allocator에만 표시한다. worker가 작업 본문에서 쓴 다른 인스턴스의 캐시는 표시되지 않는다. 작업 본문 안에서 막히는 대기(표식 worker의 gate 등)도 표시하지 않는다.
+
+#### 18.11.6 엔진의 호출 자리
+
+- **자리는 둘이다.**
+  1. World: 전체 수집의 회수가 끝난 프레임. `World::RunFullCollection`은 회수를 미루므로(17.2절) "끝난 프레임"은 미룬 회수가 다 빠진 GC 단계다. 회수할 것이 없었으면 그 수집 직후다. UE `GarbageCollection.cpp:4822`·`:5933`에 대응한다.
+  2. Engine: World를 파괴한 뒤(`Engine::DestroyWorldNow`가 World 객체까지 해제한 다음). UE의 맵 로드 Trim(`UEngine::TrimMemory`)에 대응한다.
+- **증분 cycle이 끝날 때는 부르지 않는다.** UE는 purge가 끝날 때마다 부르지만 UE의 GC는 주기(기본 약 60초)마다 한 번이고, Rocks의 증분 cycle은 World 파괴가 있으면 프레임마다 이어질 수 있어 그보다 잦다. Trim은 호출 스레드의 캐시를 비우고 빈 slab을 decommit하므로 잦으면 다시 commit하는 비용이 든다.
+- **끄는 설정은 하나다**: `WorldGcSchedule::trimMemory`(기본 켬). World의 자리는 자기 일정을, Engine의 자리는 파괴하는 World의 일정을 본다.
+- 한계: 기본 방식(`WorldGcMode::Incremental`)에서는 전체 수집을 요청하거나 World를 파괴하기 전까지 엔진이 Trim을 부르지 않는다. 호스트가 `Allocator::TrimMemory()`를 직접 부를 수 있다. lease 같은 보유 때문에 회수가 밀린 객체가 남아 있는 동안은 1번 자리의 Trim도 밀린다. 메모리 압박 신호에 따른 Trim은 넣지 않는다(신호를 내는 플랫폼 계층이 없다 — 17.3절).
+
+#### 18.11.7 리뷰 후속 가운데 넣는 것
+
+- 실험 25.9절: I1 — slab으로 블록을 돌려줄 때 그 slab의 "쓰는 블록 수"가 이미 0이면 Fatal `BinnedAllocator slab block count underflow`(겹친 중복 반환이 slab 경로로 간 경우의 일부를 잡는다. 표지 값을 나누는 쪽은 넣지 않는다). I2 — 등급 캐시와 이전 칸의 정렬을 `CacheLineSize`로. I4 — `TrimMemory` 공개 주석. I6 가운데 스레드 기록의 항목 표 늘리기 시험(`MaxThreadExitSlots` 초과 시험은 칸을 영구히 쓰므로 넣지 않는다). I7 — 예약 크기가 줄어드는 환경에서 실패하는 단언 고치기. I8 — `_Exit` 표기 통일.
+- 실험 25.10절: 시험만 — I2 내장 진입의 파괴 경로, I3 할당자 수준의 OS 오류 값(새 스레드의 첫 `Allocate`·`Deallocate`), I8 Fatal 종료 코드 비교.
+- 남기는 것(후속): 25.9절 I3(종료 hook의 등록부 잠금 범위), 25.10절 I5(`System` 종류의 남은 할당 검사 자리)·I6(예약을 첫 호출 때 만들기), UE식 epoch, 표시하지 않는 엔진 스레드의 캐시, 메모리 압박 신호.
+
+#### 18.11.8 시험과 측정
+
+- 할당자: 쉰다고 표시한 스레드의 캐시가 다른 스레드의 `TrimMemory`로 비는 것(명시 gate — 캐시 byte와 commit), 쓰는 중인 스레드의 캐시는 그대로인 것, 비우는 도중에 깨어난 소유 스레드가 기다렸다가 정상 동작하는 것(시험 통로로 비우는 쪽을 멈춰 세운다), 쉬는 중의 할당·반환이 캐시 없이 가는 것(지름길이 다른 인스턴스를 가리킬 때 포함), 래퍼 하나가 셋을 넘기는 것.
+- `WorkerScheduler`: worker가 대기 앞뒤에서 표시하는 것(세는 allocator), 작업 본문은 쓰는 중 상태에서 도는 것.
+- 엔진: World의 전체 수집 뒤 회수가 끝나면 한 번, World 파괴 뒤 한 번, 설정을 끄면 0번, 증분 cycle로는 0번.
+- 음성 대조 셋: 쉬는 표시를 무시하고 쓰는 중 캐시까지 비움, 깨어날 때 기다리지 않음, 엔진이 Trim을 부르지 않음.
+- 측정 둘: 쌍 벤치(빠른 경로에 변화 없음), 쉬는 worker가 있는 상태에서 `TrimMemory` 전후의 commit byte.
