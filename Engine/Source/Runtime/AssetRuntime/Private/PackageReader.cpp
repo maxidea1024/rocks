@@ -838,6 +838,10 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "UnsupportedSetting";
     case AssetDiagnosticCode::InvalidSetting:
         return "InvalidSetting";
+    case AssetDiagnosticCode::InvalidSkeletonData:
+        return "InvalidSkeletonData";
+    case AssetDiagnosticCode::SkeletonMismatch:
+        return "SkeletonMismatch";
     }
 
     return "Unknown";

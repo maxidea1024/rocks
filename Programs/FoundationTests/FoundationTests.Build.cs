@@ -24,10 +24,10 @@ public abstract class TestsModule : ModuleRules
     private static readonly string[] ObjectTestModules = ["ObjectRuntime", "ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig", "Curves"];
 
     // Tests of engine layer modules (EngineTests only). Paths are Group/Module under Engine/Source.
-    private static readonly string[] EngineTestModules = ["Runtime/Input", "Runtime/PlatformWindow", "Runtime/World", "Runtime/Engine", "Runtime/GraphicsTypes", "Runtime/Graphics", "Runtime/RenderBase", "Runtime/RenderGraph", "Runtime/AssetRuntime", "Runtime/EngineAssets", "Developer/AssetTools", "Developer/ShaderToolTable", "Developer/ShaderToolLoader", "Developer/ShaderCompiler", "Developer/ShaderFormatVulkan", "Runtime/VulkanGraphics", "Runtime/SpatialIndex", "Runtime/MeshSource", "Developer/MeshTools", "Runtime/SparksCompiler", "Developer/SparksTestHost"];
+    private static readonly string[] EngineTestModules = ["Runtime/Input", "Runtime/PlatformWindow", "Runtime/World", "Runtime/Engine", "Runtime/GraphicsTypes", "Runtime/Graphics", "Runtime/RenderBase", "Runtime/RenderGraph", "Runtime/AssetRuntime", "Runtime/EngineAssets", "Developer/AssetTools", "Developer/ShaderToolTable", "Developer/ShaderToolLoader", "Developer/ShaderCompiler", "Developer/ShaderFormatVulkan", "Runtime/VulkanGraphics", "Runtime/SpatialIndex", "Runtime/MeshSource", "Developer/MeshTools", "Runtime/Animation", "Runtime/SparksCompiler", "Developer/SparksTestHost"];
 
     // Engine modules EngineTests links (only the top modules tests use; lower dependencies propagate).
-    private static readonly string[] EngineTestDependencies = ["PlatformWindow", "Engine", "Graphics", "RenderBase", "RenderGraph", "SpirvReflect", "ShaderToolLoader", "ShaderCompiler", "ShaderFormatVulkan", "VulkanGraphics", "SpatialIndex", "MeshSource", "MeshTools", "MikkTSpace", "SparksTestHost", "EngineAssets"];
+    private static readonly string[] EngineTestDependencies = ["PlatformWindow", "Engine", "Graphics", "RenderBase", "RenderGraph", "SpirvReflect", "ShaderToolLoader", "ShaderCompiler", "ShaderFormatVulkan", "VulkanGraphics", "SpatialIndex", "MeshSource", "MeshTools", "MikkTSpace", "Animation", "SparksTestHost", "EngineAssets"];
 
     // Libraries included by the EngineTests shader tool external library tests (Programs/FoundationTests/Engine) and the MeshTools MikkTSpace reference
     // comparison test. Headers enter only through this executable's Private includes (adapter approach) and must produce zero warnings under the engine

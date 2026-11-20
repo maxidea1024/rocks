@@ -1,6 +1,6 @@
 # 메시·스켈레톤·애니메이션 에셋 설계
 
-기준일: 2026-11-21, 개정 7(MA2a 구현 — 5.4절·12.2절). 개정 6(MA2a·MA4a 분리). 개정 5(MA1 구현 — 3.7절). 개정 4(MA2 전 결정 반영 — index 형식·통합 bone map·메시 LOD 스트리밍). 개정 3(15절 요구를 다른 문서에 반영하고 상태 열을 더함). 개정 2(교차 검증 반영 — 17절). 정적 메시·스켈레톤·스킨 메시·애니메이션 클립의 에셋 자료구조를 정한다. 범위는 원본 데이터(에디터 데이터), 저장 설정, 빌드 계약, 쿠킹 데이터, 모듈 배치다. [엔진 구현 계획](EngineImplementationPlan.ko.md) 13.1절(StaticMeshAsset)·15절(Skeleton·SkeletalMesh·AnimationClip)의 개요를 구현할 수 있는 수준으로 구체화한다. 텍스처는 [에셋 시스템](AssetSystem.ko.md) 12절, 머티리얼은 [머티리얼 시스템](MaterialSystem.ko.md) 4절이 이미 정했으므로 이 문서는 그 둘을 참조만 한다.
+기준일: 2026-11-21, 개정 9(MA3·MA5·MA6을 a·b로 나눔). 개정 8(MA4a 구현 — 6.4절·12.3절). 개정 7(MA2a 구현 — 5.4절·12.2절). 개정 6(MA2a·MA4a 분리). 개정 5(MA1 구현 — 3.7절). 개정 4(MA2 전 결정 반영 — index 형식·통합 bone map·메시 LOD 스트리밍). 개정 3(15절 요구를 다른 문서에 반영하고 상태 열을 더함). 개정 2(교차 검증 반영 — 17절). 정적 메시·스켈레톤·스킨 메시·애니메이션 클립의 에셋 자료구조를 정한다. 범위는 원본 데이터(에디터 데이터), 저장 설정, 빌드 계약, 쿠킹 데이터, 모듈 배치다. [엔진 구현 계획](EngineImplementationPlan.ko.md) 13.1절(StaticMeshAsset)·15절(Skeleton·SkeletalMesh·AnimationClip)의 개요를 구현할 수 있는 수준으로 구체화한다. 텍스처는 [에셋 시스템](AssetSystem.ko.md) 12절, 머티리얼은 [머티리얼 시스템](MaterialSystem.ko.md) 4절이 이미 정했으므로 이 문서는 그 둘을 참조만 한다.
 
 - 배경: 사용자 지시(2026-11-19). 엔진 시험용으로 UE에서 텍스처·정적 메시·머티리얼·애니메이션을 가져오는 기능을 넣는다. Rocks에 메시·애니메이션 자료구조가 아직 없으므로 함께 정한다. 가져오는 경로는 [Unreal 교환 형식](UnrealExchange.ko.md)이 정한다. 이 문서의 자료구조는 그 경로와 상관없이 쓰는 엔진 기반이며, 뒤에 올 glTF·FBX 임포터도 같은 구조로 들어온다.
 - UE 근거: UE 5.8.4(`release`, commit `f45729c0b6f0`, 로컬 클론 `C:\github\UnrealEngine`)를 읽어 확인했다. 경로 약어는 다음과 같다. `E/` = `Engine/Source/Runtime/Engine`, `RT/` = `Engine/Source/Runtime`, `Dev/` = `Engine/Source/Developer`. UE 이름은 대응표와 근거에만 쓰고, 타입 이름은 Rocks 이름으로 짓는다. 빌드 설정·축소 설정처럼 업계 공용 서술 이름은 그대로 쓴다.
@@ -423,6 +423,19 @@ Skeleton : Asset
 - blend profile(UE `BlendProfiles`, Skeleton.h:526)은 blend 단계에서 더한다.
 - 본 병합: 스킨 메시를 임포트할 때 메시 본이 스켈레톤에 없으면 스켈레톤에 더한다. 부모 사슬이 맞지 않으면(중간 본이 빠짐) `SkeletonMismatch`로 실패한다(UE `MergeBonesToBoneTree`·`DoesParentChainMatch`, Skeleton.h:786-797, 912-923). 병합은 스켈레톤 패키지를 바꾸므로 그 스켈레톤에 Build 의존을 건 클립이 다시 쿠킹된다(7.1절).
 
+### 6.4 구현에서 정한 점(MA4a)
+
+MA4a 구현(모듈 `Engine/Source/Runtime/Animation`) 중 6.1·6.2절이 정하지 않았거나 다르게 정한 점이다. 모두 권장안으로 확정했다.
+
+1. **모듈과 파일.** `Animation`은 AssetRuntime(`Asset`·진단)과 CoreTypeBindings(`Transform`·`Rotator<double>`·`Vec3d` 미러 — 모두 있어 새 미러는 없다)에 의존한다. 8절의 Curves 의존은 클립(MA6)이 들어올 때 더한다. 리플렉션 헤더는 `Animation/BoneHierarchy.h`(`BoneInfo`·`BoneHierarchy`)와 `Animation/Skeleton.h`(`BoneTranslationRetarget`·`VirtualBone`·`BoneSocket`·`SkeletonCurveInfo`·`AnimSlotGroup`·`NamedReferencePose`·`Skeleton`)이고, 병합은 `Animation/SkeletonMerge.h`, 진단은 `Animation/AnimationDiagnostic.h`다. 모든 리플렉션 class·struct에 `ROCKS_GENERATED_BODY()`를 둔다.
+2. **계층 불변식(`ValidateBoneHierarchy`).** 차례대로 본 수 ≤ `MeshMaxBones`(65535, 넘으면 `CapacityExceeded`), pose 길이 = 본 수, 본 번호 순으로 (본 0의 부모 = `NoParentBone`, 본 i ≥ 1의 부모 ∈ [0, i) — 두 번째 루트·자기·뒤 본·−2 이하는 모두 `ParentOrder`, 이름은 구조가 맞는 Normal 토큰 — None 거부, pose 성분 유한, 회전 |길이² − 1| ≤ `BoneRotationNormalizedTolerance`(0.01, UE `THRESH_QUAT_NORMALIZED`)), 마지막에 이름 중복(같은 이름의 두 번째 본 번호가 가장 작은 쌍, related = 앞 본)이다. 이름 비교는 Name 토큰 비교(같은 pool, ASCII 대소문자 무시)라 pool 없이 한다. 빈 계층은 정상이다. `exportName`은 검사하지 않는다(원래 이름의 대소문자 보존용 EditorOnly 표시값이라 이름과 다를 수 있다 — UE도 검사하지 않는다).
+3. **pose 정규화(`NormalizeBoneReferencePose`).** 6.1절 "저장 전에 정규화"를 함수로 둔다: 길이² = 1이 아닌 유한 회전을 1/√길이²로 나누고, 길이²가 `BoneRotationMinimumLengthSquared`(1e-8, UE `FQuat::Normalize`의 `UE_SMALL_NUMBER`) 미만이면 단위 회전으로 바꾼다. 비유한 회전은 그대로 둔다(검증이 거부한다). 저장 경로(임포트·병합 저장)가 부르는 것은 MA4b다.
+4. **스켈레톤 불변식(`ValidateSkeleton`).** 계층 다음에 `retargetModes` 길이 = 본 수·값이 열거 안, 가상 본(이름은 "VB " 접두사로 시작하고 접두사보다 길다 — ASCII 대소문자 무시, UE `CheckVirtualBonePrefix`의 `StartsWith` 기본과 같다, 이름이 본·앞 가상 본과 겹치지 않음, (원본, 대상) 쌍이 앞 가상 본과 같지 않음 — UE `AddNewVirtualBone`, 원본·대상은 본 또는 **앞** 가상 본 — 사슬은 되지만 순환은 막는다), 소켓(이름 유일, 본은 원본 본 또는 가상 본, 상대 변환 유한), 커브(이름 유일, `linkedBones`는 원본 본만 — UE `FCurveMetaData::LinkedBones`가 raw 본 참조다), 슬롯 묶음(이름 유일, 슬롯 이름은 모든 묶음을 통틀어 유일 — UE에서 슬롯은 묶음 하나에만 속한다), 리타깃 원본(이름 유일, pose 유한 — 보존 필드라 길이는 보지 않는다) 순이다. `compatibleSkeletons`는 soft 참조라 보지 않는다. 가상 본 접두사는 원문이 필요해 `ValidateSkeleton`만 `NamePool`을 받고, 원문을 읽지 못하면(다른 pool·stale 토큰) 그 pool 오류다.
+5. **진단.** 6.1·6.2절 불변식 위반은 새 코드 `InvalidSkeletonData`(오류 — 11절 표에 더했다)이고, 병합의 부모 사슬 실패는 `SkeletonMismatch`다. 둘을 `AssetDiagnosticCode`에 등록했다. 결과는 `SkeletonDiagnostic{code, error, issue(SkeletonIssue), role(Skeleton·Mesh), index, related}`이고 `ToAssetDiagnostic`이 4.6절 형식(detail = index)으로 옮긴다. 할당 실패는 진단 코드 없이 그 오류다. 버린 대안: 계층 위반도 `SkeletonMismatch`(병합 실패와 입력 손상을 가를 수 없다), `InvalidMeshData`(메시가 아니다).
+6. **병합(`MergeBoneHierarchy`).** UE `MergeBonesToBoneTree`의 기본 경로(부모 사슬 검사 켬 — `a.AllowIncompatibleSkeletalMeshMerge` 끔)를 순수 함수로 옮긴다. 두 입력을 검증하고(진단의 role로 어느 쪽인지), 스켈레톤이 비었으면 결과는 메시 그대로(UE `CreateReferenceSkeletonFromMesh`)다. 아니면 메시 본마다 UE `IsCompatibleMesh`대로 같은 이름 본 또는 스켈레톤에 있는 가장 가까운 메시 조상에서 `DoesParentChainMatch`(부모 이름을 차례로 비교하고 한쪽이 루트에 닿으면 다른 쪽도 루트, 시작 본이 스켈레톤 루트면 두 루트 이름만 비교)를 한다. 실패는 `ParentChainMismatch`(index = 메시 본, related = 대조한 스켈레톤 본), 조상이 하나도 없으면 `MissingAncestor`다. 통과하면 스켈레톤 본을 번호 그대로 두고 없는 메시 본을 메시 순서로 뒤에 더한다(부모 = 메시 부모의 결과 번호 — 부모가 앞이라 늘 있다, pose = 메시 pose). 이미 있는 본은 이름이 대소문자만 다르면(같은 토큰 id, 다른 표시) UE `Rename`처럼 메시 표시와 `exportName`으로 바꾼다(`renamedBones`). UE의 둘째 단계(부모가 바뀐 본 옮기기)는 사슬 검사를 켠 경로에서 일어나지 않으므로 두지 않는다. 결과 본 수가 `MeshMaxBones`를 넘으면 `InvalidSkeletonData`·`TooManyBones`·`CapacityExceeded`다. 결과는 계층 + 메시 본 → 결과 본 대응표(`meshToMerged`)이고, 실패하면 out은 그대로다. `retargetModes` 등 스켈레톤의 본 길이 배열을 늘리는 것과 저장은 MA4b다(새 본의 리타깃 방식은 UE 기본 `Animation`).
+7. **결정성.** 검증은 첫 위반 규칙과 위치가 입력만으로 정해지고(이름 중복은 정렬 뒤 가장 작은 두 번째 번호), 병합은 메시 순서를 따르므로 같은 입력이면 같은 결과다. 부동소수점은 정규화의 √ 하나뿐이다(IEEE 정확 반올림). 스레드를 쓰지 않는다.
+8. **시험 환경.** 패키지 왕복은 AssetRuntime 시험의 `AssetEnv`에 `RegisterAnimationTypes`를 더 불러 실제 `Skeleton` 클래스로 한다(새 fixture 모듈을 두지 않는다 — 같은 의존 모듈 타입은 lease로 공유된다).
+
 ### 6.3 스킨 메시 `SkinnedAsset`·`SkeletalMesh`
 
 ```text
@@ -609,6 +622,7 @@ AssetSystem 4.6절 진단 표에 등록한다(요구 MR10).
 | `NegativeBuildScale` | 경고 | buildScale 음수 성분 홀수 개(winding 반전 없음) |
 | `UnsupportedSetting` | 경고 | 보존 상태 설정이 기본값이 아님 |
 | `UnsupportedCollisionShape` | 경고 | level set 등 받지 않는 충돌 형상 |
+| `InvalidSkeletonData` | 오류 | 본 계층·스켈레톤 불변식 위반(6.4절 — MA4a에서 더함) |
 | `SkeletonMismatch` | 오류 | 본 병합 때 부모 사슬 불일치 |
 | `UnknownBoneTrack` | 경고 | 스켈레톤에 없는 본의 트랙 |
 | `InvalidClipData` | 오류 | 클립 상한·frame rate 위반 |
@@ -729,21 +743,44 @@ Coverage(2026-11-21, clang source-based — `Build/MeasureCoverage.ps1`과 같�
 
 `DeterministicMath.cpp`의 `Acos`·`AsinTail`·`SqrtApproximation`은 줄·분기 모두 닿았다(그 파일의 나머지 미달은 기존 함수의 특수값 분기로 이 작업 범위 밖이다). 측정 중 닿을 수 없음을 확인한 분기는 구조를 고쳤다: MikkTSpace 해제 훅의 null 검사(원본은 할당에 성공한 포인터만 넘긴다), 할당 오류의 "처음 것만" 조건, 지역 진단 null 검사, `GroupByUv`의 빈 묶음, `HasAllTangents`의 NaN·x·z 판정(입력이 유한하고 x·z가 0이면 y도 0), `SqrtApproximation`의 양수 지수 쪽(z < 1). 할당 실패 주입이 찾은 MikkTSpace 원본 버그는 5.4절 8에 적었다.
 
+### 12.3 요구 대조표(MA4a — 본 계층·스켈레톤·병합 판정)
+
+시험은 EngineTests의 `Skeleton_*`(`Engine/Source/Runtime/Animation/Tests`, 15개)다. 진단 이름표는 `AssetPackage_DiagnosticNames`가 새 코드까지 본다.
+
+| 요구 | 시험 |
+|---|---|
+| 6.1 계층 불변식(정상: 빈·루트 하나·가지, 이름 찾기 대소문자 무시) | `Skeleton_HierarchyAcceptsValid` |
+| 6.1 규칙마다 하나씩 어기기(pose 길이·루트 부모·두 번째 루트·자기·뒤·−2 부모·None·잘못된 토큰·대소문자만 다른 중복·NaN 이동·크기·회전·정규화 안 된 회전, 허용 경계 안쪽) | `Skeleton_HierarchyRejectsEachRule` |
+| 6.1 본 수 상한 `MeshMaxBones`(경계 포함) | `Skeleton_HierarchyBoneLimit`, `Skeleton_MergeRejectsInvalidInputs`(병합 결과) |
+| 6.1 기준 pose 정규화 | `Skeleton_NormalizeReferencePose` |
+| 6.2 스켈레톤 필드 하나씩 변조 거부(리타깃 방식·가상 본·소켓·커브·슬롯 묶음·리타깃 원본, 다른 pool 이름) | `Skeleton_ValidateRejectsEachField` |
+| 6.2 저장 → 로드 → 재저장 byte 일치, 두 번 쓴 byte 일치(결정성) | `Skeleton_PackageRoundTripResaveIdentical` |
+| 6.2 병합 성공(빈 스켈레톤, 없는 본 더하기·대응표·pose, 대소문자 이름 바꾸기, 결정성) | `Skeleton_MergeIntoEmptySkeleton`, `Skeleton_MergeAddsMissingBones`, `Skeleton_MergeCaseOnlyRename` |
+| 6.2 부모 사슬 실패(`SkeletonMismatch` — 중간 본 빠짐·조상 사슬 다름·루트 다름) | `Skeleton_MergeRejectsParentChain` |
+| 병합 입력 검증(role)과 결과 상한 | `Skeleton_MergeRejectsInvalidInputs` |
+| 할당 실패 주입(결과 그대로·같은 결과) | `Skeleton_MergeAllocationFailures`, `Skeleton_ValidateAllocationFailures` |
+| 고정 seed 퍼징(무작위 계층 500개 — 검증·스켈레톤에서 만든 메시와 병합·무관한 계층 병합) | `Skeleton_FuzzHierarchiesAndMerges` |
+| 11 `InvalidSkeletonData`·`SkeletonMismatch` 등록·이름·4.6절 변환 | `Skeleton_DiagnosticNames`, `AssetPackage_DiagnosticNames` |
+
+Coverage(2026-11-21, clang source-based — `Build/MeasureCoverage.ps1`): 시험 `Skeleton_`(15개) 모두 통과. Animation Private·Public 8개 파일 줄 627/627(100%), 분기 333/334(99.70%), 함수 47/47. 닿지 않은 분기 1개는 이름 표 이진 탐색(`FindNamed`)의 "다른 pool 이름" 비교 쪽이다 — 병합·검증의 이름 조회는 같은 pool이라는 전제(6.4절 6) 안에서만 부르므로 domain이 다른 키가 오지 않는다(정렬 쪽 domain 비교는 다른 pool 이름을 섞은 계층 시험이 닿는다). 측정 중 닿을 수 없음을 확인한 구조는 고쳤다: 중복 이름 찾기의 "묶음 첫 원소까지 거슬러 오르기"(묶음 안이 번호 순이라 두 번째 원소의 바로 앞이 첫 원소다), 검증 단계 사이에 이름 표를 다시 써 용량이 남아 할당이 일어나지 않던 경로(단계마다 새 표).
+
 ## 13. 단계
 
-ID는 이 문서가 부여한다(MA). 착수는 사용자가 정하고, 고정 구현 순서를 바꾸지 않는다. 단, 사용자 지시(2026-11-21 "진행 가능한거부터")에 따라 에셋 DB·쿠커·머티리얼 클래스에 기대지 않는 부분을 MA2a·MA4a로 떼어 먼저 한다. 떼어 낸 부분은 순수 함수·값 타입·A1 수준 에셋 클래스뿐이라, 뒤 단계(MA2b·MA4b)가 그 위에 쿠킹 처리기·임포트 서비스를 얹을 때 바꿀 계약이 없다.
+ID는 이 문서가 부여한다(MA). 착수는 사용자가 정하고, 고정 구현 순서를 바꾸지 않는다. 단, 사용자 지시(2026-11-21 "진행 가능한거부터")에 따라 에셋 DB·쿠커·머티리얼 클래스에 기대지 않는 부분을 a 단계(MA2a·MA3a·MA4a·MA5a·MA6a)로 떼어 먼저 한다. 떼어 낸 부분은 순수 함수·값 타입·A1 수준 에셋 클래스뿐이라, 뒤 단계(MA2b·MA4b)가 그 위에 쿠킹 처리기·임포트 서비스를 얹을 때 바꿀 계약이 없다.
 
 | 단계 | 내용 | 선행 |
 |---|---|---|
 | MA1 | `MeshSource` 모듈: 저장 형식·검증·위상 조회·값 정리, 시험. **구현(2026-11-20, d5405bfa)**: 모듈 `Engine/Source/Runtime/MeshSource`, AssetRuntime `MemoryBulkSource`·메시 진단 코드 5개, 시험 52개 + AssetRuntime 3개(12.1절 대조표·coverage — 줄 99.05%, 분기 94.86%, 닿지 않은 분기는 단언·메모리 상한), 정한 점은 3.7절 | A1(패키지·Bulk) |
 | MA2a | 선행 조건에 기대지 않는 빌드 핵심: `Mesh` 모듈에 빌드 설정 값 타입(`MeshBuildSettings`), `MeshTools` 모듈에 `MeshSource` → 메모리 빌드 결과(렌더 정점·index·섹션·bounds) 순수 함수(5.2절 1–5·8–10·12단계, 6·7·11단계는 후속이라 경고 또는 원본 순서), 용접·퇴화 판정 임계값 상수를 UE 원본으로 확정, MikkTSpace ThirdParty(결정적 수학 패치)와 참조 구현 대조 시험, 필요한 결정적 초월 함수는 Core에 더함. 쿠킹 형식 패킹(13단계)·`StaticMesh` 클래스·슬롯 머티리얼 참조·쿠킹 처리기·임포트 서비스는 MA2b. 슬롯 대응(10단계)은 슬롯 이름 목록만 입력으로 받는다. **구현(2026-11-21, 미커밋)**: 모듈 `Mesh`·`MeshTools`, ThirdParty MikkTSpace(3e895b49d05e + Rocks.patch), Core `deterministic::Acos`, 진단 코드 4개, 시험 26개 + Core 2개(12.2절 대조표·coverage — Mesh·MeshTools 줄 99.7%, 분기 98.5%), 정한 점은 5.4절 | MA1 |
 | MA2b | `StaticMesh` 클래스·슬롯·섹션 정보·소켓, 쿠킹 렌더 데이터 패킹(5.3절), 쿠킹 처리기·임포트 서비스, CoreTypeBindings `Box<double>` 미러(MR8), `IndexFormat` GraphicsTypes 이동 확인(MR7) | MA2a, A2–A4, `Material` 에셋 클래스(MaterialSystem MS3) |
-| MA3 | 단순 충돌 데이터·검증 | MA2b |
-| MA4a | `Animation` 모듈: `BoneHierarchy`(불변식 검증)·`Skeleton` 에셋 클래스(저장·로드 왕복), 병합 판정 함수(부모 사슬 대조, `SkeletonMismatch`)까지 — 에셋 DB 없이 되는 부분 | A1 |
+| MA3a | 단순 충돌 값 타입(4.6절 `SimpleCollision`·형상 struct·`CollisionComplexity`)과 검증(유한값·양의 크기·볼록 형상 bulk 길이·index 범위), `UnsupportedCollisionShape` 등록 — `Mesh` 모듈, `StaticMesh` 필드 연결은 MA2b | MA2a |
+| MA4a | `Animation` 모듈: `BoneHierarchy`(불변식 검증)·`Skeleton` 에셋 클래스(저장·로드 왕복), 병합 판정 함수(부모 사슬 대조, `SkeletonMismatch`)까지 — 에셋 DB 없이 되는 부분. **구현(2026-11-21, 미커밋)**: 모듈 `Engine/Source/Runtime/Animation`, 진단 코드 `InvalidSkeletonData`·`SkeletonMismatch`, 시험 15개(12.3절 대조표·coverage), 정한 점은 6.4절 | A1 |
 | MA4b | 스켈레톤 임포트 서비스·기존 스켈레톤 병합 저장·너겟 무효화 | MA4a, A2–A4 |
-| MA5 | 스킨 메시: 원본 스킨 가중치·morph, 빌드·쿠킹 | MA2b, MA4b |
-| MA6 | 애니메이션 클립: 원본·이벤트·설정, 쿠킹 v1, CoreTypeBindings `FrameRate` 미러(MR8) | MA4b, Curve 단계(완료) |
-| MA7 | 명령행·문서·검증 보고 | MA1–MA6 |
+| MA5a | 스킨 빌드 핵심(순수 함수): `SkinnedMeshBuildSettings`, 원본 스킨 가중치를 렌더 정점까지 옮기기(용접 비교에 영향 포함), 영향 줄이기·8/16비트 정규화(`InfluencesTrimmed`), LOD 통합 bone map·필요 본 목록·inverse-bind 행렬(MA4a `BoneHierarchy`), morph target 희소 변화량 빌드(`morphThresholdPosition`) — 메모리 결과까지 | MA2a, MA4a |
+| MA5b | `SkinnedAsset`·`SkeletalMesh` 클래스, 쿠킹 렌더 데이터 패킹(`SkinnedRenderLod`), 쿠킹 처리기·임포트 서비스, 스켈레톤 병합 저장 연결 | MA5a, MA2b, MA4b |
+| MA6a | 애니메이션 클립 핵심: `AnimationAsset`·`AnimationClip` 클래스(저장·로드 왕복), `ClipSourceData`·이벤트·동기 마커·설정 검증(`InvalidClipData`·`UnknownBoneTrack`), 원본 샘플링, 쿠킹 데이터 v1로 바꾸는 순수 함수(상수 트랙 접기·재샘플링)와 쿠킹 데이터 샘플링, CoreTypeBindings `FrameRate` 미러(MR8) | MA4a, Curve 단계(완료) |
+| MA6b | 클립 쿠킹 처리기·임포트 서비스·스켈레톤 병합 뒤 재쿠킹(너겟 무효화) | MA6a, MA4b |
+| MA7 | 명령행·문서·검증 보고 | MA1–MA6b |
 
 렌더 쪽 소비: Renderer RS0(정적 메시)가 MA2 결과를, RS12(skinned)가 MA5 결과를 쓴다(Renderer 17절 RQ19).
 
@@ -788,6 +825,10 @@ ID는 이 문서가 부여한다(MA). 착수는 사용자가 정하고, 고정 �
 - 개정 6(2026-11-21): 사용자 지시 "진행 가능한거부터"에 따라 MA2를 MA2a(빌드 핵심 — 순수 함수·MikkTSpace)와 MA2b(클래스·쿠킹·임포트)로, MA4를 MA4a(본 계층·스켈레톤 클래스·병합 판정)와 MA4b(임포트·병합 저장)로 나눴다. MA3·MA5·MA6의 선행을 b 단계로 고쳤다.
 
 - 개정 7(2026-11-21): MA2a 구현에서 정한 점을 5.4절에 적었다(API·입출력 형태, 지금 모듈 의존, 원본 사본의 범위, UE 원본 임계값 확정과 removeDegenerates를 끈 때의 정확 일치 퇴화 제거, 정점 단위 법선 묶음과 대각선 soft, 비유한 중간값, buildScale 검사(`InvalidSetting`), MikkTSpace 저자 원본·패치·원본 버그 수정·참조 글루, Core `Acos`, 용접 색 비교, 섹션·슬롯, 경고 순서, 결정성, 진단 등록, 시험 도우미 이동). 5.2절 9단계 임계값 문장, 12.2절 대조표, 13절 MA2a 상태를 고쳤다.
+
+- 개정 8(2026-11-21): MA4a 구현에서 정한 점을 6.4절에 적었다(모듈 의존, 계층 불변식의 순서와 경계, pose 정규화 함수, 스켈레톤 필드 규칙, 새 진단 코드 `InvalidSkeletonData`와 `SkeletonDiagnostic`, UE 기본 경로를 옮긴 병합 판정과 대소문자 이름 바꾸기, 결정성, 시험 환경). 11절 표에 `InvalidSkeletonData`를 더하고 12.3절 대조표, 13절 MA4a 상태를 고쳤다.
+
+- 개정 9(2026-11-21): MA3·MA5·MA6도 같은 방식으로 a·b로 나눴다(MA3a 충돌 값·검증, MA5a 스킨 빌드 핵심, MA6a 클립 핵심 — 에셋 DB·쿠커 없이 되는 부분). UX1a는 엔진 플러그인 빌드 지원(BuildTargets BS4 엔진 쪽)이 없어 보류했다.
 
 ## 17. 교차 검증 기록(개정 2)
 
