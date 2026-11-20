@@ -555,9 +555,9 @@ Result<void> RecomputeMorphNormals(const MorphBuild& build, uint32 attribute, Al
             for (uint32 triangle : bases.topology.CornerTriangles(corner)) {
                 for (uint32 neighbor : work.TriangleCorners()[triangle].corners) {
                     for (uint32 affected : bases.topology.VertexCorners(cornerVertices[neighbor])) {
-                        normals[3 * affected] = 0.0f;
-                        normals[3 * affected + 1] = 0.0f;
-                        normals[3 * affected + 2] = 0.0f;
+                        normals[3 * static_cast<usize>(affected)] = 0.0f;
+                        normals[3 * static_cast<usize>(affected) + 1] = 0.0f;
+                        normals[3 * static_cast<usize>(affected) + 2] = 0.0f;
                     }
                 }
             }
@@ -616,8 +616,9 @@ Result<void> BuildMorphTarget(const MorphBuild& build, const MorphSource& morph,
         delta.vertex = vertex;
         delta.positionDelta = scratch.positionDeltas[cornerVertices[corner]];
         if (recompute) {
-            const Vec3 normal(scratch.normals[3 * corner], scratch.normals[3 * corner + 1],
-                              scratch.normals[3 * corner + 2]);
+            const Vec3 normal(scratch.normals[3 * static_cast<usize>(corner)],
+                              scratch.normals[3 * static_cast<usize>(corner) + 1],
+                              scratch.normals[3 * static_cast<usize>(corner) + 2]);
             delta.normalDelta = mesh_build::RenderNormal(normal, unit) - mesh.normals[vertex];
         } else {
             delta.normalDelta = MorphValue(source, morph.normal, corner);

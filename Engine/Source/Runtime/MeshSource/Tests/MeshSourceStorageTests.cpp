@@ -972,4 +972,108 @@ TEST(MeshSource_LoadFailures) {
     CHECK(failures > 30);
 }
 
+// 할당 크기 상한을 둔 할당기다(가장 큰 요청을 기록하고, limit보다 큰 요청은 실제로 잡지 않고
+// OutOfMemory로 돌려준다 — 변조된 요소 수가 bulk와 무관한 큰 할당을 만드는지 결정적으로 본다).
+class PeakAllocator final : public Allocator {
+public:
+    PeakAllocator(Allocator& allocator, usize limit) noexcept
+        : allocator_(allocator), limit_(limit) {
+    }
+
+    Result<void*> Allocate(usize bytes, usize alignment, uint32 tag = 0) noexcept override {
+        peak_ = bytes > peak_ ? bytes : peak_;
+        if (bytes > limit_) {
+            return Result<void*>::Failure(ErrorCode::OutOfMemory);
+        }
+
+        return allocator_.Allocate(bytes, alignment, tag);
+    }
+
+    Result<void> Deallocate(void* address) noexcept override {
+        return allocator_.Deallocate(address);
+    }
+
+    void TrimMemory() noexcept override {
+        allocator_.TrimMemory();
+    }
+
+    void MarkThreadIdle() noexcept override {
+        allocator_.MarkThreadIdle();
+    }
+
+    void MarkThreadActive() noexcept override {
+        allocator_.MarkThreadActive();
+    }
+
+    usize Peak() const noexcept {
+        return peak_;
+    }
+
+private:
+    Allocator& allocator_;
+    usize limit_ = 0;
+    usize peak_ = 0;
+};
+
+// 변조된 패키지가 크게 쓴 요소 수(3.1절·3.7절 4·12): 요소 종류 여섯 모두 상한 경계(위상 길이·위치
+// 길이·Name 값 길이·묶음 상한)에서 CorruptPackage이고, 로드는 bulk 크기에 묶인 할당만 한다(16
+// MiB보다 큰 요청이 없다). Position보다 앞서 읽히는 정점 Name 속성과 묶음 Name 속성도 길이 판정이
+// 먼저다.
+TEST(MeshSource_LoadBoundsElementAllocations) {
+    asset_test::AssetEnv env;
+    REQUIRE(env.Ready());
+    constexpr usize limit = usize{16} << 20;
+    MeshSource rich(env.allocator);
+    REQUIRE(BuildRichMesh(rich));
+    // 정점 Name 속성 "Alpha"는 (element, 이름 byte) 순서에서 Position보다 앞이다.
+    MeshSource named(env.allocator);
+    REQUIRE(BuildQuad(named));
+    REQUIRE(named.AddAttribute(MeshElement::Vertex, "Alpha", MeshValueType::Name, 1));
+    struct Case {
+        const MeshSource* mesh;
+        uint32 MeshSourceData::* count;
+        uint32 value;
+        MeshIssue issue;
+    };
+
+    const Case cases[] = {
+        {&rich, &MeshSourceData::vertexCount, MeshMaxElements, MeshIssue::AttributeLength},
+        {&rich, &MeshSourceData::cornerCount, MeshMaxElements, MeshIssue::TopologyLength},
+        {&rich, &MeshSourceData::edgeCount, MeshMaxElements, MeshIssue::TopologyLength},
+        {&rich, &MeshSourceData::polygonCount, MeshMaxElements, MeshIssue::TopologyLength},
+        {&rich, &MeshSourceData::triangleCount, MeshMaxElements, MeshIssue::TopologyLength},
+        {&rich, &MeshSourceData::polygonGroupCount, MeshMaxPolygonGroups,
+         MeshIssue::AttributeLength},
+        {&rich, &MeshSourceData::polygonGroupCount, MeshMaxPolygonGroups + 1,
+         MeshIssue::ElementCountTooLarge},
+        {&named, &MeshSourceData::vertexCount, MeshMaxElements, MeshIssue::AttributeLength},
+    };
+    uint64 id = 900;
+    for (const Case& item : cases) {
+        PeakAllocator bounded(env.allocator, limit);
+        MeshSource out(bounded);
+        MeshDiagnostic diagnostic;
+        auto loaded = LoadEdited(
+            env, id++, *item.mesh,
+            [&](MeshSourceData& data, MemoryBulkSource&) {
+                data.*item.count = item.value;
+                return true;
+            },
+            out, diagnostic);
+        CHECK(!loaded && loaded.Error() == ErrorCode::InvalidArgument);
+        CHECK(HasIssue(diagnostic, AssetDiagnosticCode::CorruptPackage, item.issue));
+        CHECK(bounded.Peak() <= limit);
+    }
+
+    // 묶음 상한은 편집 API도 지킨다(65535개까지 더하고 그다음은 CapacityExceeded).
+    MeshSource groups(env.allocator);
+    for (uint32 group = 0; group < MeshMaxPolygonGroups; ++group) {
+        REQUIRE(groups.AddPolygonGroup());
+    }
+
+    auto refused = groups.AddPolygonGroup();
+    CHECK(!refused && refused.Error() == ErrorCode::CapacityExceeded &&
+          groups.Count(MeshElement::PolygonGroup) == MeshMaxPolygonGroups);
+}
+
 } // namespace mesh_source_storage_tests_file

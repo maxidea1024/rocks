@@ -1,7 +1,10 @@
 #include "MeshToolsTestSupport.h"
 
+#include "../Private/MeshBuildInternal.h"
+
 #include <Core/Math/Color.h>
 #include <MeshSource/Tests/MeshSourceTestSupport.h>
+#include <stdio.h>
 
 // 렌더 정점 용접·퇴화 제거·섹션·슬롯 대응·색과 UV 채널·값 정리 경고 시험이다(Docs/Design/
 // MeshAnimationAssets.ko.md 5.2절 9·10단계, 4.3절, 12절 "빌드"). 임계값은 UE 원본 값이고 비교는
@@ -324,6 +327,57 @@ TEST(StaticMeshBuild_SanitizeWarningsUseSourceAttributes) {
     CHECK(built.colors[built.indices[0]].x == 1.0f);
     // 원본은 그대로다.
     CHECK(mesh.GetVec2(uv, 0, 1).x != mesh.GetVec2(uv, 0, 1).x);
+}
+
+// 겹치는 코너 정렬 키(5.4절 16): z가 모두 같은 평면 격자(정점 100 × 100, 간격 10·7 — 키가 같은 다른
+// 격자점이 드물게, 정점마다 코너 하나 공유)도 UE 가중합 키 0.30X + 0.33Y + 0.37Z로 퍼져 훑기의 비교
+// 횟수가 wedge 수에 비례한다(z만으로 정렬하면 같은 z 묶음 전체를 훑어 수십억 번이 된다). 겹침 표는
+// 정확히 같은 정점을 쓰는 다른 wedge들이다.
+TEST(StaticMeshBuild_OverlapKeySpreadsFlatMeshes) {
+    SystemAllocator allocator;
+    constexpr uint32 side = 100;
+    Array<Vec3> positions(allocator);
+    for (uint32 y = 0; y < side; ++y) {
+        for (uint32 x = 0; x < side; ++x) {
+            REQUIRE(positions.TryPushBack(Vec3(10.0f * x, 7.0f * y, 5.0f)));
+        }
+    }
+
+    Array<uint32> quads(allocator);
+    REQUIRE(quads.TryResize(static_cast<usize>(side - 1) * (side - 1) * 4));
+    Array<PolygonSpec> polygons(allocator);
+    for (uint32 y = 0; y + 1 < side; ++y) {
+        for (uint32 x = 0; x + 1 < side; ++x) {
+            uint32* quad = quads.Data() + (static_cast<usize>(y) * (side - 1) + x) * 4;
+            quad[0] = y * side + x;
+            quad[1] = y * side + x + 1;
+            quad[2] = (y + 1) * side + x + 1;
+            quad[3] = (y + 1) * side + x;
+            REQUIRE(polygons.TryPushBack(PolygonSpec{Span<const uint32>(quad, 4), 0}));
+        }
+    }
+
+    MeshSource mesh(allocator);
+    REQUIRE(BuildPolygonMesh(mesh, positions.View(), polygons.View(), 1, true));
+    mesh_build::OverlappingWedges overlaps(allocator);
+    REQUIRE(mesh_build::FindOverlappingWedges(mesh, MeshPointsSameThreshold, allocator, overlaps));
+    const uint32 wedges = 3 * mesh.Count(MeshElement::Triangle);
+    // 정점마다 그 정점을 쓰는 wedge 수(최대 6)다.
+    Array<uint32> uses(allocator);
+    REQUIRE(uses.TryResize(mesh.Count(MeshElement::Vertex)));
+    for (uint32 wedge = 0; wedge < wedges; ++wedge) {
+        ++uses[mesh.CornerVertices()[mesh.TriangleCorners()[wedge / 3].corners[wedge % 3]]];
+    }
+
+    for (uint32 wedge = 0; wedge < wedges; ++wedge) {
+        const uint32 vertex =
+            mesh.CornerVertices()[mesh.TriangleCorners()[wedge / 3].corners[wedge % 3]];
+        CHECK(overlaps.Row(wedge).Size() == uses[vertex] - 1);
+    }
+
+    CHECK(overlaps.comparisons <= 8ull * wedges);
+    printf("StaticMeshBuild_OverlapKeySpreadsFlatMeshes: %u wedges, %llu comparisons\n", wedges,
+           static_cast<unsigned long long>(overlaps.comparisons));
 }
 
 } // namespace static_mesh_builder_weld_tests_file

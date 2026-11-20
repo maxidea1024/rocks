@@ -110,27 +110,33 @@ struct CornerBasis {
     Span<const float> uv0;
 
     Vec3 Normal(uint32 corner) const noexcept {
-        return Vec3(normals[3 * corner], normals[3 * corner + 1], normals[3 * corner + 2]);
+        return Vec3(normals[3 * static_cast<usize>(corner)],
+                    normals[3 * static_cast<usize>(corner) + 1],
+                    normals[3 * static_cast<usize>(corner) + 2]);
     }
 
     Vec3 Tangent(uint32 corner) const noexcept {
-        return Vec3(tangents[3 * corner], tangents[3 * corner + 1], tangents[3 * corner + 2]);
+        return Vec3(tangents[3 * static_cast<usize>(corner)],
+                    tangents[3 * static_cast<usize>(corner) + 1],
+                    tangents[3 * static_cast<usize>(corner) + 2]);
     }
 
     Vec2 Uv(uint32 corner) const noexcept {
-        return uv0.IsEmpty() ? Vec2(0.0f, 0.0f) : Vec2(uv0[2 * corner], uv0[2 * corner + 1]);
+        return uv0.IsEmpty() ? Vec2(0.0f, 0.0f)
+                             : Vec2(uv0[2 * static_cast<usize>(corner)],
+                                    uv0[2 * static_cast<usize>(corner) + 1]);
     }
 
     void SetNormal(uint32 corner, const Vec3& value) noexcept {
-        normals[3 * corner] = value.x;
-        normals[3 * corner + 1] = value.y;
-        normals[3 * corner + 2] = value.z;
+        normals[3 * static_cast<usize>(corner)] = value.x;
+        normals[3 * static_cast<usize>(corner) + 1] = value.y;
+        normals[3 * static_cast<usize>(corner) + 2] = value.z;
     }
 
     void SetTangent(uint32 corner, const Vec3& value) noexcept {
-        tangents[3 * corner] = value.x;
-        tangents[3 * corner + 1] = value.y;
-        tangents[3 * corner + 2] = value.z;
+        tangents[3 * static_cast<usize>(corner)] = value.x;
+        tangents[3 * static_cast<usize>(corner) + 1] = value.y;
+        tangents[3 * static_cast<usize>(corner) + 2] = value.z;
     }
 };
 
@@ -164,10 +170,12 @@ struct OverlappingWedges {
 
     Array<usize> starts;
     Array<uint32> items;
+    // 훑기에서 키 차를 비교한 횟수다(정렬 키가 퍼지는지 시험이 결정적으로 본다).
+    uint64 comparisons = 0;
 };
 
-// 겹치는 wedge 표를 만든다(UE FindOverlappingCorners와 같은 z 정렬 훑기 — 같은 z 값은 wedge 번호
-// 순). 오류: 할당 실패.
+// 겹치는 wedge 표를 만든다(UE FindOverlappingCorners와 같은 키 0.30X + 0.33Y + 0.37Z 정렬 훑기 —
+// 키 차가 임계값을 넘으면 그 뒤는 보지 않고, 같은 키는 wedge 번호 순). 오류: 할당 실패.
 Result<void> FindOverlappingWedges(const MeshSource& mesh, float threshold, Allocator& scratch,
                                    OverlappingWedges& out) noexcept;
 

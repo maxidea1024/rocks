@@ -39,7 +39,8 @@ enum class SkeletonIssue : uint8 {
     NonFiniteRetargetPose, // 리타깃 원본 pose 성분이 비유한
     // 병합(MergeBoneHierarchy — SkeletonMismatch).
     ParentChainMismatch, // 같은 이름 본의 부모 사슬 이름이 스켈레톤과 다름
-    MissingAncestor      // 메시 본과 그 조상이 스켈레톤에 하나도 없음(루트가 다름)
+    MissingAncestor,     // 메시 본과 그 조상이 스켈레톤에 하나도 없음(루트가 다름)
+    EmptyMeshHierarchy   // 메시 계층에 본이 없음(UE IsCompatibleMesh의 NumOfBoneMatches > 0)
 };
 
 // 세부 규칙 이름이다(예: ParentOrder → "ParentOrder"). 모르는 값은 "Unknown"이다. 정적 수명이다.
@@ -88,7 +89,8 @@ enum class ClipIssue : uint8 {
     TrackOrder,      // 저장된 트랙이 이름 순(7.5절 6)이 아님
     BulkUnreadable,  // bulk를 읽을 수 없음(빈 ref·없는 id·크기·SHA-256 불일치)
     BulkLength,      // bulk 길이가 배치와 다름
-    TrackBoneLength, // 쿠킹 trackToBone 길이·sampleCount가 트랙 배치와 다름
+    TrackBoneLength, // 쿠킹 trackToBone 길이가 트랙 수와 다름
+    NoSamples,       // 쿠킹 sampleCount가 0
     // 클립(ValidateAnimationClip — index는 그 항목 번호).
     InvalidCurveName,       // 커브 이름이 None
     DuplicateCurve,         // 커브 이름이 앞 커브와 같음(related = 앞 커브)

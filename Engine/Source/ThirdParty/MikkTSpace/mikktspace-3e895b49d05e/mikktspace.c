@@ -761,7 +761,9 @@ static void GenerateSharedVerticesIndexListSlow(int piTriList_in_and_out[], cons
 			const SVec3 vT = GetTexCoord(pContext, index);
 
 			tbool bFound = TFALSE;
-			int t2=0, index2rec=-1;
+			/* Rocks modification: start from the vertex itself so that a vertex no comparison matches (a NaN position,
+			 * normal or texcoord makes veq fail even against itself) keeps its own index instead of -1. */
+			int t2=0, index2rec=index;
 			while (!bFound && t2<=t)
 			{
 				int j=0;

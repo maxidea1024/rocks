@@ -30,7 +30,7 @@
     "mikktspace-3e895b49d05e/mikktspace.h"
   ],
   "files": {
-    "mikktspace.c": "d302c5f938ff5c863b28ad6393942c76cba4063288758d942f9af4994a8c089f",
+    "mikktspace.c": "42a7d31e65f355ce51fdc741b3e197c3738969bd2d8a207a5244047caec4d886",
     "mikktspace.h": "17fc433894f24c73753d548086cc4d8c5c0379f4a6edfb98b5da243e4f0bc3d0"
   },
   "pragmaDirectives": [],
@@ -45,7 +45,7 @@
     {
       "file": "mikktspace.c",
       "upstreamSha256": "de87e74107df766ce68108801262bd8d53899414236b59810509a8fc2a51e288",
-      "reason": "Route cos and acos through Rocks deterministic math hooks and malloc/free through allocator hooks (decision MA-D5: the CRT result bits differ between hosts, breaking cooking determinism); store the matched index in GenerateSharedVerticesIndexListSlow (upstream never assigns index2rec, so this allocation-failure fallback wrote -1 into the vertex list and read out of bounds); and remove the counters iNumUniqueVerts and iUniqueTspaces that are set but never read: -Wunused-but-set-variable (-Wall)"
+      "reason": "Route cos and acos through Rocks deterministic math hooks and malloc/free through allocator hooks (decision MA-D5: the CRT result bits differ between hosts, breaking cooking determinism); store the matched index in GenerateSharedVerticesIndexListSlow (upstream never assigns index2rec, so this allocation-failure fallback wrote -1 into the vertex list and read out of bounds) and start index2rec from the vertex itself so that a vertex nothing matches (NaN input makes veq fail even against itself) keeps its own index; and remove the counters iNumUniqueVerts and iUniqueTspaces that are set but never read: -Wunused-but-set-variable (-Wall)"
     }
   ],
   "patch": "Rocks.patch"

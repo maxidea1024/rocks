@@ -16,6 +16,12 @@ inline constexpr uint32 MeshMinPolygonCorners = 3;
 // 최댓값으로 둔다.
 inline constexpr uint32 MeshMaxElements = static_cast<uint32>(NumericLimits<int32>::Max());
 
+// 다각형 묶음 수의 상한이다(3.1절·3.7절 12). 묶음은 머티리얼 섹션 하나라 다른 요소처럼 데이터(위상·
+// 위치 bulk)에 묶인 개수가 아니다 — 속성 없는 묶음 수만 크게 쓴 원본이 빌드에서 묶음·섹션·위상 표를
+// 그 수만큼 만들지 않게 이름 있는 상한으로 묶는다. 65535는 섹션·슬롯 번호를 16비트로 담는 값이다(UE
+// 고전 정적 메시에는 섹션 수 상한이 없고 Nanite는 64다 — NaniteBuilder.h MaxSectionArraySize).
+inline constexpr uint32 MeshMaxPolygonGroups = 65535;
+
 // 코너 TexCoord 속성의 최대 채널 수다(UE MAX_MESH_TEXTURE_COORDS_MD와 같다, 3.2절).
 inline constexpr uint32 MeshMaxTexCoords = 8;
 
@@ -89,7 +95,7 @@ enum class MeshIssue : uint8 {
     None,
     // 로드 배치 판정(MeshSource::Load — 모두 CorruptPackage).
     FormatVersion,        // formatVersion이 MeshSourceFormatVersion이 아님(UnsupportedVersion)
-    ElementCountTooLarge, // 요소 수 > MeshMaxElements
+    ElementCountTooLarge, // 요소 수 > MeshMaxElements(다각형 묶음은 MeshMaxPolygonGroups)
     BulkUnreadable,       // 빈 ref·패키지에 없는 bulkId·크기·SHA-256 불일치
     TopologyLength,       // 위상 blob 길이가 9.1절 배치와 다름
     PolygonStarts,        // 다각형 둘레 시작 표가 0에서 시작하지 않거나 줄어듦

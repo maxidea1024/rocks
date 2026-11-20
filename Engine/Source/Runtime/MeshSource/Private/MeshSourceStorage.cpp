@@ -481,9 +481,17 @@ Result<void> DecodeFixedValues(Span<const uint8> bytes, MeshSource::Attribute& a
     return Result<void>::Success();
 }
 
-// Name 값(uint32 길이 + UTF-8, N × C개)을 읽는다. 내용 규칙은 검증이 본다.
+// Name 값(uint32 길이 + UTF-8, N × C개)을 읽는다. 내용 규칙은 검증이 본다. 값마다 길이 word가
+// 있으므로 bulk가 N × C × 4 byte보다 짧으면 범위 표를 잡기 전에 손상으로 본다(변조된 요소 수가
+// bulk와 무관한 큰 할당을 만들지 못하게 — 3.7절 4).
 Result<void> DecodeNameValues(Span<const uint8> bytes, MeshSource::Attribute& attribute,
                               uint32 count, MeshDiagnostic* failure, uint32 record) noexcept {
+    const uint64 minimumBytes =
+        static_cast<uint64>(count) * attribute.channels.Size() * StorageWordBytes;
+    if (bytes.Size() < minimumBytes) {
+        return CorruptLayout(failure, MeshIssue::AttributeLength, attribute.element, record);
+    }
+
     StorageReader reader{bytes.Data(), bytes.Data() + bytes.Size()};
     for (MeshSource::Channel& channel : attribute.channels) {
         if (auto resized = channel.ranges.TryResize(count); !resized) {
@@ -758,7 +766,9 @@ Result<void> MeshSource::Load(const MeshSourceData& data, const Package& package
     MeshSource loaded(*allocator_);
     for (uint32 kind = 0; kind < MeshElementKindCount; ++kind) {
         const auto element = static_cast<MeshElement>(kind + 1);
-        if (counts[kind] > MeshMaxElements) {
+        const uint32 limit =
+            element == MeshElement::PolygonGroup ? MeshMaxPolygonGroups : MeshMaxElements;
+        if (counts[kind] > limit) {
             return CorruptLayout(failure, MeshIssue::ElementCountTooLarge, element);
         }
 
