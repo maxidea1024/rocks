@@ -26,3 +26,6 @@ Thumbs.db
 # Python tool caches
 __pycache__/
 *.py[cod]
+
+# clang coverage raw profiles written to the working directory (Build/MeasureCoverage.ps1 runs)
+*.profraw
