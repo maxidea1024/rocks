@@ -10,5 +10,5 @@ public sealed class GraphicsTypes : EngineModuleRules
     // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
     protected override UnityMode Unity => UnityMode.On;
 
-    protected override string[] RequiredModules => ["Core"];
+    protected override string[] PublicDependencies => ["Core"];
 }

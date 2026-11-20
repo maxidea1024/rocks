@@ -12,7 +12,7 @@ public sealed class TraceControl : CoreModuleRules
     // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
     protected override UnityMode Unity => UnityMode.On;
 
-    protected override string[] RequiredModules => ["Config", "TraceCapture"];
+    protected override string[] PublicDependencies => ["Config", "TraceCapture"];
 
     protected override IReadOnlyList<string> Metadata => ["TraceControl/TraceSettings.h"];
 }

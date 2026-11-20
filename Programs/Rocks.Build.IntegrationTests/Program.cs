@@ -99,10 +99,10 @@ try
             !sdkModules.Single(module => module.GetProperty("Name").GetString() == "Core").GetProperty("ProvidesLaunch").GetBoolean(),
             "Engine SDK manifest does not carry the loading phases and the boot marker");
         var sdkEngine = engineManifest.RootElement.GetProperty("EngineVersion");
-        Require(engineManifest.RootElement.GetProperty("Version").GetInt32() == 11 &&
+        Require(engineManifest.RootElement.GetProperty("Version").GetInt32() == 12 &&
             sdkEngine.GetProperty("Major").GetInt32() == engineVersion.Major && sdkEngine.GetProperty("Minor").GetInt32() == engineVersion.Minor &&
             sdkEngine.GetProperty("Patch").GetInt32() == engineVersion.Patch && sdkEngine.EnumerateObject().Count() == 3,
-            "Engine SDK manifest version 11 does not carry the Build/Build.version engine version: " + sdkEngine.GetRawText());
+            "Engine SDK manifest version 12 does not carry the Build/Build.version engine version: " + sdkEngine.GetRawText());
     }
 
     Require(!Directory.GetFiles(sdk, "Build.version", SearchOption.AllDirectories).Any(), "Installed SDK copied Build/Build.version");
@@ -320,11 +320,11 @@ try
     CopyTree(Path.Combine(root, "Templates/Game/Foundation"), reflectionGame);
     var reflectionRules = Path.Combine(reflectionGame, "Game.Build.cs");
     var reflectionRulesText = File.ReadAllText(reflectionRules);
-    Require(reflectionRulesText.Contains("Dependencies = [\"ObjectRuntime\", \"Launch\"]", StringComparison.Ordinal) &&
+    Require(reflectionRulesText.Contains("PublicDependencies = [\"ObjectRuntime\", \"Launch\"]", StringComparison.Ordinal) &&
         reflectionRulesText.Contains("Metadata = [\"GameObject.h\"]", StringComparison.Ordinal), "Game template rules changed; update the SDK descriptor fixture");
     // ObjectSerialization: 게임이 GameCore의 배열 필드를 그래프로 저장·복원한다(SDK 모듈로 링크만 한다).
     File.WriteAllText(reflectionRules, reflectionRulesText
-        .Replace("Dependencies = [\"ObjectRuntime\", \"Launch\"]", "Dependencies = [\"ObjectRuntime\", \"Launch\", \"GameCore\", \"ObjectSerialization\"]", StringComparison.Ordinal)
+        .Replace("PublicDependencies = [\"ObjectRuntime\", \"Launch\"]", "PublicDependencies = [\"ObjectRuntime\", \"Launch\", \"GameCore\", \"ObjectSerialization\"]", StringComparison.Ordinal)
         .Replace("Metadata = [\"GameObject.h\"]", "Metadata = [\"GameObject.h\", \"FixtureChild.h\"]", StringComparison.Ordinal));
     var reflectionProject = Path.Combine(reflectionGame, "Game.rocksproject");
     var reflectionProjectText = File.ReadAllText(reflectionProject);
@@ -343,7 +343,7 @@ try
             {
                 Name = "GameCore",
                 PublicIncludeDirectories = [context.PathInRoot("Core/Public")],
-                Dependencies = ["ReflectionTestFixtures", "CoreTypeBindings"],
+                PublicDependencies = ["ReflectionTestFixtures", "CoreTypeBindings"],
                 Metadata = ["GameCore/CoreThing.h", "GameCore/Extra.h"],
                 ModuleDirectory = "Core"
             };
@@ -924,7 +924,7 @@ try
     var sdkManifestPath = Path.Combine(sdk, "rocks-sdk.json");
     var sdkManifestBytes = File.ReadAllBytes(sdkManifestPath);
     var sdkManifestText = File.ReadAllText(sdkManifestPath);
-    Require(sdkManifestText.Contains("\"Version\": 11,", StringComparison.Ordinal), "SDK manifest is not version 11:\n" + sdkManifestText);
+    Require(sdkManifestText.Contains("\"Version\": 12,", StringComparison.Ordinal), "SDK manifest is not version 12:\n" + sdkManifestText);
     SetReadOnly(sdkManifestPath, false);
     try
     {

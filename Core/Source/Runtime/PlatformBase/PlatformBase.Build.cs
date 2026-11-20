@@ -10,7 +10,7 @@ public sealed class PlatformBase : CoreModuleRules
     // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
     protected override UnityMode Unity => UnityMode.On;
 
-    protected override string[] RequiredModules => ["Base"];
+    protected override string[] PublicDependencies => ["Base"];
 
     public override NativeModuleInput Configure(BuildContext context)
     {
@@ -32,7 +32,7 @@ public sealed class PlatformBase : CoreModuleRules
             PrivateIncludeDirectories = context.Platform == NativePlatform.MacOS
                 ? [context.PathInRoot($"{backend}/Apple")]
                 : [],
-            Dependencies = RequiredModules,
+            PublicDependencies = PublicDependencies,
             // macOS directory watching (FSEvents) uses the CoreServices framework.
             Frameworks = context.Platform == NativePlatform.MacOS ? ["CoreServices"] : []
         };

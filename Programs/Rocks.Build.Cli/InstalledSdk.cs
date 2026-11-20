@@ -16,8 +16,10 @@ namespace Rocks.Build.Cli;
 // (3.10절). SDK는 생성 소스 자체는 싣지 않는다(생성 헤더와 라이브러리만). DynamicModules는 NativeModuleInput과 같은 실행 중 적재 모듈
 // 목록이다(3.8절 — 게임 실행 파일이 SDK 모듈을 링크하면 그 동적 모듈도 링크하고 모듈 표에 싣는다). LoadingPhase(단계 이름 —
 // Descriptors.LoadingPhase)·ProvidesLaunch는 NativeModuleInput과 같은 칸이다(3.11절 — 게임 실행 파일의 모듈 표가 SDK 모듈의 단계로 단계
-// 순서·부트 모듈 검사를 소스 빌드와 같게 한다).
-public sealed record SdkModule(string Name, string[] Includes, string[] Defines, string[] Dependencies, string[] Libraries,
+// 순서·부트 모듈 검사를 소스 빌드와 같게 한다). PublicDependencies·PrivateDependencies는 NativeModuleInput과 같은 두 의존 목록이다
+// (Docs/Design/BuildTargets.ko.md 3.5절 — 게임 빌드가 같은 공개 환경 규칙으로 컴파일 환경을 만든다).
+public sealed record SdkModule(string Name, string[] Includes, string[] Defines, string[] PublicDependencies, string[] PrivateDependencies,
+    string[] Libraries,
     string[] SystemLibraries, string[] Frameworks, string? Descriptor, string? IdentityManifest, bool ProvidesBuildInfo,
     bool ProvidesModuleTable, bool ThirdParty, string? SharedPchHeader, string[] DynamicModules, string? LoadingPhase,
     bool ProvidesLaunch);
@@ -51,7 +53,9 @@ public static class InstalledSdk
     // 그 동적 모듈도 함께 링크하고 모듈 표에 싣는다).
     // 11: SdkModule에 LoadingPhase·ProvidesLaunch 추가(로딩 단계 — Docs/Design/ModuleLoader.ko.md 3.11절. 이전 SDK의 Core·ModuleLoader·
     // Launch는 단계가 없어 게임 실행 파일의 부트 모듈이 EarliestPossible에 시작하지 않으므로 버전 불일치로 거부한다).
-    internal const int ManifestVersion = 11;
+    // 12: SdkModule의 Dependencies를 PublicDependencies·PrivateDependencies로 나눴다(Docs/Design/BuildTargets.ko.md 3.5절 BS0 — 이전 SDK는
+    // 두 목록이 없어 게임 빌드가 공개 환경을 계산할 수 없으므로 버전 불일치로 거부한다).
+    internal const int ManifestVersion = 12;
 
     /// <summary>
     /// SDK 타깃에서 도달하는 모듈만 고른다. 규칙 로더는 모든 모듈 규칙을 읽으므로 타깃이 쓰지 않는(빌드되지 않은)
@@ -152,7 +156,8 @@ public static class InstalledSdk
                 }
 
                 packaged.Add(new(module.Name, includes.ToArray(), module.PublicDefines.ToArray(),
-                    module.Dependencies.ToArray(), libraries.ToArray(), module.SystemLibraries.ToArray(),
+                    module.PublicDependencies.ToArray(), module.PrivateDependencies.ToArray(), libraries.ToArray(),
+                    module.SystemLibraries.ToArray(),
                     module.Frameworks.ToArray(), descriptor, identityManifest, module.ProvidesBuildInfo, module.ProvidesModuleTable,
                     module.ThirdParty, module.SharedPchHeader, module.DynamicModules.ToArray(), module.LoadingPhase.ToString(),
                     module.ProvidesLaunch));
@@ -351,7 +356,8 @@ public static class InstalledSdk
             Name = module.Name,
             PublicIncludeDirectories = module.Includes.Select(path => SafePath(sdk, path)).ToArray(),
             PublicDefines = module.Defines,
-            Dependencies = module.Dependencies,
+            PublicDependencies = module.PublicDependencies,
+            PrivateDependencies = module.PrivateDependencies,
             PrebuiltLibraries = module.Libraries.Select(path => SafePath(sdk, path)).ToArray(),
             SystemLibraries = module.SystemLibraries,
             Frameworks = module.Frameworks,
@@ -505,7 +511,8 @@ public static class InstalledSdk
 
         foreach (var module in manifest.Modules)
         {
-            if (module.Includes is null || module.Libraries is null || module.Dependencies is null || module.Defines is null ||
+            if (module.Includes is null || module.Libraries is null || module.PublicDependencies is null ||
+                module.PrivateDependencies is null || module.Defines is null ||
                 module.SystemLibraries is null || module.Frameworks is null || module.DynamicModules is null || module.LoadingPhase is null)
             {
                 throw new InvalidDataException($"SDK module '{module.Name}' has incomplete declarations.");
@@ -525,7 +532,7 @@ public static class InstalledSdk
                 }
             }
 
-            foreach (var dependency in module.Dependencies.Concat(module.DynamicModules))
+            foreach (var dependency in module.PublicDependencies.Concat(module.PrivateDependencies).Concat(module.DynamicModules))
             {
                 if (!manifest.Modules.Any(candidate => candidate.Name == dependency))
                 {

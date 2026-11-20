@@ -89,6 +89,10 @@ public:
     // 할당한 VkDeviceMemory 수다(진단).
     usize DeviceMemoryCount() const noexcept;
 
+    // typeBits 가운데 장치 메모리(MemoryUsage::Device) 규칙으로 고른 메모리 종류다(transient heap,
+    // GX12). 맞는 종류가 없으면 거짓이다.
+    bool PickDeviceType(uint32 typeBits, uint32& type) const noexcept;
+
 private:
     struct Page {
         explicit Page(Allocator& allocator) noexcept : ledger(allocator) {

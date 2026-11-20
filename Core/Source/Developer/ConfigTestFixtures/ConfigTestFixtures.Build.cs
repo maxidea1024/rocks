@@ -14,7 +14,7 @@ public sealed class ConfigTestFixtures : CoreModuleRules
     // the engine group of a test executable must not register them into every engine.
     protected override LoadingPhase LoadingPhase => LoadingPhase.None;
 
-    protected override string[] RequiredModules => ["ObjectRuntime", "CoreTypeBindings"];
+    protected override string[] PublicDependencies => ["ObjectRuntime", "CoreTypeBindings"];
 
     protected override bool HasSources => false;
 

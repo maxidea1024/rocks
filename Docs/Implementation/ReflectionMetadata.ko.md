@@ -284,7 +284,7 @@ auto pawn = objects.NewObject<game::Pawn>(access, rocks::ObjectTypeIdOf<Spinning
 
 MetaCompiler는 클래스 `GeneratedType<T>`마다 `static void Trace(const T& value, TraceVisitor& visitor) noexcept`(상속 필드를 포함한 모든 참조·struct·배열 필드 — 방문할 필드가 없으면 매개변수 이름 없는 빈 본문)를 내고 `ops.trace`는 `Trace(static_cast<const T&>(object), visitor)`로 그것을 감싼다.
 
-MetaCompiler는 클래스·struct `GeneratedType<T>`마다 필드 방문 함수 `template <class Visitor> static constexpr void VisitFields(const T& value, Visitor& visitor) noexcept`도 낸다([로깅 설계](../Design/LoggingSystem.ko.md) 14.1.6절 LG16). 상속 필드를 포함해 선언 순서(가장 먼 base의 필드부터, 선언 타입 안에서는 소스 순서 — 스키마 필드 배열의 안정 ID 순과 다르다)대로 `visitor.Field("멤버 이름", 값)`을 부른다. 값은 Trace와 같은 철자의 멤버 포인터 직접 읽기이고, 자기 bitfield bool은 헤더 안의 직접 읽기(`Get_` 정의는 생성 소스에 있어 다른 모듈에서 부르지 않게 한다), 상속한 bitfield bool은 base의 생성 접근자 `Get_`의 값이다. 필드가 없으면 매개변수 이름 없는 빈 본문이다. registry·할당이 없으므로 로그 구조체 펼치기(`Object/LogStructure.h`의 `LogStructure<T>` 일반 특수화)가 생산자 경로에서 쓴다. 등록·함수표가 없는 템플릿이라 쓰지 않는 번역 단위에서는 인스턴스화되지 않는다. 생성 헤더는 `Object/LogStructure.h`를 include하지 않는다. `{@Name}`으로 쓰는 번역 단위가 직접 include한다(include 규칙은 로깅 설계 14.2절 LG16). 시험은 MetaTests `Meta.VisitFieldsReadsMembersDirectly`(생성 모양·private·상속·bitfield·빈 struct와 일반 특수화 인스턴스화)와 ObjectRuntime `LogStructureReflectionTests`다.
+MetaCompiler는 클래스·struct `GeneratedType<T>`마다 필드 방문 함수 `template <class Visitor> static constexpr void VisitFields(const T& value, Visitor& visitor) noexcept`도 낸다([로깅 설계](../Design/LoggingSystem.ko.md) 14.1.6절 LG16). 상속 필드를 포함해 선언 순서(가장 먼 base의 필드부터, 선언 타입 안에서는 소스 순서 — 스키마 필드 배열의 안정 ID 순과 다르다)대로 `visitor.Field("멤버 이름", 값)`을 부른다. 값은 Trace와 같은 철자의 멤버 포인터 직접 읽기이고, 자기 bitfield bool은 헤더 안의 직접 읽기(`Get_` 정의는 생성 소스에 있어 다른 모듈에서 부르지 않게 한다), 상속한 bitfield bool은 선언 타입으로 바꿔 헤더 안에서 직접 읽는다(`ROCKS_GENERATED_BODY`가 모든 `GeneratedType`을 friend로 둔다). 필드가 없으면 매개변수 이름 없는 빈 본문이다. registry·할당이 없으므로 로그 구조체 펼치기(`Object/LogStructure.h`의 `LogStructure<T>` 일반 특수화)가 생산자 경로에서 쓴다. 등록·함수표가 없는 템플릿이라 쓰지 않는 번역 단위에서는 인스턴스화되지 않는다. 생성 헤더는 `Object/LogStructure.h`를 include하지 않는다. 일반 특수화의 선언은 생성 헤더가 include하는 `Object/GeneratedFieldAccess.h`에 있고, 정의는 `Object/LogStructure.h`에 있다. 리플렉션 타입을 로그 인자로 쓰는 번역 단위가 정의 헤더를 직접 include하며, 빠뜨리면 `static_assert`로 거부한다(로깅 설계 14.1.6절 L30). 시험은 MetaTests `Meta.VisitFieldsReadsMembersDirectly`(생성 모양·private·상속·bitfield·빈 struct와 일반 특수화 인스턴스화), `Meta.LogStructureDeclarationWithoutDefinitionHeader`(정의 헤더 없이 판정이 같고 쓰면 거부)와 ObjectRuntime `LogStructureReflectionTests`다.
 
 native 클래스 안에는 `ROCKS_PROPERTY`·`ROCKS_NATIVE`를 쓰지 않는다. MetaCompiler가 보지 않으므로 attribute로만 남고 GC가 추적하지도 저장하지도 않는 필드가 된다. Policy(`Rocks.ToolTests policy`·self `Policy.RepositoryReflectionAnnotations`)가 엔진 저장소(템플릿 포함)의 소유 native 소스(.h·.c·.cpp·.mm — 시험·Developer 포함)에서 다음을 거부한다.
 
@@ -296,7 +296,7 @@ native 클래스 안에는 `ROCKS_PROPERTY`·`ROCKS_NATIVE`를 쓰지 않는다.
 
 ## World 타입(B8b)
 
-World 모듈의 Level·Actor·Component는 `ROCKS_CLASS(WorldOnly)`, SceneComponent는 `ROCKS_CLASS()`(WorldOnly 상속)인 리플렉션 클래스다([리플렉션·빌드 보강](../Design/ReflectionFoundations.ko.md) 9.1절, 멤버 분류는 [엔진 런타임](../Design/EngineRuntime.ko.md) 4.6절). `World.Build.cs`는 `RequiredModules = ["ObjectRuntime", "CoreTypeBindings"]`(SceneComponent의 Transform 필드)와 리터럴 `Metadata`(네 헤더)를 두고, identity 명세는 `World.rocksids.json`(타입 4·필드 7 — 이전 수동 TypeId는 어디에도 영속되지 않았으므로 ids 도구로 새로 발급했다)이다.
+World 모듈의 Level·Actor·Component는 `ROCKS_CLASS(WorldOnly)`, SceneComponent는 `ROCKS_CLASS()`(WorldOnly 상속)인 리플렉션 클래스다([리플렉션·빌드 보강](../Design/ReflectionFoundations.ko.md) 9.1절, 멤버 분류는 [엔진 런타임](../Design/EngineRuntime.ko.md) 4.6절). `World.Build.cs`는 `PublicDependencies = ["ObjectRuntime", "CoreTypeBindings"]`(SceneComponent의 Transform 필드)와 리터럴 `Metadata`(네 헤더)를 두고, identity 명세는 `World.rocksids.json`(타입 4·필드 7 — 이전 수동 TypeId는 어디에도 영속되지 않았으므로 ids 도구로 새로 발급했다)이다.
 
 - 영속 필드는 모두 `ReadOnly`이고 도구 이름(`Name`)을 가진다: Level `actors`·`name`, Actor `components`·`rootComponent`(`ObjectRef<SceneComponent>` — 영속 강한 참조)·`enabled`, Component `enabled`, SceneComponent `relativeTransform`. World 포인터·소유·Tick·수명·계층은 `ROCKS_NATIVE`다. 경로·리플렉션 쓰기는 ReadOnly로 Unsupported(`PropertyPathError::ReadOnly`)이고 로드의 staged 쓰기는 된다.
 - 등록: `RegisterWorldTypes(ModuleRegistration&)`가 `rocks::generated::World::RegisterModuleTypes`를 부른다(멱등). Engine은 ModuleRegistration을 소유하고 World → `EngineConfig::registerModuleTypes` → `EngineConfig::registerTypes`(native) 순서로 등록하며, 종료할 때 타입을 Unregister하지 않는다(ModuleRegistration 파괴 → `TypeRegistry::Shutdown`).
@@ -422,7 +422,7 @@ public sealed class ReflectionTestFixtures : CoreModuleRules
 
     protected override string ModuleName => "ReflectionTestFixtures";
 
-    protected override string[] RequiredModules => ["ObjectRuntime"];
+    protected override string[] PublicDependencies => ["ObjectRuntime"];
 
     protected override bool HasSources => false;
 

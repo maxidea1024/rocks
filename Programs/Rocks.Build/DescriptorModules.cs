@@ -168,7 +168,7 @@ public sealed class DescriptorModuleSet
         foreach (NativeModuleInput rule in included)
         {
             // 실행 중 적재 모듈도 같다(Monolithic이 링크한다 — Docs/Design/ModuleLoader.ko.md 3.8절, BuildTargets BD25).
-            foreach (string dependency in rule.Dependencies.Concat(rule.DynamicModules))
+            foreach (string dependency in rule.AllDependencies.Concat(rule.DynamicModules))
             {
                 RequireIncluded(dependency, $"module '{rule.Name}'");
             }

@@ -13,6 +13,7 @@
 #include "StorageTargetSelfTest.h"
 #include "ViewDimensionSelfTest.h"
 #include "TextureViewSelfTest.h"
+#include "TransientHeapSelfTest.h"
 #include "VertexSelfTest.h"
 
 #include <Core/Containers/Array.h>
@@ -467,8 +468,9 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     const uint32 before = failures;
     graphics::Device& device = *created.Value();
     const graphics::DeviceInfo info = device.Info();
-    printf("  %s: %.*s (validation %s%s)\n", name, static_cast<int>(info.adapterName.ByteCount()),
+    printf("  %s: %.*s (validation %s%s%s)\n", name, static_cast<int>(info.adapterName.ByteCount()),
            info.adapterName.Data(), info.validationEnabled ? "on" : "off",
+           info.gpuValidationEnabled ? ", GPU-based validation" : "",
            info.software ? ", software" : "");
 
     sample::Renderer renderer;
@@ -712,6 +714,8 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     failures += RunCommandChecks(name, device, result.triangle.GetAllocator());
     // 렌더 그래프(RG1): 그래프 텍스처·명시 전이·culling·history export/import.
     failures += RunRenderGraphChecks(name, device, renderer, result.triangle.GetAllocator());
+    // transient heap·placed 자원·aliasing 획득(GX12): 같은 heap 구간의 렌더 타깃·버퍼 이어 쓰기.
+    failures += RunTransientHeapChecks(name, device, result.triangle.GetAllocator());
     // GPU 계측(GX9): timestamp 쌍·slot 재사용·calibration·debug marker.
     failures += RunTimingChecks(name, device, renderer, result.triangle.GetAllocator());
     Check(device.ValidationErrorCount() == 0, name, "no validation errors");
@@ -901,7 +905,7 @@ void RunVulkan(Allocator& allocator, const graphics::DeviceDesc& base, BackendRe
 
 } // namespace
 
-int RunGraphicsSelfTest(Allocator& allocator, ModuleLoader& modules) noexcept {
+int RunGraphicsSelfTest(Allocator& allocator, ModuleLoader& modules, bool gpuValidation) noexcept {
     selfTestModules = &modules;
     // 검증 계층이 프로세스를 끝내도 그때까지의 진행이 남도록 출력 버퍼를 쓰지 않는다.
     setvbuf(stdout, nullptr, _IONBF, 0);
@@ -909,6 +913,8 @@ int RunGraphicsSelfTest(Allocator& allocator, ModuleLoader& modules) noexcept {
     failures = 0;
     graphics::DeviceDesc desc;
     desc.enableValidation = true;
+    // D3D12만 쓰고 다른 backend는 무시한다.
+    desc.enableGpuValidation = gpuValidation;
     BackendResult d3d12(allocator);
     BackendResult warp(allocator);
     BackendResult d3d11(allocator);

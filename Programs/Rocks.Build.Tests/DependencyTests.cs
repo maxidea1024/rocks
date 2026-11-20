@@ -38,7 +38,7 @@ internal static class DependencyTests
             "#define OPTIONAL_VALUE 0\n#endif\nint BetaValue() noexcept { return Beta() + OPTIONAL_VALUE; }\n");
         string mainSource = Write("app/main.cpp", "int AlphaValue() noexcept;\nint BetaValue() noexcept;\nint main() { return AlphaValue() * 10 + BetaValue(); }\n");
         NativeModuleInput library = new() { Name = "DepLib", Sources = [alphaSource, betaSource], PrivateIncludeDirectories = [first, second] };
-        NativeModuleInput application = new() { Name = "DepApp", Kind = NativeModuleKind.Executable, Sources = [mainSource], Dependencies = ["DepLib"] };
+        NativeModuleInput application = new() { Name = "DepApp", Kind = NativeModuleKind.Executable, Sources = [mainSource], PublicDependencies = ["DepLib"] };
         NativeBuildRequest build = request with { OutputDirectory = Path.Combine(fixture, "out"), Modules = [library, application], Targets = ["DepApp"] };
         var builder = new NativeBuildEngine();
         async Task<NativeBuildResult> Build(NativeBuildRequest? input = null)

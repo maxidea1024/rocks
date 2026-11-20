@@ -293,4 +293,9 @@ usize MemoryManager::DeviceMemoryCount() const noexcept {
     return count;
 }
 
+bool MemoryManager::PickDeviceType(uint32 typeBits, uint32& type) const noexcept {
+    type = PickType(typeBits, MemoryUsage::Device);
+    return type != NoMemoryType;
+}
+
 } // namespace rocks::graphics::vulkan

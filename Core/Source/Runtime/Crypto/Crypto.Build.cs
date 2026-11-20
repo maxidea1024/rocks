@@ -17,7 +17,7 @@ public sealed class CryptoModule : CoreModuleRules
     protected override IReadOnlyList<string> UnityExclude(BuildContext context) =>
         [context.PathInRoot($"{ModuleDirectory}/Private/Aes/AesX64.cpp"), context.PathInRoot($"{ModuleDirectory}/Private/Aes/AesArm64.cpp")];
 
-    protected override string[] RequiredModules => ["Core", "Task", "Sodium"];
+    protected override string[] PublicDependencies => ["Core", "Task", "Sodium"];
 
     protected override IReadOnlyList<string> PrivateIncludeDirectories(BuildContext context) =>
         ThirdPartyModuleRules.ConsumerIncludeDirectories(context, "Sodium");

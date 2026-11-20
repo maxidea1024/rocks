@@ -78,6 +78,12 @@ struct DeviceDesc {
     // API 검증 계층(D3D12·D3D11 debug layer, Vulkan VK_LAYER_KHRONOS_validation, GL debug
     // context)을 켠다. 없으면 켜지 않고 계속한다.
     bool enableValidation = false;
+    // GPU 기반 검증(D3D12 GPU-based validation)을 켠다. 켜면 enableValidation도 켠 것으로 본다(UE
+    // 5.8 `-gpuvalidation`과 같다, D3D12Adapter.cpp CreateRootDevice). 셰이더에 검사 코드를 넣어
+    // GPU 실행 중 자원 상태·초기화 안 된 placed 자원 접근·descriptor 오류를 잡으므로 아주 느리다.
+    // 진단 실행 전용이다. 지금은 D3D12만 쓰고 다른 backend는 무시한다. debug layer 쪽 기능이
+    // 없으면(ID3D12Debug1 없음) 켜지 않고 경고를 남긴 뒤 계속한다.
+    bool enableGpuValidation = false;
     // 하드웨어 대신 소프트웨어 장치를 쓴다(D3D12·D3D11 WARP, Vulkan CPU 장치 — lavapipe·SwiftShader
     // 같은 소프트웨어 ICD). 헤드리스 CI 검증용이다. Vulkan은 CPU 장치가 없으면 Unsupported다.
     // OpenGL은 무시한다.
@@ -814,6 +820,9 @@ struct ColorAttachment {
     uint32 slice = 0;
     uint32 resolveMipLevel = 0;
     uint32 resolveSlice = 0;
+    // placed 텍스처의 aliasing 획득이다(ResourceTransition::acquire와 같은 뜻, RenderBase 8절
+    // GX12). 패스 시작의 attachment 전이 전에 한다. load는 Load일 수 없다(이전 내용이 없다).
+    bool acquire = false;
 };
 
 // 패스의 깊이·스텐실 attachment다(DepthStencil 텍스처). readOnly면 깊이·스텐실을 읽기 전용으로
@@ -831,6 +840,8 @@ struct DepthAttachment {
     // 붙일 mip과 slice(배열 층·cube 면)다(ColorAttachment와 같은 규칙, 3D 깊이는 없다).
     uint32 mipLevel = 0;
     uint32 slice = 0;
+    // placed 텍스처의 aliasing 획득이다(ColorAttachment::acquire).
+    bool acquire = false;
 };
 
 // attachment(mipLevel, slice)가 텍스처 안인지다. slice 상한은 3D면 그 mip의 깊이, 아니면 slice
@@ -845,6 +856,45 @@ enum class QueueKind : uint8 {
     Graphics,
     AsyncCompute
 };
+
+// --- transient heap(RenderBase 8절 GX12) ---
+
+// transient heap 종류다. 버퍼, 렌더 타깃·깊이가 아닌 텍스처, 렌더 타깃·깊이 텍스처를 늘 다른 heap에
+// 둔다(D3D12 resource heap tier 1 규칙, Vulkan은 선형·최적 자원을 나눠 bufferImageGranularity를
+// 따로 맞추지 않는다).
+enum class TransientHeapKind : uint8 {
+    Buffers,
+    Textures,
+    Targets
+};
+
+// transient heap handle이다(Device::CreateTransientHeap). 놓기는 Device::RetireTransientHeap이다.
+struct TransientHeapHandle {
+    SlotHandle slot;
+
+    bool IsNull() const noexcept {
+        return slot.IsNull();
+    }
+
+    bool operator==(const TransientHeapHandle&) const noexcept = default;
+};
+
+// transient heap 설정이다. bytes는 0보다 크다.
+struct TransientHeapDesc {
+    uint64 bytes = 0;
+    TransientHeapKind kind = TransientHeapKind::Buffers;
+};
+
+// 자원 하나를 heap에 둘 때의 크기·정렬과 heap 종류다(Device::GetTexturePlacement·
+// GetBufferPlacement). offset은 alignment 배수여야 한다.
+struct TransientPlacement {
+    uint64 bytes = 0;
+    uint64 alignment = 0;
+    TransientHeapKind kind = TransientHeapKind::Buffers;
+};
+
+// 텍스처 desc의 heap 종류다(RenderTarget·DepthStencil 용도면 Targets, 아니면 Textures).
+TransientHeapKind TransientHeapKindOf(const TextureDesc& desc) noexcept;
 
 // 패스 시작 설정이다(Device::BeginPass, GX4). 색 attachment는 앞에서부터 colorCount개를 쓴다. 모든
 // attachment의 크기(attachment mip의 크기)와 표본 수(TextureDesc::sampleCount)가 같아야 한다. 색도
@@ -1075,6 +1125,8 @@ struct DeviceInfo {
     // 이 장치의 incarnation 번호다(GpuFencePoint::deviceEpoch).
     uint64 deviceEpoch = 0;
     bool validationEnabled = false;
+    // GPU 기반 검증이 켜졌는지다(DeviceDesc::enableGpuValidation, D3D12만).
+    bool gpuValidationEnabled = false;
     bool software = false;
     // 자원·파이프라인 생성(Create*)을 소유 스레드가 아닌 스레드에서도 부를 수 있는지다(RenderBase
     // 5.4절 GX11). false면 소유 스레드 전용이고 다른 스레드의 생성 요청은 렌더 lane 작업으로

@@ -5,7 +5,7 @@ public sealed class MetaSchema : CoreModuleRules
 {
     protected override string ModuleName => "MetaSchema";
 
-    protected override string[] RequiredModules => ["Core"];
+    protected override string[] PublicDependencies => ["Core"];
 
     protected override bool HasSources => false;
 }

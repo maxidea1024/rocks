@@ -14,7 +14,7 @@ public sealed class Core : CoreModuleRules
     // (Docs/Design/UnityBuildPch.ko.md section 8.4). The header lists widely included, rarely changed Base, PlatformBase and Core headers.
     protected override string? SharedPchHeader => "Core/CoreSharedPch.h";
 
-    protected override string[] RequiredModules => ["PlatformBase", "DeterministicMath"];
+    protected override string[] PublicDependencies => ["PlatformBase", "DeterministicMath"];
 
     // Boot module (in the dependency closure of Launch): started by the module loader right after it is created.
     protected override LoadingPhase LoadingPhase => LoadingPhase.EarliestPossible;

@@ -204,8 +204,10 @@ namespace Rocks.Build.Cli
                         // 공유 PCH를 쓰면 PCH에 든 헤더가 빠진 include를 메워 검사가 무력해진다.
                         Unity = UnityMode.Off,
                         PchUsage = PchUsage.Off,
-                        // 저장소 루트를 include하지 않는다: 검사 TU는 의존 모듈의 public include만으로 헤더를 연다.
-                        Dependencies = reached.Where(name => modules.Single(module => module.Name == name).Kind == NativeModuleKind.StaticLibrary).Order(StringComparer.Ordinal).ToArray()
+                        // 저장소 루트를 include하지 않는다: 검사 TU는 의존 모듈의 public include만으로 헤더를 연다. 도달한 라이브러리를
+                        // 모두 공개 의존으로 두므로 모듈마다 자기 공개 환경만으로 컴파일하는 검사(BD9)가 아니다 — 그 검사는 BS1이다.
+                        // BS1 전에는 의존을 비공개로 내리지 않는다(Docs/Design/BuildTargets.ko.md 3.5절, BS0 → BS1 → BS3).
+                        PublicDependencies = reached.Where(name => modules.Single(module => module.Name == name).Kind == NativeModuleKind.StaticLibrary).Order(StringComparer.Ordinal).ToArray()
                     });
                     targets.Add("PublicHeaderChecks");
                 }

@@ -131,6 +131,9 @@ struct DeviceFeatures {
     // NVIDIA의 D3D12_OPTIONS6 PerPrimitiveShadingRateSupportedWithViewportIndexing(Ampere 이후)일
     // 때다. Vulkan은 asyncCompute와 같다. asyncCompute가 거짓이면 늘 거짓이다.
     bool efficientAsyncCompute = false;
+    // transient heap과 placed 자원(Device::CreateTransientHeap, RenderBase 8절 GX12)을 쓸 수 있다.
+    // D3D12·Vulkan은 참, D3D11·OpenGL ES는 거짓(렌더 그래프는 풀을 쓴다, UE와 같다).
+    bool transientHeaps = false;
     // compute 셰이더를 실행할 수 있다(D3D FL 11.0·Vulkan·OpenGL ES 3.1은 늘 참).
     bool computeShaders = false;
     // 깊이 clamp(깊이 clip 끄기)를 쓸 수 있다(D3D 늘 참, Vulkan depthClamp, OpenGL ES

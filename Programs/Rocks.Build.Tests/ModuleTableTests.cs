@@ -117,13 +117,13 @@ internal static class ModuleTableTests
         NativeModuleInput[] modules =
         [
             new() { Name = "Platform", Sources = [platformSource] },
-            new() { Name = "Core", Sources = [coreSource], PublicIncludeDirectories = [coreInclude], Dependencies = ["Platform"], ProvidesModuleTable = true },
-            new() { Name = "Headers", PublicIncludeDirectories = [headersInclude], Dependencies = ["Core"] },
+            new() { Name = "Core", Sources = [coreSource], PublicIncludeDirectories = [coreInclude], PublicDependencies = ["Platform"], ProvidesModuleTable = true },
+            new() { Name = "Headers", PublicIncludeDirectories = [headersInclude], PublicDependencies = ["Core"] },
             new() { Name = "Third", Sources = [thirdSource], ThirdParty = true },
-            new() { Name = "Engine", Sources = [engineSource], Dependencies = ["Headers", "Third"] },
+            new() { Name = "Engine", Sources = [engineSource], PublicDependencies = ["Headers", "Third"] },
             new()
             {
-                Name = "Game", Kind = NativeModuleKind.Executable, Sources = [mainSource], Dependencies = ["Engine", "Core"],
+                Name = "Game", Kind = NativeModuleKind.Executable, Sources = [mainSource], PublicDependencies = ["Engine", "Core"],
                 LoadingPhase = LoadingPhase.PostDefault
             }
         ];
@@ -187,7 +187,7 @@ internal static class ModuleTableTests
             "differ only in case", "module names that differ only in case");
         await Rejects(builder, game with
         {
-            Modules = modules.Select(module => module.Name == "Engine" ? module with { Dependencies = ["headers", "Third"] } : module).ToArray()
+            Modules = modules.Select(module => module.Name == "Engine" ? module with { PublicDependencies = ["headers", "Third"] } : module).ToArray()
         }, "differs in case from module 'Headers'", "a dependency spelled with different case");
         await Rejects(builder, game with
         {
@@ -196,7 +196,7 @@ internal static class ModuleTableTests
         await Rejects(builder, game with
         {
             Modules = modules.Select(module => module.Name == "Engine" ? module with { Name = "Engine-2" }
-                : module.Name == "Game" ? module with { Dependencies = ["Engine-2", "Core"] } : module).ToArray()
+                : module.Name == "Game" ? module with { PublicDependencies = ["Engine-2", "Core"] } : module).ToArray()
         }, "must have a C identifier name", "a non-identifier entry module name");
 
         // MD6: 의존의 단계가 행보다 늦으면 거부한다(Engine Default → Core PostEngineInit). 실행 파일 행은 None이라 검사하지 않는다.

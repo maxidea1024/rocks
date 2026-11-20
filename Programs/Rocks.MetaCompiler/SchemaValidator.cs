@@ -228,7 +228,7 @@ internal static partial class SchemaValidator
 
             if (bound.Length == 0 && StructRules.IsCoreValueType(spelling))
             {
-                return $"Core value types are reflected by the {StructRules.BindingModule} module: depend on {StructRules.BindingModule} (add it to the module's RequiredModules) so its descriptor is imported.";
+                return $"Core value types are reflected by the {StructRules.BindingModule} module: depend on {StructRules.BindingModule} (add it to the module's PublicDependencies, or PrivateDependencies when only private headers use it) so its descriptor is imported.";
             }
 
             return "Use a supported scalar, Guid, String, Name, AssetId, Sha256Digest, ROCKS_ENUM enum, ROCKS_STRUCT struct, ObjectRef, WeakObjectRef, SoftObjectRef, ClassRef, rocks::InstancedStruct<>, rocks::Optional, rocks::OrderedMap/OrderedSet or rocks::Array/ObjectRefArray/StructRefArray field; raw pointers/other containers/cv-qualified fields need an explicit codec extension.";

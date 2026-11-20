@@ -19,7 +19,7 @@ internal static class GeneratedSourceTests
             Modules =
             [
                 new() { Name = "GenLib", GeneratedSources = [new("Table.Generated.cpp", body)] },
-                new() { Name = "GenGame", Kind = NativeModuleKind.Executable, Sources = [main], Dependencies = ["GenLib"] }
+                new() { Name = "GenGame", Kind = NativeModuleKind.Executable, Sources = [main], PublicDependencies = ["GenLib"] }
             ],
             Targets = ["GenGame"]
         };

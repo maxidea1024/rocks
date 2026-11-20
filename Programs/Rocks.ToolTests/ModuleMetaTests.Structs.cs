@@ -301,7 +301,7 @@ internal static partial class ModuleMetaTests
             Verify.Contains("RMC2000", upper.StdErr, "unsupported field type code");
             Verify.Contains("not bound by CoreTypeBindings", upper.StdErr, "unbound instantiation hint");
             Verify.Contains("rocks::Vector3<float>", upper.StdErr, "bound instantiation in the hint");
-            Verify.That(!upper.StdErr.Contains("RequiredModules", StringComparison.Ordinal), "dependency hint is not shown when the descriptor is imported");
+            Verify.That(!upper.StdErr.Contains("PublicDependencies", StringComparison.Ordinal), "dependency hint is not shown when the descriptor is imported");
         });
 
         // 깊이는 import struct까지 이어서 센다: 위조한 import 사슬 17단(descriptor), 이 모듈 struct가 import한 깊이 16 사슬을

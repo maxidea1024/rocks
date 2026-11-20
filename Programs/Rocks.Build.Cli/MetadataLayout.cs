@@ -224,35 +224,14 @@ public static class MetadataLayout
         LinkClosure.Reachable(roots, byName, (name, from) =>
             throw new ArgumentException($"Module '{from ?? "target"}' depends on unknown module '{name}'."));
 
-    /// <summary>ActionGraph와 같은 include 검색 순서다: 자기 public, 자기 private, 의존 모듈 public(후위 순서).</summary>
+    /// <summary>
+    /// ActionGraph와 같은 include 검색 순서다: 자기 public, 자기 private, 컴파일 환경에 보이는 의존 모듈 public(후위 순서 —
+    /// ModuleVisibility, Docs/Design/BuildTargets.ko.md 3.5절).
+    /// </summary>
     public static IReadOnlyList<string> IncludeOrder(NativeModuleInput module, IReadOnlyDictionary<string, NativeModuleInput> byName)
     {
-        var reached = new HashSet<string>(NameComparer);
-        var dependencies = new List<NativeModuleInput>();
-        void Reach(string name, string from)
-        {
-            if (!byName.TryGetValue(name, out NativeModuleInput? current))
-            {
-                throw new ArgumentException($"Module '{from}' depends on unknown module '{name}'.");
-            }
-
-            if (!reached.Add(current.Name))
-            {
-                return;
-            }
-
-            foreach (string dependency in current.Dependencies)
-            {
-                Reach(dependency, current.Name);
-            }
-
-            if (!NameComparer.Equals(current.Name, module.Name))
-            {
-                dependencies.Add(current);
-            }
-        }
-
-        Reach(module.Name, module.Name);
+        List<NativeModuleInput> dependencies = ModuleVisibility.Of(module, byName, (name, from) =>
+            throw new ArgumentException($"Module '{from}' depends on unknown module '{name}'."));
         return module.PublicIncludeDirectories.Concat(module.PrivateIncludeDirectories)
             .Concat(dependencies.SelectMany(dependency => dependency.PublicIncludeDirectories))
             .Select(path => Path.GetFullPath(path)).Distinct(PathComparer).ToArray();
@@ -467,19 +446,7 @@ public static class MetadataLayout
         }
     }
 
-    private static bool DependsOn(NativeModuleInput module, string target, IReadOnlyDictionary<string, NativeModuleInput> byName)
-    {
-        var visited = new HashSet<string>(NameComparer);
-        bool Visit(string name)
-        {
-            if (!visited.Add(name) || !byName.TryGetValue(name, out NativeModuleInput? current))
-            {
-                return false;
-            }
-
-            return current.Dependencies.Any(dependency => NameComparer.Equals(dependency, target) || Visit(dependency));
-        }
-
-        return Visit(module.Name);
-    }
+    // module의 컴파일 환경에 target 모듈이 보이는지다(생성 헤더 해석 — "도달"이 아니라 "보임", Docs/Design/BuildTargets.ko.md 3.5절).
+    private static bool DependsOn(NativeModuleInput module, string target, IReadOnlyDictionary<string, NativeModuleInput> byName) =>
+        ModuleVisibility.Sees(module, target, byName);
 }

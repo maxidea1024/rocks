@@ -13,7 +13,7 @@ public sealed class AsyncCompression : CoreModuleRules
     // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
     protected override UnityMode Unity => UnityMode.On;
 
-    protected override string[] RequiredModules => ["Core", "Task", "Compression"];
+    protected override string[] PublicDependencies => ["Core", "Task", "Compression"];
 
     protected override IReadOnlyList<string> PrivateIncludeDirectories(BuildContext context) =>
         [context.PathInRoot("Core/Source/Runtime/Compression/Private")];

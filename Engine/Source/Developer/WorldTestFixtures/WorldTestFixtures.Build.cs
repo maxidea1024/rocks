@@ -14,7 +14,7 @@ public sealed class WorldTestFixtures : EngineModuleRules
     // the engine group of a test executable must not register them into every engine.
     protected override LoadingPhase LoadingPhase => LoadingPhase.None;
 
-    protected override string[] RequiredModules => ["World"];
+    protected override string[] PublicDependencies => ["World"];
 
     protected override bool HasSources => false;
 

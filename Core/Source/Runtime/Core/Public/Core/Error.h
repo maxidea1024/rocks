@@ -44,7 +44,10 @@ enum class ErrorCode : uint32 {
     AlreadyRegistered,
     // 요청이 속한 수명 범위(AssetScope 등)가 닫혔다(Revoke). 그 범위의 새 접근·발급은 거부되고 진행
     // 중이던 callback은 이 값을 한 번 받는다(AssetSystem 11.1절).
-    ScopeClosed
+    ScopeClosed,
+    // 대상이 아직 준비되지 않았다(로드 중이거나 상주하지 않음). 호출자가 명시 실패 정책을 골랐을 때
+    // 돌려준다 — 보류·우선 로드는 다른 정책이다(AssetSystem 11.7절 9).
+    NotReady
 };
 
 // 진단 출력용 열거자 이름이다(예: ErrorCode::NotFound → "NotFound"). 모르는 값은 "Unknown"이다.
@@ -98,6 +101,8 @@ constexpr const char* ErrorCodeName(ErrorCode code) noexcept {
         return "AlreadyRegistered";
     case ErrorCode::ScopeClosed:
         return "ScopeClosed";
+    case ErrorCode::NotReady:
+        return "NotReady";
     }
     return "Unknown";
 }

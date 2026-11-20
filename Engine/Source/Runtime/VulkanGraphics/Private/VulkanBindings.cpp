@@ -76,6 +76,9 @@ void VulkanDevice::QueryDeviceCaps() noexcept {
     features.vertexViewportLayerOutput = viewportLayer_ && multiViewport;
     features.atomic64 = atomic64_;
     features.splitTransitions = sync2_;
+    // transient heap·placed 자원(GX12)은 1.0 core 기능(vkBindImageMemory·vkBindBufferMemory
+    // offset)이다.
+    features.transientHeaps = true;
     features.rayTracingPipeline = rayTracingPipeline_;
     features.rayQuery = rayQuery_;
     features.indirectFirstInstance = enabledFeatures_.drawIndirectFirstInstance == VK_TRUE;
@@ -214,6 +217,7 @@ void VulkanDevice::ReleaseViewSource(const BufferViewRecord& view) noexcept {
             Retired entry;
             entry.buffer = orphan.buffer;
             entry.memory = orphan.memory;
+            entry.heap = orphan.heap;
             RetireEntry(Move(entry));
             auto removed = orphanBuffers_.TryRemoveAtSwap(index);
             (void)removed;

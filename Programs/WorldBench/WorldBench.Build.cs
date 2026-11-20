@@ -12,6 +12,6 @@ public sealed class WorldBenchProgram : ModuleRules
         Name = "WorldBench",
         Kind = NativeModuleKind.Executable,
         Sources = context.Sources("Programs/WorldBench/Private"),
-        Dependencies = ["Launch", "World"]
+        PublicDependencies = ["Launch", "World"]
     };
 }

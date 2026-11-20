@@ -149,11 +149,11 @@ internal static class ActionGraph
             }
 
             marks[name] = 1;
-            foreach (string dependency in module.Dependencies)
+            foreach (string dependency in module.AllDependencies)
             {
                 if (!modules.ContainsKey(dependency))
                 {
-                    throw new ArgumentException($"Module {module.Name}, Dependencies: unknown module {dependency}.");
+                    throw new ArgumentException($"Module {module.Name}, dependencies: unknown module {dependency}.");
                 }
 
                 if (modules.TryGetValue(dependency, out var candidate) && candidate.Kind == NativeModuleKind.Executable)
@@ -220,33 +220,13 @@ internal static class ActionGraph
         HashSet<string> entryModules = ModuleTables.EntryModules(modules);
         foreach (var module in ordered)
         {
-            var reachable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var dependencyOrder = new List<NativeModuleInput>();
-            void Reach(string name)
-            {
-                if (!reachable.Add(name))
-                {
-                    return;
-                }
-
-                foreach (string dependency in modules[name].Dependencies)
-                {
-                    Reach(dependency);
-                }
-
-                if (!string.Equals(name, module.Name, StringComparison.OrdinalIgnoreCase))
-                {
-                    dependencyOrder.Add(modules[name]);
-                }
-            }
-
-            Reach(module.Name);
-            var dependencies = dependencyOrder.ToArray();
-            // 실행 파일의 링크 모듈은 링크 폐포에 동적 모듈 쪽을 더한 것이다(LinkClosure — 컴파일 환경은 dependencies만 쓴다). 실행 파일의
-            // 도달 집합(closures — BuildInfo가 실행 파일의 액션을 고른다)도 링크하는 모듈 전부다.
-            NativeModuleInput[] linked = module.Kind == NativeModuleKind.Executable
-                ? LinkClosure.Of(module.Name, modules).Select(name => modules[name]).ToArray()
-                : dependencies;
+            // 컴파일 환경에 보이는 의존 모듈이다(공개 환경 규칙 — ModuleVisibility, Docs/Design/BuildTargets.ko.md 3.5절). include·정의·
+            // AdditionalInputs·공유 PCH 후보가 쓴다.
+            var dependencies = ModuleVisibility.Of(module, modules).ToArray();
+            // 링크 모듈은 두 목록의 도달 폐포다(실행 파일은 동적 모듈 쪽을 더한다 — LinkClosure). 도달 집합(closures — BuildInfo가 실행
+            // 파일의 액션을 고른다)도 링크하는 모듈 전부다.
+            NativeModuleInput[] linked = LinkClosure.Of(module.Name, modules, module.Kind == NativeModuleKind.Executable)
+                .Select(name => modules[name]).ToArray();
             closures[module.Name] = [module.Name, .. linked.Select(value => value.Name)];
             string[] includes = module.PublicIncludeDirectories.Concat(module.PrivateIncludeDirectories)
                 .Concat(dependencies.SelectMany(value => value.PublicIncludeDirectories)).Select(Absolute)
@@ -438,7 +418,8 @@ internal static class ActionGraph
             if (pchWanted && pchUsers != 0)
             {
                 pch = PchBuild.Plan(request, module, dependencies, includes, defines, Common(NativeLanguage.Cpp), definitionsHeader, definitionsContent,
-                    pchUsers, depfile, headers, extraInputs, Absolute, output, notices, name => closures[name], name => modules[name]);
+                    pchUsers, depfile, headers, extraInputs, Absolute, output, notices, name => ModuleVisibility.PublicClosure(name, modules),
+                    name => modules[name]);
             }
 
             if (pch is not null)

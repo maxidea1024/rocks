@@ -22,8 +22,21 @@ public abstract class SourceModuleRules : ModuleRules
     /// <summary>Module name. Must match the folder name.</summary>
     protected abstract string ModuleName { get; }
 
-    /// <summary>Names of direct module dependencies. Only lower modules of the same layer or modules of a lower layer.</summary>
-    protected abstract string[] RequiredModules { get; }
+    /// <summary>
+    /// Public dependencies (counterpart of UE PublicDependencyModuleNames, Docs/Design/BuildTargets.ko.md section 3.5): modules whose headers this
+    /// module's public headers use. Their public include paths and defines reach this module and its consumers. Only lower modules of the same
+    /// layer or modules of a lower layer. A module may appear in only one of the two lists.
+    /// </summary>
+    protected abstract string[] PublicDependencies { get; }
+
+    /// <summary>
+    /// Private dependencies (counterpart of UE PrivateDependencyModuleNames): modules used only by this module's implementation. Their public
+    /// include paths and defines reach this module but not its consumers; they are still linked. Example:
+    /// <code>
+    /// protected override string[] PrivateDependencies => ["Compression"];
+    /// </code>
+    /// </summary>
+    protected virtual string[] PrivateDependencies => [];
 
     /// <summary>
     /// Modules loaded at run time with <c>ModuleLoader::Load(name)</c> instead of being linked as dependencies (counterpart of UE
@@ -151,7 +164,8 @@ public abstract class SourceModuleRules : ModuleRules
             PublicIncludeDirectories = [context.PathInRoot($"{ModuleDirectory}/Public")],
             PrivateIncludeDirectories = PrivateIncludeDirectories(context),
             PrivateDefines = PrivateDefines(context),
-            Dependencies = RequiredModules,
+            PublicDependencies = PublicDependencies,
+            PrivateDependencies = PrivateDependencies,
             DynamicModules = DynamicModules,
             LoadingPhase = LoadingPhase,
             Optimization = Optimization,
@@ -166,7 +180,8 @@ public abstract class SourceModuleRules : ModuleRules
         {
             Name = ModuleName,
             PublicIncludeDirectories = [context.PathInRoot($"{ModuleDirectory}/Public")],
-            Dependencies = RequiredModules,
+            PublicDependencies = PublicDependencies,
+            PrivateDependencies = PrivateDependencies,
             DynamicModules = DynamicModules,
             LoadingPhase = LoadingPhase,
             Metadata = Metadata,
@@ -202,7 +217,7 @@ public static class RepositoryUnity
 /// public sealed class Core : CoreModuleRules
 /// {
 ///     protected override string ModuleName => "Core";
-///     protected override string[] RequiredModules => ["PlatformBase"];
+///     protected override string[] PublicDependencies => ["PlatformBase"];
 /// }
 /// </code>
 /// </summary>

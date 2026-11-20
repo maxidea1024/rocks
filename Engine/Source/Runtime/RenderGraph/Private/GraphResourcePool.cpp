@@ -16,7 +16,8 @@ uint64 TextureBytes(const graphics::TextureDesc& desc) noexcept {
 
 GraphResourcePool::GraphResourcePool(Allocator& allocator, graphics::Device& device,
                                      const GraphResourcePoolConfig& config) noexcept
-    : allocator_(allocator), device_(device), config_(config), entries_(allocator) {
+    : allocator_(allocator), device_(device), config_(config), entries_(allocator),
+      transientHeaps_(allocator), placed_(allocator) {
 }
 
 GraphResourcePool::~GraphResourcePool() noexcept {
@@ -33,6 +34,17 @@ GraphResourcePool::~GraphResourcePool() noexcept {
     }
 
     entries_.Clear();
+    // transient heap과 placed 자원도 장치에 넘긴다(장치가 마지막 사용 뒤 해제한다).
+    for (PlacedEntry& entry : placed_) {
+        RetirePlaced(entry);
+    }
+
+    for (TransientHeapEntry& heap : transientHeaps_) {
+        if (heap.live) {
+            device_.RetireTransientHeap(heap.handle);
+            heap.live = false;
+        }
+    }
 }
 
 bool GraphResourcePool::SameTextureKey(const graphics::TextureDesc& left,
@@ -273,6 +285,7 @@ usize GraphResourcePool::CollectReturned() noexcept {
 usize GraphResourcePool::Evict(uint64 frame) noexcept {
     frame_ = frame > frame_ ? frame : frame_;
     (void)CollectReturned();
+    EvictTransient(frame);
     if (bytes_ <= config_.budgetBytes) {
         return 0;
     }
@@ -338,6 +351,20 @@ void GraphResourcePool::Clear() noexcept {
         auto removed = entries_.TryRemove(slot);
         (void)removed;
     }
+
+    // 쓰는 중이 아닌 transient heap과 그 placed 자원을 놓는다.
+    for (PlacedEntry& entry : placed_) {
+        if (entry.live && !transientHeaps_[entry.heap].inUse) {
+            RetirePlaced(entry);
+        }
+    }
+
+    for (TransientHeapEntry& heap : transientHeaps_) {
+        if (heap.live && !heap.inUse) {
+            device_.RetireTransientHeap(heap.handle);
+            heap.live = false;
+        }
+    }
 }
 
 GraphPoolStats GraphResourcePool::Stats() const noexcept {
@@ -355,6 +382,17 @@ GraphPoolStats GraphResourcePool::Stats() const noexcept {
     stats.evicted = evicted_;
     stats.exports = exports_;
     stats.returned = returned_;
+    for (const TransientHeapEntry& heap : transientHeaps_) {
+        stats.transientHeaps += heap.live ? 1u : 0u;
+        stats.transientHeapBytes += heap.live ? heap.bytes : 0u;
+    }
+
+    for (const PlacedEntry& entry : placed_) {
+        stats.placedResources += entry.live ? 1u : 0u;
+    }
+
+    stats.transientHeapsCreated = transientHeapsCreated_;
+    stats.placedCreated = placedCreated_;
     return stats;
 }
 

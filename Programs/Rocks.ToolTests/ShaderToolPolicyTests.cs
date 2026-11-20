@@ -34,19 +34,19 @@ internal static class ShaderToolPolicyTests
         IReadOnlyList<CheckFailure> Run() => PolicyChecks.ShaderToolReferences(temporary.Root, BinaryLibraries, BinaryHeaders);
 
         // 양성 대조: 메인 프로세스는 표를, 형식 모듈은 표·로더·binary 헤더·절대 경로 열기를, Runtime은 OpenSystem을 쓴다.
-        temporary.Write("Engine/Source/Developer/ShaderCompiler/ShaderCompiler.Build.cs", "RequiredModules => [\"ShaderToolTable\"];\n");
+        temporary.Write("Engine/Source/Developer/ShaderCompiler/ShaderCompiler.Build.cs", "PublicDependencies => [\"ShaderToolTable\"];\n");
         temporary.Write("Engine/Source/Developer/ShaderCompiler/Private/Keys.cpp", "#include <ShaderToolTable/ShaderToolTable.h>\n");
         temporary.Write("Engine/Source/Developer/ShaderFormatD3D/ShaderFormatD3D.Build.cs",
-            "RequiredModules => [\"ShaderToolLoader\", \"ShaderToolTable\"]; Headers(\"DirectXShaderCompiler\");\n");
+            "PublicDependencies => [\"ShaderToolLoader\", \"ShaderToolTable\"]; Headers(\"DirectXShaderCompiler\");\n");
         temporary.Write("Engine/Source/Developer/ShaderFormatD3D/Private/Win64/Dxc.cpp",
             "#include <ShaderToolLoader/ShaderToolLoader.h>\n#include <dxc/dxcapi.h>\nvoid F(platform::DynamicLibrary& l) { (void)l.Open(\"C:/x.dll\"); }\n");
         temporary.Write("Engine/Source/Runtime/Probe/Private/Vulkan.cpp",
             "#include <Platform/DynamicLibrary.h>\nvoid G(platform::DynamicLibrary& l) { (void)l.OpenSystem(\"vulkan-1.dll\"); }\n" +
             "// #include <ShaderToolTable/ShaderToolTable.h> and l.Open(path) in a comment are not code\n");
-        temporary.Write("Engine/Source/Runtime/Probe/Probe.Build.cs", "// depends on \"ShaderToolTable\" only in a comment\nRequiredModules => [\"Core\"];\n");
+        temporary.Write("Engine/Source/Runtime/Probe/Probe.Build.cs", "// depends on \"ShaderToolTable\" only in a comment\nPublicDependencies => [\"Core\"];\n");
         // SH0 도구 스파이크는 워커가 생기기 전에 도구를 직접 여는 측정 프로그램이다.
         temporary.Write("Programs/ShaderToolSpike/ShaderToolSpike.Build.cs",
-            "Dependencies = [\"ShaderToolLoader\", \"ShaderToolTable\"]; Headers(\"DirectXShaderCompiler\");\n");
+            "PublicDependencies = [\"ShaderToolLoader\", \"ShaderToolTable\"]; Headers(\"DirectXShaderCompiler\");\n");
         temporary.Write("Programs/ShaderToolSpike/Private/Win64/Dxc.cpp",
             "#include <ShaderToolLoader/ShaderToolLoader.h>\n#include <dxc/dxcapi.h>\n");
         NoFailures(Run());
@@ -54,14 +54,14 @@ internal static class ShaderToolPolicyTests
         (string File, string Content, string Rule)[] cases =
         [
             ("Engine/Source/Runtime/Probe/Private/Table.cpp", "#include <ShaderToolTable/ShaderToolTable.h>\n", "shader-tool-table"),
-            ("Engine/Source/Runtime/Probe/Probe.Build.cs", "RequiredModules => [\"ShaderToolTable\"];\n", "shader-tool-table"),
+            ("Engine/Source/Runtime/Probe/Probe.Build.cs", "PublicDependencies => [\"ShaderToolTable\"];\n", "shader-tool-table"),
             ("Engine/Source/Runtime/Probe/Probe.Build.cs", "Headers(\"DirectXShaderCompiler\");\n", "shader-tool-binary-load"),
             ("Engine/Source/Runtime/Probe/Private/Dxc.cpp", "#include <dxc/dxcapi.h>\n", "shader-tool-binary-load"),
             ("Engine/Source/Runtime/Probe/Private/Open.cpp",
                 "#include <Platform/DynamicLibrary.h>\nvoid H(platform::DynamicLibrary& l, const char* p) { (void)l.Open(p); }\n", "shader-tool-binary-load"),
             // 메인 프로세스(ShaderCompiler)는 표는 쓰지만 binary를 열지 않는다.
             ("Engine/Source/Developer/ShaderCompiler/Private/Load.cpp", "#include <ShaderToolLoader/ShaderToolLoader.h>\n", "shader-tool-binary-load"),
-            ("Engine/Source/Developer/ShaderCompiler/ShaderCompiler.Build.cs", "RequiredModules => [\"ShaderToolTable\", \"ShaderToolLoader\"];\n",
+            ("Engine/Source/Developer/ShaderCompiler/ShaderCompiler.Build.cs", "PublicDependencies => [\"ShaderToolTable\", \"ShaderToolLoader\"];\n",
                 "shader-tool-binary-load"),
             // 이름이 비슷한 폴더는 형식 모듈이 아니다.
             ("Engine/Source/Developer/ShaderFormat/Private/Load.cpp", "#include <ShaderToolLoader/ShaderToolLoader.h>\n", "shader-tool-binary-load"),
@@ -93,11 +93,11 @@ internal static class ShaderToolPolicyTests
         Verify.That(new DefaultTarget().Type == TargetType.Game, "a target without a type must be a Game target (UE TargetRules.Type default)");
         NativeModuleInput[] modules =
         [
-            new() { Name = "Game", Kind = NativeModuleKind.Executable, Dependencies = ["Engine", "Renderer"] },
-            new() { Name = "Engine", Dependencies = ["Core"] },
+            new() { Name = "Game", Kind = NativeModuleKind.Executable, PublicDependencies = ["Engine", "Renderer"] },
+            new() { Name = "Engine", PublicDependencies = ["Core"] },
             new() { Name = "Core" },
-            new() { Name = "Renderer", Dependencies = ["Engine"] },
-            new() { Name = "Cooker", Dependencies = ["Engine"] },
+            new() { Name = "Renderer", PublicDependencies = ["Engine"] },
+            new() { Name = "Cooker", PublicDependencies = ["Engine"] },
             new() { Name = "D3D12Graphics", SystemLibraries = ["d3d12", "d3dcompiler"] },
             new() { Name = "Dxc", PrebuiltLibraries = ["lib/dxcompiler.lib"] },
             new() { Name = "OpenGLGraphics", SystemLibraries = ["opengl32"] }

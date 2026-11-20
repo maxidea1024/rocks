@@ -12,7 +12,7 @@ public sealed class SampleGameModule : ModuleRules
         Sources = context.Sources("Source"),
         PublicIncludeDirectories = [context.PathInRoot("Source")],
         // Launch: the common entry point (crash reporting, command line capture, exit code).
-        Dependencies = ["ObjectRuntime", "Launch"],
+        PublicDependencies = ["ObjectRuntime", "Launch"],
         Metadata = ["GameObject.h"],
         ModuleDirectory = "."
     };

@@ -127,7 +127,7 @@ internal static class BuildInfoTests
         {
             await builder.BuildAsync(game with
             {
-                Modules = [.. game.Modules, new() { Name = "Empty", Kind = NativeModuleKind.Executable, Dependencies = ["Engine"] }],
+                Modules = [.. game.Modules, new() { Name = "Empty", Kind = NativeModuleKind.Executable, PublicDependencies = ["Engine"] }],
                 Targets = ["Empty"]
             });
             throw new InvalidOperationException("an executable without sources was accepted");
@@ -1104,11 +1104,11 @@ internal static class BuildInfoTests
             new()
             {
                 Name = "Engine", Sources = [Path.Combine(fixture, "engine", "src", "engine.cpp")],
-                PublicIncludeDirectories = [Path.Combine(fixture, "engine", "include")], Dependencies = ["Core"]
+                PublicIncludeDirectories = [Path.Combine(fixture, "engine", "include")], PublicDependencies = ["Core"]
             },
             new()
             {
-                Name = "Game", Kind = NativeModuleKind.Executable, Dependencies = ["Engine"],
+                Name = "Game", Kind = NativeModuleKind.Executable, PublicDependencies = ["Engine"],
                 Sources = [Path.Combine(fixture, "game", "main.cpp"), Path.Combine(fixture, "game", "helper.cpp")],
                 PrivateIncludeDirectories = [Path.Combine(fixture, "game", "pct%dir")]
             }
