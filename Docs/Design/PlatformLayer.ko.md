@@ -192,6 +192,47 @@ UE 5.8(`Engine/Source/Runtime/Core/Private/Windows/WindowsPlatformProcess.cpp:23
 
 검증(2026-11-16): Windows x64 Debug·Asan에서 동적 라이브러리 시험 8건이 통과했다. 인자 음성 대조, 파일 없음·없는 디렉터리 아래·디렉터리·라이브러리가 아닌 파일·없는 시스템 이름, 심볼 조회·없는 심볼·표 되돌리기(처음 없는 색인)·lease 수·`Busy`·lease 이동·라이브러리 이동 대입, 8 스레드 × 64회 동시 조회의 lease 수, 같은 디렉터리 의존 해결(A의 import 칸 = B의 export 주소)과 의존 없음 `NotFound`·실패 뒤 남지 않음, 소유자 소멸 뒤 마지막 lease가 내림, 정확한 전체 길이 239·240·247·248·259·260·261·300·512 byte와 기준 경로 + 300 byte 경로(작업 디렉터리 길이와 무관하게 만든다), 음성 대조를 확인한다. 음성 대조는 자식 probe에서 의존 DLL B를 현재 디렉터리에만·PATH에만 두고 연다: `DynamicLibrary`는 `NotFound`이고 같은 자리에서 OS 기본 검색(`LoadLibraryExW` 플래그 0) 대조군은 연다(B가 실제로 찾을 수 있는 곳에 있는데 보지 않음). B를 A 옆에 두면 같은 probe가 연다. Android x86_64 에뮬레이터(API 35)에서는 OS 공급 라이브러리 시험 4건이 통과하고 시험 라이브러리가 필요한 4건은 SKIP이다. macOS는 이 기계에서 빌드하지 않았다(CI가 맡는다).
 
+## 크래시 수집과 프로세스 진입 (2026-11-19, 크래시 처리 LC1–LC7)
+
+설계와 결정은 [크래시 처리·실행 진입점](CrashHandlingAndLaunch.ko.md)에 있다. 이 절은 PlatformBase가 맡는 OS 경계만 적는다. 실행 파일은 이 API를 직접 부르지 않고 공통 실행 계층(`Launch`, Core 위 모듈)의 `ROCKS_IMPLEMENT_APPLICATION`을 거친다. 진입점(`main`·`wmain`·`WinMain`·`wWinMain`)을 직접 정의하는 것은 policy `process-entry-point`가 막는다.
+
+| 공개 헤더 | 맡는 일 |
+|---|---|
+| `Platform/CrashReporting.h` | 수집기 설치·해제(`InstallCrashReporting`·`RemoveCrashReporting`·`ValidateCrashReportingOptions`), capability 조회, 덤프 도우미 시작(`StartCrashHelper`)과 도우미 모드 분기, 크래시 폴더 갱신, 연관 파일 칸(`SetCrashAnnotation`), 실행 단계 표시(`SetRunPhase`), 보호 호출(`RunWithCrashGuard`), 스레드 준비(`PrepareThreadForCrashHandling`·`ReleaseThreadCrashHandling`), 종료 콜백 등록(`RegisterTerminationCallback`), unhandled filter 교환 확인(`CheckUnhandledCrashFilter`), 대화상자 억제(`SuppressSystemErrorDialogs`) |
+| `Platform/Fatal.h` | `Fatal`·`FatalAt`. 수집기가 있으면 공통 보고 경로로 가고, 없으면 stderr 뒤 바로 끝난다 |
+| `Platform/ProcessEntry.h` | 진입 인자의 UTF-8 변환(`ConvertEntryArgument`), Windows GUI 진입 인자(`GetWindowedEntryArguments`), 종료 요청 처리기(Ctrl-C·Ctrl-Break·SIGINT·SIGTERM, `InstallTerminationRequestHandler`) |
+
+구현 파일:
+- `Private/Common`: `CrashReporting.cpp`(소유권·종료 콜백·크래시 기록·연관 파일 칸·단계 표시), `CrashMetadata.cpp`(`CrashInfo.json` 서식), `CrashModule.cpp`(PE CodeView 읽기), `ProcessEntry.cpp`.
+- `Private/Win64`: `CrashReporting.cpp`(SEH 보호 프레임·unhandled filter·힙 손상 VEH·CRT hook·크래시 처리 스레드), `CrashHelper.cpp`(같은 실행 파일의 도우미 모드·교환 블록·`PssCaptureSnapshot`), `CrashFiles.cpp`(폴더·프로세스 안 덤프·fallback), `ProcessEntry.cpp`.
+- `Private/Posix`: `CrashReporting.cpp`(`sigaction`·`sigaltstack`·pipe로 깨우는 크래시 처리 스레드·이전 동작 복원), `ProcessEntry.cpp`.
+
+OS 경계:
+
+| 경계 | Windows | POSIX(macOS·Android) |
+|---|---|---|
+| 하드웨어 fault | 보호 프레임의 SEH, 최종 `SetUnhandledExceptionFilter`, 선택 기능 힙 손상 VEH | `SIGSEGV`·`SIGBUS`·`SIGILL`·`SIGFPE`·`SIGTRAP`(`SA_SIGINFO`·`SA_ONSTACK`) |
+| abort·CRT 치명 | `signal(SIGABRT)`, `_set_invalid_parameter_handler`, `_set_purecall_handler`(돌아오지 않음) | `SIGABRT` |
+| stack overflow | 스레드마다 `SetThreadStackGuarantee` | 스레드마다 `sigaltstack` |
+| 크래시 처리 스레드 깨우기 | 커널 이벤트 | 미리 만든 pipe에 1 byte(macOS는 이름 없는 세마포어가 없다) |
+| 덤프 | 같은 실행 파일의 도우미 프로세스(`PssCaptureSnapshot` + `MiniDumpWriteDump`), 실패하면 프로세스 안 덤프 | 없음. 처리 뒤 이전 동작으로 넘겨 OS 수집기(debuggerd tombstone·ReportCrash)가 받는다 |
+| 끝내기 | `TerminateProcess`(stack을 풀지 않는다) | 이전 동작을 복원하고 하드웨어 fault는 반환해 다시 fault, 보낸 신호는 `pthread_kill`로 다시 냄, Fatal은 `abort` |
+| 종료 요청 | `SetConsoleCtrlHandler`(Ctrl-C·Ctrl-Break만. 창 닫기·로그오프는 OS 기본 동작) | `SIGINT`·`SIGTERM`(설치 전 무시면 걸지 않음) |
+
+`QueryCrashCapabilities()`는 실제 준비 상태를 돌려준다. 빈 구현이 성공을 돌려주지 않는다(위 "플랫폼 선택과 실패 정책").
+
+| capability | Windows | Windows Asan | POSIX |
+|---|---|---|---|
+| `OsFaultHandling`·`TerminationCallbacks`·`Metadata` | 예 | 예 | 예 |
+| `ThreadGuard`(`platform::Thread` SEH 보호) | 예 | 예 | 아니오(신호 처리기가 프로세스 전역) |
+| `Minidump` | 도우미가 떴거나 프로세스 안 덤프를 쓸 수 있을 때 | 아니오 | 아니오 |
+| `OutOfProcessDump`·`UnreportedExitRecord` | 도우미가 떴을 때 | 아니오 | 아니오 |
+| `SystemCrashReport` | 아니오(WER로 넘기지 않는다) | 아니오 | 예 |
+
+크래시 경로는 이 문서의 동기화 primitive(mutex·condition variable·`ManualResetEvent`)를 쓰지 않는다. 크래시 때 사용자 공간 대기열 상태를 믿지 않기 위해 OS 이벤트·pipe·원자 변수만 쓴다. `platform::Thread`는 시작 때 `PrepareThreadForCrashHandling`(stack 보장·대체 stack)을 부르고 끝날 때 돌려준다.
+
+검증(2026-11-19, LC7까지): Windows x64 Debug·Release(ThinLTO)·Asan에서 C++ 시험과 `Rocks.ToolTests native`의 `Native.Crash.*`·`Native.Launch.*`(덤프를 cdb로 열어 실패 프레임·private PDB 확인 포함)이 통과했다. Android x86_64 에뮬레이터(API 35)에서 C++ 시험과 크래시·Launch probe를 adb로 직접 돌렸다. macOS는 이 기계에서 빌드하지 않았다(CI가 맡는다). 미확인 목록은 그 설계 24.2절에 있다.
+
 ## 모바일 플랫폼 (2026-11-11: desktop + mobile은 우선 Android)
 
 사용자 결정으로 mobile은 Android에 먼저 집중하고 iOS는 보류한다. PlatformBase는 다음 구조다.
@@ -272,6 +313,7 @@ dotnet msbuild Rocks.proj -t:Test -p:RocksPlatform=android -p:AndroidAbi=x86_64
 | P1 | 공유 메모리: `GenericPlatform/GenericPlatformMemory.h`의 named shared-memory map/unmap | Rocks에 named shared-memory 공개 API는 확인하지 못하였다. 범위와 읽기/쓰기 권한, 소유권과 플랫폼별 이름 규칙을 설계한다. | 별도 프로세스 간 읽기·쓰기, 중복 생성·열기, 접근 거부, 부분 실패·중도 종료·해제, 이름 충돌과 크기 경계를 검증한다. |
 | P1 | 프로세스와 pipe: `GenericPlatform/GenericPlatformProcess.h`의 생성·대기·종료·반환값·pipe | **부분 구현(2026-11-13)**: `Platform/Process.h`의 생성·대기·종료 코드·자손까지 강제 종료·시간 제한 pipe·동시 수집 `RunProcess`·PID 생존 확인(위 "자식 프로세스와 pipe" 절). 환경 변수 지정·detach·(PID, 시작 시각) 정체·권한 상승 여부(Rockpile R0)·다른 스레드 취소는 후속이며 Android는 Unsupported다. | 실행 실패, stdin/stdout/stderr, 제한된 출력 수집, timeout·취소, 자식 및 자손 회수, 중복 종료·정리 실패와 플랫폼별 동작을 검증한다. Windows Debug·Asan과 Android 에뮬레이터 21건 통과, macOS는 CI만(로컬 미빌드). |
 | P1 | 동적 모듈: `GenericPlatform/GenericPlatformProcess.h`의 라이브러리 load/export/free | **구현(2026-11-16, 위 "동적 라이브러리" 절)**: `Platform/DynamicLibrary.h`의 절대 경로 열기·OS 공급 라이브러리 이름 열기·심볼 표 조회·lease 수명(참조 중 `Close`는 `Busy`). Rocks `ModuleLease`는 이미 확보된 모듈 수명 관리용이며 이 로더와 별개다. macOS·Android 시험 라이브러리 생성과 실행 검증은 후속이다. | 누락·잘못된 심볼, ABI, 참조 중 unload 거부, 동시 조회와 실패 rollback, Windows/macOS 실행을 검증한다. |
+| P1 | 크래시 처리: `GenericPlatform/GenericPlatformCrashContext.h`, `Windows/WindowsPlatformCrashContext.cpp`의 예외 filter·크래시 보고 스레드·외부 크래시 보고 프로세스 | **구현(2026-11-19, 위 "크래시 수집과 프로세스 진입" 절)**: 수집기·같은 실행 파일 덤프 도우미·`CrashInfo.json`·종료 콜백·종료 요청. UE CrashReportClient 같은 업로드·사용자 대화 프로그램은 범위 밖이다. macOS·Android 덤프(Mach 예외 포트·ptrace 도우미)와 Windows arm64 실행은 후속이다. | 주·`platform::Thread`·외부 스레드 접근 위반, stack overflow, Fatal·assert·abort·CRT 치명, 동시 실패, 도우미 실패·무응답 fallback, 디버거·ASan 정책을 자식 프로세스로 검증한다. Windows Debug·Release·Asan 통과, Android 에뮬레이터 직접 실행, macOS 미빌드. |
 | P1 | 비동기·매핑 파일: `GenericPlatform/GenericPlatformFile.h`의 async read, mapped file 및 결과 오류 | 비동기 파일 핸들·매핑 파일 backend는 아직 없다. 동기 파일 계약과 task/lifetime 기반 이후에 도입한다. | 취소와 완료의 단일 종결, 사용 중 해제·늦은 completion, EOF·잘못된 범위·매핑 해제, fault injection과 실제 OS 실행을 검증한다. |
 | P2 | 파일 journal 및 플랫폼 부가 기능: `GenericPlatform/GenericPlatformFile.h`의 journal 조회·반복, 파일 특성 | journal, 실제 디스크 이름·링크 및 플랫폼별 부가 메타데이터는 기능별 후속이다. unsupported는 성공이나 빈 결과로 위장하지 않는다. | 기능 가용성, 권한·미지원, 중단/재개와 변경 추적의 중복·누락, 플랫폼별 오류와 resource cleanup을 검증한다. |
 

@@ -112,7 +112,7 @@ Core 위 엔진 계층의 렌더 기반 첫 묶음([렌더 기반](../Design/Ren
 
 SystemAllocator와 Arena·Stack·Pool·Binned·Budget·Debug·External allocator는 사용 범위별 live allocation·byte 계수 또는 통계를 제공한다. 상세 사용법과 확인되지 않은 외부 공급자 지원은 [할당기 설계와 사용 규약](Allocators.ko.md)에 정리한다. ObjectRegistry의 Stats는 상태와 보유 계수를, CaptureDiagnostics는 호출자가 준 버퍼에 객체별 스냅샷을 제공한다. 캡처는 할당하지 않으며 용량 부족 시 부분 기록하지 않는다. LastGcReport는 마지막 성공 GC의 검사·표식·retire·회수 개수와 ns 시간을 보존한다.
 
-로깅은 [로깅 설계](../Design/LoggingSystem.ko.md) LG1–LG10을 구현했다(사용법은 [로깅 사용 안내](Logging.ko.md)). 카테고리·컴파일 타임 하한·호출 위치·메시지 템플릿을 갖춘 `Log::*`, Async·Sync·Manual 모드의 `LogSystem`(무할당 lock-free 큐·블록 풀·출력 스레드·장애 격리·`Log::Fatal`), 레이아웃·stderr·JSON lines·파일 sink(회전·보관)와 선택적 봉인(`crypto::LogFileSealer`, Commandlet `log keygen`·`log decode`)이 있다. Engine·World·그래픽 backend가 기록하고, Sandbox(자체 검사 Sync, `--engine` Async)·Commandlet·셰이더 도구 스파이크가 LogSystem을 설치한다. 설정 파일의 `log.*` 콘솔 설정으로 모드·레벨·파일 기록을 고른다(`LogHost`). 남은 것: crash 수집, 전문 viewer. LogBuffer는 단일 스레드 초기 진단으로 남는다.
+로깅은 [로깅 설계](../Design/LoggingSystem.ko.md) LG1–LG10을 구현했다(사용법은 [로깅 사용 안내](Logging.ko.md)). 카테고리·컴파일 타임 하한·호출 위치·메시지 템플릿을 갖춘 `Log::*`, Async·Sync·Manual 모드의 `LogSystem`(무할당 lock-free 큐·블록 풀·출력 스레드·장애 격리·`Log::Fatal`), 레이아웃·stderr·JSON lines·파일 sink(회전·보관)와 선택적 봉인(`crypto::LogFileSealer`, Commandlet `log keygen`·`log decode`)이 있다. Engine·World·그래픽 backend가 기록하고, Sandbox(자체 검사 Sync, `--engine` Async)·Commandlet·셰이더 도구 스파이크가 LogSystem을 설치한다. 설정 파일의 `log.*` 콘솔 설정으로 모드·레벨·파일 기록을 고른다(`LogHost`). 크래시 때의 마지막 로그는 크래시 수집기의 종료 콜백이 비운다(아래 2026-11-19 절). 남은 것: 전문 viewer. LogBuffer는 단일 스레드 초기 진단으로 남는다.
 
 Commandlet은 CPU-only 독립 실행 진입점과 명령 등록·목록·도움말을 제공한다. 현재 core-check 외의 에셋·cook·패키징·엔진 부트 명령은 구현되지 않았다. 상세 실행법과 인수·수명 계약은 Programs/Commandlet/README.ko.md를 따른다.
 
@@ -385,3 +385,12 @@ libsodium 1.0.22-stable 기반 범용 암호 모듈 `Crypto`를 추가했다(설
 - World·리플렉션(C1·C2·C5): `SceneComponent` 위치 cm·월드 행렬 = 상대 × 부모, Core 값 미러(`Rotator` 필드 순서·도, `Transform` 멤버 순서·double) 주석과 시험. 위치·회전 저장 데이터가 없어 migration은 두지 않았다.
 - 문서(C6·C8): 전체 구현 계획 개정 1.12(2.2·2.3·10.4·16·33.17절 등), Core 상세 명세, 리플렉션·World·공간 인덱스(cm)·Sparks(SD18 번복) 설계를 고쳤고, 물리 기준을 PhysX 5에서 Jolt로 되돌리며 [물리 어댑터 경계](../Design/PhysicsJoltAdapter.ko.md)를 새로 썼다(설계만, Jolt 미도입).
 - 남은 것: 렌더 경계 코드(셰이더 행렬 전달·앞면·Sandbox 기대값, 렌더 세션 소관), 카메라·입력 이동·물리 구현(미구현, 계약만), Jolt 규약과 UE 물리 API 단위 검증 항목(물리 어댑터 경계 8절), 밀도·각충격량 단위 변환 함수.
+
+## 2026-11-19 공통 실행 진입점과 크래시 수집(LC1–LC7)
+
+[크래시 처리·실행 진입점 설계](../Design/CrashHandlingAndLaunch.ko.md) LC1–LC7을 구현했다(사용법: [공통 실행 진입점과 크래시 수집](CrashHandlingAndLaunch.ko.md)).
+
+- PlatformBase 크래시 수집기: Windows SEH 보호 프레임·unhandled filter·CRT 치명 hook·선택 기능 힙 손상 VEH, 같은 실행 파일의 덤프 도우미(`PssCaptureSnapshot` 덤프, 실패하면 프로세스 안 덤프), `CrashInfo.json`, 종료 콜백(로그 flush), 연관 파일 칸, 실행 단계 표시. POSIX는 신호 처리기·`sigaltstack`·`CrashInfo.json`이고 덤프는 OS 수집기에 넘긴다. 로깅 LG18의 처리기를 이 수집기로 옮겼다.
+- Core `ProcessCommandLine`과 `Launch` 모듈(`ROCKS_IMPLEMENT_APPLICATION`): 모든 native 실행 파일(Sandbox·RocksCommandlet·시험 실행기·벤치·ShaderToolSpike·게임 템플릿)이 같은 진입점·크래시 수집·도구 로그·종료 코드 경로를 탄다. 진입점 직접 정의는 policy `process-entry-point`가 막는다.
+- 엔진 연계: Engine 단계 표시, Sandbox 종료 요청 다리(Ctrl-C → 다음 프레임 경계의 `RequestExit`), `RequestExit` 소유 스레드 검사, unhandled filter 교체 경고.
+- 검증(LC7 끝 체인): Windows Foundation·EngineTests Debug, Release ThinLTO 크래시 필터, Rocks.Build.Tests·IntegrationTests, format·policy, Commandlet·Sandbox self-test 통과. Asan 크래시 필터는 LC5–LC6에서 통과. Android x86_64 에뮬레이터에서 C++ 시험과 크래시·Launch probe를 직접 실행했다. macOS·POSIX Asan·Android 실기기·Windows arm64는 실행하지 않았다(설계 24.2절).

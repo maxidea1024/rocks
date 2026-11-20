@@ -1,5 +1,6 @@
 #pragma once
 
+#include <AssetRuntime/CookedManifest.h>
 #include <AssetRuntime/PackageReader.h>
 #include <Base/Endian.h>
 #include <Core/Text/StringView.h>
@@ -96,6 +97,13 @@ inline bool IsMalformedEmptyBulkRef(uint64 rawBytes, const Sha256Digest& sha256)
 // InvalidArgument, 할당 실패는 OutOfMemory다. writer 옵션 검증과 reader가 같이 쓴다(정의는
 // PackageReader.cpp).
 Result<void> ValidateTagsRecord(Allocator& scratch, Span<const uint8> bytes) noexcept;
+
+// WriteCookedManifest의 본문이다(AS 10.1절 7). maxFileBytes는 출력 파일(CRC 칸 포함) byte 상한이고
+// 넘으면 CapacityExceeded(진단 None, out 그대로)다. 공개 함수는 CookedManifestMaxFileBytes를 넘긴다
+// — 시험이 1 GiB 모델 없이 상한 경계를 보도록 상한을 인자로 받는다.
+Result<void> WriteCookedManifestWithLimit(Allocator& allocator, const CookedManifest& manifest,
+                                          uint64 maxFileBytes, Array<uint8>& out,
+                                          AssetDiagnostic* failure) noexcept;
 
 // (assetId, kind) 정렬 비교다.
 inline bool DependencyLess(const PackageDependencyEntry& left,

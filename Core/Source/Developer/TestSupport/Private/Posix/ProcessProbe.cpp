@@ -20,8 +20,8 @@ bool ProcessSpawnExpected() noexcept {
     return uname(&name) == 0 && strcmp(name.sysname, "Darwin") == 0;
 }
 
-usize ReadUtf8Arguments(int argc, char** argv, char* buffer, usize capacity, const char** arguments,
-                        usize maxArguments) noexcept {
+usize ReadUtf8Arguments(int argc, const char* const* argv, char* buffer, usize capacity,
+                        const char** arguments, usize maxArguments) noexcept {
     if (argc < 0 || static_cast<usize>(argc) > maxArguments) {
         return 0;
     }

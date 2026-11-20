@@ -169,6 +169,7 @@ void LogAppendLine(FixedStringBuilder& out, const LogCaptureTemplate& text, cons
         WriteCaptureEmergency(record, LogLevel::Fatal, category.Name(), text.text);
         LogReadScope scope;
         if (scope.System() != nullptr) {
+            MarkFatalFlushAttempted();
             DeliverFatalToLogSystem(*scope.System(), record);
         }
     } else {
@@ -178,9 +179,9 @@ void LogAppendLine(FixedStringBuilder& out, const LogCaptureTemplate& text, cons
     platform::Fatal("Rocks fatal log record; aborting");
 }
 
-[[noreturn]] void ReportAssertFailure(const char* message) noexcept {
+[[noreturn]] void ReportAssertFailure(const char* message, const char* file, uint32 line) noexcept {
     if (fatalInProgress) {
-        platform::Fatal(message);
+        platform::FatalAt(message, file, line);
     }
 
     fatalInProgress = true;
@@ -194,11 +195,12 @@ void LogAppendLine(FixedStringBuilder& out, const LogCaptureTemplate& text, cons
     if (captured) {
         LogReadScope scope;
         if (scope.System() != nullptr) {
+            MarkFatalFlushAttempted();
             DeliverFatalToLogSystem(*scope.System(), Span<const uint8>(capture, captured.Value()));
         }
     }
 
-    platform::Fatal("Rocks invariant failed; aborting");
+    platform::FatalAt("Rocks invariant failed; aborting", file, line);
 }
 
 } // namespace rocks::detail
@@ -211,35 +213,5 @@ void Log::SetFrame(uint64 frame) noexcept {
         system->SetFrame(frame);
     }
 }
-
-namespace detail {
-
-namespace {
-
-// 로그 hook을 걸기 전의 hook이다(flush 뒤 연쇄한다).
-constinit platform::TerminationHook chainedTerminationHook = nullptr;
-
-} // namespace
-
-void SetChainedTerminationHook(platform::TerminationHook hook) noexcept {
-    platform::AtomicStore<platform::MemoryOrder::Release>(&chainedTerminationHook, hook);
-}
-
-void LogTerminationHook(const char* message, usize bytes) noexcept {
-    // Log::Fatal·assert가 이 스레드에서 이미 flush했으면(그 뒤 platform::Fatal이 hook을 부른다)
-    // 다시 하지 않는다.
-    if (!fatalInProgress) {
-        fatalInProgress = true;
-        FlushInstalledLogForTermination();
-        fatalInProgress = false;
-    }
-
-    if (const platform::TerminationHook chained =
-            platform::AtomicLoad<platform::MemoryOrder::Acquire>(&chainedTerminationHook)) {
-        chained(message, bytes);
-    }
-}
-
-} // namespace detail
 
 } // namespace rocks

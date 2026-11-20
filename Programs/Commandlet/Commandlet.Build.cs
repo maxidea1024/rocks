@@ -7,8 +7,8 @@ public sealed class CommandletHost : ModuleRules
     {
         Name = "RocksCommandlet",
         Kind = NativeModuleKind.Executable,
-        // Commandlet is a desktop tool. Android has no host backend, so only the common sources are listed (it is not built unless
-        // a target includes it).
+        // Commandlet is a desktop tool. Android has no standard output backend, so only the common sources are listed (it is not built
+        // unless a target includes it). The platform directory holds the standard output channel (StandardOutput.cpp).
         Sources = context.Platform == NativePlatform.Android
             ? context.Sources("Programs/Commandlet/Private/Common")
             : context.Sources("Programs/Commandlet/Private/Common", $"Programs/Commandlet/Private/{context.PlatformDirectory}"),
@@ -17,6 +17,7 @@ public sealed class CommandletHost : ModuleRules
         // Crypto: the log keygen/decode/seal commands (encrypted log files).
         // Compression: log decode/view read compressed log files (independent zstd frames per batch).
         // HostConfig: the config-dump command boots the same config context as the engine hosts (engine files, log.*, trace.*).
-        Dependencies = ["Core", "TraceAnalysis", "Crypto", "Compression", "HostConfig"]
+        // Launch: the common entry point (command line capture, crash reporting and the tool log, Docs/Design/CrashHandlingAndLaunch.ko.md).
+        Dependencies = ["Core", "Launch", "TraceAnalysis", "Crypto", "Compression", "HostConfig"]
     };
 }

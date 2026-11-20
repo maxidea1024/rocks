@@ -5,8 +5,10 @@
 #include <Core/Diagnostics/LogSystem.h>
 #include <Core/Diagnostics/RuntimeLogSink.h>
 #include <Core/Memory/SystemAllocator.h>
+#include <Core/Text/StringBuilder.h>
 #include <Core/Text/StringView.h>
-#include <Platform/CrashHandler.h>
+#include <Launch/Application.h>
+#include <Platform/CrashReporting.h>
 #include <Platform/Fatal.h>
 #include <Platform/Sync.h>
 
@@ -134,11 +136,36 @@ public:
 
 // 비정상 종료 직전의 Async 기록이 파일에 남는지 별도 child에서 확인한다(설계 14.1.8, L24·L25).
 // directory에 Probe-*.log를 쓴다. 정상이면 반환하지 않는다.
-// - mode 0: platform::Fatal을 바로 부른다(종료 hook)
-// - mode 1: 크래시 처리기를 설치하고 접근 위반
-// - mode 2: 크래시 처리기를 설치하고 stack overflow
+// 모든 mode가 크래시 수집기를 설치한다(종료 콜백이 크래시 처리 스레드에서 flush한다).
+// - mode 0: platform::Fatal을 바로 부른다
+// - mode 1: 접근 위반
+// - mode 2: stack overflow
 // - mode 3: 멈춘 sink(Write가 돌아오지 않음) 안에서 platform::Fatal. flush는 제한 시간 뒤 포기하고
 //   프로세스가 끝난다(파일 기록은 없고 stderr에 Fatal 문구가 남는다)
+namespace {
+
+// 로그 크래시 probe의 크래시 폴더 뿌리다(<directory>/Crashes).
+char logCrashDirectory[platform::CrashReportingOptions::MaxOutputDirectoryBytes + 1];
+
+} // namespace
+
+// 로그 크래시 probe의 크래시 수집 설정이다(시험 실행기 configure가 부른다). 크래시 폴더는 시험이
+// 지우는 directory 아래에 둔다(작업 폴더의 Saved/Crashes에 남기지 않는다). 시험이 끝나면
+// directory를 지우고, 도우미는 부모가 끝난 뒤에도 덤프를 쓰므로 프로세스 안에서 쓴다(로그 보존
+// 시험이다. 도우미 경로는 CrashProcessProbe가 본다). 폴더가 없거나 경로가 길면 끈다(본문이 준비
+// 실패로 끝낸다).
+void ConfigureLogCrashProbe(const char* directory, launch::ApplicationSettings& settings) noexcept {
+    FixedStringBuilder path{Span<char>(logCrashDirectory)};
+    if (directory == nullptr || !path.TryAppendFormat("{}/Crashes", directory) ||
+        path.Truncated()) {
+        settings.crashReporting = launch::CrashReportingMode::Off;
+        return;
+    }
+
+    settings.crashReporting = launch::CrashReportingMode::InProcess;
+    settings.crashDirectory = logCrashDirectory;
+}
+
 int RunLogCrashProbe(uint32 mode, const char* directory) noexcept {
     // 준비 실패 종료 코드다. 크래시 종료 코드(abort 3, 예외 코드)와 겹치지 않게 따로 둔다.
     constexpr int MissingDirectory = 20;
@@ -150,7 +177,8 @@ int RunLogCrashProbe(uint32 mode, const char* directory) noexcept {
         return MissingDirectory;
     }
 
-    if (mode != 0 && !platform::InstallCrashHandler()) {
+    // 수집기는 시험 실행기의 Launch 설정(ConfigureLogCrashProbe)이 설치했다.
+    if (!platform::IsCrashReportingInstalled()) {
         return HandlerFailed;
     }
 
