@@ -292,6 +292,25 @@ Result<CommandContext*> D3D12Device::BeginPass(const PassDesc& pass) noexcept {
         }
     }
 
+    // 획득(acquire) attachment에는 이전 내용이 없으므로 Load로 열 수 없다(GX12).
+    for (uint32 index = 0; index < pass.colorCount; ++index) {
+        if (pass.colors[index].acquire && pass.colors[index].load == LoadAction::Load) {
+            return FailCode<CommandContext*>(
+                ErrorCode::InvalidArgument, "acquired color attachment cannot use the Load action");
+        }
+    }
+
+    if (hasDepth && pass.depth.acquire) {
+        const bool stencil =
+            GetPixelFormatInfo(textures_.Find(pass.depth.texture.slot)->format).stencilBits != 0;
+        if (pass.depth.readOnly || pass.depth.depthLoad == LoadAction::Load ||
+            (stencil && pass.depth.stencilLoad == LoadAction::Load)) {
+            return FailCode<CommandContext*>(
+                ErrorCode::InvalidArgument,
+                "acquired depth attachment cannot be read-only or use the Load action");
+        }
+    }
+
     // resolve 대상: MSAA attachment의 1표본 RenderTarget, 같은 형식·크기, view 아님, 겹침 없음.
     for (uint32 index = 0; index < pass.colorCount; ++index) {
         const TextureHandle resolve = pass.colors[index].resolveTarget;

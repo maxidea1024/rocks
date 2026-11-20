@@ -330,7 +330,7 @@ void VulkanDevice::AssignPendingUploads(uint64 value) noexcept {
 Result<void> VulkanDevice::ReserveRetireCapacity(usize extra) noexcept {
     const usize live = buffers_.Size() + bufferViews_.Size() + orphanBuffers_.Size() +
                        textures_.Size() + pipelines_.Size() + readbacks_.Size() +
-                       swapChains_.Size() + framebuffers_.Size();
+                       swapChains_.Size() + framebuffers_.Size() + heaps_.Size();
     return retired_.TryEnsureCapacity(retired_.Size() + live + extra);
 }
 
@@ -397,6 +397,15 @@ void VulkanDevice::DestroyRetired(Retired& entry) noexcept {
     }
 
     FreeMemoryLocked(entry.memory);
+    // placed 자원은 메모리를 heap이 가진다. 자원을 파괴했으므로 heap의 placed 수를 줄인다.
+    if (!entry.heap.IsNull()) {
+        ReleasePlacement(entry.heap);
+    }
+
+    if (entry.heapMemory != VK_NULL_HANDLE) {
+        functions_.vkFreeMemory(device_, entry.heapMemory, nullptr);
+    }
+
     for (uint32 index = 0; index < entry.semaphoreCount; ++index) {
         functions_.vkDestroySemaphore(device_, entry.semaphores[index], nullptr);
     }

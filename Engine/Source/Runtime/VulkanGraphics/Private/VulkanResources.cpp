@@ -208,30 +208,9 @@ Result<VkSampler> VulkanDevice::SamplerFor(const SamplerDesc& desc) noexcept {
     return Result<VkSampler>::Success(sampler);
 }
 
-// 다른 스레드에서도 부를 수 있다(concurrentResourceCreation). 초기 데이터는 업로드 ring에 쓰고
-// 복사를 기록한다. 소유 스레드의 다음 제출이 실행한다.
-Result<BufferHandle> VulkanDevice::CreateBuffer(const BufferDesc& desc,
-                                                Span<const uint8> initial) noexcept {
-    auto valid = ValidateBufferDesc(desc);
-    if (!valid || initial.Size() != desc.size) {
-        return Result<BufferHandle>::Failure(ErrorCode::InvalidArgument);
-    }
-
-    platform::LockGuard lock(gate_);
-    if (desc.size > caps_.limits.bufferBytes) {
-        auto failed = FailCode("CreateBuffer", ErrorCode::Unsupported,
-                               "buffer size exceeds the device limit (bufferBytes)");
-        return Result<BufferHandle>::Failure(failed.Error());
-    }
-
-    auto reserved = ReserveRetireCapacity(1);
-    if (!reserved) {
-        return Result<BufferHandle>::Failure(reserved.Error());
-    }
-
-    // 용도를 Vulkan buffer usage로 옮긴다. typed view는 texel buffer, 구조화·raw view는 storage
-    // buffer usage가 필요하다(raw 버퍼는 typed view도 받는다). 복사 원본은 ReadBuffer용이다.
-    const BufferUsage use = desc.usage;
+// 용도를 Vulkan buffer usage로 옮긴다. typed view는 texel buffer, 구조화·raw view는 storage
+// buffer usage가 필요하다(raw 버퍼는 typed view도 받는다). 복사 원본은 ReadBuffer용이다.
+VkBufferUsageFlags VulkanDevice::BufferUsageFor(BufferUsage use) noexcept {
     const bool storageLayout = HasAnyBufferUsage(use, BufferUsage::Structured | BufferUsage::Raw);
     const bool typedViews = !HasAnyBufferUsage(use, BufferUsage::Structured);
     VkBufferUsageFlags usage =
@@ -250,22 +229,84 @@ Result<BufferHandle> VulkanDevice::CreateBuffer(const BufferDesc& desc,
                  (typedViews ? VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT : 0u);
     }
 
+    return usage;
+}
+
+// 다른 스레드에서도 부를 수 있다(concurrentResourceCreation). 초기 데이터는 업로드 ring에 쓰고
+// 복사를 기록한다. 소유 스레드의 다음 제출이 실행한다.
+Result<BufferHandle> VulkanDevice::CreateBuffer(const BufferDesc& desc,
+                                                Span<const uint8> initial) noexcept {
+    return CreateBufferIn(desc, initial, nullptr);
+}
+
+Result<BufferHandle> VulkanDevice::CreateBufferIn(const BufferDesc& desc, Span<const uint8> initial,
+                                                  const Placement* placement) noexcept {
+    // placed 버퍼는 초기 데이터가 없다(내용은 획득 뒤 쓴다).
+    auto valid = ValidateBufferDesc(desc);
+    if (!valid || initial.Size() != (placement != nullptr ? 0u : desc.size)) {
+        return Result<BufferHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    platform::LockGuard lock(gate_);
+    if (desc.size > caps_.limits.bufferBytes) {
+        auto failed = FailCode("CreateBuffer", ErrorCode::Unsupported,
+                               "buffer size exceeds the device limit (bufferBytes)");
+        return Result<BufferHandle>::Failure(failed.Error());
+    }
+
+    auto reserved = ReserveRetireCapacity(1);
+    if (!reserved) {
+        return Result<BufferHandle>::Failure(reserved.Error());
+    }
+
+    const VkBufferUsageFlags usage = BufferUsageFor(desc.usage);
     BufferRecord record;
     record.size = desc.size;
     record.desc = desc;
-    auto created =
-        CreateBufferWithMemory(desc.size, usage, MemoryUsage::Device, record.buffer, record.memory);
-    if (!created) {
-        return Result<BufferHandle>::Failure(created.Error());
+    if (placement != nullptr) {
+        VkBufferCreateInfo info = {};
+        info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        info.size = desc.size;
+        info.usage = usage;
+        info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        const VkResult result = functions_.vkCreateBuffer(device_, &info, nullptr, &record.buffer);
+        if (result != VK_SUCCESS) {
+            return FailWith<BufferHandle>("vkCreateBuffer", result);
+        }
+
+        auto bound =
+            BindPlaced(*placement, TransientHeapKind::Buffers, VK_NULL_HANDLE, record.buffer);
+        if (!bound) {
+            functions_.vkDestroyBuffer(device_, record.buffer, nullptr);
+            return Result<BufferHandle>::Failure(bound.Error());
+        }
+
+        record.heap = placement->heap;
+    } else {
+        auto created = CreateBufferWithMemory(desc.size, usage, MemoryUsage::Device, record.buffer,
+                                              record.memory);
+        if (!created) {
+            return Result<BufferHandle>::Failure(created.Error());
+        }
     }
 
     const VkBuffer buffer = record.buffer;
     const MemoryAllocation memory = record.memory;
+    const SlotHandle heap = record.heap;
     auto added = buffers_.TryAdd(Move(record));
     if (!added) {
         functions_.vkDestroyBuffer(device_, buffer, nullptr);
         FreeMemoryLocked(memory);
+        if (!heap.IsNull()) {
+            ReleasePlacement(heap);
+        }
+
         return Result<BufferHandle>::Failure(added.Error());
+    }
+
+    // placed 버퍼는 업로드하지 않는다(heap 구간을 다른 자원이 쓰는 중일 수 있다).
+    if (placement != nullptr) {
+        return Result<BufferHandle>::Success(BufferHandle{added.Value()});
     }
 
     auto copied = RecordBufferUpload(buffer, 0, initial);
@@ -484,29 +525,28 @@ PixelFormatCaps VulkanDevice::GetPixelFormatCaps(PixelFormat format) const noexc
     return formatCaps_[number];
 }
 
-// 다른 스레드에서도 부를 수 있다(concurrentResourceCreation). 초기 픽셀은 업로드 기록으로 간다.
-Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
-                                                  Span<const uint8> pixels) noexcept {
-    const TextureFormatInfo format = TextureFormat(desc.format);
+VulkanDevice::TextureDescCheck VulkanDevice::CheckTextureDesc(const TextureDesc& desc,
+                                                              usize pixelBytes) const noexcept {
+    TextureDescCheck check;
     // 형식·용도·차원 지원은 장치 능력으로 판정한다(PixelFormat.ko.md 8.3절). 대응하지 않으면 다른
     // 형식으로 바꾸지 않고 Unsupported다. 다른 인자 검사보다 먼저 본다.
     if (IsValidPixelFormat(desc.format) && IsValidTextureDimension(desc.dimension) &&
         !HasPixelFormatCaps(GetPixelFormatCaps(desc.format), RequiredPixelFormatCaps(desc))) {
-        platform::LockGuard lock(gate_);
-        return UnsupportedFormat<TextureHandle>(desc.format);
+        check.code = ErrorCode::Unsupported;
+        check.unsupportedFormat = true;
+        return check;
     }
 
     auto valid = ValidateTextureDesc(desc);
     if (!valid) {
-        return Result<TextureHandle>::Failure(valid.Error());
+        check.code = valid.Error();
+        return check;
     }
 
     if (!CheckTextureLimits(caps_, desc)) {
-        platform::LockGuard lock(gate_);
-        return Result<TextureHandle>::Failure(
-            FailCode("CreateTexture", ErrorCode::Unsupported,
-                     "texture size, layer count or dimension exceeds the Vulkan device limits")
-                .Error());
+        check.code = ErrorCode::Unsupported;
+        check.detail = "texture size, layer count or dimension exceeds the Vulkan device limits";
+        return check;
     }
 
     const bool renderTarget = HasTextureUsage(desc.usage, TextureUsage::RenderTarget);
@@ -524,20 +564,79 @@ Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
         !pixelInfo.topLevelBlockAligned ||
         (desc.width % pixelInfo.blockWidth == 0 && desc.height % pixelInfo.blockHeight == 0);
     if (desc.width > MaxTextureExtent || desc.height > MaxTextureExtent || size == 0 || !aligned ||
-        desc.mipLevels > MaxMipLevels ||
-        (attachment ? pixels.Size() != 0 : pixels.Size() != size) || (depthTarget && !depth)) {
-        return Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
+        desc.mipLevels > MaxMipLevels || (attachment ? pixelBytes != 0 : pixelBytes != size) ||
+        (depthTarget && !depth)) {
+        check.code = ErrorCode::InvalidArgument;
+        return check;
     }
 
     if (desc.sampleCount > 1 &&
         (GetPixelFormatSampleCounts(desc.format) & SampleCountBit(desc.sampleCount)) == 0) {
-        platform::LockGuard lock(gate_);
-        return Result<TextureHandle>::Failure(
-            FailCode("CreateTexture", ErrorCode::Unsupported,
-                     "MSAA sample count is not supported for this format by the Vulkan device")
-                .Error());
+        check.code = ErrorCode::Unsupported;
+        check.detail = "MSAA sample count is not supported for this format by the Vulkan device";
+        return check;
     }
 
+    return check;
+}
+
+VkImageCreateInfo VulkanDevice::ImageInfoFor(const TextureDesc& desc) const noexcept {
+    const bool renderTarget = HasTextureUsage(desc.usage, TextureUsage::RenderTarget);
+    const bool storage = HasTextureUsage(desc.usage, TextureUsage::Storage);
+    const bool volume = desc.dimension == TextureDimension::Texture3D;
+    VkImageCreateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    info.imageType = volume ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
+    info.format = TextureFormat(desc.format).format;
+    info.extent = {desc.width, desc.height, volume ? desc.depth : 1u};
+    info.mipLevels = desc.mipLevels;
+    // cube·배열은 layer 배열이다(cube 면은 UE·D3D 순서대로 layer 0–5, Vulkan cube 면 순서와
+    // 같다).
+    info.arrayLayers = TextureSliceCount(desc);
+    // VkSampleCountFlagBits 값은 표본 수와 같다(1·2·4·8·16·32).
+    info.samples = static_cast<VkSampleCountFlagBits>(desc.sampleCount);
+    info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    info.usage = ImageUsageFor(desc.format, renderTarget, storage);
+    // 3D 렌더 타깃은 깊이 면을 2D attachment view로 붙인다(2D_ARRAY_COMPATIBLE, Vulkan 1.1
+    // core, 텍스처 GX2 C부).
+    info.flags = ImageFlagsFor(desc.format) |
+                 (volume && renderTarget ? VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT : 0u) |
+                 (IsCubeDimension(desc.dimension) ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0u);
+    info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    return info;
+}
+
+// 다른 스레드에서도 부를 수 있다(concurrentResourceCreation). 초기 픽셀은 업로드 기록으로 간다.
+Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
+                                                  Span<const uint8> pixels) noexcept {
+    return CreateTextureIn(desc, pixels, nullptr);
+}
+
+Result<TextureHandle> VulkanDevice::CreateTextureIn(const TextureDesc& desc,
+                                                    Span<const uint8> pixels,
+                                                    const Placement* placement) noexcept {
+    const TextureDescCheck check = CheckTextureDesc(desc, pixels.Size());
+    if (check.code != ErrorCode::None) {
+        if (check.unsupportedFormat) {
+            platform::LockGuard lock(gate_);
+            return UnsupportedFormat<TextureHandle>(desc.format);
+        }
+
+        if (check.detail != nullptr) {
+            platform::LockGuard lock(gate_);
+            return Result<TextureHandle>::Failure(
+                FailCode("CreateTexture", check.code, check.detail).Error());
+        }
+
+        return Result<TextureHandle>::Failure(check.code);
+    }
+
+    const TextureFormatInfo format = TextureFormat(desc.format);
+    const bool renderTarget = HasTextureUsage(desc.usage, TextureUsage::RenderTarget);
+    const bool depthTarget = HasTextureUsage(desc.usage, TextureUsage::DepthStencil);
+    const bool storage = HasTextureUsage(desc.usage, TextureUsage::Storage);
+    const bool attachment = renderTarget || depthTarget || storage;
     platform::LockGuard lock(gate_);
     auto reserved = ReserveRetireCapacity(1);
     if (!reserved) {
@@ -551,27 +650,7 @@ Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
 
     const bool volume = desc.dimension == TextureDimension::Texture3D;
     const uint32 slices = TextureSliceCount(desc);
-    VkImageCreateInfo info = {};
-    info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    info.imageType = volume ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
-    info.format = format.format;
-    info.extent = {desc.width, desc.height, volume ? desc.depth : 1u};
-    info.mipLevels = desc.mipLevels;
-    // cube·배열은 layer 배열이다(cube 면은 UE·D3D 순서대로 layer 0–5, Vulkan cube 면 순서와
-    // 같다).
-    info.arrayLayers = slices;
-    // VkSampleCountFlagBits 값은 표본 수와 같다(1·2·4·8·16·32).
-    info.samples = static_cast<VkSampleCountFlagBits>(desc.sampleCount);
-    info.tiling = VK_IMAGE_TILING_OPTIMAL;
-    info.usage = ImageUsageFor(desc.format, renderTarget, storage);
-    // 3D 렌더 타깃은 깊이 면을 2D attachment view로 붙인다(2D_ARRAY_COMPATIBLE, Vulkan 1.1
-    // core, 텍스처 GX2 C부).
-    info.flags = ImageFlagsFor(desc.format) |
-                 (volume && renderTarget ? VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT : 0u) |
-                 (IsCubeDimension(desc.dimension) ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0u);
-
-    info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    const VkImageCreateInfo info = ImageInfoFor(desc);
     TextureRecord record;
     record.dimension = desc.dimension;
     record.width = desc.width;
@@ -589,23 +668,45 @@ Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
     record.sampler = sampler.Value();
     record.comparison = desc.sampler.comparison;
     // 업로드로 채운 텍스처와 렌더 타깃 모두 셰이더 읽기 상태로 시작한다(D3D12와 같다, GX5). 아래
-    // 업로드 기록이 UNDEFINED에서 그 상태로 바꾼다.
-    const ResourceAccess startState = CanonicalAccess(ResourceAccess::SrvGraphics);
+    // 업로드 기록이 UNDEFINED에서 그 상태로 바꾼다. placed 텍스처는 heap 구간을 다른 자원이 쓰는
+    // 중일 수 있어 아무것도 기록하지 않고 Unknown(UNDEFINED)으로 시작한다(첫 사용은 획득 전이).
+    const ResourceAccess startState = placement != nullptr
+                                          ? ResourceAccess::Unknown
+                                          : CanonicalAccess(ResourceAccess::SrvGraphics);
     auto committed = record.committed.Reset(allocator_, desc.mipLevels, slices, startState);
     auto current = record.current.Reset(allocator_, desc.mipLevels, slices, startState);
     if (!committed || !current) {
         return Result<TextureHandle>::Failure(!committed ? committed.Error() : current.Error());
     }
 
-    auto image = CreateImageWithMemory(info, record.image, record.memory);
-    if (!image) {
-        return Result<TextureHandle>::Failure(image.Error());
+    if (placement != nullptr) {
+        const VkResult result = functions_.vkCreateImage(device_, &info, nullptr, &record.image);
+        if (result != VK_SUCCESS) {
+            record.image = VK_NULL_HANDLE;
+            return FailWith<TextureHandle>("vkCreateImage", result);
+        }
+
+        auto bound =
+            BindPlaced(*placement, TransientHeapKindOf(desc), record.image, VK_NULL_HANDLE);
+        if (!bound) {
+            functions_.vkDestroyImage(device_, record.image, nullptr);
+            return Result<TextureHandle>::Failure(bound.Error());
+        }
+
+        record.heap = placement->heap;
+    } else {
+        auto image = CreateImageWithMemory(info, record.image, record.memory);
+        if (!image) {
+            return Result<TextureHandle>::Failure(image.Error());
+        }
     }
 
-    // 생성 중 실패하면 아직 GPU가 참조하지 않으므로 바로 파괴한다.
+    // 생성 중 실패하면 아직 GPU가 참조하지 않으므로 바로 파괴한다(placed면 heap의 placed 수도
+    // 되돌린다).
     Retired cleanup;
     cleanup.image = record.image;
     cleanup.memory = record.memory;
+    cleanup.heap = record.heap;
     // 기본 view: 깊이·스텐실은 깊이 aspect, 비디오는 plane 0(휘도)이다(PixelFormat.ko.md 10·11절).
     // 성분 대응은 형식 흉내(A8 등)의 대응 위에 TextureDesc::swizzle을 합성한다.
     const ViewFormatInfo viewFormat = ViewFormat(desc.format, 0, desc.format);
@@ -658,6 +759,11 @@ Result<TextureHandle> VulkanDevice::CreateTexture(const TextureDesc& desc,
         (void)tracked;
     }
 
+    // placed 텍스처는 업로드 기록에 아무것도 남기지 않는다(위 startState).
+    if (placement != nullptr) {
+        return Result<TextureHandle>::Success(TextureHandle{added.Value()});
+    }
+
     Result<void> uploaded = Result<void>::Success();
     if (attachment) {
         // 셰이더 읽기 상태(SHADER_READ_ONLY)로 바꿔 둔다. 다음 제출보다 먼저 실행된다.
@@ -706,6 +812,7 @@ void VulkanDevice::Retire(BufferHandle handle) noexcept {
         orphan.buffer = record->buffer;
         orphan.memory = record->memory;
         orphan.viewCount = record->viewCount;
+        orphan.heap = record->heap;
         auto kept = orphanBuffers_.TryPushBack(orphan);
         if (kept) {
             auto removed = buffers_.TryRemove(handle.slot);
@@ -717,6 +824,7 @@ void VulkanDevice::Retire(BufferHandle handle) noexcept {
         Retired entry;
         entry.buffer = record->buffer;
         entry.memory = record->memory;
+        entry.heap = record->heap;
         KeepUntilDestruction(Move(entry));
         auto removed = buffers_.TryRemove(handle.slot);
         (void)removed;
@@ -726,6 +834,7 @@ void VulkanDevice::Retire(BufferHandle handle) noexcept {
     Retired entry;
     entry.buffer = record->buffer;
     entry.memory = record->memory;
+    entry.heap = record->heap;
     RetireEntry(Move(entry));
     auto removed = buffers_.TryRemove(handle.slot);
     (void)removed;
@@ -866,6 +975,7 @@ void VulkanDevice::RetireTextureRecord(SlotHandle slot, TextureRecord& record) n
     if (!record.isView) {
         entry.image = record.image;
         entry.memory = record.memory;
+        entry.heap = record.heap;
     }
     // 이 view를 attachment로 쓴 framebuffer를 먼저 회수한다(같은 fence 뒤에 파괴된다).
     RetireFramebuffers(record.view);

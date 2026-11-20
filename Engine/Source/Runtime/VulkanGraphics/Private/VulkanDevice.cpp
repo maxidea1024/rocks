@@ -106,7 +106,7 @@ constexpr uint32 CpuRank = 4;
 VulkanDevice::VulkanDevice(Allocator& allocator) noexcept
     : allocator_(allocator), adapterName_(allocator), lastError_(allocator), memory_(allocator),
       buffers_(allocator), textures_(allocator), pipelines_(allocator), swapChains_(allocator),
-      readbacks_(allocator), bufferViews_(allocator), orphanBuffers_(allocator),
+      readbacks_(allocator), bufferViews_(allocator), heaps_(allocator), orphanBuffers_(allocator),
       retired_(allocator), renderPasses_(allocator), framebuffers_(allocator),
       attachmentViews_(allocator), volumeAttachmentImages_(allocator),
       timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics), touchedTextures_(allocator),
@@ -211,6 +211,12 @@ VulkanDevice::~VulkanDevice() {
         }
 
         buffers_.Clear();
+        // placed 자원을 모두 파괴했으므로 남은 transient heap 메모리를 놓는다.
+        for (TransientHeapRecord& heap : heaps_) {
+            functions_.vkFreeMemory(device_, heap.memory, nullptr);
+        }
+
+        heaps_.Clear();
         for (PipelineRecord& record : pipelines_) {
             functions_.vkDestroyPipeline(device_, record.pipeline, nullptr);
             DestroyPipelineLayout(record);

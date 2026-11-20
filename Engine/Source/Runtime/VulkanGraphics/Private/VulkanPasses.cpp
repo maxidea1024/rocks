@@ -283,13 +283,16 @@ void VulkanDevice::StartPass() noexcept {
         Barrier(frame_, target_.image, target_.restLayout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                 0, VK_REMAINING_MIP_LEVELS, VK_PIPELINE_STAGE_TRANSFER_BIT);
     } else {
-        // attachment의 subresource 하나만 바꾼다(텍스처 GX2 C부).
+        // attachment의 subresource 하나만 바꾼다(텍스처 GX2 C부). placed 텍스처의 acquire는 그
+        // subresource를 UNDEFINED에서 이전 메모리 쓰기를 모두 기다려 바꾼다(GX12, placed가 아니면
+        // 무시한다).
         for (uint32 index = 0; index < target_.colorCount; ++index) {
             TextureRecord* color = textures_.Find(target_.colors[index].slot);
             TrackTransition(*color, target_.colors[index].slot,
                             AttachmentSubresource(color->dimension, target_.colorMips[index],
                                                   target_.colorSlices[index]),
-                            ResourceAccess::RenderTarget, false);
+                            ResourceAccess::RenderTarget, false,
+                            target_.colorAcquire[index] && !color->heap.IsNull());
         }
 
         TextureRecord* depth = textures_.Find(target_.depth.slot);
@@ -298,7 +301,7 @@ void VulkanDevice::StartPass() noexcept {
                 *depth, target_.depth.slot,
                 AttachmentSubresource(depth->dimension, target_.depthMip, target_.depthSlice),
                 target_.depthReadOnly ? ResourceAccess::DepthRead : ResourceAccess::DepthWrite,
-                false);
+                false, target_.depthAcquire && !depth->heap.IsNull());
         }
     }
 
@@ -408,6 +411,24 @@ Result<CommandContext*> VulkanDevice::BeginPass(const PassDesc& pass) noexcept {
         }
     }
 
+    // 획득(acquire) attachment에는 이전 내용이 없으므로 Load로 열 수 없다(GX12).
+    for (uint32 index = 0; index < pass.colorCount; ++index) {
+        if (pass.colors[index].acquire && pass.colors[index].load == LoadAction::Load) {
+            return fail(ErrorCode::InvalidArgument,
+                        "acquired color attachment cannot use the Load action");
+        }
+    }
+
+    const bool depthStencil =
+        hasDepth &&
+        GetPixelFormatInfo(textures_.Find(pass.depth.texture.slot)->format).stencilBits != 0;
+    if (hasDepth && pass.depth.acquire &&
+        (pass.depth.readOnly || pass.depth.depthLoad == LoadAction::Load ||
+         (depthStencil && pass.depth.stencilLoad == LoadAction::Load))) {
+        return fail(ErrorCode::InvalidArgument,
+                    "acquired depth attachment cannot be read-only or use the Load action");
+    }
+
     // resolve 대상: MSAA attachment의 1표본 RenderTarget, 같은 형식·크기, view 아님, 겹침 없음.
     for (uint32 index = 0; index < pass.colorCount; ++index) {
         const TextureHandle resolve = pass.colors[index].resolveTarget;
@@ -470,6 +491,7 @@ Result<CommandContext*> VulkanDevice::BeginPass(const PassDesc& pass) noexcept {
         target.clears[index].color = ClearValueOf(record->format, color.clear);
         target.colorMips[index] = color.mipLevel;
         target.colorSlices[index] = color.slice;
+        target.colorAcquire[index] = color.acquire;
         auto view = AttachmentViewFor(*record, color.mipLevel, color.slice);
         if (!view) {
             return Result<CommandContext*>::Failure(view.Error());
@@ -504,6 +526,7 @@ Result<CommandContext*> VulkanDevice::BeginPass(const PassDesc& pass) noexcept {
         target.clears[pass.colorCount].depthStencil = {depth.clearDepth, depth.clearStencil};
         target.depthMip = depth.mipLevel;
         target.depthSlice = depth.slice;
+        target.depthAcquire = depth.acquire;
         auto view = AttachmentViewFor(*record, depth.mipLevel, depth.slice);
         if (!view) {
             return Result<CommandContext*>::Failure(view.Error());

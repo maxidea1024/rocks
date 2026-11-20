@@ -213,6 +213,9 @@ struct GraphTransitionRecord {
     bool attachment = false;
     uint32 beginPass = GraphIndexNone;
     uint32 forkPass = GraphIndexNone;
+    // transient 자원(RG5)의 첫 전이다: before는 Discard이고 장치에 aliasing 획득으로 낸다
+    // (ResourceTransition::acquire, attachment면 PassDesc의 attachment acquire).
+    bool acquire = false;
 
     bool operator==(const GraphTransitionRecord&) const noexcept = default;
 };
@@ -263,6 +266,14 @@ struct GraphStats {
     uint32 asyncComputePasses = 0;
     uint32 computeRecordings = 0;
     uint32 queueWaits = 0;
+    // transient aliasing(RG5): transient heap에 둔 자원 수, 그 가운데 앞 자원의 구간을 이어 받은
+    // 수, transient 자원 크기의 합(aliasing이 없을 때의 사용량), heap에서 실제로 쓴 최대 끝
+    // offset의 합(aliasing한 사용량), 쓴 heap 수다.
+    uint32 transientResources = 0;
+    uint32 aliasedResources = 0;
+    uint64 transientBytes = 0;
+    uint64 transientPeakBytes = 0;
+    uint32 transientHeaps = 0;
 };
 
 } // namespace rocks::render
