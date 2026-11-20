@@ -97,7 +97,9 @@ bool AppendPath(char* destination, usize& length, const char* source) noexcept {
     return true;
 }
 
-// root(상대면 지금 작업 폴더 기준)에 크래시 폴더 이름을 붙여 folder에 쓴다.
+// root(상대면 지금 작업 폴더 기준)에 크래시 폴더 이름을 붙여 folder에 쓴다. 굳힌 뿌리가
+// MaxOutputDirectoryBytes를 넘으면 false다(Windows의 GetFullPathNameW 상한과 같은 플랫폼 공통 상한,
+// macOS PATH_MAX 1024에 맞춘다 — 설계 14.1절).
 bool BuildFolder(const char* root, char* folder) noexcept {
     usize length = 0;
     folder[0] = '\0';
@@ -113,7 +115,9 @@ bool BuildFolder(const char* root, char* folder) noexcept {
         }
     }
 
-    if (!AppendPath(folder, length, root) || !AppendPath(folder, length, "/") ||
+    if (!AppendPath(folder, length, root) ||
+        length > CrashReportingOptions::MaxOutputDirectoryBytes ||
+        !AppendPath(folder, length, "/") ||
         !AppendPath(folder, length, detail::CrashFolderName())) {
         folder[0] = '\0';
         return false;

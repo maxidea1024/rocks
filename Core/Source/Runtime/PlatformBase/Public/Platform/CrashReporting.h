@@ -109,7 +109,9 @@ struct CrashReportingOptions {
     // (파일 이름으로 그대로 쓴다). 설치 때 복사한다.
     const char* programName = nullptr;
     // 크래시 폴더의 뿌리(UTF-8)다. nullptr이면 "Saved/Crashes"다. 상대 경로는 설치 때 현재 작업
-    // 폴더 기준 절대 경로로 굳힌다. 설치 때 복사한다.
+    // 폴더 기준 절대 경로로 굳힌다. 굳힌 절대 경로도 MaxOutputDirectoryBytes(Windows는 UTF-16 같은
+    // 단위 수)를 넘으면 설치가 InvalidArgument다(모든 플랫폼 공통, macOS PATH_MAX에 맞춘다). 설치
+    // 때 복사한다.
     const char* outputDirectory = nullptr;
     // 빌드 식별 정보다. JSON 객체의 멤버 목록을 중괄호 없이 UTF-8로 준다(예: 문자 그대로
     // "engineVersion": "0.1.0", "toolBuildId": "..."). 메타데이터 "build" 객체에

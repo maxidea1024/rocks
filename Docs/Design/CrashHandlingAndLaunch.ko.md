@@ -1,6 +1,6 @@
 # 공통 실행 진입점과 네이티브 크래시 수집 설계
 
-기준일: 2026-11-20, 개정 5(19.6절: 로깅 쪽 반영 완료 — 로깅 문서 개정 번호 재정리, LogFile·LogDirectory 칸). 개정 4(LC1–LC7 구현 반영, LC8 문서 마무리). 결정은 22절, 단계는 23절, 미확인 사실은 24절, 바뀐 점과 단계별로 설계와 다르게 정한 점은 25절에 있다. 사용법은 [공통 실행 진입점과 크래시 수집 사용 안내](../Implementation/CrashHandlingAndLaunch.ko.md)에 있다.
+기준일: 2026-11-20, 개정 6(macOS CI 두 건: 14.1절 굳힌 뿌리 상한을 플랫폼 공통으로, 8.7·17절 POSIX abort 재진입의 기대값). 개정 5(19.6절: 로깅 쪽 반영 완료 — 로깅 문서 개정 번호 재정리, LogFile·LogDirectory 칸). 개정 4(LC1–LC7 구현 반영, LC8 문서 마무리). 결정은 22절, 단계는 23절, 미확인 사실은 24절, 바뀐 점과 단계별로 설계와 다르게 정한 점은 25절에 있다. 사용법은 [공통 실행 진입점과 크래시 수집 사용 안내](../Implementation/CrashHandlingAndLaunch.ko.md)에 있다.
 
 이 문서는 두 가지를 정한다.
 - **공통 실행 진입점(Launch).** 실행 파일마다 흩어진 `main`·`wmain`의 시작·종료 처리를 한 계층으로 모은다. 플랫폼 진입점 연결, 이른 크래시 처리 설치, 인자 전달, 공통 서비스 시작·종료, 프로그램 본문 호출, 종료 코드 전달, 크래시 처리 해제 시점이 대상이다. 엔진 수명(`Engine::Initialize`·`Run`·`Shutdown`)은 다시 만들지 않는다.
@@ -725,6 +725,7 @@ Log::Fatal / ROCKS_ASSERT                    → 비상 출력, LogSystem 전달
 - **async-signal-safe 범위.** 처리기 쪽은 원자 연산, `write`, `clock_gettime`, `sched_yield`, `sigaction`, `kill`, `pthread_kill`, `pause`만 쓴다.
 - **겹친 스레드.** 소유자의 완료를 보고 돌아가지 않고 소유자 마감과 여유까지 계속 기다린다. 그래도 끝나지 않으면 소유자의 신호(Fatal 소유자는 SIGABRT)의 이전 동작을 되돌리고 `kill`로 그 신호를 낸다. 소유자보다 먼저 다른 신호로 프로세스를 끝내지 않는다.
 - **Asan 구성(LC7).** 하드웨어 fault 신호의 이전 동작이 처리기면(SIG_DFL·SIG_IGN이 아니면) 보고하지 않고 넘긴다. 그 처리기가 ASan 것인지는 확인하지 않는다. ASan 보고 뒤 death callback이 Fatal 경로로 기록한다. 크래시 처리 스레드 자신의 fault는 넘기기 전에 본다(13.2절).
+- **stderr 사유 줄.** POSIX의 SIGABRT(abort 포함)·하드웨어 fault는 신호 경로라 실패 스레드가 stderr에 사유 줄을 쓰지 않는다. 사유는 `CrashInfo.json`의 `signal`(번호)과 `message`("Fatal signal 6" 등)에 남는다. Windows의 abort는 SIGABRT 처리기가 Fatal 경로(`FailFatally(Abort, "abort() was called")`)로 가므로 비상 출력에 그 문구가 남는다. 같은 abort라도 플랫폼마다 stderr가 다르므로 시험은 플랫폼별 정확한 기대값을 쓴다(17절 abort 재진입).
 - **SIGTRAP.** x86 `int3`은 명령 뒤에서 멈추므로 반환하면 다시 나지 않는다. si_code와 관계없이 보낸 신호처럼 다시 낸다. SIGABRT의 종료 사유는 `Abort`다. W 쪽은 신호 문맥 밖이지만 깨진 스레드가 쥔 lock은 TryLock 실패로 건너뛴다(최선 노력).
 
 ### 8.8 내장(Embedded) 모드
@@ -1043,6 +1044,9 @@ Rocks가 다른 호스트 프로세스 안에 라이브러리로 들어간 경�
   - `Minidump.dmp`
   - `CrashInfo.json`. 예비본은 `"complete": false`이고, 최종본으로 덮는다.
   - 로그·trace는 복사하지 않고 경로만 적는다(요구 12절).
+- **굳힌 뿌리의 길이 상한(개정 6).** 설치와 `SetCrashOutputDirectory`는 뿌리를 절대 경로로 굳힌 뒤 그 길이를 본다. 상한은 플랫폼 공통으로 `CrashReportingOptions::MaxOutputDirectoryBytes`(1023)다. Windows는 `GetFullPathNameW` 결과가 UTF-16 1024 단위 미만이어야 하고(`MaxRootUnits`, ASCII 경로면 같은 값), POSIX는 굳힌 뿌리가 1023 byte 이하여야 한다. 넘으면 설치는 실패(`InvalidArgument`)이고 `SetCrashOutputDirectory`는 false다(Launch는 이전 설정·폴더로 되돌린다).
+  - 근거: macOS `PATH_MAX`는 1024라 그보다 긴 뿌리는 크래시 때 `mkdir`이 `ENAMETOOLONG`으로 실패하고 fallback 폴더로 간다. 설치 때 거부해야 설정 오류가 정상 실행 중에 드러난다. Linux·Android(`PATH_MAX` 4096)도 같은 상한을 써서 플랫폼마다 결과가 같다.
+  - 개정 5까지 POSIX는 폴더 전체 칸(4096 byte)만 봐서, 작업 폴더 + 약 1,020 byte 상대 폴더를 받아들였다. Windows만 거부해 `Native.Launch.settings-rollback`이 macOS CI에서 실패했다(run 44657190704).
 - **실패.** 폴더나 파일을 만들 수 없으면 `%TEMP%\Rocks\Crashes\` 아래 같은 이름으로 한 번 다시 시도한다. 그것도 실패하면 `WriteDiagnostic`으로 한 줄(경로·Win32 오류)을 남긴다. 그래도 종료 콜백은 돈다.
 
 ### 14.2 빌드 식별 블록
@@ -1213,7 +1217,7 @@ Rocks는 이 값을 쓰지 않는다.
 | `abort()`(주 스레드·외부 스레드) | 직접 `abort()` | `kind=Abort`, 덤프, 종료 코드가 3이 아님(처리기가 반환하지 않음) |
 | invalid parameter | CRT 함수에 잘못된 인자 | `kind=RuntimeCheck`, 덤프 |
 | pure virtual call | 생성 중 순수 가상 호출 | `kind=RuntimeCheck`, 덤프 |
-| abort 재진입 | 종료 콜백 안에서 `abort()` | `reporterFailed`, 예산 안 종료, 덤프는 이미 있음 |
+| abort 재진입 | 종료 콜백 안에서 `abort()` | `reporterFailed`, 예산 안 종료, 덤프는 이미 있음. 처음 abort의 사유: Windows는 stderr의 "abort() was called"(Fatal 경로), POSIX는 `CrashInfo.json`의 `signal` 6·`message` "Fatal signal 6"(신호 경로라 stderr 사유 줄이 없다, 8.7절) |
 | Off 모드 Fatal | 수집기를 끈 probe에서 `platform::Fatal` | 크래시 폴더 없음, stderr 문구, Rocks 예외 코드, raise 흔적 없음 |
 | stack overflow | 무한 재귀(주 스레드, `platform::Thread`) | 0xC00000FD, 덤프 유효 |
 | 처리기 재귀 | 종료 콜백 안 접근 위반·Fatal | 예산 안 종료, `reporterFailed`, 덤프는 이미 있음 |
@@ -1791,3 +1795,7 @@ bool SetCrashAnnotation(CrashAnnotation slot, const char* text, usize bytes) noe
   - **ML2와 정적 소멸 없는 종료.** 멈춘 로그 출력 스레드를 포기하면 설정 문맥이 모듈 lease를 잡은 채 남는다. 그때는 프로세스 로더를 내리거나 파괴하지 않고 정적 저장소로 옮겨 둔 채 돌아온다(Launch가 `_Exit`로 끝낸다). 로더를 파괴하면 남은 lease로 Fatal이다.
   - **유니티 빌드(UB2·UB3).** 유니티를 켠 PlatformBase·FoundationTests에서 겹친 파일 지역 이름을 파일 고유 이름으로 바꿨다(CrashModule·CrashHelper·POSIX CrashReporting·POSIX ProcessEntry·CrashProcessProbe, 동작 불변). 새 시험 파일 넷(LaunchTests·CrashReportingTests·ProcessEntryTests·ProcessCommandLineTests)은 파일 지역 부분을 `<파일>_file` namespace로 감싸고 `detail::`을 `platform::detail::`로 한정했다.
   - **origin 결함 하나.** WorldBench가 ML2 뒤에도 옛 `ModuleRegistration`의 `modules.Unregister()`를 불러 컴파일되지 않았다(origin은 이 실행 파일을 빌드하지 않는다). 모듈 타입은 `DetachTypes`가 되돌리므로 그 호출을 뺐다.
+- macOS CI 두 건(2026-11-20, run 44657190704, 개정 6).
+  - **`Native.Crash.callback-abort`(시험 결함).** POSIX에서 처음 abort는 SIGABRT 신호 경로(`CrashSignalHandler` → `ReportAsOwner`, 사유 "Fatal signal 6")라 stderr에 사유 줄을 쓰지 않는다. Windows만 SIGABRT 처리기가 Fatal 경로로 "abort() was called"를 쓴다. 시험이 그 Windows 문구를 모든 플랫폼에 기대했다. 수집기 동작(처리 스레드의 두 번째 abort → `FailReporter` → 남은 콜백 포기·파일 단계 계속)은 macOS 출력과 일치하므로 맞다. 시험을 플랫폼별 정확한 기대값으로 고쳤다(POSIX는 `signal` 6·`message`).
+  - **`Native.Launch.settings-rollback`(수집기 결함).** POSIX는 굳힌 뿌리의 길이를 보지 않아 macOS에서 만들 수 없는 긴 폴더를 받아들였다(14.1절). POSIX `BuildFolder`가 굳힌 뿌리를 `MaxOutputDirectoryBytes`로 제한하게 고쳤다. 시험은 그대로다(어느 플랫폼이든 작업 폴더 + 1,019 byte가 상한을 넘는다).
+  - **같은 가정 훑기.** 경로 길이로 실패를 유도하는 시험은 이것 하나다. 콜백 재진입 시험 셋 가운데 플랫폼 고정 문구를 기대한 것은 callback-abort뿐이다(callback-fault는 공통 문구, callback-fatal은 두 플랫폼 모두 Fatal 경로).
