@@ -187,18 +187,35 @@ LogContextScope stage("Stage", "BeginPlay");
 
 ## 호스트: LogSystem 설치
 
+Rocks 실행 파일은 Launch 진입점(`ROCKS_IMPLEMENT_APPLICATION`)으로 시작한다. Launch가 크래시 수집기를 설치한 뒤 본문 `Run(context)`를 부르고, 엔진 호스트 본문이 LogSystem을 만들고 설치한다. 명령줄 도구는 `ToolLogging::Stderr`를 고르면 Launch가 도구 로그를 만들어 설치해 둔다(`context.ToolLog()`).
+
 ```cpp
-int main() {
-    SystemAllocator allocator;
-    StderrLogSink console;                                    // 기본 콘솔 레이아웃
+#include <Launch/EntryPoint.h>
+
+namespace {
+int Run(rocks::launch::ApplicationContext& context) noexcept {
+    Allocator& allocator = context.SystemAllocator();
+    StderrLogSink console;                                    // 기본 콘솔 레이아웃. LogSystem보다 먼저 선언
     LogSystem logs(allocator, LogSystemConfig::ForEngineHost()); // 명령줄 도구는 ForTool()
     (void)logs.AddSink(console);
     (void)logs.Start();
     LogInstallScope installed(logs);                          // 전역 호출 대상. 범위가 끝나면 이전 대상을 복원
     (void)logs.SetThreadName("GameThread");
     ...
-}   // 역순 정리: 설치 해제 → Stop(큐 drain, sink flush, 출력 스레드 join) → sink 파괴
+    return 0;
+}   // 역순 정리: 설치 해제 → LogSystem 파괴(Stop: 큐 drain, sink flush, 출력 스레드 join) → sink 파괴
+
+const rocks::launch::ApplicationDescription& Describe() noexcept {
+    static constexpr rocks::launch::ApplicationDescription description{
+        .name = "MyGame", .kind = rocks::launch::ApplicationKind::EngineHost, .run = &Run};
+    return description;
+}
+} // namespace
+
+ROCKS_IMPLEMENT_APPLICATION(Describe)
 ```
+
+엔진 호스트는 보통 이 과정을 직접 쓰지 않고 `LogHost`(설정 CVar로 콘솔·파일 sink를 만든다)를 쓴다.
 
 | 모드 | 동작 | 기본으로 쓰는 호스트 |
 |---|---|---|
@@ -350,7 +367,7 @@ host.Stop();                                           // WriterAbandoned()면 �
 | `log.levels` | string | `""` — `Graphics=warning,Engine.World=debug` | 실행 중, sync 지점 |
 | `log.rate_limits` | string | `""` — `Graphics=20,Engine.World.Tick=100`(접두사별 초당 기록 수, 최대 16항목) | 실행 중, sync 지점 |
 | `log.file.enabled` | bool | `false` | 시작 뒤 고정 |
-| `log.file.directory` | string | `Saved/Logs` | 시작 뒤 고정 |
+| `log.file.directory` | string | `Saved/Logs`(상대 경로는 파일을 열 때의 작업 디렉터리 기준 절대 경로로 굳힌다) | 시작 뒤 고정 |
 | `log.file.format` | string | `text` · `jsonlines` | 시작 뒤 고정 |
 | `log.file.max_bytes` | int64 | `16777216` (64 KiB–1 TiB) | 시작 뒤 고정 |
 | `log.file.retention` | int32 | `8` (1–256) | 시작 뒤 고정 |
@@ -396,6 +413,8 @@ Log::Info(LogNet, "Request accepted");
 - `Log::Fatal`·assert는 자기 스레드에서 먼저 flush를 시도한다. 그 뒤 수집기의 콜백이 남은 기록을 마감 안에서 한 번 더 기다린다.
 - 크래시한 스레드가 로그 출력 스레드 자신이면(sink 안의 크래시 등) 큐를 비울 주체가 없다. 그때는 비상 출력(stderr)만 남는다.
 - 비정상 종료한 봉인 파일에는 끝 표시가 없다(`log decode`가 비정상 종료로 알린다).
+- 크래시 기록(`CrashInfo.json`의 `associatedFiles`)에 로그 위치가 남는다. `LogHost`가 연 파일 sink는 파일을 열 때와 회전할 때 `logFile`에 지금 파일의 절대 경로를 적고, `LogHost`가 `logDirectory`에 로그 폴더를 적는다. 직접 만든 `FileLogSink`가 이 칸을 쓰게 하려면 `FileLogSinkConfig::crashAnnotation = true`로 둔다. 프로세스에서 하나만 켠다(칸은 쓰는 쪽이 하나여야 한다). 경로가 512 B를 넘으면 칸을 비우고 Warning을 한 번 남긴다.
+- Asan 구성에서는 ASan이 먼저 보고하고, 그 뒤 수집기가 같은 콜백으로 로그를 비운다. 수집기의 공용 마감(기본 2초)은 Launch `ApplicationSettings::crashCallbackBudgetMilliseconds`로 바꿀 수 있다.
 
 ## 로그 파일 보기(`log view`)
 
@@ -419,4 +438,3 @@ RocksCommandlet log view game.log --key dev.key --correlation request=55
 ## 아직 구현되지 않은 것
 
 - 설정 단계 거부(`log.levels`·`log.rate_limits`·레이아웃의 문법 오류): CVar 이관(CVR7)의 `Validate`. 지금은 적용 때 Warning·Error
-- POSIX 크래시 처리기: 코드는 있으나 이 저장소의 Windows 환경에서만 빌드·시험했다

@@ -7,13 +7,21 @@
 #include <Core/Text/StringBuilder.h>
 #include <Platform/Atomics.h>
 #include <Platform/Clock.h>
+#include <Platform/CrashReporting.h>
 #include <Platform/File.h>
+#include <Platform/Path.h>
 
 using namespace rocks;
 
 namespace rocks::test {
 uint64 OperatorNewCalls() noexcept;
 } // namespace rocks::test
+
+// 크래시 처리가 칸을 읽는 PlatformBase 내부 함수다(Private/Common/CrashReportingInternal.h). 시험은
+// 크래시 기록에 실제로 남을 값을 이것으로 확인한다.
+namespace rocks::platform::detail {
+bool ReadCrashAnnotation(CrashAnnotation slot, char* buffer, usize capacity, usize& bytes) noexcept;
+} // namespace rocks::platform::detail
 
 namespace file_log_sink_tests_file {
 
@@ -210,7 +218,8 @@ TEST(FileLogSinkWritesPlaintextThroughLayout) {
         CHECK(file.Open().Error() == ErrorCode::AlreadyExists);
         REQUIRE(path.TryAppend(
             Span<const char>(file.CurrentPath().Data(), file.CurrentPath().ByteCount())));
-        CHECK(file.CurrentPath().StartsWith(directory.View(), StringComparison::CaseSensitive));
+        CHECK(file.CurrentPath().StartsWith(file.Directory(), StringComparison::CaseSensitive));
+        CHECK(file.Directory().EndsWith(directory.View(), StringComparison::CaseSensitive));
         CHECK(file.CurrentPath().EndsWith("Z.log", StringComparison::CaseSensitive));
         LogSystem logs(allocator, SyncConfig());
         REQUIRE(logs.AddSink(file).IsOk());
@@ -493,4 +502,240 @@ TEST(FileLogSinkCompressesBatches) {
     REQUIRE(bytes.Size() > 1);
     CHECK(bytes[0] == 'Z');
 }
+
+namespace {
+
+// 크래시 기록 칸의 지금 값이다.
+struct AnnotationText {
+    StringView View() const noexcept {
+        return StringView(text, bytes);
+    }
+
+    char text[platform::MaxCrashAnnotationBytes]{};
+    usize bytes = 0;
+    bool read = false;
+};
+
+AnnotationText ReadLogFileAnnotation() noexcept {
+    AnnotationText value;
+    value.read = platform::detail::ReadCrashAnnotation(platform::CrashAnnotation::LogFile,
+                                                       value.text, sizeof(value.text), value.bytes);
+    return value;
+}
+
+// 시험이 바꾼 LogFile 칸을 끝에 비운다(같은 프로세스의 뒤 시험·크래시 기록에 남지 않게).
+struct LogFileAnnotationCleanup {
+    ~LogFileAnnotationCleanup() noexcept {
+        (void)platform::SetCrashAnnotation(platform::CrashAnnotation::LogFile, nullptr, 0);
+    }
+};
+
+constexpr StringView PreviousAnnotation = "previous";
+
+// 가상 폴더 이름의 byte 수다. 크래시 기록 칸보다 길어 그 아래 파일 경로는 칸에 들어가지 않는다.
+constexpr usize LongDirectoryBytes = platform::MaxCrashAnnotationBytes + 64;
+
+// 긴 가상 폴더 이름(LongDirectoryBytes byte의 'v')을 시험 폴더로 바꿔 실제 파일 시스템에 넘긴다.
+// 크래시 기록 칸보다 긴 로그 경로를 OS 경로 길이 제한 없이 만든다.
+class LongNameFileSystem final : public platform::FileSystem {
+public:
+    explicit LongNameFileSystem(const ScratchDirectory& directory) noexcept
+        : directory_(directory) {
+        platform::MemorySet(name_, static_cast<uint8>('v'), LongDirectoryBytes);
+    }
+
+    StringView Name() const noexcept {
+        return StringView(name_, LongDirectoryBytes);
+    }
+
+    platform::FileStatus Open(const char* path, usize bytes, platform::FileOpenMode mode,
+                              platform::FileHandle*& out) noexcept override {
+        const MappedPath mapped = Map(path, bytes);
+        return inner.Open(mapped.path, mapped.bytes, mode, out);
+    }
+
+    platform::FileStatus Exists(const char* path, usize bytes, bool& exists) noexcept override {
+        const MappedPath mapped = Map(path, bytes);
+        return inner.Exists(mapped.path, mapped.bytes, exists);
+    }
+
+    platform::FileStatus Delete(const char* path, usize bytes) noexcept override {
+        const MappedPath mapped = Map(path, bytes);
+        return inner.Delete(mapped.path, mapped.bytes);
+    }
+
+    platform::FileStatus Stat(const char* path, usize bytes,
+                              platform::FileInfo& info) noexcept override {
+        const MappedPath mapped = Map(path, bytes);
+        return inner.Stat(mapped.path, mapped.bytes, info);
+    }
+
+    platform::FileStatus MakeDirectory(const char* path, usize bytes) noexcept override {
+        const MappedPath mapped = Map(path, bytes);
+        return inner.MakeDirectory(mapped.path, mapped.bytes);
+    }
+
+    platform::FileStatus EnumerateDirectory(const char* path, usize bytes,
+                                            platform::DirectoryVisitor visitor,
+                                            void* context) noexcept override {
+        const MappedPath mapped = Map(path, bytes);
+        return inner.EnumerateDirectory(mapped.path, mapped.bytes, visitor, context);
+    }
+
+    platform::FileSystem& inner = platform::PhysicalFileSystem();
+
+private:
+    struct MappedPath {
+        char path[MaxLogFilePathBytes]{};
+        usize bytes = 0;
+    };
+
+    // 가상 이름으로 시작하면 그 부분을 시험 폴더로 바꾼다(NUL 종료).
+    MappedPath Map(const char* path, usize bytes) const noexcept {
+        MappedPath mapped;
+        FixedStringBuilder built{Span<char>(mapped.path)};
+        if (bytes >= LongDirectoryBytes &&
+            platform::MemoryEquals(path, name_, LongDirectoryBytes)) {
+            (void)built.TryAppend(directory_.View());
+            (void)built.TryAppend(
+                StringView(path + LongDirectoryBytes, bytes - LongDirectoryBytes));
+        } else {
+            (void)built.TryAppend(StringView(path, bytes));
+        }
+
+        mapped.bytes = built.ByteCount();
+        return mapped;
+    }
+
+    const ScratchDirectory& directory_;
+    char name_[LongDirectoryBytes]{};
+};
+
+// 회전이 일어나도록 묶음 크기 상한을 넘는 기록 둘을 따로 flush한다(maxBytes = RotatingMaxBytes).
+constexpr uint64 RotatingMaxBytes = 48;
+
+void WriteUntilRotated(FileLogSink& file) noexcept {
+    REQUIRE(file.Write(Event("first record before the rotation")).IsOk());
+    REQUIRE(file.Flush().IsOk());
+    REQUIRE(file.Write(Event("second record needs a new file")).IsOk());
+    REQUIRE(file.Flush().IsOk());
+    CHECK(file.Rotations() == 1);
+}
+
+} // namespace
+
+// 상대 로그 폴더는 Open 때의 작업 디렉터리에 붙인 절대 경로가 되고, 절대 폴더는
+// 그대로다(설계 9.1절).
+TEST(FileLogSinkResolvesRelativeDirectoryAgainstWorkingDirectory) {
+    ScratchDirectory directory;
+    SystemAllocator allocator;
+    char working[MaxLogFilePathBytes];
+    usize workingBytes = 0;
+    REQUIRE(platform::GetStandardDirectory(platform::StandardDirectory::Working, working,
+                                           sizeof(working), workingBytes));
+    const bool rootWorking = workingBytes != 0 && (working[workingBytes - 1] == '/' ||
+                                                   working[workingBytes - 1] == '\\');
+    char resolved[MaxLogFilePathBytes];
+    usize resolvedBytes = 0;
+    {
+        FileLogSink file(allocator, Config(directory));
+        CHECK(file.Directory() == directory.View());
+        REQUIRE(file.Open().IsOk());
+        CHECK(file.Directory().StartsWith(StringView(working, workingBytes),
+                                          StringComparison::CaseSensitive));
+        CHECK(file.Directory().EndsWith(directory.View(), StringComparison::CaseSensitive));
+        CHECK(file.Directory().ByteCount() ==
+              workingBytes + (rootWorking ? 0 : 1) + directory.length);
+        CHECK(file.CurrentPath().StartsWith(file.Directory(), StringComparison::CaseSensitive));
+        resolvedBytes = file.Directory().ByteCount();
+        platform::MemoryCopy(resolved, file.Directory().Data(), resolvedBytes);
+        file.Close();
+    }
+
+    FileLogSinkConfig config = Config(directory);
+    config.directory = StringView(resolved, resolvedBytes);
+    FileLogSink absolute(allocator, config);
+    REQUIRE(absolute.Open().IsOk());
+    CHECK(absolute.Directory() == StringView(resolved, resolvedBytes));
+    absolute.Close();
+}
+
+// crashAnnotation을 켠 sink는 Open과 회전 때 크래시 기록의 LogFile 칸에 지금 파일을 알리고, Close는
+// 칸을 비우지 않는다. 끈 sink(기본)는 칸을 건드리지 않는다(설계 14.1.8절, L29).
+TEST(FileLogSinkAnnouncesCurrentFileForCrashRecords) {
+    LogFileAnnotationCleanup cleanup;
+    ScratchDirectory directory;
+    SystemAllocator allocator;
+    REQUIRE(platform::SetCrashAnnotation(platform::CrashAnnotation::LogFile,
+                                         PreviousAnnotation.Data(),
+                                         PreviousAnnotation.ByteCount()));
+    {
+        FileLogSinkConfig config = Config(directory);
+        config.maxBytes = RotatingMaxBytes;
+        FileLogSink quiet(allocator, config);
+        REQUIRE(quiet.Open().IsOk());
+        WriteUntilRotated(quiet);
+        quiet.Close();
+        const AnnotationText untouched = ReadLogFileAnnotation();
+        CHECK(untouched.read);
+        CHECK(untouched.View() == PreviousAnnotation);
+    }
+
+    Array<char> last(allocator);
+    {
+        FileLogSinkConfig config = Config(directory);
+        config.maxBytes = RotatingMaxBytes;
+        config.crashAnnotation = true;
+        FileLogSink file(allocator, config);
+        REQUIRE(file.Open().IsOk());
+        const AnnotationText opened = ReadLogFileAnnotation();
+        CHECK(opened.read);
+        CHECK(opened.View() == file.CurrentPath());
+        CHECK(opened.View().StartsWith(file.Directory(), StringComparison::CaseSensitive));
+        WriteUntilRotated(file);
+        const AnnotationText rotated = ReadLogFileAnnotation();
+        CHECK(rotated.read);
+        CHECK(rotated.View() == file.CurrentPath());
+        CHECK(rotated.View() != opened.View());
+        REQUIRE(last.TryAppend(
+            Span<const char>(file.CurrentPath().Data(), file.CurrentPath().ByteCount())));
+        file.Close();
+    }
+
+    const AnnotationText closed = ReadLogFileAnnotation();
+    CHECK(closed.read);
+    CHECK(closed.View() == StringView(last.Data(), last.Size()));
+}
+
+// 파일 경로가 칸(MaxCrashAnnotationBytes)보다 길면 자르지 않고 칸을 비운다. 앞의 값이 남아 다른
+// 파일을 가리키지 않는다. 회전 뒤에도 비어 있다(Warning은 비상 경로에 한 번 — 시험 로그에 보인다).
+TEST(FileLogSinkClearsCrashAnnotationWhenPathIsTooLong) {
+    LogFileAnnotationCleanup cleanup;
+    ScratchDirectory directory;
+    SystemAllocator allocator;
+    LongNameFileSystem system(directory);
+    REQUIRE(platform::SetCrashAnnotation(platform::CrashAnnotation::LogFile,
+                                         PreviousAnnotation.Data(),
+                                         PreviousAnnotation.ByteCount()));
+    FileLogSinkConfig config = Config(directory);
+    config.directory = system.Name();
+    config.fileSystem = &system;
+    config.maxBytes = RotatingMaxBytes;
+    config.crashAnnotation = true;
+    FileLogSink file(allocator, config);
+    REQUIRE(file.Open().IsOk());
+    // 실제 파일 시스템이 아니므로 폴더를 절대 경로로 바꾸지 않는다.
+    CHECK(file.Directory() == system.Name());
+    CHECK(file.CurrentPath().ByteCount() > platform::MaxCrashAnnotationBytes);
+    const AnnotationText opened = ReadLogFileAnnotation();
+    CHECK(opened.read);
+    CHECK(opened.bytes == 0);
+    WriteUntilRotated(file);
+    const AnnotationText rotated = ReadLogFileAnnotation();
+    CHECK(rotated.read);
+    CHECK(rotated.bytes == 0);
+    file.Close();
+    CHECK(CountFiles(directory) == 2);
+}
+
 } // namespace file_log_sink_tests_file

@@ -1,6 +1,6 @@
 # 로깅 시스템 설계
 
-기준일: 2026-11-20, 개정 15. 엔진 전반에서 쓰는 **로그**(사람이 읽는 사건 기록)의 호출 API, 카테고리·레벨 필터, 비동기 기록 경로, 출력 형식, 장애 격리, 엔진 적용 범위를 정한다.
+기준일: 2026-11-20, 개정 16. 엔진 전반에서 쓰는 **로그**(사람이 읽는 사건 기록)의 호출 API, 카테고리·레벨 필터, 비동기 기록 경로, 출력 형식, 장애 격리, 엔진 적용 범위를 정한다.
 
 요구는 다음 문서에서 온다.
 - [엔진 구현 계획](EngineImplementationPlan.ko.md) 29.4절(필수 로깅·프로파일러: level/category, UTC+monotonic, rate limit·중복 집계, compile/runtime level, error/fatal 비상 경로, 임계 구간에서 file IO·heap·lock wait 금지)
@@ -24,7 +24,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론)의 현재 기본 경로다. 경�
 
 UE의 매크로 중심 API(`UE_LOG`, `DECLARE_LOG_CATEGORY_*`)는 따르지 않는다. 일반 로그는 함수 호출로 쓴다. 메시지 템플릿과 출력 레이아웃은 Serilog·log4j의 개념을 Rocks 이름으로 가져온다. UE 이름은 대응표(4절)에만 둔다.
 
-상태: LG0–LG19 **구현 완료**(결정 L1–L28, 구현과 다르게 정한 점은 14.2절). LG16(`{@Obj}`)은 개정 15에서 구현했다(MetaCompiler `VisitFields` 생성·ObjectRuntime `Object/LogStructure.h` 포함). 단계는 14절, 다른 세션과의 순서는 15절, 결정은 17절이다.
+상태: LG0–LG19 **구현 완료**(결정 L1–L29, 구현과 다르게 정한 점은 14.2절). LG16(`{@Obj}`)은 개정 15에서 구현했다(MetaCompiler `VisitFields` 생성·ObjectRuntime `Object/LogStructure.h` 포함). 개정 16에서 크래시 기록의 로그 칸(`LogFile`·`LogDirectory`)을 붙였다(14.1.8절, L29). 단계는 14절, 다른 세션과의 순서는 15절, 결정은 17절이다.
 
 ## 1. 결정 요약
 
@@ -344,7 +344,7 @@ LogContextScope stage("Stage", "BeginPlay");
 
 ### 9.1 파일 sink와 암호화
 
-- `FileLogSink`(Core): 실행마다 새 파일(`<로그 폴더>/<호스트>-<UTC 시작 시각>.log`), 크기 상한을 넘으면 회전(`log.file.max_bytes`), 보관 개수 상한(`log.file.retention`). 보관 정리는 `<호스트>-<YYYYMMDDTHHMMSSmmmZ>[-<숫자>].log` 모양에 정확히 맞는 파일만 센다(같은 폴더의 다른 호스트 파일을 지우지 않는다). 쓰기는 PlatformBase 파일 API를 쓴다. flush 묶음 단위로 쓰고, 버퍼는 Start에서 확보한다(무할당).
+- `FileLogSink`(Core): 실행마다 새 파일(`<로그 폴더>/<호스트>-<UTC 시작 시각>.log`). 상대 로그 폴더는 Open 때 작업 디렉터리에 붙여 절대 경로로 굳힌다(실제 파일 시스템일 때, 개정 16 — UE `FOutputDeviceFile`도 절대 경로로 연다). 뒤에 작업 디렉터리가 바뀌어도 회전 파일이 같은 폴더에 생기고, 크래시 기록의 파일 칸이 절대 경로가 된다. 크기 상한을 넘으면 회전(`log.file.max_bytes`), 보관 개수 상한(`log.file.retention`). 보관 정리는 `<호스트>-<YYYYMMDDTHHMMSSmmmZ>[-<숫자>].log` 모양에 정확히 맞는 파일만 센다(같은 폴더의 다른 호스트 파일을 지우지 않는다). 쓰기는 PlatformBase 파일 API를 쓴다. flush 묶음 단위로 쓰고, 버퍼는 Start에서 확보한다(무할당).
 - **암호화는 선택이고 기본은 끔이다**(`log.file.encrypt = false`). Core는 Crypto보다 아래 계층이라 Core에는 인터페이스만 둔다.
 
 ```cpp
@@ -683,6 +683,7 @@ LG11–LG19의 검증도 같다: Debug 빌드, format, policy, 바뀐 부분 시
 - **대기 시간:**
   - 기본은 `fatalFlushTimeoutMilliseconds`와 공용 마감까지 남은 시간 중 짧은 쪽이다.
   - `Log::Fatal`·assert가 flush를 시도했으면(아래 Fatal 표시) 실패 스레드의 대기가 제한 시간에 끊겼을 수 있다. 그 뒤에 들어온 다른 스레드의 기록도 있을 수 있다. 그래서 바로 건너뛰지 않고 남은 큐를 한 번 더 기다린다. 상한은 "공용 마감 - `TerminationCallbackReserveMilliseconds`(250 ms)"다. 기본 대기도 이 상한을 넘지 않는다.
+  - 공용 마감은 수집기 기본 2초이고, Launch `ApplicationSettings::crashCallbackBudgetMilliseconds`로 바꿀 수 있다. 위 상한 "공용 마감 - 250 ms"도 바꾼 마감을 따른다.
   - 콜백은 등록 역순으로 불리고 마감을 함께 쓴다. 여유는 로그 뒤에 불리는 콜백(수집기가 설치 때 먼저 등록한 것 등)의 몫이다.
   - 콜백이 불렸을 때 상한이 이미 지났으면 건너뛰지 않고 timeout 0으로 한 번 시도한다. Sync는 sink lock을 잡으면 비우고, Async는 이미 비어 있으면 `Completed`, 아니면 `TimedOut`이다. 기다리지 않는 시도라 다른 콜백의 몫을 쓰지 않고, 남은 기록을 건질 기회는 남는다. 마감이 지난 뒤의 콜백을 아예 부르지 않는 것은 수집기의 몫이다(수집기 계약 3).
   - 밀리초 변환은 `NumericLimits<uint32>::Max()`에서 자른다.
@@ -703,11 +704,18 @@ LG11–LG19의 검증도 같다: Debug 빌드, format, policy, 바뀐 부분 시
 **한계.**
 - Async 큐에서 칸을 예약한 생산자가 게시 전에 멈추면(그 짧은 구간에서 크래시), 출력 스레드는 그 칸을 넘지 못한다. 콜백은 상한까지 기다린 뒤 `TimedOut`이고, 그 칸 뒤의 기록은 잃는다. 이 구간은 복사 한 번이라 드물다. 고치려면 큐가 멈춘 칸을 건너뛰어야 하는데, 생산자가 살아 있는지 가릴 수 없어 하지 않는다.
 - 봉인 파일의 끝 표시: 비정상 종료에서는 `Final`을 쓰지 않는다. "끝 표시 없음 = 비정상 종료" 판정이 맞기 때문이다(9.1절).
-- **크래시 기록의 로그 파일 칸.** 크래시 기록(CrashInfo.json `associatedFiles.logFile`)에서 로그 파일을 찾을 수 있게, `FileLogSink`가 파일을 열 때와 회전할 때 `platform::SetCrashAnnotation(CrashAnnotation::LogFile, data, bytes)`(`Platform/CrashReporting.h`)로 현재 파일의 절대 경로를 알린다. 칸 API는 크래시 수집 LC1b에서 생기며, 로깅은 크래시 수집이 engine-runtime에 병합된 뒤 붙인다(15.1절).
-  - 칸은 쓰는 쪽이 하나여야 한다(seqlock). Async는 출력 스레드만, Sync는 sink mutex 안에서만 쓴다. 프로세스에 `FileLogSink`가 여럿이면 설치된 LogSystem의 sink만 알린다.
-  - 칸은 512 B(`MaxCrashAnnotationBytes`)다. 넘으면 API가 false를 돌려주고 칸을 바꾸지 않는다(자르지 않는다). 그러면 칸을 비우고(`bytes` 0) Warning을 한 번 남긴다. 이전 회전 파일 경로가 남아 엉뚱한 파일을 가리키지 않게 하려는 것이다.
-  - 버린 대안: 넘을 때 파일 이름만 넘기기. 같은 이름이 여러 폴더에 있을 수 있어 헷갈린다. 폴더를 따로 담는 칸이 없다.
-  - 정상 Stop 때 칸을 비우지 않는다. 정상 종료 뒤의 크래시에서도 마지막 로그 파일은 여전히 유효하다.
+- **Asan 구성.** 콜백은 ASan 보고 뒤 death callback이 부르는 공통 Fatal 경로(종료 사유 `Sanitizer`)에서 불린다. 그래서 Windows Asan의 접근 위반에서도 큐가 비워진다. POSIX Asan에서 크래시 처리 스레드 자신이 ASan 오류를 내면 콜백이 불리지 않거나 끝나지 않을 수 있다(CrashHandlingAndLaunch 13.2절의 한계).
+- **크래시 기록의 로그 칸(개정 16, L29).** 크래시 기록(CrashInfo.json `associatedFiles`)에서 로그를 찾을 수 있게 `platform::SetCrashAnnotation`(`Platform/CrashReporting.h`)으로 두 칸을 채운다.
+  - `LogFile`: `FileLogSinkConfig::crashAnnotation`을 켠 `FileLogSink`가 파일을 열 때(Open의 첫 파일)와 회전할 때 현재 파일의 경로를 알린다. 경로는 9.1절에 따라 절대 경로다.
+  - `LogDirectory`: `LogHost`가 파일 sink를 연 뒤 그 sink의 절대 로그 폴더를 한 번 알린다.
+  - **쓰는 쪽은 하나다(seqlock 칸).** 프로세스에서 `crashAnnotation`을 켜는 sink는 `LogHost`가 설치하는 파일 sink 하나다. Open은 등록 전 호출 스레드에서, 회전은 Async 출력 스레드나 Sync sink mutex 안에서 일어나므로 쓰기가 겹치지 않는다. `LogDirectory`는 `LogHost` 설정 스레드만 쓴다.
+  - 칸은 512 B(`MaxCrashAnnotationBytes`)다. 넘으면 API가 false를 돌려주고 칸을 바꾸지 않는다(자르지 않는다). 그러면 칸을 비우고(`bytes` 0) 비상 경로에 Warning을 한 번 남긴다. 이전 회전 파일 경로가 남아 엉뚱한 파일을 가리키지 않게 하려는 것이다.
+  - 정상 Stop·Close 때 칸을 비우지 않는다. 정상 종료 뒤의 크래시에서도 마지막 로그 파일은 여전히 유효하다.
+  - 버린 대안:
+    - 처음 설계의 "설치된 LogSystem의 sink만 알린다"를 sink가 스스로 판정하는 것. sink는 자기를 등록한 LogSystem을 모르고, 판정하려면 등록·설치 상태를 sink 쓰기 경로에서 읽어야 한다. 설치하는 쪽(`LogHost`)이 설정 칸으로 고르는 것이 결정적이다.
+    - 모든 `FileLogSink`가 알리는 것. 시험처럼 sink가 여럿이면 같은 칸을 여러 스레드가 써서 값이 섞인다.
+    - 넘을 때 파일 이름만 넘기기. 같은 이름이 여러 폴더에 있을 수 있어 헷갈린다(폴더 칸이 있어도 파일 칸만 읽는 도구가 잘못 짚는다).
+    - 칸에 쓸 때만 절대 경로로 바꾸기. 작업 디렉터리가 바뀐 뒤의 회전 파일이 다른 폴더에 생기는 문제가 그대로 남는다.
 - UE: 크래시 보고 전에 `GLog->Panic()`을 부른다(`Private/Windows/WindowsPlatformCrashContext.cpp:1833–1837`). Panic은 출력 장치 lock을 최대 1초 기다린 뒤 그대로 flush로 넘어간다(`OR:981–1016`).
 
 **버린 대안(개정 9–11의 설계).**
@@ -847,7 +855,7 @@ LG11–LG19 중 다른 세션 소유 모듈을 고쳐야 하는 곳이다. 그 �
 | LG16 | ObjectRuntime·MetaCompiler(리플렉션 세션) | MetaCompiler가 `GeneratedType<T>::VisitFields`를 생성, ObjectRuntime에 `Object/LogStructure.h`(일반 특수화) | 객체 참조·AssetId·약한 참조·`GeneratedFieldAccess`가 ObjectRuntime에 있다. 생성 코드 크기 증가를 리플렉션 세션이 판단한다. 개정 15에서 로깅이 구현했다(생성 크기는 14.2절 LG16). 리플렉션 세션 검토 대상이다 |
 | LG17 | Compression(Compression 소유 세션) | 고정 작업 공간 zstd 압축 문맥: 최대 입력 크기·고정 매개변수로 `ZSTD_estimateCCtxSize` 계열 크기를 한 번 확보하고 `ZSTD_initStaticCCtx`, 이후 할당 없음(넘치면 실패) | LG17 선행 조건. 지금 `Compressor`는 호출마다 pledged size를 바꿔 작업 공간을 다시 잡을 수 있다(`ZstdCodec.cpp:312–315`) |
 | LG17 | Crypto(`LogFileSealer`, 로깅이 LG10에서 작성) | 봉인 파일 머리에 압축 표시 | crypto 세션에 알린다 |
-| LG18 | PlatformBase 크래시 수집(rocks-36, CrashHandlingAndLaunch.ko.md 19절) | `platform::RegisterTerminationCallback`·`TerminationContext`, `ManualResetEvent::TrySignal`. 처리기·크래시 처리 스레드·stack 보장·`sigaltstack`은 수집기 소유 | 개정 14에서 이관 완료(LC1a). 남은 것: `FileLogSink`의 `SetCrashAnnotation(CrashAnnotation::LogFile, 경로)`는 LC1b의 칸 API 뒤. 주소 대기(WaitOnAddress·futex)가 생기면 깨우기를 그것으로 바꾼다 |
+| LG18 | PlatformBase 크래시 수집(rocks-36, CrashHandlingAndLaunch.ko.md 19절) | `platform::RegisterTerminationCallback`·`TerminationContext`, `ManualResetEvent::TrySignal`. 처리기·크래시 처리 스레드·stack 보장·`sigaltstack`은 수집기 소유 | 개정 14에서 이관 완료(LC1a). 크래시 기록의 로그 칸(`LogFile`·`LogDirectory`)은 크래시 수집 병합(e6f6151b) 뒤 개정 16에서 붙였다(L29). 남은 것: 주소 대기(WaitOnAddress·futex)가 생기면 깨우기를 그것으로 바꾼다 |
 
 ## 16. 범위 밖·후속
 
@@ -893,6 +901,7 @@ LG11–LG19 중 다른 세션 소유 모듈을 고쳐야 하는 곳이다. 그 �
 | L26 | 로그 보기는 Commandlet `log view`(거르기·여러 파일·평문·zst·봉인)까지 한다. 전문 viewer는 Lens(M3). 개정 8의 16절 밖, 새 범위(2026-11-18 사용자 진행 지시·L25 선택으로 확정) | 결정됨(2026-11-18) |
 | L27 | WorkerScheduler 지연·포화 진단은 단계로 두지 않는다. Engine의 스케줄러 소유와 스케줄러 통계 확장이 선행 조건이다(16절) | 결정됨(2026-11-18, 권장안) |
 | L28 | sink 수명은 `RemoveSink` 성공 또는 LogSystem 파괴까지다(`Stop`만으로는 안 됨). `RuntimeLogSink`가 등록 계수를 갖고 등록된 채 파괴되면 Fatal(8.4절) | 결정됨(2026-11-20, macOS CI 결함에서 — 권장안) |
+| L29 | 크래시 기록의 `LogFile` 칸은 `FileLogSinkConfig::crashAnnotation`을 켠 sink 하나(`LogHost`가 설치하는 파일 sink)만 쓰고, `LogDirectory`는 `LogHost`가 쓴다. 상대 로그 폴더는 Open 때 절대 경로로 굳힌다(9.1·14.1.8절) | 결정됨(2026-11-20, 크래시 수집 병합 뒤 — 권장안) |
 
 ## 18. 개정 이력
 
@@ -917,6 +926,7 @@ LG11–LG19 중 다른 세션 소유 모듈을 고쳐야 하는 곳이다. 그 �
 - 개정 7(2026-11-18): LG7 구현 반영 — `CreateD3D12Device`·`Window::Create`에 report 인자(기본 nullptr), `Graphics/GraphicsLog.h` 카테고리와 `ValidationMessageFilter`, 셰이더 실패는 장치 LastError + 호출자 기록, Sandbox는 backend별 실행이라 "건너뛴 backend Warning·모두 실패 Error", OpenGL 기존 로그는 규칙 충족으로 유지.
 - 개정 8(2026-11-18): LG8·LG9 구현 반영 — 설정 이름을 Config 규칙에 맞춰 `log.file.max_bytes`·`log.file.recipient_key`로 바꿨다. `log.mode` 기본값 `default`(호스트 프리셋)를 더했다. 카테고리 재정의는 문자열 `log.levels`이고, 설정 처리는 새 `LogHost` 모듈에 둔다(9.2절). 보관 정리는 파일 이름 모양이 정확히 맞는 것만 센다. Asan·TSan 전체 체인은 저장소 검증 기준 변경으로 생략했다. Templates/Game은 tick·Engine이 없어 엔진 호스트로 다루지 않는다.
 - 개정 9(2026-11-18): 후속 설계 확정 — 16절 항목을 LG11–LG19로 설계했다(14.1절, 결정 L14–L27). 상관 id 스택을 Core로 내리고 trace `log` 채널은 `TraceLogSink`가 쓴다. 레이아웃 설정과 Config 검증 hook, 카테고리별 rate limit, `{@Obj}` 캡처 시점 복사와 생성 필드 방문 함수, Formatter spec 검증 규약, 시간 회전과 묶음별 zstd 압축(압축 뒤 봉인), `platform::Fatal` hook, `log view`를 다룬다. WorkerScheduler 진단은 선행 조건만 적었다. UE 5.8.4 `StructuredLog`·`LogTrace`·`OutputDeviceFile`·`FileHelper`·`OutputDeviceRedirector::Panic`을 확인했다. 다른 세션 조율은 15.1절이다. 리뷰 반영: 상관 id 스택에 확장 칸·관찰자 hook(H1), rate limit 창·수 단일 원자 값(M1), Compression 고정 작업 공간 문맥 요청(M2), 종료 hook `const char*`·막히지 않는 flush(M3), `log.levels` 거부 범위(M5), `{@Obj}` 특수화를 ObjectRuntime으로(M6), 런타임 템플릿 spec 검사 경로·전파 분기 하나·`DedicatedLane` 전파·tick 캡처·LG17 시험 방식·validate reason(Low). L25는 사용자 선택 A로 확정했고, L24·L26은 개정 8의 16절 밖 새 범위로 표시했다.
+- 개정 16(2026-11-20): 크래시 수집 병합(e6f6151b) 뒤 로깅 몫. 크래시 기록의 로그 칸(L29): `FileLogSinkConfig::crashAnnotation`과 `LogHost`의 `LogDirectory`, 상대 로그 폴더를 Open 때 절대 경로로(9.1절), 처음 설계의 "설치된 LogSystem의 sink만"을 설치하는 쪽의 설정 칸으로 바꿈. 14.1.8절에 공용 마감을 Launch 설정으로 바꿀 수 있음과 Asan 구성의 콜백 경로·한계를 적었다.
 - 개정 15(2026-11-20): LG16 구현 반영(14.1.6의 세부와 다르게 정한 점은 14.2절 LG16). 특수화 없는 타입 거부(static_assert와 템플릿 오류 셋), `LogStaticName`, `LogStructureWriter` 쓰기 함수, 인코딩·상한 세부, 텍스트·JSON 모양, `LogProperty`의 `Structure`·`Array`·`Null`과 하위 트리 범위, `LogEvent::structureNodes`, 생성 `VisitFields` 모양과 생성 크기를 적었다. 리뷰 반영: 노드 칸 넘침·공간 잘림을 열린 조상 모두에 표시, 빈 노드 span은 잘림이 아님, `LogStructure`는 클래스 타입만(static_assert), `Object/LogStructure.h` include 규칙(ODR, 생성 헤더 include는 rocks-78과 맞춰 되돌림), `detail::LogTo`의 `{@Name}`, 객체 참조에 registry 번호, enum 기호·태그 이름 규칙과 수명 문구, 8.6절 메모리 표. 생성 소스 분리(GS2) 병합 때 자기 bitfield를 `Get_` 대신 헤더 안 직접 읽기로 바꾸고 ODR 재검토 시점을 GSD5 재검토로 옮겼다.
 - 개정 14(2026-11-20): LG18 처리기를 크래시 수집기로 옮긴 것을 반영했다(14.1.8, L24·L25, 9.2절 호스트 순서, 14.2절, 15.1절). 로깅은 첫 `LogInstallScope` 설치 때 종료 콜백 하나를 등록하고 해제하지 않는다. `Log::Fatal`·assert의 프로세스 Fatal 표시, `failingThreadId`·`stoppedThreadIds`로 출력 스레드 판정, `FlushForTermination`의 결과 값을 정했다. `SetTerminationHook`·hook 연쇄·로깅 자체 처리기와 스레드별 중복 판정을 버린 이유와, 예약 뒤 게시 전 멈춘 칸의 한계를 적었다. 코드는 크래시 수집 LC1a(rocks-36)가 함께 바꿨고 로깅이 리뷰했다.
 - 개정 13(2026-11-20): sink 수명 계약을 `RemoveSink` 성공 또는 LogSystem 파괴까지로 좁히고 등록 계수로 위반을 Fatal로 잡는다(8.4절, L28). macOS CI에서 시험이 sink를 LogSystem보다 나중에 선언해 파괴된 sink를 flush하던 결함(31곳 선언 순서 정정)에서 나왔다. POSIX 크래시 처리기 깨우기를 self-pipe로(14.1.8, L25).

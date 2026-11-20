@@ -3,6 +3,7 @@
 #include <Compression/FixedWorkspaceCompressor.h>
 #include <Core/Diagnostics/Log.h>
 #include <Crypto/Bytes.h>
+#include <Platform/CrashReporting.h>
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
 
@@ -322,6 +323,8 @@ void LogHost::PrepareFileSink(StringView hostName) noexcept {
     FileLogSinkConfig file;
     file.directory = LogFileDirectoryVar.Get();
     file.hostName = hostName;
+    // 이 sink가 크래시 기록의 LogFile 칸을 쓰는 유일한 sink다(설계 14.1.8절, L29).
+    file.crashAnnotation = true;
     file.format = LogFileFormatVar.Get();
     if (file.format == LogFileFormat::JsonLines) {
         if (!LogFileLayoutVar.Get().IsEmpty()) {
@@ -406,6 +409,17 @@ void LogHost::PrepareFileSink(StringView hostName) noexcept {
                    "file",
                    file.directory, ErrorCodeName(opened.Error()));
         return;
+    }
+
+    // 크래시 기록의 LogDirectory 칸은 LogHost만 쓴다(설정 스레드). 넘치면 자르지 않고 비운다.
+    const StringView directory = sink.Value()->Directory();
+    if (!platform::SetCrashAnnotation(platform::CrashAnnotation::LogDirectory, directory.Data(),
+                                      directory.ByteCount())) {
+        (void)platform::SetCrashAnnotation(platform::CrashAnnotation::LogDirectory, nullptr, 0);
+        Log::Warning(LogHostCategory,
+                     "The log directory path is {Bytes} bytes, longer than the crash record limit "
+                     "of {Limit} bytes; crash records will not name the log directory",
+                     directory.ByteCount(), platform::MaxCrashAnnotationBytes);
     }
 
     if (auto added = logs_->AddSink(*sink.Value()); !added) {
