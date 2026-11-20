@@ -6,6 +6,7 @@
 #include <SparksCompiler/PackageManifest.h>
 #include <SparksCompiler/Token.h>
 
+#include "LanguageNames.h"
 #include "Names.h"
 #include "SchemaInput.h"
 
@@ -26,8 +27,8 @@ constexpr StringView TypeKeys[] = {
     "name",          "id",     "kind",      "base",   "scriptExtensible",
     "constructible", "fields", "functions", "events", "cases"};
 constexpr StringView FieldKeys[] = {"name", "id", "type", "access", "computed", "changed"};
-constexpr StringView FunctionKeys[] = {"name",           "id",         "static", "async",
-                                       "typeParameters", "parameters", "returns"};
+constexpr StringView FunctionKeys[] = {
+    "name", "id", "static", "async", "overridable", "typeParameters", "parameters", "returns"};
 constexpr StringView FunctionParameterKeys[] = {"name", "type", "perSecond"};
 constexpr StringView EventParameterKeys[] = {"name", "type"};
 constexpr StringView TypeParameterKeys[] = {"name", "constraint"};
@@ -400,6 +401,11 @@ private:
         const JsonValue name = object.Find("name");
         if (ReadName(object, "name", false, type.name)) {
             type.span = SpanOf(name);
+            if (detail::IsLanguageOwnedName(out_.Text(type.name))) {
+                ReportNamed(type.span, "Type", out_.Text(type.name),
+                            " uses a name that the language owns.");
+            }
+
             // 중복은 다 읽은 뒤 정렬로 본다(CheckDuplicateTypeNames).
             if (auto pushed = typeNames_.TryPushBack(NameUse{type.name, type.span}); !pushed) {
                 error_ = pushed.Error();
@@ -487,6 +493,7 @@ private:
         }
 
         if (allowBase && object.Find("base").IsValid()) {
+            type.baseSpan = SpanOf(object.Find("base"));
             ReadName(object, "base", false, type.base);
         }
 
@@ -503,8 +510,11 @@ private:
         type.fieldCount = static_cast<uint32>(out_.fields_.Size()) - type.firstField;
         type.firstFunction = static_cast<uint32>(out_.functions_.Size());
         const JsonValue functions = allowFunctions ? ArrayOf(object, "functions") : JsonValue();
+        // kind를 모르면 overridable도 거부하지 않는다(kind 규칙과 같다).
+        const bool overridableKind =
+            !knownKind || type.kind == SchemaTypeKind::Object || type.kind == SchemaTypeKind::Asset;
         for (usize index = 0; index < functions.Size() && error_ == ErrorCode::None; ++index) {
-            ReadFunction(functions.At(index));
+            ReadFunction(functions.At(index), overridableKind);
         }
 
         type.functionCount = static_cast<uint32>(out_.functions_.Size()) - type.firstFunction;
@@ -590,6 +600,10 @@ private:
             UseMemberName(field.name, field.span);
         }
 
+        if (object.Find("type").IsValid()) {
+            field.typeSpan = SpanOf(object.Find("type"));
+        }
+
         ReadTypeNotation(object, "type", field.type);
         const JsonValue access = object.Find("access");
         if (access.IsValid()) {
@@ -637,6 +651,10 @@ private:
                 }
             }
 
+            if (element.Find("type").IsValid()) {
+                parameter.typeSpan = SpanOf(element.Find("type"));
+            }
+
             ReadTypeNotation(element, "type", parameter.type);
             parameter.perSecond = function && ReadBool(element, "perSecond", false);
             if (auto pushed = out_.parameters_.TryPushBack(parameter); !pushed) {
@@ -647,7 +665,7 @@ private:
         count = static_cast<uint32>(out_.parameters_.Size()) - first;
     }
 
-    void ReadFunction(JsonValue object) noexcept {
+    void ReadFunction(JsonValue object, bool overridableKind) noexcept {
         if (!object.IsObject()) {
             ReportAt(object, "Each function must be an object.");
             return;
@@ -665,6 +683,13 @@ private:
         ReadId(object, function.id, function.idSpan);
         function.isStatic = ReadBool(object, "static", false);
         function.isAsync = ReadBool(object, "async", false);
+        function.overridable = ReadBool(object, "overridable", false);
+        if (function.overridable && !overridableKind) {
+            ReportAt(object.Find("overridable"),
+                     "'overridable' is only for functions of object and asset types.");
+        } else if (function.overridable && function.isStatic) {
+            ReportAt(object.Find("overridable"), "A static function cannot be overridable.");
+        }
         function.firstTypeParameter = static_cast<uint32>(out_.typeParameters_.Size());
         const JsonValue typeParameters = ArrayOf(object, "typeParameters");
         for (usize index = 0; index < typeParameters.Size() && error_ == ErrorCode::None; ++index) {
@@ -692,6 +717,7 @@ private:
             }
 
             if (element.Find("constraint").IsValid()) {
+                parameter.constraintSpan = SpanOf(element.Find("constraint"));
                 ReadName(element, "constraint", false, parameter.constraint);
             }
 
@@ -703,6 +729,10 @@ private:
         function.typeParameterCount =
             static_cast<uint32>(out_.typeParameters_.Size()) - function.firstTypeParameter;
         ReadParameters(object, true, function.firstParameter, function.parameterCount);
+        if (object.Find("returns").IsValid()) {
+            function.returnsSpan = SpanOf(object.Find("returns"));
+        }
+
         ReadTypeNotation(object, "returns", function.returns);
         if (auto pushed = out_.functions_.TryPushBack(function); !pushed) {
             error_ = pushed.Error();

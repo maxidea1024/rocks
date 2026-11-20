@@ -8,8 +8,11 @@ namespace Rocks.MetaCompiler;
 // 선언은 imported(의존 모듈 descriptor)에 같은 이름·같은 헤더 파일로 있어야 한다(RMC2003).
 // resolveHeader는 descriptor의 header 철자를 이번 include 검색 순서로 찾은 정규 경로다(없으면 null).
 internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, StableIdManifest? manifest,
-    IReadOnlyDictionary<string, ClassModel> imported, Func<string, string?> resolveHeader)
+    IReadOnlyDictionary<string, ClassModel> imported, Func<string, string?> resolveHeader, bool requireGeneratedBody = false)
 {
+    // ROCKS_GENERATED_BODY()가 남기는 자기 타입 표지 멤버의 이름이다(Meta/Annotations.h와 같다).
+    private const string ReflectedSelfMarker = "rocksReflectedSelf";
+
     // 진단의 기본 위치로 쓰는 첫 입력이다.
     private readonly string inputFile = inputs[0].Path;
     private readonly Dictionary<string, ClassModel> classes = new(StringComparer.Ordinal);
@@ -864,6 +867,17 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
                 JsonElement[] members = Children(node).ToArray();
                 currentAliases.Clear();
                 bool generatedBody = members.Any(member => Annotation(member, "rocks.generated") is not null);
+                // 표지 규칙(Docs/Design/ReflectionGeneratedSources.ko.md 8.1절): 리플렉션 클래스·struct는 ROCKS_GENERATED_BODY()를 둔다.
+                // Binds 미러는 실제 타입이 따로 있으므로 대상이 아니다. C++ 관문(Meta/GeneratedType.h의 ReflectedDeclarationV)이 읽는
+                // 자기 타입 표지도 함께 본다 — 매크로가 둘을 같이 내므로 접근 표지만 있으면 매크로 정의가 어긋난 것이다.
+                bool selfMarker = members.Any(member => Text(member, "kind") == "CXXMethodDecl" && Text(member, "name") == ReflectedSelfMarker);
+                if (requireGeneratedBody && !(generatedBody && selfMarker) && (structSpec is null || structSpec.Binds.Length == 0))
+                {
+                    throw new MetadataException($"{qualified}: a reflected {(isStruct ? "struct" : "class")} must contain ROCKS_GENERATED_BODY()", "RMC2211",
+                        "Write ROCKS_GENERATED_BODY() as the first line inside the type. It marks the type as reflected so that using it " +
+                        "in reflection templates without its generated header is a compile error.");
+                }
+
                 string access = Text(node, "tagUsed") == "class" ? "private" : "public";
                 foreach (JsonElement member in members)
                 {

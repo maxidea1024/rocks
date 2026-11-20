@@ -64,6 +64,8 @@ enum 번호는 UE와 같게 둔다(golden 시험의 비교를 단순하게 하�
 ```cpp
 ROCKS_STRUCT()
 struct ScalarCurveBase {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() Optional<float> defaultValue;              // 키가 없을 때의 값(UE DefaultValue = MAX_flt는 "없음")
     ROCKS_PROPERTY() CurveExtrapolation preExtrapolation = CurveExtrapolation::Constant;
     ROCKS_PROPERTY() CurveExtrapolation postExtrapolation = CurveExtrapolation::Constant;
@@ -71,6 +73,8 @@ struct ScalarCurveBase {
 
 ROCKS_STRUCT(Atomic)
 struct TangentCurveKey {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() float time = 0;
     ROCKS_PROPERTY() float value = 0;
     ROCKS_PROPERTY() CurveInterp interp = CurveInterp::Linear;
@@ -94,7 +98,12 @@ private:
 };
 
 ROCKS_STRUCT(Atomic)
-struct PlainCurveKey { ROCKS_PROPERTY() float time = 0; ROCKS_PROPERTY() float value = 0; };
+struct PlainCurveKey {
+    ROCKS_GENERATED_BODY()
+
+    ROCKS_PROPERTY() float time = 0;
+    ROCKS_PROPERTY() float value = 0;
+};
 
 ROCKS_STRUCT()
 struct PlainCurve : ScalarCurveBase {

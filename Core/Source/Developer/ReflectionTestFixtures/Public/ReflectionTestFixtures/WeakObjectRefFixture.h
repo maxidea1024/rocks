@@ -17,22 +17,30 @@ namespace rocks::reflection_fixture {
 // 집합을 넓히는 강한 참조다. WeakOther는 기대 타입과 무관한 대조용 클래스다.
 ROCKS_CLASS()
 struct WeakTarget : Object {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() uint32 value = 0;
 };
 
 ROCKS_CLASS()
 struct WeakOther final : Object {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() uint32 value = 0;
 };
 
 ROCKS_STRUCT()
 struct WeakLink {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() WeakObjectRef<WeakTarget> target;
     ROCKS_PROPERTY() uint32 slot = 0;
 };
 
 ROCKS_STRUCT()
 struct WeakLinkGroup {
+    ROCKS_GENERATED_BODY()
+
     explicit WeakLinkGroup(Allocator& allocator) noexcept : links(allocator) {
     }
 
@@ -41,6 +49,8 @@ struct WeakLinkGroup {
 
 ROCKS_CLASS()
 struct WeakHolder final : WeakTarget {
+    ROCKS_GENERATED_BODY()
+
     explicit WeakHolder(Allocator& allocator) noexcept : targets(allocator), group(allocator) {
     }
 

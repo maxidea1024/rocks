@@ -1,0 +1,3 @@
+import Rocks.Actor;
+
+fn G(): int { return Nope; }

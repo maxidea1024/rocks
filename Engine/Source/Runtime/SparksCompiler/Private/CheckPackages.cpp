@@ -1,6 +1,7 @@
 #include <Core/Algorithms.h>
 
 #include "CompilationChecker.h"
+#include "NameBinder.h"
 #include "Names.h"
 
 // 패키지 검사다: binding schema·manifest 읽기, 패키지 이름 중복(S1112), 모듈 경로(S1108–S1110),
@@ -154,6 +155,20 @@ Result<void> CompilationChecker::Run() noexcept {
 
     CheckCycles();
     ParseModules();
+    if (compilation_.lastStage_ == CompilationStage::Syntax) {
+        if (error_ != ErrorCode::None) {
+            return Result<void>::Failure(error_);
+        }
+
+        // 결과 접근이 쓰는 import 구간을 비운 채로 둔다.
+        for (auto& module : compilation_.modules_) {
+            module.firstImport = 0;
+            module.importCount = 0;
+        }
+
+        return Result<void>::Success();
+    }
+
     CollectLexicalErrors();
     for (uint32 module = 0; module < compilation_.modules_.Size() && error_ == ErrorCode::None;
          ++module) {
@@ -162,6 +177,15 @@ Result<void> CompilationChecker::Run() noexcept {
 
     if (error_ != ErrorCode::None) {
         return Result<void>::Failure(error_);
+    }
+
+    if (compilation_.lastStage_ == CompilationStage::Imports) {
+        return Result<void>::Success();
+    }
+
+    NameBinder binder(compilation_, diagnostics_);
+    if (auto bound = binder.Run(); !bound) {
+        return bound;
     }
 
     return Result<void>::Success();

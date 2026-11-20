@@ -1,0 +1,5 @@
+# Engine interfaces and their base chain: each missing method is reported at the class, and an
+# interface reached twice (directly and through a base interface) is checked once.
+error S0324 6:7
+error S0324 6:7
+error S0324 10:8

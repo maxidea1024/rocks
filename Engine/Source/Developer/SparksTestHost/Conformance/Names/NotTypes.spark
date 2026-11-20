@@ -1,0 +1,13 @@
+class Door : ScriptComponent {
+    var Speed: int;
+    var Copy: Speed;
+
+    fn Run(count: int) {
+        let first: count = 1;
+        let second: Time = 2;
+        let third: Owner = 3;
+        _ = first;
+        _ = second;
+        _ = third;
+    }
+}

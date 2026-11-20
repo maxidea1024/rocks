@@ -14,6 +14,8 @@ namespace rocks::reflection_fixture {
 // 시험한다(GeneratedPathTests).
 ROCKS_STRUCT()
 struct PathEntry {
+    ROCKS_GENERATED_BODY()
+
     explicit PathEntry(Allocator& allocator) noexcept : caption(allocator) {
     }
 
@@ -24,6 +26,8 @@ struct PathEntry {
 
 ROCKS_CLASS()
 struct PathOwner final : Object {
+    ROCKS_GENERATED_BODY()
+
     explicit PathOwner(Allocator& allocator) noexcept
         : primary(allocator), frozen(allocator), locked(allocator), entries(allocator),
           frozenEntries(allocator), frozenLinks(allocator) {

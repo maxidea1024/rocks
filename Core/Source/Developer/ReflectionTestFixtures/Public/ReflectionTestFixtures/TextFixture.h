@@ -39,24 +39,36 @@ enum class TextChannels : uint32 {
 
 ROCKS_STRUCT()
 struct TextPoint {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() int32 x = 0;
     ROCKS_PROPERTY() int32 y = 0;
 };
 
 ROCKS_CLASS(Abstract)
-struct TextKindBase : Object {};
+struct TextKindBase : Object {
+    ROCKS_GENERATED_BODY()
+};
 
 ROCKS_CLASS()
-struct TextKindDerived final : TextKindBase {};
+struct TextKindDerived final : TextKindBase {
+    ROCKS_GENERATED_BODY()
+};
 
 ROCKS_CLASS(Name = "Text.Renamed")
-struct TextKindRenamed final : TextKindBase {};
+struct TextKindRenamed final : TextKindBase {
+    ROCKS_GENERATED_BODY()
+};
 
 ROCKS_CLASS()
-struct TextStranger final : Object {};
+struct TextStranger final : Object {
+    ROCKS_GENERATED_BODY()
+};
 
 ROCKS_CLASS()
 struct TextHolder final : Object {
+    ROCKS_GENERATED_BODY()
+
     explicit TextHolder(Allocator& allocator) noexcept
         : label(allocator), source(allocator), numbers(allocator), words(allocator),
           points(allocator), tags(allocator), scores(allocator), byQuality(allocator),

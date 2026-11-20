@@ -1,0 +1,11 @@
+# Imported names (3.9 step 6, S0311): one diagnostic per import line that brings a name of an
+# earlier import or of this file, and for an alias that clashes with an imported name or an
+# engine type. A lowercase alias is S0306. 'Alias.Name' names a type of the aliased module, and
+# the short name of an aliased declaration is unknown (S0318).
+error S0311 Game/Main.spark 2:8
+error S0311 Game/Main.spark 3:8
+error S0311 Game/Main.spark 5:23
+error S0311 Game/Main.spark 6:25
+error S0306 Game/Main.spark 7:26
+error S0318 Game/Main.spark 13:24
+error S0318 Game/Main.spark 14:16

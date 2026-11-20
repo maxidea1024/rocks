@@ -924,6 +924,66 @@ TEST(SparksBindingSchema_ValueKinds) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
+// `overridable`(LC2b, SD65): object·asset 타입의 static이 아닌 함수만. 타입 이름은 언어 소유 이름일
+// 수 없다(3.9절 "이름의 출처").
+TEST(SparksBindingSchema_OverridableAndLanguageNames) {
+    SystemAllocator allocator;
+    {
+        constexpr StringView Id = "\"id\": \"5a7e0000000000000000000000000003\"";
+        auto function = [&](StringView kind, StringView extra) noexcept {
+            const String lines = Join(allocator, "\"name\": \"F\",\n", Id, ",\n", extra);
+            StringBuilder<512> type(allocator);
+            type.Append("\"name\": \"T\",\n\"id\": \"").Append(TypeId).Append("\",\n\"kind\": \"");
+            type.Append(kind)
+                .Append("\",\n\"functions\": [\n{\n")
+                .Append(lines.View())
+                .Append("\n}\n]");
+            return TypeSchema(allocator, type.View());
+        };
+        {
+            Read read(allocator);
+            REQUIRE(ReadText(read, function("object", "\"overridable\": true").View()));
+            CHECK(read.valid);
+            REQUIRE(read.schema.Functions().Size() == 1);
+            CHECK(read.schema.Functions()[0].overridable);
+        }
+        CHECK(Accepts(function("asset", "\"overridable\": false").View()));
+        // 줄: 7 name, 8 id, 9 kind, 10 functions, 11 '{', 12 name, 13 id, 14 key.
+        CHECK(Rejects(function("struct", "\"overridable\": true").View(), 14, 16));
+        CHECK(FirstSays(function("struct", "\"overridable\": true").View(),
+                        "'overridable' is only for functions of object and asset types."));
+        CHECK(Rejects(function("interface", "\"overridable\": true").View(), 14, 16));
+        CHECK(
+            Rejects(function("object", "\"static\": true,\n\"overridable\": true").View(), 15, 16));
+        CHECK(FirstSays(function("object", "\"static\": true,\n\"overridable\": true").View(),
+                        "A static function cannot be overridable."));
+        CHECK(Rejects(function("object", "\"overridable\": 1").View(), 14, 16));
+        // kind를 모르면 overridable을 거부하지 않는다(kind 진단 하나).
+        CHECK(Rejects(function("thing", "\"overridable\": true").View(), 9, 9));
+
+        constexpr StringView LanguageOwned[] = {"Array",  "Text",          "Log",
+                                                "Action", "WorldPosition", "Clock"};
+        for (const StringView name : LanguageOwned) {
+            const String lines = Join(allocator, "\"name\": \"", name, "\",\n\"id\": \"", TypeId);
+            const String text = TypeSchema(
+                allocator, Join(allocator, lines.View(), "\",\n\"kind\": \"object\"").View());
+            CHECK(Rejects(text.View(), 7, 9));
+            CHECK(FirstSays(
+                text.View(),
+                Join(allocator, "Type '", name, "' uses a name that the language owns.").View()));
+        }
+
+        // 엔진이 제공하는 예약 이름은 schema가 정의한다.
+        CHECK(Accepts(ObjectType(allocator, "object", "").View()));
+        const String world =
+            TypeSchema(allocator, Join(allocator, "\"name\": \"World\",\n\"id\": \"", TypeId,
+                                       "\",\n\"kind\": \"object\"")
+                                      .View());
+        CHECK(Accepts(world.View()));
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
 TEST(SparksBindingSchema_ReportsEveryProblem) {
     SystemAllocator allocator;
     {

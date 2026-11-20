@@ -15,6 +15,8 @@ namespace rocks::asset_fixture {
 // 담는다.
 ROCKS_CLASS()
 struct TestAsset final : Asset {
+    ROCKS_GENERATED_BODY()
+
     explicit TestAsset(Allocator& allocator) noexcept
         : label(allocator), hardList(allocator), soft(allocator), note(allocator) {
     }
@@ -36,6 +38,8 @@ struct TestAsset final : Asset {
 // 하위 객체다(대표 에셋 아래 이름 있는 객체 — import 경로 "Body.Socket" 시험).
 ROCKS_CLASS()
 struct TestPart final : Object {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() int32 index = 0;
     ROCKS_PROPERTY() ObjectRef<TestPart> sibling;
     ROCKS_PROPERTY() BulkDataRef data;
@@ -44,12 +48,16 @@ struct TestPart final : Object {
 // 저장 불가 클래스다(Transient — export에서 그 부분 트리째 빠진다).
 ROCKS_CLASS(Transient)
 struct TestScratch final : Object {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() int32 cache = 0;
 };
 
 // Required Hard 참조를 가진 에셋이다(쿠킹 저장의 Required 거부·로드 누락 시험).
 ROCKS_CLASS()
 struct TestRequiredAsset final : Asset {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY(Required) ObjectRef<Asset> target;
 };
 
@@ -68,6 +76,8 @@ inline TestHookAssetHooks testHookAssetHooks;
 // 참조다(오래된 의존 쿠킹 결과를 가리켜 공개를 실패시키면 롤백이 소멸자를 부른다).
 ROCKS_CLASS()
 struct TestHookAsset final : Asset {
+    ROCKS_GENERATED_BODY()
+
     TestHookAsset() noexcept {
         if (testHookAssetHooks.constructed != nullptr) {
             testHookAssetHooks.constructed(testHookAssetHooks.context);

@@ -3,7 +3,11 @@
 #include <Core/Text/StringBuilder.h>
 #include <Platform/Memory.h>
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <d3d11shader.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
 
 namespace rocks::graphics::d3d11 {
 

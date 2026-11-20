@@ -1,0 +1,14 @@
+1:8 decl struct Test:Main.SphereCollider
+3:4 decl fn Test:Main.G
+3:6 decl param c@3:6
+3:9 type Rocks.SphereCollider
+3:31 c -> param c@3:6
+5:7 decl class Test:Main.D
+5:11 type Rocks.ScriptComponent
+6:9 decl field Test:Main.D.Owner
+6:16 type int
+7:8 decl method Test:Main.D.F
+8:13 Owner -> engine-field Rocks.Component.Owner
+9:13 decl local x@9:13
+10:13 decl local x@10:13
+11:13 x -> local x@9:13

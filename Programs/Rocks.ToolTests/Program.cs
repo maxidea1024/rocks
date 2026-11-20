@@ -74,6 +74,8 @@ internal static class Program
                     failures.AddRange(PolicyChecks.UnityCollisions(root, rulesAssembly));
                     // PCH 헤더는 빌드가 강제 include한다 — 소스와 헤더가 직접 include하지 않는다(같은 문서 8.1·10절).
                     failures.AddRange(PolicyChecks.PchHeaderIncludes(root, rulesAssembly));
+                    // 매크로를 남기는 헤더(Windows SDK 계열)는 감싸서 include한다(같은 문서 6.1절).
+                    failures.AddRange(PolicyChecks.UnityMacroLeaks(root, rulesAssembly));
                     foreach (string notice in release.Notices)
                     {
                         Console.WriteLine("note: " + notice);

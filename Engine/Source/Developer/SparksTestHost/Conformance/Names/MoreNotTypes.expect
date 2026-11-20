@@ -1,0 +1,4 @@
+# S0319 for an RPC prefix, a top-level function and a parameter in a type position.
+error S0319 4:12
+error S0319 5:12
+error S0319 7:16

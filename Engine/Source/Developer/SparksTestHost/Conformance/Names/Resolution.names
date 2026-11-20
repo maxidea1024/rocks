@@ -1,0 +1,67 @@
+1:6 decl enum Test:Main.DoorState
+1:18 decl case Test:Main.DoorState.Closed
+1:26 decl case Test:Main.DoorState.Open
+3:7 decl const Test:Main.MaxStack
+3:17 type int
+5:8 decl struct Test:Main.HitInfo
+6:9 decl field Test:Main.HitInfo.Point
+6:16 type vec3
+7:9 decl field Test:Main.HitInfo.Damage
+7:17 type int
+9:8 decl method Test:Main.HitInfo.Scaled
+9:15 decl param factor@9:15
+9:23 type int
+9:29 type int
+10:16 Damage -> field Test:Main.HitInfo.Damage
+10:25 factor -> param factor@9:15
+14:4 decl fn Test:Main.Twice
+14:10 decl param value@14:10
+14:17 type int
+14:23 type int
+15:12 value -> param value@14:10
+15:20 MaxStack -> const Test:Main.MaxStack
+18:7 decl class Test:Main.DoorLogic
+18:19 type Rocks.ScriptComponent
+19:9 decl field Test:Main.DoorLogic.OpenAngle
+19:20 type float
+20:9 decl field Test:Main.DoorLogic.State
+20:17 DoorState -> enum Test:Main.DoorState
+21:9 decl field Test:Main.DoorLogic.Hits
+21:15 type Map<string, Array<Test:Main.HitInfo>>
+21:19 type string
+21:27 type Array<Test:Main.HitInfo>
+21:33 type Test:Main.HitInfo
+22:9 decl field Test:Main.DoorLogic.Target
+22:17 type Rocks.Actor?
+24:11 decl event Test:Main.DoorLogic.Opened
+24:18 decl param by@24:18
+24:22 type Rocks.Actor?
+27:9 Log -> prelude Log
+30:8 Owner -> engine-field Rocks.Component.Owner
+30:25 decl param actor@30:25
+30:32 type Rocks.Actor
+31:14 Opened -> event Test:Main.DoorLogic.Opened
+31:21 actor -> param actor@30:25
+34:8 decl method Test:Main.DoorLogic.Swing
+34:14 decl param dt@34:14
+34:18 type float
+34:26 type float
+35:13 decl local total@35:13
+36:14 decl local key@36:14
+36:19 decl local list@36:19
+36:27 Hits -> field Test:Main.DoorLogic.Hits
+37:13 total -> local total@35:13
+37:21 total -> local total@35:13
+37:29 float -> builtin float
+37:35 Twice -> fn Test:Main.Twice
+37:41 list -> local list@36:19
+40:17 decl local found@40:17
+40:25 Target -> field Test:Main.DoorLogic.Target
+41:17 decl local pawn@41:17
+41:24 found -> local found@40:17
+41:34 type Rocks.Pawn
+42:17 pawn -> local pawn@41:17
+45:13 World -> context World
+46:16 total -> local total@35:13
+46:24 dt -> param dt@34:14
+46:29 OpenAngle -> field Test:Main.DoorLogic.OpenAngle

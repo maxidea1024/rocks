@@ -1,0 +1,9 @@
+import Tools as T;
+
+struct Box {
+    var A: T.Hammer;
+    var B: T.Helper;
+    var C: T.Nope;
+    var D: T.Hammer.Head;
+    var E: T;
+}

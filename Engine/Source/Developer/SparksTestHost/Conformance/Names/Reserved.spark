@@ -1,0 +1,16 @@
+class Array : ScriptComponent {
+    var World: int;
+    fn Delay() { }
+    var Changed: int;
+}
+
+struct Hit { }
+
+enum Mode { Tag, Server }
+
+const Log: int = 1;
+
+fn Compute(vec3: int): int {
+    let int = 1;
+    return int + vec3;
+}

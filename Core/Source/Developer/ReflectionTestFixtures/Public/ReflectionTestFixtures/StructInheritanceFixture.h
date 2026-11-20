@@ -33,6 +33,8 @@ struct InheritMarked : InheritMarker {};
 
 ROCKS_STRUCT()
 struct InheritBase : InheritMarker {
+    ROCKS_GENERATED_BODY()
+
     explicit InheritBase(Allocator& allocator) noexcept : name(allocator), note(allocator) {
     }
 
@@ -45,6 +47,8 @@ struct InheritBase : InheritMarker {
 
 ROCKS_STRUCT()
 struct InheritMiddle : InheritBase {
+    ROCKS_GENERATED_BODY()
+
     explicit InheritMiddle(Allocator& allocator) noexcept : InheritBase(allocator) {
     }
 
@@ -53,6 +57,8 @@ struct InheritMiddle : InheritBase {
 
 ROCKS_STRUCT()
 struct InheritLeaf : InheritMiddle, InheritTag<InheritLeaf> {
+    ROCKS_GENERATED_BODY()
+
     explicit InheritLeaf(Allocator& allocator) noexcept : InheritMiddle(allocator) {
     }
 
@@ -61,6 +67,8 @@ struct InheritLeaf : InheritMiddle, InheritTag<InheritLeaf> {
 
 ROCKS_STRUCT()
 struct InheritOffset : InheritMarked, InheritBase {
+    ROCKS_GENERATED_BODY()
+
     explicit InheritOffset(Allocator& allocator) noexcept : InheritBase(allocator) {
     }
 
@@ -69,6 +77,8 @@ struct InheritOffset : InheritMarked, InheritBase {
 
 ROCKS_STRUCT(Atomic)
 struct InheritAtomicBase {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() int32 x = 0;
     ROCKS_PROPERTY() int32 y = 0;
 };
@@ -76,22 +86,30 @@ struct InheritAtomicBase {
 // Atomic은 base에서 상속된다(파생에 다시 쓰지 않는다).
 ROCKS_STRUCT()
 struct InheritAtomicLeaf : InheritAtomicBase {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() int32 z = 0;
 };
 
 ROCKS_STRUCT()
 struct InheritRefBase {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() ObjectRef<Object> target;
 };
 
 // 강한 참조 형질을 base에서 상속한다.
 ROCKS_STRUCT()
 struct InheritRefLeaf : InheritRefBase {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() int32 n = 0;
 };
 
 ROCKS_STRUCT()
 struct InheritRequiredBase {
+    ROCKS_GENERATED_BODY()
+
     explicit InheritRequiredBase(Allocator& allocator) noexcept : asset(allocator) {
     }
 
@@ -101,6 +119,8 @@ struct InheritRequiredBase {
 // Required 형질을 base에서 상속한다.
 ROCKS_STRUCT()
 struct InheritRequiredLeaf : InheritRequiredBase {
+    ROCKS_GENERATED_BODY()
+
     explicit InheritRequiredLeaf(Allocator& allocator) noexcept : InheritRequiredBase(allocator) {
     }
 
@@ -110,12 +130,16 @@ struct InheritRequiredLeaf : InheritRequiredBase {
 // InheritBase와 무관한 struct다(InstancedStruct<InheritBase>가 거부한다).
 ROCKS_STRUCT()
 struct InheritOther {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() int32 q = 0;
 };
 
 // InstancedStruct<InheritBase> 멤버를 담는 struct다.
 ROCKS_STRUCT()
 struct InheritShapeHost {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() InstancedStruct<InheritBase> shape;
     ROCKS_PROPERTY() uint32 count = 0;
 };
@@ -123,18 +147,24 @@ struct InheritShapeHost {
 // InstancedStruct 멤버를 base에서 상속한다(ContainsInstancedStruct 형질 상속).
 ROCKS_STRUCT()
 struct InheritShapeChild : InheritShapeHost {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() int32 extra = 0;
 };
 
 // 중첩 struct 멤버를 가진 base다(깊이 2).
 ROCKS_STRUCT()
 struct InheritNestedBase {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() InheritOther inner;
 };
 
 // 깊이를 base에서 상속한다(2).
 ROCKS_STRUCT()
 struct InheritNestedLeaf : InheritNestedBase {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() int32 z = 0;
 };
 
@@ -158,11 +188,15 @@ private:
 
 ROCKS_STRUCT()
 struct InheritPrivateLeaf : InheritPrivateBase {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() int32 open = 0;
 };
 
 ROCKS_CLASS()
 struct InheritHolder final : Object {
+    ROCKS_GENERATED_BODY()
+
     explicit InheritHolder(Allocator& allocator) noexcept
         : leaf(allocator), offset(allocator), shapes(allocator) {
     }

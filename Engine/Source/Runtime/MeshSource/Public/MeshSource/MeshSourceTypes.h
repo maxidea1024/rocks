@@ -127,10 +127,16 @@ enum class MeshIssue : uint8 {
     BoneIndexRange,          // boneIndex >= MeshValidateOptions::boneCount
     ZeroWeightSum,           // 영향이 있는데 가중치 합이 0(정규화 불가 — SanitizeMeshSource)
     // 경고(SanitizeMeshSource).
-    NonFiniteTexCoord,   // NonFiniteAttribute: UV 비유한 성분을 0으로 고침
-    NonFiniteColor,      // NonFiniteAttribute: 색 비유한값을 (1, 1, 1, 1)로 고침
-    UvOutOfRange,        // UvOutOfRange: |UV 성분| > MeshUvRangeWarning
-    NonNormalizedWeights // NonNormalizedWeights: 가중치 합 != BoneWeightTotal을 정규화함
+    NonFiniteTexCoord,    // NonFiniteAttribute: UV 비유한 성분을 0으로 고침
+    NonFiniteColor,       // NonFiniteAttribute: 색 비유한값을 (1, 1, 1, 1)로 고침
+    UvOutOfRange,         // UvOutOfRange: |UV 성분| > MeshUvRangeWarning
+    NonNormalizedWeights, // NonNormalizedWeights: 가중치 합 != BoneWeightTotal을 정규화함
+    // 빌드(MeshTools BuildStaticMeshLod — MeshAnimationAssets.ko.md 5.2·5.4절). 진단 code는 같은
+    // 이름이고 InvalidBuildScale만 InvalidSetting이다. index는 차례로 묶음·없음·필드·축이다.
+    MaterialSlotFallback, // 묶음의 슬롯 이름과 맞는 슬롯이 없음
+    NegativeBuildScale,   // buildScale 음수 성분이 홀수 개(count = 그 수)
+    UnsupportedSetting,   // 보존 설정(MeshBuildSettingField)이 기본값이 아님
+    InvalidBuildScale     // buildScale 축이 0·비유한이거나 역수가 비유한
 };
 
 // 진단 세부 규칙의 이름이다(예: DuplicateEdge → "DuplicateEdge"). 모르는 값은 "Unknown"이다. 반환

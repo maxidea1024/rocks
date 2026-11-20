@@ -1,0 +1,8 @@
+# A member cannot hide an inherited member (3.1, S0313): engine members by exact spelling
+# (a field, a function and an overridable function without 'override'), Sparks members
+# ignoring letter case.
+error S0313 2:9
+error S0313 3:8
+error S0313 4:8
+error S0313 14:9
+error S0313 15:8

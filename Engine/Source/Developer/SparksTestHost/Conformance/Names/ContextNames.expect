@@ -1,0 +1,10 @@
+# Context names exist only where the base type provides them (3.9, S0321): not in struct
+# functions, top-level functions or initial values, no Input in a world service, Caller only
+# in a server RPC function, none in a data asset.
+error S0321 3:13
+error S0321 9:9
+error S0321 15:13
+error S0321 16:13
+error S0321 21:17
+error S0321 28:13
+error S0321 34:13

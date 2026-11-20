@@ -1,0 +1,11 @@
+1:4 decl fn Test:Main.Jump
+1:12 type int
+3:7 decl const Test:Main.Location
+3:17 type int
+5:7 decl class Test:Main.Mover
+5:15 type Rocks.Character
+6:8 decl method Test:Main.Mover.Run
+6:20 Jump -> engine-fn Rocks.Character.Jump
+9:4 decl fn Test:Main.Free
+9:12 type int
+9:25 Jump -> fn Test:Main.Jump

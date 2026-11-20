@@ -1,0 +1,16 @@
+# Type names (3.9 "type notation"): unknown types and qualified paths that are not
+# 'Alias.Name' (S0318), names that are not types (S0319), and the number of type arguments
+# (S0320).
+error S0318 1:10
+error S0318 2:10
+error S0318 3:10
+error S0319 4:10
+error S0319 5:10
+error S0319 6:10
+error S0320 7:10
+error S0320 8:10
+error S0320 9:10
+error S0320 10:10
+error S0319 11:10
+error S0318 12:16
+error S0318 13:10

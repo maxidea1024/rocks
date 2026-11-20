@@ -1,0 +1,5 @@
+# Another return type or parameter count is S0315. A parameter type that cannot be resolved
+# stops the comparison (only S0318).
+error S0315 2:17
+error S0315 6:17
+error S0318 10:41

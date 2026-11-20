@@ -1,0 +1,7 @@
+# Hook names (3.9 step 3): members of a lifecycle class cannot use hook names, On + hook
+# names or Unity hook names. A data asset class, struct fields and enum cases may.
+error S0308 2:8
+error S0308 3:8
+error S0308 4:8
+error S0308 5:9
+error S0308 6:11

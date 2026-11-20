@@ -1,0 +1,62 @@
+1:6 decl enum Test:Main.Mode
+1:13 decl case Test:Main.Mode.Idle
+1:19 decl case Test:Main.Mode.Run
+3:20 decl param by@3:20
+3:24 type Rocks.Actor
+3:31 decl param force@3:31
+3:38 type float
+5:7 decl class Test:Main.Walker
+5:16 type Rocks.Character
+6:9 decl field Test:Main.Walker.Speeds
+6:17 type Array<float>
+6:23 type float
+7:9 decl field Test:Main.Walker.Mode2
+7:17 Mode -> enum Test:Main.Mode
+9:20 decl param by@9:20
+9:24 type Rocks.Actor
+9:31 decl param force@9:31
+9:38 type float
+10:26 by -> param by@9:20
+10:31 force -> param force@9:31
+13:8 decl method Test:Main.Walker.Step
+13:13 decl param limit@13:13
+13:20 type int
+13:26 type float
+14:13 decl local index@14:13
+15:13 decl local sum@15:13
+16:16 index -> local index@14:13
+16:24 limit -> param limit@13:13
+17:13 index -> local index@14:13
+20:17 Mode2 -> field Test:Main.Walker.Mode2
+21:18 Mode -> enum Test:Main.Mode
+21:31 sum -> local sum@15:13
+21:38 sum -> local sum@15:13
+22:18 Mode -> enum Test:Main.Mode
+22:30 sum -> local sum@15:13
+22:36 Speeds -> field Test:Main.Walker.Speeds
+22:43 index -> local index@14:13
+25:17 index -> local index@14:13
+27:24 sum -> local sum@15:13
+27:31 sum -> local sum@15:13
+30:13 decl local names@30:13
+30:20 type Map<string, float>
+30:24 type string
+30:32 type float
+30:45 index -> local index@14:13
+30:54 sum -> local sum@15:13
+30:73 sum -> local sum@15:13
+31:13 decl local first@31:13
+31:21 Speeds -> field Test:Main.Walker.Speeds
+31:41 sum -> local sum@15:13
+32:13 decl local found@32:13
+32:21 Find -> engine-fn Rocks.Actor.Find
+32:26 type Rocks.ScriptComponent
+33:13 decl local other@33:13
+33:21 Owner2 -> method Test:Main.Walker.Owner2
+33:33 type Rocks.SphereCollider
+34:13 names -> local names@30:13
+35:13 found -> local found@32:13
+36:13 other -> local other@33:13
+37:16 first -> local first@31:13
+40:8 decl method Test:Main.Walker.Owner2
+40:18 type Rocks.Actor

@@ -141,6 +141,31 @@ public static class MathReference
 
         Emit(text, "Gamma22Reference", gamma.Select(x => (x, 0.0, PowRational(x, 11, 5))));
 
+        // Acos: 분기 경계(±½)·끝점(±1)·0 근처, 고른 표본, ±1 근처(√ 보정 경로), ½ 근처.
+        var acos = new List<double>
+        {
+            0.5, -0.5, 0.0, 1.0, -1.0, 1e-9, -1e-9, 0.9999999999, -0.9999999999, 1 - Math.ScaleB(1, -53),
+            -1 + Math.ScaleB(1, -53), 0.7071067811865476, -0.7071067811865476, 0.5000000000000001, -0.5000000000000001
+        };
+        for (int i = 0; i < 150; ++i)
+        {
+            acos.Add(random.Uniform(-1, 1));
+        }
+
+        for (int i = 0; i < 30; ++i)
+        {
+            acos.Add(1 - random.Uniform(0, 1e-6));
+            acos.Add(-1 + random.Uniform(0, 1e-6));
+        }
+
+        for (int i = 0; i < 20; ++i)
+        {
+            acos.Add(random.Uniform(0.49, 0.51));
+            acos.Add(random.Uniform(-0.51, -0.49));
+        }
+
+        Emit(text, "AcosReference", acos.Select(x => (x, 0.0, Acos(x))));
+
         text.Append("// clang-format on\n\n} // namespace rocks::deterministic::reference\n");
         return text.ToString();
     }
@@ -423,6 +448,91 @@ public static class MathReference
         }
 
         return Round(sum, 0, negative && sum.Sign != 0);
+    }
+
+    // arccos(x)(|x| ≤ 1): x ≥ 0이면 2·asin(√((1 − x)/2)), x < 0이면 π − acos(−x). √는 정수 제곱근,
+    // asin은 고정소수점 sin·cos로 Newton 반복한다(인자 ≤ π/4라 급수가 빨리 수렴한다).
+    private static double Acos(double x)
+    {
+        var (m, e) = Exact(Math.Abs(x));
+        if (!m.IsZero && -e > Precision - 100)
+        {
+            throw new InvalidOperationException("Acos reference input is too small");
+        }
+
+        BigInteger magnitude = m.IsZero ? 0 : e >= 0 ? (m << e) * One : (m * One) >> -e;
+        BigInteger half = (One - magnitude) / 2;
+        BigInteger s = IntegerSqrt(half * One);
+        BigInteger angle = 2 * AsinFixed(s);
+        if (x < 0)
+        {
+            angle = PiFixed - angle;
+        }
+
+        return Round(angle, 0);
+    }
+
+    // asin(s)(s 고정소수점 ∈ [0, √½]): sin(φ) = s를 Newton으로 푼다. 시작값은 double asin(53비트)이고
+    // 반복마다 맞는 비트가 두 배가 되므로 4회면 400비트를 넘는다(여유로 6회).
+    private static BigInteger AsinFixed(BigInteger s)
+    {
+        if (s.Sign == 0)
+        {
+            return 0;
+        }
+
+        var (m, e) = Exact(Math.Asin((double)s / (double)One));
+        BigInteger phi = e >= 0 ? (m << e) * One : (m * One) >> -e;
+        for (int iteration = 0; iteration < 6; ++iteration)
+        {
+            var (sine, cosine) = SinCosFixed(phi);
+            phi -= (sine - s) * One / cosine;
+        }
+
+        return phi;
+    }
+
+    // sin(a)·cos(a)(a 고정소수점, |a| ≤ 1)의 Taylor 급수.
+    private static (BigInteger Sine, BigInteger Cosine) SinCosFixed(BigInteger a)
+    {
+        BigInteger square = a * a >> Precision;
+        BigInteger sine = 0, term = a;
+        for (int k = 1; term != 0; k += 2)
+        {
+            sine += term;
+            term = -(term * square >> Precision) / ((k + 1) * (k + 2));
+        }
+
+        BigInteger cosine = 0;
+        term = One;
+        for (int k = 0; term != 0; k += 2)
+        {
+            cosine += term;
+            term = -(term * square >> Precision) / ((k + 1) * (k + 2));
+        }
+
+        return (sine, cosine);
+    }
+
+    // ⌊√n⌋(n ≥ 0) — Newton 정수 반복.
+    private static BigInteger IntegerSqrt(BigInteger n)
+    {
+        if (n.Sign == 0)
+        {
+            return 0;
+        }
+
+        BigInteger x = BigInteger.One << (int)((n.GetBitLength() + 1) / 2);
+        while (true)
+        {
+            BigInteger next = (x + n / x) >> 1;
+            if (next >= x)
+            {
+                return x;
+            }
+
+            x = next;
+        }
     }
 
     private sealed class XorShift(ulong state)

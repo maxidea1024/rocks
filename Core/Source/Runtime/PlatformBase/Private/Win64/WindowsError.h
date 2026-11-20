@@ -2,7 +2,11 @@
 
 #include <Platform/File.h>
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
 
 // Win32 오류 코드를 PlatformBase 공통 상태(FileStatus)로 바꾸는 규칙이다. 파일·디렉터리 감시·
 // 프로세스·문자열 변환 backend가 같은 규칙을 쓴다. 공개 헤더에 Windows 타입을 노출하지 않는다.

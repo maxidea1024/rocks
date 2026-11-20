@@ -24,28 +24,38 @@ namespace rocks::reflection_fixture {
 // 담는다.
 ROCKS_STRUCT()
 struct AssignPoint {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() int32 x = 0;
     ROCKS_PROPERTY() int32 y = 0;
 };
 
 ROCKS_STRUCT(Atomic)
 struct AssignAtom {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() int32 a = 0;
     ROCKS_PROPERTY() int32 b = 0;
 };
 
 ROCKS_STRUCT()
 struct AssignInner {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() int32 value = 0;
     ROCKS_PROPERTY(ReadOnly) int32 fixed = 0;
     ROCKS_PROPERTY() AssignPoint point;
 };
 
 ROCKS_CLASS()
-struct AssignTarget final : Object {};
+struct AssignTarget final : Object {
+    ROCKS_GENERATED_BODY()
+};
 
 ROCKS_STRUCT()
 struct AssignMixed {
+    ROCKS_GENERATED_BODY()
+
     explicit AssignMixed(Allocator& allocator) noexcept : note(allocator) {
     }
 
@@ -59,6 +69,8 @@ struct AssignMixed {
 // StructRefArray 원소가 될 수 없다.
 ROCKS_STRUCT()
 struct AssignBundle {
+    ROCKS_GENERATED_BODY()
+
     explicit AssignBundle(Allocator& allocator) noexcept : crew(allocator), parts(allocator) {
     }
 
@@ -69,16 +81,24 @@ struct AssignBundle {
 };
 
 ROCKS_CLASS(Abstract)
-struct AssignKindBase : Object {};
+struct AssignKindBase : Object {
+    ROCKS_GENERATED_BODY()
+};
 
 ROCKS_CLASS()
-struct AssignKindCurrent final : AssignKindBase {};
+struct AssignKindCurrent final : AssignKindBase {
+    ROCKS_GENERATED_BODY()
+};
 
 ROCKS_CLASS(Deprecated)
-struct AssignKindOld final : AssignKindBase {};
+struct AssignKindOld final : AssignKindBase {
+    ROCKS_GENERATED_BODY()
+};
 
 ROCKS_CLASS()
 struct AssignHolder final : Object {
+    ROCKS_GENERATED_BODY()
+
     explicit AssignHolder(Allocator& allocator) noexcept
         : label(allocator), numbers(allocator), points(allocator), tags(allocator),
           scores(allocator), byKey(allocator), mixed(allocator), items(allocator), group(allocator),
@@ -115,6 +135,8 @@ struct AssignHolder final : Object {
 // B9j–B9m 묶음 리뷰의 B9i5 우려).
 ROCKS_STRUCT()
 struct AssignNest {
+    ROCKS_GENERATED_BODY()
+
     explicit AssignNest(Allocator& allocator) noexcept : mixed(allocator) {
     }
 
@@ -124,6 +146,8 @@ struct AssignNest {
 
 ROCKS_CLASS()
 struct AssignNestHolder final : Object {
+    ROCKS_GENERATED_BODY()
+
     explicit AssignNestHolder(Allocator& allocator) noexcept : nests(allocator) {
     }
 
@@ -133,6 +157,8 @@ struct AssignNestHolder final : Object {
 // struct Map을 담은 struct다(JSON import MergeByKey가 준비 상태를 보는지 — 리플렉션 B9i 리뷰 반영).
 ROCKS_STRUCT()
 struct AssignShelf {
+    ROCKS_GENERATED_BODY()
+
     explicit AssignShelf(Allocator& allocator) noexcept : byKey(allocator) {
     }
 
@@ -144,6 +170,8 @@ struct AssignShelf {
 // Deprecated 클래스를 담을 수 있는 ClassRef 컨테이너, struct Map을 담은 struct의 배열·Optional.
 ROCKS_CLASS()
 struct AssignWholeHolder final : Object {
+    ROCKS_GENERATED_BODY()
+
     explicit AssignWholeHolder(Allocator& allocator) noexcept
         : numbers(allocator), tags(allocator), scores(allocator), points(allocator),
           byKey(allocator), kinds(allocator), kindSet(allocator), kindMap(allocator),

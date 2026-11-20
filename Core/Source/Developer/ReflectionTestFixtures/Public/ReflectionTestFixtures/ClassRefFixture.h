@@ -16,40 +16,56 @@ namespace rocks::reflection_fixture {
 // (ClassRefGraphTests·ClassRefFieldTests). ClassRenamed는 Name 지정자로 바꾼 타입 도구 이름이다.
 ROCKS_CLASS(Abstract)
 struct ClassBase : Object {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() uint32 value = 0;
 };
 
 ROCKS_CLASS()
 struct ClassDerived : ClassBase {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() uint32 extra = 0;
 };
 
 ROCKS_CLASS()
-struct ClassLeaf final : ClassDerived {};
+struct ClassLeaf final : ClassDerived {
+    ROCKS_GENERATED_BODY()
+};
 
 ROCKS_CLASS()
 struct ClassStranger final : Object {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() uint32 value = 0;
 };
 
 ROCKS_CLASS(Name = "Fixture.Renamed")
 struct ClassRenamed final : Object {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() uint32 value = 0;
 };
 
 ROCKS_STRUCT()
 struct ClassValue {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() uint32 value = 0;
 };
 
 ROCKS_STRUCT()
 struct ClassSlot {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() ClassRef<ClassBase> kind;
     ROCKS_PROPERTY() uint32 count = 0;
 };
 
 ROCKS_CLASS()
 struct ClassHolder final : Object {
+    ROCKS_GENERATED_BODY()
+
     explicit ClassHolder(Allocator& allocator) noexcept : list(allocator), slots(allocator) {
     }
 

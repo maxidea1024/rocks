@@ -137,6 +137,8 @@ Result<void> Report::TryAddFailure(StringView text) noexcept {
 Result<bool> TryParseExpectation(StringView text, Expectation& out, String& problem) noexcept {
     out.diagnostics_.Clear();
     out.clean_ = false;
+    out.stage_ = CompilationStage::All;
+    bool sawStage = false;
     bool sawDirective = false;
     uint32 lineNumber = 0;
     StringBuilder<detail::MessageInlineBytes> message(problem.GetAllocator());
@@ -182,6 +184,23 @@ Result<bool> TryParseExpectation(StringView text, Expectation& out, String& prob
             }
 
             out.clean_ = true;
+        } else if (words[0] == StringView("stage") && count == 2) {
+            if (sawStage) {
+                return fail("'stage' appears twice");
+            }
+
+            sawStage = true;
+            if (words[1] == StringView("syntax")) {
+                out.stage_ = CompilationStage::Syntax;
+            } else if (words[1] == StringView("imports")) {
+                out.stage_ = CompilationStage::Imports;
+            } else if (words[1] == StringView("names")) {
+                out.stage_ = CompilationStage::Names;
+            } else {
+                return fail("unknown stage (expected 'syntax', 'imports' or 'names')");
+            }
+
+            continue; // 단계만으로는 기대 진단 지시가 아니다
         } else if (words[0] == StringView("error") && count >= 2 && count <= MaxWords) {
             ExpectedDiagnostic expected;
             if (!ParseCode(words[1], expected.code)) {
@@ -217,7 +236,7 @@ Result<bool> TryParseExpectation(StringView text, Expectation& out, String& prob
                 return Result<bool>::Failure(pushed.Error());
             }
         } else {
-            return fail("unknown directive (expected 'error' or 'clean')");
+            return fail("unknown directive (expected 'error', 'clean' or 'stage')");
         }
 
         sawDirective = true;

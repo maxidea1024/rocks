@@ -1,2 +1,4 @@
 # '///' only documents declarations, members and enum cases.
 error S0208 2:5
+# Syntax only: later stages (names, types) are not checked here.
+stage syntax

@@ -1,2 +1,4 @@
 # '?? break' does not exist.
 error S0213 1:20
+# Syntax only: later stages (names, types) are not checked here.
+stage syntax

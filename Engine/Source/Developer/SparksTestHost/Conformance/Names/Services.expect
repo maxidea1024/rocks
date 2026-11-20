@@ -1,0 +1,8 @@
+# Manifest services (3.9, S0325): each entry is a module path of the package and a top-level
+# class derived from WorldService in it. An unresolved import of that module is no reason to skip
+# the check (it removes no declaration).
+error S0301 Late.spark 1:8
+error S0325 SparksPackage.json5 5:30
+error S0325 SparksPackage.json5 5:47
+error S0325 SparksPackage.json5 5:62
+error S0325 SparksPackage.json5 5:77

@@ -23,6 +23,8 @@ namespace rocks {
 // 수명: 값 타입이다. 가리키는 byte는 그 패키지 객체(Package::BulkBytes)가 소유한다.
 ROCKS_STRUCT()
 struct BulkDataRef {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() uint32 bulkId = 0;
     ROCKS_PROPERTY() uint64 rawBytes = 0;
     ROCKS_PROPERTY() Sha256Digest sha256 {};

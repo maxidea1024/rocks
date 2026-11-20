@@ -1,3 +1,5 @@
 # Precedence, postfix chains, type arguments, literals and strings (3.6 Expr). The '>=' after
 # 'Array<int>' splits into '>' and '='.
 clean
+# Syntax only: later stages (names, types) are not checked here.
+stage syntax

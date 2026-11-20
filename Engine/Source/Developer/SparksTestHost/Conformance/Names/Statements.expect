@@ -1,0 +1,4 @@
+# Every statement and expression form resolves its names (3.9 "simple names"): while, switch
+# with default, '?? return', index, map literal, interpolation, unary, parentheses, type
+# arguments in expressions, 'this' event paths and extension event parameters.
+clean

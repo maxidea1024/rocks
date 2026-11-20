@@ -25,6 +25,8 @@ enum class FixtureQuality : uint8 {
 
 ROCKS_STRUCT()
 struct FixturePoint {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() int32 x = 0;
     ROCKS_PROPERTY() int32 y = 0;
 };
@@ -33,6 +35,8 @@ struct FixturePoint {
 // CurveData.ko.md 9.1·17.2절).
 ROCKS_STRUCT()
 struct FixtureSpan {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() int32 low = 0;
     ROCKS_PROPERTY() int32 high = 0;
 
@@ -45,6 +49,8 @@ struct FixtureSpan {
 // hook 멤버를 담은 설정 섹션이다(기본 fixture에 등록하지 않는다 — 그 시험이 따로 등록한다).
 ROCKS_STRUCT(Settings(Branch = "Render", Section = "SpanCheck"))
 struct SpanSettings {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() FixtureSpan span;
 };
 
@@ -52,6 +58,8 @@ struct SpanSettings {
 // 등록하지 않는다 — 그 시험이 따로 등록한다. Docs/Design/CurveData.ko.md 17.8절).
 ROCKS_STRUCT(Settings(Branch = "Render", Section = "CurveCheck"))
 struct CurveSettings {
+    ROCKS_GENERATED_BODY()
+
     explicit CurveSettings(Allocator& allocator) noexcept : curve(allocator) {
     }
 
@@ -62,6 +70,8 @@ struct CurveSettings {
 // 문자열이고 배열 연산 객체는 InvalidArrayOperation이다(Docs/Design/CurveData.ko.md 17.3절 B5).
 ROCKS_STRUCT(Settings(Branch = "Render", Section = "BlobCheck"))
 struct BlobSettings {
+    ROCKS_GENERATED_BODY()
+
     explicit BlobSettings(Allocator& allocator) noexcept : blob(allocator) {
     }
 
@@ -71,6 +81,8 @@ struct BlobSettings {
 // 배열 원소 struct다(원소 안의 배열 연산은 지원하지 않는다 — UnsupportedOperation 시험).
 ROCKS_STRUCT()
 struct FixtureLayer {
+    ROCKS_GENERATED_BODY()
+
     explicit FixtureLayer(Allocator& allocator) noexcept : names(allocator) {
     }
 
@@ -79,6 +91,8 @@ struct FixtureLayer {
 
 ROCKS_STRUCT(Settings(Branch = "Render", Section = "RenderGraph"))
 struct GraphSettings {
+    ROCKS_GENERATED_BODY()
+
     explicit GraphSettings(Allocator& allocator) noexcept
         : passes(allocator), tags(allocator), cacheDir(allocator), points(allocator),
           byName(allocator), qualities(allocator), scales(allocator), layers(allocator) {
@@ -105,6 +119,8 @@ struct GraphSettings {
 
 ROCKS_STRUCT(Settings(Branch = "Game", Section = "Gameplay"))
 struct GameplaySettings {
+    ROCKS_GENERATED_BODY()
+
     explicit GameplaySettings(Allocator& allocator) noexcept : title(allocator) {
     }
 
@@ -122,6 +138,8 @@ struct GameplaySettings {
 // 수 없는 필드다.
 ROCKS_STRUCT(Settings(Branch = "Game", Section = "Display"))
 struct DisplaySettings {
+    ROCKS_GENERATED_BODY()
+
     explicit DisplaySettings(Allocator& allocator) noexcept : recentMaps(allocator) {
     }
 

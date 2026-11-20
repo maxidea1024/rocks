@@ -1,2 +1,4 @@
 # Values and 'key: value' entries do not mix.
 error S0218 1:18
+# Syntax only: later stages (names, types) are not checked here.
+stage syntax

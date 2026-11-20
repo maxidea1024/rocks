@@ -5,7 +5,13 @@
 #include "FileType.h"
 #include "WindowsFileCommon.h"
 #include "WindowsPathGuard.h"
+
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
+
 #include <new>
 
 namespace rocks::platform {

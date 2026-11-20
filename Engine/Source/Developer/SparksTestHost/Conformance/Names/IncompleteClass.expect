@@ -1,0 +1,3 @@
+# Inside a class whose base is unknown nothing that depends on the base is reported: override
+# targets, context names and unknown names (3.9 "cascade").
+error S0318 1:14

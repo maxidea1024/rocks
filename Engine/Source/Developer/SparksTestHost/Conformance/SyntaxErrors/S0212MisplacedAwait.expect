@@ -1,2 +1,4 @@
 # 'await' inside an argument.
 error S0212 1:12
+# Syntax only: later stages (names, types) are not checked here.
+stage syntax

@@ -17,12 +17,17 @@
 #include <Platform/Fatal.h>
 #include <Platform/Win64/ComRef.h>
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
 #include <d3d12.h>
 #include <d3d12shader.h>
 #include <d3dcompiler.h>
 #include <dxgi1_6.h>
 #include <dxgidebug.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
+
 #include <Platform/Atomics.h>
 
 #include "D3D12Caps.h"

@@ -96,6 +96,87 @@ Result<void> CompareSyntaxTree(Allocator& allocator, const CaseInput& input,
     return report.TryAddFailure(message.View());
 }
 
+// 이름 해석 golden을 비교하고 다르면 실패 항목을 더한다. 파일 사례는 그 모듈의 덤프, 폴더 사례는
+// 이름 해석을 한 모듈마다 "== <경로>" 줄과 덤프를 경로 byte 순으로 이은 것이다(13.1절).
+Result<void> CompareNames(Allocator& allocator, const CaseInput& input, const SourceSet& sources,
+                          const Compilation& compilation, uint32 mainModule, CompilationStage stage,
+                          Report& report) noexcept {
+    StringBuilder<detail::MessageInlineBytes> message(allocator);
+    StringBuilder<detail::MessageInlineBytes> dump(allocator);
+    bool resolved = stage == CompilationStage::Names;
+    if (resolved && !input.folder) {
+        auto dumped = compilation.AppendNameDump(dump, mainModule);
+        if (!dumped && dumped.Error() != ErrorCode::InvalidArgument) {
+            return dumped;
+        }
+
+        resolved = static_cast<bool>(dumped);
+    } else if (resolved) {
+        Array<uint32> modules(allocator);
+        for (uint32 module = 0; module < compilation.ModuleCount(); ++module) {
+            if (auto pushed = modules.TryPushBack(module); !pushed) {
+                return pushed;
+            }
+        }
+
+        algo::Sort(modules.View(), [&](uint32 left, uint32 right) noexcept {
+            return StringView::CompareBytes(sources.Get(compilation.ModuleSource(left)).Path(),
+                                            sources.Get(compilation.ModuleSource(right)).Path()) <
+                   0;
+        });
+        for (const uint32 module : modules) {
+            StringBuilder<detail::MessageInlineBytes> one(allocator);
+            auto dumped = compilation.AppendNameDump(one, module);
+            if (!dumped) {
+                if (dumped.Error() != ErrorCode::InvalidArgument) {
+                    return dumped;
+                }
+
+                continue; // 이름 해석을 하지 않은 모듈(manifest 오류 등)
+            }
+
+            if (auto formatted = dump.TryAppendFormat(
+                    "== {}\n", sources.Get(compilation.ModuleSource(module)).Path());
+                !formatted) {
+                return formatted;
+            }
+
+            if (auto appended = dump.TryAppend(one.View()); !appended) {
+                return appended;
+            }
+        }
+    }
+
+    if (!resolved) {
+        if (auto formatted = message.TryAppendFormat(
+                "{}: has a .names file but the module was not name-resolved", input.name);
+            !formatted) {
+            return formatted;
+        }
+
+        return report.TryAddFailure(message.View());
+    }
+
+    if (dump.View() == input.names) {
+        return Result<void>::Success();
+    }
+
+    const LineDifference difference = FindLineDifference(input.names, dump.View());
+    if (auto formatted = message.TryAppendFormat(
+            "{}: names differ from .names at line {}\n"
+            "  expected: {}\n  actual:   {}\n  actual names:\n",
+            input.name, difference.line, difference.expected, difference.actual);
+        !formatted) {
+        return formatted;
+    }
+
+    if (auto appended = message.TryAppend(dump.View()); !appended) {
+        return appended;
+    }
+
+    return report.TryAddFailure(message.View());
+}
+
 Result<void> AddCaseFailure(Allocator& allocator, Report& report, StringView caseName,
                             StringView reason) noexcept {
     StringBuilder<detail::MessageInlineBytes> message(allocator);
@@ -279,6 +360,10 @@ Result<void> RunCase(Allocator& allocator, const CaseInput& input, Report& repor
         mainModule = module.Value();
     }
 
+    if (auto staged = compilation.SetLastStage(expectation.Stage()); !staged) {
+        return staged;
+    }
+
     if (auto checked = compilation.Check(diagnostics); !checked) {
         return checked;
     }
@@ -286,6 +371,14 @@ Result<void> RunCase(Allocator& allocator, const CaseInput& input, Report& repor
     if (input.hasSyntaxTree && !input.folder) {
         if (auto compared = CompareSyntaxTree(allocator, input, sources,
                                               compilation.ModuleTree(mainModule), report);
+            !compared) {
+            return compared;
+        }
+    }
+
+    if (input.hasNames) {
+        if (auto compared = CompareNames(allocator, input, sources, compilation, mainModule,
+                                         expectation.Stage(), report);
             !compared) {
             return compared;
         }

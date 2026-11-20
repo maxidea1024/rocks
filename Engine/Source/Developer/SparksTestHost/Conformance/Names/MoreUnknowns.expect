@@ -1,0 +1,3 @@
+# The first name of an 'on' or 'emit' path is resolved like any name (S0317).
+error S0317 2:8
+error S0317 3:21

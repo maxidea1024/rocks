@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/NumericLimits.h>
 #include <Core/Containers/Array.h>
 #include <Core/Result.h>
 #include <Core/Text/StringBuilder.h>
@@ -63,5 +64,9 @@ private:
 
 // 진단 문장 builder의 inline 크기다.
 inline constexpr usize CompilationMessageInlineBytes = 256;
+
+// 이름 해석 기록이 없는 노드다(Compilation::nodeSymbols_·nodeTypes_ — 덤프가 건너뛰고 공개 접근은
+// NoSymbol·NoType으로 돌려준다). 해석하지 못한 자리는 NoSymbol·NoType을 기록한다.
+inline constexpr uint32 NotRecorded = NumericLimits<uint32>::Max() - 1;
 
 } // namespace rocks::sparks::detail

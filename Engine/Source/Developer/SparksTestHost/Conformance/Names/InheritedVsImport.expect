@@ -1,0 +1,4 @@
+# An imported name or an alias that a class of the module inherits as a member is S0311 at the
+# import.
+error S0311 Main.spark 1:8
+error S0311 Main.spark 2:17

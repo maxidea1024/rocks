@@ -1,0 +1,10 @@
+# Base lists (3.9, S0322): the first base is an engine type that scripts may extend or an open
+# class, the others are interfaces listed once. An unknown base is S0318.
+error S0322 1:11
+error S0322 3:11
+error S0322 5:11
+error S0322 7:28
+error S0322 8:31
+error S0322 9:11
+error S0318 12:11
+error S0322 13:11

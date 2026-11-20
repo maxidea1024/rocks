@@ -1,0 +1,13 @@
+class A : SoundAsset { }
+struct S { }
+class B : S { }
+class C : ScriptComponent { }
+class D : C { }
+interface I { }
+class E : ScriptComponent, C { }
+class F : ScriptComponent, I, I { }
+class G : I { }
+open class H : ScriptComponent { }
+class J : H, I { }
+class K : Nope { }
+class L : Component { }

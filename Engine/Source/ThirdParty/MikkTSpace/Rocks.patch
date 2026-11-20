@@ -1,0 +1,321 @@
+diff --git a/mikktspace.c b/mikktspace.c
+index 0342ae0..692d062 100644
+--- a/mikktspace.c
++++ b/mikktspace.c
+@@ -30,6 +30,26 @@
+ 
+ #include "mikktspace.h"
+ 
++/* Rocks modification (Engine/Source/ThirdParty/MikkTSpace/ThirdParty.json "modifications" and Rocks.patch).
++ * The transcendental functions and the heap go through hooks so that the result bits are the same on every host
++ * (Rocks deterministic math instead of the CRT cos/acos) and the memory comes from the caller's allocator.
++ * The consumer (MeshTools) defines the hook functions. A translation unit that defines these macros before
++ * including this file gets the original upstream expressions back (MikkTSpaceReference.c). */
++#ifndef ROCKS_MIKKTSPACE_THRESHOLD_COS
++double RocksMikkTSpaceCosPi(double fX);
++#define ROCKS_MIKKTSPACE_THRESHOLD_COS(fAngularThreshold) ((float) RocksMikkTSpaceCosPi((fAngularThreshold) / 180.0f))
++#endif
++#ifndef ROCKS_MIKKTSPACE_ACOS
++double RocksMikkTSpaceAcos(double fX);
++#define ROCKS_MIKKTSPACE_ACOS(fCos) ((float) RocksMikkTSpaceAcos(fCos))
++#endif
++#ifndef ROCKS_MIKKTSPACE_MALLOC
++void * RocksMikkTSpaceAllocate(const SMikkTSpaceContext * pContext, size_t uBytes);
++void RocksMikkTSpaceFree(const SMikkTSpaceContext * pContext, void * pMemory);
++#define ROCKS_MIKKTSPACE_MALLOC(pContext, uBytes) RocksMikkTSpaceAllocate((pContext), (uBytes))
++#define ROCKS_MIKKTSPACE_FREE(pContext, pMemory) RocksMikkTSpaceFree((pContext), (pMemory))
++#endif
++
+ #define TFALSE		0
+ #define TTRUE		1
+ 
+@@ -238,7 +258,7 @@ tbool genTangSpace(const SMikkTSpaceContext * pContext, const float fAngularThre
+ 	int iNrActiveGroups = 0, index = 0;
+ 	const int iNrFaces = pContext->m_pInterface->m_getNumFaces(pContext);
+ 	tbool bRes = TFALSE;
+-	const float fThresCos = (float) cos((fAngularThreshold*(float)M_PI)/180.0f);
++	const float fThresCos = ROCKS_MIKKTSPACE_THRESHOLD_COS(fAngularThreshold);
+ 
+ 	// verify all call-backs have been set
+ 	if ( pContext->m_pInterface->m_getNumFaces==NULL ||
+@@ -258,12 +278,12 @@ tbool genTangSpace(const SMikkTSpaceContext * pContext, const float fAngularThre
+ 	if (iNrTrianglesIn<=0) return TFALSE;
+ 
+ 	// allocate memory for an index list
+-	piTriListIn = (int *) malloc(sizeof(int)*3*iNrTrianglesIn);
+-	pTriInfos = (STriInfo *) malloc(sizeof(STriInfo)*iNrTrianglesIn);
++	piTriListIn = (int *) ROCKS_MIKKTSPACE_MALLOC(pContext, sizeof(int)*3*iNrTrianglesIn);
++	pTriInfos = (STriInfo *) ROCKS_MIKKTSPACE_MALLOC(pContext, sizeof(STriInfo)*iNrTrianglesIn);
+ 	if (piTriListIn==NULL || pTriInfos==NULL)
+ 	{
+-		if (piTriListIn!=NULL) free(piTriListIn);
+-		if (pTriInfos!=NULL) free(pTriInfos);
++		if (piTriListIn!=NULL) ROCKS_MIKKTSPACE_FREE(pContext, piTriListIn);
++		if (pTriInfos!=NULL) ROCKS_MIKKTSPACE_FREE(pContext, pTriInfos);
+ 		return TFALSE;
+ 	}
+ 
+@@ -310,14 +330,14 @@ tbool genTangSpace(const SMikkTSpaceContext * pContext, const float fAngularThre
+ 	
+ 	// based on the 4 rules, identify groups based on connectivity
+ 	iNrMaxGroups = iNrTrianglesIn*3;
+-	pGroups = (SGroup *) malloc(sizeof(SGroup)*iNrMaxGroups);
+-	piGroupTrianglesBuffer = (int *) malloc(sizeof(int)*iNrTrianglesIn*3);
++	pGroups = (SGroup *) ROCKS_MIKKTSPACE_MALLOC(pContext, sizeof(SGroup)*iNrMaxGroups);
++	piGroupTrianglesBuffer = (int *) ROCKS_MIKKTSPACE_MALLOC(pContext, sizeof(int)*iNrTrianglesIn*3);
+ 	if (pGroups==NULL || piGroupTrianglesBuffer==NULL)
+ 	{
+-		if (pGroups!=NULL) free(pGroups);
+-		if (piGroupTrianglesBuffer!=NULL) free(piGroupTrianglesBuffer);
+-		free(piTriListIn);
+-		free(pTriInfos);
++		if (pGroups!=NULL) ROCKS_MIKKTSPACE_FREE(pContext, pGroups);
++		if (piGroupTrianglesBuffer!=NULL) ROCKS_MIKKTSPACE_FREE(pContext, piGroupTrianglesBuffer);
++		ROCKS_MIKKTSPACE_FREE(pContext, piTriListIn);
++		ROCKS_MIKKTSPACE_FREE(pContext, pTriInfos);
+ 		return TFALSE;
+ 	}
+ 	//printf("gen 4rule groups begin\n");
+@@ -327,13 +347,13 @@ tbool genTangSpace(const SMikkTSpaceContext * pContext, const float fAngularThre
+ 
+ 	//
+ 
+-	psTspace = (STSpace *) malloc(sizeof(STSpace)*iNrTSPaces);
++	psTspace = (STSpace *) ROCKS_MIKKTSPACE_MALLOC(pContext, sizeof(STSpace)*iNrTSPaces);
+ 	if (psTspace==NULL)
+ 	{
+-		free(piTriListIn);
+-		free(pTriInfos);
+-		free(pGroups);
+-		free(piGroupTrianglesBuffer);
++		ROCKS_MIKKTSPACE_FREE(pContext, piTriListIn);
++		ROCKS_MIKKTSPACE_FREE(pContext, pTriInfos);
++		ROCKS_MIKKTSPACE_FREE(pContext, pGroups);
++		ROCKS_MIKKTSPACE_FREE(pContext, piGroupTrianglesBuffer);
+ 		return TFALSE;
+ 	}
+ 	memset(psTspace, 0, sizeof(STSpace)*iNrTSPaces);
+@@ -351,13 +371,13 @@ tbool genTangSpace(const SMikkTSpaceContext * pContext, const float fAngularThre
+ 	//printf("gen tspaces end\n");
+ 	
+ 	// clean up
+-	free(pGroups);
+-	free(piGroupTrianglesBuffer);
++	ROCKS_MIKKTSPACE_FREE(pContext, pGroups);
++	ROCKS_MIKKTSPACE_FREE(pContext, piGroupTrianglesBuffer);
+ 
+ 	if (!bRes)	// if an allocation in GenerateTSpaces() failed
+ 	{
+ 		// clean up and return false
+-		free(pTriInfos); free(piTriListIn); free(psTspace);
++		ROCKS_MIKKTSPACE_FREE(pContext, pTriInfos); ROCKS_MIKKTSPACE_FREE(pContext, piTriListIn); ROCKS_MIKKTSPACE_FREE(pContext, psTspace);
+ 		return TFALSE;
+ 	}
+ 
+@@ -368,7 +388,7 @@ tbool genTangSpace(const SMikkTSpaceContext * pContext, const float fAngularThre
+ 	// with the same welded index in piTriListIn[].
+ 	DegenEpilogue(psTspace, pTriInfos, piTriListIn, pContext, iNrTrianglesIn, iTotTris);
+ 
+-	free(pTriInfos); free(piTriListIn);
++	ROCKS_MIKKTSPACE_FREE(pContext, pTriInfos); ROCKS_MIKKTSPACE_FREE(pContext, piTriListIn);
+ 
+ 	index = 0;
+ 	for (f=0; f<iNrFaces; f++)
+@@ -413,7 +433,7 @@ tbool genTangSpace(const SMikkTSpaceContext * pContext, const float fAngularThre
+ 		}
+ 	}
+ 
+-	free(psTspace);
++	ROCKS_MIKKTSPACE_FREE(pContext, psTspace);
+ 
+ 	
+ 	return TTRUE;
+@@ -488,17 +508,17 @@ static void GenerateSharedVerticesIndexList(int piTriList_in_and_out[], const SM
+ 	}
+ 
+ 	// make allocations
+-	piHashTable = (int *) malloc(sizeof(int)*iNrTrianglesIn*3);
+-	piHashCount = (int *) malloc(sizeof(int)*g_iCells);
+-	piHashOffsets = (int *) malloc(sizeof(int)*g_iCells);
+-	piHashCount2 = (int *) malloc(sizeof(int)*g_iCells);
++	piHashTable = (int *) ROCKS_MIKKTSPACE_MALLOC(pContext, sizeof(int)*iNrTrianglesIn*3);
++	piHashCount = (int *) ROCKS_MIKKTSPACE_MALLOC(pContext, sizeof(int)*g_iCells);
++	piHashOffsets = (int *) ROCKS_MIKKTSPACE_MALLOC(pContext, sizeof(int)*g_iCells);
++	piHashCount2 = (int *) ROCKS_MIKKTSPACE_MALLOC(pContext, sizeof(int)*g_iCells);
+ 
+ 	if (piHashTable==NULL || piHashCount==NULL || piHashOffsets==NULL || piHashCount2==NULL)
+ 	{
+-		if (piHashTable!=NULL) free(piHashTable);
+-		if (piHashCount!=NULL) free(piHashCount);
+-		if (piHashOffsets!=NULL) free(piHashOffsets);
+-		if (piHashCount2!=NULL) free(piHashCount2);
++		if (piHashTable!=NULL) ROCKS_MIKKTSPACE_FREE(pContext, piHashTable);
++		if (piHashCount!=NULL) ROCKS_MIKKTSPACE_FREE(pContext, piHashCount);
++		if (piHashOffsets!=NULL) ROCKS_MIKKTSPACE_FREE(pContext, piHashOffsets);
++		if (piHashCount2!=NULL) ROCKS_MIKKTSPACE_FREE(pContext, piHashCount2);
+ 		GenerateSharedVerticesIndexListSlow(piTriList_in_and_out, pContext, iNrTrianglesIn);
+ 		return;
+ 	}
+@@ -536,14 +556,14 @@ static void GenerateSharedVerticesIndexList(int piTriList_in_and_out[], const SM
+ 	}
+ 	for (k=0; k<g_iCells; k++)
+ 		assert(piHashCount2[k] == piHashCount[k]);	// verify the count
+-	free(piHashCount2);
++	ROCKS_MIKKTSPACE_FREE(pContext, piHashCount2);
+ 
+ 	// find maximum amount of entries in any hash entry
+ 	iMaxCount = piHashCount[0];
+ 	for (k=1; k<g_iCells; k++)
+ 		if (iMaxCount<piHashCount[k])
+ 			iMaxCount=piHashCount[k];
+-	pTmpVert = (STmpVert *) malloc(sizeof(STmpVert)*iMaxCount);
++	pTmpVert = (STmpVert *) ROCKS_MIKKTSPACE_MALLOC(pContext, sizeof(STmpVert)*iMaxCount);
+ 	
+ 
+ 	// complete the merge
+@@ -569,10 +589,10 @@ static void GenerateSharedVerticesIndexList(int piTriList_in_and_out[], const SM
+ 			MergeVertsSlow(piTriList_in_and_out, pContext, pTable, iEntries);
+ 	}
+ 
+-	if (pTmpVert!=NULL) { free(pTmpVert); }
+-	free(piHashTable);
+-	free(piHashCount);
+-	free(piHashOffsets);
++	if (pTmpVert!=NULL) { ROCKS_MIKKTSPACE_FREE(pContext, pTmpVert); }
++	ROCKS_MIKKTSPACE_FREE(pContext, piHashTable);
++	ROCKS_MIKKTSPACE_FREE(pContext, piHashCount);
++	ROCKS_MIKKTSPACE_FREE(pContext, piHashOffsets);
+ }
+ 
+ static void MergeVertsFast(int piTriList_in_and_out[], STmpVert pTmpVert[], const SMikkTSpaceContext * pContext, const int iL_in, const int iR_in)
+@@ -728,7 +748,7 @@ static void MergeVertsSlow(int piTriList_in_and_out[], const SMikkTSpaceContext
+ 
+ static void GenerateSharedVerticesIndexListSlow(int piTriList_in_and_out[], const SMikkTSpaceContext * pContext, const int iNrTrianglesIn)
+ {
+-	int iNumUniqueVerts = 0, t=0, i=0;
++	int t=0, i=0;
+ 	for (t=0; t<iNrTrianglesIn; t++)
+ 	{
+ 		for (i=0; i<3; i++)
+@@ -753,7 +773,11 @@ static void GenerateSharedVerticesIndexListSlow(int piTriList_in_and_out[], cons
+ 					const SVec3 vT2 = GetTexCoord(pContext, index2);
+ 					
+ 					if (veq(vP,vP2) && veq(vN,vN2) && veq(vT,vT2))
++					{
++						/* Rocks modification: upstream never stores the match, so this fallback wrote -1 into the list. */
++						index2rec = index2;
+ 						bFound = TTRUE;
++					}
+ 					else
+ 						++j;
+ 				}
+@@ -762,7 +786,6 @@ static void GenerateSharedVerticesIndexListSlow(int piTriList_in_and_out[], cons
+ 
+ 			assert(bFound);
+ 			// if we found our own
+-			if (index2rec == index) { ++iNumUniqueVerts; }
+ 
+ 			piTriList_in_and_out[offs] = index2rec;
+ 		}
+@@ -1048,14 +1071,14 @@ static void InitTriInfo(STriInfo pTriInfos[], const int piTriListIn[], const SMi
+ 	
+ 	// match up edge pairs
+ 	{
+-		SEdge * pEdges = (SEdge *) malloc(sizeof(SEdge)*iNrTrianglesIn*3);
++		SEdge * pEdges = (SEdge *) ROCKS_MIKKTSPACE_MALLOC(pContext, sizeof(SEdge)*iNrTrianglesIn*3);
+ 		if (pEdges==NULL)
+ 			BuildNeighborsSlow(pTriInfos, piTriListIn, iNrTrianglesIn);
+ 		else
+ 		{
+ 			BuildNeighborsFast(pTriInfos, pEdges, piTriListIn, iNrTrianglesIn);
+ 	
+-			free(pEdges);
++			ROCKS_MIKKTSPACE_FREE(pContext, pEdges);
+ 		}
+ 	}
+ }
+@@ -1202,7 +1225,7 @@ static tbool GenerateTSpaces(STSpace psTspace[], const STriInfo pTriInfos[], con
+ 	STSpace * pSubGroupTspace = NULL;
+ 	SSubGroup * pUniSubGroups = NULL;
+ 	int * pTmpMembers = NULL;
+-	int iMaxNrFaces=0, iUniqueTspaces=0, g=0, i=0;
++	int iMaxNrFaces=0, g=0, i=0;
+ 	for (g=0; g<iNrActiveGroups; g++)
+ 		if (iMaxNrFaces < pGroups[g].iNrFaces)
+ 			iMaxNrFaces = pGroups[g].iNrFaces;
+@@ -1210,19 +1233,18 @@ static tbool GenerateTSpaces(STSpace psTspace[], const STriInfo pTriInfos[], con
+ 	if (iMaxNrFaces == 0) return TTRUE;
+ 
+ 	// make initial allocations
+-	pSubGroupTspace = (STSpace *) malloc(sizeof(STSpace)*iMaxNrFaces);
+-	pUniSubGroups = (SSubGroup *) malloc(sizeof(SSubGroup)*iMaxNrFaces);
+-	pTmpMembers = (int *) malloc(sizeof(int)*iMaxNrFaces);
++	pSubGroupTspace = (STSpace *) ROCKS_MIKKTSPACE_MALLOC(pContext, sizeof(STSpace)*iMaxNrFaces);
++	pUniSubGroups = (SSubGroup *) ROCKS_MIKKTSPACE_MALLOC(pContext, sizeof(SSubGroup)*iMaxNrFaces);
++	pTmpMembers = (int *) ROCKS_MIKKTSPACE_MALLOC(pContext, sizeof(int)*iMaxNrFaces);
+ 	if (pSubGroupTspace==NULL || pUniSubGroups==NULL || pTmpMembers==NULL)
+ 	{
+-		if (pSubGroupTspace!=NULL) free(pSubGroupTspace);
+-		if (pUniSubGroups!=NULL) free(pUniSubGroups);
+-		if (pTmpMembers!=NULL) free(pTmpMembers);
++		if (pSubGroupTspace!=NULL) ROCKS_MIKKTSPACE_FREE(pContext, pSubGroupTspace);
++		if (pUniSubGroups!=NULL) ROCKS_MIKKTSPACE_FREE(pContext, pUniSubGroups);
++		if (pTmpMembers!=NULL) ROCKS_MIKKTSPACE_FREE(pContext, pTmpMembers);
+ 		return TFALSE;
+ 	}
+ 
+ 
+-	iUniqueTspaces = 0;
+ 	for (g=0; g<iNrActiveGroups; g++)
+ 	{
+ 		const SGroup * pGroup = &pGroups[g];
+@@ -1307,16 +1329,16 @@ static tbool GenerateTSpaces(STSpace psTspace[], const STriInfo pTriInfos[], con
+ 			if (!bFound)
+ 			{
+ 				// insert new subgroup
+-				int * pIndices = (int *) malloc(sizeof(int)*iMembers);
++				int * pIndices = (int *) ROCKS_MIKKTSPACE_MALLOC(pContext, sizeof(int)*iMembers);
+ 				if (pIndices==NULL)
+ 				{
+ 					// clean up and return false
+ 					int s=0;
+ 					for (s=0; s<iUniqueSubGroups; s++)
+-						free(pUniSubGroups[s].pTriMembers);
+-					free(pUniSubGroups);
+-					free(pTmpMembers);
+-					free(pSubGroupTspace);
++						ROCKS_MIKKTSPACE_FREE(pContext, pUniSubGroups[s].pTriMembers);
++					ROCKS_MIKKTSPACE_FREE(pContext, pUniSubGroups);
++					ROCKS_MIKKTSPACE_FREE(pContext, pTmpMembers);
++					ROCKS_MIKKTSPACE_FREE(pContext, pSubGroupTspace);
+ 					return TFALSE;
+ 				}
+ 				pUniSubGroups[iUniqueSubGroups].iNrFaces = iMembers;
+@@ -1352,14 +1374,13 @@ static tbool GenerateTSpaces(STSpace psTspace[], const STriInfo pTriInfos[], con
+ 
+ 		// clean up and offset iUniqueTspaces
+ 		for (s=0; s<iUniqueSubGroups; s++)
+-			free(pUniSubGroups[s].pTriMembers);
+-		iUniqueTspaces += iUniqueSubGroups;
++			ROCKS_MIKKTSPACE_FREE(pContext, pUniSubGroups[s].pTriMembers);
+ 	}
+ 
+ 	// clean up
+-	free(pUniSubGroups);
+-	free(pTmpMembers);
+-	free(pSubGroupTspace);
++	ROCKS_MIKKTSPACE_FREE(pContext, pUniSubGroups);
++	ROCKS_MIKKTSPACE_FREE(pContext, pTmpMembers);
++	ROCKS_MIKKTSPACE_FREE(pContext, pSubGroupTspace);
+ 
+ 	return TTRUE;
+ }
+@@ -1414,7 +1435,7 @@ static STSpace EvalTspace(int face_indices[], const int iFaces, const int piTriL
+ 			// weight contribution by the angle
+ 			// between the two edge vectors
+ 			fCos = vdot(v1,v2); fCos=fCos>1?1:(fCos<(-1) ? (-1) : fCos);
+-			fAngle = (float) acos(fCos);
++			fAngle = ROCKS_MIKKTSPACE_ACOS(fCos);
+ 			fMagS = pTriInfos[f].fMagS;
+ 			fMagT = pTriInfos[f].fMagT;
+ 

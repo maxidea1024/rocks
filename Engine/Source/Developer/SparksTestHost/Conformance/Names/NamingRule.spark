@@ -1,0 +1,25 @@
+enum mode { quiet, Loud }
+
+const maxStack: int = 1;
+
+fn twice(Value: int): int {
+    var Result2 = Value;
+    return Result2;
+}
+
+struct point {
+    var x: float;
+    fn length(): float { return 0.0; }
+}
+
+interface usable {
+    fn use(Who: int);
+}
+
+class door : ScriptComponent {
+    event opened(By: Actor?);
+    on Start() {
+        for (I in 0..<3) { _ = I; }
+        if (let Found = Owner) { _ = Found; }
+    }
+}

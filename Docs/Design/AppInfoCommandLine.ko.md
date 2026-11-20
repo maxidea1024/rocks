@@ -678,6 +678,8 @@ ROCKS_STRUCT(Command(Name = "trace-report", Help = "Convert a trace file into a 
                      Examples = ("trace-report run.rtrace",
                                  "trace-report run.rtrace report.json --format json")))
 struct TraceReportOptions {
+    ROCKS_GENERATED_BODY()
+
     explicit TraceReportOptions(Allocator& allocator) noexcept : input(allocator), channel(allocator) {
     }
 
@@ -858,6 +860,8 @@ enum class CommandLineOutcome : uint8 {
 // HostConfig 모듈. 모든 호스트(게임·Sandbox·RocksCommandlet)가 받는 공용 옵션이다.
 ROCKS_STRUCT(Command(Global))
 struct HostCommandLineOptions {
+    ROCKS_GENERATED_BODY()
+
     explicit HostCommandLineOptions(Allocator& allocator) noexcept;
 
     ROCKS_PROPERTY(Help = "Override a setting for this run", ValueName = "target=value")

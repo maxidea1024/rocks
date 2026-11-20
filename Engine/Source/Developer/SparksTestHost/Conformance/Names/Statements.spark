@@ -1,0 +1,41 @@
+enum Mode { Idle, Run }
+
+event Actor.Pushed(by: Actor, force: float);
+
+class Walker : Character {
+    var Speeds: Array<float> = [];
+    var Mode2 = Mode.Idle;
+
+    on this.Pushed(by: Actor, force: float) {
+        emit this.Pushed(by, -force);
+    }
+
+    fn Step(limit: int): float {
+        var index = 0;
+        var sum = 0.0;
+        while (index < limit) {
+            index += 1;
+        }
+
+        switch (Mode2) {
+            case Mode.Idle: { sum = (sum + 1.0); }
+            case Mode.Run: { sum = Speeds[index] ?? 0.0; }
+        }
+
+        switch (index) {
+            case 0, 1: { }
+            default: { sum = -sum; }
+        }
+
+        let names: Map<string, float> = ["${index}": sum, "b": !true ?? sum];
+        let first = Speeds[0] ?? return sum;
+        let found = Find<ScriptComponent>();
+        let other = Owner2.Find<SphereCollider>();
+        _ = names;
+        _ = found;
+        _ = other;
+        return first;
+    }
+
+    fn Owner2(): Actor { return this; }
+}

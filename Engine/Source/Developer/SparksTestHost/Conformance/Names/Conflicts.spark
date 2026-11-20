@@ -1,0 +1,28 @@
+class SoundAsset : ScriptComponent { }
+
+fn Helper(): int { return 1; }
+
+class Door : ScriptComponent {
+    var Health: int;
+    var Helper: int;
+    var WORLD: int;
+
+    fn Run(health: int) {
+        let count = 1;
+        if (count > 0) {
+            let cOUNT = 2;
+            _ = cOUNT;
+        }
+
+        let world = 3;
+        _ = world;
+        _ = health;
+    }
+}
+
+struct Data {
+    var Value: int;
+    fn Get(vALUE: int): int { return vALUE; }
+}
+
+fn Free(world: int): int { return world; }

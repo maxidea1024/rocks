@@ -1,0 +1,15 @@
+open class A : Nope { }
+
+class B : A {
+    fn F() {
+        _ = nope;
+        _ = World;
+    }
+}
+
+open class C : D { }
+open class D : C { }
+
+class E : C {
+    fn F() { _ = nope2; }
+}

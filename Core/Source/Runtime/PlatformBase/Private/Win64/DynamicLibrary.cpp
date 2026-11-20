@@ -2,7 +2,11 @@
 #include "WindowsError.h"
 #include "WindowsFileCommon.h"
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
 
 // Windows DLL 로더 backend다. 의존 DLL 검색을 연 DLL의 디렉터리와 System32로 제한해 현재
 // 디렉터리·PATH·실행 파일 디렉터리의 같은 이름 DLL을 쓰지 않는다(DLL 바꿔치기 방지).

@@ -265,6 +265,7 @@ void CompilationChecker::ResolveImports(uint32 moduleNumber) noexcept {
             }
         }
 
+        resolution.target = target;
         if (judged && target == moduleNumber) {
             Report(DiagnosticCode::SelfImport, module.source, span,
                    "A module cannot import itself.",

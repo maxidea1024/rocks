@@ -66,6 +66,8 @@ inline ValidateLog& CurrentValidateLog() noexcept {
 
 ROCKS_STRUCT()
 struct ValidRange {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() int32 low = 0;
     ROCKS_PROPERTY() int32 high = 0;
 
@@ -78,6 +80,8 @@ struct ValidRange {
 
 ROCKS_STRUCT()
 struct ValidBox {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() ValidRange range;
     ROCKS_PROPERTY() int32 limit = 100;
 
@@ -91,6 +95,8 @@ struct ValidBox {
 
 ROCKS_STRUCT()
 struct ValidDerived : ValidRange {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() int32 extra = 0;
 
     static Result<void> Validate(const ValidDerived& value) noexcept {
@@ -103,6 +109,8 @@ struct ValidDerived : ValidRange {
 // 기본값이 hook을 어기는 struct다(count > 0 — 값을 만드는 경로 연산이 기본값을 검증하는지 본다, n).
 ROCKS_STRUCT()
 struct ValidNonEmpty {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() int32 count = 0;
 
     static Result<void> Validate(const ValidNonEmpty& value) noexcept {
@@ -115,6 +123,8 @@ struct ValidNonEmpty {
 // 자기 hook은 없고 hook 멤버를 담는다(트리에만 hook이 있다).
 ROCKS_STRUCT()
 struct ValidWrapper {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() ValidNonEmpty item;
 };
 
@@ -123,6 +133,8 @@ struct ValidWrapper {
 // 안을 바꾸는 경우다.
 ROCKS_STRUCT()
 struct ValidList {
+    ROCKS_GENERATED_BODY()
+
     explicit ValidList(Allocator& allocator) noexcept : values(allocator), map(allocator) {
     }
 
@@ -142,6 +154,8 @@ struct ValidList {
 // hook 없는 바깥 struct다(hook struct가 경로의 둘째 단계 — 실패 단계 재매핑 시험).
 ROCKS_STRUCT()
 struct ValidOuter {
+    ROCKS_GENERATED_BODY()
+
     explicit ValidOuter(Allocator& allocator) noexcept : list(allocator) {
     }
 
@@ -152,12 +166,16 @@ class ValidHolder;
 
 ROCKS_STRUCT()
 struct ValidRefElement {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() ObjectRef<ValidHolder> link;
     ROCKS_PROPERTY() ValidRange range;
 };
 
 ROCKS_CLASS()
 class ValidHolder : public Object {
+    ROCKS_GENERATED_BODY()
+
 public:
     explicit ValidHolder(Allocator& allocator) noexcept
         : ranges(allocator), byKey(allocator), elements(allocator), outer(allocator),

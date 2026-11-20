@@ -52,7 +52,9 @@ bool SchemaHasNoObjectReferences(const TypeSchema& schema) noexcept;
 // 언제나 성공이다. 실패는 InvalidArgument다. 어느 스레드에서나 부를 수 있다.
 template <RenderTransferable T>
 Result<void> CheckRenderTransfer() noexcept {
-    if constexpr (!IsReleaseBuild && requires { GeneratedType<T>::Schema(); }) {
+    // 관문: 리플렉션 타입인데 생성 헤더가 보이지 않으면 검사를 건너뛰지 않고 컴파일 오류를 낸다.
+    if constexpr (::rocks::detail::GeneratedHeaderVisible<T>() && !IsReleaseBuild &&
+                  requires { GeneratedType<T>::Schema(); }) {
         if (!detail::SchemaHasNoObjectReferences(GeneratedType<T>::Schema())) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }

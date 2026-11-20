@@ -1,0 +1,2 @@
+struct Hammer { }
+fn Helper(): int { return 1; }

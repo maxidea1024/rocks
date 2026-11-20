@@ -1,0 +1,3 @@
+# A cycle across modules is reported once, at the class whose module import path comes first
+# by bytes (Alpha before Beta).
+error S0323 Alpha.spark 3:20

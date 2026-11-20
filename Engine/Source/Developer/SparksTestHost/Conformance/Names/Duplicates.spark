@@ -1,0 +1,29 @@
+class Door : ScriptComponent {
+    var Speed: int;
+    fn SPEED() { }
+    event SpeEd();
+}
+
+struct DOOR { }
+
+enum Mode { Open, OPEN, Shut }
+
+interface Usable {
+    fn Use();
+    fn USE();
+}
+
+fn Sum(value: int, vALUE: int): int {
+    var total = value;
+    var tOTAL = vALUE;
+    if (true) {
+        var inner = 1;
+        _ = inner;
+    }
+    var inner = 2;
+    return total + tOTAL + inner;
+}
+
+class Ui : WidgetController {
+    event Pressed(first: int, fIRST: int);
+}

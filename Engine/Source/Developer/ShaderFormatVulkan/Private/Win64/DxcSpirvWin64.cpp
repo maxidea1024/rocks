@@ -6,10 +6,15 @@
 // dxcapi.h는 Windows에서 COM 형식(IUnknown·HRESULT)을 쓰므로 Windows 헤더 뒤에 include한다
 // (ShaderToolLoader Win64 구현과 같은 순서). 빌드가 WIN32_LEAN_AND_MEAN을 정의하므로 COM 기본
 // 형식과 IStream 헤더를 직접 더한다.
+
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
 #include <Unknwn.h>
 #include <objidl.h>
 #include <dxc/dxcapi.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
 
 namespace rocks::shader {
 

@@ -84,6 +84,8 @@ enum class PlainCurveInterp : uint8 {
 // math::CurveSegmentKey(KeyCurveMath.h)이므로 평가 핵심 식에 변환 없이 들어간다.
 ROCKS_STRUCT(Atomic)
 struct TangentCurveKey {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() float time = 0.0f;
     ROCKS_PROPERTY() float value = 0.0f;
     ROCKS_PROPERTY() CurveInterp interp = CurveInterp::Linear;
@@ -98,6 +100,8 @@ struct TangentCurveKey {
 // PlainCurve의 키다(UE FSimpleCurveKey): 시간과 값.
 ROCKS_STRUCT(Atomic)
 struct PlainCurveKey {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() float time = 0.0f;
     ROCKS_PROPERTY() float value = 0.0f;
 };
@@ -110,6 +114,8 @@ struct PlainCurveKey {
 // 이 struct만으로는 평가하지 않는다(키가 없다). 다형 저장의 평가 규칙은 설계 14절이다.
 ROCKS_STRUCT()
 struct ScalarCurveBase {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() Optional<float> defaultValue;
     ROCKS_PROPERTY() CurveExtrapolation preExtrapolation = CurveExtrapolation::Constant;
     ROCKS_PROPERTY() CurveExtrapolation postExtrapolation = CurveExtrapolation::Constant;

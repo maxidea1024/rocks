@@ -1,0 +1,18 @@
+class Mover : ScriptComponent {
+    fn Start() { }
+    fn OnTick() { }
+    fn Update() { }
+    var Awake: int;
+    event Destroy();
+    fn Started() { }
+}
+
+class Tuning : DataAsset {
+    fn Start() { }
+}
+
+struct Step {
+    var Start: int;
+}
+
+enum Phase { Start, Tick }

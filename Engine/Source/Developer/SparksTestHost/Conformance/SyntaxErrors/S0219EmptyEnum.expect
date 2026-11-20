@@ -1,2 +1,4 @@
 # An enum needs a case.
 error S0219 1:6
+# Syntax only: later stages (names, types) are not checked here.
+stage syntax

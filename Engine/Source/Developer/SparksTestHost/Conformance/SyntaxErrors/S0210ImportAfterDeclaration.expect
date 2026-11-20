@@ -1,2 +1,4 @@
 # Imports come first.
 error S0210 2:1
+# Syntax only: later stages (names, types) are not checked here.
+stage syntax

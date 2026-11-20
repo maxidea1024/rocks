@@ -7,6 +7,7 @@
 #include <Core/Text/String.h>
 #include <Core/Text/StringView.h>
 #include <Platform/File.h>
+#include <SparksCompiler/Compilation.h>
 
 // Sparks conformance corpus 실행기다(Docs/Design/SparksLanguage.ko.md 13.1절).
 //
@@ -27,7 +28,9 @@
 //   - 폴더 사례: 폴더 바로 아래에 SparksPackage.json5가 있으면 그 폴더가 패키지 하나, 없으면 바로
 //     아래 폴더 하나하나가 패키지(각자 SparksPackage.json5 필수)다. 패키지 안에는 .spark와 루트의
 //     SparksPackage.json5만 둔다. 진단 경로는 사례 폴더 기준 경로다.
-// 짝이 맞지 않거나(`.spark`·폴더 없는 `.expect`·`.ast`, `.expect` 없는 사례, 폴더 사례 옆의 `.ast`)
+// 사례는 선택으로 <사례>.names(이름 해석 golden, AppendNameDump — 폴더 사례는 모듈마다
+// "== <경로>" 줄과 덤프를 경로 순으로 이은 것)도 둔다. 짝이 맞지 않거나(`.spark`·폴더 없는
+// `.expect`·`.ast`·`.names`, `.expect` 없는 사례, 폴더 사례 옆의 `.ast`)
 // 낯선 파일이 있으면 그 자리의 실패로 기록한다(빈 기대값이 조용히 통과하지 않게).
 //
 // 사례 실행: binding schema(schemaDirectory의 *.sparkbind.json, 진단 경로 `Schema/<파일>`)와 사례의
@@ -42,6 +45,8 @@
 //   error S0301 Game/Main.spark 3:8   폴더 사례는 사례 폴더 기준 파일 경로를 쓴다
 //   error S1108 Game/combat.spark     폴더 사례의 파일 전체 진단
 //   clean                             진단이 없어야 한다(error와 함께 쓸 수 없다)
+//   stage syntax                      그 단계까지만 컴파일한다(syntax·imports·names, 한 번, 기본은
+//                                     전체 — 구문 사례가 뒤 단계 규칙에 묶이지 않게)
 // 진단은 8.1절 순서대로 모두 일치해야 한다. 파일 사례에 경로를 쓰거나 폴더 사례에 경로를 빠뜨리면
 // 형식 오류다.
 //
@@ -72,6 +77,11 @@ public:
         return clean_;
     }
 
+    // `stage` 지시의 단계다(없으면 CompilationStage::All).
+    CompilationStage Stage() const noexcept {
+        return stage_;
+    }
+
     Span<const ExpectedDiagnostic> Diagnostics() const noexcept {
         return diagnostics_.View();
     }
@@ -81,6 +91,7 @@ private:
                                             String& problem) noexcept;
 
     Array<ExpectedDiagnostic> diagnostics_;
+    CompilationStage stage_ = CompilationStage::All;
     bool clean_ = false;
 };
 
@@ -137,6 +148,8 @@ struct CaseInput {
     StringView expect;            // `.expect` 내용
     bool hasSyntaxTree = false;   // `.ast`가 있는지(파일 사례만)
     StringView syntaxTree;        // `.ast` 내용(hasSyntaxTree일 때만)
+    bool hasNames = false;        // `.names`가 있는지
+    StringView names;             // `.names` 내용(hasNames일 때만)
 };
 
 // 사례 하나를 실행한다. 기대와 다르면 report에 실패 항목을 더한다(한 사례에 진단·구문 트리 실패가

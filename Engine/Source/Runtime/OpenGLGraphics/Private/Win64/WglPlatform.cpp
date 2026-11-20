@@ -2,7 +2,11 @@
 
 #include <Platform/Memory.h>
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
 
 // Windows 미리보기(GLES31_PC)의 WGL 플랫폼 층이다(설계: Docs/Design/OpenGLESGraphics.ko.md 4.1절).
 // 데스크톱 GL 전용 호출(glClipControl, GL_FRAMEBUFFER_SRGB 켜기, WGL sRGB 픽셀 형식, WGL context)은

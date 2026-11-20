@@ -1,0 +1,10 @@
+# Names that are not visible are reported (S0317): a misspelled member, a hook name, the event
+# name Changed alone, a local used before its declaration or in its own initial value, and a
+# member from a top-level function.
+error S0317 4:13
+error S0317 5:13
+error S0317 6:9
+error S0317 7:13
+error S0317 8:20
+error S0317 10:21
+error S0317 16:12

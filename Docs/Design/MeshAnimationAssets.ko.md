@@ -1,6 +1,6 @@
 # 메시·스켈레톤·애니메이션 에셋 설계
 
-기준일: 2026-11-20, 개정 5(MA1 구현 — 3.7절). 개정 4(MA2 전 결정 반영 — index 형식·통합 bone map·메시 LOD 스트리밍). 개정 3(15절 요구를 다른 문서에 반영하고 상태 열을 더함). 개정 2(교차 검증 반영 — 17절). 정적 메시·스켈레톤·스킨 메시·애니메이션 클립의 에셋 자료구조를 정한다. 범위는 원본 데이터(에디터 데이터), 저장 설정, 빌드 계약, 쿠킹 데이터, 모듈 배치다. [엔진 구현 계획](EngineImplementationPlan.ko.md) 13.1절(StaticMeshAsset)·15절(Skeleton·SkeletalMesh·AnimationClip)의 개요를 구현할 수 있는 수준으로 구체화한다. 텍스처는 [에셋 시스템](AssetSystem.ko.md) 12절, 머티리얼은 [머티리얼 시스템](MaterialSystem.ko.md) 4절이 이미 정했으므로 이 문서는 그 둘을 참조만 한다.
+기준일: 2026-11-21, 개정 7(MA2a 구현 — 5.4절·12.2절). 개정 6(MA2a·MA4a 분리). 개정 5(MA1 구현 — 3.7절). 개정 4(MA2 전 결정 반영 — index 형식·통합 bone map·메시 LOD 스트리밍). 개정 3(15절 요구를 다른 문서에 반영하고 상태 열을 더함). 개정 2(교차 검증 반영 — 17절). 정적 메시·스켈레톤·스킨 메시·애니메이션 클립의 에셋 자료구조를 정한다. 범위는 원본 데이터(에디터 데이터), 저장 설정, 빌드 계약, 쿠킹 데이터, 모듈 배치다. [엔진 구현 계획](EngineImplementationPlan.ko.md) 13.1절(StaticMeshAsset)·15절(Skeleton·SkeletalMesh·AnimationClip)의 개요를 구현할 수 있는 수준으로 구체화한다. 텍스처는 [에셋 시스템](AssetSystem.ko.md) 12절, 머티리얼은 [머티리얼 시스템](MaterialSystem.ko.md) 4절이 이미 정했으므로 이 문서는 그 둘을 참조만 한다.
 
 - 배경: 사용자 지시(2026-11-19). 엔진 시험용으로 UE에서 텍스처·정적 메시·머티리얼·애니메이션을 가져오는 기능을 넣는다. Rocks에 메시·애니메이션 자료구조가 아직 없으므로 함께 정한다. 가져오는 경로는 [Unreal 교환 형식](UnrealExchange.ko.md)이 정한다. 이 문서의 자료구조는 그 경로와 상관없이 쓰는 엔진 기반이며, 뒤에 올 glTF·FBX 임포터도 같은 구조로 들어온다.
 - UE 근거: UE 5.8.4(`release`, commit `f45729c0b6f0`, 로컬 클론 `C:\github\UnrealEngine`)를 읽어 확인했다. 경로 약어는 다음과 같다. `E/` = `Engine/Source/Runtime/Engine`, `RT/` = `Engine/Source/Runtime`, `Dev/` = `Engine/Source/Developer`. UE 이름은 대응표와 근거에만 쓰고, 타입 이름은 Rocks 이름으로 짓는다. 빌드 설정·축소 설정처럼 업계 공용 서술 이름은 그대로 쓴다.
@@ -120,6 +120,8 @@ ROCKS_ENUM() enum class MeshValueType : uint8 { Invalid = 0, Float = 1, Vec2 = 2
 
 ROCKS_STRUCT()
 struct MeshAttributeRecord {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() Name name;
     ROCKS_PROPERTY() MeshElement element = MeshElement::Invalid;
     ROCKS_PROPERTY() MeshValueType type = MeshValueType::Invalid;
@@ -129,6 +131,8 @@ struct MeshAttributeRecord {
 
 ROCKS_STRUCT()
 struct MeshSourceData {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() uint32 formatVersion = 1;
     ROCKS_PROPERTY() uint32 vertexCount = 0;
     ROCKS_PROPERTY() uint32 cornerCount = 0;
@@ -223,6 +227,8 @@ UE `DistanceFieldReplacementMesh`(:3024)는 객체 참조라 빌드 설정 struc
 ```cpp
 ROCKS_STRUCT()
 struct MeshMaterialSlot {                                            // 참조 struct
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() Name slotName;                                  // 사용자에게 보이는 이름
     ROCKS_PROPERTY(EditorOnly) Name importedSlotName;                // 다각형 묶음 MaterialSlotName과 맞추는 키
     ROCKS_PROPERTY() ObjectRef<MaterialBase> material;               // Hard. 비면 엔진 기본 머티리얼
@@ -310,7 +316,7 @@ LOD마다 원본 사본에 다음 순서로 적용한다. UE `FStaticMeshBuilder
 6. (보존 설정) lightmap UV 생성 — 후속.
 7. (보존 설정) 축소 — 후속.
 8. `buildScale` 적용: 위치에 곱하고, tangent는 크기를 곱한 뒤 정규화, 법선은 역전치로 변환한 뒤 정규화한다(UE `ScaleStaticMeshVertex`와 같은 식 — StaticMeshBuilder.cpp:1596, 1693). 성분이 음수여도 winding을 뒤집지 않는다(UE와 같다). 음수 성분이 홀수 개면 `NegativeBuildScale` 경고(계획 13.1절 winding 진단).
-9. 정점 버퍼 구성: 삼각형 순서로 코너를 렌더 정점으로 옮긴다. `removeDegenerates`면 두 꼭짓점 위치가 `MeshPointsSameThreshold`(UE `THRESH_POINTS_ARE_SAME`) 안에서 같은 삼각형을 뺀다(UE 판정과 같다 — StaticMeshBuilder.cpp:1644-1674. 면적 0 판정이 아니다). 렌더 정점 용접은 위치·법선·tangent·UV·색을 UE와 같은 임계값으로 비교한다(:1724). 임계값 상수 값은 MA2에서 UE 원본으로 확정한다.
+9. 정점 버퍼 구성: 삼각형 순서로 코너를 렌더 정점으로 옮긴다. `removeDegenerates`면 두 꼭짓점 위치가 `MeshPointsSameThreshold`(UE `THRESH_POINTS_ARE_SAME`) 안에서 같은 삼각형을 뺀다(UE 판정과 같다 — StaticMeshBuilder.cpp:1644-1674. 면적 0 판정이 아니다). 렌더 정점 용접은 위치·법선·tangent·UV·색을 UE와 같은 임계값으로 비교한다(:1724). 임계값 상수 값은 UE 원본으로 확정했다(5.4절 4).
 10. 섹션 구성: 다각형 묶음 순서로 삼각형을 모으고, 슬롯 대응(4.3절)으로 머티리얼 번호를 정한다.
 11. 정점 cache·fetch 최적화(meshoptimizer 어댑터, 계획 13.1절. 어댑터가 생기기 전에는 원본 순서). 결과 순서는 결정적이어야 한다.
 12. bounds 계산(상자 + 구, 경계 확장 적용).
@@ -347,6 +353,26 @@ MeshStream { uint32 vertexFormat;  // GraphicsTypes VertexFormat 번호. 로드 
 - LOD 하나가 mip 하나처럼 스트리밍 단위다(StreamableRenderAsset 기반). LOD별 bulk 묶음과 상주 LOD 수 규칙은 텍스처 스트리밍의 메시 확장으로 렌더 세션이 정한다(요구 MR3).
 - 렌더러에 넘기는 정점 입력 타입(stream 묶음의 이름·셰이더 입력 대응)은 RenderBase 10절 몫이다(요구 MR1).
 
+### 5.4 구현에서 정한 점(MA2a)
+
+MA2a 구현(모듈 `Engine/Source/Runtime/Mesh`, `Engine/Source/Developer/MeshTools`, ThirdParty `Engine/Source/ThirdParty/MikkTSpace`, Core `DeterministicMath::Acos`) 중 위 절이 정하지 않았거나 다르게 정한 점이다. 모두 권장안으로 확정했다.
+
+1. **API.** `MeshTools/StaticMeshBuilder.h`의 순수 함수 `BuildStaticMeshLod(const StaticMeshBuildInput&, StaticMeshBuildResult&, MeshDiagnostic*)`다. 입력은 원본 메시 포인터, `MeshBuildSettings`, 슬롯마다의 importedSlotName 목록(`slotNames` — 슬롯 머티리얼 참조는 MA2b), 섹션 정보 덮어쓰기(`MeshBuildSectionInfo{materialIndex, castShadow}` — `MeshNoIndex`면 슬롯 대응 결과), bounds 확장 두 벡터(StaticMesh 필드를 MA2b가 넘긴다), 임시 할당기다. 결과는 정점 속성별 배열(위치·법선·tangent·쌍법선 부호·UV·선형 색), `uint32` index, 섹션, bounds(상자 최소·최대 + 구 반지름, 구 중심 = 상자 중심), 경고 배열이다. UV는 채널 우선(`texCoords[c × 정점 수 + v]` — 5.3절 쌍 묶기 패킹이 채널 단위라서), 색은 원본에 `Color`가 있을 때만 채운다(전부 흰색이면 stream을 빼는 판정은 5.3절 패킹 몫). 실패하면 결과는 그대로다(지역 결과에 만든 뒤 옮긴다). 버린 대안: 정점 구조체 배열(UV 채널 수가 메시마다 달라 고정 구조체로 담으면 빈 칸이 생긴다).
+2. **모듈 의존(지금).** `Mesh`는 `MeshBuildSettings`(리플렉션 값 struct, 4.1절 필드 전부)와 진단용 필드 번호 `MeshBuildSettingField`만 가지며 ObjectRuntime·CoreTypeBindings(`Vec3d` 미러)에 의존한다. `MeshTools`는 MeshSource·Mesh(public)와 DeterministicMath·MikkTSpace(private)에 의존한다. 8절 표의 나머지 의존(AssetRuntime·Animation·Material·AssetCooker 등)은 그 기능이 들어오는 MA2b·MA5에서 더한다.
+3. **원본 사본.** 5.2절 "원본 사본"은 위상 전체와 빌드가 쓰는 코너 속성(Normal·Tangent·BinormalSign·Color·TexCoord)만 복사한 `MeshSource`다. 앞의 셋은 원본에 없으면 0으로 더한다. 스킨·morph·사용자 속성은 정적 메시 빌드가 쓰지 않아 복사하지 않는다 — 그래서 값 정리(`SanitizeMeshSource`)가 스킨 가중치 정규화 경고나 합 0 오류를 내지 않는다. 3.5절의 "정적 메시에 스킨 속성이 있으면 경고"는 11절에 코드가 없어 MA2a는 내지 않는다(MA5에서 스킨 메시 빌드와 함께 정한다). 원본 검증은 사본이 아니라 원본 전체에 `ValidateMeshSource`로 한다(로드를 거치지 않은 메모리 메시도 받으므로). 값 정리 경고의 속성 번호는 원본 번호로 바꿔 돌려준다.
+4. **임계값(UE 원본으로 확정).** `MeshPointsSameThreshold` = 0.00002(UE `THRESH_POINTS_ARE_SAME`), `MeshNormalsSameThreshold` = 0.00002(`THRESH_NORMALS_ARE_SAME`), `MeshUvsSameThreshold` = 1/1024(`THRESH_UVS_ARE_SAME`) — UnrealMathUtility.h·MeshBuild.h. 비교는 UE와 같이 성분마다 `|a − b| ≤ 임계값`이다. 위치 임계값은 `removeDegenerates`면 위 값, 아니면 0이고(UE `VertexComparisonThreshold`), 퇴화 판정·겹치는 코너·렌더 정점 용접이 같은 값을 쓴다. 그래서 `removeDegenerates`를 꺼도 두 꼭짓점 위치가 **정확히** 같은 삼각형은 빠진다(UE와 같다 — 5.2절 9단계의 "removeDegenerates면"을 이렇게 읽는다). 내부 계산은 UE의 `SMALL_NUMBER`(1e-8)·`KINDA_SMALL_NUMBER`(1e-4)·`DELTA`(1e-5)·`MIN_flt`를 이름 있는 상수로 둔다. 9.3절 너겟 키용으로 `MeshBuildThresholdVersion`·`MeshMikkTSpacePatchVersion`(둘 다 1)을 둔다.
+5. **삼각형·코너 법선과 tangent.** UE `GetTriangleTangentsAndNormalsWithUV`·`WithNoUVs`(UV 채널이 없으면 Duff·Frisvad 기저)와 `ComputeTangentsAndNormals`의 정점 단위 묶음을 그대로 옮긴다: 정점마다 그 정점을 쓰는 삼각형을, 정점에서 나가는 변이 soft인 쌍끼리 이어 묶고, 묶음의 (가중) 삼각형 법선 합을 0 벡터 코너에 쓰고, MikkTSpace를 쓰지 않으면 UV0 값별 tangent·쌍법선 합을 Gram–Schmidt로 직교화한 뒤 행렬식 부호를 쓴다. 변 목록에 없는 쌍(다각형 안 대각선)은 soft다 — UE는 다각형 내부 변을 soft 변으로 만든다. 묶음 안 합산 순서는 삼각형 번호 오름차순이고(UE는 해시 표 순서라 bit 일치는 보장하지 않는다 — 5.2절), UV0 키는 −0을 +0으로 본 정확 비교다(UE `FNTBGroupKeyFuncs`). 가중치는 면적 × 코너 각이고 코너 각은 `deterministic::Acos`(입력을 [−1, 1]로 자른다 — UE `FMath::Acos`)다. UE의 `BlendOverlappingNormals` 플래그는 그 함수가 읽지 않아 효과가 없으므로 따로 구현하지 않는다(겹치는 코너는 용접에만 쓰인다).
+6. **비유한 중간값.** 아주 큰 좌표의 넘침이 낸 비유한 법선·tangent는 0 벡터로 둔다(NaN을 남기면 호스트마다 기본 NaN bit가 달라 결정성이 깨진다). 크기를 곱한 위치가 비유한이면 빌드 실패다(7). bounds는 double로 계산해 넘치지 않는다.
+7. **`buildScale` 검사.** UE처럼 float로 바꿔 쓴다. 성분이 float 범위 밖·0(−0, float로 바꿔 0이 되는 작은 값 포함)·NaN이거나 역수가 비유한(법선을 나눌 수 없다)이면, 또는 곱한 위치가 비유한이면 `InvalidSetting`(AssetSystem 4.6절에 있던 이름, issue `InvalidBuildScale`, index = 축) 실패다. UE는 검사하지 않아 NaN 법선이 나온다. 버린 대안: `UnsupportedSetting`(경고 뜻이다), `InvalidMeshData`(메시가 아니라 설정 문제다).
+8. **MikkTSpace.** 저자 저장소(mmikk/MikkTSpace 3e895b49d05e, zlib)를 고정 해시로 들인다. UE 사본의 `m_bIgnoreDegenerates`(퇴화 삼각형 후처리 생략 — 성능용 확장)는 원본에 없어 넣지 않는다: 빠지는 삼각형의 코너도 이웃에서 tangent를 받을 뿐이고 렌더 정점에는 쓰이지 않는다. 패치(`Rocks.patch`, manifest `modifications`)는 `cos`(각 임계값)를 `CosPi(t/180)`로(같은 함수, 기본 180°에서 둘 다 −1), `acos`를 `deterministic::Acos`로, `malloc`·`free`를 호출자 allocator 훅으로 바꾸고, 원본 버그 하나를 고치고(해시 표 할당이 실패할 때 쓰는 `GenerateSharedVerticesIndexListSlow`가 찾은 번호를 저장하지 않아 −1을 쓰고 범위 밖을 읽는다 — UE 사본도 같다, 할당 실패 주입 시험이 찾았다), `-Wunused-but-set-variable`에 걸리는 세지 않는 계수기 둘을 지운다. 훅은 MeshTools가 C 연결로 정의한다(MikkTSpace를 링크하는 곳은 MeshTools뿐). 부호는 UE와 같이 MikkTSpace 부호의 반대이고, 코너를 여러 삼각형이 쓰면 마지막 삼각형의 값이 남는다(UE와 같다). 원본은 일부 할당 실패를 느린 경로로 넘기는데 그때도 결과가 같다(시험으로 확인). 면 번호를 `int`에 2비트 밀어 쓰므로 삼각형 수 상한은 `MeshMikkTSpaceMaxTriangles`(2^29 − 1)이고 넘으면 `CapacityExceeded`다. 패치 전 원본 대조용 글루 `MikkTSpaceReference.c`는 같은 원본을 원래 식(CRT `cos`·`acos`·`malloc`)으로 다른 이름에 다시 빌드한다(시험만 부른다).
+9. **결정적 `Acos`(Core).** `DeterministicMath`에 `Acos(double)`를 더했다(CoreDataFoundations 2.2절). |x| ≤ ½은 π/2 − asin(x)의 asin Taylor 30항(계수는 컴파일 시점 IEEE 연산), 그 밖은 2·asin(√((1 − |x|)/2))이고 √는 고정 횟수 Newton 근사 뒤 z − s²(오차 없는 곱)로 보정한다(CRT·명령 sqrt를 쓰지 않는다 — 모듈 소스 정책). 정확도 상한 1 ulp(400비트 기준값 표), 기존 함수의 결과 bit는 그대로라 `Version`은 1을 유지하고 Acos 표본 digest를 따로 고정한다.
+10. **렌더 정점 용접.** UE `BuildVertexBuffer`와 같이 겹치는 앞 wedge의 렌더 정점 가운데 wedge 번호 순 첫 일치를 쓴다. 비교 항목은 위치·법선·tangent·쌍법선(= cross(N, T) × 부호를 크기 적용 뒤 정규화)·색·UV 전 채널이다. 색은 UE처럼 8비트 sRGB로 비교하되 Rocks 정확 반올림 부호화(`LinearColor::ToSRGB`)를 쓰고, 출력은 먼저 나온 코너의 선형 float다. UE는 흰색 아닌 색이 처음 나오기 전에는 색을 비교하지 않아 색 있는 코너가 흰 정점에 합쳐질 수 있는데 이 동작은 따르지 않는다(Color 속성이 있으면 늘 비교한다). 쌍법선 부호 출력은 크기를 적용한 (tangent, 쌍법선, 법선)의 행렬식 부호다(UE 패킹의 `GetBasisDeterminantSign`).
+11. **섹션과 슬롯.** 다각형 묶음마다 섹션 하나(빈 묶음도 삼각형 0 섹션 — UE와 같다). 슬롯 대응은 Name 비교 규칙의 첫 일치이고, None(빈 이름)은 빈 importedSlotName과 맞는다(UE FName None == None). `MaterialSlotFallback`(index = 묶음)은 대체 번호를 실제로 쓸 때만 낸다 — 섹션 정보가 머티리얼 번호를 덮어쓴 섹션은 내지 않는다.
+12. **경고 순서.** 값 정리(NonFiniteAttribute·UvOutOfRange), `UnsupportedSetting`(보존 필드마다, 필드 순서, index = `MeshBuildSettingField`), `NegativeBuildScale`(count = 음수 성분 수), `MaterialSlotFallback`(묶음 순서). 보존 필드의 "기본값이 아님"은 실수 필드를 bit로 비교한다(−0.0도 다르다 — 저장 byte가 다르다).
+13. **결정성.** 빌드 전체를 `RunWithDeterministicFloatingPoint` 안에서 하고(호출 전 FTZ가 켜져 있어도 같은 결과 — 시험), 초월 함수는 Core 결정적 수학만, √는 정확 반올림 명령(`math::Sqrt`)만 쓴다. 스레드를 쓰지 않으므로 12절의 "스레드 수 바꿔서" 시험은 대상이 없어 두지 않는다(스레드를 쓰게 되면 그때 더한다). 11단계는 원본 순서다.
+14. **진단 등록.** `AssetDiagnosticCode`에 `MaterialSlotFallback`·`NegativeBuildScale`(메시)과 `UnsupportedSetting`·`InvalidSetting`(임포트·설정 — 4.6절에 이름만 있던 것)을, `MeshIssue`에 빌드 세부 규칙 넷(`MaterialSlotFallback`·`NegativeBuildScale`·`UnsupportedSetting`·`InvalidBuildScale`)을 더했다. 원본 검증 실패는 `ValidateMeshSource`의 진단 그대로, 할당 실패·용량 초과는 진단 코드 없이 그 오류다.
+15. **시험 도우미.** MA1 퍼저의 무작위 메시 생성기(`RandomFuzzMesh`·`RandomFuzzAttributes`)를 `MeshSourceTestSupport.h`로 옮겨 빌드 퍼징이 같은 생성기를 쓴다(동작 불변 이동).
+
 ## 6. 스켈레톤과 스킨 메시
 
 ### 6.1 본 계층 `BoneHierarchy`
@@ -356,6 +382,8 @@ inline constexpr int32 NoParentBone = -1;
 
 ROCKS_STRUCT()
 struct BoneInfo {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() Name name;                         // 본의 안정 식별자(UE와 같이 이름으로 식별)
     ROCKS_PROPERTY() int32 parentIndex = NoParentBone;  // 루트만 NoParentBone
     ROCKS_PROPERTY(EditorOnly) String exportName;       // 대소문자를 보존한 원래 이름(UE ExportName)
@@ -363,6 +391,8 @@ struct BoneInfo {
 
 ROCKS_STRUCT()
 struct BoneHierarchy {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() Array<BoneInfo> bones;
     ROCKS_PROPERTY() Array<Transform> referencePose;    // 부모 기준 local, double(UE FTransform)
 };
@@ -648,6 +678,57 @@ Coverage(2026-11-20, clang source-based — Rocks.Build `Coverage` 구성, Swift
 
 입력 변조·실패 주입으로 닿을 수 있는 오류 분기는 모두 시험으로 닿게 했다. 측정 중 닿을 수 없음을 확인한 분기는 구조를 고쳤다: 저장 후 정렬 비교의 빈 이름 경로(레코드 이름은 비지 않는다), 64비트에서 늘 거짓인 크기 검사, 저장 경로의 `Invalid` 값 타입 case, 미리 잡은 변 표 삽입의 실패(단언으로), 엔진 규칙의 최소 채널(늘 1 이상), 속성 이름 내용 검사(만드는 두 길이 모두 지킨다 — 3.7절 4).
 
+### 12.2 요구 대조표(MA2a — 정적 메시 빌드 핵심)
+
+시험은 EngineTests의 `StaticMeshBuild_*`(`Engine/Source/Developer/MeshTools/Tests`, 26개)와 Core의 `DeterministicMath_AccuracyAgainstReferenceTables`(Acos 표)·`DeterministicMath_AcosSpecialValuesAndDigest`다. 진단 이름표는 `AssetPackage_DiagnosticNames`·`MeshSource_DiagnosticNames`가 새 코드까지 본다.
+
+| 요구 | 시험 |
+|---|---|
+| 5.2 1단계 원본 검증(실패는 검증 진단 그대로) | `StaticMeshBuild_RejectsInvalidInputs`, `StaticMeshBuild_FuzzSourceMeshes` |
+| 5.2 2단계 값 정리(사본에만, 경고는 원본 속성 번호) | `StaticMeshBuild_SanitizeWarningsUseSourceAttributes`, `StaticMeshBuild_RecomputesOnlyZeroCorners`(NaN 법선) |
+| 5.2 3단계 삼각형 기저(UV 경로·UV 없는 Duff·Frisvad 경로) | `StaticMeshBuild_QuadBasics`, `StaticMeshBuild_TangentsWithoutUvs`, `StaticMeshBuild_AveragedTangentsMatchConvention` |
+| 5.2 4단계 겹치는 코너(위치 임계값 경계 안·밖, 임계값 0) | `StaticMeshBuild_WeldPositionThreshold` |
+| 5.2 5단계 0 벡터 코너만 재계산·가중 법선·hard edge·대각선 soft·MikkTSpace | `StaticMeshBuild_RecomputesOnlyZeroCorners`, `StaticMeshBuild_WeightedNormals`, `StaticMeshBuild_HardEdgeSplitsNormals`, `StaticMeshBuild_NgonDiagonalsAreSoft`, `StaticMeshBuild_MikkTSpaceMatchesReference` |
+| 5.2 6·7단계 보존 설정 경고 | `StaticMeshBuild_PreservedSettingsWarn` |
+| 5.2 8단계 buildScale(음수 성분 winding 유지·경고 홀짝, 비균일 역전치, 잘못된 값) | `StaticMeshBuild_NegativeBuildScale`, `StaticMeshBuild_NonUniformScaleNormals`, `StaticMeshBuild_RejectsInvalidInputs` |
+| 5.2 9단계 퇴화 on/off·UE 판정식(일직선 세 점 남김)·용접(속성 하나만 다르면 안 합침) | `StaticMeshBuild_DegenerateTriangles`, `StaticMeshBuild_WeldPositionThreshold`, `StaticMeshBuild_WeldRequiresEveryAttribute` |
+| 5.2 10단계 섹션(묶음 순서·빈 묶음)·슬롯 대응·대체 경고·섹션 정보 | `StaticMeshBuild_SectionsFollowGroups`, `StaticMeshBuild_SlotMatchingAndSectionInfo` |
+| 5.2 11단계 원본 순서 | `StaticMeshBuild_QuadBasics`, `StaticMeshBuild_NgonDiagonalsAreSoft`, `StaticMeshBuild_SectionsFollowGroups` |
+| 5.2 12단계 bounds·확장 | `StaticMeshBuild_BoundsAndExtension`, `StaticMeshBuild_QuadBasics` |
+| 5.2 결정성(두 번, 호출 전 FTZ, 비정규 중간값) — 스레드 없음(5.4절 13) | `StaticMeshBuild_DeterministicBytes`, `StaticMeshBuild_FuzzSourceMeshes` |
+| n-gon·코너 공유·빈 메시·UV 채널·색 | `StaticMeshBuild_NgonDiagonalsAreSoft`, `StaticMeshBuild_EmptyMeshes`, `StaticMeshBuild_UvChannelsAndColors` |
+| 11 `MaterialSlotFallback`·`NegativeBuildScale`·`UnsupportedSetting`·`InvalidSetting` | `StaticMeshBuild_SlotMatchingAndSectionInfo`, `StaticMeshBuild_NegativeBuildScale`, `StaticMeshBuild_PreservedSettingsWarn`, `StaticMeshBuild_RejectsInvalidInputs` |
+| 4.1 구현 필드 `recomputeNormals`·`recomputeTangents` | `StaticMeshBuild_RecomputesOnlyZeroCorners`, `StaticMeshBuild_DeterministicBytes` |
+| 4.1 `useMikkTSpace`·`computeWeightedNormals`·`removeDegenerates` | `StaticMeshBuild_AveragedTangentsMatchConvention`, `StaticMeshBuild_MikkTSpaceMatchesReference`, `StaticMeshBuild_WeightedNormals`, `StaticMeshBuild_DegenerateTriangles` |
+| 4.1 `useHighPrecisionTangentBasis`·`useFullPrecisionUVs`(패킹은 MA2b — 여기서는 저장·경고 없음) | `StaticMeshBuild_SettingFieldTable`, `StaticMeshBuild_PreservedSettingsWarn` |
+| 4.1 `buildScale` | `StaticMeshBuild_NegativeBuildScale`, `StaticMeshBuild_NonUniformScaleNormals`, `StaticMeshBuild_BoundsAndExtension` |
+| 4.1 필드 표·UE 기본값·리플렉션 필드 이름 | `StaticMeshBuild_SettingFieldTable` |
+| MikkTSpace 패치 전 원본 대조(정육면체·구·거울 UV 띠·울퉁불퉁한 격자, 상한 성분 1e-6, 부호 일치) | `StaticMeshBuild_MikkTSpaceMatchesReference` |
+| 할당 실패 주입(결과 그대로, MikkTSpace 느린 경로는 같은 결과) | `StaticMeshBuild_AllocationFailures` |
+| 고정 seed 퍼징(MA1 생성기 400개) | `StaticMeshBuild_FuzzSourceMeshes` |
+| 아주 큰 값(좌표·UV·원본 법선 넘침)·아주 작은 삼각형 — 결과 유한, byte 결정적 | `StaticMeshBuild_ExtremeValuesStayFinite` |
+| Core `Acos`(기준값 1 ulp·특수값·digest) | `DeterministicMath_AccuracyAgainstReferenceTables`, `DeterministicMath_AcosSpecialValuesAndDigest` |
+
+Coverage(2026-11-21, clang source-based — `Build/MeasureCoverage.ps1`과 같은 방법, Swift 6.3.3 툴체인의 llvm-profdata·llvm-cov): 시험 `StaticMeshBuild`(26개)·`DeterministicMath`(7개) 모두 통과. 메인 트리가 다른 세션의 리플렉션 작업 중이라 빌드되지 않아 검증은 `origin/feature/engine-runtime`(90972993)에 이 작업을 얹은 임시 worktree에서 했다.
+
+| 파일 | 줄 | 분기 |
+|---|---|---|
+| StaticMeshBuilder.cpp | 517/521 | 261/264 |
+| MeshTangentBasis.cpp | 442/442 | 217/220 |
+| MeshOverlappingCorners.cpp | 70/70 | 38/38 |
+| MeshMikkTSpace.cpp | 79/79 | 10/11 |
+| MeshBuildInternal.h | 78/78 | 37/40 |
+| MeshBuildSettings.cpp·MeshModule.cpp·StaticMeshBuilder.h | 121/121 | 114/114 |
+| 합계(Mesh·MeshTools) | 1307/1311(99.7%) | 677/687(98.5%), 함수 전부 |
+
+닿지 않은 분기 10개의 사유:
+- 3개는 메모리 상한이다: 삼각형 수 상한(`MeshMikkTSpaceMaxTriangles`·index 수 uint32 — 수억 개 삼각형) 둘, 원본 사본의 `AddPolygonGroup` 실패(묶음은 속성이 없으면 할당하지 않아 `MeshMaxElements`에서만 실패) 하나.
+- 3개는 UE 식을 그대로 옮긴 판정의 닿지 않는 쪽이다(`BasisWithUv`): `CreateOrthonormalBasis`는 tangent가 있으면 쌍법선을 외적으로 채우고 법선은 단위 벡터로 끝나므로 "tangent는 있는데 쌍법선이 0"과 "직교화 뒤 법선이 0"이 생기지 않는다.
+- 3개는 성분별 단락의 뒤쪽 성분이다(`IsFiniteVector`·`ContainsNaN`의 y·z 성분만 비유한) — 시험의 넘침 입력은 x 성분부터 넘친다.
+- 1개는 `ROCKS_ASSERT`의 실패 쪽(MikkTSpace 실패가 할당 실패뿐이라는 단언)이다.
+
+`DeterministicMath.cpp`의 `Acos`·`AsinTail`·`SqrtApproximation`은 줄·분기 모두 닿았다(그 파일의 나머지 미달은 기존 함수의 특수값 분기로 이 작업 범위 밖이다). 측정 중 닿을 수 없음을 확인한 분기는 구조를 고쳤다: MikkTSpace 해제 훅의 null 검사(원본은 할당에 성공한 포인터만 넘긴다), 할당 오류의 "처음 것만" 조건, 지역 진단 null 검사, `GroupByUv`의 빈 묶음, `HasAllTangents`의 NaN·x·z 판정(입력이 유한하고 x·z가 0이면 y도 0), `SqrtApproximation`의 양수 지수 쪽(z < 1). 할당 실패 주입이 찾은 MikkTSpace 원본 버그는 5.4절 8에 적었다.
+
 ## 13. 단계
 
 ID는 이 문서가 부여한다(MA). 착수는 사용자가 정하고, 고정 구현 순서를 바꾸지 않는다. 단, 사용자 지시(2026-11-21 "진행 가능한거부터")에 따라 에셋 DB·쿠커·머티리얼 클래스에 기대지 않는 부분을 MA2a·MA4a로 떼어 먼저 한다. 떼어 낸 부분은 순수 함수·값 타입·A1 수준 에셋 클래스뿐이라, 뒤 단계(MA2b·MA4b)가 그 위에 쿠킹 처리기·임포트 서비스를 얹을 때 바꿀 계약이 없다.
@@ -655,7 +736,7 @@ ID는 이 문서가 부여한다(MA). 착수는 사용자가 정하고, 고정 �
 | 단계 | 내용 | 선행 |
 |---|---|---|
 | MA1 | `MeshSource` 모듈: 저장 형식·검증·위상 조회·값 정리, 시험. **구현(2026-11-20, d5405bfa)**: 모듈 `Engine/Source/Runtime/MeshSource`, AssetRuntime `MemoryBulkSource`·메시 진단 코드 5개, 시험 52개 + AssetRuntime 3개(12.1절 대조표·coverage — 줄 99.05%, 분기 94.86%, 닿지 않은 분기는 단언·메모리 상한), 정한 점은 3.7절 | A1(패키지·Bulk) |
-| MA2a | 선행 조건에 기대지 않는 빌드 핵심: `Mesh` 모듈에 빌드 설정 값 타입(`MeshBuildSettings`), `MeshTools` 모듈에 `MeshSource` → 메모리 빌드 결과(렌더 정점·index·섹션·bounds) 순수 함수(5.2절 1–5·8–10·12단계, 6·7·11단계는 후속이라 경고 또는 원본 순서), 용접·퇴화 판정 임계값 상수를 UE 원본으로 확정, MikkTSpace ThirdParty(결정적 수학 패치)와 참조 구현 대조 시험, 필요한 결정적 초월 함수는 Core에 더함. 쿠킹 형식 패킹(13단계)·`StaticMesh` 클래스·슬롯 머티리얼 참조·쿠킹 처리기·임포트 서비스는 MA2b. 슬롯 대응(10단계)은 슬롯 이름 목록만 입력으로 받는다 | MA1 |
+| MA2a | 선행 조건에 기대지 않는 빌드 핵심: `Mesh` 모듈에 빌드 설정 값 타입(`MeshBuildSettings`), `MeshTools` 모듈에 `MeshSource` → 메모리 빌드 결과(렌더 정점·index·섹션·bounds) 순수 함수(5.2절 1–5·8–10·12단계, 6·7·11단계는 후속이라 경고 또는 원본 순서), 용접·퇴화 판정 임계값 상수를 UE 원본으로 확정, MikkTSpace ThirdParty(결정적 수학 패치)와 참조 구현 대조 시험, 필요한 결정적 초월 함수는 Core에 더함. 쿠킹 형식 패킹(13단계)·`StaticMesh` 클래스·슬롯 머티리얼 참조·쿠킹 처리기·임포트 서비스는 MA2b. 슬롯 대응(10단계)은 슬롯 이름 목록만 입력으로 받는다. **구현(2026-11-21, 미커밋)**: 모듈 `Mesh`·`MeshTools`, ThirdParty MikkTSpace(3e895b49d05e + Rocks.patch), Core `deterministic::Acos`, 진단 코드 4개, 시험 26개 + Core 2개(12.2절 대조표·coverage — Mesh·MeshTools 줄 99.7%, 분기 98.5%), 정한 점은 5.4절 | MA1 |
 | MA2b | `StaticMesh` 클래스·슬롯·섹션 정보·소켓, 쿠킹 렌더 데이터 패킹(5.3절), 쿠킹 처리기·임포트 서비스, CoreTypeBindings `Box<double>` 미러(MR8), `IndexFormat` GraphicsTypes 이동 확인(MR7) | MA2a, A2–A4, `Material` 에셋 클래스(MaterialSystem MS3) |
 | MA3 | 단순 충돌 데이터·검증 | MA2b |
 | MA4a | `Animation` 모듈: `BoneHierarchy`(불변식 검증)·`Skeleton` 에셋 클래스(저장·로드 왕복), 병합 판정 함수(부모 사슬 대조, `SkeletonMismatch`)까지 — 에셋 DB 없이 되는 부분 | A1 |
@@ -705,6 +786,8 @@ ID는 이 문서가 부여한다(MA). 착수는 사용자가 정하고, 고정 �
 - 개정 5(2026-11-20): MA1 `MeshSource` 모듈 구현에서 정한 점을 3.7절에 적었다(위치 속성 `Position`, Load·Store 인자와 AssetRuntime `MemoryBulkSource`, 로드·검증 판정 분담, 엔진 이름 속성 판정, 스킨 가중치 중복·합 0, 값 정리 순서, 가변 길이 값의 메모리 형태, 진단 형식, 위상 조회). 3.2절 표에 `Position`을 더하고 13절 MA1 상태를 적었다.
 
 - 개정 6(2026-11-21): 사용자 지시 "진행 가능한거부터"에 따라 MA2를 MA2a(빌드 핵심 — 순수 함수·MikkTSpace)와 MA2b(클래스·쿠킹·임포트)로, MA4를 MA4a(본 계층·스켈레톤 클래스·병합 판정)와 MA4b(임포트·병합 저장)로 나눴다. MA3·MA5·MA6의 선행을 b 단계로 고쳤다.
+
+- 개정 7(2026-11-21): MA2a 구현에서 정한 점을 5.4절에 적었다(API·입출력 형태, 지금 모듈 의존, 원본 사본의 범위, UE 원본 임계값 확정과 removeDegenerates를 끈 때의 정확 일치 퇴화 제거, 정점 단위 법선 묶음과 대각선 soft, 비유한 중간값, buildScale 검사(`InvalidSetting`), MikkTSpace 저자 원본·패치·원본 버그 수정·참조 글루, Core `Acos`, 용접 색 비교, 섹션·슬롯, 경고 순서, 결정성, 진단 등록, 시험 도우미 이동). 5.2절 9단계 임계값 문장, 12.2절 대조표, 13절 MA2a 상태를 고쳤다.
 
 ## 17. 교차 검증 기록(개정 2)
 

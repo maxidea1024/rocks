@@ -3,9 +3,13 @@
 #include <Platform/Win64/WideString.h>
 #include <PlatformWindow/Window.h>
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
 #include <WtsApi32.h>
 #include <Xinput.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
 
 namespace rocks::platform {
 

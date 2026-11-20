@@ -4,7 +4,11 @@
 
 #if ROCKS_ARCH_ARM64
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
 
 namespace rocks::platform::detail {
 

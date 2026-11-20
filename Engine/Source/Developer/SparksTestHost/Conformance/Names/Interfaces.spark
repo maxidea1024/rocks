@@ -1,0 +1,20 @@
+interface Usable {
+    fn Use(by: Actor);
+    async fn Wait(): int;
+}
+
+class Door : ScriptComponent, Usable {
+    fn Use(by: Actor) { }
+}
+
+class Gate : ScriptComponent, Usable {
+    fn Use(by: Pawn) { }
+    async fn Wait(): int { return 1; }
+}
+
+open class Base : ScriptComponent {
+    fn Use(by: Actor) { }
+    async fn Wait(): int { return 0; }
+}
+
+class Child : Base, Usable { }

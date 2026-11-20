@@ -1,0 +1,48 @@
+enum DoorState { Closed, Open }
+
+const MaxStack: int = 99;
+
+struct HitInfo {
+    var Point: vec3;
+    var Damage: int64 = 1;
+
+    fn Scaled(factor: int): int {
+        return Damage * factor;
+    }
+}
+
+fn Twice(value: int): int {
+    return value * MaxStack;
+}
+
+class DoorLogic : ScriptComponent {
+    var OpenAngle: float = 90.0;
+    var State = DoorState.Closed;
+    var Hits: Map<string, Array<HitInfo>> = [];
+    var Target: Actor?;
+
+    event Opened(by: Actor?);
+
+    on Start() {
+        Log.Info("ready");
+    }
+
+    on Owner.Interacted(actor: Actor) {
+        emit Opened(actor);
+    }
+
+    fn Swing(dt: float): float {
+        var total = 0.0;
+        for (key, list in Hits) {
+            total = total + float(Twice(list.Count));
+        }
+
+        if (let found = Target) {
+            let pawn = found as? Pawn;
+            _ = pawn;
+        }
+
+        _ = World.Audio;
+        return total * dt + OpenAngle;
+    }
+}

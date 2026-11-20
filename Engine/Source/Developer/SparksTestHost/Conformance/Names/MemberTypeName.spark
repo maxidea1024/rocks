@@ -1,0 +1,11 @@
+class Health : ScriptComponent { }
+
+class Fighter : ScriptComponent {
+    var Health: Health?;
+    var SoundAsset: int;
+    var HealthComp: Health?;
+}
+
+struct Pack {
+    var Fighter: int;
+}

@@ -4,7 +4,12 @@
 #include <Platform/Win64/WideString.h>
 #include <TestSupport/Test.h>
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
+
 #include <string.h>
 
 // Platform/Win64/WideString.h 시험이다(UTF-8·UTF-16 변환, 할당 판과 고정 버퍼 판). Windows 전용

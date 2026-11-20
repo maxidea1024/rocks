@@ -37,6 +37,10 @@ inline constexpr bool IsPlainCopyV =
 // T 값의 깊은 복사 방식이다(위 규칙). Supported가 거짓이면 Copy를 부르지 않는다.
 template <class T>
 struct ValueCopy {
+    // 생성 struct는 생성 헤더의 특수화가 받는다. 리플렉션 struct가 생성 헤더 없이 이 일반형으로
+    // 오면 관문이 컴파일 오류를 낸다(Meta/GeneratedType.h).
+    static_assert((GeneratedHeaderVisible<T>(), true));
+
     static constexpr bool Supported =
         IsPlainCopyV<T> || (IsNothrowCopyConstructibleV<T> && IsNothrowCopyAssignableV<T>);
 
@@ -342,6 +346,10 @@ inline Result<void> StructValidationResult(const Result<void>& result) noexcept 
 // hook이 없다.
 template <class T>
 struct ValueValidate {
+    // 생성 struct는 생성 헤더의 특수화가 받는다. 리플렉션 struct가 생성 헤더 없이 이 일반형으로
+    // 오면 관문이 컴파일 오류를 낸다(Meta/GeneratedType.h).
+    static_assert((GeneratedHeaderVisible<T>(), true));
+
     static constexpr bool HasHook = false;
 
     static Result<void> Run(const T&) noexcept {

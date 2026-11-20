@@ -1,0 +1,13 @@
+# Reserved names (appendix A, 3.9 step 2) cannot be declared: prelude types, core and
+# prelude engine types, context names, prelude values, the event name Changed, validated
+# literals, RPC prefixes and built-in types - for every kind of declaration.
+error S0307 1:7
+error S0307 2:9
+error S0307 3:8
+error S0307 4:9
+error S0307 7:8
+error S0307 9:13
+error S0307 9:18
+error S0307 11:7
+error S0307 13:12
+error S0307 14:9

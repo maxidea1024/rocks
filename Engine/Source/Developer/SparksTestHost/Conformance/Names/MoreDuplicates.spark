@@ -1,0 +1,6 @@
+class Door : ScriptComponent {
+    on TriggerEnter(other: Actor, oTHER: Collider) { }
+    fn Run(list: Array<int>) {
+        for (item, iTEM in list) { }
+    }
+}

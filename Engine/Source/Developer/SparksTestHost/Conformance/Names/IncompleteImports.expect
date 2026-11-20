@@ -1,0 +1,5 @@
+# Unknown names are not reported in a module with an import that is S0302, S0305 or not judged
+# (its package is invalid).
+error S1105 Broken/SparksPackage.json5 1:27
+error S0302 Game/A.spark 1:8
+error S0305 Game/B.spark 1:8

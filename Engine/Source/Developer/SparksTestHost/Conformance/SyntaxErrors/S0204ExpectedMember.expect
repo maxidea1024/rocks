@@ -1,2 +1,4 @@
 # A class body holds members only.
 error S0204 1:15
+# Syntax only: later stages (names, types) are not checked here.
+stage syntax

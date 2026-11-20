@@ -1,0 +1,3 @@
+import Beta;
+
+open class First : Second { }

@@ -17,6 +17,8 @@ namespace rocks::reflection_fixture {
 // Vec4, Quatd, Rotator<float>, Rotator<double>, IntVec2.
 ROCKS_STRUCT()
 struct CoreValueBundle {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() Vec4d thresholds;
     ROCKS_PROPERTY() Vec2 uv;
     ROCKS_PROPERTY() Vec2d uvPrecise;
@@ -34,6 +36,8 @@ struct CoreValueBundle {
 // Docs/Design/ReflectionExtensions.ko.md 3.2절). CoreValueBundle과 함께 미러 17종을 모두 덮는다.
 ROCKS_CLASS()
 struct CoreValueFields final : Object {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() Vec3 position;
     ROCKS_PROPERTY() Quat rotation;
     ROCKS_PROPERTY() Color tint;
@@ -51,6 +55,8 @@ struct CoreValueFields final : Object {
 // 필드(struct 의존 포함)를 빌린다.
 ROCKS_CLASS()
 struct SceneFixture : WorldFixture {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() Transform relative;
 };
 

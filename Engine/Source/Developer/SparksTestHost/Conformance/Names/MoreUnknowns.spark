@@ -1,0 +1,4 @@
+class Door : ScriptComponent {
+    on Nope.Opened() { }
+    fn Run() { emit Missing(); }
+}

@@ -1,0 +1,15 @@
+# 'override fn' (3.9): the target is an inherited overridable function with the same
+# signature (parameter names may differ). Nothing to override, a field, a function that is
+# not overridable, a struct or top-level function: S0314. Another signature: S0315. 'open fn'
+# outside an open class: S0316.
+error S0314 3:17
+error S0314 4:17
+error S0314 5:17
+error S0315 9:17
+error S0316 14:13
+error S0314 17:13
+error S0316 18:9
+error S0314 21:17
+error S0316 22:13
+error S0314 32:17
+error S0315 36:23
