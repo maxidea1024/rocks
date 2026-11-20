@@ -7,6 +7,13 @@
 namespace rocks::detail {
 namespace {
 
+// 비상 경로 렌더의 속성 텍스트 버퍼에서 인자 하나에 두는 byte 수다(짧은 값만 담고 길면 자른다).
+constexpr usize LogEmergencyTextBytesPerArgument = 8;
+
+// 비상 출력 한 줄의 장식(대괄호 둘·구분자·끝 줄바꿈과 레벨 이름)에 남기는 byte 수다. 가장 긴 레벨
+// 이름 "Warning" 기준 13 byte보다 넉넉하게 둔다.
+constexpr usize LogEmergencyDecorationBytes = 16;
+
 // Lazy 기록의 템플릿이다(람다가 만든 메시지 하나를 담는다).
 constexpr const char LazyTemplateText[] = "{Message}";
 
@@ -32,7 +39,7 @@ LogCaptureTemplate LazyTemplate(SourceLocation where) noexcept {
 void WriteCaptureEmergency(Span<const uint8> capture, LogLevel level, StringView category,
                            StringView fallback) noexcept {
     char message[LogEmergencyMessageBytes];
-    char texts[MaxLogArguments * 8];
+    char texts[MaxLogArguments * LogEmergencyTextBytesPerArgument];
     LogProperty properties[MaxLogArguments];
     LogEvent event;
     const LogRenderTarget target{
@@ -60,7 +67,7 @@ bool OnLogWriterThread() noexcept {
 
 void WriteLogEmergencyText(LogLevel level, StringView category, StringView message) noexcept {
     // "[" 레벨 "][" 카테고리 "] " 메시지 "\n". 끝 줄바꿈 자리를 남기고 잘라 담는다.
-    char line[LogEmergencyMessageBytes + MaxLogCategoryNameBytes + 16];
+    char line[LogEmergencyMessageBytes + MaxLogCategoryNameBytes + LogEmergencyDecorationBytes];
     FixedStringBuilder text{Span<char>(line, sizeof(line) - 1)};
     (void)text.TryAppendAscii('[');
     (void)text.TryAppend(IsValidLogLevel(level) ? LogLevelName(level) : StringView("Unknown"));
@@ -142,7 +149,7 @@ void LogAppendLine(FixedStringBuilder& out, const LogCaptureTemplate& text, cons
     }
 
     char message[LogLazyMessageBytes];
-    char texts[MaxLogArguments * 8];
+    char texts[MaxLogArguments * LogEmergencyTextBytesPerArgument];
     LogProperty properties[MaxLogArguments];
     LogEvent event;
     const LogRenderTarget target{
