@@ -146,7 +146,15 @@ bool CoversStages(ResourceAccess from, ResourceAccess to) noexcept {
 //   맡는다(RenderPassFor).
 // - 다른 상태: layout이 바뀌거나, 쓰기가 끼거나, 새 단계가 생기면 둔다. 같은 layout에서 단계가
 //   줄어드는 읽기 → 읽기만 의존이 없다.
+// - 내용이 필요 없는 상태(Unknown·Discard)로는 내지 않는다. UNDEFINED는 newLayout이 될 수 없고,
+// 다음
+//   전이가 UNDEFINED에서 시작하므로 실제 layout이 무엇이든 맞다(placed 텍스처가 처음 상태
+//   Unknown으로 돌아가는 업로드·readback 기록).
 bool BarrierNeeded(ResourceAccess from, ResourceAccess to, bool uavOrder) noexcept {
+    if (to == ResourceAccess::Unknown || to == ResourceAccess::Discard) {
+        return false;
+    }
+
     if (from == to) {
         if (HasAnyAccess(to, UavAccessMask)) {
             return uavOrder;
@@ -195,6 +203,48 @@ bool VulkanDevice::AccessBarrier(VkCommandBuffer buffer, VkImage image, uint32 f
     functions_.vkCmdPipelineBarrier(buffer, source.stage, destination.stage, 0, 0, nullptr, 0,
                                     nullptr, 1, &barrier);
     return true;
+}
+
+namespace {
+
+// aliasing 획득의 앞쪽이다: 같은 heap 구간을 앞서 쓴 자원의 모든 쓰기를 기다린다(UE
+// VulkanBarriers.cpp:973, 1112의 Discard → UNDEFINED aliasing barrier와 같다).
+constexpr StageAccess AcquireSource = {VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                       VK_ACCESS_MEMORY_WRITE_BIT};
+
+} // namespace
+
+void VulkanDevice::AcquireBarrier(VkCommandBuffer buffer, const TextureRecord& record,
+                                  const ResolvedSubresourceRange& range,
+                                  ResourceAccess to) noexcept {
+    // 내용이 필요 없는 상태로의 획득은 낼 것이 없다(BarrierNeeded와 같은 규칙).
+    if (LayoutFor(to) == VK_IMAGE_LAYOUT_UNDEFINED) {
+        return;
+    }
+
+    const StageAccess destination = StageAccessFor(to);
+    VkImageMemoryBarrier barrier = {};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.srcAccessMask = AcquireSource.access;
+    barrier.dstAccessMask = destination.access;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = LayoutFor(to);
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = record.image;
+    barrier.subresourceRange = {record.aspect, range.firstMip, range.mipCount, range.firstSlice,
+                                range.sliceCount};
+    // 2D_ARRAY_COMPATIBLE 3D 이미지는 AccessBarrier와 같이 layer 수를 REMAINING으로 둔다.
+    for (VkImage volume : volumeAttachmentImages_) {
+        if (volume == record.image) {
+            barrier.subresourceRange.baseArrayLayer = 0;
+            barrier.subresourceRange.layerCount = VK_REMAINING_ARRAY_LAYERS;
+            break;
+        }
+    }
+
+    functions_.vkCmdPipelineBarrier(buffer, AcquireSource.stage, destination.stage, 0, 0, nullptr,
+                                    0, nullptr, 1, &barrier);
 }
 
 void VulkanDevice::MipLayerBarriers(VkCommandBuffer buffer, const TextureRecord& record,
@@ -321,20 +371,27 @@ void VulkanDevice::ForEachStateRun(const TextureRecord& record,
 
 void VulkanDevice::TrackTransition(TextureRecord& record, SlotHandle slot,
                                    const ResolvedSubresourceRange& range, ResourceAccess after,
-                                   bool uavOrder) noexcept {
+                                   bool uavOrder, bool acquire) noexcept {
     after = CanonicalAccess(after);
-    // subresource마다 상태가 다를 수 있으므로 같은 상태 열의 layer 구간 × 같은 상태의 mip 구간마다
-    // barrier 하나를 낸다.
-    ForEachStateRun(record, range,
-                    [&](uint32 mip, uint32 mipCount, uint32 layer, uint32 layerCount,
-                        ResourceAccess from) noexcept {
-                        if (BarrierNeeded(from, after, uavOrder)) {
-                            SuspendRenderPass();
-                        }
+    if (acquire) {
+        // aliasing 획득은 추적 상태와 무관하게 범위 전체를 UNDEFINED에서 바꾼다(barrier 하나).
+        SuspendRenderPass();
+        AcquireBarrier(frame_, record, range, after);
+    } else {
+        // subresource마다 상태가 다를 수 있으므로 같은 상태 열의 layer 구간 × 같은 상태의 mip
+        // 구간마다 barrier 하나를 낸다.
+        ForEachStateRun(record, range,
+                        [&](uint32 mip, uint32 mipCount, uint32 layer, uint32 layerCount,
+                            ResourceAccess from) noexcept {
+                            if (BarrierNeeded(from, after, uavOrder)) {
+                                SuspendRenderPass();
+                            }
 
-                        (void)AccessBarrier(frame_, record.image, mip, mipCount, from, after,
-                                            uavOrder, record.aspect, layer, layerCount);
-                    });
+                            (void)AccessBarrier(frame_, record.image, mip, mipCount, from, after,
+                                                uavOrder, record.aspect, layer, layerCount);
+                        });
+    }
+
     for (uint32 layer = range.firstSlice; layer < range.firstSlice + range.sliceCount; ++layer) {
         for (uint32 mip = range.firstMip; mip < range.firstMip + range.mipCount; ++mip) {
             record.current.At(mip, layer) = after;
@@ -385,17 +442,20 @@ void VulkanDevice::SettleTracking(bool executed) noexcept {
 
 // 버퍼에는 layout이 없다. 버퍼 쓰기 명령(GX4) 전에는 업로드 묶음의 barrier가 버퍼 내용을
 // 맞추므로, 여기서는 쓰기가 끼거나 새 단계가 생기는 전이만 메모리 barrier로 낮춘다(앞 상태를
-// 모르거나 내용 버림이면 모든 쓰기를 기다린다. UE도 Discard를 Unknown처럼 다룬다). 단계가 줄어드는
-// 읽기 → 읽기는 아무것도 하지 않는다.
+// 모르거나 내용 버림이면 모든 쓰기를 기다린다. UE도 Discard를 Unknown처럼 다룬다). placed 버퍼의
+// 획득(acquire)도 같은 heap 구간의 앞 쓰기를 모두 기다린다(GX12). 단계가 줄어드는 읽기 → 읽기는
+// 아무것도 하지 않는다.
 void VulkanDevice::LowerBufferTransition(const ResourceTransition& transition) noexcept {
-    if (buffers_.Find(transition.buffer.slot) == nullptr) {
+    const BufferRecord* record = buffers_.Find(transition.buffer.slot);
+    if (record == nullptr) {
         ++ignoredDraws_;
         return;
     }
 
     const ResourceAccess before = CanonicalAccess(transition.before);
     const ResourceAccess after = CanonicalAccess(transition.after);
-    const bool unknown = before == ResourceAccess::Unknown || before == ResourceAccess::Discard;
+    const bool unknown = before == ResourceAccess::Unknown || before == ResourceAccess::Discard ||
+                         (transition.acquire && !record->heap.IsNull());
     if (!unknown && !IsWritableAccess(before) && !IsWritableAccess(after) &&
         CoversStages(before, after)) {
         return;
@@ -453,8 +513,16 @@ TextureRecord* VulkanDevice::ResolveTextureTransition(const ResourceTransition& 
         return nullptr;
     }
 
-    if (validation_ && transition.before != ResourceAccess::Unknown &&
+    // 획득 전이의 before는 Discard다(이전 내용이 없다). 어기면 검증 오류로 세고 획득은 그대로 한다.
+    if (validation_ && transition.acquire && !record->heap.IsNull() &&
         transition.before != ResourceAccess::Discard) {
+        platform::AtomicFetchAdd<platform::MemoryOrder::AcquireRelease>(&validationState_.errors,
+                                                                        uint64{1});
+        auto failed = FailCode("Transition", ErrorCode::InvalidArgument,
+                               "acquire transition needs the Discard before-state");
+        (void)failed;
+    } else if (validation_ && transition.before != ResourceAccess::Unknown &&
+               transition.before != ResourceAccess::Discard) {
         bool matched = true;
         for (uint32 layer = range.firstSlice;
              matched && layer < range.firstSlice + range.sliceCount; ++layer) {
@@ -501,8 +569,10 @@ void VulkanDevice::TransitionLocked(Span<const ResourceTransition> transitions) 
             continue;
         }
 
+        // placed가 아닌 텍스처의 acquire는 무시한다(ResourceTransition::acquire).
         const bool uav = HasAnyAccess(transition.after, UavAccessMask);
-        TrackTransition(*record, slot, range, transition.after, uav);
+        TrackTransition(*record, slot, range, transition.after, uav,
+                        transition.acquire && !record->heap.IsNull());
     }
 
     ResumeRenderPass();
@@ -574,7 +644,8 @@ VulkanDevice::BeginTransitions(Span<const ResourceTransition> transitions) noexc
         }
 
         if (!transition.buffer.IsNull()) {
-            if (buffers_.Find(transition.buffer.slot) == nullptr) {
+            const BufferRecord* buffer = buffers_.Find(transition.buffer.slot);
+            if (buffer == nullptr) {
                 ++ignoredDraws_;
                 continue;
             }
@@ -582,8 +653,9 @@ VulkanDevice::BeginTransitions(Span<const ResourceTransition> transitions) noexc
             // LowerBufferTransition과 같은 조건이다.
             const ResourceAccess before = CanonicalAccess(transition.before);
             const ResourceAccess after = CanonicalAccess(transition.after);
-            const bool unknown =
-                before == ResourceAccess::Unknown || before == ResourceAccess::Discard;
+            const bool unknown = before == ResourceAccess::Unknown ||
+                                 before == ResourceAccess::Discard ||
+                                 (transition.acquire && !buffer->heap.IsNull());
             if (!unknown && !IsWritableAccess(before) && !IsWritableAccess(after) &&
                 CoversStages(before, after)) {
                 continue;
@@ -612,15 +684,28 @@ VulkanDevice::BeginTransitions(Span<const ResourceTransition> transitions) noexc
 
         const ResourceAccess after = CanonicalAccess(transition.after);
         const bool uav = HasAnyAccess(transition.after, UavAccessMask);
-        ForEachStateRun(*record, range,
-                        [&](uint32 mip, uint32 mipCount, uint32 layer, uint32 layerCount,
-                            ResourceAccess from) noexcept {
-                            if (BarrierNeeded(from, after, uav)) {
-                                (void)splitImageBarriers_.TryPushBack(
-                                    ImageBarrier2(record->image, record->aspect, mip, mipCount,
-                                                  layer, layerCount, from, after));
-                            }
-                        });
+        if (transition.acquire && !record->heap.IsNull()) {
+            // aliasing 획득(TrackTransition과 같은 barrier)이다. 그래프는 획득을 나누지 않지만
+            // 받으면 범위 전체를 UNDEFINED에서 바꾼다.
+            if (LayoutFor(after) != VK_IMAGE_LAYOUT_UNDEFINED) {
+                VkImageMemoryBarrier2 barrier = ImageBarrier2(
+                    record->image, record->aspect, range.firstMip, range.mipCount, range.firstSlice,
+                    range.sliceCount, ResourceAccess::Unknown, after);
+                barrier.srcStageMask = AcquireSource.stage;
+                barrier.srcAccessMask = AcquireSource.access;
+                (void)splitImageBarriers_.TryPushBack(barrier);
+            }
+        } else {
+            ForEachStateRun(*record, range,
+                            [&](uint32 mip, uint32 mipCount, uint32 layer, uint32 layerCount,
+                                ResourceAccess from) noexcept {
+                                if (BarrierNeeded(from, after, uav)) {
+                                    (void)splitImageBarriers_.TryPushBack(
+                                        ImageBarrier2(record->image, record->aspect, mip, mipCount,
+                                                      layer, layerCount, from, after));
+                                }
+                            });
+        }
 
         // 이미지 layout은 begin 뒤 바뀌므로 추적 상태를 지금 바꾼다(그 사이 render pass를 다시
         // 열지 않는다, 사이 접근은 계약 위반이다).
