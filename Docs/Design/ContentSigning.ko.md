@@ -1,6 +1,6 @@
 # 콘텐츠 서명 — 서명된 쿠킹 매니페스트(청크 표) 설계안
 
-> 상태: 채택(2026-11-15 사용자 결정: 추천안, 구현은 AssetRuntime A1과 함께). 리뷰 1회 반영. 구현 A1f(2026-11-21 — 7절, 시험·coverage는 [AssetSystem](AssetSystem.ko.md) 14.1.11·14.1.12). [Crypto](Crypto.ko.md) 13절 후속 판단과
+> 상태: 채택(2026-11-15 사용자 결정: 추천안, 구현은 AssetRuntime A1과 함께). 리뷰 1회 반영. 구현 A1f 완료(2026-11-21, 리뷰 3회 — 7절, 시험·coverage는 [AssetSystem](AssetSystem.ko.md) 14.1.11·14.1.12). [Crypto](Crypto.ko.md) 13절 후속 판단과
 > 엔진 계획 9.3절을 따른다.
 
 ## 1. 범위
