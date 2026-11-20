@@ -1,0 +1,27 @@
+const Limit: int = 1;
+
+class Door : ScriptComponent {
+    var Limit: int;
+    fn Run(count: int) {
+        if (count > 0) {
+            let cOUNT = 2;
+            _ = cOUNT;
+        }
+    }
+}
+
+open class Base : ScriptComponent {
+    var Speed: int;
+}
+
+class Fast : Base {
+    fn Go() {
+        let speed = 1;
+        _ = speed;
+    }
+
+    @rpc(Server) fn Ping() {
+        let caller = 1;
+        _ = caller;
+    }
+}

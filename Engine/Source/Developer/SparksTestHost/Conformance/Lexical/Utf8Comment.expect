@@ -1,2 +1,4 @@
 # Non-ASCII text in a comment is valid UTF-8.
 clean
+# Syntax only: later stages (names, types) are not checked here.
+stage syntax

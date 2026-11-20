@@ -1,0 +1,9 @@
+open class Base : ScriptComponent { }
+
+class Sub : Base { fn Start() { } }
+
+class Keeper : WorldService { fn Tick() { } }
+
+class Ui : WidgetController { fn OnEnable() { } }
+
+class Mover : Character { fn LateUpdate() { } }

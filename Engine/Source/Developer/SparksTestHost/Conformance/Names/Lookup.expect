@@ -1,0 +1,5 @@
+# A name whose conflict was reported names the side without a diagnostic (3.9 "lookup"): the
+# engine type, the inherited engine member and the first of two locals.
+error S0310 1:8
+error S0313 6:9
+error S0309 10:13

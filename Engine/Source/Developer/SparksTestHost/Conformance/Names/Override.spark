@@ -1,0 +1,37 @@
+class Mover : Character {
+    override fn CanMove(): bool { return false; }
+    override fn Fly() { }
+    override fn Location() { }
+    override fn Jump() { }
+}
+
+class Panel : ScriptComponent {
+    override fn DescribeState(detailed: int): string { return ""; }
+}
+
+class Panel2 : ScriptComponent {
+    override fn DescribeState(_: bool): string { return ""; }
+    open fn Extra() { }
+}
+
+override fn Free() { }
+open fn Free2() { }
+
+struct Data {
+    override fn A() { }
+    open fn B() { }
+}
+
+open class Base : ScriptComponent {
+    open fn Step(count: int) { }
+    fn Fixed() { }
+}
+
+class Child : Base {
+    override fn Step(amount: int) { }
+    override fn Fixed() { }
+}
+
+class Child2 : Base {
+    override async fn Step(count: int) { }
+}

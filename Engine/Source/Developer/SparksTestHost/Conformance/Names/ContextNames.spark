@@ -1,0 +1,36 @@
+struct Data {
+    fn Get(): int {
+        _ = World;
+        return 0;
+    }
+}
+
+fn Free() {
+    _ = Time;
+}
+
+class Keeper : WorldService {
+    fn Run() {
+        _ = World;
+        _ = Input;
+        _ = Caller;
+    }
+}
+
+class Door : ScriptComponent {
+    var Speed = Time;
+    @rpc(Server, Reliable) fn Fire() {
+        _ = Caller;
+        _ = Input;
+    }
+
+    @rpc(AllClients) fn Show() {
+        _ = Caller;
+    }
+}
+
+class Config : DataAsset {
+    fn Get() {
+        _ = Session;
+    }
+}

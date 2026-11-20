@@ -1,2 +1,4 @@
 # Comparisons do not chain.
 error S0209 1:20
+# Syntax only: later stages (names, types) are not checked here.
+stage syntax

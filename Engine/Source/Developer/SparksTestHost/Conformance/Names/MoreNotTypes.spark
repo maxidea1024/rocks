@@ -1,0 +1,10 @@
+fn Helper() { }
+
+class Door : ScriptComponent {
+    var A: Server;
+    var B: Helper;
+    fn Run(count: int) {
+        let c: count = 1;
+        _ = c;
+    }
+}

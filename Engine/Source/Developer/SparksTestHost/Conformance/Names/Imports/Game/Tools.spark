@@ -1,0 +1,2 @@
+fn Helper(): int { return 2; }
+struct Tool { }

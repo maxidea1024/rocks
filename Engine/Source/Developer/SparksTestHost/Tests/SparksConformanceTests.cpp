@@ -7,6 +7,9 @@
 #include <Platform/Fatal.h>
 #include <Platform/File.h>
 #include <Platform/Process.h>
+#include <SparksCompiler/Compilation.h>
+#include <SparksCompiler/Diagnostic.h>
+#include <SparksCompiler/Source.h>
 #include <SparksTestHost/Conformance.h>
 #include <TestSupport/Test.h>
 
@@ -85,7 +88,8 @@ TEST(SparksConformance_RejectsMalformedExpectations) {
                          "line 0: 'clean' cannot be combined with 'error'", allocator));
         CHECK(ParseFails("clean\nclean\n", "line 2: 'clean' appears twice", allocator));
         CHECK(ParseFails("warning S0101 1:1\n",
-                         "line 1: unknown directive (expected 'error' or 'clean')", allocator));
+                         "line 1: unknown directive (expected 'error', 'clean' or 'stage')",
+                         allocator));
         CHECK(ParseFails("error 0101 1:1\n", "line 1: diagnostic code must look like S0412",
                          allocator));
         CHECK(ParseFails("error S9999 1:1\n", "line 1: unknown diagnostic code", allocator));
@@ -98,11 +102,26 @@ TEST(SparksConformance_RejectsMalformedExpectations) {
         CHECK(ParseFails("error S0101 1:1 extra\n",
                          "line 1: the file path comes before the position", allocator));
         CHECK(ParseFails("error S0101 A.spark 1:1 extra\n",
-                         "line 1: unknown directive (expected 'error' or 'clean')", allocator));
+                         "line 1: unknown directive (expected 'error', 'clean' or 'stage')",
+                         allocator));
         CHECK(ParseFails("error S0101 A.spark 1\n",
                          "line 1: position must look like 14:7 (line and column from 1)",
                          allocator));
-        CHECK(ParseFails("clean extra\n", "line 1: unknown directive (expected 'error' or 'clean')",
+        CHECK(ParseFails("clean extra\n",
+                         "line 1: unknown directive (expected 'error', 'clean' or 'stage')",
+                         allocator));
+        // stage: 한 번, 알려진 이름만, 그것만으로는 기대 지시가 아니다.
+        CHECK(ParseFails(
+            "stage syntax\n",
+            "line 0: the file has no directive; write 'clean' when no diagnostic is expected",
+            allocator));
+        CHECK(ParseFails("stage types\nclean\n",
+                         "line 1: unknown stage (expected 'syntax', 'imports' or 'names')",
+                         allocator));
+        CHECK(ParseFails("stage syntax\nstage names\nclean\n", "line 2: 'stage' appears twice",
+                         allocator));
+        CHECK(ParseFails("stage\nclean\n",
+                         "line 1: unknown directive (expected 'error', 'clean' or 'stage')",
                          allocator));
     }
     CHECK(allocator.Stats().liveAllocations == 0);
@@ -211,6 +230,8 @@ TEST(SparksConformance_ReportsCorpusLayoutProblems) {
         REQUIRE(write(area.Value().View(), "NoExpect.ast", ""));
         REQUIRE(write(area.Value().View(), "NoSource.expect", "clean\n"));
         REQUIRE(write(area.Value().View(), "NoSource.ast", ""));
+        REQUIRE(write(area.Value().View(), "NoSource.names", ""));
+        REQUIRE(write(area.Value().View(), "Good.names", ""));
         REQUIRE(write(area.Value().View(), "OnlyTree.ast", ""));
         REQUIRE(write(area.Value().View(), "Notes.txt", "x"));
         REQUIRE(write(rootPath, "Stray.spark", "x"));
@@ -219,12 +240,12 @@ TEST(SparksConformance_ReportsCorpusLayoutProblems) {
         REQUIRE(RunCorpus(allocator, files, rootPath, "", report));
         PrintFailures(report);
         CHECK(report.CasesRun() == 1);
-        REQUIRE(report.Failures().Size() == 6);
+        REQUIRE(report.Failures().Size() == 7);
         // 낯선 파일은 목록을 훑을 때, 짝 없는 파일은 stem 순으로 맞춰 볼 때 기록한다. 같은 stem의
-        // 짝 없는 파일은 .expect, .ast 순이다.
+        // 짝 없는 파일은 .expect, .ast, .names 순이다.
         CHECK(report.Failures()[0].View() ==
-              StringView("Area/Notes.txt: unexpected file (only .spark, .expect, .ast and case "
-                         "folders)"));
+              StringView("Area/Notes.txt: unexpected file (only .spark, .expect, .ast, .names "
+                         "and case folders)"));
         CHECK(report.Failures()[1].View() ==
               StringView("Area/NoExpect.spark: missing the .expect file"));
         CHECK(report.Failures()[2].View() ==
@@ -232,8 +253,10 @@ TEST(SparksConformance_ReportsCorpusLayoutProblems) {
         CHECK(report.Failures()[3].View() ==
               StringView("Area/NoSource.ast: missing the .spark file or case folder"));
         CHECK(report.Failures()[4].View() ==
-              StringView("Area/OnlyTree.ast: missing the .spark file or case folder"));
+              StringView("Area/NoSource.names: missing the .spark file or case folder"));
         CHECK(report.Failures()[5].View() ==
+              StringView("Area/OnlyTree.ast: missing the .spark file or case folder"));
+        CHECK(report.Failures()[6].View() ==
               StringView(
                   "Stray.spark: unexpected file at the corpus root (cases live in area folders)"));
 
@@ -377,6 +400,171 @@ TEST(SparksConformance_ComparesSyntaxTreeGolden) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
+// 구문 사례(Lexical·Syntax·SyntaxErrors — corpus에서는 stage syntax)를 전체 단계로 컴파일한다.
+// 복구된 트리(Error 노드·빠진 자식)가 이름 해석을 깨지 않아야 하고, 어휘·구문 진단이 있는
+// 모듈에서는 "찾지 못함"(S0317·S0318)이 나지 않아야 한다(3.9절 연쇄 방지).
+TEST(SparksConformance_SyntaxCorpusThroughNameResolution) {
+    SystemAllocator allocator;
+    {
+        constexpr usize PathCapacity = 4096;
+        char engine[PathCapacity];
+        auto found = FindEngineDirectory(Span<char>(engine, PathCapacity));
+        REQUIRE(found);
+        platform::FileSystem& files = platform::PhysicalFileSystem();
+        uint32 compiled = 0;
+        uint32 broken = 0;
+        constexpr StringView Areas[] = {"Lexical", "Syntax", "SyntaxErrors"};
+        for (const StringView area : Areas) {
+            StringBuilder<PathCapacity> areaPath(allocator);
+            areaPath.Append(StringView(engine, found.Value()))
+                .Append("/Source/Developer/SparksTestHost/Conformance/")
+                .Append(area);
+            REQUIRE(!areaPath.HasFailed());
+            struct Listing {
+                Allocator* allocator = nullptr;
+                Array<String>* names = nullptr;
+                bool failed = false;
+            };
+
+            Array<String> names(allocator);
+            Listing listing{&allocator, &names, false};
+            auto collect = [](const platform::DirectoryEntry& entry, void* context) noexcept {
+                auto& list = *static_cast<Listing*>(context);
+                const StringView name(entry.name, entry.nameBytes);
+                if (entry.info.type == platform::FileType::Directory ||
+                    !name.EndsWith(".spark", StringComparison::CaseSensitive)) {
+                    return true;
+                }
+
+                String copy(*list.allocator);
+                list.failed =
+                    list.failed || !copy.TryAssign(name) || !list.names->TryPushBack(Move(copy));
+                return !list.failed;
+            };
+            REQUIRE(files.EnumerateDirectory(areaPath.View().Data(), areaPath.ByteCount(), collect,
+                                             &listing));
+            REQUIRE(!listing.failed);
+            for (const String& name : names) {
+                StringBuilder<PathCapacity> filePath(allocator);
+                filePath.Append(areaPath.View()).Append("/").Append(name.View());
+                platform::File file;
+                REQUIRE(file.Open(files, filePath.View().Data(), filePath.ByteCount(),
+                                  platform::FileOpenMode::ReadExisting));
+                uint64 size = 0;
+                REQUIRE(file.Size(size));
+                Array<char> bytes(allocator);
+                REQUIRE(bytes.TryResize(static_cast<usize>(size)));
+                const platform::FileTransfer read = file.ReadExact(bytes.Data(), bytes.Size());
+                REQUIRE(read.status && read.bytes == bytes.Size());
+                REQUIRE(file.Close());
+
+                SourceSet sources(allocator);
+                DiagnosticList diagnostics(allocator);
+                Compilation compilation(allocator, sources);
+                auto manifest =
+                    sources.TryAdd("SparksPackage.json5",
+                                   "{ name: \"Test\", sparks: 1, profile: \"full\" }", diagnostics);
+                REQUIRE(manifest);
+                auto package = compilation.AddPackage(manifest.Value());
+                REQUIRE(package);
+                auto source = sources.TryAdd(name.View(), StringView(bytes.Data(), bytes.Size()),
+                                             diagnostics);
+                REQUIRE(source);
+                REQUIRE(compilation.AddModule(package.Value(), source.Value(), "Main.spark"));
+                REQUIRE(compilation.Check(diagnostics));
+                ++compiled;
+                bool syntaxErrors = false;
+                bool unknownNames = false;
+                for (const Diagnostic& diagnostic : diagnostics.View()) {
+                    const uint32 code = static_cast<uint32>(diagnostic.Code());
+                    constexpr uint32 FirstSyntaxCode = 101;
+                    constexpr uint32 LastSyntaxCode = 299;
+                    syntaxErrors =
+                        syntaxErrors || (code >= FirstSyntaxCode && code <= LastSyntaxCode);
+                    unknownNames = unknownNames ||
+                                   diagnostic.Code() == DiagnosticCode::UnknownName ||
+                                   diagnostic.Code() == DiagnosticCode::UnknownType;
+                }
+
+                if (syntaxErrors) {
+                    ++broken;
+                    if (unknownNames) {
+                        platform::WriteDiagnostic(name.Data(), name.ByteCount());
+                        platform::WriteDiagnostic("\n", 1);
+                    }
+
+                    CHECK(!unknownNames);
+                }
+            }
+        }
+
+        CHECK(compiled == 29); // 구문 사례 전부(사례를 더하면 함께 고친다)
+        CHECK(broken >= 20);
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// 이름 해석 golden(`.names`)과 `stage` 지시(13.1절).
+TEST(SparksConformance_ComparesNamesGoldenAndStages) {
+    SystemAllocator allocator;
+    {
+        constexpr StringView Names = "1:7 decl const Test:Main.X\n"
+                                     "1:10 type int\n";
+        CaseInput input;
+        input.name = "Area/Names.spark";
+        input.source = "const X: int = 1;\n";
+        input.expect = "clean\n";
+        input.hasNames = true;
+        input.names = Names;
+        Report report(allocator);
+        REQUIRE(RunCase(allocator, input, report));
+        PrintFailures(report);
+        CHECK(report.Failures().IsEmpty());
+
+        input.names = "1:7 decl const Test:Main.Y\n";
+        REQUIRE(RunCase(allocator, input, report));
+        REQUIRE(report.Failures().Size() == 1);
+        CHECK(report.Failures()[0].View() ==
+              StringView("Area/Names.spark: names differ from .names at line 1\n"
+                         "  expected: 1:7 decl const Test:Main.Y\n"
+                         "  actual:   1:7 decl const Test:Main.X\n"
+                         "  actual names:\n1:7 decl const Test:Main.X\n1:10 type int\n"));
+
+        // 이름 해석까지 가지 않으면 `.names`는 실패다.
+        input.names = Names;
+        input.expect = "stage imports\nclean\n";
+        REQUIRE(RunCase(allocator, input, report));
+        REQUIRE(report.Failures().Size() == 2);
+        CHECK(report.Failures()[1].View() ==
+              StringView("Area/Names.spark: has a .names file but the module was not "
+                         "name-resolved"));
+
+        // stage syntax는 뒤 단계의 진단을 보지 않는다.
+        Report staged(allocator);
+        REQUIRE(Run(allocator, "Area/Stage.spark", "import Nope;\nfn F(): int { return X; }\n",
+                    "stage syntax\nclean\n", staged));
+        REQUIRE(Run(allocator, "Area/Stage2.spark", "import Nope;\nfn F(): int { return X; }\n",
+                    "stage imports\nerror S0301 1:8\n", staged));
+        REQUIRE(Run(allocator, "Area/Stage3.spark", "fn F(): int { return X; }\n",
+                    "stage names\nerror S0317 1:22\n", staged));
+        REQUIRE(Run(allocator, "Area/Stage4.spark", "fn F(): int { return X; }\n",
+                    "error S0317 1:22\n", staged));
+        PrintFailures(staged);
+        CHECK(staged.Failures().IsEmpty());
+        CHECK(staged.CasesRun() == 4);
+
+        Expectation expectation(allocator);
+        String problem(allocator);
+        auto parsed = TryParseExpectation("stage imports\nclean\n", expectation, problem);
+        REQUIRE(parsed && parsed.Value());
+        CHECK(expectation.Stage() == CompilationStage::Imports);
+        parsed = TryParseExpectation("clean\n", expectation, problem);
+        REQUIRE(parsed && parsed.Value());
+        CHECK(expectation.Stage() == CompilationStage::All);
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
 // 폴더 사례(13.1절 "패키지 사례"): 배치 오류는 사례마다 실패 하나이고, 폴더 사례의 지시는 파일
 // 경로를 쓰며 파일 사례는 쓰지 않는다. schema 폴더에는 *.sparkbind.json만 둔다.
 TEST(SparksConformance_FolderCasesAndSchemas) {
@@ -424,6 +612,8 @@ TEST(SparksConformance_FolderCasesAndSchemas) {
         REQUIRE(write("Corpus/Area/Good/Combat/Main.spark", "import Combat.Main;\n"));
         REQUIRE(write("Corpus/Area/Good.expect", "error S0304 Combat/Main.spark 1:8\n"));
         REQUIRE(write("Corpus/Area/Good.ast", ""));
+        // 폴더 사례의 `.names`: 모듈마다 "== 경로" 줄과 덤프.
+        REQUIRE(write("Corpus/Area/Good.names", "== Combat/Main.spark\n"));
         REQUIRE(write("Corpus/Area/Both.spark", ""));
         REQUIRE(write("Corpus/Area/Both/SparksPackage.json5", Manifest));
         REQUIRE(write("Corpus/Area/Both.expect", "clean\n"));

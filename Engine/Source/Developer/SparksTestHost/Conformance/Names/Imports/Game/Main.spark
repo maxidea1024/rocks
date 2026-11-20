@@ -1,0 +1,19 @@
+import Shared;
+import Tools;
+import Extra;
+import Weapons.Sword as Blades;
+import Weapons.Bow as Item;
+import Weapons.Arrow as SoundAsset;
+import Weapons.Shield as quiver;
+
+struct Widget2 { }
+
+fn Use(): int {
+    let first: Blades.Sword? = null;
+    let second: Blades.Nope? = null;
+    let third: Sword? = null;
+    _ = first;
+    _ = second;
+    _ = third;
+    return Helper();
+}

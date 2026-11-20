@@ -1,0 +1,8 @@
+== Main.spark
+3:8 decl struct Game:Main.Hammer
+5:4 decl fn Game:Main.F
+5:6 decl param h@5:6
+5:9 type Game:Main.Hammer
+5:23 h -> param h@5:6
+== Tools.spark
+1:8 decl struct Game:Tools.Hammer

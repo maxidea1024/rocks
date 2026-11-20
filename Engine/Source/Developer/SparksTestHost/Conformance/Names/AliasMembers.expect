@@ -1,0 +1,6 @@
+# 'Alias.Name' names a top-level type of the aliased module: a function there is not a type
+# (S0319), the alias itself is not a type (S0319), a missing name and a longer path are unknown types (S0318).
+error S0319 Main.spark 5:14
+error S0318 Main.spark 6:14
+error S0318 Main.spark 7:12
+error S0319 Main.spark 8:12

@@ -69,8 +69,9 @@ struct SchemaType {
     uint32 eventCount = 0;
     uint32 firstCase = 0;
     uint32 caseCount = 0;
-    SourceSpan span;   // `name` 값
-    SourceSpan idSpan; // `id` 값
+    SourceSpan span;     // `name` 값
+    SourceSpan idSpan;   // `id` 값
+    SourceSpan baseSpan; // `base` 값(없으면 빈 범위)
 };
 
 struct SchemaField {
@@ -81,7 +82,8 @@ struct SchemaField {
     bool computed = false;
     bool changed = false;
     SourceSpan span;
-    SourceSpan idSpan; // computed면 빈 범위
+    SourceSpan idSpan;   // computed면 빈 범위
+    SourceSpan typeSpan; // `type` 값
 };
 
 struct SchemaParameter {
@@ -89,12 +91,14 @@ struct SchemaParameter {
     SchemaText type;
     bool perSecond = false;
     SourceSpan span;
+    SourceSpan typeSpan; // `type` 값
 };
 
 struct SchemaTypeParameter {
     SchemaText name;
     SchemaText constraint; // 없으면 길이 0
     SourceSpan span;
+    SourceSpan constraintSpan; // `constraint` 값(없으면 빈 범위)
 };
 
 struct SchemaFunction {
@@ -103,12 +107,14 @@ struct SchemaFunction {
     SchemaText returns; // 없으면 void
     bool isStatic = false;
     bool isAsync = false;
+    bool overridable = false; // Sparks `override fn`의 대상이 될 수 있는지(LC2b, SD65)
     uint32 firstTypeParameter = 0;
     uint32 typeParameterCount = 0;
     uint32 firstParameter = 0;
     uint32 parameterCount = 0;
     SourceSpan span;
     SourceSpan idSpan;
+    SourceSpan returnsSpan; // `returns` 값(없으면 빈 범위)
 };
 
 struct SchemaEvent {

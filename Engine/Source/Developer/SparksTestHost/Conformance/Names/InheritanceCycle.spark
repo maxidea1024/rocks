@@ -1,0 +1,3 @@
+open class A : B { }
+open class B : A { }
+open class C : C { }

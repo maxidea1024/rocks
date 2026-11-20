@@ -1,0 +1,16 @@
+const Now: float = Time;
+
+class Keeper : WorldService {
+    on Tick(dt: float) {
+        _ = Input;
+        _ = dt;
+    }
+}
+
+struct Data {
+    @rpc(Server) fn F() { _ = Caller; }
+}
+
+class Config : DataAsset {
+    @rpc(Server) fn F() { _ = Caller; }
+}

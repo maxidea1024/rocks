@@ -1,0 +1,10 @@
+# Conflicts with names from other sources (3.9 step 5, S0310): a top-level declaration and an
+# engine type, a member and a top-level function, value names that differ only in letter case
+# (members, context names, enclosing locals). A top-level function has no context names.
+error S0310 1:7
+error S0310 7:9
+error S0310 8:9
+error S0310 10:12
+error S0310 13:17
+error S0310 17:13
+error S0310 25:12

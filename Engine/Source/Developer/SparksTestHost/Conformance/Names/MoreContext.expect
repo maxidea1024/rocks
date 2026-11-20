@@ -1,0 +1,6 @@
+# S0321 in a constant initial value, in a handler of a world service (Input), and Caller in an
+# '@rpc(Server)' function of a struct or a data asset class (no context names there).
+error S0321 1:20
+error S0321 5:13
+error S0321 11:31
+error S0321 15:31

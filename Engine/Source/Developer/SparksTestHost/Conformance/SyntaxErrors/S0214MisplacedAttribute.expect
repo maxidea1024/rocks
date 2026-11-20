@@ -1,2 +1,4 @@
 # Statements have no attributes.
 error S0214 1:10
+# Syntax only: later stages (names, types) are not checked here.
+stage syntax

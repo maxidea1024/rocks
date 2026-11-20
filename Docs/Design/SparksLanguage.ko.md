@@ -539,6 +539,84 @@ VerbatimLit  = '@"' { VerbatimChar | '""' } '"' ;                 (* escape·보
 | `Tag`·`TagSet` | `Tag.Find(s)`, `TagSet`: `Has` `HasAny(set)` `HasAll(set)` `Add` `Remove` | |
 | 설정 | `CVars.Find<T>(s)`, `CVarRef<T>.Value`, `Settings.Get<T>()` | §10.4 |
 
+### 3.9 이름 해석 세부(LC2b 확정)
+
+이 절은 §3.1·§3.4의 이름 규칙을 컴파일러가 판정하는 방식으로 확정한다. 진단 코드는 §8.1 "이름 해석" 표다.
+
+**범위.** LC2b는 다음을 해석·검사한다.
+
+- 선언(모듈 최상위 class·struct·enum·interface·const·fn, 멤버 field·fn·event, enum case, interface 메서드, import 별칭, 매개변수, 지역 이름)의 명명·예약·중복·충돌·상속·`override`·기반 목록.
+- 모든 타입 표기의 대상: 소스의 `Type`·기반 목록·`as?` 대상·식 안의 타입 인자(`Find<Pickup>`), binding schema의 타입 표기·`base`·`constraint`.
+- 식의 단순 이름(`Identifier` 노드 — `.` 뒤가 아닌 이름)과 `on`·`emit` 경로의 첫 이름.
+- manifest `services`.
+
+뒤 단계로 넘기는 것: `.` 뒤 멤버와 호출의 이름 지정 인자 이름(수신자 타입이 필요하다 — LC2c), `?`·`void` 위치와 타입 인자 제약(LC2c), attribute 이름과 인자(attribute마다 정의한다 — `@net(OwnerOnly)`의 짧은 이름, LC3), 이름 하나짜리 `on X()`의 hook과 확장 이벤트(`event Actor.Interacted`) 선언(LC3), 프로필(LC2d), 사용하지 않는 이름(LC2d).
+
+**이름의 출처(SD62).**
+
+| 출처 | 이름 |
+|---|---|
+| 내장 타입(언어) | `bool` `int` `float` `int8`–`int64` `uint8`–`uint64` `float32` `float64` `string` `vec2` `vec3` `vec4` `quat` `mat4` `void` |
+| prelude 타입(언어 소유) | 제네릭 `Array<T>` `Set<T>` `Map<K, V>` `Result<T>` `Soft<T>` `Row<T>` `Class<T>` `CVarRef<T>` `LoadRequest<T>`, 그 밖 `Text` `Tag` `TagSet` `InputAction` `Rotator` `Transform` `Color`, enum `Clock`(`Game`·`UI` — 타입이며 `Clock.Game`처럼 값으로도 쓴다). `WorldPosition`은 언어 소유 이름으로 예약만 한다(규격이 정해지면 이 표에 정의한다 — 연동 요구 SE-G13. 그때까지 쓰면 S0318) |
+| prelude 값(언어 소유) | `Log` `Assert` `Math` `Random` `Format` `Parse` `Delay` `NextTick` `NextFixedTick` `All` `Race` `Assets` `CVars` `Settings`, 검증 리터럴 `Tag` `Action` `Asset` `Row` `Loc` `CVar`(`Tag`·`Row`는 타입이기도 하다) |
+| 엔진 패키지 `Rocks`(binding schema) | schema의 모든 타입. 부록 A의 핵심 엔진 타입과 `Connection`·`PlaySession`·`Hit`·`Error`(닫힌 enum)는 schema가 제공한다 |
+| 문맥 이름 | `World` `Session` `Input` `Time` `Caller` |
+| RPC 접두 | `Server` `AllClients` `OwnerClient`(쓰임 규칙은 LC3) |
+
+언어 소유 이름(내장 타입·prelude 타입·prelude 값)은 컴파일러의 표이며 그 멤버는 부록 B다(LC2c부터 쓴다). binding schema의 타입 이름은 언어 소유 이름일 수 없다(S1120). 부록 A의 "prelude"·"prelude 타입" 행은 사용자 선언을 막는 예약 목록이고 출처는 이 표가 정한다(`Clock`은 언어 enum 타입, `Error`·`Connection`·`PlaySession`·`Hit`는 schema 타입이다).
+
+**보이는 이름.**
+
+- 모든 위치: 내장 타입, prelude, 엔진 타입, 그 모듈의 최상위 선언, import한 선언. 별칭 없는 import는 대상 모듈의 최상위 선언 전부를 짧은 이름으로, 별칭 import는 별칭 이름 하나를 도입한다(대상 모듈의 선언은 `별칭.이름`). 확장 이벤트는 이름을 도입하지 않는다(대상 타입의 멤버다 — LC3). 같은 패키지의 다른 모듈도 import해야 보인다.
+- class 본문(필드 초기값·함수·handler): 위에 더해 자기 멤버와 상속 멤버(엔진 기반 체인의 field·function·event와 Sparks 기반 클래스의 멤버).
+- struct 본문(필드 초기값·함수): 위에 더해 자기 멤버.
+- 함수·handler 본문: 위에 더해 매개변수와 둘러싼 블록의 지역 이름, 그리고 class 함수·handler에서는 쓸 수 있는 문맥 이름(아래). 지역 이름의 범위는 선언 문장 다음부터 그 블록 끝이며(초기값 안에서는 아직 보이지 않는다), `if (let x = e)`의 `x`는 then 블록, `for`의 binder는 몸통이다.
+- enum case는 `E.Case`(LC2c)로만, interface 메서드는 멤버 접근으로만 보인다.
+
+**문맥 이름의 쓸 수 있는 곳.** class 함수·handler 본문에서 기반 체인으로 정한다. `Actor`·`Component`·`WidgetController` 파생은 `World` `Session` `Input` `Time`, `WorldService` 파생은 `World` `Session` `Time`이다. 그 밖(`DataAsset` 파생 등)과 struct 함수·최상위 fn·필드 초기값·const 초기값에는 없다. `Caller`는 위의 문맥 이름이 있는 class의 함수 중 `@rpc` attribute의 첫 인자가 이름 `Server`인 함수 본문에서만 쓴다(구문 모양만 본다 — attribute 규칙은 LC3. struct·`DataAsset` 파생의 `@rpc(Server)` 함수에는 없다). 쓸 수 없는 곳의 문맥 이름은 S0321이다. 식의 `World`는 언제나 문맥 이름이며 엔진 타입 `World`가 아니다(§3.1).
+
+**찾기.** 이름은 그 위치에서 보이는 이름 중 철자가 정확히 같은 대상을 가리킨다. 우선순위는 없다 — 대상이 둘이 되는 선언은 선언 검사(아래)가 막는다. 예외는 엔진끼리의 겹침뿐이다: 식에서는 상속 엔진 멤버와 문맥 이름이 같은 이름의 엔진 타입보다 앞서고(`Widget`·`World`), 타입 자리에서는 타입만 찾는다. 같은 철자의 대상이 둘 이상이면(그 충돌은 선언 검사가 이미 알렸다) 이름 진단을 받지 않은 쪽을 가리키고, 모두 받았으면 찾는 차례(지역 이름 — 나중에 선언한 것부터 → 자기 멤버 → 상속 멤버(가까운 기반부터) → 문맥 이름 → 모듈 최상위 선언 → import한 이름(먼저 들여온 것) → 엔진 타입 → 언어 이름)에서 앞의 것이다. 그래서 진단 하나 뒤에 같은 원인의 진단이 이어지지 않는다(예: 같은 블록에서 두 번 선언한 `x`의 쓰임은 첫 선언, 엔진 타입과 겹쳐 진단을 받은 최상위 선언의 이름은 엔진 타입).
+
+**선언 검사.** 선언 이름 하나에 S03xx를 하나만 낸다. 아래 순서로 처음 걸리는 것 하나이고, 그 이름의 뒤 검사(`override`·interface 구현 검사 포함)는 하지 않는다(선언은 그대로 도입해 연쇄를 막는다). 충돌은 "나중에 도입된 사용자 선언"에 낸다(§3.1): 같은 공간 안은 원문 순서로 뒤의 것, 멤버·지역 이름은 둘러싼 이름보다 뒤, 최상위 선언은 엔진 타입보다 뒤다. 예외로 import가 낀 충돌은 고칠 곳이 그 import 줄이므로 언제나 import에 낸다(S0311).
+
+1. **명명(S0306).** PascalCase(대문자로 시작): 타입·enum case·최상위 const·fn·멤버(field·fn·event)·interface 메서드·import 별칭. lowerCamel(소문자로 시작): 매개변수(함수·handler·이벤트·interface 메서드)·지역 이름·`if (let)` binder·`for` binder. 수정 예는 첫 글자의 대소문자만 바꾼 이름이며, 그것이 키워드나 예약 이름이면 바꿀 방향만 안내한다.
+2. **예약(S0307).** 부록 A의 내장 타입·prelude·prelude 타입·핵심 엔진 타입·검증 리터럴·문맥 이름·RPC 접두·`Changed`와 철자가 정확히 같은 사용자 선언 이름(enum case·매개변수 포함 모든 선언).
+3. **hook 이름(S0308).** 수명 클래스(기반 체인에 `Actor`·`Component`·`WorldService`·`WidgetController`가 있는 class)의 멤버 이름이 hook 이름(`Awake` `Enable` `Start` `Tick` `FixedTick` `LateTick` `Disable` `Destroy` `TriggerEnter` `TriggerExit` `CollisionEnter` `CollisionExit` `Validate`), 그 앞에 `On`을 붙인 이름, Unity hook 이름(`Update` `FixedUpdate` `LateUpdate`)과 정확히 같다. 수정 예는 `on` 형태다(`Update` → `on Tick()`).
+4. **중복(S0309).** 같은 선언 공간(모듈 최상위, 한 타입의 멤버, 한 enum의 case, 한 interface의 메서드, 한 매개변수 목록, 한 블록의 지역 이름)에서 ASCII 대소문자를 무시하고 같은 이름이 다시 나오면 둘째부터 낸다(한 자리에서 쓴 철자끼리는 대소문자 차이도 실수로 본다).
+5. **충돌(S0310·S0312·S0313).** 다른 출처의 보이는 이름과 비교한다. 값 이름(지역 이름·매개변수·Sparks 멤버·문맥 이름)끼리는 ASCII 대소문자를 무시하고, 그 밖(엔진 멤버·타입·최상위 선언·import한 선언·prelude)과는 철자가 정확히 같을 때만 충돌이다(§3.1). 쓸 수 없는 위치의 문맥 이름은 보이지 않으므로 충돌하지 않는다.
+   - S0313: class 멤버가 상속 멤버와 같다(엔진 멤버는 정확히, Sparks 멤버는 대소문자 무시). 시그니처가 같은 재정의 가능 함수의 `override fn`은 예외다. 상속 대상이 재정의 가능하고 시그니처가 같으면 수정 예로 `override fn`을 제시한다.
+   - S0312: class·struct 멤버 이름이 그 위치에서 보이는 타입 이름(모듈 최상위 타입·import한 타입·엔진 타입·prelude 타입)과 정확히 같다(`var Health: Health?`).
+   - S0310: 그 밖의 충돌 — 최상위 선언과 엔진 타입, 멤버와 최상위 fn·const·import한 선언·별칭, 멤버·지역 이름과 문맥 이름(대소문자 무시), 지역 이름·매개변수와 둘러싼 지역 이름·매개변수·자기 멤버·Sparks 상속 멤버(대소문자 무시), class가 상속하는 멤버와 그 모듈의 최상위 선언(정확히 — 위치는 최상위 선언, class 안에서 그 이름이 둘을 가리키므로).
+   - 범위: `if (let)` binder와 `for` binder는 몸통 블록을 둘러싼 범위에 있다(몸통 안의 같은 이름은 S0310). 함수·handler 매개변수 목록도 몸통을 둘러싼 범위다. 본문이 없는 매개변수 목록(이벤트·interface 메서드·확장 이벤트)은 이름이 본문에서 쓰이지 않으므로 1·2·4번만 검사한다(멤버·문맥 이름과 비교하지 않는다).
+6. **import 충돌(S0311).** 별칭 없는 import가 도입한 이름이 앞선 import가 도입한 이름·현재 파일의 최상위 선언과 정확히 같거나, 별칭이 그것들·엔진 타입과 같거나, import한 이름·별칭이 그 모듈의 class가 상속하는 멤버와 같으면 그 import에 낸다(위치는 경로 시작, 별칭이면 별칭 이름). 겹치는 이름이 여럿이어도 import 줄당 하나이며 메시지는 원문 순서로 처음 겹친 이름이다. 대상 모듈 안에서 이미 오류인 이름(예약·엔진 타입 충돌)은 import에서 다시 알리지 않는다. 별칭의 명명·예약은 1·2번 규칙이다. S0303·S0304를 받은 import의 별칭은 검사하지 않고 그 모듈을 가리키게만 둔다(쓰임에 연쇄 진단이 없게).
+
+**`override`·`open`.**
+
+- `override fn`의 대상은 같은 이름(정확히)의 상속 함수다. 엔진 함수는 schema `overridable: true`인 것, Sparks 함수는 `open fn`·`override fn`이 재정의 가능하다. 대상이 없거나(struct·최상위 fn의 `override` 포함), 같은 이름의 상속 멤버가 함수가 아니거나 재정의할 수 없으면 S0314다.
+- 시그니처는 매개변수 수, 각 매개변수 타입(이름은 무관 — 쓰지 않는 인자는 `_`), 반환 타입, `async` 여부가 모두 같아야 한다. 다르면 S0315다. 어느 쪽이든 타입을 해석하지 못한 매개변수·반환이 있으면 수·`async`를 포함해 아무것도 비교하지 않는다(그 타입의 진단이 이미 있다).
+- `open fn`은 `open class`의 함수에만 쓴다. struct·최상위 fn·`open`이 아닌 class의 `open fn`은 S0316이다.
+
+**기반 목록.** 첫 기반은 schema의 `object`·`asset` 타입 중 `scriptExtensible: true`인 것 또는 Sparks `open class`, 나머지 기반은 interface(schema `interface`·Sparks `interface`)이며 같은 interface를 두 번 쓸 수 없다. 어긋나면 그 기반 경로에 S0322다(기반 타입을 찾지 못하면 S0318, 타입이 아니면 S0319). Sparks 클래스 사이의 상속 순환은 S0323이며 순환 하나에 하나(순환에 든 class 중 패키지 이름 → 모듈 import 경로 → 원문 위치의 byte 순으로 처음인 것의 첫 기반)다. 기반이 될 수 없어 S0322를 받은 class(`open`이 아닌 class)는 기반이 없는 것으로 보므로 순환을 이루지 않는다. class는 기반 interface(와 그 schema `base` 체인 — 같은 interface는 한 번만 센다)의 모든 메서드를 같은 이름·시그니처의 함수(자기 함수 또는 상속 함수, `override` 없이)로 구현해야 하며, 없으면 class 이름에, 이름은 같지만 시그니처가 다르면 자기 함수면 그 함수 이름에, 상속 함수면 class 이름에 S0324다. 진단을 받은 interface 메서드와 이름 진단을 받은 구현 함수는 다시 알리지 않는다.
+
+**타입 표기 해석.**
+
+- 한 구간 이름은 타입 이름 공간(내장 타입·prelude 타입·엔진 타입·모듈 최상위 타입·import한 타입)에서 찾는다. 없으면 S0318이다. 같은 패키지와 의존 패키지에서 그 이름의 최상위 타입을 선언한 모듈이 하나뿐이면 수정 예는 그 import이고, 아니면 편집 거리 2 이하의 비슷한 타입 이름이다. 타입이 아닌 대상(prelude 값, 검증 리터럴 `Action`·`Asset`·`Loc`·`CVar`, 문맥 이름 `Session`·`Input`·`Time`·`Caller`, RPC 접두, 별칭, 최상위 const·fn, 멤버)이면 S0319다.
+- 두 구간 경로는 첫 구간이 import 별칭일 때만 그 모듈의 최상위 타입이다. 첫 구간이 별칭이 아니면(`Weapons.Sword`) S0318이며 import한 선언은 짧은 이름으로 쓴다고 설명한다. 세 구간 이상도 S0318이다. 위치는 해석하지 못한 첫 구간이다.
+- 제네릭 타입은 정한 수의 타입 인자(`Map` 2, 나머지 1)가 있어야 하고 제네릭이 아닌 타입에는 타입 인자가 없어야 한다. 어긋나면 그 `Type`의 시작에 S0320이다.
+- 기반 목록과 `as?` 대상(`Path`)도 같은 규칙이다(타입 인자가 없다).
+- binding schema 표기는 내장 타입·prelude 타입·`Rocks` schema 타입·그 함수의 타입 매개변수에서 찾는다. 못 찾거나 타입 인자 수가 틀리면 그 표기 값에 S1120이며, 그 멤버의 타입은 정해지지 않은 채 파일은 계속 쓴다(쓰는 쪽에서 연쇄 진단을 내지 않는다). `base`는 같은 kind 계열(`object` → `object`, `asset` → `asset`, `interface` → `interface`)의 schema 타입이어야 하고 순환이 없어야 하며, `constraint`는 `object`·`interface` schema 타입이어야 한다. 어긋나면 그 값에 S1120이다.
+
+**단순 이름.** 식의 `Identifier`와 `on`·`emit` 경로의 첫 이름(`this` 제외)을 위 규칙으로 찾는다. 못 찾으면 S0317이다(수정 예는 타입과 같은 방식 — import 제안 또는 비슷한 이름, 별칭 import의 선언을 짧은 이름으로 쓰면 `별칭.이름`). 문맥 이름인데 그 위치에서 쓸 수 없으면 S0321이다. 이름 하나짜리 `on X()`의 `X`는 hook이며 찾지 않는다(LC3).
+
+**연쇄 방지(SD64).** 이름 공간이 불완전하면 그 안의 S0317·S0318을 내지 않는다(그 이름이 빠진 선언에서 왔을 수 있기 때문이다). 그 밖의 진단은 낸다.
+
+- 모듈: 그 모듈에 어휘·구문 진단(S01xx·S02xx — 선언을 잃지 않는 S0102·S0208도 단순함을 위해 포함한다)이 있다, 해석하지 못한 import(S0301·S0302·S0305이거나 판정하지 않은 import — S0303·S0304는 해석한 것으로 본다)가 있다, 직접 import한 모듈에 어휘·구문 진단이 있다(전이하지 않는다 — import한 모듈의 import 실패는 그 모듈의 선언을 없애지 않는다).
+- class: 첫 기반을 해석하지 못했거나(S0318·S0319·S0322) 상속 순환(S0323)에 들었거나 Sparks 기반 클래스가 불완전하다. 이 class의 멤버 타입·본문에서는 S0317·S0318에 더해 기반에 기대는 검사를 하지 않는다: S0308(수명 클래스인지 모른다), S0313·S0314·S0315(상속 멤버를 모른다), S0324, S0321과 문맥 이름·상속 멤버와의 S0310.
+
+**manifest `services`(S0325).** 항목의 마지막 구간을 뺀 경로가 같은 패키지 모듈의 import 경로이고, 마지막 구간이 그 모듈 최상위 class의 이름이며, 그 class의 기반 체인에 `WorldService`가 있어야 한다. 어긋나면 manifest의 그 항목에 S0325다. 그 모듈에 어휘·구문 진단이 있거나(선언이 빠졌을 수 있다) 그 class가 불완전하면(기반을 모른다) 내지 않는다. 해석하지 못한 import는 그 모듈의 선언을 없애지 않으므로 이유가 되지 않는다.
+
+**이름 해석 덤프(SD58 확장, `AppendNameDump`).** 모듈 하나의 해석 결과를 결정적인 텍스트로 적는다(형식은 `SparksCompiler/Compilation.h`). corpus 사례 옆의 `<사례>.names`가 golden이다(§13.1). 선언 이름(`decl` 줄 — 최상위·멤버·case·별칭·매개변수·지역 이름), 해석한 자리(단순 이름·`on`·`emit` 경로 첫 이름), 타입 표기(`type` 줄)마다 한 줄이며 원문 위치 순서다. 대상은 선언 종류와 정규 이름(`패키지:모듈 경로.이름`, 엔진은 `Rocks.이름`)으로 적고, 지역 이름·매개변수는 선언 위치를 함께 적는다. 확장 이벤트는 매개변수 이름·타입만 LC2b가 검사하고(다른 매개변수 목록과 같다) 대상과 이벤트 이름은 LC3다.
+
 ## 4. 타입·참조·값
 
 ### 4.1 값과 참조
@@ -1010,7 +1088,7 @@ Characters/PlayerCharacter.spark:42:5: error S0731: Cannot assign to a function 
   - 목록 끝의 쉼표는 enum case 목록만 받는다. 인자·매개변수·컬렉션 리터럴·case 값 목록의 끝 쉼표는 다음 원소가 빠진 것이다(S0202·S0207).
   - `try`와 `await`를 함께 쓸 때는 `try await F()` 순서다(`await try F()`는 S0212, 순서를 고치라는 문장).
   - 식 안의 `?? return`·`?? break`·`?? continue`는 `??`의 오른쪽 피연산자로 읽지 않는다(지역 선언의 Exit이거나 S0213).
-- **이름 해석(S03xx, LC2):** import·이름·명명 규칙이다. LC2a는 import 해석(§3.4 "import 해석")만 정하고 나머지 코드는 LC2b에서 더한다.
+- **이름 해석(S03xx, LC2):** import·이름·명명 규칙이다. S0301–S0305는 import 해석(§3.4 "import 해석", LC2a), S0306–S0325는 선언·이름·타입 표기 해석(§3.9, LC2b)이며 위치와 연쇄 방지 규칙은 §3.9에 있다.
 
 | 코드 | 이름 | 조건 | 수정 예 |
 |---|---|---|---|
@@ -1019,6 +1097,26 @@ Characters/PlayerCharacter.spark:42:5: error S0731: Cannot assign to a function 
 | S0303 | `duplicate-import` | 같은 모듈을 다시 import했다(별칭 유무와 무관, 두 번째 줄부터 줄마다) | 한 줄을 지운다 |
 | S0304 | `self-import` | 자기 모듈을 import했다(줄마다) | 지운다 |
 | S0305 | `rocks-import` | `Rocks` 패키지를 import했다(엔진 타입·prelude는 자동으로 보인다, SD60) | 지운다 |
+| S0306 | `naming-rule` | 이름의 첫 글자가 그 종류의 규칙(§3.1 표 — 타입·멤버·enum case·최상위 선언·별칭은 대문자, 매개변수·지역 이름·binder는 소문자)과 다르다 | 첫 글자를 바꾼 이름 |
+| S0307 | `reserved-name` | 사용자 선언 이름이 예약 이름(부록 A — 내장 타입·prelude·핵심 엔진 타입·검증 리터럴·문맥 이름·RPC 접두·`Changed`)이다 | 다른 이름 |
+| S0308 | `hook-name` | 수명 클래스의 멤버 이름이 hook 이름·`On`+hook·Unity hook 이름이다 | `on Start()`처럼 hook으로 |
+| S0309 | `duplicate-declaration` | 같은 선언 공간에 같은 이름(대소문자 무시)이 다시 나온다(둘째부터) | 한쪽 이름을 바꾼다 |
+| S0310 | `name-conflict` | 선언 이름이 다른 출처의 보이는 이름과 겹친다(§3.9 비교 규칙 — 엔진 타입, 최상위 fn·const, import한 선언, 문맥 이름, 둘러싼 지역 이름, Sparks 멤버) | 다른 이름 |
+| S0311 | `import-conflict` | import가 도입한 이름이 앞선 import·현재 파일의 최상위 선언과 같거나 별칭이 그것들·엔진 타입과 같다(import 줄당 하나) | 별칭을 붙이거나 이름을 바꾼다 |
+| S0312 | `member-type-name` | class·struct 멤버 이름이 보이는 타입 이름과 같다(`var Health: Health?`) | 멤버 이름을 바꾼다(`HealthComp`) |
+| S0313 | `hides-inherited-member` | 멤버 이름이 상속 멤버와 같다(`override fn` 예외) | 다른 이름, 재정의 가능하면 `override fn` |
+| S0314 | `override-without-target` | `override fn`이 재정의할 상속 함수가 없다(같은 이름이 함수가 아니거나 재정의할 수 없는 경우 포함) | `override`를 지우거나 이름을 고친다 |
+| S0315 | `override-signature-mismatch` | `override fn`의 매개변수 타입·수·반환 타입·`async`가 대상과 다르다 | 대상의 시그니처로 |
+| S0316 | `misplaced-open` | `open fn`이 `open class` 밖에 있다 | `open`을 지우거나 class에 `open`을 붙인다 |
+| S0317 | `unknown-name` | 식의 이름을 찾지 못했다 | import 추가 또는 비슷한 이름 |
+| S0318 | `unknown-type` | 타입 이름을 찾지 못했다(별칭 아닌 한정 경로 `Weapons.Sword` 포함) | import 추가, 짧은 이름, 비슷한 이름 |
+| S0319 | `not-a-type` | 타입 자리의 이름이 타입이 아니다(prelude 값·문맥 이름·const·fn·멤버 등) | 그 대상의 타입을 쓴다 |
+| S0320 | `type-argument-count` | 제네릭 타입의 타입 인자 수가 틀리거나 제네릭이 아닌 타입에 타입 인자가 있다 | `Map<string, int>`처럼 정한 수로 |
+| S0321 | `context-name-unavailable` | 그 위치에서 쓸 수 없는 문맥 이름(§3.9 — struct·최상위 fn·필드 초기값의 `World`, `WorldService`의 `Input`, 서버 RPC 밖의 `Caller`) | 문맥 이름이 있는 class 함수로 옮긴다 |
+| S0322 | `invalid-base` | 첫 기반이 상속할 수 있는 엔진 타입(`scriptExtensible`)이나 `open class`가 아니거나, 나머지 기반이 interface가 아니거나 거듭된다 | 기반 타입을 고친다 |
+| S0323 | `inheritance-cycle` | Sparks 클래스 상속이 순환한다(순환 하나에 하나) | 순환을 끊는다 |
+| S0324 | `interface-not-implemented` | class가 기반 interface의 메서드를 같은 이름·시그니처로 구현하지 않았다 | 그 시그니처의 `fn`을 더한다 |
+| S0325 | `invalid-service` | manifest `services` 항목이 같은 패키지 모듈의 `WorldService` 파생 최상위 class가 아니다 | 모듈 경로와 class 이름을 고친다 |
 
 - **패키지(S11xx, LC2a):** manifest·모듈 경로·패키지 의존·binding schema 파일이다. 위치 규칙은 §3.4와 §10.2 "binding schema 파일 형식"에 있다. 코드 대역의 나머지(reload·backend)는 해당 마일스톤에서 더한다.
 
@@ -1272,6 +1370,7 @@ Sparks에서는 `var MaxHealth: int32`(편집·저장), 읽기 전용 속성 `Cu
 | 함수 | `id` | 예 | FunctionId |
 | 함수 | `static` | 아니오 | bool(기본 false). 타입 이름으로 부르는 함수 |
 | 함수 | `async` | 아니오 | bool(기본 false). `await`로 부르는 함수 |
+| 함수 | `overridable` | 아니오 | bool(기본 false). Sparks class가 `override fn`으로 재정의할 수 있는 가상 함수인지(LC2b). `object`·`asset` 타입의 `static`이 아닌 함수만 |
 | 함수 | `typeParameters` | 아니오 | `{ "name": 영문 대문자 하나로 시작하는 이름, "constraint": 기반 타입 이름(생략 가능) }` 배열(`Find<T: Component>` 꼴) |
 | 함수 | `parameters` | 아니오 | `{ "name": lowerCamel 이름(키워드 아님), "type": 타입 표기, "perSecond": bool(기본 false) }` 배열. 이름 중복 불가 |
 | 함수 | `returns` | 아니오 | 반환 타입 표기. 없으면 `void` |
@@ -1280,6 +1379,7 @@ Sparks에서는 `var MaxHealth: int32`(편집·저장), 읽기 전용 속성 `Cu
 | 이벤트 | `parameters` | 아니오 | `{ "name": lowerCamel 이름(키워드 아님), "type": 타입 표기 }` 배열. 이름 중복 불가 |
 | 이벤트 | `publisher` | 아니오 | `"server"`·`"owner"`·`"all"`(기본) |
 
+- **이름(LC2b):** 타입 이름은 언어 소유 이름(내장 타입·prelude 타입·prelude 값 — §3.9 표)일 수 없다(S1120 — 그 파일을 쓰지 않는다). 타입 표기·`base`·`constraint`의 이름 해석과 그 오류는 §3.9 "타입 표기 해석"이다.
 - **타입 표기:** §3.6 `Type`과 같은 문자열의 정규형이다(`int32`, `Actor?`, `Array<Actor>`, `Map<string, int32>`, `Result<void>`, `Soft<SoundAsset>`, 타입 매개변수 `T?`). 문법은 `표기 = 이름 {"." 이름} ["<" 표기 {", " 표기} ">"] ["?"]`이고 공백은 쉼표 뒤 한 칸만 쓴다(생성기 출력이 하나로 정해지게). 이름은 ASCII 영문자로 시작하는 영문자·숫자이며 키워드(§3.1)일 수 없고, 꺾쇠 중첩은 §8.1 구문 깊이 상한(128)까지다. schema reader는 표기의 문법만 검사하고(S1120), 이름이 가리키는 타입(같은·의존 패키지의 타입, prelude 타입, 내장 타입, 그 함수의 타입 매개변수)은 이름 해석(LC2b)이 검사한다.
 - 한 타입 안의 필드·함수·이벤트 이름은 한 이름 공간이다(§3.1). 중복은 메타 컴파일러가 막지만 reader도 S1120으로 거부한다(손으로 쓴 schema·손상된 파일 방어).
 - 타입의 `kind`가 허용하지 않는 key(표의 "만" 조건)는 S1120 하나만 내고 그 값은 검사하지 않는다(진단이 겹치지 않게). `kind`가 없거나 틀리면 어느 key도 거부하지 않고 모든 값을 검사한다(`cases`가 하나 이상이어야 한다는 규칙은 `enum`일 때만).
@@ -1526,6 +1626,7 @@ class DoorLogic : ScriptComponent {
   - `error S0412 14:14` — 이 위치에 이 코드의 진단이 나야 한다. 여러 줄이면 §8.1의 순서대로 모두 일치해야 하며 빠지거나 더 나온 진단은 실패다.
   - `error S0103` — 위치를 적지 않으면 원문 위치가 없는 진단(파일 전체)이다.
   - `clean` — 진단이 없어야 한다. `error`와 함께 쓸 수 없다.
+  - `stage syntax`·`stage imports`·`stage names` — 그 단계까지만 컴파일한다(`syntax`는 manifest·schema·모듈 경로·의존·어휘·구문 분석, `imports`는 거기에 import 해석, `names`는 거기에 이름 해석). 한 번만 쓰며 없으면 전체 단계다. 구문 사례(`Lexical`·`Syntax`·`SyntaxErrors` 영역)가 뒤 단계 규칙(이름·타입·미사용)에 묶이지 않게 한다(LC2b). 단계만으로는 기대 지시가 아니다(`error`나 `clean`이 함께 있어야 한다).
   - 지시가 하나도 없는 `.expect`, 알 수 없는 지시, `.expect`가 없는 `.spark`, `.spark`가 없는 `.expect`는 corpus 오류로 실패한다(빈 기대값이 조용히 통과하지 않게 한다).
   - 실행 결과 지시(`result`·`fault`·`trace`)는 해당 마일스톤(LC5·LC6)에서 더한다.
 - **패키지 사례(LC2a):** 사례는 파일 하나(`<사례>.spark`) 또는 폴더 하나(`<사례>/`)다.
@@ -1533,6 +1634,7 @@ class DoorLogic : ScriptComponent {
   - 폴더 사례는 폴더 바로 아래에 `SparksPackage.json5`가 있으면 그 폴더가 패키지 하나이고, 없으면 바로 아래 폴더 하나하나가 패키지다(각자 `SparksPackage.json5` 필수). 패키지 안에는 `.spark`와 `SparksPackage.json5`(루트)만 둔다. `.expect`는 폴더와 같은 stem으로 영역에 두며 `error` 지시에 사례 폴더 기준 경로(`/` 구분)를 쓴다: `error S0301 Game/Combat/Score.spark 3:8`, 파일 전체 진단은 `error S1108 Game/combat.spark`. 진단 경로도 사례 폴더 기준이다. 그 밖의 파일, 파일이 하나도 없는 사례 폴더, manifest 없는 패키지 폴더, 패키지 루트가 아닌 곳의 `SparksPackage.json5`는 corpus 오류다(모듈이 없는 패키지 — manifest만 있는 폴더 — 는 쓸 수 있다).
   - 모든 사례는 시험용 가짜 엔진 schema(`SparksTestHost/Schema/*.sparkbind.json`, 패키지 `Rocks`)를 함께 컴파일한다. 진단 경로는 `Schema/<파일 이름>`이다.
   - `.ast`(구문 트리 golden)는 파일 사례에만 둔다(폴더 사례 옆의 `.ast`는 corpus 오류).
+- **이름 해석 golden(LC2b, SD58):** 사례 옆에 `<사례>.names`가 있으면 이름 해석 덤프(`AppendNameDump`, 형식은 `Compilation.h`)가 파일 내용과 바이트 단위로 같아야 한다. 파일 사례는 그 모듈의 덤프, 폴더 사례는 이름 해석을 한 모듈마다 `== <사례 폴더 기준 경로>` 줄과 그 덤프를 경로 byte 순으로 이은 것이다. 판정·실패 보고는 `.ast`와 같다.
 - **구문 트리 golden(LC1b, SD58):** 사례 옆에 `<사례>.ast`가 있으면 그 사례의 구문 트리 덤프(`AppendSyntaxDump`, 형식은 `SyntaxTree.h`)가 파일 내용과 바이트 단위로 같아야 한다(끝의 LF 포함). `.ast`는 선택이며 `.spark` 없이 있으면 corpus 오류이고, 원문 검사가 막아(S0101·S0103) 트리가 없는 사례에 `.ast`가 있어도 실패다. 진단(`.expect`)과 트리는 따로 판정한다. 다르면 첫 다른 줄과 실제 트리 전체를 보인다(검토 뒤 golden 갱신에 쓴다). 사례 실행은 컴파일(LC2a부터 manifest·schema·모듈 경로·어휘·구문 분석·import 해석, 마일스톤마다 늘어난다)이다. 이후 IR·bytecode 덤프 golden도 같은 방식(`.ir`·`.bytecode`)으로 더한다.
 - corpus는 `Engine/Source/Developer/SparksTestHost/Conformance`에 두고 시험이 실행 중 엔진 디렉터리 탐색으로 찾는다. 저장소가 줄 끝을 LF로 정규화하므로 CRLF·잘못된 UTF-8·BOM처럼 바이트가 중요한 사례는 C++ 시험에 직접 넣는다.
 - 제안 목표(미측정): 파일 1,000개 기준 자동완성 p95 100 ms, 편집 후 진단 p95 300 ms. 검증: 후보 golden test, prefix fuzz, CLI와의 진단 동등성, rename 후 저장 데이터 보존.
@@ -1722,7 +1824,7 @@ LC2는 범위가 커서 하위 단계로 나눈다(각 단계가 corpus 영역 �
 | 하위 단계 | 내용 |
 |---|---|
 | LC2a 컴파일 입력 | binding schema 파일 형식과 reader, 시험용 가짜 엔진 schema, 패키지 manifest reader, 모듈 경로 규칙, 패키지 의존(없음·순환), import 해석, 컴파일 단위(`Compilation`), corpus 패키지 사례. 진단 S0301–S0305, S1101–S1112, S1120 |
-| LC2b 선언·이름 | prelude와 부록 A·B 선언 표, 선언 수집, 명명 규칙, 예약 이름, 이름 하나에 대상 하나, import한 이름의 충돌, 별칭, 문맥 이름, 상속 멤버·`override` 대상, 타입 표기 해석(소스·schema), manifest `services` 해석. 진단 S03xx 나머지 |
+| LC2b 선언·이름 | prelude와 부록 A·B 선언 표, 선언 수집, 명명 규칙, 예약 이름, 이름 하나에 대상 하나, import한 이름의 충돌, 별칭, 문맥 이름, 상속 멤버·`override` 대상, 기반 목록·interface 구현, 타입 표기 해석(소스·schema), manifest `services` 해석, 이름 해석 덤프(`.names`). 규칙은 §3.9. 진단 S0306–S0325, schema S1120(이름) |
 | LC2c 타입·숫자 | 식의 타입, 숫자(타입 없는 상수·변환·나눗셈·비교·상수 overflow), 문자열 보간, 컨테이너·리터럴과 기대 타입, 호출·인자 형태·생성, 검증 리터럴, `as?`, switch, 조건, 반환 경로. 진단 S04xx 일부·S05xx |
 | LC2d 흐름·대입·마무리 | null 흐름(`T?`, `?.`·`??`·`if (let)`·Exit, await 이후 `T?`), 대입·`let`(S07xx), 미사용 이름·결과, 상수식과 const 순환, 필드 기본값 규칙, 프로필 검사, §2 예시 통과 |
 
@@ -1758,7 +1860,7 @@ LC2는 범위가 커서 하위 단계로 나눈다(각 단계가 corpus 영역 �
 
 ## 19. 결정 사항
 
-2026.11.12 검토에서 초안의 권고안 10건(SD1–SD10)을 채택하였고, 같은 날 4차 검증에서 도출된 11건(SD11–SD21)을 채택하였다. 2026.11.18 5차 검증(초안 1.3)에서 사용자 요구(핫 리로드 필수·오류 방어·선택형 AOT·`WeakObjectRef` 명칭)와 권장안으로 24건(SD22–SD45)을 확정하였다. 2026.11.20 초안 1.5에서 구현 순서 3건(SD51–SD53)을, 같은 날 언어 코어 구현 중 리터럴·숫자 타입·덤프 5건(SD54–SD58)을 사용자 결정으로 더하였다. 2026.11.20 레벨 스크립트 설계 확정([LevelScript](LevelScript.ko.md) LD1–LD20, 모두 권장안)에서 언어에 걸리는 결정을 5건(SD46–SD50)으로 요약해 더하였다. SD4는 기본값만 확정하고 target별 값은 마켓 규정 검토 후 정한다. SD3·SD9·SD20은 엔진 수준 결정이며 전체 계획 개정 1.7·1.8의 §5.2·§20.2에 반영되어 있다.
+2026.11.12 검토에서 초안의 권고안 10건(SD1–SD10)을 채택하였고, 같은 날 4차 검증에서 도출된 11건(SD11–SD21)을 채택하였다. 2026.11.18 5차 검증(초안 1.3)에서 사용자 요구(핫 리로드 필수·오류 방어·선택형 AOT·`WeakObjectRef` 명칭)와 권장안으로 24건(SD22–SD45)을 확정하였다. 2026.11.20 초안 1.5에서 구현 순서 3건(SD51–SD53)을, 같은 날 언어 코어 구현 중 리터럴·숫자 타입·덤프 5건(SD54–SD58)을 사용자 결정으로 더하였다. 언어 코어 구현의 LC2a에서 컴파일 입력 3건(SD59–SD61)을, LC2b(2026.11.21)에서 이름 해석 4건(SD62–SD65)을 권장안으로 확정하였다. 2026.11.20 레벨 스크립트 설계 확정([LevelScript](LevelScript.ko.md) LD1–LD20, 모두 권장안)에서 언어에 걸리는 결정을 5건(SD46–SD50)으로 요약해 더하였다. SD4는 기본값만 확정하고 target별 값은 마켓 규정 검토 후 정한다. SD3·SD9·SD20은 엔진 수준 결정이며 전체 계획 개정 1.7·1.8의 §5.2·§20.2에 반영되어 있다.
 
 - **SD1. 확장자:** 소스 `.spark`, 컴파일 모듈 `.sparkc`. `.sparkc`는 빌드 출력 폴더에만 생성한다. 초안의 `.sparks`는 언어 이름과 철자가 같아 혼동되므로 사용자 결정(2026-11-12)으로 `.sparkc`로 정정하였다.
 - **SD2. C++ 리플렉션 필드 이름:** 첫 글자를 대문자로 바꾸고 끝의 `_`를 제거하여 노출하며, 그 밖의 `_`가 있으면 `ScriptName`이 필요하다(§10.3). 리플렉션 필드를 C++에서도 PascalCase로 선언하도록 규약을 개정하는 대안은 채택하지 않는다.
@@ -1821,6 +1923,11 @@ LC2는 범위가 커서 하위 단계로 나눈다(각 단계가 corpus 영역 �
 - **SD59. manifest 의존은 이름 목록:** `dependencies`는 패키지 이름 배열이다. 패키지에 아직 버전이 없으므로 초안의 "interface 호환 범위"는 패키지 버전이 생기는 단계(배포·EI9)에서 더한다(LC2a, 2026-11-20).
 - **SD60. `Rocks`는 import하지 않는다:** 엔진 binding schema의 `Rocks` 패키지 타입은 모두 import 없이 보이고(§2 예시가 그렇게 쓴다) `import Rocks…`는 S0305다. 충돌은 이름 하나에 대상 하나 규칙으로 판정한다(LC2a).
 - **SD61. binding schema 파일 형식:** 모듈마다 `<모듈>.sparkbind.json`, 엄격한 JSON, 타입·필드·함수·이벤트·enum case와 32자리 16진 ID, 타입은 Sparks 타입 표기 문자열(§10.2). key는 쓰는 마일스톤이 더한다(LC2a).
+
+- **SD62. 이름의 출처:** 내장 타입·prelude 타입·prelude 값(부록 B의 대상)은 언어가 소유하는 컴파일러 표이고, 엔진 객체·값 타입(핵심 엔진 타입, `Connection`·`PlaySession`·`Hit`, 닫힌 enum `Error`)은 binding schema(`Rocks`)가 제공한다. schema는 언어 소유 이름을 정의할 수 없다(§3.9, LC2b).
+- **SD63. 대소문자 비교:** 이름 찾기는 철자가 정확히 같은 대상이다. 충돌 판정은 같은 선언 공간 안과 값 이름(지역 이름·매개변수·Sparks 멤버·문맥 이름)끼리는 ASCII 대소문자를 무시하고, 그 밖은 정확히 같을 때만이다(§3.1의 규칙을 선언 공간 안으로 넓힌 것, §3.9).
+- **SD64. 이름 해석의 연쇄 방지:** 어휘·구문 진단이 있는 모듈, 해석하지 못한 import가 있는 모듈, 어휘·구문 진단이 있는 모듈을 직접 import한 모듈 안에서는 "찾지 못함"(S0317·S0318)을 내지 않고, 기반을 해석하지 못한 class 안에서는 기반에 기대는 검사도 하지 않는다. 같은 철자의 대상이 둘이면 진단을 받지 않은 쪽을 가리킨다(원인 하나에 진단 하나, §3.9).
+- **SD65. 재정의 가능 함수의 표시:** binding schema 함수에 `overridable`을 두어 엔진 가상 함수 중 Sparks가 재정의할 수 있는 것을 표시한다. `override fn`의 대상은 이것과 Sparks `open fn`·`override fn`뿐이다(§3.9, 연동 요구 SE-R4).
 
 ## 20. 교차 검증 기록
 

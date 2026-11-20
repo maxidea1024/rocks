@@ -1,2 +1,4 @@
 # A literal cannot be assigned to.
 error S0211 1:10
+# Syntax only: later stages (names, types) are not checked here.
+stage syntax

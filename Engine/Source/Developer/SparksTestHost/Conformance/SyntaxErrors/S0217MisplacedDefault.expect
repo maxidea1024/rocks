@@ -1,2 +1,4 @@
 # 'default' must come last.
 error S0217 1:36
+# Syntax only: later stages (names, types) are not checked here.
+stage syntax

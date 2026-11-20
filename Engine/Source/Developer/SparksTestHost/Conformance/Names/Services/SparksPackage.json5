@@ -1,0 +1,6 @@
+{
+  name: "Game",
+  sparks: 1,
+  profile: "core",
+  services: ["Score.Keeper", "Score.Missing", "Nope.Keeper", "Score.Plain", "Late.Nope"],
+}

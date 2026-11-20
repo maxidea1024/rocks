@@ -81,6 +81,12 @@
               "type": "vec3"
             }
           ]
+        },
+        {
+          "name": "CanMove",
+          "id": "5a7e0000000000000000000000000213",
+          "overridable": true,
+          "returns": "bool"
         }
       ]
     },
@@ -151,7 +157,21 @@
       "id": "5a7e0000000000000000000000000007",
       "kind": "object",
       "base": "Component",
-      "scriptExtensible": true
+      "scriptExtensible": true,
+      "functions": [
+        {
+          "name": "DescribeState",
+          "id": "5a7e0000000000000000000000000271",
+          "overridable": true,
+          "parameters": [
+            {
+              "name": "detailed",
+              "type": "bool"
+            }
+          ],
+          "returns": "string"
+        }
+      ]
     },
     {
       "name": "Collider",
@@ -306,6 +326,35 @@
         "ModuleUnloading",
         "Unsupported",
         "Busy"
+      ]
+    },
+    {
+      "name": "Interactable",
+      "id": "5a7e0000000000000000000000000031",
+      "kind": "interface",
+      "functions": [
+        {
+          "name": "Interact",
+          "id": "5a7e0000000000000000000000000311",
+          "parameters": [
+            {
+              "name": "by",
+              "type": "Actor"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Pressable",
+      "id": "5a7e0000000000000000000000000032",
+      "kind": "interface",
+      "base": "Interactable",
+      "functions": [
+        {
+          "name": "Press",
+          "id": "5a7e0000000000000000000000000321"
+        }
       ]
     }
   ]

@@ -1,0 +1,6 @@
+# A value in a type position is S0319: a member, a local name, an available context name and
+# an inherited engine member.
+error S0319 3:15
+error S0319 6:20
+error S0319 7:21
+error S0319 8:20

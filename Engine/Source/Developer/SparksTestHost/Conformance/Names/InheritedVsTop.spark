@@ -1,0 +1,9 @@
+fn Jump(): int { return 1; }
+
+const Location: int = 1;
+
+class Mover : Character {
+    fn Run() { _ = Jump(); }
+}
+
+fn Free(): int { return Jump(); }

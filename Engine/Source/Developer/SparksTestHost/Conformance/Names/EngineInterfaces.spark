@@ -1,0 +1,11 @@
+class Button : ScriptComponent, Pressable {
+    fn Press() { }
+    fn Interact(by: Actor) { }
+}
+
+class Bad : ScriptComponent, Pressable { }
+
+class Twice : ScriptComponent, Pressable, Interactable {
+    fn Press() { }
+    fn Interact(by: Pawn) { }
+}

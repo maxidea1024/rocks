@@ -1,0 +1,4 @@
+# A member that a class inherits cannot share its name with a top-level declaration of the
+# module (S0310 at the declaration): inside the class the name would mean two things.
+error S0310 1:4
+error S0310 3:7

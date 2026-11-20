@@ -1,0 +1,13 @@
+struct SphereCollider { }
+
+fn G(c: SphereCollider) { _ = c; }
+
+class D : ScriptComponent {
+    var Owner: int;
+    fn F() {
+        _ = Owner;
+        let x = 1;
+        let x = 2;
+        _ = x;
+    }
+}

@@ -1,0 +1,2 @@
+struct Item { var Count: int; }
+fn Helper(): int { return 1; }

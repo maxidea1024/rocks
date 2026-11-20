@@ -1,0 +1,3 @@
+import Broken;
+
+fn G(): int { return Nope; }

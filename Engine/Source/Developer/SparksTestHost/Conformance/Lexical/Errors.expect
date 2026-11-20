@@ -12,3 +12,5 @@ error S0107 9:13
 error S0111 10:18
 error S0114 11:13
 error S0107 12:13
+# Syntax only: later stages (names, types) are not checked here.
+stage syntax

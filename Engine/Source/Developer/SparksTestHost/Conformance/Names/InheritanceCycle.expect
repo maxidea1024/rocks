@@ -1,0 +1,3 @@
+# A cycle of Sparks classes (S0323) is reported once, at the first base of its first class.
+error S0323 1:16
+error S0323 3:16

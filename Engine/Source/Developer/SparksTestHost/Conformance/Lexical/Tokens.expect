@@ -1,2 +1,4 @@
 # Every token kind used here is valid.
 clean
+# Syntax only: later stages (names, types) are not checked here.
+stage syntax

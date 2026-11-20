@@ -1,0 +1,7 @@
+class Door : NopeBase {
+    override fn Anything() { }
+    fn Run() {
+        _ = World;
+        _ = unknownName;
+    }
+}

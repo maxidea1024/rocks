@@ -21,7 +21,7 @@
 | SE-R1 | 함수 리플렉션(CU2): `ROCKS_FUNCTION` 매크로, 인자·반환 schema, FunctionId 발급, 호출 thunk 생성 | 없음 | `MetaSchema/Public/Meta/Annotations.h`의 매크로는 `ROCKS_CLASS`·`ROCKS_PROPERTY`·`ROCKS_ENUM`·`ROCKS_ENUMERATOR`·`ROCKS_STRUCT`·`ROCKS_NATIVE`·`ROCKS_GENERATED_BODY`뿐 | EI1·EI2 | UiToolkit CU2, SL 10절 |
 | SE-R2 | 이벤트 필드(CU3): `MulticastDelegate` 필드를 `FieldKind::Event`로 분류, 인자 이름 `Params` 지정자 | 없음 | `MetaSchema/Public/Meta/TypeSchema.h`의 `FieldKind`는 `Value`·`ObjectReference` | EI1·EI3 | UiToolkit CU3, SL 10.1절 |
 | SE-R3 | 스크립트 지정자: 클래스 `ScriptExtensible`, 필드 `ScriptName`·`ScriptWritable`, 함수의 lane·효과·자원 정책·파괴 지연·`NoFatalOnInput`·초당 값 인자, `TryX` → `X` 이름 규칙 | 없음 | `Programs/Rocks.MetaCompiler/Specifiers.cs`의 지정자 목록에 없다 | EI1 | SL 10.2·10.3절 |
-| SE-R4 | binding schema 출력: 메타 컴파일러가 모듈마다 `.sparkbind.json`을 생성한다(형식은 SL 10.2절 "binding schema 파일 형식", LC2a 확정 — 효과·lane·자원 정책 key는 LC3 이후 더한다) | 없음 | — | EI1 | SL 10.2절 |
+| SE-R4 | binding schema 출력: 메타 컴파일러가 모듈마다 `.sparkbind.json`을 생성한다(형식은 SL 10.2절 "binding schema 파일 형식", LC2a 확정 — 함수의 `overridable`(재정의 가능 가상 함수, SD65)은 LC2b, 효과·lane·자원 정책 key는 LC3 이후 더한다) | 없음 | — | EI1 | SL 10.2절 |
 | SE-R5 | interface 표(CU9): `TypeInfo`의 interface 목록·slot 표, C++ `ROCKS_INTERFACE` | 없음 | 위 매크로 목록에 없다 | EI2 | SL 10.3절 |
 | SE-R6 | 편집 메타(CU1): 강제 범위(Min·Max), 편집 범위·단위·편집 조건 | 일부 | 필드 지정자 `Category`·`DisplayName`·`ReadOnly`·`MaxElements`는 있다(`Specifiers.cs`). 범위·단위·조건은 없다 | EI5 | UiToolkit CU1, SL 10.1절 |
 | SE-R7 | 변경 통지(CU5): native 필드의 `Changed`, 계산 속성(getter·setter 쌍) | 없음 | ObjectRuntime·MetaSchema 공개 헤더에 통지 API가 없다 | EI3 | UiToolkit CU5, SL 5.3·10.2절 |

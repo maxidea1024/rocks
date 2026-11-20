@@ -8,3 +8,5 @@ error S0201 6:19
 error S0202 7:17
 error S0203 12:1
 error S0201 14:13
+# Syntax only: later stages (names, types) are not checked here.
+stage syntax

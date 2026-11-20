@@ -1,0 +1,6 @@
+# One cause, one diagnostic: a duplicate interface method is not reported again as unimplemented,
+# a function with a name diagnostic is not checked against interfaces, and the alias of a
+# self-import still names the module.
+error S0304 1:8
+error S0309 5:8
+error S0315 21:17

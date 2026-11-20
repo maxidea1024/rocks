@@ -1,0 +1,5 @@
+import Tools;
+
+struct Hammer { }
+
+fn F(h: Hammer) { _ = h; }

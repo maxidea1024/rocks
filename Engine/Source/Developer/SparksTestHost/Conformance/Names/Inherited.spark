@@ -1,0 +1,16 @@
+class Mover : Character {
+    var Location: vec3;
+    fn Jump() { }
+    fn CanMove(): bool { return true; }
+    fn Hover() { }
+}
+
+open class Base : ScriptComponent {
+    var Speed: int;
+    open fn Step() { }
+}
+
+class Derived : Base {
+    var SPEED: int;
+    fn Step() { }
+}

@@ -1,0 +1,17 @@
+class Door : ScriptComponent {
+    var Speed: int;
+    fn Run() {
+        _ = Sped;
+        _ = missingThing;
+        Start();
+        _ = Changed;
+        let late = early;
+        let early = 1;
+        let again = again;
+        _ = late + early + again;
+    }
+}
+
+fn Free(): int {
+    return Speed;
+}

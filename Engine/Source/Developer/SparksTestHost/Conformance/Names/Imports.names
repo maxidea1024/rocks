@@ -1,0 +1,42 @@
+== Game/Extra.spark
+1:8 decl struct Game:Extra.Widget2
+== Game/Main.spark
+4:25 decl alias Blades=Weapons:Sword
+5:23 decl alias Item=Weapons:Bow
+6:25 decl alias SoundAsset=Weapons:Arrow
+7:26 decl alias quiver=Weapons:Shield
+9:8 decl struct Game:Main.Widget2
+11:4 decl fn Game:Main.Use
+11:11 type int
+12:9 decl local first@12:9
+12:16 type Weapons:Sword.Sword?
+13:9 decl local second@13:9
+13:17 type ?
+14:9 decl local third@14:9
+14:16 type ?
+15:9 first -> local first@12:9
+16:9 second -> local second@13:9
+17:9 third -> local third@14:9
+18:12 Helper -> fn Game:Shared.Helper
+== Game/Shared.spark
+1:8 decl struct Game:Shared.Item
+1:19 decl field Game:Shared.Item.Count
+1:26 type int
+2:4 decl fn Game:Shared.Helper
+2:14 type int
+== Game/Tools.spark
+1:4 decl fn Game:Tools.Helper
+1:14 type int
+2:8 decl struct Game:Tools.Tool
+== Weapons/Arrow.spark
+1:7 decl class Weapons:Arrow.Arrow
+1:15 type Rocks.ScriptComponent
+== Weapons/Bow.spark
+1:7 decl class Weapons:Bow.Bow
+1:13 type Rocks.ScriptComponent
+== Weapons/Shield.spark
+1:7 decl class Weapons:Shield.Shield
+1:16 type Rocks.ScriptComponent
+== Weapons/Sword.spark
+1:7 decl class Weapons:Sword.Sword
+1:15 type Rocks.ScriptComponent

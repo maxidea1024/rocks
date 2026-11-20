@@ -1,0 +1,10 @@
+# Duplicates in one declaration space (3.9 step 4) are compared ignoring letter case: the
+# second and later ones are reported. A name of a finished sibling block can be reused.
+error S0309 3:8
+error S0309 4:11
+error S0309 7:8
+error S0309 9:19
+error S0309 13:8
+error S0309 16:20
+error S0309 18:9
+error S0309 28:31

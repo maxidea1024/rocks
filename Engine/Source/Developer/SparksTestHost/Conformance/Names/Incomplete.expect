@@ -1,0 +1,7 @@
+# Unknown names are not reported where a name may come from a declaration that is missing
+# (3.9 "cascade", SD64): a module with an unresolved import, a module that imports a module
+# with syntax errors, and a class whose base is unknown (context names too).
+error S0207 Broken.spark 1:12
+error S0317 Fine.spark 1:22
+error S0318 Fine.spark 3:11
+error S0301 Main.spark 1:8

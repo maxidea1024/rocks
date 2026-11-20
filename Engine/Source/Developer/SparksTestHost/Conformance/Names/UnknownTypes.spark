@@ -1,0 +1,13 @@
+const A: Nothing = 1;
+const B: Weapons.Sword = 1;
+const C: WorldPosition = 1;
+const D: Log = 1;
+const E: Session = 1;
+const F: A = 1;
+const G: Array = 1;
+const H: Map<int> = 1;
+const I: Actor<int> = 1;
+const J: int<int> = 1;
+const K: Action = 1;
+const L: Array<Nothin2> = 1;
+const M: a.b.c = 1;

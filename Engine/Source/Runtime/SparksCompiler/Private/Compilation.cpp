@@ -13,8 +13,72 @@ Compilation::Compilation(Allocator& allocator, const SourceSet& sources) noexcep
     : allocator_(&allocator), sources_(&sources), text_(allocator), schemas_(allocator),
       packages_(allocator), modules_(allocator), trees_(allocator), imports_(allocator),
       modulePaths_(allocator, ModulePathHash{this}, ModulePathEqual{this}),
-      packagesByName_(allocator), sortedModules_(allocator), sortedFirst_(allocator),
-      sortedCount_(allocator) {
+      packagesByName_(allocator), symbols_(allocator), types_(allocator), typeArguments_(allocator),
+      typeIndex_(allocator, TypeHash{this}, TypeEqual{this}), signatures_(allocator),
+      signatureParameters_(allocator), symbolBases_(allocator), nodeSymbols_(allocator),
+      nodeTypes_(allocator), nodeBase_(allocator), sortedModules_(allocator),
+      sortedFirst_(allocator), sortedCount_(allocator) {
+}
+
+Compilation::TypeProbe Compilation::ProbeOf(uint32 type) const noexcept {
+    const TypeEntry& entry = types_[type];
+    return TypeProbe{
+        entry.symbol,
+        Span<const uint32>(typeArguments_.Data() + entry.firstArgument, entry.argumentCount),
+        entry.optional};
+}
+
+uint64 Compilation::TypeHash::operator()(uint32 type) const noexcept {
+    return (*this)(owner->ProbeOf(type));
+}
+
+uint64 Compilation::TypeHash::operator()(const TypeProbe& probe) const noexcept {
+    uint64 hash = HashCombine(MixHash(probe.symbol), MixHash(probe.optional ? 1 : 0));
+    for (const uint32 argument : probe.arguments) {
+        hash = HashCombine(hash, MixHash(argument));
+    }
+
+    return hash;
+}
+
+bool Compilation::TypeEqual::operator()(uint32 left, uint32 right) const noexcept {
+    return (*this)(left, owner->ProbeOf(right));
+}
+
+bool Compilation::TypeEqual::operator()(uint32 left, const TypeProbe& right) const noexcept {
+    const TypeProbe probe = owner->ProbeOf(left);
+    if (probe.symbol != right.symbol || probe.optional != right.optional ||
+        probe.arguments.Size() != right.arguments.Size()) {
+        return false;
+    }
+
+    for (usize index = 0; index < probe.arguments.Size(); ++index) {
+        if (probe.arguments[index] != right.arguments[index]) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+uint32 Compilation::NodeSymbol(uint32 module, uint32 node) const noexcept {
+    if (module >= nodeBase_.Size() || nodeBase_[module] == NoNode ||
+        node >= trees_[module].NodeCount()) {
+        return NoSymbol;
+    }
+
+    const uint32 symbol = nodeSymbols_[nodeBase_[module] + node];
+    return symbol == detail::NotRecorded ? NoSymbol : symbol;
+}
+
+uint32 Compilation::NodeType(uint32 module, uint32 node) const noexcept {
+    if (module >= nodeBase_.Size() || nodeBase_[module] == NoNode ||
+        node >= trees_[module].NodeCount()) {
+        return NoType;
+    }
+
+    const uint32 type = nodeTypes_[nodeBase_[module] + node];
+    return type == detail::NotRecorded ? NoType : type;
 }
 
 uint64 Compilation::ModulePathHash::operator()(uint32 module) const noexcept {
@@ -95,6 +159,15 @@ Result<uint32> Compilation::AddModule(uint32 package, SourceId source, StringVie
     // 용량을 미리 잡았으므로 실패하지 않는다.
     static_cast<void>(trees_.TryPushBack(SyntaxTree(*allocator_)));
     return Result<uint32>::Success(static_cast<uint32>(modules_.Size() - 1));
+}
+
+Result<void> Compilation::SetLastStage(CompilationStage stage) noexcept {
+    if (checked_) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    lastStage_ = stage;
+    return Result<void>::Success();
 }
 
 Result<void> Compilation::Check(DiagnosticList& diagnostics) noexcept {

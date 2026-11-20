@@ -1,0 +1,4 @@
+import Tools;
+import Extra as Location;
+
+class Mover : Character { }

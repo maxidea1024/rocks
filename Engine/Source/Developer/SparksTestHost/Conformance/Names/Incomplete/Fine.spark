@@ -1,0 +1,8 @@
+fn H(): int { return Nope2; }
+
+class X : NopeBase {
+    fn F() {
+        _ = anything;
+        _ = World;
+    }
+}

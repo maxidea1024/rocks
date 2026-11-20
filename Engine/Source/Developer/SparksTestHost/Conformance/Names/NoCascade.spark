@@ -1,0 +1,26 @@
+import Main as M;
+
+interface Usable {
+    fn Use();
+    fn USE();
+}
+
+class Door : ScriptComponent, Usable {
+    fn Use() { }
+}
+
+open class Base : ScriptComponent {
+    open fn Run(x: int) { }
+}
+
+interface Runner {
+    fn Run(x: int);
+}
+
+class Child : Base, Runner {
+    override fn Run(x: bool) { }
+}
+
+struct Thing { }
+
+fn F(t: M.Thing) { _ = t; }

@@ -1,2 +1,4 @@
 # The class name is missing.
 error S0207 1:7
+# Syntax only: later stages (names, types) are not checked here.
+stage syntax
