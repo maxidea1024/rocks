@@ -377,6 +377,14 @@ A2는 에디터 쪽 에셋 데이터베이스다(4·5.4·5.5·7·8·13·16절). 
 11. **색인**(A2b·A2d): 항목은 `{assetId, 논리 경로, key, OS 상대 이름, 대표 타입, 지문, 크기, 수정 시각, dependencies, tags, ImportRecord 요약, readOnly}`. 조회는 7절 목록이고 타입 상속 조회는 등록된 타입만 상속을 따르며 등록되지 않은 타입 id는 정확 일치만 한다(리뷰). 캐시는 7절 그대로 범위 읽기로 지문을 비교한다(리뷰 — 크기·수정 시각만 보는 UE `DiskCachedAssetData` 방식은 FAT 2초 해상도와 같은 크기 편집을 놓친다). 부분 읽기와 전체 읽기의 판정 관계는 시험 표로 둔다: 헤더·섹션 표·읽은 섹션의 손상은 같은 진단, Objects·Bulk 내용과 그 패딩의 손상은 부분 읽기 통과·열기 실패.
 
 12. **그 밖**(리뷰 권장): 다중 출력 임포트의 출력 경로는 `<주 출력 경로>_<출력 키>`(UE 다중 임포트의 접미 규칙)이고 충돌하면 임포트를 거부한다. 임포트 옵션의 텍스트 표기는 `ReflectionText`를 쓴다. 별칭이 있는 경로에 새 에셋을 만들거나 이동해 오면 그 경로가 점유된 것으로 보고 거부한다(UE redirector가 경로를 점유하는 것과 같다 — 별칭을 지운 뒤 쓴다). 고아 임시 파일(`*.rasset.<guid>.tmp`)은 잠금을 쥔 저장이 그 디렉터리에서, 잠금을 쥔 전체 검색(`asset-index-rebuild`)이 전체에서 지운다.
+13. **A2b 세부**(2026-11-21, 구현 착수 전):
+    - 부분 읽기는 `ReadPackage`와 판정 코드를 함께 쓴다. AssetRuntime의 읽기 핵심을 바이트 공급원 추상(전체 파일 span 또는 범위 읽기)으로 바꾸고, 전체 읽기는 지금과 같은 판정·같은 진단을, 부분 읽기는 그중 Objects·Bulk·BulkIndex 섹션의 내용·CRC, 섹션 사이 패딩 byte 0 검사, bulk 대조만 건너뛴다(표의 위치·정렬·겹침·종류별 flags·schemaVersion 판정은 그대로). 부분 읽기는 헤더(64 byte)·섹션 표를 먼저 읽고 고른 섹션 크기의 합만큼 소유 버퍼를 한 번 잡은 뒤 섹션마다 범위 읽기를 하므로 결과 view가 그 버퍼를 가리킨다(`PackageIndexView` — 이동해도 유효). 64 byte보다 작은 파일은 있는 만큼으로 헤더 판정을 한다(전체 읽기와 같은 진단). 범위 읽기의 IO 오류는 그 오류(진단 None)다.
+    - 범위 읽기 `PackageRangeReader`의 구현은 메모리(`MemoryPackageRangeReader`)와 파일(`FilePackageRangeReader` — `platform::FileSystem&`로 열어 Seek + ReadExact, 고장 주입은 FileSystem)이다.
+    - Tags 값 스키마(2)도 A2b에서 정한다(색인이 읽는다): `ReadPackageTags`·`WritePackageTags`(AssetRuntime)와 writer·reader의 Tags 검증 교체. 태그 값은 UTF-8이고 키는 비지 않은 1–256 byte, 값 하나는 4 KiB 이하(패키지 문자열 상한)다.
+    - `AssetIndex`(AssetDatabase): `Rebuild(FileSystem&, WorkerScheduler*)`가 `Content/`를 재귀 열거해(링크는 따라가지 않는다) `.rasset`(대소문자 무시)만 부분 읽기로 색인하고, `*.tmp`와 그 밖의 파일은 무시한다(UE AssetRegistry가 패키지 확장자만 보는 것과 같다). 병렬 읽기 결과와 진단은 논리 경로 키 → OS 상대 이름 순으로 정렬한다(7.1절 9).
+    - 진단(4.6절 코드): 이름 규칙 위반 `InvalidPath`(LogicalPathError 사유), 패키지 판정 실패는 그 코드(`CorruptPackage`·`UnsupportedVersion`·`NewerVersion`), 쿠킹 패키지는 `CorruptPackage`(에디터 기대), 같은 AssetId 둘 이상 `DuplicateAssetId`(모두 진단, ID 조회는 AlreadyExists), 같은 경로 키 둘 이상 `DuplicatePath`(모두 진단, 경로 조회는 AlreadyExists — 7.1절 10). `Verify`가 더하는 것: 색인에 없는 Hard·Soft 의존 `MissingDependency`(EditorOnly·Build·ImportOwner는 A2c 이후), Hard 의존의 expectedType과 대상 대표 타입이 다르면 `TypeMismatch`(등록된 타입은 상속을 따른다).
+    - 조회: ID, 경로(LogicalPath 키), 디렉터리(마운트 또는 논리 경로 아래 — 바로 아래만 또는 재귀), 대표 타입(정확 일치 또는 TypeRegistry로 파생 포함 — 미등록 id는 정확 일치), 태그(키·값 일치, 목록 값은 원소마다), 정방향 의존(종류 묶음), 역방향 참조자(종류 묶음). 결과는 경로 키 순이다.
+    - 명령(13절): `asset-list [--under=<path>]`(경로·AssetId·대표 타입 id 한 줄씩), `asset-index-verify`(진단 줄, 있으면 종료 1). 타입 이름 필터(`--type`)와 `asset-info`의 속성 출력은 commandlet이 타입을 등록해야 해서 A2c(`asset-new`·`asset-set`과 함께)로 미룬다.
 
 ## 8. 동시성
 
