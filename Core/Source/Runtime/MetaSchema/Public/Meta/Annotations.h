@@ -98,8 +98,16 @@
 // generated typed 접근기만 private/protected 필드 접근을 허용한다. 파생 타입에 펼친 기반 필드도
 // 해당 GeneratedType specialization을 통해 접근한다. raw 주소 공개나 Object 수명 검사를 우회하지
 // 않는다.
+//
+// 리플렉션 클래스·struct는 이 매크로를 반드시 둔다(빌드의 메타 단계가 RMC2211로 확인한다). 매크로가
+// 타입에 선언만으로 판정되는 표지(rocksReflectedSelf)를 남겨, 생성 헤더를 include하지 않은 번역
+// 단위에서 이 타입으로 리플렉션 템플릿을 쓰면 컴파일 오류가 난다(Meta/GeneratedType.h의
+// ReflectedDeclarationV, Docs/Design/ReflectionGeneratedSources.ko.md 8.1절). 표지는 정의하지 않는
+// 선언이라 타입의 크기·배치·aggregate 여부를 바꾸지 않는다.
 #define ROCKS_GENERATED_BODY()                                                                     \
     template <class>                                                                               \
     friend struct ::rocks::GeneratedType;                                                          \
+    friend struct ::rocks::detail::ReflectedDeclarationProbe;                                      \
+    auto rocksReflectedSelf() noexcept -> decltype(this);                                          \
     [[clang::annotate("rocks", "rocks.generated")]] static void                                    \
     rocksGeneratedAccessMarker() noexcept;

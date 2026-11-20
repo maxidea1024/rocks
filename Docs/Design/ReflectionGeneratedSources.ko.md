@@ -247,6 +247,39 @@ GS2(타입별 본문 분리)는 소비 코드를 고치지 않는다.
 - 생성 헤더의 include 목록을 그대로 두므로(GSD5 보류), 생성 헤더가 끌어오던 include에 기대는 코드가 깨지지 않는다.
 - `GeneratedType<T>::Schema()`·`Ops()`·`Register()`·`CopyValue()` 등의 호출 문법은 그대로다. 링크할 때 소유 모듈의 라이브러리가 필요하다(의존 선언이 이미 있어야 하는 관계다).
 
+### 8.1 생성 헤더가 보이지 않는 번역 단위
+
+**문제**
+- 리플렉션 헤더(`Foo.h`)는 자기 생성 헤더를 include하지 않는다. 그래서 타입 `S`는 보이는데 `GeneratedType<S>`는 보이지 않는 번역 단위가 생긴다.
+- `GeneratedType<S>`가 있는지를 탐지식(`requires { GeneratedType<S>::… }`)이나 생성 헤더가 내는 특수화로 고르는 템플릿은, 그런 번역 단위에서 오류 없이 "리플렉션 타입이 아닌 경우"의 길로 간다. 생성 헤더를 본 번역 단위와 판정이 갈리면 같은 템플릿이 두 가지로 인스턴스화되어 ODR 위반이기도 하다.
+
+**전수 조사**(2026-11-21, 손으로 쓴 헤더의 탐지 지점)
+
+| 지점 | 보이지 않을 때 | 판정 |
+|---|---|---|
+| `TypeIdOf`·`TypeOf`(`Meta/GeneratedType.h`), `ObjectTypeIdOf`·`ReflectedAncestorOf`(`Object/NativeClass.h`) | `static_assert`가 include를 안내한다 | 이미 컴파일 오류 |
+| `ArrayFieldCodec.h`의 `GeneratedType<E>::ContainsStrongReference` 등 직접 사용 | 불완전 타입 오류 | 이미 컴파일 오류 |
+| `ReflectedStruct`·`SettingsStruct`(`Config/ConfigContext.h`), `ReflectedEnum`(`Config/CVarEnum.h`) | 제약을 만족하지 못해 호출이 컴파일되지 않는다 | 이미 컴파일 오류 |
+| `detail::ValueCopy<S>` 일반형(`Object/ValueCopy.h`) | 생성 특수화 대신 C++ 복사를 하거나 `Unsupported`를 돌려준다 | **조용히 갈림** |
+| `detail::ValueValidate<S>` 일반형(같은 파일) | 검증 hook을 건너뛴다 | **조용히 갈림** |
+| `ReflectedStructField<S>::Supported`(`Object/GeneratedFieldAccess.h`) | 거짓이 되어 필드 형질이 struct가 아닌 길로 간다 | **조용히 갈림** |
+| `GeneratedFieldVisitor`·`GeneratedLogFields`(같은 파일) | 로그 구조 특수화가 빠진다 | **조용히 갈림** |
+| `render::CheckRenderTransfer<T>`(`RenderBase/RenderTransfer.h`) | 스키마 검사를 건너뛴다 | **조용히 갈림** |
+| `ReflectedEnumField<E>::Supported`(`Object/GeneratedFieldAccess.h`) | 거짓이 된다 | 표지 없음(아래 한계) |
+
+**규칙**
+- 리플렉션 클래스·struct는 정의 안에 `ROCKS_GENERATED_BODY()`를 둔다(UE와 같다). 이 매크로가 타입 자신에게 선언만으로 판정되는 표지를 남긴다(`ReflectedDeclarationV<T>` — 생성 헤더 없이도 번역 단위마다 같은 값이다).
+  - 표지는 자기 타입을 돌려주는 멤버 함수 선언이다. 상속으로 물려받은 표지는 반환 타입이 달라 세지 않는다.
+  - 빌드의 메타 단계가 표지 없는 리플렉션 클래스·struct를 거부한다(`RMC2211`, MetaCompiler `--require-generated-body` — `MetadataRunner`가 늘 넘긴다). Binds 미러 선언은 대상이 아니다(실제 타입은 미러가 아니다).
+- 탐지 지점은 한 관문(`detail::GeneratedHeaderVisible<T>()`)을 거친다. 표지가 있는 타입인데 `GeneratedType<T>`가 보이지 않으면 `static_assert`로 컴파일 오류를 내고 include할 헤더를 안내한다. 위 표의 "조용히 갈림" 다섯 지점에 넣는다.
+- 탐지식을 새로 쓸 때는 이 관문을 쓴다(`requires { GeneratedType<T>::… }`만으로 고르지 않는다).
+
+**한계**
+- 리플렉션 enum에는 표지를 둘 자리가 없다(enum 정의에는 본문 매크로를 넣을 수 없다). enum의 탐지 지점은 생성 헤더가 없으면 컴파일 오류이거나(`ReflectedEnum`) 결과가 같다(값 복사).
+- Binds 미러의 실제 타입(`Vector3` 등)에는 표지가 없다. 이 타입들은 평범한 값이라 일반형의 동작이 생성 특수화와 같고, 로그 구조는 처음부터 Binds 미러를 뺀다(`GeneratedLogFields`).
+- 표지는 완전한 타입에서만 판정된다. 전방 선언만 보이는 지점에서 먼저 판정하면 그 번역 단위에서는 표지가 없는 것으로 남는다.
+- MetaCompiler를 `--require-generated-body` 없이 직접 돌리면(도구 시험의 작은 입력) 표지 없는 타입도 받는다. 그런 타입은 관문이 지켜 주지 않는다.
+
 ## 9. 측정과 수용 기준
 
 GS0에서 기준을 재고 단계마다 같은 장비·같은 방법으로 다시 잰다. 다른 빌드가 돌지 않는 상태에서 잰다.
@@ -289,6 +322,8 @@ GS0·GS1 측정 조건(2026-11-20): 같은 장비에서 두 commit을 각각 내
 | GSD12 | action마다 소요 시간을 `action-report.json`에 기록한다(측정 기반) | 확정 |
 | GSD13 | 생성 코드의 양을 줄이는 일(필드마다 thunk를 만드는 대신 값 종류와 offset으로 도는 공용 codec)은 별도 과제로 둔다(12절) | 보류 |
 | GSD14 | 등록 함수 분리(GS1)를 타입별 본문 분리(GS2)보다 먼저 한다. 리플렉션 생성 소스는 `Sources`와 다른 목록으로 나르고 모듈 진입점 판정에 넣지 않는다(진입점 모듈로 바꾸는 일은 ML2). → 진입점 판정 면제는 ML2(2026-11-20)가 거뒀다(개정 이력 3) | 확정 |
+| GSD15 | 리플렉션 클래스·struct는 `ROCKS_GENERATED_BODY()`를 반드시 둔다. 이 매크로가 선언만으로 판정되는 표지를 남기고, 빌드의 메타 단계가 표지 없는 타입을 거부한다(`RMC2211`). Binds 미러는 예외다(8.1절) | 확정(2026-11-21) |
+| GSD16 | `GeneratedType<T>`의 유무로 길을 고르는 템플릿은 관문 `detail::GeneratedHeaderVisible<T>()`를 거친다. 표지가 있는데 생성 헤더가 보이지 않으면 컴파일 오류다(8.1절) | 확정(2026-11-21) |
 
 ## 11. 단계
 
@@ -339,3 +374,4 @@ GS0·GS1 측정 조건(2026-11-20): 같은 장비에서 두 commit을 각각 내
 | 3(사실 정정) | 2026-11-20 | 모듈 로더 ML2 반영([모듈 로더](ModuleLoader.ko.md) 3.10절 "GS1 위 세부"). 진입점 판정이 리플렉션 생성 소스를 세게 되어 GSD14의 진입점 면제를 거뒀고, 손으로 쓴 소스가 없는 메타데이터 모듈은 빌드가 만든 진입점 TU를 받는다. 개정 2(구현 기록)의 설치 SDK 표지 `ReflectionOnlyLibrary`는 없앴고 SDK manifest는 8이다. 모듈 생성 소스는 자기 타입 함수 `RegisterModuleOwnTypes`도 정의한다(5.5절 등록 함수 세 개) |
 | 3(병합 기록) | 2026-11-20 | 모듈 로더 ML2(engine-runtime f5b448c8)와 GS2·유니티 PCH 작업을 병합했다. 설치 SDK manifest 8은 ML2의 `ReflectionOnlyLibrary` 제거가 가졌고, GS2(타입별 본문이 SDK 라이브러리에 있음)와 공유 PCH 헤더 칸은 함께 9다("2(구현 기록 2)"의 "manifest 8"은 병합 전 번호다). 모듈 정의가 정의 헤더로 가므로([유니티 빌드·PCH](UnityBuildPch.ko.md) 8.2절) ML2의 `ROCKS_MODULE_TYPES`도 `ROCKS_MODULE_NAME`과 함께 정의 헤더에 들어가고, AST 생성과 native compile이 같은 헤더를 받는다. ML2가 모듈 생성 소스 끝에 더한 `RegisterModuleOwnTypes`는 그대로다 |
 | 3(검증 기록) | 2026-11-20 | GS2의 첫 전체 빌드와 시험을 유니티·PCH 작업 끝의 검증에서 함께 돌렸다([유니티 빌드·PCH](UnityBuildPch.ko.md) 개정 이력 "검증 기록"). Foundation·EngineTests Debug 빌드와 시험(2,549개·2,954개), 도구 시험 meta 246건, 통합 시험(설치 SDK 게임, Release ThinLTO SDK·게임 포함) 통과, 무변경 재빌드 0 action. 통합 시험 한 곳이 GS2에 맞지 않아 고쳤다 — 필드를 더해도 타입별 생성 헤더는 그대로이므로 게시 여부를 생성 소스와 descriptor로 확인한다. 수치(Foundation Debug clean build, 유니티·PCH를 끈 검증 변형이라 생성 소스 분리의 몫만 보인다): compile 시간 합 5,799.5 s → 752.8 s(1,278 → 1,337 action), 시험 실행 파일 3,970.6 s(386 TU) → 262.1 s(390 TU), 공개 헤더 단독 컴파일 검사 693.6 s → 151.0 s, 리플렉션 fixture 모듈의 생성 소스 26 TU 58.2 s. native 단계 벽시계는 776.5 s → 103.3 s다(장비 부하가 달라 거친 비교다) |
+| 4 | 2026-11-21 | 8.1절을 더했다(GSD15·GSD16): 생성 헤더가 보이지 않는 번역 단위에서 템플릿이 오류 없이 다른 길로 가는 지점을 조사하고, `ROCKS_GENERATED_BODY()`의 표지와 탐지 관문으로 컴파일 오류가 되게 했다. 표지를 위해 저장소의 리플렉션 클래스·struct에 `ROCKS_GENERATED_BODY()`를 넣었다(동작은 그대로다) |

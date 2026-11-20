@@ -175,6 +175,9 @@ public static class MetadataRunner
                     arguments.Add("--verify-sources");
                 }
 
+                // 리플렉션 클래스·struct의 표지(ROCKS_GENERATED_BODY)를 요구한다(Docs/Design/ReflectionGeneratedSources.ko.md 8.1절).
+                arguments.Add("--require-generated-body");
+
                 var generated = await ProcessRunner.RunAsync(new("dotnet", arguments, context.RootDirectory,
                     toolchain.Environment, Timeout: TimeSpan.FromMinutes(3)), cancellationToken);
                 Console.Write(generated.StdOut);

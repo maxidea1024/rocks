@@ -124,7 +124,7 @@ internal static class CompilerDriver
         afterManifestRead?.Invoke();
         StableIdManifest? manifest = options.IdentityManifest is null ? null : StableIdManifest.Load(options.IdentityManifest);
         VerifyIdentitySnapshot(options.IdentityManifest, identitySnapshot);
-        var parser = new ClangAstParser(options.Inputs, manifest, imported, ResolveHeader);
+        var parser = new ClangAstParser(options.Inputs, manifest, imported, ResolveHeader, options.RequireGeneratedBody);
         SchemaModel schema;
         try
         {

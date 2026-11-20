@@ -39,6 +39,9 @@ internal static partial class MetaTests
         // 마지막으로 생성한 헤더의 타입별 생성 소스(본문) 경로다.
         public string Source => MetaCompilerArguments.GeneratedSourcePath(temporary.Root, lastInclude);
 
+        // 마지막으로 생성한 리플렉션 헤더의 include 철자다(예: Probe.h).
+        public string IncludeSpelling => lastInclude;
+
         // 생성 헤더와 그 생성 소스의 글이다(헤더가 먼저다). 선언·형질·inline Trace는 헤더에, 본문(Schema·Ops·Register·정적 검사)은 생성
         // 소스에 있으므로(Docs/Design/ReflectionGeneratedSources.ko.md 5.1절) 생성 코드의 문구를 보는 시험은 둘을 이어 읽는다.
         public string GeneratedText() => File.ReadAllText(Output) + File.ReadAllText(Source);
@@ -338,11 +341,16 @@ internal static partial class MetaTests
         // 마지막으로 생성한 헤더와 그 생성 소스를 한 번역 단위로 소비자와 같은 경고 프로필로 컴파일한다(생성 static_assert probe —
         // 생성 헤더를 고친 뒤 부른다). 정적 검사는 생성 소스의 VerifyGenerated 정의에 있으므로 생성 소스까지 컴파일해야 평가된다.
         // consumer는 include 뒤에 붙이는 소비 코드다(생성 템플릿을 인스턴스화할 때 쓴다).
-        public async Task<ProcessResult> CompileGeneratedAsync(string consumer = "")
+        public Task<ProcessResult> CompileGeneratedAsync(string consumer = "") =>
+            CompileSourceAsync($"#include <{lastInclude[..^2]}.generated.h>\n#include \"{Source.Replace('\\', '/')}\"\n{consumer}");
+
+        // 소비 번역 단위 하나를 소비자와 같은 경고 프로필로 구문 검사한다. 무엇을 include할지는 text가 정한다(생성 헤더를 빼고
+        // 리플렉션 헤더만 include한 소비자를 볼 때 쓴다). 마지막으로 생성한 헤더의 include 철자는 IncludeSpelling이다.
+        public async Task<ProcessResult> CompileSourceAsync(string text)
         {
             bool clangCl = Path.GetFileNameWithoutExtension(compiler).Contains("clang-cl", StringComparison.OrdinalIgnoreCase);
             string source = temporary.FilePath("generated-check.cpp");
-            File.WriteAllText(source, $"#include <{lastInclude[..^2]}.generated.h>\n#include \"{Source.Replace('\\', '/')}\"\n{consumer}", new UTF8Encoding(false, true));
+            File.WriteAllText(source, text, new UTF8Encoding(false, true));
             List<string> arguments = clangCl
                 ? ["/nologo", "/TP", "/utf-8", "/clang:-std=c++23", "/W4", "/WX", "/GR-", "/EHs-c-", "/Zc:__cplusplus", "/Zs", source]
                 : ["-x", "c++", "-std=c++23", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-fno-exceptions", "-fno-rtti", "-fsyntax-only", source];

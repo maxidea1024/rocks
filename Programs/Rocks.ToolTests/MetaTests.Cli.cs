@@ -24,6 +24,47 @@ internal static partial class MetaTests
             await probe.GenerateAsync(source, extra: ["--definitions-header", probe.HeaderPath("Missing.Definitions.h")], expectedCode: "RMC1000",
                 reason: "definitions header not found");
         });
+        // 표지 규칙(Docs/Design/ReflectionGeneratedSources.ko.md 8.1절). --require-generated-body를 주면 ROCKS_GENERATED_BODY()가 없는
+        // 리플렉션 클래스·struct를 RMC2211로 거부한다(옵션이 없으면 받는다). 표지가 있는 타입을 생성 헤더 없이 리플렉션 템플릿에 쓰면
+        // 관문이 컴파일 오류를 내고, 생성 헤더를 include하면 컴파일된다. 표지가 없는 타입은 같은 코드가 조용히 컴파일된다(규칙을 두는
+        // 이유다).
+        suite.Add("Meta.GeneratedBodyMarkerIsRequiredAndGuardsTemplates", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            const string body = "ROCKS_PROPERTY() rocks::String label;\nexplicit Leaf(rocks::Allocator& allocator) noexcept : label(allocator) {}\n};\n" +
+                "ROCKS_CLASS()\nclass Holder : public rocks::Object {\n";
+            string unmarked = Preamble + "ROCKS_STRUCT()\nstruct Leaf {\n" + body + "public:\nHolder() noexcept {}\n};\n}\n";
+            string marked = Preamble + "ROCKS_STRUCT()\nstruct Leaf {\nROCKS_GENERATED_BODY()\n" + body +
+                "ROCKS_GENERATED_BODY()\npublic:\nHolder() noexcept {}\n};\n}\n";
+            string halfMarked = Preamble + "ROCKS_STRUCT()\nstruct Leaf {\nROCKS_GENERATED_BODY()\n" + body +
+                "public:\nHolder() noexcept {}\n};\n}\n";
+            await probe.GenerateAsync(unmarked);
+            await probe.GenerateAsync(unmarked, extra: ["--require-generated-body"], expectedCode: "RMC2211",
+                reason: "probe::Leaf: a reflected struct must contain ROCKS_GENERATED_BODY()");
+            await probe.GenerateAsync(halfMarked, extra: ["--require-generated-body"], expectedCode: "RMC2211",
+                reason: "probe::Holder: a reflected class must contain ROCKS_GENERATED_BODY()");
+            await probe.GenerateAsync(unmarked, extra: ["--require-generated-body", "--require-generated-body"], expectedCode: "RMC1000",
+                reason: "duplicate option --require-generated-body");
+
+            // 소비자: 값 복사(ValueCopy 일반형)와 필드 형질(ReflectedStructField)을 쓴다.
+            string Consumer(bool generatedHeader) =>
+                (generatedHeader ? $"#include <{probe.IncludeSpelling[..^2]}.generated.h>\n" : $"#include <{probe.IncludeSpelling}>\n") +
+                "#include <Object/ValueCopy.h>\n" +
+                "rocks::Result<void> Copy(probe::Leaf& to, const probe::Leaf& from, rocks::Allocator& allocator) noexcept {\n" +
+                "    return rocks::detail::TryCopyValue(to, from, allocator);\n}\n" +
+                "bool IsStruct() noexcept { return rocks::detail::ReflectedStructField<probe::Leaf>::Supported; }\n" +
+                "static_assert(rocks::ReflectedDeclarationV<probe::Leaf> == PROBE_MARKED);\n" +
+                "static_assert(!rocks::ReflectedDeclarationV<rocks::String> && !rocks::ReflectedDeclarationV<int>);\n";
+            await probe.GenerateAsync(unmarked);
+            var silent = await probe.CompileSourceAsync("#define PROBE_MARKED false\n" + Consumer(generatedHeader: false));
+            Verify.Equal(0, silent.ExitCode, "an unmarked type compiles without its generated header (the silent path): " + silent.StdOut + silent.StdErr);
+            await probe.GenerateAsync(marked, extra: ["--require-generated-body"]);
+            var guarded = await probe.CompileSourceAsync("#define PROBE_MARKED true\n" + Consumer(generatedHeader: false));
+            Verify.That(guarded.ExitCode != 0, "a marked type without its generated header must not compile");
+            Verify.Contains("its generated header is not included", guarded.StdOut + guarded.StdErr, "the gate must name the cause");
+            var included = await probe.CompileSourceAsync("#define PROBE_MARKED true\n" + Consumer(generatedHeader: true));
+            Verify.Equal(0, included.ExitCode, "a marked type with its generated header must compile: " + included.StdOut + included.StdErr);
+        });
         suite.Add("Meta.FixtureDeterminismTimestampAndStaleCheck", async () =>
         {
             using Probe probe = new(options, actualEnvironment, generator, compiler);

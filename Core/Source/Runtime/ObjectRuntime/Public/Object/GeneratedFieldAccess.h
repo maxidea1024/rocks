@@ -77,10 +77,11 @@ struct ReflectedEnumField {
 // 비enum 클래스다(Docs/Design/ReflectionFoundations.ko.md 4.6절).
 template <class T>
 struct ReflectedStructField {
-    static constexpr bool Supported = !IsEnumV<T> && IsClassV<T> && requires {
-        GeneratedType<T>::Id();
-        GeneratedType<T>::ContainsStrongReference;
-    };
+    static constexpr bool Supported =
+        !IsEnumV<T> && IsClassV<T> && detail::GeneratedHeaderVisible<T>() && requires {
+            GeneratedType<T>::Id();
+            GeneratedType<T>::ContainsStrongReference;
+        };
 };
 
 // 리플렉션 배열 필드의 컨테이너다(Docs/Design/ReflectionFoundations.ko.md 5.6절). 부분 특수화로만
@@ -1022,9 +1023,10 @@ concept GeneratedBindsMirror = requires(const T& value) { GeneratedType<T>::Veri
 
 // MetaCompiler가 필드 방문 함수를 낸 타입이다.
 template <class T>
-concept GeneratedFieldVisitor = requires(const T& value, LogStructureFieldVisitor& visitor) {
-    GeneratedType<T>::VisitFields(value, visitor);
-};
+concept GeneratedFieldVisitor =
+    GeneratedHeaderVisible<T>() && requires(const T& value, LogStructureFieldVisitor& visitor) {
+        GeneratedType<T>::VisitFields(value, visitor);
+    };
 
 // 로그 일반 특수화를 받는 타입이다. Binds 미러 대상(Vec3·Transform 등)은 뺀다: 실제 타입이 Core에
 // 있어 생성 헤더 없이도 보이므로, 넣으면 생성 헤더를 본 번역 단위와 안 본 번역 단위의 판정이
