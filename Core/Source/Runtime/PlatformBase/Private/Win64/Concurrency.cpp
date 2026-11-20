@@ -157,11 +157,28 @@ ThreadExitSlot::ThreadExitSlot(Callback callback) noexcept {
 }
 
 void* ThreadExitSlot::Get() const noexcept {
-    return valid_ ? FlsGetValue(static_cast<DWORD>(native_)) : nullptr;
+    if (!valid_) {
+        return nullptr;
+    }
+
+    // FlsGetValue는 성공해도 last-error를 0으로 지운다(측정). 이 조회는 할당자의 느린 경로에 있어
+    // 실패한 Win32 호출과 그 뒤의 GetLastError 사이에 낄 수 있으므로 값을 보존한다(계약).
+    const DWORD lastError = GetLastError();
+    void* value = FlsGetValue(static_cast<DWORD>(native_));
+    SetLastError(lastError);
+    return value;
 }
 
 bool ThreadExitSlot::Set(void* value) noexcept {
-    return valid_ && FlsSetValue(static_cast<DWORD>(native_), value) != 0;
+    if (!valid_) {
+        return false;
+    }
+
+    // 실패한 FlsSetValue는 last-error를 바꾼다. 호출자는 반환값만 보므로 보존한다(Get과 같은 계약).
+    const DWORD lastError = GetLastError();
+    const bool stored = FlsSetValue(static_cast<DWORD>(native_), value) != 0;
+    SetLastError(lastError);
+    return stored;
 }
 
 namespace detail {

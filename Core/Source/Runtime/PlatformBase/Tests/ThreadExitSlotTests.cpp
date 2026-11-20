@@ -3,6 +3,7 @@
 #include <Platform/Fatal.h>
 #include <Platform/Thread.h>
 #include <TestSupport/OsThread.h>
+#include <TestSupport/SystemError.h>
 #include <TestSupport/Test.h>
 
 // platform::ThreadExitSlot: 스레드별 값과 스레드 종료 정리 함수다(Docs/Design/
@@ -154,6 +155,46 @@ TEST(ThreadExitSlot_CallbackRunsOnRawOsThreads) {
         CHECK(record.localAfterWrite == CallbackMarker);
         CHECK(record.clearedInside);
     }
+}
+
+// Get·Set은 호출 스레드의 OS 오류 값(Windows last-error, POSIX errno)을 바꾸지 않는다. 할당자의
+// 느린 경로가 이 칸을 읽으므로, 실패한 OS 호출과 그 오류 값을 읽는 코드 사이에 끼어도 값이 남아야
+// 한다. Windows FlsGetValue는 성공해도 last-error를 0으로 지우므로 구현이 보존한다.
+TEST(ThreadExitSlot_GetAndSetKeepTheSystemErrorValue) {
+    REQUIRE(TestSlot().IsValid());
+    constexpr uint32 ErrorMarker = 1234;
+    ExitRecord record;
+    test::SetSystemError(ErrorMarker);
+    void* const empty = TestSlot().Get();
+    const uint32 afterEmptyGet = test::SystemError();
+    test::SetSystemError(ErrorMarker);
+    const bool stored = TestSlot().Set(&record);
+    const uint32 afterSet = test::SystemError();
+    test::SetSystemError(ErrorMarker);
+    void* const value = TestSlot().Get();
+    const uint32 afterGet = test::SystemError();
+    test::SetSystemError(ErrorMarker);
+    // 이 스레드가 끝날 때(프로세스 종료) 죽은 지역 변수로 불리지 않게 값을 지운다.
+    const bool cleared = TestSlot().Set(nullptr);
+    const uint32 afterClear = test::SystemError();
+    // 유효하지 않은 칸도 같다.
+    ThreadExitSlot invalid(nullptr);
+    test::SetSystemError(ErrorMarker);
+    void* const invalidValue = invalid.Get();
+    const bool invalidStored = invalid.Set(&record);
+    const uint32 afterInvalid = test::SystemError();
+    test::SetSystemError(0);
+    CHECK(empty == nullptr);
+    CHECK(afterEmptyGet == ErrorMarker);
+    CHECK(stored);
+    CHECK(afterSet == ErrorMarker);
+    CHECK(value == &record);
+    CHECK(afterGet == ErrorMarker);
+    CHECK(cleared);
+    CHECK(afterClear == ErrorMarker);
+    CHECK(invalidValue == nullptr);
+    CHECK(!invalidStored);
+    CHECK(afterInvalid == ErrorMarker);
 }
 
 // 유효하지 않은 칸(정리 함수 없음)은 값을 받지 않는다.
