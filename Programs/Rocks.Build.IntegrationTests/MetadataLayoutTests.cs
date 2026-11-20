@@ -219,7 +219,7 @@ internal static class MetadataLayoutTests
             Name = name,
             PublicIncludeDirectories = [Path($"{name}/Public")],
             PrivateIncludeDirectories = [Path($"{name}/Private")],
-            Dependencies = dependencies ?? [],
+            PublicDependencies = dependencies ?? [],
             Metadata = metadata,
             ModuleDirectory = name
         };

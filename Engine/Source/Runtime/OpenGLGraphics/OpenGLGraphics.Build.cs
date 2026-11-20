@@ -12,7 +12,7 @@ public sealed class OpenGLGraphics : EngineModuleRules
     // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
     protected override UnityMode Unity => UnityMode.On;
 
-    protected override string[] RequiredModules => ["Graphics"];
+    protected override string[] PublicDependencies => ["Graphics"];
 
     public override NativeModuleInput Configure(BuildContext context)
     {
@@ -36,7 +36,7 @@ public sealed class OpenGLGraphics : EngineModuleRules
                 }
             ],
             PublicIncludeDirectories = [context.PathInRoot($"{ModuleDirectory}/Public")],
-            Dependencies = RequiredModules,
+            PublicDependencies = PublicDependencies,
             // Windows: WGL and the GL 1.0/1.1 entry points come from opengl32; every other GL function is obtained at
             // run time with wglGetProcAddress. Android: EGL and GLESv3 are NDK system libraries; GL functions are
             // obtained with eglGetProcAddress (dlsym fallback).

@@ -15,7 +15,7 @@ public sealed class ReflectionTestFixtures : CoreModuleRules
 
     // CoreTypeBindings: the Core value type field fixture (CoreValueFixture.h) imports that module's Binds mirrors.
     // Localization: rocks::Text fields (TextFieldFixture.h).
-    protected override string[] RequiredModules => ["ObjectRuntime", "CoreTypeBindings", "Localization"];
+    protected override string[] PublicDependencies => ["ObjectRuntime", "CoreTypeBindings", "Localization"];
 
     protected override bool HasSources => false;
 

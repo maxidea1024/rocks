@@ -11,7 +11,7 @@ public sealed class CoreTypeBindings : CoreModuleRules
 {
     protected override string ModuleName => "CoreTypeBindings";
 
-    protected override string[] RequiredModules => ["ObjectRuntime"];
+    protected override string[] PublicDependencies => ["ObjectRuntime"];
 
     protected override bool HasSources => false;
 

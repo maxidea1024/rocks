@@ -1,0 +1,10 @@
+fn Values() {
+    _ = a || b && !c == d < e ?? f + g * -h;
+    _ = n?.Count ?? 0 > 5;
+    _ = (x as? Weapons.Sword)?.Swing(power: 2, 3)[0];
+    _ = Owner.Find<Door>().Open();
+    _ = [1, 2] + ["a": 1];
+    _ = "HP ${current}/${max}" + @"C:\x" + "\n";
+    _ = this.value + 0x1F + 1.5e3 + true + null;
+    var list: Array<int>= [];
+}

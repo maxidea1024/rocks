@@ -1,0 +1,3 @@
+# Precedence, postfix chains, type arguments, literals and strings (3.6 Expr). The '>=' after
+# 'Array<int>' splits into '>' and '='.
+clean

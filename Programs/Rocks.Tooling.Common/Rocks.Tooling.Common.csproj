@@ -1,1 +1,6 @@
-<Project Sdk="Microsoft.NET.Sdk" />
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <!-- Verified toolchain table (Docs/Design/ClangVersionSupport.ko.md section 6.1). Embedded so installed SDK tools carry it. -->
+    <EmbeddedResource Include="../../Build/Toolchain.json" LogicalName="Rocks.Toolchain.json" />
+  </ItemGroup>
+</Project>

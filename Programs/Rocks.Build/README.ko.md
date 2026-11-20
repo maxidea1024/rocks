@@ -28,6 +28,13 @@
 - 증분: 생성 TU의 key는 cpp 내용이고 `<out>/BuildInfo`는 header 디렉터리가 아니다. ID가 같으면 생성 파일을 다시 쓰지 않아 no-op이 0 액션이고, Core에 닿는 실행 파일은 입력 byte가 하나만 바뀌어도(주석 포함) 생성 TU와 link가 다시 돈다. 첫 InputSnapshot은 Prepare가 읽은 digest·열거의 메모로 만들어 마지막 비교가 Prepare 읽기부터 빌드 끝까지를 덮는다.
 - `NativeBuildResult.ToolchainFingerprint`(대상이 없으면 null)·`ToolBuildIds`(link가 성공한 실행 파일만)는 action-report.json에 실린다.
 
+## 의존 공개 범위(ModuleVisibility)
+
+- 모듈은 `PublicDependencies`(공개 헤더가 쓰는 모듈)와 `PrivateDependencies`(구현만 쓰는 모듈) 두 목록으로 의존한다([빌드 타깃](../../Docs/Design/BuildTargets.ko.md) 3.5절, UE `PublicDependencyModuleNames`·`PrivateDependencyModuleNames`). 한 모듈을 두 목록에 함께 적으면 `InputValidation`이 거부한다.
+- 보임: `ModuleVisibility.Of`가 컴파일 환경에 보이는 의존 모듈을 계산한다 — 대상 모듈은 두 목록, 그 밖의 모듈은 공개 목록만 따라간다(의존 우선 후위 순서). include·정의·`AdditionalInputs`·공유 PCH 후보와 메타데이터의 include 순서·import 범위·생성 헤더 해석이 이 결과를 쓴다.
+- 도달: 링크·빌드 대상·순환 검사·`Closures`·모듈 표·SDK·기술자 검사·Release 배제는 `AllDependencies`(공개 다음 비공개)를 따라간다. 비공개 의존도 링크한다.
+- BS0 전환은 기존 모듈을 모두 공개 의존으로 옮겼고, 모든 타깃의 `compile_commands.json`이 전환 전과 같다.
+
 ## 모듈 표(ModuleTables)
 
 `NativeModuleInput.ProvidesModuleTable` 표지 모듈(엔진 Core — `Core/Module/ModuleEntry.h`)에 닿는 `Executable` 모듈마다 `ModuleTables.Add`가 `<실행 파일>.ModuleTable.cpp`를 그 모듈의 생성 소스로 더한다(`<out>/GeneratedSources/<실행 파일>/`, 규칙 생성 TU와 같은 경로·증분 — [모듈 로더](../../Docs/Design/ModuleLoader.ko.md) 3.2절). 이름 "Core"로 판정하지 않는다.
@@ -64,6 +71,8 @@ cache hit은 key와 모든 출력 파일이 기록과 일치할 때만 인정한
 - 묶음 파일: `<out>/Unity/<모듈>/<모듈>.Unity.<첫 구성원 경로 해시 12자리>.cpp`, 내용은 구성원마다 루트 기준 `#include "…"`다. 묶음 TU에만 `/I<root>`(출력 아래 구성원이면 `/I<out>`)를 include 목록 맨 뒤에 붙인다. `__FILE__`은 단독 TU와 같다.
 - object: `obj/<모듈>/<변형>/<해시>.obj`(+ 의존 기록 `.deps`). 변형은 `u<유니티>p<PCH>`(예: `u1p1`, 검증 빌드 `--unity off --pch off`는 `u0p0`)이고 compile action의 Id에도 들어간다 — 일반 빌드와 검증 빌드를 번갈아 돌려도 서로의 object와 기록을 덮어쓰지 않는다. 빌드가 성공하면 이번 변형 디렉터리와 묶음 디렉터리에서 이번 계획이 만들지 않은 파일을 지운다.
 - `compile_commands.json`은 원본 소스마다 논리 명령 하나이고(`output`은 그 소스가 단독 TU일 때의 object 경로다 — 묶인 소스의 그 파일은 없다), 도구 빌드 ID는 유니티 켬·끔과 묶음 구성에 따라 바뀌지 않는다(archive·link의 object는 원본 소스 키 목록으로 적는다).
+- 도구 모음 확인(`ToolchainCheck` — [Clang 버전 지원](../../Docs/Design/ClangVersionSupport.ko.md) 6.2절): discovery가 `Build/Toolchain.json`(Rocks.Tooling.Common 포함 리소스 `Rocks.Toolchain.json` — 설치 SDK 도구도 같은 표를 갖는다)으로 제조사별 최소 Clang과 Windows STL(`yvals_core.h`)이 요구하는 최소 Clang을 확인하고, 정규화한 `--version` 첫 줄 전체가 검증 목록에 있는지(`NativeToolchain.ToolchainVerified`)와 STL 확인 결과(`StlClangCheck`)를 남긴다. 빌드 CLI(`build`·`test`·`sdk`·`game`)는 둘을 build-evidence(`toolchainVerified`·`stlClangCheck`, 게임은 `game-build-evidence.json`)에 적고, `--require-verified-toolchain on|off`(기본 off, Rocks.proj `RequireVerifiedToolchain`)가 on이면 검증 목록 밖을 FAIL evidence로 끝낸다.
+- action 출력 게시(`FileReplace`): 임시 출력을 최종 경로로 옮길 때 Windows는 POSIX 의미 이름 바꾸기(`FileRenameInfoEx`, `REPLACE_IF_EXISTS | POSIX_SEMANTICS`)로 대상을 바꿔, 다른 프로세스(백신·인덱서)가 대상을 삭제 공유로 열고 있어도 성공한다. 실패하면 `Cannot publish 원본 -> 대상`으로 경로를 남긴다(대기·재시도 없음).
 - 명령 옵션: `--unity on|off`, `--pch on|off`, `--adaptive on|off`(기본 on). 켠 모듈은 묶음 충돌 정책 검사(`Rocks.ToolTests policy` — 파일 지역 이름, 파일 범위 using, `.cpp` 매크로, pragma 균형)의 대상이다. `Rocks.ToolTests unity-audit`는 설정과 무관하게 모든 엔진 모듈의 충돌을 센다.
 
 ## 정의 헤더·PCH·작업 파일 분리

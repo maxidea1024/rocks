@@ -1,0 +1,6 @@
+# Module path rules (3.4): a file next to a folder of the same name (S1110), a path that
+# differs only in letter case (S1109, on the spelling that is not first by bytes) and an
+# invalid name (S1108). All are diagnostics of the whole file.
+error S1110 Combat.spark
+error S1109 Door.spark
+error S1108 combat2.spark

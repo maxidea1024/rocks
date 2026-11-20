@@ -5,7 +5,7 @@ public sealed class Base : CoreModuleRules
 {
     protected override string ModuleName => "Base";
 
-    protected override string[] RequiredModules => [];
+    protected override string[] PublicDependencies => [];
 
     protected override bool HasSources => false;
 }

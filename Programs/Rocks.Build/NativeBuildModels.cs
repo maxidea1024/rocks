@@ -183,6 +183,14 @@ public sealed record NativeToolchain
     // 예: "clang version 21.1.6", "clang version 21.1.6 (a832a5222e48...)".
     public string CompilerVersion { get; init; } = "";
 
+    // 컴파일러가 검증한 도구 모음 목록(Build/Toolchain.json — Docs/Design/ClangVersionSupport.ko.md 6.2절)에 있는지다. discovery가 채우고,
+    // 수동으로 만든 툴체인(시험)은 참이다. 거짓이면 빌드 CLI가 한 줄 알리고 build-evidence에 남긴다.
+    public bool ToolchainVerified { get; init; } = true;
+
+    // Windows에서 고른 MSVC STL이 요구하는 최소 Clang 확인 결과다(build-evidence의 stlClangCheck — "requires Clang 22" 또는 "not checked: 이유").
+    // Windows 밖과 수동으로 만든 툴체인은 null이다.
+    public string? StlClangCheck { get; init; }
+
     // `-print-effective-triple`로 얻은 실제 대상 triple이다(compile 인자의 --target·배포 대상 반영).
     // 예: "x86_64-pc-windows-msvc19.29.30159", "arm64-apple-macosx13.0.0", "aarch64-unknown-linux-android26".
     public string TargetTriple { get; init; } = "";
@@ -228,12 +236,22 @@ public sealed record NativeModuleInput
 
     public IReadOnlyList<string> PrivateDefines { get; init; } = [];
 
-    public IReadOnlyList<string> Dependencies { get; init; } = [];
+    // 공개 의존이다(UE PublicDependencyModuleNames, Docs/Design/BuildTargets.ko.md 3.5절 BD7). 이 모듈의 공개 헤더가 쓰는 모듈이며, 그
+    // 모듈의 공개 환경(public include·정의, 그 공개 의존의 공개 환경)이 이 모듈과 소비자에게 보인다. 두 목록에 함께 적으면 입력 오류다.
+    public IReadOnlyList<string> PublicDependencies { get; init; } = [];
+
+    // 비공개 의존이다(UE PrivateDependencyModuleNames). 구현만 쓰는 모듈이며, 그 공개 환경은 이 모듈에만 보이고 소비자에게는 넘어가지
+    // 않는다. 링크는 공개 의존과 같이 한다.
+    public IReadOnlyList<string> PrivateDependencies { get; init; } = [];
+
+    // 두 목록을 공개 다음 비공개 순으로 이은 것이다. 링크·빌드 대상·순환 검사·모듈 표처럼 보임이 아니라 도달을 따라가는 곳이 쓴다
+    // (보임은 ModuleVisibility).
+    public IEnumerable<string> AllDependencies => PublicDependencies.Concat(PrivateDependencies);
 
     // 실행 중에 ModuleLoader::Load(이름)으로 적재하는 모듈이다(UE DynamicallyLoadedModuleNames 대응, Docs/Design/ModuleLoader.ko.md 3.8절
     // MD11). 이 모듈의 컴파일에 그 모듈의 include·정의를 넣지 않는다(쓰는 쪽은 별도 모듈의 interface와 Find<T>(이름)로 쓴다). 빌드는
     // 그 모듈과 링크 폐포를 타깃에 넣어 빌드하고, 이 모듈에 닿는 실행 파일이 함께 링크하며(Monolithic) 실행 파일 모듈 표에 행을 싣는다.
-    // 순환 검사의 참조 사슬에는 넣지 않는다(UE와 같다 — Engine이 적재하는 모듈이 Engine에 링크 의존해도 된다). Dependencies와 겹치거나
+    // 순환 검사의 참조 사슬에는 넣지 않는다(UE와 같다 — Engine이 적재하는 모듈이 Engine에 링크 의존해도 된다). 두 의존 목록과 겹치거나
     // 자기 자신·실행 파일·모르는 이름이면 입력 오류다(InputValidation). 사용 예(엔진 모듈 규칙):
     // protected override string[] DynamicModules => ["RendererPlugin"];
     public IReadOnlyList<string> DynamicModules { get; init; } = [];

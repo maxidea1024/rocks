@@ -10,7 +10,7 @@ public sealed class PlatformWindow : EngineModuleRules
     // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
     protected override UnityMode Unity => UnityMode.On;
 
-    protected override string[] RequiredModules => ["Input"];
+    protected override string[] PublicDependencies => ["Input"];
 
     public override NativeModuleInput Configure(BuildContext context)
     {
@@ -25,7 +25,7 @@ public sealed class PlatformWindow : EngineModuleRules
             // The entry point (Private/PlatformWindowModule.cpp) is built on every platform.
             Sources = [ModuleEntrySource(context), .. context.Sources(windows ? $"{backend}/Win64" : $"{backend}/Unsupported")],
             PublicIncludeDirectories = [context.PathInRoot($"{ModuleDirectory}/Public")],
-            Dependencies = RequiredModules,
+            PublicDependencies = PublicDependencies,
             // XInput is loaded dynamically at run time (the SDK's xinput.lib makes lld-link warn about a DllMain import).
             // wtsapi32 answers the desktop session connect state (QueryDesktopSessionState).
             SystemLibraries = windows ? ["user32", "wtsapi32"] : []

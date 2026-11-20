@@ -76,7 +76,7 @@ rocks/
 public sealed class Core : CoreModuleRules
 {
     protected override string ModuleName => "Core";
-    protected override string[] RequiredModules => ["PlatformBase"];
+    protected override string[] PublicDependencies => ["PlatformBase"];
 }
 ```
 
@@ -86,7 +86,7 @@ public sealed class Core : CoreModuleRules
    `<Module>.Build.cs`를 만든다.
 2. 테스트는 `<Module>/Tests/`에 두고 `Programs/FoundationTests/FoundationTests.Build.cs`의 테스트 모듈
    목록에 이름을 더한다.
-3. 다른 모듈은 `RequiredModules`에 이름을 넣어 의존한다.
+3. 다른 모듈은 `PublicDependencies`(공개 헤더가 쓰는 모듈 — 소비자에게도 보인다)나 `PrivateDependencies`(구현만 쓰는 모듈)에 이름을 넣어 의존한다([빌드 타깃](../Design/BuildTargets.ko.md) 3.5절).
 
 ## 프로젝트·플러그인 기술자
 

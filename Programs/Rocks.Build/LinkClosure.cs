@@ -1,8 +1,8 @@
 namespace Rocks.Build;
 
 /// <summary>
-/// 실행 파일이 링크하는 모듈 집합이다(Docs/Design/ModuleLoader.ko.md 3.8절, Monolithic). 링크 의존(<see cref="NativeModuleInput.Dependencies"/>)
-/// 폐포에, 그 폐포의 모듈(과 이어서 더해진 모듈)이 <see cref="NativeModuleInput.DynamicModules"/>로 둔 모듈과 그 링크 폐포를 더한다.
+/// 실행 파일이 링크하는 모듈 집합이다(Docs/Design/ModuleLoader.ko.md 3.8절, Monolithic). 링크 의존(두 의존 목록 —
+/// <see cref="NativeModuleInput.AllDependencies"/>) 폐포에, 그 폐포의 모듈(과 이어서 더해진 모듈)이 <see cref="NativeModuleInput.DynamicModules"/>로 둔 모듈과 그 링크 폐포를 더한다.
 /// 동적 관계는 순환 검사의 참조 사슬이 아니므로(UE와 같다) 이미 닿은 모듈로 돌아가는 관계는 건너뛴다. 이름을 모르는 모듈은 건너뛴다
 /// (그 오류는 입력 검사·액션 그래프가 알린다).
 /// </summary>
@@ -13,6 +13,16 @@ public static class LinkClosure
     /// 같다)이고, 그 뒤에 동적 모듈 쪽이 같은 규칙으로 붙는다. 정적 라이브러리 링크는 이 순서를 뒤집어 의존하는 쪽을 앞에 둔다.
     /// </summary>
     public static List<string> Of(string root, IReadOnlyDictionary<string, NativeModuleInput> modules) => Collect(root, modules, out _);
+
+    /// <summary>
+    /// <paramref name="withDynamic"/>이면 <see cref="Of(string, IReadOnlyDictionary{string, NativeModuleInput})"/>와 같고, 아니면 링크 의존
+    /// 폐포(앞부분)만이다(라이브러리 모듈의 도달 집합).
+    /// </summary>
+    public static List<string> Of(string root, IReadOnlyDictionary<string, NativeModuleInput> modules, bool withDynamic)
+    {
+        List<string> order = Collect(root, modules, out int linked);
+        return withDynamic ? order : order.GetRange(0, linked);
+    }
 
     /// <summary>
     /// <see cref="Of"/>와 같은 목록과, 그 가운데 링크 의존으로는 닿지 않고 동적 관계로만 닿는 모듈 이름 집합(요청 시 적재 — 모듈 표 행의
@@ -43,7 +53,7 @@ public static class LinkClosure
                 return;
             }
 
-            foreach (string dependency in module.Dependencies)
+            foreach (string dependency in module.AllDependencies)
             {
                 Visit(dependency);
             }
@@ -51,7 +61,7 @@ public static class LinkClosure
             order.Add(module.Name);
         }
 
-        foreach (string dependency in rootModule.Dependencies)
+        foreach (string dependency in rootModule.AllDependencies)
         {
             Visit(dependency);
         }
@@ -95,7 +105,7 @@ public static class LinkClosure
                 continue;
             }
 
-            foreach (string next in module.Dependencies.Concat(module.DynamicModules).Reverse())
+            foreach (string next in module.AllDependencies.Concat(module.DynamicModules).Reverse())
             {
                 pending.Push((next, module.Name));
             }

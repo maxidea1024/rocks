@@ -16,7 +16,7 @@ public sealed class CurvesTestFixtures : CoreModuleRules
     // the engine group of a test executable must not register them into every engine.
     protected override LoadingPhase LoadingPhase => LoadingPhase.None;
 
-    protected override string[] RequiredModules => ["Curves", "CoreTypeBindings"];
+    protected override string[] PublicDependencies => ["Curves", "CoreTypeBindings"];
 
     protected override bool HasSources => false;
 

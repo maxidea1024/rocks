@@ -10,5 +10,5 @@ public sealed class DynamicModuleTestFixture : CoreModuleRules
 
     protected override string ModuleName => "DynamicModuleTestFixture";
 
-    protected override string[] RequiredModules => ["Core", "DynamicModuleTestApi"];
+    protected override string[] PublicDependencies => ["Core", "DynamicModuleTestApi"];
 }

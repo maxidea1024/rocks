@@ -1,0 +1,109 @@
+File @1:1-28:1
+  List @1:1-1:1
+  List @1:1-27:2
+    Function @1:1-27:2
+      -
+      List @1:1-1:1
+      Name "Run" @1:4-1:7
+      List @1:7-1:26
+        Parameter @1:8-1:25
+          Name "items" @1:8-1:13
+          Type @1:15-1:25
+            Path @1:15-1:20
+              Name "Array" @1:15-1:20
+            List @1:20-1:25
+              Type @1:21-1:24
+                Path @1:21-1:24
+                  Name "int" @1:21-1:24
+                -
+      -
+      Block @1:27-27:2
+        LocalVariable @2:5-2:19
+          Name "count" @2:9-2:14
+          -
+          IntegerLiteral "0" @2:17-2:18
+          -
+        LocalVariable let @3:5-3:33
+          Name "door" @3:9-3:13
+          -
+          Call @3:16-3:22
+            Identifier "Find" @3:16-3:20
+              -
+            List @3:20-3:22
+          ExitReturn @3:23-3:32
+            -
+        If @4:5-10:6
+          IfLet @4:9-4:28
+            Name "d" @4:13-4:14
+            Call @4:17-4:28
+              Member "Next" @4:17-4:26
+                Identifier "door" @4:17-4:21
+                  -
+                -
+              List @4:26-4:28
+          Block @4:30-6:6
+            Assignment "+=" @5:9-5:20
+              Identifier "count" @5:9-5:14
+                -
+              IntegerLiteral "1" @5:18-5:19
+          If @6:12-10:6
+            Binary ">" @6:16-6:25
+              Identifier "count" @6:16-6:21
+                -
+              IntegerLiteral "2" @6:24-6:25
+            Block @6:27-8:6
+              Break "break" @7:9-7:15
+            Block @8:12-10:6
+              Continue "continue" @9:9-9:18
+        For @11:5-12:6
+          Name "i" @11:10-11:11
+          -
+          IntegerLiteral "0" @11:15-11:16
+          IntegerLiteral "3" @11:19-11:20
+          Block @11:22-12:6
+        For @13:5-14:6
+          Discard "_" @13:10-13:11
+          Name "v" @13:13-13:14
+          Identifier "items" @13:18-13:23
+            -
+          -
+          Block @13:25-14:6
+        While @15:5-17:6
+          Binary "<" @15:12-15:22
+            Identifier "count" @15:12-15:17
+              -
+            IntegerLiteral "10" @15:20-15:22
+          Block @15:24-17:6
+            Assignment "=" @16:9-16:27
+              Identifier "count" @16:9-16:14
+                -
+              Binary "*" @16:17-16:26
+                Identifier "count" @16:17-16:22
+                  -
+                IntegerLiteral "2" @16:25-16:26
+        Switch @18:5-23:6
+          Identifier "count" @18:13-18:18
+            -
+          List @18:20-23:6
+            SwitchCase @19:9-20:10
+              List @19:14-19:18
+                IntegerLiteral "1" @19:14-19:15
+                IntegerLiteral "2" @19:17-19:18
+              Block @19:20-20:10
+          SwitchDefault @21:9-22:10
+            Block @21:18-22:10
+        DiscardAssignment @24:5-24:26
+          Try await @24:9-24:25
+            Call @24:19-24:25
+              Identifier "Load" @24:19-24:23
+                -
+              List @24:23-24:25
+        Emit @25:5-25:27
+          EventPath @25:10-25:19
+            This "this" @25:10-25:14
+            Name "Done" @25:15-25:19
+          List @25:19-25:26
+            Identifier "count" @25:20-25:25
+              -
+        Return @26:5-26:12
+          -

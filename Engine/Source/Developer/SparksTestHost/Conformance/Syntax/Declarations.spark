@@ -1,0 +1,28 @@
+import Weapons;
+import Weapons.Sword as Sword;
+
+/// A door that opens.
+@edit
+open class Door : ScriptComponent, IUsable {
+}
+
+struct Hit {
+}
+
+enum State {
+    /// Closed by default.
+    Closed,
+    @formerly("Opened") Open,
+}
+
+interface IUsable {
+    fn Use(user: Actor): bool;
+    async fn Wait();
+}
+
+const MaxStack: int = 99;
+
+event Actor.Interacted(by: Actor);
+
+async fn Load(path: string, _: int): Array<Item>? {
+}

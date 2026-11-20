@@ -1,0 +1,2 @@
+# '///' only documents declarations, members and enum cases.
+error S0208 2:5

@@ -1,0 +1,2 @@
+# An enum needs a case.
+error S0219 1:6

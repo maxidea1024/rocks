@@ -1,0 +1,9 @@
+# Import resolution (3.4): the first two lines resolve (a module of this package and one
+# of a dependency); then an unknown module, a package named as a module, a package that
+# is not a dependency, a repeated import, a self import and the engine package.
+error S0301 Game/Main.spark 3:8
+error S0301 Game/Main.spark 4:8
+error S0302 Game/Main.spark 5:8
+error S0303 Game/Main.spark 6:8
+error S0304 Game/Main.spark 7:8
+error S0305 Game/Main.spark 8:8

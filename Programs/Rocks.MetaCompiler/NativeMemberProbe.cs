@@ -19,8 +19,8 @@ namespace Rocks.MetaCompiler;
 // 800겹은 JSON 깊이 한도 초과), 변수 선언은 형식 철자 두 개만 낸다. 철자를 다시 쓰지 않고 decltype만 쓰므로 이름 가려짐·
 // 특수화 선택·base 판정을 모두 Clang이 한다. 탐침 변수는 ROCKS_GENERATED_BODY가 friend로 두는 GeneratedType의 특수화 안에
 // 두어 private·protected 멤버에도 접근 검사를 끄지 않고 닿는다. 탐침 텍스트의 이름은 모두 rocks_meta_probe·RocksProbe·
-// rocksProbe 접두를 달아 리플렉션 헤더의 매크로(`#define Indirect 1` 등)와 겹치지 않게 한다. 값으로 담는 타입의 필드·템플릿
-// 인자는 첫 실행 AST의 재귀 검사(ClangAstParser.StrongReferencePath)가 본다.
+// rocksProbe 접두를 달아 리플렉션 헤더의 매크로(`#define Indirect 1` 등)와 겹치지 않게 한다. 값으로 담는 타입의 필드·base·템플릿
+// 인자는 정규 형식 탐침의 레코드 닫힘(ClangAstParser.VerifyNativeMembersAsync)이 보고, 거기서 닿은 포인터도 이 판정 형판으로 묻는다.
 //
 // 실패 격리: 대상 클래스의 완전성을 sizeof로 보므로 대상 템플릿의 인스턴스화가 hard error·치명적 오류(재귀 깊이)가 될 수
 // 있고 그러면 번역 단위 전체가 실패한다. 그때는 진단의 instantiation note가 가리키는 `<stdin>` 줄을 탐침 변수 줄에 대응시켜

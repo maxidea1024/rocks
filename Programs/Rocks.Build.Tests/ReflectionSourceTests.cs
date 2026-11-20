@@ -98,7 +98,7 @@ internal static class ReflectionSourceTests
         {
             Name = "Fixtures",
             PublicIncludeDirectories = [generatedPublic],
-            Dependencies = ["Core"],
+            PublicDependencies = ["Core"],
             ReflectionSources = [moduleSource],
             GeneratedSources = [new("Fixtures.ModuleEntry.cpp", "#include <Core/Module/ModuleEntry.h>\nROCKS_IMPLEMENT_MODULE(Unused, Fixtures)\n")]
         };
@@ -106,8 +106,8 @@ internal static class ReflectionSourceTests
         [
             new() { Name = "Core", Sources = [coreSource], PublicIncludeDirectories = [coreInclude], ProvidesModuleTable = true },
             fixtures,
-            new() { Name = "Engine", Sources = [engineSource], Dependencies = ["Core"], ReflectionSources = [engineReflection] },
-            new() { Name = "Game", Kind = NativeModuleKind.Executable, Sources = [mainSource], Dependencies = ["Engine", "Fixtures", "Core"] }
+            new() { Name = "Engine", Sources = [engineSource], PublicDependencies = ["Core"], ReflectionSources = [engineReflection] },
+            new() { Name = "Game", Kind = NativeModuleKind.Executable, Sources = [mainSource], PublicDependencies = ["Engine", "Fixtures", "Core"] }
         ];
         NativeBuildRequest game = request with { OutputDirectory = output, Modules = modules, Targets = ["Game"] };
         var builder = new NativeBuildEngine();
@@ -117,7 +117,7 @@ internal static class ReflectionSourceTests
         byName["Fixtures"] = fixtures with { GeneratedSources = [] };
         HashSet<string> entries = ModuleTables.EntryModules(byName);
         Check(entries.SetEquals(["Core", "Engine", "Fixtures", "Game"]), "entry modules must count reflection generated sources: " + string.Join(", ", entries.Order()));
-        byName["Fixtures"] = new() { Name = "Fixtures", Dependencies = ["Core"], PrebuiltLibraries = [Path.Combine(fixture, "prebuilt.lib")] };
+        byName["Fixtures"] = new() { Name = "Fixtures", PublicDependencies = ["Core"], PrebuiltLibraries = [Path.Combine(fixture, "prebuilt.lib")] };
         Check(ModuleTables.EntryModules(byName).Contains("Fixtures"), "an installed SDK library of a metadata module is module code");
 
         NativeBuildResult cold = await builder.BuildAsync(game);

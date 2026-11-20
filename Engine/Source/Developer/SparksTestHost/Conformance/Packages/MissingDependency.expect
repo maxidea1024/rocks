@@ -1,0 +1,3 @@
+# A dependency that is not in the compilation (S1106). Imports into it are not judged
+# again.
+error S1106 SparksPackage.json5 1:60

@@ -13,5 +13,5 @@ public sealed class TraceAnalysis : CoreModuleRules
     // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
     protected override UnityMode Unity => UnityMode.On;
 
-    protected override string[] RequiredModules => ["Core", "Compression", "TraceCapture"];
+    protected override string[] PublicDependencies => ["Core", "Compression", "TraceCapture"];
 }

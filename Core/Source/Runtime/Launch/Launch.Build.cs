@@ -10,7 +10,7 @@ public sealed class Launch : CoreModuleRules
     protected override string ModuleName => "Launch";
 
     // Launch owns the process module loader (Docs/Design/ModuleLoader.ko.md sections 3.9 and 3.11).
-    protected override string[] RequiredModules => ["Core", "ModuleLoader", "PlatformBase"];
+    protected override string[] PublicDependencies => ["Core", "ModuleLoader", "PlatformBase"];
 
     // Boot module: started by the loader right after it is created, together with its whole dependency closure.
     protected override LoadingPhase LoadingPhase => LoadingPhase.EarliestPossible;

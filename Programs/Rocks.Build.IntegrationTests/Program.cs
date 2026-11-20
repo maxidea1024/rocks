@@ -99,13 +99,17 @@ try
             !sdkModules.Single(module => module.GetProperty("Name").GetString() == "Core").GetProperty("ProvidesLaunch").GetBoolean(),
             "Engine SDK manifest does not carry the loading phases and the boot marker");
         var sdkEngine = engineManifest.RootElement.GetProperty("EngineVersion");
-        Require(engineManifest.RootElement.GetProperty("Version").GetInt32() == 11 &&
+        Require(engineManifest.RootElement.GetProperty("Version").GetInt32() == 12 &&
             sdkEngine.GetProperty("Major").GetInt32() == engineVersion.Major && sdkEngine.GetProperty("Minor").GetInt32() == engineVersion.Minor &&
             sdkEngine.GetProperty("Patch").GetInt32() == engineVersion.Patch && sdkEngine.EnumerateObject().Count() == 3,
-            "Engine SDK manifest version 11 does not carry the Build/Build.version engine version: " + sdkEngine.GetRawText());
+            "Engine SDK manifest version 12 does not carry the Build/Build.version engine version: " + sdkEngine.GetRawText());
     }
 
     Require(!Directory.GetFiles(sdk, "Build.version", SearchOption.AllDirectories).Any(), "Installed SDK copied Build/Build.version");
+    // 설치 SDK는 Build/Toolchain.json을 싣지 않고, SDK 도구가 표를 포함 리소스로 갖는다(Docs/Design/ClangVersionSupport.ko.md 6.1절).
+    string sdkToolingCommon = Path.Combine(sdk, "Tools", "Rocks.Build.Cli", "Rocks.Tooling.Common.dll");
+    Require(File.Exists(sdkToolingCommon) && ManifestResources(sdkToolingCommon).Contains("Rocks.Toolchain.json"),
+        "Installed SDK tools do not carry the Rocks.Toolchain.json resource: " + sdkToolingCommon);
 
     Require(File.Exists(Path.Combine(sdk, "Metadata/CoreTypeBindings/CoreTypeBindings.rocksmeta.json")) &&
         File.Exists(Path.Combine(sdk, "Metadata/CoreTypeBindings/CoreTypeBindings.rocksids.json")),
@@ -320,11 +324,11 @@ try
     CopyTree(Path.Combine(root, "Templates/Game/Foundation"), reflectionGame);
     var reflectionRules = Path.Combine(reflectionGame, "Game.Build.cs");
     var reflectionRulesText = File.ReadAllText(reflectionRules);
-    Require(reflectionRulesText.Contains("Dependencies = [\"ObjectRuntime\", \"Launch\"]", StringComparison.Ordinal) &&
+    Require(reflectionRulesText.Contains("PublicDependencies = [\"ObjectRuntime\", \"Launch\"]", StringComparison.Ordinal) &&
         reflectionRulesText.Contains("Metadata = [\"GameObject.h\"]", StringComparison.Ordinal), "Game template rules changed; update the SDK descriptor fixture");
     // ObjectSerialization: 게임이 GameCore의 배열 필드를 그래프로 저장·복원한다(SDK 모듈로 링크만 한다).
     File.WriteAllText(reflectionRules, reflectionRulesText
-        .Replace("Dependencies = [\"ObjectRuntime\", \"Launch\"]", "Dependencies = [\"ObjectRuntime\", \"Launch\", \"GameCore\", \"ObjectSerialization\"]", StringComparison.Ordinal)
+        .Replace("PublicDependencies = [\"ObjectRuntime\", \"Launch\"]", "PublicDependencies = [\"ObjectRuntime\", \"Launch\", \"GameCore\", \"ObjectSerialization\"]", StringComparison.Ordinal)
         .Replace("Metadata = [\"GameObject.h\"]", "Metadata = [\"GameObject.h\", \"FixtureChild.h\"]", StringComparison.Ordinal));
     var reflectionProject = Path.Combine(reflectionGame, "Game.rocksproject");
     var reflectionProjectText = File.ReadAllText(reflectionProject);
@@ -343,7 +347,7 @@ try
             {
                 Name = "GameCore",
                 PublicIncludeDirectories = [context.PathInRoot("Core/Public")],
-                Dependencies = ["ReflectionTestFixtures", "CoreTypeBindings"],
+                PublicDependencies = ["ReflectionTestFixtures", "CoreTypeBindings"],
                 Metadata = ["GameCore/CoreThing.h", "GameCore/Extra.h"],
                 ModuleDirectory = "Core"
             };
@@ -802,7 +806,22 @@ try
     using (var completed = JsonDocument.Parse(File.ReadAllText(evidencePath)))
     {
         Require(completed.RootElement.GetProperty("status").GetString() == "PASS", "Game completion did not replace RUNNING marker");
+        Require(completed.RootElement.GetProperty("toolchainVerified").GetBoolean() == toolchain.ToolchainVerified,
+            "Game evidence does not record whether the toolchain is verified: " + completed.RootElement.GetRawText());
     }
+
+    // --require-verified-toolchain on: SDK 도구의 표로 확인한다. 검증한 도구 모음이면 빌드하고, 아니면 FAIL evidence를 남기고 실패한다.
+    var strict = await Cli("game", "--sdk", sdk, "--project", game, "--configuration", "Debug", "--require-verified-toolchain", "on");
+    using (var strictEvidence = JsonDocument.Parse(File.ReadAllText(evidencePath)))
+    {
+        string strictStatus = strictEvidence.RootElement.GetProperty("status").GetString()!;
+        Require(toolchain.ToolchainVerified
+                ? strict.ExitCode == 0 && strictStatus == "PASS"
+                : strict.ExitCode != 0 && strictStatus == "FAIL" && strict.StdErr.Contains("accepts only verified toolchains", StringComparison.Ordinal),
+            $"game --require-verified-toolchain on did not follow the toolchain table (verified={toolchain.ToolchainVerified}): " + strict.StdErr);
+    }
+
+    Require((await Game()).ExitCode == 0, "Game did not build after the verified toolchain check");
 
     Pass("game-running-evidence-and-completion", timer.Elapsed);
 
@@ -924,7 +943,7 @@ try
     var sdkManifestPath = Path.Combine(sdk, "rocks-sdk.json");
     var sdkManifestBytes = File.ReadAllBytes(sdkManifestPath);
     var sdkManifestText = File.ReadAllText(sdkManifestPath);
-    Require(sdkManifestText.Contains("\"Version\": 11,", StringComparison.Ordinal), "SDK manifest is not version 11:\n" + sdkManifestText);
+    Require(sdkManifestText.Contains("\"Version\": 12,", StringComparison.Ordinal), "SDK manifest is not version 12:\n" + sdkManifestText);
     SetReadOnly(sdkManifestPath, false);
     try
     {
@@ -1326,4 +1345,13 @@ static void CopyTree(string source, string destination)
     {
         CopyTree(directory, Path.Combine(destination, Path.GetFileName(directory)));
     }
+}
+
+// 어셈블리의 포함 리소스 이름이다(적재하지 않고 메타데이터만 읽는다).
+static HashSet<string> ManifestResources(string assemblyPath)
+{
+    using var stream = File.OpenRead(assemblyPath);
+    using var pe = new System.Reflection.PortableExecutable.PEReader(stream);
+    var reader = System.Reflection.Metadata.PEReaderExtensions.GetMetadataReader(pe);
+    return reader.ManifestResources.Select(handle => reader.GetString(reader.GetManifestResource(handle).Name)).ToHashSet(StringComparer.Ordinal);
 }

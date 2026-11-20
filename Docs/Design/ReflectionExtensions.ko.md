@@ -757,7 +757,7 @@ enum class UnsaveablePolicy : uint8 {
 
 구현(B9i3a)에서 정한 점(모듈 골격·용도·진단 — 값 Format·Parse는 B9i3b, 대입 묶음은 B9i3c):
 
-- 모듈: `Core/Source/Runtime/ReflectionText`(`ReflectionText.Build.cs` — `RequiredModules` ObjectRuntime·Core), 공개 헤더 `<ReflectionText/TextUse.h>`·`TextDiagnostics.h`·`TextCodecOptions.h`, namespace `rocks::reflection_text`. 리플렉션 타입이 없어 `.rocksids.json`은 두지 않는다. 시험은 FoundationTests의 Object 계열 시험 모듈 목록에 넣었다(Foundation·EngineTests가 함께 돈다).
+- 모듈: `Core/Source/Runtime/ReflectionText`(`ReflectionText.Build.cs` — `PublicDependencies` ObjectRuntime·Core), 공개 헤더 `<ReflectionText/TextUse.h>`·`TextDiagnostics.h`·`TextCodecOptions.h`, namespace `rocks::reflection_text`. 리플렉션 타입이 없어 `.rocksids.json`은 두지 않는다. 시험은 FoundationTests의 Object 계열 시험 모듈 목록에 넣었다(Foundation·EngineTests가 함께 돈다).
 - 용도 판정 API: `TextOutputExcludedFlags(use)`(위 표), `TextInputExcludedFlags(use) -> Result<uint32>`(Report와 정의되지 않은 값은 InvalidArgument — 입력 진입점이 맨 앞에서 부른다), `IsTextOutputExcluded(use, flags)`, `ClassifyTextInput(use, flags) -> TextFieldInput { Accept, Excluded, ReadOnly }`. 제외가 ReadOnly보다 먼저다(Transient + ReadOnly는 Excluded). ReadOnly 결과의 수용(staged 대상·같은 값 무동작)은 대상과 값을 아는 대입 묶음이 정한다.
 - 판정 입력은 그 위치의 유효 플래그(`PropagateFieldFlags`)다. Transient·ReadOnly는 전파로 멤버에 닿지만 DuplicateTransient·NonTryoutDuplicateTransient·TextExportTransient는 전파되지 않으므로(9.1절), codec은 경로·순회의 단계마다 판정하고 제외된 단계의 부분 트리에 들어가지 않는다 — 제외된 struct 필드는 멤버까지 통째로 빠진다(포함 필터처럼 멤버마다 보지 않는다).
 - EditorOnly·SaveGame·Required는 텍스트 용도와 무관하다(스펙 표에 없는 결정 — 텍스트 codec은 도구·편집기 문맥에서 쓰고, UE `ShouldPort`도 CPF_EditorOnly를 보지 않는다 — Property.cpp:1153-1182).

@@ -238,11 +238,20 @@ internal static class InputValidation
 
         foreach (NativeModuleInput module in modules)
         {
-            foreach (string dependency in module.Dependencies)
+            foreach (string dependency in module.AllDependencies)
             {
                 if (byFolded.TryGetValue(dependency, out string? actual) && !string.Equals(actual, dependency, StringComparison.Ordinal))
                 {
-                    throw new ArgumentException($"Module {module.Name}, Dependencies: '{dependency}' differs in case from module '{actual}'.");
+                    throw new ArgumentException($"Module {module.Name}, dependencies: '{dependency}' differs in case from module '{actual}'.");
+                }
+            }
+
+            // 한 모듈을 두 목록에 함께 적으면 공개 범위가 모호하다(Docs/Design/BuildTargets.ko.md 3.5절 BD11).
+            foreach (string dependency in module.PublicDependencies)
+            {
+                if (module.PrivateDependencies.Contains(dependency, StringComparer.OrdinalIgnoreCase))
+                {
+                    throw new ArgumentException($"Module {module.Name}: '{dependency}' is in both PublicDependencies and PrivateDependencies.");
                 }
             }
         }
@@ -286,9 +295,9 @@ internal static class InputValidation
                     throw new ArgumentException($"Module {module.Name}, DynamicModules: '{dynamic}' is listed twice.");
                 }
 
-                if (module.Dependencies.Contains(dynamic, StringComparer.OrdinalIgnoreCase))
+                if (module.AllDependencies.Contains(dynamic, StringComparer.OrdinalIgnoreCase))
                 {
-                    throw new ArgumentException($"Module {module.Name}: '{dynamic}' is both in Dependencies and DynamicModules; a module that is " +
+                    throw new ArgumentException($"Module {module.Name}: '{dynamic}' is both a dependency and in DynamicModules; a module that is " +
                         "linked as a dependency cannot also be loaded at run time.");
                 }
 

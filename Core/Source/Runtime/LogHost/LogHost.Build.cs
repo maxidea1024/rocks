@@ -11,5 +11,5 @@ public sealed class LogHost : CoreModuleRules
     // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
     protected override UnityMode Unity => UnityMode.On;
 
-    protected override string[] RequiredModules => ["Config", "Crypto", "Compression", "Core"];
+    protected override string[] PublicDependencies => ["Config", "Crypto", "Compression", "Core"];
 }

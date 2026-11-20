@@ -200,7 +200,7 @@ internal static class ResponseFileTests
             Modules =
             [
                 new() { Name = "RspLib", Sources = [library] },
-                new() { Name = "RspGame", Kind = NativeModuleKind.Executable, Sources = [main], Dependencies = ["RspLib"] }
+                new() { Name = "RspGame", Kind = NativeModuleKind.Executable, Sources = [main], PublicDependencies = ["RspLib"] }
             ],
             Targets = ["RspGame"],
             ResponseFiles = ResponseFileMode.Always
@@ -313,7 +313,7 @@ internal static class ResponseFileTests
             [
                 new() { Name = "RspLib", Sources = [Path.Combine(source, "lib.cpp")] },
                 new() { Name = "RspGame", Kind = NativeModuleKind.Executable, Sources = [Path.Combine(source, "main.cpp")],
-                    Dependencies = ["RspLib"] }
+                    PublicDependencies = ["RspLib"] }
             ],
             Targets = ["RspGame"],
             ResponseFiles = ResponseFileMode.Always

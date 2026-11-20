@@ -122,7 +122,7 @@ internal static class PchTests
             Modules =
             [
                 new() { Name = "DefLib", Sources = [library], PublicIncludeDirectories = [include], PublicDefines = ["DEF_PUBLIC=" + publicValue], PrivateDefines = ["DEF_PRIVATE"] },
-                new() { Name = "DefApp", Kind = NativeModuleKind.Executable, Sources = [main], Dependencies = ["DefLib"] }
+                new() { Name = "DefApp", Kind = NativeModuleKind.Executable, Sources = [main], PublicDependencies = ["DefLib"] }
             ],
             Targets = ["DefApp"]
         };
@@ -187,7 +187,7 @@ internal static class PchTests
             PrivateDefines = ["PCH_FIXTURE=1"],
             PrivatePchHeader = pchHeader
         };
-        NativeModuleInput application = new() { Name = "PchApp", Kind = NativeModuleKind.Executable, Sources = [main], Dependencies = ["PchLib"] };
+        NativeModuleInput application = new() { Name = "PchApp", Kind = NativeModuleKind.Executable, Sources = [main], PublicDependencies = ["PchLib"] };
         NativeBuildRequest build = request with
         {
             RootDirectory = fixture,
@@ -315,7 +315,7 @@ internal static class PchTests
         {
             RootDirectory = fixture,
             OutputDirectory = Path.Combine(fixture, "out"),
-            Modules = [library, new() { Name = "AdaptApp", Kind = NativeModuleKind.Executable, Sources = [main], Dependencies = ["AdaptLib"] }],
+            Modules = [library, new() { Name = "AdaptApp", Kind = NativeModuleKind.Executable, Sources = [main], PublicDependencies = ["AdaptLib"] }],
             Targets = ["AdaptApp"]
         };
         NativeBuildRequest Working(params string[] files) => build with { WorkingSet = files.ToHashSet(NativeToolchains.PathComparer) };
@@ -442,12 +442,12 @@ internal static class PchTests
             Name = "SharedUpper",
             Sources = [upperSource],
             PublicIncludeDirectories = [upperInclude],
-            Dependencies = ["SharedBase"],
+            PublicDependencies = ["SharedBase"],
             SharedPchHeader = "upper/UpperPch.h"
         };
-        NativeModuleInput moduleA = new() { Name = "UserA", Sources = [userA], Dependencies = ["SharedUpper"] };
-        NativeModuleInput moduleB = new() { Name = "UserB", Sources = [userB], Dependencies = ["SharedUpper"], PrivateDefines = ["USER_B_EXTRA=5"] };
-        NativeModuleInput application = new() { Name = "SharedApp", Kind = NativeModuleKind.Executable, Sources = [main], Dependencies = ["UserA", "UserB"] };
+        NativeModuleInput moduleA = new() { Name = "UserA", Sources = [userA], PublicDependencies = ["SharedUpper"] };
+        NativeModuleInput moduleB = new() { Name = "UserB", Sources = [userB], PublicDependencies = ["SharedUpper"], PrivateDefines = ["USER_B_EXTRA=5"] };
+        NativeModuleInput application = new() { Name = "SharedApp", Kind = NativeModuleKind.Executable, Sources = [main], PublicDependencies = ["UserA", "UserB"] };
         NativeBuildRequest With(NativeModuleInput a, NativeModuleInput b, string output = "out") => request with
         {
             RootDirectory = fixture,

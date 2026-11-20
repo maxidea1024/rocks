@@ -96,7 +96,7 @@ Core/Source/Runtime/Crypto/
   Tests/
 ```
 
-- **의존.** Crypto의 RequiredModules는 `Core`, `Task`, `Sodium`뿐이다. 외부 암호 라이브러리는 libsodium 하나다. Task는 `AsyncCrypto`만 쓴다. 정적 링크이므로 동기 API만 쓰는 모듈은 Task object를 링크하지 않는다. Compression 모듈과 같은 구성이다.
+- **의존.** Crypto의 PublicDependencies는 `Core`, `Task`, `Sodium`뿐이다. 외부 암호 라이브러리는 libsodium 하나다. Task는 `AsyncCrypto`만 쓴다. 정적 링크이므로 동기 API만 쓰는 모듈은 Task object를 링크하지 않는다. Compression 모듈과 같은 구성이다.
 - **헤더 격리.** 외부 헤더는 Private에서만 include한다. 공개 헤더는 `sodium.h`나 intrinsics 헤더를 포함하지 않는다. 라이브러리 상태의 크기·정렬은 공개 헤더에 드러내지 않는다. 상태에는 키 확장 결과가 들어 있으므로 SecretArena 슬롯에 둔다(10.2절).
 - **Core 모듈은 외부 의존 없이 유지한다.** Core `Sha256`(콘텐츠 동일성 해시, Rockpile R0의 하드웨어 경로 계획 포함)은 그대로 둔다. Crypto는 SHA-256을 공개 API로 다시 내놓지 않는다(결정 D7).
 - **Compression과 독립.** 두 모듈을 잇는 것은 Core로 옮긴 `StreamProgress`와 호출자 코드다(9.6절).

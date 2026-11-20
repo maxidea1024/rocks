@@ -52,7 +52,7 @@ internal static class PlatformPrivateHeaderTests
             Name = "PathHeaderFixture",
             Kind = NativeModuleKind.Executable,
             Sources = [appSource],
-            Dependencies = ["PlatformBase"]
+            PublicDependencies = ["PlatformBase"]
         };
         var request = new NativeBuildRequest
         {

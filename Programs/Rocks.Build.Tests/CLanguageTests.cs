@@ -139,7 +139,7 @@ internal static class CLanguageTests
             Modules =
             [
                 new() { Name = "CLib", Sources = [unity], Optimization = CodeOptimization.Always },
-                new() { Name = "CApp", Kind = NativeModuleKind.Executable, Sources = [main], Dependencies = ["CLib"] }
+                new() { Name = "CApp", Kind = NativeModuleKind.Executable, Sources = [main], PublicDependencies = ["CLib"] }
             ],
             Targets = ["CApp"]
         };

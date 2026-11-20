@@ -25,7 +25,7 @@ public abstract class LaunchTestProgram : ModuleRules
             context.PathInRoot(context.Platform == NativePlatform.Windows ? $"{Root}/Win64/TerminationSignal.cpp" : $"{Root}/Posix/TerminationSignal.cpp")],
         PrivateIncludeDirectories = [context.PathInRoot($"{Root}/Common")],
         WindowsSubsystem = Subsystem,
-        Dependencies = ["Launch"]
+        PublicDependencies = ["Launch"]
     };
 }
 
