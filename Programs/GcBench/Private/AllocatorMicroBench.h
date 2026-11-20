@@ -21,4 +21,16 @@ namespace gc_bench {
 //   }
 int RunAllocatorMicroBench(rocks::Allocator& allocator, const char* name) noexcept;
 
+// 쉬는 worker가 스레드 캐시를 쥔 상태에서 TrimMemory 전후의 commit을 잰다(Docs/Design/
+// GarbageCollectionScale.ko.md 18.11절). BinnedAllocator 위에 WorkerScheduler를 띄워 worker마다
+// 캐시를 채우게 한 뒤, 모두 대기에 들어갔을 때 TrimMemory를 부른다. 두 번 잰다: worker의 쉬는 표시
+// (Allocator::MarkThreadIdle)를 할당자에 넘긴 경우와 넘기지 않은 경우(대조 — 캐시가 그대로 남는다).
+// 반환값은 0이 성공이다.
+//
+// 사용 예:
+//   if (const int status = gc_bench::RunIdleTrimBench(8); status != 0) {
+//       return status;
+//   }
+int RunIdleTrimBench(rocks::uint32 workers) noexcept;
+
 } // namespace gc_bench

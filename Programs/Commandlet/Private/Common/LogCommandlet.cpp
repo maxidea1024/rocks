@@ -3,7 +3,7 @@
 #include <Core/Containers/Array.h>
 #include <Core/Diagnostics/Correlation.h>
 #include <Core/Diagnostics/LogRecord.h>
-#include <Core/Memory/SystemAllocator.h>
+#include <Core/Memory/Allocator.h>
 #include <Core/Text/Json.h>
 #include <Core/Text/NumberText.h>
 #include <Core/Text/StringBuilder.h>
@@ -296,7 +296,8 @@ Result<void> PrintPlaintext(void* raw, Span<const uint8> plaintext) noexcept {
         StringView(reinterpret_cast<const char*>(bytes.Data()), bytes.Size()));
 }
 
-Result<int32> Decode(Span<const StringView> args, CommandletOutput& output) noexcept {
+Result<int32> Decode(Span<const StringView> args, CommandletOutput& output,
+                     Allocator& allocator) noexcept {
     if (args.Size() != 3 && args.Size() != 4) {
         return UsageError(output);
     }
@@ -306,7 +307,6 @@ Result<int32> Decode(Span<const StringView> args, CommandletOutput& output) noex
     }
 
     const bool json = args.Size() == 4;
-    SystemAllocator allocator;
     Array<uint8> key(allocator);
     Result<int32> failure = Result<int32>::Success(1);
     if (!ReadWholeFile(output, args[2], key, failure)) {
@@ -378,13 +378,13 @@ Result<int32> Decode(Span<const StringView> args, CommandletOutput& output) noex
 }
 
 // 평문 파일을 같은 형식으로 봉인한다(진단·시험용).
-Result<int32> Seal(Span<const StringView> args, CommandletOutput& output) noexcept {
+Result<int32> Seal(Span<const StringView> args, CommandletOutput& output,
+                   Allocator& allocator) noexcept {
     const bool compress = args.Size() == 5 && args[4] == "--compress";
     if ((args.Size() != 4 && !compress) || args[2] != "--public") {
         return UsageError(output);
     }
 
-    SystemAllocator allocator;
     Array<uint8> recipient(allocator);
     Array<uint8> plain(allocator);
     Result<int32> failure = Result<int32>::Success(1);
@@ -450,12 +450,12 @@ Result<int32> Seal(Span<const StringView> args, CommandletOutput& output) noexce
 
 // 평문 파일을 묶음(SealBatchBytes)마다 독립 zstd frame으로 압축한다(log.file.compress 파일과 같은
 // 모양, 진단·시험용).
-Result<int32> Pack(Span<const StringView> args, CommandletOutput& output) noexcept {
+Result<int32> Pack(Span<const StringView> args, CommandletOutput& output,
+                   Allocator& allocator) noexcept {
     if (args.Size() != 2) {
         return UsageError(output);
     }
 
-    SystemAllocator allocator;
     Array<uint8> plain(allocator);
     Result<int32> failure = Result<int32>::Success(1);
     if (!ReadWholeFile(output, args[0], plain, failure)) {
@@ -743,7 +743,8 @@ void SplitPart(StringView name, StringView& stem, uint64& part) noexcept {
     stem = StringView(stem.Data(), digits - 1);
 }
 
-Result<int32> View(Span<const StringView> args, CommandletOutput& output) noexcept {
+Result<int32> View(Span<const StringView> args, CommandletOutput& output,
+                   Allocator& allocator) noexcept {
     if (args.Size() == 0 || args.Size() % 2 == 0) {
         return UsageError(output);
     }
@@ -796,7 +797,6 @@ Result<int32> View(Span<const StringView> args, CommandletOutput& output) noexce
         return UsageError(output);
     }
 
-    SystemAllocator allocator;
     Result<int32> failure = Result<int32>::Success(1);
     Result<crypto::KemKeyPair> pair = Result<crypto::KemKeyPair>::Failure(ErrorCode::NotFound);
     if (!keyPath.IsEmpty()) {
@@ -968,7 +968,10 @@ Result<int32> View(Span<const StringView> args, CommandletOutput& output) noexce
 
 } // namespace
 
-Result<int32> RunLogCommand(void*, Span<const StringView> args, CommandletOutput& output) noexcept {
+Result<int32> RunLogCommand(void* context, Span<const StringView> args,
+                            CommandletOutput& output) noexcept {
+    // 문맥은 실행 진입점이 넘긴 범용 할당자다(파일·복호·압축 풀기 버퍼가 거기서 나온다).
+    Allocator& allocator = *static_cast<Allocator*>(context);
     if (args.Size() == 0) {
         return UsageError(output);
     }
@@ -979,19 +982,19 @@ Result<int32> RunLogCommand(void*, Span<const StringView> args, CommandletOutput
     }
 
     if (args[0] == "decode") {
-        return Decode(rest, output);
+        return Decode(rest, output, allocator);
     }
 
     if (args[0] == "seal") {
-        return Seal(rest, output);
+        return Seal(rest, output, allocator);
     }
 
     if (args[0] == "view") {
-        return View(rest, output);
+        return View(rest, output, allocator);
     }
 
     if (args[0] == "pack") {
-        return Pack(rest, output);
+        return Pack(rest, output, allocator);
     }
 
     if (args[0] == "--help" && args.Size() == 1) {

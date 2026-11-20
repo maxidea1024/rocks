@@ -1,7 +1,7 @@
 #include <Core/Memory/BinnedAllocator.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <TestSupport/HostFailure.h>
-#include <cstdlib>
+#include <stdlib.h>
 
 namespace rocks::test {
 namespace {
@@ -65,7 +65,7 @@ int RunBinnedAllocatorNegativeControl(uint32 operation) noexcept {
         }
 
         // 파괴가 Fatal이 아니면 여기에 온다.
-        std::_Exit(0);
+        _Exit(0);
     }
 
     InvalidBinnedBacking backing(operation);
@@ -81,7 +81,7 @@ int RunBinnedAllocatorNegativeControl(uint32 operation) noexcept {
     }
 
     // 누수나 destructor 진단을 이용한 거짓 양성을 방지한다.
-    std::_Exit(0);
+    _Exit(0);
 }
 
 } // namespace rocks::test

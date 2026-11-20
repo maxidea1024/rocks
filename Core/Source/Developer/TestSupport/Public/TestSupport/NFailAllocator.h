@@ -40,6 +40,19 @@ public:
         return allocator_.Deallocate(address);
     }
 
+    // 상위 allocator에 그대로 넘긴다(Allocator.h).
+    void TrimMemory() noexcept override {
+        allocator_.TrimMemory();
+    }
+
+    void MarkThreadIdle() noexcept override {
+        allocator_.MarkThreadIdle();
+    }
+
+    void MarkThreadActive() noexcept override {
+        allocator_.MarkThreadActive();
+    }
+
 private:
     Allocator& allocator_;
     uint64 attempts_ = 0;

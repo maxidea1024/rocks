@@ -31,8 +31,8 @@ struct BinnedAllocator::TestHooks {
     // 이 스레드의 다음 캐시 만들기를 실패시킨다(그 호출은 등급 잠금 경로로 가고, 다음 호출이 다시
     // 만든다).
     static void FailNextThreadCacheCreation() noexcept;
-    // 호출 스레드의 캐시와 이전 칸의 블록을 모두 slab으로 돌려준다(decommit하지 않는다 — Trim과
-    // 달리 보관소는 그대로다).
+    // 호출 스레드의 캐시와 이전 칸의 블록을 모두 slab으로 돌려준다(decommit하지 않는다 —
+    // TrimMemory와 달리 보관소는 그대로다).
     static void FlushCurrentThreadCache(BinnedAllocator& allocator) noexcept;
     // 호출 스레드가 이 인스턴스의 캐시를 갖고 있는지다.
     static bool HasCurrentThreadCache(BinnedAllocator& allocator) noexcept;
@@ -46,6 +46,11 @@ struct BinnedAllocator::TestHooks {
     // 번째로 꺼낼 때 Fatal이어야 한다 — Fatal 대조 프로그램(자식 프로세스)에서만 부른다. 호출
     // 스레드의 캐시가 없거나 작은 블록이 아니면 거짓이다.
     static bool ReturnAgainIgnoringMarker(BinnedAllocator& allocator, void* address) noexcept;
+    // 겹친 중복 반환이 slab 경로로 간 결과를 만든다: 작은 블록 address를 표지 검사 없이 자기 slab에
+    // 한 번 더 돌려준다. 그 slab에 나가 있는 블록이 없으면 Fatal이어야 한다 — Fatal 대조
+    // 프로그램(자식 프로세스)에서만 부른다. address가 든 slab은 commit돼 있어야 한다(쓰는
+    // slab이거나 보관 중인 빈 slab). 예약 범위 밖이면 거짓이다.
+    static bool ReturnToSlabAgain(BinnedAllocator& allocator, void* address) noexcept;
     // 호출 스레드가 "종료한 스레드"로 표시됐는지다.
     static bool IsCurrentThreadExited() noexcept;
     // 호출 스레드의 thread_local 포인터만 지운다(기록과 종료 칸의 값은 그대로다). 스레드가 끝나는
@@ -64,6 +69,28 @@ struct BinnedAllocator::TestHooks {
     static uint32 CurrentThreadRecordEntries() noexcept;
     // 인스턴스에 등록된 스레드 캐시 수다.
     static uint32 ThreadCacheCount(BinnedAllocator& allocator) noexcept;
+    // 그 가운데 "쉬는 중"(MarkThreadIdle)인 캐시 수다.
+    static uint32 IdleThreadCacheCount(BinnedAllocator& allocator) noexcept;
+    // 호출 스레드의 이 인스턴스 캐시에 든 블록의 바이트 합이다(캐시가 없으면 0). 소유 스레드에서만
+    // 부른다.
+    static usize CurrentThreadCacheBlockBytes(BinnedAllocator& allocator) noexcept;
+    // 호출 스레드의 빠른 경로 지름길("마지막에 쓴 인스턴스")이 이 인스턴스를 가리키는지다.
+    static bool IsCurrentThreadShortcut(BinnedAllocator& allocator) noexcept;
+
+    // TrimMemory가 쉬는 캐시를 비우는 과정의 지점이다(SetTrimHook).
+    enum class TrimPoint : uint32 {
+        // 비우는 쪽: 캐시를 "비우는 중"으로 바꾼 직후(등록부 잠금 안, 아직 비우기 전).
+        CacheClaimed,
+        // 비우는 쪽: 그 캐시를 다 비운 직후(등록부 잠금 안, "쉬는 중"으로 되돌리기 전).
+        CacheFlushed,
+        // 소유 스레드: MarkThreadActive가 "비우는 중"을 보고 등록부 잠금을 기다리려는 직전.
+        OwnerWaiting,
+    };
+
+    using TrimHook = void (*)(void* context, TrimPoint point) noexcept;
+    // 위 지점마다 부를 함수를 건다(null이면 끈다). 다른 스레드가 이 인스턴스의 TrimMemory·
+    // MarkThreadActive를 부르기 전에 걸고, 그 스레드들이 끝난 뒤에 끈다(잠금 없이 읽는다).
+    static void SetTrimHook(BinnedAllocator& allocator, TrimHook hook, void* context) noexcept;
     // 인스턴스의 모든 스레드 캐시에 든 블록의 바이트 합이다(이전 칸은 세지 않는다). 다른 스레드가
     // 이 인스턴스를 쓰지 않을 때만 부른다(그 스레드의 묶음 개수를 잠금 없이 읽는다).
     static usize ThreadCacheBlockBytes(BinnedAllocator& allocator) noexcept;

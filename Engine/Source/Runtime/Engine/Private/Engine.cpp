@@ -468,7 +468,14 @@ Result<void> Engine::DestroyWorldNow(usize index) noexcept {
     UniquePtr<World> world = Move(context.world);
     auto removed = worlds_.TryRemoveAt(index);
     (void)removed;
+    const bool trim = world->GcSchedule().trimMemory;
     world.Reset();
+    // World 하나의 객체·저장소가 모두 반환됐다: 쥐고만 있는 메모리를 OS에 돌려준다(UE가 맵을 내린
+    // 뒤 메모리를 줄이는 것에 대응 — GC 설계 18.11.6절). 그 World의 일정 설정으로 끈다.
+    if (trim) {
+        allocator_.TrimMemory();
+    }
+
     return Result<void>::Success();
 }
 

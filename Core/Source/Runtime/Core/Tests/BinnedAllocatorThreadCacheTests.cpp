@@ -455,7 +455,7 @@ TEST(CoreBinnedCacheRefillsByBundle) {
         BinnedAllocatorTestAccess::FlushCurrentThreadCache(allocator);
         CHECK(allocator.Usage().retainedSlabs == 1);
         CHECK(BinnedAllocatorTestAccess::SlabTableEntry(allocator, first.Value()) == 0);
-        allocator.Trim();
+        allocator.TrimMemory();
         CHECK(allocator.Usage().committedBytes == 0);
     }
 
@@ -498,8 +498,8 @@ TEST(CoreBinnedTransferSlotsHoldOnlyFullBundles) {
 
             REQUIRE(FreeMany(allocator, blocks, fromCaches) == 0);
             CHECK(allocator.Stats().liveAllocations == 0);
-            // Trim은 호출 스레드의 캐시와 이전 칸을 slab으로 돌려주고 모두 decommit한다.
-            allocator.Trim();
+            // TrimMemory는 호출 스레드의 캐시와 이전 칸을 slab으로 돌려주고 모두 decommit한다.
+            allocator.TrimMemory();
             CHECK(BinnedAllocatorTestAccess::TransferBundleCount(allocator, sizeClass) == 0);
             CHECK(allocator.Usage().committedBytes == 0);
         }
@@ -508,8 +508,8 @@ TEST(CoreBinnedTransferSlotsHoldOnlyFullBundles) {
     CHECK(system.Stats().liveAllocations == 0);
 }
 
-// 부분 묶음은 이전 칸에 가지 않는다(검토 F7): 스레드가 끝날 때와 Trim 때 부분 묶음은 slab으로 바로
-// 돌아가고, 가득 찬 예비 묶음만 이전 칸으로 간다.
+// 부분 묶음은 이전 칸에 가지 않는다(검토 F7): 스레드가 끝날 때와 TrimMemory 때 부분 묶음은 slab으로
+// 바로 돌아가고, 가득 찬 예비 묶음만 이전 칸으로 간다.
 TEST(CoreBinnedPartialBundlesReturnToSlabsAtThreadExitAndTrim) {
     SystemAllocator system;
     {
@@ -552,11 +552,11 @@ TEST(CoreBinnedPartialBundlesReturnToSlabsAtThreadExitAndTrim) {
             CHECK(allocator.Stats().totalAllocations == 10 + limit + 36);
         }
 
-        // 이 스레드의 부분 묶음도 Trim이 slab으로 돌려준다.
+        // 이 스레드의 부분 묶음도 TrimMemory가 slab으로 돌려준다.
         void* blocks[10]{};
         REQUIRE(AllocateMany(allocator, SmallRequest, blocks, 10) == 0);
         REQUIRE(FreeMany(allocator, blocks, 10) == 0);
-        allocator.Trim();
+        allocator.TrimMemory();
         CHECK(BinnedAllocatorTestAccess::TransferBundleCount(allocator, sizeClass) == 0);
         CHECK(allocator.Usage().committedBytes == 0);
         CHECK(allocator.Stats().liveAllocations == 0);
@@ -566,7 +566,7 @@ TEST(CoreBinnedPartialBundlesReturnToSlabsAtThreadExitAndTrim) {
 }
 
 // 스레드가 끝나면 그 캐시의 블록과 계수가 인스턴스로 돌아간다. 끝난 스레드가 할당한 블록은 살아
-// 있고 다른 스레드가 반환할 수 있다. Trim은 다른 스레드의 캐시를 건드리지 않는다.
+// 있고 다른 스레드가 반환할 수 있다. TrimMemory는 다른 스레드의 캐시를 건드리지 않는다.
 TEST(CoreBinnedThreadExitReturnsCacheAndKeepsLiveBlocks) {
     SystemAllocator system;
     {
@@ -589,8 +589,9 @@ TEST(CoreBinnedThreadExitReturnsCacheAndKeepsLiveBlocks) {
         CHECK(allocator.Stats().totalAllocations == Count);
         const usize committed = allocator.Usage().committedBytes;
         CHECK(committed != 0);
-        // 다른 스레드의 캐시는 Trim이 비우지 않는다: 살아 있는 블록과 캐시의 블록이 slab을 붙든다.
-        allocator.Trim();
+        // 다른 스레드의 캐시는 TrimMemory가 비우지 않는다: 살아 있는 블록과 캐시의 블록이 slab을
+        // 붙든다.
+        allocator.TrimMemory();
         CHECK(allocator.Usage().committedBytes == committed);
         gate.Advance();
         JoinWorker(thread);
@@ -606,7 +607,7 @@ TEST(CoreBinnedThreadExitReturnsCacheAndKeepsLiveBlocks) {
         // 이미 반환된 블록은 끝난 스레드가 돌려줬어도 중복 반환이다.
         CHECK(allocator.Deallocate(work.blocks[Freed]).Error() == ErrorCode::NotFound);
         CHECK(allocator.Stats().liveAllocations == 0);
-        allocator.Trim();
+        allocator.TrimMemory();
         CHECK(allocator.Usage().committedBytes == 0);
     }
 
@@ -628,7 +629,7 @@ TEST(CoreBinnedRawOsThreadCacheIsReturned) {
         CHECK(BinnedAllocatorTestAccess::ThreadCacheCount(allocator) == 0);
         CHECK(allocator.Stats().liveAllocations == 0);
         CHECK(allocator.Stats().totalAllocations == 300);
-        allocator.Trim();
+        allocator.TrimMemory();
         CHECK(allocator.Usage().committedBytes == 0);
     }
 
@@ -698,7 +699,7 @@ TEST(CoreBinnedInstanceDestroyedBeforeItsThreadsExit) {
             CHECK(second->Stats().liveAllocations == 1);
             CHECK(second->Stats().totalAllocations == (round == 0 ? 101u : 1u));
             REQUIRE(second->Deallocate(block.Value()));
-            second->Trim();
+            second->TrimMemory();
             CHECK(second->Usage().committedBytes == 0);
             DestroyAt(second);
         }
@@ -731,7 +732,7 @@ TEST(CoreBinnedCacheCreationFailureUsesLockedPath) {
         CHECK(allocator.Deallocate(direct.Value()).Error() == ErrorCode::NotFound);
         CHECK(allocator.Stats().liveAllocations == 0);
         CHECK(allocator.Stats().totalAllocations == 2);
-        allocator.Trim();
+        allocator.TrimMemory();
         CHECK(allocator.Usage().committedBytes == 0);
 
         BinnedAllocatorConfig config;
@@ -774,7 +775,7 @@ TEST(CoreBinnedProducerConsumerHandoff) {
         CHECK(BinnedAllocatorTestAccess::ThreadCacheCount(allocator) == 0);
         CHECK(allocator.Stats().liveAllocations == 0);
         CHECK(allocator.Stats().totalAllocations == uint64{HandoffRounds} * HandoffBatch);
-        allocator.Trim();
+        allocator.TrimMemory();
         CHECK(allocator.Usage().committedBytes == 0);
         REQUIRE(workMemory.Deallocate(producer));
     }
@@ -806,7 +807,7 @@ TEST(CoreBinnedExitedThreadUsesLockedPath) {
         CHECK(*static_cast<uint32*>(work.kept) == ExitedThreadBlocks - 1);
         REQUIRE(allocator.Deallocate(work.kept));
         CHECK(allocator.Stats().liveAllocations == 0);
-        allocator.Trim();
+        allocator.TrimMemory();
         CHECK(allocator.Usage().committedBytes == 0);
         // 이 스레드는 종료 정리를 돌리지 않았다.
         CHECK(!BinnedAllocatorTestAccess::IsCurrentThreadExited());
@@ -839,9 +840,9 @@ TEST(CoreBinnedThreadWithoutExitHookStaysUncached) {
         CHECK(allocator.Stats().totalAllocations == Total);
         CHECK(other.Stats().liveAllocations == 0);
         CHECK(other.Stats().totalAllocations == Total);
-        // 반환이 곧바로 slab으로 갔으므로 그 스레드의 캐시 없이도 Trim이 모두 푼다.
-        allocator.Trim();
-        other.Trim();
+        // 반환이 곧바로 slab으로 갔으므로 그 스레드의 캐시 없이도 TrimMemory가 모두 푼다.
+        allocator.TrimMemory();
+        other.TrimMemory();
         CHECK(allocator.Usage().committedBytes == 0);
         CHECK(other.Usage().committedBytes == 0);
         // 이 스레드는 그대로 캐시를 쓴다.
@@ -886,8 +887,8 @@ TEST(CoreBinnedThreadRecordIsFoundAgainFromExitSlot) {
         CHECK(allocator.Stats().totalAllocations == ExitedThreadBlocks);
         CHECK(other.Stats().liveAllocations == 0);
         CHECK(other.Stats().totalAllocations == ExitedThreadBlocks);
-        allocator.Trim();
-        other.Trim();
+        allocator.TrimMemory();
+        other.TrimMemory();
         CHECK(allocator.Usage().committedBytes == 0);
         CHECK(other.Usage().committedBytes == 0);
     }
@@ -919,17 +920,19 @@ TEST(CoreBinnedAllocatorUsedByAnotherThreadExitCleanup) {
         CHECK(BinnedAllocatorTestAccess::ThreadCacheCount(allocator) == 0);
         CHECK(allocator.Stats().liveAllocations == 0);
         CHECK(allocator.Stats().totalAllocations == uint64{2} * ExitedThreadBlocks);
-        allocator.Trim();
+        allocator.TrimMemory();
         CHECK(allocator.Usage().committedBytes == 0);
     }
 
     CHECK(system.Stats().liveAllocations == 0);
 }
 
-// 쉬는 스레드의 캐시가 쥐는 블록은 상한(BinnedAllocator::MaxThreadCacheBytes — 등급마다 한도만큼 찬
-// 묶음 둘)을 넘지 않는다: 묶음 셋만큼 반환해도 둘만 남고 하나는 이전 칸으로 간다. 모든 등급을
-// 그렇게 채우면 정확히 그 값이다. 그 스레드가 쉬는 동안 다른 스레드의 Trim은 이전 칸의 묶음은
-// 돌려받지만 캐시의 블록은 돌려받지 못하고(한계 — 설계 18.8절), 스레드가 끝나면 모두 돌아온다.
+// 스레드의 캐시가 쥐는 블록은 상한(BinnedAllocator::MaxThreadCacheBytes — 등급마다 한도만큼 찬 묶음
+// 둘)을 넘지 않는다: 묶음 셋만큼 반환해도 둘만 남고 하나는 이전 칸으로 간다. 모든 등급을 그렇게
+// 채우면 정확히 그 값이다. 그 스레드가 쉰다고 표시하지 않고(MarkThreadIdle) 막혀 있는 동안 다른
+// 스레드의 TrimMemory는 이전 칸의 묶음은 돌려받지만 캐시의 블록은 돌려받지 못하고(한계 — 설계
+// 18.8절), 스레드가 끝나면 모두 돌아온다. 표시한 스레드의 캐시는 BinnedAllocatorIdleTrimTests.cpp가
+// 본다.
 TEST(CoreBinnedIdleThreadCacheIsBounded) {
     REQUIRE(BinnedAllocatorTestAccess::ClassCount() == MaxClasses);
     usize limit = 0;
@@ -969,8 +972,9 @@ TEST(CoreBinnedIdleThreadCacheIsBounded) {
         }
 
         CHECK(transferBundles == MaxClasses);
-        // 이 스레드의 Trim은 이전 칸을 비우지만 쉬는 스레드의 캐시는 돌려받지 못한다.
-        allocator.Trim();
+        // 이 스레드의 TrimMemory는 이전 칸을 비우지만 표시 없이 막혀 있는 스레드의 캐시는 돌려받지
+        // 못한다.
+        allocator.TrimMemory();
         transferBundles = 0;
         for (uint32 sizeClass = 0; sizeClass < MaxClasses; ++sizeClass) {
             transferBundles += BinnedAllocatorTestAccess::TransferBundleCount(allocator, sizeClass);
@@ -986,7 +990,7 @@ TEST(CoreBinnedIdleThreadCacheIsBounded) {
         CHECK(BinnedAllocatorTestAccess::ThreadCacheCount(allocator) == 0);
         CHECK(BinnedAllocatorTestAccess::ThreadCacheBlockBytes(allocator) == 0);
         CHECK(allocator.Stats().liveAllocations == 0);
-        allocator.Trim();
+        allocator.TrimMemory();
         CHECK(allocator.Usage().committedBytes == 0);
         // IdleCacheWork는 소멸이 trivial하다(저장소만 돌려준다).
         REQUIRE(system.Deallocate(work));
