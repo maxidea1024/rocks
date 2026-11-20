@@ -12,6 +12,11 @@
 //                              InterpolationEnd, StringText("/"), InterpolationBegin, Identifier,
 //                              InterpolationEnd, StringEnd
 // StringText의 범위는 escape를 풀지 않은 원문이다. 비어 있는 조각은 만들지 않는다.
+//
+// 어휘 오류 자리에는 Invalid 토큰이 남는다: 잘못된 문자(그 문자 범위), 닫히지 않은 문자열(닫는
+// StringEnd 바로 앞, 빈 범위), 닫히지 않은 verbatim 문자열(그 토큰 뒤, 빈 범위), 닫히지 않은 블록
+// 주석(`/*` 범위). 구문 분석은 Invalid 토큰에서 진단을 더 내지 않고 복구한다(원인 하나에 진단
+// 하나).
 
 namespace rocks::sparks {
 
@@ -28,6 +33,7 @@ enum class TokenKind : uint8 {
     StringEnd,          // 닫는 `"`(닫히지 않은 문자열이면 빈 범위)
     DocComment,         // `///` 줄 전체
     VerbatimString,     // `@"..."` 전체(escape·보간 없음, 여러 줄 가능)
+    Invalid, // 어휘 오류 자리(잘못된 문자, 닫히지 않은 문자열·주석의 끝). 진단은 이미 냈다
 
     // 키워드(부록 A).
     Import,

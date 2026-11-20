@@ -1,0 +1,2 @@
+# A range is only a for loop header.
+error S0216 1:19

@@ -1,0 +1,10 @@
+# One diagnostic per cause; the tree keeps its shape with Error nodes (8.1 "Recovery").
+# The invalid '#' adds no syntax error; the body after the broken 'if' header is still read.
+error S0206 2:13
+error S0202 4:17
+error S0202 5:14
+error S0104 5:16
+error S0201 6:19
+error S0202 7:17
+error S0203 12:1
+error S0201 14:13

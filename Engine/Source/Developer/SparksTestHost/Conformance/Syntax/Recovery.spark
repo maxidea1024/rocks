@@ -1,0 +1,14 @@
+class Door : ScriptComponent {
+    var hp: = 1;
+    fn Open() {
+        var x = ;
+        G(1, ) # 2;
+        if (ready {
+            y = ;
+        }
+    }
+}
+
+junk
+
+const Limit = 3;

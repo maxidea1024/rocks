@@ -1,0 +1,16 @@
+class Door : ScriptComponent {
+    @save var hp: int = 100;
+    let id = 1;
+    var timer: Timer?;
+    event Opened(by: Actor);
+    open fn Open() {
+    }
+    override async fn Close(): bool {
+    }
+    on Opened(by: Actor) {
+    }
+    on this.Hit(_: int) {
+    }
+    on Owner.Damaged() {
+    }
+}

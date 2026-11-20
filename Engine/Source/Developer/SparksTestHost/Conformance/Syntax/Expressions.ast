@@ -1,0 +1,129 @@
+File @1:1-11:1
+  List @1:1-1:1
+  List @1:1-10:2
+    Function @1:1-10:2
+      -
+      List @1:1-1:1
+      Name "Values" @1:4-1:10
+      List @1:10-1:12
+      -
+      Block @1:13-10:2
+        DiscardAssignment @2:5-2:45
+          Binary "||" @2:9-2:44
+            Identifier "a" @2:9-2:10
+              -
+            Binary "&&" @2:14-2:44
+              Identifier "b" @2:14-2:15
+                -
+              Binary "==" @2:19-2:44
+                Unary "!" @2:19-2:21
+                  Identifier "c" @2:20-2:21
+                    -
+                Binary "<" @2:25-2:44
+                  Identifier "d" @2:25-2:26
+                    -
+                  Binary "??" @2:29-2:44
+                    Identifier "e" @2:29-2:30
+                      -
+                    Binary "+" @2:34-2:44
+                      Identifier "f" @2:34-2:35
+                        -
+                      Binary "*" @2:38-2:44
+                        Identifier "g" @2:38-2:39
+                          -
+                        Unary "-" @2:42-2:44
+                          Identifier "h" @2:43-2:44
+                            -
+        DiscardAssignment @3:5-3:27
+          Binary ">" @3:9-3:26
+            Binary "??" @3:9-3:22
+              Member null-conditional "Count" @3:9-3:17
+                Identifier "n" @3:9-3:10
+                  -
+                -
+              IntegerLiteral "0" @3:21-3:22
+            IntegerLiteral "5" @3:25-3:26
+        DiscardAssignment @4:5-4:54
+          Index @4:9-4:53
+            Call @4:9-4:50
+              Member null-conditional "Swing" @4:9-4:37
+                Parenthesized @4:9-4:30
+                  CastTest @4:10-4:29
+                    Identifier "x" @4:10-4:11
+                      -
+                    Path @4:16-4:29
+                      Name "Weapons" @4:16-4:23
+                      Name "Sword" @4:24-4:29
+                -
+              List @4:37-4:50
+                Argument @4:38-4:46
+                  Name "power" @4:38-4:43
+                  IntegerLiteral "2" @4:45-4:46
+                Argument @4:48-4:49
+                  -
+                  IntegerLiteral "3" @4:48-4:49
+            IntegerLiteral "0" @4:51-4:52
+        DiscardAssignment @5:5-5:35
+          Call @5:9-5:34
+            Member "Open" @5:9-5:32
+              Call @5:9-5:27
+                Member "Find" @5:9-5:25
+                  Identifier "Owner" @5:9-5:14
+                    -
+                  List @5:19-5:25
+                    Type @5:20-5:24
+                      Path @5:20-5:24
+                        Name "Door" @5:20-5:24
+                      -
+                List @5:25-5:27
+              -
+            List @5:32-5:34
+        DiscardAssignment @6:5-6:27
+          Binary "+" @6:9-6:26
+            CollectionLiteral @6:9-6:15
+              IntegerLiteral "1" @6:10-6:11
+              IntegerLiteral "2" @6:13-6:14
+            CollectionLiteral @6:18-6:26
+              MapEntry @6:19-6:25
+                String @6:19-6:22
+                  StringText "a" @6:20-6:21
+                IntegerLiteral "1" @6:24-6:25
+        DiscardAssignment @7:5-7:49
+          Binary "+" @7:9-7:48
+            Binary "+" @7:9-7:41
+              String @7:9-7:31
+                StringText "HP " @7:10-7:13
+                Interpolation @7:13-7:23
+                  Identifier "current" @7:15-7:22
+                    -
+                StringText "/" @7:23-7:24
+                Interpolation @7:24-7:30
+                  Identifier "max" @7:26-7:29
+                    -
+              VerbatimString "@\"C:\\x\"" @7:34-7:41
+            String @7:44-7:48
+              StringText "\\n" @7:45-7:47
+        DiscardAssignment @8:5-8:49
+          Binary "+" @8:9-8:48
+            Binary "+" @8:9-8:41
+              Binary "+" @8:9-8:34
+                Binary "+" @8:9-8:26
+                  Member "value" @8:9-8:19
+                    This "this" @8:9-8:13
+                    -
+                  IntegerLiteral "0x1F" @8:22-8:26
+                FloatLiteral "1.5e3" @8:29-8:34
+              BoolLiteral "true" @8:37-8:41
+            NullLiteral "null" @8:44-8:48
+        LocalVariable @9:5-9:30
+          Name "list" @9:9-9:13
+          Type @9:15-9:25
+            Path @9:15-9:20
+              Name "Array" @9:15-9:20
+            List @9:20-9:25
+              Type @9:21-9:24
+                Path @9:21-9:24
+                  Name "int" @9:21-9:24
+                -
+          CollectionLiteral @9:27-9:29
+          -

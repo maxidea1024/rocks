@@ -16,8 +16,8 @@
 
 namespace rocks::sparks {
 
-// 정수 리터럴(10진·`0x` 16진·`0b` 2진, 구분자 `_` 포함)의 값이다. int64 범위 검사(S0109)는 단항
-// `-`를 보는 구문 분석이 하므로 여기서는 uint64까지 받는다.
+// 정수 리터럴(10진·`0x` 16진·`0b` 2진, 구분자 `_` 포함)의 값이다. 범위 검사(S0109)는 쓰는 자리의
+// 타입을 아는 검사 단계(LC3)가 하므로 여기서는 uint64까지 받는다.
 // 실패: uint64를 넘으면 Overflow.
 Result<uint64> TryDecodeIntegerLiteral(StringView text) noexcept;
 

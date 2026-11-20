@@ -1,0 +1,2 @@
+# A literal cannot be assigned to.
+error S0211 1:10

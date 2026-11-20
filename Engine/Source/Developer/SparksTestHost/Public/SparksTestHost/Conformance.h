@@ -19,9 +19,13 @@
 //   auto ran = conformance::RunCorpus(allocator, files, corpusPath, report);
 //   bool passed = ran && report.Failures().IsEmpty();
 //
-// corpus 구조: <corpus>/<영역>/<사례>.spark 와 같은 이름(stem)의 <사례>.expect. 사례 이름에는 점이
-// 들어가도 된다(stem으로 짝을 맞춘다). 영역 아래에 다른 파일이나 폴더가 있거나 짝이 맞지 않으면
-// 그 자리의 실패로 기록한다(빈 기대값이 조용히 통과하지 않게).
+// corpus 구조: <corpus>/<영역>/<사례>.spark 와 같은 이름(stem)의 <사례>.expect, 그리고 선택으로
+// <사례>.ast(구문 트리 golden). 사례 이름에는 점이 들어가도 된다(stem으로 짝을 맞춘다). 영역 아래에
+// 다른 파일이나 폴더가 있거나 짝이 맞지 않으면(`.spark` 없는 `.expect`·`.ast`, `.expect` 없는
+// `.spark`) 그 자리의 실패로 기록한다(빈 기대값이 조용히 통과하지 않게).
+//
+// 사례 실행: 원문 검사(LC0) → 어휘·구문 분석(LC1, ParseFile). 원문 검사가 막으면 뒤 단계를 돌리지
+// 않는다. `.ast`가 있으면 구문 트리 덤프(AppendSyntaxDump)가 그 내용과 byte 단위로 같아야 한다.
 //
 // `.expect` 형식(13.1절): UTF-8 텍스트(처음의 BOM은 무시), 한 줄에 지시 하나, 단어는 공백이나
 // tab으로 나눈다. 빈 줄과 '#'로 시작하는 줄은 주석.
@@ -100,9 +104,18 @@ private:
     uint32 casesRun_ = 0;
 };
 
-// 사례 하나를 실행한다. caseName은 진단 경로로도 쓴다(예: "Lexical/Bom.spark").
-Result<void> RunCase(Allocator& allocator, StringView caseName, StringView source,
-                     StringView expectText, Report& report) noexcept;
+// 사례 하나의 입력이다.
+struct CaseInput {
+    StringView name;            // 사례 이름이자 진단 경로(예: "Lexical/Bom.spark")
+    StringView source;          // `.spark` 내용
+    StringView expect;          // `.expect` 내용
+    bool hasSyntaxTree = false; // `.ast`가 있는지
+    StringView syntaxTree;      // `.ast` 내용(hasSyntaxTree일 때만)
+};
+
+// 사례 하나를 실행한다. 기대와 다르면 report에 실패 항목을 더한다(한 사례에 진단·구문 트리 실패가
+// 각각 하나씩 있을 수 있다). Result 실패는 할당 실패뿐이다.
+Result<void> RunCase(Allocator& allocator, const CaseInput& input, Report& report) noexcept;
 
 // corpus 폴더 전체를 실행한다. 영역과 사례는 이름의 byte 순으로 돈다(결과가 결정적이다).
 // 실패: corpus 폴더를 열거할 수 없으면 NotFound(없음) 또는 InvalidArgument(그 밖의 파일 오류),

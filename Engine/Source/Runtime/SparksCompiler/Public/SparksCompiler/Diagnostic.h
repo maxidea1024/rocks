@@ -49,7 +49,26 @@ enum class DiagnosticCode : uint16 {
     StringInInterpolation = 111,
     RangeOperator = 112,
     FloatLiteralOutOfRange = 113,
-    NumericSuffix = 114
+    NumericSuffix = 114,
+    ExpectedToken = 201,
+    ExpectedExpression = 202,
+    ExpectedDeclaration = 203,
+    ExpectedMember = 204,
+    ExpectedStatement = 205,
+    ExpectedType = 206,
+    ExpectedName = 207,
+    MisplacedDocComment = 208,
+    ChainedComparison = 209,
+    ImportAfterDeclaration = 210,
+    InvalidAssignmentTarget = 211,
+    MisplacedAwait = 212,
+    MisplacedExit = 213,
+    MisplacedAttribute = 214,
+    NestingTooDeep = 215,
+    RangeOutsideFor = 216,
+    MisplacedDefault = 217,
+    MixedCollectionLiteral = 218,
+    EmptyEnum = 219
 };
 
 // 진단 코드 표기의 숫자 자리 수다("S0412").

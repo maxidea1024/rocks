@@ -247,7 +247,8 @@ TEST(SparksLexer_VerbatimStrings) {
         REQUIRE(Lex(open, "x = @\"never\nclosed"));
         REQUIRE(open.diagnostics.Count() == 1);
         CHECK(DiagnosticIs(open, 0, DiagnosticCode::UnterminatedString, 1, 5));
-        const TokenKind openKinds[] = {K::Identifier, K::Equal, K::VerbatimString, K::EndOfFile};
+        const TokenKind openKinds[] = {K::Identifier, K::Equal, K::VerbatimString, K::Invalid,
+                                       K::EndOfFile};
         CHECK(KindsAre(open, openKinds));
 
         // 보간 안의 verbatim 문자열도 S0111이다.
@@ -310,9 +311,9 @@ TEST(SparksLexer_UnterminatedStrings) {
         CHECK(DiagnosticIs(lexed, 0, DiagnosticCode::UnterminatedString, 1, 5));
         CHECK(DiagnosticIs(lexed, 1, DiagnosticCode::UnterminatedString, 2, 5));
         const TokenKind expected[] = {
-            K::Identifier, K::Equal,      K::StringBegin, K::StringText,         K::StringEnd,
-            K::Identifier, K::Equal,      K::StringBegin, K::InterpolationBegin, K::Identifier,
-            K::StringEnd,  K::Identifier, K::EndOfFile};
+            K::Identifier, K::Equal,      K::StringBegin, K::StringText,  K::Invalid,
+            K::StringEnd,  K::Identifier, K::Equal,       K::StringBegin, K::InterpolationBegin,
+            K::Identifier, K::Invalid,    K::StringEnd,   K::Identifier,  K::EndOfFile};
         CHECK(KindsAre(lexed, expected));
         CHECK(TokenText(lexed, 3) == StringView("abc"));
     }
@@ -352,13 +353,13 @@ TEST(SparksLexer_Comments) {
         REQUIRE(Lex(open, "a /* not closed\nb"));
         REQUIRE(open.diagnostics.Count() == 1);
         CHECK(DiagnosticIs(open, 0, DiagnosticCode::UnterminatedBlockComment, 1, 3));
-        const TokenKind onlyA[] = {K::Identifier, K::EndOfFile};
+        const TokenKind onlyA[] = {K::Identifier, K::Invalid, K::EndOfFile};
         CHECK(KindsAre(open, onlyA));
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
-// 쓸 수 없는 문자는 S0104이고 건너뛴다. 같은 줄의 같은 코드는 한 번만 낸다.
+// 쓸 수 없는 문자는 S0104이고 Invalid 토큰으로 남긴다. 같은 줄의 같은 코드는 한 번만 낸다.
 TEST(SparksLexer_InvalidCharactersAreReportedOncePerLine) {
     SystemAllocator allocator;
     {
@@ -374,8 +375,10 @@ TEST(SparksLexer_InvalidCharactersAreReportedOncePerLine) {
         CHECK(DiagnosticIs(lexed, 3, DiagnosticCode::InvalidCharacter, 4, 1));
         CHECK(lexed.diagnostics[3].Message() == StringView("Unexpected character U+D55C."));
         CHECK(DiagnosticIs(lexed, 4, DiagnosticCode::InvalidCharacter, 5, 1));
-        const TokenKind expected[] = {K::Identifier, K::Identifier, K::Identifier, K::Identifier,
-                                      K::Identifier, K::Identifier, K::Identifier, K::EndOfFile};
+        const TokenKind expected[] = {
+            K::Identifier, K::Invalid,    K::Invalid, K::Identifier, K::Identifier, K::Invalid,
+            K::Identifier, K::Identifier, K::Invalid, K::Identifier, K::Invalid,    K::Identifier,
+            K::Invalid,    K::Invalid,    K::Invalid, K::Invalid,    K::Invalid,    K::EndOfFile};
         CHECK(KindsAre(lexed, expected));
     }
     CHECK(allocator.Stats().liveAllocations == 0);

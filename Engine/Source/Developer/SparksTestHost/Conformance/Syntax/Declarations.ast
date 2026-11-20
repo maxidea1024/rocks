@@ -1,0 +1,121 @@
+File @1:1-29:1
+  List @1:1-2:31
+    Import @1:1-1:16
+      Path @1:8-1:15
+        Name "Weapons" @1:8-1:15
+      -
+    Import @2:1-2:31
+      Path @2:8-2:21
+        Name "Weapons" @2:8-2:15
+        Name "Sword" @2:16-2:21
+      Name "Sword" @2:25-2:30
+  List @4:1-28:2
+    Class open @4:1-7:2
+      DocComment "/// A door that opens." lines=1 @4:1-4:23
+      List @5:1-5:6
+        Attribute "edit" @5:1-5:6
+          List @5:6-5:6
+      Name "Door" @6:12-6:16
+      List @6:19-6:43
+        Path @6:19-6:34
+          Name "ScriptComponent" @6:19-6:34
+        Path @6:36-6:43
+          Name "IUsable" @6:36-6:43
+      List @6:44-7:2
+    Struct @9:1-10:2
+      -
+      List @9:1-9:1
+      Name "Hit" @9:8-9:11
+      List @9:12-10:2
+    Enum @12:1-16:2
+      -
+      List @12:1-12:1
+      Name "State" @12:6-12:11
+      List @12:12-16:2
+        EnumCase @13:5-14:11
+          DocComment "/// Closed by default." lines=1 @13:5-13:27
+          List @14:5-14:5
+          Name "Closed" @14:5-14:11
+        EnumCase @15:5-15:29
+          -
+          List @15:5-15:24
+            Attribute "formerly" @15:5-15:24
+              List @15:14-15:24
+                Argument @15:15-15:23
+                  -
+                  String @15:15-15:23
+                    StringText "Opened" @15:16-15:22
+          Name "Open" @15:25-15:29
+    Interface @18:1-21:2
+      -
+      List @18:1-18:1
+      Name "IUsable" @18:11-18:18
+      List @18:19-21:2
+        InterfaceMethod @19:5-19:31
+          -
+          List @19:5-19:5
+          Name "Use" @19:8-19:11
+          List @19:11-19:24
+            Parameter @19:12-19:23
+              Name "user" @19:12-19:16
+              Type @19:18-19:23
+                Path @19:18-19:23
+                  Name "Actor" @19:18-19:23
+                -
+          Type @19:26-19:30
+            Path @19:26-19:30
+              Name "bool" @19:26-19:30
+            -
+        InterfaceMethod async @20:5-20:21
+          -
+          List @20:5-20:5
+          Name "Wait" @20:14-20:18
+          List @20:18-20:20
+          -
+    Const @23:1-23:26
+      -
+      List @23:1-23:1
+      Name "MaxStack" @23:7-23:15
+      Type @23:17-23:20
+        Path @23:17-23:20
+          Name "int" @23:17-23:20
+        -
+      IntegerLiteral "99" @23:23-23:25
+    ExtensionEvent @25:1-25:35
+      -
+      List @25:1-25:1
+      Name "Actor" @25:7-25:12
+      Name "Interacted" @25:13-25:23
+      List @25:23-25:34
+        Parameter @25:24-25:33
+          Name "by" @25:24-25:26
+          Type @25:28-25:33
+            Path @25:28-25:33
+              Name "Actor" @25:28-25:33
+            -
+    Function async @27:1-28:2
+      -
+      List @27:1-27:1
+      Name "Load" @27:10-27:14
+      List @27:14-27:36
+        Parameter @27:15-27:27
+          Name "path" @27:15-27:19
+          Type @27:21-27:27
+            Path @27:21-27:27
+              Name "string" @27:21-27:27
+            -
+        Parameter @27:29-27:35
+          Discard "_" @27:29-27:30
+          Type @27:32-27:35
+            Path @27:32-27:35
+              Name "int" @27:32-27:35
+            -
+      Type optional @27:38-27:50
+        Path @27:38-27:43
+          Name "Array" @27:38-27:43
+        List @27:43-27:49
+          Type @27:44-27:48
+            Path @27:44-27:48
+              Name "Item" @27:44-27:48
+            -
+      Block @27:51-28:2
