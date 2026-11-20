@@ -27,7 +27,7 @@
     "interStageVectors": 16,
     "rootConstantBytes": 128
   },
-  "features": ["compute"],
+  "features": ["compute", "vertexViewportLayerOutput"],
   "deviceRequirements": ["D3D_FEATURE_LEVEL_11_0"],
   "producers": [{ "host": "windows-x64" }]
 }

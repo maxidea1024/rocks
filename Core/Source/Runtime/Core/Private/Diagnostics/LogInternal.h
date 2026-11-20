@@ -91,7 +91,9 @@ void LogTo(LogSystem& system, LogLevel level, const LogCategory& category,
         SubmitToLogSystem(system, level, category, ToCaptureTemplate(text), nullptr, 0);
     } else {
         const FormatArg list[] = {MakeLogArg(args)...};
-        SubmitToLogSystem(system, level, category, ToCaptureTemplate(text), list, sizeof...(Args));
+        SubmitToLogSystem(system, level, category,
+                          WithArgumentInfo<Args...>(ToCaptureTemplate(text)), list,
+                          sizeof...(Args));
     }
 }
 

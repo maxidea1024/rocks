@@ -284,6 +284,8 @@ auto pawn = objects.NewObject<game::Pawn>(access, rocks::ObjectTypeIdOf<Spinning
 
 MetaCompiler는 클래스 `GeneratedType<T>`마다 `static void Trace(const T& value, TraceVisitor& visitor) noexcept`(상속 필드를 포함한 모든 참조·struct·배열 필드 — 방문할 필드가 없으면 매개변수 이름 없는 빈 본문)를 내고 `ops.trace`는 `Trace(static_cast<const T&>(object), visitor)`로 그것을 감싼다.
 
+MetaCompiler는 클래스·struct `GeneratedType<T>`마다 필드 방문 함수 `template <class Visitor> static constexpr void VisitFields(const T& value, Visitor& visitor) noexcept`도 낸다([로깅 설계](../Design/LoggingSystem.ko.md) 14.1.6절 LG16). 상속 필드를 포함해 선언 순서(가장 먼 base의 필드부터, 선언 타입 안에서는 소스 순서 — 스키마 필드 배열의 안정 ID 순과 다르다)대로 `visitor.Field("멤버 이름", 값)`을 부른다. 값은 Trace와 같은 철자의 멤버 포인터 직접 읽기이고, 자기 bitfield bool은 헤더 안의 직접 읽기(`Get_` 정의는 생성 소스에 있어 다른 모듈에서 부르지 않게 한다), 상속한 bitfield bool은 base의 생성 접근자 `Get_`의 값이다. 필드가 없으면 매개변수 이름 없는 빈 본문이다. registry·할당이 없으므로 로그 구조체 펼치기(`Object/LogStructure.h`의 `LogStructure<T>` 일반 특수화)가 생산자 경로에서 쓴다. 등록·함수표가 없는 템플릿이라 쓰지 않는 번역 단위에서는 인스턴스화되지 않는다. 생성 헤더는 `Object/LogStructure.h`를 include하지 않는다. `{@Name}`으로 쓰는 번역 단위가 직접 include한다(include 규칙은 로깅 설계 14.2절 LG16). 시험은 MetaTests `Meta.VisitFieldsReadsMembersDirectly`(생성 모양·private·상속·bitfield·빈 struct와 일반 특수화 인스턴스화)와 ObjectRuntime `LogStructureReflectionTests`다.
+
 native 클래스 안에는 `ROCKS_PROPERTY`·`ROCKS_NATIVE`를 쓰지 않는다. MetaCompiler가 보지 않으므로 attribute로만 남고 GC가 추적하지도 저장하지도 않는 필드가 된다. Policy(`Rocks.ToolTests policy`·self `Policy.RepositoryReflectionAnnotations`)가 엔진 저장소(템플릿 포함)의 소유 native 소스(.h·.c·.cpp·.mm — 시험·Developer 포함)에서 다음을 거부한다.
 
 - `reflection-annotation-native-type`: `ROCKS_NATIVE_TYPE`을 직접 담은 클래스 본문 안의 두 annotation(중첩 클래스의 멤버는 그 중첩 클래스로 판정). Metadata 헤더 안이면 MetaCompiler도 거부하므로 이 규칙의 실익은 .cpp 안 native 클래스에 구체적인 메시지를 주는 데 있다.

@@ -73,7 +73,7 @@ void AppendCorrelation(Writer& writer, const LogEvent& event) noexcept {
     }
 }
 
-// 템플릿 자리에 쓰인 속성인지다. 이름 자리는 "{이름}"·"{이름:"이 템플릿에 있으면, 위치
+// 템플릿 자리에 쓰인 속성인지다. 이름 자리는 "{이름}"·"{이름:"·"{@이름}"이 템플릿에 있으면, 위치
 // 자리(Arg0…)는 검증된 템플릿이 모든 인자를 쓰므로 늘 쓰인 것이다.
 bool IsPropertyUsed(StringView templateText, StringView name) noexcept {
     if (name.StartsWith("Arg", StringComparison::CaseSensitive)) {
@@ -83,11 +83,18 @@ bool IsPropertyUsed(StringView templateText, StringView name) noexcept {
     const char* data = templateText.Data();
     const usize bytes = templateText.ByteCount();
     for (usize index = 0; index + name.ByteCount() + 1 < bytes; ++index) {
-        if (data[index] != '{' || StringView(data + index + 1, name.ByteCount()) != name) {
+        if (data[index] != '{') {
             continue;
         }
 
-        const char next = data[index + 1 + name.ByteCount()];
+        // 구조체 펼치기 자리("{@이름}")는 '@'를 건너뛰고 비교한다.
+        const usize nameAt = data[index + 1] == '@' ? index + 2 : index + 1;
+        if (nameAt + name.ByteCount() >= bytes ||
+            StringView(data + nameAt, name.ByteCount()) != name) {
+            continue;
+        }
+
+        const char next = data[nameAt + name.ByteCount()];
         if (next == '}' || next == ':') {
             return true;
         }

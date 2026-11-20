@@ -388,6 +388,8 @@ private:
     char* render_ = nullptr;
     LogProperty properties_[MaxLogArguments];
     LogProperty context_[MaxLogContextDepth];
+    // 펼친 값("{@Name}")의 렌더 노드다(출력 쪽만 쓴다).
+    LogProperty structureNodes_[MaxLogStructureNodes];
     platform::Thread writer_;
     platform::ManualResetEvent wake_;
 

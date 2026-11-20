@@ -614,8 +614,10 @@ void LogSystem::Dispatch(Span<const uint8> capture, const LogBlockProvider* bloc
     const usize messageBytes = config_.renderBytes / 4 * 3;
     LogRenderTarget target{Span<char>(render_, messageBytes),
                            Span<char>(render_ + messageBytes, config_.renderBytes - messageBytes),
-                           Span<LogProperty>(properties_), Span<LogProperty>(context_),
-                           clockFrequency_};
+                           Span<LogProperty>(properties_),
+                           Span<LogProperty>(context_),
+                           clockFrequency_,
+                           Span<LogProperty>(structureNodes_)};
     LogEvent event;
     if (!RenderLogCapture(capture, blocks, target, event)) {
         // 손상된 기록은 버린다(이 경로에서 손상은 결함이지만 Fatal로 가지 않는다).

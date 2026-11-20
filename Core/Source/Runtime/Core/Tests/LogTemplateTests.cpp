@@ -669,8 +669,16 @@ TEST(LogRenderRejectsCorruptHeaderAndValueCells) {
 
     capture = MakeValidCapture();
     detail::LogCaptureValue number = capture.Value(1);
-    number.kind = static_cast<uint8>(detail::FormatArgKind::Custom) + 1;
+    // Custom + 1은 펼친 값("{@Name}", LG16) 칸이다. 그 다음 값부터 모르는 종류다.
+    number.kind = static_cast<uint8>(detail::FormatArgKind::Custom) + 2;
     capture.SetValue(1, number);
+    CHECK(capture.Render() == ErrorCode::InvalidArgument);
+
+    // 펼친 값 칸이라고 표시했지만 byte가 펼친 값 인코딩이 아니다(문자열 byte).
+    capture = MakeValidCapture();
+    text = capture.Value(0);
+    text.kind = static_cast<uint8>(detail::FormatArgKind::Custom) + 1;
+    capture.SetValue(0, text);
     CHECK(capture.Render() == ErrorCode::InvalidArgument);
 
     capture = MakeValidCapture();

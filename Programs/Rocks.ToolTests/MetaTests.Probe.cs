@@ -335,11 +335,12 @@ internal static partial class MetaTests
 
         // 마지막으로 생성한 헤더와 그 생성 소스를 한 번역 단위로 소비자와 같은 경고 프로필로 컴파일한다(생성 static_assert probe —
         // 생성 헤더를 고친 뒤 부른다). 정적 검사는 생성 소스의 VerifyGenerated 정의에 있으므로 생성 소스까지 컴파일해야 평가된다.
-        public async Task<ProcessResult> CompileGeneratedAsync()
+        // consumer는 include 뒤에 붙이는 소비 코드다(생성 템플릿을 인스턴스화할 때 쓴다).
+        public async Task<ProcessResult> CompileGeneratedAsync(string consumer = "")
         {
             bool clangCl = Path.GetFileNameWithoutExtension(compiler).Contains("clang-cl", StringComparison.OrdinalIgnoreCase);
             string source = temporary.FilePath("generated-check.cpp");
-            File.WriteAllText(source, $"#include <{lastInclude[..^2]}.generated.h>\n#include \"{Source.Replace('\\', '/')}\"\n", new UTF8Encoding(false, true));
+            File.WriteAllText(source, $"#include <{lastInclude[..^2]}.generated.h>\n#include \"{Source.Replace('\\', '/')}\"\n{consumer}", new UTF8Encoding(false, true));
             List<string> arguments = clangCl
                 ? ["/nologo", "/TP", "/utf-8", "/clang:-std=c++23", "/W4", "/WX", "/GR-", "/EHs-c-", "/Zc:__cplusplus", "/Zs", source]
                 : ["-x", "c++", "-std=c++23", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-fno-exceptions", "-fno-rtti", "-fsyntax-only", source];

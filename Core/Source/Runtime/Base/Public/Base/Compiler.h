@@ -133,6 +133,19 @@
 #define ROCKS_ADDRESS_SANITIZER 0
 #endif
 
+// 이 함수 본문의 메모리 접근을 AddressSanitizer 계측에서 뺀다(Asan 구성이 아니면 아무 영향이 없다).
+// 자체 할당기가 수동 poison(Core/Memory/AddressSanitizer.h)으로 닫아 둔 메모리 안의 자기 관리
+// word(자유 목록 연결·반환 표지)를 읽고 쓰는 작은 내부 함수에만 쓴다.
+// - 본문에서 직접 하는 읽기·쓰기만 빠진다. 이 함수가 부르는 다른 함수(인라인되지 않은 계측 함수)의
+//   접근은 그대로 검사되므로, 닫힌 메모리는 이 함수 안에서 직접 건드린다.
+// - 사용자 메모리를 다루는 일반 코드에 붙이지 않는다(그 함수의 오류를 ASan이 놓친다).
+//
+// 사용 예(Core/Private/Memory/BinnedAllocator.cpp):
+//   ROCKS_NO_SANITIZE_ADDRESS void* ReadLink(void* block) noexcept {
+//       return static_cast<FreeBlock*>(block)->next;   // 닫힌 자유 블록의 연결 word
+//   }
+#define ROCKS_NO_SANITIZE_ADDRESS __attribute__((no_sanitize("address")))
+
 // 인라인하지 않는다. 드문 오류 경로·큰 진단 함수를 hot path 밖으로 뺄 때 쓴다.
 #define ROCKS_NOINLINE __attribute__((noinline))
 
