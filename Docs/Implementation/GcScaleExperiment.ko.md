@@ -52,9 +52,10 @@
 
 남은 한계(설계 0절과 같다):
 
-- **제품 연결은 Sandbox 엔진 호스트까지다(25.10절).** 실행 진입점(Launch)이 `SystemAllocator` 위에 `BinnedAllocator`를 하나 두고 범용 할당자(`ApplicationContext::DefaultAllocator()`)로 내주며 Sandbox의 엔진 호스트가 그것을 엔진에 넘긴다. Commandlet·벤치 도구와 게임 템플릿(`Templates/Game/Foundation/Source/Main.cpp`)은 아직 `SystemAllocator`를 쓴다(후속). `Trim`을 부르는 시점은 아직 어디에도 없다. 큰 블록(8 KB 초과)은 원장을 두 번 지난다.
+- **제품 연결(25.10·25.11절).** 실행 진입점(Launch)이 `SystemAllocator` 위에 `BinnedAllocator`를 하나 두고 범용 할당자(`ApplicationContext::DefaultAllocator()`)로 내준다. Sandbox 엔진 호스트, 게임 템플릿, Commandlet(설정 문맥·`trace-report`·`log` 명령)이 그것을 쓴다. 벤치 도구는 바꾸지 않는다(결정 — 측정 도구는 할당자를 일부러 고른다). 큰 블록(8 KB 초과)은 원장을 두 번 지난다(`BinnedAllocator`의 큰 할당 원장과 상위 `SystemAllocator`의 원장).
+- **엔진이 Trim을 부르는 때(25.11절).** 전체 수집의 회수가 끝난 프레임과 World를 파괴한 뒤, 둘뿐이다(`WorldGcSchedule::trimMemory`로 끈다). 기본 방식(증분)에서는 전체 수집을 요청하거나 World를 파괴하기 전까지 부르지 않는다 — 그 사이에는 빈 slab이 보관 한도(4 MiB)를 넘는 만큼만 그때그때 풀린다. 호스트가 `Allocator::TrimMemory()`를 직접 부를 수 있다. 메모리 압박 신호에 따른 Trim은 없다(신호를 내는 플랫폼 계층이 없다).
 - **ASan은 로컬에서 돌리지 않았다.** `BinnedAllocator`의 수동 poison 경로는 Windows CI의 AddressSanitizer 단계(run 44656731971, dd157ca6 — Asan 구성 Foundation)에서 처음 실행돼 통과했다(메인 세션 확인: 2,659개 가운데 실패 0 — `CoreBinned` 27·`GcSoak` 9·`ThreadExitSlot` 4 포함. 그 단계 자체는 다른 세션의 크래시 시험 둘로 실패했다). macOS에서는 그 단계가 아직 돌지 못했다(앞 단계의 다른 세션 실패). 그 앞의 efd940ac에서는 같은 단계가 `TryMarkReturned`의 비교 교환을 use-after-poison으로 잡았다 — 중복 반환 경쟁 시험에서 한 스레드가 블록을 닫은 뒤 다른 스레드가 계측되는 원자 연산으로 읽었다. 그 코드와 시험은 개정 13에서 없어졌다. 개정 15(AL6)의 코드는 그 단계에서 아직 돌지 않았다.
-- **다른 스레드 캐시의 `Trim`은 후속.** `Trim`은 호출 스레드의 캐시만 비운다. 쉬는 스레드가 쥘 수 있는 상한은 스레드 × 인스턴스당 2,361,856 byte(`BinnedAllocator::MaxThreadCacheBytes`)이고, 그 블록이 붙드는 commit은 가장 나쁜 경우 195 MiB다(설계 18.8절).
+- **쉬는 스레드의 캐시(25.11절).** `TrimMemory`는 호출 스레드의 캐시와, 쉰다고 표시한(`MarkThreadIdle`) 스레드의 캐시를 비운다. 표시하는 것은 `WorkerScheduler`의 worker뿐이다(작업이 없어 막히는 대기 앞뒤). 표시하지 않고 쉬는 스레드(로그 출력·비동기 파일·trace 등)와 Trim 때 깨어 있던 스레드는 스레드 × 인스턴스당 최대 2,361,856 byte(`BinnedAllocator::MaxThreadCacheBytes`)를 쥔 채로 있고, 그 블록이 붙드는 commit은 가장 나쁜 경우 195 MiB다(설계 18.8절). UE의 epoch(Trim 때 깨어 있던 스레드가 다음에 쉴 때 스스로 비움)는 넣지 않았다(후속). 래퍼 allocator를 끼워도 표시와 Trim은 상위로 넘어간다.
 - **스레드 종료 순서의 남는 경우**(설계 18.4절). 할당자의 종료 hook이 지나간 뒤 같은 스레드의 뒤 순번 종료 정리가 allocator를 쓰는 경우와, 스레드의 첫 allocator 사용이 자기 종료 정리 안인 경우 — 기록 하나가 새고 그 캐시는 인스턴스 파괴 때 회수된다(해제된 메모리를 만지지는 않는다). fiber에서는 `ThreadExitSlot`을 쓰지 않는다.
 - **겹친 중복 반환**(설계 18.4절). 같은 블록을 두 스레드가 같은 순간에 반환하면 둘 다 성공으로 돌아올 수 있다. 그 블록을 두 번째로 내줄 때 Fatal로 잡지만, 그 사이에 다시 반환되거나 slab으로 돌아가면 놓치고 slab 계수가 어긋날 수 있다. 오용 검출은 그 slab의 decommit·재사용과 겹치면 보장되지 않는다(한계 2).
 - **GC churn 회수의 이득은 작다**(gate A7). 일반 그래프의 churn 회수는 `BinnedAllocator`에서 플랫폼 할당의 0.89배다(개정 13 구현 — 비교 교환 구현에서는 같은 수준이었다). `SystemAllocator`에 견주면 0.37배다(25.10절). 할당자만 바꿔 잰 객체 비교에서는 churn 회수 0.81배·종료 회수 0.75배이고, 큰 이득은 뜨거운 쌍·여러 스레드 쪽이다.
@@ -62,7 +63,7 @@
 - **플랫폼.** 이 기계는 Windows만 빌드한다. macOS는 CI로, Android는 NDK 구문 검사로만 봤다.
 - **검증의 한계.** origin을 충돌 없이 병합한 뒤에는 다시 검증하지 않는다(작업 규칙). 양쪽이 같은 고정 크기 등록부에 더하는 변경은 충돌 없이도 깨진다 — 시험 실행기의 자식 probe 등록부(8칸)에서 AL5의 probe와 다른 세션의 probe가 병합으로 만나 아홉이 됐고, EngineTests의 시험 넷이 dd157ca6부터 실패했다. AL6의 전체 실행에서 찾아 고쳤다(16칸). 같은 실행에서 엔진 단계 크래시 시험의 자식 하나가 120초 시한에 걸린 것을 한 번 봤다 — 재현되지 않았고 멈춘 자리를 가르지 못했다(25.10절).
 - **4절 gate 가운데 남은 것.** 일반 그래프의 STW 병렬 표식(×8 16.7–17.2ms — 목표 15ms의 1.1–1.15배), 증분 Step p99(부하 아래 판정 불가 — 재측정 필요), Slot 정보 합계(hot 64B는 충족, 전체 192.3B — 설계 11절 결정 5).
-- **리뷰의 후속 목록**(25.9·25.10절): 겹친 중복 반환의 slab 경로 보강, 캐시 줄 크기, 종료 hook의 전역 잠금 구간, 시험이 없는 경로, 엔진 시험의 변별력, 내장 진입의 파괴 경로 시험 등.
+- **리뷰의 후속 목록**(25.9·25.10·25.11절): 겹친 중복 반환에서 캐시 보유와 slab 보유의 표지 값 나누기, 종료 hook의 전역 잠금 구간, `System` 종류의 남은 할당 검사 자리, 주소 범위 예약을 첫 호출 때 만들기, `MaxThreadExitSlots` 초과 시험, 예약이 거부되는 환경에 기대는 단언(`smallInSystem=0`·`fallbackAllocations == 0`), UE식 epoch, 표시하지 않는 엔진 스레드의 캐시 등.
 
 ## 1. 측정 환경
 
@@ -1920,3 +1921,75 @@ gate 확정(설계 18.8절, 개정 13):
 - macOS·Android 실행 — POSIX `ThreadExitSlot`의 `errno` 보존과 `test::SetSystemError`·`SystemError`의 POSIX 구현은 macOS CI가 첫 실행이다. Android는 구문 검사뿐이다.
 - 게임 템플릿 빌드(`Rocks.Build.IntegrationTests`) — 템플릿을 바꾸지 않아 돌리지 않았다.
 - Release·Development 구성의 시험 실행(벤치만 Development로 빌드했다).
+
+### 25.11 AL7: 남은 연결과 Trim (설계 개정 16, 2026-11-20)
+
+사용자 지시 "남은작업 진행"으로 25.10절이 후속으로 남긴 것을 한 묶음으로 넣었다(설계 18.11절).
+
+한 것:
+
+- **나머지 연결.** 게임 템플릿이 `context.DefaultAllocator()`를 쓴다. Commandlet은 진입점이 범용 할당자를 `commandlet_host::Run`에 넘기고, 설정 문맥(`HostSettings`)·`trace-report`·`log decode`·`seal`·`pack`·`view`가 그것을 쓴다(명령은 등록 때 건 문맥 포인터로 받는다). `core-check`는 자기 `SystemAllocator`를 그대로 쓴다 — 그 명령이 점검하는 대상이다. `log keygen`은 할당자를 쓰지 않는다. 벤치 도구(CompressionBench·CryptoBench·LogBench·GcBench)는 바꾸지 않았다(결정 — 측정 도구는 할당자를 일부러 고른다).
+- **`Allocator` 인터페이스.** `TrimMemory()`·`MarkThreadIdle()`·`MarkThreadActive()`를 더했다(기본 무동작). 이름이 `Trim`이 아닌 까닭: `ArenaAllocator`·`PoolAllocator`·`StackAllocator`에 `Result<void> Trim()`(살아 있는 할당이 없을 때만 chunk를 돌려준다)이 이미 있어 같은 이름의 가상 함수를 둘 수 없다. `BinnedAllocator::Trim()`은 `TrimMemory()`로 개명했다(이 문서의 앞 절들은 옛 이름으로 적혀 있다). 상위 하나에 그대로 넘기는 래퍼 여섯(`BudgetAllocator`·`DebugAllocator`, TestSupport `NFailAllocator`, ObjectSerialization의 `BudgetAllocator`·`ObservationAllocator`, SpatialIndex의 `CountingAllocator`)은 이 셋도 넘긴다.
+- **쉬는 스레드의 캐시.** 스레드 캐시마다 상태(쓰는 중·쉬는 중·비우는 중)를 둔다. `TrimMemory`는 등록부 잠금 아래에서 쉬는 캐시를 비우는 중으로 바꿔 묶음을 slab으로 돌려준 뒤 되돌리고, 깨어난 소유 스레드는 비우는 중이면 그 잠금을 얻어 끝을 기다린다. 쉰다고 표시할 때 빠른 경로의 지름길("마지막에 쓴 인스턴스")을 지우고 느린 경로가 쉬는 캐시를 내주지 않으므로, 쉬는 사이의 할당·반환은 캐시 없이 등급 잠금 경로로 간다 — 빠른 경로에는 검사를 더하지 않았다.
+- **`WorkerScheduler`.** worker가 막히는 대기 바로 앞에서(gate를 쥔 채) `MarkThreadIdle`을, 깨어난 바로 뒤에(gate를 풀고) `MarkThreadActive`를 부른다.
+- **엔진의 호출 자리 둘.** World는 전체 수집의 회수가 끝난 GC 단계에 한 번(`World::TrimAfterFullCollection` — 회수할 것이 없었으면 수집한 프레임에 바로), Engine은 World를 파괴한 뒤에 한 번 `TrimMemory`를 부른다. `WorldGcSchedule::trimMemory`(기본 켬)로 끈다. 증분 cycle이 끝날 때는 부르지 않는다.
+- **UE 5.8 확인**은 설계 18.11.2절에 파일·줄과 함께 적었다. 요지: UE는 GC의 purge가 끝날 때만 `FMemory::Trim`을 부른다(`GarbageCollection.cpp:4822`·`:5772`·`:5933`, 맵 로드는 `UEngine::TrimMemory`가 전체 purge GC를 부른다). 쉬는 worker의 캐시는 worker가 대기 앞뒤에서 표시하고(`WaitingQueue.cpp:119–125`), Trim이 그 캐시를 직접 비우는 것은 비데스크톱뿐이다(`MallocBinnedCommonUtils.h:143–170` — 데스크톱은 epoch만 올린다).
+- **리뷰 후속 가운데 넣은 것.** 25.9절 I1(slab으로 돌아오는 블록이 "쓰는 블록 수"가 0인 slab에 닿으면 Fatal `BinnedAllocator slab block count underflow`), I2(등급 캐시와 이전 칸의 정렬을 `CacheLineSize`로), I4(`TrimMemory` 공개 주석), I6의 스레드 기록 항목 표 늘리기 시험, I7(`ReservedBytes() == DefaultReserveBytes` 단언을 범위 단언으로), I8(`_Exit` 표기). 25.10절 I2(내장 진입의 파괴 경로 시험), I3(할당자 수준의 OS 오류 값 시험), I8(Fatal 종료 코드 비교).
+- **다른 세션의 서식 위반 한 줄.** `Programs/FoundationTests/Private/Main.cpp`의 probe 등록부 주석이 병합된 커밋(e37615e3)에서 100열을 넘어 서식 검사가 실패했다. 그 주석의 줄바꿈만 고쳤다.
+
+시험:
+
+- `BinnedAllocatorIdleTrimTests.cpp`(새 파일 — 순서는 모두 명시 gate):
+  - `CoreBinnedTrimMemoryFlushesIdleThreadCache`: 캐시를 채우고 쉰다고 표시한 뒤 gate에서 기다리는 스레드가 있을 때 다른 스레드의 `TrimMemory`가 그 캐시를 비운다(캐시 byte 0, commit 0). 표시는 남고, 깨어난 스레드는 빈 캐시로 정상 동작한다.
+  - `CoreBinnedTrimMemoryLeavesActiveThreadCaches`: 표시하지 않은 스레드의 캐시는 그대로다(캐시 byte 불변, commit 남음).
+  - `CoreBinnedOwnerWaitsForTrimInProgress`: 시험 통로로 비우는 쪽을 캐시를 가져간 직후에 세우고 소유 스레드를 깨운다. 소유 스레드는 비우는 중임을 보고 기다리며(hook이 알린다), 돌아왔을 때 비우기가 이미 끝나 있다. 기다리지 않는 구현에서는 시험이 멈추지 않고 실패한다.
+  - `CoreBinnedIdleThreadAllocatesWithoutItsCache`: 쉬는 사이의 할당·반환이 캐시를 건드리지 않는다 — 지름길이 이 인스턴스를 가리키던 경우, 쉬는 사이에 다른 인스턴스를 써서 지름길이 그쪽으로 간 경우, 표시할 때 지름길이 애초에 다른 인스턴스를 가리키던 경우. 표시는 세지 않는 상태다(두 번 알려도 한 번 깨우면 쓰는 중, 표시 없이 깨워도 무동작, 캐시 없는 스레드의 표시는 무동작). 쉬는 스레드가 스스로 `TrimMemory`를 불러도 캐시가 비고 표시는 남는다.
+  - `CoreAllocatorWrappersForwardTrimAndIdleMarks`: `BudgetAllocator`·`DebugAllocator`·`NFailAllocator`가 세 호출을 상위로 넘긴다.
+  - `CoreBinnedThreadRecordGrowsPastInitialEntries`: 한 스레드가 인스턴스 여섯 개의 캐시를 가지면 기록의 항목이 여섯이 되고(처음 4칸), 스레드가 끝나면 여섯 캐시가 모두 돌아온다.
+  - `CoreBinnedFirstUseOnThreadKeepsSystemError`: 새 스레드의 첫 `Allocate`·`Deallocate`(기록·캐시 만들기, slab commit)와 두 표시가 OS 오류 값을 바꾸지 않는다.
+- `CoreBinnedReturningBlockToEmptySlabIsFatal`(`BinnedAllocatorTests.cpp` — 기존 자식 probe의 새 시나리오라 등록부 자리를 더 쓰지 않는다): 하나뿐인 블록을 반환해 빈 slab에 같은 블록이 한 번 더 돌아오면 Fatal이다.
+- `WorkerSchedulerWorkersMarkIdleAroundTheirWait`: 세는 allocator로 worker 넷이 모두 쉰다고 알리는 것을 기다리고(알리지 않는 구현에서 멈추지 않게 10초 감시 시한을 둔다 — 알리는 구현의 결과는 시간과 무관하다), 작업 본문이 쓰는 중 상태에서 도는지, 종료 뒤 두 표시의 수가 같은지 본다.
+- `Engine_TrimsMemoryAfterFullCollectionReclaimAndWorldDestroy`: 회수 예산을 프레임당 객체 32개로 두고 전체 수집을 요청한다. 회수가 남아 있는 프레임에는 0번, 다 빠진 프레임에 1번, 그 뒤 프레임에는 그대로, 회수할 것이 없는 전체 수집은 그 프레임에 바로, World 파괴 뒤에 1번.
+- `Engine_DoesNotTrimMemoryOnIncrementalCyclesOrWhenDisabled`: 증분 cycle로는 0번, `trimMemory`를 끈 World는 전체 수집 뒤에도 파괴 뒤에도 0번, 켠 World의 파괴는 1번.
+- `Native.Launch.default-allocator`·`embedded-host`(Rocks.ToolTests): 남긴 할당의 종료 코드를 Fatal 종료 코드와 견주고(Windows `0xE0524B46`, POSIX SIGABRT), 내장 진입은 `allocator-leak-no-teardown`에서도 Fatal로 끝난다(정적 소멸 없이 끝내라는 요청을 무시하고 범용 할당자를 파괴한다).
+
+음성 대조(모두 잡혔다 — Debug, 그 시험만 돌렸다):
+
+| 대조 | 바꾼 것 | 잡은 시험 |
+|---|---|---|
+| N1 | `TrimMemory`가 쉬는 표시를 무시하고 쓰는 중인 캐시까지 비움 | `CoreBinnedTrimMemoryLeavesActiveThreadCaches` |
+| N2 | 깨어난 소유 스레드가 비우기가 끝나기를 기다리지 않음 | `CoreBinnedOwnerWaitsForTrimInProgress`(멈추지 않고 실패) |
+| N3a | World가 전체 수집의 회수 뒤에 `TrimMemory`를 부르지 않음 | `Engine_TrimsMemoryAfterFullCollectionReclaimAndWorldDestroy` |
+| N3b | Engine이 World 파괴 뒤에 `TrimMemory`를 부르지 않음 | 같은 시험(파괴 뒤의 단언) |
+| N4 | `trimMemory` 설정을 무시하고 언제나 부름 | `Engine_DoesNotTrimMemoryOnIncrementalCyclesOrWhenDisabled` |
+| N5 | worker가 대기 앞뒤에서 표시하지 않음 | `WorkerSchedulerWorkersMarkIdleAroundTheirWait`(처음에는 무한 대기로 멈췄다 — 감시 시한을 넣어 실패로 끝나게 고쳤다) |
+| N6 | 느린 경로가 쉬는 캐시를 내줌(상태 검사 없음) | `CoreBinnedIdleThreadAllocatesWithoutItsCache` |
+
+측정(Development, 다른 세션의 부하가 드나드는 기계):
+
+- **쌍 벤치 — 빠른 경로에 변화가 없다.** `GcBench --allocator-micro`를 AL7 앞의 실행 파일과 같은 round에서 번갈아 5 round 돌렸다(`BinnedAllocator`).
+
+  | 항목 | AL7 앞 | AL7 뒤 |
+  |---|---|---|
+  | 쌍 16–8192 B, 최솟값 | 7.3–7.4 ns | 7.3–7.4 ns |
+  | 쌍, round 중앙값 | 7.4–7.9 ns | 7.3–7.5 ns |
+  | 묶음 4096×64 B, 최솟값(중앙값) | 5.4(5.8) ns/연산 | 5.4(5.5) ns/연산 |
+  | 인계: 같은 스레드 | 7.9–12.4 ns/쌍 | 7.8–8.1 ns/쌍 |
+  | 인계: 다른 스레드 | 17.5–19.2 ns/쌍 | 18.0–28.5 ns/쌍(28.5는 한 round) |
+  | 동시 1 스레드 | 101–128 M쌍/s | 122–128 M쌍/s |
+  | 동시 8 스레드 | 420–569 M쌍/s | 392–589 M쌍/s |
+
+- **쉬는 worker와 `TrimMemory`.** `GcBench --allocator-trim-idle`(새 측정 모드): `BinnedAllocator` 위에 `WorkerScheduler`를 띄워 worker마다 크기 열 가지의 블록 256개씩을 할당했다가 반환해 캐시를 채우고, 모든 worker가 대기에 들어간 뒤 `TrimMemory`를 부른다.
+
+  | worker | 쉬는 표시 | commit: 앞 → 뒤 | `TrimMemory` |
+  |---|---|---|---|
+  | 8 | 넘김 | 12.2–13.4 MiB → 256 KiB(3회 모두) | 0.9–1.3 ms |
+  | 8 | 넘기지 않음(대조) | 11.6–13.4 MiB → 7.2–7.5 MiB | 0.2–0.4 ms |
+  | 2 | 넘김 | 5.6 MiB → 192 KiB | 0.5 ms |
+  | 2 | 넘기지 않음(대조) | 5.6 MiB → 2.4 MiB | 0.3 ms |
+
+  표시를 넘긴 경우에 남는 256 KiB는 scheduler 자신의 살아 있는 할당이 든 slab이다. 대조에서 남는 것은 worker 캐시의 블록이 붙든 slab이다(이 측정이 채운 등급에서의 값이다).
+
+검증(반복 중 — 바뀐 시험만): Foundation `CoreBinned` 34개(새 시험 7개 포함)·`CoreAllocatorWrappers` 1개·`WorkerScheduler` 22개·`ThreadExitSlot` 5개·`GcSoak` 9개, EngineTests `Engine_` 25개(새 시험 2개 포함), `Native.Launch` 15개, Commandlet 시험(`Rocks.Commandlet.Tests`) 51개 통과. 리뷰와 마지막 전체 검증은 아래에 적는다.
+
+후속(넣지 않은 것): UE식 epoch(Trim 때 깨어 있던 스레드가 다음에 쉴 때 스스로 비움), 표시하지 않는 엔진 스레드(로그 출력·비동기 파일·trace)의 캐시, 메모리 압박 신호에 따른 Trim, 작업 본문 안에서 막히는 대기의 표시, 25.9절 I3(종료 hook의 등록부 잠금 범위)·I1의 나머지(표지 값 나누기)·I6의 나머지(`MaxThreadExitSlots` 초과 시험), 25.10절 I4·I5·I6·I7·I9·I10.

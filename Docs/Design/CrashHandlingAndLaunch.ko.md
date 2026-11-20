@@ -1,6 +1,6 @@
 # 공통 실행 진입점과 네이티브 크래시 수집 설계
 
-기준일: 2026-11-20, 개정 9(11.5절: 프로세스 안 덤프를 자기 snapshot에서 써서 마감 집행 스레드가 멈추지 않게 함). 개정 8(7.4·8.1·8.2·18절: 범용 할당자 — `ApplicationSettings::defaultAllocator`·`ApplicationContext::DefaultAllocator()`, 기본은 Launch의 `SystemAllocator` 위에 둔 `BinnedAllocator`. GC 규모 세션의 AL6, 사용자 지시). 개정 7(10.5·13.2절: Asan 구성의 stack 보장분을 ASan stack overflow 보고에 맞춰 키움). 개정 6(macOS CI 두 건: 14.1절 굳힌 뿌리 상한을 플랫폼 공통으로, 8.7·17절 POSIX abort 재진입의 기대값). 개정 5(19.6절: 로깅 쪽 반영 완료 — 로깅 문서 개정 번호 재정리, LogFile·LogDirectory 칸). 개정 4(LC1–LC7 구현 반영, LC8 문서 마무리). 결정은 22절, 단계는 23절, 미확인 사실은 24절, 바뀐 점과 단계별로 설계와 다르게 정한 점은 25절에 있다. 사용법은 [공통 실행 진입점과 크래시 수집 사용 안내](../Implementation/CrashHandlingAndLaunch.ko.md)에 있다.
+기준일: 2026-11-20, 개정 10(7.4절: 게임 템플릿과 Commandlet도 범용 할당자를 쓴다 — GC 규모 세션의 AL7). 개정 9(11.5절: 프로세스 안 덤프를 자기 snapshot에서 써서 마감 집행 스레드가 멈추지 않게 함). 개정 8(7.4·8.1·8.2·18절: 범용 할당자 — `ApplicationSettings::defaultAllocator`·`ApplicationContext::DefaultAllocator()`, 기본은 Launch의 `SystemAllocator` 위에 둔 `BinnedAllocator`. GC 규모 세션의 AL6, 사용자 지시). 개정 7(10.5·13.2절: Asan 구성의 stack 보장분을 ASan stack overflow 보고에 맞춰 키움). 개정 6(macOS CI 두 건: 14.1절 굳힌 뿌리 상한을 플랫폼 공통으로, 8.7·17절 POSIX abort 재진입의 기대값). 개정 5(19.6절: 로깅 쪽 반영 완료 — 로깅 문서 개정 번호 재정리, LogFile·LogDirectory 칸). 개정 4(LC1–LC7 구현 반영, LC8 문서 마무리). 결정은 22절, 단계는 23절, 미확인 사실은 24절, 바뀐 점과 단계별로 설계와 다르게 정한 점은 25절에 있다. 사용법은 [공통 실행 진입점과 크래시 수집 사용 안내](../Implementation/CrashHandlingAndLaunch.ko.md)에 있다.
 
 이 문서는 두 가지를 정한다.
 - **공통 실행 진입점(Launch).** 실행 파일마다 흩어진 `main`·`wmain`의 시작·종료 처리를 한 계층으로 모은다. 플랫폼 진입점 연결, 이른 크래시 처리 설치, 인자 전달, 공통 서비스 시작·종료, 프로그램 본문 호출, 종료 코드 전달, 크래시 처리 해제 시점이 대상이다. 엔진 수명(`Engine::Initialize`·`Run`·`Shutdown`)은 다시 만들지 않는다.
@@ -573,7 +573,7 @@ bool IsTerminationRequested() noexcept;
   - 본문은 엔진·모듈·컨테이너에 `DefaultAllocator()`를 넘긴다. `SystemAllocator()`는 범용 할당자의 상위이고 Launch의 도구 로그가 쓴다 — 본문이 직접 쓸 일은 비교·진단뿐이다.
   - 수명: 설정 적용 뒤·도구 로그 앞에 만들고, 도구 로그를 멈춘 뒤에 파괴한다(8.2절). 본문이 범용 할당자의 할당을 남긴 채 돌아오면 파괴가 Fatal이다(`SystemAllocator`의 남은 할당 계약과 같다). `RequestExitWithoutStaticTeardown`이면 파괴하지 않고 `_Exit`한다(내장 진입은 그 요청을 무시하므로 파괴한다). 내장 진입은 실행마다 인스턴스 하나다.
   - 비용: 주소 범위 예약(16 GiB — Android 4 GiB, commit 아님)과 약 290 KB의 표가 Launch를 쓰는 모든 실행 파일에 든다. 범용 할당자를 쓴 스레드마다 캐시가 최대 약 2.25 MiB(`BinnedAllocator::MaxThreadCacheBytes`)다.
-  - 지금 쓰는 곳은 Sandbox 엔진 호스트다. Commandlet·벤치 도구와 게임 템플릿(`Templates/Game/Foundation/Source/Main.cpp` — 아직 `context.SystemAllocator()`)은 후속이다.
+  - 쓰는 곳(개정 10): Sandbox 엔진 호스트, 게임 템플릿(`Templates/Game/Foundation/Source/Main.cpp`), Commandlet(설정 문맥·`trace-report`·`log` 명령 — `core-check`는 `SystemAllocator` 자체를 점검하므로 자기 것을 만든다). 벤치 도구는 바꾸지 않는다(측정 도구는 할당자를 일부러 고른다 — GC 규모 설계 18.11.1절).
 
 ## 8. 흐름
 
@@ -1831,3 +1831,4 @@ bool SetCrashAnnotation(CrashAnnotation slot, const char* text, usize bytes) noe
   - **경로.** 그 probe(`engine-crash-stage`)는 `CrashHelperPolicy::InProcess`로 설치한다. 그래서 W가 종료 콜백 뒤 프로세스 안 덤프를 쓴다. 크래시 때 엔진의 worker 스레드가 살아 있다(`BeginShutdown`은 executor를 멈추기 전이다).
   - **유일한 무기한 대기.** 크래시한 스레드의 대기(`HandleCrash`의 `WaitForSingleObject(reportFinished, TotalWaitMilliseconds)` 뒤 `TerminateProcess`)와 겹친 스레드의 대기(`WaitForOwner`, 마감 + 여유 뒤 종료)는 모두 유한하다. 종료 콜백은 공용 마감을 지키고 로그 flush는 막히는 lock을 쓰지 않는다. 마감 집행을 무력하게 만드는 곳은 살아 있는 자기 프로세스의 `MiniDumpWriteDump`뿐이었다(11.5절: dbghelp가 마감 스레드까지 suspend). 그 순간 worker가 heap 할당 중(`SystemAllocator` → 프로세스 heap)이거나 스레드 생성·종료(loader lock) 중이면 영원히 멈춘다. 부하가 큰 전체 실행에서만 드물게 나는 관찰과 맞는다.
   - **수정.** 프로세스 안 덤프를 자기 snapshot에서 쓴다(11.5절). gate로 결정적으로 재현하는 시험을 더했다.
+- 개정 10(2026-11-20): 범용 할당자를 쓰는 곳을 넓혔다(GC 규모 세션의 AL7 — 사용자 지시 "남은작업 진행", GC 규모 설계 18.11절). 게임 템플릿과 Commandlet이 `context.DefaultAllocator()`를 쓴다. Launch의 코드는 바뀌지 않았다. 시험: 내장 진입이 `allocator-leak-no-teardown`에서도 범용 할당자를 파괴해 Fatal로 끝나는 것(`Native.Launch.embedded-host`), 남긴 할당의 종료 코드를 Fatal 종료 코드와 견주는 것(`Native.Launch.default-allocator`).
