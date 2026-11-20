@@ -276,6 +276,12 @@ struct ResourceTransition {
     SubresourceRange range;
     ResourceAccess before = ResourceAccess::Unknown;
     ResourceAccess after = ResourceAccess::Unknown;
+    // placed 자원(Device::CreatePlacedTexture·CreatePlacedBuffer)의 aliasing 획득이다(RenderBase
+    // 8절 GX12). before는 Discard여야 한다. 같은 heap 구간을 앞서 쓴 자원의 접근이 끝난 뒤 이
+    // 자원이 그 메모리를 쓴다. D3D12는 자원이 아직 활성이 아니면 aliasing barrier(before null)를 내고
+    // 렌더 타깃·깊이는 DiscardResource로 초기화한다. Vulkan은 그 범위를 UNDEFINED layout에서 이전
+    // 메모리 쓰기를 모두 기다려 바꾼다. placed가 아닌 자원에서는 무시한다.
+    bool acquire = false;
 
     bool operator==(const ResourceTransition&) const noexcept = default;
 };

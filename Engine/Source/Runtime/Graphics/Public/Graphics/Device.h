@@ -432,6 +432,66 @@ public:
     // 붙든다. view에는 업로드·readback·그리기 대상 지정을 할 수 없다(InvalidArgument). 형식·plane
     // 조합이 틀리면 InvalidArgument, 형식이 Sampled가 아니거나 backend가 view를 지원하지 않으면
     // Unsupported다.
+    // --- transient heap·placed 자원(RenderBase 8절 GX12, DeviceFeatures::transientHeaps) ---
+    //
+    // 렌더 그래프가 수명이 겹치지 않는 자원끼리 메모리를 나누려고 쓴다. heap 하나에 placed 자원
+    // 여럿을 offset으로 둔다. 같은 구간을 쓰는 자원은 처음 쓰기 전에 획득 전이
+    // (ResourceTransition::acquire, attachment acquire)를 낸다. 앞 자원의 접근과 겹치지 않게 하는
+    // 것(같은 queue 순서, queue 사이는 QueueWait)은 호출자 몫이다.
+    //
+    // 사용 예:
+    //   auto placement = device.GetTexturePlacement(desc);
+    //   auto heap = device.CreateTransientHeap({.bytes = 128ull << 20,
+    //                                           .kind = placement.Value().kind});
+    //   auto texture = device.CreatePlacedTexture(heap.Value(), 0, desc);
+    //   ... 첫 사용: ResourceTransition{.texture = texture, .before = Discard, .after = …,
+    //                                   .acquire = true}
+    //   device.Retire(texture.Value());          // 자원 객체만, 메모리는 heap 소유
+    //   device.RetireTransientHeap(heap.Value()); // placed 자원과 heap의 마지막 사용 뒤 해제
+    //
+    // 실패: 지원하지 않는 장치 Unsupported(기본 구현), 크기 0·종류 불일치·정렬·범위 밖
+    // InvalidArgument, 장치 메모리 부족 OutOfMemory·DependencyFailed.
+    virtual Result<TransientHeapHandle> CreateTransientHeap(const TransientHeapDesc& desc) noexcept {
+        (void)desc;
+        return Result<TransientHeapHandle>::Failure(ErrorCode::Unsupported);
+    }
+
+    // heap을 회수 대기로 넘긴다. 그 heap의 placed 자원이 모두 회수되고 heap의 마지막 사용(두 queue)이
+    // 끝난 뒤 해제한다. 모르는 handle은 무시한다.
+    virtual void RetireTransientHeap(TransientHeapHandle heap) noexcept {
+        (void)heap;
+    }
+
+    // desc 텍스처·버퍼를 heap에 둘 때의 크기·정렬·heap 종류다. 실패: desc 규칙 위반 InvalidArgument,
+    // 지원하지 않으면 Unsupported. 스레드 안전.
+    virtual Result<TransientPlacement> GetTexturePlacement(const TextureDesc& desc) const noexcept {
+        (void)desc;
+        return Result<TransientPlacement>::Failure(ErrorCode::Unsupported);
+    }
+
+    virtual Result<TransientPlacement> GetBufferPlacement(const BufferDesc& desc) const noexcept {
+        (void)desc;
+        return Result<TransientPlacement>::Failure(ErrorCode::Unsupported);
+    }
+
+    // heap의 offset에 placed 텍스처·버퍼를 만든다(초기 데이터 없음, Sampled 텍스처는 받지 않는다).
+    // 돌려준 handle은 보통 자원과 같다. 처음 쓰기 전에 획득 전이가 필요하다.
+    virtual Result<TextureHandle> CreatePlacedTexture(TransientHeapHandle heap, uint64 offset,
+                                                      const TextureDesc& desc) noexcept {
+        (void)heap;
+        (void)offset;
+        (void)desc;
+        return Result<TextureHandle>::Failure(ErrorCode::Unsupported);
+    }
+
+    virtual Result<BufferHandle> CreatePlacedBuffer(TransientHeapHandle heap, uint64 offset,
+                                                    const BufferDesc& desc) noexcept {
+        (void)heap;
+        (void)offset;
+        (void)desc;
+        return Result<BufferHandle>::Failure(ErrorCode::Unsupported);
+    }
+
     virtual Result<TextureHandle> CreateTextureView(TextureHandle texture,
                                                     const TextureViewDesc& desc) noexcept {
         (void)texture;
