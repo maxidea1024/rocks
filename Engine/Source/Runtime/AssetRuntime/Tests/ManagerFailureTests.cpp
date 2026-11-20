@@ -176,7 +176,8 @@ TEST(AssetManager_DiscardingRetiresAndReportsLateEdges) {
 // 할당 실패(11.7절 — 모든 지점): Initialize·scope·요청·callback·보류 명령·묶음 로드(비ASCII bundle
 // 이름 — 키 정규화가 할당한다)·용량 추정·넘겨받기·간선 표·병합·Discard·lease·동기 로드의 어느
 // 할당이 한 번 실패해도 상태가 일관되고(그 요청만 실패하거나 다음 Pump에서 다시 한다), 실패를 끈 뒤
-// 모든 handle을 놓으면 상주 단위·살아 있는 handle이 남지 않는다.
+// 모든 handle을 놓으면 상주 단위·살아 있는 handle이 남지 않고, Discard한 패키지 수 합과 RootRef를
+// 놓은 패키지 수 합(releasedPackages)이 같다.
 constexpr char NonAsciiBundleName[] = "Visual\xEC\x8B\x9C\xEA\xB0\x81";
 
 bool CookSweepScene(ManagerRig& rig) noexcept {
@@ -240,18 +241,18 @@ void RunSweepScenario(ManagerRig& rig, ReadyRecord& ready, PrimaryAssetLease& pr
     for (uint32 round = 0; round < Rounds; ++round) {
         rig.io.Complete();
         rig.worker.RunAll();
-        (void)rig.manager->Pump();
+        (void)rig.Pump();
     }
 
     auto blocking = rig.manager->LoadBlocking(RequestOf(5), "ManagerFailureTests.Sweep");
     if (rig.IsLoaded(3) && rig.IsLoaded(5)) {
         (void)rig.SetHard(5, 3);
-        (void)rig.manager->Pump();
+        (void)rig.Pump();
         (void)rig.SetHard(3, 5);
-        (void)rig.manager->Pump();
+        (void)rig.Pump();
     }
 
-    (void)rig.manager->Pump();
+    (void)rig.Pump();
 }
 
 TEST(AssetManager_AllocationFailures) {
@@ -294,6 +295,10 @@ TEST(AssetManager_AllocationFailures) {
             for (uint64 id = 1; id <= 5; ++id) {
                 CHECK(!rig.IsLoaded(id));
             }
+
+            // Discard한 패키지는 모두 RootRef를 놓았고 그 Pump가 셌다(RootRef 반환 할당이 실패해
+            // 다음 Pump가 다시 한 경우도 — 11.7절 3 releasedPackages).
+            CHECK(rig.discarded > 0 && rig.released == rig.discarded);
         } else {
             failed = failing.Attempts() >= attempt;
         }

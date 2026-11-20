@@ -281,6 +281,11 @@ struct AssetManagerPumpResult {
     AssetLoaderPumpResult loader;
     uint32 residentUnitsCreated = 0;
     uint32 discardedPackages = 0;
+    // Discard를 마치고 로더 RootRef를 놓은 패키지 수다(11.7절 3 Discarding). 이 Pump 뒤 Registry
+    // GC가 그 객체를 회수할 수 있다 — Discard만 하고 RootRef를 아직 쥔 패키지는 회수할 수 없으므로
+    // GC를 거는 쪽은 이 값을 본다(RootRef 반환 할당이 실패해 다음 Pump가 다시 할 때도 그 Pump에서
+    // 센다).
+    uint32 releasedPackages = 0;
     uint32 callbacks = 0;
     uint32 deferredCommands = 0;
 };

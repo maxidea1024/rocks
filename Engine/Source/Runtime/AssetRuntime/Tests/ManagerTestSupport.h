@@ -85,8 +85,16 @@ struct ManagerRig {
         return ticket ? Move(ticket.Value()) : LoadTicket();
     }
 
+    // Pump하고 Discard·RootRef 반환 패키지 수를 더해 둔다(discarded·released).
     bool Pump(const AssetManagerPumpBudget& budget = {}) noexcept {
-        return manager->Pump(budget).IsOk();
+        auto pumped = manager->Pump(budget);
+        if (!pumped) {
+            return false;
+        }
+
+        discarded += pumped.Value().discardedPackages;
+        released += pumped.Value().releasedPackages;
+        return true;
     }
 
     // IO·worker를 내보내며 Pump를 로더 단위가 없어질 때까지 되풀이한다(횟수 상한 — 넘으면 false).
@@ -212,6 +220,9 @@ struct ManagerRig {
     TestLoaderWorker worker;
     AssetManagerConfig config;
     UniquePtr<AssetManager> manager;
+    // Pump()가 더한 Discard·RootRef 반환 패키지 수다.
+    uint64 discarded = 0;
+    uint64 released = 0;
 };
 
 } // namespace rocks::asset_test

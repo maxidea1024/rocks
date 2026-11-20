@@ -1,4 +1,5 @@
 #include <Base/Compiler.h>
+#include <Core/Diagnostics/Log.h>
 #include <Core/Diagnostics/LogSystem.h>
 #include <Core/Diagnostics/RuntimeLogSink.h>
 #include <Core/Memory/SystemAllocator.h>
@@ -850,6 +851,97 @@ TEST(Engine_ShutdownStageFailureIsReportedWithoutSkippingLaterStages) {
     }
 }
 
+namespace {
+
+// 종료 단계마다 Shutdown을 다시 부르고 그 결과를 세는 hook·client·Subsystem이다.
+struct ReentrantShutdownState {
+    uint32 calls = 0;
+    uint32 busy = 0;
+};
+
+ReentrantShutdownState reentrantShutdown;
+
+void CallShutdownAgain(Engine& engine) noexcept {
+    ++reentrantShutdown.calls;
+    if (engine.Shutdown().Error() == ErrorCode::Busy) {
+        ++reentrantShutdown.busy;
+    }
+}
+
+class ReentrantShutdownHooks final : public EngineLoopHooks, public EngineClient {
+public:
+    void BeginShutdown(Engine& engine) noexcept override {
+        CallShutdownAgain(engine);
+    }
+
+    Result<void> CompleteInFlightWork(Engine& engine) noexcept override {
+        CallShutdownAgain(engine);
+        return Result<void>::Success();
+    }
+
+    Result<uint64> DrainShutdownCleanup(Engine& engine) noexcept override {
+        CallShutdownAgain(engine);
+        return Result<uint64>::Success(0);
+    }
+
+    Result<void> VerifyShutdownClosure(Engine& engine) noexcept override {
+        CallShutdownAgain(engine);
+        return Result<void>::Success();
+    }
+
+    Result<void> StopExecutors(Engine& engine) noexcept override {
+        CallShutdownAgain(engine);
+        return Result<void>::Success();
+    }
+
+    void OnEngineShutdown(Engine& engine) noexcept override {
+        CallShutdownAgain(engine);
+    }
+};
+
+class ReentrantShutdownSubsystem final : public EngineSubsystem {
+public:
+    void BeginShutdown(Engine& engine) noexcept override {
+        CallShutdownAgain(engine);
+    }
+
+    Result<void> CompleteInFlightWork(Engine& engine) noexcept override {
+        CallShutdownAgain(engine);
+        return Result<void>::Success();
+    }
+
+    void Deinitialize(Engine& engine) noexcept override {
+        CallShutdownAgain(engine);
+    }
+};
+
+} // namespace
+
+// 종료 재진입: 종료 단계 안(Subsystem BeginShutdown·CompleteInFlightWork·Deinitialize, client
+// OnEngineShutdown, hook 다섯 단계)에서 다시 부른 Shutdown은 모두 Busy이고 바깥 종료는 그대로
+// 끝난다(Stopped·성공). 끝난 뒤 다시 부르면 아무것도 하지 않고 성공한다.
+TEST(Engine_ReentrantShutdownIsBusy) {
+    SystemAllocator allocator;
+    reentrantShutdown = ReentrantShutdownState{};
+    ReentrantShutdownHooks hooks;
+    const EngineSubsystemType subsystems[] = {
+        MakeSubsystemType<EngineSubsystem, ReentrantShutdownSubsystem>("Reentrant")};
+    EngineConfig config;
+    config.modules = &test::ProcessModules();
+    config.hooks = &hooks;
+    config.client = &hooks;
+    config.subsystems = subsystems;
+    Engine engine(allocator);
+    REQUIRE(engine.Initialize(config));
+    CHECK(engine.Shutdown());
+    CHECK(engine.State() == EngineState::Stopped);
+    constexpr uint32 ReentrantStages = 9;
+    CHECK(reentrantShutdown.calls == ReentrantStages);
+    CHECK(reentrantShutdown.busy == ReentrantStages);
+    CHECK(engine.Shutdown());
+    CHECK(reentrantShutdown.calls == ReentrantStages);
+}
+
 // --- 로그(LG6) ---
 
 namespace {
@@ -1177,8 +1269,11 @@ TEST(EngineLog_DeferredWorldDestroyWarnsOnceAndReportsResolution) {
     }
 
     logs.Pump();
+    // Debug 기록은 컴파일 하한(LogCompiledMinimum — Release는 Info)보다 낮으면 빠진다.
+    const usize expectedDebug = LogLevel::Debug >= LogCompiledMinimum ? 1 : 0;
     CHECK(capturedLogs.Count(LogLevel::Debug,
-                             "World {World} destroy deferred: {Error}; retrying each frame") == 1);
+                             "World {World} destroy deferred: {Error}; retrying each frame") ==
+          expectedDebug);
     const char* const warning = "World {World} destroy still deferred after {Frames} frames: "
                                 "{Error}; something outside still holds its objects";
     CHECK(capturedLogs.Count(LogLevel::Warning, warning) == 1);

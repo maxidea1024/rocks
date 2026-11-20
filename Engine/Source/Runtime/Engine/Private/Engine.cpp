@@ -3,6 +3,7 @@
 #include <Core/Assert.h>
 #include <Core/Diagnostics/Log.h>
 #include <Core/Diagnostics/LogContext.h>
+#include <Core/ScopeExit.h>
 #include <Engine/Engine.h>
 #include <Engine/EngineLog.h>
 #include <Platform/Atomics.h>
@@ -565,6 +566,7 @@ Result<void> Engine::RunFrame() noexcept {
 
     const uint64 frameStart = platform::MonotonicNanoseconds();
     inFrame_ = true;
+    frameRunning_ = true;
     // hook은 Registry scope 없이 부른다(World 객체는 World::With가 자기 scope를 세운다). 엔진
     // Registry를 다루는 Subsystem·client 호출 구간에만 엔진 scope를 세운다.
 
@@ -668,6 +670,7 @@ Result<void> Engine::RunFrame() noexcept {
     }
 
     inFrame_ = false;
+    frameRunning_ = false;
     frameNanoseconds_ = platform::MonotonicNanoseconds() - frameStart;
     if (config_.maxFrames != 0 && time_.frameIndex >= config_.maxFrames) {
         exitRequested_ = true;
@@ -710,6 +713,14 @@ Result<void> Engine::Shutdown() noexcept {
         return Result<void>::Failure(ErrorCode::Busy);
     }
 
+    // 종료 단계 안(Subsystem·hook·client의 종료 함수와 그 안에서 불린 callback)에서 다시 부르면
+    // Busy다 — 같은 단계를 다시 돌면 바깥 호출이 쓰는 상태(정리 중인 Subsystem 등)를 지운다.
+    if (shutdownRunning_) {
+        return Result<void>::Failure(ErrorCode::Busy);
+    }
+
+    shutdownRunning_ = true;
+    auto running = MakeScopeExit([this]() noexcept { shutdownRunning_ = false; });
     if (state_ != EngineState::Stopping) {
         state_ = EngineState::Stopping;
     }
