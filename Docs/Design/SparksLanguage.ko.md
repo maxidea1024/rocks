@@ -2,11 +2,13 @@
 
 정적 타입 · C 계열 문법 · 레지스터 VM · 비프로그래머 대상의 방어적 설계
 
-**설계 기준일 2026.11.20 · 초안 1.4 · 상태: 설계 제안 / 미구현 · 성능 미측정**
+**설계 기준일 2026.11.20 · 초안 1.5 · 상태: 설계 제안 / 미구현 · 성능 미측정**
 
 이 문서는 [전체 계획](EngineImplementationPlan.ko.md) §23이 요구하는 Rocks 게임플레이 언어 Sparks를 정의한다. 프로그래머가 아닌 사용자도 쓸 수 있도록 Go처럼 단순하게, 실수할 여지가 적게, 메모리·리소스 누수가 생길 수 없는 구조로 설계한다. 기준은 엔진 구현 상태가 아니라 전체 계획 §23과 이 언어가 연결되는 전체 계획 §5·§6·§8·§9·§10·§16·§17·§20·§21·§24·§29의 계약이다. 이 문서의 문법·이름·API는 설계 제안이며 구현·측정 결과가 아니다. 예시의 엔진 API 이름(`AddMovement`, `World.Spawn` 등)은 바인딩 규칙을 보이기 위한 예시이며 실제 이름은 각 모듈의 C++ 선언에서 생성된다. 아직 엔진에 없는 게임 타입(`Character`, `Collider`·`SphereCollider`, `SoundAsset`, `Sequence`, `DataAsset`, `ScriptComponent`, `WidgetController`, `PlaySession`)은 자리표시 이름이며 해당 모듈이 들어올 때 확정한다(§17.2).
 
-초안 1.3은 구현 착수 전 스펙 완비를 위한 개정이다. 엔진 런타임(Actor·World 코드)·Prefab 개정 3·리플렉션 B9·주변 시스템 스펙(로깅·CVar·입력·UI·콘텐츠 서명)과 이름·시점을 맞추고, 사용자 핵심 요구 3가지 — **핫 리로드 필수(§12.4), 오류 방어(§8.4), 선택형 native AOT(§12.5, Unity IL2CPP와 같은 backend 선택)** — 를 규격으로 확정하였다. 미정 값(전달 수 상한·예산·interface·CU9)을 정하고 표준 API(부록 B)를 추가하였다. 구현은 전체 계획의 순서(L0 = Foundation Gate 이후 M3)를 따른다.
+초안 1.3은 구현 착수 전 스펙 완비를 위한 개정이다. 엔진 런타임(Actor·World 코드)·Prefab 개정 3·리플렉션 B9·주변 시스템 스펙(로깅·CVar·입력·UI·콘텐츠 서명)과 이름·시점을 맞추고, 사용자 핵심 요구 3가지 — **핫 리로드 필수(§12.4), 오류 방어(§8.4), 선택형 native AOT(§12.5, Unity IL2CPP와 같은 backend 선택)** — 를 규격으로 확정하였다. 미정 값(전달 수 상한·예산·interface·CU9)을 정하고 표준 API(부록 B)를 추가하였다. 구현 순서는 초안 1.5의 §18을 따른다.
+
+초안 1.5(2026.11.20)는 구현 순서를 바꾼 개정이다. 엔진 요소와 무관한 언어 코어(LC0–LC9)를 먼저 구현하고 엔진 연동(EI1–EI9)은 엔진이 준비되는 대로 더한다(§18, SD51–SD53). 엔진·도구 코드에 필요한 사항은 [Sparks 엔진 연동 요구 목록](SparksEngineIntegration.ko.md)으로 분리하였다.
 
 초안 1.4(2026.11.20)는 레벨마다 하나인 연결 스크립트(UE Level Blueprint 대응)를 기반 타입 `LevelScript`로 더한 개정이다. 정본은 [레벨 스크립트](LevelScript.ko.md)(결정 LD1–LD20)이고, 이 문서에는 언어 쪽 요지(기반 타입·참조 형태·수명 순서·엔진 Actor 물리 이벤트·편집기 명령·진단 코드)만 두며 결정은 SD46–SD50으로 요약한다.
 
@@ -15,7 +17,7 @@
 | 기준 문서 | 전체 계획 §23 · [엔진 런타임](EngineRuntime.ko.md)(이하 ER) 2·6–8절과 World 코드 · [Prefab](Prefab.ko.md) 개정 3 · [레벨 스크립트](LevelScript.ko.md) 개정 1 · [런타임 클래스 메타데이터](RuntimeClassMetadata.ko.md)(이하 RCM) · [리플렉션 B9](ReflectionExtensions.ko.md)(이하 RX) · [입력 상세안](CoreObjectInputDetailedPlan.ko.md) · [UI 툴킷](UiToolkit.ko.md) CU1–CU9 · [로깅](LoggingSystem.ko.md) · [CVar](CVarSystem.ko.md) · [콘텐츠 서명](ContentSigning.ko.md) · [Clang 생성 Reflection](../Implementation/ReflectionMetadata.ko.md)(구현 상태) |
 | Unity·Verse 비교 기준 | Unity 수명 hook 체계(종류·호출 순서·의미). Verse는 The Book of Verse[R19] 기준이며 언어 설계의 참고 대상이다. Rocks의 Unreal 기준은 UE 5.8(5.8.4, commit `f45729c0b6f0`) |
 | Rocks 상태 | Sparks 언어·VM·컴파일러 미구현. Core C5(`NamePool::TryFind`)는 구현됨 |
-| 식별자 | 도입 단계 L0–L4, Core 변경 C1–C5, 리플렉션 확장 CU9, Gate G1–G6, 결정 SD1–SD50, 진단 코드 S0100–S1199, 부록 A·B, 참고 자료 R1–R31 |
+| 식별자 | 도입 단계 L0–L4, 언어 코어 마일스톤 LC0–LC9, 엔진 연동 단계 EI1–EI9(요구 항목 SE-*), Core 변경 C1–C5, 리플렉션 확장 CU9, Gate G1–G6, 결정 SD1–SD50, 진단 코드 S0100–S1199, 부록 A·B, 참고 자료 R1–R31 |
 
 ## 0. 핵심 결정
 
@@ -25,13 +27,13 @@
 | 단순성 | 진단은 경고 없이 오류만 두고 모든 오류에 수정 예를 제시한다. 한 가지 일에는 한 가지 방법만 둔다. 실수가 잦은 구조는 언어 규칙으로 제거한다. 기능은 core 프로필과 full 프로필로 구분한다. |
 | 문법 | C 계열이다. `var`/`let`, `fn Name(a: T): R`, 괄호로 감싼 조건식, `on` handler, `@attribute`, 범위 `0..<n`. 타입·멤버는 PascalCase로 C++ 이름과 같고, 내장 값 타입(`float`, `vec3`)과 지역 이름은 소문자로 시작한다. 한 위치에서 이름 하나는 대상 하나만 가리킨다. |
 | 수명 hook | Unity의 hook 체계(종류·의미)를 따르고 이름은 Rocks 어휘를 사용한다: `Awake`, `Enable`, `Start`, `Tick`, `FixedTick`, `LateTick`, `Disable`, `Destroy`, 물리 `TriggerEnter` 등. 프레임 안 순서와 Start 시점은 엔진 World의 tick phase를 따른다(SD24·SD26). 종료 경로마다 실행하는 hook을 정한다(SD20). |
-| 객체 참조 | "없음"은 하나다. 다른 Actor·Component는 `T?`로 받고 약한 handle로 저장하며 파괴되면 null로 읽힌다. 스크립트 단계(§5.4) 안의 파괴 요청은 그 단계가 끝날 때 World에 적용된다(SD3·SD25). 스크립트 상태는 GC root가 되지 않는다. 엔진 쪽 저장 표현은 같은 저장 단위 안 대상만 보존하는 `WeakObjectRef` 필드다(현재 코드 이름 `WeakObjectRef` — 개명은 §17.2 코드 후속. 셀 사이 참조는 World의 영속 entity 참조 — RX 5.1절). |
+| 객체 참조 | "없음"은 하나다. 다른 Actor·Component는 `T?`로 받고 약한 handle로 저장하며 파괴되면 null로 읽힌다. 스크립트 단계(§5.4) 안의 파괴 요청은 그 단계가 끝날 때 World에 적용된다(SD3·SD25). 스크립트 상태는 GC root가 되지 않는다. 엔진 쪽 저장 표현은 같은 저장 단위 안 대상만 보존하는 `WeakObjectRef` 필드다(셀 사이 참조는 World의 영속 entity 참조 — RX 5.1절). |
 | 이벤트 | `on 경로.이벤트(...)` 한 형태다. 명시 구독·closure가 없으며, 발행은 큐에 등록되어 현재 실행 조각(§5.4)이 끝난 뒤 같은 스크립트 단계 안에서 순서대로 전달된다. 기다리는 handler는 실행 중에 온 이벤트의 처리 방식을 표시한다(SD11). |
 | 유지 자원 | 멈출 때까지 계속되는 자원(반복 사운드·입력 context·로딩 요청 등)은 필드나 지역 변수(`var`·`let`)에 담아야만 생성되고(로딩 요청은 지역 변수 전용), 블록이 끝나거나 다른 값을 넣거나 객체가 비활성화·종료되면 멈춘다. 복사하거나 다른 이름으로 옮길 수 없다. |
 | 비동기 로딩 | `try await X.Load()` 하나로 로드하고, 상주는 결과 값을 보관하는 것으로 유지한다. 진행률은 지역 요청 handle로 조회한다. 이동·travel·준비 대기는 엔진이 prefetch와 로딩 화면을 관리한다. |
 | 누수 | 소유 범위를 Session·Instance·Execution·ModuleHost로 고정하고, 범위 종료의 일괄 해제는 실패할 수 없는 3개 연산(EndExec·Detach·CloseSession)으로만 수행한다. 범위 종료마다 0을 검사하고 장시간 세션의 증가 추세를 Gate로 검사한다. |
 | 실행 | 레지스터 VM(Scalar·Ref·Buf bank), bytecode 사전 컴파일(`.sparkc`), 스크립팅 backend 선택(VM 또는 native AOT = typed IR → C++, Unity의 Mono/IL2CPP 선택과 같은 맥락, target·빌드 구성별 옵션, SD31), 런타임 eval(target 정책, 기본 꺼짐), 컴파일러를 공유하는 LSP 언어 서버. |
-| 핫 리로드 | 편집기·개발 빌드에서 저장하면 실행 중인 게임에 반영된다. 함수 본문(L1)부터 필드·`on`·component 구성·클래스 계층·`@net`·`@rpc`(L2–L3)까지 제자리 migration 또는 instance 재생성으로 처리하고, 계획·검증이 끝난 변경만 원자적으로 적용하며 실패하면 이전 revision을 유지한다. Tryout 재시작은 엔진 C++ 변경과 패키지 의존 graph 변경에만 남긴다(§12.4, SD28–SD30). |
+| 핫 리로드 | 편집기·개발 빌드에서 저장하면 실행 중인 게임에 반영된다. 함수 본문과 필드·`on`(언어 코어 LC7)부터 component 구성·클래스 계층(연동 EI6), `@net`·`@rpc`(연동 EI7)까지 제자리 migration 또는 instance 재생성으로 처리하고, 계획·검증이 끝난 변경만 원자적으로 적용하며 실패하면 이전 revision을 유지한다. Tryout 재시작은 엔진 C++ 변경과 패키지 의존 graph 변경에만 남긴다(§12.4, SD28–SD30). |
 | 오류 방어 | 사용자 코드의 어떤 실수도 process·편집기·다른 instance를 망가뜨리지 않는다. 컴파일 오류는 마지막 성공 revision을 유지하고, 실행 오류는 실행 트리 → instance 순으로 범위를 좁혀 격리하며, 노출 API는 입력 오류로 Fatal하지 않는다(§8.4, SD32). |
 
 ## 1. 요구와 설계 원칙
@@ -48,7 +50,7 @@
 | 비동기 로딩 | 전체 계획 §9.2 LoadTicket·AssetLease 계약에 대응하는 `Load`·요청 handle·이동·travel. | 7 |
 | VM, 사전 컴파일, AOT | 레지스터 VM, `.sparkc`, 선택적 C++ 변환. | 11·12 |
 | 런타임 eval | 컴파일러를 런타임에 포함할 수 있는 구조, target 정책. | 12.6·12.7 |
-| 핫 리로드 필수 | 등급별 reload(본문 → 제자리 migration → instance 재생성), 원자적 적용·롤백, 편집기 요약, L1부터 단계적 도입. | 12.4 |
+| 핫 리로드 필수 | 등급별 reload(본문 → 제자리 migration → instance 재생성), 원자적 적용·롤백, 편집기 요약, 언어 코어 LC7부터 단계적 도입. | 12.4 |
 | 오류에 방어적 | 범위를 좁히는 fault 처리, 권한 구역 분석, 폭주 상한, 편집기 문맥 transaction 취소, 노출 API의 Fatal 금지, 격리 복구. | 8 |
 | 선택형 native AOT | target·빌드 구성마다 VM과 AOT 중 선택(IL2CPP 맥락), 두 backend의 비트 동일 결과, VM 항상 포함. | 12.5 |
 | VS Code 자동완성 | 컴파일러를 공유하는 LSP 서버와 VS Code 확장. | 13 |
@@ -529,7 +531,7 @@ Escape       = "\" ( '"' | "\" | "n" | "t" | "$" | "u{" Hex { Hex } "}" ) ;
 | 분류 | 타입 | 규칙 |
 |---|---|---|
 | 논리·숫자 | `bool`, `int`(64비트), `float`(64비트) | overflow·NaN·Inf는 fault. 엔진의 32비트 값과 주고받을 때(native 필드 쓰기·인자·반환) 범위를 검사하며 정수 범위 밖은 `IntegerOverflow`, float32 범위 밖은 `NonFinite`이고 상수는 컴파일 오류다. `float`를 float32로 바꿀 때는 최근접 짝수로 반올림한다 |
-| 수학 | `vec2`–`vec4`, `quat`, `mat4`, `Rotator`, `WorldPosition`, `Transform`, `Color` | Core 수학 타입의 바인딩(연산과 메서드는 부록 B). 스크립트 안의 성분은 `float`(64비트)이고 엔진에 전달할 때 위 규칙으로 변환한다. 단위·축은 엔진 규약(UE 5.8과 같은 왼손 좌표계, +X 전방·+Y 오른쪽·+Z 위, yaw 양수는 오른쪽 회전, 길이 cm·질량 kg·시간 초, `Rotator` 도, 삼각함수·quaternion 축-각·각속도 라디안)을 따른다(전체 계획 §2.2, Math 구현 문서의 Rotator 규약). 각도 단위가 둘이므로 각도를 받는 native 함수·필드는 UE처럼 이름이나 타입으로 단위를 드러내고(`Rotator` 필드는 도, `…InRadians`·`…InDegrees`), 언어 서버가 hover·자동완성에 단위를 표시한다(SD18) |
+| 수학 | `vec2`–`vec4`, `quat`, `mat4`, `Rotator`, `WorldPosition`, `Transform`, `Color` | Core 수학 타입의 바인딩(연산과 메서드는 부록 B). `WorldPosition`은 엔진에 아직 없는 자리표시 타입이며(연동 요구 SE-G13) 이름만 예약하고 규격은 엔진 타입이 생길 때 정한다. 스크립트 안의 성분은 `float`(64비트)이고 엔진에 전달할 때 위 규칙으로 변환한다. 단위·축은 엔진 규약(UE 5.8과 같은 왼손 좌표계, +X 전방·+Y 오른쪽·+Z 위, yaw 양수는 오른쪽 회전, 길이 cm·질량 kg·시간 초, `Rotator` 도, 삼각함수·quaternion 축-각·각속도 라디안)을 따른다(전체 계획 §2.2, Math 구현 문서의 Rotator 규약). 각도 단위가 둘이므로 각도를 받는 native 함수·필드는 UE처럼 이름이나 타입으로 단위를 드러내고(`Rotator` 필드는 도, `…InRadians`·`…InDegrees`), 언어 서버가 hover·자동완성에 단위를 표시한다(SD18) |
 | 문자 | `string`, `Text` | 화면 표시 API는 `Text`만 받는다. `Text`는 `Loc(...)`로 생성 |
 | 엔진 데이터 | `Tag`, `TagSet`, `InputAction`, `Soft<T>`, `Row<T>` | §3.5 리터럴. `Soft<T>`·`Row<T>`에는 빈 값이 없으며 선택 값은 `Soft<T>?`다(SD19) |
 | 컨테이너 | `Array<T>`, `Map<K,V>`, `Set<T>` | 삽입 순서로 순회. 번호·키 읽기는 `T?`. 범위 밖 쓰기는 fault. Map의 `m[k] = v`는 삽입 또는 교체이고, 복합 대입과 경로 쓰기는 키가 없으면 fault. 무공변(`Array<Derived>`는 `Array<Base>`가 아니다). 타입 인자에는 `?`를 쓸 수 없다. C++ 쪽은 Core `OrderedMap`·`OrderedSet`(삽입 순서 보존)이고 키는 `==` 가능한 단일 값(정수·bool·enum·문자열·Name·Guid·Soft·클래스 참조 — 실수·객체 키는 저장할 수 없다)이다(RX 7절). 따라서 객체 키 Map·객체 원소 Set은 VM 전용(비영속·비복제)이며 `@edit`·`@save`·`@net` 필드에 두면 컴파일 오류다 |
@@ -618,7 +620,7 @@ Unity의 hook 체계(종류·의미)를 따르고 이름은 Rocks 어휘를 사�
 | travel | 활성이면 실행 | 실행 | Destroy 반환 직후. 이전 World만 종료하고 Session은 유지 |
 | Tryout Stop, process 종료 | 활성이면 실행 | 실행 | Destroy 반환 직후. 그 뒤 CloseSession(§9.1) |
 | 격리(§8.3: fault, 필수 `@edit` 참조 대상 제거) | 실행하지 않음 | 그 instance가 파괴될 때 실행 | 격리 시점에 실행·유지 자원·연결 해제(값 필드 보존), Destroy 반환 직후 Detach |
-| GC가 도달 불가로 판정 | 실행하지 않음 | 실행하지 않음 | 회수 전 cleanup hook에서 정확히 1회(현재 `Object`에 이 hook이 없으므로 ObjectFoundations·GC 문서의 선행 조건 — §17.2). 스크립트 instance는 World 장부에 편입된 객체에만 붙으므로 이 경로는 안전망이다 |
+| GC가 도달 불가로 판정 | 실행하지 않음 | 실행하지 않음 | 회수 전 cleanup hook에서 정확히 1회(현재 `Object`에 이 hook이 없으므로 ObjectFoundations·GC 문서의 선행 조건 — 연동 요구 SE-O1). 스크립트 instance는 World 장부에 편입된 객체에만 붙으므로 이 경로는 안전망이다 |
 
 정상 종료 경로의 hook은 Teardown 예산(§9.3) 안에서 실행하며 예산을 넘거나 fault가 나면 그 hook만 끊고 종료를 계속한다. 파괴 경로의 Disable과 Destroy는 safepoint를 열지 않는다(전체 계획 §5.2).
 
@@ -693,7 +695,7 @@ Sparks 코드는 엔진의 정해진 지점에서 실행되며 이 실행 묶음
 | 6 | LateUpdate | **LateTick** |
 | 7 | PreRender 뒤 프레임 끝 정리 | 적용된 파괴의 Disable·Destroy·Detach(§4.3), reload 경계(§12.4) |
 
-입력 batch·재개 단계를 실행할 World의 phase 경계 hook은 ER 8절에 계약으로 추가한다(§17.2). "가변 tick"은 프레임마다 1회, "고정 tick"은 고정 step마다 1회의 실행 시점이며, 재개 순서 key의 tick은 프레임 번호다.
+입력 batch·재개 단계를 실행할 World의 phase 경계 hook은 ER 8절에 계약으로 추가한다(연동 요구 SE-W1). "가변 tick"은 프레임마다 1회, "고정 tick"은 고정 step마다 1회의 실행 시점이며, 재개 순서 key의 tick은 프레임 번호다.
 
 실행 조각 → 발행 큐(FIFO · emit·Changed) → 다음 실행 조각(연쇄 깊이 상한 16) → 활성 전환 적용(World `SetEnabled`, Enable·Disable hook 실행, 이때 등록된 emit은 같은 큐로 전달) → 파괴 적용(World `DestroyActor`·`DestroyComponent` 호출, 실제 hook은 프레임 끝 정리) → 다음 스크립트 단계
 
@@ -711,7 +713,7 @@ Sparks 코드는 엔진의 정해진 지점에서 실행되며 이 실행 묶음
 - **항목:** **연결 표**는 session이 소유하는 연결 기록 배열이고 **연결 slot**은 그 원소 번호다. Sparks 연결 항목은 (연결 slot, generation) key와 handler ID만 가지며, 구독 instance의 Detach가 slot의 generation을 올려 key를 무효화한다. delegate thunk는 큐 항목만 기록하며 스크립트 코드는 전달 순회에서만 실행된다(§5.4). revision lease·raw pointer를 보관하지 않는다.
 - **비활성화:** Disable은 항목을 삭제하지 않고 비활성으로 표시하며 Enable이 다시 활성화한다. 항목은 Detach, 격리, 원천 필드 변경(해당 발행자분), 선언이 추가·삭제·변경되는 reload, CloseSession에서 삭제된다.
 - **구독자가 먼저 끝날 때:** 구독자 Detach가 자기 key를 폐기하면 항목은 즉시 호출 대상에서 제외되고, 발행자의 다음 compact에서 제거된다.
-- **발행자가 먼저 끝날 때:** 발행자의 Detach 또는 회수 전 cleanup hook(§5.1, 선행 조건 §17.2)이 delegate를 비우고, 각 항목의 소멸이 연결 기록을 해제한다. GC 경로로 회수되는 경우에도 cleanup hook이 정확히 1회 실행되므로 누락이 없다.
+- **발행자가 먼저 끝날 때:** 발행자의 Detach 또는 회수 전 cleanup hook(§5.1, 연동 요구 SE-O1)이 delegate를 비우고, 각 항목의 소멸이 연결 기록을 해제한다. GC 경로로 회수되는 경우에도 cleanup hook이 정확히 1회 실행되므로 누락이 없다.
 - **필드·배열 원천:** 필드가 바뀌면(스크립트·로드·복제 모두) 실행 조각이 끝날 때 서로 다른 발행자 집합을 비교해 추가·제거한다. 같은 객체가 배열에 여러 번 있어도 연결은 하나이고 handler는 이벤트마다 1회 호출된다.
 - **reload:** `on` 선언이 추가·삭제·변경되면 살아 있는 instance의 연결을 reload 경계에서 다시 구성한다.
 - **session 범위:** 스크립트는 자기 session이 소유한 발행자에만 연결한다. 입력 action은 session의 InputConsumerScope 안의 action instance에, 엔진 전역 이벤트는 session World 이벤트 proxy에 연결한다. 공유 에셋은 이벤트를 노출하지 않는다.
@@ -837,7 +839,7 @@ async fn LoadPreviews() {                          // 진행률이 필요할 때
 - `X.Load()`와 `Assets.LoadAll(list)`는 요청 handle `LoadRequest<T>`를 반환하며 `await`의 결과는 `Result<T>`다. 요청 생성은 실패하지 않으며 상한·예산을 넘으면 admission(새 요청의 수락)이 지연된다. 요청 handle은 지역 변수에만 둘 수 있고 한 번만 `await`한다. 상주를 유지하는 방법은 결과 값을 보관하는 것 하나다.
 - `LoadAll`은 전부 성공하거나 하나의 오류를 반환하고 전체 진행률을 제공한다.
 - 같은 package 요청은 엔진이 하나의 로드로 합친다. 한 실행의 취소는 다른 실행의 요청을 취소하지 않는다(전체 계획 §9.2).
-- 결과는 현재 target이 요구하는 준비 mask(CPU 객체·render·physics 등)를 충족한 뒤 반환된다. 임시 fallback 표시 상태를 완료로 보지 않는다. 현재 엔진의 `ReadyMask`는 `Cpu`만 구현되어 있고 Render는 `UnsupportedCapability`이므로 L2의 외형 에셋 로드는 렌더 단계의 준비 mask 구현이 선행 조건이다.
+- 결과는 현재 target이 요구하는 준비 mask(CPU 객체·render·physics 등)를 충족한 뒤 반환된다. 임시 fallback 표시 상태를 완료로 보지 않는다. 준비 mask 타입은 아직 코드에 없다(AssetManager 단계 — 연동 요구 SE-A1).
 - 해제된 package는 상한이 있는 cache(전체 계획 §29.6 allowlist)에 잠시 남아 같은 에셋을 반복 로드할 때의 비용을 줄인다. 같은 호출 위치의 반복 로드는 ledger에 표시한다.
 - 시간 제한은 `await Race(req, Delay(5.0, Clock.UI));` 다음 `req.IsDone`을 확인한다. `All`·`Race`의 인자로 쓰는 것은 요청 handle의 1회 `await`로 세지 않는다. `Race`에서 진 요청은 취소되지 않고 변수의 범위가 끝날 때까지 계속 진행한다(규칙 2). 그래서 "5초 뒤 안내를 띄우고 계속 기다리기"는 `Race` 다음 `try await req`로 쓴다. 결과를 꺼내는 `try await req`는 1회만 허용하고 두 번째는 `ContractViolation` fault다.
 
@@ -963,7 +965,7 @@ Characters/PlayerCharacter.spark:42:5: error S0731: Cannot assign to a function 
 | 비활성화 | Disable hook 후 실행 취소·유지 자원 해제·연결 비활성 |
 | 파괴 | 스크립트 단계 끝 적용(PendingDestroy) → 프레임 끝 정리에서 묶음 단위 Disable(활성이면) → Destroy hook → Detach(§4.3) |
 | 격리 | hook 없이 실행·유지 자원·연결 해제, 값 필드 보존. 그 instance가 파괴될 때 Destroy hook 후 Detach |
-| GC가 도달 불가로 판정 | 회수 전 cleanup hook에서 Detach(hook 없음, 정확히 1회 보장, 전체 계획 §5.2 — 선행 조건 §17.2) |
+| GC가 도달 불가로 판정 | 회수 전 cleanup hook에서 Detach(hook 없음, 정확히 1회 보장, 전체 계획 §5.2 — 연동 요구 SE-O1) |
 | 셀 일괄 unload | Disable·Destroy, 각 Destroy 반환 직후 Detach. 발행자별 compact는 셀 단위 1회 |
 | travel | 이전 World 정상 종료(Disable·Destroy·Detach). Session은 유지 |
 | Tryout Stop | World 정상 종료(Disable·Destroy) 후 CloseSession |
@@ -1059,7 +1061,7 @@ public:
 };
 ~~~
 
-Sparks에서는 `var MaxHealth: int`(편집·저장), 읽기 전용 속성 `Current: int`, `event Died(killer: Actor?)`, `fn ApplyDamage(amount: int, instigator: Actor?): Result<void>`로 보인다(Studio hover 표기, 소스 문법이 아님). `WeakObjectRef`는 현재 코드의 `WeakObjectRef`다(개명은 §17.2 코드 후속).
+Sparks에서는 `var MaxHealth: int`(편집·저장), 읽기 전용 속성 `Current: int`, `event Died(killer: Actor?)`, `fn ApplyDamage(amount: int, instigator: Actor?): Result<void>`로 보인다(Studio hover 표기, 소스 문법이 아님).
 
 | 예시의 이름 | 현재 상태 | 선행 |
 |---|---|---|
@@ -1070,7 +1072,7 @@ Sparks에서는 `var MaxHealth: int`(편집·저장), 읽기 전용 속성 `Curr
 | `Replicated` | 없음 | 네트워크 단계(RX 0절 범위 밖) |
 | `FieldKind::Event` | 없음 | CU3 |
 
-**Sparks 필드와 엔진 필드 플래그.** Sparks 클래스의 필드는 C++ 필드가 아니라 스크립트 instance 저장소에 놓이며, 런타임에 등록하는 schema(동적 schema — §17.2 선행 조건)로 리플렉션·저장·override·Changed에 참여한다. attribute는 다음 플래그에 대응한다.
+**Sparks 필드와 엔진 필드 플래그.** Sparks 클래스의 필드는 C++ 필드가 아니라 스크립트 instance 저장소에 놓이며, 런타임에 등록하는 schema(동적 schema — 연동 요구 SE-O3)로 리플렉션·저장·override·Changed에 참여한다. attribute는 다음 플래그에 대응한다.
 
 | Sparks | 엔진 필드 의미 |
 |---|---|
@@ -1155,7 +1157,7 @@ MIN.F64    s1, s4, s5
 
 ### 12.2 안정 ID
 
-- TypeId·FieldId·SubobjectGuid·FunctionId·RpcId는 C++와 같은 `.rocksids.json` 형식을 쓴다(전체 계획 §7.1). 현재 메타 컴파일러는 빌드와 분리된 `ids add/rename/retire` 저작 명령으로만 발급하고 이름 키는 C++ 정규 이름이며 kind는 type·field·enum 계열뿐이다. Sparks 컴파일러는 자기 패키지 manifest의 **두 번째 발급자**로서 모듈 경로 기반 이름 키(`<패키지>/<경로>.<선언>`)와 subobject·function·rpc kind를 쓴다(StableIdManifest 확장, §17.2). 개발 빌드에서는 저장 후 컴파일이 새 선언의 ID를 발급하고, 입력 중인 미완성 선언에는 발급하지 않는다.
+- TypeId·FieldId·SubobjectGuid·FunctionId·RpcId는 C++와 같은 `.rocksids.json` 형식을 쓴다(전체 계획 §7.1). 현재 메타 컴파일러는 빌드와 분리된 `ids add/rename/retire` 저작 명령으로만 발급하고 이름 키는 C++ 정규 이름이며 kind는 type·field·enum 계열뿐이다. Sparks 컴파일러는 자기 패키지 manifest의 **두 번째 발급자**로서 모듈 경로 기반 이름 키(`<패키지>/<경로>.<선언>`)와 subobject·function·rpc kind를 쓴다(StableIdManifest 확장, 연동 요구 SE-R8). 개발 빌드에서는 저장 후 컴파일이 새 선언의 ID를 발급하고, 입력 중인 미완성 선언에는 발급하지 않는다.
 - 데이터가 연결된 ID(`@save`·`@net`·`@edit` 필드, 소유 component, enum case)의 소실은 매 컴파일의 오류이며 빠른 수정이 `@formerly("OldName")`을 삽입한다. `@formerly`는 manifest의 aliases 항목으로 기록된다. 의도한 삭제는 `rocks ids retire`(AppInfoCommandLine 14절 commandlet)로 tombstone을 남긴다. enum은 case 이름으로 저장하므로 case 이름 변경에도 `@formerly`를 쓴다.
 - FunctionId는 이벤트 handler·RPC·`@cheat`·`@editorButton`·리플렉션 호출 대상·interface 구현 함수·엔진 가상 함수의 `override fn`에 발급한다.
 
@@ -1171,8 +1173,8 @@ MIN.F64    s1, s4, s5
 
 | 등급 | 대상 변경 | 처리 | 도입 |
 |---|---|---|---|
-| R1 본문 교체 | 함수·handler 본문 | 새 revision을 게시한다. 이후 시작하는 handler·호출은 새 revision을 쓴다. 대기 중인 실행은 `ReloadExecutions`(아래)를 따른다 | L1 |
-| R2 제자리 migration | Sparks 필드 추가·삭제·형식 변경, `on` 선언 추가·삭제·변경, 필드 기본값, `const`, Tag·Action·CVar 사전, WidgetAsset schema | reload 경계에서 FieldId migration·구독 연결 재구성. 사전·schema 변경은 그것을 쓰는 모듈을 다시 컴파일한 뒤 적용한다 | L2 |
+| R1 본문 교체 | 함수·handler 본문 | 새 revision을 게시한다. 이후 시작하는 handler·호출은 새 revision을 쓴다. 대기 중인 실행은 `ReloadExecutions`(아래)를 따른다 | LC7 |
+| R2 제자리 migration | Sparks 필드 추가·삭제·형식 변경, `on` 선언 추가·삭제·변경, 필드 기본값, `const`, Tag·Action·CVar 사전, WidgetAsset schema | reload 경계에서 FieldId migration·구독 연결 재구성. 사전·schema 변경은 그것을 쓰는 모듈을 다시 컴파일한 뒤 적용한다 | LC7(Sparks 필드·`on`·const), 사전·schema는 EI5 |
 | R3 instance 재생성 | 클래스 계층(기반 타입) 변경, `let` component 구성 변경(subobject 추가·삭제), struct 배치가 바뀌어 제자리 변환이 불가능한 경우 | 현재 필드 값을 FieldId별로 보관 → 정상 종료 hook(Disable·Destroy)과 Detach → 새 클래스로 재생성(subobject는 Prefab 3.2절 표대로, 삭제된 SubobjectGuid를 가리키던 prefab override는 Prefab 3.7절 고아 보존) → 보관한 값을 spawn parameter 단계에 덮어쓰기 → Awake·Enable. 같은 Actor graph의 재생성은 한 묶음이다. 편집 World(Tryout 밖)에 배치된 instance도 같은 경로로 재생성한다(UE reinstancing 대응) | L2 |
 | R4 복제 schema 교체 | `@net` 필드 추가·삭제·형식 변경, `@rpc` 추가·삭제·시그니처 변경 | `@rpc` 추가는 RpcId manifest에 덧붙여 즉시 반영한다. 그 밖에는 클래스의 복제 schema hash를 올리고 모든 Tryout process가 같은 프레임 경계에서 새 revision을 적용한다. 삭제·변경된 RpcId의 대기 메시지는 폐기·보고하고, 서버는 해당 클래스 instance의 전체 상태를 late join 경로(§5.3 활성화 전 적용 규칙)로 다시 보내며, 클라이언트는 hash가 맞을 때까지 그 instance의 복제 수신을 보류한다 | L3 |
 | Tryout 재시작 | 엔진 C++ 변경, 패키지 의존 graph 변경 | 재시작 안내(자동 재시작하지 않음) | — |
@@ -1202,7 +1204,7 @@ MIN.F64    s1, s4, s5
 
 **편집기 표시.** reload마다 요약을 보인다: 적용된 revision, 등급별 대상 수, 취소된 실행 수, 해제된 자원, 손실이 있었던 변환, 재생성·격리된 instance, 다시 시작한 Tick, 이전 revision으로 실행 중인 handler 수와 재시작 명령. 실패한 reload는 원인 진단과 "이전 revision 유지 중"을 표시한다.
 
-**엔진 쪽 계약(선행 조건, §17.2).** 같은 TypeId 아래 여러 revision 레코드의 공존과 instance별 revision 포인터·경계에서의 교체·마지막 lease 반환 시 retire(RCM "모듈 reload"의 Busy 거부를 대체), 스크립트 필드의 동적 schema 등록과 graph encode/decode·override 경로·Changed/CU5 통지, live instance의 subobject 추가·삭제, World 프레임의 reload 경계 hook.
+**엔진 쪽 계약(연동 요구 SE-O2·O3·A3·W1·W5).** 같은 TypeId 아래 여러 revision 레코드의 공존과 instance별 revision 포인터·경계에서의 교체·마지막 lease 반환 시 retire(RCM "모듈 reload"의 Busy 거부를 대체), 스크립트 필드의 동적 schema 등록과 graph encode/decode·override 경로·Changed/CU5 통지, live instance의 subobject 추가·삭제, World 프레임의 reload 경계 hook.
 
 **목표와 시험.** 본문 reload는 저장부터 적용까지 2 s 이내(SD8, 전체 계획 I1). G2 soak의 "5분마다 reload"는 L2 Gate, G5 reload 행렬(§9.3)은 등급별 L1–L3 Gate다.
 
@@ -1282,7 +1284,7 @@ MIN.F64    s1, s4, s5
 
 - **source eval**은 기존 타입에 대해 함수·handler를 실행하며 타입을 선언하지 않고, 변경 가능한 전역이 없고, 이름을 새로 등록하지 않는다. 같은 정적 타입 검사·검증·예산·ledger를 거치며 호출 가능한 API는 capability(기본 `ModSafe`: World 읽기·쓰기, IO·네트워크·저장 금지)로 제한한다.
 - **외부 모듈**은 자체 ID manifest를 갖고 타입을 pool과 무관한 NameKey([Core 상세 사양](CoreDetailedSpec.ko.md) T02)로 등록한다. 의존 패키지의 interface hash가 다르면 로드를 거부한다. `@save`·`@net`·`@rpc`는 서명된 모듈에서만 허용한다.
-- **서명:** 쿡 패키지 안의 `.sparkc`는 콘텐츠 서명(RSIG)이 이미 덮는다. 외부 모듈 서명은 RSIG 형식을 재사용하되 label `"rocks.sparks-module.v1\0"`, 모드 서명 전용 키 목록, `contentVersion` 하한과 `scope`를 갖는 별도 봉투다. Release가 매니페스트 밖 입력을 읽지 않는다는 ContentSigning 1절에 `ExternalModules=Signed` 경로를 예외로 등록하고, `ScriptEval=On`인 출시는 매니페스트 밖 입력을 받는다는 점을 target 결정 기록에 남긴다(§17.2).
+- **서명:** 쿡 패키지 안의 `.sparkc`는 콘텐츠 서명(RSIG)이 이미 덮는다. 외부 모듈 서명은 RSIG 형식을 재사용하되 label `"rocks.sparks-module.v1\0"`, 모드 서명 전용 키 목록, `contentVersion` 하한과 `scope`를 갖는 별도 봉투다. Release가 매니페스트 밖 입력을 읽지 않는다는 ContentSigning 1절에 `ExternalModules=Signed` 경로를 예외로 등록하고, `ScriptEval=On`인 출시는 매니페스트 밖 입력을 받는다는 점을 target 결정 기록에 남긴다(연동 요구 SE-B6).
 - 외부 모듈이 생성한 Actor의 수명은 World가 관리하며 모듈 unload 전에 파괴한다. 저장 대상에서 제외(transient)한다.
 - unload는 비동기다(Unloading → Unloaded). TypeRegistry가 Busy이면 120 프레임 동안 재시도한 뒤 그 모듈을 사용 중지하고 Gate 실패로 보고한다. Unloading 중 호출은 `ModuleUnloading` 오류를 반환하고, `Result`를 반환하지 않는 호출은 `ContractViolation` fault다.
 
@@ -1418,7 +1420,7 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 
 ### 17.1 전체 계획·입력 상세안·UI 툴킷(초안 1.2까지 반영)
 
-개정 대상은 전체 계획, 입력 상세안, UI 툴킷, Core 구현 코드다. 위치 열의 절 번호는 접두어가 없으면 전체 계획의 절이다. "현재 문구"는 전체 계획 개정 1.6 기준이며(개정 1.8 행은 1.7 기준), 문서 항목은 모두 전체 계획 개정 1.7·1.8, 입력 상세안, UI 툴킷에 반영하였다. 수명 단계 이름(BeginPlay 등)을 쓰는 전체 계획 §5.3과 입력 상세안 586행은 엔진 내부 단계 이름이므로 그대로 두고 전체 계획 §20.2의 대응표로 연결한다. Core 구현 코드(C1–C5)는 도입 단계 L1의 구현 대상이다.
+개정 대상은 전체 계획, 입력 상세안, UI 툴킷, Core 구현 코드다. 위치 열의 절 번호는 접두어가 없으면 전체 계획의 절이다. "현재 문구"는 전체 계획 개정 1.6 기준이며(개정 1.8 행은 1.7 기준), 문서 항목은 모두 전체 계획 개정 1.7·1.8, 입력 상세안, UI 툴킷에 반영하였다. 수명 단계 이름(BeginPlay 등)을 쓰는 전체 계획 §5.3과 입력 상세안 586행은 엔진 내부 단계 이름이므로 그대로 두고 전체 계획 §20.2의 대응표로 연결한다. Core 구현 코드 C1–C4는 연동 단계 EI3의 선행이다(연동 요구 SE-C1–C4, C5는 구현됨).
 
 | 위치 | 현재 문구 | 이 설계 |
 |---|---|---|
@@ -1440,44 +1442,106 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 | §22.6 session 구성(개정 1.8) | VM globals·coroutine·root | 스크립트 실행·연결 표·대기(전역 변수와 GC root 없음) |
 | §23.4 conformance(개정 1.8) | 순환 import를 오류 사례로 열거 | 패키지 간 순환 의존(파일 간 순환 참조는 허용) |
 
-### 17.2 초안 1.3이 요구하는 후속(다른 문서·코드)
+### 17.2 다른 문서의 후속 개정
 
-이번 개정은 문서 작업이다. 아래 항목은 이 규격이 기대는 다른 문서·코드의 변경이며, 표시한 시점에 해당 작업에서 반영한다. Sparks 구현은 전체 계획의 순서(L0 = Foundation Gate 이후 M3)를 따른다.
+엔진·도구 **코드**에 필요한 사항은 [Sparks 엔진 연동 요구 목록](SparksEngineIntegration.ko.md)이 정본이다(초안 1.5에서 분리). 항목마다 현재 상태와 그것이 필요한 연동 단계를 적고, 엔진이 준비되는 대로 하나씩 더한다. 이 절에는 다른 **문서**의 개정만 남긴다.
 
 | 대상 | 필요한 변경 | 시점 |
 |---|---|---|
-| **코드베이스: `WeakObjectRef<T>` → `WeakObjectRef<T>`** | `ObjectRuntime/Public/Object/ObjectRefs.h`의 타입 이름, 메타 컴파일러의 타입 인식·오류 문구, 시험, policy, 구현 문서(Docs/Implementation)의 `WeakObjectRef` 표기, 그리고 다른 세션이 수정 중이던 CurveData 문서의 표기 1곳. 별칭 없이 바꾼다(SD23). 설계 문서 표기는 초안 1.3과 함께 바꾸었다 | 리플렉션 매크로 단축 개명과 묶어 사용자 착수 지시 때. **나중에 코드베이스에서도 고칠 것** |
-| 전체 계획 §5.2·§9.2·§20.2–20.5·§23 | Entity → Actor, TransformComponent → SceneComponent, `OnAwake(ComponentContext&)` → 현재 시그니처, tick group 이름을 World tick phase로(ER 2절이 예고한 개정의 미반영분), §23의 도입 단계표(핫 리로드 L1–L3, AOT backend L3)·"LLVM 기반 AOT"를 스크립팅 backend 선택(SD31)으로, §29.6 NL09에 G5·G6 추가 | 다음 전체 계획 개정 |
-| ER 7.2 | Component용 시작 준비 hook(`IsReadyToStart`), Sparks Start bridge 계약(SD24) | L2 전 |
-| ER 7.4·7절 | 스크립트 단계 중 파괴·활성 요청의 bridge 큐 계약(SD25), 프레임 끝 정리 반복 상한, 격리 bridge 계약(§8.3) | L2 전 |
-| ER 8절 | 입력 batch·재개 단계와 reload 경계를 실행할 phase 경계 hook(§5.4) | L1 전 |
-| ObjectFoundations·GC 대규모 처리 | 회수 전 정확히 1회 실행되는 cleanup hook(GC 도달 불가 경로의 Detach, §5.1) | L1 전 |
-| RCM·TypeRegistry | 같은 TypeId의 revision 공존·instance별 revision·retire(모듈 reload의 Busy 거부 대체), 스크립트 필드 동적 schema 등록(전체 계획 §23.4 "opaque script field storage" 구체화) | L1 전(본문 reload), L2 전(필드 migration) |
-| Prefab | Sparks reload(R3)에 따른 subobject 표 변경 행, live instance의 subobject 추가·삭제 | L2 전 |
-| 메타 컴파일러·StableIdManifest | Sparks 컴파일러의 두 번째 발급자 계약과 kind 확장(§12.2), `ScriptExtensible`·`ScriptName`·`ScriptWritable` 지정자, `TryX` 자동 이름(SD44), `NoFatalOnInput` 선언과 policy | L1 |
-| UiToolkit CU1–CU9 | CU9 규격(§10.3) 반영, CU1 attribute 대응(§10.1), CU5 계산 속성 setter 통지(§10.2) | L1 |
-| CompilerDiagnostics | 엔진 공통 진단 코드 등록부(Sparks S0100–S1199, 메타 컴파일러 RMC####, UI validate 코드) | L1 |
-| ContentSigning 1절 | `ExternalModules=Signed` 예외와 모듈 서명 봉투(§12.7) | L3 |
+| 전체 계획 §5.2·§9.2·§20.2–20.5·§23 | Entity → Actor, TransformComponent → SceneComponent, `OnAwake(ComponentContext&)` → 현재 시그니처, tick group 이름을 World tick phase로(ER 2절이 예고한 개정의 미반영분), §23의 도입 단계표를 언어 코어·엔진 연동 두 갈래(§18)로, "LLVM 기반 AOT"를 스크립팅 backend 선택(SD31)으로, §29.6 NL09에 G5·G6 추가 | 다음 전체 계획 개정 |
+| ER 7.2·7.4·8절 | Component 시작 준비 hook과 Start bridge 계약(SD24), 파괴·활성 bridge 큐와 격리 bridge 계약(SD25, §8.3), 스크립트 단계 hook(§5.4) — 연동 요구 목록 SE-W1–W3의 설계 | EI3 전 |
+| ObjectFoundations·GC 대규모 처리 | 회수 전 cleanup hook(SE-O1)의 설계 | EI2 전 |
+| RCM·TypeRegistry | 타입 revision과 스크립트 클래스 등록(SE-O2·O3)의 설계 | EI2 전 |
+| Prefab | Sparks reload(R3)에 따른 subobject 표 변경 행, live instance의 subobject 추가·삭제 | EI6 전 |
+| UiToolkit CU1–CU9 | CU9 규격(§10.3) 반영, CU1 attribute 대응(§10.1), CU5 계산 속성 setter 통지(§10.2) | EI1 전 |
+| CompilerDiagnostics | 엔진 공통 진단 코드 등록부(Sparks S0100–S1199, 메타 컴파일러 RMC####, UI validate 코드) | LC0와 함께 |
+| ContentSigning 1절 | `ExternalModules=Signed` 예외와 모듈 서명 봉투(§12.7) | EI9 전 |
 | CVarSystem 14.5절 | Sparks 노출 문법(§10.4) 반영 | 다음 CVar 문서 개정 |
-| Core `Delegate` | C1–C4 | L1 |
 | 게임 타입 자리표시 | `Character`·`Collider`·`SphereCollider`·`SoundAsset`·`Sequence`·`DataAsset`·`ScriptComponent`·`WidgetController`·`PlaySession`의 Rocks 이름 확정(Rocks 고유 이름 원칙) | 해당 모듈 진입 시 |
 | ID 개념 이름 | `SoftEntityId`·영속 Entity Guid·파생 Entity ID를 Actor 계열 이름으로 바꿀지 Prefab과 함께 결정 | Prefab PF 단계 |
-| (초안 1.4) World·물리 | `LevelScript` 타입·`Level.levelScript`·`World::SetLevelScript`, LevelScript 파생 spawn·파괴 거부, 엔진 Actor 물리 이벤트 `TriggerEntered`·`TriggerExited`·`CollisionEntered`·`CollisionExited`([LevelScript](LevelScript.ko.md) 4절) | L2 전(이벤트는 물리 단계) |
-| (초안 1.4) 편집기·언어 서버 | Outliner "레벨 스크립트" 항목, 레벨 스크립트 명령·템플릿(전체 계획 §22.3), `sparks-lsp` 명령 `sparks.levelScript.*`(§13) | 편집기 단계, LSP L2 |
+| (초안 1.4) 편집기 | Outliner "레벨 스크립트" 항목, 레벨 스크립트 명령·템플릿(전체 계획 §22.3), `sparks-lsp` 명령 `sparks.levelScript.*`(§13) | 편집기 단계 |
+
+끝난 항목: 코드의 `WeakRef<T>` → `WeakObjectRef<T>` 개명(커밋 `e0e78953`, SD23), Core C5 `NamePool::TryFind`.
 
 ## 18. 도입 단계
 
-| 도입 단계 | 언어 기능 | 완료 기준(전체 계획 §23.1) |
+구현은 두 갈래로 나눈다(SD51, 2026-11-20 사용자 결정). 엔진 요소와 무관한 **언어 코어**(LC0–LC9)를 먼저 만들고, 엔진 쪽이 준비되는 대로 **엔진 연동**(EI1–EI9)을 하나씩 더한다. 언어 코어는 엔진의 다른 작업(리플렉션 확장·World·에셋)을 기다리지 않고, 그 작업들도 Sparks를 기다리지 않는다.
+
+### 18.1 언어 코어와 host 경계
+
+언어 코어가 엔진 없이 완결되도록 경계를 둘로 정한다(SD52).
+
+- **binding schema는 파일이다.** 컴파일러는 엔진 API를 C++ 리플렉션에서 직접 읽지 않고 binding schema 파일(`<모듈>.sparkbind.json`)과 사전 파일(Tag·Action·CVar·에셋·`Loc` catalog)에서만 읽는다. 내용은 §10.2의 표(타입·필드·계산 속성·함수·자원 정책·파괴 지연·이벤트)다. 언어 코어는 손으로 쓴 시험용 schema(가짜 엔진: `Actor`·`Component`·`ScriptComponent`·`SceneComponent`와 §2 예시가 쓰는 타입)로 개발하고, 실제 엔진 선언에서 이 파일을 생성하는 것은 연동 단계 EI1이다. 언어 서버가 엔진 없이 동작하는 것(§13)도 같은 파일 덕분이다. 세부 형식은 LC2 착수 때 이 절에 확정한다.
+- **VM은 엔진을 host interface로만 부른다.** VM이 밖으로 부르는 것은 객체 handle의 생존·타입 판정, native 필드 읽기·쓰기, native 함수 호출(FunctionId와 bank 창), native 이벤트 연결·해제, 파괴·활성 전환 적용 요청(§4.3), 유지 자원 해제, 로드 요청과 lease 반환, 시계(§6.1), 로그·fault 보고다. host가 VM에 들어오는 것은 instance 생성·Detach, 수명 hook 실행, 스크립트 단계 열기·닫기, 이벤트 항목 넣기, 재개, revision 게시, CloseSession이다. 엔진의 `ScriptRuntime` 모듈(EI2)이 이 interface를 ObjectRuntime·World 위에 구현한다. 세부 API는 LC5(1차)·LC6(2차) 착수 때 이 절에 확정한다.
+- **Sparks 필드의 저장소는 VM이 가진다.** Sparks 클래스의 필드는 VM의 instance 저장소에 있고, 엔진에는 연동 단계에서 런타임 타입 등록으로 보인다(연동 요구 SE-O3). 그래서 필드 migration(R2)까지 언어 코어 안에서 완결된다.
+- **가짜 host로 시험한다.** `SparksTestHost`는 가짜 객체표(handle + generation), 결정적 시험 시계, 수명 hook·tick phase driver, 가짜 native 함수·이벤트·유지 자원·로드를 가진 headless host다. conformance corpus(§13.1)와 `@test`가 이 host에서 돈다. 실제 시간에 기대지 않는다.
+
+모듈 배치(SD53):
+
+| 모듈 | 위치 | 내용 | 의존 |
+|---|---|---|---|
+| `SparksVm` | `Engine/Source/Runtime` | bytecode와 `.sparkc` 형식, verifier, interpreter, 값 버퍼, 실행·발행 큐·ledger, 핫 리로드, host interface | Core |
+| `SparksCompiler` | `Engine/Source/Runtime` | lexer, parser, 검사기, typed IR, bytecode 생성, 진단, schema·manifest reader, formatter | Core, SparksVm |
+| `SparksTestHost` | `Engine/Source/Developer` | 가짜 host, conformance runner | Core, SparksVm, SparksCompiler |
+| `Sparks`(CLI) | `Programs` | `sparks check`·`build`·`test`·`fmt` | 위 모듈, Launch |
+| `SparksLsp` | `Programs` | 언어 서버 `sparks-lsp` | SparksCompiler, Launch |
+| `ScriptRuntime`(연동, EI2) | `Engine/Source/Runtime` | host 구현, native call thunk, Sparks 클래스의 타입 등록 | SparksVm, ObjectRuntime, MetaSchema, Task |
+
+- 언어 모듈을 Engine 층에 두는 이유는 Core 층을 가볍게 유지하기 위해서다(엔진 기능 모듈은 Engine 층 — SpatialIndex와 같다). 의존은 Core뿐이므로 World·RHI 없이 링크된다.
+- `SparksCompiler`가 Runtime에 있는 이유는 런타임 eval이 켜진 target의 실행 파일에 들어갈 수 있어야 하기 때문이다(SD5). `ScriptEval=Off`인 target은 링크하지 않는다(§12.6).
+- 언어 코어가 쓰는 기반은 모두 이미 있다: Core의 컨테이너(`Array`·`HashMap`·`OrderedMap`·`OrderedSet`·`Span`), 문자열(`String`·`StringView`·`StringBuilder`의 최단 실수 표기·`Unicode`·`NumberText`·`EditDistance`·`Path`), `ArenaAllocator`·`BudgetAllocator`, `Result`, `Hash`·`Sha256`, `Json`(읽기·쓰기, JSON5 읽기), `ByteReader`·`ByteWriter`, `RandomStream`, 로그, Base의 overflow 검사 도우미(`Base/Checked.h`), PlatformBase의 파일 API(읽기·디렉터리 열거)와 원자 연산.
+- 시험은 기존 관례를 따른다. conformance runner의 `TEST`는 `SparksTestHost/Tests`에 두고 EngineTests에 등록한다(`TestSupport`는 모듈이 아니라 시험 실행 파일이 직접 끌어오는 소스다). corpus는 `SparksTestHost/Conformance`에 두고 실행 중 엔진 디렉터리 탐색(`HostConfig::FindEngineDirectory`)으로 찾는다. 저장소가 줄 끝을 LF로 정규화하므로(`.gitattributes`) CRLF·잘못된 UTF-8처럼 바이트가 중요한 사례는 C++ 시험에 직접 넣는다.
+
+### 18.2 언어 코어 마일스톤
+
+각 마일스톤은 conformance corpus의 해당 영역이 통과하는 것으로 끝난다. LC0–LC7과 LC9는 밖의 선행 작업이 없고, LC8만 표준 입출력 API(연동 요구 SE-B7)를 기다린다. "함께 하는 일"은 Sparks 쪽이 그 마일스톤에서 직접 하는 다른 모듈·문서의 작은 변경이다.
+
+| 마일스톤 | 내용 | 완료 기준 | 밖의 선행 |
+|---|---|---|---|
+| LC0 기반 | 모듈 뼈대, 소스 관리(UTF-8 검증·줄·열), 진단 인프라(§8.1 형식·S 코드 표·수정 예), conformance runner(`.spark` + `.expect`), TestHost 뼈대 | 진단 출력 형식 golden, runner 동작 | 없음. 함께 하는 일: 진단 코드 등록부 문서(SE-R9) |
+| LC1 어휘·구문 | lexer(§3.1·§3.6), 오류 허용 parser와 AST(core·full 문법 전부). 진단 S01xx·S02xx | §3.6의 생성 규칙마다 양성·음성 사례, 깨진 입력에서 연쇄 오류 없이 복구 | 없음 |
+| LC2 이름·타입 | binding schema 형식과 reader, 시험용 가짜 엔진 schema, 패키지 manifest·import, prelude와 부록 B 선언, 이름 해석(§3.1·§3.4), 타입 검사(§3.2·§3.3·§4 — 숫자, null 흐름, await 이후 `T?`, 대입, `let`, 미사용), 상수식, 프로필 검사. 진단 S03xx–S05xx·S07xx·S11xx | 해당 절의 "오류다" 문장마다 음성 사례, §2 예시가 시험용 schema로 통과 | 없음 |
+| LC3 문맥·수명 규칙 | 효과 추론과 실행 문맥(§6.2), hook·이벤트 선언 검사(§5), 재진입 표시(SD11), 유지 자원 규칙(§7.1), 권한 구역(SD45), 저장 가능 타입과 호환성(§15). 진단 S06xx·S08xx–S10xx | 컴파일러 앞단 완성 — 본문의 "오류다" 문장과 SD 전부에 음성 사례 | 없음 |
+| LC4 IR·bytecode | typed IR, bank 할당, 32비트 명령 인코딩, `.sparkc` 읽기·쓰기(§12.1), verifier(§11), 패키지 ID manifest(§12.2), interface·body hash(§12.3) | 같은 입력 → 같은 바이트, 변조 bytecode의 verifier 거부, 재컴파일 범위 시험 | 없음. 함께 하는 일: 메타 컴파일러 `ids` 파서에 Sparks kind·이름 키 추가(SE-R8의 파서 부분 — CI가 모든 `.rocksids.json`을 검사하므로 그 전에는 Sparks ID manifest를 커밋하지 않는다) |
+| LC5 VM 핵심 | interpreter(Scalar·Ref·Buf bank), 값 버퍼(COW 참조계수), 숫자 검사와 fault(§8.3), 예산(명령어·호출 깊이·메모리), 부록 B 표준 API, host interface 1차(native call·객체 handle 검증·native 필드) | 동기 함수 corpus의 결과·fault·예산 계수 golden, 종료 시 메모리 ledger 0 | 없음 |
+| LC6 실행 모델 | instance와 수명 hook, 스크립트 단계·발행 큐·`emit`·`Changed`·연쇄 상한(§5.4), async 실행·`await`·`All`/`Race`·취소(§6.1), 유지 자원 해제(§7.1), 파괴·활성 지연 큐(§4.3), 소유 범위와 EndExec·Detach·CloseSession(§9), fault 처리와 격리(§8.3), host interface 2차(이벤트·자원·로드·시계) | TestHost에서 §2 예시 시나리오의 전달 순서 golden, Gate G1·G4 | 없음 |
+| LC7 핫 리로드 | R1 본문 교체, R2 스크립트 필드 migration과 구독 연결 재구성, `ReloadExecutions`, 계획·판정·원자적 적용의 언어 쪽(§12.4), 증분 재컴파일 | Gate G5의 R1·R2 행, 본문 reload 2 s 측정 | 없음 |
+| LC8 도구 | CLI(`sparks check·build·test·fmt`), formatter, `@test` 실행, 언어 서버(진단·의미 강조 → 자동완성·hover·빠른 수정) | CLI와 언어 서버의 진단 동등성, 자동완성 후보 golden | 표준 입출력 API(연동 요구 SE-B7 — CLI의 표준 출력, 언어 서버의 표준 입력). formatter와 `@test` 실행기 라이브러리는 없음 |
+| LC9 AOT 생성 | typed IR → C++ 생성기, 동등성 규칙(§12.5), VM·AOT 혼합 진입 표 | Gate G6(TestHost에서 VM·AOT 차등) | 없음. 시험은 corpus의 생성 C++을 golden으로 커밋해 시험 실행 파일에 컴파일하고, 다시 생성한 바이트가 golden과 같은지 대조한다. target 빌드 편입은 EI8(SE-B2) |
+
+순서는 LC0 → LC7이 한 줄이다. LC8의 CLI는 LC3 뒤부터 단계마다 넓히고(check → build → test), 언어 서버는 LC3 뒤에 시작할 수 있다. LC9는 LC6 뒤다.
+
+### 18.3 엔진 연동 단계
+
+연동 단계와 단계마다 엔진·도구에 있어야 하는 항목, 그 현재 상태는 [Sparks 엔진 연동 요구 목록](SparksEngineIntegration.ko.md)이 정본이다. 요지는 다음과 같다.
+
+| 단계 | 내용 | 먼저 끝나야 하는 언어 코어 |
 |---|---|---|
-| L0 · M3 | core·full 문법, 타입·참조·대입·숫자 규칙, hook·스크립트 단계·이벤트 전달 모델, 유지 자원, 소유·해제 연산, 예약 이름(부록 A), 표준 API(부록 B), 전달 수 상한·예산 값, CU9 규격, 진단 형식·코드 대역 — **초안 1.3에서 문서 규격 확정**. 남은 L0 작업은 conformance corpus 작성(§13.1) | Core/Object 계약에 맞는 언어 규칙 확정 |
-| L1 · M3 | 컴파일러 라이브러리, verifier, interpreter, native call, 진단, Core C1–C4, LSP 기본(진단·의미 강조), **R1 본문 핫 리로드**(2 s 측정), CU9 구현 | 조건문·함수·객체 필드·배열·오류 처리와 바인딩 테스트, G5의 R1 행 |
-| L2 · M3/M4 | 수명 hook, `on 경로.이벤트`·큐·`Changed`, async handler·`All`/`Race`, 유지 자원, `Load`·`LoadAll`·Teleport·Travel, ledger G1·G4, LSP 자동완성·빠른 수정, VS Code 확장, **R2·R3 핫 리로드**, 오류 방어 경계(§8.4), AOT 동기 함수와 차등 시험 틀(G6) | 상호작용·문·카메라·컷씬 trigger를 C++ 수정 없이 제작, G5의 R1–R3 행, G2의 reload 항목 |
-| L3 · M5 | `@net`·RPC, 저장 호환성, 디버거(DAP), **R4 핫 리로드**, soak G2·G3, eval(`DevOnly`), **AOT backend 완성**(async 상태 기계, VM 혼합·reload·디버거, 크래시 역변환) | 취소·GC·replication·중단점·migration·누수 Gate 통합 검증, G5 전체, G6 전체 |
-| L4 · M6 이후 | profiler UI, 최적화 IR, AOT profile 기반 최적화와 cold module VM 유지, target별 eval 정책 | hot function 비용과 마켓 규정 근거로 결정 |
+| EI1 binding 생성 | 실제 엔진 선언에서 binding schema 생성(함수 리플렉션 CU2·이벤트 필드 CU3·스크립트 지정자) | LC2 |
+| EI2 ScriptRuntime | ObjectRuntime 위의 host 구현, native call, Sparks 클래스의 타입 등록 | LC5 |
+| EI3 World bridge | `ScriptComponent`, 수명 hook, 스크립트 단계, 이벤트 연결, 파괴·활성 지연 | LC6 |
+| EI4 에셋·생성 | `Load`·`LoadAll`, `World.Spawn(prefab, at)` | LC6 |
+| EI5 게임 시스템 | 입력·Tag·`Loc`·CVar·물리·UI·오디오(시스템마다 따로) | LC6 |
+| EI6 편집기 핫 리로드 | 저장 → compile action → 실행 중 World 적용, R3 instance 재생성 | LC7 |
+| EI7 네트워크·저장·결정성 | `@net`·RPC·R4, `@save`, `@deterministic`, 디버거(DAP) | LC6·LC7 |
+| EI8 AOT 빌드 편입 | 생성 C++을 target 빌드에 포함 | LC9 |
+| EI9 출시 | 쿡·서명·eval 정책 | LC4 |
+
+### 18.4 전체 계획 단계와의 대응
+
+전체 계획 §23.1의 도입 단계 L0–L4는 완료 기준으로 유지하고, 위 두 갈래가 그것을 채운다.
+
+| 도입 단계 | 채우는 마일스톤 | 완료 기준(전체 계획 §23.1) |
+|---|---|---|
+| L0 · M3 | 문서 규격(초안 1.3에서 확정), LC0의 conformance 틀 | Core/Object 계약에 맞는 언어 규칙 확정 |
+| L1 · M3 | LC1–LC5, LC8의 CLI와 언어 서버 기본, EI1·EI2 | 조건문·함수·객체 필드·배열·오류 처리와 바인딩 테스트 |
+| L2 · M3/M4 | LC6, LC7(R1·R2), LC8의 자동완성·빠른 수정과 VS Code 확장, LC9의 동기 함수, EI3·EI4·EI5·EI6(R3) | 상호작용·문·카메라·컷씬 trigger를 C++ 수정 없이 제작, G5의 R1–R3 행, G2의 reload 항목 |
+| L3 · M5 | EI7, LC9 완성과 EI8, eval(`DevOnly`), soak G2·G3 | 취소·GC·replication·중단점·migration·누수 Gate 통합 검증, G5 전체, G6 전체 |
+| L4 · M6 이후 | profiler UI, 최적화 IR, AOT profile 기반 최적화와 cold module VM 유지, EI9, target별 eval 정책 | hot function 비용과 마켓 규정 근거로 결정 |
 
 ## 19. 결정 사항
 
-2026.11.12 검토에서 초안의 권고안 10건(SD1–SD10)을 채택하였고, 같은 날 4차 검증에서 도출된 11건(SD11–SD21)을 채택하였다. 2026.11.18 5차 검증(초안 1.3)에서 사용자 요구(핫 리로드 필수·오류 방어·선택형 AOT·`WeakObjectRef` 명칭)와 권장안으로 24건(SD22–SD45)을 확정하였다. 2026.11.20 레벨 스크립트 설계 확정([LevelScript](LevelScript.ko.md) LD1–LD20, 모두 권장안)에서 언어에 걸리는 결정을 5건(SD46–SD50)으로 요약해 더하였다. SD4는 기본값만 확정하고 target별 값은 마켓 규정 검토 후 정한다. SD3·SD9·SD20은 엔진 수준 결정이며 전체 계획 개정 1.7·1.8의 §5.2·§20.2에 반영되어 있다.
+2026.11.12 검토에서 초안의 권고안 10건(SD1–SD10)을 채택하였고, 같은 날 4차 검증에서 도출된 11건(SD11–SD21)을 채택하였다. 2026.11.18 5차 검증(초안 1.3)에서 사용자 요구(핫 리로드 필수·오류 방어·선택형 AOT·`WeakObjectRef` 명칭)와 권장안으로 24건(SD22–SD45)을 확정하였다. 2026.11.20 초안 1.5에서 구현 순서 3건(SD51–SD53)을 사용자 결정으로 더하였다. 2026.11.20 레벨 스크립트 설계 확정([LevelScript](LevelScript.ko.md) LD1–LD20, 모두 권장안)에서 언어에 걸리는 결정을 5건(SD46–SD50)으로 요약해 더하였다. SD4는 기본값만 확정하고 target별 값은 마켓 규정 검토 후 정한다. SD3·SD9·SD20은 엔진 수준 결정이며 전체 계획 개정 1.7·1.8의 §5.2·§20.2에 반영되어 있다.
 
 - **SD1. 확장자:** 소스 `.spark`, 컴파일 모듈 `.sparkc`. `.sparkc`는 빌드 출력 폴더에만 생성한다. 초안의 `.sparks`는 언어 이름과 철자가 같아 혼동되므로 사용자 결정(2026-11-12)으로 `.sparkc`로 정정하였다.
 - **SD2. C++ 리플렉션 필드 이름:** 첫 글자를 대문자로 바꾸고 끝의 `_`를 제거하여 노출하며, 그 밖의 `_`가 있으면 `ScriptName`이 필요하다(§10.3). 리플렉션 필드를 C++에서도 PascalCase로 선언하도록 규약을 개정하는 대안은 채택하지 않는다.
@@ -1501,12 +1565,12 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 - **SD20. 종료 경로별 hook:** `RequestDestroy`·부모 파괴·셀 unload·travel·Tryout Stop·process 종료는 Disable(활성이면)·Destroy를 실행한 뒤 Detach한다. fault 격리와 GC 도달 불가 경로는 Disable을 실행하지 않는다(§5.1).
 - **SD21. NextTick의 시계:** `NextTick()`은 게임 시계를 따라 일시 정지 중 재개하지 않으며 `Time.Delta`는 GameClock delta다. UI 시계의 다음 프레임 대기는 `Delay(0.0, Clock.UI)`다(§6.1).
 - **SD22. 엔진 이름 정렬:** 게임 객체는 `Actor`(Entity 대체, ER 2절), 조종 대상은 `Pawn`, `Character`는 Pawn 파생 자리표시, 장면 component는 `SceneComponent`다. `WorldService`는 Object 기반 스크립트 공유 상태 타입이며 엔진 쪽 호스트는 `WorldSubsystem`이다. ID 개념(`SoftEntityId` 등)은 Prefab과 함께 결정할 때까지 유지한다.
-- **SD23. 약한 객체 참조 이름:** `WeakObjectRef<T>`를 `WeakObjectRef<T>`로 부른다(사용자 결정). `ObjectRef`·`WeakObjectRef`·`SoftObjectRef`로 가족을 맞추고 Core `WeakPtr`와 구분한다. 문서는 이번에 바꾸고 코드는 §17.2의 후속으로 바꾼다.
+- **SD23. 약한 객체 참조 이름:** 처음 이름 `WeakRef<T>`를 `WeakObjectRef<T>`로 바꾼다(사용자 결정, 코드 개명은 커밋 `e0e78953`에서 완료). `ObjectRef`·`WeakObjectRef`·`SoftObjectRef`로 가족을 맞추고 Core `WeakPtr`와 구분한다. 
 - **SD24. Start 시점:** C++ `OnStart`의 엔진 규칙(ER 7.2: 다음 프레임 시작 처리, `IsReadyToStart`)을 따르고, Sparks `on Start`는 그 시점에 시작하는 실행이다. 준비 대기 중에는 bridge가 Tick을 보류한다(§5.1).
 - **SD25. 파괴·활성 전환의 두 시점:** 스크립트 단계 끝에 World API를 호출하는 적용 시점과, 실제 hook·Detach가 실행되는 프레임 끝 정리를 구분한다. 적용 이후 스크립트는 대상을 null로 읽는다(§4.3).
 - **SD26. 프레임 순서:** Unity hook의 종류·의미를 따르되 프레임 안 순서는 엔진 World tick phase(UE tick group)를 따른다. FixedTick은 Tick 뒤이고 물리 이벤트는 프레임당 1 batch다(§5.4).
 - **SD27. 상속:** core에서 Sparks 클래스는 상속할 수 없고 `override fn`은 엔진 가상 함수에만 쓴다. full의 `open class`·`open fn`만 Sparks 파생과 재정의를 허용한다(§3.2).
-- **SD28. 핫 리로드 등급과 단계:** R1 본문 교체(L1), R2 제자리 migration·R3 instance 재생성(L2), R4 복제 schema 교체(L3). Tryout 재시작은 엔진 C++ 변경과 패키지 의존 graph 변경에만 남긴다(§12.4).
+- **SD28. 핫 리로드 등급과 단계:** R1 본문 교체·R2 제자리 migration(언어 코어 LC7), R3 instance 재생성(연동 EI6), R4 복제 schema 교체(연동 EI7). Tryout 재시작은 엔진 C++ 변경과 패키지 의존 graph 변경에만 남긴다(§12.4).
 - **SD29. reload 원자성:** 계획·검증이 모두 끝난 변경만 패키지와 의존 패키지 단위로 한 번에 적용하고, 하나라도 실패하면 이전 revision을 유지한다. instance 단위 실패는 그 instance만 격리한다(§12.4).
 - **SD30. 대기 중인 실행의 reload:** 자동 이전은 하지 않고 `ReloadExecutions: Keep | Cancel`(Tryout 기본 `Cancel`)과 모듈별 살아 있는 revision 상한 8을 둔다(§12.4).
 - **SD31. 스크립팅 backend 선택:** Unity Mono/IL2CPP처럼 target·빌드 구성마다 `Vm`·`Aot`를 고르는 옵션이며 기본은 `Vm`이다(사용자 결정: AOT는 반드시 제공하되 쓸지는 선택). VM은 항상 포함하고 두 backend의 관찰 가능한 결과는 같다. 예산은 bytecode 명령어 기준으로 센다(§12.5).
@@ -1529,14 +1593,17 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 - **SD48. LevelScript의 수명:** 레벨 편입에서 그 Level의 모든 배치 Actor 뒤에 Awake·Enable하고, Start는 같은 프레임에 준비된 활성 배치 Actor 뒤에 시작하되 기다리지 않는다. Level을 내릴 때는 먼저 Disable·Destroy한다. `RequestDestroy`로 파괴할 수 없고 Level 파괴만 파괴한다(§5.1, LevelScript LD8·LD11·LD16).
 - **SD49. Actor 물리 이벤트와 LevelScript의 물리 금지:** 엔진 `Actor`가 `TriggerEntered`·`TriggerExited`·`CollisionEntered`·`CollisionExited` 이벤트를 노출해 다른 객체가 `on X.TriggerEntered(...)`로 받는다. 같은 물리 batch에서 hook 다음에 발행하고 지연 slot 표로 구독이 있을 때만 비용이 든다. 이름은 hook과 겹치지 않게 과거형이다. LevelScript는 물리 hook(S0801)과 Collider component(S0802)를 가질 수 없다(§5.2·§5.5, LevelScript LD9·LD18).
 - **SD50. 편집기 진입:** "레벨 스크립트 열기"·"참조 추가"·"이벤트 추가" 명령과 언어 서버 명령 채널(§13), 생성 경로 `<패키지>/Levels/<레벨 경로 이름>.spark`를 둔다. 배치한 Actor(직접 배치·prefab 배치)에 편집기에서 ScriptComponent를 붙이는 것은 core에서도 되며 실행 중 추가(full)와 다르다(§4.5, LevelScript LD14·LD15).
+- **SD51. 언어 코어 우선:** 엔진 요소와 무관한 언어 코어(LC0–LC9)를 먼저 구현하고 엔진 연동(EI1–EI9)은 엔진이 준비되는 대로 하나씩 더한다(사용자 결정 2026-11-20). 엔진·도구 쪽 요구는 [연동 요구 목록](SparksEngineIntegration.ko.md)에 따로 모으고, 구현 중 새로 드러난 요구도 코어 안에서 우회하지 않고 그 목록에 더한다(§18).
+- **SD52. host 경계:** 컴파일러는 엔진 API를 binding schema 파일로만 알고, VM은 엔진을 host interface로만 부른다. Sparks 필드의 저장소는 VM이 가진다. 언어 코어는 Core 층에만 의존하고 가짜 host(`SparksTestHost`)로 시험한다(§18.1).
+- **SD53. 모듈 배치:** `SparksVm`·`SparksCompiler`는 `Engine/Source/Runtime`, `SparksTestHost`는 `Engine/Source/Developer`, CLI와 언어 서버는 `Programs`에 둔다. 엔진 쪽 host 구현은 `ScriptRuntime` 모듈이다(§18.1).
 
 ## 20. 교차 검증 기록
 
-초안 0.1·0.4·0.5·1.0·1.2는 이 문서의 작업 초안이다. 초안 1.4의 LevelScript 반영은 [LevelScript](LevelScript.ko.md) 초안 0.1을 리뷰어 1명이 문서 원문·UE 5.8 소스와 대조한 결과(정정 9건 — Prefab 판, 진단 등록처, 배치 불가 표지, GameDirector 이름, 레벨 로드 순서, UE 인용, UE BeginPlay 순서, `Find<T>`, Sparks 이름)를 따른다. 기록은 그 문서 10절에 있다.
+초안 0.1·0.4·0.5·1.0·1.2는 이 문서의 작업 초안이다. 초안 1.5(구현 순서 — §18, SD51–SD53)는 사용자 결정에 따른 개정이며, 연동 요구 목록의 현재 상태는 작성 때 코드(커밋 `03c13ddb`)로 확인하였다. 초안 1.4의 LevelScript 반영은 [LevelScript](LevelScript.ko.md) 초안 0.1을 리뷰어 1명이 문서 원문·UE 5.8 소스와 대조한 결과(정정 9건 — Prefab 판, 진단 등록처, 배치 불가 표지, GameDirector 이름, 레벨 로드 순서, UE 인용, UE BeginPlay 순서, `Find<T>`, Sparks 이름)를 따른다. 기록은 그 문서 10절에 있다.
 
 ### 20.1 5차 검증(초안 1.2, 스펙 완비)
 
-2026-11-18 사용자 지시로 구현 착수 전 문서만으로 규격을 완비하였다. 리뷰어 3명이 독립적으로 (1) 문서 내부 정합성·규격 완결성과 사용자 핵심 요구(핫 리로드·오류 방어·선택형 AOT), (2) 엔진 설계 문서·현재 코드(World·Actor·메타 컴파일러·Core)와의 정합성, (3) 새 주변 시스템 스펙(로깅·CVar·입력·UI·커브·물리·공간 인덱스·동기화·콘텐츠 서명)과의 정합성과 빠진 영역을 검토하였다. 사용자 결정은 `WeakObjectRef` 명칭(SD23), AOT는 IL2CPP식 선택 옵션(SD31), 이번 개정은 문서만(코드 후속은 §17.2)이며, 나머지는 권장안으로 확정하였다.
+2026-11-18 사용자 지시로 구현 착수 전 문서만으로 규격을 완비하였다. 리뷰어 3명이 독립적으로 (1) 문서 내부 정합성·규격 완결성과 사용자 핵심 요구(핫 리로드·오류 방어·선택형 AOT), (2) 엔진 설계 문서·현재 코드(World·Actor·메타 컴파일러·Core)와의 정합성, (3) 새 주변 시스템 스펙(로깅·CVar·입력·UI·커브·물리·공간 인덱스·동기화·콘텐츠 서명)과의 정합성과 빠진 영역을 검토하였다. 사용자 결정은 `WeakObjectRef` 명칭(SD23), AOT는 IL2CPP식 선택 옵션(SD31), 이번 개정은 문서만(코드 후속은 당시 §17.2, 지금은 연동 요구 목록)이며, 나머지는 권장안으로 확정하였다.
 
 | 관점 | 주요 지적 | 조치 | 위치 |
 |---|---|---|---|

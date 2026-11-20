@@ -259,7 +259,7 @@ Result<ObjectHandle> World::SetLevelScript(ObjectHandle level, ClassRef<LevelScr
 ### 4.2 저장과 로드
 
 - LevelScript Actor는 레벨에 직접 배치한 Actor처럼 `Level.actors`에 저장된다. `@edit` 값과 참조도 같은 Actor Record 경로를 탄다. prefab에서 펼친 Actor용 Transient 목록 `spawnedActors`(PF D15)에는 들어가지 않는다.
-- **선행 조건**: Sparks 클래스 Actor를 레벨에 저장하려면 스크립트 필드의 동적 schema 등록(SL 17.2절 RCM·TypeRegistry 행)이 먼저다. 지금 Level 그래프 저장은 생성 타입만 받는다(ER 4.6절 "Level 그래프 저장은 구조 시험용").
+- **선행 조건**: Sparks 클래스 Actor를 레벨에 저장하려면 스크립트 필드의 동적 schema 등록([Sparks 엔진 연동 요구 목록](SparksEngineIntegration.ko.md) SE-O3)이 먼저다. 지금 Level 그래프 저장은 생성 타입만 받는다(ER 4.6절 "Level 그래프 저장은 구조 시험용").
 - **저장 검증**(레벨 패키지 단계에서 레벨 저장·쿡이 한다, 진단은 4.9절):
   1. `levelScript`가 null이 아니면 `actors`의 원소여야 한다(`LevelScriptNotInLevel`).
   2. `actors` 안의 LevelScript 파생 Actor는 0개 또는 1개이고, 1개면 그것이 `levelScript`여야 한다(`DuplicateLevelScript`).
@@ -540,7 +540,7 @@ Levels/Stage1.spark:12:5: error S0801: A LevelScript cannot declare physics hook
 
 | 선행 | 내용 | 상태(2026-11-20) |
 |---|---|---|
-| Sparks 동적 schema 등록 | Sparks 클래스 Actor를 레벨에 저장하려면 스크립트 필드의 동적 schema 등록이 먼저다(SL 17.2절 RCM·TypeRegistry 행). 지금 Level 그래프 저장은 생성 타입만 받는다(ER 4.6절) | 후속(L2 전) |
+| Sparks 동적 schema 등록 | Sparks 클래스 Actor를 레벨에 저장하려면 스크립트 필드의 동적 schema 등록이 먼저다([Sparks 엔진 연동 요구 목록](SparksEngineIntegration.ko.md) SE-O3). 지금 Level 그래프 저장은 생성 타입만 받는다(ER 4.6절) | 후속(L2 전) |
 | 레벨 패키지 단계 | Level 저장·쿡·cooked 로드와 레벨 편입 계약(ER 4.6절), 저장 검증(4.2절) | 후속 |
 | Prefab PF4·PF5 | prefab 배치에 component 추가(override 노드 추가 — LD15), 배치 펼치기와 배치 노드 참조 해석(LD17, PF D22) | 후속 |
 | 영속 Entity 참조 | 셀 사이 참조(LD6), 펼친 노드 참조의 최종 표현(LD17) | 후속(World 단계) |
