@@ -1,6 +1,6 @@
 # 빌드 타깃·모듈 의존·플러그인 조건 설계
 
-기준일: 2026-11-21, 개정 10. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
+기준일: 2026-11-21, 개정 11. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
 - **타깃 종류 확장**: Editor·Client·Server 타깃과, 타깃 종류에 따라 코드·데이터를 컴파일에서 빼는 매크로.
 - **모듈 의존 공개 범위**: 의존마다 Public(소비자에게 include·정의를 넘김)과 Private(이 모듈 안에서만 씀)을 나눈다.
 - **플러그인 활성 조건**: 프로젝트가 플러그인을 특정 타깃·플랫폼·구성에서만 켠다.
@@ -418,6 +418,11 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 - Release 배제는 Game 타깃마다 엔진 주인으로 해석해 `IncludedPluginModules`를 도달 근에 더한다. 해석이 실패하면(끈 플러그인 모듈 사용 등) `release-plugin-resolution` 실패다.
 - `plugin-module-rules-base` 검사 대상은 두 가지다. 규칙 파일이 `<플러그인>/Source/<모듈>/<모듈>.Build.cs`이고 그 플러그인 폴더에 `<플러그인>.rocksplugin`이 있는지, 그리고 `class <모듈> : PluginModuleRules` 선언인지(다른 규칙 기반 클래스 금지)다.
 
+**BS9c 구현 세부(개정 11).**
+- 링크 표시는 `NativeModuleInput.PluginModules`다(실행 파일만 가진다). `DescriptorModuleSet.LinkIntoPrimary(modules, 타깃 Modules)`가 `Modules[0]`이 실행 파일일 때만 `IncludedPluginModules`를 넣는다. 규칙이 이 칸을 채우면 `RuleLoader`가 거부하고, 입력 검사는 실행 파일만·아는 이름·한 번·`Modular` 거부를 본다.
+- `LinkClosure`는 루트의 링크 폐포 다음에 `PluginModules`와 그 링크 폐포를 링크 쪽(요청 시 적재 아님)에 넣고, 그 뒤에 동적 모듈을 넣는다. 그래서 모듈 표 생성기와 링크 명령은 고치지 않고 BD36 순서를 얻는다. `Reachable`, 액션 그래프의 계획 순서(실행 파일을 플러그인 archive 뒤로), 메타데이터 생성 순서도 `PluginModules`를 따른다. 플러그인 모듈은 실행 파일의 의존이 아니므로 실행 파일 컴파일에 include·정의가 들어가지 않는다.
+- 빌드 CLI는 모든 엔진 타깃에서 `DescriptorOwner.ForEngine`으로 해석한다. 메타데이터·공개 헤더 검사·빌드의 근은 `Modules`에 `IncludedPluginModules`를 더한 것이다. SDK export 타깃은 켠 플러그인이 하나라도 있으면(Game 타깃의 `enabledByDefault` 포함) 거부한다. 게임 빌드도 `LinkIntoPrimary`를 쓴다.
+
 ## 4. 결정 요약
 
 1. 타깃 종류는 UE와 같은 다섯 가지다(Game·Editor·Client·Server·Program).
@@ -587,3 +592,4 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 | 8 | 2026-11-21 | 3.9절 엔진 플러그인 빌드를 더했다(BD32–BD42, BS9a–BS9d, 4절 10항, 7절 세 행). 사용자 지시 "진행 가능한거부터"에 따라 Unreal 교환 리더(UX1a)를 막는 빈 곳을 메운다. rocks-07과 조율해 rocks-ff가 맡는다. UE 근거는 5.8.4 UBT(`Plugins.cs`·`EnumeratePlugins.cs`·`UEBuildTarget.SetupPlugins`·`PreBuildSetup`·`ModuleDescriptor.IsCompiledInConfiguration`·`TargetRules`의 플러그인 목록과 `bBuildDeveloperTools`·`RulesCompiler`) |
 | 9 | 2026-11-21 | BS9a 구현 세부(3.9절): `PluginReferrer`·`DescriptorOwner`·`TargetPluginReferences`, `BuildContext.PluginRoot`·`Plugins`, `TargetType`을 `Rocks.Build` 어셈블리로 옮김, 게임 빌드 해석을 규칙 로드 뒤로 |
 | 10 | 2026-11-21 | BS9b 구현 세부(3.9절): `PluginModuleRules`(봉인 Configure, 기술자 값), `SourceModuleRules.ModuleType`과 정책 `module-type-group`, `Apply`의 위치·계층 검사(`EngineRoot`), Release 배제의 플러그인 해석과 `release-plugin-resolution`, `plugin-module-rules-base` 범위. [모듈 로더](ModuleLoader.ko.md) 개정 7 |
+| 11 | 2026-11-21 | BS9c 구현 세부(3.9절): `PluginModules`와 `LinkIntoPrimary`, `LinkClosure` 순서(링크 폐포 → 플러그인 모듈 → 동적 모듈), CLI 엔진 해석과 빌드 근, SDK export·`Modular` 거부 |

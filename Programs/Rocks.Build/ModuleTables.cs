@@ -197,7 +197,8 @@ public static class ModuleTables
 
     /// <summary>
     /// 실행 파일 <paramref name="executable"/>의 모듈 표 TU 내용이다. 행은 의존 우선 깊이 탐색의 후위 순서(의존 목록 순서대로)에서 진입점
-    /// 모듈만 고른 것이고, 그 뒤에 실행 중 적재 모듈(DynamicModules) 쪽이 같은 규칙으로 붙으며 실행 파일이 마지막이다. 행의 의존은 직접
+    /// 모듈만 고른 것이고, 그 뒤에 실행 파일에 링크하는 켠 플러그인 모듈(PluginModules — 보통 행, Docs/Design/BuildTargets.ko.md 3.9절 BD36)과
+    /// 실행 중 적재 모듈(DynamicModules) 쪽이 같은 규칙으로 붙으며 실행 파일이 마지막이다. 행의 의존은 직접
     /// 의존 가운데 진입점 모듈이며, 면제 모듈을 거치는 의존은 그 너머의 진입점 모듈로 바꿔 싣는다(중복 제거, 처음 만난 순서). 링크 폐포
     /// 밖에서 DynamicModules로만 든 행은 요청 시 적재 행(onRequest)이다 — 단계 실행이 건너뛴다(3.8·3.11절). 행마다 단계 순서를 검사한다(MD6).
     /// </summary>

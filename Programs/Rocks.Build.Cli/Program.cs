@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Rocks.Build;
 using Rocks.Build.Cli;
+using Rocks.Build.Descriptors;
 using Rocks.Build.Rules;
 using Rocks.Tooling.Common;
 
@@ -184,10 +185,22 @@ namespace Rocks.Build.Cli
             {
                 // 모듈 소유 메타데이터의 배치(생성 include 디렉터리·명세 경로·검증)를 타깃에서 도달하는 모듈에 대해 정한다.
                 // 아래 모든 단계가 이 결과를 쓰고, 검증 실패도 build-evidence에 기록된다.
-                var plan = MetadataLayout.Apply(context, rules.Modules, rules.Target.Modules);
+                // 엔진 플러그인(Docs/Design/BuildTargets.ko.md 3.9절): 타깃이 켠 플러그인의 모듈만 기술자 종류대로 남기고(끈 플러그인 모듈과
+                // 그 사용은 오류), 주 실행 파일에 링크하도록 표시한다. 켠 플러그인 모듈은 타깃이 참조하지 않아도 빌드 대상이다.
+                var pluginSet = DescriptorModuleSet.Resolve(DescriptorOwner.ForEngine(rules.Target.Name, rules.Target.Plugins, root), rules.Plugins,
+                    toolchain.Platform, configuration, rules.Target.Type);
+                if (args[0] == "sdk" && pluginSet.EnabledPlugins.Count != 0)
+                {
+                    throw new ArgumentException($"Target {targetName}: an installed SDK does not carry engine plugins; the export target enables " +
+                        string.Join(", ", pluginSet.EnabledPlugins.Select(plugin => plugin.Name)) + ".");
+                }
+
+                var ruleModules = pluginSet.LinkIntoPrimary(pluginSet.Apply(rules.Modules, rules.Target.Modules), rules.Target.Modules);
+                string[] buildRoots = [.. rules.Target.Modules.Concat(pluginSet.IncludedPluginModules).Distinct(StringComparer.OrdinalIgnoreCase)];
+                var plan = MetadataLayout.Apply(context, ruleModules, buildRoots);
                 var metaStart = System.Diagnostics.Stopwatch.GetTimestamp();
                 var metadata = await MetadataRunner.GenerateAsync(context, toolchain, plan, rules.Target,
-                    HostTool(root, "Rocks.MetaCompiler"), cancellationToken, jobs: Jobs(options), verifySources: VerifyMetadataSources(options));
+                    HostTool(root, "Rocks.MetaCompiler"), cancellationToken, buildRoots, jobs: Jobs(options), verifySources: VerifyMetadataSources(options));
                 evidence.RecordStep("metadata", ["Rocks.MetaCompiler", targetName], metadata,
                     System.Diagnostics.Stopwatch.GetElapsedTime(metaStart));
                 if (metadata != 0)
@@ -197,7 +210,7 @@ namespace Rocks.Build.Cli
                 }
 
                 var modules = plan.Modules.ToList();
-                var targets = rules.Target.Modules.ToList();
+                var targets = buildRoots.ToList();
                 if (rules.Target.CheckPublicHeaders)
                 {
                     var sources = new List<string>();

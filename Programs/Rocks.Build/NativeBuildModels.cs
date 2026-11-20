@@ -299,6 +299,11 @@ public sealed record NativeModuleInput
     // (PluginModuleRules)가 정한다. Release 배제 정책이 Developer 모듈을 이 칸으로 찾는다. 실행 파일·서드파티는 Runtime이다.
     public Descriptors.ModuleType Type { get; init; } = Descriptors.ModuleType.Runtime;
 
+    // 이 실행 파일에 링크할 켠 플러그인 모듈이다(Docs/Design/BuildTargets.ko.md 3.9절 BD36, UE AddModuleToBinary). 빌드가 타깃의 주 실행
+    // 파일(TargetRules.Modules[0])에 채우고 규칙은 채우지 않는다(RuleLoader가 거부). 의존이 아니므로 include·정의를 받지 않고, 링크 폐포 뒤에
+    // 그 모듈과 링크 폐포를 링크하며 모듈 표에 보통 행(기술자 단계로 시작)으로 싣는다. 실행 파일만 가질 수 있다.
+    public IReadOnlyList<string> PluginModules { get; init; } = [];
+
     // 설치 SDK 모듈 전용: 미리 생성된 descriptor와 identity 명세다. 다시 생성하지 않고 import만 한다.
     // Metadata와 함께 쓸 수 없다.
     public ImportedMetadata? ImportedMetadata { get; init; }

@@ -403,7 +403,9 @@ public static class InstalledSdk
             LoadingPhase = Enum.Parse<Descriptors.LoadingPhase>(module.LoadingPhase!),
             ProvidesLaunch = module.ProvidesLaunch
         }).Concat(projectModules).ToArray();
-        // 켠 플러그인의 모듈도 빌드한다(UE처럼 타깃이 직접 참조하지 않아도 컴파일된다). 메타데이터 생성도 같은 root 집합이다.
+        // 켠 플러그인의 모듈은 타깃이 직접 참조하지 않아도 빌드하고 주 실행 파일에 링크한다(Docs/Design/BuildTargets.ko.md 3.9절 BD36, UE와
+        // 같다). 메타데이터 생성도 같은 root 집합이다.
+        modules = [.. moduleSet.LinkIntoPrimary(modules, rules.Target.Modules)];
         string[] targets = rules.Target.Modules.Concat(moduleSet.IncludedPluginModules).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         var plan = MetadataLayout.Apply(context, modules, targets);
         var declaredInputs = GameInputSnapshot.DeclaredInputs(context, plan);

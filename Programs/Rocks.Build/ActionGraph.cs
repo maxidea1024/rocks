@@ -176,11 +176,12 @@ internal static class ActionGraph
 
         // 실행 중 적재 모듈(DynamicModules — Docs/Design/ModuleLoader.ko.md 3.8절)도 빌드한다. 링크 폐포를 다 본 뒤 따로 방문하므로 동적
         // 관계는 순환 검사의 참조 사슬이 아니다. 그 모듈을 링크하는 실행 파일은 그 archive 뒤에 계획해야 하므로 실행 파일을 끝으로 옮긴다
-        // (실행 파일은 누구의 의존도 아니다). 동적 모듈이 없으면 순서가 바뀌지 않는다.
+        // (실행 파일은 누구의 의존도 아니다). 동적 모듈이 없으면 순서가 바뀌지 않는다. 실행 파일에 링크하는 켠 플러그인 모듈
+        // (PluginModules — Docs/Design/BuildTargets.ko.md 3.9절 BD36)도 같은 방식으로 빌드하고 실행 파일 앞에 계획한다.
         bool anyDynamic = false;
         for (int index = 0; index < ordered.Count; ++index)
         {
-            foreach (string dynamic in ordered[index].DynamicModules)
+            foreach (string dynamic in ordered[index].PluginModules.Concat(ordered[index].DynamicModules))
             {
                 anyDynamic = true;
                 Visit(dynamic);
