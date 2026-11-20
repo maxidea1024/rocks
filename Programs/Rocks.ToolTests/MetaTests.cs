@@ -97,6 +97,7 @@ internal static partial class MetaTests
         RegisterPathThunks(context);
         RegisterArrayRestrictions(context);
         RegisterNative(context);
+        RegisterCanonicalTypes(context);
         RegisterSettings(context);
         RegisterLogFieldVisitors(context);
         RegisterRejectedCells(context);

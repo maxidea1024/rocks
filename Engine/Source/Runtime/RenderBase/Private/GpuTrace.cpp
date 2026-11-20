@@ -68,13 +68,40 @@ Result<void> RegisterGpuTraceTypes(TraceSession& session) noexcept {
 
     TraceEventType* const types[] = {&GpuQueueType, &GpuCalibrationType, &GpuScopeType,
                                      &GpuFrameType};
-    for (TraceEventType* type : types) {
-        if (auto registered = session.RegisterEventType(*type); !registered) {
+    for (usize index = 0; index < sizeof(types) / sizeof(types[0]); ++index) {
+        if (auto registered = session.RegisterEventType(*types[index]); !registered) {
+            // 이 호출이 등록한 형과 채널만 되돌린다.
+            for (usize undo = index; undo-- > 0;) {
+                (void)session.UnregisterEventType(*types[undo]);
+            }
+
+            (void)session.UnregisterChannel(GpuTraceChannel);
             return registered;
         }
     }
 
     return Result<void>::Success();
+}
+
+Result<void> UnregisterGpuTraceTypes(TraceSession& session) noexcept {
+    TraceEventType* const types[] = {&GpuFrameType, &GpuScopeType, &GpuCalibrationType,
+                                     &GpuQueueType};
+    // NotFound 밖의 첫 오류를 기억하고 나머지는 계속 푼다.
+    ErrorCode first = ErrorCode::None;
+    for (TraceEventType* type : types) {
+        auto unregistered = session.UnregisterEventType(*type);
+        if (!unregistered && unregistered.Error() != ErrorCode::NotFound &&
+            first == ErrorCode::None) {
+            first = unregistered.Error();
+        }
+    }
+
+    auto channel = session.UnregisterChannel(GpuTraceChannel);
+    if (!channel && channel.Error() != ErrorCode::NotFound && first == ErrorCode::None) {
+        first = channel.Error();
+    }
+
+    return first == ErrorCode::None ? Result<void>::Success() : Result<void>::Failure(first);
 }
 
 uint64 GpuTicksToTraceTicks(const graphics::ClockCalibration& calibration, uint64 gpuTicks,

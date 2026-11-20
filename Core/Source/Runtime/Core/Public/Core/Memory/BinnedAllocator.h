@@ -70,8 +70,10 @@ struct BinnedAllocatorUsage {
 //   "free block lost its return marker"로 끝난다. 반환한 블록의 둘째 word(offset 8)를 덮어쓴
 //   use-after-free도 그 블록을 다시 내줄 때 같은 Fatal이다. 한계: 이 검사는 블록을 내줄 때만 한다.
 //   먼저 받은 쪽이 그 블록을 다시 반환한 뒤에는 잡지 못하고, 두 번 든 블록이 다시 나가기 전에
-//   slab으로 돌아가면(스레드 종료, Trim, 묶음 넘침) 검사를 지나지 않는다 — slab의 블록 계수가
-//   어긋나 그 slab의 살아 있는 블록이 다시 나가거나, 접근 위반이나 파괴 때의 Fatal이 될 수 있다.
+//   slab으로 돌아가면(스레드 종료, TrimMemory, 묶음 넘침) 검사를 지나지 않는다 — slab의 블록
+//   계수가 어긋나 그 slab의 살아 있는 블록이 다시 나가거나, 접근 위반이나 파괴 때의 Fatal이 될 수
+//   있다. 그 가운데 "나가 있는 블록이 없는 slab에 블록이 또 돌아온" 경우만 그 자리에서 Fatal
+//   "slab block count underflow"로 끝난다.
 // - Stats의 liveBytes는 요청 크기가 아니라 내준 블록 크기의 합이다(반환 때 요청 크기를 알 수 없다
 //   — 큰 할당은 요청 크기 그대로다). Allocator.h의 "요청 크기"와 다르다.
 // - OS가 주소 범위 예약을 거부해도 생성은 실패하지 않는다: 크기를 절반씩 줄여 가며 MinReserveBytes
@@ -102,10 +104,11 @@ public:
     ~BinnedAllocator() noexcept override;
 
     // 스레드 하나가 이 인스턴스의 캐시에 쥘 수 있는 블록 바이트의 상한이다(등급 32개마다 묶음 둘 —
-    // 약 2.25 MiB, 블록 3,120개). 캐시의 블록은 그 스레드가 끝나거나 그 스레드가 Trim을 부를 때까지
-    // 남는다: 다른 스레드의 Trim은 건드리지 않으므로, 한 번 크게 쓰고 쉬는 스레드는 이만큼을 쥔
-    // 채로 있다. 캐시의 블록이 든 slab은 풀리지 않아서, 붙들리는 commit은 블록들이 slab에 흩어진
-    // 정도에 따라 이보다 클 수 있다(가장 나쁜 경우 블록마다 다른 slab — 3,120 × 64 KiB).
+    // 약 2.25 MiB, 블록 3,120개). 캐시의 블록은 그 스레드가 끝나거나, 그 스레드가 TrimMemory를
+    // 부르거나, 그 스레드가 쉰다고 표시한(MarkThreadIdle) 사이에 다른 스레드가 TrimMemory를 부를
+    // 때까지 남는다. 표시하지 않고 쉬는 스레드는 한 번 크게 쓴 뒤 이만큼을 쥔 채로 있다. 캐시의
+    // 블록이 든 slab은 풀리지 않아서, 붙들리는 commit은 블록들이 slab에 흩어진 정도에 따라 이보다
+    // 클 수 있다(가장 나쁜 경우 블록마다 다른 slab — 3,120 × 64 KiB).
     static constexpr usize MaxThreadCacheBytes = 2361856;
 
     BinnedAllocator(const BinnedAllocator&) = delete;
@@ -119,9 +122,29 @@ public:
     // nullptr는 성공한 무동작이다. 미소유·중복·중간 주소는 NotFound다(위 계약).
     Result<void> Deallocate(void* address) noexcept override;
 
-    // 보관 중인 빈 slab을 모두 decommit한다. 살아 있는 할당은 건드리지 않는다. 메모리 압박 때나
-    // 큰 작업이 끝난 뒤에 부른다.
-    void Trim() noexcept;
+    // 쥐고만 있는 메모리를 OS에 돌려준다(Allocator::TrimMemory). 순서대로: 호출 스레드의 캐시,
+    // 쉰다고 표시한(MarkThreadIdle) 다른 스레드의 캐시, 이전 칸의 블록을 slab으로 돌려준 뒤 보관
+    // 중인 빈 slab을 모두 decommit한다. 살아 있는 할당과 쓰는 중인 다른 스레드의 캐시는 건드리지
+    // 않는다(MaxThreadCacheBytes). 큰 작업이 끝난 뒤나 메모리 압박 때 부른다.
+    //
+    // 어느 스레드에서나, 여러 스레드가 동시에 불러도 된다. 쉬는 캐시를 비우는 동안 프로세스의
+    // 인스턴스 등록부 잠금을 쥔다: 그 사이 다른 스레드의 첫 할당(캐시 만들기)·스레드 종료 정리·
+    // Stats·MarkThreadActive가 기다린다(캐시 하나에 블록 최대 3,120개). 실패하지 않는다 —
+    // decommit을 못 한 slab은 보관해 두고 다음 호출이 다시 시도한다.
+    void TrimMemory() noexcept override;
+    // 호출 스레드의 이 인스턴스 캐시를 "쉬는 중"으로 둔다(Allocator::MarkThreadIdle). 캐시가 없으면
+    // 아무것도 하지 않는다. 잠금을 잡지 않는다. 쉬는 사이의 Allocate·Deallocate는 캐시 없이 등급
+    // 잠금 경로로 간다(느리지만 맞다 — 다른 스레드의 TrimMemory와 경쟁하지 않는다).
+    //
+    // 사용 예(막히는 대기 앞뒤):
+    //   memory.MarkThreadIdle();
+    //   event.Wait();
+    //   memory.MarkThreadActive();
+    void MarkThreadIdle() noexcept override;
+    // 캐시를 다시 "쓰는 중"으로 둔다(Allocator::MarkThreadActive). 다른 스레드의 TrimMemory가 이
+    // 캐시를 비우는 중이면 끝날 때까지 기다린다(등록부 잠금). 표시한 적이 없으면 아무것도 하지
+    // 않는다.
+    void MarkThreadActive() noexcept override;
 
     // 살아 있는 할당 수·byte와 누적 할당 수다(작은 블록 + 큰 할당). 다른 스레드가 쓰는 중이면 그
     // 순간의 근사다.

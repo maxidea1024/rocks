@@ -69,7 +69,7 @@ configure가 크래시 설정을 바꾸면 Launch가 먼저 `platform::ValidateC
 
 ## 3. 엔진 호스트
 
-- **할당자.** 엔진·모듈 로더·설정 문맥·LogHost에는 `context.DefaultAllocator()`(프로세스의 범용 할당자 — 기본 `BinnedAllocator`)를 넘긴다. 본문은 돌아가기 전에 거기서 받은 할당을 모두 반환하고 그 할당자를 쓰는 스레드를 끝낸다. 할당을 남기면 Launch의 정리가 Fatal(`BinnedAllocator destroyed with live allocations`)로 끝난다 — 아래 "정적 소멸을 건너뛰는 종료"를 요청한 경우는 검사하지 않는다. `context.SystemAllocator()`는 범용 할당자의 상위이고 Launch의 도구 로그가 쓴다(비교·진단용).
+- **할당자.** 엔진·모듈 로더·설정 문맥·LogHost에는 `context.DefaultAllocator()`(프로세스의 범용 할당자 — 기본 `BinnedAllocator`)를 넘긴다. 본문은 돌아가기 전에 거기서 받은 할당을 모두 반환하고 그 할당자를 쓰는 스레드를 끝낸다. 할당을 남기면 Launch의 정리가 Fatal(`BinnedAllocator destroyed with live allocations`)로 끝난다 — 아래 "정적 소멸을 건너뛰는 종료"를 요청한 경우는 검사하지 않는다. `context.SystemAllocator()`는 범용 할당자의 상위이고 Launch의 도구 로그가 쓴다(비교·진단용). 큰 작업을 끝낸 뒤 쥐고만 있는 메모리를 OS에 돌려주려면 `context.DefaultAllocator().TrimMemory()`를 부른다 — 엔진은 전체 수집의 회수가 끝났을 때와 World를 파괴한 뒤에 스스로 부른다(`WorldGcSchedule::trimMemory`).
 - **종료 요청.** `handleTerminationRequests`를 켜면 처리기는 `launch::RequestTermination()` 표시만 남긴다. 게임 스레드가 프레임 첫 단계(`EngineLoopHooks::PumpEvents`)에서 `launch::IsTerminationRequested()`를 보고 `Engine::RequestExit()`를 부른다. Sandbox `TerminationRequestBridge`가 예다. `RequestExit`는 `Initialize`를 부른 게임 스레드에서만 부른다(Debug·Development에서 검사).
 - **단계 표시.** Engine은 `Engine.Initialize`·`Engine.Ready`·`Engine.Run`·`Engine.Shutdown`·`Engine.Stopped`를 스스로 남긴다(`Engine/Engine.h`의 `EngineStage*`). 본문이 따로 남기려면 `context.SetStage(platform::RunPhase::Running, "MyTool.Import")`처럼 정적 문자열을 넘긴다. 서로 다른 이름은 프로세스에 64개(`platform::MaxRunStageNames`)까지 기록되고, 넘으면 이름 없이 phase만 남는다.
 - **정적 소멸을 건너뛰는 종료.** 멈춘 로그 출력 스레드를 포기한 경우처럼 정적 소멸이 위험하면 `context.RequestExitWithoutStaticTeardown()`을 부르고 본문에서 돌아온다. Launch가 정리(도구 로그, 종료 요청 처리기, 크래시 수집 해제)를 마친 뒤 `_Exit`로 끝낸다.

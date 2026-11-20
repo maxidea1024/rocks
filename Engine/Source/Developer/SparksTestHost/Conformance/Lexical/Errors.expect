@@ -1,0 +1,12 @@
+# One case per lexical code; positions point at the offending text.
+error S0105 1:5
+error S0110 2:9
+error S0110 3:9
+error S0110 4:9
+error S0104 5:11
+error S0112 6:12
+error S0108 7:10
+error S0107 8:9
+error S0111 9:14
+error S0114 10:9
+error S0107 11:9

@@ -531,12 +531,24 @@ Result<void> TraceSession::RegisterChannel(TraceChannel& channel, bool enabled) 
         }
     }
 
-    if (state.nextChannelId >= TraceFormat::MaxChannels) {
+    // 등록을 푼 같은 이름 채널은 그 id를 다시 쓴다(그 채널 형의 스키마가 담은 채널 id와 맞는다).
+    uint16 id = state.nextChannelId;
+    bool reused = false;
+    for (uint16 candidate = 0; candidate < state.nextChannelId; ++candidate) {
+        if (state.channels[candidate] == nullptr &&
+            platform::CStringEquals(state.channelNames[candidate], channel.Name())) {
+            id = candidate;
+            reused = true;
+            break;
+        }
+    }
+
+    if (!reused && state.nextChannelId >= TraceFormat::MaxChannels) {
         return Result<void>::Failure(ErrorCode::CapacityExceeded);
     }
 
     // 채널 정보를 먼저 정의 버퍼에 넣고 켠다. 그래서 이 채널의 기록은 항상 채널 정보 뒤에 나간다.
-    const uint16 id = state.nextChannelId;
+    // 다시 쓰는 id도 정보를 다시 기록한다(분석기는 같은 id의 나중 정보를 쓴다).
     uint8 fixed[TraceFormat::ChannelInfoFixedBytes];
     StoreLittleEndian<uint16>(fixed + TraceFormat::ChannelInfoIdOffset, id);
     fixed[TraceFormat::ChannelInfoReadOnlyOffset] = channel.IsReadOnly() ? 1 : 0;
@@ -554,7 +566,13 @@ Result<void> TraceSession::RegisterChannel(TraceChannel& channel, bool enabled) 
     }
 
     state.channels[id] = &channel;
-    ++state.nextChannelId;
+    if (!reused) {
+        const usize nameBytes = platform::CStringLength(channel.Name());
+        platform::MemoryCopy(state.channelNames[id], channel.Name(), nameBytes);
+        state.channelNames[id][nameBytes] = '\0';
+        ++state.nextChannelId;
+    }
+
     TraceChannelAccess::SetId(channel, id);
     TraceChannelAccess::SetEnabled(channel, enabled);
     return Result<void>::Success();
@@ -690,7 +708,8 @@ Result<void> TraceSession::RegisterEventType(TraceEventType& type) noexcept {
     constexpr usize NameOffset = 5 * sizeof(uint16) + 2 * sizeof(uint8);
     constexpr usize IdEnd = 2 * sizeof(uint16);
     const uint8* candidate = state.schemaBytes.Data() + offset;
-    for (const TraceTypeEntry& entry : state.types) {
+    for (usize index = 0; index < state.types.Size(); ++index) {
+        TraceTypeEntry& entry = state.types[index];
         if (!entry.present) {
             continue;
         }
@@ -707,6 +726,15 @@ Result<void> TraceSession::RegisterEventType(TraceEventType& type) noexcept {
             platform::MemoryEquals(existing + IdEnd, candidate + IdEnd, bytes - IdEnd);
         auto shrunk = state.schemaBytes.TryResize(offset);
         (void)shrunk;
+        if (same && entry.released) {
+            // 등록을 푼 같은 형이다. 그 형 id와 이미 낸 스키마를 다시 쓴다(개정 9).
+            entry.object = &type;
+            entry.released = false;
+            TraceEventTypeAccess::SetLayout(type);
+            TraceEventTypeAccess::SetId(type, static_cast<uint16>(index + 1));
+            return Result<void>::Success();
+        }
+
         return Result<void>::Failure(same ? ErrorCode::AlreadyExists : ErrorCode::TypeMismatch);
     }
 
@@ -740,6 +768,7 @@ Result<void> TraceSession::UnregisterEventType(TraceEventType& type) noexcept {
     }
 
     state_->types[id - 1].object = nullptr;
+    state_->types[id - 1].released = true;
     TraceEventTypeAccess::SetId(type, TraceEventType::NoId);
     return Result<void>::Success();
 }
@@ -862,3 +891,5 @@ Guid TraceSession::SessionGuid() const noexcept {
 }
 
 } // namespace rocks
+
+ROCKS_DEFINE_HOST_SERVICE(rocks::TraceSession)

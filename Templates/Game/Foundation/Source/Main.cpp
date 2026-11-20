@@ -7,6 +7,8 @@ namespace {
 // Game body. Launch (the common entry layer) calls it after installing crash reporting and
 // capturing the command line; the return value is the process exit code.
 int Run(rocks::launch::ApplicationContext& context) noexcept {
+    // The process-wide general-purpose allocator (BinnedAllocator by default). Everything
+    // allocated from it must be returned before this function returns.
     rocks::Allocator& allocator = context.DefaultAllocator();
     rocks::TypeRegistry types(allocator);
     // RegisterModuleTypes (declared in the module generated header, defined in the module generated

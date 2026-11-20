@@ -24,7 +24,8 @@ public static class NativeToolchains
             throw new PlatformNotSupportedException("Only Windows and macOS native hosts are supported.");
         }
 
-        string compilerPath = NativeEnvironment.FindExecutable(compiler ?? (windows ? "clang-cl" : "clang++"), environment);
+        // PATH나 인자에 적힌 철자가 아니라 디스크의 철자를 쓴다(Docs/Design/UnityBuildPch.ko.md 4.4절). 옆에서 찾는 도구도 따라온다.
+        string compilerPath = PathSpelling.OnDisk(NativeEnvironment.FindExecutable(compiler ?? (windows ? "clang-cl" : "clang++"), environment));
         (ProcessResult version, string[] config) = await ProbeVersionAsync(compilerPath, environment, cancellationToken);
         string compilerVersion = ParseCompilerVersion(version.StdOut);
         // archiver·linker는 compiler와 같은 LLVM 설치에서 먼저 찾는다. Release의 ThinLTO bitcode는 같은 LLVM
@@ -223,7 +224,7 @@ public static class NativeToolchains
         string root = ndk ?? Environment.GetEnvironmentVariable("ANDROID_NDK_HOME")
             ?? Environment.GetEnvironmentVariable("ANDROID_NDK_ROOT") ?? FindDefaultNdk()
             ?? throw new FileNotFoundException("Android NDK not found. Pass --android-ndk or set ANDROID_NDK_HOME.");
-        root = Path.GetFullPath(root);
+        root = PathSpelling.OnDisk(Path.GetFullPath(root));
         string properties = Path.Combine(root, "source.properties");
         if (!File.Exists(properties))
         {

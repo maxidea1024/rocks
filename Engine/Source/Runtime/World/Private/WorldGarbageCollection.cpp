@@ -21,8 +21,10 @@ void World::StepGarbageCollection() noexcept {
         FlushDestroys();
     }
 
-    // 회수 대기를 예산만큼 먼저 회수한다(GC 설계 17.3절).
+    // 회수 대기를 예산만큼 먼저 회수한다(GC 설계 17.3절). 전체 수집의 회수가 이 프레임에 다
+    // 빠졌으면 쥐고만 있는 메모리를 돌려준다.
     DrainDeferredReclaim();
+    TrimAfterFullCollection();
     secondsSinceFullCollection_ += lastRealDeltaSeconds_;
     // 주기 수집은 간격만 본다(World 파괴가 없어도 — GC 설계 17.3절, UE와 같다). 0 이하는 주기
     // 수집을 하지 않는다.
@@ -37,6 +39,8 @@ void World::StepGarbageCollection() noexcept {
             RequestFullCollection();
         }
 
+        // 회수할 것이 없었으면 여기서 끝난 것이다(있으면 회수가 다 빠진 프레임에 부른다).
+        TrimAfterFullCollection();
         return;
     }
 
@@ -91,6 +95,18 @@ void World::DrainDeferredReclaim() noexcept {
     }
 }
 
+void World::TrimAfterFullCollection() noexcept {
+    if (!trimPending_ || objects_.CollectionPhase() != GcPhase::Idle ||
+        objects_.HasPendingReclaim()) {
+        return;
+    }
+
+    trimPending_ = false;
+    if (gcSchedule_.trimMemory) {
+        allocator_.TrimMemory();
+    }
+}
+
 bool World::RunFullCollection() noexcept {
     // 진행 중인 증분 cycle: cutoff 전(Marking)은 취소하고, 그 뒤(sweep·회수)는 회수 없이
     // 끝낸다(남은 분류만 하고 회수는 예산으로 나눈다 — GC 설계 17.2절).
@@ -119,6 +135,7 @@ bool World::RunFullCollection() noexcept {
     gcPending_ = false;
     destroyedDuringCycle_ = false;
     secondsSinceFullCollection_ = 0.0;
+    trimPending_ = true;
     return true;
 }
 

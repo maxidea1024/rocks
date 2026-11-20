@@ -1,6 +1,6 @@
 # 로깅 시스템 설계
 
-기준일: 2026-11-20, 개정 16. 엔진 전반에서 쓰는 **로그**(사람이 읽는 사건 기록)의 호출 API, 카테고리·레벨 필터, 비동기 기록 경로, 출력 형식, 장애 격리, 엔진 적용 범위를 정한다.
+기준일: 2026-11-20, 개정 17. 엔진 전반에서 쓰는 **로그**(사람이 읽는 사건 기록)의 호출 API, 카테고리·레벨 필터, 비동기 기록 경로, 출력 형식, 장애 격리, 엔진 적용 범위를 정한다.
 
 요구는 다음 문서에서 온다.
 - [엔진 구현 계획](EngineImplementationPlan.ko.md) 29.4절(필수 로깅·프로파일러: level/category, UTC+monotonic, rate limit·중복 집계, compile/runtime level, error/fatal 비상 경로, 임계 구간에서 file IO·heap·lock wait 금지)
@@ -219,6 +219,9 @@ LogContextScope stage("Stage", "BeginPlay");
 - 우선순위: **컴파일 타임 하한 → 카테고리 재정의(점 접두사 최장 일치) → 전역 최소.** 재정의는 전역보다 자세하게도 조용하게도 할 수 있다. Fatal은 어떤 필터로도 막지 않는다.
 - 컴파일 타임 하한은 Rocks.Build가 타깃 전체에 하나만 정의한다. 모듈마다 다르면 inline 함수 본문이 TU마다 달라져 ODR 위반이다. 카테고리별 컴파일 타임 하한은 두지 않는다(카테고리를 템플릿 인자로 넘겨야 해서 호출 모양이 무거워진다).
 - 꺼진 레벨의 본문은 `if constexpr`로 비운다. 일반 인자는 평가된다. 문자열이 바이너리에서 빠지는지는 Release **최종 링크 결과**로 확인한다(ThinLTO라 `.obj`는 bitcode다).
+  - **검사:** `Rocks.ToolTests log-release --root . --native-executable <Release LogBench>`. LogBench가 부르는 Debug 템플릿 문자열이 없고 Info 템플릿 문자열이 있어야 통과한다. 실행 파일이 없으면 실패한다. 한 구성·한 linker에서 확인한 사실이며 일반 보장은 아니다(최적화가 참조 없는 리터럴을 버리는 데 기댄다).
+  - **CI:** Release 단계 뒤에 LogBench를 Release로 따로 빌드하고 이 검사를 돌린다. 로컬에서는 같은 두 명령을 직접 부른다.
+  - **버린 대안:** 처음에는 `self` 검사 안에서 정해진 출력 경로의 Release LogBench를 찾고 없으면 SKIP했다. 그러나 `self`는 Debug Foundation 단계에서 돌고 그때 Release LogBench가 없어 CI에서 한 번도 실제로 돌지 않았다. 로컬에서는 예전에 빌드한 실행 파일을 검사해 지금 소스와 다른 결과를 낼 수 있었다. 환경 변수로 CI에서만 SKIP을 실패로 바꾸는 안도 같은 낡은 결과물 문제가 남아 버렸다.
 - 컴파일에서 뺀 레벨은 런타임 설정으로 되살릴 수 없다. `SetLevel`이 그런 값을 받으면 성공하되 한 번 Warning을 남긴다.
 - 런타임 변경(`SetGlobalMinimum`, `SetLevel(name, level)`, `ClearLevel`)은 mutex로 직렬화한다. 표 용량(64)을 넘으면 `CapacityExceeded`.
 - **읽기는 원자 변수만 본다.** 표의 각 칸은 `Atomic<uint64>` 접두사 해시와 `Atomic<uint8>` 레벨(빈 칸 표시 포함)이다. 생산자는 카테고리가 가진 접두사 해시들을 긴 것부터 표와 대조한다. 이름 문자열은 mutex 안에서만 읽는다(진단·충돌 검사용). 비원자 데이터를 잠금 없이 읽지 않으므로 데이터 경쟁이 없다.
@@ -927,6 +930,7 @@ LG11–LG19 중 다른 세션 소유 모듈을 고쳐야 하는 곳이다. 그 �
 - 개정 8(2026-11-18): LG8·LG9 구현 반영 — 설정 이름을 Config 규칙에 맞춰 `log.file.max_bytes`·`log.file.recipient_key`로 바꿨다. `log.mode` 기본값 `default`(호스트 프리셋)를 더했다. 카테고리 재정의는 문자열 `log.levels`이고, 설정 처리는 새 `LogHost` 모듈에 둔다(9.2절). 보관 정리는 파일 이름 모양이 정확히 맞는 것만 센다. Asan·TSan 전체 체인은 저장소 검증 기준 변경으로 생략했다. Templates/Game은 tick·Engine이 없어 엔진 호스트로 다루지 않는다.
 - 개정 9(2026-11-18): 후속 설계 확정 — 16절 항목을 LG11–LG19로 설계했다(14.1절, 결정 L14–L27). 상관 id 스택을 Core로 내리고 trace `log` 채널은 `TraceLogSink`가 쓴다. 레이아웃 설정과 Config 검증 hook, 카테고리별 rate limit, `{@Obj}` 캡처 시점 복사와 생성 필드 방문 함수, Formatter spec 검증 규약, 시간 회전과 묶음별 zstd 압축(압축 뒤 봉인), `platform::Fatal` hook, `log view`를 다룬다. WorkerScheduler 진단은 선행 조건만 적었다. UE 5.8.4 `StructuredLog`·`LogTrace`·`OutputDeviceFile`·`FileHelper`·`OutputDeviceRedirector::Panic`을 확인했다. 다른 세션 조율은 15.1절이다. 리뷰 반영: 상관 id 스택에 확장 칸·관찰자 hook(H1), rate limit 창·수 단일 원자 값(M1), Compression 고정 작업 공간 문맥 요청(M2), 종료 hook `const char*`·막히지 않는 flush(M3), `log.levels` 거부 범위(M5), `{@Obj}` 특수화를 ObjectRuntime으로(M6), 런타임 템플릿 spec 검사 경로·전파 분기 하나·`DedicatedLane` 전파·tick 캡처·LG17 시험 방식·validate reason(Low). L25는 사용자 선택 A로 확정했고, L24·L26은 개정 8의 16절 밖 새 범위로 표시했다.
 - 개정 16(2026-11-20): 크래시 수집 병합(e6f6151b) 뒤 로깅 몫. 크래시 기록의 로그 칸(L29): `FileLogSinkConfig::crashAnnotation`과 `LogHost`의 `LogDirectory`, 상대 로그 폴더를 Open 때 절대 경로로(9.1절), 처음 설계의 "설치된 LogSystem의 sink만"을 설치하는 쪽의 설정 칸으로 바꿈. 14.1.8절에 공용 마감을 Launch 설정으로 바꿀 수 있음과 Asan 구성의 콜백 경로·한계를 적었다.
+- 개정 17(2026-11-20): Release 문자열 제외 검사를 `self`에서 전용 명령 `log-release`로 옮김(7절). 실행 파일은 인자로 받고 없으면 실패하며, CI Release 단계 뒤에 LogBench를 Release로 빌드해 돌린다.
 - 개정 15(2026-11-20): LG16 구현 반영(14.1.6의 세부와 다르게 정한 점은 14.2절 LG16). 특수화 없는 타입 거부(static_assert와 템플릿 오류 셋), `LogStaticName`, `LogStructureWriter` 쓰기 함수, 인코딩·상한 세부, 텍스트·JSON 모양, `LogProperty`의 `Structure`·`Array`·`Null`과 하위 트리 범위, `LogEvent::structureNodes`, 생성 `VisitFields` 모양과 생성 크기를 적었다. 리뷰 반영: 노드 칸 넘침·공간 잘림을 열린 조상 모두에 표시, 빈 노드 span은 잘림이 아님, `LogStructure`는 클래스 타입만(static_assert), `Object/LogStructure.h` include 규칙(ODR, 생성 헤더 include는 rocks-78과 맞춰 되돌림), `detail::LogTo`의 `{@Name}`, 객체 참조에 registry 번호, enum 기호·태그 이름 규칙과 수명 문구, 8.6절 메모리 표. 생성 소스 분리(GS2) 병합 때 자기 bitfield를 `Get_` 대신 헤더 안 직접 읽기로 바꾸고 ODR 재검토 시점을 GSD5 재검토로 옮겼다.
 - 개정 14(2026-11-20): LG18 처리기를 크래시 수집기로 옮긴 것을 반영했다(14.1.8, L24·L25, 9.2절 호스트 순서, 14.2절, 15.1절). 로깅은 첫 `LogInstallScope` 설치 때 종료 콜백 하나를 등록하고 해제하지 않는다. `Log::Fatal`·assert의 프로세스 Fatal 표시, `failingThreadId`·`stoppedThreadIds`로 출력 스레드 판정, `FlushForTermination`의 결과 값을 정했다. `SetTerminationHook`·hook 연쇄·로깅 자체 처리기와 스레드별 중복 판정을 버린 이유와, 예약 뒤 게시 전 멈춘 칸의 한계를 적었다. 코드는 크래시 수집 LC1a(rocks-36)가 함께 바꿨고 로깅이 리뷰했다.
 - 개정 13(2026-11-20): sink 수명 계약을 `RemoveSink` 성공 또는 LogSystem 파괴까지로 좁히고 등록 계수로 위반을 Fatal로 잡는다(8.4절, L28). macOS CI에서 시험이 sink를 LogSystem보다 나중에 선언해 파괴된 sink를 flush하던 결함(31곳 선언 순서 정정)에서 나왔다. POSIX 크래시 처리기 깨우기를 self-pipe로(14.1.8, L25).

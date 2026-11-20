@@ -53,4 +53,37 @@ struct TestRequiredAsset final : Asset {
     ROCKS_PROPERTY(Required) ObjectRef<Asset> target;
 };
 
+// TestHookAsset의 생성자·소멸자가 부르는 시험 hook이다(null이면 부르지 않는다). 시험이 걸고 끝나기
+// 전에 푼다 — 모듈이 EngineTests 하나에 정적으로 링크되므로 testHookAssetHooks는 하나다.
+struct TestHookAssetHooks {
+    void (*constructed)(void* context) noexcept = nullptr;
+    void (*destroyed)(void* context) noexcept = nullptr;
+    void* context = nullptr;
+};
+
+inline TestHookAssetHooks testHookAssetHooks;
+
+// 생성자·소멸자가 시험 hook을 부르는 에셋이다(로더 공개 트랜잭션 안의 사용자 코드가 로더에
+// 재진입하는 시험 — Docs/Design/AssetSystem.ko.md 11.6절 18). typed는 기대 타입이 TestAsset인 Hard
+// 참조다(오래된 의존 쿠킹 결과를 가리켜 공개를 실패시키면 롤백이 소멸자를 부른다).
+ROCKS_CLASS()
+struct TestHookAsset final : Asset {
+    TestHookAsset() noexcept {
+        if (testHookAssetHooks.constructed != nullptr) {
+            testHookAssetHooks.constructed(testHookAssetHooks.context);
+        }
+    }
+
+    ~TestHookAsset() {
+        if (testHookAssetHooks.destroyed != nullptr) {
+            testHookAssetHooks.destroyed(testHookAssetHooks.context);
+        }
+    }
+
+    TestHookAsset(const TestHookAsset&) = delete;
+    TestHookAsset& operator=(const TestHookAsset&) = delete;
+
+    ROCKS_PROPERTY() ObjectRef<TestAsset> typed;
+};
+
 } // namespace rocks::asset_fixture
