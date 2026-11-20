@@ -1,5 +1,6 @@
 using Rocks.Build;
 using Rocks.Build.Descriptors;
+using Rocks.Build.Rules;
 
 // .rocksproject·.rocksplugin 읽기·검증과 플러그인 활성화 해석을 시험한다.
 internal static class DescriptorTests
@@ -162,25 +163,55 @@ internal static class DescriptorTests
         PluginDescriptor[] all = [core, physics, water, ocean, debug];
 
         // 기본 활성 + 명시 활성 + 의존 전이. 의존이 앞에 온다.
-        var enabled = PluginCatalog.ResolveEnabled(Project("Game1",
+        var enabled = ResolveProject(Project("Game1",
             "{ \"name\": \"Ocean\", \"enabled\": true }, { \"name\": \"DebugDraw\", \"enabled\": false }"), all);
         string[] names = enabled.Select(plugin => plugin.Name).ToArray();
         Check(names.SequenceEqual(["CoreTools", "Physics", "Water", "Ocean"]), "resolve order: " + string.Join(",", names));
 
         // 프로젝트가 끈 플러그인을 켠 플러그인이 요구하면 오류다.
-        ExpectFailure(() => PluginCatalog.ResolveEnabled(Project("Game2",
+        ExpectFailure(() => ResolveProject(Project("Game2",
             "{ \"name\": \"Water\", \"enabled\": true }, { \"name\": \"Physics\", \"enabled\": false }"), all),
             "disabled dependency");
 
         // 없는 플러그인 참조(프로젝트·플러그인), 순환, 중복 이름은 오류다.
-        ExpectFailure(() => PluginCatalog.ResolveEnabled(Project("Game3", "{ \"name\": \"Nope\", \"enabled\": true }"), all),
+        ExpectFailure(() => ResolveProject(Project("Game3", "{ \"name\": \"Nope\", \"enabled\": true }"), all),
             "unknown project plugin");
         PluginDescriptor broken = Plugin("Broken", true, "Ghost");
-        ExpectFailure(() => PluginCatalog.ResolveEnabled(Project("Game4", ""), [.. all, broken]), "unknown dependency");
+        ExpectFailure(() => ResolveProject(Project("Game4", ""), [.. all, broken]), "unknown dependency");
         PluginDescriptor left = Plugin("Left", true, "Right");
         PluginDescriptor right = Plugin("Right", false, "Left");
-        ExpectFailure(() => PluginCatalog.ResolveEnabled(Project("Game5", ""), [.. all, left, right]), "cycle");
-        ExpectFailure(() => PluginCatalog.ResolveEnabled(Project("Game6", ""), [.. all, core]), "duplicate plugin");
+        ExpectFailure(() => ResolveProject(Project("Game5", ""), [.. all, left, right]), "cycle");
+        ExpectFailure(() => ResolveProject(Project("Game6", ""), [.. all, core]), "duplicate plugin");
+
+        // 타깃 규칙 참조(엔진 저장소 타깃, Docs/Design/BuildTargets.ko.md 3.9절). Program은 enabledByDefault를 적용하지 않고 명시한 것과
+        // 그 의존만 켠다(BD34). Game은 기본 활성도 켠다.
+        string[] Names(IEnumerable<PluginDescriptor> plugins) => plugins.Select(plugin => plugin.Name).ToArray();
+        PluginReferrer commandlet = PluginReferrer.OfTarget("Commandlet");
+        Check(Names(PluginCatalog.ResolveEnabled([new("Water", true)], commandlet, all, applyDefaults: false))
+            .SequenceEqual(["Physics", "Water"]), "a Program target enables only the referenced plugin and its dependencies");
+        Check(PluginCatalog.ResolveEnabled([], commandlet, all, applyDefaults: false).Count == 0,
+            "a Program target without references enables no plugin");
+        Check(Names(PluginCatalog.ResolveEnabled([new("CoreTools", false)], commandlet, all, applyDefaults: true))
+            .SequenceEqual(["DebugDraw"]), "a Game target enables default plugins unless it disables them");
+        ExpectFailure(() => PluginCatalog.ResolveEnabled([new("Nope", true)], commandlet, all, applyDefaults: false),
+            "unknown target plugin", "target 'Commandlet' references unknown plugin 'Nope'");
+        ExpectFailure(() => PluginCatalog.ResolveEnabled([new("Water", true), new("Physics", false)], commandlet, all, applyDefaults: false),
+            "target disabled a required plugin", "requires 'Physics', but the target 'Commandlet' disables it");
+        ExpectFailure(() => PluginCatalog.ResolveEnabled([new("Water", true), new("Water", false)], commandlet, all, applyDefaults: false),
+            "duplicate reference", "more than once");
+        ExpectFailure(() => TargetPluginReferences.Validate("Commandlet", [new("Water", true), new("water", true)]),
+            "target reference differing in case", "more than once");
+        ExpectFailure(() => TargetPluginReferences.Validate("Commandlet", [new("Bad-Name", true)]), "target reference name",
+            "is not a valid name");
+
+        // 타깃 참조가 같은 이름의 프로젝트 참조를 이긴다(BD33). 순서는 타깃 참조, 그 뒤 남은 프로젝트 참조다.
+        IReadOnlyList<PluginReference> combined = TargetPluginReferences.Combine([new("Water", false)],
+            [new("Water", true), new("Ocean", true)]);
+        Check(combined.SequenceEqual([new PluginReference("Water", false), new PluginReference("Ocean", true)]),
+            "target references win over project references");
+
+        IReadOnlyList<PluginDescriptor> ResolveProject(ProjectDescriptor project, IReadOnlyList<PluginDescriptor> available) =>
+            PluginCatalog.ResolveEnabled(project.Plugins, PluginReferrer.Of(project), available, applyDefaults: true);
     }
 
     private static void DiscoversPluginFolders(string directory)
@@ -240,7 +271,7 @@ internal static class DescriptorTests
         string[] Names(IEnumerable<NativeModuleInput> modules) => modules.Select(module => module.Name).ToArray();
 
         // Windows Development: Developer는 들어가고 Editor·Android 전용·켜지지 않은 플러그인 모듈은 빠진다.
-        var development = DescriptorModuleSet.Resolve(project, available, NativePlatform.Windows, NativeConfiguration.Development);
+        var development = GameSet(project, available, NativePlatform.Windows, NativeConfiguration.Development);
         Check(Names(development.Apply(rules, ["Game", "GameTools"])).SequenceEqual(["Game", "GameTools", "Water"]),
             "Windows Development module selection");
         Check(development.EnabledPlugins.Select(plugin => plugin.Name).SequenceEqual(["Water"]), "enabled plugins");
@@ -253,13 +284,13 @@ internal static class DescriptorTests
             "disabled plugin reason");
 
         // Release는 Developer 모듈을 뺀다. 타깃이 쓰면 이유와 함께 거부한다.
-        var release = DescriptorModuleSet.Resolve(project, available, NativePlatform.Windows, NativeConfiguration.Release);
+        var release = GameSet(project, available, NativePlatform.Windows, NativeConfiguration.Release);
         Check(Names(release.Apply(rules, ["Game"])).SequenceEqual(["Game", "Water"]), "Release excludes Developer modules");
         ExpectFailure(() => release.Apply(rules, ["GameTools"]), "Release target used a Developer module",
             "Developer modules are not built in Release");
 
         // Android는 Android 전용 모듈을 넣는다.
-        var android = DescriptorModuleSet.Resolve(project, available, NativePlatform.Android, NativeConfiguration.Debug);
+        var android = GameSet(project, available, NativePlatform.Android, NativeConfiguration.Debug);
         Check(Names(android.Apply(rules, ["GameMobile"])).SequenceEqual(["Game", "GameTools", "GameMobile", "Water"]),
             "Android includes platform-specific module");
 
@@ -293,15 +324,77 @@ internal static class DescriptorTests
         // 프로젝트가 대상으로 하지 않는 플랫폼, 여러 기술자에 같은 모듈 이름.
         string windowsOnly = Write(root, "WindowsOnly/WindowsOnly.rocksproject",
             """{ "fileVersion": 1, "engineVersion": "0.1", "targetPlatforms": ["Windows"] }""");
-        ExpectFailure(() => DescriptorModuleSet.Resolve(DescriptorReader.ReadProject(windowsOnly), [], NativePlatform.MacOS,
+        ExpectFailure(() => GameSet(DescriptorReader.ReadProject(windowsOnly), [], NativePlatform.MacOS,
             NativeConfiguration.Debug), "platform outside targetPlatforms", "does not target MacOS");
         Write(plugins, "Ocean/Ocean.rocksplugin", """
             { "fileVersion": 1, "version": 1, "versionName": "1.0", "friendlyName": "Ocean",
               "modules": [ { "name": "Water", "type": "Runtime" } ] }
             """);
-        ExpectFailure(() => DescriptorModuleSet.Resolve(project, PluginCatalog.Discover([plugins]), NativePlatform.Windows,
+        ExpectFailure(() => GameSet(project, PluginCatalog.Discover([plugins]), NativePlatform.Windows,
             NativeConfiguration.Debug), "module declared by two descriptors", "is also declared by");
+        File.Delete(Path.Combine(plugins, "Ocean", "Ocean.rocksplugin"));
+
+        // Program 타깃(명령행 도구·시험)은 Release에서도 Developer 모듈을 넣는다(BD35 — UE DeveloperTool). Game Release만 뺀다.
+        var programRelease = DescriptorModuleSet.Resolve(DescriptorOwner.ForProject(project, "Tool", []), available, NativePlatform.Windows,
+            NativeConfiguration.Release, TargetType.Program);
+        Check(Names(programRelease.Apply(rules, ["GameTools"])).SequenceEqual(["Game", "GameTools", "Water"]),
+            "a Program target keeps Developer modules in Release");
+
+        // 타깃 규칙의 참조가 프로젝트 참조를 이긴다: 프로젝트가 켠 Water를 타깃이 끄면 Water 모듈이 빠진다.
+        var targetDisables = DescriptorModuleSet.Resolve(DescriptorOwner.ForProject(project, "Game", [new("Water", false)]), available,
+            NativePlatform.Windows, NativeConfiguration.Development, TargetType.Game);
+        Check(targetDisables.EnabledPlugins.Count == 0, "a target reference overrides the project reference");
+
+        // 엔진 저장소 타깃(프로젝트 없음): 기술자가 없는 엔진 모듈은 대조 없이 통과하고, 켠 플러그인 모듈만 더해진다. 플랫폼 검사는 없다.
+        string engineRoot = Path.Combine(root, "Game");
+        NativeModuleInput EngineRule(string name, string directory, params string[] dependencies) =>
+            Rule(name, dependencies) with { ModuleDirectory = directory };
+        NativeModuleInput[] engineRules =
+        [
+            EngineRule("Core", "Core/Source/Runtime/Core"), EngineRule("Engine", "Engine/Source/Runtime/Engine", "Core"),
+            EngineRule("Water", "Plugins/Water/Source/Water", "Engine"), EngineRule("Weather", "Plugins/Weather/Source/Weather", "Engine")
+        ];
+        var engine = DescriptorModuleSet.Resolve(DescriptorOwner.ForEngine("EngineTests", [new("Water", true)], engineRoot), available,
+            NativePlatform.Android, NativeConfiguration.Release, TargetType.Program);
+        Check(Names(engine.Apply(engineRules, ["Engine"])).SequenceEqual(["Core", "Engine", "Water"]),
+            "an engine target keeps engine modules and adds enabled plugin modules");
+        Check(engine.IncludedPluginModules.SequenceEqual(["Water"]), "engine target plugin modules");
+        ExpectFailure(() => engine.Apply([.. engineRules, Rule("Tool", "Weather")], ["Tool"]),
+            "an engine module used a disabled plugin module", "plugin 'Weather' is not enabled");
+        var engineNone = DescriptorModuleSet.Resolve(DescriptorOwner.ForEngine("Foundation", [], engineRoot), available, NativePlatform.Windows,
+            NativeConfiguration.Debug, TargetType.Program);
+        Check(engineNone.EnabledPlugins.Count == 0 && Names(engineNone.Apply(engineRules, ["Engine"])).SequenceEqual(["Core", "Engine"]),
+            "an engine target without plugin references builds no plugin module");
+
+        // 계층(BD37·BD39): 플러그인 모듈의 폴더는 <플러그인>/Source/<모듈>, 엔진 계층 모듈은 플러그인 모듈에 링크·적재 의존하지 않는다,
+        // 프로그램 모듈은 켠 플러그인 모듈을 쓸 수 있다, 플러그인 사이 의존은 .rocksplugin plugins에 적어야 한다.
+        NativeModuleInput[] Replace(NativeModuleInput replacement) =>
+            [.. engineRules.Where(rule => rule.Name != replacement.Name), replacement];
+        ExpectFailure(() => engine.Apply(Replace(EngineRule("Water", "Engine/Source/Developer/Water", "Engine")), ["Engine"]),
+            "plugin module outside its plugin folder", "must live in Plugins/Water/Source/Water");
+        ExpectFailure(() => engine.Apply(Replace(EngineRule("Engine", "Engine/Source/Runtime/Engine", "Core", "Water")), ["Engine"]),
+            "engine module linked to a plugin module", "engine module 'Engine' must not depend on plugin module 'Water'");
+        ExpectFailure(() => engine.Apply(Replace(EngineRule("Core", "Core/Source/Runtime/Core") with { DynamicModules = ["Water"] }), ["Engine"]),
+            "engine module loading a plugin module at run time", "engine module 'Core' must not depend on plugin module 'Water'");
+        Check(Names(engine.Apply([.. engineRules, Rule("Tool", "Water")], ["Tool"])).Contains("Tool"),
+            "a program module may use an enabled plugin module");
+        ExpectFailure(() => engine.Apply(Replace(EngineRule("Water", "Plugins/Water/Source/Water", "Weather")), ["Engine"]),
+            "plugin module used another plugin without declaring it", "add { \"name\": \"Weather\", \"enabled\": true } to \"plugins\" of Water.rocksplugin");
+        Write(plugins, "Storm/Storm.rocksplugin", """
+            { "fileVersion": 1, "version": 1, "versionName": "1.0", "friendlyName": "Storm",
+              "modules": [ { "name": "Storm", "type": "Developer" } ], "plugins": [ { "name": "Weather", "enabled": true } ] }
+            """);
+        var storm = DescriptorModuleSet.Resolve(DescriptorOwner.ForEngine("Commandlet", [new("Storm", true)], engineRoot),
+            PluginCatalog.Discover([plugins]), NativePlatform.Windows, NativeConfiguration.Release, TargetType.Program);
+        Check(Names(storm.Apply([.. engineRules, EngineRule("Storm", "Plugins/Storm/Source/Storm", "Weather")], ["Engine"]))
+            .SequenceEqual(["Core", "Engine", "Weather", "Storm"]), "a plugin module may use a declared dependency plugin");
+        File.Delete(Path.Combine(plugins, "Storm", "Storm.rocksplugin"));
     }
+
+    // 설치 SDK 게임 빌드의 Game 타깃(타깃 참조 없음)이다.
+    private static DescriptorModuleSet GameSet(ProjectDescriptor project, IReadOnlyList<PluginDescriptor> available, NativePlatform platform,
+        NativeConfiguration configuration) =>
+        DescriptorModuleSet.Resolve(DescriptorOwner.ForProject(project, "Game", []), available, platform, configuration, TargetType.Game);
 
     private static string Write(string directory, string relative, string text)
     {

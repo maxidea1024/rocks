@@ -1,0 +1,12 @@
+# Cascade prevention (3.10): unresolved names and types, classes with unresolved bases and failed arguments
+# produce no further S04xx/S05xx in the expressions around them.
+error S0318 1:16
+error S0318 7:34
+error S0401 14:27
+error S0401 15:21
+error S0509 16:18
+error S0401 17:20
+error S0317 19:9
+error S0318 23:19
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

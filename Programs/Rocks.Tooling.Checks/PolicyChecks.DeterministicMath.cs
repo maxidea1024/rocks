@@ -44,7 +44,7 @@ public static partial class PolicyChecks
     private static readonly Regex Identifier = Pattern("[A-Za-z_][A-Za-z0-9_]*");
 
     /// <summary>
-    /// 엔진·Core의 런타임과 개발 도구(쿠킹 산출물의 결정성, 시험 제외)는 C runtime 실수 해석·scanf·locale·cvt 함수와 실수
+    /// 엔진·Core의 런타임과 개발 도구, 엔진 플러그인(쿠킹 산출물의 결정성, 시험 제외)은 C runtime 실수 해석·scanf·locale·cvt 함수와 실수
     /// 서식 printf를 쓰지 않는다(rule id crt-number-conversion, CoreDataFoundations.ko.md 3.2). 실수 해석·표기는 Core
     /// NumberText·StringBuilder(정수 연산만 쓰는 변환)를 쓴다. 주석·문자열 안의 이름과 멤버(.·->)·한정 이름(X::)은 대상이
     /// 아니다. 이름 자체를 보므로 함수 포인터(&amp;strtod)·여러 줄 호출도 잡는다.
@@ -53,7 +53,7 @@ public static partial class PolicyChecks
     {
         List<CheckFailure> failures = [];
         foreach (string path in NativeSources(root, ["Core/Source/Runtime", "Core/Source/Developer", "Engine/Source/Runtime",
-                     "Engine/Source/Developer"]))
+                     "Engine/Source/Developer", "Engine/Plugins"]))
         {
             string relative = Relative(root, path);
             if (IsTestSource(relative))

@@ -6,3 +6,5 @@ error S0325 SparksPackage.json5 5:30
 error S0325 SparksPackage.json5 5:47
 error S0325 SparksPackage.json5 5:62
 error S0325 SparksPackage.json5 5:77
+# Names only: type rules (LC2c) are checked in the Types area.
+stage names

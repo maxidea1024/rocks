@@ -1,0 +1,118 @@
+enum Mode { A, B }
+
+struct Point {
+    var X: int;
+
+    fn Sum(other: Point): int {
+        return X + other.X;
+    }
+}
+
+open class Base : ScriptComponent {
+    var Health = 10;
+
+    fn Heal(amount: int) {
+        Health += amount;
+    }
+}
+
+class Derived : Base {
+    fn Context() {
+        _ = World.Audio;
+        _ = Input.Jump.Value;
+        _ = Time.Delta;
+        _ = Time.Frame;
+        let place = Session;
+        _ = place;
+        _ = Health;
+        _ = Owner.Location;
+    }
+}
+
+fn Valid(v: vec3, w: vec2, q: quat, r: Rotator, t: Transform, text: string, items: Array<int>,
+         actors: Array<Actor>, scores: Map<string, int>, names: Set<string>, a: Actor,
+         c: Character, tag: Tag, p: Point, d: Derived, actorOpt: Actor?, textOpt: string?,
+         result: Result<int>, done: Result<void>, soundList: Array<SoundAsset>) {
+    _ = v.X + v.Y + v.Z;
+    _ = v.Length();
+    _ = v.Cross(v);
+    _ = v.Normalize();
+    _ = w.Dot(w);
+    _ = q.W;
+    _ = q.Rotate(v);
+    _ = quat.FromAxisAngle(v, 1.0);
+    _ = r.Yaw;
+    _ = r.Forward();
+    _ = t.Location;
+    _ = t.ToMatrix().TransformPosition(v);
+    _ = text.Length;
+    _ = text.Find("a");
+    _ = text.Split(",");
+    _ = items.Count;
+    _ = items.Contains(1);
+    _ = items.IndexOf(2);
+    items.Sort();
+    _ = actors.SlotCount;
+    _ = actors.AliveCount();
+    _ = actors.Contains(a);
+    _ = scores.Count;
+    _ = scores.Keys();
+    _ = scores.Values();
+    _ = names.Add("x");
+    _ = result.Value;
+    _ = result.Error;
+    _ = done.Error;
+    _ = a.Location;
+    _ = a.Tags.Has(tag);
+    _ = c.Location;
+    c.Jump();
+    c.AddMovement(v);
+    _ = c.CanMove();
+    _ = Actor.CountAll();
+    _ = Mode.A;
+    _ = CollisionChannel.Camera;
+    _ = Error.NotFound;
+    _ = Clock.Game;
+    _ = Math.Pi;
+    _ = Math.Sqrt(2.0);
+    _ = Tag.Find("A.B");
+    _ = actorOpt?.Location;
+    actorOpt?.RequestDestroy();
+    _ = actorOpt?.Find<ScriptComponent>();
+    _ = textOpt?.Length;
+    _ = textOpt?.Find("a");
+    _ = p.X;
+    _ = p.Sum(p);
+    _ = d.Health;
+    d.Heal(1);
+    _ = d.Owner;
+    _ = soundList.Count;
+}
+
+fn Errors(v: vec3, q: quat, text: string, a: Actor, mode: Mode, vectors: Array<vec3>,
+          actors: Array<Actor>, items: Array<int>, done: Result<void>, actorOpt: Actor?,
+          textOpt: string?, p: Point, sounds: Array<SoundAsset>) {
+    _ = v.Bogus;
+    _ = text.Bogus;
+    _ = a.Bogus;
+    _ = Mode.C;
+    _ = Math.Bogus;
+    _ = CollisionChannel.Bogus;
+    _ = p.Bogus;
+    _ = actorOpt.Location;
+    _ = textOpt.Length;
+    _ = a?.Location;
+    _ = text?.Length;
+    _ = Actor.Location;
+    _ = a.CountAll();
+    _ = vec3.Length();
+    _ = q.FromAxisAngle(v, 1.0);
+    _ = mode.A;
+    _ = Point.X;
+    _ = vectors.Contains(v);
+    actors.Sort();
+    _ = actors.Count;
+    _ = items.SlotCount;
+    _ = done.Value;
+    _ = sounds.SlotCount;
+}

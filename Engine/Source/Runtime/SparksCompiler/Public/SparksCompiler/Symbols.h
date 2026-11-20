@@ -38,14 +38,18 @@ enum class SymbolKind : uint8 {
     Enum,
     Interface,
     Const,
-    Function,        // 최상위 fn
-    Field,           // class·struct 필드(owner = 타입 심볼)
-    Method,          // class·struct 함수(owner = 타입 심볼)
-    Event,           // class 이벤트(owner = 타입 심볼)
-    EnumCase,        // owner = enum 심볼
-    InterfaceMethod, // owner = interface 심볼
-    Parameter,       // 함수·handler·이벤트·interface 메서드 매개변수(owner = 그 선언의 심볼)
-    Local            // 지역 변수·`if (let)` binder·`for` binder
+    Function,         // 최상위 fn
+    Field,            // class·struct 필드(owner = 타입 심볼)
+    Method,           // class·struct 함수(owner = 타입 심볼)
+    Event,            // class 이벤트(owner = 타입 심볼)
+    EnumCase,         // owner = enum 심볼
+    InterfaceMethod,  // owner = interface 심볼
+    Parameter,        // 함수·handler·이벤트·interface 메서드 매개변수(owner = 그 선언의 심볼)
+    Local,            // 지역 변수·`if (let)` binder·`for` binder
+    LanguageField,    // 부록 B 필드·속성·상수(owner = 주인 타입·이름 공간, index = 멤버 표 번호)
+    LanguageFunction, // 부록 B 함수(owner = 주인, 최상위 prelude 함수는 그 PreludeValue 심볼 자신)
+    LanguageEvent,    // 부록 B 이벤트(`InputAction.Triggered`)
+    LanguageTypeParameter // 부록 B의 타입 인자·자리표시(index = LanguageTypeParameterKind)
 };
 
 // 심볼 flag다.
@@ -60,6 +64,19 @@ struct SymbolFlags {
         1u << 6; // 선언 이름에 진단을 냈다(import가 다시 알리지 않는다)
     static constexpr uint32 Incomplete = 1u << 7; // class 이름 공간이 불완전하다(3.9절 연쇄 방지)
     static constexpr uint32 Lifecycle = 1u << 8;  // 수명 클래스(기반 체인에 수명 엔진 타입)
+    static constexpr uint32 ReadOnly = 1u
+                                       << 9; // 읽기 전용 속성(부록 B `let`, schema `access: read`)
+    static constexpr uint32 Variadic = 1u << 10; // 대기 1개 이상을 받는다(All·Race)
+};
+
+// 언어 타입 매개변수·자리표시의 종류다(LanguageTypeParameter 심볼의 index).
+enum class LanguageTypeParameterKind : uint32 {
+    Numeric,       // `$N` 모든 숫자 타입
+    Signed,        // `$S` 부호 있는 정수·실수 타입
+    Integer,       // `$I` 정수 타입
+    FloatOrVector, // `$F` float 또는 벡터
+    Vector,        // `$V` vec2·vec3·vec4
+    Generic        // 주인 제네릭 타입·함수의 타입 인자(`T`·`K`·`V`, item = 위치)
 };
 
 // 심볼 하나다. 쓰지 않는 칸은 기본값이다.

@@ -1,0 +1,9 @@
+# Conditions (3.10): if, while, '!', '&&', '||' and the first argument of Assert must be 'bool' (not 'bool?') - S0408.
+error S0408 12:9
+error S0408 15:9
+error S0408 18:12
+error S0408 21:12
+error S0401 22:18
+error S0317 23:9
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

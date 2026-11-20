@@ -4,3 +4,5 @@ error S0310 4:9
 error S0310 7:17
 error S0310 19:13
 error S0310 24:13
+# Names only: type rules (LC2c) are checked in the Types area.
+stage names

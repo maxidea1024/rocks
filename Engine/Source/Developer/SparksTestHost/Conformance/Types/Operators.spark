@@ -1,0 +1,111 @@
+enum Mode { A, B }
+enum Other { C }
+
+fn Valid(i: int, u: uint32, f: float, g: float32, flag: bool, text: string, v: vec3, w: vec2,
+         q: quat, t: Transform, a: Actor, p: Pawn, opt: int?, actorOpt: Actor?, mode: Mode) {
+    _ = i + 1;
+    _ = 2 - i;
+    _ = i * i;
+    _ = i % 3;
+    _ = u * 2;
+    _ = f / 2;
+    _ = g / g;
+    _ = -i;
+    _ = -f;
+    _ = -v;
+    _ = v + v;
+    _ = v - v;
+    _ = v * 2.0;
+    _ = 2.0 * v;
+    _ = v / 2;
+    _ = w * f;
+    _ = q * q;
+    _ = t.ToMatrix() * t.ToMatrix();
+    _ = i < 2;
+    _ = f >= 1.5;
+    _ = text < "b";
+    _ = mode > Mode.A;
+    _ = i == 2;
+    _ = flag != true;
+    _ = text == "a";
+    _ = mode == Mode.B;
+    _ = a == p;
+    _ = p == a;
+    _ = opt == i;
+    _ = opt == null;
+    _ = null != actorOpt;
+    _ = !flag;
+    _ = flag && i > 0 || !flag;
+    _ = opt ?? 0;
+    _ = opt ?? opt;
+    _ = opt ?? null;
+    _ = 1 < 2.5;
+    _ = 2 == 2;
+    _ = actorOpt ?? a;
+    var x = i;
+    x += 1;
+    x -= i;
+    x *= 2;
+    var y = f;
+    y /= 2.0;
+    var z = v;
+    z += v;
+    z *= 2.0;
+    z /= f;
+    var r = q;
+    r *= q;
+}
+
+fn Errors(i: int, j: int32, u: uint32, f: float, g: float32, flag: bool, text: string, v: vec3,
+          q: quat, a: Actor, opt: int?, mode: Mode, other: Other, tag: Tag, optFloat: float?) {
+    _ = i + f;
+    _ = j < i;
+    _ = text + "b";
+    _ = flag + flag;
+    _ = -u;
+    _ = -flag;
+    _ = v + f;
+    _ = f / v;
+    _ = v * v;
+    _ = v % 2.0;
+    _ = q * v;
+    _ = flag < flag;
+    _ = a < a;
+    _ = mode < other;
+    _ = f == f;
+    _ = v == v;
+    _ = a == i;
+    _ = mode == other;
+    _ = i == null;
+    _ = null == null;
+    _ = !i;
+    _ = i && flag;
+    _ = flag || opt;
+    _ = i ?? 0;
+    _ = opt ?? "x";
+    _ = tag + tag;
+    _ = f % f;
+    _ = opt ?? optFloat;
+    _ = "Score: " + 5;
+    _ = text + 1;
+    _ = flag == 1;
+    _ = q * 2;
+    _ = mode < 1;
+    _ = 1 == 1.5;
+    var items: Array<int> = [];
+    items[0] += 1;
+    var x = i;
+    x /= 2;
+    _ = x % 0;
+    var y = f;
+    y *= g;
+    var s = text;
+    s += "b";
+    var z = v;
+    z *= v;
+    z -= f;
+    var o = opt;
+    o += 1;
+    var b = flag;
+    b += true;
+}

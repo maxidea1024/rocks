@@ -136,12 +136,16 @@ try
             case "buildinfo":
                 await BuildInfoTests.RunAsync(request, root, Pass);
                 break;
+            case "descriptors":
+                DescriptorTests.Run(root, repository);
+                Pass("project and plugin descriptors parse strictly and resolve plugins");
+                break;
             case "windows-headers":
                 await WindowsHeaderPairTests.RunAsync(request, root, repository, Pass);
                 break;
             default:
                 throw new ArgumentException(
-                    $"Unknown test group '{group}'. Groups: dependency, unity, pch, dynamic, module-table, modular, buildinfo, windows-headers.");
+                    $"Unknown test group '{group}'. Groups: dependency, unity, pch, dynamic, module-table, modular, buildinfo, descriptors, windows-headers.");
         }
 
         Console.WriteLine($"Native build regression groups ({group} only): {passed}, failed: 0");

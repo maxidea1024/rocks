@@ -1,0 +1,72 @@
+enum Mode { A, B }
+
+class Keeper : ScriptComponent {
+}
+
+struct Leaf {
+    var Value: int;
+}
+
+struct Wrapper {
+    var Inner: Leaf;
+    var Kind: Mode;
+    var Where: vec3;
+}
+
+struct Node {
+    var Children: Array<Node>;
+    var Lookup: Map<string, Node>;
+    var Parent: Keeper?;
+}
+
+struct Needs {
+    var Label: Tag;
+}
+
+struct Outer {
+    var Inner: Needs;
+}
+
+struct Given {
+    var Inner: Needs = Needs(Label: Tag("A.B"));
+}
+
+struct UsesEngine {
+    var Params: SpawnParams;
+}
+
+struct SelfLoop {
+    var Me: SelfLoop;
+}
+
+struct SelfOptional {
+    var Me: SelfOptional?;
+}
+
+struct First {
+    var Next: Second;
+}
+
+struct Second {
+    var Following: Third;
+}
+
+struct Third {
+    var Back: First;
+    var Again: Second;
+}
+
+fn Valid() {
+    _ = Wrapper();
+    _ = Node();
+    _ = Given();
+    _ = Outer(Inner: Needs(Label: Tag("A.B")));
+    _ = SelfLoop();
+    _ = First();
+}
+
+fn Errors() {
+    _ = Outer();
+    _ = UsesEngine();
+    _ = SpawnParams();
+}

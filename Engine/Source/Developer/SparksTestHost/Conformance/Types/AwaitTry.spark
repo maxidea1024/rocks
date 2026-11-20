@@ -1,0 +1,49 @@
+async fn LoadCount(): int {
+    return 1;
+}
+
+fn Make(): Result<int> {
+    return 1;
+}
+
+fn Done(): Result<void> {
+    return;
+}
+
+async fn Valid(a: Actor, soft: Soft<DataAsset>): Result<void> {
+    let count = await LoadCount();
+    await Delay(1.0, Clock.Game);
+    await NextTick();
+    await a.Destroyed;
+    let loaded = await soft.Load();
+    let asset = try await soft.Load();
+    let made = try Make();
+    try Done();
+    let request = soft.Load();
+    await All(request, NextTick());
+    let moved = await a.MoveTo(a.Location);
+    _ = count; _ = loaded; _ = asset; _ = made; _ = request; _ = moved;
+    return;
+}
+
+fn Twice(value: int): int {
+    return value * 2;
+}
+
+async fn Errors(a: Actor, soft2: Soft<DataAsset>, held: LoadRequest<DataAsset>): Result<void> {
+    await 1;
+    await Twice(1);
+    let n = try 1;
+    let m = try Twice(1);
+    let k = try await LoadCount();
+    await a;
+    await All(LoadCount());
+    await All(soft2.Load());
+    await Race(held);
+    let maybe: Result<int>? = null;
+    let unwrapped = try maybe;
+    let nothing = try Done();
+    _ = unwrapped; _ = nothing;
+    _ = n; _ = m; _ = k;
+    return;
+}

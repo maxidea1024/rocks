@@ -1,0 +1,27 @@
+# Member access (3.10): value, reference and base chain, type names (enum cases, static functions), namespaces,
+# context names, '?.', appendix B member conditions; S0326, S0412, S0414, S0425.
+error S0326 95:9
+error S0326 96:9
+error S0326 97:9
+error S0326 98:9
+error S0326 99:9
+error S0326 100:9
+error S0326 101:9
+error S0412 102:9
+error S0412 103:9
+error S0414 104:9
+error S0414 105:9
+error S0425 106:9
+error S0425 107:9
+error S0425 108:9
+error S0425 109:9
+error S0425 110:9
+error S0425 111:9
+error S0326 112:9
+error S0326 113:5
+error S0326 114:9
+error S0326 115:9
+error S0326 116:9
+error S0326 117:9
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

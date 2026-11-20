@@ -1,0 +1,12 @@
+enum Mode { A }
+
+fn Errors(v: vec3) {
+    _ = (5).Foo;
+    _ = (1.5).X;
+    _ = null.X;
+    _ = null?.X;
+    _ = Math?.Pi;
+    _ = Mode?.A;
+    _ = v.Lenght();
+    _ = Math.Sqr(2.0);
+}

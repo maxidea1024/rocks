@@ -683,6 +683,8 @@ TEST(SparksNames_AllocationFailureEverywhere) {
                            "    }\n"
                            "}\n"
                            "class Keep : WorldService { fn Run() { _ = Input; } }\n");
+            // 이름 해석만 본다(타입 검사의 할당 실패는 SparksTypes 시험이 본다).
+            REQUIRE(fixture.compilation.SetLastStage(CompilationStage::Names));
             if (failAt == 0) {
                 allocator.DisableFailure(); // 깨끗한 실행: Check의 할당 수를 센다
             } else {
@@ -695,6 +697,10 @@ TEST(SparksNames_AllocationFailureEverywhere) {
                 checkAttempts = allocator.Attempts();
                 fixture.diagnostics.Sort(fixture.sources);
                 REQUIRE(AppendDiagnostics(clean, fixture.sources, fixture.diagnostics));
+                if (fixture.diagnostics.Count() != 9) {
+                    fixture.Print();
+                }
+
                 CHECK(fixture.diagnostics.Count() == 9);
             } else if (checked) {
                 ++successes;

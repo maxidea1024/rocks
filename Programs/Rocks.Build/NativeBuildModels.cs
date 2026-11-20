@@ -295,6 +295,10 @@ public sealed record NativeModuleInput
     // 프로젝트 루트 기준 모듈 폴더다. identity 명세 <ModuleDirectory>/<Name>.rocksids.json의 위치를 정한다.
     public string? ModuleDirectory { get; init; }
 
+    // 모듈 종류다(Docs/Design/BuildTargets.ko.md 3.9절 BD38). 엔진 모듈은 규칙의 Group 폴더(SourceModuleRules), 플러그인 모듈은 기술자
+    // (PluginModuleRules)가 정한다. Release 배제 정책이 Developer 모듈을 이 칸으로 찾는다. 실행 파일·서드파티는 Runtime이다.
+    public Descriptors.ModuleType Type { get; init; } = Descriptors.ModuleType.Runtime;
+
     // 설치 SDK 모듈 전용: 미리 생성된 descriptor와 identity 명세다. 다시 생성하지 않고 import만 한다.
     // Metadata와 함께 쓸 수 없다.
     public ImportedMetadata? ImportedMetadata { get; init; }

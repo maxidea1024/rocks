@@ -1,0 +1,66 @@
+fn Valid(items: Array<int>, scores: Map<string, float>, names: Set<string>, n: int, u: uint8) {
+    for (item in items) {
+        _ = item + 1;
+    }
+
+    for (index, item in items) {
+        _ = index * item;
+    }
+
+    for (key in scores) {
+        _ = key.Length;
+    }
+
+    for (key, value in scores) {
+        _ = "${key} ${value * 2.0}";
+    }
+
+    for (name in names) {
+        _ = name;
+    }
+
+    for (i in 0..<n) {
+        _ = i;
+    }
+
+    for (j in u..<10) {
+        _ = j;
+    }
+
+    for (k in 0..<3) {
+        _ = k;
+    }
+
+    for (m in -3..<n) {
+        _ = m;
+    }
+}
+
+fn Errors(items: Array<int>?, names: Set<string>, f: float, n: int, small: int32, text: string) {
+    for (a, b in names) {
+    }
+
+    for (a, b in 0..<n) {
+    }
+
+    for (x in 0..<f) {
+    }
+
+    for (y in 0.5..<n) {
+    }
+
+    for (z in small..<n) {
+    }
+
+    for (w in n) {
+    }
+
+    for (v in items) {
+    }
+
+    for (c in text) {
+    }
+
+    for (d in Missing) {
+    }
+}

@@ -1,0 +1,5 @@
+# A struct cycle across modules of one package is reported once, in the struct first by module import path
+# (Main before Other); a struct in the cycle is treated as having a default value (no S0404 for Alpha()).
+error S0426 Main.spark 5:15
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

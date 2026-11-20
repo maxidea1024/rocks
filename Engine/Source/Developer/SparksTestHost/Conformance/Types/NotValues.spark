@@ -1,0 +1,20 @@
+enum Mode { A }
+
+fn Twice(value: int): int {
+    return value * 2;
+}
+
+fn Errors() {
+    _ = Mode;
+    _ = Math;
+    _ = vec3;
+    let logged = Log.Info("a");
+    _ = Twice;
+    _ = Tag;
+    let w = Math.Min;
+    var x = Mode;
+    _ = Twice(Mode);
+    _ = Action;
+    _ = Log.Info("a");
+    _ = logged; _ = w; _ = x;
+}

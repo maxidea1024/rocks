@@ -1,0 +1,9 @@
+# Language generic functions (appendix B) take explicit type arguments (S0411), arguments are invariant (S0401).
+error S0411 15:9
+error S0411 16:9
+error S0401 17:35
+error S0411 18:9
+error S0411 19:9
+error S0401 20:27
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

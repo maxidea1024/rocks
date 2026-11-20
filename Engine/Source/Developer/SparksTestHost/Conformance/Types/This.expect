@@ -1,0 +1,9 @@
+# 'this' (3.10): a value of the class in class functions, handlers and field initializers; S0423 in struct functions,
+# top-level functions and const initializers, and for 'this.X' of an own member ('emit this.E' is not an expression).
+error S0423 5:13
+error S0423 10:19
+error S0423 13:9
+error S0423 28:21
+error S0423 31:13
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

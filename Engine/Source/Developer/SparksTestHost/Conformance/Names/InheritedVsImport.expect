@@ -2,3 +2,5 @@
 # import.
 error S0311 Main.spark 1:8
 error S0311 Main.spark 2:17
+# Names only: type rules (LC2c) are checked in the Types area.
+stage names

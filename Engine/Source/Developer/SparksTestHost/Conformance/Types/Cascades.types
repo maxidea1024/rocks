@@ -1,0 +1,9 @@
+8:9-8:15 Identifier Test:Main.Broken
+9:9-9:15 Identifier Test:Main.Broken
+14:27-14:30 String string
+15:21-15:24 String string
+17:20-17:23 String string
+27:13-27:16 String string
+31:12-31:21 Binary int
+31:12-31:17 Identifier int
+31:20-31:21 IntegerLiteral int

@@ -1,0 +1,14 @@
+# Returns (3.10): terminating statements (return, blocks, if/else, switch with default or all enum cases), Result<T>
+# returns T or Error; S0409 at the closing brace, S0410 value shape, S0401 value type and Result<T?>.
+error S0401 54:12
+error S0410 58:12
+error S0410 62:5
+error S0401 66:12
+error S0401 70:12
+error S0401 73:29
+error S0409 81:1
+error S0409 87:1
+error S0409 94:1
+error S0410 98:16
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

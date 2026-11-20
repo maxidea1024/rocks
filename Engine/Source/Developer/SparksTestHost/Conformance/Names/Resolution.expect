@@ -1,1 +1,3 @@
 clean
+# Names only: type rules (LC2c) are checked in the Types area.
+stage names

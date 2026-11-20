@@ -1,0 +1,16 @@
+struct Alone {
+    var Me = Alone();
+}
+
+struct Pair {
+    var Next = Partner();
+}
+
+struct Partner {
+    var Back: Pair;
+}
+
+fn Use() {
+    _ = Alone();
+    _ = Pair();
+}

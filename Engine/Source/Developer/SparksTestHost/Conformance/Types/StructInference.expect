@@ -1,0 +1,6 @@
+# S0426 includes field types inferred from initializers; the position is the field name when there is no
+# type annotation.
+error S0426 2:9
+error S0426 6:9
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

@@ -1,0 +1,39 @@
+# Untyped constants: default types, exact range of every integer width, exact float conversion,
+# constant folding (S0503 overflow, S0505 non-finite), integer '/' (S0501), zero divisor of '%' and Math.Div (S0504).
+# '%' is floor remainder (3.3): -7 % 3 == 2, 7 % -3 == -2.
+error S0109 2:22
+error S0109 45:19
+error S0109 46:19
+error S0109 47:21
+error S0109 48:21
+error S0109 49:13
+error S0109 50:21
+error S0109 51:22
+error S0109 52:20
+error S0509 53:18
+error S0509 54:18
+error S0109 55:22
+error S0503 56:13
+error S0503 57:13
+error S0503 58:13
+error S0505 59:13
+error S0505 60:13
+error S0505 61:13
+error S0501 62:13
+error S0501 63:13
+error S0504 64:17
+error S0504 65:25
+error S0406 66:13
+error S0109 67:21
+error S0401 68:18
+error S0109 69:19
+error S0504 70:21
+error S0109 71:14
+error S0503 72:14
+error S0109 73:21
+error S0109 74:20
+error S0109 75:21
+error S0109 76:23
+error S0503 77:14
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

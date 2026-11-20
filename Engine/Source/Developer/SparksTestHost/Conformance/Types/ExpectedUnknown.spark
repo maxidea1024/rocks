@@ -1,0 +1,52 @@
+struct Point {
+    var X: int;
+}
+
+struct Holder {
+    var Items: Array<Nope1> = [];
+    var Value: Nope2 = null;
+}
+
+class Door : ScriptComponent {
+    event Opened(count: int);
+
+    fn Fire() {
+        emit Opend(null);
+        emit Opend([]);
+    }
+}
+
+fn Twice(value: int): int {
+    return value * 2;
+}
+
+fn TakesUnknown(value: Nope3) {
+}
+
+fn ReturnsUnknown(): Nope4 {
+    return [];
+}
+
+async fn LoadsUnknown(): Nope5 {
+    return null;
+}
+
+async fn Uses() {
+    let a: Nope6 = null;
+    let b: Nope7 = [];
+    let c: Nope8 = Asset("/Game/X");
+    let d: Vec3 = 1.0;
+    _ = d.X;
+    _ = Undefined([]);
+    _ = Twice([], 1);
+    TakesUnknown([]);
+    TakesUnknown(null);
+    _ = Point(Bogus: []);
+    _ = Missing1 ?? [];
+    _ = Missing2 == [];
+    Missing3 = [];
+    Missing4.Field = null;
+    let e = await LoadsUnknown();
+    _ = e;
+    _ = a; _ = b; _ = c;
+}

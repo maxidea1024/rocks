@@ -1,0 +1,32 @@
+class Broken : Missing {
+    fn Run(): int {
+        return Missing2;
+    }
+}
+
+fn Uses(broken: Broken, unknown: Nope) {
+    _ = broken.Anything;
+    _ = broken.Anything.More;
+    _ = unknown.Field;
+    _ = unknown + 1;
+    let x = unknown;
+    _ = x.Y;
+    let y: string = Twice("a");
+    _ = Twice(Twice("a"));
+    _ = "${Twice(1.5)}";
+    let z = [Twice("a"), 1];
+    _ = z;
+    _ = Undefined(1, 2);
+    _ = Broken(Field: 1);
+}
+
+fn Unknown(value: Nope2) {
+}
+
+fn Calls() {
+    Unknown("a");
+}
+
+fn Twice(value: int): int {
+    return value * 2;
+}

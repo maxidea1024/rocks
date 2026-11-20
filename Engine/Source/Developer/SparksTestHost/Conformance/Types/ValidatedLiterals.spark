@@ -1,0 +1,42 @@
+struct Weapon {
+    var Damage: int;
+}
+
+fn Valid(count: int) {
+    let tag = Tag("Status.Burning");
+    let action = Action("Jump");
+    let data: DataAsset = Asset("/Game/Data/Rules");
+    let maybe: DataAsset? = Asset("/Game/Data/Rules");
+    let soft: Soft<DataAsset> = Asset("/Game/Data/Rules");
+    let softMaybe: Soft<DataAsset>? = Asset("/Game/Data/Rules");
+    let row: Row<Weapon> = Row("Sword");
+    let rowMaybe: Row<Weapon>? = Row("Sword");
+    let cvar: CVarRef<int> = CVar("r.Shadows");
+    let text = Loc("Hud.Count", Count: count, Name: "x");
+    let plain = Loc("Hud.Title");
+    _ = tag; _ = action; _ = data; _ = maybe; _ = soft; _ = softMaybe; _ = row; _ = rowMaybe;
+    _ = cvar; _ = text; _ = plain;
+}
+
+fn Errors(name: string, actor: Actor) {
+    _ = Tag(name);
+    _ = Tag("${name}");
+    _ = Action(name);
+    _ = Asset("/Game/Data/Rules");
+    let wrong: int = Asset("/Game/Data/Rules");
+    _ = Row("Sword");
+    _ = CVar("r.Shadows");
+    _ = Loc(name);
+    _ = Loc(name, Count: 1);
+    _ = Loc("Hud.Null", Value: null);
+    _ = Loc("Hud.Who", Who: actor);
+    _ = Loc("Hud.Pair", 1);
+    _ = Loc("Hud.Pair", 1, 2);
+    _ = Loc("Hud.Twice", A: 1, A: 2);
+    _ = Loc();
+    let notAsset: int = Asset("/Game/Data/Rules");
+    _ = notAsset;
+    _ = Tag();
+    _ = Tag("A", "B");
+    _ = wrong;
+}

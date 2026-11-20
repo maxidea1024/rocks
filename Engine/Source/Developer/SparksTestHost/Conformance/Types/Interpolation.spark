@@ -1,0 +1,24 @@
+enum Mode { A }
+
+struct Point {
+    var X: int;
+}
+
+fn Valid(flag: bool, i: int, u: uint8, f: float, g: float32, text: string, mode: Mode, tag: Tag,
+         v: vec3, w: vec2, q: quat, r: Rotator, c: Color, t: Transform) {
+    _ = "${flag} ${i} ${u} ${f} ${g} ${text} ${mode} ${tag}";
+    _ = "${v} ${w} ${q} ${r} ${c} ${t}";
+    _ = "${i + 1} ${1.5} ${-2} ${text.Length}";
+    _ = "plain";
+}
+
+fn Errors(opt: int?, actor: Actor, p: Point, items: Array<int>, label: Text, m: mat4) {
+    _ = "${opt}";
+    _ = "${actor}";
+    _ = "${p}";
+    _ = "${items}";
+    _ = "${label}";
+    _ = "${m}";
+    _ = "${null}";
+    _ = "${Missing}";
+}

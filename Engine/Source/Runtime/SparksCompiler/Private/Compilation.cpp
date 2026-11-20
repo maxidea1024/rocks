@@ -16,7 +16,7 @@ Compilation::Compilation(Allocator& allocator, const SourceSet& sources) noexcep
       packagesByName_(allocator), symbols_(allocator), types_(allocator), typeArguments_(allocator),
       typeIndex_(allocator, TypeHash{this}, TypeEqual{this}), signatures_(allocator),
       signatureParameters_(allocator), symbolBases_(allocator), nodeSymbols_(allocator),
-      nodeTypes_(allocator), nodeBase_(allocator), sortedModules_(allocator),
+      nodeTypes_(allocator), exprTypes_(allocator), nodeBase_(allocator), sortedModules_(allocator),
       sortedFirst_(allocator), sortedCount_(allocator) {
 }
 
@@ -69,6 +69,16 @@ uint32 Compilation::NodeSymbol(uint32 module, uint32 node) const noexcept {
 
     const uint32 symbol = nodeSymbols_[nodeBase_[module] + node];
     return symbol == detail::NotRecorded ? NoSymbol : symbol;
+}
+
+uint32 Compilation::ExpressionType(uint32 module, uint32 node) const noexcept {
+    if (module >= nodeBase_.Size() || nodeBase_[module] == NoNode ||
+        node >= trees_[module].NodeCount() || exprTypes_.IsEmpty()) {
+        return NoType;
+    }
+
+    const uint32 type = exprTypes_[nodeBase_[module] + node];
+    return type == detail::NotRecorded ? NoType : type;
 }
 
 uint32 Compilation::NodeType(uint32 module, uint32 node) const noexcept {

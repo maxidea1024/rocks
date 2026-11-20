@@ -1,3 +1,5 @@
 # A clash between an import and a declaration of the file is reported at the import, so the
 # name names the declaration of the file.
 error S0311 Main.spark 1:8
+# Names only: type rules (LC2c) are checked in the Types area.
+stage names

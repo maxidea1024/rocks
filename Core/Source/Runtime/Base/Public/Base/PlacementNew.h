@@ -9,8 +9,14 @@
 // <vcruntime_new.h>에 있으므로 그것만 연다. 다른 표준 라이브러리(libc++·libstdc++)에서는 <new>가
 // 가벼워 그대로 쓴다.
 //
-// 보이는 것: placement new·delete와 전역 operator new·delete 선언. launder·bad_alloc처럼 <new>의
-// 다른 것이 필요하면 <new>를 include한다(시험 소스 밖에서는 정책 예외가 필요하다).
+// 보장하는 것은 MSVC 런타임 기준 집합뿐이다: placement new·delete, 전역 operator new·delete 선언,
+// align_val_t, nothrow_t·nothrow. launder, bad_alloc, bad_array_new_length,
+// hardware_destructive_interference_size, destroying_delete_t, set_new_handler, 기능 시험 매크로
+// (__cpp_lib_*)는 MSVC에서 이 헤더만으로 보이지 않는다. libc++에서는 <new> 전체가 보이므로, 그런
+// 이름을 쓰는 코드는 Posix·Mac 전용 소스에서 컴파일되다가 공통 소스로 옮기면 Windows에서만 깨진다.
+// 그런 이름이 필요하면 <new>를 include한다. 시험 소스 밖이면 정책의 허용 목록
+// (PolicyChecks.PlacementNewAllowances)에 경로와 사유를 올린다. <vcruntime_new.h>를 직접
+// include하지 않는다(MSVC 런타임에만 있다).
 //
 // 사용 예:
 //   #include <Base/PlacementNew.h>

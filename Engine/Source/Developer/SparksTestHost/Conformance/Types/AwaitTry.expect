@@ -1,0 +1,15 @@
+# 'await' and 'try' (3.10): await results (async fn return, LoadRequest<T> -> Result<T>, other waits -> void),
+# 'try' unwraps Result<T> (Result<void> -> void); S0421 for operands that are not waits or Results.
+error S0421 34:5
+error S0421 35:5
+error S0421 36:13
+error S0421 37:13
+error S0421 38:13
+error S0421 39:5
+error S0422 40:15
+error S0422 41:15
+error S0422 42:16
+error S0421 44:21
+error S0405 45:19
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

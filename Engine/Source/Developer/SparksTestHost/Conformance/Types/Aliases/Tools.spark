@@ -1,0 +1,11 @@
+enum Kind { Small, Large }
+
+struct Hammer {
+    var Weight: int;
+}
+
+const Limit: int = 3;
+
+fn Helper(): int {
+    return Limit;
+}

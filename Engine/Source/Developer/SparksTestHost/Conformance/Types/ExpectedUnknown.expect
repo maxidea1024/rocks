@@ -1,0 +1,23 @@
+# A place whose expected type is unknown because of an earlier error (unresolved annotation, callee, parameter,
+# field, assignment target or event) reports no S0417 for null, [] or Asset(...), and a local whose annotation
+# failed does not take the initializer's type (3.10 cascade prevention).
+error S0318 6:22
+error S0318 7:16
+error S0317 14:14
+error S0317 15:14
+error S0318 23:24
+error S0318 26:22
+error S0318 30:26
+error S0318 35:12
+error S0318 36:12
+error S0318 37:12
+error S0318 38:12
+error S0317 40:9
+error S0403 41:9
+error S0326 44:15
+error S0317 45:9
+error S0317 46:9
+error S0317 47:5
+error S0317 48:5
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

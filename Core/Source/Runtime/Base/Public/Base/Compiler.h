@@ -82,6 +82,23 @@
 #error "ROCKS_PLATFORM_* does not match the target OS (ROCKS_PLATFORM_MAC is macOS only)."
 #endif
 
+// MSVC 런타임 선택(/MD·/MDd·/MT·/MTd)을 object에 기록한다. 링커는 기록이 다른 object를 함께
+// 링크하면 LNK2038로 거부한다(게임 모듈을 엔진과 다른 런타임 선택으로 빌드해 섞는 실수를 잡는다).
+// MSVC STL의 yvals.h가 같은 이름과 값으로 기록하는데, 엔진 소스는 STL 헤더를 거의 include하지
+// 않으므로 여기서 직접 남긴다(Docs/Design/UnityBuildPch.ko.md 8.4절 "placement new 헤더"). 값은
+// 컴파일러가 런타임 선택에 따라 정의하는 _DLL·_DEBUG로 고른다.
+#if ROCKS_PLATFORM_WINDOWS
+#if defined(_DLL) && defined(_DEBUG)
+#pragma detect_mismatch("RuntimeLibrary", "MDd_DynamicDebug")
+#elif defined(_DLL)
+#pragma detect_mismatch("RuntimeLibrary", "MD_DynamicRelease")
+#elif defined(_DEBUG)
+#pragma detect_mismatch("RuntimeLibrary", "MTd_StaticDebug")
+#else
+#pragma detect_mismatch("RuntimeLibrary", "MT_StaticRelease")
+#endif
+#endif
+
 // 빌드 구성 매크로다(UE5.8 UE_BUILD_DEBUG·UE_BUILD_DEVELOPMENT·UE_BUILD_SHIPPING 대응). 빌드
 // 시스템(Rocks.Build)이 구성에 따라 정확히 하나를 1로 정의한다. 모듈이 직접 정의할 수 없다.
 //   ROCKS_BUILD_DEBUG        Debug·Asan 구성. 기본은 최적화 없음.

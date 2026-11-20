@@ -1,3 +1,5 @@
 # S0309 in a handler parameter list and between the two for binders.
 error S0309 2:35
 error S0309 4:20
+# Names only: type rules (LC2c) are checked in the Types area.
+stage names

@@ -840,6 +840,10 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "InfluencesTrimmed";
     case AssetDiagnosticCode::MissingInfluences:
         return "MissingInfluences";
+    case AssetDiagnosticCode::InvalidCollisionData:
+        return "InvalidCollisionData";
+    case AssetDiagnosticCode::UnsupportedCollisionShape:
+        return "UnsupportedCollisionShape";
     case AssetDiagnosticCode::UnsupportedSetting:
         return "UnsupportedSetting";
     case AssetDiagnosticCode::InvalidSetting:

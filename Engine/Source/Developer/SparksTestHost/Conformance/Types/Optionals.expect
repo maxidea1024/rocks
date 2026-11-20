@@ -1,0 +1,12 @@
+# Optional operations (3.10): 'if (let)', '?.', '??', '?? return' narrow 'T?' to 'T'; S0414 for non-optional operands and
+# 'bool?' in 'if (let)', S0410 for '?? return' values that do not match the function.
+error S0414 26:17
+error S0414 29:17
+error S0414 32:13
+error S0401 33:21
+error S0414 34:9
+error S0414 35:9
+error S0410 39:31
+error S0410 44:21
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

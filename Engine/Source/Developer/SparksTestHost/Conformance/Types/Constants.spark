@@ -1,0 +1,78 @@
+const Small: int8 = 1;
+const TooBig: int8 = 200;
+
+fn Valid() {
+    let a = 1;
+    let b = 1.5;
+    let c: int8 = -128;
+    let d: int8 = 127;
+    let e: uint8 = 255;
+    let f: int16 = -32768;
+    let g: uint16 = 65535;
+    let h: int32 = -2147483648;
+    let i: uint32 = 4294967295;
+    let j: int = -9223372036854775808;
+    let k: int64 = 9223372036854775807;
+    let l: uint64 = 18446744073709551615;
+    let m: float32 = 16777216;
+    let n: float = 9007199254740992;
+    let o: float32 = 0.1;
+    let p: int8 = 100 + 27;
+    let q: int8 = -(-127);
+    let r = 1.0 / 4.0;
+    let s = 1 / 4.0;
+    let t: uint64 = 18446744073709551615 - 1 + 1;
+    let u = (2 + 3) * 4 % 7;
+    let v: float32 = 1.5;
+    let w = v * 2;
+    let x = Small + 1;
+    let y: float = 3;
+    let z: float32 = 4294967296;
+    let aa: float32 = 16777218;
+    let bb: int8 = -100 - 28;
+    let cc: uint8 = -7 % 3 + 1;
+    let dd: int8 = 7 % -3 - 1;
+    let ee: int8 = 3 + -5;
+    let ff: int8 = -5 + 3;
+    let gg: uint8 = -(-3);
+    let hh: uint8 = -3 + 3;
+    _ = z; _ = aa; _ = bb; _ = cc; _ = dd; _ = ee; _ = ff; _ = gg; _ = hh;
+    _ = a; _ = b; _ = c; _ = d; _ = e; _ = f; _ = g; _ = h; _ = i; _ = j; _ = k; _ = l;
+    _ = m; _ = n; _ = o; _ = p; _ = q; _ = r; _ = s; _ = t; _ = u; _ = w; _ = x; _ = y;
+}
+
+fn Errors(value: int) {
+    let a: int8 = 128;
+    let b: int8 = -129;
+    let c: uint16 = 65536;
+    let d: uint32 = -1;
+    let e = 9223372036854775808;
+    let f: uint64 = -1;
+    let g: float32 = 16777217;
+    let h: float = 9007199254740993;
+    let i: int = 1.5;
+    let j: int = 2.0;
+    let k: float32 = 3.5e38;
+    let l = 18446744073709551615 + 1;
+    let m = -9223372036854775808 - 1 - 9223372036854775808 - 9223372036854775808;
+    let n = 4294967296 * 4294967296;
+    let o = 1e308 * 10.0;
+    let p = 1.0 / 0.0;
+    let q = 0.0 / 0.0;
+    let r = 7 / 2;
+    let s = value / 2;
+    let t = 5 % 0;
+    let u = Math.Div(5, 0);
+    let v = 5.0 % 2.0;
+    let w = Small + 1000;
+    let x: int = Small;
+    let y: int8 = 100 + 28;
+    let z = value % 0;
+    let aa = 18446744073709551616;
+    let bb = -18446744073709551615;
+    let cc: uint8 = 3 - 5;
+    let dd: int8 = -100 - 29;
+    let ee: uint8 = 7 % -3;
+    let ff: float32 = 16777219;
+    let gg = -3037000500 * 3037000500;
+}

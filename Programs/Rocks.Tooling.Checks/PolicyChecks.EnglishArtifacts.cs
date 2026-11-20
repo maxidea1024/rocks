@@ -45,12 +45,30 @@ public static partial class PolicyChecks
                parts[1].EndsWith("Tests", StringComparison.Ordinal);
     }
 
-    // 시험 fixture 모듈(<루트>/Source/Developer/<이름>TestFixtures/) 안의 파일인가.
+    // 시험 fixture 모듈(<루트>/Source/Developer/<이름>TestFixtures/, 엔진 플러그인의 Engine/Plugins/…/Source/<이름>TestFixtures/ —
+    // BuildTargets 3.9절 BD42) 안의 파일인가.
     private static bool IsTestFixtureSource(string relative)
     {
         string[] parts = relative.Split('/');
-        return parts.Length > 4 && parts[1] == "Source" && parts[2] == "Developer" &&
-               parts[3].EndsWith("TestFixtures", StringComparison.Ordinal);
+        if (parts.Length > 4 && parts[1] == "Source" && parts[2] == "Developer" && parts[3].EndsWith("TestFixtures", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (parts.Length < 6 || parts[0] != "Engine" || parts[1] != "Plugins")
+        {
+            return false;
+        }
+
+        for (int index = 3; index + 2 < parts.Length; ++index)
+        {
+            if (parts[index] == "Source" && parts[index + 1].EndsWith("TestFixtures", StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // 생성 파일(*.generated.h 등)인가. 생성기가 내는 주석까지 영어여야 한다.

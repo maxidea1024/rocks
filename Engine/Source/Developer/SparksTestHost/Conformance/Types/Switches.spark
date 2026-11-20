@@ -1,0 +1,115 @@
+enum Mode { A, B, C }
+
+const Limit: int = 10;
+
+fn Valid(mode: Mode, i: int, text: string, error: Error, u: uint8) {
+    switch (mode) {
+        case Mode.A, Mode.B: { }
+        case Mode.C: { }
+    }
+
+    switch (i) {
+        case 1, 2: { }
+        case Limit: { }
+        case -1: { }
+        default: { }
+    }
+
+    switch (text) {
+        case "a": { }
+        default: { }
+    }
+
+    switch (error) {
+        case Error.NotFound: { }
+        default: { }
+    }
+
+    switch (u) {
+        case 255: { }
+        default: { }
+    }
+
+    switch (Clock.Game) {
+        case Clock.Game: { }
+        case Clock.UI: { }
+    }
+}
+
+fn Errors(mode: Mode, i: int, f: float, text: string, error: Error, u: uint8, flag: bool,
+          maybe: Mode?, tag: Tag) {
+    switch (maybe) {
+        case Mode.A: { }
+        default: { }
+    }
+
+    switch (tag) {
+        default: { }
+    }
+
+    switch (text) {
+        case "A": { }
+        case @"A": { }
+        case "\u{41}": { }
+        default: { }
+    }
+
+    switch (flag) {
+        case true: { }
+        case true: { }
+        default: { }
+    }
+
+    switch (mode) {
+        case Mode.A: { }
+    }
+
+    switch (mode) {
+        case Mode.A, Mode.B, Mode.C: { }
+        default: { }
+    }
+
+    switch (i) {
+        case 1: { }
+    }
+
+    switch (mode) {
+        case Mode.A, Mode.A: { }
+        case Mode.B, Mode.C: { }
+    }
+
+    switch (i) {
+        case 1: { }
+        case 1: { }
+        default: { }
+    }
+
+    switch (i) {
+        case "a": { }
+        default: { }
+    }
+
+    switch (i) {
+        case i: { }
+        default: { }
+    }
+
+    switch (f) {
+        default: { }
+    }
+
+    switch (error) {
+        case Error.Busy: { }
+    }
+
+    switch (u) {
+        case 256: { }
+        default: { }
+    }
+
+    switch (text) {
+        case "a": { }
+        case "a": { }
+        default: { }
+    }
+}

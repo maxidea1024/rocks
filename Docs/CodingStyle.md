@@ -90,7 +90,7 @@
 
 ## 중괄호 목록 추론
 
-형식 추론이 `std::initializer_list`를 요구하는 문법을 쓰지 않는다. 엔진은 STL 헤더를 쓰지 않으므로 Android(NDK) 빌드에는 `<initializer_list>`가 없어 컴파일되지 않는다(Windows에서는 시스템 헤더가 간접으로 들여와 통과한다).
+형식 추론이 `std::initializer_list`를 요구하는 문법을 쓰지 않는다. 엔진은 STL 헤더를 쓰지 않으므로 Android(NDK) 빌드에는 `<initializer_list>`가 없어 컴파일되지 않는다(Windows에서도 엔진 헤더만으로는 보이지 않는다. 다른 STL 헤더가 끼어 있으면 그 헤더가 간접으로 들여와 통과할 수 있다).
 
 - range-for의 범위를 중괄호 목록으로 쓰지 않는다: `for (bool x : {true, false})` 대신 `const bool cases[] = {true, false}; for (bool x : cases)`.
 - auto 변수를 중괄호 목록으로 복사 초기화하지 않는다: `auto values = {1, 2};` 대신 배열이나 `Array`.

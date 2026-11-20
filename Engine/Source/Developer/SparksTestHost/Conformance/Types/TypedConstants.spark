@@ -1,0 +1,87 @@
+enum Mode { A, B }
+
+const A: int = 1;
+const B: int = A + 1;
+const C: int = -A;
+const D: int = B * 3 % 4;
+const Small: int8 = 100;
+const Flag: bool = !false;
+const Both: bool = Flag && A < B;
+const Half: float = 1.0 / 2.0;
+const Ratio: float32 = float32(Half);
+const Big: int = 300;
+const Same: bool = Mode.A == Mode.B;
+
+const Overflow: int8 = Small + 100;
+const Negated: uint8 = -(int8(1)) + 1;
+const Narrow: int8 = int8(Big);
+const Bad: int = "x";
+const UsesBad: int = Bad + 1;
+const Huge: float32 = float32(1e300);
+
+const N8: int8 = -128;
+const Neg: int8 = -N8;
+const FNeg: float = -Half;
+const BadBool: bool = 1;
+const NotBad: bool = !BadBool;
+const Diff: int = B - A;
+const Cmp1: bool = A != B;
+const Cmp2: bool = A <= B;
+const Cmp3: bool = A > B;
+const Cmp4: bool = A >= B;
+const Cmp5: bool = C < A;
+const Or: bool = Flag || false;
+const BoolEq: bool = Flag == true;
+const F32: float32 = Ratio * 2.0;
+const F32Over: float32 = float32(3.0e38) * 2.0;
+const BigF: float = 1e300;
+const NarrowF: float32 = float32(BigF);
+
+fn Valid(i: int, mode: Mode) {
+    switch (i) {
+        case A: { }
+        case B: { }
+        case C: { }
+        case D + 10: { }
+        case int(Small): { }
+        default: { }
+    }
+
+    _ = Both;
+    _ = Ratio;
+    _ = Same;
+}
+
+// 접은 값을 switch 중복(S0416)으로 확인한다: Diff == 1, Cmp1·Cmp2·Cmp5·Or·BoolEq == true, Cmp3·Cmp4 == false.
+fn Values(i: int, flag: bool) {
+    switch (i) {
+        case Diff: { }
+        case 1: { }
+        default: { }
+    }
+
+    switch (flag) {
+        case Cmp1: { }
+        case Cmp3: { }
+        case Cmp2: { }
+        case Cmp4: { }
+        case Cmp5: { }
+        case Or: { }
+        case BoolEq: { }
+        case NotBad: { }
+        default: { }
+    }
+
+    _ = FNeg;
+    _ = F32;
+}
+
+fn Errors(i: int) {
+    switch (i) {
+        case Bad: { }
+        case UsesBad: { }
+        case 1 + 1: { }
+        case B: { }
+        default: { }
+    }
+}
