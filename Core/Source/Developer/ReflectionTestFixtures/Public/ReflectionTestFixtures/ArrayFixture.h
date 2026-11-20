@@ -20,6 +20,8 @@ struct ArrayOwner;
 // 참조 없는 struct 원소다(Array<ArrayTag>). 원소 struct 안 배열을 담는다.
 ROCKS_STRUCT()
 struct ArrayTag {
+    ROCKS_GENERATED_BODY()
+
     explicit ArrayTag(Allocator& allocator) noexcept : label(allocator), codes(allocator) {
     }
 
@@ -31,6 +33,8 @@ struct ArrayTag {
 // 참조 struct 원소다(StructRefArray<ArraySlot>). 원소 struct 안 참조와 배열을 담는다.
 ROCKS_STRUCT()
 struct ArraySlot {
+    ROCKS_GENERATED_BODY()
+
     explicit ArraySlot(Allocator& allocator) noexcept : name(allocator), weights(allocator) {
     }
 
@@ -42,6 +46,8 @@ struct ArraySlot {
 // 인라인 참조 struct다(클래스 필드). Registry 컨테이너 둘을 담으므로 ContainsReferenceArray다.
 ROCKS_STRUCT()
 struct ArrayBundle {
+    ROCKS_GENERATED_BODY()
+
     explicit ArrayBundle(Allocator& allocator) noexcept : refs(allocator), slots(allocator) {
     }
 
@@ -51,6 +57,8 @@ struct ArrayBundle {
 
 ROCKS_CLASS()
 struct ArrayOwner : Object {
+    ROCKS_GENERATED_BODY()
+
     explicit ArrayOwner(Allocator& allocator) noexcept
         : flags(allocator), longs(allocator), doubles(allocator), guids(allocator),
           assets(allocator), digests(allocator), ints(allocator), names(allocator),
@@ -87,6 +95,8 @@ struct ArrayOwner : Object {
 // 배열 필드를 상속한다(생성 클래스 Trace가 상속 배열 필드도 방문한다).
 ROCKS_CLASS()
 struct ArrayChild final : ArrayOwner {
+    ROCKS_GENERATED_BODY()
+
     explicit ArrayChild(Allocator& allocator) noexcept : ArrayOwner(allocator), extra(allocator) {
     }
 

@@ -1,11 +1,10 @@
 #include "DirectoryWatchInternal.h"
 #include "FileInternal.h"
 
+#include <Base/PlacementNew.h>
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
-
-#include <new>
 
 namespace rocks::platform {
 namespace detail {

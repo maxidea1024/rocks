@@ -3,6 +3,7 @@
 #include "TerminationRequest.h"
 
 #include <Base/Compiler.h>
+#include <Base/PlacementNew.h>
 #include <Base/TypeTraits.h>
 #include <Core/App/ProcessCommandLine.h>
 #include <Core/Diagnostics/Log.h>
@@ -20,7 +21,6 @@
 #include <Platform/Memory.h>
 #include <Platform/ProcessEntry.h>
 
-#include <new>
 #include <stdlib.h>
 
 namespace rocks::launch {

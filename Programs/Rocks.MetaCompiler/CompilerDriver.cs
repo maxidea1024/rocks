@@ -124,7 +124,7 @@ internal static class CompilerDriver
         afterManifestRead?.Invoke();
         StableIdManifest? manifest = options.IdentityManifest is null ? null : StableIdManifest.Load(options.IdentityManifest);
         VerifyIdentitySnapshot(options.IdentityManifest, identitySnapshot);
-        var parser = new ClangAstParser(options.Inputs, manifest, imported, ResolveHeader);
+        var parser = new ClangAstParser(options.Inputs, manifest, imported, ResolveHeader, options.RequireGeneratedBody);
         SchemaModel schema;
         try
         {
@@ -223,7 +223,7 @@ internal static class CompilerDriver
         List<(string Path, string Text, GeneratedRoot Root)> outputs = [];
         foreach (ModuleInput input in options.Inputs)
         {
-            (string header, string source) = CppEmitter.Emit(schema, input);
+            (string header, string source) = CppEmitter.Emit(schema, input, options.Module);
             outputs.Add((options.OutputPath(input), header, input.Private ? GeneratedRoot.Private : GeneratedRoot.Public));
             outputs.Add((options.SourcePath(input), source, GeneratedRoot.Source));
         }

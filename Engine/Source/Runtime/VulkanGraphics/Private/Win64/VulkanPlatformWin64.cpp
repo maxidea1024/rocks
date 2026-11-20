@@ -1,6 +1,11 @@
 #include "VulkanApi.h"
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
+
 #include <vulkan/vulkan_win32.h>
 
 namespace rocks::graphics::vulkan {

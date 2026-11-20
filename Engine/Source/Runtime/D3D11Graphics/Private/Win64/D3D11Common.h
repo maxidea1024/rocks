@@ -6,9 +6,13 @@
 
 #include "D3D11PixelFormats.h"
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
 #include <d3d11_4.h>
 #include <dxgi1_6.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
 
 // D3D11Graphics 내부 공용 도구다(형식 표·진단 문자열). 장치 구현 파일들만 쓴다. COM 참조는
 // PlatformBase(Platform/Win64/ComRef.h), DXGI 어댑터 도우미는 DxgiGraphics가 D3D12Graphics와 함께

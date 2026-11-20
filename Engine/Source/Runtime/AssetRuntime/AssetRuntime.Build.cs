@@ -7,7 +7,7 @@ using Rocks.Build.Rules;
 // BulkDataRef are reflection types; generated headers are <AssetRuntime/<Type>.generated.h>, module registration is
 // rocks::generated::AssetRuntime::RegisterModuleTypes, declared in <AssetRuntime/AssetRuntime.module.generated.h> and defined in
 // the module generated source that the build compiles into this module (called by RegisterAssetRuntimeTypes), and the identity
-// spec is AssetRuntime.rocksids.json.
+// spec is AssetRuntime.rocksids.json. Crypto: the signed cooked manifest envelope (Docs/Design/ContentSigning.ko.md, stage A1f).
 public sealed class AssetRuntime : EngineModuleRules
 {
     protected override string ModuleName => "AssetRuntime";
@@ -15,7 +15,7 @@ public sealed class AssetRuntime : EngineModuleRules
     // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
     protected override UnityMode Unity => UnityMode.On;
 
-    protected override string[] PublicDependencies => ["ObjectSerialization", "ObjectRuntime", "Serialization", "Task", "Compression"];
+    protected override string[] PublicDependencies => ["ObjectSerialization", "ObjectRuntime", "Serialization", "Task", "Compression", "Crypto"];
 
     protected override IReadOnlyList<string> Metadata => ["AssetRuntime/BulkData.h", "AssetRuntime/Package.h"];
 }

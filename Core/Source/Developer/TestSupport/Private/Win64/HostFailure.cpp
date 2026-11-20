@@ -2,7 +2,13 @@
 #include <Base/Compiler.h>
 #include <Platform/CrashReporting.h>
 #include <PlatformBase/Private/Win64/CrashHelper.h>
+
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
+
 #include <io.h>
 #include <stdio.h>
 #include <string.h>

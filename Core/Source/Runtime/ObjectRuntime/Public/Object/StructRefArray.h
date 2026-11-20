@@ -1,12 +1,12 @@
 #pragma once
 
+#include <Base/PlacementNew.h>
 #include <Base/TypeTraits.h>
 #include <Core/Memory/Allocator.h>
 #include <Meta/GeneratedType.h>
 #include <Object/Object.h>
 #include <Object/RuntimeTypeOps.h>
 #include <Platform/Fatal.h>
-#include <new>
 
 namespace rocks {
 
@@ -33,7 +33,8 @@ struct StructElementOps {
     void (*construct)(void* memory, Allocator& allocator) noexcept = nullptr;
     void (*destroy)(void* memory) noexcept = nullptr;
     // 원소 타입의 native 키(&NativeTypeIdentity<S> — NativeTypeKey<S>()와 같은 주소)다.
-    // NativeTypeKey는 constexpr가 아니라 변수 주소를 직접 쓴다.
+    // NativeTypeKey는 constexpr가 아니라 변수 주소를 직접 쓴다. struct 키는 리플렉션 struct도
+    // inline 표지다(생성 .cpp 키는 클래스만 — Docs/Design/BuildTargets.ko.md 3.8절 BS8b 한계).
     const void* nativeType = nullptr;
 };
 

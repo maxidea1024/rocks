@@ -21,6 +21,8 @@ namespace rocks::trace_control {
 //   "TracePresets": { "default": { "$append": ["stats"], "$remove": ["log"] } }
 ROCKS_STRUCT(Settings(Branch = "Engine", Section = "TracePresets"))
 struct TracePresetSettings {
+    ROCKS_GENERATED_BODY()
+
     explicit TracePresetSettings(Allocator& allocator) noexcept : defaultChannels(allocator) {
     }
 

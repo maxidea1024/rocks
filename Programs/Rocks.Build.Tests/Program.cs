@@ -93,8 +93,19 @@ try
         Console.WriteLine("PASS " + name);
     }
 
-    // --group <이름>: 고친 묶음 하나만 돌린다(반복 확인용이다 — 전체 실행은 옵션 없이 한다). 요청과 임시 루트만 쓰는 독립 묶음만 고를
-    // 수 있다. 예: dotnet run --project Programs/Rocks.Build.Tests -- --root . --group pch
+    // 저장소 루트다(--root, 없으면 현재 디렉터리부터 위로 Rocks.proj와 Build/Build.version이 있는 곳). 게임 템플릿·엔진 버전 파일·엔진
+    // 헤더처럼 저장소 파일을 보는 시험이 쓴다. 찾지 못하면 그 확인만 건너뛴다.
+    string? repository = args.Contains("--root") ? Path.GetFullPath(args[Array.IndexOf(args, "--root") + 1]) : null;
+    for (var candidate = new DirectoryInfo(Directory.GetCurrentDirectory()); repository is null && candidate is not null; candidate = candidate.Parent)
+    {
+        if (File.Exists(Path.Combine(candidate.FullName, "Rocks.proj")) && File.Exists(EngineVersion.PathIn(candidate.FullName)))
+        {
+            repository = candidate.FullName;
+        }
+    }
+
+    // --group <이름>: 고친 묶음 하나만 돌린다(반복 확인용이다 — 전체 실행은 옵션 없이 한다). 요청과 임시 루트(windows-headers는 저장소
+    // 루트도)만 쓰는 독립 묶음만 고를 수 있다. 예: dotnet run --project Programs/Rocks.Build.Tests -- --root . --group pch
     if (args.Contains("--group"))
     {
         string group = args[Array.IndexOf(args, "--group") + 1];
@@ -125,8 +136,16 @@ try
             case "buildinfo":
                 await BuildInfoTests.RunAsync(request, root, Pass);
                 break;
+            case "descriptors":
+                DescriptorTests.Run(root, repository);
+                Pass("project and plugin descriptors parse strictly and resolve plugins");
+                break;
+            case "windows-headers":
+                await WindowsHeaderPairTests.RunAsync(request, root, repository, Pass);
+                break;
             default:
-                throw new ArgumentException($"Unknown test group '{group}'. Groups: dependency, unity, pch, dynamic, module-table, modular, buildinfo.");
+                throw new ArgumentException(
+                    $"Unknown test group '{group}'. Groups: dependency, unity, pch, dynamic, module-table, modular, buildinfo, descriptors, windows-headers.");
         }
 
         Console.WriteLine($"Native build regression groups ({group} only): {passed}, failed: 0");
@@ -136,17 +155,6 @@ try
 
     await PlatformSelectionTests.RunAsync(request, root);
     Pass("platform routing rejects unknown and mismatched targets");
-
-    // 저장소 루트다(--root, 없으면 현재 디렉터리부터 위로 Rocks.proj와 Build/Build.version이 있는 곳). 게임 템플릿·엔진 버전 파일처럼
-    // 저장소 파일을 보는 시험이 쓴다. 찾지 못하면 그 확인만 건너뛴다.
-    string? repository = args.Contains("--root") ? Path.GetFullPath(args[Array.IndexOf(args, "--root") + 1]) : null;
-    for (var candidate = new DirectoryInfo(Directory.GetCurrentDirectory()); repository is null && candidate is not null; candidate = candidate.Parent)
-    {
-        if (File.Exists(Path.Combine(candidate.FullName, "Rocks.proj")) && File.Exists(EngineVersion.PathIn(candidate.FullName)))
-        {
-            repository = candidate.FullName;
-        }
-    }
 
     DescriptorTests.Run(root, repository);
     Pass("project and plugin descriptors parse strictly and resolve plugins");
@@ -344,6 +352,8 @@ try
 
     // 정의 헤더·모듈 PCH·작업 파일 분리(UB4). 하위 묶음마다 PASS를 센다.
     await PchTests.RunAsync(request, root, Pass);
+
+    await WindowsHeaderPairTests.RunAsync(request, root, repository, Pass);
 
     await ReflectionSourceTests.RunAsync(request, root);
     Pass("reflection generated sources: source-less module archive, registration through the declaration, entry module and module types marker, incremental, validation");

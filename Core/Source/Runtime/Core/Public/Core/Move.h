@@ -1,8 +1,8 @@
 #pragma once
 
+#include <Base/PlacementNew.h>
 #include <Base/TypeTraits.h>
 #include <Core/Traits.h>
-#include <new>
 
 namespace rocks {
 

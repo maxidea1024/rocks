@@ -25,6 +25,8 @@ namespace rocks {
 // IntegerStepCurve의 키다(UE FIntegralKey): 시간과 int32 값.
 ROCKS_STRUCT(Atomic)
 struct IntegerStepKey {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() float time = 0.0f;
     ROCKS_PROPERTY() int32 value = 0;
 };
@@ -33,6 +35,8 @@ struct IntegerStepKey {
 // 대소문자 무시 — Name.h)이고 표시 철자는 wire에 보존된다(설계 9절).
 ROCKS_STRUCT(Atomic)
 struct NameStepKey {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() float time = 0.0f;
     ROCKS_PROPERTY() Name value;
 };
@@ -41,6 +45,8 @@ struct NameStepKey {
 // allocator를 쓴다. 이동만 되고 복사는 CloneCurveKey(내부)·커브의 TryCopyFrom이 한다.
 ROCKS_STRUCT(Atomic)
 struct StringStepKey {
+    ROCKS_GENERATED_BODY()
+
     explicit StringStepKey(Allocator& allocator) noexcept : value(allocator) {
     }
 

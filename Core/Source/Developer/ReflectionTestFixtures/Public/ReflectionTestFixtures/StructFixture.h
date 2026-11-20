@@ -14,6 +14,8 @@ struct StructOwner;
 // Version 2), NATIVE 멤버로 둔 리플렉션 struct(StructOwner::scratch).
 ROCKS_STRUCT(Version = 2)
 struct StructLeaf {
+    ROCKS_GENERATED_BODY()
+
     explicit StructLeaf(Allocator& allocator) noexcept : label(allocator) {
     }
 
@@ -51,6 +53,8 @@ struct StructLeaf {
 
 ROCKS_STRUCT()
 struct StructMiddle {
+    ROCKS_GENERATED_BODY()
+
     explicit StructMiddle(Allocator& allocator) noexcept : leaf(allocator) {
     }
 
@@ -63,6 +67,8 @@ struct StructMiddle {
 
 ROCKS_STRUCT()
 struct StructHolder {
+    ROCKS_GENERATED_BODY()
+
     explicit StructHolder(Allocator& allocator) noexcept : middle(allocator) {
     }
 
@@ -73,6 +79,8 @@ struct StructHolder {
 
 ROCKS_CLASS()
 struct StructOwner final : Object {
+    ROCKS_GENERATED_BODY()
+
     explicit StructOwner(Allocator& allocator) noexcept
         : holder(allocator), extra(allocator), scratch(allocator) {
         ++constructed;

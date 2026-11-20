@@ -1,3 +1,5 @@
+using Rocks.Build.Rules;
+
 namespace Rocks.Build.Descriptors;
 
 /// <summary>
@@ -13,28 +15,62 @@ public sealed record DescribedModule(ModuleDescriptor Descriptor, string OwnerNa
 }
 
 /// <summary>
-/// 기술자로 이번 빌드(플랫폼·구성)에 넣을 모듈을 정하고, C# 모듈 규칙과 서로 맞는지 검사한다(UE
+/// 기술자 모듈 집합을 정하는 빌드의 주인이다(Docs/Design/BuildTargets.ko.md 3.9절). 설치 SDK 게임 빌드는 프로젝트 기술자(프로젝트 모듈,
+/// 프로젝트 참조와 타깃 참조를 합친 플러그인 참조, targetPlatforms)이고, 엔진 저장소 빌드는 프로젝트가 없이 타깃 규칙의 플러그인 참조만
+/// 가진다. 엔진 저장소의 Core·Engine 모듈은 기술자가 없으므로 대조하지 않는다.
+/// </summary>
+public sealed record DescriptorOwner(ProjectDescriptor? Project, IReadOnlyList<PluginReference> Plugins, PluginReferrer Referrer)
+{
+    /// <summary>엔진 저장소 루트다(엔진 타깃만). 플러그인 모듈 폴더·계층 검사가 규칙의 ModuleDirectory(루트 기준)와 대조할 때 쓴다.</summary>
+    public string? EngineRoot { get; init; }
+
+    /// <summary>
+    /// 프로젝트와 그 타깃이다. 타깃 참조가 같은 이름의 프로젝트 참조를 이긴다(<see cref="TargetPluginReferences.Combine"/>).
+    /// </summary>
+    public static DescriptorOwner ForProject(ProjectDescriptor project, string targetName, IReadOnlyList<PluginReference> targetPlugins)
+    {
+        TargetPluginReferences.Validate(targetName, targetPlugins);
+        PluginReferrer referrer = targetPlugins.Count == 0
+            ? PluginReferrer.Of(project)
+            : new($"target '{targetName}' or project", project.FilePath);
+        return new(project, TargetPluginReferences.Combine(targetPlugins, project.Plugins), referrer);
+    }
+
+    /// <summary>엔진 저장소(rootDirectory) 타깃이다(프로젝트 없음).</summary>
+    public static DescriptorOwner ForEngine(string targetName, IReadOnlyList<PluginReference> targetPlugins, string rootDirectory)
+    {
+        TargetPluginReferences.Validate(targetName, targetPlugins);
+        return new(null, targetPlugins, PluginReferrer.OfTarget(targetName)) { EngineRoot = Path.GetFullPath(rootDirectory) };
+    }
+}
+
+/// <summary>
+/// 기술자로 이번 빌드(타깃 종류·플랫폼·구성)에 넣을 모듈을 정하고, C# 모듈 규칙과 서로 맞는지 검사한다(UE
 /// UnrealBuildTool이 .uproject·.uplugin의 Modules 목록으로 빌드할 모듈을 고르는 것과 같은 역할).
 ///
 /// 사용 예(게임 빌드):
 /// <code>
 /// var project = DescriptorReader.ReadProject(projectFile);
 /// var plugins = PluginCatalog.Discover([Path.Combine(project.RootDirectory, "Plugins")]);
-/// var set = DescriptorModuleSet.Resolve(project, plugins, platform, configuration);
+/// var owner = DescriptorOwner.ForProject(project, target.Name, target.Plugins);
+/// var set = DescriptorModuleSet.Resolve(owner, plugins, platform, configuration, target.Type);
 /// var modules = set.Apply(ruleModules, target.Modules);   // 빌드할 규칙 모듈만 남는다
 /// </code>
 ///
-/// 모듈을 빼는 규칙:
+/// 켤 플러그인: owner의 참조와, Game 타깃이면 enabledByDefault 플러그인(Program 타깃은 명시한 것만 — BD34), 그리고 그 의존 플러그인.
+///
+/// 모듈을 빼는 규칙(BD35):
 /// <list type="bullet">
 /// <item>켜지지 않은 플러그인의 모듈(PluginCatalog.ResolveEnabled 기준).</item>
 /// <item>Editor 모듈: 아직 에디터 타깃이 없으므로 항상 뺀다.</item>
-/// <item>Developer 모듈: Release(배포)에서 뺀다. UE 5.8의 DeveloperTool(기본은 에디터·프로그램 타깃이거나
-/// Test·Shipping이 아닌 구성 — Rocks에는 Test 구성이 없다)과 같은 의미다.
+/// <item>Developer 모듈: Game 타깃의 Release(배포)에서 뺀다. UE 5.8의 DeveloperTool(<c>bBuildDeveloperTools</c> 기본은 에디터·프로그램
+/// 타깃이거나 Test·Shipping이 아닌 구성 — Rocks에는 Test 구성이 없다)과 같은 의미다. Program 타깃(명령행 도구·시험)은 Release에서도 넣는다.
 /// UE의 Developer(에디터·프로그램 타깃 전용)와는 다르다.</item>
 /// <item>platforms에 이번 플랫폼이 없는 모듈.</item>
 /// </list>
 /// 오류(DescriptorException): 프로젝트가 이번 플랫폼을 targetPlatforms에 두지 않음, 여러 기술자가 같은 모듈 이름을
-/// 선언, 규칙은 있는데 기술자가 없는 모듈, 기술자는 있는데 규칙이 없는 모듈, 빠진 모듈을 타깃이나 남은 모듈이 참조(링크 의존·DynamicModules).
+/// 선언, 규칙은 있는데 기술자가 없는 모듈(게임 빌드), 기술자는 있는데 규칙이 없는 모듈, 빠진 모듈을 타깃이나 남은 모듈이 참조(링크
+/// 의존·DynamicModules).
 ///
 /// 규칙 계약: 규칙 로더는 이름을 알기 위해 모든 모듈 규칙의 Configure를 먼저 실행한 뒤 이 필터를 적용한다.
 /// 따라서 규칙은 빠질 모듈(켜지지 않은 플러그인, 다른 플랫폼 전용)이라도 예외 없이 NativeModuleInput을
@@ -44,15 +80,18 @@ public sealed class DescriptorModuleSet
 {
     private readonly Dictionary<string, DescribedModule> modules;
 
-    private DescriptorModuleSet(ProjectDescriptor project, Dictionary<string, DescribedModule> modules,
-        IReadOnlyList<PluginDescriptor> enabledPlugins)
+    private readonly Dictionary<string, PluginDescriptor> plugins;
+
+    private DescriptorModuleSet(DescriptorOwner owner, Dictionary<string, DescribedModule> modules,
+        IReadOnlyList<PluginDescriptor> enabledPlugins, IReadOnlyList<PluginDescriptor> available)
     {
-        Project = project;
+        Owner = owner;
         this.modules = modules;
         EnabledPlugins = enabledPlugins;
+        plugins = available.ToDictionary(plugin => plugin.Name, StringComparer.Ordinal);
     }
 
-    public ProjectDescriptor Project { get; }
+    public DescriptorOwner Owner { get; }
 
     /// <summary>켠 플러그인(의존 순서)이다.</summary>
     public IReadOnlyList<PluginDescriptor> EnabledPlugins { get; }
@@ -69,40 +108,40 @@ public sealed class DescriptorModuleSet
         Modules.Where(module => module.FromPlugin && module.Included).Select(module => module.Name).ToList();
 
     /// <summary>
-    /// project와 찾은 플러그인(available)으로 모듈 집합을 정한다. available에는 켜지지 않은 플러그인도 넣는다(그
+    /// owner와 찾은 플러그인(available)으로 targetType 타깃의 모듈 집합을 정한다. available에는 켜지지 않은 플러그인도 넣는다(그
     /// 모듈도 규칙과 대조하고, 참조하면 "켜지지 않음"으로 알려 준다).
     /// </summary>
-    public static DescriptorModuleSet Resolve(ProjectDescriptor project, IReadOnlyList<PluginDescriptor> available,
-        NativePlatform platform, NativeConfiguration configuration)
+    public static DescriptorModuleSet Resolve(DescriptorOwner owner, IReadOnlyList<PluginDescriptor> available,
+        NativePlatform platform, NativeConfiguration configuration, TargetType targetType)
     {
-        if (!project.TargetPlatforms.Contains(platform))
+        ProjectDescriptor? project = owner.Project;
+        if (project is not null && !project.TargetPlatforms.Contains(platform))
         {
             throw new DescriptorException(project.FilePath,
                 $"the project does not target {platform} (targetPlatforms: {string.Join(", ", project.TargetPlatforms)}).");
         }
 
-        IReadOnlyList<PluginDescriptor> enabled = PluginCatalog.ResolveEnabled(project, available);
+        IReadOnlyList<PluginDescriptor> enabled = PluginCatalog.ResolveEnabled(owner.Plugins, owner.Referrer, available,
+            applyDefaults: targetType == TargetType.Game);
         var enabledNames = enabled.Select(plugin => plugin.Name).ToHashSet(StringComparer.Ordinal);
         var result = new Dictionary<string, DescribedModule>(StringComparer.OrdinalIgnoreCase);
 
-        void Add(ModuleDescriptor module, string owner, string file, bool fromPlugin, string? pluginNotEnabled)
+        void Add(ModuleDescriptor module, string ownerName, string file, bool fromPlugin, string? pluginNotEnabled)
         {
-            string? reason = pluginNotEnabled ?? module.Type switch
-            {
-                ModuleType.Editor => "Editor modules are not built yet (there is no editor target)",
-                ModuleType.Developer when configuration == NativeConfiguration.Release => "Developer modules are not built in Release",
-                _ => module.SupportsPlatform(platform) ? null : $"the module does not support {platform}"
-            };
-            if (!result.TryAdd(module.Name, new(module, owner, file, fromPlugin, reason)))
+            string? reason = pluginNotEnabled ?? ExclusionReason(module, platform, configuration, targetType);
+            if (!result.TryAdd(module.Name, new(module, ownerName, file, fromPlugin, reason)))
             {
                 throw new DescriptorException(file,
                     $"module '{module.Name}' is also declared by {result[module.Name].OwnerFile}.");
             }
         }
 
-        foreach (ModuleDescriptor module in project.Modules)
+        if (project is not null)
         {
-            Add(module, project.Name, project.FilePath, false, null);
+            foreach (ModuleDescriptor module in project.Modules)
+            {
+                Add(module, project.Name, project.FilePath, false, null);
+            }
         }
 
         foreach (PluginDescriptor plugin in available.OrderBy(plugin => plugin.Name, StringComparer.Ordinal))
@@ -114,12 +153,26 @@ public sealed class DescriptorModuleSet
             }
         }
 
-        return new(project, result, enabled);
+        return new(owner, result, enabled, available);
     }
 
     /// <summary>
-    /// 프로젝트의 규칙 모듈(ruleModules)을 기술자와 대조하고 이번 빌드에 넣을 모듈만 돌려준다(입력 순서 유지).
-    /// targetModules는 타깃이 고른 모듈이다. SDK(엔진) 모듈은 ruleModules에 넣지 않는다.
+    /// 켠 기술자의 모듈 하나를 이번 문맥에서 빼는 이유다(BD35 표). 들어가면 null이다.
+    /// </summary>
+    public static string? ExclusionReason(ModuleDescriptor module, NativePlatform platform, NativeConfiguration configuration,
+        TargetType targetType) => module.Type switch
+        {
+            ModuleType.Editor => "Editor modules are not built yet (there is no editor target)",
+            ModuleType.Developer when targetType == TargetType.Game && configuration == NativeConfiguration.Release =>
+                "Developer modules are not built in Release game targets",
+            _ => module.SupportsPlatform(platform) ? null : $"the module does not support {platform}"
+        };
+
+    /// <summary>
+    /// 규칙 모듈(ruleModules)을 기술자와 대조하고 이번 빌드에 넣을 모듈만 돌려준다(입력 순서 유지).
+    /// targetModules는 타깃이 고른 모듈이다. 게임 빌드는 프로젝트 규칙 모듈만 넘기며(SDK 엔진 모듈은 넣지 않는다) 모든 규칙 모듈에 기술자가
+    /// 있어야 한다. 엔진 저장소 빌드(owner에 프로젝트가 없음)는 모든 규칙 모듈을 넘기고, 기술자가 선언하지 않은 모듈(Core·Engine 모듈)은
+    /// 그대로 통과시킨다.
     /// </summary>
     public IReadOnlyList<NativeModuleInput> Apply(IReadOnlyList<NativeModuleInput> ruleModules, IReadOnlyList<string> targetModules)
     {
@@ -128,9 +181,14 @@ public sealed class DescriptorModuleSet
         {
             if (!modules.TryGetValue(rule.Name, out DescribedModule? described))
             {
-                throw new DescriptorException(Project.FilePath,
+                if (Owner.Project is null)
+                {
+                    continue;
+                }
+
+                throw new DescriptorException(Owner.Project.FilePath,
                     $"module '{rule.Name}' has rules but no descriptor declares it; add it to \"modules\" of " +
-                    $"{Path.GetFileName(Project.FilePath)} or of its plugin's .rocksplugin.");
+                    $"{Path.GetFileName(Owner.Project.FilePath)} or of its plugin's .rocksplugin.");
             }
 
             if (!string.Equals(described.Name, rule.Name, StringComparison.Ordinal))
@@ -151,6 +209,8 @@ public sealed class DescriptorModuleSet
             }
         }
 
+        ValidateLayers(ruleModules);
+
         void RequireIncluded(string name, string user)
         {
             if (modules.TryGetValue(name, out DescribedModule? module) && !module.Included)
@@ -164,7 +224,7 @@ public sealed class DescriptorModuleSet
             RequireIncluded(target, "the target");
         }
 
-        var included = ruleModules.Where(rule => modules[rule.Name].Included).ToList();
+        var included = ruleModules.Where(rule => !modules.TryGetValue(rule.Name, out DescribedModule? module) || module.Included).ToList();
         foreach (NativeModuleInput rule in included)
         {
             // 실행 중 적재 모듈도 같다(Monolithic이 링크한다 — Docs/Design/ModuleLoader.ko.md 3.8절, BuildTargets BD25).
@@ -174,7 +234,71 @@ public sealed class DescriptorModuleSet
             }
         }
 
-        // 기술자의 loadingPhase를 모듈 표 행으로 넘긴다(Docs/Design/ModuleLoader.ko.md 3.2절).
-        return included.Select(rule => rule with { LoadingPhase = modules[rule.Name].Descriptor.LoadingPhase }).ToList();
+        // 기술자의 loadingPhase를 모듈 표 행으로 넘긴다(Docs/Design/ModuleLoader.ko.md 3.2절). 기술자가 없는 엔진 모듈은 규칙 값 그대로다.
+        return included.Select(rule => modules.TryGetValue(rule.Name, out DescribedModule? module)
+            ? rule with { LoadingPhase = module.Descriptor.LoadingPhase }
+            : rule).ToList();
     }
+
+    /// <summary>
+    /// 플러그인 모듈의 위치와 계층 의존을 검사한다(Docs/Design/BuildTargets.ko.md 3.9절 BD37·BD39). 타깃과 무관한 구조 규칙이라 모든 규칙
+    /// 모듈(빠진 모듈 포함)을 본다. 의존은 링크 의존과 실행 중 적재(DynamicModules) 둘 다다.
+    /// <list type="bullet">
+    /// <item>엔진 저장소: 플러그인 모듈의 ModuleDirectory는 &lt;플러그인&gt;/Source/&lt;모듈&gt;이다(PluginModuleRules).</item>
+    /// <item>엔진 저장소: Core·Engine/Source 모듈은 플러그인 모듈에 의존하지 않는다(UE scope 검사와 같다).</item>
+    /// <item>플러그인 모듈이 다른 플러그인의 모듈에 의존하면 그 플러그인을 자기 .rocksplugin plugins에 적어야 한다.</item>
+    /// </list>
+    /// </summary>
+    private void ValidateLayers(IReadOnlyList<NativeModuleInput> ruleModules)
+    {
+        DescribedModule? PluginModule(string name) =>
+            modules.TryGetValue(name, out DescribedModule? module) && module.FromPlugin ? module : null;
+
+        foreach (NativeModuleInput rule in ruleModules)
+        {
+            DescribedModule? self = PluginModule(rule.Name);
+            if (Owner.EngineRoot is string root && self is not null)
+            {
+                string expected = Relative(root, Path.Combine(Path.GetDirectoryName(self.OwnerFile)!, "Source", rule.Name));
+                if (!string.Equals(rule.ModuleDirectory?.Replace('\\', '/'), expected, StringComparison.Ordinal))
+                {
+                    throw new DescriptorException(self.OwnerFile,
+                        $"plugin module '{rule.Name}' must live in {expected} (its rules give '{rule.ModuleDirectory}'); derive its rules from PluginModuleRules.");
+                }
+            }
+
+            bool engineModule = Owner.EngineRoot is not null && self is null && IsEngineLayer(rule.ModuleDirectory);
+            foreach (string dependency in rule.AllDependencies.Concat(rule.DynamicModules))
+            {
+                if (PluginModule(dependency) is not DescribedModule target)
+                {
+                    continue;
+                }
+
+                if (engineModule)
+                {
+                    throw new DescriptorException(target.OwnerFile,
+                        $"engine module '{rule.Name}' must not depend on plugin module '{dependency}' of plugin '{target.OwnerName}'; " +
+                        "Core and Engine/Source modules never reference plugins.");
+                }
+
+                if (self is not null && target.OwnerName != self.OwnerName &&
+                    !plugins[self.OwnerName].Plugins.Any(reference => reference.Name == target.OwnerName))
+                {
+                    throw new DescriptorException(self.OwnerFile,
+                        $"plugin module '{rule.Name}' depends on module '{dependency}' of plugin '{target.OwnerName}'; add " +
+                        $"{{ \"name\": \"{target.OwnerName}\", \"enabled\": true }} to \"plugins\" of {Path.GetFileName(self.OwnerFile)}.");
+                }
+            }
+        }
+    }
+
+    // Core·Engine/Source 아래 모듈(엔진 계층)인가. Engine/Plugins와 Programs는 아니다.
+    private static bool IsEngineLayer(string? moduleDirectory)
+    {
+        string? path = moduleDirectory?.Replace('\\', '/');
+        return path is not null && (path.StartsWith("Core/", StringComparison.Ordinal) || path.StartsWith("Engine/Source/", StringComparison.Ordinal));
+    }
+
+    private static string Relative(string root, string path) => Path.GetRelativePath(root, path).Replace('\\', '/');
 }

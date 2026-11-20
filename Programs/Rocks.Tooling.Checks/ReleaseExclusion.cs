@@ -1,4 +1,5 @@
 using Rocks.Build;
+using Rocks.Build.Descriptors;
 using Rocks.Build.Rules;
 
 namespace Rocks.Tooling.Checks;
@@ -25,7 +26,7 @@ public sealed record ReleaseExclusionResult(IReadOnlyList<CheckFailure> Failures
 /// Release 배제 정책이다(Docs/Design/ShaderSystem.ko.md 9절). Game 타깃(<see cref="TargetType.Game"/>, UE Shipping 대상)을 Release 구성의
 /// 각 플랫폼(Windows x64·macOS arm64·Android arm64)으로 규칙 평가해 다음을 거부한다.
 /// <list type="bullet">
-/// <item><c>release-developer-module</c>: 모듈 도달 집합에 Developer 모듈(<c>&lt;계층&gt;/Source/Developer/</c> 아래 규칙)이 있다.</item>
+/// <item><c>release-developer-module</c>: 모듈 도달 집합(켠 플러그인 모듈 포함)에 Developer 모듈(<see cref="NativeModuleInput.Type"/>)이 있다.</item>
 /// <item><c>release-shader-compiler</c>: 도달 모듈의 시스템 라이브러리·prebuilt 라이브러리·링크 인자에 d3dcompiler·dxcompiler가 있다.</item>
 /// <item><c>release-windows-opengl</c>: Windows 대상이 OpenGLGraphics에 닿는다(GLES31_PC는 개발용 미리보기, UE와 같다). Android는 GLES
 /// backend로 링크한다.</item>
@@ -81,18 +82,80 @@ public static class ReleaseExclusion
 
         IReadOnlyDictionary<string, string> directories = RuleDirectories(root);
         var violations = new List<ReleaseViolation>();
+        var failures = new List<CheckFailure>();
         foreach ((NativePlatform platform, NativeArchitecture architecture) in Platforms)
         {
             var context = new BuildContext(root, Path.Combine(root, "out", "policy-release"), platform, architecture, NativeConfiguration.Release);
             LoadedRuleSet rules = RuleLoader.LoadAll(rulesAssembly, context);
-            var developer = rules.Modules.Where(module => IsDeveloper(module.ModuleDirectory ?? directories.GetValueOrDefault(module.Name)))
-                .Select(module => module.Name).ToHashSet(StringComparer.Ordinal);
-            var targets = rules.Targets.Where(target => target.Type == TargetType.Game)
-                .Select(target => (target.Name, target.Modules)).ToArray();
-            violations.AddRange(Analyze(rules.Modules, developer, targets, platform));
+            if (platform == Platforms[0].Platform)
+            {
+                failures.AddRange(GroupMismatches(rules.Modules, directories));
+            }
+
+            var targets = new List<(string Name, IReadOnlyList<string> Modules)>();
+            foreach (TargetRules target in rules.Targets.Where(target => target.Type == TargetType.Game))
+            {
+                // 켠 플러그인 모듈은 타깃이 참조하지 않아도 주 실행 파일에 링크된다(Docs/Design/BuildTargets.ko.md 3.9절 BD36·BD38). 해석
+                // 오류(끈 플러그인·빠진 모듈 사용)도 이 타깃의 Release 빌드를 막으므로 정책 실패로 알린다.
+                try
+                {
+                    var set = DescriptorModuleSet.Resolve(DescriptorOwner.ForEngine(target.Name, target.Plugins, root), rules.Plugins, platform,
+                        NativeConfiguration.Release, target.Type);
+                    set.Apply(rules.Modules, target.Modules);
+                    targets.Add((target.Name, [.. target.Modules, .. set.IncludedPluginModules]));
+                }
+                catch (DescriptorException error)
+                {
+                    failures.Add(new($"target {target.Name}", 0, "release-plugin-resolution", $"{platform} Release: {error.Message}"));
+                }
+            }
+
+            violations.AddRange(Analyze(rules.Modules, DeveloperModules(rules.Modules), targets, platform));
         }
 
-        return Apply(violations, KnownExceptions);
+        ReleaseExclusionResult result = Apply(violations, KnownExceptions);
+        return result with { Failures = [.. failures, .. result.Failures] };
+    }
+
+    /// <summary>
+    /// 모듈 종류(<see cref="NativeModuleInput.Type"/>)가 Developer인 모듈 이름이다(Docs/Design/BuildTargets.ko.md 3.9절 BD38). 엔진 모듈은
+    /// Group 폴더, 플러그인 모듈은 기술자가 종류를 정하므로 플러그인 경로(<c>Engine/Plugins/…/Source/&lt;모듈&gt;</c>)의 Developer 모듈도 잡힌다.
+    /// </summary>
+    public static IReadOnlySet<string> DeveloperModules(IReadOnlyList<NativeModuleInput> modules) =>
+        modules.Where(module => module.Type == ModuleType.Developer).Select(module => module.Name)
+            .ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>
+    /// 엔진 모듈의 Group 폴더(<c>&lt;계층&gt;/Source/Developer|Editor/</c>)와 종류 칸이 다른 모듈이다(rule <c>module-type-group</c>). Configure를
+    /// 재정의한 규칙이 base.Configure를 거치지 않아 종류를 잃으면 Release 배제가 Developer 모듈을 놓치므로 막는다. 폴더는 규칙의
+    /// ModuleDirectory, 없으면 규칙 파일 폴더(directories)다. 플러그인 모듈(<c>Engine/Plugins</c>)은 기술자가 종류를 정하므로 보지 않는다.
+    /// </summary>
+    public static IReadOnlyList<CheckFailure> GroupMismatches(IReadOnlyList<NativeModuleInput> modules, IReadOnlyDictionary<string, string> directories)
+    {
+        var failures = new List<CheckFailure>();
+        foreach (NativeModuleInput module in modules)
+        {
+            string? directory = (module.ModuleDirectory ?? directories.GetValueOrDefault(module.Name))?.Replace('\\', '/');
+            if (directory is null || directory.StartsWith("Engine/Plugins/", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            string[] parts = directory.Split('/');
+            ModuleType expected = parts.Length > 2 && parts[1] == "Source" ? parts[2] switch
+            {
+                "Developer" => ModuleType.Developer,
+                "Editor" => ModuleType.Editor,
+                _ => ModuleType.Runtime
+            } : ModuleType.Runtime;
+            if (module.Type != expected)
+            {
+                failures.Add(new($"module {module.Name}", 0, "module-type-group",
+                    $"module {module.Name} in {directory} has type {module.Type}, expected {expected}; start an overridden Configure from base.Configure"));
+            }
+        }
+
+        return failures;
     }
 
     /// <summary>
@@ -192,25 +255,5 @@ public static class ReleaseExclusion
         }
 
         return directories;
-    }
-
-    // <계층>/Source/Developer/<모듈> 또는 플러그인의 .../Source/Developer/<모듈>이다.
-    private static bool IsDeveloper(string? directory)
-    {
-        if (directory is null)
-        {
-            return false;
-        }
-
-        string[] parts = directory.Replace('\\', '/').Split('/');
-        for (int index = 0; index + 1 < parts.Length; ++index)
-        {
-            if (parts[index] == "Source" && parts[index + 1] == "Developer")
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 }

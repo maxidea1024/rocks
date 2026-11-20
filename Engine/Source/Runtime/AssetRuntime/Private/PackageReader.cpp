@@ -820,6 +820,8 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "IncompatibleCook";
     case AssetDiagnosticCode::NeverCookReferenced:
         return "NeverCookReferenced";
+    case AssetDiagnosticCode::ContentNotTrusted:
+        return "ContentNotTrusted";
     case AssetDiagnosticCode::InvalidMeshData:
         return "InvalidMeshData";
     case AssetDiagnosticCode::NonFiniteAttribute:
@@ -830,6 +832,32 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "NonNormalizedWeights";
     case AssetDiagnosticCode::TooManyInfluences:
         return "TooManyInfluences";
+    case AssetDiagnosticCode::MaterialSlotFallback:
+        return "MaterialSlotFallback";
+    case AssetDiagnosticCode::NegativeBuildScale:
+        return "NegativeBuildScale";
+    case AssetDiagnosticCode::InfluencesTrimmed:
+        return "InfluencesTrimmed";
+    case AssetDiagnosticCode::MissingInfluences:
+        return "MissingInfluences";
+    case AssetDiagnosticCode::InvalidCollisionData:
+        return "InvalidCollisionData";
+    case AssetDiagnosticCode::UnsupportedCollisionShape:
+        return "UnsupportedCollisionShape";
+    case AssetDiagnosticCode::UnsupportedSetting:
+        return "UnsupportedSetting";
+    case AssetDiagnosticCode::InvalidSetting:
+        return "InvalidSetting";
+    case AssetDiagnosticCode::InvalidSkeletonData:
+        return "InvalidSkeletonData";
+    case AssetDiagnosticCode::SkeletonMismatch:
+        return "SkeletonMismatch";
+    case AssetDiagnosticCode::InvalidClipData:
+        return "InvalidClipData";
+    case AssetDiagnosticCode::UnknownBoneTrack:
+        return "UnknownBoneTrack";
+    case AssetDiagnosticCode::EventPropertiesDropped:
+        return "EventPropertiesDropped";
     }
 
     return "Unknown";

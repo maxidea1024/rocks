@@ -2,10 +2,14 @@
 
 #include "../Common/CrashReportingInternal.h"
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
 
 #include <DbgHelp.h>
 #include <processsnapshot.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
 
 // Windows 크래시 수집기의 파일 쪽이다(Docs/Design/CrashHandlingAndLaunch.ko.md 11·14절). 설치 때
 // 경로·모듈 정보·DbgHelp를 준비하고, 크래시 때 크래시 폴더·CrashInfo.json·덤프를 쓴다. 쓰는 쪽은

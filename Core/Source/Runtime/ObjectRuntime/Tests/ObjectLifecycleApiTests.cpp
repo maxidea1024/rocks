@@ -1,3 +1,4 @@
+#include <Base/PlacementNew.h>
 #include <Base/TypeTraits.h>
 #include <TestSupport/Test.h>
 #include <TestSupport/HostFailure.h>
@@ -8,7 +9,6 @@
 #include <Platform/Fatal.h>
 #include <Platform/Thread.h>
 #include <Task/WorkerScheduler.h>
-#include <new>
 
 using namespace rocks;
 namespace object_lifecycle_api_tests_file {

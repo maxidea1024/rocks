@@ -1,3 +1,4 @@
+#include <Base/PlacementNew.h>
 #include <Platform/File.h>
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
@@ -5,8 +6,12 @@
 #include "FileType.h"
 #include "WindowsFileCommon.h"
 #include "WindowsPathGuard.h"
+
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
-#include <new>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
 
 namespace rocks::platform {
 namespace {

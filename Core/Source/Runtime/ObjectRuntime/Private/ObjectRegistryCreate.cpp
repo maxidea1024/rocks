@@ -1,6 +1,7 @@
 #include "ObjectRegistryInternal.h"
 
 #include <Base/Compiler.h>
+#include <Base/PlacementNew.h>
 
 #include <Core/Text/NameComponent.h>
 #include <Core/Text/StringBuilder.h>
@@ -8,7 +9,6 @@
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
-#include <new>
 
 // ObjectRegistry 생성 트랜잭션이다(ConstructionContext가 거치는 Registry 쪽 지점).
 // BeginConstruction, CreatePending(생성 검사·이름 기록·이름 색인 확장·chunk 표 확장·빈 슬롯

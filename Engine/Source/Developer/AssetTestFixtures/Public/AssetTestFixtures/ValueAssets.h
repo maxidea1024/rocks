@@ -35,6 +35,8 @@ enum class FixtureKind : uint8 {
 // 단순: 스칼라 필드(정수 폭 셋·실수 둘·bool·Name·String·enum·Guid).
 ROCKS_CLASS()
 struct SimpleAsset final : Asset {
+    ROCKS_GENERATED_BODY()
+
     explicit SimpleAsset(Allocator& allocator) noexcept : label(allocator) {
     }
 
@@ -53,6 +55,8 @@ struct SimpleAsset final : Asset {
 // 값 묶음의 struct 원소다(Optional 멤버 포함).
 ROCKS_STRUCT()
 struct FixturePoint {
+    ROCKS_GENERATED_BODY()
+
     explicit FixturePoint(Allocator& allocator) noexcept : label(allocator) {
     }
 
@@ -65,6 +69,8 @@ struct FixturePoint {
 // 중첩 struct다(struct 안 struct와 struct 배열).
 ROCKS_STRUCT()
 struct FixtureGroup {
+    ROCKS_GENERATED_BODY()
+
     explicit FixtureGroup(Allocator& allocator) noexcept : point(allocator), points(allocator) {
     }
 
@@ -75,6 +81,8 @@ struct FixtureGroup {
 // InstancedStruct에 담는 참조 없는 struct다.
 ROCKS_STRUCT()
 struct FixturePayload {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() float factor = 1.0f;
     ROCKS_PROPERTY() int32 steps = 0;
 };
@@ -84,6 +92,8 @@ struct FixturePayload {
 // 타입(Transform·Vector·Rotator — 위치 cm, 각도 도).
 ROCKS_CLASS()
 struct ValueAsset final : Asset {
+    ROCKS_GENERATED_BODY()
+
     explicit ValueAsset(Allocator& allocator) noexcept
         : group(allocator), numbers(allocator), names(allocator), words(allocator),
           bytes(allocator), curve(allocator), track(allocator) {
@@ -109,6 +119,8 @@ struct ValueAsset final : Asset {
 // 큰 데이터: 수 MB bulk(압축되는 무늬·압축되지 않는 무작위)·0 byte bulk·bulk 배열.
 ROCKS_CLASS()
 struct BulkAsset final : Asset {
+    ROCKS_GENERATED_BODY()
+
     explicit BulkAsset(Allocator& allocator) noexcept : chunks(allocator) {
     }
 
@@ -121,6 +133,8 @@ struct BulkAsset final : Asset {
 // 상속: 기반 에셋 클래스(파생 가능)와 파생 클래스. 기반 필드가 파생 객체에서 왕복되는지 본다.
 ROCKS_CLASS()
 struct BaseGameAsset : Asset {
+    ROCKS_GENERATED_BODY()
+
     explicit BaseGameAsset(Allocator& allocator) noexcept : baseName(allocator) {
     }
 
@@ -130,6 +144,8 @@ struct BaseGameAsset : Asset {
 
 ROCKS_CLASS()
 struct DerivedGameAsset final : BaseGameAsset {
+    ROCKS_GENERATED_BODY()
+
     explicit DerivedGameAsset(Allocator& allocator) noexcept
         : BaseGameAsset(allocator), extras(allocator) {
     }
@@ -141,6 +157,8 @@ struct DerivedGameAsset final : BaseGameAsset {
 // 검증 hook: low ≤ high가 아니면 로드(그래프 1단계)와 쓰기가 거부한다.
 ROCKS_STRUCT()
 struct FixtureRange {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() int32 low = 0;
     ROCKS_PROPERTY() int32 high = 0;
 
@@ -152,6 +170,8 @@ struct FixtureRange {
 
 ROCKS_CLASS()
 struct ValidatedAsset final : Asset {
+    ROCKS_GENERATED_BODY()
+
     explicit ValidatedAsset(Allocator& allocator) noexcept : ranges(allocator) {
     }
 
@@ -162,6 +182,8 @@ struct ValidatedAsset final : Asset {
 // 게임 데이터의 한 줄(struct 원소 — 이름·수치·Soft 참조).
 ROCKS_STRUCT()
 struct FixtureEntry {
+    ROCKS_GENERATED_BODY()
+
     explicit FixtureEntry(Allocator& allocator) noexcept : id(allocator), icon(allocator) {
     }
 
@@ -174,6 +196,8 @@ struct FixtureEntry {
 // 게임 데이터 에셋의 하위 객체다(대표 에셋 아래 — 다른 하위 객체·다른 패키지 에셋 참조, 커브).
 ROCKS_CLASS()
 struct GameComponent final : Object {
+    ROCKS_GENERATED_BODY()
+
     explicit GameComponent(Allocator& allocator) noexcept : response(allocator) {
     }
 
@@ -187,6 +211,8 @@ struct GameComponent final : Object {
 // 참조·커브·bulk· struct 배열·Map을 함께 가진다.
 ROCKS_CLASS()
 struct GameDataAsset final : Asset {
+    ROCKS_GENERATED_BODY()
+
     explicit GameDataAsset(Allocator& allocator) noexcept
         : title(allocator), dependencies(allocator), fallback(allocator), entries(allocator),
           byLevel(allocator), balance(allocator), components(allocator) {

@@ -1,6 +1,7 @@
 #include "../Common/DirectoryWatchInternal.h"
 #include "../Posix/PosixFileError.h"
 
+#include <Base/PlacementNew.h>
 #include <Platform/Memory.h>
 
 #include <dirent.h>
@@ -12,8 +13,6 @@
 #include <sys/inotify.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
-#include <new>
 
 // Linux(Android) inotify backend다. inotify는 하위 디렉터리를 자동으로 감시하지 않으므로
 // 디렉터리마다 watch를 두고 wd → 상대 경로 표를 유지한다. 새 디렉터리는 IN_CREATE를 받는 즉시

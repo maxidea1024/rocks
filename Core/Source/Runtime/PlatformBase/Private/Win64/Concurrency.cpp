@@ -1,3 +1,4 @@
+#include <Base/PlacementNew.h>
 #include <Platform/CrashReporting.h>
 #include <Platform/Thread.h>
 #include <Platform/Atomics.h>
@@ -5,9 +6,14 @@
 #include <Platform/PlatformMath.h>
 #include "../Common/ThreadInternal.h"
 #include "WindowsString.h"
+
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
+
 #include <process.h>
-#include <new>
 
 // ntdll: 프로세스가 종료 절차(LdrShutdownProcess)에 들어갔는지다. SDK 헤더에 선언이 없어 직접
 // 선언한다.

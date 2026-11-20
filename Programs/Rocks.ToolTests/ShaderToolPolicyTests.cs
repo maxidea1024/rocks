@@ -137,6 +137,29 @@ internal static class ShaderToolPolicyTests
             applied.Notices[0].Contains("until SH2", StringComparison.Ordinal), "known exception handling: " + string.Join('\n', applied.Failures));
         ReleaseExclusionResult stale = ReleaseExclusion.Apply([], [known]);
         Verify.That(stale.Failures.Count == 1 && stale.Failures[0].Rule == "release-exception-stale", "stale exception escaped");
+
+        // Developer 판정은 경로가 아니라 모듈 종류 칸이다(Docs/Design/BuildTargets.ko.md 3.9절 BD38). 플러그인 경로의 Developer 모듈은
+        // Source/Developer가 없어도 잡히고(음성 대조: 예전 경로 판정이 놓치던 모양), 종류가 Runtime이면 Source/Developer 경로라도 아니다.
+        NativeModuleInput importer = new()
+        {
+            Name = "Importer",
+            Type = Rocks.Build.Descriptors.ModuleType.Developer,
+            ModuleDirectory = "Engine/Plugins/Importers/Importer/Source/Importer"
+        };
+        NativeModuleInput[] typed = [.. modules, importer];
+        IReadOnlySet<string> typedDeveloper = ReleaseExclusion.DeveloperModules(typed);
+        Verify.That(typedDeveloper.SetEquals(["Importer"]), "Developer modules by type: " + string.Join(',', typedDeveloper));
+        IReadOnlyList<ReleaseViolation> plugin = ReleaseExclusion.Analyze(typed, typedDeveloper, [("Game", ["Game", "Importer"])], NativePlatform.Windows);
+        Verify.That(plugin.Count == 1 && plugin[0].Rule == "release-developer-module" && plugin[0].Module == "Importer",
+            "plugin Developer module reached by a Release target escaped: " + string.Join('\n', plugin));
+
+        // 종류 칸과 Group 폴더가 다르면(Configure 재정의가 종류를 잃음) module-type-group이다. 플러그인 경로는 기술자가 정하므로 보지 않는다.
+        var directories = new Dictionary<string, string>(StringComparer.Ordinal) { ["Cooker"] = "Engine/Source/Developer/Cooker" };
+        IReadOnlyList<CheckFailure> mismatches = ReleaseExclusion.GroupMismatches(typed, directories);
+        Verify.That(mismatches.Count == 1 && mismatches[0].Rule == "module-type-group" && mismatches[0].Path == "module Cooker",
+            "type and group mismatch escaped: " + string.Join('\n', mismatches));
+        NoFailures(ReleaseExclusion.GroupMismatches([.. typed.Where(module => module.Name != "Cooker"),
+            new() { Name = "Cooker", Type = Rocks.Build.Descriptors.ModuleType.Developer }], directories));
     }
 
     private static void NoFailures(IReadOnlyList<CheckFailure> failures) => Verify.That(failures.Count == 0, string.Join('\n', failures));

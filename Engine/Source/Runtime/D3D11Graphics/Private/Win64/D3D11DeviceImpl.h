@@ -16,8 +16,12 @@
 #include <Graphics/UploadRing.h>
 #include <Platform/Sync.h>
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <d3dcompiler.h>
 #include <dxgidebug.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
 
 // D3D11 장치 구현의 선언이다. 정의는 기능별 파일에 나눈다.
 // - D3D11Device.cpp: 생성·장치 정보·fence·소유권·회수·검증 집계

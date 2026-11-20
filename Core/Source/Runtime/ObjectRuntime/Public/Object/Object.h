@@ -2,6 +2,7 @@
 
 #include <Base/TypeTraits.h>
 #include <Core/Result.h>
+#include <Meta/GeneratedType.h>
 #include <Object/ObjectHandle.h>
 #include <Object/TypeLease.h>
 
@@ -73,19 +74,44 @@ private:
     ObjectHandle handle_;
 };
 
-// 타입마다 고유한 주소를 갖는 표지다. const를 붙이지 않는다: 읽기 전용 상수는 링커의 동일 데이터
-// 병합(ICF)으로 서로 다른 타입의 주소가 합쳐질 수 있다.
+// 리플렉션 클래스가 아닌 타입(native 등록 타입·struct·enum)의 표지다. 타입마다 고유한 주소다.
+// const를 붙이지 않는다: 읽기 전용 상수는 링커의 동일 데이터 병합(ICF)으로 서로 다른 타입의 주소가
+// 합쳐질 수 있다. inline 변수라 Modular에서는 공유 라이브러리마다 따로
+// 생긴다(Docs/Design/BuildTargets.ko.md 3.8절 BS8b 한계).
 template <class T>
 inline uint8 NativeTypeIdentity = 0;
 
-// 현재 실행 이미지 안의 정확한 C++ 타입 비교용 키다. 직렬화하거나 ABI에 노출하지 않는다.
-// Object의 nullptr 키는 기반 타입 조회를 뜻한다. 상속 판정은 등록된 base 사슬을 따라
-// TypeLease::IsNativeA가 한다.
-// 동적 모듈 사이의 키 통합은 보장하지 않으며 별도 ABI 계약이 필요하다.
+// 정확한 C++ 타입 비교용 키다. 직렬화하거나 ABI에 노출하지 않는다. Object의 nullptr 키는 기반 타입
+// 조회를 뜻한다. 상속 판정은 등록된 base 사슬을 따라 TypeLease::IsNativeA가 한다.
+// 리플렉션 클래스(Object 파생이고 ReflectedDeclarationV — 정의 안의 ROCKS_GENERATED_BODY)의 키는
+// 생성 .cpp가 정의한 저장소의 주소라(GeneratedType<T>::NativeKey) 공유 라이브러리 사이에서도
+// 하나다. 그래서 그 타입의 생성 헤더를 include한 번역 단위에서만 쓸 수 있다(없으면 컴파일 오류 —
+// 번역 단위마다 다른 키를 쓰는 ODR 위반을 막는다). 그 밖(리플렉션 struct 포함)은 NativeTypeIdentity
+// 주소다 — struct 키는 헤더 템플릿의 상수 연산표(StructElementOpsOf)가 상수 주소로 쓴다.
+// class 타입은 완전한 타입이어야 한다(전방 선언만 보이면 리플렉션 판정이 거짓이 되어 조용히
+// 다른 키가 되므로 컴파일 오류).
+//
+// 사용 예:
+//   #include <World/Actor.generated.h>
+//   const void* key = NativeTypeKey<Actor>();
 template <class T>
 const void* NativeTypeKey() noexcept {
+    static_assert(
+        !IsClassV<T> || requires { sizeof(T); },
+        "NativeTypeKey needs a complete type: include the definition of T in this "
+        "translation unit");
     if constexpr (IsSameV<T, Object>) {
         return nullptr;
+    } else if constexpr (ReflectedDeclarationV<T> && IsBaseOfV<Object, T>) {
+        static_assert(
+            requires { GeneratedType<T>::NativeKey(); },
+            "NativeTypeKey of a reflected type needs its generated header: include "
+            "<Module/Header.generated.h> in this translation unit");
+        if constexpr (requires { GeneratedType<T>::NativeKey(); }) {
+            return GeneratedType<T>::NativeKey();
+        } else {
+            return nullptr;
+        }
     } else {
         return &NativeTypeIdentity<T>;
     }

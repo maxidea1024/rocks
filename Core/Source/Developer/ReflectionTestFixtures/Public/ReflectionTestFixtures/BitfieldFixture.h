@@ -13,6 +13,8 @@ namespace rocks::reflection_fixture {
 // 담고, BitfieldChild는 base의 bitfield를 상속한다(BitfieldGraphTests·TextBitfieldTests).
 ROCKS_STRUCT()
 struct BitfieldFlags {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() uint8 first : 1 = 0;
     ROCKS_NATIVE() uint8 spare : 6 = 0;
     ROCKS_PROPERTY() uint8 second : 1 = 0;
@@ -52,6 +54,8 @@ private:
 
 ROCKS_CLASS()
 struct BitfieldChild final : BitfieldHolder {
+    ROCKS_GENERATED_BODY()
+
     explicit BitfieldChild(Allocator& allocator) noexcept : BitfieldHolder(allocator) {
     }
 

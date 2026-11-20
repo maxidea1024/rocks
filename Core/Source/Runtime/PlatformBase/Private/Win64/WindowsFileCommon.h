@@ -6,7 +6,12 @@
 #include "WindowsError.h"
 #include "WindowsPathGuard.h"
 #include "WindowsString.h"
+
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
 
 // Windows 동기·비동기 파일 backend가 함께 쓰는 비공개 도구다. 공개 헤더에 Windows 타입을 노출하지
 // 않는다. 오류 변환은 WindowsError.h, UTF-8·UTF-16 변환은 공개 헤더 Platform/Win64/WideString.h에

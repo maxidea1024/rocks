@@ -605,8 +605,9 @@ uint32 AssetManager::Impl::ProcessClosing(uint32 maxDiscards) noexcept {
                 (void)scratchSlots.TryPushBack(packages[member].loaderSlot);
             }
 
-            // RootRef 칸을 돌려주는 할당이 실패하면 다음 Pump에서 다시 한다.
+            // RootRef 칸을 돌려주는 할당이 실패하면 다음 Pump에서 다시 한다(그 Pump가 센다).
             if (loader->ReleaseRetired(scratchSlots.View())) {
+                releasedPackages += unit.packageCount;
                 EndUnit(static_cast<uint32>(index));
             }
         }

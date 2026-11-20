@@ -7,10 +7,15 @@
 // include한다. 이 번역 단위가 엔진 경고 규칙으로 경고 0인지가 P3에서 넘어온 확인 항목이다
 // (Docs/Design/ShaderSystem.ko.md 8절 진척). 빌드가 WIN32_LEAN_AND_MEAN을 정의하므로 COM 기본
 // 형식(IUnknown)과 IStream 헤더를 직접 더한다.
+
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
 #include <Unknwn.h>
 #include <objidl.h>
 #include <dxc/dxcapi.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
 
 namespace rocks::shader {
 

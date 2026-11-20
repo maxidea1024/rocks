@@ -30,6 +30,7 @@
 // 사용 예(이 모듈에 의존하는 모듈의 리플렉션 클래스):
 //   ROCKS_CLASS()
 //   class Spline : public rocks::Object {
+//       ROCKS_GENERATED_BODY()
 //   public:
 //       explicit Spline(rocks::Allocator& allocator) noexcept : path(allocator) {}
 //       ROCKS_PROPERTY() rocks::InterpCurve<rocks::Vec3d> path;   // 미러 InterpCurveVectorBinding

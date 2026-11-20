@@ -3,6 +3,7 @@
 #include <Core/Memory/UniquePtr.h>
 #include <ObjectSerialization/ObjectGraph.h>
 #include <TestSupport/Test.h>
+#include <World/Level.generated.h>
 #include <World/Private/WorldInternal.h>
 #include <World/SceneComponent.h>
 #include <World/World.h>

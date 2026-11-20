@@ -49,6 +49,8 @@ inline constexpr uint32 MeshSourceFormatVersion = 1;
 // 다른 두 이름은 같다), data는 값 타입별 배치(3.4.1절)의 bulk다.
 ROCKS_STRUCT()
 struct MeshAttributeRecord {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() Name name;
     ROCKS_PROPERTY() MeshElement element = MeshElement::Invalid;
     ROCKS_PROPERTY() MeshValueType type = MeshValueType::Invalid;
@@ -68,6 +70,8 @@ struct MeshAttributeRecord {
 //   auto read = loaded.Load(asset->source, *package, names);    // 로드한 패키지의 bulk로 읽는다
 ROCKS_STRUCT()
 struct MeshSourceData {
+    ROCKS_GENERATED_BODY()
+
     explicit MeshSourceData(Allocator& allocator) noexcept : attributes(allocator) {
     }
 

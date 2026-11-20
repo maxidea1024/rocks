@@ -4,8 +4,12 @@
 // UTF-8·UTF-16 변환은 PlatformBase 공개 헤더의 것을 그대로 쓴다(시험 도구에 따로 두지 않는다).
 #include <Platform/Win64/WideString.h>
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
 #include <shellapi.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
 
 namespace rocks::test {
 

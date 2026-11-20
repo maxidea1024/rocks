@@ -236,7 +236,7 @@ internal static class CppEmitter
     // 때와 같다(소비 코드가 이 헤더가 끌어오는 include에 기대도 깨지지 않는다 — GSD5 보류). 생성 소스는 자기 생성 헤더를 첫 include로
     // 두고 나머지 멤버(스키마 표·연산 표·등록·복사·검증·정적 검사)를 한정된 이름으로 정의한다. 파일 지역 이름과 매크로를 정의하지
     // 않으므로 다른 생성 소스와 한 번역 단위로 묶여도 충돌하지 않는다. 소유 모듈이 번역 단위로 한 번 컴파일한다.
-    public static (string Header, string Source) Emit(SchemaModel schema, ModuleInput input)
+    public static (string Header, string Source) Emit(SchemaModel schema, ModuleInput input, string module)
     {
         string include = input.Include;
         if (include.Length == 0 || include.IndexOfAny(['\r', '\n', '"', '\\', '<', '>']) >= 0)
@@ -254,6 +254,14 @@ internal static class CppEmitter
         Line("// and generated checks are defined in the generated source of this header, compiled once by the owning module.");
         Line("#pragma once");
         Line($"#include <{include}>");
+        // 모듈 API 매크로는 빌드가 정의 헤더로 넣는다. 빌드 밖에서 이 헤더를 컴파일하는 도구(시험)는 빈 값을 쓴다(Monolithic과 같다).
+        if (schema.Ordered.Any(type => type.Header == include && !type.IsEnum && !type.IsStruct))
+        {
+            Line($"#ifndef {ApiMacro(module)}");
+            Line($"#define {ApiMacro(module)}");
+            Line("#endif");
+        }
+
         Line("#include <Base/TypeTraits.h>");
         Line("#include <Meta/GeneratedType.h>");
         Line("#include <Object/GeneratedFieldAccess.h>");
@@ -270,7 +278,8 @@ internal static class CppEmitter
         // 직접 타입으로 쓰면 그 타입의 GeneratedType이 먼저 보여야 한다(생성 접근기가 GeneratedType<T>::Id·IsDeclared·
         // ContainsStrongReference로 알아보고, StructRefArray<S>::Trace가 GeneratedType<S>::Trace를 인스턴스화한다). 같은
         // 특수화를 두 번 정의하지 않도록 그 타입의 생성 헤더를 include한다. 클래스 대상(참조의 기대 타입·ClassRef의 Base)은
-        // NativeTypeKey만 쓰므로 include하지 않는다(ClassRef<Self>·파생 클래스를 Base로 두어도 include 순환이 생기지 않는다).
+        // NativeTypeKey만 쓰므로 헤더에서는 include하지 않는다(ClassRef<Self>·파생 클래스를 Base로 두어도 include 순환이 생기지 않는다 —
+        // 그 키가 필요한 생성 소스가 따로 include한다).
         ClassModel[] own = schema.Ordered.Where(type => type.Header == include).ToArray();
         IEnumerable<string> valueHeaders = own.SelectMany(type => type.Fields)
             .Where(field => field.TargetKind is "Enum" or "Struct" or "InstancedStruct" && field.Reference is not null)
@@ -312,6 +321,28 @@ internal static class CppEmitter
         Body($"// checks of the reflected types declared in <{include}>. Compiled once as a translation unit of the owning module.");
         Body("// A comment before a type or field names the reflected declaration as <header>:<line> <Type>::<member>.");
         Body($"#include <{CompilerOptions.GeneratedSpelling(include)}>");
+        // 클래스 대상(참조의 기대 타입·ClassRef의 Base·클래스 base)의 NativeTypeKey는 그 타입 생성 .cpp의 키(GeneratedType<T>::NativeKey)를
+        // 쓰므로(Docs/Design/BuildTargets.ko.md 3.8절 BS8b) 생성 소스가 그 생성 헤더를 include한다. 생성 소스는 다른 곳에서 include하지
+        // 않는 말단 번역 단위라 헤더와 달리 include 순환이 생기지 않는다.
+        // import 타입에서 물려받은 필드의 클래스 대상은 이름 없이 ID만 있다(SchemaValidator.Imports — enum·struct 대상만 이름으로 잇는다).
+        Dictionary<string, ClassModel> byId = schema.Classes.Values.Concat(schema.Imported.Values)
+            .GroupBy(type => type.Id, StringComparer.Ordinal).ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        IEnumerable<FieldModel> ownFields = own.SelectMany(type => type.Fields).ToArray();
+        IEnumerable<string> targetHeaders = ownFields
+            .SelectMany(field => new[] { field.Reference, field.KeyReference })
+            .Concat(own.Where(type => type.Base.Length != 0).Select(type => type.Base))
+            .Where(name => name is not null && (schema.Classes.ContainsKey(name) || schema.Imported.ContainsKey(name)))
+            .Select(name => schema.Find(name!).Header)
+            .Concat(ownFields.SelectMany(field => new[] { field.ReferenceId, field.KeyReferenceId })
+                .Where(id => id is not null && byId.ContainsKey(id)).Select(id => byId[id!].Header))
+            .Where(header => header != include && !valueHeaders.Contains(header, StringComparer.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal);
+        foreach (string targetHeader in targetHeaders)
+        {
+            Body($"#include <{CompilerOptions.GeneratedSpelling(targetHeader)}>");
+        }
+
         Line("namespace rocks {");
         Body("namespace rocks {");
         // 특수화는 schema.Ordered 순서다: enum, struct(PROPERTY·NATIVE로 쓰는 struct 먼저), 클래스(base 먼저). 같은 헤더 안에서도 쓰는
@@ -327,11 +358,11 @@ internal static class CppEmitter
 
             if (type.IsStruct)
             {
-                EmitStruct(schema, type, Line, Body);
+                EmitStruct(schema, type, module, Line, Body);
                 continue;
             }
 
-            EmitClass(schema, type, Line, Body);
+            EmitClass(schema, type, module, Line, Body);
         }
 
         Line("} // namespace rocks");
@@ -357,7 +388,7 @@ internal static class CppEmitter
 
     // 리플렉션 클래스의 GeneratedType 특수화다. 헤더: Id(constexpr), Trace(inline — GC와 native 파생의 Trace 사슬이 직접 부른다),
     // 나머지 멤버의 선언. 생성 소스: bitfield 접근자, 정적 검사, Schema, ReferenceLayout, Ops, Register.
-    private static void EmitClass(SchemaModel schema, ClassModel type, Action<string> Line, Action<string> Body)
+    private static void EmitClass(SchemaModel schema, ClassModel type, string module, Action<string> Line, Action<string> Body)
     {
         string native = "::" + type.NativeName;
         string self = $"GeneratedType<{native}>";
@@ -402,6 +433,7 @@ internal static class CppEmitter
 
         Line($"static constexpr TypeId Id() noexcept {{ return {GuidValue(type.Id)}; }}");
         Line("static const TypeSchema& Schema() noexcept;");
+        EmitNativeKey(module, self, Line, Body);
         EmitVerifyGenerated(self, checks, Line, Body);
         Body($"const TypeSchema& {self}::Schema() noexcept {{");
         EmitFieldSchemas(type, Body);
@@ -838,7 +870,23 @@ internal static class CppEmitter
         type.Fields.Any(field => !field.Spec.Transient &&
             (field.Spec.Required || (field.StructTarget && ContainsRequired(schema, schema.Find(field.Reference!)))));
 
-    private static void EmitStruct(SchemaModel schema, ClassModel type, Action<string> Line, Action<string> Body)
+    // 모듈 API 매크로 이름이다(Docs/Design/BuildTargets.ko.md 3.8절 BD27 — 빌드가 모듈 정의 헤더에 정의한다).
+    internal static string ApiMacro(string module) => "ROCKS_" + module.ToUpperInvariant() + "_API";
+
+    // 리플렉션 클래스의 native 키다(Docs/Design/BuildTargets.ko.md 3.8절 BS8b). 헤더는 모듈 API 매크로로 export한 선언만 두고,
+    // 생성 소스가 const가 아닌 정적 지역 저장소의 주소로 정의한다(소유 모듈에 하나 — 공유 라이브러리 사이에서도 같은 키). struct는
+    // 내지 않는다: struct 키는 헤더 템플릿의 상수 연산표가 쓰는 inline 표지다(BS8b 한계).
+    private static void EmitNativeKey(string module, string self, Action<string> Line, Action<string> Body)
+    {
+        Line($"static {ApiMacro(module)} const void* NativeKey() noexcept;");
+        Body($"const void* {self}::NativeKey() noexcept {{");
+        Body("// Not const: identical read-only constants may be folded together by the linker (ICF).");
+        Body("static unsigned char key = 0;");
+        Body("return &key;");
+        Body("}");
+    }
+
+    private static void EmitStruct(SchemaModel schema, ClassModel type, string module, Action<string> Line, Action<string> Body)
     {
         string native = "::" + type.NativeName;
         string self = $"GeneratedType<{native}>";

@@ -27,6 +27,11 @@ internal sealed class CompilerOptions
     // 않는다. 단독 실행과 도구 시험이 빌드 없이 생성물 전체를 확인할 때 쓴다(Docs/Design/ReflectionGeneratedSources.ko.md 7절).
     public bool VerifySources { get; init; }
 
+    // 리플렉션 클래스·struct에 ROCKS_GENERATED_BODY()를 요구한다(--require-generated-body, 어기면 RMC2211). 이 매크로가 남기는 표지로
+    // 생성 헤더를 include하지 않은 번역 단위의 리플렉션 템플릿 사용이 컴파일 오류가 된다
+    // (Docs/Design/ReflectionGeneratedSources.ko.md 8.1절). 빌드의 메타 단계는 늘 넘긴다. Binds 미러 선언은 대상이 아니다.
+    public bool RequireGeneratedBody { get; init; }
+
     // 게시 전 검증 컴파일을 함께 돌리는 수다(--jobs). 검증 컴파일은 생성물마다 독립이다. 지정하지 않으면 DefaultVerifyJobs와 프로세서 수
     // 가운데 작은 값이다. 빌드는 자기 --jobs를 넘기고, MetaCompiler를 여럿 함께 띄우는 도구 시험은 1을 넘긴다.
     public int VerifyJobs { get; init; } = Math.Min(DefaultVerifyJobs, Environment.ProcessorCount);
@@ -88,6 +93,7 @@ internal sealed class CompilerOptions
         List<string> clang = [];
         bool check = false;
         bool verifySources = false;
+        bool requireGeneratedBody = false;
         for (int index = 0; index < arguments.Length; ++index)
         {
             string argument = arguments[index];
@@ -110,6 +116,17 @@ internal sealed class CompilerOptions
                 }
 
                 verifySources = true;
+                continue;
+            }
+
+            if (argument == "--require-generated-body")
+            {
+                if (requireGeneratedBody)
+                {
+                    throw new MetadataException("duplicate option --require-generated-body", "RMC1000", "Specify --require-generated-body only once.");
+                }
+
+                requireGeneratedBody = true;
                 continue;
             }
 
@@ -330,6 +347,7 @@ internal sealed class CompilerOptions
             IdentityInventory = inventory,
             Check = check,
             VerifySources = verifySources,
+            RequireGeneratedBody = requireGeneratedBody,
             VerifyJobs = verifyJobs
         };
         options.Imports.AddRange(imports.Select(Path.GetFullPath));

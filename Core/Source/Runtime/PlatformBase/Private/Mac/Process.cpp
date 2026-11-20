@@ -1,6 +1,7 @@
 #include "../Common/ProcessInternal.h"
 #include "../Posix/PosixFileError.h"
 
+#include <Base/PlacementNew.h>
 #include <Platform/Clock.h>
 #include <Platform/Memory.h>
 
@@ -9,7 +10,6 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <mach-o/dyld.h>
-#include <new>
 #include <poll.h>
 #include <signal.h>
 #include <spawn.h>

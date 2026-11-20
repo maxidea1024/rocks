@@ -4,6 +4,8 @@
 
 `log`는 암호화한 로그 파일 도구다([로깅 설계](../../Docs/Design/LoggingSystem.ko.md) 9.1절, LG10). `log keygen <공개키 파일> <개인키 파일>`은 X-Wing 키 쌍을 만들고(기존 파일을 덮어쓰지 않는다), `log decode <파일> --key <개인키 파일> [--json]`은 평문을 표준 출력으로 낸다. 끝 표시가 없으면 마지막 완전한 묶음까지 낸 뒤 "no end marker (abnormal termination)"를 알리고, 변조는 오류 1이다. `--json`은 상태를 표준 오류에 JSON 객체 한 줄로 쓴다. `log seal <평문> <출력> --public <공개키 파일>`은 같은 형식으로 봉인한다(진단·시험용). **개인키는 저장소와 쿠킹 결과에 넣지 않는다.**
 
+`content-sign`은 쿠킹 매니페스트 서명 도구다([콘텐츠 서명 설계](../../Docs/Design/ContentSigning.ko.md) 5·7절, A1f). `content-sign keygen <키 파일> <공개 파일> --password-file <경로>`은 Ed25519 키를 비밀번호(Argon2id)로 감싼 키 파일과 신뢰 목록에 넣을 공개 줄(`<keyId hex> <공개키 hex>`)을 만든다(기존 파일을 덮어쓰지 않는다). `content-sign sign <in.rman> <out.rsig> --key <키 파일> --password-file <경로> --version <u64> --product <id> --channel <이름>`은 매니페스트를 확인한 뒤 서명 봉투를 임시 파일에 쓰고 원자적으로 바꾼다. `content-sign verify <in.rsig> --trust <공개 파일> --product <id> --channel <이름> [--minimum-version <u64>]`은 엔진과 같은 순서로 검증한다. 비밀번호는 파일로만 받는다(끝의 줄바꿈 하나는 뺀다). **키 파일은 저장소와 쿠킹 결과에 넣지 않는다.**
+
 ```text
 dotnet msbuild Rocks.proj /t:Build /p:RocksTarget=Commandlet
 RocksCommandlet --help

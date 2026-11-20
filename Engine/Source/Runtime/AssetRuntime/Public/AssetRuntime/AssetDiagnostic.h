@@ -12,7 +12,9 @@ namespace rocks {
 // 여기 값은 진단 이름과 1:1이며 저장 포맷이 아니다(순서를 바꿔도 된다). A1이 내는 것은 패키지·
 // 매니페스트·로드 쪽(CorruptPackage·UnsupportedVersion·NewerVersion·MissingDependency·TypeMismatch·
 // IncompatibleCook·UnpackagedReference·UnsupportedCycle)이고, 나머지는 A2–A5가 같은 이름표를 쓴다.
-// 메시 코드는 MeshSource 모듈(MA1)이 MeshDiagnostic::code로 낸다.
+// 메시 코드는 MeshSource 모듈(MA1)과 MeshTools 빌드(MA2a·MA5a)가 MeshDiagnostic::code로, 스켈레톤
+// 코드는 Animation 모듈(MA4a)이 SkeletonDiagnostic::code로, 클립 코드는 Animation 모듈(MA6a)이
+// ClipDiagnostic::code로 낸다.
 enum class AssetDiagnosticCode : uint16 {
     None,
     // 식별·경로
@@ -37,12 +39,36 @@ enum class AssetDiagnosticCode : uint16 {
     CorruptEntry,
     IncompatibleCook,
     NeverCookReferenced,
-    // 메시(MeshAnimationAssets.ko.md 11절 — MA1 원본 메시가 내는 것)
+    // 콘텐츠 서명(ContentSigning.ko.md 7절 — A1f): 서명 봉투를 신뢰할 수 없다(모르는 키·낮은
+    // contentVersion·다른 scope·서명 불일치 — AssetDiagnostic::section이 ContentEnvelopeField)
+    ContentNotTrusted,
+    // 메시(MeshAnimationAssets.ko.md 11절 — MA1 원본 메시와 MA2a 빌드가 내는 것)
     InvalidMeshData,
     NonFiniteAttribute,
     UvOutOfRange,
     NonNormalizedWeights,
-    TooManyInfluences
+    TooManyInfluences,
+    MaterialSlotFallback,
+    NegativeBuildScale,
+    // 스킨 메시 빌드(MeshAnimationAssets.ko.md 6.5절 — MA5a): 정보 InfluencesTrimmed, 경고
+    // MissingInfluences.
+    InfluencesTrimmed,
+    MissingInfluences,
+    // 단순 충돌(MeshAnimationAssets.ko.md 4.8절 — MA3a): 오류 InvalidCollisionData, 임포터 경고
+    // UnsupportedCollisionShape.
+    InvalidCollisionData,
+    UnsupportedCollisionShape,
+    // 임포트·설정(4.6절 — MA2a 메시 빌드가 처음 낸다)
+    UnsupportedSetting,
+    InvalidSetting,
+    // 애니메이션(MeshAnimationAssets.ko.md 6.4·11절 — MA4a 스켈레톤이 내는 것)
+    InvalidSkeletonData,
+    SkeletonMismatch,
+    // 클립(MeshAnimationAssets.ko.md 7.5절 — MA6a): 오류 InvalidClipData, 경고 UnknownBoneTrack,
+    // 임포터 경고 EventPropertiesDropped.
+    InvalidClipData,
+    UnknownBoneTrack,
+    EventPropertiesDropped
 };
 
 // 진단 이름이다(예: CorruptPackage → "CorruptPackage"). 모르는 값은 "Unknown"이다. 반환 문자열은

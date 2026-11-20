@@ -63,14 +63,34 @@ public static partial class PolicyChecks
     // 엔진이 소유한 C++ 소스의 최상위 폴더다(서식·경고·플랫폼 경계 검사 범위).
     private static readonly string[] OwnedSourceRoots = ["Core", "Engine", "Programs", "Templates"];
 
-    // 시험 실행 파일에 들어가는 소스다. 모듈 시험은 <루트>/Source/<그룹>/<모듈>/Tests/ 아래(FoundationTests.Build.cs가 모으는
-    // 곳)이고 runner는 Programs/FoundationTests/다. 모듈 Private/ 아래의 Tests 디렉터리(UE의 Private/Tests 관례)는 모듈 소스로
+    // 시험 실행 파일에 들어가는 소스다. 모듈 시험은 <루트>/Source/<그룹>/<모듈>/Tests/ 아래와 엔진 플러그인의
+    // Engine/Plugins/…/<플러그인>/Source/<모듈>/Tests/ 아래(FoundationTests.Build.cs가 모으는 곳 — BuildTargets 3.9절 BD40·BD42)이고
+    // runner는 Programs/FoundationTests/다. 모듈 Private/ 아래의 Tests 디렉터리(UE의 Private/Tests 관례)는 모듈 소스로
     // 컴파일되어 출하되므로 시험 소스가 아니다.
     private static bool IsTestSource(string relative)
     {
         string[] parts = relative.Split('/');
-        return (parts.Length > 5 && parts[1] == "Source" && parts[4] == "Tests") ||
+        return (parts.Length > 5 && parts[1] == "Source" && parts[4] == "Tests") || IsPluginModuleSubfolder(parts, "Tests") ||
                relative.StartsWith("Programs/FoundationTests/", StringComparison.Ordinal);
+    }
+
+    // Engine/Plugins/…/Source/<모듈>/<folder>/ 아래 파일인가(플러그인 모듈의 하위 폴더).
+    private static bool IsPluginModuleSubfolder(string[] parts, string folder)
+    {
+        if (parts.Length < 7 || parts[0] != "Engine" || parts[1] != "Plugins")
+        {
+            return false;
+        }
+
+        for (int index = 3; index + 3 < parts.Length; ++index)
+        {
+            if (parts[index] == "Source" && parts[index + 2] == folder)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // 리플렉션 필드 템플릿(rocks::Array·ObjectRefArray·StructRefArray·ObjectRefMap·ObjectRef·WeakObjectRef·SoftObjectRef·ClassRef)의 명시적 인스턴스화·extern
@@ -191,7 +211,16 @@ public static partial class PolicyChecks
                     failures.Add(new(relative, 1, "platform-boundary",
                         "Platform/Win64 holds only headers directly in the directory (no subdirectories or sources)"));
                 }
-                else if (!HasWindowsOnlyGuard(File.ReadAllText(path, StrictUtf8)))
+                else if (ReincludedWindowsHeaders.Contains(relative, StringComparer.Ordinal))
+                {
+                    if (!HasWindowsOnlyGuard(File.ReadAllText(path, StrictUtf8), reincluded: true))
+                    {
+                        failures.Add(new(relative, 1, "platform-boundary",
+                            "this Platform/Win64 header is included repeatedly: it has no #pragma once and wraps its content in " +
+                            "#if ROCKS_PLATFORM_WINDOWS after #include <Base/Compiler.h>"));
+                    }
+                }
+                else if (!HasWindowsOnlyGuard(File.ReadAllText(path, StrictUtf8), reincluded: false))
                 {
                     failures.Add(new(relative, 1, "platform-boundary",
                         "Platform/Win64 header must wrap its content in #if ROCKS_PLATFORM_WINDOWS after #include <Base/Compiler.h>"));
@@ -302,11 +331,21 @@ public static partial class PolicyChecks
             name.EndsWith(".h", StringComparison.Ordinal);
     }
 
-    private static bool HasWindowsOnlyGuard(string text)
+    // 여러 번 include하는 조각이라 #pragma once가 없는 Windows 전용 공개 헤더다: Windows SDK 헤더를 감싸는 쌍이다
+    // (Docs/Design/UnityBuildPch.ko.md 6.1절 "매크로를 남기는 헤더"). 나머지 틀은 다른 Windows 전용 공개 헤더와 같다.
+    private static readonly string[] ReincludedWindowsHeaders =
+    [
+        WindowsPublicHeaderDirectory + "WindowsHeadersBegin.h", WindowsPublicHeaderDirectory + "WindowsHeadersEnd.h"
+    ];
+
+    // reincluded면 #pragma once 없이 #include <Base/Compiler.h>로 시작해야 한다(#pragma once가 있으면 두 번째 include가 비어
+    // 매크로를 되돌리거나 숨기지 못한다). #pragma once는 어느 줄에 있어도(#if 안이어도) 파일 전체에 듣는다.
+    private static bool HasWindowsOnlyGuard(string text, bool reincluded)
     {
         string[] lines = WithoutComments(text).Split('\n').Select(line => line.Trim()).Where(line => line.Length != 0).ToArray();
-        return lines.Length >= 4 && PragmaOnceLine.IsMatch(lines[0]) && CompilerIncludeLine.IsMatch(lines[1]) &&
-            WindowsGuardLine.IsMatch(lines[2]) && EndifLine.IsMatch(lines[^1]);
+        int include = reincluded ? 0 : 1;
+        return lines.Length >= include + 3 && (reincluded ? !lines.Any(PragmaOnceLine.IsMatch) : PragmaOnceLine.IsMatch(lines[0])) &&
+            CompilerIncludeLine.IsMatch(lines[include]) && WindowsGuardLine.IsMatch(lines[include + 1]) && EndifLine.IsMatch(lines[^1]);
     }
 
     /// <summary>shell 문자열을 실행하지 않는다. flags 검증에는 가능한 한 실제 ArgumentList를 전달한다.</summary>

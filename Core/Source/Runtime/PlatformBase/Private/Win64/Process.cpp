@@ -2,13 +2,17 @@
 #include "WindowsError.h"
 #include "WindowsString.h"
 
+#include <Base/PlacementNew.h>
 #include <Platform/Atomics.h>
 #include <Platform/Clock.h>
 #include <Platform/Memory.h>
 #include <Platform/SecureRandom.h>
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
-#include <new>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
 
 namespace rocks::platform {
 

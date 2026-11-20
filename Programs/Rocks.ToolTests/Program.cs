@@ -60,11 +60,11 @@ internal static class Program
                     parallelism = options.Jobs(Math.Max(1, Environment.ProcessorCount));
                     break;
                 case "policy":
-                    var failures = PolicyChecks.Runtime(root).Concat(PolicyChecks.ReflectionAnnotations(root)).Concat(PolicyChecks.ModuleGeneratedHeaderIncludes(root)).Concat(PolicyChecks.PlatformBoundary(root)).Concat(PolicyChecks.TargetMacros(root))
+                    var failures = PolicyChecks.Runtime(root).Concat(PolicyChecks.ReflectionAnnotations(root)).Concat(PolicyChecks.ModuleGeneratedHeaderIncludes(root)).Concat(PolicyChecks.PlatformBoundary(root)).Concat(PolicyChecks.PlacementNewHeaders(root)).Concat(PolicyChecks.TargetMacros(root))
                         .Concat(PolicyChecks.TargetIntrinsics(root)).Concat(PolicyChecks.TestAccess(root))
                         .Concat(PolicyChecks.SourceWarnings(root)).Concat(PolicyChecks.OptimizationOverrides(root))
                         .Concat(PolicyChecks.CompilerBuiltins(root)).Concat(PolicyChecks.RawLimitLiterals(root)).Concat(PolicyChecks.InitializerListDeductions(root)).Concat(PolicyChecks.CVarRegistrations(root)).Concat(PolicyChecks.CompileTimeMessages(root)).Concat(PolicyChecks.EnglishSourceLiterals(root)).Concat(PolicyChecks.EnglishBuildFiles(root)).Concat(PolicyChecks.DeterministicMathSources(root)).Concat(PolicyChecks.CrtNumberConversions(root)).Concat(UnicodeTables.Check(root)).Concat(Json5UnicodeTablesGenerator.Check(root)).Concat(MathTables.Check(root)).Concat(NumberTables.Check(root))
-                        .Concat(PolicyChecks.PythonFreeMainPath(root)).Concat(PolicyChecks.ThirdParty(root)).Concat(PolicyChecks.DerivedSources(root)).Concat(PolicyChecks.ForeignEngineBoundary(root))
+                        .Concat(PolicyChecks.PythonFreeMainPath(root)).Concat(PolicyChecks.ThirdParty(root)).Concat(PolicyChecks.DerivedSources(root)).Concat(PolicyChecks.ForeignEngineBoundary(root)).Concat(PolicyChecks.PluginModuleRules(root))
                         .Concat(PolicyChecks.ShaderToolReferences(root)).Concat(PolicyChecks.ProcessEntryPoints(root)).ToList();
                     // Release 배제(셰이더 시스템 9절)는 규칙 어셈블리를 평가한다. 알려진 예외는 실패가 아니지만 조용히 넘기지 않고 출력한다.
                     string rulesAssembly = options.Optional("rules") ?? ReleaseExclusion.DefaultRulesAssembly(root);
@@ -74,6 +74,8 @@ internal static class Program
                     failures.AddRange(PolicyChecks.UnityCollisions(root, rulesAssembly));
                     // PCH 헤더는 빌드가 강제 include한다 — 소스와 헤더가 직접 include하지 않는다(같은 문서 8.1·10절).
                     failures.AddRange(PolicyChecks.PchHeaderIncludes(root, rulesAssembly));
+                    // Windows SDK 헤더는 Windows 플랫폼의 모든 모듈에서 감싸서 include한다(같은 문서 6.1절 "매크로를 남기는 헤더").
+                    failures.AddRange(PolicyChecks.WindowsMacroLeaks(root, rulesAssembly));
                     foreach (string notice in release.Notices)
                     {
                         Console.WriteLine("note: " + notice);

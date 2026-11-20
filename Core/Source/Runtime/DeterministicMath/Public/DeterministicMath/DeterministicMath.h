@@ -18,7 +18,7 @@
 // - 결과가 NaN이면 항상 고정 quiet NaN(double 0x7FF8000000000000)이다(CPU마다 다른 기본 NaN 비트를
 //   쓰지 않는다).
 // - 정확도는 결정성과 별개다. 상한(가장 가까운 double까지의 비트 거리)은 생성한 고정밀 기준값 표로
-//   시험한다: Exp2·Log2 1, Pow·sRGB·Gamma22 2, SinPi·CosPi 2(비정규 결과는 1 더). 결과 비트를
+//   시험한다: Exp2·Log2·Acos 1, Pow·sRGB·Gamma22 2, SinPi·CosPi 2(비정규 결과는 1 더). 결과 비트를
 //   바꾸는 변경은 Version을 올린다(너겟 키·cookKey에 들어간다).
 //
 // 사용 예:
@@ -50,6 +50,10 @@ double Pow(double base, double exponent) noexcept;
 // (SinPi(±n) = ±0, CosPi(n + ½) = +0). ±Inf·NaN은 고정 NaN.
 double SinPi(double x) noexcept;
 double CosPi(double x) noexcept;
+
+// arccos(x)(라디안, [0, π])다. Acos(1) = +0, Acos(−1) = π(가장 가까운 double), |x| > 1·NaN은
+// 고정 NaN. MikkTSpace 패치·가중 법선의 코너 각(MeshAnimationAssets.ko.md 결정 MA-D5)이 쓴다.
+double Acos(double x) noexcept;
 
 // sinc(x) = sin(πx)/(πx), sinc(0) = 1. Lanczos(x, lobes) = sinc(x)·sinc(x/lobes)(|x| < lobes), 그
 // 밖 0.

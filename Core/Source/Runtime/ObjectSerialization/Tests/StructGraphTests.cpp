@@ -1,10 +1,10 @@
+#include <Base/PlacementNew.h>
 #include <ReflectionTestFixtures/ReflectionFixture.generated.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Object/ConstructionContext.h>
 #include <ObjectSerialization/ObjectGraph.h>
 #include <Serialization/Record.h>
 #include <TestSupport/Test.h>
-#include <new>
 
 // 리플렉션 struct의 그래프 저장·복원 시험이다(Docs/Design/ReflectionFoundations.ko.md 4.4·4.6절).
 // GeneratedType 특수화는 MetaCompiler 생성 코드(B4b)와 같은 모양으로 손으로 썼다: 3단 중첩(Holder →

@@ -1,6 +1,10 @@
 #include "../Common/VirtualMemoryBackend.h"
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
 
 namespace rocks::platform {
 namespace {

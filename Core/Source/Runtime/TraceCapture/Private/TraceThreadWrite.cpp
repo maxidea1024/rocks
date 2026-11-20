@@ -1,12 +1,11 @@
 #include "TraceSessionInternal.h"
 
 #include <Base/Endian.h>
+#include <Base/PlacementNew.h>
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
 #include <Platform/Thread.h>
-
-#include <new>
 
 // 생산자 경로다(Docs/Design/TraceSystem.ko.md 4.1절). 스레드마다 자기 블록에 잠금 없이 이어 쓰고,
 // 다 쓴 기록의 끝을 published에 release로 공개한다. 블록을 받지 못하면 기다리지 않고 버리며 손실을

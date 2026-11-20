@@ -2,8 +2,12 @@
 
 #include <GraphicsTypes/PixelFormat.h>
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
 #include <d3d11_4.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
 
 // 픽셀 형식의 D3D11(DXGI) 대응 표와 장치 능력 질의다(Docs/Design/PixelFormat.ko.md 8.4절, PF4).
 // DXGI 형식은 D3D12와 같다(D3D12Graphics/Private/Win64/D3D12PixelFormats.cpp와 같은 표, D3D 공용

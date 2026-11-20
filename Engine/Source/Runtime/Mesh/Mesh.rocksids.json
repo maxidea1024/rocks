@@ -1,0 +1,600 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "rocks::CollisionBox::center",
+      "id": "6c438e9517bf4e82a851f8ad009afeae",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionBox::collisionEnabled",
+      "id": "56de33c54e894fa2b3f50e9a01d9e430",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionBox::contributeToMass",
+      "id": "1270838af9b34fcf8449df2151092f52",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionBox::name",
+      "id": "e75d503bfa6f4c0c8d7345fa4d1569a2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionBox::restOffset",
+      "id": "6062b5ca71aa49ed9229533256362ecc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionBox::rotation",
+      "id": "be5e08f0c991425d9afd77fb59e13ece",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionBox::size",
+      "id": "a3543e0a33dd4241a86431142e0a6f06",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionCapsule::center",
+      "id": "db1138c61b474b5a8e0ae14905615a8a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionCapsule::collisionEnabled",
+      "id": "e4de950da9a446ce82f73956a9860e00",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionCapsule::contributeToMass",
+      "id": "1bdeb6a544a349f2a1a02df356624f14",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionCapsule::length",
+      "id": "a9de8727be814c7190c220dd95a4c6d7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionCapsule::name",
+      "id": "604021c201704cd5ad8fb18230f74190",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionCapsule::radius",
+      "id": "2dd1ee12e4bc4c2db2d69f4d622f79df",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionCapsule::restOffset",
+      "id": "8e1c33284e04489e8d0ef28008b5856f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionCapsule::rotation",
+      "id": "dc9572cd1b4049b9a277450c336b412d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionConvex::collisionEnabled",
+      "id": "db0f45a47e02405eb4270bcdb19ab052",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionConvex::contributeToMass",
+      "id": "2684343558404dfe8b9ff8d2f9b01cc6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionConvex::indices",
+      "id": "0dcde97bde4a4e08b47df18a8e32f040",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionConvex::name",
+      "id": "6e34d97f77bb439bb970608ace740de7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionConvex::restOffset",
+      "id": "7c59d1a7916042088451d49dedab04da",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionConvex::transform",
+      "id": "6132e45cf2c3464e8ff254d205628d61",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionConvex::vertices",
+      "id": "ae5f3c4297f646f493c4e6522af44e55",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionCylinder::center",
+      "id": "7fac9192da0b48109ac57c43c11c5609",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionCylinder::collisionEnabled",
+      "id": "e22f8e83494d4859b1b630eb7c4a86f0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionCylinder::contributeToMass",
+      "id": "46afa19d3f8f48acb2d6453f3d23a349",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionCylinder::length",
+      "id": "101e48a03a3f4c27a6541f05ab39ebad",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionCylinder::name",
+      "id": "c3339fa3cc3d42cbb7643e2b184ffbf0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionCylinder::radius",
+      "id": "ed911175eaf644c0830d4a74af73d00e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionCylinder::restOffset",
+      "id": "fc38e40794fa46139c0b8d71a5d5a41c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionCylinder::rotation",
+      "id": "aa8ef1249a304e0fbfccf54b8092c0e6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionSphere::center",
+      "id": "d55efac2e65046f4a0ca70829c1720ed",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionSphere::collisionEnabled",
+      "id": "20995540867e4eb78e6a2366cea735e1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionSphere::contributeToMass",
+      "id": "a651ca7e55614e95aeb92694ef932421",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionSphere::name",
+      "id": "8ef3fedf35024383b245c43df0dff855",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionSphere::radius",
+      "id": "77074a3edac149f8b6259d676ea59dbd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionSphere::restOffset",
+      "id": "7555ad66274b43dca93186b3455566da",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionTaperedCapsule::center",
+      "id": "598e9251a00648f39a0f549ad5c71713",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionTaperedCapsule::collisionEnabled",
+      "id": "ce3ce78e34484d21aeb90b4c6e322b45",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionTaperedCapsule::contributeToMass",
+      "id": "1e43b307c07a4e978eeaecc187224f7a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionTaperedCapsule::length",
+      "id": "84d92aef180c43f38e1e35148cb1f409",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionTaperedCapsule::name",
+      "id": "ff511ea0c37e4d038fbddfd96a1d440f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionTaperedCapsule::radius0",
+      "id": "a7a4685af3bb4f0aa0edd31fb730720a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionTaperedCapsule::radius1",
+      "id": "ec75792d9ef54d9aa513ebab9b66be9a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionTaperedCapsule::restOffset",
+      "id": "7eef85d359ff4a29b4813cce0177ce81",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::CollisionTaperedCapsule::rotation",
+      "id": "bf5f490b8e7749aa852e5c01b61420ff",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::buildReversedIndexBuffer",
+      "id": "4f8d9921782945279e7e2c3ee19afe41",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::buildScale",
+      "id": "3532fb6e2c3148db82db4a41ca534ce1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::computeWeightedNormals",
+      "id": "74fcf4c026bf4f88a77c142f6f408b43",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::distanceFieldResolutionScale",
+      "id": "40e21c08639e430bba6a8b81cdb60c6e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::dstLightmapIndex",
+      "id": "5310fa52728b4e30a42a725cd874b2d3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::generateDistanceFieldAsIfTwoSided",
+      "id": "4dbfd43d12d946a08d5d3efc99d7e688",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::generateLightmapUVs",
+      "id": "3e8ee63031d7497c8de1fd17025ebdf4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::maxLumenMeshCards",
+      "id": "cfef085fa77b48728929c11ce91bf02d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::minLightmapResolution",
+      "id": "775f175fa4ed4f4ca1b59738fc8a4964",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::recomputeNormals",
+      "id": "d0a289eda3694b9a842d95d077ca6776",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::recomputeTangents",
+      "id": "1ef1276e7188484ea1b5066ea4fe9650",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::removeDegenerates",
+      "id": "301cdf7d29b34b61aaad49eee6f6a469",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::srcLightmapIndex",
+      "id": "dde0004f0d7a4b5e981157104c9d0136",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::supportFaceRemap",
+      "id": "4b77ac35d35341098fde18c48bf0f06a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::useFullPrecisionUVs",
+      "id": "10b7ef598805446e9d1ebc81a9776e06",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::useHighPrecisionTangentBasis",
+      "id": "984e672b25a64ff6bb333d9b7d0ecad7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::useMikkTSpace",
+      "id": "a0cc65e4575e4cc6b393bfc8ca4add77",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SimpleCollision::boxes",
+      "id": "3e637b3038614a1aa3210bc317e23adc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SimpleCollision::capsules",
+      "id": "a53e829bd1524cc298a9aef871a6cc20",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SimpleCollision::convexes",
+      "id": "c24537c5ea0a4dccb85bd83e0abc52b0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SimpleCollision::cylinders",
+      "id": "d1568e0ab9a34ea0a771936fb18dd178",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SimpleCollision::spheres",
+      "id": "bb5b2b5ef1b040779fa04989473df59d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SimpleCollision::taperedCapsules",
+      "id": "7ca1b39d37d84f80a8fc7ca8fd88cb96",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedMeshBuildSettings::boneInfluenceLimit",
+      "id": "bf5399a89531429fb51f4b8348807418",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedMeshBuildSettings::morphThresholdPosition",
+      "id": "2f0da8e091ac4350a2fa240589a3901e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedMeshBuildSettings::thresholdPosition",
+      "id": "514b9d84f5054432bbfaf2b0a1526733",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedMeshBuildSettings::thresholdTangentNormal",
+      "id": "5148d126e8fb4e05a56db845c22e8685",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedMeshBuildSettings::thresholdUV",
+      "id": "bd5cfc2be0024841a33e0a08acb71ed8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedMeshBuildSettings::useHighPrecisionSkinWeights",
+      "id": "5267afbf6f7740fcaa0b77fdff82ca74",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CollisionBox",
+      "id": "884c9c09c69d4a03a2f554af5148c6e1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CollisionCapsule",
+      "id": "3457cadea9414dc6ad782e02c1e41542",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CollisionComplexity",
+      "id": "e75d0a569557424d8bb4f913fe594047",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CollisionConvex",
+      "id": "276a4bcc060945ce92442620f172cb99",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CollisionCylinder",
+      "id": "1fcfd8349f834bcfba95559643e24d98",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CollisionEnabled",
+      "id": "041328a687324cb897f0163b32d7a286",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CollisionSphere",
+      "id": "888ac344a199415991fcfa719c1d2c39",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::CollisionTaperedCapsule",
+      "id": "1ac1186ea381457a90a2a482e8ceb837",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::MeshBuildSettings",
+      "id": "5a5e1138c19c41fa870a58eeb11173ba",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SimpleCollision",
+      "id": "9f12441ee61a4e6e973eeb219845ff77",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SkinnedMeshBuildSettings",
+      "id": "aa7f91f544414a35a12c42342829cf8c",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}

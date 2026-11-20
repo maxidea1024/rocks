@@ -14,12 +14,16 @@ namespace rocks::reflection_fixture {
 // 담는다(TextGraphTests·TextFieldPathTests·TextFieldJsonTests).
 ROCKS_STRUCT()
 struct TextFieldCaption {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() Text label;
     ROCKS_PROPERTY() uint32 order = 0;
 };
 
 ROCKS_CLASS()
 struct TextFieldHolder final : Object {
+    ROCKS_GENERATED_BODY()
+
     explicit TextFieldHolder(Allocator& allocator) noexcept : lines(allocator), byKey(allocator) {
     }
 

@@ -1,5 +1,7 @@
 #include "LogCommandlet.h"
 
+#include "CommandletFiles.h"
+
 #include <Core/Containers/Array.h>
 #include <Core/Diagnostics/Correlation.h>
 #include <Core/Diagnostics/LogRecord.h>
@@ -62,109 +64,32 @@ Result<int32> UsageError(CommandletOutput& output) noexcept {
     return Write(output, CommandletStream::Error, Usage, 2);
 }
 
-// 인수 view는 NUL 종료를 보장하지 않으므로 경로를 복사한다.
-struct PathText {
-    explicit PathText(StringView path) noexcept {
-        const usize bytes =
-            path.ByteCount() < sizeof(text) - 1 ? path.ByteCount() : sizeof(text) - 1;
-        platform::MemoryCopy(text, path.Data(), bytes);
-        text[bytes] = '\0';
-    }
-
-    char text[CommandletRegistry::MaxArgumentBytes + 1];
-};
+// log 명령의 파일 도우미다(오류 문구 접두 "log" — CommandletFiles.h).
+constexpr StringView LogCommandName = "log";
 
 Result<int32> FileFailure(CommandletOutput& output, const char* action, StringView path,
                           platform::FileStatus status) noexcept {
-    char storage[MessageBytes];
-    FixedStringBuilder text{Span<char>(storage)};
-    (void)text.TryAppendFormat("log: cannot {} '{}' (file code {}, native error {})\n", action,
-                               path, static_cast<int32>(status.code), status.nativeError);
-    return Write(output, CommandletStream::Error, text.View(), 1);
+    return ReportFileFailure(output, LogCommandName, action, path, status);
 }
 
-// 파일 전체를 읽는다. 실패하면 오류를 출력하고 그 종료 코드를 failure에 둔다.
 bool ReadWholeFile(CommandletOutput& output, StringView path, Array<uint8>& bytes,
                    Result<int32>& failure) noexcept {
-    const PathText native(path);
-    platform::File file;
-    if (const platform::FileStatus opened =
-            file.Open(native.text, platform::FileOpenMode::ReadExisting);
-        !opened) {
-        failure = FileFailure(output, "open", path, opened);
-        return false;
-    }
-
-    uint64 size = 0;
-    if (const platform::FileStatus sized = file.Size(size); !sized) {
-        failure = FileFailure(output, "size", path, sized);
-        return false;
-    }
-
-    if (!bytes.TryResize(static_cast<usize>(size))) {
-        failure = Result<int32>::Failure(ErrorCode::OutOfMemory);
-        return false;
-    }
-
-    if (const platform::FileTransfer read = file.ReadExact(bytes.Data(), bytes.Size());
-        !read.status) {
-        failure = FileFailure(output, "read", path, read.status);
-        return false;
-    }
-
-    return true;
+    return ReadCommandFile(output, LogCommandName, path, bytes, failure);
 }
 
-// 새 파일에 쓴다(있으면 덮어쓰지 않는다 — 개인키를 실수로 바꾸지 않게).
 Result<int32> WriteNewFile(CommandletOutput& output, StringView path,
                            Span<const uint8> bytes) noexcept {
-    const PathText native(path);
-    platform::File file;
-    if (const platform::FileStatus opened =
-            file.Open(native.text, platform::FileOpenMode::CreateNew);
-        !opened) {
-        return FileFailure(output, "create", path, opened);
-    }
-
-    if (const platform::FileTransfer written = file.WriteAll(bytes.Data(), bytes.Size());
-        !written.status) {
-        return FileFailure(output, "write", path, written.status);
-    }
-
-    if (const platform::FileStatus closed = file.Close(); !closed) {
-        return FileFailure(output, "close", path, closed);
-    }
-
-    return Result<int32>::Success(0);
+    return WriteNewCommandFile(output, LogCommandName, path, bytes);
 }
 
-// 새 파일을 만든다(있으면 덮어쓰지 않는다). 실패하면 오류를 출력하고 그 종료 코드를 failure에 둔다.
 bool CreateNewFile(CommandletOutput& output, const PathText& path, StringView shown,
                    platform::File& file, Result<int32>& failure) noexcept {
-    if (const platform::FileStatus opened = file.Open(path.text, platform::FileOpenMode::CreateNew);
-        !opened) {
-        failure = FileFailure(output, "create", shown, opened);
-        return false;
-    }
-
-    return true;
+    return CreateCommandFile(output, LogCommandName, path, shown, file, failure);
 }
 
-// 열어 둔 새 파일에 bytes를 다 쓰고 닫는다.
 bool WriteAndClose(CommandletOutput& output, StringView shown, platform::File& file,
                    Span<const uint8> bytes, Result<int32>& failure) noexcept {
-    if (const platform::FileTransfer written = file.WriteAll(bytes.Data(), bytes.Size());
-        !written.status) {
-        failure = FileFailure(output, "write", shown, written.status);
-        return false;
-    }
-
-    if (const platform::FileStatus closed = file.Close(); !closed) {
-        failure = FileFailure(output, "close", shown, closed);
-        return false;
-    }
-
-    return true;
+    return WriteCommandFileAndClose(output, LogCommandName, shown, file, bytes, failure);
 }
 
 Result<int32> KeyGen(Span<const StringView> args, CommandletOutput& output) noexcept {

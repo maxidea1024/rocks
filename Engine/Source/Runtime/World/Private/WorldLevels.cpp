@@ -2,7 +2,10 @@
 
 #include <Object/ConstructionContext.h>
 #include <Platform/Fatal.h>
+#include <World/Actor.generated.h>
+#include <World/Component.generated.h>
 #include <World/Level.generated.h>
+#include <World/SceneComponent.generated.h>
 #include <World/World.h>
 
 namespace rocks {

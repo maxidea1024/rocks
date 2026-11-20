@@ -26,16 +26,24 @@ enum class RefMapSlot : uint8 {
 };
 
 ROCKS_CLASS()
-struct RefMapTarget : Object {};
+struct RefMapTarget : Object {
+    ROCKS_GENERATED_BODY()
+};
 
 ROCKS_CLASS()
-struct RefMapDerived final : RefMapTarget {};
+struct RefMapDerived final : RefMapTarget {
+    ROCKS_GENERATED_BODY()
+};
 
 ROCKS_CLASS()
-struct RefMapOther final : Object {};
+struct RefMapOther final : Object {
+    ROCKS_GENERATED_BODY()
+};
 
 ROCKS_STRUCT()
 struct RefMapBundle {
+    ROCKS_GENERATED_BODY()
+
     explicit RefMapBundle(Allocator& allocator) noexcept : byName(allocator) {
     }
 
@@ -45,6 +53,8 @@ struct RefMapBundle {
 
 ROCKS_CLASS()
 struct RefMapHolder final : Object {
+    ROCKS_GENERATED_BODY()
+
     explicit RefMapHolder(Allocator& allocator) noexcept
         : byString(allocator), byNumber(allocator), bySlot(allocator), byClass(allocator),
           bySoft(allocator), required(allocator), limited(allocator), bundle(allocator) {

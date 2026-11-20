@@ -1,9 +1,8 @@
 #include "../Common/DirectoryWatchInternal.h"
 #include "WindowsFileCommon.h"
 
+#include <Base/PlacementNew.h>
 #include <Platform/Memory.h>
-
-#include <new>
 
 // Windows backend다. 디렉터리 핸들(FILE_FLAG_OVERLAPPED)에 ReadDirectoryChangesExW(확장 정보로 항목
 // 종류를 얻는다, Windows 10 1709+)를 걸고, 없으면 ReadDirectoryChangesW를 쓴다. 완료 여부는

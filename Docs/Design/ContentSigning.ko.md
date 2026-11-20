@@ -1,6 +1,6 @@
 # 콘텐츠 서명 — 서명된 쿠킹 매니페스트(청크 표) 설계안
 
-> 상태: 채택(2026-11-15 사용자 결정: 추천안, 구현은 AssetRuntime A1과 함께). 리뷰 1회 반영. [Crypto](Crypto.ko.md) 13절 후속 판단과
+> 상태: 채택(2026-11-15 사용자 결정: 추천안, 구현은 AssetRuntime A1과 함께). 리뷰 1회 반영. 구현 A1f(2026-11-21 — 7절, 시험·coverage는 [AssetSystem](AssetSystem.ko.md) 14.1.11·14.1.12). [Crypto](Crypto.ko.md) 13절 후속 판단과
 > 엔진 계획 9.3절을 따른다.
 
 ## 1. 범위
@@ -67,3 +67,24 @@
   `content-sign`. AssetRuntime이 아직 없으므로 형식 코드와 도구를 A1과 함께 구현한다.
 - 검증: golden 봉투(고정 키), 헤더 모든 필드와 매니페스트 1 bit 변조·자르기·늘리기, 다른 scope, 낮은 버전, 모르는 키·버전·알고리즘,
   예약 byte, 길이 오류, 독립 구현(PyNaCl·`cryptography` Ed25519ph)과 서명 byte 일치.
+
+## 7. 구현에서 정한 점(A1f — 2026-11-21)
+
+AssetRuntime 다음 단계(A1f, [AssetSystem](AssetSystem.ko.md) 1절)가 1–6절을 다음과 같이 정했다. 애매한 곳은 UE 5.8 pak 서명(`FPakSignatureFile` — 서명 파일 + 공개키를 실행 파일에 넣고 불일치면 거부)을 따른다.
+
+1. **위치**: 봉투 형식·검증·쓰기는 AssetRuntime `ContentSignature.h`(Crypto 의존을 더한다 — Core 층 모듈이라 의존 방향이 맞다). 쓰는 쪽은 `content-sign` commandlet이고 읽는 쪽은 EngineAssets다.
+   - `ContentScope`: `MakeContentScope(productId, channel)` = SHA-256(productId ‖ 0 ‖ channel). productId·channel은 ASCII 식별자(빈 값·NUL 금지 — InvalidArgument).
+   - `ContentTrust`: 신뢰 키 목록(`TrustedContentKey { crypto::KeyId id; crypto::Ed25519PublicKey key; }`, 같은 id 두 번 금지), 최소 contentVersion, scope.
+   - `WriteContentEnvelope(allocator, manifestBytes, signingKey, keyId, contentVersion, scope, out)`: 3절 배치 그대로 쓰고 서명 메시지(3절)를 Ed25519ph로 서명한다. 같은 입력이면 같은 byte(Ed25519는 결정적이다). 매니페스트가 `CookedManifestMaxFileBytes`를 넘으면 `CapacityExceeded`(읽기 전), null keyId `InvalidArgument`, 실패하면 out은 그대로다.
+   - `VerifyContentEnvelope(allocator, envelope, trust, info, failure) → Result<Span<const uint8>>`: 4절 순서로 검증하고 같은 버퍼 안의 매니페스트 byte span을 돌려준다(복사 없음 — 검증한 byte와 파싱하는 byte가 같다). allocator는 Ed25519ph 검증 상태(SHA-512)를 받는다(할당 실패를 시험할 수 있게 — Crypto 기본값은 비밀 저장소지만 공개 데이터 해시라 일반 allocator로 충분하다).
+2. **오류·진단**(4절 "단계는 진단 로그에만"을 진단 칸으로 둔다 — 호출자가 로그에 쓴다): 길이(헤더 136 byte 미만, 봉투 상한 `CookedManifestMaxFileBytes` + 136 초과)·magic·예약 byte·매니페스트 길이 ≠ 남은 byte는 `CorruptPackage` / `InvalidArgument`, 버전·알고리즘을 모르면 `UnsupportedVersion` / `Unsupported`, 신뢰 판정(모르는 keyId·contentVersion < 최소·scope 불일치·서명 불일치)은 모두 `AuthenticationFailed`이고 진단 코드 `ContentNotTrusted`다. 걸린 칸은 `AssetDiagnostic::section`에 `ContentEnvelopeField`(File·Magic·FormatVersion·Algorithm·Reserved·Key·ContentVersion·Scope·ManifestLength·Signature, 200부터 — 매니페스트 칸 100–과 겹치지 않는다)로 둔다(매니페스트 reader의 칸 보고와 같은 방식). 신뢰 정보 자체가 잘못됐으면(키 없음·null id·같은 id) 봉투를 보기 전에 `InvalidArgument`(진단 None)다. 판정 순서는 4절 그대로이고 앞 단계가 이긴다(변조된 봉투가 어느 단계에서 걸리는지 결정적이다).
+3. **신뢰 정보의 출처**(CS3): 신뢰 키 목록·최소 버전·scope는 실행 파일 안에 있어야 한다. 빌드 규칙이 프로젝트 설정에서 생성 TU를 만들어 넣는 것은 BuildTargets 쪽 후속(빌드 세션과 조율)이고, 그 생성 코드와 지금의 게임 코드가 같은 진입점 `EngineAssetsSubsystem::SetContentTrust(const ContentTrust*)`(엔진 초기화 전, 게임 스레드, 포인터는 엔진보다 오래 산다)를 부른다. 어느 쪽이든 키는 실행 파일 코드·데이터 안이라 위협 모델(1절 — 실행 파일까지 고치는 공격자는 범위 밖)이 같다.
+4. **적용 정책**(CS5, EngineAssets `Initialize` — AssetSystem 11.8절 4의 매니페스트 읽기를 바꾼다):
+   - `<root>/CookedManifest.rsig`가 있으면 어느 구성이든 검증하고, 실패하면 엔진 초기화 실패(신뢰 정보가 등록되지 않았으면 `InvalidArgument` — "content trust is not configured").
+   - 봉투가 없으면 Release 구성(`IsReleaseBuild`)은 `NotFound`로 실패한다(Release는 서명된 콘텐츠만). Debug·Development는 `CookedManifest.rman`을 읽고 Warning 한 번("cooked content is not signed")이다 — 개발 쿠킹 디렉터리는 서명하지 않는다.
+   - 봉투와 rman이 함께 있으면 봉투만 쓴다(rman은 읽지 않는다 — 검증하지 않은 byte를 쓰지 않는다).
+   - 실패 기록은 EngineAssets 초기화 실패 한 줄이고 단계 이름이 걸린 곳을 말한다: `content trust`(신뢰 정보 없음), `content signature (<칸>)`(봉투 검증 — 칸은 `ContentEnvelopeFieldName`, 신뢰 정보 자체가 틀렸거나 할당 실패면 `None`), `content signature read`(봉투 파일 읽기 오류 — 없음 밖), `content signature`(Release에서 봉투 없음), 그 뒤 `manifest read`·`manifest parse`. 서명으로 시작했는지와 contentVersion은 `EngineAssetsSubsystem::Stats()`(`contentSigned`·`contentVersion`)로 본다.
+   - 봉투 파일은 한 번 읽고(크기 상한은 2의 봉투 상한) 그 버퍼에서 검증·파싱한다.
+5. **`content-sign` commandlet**(5절): `content-sign sign <in.rman> <out.rsig> --key <key blob> --password-file <path> --version <u64> --product <id> --channel <name>`(입력은 `ReadCookedManifest`로 검증한 뒤 서명한다 — 매니페스트가 아닌 파일에 서명하지 않는다) — 서명 키는 비밀번호 방식 KeyBlob(`Ed25519SigningKey`, Crypto 10.4절)이고 비밀번호는 파일로만 받는다(명령줄·셸 기록에 남기지 않는다 — 끝의 줄바꿈 하나는 뺀다. PlatformBase에 환경 변수 API가 없어 파일로 정했다 — CI는 비밀을 임시 파일로 넘긴다). `content-sign verify <in.rsig> --trust <public> --product <id> --channel <name> [--minimum-version <u64>]`은 엔진과 같은 순서로 봉투를 검증하고 안의 매니페스트를 확인한다(배포 전 확인·시험 왕복용 — 거부면 걸린 칸을 알린다). `content-sign keygen <out key blob> <out public> --password-file <path>`은(비밀번호 비용 `PasswordCostModerate` — 도구 키 파일 권장값) 새 키(KeyId 무작위)를 만들고, 공개 파일은 텍스트 한 줄 `<keyId hex 32> <public key hex 64>`(신뢰 목록에 넣는 값)다. 기존 파일은 덮어쓰지 않는다. 출력 봉투는 임시 파일에 쓴 뒤 Replace한다(원자적 교체 — CS1). 사용법 오류 2, 파일·키·서명 오류 1, 성공 0(Commandlet 규약).
+6. **후속**: 패처의 (keyId → 받은 최고 버전) 기록(CS4)은 패처가 생길 때, 빌드 규칙의 신뢰 정보 생성(3), 부분 읽기 조각 해시(CS6)는 mip 스트리밍 때다.
+7. **시험**(6절 검증 항목): golden 봉투(고정 seed 키 — 독립 구현인 RFC 8032 참조 Python 코드로 만든 서명 byte와 같다), 헤더 모든 칸·매니페스트 1 bit 변조, 자르기·늘리기, 다른 scope, 낮은 버전, 모르는 키·버전·알고리즘, 예약 byte, 길이 오류, 판정 순서(겹친 위반), 쓰기 인자 오류·할당 실패, EngineAssets 정책(구성별 봉투 있음·없음 × 신뢰 등록 있음·없음 × 검증 성공·실패), commandlet 왕복(keygen → sign → 엔진 검증)과 사용법 오류.
