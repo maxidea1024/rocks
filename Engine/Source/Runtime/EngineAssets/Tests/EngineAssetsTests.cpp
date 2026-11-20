@@ -241,6 +241,8 @@ TEST(EngineAssets_GarbageCollectionCombinations) {
 // IncompatibleCook)다. 실패면 엔진 상태가 Failed이고 실패 단계·오류·진단을 담은 Error 로그가 정확히
 // 하나이며, 성공이면 시작 Info 로그가 하나다.
 TEST(EngineAssets_InitializationCombinations) {
+    constexpr const char* MissingManifestStage =
+        IsReleaseBuild ? "content signature" : "manifest read";
     enum class ManifestState : uint8 {
         Valid,
         Missing,
@@ -257,8 +259,9 @@ TEST(EngineAssets_InitializationCombinations) {
     };
     const Expected states[] = {
         {ManifestState::Valid, ErrorCode::None, "", ""},
-        {ManifestState::Missing, ErrorCode::NotFound, "manifest read", "None"},
-        {ManifestState::Directory, ErrorCode::NotFound, "manifest read", "None"},
+        // 봉투도 rman도 없으면 Release는 봉투 단계에서, 그 밖은 rman 읽기에서 NotFound다.
+        {ManifestState::Missing, ErrorCode::NotFound, MissingManifestStage, "None"},
+        {ManifestState::Directory, ErrorCode::NotFound, MissingManifestStage, "None"},
         {ManifestState::Empty, ErrorCode::InvalidArgument, "manifest parse", "CorruptPackage"},
         {ManifestState::Corrupt, ErrorCode::InvalidArgument, "manifest parse", "CorruptPackage"},
         {ManifestState::OtherVersion, ErrorCode::Unsupported, "manifest parse",
@@ -479,6 +482,7 @@ int EngineAssetsFatalProbe(int argc, const char* const* argv) noexcept {
     }
 
     const StringView root(argv[RootArgument], strlen(argv[RootArgument]));
+    EngineAssetsSubsystem::SetContentTrust(&TestContentTrust());
     ConfigFixture fixture(DevelopmentRules());
     if (!PrepareSettings(fixture.Context(), root)) {
         return 3;

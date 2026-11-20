@@ -549,7 +549,7 @@ UE와 다른 점과 이유:
    - 명령행은 따로 두지 않는다: `--set=asset.cooked_root=<dir>`(Config 세션 층 — 다른 설정과 같은 규약). 11.4절의 `-CookedRoot` 표기는 이것으로 바뀐다. 개발 실행은 프로젝트 설정 파일에 `{SavedDir}/Cooked/<profile>` 같은 값을 둔다(도구 `asset-load-cooked`와 같은 위치).
    - 설정 문맥이 필수다: CVar `Get()`은 이 스레드에 묶인 설정 snapshot을 읽고 묶음이 없으면 `platform::Fatal`이며(CVarSystem 7.1절), 부팅 값은 `CompleteStartup` 뒤 봉인된 snapshot을 읽는다. 그래서 `Initialize`는 먼저 `Engine::Settings()`가 null이면 `InvalidArgument`로 실패한다(기록 — "EngineAssets requires an engine config context"). CVar 등록은 모듈 `RegisterSettings`(호스트의 HostSettings가 부른다)가 하고, 시험은 같은 공개 함수 `RegisterEngineAssetsSettings(ConfigContext&)`를 직접 부른다. 등록 누락은 Policy `cvar-registration`이 빌드에서 잡는다.
    - 쿠킹 루트 결정(설정 값 → 실행 파일 기본)은 순수 함수 `ResolveCookedRoot(configured, executableDir, out)`이고 시험이 직접 부른다.
-4. **초기화**(`Initialize(Engine&)` — 생성 순서, 멤버는 이 순서로 선언해 역순으로 소멸한다): 쿠킹 루트 결정 → `<root>/CookedManifest.rman`을 동기로 읽어(크기 상한 `CookedManifestMaxFileBytes`) `ReadCookedManifest`(검증 포함 — A1f에서 서명 봉투 `CookedManifest.rsig`로 바뀐다) → `platform::AsyncIoContext::Start(backend, asset.io.workers)` → `AsyncCookedPackageIo` → 로더 `WorkerScheduler`(`asset.loader.workers`) → `WorkerSchedulerLoaderWorker` → `AssetManagerConfig`(allocator = `engine.GetAllocator()` — 여러 스레드의 할당·해제를 받아야 한다는 로더 요구, TypeRegistry = 엔진 TypeRegistry, 프레임 판정 = `Engine::IsInFrame`, 로더 관찰자·PostLoad handler 없음 — 9) → `AssetManager::Initialize`. 실패하면 Initialize가 자기 부분 상태를 역순으로 되돌리고(실패한 Subsystem은 Deinitialize되지 않는다 — Subsystem 규칙) 엔진 초기화가 실패한다. 쿠킹 루트·파일 경로·오류·진단을 한 번 기록한다(`LogEngineAssets`, 영어). 매니페스트가 없는 것도 실패다(빈 콘텐츠로 돌지 않는다). 소멸자는 부분 초기화에도 안전하다.
+4. **초기화**(`Initialize(Engine&)` — 생성 순서, 멤버는 이 순서로 선언해 역순으로 소멸한다): 쿠킹 루트 결정 → 매니페스트(`<root>/CookedManifest.rsig` 서명 봉투가 있으면 그것만 읽어 `VerifyContentEnvelope`로 검증하고 같은 버퍼의 매니페스트 byte를 쓴다. 없으면 Release는 실패, 그 밖은 Warning 한 번 뒤 `<root>/CookedManifest.rman`을 읽는다 — A1f, [ContentSigning](ContentSigning.ko.md) 7절 4. 크기 상한은 봉투 `ContentEnvelopeMaxBytes`·rman `CookedManifestMaxFileBytes`) → `ReadCookedManifest`(검증 포함) → `platform::AsyncIoContext::Start(backend, asset.io.workers)` → `AsyncCookedPackageIo` → 로더 `WorkerScheduler`(`asset.loader.workers`) → `WorkerSchedulerLoaderWorker` → `AssetManagerConfig`(allocator = `engine.GetAllocator()` — 여러 스레드의 할당·해제를 받아야 한다는 로더 요구, TypeRegistry = 엔진 TypeRegistry, 프레임 판정 = `Engine::IsInFrame`, 로더 관찰자·PostLoad handler 없음 — 9) → `AssetManager::Initialize`. 실패하면 Initialize가 자기 부분 상태를 역순으로 되돌리고(실패한 Subsystem은 Deinitialize되지 않는다 — Subsystem 규칙) 엔진 초기화가 실패한다. 쿠킹 루트·파일 경로·오류·진단을 한 번 기록한다(`LogEngineAssets`, 영어). 매니페스트가 없는 것도 실패다(빈 콘텐츠로 돌지 않는다). 소멸자는 부분 초기화에도 안전하다.
 5. **프레임**:
    - `OnFrameBegin`(엔진 3단계 — World Tick 전): `AssetManager::Pump`(CVar 예산). 그 프레임의 World Tick이 결과·callback을 본다(UE 순서). Pump 실패는 처음 한 번만 Error로 남기고 횟수를 센다 — 프레임 안 Pump가 실패하는 경우(AssetManager를 직접 Shutdown한 뒤 ShuttingDown 등)는 되돌아오지 않으므로 회복 기록이 없다.
    - callback은 엔진 접근 범위 안에서 불린다(Pump가 엔진 단계 안이다). World 객체를 다루는 callback은 스스로 그 World 접근 범위(`World::With`)로 들어간다. World 파괴 뒤에도 놓인 티켓의 `Cancelled`·종료의 `ShuttingDown`이 전달되므로 callback은 World 객체를 raw 포인터로 붙잡지 않는다(약한 참조 `WeakObjectRef` — 11.7절 5·12, 사용 규칙).
@@ -571,7 +571,7 @@ UE와 다른 점과 이유:
    - 종료: World Subsystem이 쥔 티켓은 World 파괴 뒤 다음 Pump에서 callback이 Cancelled, CompleteInFlightWork에서 대기 callback ShuttingDown, client가 놓지 않은 lease → 자식 프로세스 Fatal(문구 대조), 규칙대로 놓으면 정상 종료
    - CVar: 실행 중 Pump·GC 예산 변경이 다음 프레임부터 적용, 부팅 고정 값은 시작 뒤 바뀌지 않음
    - Pump 실패 기록(처음 한 번, 횟수), GC 조각 할당 실패(매번 기록, 다음 프레임에 다시)
-9. **후속**: Rocks Lens 이벤트(로더 관찰자 → Trace, TraceSystem), 클래스별 PostLoad dispatch(A5 — handler를 여기서 연결), 서명 봉투 검증(A1f — 4의 매니페스트 읽기를 바꾼다), 쿠킹 결과를 배포 위치로 옮기는 패키징(후속).
+9. **후속**: Rocks Lens 이벤트(로더 관찰자 → Trace, TraceSystem), 클래스별 PostLoad dispatch(A5 — handler를 여기서 연결), 쿠킹 결과를 배포 위치로 옮기는 패키징(후속).
 
 ## 12. 텍스처
 
@@ -1342,7 +1342,7 @@ A1d 상태(2026-11-21): **구현**. 완료 조건 넷을 모두 갖췄다. 빠�
 | | GC: 표식 scheduler 2(엔진 gcWorkers 0·2 — 엔진 GC scheduler 유무·worker 수 확인) × 조각 크기 2(무제한·객체 1) × cycle 도중 Discard 2 × 열린 트랜잭션 프레임 2 = 16 — 병렬 축은 엔진 GC scheduler가 있고 EngineAssets가 그것을 조각에 넘김(`gcParallelSteps`), cycle 수(1 + 도중 Discard), Busy 횟수, scheduler마다 예산 1이 무제한보다 많은 프레임, 회수 뒤 객체 감소·실패 없음·lingering 없음 | `EngineAssets_GarbageCollectionCombinations` |
 | | 허가: 동시 진행 상한 2(기본·1) × 임시 byte 상한 2(기본·1) = 4 — 둘 다 기본일 때만 두 패키지 허가, 아니면 하나(진행 중인 것이 없으면 상한을 넘어도 하나는 허가)와 허가 대기 단위 하나 | `EngineAssets_AdmissionVariables` |
 | | 종료: 종료 시점 2(Pump 전·IO 진행 중) × callback 안 재종료 2 = 4 — callback ShuttingDown 한 번, 재종료 Busy, 바깥 종료 Stopped | `EngineAssets_ShutdownCombinations` |
-| | 로더 관찰자(Rocks Lens)·클래스별 PostLoad dispatch·서명 봉투·패키징 | 범위 밖(9 — 후속·A5·A1f) |
+| | 로더 관찰자(Rocks Lens)·클래스별 PostLoad dispatch·패키징 | 범위 밖(9 — 후속·A5). 서명 봉투는 A1f(14.1.11) |
 
 #### 14.1.10 Coverage(A1e)
 
@@ -1374,6 +1374,53 @@ A1e 상태(2026-11-21): **완료**(리뷰 3회 — 미충족 2회 반영 뒤 충
 - 조합: 초기화 12개·GC 16개·허가 4개·종료 4개 전부
 - coverage(14.1.10): 닿지 않은 곳은 모두 근거
 - 빠진 시험 관점 리뷰어 판정: 1회 미충족 → 반영, 2회 미충족(초기화 중 재종료 1건) → 반영, 3회 **충족**
+
+#### 14.1.11 요구 대조표(A1f — 콘텐츠 서명)
+
+설계는 [ContentSigning](ContentSigning.ko.md) 3·4·7절이다. 시험은 셋이다: AssetRuntime `Tests/ContentSignatureTests.cpp`(EngineTests, 11개 — 봉투 형식·검증·키 줄), EngineAssets `Tests/EngineAssetsSigningTests.cpp`(2개 — 엔진 정책)와 시험 장면(`DiskScene`이 시험 키로 서명한 봉투를 쓰고 신뢰 정보를 등록 — EngineAssets 시험 30개 전부가 서명 봉투 경로로 시작하므로 Release 구성에서도 돈다), `Programs/Rocks.Commandlet.Tests`(C#, content-sign 23항목). golden은 독립 구현(세션 scratchpad `ed25519ph_ref.py` — RFC 8032 5.1 순수 Python, RFC 7.3 벡터로 확인)이 만든 byte다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 형식(3, 7-1) | 봉투 배치(magic·버전 1·알고리즘 2·예약 0·keyId BE·contentVersion LE·scope·길이 LE·서명·매니페스트), 서명 메시지(label ‖ 헤더 ‖ 매니페스트), 같은 입력이면 같은 byte, 독립 구현과 byte 일치, 검증이 같은 버퍼 안의 매니페스트 span(복사 없음)과 헤더 값(info) | `ContentSignature_GoldenEnvelope` |
+| 검증 순서·진단(4, 7-2) | 모든 byte의 모든 bit 변조(1336회)가 칸별 단계로 거부(magic·예약·길이 CorruptPackage, 버전·알고리즘 UnsupportedVersion, keyId·낮아진 버전·scope·서명·매니페스트 ContentNotTrusted / AuthenticationFailed, 버전이 커지는 변조는 서명 단계), 되돌리면 통과 | `ContentSignature_EveryBitFlip` |
+| | 자르기(모든 길이 — 136 미만 File, 이상 ManifestLength), 1 byte 늘리기, 길이 칸까지 맞춘 자르기는 서명이 거부, 봉투 상한 초과는 내용을 읽기 전에 File | `ContentSignature_TruncateAndExtend` |
+| | 이웃한 두 단계를 함께 어기면 앞 단계가 이긴다(8쌍) | `ContentSignature_OverlappingViolations` |
+| | 칸 이름(고유, 칸이 아닌 값 None) | `ContentSignature_FieldNames` |
+| 신뢰 정보(CS3·CS4, 7-1) | 최소 버전 3 × 키 위치 3 × scope 2 = 18 조합(아래), 키 없음·null id·같은 id 두 번 InvalidArgument(진단 None·봉투 보기 전), id는 맞고 공개키가 다르면 Signature | `ContentSignature_TrustCombinations`, `ContentSignature_InvalidTrust` |
+| scope(7-1) | ASCII 식별자 규칙(빈 값·NUL·공백·비ASCII·'/'·범위 경계 문자 거부), 구분자 0으로 ("ab","c")≠("a","bc"), 값 = SHA-256(productId ‖ 0 ‖ channel) | `ContentSignature_ScopeNames` |
+| 쓰기(7-1) | null keyId InvalidArgument, 상한 초과 CapacityExceeded(읽기 전), 빈 키 StaleHandle, 실패하면 out 그대로, 빈 매니페스트 봉투, 서명·검증 상태의 모든 할당 실패(그 오류, out 그대로, 진단 None) | `ContentSignature_WriteErrors`, `ContentSignature_AllocationFailures` |
+| 키 줄(7-5) | 형식(keyId hex 32 ‖ 공백 ‖ 공개키 hex 64, 소문자), 왕복, 끝 `\n`·`\r\n` 하나, 대문자 hex, 길이·구분자·hex 아님·줄바꿈만·줄바꿈 둘·null keyId 거부 | `ContentSignature_TrustedKeyText` |
+| 엔진 정책(7-3·4) | 봉투 3(없음·서명·변조) × 신뢰 등록 2 × rman 2 = 12 조합(아래) — 결과·단계 이름·진단 이름의 Error 한 줄, 서명 안 됨 Warning 수, `contentSigned`·`contentVersion`, 봉투가 있으면 rman(깨진 byte)을 읽지 않음, Release는 봉투만 | `EngineAssets_SigningPolicyCombinations` |
+| | 시험 키 서명이라도 낮은 contentVersion(ContentVersion)·다른 scope(Scope) 거부, 최소와 같은 버전 통과, 등록한 신뢰 정보가 잘못됐으면 InvalidArgument(칸 None), 봉투 안 매니페스트가 깨지면 봉투 통과 뒤 manifest parse(CorruptPackage) | `EngineAssets_SignedContentRejections` |
+| | 신뢰 정보 등록(`SetContentTrust`)·해제, 서명 봉투로 시작하는 기존 엔진 경로 전부(초기화 조합·할당 실패·프레임·종료) | `EngineAssets_*`(30개 — `DiskScene`) |
+| commandlet(5, 7-5) | keygen(공개 줄 98 byte 형식, 덮어쓰기 거부, 비밀번호 파일 없음 사용법 2·빈 비밀번호 1), sign(성공·다시 서명은 원자적 교체·임시 파일 없음, 틀린 비밀번호, 매니페스트 아님, 버전·product 형식·같은 선택지 두 번·모르는 선택지 사용법 2), verify(성공, 다른 channel Scope, 높은 최소 버전 ContentVersion, 변조 Signature, 키 줄 아님), 하위 명령 없음·모름 사용법 2, 도움말 | `Rocks.Commandlet.Tests`(content-sign 23항목) |
+| 조합(14 완료 조건 2) | 신뢰: 최소 버전 3(봉투보다 낮음·같음·높음) × 키 위치 3(하나·여럿 가운데 마지막·없음) × scope 2 = 18 — 겹치면 Key → ContentVersion → Scope | `ContentSignature_TrustCombinations` |
+| | 엔진 정책: 봉투 3 × 신뢰 등록 2 × rman 2 = 12, 기대값은 구성(IsReleaseBuild)으로 고르고 Debug·Release 실행이 양쪽을 덮는다 | `EngineAssets_SigningPolicyCombinations` |
+| | 패처 (keyId → 받은 최고 버전) 기록, 빌드 규칙의 신뢰 정보 생성, 부분 읽기 조각 해시 | 범위 밖(ContentSigning 7-6 — 후속) |
+
+#### 14.1.12 Coverage(A1f)
+
+측정(2026-11-21, `pwsh -NoProfile -File Build/MeasureCoverage.ps1 -Target EngineTests -Filter ContentSignature,EngineAssets,Engine_ -Sources Engine/Source/Runtime/AssetRuntime/Private,Engine/Source/Runtime/EngineAssets/Private,Engine/Source/Runtime/EngineAssets/Public`):
+
+| 파일 | 줄 | 분기 | 함수 |
+|---|---|---|---|
+| `AssetRuntime/Private/ContentSignature.cpp` | 98.1%(257/262) | 97.9%(137/140) | 100%(14/14) |
+| `EngineAssets/Private/EngineAssetsSubsystem.cpp` | 95.4%(329/345) | 94.7%(108/114) | 100%(17/17) |
+
+닿지 않은 곳과 근거:
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| `WriteContentEnvelope` | 서명 상태에 조각 넣기 실패 | 방금 만든 상태라 실패 조건(끝난 상태·옮겨 간 객체 — Crypto 9.1절)이 없다. 오류를 그대로 잇는다 |
+| `VerifyContentEnvelope` | 검증 상태에 조각 넣기 실패, 서명 확인의 AuthenticationFailed 밖 오류 | 같은 이유(방금 만든 상태 — 끝남·옮겨 감·이전 실패가 없다). 할당 실패는 상태 만들기에서 나고 시험이 닿는다 |
+| `EngineAssetsSubsystem::Initialize` | 봉투가 없을 때 rman 경로 다시 만들기 실패 | 두 파일 이름이 같은 길이(`CookedManifest.rsig`·`.rman`)라 앞에서 만든 문자열 용량으로 다시 쓴다(할당 없음) |
+| `EngineAssetsSubsystem` | A1e 근거 넷(14.1.10) | 그대로다 |
+
+A1f 상태(2026-11-21): **구현**(리뷰어 판정 전). 완료 조건:
+- 요구 대조표(14.1.11): 시험 없는 항목 0
+- 조합: 신뢰 18·엔진 정책 12·bit 변조 1336·자르기 전 길이
+- coverage(14.1.12): 닿지 않은 곳은 모두 근거
+- 빠진 시험 관점 리뷰어 판정: 대기
 
 ## 15. PNG 디코더 범위
 

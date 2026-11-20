@@ -1,4 +1,5 @@
 #include "CommandletHost.h"
+#include "ContentSignCommandlet.h"
 #include "LogCommandlet.h"
 #include <Config/ConfigDump.h>
 #include <Core/Memory/SystemAllocator.h>
@@ -174,6 +175,13 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
     registered = registry.Register(
         {"log", "Log file tools: keygen, decode, seal. Never commit or cook the private key.",
          &RunLogCommand, &allocator});
+    if (!registered) {
+        return 1;
+    }
+    registered = registry.Register(
+        {"content-sign",
+         "Cooked content signing: keygen, sign, verify. Never commit or cook the key file.",
+         &RunContentSignCommand, &allocator});
     if (!registered) {
         return 1;
     }

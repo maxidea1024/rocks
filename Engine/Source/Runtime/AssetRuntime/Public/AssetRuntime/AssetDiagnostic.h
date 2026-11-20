@@ -38,6 +38,9 @@ enum class AssetDiagnosticCode : uint16 {
     CorruptEntry,
     IncompatibleCook,
     NeverCookReferenced,
+    // 콘텐츠 서명(ContentSigning.ko.md 7절 — A1f): 서명 봉투를 신뢰할 수 없다(모르는 키·낮은
+    // contentVersion·다른 scope·서명 불일치 — AssetDiagnostic::section이 ContentEnvelopeField)
+    ContentNotTrusted,
     // 메시(MeshAnimationAssets.ko.md 11절 — MA1 원본 메시와 MA2a 빌드가 내는 것)
     InvalidMeshData,
     NonFiniteAttribute,

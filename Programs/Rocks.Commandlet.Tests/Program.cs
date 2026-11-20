@@ -211,6 +211,92 @@ finally
     Directory.Delete(logDirectory, true);
 }
 
+// content-sign keygen·sign·verify(ContentSigning.ko.md 7절 5·7): 왕복, 덮어쓰기 거부, 틀린 비밀번호, 매니페스트가 아닌 입력,
+// 다른 scope·높은 최소 버전·변조 봉투의 거부, 사용법 오류. 입력 매니페스트는 빈 쿠킹 매니페스트(AssetSystem 10절 형식)를 직접 쓴다.
+string signDirectory = Path.Combine(Path.GetTempPath(), $"rocks-content-sign-{Environment.ProcessId}");
+Directory.CreateDirectory(signDirectory);
+try
+{
+    string keyBlob = Path.Combine(signDirectory, "content.key");
+    string publicLine = Path.Combine(signDirectory, "content.pub");
+    string password = Path.Combine(signDirectory, "password.txt");
+    string wrongPassword = Path.Combine(signDirectory, "wrong.txt");
+    string emptyPassword = Path.Combine(signDirectory, "empty.txt");
+    string manifest = Path.Combine(signDirectory, "CookedManifest.rman");
+    string envelope = Path.Combine(signDirectory, "CookedManifest.rsig");
+    string tampered = Path.Combine(signDirectory, "tampered.rsig");
+    string notManifest = Path.Combine(signDirectory, "junk.rman");
+    File.WriteAllText(password, "correct horse battery\r\n");
+    File.WriteAllText(wrongPassword, "wrong\n");
+    File.WriteAllText(emptyPassword, "\n");
+    File.WriteAllBytes(manifest, EmptyCookedManifest("Windows"));
+    File.WriteAllBytes(notManifest, [1, 2, 3, 4]);
+    string[] scope = ["--product", "rocks.game", "--channel", "live"];
+    await Check("content-sign usage", ["content-sign"], 2, "", "content-sign keygen");
+    await Check("content-sign help", ["content-sign", "--help"], 0, "content-sign verify", "");
+    await Check("content-sign keygen without password", ["content-sign", "keygen", keyBlob, publicLine], 2, "",
+        "usage:");
+    await Check("content-sign keygen empty password",
+        ["content-sign", "keygen", keyBlob, publicLine, "--password-file", emptyPassword], 1, "", "is empty");
+    await Check("content-sign keygen", ["content-sign", "keygen", keyBlob, publicLine, "--password-file", password], 0,
+        "Keep the key file out of the repository", "");
+    string line = File.ReadAllText(publicLine);
+    bool lineShape = line.Length == 98 && line[32] == ' ' && line[97] == '\n';
+    Console.WriteLine($"content-sign public line: {(lineShape ? "PASS" : "FAIL")}");
+    if (!lineShape)
+    {
+        ++failures;
+        Console.Error.WriteLine($"  line={line}");
+    }
+
+    await Check("content-sign keygen refuses to overwrite",
+        ["content-sign", "keygen", keyBlob, publicLine, "--password-file", password], 1, "", "cannot create");
+    await Check("content-sign sign", ["content-sign", "sign", manifest, envelope, "--key", keyBlob,
+        "--password-file", password, "--version", "9", .. scope], 0, "content version 9", "");
+    await Check("content-sign verify", ["content-sign", "verify", envelope, "--trust", publicLine, .. scope,
+        "--minimum-version", "9"], 0, "content-sign verify: OK", "");
+    await Check("content-sign verify other channel", ["content-sign", "verify", envelope, "--trust", publicLine,
+        "--product", "rocks.game", "--channel", "beta"], 1, "", "rejected at Scope");
+    await Check("content-sign verify higher minimum", ["content-sign", "verify", envelope, "--trust", publicLine,
+        .. scope, "--minimum-version", "10"], 1, "", "rejected at ContentVersion");
+    byte[] bytes = File.ReadAllBytes(envelope);
+    bytes[^1] ^= 1;
+    File.WriteAllBytes(tampered, bytes);
+    await Check("content-sign verify tampered", ["content-sign", "verify", tampered, "--trust", publicLine, .. scope],
+        1, "", "rejected at Signature");
+    await Check("content-sign sign replaces", ["content-sign", "sign", manifest, envelope, "--key", keyBlob,
+        "--password-file", password, "--version", "10", .. scope], 0, "content version 10", "");
+    await Check("content-sign verify replaced", ["content-sign", "verify", envelope, "--trust", publicLine, .. scope,
+        "--minimum-version", "10"], 0, "content version 10", "");
+    bool noTemporary = !File.Exists(envelope + ".tmp");
+    Console.WriteLine($"content-sign leaves no temporary file: {(noTemporary ? "PASS" : "FAIL")}");
+    if (!noTemporary)
+    {
+        ++failures;
+    }
+
+    await Check("content-sign sign wrong password", ["content-sign", "sign", manifest, envelope, "--key", keyBlob,
+        "--password-file", wrongPassword, "--version", "9", .. scope], 1, "", "wrong password");
+    await Check("content-sign sign not a manifest", ["content-sign", "sign", notManifest, envelope, "--key", keyBlob,
+        "--password-file", password, "--version", "9", .. scope], 1, "", "is not a cooked manifest");
+    await Check("content-sign sign bad version", ["content-sign", "sign", manifest, envelope, "--key", keyBlob,
+        "--password-file", password, "--version", "nine", .. scope], 2, "", "usage:");
+    await Check("content-sign sign bad product", ["content-sign", "sign", manifest, envelope, "--key", keyBlob,
+        "--password-file", password, "--version", "9", "--product", "rocks game", "--channel", "live"], 2, "",
+        "usage:");
+    await Check("content-sign sign duplicate option", ["content-sign", "sign", manifest, envelope, "--key", keyBlob,
+        "--key", keyBlob, "--password-file", password, "--version", "9", .. scope], 2, "", "usage:");
+    await Check("content-sign sign unknown option", ["content-sign", "sign", manifest, envelope, "--trust", keyBlob,
+        "--password-file", password, "--version", "9", .. scope], 2, "", "usage:");
+    await Check("content-sign verify not a key line", ["content-sign", "verify", envelope, "--trust", keyBlob,
+        .. scope], 1, "", "is not a content public key line");
+    await Check("content-sign unknown subcommand", ["content-sign", "seal"], 2, "", "usage:");
+}
+finally
+{
+    Directory.Delete(signDirectory, true);
+}
+
 if (OperatingSystem.IsWindows())
 {
     // 무효 stderr 핸들을 child의 표준 오류로 직접 설정해 출력 실패를 재현한다.
@@ -263,3 +349,46 @@ if (OperatingSystem.IsMacOS())
 }
 
 return failures == 0 ? 0 : 1;
+
+// 항목이 없는 쿠킹 매니페스트 byte다(AssetSystem 10절 형식 v1): magic, 형식 버전, 항목 수, 프로파일 id(LE64 길이 + byte),
+// 프로파일·쿠킹 설정 digest, 쿠커 버전, 쿠킹한 엔진 버전 셋, 앞 모든 byte의 CRC32.
+static byte[] EmptyCookedManifest(string profile)
+{
+    using MemoryStream stream = new();
+    using (BinaryWriter writer = new(stream, System.Text.Encoding.UTF8, true))
+    {
+        writer.Write("RMAN"u8);
+        writer.Write(1u);
+        writer.Write(0u);
+        byte[] profileBytes = System.Text.Encoding.UTF8.GetBytes(profile);
+        writer.Write((ulong)profileBytes.Length);
+        writer.Write(profileBytes);
+        writer.Write(new byte[64]);
+        writer.Write(1u);
+        writer.Write(0u);
+        writer.Write(1u);
+        writer.Write(0u);
+    }
+
+    byte[] body = stream.ToArray();
+    byte[] file = new byte[body.Length + 4];
+    body.CopyTo(file, 0);
+    BitConverter.TryWriteBytes(file.AsSpan(body.Length), Crc32(body));
+    return file;
+}
+
+// CRC-32(IEEE 802.3, 반사 다항식 0xEDB88320)다.
+static uint Crc32(byte[] bytes)
+{
+    uint crc = 0xFFFFFFFFu;
+    foreach (byte value in bytes)
+    {
+        crc ^= value;
+        for (int bit = 0; bit < 8; ++bit)
+        {
+            crc = (crc & 1) != 0 ? (crc >> 1) ^ 0xEDB88320u : crc >> 1;
+        }
+    }
+
+    return ~crc;
+}

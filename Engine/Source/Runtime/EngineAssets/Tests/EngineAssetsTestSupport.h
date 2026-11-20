@@ -47,9 +47,25 @@ inline bool MakeParent(StringView path) noexcept {
         platform::MakeDirectoryTree(platform::PhysicalFileSystem(), path.Data(), slash - 1));
 }
 
-// 시험 임시 디렉터리에 쓴 쿠킹 장면이다(패키지 파일 + CookedManifest.rman). 1 → 2 Hard, 3은 따로다.
+// 시험 콘텐츠 서명이다(ContentSigning.ko.md 7절 7): 고정 seed 키(keyId TestContentKeyId), scope
+// ("rocks.engine-assets.test", "main"), 최소 버전 TestMinimumContentVersion. 신뢰 정보는 프로세스
+// 수명 동안 유효하다.
+inline constexpr uint64 TestMinimumContentVersion = 3;
+inline constexpr uint64 TestContentVersion = 5;
+crypto::KeyId TestContentKeyId() noexcept;
+const ContentTrust& TestContentTrust() noexcept;
+// manifest를 시험 키로 서명한 봉투를 out에 쓴다(version은 contentVersion, scope가 있으면 시험
+// scope 대신 그것).
+bool SignTestManifest(Allocator& allocator, Span<const uint8> manifest, Array<uint8>& out,
+                      uint64 version = TestContentVersion,
+                      const Sha256Digest* scope = nullptr) noexcept;
+
+// 시험 임시 디렉터리에 쓴 쿠킹 장면이다(패키지 파일 + CookedManifest.rman + 시험 키로 서명한
+// CookedManifest.rsig). 1 → 2 Hard, 3은 따로다. 수명 동안 시험 신뢰 정보를 EngineAssets에 등록한다
+// (끝나면 해제) — Release 구성은 서명 봉투만 받으므로 기본으로 서명한다.
 struct DiskScene {
     explicit DiskScene(const char* tag) noexcept : scene(env) {
+        EngineAssetsSubsystem::SetContentTrust(&TestContentTrust());
         const int count = snprintf(root, sizeof(root), "rocks-engine-assets-%s-%u", tag,
                                    static_cast<unsigned>(platform::CurrentProcessId()));
         rootBytes = count > 0 ? static_cast<usize>(count) : 0;
@@ -63,12 +79,13 @@ struct DiskScene {
     }
 
     ~DiskScene() noexcept {
+        EngineAssetsSubsystem::SetContentTrust(nullptr);
         if (made) {
             CHECK(platform::DeleteDirectoryTree(platform::PhysicalFileSystem(), root, rootBytes));
         }
     }
 
-    // 장면을 쿠킹해 파일로 쓴다. writeManifest가 거짓이면 매니페스트를 쓰지 않는다.
+    // 장면을 쿠킹해 파일로 쓴다. writeManifest가 거짓이면 매니페스트(rman·봉투)를 쓰지 않는다.
     bool Write(bool writeManifest = true) noexcept {
         if (!made || !env.Ready() || !scene.Cook()) {
             return false;
@@ -90,10 +107,27 @@ struct DiskScene {
                WriteManifestBytes(bytes.View());
     }
 
+    // 매니페스트 byte를 rman으로 쓰고, signEnvelope면 같은 byte를 서명한 봉투도 쓴다(봉투 검증은
+    // 통과하고 매니페스트 판정이 그 byte를 본다).
     bool WriteManifestBytes(Span<const uint8> bytes) noexcept {
+        if (!WriteRootFile(CookedManifestFileName, bytes)) {
+            return false;
+        }
+
+        if (!signEnvelope) {
+            return true;
+        }
+
+        Array<uint8> envelope(env.allocator);
+        return SignTestManifest(env.allocator, bytes, envelope) &&
+               WriteRootFile(ContentEnvelopeFileName, envelope.View());
+    }
+
+    // 쿠킹 루트 바로 아래 name 파일에 bytes를 쓴다.
+    bool WriteRootFile(StringView name, Span<const uint8> bytes) noexcept {
         StringBuilder<160> path(env.allocator);
         return path.TryAppend(scene.root).IsOk() && path.TryAppend("/").IsOk() &&
-               path.TryAppend(CookedManifestFileName).IsOk() && WriteWholeFile(path.View(), bytes);
+               path.TryAppend(name).IsOk() && WriteWholeFile(path.View(), bytes);
     }
 
     StringView Root() const noexcept {
@@ -104,6 +138,8 @@ struct DiskScene {
     LoaderScene scene;
     char root[96] = {};
     usize rootBytes = 0;
+    // 거짓이면 봉투를 쓰지 않는다(서명하지 않은 개발 쿠킹 디렉터리).
+    bool signEnvelope = true;
     bool made = false;
 };
 

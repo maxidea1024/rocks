@@ -820,6 +820,8 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "IncompatibleCook";
     case AssetDiagnosticCode::NeverCookReferenced:
         return "NeverCookReferenced";
+    case AssetDiagnosticCode::ContentNotTrusted:
+        return "ContentNotTrusted";
     case AssetDiagnosticCode::InvalidMeshData:
         return "InvalidMeshData";
     case AssetDiagnosticCode::NonFiniteAttribute:

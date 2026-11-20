@@ -3,6 +3,7 @@
 #include <Core/App/ProcessCommandLine.h>
 #include <Core/Diagnostics/Log.h>
 #include <Core/FileError.h>
+#include <Core/Text/StringBuilder.h>
 #include <EngineAssets/EngineAssetsSubsystem.h>
 #include <Platform/Atomics.h>
 #include <Platform/File.h>
@@ -19,6 +20,12 @@ constexpr LogCategory LogEngineAssets{"EngineAssets"};
 // 하위 값은 프로세스 안 순번이다(한 프로세스의 Engine이 여럿이어도 겹치지 않는다).
 constexpr uint64 AssetContextHigh = 0x524f434b53415354ull;
 uint64 NextAssetContext = 0;
+
+// 등록된 콘텐츠 서명 신뢰 정보다(SetContentTrust — 게임 스레드, 엔진 초기화 전).
+const ContentTrust* ContentTrustSource = nullptr;
+
+// 봉투 검증 실패 단계 이름("content signature (<칸>)")의 버퍼 byte 수다.
+constexpr usize ContentStageBytes = 64;
 
 bool FrameRunning(void* context) noexcept {
     return static_cast<const Engine*>(context)->IsInFrame();
@@ -83,6 +90,10 @@ EngineAssetsSubsystem::~EngineAssetsSubsystem() {
     Teardown();
 }
 
+void EngineAssetsSubsystem::SetContentTrust(const ContentTrust* trust) noexcept {
+    ContentTrustSource = trust;
+}
+
 Result<void> EngineAssetsSubsystem::Initialize(Engine& engine) noexcept {
     using namespace engine_assets_detail;
     engine_ = &engine;
@@ -94,7 +105,7 @@ Result<void> EngineAssetsSubsystem::Initialize(Engine& engine) noexcept {
     }
 
     AssetDiagnostic diagnostic;
-    auto fail = [&](const char* stage, ErrorCode error) noexcept {
+    auto fail = [&](StringView stage, ErrorCode error) noexcept {
         Log::Error(LogEngineAssets,
                    "EngineAssets initialization failed at {Stage}: {Error} (diagnostic {Code}, "
                    "cooked root '{Root}', profile '{Profile}')",
@@ -127,29 +138,74 @@ Result<void> EngineAssetsSubsystem::Initialize(Engine& engine) noexcept {
         return fail("runtime profile", assigned.Error());
     }
 
-    // 매니페스트(A1f에서 서명 봉투로 바뀐다).
+    // 매니페스트: 서명 봉투가 있으면 그것만 읽어 검증하고 같은 버퍼의 매니페스트 byte를 쓴다
+    // (ContentSigning.ko.md 7절 4 — 봉투가 있으면 rman은 읽지 않는다).
     {
         String path(allocator);
-        if (auto built = path.TryAppend(cookedRoot_.View()); !built) {
-            return fail("manifest path", built.Error());
-        }
+        auto buildPath = [&](StringView name) noexcept -> Result<void> {
+            path.Clear();
+            if (auto built = path.TryAppend(cookedRoot_.View()); !built) {
+                return built;
+            }
 
-        if (auto built = path.TryAppend("/"); !built) {
-            return fail("manifest path", built.Error());
-        }
+            if (auto built = path.TryAppend("/"); !built) {
+                return built;
+            }
 
-        if (auto built = path.TryAppend(CookedManifestFileName); !built) {
+            return path.TryAppend(name);
+        };
+        if (auto built = buildPath(ContentEnvelopeFileName); !built) {
             return fail("manifest path", built.Error());
         }
 
         Array<uint8> bytes(allocator);
-        if (auto read = ReadManifestFile(platform::PhysicalFileSystem(), path.View(),
-                                         CookedManifestMaxFileBytes, bytes);
-            !read) {
-            return fail("manifest read", read.Error());
+        Span<const uint8> manifestBytes;
+        platform::FileSystem& files = platform::PhysicalFileSystem();
+        auto envelope = ReadManifestFile(files, path.View(), ContentEnvelopeMaxBytes, bytes);
+        if (envelope) {
+            if (ContentTrustSource == nullptr) {
+                return fail("content trust", ErrorCode::InvalidArgument);
+            }
+
+            ContentEnvelopeInfo info;
+            auto verified = VerifyContentEnvelope(allocator, bytes.View(), *ContentTrustSource,
+                                                  &info, &diagnostic);
+            if (!verified) {
+                // 걸린 봉투 칸을 단계 이름에 담는다(4절 "단계는 진단 로그에만").
+                char stage[ContentStageBytes];
+                FixedStringBuilder text{Span<char>(stage)};
+                (void)text.TryAppendFormat(
+                    "content signature ({})",
+                    ContentEnvelopeFieldName(
+                        static_cast<ContentEnvelopeField>(diagnostic.section)));
+                return fail(text.View(), verified.Error());
+            }
+
+            manifestBytes = verified.Value();
+            stats_.contentSigned = true;
+            stats_.contentVersion = info.contentVersion;
+        } else if (envelope.Error() != ErrorCode::NotFound) {
+            return fail("content signature read", envelope.Error());
+        } else if constexpr (IsReleaseBuild) {
+            // Release는 서명된 콘텐츠만 쓴다(CS5).
+            return fail("content signature", ErrorCode::NotFound);
+        } else {
+            Log::Warning(LogEngineAssets,
+                         "Cooked content is not signed: '{Root}' has no {File}; reading {Manifest}",
+                         cookedRoot_.View(), ContentEnvelopeFileName, CookedManifestFileName);
+            if (auto built = buildPath(CookedManifestFileName); !built) {
+                return fail("manifest path", built.Error());
+            }
+
+            if (auto read = ReadManifestFile(files, path.View(), CookedManifestMaxFileBytes, bytes);
+                !read) {
+                return fail("manifest read", read.Error());
+            }
+
+            manifestBytes = bytes.View();
         }
 
-        auto manifest = ReadCookedManifest(allocator, bytes.View(), &diagnostic);
+        auto manifest = ReadCookedManifest(allocator, manifestBytes, &diagnostic);
         if (!manifest) {
             return fail("manifest parse", manifest.Error());
         }

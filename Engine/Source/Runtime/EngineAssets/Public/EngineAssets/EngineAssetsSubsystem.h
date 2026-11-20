@@ -2,6 +2,7 @@
 
 #include <AssetRuntime/AssetLoader.h>
 #include <AssetRuntime/AssetManager.h>
+#include <AssetRuntime/ContentSignature.h>
 #include <AssetRuntime/CookedManifest.h>
 #include <AssetRuntime/CookedPackageIo.h>
 #include <Core/Memory/UniquePtr.h>
@@ -50,7 +51,7 @@ StringView ResolveRuntimeProfile(StringView configured) noexcept;
 // 실행 파일 경로에서 디렉터리 부분이다('/'·'\\' 마지막 구분자 앞, 없으면 빈 값).
 StringView ExecutableDirectoryOf(StringView executablePath) noexcept;
 
-// 쿠킹 매니페스트 파일 이름이다(11.4절 — A1f에서 서명 봉투로 바뀐다).
+// 서명하지 않은 쿠킹 매니페스트 파일 이름이다(11.4절 — 서명 봉투는 ContentEnvelopeFileName).
 inline constexpr StringView CookedManifestFileName = "CookedManifest.rman";
 
 // 관측 값이다(시험·도구 — 11.8절 5).
@@ -71,6 +72,9 @@ struct EngineAssetsStats {
     bool lingering = false;
     // 로더 worker scheduler의 worker 수다(asset.loader.workers — 초기화 뒤).
     uint32 loaderWorkers = 0;
+    // 서명 봉투로 시작했는지와 그 contentVersion이다(ContentSigning.ko.md 7절 4 — 초기화 뒤).
+    bool contentSigned = false;
+    uint64 contentVersion = 0;
 };
 
 class EngineAssetsSubsystem final : public EngineSubsystem {
@@ -83,10 +87,25 @@ public:
     // 부분 초기화에도 안전하다(만든 것만 역순으로 끝낸다).
     ~EngineAssetsSubsystem() override;
 
+    // 콘텐츠 서명 신뢰 정보를 등록한다(ContentSigning.ko.md 7절 3 — 신뢰 공개키·최소 버전·scope는
+    // 실행 파일 안에 있어야 한다). 엔진 초기화 전에 게임 스레드에서 부르고, trust와 그 키 배열은 그
+    // 뒤 초기화하는 모든 엔진보다 오래 살아야 한다. nullptr은 해제다(쿠킹 루트에 서명 봉투가 있으면
+    // 초기화가 InvalidArgument로 실패한다).
+    //
+    // 사용 예(게임 진입점 — 빌드 규칙이 생성할 신뢰 목록 대신):
+    //   static const TrustedContentKey keys[] = {{keyId, publicKey}};
+    //   static ContentTrust trust{keys, 7, MakeContentScope("MyGame", "live").Value()};
+    //   EngineAssetsSubsystem::SetContentTrust(&trust);
+    static void SetContentTrust(const ContentTrust* trust) noexcept;
+
     // 11.8절 4의 순서로 만든다. 실패하면 만든 것을 역순으로 되돌리고 그 오류를 돌려준다(기록 한
-    // 번). 오류: 엔진 설정 문맥 없음 InvalidArgument, 쿠킹 루트 결정·매니페스트 읽기(없으면
-    // NotFound)·검증(CorruptPackage 진단)·IO context 시작·scheduler 시작·AssetManager 초기화
-    // (프로파일 다름 IncompatibleCook 등)의 오류, 할당 실패.
+    // 번). 매니페스트는 쿠킹 루트에 서명 봉투(CookedManifest.rsig)가 있으면 그것만 읽어 검증한다.
+    // 없으면 Release 구성은 NotFound로 실패하고, 그 밖의 구성은 Warning 한 번 뒤
+    // CookedManifest.rman을 읽는다(ContentSigning.ko.md 7절 4). 오류: 엔진 설정 문맥 없음
+    // InvalidArgument, 봉투가 있는데 신뢰 정보 없음 InvalidArgument, 봉투 검증(ContentNotTrusted /
+    // AuthenticationFailed 등), 쿠킹 루트 결정·매니페스트 읽기(없으면 NotFound)·검증(CorruptPackage
+    // 진단)·IO context 시작·scheduler 시작·AssetManager 초기화(프로파일 다름 IncompatibleCook 등)의
+    // 오류, 할당 실패.
     Result<void> Initialize(Engine& engine) noexcept override;
     // World Tick 전 Pump(11.8절 5).
     void OnFrameBegin(Engine& engine) noexcept override;
