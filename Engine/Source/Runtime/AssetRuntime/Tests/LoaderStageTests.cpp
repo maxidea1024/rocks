@@ -1,6 +1,8 @@
 #include "LoaderTestSupport.h"
 
 #include <AssetTestFixtures/TestAssets.generated.h>
+#include <Platform/Sync.h>
+#include <Platform/Thread.h>
 
 // 로더 단계 경계 시험이다(Docs/Design/AssetSystem.ko.md 11.6절 A1c): 실패와 취소의 겹침(실패가
 // 이긴다), 정리 중 재요청, Queued 단위의 의존 실패, 의존 단위를 직접 요청한 쪽만 취소, 단계별 합류,
@@ -580,6 +582,310 @@ TEST(AssetLoader_DependencyWaitSkipsPostLoadingUnits) {
     CHECK(rig.StateOf(six) == AssetLoadState::Succeeded);
     REQUIRE(postLoad.order.Size() == 5);
     CHECK(postLoad.order[2] == FixedId(2));
+    CHECK(postLoad.PackagesMatch(*rig.loader));
+}
+
+// PostLoad 굶주림 방지(11.6절 16): 준비된 A(Critical)·B·C를 단위 하나 예산으로 Pump하면 A를 공개해
+// 예산이 다해도 A의 PostLoad 하나는 불려 요청 A가 끝나고 소진이 표시된다. 다음 Pump도 같다(B).
+TEST(AssetLoader_PostLoadRunsWhenInstantiateBudgetIsSpent) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    LoaderRig rig(env);
+    for (uint64 id = 1; id <= 3; ++id) {
+        rig.scene.Add(id);
+    }
+
+    REQUIRE(rig.Cook());
+    RecordingPostLoad postLoad(env.allocator);
+    rig.config.postLoad = &postLoad;
+    REQUIRE(rig.Start());
+    const AssetLoadHandle a = rig.Request(1, LoadPriority::Critical);
+    const AssetLoadHandle b = rig.Request(2, LoadPriority::High);
+    const AssetLoadHandle c = rig.Request(3);
+    AssetLoaderPumpBudget none;
+    none.maxUnits = 0;
+    // 허가 → IO 완료 처리(worker 게시)까지는 공개할 단위가 없다.
+    REQUIRE(rig.loader->Pump(none));
+    REQUIRE(rig.loader->Pump(none));
+    auto pumped = rig.loader->Pump(none);
+    REQUIRE(pumped);
+    CHECK(pumped.Value().instantiatedUnits == 1 && pumped.Value().postLoads == 1 &&
+          pumped.Value().budgetExhausted);
+    REQUIRE(postLoad.order.Size() == 1 && postLoad.order[0] == FixedId(1));
+    CHECK(rig.StateOf(a) == AssetLoadState::Succeeded && rig.StateOf(b) == AssetLoadState::Pending);
+    pumped = rig.loader->Pump(none);
+    REQUIRE(pumped);
+    CHECK(pumped.Value().instantiatedUnits == 1 && pumped.Value().postLoads == 1 &&
+          pumped.Value().budgetExhausted);
+    CHECK(rig.StateOf(b) == AssetLoadState::Succeeded && rig.StateOf(c) == AssetLoadState::Pending);
+    REQUIRE(rig.PumpUntilSettled());
+    CHECK(rig.StateOf(c) == AssetLoadState::Succeeded && postLoad.order.Size() == 3);
+    CHECK(postLoad.PackagesMatch(*rig.loader));
+}
+
+namespace {
+
+// 콜백 안에서 로더를 다시 부르는 handler·관찰자다(11.6절 18).
+struct ReentrantCalls {
+    AssetLoader* loader = nullptr;
+    Allocator* allocator = nullptr;
+    AssetLoadHandle handle;
+    static constexpr usize Count = 7;
+    ErrorCode mutating[Count] = {};
+    bool reads = false;
+    // 시계 콜백 안에서는 Describe(시계를 다시 읽는다)를 부르지 않는다.
+    bool describe = true;
+    uint32 calls = 0;
+
+    void Try() noexcept {
+        ++calls;
+        mutating[0] = loader->Request(LoaderRequestOf(9)).Error();
+        mutating[1] = loader->SetPriority(handle, LoadPriority::High).Error();
+        mutating[2] = loader->Release(handle).Error();
+        mutating[3] = loader->Pump().Error();
+        mutating[4] = loader->WaitForCompletions().Error();
+        mutating[5] = loader->WaitFor(handle, "reentrant").Error();
+        mutating[6] = loader->Shutdown().Error();
+        AssetLoaderSnapshot snapshot(*allocator);
+        reads = loader->Status(handle).IsOk() && loader->FindByPath("/Game/P1").IsOk() &&
+                (!describe || loader->Describe(snapshot).IsOk());
+    }
+
+    bool AllRefused() const noexcept {
+        for (ErrorCode error : mutating) {
+            if (error != ErrorCode::WrongContext) {
+                return false;
+            }
+        }
+
+        return calls > 0 && reads;
+    }
+};
+
+struct ReentrantPostLoad final : AssetPostLoadHandler {
+    void PostLoad(ObjectHandle, AssetId asset) noexcept override {
+        if (asset == FixedId(1)) {
+            calls.Try();
+        }
+    }
+
+    ReentrantCalls calls;
+};
+
+struct ReentrantObserver final : AssetLoaderObserver {
+    void OnSyncWait(const AssetLoaderSyncWait&) noexcept override {
+        calls.Try();
+    }
+
+    ReentrantCalls calls;
+};
+
+// 완료 대기 진입 hook 쪽이다: 재진입을 시도한 뒤 완료 스레드에 신호를 준다.
+struct ReentrantWait {
+    ReentrantCalls calls;
+    TestPackageIo* io = nullptr;
+    platform::ManualResetEvent entered;
+};
+
+void ReentrantWaitEntered(void* context) noexcept {
+    auto& wait = *static_cast<ReentrantWait*>(context);
+    if (wait.calls.calls == 0) {
+        wait.calls.Try();
+    }
+
+    wait.entered.Signal();
+}
+
+// Begin·Run·시계·프레임 판정 쪽이다(첫 호출에서만 시도한다).
+void ReentrantOnce(void* context) noexcept {
+    auto& calls = *static_cast<ReentrantCalls*>(context);
+    if (calls.calls == 0 && calls.loader != nullptr) {
+        calls.Try();
+    }
+}
+
+struct ReentrantClock {
+    ReentrantCalls calls;
+    uint64 now = 0;
+};
+
+uint64 ReentrantClockRead(void* context) noexcept {
+    auto& clock = *static_cast<ReentrantClock*>(context);
+    ReentrantOnce(&clock.calls);
+    return ++clock.now;
+}
+
+bool ReentrantInFrame(void* context) noexcept {
+    ReentrantOnce(context);
+    return false;
+}
+
+} // namespace
+
+// 콜백 재진입(11.6절 17·18): PostLoad handler·동기 대기 관찰자·완료 대기 진입 hook(큐 뮤텍스를 쥔
+// 채 — 다른 스레드가 그 뒤에 완료를 내보낸다) 안에서 상태를 바꾸는 공개 함수(Request·SetPriority·
+// Release·Pump·WaitForCompletions·WaitFor·Shutdown)는 모두 WrongContext이고 읽기(Status·Describe·
+// FindByPath)는 된다(교착 없음). 로더는 이어서 정상으로 끝난다(9는 요청되지 않았다).
+TEST(AssetLoader_CallbacksCannotReenter) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    LoaderRig rig(env);
+    rig.scene.Add(1);
+    rig.scene.Add(9);
+    REQUIRE(rig.Cook());
+    ReentrantPostLoad postLoad;
+    ReentrantObserver observer;
+    ReentrantWait wait;
+    wait.io = &rig.io;
+    rig.config.postLoad = &postLoad;
+    rig.config.observer = &observer;
+    rig.config.waitEntered = ReentrantWaitEntered;
+    rig.config.waitEnteredContext = &wait;
+    REQUIRE(rig.Start());
+    rig.io.hold = true;
+    const AssetLoadHandle handle = rig.Request(1);
+    ReentrantCalls* const sides[] = {&postLoad.calls, &observer.calls, &wait.calls};
+    for (ReentrantCalls* calls : sides) {
+        calls->loader = rig.loader.Get();
+        calls->allocator = &env.allocator;
+        calls->handle = handle;
+    }
+
+    // IO를 보류해 WaitFor가 실제로 기다리게 하고, 완료 스레드는 대기 진입 뒤에 완료를 내보낸다.
+    platform::Thread completer;
+    REQUIRE(completer.Start(
+                [](void* context) noexcept {
+                    auto& state = *static_cast<ReentrantWait*>(context);
+                    (void)state.entered.Wait();
+                    state.io->Complete();
+                },
+                &wait) == platform::ThreadStatus::Success);
+    auto waited = rig.loader->WaitFor(handle, "LoaderStageTests.Reentrant");
+    REQUIRE(completer.Join() == platform::ThreadStatus::Success);
+    REQUIRE(waited && waited.Value().state == AssetLoadState::Succeeded);
+    CHECK(postLoad.calls.AllRefused() && observer.calls.AllRefused() && wait.calls.AllRefused());
+    CHECK(!rig.IsLoaded(9) && rig.loader->Status(handle).IsOk());
+    REQUIRE(rig.loader->Release(handle));
+}
+
+// 바깥 경계 재진입(11.6절 18): IO Begin·worker Run·시계·프레임 판정 안에서도 상태를 바꾸는 공개
+// 함수는 모두 WrongContext이고(허가 순회가 단위 참조를 쥔 채 Begin을 부른다) 로더는 이어서 정상으로
+// 끝난다.
+TEST(AssetLoader_BoundaryCallbacksCannotReenter) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    LoaderRig rig(env);
+    rig.scene.Add(1);
+    rig.scene.Add(9);
+    REQUIRE(rig.Cook());
+    ReentrantCalls begin;
+    ReentrantCalls run;
+    ReentrantClock clock;
+    ReentrantCalls frame;
+    clock.calls.describe = false;
+    rig.io.onBegin = ReentrantOnce;
+    rig.io.onBeginContext = &begin;
+    rig.worker.onRun = ReentrantOnce;
+    rig.worker.onRunContext = &run;
+    rig.config.clock = ReentrantClockRead;
+    rig.config.clockContext = &clock;
+    rig.config.inFrame = ReentrantInFrame;
+    rig.config.inFrameContext = &frame;
+    REQUIRE(rig.Start());
+    const AssetLoadHandle handle = rig.Request(1);
+    ReentrantCalls* const sides[] = {&begin, &run, &clock.calls, &frame};
+    for (ReentrantCalls* calls : sides) {
+        calls->allocator = &env.allocator;
+        calls->handle = handle;
+        calls->loader = rig.loader.Get();
+    }
+
+    auto waited = rig.loader->WaitFor(handle, "LoaderStageTests.Boundary");
+    REQUIRE(waited && waited.Value().state == AssetLoadState::Succeeded);
+    for (ReentrantCalls* calls : sides) {
+        CHECK(calls->AllRefused());
+    }
+
+    CHECK(!rig.IsLoaded(9));
+}
+
+// PostLoad 대기 중 의존 실패와 재요청(11.6절 6·16): U(2)가 공개된 채 PostLoad를 기다리는
+// 동안(Critical 감시 단위들이 Pump마다 PostLoad를 가져간다) X(1 → 2, 손상)를 요청하면 X는
+// CorruptPackage로 실패하고 X가 U의 관심을 놓아도 U는 버려지지 않는다. U가 아직 PostLoad 대기일 때
+// X를 고쳐 다시 요청하면 새 X 단위는 바로 허가 후보(U를 공개 대기로 세지 않음)이고, 공개된 뒤에는
+// U의 PostLoad를 기다린다 (PostLoadDependency). 끝나면 U·X PostLoad가 한 번씩 U 먼저이고 X는
+// Succeeded다.
+TEST(AssetLoader_DependentFailsWhileDependencyPostLoads) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    LoaderRig rig(env);
+    constexpr uint64 SentinelBase = 100;
+    constexpr uint32 Sentinels = 10;
+    rig.scene.Add(1);
+    rig.scene.Add(2);
+    for (uint32 index = 0; index < Sentinels; ++index) {
+        rig.scene.Add(SentinelBase + index);
+    }
+
+    rig.scene.Hard(1, 2);
+    REQUIRE(rig.Cook());
+    rig.scene.FileOf(1)[70] ^= 0x01;
+    RecordingPostLoad postLoad(env.allocator);
+    rig.config.postLoad = &postLoad;
+    REQUIRE(rig.Start());
+    for (uint32 index = 0; index < Sentinels; ++index) {
+        (void)rig.Request(SentinelBase + index, LoadPriority::Critical);
+    }
+
+    const AssetLoadHandle u = rig.Request(2);
+    AssetLoaderPumpBudget single;
+    single.maxPostLoads = 0;
+    for (uint32 round = 0; round < 3; ++round) {
+        REQUIRE(rig.loader->Pump(single));
+    }
+
+    REQUIRE(rig.IsLoaded(2) && postLoad.CountOf(FixedId(2)) == 0);
+    const AssetLoadHandle x = rig.Request(1);
+    for (uint32 round = 0; round < 3 && rig.StateOf(x) == AssetLoadState::Pending; ++round) {
+        REQUIRE(rig.loader->Pump(single));
+    }
+
+    const AssetLoadStatus failed = rig.StatusOf(x);
+    CHECK(failed.state == AssetLoadState::Failed &&
+          failed.diagnostic.code == AssetDiagnosticCode::CorruptPackage &&
+          failed.diagnostic.asset == FixedId(1));
+    auto unitOf = [&](uint64 id) noexcept {
+        AssetLoaderUnitInfo found;
+        AssetLoaderSnapshot snapshot(env.allocator);
+        if (rig.loader->Describe(snapshot)) {
+            for (const AssetLoaderUnitInfo& unit : snapshot.units) {
+                found = unit.asset == FixedId(id) ? unit : found;
+            }
+        }
+
+        return found;
+    };
+    // U는 아직 PostLoad를 기다리며 버려지지 않았다.
+    CHECK(unitOf(2).asset == FixedId(2) && unitOf(2).phase == AssetLoaderUnitPhase::PostLoading &&
+          rig.StateOf(u) == AssetLoadState::Pending);
+    // U가 아직 PostLoad 대기일 때 X를 고쳐 다시 요청한다.
+    rig.scene.FileOf(1)[70] ^= 0x01;
+    const AssetLoadHandle again = rig.Request(1);
+    CHECK(unitOf(1).asset == FixedId(1) && unitOf(1).waiting == AssetLoaderWait::Admission);
+    for (uint32 round = 0; round < 3; ++round) {
+        REQUIRE(rig.loader->Pump(single));
+    }
+
+    REQUIRE(rig.IsLoaded(1) && postLoad.CountOf(FixedId(2)) == 0);
+    CHECK(unitOf(1).phase == AssetLoaderUnitPhase::PostLoading &&
+          unitOf(1).waiting == AssetLoaderWait::PostLoadDependency &&
+          unitOf(1).waitingOn == FixedId(2) && rig.StateOf(again) == AssetLoadState::Pending);
+    REQUIRE(rig.PumpUntilSettled());
+    CHECK(rig.StateOf(u) == AssetLoadState::Succeeded &&
+          rig.StateOf(again) == AssetLoadState::Succeeded);
+    CHECK(postLoad.CountOf(FixedId(2)) == 1 && postLoad.CountOf(FixedId(1)) == 1 &&
+          postLoad.IndexOf(FixedId(2)) < postLoad.IndexOf(FixedId(1)));
+    CHECK(postLoad.PackagesMatch(*rig.loader));
 }
 
 } // namespace loader_stage_tests_file

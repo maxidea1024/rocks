@@ -208,6 +208,7 @@ TEST(Engine_HeadlessRunExecutesFramesInDocumentedOrder) {
         const EngineSubsystemType subsystems[] = {
             MakeSubsystemType<EngineSubsystem, AlphaSubsystem>("Alpha")};
         EngineConfig config;
+        config.modules = &test::ProcessModules();
         config.hooks = &hooks;
         config.client = &client;
         config.subsystems = subsystems;
@@ -242,10 +243,166 @@ TEST(Engine_HeadlessRunExecutesFramesInDocumentedOrder) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
+// 엔진 묶음(Docs/Design/ModuleLoader.ko.md 3.11절, ML1): Engine은 시험 실행기의 프로세스 로더로
+// 엔진 단계 모듈(World·Engine 등)을 시작하고 PostEngineInit 단계를 돈 뒤, Shutdown에서 엔진 묶음을
+// 내리고 자기 타입 등록기를 뗀다. 한 프로세스에서 Engine을 차례로 만들면 매번 시작·종료하고, 동시에
+// 둘이면 처음 Engine이 시작하고 마지막 Engine이 내린다(참조 수, 등록기는 Engine마다).
+TEST(Engine_StartsAndStopsTheEngineModuleGroup) {
+    SystemAllocator allocator;
+    ModuleLoader& modules = test::ProcessModules();
+    CHECK(modules.EngineGroupUsers() == 0);
+    for (uint32 round = 0; round < 2; ++round) {
+        EngineConfig config;
+        config.modules = &modules;
+        Engine engine(allocator);
+        REQUIRE(engine.Initialize(config));
+        CHECK(modules.IsStarted("World"));
+        CHECK(modules.IsStarted("Engine"));
+        CHECK(modules.EngineGroupUsers() == 1);
+        CHECK(modules.PhaseStarted(LoadingPhase::PostEngineInit));
+        CHECK(modules.TypeRegistrarCount() == 1);
+        REQUIRE(engine.Shutdown());
+        CHECK(modules.State("World").Value() == ModuleState::Stopped);
+        CHECK(modules.EngineGroupUsers() == 0);
+        CHECK(!modules.PhaseStarted(LoadingPhase::PreDefault));
+        CHECK(modules.TypeRegistrarCount() == 0);
+        CHECK(modules.CurrentGroup() == ModuleGroup::Host);
+    }
+
+    {
+        EngineConfig config;
+        config.modules = &modules;
+        Engine first(allocator);
+        Engine second(allocator);
+        REQUIRE(first.Initialize(config));
+        REQUIRE(second.Initialize(config));
+        CHECK(modules.EngineGroupUsers() == 2);
+        CHECK(modules.TypeRegistrarCount() == 2);
+        REQUIRE(first.Shutdown());
+        CHECK(modules.IsStarted("World"));
+        CHECK(modules.TypeRegistrarCount() == 1);
+        REQUIRE(second.Shutdown());
+        CHECK(!modules.IsStarted("World"));
+        CHECK(modules.EngineGroupUsers() == 0);
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// 엔진 묶음 실패 경로 시험용 로더 표다. Engine은 아무 로더나 받으므로 시험이 실패를 넣을 모듈
+// 둘(엔진 단계 Default·PostEngineInit)만 가진 표로 자기 로더를 만든다.
+ErrorCode groupProbeErrors[2] = {};
+uint32 groupProbeStarts[2] = {};
+
+template <usize Index>
+class GroupProbe final : public ModuleImplementation {
+public:
+    Result<void> Startup(ModuleStartContext&) noexcept override {
+        if (groupProbeErrors[Index] != ErrorCode::None) {
+            return Result<void>::Failure(groupProbeErrors[Index]);
+        }
+
+        ++groupProbeStarts[Index];
+        return Result<void>::Success();
+    }
+};
+
+const ModuleEntry& GroupProbeDefaultEntry() noexcept {
+    static constexpr ModuleEntry entry = detail::MakeModuleEntry<GroupProbe<0>>("GroupDefault");
+    return entry;
+}
+
+const ModuleEntry& GroupProbeLateEntry() noexcept {
+    static constexpr ModuleEntry entry = detail::MakeModuleEntry<GroupProbe<1>>("GroupLate");
+    return entry;
+}
+
+constexpr ModuleTableRow GroupProbeRows[] = {
+    {"GroupDefault", &GroupProbeDefaultEntry, nullptr, 0, LoadingPhase::Default, false},
+    {"GroupLate", &GroupProbeLateEntry, nullptr, 0, LoadingPhase::PostEngineInit, false},
+};
+
+// 엔진 묶음의 실패 경로(3.11절): PostEngineInit 실패는 클라이언트 OnEngineShutdown을 한 번 부른 뒤
+// 초기화 실패 정리를 하고, 엔진 단계 모듈 실패는 RegisterTypes 단계 실패다. 어느 쪽이든 엔진 묶음
+// 사용자와 등록기가 0으로 돌아가 다음 Engine이 다시 시도한다. 동시에 사는 두 번째 Engine이 뒤
+// 단계에서 실패하면 자기 사용자 몫과 등록기만 놓는다.
+TEST(Engine_EngineGroupFailureRestoresTheLoader) {
+    ResetSteps();
+    SystemAllocator allocator;
+    {
+        auto created = ModuleLoader::TryCreate(allocator, ModuleTable(GroupProbeRows));
+        REQUIRE(created);
+        UniquePtr<ModuleLoader> modules = Move(created.Value());
+        groupProbeErrors[0] = ErrorCode::None;
+        groupProbeErrors[1] = ErrorCode::OutOfMemory;
+        {
+            RecordingClient client;
+            EngineConfig config;
+            config.modules = modules.Get();
+            config.client = &client;
+            Engine engine(allocator);
+            CHECK(engine.Initialize(config).Error() == ErrorCode::OutOfMemory);
+            const char* const late[] = {"client.start", "client.shutdown"};
+            CHECK(StepsAre(late));
+            CHECK(modules->EngineGroupUsers() == 0);
+            CHECK(modules->TypeRegistrarCount() == 0);
+            CHECK(!modules->IsStarted("GroupDefault"));
+        }
+
+        groupProbeErrors[0] = ErrorCode::Unsupported;
+        groupProbeErrors[1] = ErrorCode::None;
+        {
+            EngineConfig config;
+            config.modules = modules.Get();
+            Engine engine(allocator);
+            CHECK(engine.Initialize(config).Error() == ErrorCode::Unsupported);
+            CHECK(modules->EngineGroupUsers() == 0);
+            CHECK(modules->TypeRegistrarCount() == 0);
+        }
+
+        groupProbeErrors[0] = ErrorCode::None;
+        {
+            EngineConfig config;
+            config.modules = modules.Get();
+            Engine first(allocator);
+            REQUIRE(first.Initialize(config));
+            CHECK(modules->IsStarted("GroupLate"));
+            EngineConfig invalid = config;
+            invalid.gcWorkers = EngineConfig::MaxGcWorkers + 1;
+            Engine second(allocator);
+            CHECK(second.Initialize(invalid).Error() == ErrorCode::InvalidArgument);
+            CHECK(modules->EngineGroupUsers() == 1);
+            CHECK(modules->TypeRegistrarCount() == 1);
+            CHECK(modules->IsStarted("GroupDefault"));
+            REQUIRE(first.Shutdown());
+            CHECK(modules->EngineGroupUsers() == 0);
+            CHECK(!modules->IsStarted("GroupDefault"));
+        }
+
+        modules->ShutdownGroup(ModuleGroup::Process);
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// EngineConfig::modules가 없으면 초기화가 InvalidArgument로 실패한다(대체 로더는 없다 — 3.11절).
+TEST(Engine_RequiresTheProcessModuleLoader) {
+    SystemAllocator allocator;
+    {
+        EngineConfig config;
+        Engine engine(allocator);
+        CHECK(engine.Initialize(config).Error() == ErrorCode::InvalidArgument);
+        CHECK(engine.State() == EngineState::Failed);
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
 TEST(Engine_FixedDeltaDrivesWorldTimeDeterministically) {
     SystemAllocator allocator;
     {
         EngineConfig config;
+        config.modules = &test::ProcessModules();
         config.fixedFrameDeltaSeconds = 0.02;
         config.maxFrames = 10;
         config.registerTypes = &RegisterGameTypes;
@@ -278,6 +435,7 @@ TEST(Engine_SubsystemFailureRollsBackInitializedStepsInReverse) {
             MakeSubsystemType<EngineSubsystem, AlphaSubsystem>("Alpha"),
             MakeSubsystemType<EngineSubsystem, FailingSubsystem>("Failing")};
         EngineConfig config;
+        config.modules = &test::ProcessModules();
         config.client = &client;
         config.subsystems = subsystems;
         Engine engine(allocator);
@@ -304,6 +462,7 @@ TEST(Engine_ClientStartFailureDeinitializesSubsystemsWithoutClientShutdown) {
         const EngineSubsystemType subsystems[] = {
             MakeSubsystemType<EngineSubsystem, AlphaSubsystem>("Alpha")};
         EngineConfig config;
+        config.modules = &test::ProcessModules();
         config.client = &client;
         config.subsystems = subsystems;
         Engine engine(allocator);
@@ -319,6 +478,7 @@ TEST(Engine_DuplicateTypeRegistrationFailsInitialization) {
     SystemAllocator allocator;
     {
         EngineConfig config;
+        config.modules = &test::ProcessModules();
         // World 타입 등록은 멱등이라 다시 불러도 성공한다(모듈 로더가 이미 등록한 타입은 건너뛴다).
         // native 타입을 두 번 등록하면 AlreadyExists로 실패하고, 첫 등록 토큰이 남은 채로
         // 정리된다(Teardown은 Unregister하지 않고 TypeRegistry::Shutdown에 맡긴다).
@@ -354,6 +514,7 @@ TEST(Engine_RequestExitFromHookAndDeferredWorldDestroy) {
     {
         RecordingHooks hooks;
         EngineConfig config;
+        config.modules = &test::ProcessModules();
         config.hooks = &hooks;
         config.fixedFrameDeltaSeconds = 0.016;
         config.registerTypes = &RegisterGameTypes;
@@ -386,6 +547,7 @@ TEST(Engine_MultipleWorldsTickEachFrameAndDestroyOutsideFrameIsImmediate) {
     SystemAllocator allocator;
     {
         EngineConfig config;
+        config.modules = &test::ProcessModules();
         config.fixedFrameDeltaSeconds = 0.016;
         config.registerTypes = &RegisterGameTypes;
         Engine engine(allocator);
@@ -479,6 +641,7 @@ TEST(Engine_RegistersWorldThenModulesThenNativeTypesAndShutsDown) {
     SystemAllocator allocator;
     {
         EngineConfig config;
+        config.modules = &test::ProcessModules();
         config.fixedFrameDeltaSeconds = 0.016;
         config.registerModuleTypes = &RegisterFixtureModules;
         config.registerTypes = &RegisterNativesLast;
@@ -524,6 +687,7 @@ TEST(Engine_InitializationFailureTeardownReleasesNativeDerivedTypes) {
     SystemAllocator allocator;
     {
         EngineConfig config;
+        config.modules = &test::ProcessModules();
         config.registerModuleTypes = [](ModuleRegistration& modules) noexcept {
             return generated::WorldTestFixtures::RegisterModuleTypes(modules);
         };
@@ -542,6 +706,7 @@ TEST(Engine_InitializationFailureTeardownReleasesNativeDerivedTypes) {
             MakeSubsystemType<EngineSubsystem, AlphaSubsystem>("Alpha"),
             MakeSubsystemType<EngineSubsystem, FailingSubsystem>("Failing")};
         EngineConfig config;
+        config.modules = &test::ProcessModules();
         config.subsystems = subsystems;
         config.registerTypes = &RegisterNativeGameTypes;
         Engine engine(allocator);
@@ -624,6 +789,7 @@ TEST(Engine_ShutdownStageHooksRunInPlanOrderAndRepeatDrainUntilClosed) {
         const EngineSubsystemType subsystems[] = {
             MakeSubsystemType<EngineSubsystem, ShutdownSubsystem>("Shutdown")};
         EngineConfig config;
+        config.modules = &test::ProcessModules();
         config.hooks = &hooks;
         config.subsystems = subsystems;
         config.maxFrames = 1;
@@ -654,6 +820,7 @@ TEST(Engine_ShutdownStageFailureIsReportedWithoutSkippingLaterStages) {
         ShutdownHooks hooks;
         hooks.failWork = true;
         EngineConfig config;
+        config.modules = &test::ProcessModules();
         config.hooks = &hooks;
         Engine engine(allocator);
         REQUIRE(engine.Initialize(config));
@@ -672,6 +839,7 @@ TEST(Engine_ShutdownStageFailureIsReportedWithoutSkippingLaterStages) {
         ShutdownHooks hooks;
         hooks.pendingRounds = NumericLimits<uint32>::Max();
         EngineConfig config;
+        config.modules = &test::ProcessModules();
         config.hooks = &hooks;
         Engine engine(allocator);
         REQUIRE(engine.Initialize(config));
@@ -868,6 +1036,7 @@ TEST(EngineLog_EachInitializationStageFailureIsLoggedOnceWithItsStage) {
     // 할당 시도 수를 잰 뒤(실패 없음) 그 시도 각각을 실패시켜 단계 판정을 모두 확인한다.
     {
         EngineConfig config;
+        config.modules = &test::ProcessModules();
         config.registerTypes = &RecordAttempts;
         allocator.DisableFailure();
         Engine engine(allocator);
@@ -884,6 +1053,7 @@ TEST(EngineLog_EachInitializationStageFailureIsLoggedOnceWithItsStage) {
         logs.Pump();
         capturedLogs.Reset();
         EngineConfig config;
+        config.modules = &test::ProcessModules();
         config.registerTypes = &RecordAttempts;
         allocator.FailOnAttempt(attempt);
         {
@@ -917,6 +1087,7 @@ TEST(EngineLog_EachInitializationStageFailureIsLoggedOnceWithItsStage) {
     {
         capturedLogs.Reset();
         EngineConfig config;
+        config.modules = &test::ProcessModules();
         config.registerTypes = &FailNativeRegistration;
         Engine engine(system);
         CHECK(engine.Initialize(config).Error() == ErrorCode::AlreadyExists);
@@ -930,6 +1101,7 @@ TEST(EngineLog_EachInitializationStageFailureIsLoggedOnceWithItsStage) {
         const EngineSubsystemType subsystems[] = {
             MakeSubsystemType<EngineSubsystem, FailingSubsystem>("Failing")};
         EngineConfig config;
+        config.modules = &test::ProcessModules();
         config.subsystems = subsystems;
         Engine engine(system);
         CHECK(engine.Initialize(config).Error() == ErrorCode::OutOfMemory);
@@ -943,6 +1115,7 @@ TEST(EngineLog_EachInitializationStageFailureIsLoggedOnceWithItsStage) {
         RecordingClient client;
         client.fail = true;
         EngineConfig config;
+        config.modules = &test::ProcessModules();
         config.client = &client;
         Engine engine(system);
         CHECK(engine.Initialize(config).Error() == ErrorCode::DependencyFailed);
@@ -954,6 +1127,7 @@ TEST(EngineLog_EachInitializationStageFailureIsLoggedOnceWithItsStage) {
     {
         capturedLogs.Reset();
         EngineConfig config;
+        config.modules = &test::ProcessModules();
         Engine engine(system);
         REQUIRE(engine.Initialize(config));
         CHECK(engine.Initialize(config).Error() == ErrorCode::InvalidArgument);
@@ -973,6 +1147,7 @@ TEST(EngineLog_DeferredWorldDestroyWarnsOnceAndReportsResolution) {
     SystemAllocator allocator;
     {
         EngineConfig config;
+        config.modules = &test::ProcessModules();
         config.fixedFrameDeltaSeconds = 0.016;
         config.registerTypes = &RegisterGameTypes;
         Engine engine(allocator);
@@ -1028,6 +1203,7 @@ TEST(EngineLog_RepeatedWorldTickFailureIsLoggedOnceThenSummarized) {
     SystemAllocator allocator;
     {
         EngineConfig config;
+        config.modules = &test::ProcessModules();
         config.fixedFrameDeltaSeconds = 0.016;
         config.registerTypes = &RegisterGameTypes;
         Engine engine(allocator);
@@ -1075,6 +1251,7 @@ TEST(EngineLog_TickPrerequisiteCycleIsRejectedWithActorNames) {
     SystemAllocator allocator;
     {
         EngineConfig config;
+        config.modules = &test::ProcessModules();
         config.fixedFrameDeltaSeconds = 0.016;
         config.registerTypes = &RegisterGameTypes;
         Engine engine(allocator);
@@ -1119,6 +1296,7 @@ TEST(EngineLog_RunReportsFramesAndReasonAndCreateWorldFailureStage) {
     SystemAllocator allocator;
     {
         EngineConfig config;
+        config.modules = &test::ProcessModules();
         config.fixedFrameDeltaSeconds = 0.016;
         config.maxFrames = 3;
         Engine engine(allocator);
@@ -1205,6 +1383,7 @@ int EngineRequestExitProbe(int, const char* const*) noexcept {
     SystemAllocator allocator;
     Engine engine(allocator);
     EngineConfig config;
+    config.modules = &test::ProcessModules();
     if (!engine.Initialize(config)) {
         return 2;
     }
@@ -1232,6 +1411,7 @@ TEST(Engine_MarksRunStagesForCrashRecords) {
     {
         StageRecorder recorder;
         EngineConfig config;
+        config.modules = &test::ProcessModules();
         config.hooks = &recorder;
         config.client = &recorder;
         Engine engine(allocator);
@@ -1331,6 +1511,7 @@ int EngineCrashStageProbe(int argc, const char* const* argv) noexcept {
     CrashingStage stage;
     stage.crashOnStart = strcmp(argv[3], "init") == 0;
     EngineConfig config;
+    config.modules = &test::ProcessModules();
     config.hooks = &stage;
     config.client = &stage;
     Engine engine(allocator);

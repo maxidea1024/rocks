@@ -1,6 +1,6 @@
 # 공통 실행 진입점과 네이티브 크래시 수집 설계
 
-기준일: 2026-11-20, 개정 10(7.4절: 게임 템플릿과 Commandlet도 범용 할당자를 쓴다 — GC 규모 세션의 AL7). 개정 9(11.5절: 프로세스 안 덤프를 자기 snapshot에서 써서 마감 집행 스레드가 멈추지 않게 함). 개정 8(7.4·8.1·8.2·18절: 범용 할당자 — `ApplicationSettings::defaultAllocator`·`ApplicationContext::DefaultAllocator()`, 기본은 Launch의 `SystemAllocator` 위에 둔 `BinnedAllocator`. GC 규모 세션의 AL6, 사용자 지시). 개정 7(10.5·13.2절: Asan 구성의 stack 보장분을 ASan stack overflow 보고에 맞춰 키움). 개정 6(macOS CI 두 건: 14.1절 굳힌 뿌리 상한을 플랫폼 공통으로, 8.7·17절 POSIX abort 재진입의 기대값). 개정 5(19.6절: 로깅 쪽 반영 완료 — 로깅 문서 개정 번호 재정리, LogFile·LogDirectory 칸). 개정 4(LC1–LC7 구현 반영, LC8 문서 마무리). 결정은 22절, 단계는 23절, 미확인 사실은 24절, 바뀐 점과 단계별로 설계와 다르게 정한 점은 25절에 있다. 사용법은 [공통 실행 진입점과 크래시 수집 사용 안내](../Implementation/CrashHandlingAndLaunch.ko.md)에 있다.
+기준일: 2026-11-20, 개정 11(7.4절: 게임 템플릿과 Commandlet도 범용 할당자를 쓴다 — GC 규모 세션의 AL7). 개정 10(7.4·8.1·8.2절: 모듈 로더 — Launch가 프로세스 모듈 로더를 소유하는 "Launch.Modules" 단계와 `ApplicationContext::Modules()`, [모듈 로더](ModuleLoader.ko.md) ML1). 개정 9(11.5절: 프로세스 안 덤프를 자기 snapshot에서 써서 마감 집행 스레드가 멈추지 않게 함). 개정 8(7.4·8.1·8.2·18절: 범용 할당자 — `ApplicationSettings::defaultAllocator`·`ApplicationContext::DefaultAllocator()`, 기본은 Launch의 `SystemAllocator` 위에 둔 `BinnedAllocator`. GC 규모 세션의 AL6, 사용자 지시). 개정 7(10.5·13.2절: Asan 구성의 stack 보장분을 ASan stack overflow 보고에 맞춰 키움). 개정 6(macOS CI 두 건: 14.1절 굳힌 뿌리 상한을 플랫폼 공통으로, 8.7·17절 POSIX abort 재진입의 기대값). 개정 5(19.6절: 로깅 쪽 반영 완료 — 로깅 문서 개정 번호 재정리, LogFile·LogDirectory 칸). 개정 4(LC1–LC7 구현 반영, LC8 문서 마무리). 결정은 22절, 단계는 23절, 미확인 사실은 24절, 바뀐 점과 단계별로 설계와 다르게 정한 점은 25절에 있다. 사용법은 [공통 실행 진입점과 크래시 수집 사용 안내](../Implementation/CrashHandlingAndLaunch.ko.md)에 있다.
 
 이 문서는 두 가지를 정한다.
 - **공통 실행 진입점(Launch).** 실행 파일마다 흩어진 `main`·`wmain`의 시작·종료 처리를 한 계층으로 모은다. 플랫폼 진입점 연결, 이른 크래시 처리 설치, 인자 전달, 공통 서비스 시작·종료, 프로그램 본문 호출, 종료 코드 전달, 크래시 처리 해제 시점이 대상이다. 엔진 수명(`Engine::Initialize`·`Run`·`Shutdown`)은 다시 만들지 않는다.
@@ -567,13 +567,14 @@ bool IsTerminationRequested() noexcept;
   - 링크가 `/SUBSYSTEM:CONSOLE` 또는 `/SUBSYSTEM:WINDOWS`를 고른다.
   - 진입점 매크로와 맞지 않으면 링크 오류(진입 기호 없음)로 드러난다.
   - 기존 도구는 모두 Console로 남는다(요구 4절).
+- **모듈 로더(개정 10 — [모듈 로더](ModuleLoader.ko.md) 3.11절 ML1).** Launch가 프로세스의 모듈 로더를 소유한다(UE `FModuleManager`의 자리, 전역 접근자 없음 — MD4). `ApplicationContext::Modules()`가 그 로더이고 본문 수명 동안 유효하다. 범용 할당자로 이 실행 파일의 모듈 표(`GeneratedModuleTable()`)에서 만들고 부트 모듈(`EarliestPossible`)을 시작한다. 엔진 호스트는 `PostConfigInit`과 호스트 묶음 종료를, `Engine`은 엔진 단계를 이 로더로 돈다. Launch 모듈은 `ModuleLoader`에 의존한다.
 - **본문 서명이 `ApplicationContext&` 하나인 이유.** 인자·할당기·도구 로그·단계 표시를 모두 거기서 얻는다. 그래서 프로그램마다 시작 코드를 되풀이하지 않는다.
 - **범용 할당자(개정 8 — GC 규모 설계 18.10절, 사용자 지시 "엔진에 BinnedAllocator 연결해").** Launch가 프로세스의 범용 할당자를 소유한다(UE가 프로세스 기본 할당자를 Binned로 두는 자리).
   - `ApplicationSettings::defaultAllocator`가 `DefaultAllocatorKind::Binned`(기본)이면 Launch가 자기 `SystemAllocator`를 상위로 `BinnedAllocator`를 하나 만들고 `ApplicationContext::DefaultAllocator()`가 그것을 돌려준다. `System`이면 `DefaultAllocator()`가 `SystemAllocator()`와 같은 객체다(문제를 가를 때의 비교 수단). `configure`가 바꿀 수 있다. 명령줄 옵션은 두지 않는다.
   - 본문은 엔진·모듈·컨테이너에 `DefaultAllocator()`를 넘긴다. `SystemAllocator()`는 범용 할당자의 상위이고 Launch의 도구 로그가 쓴다 — 본문이 직접 쓸 일은 비교·진단뿐이다.
   - 수명: 설정 적용 뒤·도구 로그 앞에 만들고, 도구 로그를 멈춘 뒤에 파괴한다(8.2절). 본문이 범용 할당자의 할당을 남긴 채 돌아오면 파괴가 Fatal이다(`SystemAllocator`의 남은 할당 계약과 같다). `RequestExitWithoutStaticTeardown`이면 파괴하지 않고 `_Exit`한다(내장 진입은 그 요청을 무시하므로 파괴한다). 내장 진입은 실행마다 인스턴스 하나다.
   - 비용: 주소 범위 예약(16 GiB — Android 4 GiB, commit 아님)과 약 290 KB의 표가 Launch를 쓰는 모든 실행 파일에 든다. 범용 할당자를 쓴 스레드마다 캐시가 최대 약 2.25 MiB(`BinnedAllocator::MaxThreadCacheBytes`)다.
-  - 쓰는 곳(개정 10): Sandbox 엔진 호스트, 게임 템플릿(`Templates/Game/Foundation/Source/Main.cpp`), Commandlet(설정 문맥·`trace-report`·`log` 명령 — `core-check`는 `SystemAllocator` 자체를 점검하므로 자기 것을 만든다). 벤치 도구는 바꾸지 않는다(측정 도구는 할당자를 일부러 고른다 — GC 규모 설계 18.11.1절).
+  - 쓰는 곳(개정 11): Sandbox 엔진 호스트, Launch의 모듈 로더, 게임 템플릿(`Templates/Game/Foundation/Source/Main.cpp`), Commandlet(설정 문맥·`trace-report`·`log` 명령 — `core-check`는 `SystemAllocator` 자체를 점검하므로 자기 것을 만든다). 벤치 도구는 바꾸지 않는다(측정 도구는 할당자를 일부러 고른다 — GC 규모 설계 18.11.1절).
 
 ## 8. 흐름
 
@@ -590,19 +591,20 @@ bool IsTerminationRequested() noexcept;
 | 6 | 종료 요청 처리기(선택) | 실패는 경고만 |
 | 6a | 범용 할당자(개정 8 — `defaultAllocator`가 `Binned`면 `SystemAllocator` 위에 `BinnedAllocator`를 만든다. 번호를 밀지 않으려고 6a로 둔다) | 실패하지 않는다(내부 상태를 할당하지 못하면 Fatal) |
 | 7 | 도구 로그 서비스(`ToolLogging::Stderr`) | stderr 한 줄, 로그 없이 계속(D22) |
+| 7a | 모듈 로더(개정 10, 단계 이름 "Launch.Modules"): 범용 할당자와 `GeneratedModuleTable()`로 로더를 만들고 `StartPhase(EarliestPossible)`로 부트 모듈(Launch의 의존 폐포 — Core·ModuleLoader·Launch)을 시작한다. Modular의 `Prepare`는 ML4 | 로더 생성·부트 모듈 시작 실패는 `Log::Error` 한 번(모듈·단계·문구) 뒤 본문 없이 `ModuleStartupFailureExitCode`(1)로 끝낸다(시작한 단계만 역순 정리) |
 | 8 | `SetRunPhase(Running, "Main")` → `run(context)` | 본문의 반환값 |
-| 9 | 7 → 6a → 6 역순 정리, `SetRunPhase(Shutdown, ...)` | 정리 실패는 stderr. 종료 코드는 본문 값을 유지한다 |
+| 9 | 7a → 7 → 6a → 6 역순 정리, `SetRunPhase(Shutdown, ...)` | 정리 실패는 stderr. 종료 코드는 본문 값을 유지한다 |
 | 10 | 보호 프레임을 나와 `RemoveCrashReporting`(도우미에 `Shutdown`을 먼저 쓴다) → 종료 코드 반환(또는 `_Exit`) | — |
 
-- **초기화 실패는 성공한 단계만 역순으로 정리한다.** Launch의 단계는 3–7뿐이다(6a 포함). 각 단계의 정리는 "시작됐는지" 표시로 판단한다. 엔진 호스트의 내부 단계(HostSettings·LogHost·Trace·Engine)는 지금처럼 본문의 범위 객체와 `Engine`의 역순 정리가 맡는다.
+- **초기화 실패는 성공한 단계만 역순으로 정리한다.** Launch의 단계는 3–7a다(6a·7a 포함). 각 단계의 정리는 "시작됐는지" 표시로 판단한다. 엔진 호스트의 내부 단계(HostSettings·LogHost·Trace·Engine)는 지금처럼 본문의 범위 객체와 `Engine`의 역순 정리가 맡는다.
 - **크래시 처리를 설정보다 먼저 건다(요구 10절).** 설정 로딩·LogHost·Engine 초기화는 모두 8단계 본문 안이다.
-- **모듈 로더(ML1, 아직 없음).** [모듈 로더](ModuleLoader.ko.md) 3.9절은 7단계 뒤·8단계 전에 로더 생성·`Prepare`·부트 모듈과 `EarliestPossible` 시작을, 9단계에서 도구 로그 정리 전에 프로세스 묶음 종료를 넣는다. 지금(ML0)은 Launch가 로더를 만들지 않는다. 모듈 진입점(`ROCKS_IMPLEMENT_MODULE`)은 상수 기술과 함수뿐이라 실행 순서가 없고, 프로세스 진입점(`ROCKS_IMPLEMENT_APPLICATION`)과 겹치지 않는다(21절).
+- **모듈 로더(개정 10, ML1).** 7a단계가 로더를 만들고 부트 모듈을 시작하며, 9단계에서 도구 로그 정리 전에 프로세스 묶음을 내린다([모듈 로더](ModuleLoader.ko.md) 3.9·3.11절). 모듈 진입점(`ROCKS_IMPLEMENT_MODULE`)은 상수 기술과 함수뿐이라 실행 순서가 없고, 프로세스 진입점(`ROCKS_IMPLEMENT_APPLICATION`)과 겹치지 않는다(21절).
 - **정상 종료 정리는 한 번만 한다.** `RunApplication`은 반환 경로가 하나다. 크래시 종료는 이 경로를 타지 않는다(8.3절).
 
 ### 8.2 정상 종료
 
-1. 본문이 반환한다. 엔진 호스트는 그 전에 `Engine::Shutdown` → trace 정지 → `LogHost::Stop`을 마쳤다.
-2. Launch가 도구 로그를 멈추고, 범용 할당자가 `BinnedAllocator`면 파괴하고(남은 할당이 있으면 Fatal — 개정 8. `RequestExitWithoutStaticTeardown`이면 파괴하지 않는다), 종료 요청 처리기를 뗀다.
+1. 본문이 반환한다. 엔진 호스트는 그 전에 `Engine::Shutdown`(엔진 묶음 모듈 종료) → 호스트 묶음 모듈 종료 → trace 정지 → `LogHost::Stop`을 마쳤다.
+2. Launch가 모듈 로더의 프로세스 묶음을 내리고(부트 모듈 포함, 시작 역순 — 개정 10), 남은 모듈 lease를 Error로 진단한 뒤 로더를 파괴한다(`RequestExitWithoutStaticTeardown`이면 내리지도 파괴하지도 않는다 — 설정 문맥이 lease를 쥔 채 남았을 수 있다). 그다음 도구 로그를 멈추고, 범용 할당자가 `BinnedAllocator`면 파괴하고(남은 할당이 있으면 Fatal — 개정 8. `RequestExitWithoutStaticTeardown`이면 파괴하지 않는다), 종료 요청 처리기를 뗀다.
 3. `RemoveCrashReporting`이 다음 순서로 정리한다.
    1. `crashOwner`를 sentinel(`ShutdownOwner`)로 CAS한다. 실패하면 이미 보고가 진행 중이라는 뜻이다. 그때는 돌아오지 않고 기다리며, 종료는 소유자 T가 한다(B11).
    2. 교환 블록 상태를 `Shutdown`으로 쓰고 도우미를 깨운다.
@@ -1822,6 +1824,9 @@ bool SetCrashAnnotation(CrashAnnotation slot, const char* text, usize bytes) noe
 - Windows CI Asan 두 건(2026-11-20, run 44657190704, 개정 7).
   - **원인(수집기 설정).** `asan-policy-main-stack-overflow`·`log-crash-stack-overflow`가 `0xC0000005`로 끝났다. ASan은 stack overflow를 넘친 스레드에서 보고하는데, 그 보고가 Rocks가 잡은 stack 보장분 32 KiB 가운데 약 29 KiB를 쓴다(로컬 측정). CI에서는 ASan 보고가 `ERROR` 줄 직후 다시 넘쳤다. 로컬에서 보장분을 28 KiB로 줄이면 같은 출력(ERROR 줄에서 끝)과 종료 코드가 재현되고, 29 KiB부터는 death callback까지 간다. 공식 LLVM 21.1.6과 Foundation 대상으로 빌드해도 32 KiB에서는 로컬에서 통과했으므로, CI와의 차이는 남은 여유 3 KiB를 넘는 추가 stack 사용이다(CPU의 XSAVE 영역 크기 등 기계 차이). 유니티·PCH나 할당자 변경과는 무관하다(Debug 시험·Asan 시험 2,659건은 CI에서도 통과했다).
   - **수정.** `CrashStackReserveBytes`를 Asan 구성에서 128 KiB로 키웠다(일반 구성 32 KiB 그대로, 10.5절). 일반 구성은 보장분 4 KiB로도 stack overflow 보고·덤프가 끝나 여유가 충분하다(Debug 측정).
+- 개정 10(2026-11-20): 모듈 로더 통합([모듈 로더](ModuleLoader.ko.md) ML1, 개정 5 3.11절).
+  - 실행 단계에 "Launch.Modules"(7a)를 더했다(도구 로그 뒤 — 8.2절의 역순 정리에서 도구 로그보다 먼저 프로세스 묶음을 내린다). 실패는 Abort(`ModuleStartupFailureExitCode`).
+  - `ApplicationContext::Modules()`를 더했다(7.4절). Launch 모듈 규칙이 `ModuleLoader`에 의존하고 부트 모듈 표지 `ProvidesLaunch`를 켠다.
 - 개정 8(2026-11-20): 범용 할당자(GC 규모 세션의 AL6 — 사용자 지시 "엔진에 BinnedAllocator 연결해", GC 규모 설계 18.10절).
   - `ApplicationSettings::defaultAllocator`(`DefaultAllocatorKind` — 기본 `Binned`, `System`)와 `ApplicationContext::DefaultAllocator()`를 더했다(7.4절). `SystemAllocator()`는 그대로다.
   - 실행 단계에 "Launch.DefaultAllocator"를 더했다(종료 요청 처리기 뒤, 도구 로그 앞 — 8.2절의 역순 정리에서 도구 로그 다음에 파괴된다).
@@ -1831,4 +1836,4 @@ bool SetCrashAnnotation(CrashAnnotation slot, const char* text, usize bytes) noe
   - **경로.** 그 probe(`engine-crash-stage`)는 `CrashHelperPolicy::InProcess`로 설치한다. 그래서 W가 종료 콜백 뒤 프로세스 안 덤프를 쓴다. 크래시 때 엔진의 worker 스레드가 살아 있다(`BeginShutdown`은 executor를 멈추기 전이다).
   - **유일한 무기한 대기.** 크래시한 스레드의 대기(`HandleCrash`의 `WaitForSingleObject(reportFinished, TotalWaitMilliseconds)` 뒤 `TerminateProcess`)와 겹친 스레드의 대기(`WaitForOwner`, 마감 + 여유 뒤 종료)는 모두 유한하다. 종료 콜백은 공용 마감을 지키고 로그 flush는 막히는 lock을 쓰지 않는다. 마감 집행을 무력하게 만드는 곳은 살아 있는 자기 프로세스의 `MiniDumpWriteDump`뿐이었다(11.5절: dbghelp가 마감 스레드까지 suspend). 그 순간 worker가 heap 할당 중(`SystemAllocator` → 프로세스 heap)이거나 스레드 생성·종료(loader lock) 중이면 영원히 멈춘다. 부하가 큰 전체 실행에서만 드물게 나는 관찰과 맞는다.
   - **수정.** 프로세스 안 덤프를 자기 snapshot에서 쓴다(11.5절). gate로 결정적으로 재현하는 시험을 더했다.
-- 개정 10(2026-11-20): 범용 할당자를 쓰는 곳을 넓혔다(GC 규모 세션의 AL7 — 사용자 지시 "남은작업 진행", GC 규모 설계 18.11절). 게임 템플릿과 Commandlet이 `context.DefaultAllocator()`를 쓴다. Launch의 코드는 바뀌지 않았다. 시험: 내장 진입이 `allocator-leak-no-teardown`에서도 범용 할당자를 파괴해 Fatal로 끝나는 것(`Native.Launch.embedded-host`), 남긴 할당의 종료 코드를 Fatal 종료 코드와 견주는 것(`Native.Launch.default-allocator`).
+- 개정 11(2026-11-20): 범용 할당자를 쓰는 곳을 넓혔다(GC 규모 세션의 AL7 — 사용자 지시 "남은작업 진행", GC 규모 설계 18.11절). 게임 템플릿과 Commandlet이 `context.DefaultAllocator()`를 쓴다. Launch의 코드는 바뀌지 않았다. 시험: 내장 진입이 `allocator-leak-no-teardown`에서도 범용 할당자를 파괴해 Fatal로 끝나는 것(`Native.Launch.embedded-host`), 남긴 할당의 종료 코드를 Fatal 종료 코드와 견주는 것(`Native.Launch.default-allocator`).

@@ -68,6 +68,7 @@ TEST(Engine_RunsOnBinnedAllocatorWithGcWorkers) {
         BinnedAllocator allocator(system);
         {
             EngineConfig config;
+            config.modules = &test::ProcessModules();
             config.fixedFrameDeltaSeconds = FrameSeconds;
             config.gcWorkers = 2;
             Engine engine(allocator);
@@ -108,6 +109,7 @@ TEST(Engine_RunsOnBinnedAllocatorWithSerialMarking) {
         BinnedAllocator allocator(system);
         {
             EngineConfig config;
+            config.modules = &test::ProcessModules();
             config.fixedFrameDeltaSeconds = FrameSeconds;
             config.gcWorkers = 0;
             Engine engine(allocator);
@@ -140,6 +142,7 @@ TEST(Engine_RestartsOnTheSameBinnedAllocator) {
         for (uint32 lifetime = 0; lifetime < Lifetimes; ++lifetime) {
             {
                 EngineConfig config;
+                config.modules = &test::ProcessModules();
                 config.fixedFrameDeltaSeconds = FrameSeconds;
                 config.gcWorkers = 2;
                 Engine engine(allocator);
@@ -224,6 +227,7 @@ TEST(Engine_TrimsMemoryAfterFullCollectionReclaimAndWorldDestroy) {
             EngineConfig config;
             config.fixedFrameDeltaSeconds = FrameSeconds;
             config.gcWorkers = 2;
+            config.modules = &test::ProcessModules();
             Engine engine(allocator);
             REQUIRE(engine.Initialize(config));
             WorldCreateDesc desc;
@@ -289,6 +293,7 @@ TEST(Engine_DoesNotTrimMemoryOnIncrementalCyclesOrWhenDisabled) {
             EngineConfig config;
             config.fixedFrameDeltaSeconds = FrameSeconds;
             config.gcWorkers = 0;
+            config.modules = &test::ProcessModules();
             Engine engine(allocator);
             REQUIRE(engine.Initialize(config));
             // 기본 일정(증분): Actor 파괴가 증분 cycle을 돌려 회수한다.

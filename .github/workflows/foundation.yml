@@ -6,6 +6,11 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+# One run per commit: when the same commit is pushed to several branches (a feature branch and feature/engine-runtime), the
+# newer run cancels the older one instead of running the identical build twice.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.sha }}
+  cancel-in-progress: true
 jobs:
   native:
     if: github.event_name != 'push' || contains(github.event.head_commit.message, '[ci]')

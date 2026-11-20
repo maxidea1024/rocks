@@ -36,6 +36,10 @@ enum class ModuleState : uint8 {
     Failed
 };
 
+// 동시에 붙일 수 있는 타입 등록기의 최대 수다(동시에 사는 Engine마다 하나 —
+// Docs/Design/ModuleLoader.ko.md 3.11절).
+inline constexpr usize MaxTypeRegistrars = 4;
+
 // 모듈의 종료 시점을 정하는 묶음이다(3.3절). 안쪽 묶음일수록 값이 크다.
 enum class ModuleGroup : uint8 {
     // 부트 모듈·EarliestPossible: 로더와 같이 산다.
@@ -56,22 +60,47 @@ enum class ModuleChange : uint8 {
 const char* ModuleStateName(ModuleState state) noexcept;
 const char* ModuleGroupName(ModuleGroup group) noexcept;
 
+// 단계가 속한 묶음이다(3.3절 표). EarliestPossible은 Process, PostConfigInit은 Host, PreDefault부터
+// PostEngineInit까지는 Engine이다. None은 묶음이 없으므로 쓰지 않는다(Process를 돌려준다).
+constexpr ModuleGroup LoadingPhaseGroup(LoadingPhase phase) noexcept {
+    switch (phase) {
+    case LoadingPhase::EarliestPossible:
+    case LoadingPhase::None:
+        return ModuleGroup::Process;
+    case LoadingPhase::PostConfigInit:
+        return ModuleGroup::Host;
+    case LoadingPhase::PreDefault:
+    case LoadingPhase::Default:
+    case LoadingPhase::PostDefault:
+    case LoadingPhase::PostEngineInit:
+        return ModuleGroup::Engine;
+    }
+
+    return ModuleGroup::Process;
+}
+
 // 모듈 로더다(UE FModuleManager 대응, 3.4절). 빌드가 만든 모듈 표(GeneratedModuleTable)로 모듈을
-// 의존 순서대로 시작하고, 묶음마다 시작 역순으로 내린다. 프로세스에 하나이고 Launch가
-// 소유한다(MD4). 전역 접근자는 없다. 필요한 곳은 참조를 받는다.
+// 단계(StartPhase)나 이름(Load)으로 의존 순서대로 시작하고, 묶음마다 시작 역순으로 내린다.
+// 프로세스에 하나이고 Launch가 소유한다(MD4 — launch::ApplicationContext::Modules()). 전역 접근자는
+// 없다. 필요한 곳은 참조를 받는다.
 //
-// 사용 예:
+// 사용 예(Launch·엔진 호스트·Engine이 나눠 하는 일, 3.11절):
 //   auto created = ModuleLoader::TryCreate(allocator, GeneratedModuleTable());
-//   if (!created) { return created.Error(); }
 //   UniquePtr<ModuleLoader> loader = Move(created.Value());
-//   ModuleLoadReport report = loader->Load("Engine");          // Engine의 의존부터 시작한다
-//   if (!report.IsOk()) { ...기록하고 loader->ShutdownGroup(ModuleGroup::Process)... }
-//   auto* engine = loader->Find<EngineModule>("Engine");
-//   ...
-//   loader->ShutdownGroup(ModuleGroup::Process);              // 시작 역순으로 내린다
+//   ModuleLoadReport boot = loader->StartPhase(LoadingPhase::EarliestPossible); // Launch
+//   ...HostSettings·LogHost...
+//   ModuleLoadReport host = loader->StartPhase(LoadingPhase::PostConfigInit);   // 엔진 호스트
+//   ModuleLoadReport engine = loader->StartEngineGroup(); //
+//   Engine::Initialize(PreDefault–PostDefault) if (!engine.IsOk()) { ...기록하고 시작 중단... }
+//   loader->Load("Probe");                                // 요청 시 적재 모듈
+//   auto* probe = loader->Find<ProbeModule>("Probe");
+//   loader->ShutdownEngineGroup();                        // Engine::Shutdown
+//   loader->ShutdownGroup(ModuleGroup::Host);             // 엔진 호스트
+//   loader->ShutdownGroup(ModuleGroup::Process);          // Launch 정리
 //
-// 스레드: Load·ShutdownGroup·Services·Changed 구독은 로더를 만든 스레드(로더 스레드)에서만 한다.
-// Load는 다른 스레드에서 부르면 WrongThread report이고, ShutdownGroup은 Fatal이다.
+// 스레드: Load·StartPhase·엔진 묶음·ShutdownGroup·Services·Changed 구독은 로더를 만든 스레드(로더
+// 스레드)에서만 한다. Load·StartPhase·StartEngineGroup은 다른 스레드에서 부르면 WrongThread
+// report이고, ShutdownGroup·ShutdownEngineGroup은 Fatal이다.
 // IsStarted·State·Find·LeaseCount는 어느 스레드에서든 부를 수 있다(상태 칸을 원자적으로 읽는다).
 // 다른 스레드에서 얻은 수명 객체 포인터는 그 모듈이 내려가기 전까지만 유효하며, 내리는 시점과의
 // 동기화는 호출자 책임이다.
@@ -99,11 +128,12 @@ public:
     // TryCreate 전용이다(UniquePtr::TryMake가 부른다). 직접 부를 수 없다.
     ModuleLoader(CreateTag, Allocator& allocator, ModuleTable table) noexcept;
 
-    // 아직 시작해 있는 모듈을 안쪽 묶음부터 종료 절차로 내린 뒤 모든 수명 객체를 파괴한다.
+    // 아직 시작해 있는 모듈을 안쪽 묶음부터 종료 절차로 내린 뒤 모든 수명 객체를 파괴한다. 엔진
+    // 묶음 사용자(StartEngineGroup)가 남아 있으면 Fatal이다.
     // SupportsAutomaticShutdown() == false 모듈은 Shutdown 없이 객체만 파괴한다(UE와 같다). 로더
     // 스레드에서 파괴한다. 발급한 lease가 남아 있으면 Fatal이다(lease 해제가 파괴된 기록을 쓰지
     // 않게). 호스트는 파괴 전에 ModulesWithLeases로 남은 lease를 진단해 기록한다. 타입 등록기가
-    // 붙어 있으면 그 등록을 되돌리고 뗀다(등록기는 그때까지 살아 있어야 한다).
+    // 붙어 있으면 그 등록을 되돌리고 모두 뗀다(등록기는 그때까지 살아 있어야 한다).
     ~ModuleLoader() noexcept;
 
     ModuleLoader(const ModuleLoader&) = delete;
@@ -118,6 +148,47 @@ public:
     // 성공한 모듈마다 Changed(name, Started)를 시작 순서대로 낸다.
     ModuleLoadReport Load(StringView name) noexcept;
 
+    // 아직 돌지 않은 단계부터 phase까지 차례로 돈다(3.3·3.11절, MD6). 단계마다 현재 묶음을 그
+    // 단계의 묶음(LoadingPhaseGroup)으로 바꾸고, 표 순서(의존 순서)로 그 단계 값을 가진 행
+    // 가운데 요청 시 적재 행(onRequest)이 아닌 행을 Load처럼 시작한다. 이미 시작한 모듈은 할 일이
+    // 없다.
+    // - 이미 돈 단계를 다시 부르면 할 일 없이 성공이다(UE와 같다).
+    // - 실패하면 그 단계를 멈추고 report를 돌려준다(requested는 실패한 단계 이름 — 부른 단계보다
+    // 앞일
+    //   수 있다, 나머지는 Load와 같다).
+    //   그 단계는 돈 것으로 치지 않는다. 이미 시작한 모듈은 내리지 않는다 — 호출자가 그 묶음을
+    //   ShutdownGroup으로 내린다.
+    // - 로더 스레드가 아니면 WrongThread, 종료 중이면 ShuttingDown report다.
+    // - 계약 위반은 Fatal이다: phase가 None이거나, 지금 묶음보다 앞 묶음의 단계를 부르거나(UE는
+    //   Error 로그), Load 진행 중이거나 묶음 종료 콜백 안에서 부른다.
+    ModuleLoadReport StartPhase(LoadingPhase phase) noexcept;
+
+    // phase를 다 돌았는지다(ShutdownGroup이 그 묶음을 내리면 다시 false다). None은 false다.
+    bool PhaseStarted(LoadingPhase phase) const noexcept;
+
+    // 지금 묶음이다. 마지막으로 돈(또는 도는 중인) 단계의 묶음이고, Load로 시작하는 모듈이 여기에
+    // 속한다(3.3절). 묶음을 내리면 바깥 묶음으로 돌아간다.
+    ModuleGroup CurrentGroup() const noexcept {
+        return currentGroup_;
+    }
+
+    // 엔진 묶음 사용자를 하나 더한다(MD9 참조 수 — 동시에 여러 Engine). 처음 사용자면
+    // StartPhase(PostDefault)로 엔진 앞 단계(PreDefault·Default·PostDefault)를 돈다. 그것이
+    // 실패하면 엔진 묶음을 스스로 내리고 사용자 수를 되돌린 뒤 실패 report를 돌려준다. 성공하면
+    // 반드시 ShutdownEngineGroup으로 짝을 맞춘다. PostEngineInit은 각 Engine이 StartPhase로 부른다.
+    // 로더 스레드가 아니면 WrongThread report다(사용자 수는 그대로). StartPhase와 같은 계약 위반은
+    // Fatal이다.
+    ModuleLoadReport StartEngineGroup() noexcept;
+
+    // 엔진 묶음 사용자를 하나 뺀다. 마지막 사용자면 엔진 묶음을 내린다(ShutdownGroup(Engine)과 같은
+    // 절차). 사용자가 없거나, 로더 스레드가 아니거나, ShutdownGroup과 같은 계약 위반이면 Fatal이다.
+    void ShutdownEngineGroup() noexcept;
+
+    // 지금 엔진 묶음 사용자 수다.
+    usize EngineGroupUsers() const noexcept {
+        return engineUsers_;
+    }
+
     // group과 그보다 안쪽 묶음에서 시작한 모듈을 내린다(MD9, UE UnloadModulesAtShutdown 절차).
     // 1. SupportsAutomaticShutdown() == true인 Started 모듈을 시작 순번의 역순으로 고른다.
     // 2. 고른 모듈 전체의 PreUnload를 먼저 부른다. 이 동안 대상 모듈은 모두 Started로 보인다.
@@ -126,8 +197,10 @@ public:
     //    의존 모듈은 Find로 보인다.
     // Changed는 내지 않는다. 진행 중의 Load는 ShuttingDown이다. Process 묶음을 내리면 그 뒤 모든
     // Load가 ShuttingDown이다(프로세스 종료). 호스트·엔진 묶음은 다시 시작할 수 있다(다음 Engine).
-    // 내릴 모듈이 없으면 할 일이 없다. 로더 스레드가 아니거나, Load 진행 중이거나, 묶음 종료 콜백
-    // 안에서 부르면 Fatal이다.
+    // 내린 묶음과 안쪽 묶음의 단계는 다시 돌 수 있게 되돌리고 지금 묶음은 바깥 묶음이 된다(엔진
+    // 묶음을 내리면 다음 Engine이 엔진 단계를 다시 돈다). 내릴 모듈이 없으면 할 일이 없다. 로더
+    // 스레드가 아니거나, Load 진행 중이거나, 묶음 종료 콜백 안에서 부르거나, 엔진 묶음
+    // 사용자(StartEngineGroup)가 남아 있으면 Fatal이다.
     void ShutdownGroup(ModuleGroup group) noexcept;
 
     // name 모듈이 Started인지다. 표에 없으면 false다.
@@ -170,24 +243,25 @@ public:
     // 이름은 정적 수명이다(모듈 표).
     usize ModulesWithLeases(Span<StringView> names) const noexcept;
 
-    // 타입 등록기를 붙이고 이미 시작한 모듈의 타입을 시작 순서로 몰아서 등록한다(3.6·3.10절 MD15).
-    // 붙은 뒤 시작하는 모듈은 Startup 직전에 등록하고(실패하면 StartupFailed, 단계
-    // "RegisterTypes"), Startup이 실패하면 되돌린다. 묶음 종료는 각 모듈의 Shutdown 뒤 그 모듈
-    // 타입을 되돌린다. 몰아서 등록하다 실패하면 이번에 등록한 것을 시작 역순으로 되돌리고 붙이지
-    // 않은 채 report(StartupFailed, failed에 그 모듈, error에 등록기 오류)를 돌려준다. 로더
-    // 스레드가 아니면 WrongThread report다. 이미 붙어 있거나, Load 진행 중이거나, 묶음 종료 콜백
-    // 안에서 부르면 Fatal이다(등록기는 한 번에 하나 — 여러 Engine의 참조 수는 ML1). registrar는 뗄
-    // 때까지 살아 있어야 한다.
+    // 타입 등록기를 붙이고 이미 시작한 모듈의 타입을 시작 순서로 그 등록기에 몰아서
+    // 등록한다(3.6·3.10·3.11절 MD15). 등록기는 MaxTypeRegistrars개까지 함께 붙는다(동시에 사는
+    // Engine마다 자기 TypeRegistry). 붙은 뒤 시작하는 모듈은 Startup 직전에 붙은 모든 등록기에
+    // 등록하고(하나라도 실패하면 이 모듈이 이미 등록한 등록기를 되돌리고 StartupFailed, 단계
+    // "RegisterTypes"), Startup이 실패하면 되돌린다. 묶음 종료는 각 모듈의 Shutdown 뒤 모든
+    // 등록기에서 그 모듈 타입을 되돌린다. 몰아서 등록하다 실패하면 이번에 등록한 것을 시작 역순으로
+    // 되돌리고 붙이지 않은 채 report(StartupFailed, failed에 그 모듈, error에 등록기 오류)를
+    // 돌려준다. 로더 스레드가 아니면 WrongThread report다. 같은 등록기가 이미 붙어 있거나, 자리가
+    // 없거나, Load 진행 중이거나, 묶음 종료 콜백 안에서 부르면 Fatal이다. registrar는 뗄 때까지
+    // 살아 있어야 한다.
     ModuleLoadReport AttachTypeRegistrar(ModuleTypeRegistrar& registrar) noexcept;
 
-    // 남은 타입 등록을 시작 역순으로 되돌리고 등록기를 뗀다. 붙어 있지 않으면 할 일이 없다. 로더
-    // 스레드가 아니거나, Load 진행 중이거나, 묶음 종료 콜백 안에서 부르면 Fatal이다.
-    void DetachTypeRegistrar() noexcept;
+    // registrar에 남은 타입 등록을 시작 역순으로 되돌리고 그 등록기를 뗀다. 붙어 있지 않으면 할
+    // 일이 없다. 로더 스레드가 아니거나, Load 진행 중이거나, 묶음 종료 콜백 안에서 부르면
+    // Fatal이다.
+    void DetachTypeRegistrar(ModuleTypeRegistrar& registrar) noexcept;
 
-    // 붙어 있는 타입 등록기다. 없으면 null이다.
-    ModuleTypeRegistrar* TypeRegistrar() const noexcept {
-        return registrar_;
-    }
+    // 지금 붙어 있는 타입 등록기 수다.
+    usize TypeRegistrarCount() const noexcept;
 
     // 호스트 서비스 표다(3.1절). 로더 스레드에서만 쓴다.
     HostServices& Services() noexcept {
@@ -221,8 +295,8 @@ private:
         uint64 startOrder = 0;
         // 진행 중인 묶음 종료가 이 모듈의 PreUnload를 불렀고 Shutdown이 남았다.
         bool pendingShutdown = false;
-        // 붙은 타입 등록기에 이 모듈의 타입을 등록했다.
-        bool typesRegistered = false;
+        // 이 모듈의 타입을 등록한 등록기 자리의 비트다(registrars_ 색인).
+        uint32 registeredSlots = 0;
         // 살아 있는 lease 수다.
         usize leases = 0;
     };
@@ -232,20 +306,31 @@ private:
     Result<void> Initialize(ModuleTable table) noexcept;
     bool StartRecord(usize index, ModuleLoadReport& report) noexcept;
     void ShutdownRecords(ModuleGroup group) noexcept;
-    bool RegisterRecordTypes(usize index, ModuleLoadReport& report) noexcept;
-    void UnregisterRecordTypes(usize index) noexcept;
-    void UnregisterAllTypes() noexcept;
+    bool RunPhase(LoadingPhase phase, ModuleLoadReport& report) noexcept;
+    bool RejectStart(ModuleLoadReport& report, StringView requested, bool phase) const noexcept;
+    void CheckShutdownCall(bool engineGroup) const noexcept;
+    bool RegisterRecordTypes(usize index, usize slot, ModuleLoadReport& report) noexcept;
+    bool RegisterRecordTypesAll(usize index, ModuleLoadReport& report) noexcept;
+    void UnregisterRecordTypes(usize index, usize slot) noexcept;
+    void UnregisterRecordTypesAll(usize index) noexcept;
+    void UnregisterSlotTypes(usize slot) noexcept;
+    usize SlotOf(const ModuleTypeRegistrar& registrar) const noexcept;
     void CheckRegistrarCall() const noexcept;
 
     Allocator* allocator_;
     HostServices services_;
     ModuleTable table_;
-    ModuleTypeRegistrar* registrar_ = nullptr;
+    // 붙은 타입 등록기다. 빈 자리는 null이다.
+    ModuleTypeRegistrar* registrars_[MaxTypeRegistrars] = {};
     Array<Record> records_;
     // 모든 행의 의존 색인을 이어 둔 배열이다. 행마다 [dependencyStart, dependencyStart + count)다.
     Array<usize> dependencies_;
     uint64 loaderThread_;
     ModuleGroup currentGroup_ = ModuleGroup::Process;
+    // 아직 다 돌지 않은 첫 단계다(LoadingPhase 값 순서). None이면 모든 단계를 돌았다.
+    LoadingPhase nextPhase_ = LoadingPhase::EarliestPossible;
+    // 엔진 묶음 사용자 수다(StartEngineGroup·ShutdownEngineGroup).
+    usize engineUsers_ = 0;
     // 다음 시작 순번이다. 0은 시작하지 않은 모듈의 값이다.
     uint64 nextStartOrder_ = 1;
     // 진행 중인 Load 호출 수(Startup 안의 중첩 Load 포함)다. 0이 아니면 ShutdownGroup은 Fatal이다.

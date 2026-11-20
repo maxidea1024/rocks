@@ -2642,6 +2642,27 @@
     },
     {
       "kind": "field",
+      "name": "rocks::asset_fixture::TestMeshAsset::editorMesh",
+      "id": "5e21b3f96886475cab035022c0a5aee7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::TestMeshAsset::lods",
+      "id": "99bb954ab8344350bcb0aac17d5ac666",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::TestMeshAsset::mesh",
+      "id": "d00e3e9244d84b4d89465eb116965930",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::asset_fixture::TestPart::data",
       "id": "a6156fae67e542c4b42137f27f00b580",
       "aliases": [],
@@ -3190,6 +3211,13 @@
       "kind": "type",
       "name": "rocks::asset_fixture::TestAsset",
       "id": "985f83177cf2447d9e089bee68fb04a8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::asset_fixture::TestMeshAsset",
+      "id": "92672eb6a18d401f811054cb028076b6",
       "aliases": [],
       "retired": false
     },

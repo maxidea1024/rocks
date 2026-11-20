@@ -1,7 +1,6 @@
 #include <Base/Compiler.h>
 #include <Config/ConfigContext.h>
 #include <Core/Assert.h>
-#include <Core/Module/ModuleEntry.h>
 #include <Core/Diagnostics/Log.h>
 #include <Core/Diagnostics/LogContext.h>
 #include <Engine/Engine.h>
@@ -42,12 +41,13 @@ enum class InitStage : uint8 {
     Subsystems,
     PermanentRegion,
     ClientStart,
+    PostEngineInit,
     Count
 };
 
 constexpr const char* InitStageNames[] = {
-    "TypeRegistry", "ModuleRegistration", "RegisterTypes",   "ObjectRegistry",
-    "GcScheduler",  "Subsystems",         "PermanentRegion", "ClientStart",
+    "TypeRegistry", "ModuleRegistration", "RegisterTypes", "ObjectRegistry", "GcScheduler",
+    "Subsystems",   "PermanentRegion",    "ClientStart",   "PostEngineInit",
 };
 
 static_assert(sizeof(InitStageNames) / sizeof(InitStageNames[0]) ==
@@ -307,6 +307,20 @@ Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
         initializedSteps_ = StepClient;
     }
 
+    {
+        // 클라이언트 시작 뒤 첫 프레임 전 단계다(UE PostEngineInit). 실패하면 시작한 클라이언트를
+        // 먼저 멈춘 뒤 초기화 실패 정리를 한다.
+        InitStageContext stage(InitStage::PostEngineInit);
+        if (auto started = StartPostEngineInitModules(); !started) {
+            if (config_.client != nullptr) {
+                ObjectAccessScope scope(objects_->OwnerAccess());
+                config_.client->OnEngineShutdown(*this);
+            }
+
+            return fail(InitStage::PostEngineInit, started.Error());
+        }
+    }
+
     state_ = EngineState::Running;
     platform::SetRunPhase(platform::RunPhase::Running, EngineStageReady);
     WarnIfCrashFilterReplaced();
@@ -364,8 +378,6 @@ void Engine::Teardown(uint32 completedSteps, const char* stage) noexcept {
 
         types_.Reset();
     }
-
-    ReleaseOwnModuleLoader();
 
     initializedSteps_ = 0;
 }
@@ -785,7 +797,7 @@ Result<void> Engine::Shutdown() noexcept {
     // World·게임 타입은 Unregister하지 않는다 — 게임이 토큰을 버린 native 파생이 리플렉션 base의
     // dependent로 남아 Unregister가 Busy로 멈춘다. ModuleRegistration 파괴로 붙잡은 lease만 놓고
     // TypeRegistry::Shutdown이 남은 레코드를 dependent 순서로 반납한다. 모듈 타입 등록기는 그 전에
-    // 떼어 모듈별 기록을 놓는다(Docs/Design/ModuleLoader.ko.md 3.10절).
+    // 떼어 모듈별 기록을 놓는다(Docs/Design/ModuleLoader.ko.md 3.11절).
     modules_.Reset();
     DetachModuleTypes();
     if (types_) {
@@ -797,8 +809,6 @@ Result<void> Engine::Shutdown() noexcept {
 
         types_.Reset();
     }
-
-    ReleaseOwnModuleLoader();
 
     initializedSteps_ = 0;
     shutdownProgress_ = ShutdownNotStarted;
@@ -812,23 +822,9 @@ Result<void> Engine::Shutdown() noexcept {
 Result<void> Engine::AttachModuleTypes() noexcept {
     ModuleLoader* loader = config_.modules;
     if (loader == nullptr) {
-        // ML1 전 대체 경로: 이 실행 파일의 모듈 표로 엔진 자기 로더를 만들어 Engine 모듈(의존
-        // 폐포)을 시작한다(Docs/Design/ModuleLoader.ko.md 3.10절).
-        auto created = ModuleLoader::TryCreate(allocator_, GeneratedModuleTable());
-        if (!created) {
-            return Result<void>::Failure(created.Error());
-        }
-
-        ownModules_ = Move(created.Value());
-        loader = ownModules_.Get();
-        const ModuleLoadReport loaded = loader->Load(ROCKS_MODULE_NAME_TEXT);
-        if (!loaded.IsOk()) {
-            Log::Error(
-                LogEngine, "Engine modules could not start: {Module} failed at {Stage}: {Message}",
-                StringView(loaded.failed), StringView(loaded.stage), StringView(loaded.message));
-            return Result<void>::Failure(
-                loaded.error != ErrorCode::None ? loaded.error : ErrorCode::DependencyFailed);
-        }
+        Log::Error(LogEngine, "EngineConfig::modules is required: pass the process module loader "
+                              "(Docs/Design/ModuleLoader.ko.md section 3.11)");
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
     auto registrations =
@@ -850,23 +846,54 @@ Result<void> Engine::AttachModuleTypes() noexcept {
     }
 
     attachedModules_ = loader;
+    // 엔진 단계(PreDefault·Default·PostDefault) 모듈을 시작한다. 등록기가 붙어 있으므로 각 모듈의
+    // 타입은 Startup 직전에 등록된다. 이미 다른 Engine이 시작했으면 사용자 수만 는다.
+    const ModuleLoadReport started = loader->StartEngineGroup();
+    if (!started.IsOk()) {
+        Log::Error(LogEngine,
+                   "Engine modules could not start ({Code}): {Module} failed at {Stage}: {Message}",
+                   ModuleLoadCodeName(started.code), StringView(started.failed),
+                   StringView(started.stage), StringView(started.message));
+        return Result<void>::Failure(
+            started.error != ErrorCode::None ? started.error : ErrorCode::DependencyFailed);
+    }
+
+    engineGroupStarted_ = true;
+    return Result<void>::Success();
+}
+
+Result<void> Engine::StartPostEngineInitModules() noexcept {
+    const ModuleLoadReport started = attachedModules_->StartPhase(LoadingPhase::PostEngineInit);
+    if (!started.IsOk()) {
+        Log::Error(LogEngine,
+                   "PostEngineInit modules could not start ({Code}): {Module} failed at {Stage}: "
+                   "{Message}",
+                   ModuleLoadCodeName(started.code), StringView(started.failed),
+                   StringView(started.stage), StringView(started.message));
+        return Result<void>::Failure(
+            started.error != ErrorCode::None ? started.error : ErrorCode::DependencyFailed);
+    }
+
     return Result<void>::Success();
 }
 
 void Engine::DetachModuleTypes() noexcept {
     if (attachedModules_ != nullptr) {
-        attachedModules_->DetachTypeRegistrar();
+        // 엔진 묶음을 먼저 놓는다(마지막 Engine이면 엔진 묶음 모듈의 Shutdown 뒤 그 타입을 모든
+        // 등록기에서 되돌린다). 그다음 이 Engine의 등록기에 남은 등록(앞 묶음 모듈)을 되돌린다.
+        if (engineGroupStarted_) {
+            attachedModules_->ShutdownEngineGroup();
+            engineGroupStarted_ = false;
+        }
+
+        if (moduleTypes_) {
+            attachedModules_->DetachTypeRegistrar(*moduleTypes_);
+        }
+
         attachedModules_ = nullptr;
     }
 
     moduleTypes_.Reset();
-}
-
-void Engine::ReleaseOwnModuleLoader() noexcept {
-    if (ownModules_) {
-        ownModules_->ShutdownGroup(ModuleGroup::Process);
-        ownModules_.Reset();
-    }
 }
 
 Result<void> Engine::StopGcScheduler() noexcept {

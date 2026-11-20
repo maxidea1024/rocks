@@ -90,6 +90,8 @@ struct BackendResult {
 };
 
 uint32 failures = 0;
+// 렌더 lane 검사의 엔진이 쓰는 프로세스 모듈 로더다(RunGraphicsSelfTest 동안 유효).
+ModuleLoader* selfTestModules = nullptr;
 
 void Check(bool condition, const char* backend, const char* what) noexcept {
     if (!condition) {
@@ -753,7 +755,7 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
                device.LastError().Data());
     }
     // 렌더 lane(RB1): 장치를 lane으로 넘겨 엔진 루프 프레임을 그리고 되돌려 받는다.
-    failures += RunRenderLaneChecks(name, device, result.triangle.GetAllocator());
+    failures += RunRenderLaneChecks(name, device, result.triangle.GetAllocator(), *selfTestModules);
     result.passed = failures == before;
     printf("  [%s] %s\n", result.passed ? "PASS" : "FAIL", name);
 }
@@ -899,7 +901,8 @@ void RunVulkan(Allocator& allocator, const graphics::DeviceDesc& base, BackendRe
 
 } // namespace
 
-int RunGraphicsSelfTest(Allocator& allocator) noexcept {
+int RunGraphicsSelfTest(Allocator& allocator, ModuleLoader& modules) noexcept {
+    selfTestModules = &modules;
     // 검증 계층이 프로세스를 끝내도 그때까지의 진행이 남도록 출력 버퍼를 쓰지 않는다.
     setvbuf(stdout, nullptr, _IONBF, 0);
     printf("Graphics self-test\n");

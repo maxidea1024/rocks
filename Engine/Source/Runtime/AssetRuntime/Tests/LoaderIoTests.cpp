@@ -221,6 +221,7 @@ TEST(AssetLoader_LoadsFromDiskWithWorkers) {
         AsyncCookedPackageIo halves(env.allocator, io, half);
         rig.config.io = &halves;
         REQUIRE(rig.Start());
+#if !ROCKS_BUILD_RELEASE
         const platform::FileStatus osFailure{platform::FileCode::SystemError, 0};
         struct FaultCase {
             uint64 id;
@@ -240,10 +241,13 @@ TEST(AssetLoader_LoadsFromDiskWithWorkers) {
                   waited.Value().diagnostic.code == AssetDiagnosticCode::None &&
                   waited.Value().diagnostic.asset == FixedId(fault.id));
         }
+#endif
 
         // 짧게 읽힘(11.6절 4): 완료 게시를 보류한 채 Begin(크기 확인·첫 조각 제출)까지 진행하고
         // 파일을 1/4로 다시 쓴 뒤 재개하면, 남은 조각이 짧게 읽혀 InvalidArgument(진단 None)다.
         const StringView tenPath = rig.scene.PathOf(10);
+        // 조각이 둘 이상이어야 남은 조각이 줄어든 파일을 읽는다(결정적).
+        REQUIRE(rig.scene.EntryOf(10).packageBytes > half);
         io.HoldCompletions();
         const AssetLoadHandle shortRead = rig.Request(10);
         REQUIRE(rig.loader->Pump());
@@ -278,8 +282,25 @@ namespace {
 
 // 자식 프로세스 probe다: 초기화한 로더를 다른 스레드에서 파괴하면 Fatal이다(11.6절 15). 돌아오면
 // 검출이 빠졌다는 뜻이라 0을 돌려준다.
-int AssetLoaderFatalProbe(int, const char* const*) noexcept {
+// PostLoad handler 안에서 소유 로더를 지운다(콜백 안 파괴 — Fatal이어야 한다).
+struct DestroyingPostLoad final : AssetPostLoadHandler {
+    void PostLoad(ObjectHandle, AssetId) noexcept override {
+        rig->loader.Reset();
+    }
+
+    LoaderRig* rig = nullptr;
+};
+
+// 자식 프로세스 probe다(11.6절 15·18): "off-thread"는 초기화한 로더를 다른 스레드에서,
+// "in-callback"은 PostLoad handler 안에서 파괴한다 — 둘 다 Fatal이다. 돌아오면 검출이 빠졌다는
+// 뜻이라 0을 돌려준다.
+int AssetLoaderFatalProbe(int argc, const char* const* argv) noexcept {
     rocks::test::PrepareFatalTestProcess();
+    constexpr int ScenarioArgument = 3;
+    if (argc <= ScenarioArgument) {
+        return 5;
+    }
+
     AssetEnv env;
     if (!env.Ready()) {
         return 2;
@@ -287,8 +308,21 @@ int AssetLoaderFatalProbe(int, const char* const*) noexcept {
 
     LoaderRig rig(env);
     rig.scene.Add(1);
+    DestroyingPostLoad destroying;
+    destroying.rig = &rig;
+    const bool inCallback = strcmp(argv[ScenarioArgument], "in-callback") == 0;
+    if (inCallback) {
+        rig.config.postLoad = &destroying;
+    }
+
     if (!rig.Cook() || !rig.Start()) {
         return 3;
+    }
+
+    if (inCallback) {
+        (void)rig.Request(1);
+        (void)rig.PumpUntilSettled();
+        return 0;
     }
 
     platform::Thread thread;
@@ -305,21 +339,21 @@ int AssetLoaderFatalProbe(int, const char* const*) noexcept {
 const bool AssetLoaderProbeRegistered =
     rocks::test::RegisterProcessProbe("asset-loader", &AssetLoaderFatalProbe);
 
-} // namespace
-
-// 소멸 스레드(11.6절 15): 초기화한 로더를 소유 스레드가 아닌 곳에서 파괴하면 자식 프로세스가
-// Fatal로 끝나고 그 문구를 남긴다.
-TEST(AssetLoader_DestroyOffOwnerThreadIsFatal) {
-    REQUIRE(AssetLoaderProbeRegistered);
+// 자식 probe를 띄워 비정상 종료와 표준 오류의 문구를 본다.
+bool AssetLoaderProbeFails(const char* scenario, const char* message) noexcept {
     char executable[4096];
     usize executableBytes = 0;
-    REQUIRE(platform::GetExecutablePath(executable, sizeof(executable), executableBytes));
-    const platform::ProcessArgument arguments[] = {{"--process-probe", 15}, {"asset-loader", 12}};
+    if (!platform::GetExecutablePath(executable, sizeof(executable), executableBytes)) {
+        return false;
+    }
+
+    const platform::ProcessArgument arguments[] = {
+        {"--process-probe", 15}, {"asset-loader", 12}, {scenario, strlen(scenario)}};
     platform::ProcessStartInfo info;
     info.executable = executable;
     info.executableBytes = executableBytes;
     info.arguments = arguments;
-    info.argumentCount = 2;
+    info.argumentCount = 3;
     info.output = platform::ProcessStreamMode::Null;
     info.error = platform::ProcessStreamMode::Pipe;
     static char error[4096];
@@ -327,10 +361,23 @@ TEST(AssetLoader_DestroyOffOwnerThreadIsFatal) {
     options.error = error;
     options.errorCapacity = sizeof(error) - 1;
     const platform::ProcessRunResult run = platform::RunProcess(info, options);
-    REQUIRE(run.status && !run.timedOut);
+    if (!run.status || run.timedOut) {
+        return false;
+    }
+
     error[run.errorBytes < sizeof(error) ? run.errorBytes : sizeof(error) - 1] = '\0';
-    CHECK(run.exit.kind != platform::ProcessExitKind::Exited || run.exit.code != 0);
-    CHECK(strstr(error, "AssetLoader destroyed outside its owner thread") != nullptr);
+    const bool abnormal = run.exit.kind != platform::ProcessExitKind::Exited || run.exit.code != 0;
+    return abnormal && strstr(error, message) != nullptr;
+}
+
+} // namespace
+
+// 소멸 수명(11.6절 15·18): 초기화한 로더를 소유 스레드가 아닌 곳에서, 또는 자기 PostLoad handler
+// 안에서 파괴하면 자식 프로세스가 Fatal로 끝나고 그 문구를 남긴다.
+TEST(AssetLoader_DestroyOffOwnerThreadIsFatal) {
+    REQUIRE(AssetLoaderProbeRegistered);
+    CHECK(AssetLoaderProbeFails("off-thread", "AssetLoader destroyed outside its owner thread"));
+    CHECK(AssetLoaderProbeFails("in-callback", "AssetLoader destroyed inside its own callback"));
 }
 
 // worker 제출 실패(11.6절 5): WorkerSchedulerLoaderWorker는 작업 묶음 할당 실패와 scheduler 거부를

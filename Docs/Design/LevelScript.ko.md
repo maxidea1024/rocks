@@ -409,7 +409,7 @@ Levels/Stage1.spark:12:5: error S0801: A LevelScript cannot declare physics hook
 
 | 선택지 | 부수 효과 |
 |---|---|
-| **(가) 레벨마다 숨은 Actor 하나 — 확정** | tick·`@net`·RPC·`let` component·hook·저장·핫 리로드 R3를 Actor 경로 그대로 쓴다. 배치 불가는 UT 7.3절 (e) CLASS 지정자 `NotPlaceable`을 재사용하고(UD15 — 이 결정으로 확정), Outliner 숨김은 새 지정자 없이 편집기 규칙으로 둔다(4.1절). 레벨마다 Actor가 하나 늘지만 무시할 수준이다 |
+| **(가) 레벨마다 숨은 Actor 하나 — 확정** | tick·`@net`·RPC·`let` component·hook·저장·핫 리로드 R3를 Actor 경로 그대로 쓴다. 배치 불가는 UT 7.3절 (e) CLASS 지정자 `NotPlaceable`을 재사용하고(UD15 중 이 지정자만 이 결정으로 확정), Outliner 숨김은 새 지정자 없이 편집기 규칙으로 둔다(4.1절). 레벨마다 Actor가 하나 늘지만 무시할 수준이다 |
 | (나) Level이 소유하는 Actor 아닌 Object(WorldService식) | tick 등록·복제·저장·hook 호스트를 새로 만들어야 한다. Transform이 없는 점은 깔끔하지만 component를 붙일 수 없어 로직을 나눌 방법이 줄어든다 |
 | (다) 새 타입 없이 관례만(빈 Actor + ScriptComponent, Unity식) | 엔진·언어 변경이 없다. 대신 레벨 로직이 어디 있는지 정해진 곳이 없고, 여러 개로 흩어지며, 다른 Actor보다 늦게 활성화된다는 순서 보장도 없다 |
 
@@ -559,7 +559,7 @@ Levels/Stage1.spark:12:5: error S0801: A LevelScript cannot declare physics hook
 | [엔진 구현 계획](EngineImplementationPlan.ko.md) 개정 1.16 | 20.2절(Actor 물리 이벤트·서브 레벨 unload·편집기 component 추가), 20.4·20.5·23.1·24.1·33.2·33.7절(BP 제외 유지 + Level Blueprint 대응은 LevelScript, 노드 시각 편집은 보류 선택지), 22.1·22.3절(편집기 명령·템플릿), 33.19절 기록 |
 | [엔진 런타임](EngineRuntime.ko.md) | 4.6절 Level 행 `levelScript`, 레벨 편입 6항(LD8), 레벨 저장 검증(LD5·LD6·LD17), 7.2절 `DestroyLevel`·World 종료 순서와 파괴 규칙(LD16) |
 | [Prefab](Prefab.ko.md) 개정 5 | D22(LD17), 1.3절 비범위, 3.6절 배치 노드 참조, 3.11절 진단, 7절 Level 행 |
-| [UI 툴킷](UiToolkit.ko.md) 초안 2.2 | 7.3절 (e) `NotPlaceable`을 LevelScript가 쓴다, UD15 확정 |
+| [UI 툴킷](UiToolkit.ko.md) 초안 2.3 | 7.3절 (e) `NotPlaceable`을 LevelScript가 쓴다, UD15 중 `NotPlaceable`만 확정 |
 | [에셋 시스템](AssetSystem.ko.md) 개정 11 | 4.6절 진단 행 |
 
 [CompilerDiagnostics](CompilerDiagnostics.ko.md)는 C++ 경고 정책 문서라 고치지 않았다. 레벨 저장·쿡·로드 진단은 AS 4.6절, Sparks 컴파일 오류는 SL 8.1절 S 대역에 둔다.

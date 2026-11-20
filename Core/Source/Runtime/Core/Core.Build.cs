@@ -1,4 +1,5 @@
 using Rocks.Build;
+using Rocks.Build.Descriptors;
 using Rocks.Build.Rules;
 
 // Containers, allocators, strings, math, diagnostics and time (UE Core counterpart). Must not depend on windows or input.
@@ -14,6 +15,9 @@ public sealed class Core : CoreModuleRules
     protected override string? SharedPchHeader => "Core/CoreSharedPch.h";
 
     protected override string[] RequiredModules => ["PlatformBase", "DeterministicMath"];
+
+    // Boot module (in the dependency closure of Launch): started by the module loader right after it is created.
+    protected override LoadingPhase LoadingPhase => LoadingPhase.EarliestPossible;
 
     // Provides Core/Build/BuildInfo.h (rocks::build::ToolchainFingerprint and ToolBuildId). For every executable that reaches this module the build
     // generates and adds a definition TU (Docs/Design/ReflectionFoundations.ko.md section 8.1).

@@ -38,6 +38,8 @@ struct CookedPackageRead {
 };
 
 // IO 구현이다. Begin·Release는 Game 스레드에서 불리고, complete는 구현이 고른 스레드에서 불린다.
+// Begin·Release가 도는 동안 로더 상태를 바꾸는 호출은 WrongContext다(AssetLoader 콜백 재진입 규칙,
+// AS 11.6절 18).
 class CookedPackageIo {
 public:
     // 읽기를 시작한다. 즉시 실패(경로를 받을 수 없음·자원 부족 등)는 그 오류를 돌려주며 complete를

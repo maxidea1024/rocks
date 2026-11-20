@@ -19,7 +19,7 @@ namespace rocks {
 //   ModuleTypeRegistrations registrations(types, allocator);
 //   ModuleLoadReport attached = loader.AttachTypeRegistrar(registrations);   // 시작한 모듈 등록
 //   ...
-//   loader.DetachTypeRegistrar();                                             // 레지스트리 종료 전
+//   loader.DetachTypeRegistrar(registrations);                                // 레지스트리 종료 전
 //   (void)types.Shutdown();
 //
 // 해제 규칙: Unregister는 그 모듈 기록의 Unregister를 시도하고, 남은 객체·native 파생 때문에 Busy면

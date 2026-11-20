@@ -31,8 +31,11 @@ namespace Rocks.Build.Descriptors;
 /// <summary>모듈 종류다. Runtime은 게임에 들어가고 Developer·Editor는 도구·에디터에서만 쓴다.</summary>
 public enum ModuleType { Runtime, Developer, Editor }
 
-/// <summary>모듈을 올리는 시점이다(UE ELoadingPhase의 일부). 기본은 Default다.</summary>
-public enum LoadingPhase { EarliestPossible, PostConfigInit, PreDefault, Default, PostDefault }
+/// <summary>
+/// 모듈을 올리는 시점이다(UE ELoadingPhase의 일부, Docs/Design/ModuleLoader.ko.md 3.3절). 기본은 Default다. 값 순서가 단계 순서이고 Core
+/// <c>rocks::LoadingPhase</c>와 같다. None은 자동으로 올리지 않는다(코드가 Load로 올린다).
+/// </summary>
+public enum LoadingPhase { EarliestPossible, PostConfigInit, PreDefault, Default, PostDefault, PostEngineInit, None }
 
 /// <summary>
 /// 기술자에 적힌 모듈 하나다.

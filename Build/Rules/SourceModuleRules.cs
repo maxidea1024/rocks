@@ -1,4 +1,5 @@
 using Rocks.Build;
+using Rocks.Build.Descriptors;
 using Rocks.Build.Rules;
 
 /// <summary>
@@ -34,6 +35,19 @@ public abstract class SourceModuleRules : ModuleRules
     /// </code>
     /// </summary>
     protected virtual string[] DynamicModules => [];
+
+    /// <summary>
+    /// Loading phase of this module (counterpart of UE ELoadingPhase, Docs/Design/ModuleLoader.ko.md sections 3.3 and 3.11). The module loader starts
+    /// the module when that phase runs: EarliestPossible right after the loader is created (boot modules), PostConfigInit after the host
+    /// settings and log start, PreDefault, Default and PostDefault inside Engine::Initialize, PostEngineInit after the engine client starts,
+    /// None only when code calls ModuleLoader::Load. A dependency must not use a later phase than this module (None is allowed). The layer rules
+    /// set the default: Core modules PostConfigInit (host services and foundation libraries, like UE LoadCoreModules), Engine modules PreDefault
+    /// (before game and plugin Default modules, like UE LoadPreInitModules). Example:
+    /// <code>
+    /// protected override LoadingPhase LoadingPhase => LoadingPhase.None;
+    /// </code>
+    /// </summary>
+    protected virtual LoadingPhase LoadingPhase => LoadingPhase.Default;
 
     /// <summary>Group under Source (Runtime, Developer or Editor).</summary>
     protected virtual string Group => "Runtime";
@@ -139,6 +153,7 @@ public abstract class SourceModuleRules : ModuleRules
             PrivateDefines = PrivateDefines(context),
             Dependencies = RequiredModules,
             DynamicModules = DynamicModules,
+            LoadingPhase = LoadingPhase,
             Optimization = Optimization,
             Unity = UnityFor(context),
             UnityExclude = UnityExclude(context),
@@ -153,6 +168,7 @@ public abstract class SourceModuleRules : ModuleRules
             PublicIncludeDirectories = [context.PathInRoot($"{ModuleDirectory}/Public")],
             Dependencies = RequiredModules,
             DynamicModules = DynamicModules,
+            LoadingPhase = LoadingPhase,
             Metadata = Metadata,
             ModuleDirectory = ModuleDirectory
         };
@@ -192,10 +208,18 @@ public static class RepositoryUnity
 public abstract class CoreModuleRules : SourceModuleRules
 {
     protected override string Layer => "Core";
+
+    // Core modules start in the host group, after the host settings and the log (UE LoadCoreModules, Docs/Design/ModuleLoader.ko.md
+    // section 3.11), so host service modules live across engines and PostConfigInit modules may depend on them.
+    protected override LoadingPhase LoadingPhase => LoadingPhase.PostConfigInit;
 }
 
 /// <summary>Rules for game engine layer (Engine/Source) modules. May depend on Core modules.</summary>
 public abstract class EngineModuleRules : SourceModuleRules
 {
     protected override string Layer => "Engine";
+
+    // Engine modules start first in the engine group, before game and plugin Default modules (UE LoadPreInitModules, Docs/Design/ModuleLoader.ko.md
+    // section 3.11), so a PreDefault game or plugin module may depend on them.
+    protected override LoadingPhase LoadingPhase => LoadingPhase.PreDefault;
 }

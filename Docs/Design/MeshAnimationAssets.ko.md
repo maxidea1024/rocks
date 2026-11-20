@@ -1,6 +1,6 @@
 # 메시·스켈레톤·애니메이션 에셋 설계
 
-기준일: 2026-11-20, 개정 4(MA2 전 결정 반영 — index 형식·통합 bone map·메시 LOD 스트리밍). 개정 3(15절 요구를 다른 문서에 반영하고 상태 열을 더함). 개정 2(교차 검증 반영 — 17절). 정적 메시·스켈레톤·스킨 메시·애니메이션 클립의 에셋 자료구조를 정한다. 범위는 원본 데이터(에디터 데이터), 저장 설정, 빌드 계약, 쿠킹 데이터, 모듈 배치다. [엔진 구현 계획](EngineImplementationPlan.ko.md) 13.1절(StaticMeshAsset)·15절(Skeleton·SkeletalMesh·AnimationClip)의 개요를 구현할 수 있는 수준으로 구체화한다. 텍스처는 [에셋 시스템](AssetSystem.ko.md) 12절, 머티리얼은 [머티리얼 시스템](MaterialSystem.ko.md) 4절이 이미 정했으므로 이 문서는 그 둘을 참조만 한다.
+기준일: 2026-11-20, 개정 5(MA1 구현 — 3.7절). 개정 4(MA2 전 결정 반영 — index 형식·통합 bone map·메시 LOD 스트리밍). 개정 3(15절 요구를 다른 문서에 반영하고 상태 열을 더함). 개정 2(교차 검증 반영 — 17절). 정적 메시·스켈레톤·스킨 메시·애니메이션 클립의 에셋 자료구조를 정한다. 범위는 원본 데이터(에디터 데이터), 저장 설정, 빌드 계약, 쿠킹 데이터, 모듈 배치다. [엔진 구현 계획](EngineImplementationPlan.ko.md) 13.1절(StaticMeshAsset)·15절(Skeleton·SkeletalMesh·AnimationClip)의 개요를 구현할 수 있는 수준으로 구체화한다. 텍스처는 [에셋 시스템](AssetSystem.ko.md) 12절, 머티리얼은 [머티리얼 시스템](MaterialSystem.ko.md) 4절이 이미 정했으므로 이 문서는 그 둘을 참조만 한다.
 
 - 배경: 사용자 지시(2026-11-19). 엔진 시험용으로 UE에서 텍스처·정적 메시·머티리얼·애니메이션을 가져오는 기능을 넣는다. Rocks에 메시·애니메이션 자료구조가 아직 없으므로 함께 정한다. 가져오는 경로는 [Unreal 교환 형식](UnrealExchange.ko.md)이 정한다. 이 문서의 자료구조는 그 경로와 상관없이 쓰는 엔진 기반이며, 뒤에 올 glTF·FBX 임포터도 같은 구조로 들어온다.
 - UE 근거: UE 5.8.4(`release`, commit `f45729c0b6f0`, 로컬 클론 `C:\github\UnrealEngine`)를 읽어 확인했다. 경로 약어는 다음과 같다. `E/` = `Engine/Source/Runtime/Engine`, `RT/` = `Engine/Source/Runtime`, `Dev/` = `Engine/Source/Developer`. UE 이름은 대응표와 근거에만 쓰고, 타입 이름은 Rocks 이름으로 짓는다. 빌드 설정·축소 설정처럼 업계 공용 서술 이름은 그대로 쓴다.
@@ -80,6 +80,7 @@ UE의 UV 공유 요소(채널별 UV 정점 — MeshDescription.h:131-149)는 저
 
 | 요소 | 이름 | 값 타입 | 채널 | 대응(UE `FStaticMeshAttributes`·`FSkeletalMeshAttributes`) |
 |---|---|---|---|---|
+| 정점 | `Position` | Vec3 | 1 | Vertex::Position(MeshAttributes.h:90). 필수이며 메모리 형태에서는 위상과 함께 따로 둔다(3.7절 1) |
 | 코너 | `Normal` | Vec3 | 1 | Normal(StaticMeshAttributes.h:23) |
 | 코너 | `Tangent` | Vec3 | 1 | Tangent(:24) |
 | 코너 | `BinormalSign` | Float | 1 | BinormalSign(:25) |
@@ -111,7 +112,7 @@ UE의 삼각형 법선·tangent(StaticMeshAttributes.h:36-38)는 transient라 �
 
 ### 3.4 저장 형식
 
-`MeshSourceData`(`ROCKS_STRUCT`, 리플렉션 저장)가 영속 형태이고, `MeshSource`(C++ 클래스, 리플렉션 없음)가 편집·빌드용 메모리 형태다. 둘 사이 변환은 `MeshSource::Load(const MeshSourceData&, const Package&)`(bulk는 `Package::BulkBytes`로 읽는다)·`MeshSource::Store(...)`가 한다.
+`MeshSourceData`(`ROCKS_STRUCT`, 리플렉션 저장)가 영속 형태이고, `MeshSource`(C++ 클래스, 리플렉션 없음)가 편집·빌드용 메모리 형태다. 둘 사이 변환은 `MeshSource::Load(const MeshSourceData&, const Package&, NamePool&, …)`(bulk는 `Package::BulkBytes`로 읽는다)·`MeshSource::Store(MemoryBulkSource&, NamePool&, MeshSourceData&, …)`가 한다. 속성 이름(`Name` 필드)의 원문을 얻고 만드는 데 pool이 필요해 인자에 더했다(3.7절 2).
 
 ```cpp
 ROCKS_ENUM() enum class MeshElement : uint8 { Invalid = 0, Vertex = 1, Corner = 2, Edge = 3, Polygon = 4, Triangle = 5, PolygonGroup = 6 };
@@ -175,6 +176,22 @@ struct MeshSourceData {
 | 선형 float 정점 색(빌드는 8비트 sRGB) | StaticMeshBuilder.cpp:1704-1708 |
 | 법선·tangent·UV 정밀도(기본 8비트 tangent·half UV) | E/Public/Rendering/StaticMeshVertexBuffer.h:107-134 |
 | 재계산·생성 결과와 원본의 구분(BuildScale3D·lightmap UV가 섞임) | Dev/MeshBuilder/Private/MeshDescriptionHelper.cpp:34-130, StaticMeshBuilder.cpp:1596 |
+
+### 3.7 구현에서 정한 점(MA1)
+
+MA1 구현(모듈 `Engine/Source/Runtime/MeshSource`) 중 위 절이 정하지 않았거나 다르게 정한 점이다. 모두 권장안으로 확정했다.
+
+1. **정점 위치는 엔진 이름 속성 `Position`(정점, Vec3, 1)으로 저장한다.** 9.1절 위상 blob에 위치 배열이 없어 위치를 담을 곳이 정해지지 않았다. UE도 위치를 정점 속성(`MeshAttribute::Vertex::Position`)으로 둔다. 속성 레코드 하나 = bulk 하나(MA-D2)를 그대로 따르고 위상 blob은 번호만 담게 한다. 이 레코드는 정점 수가 0이어도 반드시 있어야 하며(없으면 `CorruptPackage`), 메모리 형태 `MeshSource`는 위치를 위상과 함께 따로 갖는다(`Positions()`). 그래서 속성 목록에 정점 `Position`을 더하는 것은 이름 중복이다. 버린 대안: 위상 blob 0번 배열로 넣기(위상 blob이 번호 아닌 값을 담게 되고 UE 모델과 달라진다).
+2. **Load·Store 인자.** `Load(const MeshSourceData&, const Package&, NamePool&, MeshDiagnostic*)`, `Store(MemoryBulkSource&, NamePool&, MeshSourceData&, MeshDiagnostic*)`다. 레코드 이름이 실행 중 pool 토큰(`Name`)이라 원문을 읽고(`AcquireNameFieldText`) 만들 때(`TryIntern`) pool이 필요하다. bulk 쓰기 경로는 AssetRuntime의 기존 `PackageBulkSource`(writer가 저장 전 ref로 raw byte를 읽고 크기·SHA-256을 대조한다)이며, 메모리에 raw byte를 모아 임시 bulkId를 주는 구현이 없어 가장 작은 공용 구현 `MemoryBulkSource`(AssetRuntime, 헤더 `AssetRuntime/MemoryBulkSource.h`)를 더했다. 텍스처·애니메이션 원본도 같은 것을 쓴다. 버린 대안: MeshSource 모듈 안 전용 bulk 저장소(같은 기능을 모듈마다 두게 된다).
+3. **bulk는 늘 있다.** 위상과 모든 속성은 길이가 0이어도 bulk entry를 갖는다(0 byte entry는 패키지 포맷이 받는다). 빈 ref(bulkId 0)·읽을 수 없는 ref는 `CorruptPackage`다. 빈 ref를 "0 byte"로 읽는 특례를 두지 않아 저장 형태가 하나다.
+4. **로드 판정 분담.** 로드는 배치를 해석하는 데 필요한 것을 본다: `formatVersion`(다르면 `UnsupportedVersion`, ErrorCode `Unsupported` — 하위호환 읽기가 없으므로), 요소 수 ≤ `MeshMaxElements`, 레코드 element·값 타입·채널(값 타입 범위 밖, 0채널, 가변 길이 값 타입의 채널 ≠ 1), 레코드 순서(9.2절 순서의 **엄격** 증가 — 같은 이름 byte 둘·역순은 손상), `Position` 레코드, 3.4.1절 길이·단조·상한(Name 각 길이 ≤ `MaxNameFieldBytes`, 영향 개수 ≤ `MeshMaxSourceInfluences`, 희소 번호 < N·엄격 증가), 희소 항목이 비트 단위 `+0.0` 셋이면 손상(저장 형태는 0이 아닌 것만 담는다). 그다음 `ValidateMeshSource`를 불러 내용 불변식(번호 범위·변·다각형·삼각형·위치 유한·속성 이름·엔진 속성·값)을 보며, 로드 중 실패는 모두 `CorruptPackage`(원래 판정은 `MeshDiagnostic::issue`에 남는다)다. 할당·pool 오류는 진단 코드 없이 그 오류 그대로다.
+5. **엔진 이름 속성 판정.** 이름은 Name 비교 규칙(`NameTextEquals` — ASCII 대소문자 무시)으로, 접두(`Morph-`·`MorphNormal-`·`SkinWeights-`)는 ASCII 대소문자 무시로 맞춘다. 엔진 이름과 맞는 속성은 3.2절 표의 요소·값 타입·채널이어야 한다(다른 요소에 붙은 `Normal`도 오류 — 이름만 같고 뜻이 다른 속성을 막는다). 접두 뒤가 빈 이름(`Morph-`)도 오류다. 그 밖의 사용자 속성은 Float·Vec2·Vec3·Vec4·UInt32·Bool·Name이면 채널 1–255, BoneInfluences·SparseVec3이면 채널 1이다(3.4.1절 배치가 채널 하나만 정한다).
+6. **스킨 가중치.** 한 정점 안 같은 boneIndex 둘은 `InvalidMeshData`다(UE `FBoneWeights`도 같은 본을 합쳐 담는다). boneIndex 범위 검사는 본 수를 아는 호출자가 `MeshValidateOptions::boneCount`로 준 때만 한다(원본 메시는 본 계층을 모른다 — 6.3절 빌드가 넘긴다). 정규화(`SanitizeMeshSource`)는 영향이 있는데 합이 0이면 비례 배분할 수 없어 `InvalidMeshData`다(UE는 `ensure`로 막는 경우다 — BoneWeights.h `NormalizeWeights`). 영향 순서는 바꾸지 않는다.
+7. **값 정리 `SanitizeMeshSource`.** 먼저 `ValidateMeshSource`를 부르고(실패하면 아무것도 바꾸지 않는다), 정규화 합 0을 먼저 모두 확인하고 경고 칸을 미리 잡은 뒤 값을 고친다 — 실패하면 원본은 그대로다. 법선·tangent를 0 벡터로 고치는 것은 경고를 내지 않는다(빌드가 다시 계산하므로 3.3절이 경고를 정하지 않았다). UV·색 비유한값과 UV 범위는 속성마다 경고 하나에 고친(해당) 값 수를 담는다.
+8. **기본값.** 요소를 더하면 그 요소의 속성 값은 0(Name은 빈 문자열 = None, 영향은 없음, 희소는 0)이고, 엔진 `Color`만 UE처럼 (1, 1, 1, 1)이다.
+9. **가변 길이 값의 메모리 형태.** Name·BoneInfluences는 요소마다 (offset, 개수) 범위와 덧붙이기 저장소를 갖는다. 같은 길이 이하로 다시 쓰면 제자리, 더 길면 저장소 끝에 덧붙인다(앞 자리는 Store가 압축할 때까지 남는다). 요소를 하나씩 더하고 값을 순서대로 쓰는 임포트가 O(전체)로 끝나게 하려는 것이다. 버린 대안: 저장 배치 그대로 메모리에 두기(중간 값을 바꾸면 뒤를 모두 옮겨 O(N²)).
+10. **진단.** 실패·경고는 `MeshDiagnostic{code(AssetDiagnosticCode), error, issue(MeshIssue), element, attribute, index, count}`로 돌려준다. `code`가 AssetSystem 4.6절 진단 이름이고 `issue`는 어긴 규칙 하나를 가리키는 세부 분류다(시험이 정확히 그 규칙이 걸렸는지 대조한다). `ToAssetDiagnostic`이 4.6절 `AssetDiagnostic`으로 옮긴다. MA1이 등록한 코드는 `InvalidMeshData`·`NonFiniteAttribute`·`UvOutOfRange`·`NonNormalizedWeights`·`TooManyInfluences`다(나머지 11절 코드는 MA2 이후 단계가 등록한다).
+11. **위상 조회 `MeshTopologyIndex`.** `ValidateMeshSource`를 통과한 메시에서 만든다(통과하지 않은 메시는 계약 위반 — 범위 단언). 다각형 → 삼각형, 묶음 → 다각형, 정점 → 코너·변, 코너 → 삼각형·다각형, 변 → 다각형(퇴화 변은 건너뜀)과 `FindEdge`를 준다. 만들기 실패는 할당 오류뿐이다.
 
 ## 4. 메시 공통 설정과 구성 요소
 
@@ -576,13 +593,68 @@ AssetSystem 4.6절 진단 표에 등록한다(요구 MR10).
 - **스켈레톤·스킨**: 계층 불변식, 병합 성공·부모 사슬 실패, 병합 뒤 클립 재쿠킹(너겟 무효화), 영향 줄이기 결정성(가중치 동률), 정규화 잔차, palette 분할 경계.
 - **클립**: 상수 트랙 접기의 비트 보존, 재샘플링(원본 비율 = 목표 비율이면 키 그대로), 상한 초과, 스켈레톤에 없는 트랙, 커브 왕복, 이벤트 정렬.
 
+### 12.1 요구 대조표(MA1 — 원본 메시)
+
+시험은 EngineTests의 `MeshSource_*`(`Engine/Source/Runtime/MeshSource/Tests`, 52개)와 AssetRuntime의 `AssetPackage_MemoryBulkSource*`(3개)다. 패키지 왕복은 fixture 에셋 `TestMeshAsset`(AssetTestFixtures `MeshAssets.h` — `MeshSourceData` 필드·배열·EditorOnly 필드)으로 실제 패키지를 쓰고 다른 Registry에 로드한 뒤 `MeshSource::Load`를 부른다. 불변식 위반 시험은 진단 코드와 세부 규칙(`MeshIssue`)·위치를 함께 대조한다.
+
+| 요구 | 시험 |
+|---|---|
+| 3.1 번호 범위(코너·변·다각형·삼각형) | `MeshSource_ValidRejectsIndexRanges`, `MeshSource_LoadRejectsTopologyBytes`(로드 중 CorruptPackage) |
+| 3.1 코너 공유·퇴화 삼각형·같은 코너 반복 정상 | `MeshSource_ValidAcceptsSharedAndDegenerate`, `MeshSource_TopologyQueries`, `MeshSource_TopologyRepeatedCorners` |
+| 3.1 변: 같은 정점·중복(순서만 다른 것 포함)·작은 번호 먼저 | `MeshSource_ValidRejectsBadEdges`, `MeshSource_AddElementsKeepsShape`, `MeshSource_LoadRejectsTopologyBytes`(EdgeOrder) |
+| 3.1 둘레 ≥ 3·둘레 변 존재·퇴화 변 건너뜀 | `MeshSource_ValidRejectsBadPolygons`, `MeshSource_ValidAcceptsSharedAndDegenerate` |
+| 3.1 다각형별 삼각형 수·둘레 소속 | `MeshSource_ValidRejectsBadTriangles` |
+| 3.1 위치 유한값(MA-D9) | `MeshSource_ValidRejectsNonFinitePosition` |
+| 3.1 요소 수 ≤ `MeshMaxElements`(경계 포함) | `MeshSource_LoadRejectsFormatFields` |
+| 3.2 엔진 이름 속성 형태·대소문자·접두 | `MeshSource_ValidRejectsEngineAttributeShapes`, `MeshSource_LoadRejectsCaseOnlyDuplicateNames` |
+| 3.2 기본값(Color 흰색)·속성 추가 규칙 | `MeshSource_AttributeDefaults`, `MeshSource_AddAttributeRejectsBadArguments`, `MeshSource_AddAttributeNamesAreUniquePerElement` |
+| 3.2 스킨 가중치 상한·같은 본·boneIndex 범위 | `MeshSource_ValidRejectsAttributeValues`, `MeshSource_LoadRejectsInfluenceBytes` |
+| 3.2 정규화 잔차·동률 | `MeshSource_NormalizeWeightsResidual`, `MeshSource_SanitizeNormalizesWeights` |
+| 3.2 morph 희소 저장, `-0.0` 보존 | `MeshSource_SparseKeepsNegativeZero`, `MeshSource_StoreLoadRoundTrip`, `MeshSource_LoadRejectsSparseBytes`(+0.0 항목) |
+| 3.3 값 정리와 경고 수, 실패 시 무변경 | `MeshSource_SanitizeFixesValues`, `MeshSource_SanitizeFailureKeepsMesh`, `MeshSource_SanitizeWarningAllocation` |
+| 3.4 Load·Store 왕복(쿠킹·에디터·Zstd)·비트 일치 | `MeshSource_StoreLoadRoundTrip`, `MeshSource_StoreIsDeterministicAndResaveIdentical`, `MeshSource_SeveralSourcesShareBulk`, `MeshSource_EmptyMeshRoundTrip` |
+| 3.4 포맷 필드 하나씩 변조 | `MeshSource_LoadRejectsFormatFields`, `MeshSource_LoadRecordNameTokens` |
+| 3.4 bulk 길이 변조·잘림·SHA 불일치 | `MeshSource_LoadRejectsRefMismatch`, `MeshSource_PackageBulkTamperIsCorrupt`, `MeshSource_LoadRejectsFixedValueBytes`, `MeshSource_LoadRejectsNameValueBytes` |
+| 3.4.1 값 타입별 배치·길이·단조·범위 | `MeshSource_LoadRejectsFixedValueBytes`, `MeshSource_LoadRejectsNameValueBytes`, `MeshSource_LoadRejectsInfluenceBytes`, `MeshSource_LoadRejectsSparseBytes` |
+| 3.5 이름 유일(대소문자만 다른 이름)·Name 값 내용 규칙 | `MeshSource_LoadRejectsCaseOnlyDuplicateNames`, `MeshSource_ValidRejectsAttributeValues` |
+| 3.7 2 `MemoryBulkSource` | `AssetPackage_MemoryBulkSourceEntries`, `AssetPackage_MemoryBulkSourceFailures`, `AssetPackage_MemoryBulkSourceWrites` |
+| 3.7 9 가변 길이 값 덮어쓰기·별칭 | `MeshSource_NameValuesOverwriteAndAlias`, `MeshSource_InfluencesOverwriteAndAlias` |
+| 3.7 11 위상 조회 | `MeshSource_TopologyQueries`, `MeshSource_TopologyRepeatedCorners`, `MeshSource_TopologyEmpty` |
+| 9.1 위상 blob 배치 | `MeshSource_LoadRejectsTopologyBytes`, `MeshSource_EmptyMeshRoundTrip` |
+| 9.2 결정적 정렬 | `MeshSource_StoreIsDeterministicAndResaveIdentical`, `MeshSource_StoreLoadRoundTrip`, `MeshSource_LoadRejectsFormatFields`(AttributeOrder) |
+| 11 진단 코드 등록·이름·4.6절 변환 | `MeshSource_DiagnosticNames`, `AssetPackage_DiagnosticNames`, `MeshSource_ValidReportsAttributeIndex` |
+| 12 퍼징(고정 seed) | `MeshSource_FuzzRandomMeshes`(600개 — 통과분은 위상 조회 전체·일부 패키지 왕복), `MeshSource_FuzzStoredBytes`(160개 bulk 변조) |
+| 할당 실패 주입(강한 보장) | `MeshSource_EditFailuresKeepState`, `MeshSource_EditFailuresFromEmpty`, `MeshSource_FirstAttributeFailureAndRegistration`, `MeshSource_ValidScratchFailures`, `MeshSource_StoreFailures`, `MeshSource_LoadFailures`, `MeshSource_TopologyBuildFailures`, `MeshSource_SanitizeWarningAllocation` |
+
+Coverage(2026-11-20, clang source-based — Rocks.Build `Coverage` 구성, Swift 6.3.3 툴체인의 llvm-profdata·llvm-cov, 측정 방법은 `Build/MeasureCoverage.ps1`과 같고 출력만 이 작업 전용 디렉터리에 두었다): 시험 `MeshSource`(52개)·`AssetPackage_MemoryBulkSource`(3개)·`AssetPackage_DiagnosticNames`(1개) 모두 통과. 대상은 MeshSource Private·Public 14개 파일과 AssetRuntime `MemoryBulkSource.h/.cpp`다.
+
+| 파일 | 줄 | 분기 |
+|---|---|---|
+| MeshSource.cpp | 472/488 | 265/307 |
+| MeshSourceStorage.cpp | 681/684 | 335/342 |
+| MeshSourceValidation.cpp | 263/263 | 150/151 |
+| MeshSourceSanitize.cpp | 178/178 | 104/108 |
+| MeshSourceTypes.cpp | 231/231 | 173/174 |
+| MeshTopologyIndex.cpp | 250/250 | 86/90 |
+| MemoryBulkSource.cpp | 26/28 | 11/13 |
+| 그 밖(MeshSourceModule.cpp·MeshSourceInternal.h·공개 헤더 5개·MemoryBulkSource.h) | 87/87 | 2/2 |
+| 합계 | 2188/2209(99.05%) | 1126/1187(94.86%), 함수 157/157 |
+
+닿지 않은 분기 61개의 사유:
+- 47개는 불변식 검사 `ROCKS_ASSERT`의 실패 쪽이다(용량을 미리 잡은 뒤의 실패할 수 없는 추가, 공개 접근 함수의 계약 위반 — 매크로 전개 안이라 `-show-expansions`로만 보인다).
+- 10개는 메모리 상한이라 시험으로 만들 수 없다: 요소 종류마다 `MeshMaxElements`(2^31 − 1)개에 닿은 뒤의 `Add*` 거부 7개(`AddPolygon`의 둘레 전체 길이 포함), 가변 길이 값 저장소의 uint32 offset 넘침(Name·영향 쓰기, Name 로드) 3개 — 모두 수 GiB–수십 GiB를 실제로 할당해야 한다. `MemoryBulkSource::Add`의 bulkId 소진(2^32 − 2 entry)도 같은 이유다(1개).
+- 1개는 모듈 내부 열거 `EngineName`의 열거 밖 값(switch의 암묵 default)으로, 모듈 안 호출자가 만들지 않는다.
+- 2개는 `BoneInfluence`의 defaulted `operator==` 거짓 쪽이다. `MeshSource_NormalizeWeightsResidual`이 본이 다른 경우와 가중치만 다른 경우를 런타임 값으로 모두 부르는데도 기록이 0으로 남는다(헤더 constexpr 기본 비교의 계측 기록 방식으로 보이며 원인은 확인하지 못했다).
+
+입력 변조·실패 주입으로 닿을 수 있는 오류 분기는 모두 시험으로 닿게 했다. 측정 중 닿을 수 없음을 확인한 분기는 구조를 고쳤다: 저장 후 정렬 비교의 빈 이름 경로(레코드 이름은 비지 않는다), 64비트에서 늘 거짓인 크기 검사, 저장 경로의 `Invalid` 값 타입 case, 미리 잡은 변 표 삽입의 실패(단언으로), 엔진 규칙의 최소 채널(늘 1 이상), 속성 이름 내용 검사(만드는 두 길이 모두 지킨다 — 3.7절 4).
+
 ## 13. 단계
 
 ID는 이 문서가 부여한다(MA). 착수는 사용자가 정하고, 고정 구현 순서를 바꾸지 않는다.
 
 | 단계 | 내용 | 선행 |
 |---|---|---|
-| MA1 | `MeshSource` 모듈: 저장 형식·검증·위상 조회·값 정리, 시험 | A1(패키지·Bulk) |
+| MA1 | `MeshSource` 모듈: 저장 형식·검증·위상 조회·값 정리, 시험. **구현(2026-11-20, 미커밋)**: 모듈 `Engine/Source/Runtime/MeshSource`, AssetRuntime `MemoryBulkSource`·메시 진단 코드 5개, 시험 52개 + AssetRuntime 3개(12.1절 대조표·coverage — 줄 99.05%, 분기 94.86%, 닿지 않은 분기는 단언·메모리 상한), 정한 점은 3.7절 | A1(패키지·Bulk) |
 | MA2 | `Mesh` 정적 메시 클래스·설정 타입, `MeshTools` 빌드(5.2절 중 구현 상태 항목)·쿠킹 렌더 데이터·임포트 서비스, MikkTSpace ThirdParty(패치), CoreTypeBindings `Box<double>` 미러(MR8), `IndexFormat` GraphicsTypes 이동 확인(MR7) | MA1, A2–A4, `Material` 에셋 클래스(MaterialSystem MS3) |
 | MA3 | 단순 충돌 데이터·검증 | MA2 |
 | MA4 | `Animation` 본 계층·스켈레톤·병합 | A1–A4 |
@@ -628,6 +700,7 @@ ID는 이 문서가 부여한다(MA). 착수는 사용자가 정하고, 고정 �
 - 개정 2(2026-11-20): 교차 검증(설계 반례 리뷰, UE 사실 확인) 반영. 17절.
 - 개정 3(2026-11-20): 15절 요구 MR1–MR10을 대상 문서에 반영했다(RenderBase 29, Renderer 10, TextureStreaming 5, MaterialSystem 6, PhysicsJoltAdapter 1, AssetSystem 10). MR8은 확인 결과 `FrameRate`·`Box<double>` 미러만 없어 MA2·MA6 단계에 넣었다. 15절에 상태 열을 더했다.
 - 개정 4(2026-11-20): MA2 전 결정을 권장안으로 확정해 반영했다(사용자 지시 "MA2 전 결정 사항들도 권장안대로"). index 형식은 GraphicsTypes `IndexFormat` 번호(자체 `MeshIndexWidth` 삭제, MA-D10 개정), skinned 쿠킹 데이터는 섹션별 palette 대신 LOD 통합 bone map과 256 기준 번호 폭(RenderBase R18), 메시 LOD 스트리밍은 TextureStreaming 4.9절(T9). 15절 MR2·MR3·MR7 상태를 고쳤다.
+- 개정 5(2026-11-20): MA1 `MeshSource` 모듈 구현에서 정한 점을 3.7절에 적었다(위치 속성 `Position`, Load·Store 인자와 AssetRuntime `MemoryBulkSource`, 로드·검증 판정 분담, 엔진 이름 속성 판정, 스킨 가중치 중복·합 0, 값 정리 순서, 가변 길이 값의 메모리 형태, 진단 형식, 위상 조회). 3.2절 표에 `Position`을 더하고 13절 MA1 상태를 적었다.
 
 ## 17. 교차 검증 기록(개정 2)
 

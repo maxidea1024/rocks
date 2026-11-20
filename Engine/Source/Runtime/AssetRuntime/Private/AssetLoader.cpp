@@ -237,6 +237,10 @@ struct AssetLoader::Impl {
     uint64 ownerThread = 0;
     StringBuilder<LoaderPathInlineBytes> root;
     bool shutDown = false;
+    // PostLoad handler·관찰자·시험 hook이 불리는 중인지다(11.6절 18 — 상태를 바꾸는 공개 함수는
+    // WrongContext).
+    // (시계는 const 조회 안에서도 불리므로 mutable이다.)
+    mutable bool inCallback = false;
 
     // 매니페스트 항목마다 진행 중 단위 번호와 공개 번호(없으면 LoaderNoIndex)다.
     Array<uint32> entryUnit;
@@ -289,9 +293,17 @@ struct AssetLoader::Impl {
     // 최근 동기 대기 고리(다음 쓸 자리 = syncWaits % 용량)다.
     AssetLoaderSyncWait recentWaits[AssetLoaderSnapshot::RecentSyncWaitCapacity] = {};
 
+    // 바깥 코드(설정 시계)는 콜백 중 표시 안에서 부른다(11.6절 18).
     uint64 Now() const noexcept {
-        return config.clock != nullptr ? config.clock(config.clockContext)
-                                       : LoaderDefaultClock(nullptr);
+        if (config.clock == nullptr) {
+            return LoaderDefaultClock(nullptr);
+        }
+
+        const bool previous = inCallback;
+        inCallback = true;
+        const uint64 now = config.clock(config.clockContext);
+        inCallback = previous;
+        return now;
     }
 
     bool OnOwnerThread() const noexcept {
@@ -988,7 +1000,10 @@ struct AssetLoader::Impl {
         job->asyncPending = true;
         job->readBegun = true;
         ++asyncInFlight;
-        if (auto begun = config.io->Begin(read); !begun) {
+        inCallback = true;
+        Result<void> begun = config.io->Begin(read);
+        inCallback = false;
+        if (!begun) {
             job->asyncPending = false;
             job->readBegun = false;
             --asyncInFlight;
@@ -1086,7 +1101,9 @@ struct AssetLoader::Impl {
         const LoaderCompletion completion = job->completion;
         // IO 완료만 readBegun이 남아 있다(worker 완료 때는 이미 놓았다).
         if (job->readBegun) {
+            inCallback = true;
             config.io->Release(job->read);
+            inCallback = false;
             job->readBegun = false;
         }
 
@@ -1123,7 +1140,10 @@ struct AssetLoader::Impl {
             SetPhase(*job, AssetLoaderPackagePhase::Preparing);
             job->asyncPending = true;
             ++asyncInFlight;
-            if (auto run = config.worker->Run(RunLoaderPrepare, job); !run) {
+            inCallback = true;
+            Result<void> run = config.worker->Run(RunLoaderPrepare, job);
+            inCallback = false;
+            if (!run) {
                 job->asyncPending = false;
                 --asyncInFlight;
                 diagnostic.error = run.Error();
@@ -1324,12 +1344,15 @@ struct AssetLoader::Impl {
         return best;
     }
 
-    // 단위 unit의 다음 구성 패키지 하나를 PostLoad한다.
+    // 단위 unit의 다음 구성 패키지 하나를 PostLoad한다. handler가 도는 동안은 콜백 중 표시를
+    // 쥐고(상태를
+    // 바꾸는 재진입 거부), 단위 참조를 쥐지 않는다(돌아온 뒤 다시 찾는다).
     void PostLoadNext(uint32 unit) noexcept {
-        LoaderUnit& target = units[unit];
-        const uint32 member = target.members[target.postLoadNext++];
+        const uint32 member = units[unit].members[units[unit].postLoadNext++];
+        inCallback = true;
         config.postLoad->PostLoad(loadedHandles[entryLoaded[member]], EntryAsset(member));
-        if (target.postLoadNext == target.members.Size()) {
+        inCallback = false;
+        if (units[unit].postLoadNext == units[unit].members.Size()) {
             FinishUnit(unit);
         }
     }
@@ -1358,8 +1381,18 @@ struct AssetLoader::Impl {
             if (result.instantiatedUnits >= budget.maxUnits ||
                 Now() - start >= budget.maxNanoseconds) {
                 result.budgetExhausted = true;
-                return result;
+                break;
             }
+        }
+
+        // 공개가 예산을 다 써도 준비된 PostLoad 하나는 부른다(굶주림 방지 — 11.6절 16).
+        if (result.budgetExhausted) {
+            if (const uint32 unit = PickPostLoad(); unit != LoaderNoIndex) {
+                PostLoadNext(unit);
+                ++result.postLoads;
+            }
+
+            return result;
         }
 
         // PostLoad는 공개를 다 한 뒤에 한다(공개가 예산을 다 쓰지 않았으면). 준비된 것이 있으면
@@ -1420,7 +1453,9 @@ struct AssetLoader::Impl {
         queue.mutex.Lock();
         while (queue.head == nullptr && asyncInFlight > 0) {
             if (config.waitEntered != nullptr) {
+                inCallback = true;
                 config.waitEntered(config.waitEnteredContext);
+                inCallback = false;
             }
 
             (void)queue.changed.Wait(queue.mutex);
@@ -1548,6 +1583,11 @@ AssetLoader::~AssetLoader() {
         platform::Fatal("AssetLoader destroyed outside its owner thread");
     }
 
+    // 콜백 안의 파괴는 돌아온 뒤 해제된 상태를 읽는다(11.6절 18).
+    if (impl_->inCallback) {
+        platform::Fatal("AssetLoader destroyed inside its own callback");
+    }
+
     (void)Shutdown();
     Allocator& allocator = *config_.allocator;
     impl_->~Impl();
@@ -1616,6 +1656,10 @@ Result<AssetLoadHandle> AssetLoader::Request(const AssetLoadRequest& request,
     Impl& impl = *impl_;
     if (!impl.OnOwnerThread()) {
         return fail(ErrorCode::WrongThread, AssetDiagnosticCode::None, request.id);
+    }
+
+    if (impl.inCallback) {
+        return fail(ErrorCode::WrongContext, AssetDiagnosticCode::None, request.id);
     }
 
     if (impl.shutDown) {
@@ -1763,6 +1807,10 @@ Result<void> AssetLoader::SetPriority(AssetLoadHandle handle, LoadPriority prior
         return Result<void>::Failure(ErrorCode::WrongThread);
     }
 
+    if (impl.inCallback) {
+        return Result<void>::Failure(ErrorCode::WrongContext);
+    }
+
     if (!impl.ValidHandle(handle)) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
@@ -1786,6 +1834,10 @@ Result<void> AssetLoader::Release(AssetLoadHandle handle) noexcept {
     Impl& impl = *impl_;
     if (!impl.OnOwnerThread()) {
         return Result<void>::Failure(ErrorCode::WrongThread);
+    }
+
+    if (impl.inCallback) {
+        return Result<void>::Failure(ErrorCode::WrongContext);
     }
 
     if (!impl.ValidHandle(handle)) {
@@ -1812,6 +1864,10 @@ Result<AssetLoaderPumpResult> AssetLoader::Pump(const AssetLoaderPumpBudget& bud
         return Result<Out>::Failure(ErrorCode::WrongThread);
     }
 
+    if (impl.inCallback) {
+        return Result<Out>::Failure(ErrorCode::WrongContext);
+    }
+
     if (impl.shutDown) {
         return Result<Out>::Failure(ErrorCode::ShuttingDown);
     }
@@ -1826,6 +1882,10 @@ Result<void> AssetLoader::WaitForCompletions() noexcept {
 
     if (!impl_->OnOwnerThread()) {
         return Result<void>::Failure(ErrorCode::WrongThread);
+    }
+
+    if (impl_->inCallback) {
+        return Result<void>::Failure(ErrorCode::WrongContext);
     }
 
     impl_->WaitCompletions();
@@ -1843,7 +1903,18 @@ Result<AssetLoadStatus> AssetLoader::WaitFor(AssetLoadHandle handle, const char*
         return Result<Out>::Failure(ErrorCode::WrongThread);
     }
 
-    if (config_.inFrame != nullptr && config_.inFrame(config_.inFrameContext)) {
+    if (impl.inCallback) {
+        return Result<Out>::Failure(ErrorCode::WrongContext);
+    }
+
+    bool framing = false;
+    if (config_.inFrame != nullptr) {
+        impl.inCallback = true;
+        framing = config_.inFrame(config_.inFrameContext);
+        impl.inCallback = false;
+    }
+
+    if (framing) {
         return Result<Out>::Failure(ErrorCode::WrongContext);
     }
 
@@ -1874,7 +1945,9 @@ Result<AssetLoadStatus> AssetLoader::WaitFor(AssetLoadHandle handle, const char*
     ++impl.syncWaits;
     impl.syncWaitNanoseconds += elapsed;
     if (config_.observer != nullptr) {
+        impl.inCallback = true;
         config_.observer->OnSyncWait(wait);
+        impl.inCallback = false;
     }
 
     return Status(handle);
@@ -2046,6 +2119,10 @@ Result<void> AssetLoader::Shutdown() noexcept {
     Impl& impl = *impl_;
     if (!impl.OnOwnerThread()) {
         return Result<void>::Failure(ErrorCode::WrongThread);
+    }
+
+    if (impl.inCallback) {
+        return Result<void>::Failure(ErrorCode::WrongContext);
     }
 
     if (impl.shutDown) {

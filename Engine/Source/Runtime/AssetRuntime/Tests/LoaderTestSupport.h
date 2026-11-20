@@ -70,6 +70,10 @@ struct LoaderNode {
     uint64 soft = 0;
     // 0이 아니면 이 크기의 bulk(Zstd)를 붙인다.
     uint32 bulkBytes = 0;
+    // 참이면 이 패키지는 다른 Registry에서 대표 에셋을 TestRequiredAsset(target → 자기)으로 다시 쓴
+    // 쿠킹 결과로 바꾼다 — 이 패키지를 Hard로 가리키는 패키지는 TestAsset을 기대하고 쓰였으므로
+    // 공개 단계에서 TypeMismatch다(오래된 의존 쿠킹 결과).
+    bool staleType = false;
 };
 
 // 쿠킹 패키지 장면이다: 노드를 더하고 Cook하면 패키지 byte와 매니페스트가 생긴다.
@@ -174,7 +178,9 @@ public:
                 options.bulkCodec = BulkCodec::Zstd;
             }
 
-            Array<uint8> file = Write(env_.allocator, source, packages[index].Handle(), options);
+            Array<uint8> file =
+                node.staleType ? WriteStale(node.id)
+                               : Write(env_.allocator, source, packages[index].Handle(), options);
             if (file.IsEmpty()) {
                 return false;
             }
@@ -237,6 +243,36 @@ public:
     StringView root = "cooked";
 
 private:
+    // id 패키지를 따로 만든 Registry에서 대표 에셋 TestRequiredAsset(target → 자기)으로 쓴다.
+    Array<uint8> WriteStale(uint64 id) noexcept {
+        constexpr uint64 StaleContextHigh = 0x5354414c45ull;
+        RegistryOptions options;
+        options.names = &env_.names;
+        options.policy.packageNativeType = NativeTypeKey<Package>();
+        options.policy.rejectWorldOnly = true;
+        auto registry = UniquePtr<ObjectRegistry>::TryMake(
+            env_.allocator, env_.allocator, env_.types, ContextId{StaleContextHigh, id}, options);
+        if (!registry) {
+            return Array<uint8>(env_.allocator);
+        }
+
+        ObjectRegistry& stale = *registry.Value();
+        const ObjectAccessContext access = stale.OwnerAccess();
+        auto package = NewPackage(stale, access, FixedId(id), PackageKind::Cooked);
+        if (!package) {
+            return Array<uint8>(env_.allocator);
+        }
+
+        const ObjectHandle asset =
+            Make<TestRequiredAsset>(stale, TestRequiredType(), package.Value().Handle(), "");
+        TestRequiredAsset* pointer = Pointer<TestRequiredAsset>(stale, asset);
+        if (pointer == nullptr || !stale.SetReference(access, asset, pointer->target, asset)) {
+            return Array<uint8>(env_.allocator);
+        }
+
+        return Write(env_.allocator, stale, package.Value().Handle(), CookedOptions());
+    }
+
     usize IndexOf(uint64 id) const noexcept {
         for (usize index = 0; index < nodes_.Size(); ++index) {
             if (nodes_[index].id == id) {
@@ -320,6 +356,10 @@ public:
             return Result<void>::Failure(file->beginError);
         }
 
+        if (onBegin != nullptr) {
+            onBegin(onBeginContext);
+        }
+
         ++active;
         Held entry;
         entry.read = &read;
@@ -384,6 +424,9 @@ public:
         return false;
     }
 
+    // 시험 hook: Begin마다 불린다(로더 재진입 시험).
+    void (*onBegin)(void* context) noexcept = nullptr;
+    void* onBeginContext = nullptr;
     Array<File> files;
     Array<Held> held;
     // Begin을 부른 경로(순서대로)다.
@@ -411,6 +454,10 @@ public:
         }
 
         ++runs;
+        if (onRun != nullptr) {
+            onRun(onRunContext);
+        }
+
         if (hold) {
             (void)pending.TryPushBack(Pending{job, context});
             return Result<void>::Success();
@@ -443,6 +490,9 @@ public:
         }
     }
 
+    // 시험 hook: Run마다 불린다(로더 재진입 시험).
+    void (*onRun)(void* context) noexcept = nullptr;
+    void* onRunContext = nullptr;
     Array<Pending> pending;
     bool hold = false;
     ErrorCode failRun = ErrorCode::None;
@@ -488,15 +538,51 @@ private:
 // PostLoad 호출 순서를 적는 handler다.
 class RecordingPostLoad final : public AssetPostLoadHandler {
 public:
-    explicit RecordingPostLoad(Allocator& allocator) noexcept : order(allocator) {
+    explicit RecordingPostLoad(Allocator& allocator) noexcept
+        : order(allocator), packages(allocator) {
     }
 
     void PostLoad(ObjectHandle package, AssetId asset) noexcept override {
-        (void)package;
         (void)order.TryPushBack(asset);
+        (void)packages.TryPushBack(package);
+    }
+
+    // 넘어온 package handle이 모두 그 에셋의 FindPackage 결과와 같은지다(공개한 패키지가 남아 있을
+    // 때).
+    bool PackagesMatch(AssetLoader& loader) const noexcept {
+        for (usize index = 0; index < order.Size(); ++index) {
+            auto found = loader.FindPackage(order[index]);
+            if (!found || !(found.Value() == packages[index])) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    // asset의 기록 위치다(없으면 order 크기).
+    usize IndexOf(AssetId asset) const noexcept {
+        for (usize index = 0; index < order.Size(); ++index) {
+            if (order[index] == asset) {
+                return index;
+            }
+        }
+
+        return order.Size();
+    }
+
+    // asset이 몇 번 기록됐는지다.
+    usize CountOf(AssetId asset) const noexcept {
+        usize count = 0;
+        for (const AssetId& recorded : order) {
+            count += recorded == asset ? 1 : 0;
+        }
+
+        return count;
     }
 
     Array<AssetId> order;
+    Array<ObjectHandle> packages;
 };
 
 // id 요청이다(우선순위 Normal, 취소 없음).
