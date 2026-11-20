@@ -239,7 +239,8 @@ struct AssetLoader::Impl {
     bool shutDown = false;
     // PostLoad handler·관찰자·시험 hook이 불리는 중인지다(11.6절 18 — 상태를 바꾸는 공개 함수는
     // WrongContext).
-    bool inCallback = false;
+    // (시계는 const 조회 안에서도 불리므로 mutable이다.)
+    mutable bool inCallback = false;
 
     // 매니페스트 항목마다 진행 중 단위 번호와 공개 번호(없으면 LoaderNoIndex)다.
     Array<uint32> entryUnit;
@@ -292,9 +293,17 @@ struct AssetLoader::Impl {
     // 최근 동기 대기 고리(다음 쓸 자리 = syncWaits % 용량)다.
     AssetLoaderSyncWait recentWaits[AssetLoaderSnapshot::RecentSyncWaitCapacity] = {};
 
+    // 바깥 코드(설정 시계)는 콜백 중 표시 안에서 부른다(11.6절 18).
     uint64 Now() const noexcept {
-        return config.clock != nullptr ? config.clock(config.clockContext)
-                                       : LoaderDefaultClock(nullptr);
+        if (config.clock == nullptr) {
+            return LoaderDefaultClock(nullptr);
+        }
+
+        const bool previous = inCallback;
+        inCallback = true;
+        const uint64 now = config.clock(config.clockContext);
+        inCallback = previous;
+        return now;
     }
 
     bool OnOwnerThread() const noexcept {
@@ -991,7 +1000,10 @@ struct AssetLoader::Impl {
         job->asyncPending = true;
         job->readBegun = true;
         ++asyncInFlight;
-        if (auto begun = config.io->Begin(read); !begun) {
+        inCallback = true;
+        Result<void> begun = config.io->Begin(read);
+        inCallback = false;
+        if (!begun) {
             job->asyncPending = false;
             job->readBegun = false;
             --asyncInFlight;
@@ -1089,7 +1101,9 @@ struct AssetLoader::Impl {
         const LoaderCompletion completion = job->completion;
         // IO 완료만 readBegun이 남아 있다(worker 완료 때는 이미 놓았다).
         if (job->readBegun) {
+            inCallback = true;
             config.io->Release(job->read);
+            inCallback = false;
             job->readBegun = false;
         }
 
@@ -1126,7 +1140,10 @@ struct AssetLoader::Impl {
             SetPhase(*job, AssetLoaderPackagePhase::Preparing);
             job->asyncPending = true;
             ++asyncInFlight;
-            if (auto run = config.worker->Run(RunLoaderPrepare, job); !run) {
+            inCallback = true;
+            Result<void> run = config.worker->Run(RunLoaderPrepare, job);
+            inCallback = false;
+            if (!run) {
                 job->asyncPending = false;
                 --asyncInFlight;
                 diagnostic.error = run.Error();
@@ -1566,6 +1583,11 @@ AssetLoader::~AssetLoader() {
         platform::Fatal("AssetLoader destroyed outside its owner thread");
     }
 
+    // 콜백 안의 파괴는 돌아온 뒤 해제된 상태를 읽는다(11.6절 18).
+    if (impl_->inCallback) {
+        platform::Fatal("AssetLoader destroyed inside its own callback");
+    }
+
     (void)Shutdown();
     Allocator& allocator = *config_.allocator;
     impl_->~Impl();
@@ -1885,7 +1907,14 @@ Result<AssetLoadStatus> AssetLoader::WaitFor(AssetLoadHandle handle, const char*
         return Result<Out>::Failure(ErrorCode::WrongContext);
     }
 
-    if (config_.inFrame != nullptr && config_.inFrame(config_.inFrameContext)) {
+    bool framing = false;
+    if (config_.inFrame != nullptr) {
+        impl.inCallback = true;
+        framing = config_.inFrame(config_.inFrameContext);
+        impl.inCallback = false;
+    }
+
+    if (framing) {
         return Result<Out>::Failure(ErrorCode::WrongContext);
     }
 
