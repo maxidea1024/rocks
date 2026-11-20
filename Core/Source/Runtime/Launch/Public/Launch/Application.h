@@ -8,6 +8,7 @@
 namespace rocks {
 class Allocator;
 class LogSystem;
+class ModuleLoader;
 } // namespace rocks
 
 // 공통 실행 계층이다(UE Launch·GuardedMain 대응, Docs/Design/CrashHandlingAndLaunch.ko.md 6–8절).
@@ -131,6 +132,22 @@ public:
     //   auto loader = ModuleLoader::TryCreate(memory, GeneratedModuleTable());
     Allocator& DefaultAllocator() noexcept;
 
+    // Launch가 소유한 프로세스 모듈 로더다(Docs/Design/ModuleLoader.ko.md 3.9·3.11절, UE
+    // FModuleManager의 자리 — 전역 접근자는 없다). 본문 수명 동안 유효하다. 범용 할당자로 이 실행
+    // 파일의 모듈 표(GeneratedModuleTable)에서 만들었고 부트 모듈(EarliestPossible 단계 — Core·
+    // ModuleLoader·Launch)이 시작해 있다. 본문은 단계를 이어 돈다: 엔진 호스트는 설정·로그 뒤
+    // StartPhase(PostConfigInit)와 끝에 ShutdownGroup(Host)를, Engine(EngineConfig::modules)은 엔진
+    // 단계를 돈다. 프로세스 묶음은 본문이 돌아간 뒤 Launch가 내린다(도구 로그 정리 전). 본문은 이
+    // 로더의 lease를 잡은 등록(설정 문맥 등)을 돌아가기 전에 놓는다. 남으면 Launch가 Error로
+    // 기록하고 로더 파괴가 Fatal이다(RequestExitWithoutStaticTeardown이면 내리지도 파괴하지도
+    // 않는다).
+    //
+    // 사용 예:
+    //   rocks::ModuleLoader& modules = context.Modules();
+    //   rocks::EngineConfig config;
+    //   config.modules = &modules;
+    ModuleLoader& Modules() noexcept;
+
     // Launch가 소유한 시스템 할당기다(본문 수명 동안 유효). 범용 할당자의 상위이고 Launch의 도구
     // 로그가 쓴다. 본문은 보통 DefaultAllocator()를 쓰고, 이것은 두 할당자를 비교하거나 진단할 때
     // 쓴다.
@@ -161,6 +178,7 @@ private:
 
     Allocator* allocator_ = nullptr;
     Allocator* defaultAllocator_ = nullptr;
+    ModuleLoader* modules_ = nullptr;
     LogSystem* toolLog_ = nullptr;
     const ApplicationSettings* settings_ = nullptr;
     bool exitWithoutStaticTeardown_ = false;
@@ -168,6 +186,10 @@ private:
 
 // 명령줄을 캡처하지 못했을 때의 기본 종료 코드다(stderr에 한 줄을 남긴다).
 inline constexpr int CommandLineFailureExitCode = 1;
+
+// 모듈 로더를 만들지 못했거나 부트 모듈이 시작하지 못했을 때의 종료 코드다(Launch가 Error로 원인을
+// 한 번 기록한다 — Docs/Design/ModuleLoader.ko.md 3.11절).
+inline constexpr int ModuleStartupFailureExitCode = 1;
 
 // 실행 파일 설명이다. 보통 정적 상수로 두고 Describe 함수가 돌려준다.
 struct ApplicationDescription {
@@ -191,7 +213,8 @@ struct ApplicationDescription {
 // 진입점 공통 본문이다. 실행 파일은 직접 부르지 않고 EntryPoint.h의 매크로를 쓴다.
 // 순서(설계 8.1절): 도우미 모드 분기 → 이른 크래시 수집 설치 → 보호 프레임 안에서 명령줄 캡처 →
 // configure → 설정 적용(대화상자·크래시 설정·도우미 시작) → 종료 요청 처리기 → 범용 할당자 → 도구
-// 로그 → 본문 → 시작한 단계만 역순 정리 → 보호 프레임 밖에서 크래시 수집 해제 → 종료 코드.
+// 로그 → 모듈 로더(부트 모듈) → 본문 → 시작한 단계만 역순 정리 → 보호 프레임 밖에서 크래시 수집
+// 해제 → 종료 코드. 모듈 로더 단계가 실패하면 본문 없이 ModuleStartupFailureExitCode다.
 // 초기화 실패(명령줄 캡처)는 성공한 단계만 역순으로 정리하고 종료 코드는
 // description.commandLineFailureExitCode다(stderr 한 줄에 원인과 상한을 적는다). 정리는 반환 경로
 // 하나에서 한 번만 한다. 크래시 종료는 이 경로를 타지 않는다. description.name이나 run이 없으면

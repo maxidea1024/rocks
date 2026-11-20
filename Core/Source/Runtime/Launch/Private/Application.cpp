@@ -13,6 +13,7 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/StringBuilder.h>
 #include <Launch/Application.h>
+#include <ModuleLoader/ModuleLoader.h>
 #include <Platform/Atomics.h>
 #include <Platform/CrashReporting.h>
 #include <Platform/Fatal.h>
@@ -33,6 +34,9 @@ constexpr char DefaultCrashDirectory[] = "Saved/Crashes";
 
 // 명령줄 캡처 실패 줄의 칸이다(원인 이름과 상한 숫자를 담는다).
 constexpr usize DiagnosticLineBytes = 256;
+
+// 정리 뒤 lease가 남은 모듈을 이름까지 기록하는 상한이다(넘는 모듈은 수만 기록한다).
+constexpr usize MaxLeaseReportNames = 16;
 
 constinit uint32 terminationRequested = 0;
 
@@ -106,7 +110,7 @@ public:
     }
 
 private:
-    static constexpr usize StageCount = 5;
+    static constexpr usize StageCount = 6;
 
     // 보호 프레임 안의 본문이다(인라인되지 않는 별도 함수, D34).
     static int GuardedStages(void* context) noexcept;
@@ -120,6 +124,13 @@ private:
     static void StopDefaultAllocator(ApplicationRunner& runner) noexcept;
     static bool StartToolLog(ApplicationRunner& runner) noexcept;
     static void StopToolLog(ApplicationRunner& runner) noexcept;
+    static bool StartModules(ApplicationRunner& runner) noexcept;
+    static void StopModules(ApplicationRunner& runner) noexcept;
+
+    // 범용 할당자다(Binned가 아니면 SystemAllocator).
+    Allocator& DefaultAllocatorObject() noexcept {
+        return binned_ != nullptr ? static_cast<Allocator&>(*binned_) : allocator_;
+    }
 
     platform::CrashReportingOptions
     MakeCrashOptions(const ApplicationSettings& settings) const noexcept;
@@ -152,6 +163,8 @@ private:
     LogSystem* toolLog_ = nullptr;
     StderrLogSink* toolSink_ = nullptr;
     LogInstallScope* toolScope_ = nullptr;
+    // 프로세스 모듈 로더다(범용 할당자로 만든다). 범용 할당자보다 먼저 파괴한다(단계 역순).
+    UniquePtr<ModuleLoader> modules_;
 };
 
 platform::CrashReportingOptions
@@ -397,18 +410,78 @@ void ApplicationRunner::StopToolLog(ApplicationRunner& runner) noexcept {
     runner.toolSink_ = nullptr;
 }
 
+bool ApplicationRunner::StartModules(ApplicationRunner& runner) noexcept {
+    // 이 실행 파일의 모듈 표로 로더를 만들고 부트 모듈(EarliestPossible)을 시작한다
+    // (Docs/Design/ModuleLoader.ko.md 3.11절). 실패는 여기서 한 번 기록한다(로더는 기록하지
+    // 않는다).
+    auto created = ModuleLoader::TryCreate(runner.DefaultAllocatorObject(), GeneratedModuleTable());
+    if (!created) {
+        Log::Error(LogLaunch, "The module loader could not be created: {Error}",
+                   StringView(ErrorCodeName(created.Error())));
+        return false;
+    }
+
+    runner.modules_ = Move(created.Value());
+    const ModuleLoadReport started = runner.modules_->StartPhase(LoadingPhase::EarliestPossible);
+    if (!started.IsOk()) {
+        Log::Error(LogLaunch, "Boot module {Module} failed to start ({Code}) at {Stage}: {Message}",
+                   StringView(started.failed), StringView(ModuleLoadCodeName(started.code)),
+                   StringView(started.stage), StringView(started.message));
+        runner.modules_->ShutdownGroup(ModuleGroup::Process);
+        runner.modules_.Reset();
+        return false;
+    }
+
+    return true;
+}
+
+void ApplicationRunner::StopModules(ApplicationRunner& runner) noexcept {
+    if (!runner.modules_) {
+        return;
+    }
+
+    // 정적 소멸 없이 끝내는 경로는 로더를 내리지도 파괴하지도 않는다: 멈춘 출력 스레드를 포기한
+    // 본문이 남긴 설정 문맥이 모듈 lease를 쥐고 있다(범용 할당자와 같은 규칙). 내장 진입은 그
+    // 요청을 무시하므로 내린다.
+    if (runner.context_.exitWithoutStaticTeardown_ && !runner.embedded_) {
+        alignas(UniquePtr<ModuleLoader>) static unsigned char
+            abandoned[sizeof(UniquePtr<ModuleLoader>)];
+        ::new (abandoned) UniquePtr<ModuleLoader>(Move(runner.modules_));
+        return;
+    }
+
+    runner.modules_->ShutdownGroup(ModuleGroup::Process);
+    // 남은 lease는 모듈 코드를 가리키는 등록이 남은 것이다. 파괴의 Fatal(마지막 안전장치) 전에
+    // 원인을 남긴다.
+    StringView holders[MaxLeaseReportNames];
+    const usize leftover = runner.modules_->ModulesWithLeases(Span<StringView>(holders));
+    for (usize index = 0; index < leftover && index < MaxLeaseReportNames; ++index) {
+        Log::Error(LogLaunch,
+                   "Module {Module} still has code leases after shutdown; a registration that "
+                   "points at its code was not released",
+                   holders[index]);
+    }
+
+    if (leftover > MaxLeaseReportNames) {
+        Log::Error(LogLaunch,
+                   "{Count} more modules still have code leases after shutdown (names not listed)",
+                   leftover - MaxLeaseReportNames);
+    }
+
+    runner.modules_.Reset();
+}
+
 int ApplicationRunner::RunBody(ApplicationRunner& runner) noexcept {
     ApplicationContext& context = runner.context_;
     context.allocator_ = &runner.allocator_;
-    context.defaultAllocator_ = &runner.allocator_;
-    if (runner.binned_ != nullptr) {
-        context.defaultAllocator_ = runner.binned_;
-    }
+    context.defaultAllocator_ = &runner.DefaultAllocatorObject();
+    context.modules_ = runner.modules_.Get();
 
     context.toolLog_ = runner.toolLog_;
     context.settings_ = &runner.settings_;
     const int exitCode = runner.description_.run(context);
     context.toolLog_ = nullptr;
+    context.modules_ = nullptr;
     return exitCode;
 }
 
@@ -423,6 +496,8 @@ ROCKS_NOINLINE int ApplicationRunner::GuardedStages(void* context) noexcept {
         {"Launch.DefaultAllocator", &StartDefaultAllocator, &StopDefaultAllocator,
          detail::StageFailure::Continue, 0},
         {"Launch.ToolLog", &StartToolLog, &StopToolLog, detail::StageFailure::Continue, 0},
+        {"Launch.Modules", &StartModules, &StopModules, detail::StageFailure::Abort,
+         ModuleStartupFailureExitCode},
     };
     return detail::RunLaunchStages(stages, runner, &RunBody);
 }
@@ -547,6 +622,10 @@ Allocator& ApplicationContext::DefaultAllocator() noexcept {
 
 Allocator& ApplicationContext::SystemAllocator() noexcept {
     return *allocator_;
+}
+
+ModuleLoader& ApplicationContext::Modules() noexcept {
+    return *modules_;
 }
 
 LogSystem* ApplicationContext::ToolLog() noexcept {

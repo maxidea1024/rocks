@@ -51,6 +51,7 @@ TEST(Engine_ConfigSyncPointRunsBeforeFrameBegin) {
     SystemAllocator allocator;
     SettingsClient client(settings);
     EngineConfig config;
+    config.modules = &test::ProcessModules();
     config.settings = &settings;
     config.client = &client;
     config.fixedFrameDeltaSeconds = 1.0 / 60.0;
@@ -101,6 +102,7 @@ TEST(Engine_WorldOwnsCVarScope) {
     REQUIRE(settings.Register(WorldViewDistance));
     SystemAllocator allocator;
     EngineConfig config;
+    config.modules = &test::ProcessModules();
     config.settings = &settings;
     config.fixedFrameDeltaSeconds = 1.0 / 60.0;
     Engine engine(allocator);
@@ -139,6 +141,7 @@ TEST(Engine_FailedWorldInitializeReleasesCVarScope) {
     config::ConfigContext& settings = fixture.Context();
     SystemAllocator allocator;
     EngineConfig config;
+    config.modules = &test::ProcessModules();
     config.settings = &settings;
     config.fixedFrameDeltaSeconds = 1.0 / 60.0;
     Engine engine(allocator);

@@ -1,5 +1,4 @@
 #include <Core/Memory/UniquePtr.h>
-#include <Core/Module/ModuleEntry.h>
 #include <Launch/EntryPoint.h>
 #include <ModuleLoader/ModuleLoader.h>
 #include <Object/ModuleTypeRegistrations.h>
@@ -102,36 +101,31 @@ uint64 Min(uint64 left, uint64 right) noexcept {
     return left < right ? left : right;
 }
 
-int Measure(uint32 actors, bool ticking) noexcept {
+int Measure(ModuleLoader& modules, uint32 actors, bool ticking) noexcept {
     BenchAllocator memory;
     int status = 0;
     {
-        // World 리플렉션 타입은 모듈 로더가 등록한다(Docs/Design/ModuleLoader.ko.md 3.10절): World
-        // 모듈(의존 폐포)을 시작하고 이 레지스트리의 타입 등록기를 붙인다. 등록기는 레지스트리보다
-        // 먼저 떼고(detach), 로더는 레지스트리가 모듈 lease를 놓은 뒤 파괴한다(선언 순서).
-        auto createdModules = ModuleLoader::TryCreate(memory, GeneratedModuleTable());
-        if (!createdModules) {
-            return 2;
-        }
-
-        UniquePtr<ModuleLoader> modules = Move(createdModules.Value());
-        if (!modules->Load("World").IsOk()) {
+        // World 리플렉션 타입은 모듈 로더가 등록한다(Docs/Design/ModuleLoader.ko.md 3.11절):
+        // Launch의 프로세스 로더에서 World 모듈(의존 폐포)을 시작하고(처음 한 번, 프로세스 묶음) 이
+        // 레지스트리의 타입 등록기를 붙인다. 등록기는 레지스트리보다 먼저 뗀다(detach).
+        if (!modules.Load("World").IsOk()) {
             return 2;
         }
 
         TypeRegistry types(memory);
         ModuleTypeRegistrations registrations(types, memory);
-        if (!modules->AttachTypeRegistrar(registrations).IsOk()) {
+        if (!modules.AttachTypeRegistrar(registrations).IsOk()) {
             return 2;
         }
 
         struct DetachTypes {
             ModuleLoader& loader;
+            ModuleTypeRegistrations& registrations;
 
             ~DetachTypes() noexcept {
-                loader.DetachTypeRegistrar();
+                loader.DetachTypeRegistrar(registrations);
             }
-        } detach{*modules};
+        } detach{modules, registrations};
 
         auto token = RegisterNativeClass<BenchActor>(types);
         if (!token) {
@@ -374,7 +368,7 @@ int RunMain(rocks::launch::ApplicationContext& context) noexcept {
     }
 
     for (rocks::uint32 index = 0; index < count; ++index) {
-        if (const int status = Measure(sizes[index], ticking); status != 0) {
+        if (const int status = Measure(context.Modules(), sizes[index], ticking); status != 0) {
             printf("WorldBench failed with status %d\n", status);
             return status;
         }

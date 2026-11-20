@@ -1,4 +1,5 @@
 using Rocks.Build;
+using Rocks.Build.Descriptors;
 using Rocks.Build.Rules;
 
 // Module loader (Docs/Design/ModuleLoader.ko.md, UE FModuleManager counterpart): starts modules from the build-generated module table in dependency
@@ -13,4 +14,7 @@ public sealed class ModuleLoader : CoreModuleRules
     protected override UnityMode Unity => UnityMode.On;
 
     protected override string[] RequiredModules => ["Core", "PlatformBase"];
+
+    // Boot module (in the dependency closure of Launch): started by the module loader right after it is created.
+    protected override LoadingPhase LoadingPhase => LoadingPhase.EarliestPossible;
 }
