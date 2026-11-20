@@ -5,6 +5,7 @@
 #include <Windows.h>
 
 #include <DbgHelp.h>
+#include <processsnapshot.h>
 
 // Windows 크래시 수집기의 파일 쪽이다(Docs/Design/CrashHandlingAndLaunch.ko.md 11·14절). 설치 때
 // 경로·모듈 정보·DbgHelp를 준비하고, 크래시 때 크래시 폴더·CrashInfo.json·덤프를 쓴다. 쓰는 쪽은
@@ -36,6 +37,19 @@ void ReleaseCrashFiles() noexcept;
 
 // 프로세스 안 덤프를 쓸 수 있는가(DbgHelp 준비됨)다.
 bool CanWriteInProcessDump() noexcept;
+
+// process를 덤프용으로 캡처한다(PssCaptureSnapshot, VA clone·스레드 문맥, Detailed·Full이면 핸들
+// 정보). VA clone이 job을 빠지게 PSS_CREATE_BREAKAWAY_OPTIONAL을 먼저 청하고, 이 OS가 그 조합을
+// 받지 않으면(ERROR_INVALID_PARAMETER) 플래그 없이 다시 캡처한다. 성공이면 ERROR_SUCCESS이고
+// snapshot은 PssFreeSnapshot(GetCurrentProcess(), snapshot)으로 푼다. 도우미(부모 캡처)와 프로세스
+// 안 덤프(자기 캡처 — 살아 있는 자기 프로세스를 덤프하면 dbghelp가 마감 스레드까지 suspend한다,
+// 설계 11.5절)가 같이 쓴다.
+DWORD CaptureCrashSnapshot(HANDLE process, CrashDumpDetail detail, HPSS& snapshot) noexcept;
+
+// 시험용: 덤프 callback마다 callback 종류로 부른다(nullptr이면 끈다). 덤프의 특정 단계에서 다른
+// 스레드가 lock을 잡게 맞추는 시험이 쓴다(TestSupport). 설치 전에 한 번 건다.
+using CrashDumpCallbackHook = void (*)(ULONG callbackType) noexcept;
+void SetCrashDumpCallbackHookForTest(CrashDumpCallbackHook hook) noexcept;
 
 // 설치 때 굳힌 크래시 폴더 경로다(UTF-16과 진단용 UTF-8).
 const wchar_t* CrashPrimaryFolder() noexcept;
