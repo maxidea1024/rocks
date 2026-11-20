@@ -2,9 +2,7 @@
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
 #include <Platform/Sync.h>
-#include <Platform/Thread.h>
 #include <Base/Checked.h>
-#include "../Common/TerminationInternal.h"
 
 #include <Windows.h>
 #include <malloc.h>
@@ -116,24 +114,6 @@ void WriteDiagnostic(const char* bytes, usize count) noexcept {
         bytes += written;
         count -= written;
     }
-}
-
-[[noreturn]] void Fatal(const char* message) noexcept {
-    const char* text = message != nullptr ? message : "Rocks fatal error";
-    DWORD length = 0;
-    while (length < 4096 && text[length] != '\0') {
-        ++length;
-    }
-
-    // CRT FILE lock을 거치지 않는다. 오류 진단 자체의 실패는 추가 logger나 재할당으로 처리하지
-    // 않는다.
-    DWORD written = 0;
-    const HANDLE errorStream = GetStdHandle(STD_ERROR_HANDLE);
-    WriteFile(errorStream, text, length, &written, nullptr);
-    WriteFile(errorStream, "\n", 1, &written, nullptr);
-    detail::RecordTerminatingThread(CurrentThreadId());
-    detail::RunTerminationHook(text, length);
-    abort();
 }
 
 } // namespace rocks::platform

@@ -119,6 +119,18 @@ public static class LogCompiledMinimums
 public enum NativeModuleKind { StaticLibrary, Executable }
 
 /// <summary>
+/// Windows 실행 파일의 subsystem이다(링크 <c>/SUBSYSTEM:CONSOLE</c>·<c>/SUBSYSTEM:WINDOWS</c>).
+/// <list type="bullet">
+/// <item>Console(기본): 콘솔 프로그램. 진입 기호는 <c>wmain</c>이다(Launch <c>ROCKS_IMPLEMENT_APPLICATION</c>).</item>
+/// <item>Windows: GUI 프로그램. 콘솔 창이 붙지 않는다. 진입 기호는 <c>wWinMain</c>이다
+/// (Launch <c>ROCKS_IMPLEMENT_WINDOWED_APPLICATION</c>). 매크로와 맞지 않으면 진입 기호가 없어 링크 오류다.</item>
+/// </list>
+/// 다른 플랫폼 toolchain은 이 값을 쓰지 않는다. 정적 라이브러리에 Windows를 두면 입력 오류다
+/// (Docs/Design/CrashHandlingAndLaunch.ko.md 7.4절).
+/// </summary>
+public enum WindowsSubsystem { Console, Windows }
+
+/// <summary>
 /// 모듈 단위 최적화 재정의다(UE ModuleRules.OptimizeCode 대응).
 /// <list type="bullet">
 /// <item>Default: 구성을 따른다(Debug·Asan은 끔, Development·Release는 켬).</item>
@@ -202,6 +214,9 @@ public sealed record NativeModuleInput
     public required string Name { get; init; }
 
     public NativeModuleKind Kind { get; init; } = NativeModuleKind.StaticLibrary;
+
+    // Windows 실행 파일의 subsystem이다(WindowsSubsystem). 실행 파일에만 뜻이 있고 dependency로 전파하지 않는다.
+    public WindowsSubsystem WindowsSubsystem { get; init; } = WindowsSubsystem.Console;
 
     public IReadOnlyList<string> Sources { get; init; } = [];
 

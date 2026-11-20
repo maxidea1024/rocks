@@ -25,6 +25,8 @@ internal static class NativeTests
     public static void Register(TestSuite suite, Options options, IReadOnlyDictionary<string, string?> environment)
     {
         LoggerOutputTests.Register(suite, options, environment);
+        CrashReportingTests.Register(suite, options, environment);
+        LaunchTests.Register(suite, options, environment);
         AlgorithmsCompilerTests.Register(suite, options, environment);
         LogCompilerTests.Register(suite, options, environment);
         CVarCompilerTests.Register(suite, options, environment);

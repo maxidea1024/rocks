@@ -210,9 +210,10 @@ public static partial class PolicyChecks
                 continue;
             }
 
-            // Base/Compiler.h는 ROCKS_PLATFORM_*를 정의하고 컴파일 대상과 맞는지 검증하는 정의 지점이라 OS 분기만 허용한다. 모든
-            // 번역 단위가 포함하는 헤더이므로 OS 헤더·API는 여전히 막는다.
-            ScanFile(path, relative, relative == TargetMacroDefinitionHeader ? BannedPlatformDependencyOnly : BannedPlatform,
+            // Base/Compiler.h는 ROCKS_PLATFORM_*를 정의하고 컴파일 대상과 맞는지 검증하는 정의 지점이고, Launch/EntryPoint.h는 플랫폼
+            // 진입 기호(wmain·wWinMain·main)를 고르는 매크로라 OS 분기만 허용한다. OS 헤더·API는 여전히 막는다.
+            bool branchAllowed = relative == TargetMacroDefinitionHeader || relative == LaunchEntryPointHeader;
+            ScanFile(path, relative, branchAllowed ? BannedPlatformDependencyOnly : BannedPlatform,
                 "platform-boundary", "OS dependency outside native backend", failures);
         }
 
@@ -229,6 +230,7 @@ public static partial class PolicyChecks
     /// 포함한다. PlatformBoundary가 감쌈·위치·포함 범위를 검사한다.</item>
     /// <item>Programs/Commandlet/Private/Win64/</item>
     /// <item>Programs/ShaderToolSpike/Private/Win64/: SH0 도구 스파이크의 DXC COM·D3D12·WGL 측정 코드.</item>
+    /// <item>Programs/LaunchTests/Private/{Win64,Posix}/: Launch 내장 모드 시험 호스트(호스트 진입점·처리되지 않은 예외 처리).</item>
     /// <item>Engine/Source/{Runtime,Developer}/&lt;Module&gt;/Private/{Win64,Mac,Posix,Apple,Android}/: 창·그래픽
     /// backend처럼 OS SDK를 직접 쓰는 엔진 모듈 구현. 공개 헤더(Public/)와 공통 구현은 여전히 금지다.</item>
     /// </list>
@@ -239,6 +241,12 @@ public static partial class PolicyChecks
         if (parts.Length >= 5 && parts[0] == "Programs" && parts[1] is "Commandlet" or "ShaderToolSpike" && parts[2] == "Private")
         {
             return parts[3] == "Win64";
+        }
+
+        // Launch 시험 실행 파일의 내장 호스트(자기 진입점과 OS 크래시 처리를 가진 호스트, CrashHandlingAndLaunch.ko.md 8.8절).
+        if (parts.Length >= 5 && parts[0] == "Programs" && parts[1] == "LaunchTests" && parts[2] == "Private")
+        {
+            return parts[3] is "Win64" or "Posix";
         }
 
         if (parts.Length >= 7 && parts[0] == "Engine" && parts[1] == "Source" &&
@@ -262,6 +270,9 @@ public static partial class PolicyChecks
         return (parts[2] == "Runtime" && parts[3] == "PlatformBase" && platform) ||
                (parts[2] == "Developer" && parts[3] == "TestSupport" && platform);
     }
+
+    // 플랫폼 진입점 매크로 헤더다(D3·D7). 진입 기호를 플랫폼마다 고르는 것이 이 헤더의 일이다.
+    private const string LaunchEntryPointHeader = "Core/Source/Runtime/Launch/Public/Launch/EntryPoint.h";
 
     private const string WindowsPublicHeaderDirectory = "Core/Source/Runtime/PlatformBase/Public/Platform/Win64/";
 

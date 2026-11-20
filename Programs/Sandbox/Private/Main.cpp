@@ -1,9 +1,7 @@
 #include "EngineHost.h"
 #include "GraphicsSelfTest.h"
 
-#include <Core/Diagnostics/LogSystem.h>
-#include <Core/Diagnostics/RuntimeLogSink.h>
-#include <Core/Memory/SystemAllocator.h>
+#include <Launch/EntryPoint.h>
 #include <Platform/Memory.h>
 #include <stdio.h>
 
@@ -15,11 +13,21 @@
 //                                  파일(Engine/Config) 다음 설정 파일(Project 층 — "Settings"
 //                                  섹션의 log.* 등), 그다음 --set(Session 층) 순으로 합친다.
 //                                  --trace는 trace 채널·묶음을 켠다(TraceControl)
+//                                  첫 Ctrl-C는 다음 프레임 경계에서 정상 종료한다(두 번째는 즉시
+//                                  종료).
+//                                  --request-termination-at-frame N은 시험용으로 N번째 프레임에서
+//                                  같은 종료 요청 표시를 남긴다
 //
-// 로그(Docs/Design/LoggingSystem.ko.md 5.1절): 자체 검사는 명령줄 도구처럼 Sync, 엔진 실행은
-// LogHost가 설정으로 만든 LogSystem(기본 Async)을 stderr sink와 함께 설치한다. 자체 검사의
-// PASS/FAIL 줄은 시험 결과 출력이라 표준 출력 printf로 남긴다.
+// 진입점은 Launch 공통 실행 계층이다(Docs/Design/CrashHandlingAndLaunch.ko.md 16절). Launch가
+// 명령줄을 UTF-8로 캡처하고 크래시 수집(덤프 도우미 포함)을 설치한다. 로그(Docs/Design/
+// LoggingSystem.ko.md 5.1절): 자체 검사는 Launch 도구 로그(Sync LogSystem·stderr sink)이고, 엔진
+// 실행은 LogHost가 설정으로 만든 LogSystem(기본 Async)을 stderr sink와 함께 설치한다(configure가
+// --engine을 보고 도구 로그를 끈다). 자체 검사의 PASS/FAIL 줄은 시험 결과 출력이라 표준 출력
+// printf로 남긴다.
 namespace {
+
+using rocks::Span;
+using rocks::StringView;
 
 int Usage() noexcept {
     fprintf(stderr, "usage: Sandbox [--self-test] | --engine [--frames N] [--config <file>] "
@@ -28,82 +36,102 @@ int Usage() noexcept {
     return 2;
 }
 
+bool Is(StringView argument, const char* text) noexcept {
+    return argument == StringView(text);
+}
+
 // 1 이상 10진 정수만 받는다.
-bool ParseFrames(const char* text, rocks::uint64& frames) noexcept {
+bool ParseFrames(StringView text, rocks::uint64& frames) noexcept {
     rocks::uint64 value = 0;
-    if (text[0] == '\0') {
+    if (text.ByteCount() == 0) {
         return false;
     }
 
-    for (const char* digit = text; *digit != '\0'; ++digit) {
-        if (*digit < '0' || *digit > '9' || value > 1000000000u) {
+    for (rocks::usize index = 0; index < text.ByteCount(); ++index) {
+        const char digit = text.Data()[index];
+        if (digit < '0' || digit > '9' || value > 1000000000u) {
             return false;
         }
 
-        value = value * 10 + static_cast<rocks::uint64>(*digit - '0');
+        value = value * 10 + static_cast<rocks::uint64>(digit - '0');
     }
 
     frames = value;
     return value != 0;
 }
 
+// 자체 검사(Launch 도구 로그가 설치된 상태)다. 도구 로그를 시작하지 못했어도 검사는 돈다(Warning
+// 이상은 비상 경로로 stderr에 간다).
 int RunSelfTest(rocks::Allocator& allocator) noexcept {
-    rocks::StderrLogSink stderrSink;
-    rocks::LogSystem logs(allocator, rocks::LogSystemConfig::ForTool());
-    if (!logs.AddSink(stderrSink) || !logs.Start()) {
-        fprintf(stderr, "Sandbox: the log system could not start\n");
-        return 1;
-    }
-
-    int graphics = 0;
-    rocks::uint32 engine = 0;
-    {
-        rocks::LogInstallScope installed(logs);
-        graphics = sandbox::RunGraphicsSelfTest(allocator);
-        engine = sandbox::RunEngineHostSelfTest();
-    }
-
-    logs.Stop();
+    const int graphics = sandbox::RunGraphicsSelfTest(allocator);
+    const rocks::uint32 engine = sandbox::RunEngineHostSelfTest();
     return graphics == 0 && engine == 0 ? 0 : 1;
 }
 
-} // namespace
+// 엔진 실행(--engine)이면 Launch 도구 로그를 쓰지 않고(LogHost가 설정으로 로그를 만든다), 첫
+// Ctrl-C·Ctrl-Break·SIGINT·SIGTERM을 종료 요청 표시로 받는다(엔진 PumpEvents의 다리가 정상 종료로
+// 잇는다. 두 번째 요청은 OS 기본 동작으로 바로 끝난다).
+void Configure(Span<const StringView> arguments,
+               rocks::launch::ApplicationSettings& settings) noexcept {
+    for (const StringView argument : arguments) {
+        if (Is(argument, "--engine")) {
+            settings.toolLogging = rocks::launch::ToolLogging::None;
+            settings.handleTerminationRequests = true;
+        }
+    }
+}
 
-int main(int argc, char** argv) {
-    rocks::SystemAllocator allocator;
+int Run(rocks::launch::ApplicationContext& context) noexcept {
+    const Span<const StringView> arguments = context.Arguments();
     bool engine = false;
     sandbox::EngineHostOptions options;
-    // --set·--trace 인자다(나온 순서). argv를 빌린다.
-    constexpr int MaxSettingArguments = 64;
-    rocks::StringView settingArguments[MaxSettingArguments];
-    int settingCount = 0;
-    for (int index = 1; index < argc; ++index) {
-        if (rocks::platform::CStringEquals(argv[index], "--self-test")) {
+    // --set·--trace 인자다(나온 순서). Launch 명령줄 저장소를 빌린다(프로세스 수명).
+    constexpr rocks::usize MaxSettingArguments = 64;
+    StringView settingArguments[MaxSettingArguments];
+    rocks::usize settingCount = 0;
+    for (rocks::usize index = 0; index < arguments.Size(); ++index) {
+        const StringView argument = arguments[index];
+        const bool hasValue = index + 1 < arguments.Size();
+        if (Is(argument, "--self-test")) {
             continue;
         }
 
-        if (rocks::platform::CStringEquals(argv[index], "--engine")) {
+        if (Is(argument, "--engine")) {
             engine = true;
-        } else if (rocks::platform::CStringEquals(argv[index], "--frames") && index + 1 < argc &&
-                   ParseFrames(argv[index + 1], options.frames)) {
+        } else if (Is(argument, "--frames") && hasValue &&
+                   ParseFrames(arguments[index + 1], options.frames)) {
             ++index;
-        } else if (rocks::platform::CStringEquals(argv[index], "--config") && index + 1 < argc) {
-            options.configPath = argv[++index];
-        } else if (rocks::platform::CStringEquals(argv[index], "--trace-file") &&
-                   index + 1 < argc) {
-            options.traceFile = argv[++index];
-        } else if ((rocks::StringView(argv[index])
-                        .StartsWith("--set=", rocks::StringComparison::CaseSensitive) ||
-                    rocks::StringView(argv[index])
-                        .StartsWith("--trace=", rocks::StringComparison::CaseSensitive)) &&
+        } else if (Is(argument, "--config") && hasValue) {
+            options.configPath = arguments[++index].Data();
+        } else if (Is(argument, "--trace-file") && hasValue) {
+            options.traceFile = arguments[++index].Data();
+        } else if (Is(argument, "--request-termination-at-frame") && hasValue &&
+                   ParseFrames(arguments[index + 1], options.requestTerminationAtFrame)) {
+            ++index;
+        } else if ((argument.StartsWith("--set=", rocks::StringComparison::CaseSensitive) ||
+                    argument.StartsWith("--trace=", rocks::StringComparison::CaseSensitive)) &&
                    settingCount < MaxSettingArguments) {
-            settingArguments[settingCount++] = rocks::StringView(argv[index]);
+            settingArguments[settingCount++] = argument;
         } else {
             return Usage();
         }
     }
 
-    options.arguments = rocks::Span<const rocks::StringView>(
-        settingArguments, static_cast<rocks::usize>(settingCount));
-    return engine ? sandbox::RunEngineHost(allocator, options) : RunSelfTest(allocator);
+    options.arguments = Span<const StringView>(settingArguments, settingCount);
+    return engine ? sandbox::RunEngineHost(context, options)
+                  : RunSelfTest(context.SystemAllocator());
 }
+
+const rocks::launch::ApplicationDescription& Describe() noexcept {
+    static constexpr rocks::launch::ApplicationDescription Description{
+        .name = "Sandbox",
+        .kind = rocks::launch::ApplicationKind::EngineHost,
+        .settings = {.toolLogging = rocks::launch::ToolLogging::Stderr},
+        .configure = &Configure,
+        .run = &Run};
+    return Description;
+}
+
+} // namespace
+
+ROCKS_IMPLEMENT_APPLICATION(Describe)

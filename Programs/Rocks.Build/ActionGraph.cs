@@ -596,14 +596,18 @@ internal static class ActionGraph
                         finalInputs.Add(profileLibrary);
                     }
 
-                    finalArguments.AddRange(["/Fe{OUTPUT0}", "/link", "/INCREMENTAL:NO", "/SUBSYSTEM:CONSOLE", "/MANIFEST:EMBED"]);
+                    string subsystem = module.WindowsSubsystem == WindowsSubsystem.Windows ? "/SUBSYSTEM:WINDOWS" : "/SUBSYSTEM:CONSOLE";
+                    finalArguments.AddRange(["/Fe{OUTPUT0}", "/link", "/INCREMENTAL:NO", subsystem, "/MANIFEST:EMBED"]);
                     if (asanThunk != null)
                     {
                         finalArguments.AddRange(["/INCLUDE:__asan_seh_interceptor", "/WHOLEARCHIVE:" + asanThunk]);
                     }
                     // 모든 구성이 PDB를 남긴다. Release PDB는 배포 파일과 분리해 크래시 분석용으로 보관한다.
                     finalOutputs.Add(Path.ChangeExtension(finalPath, ".pdb"));
-                    finalArguments.AddRange(["/DEBUG:FULL", "/PDB:{OUTPUT1}"]);
+                    // CodeView 레코드에는 PDB 파일 이름만 남긴다(/PDBALTPATH:%_PDB%, lld-link가 %_PDB%를 PDB 파일 이름으로 바꾼다).
+                    // 링크 임시 폴더 경로가 배포 실행 파일에 새지 않고, 디버거는 기호 경로에서 이름·GUID·age로 찾는다
+                    // (Docs/Design/CrashHandlingAndLaunch.ko.md 14.4절 D16).
+                    finalArguments.AddRange(["/DEBUG:FULL", "/PDB:{OUTPUT1}", "/PDBALTPATH:%_PDB%"]);
                     finalArguments.AddRange(new[] { "kernel32", "user32", "gdi32", "winspool", "shell32", "ole32", "oleaut32", "uuid", "comdlg32", "advapi32" }
                         .Select(value => "/DEFAULTLIB:" + value + ".lib"));
                 }

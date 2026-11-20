@@ -11,11 +11,19 @@
 #include <Object/TypeRegistry.h>
 #include <Platform/Atomics.h>
 #include <Platform/Clock.h>
+#include <Platform/CrashReporting.h>
 #include <Platform/Fatal.h>
 #include <Platform/File.h>
 #include <Platform/Sync.h>
 
 using namespace rocks;
+
+// 크래시 처리가 칸을 읽는 PlatformBase 내부 함수다(Private/Common/CrashReportingInternal.h). 시험은
+// 크래시 기록에 실제로 남을 값을 이것으로 확인한다.
+namespace rocks::platform::detail {
+bool ReadCrashAnnotation(CrashAnnotation slot, char* buffer, usize capacity, usize& bytes) noexcept;
+} // namespace rocks::platform::detail
+
 namespace log_host_tests_file {
 
 namespace {
@@ -356,6 +364,20 @@ TEST(LogHostWritesAPlainFileFromConfig) {
         REQUIRE(host.IsFileLogging());
         REQUIRE(
             path.TryAppend(Span<const char>(host.FilePath().Data(), host.FilePath().ByteCount())));
+        // 크래시 기록 칸: LogFile은 지금 파일, LogDirectory는 그 파일의 (절대)
+        // 폴더다(설계 14.1.8절, L29).
+        char annotation[platform::MaxCrashAnnotationBytes];
+        usize annotationBytes = 0;
+        CHECK(platform::detail::ReadCrashAnnotation(platform::CrashAnnotation::LogFile, annotation,
+                                                    sizeof(annotation), annotationBytes));
+        CHECK(StringView(annotation, annotationBytes) == host.FilePath());
+        CHECK(platform::detail::ReadCrashAnnotation(platform::CrashAnnotation::LogDirectory,
+                                                    annotation, sizeof(annotation),
+                                                    annotationBytes));
+        const StringView logDirectory(annotation, annotationBytes);
+        CHECK(logDirectory.EndsWith(directory.View(), StringComparison::CaseSensitive));
+        CHECK(logDirectory.ByteCount() > directory.View().ByteCount());
+        CHECK(host.FilePath().StartsWith(logDirectory, StringComparison::CaseSensitive));
         {
             LogInstallScope installed(host.System());
             Log::Warning(LogHostTests, "plain value {Value}", 7);
@@ -363,6 +385,9 @@ TEST(LogHostWritesAPlainFileFromConfig) {
 
         host.Stop();
     }
+
+    (void)platform::SetCrashAnnotation(platform::CrashAnnotation::LogFile, nullptr, 0);
+    (void)platform::SetCrashAnnotation(platform::CrashAnnotation::LogDirectory, nullptr, 0);
 
     Array<uint8> file(fixture.system);
     REQUIRE(ReadAll(StringView(path.Data(), path.Size()), file));

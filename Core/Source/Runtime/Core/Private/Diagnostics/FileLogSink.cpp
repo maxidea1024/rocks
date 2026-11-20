@@ -7,7 +7,9 @@
 #include <Core/Time/DateTime.h>
 #include <Core/Time/TimeSpan.h>
 #include <Platform/Clock.h>
+#include <Platform/CrashReporting.h>
 #include <Platform/Memory.h>
+#include <Platform/Path.h>
 
 namespace rocks {
 
@@ -25,11 +27,6 @@ constexpr StringView CompressedLogFileExtension = ".log.zst";
 
 // 파일 이름 시각 "YYYYMMDDTHHMMSSmmmZ"에서 날짜와 시각을 가르는 'T'의 위치다("YYYYMMDD" 뒤).
 constexpr usize LogFileStampDateBytes = 8;
-
-// UTC tick(DateTime) 하나는 100 ns다. UTC를 읽지 못할 때 단조 ns를 tick으로 바꾼다.
-constexpr uint64 NanosecondsPerUtcTick = 100;
-static_assert(TimeSpan::TicksPerSecond * NanosecondsPerUtcTick == 1000000000,
-              "a DateTime tick must be 100 ns");
 
 bool IsDigit(char value) noexcept {
     return value >= '0' && value <= '9';
@@ -96,6 +93,27 @@ bool IsHostByte(char value) noexcept {
 
 bool IsSeparator(char value) noexcept {
     return value == '/' || value == '\\';
+}
+
+bool IsAsciiLetter(char value) noexcept {
+    return (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z');
+}
+
+// 작업 디렉터리에 붙이지 않을 경로인지다. POSIX는 '/'로 시작하는 경로다. Windows는 구분자로
+// 시작하는 경로(UNC·현재 드라이브 루트)와 드라이브 문자로 시작하는 경로(절대 "C:/"와 드라이브 상대
+// "C:x")다.
+bool IsRootedPath(StringView path) noexcept {
+    if (path.IsEmpty()) {
+        return false;
+    }
+
+    const char* text = path.Data();
+    if (platform::HostPathStyle() != platform::PathStyle::Windows) {
+        return text[0] == '/';
+    }
+
+    return IsSeparator(text[0]) ||
+           (path.ByteCount() >= 2 && IsAsciiLetter(text[0]) && text[1] == ':');
 }
 
 // Open이 지울 후보로 모으는 기존 파일 하나다.
@@ -166,6 +184,10 @@ Result<void> FileLogSink::Open() noexcept {
     bool hostValid = hostBytes_ != 0 && hostBytes_ <= MaxLogFileHostBytes;
     for (usize index = 0; hostValid && index < hostBytes_; ++index) {
         hostValid = IsHostByte(host_[index]);
+    }
+
+    if (auto resolved = ResolveDirectory(); !resolved) {
+        return resolved;
     }
 
     // 파일 이름: 호스트 + "-" + 시각(LogFileStampBytes) + "-N"(최대 MaxLogFilePartBytes) + ".log".
@@ -278,7 +300,7 @@ Result<void> FileLogSink::Open() noexcept {
     // 시작 시각이다. UTC를 읽지 못하면 단조 시각으로 대신한다(이름이 겹치면 번호가 붙는다).
     int64 ticks = 0;
     if (!platform::TryUtcTicks(ticks)) {
-        ticks = static_cast<int64>(platform::MonotonicNanoseconds() / NanosecondsPerUtcTick);
+        ticks = static_cast<int64>(platform::MonotonicNanoseconds() / LogNanosecondsPerUtcTick);
     }
 
     const auto now = DateTime::TryFromTicks(ticks);
@@ -527,6 +549,7 @@ Result<void> FileLogSink::OpenNextFile() noexcept {
         fileHasRecords_ = false;
         headerBytes_ = header;
         Remember(StringView(path_, pathBytes_));
+        AnnounceCurrentFile();
         if (header != 0) {
             return WriteRaw(sealed_, header);
         }
@@ -558,6 +581,71 @@ void FileLogSink::Remember(StringView path) noexcept {
     platform::MemoryCopy(target, path.Data(), bytes);
     target[bytes] = '\0';
     ++keptCount_;
+}
+
+// 상대 로그 폴더를 지금 작업 디렉터리에 붙여 절대 경로로 굳힌다(UE FOutputDeviceFile도 절대 경로로
+// 연다). 실제 파일 시스템일 때만이다(다른 FileSystem의 경로는 그 구현이 해석한다). 빈 폴더·잘린
+// 폴더는 Open의 설정 검사가 거부하도록 그대로 둔다.
+Result<void> FileLogSink::ResolveDirectory() noexcept {
+    if (fileSystem_ != &platform::PhysicalFileSystem() || directoryBytes_ == 0 ||
+        directoryBytes_ >= sizeof(directory_) ||
+        IsRootedPath(StringView(directory_, directoryBytes_))) {
+        return Result<void>::Success();
+    }
+
+    char working[MaxLogFilePathBytes];
+    usize workingBytes = 0;
+    const platform::FileStatus found = platform::GetStandardDirectory(
+        platform::StandardDirectory::Working, working, sizeof(working), workingBytes);
+    if (!found) {
+        return Result<void>::Failure(found.code == platform::FileCode::Overflow
+                                         ? ErrorCode::InvalidArgument
+                                         : ErrorCode::DependencyFailed);
+    }
+
+    // 루트(드라이브 루트·"/")는 끝 구분자를 가지므로 하나를 더 넣지 않는다.
+    const usize separatorBytes =
+        workingBytes != 0 && IsSeparator(working[workingBytes - 1]) ? 0 : 1;
+    // 작업 디렉터리 + 구분자 + 폴더와 NUL이 들어가야 한다.
+    if (workingBytes + separatorBytes + directoryBytes_ >= sizeof(directory_)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    platform::MemoryMove(directory_ + workingBytes + separatorBytes, directory_, directoryBytes_);
+    platform::MemoryCopy(directory_, working, workingBytes);
+    if (separatorBytes != 0) {
+        directory_[workingBytes] = platform::NativePathSeparator();
+    }
+
+    directoryBytes_ += workingBytes + separatorBytes;
+    return Result<void>::Success();
+}
+
+// 크래시 기록의 LogFile 칸에 지금 파일의 경로를 알린다(설계 14.1.8절, L29). Open(등록 전 호출
+// 스레드)과 회전(Async 출력 스레드·Sync sink mutex 안)에서만 부르므로 이 sink 안에서 쓰기가 겹치지
+// 않는다. 칸이 넘치면 자르지 않고 비운다(이전 회전 파일을 가리키지 않게).
+void FileLogSink::AnnounceCurrentFile() noexcept {
+    if (!config_.crashAnnotation) {
+        return;
+    }
+
+    using platform::CrashAnnotation;
+    if (platform::SetCrashAnnotation(CrashAnnotation::LogFile, path_, pathBytes_)) {
+        return;
+    }
+
+    (void)platform::SetCrashAnnotation(CrashAnnotation::LogFile, nullptr, 0);
+    if (annotationWarned_) {
+        return;
+    }
+
+    annotationWarned_ = true;
+    char storage[LogNoticeBytes];
+    FixedStringBuilder text{Span<char>(storage)};
+    (void)text.TryAppendFormat("The log file path is {} bytes, longer than the crash record limit "
+                               "of {} bytes; crash records will not name the log file",
+                               pathBytes_, platform::MaxCrashAnnotationBytes);
+    detail::WriteLogEmergencyText(LogLevel::Warning, LogLogging.Name(), text.View());
 }
 
 void FileLogSink::Disable(ErrorCode error) noexcept {

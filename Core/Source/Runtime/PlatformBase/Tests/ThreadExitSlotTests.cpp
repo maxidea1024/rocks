@@ -20,13 +20,19 @@ constexpr uint32 WorkerTimeoutMs = 60000;
 struct ExitRecord {
     uint32 calls = 0;
     uint64 callbackThread = 0;
-    // 정리 함수 안에서 읽은 thread_local 값이다.
-    uint32 seenLocal = 0;
+    // 정리 함수 안에서 thread_local에 쓴 뒤 다시 읽은 값이다(접근이 되는지 — 계약).
+    uint32 localAfterWrite = 0;
+    // 정리 함수에 들어올 때 읽은 thread_local 값이다. 단언하지 않는다: 스레드가 두었던 값이 남아
+    // 있다는 보장이 없다(macOS는 초기값이다).
+    uint32 localOnEntry = 0;
     // 정리 함수 안에서 칸의 값이 이미 지워져 있었는지다.
     bool clearedInside = false;
 };
 
 thread_local uint32 localValue = 0;
+// 스레드가 thread_local에 두는 값과 정리 함수가 쓰는 값이다.
+constexpr uint32 LocalMarker = 0x51075107u;
+constexpr uint32 CallbackMarker = 0x0ca11bacu;
 
 // 칸은 프로세스 수명 동안 하나만 만든다(OS 칸을 풀지 않는다).
 ThreadExitSlot& TestSlot() noexcept;
@@ -35,10 +41,11 @@ void RecordExit(void* value) noexcept {
     auto& record = *static_cast<ExitRecord*>(value);
     AtomicFetchAdd<MemoryOrder::SequentiallyConsistent>(&record.calls, 1);
     record.callbackThread = CurrentThreadId();
-    record.seenLocal = localValue;
     record.clearedInside = TestSlot().Get() == nullptr;
-    // trivial한 thread_local은 정리 함수 안에서 쓸 수도 있다.
-    localValue = 0;
+    // trivial한 thread_local은 정리 함수 안에서 읽고 쓸 수 있다(쓰고 읽으면 쓴 값이다).
+    record.localOnEntry = localValue;
+    localValue = CallbackMarker;
+    record.localAfterWrite = localValue;
 }
 
 ThreadExitSlot& TestSlot() noexcept {
@@ -55,8 +62,6 @@ struct SlotWork {
     bool setSucceeded = false;
     bool clearAgain = false;
 };
-
-constexpr uint32 LocalMarker = 0x51075107u;
 
 void RunSlotWork(void* context) noexcept {
     auto& work = *static_cast<SlotWork*>(context);
@@ -102,8 +107,9 @@ TEST(ThreadExitSlot_CallbackRunsOnceOnTheExitingThread) {
     CHECK(AtomicLoad(&record.calls) == 1);
     CHECK(record.callbackThread == work.thread);
     CHECK(record.callbackThread != CurrentThreadId());
-    // 정리 함수 안에서 그 스레드의 thread_local을 읽을 수 있다.
-    CHECK(record.seenLocal == LocalMarker);
+    // 정리 함수 안에서 그 스레드의 thread_local에 접근할 수 있다. 스레드가 두었던 값이 남아
+    // 있는지는 단언하지 않는다(계약 — 플랫폼마다 다르다).
+    CHECK(record.localAfterWrite == CallbackMarker);
     // 부르기 전에 그 스레드의 값은 지워져 있다.
     CHECK(record.clearedInside);
     CHECK(mainMarker.calls == 0);
@@ -145,7 +151,7 @@ TEST(ThreadExitSlot_CallbackRunsOnRawOsThreads) {
         CHECK(work.setSucceeded);
         CHECK(AtomicLoad(&record.calls) == 1);
         CHECK(record.callbackThread == work.thread);
-        CHECK(record.seenLocal == LocalMarker);
+        CHECK(record.localAfterWrite == CallbackMarker);
         CHECK(record.clearedInside);
     }
 }

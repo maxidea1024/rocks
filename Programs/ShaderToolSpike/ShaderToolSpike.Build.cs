@@ -23,7 +23,7 @@ public sealed class ShaderToolSpikeProgram : ModuleRules
             Sources = context.Sources($"{root}/Common", windows ? $"{root}/Win64" : $"{root}/Unsupported"),
             PrivateIncludeDirectories = [context.PathInRoot($"{root}/Common"), .. ThirdPartyModuleRules.ConsumerIncludeDirectories(context, ToolHeaders)],
             PrivateDefines = ThirdPartyModuleRules.ConsumerDefines(context, ToolHeaders),
-            Dependencies = ["ShaderToolLoader", "SpirvReflect"],
+            Dependencies = ["Launch", "ShaderToolLoader", "SpirvReflect"],
             // Used for the D3D12 shader model query (S2) and the hidden-window GL context (S12). Tool DLLs are not linked but opened at run time.
             SystemLibraries = windows ? ["d3d12", "dxgi", "opengl32", "gdi32", "user32"] : []
         };

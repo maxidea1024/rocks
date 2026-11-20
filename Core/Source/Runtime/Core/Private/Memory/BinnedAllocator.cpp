@@ -4,6 +4,8 @@
 #include "BinnedAllocatorTestHooks.h"
 
 #include <Base/Checked.h>
+#include <Base/Compiler.h>
+#include <Core/Memory/AddressSanitizer.h>
 #include <Core/Move.h>
 #include <Platform/Atomics.h>
 #include <Platform/Fatal.h>
@@ -198,15 +200,34 @@ struct FreeBlock {
 static_assert(sizeof(FreeBlock) == BlockGranularity,
               "free block words must fill the smallest block");
 
-void* ReadLink(void* block) noexcept {
+// ASan 구성에서만 수동 poison을 부른다(다른 구성에서는 호출 자체가 없다). 불변식: 사용자에게 나가
+// 있지 않은 블록(slab에서 뗀 블록, 캐시·이전 칸·slab 자유 목록의 블록)은 전체가 닫혀 있고, 나가
+// 있는 블록은 요청 크기만 열려 있다. slab 머리는 닫지 않는다.
+constexpr bool AsanEnabled = ROCKS_ADDRESS_SANITIZER != 0;
+
+void CloseBlock(void* address, usize bytes) noexcept {
+    if (AsanEnabled) {
+        AsanPoisonMemory(address, bytes);
+    }
+}
+
+void OpenBlock(void* address, usize bytes) noexcept {
+    if (AsanEnabled) {
+        AsanUnpoisonMemory(address, bytes);
+    }
+}
+
+// 자유 블록의 word 접근이다. ASan 구성에서는 자유 블록 전체가 닫혀 있으므로 계측에서 뺀다(이 함수들
+// 밖에서는 자유 블록의 내용을 읽고 쓰지 않는다).
+ROCKS_NO_SANITIZE_ADDRESS void* ReadLink(void* block) noexcept {
     return static_cast<FreeBlock*>(block)->next;
 }
 
-void WriteLink(void* block, void* next) noexcept {
+ROCKS_NO_SANITIZE_ADDRESS void WriteLink(void* block, void* next) noexcept {
     static_cast<FreeBlock*>(block)->next = next;
 }
 
-void WriteMarker(void* block, uptr marker) noexcept {
+ROCKS_NO_SANITIZE_ADDRESS void WriteMarker(void* block, uptr marker) noexcept {
     static_cast<FreeBlock*>(block)->marker = marker;
 }
 
@@ -214,9 +235,14 @@ void WriteMarker(void* block, uptr marker) noexcept {
 // 교환이라 같은 블록을 두 스레드가 함께 반환해도 한쪽만 참이다.
 bool TryMarkReturned(void* block, uptr marker) noexcept {
     uptr* word = &static_cast<FreeBlock*>(block)->marker;
+    // ASan 구성: 표지 word는 닫혀 있을 수 있다(이미 반환한 블록, 요청 크기가 16 byte보다 작은 살아
+    // 있는 블록). 원자 연산은 계측되는 함수이므로 그 word만 연다. 성공하면 호출자가 블록 전체를
+    // 닫고, 실패하면(사용자에게 나가 있지 않은 블록) 여기서 다시 닫는다.
+    OpenBlock(word, sizeof(uptr));
     uptr current = platform::AtomicLoad<MemoryOrder::Relaxed>(word);
     do {
         if (current == marker) {
+            CloseBlock(word, sizeof(uptr));
             return false;
         }
     } while (
@@ -293,20 +319,29 @@ struct ThreadRecord {
     Entry* entries = nullptr;
     uint32 count = 0;
     uint32 capacity = 0;
-    // 스레드 종료 hook이 지나간 스레드다(캐시를 다시 만들지 않는다).
-    bool exited = false;
+    // 캐시를 만들지 않는 스레드다(종료 hook이 지나갔거나, 기록을 종료 칸에 걸지 못했다).
+    bool cachesDisabled = false;
 };
 
 constexpr uint32 InitialRecordEntries = 4;
 
-// 소멸자 없는 단순 포인터다. null이면 이 스레드는 아직 캐시를 만든 적이 없다.
+// 이 스레드의 기록을 가리키는 소멸자 없는 단순 포인터다. 기준은 스레드 종료 칸의 값이고 이것은 그
+// 사본이다(빠른 경로가 읽는다). 스레드가 끝나는 동안 thread_local 저장소가 먼저 해제되는 플랫폼
+// (macOS)에서는 기록이 칸에 살아 있는데도 이 포인터가 초기값으로 돌아가므로, null이면 느린 경로가
+// 칸의 값을 먼저 본다(State::CurrentRecord).
 thread_local ThreadRecord* threadRecord = nullptr;
 // 스레드 종료 hook이 지나간 스레드가 가리키는 기록이다(읽기만 한다 — lastId 0이라 어느 인스턴스와도
 // 맞지 않는다).
 constinit ThreadRecord exitedRecord{0, nullptr, nullptr, 0, 0, true};
+// 기록을 스레드 종료 칸에 걸지 못한 스레드가 가리키는 기록이다(읽기만 한다). 그 스레드는 끝날 때
+// 캐시를 돌려줄 길이 없으므로 캐시 없이 등급 잠금 경로로만 가고, 다시 시도하지 않는다: 칸이 없거나
+// OS가 거부한 것은 다시 해도 같으므로 호출마다 기록을 할당했다가 버리지 않는다.
+constinit ThreadRecord unhookedRecord{0, nullptr, nullptr, 0, 0, true};
 
 // 시험 주입: 이 스레드의 다음 캐시 만들기를 실패시킨다.
 thread_local bool failNextCacheCreation = false;
+// 시험 주입: 이 스레드의 기록을 종료 칸에 거는 일을 실패시킨다.
+thread_local bool failNextExitHook = false;
 
 } // namespace
 
@@ -347,7 +382,8 @@ struct BinnedAllocator::State {
     // 등급 잠금 안에서 부른다. 표지가 선 블록 하나를 자기 slab에 돌려준다(slab이 비면 푼다).
     void ReturnBlock(ClassState& group, void* block) noexcept;
 
-    void* AllocateDirect(uint32 sizeClass) noexcept;
+    // bytes는 요청 크기다(ASan 구성에서 그만큼만 연다).
+    void* AllocateDirect(uint32 sizeClass, usize bytes) noexcept;
     Result<void> DeallocateDirect(void* address, usize slabIndex, uint32 sizeClass,
                                   uint32 blockIndex) noexcept;
 
@@ -358,6 +394,9 @@ struct BinnedAllocator::State {
     static void ReleaseThreadRecord(void* value) noexcept;
 
     static Registry* CreateRegistry() noexcept;
+    // 이 스레드의 기록이다(없으면 nullptr). thread_local 포인터가 비어 있으면 종료 칸의 값을 보고,
+    // 있으면 포인터가 그 기록을 다시 가리키게 한다.
+    static ThreadRecord* CurrentRecord() noexcept;
     // 이 스레드의 캐시다(빠른 경로가 "마지막에 쓴 인스턴스"에서 찾지 못했을 때 부른다). 없으면
     // 만든다. 캐시를 쓰지 않는 인스턴스·종료 중인 스레드·만들지 못한 경우는 nullptr이고 호출자는
     // 등급 잠금 경로로 간다.
@@ -494,6 +533,11 @@ void BinnedAllocator::State::ReserveRange(usize requestedBytes) noexcept {
 }
 
 void BinnedAllocator::State::ReleaseRange() noexcept {
+    if (AsanEnabled && nextUnusedSlab != 0) {
+        // 닫아 둔 블록의 표시를 지운다: 이 주소 범위는 OS가 다른 용도로 다시 내줄 수 있다.
+        AsanUnpoisonMemory(reinterpret_cast<void*>(base), nextUnusedSlab << SlabShift);
+    }
+
     platform::AlignedFree(slabTable);
     platform::AlignedFree(releasedBits);
     slabTable = nullptr;
@@ -684,6 +728,7 @@ uint32 BinnedAllocator::State::TakeBlocks(ClassState& group, uint32 sizeClass, u
                 reinterpret_cast<uint8*>(slab) + SlabHeaderBytes + usize{carved} * slab->blockBytes;
             WriteMarker(block, MarkerOf(block));
             WriteLink(block, head);
+            CloseBlock(block, slab->blockBytes);
             head = block;
             ++carved;
             ++taken;
@@ -720,7 +765,7 @@ void BinnedAllocator::State::ReturnBlock(ClassState& group, void* block) noexcep
     }
 }
 
-void* BinnedAllocator::State::AllocateDirect(uint32 sizeClass) noexcept {
+void* BinnedAllocator::State::AllocateDirect(uint32 sizeClass, usize bytes) noexcept {
     ClassState& group = classes[sizeClass];
     void* block = nullptr;
     {
@@ -734,6 +779,7 @@ void* BinnedAllocator::State::AllocateDirect(uint32 sizeClass) noexcept {
 
     // 표지가 없는 블록은 사용자에게 나가 있는 블록뿐이다: 내주는 순간에만 지운다.
     WriteMarker(block, NoMarker);
+    OpenBlock(block, bytes);
     return block;
 }
 
@@ -759,6 +805,7 @@ Result<void> BinnedAllocator::State::DeallocateDirect(void* address, usize slabI
         return Result<void>::Failure(ErrorCode::NotFound);
     }
 
+    CloseBlock(address, Classes.blockBytes[sizeClass]);
     ReturnBlock(group, address);
     ++group.freed;
     return Result<void>::Success();
@@ -803,7 +850,8 @@ BinnedAllocator::State::Registry& BinnedAllocator::State::GetRegistry() noexcept
 void BinnedAllocator::State::ReleaseThreadRecord(void* value) noexcept {
     auto* record = static_cast<ThreadRecord*>(value);
     // 이 스레드의 남은 종료 정리가 allocator를 써도 해제한 기록을 보지 않게 한다(등급 잠금 경로로
-    // 간다).
+    // 간다). thread_local 저장소가 그 뒤에 또 해제되는 플랫폼에서는 이 표지도 사라진다: 그 뒤의
+    // 호출은 새 기록을 만들어 걸고, 이 hook이 다시 불리면 정리한다(설계 18.4절 "남는 한계").
     threadRecord = &exitedRecord;
     Registry& registry = GetRegistry();
     {
@@ -820,9 +868,29 @@ void BinnedAllocator::State::ReleaseThreadRecord(void* value) noexcept {
     platform::AlignedFree(record);
 }
 
-ThreadCache* BinnedAllocator::State::FindCurrentCache() const noexcept {
+ThreadRecord* BinnedAllocator::State::CurrentRecord() noexcept {
     ThreadRecord* record = threadRecord;
-    if (id == 0 || record == nullptr) {
+    if (record == nullptr) {
+        // 기준은 칸의 값이다. 이 스레드의 thread_local 저장소가 해제됐다가 다시 생겼으면(스레드가
+        // 끝나는 동안) 포인터는 초기값인데 칸에는 살아 있는 기록이 있다 — 새 기록으로 덮으면 옛
+        // 기록의 캐시가 종료 hook으로 돌아오지 못한다.
+        record = static_cast<ThreadRecord*>(GetRegistry().exitSlot.Get());
+        if (record != nullptr) {
+            threadRecord = record;
+        }
+    }
+
+    return record;
+}
+
+ThreadCache* BinnedAllocator::State::FindCurrentCache() const noexcept {
+    // 캐시를 쓰지 않는 인스턴스는 등록부(종료 칸)를 건드리지 않는다.
+    if (id == 0) {
+        return nullptr;
+    }
+
+    ThreadRecord* record = CurrentRecord();
+    if (record == nullptr) {
         return nullptr;
     }
 
@@ -840,9 +908,9 @@ ThreadCache* BinnedAllocator::State::FindOrCreateCache() noexcept {
         return nullptr;
     }
 
-    ThreadRecord* record = threadRecord;
+    ThreadRecord* record = CurrentRecord();
     if (record != nullptr) {
-        if (record->exited) {
+        if (record->cachesDisabled) {
             return nullptr;
         }
 
@@ -863,10 +931,7 @@ ThreadCache* BinnedAllocator::State::CreateCache() noexcept {
         return nullptr;
     }
 
-    if (!registry.exitSlot.IsValid()) {
-        return nullptr;
-    }
-
+    // FindOrCreateCache가 칸의 값까지 본 뒤다: 포인터가 비어 있으면 이 스레드에는 기록이 없다.
     ThreadRecord* record = threadRecord;
     if (record == nullptr) {
         void* storage = platform::AlignedAllocate(sizeof(ThreadRecord), alignof(ThreadRecord));
@@ -875,9 +940,14 @@ ThreadCache* BinnedAllocator::State::CreateCache() noexcept {
         }
 
         record = ConstructAt<ThreadRecord>(storage);
-        // 종료 hook에 걸지 못한 기록은 쓰지 않는다(스레드가 끝날 때 캐시를 돌려줄 길이 없다).
-        if (!registry.exitSlot.Set(record)) {
+        // 종료 칸에 걸지 못한 기록은 쓰지 않는다(스레드가 끝날 때 캐시를 돌려줄 길이 없다). 칸이
+        // 없거나(Set이 거짓이다) OS가 거부한 것은 다시 해도 같으므로, 이 스레드는 앞으로 캐시 없이
+        // 간다.
+        const bool hooked = !failNextExitHook && registry.exitSlot.Set(record);
+        failNextExitHook = false;
+        if (!hooked) {
             platform::AlignedFree(storage);
+            threadRecord = &unhookedRecord;
             return nullptr;
         }
 
@@ -1239,8 +1309,8 @@ BinnedAllocator::~BinnedAllocator() noexcept {
         }
 
         // 이 스레드의 기록에서는 항목도 지운다.
-        ThreadRecord* record = threadRecord;
-        if (record != nullptr && !record->exited) {
+        ThreadRecord* record = State::CurrentRecord();
+        if (record != nullptr && !record->cachesDisabled) {
             uint32 kept = 0;
             for (uint32 index = 0; index < record->count; ++index) {
                 if (record->entries[index].id != state.id) {
@@ -1304,10 +1374,11 @@ Result<void*> BinnedAllocator::Allocate(usize bytes, usize alignment, uint32 tag
             if (block != nullptr) {
                 // 표지가 없는 블록은 사용자에게 나가 있는 블록뿐이다: 내주는 순간에만 지운다.
                 WriteMarker(block, NoMarker);
+                OpenBlock(block, bytes);
                 platform::AtomicStore<MemoryOrder::Relaxed>(&slot.allocated, slot.allocated + 1);
                 return Result<void*>::Success(block);
             }
-        } else if (void* block = state.AllocateDirect(sizeClass)) {
+        } else if (void* block = state.AllocateDirect(sizeClass, bytes)) {
             return Result<void*>::Success(block);
         }
     }
@@ -1364,6 +1435,7 @@ Result<void> BinnedAllocator::Deallocate(void* address) noexcept {
         return Result<void>::Failure(ErrorCode::NotFound);
     }
 
+    CloseBlock(address, Classes.blockBytes[sizeClass]);
     ClassCache& slot = cache->classes[sizeClass];
     if (slot.partial.count == Classes.bundleBlocks[sizeClass]) {
         state.MakeRoom(*cache, sizeClass);
@@ -1481,6 +1553,22 @@ void BinnedAllocator::TestHooks::RunCurrentThreadExitHook() noexcept {
 
 bool BinnedAllocator::TestHooks::IsCurrentThreadExited() noexcept {
     return threadRecord == &exitedRecord;
+}
+
+void BinnedAllocator::TestHooks::ForgetCurrentThreadRecord() noexcept {
+    threadRecord = nullptr;
+}
+
+const void* BinnedAllocator::TestHooks::CurrentThreadRecordPointer() noexcept {
+    return threadRecord;
+}
+
+void BinnedAllocator::TestHooks::FailNextThreadExitHook() noexcept {
+    failNextExitHook = true;
+}
+
+bool BinnedAllocator::TestHooks::IsCurrentThreadUnhooked() noexcept {
+    return threadRecord == &unhookedRecord;
 }
 
 uint32 BinnedAllocator::TestHooks::CurrentThreadRecordEntries() noexcept {

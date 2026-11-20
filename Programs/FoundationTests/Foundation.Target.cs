@@ -9,7 +9,7 @@ public sealed class FoundationTarget : TargetRules
     // Development tool and test executable (not subject to the Release exclusion policy).
     public override TargetType Type => TargetType.Program;
 
-    public override IReadOnlyList<string> Modules => ["FoundationTests"];
+    public override IReadOnlyList<string> Modules => ["FoundationTests", .. LaunchTestPrograms.Names];
 
     public override bool CheckPublicHeaders => true;
 
@@ -25,7 +25,7 @@ public sealed class EngineTestsTarget : TargetRules
     // Development tool and test executable (not subject to the Release exclusion policy).
     public override TargetType Type => TargetType.Program;
 
-    public override IReadOnlyList<string> Modules => ["EngineTests"];
+    public override IReadOnlyList<string> Modules => ["EngineTests", .. LaunchTestPrograms.Names];
 
     public override bool CheckPublicHeaders => true;
 
@@ -35,6 +35,7 @@ public sealed class EngineTestsTarget : TargetRules
 // SDK target holding only the reflection fixture modules (and their dependencies). Exported when Rocks.Build.IntegrationTests tests SDK descriptor import
 // (an external game module derives from and references reflection types of SDK modules without regenerating those modules).
 // ObjectSerialization: the game saves and restores array fields of SDK types as a graph (B5c integration test).
+// Launch: the game template's entry point (ROCKS_IMPLEMENT_APPLICATION).
 public sealed class ReflectionFixturesTarget : TargetRules
 {
     public override string Name => "ReflectionFixtures";
@@ -42,7 +43,7 @@ public sealed class ReflectionFixturesTarget : TargetRules
     // Development tool and test executable (not subject to the Release exclusion policy).
     public override TargetType Type => TargetType.Program;
 
-    public override IReadOnlyList<string> Modules => ["ReflectionTestFixtures", "ObjectSerialization"];
+    public override IReadOnlyList<string> Modules => ["ReflectionTestFixtures", "ObjectSerialization", "Launch"];
 }
 
 public sealed class CoreTarget : TargetRules
@@ -52,9 +53,16 @@ public sealed class CoreTarget : TargetRules
     // Development tool and test executable (not subject to the Release exclusion policy).
     public override TargetType Type => TargetType.Program;
 
-    public override IReadOnlyList<string> Modules => ["CoreFoundationTests"];
+    public override IReadOnlyList<string> Modules => ["CoreFoundationTests", .. LaunchTestPrograms.Names];
 
     public override bool CheckPublicHeaders => true;
 
     public override string TestExecutable => "CoreFoundationTests";
+}
+
+// Launch test executables (Programs/LaunchTests). Every test target builds them so the native harness (Native.Launch.*) finds them next to
+// the test executable.
+internal static class LaunchTestPrograms
+{
+    public static readonly string[] Names = ["LaunchProbe", "LaunchWindowedProbe", "LaunchEmbeddedHost"];
 }

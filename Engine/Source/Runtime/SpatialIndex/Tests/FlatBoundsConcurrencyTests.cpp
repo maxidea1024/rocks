@@ -21,7 +21,8 @@ using namespace rocks::spatial::flattest;
 // "--process-probe flat-bounds <시나리오>"로 다시 띄운 probe이고 오류 대화상자를 띄우지 않는다.
 // 순서는 수면이나 경쟁 운이 아니라 호출 구조로 만든다.
 namespace rocks::test {
-bool RegisterProcessProbe(const char* mode, int (*function)(int, char**) noexcept) noexcept;
+bool RegisterProcessProbe(const char* mode,
+                          int (*function)(int, const char* const*) noexcept) noexcept;
 } // namespace rocks::test
 
 namespace flat_bounds_concurrency_tests_file {
@@ -63,7 +64,7 @@ private:
 
 // 자식 쪽이다. Fatal이 나면 돌아오지 않는다. 돌아오면 검출이 빠졌다는 뜻이므로 0을 돌려 부모가
 // 실패로 본다.
-int FlatBoundsFatalProbe(int argc, char** argv) noexcept {
+int FlatBoundsFatalProbe(int argc, const char* const* argv) noexcept {
     rocks::test::PrepareFatalTestProcess();
     if (argc < 4) {
         return 20;

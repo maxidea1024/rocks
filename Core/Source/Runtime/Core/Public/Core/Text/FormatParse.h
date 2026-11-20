@@ -227,7 +227,8 @@ enum class FormatTokenKind : uint8 {
 // 해석 단위 하나다.
 // - Literal: text를 그대로 붙인다("{{"·"}}"는 중괄호 한 글자의 text).
 // - Hole: argument번째 인자를 spec으로 서식화한다. name은 이름 자리의 이름(위치 자리는 빈 view),
-//   hasSpec은 ':'가 있었는지다(빈 spec "{:}"과 spec 없음 "{}"을 구별한다).
+//   hasSpec은 ':'가 있었는지다(빈 spec "{:}"과 spec 없음 "{}"을 구별한다). structured는 구조체
+//   펼치기 자리("{@Name}")인지다(allowStructure일 때만 참이 될 수 있다, name에는 '@'가 없다).
 // view는 모두 원본 서식 문자열을 빌린다.
 struct FormatToken {
     FormatTokenKind kind = FormatTokenKind::Literal;
@@ -235,6 +236,7 @@ struct FormatToken {
     StringView name;
     StringView spec;
     bool hasSpec = false;
+    bool structured = false;
     usize argument = 0;
 };
 
@@ -245,6 +247,10 @@ struct FormatToken {
 // 영문자· 숫자가 이어진다(숫자로 시작하면 위치 번호다). 이름 자리는 나온 순서대로 0, 1, 2…번째
 // 인자에 묶인다. 이름·위치 자리를 섞으면 오류다.
 //
+// 구조체 펼치기 자리: allowStructure도 참일 때만 이름 앞 '@'("{@Name}")를 받는다(로그 템플릿 전용,
+// Docs/Design/LoggingSystem.ko.md 14.1.6절). 그 밖의 파서(StringBuilder 서식·로그 레이아웃)에서
+// '@'는 InvalidHoleName이다. '@' 뒤에는 이름이 와야 한다("{@}"·"{@0}"은 InvalidHoleName).
+//
 // 사용 예:
 //   FormatParser parser(format, false);
 //   FormatToken token;
@@ -252,8 +258,9 @@ struct FormatToken {
 //   if (parser.Error() != FormatParseError::None) { ... }
 class FormatParser {
 public:
-    constexpr FormatParser(StringView format, bool allowNamed) noexcept
-        : text_(format.Data()), bytes_(format.ByteCount()), allowNamed_(allowNamed) {
+    constexpr FormatParser(StringView format, bool allowNamed, bool allowStructure = false) noexcept
+        : text_(format.Data()), bytes_(format.ByteCount()), allowNamed_(allowNamed),
+          allowStructure_(allowNamed && allowStructure) {
     }
 
     // 다음 토큰을 token에 쓰고 true를 돌려준다. 끝이거나 오류면 false다(Error()로 구별한다). 오류
@@ -335,11 +342,24 @@ private:
         return false;
     }
 
-    // 치환 필드: '{' [arg-id | name] [':' spec] '}'
+    // 치환 필드: '{' [arg-id | ['@'] name] [':' spec] '}'
     constexpr bool ParseHole(FormatToken& token) noexcept {
         const usize holeStart = index_;
         ++index_;
         usize argument = 0;
+        if (allowStructure_ && index_ < bytes_ && text_[index_] == '@') {
+            ++index_;
+            if (index_ >= bytes_) {
+                return Fail(FormatParseError::UnmatchedOpenBrace);
+            }
+
+            if (!IsNameStart(text_[index_])) {
+                return Fail(FormatParseError::InvalidHoleName);
+            }
+
+            token.structured = true;
+        }
+
         if (index_ < bytes_ && IsFormatDigit(text_[index_])) {
             if (named_) {
                 return Fail(FormatParseError::MixedNamedAndPositional);
@@ -413,6 +433,7 @@ private:
     usize index_ = 0;
     usize next_ = 0;
     bool allowNamed_ = false;
+    bool allowStructure_ = false;
     bool automatic_ = false;
     bool manual_ = false;
     bool named_ = false;

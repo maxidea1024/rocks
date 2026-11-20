@@ -2,6 +2,7 @@
 
 #include <spirv-tools/libspirv.h>
 #include <spirv_cross_c.h>
+#include <stdio.h>
 #include <string.h>
 
 // SPIRV-Tools(검증·최적화)와 SPIRV-Cross(MSL·ESSL·HLSL 5.0) 호출이다. 두 도구는 C API라 OS 헤더
@@ -15,6 +16,11 @@ constexpr usize SpirvWordBytes = 4;
 constexpr usize SpirvHeaderWords = 5;
 // OpExtInst opcode다(SPIR-V 사양 3.49.10).
 constexpr uint32 OpExtInstCode = 12;
+// OpExtension·OpCapability opcode다(SPIR-V 사양 3.49.10·3.49.19).
+constexpr uint32 OpExtensionCode = 10;
+constexpr uint32 OpCapabilityCode = 17;
+// uint32 10진 표기 버퍼 크기다(10자리 + NUL).
+constexpr usize UInt32DecimalBytes = 11;
 constexpr uint32 OpcodeMask = 0xffffu;
 constexpr uint32 WordCountShift = 16;
 
@@ -138,8 +144,8 @@ const char* CrossTargetName(CrossTarget target) noexcept {
 }
 
 bool CrossCompile(const shader::SpirvCrossFunctions& cross, Span<const uint8> code,
-                  CrossTarget target, StringBuilderBase& text,
-                  StringBuilderBase& diagnostics) noexcept {
+                  CrossTarget target, StringBuilderBase& text, StringBuilderBase& diagnostics,
+                  Report* combinedSamplers) noexcept {
     using Index = shader::SpirvCrossFunctions;
     text.Clear();
     const uint32* words = nullptr;
@@ -205,9 +211,13 @@ bool CrossCompile(const shader::SpirvCrossFunctions& cross, Span<const uint8> co
         }
 
         case CrossTarget::Msl:
+            // typed buffer는 MSL texture_buffer로 낸다. 끄면(SPIRV-Cross 기본값) texture2d와
+            // 좌표 변환 함수로 흉내 낸다(측정 S13, 7.2절 4항 Metal, UE 5.8도 켠다).
             ok = setUint(options, SPVC_COMPILER_OPTION_MSL_VERSION,
                          SPVC_MAKE_MSL_VERSION(2, 1, 0)) == SPVC_SUCCESS &&
                  setUint(options, SPVC_COMPILER_OPTION_MSL_PLATFORM, SPVC_MSL_PLATFORM_MACOS) ==
+                     SPVC_SUCCESS &&
+                 setBool(options, SPVC_COMPILER_OPTION_MSL_TEXTURE_BUFFER_NATIVE, SPVC_TRUE) ==
                      SPVC_SUCCESS;
             break;
         case CrossTarget::Hlsl50:
@@ -234,8 +244,86 @@ bool CrossCompile(const shader::SpirvCrossFunctions& cross, Span<const uint8> co
         diagnostics.Append(StringView(message != nullptr ? message : "SPIRV-Cross failed"));
     }
 
+    // 결합 목록은 compile 뒤에 읽는다(결합 변수 이름은 compile이 정한다).
+    if (ok && combinedSamplers != nullptr && backend == SPVC_BACKEND_GLSL) {
+        const auto getCombined = Get<decltype(&spvc_compiler_get_combined_image_samplers)>(
+            cross, Index::CompilerGetCombinedImageSamplers);
+        const auto getName = Get<decltype(&spvc_compiler_get_name)>(cross, Index::CompilerGetName);
+        const spvc_combined_image_sampler* samplers = nullptr;
+        size_t samplerCount = 0;
+        ok = getCombined(compiler, &samplers, &samplerCount) == SPVC_SUCCESS;
+        combinedSamplers->BeginArray("combinedSamplers");
+        for (size_t index = 0; ok && index < samplerCount; ++index) {
+            combinedSamplers->BeginObject();
+            combinedSamplers->String("combined",
+                                     StringView(getName(compiler, samplers[index].combined_id)));
+            combinedSamplers->String("image",
+                                     StringView(getName(compiler, samplers[index].image_id)));
+            combinedSamplers->String("sampler",
+                                     StringView(getName(compiler, samplers[index].sampler_id)));
+            combinedSamplers->EndObject();
+        }
+
+        combinedSamplers->EndArray();
+    }
+
     contextDestroy(context);
     return ok;
+}
+
+bool ReportSpirvFeatures(Span<const uint8> code, uint32 capability, StringView extension,
+                         Report& report, SpirvFeatureMatch& match) noexcept {
+    match = SpirvFeatureMatch{};
+    const uint32* words = nullptr;
+    usize count = 0;
+    if (!AsWords(code, words, count)) {
+        return false;
+    }
+
+    report.BeginArray("capabilities");
+    char number[UInt32DecimalBytes];
+    usize index = SpirvHeaderWords;
+    while (index < count) {
+        const uint32 instruction = words[index];
+        const uint32 length = instruction >> WordCountShift;
+        if (length == 0 || index + length > count) {
+            break;
+        }
+
+        const uint32 opcode = instruction & OpcodeMask;
+        if (opcode == OpCapabilityCode && length > 1) {
+            snprintf(number, sizeof(number), "%u", words[index + 1]);
+            report.Element(StringView(number));
+            match.capability = match.capability || words[index + 1] == capability;
+        }
+
+        index += length;
+    }
+
+    report.EndArray();
+    report.BeginArray("extensions");
+    index = SpirvHeaderWords;
+    while (index < count) {
+        const uint32 instruction = words[index];
+        const uint32 length = instruction >> WordCountShift;
+        if (length == 0 || index + length > count) {
+            break;
+        }
+
+        if ((instruction & OpcodeMask) == OpExtensionCode && length > 1) {
+            // 이름은 NUL 종료 literal string이고 word 안에 little-endian으로 담긴다.
+            const char* name = reinterpret_cast<const char*>(words + index + 1);
+            const usize limit = (length - 1) * SpirvWordBytes;
+            const StringView text(name, strnlen(name, limit));
+            report.Element(text);
+            match.extension = match.extension || text == extension;
+        }
+
+        index += length;
+    }
+
+    report.EndArray();
+    return true;
 }
 
 usize CountExtInst(Span<const uint8> code) noexcept {

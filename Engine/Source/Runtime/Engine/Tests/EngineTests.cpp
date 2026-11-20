@@ -1,10 +1,19 @@
+#include <Base/Compiler.h>
 #include <Core/Diagnostics/LogSystem.h>
 #include <Core/Diagnostics/RuntimeLogSink.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/StringBuilder.h>
 #include <Engine/Engine.h>
+#include <Platform/CrashReporting.h>
 #include <Platform/Fatal.h>
+#include <Platform/File.h>
+#include <Platform/Memory.h>
+#include <Platform/Path.h>
+#include <Platform/Process.h>
+#include <Platform/Thread.h>
+#include <TestSupport/HostFailure.h>
 #include <TestSupport/NFailAllocator.h>
+#include <TestSupport/ProcessProbe.h>
 #include <TestSupport/Test.h>
 #include <World/SceneComponent.h>
 #include <World/Actor.generated.h>
@@ -13,6 +22,13 @@
 #include <WorldTestFixtures/WorldTestFixtures.module.generated.h>
 #include <stdio.h>
 #include <string.h>
+
+// 시험 실행기(Programs/FoundationTests/Private/Main.cpp)가 정의한다. 파일 고유 namespace 밖에 둬야
+// 같은 기호를 가리킨다.
+namespace rocks::test {
+bool RegisterProcessProbe(const char* mode,
+                          int (*function)(int, const char* const*) noexcept) noexcept;
+} // namespace rocks::test
 
 using namespace rocks;
 namespace engine_tests_file {
@@ -1131,4 +1147,301 @@ TEST(EngineLog_RunReportsFramesAndReasonAndCreateWorldFailureStage) {
     CHECK(strcmp(record->message, "Engine run finished after 3 frames: MaxFrames") == 0);
     CHECK(record->frame == 3);
 }
+
+namespace {
+
+// 자식 프로세스 시험의 버퍼 크기다. 실행 파일 경로·자식 stderr·시험 폴더 경로(임시 폴더
+// 아래)·크래시 폴더 이름·CrashInfo.json 경로·CrashInfo.json 내용 순이다.
+constexpr usize ProbeExecutablePathBytes = 4096;
+constexpr usize ProbeErrorBytes = 4096;
+constexpr usize ProbeDirectoryBytes = 4096;
+constexpr usize CrashFolderNameBytes = 256;
+// 시험 폴더 + '/' + 크래시 폴더 이름 + "/CrashInfo.json"이다(sizeof가 '/'와 NUL 몫을 더한다).
+constexpr usize CrashInfoPathBytes =
+    ProbeDirectoryBytes + CrashFolderNameBytes + sizeof("/CrashInfo.json");
+constexpr usize CrashInfoBytes = 64 * 1024;
+
+// 엔진 단계 크래시 probe의 종료 코드다. 크래시하지 않고 돌아온 경우(준비 실패·크래시 없음)는 모두
+// EngineStageProbeLastExitCode 이하다. 크래시는 신호·예외 코드로 끝나 이 범위 밖이다.
+constexpr int EngineStageProbeUsageExitCode = 2;
+constexpr int EngineStageProbeInstallExitCode = 3;
+constexpr int EngineStageProbeEngineExitCode = 4;
+constexpr int EngineStageProbeNoCrashExitCode = 5;
+constexpr int EngineStageProbeLastExitCode = EngineStageProbeNoCrashExitCode;
+
+// 엔진 단계 크래시 probe 자식의 대기 상한이다. 멈춘 자식을 끊는 장치일 뿐이고 결과 판정에 쓰지
+// 않는다.
+constexpr uint32 EngineStageProbeTimeoutMilliseconds = 120000;
+
+// 크래시 기록의 단계 이름(설계 LC6)을 엔진 단계마다 남긴다.
+struct StageRecorder final : public EngineLoopHooks, public EngineClient {
+    const char* atStart = nullptr;
+    const char* inFrame = nullptr;
+    const char* inShutdown = nullptr;
+
+    Result<void> OnEngineStart(Engine&) noexcept override {
+        atStart = platform::CurrentRunStage();
+        return Result<void>::Success();
+    }
+
+    void PumpEvents(Engine& engine) noexcept override {
+        inFrame = platform::CurrentRunStage();
+        engine.RequestExit();
+    }
+
+    void BeginShutdown(Engine&) noexcept override {
+        inShutdown = platform::CurrentRunStage();
+    }
+};
+
+void RequestExitFromOtherThread(void* engine) noexcept {
+    static_cast<Engine*>(engine)->RequestExit();
+}
+
+// "--process-probe engine-request-exit": 게임 스레드가 아닌 스레드의 RequestExit는
+// Debug·Development에서 assert 실패다. 정상이면 돌아오지 않는다.
+int EngineRequestExitProbe(int, const char* const*) noexcept {
+    rocks::test::PrepareFatalTestProcess();
+    SystemAllocator allocator;
+    Engine engine(allocator);
+    EngineConfig config;
+    if (!engine.Initialize(config)) {
+        return 2;
+    }
+
+    platform::Thread thread;
+    if (thread.Start(&RequestExitFromOtherThread, &engine) != platform::ThreadStatus::Success) {
+        return 3;
+    }
+
+    (void)thread.Join();
+    return 0;
+}
+
+const bool EngineProbeRegistered =
+    rocks::test::RegisterProcessProbe("engine-request-exit", &EngineRequestExitProbe);
+
+} // namespace
+
+// 엔진은 초기화·초기화 끝·프레임 반복·정리·정리 끝을 크래시 기록의 단계로 남긴다(초기화·종료 중
+// 크래시의 CrashInfo.json "stage"). 프레임마다 다시 쓰지 않는다.
+TEST(Engine_MarksRunStagesForCrashRecords) {
+    const platform::RunPhase phase = platform::CurrentRunPhase();
+    const char* stage = platform::CurrentRunStage();
+    SystemAllocator allocator;
+    {
+        StageRecorder recorder;
+        EngineConfig config;
+        config.hooks = &recorder;
+        config.client = &recorder;
+        Engine engine(allocator);
+        REQUIRE(engine.Initialize(config));
+        CHECK(recorder.atStart == EngineStageInitialize);
+        CHECK(platform::CurrentRunStage() == EngineStageReady);
+        CHECK(platform::CurrentRunPhase() == platform::RunPhase::Running);
+        REQUIRE(engine.Run());
+        CHECK(recorder.inFrame == EngineStageRun);
+        REQUIRE(engine.Shutdown());
+        CHECK(recorder.inShutdown == EngineStageShutdown);
+        CHECK(platform::CurrentRunStage() == EngineStageStopped);
+        CHECK(platform::CurrentRunPhase() == platform::RunPhase::Shutdown);
+    }
+
+    platform::SetRunPhase(phase, stage);
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// RequestExit는 엔진을 소유한 게임 스레드 API다(설계 20절). 다른 스레드에서 부르면 Debug·
+// Development는 assert 실패다(자식 프로세스에서 확인, Release는 검사하지 않는다).
+TEST(Engine_RequestExitFromAnotherThreadIsFatal) {
+    if (IsReleaseBuild || !rocks::test::ProcessSpawnExpected()) {
+        return;
+    }
+
+    REQUIRE(EngineProbeRegistered);
+    char executable[ProbeExecutablePathBytes];
+    usize executableBytes = 0;
+    REQUIRE(platform::GetExecutablePath(executable, sizeof(executable), executableBytes));
+    const platform::ProcessArgument arguments[] = {{"--process-probe", 15},
+                                                   {"engine-request-exit", 19}};
+    platform::ProcessStartInfo info;
+    info.executable = executable;
+    info.executableBytes = executableBytes;
+    info.arguments = arguments;
+    info.argumentCount = 2;
+    info.output = platform::ProcessStreamMode::Null;
+    info.error = platform::ProcessStreamMode::Pipe;
+    static char error[ProbeErrorBytes];
+    platform::ProcessRunOptions options;
+    options.error = error;
+    options.errorCapacity = sizeof(error) - 1;
+    const platform::ProcessRunResult run = platform::RunProcess(info, options);
+    REQUIRE(run.status);
+    REQUIRE(!run.timedOut);
+    error[run.errorBytes < sizeof(error) ? run.errorBytes : sizeof(error) - 1] = '\0';
+    CHECK(run.exit.kind != platform::ProcessExitKind::Exited || run.exit.code != 0);
+    CHECK(strstr(error, "ownerThread_") != nullptr);
+}
+
+namespace {
+
+// "--process-probe engine-crash-stage <init|shutdown> <dir>": 크래시 수집을 걸고(프로세스 안 덤프,
+// 폴더 dir) 엔진 초기화(client 시작) 또는 정리(BeginShutdown) 안에서 접근 위반을 낸다. 부모가
+// CrashInfo.json의 stage가 그 엔진 단계인지 본다. 정상이면 돌아오지 않는다.
+ROCKS_NOINLINE void FaultInEngineStage() noexcept {
+    volatile int* volatile target = nullptr;
+    *target = 1;
+}
+
+struct CrashingStage final : public EngineLoopHooks, public EngineClient {
+    bool crashOnStart = false;
+
+    Result<void> OnEngineStart(Engine&) noexcept override {
+        if (crashOnStart) {
+            FaultInEngineStage();
+        }
+
+        return Result<void>::Success();
+    }
+
+    void PumpEvents(Engine& engine) noexcept override {
+        engine.RequestExit();
+    }
+
+    void BeginShutdown(Engine&) noexcept override {
+        FaultInEngineStage();
+    }
+};
+
+int EngineCrashStageProbe(int argc, const char* const* argv) noexcept {
+    rocks::test::PrepareFatalTestProcess();
+    if (argc < 5) {
+        return EngineStageProbeUsageExitCode;
+    }
+
+    platform::CrashReportingOptions options;
+    options.programName = "EngineStageProbe";
+    options.outputDirectory = argv[4];
+    options.helper = platform::CrashHelperPolicy::InProcess;
+    if (platform::InstallCrashReporting(options) != platform::CrashReportingStatus::Installed) {
+        return EngineStageProbeInstallExitCode;
+    }
+
+    SystemAllocator allocator;
+    CrashingStage stage;
+    stage.crashOnStart = strcmp(argv[3], "init") == 0;
+    EngineConfig config;
+    config.hooks = &stage;
+    config.client = &stage;
+    Engine engine(allocator);
+    if (!engine.Initialize(config) || !engine.Run()) {
+        return EngineStageProbeEngineExitCode;
+    }
+
+    (void)engine.Shutdown();
+    return EngineStageProbeNoCrashExitCode;
+}
+
+const bool EngineStageProbeRegistered =
+    rocks::test::RegisterProcessProbe("engine-crash-stage", &EngineCrashStageProbe);
+
+struct FoundFolder {
+    char name[CrashFolderNameBytes] = {};
+    bool found = false;
+};
+
+bool FindFolder(const platform::DirectoryEntry& entry, void* raw) noexcept {
+    auto& folder = *static_cast<FoundFolder*>(raw);
+    if (entry.info.type != platform::FileType::Directory ||
+        entry.nameBytes >= sizeof(folder.name)) {
+        return true;
+    }
+
+    platform::MemoryCopy(folder.name, entry.name, entry.nameBytes);
+    folder.found = true;
+    return false;
+}
+
+// 자식을 띄워 엔진 단계 안에서 크래시를 내고, 크래시 폴더의 CrashInfo.json 내용을 content에 읽는다.
+bool RunCrashStageProbe(const char* scenario, char* content, usize capacity,
+                        usize& bytes) noexcept {
+    bytes = 0;
+    // 크래시 폴더는 작업 폴더가 아니라 사용자 임시 폴더 아래에 만든다(실행 위치에 남지 않게).
+    char temporary[ProbeDirectoryBytes];
+    usize temporaryBytes = 0;
+    if (!platform::GetStandardDirectory(platform::StandardDirectory::Temporary, temporary,
+                                        sizeof(temporary), temporaryBytes)) {
+        return false;
+    }
+
+    char directory[ProbeDirectoryBytes];
+    FixedStringBuilder directoryText{Span<char>(directory)};
+    if (!directoryText.TryAppendFormat("{}/rocks-engine-stage-{}-{}",
+                                       StringView(temporary, temporaryBytes), StringView(scenario),
+                                       platform::CurrentProcessId())) {
+        return false;
+    }
+
+    platform::FileSystem& files = platform::PhysicalFileSystem();
+    (void)platform::DeleteDirectoryTree(files, directory, directoryText.ByteCount());
+    char executable[ProbeExecutablePathBytes];
+    usize executableBytes = 0;
+    if (!platform::GetExecutablePath(executable, sizeof(executable), executableBytes)) {
+        return false;
+    }
+
+    const platform::ProcessArgument arguments[] = {{"--process-probe", 15},
+                                                   {"engine-crash-stage", 18},
+                                                   {scenario, strlen(scenario)},
+                                                   {directory, directoryText.ByteCount()}};
+    platform::ProcessStartInfo info;
+    info.executable = executable;
+    info.executableBytes = executableBytes;
+    info.arguments = arguments;
+    info.argumentCount = 4;
+    info.output = platform::ProcessStreamMode::Null;
+    info.error = platform::ProcessStreamMode::Null;
+    platform::ProcessRunOptions options;
+    options.timeoutMilliseconds = EngineStageProbeTimeoutMilliseconds;
+    const platform::ProcessRunResult run = platform::RunProcess(info, options);
+    bool crashed = run.status && !run.timedOut &&
+                   (run.exit.kind != platform::ProcessExitKind::Exited ||
+                    run.exit.code > static_cast<uint32>(EngineStageProbeLastExitCode));
+    FoundFolder folder;
+    (void)files.EnumerateDirectory(directory, directoryText.ByteCount(), &FindFolder, &folder);
+    char path[CrashInfoPathBytes];
+    FixedStringBuilder pathText{Span<char>(path)};
+    crashed = crashed && folder.found &&
+              pathText.TryAppendFormat("{}/{}/CrashInfo.json", directoryText.View(),
+                                       StringView(folder.name));
+    platform::File metadata;
+    if (crashed && metadata.Open(path, platform::FileOpenMode::ReadExisting)) {
+        const platform::FileTransfer read = metadata.Read(content, capacity - 1);
+        bytes = read.bytes;
+        content[bytes] = '\0';
+    }
+
+    (void)metadata.Close();
+    (void)platform::DeleteDirectoryTree(files, directory, directoryText.ByteCount());
+    return crashed && bytes != 0;
+}
+
+} // namespace
+
+// 엔진 초기화·종료 중 크래시의 CrashInfo.json "stage"가 그 엔진 단계다(설계 LC6·LC7). 자식
+// 프로세스에서 확인한다(크래시 수집은 자식이 직접 건다).
+TEST(Engine_CrashDuringInitializeAndShutdownRecordsTheStage) {
+    if (!rocks::test::ProcessSpawnExpected()) {
+        return;
+    }
+
+    REQUIRE(EngineStageProbeRegistered);
+    static char content[CrashInfoBytes];
+    usize bytes = 0;
+    REQUIRE(RunCrashStageProbe("init", content, sizeof(content), bytes));
+    CHECK(strstr(content, EngineStageInitialize) != nullptr);
+    REQUIRE(RunCrashStageProbe("shutdown", content, sizeof(content), bytes));
+    CHECK(strstr(content, EngineStageShutdown) != nullptr);
+}
+
 } // namespace engine_tests_file

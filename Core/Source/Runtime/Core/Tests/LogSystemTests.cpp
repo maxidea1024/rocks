@@ -1,4 +1,5 @@
 #include <TestSupport/Test.h>
+#include <Core/Private/Diagnostics/LogInternal.h>
 #include <Core/Diagnostics/Log.h>
 #include <Core/Diagnostics/LogSystem.h>
 #include <Core/Memory/SystemAllocator.h>
@@ -1275,32 +1276,97 @@ TEST(LogSystemRateLimitWindowNeverMovesBackward) {
 
 namespace {
 
-uint32 previousHookCalls = 0;
-
-void CountingTerminationHook(const char*, usize) noexcept {
-    ++previousHookCalls;
+platform::TerminationContext TerminationContextFor(uint64 deadlineNanoseconds,
+                                                   const uint32& stoppedCount) noexcept {
+    static constexpr uint64 NoStoppedThreads[platform::MaxStoppedCrashThreads] = {};
+    return {platform::TerminationReason::Exception,
+            platform::CurrentThreadId(),
+            NoStoppedThreads,
+            &stoppedCount,
+            "probe",
+            5,
+            deadlineNanoseconds};
 }
 
 } // namespace
 
-// LogInstallScope는 종료 hook을 걸고 해제 때 앞 hook으로 되돌린다. 로그 hook은 flush 뒤 앞 hook에
-// 연쇄한다.
-TEST(LogInstallScopeChainsAndRestoresTerminationHook) {
+// 크래시 수집기의 종료 콜백이 부르는 flush다. 설치된 시스템이 없으면 건너뛰고, 설치돼 있으면 남은
+// 기록을 sink까지 비운다(마감이 지나도 Sync는 lock을 잡을 수 있으면 비운다).
+TEST(FlushInstalledLogForTerminationFindsTheInstalledSystem) {
     ResetUninstalledDrops();
+    constexpr uint64 FutureNanoseconds = 10ull * 1000 * 1000 * 1000;
+    const uint32 noStopped = 0;
+    const uint64 future = platform::MonotonicNanoseconds() + FutureNanoseconds;
+    CHECK(detail::FlushInstalledLogForTermination(TerminationContextFor(future, noStopped)) ==
+          platform::TerminationCallbackResult::Skipped);
+
     SystemAllocator allocator;
-    LogSystem logs(allocator, Config(LogMode::Manual));
+    LineSink sink;
+    LogSystem logs(allocator, Config(LogMode::Sync));
+    REQUIRE(logs.AddSink(sink).IsOk());
     REQUIRE(logs.Start().IsOk());
-    previousHookCalls = 0;
-    const platform::TerminationHook original =
-        platform::SetTerminationHook(&CountingTerminationHook);
     {
         LogInstallScope installed(logs);
-        const platform::TerminationHook current = platform::SetTerminationHook(nullptr);
-        CHECK(current == &detail::LogTerminationHook);
-        (void)platform::SetTerminationHook(current);
-        current("probe", 5);
-        CHECK(previousHookCalls == 1);
+        Log::Info(LogSystemTests, "record before termination");
+        CHECK(detail::FlushInstalledLogForTermination(TerminationContextFor(0, noStopped)) ==
+              platform::TerminationCallbackResult::Completed);
+        CHECK(detail::FlushInstalledLogForTermination(TerminationContextFor(
+                  platform::MonotonicNanoseconds() + FutureNanoseconds, noStopped)) ==
+              platform::TerminationCallbackResult::Completed);
     }
 
-    CHECK(platform::SetTerminationHook(original) == &CountingTerminationHook);
+    logs.Stop();
+    CHECK(CountText(sink.Text(), "record before termination") == 1);
+}
+
+// Manual 모드는 비울 출력 스레드가 없으므로 종료 flush를 건너뛴다.
+TEST(FlushForTerminationSkipsManualMode) {
+    ResetUninstalledDrops();
+    SystemAllocator allocator;
+    LineSink sink;
+    LogSystem logs(allocator, Config(LogMode::Manual));
+    REQUIRE(logs.AddSink(sink).IsOk());
+    REQUIRE(logs.Start().IsOk());
+    CHECK(logs.FlushForTermination(1000, 0, {}) == platform::TerminationCallbackResult::Skipped);
+    logs.Stop();
+}
+
+// 출력 스레드가 크래시한 스레드나 겹쳐 멈춘 스레드에 있으면 큐를 비울 주체가 없으므로 기다리지 않고
+// 건너뛴다(비상 문구는 stderr로 나간다, 문구 단언은 자식 probe Native.Crash.writer-fault). 두 경로
+// (FlushForTermination, 콜백)가 같은 판정을 쓴다.
+TEST(FlushForTerminationSkipsWhenTheWriterThreadFailed) {
+    ResetUninstalledDrops();
+    SystemAllocator allocator;
+    LineSink sink;
+    LogSystem logs(allocator, Config(LogMode::Async));
+    REQUIRE(logs.AddSink(sink).IsOk());
+    REQUIRE(logs.Start().IsOk());
+    {
+        // 출력 스레드는 루프를 시작할 때 id를 남긴다. 기록 하나를 비워 출력 스레드가 돈 것을
+        // 확인한다.
+        LogInstallScope installed(logs);
+        Log::Info(LogSystemTests, "record that starts the writer");
+        REQUIRE(logs.Flush(SafetyTimeoutMilliseconds));
+    }
+
+    const uint64 writer = detail::LogWriterThreadId(logs);
+    REQUIRE(writer != 0);
+    const uint64 stopped[] = {writer};
+    CHECK(logs.FlushForTermination(1000, 0, Span<const uint64>(stopped)) ==
+          platform::TerminationCallbackResult::Skipped);
+    CHECK(logs.FlushForTermination(1000, writer, {}) ==
+          platform::TerminationCallbackResult::Skipped);
+    {
+        LogInstallScope installed(logs);
+        static uint64 contextStopped[platform::MaxStoppedCrashThreads] = {};
+        contextStopped[0] = writer;
+        const uint32 stoppedCount = 1;
+        platform::TerminationContext context = TerminationContextFor(
+            platform::MonotonicNanoseconds() + 10ull * 1000 * 1000 * 1000, stoppedCount);
+        context.stoppedThreadIds = contextStopped;
+        CHECK(detail::FlushInstalledLogForTermination(context) ==
+              platform::TerminationCallbackResult::Skipped);
+    }
+
+    logs.Stop();
 }

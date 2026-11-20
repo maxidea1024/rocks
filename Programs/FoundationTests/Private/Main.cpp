@@ -1,5 +1,7 @@
 #include <TestSupport/Test.h>
 #include <TestSupport/HostFailure.h>
+#include <Core/App/ProcessCommandLine.h>
+#include <Launch/EntryPoint.h>
 #include <Platform/Clock.h>
 #include <Platform/Sync.h>
 #include <stdio.h>
@@ -11,7 +13,11 @@ namespace rocks::test {
 int RunLoggerFailureProbe() noexcept;
 int RunLogFatalProbe(uint32 mode) noexcept;
 int RunLogCrashProbe(uint32 mode, const char* directory) noexcept;
-int RunProcessProbe(int argc, char** argv) noexcept;
+int RunCrashProbe(const char* mode, const char* directory) noexcept;
+void ConfigureCrashProbe(const char* mode, const char* directory,
+                         launch::ApplicationSettings& settings) noexcept;
+void ConfigureLogCrashProbe(const char* directory, launch::ApplicationSettings& settings) noexcept;
+int RunProcessProbe(int argc, const char* const* argv) noexcept;
 int RunHashTraversalNegativeControl(bool useSet, uint32 operation) noexcept;
 int RunHashOperationsNegativeControl(uint32 operation) noexcept;
 int RunOrderedMapNegativeControl(uint32 operation) noexcept;
@@ -60,7 +66,7 @@ static int (*requiredCheckNegativeControl)(uint32) noexcept = nullptr;
 // probe(RunProcessProbe)는 엔진 모듈을 모르므로 엔진 시험은 자기 probe를 이름으로 등록한다.
 struct RegisteredProcessProbe {
     const char* mode = nullptr;
-    int (*function)(int, char**) noexcept = nullptr;
+    int (*function)(int, const char* const*) noexcept = nullptr;
 };
 
 static constexpr usize MaxRegisteredProcessProbes = 8;
@@ -68,7 +74,8 @@ static RegisteredProcessProbe registeredProcessProbes[MaxRegisteredProcessProbes
 static usize registeredProcessProbeCount = 0;
 
 // "--process-probe <mode> ..."의 mode를 등록한다(정적 초기화에서 부른다). 자리가 없으면 false다.
-bool RegisterProcessProbe(const char* mode, int (*function)(int, char**) noexcept) noexcept {
+bool RegisterProcessProbe(const char* mode,
+                          int (*function)(int, const char* const*) noexcept) noexcept {
     if (registeredProcessProbeCount == MaxRegisteredProcessProbes) {
         return false;
     }
@@ -132,14 +139,18 @@ static bool ParseUnsigned(const char* text, rocks::uint64& value) {
 
 static bool requireReturned = false;
 
+// 크래시 probe 모드 접두사다(`--negative-control crash-<mode>`, CrashProcessProbe.cpp).
+static constexpr char CrashProbePrefix[] = "crash-";
+static constexpr rocks::usize CrashProbePrefixBytes = sizeof(CrashProbePrefix) - 1;
+
 static void RequireNegativeControl() {
     REQUIRE(false);
     requireReturned = true;
 }
 
-int main(int argc, char** argv) {
+// 시험 실행기 본문이다. argv 모양(0번은 실행 파일)은 Launch가 캡처한 UTF-8 인자를 가리킨다.
+static int RunTestRunner(int argc, const char* const* argv) {
     using namespace rocks;
-    test::PrepareAutomatedTestProcess();
     // Process 시험이 이 실행 파일을 자식으로 다시 띄운 경우다(PlatformBase/Tests/ProcessTests.cpp).
     if (argc >= 3 && strcmp(argv[1], "--process-probe") == 0) {
         for (usize index = 0; index < test::registeredProcessProbeCount; ++index) {
@@ -163,6 +174,9 @@ int main(int argc, char** argv) {
             return test::RunNumberCorpus(argv[2]);
         } else if (strcmp(argv[i], "--list") == 0) {
             list = true;
+        } else if (strcmp(argv[i], "--crash-dir") == 0 && i + 1 < argc) {
+            // 크래시 폴더 뿌리다. Launch 설정(ConfigureRunner)이 이미 썼다.
+            ++i;
         } else if (strcmp(argv[i], "--filter") == 0 && i + 1 < argc) {
             filter = argv[++i];
         } else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) {
@@ -383,6 +397,10 @@ int main(int argc, char** argv) {
                 return test::RunLogCrashProbe(2, i + 1 < argc ? argv[i + 1] : nullptr);
             } else if (strcmp(control, "log-crash-stuck-sink") == 0) {
                 return test::RunLogCrashProbe(3, i + 1 < argc ? argv[i + 1] : nullptr);
+            } else if (strncmp(control, CrashProbePrefix, CrashProbePrefixBytes) == 0) {
+                // 크래시 수집기 자식 probe(CrashProcessProbe.cpp)다.
+                return test::RunCrashProbe(control + CrashProbePrefixBytes,
+                                           i + 1 < argc ? argv[i + 1] : nullptr);
             } else if (strcmp(control, "asan-uaf") == 0) {
                 return test::RunAsanNegativeControl();
             } else if (strcmp(control, "assert-stderr-lock") == 0) {
@@ -394,7 +412,7 @@ int main(int argc, char** argv) {
             return test::failures == 1 ? 1 : 3;
         } else {
             fprintf(stderr, "Usage: FoundationTests [--list] [--filter text] [--seed N] "
-                            "[--repeat N] [--json path]\n");
+                            "[--repeat N] [--json path] [--crash-dir path]\n");
             return 2;
         }
     }
@@ -501,3 +519,91 @@ int main(int argc, char** argv) {
            static_cast<unsigned long long>(test::seed));
     return test::failures == 0 ? 0 : 1;
 }
+
+// 덤프 도우미 시험 장치(ROCKS_CRASH_PROBE_HELPER, 설계 17절)다. Launch 진입점은 다른 무엇보다 먼저
+// 도우미 모드로 분기하므로 정적 초기화에서 건다. 환경 변수가 없으면 아무것도 하지 않는다.
+[[maybe_unused]] static const bool crashHelperTestMode = rocks::test::InstallCrashHelperTestMode();
+
+namespace {
+
+using rocks::Span;
+using rocks::StringView;
+namespace launch = rocks::launch;
+
+// 층마다 실행 파일 이름이 다르다(FoundationTests.Build.cs의 FOUNDATION_TEST_RUNNER_LAYER: 0 Core,
+// 1 Foundation, 2 Engine). 크래시 폴더 이름과 메타데이터 "program"이다.
+constexpr const char* RunnerNames[] = {"CoreFoundationTests", "FoundationTests", "EngineTests"};
+
+bool Is(StringView argument, const char* text) noexcept {
+    return argument == StringView(text);
+}
+
+// 실행기 설정이다(설계 16절). 실행기 본체는 Full이고 폴더는 --crash-dir이 있으면 그것이다. 이
+// 실행 파일을 다시 띄운 자식 probe는 크래시 수집을 명시적으로 고른다. 크래시 probe(crash-*)와 로그
+// 크래시 probe(log-crash-*)는 probe가 정한 설정이고, 그 밖의 probe(--process-probe,
+// --logger-failure-probe, 다른 --negative-control)는 Off다(의도적 Fatal·assert는 수집기 없이 비상
+// 출력 뒤 끝나는 기존 계약을 시험한다). 인자 해석은 RunTestRunner와 같다: --process-probe는 첫
+// 인자일 때만, --logger-failure-probe는 유일한 인자일 때만이고, 값을 받는 옵션(--filter·--seed·
+// --repeat·--json·--crash-dir)의 값은 옵션으로 보지 않는다.
+void ConfigureRunner(Span<const StringView> arguments,
+                     launch::ApplicationSettings& settings) noexcept {
+    if ((arguments.Size() >= 2 && Is(arguments[0], "--process-probe")) ||
+        (arguments.Size() == 1 && Is(arguments[0], "--logger-failure-probe"))) {
+        settings.crashReporting = launch::CrashReportingMode::Off;
+        return;
+    }
+
+    for (rocks::usize index = 0; index < arguments.Size(); ++index) {
+        const StringView argument = arguments[index];
+        const char* next = index + 1 < arguments.Size() ? arguments[index + 1].Data() : nullptr;
+        if (next == nullptr) {
+            return;
+        }
+
+        if (Is(argument, "--crash-dir")) {
+            // Launch 인자의 Data()는 NUL로 끝나고 프로세스 수명 동안 유효하다.
+            settings.crashDirectory = next;
+            ++index;
+        } else if (Is(argument, "--filter") || Is(argument, "--seed") || Is(argument, "--repeat") ||
+                   Is(argument, "--json")) {
+            ++index;
+        } else if (Is(argument, "--negative-control")) {
+            const StringView control(next);
+            const char* directory =
+                index + 2 < arguments.Size() ? arguments[index + 2].Data() : nullptr;
+            if (control.StartsWith(CrashProbePrefix, rocks::StringComparison::CaseSensitive)) {
+                rocks::test::ConfigureCrashProbe(next + CrashProbePrefixBytes, directory, settings);
+            } else if (control.StartsWith("log-crash-", rocks::StringComparison::CaseSensitive)) {
+                rocks::test::ConfigureLogCrashProbe(directory, settings);
+            } else {
+                settings.crashReporting = launch::CrashReportingMode::Off;
+            }
+
+            return;
+        }
+    }
+}
+
+int RunRunner(launch::ApplicationContext& context) noexcept {
+    static const char* argv[rocks::ProcessCommandLine::MaxArguments + 1];
+    const Span<const StringView> arguments = context.Arguments();
+    argv[0] = context.ExecutablePath().Data();
+    for (rocks::usize index = 0; index < arguments.Size(); ++index) {
+        argv[index + 1] = arguments[index].Data();
+    }
+
+    return RunTestRunner(static_cast<int>(arguments.Size() + 1), argv);
+}
+
+const launch::ApplicationDescription& Describe() noexcept {
+    static constexpr launch::ApplicationDescription Description{
+        .name = RunnerNames[FOUNDATION_TEST_RUNNER_LAYER],
+        .kind = launch::ApplicationKind::TestRunner,
+        .configure = &ConfigureRunner,
+        .run = &RunRunner};
+    return Description;
+}
+
+} // namespace
+
+ROCKS_IMPLEMENT_APPLICATION(Describe)

@@ -7,6 +7,13 @@
 namespace rocks::detail {
 namespace {
 
+// 비상 경로 렌더의 속성 텍스트 버퍼에서 인자 하나에 두는 byte 수다(짧은 값만 담고 길면 자른다).
+constexpr usize LogEmergencyTextBytesPerArgument = 8;
+
+// 비상 출력 한 줄의 장식(대괄호 둘·구분자·끝 줄바꿈과 레벨 이름)에 남기는 byte 수다. 가장 긴 레벨
+// 이름 "Warning" 기준 13 byte보다 넉넉하게 둔다.
+constexpr usize LogEmergencyDecorationBytes = 16;
+
 // Lazy 기록의 템플릿이다(람다가 만든 메시지 하나를 담는다).
 constexpr const char LazyTemplateText[] = "{Message}";
 
@@ -32,7 +39,7 @@ LogCaptureTemplate LazyTemplate(SourceLocation where) noexcept {
 void WriteCaptureEmergency(Span<const uint8> capture, LogLevel level, StringView category,
                            StringView fallback) noexcept {
     char message[LogEmergencyMessageBytes];
-    char texts[MaxLogArguments * 8];
+    char texts[MaxLogArguments * LogEmergencyTextBytesPerArgument];
     LogProperty properties[MaxLogArguments];
     LogEvent event;
     const LogRenderTarget target{
@@ -60,7 +67,7 @@ bool OnLogWriterThread() noexcept {
 
 void WriteLogEmergencyText(LogLevel level, StringView category, StringView message) noexcept {
     // "[" 레벨 "][" 카테고리 "] " 메시지 "\n". 끝 줄바꿈 자리를 남기고 잘라 담는다.
-    char line[LogEmergencyMessageBytes + MaxLogCategoryNameBytes + 16];
+    char line[LogEmergencyMessageBytes + MaxLogCategoryNameBytes + LogEmergencyDecorationBytes];
     FixedStringBuilder text{Span<char>(line, sizeof(line) - 1)};
     (void)text.TryAppendAscii('[');
     (void)text.TryAppend(IsValidLogLevel(level) ? LogLevelName(level) : StringView("Unknown"));
@@ -142,7 +149,7 @@ void LogAppendLine(FixedStringBuilder& out, const LogCaptureTemplate& text, cons
     }
 
     char message[LogLazyMessageBytes];
-    char texts[MaxLogArguments * 8];
+    char texts[MaxLogArguments * LogEmergencyTextBytesPerArgument];
     LogProperty properties[MaxLogArguments];
     LogEvent event;
     const LogRenderTarget target{
@@ -169,6 +176,7 @@ void LogAppendLine(FixedStringBuilder& out, const LogCaptureTemplate& text, cons
         WriteCaptureEmergency(record, LogLevel::Fatal, category.Name(), text.text);
         LogReadScope scope;
         if (scope.System() != nullptr) {
+            MarkFatalFlushAttempted();
             DeliverFatalToLogSystem(*scope.System(), record);
         }
     } else {
@@ -178,9 +186,9 @@ void LogAppendLine(FixedStringBuilder& out, const LogCaptureTemplate& text, cons
     platform::Fatal("Rocks fatal log record; aborting");
 }
 
-[[noreturn]] void ReportAssertFailure(const char* message) noexcept {
+[[noreturn]] void ReportAssertFailure(const char* message, const char* file, uint32 line) noexcept {
     if (fatalInProgress) {
-        platform::Fatal(message);
+        platform::FatalAt(message, file, line);
     }
 
     fatalInProgress = true;
@@ -194,11 +202,12 @@ void LogAppendLine(FixedStringBuilder& out, const LogCaptureTemplate& text, cons
     if (captured) {
         LogReadScope scope;
         if (scope.System() != nullptr) {
+            MarkFatalFlushAttempted();
             DeliverFatalToLogSystem(*scope.System(), Span<const uint8>(capture, captured.Value()));
         }
     }
 
-    platform::Fatal("Rocks invariant failed; aborting");
+    platform::FatalAt("Rocks invariant failed; aborting", file, line);
 }
 
 } // namespace rocks::detail
@@ -211,35 +220,5 @@ void Log::SetFrame(uint64 frame) noexcept {
         system->SetFrame(frame);
     }
 }
-
-namespace detail {
-
-namespace {
-
-// 로그 hook을 걸기 전의 hook이다(flush 뒤 연쇄한다).
-constinit platform::TerminationHook chainedTerminationHook = nullptr;
-
-} // namespace
-
-void SetChainedTerminationHook(platform::TerminationHook hook) noexcept {
-    platform::AtomicStore<platform::MemoryOrder::Release>(&chainedTerminationHook, hook);
-}
-
-void LogTerminationHook(const char* message, usize bytes) noexcept {
-    // Log::Fatal·assert가 이 스레드에서 이미 flush했으면(그 뒤 platform::Fatal이 hook을 부른다)
-    // 다시 하지 않는다.
-    if (!fatalInProgress) {
-        fatalInProgress = true;
-        FlushInstalledLogForTermination();
-        fatalInProgress = false;
-    }
-
-    if (const platform::TerminationHook chained =
-            platform::AtomicLoad<platform::MemoryOrder::Acquire>(&chainedTerminationHook)) {
-        chained(message, bytes);
-    }
-}
-
-} // namespace detail
 
 } // namespace rocks

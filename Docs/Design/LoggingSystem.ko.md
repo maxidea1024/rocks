@@ -1,6 +1,6 @@
 # 로깅 시스템 설계
 
-기준일: 2026-11-20, 개정 13. 엔진 전반에서 쓰는 **로그**(사람이 읽는 사건 기록)의 호출 API, 카테고리·레벨 필터, 비동기 기록 경로, 출력 형식, 장애 격리, 엔진 적용 범위를 정한다.
+기준일: 2026-11-20, 개정 16. 엔진 전반에서 쓰는 **로그**(사람이 읽는 사건 기록)의 호출 API, 카테고리·레벨 필터, 비동기 기록 경로, 출력 형식, 장애 격리, 엔진 적용 범위를 정한다.
 
 요구는 다음 문서에서 온다.
 - [엔진 구현 계획](EngineImplementationPlan.ko.md) 29.4절(필수 로깅·프로파일러: level/category, UTC+monotonic, rate limit·중복 집계, compile/runtime level, error/fatal 비상 경로, 임계 구간에서 file IO·heap·lock wait 금지)
@@ -24,7 +24,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론)의 현재 기본 경로다. 경�
 
 UE의 매크로 중심 API(`UE_LOG`, `DECLARE_LOG_CATEGORY_*`)는 따르지 않는다. 일반 로그는 함수 호출로 쓴다. 메시지 템플릿과 출력 레이아웃은 Serilog·log4j의 개념을 Rocks 이름으로 가져온다. UE 이름은 대응표(4절)에만 둔다.
 
-상태: LG0–LG15·LG17–LG19 **구현 완료**(결정 L1–L27, 구현과 다르게 정한 점은 14.2절). LG16(`{@Obj}`)은 GC 세션의 MetaCompiler·ObjectRuntime 변경 병합 뒤로 미뤘다. 단계는 14절, 다른 세션과의 순서는 15절, 결정은 17절이다.
+상태: LG0–LG19 **구현 완료**(결정 L1–L29, 구현과 다르게 정한 점은 14.2절). LG16(`{@Obj}`)은 개정 15에서 구현했다(MetaCompiler `VisitFields` 생성·ObjectRuntime `Object/LogStructure.h` 포함). 개정 16에서 크래시 기록의 로그 칸(`LogFile`·`LogDirectory`)을 붙였다(14.1.8절, L29). 단계는 14절, 다른 세션과의 순서는 15절, 결정은 17절이다.
 
 ## 1. 결정 요약
 
@@ -311,6 +311,7 @@ LogContextScope stage("Stage", "BeginPlay");
 | 문맥 스택 · 준비 버퍼 | 스레드별 `thread_local` 고정 배열(정적 TLS, 힙 없음, 스레드당 약 1.5 KiB) |
 | 재정의·스레드 이름 표 | LogSystem 안 고정 배열 |
 | 출력 렌더 버퍼 | Start 1회, 64 KiB(레이아웃·JSON 공용, `FixedStringBuilder`) |
+| 펼친 값 렌더 노드(LG16) | LogSystem 안 고정 배열 `MaxLogStructureNodes` = 128칸 × `LogProperty`(64-bit에서 72 B) ≈ 9 KiB. 개정 15에서 `LogProperty`가 48 B에서 72 B로 커져 속성·문맥 칸도 칸마다 24 B 늘었다 |
 | JSON writer 작업 공간 | Start 1회. `JsonWriter` 무할당 옵션(고정 깊이 frame, 중복 키 색인 끔)이 쓰는 고정 영역 |
 | stderr | CRT 버퍼(우리 할당 없음) |
 
@@ -343,7 +344,7 @@ LogContextScope stage("Stage", "BeginPlay");
 
 ### 9.1 파일 sink와 암호화
 
-- `FileLogSink`(Core): 실행마다 새 파일(`<로그 폴더>/<호스트>-<UTC 시작 시각>.log`), 크기 상한을 넘으면 회전(`log.file.max_bytes`), 보관 개수 상한(`log.file.retention`). 보관 정리는 `<호스트>-<YYYYMMDDTHHMMSSmmmZ>[-<숫자>].log` 모양에 정확히 맞는 파일만 센다(같은 폴더의 다른 호스트 파일을 지우지 않는다). 쓰기는 PlatformBase 파일 API를 쓴다. flush 묶음 단위로 쓰고, 버퍼는 Start에서 확보한다(무할당).
+- `FileLogSink`(Core): 실행마다 새 파일(`<로그 폴더>/<호스트>-<UTC 시작 시각>.log`). 상대 로그 폴더는 Open 때 작업 디렉터리에 붙여 절대 경로로 굳힌다(실제 파일 시스템일 때, 개정 16 — UE `FOutputDeviceFile`도 절대 경로로 연다). 뒤에 작업 디렉터리가 바뀌어도 회전 파일이 같은 폴더에 생기고, 크래시 기록의 파일 칸이 절대 경로가 된다. 크기 상한을 넘으면 회전(`log.file.max_bytes`), 보관 개수 상한(`log.file.retention`). 보관 정리는 `<호스트>-<YYYYMMDDTHHMMSSmmmZ>[-<숫자>].log` 모양에 정확히 맞는 파일만 센다(같은 폴더의 다른 호스트 파일을 지우지 않는다). 쓰기는 PlatformBase 파일 API를 쓴다. flush 묶음 단위로 쓰고, 버퍼는 Start에서 확보한다(무할당).
 - **암호화는 선택이고 기본은 끔이다**(`log.file.encrypt = false`). Core는 Crypto보다 아래 계층이라 Core에는 인터페이스만 둔다.
 
 ```cpp
@@ -405,7 +406,7 @@ public:
   - 설정 단계: 등록(`RegisterLogSettings` → `trace.*` → 호스트) → 층 파일 → `--config` → `--set` → Sync → `CompleteStartup`(`log.mode`·`log.file.*`·`log.console.layout` 고정).
   - 실행 단계: `LogHost::Start(preset, &context, hostName)` → 설치 → `Watch` → trace 세션 → 엔진 루프(프레임마다 Config Sync가 `log.level`·`log.levels` 변경을 적용).
   - 종료 단계: 엔진 정리 → `LogSystem::Flush` → trace sink(`TraceLogSink`) 제거 → trace 정지 → 설치 해제 → `LogHost::Stop`(`WriterAbandoned()`면 정리 없이 종료). trace sink는 trace 시작 직후 더한다(14.1.5).
-  - 크래시 처리기: 엔진 호스트는 시작 때 `platform::InstallCrashHandler()`, 끝에 `RemoveCrashHandler()`(14.1.8). Sandbox `--engine`이 이렇게 한다.
+  - 크래시 수집: 처리기 설치·제거는 Launch가 `platform::InstallCrashReporting`·`RemoveCrashReporting`으로 한다([크래시 처리·실행 진입점](CrashHandlingAndLaunch.ko.md)). 로깅은 첫 설치 때 종료 콜백 하나만 등록한다(14.1.8). 호스트가 따로 할 일은 없다.
   - 설치 전 설정 오류는 비상 경로(stderr)로 한 번 남는다. `HostSettings`는 LogHost보다 오래 산다.
 
 ## 10. 장애 격리
@@ -514,9 +515,9 @@ Result<UniquePtr<Device>> CreateD3D12Device(Allocator&, const DeviceDesc&, Devic
 | LG13 | 카테고리별 rate limit `log.rate_limits`, 캡처 시각을 tick으로·시계 주입(14.1.3, L21) | LG12 | 주입 시계로 창별 통과 수가 정확히 상한(단일·다중 생산자), Error·Fatal 제외, 알림 1회, 16칸 초과·잘못된 항목은 적용 시점 Warning 후 건너뜀, 무할당 |
 | LG14 | 상관 id: Core 스택(`CorrelationScope`, 확장 칸, 관찰자 hook), 기록 캡처·`{Correlation}`·JSON `corr`, task·전용 lane 상시 전파(14.1.4, L14·L15) | LG4, **15.1절 trace 조율** | 중첩·넘침·스레드 격리, 범위가 끝난 뒤 렌더해도 같은 값(Manual), 공개 `CorrelationScope`로 쌓은 값이 로그·trace에 같게 실림, trace 세션 없이 task 전파, trace 기존 시험 통과, 무할당, 생산자 비용 측정 |
 | LG15 | trace `log` 채널: `TraceLogSink`, `Trace.LogMessageSpec`·`Trace.LogMessage`, TraceAnalysis·`trace-report`, 호스트 연결(14.1.5, L16) | LG13, LG14, **15.1절 trace 조율** | 기록 → 분석 왕복(spec 1회, 순서·스레드·tick·상관 id 일치), 채널 꺼짐 기록 0, 중복 표 넘침·세션 교체, 무할당(초기화 뒤), Sandbox trace 산출물 |
-| LG16 | 구조체 펼치기 `{@Obj}`: `LogStructure<T>` 확장점, 캡처 시점 복사, ObjectRuntime 일반 특수화·생성 필드 방문 함수(14.1.6, L19) | LG11, **15.1절 리플렉션 조율** | 캡처 뒤 원본 변경·파괴에도 출력 불변, 상한 잘림, 텍스트·JSON 결정적 출력, 생성 struct 왕복, 특수화 없는 타입 컴파일 실패, 무할당 |
+| LG16 | 구조체 펼치기 `{@Obj}`: `LogStructure<T>` 확장점, 캡처 시점 복사, ObjectRuntime 일반 특수화·생성 필드 방문 함수(14.1.6, L19). **구현 완료(개정 15, 14.2절)** | LG11, **15.1절 리플렉션 조율** | 캡처 뒤 원본 변경·파괴에도 출력 불변, 상한 잘림, 텍스트·JSON 결정적 출력, 생성 struct 왕복, 특수화 없는 타입 컴파일 실패, 무할당 |
 | LG17 | 시간 기준 회전 `log.file.max_age_minutes`, 압축 `log.file.compress`(묶음별 zstd frame), 봉인과의 순서(14.1.7, L22·L23) | LG10, **15.1절 Compression 조율(고정 작업 공간 문맥)** | `LogEvent`를 sink에 직접 넣어 회전 결정적 시험, 압축 왕복·잘린 끝 frame 복원, 봉인+압축 왕복·변조 검출, 보관 정리, 무할당(Open 뒤) |
-| LG18 | 종료 경로의 마지막 로그: `platform::SetTerminationHook`, `LogSystem::FlushForTermination`, OS 예외·치명 신호 최소 처리기(14.1.8, L24·L25) | LG3, **15.1절 PlatformBase 조율** | 자식 프로세스 시험으로 `platform::Fatal`·접근 위반·stack overflow·SIGSEGV 직전 Async 기록 보존, 앞 처리기 연쇄, 멈춘 sink에서도 종료, 대화상자 억제 |
+| LG18 | 종료 경로의 마지막 로그: `LogSystem::FlushForTermination`, 크래시 수집기 종료 콜백 등록·Fatal 표시(14.1.8, L24·L25). 처리기는 수집기 소유(개정 14) | LG3, **15.1절 크래시 수집 조율** | 자식 프로세스 시험으로 `platform::Fatal`·접근 위반·stack overflow·SIGSEGV 직전 Async 기록 보존, 정확한 종료 코드, 멈춘 sink에서도 종료, 대화상자 억제 |
 | LG19 | Commandlet `log view`(거르기·여러 파일·평문·zst·봉인)(14.1.9, L26) | LG14, LG17 | 고정 입력 파일의 필터 결과 결정적 비교(Rocks.Commandlet.Tests) |
 
 검증: 커밋마다 Debug 빌드·format·변경 부분 시험. 처음에는 전체 체인(Asan·TSan)을 LG3과 LG8 끝에 한 번씩 돌리기로 했으나, 2026-11-17 저장소 검증 기준이 바뀌어(Asan은 필요할 때만) 돌리지 않았다. 메인 트리 구현은 에이전트 하나가 순서대로 하고 커밋은 경로를 지정한다.
@@ -666,45 +667,67 @@ LG11–LG19의 검증도 같다: Debug 빌드, format, policy, 바뀐 부분 시
 
 #### 14.1.8 LG18 종료 경로의 마지막 로그
 
-개정 8의 16절 밖, 새 범위다(2026-11-18 사용자 진행 지시·L25 선택으로 확정). minidump·스택 수집 같은 crash 수집 전반은 여전히 범위 밖이다(16절).
+개정 8의 16절 밖, 새 범위다(2026-11-18 사용자 진행 지시·L25 선택으로 확정). **개정 14부터 처리기는 크래시 수집기가 소유한다**([크래시 처리·실행 진입점](CrashHandlingAndLaunch.ko.md) 19절). 로깅은 수집기의 종료 콜백에 flush 하나만 꽂는다. minidump·스택 수집·덤프와 flush의 순서는 그 문서가 정한다.
 
-- `Log::Fatal`과 assert는 이미 비상 출력 뒤 best effort flush를 한다(11절). 하지만 `platform::Fatal`을 바로 부르는 코드(UniquePtr 반환 실패 등)는 큐에 남은 기록을 버린다. `platform::Fatal`은 stderr 쓰기 뒤 바로 abort한다. 접근 위반·치명 신호에는 처리기가 아예 없다.
+- `Log::Fatal`과 assert는 비상 출력 뒤 자기 스레드에서 best effort flush를 한다(11절). `platform::Fatal`을 바로 부르는 코드(UniquePtr 반환 실패 등)와 접근 위반·치명 신호는 이 경로를 지나지 않는다. 이들의 큐에 남은 기록은 수집기의 종료 콜백이 비운다.
 
-**종료 hook(L24).**
-- PlatformBase에 `platform::SetTerminationHook(void (*)(const char* message, usize bytes) noexcept)`(원자 포인터 하나)를 더한다. PlatformBase는 Core 아래라 `StringView`를 쓸 수 없어 포인터와 길이를 받는다.
-- `platform::Fatal`은 abort 전에 이 hook을 한 번 부른다(재귀 표시).
-- Core는 `LogInstallScope` 설치 때 hook을 걸고 해제 때 되돌린다. hook은 `LogSystem::FlushForTermination(timeout)`을 부른다.
+**종료 콜백 등록(L24).**
+- Core는 **첫 `LogInstallScope` 설치 때 정적 콜백 하나를 `platform::RegisterTerminationCallback`(`Platform/CrashReporting.h`)으로 한 번 등록하고 해제하지 않는다.** user는 nullptr다. 수집기 설치 전에도 등록할 수 있으므로 호스트의 설치 순서와 무관하다.
+- 콜백은 크래시 처리 스레드(수집기의 W)에서 프로세스당 한 번 불린다. 콜백은 `LogReadScope`(세대 카운터)로 그때 설치된 LogSystem을 lock 없이 찾는다. 없으면 `Skipped`다.
+- `LogInstallScope`는 등록·해제를 하지 않는다. 설치·해제가 겹치거나 시스템이 바뀌어도 콜백은 그 순간 설치된 것만 본다.
+- 등록이 실패하면(칸 4개가 다 참) 비상 경로에 Error를 한 번 남기고 계속한다. 그 프로세스는 크래시 때 로그 flush가 없다.
+- 수집기를 설치하지 않은 프로세스에서는 콜백이 불리지 않는다. Rocks 실행 파일은 Launch를 거쳐 설치하므로, 남는 것은 C# 도구와 외부 호스트뿐이다.
+
+**콜백 본문(`detail::FlushInstalledLogForTermination(const TerminationContext&)`).**
+- **출력 스레드 판정:** `failingThreadId`나 `stoppedThreadIds`(개수는 원자로 읽음)에 출력 스레드가 있으면 큐를 비울 주체가 없다. 기다리지 않고 비상 출력만 하고 `Skipped`다. 판정은 private helper `WriterThreadFailed` 하나가 두 칸을 함께 본다(`FlushForTermination`이 멈춘 스레드 목록을 `Span<const uint64>`로 받는다).
+- **대기 시간:**
+  - 기본은 `fatalFlushTimeoutMilliseconds`와 공용 마감까지 남은 시간 중 짧은 쪽이다.
+  - `Log::Fatal`·assert가 flush를 시도했으면(아래 Fatal 표시) 실패 스레드의 대기가 제한 시간에 끊겼을 수 있다. 그 뒤에 들어온 다른 스레드의 기록도 있을 수 있다. 그래서 바로 건너뛰지 않고 남은 큐를 한 번 더 기다린다. 상한은 "공용 마감 - `TerminationCallbackReserveMilliseconds`(250 ms)"다. 기본 대기도 이 상한을 넘지 않는다.
+  - 공용 마감은 수집기 기본 2초이고, Launch `ApplicationSettings::crashCallbackBudgetMilliseconds`로 바꿀 수 있다. 위 상한 "공용 마감 - 250 ms"도 바꾼 마감을 따른다.
+  - 콜백은 등록 역순으로 불리고 마감을 함께 쓴다. 여유는 로그 뒤에 불리는 콜백(수집기가 설치 때 먼저 등록한 것 등)의 몫이다.
+  - 콜백이 불렸을 때 상한이 이미 지났으면 건너뛰지 않고 timeout 0으로 한 번 시도한다. Sync는 sink lock을 잡으면 비우고, Async는 이미 비어 있으면 `Completed`, 아니면 `TimedOut`이다. 기다리지 않는 시도라 다른 콜백의 몫을 쓰지 않고, 남은 기록을 건질 기회는 남는다. 마감이 지난 뒤의 콜백을 아예 부르지 않는 것은 수집기의 몫이다(수집기 계약 3).
+  - 밀리초 변환은 `NumericLimits<uint32>::Max()`에서 자른다.
+- **결과 값:** `LogSystem::FlushForTermination(timeout, failingThreadId, stoppedThreadIds)`이 `TerminationCallbackResult`를 바로 돌려준다. 결과는 크래시 기록에 남으므로 "기다렸지만 못 비움"과 "할 수 없었음"을 가른다.
+  - `Completed`: 다 비웠다.
+  - `TimedOut`: Async에서 마감까지 기다렸지만 큐가 남았다.
+  - `Skipped`: 시작 전, Manual, 비상 모드, sink 콜백 안, 출력 스레드 자신, 출력 스레드가 실패하거나 멈춘 스레드, Sync에서 sink lock을 TryLock으로 못 잡음(쥔 스레드가 멈췄다).
 - **`FlushForTermination`은 막히는 lock을 쓰지 않는다.** UE Panic(`OR:981–1016`, lock을 제한 시간만 기다린 뒤 진행)과 같은 모양이다.
-  - Async: 출력 스레드를 깨운다. 깨우기는 PlatformBase에 주소 대기(WaitOnAddress·futex)가 생기면 그것으로 lock 없이 한다. 그 전에는 `ManualResetEvent::TrySignal`(이벤트 mutex를 TryLock으로 몇 번 시도)을 더해 대신한다. 그런 다음 lock 없이 큐 완료 위치를 원자로 확인하며 `fatalFlushTimeoutMilliseconds`까지 기다린다(양보하며 단조 시계로 상한 확인).
-  - Sync: sink mutex를 TryLock으로 잡아 fan-out·flush하고, 못 잡으면 건너뛴다.
-  - 출력 스레드 자신·sink 안·Manual이면 건너뛴다.
-- 중복 flush는 기존 스레드별 `fatalInProgress`(`Core/Private/Diagnostics/Log.cpp`)로 판정한다. `Log::Fatal`·assert가 이미 flush를 시작했으면 hook은 다시 하지 않는다.
+  - Async: 출력 스레드를 `ManualResetEvent::TrySignal`(이벤트 mutex를 TryLock으로 몇 번 시도)로 깨운다. 그런 다음 lock 없이 큐 완료 위치를 원자로 확인하며 기다린다(양보하며 단조 시계로 상한 확인). PlatformBase에 주소 대기(WaitOnAddress·futex)가 생기면 깨우기를 그것으로 바꾼다.
+  - Sync: sink mutex를 TryLock으로 잡아 flush하고, 못 잡으면 건너뛴다.
+- 콜백은 할당하지 않는다(수집기 계약 7).
 
-**OS 예외·치명 신호 최소 처리기(L25, 사용자 선택 A).**
-- PlatformBase가 프로세스에 하나 설치한다(호스트가 명시적으로 켬, 전역 생성자 없음). 하는 일은 "마지막 로그 flush"뿐이고, 처리 결과는 앞 처리기로 넘긴다.
-- **Windows:** `SetUnhandledExceptionFilter`로 설치하고, 돌려받은 앞 filter를 보관한다.
-  - **stack overflow 대응:** filter는 깨진 스레드의 남은 stack에서 돈다. 그래서 flush를 그 스레드에서 하지 않는다.
-  - 설치 때 **flush 전용 스레드**(작은 stack, 커널 이벤트 대기)를 미리 만든다. filter는 커널 이벤트를 `SetEvent`로 알리고, 완료 이벤트를 제한 시간만큼 `WaitForSingleObject`로 기다린다. 둘 다 사용자 공간 lock이 없고 stack을 거의 쓰지 않는다.
-  - 오래 사는 엔진 스레드(게임·렌더 lane·worker·로그 출력)는 `SetThreadStackGuarantee`로 처리기용 여유 stack을 확보해, 처리기 자신이 넘치는 경우를 줄인다.
-  - 끝나면 앞 filter를 부르고 그 결과를 돌려준다(없으면 `EXCEPTION_CONTINUE_SEARCH`).
-- **POSIX:** SIGSEGV·SIGBUS·SIGILL·SIGFPE·SIGABRT에 `sigaction`(`SA_ONSTACK`)으로 설치하고 앞 동작을 보관한다.
-  - 엔진 스레드와 주 스레드는 `sigaltstack`을 가진다.
-  - 처리기는 미리 만든 flush 전용 스레드를 self-pipe `write`(async-signal-safe, 쓰는 쪽 non-blocking·양쪽 `FD_CLOEXEC`)로 깨우고, 완료 원자 표시를 단조 시계로 제한 시간까지 확인한다.
-  - 끝나면 앞 동작을 되돌리고 신호를 다시 낸다.
-  - **신호 처리기 안의 flush는 최선 노력이다.** flush 스레드가 쓰는 경로(TryLock·원자 대기)는 async-signal-safe 보장 밖이다. 깨진 스레드가 쥔 lock은 TryLock 실패로 건너뛴다.
-- **flush 전용 스레드**는 `FlushForTermination`을 부르고 완료를 알린다. 깨진 스레드가 출력 스레드 자신이면 큐를 비울 주체가 없으므로 비상 출력만 남긴다.
-- **겹침:** 디버거와 이후 crash reporter가 같은 자리를 쓴다. 처리기는 앞 처리기로 연쇄하고, 결과를 바꾸지 않으며, 제거 함수를 둔다. crash 수집을 설계할 때 이 처리기를 그 안의 첫 단계로 옮긴다.
-- **비용:**
-  - 기록마다 드는 비용은 없다.
-  - 프로세스당 flush 전용 스레드 하나(대기만 함, stack 64 KiB)와 커널 이벤트 둘(Windows) 또는 세마포어 하나(POSIX)가 든다.
-  - 엔진 스레드마다 Windows는 stack 보장분(예: 32 KiB 예약), POSIX는 `sigaltstack` 32 KiB가 든다. 둘 다 Start 때 확보하고 이후 할당은 없다.
-  - 크래시 때 최대 지연은 `fatalFlushTimeoutMilliseconds`(기본 2초)다.
+**Fatal 표시.**
+- 프로세스 원자 표시 `detail::MarkFatalFlushAttempted()`·`FatalFlushAttempted()`를 둔다. `Log::Fatal`·assert가 설치된 LogSystem에 Fatal 기록을 넘기기 직전에 세운다. 콜백은 이 표시를 보고 대기 상한을 정한다(위).
+- 스레드별 `fatalInProgress`(`Core/Private/Diagnostics/Log.cpp`)는 같은 스레드의 재귀를 막는 용도로만 남는다. 콜백이 도는 W에서는 보이지 않으므로 중복 판정에 쓰지 않는다. 중복 호출 자체는 수집기가 막는다(콜백은 프로세스당 한 번).
+- assert는 `platform::FatalAt(message, file, line)`으로 끝나고, 수집기의 종료 사유는 `Assert`다.
+
+**한계.**
+- Async 큐에서 칸을 예약한 생산자가 게시 전에 멈추면(그 짧은 구간에서 크래시), 출력 스레드는 그 칸을 넘지 못한다. 콜백은 상한까지 기다린 뒤 `TimedOut`이고, 그 칸 뒤의 기록은 잃는다. 이 구간은 복사 한 번이라 드물다. 고치려면 큐가 멈춘 칸을 건너뛰어야 하는데, 생산자가 살아 있는지 가릴 수 없어 하지 않는다.
 - 봉인 파일의 끝 표시: 비정상 종료에서는 `Final`을 쓰지 않는다. "끝 표시 없음 = 비정상 종료" 판정이 맞기 때문이다(9.1절).
+- **Asan 구성.** 콜백은 ASan 보고 뒤 death callback이 부르는 공통 Fatal 경로(종료 사유 `Sanitizer`)에서 불린다. 그래서 Windows Asan의 접근 위반에서도 큐가 비워진다. POSIX Asan에서 크래시 처리 스레드 자신이 ASan 오류를 내면 콜백이 불리지 않거나 끝나지 않을 수 있다(CrashHandlingAndLaunch 13.2절의 한계).
+- **크래시 기록의 로그 칸(개정 16, L29).** 크래시 기록(CrashInfo.json `associatedFiles`)에서 로그를 찾을 수 있게 `platform::SetCrashAnnotation`(`Platform/CrashReporting.h`)으로 두 칸을 채운다.
+  - `LogFile`: `FileLogSinkConfig::crashAnnotation`을 켠 `FileLogSink`가 파일을 열 때(Open의 첫 파일)와 회전할 때 현재 파일의 경로를 알린다. 경로는 9.1절에 따라 절대 경로다.
+  - `LogDirectory`: `LogHost`가 파일 sink를 연 뒤 그 sink의 절대 로그 폴더를 한 번 알린다.
+  - **쓰는 쪽은 하나다(seqlock 칸).** 프로세스에서 `crashAnnotation`을 켜는 sink는 `LogHost`가 설치하는 파일 sink 하나다. Open은 등록 전 호출 스레드에서, 회전은 Async 출력 스레드나 Sync sink mutex 안에서 일어나므로 쓰기가 겹치지 않는다. `LogDirectory`는 `LogHost` 설정 스레드만 쓴다.
+  - 칸은 512 B(`MaxCrashAnnotationBytes`)다. 넘으면 API가 false를 돌려주고 칸을 바꾸지 않는다(자르지 않는다). 그러면 칸을 비우고(`bytes` 0) 비상 경로에 Warning을 한 번 남긴다. 이전 회전 파일 경로가 남아 엉뚱한 파일을 가리키지 않게 하려는 것이다.
+  - 정상 Stop·Close 때 칸을 비우지 않는다. 정상 종료 뒤의 크래시에서도 마지막 로그 파일은 여전히 유효하다.
+  - 버린 대안:
+    - 처음 설계의 "설치된 LogSystem의 sink만 알린다"를 sink가 스스로 판정하는 것. sink는 자기를 등록한 LogSystem을 모르고, 판정하려면 등록·설치 상태를 sink 쓰기 경로에서 읽어야 한다. 설치하는 쪽(`LogHost`)이 설정 칸으로 고르는 것이 결정적이다.
+    - 모든 `FileLogSink`가 알리는 것. 시험처럼 sink가 여럿이면 같은 칸을 여러 스레드가 써서 값이 섞인다.
+    - 넘을 때 파일 이름만 넘기기. 같은 이름이 여러 폴더에 있을 수 있어 헷갈린다(폴더 칸이 있어도 파일 칸만 읽는 도구가 잘못 짚는다).
+    - 칸에 쓸 때만 절대 경로로 바꾸기. 작업 디렉터리가 바뀐 뒤의 회전 파일이 다른 폴더에 생기는 문제가 그대로 남는다.
 - UE: 크래시 보고 전에 `GLog->Panic()`을 부른다(`Private/Windows/WindowsPlatformCrashContext.cpp:1833–1837`). Panic은 출력 장치 lock을 최대 1초 기다린 뒤 그대로 flush로 넘어간다(`OR:981–1016`).
-- 완료 기준(자식 프로세스 시험, Sandbox self-test처럼 `RunProcess`):
-  - `platform::Fatal`·접근 위반·stack overflow(Windows)·SIGSEGV(POSIX) 직전의 Async 기록이 파일·stderr에 남는다.
-  - 앞 처리기가 불린다(시험용 앞 처리기가 표시를 남긴다).
-  - 출력 스레드가 멈춘 sink 안에 있어도 프로세스가 끝난다. 단언은 종료 코드와 내용이다.
+
+**버린 대안(개정 9–11의 설계).**
+- `platform::SetTerminationHook`(원자 포인터 하나)과 `LogInstallScope`의 hook 교체·앞 hook 연쇄를 버렸다. 등록자가 여럿이면 연쇄 순서가 설치·해제 순서에 묶이고, 해제가 늦은 hook을 덮을 수 있다. 수집기의 칸 등록이 이를 대신한다.
+- 로깅 자체의 OS 예외·신호 처리기와 flush 전용 스레드를 버렸다. 처리기와 전용 스레드(W)·stack 보장·`sigaltstack`은 수집기가 하나만 둔다. 덤프와 flush의 순서도 한 곳에서 정해야 하기 때문이다.
+- 스레드별 `fatalInProgress`로 중복 flush를 판정하던 방식을 버렸다. 콜백이 실패 스레드가 아닌 W에서 돌기 때문이다.
+
+- 완료 기준(자식 프로세스 시험 `LoggerOutputTests`, 모든 모드가 수집기를 설치):
+  - `platform::Fatal`·접근 위반·stack overflow(Windows)·SIGSEGV(POSIX) 직전의 Async 기록이 파일·stderr에 남는다. Windows는 정확한 종료 코드를 단언한다.
+  - 출력 스레드가 멈춘 sink 안에서 Fatal이 나도 프로세스가 끝난다. 단언은 종료 코드와 내용이다.
+  - 출력 스레드 안에서 접근 위반이 나면(`Native.Crash.writer-fault`) 기다리지 않고 "The log writer thread itself crashed; queued records are lost"를 남긴다.
+  - 단위 시험: 설치된 시스템이 없으면 `Skipped`, 설치돼 있으면 `Completed`이고 기록이 sink에 남는다. Manual이면 `Skipped`(`FlushForTerminationSkipsManualMode`), 출력 스레드가 실패하거나 멈춘 스레드면 `Skipped`(`FlushForTerminationSkipsWhenTheWriterThreadFailed`, 멈춘 목록·실패 스레드·콜백 경로)다.
   - abort·WER 대화상자를 억제한다.
 
 #### 14.1.9 LG19 `log view`
@@ -724,9 +747,64 @@ LG11–LG19의 검증도 같다: Debug 빌드, format, policy, 바뀐 부분 시
 - **LG14:** 확장 칸 규칙을 정했다. `ext[0]`(`CorrelationCarriedExtension`)은 사본에 실려 다니고, `ext[1]`(`CorrelationPushExtension`)은 쌓기마다 Core가 0으로 시작한다(사본에 실린 쌓기 serial이 짝 없는 `ContextPop`을 만들지 않게). `CorrelationDepth()`는 인라인 TLS 읽기다. 상관 id 칸 이름·순서(`CorrelationFieldNames`)는 Correlation.h 하나에 둔다. 관찰자는 `TraceSession::Start`마다 다시 걸고(같으면 무동작) 떼지 않으며, 걸지 못하면 Warning을 남기고 센다. WorkerScheduler는 추적 여부와 상관없이 `TraceTaskScope`를 만들어 상관 id를 복원한다. `DedicatedLane::Post`는 사본을 잠금 밖에서 만든다.
 - **LG15:** 기록 이름은 trace 표기 `Trace.LogMessageSpec`·`Trace.LogMessage`다. spec 키를 EventId에서 호출 지점(EventId·카테고리·위치)으로 바꿨고, 표가 찬 뒤에는 정의를 쓰지 않고 기록에 싣는다(14.1.5). `trace-report`는 판 4이고 `logs`의 시각은 정수 ns다. Sandbox에 `--trace-file <path>`를 더했다. 엔진 호스트는 trace가 돌 때 `TraceLogSink`를 더하고 끝낼 때 Flush → `RemoveSink` → trace 정지 순서로 뺀다. 자체 검사는 `--engine --trace=default --trace-file`로 자식을 돌려 trace 파일에 로그 기록("Engine run finished")이 있는지 확인한다(TraceAnalysis가 링크되지 않는 Release에서는 NOT RUN). spec id의 위치는 파일·함수 문자열의 내용 해시다. 정의 기록 상한(16 KiB)을 넘는 spec은 쓰기 전에 가려 바로 동봉하고, 동봉한 템플릿은 1024 byte에서 자른다(잘림 비트 2). 동봉 실패는 sink만 센다(TraceSystem 6.6절).
 - **LG17:** 압축은 범용 `FixedWorkspaceCompressor`(Compression, zstd 고정 작업 공간·만든 뒤 무할당)를 쓰고, Core 인터페이스 `LogBatchCompressor`는 `LogFileCipher.h`에 있다. 봉인 파일 머리의 예약 1 byte를 `flags`로 쓴다(`LogFileFlagCompressedBatches`). 시간 회전 설정은 `FileLogSinkConfig::maxAgeNanoseconds`다.
-- **LG18:** 종료 hook 이름은 `platform::SetTerminationHook`, 처리기 API는 `platform::InstallCrashHandler`·`RemoveCrashHandler`·`PrepareThreadForCrashHandling`(`Platform/CrashHandler.h`)이다. `SetThreadStackGuarantee`·`sigaltstack`은 엔진 스레드만이 아니라 `platform::Thread`로 만든 모든 스레드가 시작 때 확보한다. POSIX 처리기는 이 환경에서 컴파일을 확인하지 못했다(Windows만 빌드·시험).
+- **LG18(개정 11 당시, 개정 14에서 수집기로 옮김):** 종료 hook 이름은 `platform::SetTerminationHook`, 처리기 API는 `platform::InstallCrashHandler`·`RemoveCrashHandler`·`PrepareThreadForCrashHandling`(`Platform/CrashHandler.h`)이다. `SetThreadStackGuarantee`·`sigaltstack`은 엔진 스레드만이 아니라 `platform::Thread`로 만든 모든 스레드가 시작 때 확보한다. POSIX 처리기는 이 환경에서 컴파일을 확인하지 못했다(Windows만 빌드·시험).
 - **LG19:** `--json` 출력 선택은 두지 않았다(입력 JSON lines 줄을 그대로 낸다). 폴더는 `*.log`·`*.log.zst`를 읽는다. 봉인 여부는 magic(`RKLOGENC`)으로 정하고 키 없는 봉인 파일은 경고 뒤 건너뛴다. 압축 파일은 스트림으로 풀어(파일당 1 GiB 상한) 잘린 frame 앞까지 보여 준다. `--event`는 16진 숫자로 비교한다. 기본 레이아웃 기록의 이어진 줄은 앞 기록의 판정을 따른다. 시험용으로 `log pack`(묶음별 zstd frame)과 `log seal --compress`를 더했다.
-- **LG18(리뷰):** POSIX 대체 stack은 정적 TLS가 아니라 스레드를 준비할 때 잡고 끝날 때 돌려주며(`ReleaseThreadCrashHandling`), 이미 있으면 덮어쓰지 않는다.
+- **LG18(리뷰):** POSIX 대체 stack은 정적 TLS가 아니라 스레드를 준비할 때 잡고 끝날 때 돌려주며(`ReleaseThreadCrashHandling`), 이미 있으면 덮어쓰지 않는다. 이 함수들은 개정 14에서 `Platform/CrashReporting.h`로 옮겨졌다(동작 같음).
+- **LG18(개정 14, 크래시 수집 LC1a):** `Platform/CrashHandler.h`·`SetTerminationHook`·`TerminatingThreadId`·`LogTerminationHook`·`SetChainedTerminationHook`·`LogInstallScope`의 hook 교체를 지웠다. 코드 변경은 크래시 수집 세션(rocks-36)이 LC1a에서 함께 했고, 로깅이 리뷰했다. 리뷰 반영: `FlushForTermination`이 `TerminationCallbackResult`를 돌려줌(할 수 없었음은 `Skipped`, 기다렸지만 남음만 `TimedOut`), 출력 스레드 판정 helper 하나(`WriterThreadFailed`), 재대기 상한 "마감 - 250 ms", 밀리초 변환 상한, 멈춘 출력 스레드·Manual 시험과 출력 스레드 크래시 자식 시험. 상한이 지난 뒤 불린 콜백은 timeout 0으로 한 번 시도한다(rocks-36 제안 채택).
+
+- **LG16(개정 15):** 14.1.6과 다르게(또는 더 구체적으로) 정한 점은 다음과 같다.
+  - **특수화 없는 타입의 거부:** `Formatter`도 `LogStructure`도 없는 클래스 타입은 영어 `static_assert`로 거부한다(`detail::LogArgKindOf`, 문구 "Log argument type needs a rocks::Formatter<T> or rocks::LogStructure<T> specialization ..."). `Formatter`나 내장 타입만 있는 인자를 `{@Name}`에 쓴 경우는 자리 종류가 템플릿 문자열 값에 달려 있어 타입만으로 판정할 수 없다. 그래서 6.3절의 다른 템플릿 오류처럼 consteval 표지 함수로 낸다. 템플릿 오류 셋을 더했다.
+    - `StructureWithoutLogStructure`: `{@Name}` 인자에 특수화가 없다.
+    - `SpecOnStructure`: `{@Name:spec}`이다.
+    - `StructureArgumentWithoutAt`: `LogStructure`만 있는 타입을 일반 자리에 썼다.
+    - 런타임 템플릿은 렌더 때 앞의 둘을 `[template error: ...]`로 낸다. 셋째는 그 자리만 `<format error>`다(인자 타입을 렌더 쪽이 모른다).
+  - **파서:** `FormatParser`에 `allowStructure` 인자와 `FormatToken::structured`를 더했다. 로그 템플릿만 켠다. `StringBuilder` 서식과 로그 레이아웃에서 `@`는 그대로 `InvalidHoleName`이다.
+  - **이름 타입 `LogStaticName`:** 필드 이름·타입 태그·enum 열거자 이름은 정적 저장소여야 하므로, 문자열 리터럴만 받는 consteval 생성자와 생성 코드용 `FromStatic(StringView)`를 가진 타입으로 받는다.
+  - **확장점 모양:**
+    - `LogStructure<T>`는 `Write` 외에 선택 `static StringView TypeTag() noexcept`(타입 태그)를 가질 수 있다.
+    - `LogStructureWriter`의 쓰기 함수는 `WriteNull`·`WriteBool`·`WriteSigned`·`WriteUnsigned`·`WriteFloat`·`WriteString`·`WriteSymbol`(정적 기호)·`WriteUnsupported`·`WriteFormatted<T>`, `BeginObject(name, tag)`/`EndObject`, `BeginArray(name, totalCount)`/`EndArray`다. 타입으로 고르는 `Write<T>`와 `WriteElements`도 있다.
+    - `Begin*`이 false면 내용을 버린다(호출자는 만들지 않아도 된다).
+    - 짝이 맞지 않는 Begin은 캡처가 닫는다.
+  - **인코딩:** 캡처 값 칸의 새 종류(`FormatArgKind` 밖 값)에 길이 있는 바이트 열로 담는다.
+    - 기록마다 머리 1 byte + 이름(포인터 + 16-bit 길이) + 값이다.
+    - 기록을 쓰기 전에 열린 객체·배열의 End 자리를 남겨 둔다. 그래서 공간이 바닥나도 인코딩은 늘 올바르다.
+    - 남은 영역이 블록보다 작으면 블록에 먼저 인코딩하고, 잘리지 않았고 들어가면 슬롯으로 옮긴다(`Formatter` 값과 같은 규칙).
+    - 렌더는 범위·종류·깊이·End 짝을 검사한다.
+  - **상한 세부:**
+    - 깊이는 객체와 배열을 함께 세고 맨 위 객체가 1이다. 넘는 객체·배열은 머리와 잘림 표시만 남는다.
+    - 필드 상한은 객체마다다.
+    - 배열은 `BeginArray`의 전체 수가 8을 넘으면 잘림이다.
+    - 상한·공간 잘림 모두 기록에 `ValueTruncated`를 세운다.
+    - 렌더 노드 칸은 기록당 `MaxLogStructureNodes` = 128이다. `LogSystem` 객체 안 고정 배열이고 `LogRenderTarget::structureNodes`로 넘긴다. 넘치면 노드만 버리고 `MessageTruncated`다(메시지는 다 렌더한다).
+  - **출력 세부:**
+    - 텍스트는 `Tag { A: 1, B: "x" }`다. 빈 객체는 `Tag {}`, 잘린 객체는 `{ A: 1, ... }`다.
+    - 배열은 `[1, 2]`이고, 잘리면 담은 원소 뒤에 전체 개수를 붙여 `[0, 1, 2, 3, 4, 5, 6, 7, ... 9 items]`다. 깊이 상한에서 잘린 배열은 `[... 9 items]`다.
+    - 공간이 모자라 값을 버리거나 문자열을 자르면 그것을 담은 모든 객체·배열에 잘림 표시가 선다(텍스트 `...`, JSON `"$truncated"`·`"$count"`가 조상까지 같다). 렌더 노드 칸이 모자라 노드를 버려도 열린 객체·배열 모두에 선다. 노드 칸을 아예 주지 않으면(빈 span) 노드를 채우지 않을 뿐 잘림이 아니다.
+    - 문자열은 따옴표와 JSON식 escape를 쓴다. 기호(enum 이름)는 따옴표 없이 낸다. 그 밖에 `null`·`<unsupported>`·`<format error>`가 있다. 아무것도 담지 못한 값은 `{ ... }`다.
+    - JSON은 `"$type"`(태그가 있을 때)과 `"$truncated": true`를 쓴다. 원소를 버린 배열은 `{"$count": n, "$items": [...]}`다.
+  - **`LogProperty`·`LogEvent`:**
+    - 종류에 `Structure`·`Array`·`Null`을 더했다.
+    - 칸 `typeTag`·`truncated`·`parent`·`subtreeBegin`·`subtreeCount`를 더했다. Array의 전체 원소 수는 `unsignedValue`다.
+    - "자식 범위"는 앞 순서 평탄 배열의 하위 트리 범위로 했다. 직접 자식은 `LogPropertySubtreeSpan`으로 건너뛰며 찾는다. `parent`는 노드 번호이고, 맨 위 속성의 직접 자식이면 `NoLogPropertyParent`다.
+    - `LogEvent::structureNodes`를 더했다.
+    - 맨 위 `Structure`의 `text`는 메시지에 렌더한 구간이다.
+  - **리플렉션 연결:**
+    - `VisitFields`는 `template <class Visitor> static constexpr void VisitFields(const T&, Visitor&) noexcept`다. 클래스·struct 모두, 상속 필드를 포함해 선언 순서(가장 먼 base의 필드부터, 선언 타입 안에서는 소스 순서)로 `visitor.Field("멤버 이름", 값)`을 부른다. 스키마 필드 배열(안정 ID 순)과 순서가 다르다. 로그가 소스 순서로 읽히게 하려는 것이다.
+    - 값은 멤버 포인터 직접 읽기다(Trace와 같은 철자). 자기 bitfield는 헤더 안에서 직접 읽는다(`static_cast<bool>(value.x != 0)`). 생성 접근자 `Get_`의 정의가 생성 소스로 옮겨 가서(생성 소스 분리 GS2), 다른 모듈이 `VisitFields`를 인스턴스화할 때 모듈 밖 함수를 부르지 않게 하려는 것이다. 상속한 bitfield는 base의 private 멤버라 base의 `Get_`을 부른다(생성 함수표 `Ops()`와 같은 제약).
+    - 타입 태그는 타입 도구 이름(없으면 스키마 이름)이고, enum 값의 기호는 C++ 열거자 이름이다. 태그는 사람이 타입을 알아보는 이름이라 한정 없는 도구 이름(기본은 C++ 이름, `Name="…"`로 바꾼 이름)을 쓴다. 기호는 코드와 그대로 맞춰 찾을 수 있게 C++ 이름을 쓴다. 도구 이름(`ROCKS_ENUMERATOR(Name="8BitData")`)은 숫자로 시작할 수 있고 접두(ToolPrefix)를 뗀 이름이라 코드 검색과 어긋난다.
+    - 특수화 가시성(ODR) — include 규칙: 리플렉션 타입의 일반 특수화는 `<Object/LogStructure.h>`를 include한 번역 단위에서만 보인다. 그래서 다음을 규칙으로 둔다.
+      - 리플렉션 타입을 `{@Name}`으로 쓰는 번역 단위는 `<Object/LogStructure.h>`를 include한다. 빠뜨리면 그 타입은 Formatter가 없는 한 `static_assert`("Log argument type needs ... specialization")로 컴파일되지 않으므로 대부분 바로 드러난다.
+      - Formatter도 가진 리플렉션 타입은 이 헤더 유무에 따라 `HasLogStructure<T>`와 그에 기댄 인라인 템플릿(`LogArgTraitsOf` 등)이 번역 단위마다 달라질 수 있다(ODR 위반). 그런 타입은 그 타입을 로그에 쓰는 모든 번역 단위에서 이 헤더를 include한다. 가장 쉬운 방법은 타입을 선언한 헤더 옆 공용 헤더에서 생성 헤더와 함께 include하는 것이다.
+      - 처음 구현은 생성 헤더가 이 헤더를 include해 규칙을 없앴다. 그러나 생성 소스 빌드 작업(rocks-78, 생성 헤더에 새 include를 더하지 않는다)과 맞추느라 되돌렸다. 모든 생성 헤더가 이미 include하는 ObjectRuntime 헤더(`Object/GeneratedFieldAccess.h`)에서 include하는 안도 검토했다. 하지만 `Object/LogStructure.h`가 그 헤더의 형질(`FieldValueKind`·`ArrayField` 등)을 써서 include가 순환한다. 파일 끝 include로 순환을 피하는 것은 깨지기 쉽고, 그 헤더를 쓰는 ObjectRuntime 코드 전체로 로깅 의존이 퍼진다. 그래서 문서 규칙으로 두었다. 생성 헤더 include 줄이기(ReflectionGeneratedSources GSD5)는 GS2 뒤에도 보류이므로, GS3에서 GSD5를 다시 볼 때 함께 다시 정한다.
+    - `LogStructure<T>`는 클래스 타입에만 둔다. enum·정수에 특수화하면 쓰는 곳(템플릿 검증 `LogArgTraitsOf`, 런타임 템플릿의 `LogStructureWriteOf`, 중첩 `Write`)에서 영어 `static_assert`("rocks::LogStructure<T> is only supported for class types ...")로 거부한다. 캡처는 클래스 인자의 객체 주소로 펼치고 정수·enum은 원시 값으로 캡처한다. 그래서 그대로 두면 컴파일은 되고 런타임에 템플릿 오류가 났다.
+    - 내부 알림 `detail::LogTo`(LogInternal.h, 종료 경로 밖)도 `WithArgumentInfo`를 거쳐 `{@Name}`을 받는다.
+    - 종류별 처리:
+      - `Optional`은 값 또는 null이다.
+      - 객체 참조(`ObjectRef`·`WeakObjectRef`·`ObjectRefArray` 원소)는 handle의 `"registry:slot:generation"` 문자열이다(null은 null). registry는 Registry 도메인 번호(`NextRegistryDomain`, 프로세스 안에서 만든 순서대로 1부터 매기는 수)다. 주소가 아니라서 같은 실행 순서면 출력이 같다. 다른 실행과는 번호가 다를 수 있다.
+      - `Guid`·`AssetId`는 `Formatter` 문자열이다.
+      - Name·Text·ClassRef·SoftObjectRef·Digest·Map·Set·InstancedStruct는 `<unsupported>`다.
+    - 생성 헤더 크기: Foundation 타깃의 생성 헤더 35개(타입 231개)에 `VisitFields` 1,802줄·약 119 KB가 늘었다(clang-format 뒤 기준, 바꾸기 전 57,301줄·3.10 MB의 약 3–4%). 등록·함수표가 없는 템플릿이라 쓰지 않으면 인스턴스화되지 않는다.
+  - **한계(수명):** 캡처는 문자열 포인터만 담는다. 필드 이름 리터럴은 `VisitFields`·`LogStructure<T>::Write`를 인스턴스화한 모듈에 있다. 타입 태그·enum 기호는 `Schema()`를 가진 모듈(생성 코드가 든 모듈)에 있다. 그 어느 모듈이든 내리기 전에 그 타입을 담은 기록을 `LogSystem::Flush`로 모두 렌더해야 한다(hot reload 대응은 후속).
 
 ## 15. 다른 세션과의 조율
 
@@ -774,10 +852,10 @@ LG11–LG19 중 다른 세션 소유 모듈을 고쳐야 하는 곳이다. 그 �
 | LG14 | TraceCapture·Task(trace 세션) | 상관 id 스택을 Core `CorrelationScope`(확장 칸 `ext[2]`, 관찰자 hook)로 옮기고 `TraceContext*`는 관찰자·래퍼로 바꾼다. TR3 훅(`TraceTasks.cpp`)과 `DedicatedLane::Post`가 trace 채널과 무관하게 상관 id를 전파(비면 분기 하나) | L14–L16 합의 필요. TraceSystem.ko.md 6.4절·7절 개정. 기록 형식 불변, TR2·TR3 시험 무수정 통과 |
 | LG15 | TraceCapture·TraceAnalysis·`trace-report`(trace 세션) | 채널 `log` 등록, `Trace.LogMessageSpec`·`Trace.LogMessage` 형식, 분석·보고 | `TraceLogSink`는 로깅이 쓰고 형식 표는 trace 쪽 문서에 둔다 |
 | LG15 | 엔진 호스트(Sandbox `EngineHost`), HostConfig(rocks-95) | trace 세션 시작 뒤 sink 추가, 정지 전 제거 | `HostSettings`는 설정 문맥만 만들므로 고칠 것이 없다. 새 `log.*` 설정은 LogHost가 등록한다 |
-| LG16 | ObjectRuntime·MetaCompiler(리플렉션 세션) | MetaCompiler가 `GeneratedType<T>::VisitFields`를 생성, ObjectRuntime에 `Object/LogStructure.h`(일반 특수화) | 객체 참조·AssetId·약한 참조·`GeneratedFieldAccess`가 ObjectRuntime에 있다. 생성 코드 크기 증가를 리플렉션 세션이 판단한다 |
+| LG16 | ObjectRuntime·MetaCompiler(리플렉션 세션) | MetaCompiler가 `GeneratedType<T>::VisitFields`를 생성, ObjectRuntime에 `Object/LogStructure.h`(일반 특수화) | 객체 참조·AssetId·약한 참조·`GeneratedFieldAccess`가 ObjectRuntime에 있다. 생성 코드 크기 증가를 리플렉션 세션이 판단한다. 개정 15에서 로깅이 구현했다(생성 크기는 14.2절 LG16). 리플렉션 세션 검토 대상이다 |
 | LG17 | Compression(Compression 소유 세션) | 고정 작업 공간 zstd 압축 문맥: 최대 입력 크기·고정 매개변수로 `ZSTD_estimateCCtxSize` 계열 크기를 한 번 확보하고 `ZSTD_initStaticCCtx`, 이후 할당 없음(넘치면 실패) | LG17 선행 조건. 지금 `Compressor`는 호출마다 pledged size를 바꿔 작업 공간을 다시 잡을 수 있다(`ZstdCodec.cpp:312–315`) |
 | LG17 | Crypto(`LogFileSealer`, 로깅이 LG10에서 작성) | 봉인 파일 머리에 압축 표시 | crypto 세션에 알린다 |
-| LG18 | PlatformBase(공용) | `platform::SetTerminationHook(const char*, usize)`, `ManualResetEvent::TrySignal`, Windows unhandled exception filter·flush 전용 스레드·`SetThreadStackGuarantee`, POSIX 치명 신호 처리기·`sigaltstack` | 앞 처리기 연쇄. 이후 crash 수집 설계가 같은 자리를 이어 쓴다. 주소 대기(WaitOnAddress·futex)가 생기면 깨우기를 그것으로 바꾼다 |
+| LG18 | PlatformBase 크래시 수집(rocks-36, CrashHandlingAndLaunch.ko.md 19절) | `platform::RegisterTerminationCallback`·`TerminationContext`, `ManualResetEvent::TrySignal`. 처리기·크래시 처리 스레드·stack 보장·`sigaltstack`은 수집기 소유 | 개정 14에서 이관 완료(LC1a). 크래시 기록의 로그 칸(`LogFile`·`LogDirectory`)은 크래시 수집 병합(e6f6151b) 뒤 개정 16에서 붙였다(L29). 남은 것: 주소 대기(WaitOnAddress·futex)가 생기면 깨우기를 그것으로 바꾼다 |
 
 ## 16. 범위 밖·후속
 
@@ -813,16 +891,17 @@ LG11–LG19 중 다른 세션 소유 모듈을 고쳐야 하는 곳이다. 그 �
 | L16 | trace `log` 채널은 TraceCapture의 `TraceLogSink`가 쓴다. `Trace.LogMessageSpec`(세션·호출 지점(EventId·카테고리·위치)당 1회, 쓰기 성공 뒤 표에 넣음, 표가 차면 기록에 카테고리·템플릿을 실음)과 `Trace.LogMessage`(캡처 tick·생산자 스레드·spec id·상관 id 명시, 렌더된 메시지)다. 기록 머리는 tick을 캡처한다(LG13). 속성은 보내지 않는다 | 결정됨(2026-11-18, 권장안 — trace 세션 합의 필요) |
 | L17 | 레이아웃 설정 `log.console.layout`·`log.file.layout`은 시작 뒤 고정(`BootCVar`)이고, 잘못된 패턴은 설정 단계에서 `Validate(CheckLogLayoutSyntax)`가 거부한다(CVR7 — 개정 12). Start의 Error 1회 + 기본 레이아웃은 방어로 남는다. jsonlines 파일에서 `log.file.layout`은 Warning 후 무시 | 결정됨(2026-11-18, 권장안 — 개정 12에서 CVR7 반영) |
 | L18 | Config에 검증 hook을 더하지 않는다. 설정 단계 거부는 CVar `Validate`(CVarSystem VD10)로 한다 — CVR7에서 `log.levels`·`log.rate_limits`·두 레이아웃에 걸었다. 적용 시점에는 적용 실패만 Warning으로 알린다 | 결정됨(2026-11-18, 권장안 — 개정 10에서 CVar 설계 확정에 맞춰 바꿈, 개정 12에서 CVR7 반영) |
-| L19 | `{@Obj}`는 캡처 시점에 값을 복사한다. Core는 `LogStructure<T>` 확장점만 두고, 일반 특수화는 ObjectRuntime이 MetaCompiler 생성 필드 방문 함수로 registry·할당 없이 읽는다. 객체 참조는 역참조하지 않는다 | 결정됨(2026-11-18, 권장안 — 리플렉션 세션 합의 필요) |
+| L19 | `{@Obj}`는 캡처 시점에 값을 복사한다. Core는 `LogStructure<T>` 확장점만 두고, 일반 특수화는 ObjectRuntime이 MetaCompiler 생성 필드 방문 함수로 registry·할당 없이 읽는다. 객체 참조는 역참조하지 않는다 | 결정됨(2026-11-18, 권장안 — 리플렉션 세션 합의 필요), 개정 15 구현 |
 | L20 | 사용자 Formatter spec 검증은 선택 멤버 `static constexpr bool IsValidSpec(StringView)`이다. 리터럴 템플릿은 컴파일 타임에, 런타임 템플릿은 로그 캡처 전용 함수 포인터 배열로 검사하고, 없으면 캡처 때 판단한다 | 결정됨(2026-11-18, 권장안) |
 | L21 | 카테고리별 rate limit은 접두사별 1초 창이고, 창 번호(32-bit)와 수(32-bit)를 `Atomic<uint64>` 하나에 묶어 CAS로 바꾼다(창마다 통과 수 정확히 상한). 최대 16칸, Trace–Warning에만 적용, Error·Fatal 제외. 버린 수는 출력 스레드가 1초에 한 번까지 알린다 | 결정됨(2026-11-18, 권장안) |
 | L22 | 시간 기준 회전은 벽시계 날짜가 아니라 그 파일 첫 기록 뒤 경과 시간(기록의 단조 시각)으로 판정한다 | 결정됨(2026-11-18, 권장안) |
 | L23 | 압축은 flush 묶음마다 독립 zstd frame(Compression 모듈, `.log.zst`)이다. 암호화와 함께면 압축한 뒤 봉인한다. 닫힌 파일 후처리 압축은 하지 않는다. 무할당을 위해 Compression에 고정 작업 공간 문맥을 요청한다 | 결정됨(2026-11-18, 권장안 — Compression 세션 합의 필요) |
-| L24 | `platform::SetTerminationHook(const char*, usize)`를 두어 Log를 거치지 않는 Fatal도 flush한다. `LogInstallScope`가 처음 걸 때 앞 hook을 기억해 해제 때 되돌리고, 로그 hook은 flush 뒤 앞 hook에 연쇄한다. `FlushForTermination`은 막히는 lock 없이 TryLock·원자 완료 확인·제한 시간 대기만 쓰고, 중복은 `fatalInProgress`로 판정하며, 종료를 부른 스레드(`platform::TerminatingThreadId`)가 출력 스레드 자신이면 기다리지 않고 비상 경로로 알린다. 겹쳐 크래시한 스레드도 같은 제한 시간까지 기다린다. 개정 8의 16절 밖, 새 범위(2026-11-18 사용자 진행 지시·L25 선택으로 확정) | 결정됨(2026-11-18) |
-| L25 | OS 예외·치명 신호에서 로그를 flush한다(A). Windows unhandled exception filter는 미리 만든 flush 전용 스레드에 커널 이벤트로 넘기고(stack overflow 대응, 엔진 스레드는 `SetThreadStackGuarantee`), POSIX는 `sigaltstack`·self-pipe `write`로 같은 스레드를 깨운다(신호 처리기 쪽은 최선 노력). 이름 없는 POSIX 세마포어(`sem_init`)는 macOS가 지원하지 않아(deprecated, 실행 때 실패) 쓰지 않는다. 앞 처리기로 연쇄한다. 비용은 기록당 0, 프로세스당 대기 스레드 하나, 스레드당 여유 stack 32 KiB, 크래시 때 최대 `fatalFlushTimeoutMilliseconds` | 결정됨(2026-11-18, 사용자 선택 A) |
+| L24 | 크래시·`platform::Fatal`에서 큐에 남은 기록을 flush한다. 개정 14부터 크래시 수집기의 종료 콜백(`platform::RegisterTerminationCallback`)에 Core가 첫 `LogInstallScope` 설치 때 정적 콜백 하나를 한 번 등록하고 해제하지 않는다. 콜백은 크래시 처리 스레드에서 `LogReadScope`로 설치된 시스템을 찾아 `FlushForTermination`을 부르고, 결과를 `TerminationCallbackResult`로 돌려준다. 막히는 lock 없이 TryLock·원자 완료 확인·제한 시간 대기만 쓴다. 실패하거나 멈춘 스레드가 출력 스레드면 기다리지 않고 비상 출력만 한다. `Log::Fatal`·assert는 프로세스 원자 표시를 세우고, 콜백은 그때 "마감 - 여유"까지 한 번 더 기다린다. 개정 9–11의 `platform::SetTerminationHook`·hook 연쇄는 버렸다(14.1.8). 개정 8의 16절 밖, 새 범위(2026-11-18 사용자 진행 지시·L25 선택으로 확정) | 결정됨(2026-11-18, 개정 14 변경) |
+| L25 | OS 예외·치명 신호에서도 로그를 flush한다(사용자 선택 A). 개정 13까지는 로깅의 최소 처리기(Windows unhandled exception filter·flush 전용 스레드, POSIX `sigaltstack`·self-pipe `write`)였다. 개정 14부터 처리기·크래시 처리 스레드·stack 보장은 크래시 수집기(CrashHandlingAndLaunch.ko.md 19절)가 하나만 소유하고, 로깅은 L24 콜백만 꽂는다. 덤프와 flush의 순서는 그 문서가 정한다. 수집기를 설치하지 않은 프로세스는 크래시 flush가 없다. 비용은 기록당 0, 크래시 때 공용 마감(기본 2초) 안 | 결정됨(2026-11-18, 사용자 선택 A, 개정 14 변경) |
 | L26 | 로그 보기는 Commandlet `log view`(거르기·여러 파일·평문·zst·봉인)까지 한다. 전문 viewer는 Lens(M3). 개정 8의 16절 밖, 새 범위(2026-11-18 사용자 진행 지시·L25 선택으로 확정) | 결정됨(2026-11-18) |
 | L27 | WorkerScheduler 지연·포화 진단은 단계로 두지 않는다. Engine의 스케줄러 소유와 스케줄러 통계 확장이 선행 조건이다(16절) | 결정됨(2026-11-18, 권장안) |
 | L28 | sink 수명은 `RemoveSink` 성공 또는 LogSystem 파괴까지다(`Stop`만으로는 안 됨). `RuntimeLogSink`가 등록 계수를 갖고 등록된 채 파괴되면 Fatal(8.4절) | 결정됨(2026-11-20, macOS CI 결함에서 — 권장안) |
+| L29 | 크래시 기록의 `LogFile` 칸은 `FileLogSinkConfig::crashAnnotation`을 켠 sink 하나(`LogHost`가 설치하는 파일 sink)만 쓰고, `LogDirectory`는 `LogHost`가 쓴다. 상대 로그 폴더는 Open 때 절대 경로로 굳힌다(9.1·14.1.8절) | 결정됨(2026-11-20, 크래시 수집 병합 뒤 — 권장안) |
 
 ## 18. 개정 이력
 
@@ -847,6 +926,9 @@ LG11–LG19 중 다른 세션 소유 모듈을 고쳐야 하는 곳이다. 그 �
 - 개정 7(2026-11-18): LG7 구현 반영 — `CreateD3D12Device`·`Window::Create`에 report 인자(기본 nullptr), `Graphics/GraphicsLog.h` 카테고리와 `ValidationMessageFilter`, 셰이더 실패는 장치 LastError + 호출자 기록, Sandbox는 backend별 실행이라 "건너뛴 backend Warning·모두 실패 Error", OpenGL 기존 로그는 규칙 충족으로 유지.
 - 개정 8(2026-11-18): LG8·LG9 구현 반영 — 설정 이름을 Config 규칙에 맞춰 `log.file.max_bytes`·`log.file.recipient_key`로 바꿨다. `log.mode` 기본값 `default`(호스트 프리셋)를 더했다. 카테고리 재정의는 문자열 `log.levels`이고, 설정 처리는 새 `LogHost` 모듈에 둔다(9.2절). 보관 정리는 파일 이름 모양이 정확히 맞는 것만 센다. Asan·TSan 전체 체인은 저장소 검증 기준 변경으로 생략했다. Templates/Game은 tick·Engine이 없어 엔진 호스트로 다루지 않는다.
 - 개정 9(2026-11-18): 후속 설계 확정 — 16절 항목을 LG11–LG19로 설계했다(14.1절, 결정 L14–L27). 상관 id 스택을 Core로 내리고 trace `log` 채널은 `TraceLogSink`가 쓴다. 레이아웃 설정과 Config 검증 hook, 카테고리별 rate limit, `{@Obj}` 캡처 시점 복사와 생성 필드 방문 함수, Formatter spec 검증 규약, 시간 회전과 묶음별 zstd 압축(압축 뒤 봉인), `platform::Fatal` hook, `log view`를 다룬다. WorkerScheduler 진단은 선행 조건만 적었다. UE 5.8.4 `StructuredLog`·`LogTrace`·`OutputDeviceFile`·`FileHelper`·`OutputDeviceRedirector::Panic`을 확인했다. 다른 세션 조율은 15.1절이다. 리뷰 반영: 상관 id 스택에 확장 칸·관찰자 hook(H1), rate limit 창·수 단일 원자 값(M1), Compression 고정 작업 공간 문맥 요청(M2), 종료 hook `const char*`·막히지 않는 flush(M3), `log.levels` 거부 범위(M5), `{@Obj}` 특수화를 ObjectRuntime으로(M6), 런타임 템플릿 spec 검사 경로·전파 분기 하나·`DedicatedLane` 전파·tick 캡처·LG17 시험 방식·validate reason(Low). L25는 사용자 선택 A로 확정했고, L24·L26은 개정 8의 16절 밖 새 범위로 표시했다.
+- 개정 16(2026-11-20): 크래시 수집 병합(e6f6151b) 뒤 로깅 몫. 크래시 기록의 로그 칸(L29): `FileLogSinkConfig::crashAnnotation`과 `LogHost`의 `LogDirectory`, 상대 로그 폴더를 Open 때 절대 경로로(9.1절), 처음 설계의 "설치된 LogSystem의 sink만"을 설치하는 쪽의 설정 칸으로 바꿈. 14.1.8절에 공용 마감을 Launch 설정으로 바꿀 수 있음과 Asan 구성의 콜백 경로·한계를 적었다.
+- 개정 15(2026-11-20): LG16 구현 반영(14.1.6의 세부와 다르게 정한 점은 14.2절 LG16). 특수화 없는 타입 거부(static_assert와 템플릿 오류 셋), `LogStaticName`, `LogStructureWriter` 쓰기 함수, 인코딩·상한 세부, 텍스트·JSON 모양, `LogProperty`의 `Structure`·`Array`·`Null`과 하위 트리 범위, `LogEvent::structureNodes`, 생성 `VisitFields` 모양과 생성 크기를 적었다. 리뷰 반영: 노드 칸 넘침·공간 잘림을 열린 조상 모두에 표시, 빈 노드 span은 잘림이 아님, `LogStructure`는 클래스 타입만(static_assert), `Object/LogStructure.h` include 규칙(ODR, 생성 헤더 include는 rocks-78과 맞춰 되돌림), `detail::LogTo`의 `{@Name}`, 객체 참조에 registry 번호, enum 기호·태그 이름 규칙과 수명 문구, 8.6절 메모리 표. 생성 소스 분리(GS2) 병합 때 자기 bitfield를 `Get_` 대신 헤더 안 직접 읽기로 바꾸고 ODR 재검토 시점을 GSD5 재검토로 옮겼다.
+- 개정 14(2026-11-20): LG18 처리기를 크래시 수집기로 옮긴 것을 반영했다(14.1.8, L24·L25, 9.2절 호스트 순서, 14.2절, 15.1절). 로깅은 첫 `LogInstallScope` 설치 때 종료 콜백 하나를 등록하고 해제하지 않는다. `Log::Fatal`·assert의 프로세스 Fatal 표시, `failingThreadId`·`stoppedThreadIds`로 출력 스레드 판정, `FlushForTermination`의 결과 값을 정했다. `SetTerminationHook`·hook 연쇄·로깅 자체 처리기와 스레드별 중복 판정을 버린 이유와, 예약 뒤 게시 전 멈춘 칸의 한계를 적었다. 코드는 크래시 수집 LC1a(rocks-36)가 함께 바꿨고 로깅이 리뷰했다.
 - 개정 13(2026-11-20): sink 수명 계약을 `RemoveSink` 성공 또는 LogSystem 파괴까지로 좁히고 등록 계수로 위반을 Fatal로 잡는다(8.4절, L28). macOS CI에서 시험이 sink를 LogSystem보다 나중에 선언해 파괴된 sink를 flush하던 결함(31곳 선언 순서 정정)에서 나왔다. POSIX 크래시 처리기 깨우기를 self-pipe로(14.1.8, L25).
 - 개정 12(2026-11-19): CVar CVR7 반영. 9.2절 표를 핸들 종류(enum·`BootCVar`·`Validate`·`Range`)로, 읽기(봉인 뒤 snapshot)·실행 중 변경(`OnSynced` + `Watcher`, `log.rate_limits` 포함)·적용 실패 진단(카테고리 목록은 닫혀 있지 않아 모르는 접두사는 진단하지 않는다)을 고쳤다. L17·L18을 설정 단계 거부 반영으로, 15.1절 CVR7 행을 반영으로 바꿨다.
 - 개정 11(2026-11-18): LG11–LG15·LG17–LG19 구현 반영(14.2절). LG11–LG13·LG17–LG19 리뷰와 LG14·LG15 리뷰(rocks-95) 반영: spec 키를 호출 지점으로, 정의 쓰기 성공 뒤 표에 넣기, 표가 차면 기록에 싣기, 상관 id 확장 칸 규칙, 종료 순서(Flush → trace sink 제거 → trace 정지), 이름을 `Trace.LogMessageSpec`·`Trace.LogMessage`로. LG16은 GC 세션 병합 뒤로 미뤘다. LG14·LG15 재리뷰 반영: 빈 전파 경로 인라인(분기 하나), spec id 위치는 문자열 해시, 정의 상한 초과 spec 즉시 동봉·동봉 템플릿 상한, 측정 숫자(14.1.4).
