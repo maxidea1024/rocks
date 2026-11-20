@@ -98,6 +98,15 @@ inline bool IsMalformedEmptyBulkRef(uint64 rawBytes, const Sha256Digest& sha256)
 // PackageReader.cpp).
 Result<void> ValidateTagsRecord(Allocator& scratch, Span<const uint8> bytes) noexcept;
 
+// 매니페스트 경로 힌트(AS 4.2절)를 검사하고, 받으면 caseless 키('/' + 구성 요소 키를 이어 붙인
+// 것)를 key 뒤에 붙인다. 규칙 위반은 InvalidArgument, scratch·key 할당 실패는 그 오류다. 매니페스트
+// 검증과 로더의 FindByPath 색인이 같은 키를 쓴다(정의는 CookedManifest.cpp).
+Result<void> CheckCookedPathHint(StringView path, Allocator& scratch,
+                                 StringBuilderBase& key) noexcept;
+
+// UTF-8 byte 순서(부호 없는 사전 순 — AS 4.2절 정렬)다(정의는 CookedManifest.cpp).
+bool Utf8ByteLess(StringView left, StringView right) noexcept;
+
 // WriteCookedManifest의 본문이다(AS 10.1절 7). maxFileBytes는 출력 파일(CRC 칸 포함) byte 상한이고
 // 넘으면 CapacityExceeded(진단 None, out 그대로)다. 공개 함수는 CookedManifestMaxFileBytes를 넘긴다
 // — 시험이 1 GiB 모델 없이 상한 경계를 보도록 상한을 인자로 받는다.

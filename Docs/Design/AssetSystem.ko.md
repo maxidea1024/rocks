@@ -407,7 +407,7 @@ World 객체는 에셋 객체 Registry 밖에 있어 `ObjectRef<에셋>`을 걸 
 8. **대조 함수**:
    - `CheckCookedManifestProfile`(로더 시작): 매니페스트 profileId ≠ 실행 프로파일이면 `IncompatibleCook` / `Unsupported`.
    - `CheckCookedManifestMerge`(부분 쿠킹 병합): profileId·profileSettings·cookSettings·cookerVersion이 모두 같아야 하고, 아니면 `IncompatibleCook` / `Unsupported`(section = 다른 칸 — 처음 다른 칸 하나).
-   - `CheckCookedPackage`(로더가 패키지를 연 뒤): 파일 길이 = packageBytes, SHA-256 = packageSha256, 그다음 `ReadPackage` 결과와 — 헤더 종류 쿠킹, assetId, 대표 에셋 타입(export 1) = typeId, BulkIndex rawBytes 합 = bulkRawBytes(합이 u64를 넘으면 — 호출자가 손상된 내용을 넘긴 경우 — 2⁶⁴로 감은 값이 같아도 불일치), Summary profileId·profileSettings·cookerVersion = 매니페스트 헤더, 패키지 Dependencies(Hard·Soft, (asset, kind) 순서) = 매니페스트 의존 배열(같은 순서로 하나씩 — 쿠킹 패키지에는 다른 종류가 없다). 다르면 `CorruptPackage` / `InvalidArgument`, section = `CookedManifestField`의 그 칸, detail = `CookedManifestNoEntry`, asset = 그 에셋, 의존이면 related = 처음 다른 자리의 의존 대상(매니페스트 쪽이 있으면 그것, 없으면 패키지 쪽). 크기·SHA-256은 `ReadPackage` 전에 본다(바뀐 파일을 해석하지 않는다).
+   - `CheckCookedPackage`(로더가 패키지를 연 뒤 — A1c가 파일 쪽 `CheckCookedPackageFile`과 내용 쪽 `CheckCookedPackageContents`로 나눴고 `CheckCookedPackage`는 둘을 차례로 부른다, 11.6절 3): 파일 길이 = packageBytes, SHA-256 = packageSha256, 그다음 `ReadPackage` 결과와 — 헤더 종류 쿠킹, assetId, 대표 에셋 타입(export 1) = typeId, BulkIndex rawBytes 합 = bulkRawBytes(합이 u64를 넘으면 — 호출자가 손상된 내용을 넘긴 경우 — 2⁶⁴로 감은 값이 같아도 불일치), Summary profileId·profileSettings·cookerVersion = 매니페스트 헤더, 패키지 Dependencies(Hard·Soft, (asset, kind) 순서) = 매니페스트 의존 배열(같은 순서로 하나씩 — 쿠킹 패키지에는 다른 종류가 없다). 다르면 `CorruptPackage` / `InvalidArgument`, section = `CookedManifestField`의 그 칸, detail = `CookedManifestNoEntry`, asset = 그 에셋, 의존이면 related = 처음 다른 자리의 의존 대상(매니페스트 쪽이 있으면 그것, 없으면 패키지 쪽). 크기·SHA-256은 `ReadPackage` 전에 본다(바뀐 파일을 해석하지 않는다).
    - `AppendCookedPackagePath`: 4.2절 파일 이름 `Packages/<a>/<A>-<h>.rpkg`(쿠킹 루트 기준)을 만든다.
 9. **로더 API 염두**: 매니페스트 모델은 AssetId 오름차순 배열이고 `Find(AssetId)`(이진 탐색)를 둔다. 경로 힌트 조회 색인(`FindByPath`)과 Hard SCC 계산은 그것을 쓰는 로더·AssetManager(A1c)가 만든다(여기서는 그 입력 — 경로 힌트 caseless 유일성, Hard 대상 존재 — 만 보장한다). 서명 봉투(ContentSigning CS1)는 같은 버퍼를 검증한 뒤 이 reader에 그 매니페스트 byte span을 넘긴다(reader는 파일을 열지 않는다).
 
@@ -462,6 +462,35 @@ Requested → ResolveManifest(`CookedManifest.rman`, 하드 의존 SCC 계산) �
 2. **미준비 객체 동작 정책(없음)**: `OnReady`(콜백 대기)·`LoadBlocking`(명시 동기)·우선순위는 있으나, 게임 명령이 아직 준비되지 않은 대상(로드 중 에셋·Ready가 아닌 객체)에 닿을 때의 정책이 없다. 정할 것: 호출자가 고르는 정책 — 보류(대상 준비 후 실행), 우선 로드(우선순위 승격 후 보류), 명시 실패(`NotReady` 등 오류 반환), 동기 대기(명시 API만) — 과 기본값, 명령을 조용히 버리지 않는 규칙(정책 밖이면 오류), 보류한 명령을 실행하기 전에 대상·문맥(같은 세대·scope가 닫히지 않음·대상이 아직 유효)을 다시 검증하는 규칙, 보류 큐의 상한과 취소.
 3. **숨겨진 동기 로딩 추적(부분)**: 조회·포인터 접근은 로드하지 않고 동기 대기는 `LoadBlocking`(도구·초기화 전용)뿐이다. 정할 것: 동기 대기 발생 위치(호출 지점)·대상·대기 시간을 Rocks Lens 이벤트로 남기는 계약, 게임 실행 중(Game 프레임 안) 동기 대기를 금지하거나 경고하는 구성별 규칙.
 4. **로딩 상태 관측(부분)**: 직렬화 진단 hook과 Rocks Lens(CPU·Task·GC·IO 구간, asset·object 조회), 순환·중복 요청·취소·월드 종료 경합 시험은 있다. 정할 것: 요청·로드 작업·단위(SCC)마다 지금 단계와 무엇을 기다리는지(의존 단위·IO·Pump 예산)를 조회하는 대기 그래프, 단계별 시간·임시 메모리 사용량, 실패 원인(누락 에셋·검증 실패·마이그레이션 실패), 강제 대기 위치(3번) — 를 도구가 읽는 형식.
+
+### 11.6 구현에서 정한 점(A1c — 로더)
+
+A1c 구현(`Engine/Source/Runtime/AssetRuntime` — `CancelToken.h`·`AssetLoader.h`·`CookedPackageIo.h`, 상태: **구현** — 시험 14.1.5절, coverage 14.1.6절)이 11.1–11.5절에서 비어 있던 것을 다음과 같이 정했다. A1c는 쿠킹 매니페스트에서 패키지를 읽어 에셋 객체 Registry에 공개하는 로더다. 요청 관심·lease·scope·`OnReady` callback·상주 단위의 계수와 Closing(11.1·11.4절)은 그 위의 `AssetManager`(A1d)가 맡는다. A1c의 로더는 공개한 패키지를 `Shutdown`까지 붙잡는다(해제 경로는 A1d가 단위 계수로 더한다).
+
+1. **요청과 결과**(UE `LoadPackageAsync` + `FLoadPackageAsyncDelegate` 대응을 결과 조회로): `AssetLoader::Request({id, priority, cancel})`는 Game 스레드에서 부르며 `AssetLoadHandle`(번호·세대)을 준다. 결과는 `Status(handle)`(Pending·Succeeded·Failed·Cancelled + 오류·진단·성공이면 패키지 handle)로 읽고 `Release(handle)`로 기록을 돌려준다(Pending이면 취소와 같다). callback 전달은 A1d가 이 결과 위에 얹는다(같은 결과를 두 경로로 내지 않는다). 매니페스트에 없는 id는 요청 때 `NotFound`(진단 `MissingDependency`, asset = 그 id)다. 이미 공개한 패키지 요청은 그 자리에서 Succeeded다.
+   - 버린 대안: 로더가 callback을 직접 부르는 것 — 11.1절의 callback 계약(lane·scope·정확히 한 번)은 AssetManager가 정하므로 로더가 따로 부르면 두 계약이 생긴다.
+2. **ResolveManifest·SCC**(UE AsyncLoading2의 `ImportPackages`·`ProcessDependencies` 대응을 로드 전에 한 번에): 요청 에셋에서 매니페스트 Hard 의존을 따라 깊이 우선으로 닿는 패키지(Hard 전이 폐포, Soft는 따라가지 않는다)를 모으고, 이미 공개했거나 진행 중인 단위에 속한 패키지에서 멈춘다(그 단위가 의존 단위가 된다). 새 패키지들에 Tarjan SCC(반복 구현 — 깊이 2만 사슬에서 스택을 쓰지 않는다)를 돌려 SCC마다 로드 단위 하나를 만든다. 단위 사이 간선은 응축 DAG이고 Tarjan 완료 순서가 의존 먼저다. 매니페스트가 Hard 대상의 존재를 보장하므로(10.1절 6) 해석은 실패하지 않는다(할당 실패만 있다).
+   - `FindByPath(path)`: 초기화 때 매니페스트 경로 힌트의 caseless 키(`TryMakeNameComponentKey` — 10.1절 6과 같은 키) 정렬 색인을 만들고 이진 탐색한다. 경로 규칙 위반은 `InvalidArgument`, 없으면 `NotFound`다.
+3. **패키지 단계**(UE `EAsyncPackageLoadingState2`의 WaitingForIo → ProcessPackageSummary → … → Complete를 줄인 것): Queued(허가 대기) → Reading(`CookedPackageIo`) → Preparing(worker: 크기·SHA-256 확인 → `PackageLoadState::Prepare`(압축 해제·검증, `maxBulkRawBytes` = 매니페스트 bulkRawBytes) → `CheckCookedPackageContents`) → Prepared → (단위의 모든 패키지가 Prepared이고 의존 단위가 모두 공개되면) Instantiating(Game Pump: 한 트랜잭션에 SCC 형제를 모두 `InstantiatePackages` → Commit) → Loaded. 단계 전이는 모두 Game 스레드(`Pump`)가 한다. IO·worker 완료는 완료 큐(뮤텍스 + 패키지 작업 안의 침입 연결 — 게시에 할당이 없다)에 쌓이고 Pump가 꺼낸다.
+   - 크기·SHA-256은 해석 전에 본다(바뀐 파일을 해석하지 않는다). 그래서 A1b의 `CheckCookedPackage`를 파일 쪽 `CheckCookedPackageFile`(크기·SHA-256)과 내용 쪽 `CheckCookedPackageContents`(종류·assetId·대표 타입·bulk 합·프로파일·의존)로 나눴다(`CheckCookedPackage`는 둘을 차례로 부른다 — 진단은 같다). 파일 크기는 IO 단계가 먼저 본다(크기가 다르면 읽지 않는다 — PackageBytes 손상).
+   - 버린 대안: IO 완료 callback이 바로 worker를 제출하는 것(UE의 ALT처럼 Game을 거치지 않음) — 단계 상태를 두 스레드가 바꾸게 되어 취소·실패 경합이 커진다. 한계: 단계마다 Pump 한 번의 지연이 생긴다(프레임마다 Pump를 부르므로 IO·worker 사이 최대 한 프레임).
+4. **패키지 경로와 IO**: 경로는 `<쿠킹 루트>/` + `AppendCookedPackagePath`(4.2절)다. IO는 `CookedPackageIo` 인터페이스(`Begin(read)` — 완료는 아무 스레드에서 정확히 한 번 `read.complete`, 즉시 실패는 반환값, 로더가 완료를 처리한 뒤 `Release(read)`)로 하며 기본 구현 `AsyncCookedPackageIo`가 PlatformBase `AsyncReadFile`을 쓴다(열기 → 크기 → 크기가 매니페스트와 같을 때만 전체 읽기). 시험은 완료를 명시 gate로 내보내는 구현을 끼워 IO 순서·오류를 결정적으로 만든다.
+   - 진단: 파일 없음은 `NotFound` / `MissingFile`, 그 밖의 IO 실패는 진단 None과 `FileErrorCode` 대응 오류, 크기·SHA-256 불일치는 `CorruptPackage`(PackageBytes·PackageSha256 칸 — 10.1절 8).
+5. **worker 실행**: `AssetLoaderWorker` 인터페이스(`Run(fn, context)` — 할당 없는 함수 포인터, 성공하면 정확히 한 번 실행)로 하며 기본 구현이 `WorkerScheduler`에 제출한다. 시험은 손으로 돌리는 구현을 끼운다.
+6. **실패 전파**: 패키지 하나가 실패하면 그 단위(SCC) 전체가 실패한다. 그 패키지를 요청한 요청은 그 진단을, 같은 단위의 다른 패키지와 그 단위에 Hard로 기대는 단위(전이)의 요청은 `DependencyFailed` / `MissingDependency`(asset = 요청 에셋, related = 처음 실패한 패키지)를 받는다. Soft 대상은 로드하지 않으므로 Soft 대상의 실패는 영향이 없다(6.2절). 실패한 단위는 남기지 않는다 — 같은 에셋의 다음 요청은 새 로드다.
+   - UE는 import 패키지 실패를 경고로 남기고 null import로 계속한다. Rocks는 6.2절 Hard 규칙(실패 시 참조자도 실패)을 따른다.
+7. **합류·취소**: 같은 단위에 닿는 요청은 그 단위에 합류한다(진행 중 단위의 패키지 요청, 진행 중 단위에 의존하는 새 단위). 단위의 관심 수 = 직접 요청(Pending) 수 + 그 단위에 기대는 진행 중 단위 수다. 취소 표시(`CancelToken`)는 Pump가 단계 경계에서 본다: 표시된 요청은 Cancelled로 끝나고(다른 요청은 그대로) 관심을 놓는다. 관심이 0이 된 미공개 단위는 버린다(Abandoned) — 진행 중 IO·worker는 끝까지 기다렸다가 결과를 버리고, 버린 단위의 의존 단위 관심도 놓는다(연쇄). 이미 공개한 단위는 취소와 무관하다.
+   - `CancelToken`은 원자 표시 + 참조 계수 공유 상태다(`CancelSource::Create(allocator)`로 만들고 `Token()`은 복사, 기본 token은 취소되지 않는다). UE 5.8 로딩에는 개별 패키지 취소가 없고(`FStreamableHandle::CancelHandle`은 관심만 놓는다) Rocks는 관심이 0이면 로드도 멈춘다.
+8. **우선순위**(11.5절 1, UE `TAsyncLoadPriority`·`UpdatePackagePriorityRecursive` 대응): `LoadPriority`는 Low·Normal·High·Critical이다. 단위 우선순위 = 직접 요청과 기대는 단위 중 가장 높은 값이고, 올라가기만 한다(합류·`SetPriority` 승격이 의존 단위로 재귀 전파 — UE와 같다, 취소로 내려가지 않는다). 반영 시점: 허가 대기 순서와 Pump의 공개 순서에 다음 결정부터 반영하고, 이미 IO·worker에 들어간 작업은 바꾸지 않는다(UE는 IO 요청 우선순위도 바꾼다 — 기본 IO 구현은 우선순위가 없는 `AsyncReadFile`이라 하지 않는다).
+9. **동시 진행·임시 메모리 상한**(11.5절 1): 허가는 단위 단위로 한다. `AssetLoaderLimits{maxPackagesInFlight, maxTempBytes}` — 허가된 패키지 수와 그 임시 byte(파일 크기 + bulkRawBytes) 합이 상한 안일 때만 다음 단위를 허가하고, 허가된 것이 없으면 상한을 넘는 단위도 혼자 허가한다(최소 진행 보장). 임시 byte는 패키지 작업을 지울 때(공개·실패·버림 뒤 진행 중 IO·worker가 끝났을 때) 돌려준다. 허가 후보는 의존 단위가 모두 허가됐거나 공개된 단위뿐이다 — 허가된 단위는 언제나 끝까지 갈 수 있어 예산이 서로 기다리는 단위로 막히지 않는다(교착 없음). 고르는 순서는 실효 우선순위 → 생성 순서이고, 첫 후보가 상한에 걸리면 뒤 후보를 건너뛰어 허가하지 않는다(큰 단위가 작은 단위에 영원히 밀리지 않게).
+   - aging(굶주림 방지): 실효 우선순위 = min(Critical, 우선순위 + 대기 중 다른 단위가 허가된 횟수 / `agingAdmissions`). 시계가 아니라 허가 횟수로 세어 결정적이다.
+   - 큰 작업의 분할: 단위(SCC)는 한 트랜잭션이라 나누지 않는다. 패키지 하나의 압축 해제도 worker 작업 하나다(블록 단위 병렬 해제는 후속 — 한계).
+10. **Pump 예산**(11.2절): `Pump({maxUnits, maxNanoseconds})`는 완료 처리·취소 확인·허가를 한 뒤 공개 준비가 된 단위를 실효 우선순위 → 생성 순서로 공개한다. 예산은 단위 사이에서 검사하고, 한 Pump는 준비된 단위가 있으면 적어도 하나를 공개한다. 시간은 설정의 시계 함수(기본 `platform::MonotonicNanoseconds`)로 잰다 — 시험은 단위마다 정해진 만큼 가는 시계를 끼운다.
+11. **동기 대기 추적**(11.5절 3): `WaitFor(handle, site)`는 결과가 나올 때까지 Pump와 완료 대기(`WaitForCompletions` — 완료 큐가 비지 않거나 진행 중 비동기 작업이 없을 때까지 조건 변수로 기다린다. 시간 대기가 없다)를 되풀이한다. 설정의 "프레임 실행 중" 판정이 참이면 `WrongContext`(구성과 무관하게 금지 — 11.1절 `LoadBlocking`과 같은 규칙). 대기마다 호출 지점·대상·걸린 시간을 `AssetLoaderObserver::OnSyncWait`로 알리고 횟수·누적 시간을 상태 조회에 남긴다. Rocks Lens 이벤트로의 연결은 EngineAssets가 이 관찰자로 한다.
+12. **상태 관측**(11.5절 4): `Describe(snapshot)`가 요청·단위·패키지 표를 채운다 — 요청(에셋·우선순위·상태·오류·진단·단위), 단위(단계·실효 우선순위·관심 수·기다리는 것(허가·의존 단위·IO·worker·Pump)·기다리는 의존 에셋·실패 진단), 패키지(에셋·단계·임시 byte·단계별 누적 시간 ns). 도구는 이 구조를 읽는다(텍스트 형식은 도구 몫).
+13. **할당 실패**: 요청·해석·허가·완료 처리·공개의 모든 할당 실패는 그 요청(또는 단위)의 `OutOfMemory`(진단 None)이고 로더 상태는 일관되게 남는다(그 요청만 실패, 다른 요청은 계속). 게시 경로(IO·worker 완료)는 할당하지 않는다.
+14. **종료**: `Shutdown()`은 새 요청을 막고(`ShuttingDown`) Pending 요청을 `ShuttingDown`으로 끝내며 모든 미공개 단위를 버린 뒤 진행 중 IO·worker가 끝날 때까지 기다리고(완료 대기 — 시간 대기 없음) 공개한 패키지의 RootRef를 놓는다. 소멸자는 Shutdown을 부른다.
+15. **스레드**: 로더의 모든 공개 함수는 Game(에셋 객체 Registry 소유) 스레드 전용이다. 다른 스레드에서 부르면 `WrongThread`다. worker는 패키지 작업의 `PackageLoadState`·버퍼만 만지고, 버린 표시는 원자 값으로 본다.
 
 ## 12. 텍스처
 
@@ -912,7 +941,7 @@ nugget-gc --max-bytes=<n> --unused-days=<n>
 | | 조회 실패 전달(5.7-19): 패키지 정책이 Package가 아닌 Registry 거부(정책 없음·다른 타입 — InstantiatePackages 인자 InvalidArgument, 진단 없음, 객체 없음), Prepare·Instantiate 도중 닫히는 TypeRegistry(모든 할당 지점에서 Shutdown — 성공 또는 진단 None + ShuttingDown; Prepare는 대표 에셋 lease 지점, Instantiate는 Hard 대표 에셋 대조·import 대상 조회 지점 포함) | `AssetPackage_LoadRequiresPackagePolicyRegistry`, `AssetPackage_TypeRegistryClosesDuringPrepare`, `AssetPackage_TypeRegistryClosesDuringInstantiate` |
 | | SCC 한 트랜잭션(2노드·3노드 모든 순서·다이아몬드·자기 참조), 실패 전파(부분 공개 없음) | `AssetPackage_HardCycleLoadsInOneTransaction`, `AssetPackage_ThreeNodeCycleLoadsInAnyOrder`, `AssetPackage_DiamondDependencies`, `AssetPackage_SelfReferencesMakeNoDependency`, `AssetPackage_FailurePropagatesThroughBatch` |
 | | 스레드(Prepare 다른 스레드, 쓰기 소유 스레드 — WrongThread) | `AssetPackage_ThreadRules` |
-| | 취소 지점 | 범위 밖(A1c 로더 — `CancelToken`) |
+| | 취소 지점 | A1c 로더 — 14.1.5절(`AssetLoader_CancelAtEachStage`) |
 | Package·Asset(6.1·5.7-7) | id·종류·bulk·대표 assetId 설정, `BulkBytes` 오류(빈 ref·없는 id·다른 크기·같은 크기 다른 SHA-256), `NewPackage` null id·정의되지 않은 종류·다른 스레드·할당 실패(남는 패키지 없음) | `AssetPackage_CookedRoundTrip`, `AssetPackage_WriterRepresentativeRules`, `AssetPackage_PackageArgumentErrors`, `AssetPackage_NewPackageFailures` |
 | 진단(4.6·5.7-8) | A1a가 내는 코드(CorruptPackage·UnsupportedVersion·NewerVersion·MissingDependency·TypeMismatch·UnpackagedReference), 원래 오류 보존, 이름표 | 위 시험들, `AssetPackage_DiagnosticNames` |
 | 자원 실패 | 할당 실패(쓰기·읽기·Prepare·Instantiate 상태 allocator·Registry 객체·bulk 저장소 — 모든 지점, 진단 None, 주입한 실패는 모두 결과로 나온다 — Registry는 할당 실패를 trace로 대신하는 참조 위치 표를 끄고 잰다; 큰 시나리오: outer import 사슬·커스텀 버전 셋·타입 여럿·Soft·묶음 둘·resolver) | `AssetPackage_AllocationFailures`, `AssetPackage_RegistryAllocationFailures`, `AssetPackage_AllocationFailuresLargeScenario` |
@@ -1008,7 +1037,7 @@ A1a 상태(2026-11-20): **구현**. 완료 조건 넷을 모두 갖췄다. 빈�
 | 변조·퍼징 | 고정 seed 4000회(byte 바꾸기·자르기·덧붙이기, 절반 CRC 맞춤 — 정해진 진단만, 거부·받아들임 모두, 받아들인 입력은 다시 쓰면 같은 byte) | `CookedManifest_FixedSeedMutationFuzz` |
 | | 게시(임시 파일·Flush·Replace)·부분 쿠킹 병합 실행·cookKey 계산 | 범위 밖(A4 쿠커 — 대조 함수는 여기) |
 | | 서명 봉투 `CookedManifest.rsig` | 범위 밖(A1f — reader는 span을 받는다) |
-| | Hard SCC 계산·`FindByPath` 색인·`maxBulkRawBytes` 적용·패키지를 열 때 대조 호출 | 범위 밖(A1c 로더 — 입력 보장과 대조 함수는 여기) |
+| | Hard SCC 계산·`FindByPath` 색인·`maxBulkRawBytes` 적용·패키지를 열 때 대조 호출 | A1c 로더 — 14.1.5절 |
 
 #### 14.1.4 Coverage(A1b)
 
@@ -1041,6 +1070,61 @@ A1b 상태(2026-11-20): **구현**. 완료 조건 넷을 모두 갖췄다. 빠�
 - 조합 384개 전부와 일대일 빠짐 검사, 금지 조합은 칸 규칙(14.1.3 조합 행)
 - coverage: 매니페스트 파일 줄·분기·함수 100%, 결과 불변식 10곳의 근거(14.1.4)
 - 빠진 시험 관점 리뷰어 판정: 충족. 남은 참고 하나: 할당 실패 sweep이 비ASCII 할당 지점에 닿는지는 코드로 확인했고 시험이 직접 단언하지는 않는다.
+
+#### 14.1.5 요구 대조표(A1c — 로더)
+
+항목마다 그것을 확인하는 시험이다(EngineTests, `Engine/Source/Runtime/AssetRuntime/Tests/LoaderTests.cpp`·`LoaderFailureTests.cpp`·`LoaderIoTests.cpp`·`LoaderCombinationTests.cpp` — 정의된 시험 24개를 모두 표가 인용한다). 시험 도구(`LoaderTestSupport.h`)는 A1a writer로 쓴 쿠킹 패키지와 그 결과로 만든 매니페스트(장면), 완료를 시험이 내보내는 IO(`TestPackageIo` — 경로마다 없음·완료 오류·Begin 즉시 실패를 끼운다), 손으로 돌리는 worker(`TestLoaderWorker`), 부를 때마다 정해진 만큼 가는 시계를 준다. 실제 스레드를 쓰는 시험(디스크 IO·WorkerScheduler·다른 스레드 호출·종료 대기)은 결과만 단언한다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 요청·결과(11.6-1) | 사슬 요청 → Succeeded·패키지 handle = FindPackage, 공개한 패키지 요청은 그 자리에서 Succeeded(다시 읽지 않음), Release 뒤 StaleHandle, 매니페스트에 없는 id NotFound / MissingDependency, 범위 밖 우선순위 InvalidArgument | `AssetLoader_LoadsChainAndJoins`, `AssetLoader_InitializeAndArguments` |
+| ResolveManifest·SCC(11.6-2) | Hard 폐포(Soft는 따라가지 않음 — 쿠킹되지 않은 Soft 대상), 요청 직후 단위 수·구성 수가 SCC와 같음(단일·둘·셋 순환·다이아몬드·진행 중 순환에 기대는 사슬·꼬리가 나가는 순환), 단위 하나 예산에서도 순환 구성은 함께 공개, 순환 참조가 서로의 대표 에셋을 가리킴, 큰 그래프(10개 순환 블록 40개 + 깊이 1500 사슬) | `AssetLoader_HardSccShapes`, `AssetLoader_LargeGraph`, `AssetLoader_LoadsChainAndJoins` |
+| | `FindByPath`(caseless 키·없는 경로 NotFound·규칙 위반 InvalidArgument) | `AssetLoader_FindByPath` |
+| 패키지 단계(11.6-3) | IO → worker(크기·SHA-256 → Prepare → 내용 대조) → Prepared → 의존 공개 대기 → Pump 공개, 단계별 대기 이유·누적 시간·임시 byte | `AssetLoader_DescribeTracksStages` |
+| 경로·IO(11.6-4) | `<루트>/` + `AppendCookedPackagePath`, 디스크 파일을 AsyncReadFile 조각 읽기로(bulk 그대로), 파일 없음 NotFound / MissingFile, 디스크 크기 다름 PackageBytes, 완료 오류 → 진단 None과 그 오류, Begin 즉시 실패(순환 둘째 패키지에서 — 첫째 IO는 끝난 뒤 버림) | `AssetLoader_LoadsFromDiskWithWorkers`, `AssetLoader_IoAndWorkerErrors` |
+| worker(11.6-5) | WorkerScheduler worker로 끝까지 로드, 제출 실패(scheduler 시작 전·작업 묶음 할당 실패) → 그 오류·실행 안 함, 로더 worker 제출 실패 → 요청 실패 | `AssetLoader_LoadsFromDiskWithWorkers`, `AssetLoader_SchedulerWorkerReportsSubmitFailures`, `AssetLoader_IoAndWorkerErrors` |
+| 손상(11.6-3·4, 10.1-8) | SHA-256 → PackageSha256, 짧은 파일 → PackageBytes, 내용 손상(매니페스트 SHA·내용 주소 맞춤) → 패키지 reader CorruptPackage, bulkRawBytes가 실제보다 작음 → `maxBulkRawBytes` CapacityExceeded, 큼 → BulkRawBytes, 의존 → PackageDependencies, 대표 타입 → TypeId, 오래된 의존 쿠킹 결과의 대표 타입이 기대 타입이 아님 → 공개 단계 TypeMismatch(의존 2·3은 공개된 채) | `AssetLoader_CorruptionIsDiagnosed`, `AssetLoader_StaleDependencyTypeFailsInstantiate` |
+| 실패 전파(11.6-6) | 사슬(손상 3 → 2·1 DependencyFailed / MissingDependency, related 3), SCC 형제, 다이아몬드(다른 가지 단독 요청은 성공), Soft 대상 손상 무영향(읽지 않음), 파일을 고친 뒤 다시 요청하면 새로 로드 | `AssetLoader_HardFailurePropagates`, `AssetLoader_AllCombinations` |
+| 합류·취소(11.6-7) | 같은 에셋·진행 중 의존 에셋 요청 합류(관심 수), 단계마다 취소(허가 대기·IO·worker(Prepare 없이 버림)·의존 대기·Pump 대기·공개 뒤 무영향) 뒤 버린 단위 정리·다시 요청하면 새 로드, 합류 요청 중 하나만 취소, Release(Pending) = 취소, 두 요청을 모두 놓으면 공유 의존까지 버림 | `AssetLoader_LoadsChainAndJoins`, `AssetLoader_CancelAtEachStage`, `AssetLoader_CancelOneOfJoinedRequests` |
+| | `CancelToken`(기본 token·복사·이동·대입·source 소멸 뒤 읽기·다른 스레드 Cancel·공유 상태 할당 실패) | `AssetLoader_CancelTokenContract` |
+| 우선순위(11.6-8) | 허가 순서(Critical → High → Normal → Low, 같으면 생성 순), SetPriority 승격의 의존 전파·내리는 값은 단위 그대로·끝난 요청 무동작, 합류 요청의 승격 전파, Pump 공개 순서 | `AssetLoader_PriorityOrder`, `AssetLoader_InstantiateOrderFollowsPriority`, `AssetLoader_LoadsChainAndJoins` |
+| 상한·aging(11.6-9) | 동시 진행 상한(정점 = 상한, 상한보다 큰 순환 단위는 진행 중이 없을 때 혼자 — 그 사이 뒤 후보도 허가 안 함), 임시 메모리 상한이 패키지 하나보다 작아도 하나씩, aging 1이면 오래 기다린 Low가 셋째 High보다 먼저·aging 없으면 맨 뒤 | `AssetLoader_AdmissionLimits`, `AssetLoader_AgingPreventsStarvation` |
+| Pump 예산(11.6-10) | maxUnits 2·0(최소 하나)·무제한, 시간 예산 경계 10·11·20·21·31 ns(단계 10 ns 시계), 소진 표시, 남은 단위의 대기 이유 Pump | `AssetLoader_PumpBudgetBoundaries` |
+| 동기 대기(11.6-11) | WaitFor 결과·관찰자(호출 지점·대상)·횟수(이미 끝난 요청 포함), 프레임 안 WrongContext | `AssetLoader_LoadsFromDiskWithWorkers` |
+| 상태 관측(11.6-12) | 요청·단위·패키지 표(단계·대기 이유·기다리는 의존 에셋·우선순위·실효 우선순위·관심 수·임시 byte·누적 시간), 이름 함수(모르는 값 "Unknown") | `AssetLoader_DescribeTracksStages`, `AssetLoader_LoadsChainAndJoins` |
+| 할당 실패(11.6-13) | 로더 allocator 모든 지점(초기화·요청·합류·허가·긴 루트 경로·완료·Prepare·공개·상태 조회) → 그 단계 OutOfMemory(진단 None) 또는 의존 DependencyFailed, 같은 로더에서 실패를 끄고 다시 요청하면 성공 | `AssetLoader_AllocationFailures` |
+| 종료(11.6-14) | Pending → ShuttingDown, 진행 중 IO가 끝날 때까지 대기(다른 스레드가 완료), 공개 패키지 놓음, 뒤 Request·Pump·WaitFor ShuttingDown, 두 번째 Shutdown 성공 | `AssetLoader_ShutdownDrainsAndReleases` |
+| 스레드·초기화(11.6-15) | 다른 스레드 호출 WrongThread(모든 공개 함수·Shutdown), 설정 누락·0 한도·다른 TypeRegistry InvalidArgument, 프로파일 다름 IncompatibleCook, 두 번째 Initialize, 초기화 전 호출 | `AssetLoader_RejectsOtherThreads`, `AssetLoader_InitializeAndArguments` |
+| 조합(14 완료 조건 2) | 요청 단위 모양 3 × 의존 4 × 결함 5 × 진행 방식 2의 허가 조합 106개 전부(금지: 단일의 형제 손상·의존 없음의 의존 손상), 번호 ↔ 조합 일대일·실행 수로 빠짐 검사 | `AssetLoader_AllCombinations` |
+| | 요청 관심·lease·scope·OnReady callback·상주 단위 해제(Closing·Discard)·ReadyMask·expectedType | 범위 밖(A1d AssetManager) |
+| | 미준비 객체 동작 정책(11.5절 2) | 범위 밖(A1d) |
+| | Rocks Lens 이벤트 연결·프레임 판정 주입 | 범위 밖(EngineAssets — 관찰자·판정 함수는 여기) |
+
+#### 14.1.6 Coverage(A1c)
+
+측정(2026-11-20, 14.1.4와 같은 명령에 filter `AssetLoader`를 더함 — `-Filter AssetPackage,FixtureAsset,CookedManifest,AssetLoader`, AssetPackage 71개·FixtureAsset 8개·CookedManifest 16개·AssetLoader 24개 시험 모두 통과):
+
+| 파일 | 줄 | 분기 | 함수 |
+|---|---|---|---|
+| `Private/AssetLoader.cpp` | 100%(1461/1461) | 100%(560/560) | 100%(83/83) |
+| `Private/CancelToken.cpp` | 100%(90/90) | 100%(24/24) | 100%(17/17) |
+| `Private/CookedPackageIo.cpp` | 85.7%(66/77) | 83.3%(20/24) | 100%(6/6) |
+| `Private/CookedManifest.cpp`(파일·내용 대조 분리 뒤) | 100%(559/559) | 100%(298/298) | 100%(28/28) |
+| `Public/AssetRuntime/AssetLoader.h`·`CancelToken.h` | 100%(7/7·8/8) | 분기 없음 | 100%(3/3·4/4) |
+
+AssetRuntime 전체는 줄 99.71%(4822/4836)·분기 98.00%(2448/2498)·함수 100%(267/267)이고, A1a 파일의 닿지 않은 분기는 14.1.2 그대로다.
+
+닿지 않은 분기(모두 `CookedPackageIo.cpp` — 기본 IO 구현이 OS 실패를 결과로 바꾸는 곳, 단언으로 바꾸지 않았다):
+- `OnAsyncPackageChunk`의 읽기 완료 실패(`!result.status`): 장치·OS의 읽기 오류다. PlatformBase `AsyncReadFile`에 오류 주입 지점이 없어 결정적으로 만들 수 없다. 로더가 IO 완료 오류를 처리하는 경로는 `TestPackageIo`의 완료 오류(`AssetLoader_IoAndWorkerErrors`)로 본다.
+- 같은 함수의 짧게 읽힘(`result.bytes != expected`): 크기를 본 뒤 다른 프로세스가 파일을 줄인 경우다. 줄이는 시점이 OS 읽기와 경쟁이라 결정적으로 만들 수 없다(시간에 기대는 시험 금지).
+- `SubmitAsyncPackageChunk`의 즉시 제출 실패(`!submitted`): `SubmitRead`가 즉시 실패하는 조건(열리지 않은 파일·진행 중 요청 재제출·4 GiB 이상·null 버퍼·종료 중 context) 가운데 앞 넷은 이 구현이 만들지 않고(열린 파일, 번갈아 쓰는 요청 둘, 조각 ≤ 1 GiB, 로더 버퍼), 마지막은 "io context가 이 객체보다 오래 산다"는 계약 위반이다. 오류를 단언 대신 결과로 바꿔 둔다.
+- `Begin`의 크기 조회 실패(`!sized`): 열기에 성공한 파일의 크기 조회(Windows `GetFileSizeEx`·POSIX `fstat`) 실패는 OS 오류라 결정적으로 만들 수 없다.
+
+닿게 한 방법과 그 과정에서 바꾼 것:
+- 결정적 순서: IO·worker를 시험이 내보내는 구현(`TestPackageIo`·`TestLoaderWorker`)으로 단계마다 멈추고, 실제 스레드 시험(디스크·WorkerScheduler·다른 스레드 호출·종료)은 결과만 단언한다. 시간 예산은 부를 때마다 정해진 만큼 가는 시계로 본다.
+- 할당 실패: 로더 allocator와 에셋 Registry allocator를 같은 NFailAllocator로 묶어 모든 지점을 돈다(초기화·요청·합류·Tarjan 작업 공간(깊이 16 사슬 — 배열이 자란다)·허가·긴 쿠킹 루트(루트·경로 builder가 자란다)·비ASCII 경로 색인 키·완료·Prepare·공개·Commit·상태 조회).
+- 처음 구현에서 없앤 죽은 분기(입력으로 닿을 수 없음을 확인): 정리 목록에 이미 Failed·Abandoned인 단위가 다시 오는 검사(정리한 단위는 다른 단위의 목록·요청에서 빠진다), 관심 수 0에서의 감소 방어, 지울 작업의 IO 반납(완료를 처리할 때 이미 돌려준다), 구성 항목의 단위 번호 대조, 허가 때 기대는 단위의 미허가 수·단계 방어(기대는 단위는 그 단위가 Queued일 때만 생기고 의존보다 먼저 허가될 수 없다), 임시 byte 상한의 중복 비교, 버린 작업 찾기 실패, Pending 요청의 단위 없음, Pump 반복 조건(진입 전·매번 비었는지 본다), WaitFor 안의 Pump 실패(검사를 마친 뒤 내부 Pump를 부른다), 상태 조회의 Loading 단위 의존 없음(그러면 Ready다), IO `Release`의 상태 없음. 여러 할당 단계의 처음 실패를 모으던 템플릿 도우미는 인스턴스마다 닿을 수 없는 분기를 만들어 비템플릿 `KeepFirst`(단계를 모두 실행하고 처음 실패만 남긴다)로 바꿨다.
+- 시험이 찾은 것: 내용 손상 시험이 처음에 MissingFile로 나왔다 — 패키지 경로가 내용 주소(SHA-256 앞부분)라 매니페스트 SHA를 고치면 경로도 바뀐다(로더 동작이 맞고 시험이 새 이름으로 다시 등록하게 고쳤다).
 
 ## 15. PNG 디코더 범위
 

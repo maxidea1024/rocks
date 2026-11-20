@@ -322,6 +322,15 @@ Result<void> ValidateCookedManifest(const CookedManifest& manifest, Allocator& s
 
 namespace package_detail {
 
+Result<void> CheckCookedPathHint(StringView path, Allocator& scratch,
+                                 StringBuilderBase& key) noexcept {
+    return CheckPathHint(path, scratch, key);
+}
+
+bool Utf8ByteLess(StringView left, StringView right) noexcept {
+    return ByteLess(left, right);
+}
+
 Result<void> WriteCookedManifestWithLimit(Allocator& allocator, const CookedManifest& manifest,
                                           uint64 maxFileBytes, Array<uint8>& out,
                                           AssetDiagnostic* failure) noexcept {
@@ -622,8 +631,17 @@ Result<void> CheckCookedManifestMerge(const CookedManifest& existing,
 Result<void> CheckCookedPackage(const CookedManifest& manifest, const CookedManifestEntry& entry,
                                 Span<const uint8> file, const PackageContents& contents,
                                 AssetDiagnostic* failure) noexcept {
-    const AssetId asset = entry.asset;
     // 크기·SHA-256을 먼저 본다(바뀐 파일을 해석한 결과로 판정하지 않는다).
+    if (auto checked = CheckCookedPackageFile(entry, file, failure); !checked) {
+        return checked;
+    }
+
+    return CheckCookedPackageContents(manifest, entry, contents, failure);
+}
+
+Result<void> CheckCookedPackageFile(const CookedManifestEntry& entry, Span<const uint8> file,
+                                    AssetDiagnostic* failure) noexcept {
+    const AssetId asset = entry.asset;
     if (file.Size() != entry.packageBytes) {
         return ManifestCorrupt<void>(failure, Field::PackageBytes, CookedManifestNoEntry, asset);
     }
@@ -632,6 +650,14 @@ Result<void> CheckCookedPackage(const CookedManifest& manifest, const CookedMani
         return ManifestCorrupt<void>(failure, Field::PackageSha256, CookedManifestNoEntry, asset);
     }
 
+    return Result<void>::Success();
+}
+
+Result<void> CheckCookedPackageContents(const CookedManifest& manifest,
+                                        const CookedManifestEntry& entry,
+                                        const PackageContents& contents,
+                                        AssetDiagnostic* failure) noexcept {
+    const AssetId asset = entry.asset;
     if (contents.header.kind != PackageKind::Cooked) {
         return ManifestCorrupt<void>(failure, Field::PackageKind, CookedManifestNoEntry, asset);
     }

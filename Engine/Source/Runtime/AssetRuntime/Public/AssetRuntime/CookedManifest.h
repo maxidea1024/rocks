@@ -184,15 +184,28 @@ Result<void> CheckCookedManifestMerge(const CookedManifest& existing,
                                       const CookedManifest& incoming,
                                       AssetDiagnostic* failure = nullptr) noexcept;
 
-// 연 패키지를 항목과 대조한다(AS 10.1절 8): file 길이·SHA-256을 먼저 보고, 그다음 contents(file의
-// ReadPackage 결과)의 종류·assetId·대표 에셋 타입·bulk rawBytes 합·Summary 프로파일 칸·Dependencies
-// (Hard·Soft 집합)를 manifest·entry와 본다.
+// 연 패키지를 항목과 대조한다(AS 10.1절 8): CheckCookedPackageFile(file 길이·SHA-256)을 먼저 하고
+// 그다음 CheckCookedPackageContents(contents — file의 ReadPackage 결과)를 한다.
 //
-// 오류: 다르면 CorruptPackage / InvalidArgument(section = CookedManifestField, asset = entry.asset,
-// related = 의존 칸이면 그 대상)다.
+// 오류: 다르면 CorruptPackage / InvalidArgument(section = CookedManifestField, detail =
+// CookedManifestNoEntry, asset = entry.asset, related = 의존 칸이면 처음 다른 자리의 대상)다.
 Result<void> CheckCookedPackage(const CookedManifest& manifest, const CookedManifestEntry& entry,
                                 Span<const uint8> file, const PackageContents& contents,
                                 AssetDiagnostic* failure = nullptr) noexcept;
+
+// 파일 쪽 대조다(AS 11.6절 3 — 로더가 해석 전에 부른다): file 길이 = packageBytes(PackageBytes),
+// SHA-256 = packageSha256(PackageSha256). 오류는 CheckCookedPackage와 같다.
+Result<void> CheckCookedPackageFile(const CookedManifestEntry& entry, Span<const uint8> file,
+                                    AssetDiagnostic* failure = nullptr) noexcept;
+
+// 내용 쪽 대조다(AS 11.6절 3 — 로더가 Prepare 뒤에 부른다): contents의 종류(PackageKind)·
+// assetId(AssetId)·대표 에셋 타입(TypeId)·BulkIndex rawBytes 합(BulkRawBytes — 합이 u64를 넘으면
+// 불일치)·Summary 프로파일 칸(PackageProfile)·Dependencies(PackageDependencies — (asset, kind) 순서
+// 배열이 같아야 한다)를 manifest·entry와 본다. 오류는 CheckCookedPackage와 같다.
+Result<void> CheckCookedPackageContents(const CookedManifest& manifest,
+                                        const CookedManifestEntry& entry,
+                                        const PackageContents& contents,
+                                        AssetDiagnostic* failure = nullptr) noexcept;
 
 // 쿠킹 루트 기준 패키지 파일 경로(AS 4.2절 `Packages/<a>/<A>-<h>.rpkg`)를 out 뒤에 붙인다.
 //
