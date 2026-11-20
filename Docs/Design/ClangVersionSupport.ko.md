@@ -1,6 +1,6 @@
 # Clang 버전 지원 설계
 
-기준일: 2026-11-20, 개정 7. Clang 22가 JSON AST에서 `ElaboratedType`을 없애, MetaCompiler가 읽던 타입 철자가 바뀌었다. 이 문서는 두 가지를 정한다.
+기준일: 2026-11-20, 개정 8. Clang 22가 JSON AST에서 `ElaboratedType`을 없애, MetaCompiler가 읽던 타입 철자가 바뀌었다. 이 문서는 두 가지를 정한다.
 - **정규 형식 탐침**: MetaCompiler가 타입 철자를 첫 실행 JSON의 `qualType`·`desugaredQualType`에서 읽지 않고, Clang이 출력한 정규 형식(완전 한정 철자)으로 읽게 한다. 그러면 Clang 21과 22의 AST 모양 차이가 철자에 닿지 않는다.
 - **도구 모음 버전 정책**: 검증한 LLVM 버전, `ROCKS_MSVC_TOOLSET`, `Build/InstallLlvm.ps1`, CI, 그리고 MSVC 14.44 고정을 언제 푸는지.
 
@@ -17,7 +17,7 @@
 
 측정 도구 모음: LLVM 21.1.6·22.1.8 공식 Windows x64 배포(설치 파일을 풀어 씀), 로컬 MSVC 14.29(Visual Studio 2019 STL), clang-format 21.1.6. UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`)의 UnrealBuildTool·UnrealHeaderTool이다. UE 이름은 12절 대응표에만 적는다.
 
-상태: **구현 중**(결정 CLGD1–CLGD15, 권장안으로 확정). 구현 단계는 CLG0–CLG4(10절)다. CLG0–CLG2는 engine-runtime에 병합했고(53bce26c), 개정 4는 CLG1·CLG2 리뷰를 레코드 닫힘(4.4절)과 base 식별자(4.3절)에 반영했다(7ee2b0d5). CLG3을 구현하고(c4c0a535) 리뷰를 반영했으며(개정 6, 7325c337), CI의 Android NDK를 고정했다(개정 7). 구현하며 정한 점은 14절 개정 3·5·6·7이다. 시제품(커밋하지 않음)으로 실제 헤더에서 확인한 측정은 1.4절이다. 개정 2는 리뷰어 교차 검증(Clang 21.1.6·22.1.8 양쪽 탐침)을 적용했다.
+상태: **구현 완료**(결정 CLGD1–CLGD15, 권장안으로 확정). 구현 단계 CLG0–CLG4(10절)를 모두 engine-runtime에 병합했다: CLG0–CLG2(53bce26c), CLG1·CLG2 리뷰 반영(개정 4, 7ee2b0d5), CLG3(개정 5, c4c0a535)과 리뷰 반영(개정 6, 7325c337), CI의 Android NDK 고정(개정 7, f17e6501), CLG4(개정 8). 구현하며 정한 점은 14절 개정 3·5·6·7·8이다. 시제품(커밋하지 않음)으로 실제 헤더에서 확인한 측정은 1.4절이다. 개정 2는 리뷰어 교차 검증(Clang 21.1.6·22.1.8 양쪽 탐침)을 적용했다.
 
 ## 1. 현재 상태와 측정
 
@@ -458,7 +458,7 @@ UE와 다르게 정한 점:
 - [빌드 안내](../../Build/README.md) 요구 사항 절: 검증한 Clang 문장 끝에 이 문서 링크를 더했다.
 - [리플렉션 기반](ReflectionFoundations.ko.md) 1.3절: 합성 번역 단위 문단 끝에 형식 철자 해석이 이 문서를 따른다는 한 줄을 더했다.
 
-구현할 때 고칠 것(현재 요구를 적은 곳):
+구현할 때 고칠 것(현재 요구를 적은 곳 — CLG1–CLG4에서 모두 고쳤다):
 - `Build/README.md` 요구 사항 절의 "검증한 Clang은 21.1.6이다(MetaCompiler가 Clang 22의 JSON AST 타입 철자를 아직 받지 않는다)"와 LLVM 21.1.6·MSVC 14.44 문장: CLG4.
 - `.github/workflows/foundation.yml`: Windows LLVM 22 leg(CLG2), `--require-verified-toolchain`(CLG3), 도구 모음 주석·`ROCKS_MSVC_TOOLSET`·LLVM 21.1.6 leg 제거(CLG4).
 - `Build/InstallLlvm.ps1`: `-Version`(CLG2), 머리 주석("the verified version stays at 21.1.6 until the MetaCompiler supports Clang 22")과 `$version`을 표에서 읽기(CLG3).
@@ -480,3 +480,4 @@ UE와 다르게 정한 점:
 | 5(구현 기록) | 2026-11-20 | CLG3 구현. 구현하며 정한 점: (가) `Build/Toolchain.json`에는 LLVM 설치 파일 SHA-256(버전별)·기본 LLVM 버전·clang-format 버전·플랫폼 최소·검증 목록만 둔다. clang-format wheel URL·SHA-256 표는 `InstallFormatter.ps1`에 그대로 두고 그 버전이 표와 같은지 스크립트가 확인한다(플랫폼별 wheel 표를 옮길 이득이 없다). CI의 MSVC 고정값(`msvc.ciToolset`)도 표에 두지 않고 CI 행렬 한 곳에 둔다(행렬 값은 정적이어야 한다). (나) C# 도구는 표를 `Rocks.Tooling.Common`의 포함 리소스 `Rocks.Toolchain.json`으로 읽는다(`ToolchainTable`). 설치 SDK에 도구가 실리므로 SDK 게임 빌드도 같은 표로 확인한다. (다) 확인은 `NativeToolchains.Discover*`가 하고(`ToolchainCheck`), 검증 목록 밖이면 빌드 CLI가 한 줄 알리고 build-evidence에 `toolchainVerified: false`를 남긴다. `--require-verified-toolchain on`(Rocks.proj `RequireVerifiedToolchain=on`, CI는 job 환경 변수로 준다)이면 실패한다. (라) STL 최소 Clang은 고른 도구 모음의 `<VCToolsInstallDir>/include/yvals_core.h`에서 읽고, 읽지 못하면 확인을 건너뛴다(첫 컴파일의 `STL1000`). |
 | 6(리뷰 반영) | 2026-11-20 | CLG3 리뷰 반영. (가) 검증 목록은 정규화한 `--version` 첫 줄 전체로 대조하고, 최소 Clang은 제조사로 나눈다(`clang.minimum.appleClang`, `clang.minimum.llvm` — 6.1절). (나) `--require-verified-toolchain` 판정을 Rocks.Build(`ToolchainCheck.RequireVerified`·`Enforce`)로 옮겨 on·off·틀린 값을 Rocks.Build.Tests가 보고, 통합 시험이 SDK 도구의 표 리소스와 `game --require-verified-toolchain on`을 본다. (다) 미검증 실패는 build-evidence를 시작하고 `toolchainVerified`를 적은 뒤 확인해 FAIL evidence로 끝낸다. 게임 evidence에도 `toolchainVerified`·`stlClangCheck`를 싣는다. (라) Rocks.Build.Tests는 발견한 도구 모음의 `ToolchainVerified`가 표 판정과 같은지만 단언한다(로컬 도구 모음이 미검증이어도 깨지지 않는다). (마) `yvals_core.h`를 읽지 못하거나(입출력 오류 포함) 조건을 찾지 못하면 evidence `stlClangCheck`에 이유를 남기고, 조건 정규식은 `#error STL1000` 줄까지 묶는다(6.2절). (바) 6.1절 표·6.2절·8절을 개정 5 결정에 맞췄다. (사) clang-format 버전 판정은 `ToolchainTable.IsClangFormatVersion` 하나로 `FormatCheck`와 MetaCompiler RMC3100이 함께 쓴다(`version 21.1.60`을 받지 않는다). (아) 빌드 안내와 `Programs/Rocks.Build/README.ko.md`에 `Build/Toolchain.json`과 `RequireVerifiedToolchain`·`--require-verified-toolchain`을 적었다. (자) CLG3 검증에서 드러난 출력 게시 실패(CLG3과 무관): 컴파일 action의 출력 게시(`Executor.PublishOutputs`)가 대상 .obj를 다른 핸들(백신·인덱서)이 열고 있으면 경로 없는 "Access to the path is denied"로 실패했다. 게시 실패는 단계와 경로를 담은 오류("Cannot publish 원본 -> 대상")로 감싸고, Windows의 대상 교체는 `SetFileInformationByHandle(FileRenameInfoEx, REPLACE_IF_EXISTS | POSIX_SEMANTICS)`로 한다 — 보유자가 삭제 공유를 주면 성공한다(대기·재시도는 쓰지 않는다). 이를 지원하지 않는 파일 시스템이면 기존 교체로 돌아간다. 시험은 Rocks.Build.Tests(삭제 공유로 연 대상은 교체, 삭제 공유 없이 연 대상은 경로를 담은 실패) |
 | 7(CI 수정) | 2026-11-20 | CLG3 뒤 CI의 Windows·macOS job이 Rocks.Build.Tests에서 실패했다: 러너 기본 NDK 27.3(clang 18.0.4)이 Android 최소 Clang 20 미만이다. CI가 검증한 NDK r29(29.0.14206865)를 쓰도록 `Build/Toolchain.json`에 `android.ndk.version`을 두고, 두 job이 `Build/SelectAndroidNdk.ps1`로 그 NDK를 `ANDROID_NDK_HOME`·`ANDROID_NDK_ROOT`로 고른다(이미지에 없으면 `sdkmanager`로 설치, 6.3절). 최소 미만 NDK의 거부 문구는 LLVM 설치 안내 대신 NDK 버전과 `ANDROID_NDK_HOME`·`--android-ndk`를 안내한다. 최소 미만을 시험이 건너뛰게 하지는 않는다 |
+| 8(구현 기록) | 2026-11-20 | CLG4 구현. `Build/Toolchain.json`의 Windows 기본 LLVM과 검증 목록을 22.1.8(`clang version 22.1.8 (ca7933e4…)`)로 바꿨다. CI는 Windows 갈래 하나(LLVM 22.1.8·이미지 기본 MSVC)와 macOS 갈래로 줄이고 `ROCKS_MSVC_TOOLSET`·LLVM 21.1.6 갈래를 뺐다. Windows 갈래가 이전 (가) 갈래의 단계 전부(유니티·PCH 끔 검증 빌드, commandlet, 서식, Rocks.Build.Tests, 통합 시험)와 (나) 갈래의 EngineTests Debug 빌드를 맡는다. 구현하며 정한 점: (가) Windows 업스트림 최소 Clang은 21로 둔다 — 로컬 LLVM 21.1.6(오래된 STL과 함께)은 빌드되고 검증 목록 밖으로 기록된다. 21.1.6 설치 파일 SHA-256도 표에 남겨 `InstallLlvm.ps1 -Version 21.1.6`으로 깔 수 있다. (나) Rocks.Build.Tests는 21.1.6이 최소 이상이지만 미검증인지 단언한다(발견한 도구 모음은 개정 6대로 표 판정과 같은지만 본다). (다) `ROCKS_MSVC_TOOLSET` 기능은 남긴다(6.4절). 빌드 안내 요구 사항 절을 같은 내용으로 고쳤다 |
