@@ -109,8 +109,17 @@ try
             case "pch":
                 await PchTests.RunAsync(request, root, Pass);
                 break;
+            case "dynamic":
+                await DynamicModuleTests.RunAsync(request, root);
+                Pass("dynamic modules");
+                break;
+            case "module-table":
+                await ModuleTableTests.RunAsync(request, root);
+                await ReflectionSourceTests.RunAsync(request, root);
+                Pass("module table and reflection sources");
+                break;
             default:
-                throw new ArgumentException($"Unknown test group '{group}'. Groups: dependency, unity, pch.");
+                throw new ArgumentException($"Unknown test group '{group}'. Groups: dependency, unity, pch, dynamic, module-table.");
         }
 
         Console.WriteLine($"Native build regression groups ({group} only): {passed}, failed: 0");
@@ -306,11 +315,17 @@ try
     SystemLibraryTests.Run(request);
     Pass("system libraries and Apple frameworks: platform link form, propagation, validation");
 
+    WindowsSubsystemTests.Run(request);
+    Pass("Windows subsystem and PDB alternate path link arguments, validation");
+
     await GeneratedSourceTests.RunAsync(request, root);
     Pass("generated sources: written under <out>/GeneratedSources, linked, incremental, name and content validation");
 
     await ModuleTableTests.RunAsync(request, root);
     Pass("module table: rows in dependency order without exempt modules, ROCKS_MODULE_NAME, missing entry link error, case collisions, reserved macro");
+
+    await DynamicModuleTests.RunAsync(request, root);
+    Pass("dynamic modules: monolithic link and module table rows, no include path, back edge allowed, incremental, validation");
 
     // 정밀 헤더 의존(UB0): depfile 파서, 2단 key, 의존 기록, compile identity, 출력 검증 memo. 하위 묶음마다 PASS를 센다.
     await DependencyTests.RunAsync(request, root, Pass);

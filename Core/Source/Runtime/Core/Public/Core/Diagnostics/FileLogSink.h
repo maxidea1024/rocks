@@ -32,7 +32,10 @@ struct FileLogSinkConfig {
     static constexpr uint32 DefaultRetention = 8;
     static constexpr usize DefaultBatchBytes = 64 * 1024;
 
-    // 로그 폴더(UTF-8)다. 없으면 Open이 만든다.
+    // 로그 폴더(UTF-8)다. 없으면 Open이 만든다. 상대 경로면 실제 파일 시스템(fileSystem이 null)일
+    // 때 Open이 그때의 작업 디렉터리에 붙여 절대 경로로 굳힌다(작업 디렉터리가 뒤에 바뀌어도 회전
+    // 파일이 같은 폴더에 생긴다). 굳힌 경로가 MaxLogFilePathBytes에 들어가지 않으면 Open이
+    // InvalidArgument다.
     StringView directory;
     // 파일 이름 앞부분이다(ASCII 영문·숫자·'_'·'-', 1–MaxLogFileHostBytes). 보통 실행 파일
     // 이름이다.
@@ -58,6 +61,11 @@ struct FileLogSinkConfig {
     uint64 maxAgeNanoseconds = 0;
     // null이면 platform::PhysicalFileSystem이다. sink보다 오래 살아야 한다.
     platform::FileSystem* fileSystem = nullptr;
+    // 크래시 기록의 LogFile 칸(platform::SetCrashAnnotation)에 지금 파일의 경로를 알린다. 파일을 열
+    // 때 (Open의 첫 파일)와 회전할 때 쓴다. 칸은 쓰는 쪽이 하나여야 하므로 프로세스에서 sink 하나만
+    // 켠다(LogHost가 설치하는 파일 sink). 경로가 MaxCrashAnnotationBytes를 넘으면 칸을 비우고 비상
+    // 경로에 Warning을 한 번 남긴다. Close는 칸을 비우지 않는다(설계 14.1.8절, L29).
+    bool crashAnnotation = false;
 };
 
 // 로그를 파일에 쓰는 sink다(Docs/Design/LoggingSystem.ko.md 9.1절).
@@ -102,6 +110,11 @@ public:
     Result<void> Write(const LogEvent& event) noexcept override;
     Result<void> Flush() noexcept override;
 
+    // 로그 폴더다(Open 뒤에는 상대 경로를 굳힌 절대 경로, 끝 구분자 없음). sink 수명 동안 유효하다.
+    StringView Directory() const noexcept {
+        return StringView(directory_, directoryBytes_);
+    }
+
     // 지금 쓰는 파일의 경로다(열린 파일이 없으면 빈 값). 다음 회전 전까지 유효하다.
     StringView CurrentPath() const noexcept {
         return StringView(path_, pathBytes_);
@@ -127,6 +140,8 @@ private:
     Result<void> FinishFile() noexcept;
     Result<void> WriteRaw(const uint8* bytes, usize count) noexcept;
     void Remember(StringView path) noexcept;
+    Result<void> ResolveDirectory() noexcept;
+    void AnnounceCurrentFile() noexcept;
     void Disable(ErrorCode error) noexcept;
     void ReleaseBuffers() noexcept;
 
@@ -168,6 +183,8 @@ private:
     bool opened_ = false;
     bool disabled_ = false;
     bool outputFailed_ = false;
+    // 크래시 기록 칸이 넘쳐 Warning을 남겼는지다(한 번만).
+    bool annotationWarned_ = false;
     TextLogSink text_;
     JsonLinesLogSink json_;
 };

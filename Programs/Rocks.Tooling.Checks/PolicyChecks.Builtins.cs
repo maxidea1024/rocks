@@ -13,7 +13,7 @@ public static partial class PolicyChecks
     private static readonly Dictionary<string, Regex> BuiltinHelperAllowances = new(StringComparer.Ordinal)
     {
         ["Core/Source/Runtime/Base/Public/Base/Compiler.h"] = Pattern(
-            "\\b__builtin_(?:debugtrap|unreachable|offsetof)\\b"),
+            "\\b__builtin_(?:debugtrap|unreachable|offsetof|return_address)\\b"),
         ["Core/Source/Runtime/Base/Public/Base/Checked.h"] = Pattern(
             "\\b__builtin_(?:add|sub|mul)_overflow\\b"),
         ["Core/Source/Runtime/Base/Public/Base/Endian.h"] = Pattern(
@@ -43,7 +43,7 @@ public static partial class PolicyChecks
     /// <item>byte 범위·C 문자열·객체 표현·캐시 힌트(memcpy·strlen·bit_cast·launder·addressof·prefetch): Platform/Memory.h</item>
     /// <item>원자 연산·메모리 순서: Platform/Atomics.h</item>
     /// <item>overflow 검사 산술: Base/Checked.h. byte 순서: Base/Endian.h</item>
-    /// <item>중단점·도달 불가·offsetof: Base/Compiler.h</item>
+    /// <item>중단점·도달 불가·offsetof·호출자 복귀 주소: Base/Compiler.h</item>
     /// <item>호출 위치(파일·함수·줄): Core/Diagnostics/SourceLocation.h</item>
     /// <item>비트 계수·NaN·무한대: Platform/Math/{Clang,Generic}PlatformMath.h</item>
     /// </list>

@@ -2,6 +2,7 @@
 
 #include <Base/TypeTraits.h>
 #include <Base/Types.h>
+#include <Core/Diagnostics/LogStructure.h>
 #include <Core/Diagnostics/SourceLocation.h>
 #include <Core/Hash.h>
 #include <Core/Text/FormatParse.h>
@@ -16,6 +17,9 @@
 // - "{}"·"{0}": 위치 자리(StringBuilder 서식과 같다). 속성 키는 Arg0, Arg1…이다. 이름 자리와 한
 //   템플릿에 섞으면 오류다.
 // - "{{"·"}}"는 중괄호 문자, spec은 StringBuilder 서식의 spec 그대로다.
+// - "{@Name}": 구조체 펼치기 자리(LG16, Docs/Design/LoggingSystem.ko.md 14.1.6절). 인자 타입에
+//   LogStructure<T> 특수화가 있어야 하고 spec은 쓸 수 없다. 속성 이름은 '@'를 뗀 Name이다.
+//   Formatter 없이 LogStructure만 가진 타입은 "{@Name}" 자리에만 쓸 수 있다.
 //
 // 검증(부분 검증): 리터럴 템플릿은 컴파일 타임에 중괄호 짝, 이름·위치 혼용, 이름 중복, 자리 수와
 // 인자 수, 위치 번호 범위, UTF-8, **내장 타입** 인자의 spec을 검사한다. 사용자 Formatter<T> 타입의
@@ -55,7 +59,13 @@ enum class LogTemplateError : uint8 {
     // 사용자 Formatter 인자 하나를 서로 다른 spec으로 썼다(Formatter는 캡처 때 한 번만 렌더한다)
     ConflictingFormatterSpec,
     // 사용자 Formatter의 IsValidSpec이 spec을 거부했다
-    InvalidFormatterSpec
+    InvalidFormatterSpec,
+    // "{@Name}" 자리 인자의 타입에 LogStructure<T> 특수화가 없다
+    StructureWithoutLogStructure,
+    // "{@Name:spec}"처럼 펼치기 자리에 spec을 썼다
+    SpecOnStructure,
+    // LogStructure만 있고 Formatter가 없는 타입을 "{@Name}"이 아닌 자리에 썼다
+    StructureArgumentWithoutAt
 };
 
 // 오류 종류의 영어 이름이다(None은 "None").
@@ -89,6 +99,12 @@ constexpr StringView LogTemplateErrorName(LogTemplateError error) noexcept {
         return "ConflictingFormatterSpec";
     case LogTemplateError::InvalidFormatterSpec:
         return "InvalidFormatterSpec";
+    case LogTemplateError::StructureWithoutLogStructure:
+        return "StructureWithoutLogStructure";
+    case LogTemplateError::SpecOnStructure:
+        return "SpecOnStructure";
+    case LogTemplateError::StructureArgumentWithoutAt:
+        return "StructureArgumentWithoutAt";
     }
 
     return "Unknown";
@@ -140,6 +156,15 @@ inline void LogTemplateError_ConflictingFormatterSpec() noexcept {
 inline void LogTemplateError_InvalidFormatterSpec() noexcept {
 }
 
+inline void LogTemplateError_StructureWithoutLogStructure() noexcept {
+}
+
+inline void LogTemplateError_SpecOnStructure() noexcept {
+}
+
+inline void LogTemplateError_StructureArgumentWithoutAt() noexcept {
+}
+
 // 사용자 Formatter의 spec 검사 함수다(Formatter<T>::IsValidSpec). 없으면 nullptr다.
 using LogSpecCheck = bool (*)(StringView spec) noexcept;
 
@@ -162,21 +187,53 @@ struct LogArgumentSpec {
 };
 
 // 로그 인자 타입의 서식 종류다. 서식과 같되, Formatter가 없는 enum은 바탕 정수로 본다(캡처는 원시
-// 값을 담는다).
+// 값을 담는다). LogStructure만 가진 타입은 Custom이다(서식하지 않고 "{@Name}"으로만 쓴다).
 template <typename T>
 consteval FormatArgKind LogArgKindOf() noexcept {
     using U = RemoveCvRefT<T>;
-    if constexpr (!HasFormatter<U> && IsEnumV<U>) {
+    if constexpr (IsLogStructureOnly<U>) {
+        return FormatArgKind::Custom;
+    } else if constexpr (IsUnloggableClass<U>) {
+        // Formatter도 LogStructure도 없는 클래스 타입은 어느 자리에도 쓸 수 없다.
+        static_assert(sizeof(U) == 0,
+                      "Log argument type needs a rocks::Formatter<T> or rocks::LogStructure<T> "
+                      "specialization (reflected types: include <Object/LogStructure.h> and use a "
+                      "{@Name} hole)");
+        return FormatArgKind::Custom;
+    } else if constexpr (!HasFormatter<U> && IsEnumV<U>) {
         return IsSignedV<UnderlyingTypeT<U>> ? FormatArgKind::Signed : FormatArgKind::Unsigned;
     } else {
         return FormatArgKindOf<U>();
     }
 }
 
+// 로그 인자 타입의 성질 비트다(AnalyzeLogTemplate의 traits).
+// - LogArgFormattable: "{Name}"·"{}" 자리에 쓸 수 있다(내장 타입·Formatter·enum)
+// - LogArgStructurable: "{@Name}" 자리에 쓸 수 있다(LogStructure 특수화)
+inline constexpr uint8 LogArgFormattable = 1u << 0;
+inline constexpr uint8 LogArgStructurable = 1u << 1;
+
+template <typename T>
+consteval uint8 LogArgTraitsOf() noexcept {
+    using U = RemoveCvRefT<T>;
+    uint8 traits = 0;
+    if constexpr (!IsLogStructureOnly<U>) {
+        traits |= LogArgFormattable;
+    }
+
+    if constexpr (HasLogStructure<U>) {
+        CheckLogStructureType<U>();
+        traits |= LogArgStructurable;
+    }
+
+    return traits;
+}
+
 // 템플릿을 해석한 결과다. 렌더(속성 이름)와 캡처(사용자 Formatter의 spec)가 쓴다.
 // - named: 이름 자리 템플릿인지. names[i]는 i번째 인자의 이름(이름 자리일 때만)
 // - specs[i]·hasSpec[i]: i번째 인자를 처음 쓴 자리의 spec
 //   사용자 Formatter 인자는 모든 자리의 spec이 같아야 한다(ConflictingFormatterSpec).
+// - structured[i]: i번째 인자가 "{@Name}" 자리다(이름 자리라 인자마다 자리가 하나다)
 // view는 모두 템플릿 원문을 빌린다.
 struct LogTemplateLayout {
     bool named = false;
@@ -184,6 +241,7 @@ struct LogTemplateLayout {
     StringView specs[MaxLogArguments];
     bool hasSpec[MaxLogArguments]{};
     bool referenced[MaxLogArguments]{};
+    bool structured[MaxLogArguments]{};
 };
 
 constexpr LogTemplateError ToLogTemplateError(FormatParseError error) noexcept {
@@ -212,9 +270,14 @@ constexpr LogTemplateError ToLogTemplateError(FormatParseError error) noexcept {
 // checks가 있으면 checks[i]는 i번째 인자의 spec 검사 함수다(없는 인자는 nullptr). 사용자 Formatter
 // 자리의 spec을 그 함수로 검사해 거부되면 InvalidFormatterSpec이다. checks가 nullptr이면 사용자
 // Formatter spec은 검사하지 않는다(렌더 때 kinds만 아는 경로).
+// traits가 있으면 traits[i]는 i번째 인자의 성질 비트(LogArgFormattable·LogArgStructurable)다.
+// "{@Name}" 자리 인자가 Structurable이 아니면 StructureWithoutLogStructure, 그 밖의 자리 인자가
+// Formattable이 아니면 StructureArgumentWithoutAt이다. traits가 nullptr이면 이 검사를 하지 않는다.
+// 펼치기 자리의 spec은 traits와 상관없이 SpecOnStructure다.
 constexpr LogTemplateError AnalyzeLogTemplate(StringView text, const FormatArgKind* kinds,
                                               usize count, LogTemplateLayout& layout,
-                                              const LogSpecCheck* checks = nullptr) noexcept {
+                                              const LogSpecCheck* checks = nullptr,
+                                              const uint8* traits = nullptr) noexcept {
     if (count > MaxLogArguments) {
         return LogTemplateError::TooManyArguments;
     }
@@ -223,7 +286,7 @@ constexpr LogTemplateError AnalyzeLogTemplate(StringView text, const FormatArgKi
         return LogTemplateError::InvalidUtf8;
     }
 
-    FormatParser parser(text, true);
+    FormatParser parser(text, true, true);
     FormatToken token;
     usize holes = 0;
     while (parser.Next(token)) {
@@ -249,7 +312,20 @@ constexpr LogTemplateError AnalyzeLogTemplate(StringView text, const FormatArgKi
             layout.names[argument] = token.name;
         }
 
-        if (kinds[argument] != FormatArgKind::Custom) {
+        if (token.structured) {
+            // 펼치기 자리는 spec을 받지 않고 LogStructure로만 캡처한다.
+            if (token.hasSpec) {
+                return LogTemplateError::SpecOnStructure;
+            }
+
+            if (traits != nullptr && (traits[argument] & LogArgStructurable) == 0) {
+                return LogTemplateError::StructureWithoutLogStructure;
+            }
+
+            layout.structured[argument] = true;
+        } else if (traits != nullptr && (traits[argument] & LogArgFormattable) == 0) {
+            return LogTemplateError::StructureArgumentWithoutAt;
+        } else if (kinds[argument] != FormatArgKind::Custom) {
             FormatSpec spec;
             if (token.hasSpec && !ParseFormatSpec(token.spec, spec)) {
                 return LogTemplateError::InvalidSpec;
@@ -338,6 +414,15 @@ constexpr void ReportLogTemplateError(LogTemplateError error) noexcept {
     case LogTemplateError::InvalidFormatterSpec:
         LogTemplateError_InvalidFormatterSpec();
         break;
+    case LogTemplateError::StructureWithoutLogStructure:
+        LogTemplateError_StructureWithoutLogStructure();
+        break;
+    case LogTemplateError::SpecOnStructure:
+        LogTemplateError_SpecOnStructure();
+        break;
+    case LogTemplateError::StructureArgumentWithoutAt:
+        LogTemplateError_StructureArgumentWithoutAt();
+        break;
     }
 }
 
@@ -363,6 +448,8 @@ template <typename... Args>
 class LogTemplate {
     static_assert(sizeof...(Args) <= MaxLogArguments,
                   "A log call takes at most MaxLogArguments arguments");
+    static_assert(MaxLogArguments <= sizeof(uint32) * 8,
+                  "the structure hole mask needs one bit per argument");
 
 public:
     template <usize Count>
@@ -378,12 +465,16 @@ public:
         constexpr detail::FormatArgKind kinds[] = {detail::LogArgKindOf<Args>()...,
                                                    detail::FormatArgKind::Custom};
         constexpr detail::LogSpecCheck checks[] = {detail::LogSpecCheckOf<Args>()..., nullptr};
+        constexpr uint8 traits[] = {detail::LogArgTraitsOf<Args>()..., 0};
         detail::LogTemplateLayout layout{};
         detail::ReportLogTemplateError(detail::AnalyzeLogTemplate(
-            StringView(text, Count - 1), kinds, sizeof...(Args), layout, checks));
+            StringView(text, Count - 1), kinds, sizeof...(Args), layout, checks, traits));
         for (usize index = 0; index < sizeof...(Args); ++index) {
             specs_[index].offset = static_cast<uint32>(layout.specs[index].Data() - text);
             specs_[index].bytes = static_cast<uint32>(layout.specs[index].ByteCount());
+            if (layout.structured[index]) {
+                structureMask_ |= uint32{1} << index;
+            }
         }
     }
 
@@ -408,11 +499,17 @@ public:
         return specs_;
     }
 
+    // "{@Name}" 자리 인자의 비트 집합이다(i번째 비트가 i번째 인자).
+    constexpr uint32 StructureMask() const noexcept {
+        return structureMask_;
+    }
+
 private:
     const char* text_;
     usize bytes_;
     uint64 eventId_;
     SourceLocation location_;
+    uint32 structureMask_ = 0;
     // 인자가 없을 때 길이 0 배열을 피하려고 최소 하나를 둔다.
     detail::LogArgumentSpec specs_[sizeof...(Args) == 0 ? 1 : sizeof...(Args)]{};
 };

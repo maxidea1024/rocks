@@ -119,6 +119,18 @@ public static class LogCompiledMinimums
 public enum NativeModuleKind { StaticLibrary, Executable }
 
 /// <summary>
+/// Windows 실행 파일의 subsystem이다(링크 <c>/SUBSYSTEM:CONSOLE</c>·<c>/SUBSYSTEM:WINDOWS</c>).
+/// <list type="bullet">
+/// <item>Console(기본): 콘솔 프로그램. 진입 기호는 <c>wmain</c>이다(Launch <c>ROCKS_IMPLEMENT_APPLICATION</c>).</item>
+/// <item>Windows: GUI 프로그램. 콘솔 창이 붙지 않는다. 진입 기호는 <c>wWinMain</c>이다
+/// (Launch <c>ROCKS_IMPLEMENT_WINDOWED_APPLICATION</c>). 매크로와 맞지 않으면 진입 기호가 없어 링크 오류다.</item>
+/// </list>
+/// 다른 플랫폼 toolchain은 이 값을 쓰지 않는다. 정적 라이브러리에 Windows를 두면 입력 오류다
+/// (Docs/Design/CrashHandlingAndLaunch.ko.md 7.4절).
+/// </summary>
+public enum WindowsSubsystem { Console, Windows }
+
+/// <summary>
 /// 모듈 단위 최적화 재정의다(UE ModuleRules.OptimizeCode 대응).
 /// <list type="bullet">
 /// <item>Default: 구성을 따른다(Debug·Asan은 끔, Development·Release는 켬).</item>
@@ -203,6 +215,9 @@ public sealed record NativeModuleInput
 
     public NativeModuleKind Kind { get; init; } = NativeModuleKind.StaticLibrary;
 
+    // Windows 실행 파일의 subsystem이다(WindowsSubsystem). 실행 파일에만 뜻이 있고 dependency로 전파하지 않는다.
+    public WindowsSubsystem WindowsSubsystem { get; init; } = WindowsSubsystem.Console;
+
     public IReadOnlyList<string> Sources { get; init; } = [];
 
     public IReadOnlyList<string> PublicIncludeDirectories { get; init; } = [];
@@ -214,6 +229,14 @@ public sealed record NativeModuleInput
     public IReadOnlyList<string> PrivateDefines { get; init; } = [];
 
     public IReadOnlyList<string> Dependencies { get; init; } = [];
+
+    // 실행 중에 ModuleLoader::Load(이름)으로 적재하는 모듈이다(UE DynamicallyLoadedModuleNames 대응, Docs/Design/ModuleLoader.ko.md 3.8절
+    // MD11). 이 모듈의 컴파일에 그 모듈의 include·정의를 넣지 않는다(쓰는 쪽은 별도 모듈의 interface와 Find<T>(이름)로 쓴다). 빌드는
+    // 그 모듈과 링크 폐포를 타깃에 넣어 빌드하고, 이 모듈에 닿는 실행 파일이 함께 링크하며(Monolithic) 실행 파일 모듈 표에 행을 싣는다.
+    // 순환 검사의 참조 사슬에는 넣지 않는다(UE와 같다 — Engine이 적재하는 모듈이 Engine에 링크 의존해도 된다). Dependencies와 겹치거나
+    // 자기 자신·실행 파일·모르는 이름이면 입력 오류다(InputValidation). 사용 예(엔진 모듈 규칙):
+    // protected override string[] DynamicModules => ["RendererPlugin"];
+    public IReadOnlyList<string> DynamicModules { get; init; } = [];
 
     public IReadOnlyList<string> AdditionalCompileArguments { get; init; } = [];
 

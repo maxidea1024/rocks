@@ -41,6 +41,11 @@ struct BinnedAllocator::TestHooks {
     // 않으므로 곧 끝날 worker 스레드에서만 부른다. 종료 정리 뒤에 도는 코드(다른 종료 정리)가
     // allocator를 쓰는 경로를 본다.
     static void RunCurrentThreadExitHook() noexcept;
+    // 겹친 중복 반환의 결과를 만든다: 방금 반환한 작은 블록 address를 표지 검사 없이 호출 스레드의
+    // 캐시에 한 번 더 넣는다(같은 블록이 자유 목록에 두 번 든다). 그 뒤의 할당이 그 블록을 두
+    // 번째로 꺼낼 때 Fatal이어야 한다 — Fatal 대조 프로그램(자식 프로세스)에서만 부른다. 호출
+    // 스레드의 캐시가 없거나 작은 블록이 아니면 거짓이다.
+    static bool ReturnAgainIgnoringMarker(BinnedAllocator& allocator, void* address) noexcept;
     // 호출 스레드가 "종료한 스레드"로 표시됐는지다.
     static bool IsCurrentThreadExited() noexcept;
     // 호출 스레드의 thread_local 포인터만 지운다(기록과 종료 칸의 값은 그대로다). 스레드가 끝나는
@@ -59,6 +64,9 @@ struct BinnedAllocator::TestHooks {
     static uint32 CurrentThreadRecordEntries() noexcept;
     // 인스턴스에 등록된 스레드 캐시 수다.
     static uint32 ThreadCacheCount(BinnedAllocator& allocator) noexcept;
+    // 인스턴스의 모든 스레드 캐시에 든 블록의 바이트 합이다(이전 칸은 세지 않는다). 다른 스레드가
+    // 이 인스턴스를 쓰지 않을 때만 부른다(그 스레드의 묶음 개수를 잠금 없이 읽는다).
+    static usize ThreadCacheBlockBytes(BinnedAllocator& allocator) noexcept;
     // sizeClass의 이전 칸 가운데 묶음이 든 칸 수와, 그 가운데 첫 묶음의 블록 수다(없으면 0).
     // TransferChainLength는 다른 스레드가 이 인스턴스를 쓰지 않을 때만 부른다.
     static uint32 TransferBundleCount(BinnedAllocator& allocator, uint32 sizeClass) noexcept;
@@ -79,6 +87,10 @@ struct BinnedAllocator::TestHooks {
 
     // ---- 상태 조회 ----
 
+    // address가 든 slab의 시작 주소다(예약 범위 밖이면 0). address를 읽지 않는다. 예약 범위의
+    // 시작은 페이지 정렬만 보장되므로(POSIX의 mmap — Windows만 64KB 단위다) slab 시작을 주소의 아래
+    // 비트를 지워서 구하면 안 된다.
+    static uptr SlabStart(BinnedAllocator& allocator, const void* address) noexcept;
     // SlabTableEntry가 예약 범위 밖 주소에 돌려주는 값이다.
     static constexpr uint8 OutsideRange = NumericLimits<uint8>::Max();
     // address가 든 slab의 표 값이다(0은 쓰지 않는 slab, 등급 + 1은 쓰는 slab). address를 읽지

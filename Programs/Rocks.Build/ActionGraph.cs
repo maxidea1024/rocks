@@ -174,6 +174,24 @@ internal static class ActionGraph
             Visit(target);
         }
 
+        // 실행 중 적재 모듈(DynamicModules — Docs/Design/ModuleLoader.ko.md 3.8절)도 빌드한다. 링크 폐포를 다 본 뒤 따로 방문하므로 동적
+        // 관계는 순환 검사의 참조 사슬이 아니다. 그 모듈을 링크하는 실행 파일은 그 archive 뒤에 계획해야 하므로 실행 파일을 끝으로 옮긴다
+        // (실행 파일은 누구의 의존도 아니다). 동적 모듈이 없으면 순서가 바뀌지 않는다.
+        bool anyDynamic = false;
+        for (int index = 0; index < ordered.Count; ++index)
+        {
+            foreach (string dynamic in ordered[index].DynamicModules)
+            {
+                anyDynamic = true;
+                Visit(dynamic);
+            }
+        }
+
+        if (anyDynamic)
+        {
+            ordered = [.. ordered.Where(module => module.Kind != NativeModuleKind.Executable), .. ordered.Where(module => module.Kind == NativeModuleKind.Executable)];
+        }
+
         string Absolute(string path) => Path.GetFullPath(path, root);
         var actions = new List<NativeAction>();
         var logicalCompiles = new List<LogicalCompile>();
@@ -224,7 +242,12 @@ internal static class ActionGraph
 
             Reach(module.Name);
             var dependencies = dependencyOrder.ToArray();
-            closures[module.Name] = [module.Name, .. dependencies.Select(value => value.Name)];
+            // 실행 파일의 링크 모듈은 링크 폐포에 동적 모듈 쪽을 더한 것이다(LinkClosure — 컴파일 환경은 dependencies만 쓴다). 실행 파일의
+            // 도달 집합(closures — BuildInfo가 실행 파일의 액션을 고른다)도 링크하는 모듈 전부다.
+            NativeModuleInput[] linked = module.Kind == NativeModuleKind.Executable
+                ? LinkClosure.Of(module.Name, modules).Select(name => modules[name]).ToArray()
+                : dependencies;
+            closures[module.Name] = [module.Name, .. linked.Select(value => value.Name)];
             string[] includes = module.PublicIncludeDirectories.Concat(module.PrivateIncludeDirectories)
                 .Concat(dependencies.SelectMany(value => value.PublicIncludeDirectories)).Select(Absolute)
                 .Distinct(NativeToolchains.PathComparer).ToArray();
@@ -502,7 +525,7 @@ internal static class ActionGraph
                 finalArguments.AddRange(LinkDriverFlags(request));
                 finalArguments.AddRange(objectPaths);
                 // 정적 라이브러리는 의존하는 쪽을 먼저 둔다. diamond에서도 각 archive는 한 번만 쓴다.
-                foreach (var dependency in dependencies.Reverse())
+                foreach (var dependency in linked.Reverse())
                 {
                     if (outputs.TryGetValue(dependency.Name, out string? library))
                     {
@@ -510,9 +533,14 @@ internal static class ActionGraph
                         finalInputs.Add(library);
                         predecessors.Add(terminalActions[dependency.Name]);
                     }
+                    else if (dependency.Sources.Count != 0 || dependency.GeneratedSources.Count != 0 || dependency.ReflectionSources.Count != 0)
+                    {
+                        // 코드가 있는 모듈은 이 실행 파일보다 먼저 계획되어 archive가 있어야 한다(계획 순서가 깨지면 조용히 빠진 링크가 된다).
+                        throw new InvalidOperationException($"Internal error: module {dependency.Name} linked by {module.Name} has no planned archive.");
+                    }
                 }
 
-                foreach (string library in new[] { module }.Concat(dependencies.Reverse())
+                foreach (string library in new[] { module }.Concat(linked.Reverse())
                     .SelectMany(value => value.PrebuiltLibraries).Select(Absolute).Distinct(NativeToolchains.PathComparer))
                 {
                     if (!File.Exists(library))
@@ -524,13 +552,13 @@ internal static class ActionGraph
                     finalInputs.Add(library);
                 }
 
-                finalArguments.AddRange(new[] { module }.Concat(dependencies.Reverse())
+                finalArguments.AddRange(new[] { module }.Concat(linked.Reverse())
                     .SelectMany(value => value.AdditionalLinkArguments));
                 // 시스템 라이브러리·framework는 이 모듈과 모든 의존 모듈의 선언을 모아 한 번씩 넣는다.
-                finalArguments.AddRange(new[] { module }.Concat(dependencies.Reverse())
+                finalArguments.AddRange(new[] { module }.Concat(linked.Reverse())
                     .SelectMany(value => value.SystemLibraries).Distinct(StringComparer.Ordinal)
                     .Select(name => windows ? name + ".lib" : "-l" + name));
-                foreach (string framework in new[] { module }.Concat(dependencies.Reverse())
+                foreach (string framework in new[] { module }.Concat(linked.Reverse())
                     .SelectMany(value => value.Frameworks).Distinct(StringComparer.Ordinal))
                 {
                     finalArguments.AddRange(["-framework", framework]);
@@ -568,14 +596,18 @@ internal static class ActionGraph
                         finalInputs.Add(profileLibrary);
                     }
 
-                    finalArguments.AddRange(["/Fe{OUTPUT0}", "/link", "/INCREMENTAL:NO", "/SUBSYSTEM:CONSOLE", "/MANIFEST:EMBED"]);
+                    string subsystem = module.WindowsSubsystem == WindowsSubsystem.Windows ? "/SUBSYSTEM:WINDOWS" : "/SUBSYSTEM:CONSOLE";
+                    finalArguments.AddRange(["/Fe{OUTPUT0}", "/link", "/INCREMENTAL:NO", subsystem, "/MANIFEST:EMBED"]);
                     if (asanThunk != null)
                     {
                         finalArguments.AddRange(["/INCLUDE:__asan_seh_interceptor", "/WHOLEARCHIVE:" + asanThunk]);
                     }
                     // 모든 구성이 PDB를 남긴다. Release PDB는 배포 파일과 분리해 크래시 분석용으로 보관한다.
                     finalOutputs.Add(Path.ChangeExtension(finalPath, ".pdb"));
-                    finalArguments.AddRange(["/DEBUG:FULL", "/PDB:{OUTPUT1}"]);
+                    // CodeView 레코드에는 PDB 파일 이름만 남긴다(/PDBALTPATH:%_PDB%, lld-link가 %_PDB%를 PDB 파일 이름으로 바꾼다).
+                    // 링크 임시 폴더 경로가 배포 실행 파일에 새지 않고, 디버거는 기호 경로에서 이름·GUID·age로 찾는다
+                    // (Docs/Design/CrashHandlingAndLaunch.ko.md 14.4절 D16).
+                    finalArguments.AddRange(["/DEBUG:FULL", "/PDB:{OUTPUT1}", "/PDBALTPATH:%_PDB%"]);
                     finalArguments.AddRange(new[] { "kernel32", "user32", "gdi32", "winspool", "shell32", "ole32", "oleaut32", "uuid", "comdlg32", "advapi32" }
                         .Select(value => "/DEFAULTLIB:" + value + ".lib"));
                 }

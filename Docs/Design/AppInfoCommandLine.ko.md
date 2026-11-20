@@ -1,6 +1,6 @@
 # 앱 정보와 명령줄 설계
 
-기준일: 2026-11-18, 개정 2(교차검증 1차 반영, 결정 D1–D30 확정). 사용자 지시("설계문서만 작성해놔")로 쓴 설계이고 구현하지 않는다. 결정은 권장안으로 확정했다(19절). 범위가 큰 항목은 19절에 따로 표시했다. 개정 2의 바뀐 점은 21절에 있다.
+기준일: 2026-11-19, 개정 3(크래시 수집·실행 진입점 반영). 사용자 지시("설계문서만 작성해놔")로 쓴 설계이고 구현하지 않는다. 단, AP1의 일부(`ProcessCommandLine`·대화상자 억제 API·진입점 연결)는 [크래시 처리·실행 진입점](CrashHandlingAndLaunch.ko.md)(LC3·LC4)이 먼저 구현했다(12절·18절). 결정은 권장안으로 확정했다(19절). 범위가 큰 항목은 19절에 따로 표시했다. 바뀐 점은 21절에 있다.
 
 **착수 시점.** 고정 구현 순서(Curve → A0-G → A1–A6 → 화면 마일스톤)를 바꾸지 않는다. 이 문서의 단계(AP·CL — 18절)는 그 순서 안에 끼워 넣지 않으며 착수 시점은 사용자가 정한다. AP3(프레임 시간 전달)은 렌더 기반 RB1의 프레임 packet과 CVar 설계의 worker 묶음 장치에 기대므로 그 단계들과 함께 간다.
 
@@ -328,7 +328,7 @@ Engine/Source/Runtime에는 핵심만 둔다. 게임 실행 파일이 쓰는 최
 |---|---|---|
 | Core 런타임 `Core`: `Core/App/AppInfo.h`, `Core/App/ProcessCommandLine.h`, `Core/Time/FrameTiming.h` | `AppInfo`·`RunTraits`·`HostKind`·`AppInfoScope`, `ProcessCommandLine`, `FrameTiming`·`LatestFrameIndex` | 모든 실행 파일 |
 | Core 런타임 `Core`: `Core/Build/BuildInfo.h`(기존 헤더 확장) | `build::Description()` 선언. 정의는 Rocks.Build 생성 TU | Rocks.Build로 링크한 모든 실행 파일 |
-| Core `PlatformBase` | Windows 넓은 문자 명령줄 캡처와 직접 분해, 실행 파일 경로, 터미널 너비 조회, 대화상자 억제 정책(지금 TestSupport·ShaderToolSpike에 복사된 코드를 합친다 — 5.1절) | 모든 실행 파일 |
+| Core `PlatformBase` | 실행 파일 경로, 터미널 너비 조회, 대화상자 억제 정책(`platform::SuppressSystemErrorDialogs`, 크래시 수집 LC1b에서 TestSupport·ShaderToolSpike 복사본을 합쳤다). Windows 명령줄은 CRT가 나눈 넓은 문자 argv를 쓰므로 직접 분해는 두지 않는다(개정 3, 12절) | 모든 실행 파일 |
 | Core 런타임 `Core`: `Core/Text/EditDistance.h`, Base `Guid` 텍스트 변환 | 이름 제안용 편집 거리(CVar 12절과 같은 함수), Guid 36자 소문자 텍스트 변환(ReflectionText도 이 함수를 쓰게 한다) | 공용 |
 | 새 Core 런타임 모듈 `CommandLine`(의존: `Core`만) | `CommandLine/CommandLineSchema.h`(생성 스키마·바인더 표 형식), 토큰화·옵션 매칭·생성 바인더 호출·필수·범위·`ValidateCommand`·진단·이름 제안·비밀 가리기·짧은 사용법 줄 | 게임 호스트, Sandbox, 도구. Command struct를 선언한 모듈 |
 | `HostConfig`(기존) | 호스트 공용 옵션 struct `HostCommandLineOptions`(`--set`·`--config`·`--trace`·`--project`·실행 성격)와 부트 도우미. 이 모듈에 Metadata 선언이 새로 생긴다(Command struct만 있으므로 identity 면제 — D30) | 게임 호스트, Sandbox, RocksCommandlet |
@@ -423,7 +423,7 @@ Config 5.4절 부트 순서 앞뒤에 다음을 끼운다.
 
 | 순서 | 일 | 실패 처리 |
 |---|---|---|
-| 0 | 진입점이 `ProcessCommandLine`을 캡처한다(Windows는 넓은 문자 원문에서 — 12절) | 종료 코드 1, stderr 한 줄 |
+| 0 | Launch 진입점(`RunApplication`)이 `ProcessCommandLine`을 캡처한다(Windows는 CRT의 넓은 문자 argv에서 — 12절) | 종료 코드 `ApplicationDescription::commandLineFailureExitCode`(기본 1, RocksCommandlet 2), stderr 한 줄 |
 | 1 | 호스트가 공용 옵션 struct(`HostCommandLineOptions`)와 자기 옵션 struct를 파싱한다(14절) | 사용법 오류: 진단 + 짧은 사용법, 종료 2. 로그가 없으므로 stderr에 직접 쓴다. 게임 호스트 Release의 알 수 없는 인자는 오류가 아니라 9단계 경고로 미룬다(D29) |
 | 2 | `RunTraits`를 정하고 Fatal 대화상자 정책을 PlatformBase에 바로 적용한다(unattended면 대화상자 없음) | — |
 | 3 | `AppInfo::Create` → `AppInfoScope` 설치. 입력은 0–2단계 결과와 `build::Description()`뿐이다 | 종료 코드 1 |
@@ -604,28 +604,33 @@ RocksCommandlet 0.1.0 (Development, Program, commit 4a28102d, 2026-11-18)
 
 ## 12. 프로세스 명령줄 `ProcessCommandLine`
 
+구현됨(개정 3): `Core/Source/Runtime/Core/Public/Core/App/ProcessCommandLine.h`. 크래시 처리·실행 진입점 설계의 LC3이 만들고 LC4에서 상한을 고쳤다. 캡처는 Launch 진입점(`RunApplication`·`RunEmbeddedApplication`)이 하고, 실행 파일 본문은 `ApplicationContext::Arguments()`로 받는다.
+
 ```cpp
 namespace rocks {
 
 // 진입점이 한 번 캡처하는 프로세스 명령줄이다. 캡처 뒤 불변이고 모든 스레드가 읽을 수 있다.
 class ProcessCommandLine {
 public:
-    static constexpr usize MaxArguments = 4096;
-    static constexpr usize MaxTotalBytes = 128 * 1024;
+    // OS 한계(Windows 32767 UTF-16 단위, Linux·Android ARG_MAX 2 MiB, macOS 1 MiB)에 맞춘 상한이다.
+    // 저장소는 정적 BSS이고 쓴 만큼만 실제 메모리가 된다.
+    static constexpr usize MaxArguments = 32 * 1024;
+    static constexpr usize MaxTotalBytes = 2 * 1024 * 1024;
+    static constexpr usize MaxExecutablePathBytes = 96 * 1024;
 
     // 진입점에서 한 번 부른다. 오류: 두 번째 호출 AlreadyExists, 잘못된 UTF-16·UTF-8 InvalidArgument,
     // 상한 초과 CapacityExceeded, 실행 파일 경로를 얻지 못하면 그 파일 상태의 오류.
-    // Windows wmain 진입점(권장): CRT가 나눈 넓은 문자 argv를 UTF-8로 바꾼다.
+    // Windows wmain·wWinMain 진입점: CRT가 나눈 넓은 문자 argv(__wargv)를 UTF-8로 바꾼다.
     static Result<void> Capture(int argc, wchar_t** argv) noexcept;
-    // POSIX main 진입점: argv를 UTF-8로 검증해 복사한다. Windows에서 부르면 argv를 무시하고
-    // GetCommandLineW 원문을 PlatformBase가 직접 나눈다(main(char**)·WinMain 진입점용).
+    // POSIX main 진입점: argv를 UTF-8로 검증해 복사한다(UTF-8이 아니면 InvalidArgument).
     static Result<void> Capture(int argc, char** argv) noexcept;
 
-    // 전제: Capture 성공(Debug·Development assert).
+    // 전제: Capture 성공(아니면 assert 실패).
     static const ProcessCommandLine& Get() noexcept;
+    static bool IsCaptured() noexcept;
 
     // 실행 파일 경로다. argv[0]이 아니라 OS에서 얻는다(Windows GetModuleFileNameW,
-    // 그 밖은 platform::GetExecutablePath — Process.h:280).
+    // 그 밖은 platform::GetExecutablePath).
     StringView ExecutablePath() const noexcept;
     Span<const StringView> Arguments() const noexcept;  // 실행 파일 제외, 원문 순서
 };
@@ -635,11 +640,10 @@ public:
 
 - **원문 보존.** 캡처한 인자는 바꾸지 않는다. UE `Set`·`Append`(`CLH` 88–94)에 대응하는 것이 없다. 응답 파일을 펼친 결과는 파서가 따로 만드는 값이고, 보관된 원문은 그대로다.
 - **정규화.** UTF-8 검증만 한다. 대소문자·경로 구분자·따옴표는 건드리지 않는다. 따옴표 처리는 OS·CRT가 이미 했다.
-- **Windows.**
-  - 권장 진입점은 `wmain`이다(RocksCommandlet이 이미 그렇다 — `Programs/Commandlet/Private/Win64/Main.cpp:58`). CRT가 넓은 문자로 나눈 argv를 UTF-8로 바꾸므로 ANSI 변환(5.2절의 깨짐·best-fit 보안 문제)을 거치지 않는다.
-  - `main(char**)`·`WinMain` 진입점은 `GetCommandLineW` 원문을 PlatformBase `Private/Win64`가 **직접 나눈다**. 규칙은 MSVC CRT(2008 이후)의 argv 분해 규칙이고, PlatformBase `Process::Start`가 자식 명령줄을 만들 때 쓰는 인용 규칙과 짝이다([플랫폼 층](PlatformLayer.ko.md) 3절). `CommandLineToArgvW`는 쓰지 않는다. shell32 의존이 생기고 첫 토큰·`""` 처리 규칙이 CRT와 다르다.
-  - 나누는 함수는 원문 텍스트를 인자로 받는 순수 함수로도 공개한다. 그래서 시험이 프로세스 전역 캡처 없이 분해 규칙을 확인할 수 있다.
-  - 보조 수단으로 실행 파일 manifest에 `activeCodePage`=`UTF-8`(Windows 10 1903 이상)을 넣는 것을 검토한다. 그러면 남은 ANSI API와 CRT argv도 UTF-8이 된다. 다만 OS 버전에 기대므로 캡처 경로의 근거로 삼지 않는다(20절).
+- **Windows(개정 3, 크래시 처리 설계 D7).**
+  - 진입점은 Launch의 `ROCKS_IMPLEMENT_APPLICATION`이 만드는 `wmain`(콘솔) 또는 `wWinMain`(GUI subsystem)뿐이다. `wWinMain`은 CRT가 이미 나눈 `__argc`·`__wargv`를 쓴다. 둘 다 CRT가 넓은 문자로 나눈 argv를 UTF-8로 바꾸므로 ANSI 변환(5.2절의 깨짐·best-fit 보안 문제)을 거치지 않는다.
+  - `main(char**)` 진입점은 Windows에서 지원하지 않는다. 진입점 직접 정의는 policy `process-entry-point`가 막는다. 그래서 개정 2의 `GetCommandLineW` 직접 분해(MSVC CRT 규칙 구현과 순수 함수 공개)는 하지 않는다. 버린 이유: Launch가 모든 Rocks 실행 파일의 진입점을 만들므로 직접 분해가 필요한 진입점이 남지 않고, CRT 규칙을 다시 구현하면 CRT와 어긋날 위험만 남는다.
+  - 보조 수단으로 실행 파일 manifest에 `activeCodePage`=`UTF-8`(Windows 10 1903 이상)을 넣는 것을 검토한다. 그러면 남은 ANSI API도 UTF-8이 된다. 다만 OS 버전에 기대므로 캡처 경로의 근거로 삼지 않는다(20절).
 - **Android.** argv가 없다. 런처 intent의 추가 인자 문자열을 같은 형태로 넣는 경로는 Android 호스트를 만들 때 정한다(20절).
 - **로그용 형태와 비밀 가리기(D16).** 원문은 로그·trace·크래시 보고에 직접 쓰지 않는다. 파서가 스키마를 알고 난 뒤 `RedactedArguments(schema, out)`로 `Secret` 옵션의 값을 `<redacted>`로 바꾼 형태를 만든다. 시작 로그는 이 형태만 쓴다.
   - 파싱 실패로 스키마 판정을 못 한 인자도 원문 대신 `<unparsed>`로 남긴다. 비밀 값이 오타 때문에 그대로 새는 것을 막는다.
@@ -1237,8 +1241,8 @@ System.CommandLine은 토큰을 명령 모델에 맞춰 나누고 값을 변환�
   - 대상 종류 정의가 Game·Program 대상에 정확히 하나씩 들어가는지
   - `--version` 출력 golden
 - **ProcessCommandLine**
-  - Windows `main(char**)` 실행 파일과 `wmain` 실행 파일 각각에 한글·이모지·전각 `－`·`＂`가 든 인자를 `Process::Start`로 넘겨 UTF-8 원문 왕복(best-fit 변환이 없는지)
-  - Windows 직접 분해 함수의 표 시험: 따옴표·`\"`·연속 역슬래시·빈 인자·첫 토큰 규칙. `Process::Start` 인용 규칙과 왕복
+  - Windows `wmain`(콘솔) 실행 파일과 `wWinMain`(GUI subsystem) 실행 파일 각각에 한글·이모지·전각 `－`·`＂`가 든 인자를 `Process::Start`로 넘겨 UTF-8 원문 왕복(best-fit 변환이 없는지). 구현됨: `Native.Launch.unicode-arguments`·`windowed-subsystem`(크래시 처리 LC3)
+  - (개정 3에서 뺌) Windows 직접 분해 함수의 표 시험. 직접 분해를 하지 않는다(12절)
   - `ExecutablePath`가 argv[0]과 다르게 띄운 경우에도 실제 경로인지
   - 상한, 두 번 캡처, 잘못된 UTF-16(짝 없는 서로게이트)
   - 로그용 형태에서 `Secret` 값이 `<redacted>`, 파싱 실패 인자가 `<unparsed>`
@@ -1285,7 +1289,7 @@ System.CommandLine은 토큰을 명령 모델에 맞춰 나누고 값을 변환�
 
 | 단계 | 범위 | 선행 | 규모 |
 |---|---|---|---|
-| AP1 | Core `AppInfo`·`RunTraits`·`HostKind`·`AppInfoScope`, `ProcessCommandLine`(Windows `wmain`·직접 분해·`GetModuleFileNameW` — PlatformBase), PlatformBase 대화상자 억제 API(TestSupport·ShaderToolSpike 복사본을 합친다), Sandbox·RocksCommandlet·FoundationTests 진입점 연결. 파서가 아직 없으므로 `RunTraits`는 호스트 기본값(시험 실행기는 `unattended = true`, 나머지는 모두 기본값)으로 채우고, 지금 손 파싱하는 인자는 그대로 둔다 | — | M |
+| AP1 | Core `AppInfo`·`RunTraits`·`HostKind`·`AppInfoScope`. 개정 3: `ProcessCommandLine`(Windows `wmain`·`wWinMain`·`GetModuleFileNameW`), PlatformBase 대화상자 억제 API(`SuppressSystemErrorDialogs`), Sandbox·RocksCommandlet·FoundationTests 진입점 연결은 크래시 처리 설계 LC3·LC4가 Launch 진입점으로 먼저 했다. AP1에 남는 일: Launch `ApplicationKind`를 `HostKind`로 합치고, `ApplicationSettings::suppressSystemErrorDialogs`를 `RunTraits::unattended`에서 정한다. 파서가 아직 없으므로 `RunTraits`는 호스트 기본값(시험 실행기는 `unattended = true`, 나머지는 모두 기본값)으로 채우고, 지금 손 파싱하는 인자는 그대로 둔다 | — | M |
 | CL1 | MetaCompiler: `Command(...)`·`Group`·PROPERTY 키(13.3절)·문자열 목록 값, Command 생성 방식(스키마·필드별 바인더·기본값 출력·범위 검사·`ValidateCommand` 호출), 명령줄 enum 이름 표, identity 면제, Command 키 사용 위치 검사, descriptor 왕복, 실행 파일 모듈 `Metadata` 경로, RMC 진단. Rocks.Build 대상 종류 정의 `ROCKS_TARGET_KIND_*` | — | M |
 | CL2 | Core 런타임 `CommandLine` 모듈: `CommandLineSchema.h`, 토큰화·매칭·생성 바인더 호출·필수·범위·`ValidateCommand`·진단·이름 제안·알 수 없는 인자 정책·`Remaining`·로그용 가리기·짧은 사용법 줄, Core `EditDistance`, Base `Guid` 텍스트 변환, 크기 측정 | CL1, AP1 | M |
 | AP2 | Rocks.Build `<exe>.BuildStamp.cpp`·`build::Description()`·`ROCKS_BUILD_BRANCH`, `ToolBuildId` 입력에서 제외, 시작 로그 묶음(D14 — 가린 명령줄은 CL2의 `RedactedArguments`) | AP1, CL2 | M |
@@ -1315,7 +1319,7 @@ System.CommandLine은 토큰을 명령 모델에 맞춰 나누고 값을 변환�
 - **D12 BuildStamp와 캐시 키** — 별도 생성 TU에 둔다. `ToolBuildId` 입력·쿠킹 byte·에셋 너겟 키에는 넣지 않는다. 커밋이 바뀌면 모든 실행 파일이 다시 링크되는 비용은 AP2에서 측정한다.
 - **D13 그래픽 API 이름** — AppInfo에 두지 않는다. Graphics 장치 정보가 공개하고 시작 로그가 남긴다.
 - **D14 시작 로그** — LogHost 설치 직후 `App` 카테고리 Info 기록 한 묶음을 남긴다. 내용은 실행 파일, 엔진 버전, 구성, 대상, 커밋, 브랜치, 플랫폼, PID, instance id, 가린 명령줄이다. 문구는 영어다.
-- **D15 프로세스 명령줄** — 진입점에서 한 번 캡처하는 불변 UTF-8 배열이다. Windows는 `wmain`을 권장하고, `main(char**)`·`WinMain`은 `GetCommandLineW` 원문을 PlatformBase가 직접 나눈다(`CommandLineToArgvW`·shell32를 쓰지 않는다). 실행 파일 경로는 OS에서 얻는다(`GetModuleFileNameW`). `activeCodePage` UTF-8 manifest는 보조 수단으로만 검토한다. UE식 `Set`·`Append`가 없다. 하위 프로세스 상속(`Inherit`)은 자식을 띄우는 도구가 생길 때 더한다. 환경 변수 인자(UE `UE-CmdLineArgs`)는 두지 않는다.
+- **D15 프로세스 명령줄** — 진입점에서 한 번 캡처하는 불변 UTF-8 배열이다. Windows는 Launch가 만드는 `wmain`·`wWinMain`(CRT `__wargv`)만 쓰고 `main(char**)`는 지원하지 않는다(개정 3, 크래시 처리 설계 D7. `GetCommandLineW` 직접 분해는 하지 않는다). 실행 파일 경로는 OS에서 얻는다(`GetModuleFileNameW`). `activeCodePage` UTF-8 manifest는 보조 수단으로만 검토한다. UE식 `Set`·`Append`가 없다. 하위 프로세스 상속(`Inherit`)은 자식을 띄우는 도구가 생길 때 더한다. 환경 변수 인자(UE `UE-CmdLineArgs`)는 두지 않는다.
 - **D16 비밀 가리기** — `Secret` 지정자 옵션의 값을 `<redacted>`로, 파싱하지 못하거나 무시한 인자를 `<unparsed>`로 바꾼다. 로그·trace·크래시 보고에는 가린 형태만 쓴다.
 - **D17 C++ 파서 — 자체 구현(확정)** — 외부 라이브러리는 검토하고 제외했다. 이유는 크기다(사용자 결정 2026-11-18).
 - **D18 선언 방식** — `ROCKS_STRUCT(Command(...))`·`ROCKS_PROPERTY` 지정자 문법으로 선언하지만, Command struct는 리플렉션 등록 타입이 아니다. 생성물은 명령줄 스키마와 바인더뿐이다. 도움말 문자열은 `Help=` 지정자에서 온다. 문서 주석에서 가져오지 않는다(주석은 한국어, 도움말은 영어). 필수 표시는 기존 `Required`와 겹치지 않게 `Mandatory`로 한다. 출시 빌드 제외는 설정 지정자 `DevelopmentOnly`가 아니라 Command 전용 `NotInRelease`로 한다. 판정은 런타임 규칙(`CommandLineRules::release`)이라 Debug에서 시험한다. Command 키는 Command struct 밖에서 쓰면 RMC 오류다. 묶음 설명은 `Group` struct로 선언한다.
@@ -1364,3 +1368,8 @@ System.CommandLine은 토큰을 명령 모델에 맞춰 나누고 값을 변환�
   - 이름 제안: Core `EditDistance`를 CVar와 함께 쓰고, 문턱은 이름 붙은 상수로 했다.
   - 단계 표: AP2 선행에 CL2를 넣었고, AP1이 `RunTraits`를 채우는 방법, CL4의 HostConfig·실행 파일 등록 변경, Sandbox 자식의 `--deterministic`을 적었다.
   - 그 밖: Windows 인코딩(비 ASCII 인자가 깨진다, best-fit 보안 문제, `wmain`·직접 분해·`GetModuleFileNameW`), 대화상자 억제 공용 API, `TryFillSecureRandom` 이름, `AppInfoScope`와 `LogInstallScope`의 차이, 스키마 칸 형식, 묶음 설명, 도움말 예의 `--config`, CI branch, UE `UE-CmdLineArgs`, Developer 판정 문구, 명령줄 enum의 kebab-case 이름을 반영했다.
+- **개정 3(2026-11-19)**: [크래시 처리·실행 진입점](CrashHandlingAndLaunch.ko.md) LC3·LC4 구현을 반영했다.
+  - 12절: `ProcessCommandLine`은 구현됐다(`Core/App/ProcessCommandLine.h`). 상한을 OS 한계에 맞춰 인자 32768개·텍스트 2 MiB·실행 파일 경로 96 KiB로 바꾸고 `IsCaptured`를 더했다. 캡처는 Launch 진입점이 한다.
+  - 12절·D15: Windows `main(char**)`·`WinMain`의 `GetCommandLineW` 직접 분해를 지웠다(그 설계 D7). Launch 진입점은 늘 `wmain`·`wWinMain`(CRT `__wargv`)이다. 17절의 직접 분해 표 시험도 뺐다.
+  - 7.1절 PlatformBase 행, 8.3절 0단계(Launch가 캡처, 실패 종료 코드는 `commandLineFailureExitCode`)를 맞췄다.
+  - 18절 AP1: 크래시 처리 설계가 먼저 구현한 부분을 적고, 남은 일(`ApplicationKind` → `HostKind`, `suppressSystemErrorDialogs` ← `RunTraits::unattended`)을 적었다. 크래시 메타데이터에 가린 명령줄(CL2 뒤)·`--crash-*` 호스트 공용 옵션(CL4 뒤)·`BuildDescription`(AP2 뒤)을 더하는 일은 그 설계 21절에 있다.

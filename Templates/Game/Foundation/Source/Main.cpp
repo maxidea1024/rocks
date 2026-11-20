@@ -1,9 +1,13 @@
 #include <GameObject.generated.h>
 #include <SampleGame/SampleGame.module.generated.h>
-#include <Core/Memory/SystemAllocator.h>
+#include <Launch/EntryPoint.h>
 
-int main() {
-    rocks::SystemAllocator allocator;
+namespace {
+
+// Game body. Launch (the common entry layer) calls it after installing crash reporting and
+// capturing the command line; the return value is the process exit code.
+int Run(rocks::launch::ApplicationContext& context) noexcept {
+    rocks::Allocator& allocator = context.SystemAllocator();
     rocks::TypeRegistry types(allocator);
     // RegisterModuleTypes (declared in the module generated header, defined in the module generated
     // source that the build compiles into this executable) registers the reflection types of this
@@ -27,3 +31,15 @@ int main() {
     auto object = borrowed.Value().Get();
     return object && object.Value()->health == 100 ? 0 : 4;
 }
+
+// The name names crash report folders (Saved/Crashes/SampleGame-<start UTC>-<pid>/).
+const rocks::launch::ApplicationDescription& Describe() noexcept {
+    static constexpr rocks::launch::ApplicationDescription Description{
+        .name = "SampleGame", .kind = rocks::launch::ApplicationKind::EngineHost, .run = &Run};
+    return Description;
+}
+
+} // namespace
+
+// Defines the platform entry point (wmain on Windows, main elsewhere).
+ROCKS_IMPLEMENT_APPLICATION(Describe)

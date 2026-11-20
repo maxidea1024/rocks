@@ -115,6 +115,16 @@ internal static class InputValidation
                 throw new ArgumentException($"Module {module.Name}: unsupported Optimization {module.Optimization}.");
             }
 
+            if (!Enum.IsDefined(module.WindowsSubsystem))
+            {
+                throw new ArgumentException($"Module {module.Name}: unsupported WindowsSubsystem {module.WindowsSubsystem}.");
+            }
+
+            if (module.WindowsSubsystem != WindowsSubsystem.Console && module.Kind != NativeModuleKind.Executable)
+            {
+                throw new ArgumentException($"Module {module.Name}: WindowsSubsystem applies only to executables.");
+            }
+
             string basename = module.Name.Split('.')[0].ToUpperInvariant();
             if (new[] { "CON", "PRN", "AUX", "NUL" }.Contains(basename) ||
                 (basename.Length == 4 && (basename.StartsWith("COM", StringComparison.Ordinal) || basename.StartsWith("LPT", StringComparison.Ordinal)) && basename[3] is >= '1' and <= '9'))
@@ -233,6 +243,58 @@ internal static class InputValidation
                 if (byFolded.TryGetValue(dependency, out string? actual) && !string.Equals(actual, dependency, StringComparison.Ordinal))
                 {
                     throw new ArgumentException($"Module {module.Name}, Dependencies: '{dependency}' differs in case from module '{actual}'.");
+                }
+            }
+        }
+
+        ValidateDynamicModules(modules, byFolded);
+    }
+
+    // 실행 중 적재 모듈 목록(NativeModuleInput.DynamicModules — Docs/Design/ModuleLoader.ko.md 3.8절 MD11)이다. 표에 있는 라이브러리 모듈을
+    // 정확한 철자로 한 번씩 가리켜야 한다. 링크 의존과 겹치면 거부한다(UE도 오류 — UEBuildModuleCPP.cs ValidateModule): 같은 모듈을
+    // 링크하면서 실행 중에 적재한다는 뜻이 모순이다. 순환은 검사하지 않는다(동적 관계는 참조 사슬이 아니다).
+    private static void ValidateDynamicModules(IReadOnlyList<NativeModuleInput> modules, Dictionary<string, string> byFolded)
+    {
+        var byName = new Dictionary<string, NativeModuleInput>(StringComparer.OrdinalIgnoreCase);
+        foreach (NativeModuleInput module in modules)
+        {
+            byName.TryAdd(module.Name, module);
+        }
+
+        foreach (NativeModuleInput module in modules)
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string dynamic in module.DynamicModules)
+            {
+                if (!byFolded.TryGetValue(dynamic, out string? actual))
+                {
+                    throw new ArgumentException($"Module {module.Name}, DynamicModules: unknown module {dynamic}.");
+                }
+
+                if (!string.Equals(actual, dynamic, StringComparison.Ordinal))
+                {
+                    throw new ArgumentException($"Module {module.Name}, DynamicModules: '{dynamic}' differs in case from module '{actual}'.");
+                }
+
+                if (string.Equals(dynamic, module.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new ArgumentException($"Module {module.Name}, DynamicModules: a module cannot load itself at run time.");
+                }
+
+                if (!seen.Add(dynamic))
+                {
+                    throw new ArgumentException($"Module {module.Name}, DynamicModules: '{dynamic}' is listed twice.");
+                }
+
+                if (module.Dependencies.Contains(dynamic, StringComparer.OrdinalIgnoreCase))
+                {
+                    throw new ArgumentException($"Module {module.Name}: '{dynamic}' is both in Dependencies and DynamicModules; a module that is " +
+                        "linked as a dependency cannot also be loaded at run time.");
+                }
+
+                if (byName[dynamic].Kind == NativeModuleKind.Executable)
+                {
+                    throw new ArgumentException($"Module {module.Name}, DynamicModules: '{dynamic}' is an executable.");
                 }
             }
         }

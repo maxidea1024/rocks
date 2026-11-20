@@ -10,6 +10,7 @@
 #include <Core/Diagnostics/RuntimeLogSink.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
+#include <Platform/CrashReporting.h>
 #include <Platform/Fatal.h>
 #include <Platform/Sync.h>
 #include <Platform/Thread.h>
@@ -158,15 +159,25 @@ class LogSystem;
 namespace detail {
 struct LogSystemAccess;
 
-// 설치된 LogSystem을 종료 전에 flush한다(종료 hook이 부른다, LogSystem::FlushForTermination).
-void FlushInstalledLogForTermination() noexcept;
+// 크래시 수집기의 종료 콜백(크래시 처리 스레드)이 부른다. 설치된 LogSystem을 lock 없이 찾아
+// LogSystem::FlushForTermination으로 비운다(Docs/Design/CrashHandlingAndLaunch.ko.md 19절).
+// - 기다리는 상한은 "공용 마감 - TerminationCallbackReserveMilliseconds"다. 콜백은 등록 역순으로
+//   불리고(로그 콜백은 Core가 먼저 등록하므로 나중에 불린다), 남긴 여유는 로그 뒤에 불리는 콜백의
+//   몫이다.
+// - Log::Fatal·assert가 실패 스레드에서 flush를 시도했으면(MarkFatalFlushAttempted) 그 시도는 그
+//   스레드의 제한 시간에 끊겼을 수 있다. 그래서 위 상한까지 남은 큐를 한 번 더 기다린다. 표시가
+//   없으면 fatalFlushTimeoutMilliseconds와 위 상한 가운데 짧은 쪽까지 기다린다.
+// - 결과는 FlushForTermination과 같다(상한이 지났으면 timeout 0으로 부른다). 설치된 LogSystem이
+//   없으면 Skipped다.
+inline constexpr uint32 TerminationCallbackReserveMilliseconds = 250;
 
-// platform::SetTerminationHook에 거는 함수다. Log::Fatal·assert가 이미 flush했으면(이 스레드의
-// Fatal 진행 표시) 다시 하지 않는다.
-void LogTerminationHook(const char* message, usize bytes) noexcept;
+platform::TerminationCallbackResult
+FlushInstalledLogForTermination(const platform::TerminationContext& context) noexcept;
 
-// LogTerminationHook이 flush 뒤 연쇄할 앞 hook이다(LogInstallScope가 정한다).
-void SetChainedTerminationHook(platform::TerminationHook hook) noexcept;
+// Log::Fatal·assert가 실패 스레드에서 flush를 시도했다는 프로세스 표시다(스레드별 fatalInProgress와
+// 별개, 크래시 처리 스레드가 읽는다).
+void MarkFatalFlushAttempted() noexcept;
+bool FatalFlushAttempted() noexcept;
 
 // 설치·해제 때마다 하나씩 오르는 전역 세대 값이다(SRCU 세대 뒤집기). 해제가 뒤집기를 마쳤는지
 // 순서를 확인하는 시험·진단용이다.
@@ -277,12 +288,20 @@ public:
 
     LogSystemStats Stats() const noexcept;
 
-    // 비정상 종료 직전의 best effort flush다(platform::Fatal·OS 예외·신호의 종료 hook이 부른다,
-    // 설계 14.1.8). 막히는 lock을 쓰지 않는다: Async는 출력 스레드를 TrySignal로 깨우고 이 호출
-    // 전에 넣은 기록이 sink flush까지 끝났는지 원자 위치로 확인하며 timeout까지 기다린다. Sync는
-    // sink lock을 TryLock으로 잡을 때만 flush한다. 출력 스레드 자신·sink 콜백 안·Manual·비상
-    // 모드에서는 하지 않는다. 다 비웠으면 true다.
-    bool FlushForTermination(uint32 timeoutMilliseconds) noexcept;
+    // 비정상 종료 직전의 best effort flush다(크래시 수집기의 종료 콜백이 크래시 처리 스레드에서
+    // 부른다, Docs/Design/CrashHandlingAndLaunch.ko.md 19절). 막히는 lock을 쓰지 않는다. Async는
+    // 출력 스레드를 TrySignal로 깨우고, 이 호출 전에 넣은 기록이 sink flush까지 끝났는지 원자
+    // 위치로 확인하며 timeout까지 기다린다. Sync는 sink lock을 TryLock으로 잡을 때만 flush한다.
+    // failingThreadId(크래시한 스레드, 없으면 0)와 stoppedThreadIds(겹쳐 멈춘 스레드)는 출력
+    // 스레드가 실패했는지 판정하는 데 쓴다. 출력 스레드가 실패했으면 큐를 비울 주체가 없으므로
+    // 기다리지 않고 비상 경로로 알린다. 결과:
+    // - Skipped: 시작 전, Manual, 비상 모드, sink 콜백 안, 출력 스레드 자신이 부름, 출력 스레드가
+    //   실패·멈춘 스레드에 있음, Sync에서 sink lock을 잡지 못함
+    // - TimedOut: Async에서 timeout까지 다 비우지 못함
+    // - Completed: 다 비움
+    platform::TerminationCallbackResult
+    FlushForTermination(uint32 timeoutMilliseconds, uint64 failingThreadId,
+                        Span<const uint64> stoppedThreadIds) noexcept;
 
     LogMode Mode() const noexcept {
         return config_.mode;
@@ -290,7 +309,12 @@ public:
 
 private:
     friend struct detail::LogSystemAccess;
-    friend void detail::FlushInstalledLogForTermination() noexcept;
+    // 출력 스레드가 크래시한 스레드(failing)나 겹쳐 멈춘 스레드(stopped)에 있는지다. 종료 flush의
+    // 두 경로(콜백, FlushForTermination)가 같은 판정을 쓴다.
+    bool WriterThreadFailed(uint64 failingThreadId,
+                            Span<const uint64> stoppedThreadIds) const noexcept;
+    friend platform::TerminationCallbackResult
+    detail::FlushInstalledLogForTermination(const platform::TerminationContext& context) noexcept;
     friend class LogInstallScope;
 
     struct SinkSlot {
@@ -364,6 +388,8 @@ private:
     char* render_ = nullptr;
     LogProperty properties_[MaxLogArguments];
     LogProperty context_[MaxLogContextDepth];
+    // 펼친 값("{@Name}")의 렌더 노드다(출력 쪽만 쓴다).
+    LogProperty structureNodes_[MaxLogStructureNodes];
     platform::Thread writer_;
     platform::ManualResetEvent wake_;
 
@@ -455,9 +481,6 @@ public:
 
 private:
     LogSystem* previous_;
-    // 이 범위가 건 종료 hook과 그 전 hook이다(해제 때 되돌린다, 로그 hook은 앞 hook에 연쇄한다).
-    platform::TerminationHook previousHook_ = nullptr;
-    bool ownsHook_ = false;
 };
 
 } // namespace rocks

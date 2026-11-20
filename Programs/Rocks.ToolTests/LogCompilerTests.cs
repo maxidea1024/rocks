@@ -27,6 +27,19 @@ internal static class LogCompilerTests
                 return spec.IsEmpty() || spec == "short";
             }
         };
+        struct Shaped { int x; };
+        template <> struct rocks::LogStructure<Shaped> {
+            static void Write(rocks::LogStructureWriter& out, const Shaped& value) noexcept {
+                out.Write("X", value.x);
+            }
+        };
+        struct Plain { int x; };
+        enum class Tone : unsigned char { A = 1 };
+        template <> struct rocks::LogStructure<Tone> {
+            static void Write(rocks::LogStructureWriter& out, const Tone&) noexcept {
+                out.Write("A", 1);
+            }
+        };
         inline constexpr rocks::LogCategory LogValid{"Graphics.D3D12"};
         template <typename... Args>
         void Capture(rocks::Span<rocks::uint8> buffer,
@@ -88,6 +101,8 @@ internal static class LogCompilerTests
                 "void Other(rocks::Span<rocks::uint8> buffer) noexcept {\n" +
                 "    (void)rocks::CaptureLog({buffer}, rocks::LogLevel::Info, LogValid, \"{} {{x}} {}\", 1, \"x\");\n" +
                 "    (void)rocks::CaptureLog({buffer}, rocks::LogLevel::Info, LogValid, rocks::RuntimeTemplate{rocks::StringView(\"{A\")}, 1);\n" +
+                "    (void)rocks::CaptureLog({buffer}, rocks::LogLevel::Info, LogValid, \"{@S} and {P}\", Shaped{1}, Point{2});\n" +
+                "    (void)rocks::CaptureLog({buffer}, rocks::LogLevel::Info, LogValid, rocks::RuntimeTemplate{rocks::StringView(\"{@S}\")}, Shaped{1});\n" +
                 "    Capture(buffer, \"{Name}\", 5);\n" +
                 "}";
 
@@ -107,6 +122,23 @@ internal static class LogCompilerTests
                 ("invalid_utf8", Call("\"\\xff{A}\", 1"), "LogTemplateError_InvalidUtf8"),
                 ("formatter_spec_conflict", Call("\"{0} {0:x}\", Point{1}"), "LogTemplateError_ConflictingFormatterSpec"),
                 ("formatter_spec_rejected", Call("\"{C:long}\", Checked{1}"), "LogTemplateError_InvalidFormatterSpec"),
+                // 구조체 펼치기(LG16): spec 금지, LogStructure 없는 인자, LogStructure만 있는 타입의 일반 자리, '@' 뒤 이름.
+                ("structure_spec", Call("\"{@S:x}\", Shaped{1}"), "LogTemplateError_SpecOnStructure"),
+                ("structure_formatter_only", Call("\"{@P}\", Point{1}"), "LogTemplateError_StructureWithoutLogStructure"),
+                ("structure_builtin", Call("\"{@N}\", 1"), "LogTemplateError_StructureWithoutLogStructure"),
+                ("structure_plain_hole", Call("\"{S}\", Shaped{1}"), "LogTemplateError_StructureArgumentWithoutAt"),
+                ("structure_positional_hole", Call("\"{}\", Shaped{1}"), "LogTemplateError_StructureArgumentWithoutAt"),
+                ("structure_hole_name", Call("\"{@0}\", Shaped{1}"), "LogTemplateError_InvalidHoleName"),
+                // Formatter도 LogStructure도 없는 타입은 영어 static_assert로 거부한다(리터럴·런타임 템플릿 모두).
+                ("structure_unspecialized", Call("\"{@S}\", Plain{1}"),
+                    "Log argument type needs a rocks::Formatter<T> or rocks::LogStructure<T> specialization"),
+                ("structure_unspecialized_runtime", Call("rocks::RuntimeTemplate{rocks::StringView(\"{@S}\")}, Plain{1}"),
+                    "Log argument type needs a rocks::Formatter<T> or rocks::LogStructure<T> specialization"),
+                // LogStructure는 클래스 타입에만 둔다(enum·정수 특수화는 쓰는 곳에서 거부한다).
+                ("structure_on_enum", Call("\"{@T}\", Tone::A"),
+                    "rocks::LogStructure<T> is only supported for class types"),
+                ("structure_on_enum_runtime", Call("rocks::RuntimeTemplate{rocks::StringView(\"{@T}\")}, Tone::A"),
+                    "rocks::LogStructure<T> is only supported for class types"),
                 ("not_null_terminated",
                     "void Test(rocks::Span<rocks::uint8> buffer) noexcept {\n" +
                     "    static constexpr char text[3] = {'a', 'b', 'c'};\n" +

@@ -455,6 +455,7 @@ internal static class CppEmitter
             Body("}");
         }
 
+        EmitVisitFields(schema, type, native, $"::{{0}}", Line);
         Line("static RuntimeTypeOps Ops(ModuleLease module = {}) noexcept;");
         Body($"RuntimeTypeOps {self}::Ops(ModuleLease module) noexcept {{");
         Body($"auto ops = MakeRuntimeTypeOps<{native}, {(type.Abstract ? "true" : "false")}>(Move(module));");
@@ -550,6 +551,70 @@ internal static class CppEmitter
         Body("return registry.Register(Schema(), Ops(Move(module)));");
         Body("}");
         Line("};");
+    }
+
+    // 필드 방문 함수다(Docs/Design/LoggingSystem.ko.md 14.1.6절 LG16 — 로그 구조체 펼치기 `{@Obj}`가 registry·할당 없이
+    // 값을 읽는다). 상속 필드를 포함한 모든 필드를 선언 순서(DeclarationOrder)로 visitor.Field("이름", 값)으로 부른다. 이름은 C++
+    // 멤버 이름의 문자열 리터럴(정적 저장소)이고 값은 멤버 포인터로 직접 읽은 const 참조다(Trace와 같은 철자 — 클래스는 선언
+    // 클래스의 멤버 포인터, struct는 자기 타입). bitfield bool은 참조를 만들 수 없으므로 생성 접근자(Get_)의 bool 값이다.
+    // 등록·함수표가 없는 constexpr 템플릿이라 쓰지 않으면 인스턴스화되지 않는다. ownerFormat은 멤버 포인터 클래스 철자다({0}은
+    // 필드의 Owner).
+    private static void EmitVisitFields(SchemaModel schema, ClassModel type, string native, string ownerFormat, Action<string> Line)
+    {
+        if (type.Fields.Count == 0)
+        {
+            Line($"template <class Visitor> static constexpr void VisitFields(const {native}&, Visitor&) noexcept {{}}");
+            return;
+        }
+
+        Line($"template <class Visitor> static constexpr void VisitFields(const {native}& value, Visitor& visitor) noexcept {{");
+        foreach (FieldModel field in DeclarationOrder(schema, type))
+        {
+            // 자기 bitfield는 헤더 안에서 직접 읽는다 — Get_ 정의는 생성 소스에 있어(GS2) 다른 모듈이 VisitFields를 인스턴스화하면
+            // 모듈 밖 함수를 부르게 된다. 상속한 bitfield는 base의 private 멤버라 base의 Get_을 부른다(생성 함수표와 같은 제약).
+            string read = field.Bitfield && field.Owner == type.Name
+                ? $"static_cast<bool>(value.{field.Name} != 0)"
+                : field.Bitfield
+                ? $"GeneratedType<::{schema.Find(field.Owner).NativeName}>::Get_{field.Name}(value)"
+                : $"value.*(&{string.Format(CultureInfo.InvariantCulture, ownerFormat, field.Owner)}::{field.Name})";
+            Line($"visitor.Field({Label(field.Name)}, {read});");
+        }
+
+        Line("}");
+    }
+
+    // 필드의 선언 순서다: 가장 먼 리플렉션 base의 필드부터, 같은 선언 타입 안에서는 그 타입의 선언 순서(OwnFields)다. 스키마 필드
+    // 배열(안정 ID 순)과 달리 로그 출력이 소스 선언 순서로 읽히게 한다. 선언 순서를 모르는 필드(import한 타입의 필드 등)는 같은 선언
+    // 타입 안 끝에 스키마 순서로 둔다. 같은 입력이면 늘 같은 순서다.
+    private static IEnumerable<FieldModel> DeclarationOrder(SchemaModel schema, ClassModel type)
+    {
+        List<string> chain = [];
+        ClassModel? current = type;
+        while (current is not null && !chain.Contains(current.Name, StringComparer.Ordinal))
+        {
+            chain.Add(current.Name);
+            string next = current.Base;
+            current = schema.Classes.TryGetValue(next, out ClassModel? own) ? own : schema.Imported.TryGetValue(next, out ClassModel? imported) ? imported : null;
+        }
+
+        int Rank(FieldModel field)
+        {
+            int index = chain.IndexOf(field.Owner);
+            return index < 0 ? chain.Count : chain.Count - 1 - index;
+        }
+
+        int Position(FieldModel field)
+        {
+            ClassModel? owner = schema.Classes.TryGetValue(field.Owner, out ClassModel? own) ? own : schema.Imported.TryGetValue(field.Owner, out ClassModel? imported) ? imported : null;
+            int index = owner is null ? -1 : owner.OwnFields.FindIndex(declared => declared.Name == field.Name);
+            return index < 0 ? int.MaxValue : index;
+        }
+
+        return type.Fields.Select((field, schemaIndex) => (field, schemaIndex))
+            .OrderBy(item => Rank(item.field))
+            .ThenBy(item => Position(item.field))
+            .ThenBy(item => item.schemaIndex)
+            .Select(item => item.field);
     }
 
     // 자기 bitfield bool 필드(리플렉션 B9m — Docs/Design/ReflectionExtensions.ko.md 14절)의 생성 접근자다. bitfield는 멤버
@@ -882,6 +947,7 @@ internal static class CppEmitter
             Line("}");
         }
 
+        EmitVisitFields(schema, type, native, native, Line);
         string? baseNative = type.Base.Length == 0 ? null : "::" + schema.Find(type.Base).NativeName;
         EmitValueCopy(type, native, baseNative, Line, Body);
         EmitValidateTree(type, native, baseNative, checks, Line, Body);

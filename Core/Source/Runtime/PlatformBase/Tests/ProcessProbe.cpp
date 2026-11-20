@@ -27,7 +27,7 @@ bool WriteText(int stream, const char* text) noexcept {
     return WriteStandardStream(stream, text, strlen(text));
 }
 
-int EchoArguments(int argc, char** argv) noexcept {
+int EchoArguments(int argc, const char* const* argv) noexcept {
     static char storage[64 * 1024];
     const char* arguments[64];
     const usize count = ReadUtf8Arguments(argc, argv, storage, sizeof(storage), arguments, 64);
@@ -155,7 +155,7 @@ int Priority() noexcept {
 // DLL이 있는 디렉터리로 두고 띄운다. 마지막 인자(dir)가 있으면 PATH 맨 앞에도 더한다. how가
 // "rocks"면 DynamicLibrary::Open, "default"면 OS 기본 검색(대조군)으로 연다. 열리면 0, NotFound면
 // 10, 그 밖의 실패는 11, 준비 실패는 12다. 경로는 UTF-8로 다시 읽는다(Windows main argv는 ANSI다).
-int OpenDynamicLibrary(int argc, char** argv) noexcept {
+int OpenDynamicLibrary(int argc, const char* const* argv) noexcept {
     static char storage[16 * 1024];
     const char* arguments[8];
     const usize count = ReadUtf8Arguments(argc, argv, storage, sizeof(storage), arguments, 8);
@@ -204,7 +204,7 @@ int OpenDynamicLibrary(int argc, char** argv) noexcept {
 //   parent-alive <pid>          IsProcessRunning(pid)이면 0, 아니면 1이다.
 //   dynamic-library <how> <path> [dir]
 //                               DynamicLibrary 음성 시험(OpenDynamicLibrary 주석).
-int RunProcessProbe(int argc, char** argv) noexcept {
+int RunProcessProbe(int argc, const char* const* argv) noexcept {
     if (argc < 3) {
         return 90;
     }

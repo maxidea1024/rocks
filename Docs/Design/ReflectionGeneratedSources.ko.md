@@ -150,7 +150,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`)의 Unre
 | `Register()` | 전부 | 생성 소스 | `Schema()`·`Ops()`를 부르는 전달 함수다 |
 | `ReferenceLayout()` | 클래스 | 생성 소스 | 등록할 때 한 번 쓴다 |
 | `CopyValue()`·`ValidateSelf()`·`ValidateTree()` | struct | 생성 소스 | 리플렉션 쓰기 경로에서 부른다. 할당을 동반하는 느린 경로다 |
-| bitfield `Get_x()`·`Set_x()` | 클래스·struct | 생성 소스(헤더에 선언) | `Ops()` 안에서만 쓴다 |
+| bitfield `Get_x()`·`Set_x()` | 클래스·struct | 생성 소스(헤더에 선언) | `Ops()` 안에서 쓴다. 로깅 `VisitFields`는 자기 bitfield를 헤더 안에서 직접 읽고, 상속한 bitfield만 base의 `Get_`을 부른다 |
 | `VerifyBinds()`, `static_assert` 묶음 | 전부 | 생성 소스(검사 전용 멤버) | 5.3절 |
 | `detail::ValueCopy<S>`·`detail::ValueValidate<S>` 특수화 | struct | 헤더 | 형질 값과, `CopyValue()`·`ValidateTree()`로 넘기는 한 줄 전달 함수다 |
 | `RegisterModuleTypes()`·`RegisterPrivateModuleTypes()` | 모듈 | 모듈 생성 소스(모듈 생성 헤더에 선언) | 모든 타입의 `Schema()`·`Ops()`를 부른다. 모듈 키(`moduleKey`)도 여기 있다 |

@@ -1,5 +1,8 @@
+#include "CrashReportingInternal.h"
 #include "ThreadInternal.h"
 #include "WaitDeadline.h"
+#include <Base/Compiler.h>
+#include <Platform/CrashReporting.h>
 #include <Platform/Fatal.h>
 #include <new>
 
@@ -70,6 +73,27 @@ bool IsExecutingThread(const ThreadState& state) noexcept {
     return executingThread == &state;
 }
 
+const char* CurrentPlatformThreadName() noexcept {
+    // RunThread가 끝날 때까지 state는 살아 있고 이름은 실행 중 바뀌지 않는다.
+    return executingThread != nullptr ? executingThread->name : nullptr;
+}
+
+namespace {
+
+struct GuardedThreadEntry {
+    Thread::Entry entry;
+    void* context;
+};
+
+// 보호 프레임이 부르는 별도 함수다(보호 블록 안에 인라인되지 않는다).
+ROCKS_NOINLINE int RunGuardedThreadEntry(void* raw) noexcept {
+    const auto* guarded = static_cast<const GuardedThreadEntry*>(raw);
+    guarded->entry(guarded->context);
+    return 0;
+}
+
+} // namespace
+
 void RunThread(ThreadState& state) noexcept {
     executingThread = &state;
     Thread::Entry entry;
@@ -83,7 +107,9 @@ void RunThread(ThreadState& state) noexcept {
     // 이름·우선순위는 entry가 보기 전에 적용한다. Start가 joinable 동안 옵션을 바꾸지 않으므로 gate
     // 밖에서 읽어도 된다.
     ApplyCurrentThreadOptions(state);
-    entry(context);
+    // 진입 함수를 크래시 보호 프레임 안에서 부른다(Windows SEH 경계, 설계 8.6절).
+    GuardedThreadEntry guarded{entry, context};
+    (void)RunWithCrashGuard(&RunGuardedThreadEntry, &guarded);
     {
         LockGuard lock(state.gate);
         state.completed = true;

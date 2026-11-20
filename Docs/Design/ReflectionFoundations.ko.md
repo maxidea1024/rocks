@@ -43,7 +43,7 @@
 
 ### 1.3 실행 단위와 순서
 
-- 타깃에서 도달하는 모듈(플러그인 모듈 포함 — native 빌드와 같은 root 집합) 중 Metadata가 있는 모듈을 의존 순서(위상 정렬)로 실행한다. 모듈 하나에 MetaCompiler 실행 한 번이며 입력 헤더 전부를 `#include`하는 합성 번역 단위를 Clang에 준다. 같은 모듈 안 헤더 사이의 base·참조는 이 실행 안에서 풀린다.
+- 타깃에서 도달하는 모듈(플러그인 모듈 포함 — native 빌드와 같은 root 집합) 중 Metadata가 있는 모듈을 의존 순서(위상 정렬)로 실행한다. 모듈 하나에 MetaCompiler 실행 한 번이며 입력 헤더 전부를 `#include`하는 합성 번역 단위를 Clang에 준다. 같은 모듈 안 헤더 사이의 base·참조는 이 실행 안에서 풀린다. 형식 철자를 Clang 버전과 무관하게 읽는 방식(정규 형식 탐침)은 [Clang 버전 지원](ClangVersionSupport.ko.md) 4절이 정한다(설계).
 - 명령: `Rocks.MetaCompiler --module M --input <h> --include <철자> [--private]… --output-root <stage>/<M> --descriptor <stage>/M.rocksmeta.json --identity-manifest <명세> --identity-inventory <임시> --import <의존 descriptor>… [--check] [--verify-sources]`.
 - clang 인자는 지금처럼 소유 모듈의 compile 프로필·public+private define/include와 의존 모듈의 public define/include다. 단 **자기 모듈을 포함한 모든 생성 include 루트는 게시본 대신 이번 실행의 stage 루트**로 바꿔 넘긴다(생성 헤더가 같은 모듈·의존 모듈의 생성 헤더를 include하므로 — 4.2절 — 검증 컴파일이 이전 빌드의 낡은 게시본이 아니라 이번 산출물을 봐야 한다).
 - 검증 컴파일은 생성 헤더마다(모듈 생성 헤더 포함) 따로 한다(소비자가 헤더를 하나씩 include하므로). 생성 소스(타입별 본문·모듈 등록 함수)는 게시 전에 컴파일하지 않는다 — 빌드가 그 모듈의 compile action으로 컴파일해 검증한다. 그래서 빌드 경로의 게시 전 검증은 생성 헤더(선언·형질·inline Trace)까지이고, 본문의 계약 위반(생성·소멸 noexcept, 접근 권한, 정적 검사)은 그 compile action이 실패하며 빌드가 컴파일러 출력 뒤에 RMC3000 안내를 붙인다. 빌드 없이 쓰는 호출자(단독 실행·도구 시험)는 `--verify-sources`로 생성 소스도 게시 전에 같은 인자로 구문 검사하게 한다(실패는 RMC3000과 원본 위치 안내). 빌드 명령의 `--verify-metadata-sources on`이 같은 옵션을 켠다. 검증 컴파일은 생성물마다 독립이라 `--jobs` 수만큼 함께 돌고, 실패는 생성물 순서에서 가장 앞선 것을 알린다. `--check`는 모든 생성 헤더·모듈 생성 헤더·생성 소스·descriptor와 출력 루트(`Public`·`Private`·`Source`)에 남은 잉여 생성 파일까지 본다.

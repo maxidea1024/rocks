@@ -34,7 +34,7 @@ public sealed record DescribedModule(ModuleDescriptor Descriptor, string OwnerNa
 /// <item>platforms에 이번 플랫폼이 없는 모듈.</item>
 /// </list>
 /// 오류(DescriptorException): 프로젝트가 이번 플랫폼을 targetPlatforms에 두지 않음, 여러 기술자가 같은 모듈 이름을
-/// 선언, 규칙은 있는데 기술자가 없는 모듈, 기술자는 있는데 규칙이 없는 모듈, 빠진 모듈을 타깃이나 남은 모듈이 참조.
+/// 선언, 규칙은 있는데 기술자가 없는 모듈, 기술자는 있는데 규칙이 없는 모듈, 빠진 모듈을 타깃이나 남은 모듈이 참조(링크 의존·DynamicModules).
 ///
 /// 규칙 계약: 규칙 로더는 이름을 알기 위해 모든 모듈 규칙의 Configure를 먼저 실행한 뒤 이 필터를 적용한다.
 /// 따라서 규칙은 빠질 모듈(켜지지 않은 플러그인, 다른 플랫폼 전용)이라도 예외 없이 NativeModuleInput을
@@ -167,7 +167,8 @@ public sealed class DescriptorModuleSet
         var included = ruleModules.Where(rule => modules[rule.Name].Included).ToList();
         foreach (NativeModuleInput rule in included)
         {
-            foreach (string dependency in rule.Dependencies)
+            // 실행 중 적재 모듈도 같다(Monolithic이 링크한다 — Docs/Design/ModuleLoader.ko.md 3.8절, BuildTargets BD25).
+            foreach (string dependency in rule.Dependencies.Concat(rule.DynamicModules))
             {
                 RequireIncluded(dependency, $"module '{rule.Name}'");
             }

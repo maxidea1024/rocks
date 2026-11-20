@@ -95,8 +95,23 @@ public static class ModuleTables
         }
 
         HashSet<string> entries = EntryModules(modules);
+        // 실행 중 적재 모듈은 로더가 Load(이름)로 찾으므로 모듈 표에 행이 있어야 한다(진입점 모듈). header-only·서드파티·Core 아래 모듈과
+        // 표 제공 모듈에 닿지 않는 모듈은 행이 없어 적재할 수 없으므로 거부한다(Docs/Design/ModuleLoader.ko.md 3.8절).
+        foreach (NativeModuleInput module in modules.Values)
+        {
+            foreach (string dynamic in module.DynamicModules)
+            {
+                if (modules.ContainsKey(dynamic) && !entries.Contains(dynamic))
+                {
+                    throw new ArgumentException($"Module {module.Name}, DynamicModules: '{dynamic}' cannot be loaded at run time because it has no " +
+                        "module entry point (header-only, third-party, below the module table provider, or not reaching it).");
+                }
+            }
+        }
+
         IEnumerable<string> roots = request.Targets.Count == 0 ? modules.Keys : request.Targets;
-        HashSet<string> reachable = Reachable(modules, roots);
+        // 동적 모듈은 실행 파일이 아니므로(입력 검사) 따라가도 표를 만들 실행 파일이 늘지 않는다. 대상 집합의 뜻을 빌드 대상과 맞춘다.
+        HashSet<string> reachable = LinkClosure.Reachable(roots, modules);
         var tables = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (NativeModuleInput module in request.Modules)
         {
@@ -121,32 +136,16 @@ public static class ModuleTables
 
     /// <summary>
     /// 실행 파일 <paramref name="executable"/>의 모듈 표 TU 내용이다. 행은 의존 우선 깊이 탐색의 후위 순서(의존 목록 순서대로)에서 진입점
-    /// 모듈만 고른 것이고 실행 파일이 마지막이다. 행의 의존은 직접 의존 가운데 진입점 모듈이며, 면제 모듈을 거치는 의존은 그 너머의 진입점
-    /// 모듈로 바꿔 싣는다(중복 제거, 처음 만난 순서).
+    /// 모듈만 고른 것이고, 그 뒤에 실행 중 적재 모듈(DynamicModules) 쪽이 같은 규칙으로 붙으며 실행 파일이 마지막이다. 행의 의존은 직접
+    /// 의존 가운데 진입점 모듈이며, 면제 모듈을 거치는 의존은 그 너머의 진입점 모듈로 바꿔 싣는다(중복 제거, 처음 만난 순서).
     /// </summary>
     internal static string Generate(string executable, IReadOnlyDictionary<string, NativeModuleInput> modules, HashSet<string> entries)
     {
-        var order = new List<NativeModuleInput>();
-        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        void Visit(string name)
-        {
-            if (!modules.TryGetValue(name, out NativeModuleInput? module) || !visited.Add(name))
-            {
-                return;
-            }
-
-            foreach (string dependency in module.Dependencies)
-            {
-                Visit(dependency);
-            }
-
-            if (entries.Contains(module.Name))
-            {
-                order.Add(module);
-            }
-        }
-
-        Visit(executable);
+        // 실행 파일이 링크하는 모듈(링크 폐포 다음 동적 모듈 쪽 — LinkClosure)에서 진입점 모듈만 고르고 실행 파일을 끝에 둔다. 동적 모듈
+        // 행은 실행 파일 행 앞에 오며, 행의 의존은 링크 의존뿐이라 Load(실행 파일)가 동적 모듈을 시작하지 않는다(Docs/Design/ModuleLoader.ko.md
+        // 3.8절).
+        var order = LinkClosure.Of(executable, modules).Append(executable)
+            .Where(name => modules.ContainsKey(name) && entries.Contains(name)).Select(name => modules[name]).ToList();
         foreach (NativeModuleInput module in order)
         {
             if (!IsIdentifier(module.Name))
@@ -228,27 +227,6 @@ public static class ModuleTables
         }
 
         return result;
-    }
-
-    private static HashSet<string> Reachable(IReadOnlyDictionary<string, NativeModuleInput> modules, IEnumerable<string> roots)
-    {
-        var reached = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var pending = new Stack<string>(roots);
-        while (pending.Count != 0)
-        {
-            string name = pending.Pop();
-            if (!modules.TryGetValue(name, out NativeModuleInput? module) || !reached.Add(name))
-            {
-                continue;
-            }
-
-            foreach (string dependency in module.Dependencies)
-            {
-                pending.Push(dependency);
-            }
-        }
-
-        return reached;
     }
 
     /// <summary>C 식별자(ASCII 영문자·숫자·'_', 숫자로 시작하지 않음)인지다.</summary>

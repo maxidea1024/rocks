@@ -87,7 +87,7 @@ void LogWrite(LogLevel level, const LogCategory& category, const LogCaptureTempl
         LogSubmit(level, category, text, nullptr, 0);
     } else {
         const FormatArg list[] = {MakeLogArg(args)...};
-        LogSubmit(level, category, WithRuntimeSpecChecks<Args...>(text), list, sizeof...(Args));
+        LogSubmit(level, category, WithArgumentInfo<Args...>(text), list, sizeof...(Args));
     }
 }
 
@@ -110,7 +110,9 @@ public:
             detail::LogAppendLine(out_, detail::ToCaptureTemplate(text), nullptr, 0);
         } else {
             const detail::FormatArg list[] = {detail::MakeLogArg(args)...};
-            detail::LogAppendLine(out_, detail::ToCaptureTemplate(text), list, sizeof...(Args));
+            detail::LogAppendLine(
+                out_, detail::WithArgumentInfo<Args...>(detail::ToCaptureTemplate(text)), list,
+                sizeof...(Args));
         }
     }
 
@@ -124,7 +126,8 @@ private:
 // - category: 정적 저장소일 필요가 없다(캡처는 이름만 담는다).
 // - text: 문자열 리터럴. 컴파일 타임에 검증된다(LogTemplate). 런타임 문자열은
 // RuntimeTemplate{text}.
-// - args: 자리 수와 같아야 한다. 정수·실수·bool·char·포인터·enum·문자열·Formatter<T> 타입.
+// - args: 자리 수와 같아야 한다. 정수·실수·bool·char·포인터·enum·문자열·Formatter<T> 타입, 그리고
+//   "{@Name}" 자리에는 LogStructure<T> 타입(LG16, Core/Diagnostics/LogStructure.h).
 // - 반환은 없다. 로깅 실패는 버림·집계로 끝난다.
 class Log {
 public:
@@ -182,7 +185,9 @@ public:
             detail::LogFatal(category, detail::ToCaptureTemplate(text), nullptr, 0);
         } else {
             const detail::FormatArg list[] = {detail::MakeLogArg(args)...};
-            detail::LogFatal(category, detail::ToCaptureTemplate(text), list, sizeof...(Args));
+            detail::LogFatal(category,
+                             detail::WithArgumentInfo<Args...>(detail::ToCaptureTemplate(text)),
+                             list, sizeof...(Args));
         }
     }
 

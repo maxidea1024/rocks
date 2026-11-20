@@ -65,10 +65,17 @@ struct BinnedAllocatorUsage {
 //   한계: 반환 표지는 값 일치다 — 살아 있는 블록의 둘째 word(offset 8)에 사용자가 그 블록의 표지
 //   값(인스턴스마다 무작위, 최상위 비트가 선 64비트 값)을 써 두면 정상 반환이 NotFound가 된다.
 //   주소가 재사용된 뒤의 옛 포인터는 새 포인터와 구분하지 못한다(Allocator.h).
+// - 겹친 중복 반환(오용): 같은 블록을 두 스레드가 같은 순간에 반환하면 둘 다 성공으로 돌아올 수
+//   있다(순서가 있는 중복 반환은 위처럼 NotFound다). 그 블록을 두 번째로 내주려는 순간 Fatal
+//   "free block lost its return marker"로 끝난다. 반환한 블록의 둘째 word(offset 8)를 덮어쓴
+//   use-after-free도 그 블록을 다시 내줄 때 같은 Fatal이다. 한계: 이 검사는 블록을 내줄 때만 한다.
+//   먼저 받은 쪽이 그 블록을 다시 반환한 뒤에는 잡지 못하고, 두 번 든 블록이 다시 나가기 전에
+//   slab으로 돌아가면(스레드 종료, Trim, 묶음 넘침) 검사를 지나지 않는다 — slab의 블록 계수가
+//   어긋나 그 slab의 살아 있는 블록이 다시 나가거나, 접근 위반이나 파괴 때의 Fatal이 될 수 있다.
 // - Stats의 liveBytes는 요청 크기가 아니라 내준 블록 크기의 합이다(반환 때 요청 크기를 알 수 없다
 //   — 큰 할당은 요청 크기 그대로다). Allocator.h의 "요청 크기"와 다르다.
-// - OS가 주소 범위 예약을 거부해도 생성은 실패하지 않는다: 크기를 절반씩 줄여 MinReserveBytes까지
-//   (설정이 그보다 작으면 설정값 한 번만) 다시 시도하고, 끝내 못 하면 모든 요청이 상위
+// - OS가 주소 범위 예약을 거부해도 생성은 실패하지 않는다: 크기를 절반씩 줄여 가며 MinReserveBytes
+//   이상인 동안(설정이 그보다 작으면 설정값 한 번만) 다시 시도하고, 끝내 못 하면 모든 요청이 상위
 //   allocator로 간다(느리지만 맞다). 실제 크기는 ReservedBytes()로 본다. 예약 범위가 다 찼거나
 //   slab commit이 실패한 작은 요청도 상위 allocator로 간다(Usage().fallbackAllocations).
 // - 상위 allocator: 이 객체와 모든 할당보다 오래 살고, 어느 스레드에서나 부를 수 있어야 한다. 상위
@@ -93,6 +100,13 @@ public:
     explicit BinnedAllocator(Allocator& backing, const BinnedAllocatorConfig& config = {}) noexcept;
     // 반환하지 않은 할당이 남아 있으면 Fatal이다. 예약한 주소 범위와 내부 저장소를 모두 푼다.
     ~BinnedAllocator() noexcept override;
+
+    // 스레드 하나가 이 인스턴스의 캐시에 쥘 수 있는 블록 바이트의 상한이다(등급 32개마다 묶음 둘 —
+    // 약 2.25 MiB, 블록 3,120개). 캐시의 블록은 그 스레드가 끝나거나 그 스레드가 Trim을 부를 때까지
+    // 남는다: 다른 스레드의 Trim은 건드리지 않으므로, 한 번 크게 쓰고 쉬는 스레드는 이만큼을 쥔
+    // 채로 있다. 캐시의 블록이 든 slab은 풀리지 않아서, 붙들리는 commit은 블록들이 slab에 흩어진
+    // 정도에 따라 이보다 클 수 있다(가장 나쁜 경우 블록마다 다른 slab — 3,120 × 64 KiB).
+    static constexpr usize MaxThreadCacheBytes = 2361856;
 
     BinnedAllocator(const BinnedAllocator&) = delete;
     BinnedAllocator& operator=(const BinnedAllocator&) = delete;
