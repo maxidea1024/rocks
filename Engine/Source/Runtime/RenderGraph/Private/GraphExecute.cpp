@@ -6,9 +6,9 @@
 #include <TraceCapture/TraceMark.h>
 
 // 그래프 실행이다: 그래프 시작 업로드, 첫 사용 pass 직전 할당(같은 그래프 안 재사용 자리 또는 풀),
-// Raster pass마다 장치 기록 열기, prologue 즉시 전이, pass 기록 함수와 CPU·GPU 구간, 그래프 끝
-// 마무리(Docs/Design/RenderBase.ko.md 7.1절 실행·업로드 행, 8절 RG2, UE
-// RC/Private/RenderGraphBuilder.cpp:2104–2167, 2691–2837, 3424–3528).
+// Raster pass마다 장치 기록 열기, prologue 즉시 전이, pass 기록 함수와 CPU·GPU 구간, async compute
+// 기록과 fork·join 대기, 그래프 끝 마무리(Docs/Design/RenderBase.ko.md 7.1절 실행·업로드 행, 8절
+// RG2·RG4, UE RC/Private/RenderGraphBuilder.cpp:2098–2167, 2691–2837, 3424–3528).
 namespace rocks::render::detail {
 
 using graphics::ResourceAccess;
@@ -155,8 +155,10 @@ Result<void> CloseRecording(GraphState& state) noexcept {
         state.commands->PopMarker();
     }
 
+    const bool compute = state.recordingQueue == graphics::QueueKind::AsyncCompute;
     state.commands = nullptr;
     state.recordingPass = GraphIndexNone;
+    state.recordingQueue = graphics::QueueKind::Graphics;
     auto submitted = state.device->EndFrame();
     if (!submitted) {
         return Result<void>::Failure(RecordGraphError(state, submitted.Error(), false,
@@ -164,6 +166,51 @@ Result<void> CloseRecording(GraphState& state) noexcept {
                                                       ErrorCodeName(submitted.Error())));
     }
 
+    // compute 기록이면 그 run의 async pass들에 제출 지점을 적는다(join이 기다린다).
+    if (compute) {
+        state.lastComputePoint = submitted.Value();
+        for (uint32 pass = state.computeRunStart; pass < state.passes.Size(); ++pass) {
+            PassRecord& record = state.passes[pass];
+            if (record.culled) {
+                continue;
+            }
+
+            if (!record.async) {
+                break;
+            }
+
+            record.submitted = submitted.Value();
+        }
+
+        state.computeRunStart = GraphIndexNone;
+    }
+
+    return Result<void>::Success();
+}
+
+// 그래프 GPU 프레임을 graphics 기록에서 연다(compute 기록에는 GPU 구간을 두지 않는다, RG4).
+void BeginTraceFrame(GraphState& state) noexcept {
+    if (state.trace != nullptr && !state.traceFrameOpen && state.commands != nullptr &&
+        state.recordingQueue == graphics::QueueKind::Graphics) {
+        state.trace->BeginFrame(*state.device, *state.commands, state.frame);
+        state.traceFrameOpen = true;
+    }
+}
+
+// attachment 없는 graphics 기록을 연다(Compute·Copy pass, prologue·그래프 끝 join 기록).
+Result<void> OpenGraphicsRecording(GraphState& state, const char* purpose) noexcept {
+    auto begun = state.device->BeginPass(graphics::PassDesc{});
+    if (!begun) {
+        return Result<void>::Failure(RecordGraphError(state, begun.Error(), false,
+                                                      "{} could not begin a recording ({})",
+                                                      purpose, ErrorCodeName(begun.Error())));
+    }
+
+    state.commands = begun.Value();
+    state.recordingQueue = graphics::QueueKind::Graphics;
+    ++state.stats.recordings;
+    BeginTraceFrame(state);
+    RestoreScopeMarkers(state);
     return Result<void>::Success();
 }
 
@@ -279,6 +326,11 @@ void IssueTransitions(FrameArena& arena, GraphState& state, uint32 pass) noexcep
             continue;
         }
 
+        // async compute fork 전이는 fork 자리의 graphics 기록이 낸다(IssueForkTransitions).
+        if (record.forkPass != GraphIndexNone) {
+            continue;
+        }
+
         auto pushed = state.lowered.TryPushBack(arena, ToDevice(state, record));
         if (!pushed) {
             // 임시 공간이 없으면 지금까지 모은 것을 내고 하나씩 낸다.
@@ -302,6 +354,101 @@ void IssueTransitions(FrameArena& arena, GraphState& state, uint32 pass) noexcep
     }
 
     state.lowered.Clear();
+}
+
+// fork 자리(graphics pass forkPass의 epilogue 또는 GraphProloguePass)의 graphics → async compute
+// 전이를 지금 graphics 기록에 낸다(RG4: compute 기록은 graphics 상태 barrier를 낼 수 없다).
+void IssueForkTransitions(FrameArena& arena, GraphState& state, uint32 forkPass) noexcept {
+    state.lowered.Clear();
+    for (const GraphTransitionRecord& record : state.transitions) {
+        if (record.forkPass != forkPass) {
+            continue;
+        }
+
+        const graphics::ResourceTransition transition = ToDevice(state, record);
+        if (!state.lowered.TryPushBack(arena, transition) && state.commands != nullptr) {
+            state.commands->Transition(Span<const graphics::ResourceTransition>(&transition, 1));
+            ++state.stats.transitions;
+        }
+    }
+
+    if (state.commands != nullptr && !state.lowered.IsEmpty()) {
+        state.commands->Transition(state.lowered.View());
+        state.stats.transitions += static_cast<uint32>(state.lowered.Size());
+    }
+
+    state.lowered.Clear();
+}
+
+// fork pass forkPass를 기다리는 run의 async pass 자원을 미리 할당한다(fork 전이가 장치 handle을
+// 쓴다).
+Result<void> PrepareForkedPasses(FrameArena& arena, GraphState& state, uint32 forkPass) noexcept {
+    for (uint32 pass = 0; pass < state.passes.Size(); ++pass) {
+        const PassRecord& record = state.passes[pass];
+        if (record.async && record.runFork == forkPass) {
+            auto prepared = PreparePass(arena, state, pass);
+            if (!prepared) {
+                return prepared;
+            }
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+// graphics queue가 compute 지점 point를 기다리게 한다(join).
+Result<void> WaitComputeOnGraphics(GraphState& state, graphics::GpuFencePoint point) noexcept {
+    if (point.IsNull() || point.value <= state.joinedComputeValue) {
+        return Result<void>::Success();
+    }
+
+    auto waited = state.device->QueueWait(graphics::QueueKind::Graphics, point);
+    if (!waited) {
+        return Result<void>::Failure(RecordGraphError(state, waited.Error(), false,
+                                                      "graph join wait failed ({})",
+                                                      ErrorCodeName(waited.Error())));
+    }
+
+    state.joinedComputeValue = point.value;
+    ++state.stats.queueWaits;
+    return Result<void>::Success();
+}
+
+// run의 첫 async pass에서 compute 기록을 연다: 먼저 run의 fork 지점을 compute queue가 기다린다.
+Result<void> OpenComputeRecording(GraphState& state, uint32 pass) noexcept {
+    const PassRecord& record = state.passes[pass];
+    const graphics::GpuFencePoint fork = record.runFork == GraphIndexNone
+                                             ? state.prologuePoint
+                                             : state.passes[record.runFork].submitted;
+    if (!fork.IsNull() && fork.value > state.forkWaitedValue) {
+        auto waited = state.device->QueueWait(graphics::QueueKind::AsyncCompute, fork);
+        if (!waited) {
+            return Result<void>::Failure(RecordGraphError(state, waited.Error(), false,
+                                                          "graph fork wait failed ({})",
+                                                          ErrorCodeName(waited.Error())));
+        }
+
+        state.forkWaitedValue = fork.value;
+        ++state.stats.queueWaits;
+    }
+
+    graphics::PassDesc desc;
+    desc.queue = graphics::QueueKind::AsyncCompute;
+    auto begun = state.device->BeginPass(desc);
+    if (!begun) {
+        const char* passName = record.name->Name() != nullptr ? record.name->Name() : "";
+        return Result<void>::Failure(RecordGraphError(
+            state, begun.Error(), false, "async compute pass '{}' could not begin a recording ({})",
+            passName, ErrorCodeName(begun.Error())));
+    }
+
+    state.commands = begun.Value();
+    state.recordingQueue = graphics::QueueKind::AsyncCompute;
+    state.computeRunStart = pass;
+    ++state.stats.recordings;
+    ++state.stats.computeRecordings;
+    RestoreScopeMarkers(state);
+    return Result<void>::Success();
 }
 
 } // namespace
@@ -374,7 +521,11 @@ void EnterScopeChain(FrameArena& arena, GraphState& state, uint32 scope) noexcep
             ++state.scopeMarkers;
         }
 
-        entry.gpuSpan = state.trace->BeginSpan(*state.commands, *record.name);
+        // GPU 구간은 graphics queue 하나의 장부다(compute 기록에서 연 구간은 CPU 구간만, RG4).
+        if (state.recordingQueue == graphics::QueueKind::Graphics) {
+            entry.gpuSpan = state.trace->BeginSpan(*state.commands, *record.name);
+            entry.gpuOpened = true;
+        }
     }
 
     // 번호가 있는 구간은 연 직후 trace 표지로 번호를 남긴다(7.5절).
@@ -395,8 +546,10 @@ void LeaveScopes(GraphState& state, uint32 scope) noexcept {
             break;
         }
 
-        if (state.trace != nullptr) {
-            if (state.commands != nullptr) {
+        // 끝 timestamp는 graphics 기록에만 쓴다(compute 기록이면 그 구간을 무효로 닫는다).
+        if (state.trace != nullptr && entry.gpuOpened) {
+            if (state.commands != nullptr &&
+                state.recordingQueue == graphics::QueueKind::Graphics) {
                 state.trace->EndSpan(*state.commands, entry.gpuSpan);
             } else {
                 state.trace->DropSpan(entry.gpuSpan);
@@ -585,9 +738,64 @@ Result<void> ExecutePass(RenderGraph& graph, FrameArena& arena, GraphState& stat
         }
     }
 
+    // async compute(RG4): compute 기록에 이어 쓰고, 열린 graphics 기록이 있으면 먼저 닫는다. run의
+    // 첫 pass가 fork 지점을 기다리고 compute 기록을 연다.
+    if (record.async) {
+        if (state.commands != nullptr && state.recordingQueue == graphics::QueueKind::Graphics) {
+            LeaveScopes(state, record.scope);
+            auto closed = CloseRecording(state);
+            if (!closed) {
+                return closed;
+            }
+        }
+
+        if (state.commands == nullptr) {
+            auto opened = OpenComputeRecording(state, pass);
+            if (!opened) {
+                return opened;
+            }
+        }
+    } else {
+        // graphics pipe로 돌아오면 compute 기록을 제출한다.
+        if (state.commands != nullptr &&
+            state.recordingQueue == graphics::QueueKind::AsyncCompute) {
+            LeaveScopes(state, record.scope);
+            auto closed = CloseRecording(state);
+            if (!closed) {
+                return closed;
+            }
+        }
+
+        // join: 새 graphics 기록 앞에서, 이 pass를 join으로 둔 async pass들의 compute 제출을
+        // 기다린다.
+        if (record.joins) {
+            if (state.commands != nullptr) {
+                LeaveScopes(state, record.scope);
+                auto closed = CloseRecording(state);
+                if (!closed) {
+                    return closed;
+                }
+            }
+
+            graphics::GpuFencePoint point;
+            for (const PassRecord& async : state.passes) {
+                if (async.async && async.joinPass == pass && async.submitted.value > point.value) {
+                    point = async.submitted;
+                }
+            }
+
+            auto joined = WaitComputeOnGraphics(state, point);
+            if (!joined) {
+                return joined;
+            }
+        }
+    }
+
     // Raster pass는 자기 렌더 타깃으로 장치 기록을 연다. 그 밖은 열린 기록에 이어 쓴다. 이 pass의
     // 구간 사슬 밖 구간은 지금 기록에서 닫는다(GPU 구간 끝이 앞 기록에 남는다).
-    if (record.kind == GraphPassKind::Raster) {
+    if (record.async) {
+        // 위에서 compute 기록을 열었다.
+    } else if (record.kind == GraphPassKind::Raster) {
         LeaveScopes(state, record.scope);
         auto closed = CloseRecording(state);
         if (!closed) {
@@ -647,13 +855,10 @@ Result<void> ExecutePass(RenderGraph& graph, FrameArena& arena, GraphState& stat
         }
 
         state.commands = begun.Value();
+        state.recordingQueue = graphics::QueueKind::Graphics;
         state.recordingPass = pass;
         ++state.stats.recordings;
-        if (state.trace != nullptr && !state.traceFrameOpen) {
-            state.trace->BeginFrame(*state.device, *state.commands, state.frame);
-            state.traceFrameOpen = true;
-        }
-
+        BeginTraceFrame(state);
         RestoreScopeMarkers(state);
     } else if (state.commands != nullptr && UsesOpenAttachment(state, pass)) {
         // Compute·Copy pass가 열린 기록의 attachment subresource에 접근하면 그 기록을 닫는다(장치는
@@ -665,7 +870,7 @@ Result<void> ExecutePass(RenderGraph& graph, FrameArena& arena, GraphState& stat
         }
     }
 
-    if (record.kind != GraphPassKind::Raster && state.commands == nullptr) {
+    if (!record.async && record.kind != GraphPassKind::Raster && state.commands == nullptr) {
         // 렌더 타깃이 없는 Compute·Copy pass는 attachment 없는 기록을 연다.
         auto begun = state.device->BeginPass(graphics::PassDesc{});
         if (!begun) {
@@ -676,12 +881,9 @@ Result<void> ExecutePass(RenderGraph& graph, FrameArena& arena, GraphState& stat
         }
 
         state.commands = begun.Value();
+        state.recordingQueue = graphics::QueueKind::Graphics;
         ++state.stats.recordings;
-        if (state.trace != nullptr && !state.traceFrameOpen) {
-            state.trace->BeginFrame(*state.device, *state.commands, state.frame);
-            state.traceFrameOpen = true;
-        }
-
+        BeginTraceFrame(state);
         RestoreScopeMarkers(state);
     }
 
@@ -705,11 +907,93 @@ Result<void> ExecutePass(RenderGraph& graph, FrameArena& arena, GraphState& stat
     IssueSplitBegins(arena, state, pass);
     record.executed = true;
     ++state.stats.executedPasses;
+    if (record.async) {
+        ++state.stats.asyncComputePasses;
+    }
+
+    // fork pass: 기다리는 run의 fork 전이를 이 graphics 기록에 내고 기록을 닫아 지점을 남긴다(다음
+    // pass는 새 기록을 연다). 구간은 열린 채로 두고 marker만 이 기록에서 닫는다.
+    if (record.forks) {
+        auto forked = PrepareForkedPasses(arena, state, pass);
+        if (!forked) {
+            return forked;
+        }
+
+        IssueForkTransitions(arena, state, pass);
+        auto closed = CloseRecording(state);
+        if (!closed) {
+            return closed;
+        }
+
+        record.submitted = state.device->LastSubmittedFence(graphics::QueueKind::Graphics);
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> ExecutePrologue(FrameArena& arena, GraphState& state) noexcept {
+    // 그래프 업로드를 먼저 제출한다(prologue fork가 그 뒤를 기다린다. 업로드 대상을 async pass가
+    // 읽을 수 있다).
+    auto uploads = state.device->SubmitUploads();
+    if (!uploads) {
+        return Result<void>::Failure(RecordGraphError(state, uploads.Error(), false,
+                                                      "graph upload submission failed ({})",
+                                                      ErrorCodeName(uploads.Error())));
+    }
+
+    bool prologue = false;
+    for (const GraphTransitionRecord& record : state.transitions) {
+        prologue = prologue || record.forkPass == GraphProloguePass;
+    }
+
+    // prologue fork 전이(처음 쓰는 상태가 graphics 상태인 자원 등)는 그 전이만 담은 graphics 기록
+    // 하나에서 낸다(UE prologue pass).
+    if (prologue) {
+        auto prepared = PrepareForkedPasses(arena, state, GraphIndexNone);
+        if (!prepared) {
+            return prepared;
+        }
+
+        auto opened = OpenGraphicsRecording(state, "graph prologue");
+        if (!opened) {
+            return opened;
+        }
+
+        IssueForkTransitions(arena, state, GraphProloguePass);
+        auto closed = CloseRecording(state);
+        if (!closed) {
+            return closed;
+        }
+    }
+
+    state.prologuePoint = state.device->LastSubmittedFence(graphics::QueueKind::Graphics);
     return Result<void>::Success();
 }
 
 Result<void> FinishGraph(FrameArena& arena, GraphState& state, bool success) noexcept {
     Result<void> outcome = Result<void>::Success();
+
+    // 그래프 끝 join(RG4, UE epilogue): 열린 compute 기록을 제출하고, graphics queue가 아직
+    // 기다리지 않은 compute 제출이 있으면 그것을 기다리는 graphics 기록을 연다. 그래서 그래프의
+    // 마지막 제출은 늘 graphics이고 마지막 전이·export 상태도 그 기록에서 낸다.
+    if (state.commands != nullptr && state.recordingQueue == graphics::QueueKind::AsyncCompute) {
+        auto closed = CloseRecording(state);
+        if (!closed) {
+            outcome = Move(closed);
+        }
+    }
+
+    if (state.lastComputePoint.value > state.joinedComputeValue) {
+        auto closed = CloseRecording(state);
+        auto joined = closed ? WaitComputeOnGraphics(state, state.lastComputePoint) : Move(closed);
+        if (joined) {
+            joined = OpenGraphicsRecording(state, "graph epilogue");
+        }
+
+        if (outcome && !joined) {
+            outcome = Move(joined);
+        }
+    }
 
     // 그래프 끝 상태(export·import 마지막 상태) 전이를 마지막 기록에 낸다.
     if (success && state.mode == GraphMode::Immediate) {
@@ -806,13 +1090,22 @@ void GraphExecutionAccess::Run(RenderGraph& graph, GraphPassExecutor& executor,
     TraceScopeName& name = *state.passes[pass].name;
     GraphPassContext context(graph, commands, pass);
     CpuScope cpu(name);
-    if (state.trace != nullptr) {
+    if (state.trace != nullptr && state.recordingQueue == graphics::QueueKind::Graphics) {
         GpuScope gpu(*state.trace, commands, name);
         executor.Execute(context);
         return;
     }
 
+    // compute 기록은 GPU 구간 없이 marker만 둔다(RG4).
+    const bool marker = state.trace != nullptr && state.trace->MarkersEnabled();
+    if (marker) {
+        commands.PushMarker(StringView(name.Name()));
+    }
+
     executor.Execute(context);
+    if (marker) {
+        commands.PopMarker();
+    }
 }
 
 void GraphExecutionAccess::Record(RenderGraph& graph, GraphPassExecutor& executor,
@@ -827,12 +1120,23 @@ Result<void> GraphExecutionAccess::Replay(RenderGraph& graph, const GraphCommand
                                           graphics::CommandContext& commands,
                                           uint32 pass) noexcept {
     GraphState& state = *graph.state_;
-    if (state.trace != nullptr) {
-        GpuScope gpu(*state.trace, commands, *state.passes[pass].name);
+    TraceScopeName& name = *state.passes[pass].name;
+    if (state.trace != nullptr && state.recordingQueue == graphics::QueueKind::Graphics) {
+        GpuScope gpu(*state.trace, commands, name);
         return list.Replay(commands);
     }
 
-    return list.Replay(commands);
+    const bool marker = state.trace != nullptr && state.trace->MarkersEnabled();
+    if (marker) {
+        commands.PushMarker(StringView(name.Name()));
+    }
+
+    auto replayed = list.Replay(commands);
+    if (marker) {
+        commands.PopMarker();
+    }
+
+    return replayed;
 }
 
 } // namespace rocks::render

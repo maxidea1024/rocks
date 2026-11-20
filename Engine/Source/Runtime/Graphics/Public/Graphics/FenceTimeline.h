@@ -161,4 +161,10 @@ private:
     bool watcherStopping_ = false;
 };
 
+// compute queue가 없는 장치(D3D11·OpenGL ES)의 Device::QueueWait다. graphics 지점끼리만 받고 할
+// 일이 없다(같은 queue는 제출 순서). 실패: AsyncCompute 쪽 Unsupported, 그 밖은
+// timeline.IsComplete의 인자 오류(WrongContext·InvalidArgument·Destroyed).
+Result<void> SingleQueueWait(const FenceTimeline& timeline, QueueKind queue,
+                             GpuFencePoint point) noexcept;
+
 } // namespace rocks::graphics

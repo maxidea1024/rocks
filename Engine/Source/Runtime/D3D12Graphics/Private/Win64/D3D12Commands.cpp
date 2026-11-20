@@ -200,6 +200,29 @@ Result<CommandContext*> D3D12Device::BeginPass(const PassDesc& pass) noexcept {
 
     platform::LockGuard lock(gate_);
 
+    // async compute 기록(RG4): attachment가 없어야 하고 compute queue가 있어야 한다.
+    if (pass.queue == QueueKind::AsyncCompute) {
+        if (!computeQueue_) {
+            return FailCode<CommandContext*>(ErrorCode::Unsupported,
+                                             "the device has no async compute queue");
+        }
+
+        if (pass.colorCount != 0 || !pass.depth.texture.IsNull()) {
+            return FailCode<CommandContext*>(ErrorCode::InvalidArgument,
+                                             "an async compute pass cannot have attachments");
+        }
+
+        if (recording_) {
+            return Result<CommandContext*>::Failure(ErrorCode::Busy);
+        }
+
+        if (timeline_.IsLost()) {
+            return Result<CommandContext*>::Failure(ErrorCode::Destroyed);
+        }
+
+        return BeginComputeRecording();
+    }
+
     if (pass.colorCount > MaxColorTargets) {
         return FailCode<CommandContext*>(ErrorCode::InvalidArgument,
                                          "pass has more color attachments than MaxColorTargets");
@@ -390,6 +413,12 @@ void D3D12Device::SetWritableTexture(uint32 slot, TextureHandle view) noexcept {
 
 void D3D12Device::RequireBufferState(ID3D12Resource* resource,
                                      D3D12_RESOURCE_STATES needed) noexcept {
+    // compute 기록은 compute queue가 받는 상태만 낸다(픽셀 셰이더 읽기 비트는 뺀다, RG4).
+    if (!AdaptForQueue(needed)) {
+        ++ignoredDraws_;
+        return;
+    }
+
     BufferState* entry = nullptr;
     for (BufferState& state : bufferStates_) {
         if (state.resource == resource) {
@@ -645,6 +674,12 @@ void D3D12Device::SetViewport(const Viewport& viewport) noexcept {
     value.Height = viewport.height;
     value.MinDepth = viewport.minDepth;
     value.MaxDepth = viewport.maxDepth;
+    // compute 기록에는 래스터 상태가 없다(RG4).
+    if (computeRecording_) {
+        ++ignoredDraws_;
+        return;
+    }
+
     list_->RSSetViewports(1, &value);
 }
 
@@ -652,11 +687,21 @@ void D3D12Device::SetScissor(const ScissorRect& scissor) noexcept {
     const D3D12_RECT rect = {static_cast<LONG>(scissor.x), static_cast<LONG>(scissor.y),
                              static_cast<LONG>(scissor.x + scissor.width),
                              static_cast<LONG>(scissor.y + scissor.height)};
+    if (computeRecording_) {
+        ++ignoredDraws_;
+        return;
+    }
+
     list_->RSSetScissorRects(1, &rect);
 }
 
 void D3D12Device::SetStencilReference(uint32 reference) noexcept {
     stencilReference_ = reference;
+    if (computeRecording_) {
+        ++ignoredDraws_;
+        return;
+    }
+
     list_->OMSetStencilRef(reference);
 }
 
@@ -691,7 +736,8 @@ Result<void> D3D12Device::CopyBuffer(BufferHandle destination, uint64 destinatio
 
 Result<void> D3D12Device::CopyTexture(TextureHandle destination, TextureHandle source) noexcept {
     platform::LockGuard lock(gate_);
-    if (!recording_) {
+    // compute 기록은 텍스처 복사를 받지 않는다(RG4, Device.h CommandContext 주석).
+    if (!recording_ || computeRecording_) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 

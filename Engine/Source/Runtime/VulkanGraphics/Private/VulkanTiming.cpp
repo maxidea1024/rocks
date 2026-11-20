@@ -220,10 +220,14 @@ usize VulkanDevice::CollectTimestamps(Span<TimestampSample> out) noexcept {
     return timestamps_.Collect(out);
 }
 
-Result<ClockCalibration> VulkanDevice::CalibrateClocks() noexcept {
+Result<ClockCalibration> VulkanDevice::CalibrateClocks(QueueKind queue) noexcept {
     auto owner = ownership_.Check();
     if (!owner) {
         return Result<ClockCalibration>::Failure(owner.Error());
+    }
+
+    if (queue != QueueKind::Graphics) {
+        return Result<ClockCalibration>::Failure(ErrorCode::Unsupported);
     }
 
     if (queryPool_ == VK_NULL_HANDLE || getCalibratedTimestamps_ == nullptr) {

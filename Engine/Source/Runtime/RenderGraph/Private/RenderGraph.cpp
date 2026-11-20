@@ -334,6 +334,15 @@ RenderGraph::RenderGraph(const RenderGraphDesc& desc) noexcept : arena_(RequireA
     state_->scratch = desc.scratch;
     state_->parallelRecording = desc.parallelRecording && desc.mode == GraphMode::Deferred &&
                                 desc.scheduler != nullptr && desc.scratch != nullptr;
+    // async compute(RG4): 즉시 실행 모드는 늘 끈다(UE와 같다). Auto는 장치의 효율 판단을, Always는
+    // compute queue가 있는지만 본다. render pass 병합(GX13 뒤)을 넣으면 그때도 끈다(병합 구간 안에
+    // fork·join 전이를 둘 수 없다).
+    const graphics::DeviceFeatures& features = desc.device->Caps().features;
+    const bool allowed =
+        desc.asyncCompute == GraphAsyncCompute::Always
+            ? features.asyncCompute
+            : desc.asyncCompute == GraphAsyncCompute::Auto && features.efficientAsyncCompute;
+    state_->asyncEnabled = allowed && desc.mode == GraphMode::Deferred;
     state_->serial = NextGraphSerial();
 }
 
@@ -844,12 +853,6 @@ Result<GraphPass> RenderGraph::AddPassWithAccesses(TraceScopeName& name, GraphPa
     }
 
     const char* passName = name.Name() != nullptr ? name.Name() : "";
-    if (kind == GraphPassKind::AsyncCompute) {
-        return reject(RecordGraphError(state, ErrorCode::Unsupported, false,
-                                       "pass '{}' uses async compute, which arrives with RG4",
-                                       passName));
-    }
-
     // 렌더 타깃 검사다.
     const bool raster = kind == GraphPassKind::Raster;
     if (raster && target.kind == GraphTargetKind::None) {
@@ -1253,6 +1256,11 @@ Result<void> RenderGraph::Execute() noexcept {
             outcome = ExecuteUploads(arena_, state);
         }
 
+        // async compute: 그래프 시작 지점과 prologue fork 전이(RG4).
+        if (outcome && state.hasAsyncPasses) {
+            outcome = ExecutePrologue(arena_, state);
+        }
+
         // 병렬 기록(RG3): 기록 함수를 worker에서 기록 목록에 기록한다(재생은 아래 선언 순서 실행).
         if (outcome && state.parallelRecording) {
             outcome = RecordPassesInParallel(*this, arena_, state);
@@ -1281,6 +1289,14 @@ bool RenderGraph::IsCulled(GraphPass pass) const noexcept {
     }
 
     return state_->passes[pass.index].culled;
+}
+
+GraphPassPipe RenderGraph::PassPipe(GraphPass pass) const noexcept {
+    if (state_ == nullptr || pass.index >= state_->passes.Size()) {
+        return GraphPassPipe::Graphics;
+    }
+
+    return state_->passes[pass.index].async ? GraphPassPipe::AsyncCompute : GraphPassPipe::Graphics;
 }
 
 namespace {

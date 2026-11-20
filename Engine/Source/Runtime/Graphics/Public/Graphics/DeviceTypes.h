@@ -838,6 +838,14 @@ struct DepthAttachment {
 bool IsAttachmentInRange(TextureDimension dimension, uint32 depth, uint32 mipLevels, uint32 slices,
                          uint32 mipLevel, uint32 slice) noexcept;
 
+// 제출 queue 종류다(계획 11.2절 QueueId, RenderBase 8절 RG4). AsyncCompute는 graphics와 따로 도는
+// compute queue다(DeviceFeatures::asyncCompute가 있을 때만). copy queue는 그래프 밖 업로드·스트리밍
+// 계층이 맡는다(결정 R6).
+enum class QueueKind : uint8 {
+    Graphics,
+    AsyncCompute
+};
+
 // 패스 시작 설정이다(Device::BeginPass, GX4). 색 attachment는 앞에서부터 colorCount개를 쓴다. 모든
 // attachment의 크기(attachment mip의 크기)와 표본 수(TextureDesc::sampleCount)가 같아야 한다. 색도
 // 깊이도 없는 패스는 compute·복사 전용이고 그 안의 그리기는 무시된다.
@@ -849,10 +857,15 @@ bool IsAttachmentInRange(TextureDimension dimension, uint32 depth, uint32 mipLev
 //   pass.colors[1] = {normal, LoadAction::Clear, StoreAction::Store, {0.5f, 0.5f, 1, 1}};
 //   pass.depth.texture = depth;
 //   auto commands = device.BeginPass(pass);
+//
+// queue가 AsyncCompute면 compute queue 기록이다(RenderBase 8절 RG4): attachment가 없어야 하고
+// compute 명령만 받는다(CommandContext의 "async compute 기록" 규칙). EndFrame이 compute queue에
+// 제출한다.
 struct PassDesc {
     ColorAttachment colors[MaxColorTargets];
     uint32 colorCount = 0;
     DepthAttachment depth;
+    QueueKind queue = QueueKind::Graphics;
 };
 
 // viewport다(픽셀 단위, 원점은 대상 왼쪽 위). 깊이 범위 기본은 [0, 1]이다.
@@ -871,12 +884,6 @@ struct ScissorRect {
     uint32 y = 0;
     uint32 width = 0;
     uint32 height = 0;
-};
-
-// 제출 queue 종류다(계획 11.2절 QueueId). 1차 범위는 graphics queue 하나다(RenderBase 1절 렌더
-// 그래프 결정). compute·copy queue는 그 단계에서 더한다.
-enum class QueueKind : uint8 {
-    Graphics
 };
 
 // GPU 제출 하나의 완료 지점이다(계획 11.2절 GpuFencePoint). 장치 incarnation(deviceEpoch)·queue·
@@ -1017,6 +1024,9 @@ struct TimestampSample {
     uint64 ticks = 0;
     // true면 값이 무효다(구간 끊김 또는 제출 실패). 이 값으로 구간을 재지 않는다.
     bool disjoint = false;
+    // timestamp를 쓴 기록의 queue다. query 번호는 queue마다 따로이고 tick의 시간축도 queue마다
+    // 다를 수 있다(CalibrateClocks(queue)로 바꾼다).
+    QueueKind queue = QueueKind::Graphics;
 };
 
 // 같은 순간의 GPU tick과 CPU 시각 한 쌍이다(Device::CalibrateClocks). CPU 시각은

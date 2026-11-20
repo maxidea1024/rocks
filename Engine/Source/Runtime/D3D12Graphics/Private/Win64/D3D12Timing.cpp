@@ -13,15 +13,28 @@ usize D3D12Device::CollectTimestamps(Span<TimestampSample> out) noexcept {
         return 0;
     }
     HarvestTimestamps();
-    return timestamps_.Collect(out);
+    usize collected = timestamps_.Collect(out);
+    // compute queue 결과는 graphics 결과 뒤에 queue 표시를 달아 낸다(RG4).
+    if (computeTimestampHeap_.Get() != nullptr && collected < out.Size()) {
+        const usize compute = computeTimestamps_.Collect(
+            Span<TimestampSample>(out.Data() + collected, out.Size() - collected));
+        for (usize index = collected; index < collected + compute; ++index) {
+            out[index].queue = QueueKind::AsyncCompute;
+        }
+
+        collected += compute;
+    }
+
+    return collected;
 }
 
-Result<ClockCalibration> D3D12Device::CalibrateClocks() noexcept {
+Result<ClockCalibration> D3D12Device::CalibrateClocks(QueueKind queue) noexcept {
     auto owner = ownership_.Check();
     if (!owner) {
         return Result<ClockCalibration>::Failure(owner.Error());
     }
-    if (timestampHeap_.Get() == nullptr) {
+    const bool compute = queue == QueueKind::AsyncCompute;
+    if ((compute ? computeTimestampHeap_.Get() : timestampHeap_.Get()) == nullptr) {
         return Result<ClockCalibration>::Failure(ErrorCode::Unsupported);
     }
     if (timeline_.IsLost()) {
@@ -32,7 +45,9 @@ Result<ClockCalibration> D3D12Device::CalibrateClocks() noexcept {
     UINT64 gpu = 0;
     UINT64 cpu = 0;
     LARGE_INTEGER frequency{};
-    const HRESULT calibrated = queue_->GetClockCalibration(&gpu, &cpu);
+    // queue마다 GPU 시계가 다를 수 있어 그 queue의 쌍을 읽는다(RG4).
+    const HRESULT calibrated =
+        (compute ? computeQueue_.Get() : queue_.Get())->GetClockCalibration(&gpu, &cpu);
     if (FAILED(calibrated) || !QueryPerformanceFrequency(&frequency) || frequency.QuadPart <= 0) {
         DetectLost(calibrated);
         return FailWith<ClockCalibration>("GetClockCalibration failed");
@@ -40,7 +55,7 @@ Result<ClockCalibration> D3D12Device::CalibrateClocks() noexcept {
     ClockCalibration calibration;
     calibration.gpuTicks = gpu;
     calibration.cpuNanoseconds = TicksToNanoseconds(cpu, static_cast<uint64>(frequency.QuadPart));
-    calibration.gpuFrequency = timestampFrequency_;
+    calibration.gpuFrequency = compute ? computeTimestampFrequency_ : timestampFrequency_;
     // QPC는 platform::MonotonicTicks와 같은 원천이다(PlatformBase Win64).
     calibration.cpuTicks = cpu;
     // GPU·CPU 값을 한 호출이 함께 읽으므로 오차는 CPU tick 하나의 길이로 둔다.
@@ -85,6 +100,12 @@ void D3D12Device::HarvestTimestamps() noexcept {
         return;
     }
     timestamps_.Harvest(completed, timestampSource_);
+    if (computeTimestampHeap_.Get() != nullptr) {
+        const uint64 computeCompleted = computeFence_->GetCompletedValue();
+        if (computeCompleted != D3D12FenceSource::RemovedFenceValue) {
+            computeTimestamps_.Harvest(computeCompleted, computeTimestampSource_);
+        }
+    }
 }
 
 // 프레임 끝에 열린 marker 구간을 닫는다(잠금 안).
@@ -96,18 +117,21 @@ void D3D12Device::CloseMarkers() noexcept {
 
 Result<uint64> D3D12Device::WriteTimestamp() noexcept {
     platform::LockGuard lock(gate_);
-    if (timestampHeap_.Get() == nullptr) {
+    // compute 기록은 compute queue의 query heap·장부를 쓴다(번호는 queue마다 따로, RG4).
+    ID3D12QueryHeap* heap = computeRecording_ ? computeTimestampHeap_.Get() : timestampHeap_.Get();
+    TimestampRing& ring = computeRecording_ ? computeTimestamps_ : timestamps_;
+    if (heap == nullptr) {
         return Result<uint64>::Failure(ErrorCode::Unsupported);
     }
     if (!recording_) {
         return Result<uint64>::Failure(ErrorCode::InvalidArgument);
     }
     HarvestTimestamps();
-    auto write = timestamps_.Allocate();
+    auto write = ring.Allocate();
     if (!write) {
         return Result<uint64>::Failure(write.Error());
     }
-    list_->EndQuery(timestampHeap_.Get(), D3D12_QUERY_TYPE_TIMESTAMP, write.Value().index);
+    list_->EndQuery(heap, D3D12_QUERY_TYPE_TIMESTAMP, write.Value().index);
     return Result<uint64>::Success(write.Value().query);
 }
 

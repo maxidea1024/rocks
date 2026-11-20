@@ -6,6 +6,10 @@ namespace rocks::graphics::d3d12 {
 
 namespace {
 
+// PCI 제조사 번호다(DXGI_ADAPTER_DESC1::VendorId, async compute 효율 판단).
+constexpr UINT AmdVendorId = 0x1002;
+constexpr UINT NvidiaVendorId = 0x10DE;
+
 // resource binding tier의 단계별 한도다(D3D12 "Hardware tiers" 표, d3d12.h 상수).
 StageResourceLimits TierStageLimits(D3D12_RESOURCE_BINDING_TIER tier, uint32 uavs) noexcept {
     StageResourceLimits limits;
@@ -170,6 +174,20 @@ DeviceCaps QueryDeviceCaps(ID3D12Device* device, IDXGIAdapter1* adapter,
     features.vertexStores = featureLevel >= D3D_FEATURE_LEVEL_11_1;
     features.pixelStores = true;
     features.hdrOutput = dxgi::AdapterHasHdrOutput(adapter);
+    // async compute 효율 판단(RenderBase 8절 RG4, UE 5.8 D3D12Adapter.cpp:1447–1484와 같다): AMD는
+    // 참, NVIDIA는 OPTIONS6 PerPrimitiveShadingRateSupportedWithViewportIndexing(Ampere 이후)일
+    // 때만, 그 밖(Intel 확장 질의는 쓰지 않는다·WARP)은 거짓이다. compute queue가
+    // 있는지(asyncCompute)는 장치가 queue를 만든 뒤 정한다.
+    if (adapter != nullptr && SUCCEEDED(adapter->GetDesc1(&adapterDesc)) &&
+        (adapterDesc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) == 0) {
+        D3D12_FEATURE_DATA_D3D12_OPTIONS6 options6 = {};
+        const bool options6Known = SUCCEEDED(
+            device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS6, &options6, sizeof(options6)));
+        features.efficientAsyncCompute =
+            adapterDesc.VendorId == AmdVendorId ||
+            (adapterDesc.VendorId == NvidiaVendorId && options6Known &&
+             options6.PerPrimitiveShadingRateSupportedWithViewportIndexing);
+    }
     features.resourceBindingTier = static_cast<uint8>(tier);
     // D3D12_RAYTRACING_TIER는 1.0 = 10, 1.1 = 11이다(major × 10 + minor와 같다).
     const D3D12_RAYTRACING_TIER rayTracing =

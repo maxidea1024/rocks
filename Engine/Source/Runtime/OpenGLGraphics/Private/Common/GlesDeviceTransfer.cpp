@@ -340,10 +340,14 @@ usize GlesDevice::CollectTimestamps(Span<TimestampSample> out) noexcept {
     return timestamps_.Collect(out);
 }
 
-Result<ClockCalibration> GlesDevice::CalibrateClocks() noexcept {
+Result<ClockCalibration> GlesDevice::CalibrateClocks(QueueKind queue) noexcept {
     auto owner = ownership_.Check();
     if (!owner) {
         return Result<ClockCalibration>::Failure(owner.Error());
+    }
+
+    if (queue != QueueKind::Graphics) {
+        return Result<ClockCalibration>::Failure(ErrorCode::Unsupported);
     }
 
     if (!timestampsReady_) {
@@ -377,8 +381,13 @@ Result<ClockCalibration> GlesDevice::CalibrateClocks() noexcept {
 
 // --- fence(GX7, 스레드 안전) ---
 
-GpuFencePoint GlesDevice::LastSubmittedFence() const noexcept {
-    return timeline_.LastSubmitted();
+// compute queue가 없다(DeviceFeatures::asyncCompute 거짓, RenderBase 8절 RG4).
+GpuFencePoint GlesDevice::LastSubmittedFence(QueueKind queue) const noexcept {
+    return queue == QueueKind::Graphics ? timeline_.LastSubmitted() : GpuFencePoint{};
+}
+
+Result<void> GlesDevice::QueueWait(QueueKind queue, GpuFencePoint point) noexcept {
+    return SingleQueueWait(timeline_, queue, point);
 }
 
 Result<bool> GlesDevice::IsFenceComplete(GpuFencePoint point) const noexcept {

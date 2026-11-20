@@ -1,12 +1,20 @@
 #include "RenderGraphInternal.h"
 
-// 그래프 컴파일이다: 미사용 제거(culling), 참조 수 수명, 같은 그래프 안 재사용 계획, subresource
-// 상태 추적과 전이 계산(Docs/Design/RenderBase.ko.md 7.1절 culling·컴파일·barrier·수명 행, 8절 RG2,
-// UE RC/Private/RenderGraphBuilder.cpp:1199–1325, 3128–3175, 3632–3646, 3783–3928,
-// RC/Private/RenderGraphResources.cpp:69–152).
+// 그래프 컴파일이다: 미사용 제거(culling), 참조 수 수명, async compute fork·join과 수명 연장, 같은
+// 그래프 안 재사용 계획, subresource 상태 추적과 전이 계산(Docs/Design/RenderBase.ko.md 7.1절
+// culling·컴파일·barrier·수명 행, 8절 RG2·RG4, UE RC/Private/RenderGraphBuilder.cpp:1160–1325,
+// 1562–1667, 3128–3175, 3632–3646, 3783–3928, RC/Private/RenderGraphResources.cpp:69–152).
 namespace rocks::render::detail {
 
 using graphics::ResourceAccess;
+
+bool SamePipe(const GraphState& state, uint32 left, uint32 right) noexcept {
+    if (left == GraphIndexNone || right == GraphIndexNone) {
+        return true;
+    }
+
+    return state.passes[left].async == state.passes[right].async;
+}
 
 bool SameResourceKey(const ResourceRecord& left, const ResourceRecord& right) noexcept {
     if (left.kind != right.kind) {
@@ -59,18 +67,30 @@ Result<void> PlanResourceReuse(FrameArena& arena, GraphState& state) noexcept {
     }
 
     // 실행과 같은 규칙으로 기록 경계를 정한다: Raster pass는 새 기록을 열고, 앞 Raster pass의
-    // attachment에 접근하는 Compute·Copy pass는 그 기록을 닫고 attachment 없는 기록을 연다.
+    // attachment에 접근하는 Compute·Copy pass는 그 기록을 닫고 attachment 없는 기록을 연다. async
+    // compute(RG4): run의 첫 async pass는 compute 기록을 열고, pipe가 graphics로 돌아온 pass·fork
+    // pass 다음 pass·join pass는 새 graphics 기록을 연다.
     uint32 recording = GraphIndexNone;
+    uint32 previous = GraphIndexNone;
     for (uint32 pass = 0; pass < state.passes.Size(); ++pass) {
         PassRecord& record = state.passes[pass];
         if (record.culled) {
             continue;
         }
 
+        const bool pipeChanged = previous != GraphIndexNone && !SamePipe(state, previous, pass);
+        const bool afterFork = previous != GraphIndexNone && state.passes[previous].forks;
+        previous = pass;
         record.opensRecording = false;
-        if (record.kind == GraphPassKind::Raster) {
+        if (record.async) {
+            record.opensRecording = record.startsRun;
+            recording = GraphIndexNone;
+        } else if (record.kind == GraphPassKind::Raster) {
             record.opensRecording = true;
             recording = pass;
+        } else if (pipeChanged || afterFork || record.joins) {
+            record.opensRecording = true;
+            recording = GraphIndexNone;
         } else if (recording != GraphIndexNone && UsesAttachmentsOf(state, pass, recording)) {
             record.opensRecording = true;
             recording = GraphIndexNone;
@@ -84,11 +104,10 @@ Result<void> PlanResourceReuse(FrameArena& arena, GraphState& state) noexcept {
         }
 
         const uint32 endUse = record.firstUse + record.useCount;
-        for (uint32 use = record.firstUse; use < endUse; ++use) {
-            const uint32 index = state.uses[use].resource;
+        const auto acquire = [&](uint32 index) noexcept -> Result<void> {
             ResourceRecord& resource = state.resources[index];
             if (resource.imported || resource.physical != GraphIndexNone) {
-                continue;
+                return Result<void>::Success();
             }
 
             uint32 found = GraphIndexNone;
@@ -102,12 +121,7 @@ Result<void> PlanResourceReuse(FrameArena& arena, GraphState& state) noexcept {
             }
 
             if (found == GraphIndexNone) {
-                auto created = NewPhysical(arena, state, index);
-                if (!created) {
-                    return created;
-                }
-
-                continue;
+                return NewPhysical(arena, state, index);
             }
 
             state.physicals[found].held = true;
@@ -115,6 +129,26 @@ Result<void> PlanResourceReuse(FrameArena& arena, GraphState& state) noexcept {
             resource.reusedWithinGraph = true;
             for (uint32 subresource = 0; subresource < resource.subresources; ++subresource) {
                 state.tracks[resource.firstTrack + subresource].access = ResourceAccess::Discard;
+            }
+
+            return Result<void>::Success();
+        };
+        for (uint32 use = record.firstUse; use < endUse; ++use) {
+            auto acquired = acquire(state.uses[use].resource);
+            if (!acquired) {
+                return acquired;
+            }
+        }
+
+        // async compute로 넓힌 수명(fork pass에서 시작하지만 그 pass는 쓰지 않는 자원)이다.
+        if (state.hasAsyncPasses) {
+            for (uint32 index = 0; index < state.resources.Size(); ++index) {
+                if (state.resources[index].firstPass == pass) {
+                    auto acquired = acquire(index);
+                    if (!acquired) {
+                        return acquired;
+                    }
+                }
             }
         }
 
@@ -130,6 +164,187 @@ Result<void> PlanResourceReuse(FrameArena& arena, GraphState& state) noexcept {
             // 렌더 타깃이었던 객체는 그 장치 기록(attachment로 묶인 채)이 닫힌 뒤에 넘긴다(같은
             // 기록의 복사·compute가 attachment 객체를 쓰지 않게, 장치 CopyTexture 계약).
             state.physicals[resource.physical].waitsForRecording = resource.renderTarget;
+        }
+
+        // async compute로 넓힌 수명(join pass에서 끝나지만 그 pass는 쓰지 않는 자원)이다.
+        if (state.hasAsyncPasses) {
+            for (const ResourceRecord& resource : state.resources) {
+                if (resource.imported || resource.exported || resource.lastPass != pass ||
+                    resource.physical == GraphIndexNone) {
+                    continue;
+                }
+
+                state.physicals[resource.physical].held = false;
+                state.physicals[resource.physical].waitsForRecording = resource.renderTarget;
+            }
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+// async compute 계획이다(RG4, UE RC/Private/RenderGraphBuilder.cpp:1160–1196, 1231–1235,
+// 1562–1667과 같은 식).
+// - pipe: 그래프가 compute queue를 쓰면 남은 AsyncCompute pass가 async다.
+// - 다른 pipe 간선: subresource마다 마지막으로 접근한 pass를 따라, 다른 pipe의 앞 접근이 있으면
+//   의존이다(읽기 → 읽기도 넣는다. 다른 pipe의 읽기 상태를 합치지 않으므로 그 사이에 전이 자리가
+//   필요하다). async pass는 다른 pipe의 가장 늦은 생산자를, graphics 소비자는 그 async pass의 첫
+//   소비자가 된다.
+// - fork = max(다른 pipe 생산자, 앞 async pass의 fork, 그래프 시작), join = min(첫 소비자, 뒤 async
+//   pass의 join, 그래프 끝). 그래서 둘 다 선언 순서로 늘기만 한다.
+// - run: graphics pass 없이 이어진 async pass 묶음이 compute 기록 하나이고, run 전체가 마지막
+// pass의
+//   fork(가장 늦은 fork)를 기다린다.
+// - 수명 연장: async pass가 쓰는 자원은 run의 fork pass(그래프 시작이면 첫 실행 pass)부터 join
+//   pass(그래프 끝이면 마지막 실행 pass)까지 놓지 않는다.
+Result<void> PlanAsyncCompute(FrameArena& arena, GraphState& state) noexcept {
+    if (!state.asyncEnabled) {
+        return Result<void>::Success();
+    }
+
+    uint32 firstLive = GraphIndexNone;
+    uint32 lastLive = GraphIndexNone;
+    for (uint32 pass = 0; pass < state.passes.Size(); ++pass) {
+        PassRecord& record = state.passes[pass];
+        record.async = !record.culled && record.kind == GraphPassKind::AsyncCompute;
+        state.hasAsyncPasses = state.hasAsyncPasses || record.async;
+        if (!record.culled) {
+            firstLive = firstLive == GraphIndexNone ? pass : firstLive;
+            lastLive = pass;
+        }
+    }
+
+    if (!state.hasAsyncPasses) {
+        return Result<void>::Success();
+    }
+
+    ArenaArray<uint32> lastAccess;
+    ArenaArray<uint32> crossProducer;
+    ArenaArray<uint32> firstConsumer;
+    auto assigned = lastAccess.TryAssign(arena, state.tracks.Size(), GraphIndexNone);
+    if (assigned) {
+        assigned = crossProducer.TryAssign(arena, state.passes.Size(), GraphIndexNone);
+    }
+
+    if (assigned) {
+        assigned = firstConsumer.TryAssign(arena, state.passes.Size(), GraphIndexNone);
+    }
+
+    if (!assigned) {
+        return assigned;
+    }
+
+    for (uint32 pass = 0; pass < state.passes.Size(); ++pass) {
+        const PassRecord& record = state.passes[pass];
+        if (record.culled) {
+            continue;
+        }
+
+        for (uint32 use = record.firstUse; use < record.firstUse + record.useCount; ++use) {
+            const SubresourceUse& entry = state.uses[use];
+            const uint32 track = state.resources[entry.resource].firstTrack + entry.subresource;
+            const uint32 previous = lastAccess[track];
+            lastAccess[track] = pass;
+            if (previous == GraphIndexNone || previous == pass || SamePipe(state, previous, pass)) {
+                continue;
+            }
+
+            if (record.async) {
+                if (crossProducer[pass] == GraphIndexNone || previous > crossProducer[pass]) {
+                    crossProducer[pass] = previous;
+                }
+            } else if (firstConsumer[previous] == GraphIndexNone) {
+                // pass는 선언 순서로 늘므로 처음 정한 것이 첫 소비자다.
+                firstConsumer[previous] = pass;
+            }
+        }
+    }
+
+    // fork(앞 → 뒤): 그래프 시작은 GraphIndexNone이다.
+    uint32 fork = GraphIndexNone;
+    for (uint32 pass = 0; pass < state.passes.Size(); ++pass) {
+        PassRecord& record = state.passes[pass];
+        if (!record.async) {
+            continue;
+        }
+
+        const uint32 producer = crossProducer[pass];
+        if (producer != GraphIndexNone && (fork == GraphIndexNone || producer > fork)) {
+            fork = producer;
+        }
+
+        record.runFork = fork;
+    }
+
+    // join(뒤 → 앞): 그래프 끝은 GraphIndexNone(가장 큰 값)이다.
+    uint32 join = GraphIndexNone;
+    for (uint32 pass = static_cast<uint32>(state.passes.Size()); pass > 0; --pass) {
+        PassRecord& record = state.passes[pass - 1];
+        if (!record.async) {
+            continue;
+        }
+
+        join = firstConsumer[pass - 1] < join ? firstConsumer[pass - 1] : join;
+        record.joinPass = join;
+    }
+
+    // run: 이어진 async pass 묶음과 그 fork(마지막 pass의 fork)다.
+    uint32 runStart = GraphIndexNone;
+    uint32 runLast = GraphIndexNone;
+    const auto closeRun = [&]() noexcept {
+        if (runStart == GraphIndexNone) {
+            return;
+        }
+
+        const uint32 runFork = state.passes[runLast].runFork;
+        for (uint32 member = runStart; member <= runLast; ++member) {
+            if (state.passes[member].async) {
+                state.passes[member].runFork = runFork;
+            }
+        }
+
+        state.passes[runStart].startsRun = true;
+        if (runFork != GraphIndexNone) {
+            state.passes[runFork].forks = true;
+        }
+
+        runStart = GraphIndexNone;
+    };
+    for (uint32 pass = 0; pass < state.passes.Size(); ++pass) {
+        const PassRecord& record = state.passes[pass];
+        if (record.culled) {
+            continue;
+        }
+
+        if (!record.async) {
+            closeRun();
+            continue;
+        }
+
+        runStart = runStart == GraphIndexNone ? pass : runStart;
+        runLast = pass;
+    }
+
+    closeRun();
+    for (uint32 pass = 0; pass < state.passes.Size(); ++pass) {
+        const PassRecord& record = state.passes[pass];
+        if (!record.async) {
+            continue;
+        }
+
+        if (record.joinPass != GraphIndexNone) {
+            state.passes[record.joinPass].joins = true;
+        }
+
+        // 수명 연장이다.
+        const uint32 start = record.runFork == GraphIndexNone ? firstLive : record.runFork;
+        const uint32 end = record.joinPass == GraphIndexNone ? lastLive : record.joinPass;
+        for (uint32 use = record.firstUse; use < record.firstUse + record.useCount; ++use) {
+            ResourceRecord& resource = state.resources[state.uses[use].resource];
+            resource.firstPass = start < resource.firstPass ? start : resource.firstPass;
+            resource.lastPass = resource.lastPass == GraphIndexNone || end > resource.lastPass
+                                    ? end
+                                    : resource.lastPass;
         }
     }
 
@@ -184,7 +399,7 @@ Result<void> TrackPassTransitions(FrameArena& arena, GraphState& state, uint32 p
         // 상태로 한 번만 바꾸고 이 pass에는 전이가 없다(읽기 → 읽기 전이 0).
         const uint32 previousUser = track.lastUser;
         track.lastUser = pass;
-        if (allowMerge && track.chain != GraphIndexNone &&
+        if (allowMerge && track.chain != GraphIndexNone && SamePipe(state, previousUser, pass) &&
             CanMergeAcrossPasses(track.access, track.flags, use.access, use.flags)) {
             track.access |= use.access;
             state.chains[track.chain].after = track.access;
@@ -261,8 +476,10 @@ namespace {
 // pipe에서 생산 pass epilogue begin, 소비 pass prologue
 // end다(RC/Private/RenderGraphBuilder.cpp:3783–3928).
 uint32 SplitBeginPass(const GraphState& state, const ChainEntry& entry) noexcept {
+    // 다른 pipe 사이 전이는 나누지 않는다(begin·end가 다른 queue의 기록이다, RG4).
     if (!state.splitEnabled || entry.attachment || entry.pass == GraphIndexNone ||
-        entry.previousUser == GraphIndexNone || entry.previousUser >= entry.pass) {
+        entry.previousUser == GraphIndexNone || entry.previousUser >= entry.pass ||
+        !SamePipe(state, entry.previousUser, entry.pass)) {
         return GraphIndexNone;
     }
 
@@ -285,10 +502,25 @@ uint32 SplitBeginPass(const GraphState& state, const ChainEntry& entry) noexcept
 
 // record와 entry가 slice·mip 범위 말고는 같은 전이인지다.
 bool SameTransitionGroup(const GraphTransitionRecord& record, const ChainEntry& entry,
-                         GraphResourceKind kind, uint32 beginPass) noexcept {
+                         GraphResourceKind kind, uint32 beginPass, uint32 forkPass) noexcept {
     return record.pass == entry.pass && record.kind == kind && record.resource == entry.resource &&
            record.before == entry.before && record.after == entry.after &&
-           record.attachment == entry.attachment && record.beginPass == beginPass;
+           record.attachment == entry.attachment && record.beginPass == beginPass &&
+           record.forkPass == forkPass;
+}
+
+// graphics 쪽에서 내야 하는 async compute 전이의 fork 자리다(RG4): async pass의 전이 가운데 앞
+// 사용자가 graphics pass이거나 없는(그래프 처음 사용) 것이다. compute 기록은 graphics 상태
+// barrier를 낼 수 없으므로 run이 기다릴 fork pass의 epilogue(없으면 그래프 시작 기록)에서 낸다. 그
+// 밖은 GraphIndexNone이다.
+uint32 ForkPassOf(const GraphState& state, const ChainEntry& entry) noexcept {
+    if (entry.pass == GraphIndexNone || !state.passes[entry.pass].async ||
+        (entry.previousUser != GraphIndexNone && state.passes[entry.previousUser].async)) {
+        return GraphIndexNone;
+    }
+
+    const uint32 fork = state.passes[entry.pass].runFork;
+    return fork == GraphIndexNone ? GraphProloguePass : fork;
 }
 
 // 마지막 두 record가 같은 mip 범위의 이웃 slice 범위이고 나머지가 같으면 하나로 합친다. 새
@@ -304,8 +536,8 @@ void MergeSliceRuns(GraphState& state) noexcept {
     if (previous.pass == last.pass && previous.kind == last.kind &&
         previous.resource == last.resource && previous.before == last.before &&
         previous.after == last.after && previous.attachment == last.attachment &&
-        previous.beginPass == last.beginPass && previous.firstMip == last.firstMip &&
-        previous.mipCount == last.mipCount &&
+        previous.beginPass == last.beginPass && previous.forkPass == last.forkPass &&
+        previous.firstMip == last.firstMip && previous.mipCount == last.mipCount &&
         previous.firstSlice + previous.sliceCount == last.firstSlice) {
         previous.sliceCount += last.sliceCount;
         state.transitions.PopBack();
@@ -323,6 +555,7 @@ Result<void> CollectTransitions(FrameArena& arena, GraphState& state, usize firs
 
         const GraphResourceKind kind = state.resources[entry.resource].kind;
         const uint32 beginPass = SplitBeginPass(state, entry);
+        const uint32 forkPass = ForkPassOf(state, entry);
         const ResourceRecord& resource = state.resources[entry.resource];
         const uint32 mip = entry.subresource % resource.mipLevels;
         const uint32 slice = entry.subresource / resource.mipLevels;
@@ -331,8 +564,9 @@ Result<void> CollectTransitions(FrameArena& arena, GraphState& state, usize firs
             GraphTransitionRecord& last = state.transitions.Back();
             const usize lastIndex = state.transitions.Size() - 1;
             if (lastIndex >= state.nextTransition &&
-                SameTransitionGroup(last, entry, kind, beginPass) && last.sliceCount == 1 &&
-                last.firstSlice == slice && last.firstMip + last.mipCount == mip) {
+                SameTransitionGroup(last, entry, kind, beginPass, forkPass) &&
+                last.sliceCount == 1 && last.firstSlice == slice &&
+                last.firstMip + last.mipCount == mip) {
                 ++last.mipCount;
                 continue;
             }
@@ -351,6 +585,7 @@ Result<void> CollectTransitions(FrameArena& arena, GraphState& state, usize firs
         record.after = entry.after;
         record.attachment = entry.attachment;
         record.beginPass = beginPass;
+        record.forkPass = forkPass;
         MergeSliceRuns(state);
         auto pushed = state.transitions.TryPushBack(arena, record);
         if (!pushed) {
@@ -420,6 +655,11 @@ Result<void> CompileGraph(FrameArena& arena, GraphState& state) noexcept {
                 }
             }
         }
+    }
+
+    auto async = PlanAsyncCompute(arena, state);
+    if (!async) {
+        return async;
     }
 
     auto planned = PlanResourceReuse(arena, state);

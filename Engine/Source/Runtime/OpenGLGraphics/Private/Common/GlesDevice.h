@@ -326,8 +326,10 @@ public:
     Result<bool> TryReadback(ReadbackHandle handle, Span<uint8> out) noexcept override;
     void ReleaseReadback(ReadbackHandle handle) noexcept override;
     usize CollectTimestamps(Span<TimestampSample> out) noexcept override;
-    Result<ClockCalibration> CalibrateClocks() noexcept override;
-    GpuFencePoint LastSubmittedFence() const noexcept override;
+    Result<ClockCalibration>
+    CalibrateClocks(QueueKind queue = QueueKind::Graphics) noexcept override;
+    GpuFencePoint LastSubmittedFence(QueueKind queue = QueueKind::Graphics) const noexcept override;
+    Result<void> QueueWait(QueueKind queue, GpuFencePoint point) noexcept override;
     Result<bool> IsFenceComplete(GpuFencePoint point) const noexcept override;
     Result<platform::WaitResult> WaitFence(GpuFencePoint point, uint32 timeoutMs) noexcept override;
     Result<void> NotifyFence(GpuFencePoint point, FenceCallback callback,
