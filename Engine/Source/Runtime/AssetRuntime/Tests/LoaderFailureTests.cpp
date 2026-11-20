@@ -90,6 +90,8 @@ TEST(AssetLoader_CancelAtEachStage) {
         rig.scene.Hard(1, 2);
         REQUIRE(rig.Cook());
         rig.config.limits.maxPackagesInFlight = 2;
+        CountingAllocator counting(env.allocator);
+        rig.config.allocator = &counting;
         REQUIRE(rig.Start());
         CancelSource source = MakeSource(env);
         REQUIRE(source.IsValid());
@@ -156,11 +158,16 @@ TEST(AssetLoader_CancelAtEachStage) {
         CHECK(status.state == AssetLoadState::Cancelled && status.error == ErrorCode::Cancelled &&
               status.diagnostic.asset == FixedId(1));
         CHECK(!rig.IsLoaded(1));
-        // 진행 중 일을 끝내면 버린 단위가 사라진다(worker 작업은 Prepare 없이 Cancelled로 끝난다).
+        // 진행 중 일을 끝내면 버린 단위가 사라진다. 버린 worker 작업은 Prepare 없이 끝난다 — 그
+        // 동안 로더 allocator 할당이 없다.
         rig.io.hold = false;
         rig.io.Complete();
         rig.worker.hold = false;
+        const uint64 before = counting.allocations;
         rig.worker.RunAll();
+        if (stage == Stage::Preparing) {
+            CHECK(counting.allocations == before);
+        }
         REQUIRE(rig.PumpUntilSettled());
         CHECK(!rig.IsLoaded(1));
         if (stage == Stage::Queued) {
@@ -395,7 +402,7 @@ TEST(AssetLoader_HardFailurePropagates) {
           rig.StateOf(cycle) == AssetLoadState::Succeeded);
 }
 
-// IO·worker 오류(11.6절 4·5): 파일 없음 → NotFound / MissingFile, 완료 오류(DependencyFailed) →
+// IO·worker 오류(11.6절 4·5): 파일 없음 → NotFound / MissingFile, 완료 오류(Unsupported) →
 // 진단 None과 그 오류, Begin 즉시 실패 → 그 오류(순환의 둘째 패키지에서 실패하면 첫째의 진행 중
 // IO는 끝난 뒤 버린다), worker 제출 실패 → 그 오류다.
 TEST(AssetLoader_IoAndWorkerErrors) {
@@ -411,7 +418,7 @@ TEST(AssetLoader_IoAndWorkerErrors) {
     rig.scene.Hard(5, 4);
     REQUIRE(rig.Cook());
     rig.io.FindFile(rig.scene.PathOf(1))->path.Clear();
-    rig.io.FindFile(rig.scene.PathOf(2))->completeError = ErrorCode::DependencyFailed;
+    rig.io.FindFile(rig.scene.PathOf(2))->completeError = ErrorCode::Unsupported;
     rig.io.FindFile(rig.scene.PathOf(3))->beginError = ErrorCode::OutOfMemory;
     rig.io.FindFile(rig.scene.PathOf(5))->beginError = ErrorCode::Busy;
     REQUIRE(rig.Start());
@@ -431,7 +438,7 @@ TEST(AssetLoader_IoAndWorkerErrors) {
           notFound.diagnostic.code == AssetDiagnosticCode::MissingFile &&
           notFound.diagnostic.asset == FixedId(1));
     const AssetLoadStatus ioError = rig.StatusOf(failed);
-    CHECK(ioError.error == ErrorCode::DependencyFailed &&
+    CHECK(ioError.error == ErrorCode::Unsupported &&
           ioError.diagnostic.code == AssetDiagnosticCode::None &&
           ioError.diagnostic.asset == FixedId(2));
     CHECK(rig.StatusOf(begin).error == ErrorCode::OutOfMemory);
@@ -552,6 +559,8 @@ TEST(AssetLoader_AllocationFailures) {
         rig.scene.Hard(1, 3);
         rig.scene.Hard(3, 4);
         rig.scene.Hard(4, 3);
+        // 독립 요청 50 — 실패 하나가 요청 1 계열과 50을 함께 실패시키지 않는다(그 요청만 실패).
+        rig.scene.Add(50);
         constexpr uint64 ChainBase = 100;
         constexpr uint32 ChainLength = 16;
         rig.scene.Hard(1, ChainBase);
@@ -581,6 +590,10 @@ TEST(AssetLoader_AllocationFailures) {
             auto initialized = loader.Initialize(attempt % 2 == 0 ? nullptr : &failure);
             AssetLoadHandle handle{};
             bool requested = false;
+            AssetLoadHandle fifty{};
+            bool fiftyRequested = false;
+            bool fiftyFailed = false;
+            bool oneFailed = false;
             if (initialized) {
                 AssetLoadRequest request;
                 request.id = FixedId(1);
@@ -593,6 +606,13 @@ TEST(AssetLoader_AllocationFailures) {
                     member.id = FixedId(4);
                     const bool joined =
                         loader.Request(request).IsOk() && loader.Request(member).IsOk();
+                    auto independent = loader.Request(LoaderRequestOf(50));
+                    if (independent) {
+                        fifty = independent.Value();
+                        fiftyRequested = true;
+                    } else {
+                        fiftyFailed = true;
+                    }
                     REQUIRE(loader.Pump());
                     AssetLoaderSnapshot snapshot(failing);
                     const bool described = loader.Describe(snapshot).IsOk();
@@ -605,6 +625,7 @@ TEST(AssetLoader_AllocationFailures) {
                     CHECK(made.Error() == ErrorCode::OutOfMemory &&
                           failure.code == AssetDiagnosticCode::None);
                     ++requestFailures;
+                    oneFailed = true;
                 }
             } else {
                 CHECK(initialized.Error() == ErrorCode::OutOfMemory &&
@@ -620,6 +641,7 @@ TEST(AssetLoader_AllocationFailures) {
                     CHECK(status.Value().state == AssetLoadState::Succeeded);
                     done = true;
                 } else if (status.Value().state != AssetLoadState::Succeeded) {
+                    oneFailed = true;
                     CHECK(status.Value().state == AssetLoadState::Failed);
                     CHECK(status.Value().error == ErrorCode::OutOfMemory ||
                           status.Value().error == ErrorCode::DependencyFailed);
@@ -627,6 +649,13 @@ TEST(AssetLoader_AllocationFailures) {
                 }
             }
 
+            if (fiftyRequested) {
+                auto status = loader.Status(fifty);
+                REQUIRE(status);
+                fiftyFailed = fiftyFailed || status.Value().state == AssetLoadState::Failed;
+            }
+
+            CHECK(!(oneFailed && fiftyFailed));
             if (initialized) {
                 // 실패 뒤에도 같은 로더로 끝까지 로드한다.
                 AssetLoadRequest request;
@@ -662,12 +691,19 @@ namespace {
 
 struct ShutdownHelper {
     TestPackageIo* io = nullptr;
+    platform::ManualResetEvent waiting;
 };
+
+// 완료 대기가 조건 변수에서 기다리기 직전에 불린다(11.6절 17).
+void SignalWaiting(void* context) noexcept {
+    static_cast<ShutdownHelper*>(context)->waiting.Signal();
+}
 
 } // namespace
 
 // 종료(11.6절 14): Pending 요청은 ShuttingDown으로 끝나고(Status는 계속 읽힌다), 진행 중 IO가 끝날
-// 때까지 기다린 뒤(다른 스레드가 완료를 내보낸다 — 순서와 무관하게 결과는 같다) 공개한 패키지를
+// 때까지 기다린 뒤(다른 스레드가 Game 스레드의 대기 진입(11.6절 17 hook) 뒤에 완료를 내보낸다)
+// 공개한 패키지를
 // 놓는다(FindPackage NotFound). 그 뒤 Request·Pump·WaitFor는 ShuttingDown, 두 번째 Shutdown은
 // 성공이다.
 TEST(AssetLoader_ShutdownDrainsAndReleases) {
@@ -685,6 +721,10 @@ TEST(AssetLoader_ShutdownDrainsAndReleases) {
     // 6의 Begin이 실패하면 순환 5·6 단위가 실패하고 5의 IO는 진행 중으로 남는다.
     rig.io.FindFile(rig.scene.PathOf(6))->beginError = ErrorCode::Busy;
     rig.config.limits.maxPackagesInFlight = 4;
+    ShutdownHelper helper;
+    helper.io = &rig.io;
+    rig.config.waitEntered = SignalWaiting;
+    rig.config.waitEnteredContext = &helper;
     REQUIRE(rig.Start());
     const AssetLoadHandle loaded = rig.Request(1);
     REQUIRE(rig.PumpUntilSettled());
@@ -700,12 +740,16 @@ TEST(AssetLoader_ShutdownDrainsAndReleases) {
     // 상한 4가 찼으므로 3 → 4 사슬은 허가 대기다.
     const AssetLoadHandle chain = rig.Request(3);
     CHECK(rig.StatusOf(cycle).state == AssetLoadState::Failed);
-    ShutdownHelper helper{&rig.io};
+    // 완료 스레드는 Game 스레드가 실제로 기다리기 시작한 뒤(대기 진입 hook의 event)에 완료를
+    // 내보낸다.
     platform::Thread thread;
-    REQUIRE(
-        thread.Start(
-            [](void* context) noexcept { static_cast<ShutdownHelper*>(context)->io->Complete(); },
-            &helper) == platform::ThreadStatus::Success);
+    REQUIRE(thread.Start(
+                [](void* context) noexcept {
+                    auto& state = *static_cast<ShutdownHelper*>(context);
+                    (void)state.waiting.Wait();
+                    state.io->Complete();
+                },
+                &helper) == platform::ThreadStatus::Success);
     CHECK(rig.loader->Shutdown());
     REQUIRE(thread.Join() == platform::ThreadStatus::Success);
     const AssetLoadStatus status = rig.StatusOf(pending);

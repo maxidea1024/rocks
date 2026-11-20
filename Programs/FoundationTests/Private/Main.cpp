@@ -69,7 +69,7 @@ struct RegisteredProcessProbe {
     int (*function)(int, const char* const*) noexcept = nullptr;
 };
 
-static constexpr usize MaxRegisteredProcessProbes = 8;
+static constexpr usize MaxRegisteredProcessProbes = 32;
 static RegisteredProcessProbe registeredProcessProbes[MaxRegisteredProcessProbes];
 static usize registeredProcessProbeCount = 0;
 

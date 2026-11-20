@@ -619,7 +619,9 @@ TEST(AssetLoader_DescribeTracksStages) {
                                      AssetLoaderWait::Dependency,
                                      AssetLoaderWait::Io,
                                      AssetLoaderWait::Worker,
-                                     AssetLoaderWait::Pump};
+                                     AssetLoaderWait::Pump,
+                                     AssetLoaderWait::PostLoadDependency,
+                                     AssetLoaderWait::PostLoad};
     for (AssetLoaderWait wait : waits) {
         CHECK(StringView(AssetLoaderWaitName(wait)) != StringView("Unknown"));
     }
@@ -639,8 +641,9 @@ TEST(AssetLoader_DescribeTracksStages) {
 
     CHECK(StringView(AssetLoadStateName(static_cast<AssetLoadState>(9))) == StringView("Unknown"));
     const AssetLoaderUnitPhase phases[] = {
-        AssetLoaderUnitPhase::Queued, AssetLoaderUnitPhase::Loading, AssetLoaderUnitPhase::Ready,
-        AssetLoaderUnitPhase::Abandoned, AssetLoaderUnitPhase::Failed};
+        AssetLoaderUnitPhase::Queued, AssetLoaderUnitPhase::Loading,
+        AssetLoaderUnitPhase::Ready,  AssetLoaderUnitPhase::Abandoned,
+        AssetLoaderUnitPhase::Failed, AssetLoaderUnitPhase::PostLoading};
     for (AssetLoaderUnitPhase phase : phases) {
         CHECK(StringView(AssetLoaderUnitPhaseName(phase)) != StringView("Unknown"));
     }
@@ -781,7 +784,7 @@ namespace {
 
 // 다른 스레드에서 부른 결과다.
 struct ThreadCalls {
-    static constexpr usize Count = 9;
+    static constexpr usize Count = 10;
 
     AssetLoader* loader = nullptr;
     Allocator* allocator = nullptr;
@@ -802,6 +805,7 @@ void CallFromOtherThread(void* context) noexcept {
     calls.results[6] = loader.WaitForCompletions().Error();
     calls.results[7] = loader.WaitFor(calls.handle, "thread").Error();
     calls.results[8] = loader.Describe(snapshot).Error();
+    calls.results[9] = loader.FindPackage(FixedId(1)).Error();
 }
 
 } // namespace

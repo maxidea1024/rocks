@@ -67,6 +67,9 @@ struct AsyncContextState {
     uint64 heldCount = 0;
     AsyncRequestState* heldHead = nullptr;
     AsyncRequestState* heldTail = nullptr;
+    // 걸어 둔 결과 주입이다(InjectFault — faultArmed가 거짓이면 없음).
+    bool faultArmed = false;
+    AsyncIoFault fault{};
     // WorkerPool
     AsyncRequestState* queueHead = nullptr;
     AsyncRequestState* queueTail = nullptr;
@@ -78,6 +81,9 @@ struct AsyncContextState {
 };
 
 // ---- 공용 코드가 제공 ----
+// 걸어 둔 주입이 point에 걸리면 그 status를 status에 담고 지운 뒤 true다. mutex 안에서 부른다.
+bool TakeAsyncFaultLocked(AsyncContextState& context, AsyncIoFaultPoint point,
+                          FileStatus& status) noexcept;
 // 완료 스레드에서 호출한다. mutex를 잡지 않은 상태에서 호출하며, 게시 후 callback을 실행한다.
 void CompleteAsyncRequest(AsyncRequestState& request, const AsyncIoResult& result) noexcept;
 

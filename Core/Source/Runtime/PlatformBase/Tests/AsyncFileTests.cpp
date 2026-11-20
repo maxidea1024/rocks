@@ -1,6 +1,7 @@
 #include <Platform/AsyncFile.h>
 #include <Platform/Clock.h>
 #include <Platform/File.h>
+#include <Platform/Sync.h>
 #include <TestSupport/Test.h>
 #include <stdio.h>
 #include <Platform/Atomics.h>
@@ -247,6 +248,64 @@ TEST(AsyncFile_CloseIsBusyWhileRequestsAreInFlight) {
         REQUIRE(request.Wait(30000) == WaitResult::Signaled);
         CHECK(request.Result().status && request.Result().bytes == sizeof(large));
         CHECK(MatchesPattern(large, 0, sizeof(large)));
+        CHECK(file.Close());
+    });
+}
+
+// 결과 주입(PlatformLayer 결과 주입): Size는 OS를 부르지 않고 그 status, Submit은 요청을 바꾸지
+// 않는 즉시 실패, Completion은 skip개를 지나보낸 뒤 하나의 완료만 status·0 byte로 바뀌고(callback도
+// 같은 값) 주입은 한 번 뒤 사라진다. ClearFault는 걸어 둔 주입을 지운다. 두 backend 공통이다.
+TEST(AsyncFile_InjectedFaultsAreDeterministic) {
+    PatternFile pattern;
+    REQUIRE(pattern.Create(PatternBytes));
+    ForEachBackend([&](AsyncIoContext& context) {
+        AsyncReadFile file;
+        REQUIRE(file.Open(context, pattern.path, pattern.length));
+        const FileStatus failure{FileCode::SystemError, 7};
+        uint64 size = 0;
+        context.InjectFault({AsyncIoFaultPoint::Size, failure, 0});
+        const FileStatus sized = file.Size(size);
+        CHECK(sized.code == FileCode::SystemError && sized.nativeError == 7 && size == 0);
+        CHECK(file.Size(size) && size == PatternBytes);
+
+        static uint8 buffer[64];
+        AsyncReadRequest request;
+        context.InjectFault({AsyncIoFaultPoint::Submit, failure, 0});
+        CHECK(file.SubmitRead(request, 0, buffer, sizeof(buffer)).code == FileCode::SystemError);
+        // 요청은 제출된 적 없는 그대로다(다시 제출할 수 있다).
+        CHECK(!request.IsComplete());
+
+        // 두 번째 완료만 바뀐다.
+        context.InjectFault({AsyncIoFaultPoint::Completion, failure, 1});
+        REQUIRE(file.SubmitRead(request, 0, buffer, sizeof(buffer)));
+        REQUIRE(request.Wait(30000) == WaitResult::Signaled);
+        CHECK(request.Result().status && request.Result().bytes == sizeof(buffer));
+        struct Seen {
+            FileCode code = FileCode::Success;
+            usize bytes = 1;
+            ManualResetEvent done;
+        } seen;
+        REQUIRE(file.SubmitRead(
+            request, 0, buffer, sizeof(buffer),
+            [](const AsyncIoResult& result, void* context) noexcept {
+                auto& out = *static_cast<Seen*>(context);
+                out.code = result.status.code;
+                out.bytes = result.bytes;
+                out.done.Signal();
+            },
+            &seen));
+        REQUIRE(request.Wait(30000) == WaitResult::Signaled);
+        CHECK(request.Result().status.code == FileCode::SystemError && request.Result().bytes == 0);
+        // callback은 게시 뒤에 불리므로 그 event로 끝을 기다린 뒤 값을 본다.
+        REQUIRE(seen.done.Wait() == WaitResult::Signaled);
+        CHECK(seen.code == FileCode::SystemError && seen.bytes == 0);
+        // 주입은 한 번 뒤 사라진다.
+        REQUIRE(file.SubmitRead(request, 0, buffer, sizeof(buffer)));
+        REQUIRE(request.Wait(30000) == WaitResult::Signaled);
+        CHECK(request.Result().status && MatchesPattern(buffer, 0, sizeof(buffer)));
+        context.InjectFault({AsyncIoFaultPoint::Size, failure, 0});
+        context.ClearFault();
+        CHECK(file.Size(size));
         CHECK(file.Close());
     });
 }

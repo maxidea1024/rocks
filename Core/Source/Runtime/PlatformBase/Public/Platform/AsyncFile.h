@@ -52,6 +52,23 @@ using AsyncReadResult = AsyncIoResult; // 읽기 전용 시절의 이름
 using AsyncIoCallback = void (*)(const AsyncIoResult& result, void* context) noexcept;
 using AsyncReadCallback = AsyncIoCallback; // 읽기 전용 시절의 이름
 
+// 결과 주입 지점이다(AsyncIoContext::InjectFault).
+enum class AsyncIoFaultPoint : uint8 {
+    // AsyncReadFile·AsyncWriteFile::Size가 OS를 부르지 않고 status를 돌려준다.
+    Size,
+    // SubmitRead·SubmitWrite가 요청 상태를 바꾸지 않고 status로 즉시 실패한다.
+    Submit,
+    // 완료 게시 직전 결과를 status·0 byte로 바꾼다(callback·Result가 그 값을 받는다).
+    Completion
+};
+
+// 주입할 결과다. 그 지점의 작업 중 앞의 skip개를 지나보낸 뒤 하나에만 status를 넣는다.
+struct AsyncIoFault {
+    AsyncIoFaultPoint point = AsyncIoFaultPoint::Completion;
+    FileStatus status{FileCode::SystemError, 0};
+    uint32 skip = 0;
+};
+
 // 비동기 I/O 완료 처리기다. 파일과 요청보다 오래 살아야 한다.
 // 사용 예(텍스처 mip 읽기):
 //   AsyncIoContext io; io.Start(DefaultAsyncIoBackend());
@@ -118,6 +135,20 @@ public:
     FileStatus ResumeCompletions() noexcept;
     // OS·worker에서 끝나 게시를 기다리는 결과 수다(진단·시험용, 읽는 순간의 값).
     uint64 HeldCompletionCount() const noexcept;
+
+    // ---- 결과 주입(Rocks 고유, UE 5.8 IoDispatcher·IAsyncReadFileHandle에는 대응 없음) ----
+    // OS·장치 오류(읽기 실패·크기 조회 실패)와 계약상 만들 수 없는 즉시 제출 실패를 결정적으로
+    // 재현해 상위 계층의 처리를 시험한다(Docs/Design/PlatformLayer.ko.md 결과 주입).
+    //
+    // 사용 예(두 번째 조각 읽기의 완료를 실패시킨다):
+    //   io.InjectFault({AsyncIoFaultPoint::Completion, {FileCode::SystemError, 5}, 1});
+    //
+    // 계약: 이 context의 그 지점 작업(모든 파일·요청) 중 앞의 skip개를 지나보낸 뒤 하나에만
+    // 적용하고 사라진다. 한 번에 하나만 걸린다(다시 걸면 바꾼다). 판정은 context mutex 안이라 여러
+    // 스레드의 작업에도 정확히 하나에 걸린다. 어느 스레드에서나 부를 수 있다.
+    void InjectFault(const AsyncIoFault& fault) noexcept;
+    // 걸어 둔 주입을 지운다(없으면 아무것도 하지 않는다).
+    void ClearFault() noexcept;
 
 private:
     friend class AsyncReadFile;
