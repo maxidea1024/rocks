@@ -1,7 +1,11 @@
 #include <Platform/SecureRandom.h>
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
 #include <bcrypt.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
 
 #pragma comment(lib, "bcrypt")
 

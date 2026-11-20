@@ -2,8 +2,6 @@
 #include <Platform/Win64/ComRef.h>
 #include <TestSupport/Test.h>
 
-#include <Windows.h>
-
 namespace windows_com_ref_tests_file {
 
 // Platform/Win64/ComRef.h 시험이다. 가짜 COM 객체로 AddRef·Release 수를 직접 세어 소유 규칙을

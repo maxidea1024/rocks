@@ -3,8 +3,12 @@
 #include <Platform/Win64/ComRef.h>
 #include <Platform/Win64/WideString.h>
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
 #include <dxgi1_6.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
 
 namespace rocks::graphics::dxgi {
 

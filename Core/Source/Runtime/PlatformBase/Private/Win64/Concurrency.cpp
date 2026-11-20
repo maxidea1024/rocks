@@ -5,7 +5,13 @@
 #include <Platform/PlatformMath.h>
 #include "../Common/ThreadInternal.h"
 #include "WindowsString.h"
+
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
+
 #include <process.h>
 #include <new>
 

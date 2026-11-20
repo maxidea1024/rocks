@@ -37,12 +37,9 @@ public abstract class TestsModule : ModuleRules
     // Unity build (Docs/Design/UnityBuildPch.ko.md section 9.3). Test sources keep their file-local helpers and TEST bodies in a namespace
     // unique to the file (<file>_file), so helpers with the same name in two sources never meet in one batch. The sources below stay standalone
     // translation units: their helpers are used from another namespace of the same file (specializations of rocks templates for test types,
-    // host service macros, probes called from the runner), so they cannot be enclosed mechanically. WindowsComRefTests.cpp is standalone for
-    // another reason: it includes the Windows COM headers, whose macros (small, interface, ...) would leak into every source that follows
-    // it in a batch (which sources follow depends on the batch boundaries, so adding an unrelated source could break the build).
+    // host service macros, probes called from the runner), so they cannot be enclosed mechanically.
     private static readonly string[] UnityStandaloneSources =
     [
-        "Core/Source/Developer/TestSupport/Private/Win64/WindowsComRefTests.cpp",
         "Core/Source/Runtime/Base/Tests/BaseTests.cpp",
         "Core/Source/Runtime/Config/Tests/ConsoleInputTests.cpp",
         "Core/Source/Runtime/Core/Tests/BinnedAllocatorFailureControls.cpp",

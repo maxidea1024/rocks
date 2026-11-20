@@ -651,6 +651,66 @@ internal static partial class SelfTests
                 [(module + "P.cpp", 2, "unity-pragma-balance"), (module + "P.cpp", 3, "unity-pragma-balance"), (module + "P.cpp", 4, "unity-pragma-balance")]),
                 "unbalanced pragmas");
         });
+        // 매크로를 남기는 헤더(같은 문서 6.1절): 묶이는 소스와 그 소스가 include하는 저장소 헤더가 Windows SDK 계열 헤더를
+        // WindowsHeadersBegin.h/WindowsHeadersEnd.h 쌍 밖에서 include하면 위반이다. 쌍이 어긋난 것, 쌍 안의 저장소 헤더도 위반이다.
+        suite.Add("Policy.UnityMacroLeaksRejectUnwrappedWindowsHeaders", () =>
+        {
+            using TemporaryDirectory temporary = new();
+            const string module = "Engine/Source/Runtime/Probe/";
+            const string begin = "#include <Platform/Win64/WindowsHeadersBegin.h>\n";
+            const string end = "#include <Platform/Win64/WindowsHeadersEnd.h>\n";
+            string include = Path.Combine(temporary.Root, module + "Public");
+            HashSet<(string Path, int Line)> Check(params (string Name, string Text)[] files)
+            {
+                foreach ((string name, string text) in files)
+                {
+                    temporary.Write(module + name, text);
+                }
+
+                string[] sources = files.Where(file => file.Name.EndsWith(".cpp", StringComparison.Ordinal))
+                    .Select(file => Path.Combine(temporary.Root, module + file.Name)).ToArray();
+                var failures = PolicyChecks.UnityModuleMacroLeaks(temporary.Root, "Probe", sources, [include]);
+                Verify.That(failures.All(failure => failure.Rule == "unity-macro-leak"), "rule name");
+                return failures.Select(failure => (failure.Path, failure.Line)).ToHashSet();
+            }
+
+            // 통과: 감싼 include(조건 안도), 누출 없는 시스템 헤더, 주석 안의 include, 감싼 헤더를 거친 include, 묶이지 않는 소스.
+            Verify.That(Check(
+                ("Private/Good.cpp", "#include \"Wrapped.h\"\n#include <stdio.h>\n" + begin + "\n#include <Windows.h>\n#include <d3d11_4.h>\n\n" + end +
+                    "// #include <Windows.h>\n#if X\n" + begin + "#include <objbase.h>\n" + end + "#endif\n"),
+                ("Private/Wrapped.h", "#pragma once\n" + begin + "#include <Unknwn.h>\n" + end),
+                ("Private/Defined.cpp", "#define SETTING 1\n#include <Windows.h>\n")).Count == 0, "wrapped includes were rejected");
+            // 통과: 이름이 SDK 헤더 접두(d3d·dxgi)와 겹치는 저장소 헤더와 생성 헤더는 누출 헤더가 아니다. 저장소 헤더는 따라가서 읽는다.
+            temporary.Write(module + "Public/DxgiProbe/DxgiAdapter.h", "#pragma once\n" + begin + "#include <dxgi1_6.h>\n" + end);
+            Verify.That(Check(
+                ("Private/D3D12Caps.cpp", "#include \"D3D12Caps.h\"\n#include <DxgiProbe/DxgiAdapter.h>\n#include <Probe/D3D12Types.generated.h>\n"),
+                ("Private/D3D12Caps.h", "#pragma once\n" + begin + "#include <d3d12.h>\n" + end)).Count == 0, "repository headers named like SDK headers");
+            // 위반: 그런 저장소 헤더 안의 감싸지 않은 include는 그 헤더의 줄로 보고한다.
+            Verify.That(Check(
+                ("Private/D3D12Device.cpp", "#include \"D3D12Device.h\"\n"),
+                ("Private/D3D12Device.h", "#pragma once\n#include <d3d12.h>\n")).SetEquals([(module + "Private/D3D12Device.h", 2)]),
+                "unwrapped include inside a repository header named like an SDK header");
+            // 위반: 모듈 PCH 헤더는 소스가 include하지 않아도 읽는다(모든 번역 단위 앞에 들어간다).
+            temporary.Write(module + "Private/ProbePch.h", "#pragma once\n#include <Windows.h>\n");
+            Verify.That(PolicyChecks.UnityModuleMacroLeaks(temporary.Root, "Probe", [], [include],
+                [Path.Combine(temporary.Root, module + "Private/ProbePch.h")]).Select(failure => (failure.Path, failure.Line))
+                .SequenceEqual([(module + "Private/ProbePch.h", 2)]), "unwrapped include inside the module PCH header");
+            // 위반: 직접 include(대소문자 무시·접두 계열), 저장소 헤더를 거친 include(헤더의 줄), public 헤더를 꺾쇠로 거친 include.
+            temporary.Write(module + "Public/Probe/Api.h", "#pragma once\n#include <dxgi1_6.h>\n");
+            Verify.That(Check(
+                ("Private/Bad.cpp", "#include <stdio.h>\n#include <windows.h>\n#include <wrl/client.h>\n#include \"Leaky.h\"\n#include <Probe/Api.h>\n"),
+                ("Private/Leaky.h", "#pragma once\n\n#include <ShlObj.h>\n")).SetEquals(
+                [(module + "Private/Bad.cpp", 2), (module + "Private/Bad.cpp", 3), (module + "Private/Leaky.h", 3), (module + "Public/Probe/Api.h", 2)]),
+                "unwrapped includes");
+            // 위반: Begin 없는 End, 닫지 않은 Begin, 이미 연 Begin, 쌍 안의 저장소 헤더.
+            Verify.That(Check(
+                ("Private/Pair.cpp", end + begin + "#include <Windows.h>\n" + begin + "#include \"Plain.h\"\n"),
+                ("Private/Plain.h", "#pragma once\n")).SetEquals(
+                [(module + "Private/Pair.cpp", 1), (module + "Private/Pair.cpp", 4), (module + "Private/Pair.cpp", 5)]), "unbalanced pairs");
+            Verify.That(PolicyChecks.IsMacroLeakingHeader("Windows.h") && PolicyChecks.IsMacroLeakingHeader("d3d12.h") &&
+                PolicyChecks.IsMacroLeakingHeader("dxc/dxcapi.h") && !PolicyChecks.IsMacroLeakingHeader("vulkan/vulkan_core.h") &&
+                !PolicyChecks.IsMacroLeakingHeader("stdio.h") && !PolicyChecks.IsMacroLeakingHeader("Platform/Win64/ComRef.h"), "header classification");
+        });
         // PCH 헤더 직접 include 금지(같은 문서 8.1·10절): 공유 PCH 헤더의 철자와 모듈 PCH 헤더의 상대 경로를 include하면 위반이고,
         // PCH 헤더끼리의 include, 주석 안의 예시, 문자열 안의 철자, 다른 헤더는 통과한다.
         suite.Add("Policy.PchHeaderIncludesAreRejected", () =>
@@ -849,6 +909,21 @@ internal static partial class SelfTests
             {
                 temporary.Write(directory + "Probe.h", unguarded);
                 Verify.Equal(1, PolicyChecks.PlatformBoundary(temporary.Root).Count, "unguarded Platform/Win64 header accepted: " + unguarded);
+            }
+
+            // 4. Windows SDK 헤더를 감싸는 쌍은 여러 번 include하는 조각이다: #pragma once가 없어야 하고 나머지 틀은 같다.
+            temporary.Write(directory + "Probe.h", guarded);
+            foreach (string fragment in new[] { "WindowsHeadersBegin.h", "WindowsHeadersEnd.h" })
+            {
+                temporary.Write(directory + fragment, "#include <Base/Compiler.h>\n#if ROCKS_PLATFORM_WINDOWS\n#undef small\n#endif\n");
+                NoFailures(PolicyChecks.PlatformBoundary(temporary.Root));
+                foreach (string wrong in new[] { guarded, "#include <Base/Compiler.h>\n#undef small\n" })
+                {
+                    temporary.Write(directory + fragment, wrong);
+                    Verify.Equal(1, PolicyChecks.PlatformBoundary(temporary.Root).Count, "wrong repeatedly included header accepted: " + wrong);
+                }
+
+                File.Delete(Path.Combine(temporary.Root, directory + fragment));
             }
         });
         suite.Add("Policy.TargetMacroControls", () =>

@@ -2,9 +2,13 @@
 
 #include <Graphics/DeviceCaps.h>
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
 #include <d3d11_4.h>
 #include <dxgi1_6.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
 
 // D3D11 장치 능력 질의다(RenderBase 4.4절 GX1). D3D12 질의(D3D12Graphics/Private/Win64/
 // D3D12Caps.cpp)와 같은 규칙이고 DXGI 어댑터 도우미(HDR 출력·보장 자원 크기)는 DxgiGraphics 모듈을

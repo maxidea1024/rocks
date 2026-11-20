@@ -191,7 +191,16 @@ public static partial class PolicyChecks
                     failures.Add(new(relative, 1, "platform-boundary",
                         "Platform/Win64 holds only headers directly in the directory (no subdirectories or sources)"));
                 }
-                else if (!HasWindowsOnlyGuard(File.ReadAllText(path, StrictUtf8)))
+                else if (ReincludedWindowsHeaders.Contains(relative, StringComparer.Ordinal))
+                {
+                    if (!HasWindowsOnlyGuard(File.ReadAllText(path, StrictUtf8), reincluded: true))
+                    {
+                        failures.Add(new(relative, 1, "platform-boundary",
+                            "this Platform/Win64 header is included repeatedly: it has no #pragma once and wraps its content in " +
+                            "#if ROCKS_PLATFORM_WINDOWS after #include <Base/Compiler.h>"));
+                    }
+                }
+                else if (!HasWindowsOnlyGuard(File.ReadAllText(path, StrictUtf8), reincluded: false))
                 {
                     failures.Add(new(relative, 1, "platform-boundary",
                         "Platform/Win64 header must wrap its content in #if ROCKS_PLATFORM_WINDOWS after #include <Base/Compiler.h>"));
@@ -302,11 +311,21 @@ public static partial class PolicyChecks
             name.EndsWith(".h", StringComparison.Ordinal);
     }
 
-    private static bool HasWindowsOnlyGuard(string text)
+    // 여러 번 include하는 조각이라 #pragma once가 없는 Windows 전용 공개 헤더다: Windows SDK 헤더를 감싸는 쌍이다
+    // (Docs/Design/UnityBuildPch.ko.md 6.1절 "매크로를 남기는 헤더"). 나머지 틀은 다른 Windows 전용 공개 헤더와 같다.
+    private static readonly string[] ReincludedWindowsHeaders =
+    [
+        WindowsPublicHeaderDirectory + "WindowsHeadersBegin.h", WindowsPublicHeaderDirectory + "WindowsHeadersEnd.h"
+    ];
+
+    // reincluded면 #pragma once 없이 #include <Base/Compiler.h>로 시작해야 한다(#pragma once가 있으면 두 번째 include가 비어
+    // 매크로를 되돌리거나 숨기지 못한다).
+    private static bool HasWindowsOnlyGuard(string text, bool reincluded)
     {
         string[] lines = WithoutComments(text).Split('\n').Select(line => line.Trim()).Where(line => line.Length != 0).ToArray();
-        return lines.Length >= 4 && PragmaOnceLine.IsMatch(lines[0]) && CompilerIncludeLine.IsMatch(lines[1]) &&
-            WindowsGuardLine.IsMatch(lines[2]) && EndifLine.IsMatch(lines[^1]);
+        int include = reincluded ? 0 : 1;
+        return lines.Length >= include + 3 && (reincluded || PragmaOnceLine.IsMatch(lines[0])) && CompilerIncludeLine.IsMatch(lines[include]) &&
+            WindowsGuardLine.IsMatch(lines[include + 1]) && EndifLine.IsMatch(lines[^1]);
     }
 
     /// <summary>shell 문자열을 실행하지 않는다. flags 검증에는 가능한 한 실제 ArgumentList를 전달한다.</summary>

@@ -7,8 +7,12 @@
 #include <Platform/Fatal.h>
 #include <Platform/Win64/WideString.h>
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <processsnapshot.h>
 #include <werapi.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
 
 namespace rocks::platform::detail {
 

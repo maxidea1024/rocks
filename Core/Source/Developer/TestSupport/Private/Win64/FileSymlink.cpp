@@ -2,7 +2,12 @@
 
 #include <Platform/Win64/WideString.h>
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
+
 #include <string.h>
 
 namespace rocks::test {
