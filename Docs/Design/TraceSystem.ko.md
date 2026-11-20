@@ -1,6 +1,6 @@
 # 다중 스레드 trace 설계
 
-기준일: 2026-11-19, 개정 8. 여러 스레드의 CPU 구간·카운터·표지·task 수명·GPU 구간을 하나의 시간축에 기록하는 **trace 수집**(TraceCapture)과, 이를 읽는 **trace 분석**(TraceAnalysis)을 정한다.
+기준일: 2026-11-20, 개정 9. 여러 스레드의 CPU 구간·카운터·표지·task 수명·GPU 구간을 하나의 시간축에 기록하는 **trace 수집**(TraceCapture)과, 이를 읽는 **trace 분석**(TraceAnalysis)을 정한다.
 
 [렌더 기반](RenderBase.ko.md)의 선행 작업 CP5(다중 스레드 CPU 구간 계측·카운터·GPU 상관)이고 RB7(`GpuScope`, RenderBase 13절)의 기반이다. 요구는 다음 문서에서 온다.
 - [엔진 구현 계획](EngineImplementationPlan.ko.md) 29.1절(계측 체계), 29.4절(필수 로깅·프로파일러), 29.5절(OB01–OB06)
@@ -115,6 +115,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론)의 현재 기본 경로다. 경�
 - **id 발급**
   - 형 id는 등록 때 발급한다. 처음 쓸 때 지연 발급하지 않는다(UE `TL Private/Trace/EventNode.cpp:78–120`와 다르다).
   - 등록은 모듈 등록 함수에서 한다. 같은 이름의 다른 스키마를 등록하면 오류다.
+  - **다시 등록(개정 9)**: 모듈이 `Startup`에서 등록하고 `Shutdown`에서 푸는 형([모듈 로더](ModuleLoader.ko.md) 3.12절)은 같은 세션 동안 여러 번 등록될 수 있다(다음 Engine·실행 중 해제 뒤 재적재). 그래서 등록을 푼 형과 같은 이름·같은 스키마를 다시 등록하면 그 형 id와 이미 낸 스키마를 그대로 다시 쓴다(새 스키마를 내지 않고 형 id 상한을 소모하지 않는다). 같은 이름·다른 스키마는 그대로 `TypeMismatch`다. 형 id 재사용이 분석기에 안전한 이유는 같은 id의 스키마가 같기 때문이다. 버린 안: 새 id로 다시 등록(같은 이름 스키마가 둘이 되어 지금 규칙상 `TypeMismatch`가 나고, 등록·해제를 되풀이하면 형 id·채널 id 상한을 다 쓴다).
   - **TR1 구현**: 같은 이름·같은 스키마라도 다른 객체면 `AlreadyExists`다(다른 스키마는 `TypeMismatch`). 머리(형 id·순서 번호)·고정부·가변 길이 칸의 합이 블록 하나(정의 형은 정의 기록 상한 16 KiB)에 들어가야 한다. 형 id 1–15는 세션 내부 형(`Trace.ChannelInfo`·`Trace.ChannelState`·`Trace.ThreadInfo`·`Trace.Loss`·`Trace.DefinitionLoss`)이고, 그 스키마도 다른 형처럼 스키마 스트림으로 나간다. 사용자 형은 16부터 4095까지다.
 - **자기 기술**
   - 스키마는 정의 기록으로 스트림에 낸다. 분석기는 사전 지식 없이 읽는다(UE `NewEvent`, `TL Private/Trace/EventNode.cpp:122–224`와 같다).
@@ -161,6 +162,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론)의 현재 기본 경로다. 경�
   - 채널은 이름·설명·읽기 전용 여부로 등록한다.
   - 이름은 소문자 점 경로이며, 설정 이름 문법(ConfigSystem 5.1절)과 같은 영역 이름 공간을 쓴다(`cpu`, `task`, `gpu`, `frame`, `log`, `mark`, `counter`, `span`, `context`, `memory.alloc`, `io`, `gc`, `asset`). `span`·`context`는 TR2에서 더했다.
   - UE식 대소문자·접미사 무시 해시(`Channel.cpp:52–84`)는 두지 않는다. 이름은 정확히 일치해야 한다.
+  - **다시 등록(개정 9)**: 등록을 푼 채널과 같은 이름을 다시 등록하면 그 채널 id를 다시 쓰고 채널 정보(`Trace.ChannelInfo`)를 다시 기록한다(분석기는 같은 id의 나중 정보를 쓴다). 그래서 그 채널의 형 스키마(채널 id를 담는다)도 그대로 맞고 채널 id 상한(128)을 소모하지 않는다. 세션은 채널 이름을 id마다 복사해 둔다(모듈 코드가 내려간 뒤에도 이름을 비교할 수 있게).
 - **켜기·끄기**
   - 상태는 원자 정수이고, 읽기는 relaxed다. 여러 채널 조건은 AND로 결합한다.
   - 변경은 정의 기록(채널 변경)으로 스트림에 남긴다.
@@ -361,7 +363,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론)의 현재 기본 경로다. 경�
   - 분석기는 오차를 표시한다(OB06 "clock 불확실성").
 - **변환할 수 없는 경우**: calibration이 없는 backend(GLES 확장 없음 등)의 GPU 구간은 기록하지 않는다. "GPU 시간 없음"을 정의 기록으로 공개한다(RenderBase 13.2절).
 - **CPU 쪽 상관**: 렌더 lane의 CPU 구간과 GPU 구간은 같은 pass 이름 id를 쓴다. 기록은 RB7 구현에 속하고, 이 문서는 형과 시간 규칙만 정한다.
-- **구현(2026-11-17, RB7).** 형 이름·배치는 `TraceStandardFormat`(`TraceCapture/TraceFormat.h`)에 두고, RenderBase `RegisterGpuTraceTypes`가 채널 `gpu`(꺼진 상태)와 함께 등록한다.
+- **구현(2026-11-17, RB7).** 형 이름·배치는 `TraceStandardFormat`(`TraceCapture/TraceFormat.h`)에 두고, RenderBase `RegisterGpuTraceTypes`가 채널 `gpu`(꺼진 상태)와 함께 등록한다. 등록 주체는 RenderBase 모듈 `Startup`이다(호스트 trace 세션 서비스 — [모듈 로더](ModuleLoader.ko.md) 3.12절).
   - `Trace.GpuQueue`(정의): u16 queue id · u8 종류(0 graphics) · u8 GPU 시간(0 없음, 1 있음), 가변 이름.
   - `Trace.GpuCalibration`(정의): u16 queue · u64 GPU tick · u64 CPU trace tick · u64 GPU 주파수 · u64 오차(ns).
   - `Trace.GpuScope`(스레드 스트림): u16 queue · u32 이름 id(`Trace.ScopeName`) · u32 깊이 · u64 프레임 · u64 시작 tick · u64 끝 tick. tick은 쓰기 전에 trace 시간축으로 바꾼 값이다.
@@ -411,6 +413,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론)의 현재 기본 경로다. 경�
 
 ## 13. 개정 이력
 
+- 개정 9(2026-11-20, 모듈 로더 ML1 후속): 4절 형 id·5절 채널 등록에 "다시 등록"을 더했다 — 등록을 푼 같은 이름 채널은 id를 다시 쓰고 채널 정보를 다시 기록하며, 같은 이름·같은 스키마 형은 형 id와 스키마를 다시 쓴다. 모듈 수명에 묶인 등록(RenderBase GPU 형 — 모듈 로더 3.12절)이 같은 세션에서 되풀이되기 때문이다.
 - 개정 8(2026-11-19, CVar 세션): 5절 TraceControl 세션 설정을 CVar 핸들(`trace.*` — CVarSystem CVR7)로, 엔진 층 파일의 `"Trace"` 섹션 거부, 콘솔 명령 인자 표기를 CVR6 명령 핸들(줄의 나머지)로 고쳤다.
 - 개정 7(2026-11-18, 로깅 세션 작성·rocks-95 합의): 상관 id 스택을 Core `CorrelationScope`로 옮기고 trace는 확장 칸·관찰자로 기록을 유지한다(6.4절). 문맥 전파는 task 채널과 무관하게 늘 하고 `DedicatedLane::Post`도 전파한다(7절). 표준 채널 `log`와 `Trace.LogMessageSpec`·`Trace.LogMessage`, 분석 `Logs()`·report `logs`를 더했다(5절·6.6절, 로깅 LG15). 재리뷰 반영: spec id 위치는 문자열 내용 해시, 정의 상한 초과 spec은 바로 동봉, 동봉 템플릿 1024 byte 상한과 잘림 비트 2, 동봉 실패는 sink만 센다(6.6절).
 - 개정 6(2026-11-18): TR5 구현 반영(5절 구현, 8절 구현). 스펙과 다르게 정한 것: 고리의 덩어리에 기록 경계 표시를 두고 경계를 잃은 덩어리는 스냅샷에서 뺀다, 동기 표지를 세션 내부 형 기록(`Trace.SnapshotSync`)으로 둔다, 수집 통계를 표준 채널 `stats`의 기록으로 펌프 수 간격에 낸다(기본 묶음에 넣지 않음), 설정 계층 연결을 새 모듈 `TraceControl`에 둔다, 묶음은 Map이 아니라 설정 struct의 필드다, 콘솔 설정 이름은 밑줄 표기다, `trace.stop`은 세션이 아니라 `trace.file`의 출력만 끝낸다.

@@ -58,6 +58,18 @@ DXC·SPIRV-Cross·SPIRV-Tools처럼 예외·RTTI가 필요하거나(LLVM 기반 
 
 소스 검사는 `.h`/`.c`/`.cpp`/`.mm` 대상 lexical guard이며 전처리 확장 전체의 형식 검증은 아니다. manifest가 선언한 외부 원본 디렉터리만 제외하며(이름이 비슷한 디렉터리는 계속 검사), 그 원본은 `third-party` 검사가 SHA-256·지시문 목록으로 대신 확인한다. 블록 주석에 쓴 pragma 예제도 탐지할 수 있으므로 긴 예시는 설계 문서에 둔다. 매크로 형태의 억제(`_Pragma("clang diagnostic ignored …")`, `__pragma(warning(disable …))`)도 검사하며, 그 밖의 우회와 새 build script·새 compiler driver를 통한 설정 변경은 코드 리뷰에서 금지한다. 신규 도구 체계 지원 시 실제 compiler invocation에 대한 감사와 음성 fixture를 확장해야 한다. 컴파일 경고 규약은 로깅의 Warning 등급이나 에셋 검증 경고를 자동으로 금지하는 규칙과는 구분한다.
 
+## 진단 코드 등록부
+
+Rocks 도구가 사용자에게 보이는 진단 코드의 대역이다(2026-11-20, Sparks 연동 요구 SE-R9). 위의 C++ 컴파일러 경고와는 별개로, Rocks가 직접 만든 컴파일러·검증기가 내는 오류 코드의 이름 공간이 겹치지 않게 한다. 코드는 한 번 발급하면 의미를 바꾸지 않고, 삭제한 코드의 번호는 다시 쓰지 않는다.
+
+| 접두사·대역 | 도구 | 정본 |
+|---|---|---|
+| `RMC1000`–`RMC4999` | 메타 컴파일러(`Programs/Rocks.MetaCompiler`) | [리플렉션 메타데이터](../Implementation/ReflectionMetadata.ko.md) |
+| `S0100`–`S1199` | Sparks 컴파일러. 대역 안의 배정(S01xx 어휘 … S11xx 패키지·reload·backend)은 Sparks 문서 8.1절 | [Sparks 언어](SparksLanguage.ko.md) 8.1절 |
+| (예약) UI 검증 | `rocks validate --ui`(UiToolkit). 접두사는 구현 때 이 표에 등록한다 | [UI 툴킷](UiToolkit.ko.md) |
+
+새 도구가 진단 코드를 내면 접두사와 대역을 이 표에 먼저 등록한다.
+
 ## 현재 검증 증거
 
 [CI 실행 42771207691](https://github.com/maxidea1024/rocks/actions/runs/42771207691)의 Windows x64 Clang 20.1.8, macOS ARM64 Apple Clang 17.0.0 Debug/ASan에서 필수 프로필·정상 컴파일·의도적 경고의 오류 거부를 모두 확인했다. 로컬 Clang 21.1.6 Core-only/Debug/Release/ASan에서도 통과했다. 상세 수치와 source digest는 [Foundation 검증 기록](../Implementation/FoundationStatus.ko.md)을 따른다. 경고 정책을 문서 선언만으로 완료 처리하지 않는다.

@@ -16,11 +16,27 @@ jobs:
     if: github.event_name != 'push' || contains(github.event.head_commit.message, '[ci]')
     strategy:
       fail-fast: false
+      # Windows runs two legs (Docs/Design/ClangVersionSupport.ko.md section 6.3): the verified toolchain (LLVM 21.1.6 with the MSVC 14.44
+      # toolset) and LLVM 22.1.8 with the image's default MSVC (14.52), whose STL requires Clang 22. The Clang 22 leg runs the Foundation
+      # tests (Debug, Asan, Release — the meta tests are part of them) and the EngineTests Debug build.
       matrix:
-        os: [windows-latest, macos-15]
+        include:
+          - os: windows-latest
+            leg: windows
+            llvm: '21.1.6'
+            msvc: '14.44'
+          - os: windows-latest
+            leg: windows-clang22
+            llvm: '22.1.8'
+            msvc: ''
+          - os: macos-15
+            leg: macos
+            llvm: ''
+            msvc: ''
+    name: native (${{ matrix.leg }})
     runs-on: ${{ matrix.os }}
     env:
-      ROCKS_MSVC_TOOLSET: ${{ matrix.os == 'windows-latest' && '14.44' || '' }}
+      ROCKS_MSVC_TOOLSET: ${{ matrix.msvc }}
     defaults:
       run:
         shell: pwsh
@@ -33,23 +49,26 @@ jobs:
           global-json-file: global.json
       - name: Install verified native formatter
         run: ./Build/InstallFormatter.ps1
-      # Windows uses the verified toolchain: LLVM 21.1.6 (same as local builds) first on PATH, and the MSVC 14.44 toolset that the
-      # image installs next to 14.52 (ROCKS_MSVC_TOOLSET above). STL 14.52 rejects Clang older than 22 (STL1000), and the
-      # MetaCompiler does not support Clang 22's JSON AST type spellings yet.
-      - name: Install verified LLVM (Windows)
+      # Windows puts the leg's pinned LLVM first on PATH. The verified leg pairs LLVM 21.1.6 (same as local builds) with the MSVC 14.44
+      # toolset that the image installs next to 14.52 (ROCKS_MSVC_TOOLSET above); STL 14.52 rejects Clang older than 22 (STL1000).
+      - name: Install pinned LLVM (Windows)
         if: runner.os == 'Windows'
-        run: ./Build/InstallLlvm.ps1
+        run: ./Build/InstallLlvm.ps1 -Version ${{ matrix.llvm }}
       - name: Build and test Foundation through MSBuild
         run: dotnet msbuild Rocks.proj /t:Test /p:Adaptive=off /p:Configuration=Debug /p:RocksTarget=Foundation /v:minimal
       # Verification variant (Docs/Design/UnityBuildPch.ko.md section 11): every source is its own translation unit and no PCH is used, so a
       # missing include that unity batches or the PCH would hide fails here. Compiles and links only; the tests ran in the step above.
       - name: Build Foundation without unity batches and PCH
-        if: runner.os == 'Windows'
+        if: matrix.leg == 'windows'
         run: dotnet msbuild Rocks.proj /t:Build /p:Adaptive=off /p:Unity=off /p:Pch=off /p:Configuration=Debug /p:RocksTarget=Foundation /v:minimal
       - name: Verify stable identity merge history
         if: github.event_name == 'pull_request'
         run: ./Build/CheckIdentityMerges.ps1 -MetaCompiler out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll
+      - name: Build EngineTests (Clang 22 leg)
+        if: matrix.leg == 'windows-clang22'
+        run: dotnet msbuild Rocks.proj /t:Build /p:Adaptive=off /p:Configuration=Debug /p:RocksTarget=EngineTests /p:NativeOutput=out/ci-engine /v:minimal
       - name: Build and test headless commandlet
+        if: matrix.leg != 'windows-clang22'
         run: |
           dotnet msbuild Rocks.proj /t:Build /p:Adaptive=off /p:Configuration=Debug /p:RocksTarget=Commandlet /p:NativeOutput=out/ci-commandlet /v:minimal
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -58,10 +77,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       # C++ uses clang-format 21.1.6 installed above; C# uses dotnet format of the SDK pinned by global.json (Build/Format/Rocks.Format.slnx).
       - name: Verify C++ and C# formatting
+        if: matrix.leg != 'windows-clang22'
         run: dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll format --root .
       - name: Verify native action graph and incremental failures
+        if: matrix.leg != 'windows-clang22'
         run: dotnet run --project Programs/Rocks.Build.Tests -- --root .
       - name: Verify installed SDK and external game
+        if: matrix.leg != 'windows-clang22'
         run: dotnet run --project Programs/Rocks.Build.IntegrationTests -- --root .
       - name: AddressSanitizer
         run: dotnet msbuild Rocks.proj /t:Test /p:Adaptive=off /p:Configuration=Asan /p:RocksTarget=Foundation /v:minimal
@@ -80,7 +102,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: foundation-${{ runner.os }}
+          name: foundation-${{ matrix.leg }}
           path: |
             out/**/foundation-report.json
             out/**/build-evidence.json

@@ -6,7 +6,8 @@ using Rocks.Build.Rules;
 // RenderHandle reservation table. Sits on the Graphics device contract and does not know ObjectRuntime,
 // World or Engine (the executable and WorldIntegration connect the game side).
 // MetaSchema is used only for the Development check of Object reference fields in transferred types.
-// TraceCapture is used by GPU instrumentation (RB7, GpuTrace).
+// TraceCapture is used by GPU instrumentation (RB7, GpuTrace). ModuleLoader gives the module lifetime object the host trace session
+// service, so Startup registers the GPU trace channel and types (Docs/Design/ModuleLoader.ko.md section 3.12).
 public sealed class RenderBase : EngineModuleRules
 {
     protected override string ModuleName => "RenderBase";
@@ -14,5 +15,5 @@ public sealed class RenderBase : EngineModuleRules
     // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
     protected override UnityMode Unity => UnityMode.On;
 
-    protected override string[] RequiredModules => ["Graphics", "Task", "MetaSchema", "TraceCapture"];
+    protected override string[] RequiredModules => ["Graphics", "Task", "MetaSchema", "TraceCapture", "ModuleLoader"];
 }

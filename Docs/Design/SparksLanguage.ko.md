@@ -263,7 +263,7 @@ class DoorLogic : ScriptComponent {
 | 대상 | 규칙(첫 글자로 판정) | 예 |
 |---|---|---|
 | 키워드·attribute 이름 | 소문자로 시작 | `var`, `on`, `@edit`, `@tableRow` |
-| 내장 값 타입(닫힌 목록, 예약어) | 소문자 | `bool`, `int`, `float`, `string`, `vec2`–`vec4`, `quat`, `mat4` |
+| 내장 값 타입(닫힌 목록, 예약어) | 소문자 | `bool`, `int`, `float`, `int8`–`int64`, `uint8`–`uint64`, `float32`, `float64`, `string`, `vec2`–`vec4`, `quat`, `mat4` |
 | 그 밖의 타입·멤버·이벤트·enum case·attribute 인자 이름·생성 인자 이름 | 대문자로 시작(PascalCase) | `DoorState.Open`, `MoveSpeed`, `@edit(Min: 0)`, `Radius:` |
 | 지역 이름: 함수·handler 인자, `var`/`let` 지역 변수, `if (let)` binding, 반복 변수 | 소문자로 시작(lowerCamel) | `moveInput`, `dt` |
 
@@ -273,7 +273,7 @@ class DoorLogic : ScriptComponent {
 - 한 타입의 필드·함수·이벤트는 이름 공간 하나를 공유하고 한 모듈의 최상위 선언도 이름 공간 하나다. 같은 이름은 오류다.
 - 상속 멤버와 같은 이름의 선언은 오류다. 예외는 시그니처가 같은 재정의 가능 함수의 `override fn`이며, 재정의할 대상이 없는 `override`도 오류다.
 - 키워드, 내장 타입, predeclared 이름(prelude·검증 리터럴·문맥 이름·RPC 접두·`Changed`)은 사용자 선언 이름으로 쓸 수 없다. hook 이름은 수명 클래스와 그 기반 타입의 멤버 이름으로만 쓸 수 없으며 struct 필드·enum case에는 쓸 수 있다. 전체 목록은 부록 A(§3.7)다.
-- 오버로딩은 prelude 수학 함수(`Math.Min`·`Max`·`Abs`·`Clamp` 등, `int`와 `float` 공용)에만 있다. 모든 인자가 `int`면 int 판, 그 밖에 float 판에 맞으면 float 판을 고르며 어디에도 맞지 않으면 오류다.
+- 오버로딩은 prelude 수학 함수(`Math.Min`·`Max`·`Abs`·`Clamp`·`Sign`·`Div`, 모든 숫자 타입 공용 — 부록 B)에만 있다. 인자는 모두 같은 숫자 타입이어야 하며 그 타입의 판을 고른다. 리터럴 인자는 다른 인자의 타입을 따르고, 모두 리터럴이면 기본 타입(`int`·`float`)이다. 맞는 판이 없으면 오류다.
 
 ### 3.2 선언과 기본값
 
@@ -284,7 +284,7 @@ class DoorLogic : ScriptComponent {
 | `enum` | 열거. 플래그 조합은 `Set<E>` | `enum DamageKind { Physical, Fire, Poison }` |
 | `event` | 클래스 안의 멤버 이벤트, 최상위의 Actor 확장 이벤트·World 이벤트 | `event Died(killer: Actor?);` · `event Actor.Interacted(actor: Actor);` · `event World.GameStarted();` |
 | `fn`, `async fn` | 함수와 기다리는 함수 | `fn Lerp(a: float, b: float, t: float): float` |
-| `const` | 컴파일 시 상수. 타입은 `bool`·`int`·`float`·`string`·enum·`Tag`·수학 타입. 값은 모듈 interface hash에 포함되므로 값이 바뀌면 쓰는 모듈이 다시 컴파일된다 | `const MaxStack: int = 99;` |
+| `const` | 컴파일 시 상수. 타입은 `bool`·숫자 타입·`string`·enum·`Tag`·수학 타입. 값은 모듈 interface hash에 포함되므로 값이 바뀌면 쓰는 모듈이 다시 컴파일된다 | `const MaxStack: int = 99;` |
 | `interface` (full) | 함수 시그니처만 가진 계약(§10.3 CU9) | `interface Damageable { fn ApplyDamage(amount: int); }` |
 
 - **기본값(zero value):** 초기값이 없는 필드는 `0`, `0.0`, `false`, `""`, `null`, 빈 컨테이너, enum의 첫 case, 벡터 0, `quat`·`mat4`·`Transform`은 단위(UE `FQuat::Identity`·`FTransform::Identity`), `Rotator`는 (0, 0, 0), `Color`는 (0, 0, 0, 0), `Text`는 빈 Text로 시작한다. `Tag`·`InputAction`과 `?` 없는 객체·에셋·`Soft<T>`·`Row<T>` 필드에는 기본값이 없으므로(`Tag?`의 없음이 None Name이기 때문 — §15) `@edit`로 지정하거나 초기값(소유 component 생성식, `Asset(...)`·`Row(...)` 리터럴)을 두어야 하며 지정이 누락되면 쿡 오류다(SD19). 필드 초기값은 클래스 기본값 레코드에 들어가므로, non-null 참조 초기값(`Asset(...)`·`Soft<T>`·`Row(...)`)은 레코드의 참조 의존 수집(대상 정체성 비교, override하지 않은 값의 레코드 참조를 패키지 의존에 포함)이, 소유 component 생성식은 default subobject가 선행 조건이며 둘 다 해당 도입 단계(L2) 전에 갖춘다([RuntimeClassMetadata](RuntimeClassMetadata.ko.md) '클래스 기본값 결정'). 선택 값은 `T?`로 선언한다. 지역 변수는 선언할 때 초기화해야 한다.
@@ -324,10 +324,13 @@ let mesh = try await MeshAsset.Load();                  // 실패하면 이 실�
 _ = bag.Add(item);                                      // 결과를 버릴 때는 _ 로 명시
 ~~~
 
-- **숫자:** 암묵적 숫자 변환은 없다. 상수식의 0 나누기·overflow·NaN·Inf는 컴파일 오류다. 정수 리터럴(단항 `-`와 괄호 포함)은 타입이 명시된 선언·인자·반환·대입 우변과, 다른 피연산자가 `float`인 산술·비교에서 `float` 상수로 쓴다. const 이름과, 정수 리터럴 하나가 아닌 상수식(`2 * 3` 등)에는 이 승격을 적용하지 않는다. 명시 변환은 `float(i)`(2^53을 넘어 정확히 표현할 수 없으면 `IntegerOverflow` fault)와 `Math.FloorToInt`·`CeilToInt`·`RoundToInt`·`TruncToInt`(`RoundToInt`의 0.5는 0에서 먼 쪽, 범위 밖은 `IntegerOverflow`)이다. `Math.Floor` 등은 `float`를 반환한다(부록 B).
-- **나눗셈:** `int / int`는 오류다(SD17). 몫은 `Math.Div(a, b)`(내림, `a == Math.Div(a, b) * b + a % b`), 비율은 `float(a) / float(b)`로 쓴다. 피연산자에 `float`가 있으면 `/`는 `float`를 반환한다. `%`는 정수 전용 내림 방식이며 `int` 변수의 `/=`는 오류다.[R30]
+- **숫자 타입(SD56, Go 수준):** 정수 `int8`·`int16`·`int32`·`int64`·`uint8`·`uint16`·`uint32`·`uint64`, 실수 `float32`·`float64`. 기본형 `int`는 `int64`, `float`는 `float64`의 다른 이름이다(같은 타입이며 변환이 필요 없다 — 비프로그래머는 대부분 `int`·`float`만 쓴다). 크기를 정한 타입은 엔진 데이터(C++ `int32`·`float` 필드 등)와 저장 크기를 맞출 때 쓴다.
+- **변환은 명시적으로만(Go와 같다):** 서로 다른 숫자 타입은 섞어 계산·비교·대입할 수 없고 `int32(x)`·`float32(x)`·`uint8(x)`·`float(i)`처럼 타입 이름으로 바꾼다. 정수끼리의 변환과 정수 → 실수 변환은 값이 대상 타입에 정확히 들어가지 않으면 `IntegerOverflow` fault다(`uint8(300)`, 2^53을 넘는 `float(i)` 등 — Go처럼 잘라 내지 않는다, SD57). `float64` → `float32`는 최근접 짝수로 반올림하고 범위를 넘으면 `NonFinite`다. 실수 → 정수는 반올림 방식을 드러내는 `Math.FloorToInt`·`CeilToInt`·`RoundToInt`·`TruncToInt`(결과는 `int`, `RoundToInt`의 0.5는 0에서 먼 쪽, 범위 밖은 `IntegerOverflow`)로만 하고 다른 정수 타입은 그 결과를 다시 바꾼다. `Math.Floor` 등은 같은 실수 타입을 반환한다(부록 B).
+- **숫자 리터럴은 타입이 없는 상수다(Go의 untyped constant):** 정수 리터럴과 실수 리터럴(단항 `-`·괄호·리터럴끼리의 상수식 포함)은 쓰는 자리의 타입을 따른다 — 타입이 명시된 선언·인자·반환·대입 우변, 다른 피연산자의 타입이 정해진 산술·비교. 정수 리터럴은 실수 자리에도 쓸 수 있지만 실수 리터럴은 정수 자리에 쓸 수 없다. 값이 그 타입에 들어가지 않으면 컴파일 오류다(S0109: `var b: uint8 = 300`, `var c: uint8 = -1`). 자리의 타입이 없으면(`var x = 1`) 정수 리터럴은 `int`, 실수 리터럴은 `float`이다. 이름 붙은 `const`는 선언한 타입을 가진다. 상수식의 0 나누기·overflow·NaN·Inf는 컴파일 오류다.
+- **overflow(SD57):** 모든 정수 타입의 산술(`+`·`-`·`*`·단항 `-`·`%`·`Math.Div`)이 그 타입의 범위를 넘으면 `IntegerOverflow` fault다. 부호 없는 타입의 `0 - 1`도 fault다(조용히 돌아가지 않는다). 부호 없는 타입에 단항 `-`를 쓰면 컴파일 오류다. 모든 실수 타입의 NaN·Inf 결과는 `NonFinite` fault다.
+- **나눗셈:** 정수 타입끼리의 `/`는 오류다(SD17 — 모든 정수 타입). 몫은 `Math.Div(a, b)`(내림, `a == Math.Div(a, b) * b + a % b`), 비율은 `float(a) / float(b)`로 쓴다. 실수 타입의 `/`는 같은 실수 타입을 반환한다. `%`는 정수 전용 내림 방식이며 정수 변수의 `/=`는 오류다.[R30]
 - **비교:** `==`·`!=`는 `bool`, `int`, `string`(UTF-8 바이트 비교), enum, `Tag`, `InputAction`, `Soft<T>`·`Row<T>`(ID 비교), 객체, 그리고 이들의 `T?`에만 쓴다. 객체 비교는 파괴되었으면 null로 읽은 뒤의 동일성이며 한쪽이 다른 쪽의 기반 타입일 때만 쓸 수 있다. `float`·수학 타입·struct·`Text`·컨테이너·`Result`·에셋 값의 `==`는 오류이며 `float`·vector는 `Math.NearlyEqual`을 쓴다. `?` 없는 `T`를 `null`과 비교하는 것도 오류다. Map 키·Set 원소·switch 대상은 `==`를 쓸 수 있는 타입만 허용하고, case에는 상수식만 쓰며 같은 case의 중복은 오류다. enum switch는 모든 case를 처리하고 `default`가 없으며(엔진 enum `Error`는 case가 늘 수 있으므로 `default` 필수), 그 밖의 switch는 `default`가 필수다.
-- **문자열:** `+`는 없고 보간 `"${x}"`만 사용한다. 보간할 수 있는 타입은 `bool`·`int`·`float`·`string`·enum(case 이름)·`Tag`·수학 타입이다. `float`는 다시 읽었을 때 같은 값이 되는 가장 짧은 10진 표기로 쓰고 정수값이면 끝에 `.0`을 표기한다. `T?`·객체·struct·컨테이너·`Text`의 보간은 오류다.
+- **문자열:** `+`는 없고 보간 `"${x}"`만 사용한다. 보간이 없는 원문 그대로의 텍스트는 verbatim `@"..."`로 쓴다(§3.6). 보간할 수 있는 타입은 `bool`·`int`·`float`·`string`·enum(case 이름)·`Tag`·수학 타입이다. `float`는 다시 읽었을 때 같은 값이 되는 가장 짧은 10진 표기로 쓰고 정수값이면 끝에 `.0`을 표기한다. `T?`·객체·struct·컨테이너·`Text`의 보간은 오류다.
 - **조건과 평가:** 대입은 문장이다. 조건식은 `bool`만 허용한다. 평가 순서는 항상 왼쪽에서 오른쪽이며 `&&`·`||`·`??`는 왼쪽 값으로 결과가 정해지면 오른쪽을 평가하지 않는다. `break`는 반복문만 대상으로 한다.
 - **사용하지 않는 이름과 버린 결과:** 사용하지 않는 지역 변수·import, 버린 결과는 오류다. "사용하지 않음"은 어느 경로에서도 읽지 않는 것이다. `void`가 아닌 모든 결과(`try`로 꺼낸 값과 `Result<void>` 포함)는 사용하거나 `_ =`로 버리며, 유지 자원은 `_ =`로도 버릴 수 없다. handler 인자는 이벤트 인자 목록의 앞에서부터 필요한 만큼 선언하고, 쓰지 않는 앞쪽 인자와 `override fn`의 쓰지 않는 인자는 이름을 `_`로 쓴다. 그 밖의 함수 인자를 쓰지 않으면 오류다. 반복 변수가 필요 없으면 `_`를 쓴다. 유지 자원 지역 변수는 보관 자체가 사용이다(§7.1).
 - **`await`·`try`:** 문장 수준(문장 전체, 지역 변수 선언의 초기값, 단순 대입의 우변, `return`)에서만 쓰며 바로 뒤의 호출·이벤트·요청 하나에 적용된다(§3.6 `Value`). `await F() + 1`과 복합 대입(`+=` 등)의 우변은 오류이며 지역 변수로 먼저 받는다. `?? return`도 지역 변수 선언에서만 쓴다(`?? break`·`?? continue`는 없다 — SD39).
@@ -438,23 +441,29 @@ Args         = "(" [ Arg { "," Arg } ] ")" ;
 Arg          = [ Ident ":" ] Expr ;
 Primary      = Literal | Ident [ TypeArgs ] | "this" | "(" Expr ")" | "[" [ Elem { "," Elem } ] "]" ;
 Elem         = Expr [ ":" Expr ] ;
-Literal      = IntLit | FloatLit | StringLit | "true" | "false" | "null" ;
+Literal      = IntLit | FloatLit | StringLit | VerbatimLit | "true" | "false" | "null" ;
 ~~~
 
 어휘:
 
 ~~~text
 Ident        = Letter { Letter | Digit } ;                 (* ASCII, "_" 제외 *)
-IntLit       = Digit { Digit } ;
-FloatLit     = Digit { Digit } "." Digit { Digit } [ Exp ] | Digit { Digit } Exp ;
-Exp          = ( "e" | "E" ) [ "+" | "-" ] Digit { Digit } ;
+IntLit       = Decimal | ( "0x" | "0X" ) { "_" } HexDigit { [ "_" ] HexDigit }
+             | ( "0b" | "0B" ) { "_" } BinDigit { [ "_" ] BinDigit } ;   (* 구분자는 여러 개 이어 써도 된다 *)
+Decimal      = Digit { { "_" } Digit } ;
+FloatLit     = Decimal "." Decimal [ Exp ] | "." Decimal [ Exp ] | Decimal Exp ;
+Exp          = ( "e" | "E" ) [ "+" | "-" ] Decimal ;
 StringLit    = '"' { Char | Escape | "${" Expr "}" } '"' ;
 Escape       = "\" ( '"' | "\" | "n" | "t" | "$" | "u{" Hex { Hex } "}" ) ;
+VerbatimLit  = '@"' { VerbatimChar | '""' } '"' ;                 (* escape·보간 없음, 여러 줄 가능 *)
 ~~~
 
 - `Char`는 `"`·`\`·줄바꿈을 제외한 문자이며 단독 `$`는 `$` 문자다. `${`만 보간을 시작하고 문자 `${`는 `\${`로 쓴다. `${ }` 안에는 문자열 리터럴을 쓸 수 없다. `\u{}`는 16진 1–6자리다.
-- 정수 리터럴은 10진만 쓰고 자릿수 구분자는 없다. 지수 표기는 `FloatLit`에만 있다. 범위를 넘는 리터럴은 컴파일 오류이며 int64 최솟값은 단항 `-`와 결합할 때만 쓴다.
-- 숫자 뒤의 `.`는 다음 문자가 숫자일 때만 `FloatLit`에 포함되므로 `0..<n`은 범위로 읽힌다. `1.`·`.5`는 쓸 수 없다.
+- **숫자 리터럴은 최신 C#의 형태를 따른다(SD54, 2026-11-20 사용자 결정).** 10진(`1_000_000`), 16진(`0xFF_FF`, `0x_FF`), 2진(`0b1010_0101`), 실수(`1.5`, `.5`, `1e3`, `1_000.5e-3`)를 쓴다. 자릿수 구분자 `_`는 숫자 사이에 몇 개든 둘 수 있고, 16진·2진은 접두사 바로 뒤에도 둘 수 있다. 숫자 끝, `.` 앞뒤, `e` 바로 뒤에는 둘 수 없다. 앞자리 0은 10진으로 읽는다(`007`은 7 — 8진 리터럴은 없다). 16진·2진은 정수 리터럴이다.
+- **C#과 다른 점:** 접미사(`u`·`l`·`ul`·`f`·`d`·`m`)는 쓰지 않는다. 리터럴은 Go처럼 쓰는 자리의 타입을 따르므로(§3.3 "숫자 리터럴은 타입이 없는 상수다") 타입은 선언(`var x: uint8 = 1`)이나 변환(`float32(1.5)`)으로 정한다. 접미사를 쓰면 S0114로 이유와 고칠 형태를 보인다.
+- 범위를 넘는 리터럴은 컴파일 오류이며 int64 최솟값은 단항 `-`와 결합할 때만 쓴다. 16진·2진도 int64 범위다(`0xFFFF_FFFF_FFFF_FFFF`를 -1로 읽지 않는다).
+- 숫자 뒤의 `.`는 다음 문자가 숫자일 때만 `FloatLit`에 포함되므로 `0..<n`은 범위로 읽힌다. `1.`은 쓸 수 없다(C#과 같다).
+- **verbatim 문자열(SD55, 2026-11-20 사용자 결정):** `@"..."`는 C#의 verbatim 문자열이다. `\`는 그대로 글자이고 escape가 없으며 `"`는 `""`로 쓴다. 보간 `${ }`도 하지 않는다(그대로 글자). 여러 줄에 걸칠 수 있고, 원문의 CRLF는 값에서 LF가 된다(저장소 줄 끝 설정과 무관하게 같은 값). 경로·정규식·여러 줄 텍스트에 쓴다. `@` 바로 뒤에 `"`가 올 때만 verbatim이며 그 밖의 `@`는 attribute다.
 
 **interface·open(full):** interface에는 함수 시그니처만 두며 필드·이벤트·기본 구현이 없다. class만 구현하고 struct는 구현하지 않는다. 구현 함수는 같은 이름·시그니처의 `fn`이며 `override`를 쓰지 않는다. interface 타입은 참조로만 쓰고(`I?`, `as? I`, `Owner.Find<I>()`) `@save`·`@net`·`@edit` 필드에 둘 수 없다. 메서드 추가는 interface의 끝에만 허용한다(slot 호환, §10.3 CU9). `open class`만 Sparks 파생 클래스의 기반이 되고 `open fn`만 재정의된다. 우선순위(높은 것부터): `.` `?.` `()` `[]` → `as?` → 단항 `!` `-` → `*` `/` `%` → `+` `-` → `??`(오른쪽 결합) → 비교(결합 없음) → `==` `!=`(결합 없음) → `&&` → `||`. `??`가 비교보다 높으므로 `n?.Count ?? 0 > 5`는 `(n?.Count ?? 0) > 5`다. `?.`의 단락 범위는 바로 뒤의 이름과 그 이름에 붙은 타입 인자·호출 인자까지다(§4.3).
 
@@ -463,7 +472,7 @@ Escape       = "\" ( '"' | "\" | "n" | "t" | "$" | "u{" Hex { Hex } "}" ) ;
 | 분류 | 이름 | 사용 제한 |
 |---|---|---|
 | 키워드(full 전용 포함, 항상 예약) | `import` `as` `class` `struct` `enum` `event` `fn` `async` `const` `var` `let` `if` `else` `for` `in` `while` `switch` `case` `default` `break` `continue` `return` `on` `emit` `await` `try` `override` `this` `true` `false` `null` `interface` `open` | 식별자로 쓸 수 없다 |
-| 내장 타입 | `bool` `int` `float` `string` `vec2` `vec3` `vec4` `quat` `mat4`, `void`(`Result<void>`의 타입 인자 전용) | 식별자로 쓸 수 없다. 타입과 생성·변환 호출로만 쓴다 |
+| 내장 타입 | `bool` `int` `float` `int8` `int16` `int32` `int64` `uint8` `uint16` `uint32` `uint64` `float32` `float64` `string` `vec2` `vec3` `vec4` `quat` `mat4`, `void`(`Result<void>`의 타입 인자 전용) | 식별자로 쓸 수 없다. 타입과 생성·변환 호출로만 쓴다 |
 | prelude | `Log` `Assert` `Math` `Random` `Format` `Parse` `Delay` `NextTick` `NextFixedTick` `All` `Race` `Assets` `CVars` `Settings` `Clock` `Error` | 사용자 선언 이름으로 쓸 수 없다 |
 | prelude 타입 | `Array` `Map` `Set` `Result` `Soft` `Row` `Text` `TagSet` `InputAction` `LoadRequest` `Connection` `PlaySession` `Class` `CVarRef` `Rotator` `Transform` `WorldPosition` `Color` `Hit` | 사용자 선언 이름으로 쓸 수 없다 |
 | 핵심 엔진 타입(언어 버전 1에 고정) | `Actor` `Pawn` `Component` `SceneComponent` `ScriptComponent` `LevelScript` `WorldService` `WidgetController` `Widget` `DataAsset` `Collider` `World` | 사용자 선언 이름으로 쓸 수 없다. 그 밖의 `Rocks` 패키지 타입은 이름 하나에 대상 하나 규칙(§3.1)으로만 충돌을 판정한다 |
@@ -481,9 +490,9 @@ Escape       = "\" ( '"' | "\" | "n" | "t" | "$" | "u{" Hex { Hex } "}" ) ;
 
 | 대상 | API | 규칙 |
 |---|---|---|
-| `Math`(int·float 공용 판) | `Min` `Max` `Abs` `Clamp(x, lo, hi)` `Sign` | §3.1 오버로딩 규칙. `Clamp`의 `lo > hi`는 `AssertFailed`. `Abs`의 int64 최솟값은 `IntegerOverflow` |
-| `Math`(int) | `Div(a, b)` | 내림 몫, `b == 0`은 `DivideByZero` |
-| `Math`(float) | `Floor` `Ceil` `Round` `Trunc`(→ float), `FloorToInt` `CeilToInt` `RoundToInt` `TruncToInt`(→ int), `Sqrt` `Pow` `Exp` `Ln` `Sin` `Cos` `Tan` `Asin` `Acos` `Atan` `Atan2(y, x)`, `Radians` `Degrees`, `Lerp(a, b, t)` `InverseLerp(a, b, v)`, `EaseIn` `EaseOut` `EaseInOut`(t를 [0, 1]로 clamp), `NearlyEqual(a, b, tolerance)`, 상수 `Math.Pi` | 삼각함수는 라디안. 결과가 NaN·Inf면 `NonFinite`(`Sqrt(-1.0)` 등). **초월 함수는 VM·AOT가 같은 Core Math 함수를 호출한다**(§12.5). 플랫폼 간 비트 동일성은 Core Math의 결정성 수준(CurveData D17과 같은 UE 수준 — Windows x64에서 UE와 같은 비트)을 따른다. `InverseLerp`의 `a == b`는 `DivideByZero` |
+| `Math`(모든 숫자 타입 공용 판) | `Min` `Max` `Abs` `Clamp(x, lo, hi)` `Sign` | §3.1 오버로딩 규칙(인자는 같은 타입). `Clamp`의 `lo > hi`는 `AssertFailed`. 부호 있는 타입의 최솟값에 대한 `Abs`는 `IntegerOverflow`. 부호 없는 타입에는 `Abs`·`Sign`이 없다 |
+| `Math`(모든 정수 타입) | `Div(a, b)` | 내림 몫, `b == 0`은 `DivideByZero` |
+| `Math`(`float`=`float64`; `float32`는 변환 후 사용 — Go의 math처럼) | `Floor` `Ceil` `Round` `Trunc`(→ float), `FloorToInt` `CeilToInt` `RoundToInt` `TruncToInt`(→ int), `Sqrt` `Pow` `Exp` `Ln` `Sin` `Cos` `Tan` `Asin` `Acos` `Atan` `Atan2(y, x)`, `Radians` `Degrees`, `Lerp(a, b, t)` `InverseLerp(a, b, v)`, `EaseIn` `EaseOut` `EaseInOut`(t를 [0, 1]로 clamp), `NearlyEqual(a, b, tolerance)`, 상수 `Math.Pi` | 삼각함수는 라디안. 결과가 NaN·Inf면 `NonFinite`(`Sqrt(-1.0)` 등). **초월 함수는 VM·AOT가 같은 Core Math 함수를 호출한다**(§12.5). 플랫폼 간 비트 동일성은 Core Math의 결정성 수준(CurveData D17과 같은 UE 수준 — Windows x64에서 UE와 같은 비트)을 따른다. `InverseLerp`의 `a == b`는 `DivideByZero` |
 | `vec2`–`vec4` | 필드 `X` `Y` `Z` `W`, `+` `-`(벡터끼리), `*` `/`(float와), 단항 `-`, `Dot` `Cross`(vec3) `Length` `LengthSquared` `Distance(b)` `Normalize()` | `Normalize()`는 길이가 1e-8 미만이면 0 벡터를 반환한다(UE `GetSafeNormal`). 성분별 곱은 `Math.Scale(a, b)` |
 | `quat` | `quat(X, Y, Z, W)`, `*`(합성: `a * b`는 b를 먼저 적용 — UE `FQuat`과 같음), `Rotate(v)` `Inverse()` `FromAxisAngle(axis, radians)` `ToRotator()` | 기본값 단위 quat. 0 길이 axis는 단위 quat을 반환 |
 | `Rotator` | 필드 `Pitch` `Yaw` `Roll`(도), 이름 지정 생성, `ToQuat()` `Forward()` `Right()` `Up()` | UE `FRotator` 규약 |
@@ -530,7 +539,7 @@ Escape       = "\" ( '"' | "\" | "n" | "t" | "$" | "u{" Hex { Hex } "}" ) ;
 
 | 분류 | 타입 | 규칙 |
 |---|---|---|
-| 논리·숫자 | `bool`, `int`(64비트), `float`(64비트) | overflow·NaN·Inf는 fault. 엔진의 32비트 값과 주고받을 때(native 필드 쓰기·인자·반환) 범위를 검사하며 정수 범위 밖은 `IntegerOverflow`, float32 범위 밖은 `NonFinite`이고 상수는 컴파일 오류다. `float`를 float32로 바꿀 때는 최근접 짝수로 반올림한다 |
+| 논리·숫자 | `bool`, `int8`–`int64`, `uint8`–`uint64`, `float32`, `float64`, 기본형 `int`(=`int64`)·`float`(=`float64`) | 규칙은 §3.3(SD56·SD57). 엔진 필드·인자는 C++ 타입과 같은 Sparks 타입으로 보이므로(C++ `int32` → `int32`, `float` → `float32`, `double` → `float64`) 경계에서 따로 변환하지 않는다. 수학 타입(`vec3` 등)의 성분은 `float64`이며 엔진의 float32 벡터와 주고받을 때 최근접 짝수로 반올림하고 범위 밖은 `NonFinite`다 |
 | 수학 | `vec2`–`vec4`, `quat`, `mat4`, `Rotator`, `WorldPosition`, `Transform`, `Color` | Core 수학 타입의 바인딩(연산과 메서드는 부록 B). `WorldPosition`은 엔진에 아직 없는 자리표시 타입이며(연동 요구 SE-G13) 이름만 예약하고 규격은 엔진 타입이 생길 때 정한다. 스크립트 안의 성분은 `float`(64비트)이고 엔진에 전달할 때 위 규칙으로 변환한다. 단위·축은 엔진 규약(UE 5.8과 같은 왼손 좌표계, +X 전방·+Y 오른쪽·+Z 위, yaw 양수는 오른쪽 회전, 길이 cm·질량 kg·시간 초, `Rotator` 도, 삼각함수·quaternion 축-각·각속도 라디안)을 따른다(전체 계획 §2.2, Math 구현 문서의 Rotator 규약). 각도 단위가 둘이므로 각도를 받는 native 함수·필드는 UE처럼 이름이나 타입으로 단위를 드러내고(`Rotator` 필드는 도, `…InRadians`·`…InDegrees`), 언어 서버가 hover·자동완성에 단위를 표시한다(SD18) |
 | 문자 | `string`, `Text` | 화면 표시 API는 `Text`만 받는다. `Text`는 `Loc(...)`로 생성 |
 | 엔진 데이터 | `Tag`, `TagSet`, `InputAction`, `Soft<T>`, `Row<T>` | §3.5 리터럴. `Soft<T>`·`Row<T>`에는 빈 값이 없으며 선택 값은 `Soft<T>?`다(SD19) |
@@ -876,14 +885,14 @@ async fn LoadPreviews() {                          // 진행률이 필요할 때
 
 ~~~text
 UI/HealthBar.spark:14:14: error S0412: 'Target' may be null.
-    let hp = Target.Current;
-             ^^^^^^
+        let hp = Target.Current;
+                 ^^^^^^
   'Target' has type 'Health?'. Another actor reads as null once it is destroyed.
   fix: if (let health = Target) { let hp = health.Current; … }
 
 Characters/PlayerCharacter.spark:42:5: error S0731: Cannot assign to a function result.
-    GetTransform().Location.Z = 1.0;
-    ^^^^^^^^^^^^^^
+        GetTransform().Location.Z = 1.0;
+        ^^^^^^^^^^^^^^
   GetTransform() returns a copy, so assigning to it never changes the original.
   fix: RelativeLocation.Z = 1.0;
 ~~~
@@ -893,6 +902,36 @@ Characters/PlayerCharacter.spark:42:5: error S0731: Cannot assign to a function 
 - **코드 대역:** S01xx 어휘, S02xx 구문, S03xx 이름 해석, S04xx null·타입, S05xx 숫자·상수식, S06xx 실행 문맥·효과, S07xx 대입·`let`, S08xx 이벤트·수명 hook·재진입, S09xx 유지 자원·로드, S10xx 저장·ID·호환성, S11xx 패키지·reload·backend. 코드는 한 번 발급하면 의미를 바꾸지 않는다. 엔진 공통 진단 코드 등록부(RMC#### 메타 컴파일러, UI validate 코드와 함께)는 CompilerDiagnostics 문서에 둔다(§17.2).
 - **LevelScript 코드(초안 1.4):** S0413 `LevelScript`의 `@edit` 객체 필드에 `?`가 없다(§3.2), S0801 `LevelScript`가 물리 hook을 선언했다, S0802 `LevelScript`가 `let` Collider component 필드를 선언했다. 메시지와 수정 예는 [LevelScript](LevelScript.ko.md) 4.9절에 있다.
 - 진단은 원인 하나를 작성한 코드 그대로 보이고 수정 예를 포함한다. 한 원인에서 파생된 연쇄 오류는 표시하지 않는다.[R23] 수정 예는 이름 규칙(§3.1)을 지키도록 생성한다. 지역 이름은 멤버 이름이 아니라 타입 이름에서 도출한다(`Target: Health?` → `health`). 유사 이름 제시는 Core `EditDistance`와 이름 붙은 문턱 상수를 쓴다.
+- **위치:** 줄과 열은 1부터 센다. 열은 그 줄의 처음부터 센 Unicode code point 수이며 tab도 1이다(바이트 수가 아니다 — 주석·문자열에 한글이 있어도 열이 편집기와 맞는다). 언어 서버는 LSP가 요구하는 UTF-16 단위로 바꿔 보낸다. 줄 끝은 LF이고 LF 바로 앞의 CR은 줄 끝의 일부다 — 그래서 CRLF의 CR·LF 위치는 LF만 쓴 파일의 LF 위치와 같은 열(줄 끝)이다. BOM 안의 위치는 1줄 1열이다.
+- **출력 세부:** 첫 줄 `경로:줄:열: error S코드: 메시지`, 둘째 줄은 원문 줄을 공백 4칸 들여 보이고(원문 줄의 들여쓰기도 그대로 보인다), 셋째 줄은 공백 4 + (열 − 1)칸 뒤에 `^`를 둔다. `^`의 수는 범위가 그 줄 안에 있는 code point 수이며 최소 1이고, 범위가 줄 끝을 넘으면 그 줄 끝에서 자른다(여러 줄 범위는 첫 줄만 표시, BOM 안에서 시작하는 범위는 BOM 뒤부터 센다). 그 뒤 설명 줄들과 `fix:` 줄은 공백 2칸 들여 쓴다(설명의 빈 줄은 들여쓰지 않는다). 설명이나 수정 예가 없으면 그 줄을 생략한다. 메시지와 수정 예는 한 줄이며(첫 줄을 problem matcher가 읽는다) 설명만 여러 줄일 수 있다. 원문 위치가 없는 진단(파일 전체 — 크기 초과 등)은 첫 줄이 `경로: error S코드: 메시지`이고 원문 줄·밑줄 없이 설명·수정 예를 쓴다. 원문 줄을 보일 때 tab·CR 같은 C0 제어 문자, DEL, C1 제어 문자(U+0080–U+009F), 표시 순서를 바꾸는 bidi 제어 문자(U+061C, U+200E·U+200F, U+202A–U+202E, U+2066–U+2069)는 공백 한 칸으로, 잘못된 UTF-8 byte는 U+FFFD로 바꾼다(열 계산과 맞고, 터미널을 흐트러뜨리거나 원문을 다르게 보이게 하지 않게). 동아시아 넓은 문자는 터미널에서 두 칸을 차지해 `^`가 어긋날 수 있다(표시 한계, 위치 값은 정확하다).
+- **순서:** 한 번의 컴파일이 낸 진단은 파일 경로 byte 순 → (같은 경로의 서로 다른 파일이면 더한 순서) → 파일 전체 진단 먼저 → 시작 위치 → 코드 → 낸 순서로 정렬해 낸다. 같은 입력이면 출력이 바이트 단위로 같다.
+- **원문 검사(S01xx 앞부분, LC0):** 컴파일러는 원문을 받으면 먼저 다음을 검사한다. 원문 처음의 UTF-8 BOM(EF BB BF)은 허용하고 무시한다(편집기가 붙이는 경우가 많다). 원문 크기 상한은 16 MiB(`MaxSourceBytes`)다.
+
+| 코드 | 이름 | 조건 | 수정 예 |
+|---|---|---|---|
+| S0101 | `invalid-utf8` | UTF-8이 아닌 바이트 열(overlong·surrogate·U+10FFFF 초과·잘린 sequence). 위치는 처음 잘못된 sequence의 첫 byte(예: `E1 80 5A`면 `E1`)이며 파일당 하나만 낸다 | 파일을 UTF-8로 다시 저장 |
+| S0102 | `lone-carriage-return` | LF가 뒤따르지 않는 CR. 줄 끝 해석이 편집기마다 달라지므로 오류다. 처음 하나만 내고, S0101이 있으면 검사하지 않는다. 홀로 선 CR은 줄을 나누지 않는다 | 줄 끝을 LF 또는 CRLF로 |
+| S0103 | `source-too-large` | 원문이 16 MiB를 넘는다 | 파일을 나눈다 |
+
+  S0101이나 S0103이 나면 그 파일의 뒤 단계(어휘 분석 이후)를 실행하지 않는다.
+- **어휘 분석(S01xx 나머지, LC1):** 원문을 토큰으로 나눈다. 공백은 space·tab·LF·CR이다. 오류가 나도 끝까지 토큰을 만들어(그 자리는 건너뛴다) 구문 분석이 이어지게 한다. 연쇄 오류를 막기 위해 같은 줄에서 같은 코드는 한 번만 낸다.
+
+| 코드 | 이름 | 조건 | 수정 예 |
+|---|---|---|---|
+| S0104 | `invalid-character` | 문자열·주석 밖에서 쓸 수 없는 문자(ASCII 밖 문자, `'` `#` `\` `` ` `` `~` `^` `$`, 제어 문자, 단독 `&`·`\|`). 단독 `&`·`\|`는 비트 연산자가 없다고 설명한다 | 문자 삭제, 논리 연산은 `&&`·`\|\|` |
+| S0105 | `underscore-in-identifier` | 식별자 안의 `_`(`move_speed`, `_x`). 단독 `_`는 따로 토큰이다 | PascalCase·lowerCamel로(`moveSpeed`) |
+| S0106 | `unterminated-block-comment` | `/*`가 닫히지 않았다. 위치는 `/*` | `*/` 추가. 블록 주석은 중첩되지 않는다 |
+| S0107 | `unterminated-string` | 일반 문자열은 줄 끝이나 파일 끝까지, verbatim 문자열은 파일 끝까지 닫는 `"`가 없다. 위치는 여는 `"`(verbatim은 `@`) | 같은 줄에서 `"`로 닫는다(verbatim은 `"`로 닫는다) |
+| S0108 | `invalid-escape` | `\"` `\\` `\n` `\t` `\$` `\u{…}` 밖의 escape, `\u{}`의 자리 수가 0이거나 6을 넘음, surrogate·U+10FFFF 초과 | 허용 escape 목록 제시 |
+| S0109 | `integer-literal-too-large` | 정수 리터럴이 쓰는 자리의 타입에 들어가지 않는다(`int`면 int64 — 단항 `-`가 붙은 9223372036854775808만 허용, `uint8`이면 0–255, 부호 없는 자리의 음수). 타입을 아는 검사 단계가 판정한다 | 범위 안의 값이나 더 넓은 타입 |
+| S0110 | `malformed-number` | `1.`, 숫자가 없는 지수(`1e`·`1e+`), 숫자가 없는 접두사(`0x`·`0b`), 2진에 쓸 수 없는 숫자(`0b102`), 잘못된 자리의 `_`(`1_`·`1_.5`·`1._5`·`1e_5`), 숫자 바로 뒤의 영문자(`12abc`, 접미사는 S0114) | `1.0`·`1.0e3`·`0xFF`·`1_000` |
+| S0114 | `numeric-suffix` | C# 숫자 접미사(`1L`·`1u`·`1.5f`·`1.5d`·`1.5m`) | 접미사를 지운다. 실수가 필요하면 `1.0` |
+| S0111 | `string-in-interpolation` | `${ }` 안의 문자열 리터럴 | 지역 변수로 먼저 받는다 |
+| S0112 | `range-operator` | `..`(범위는 `..<` 하나다, SD16) | `a..<b` |
+| S0113 | `float-literal-out-of-range` | 실수 리터럴이 유한한 double로 표현되지 않는다(`1e400`). 너무 작은 값은 0 또는 비정규 수로 허용 | 범위 안의 값 |
+
+- **토큰:** 식별자, 단독 `_`, 키워드(부록 A — `true`·`false`·`null` 포함), 정수·실수 리터럴, 문자열(시작·조각·`${`·`}`·끝으로 나뉜다), verbatim 문자열(`@"…"` 전체가 한 토큰), 문서 주석 `///`, 구두점 `{ } ( ) [ ] ; , . ?. ? : = == != < <= > >= + - * / % += -= *= /= ! && || ?? ..< @ as?`. `as?`는 `as` 바로 뒤에 공백 없이 `?`가 올 때 한 토큰이다(그 밖의 `as`는 import 별칭 키워드). `>=`는 한 토큰이며 타입 인자를 닫는 자리에서 구문 분석이 둘로 나눈다(§3.6). 토큰은 원문 위치만 가지며 값(정수·실수·escape를 푼 문자열)은 구문 분석이 원문에서 다시 읽는다.
+- **문서 주석:** `///` 바로 뒤가 `/`가 아니면 문서 주석 토큰이고(`////`는 일반 주석), 놓인 자리 검사는 구문 분석이 한다(§3.1).
 - 사전 대조 리터럴(`Tag`·`Action`·`CVar`)이 사전에서 이름이 바뀐 경우 사전의 redirect(`@formerly`와 같은 역할)를 따라 자동 변환하고 빠른 수정으로 소스를 고친다. redirect도 없으면 오류다.
 
 ### 8.2 Result와 try
@@ -1061,7 +1100,7 @@ public:
 };
 ~~~
 
-Sparks에서는 `var MaxHealth: int`(편집·저장), 읽기 전용 속성 `Current: int`, `event Died(killer: Actor?)`, `fn ApplyDamage(amount: int, instigator: Actor?): Result<void>`로 보인다(Studio hover 표기, 소스 문법이 아님).
+Sparks에서는 `var MaxHealth: int32`(편집·저장), 읽기 전용 속성 `Current: int32`, `event Died(killer: Actor?)`, `fn ApplyDamage(amount: int32, instigator: Actor?): Result<void>`로 보인다(Studio hover 표기, 소스 문법이 아님).
 
 | 예시의 이름 | 현재 상태 | 선행 |
 |---|---|---|
@@ -1128,7 +1167,7 @@ Sparks에서는 `var MaxHealth: int`(편집·저장), 읽기 전용 속성 `Curr
 ## 11. VM
 
 - **레지스터 기반**, 타입별 opcode, 32비트 고정 명령. Lua 5.0은 2003년 레지스터 VM으로 전환하였고[R1], Shi 등은 실행 명령 수 47.21% 감소, 코드 크기 25.05% 증가, switch dispatch 실행 시간 32.28% 감소를 보고하였다(Pentium 4).[R2][R3] Luau·GDScript와 달리 모든 타입이 확정되므로 타입 태그 검사가 없다.[R6][R7]
-- **3개 bank:** Scalar(태그 없는 64비트), Ref(엔진 객체 handle+generation), Buf(참조계수 버퍼). 스크립트 상태는 GC root를 만들지 않으며 재개 시 `this`의 generation을 확인한다. 호출 깊이는 256 frame까지다(§9.3).
+- **3개 bank:** Scalar(태그 없는 64비트 — 좁은 정수 타입도 64비트 칸에 두고 그 타입의 범위로 overflow를 검사하는 타입별 opcode를 쓴다), Ref(엔진 객체 handle+generation), Buf(참조계수 버퍼). 스크립트 상태는 GC root를 만들지 않으며 재개 시 `this`의 generation을 확인한다. 호출 깊이는 256 frame까지다(§9.3).
 - **필드 쓰기 opcode**는 Changed 연결 여부를 확인하고 실행 조각 안의 첫 쓰기에서 변경 후보로 기록한다(조각 끝 값 비교, §5.3). 정수 overflow·부동소수점 유한성을 검사하고 FMA 축약을 쓰지 않는다.
 - **safepoint:** back-edge, 호출 복귀, `await`, 할당. Teardown 문맥과 파괴 경로의 Disable에서는 safepoint를 열지 않는다(전체 계획 §5.2). Borrow는 native call thunk 안에서만 얻고 반환 전 해제한다(전체 계획 §6.3).
 - **verifier:** 로드 시 선형 1회.[R4] 구조(범위·branch·bank 크기), 타입(bank·TypeId·초기화·non-null), 바인딩(FunctionId·시그니처 hash·lane·자원 정책), 문맥(금지 호출, `await` 위치, eval capability)을 검사한다.
@@ -1328,6 +1367,13 @@ class DoorLogic : ScriptComponent {
 - `@test fn`(full 또는 패키지 manifest의 test 패키지)은 headless World fixture에서 실행한다. 시험 시계는 `NextTick`·`Delay`를 결정적으로 진행하며 실제 시간에 기대지 않는다(sleep 금지). `Assert`가 실패 판정이다.
 - CLI `sparks test <패키지>`가 실행하고 결과는 진단과 같은 형식으로 보고한다. 같은 corpus를 VM·AOT 차등 시험(G6)에도 쓴다.
 - **conformance corpus:** `Conformance/<영역>/<사례>.spark`와 `.expect`. `.expect`에는 진단 코드·줄·열, 또는 실행 trace(전달 순서·fault 종류·위치 ID·ledger counter)를 적는다. 본문의 "오류다" 문장과 SD마다 음성 사례를 1개 이상 둔다. 영역은 진단 코드 대역(§8.1)과 같다.
+- **`.expect` 형식(LC0):** UTF-8 텍스트(처음의 BOM은 무시, UTF-8이 아니면 형식 오류)이며 한 줄에 지시 하나다. 단어는 공백이나 tab으로 나누고, 숫자는 0–9만 쓴다(`+` 부호 없음). 빈 줄과 `#`로 시작하는 줄은 주석이다. 사례 이름(stem)에는 점이 들어가도 되며 `.spark`와 `.expect`는 stem으로 짝을 맞춘다.
+  - `error S0412 14:14` — 이 위치에 이 코드의 진단이 나야 한다. 여러 줄이면 §8.1의 순서대로 모두 일치해야 하며 빠지거나 더 나온 진단은 실패다.
+  - `error S0103` — 위치를 적지 않으면 원문 위치가 없는 진단(파일 전체)이다.
+  - `clean` — 진단이 없어야 한다. `error`와 함께 쓸 수 없다.
+  - 지시가 하나도 없는 `.expect`, 알 수 없는 지시, `.expect`가 없는 `.spark`, `.spark`가 없는 `.expect`는 corpus 오류로 실패한다(빈 기대값이 조용히 통과하지 않게 한다).
+  - 실행 결과 지시(`result`·`fault`·`trace`)는 해당 마일스톤(LC5·LC6)에서 더한다.
+- corpus는 `Engine/Source/Developer/SparksTestHost/Conformance`에 두고 시험이 실행 중 엔진 디렉터리 탐색으로 찾는다. 저장소가 줄 끝을 LF로 정규화하므로 CRLF·잘못된 UTF-8·BOM처럼 바이트가 중요한 사례는 C++ 시험에 직접 넣는다.
 - 제안 목표(미측정): 파일 1,000개 기준 자동완성 p95 100 ms, 편집 후 진단 p95 300 ms. 검증: 후보 golden test, prefix fuzz, CLI와의 진단 동등성, rename 후 저장 데이터 보존.
 
 ## 14. 네트워크
@@ -1388,7 +1434,7 @@ class Chest : ScriptComponent {
 }
 ~~~
 
-- **저장 가능 타입:** `bool`·`int`·`float`·수학 타입·`string`·enum·`Tag`·`TagSet`·`Soft<T>`·`Row<T>`, 이들의 `T?`, 그리고 이들로만 구성된 struct·컨테이너. 엔진 객체(자기 component 포함)·로드한 에셋 값·`Text`·`Result`는 저장할 수 없다(전체 계획 §7.2). C++ 대응(리플렉션 B9 — ReflectionExtensions 19절): `Tag` → Name, `TagSet` → `OrderedSet<Name>`, `Row<T>` → Name, `T?`(단일 값·문자열·struct) → `Optional<T>`, `Tag?`·`Row<T>?`는 None Name(없음은 하나 — SD19).
+- **저장 가능 타입:** `bool`·모든 숫자 타입·수학 타입·`string`·enum·`Tag`·`TagSet`·`Soft<T>`·`Row<T>`, 이들의 `T?`, 그리고 이들로만 구성된 struct·컨테이너. 엔진 객체(자기 component 포함)·로드한 에셋 값·`Text`·`Result`는 저장할 수 없다(전체 계획 §7.2). C++ 대응(리플렉션 B9 — ReflectionExtensions 19절): `Tag` → Name, `TagSet` → `OrderedSet<Name>`, `Row<T>` → Name, `T?`(단일 값·문자열·struct) → `Optional<T>`, `Tag?`·`Row<T>?`는 None Name(없음은 하나 — SD19).
 - **호환성:** 매 컴파일 검사. 필드 추가는 기본값(또는 zero value), 삭제는 `retire`, 이름 변경은 `@formerly`, 무손실이 아닌 형식 변경은 migration 함수. enum은 case 이름으로 저장하므로 case 추가 위치는 자유이고 삭제는 `retire`다.
 - **로드:** 무손실 변환이 가능하면 변환하고, 불가능하거나 알 수 없는 enum 값이면 기본값을 쓰고 보고한다. 클래스를 찾지 못하면 원래 필드를 보존하는 placeholder로 로드한다. 저장 파일에도 RPC와 같은 길이·값 검사를 적용한다.
 - **범위 attribute:** `@edit(Min, Max)`는 편집기 입력 범위이자 실행 중 계약이다. 범위를 벗어난 값을 쓰면 `AssertFailed` fault이고, 저장 로드에서 범위를 벗어나면 가장 가까운 경계로 고치고 보고한다.
@@ -1481,12 +1527,13 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 | 모듈 | 위치 | 내용 | 의존 |
 |---|---|---|---|
 | `SparksVm` | `Engine/Source/Runtime` | bytecode와 `.sparkc` 형식, verifier, interpreter, 값 버퍼, 실행·발행 큐·ledger, 핫 리로드, host interface | Core |
-| `SparksCompiler` | `Engine/Source/Runtime` | lexer, parser, 검사기, typed IR, bytecode 생성, 진단, schema·manifest reader, formatter | Core, SparksVm |
-| `SparksTestHost` | `Engine/Source/Developer` | 가짜 host, conformance runner | Core, SparksVm, SparksCompiler |
+| `SparksCompiler` | `Engine/Source/Runtime` | 원문 관리, 진단, lexer, parser, 검사기, typed IR, bytecode 생성, schema·manifest reader, formatter | Core(LC4부터 SparksVm) |
+| `SparksTestHost` | `Engine/Source/Developer` | 가짜 host, conformance runner | Core, SparksCompiler(LC5부터 SparksVm) |
 | `Sparks`(CLI) | `Programs` | `sparks check`·`build`·`test`·`fmt` | 위 모듈, Launch |
 | `SparksLsp` | `Programs` | 언어 서버 `sparks-lsp` | SparksCompiler, Launch |
 | `ScriptRuntime`(연동, EI2) | `Engine/Source/Runtime` | host 구현, native call thunk, Sparks 클래스의 타입 등록 | SparksVm, ObjectRuntime, MetaSchema, Task |
 
+- 모듈은 필요해질 때 만든다. LC0은 `SparksCompiler`(원문·진단)와 `SparksTestHost`(conformance runner)만 만들고, `SparksVm`은 bytecode 형식이 생기는 LC4에서 만든다(빈 자리표시 모듈을 두지 않는다).
 - 언어 모듈을 Engine 층에 두는 이유는 Core 층을 가볍게 유지하기 위해서다(엔진 기능 모듈은 Engine 층 — SpatialIndex와 같다). 의존은 Core뿐이므로 World·RHI 없이 링크된다.
 - `SparksCompiler`가 Runtime에 있는 이유는 런타임 eval이 켜진 target의 실행 파일에 들어갈 수 있어야 하기 때문이다(SD5). `ScriptEval=Off`인 target은 링크하지 않는다(§12.6).
 - 언어 코어가 쓰는 기반은 모두 이미 있다: Core의 컨테이너(`Array`·`HashMap`·`OrderedMap`·`OrderedSet`·`Span`), 문자열(`String`·`StringView`·`StringBuilder`의 최단 실수 표기·`Unicode`·`NumberText`·`EditDistance`·`Path`), `ArenaAllocator`·`BudgetAllocator`, `Result`, `Hash`·`Sha256`, `Json`(읽기·쓰기, JSON5 읽기), `ByteReader`·`ByteWriter`, `RandomStream`, 로그, Base의 overflow 검사 도우미(`Base/Checked.h`), PlatformBase의 파일 API(읽기·디렉터리 열거)와 원자 연산.
@@ -1541,7 +1588,7 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 
 ## 19. 결정 사항
 
-2026.11.12 검토에서 초안의 권고안 10건(SD1–SD10)을 채택하였고, 같은 날 4차 검증에서 도출된 11건(SD11–SD21)을 채택하였다. 2026.11.18 5차 검증(초안 1.3)에서 사용자 요구(핫 리로드 필수·오류 방어·선택형 AOT·`WeakObjectRef` 명칭)와 권장안으로 24건(SD22–SD45)을 확정하였다. 2026.11.20 초안 1.5에서 구현 순서 3건(SD51–SD53)을 사용자 결정으로 더하였다. 2026.11.20 레벨 스크립트 설계 확정([LevelScript](LevelScript.ko.md) LD1–LD20, 모두 권장안)에서 언어에 걸리는 결정을 5건(SD46–SD50)으로 요약해 더하였다. SD4는 기본값만 확정하고 target별 값은 마켓 규정 검토 후 정한다. SD3·SD9·SD20은 엔진 수준 결정이며 전체 계획 개정 1.7·1.8의 §5.2·§20.2에 반영되어 있다.
+2026.11.12 검토에서 초안의 권고안 10건(SD1–SD10)을 채택하였고, 같은 날 4차 검증에서 도출된 11건(SD11–SD21)을 채택하였다. 2026.11.18 5차 검증(초안 1.3)에서 사용자 요구(핫 리로드 필수·오류 방어·선택형 AOT·`WeakObjectRef` 명칭)와 권장안으로 24건(SD22–SD45)을 확정하였다. 2026.11.20 초안 1.5에서 구현 순서 3건(SD51–SD53)을, 같은 날 언어 코어 구현 중 리터럴·숫자 타입 4건(SD54–SD57)을 사용자 결정으로 더하였다. 2026.11.20 레벨 스크립트 설계 확정([LevelScript](LevelScript.ko.md) LD1–LD20, 모두 권장안)에서 언어에 걸리는 결정을 5건(SD46–SD50)으로 요약해 더하였다. SD4는 기본값만 확정하고 target별 값은 마켓 규정 검토 후 정한다. SD3·SD9·SD20은 엔진 수준 결정이며 전체 계획 개정 1.7·1.8의 §5.2·§20.2에 반영되어 있다.
 
 - **SD1. 확장자:** 소스 `.spark`, 컴파일 모듈 `.sparkc`. `.sparkc`는 빌드 출력 폴더에만 생성한다. 초안의 `.sparks`는 언어 이름과 철자가 같아 혼동되므로 사용자 결정(2026-11-12)으로 `.sparkc`로 정정하였다.
 - **SD2. C++ 리플렉션 필드 이름:** 첫 글자를 대문자로 바꾸고 끝의 `_`를 제거하여 노출하며, 그 밖의 `_`가 있으면 `ScriptName`이 필요하다(§10.3). 리플렉션 필드를 C++에서도 PascalCase로 선언하도록 규약을 개정하는 대안은 채택하지 않는다.
@@ -1559,7 +1606,7 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 - **SD14. 객체 원소 Array의 파괴 처리:** `Array`는 파괴된 원소의 자리를 유지하고 null로 읽으며 순회는 살아 있는 원소만 제공한다. 자동 제거는 `Set` 원소와 `Map` 키에만 적용하여 번호가 조용히 바뀌는 일을 없앤다(§4.3).
 - **SD15. enum 값 표기:** 식에서는 항상 타입 이름으로 한정한다(`Clock.Game`). 짧은 이름은 attribute가 정의한 인자에만 쓴다(§3.3).
 - **SD16. 범위 표기:** `a..<b`(b 미포함)를 쓴다. 끝 포함 여부가 배경 언어마다 다르게 읽히는 `..`는 쓰지 않는다(§3.3).
-- **SD17. 정수 나눗셈:** `int / int`는 오류다. 몫은 `Math.Div`, 비율은 `float(a) / float(b)`로 쓴다(§3.3). 2차 검증의 "`/`는 항상 `float`"를 대체한다.
+- **SD17. 정수 나눗셈:** 정수 타입끼리의 `/`는 오류다(SD56 이후 모든 정수 타입). 몫은 `Math.Div`, 비율은 `float(a) / float(b)`로 쓴다(§3.3). 2차 검증의 "`/`는 항상 `float`"를 대체한다.
 - **SD18. 단위:** 스크립트의 값은 엔진 규약을 따르며 엔진 규약은 UE 5.8과 같다: 길이 cm, 질량 kg, 시간 초, `Rotator`(`Pitch`·`Yaw`·`Roll`) 도, 삼각함수·quaternion 축-각·각속도 라디안(각속도·토크 API는 `…InRadians`·`…InDegrees` 쌍). `Math.Radians(...)`·`Math.Degrees(...)`는 상수식에서 허용한다(§4.2·§4.5). 각도를 받는 native 함수·필드는 이름이나 타입으로 단위를 드러내고 언어 서버가 hover에 표시한다. **2026-11-17 번복:** 처음 결정은 미터·라디안이었고 "한 언어 안에 각도 단위 2개"를 피하려 했으나, 사용자 요구로 엔진 규약이 UE와 같은 cm·도(`Rotator`)·라디안(삼각함수)이 되어 이를 따른다. 두 각도 단위는 UE와 같이 API 이름·타입으로 구분한다.
 - **SD19. 빈 Soft·Row 제거:** `Soft<T>`·`Row<T>`에는 빈 값이 없고 선택 값은 `Soft<T>?`·`Row<T>?`로 쓴다. "없음"은 `null` 하나다(§3.2).
 - **SD20. 종료 경로별 hook:** `RequestDestroy`·부모 파괴·셀 unload·travel·Tryout Stop·process 종료는 Disable(활성이면)·Destroy를 실행한 뒤 Detach한다. fault 격리와 GC 도달 불가 경로는 Disable을 실행하지 않는다(§5.1).
@@ -1596,6 +1643,10 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 - **SD51. 언어 코어 우선:** 엔진 요소와 무관한 언어 코어(LC0–LC9)를 먼저 구현하고 엔진 연동(EI1–EI9)은 엔진이 준비되는 대로 하나씩 더한다(사용자 결정 2026-11-20). 엔진·도구 쪽 요구는 [연동 요구 목록](SparksEngineIntegration.ko.md)에 따로 모으고, 구현 중 새로 드러난 요구도 코어 안에서 우회하지 않고 그 목록에 더한다(§18).
 - **SD52. host 경계:** 컴파일러는 엔진 API를 binding schema 파일로만 알고, VM은 엔진을 host interface로만 부른다. Sparks 필드의 저장소는 VM이 가진다. 언어 코어는 Core 층에만 의존하고 가짜 host(`SparksTestHost`)로 시험한다(§18.1).
 - **SD53. 모듈 배치:** `SparksVm`·`SparksCompiler`는 `Engine/Source/Runtime`, `SparksTestHost`는 `Engine/Source/Developer`, CLI와 언어 서버는 `Programs`에 둔다. 엔진 쪽 host 구현은 `ScriptRuntime` 모듈이다(§18.1).
+- **SD54. 숫자 리터럴은 C# 형태:** 자릿수 구분자 `_`, 16진 `0x`·2진 `0b`, `.5` 형태의 실수, 앞자리 0(10진)을 최신 C#처럼 받는다(사용자 결정 2026-11-20). 리터럴은 Go처럼 쓰는 자리의 타입을 따르므로(SD56) 접미사는 받지 않고 S0114로 안내한다(§3.6).
+- **SD55. verbatim 문자열:** C#의 `@"..."`를 받는다. escape·보간이 없고 `""`가 `"`이며 여러 줄일 수 있다. 값의 줄 끝은 LF로 맞춘다(사용자 결정 2026-11-20, §3.6).
+- **SD56. 숫자 타입은 Go 수준:** `int8`–`int64`, `uint8`–`uint64`, `float32`, `float64`를 두고 기본형 `int`(=`int64`)·`float`(=`float64`)를 유지한다. 변환은 Go처럼 타입 이름으로만 하고 서로 다른 숫자 타입은 섞지 않으며, 리터럴은 Go의 untyped 상수처럼 쓰는 자리의 타입을 따른다(사용자 결정 2026-11-20, §3.3).
+- **SD57. 정수 overflow는 fault:** 모든 정수 타입의 범위 초과 산술과 정확하지 않은 변환은 `IntegerOverflow` fault다. Go의 wrap과 다르게 정한 이유는 방어적 설계(조용히 틀린 값을 내지 않음)다(사용자 결정 2026-11-20).
 
 ## 20. 교차 검증 기록
 

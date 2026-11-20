@@ -1,6 +1,8 @@
 #include "RecordingDevice.h"
 
 #include <Core/Memory/SystemAllocator.h>
+#include <Core/Module/ModuleEntry.h>
+#include <ModuleLoader/ModuleLoader.h>
 #include <RenderBase/GpuTrace.h>
 #include <RenderBase/RenderLane.h>
 #include <TestSupport/Test.h>
@@ -423,4 +425,73 @@ TEST(GpuTrace_SettingsAndDisjointSamples) {
         REQUIRE(device.WaitIdle());
         session.Stop();
     }
+}
+
+// RenderBase 모듈(Docs/Design/ModuleLoader.ko.md 3.12절): 호스트가 실행 중인 trace 세션을 서비스로
+// 등록하면 모듈 Startup이 GPU 채널·형을 등록하고 모듈 lease를 잡으며, 묶음 종료가 등록을 풀고
+// lease를 놓는다. 같은 세션에서 엔진 묶음을 다시 시작하면 다시 등록된다(세션이 같은 이름 채널·같은
+// 스키마 형의 id를 다시 쓴다 — TraceSystem 개정 9). 서비스가 없으면 아무것도 등록하지 않는다. 이미
+// 등록된 세션에 다시 등록하면 실패하되 앞 등록은 그대로 둔다.
+TEST(GpuTrace_RenderBaseModuleRegistersThroughTheTraceService) {
+    SystemAllocator allocator;
+    {
+        TraceSession session;
+        REQUIRE(session.Start(ManualSettings(allocator)));
+        {
+            auto created = ModuleLoader::TryCreate(allocator, GeneratedModuleTable());
+            REQUIRE(created);
+            UniquePtr<ModuleLoader> modules = Move(created.Value());
+            REQUIRE(modules->Load("RenderBase").IsOk());
+            CHECK(session.SetChannelEnabled(GpuTraceChannel, true).Error() == ErrorCode::NotFound);
+            CHECK(modules->LeaseCount("RenderBase") == 0);
+            modules->ShutdownGroup(ModuleGroup::Process);
+        }
+
+        {
+            auto created = ModuleLoader::TryCreate(allocator, GeneratedModuleTable());
+            REQUIRE(created);
+            UniquePtr<ModuleLoader> modules = Move(created.Value());
+            REQUIRE(modules->Services().Register(session));
+            for (uint32 round = 0; round < 2; ++round) {
+                REQUIRE(modules->StartEngineGroup().IsOk());
+                CHECK(modules->IsStarted("RenderBase"));
+                CHECK(session.SetChannelEnabled(GpuTraceChannel, true));
+                CHECK(modules->LeaseCount("RenderBase") == 1);
+                CHECK(RegisterGpuTraceTypes(session).Error() == ErrorCode::AlreadyExists);
+                CHECK(session.SetChannelEnabled(GpuTraceChannel, false));
+                modules->ShutdownEngineGroup();
+                CHECK(session.SetChannelEnabled(GpuTraceChannel, true).Error() ==
+                      ErrorCode::NotFound);
+                CHECK(modules->LeaseCount("RenderBase") == 0);
+            }
+
+            modules->ShutdownGroup(ModuleGroup::Process);
+            CHECK(modules->Services().Unregister(session));
+        }
+
+        session.Stop();
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// 형 등록이 중간에 실패하면 이 호출이 등록한 형과 채널만 되돌린다. 다른 채널에 같은 이름·다른
+// 스키마의 Trace.GpuScope가 먼저 있으면 TypeMismatch이고 GPU 채널은 등록되지 않은 채로 남는다.
+TEST(GpuTrace_RegisterRollsBackOnlyItsOwnRegistrations) {
+    SystemAllocator allocator;
+    {
+        TraceSession session;
+        REQUIRE(session.Start(ManualSettings(allocator)));
+        TraceChannel other{"test.other", ""};
+        TraceEventType conflicting{Format::GpuScopeType, other};
+        REQUIRE(session.RegisterChannel(other, false));
+        REQUIRE(session.RegisterEventType(conflicting));
+        CHECK(RegisterGpuTraceTypes(session).Error() == ErrorCode::TypeMismatch);
+        CHECK(session.SetChannelEnabled(GpuTraceChannel, true).Error() == ErrorCode::NotFound);
+        CHECK(conflicting.Id() != TraceEventType::NoId);
+        CHECK(UnregisterGpuTraceTypes(session));
+        session.Stop();
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
 }

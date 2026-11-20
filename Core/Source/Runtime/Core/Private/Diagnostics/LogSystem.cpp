@@ -1523,3 +1523,5 @@ LogSystemStats LogSystem::Stats() const noexcept {
 }
 
 } // namespace rocks
+
+ROCKS_DEFINE_HOST_SERVICE(rocks::LogSystem)
