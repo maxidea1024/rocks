@@ -13,7 +13,7 @@ namespace Rocks.Tooling.Checks;
 /// </summary>
 public static class FormatCheck
 {
-    public const string RequiredVersion = "21.1.6";
+    public static string RequiredVersion => ToolchainTable.ClangFormatVersion;
 
     /// <summary>
     /// C# 서식 검사 작업 영역(저장소 상대 경로)이다. 저장소의 C# 프로젝트를 모두 담은 솔루션이며 dotnet format을 이 솔루션으로
@@ -64,7 +64,7 @@ public static class FormatCheck
         var version = await ProcessRunner.RunAsync(new(formatter, ["--version"], root, environment,
             Timeout: TimeSpan.FromSeconds(15)), cancellationToken);
         if (version.ExitCode != 0 || !Regex.IsMatch(version.StdOut,
-            @"version\s+21\.1\.6(?:\s|$)", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)))
+            $@"version\s+{Regex.Escape(RequiredVersion)}(?:\s|$)", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)))
         {
             throw new InvalidOperationException("Rocks requires clang-format " + RequiredVersion);
         }

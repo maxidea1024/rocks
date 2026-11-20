@@ -9,7 +9,10 @@ $packages = @{
 }
 $package = $packages["$platform-$architecture"]
 if (-not $package) { throw "Unsupported formatter platform: $platform-$architecture" }
-$destination = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../out/toolchains/clang-format-21.1.6'))
+# The pinned version comes from Build/Toolchain.json (Docs/Design/ClangVersionSupport.ko.md section 6.1); the wheels above must match it.
+$expected = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Toolchain.json') -Raw | ConvertFrom-Json).clangFormat.version
+if ($package[0] -notmatch "/clang_format-$([regex]::Escape($expected))-") { throw "Formatter wheel does not match Build/Toolchain.json clang-format $expected." }
+$destination = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "../out/toolchains/clang-format-$expected"))
 [IO.Directory]::CreateDirectory($destination) | Out-Null
 $archive = Join-Path $destination 'package.zip'
 Invoke-WebRequest -Uri $package[0] -OutFile $archive
@@ -24,7 +27,7 @@ try {
 } finally { $zip.Dispose() }
 if (-not $IsWindows) { & chmod +x $binary; if ($LASTEXITCODE -ne 0) { throw 'chmod failed.' } }
 $version = & $binary --version
-if ($LASTEXITCODE -ne 0 -or $version -notmatch 'clang-format version 21\.1\.6(?:\s|$)') { throw "Unexpected formatter version: $version" }
+if ($LASTEXITCODE -ne 0 -or $version -notmatch "clang-format version $([regex]::Escape($expected))(?:\s|$)") { throw "Unexpected formatter version: $version" }
 $env:ROCKS_CLANG_FORMAT = $binary
 if ($env:GITHUB_ENV) { "ROCKS_CLANG_FORMAT=$binary" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append }
 Write-Output $binary

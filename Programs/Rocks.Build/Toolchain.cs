@@ -187,6 +187,8 @@ public static class NativeToolchains
             FingerprintPaths = paths.Distinct(PathComparer).ToArray(),
             RuntimeFiles = runtime,
             CompilerVersion = compilerVersion,
+            ToolchainVerified = ToolchainCheck.Verify(windows ? NativePlatform.Windows : NativePlatform.MacOS, compilerVersion,
+                windows ? ReadStlHeader(EnvironmentValue("VCToolsInstallDir")) : null),
             TargetTriple = triple,
             CompilerDigest = compilerDigest,
             LinkerDigest = linkerDigest,
@@ -277,6 +279,7 @@ public static class NativeToolchains
             FingerprintPaths = [properties],
             RuntimeFiles = [],
             CompilerVersion = compilerVersion,
+            ToolchainVerified = ToolchainCheck.Verify(NativePlatform.Android, compilerVersion, null),
             TargetTriple = effective,
             CompilerDigest = Hashing.Sha256File(compiler),
             LinkerDigest = Hashing.Sha256File(lld),
@@ -284,6 +287,18 @@ public static class NativeToolchains
             AbiFields = abiFields,
             RemovedEnvironment = removed
         };
+    }
+
+    // 고른 MSVC 도구 모음의 STL 설정 헤더(yvals_core.h) 본문이다(도구 모음 경로를 모르거나 파일이 없으면 null — 확인을 건너뛴다).
+    private static string? ReadStlHeader(string toolsInstallDirectory)
+    {
+        if (toolsInstallDirectory.Length == 0)
+        {
+            return null;
+        }
+
+        string header = Path.Combine(toolsInstallDirectory, "include", "yvals_core.h");
+        return File.Exists(header) ? File.ReadAllText(header) : null;
     }
 
     /// <summary>

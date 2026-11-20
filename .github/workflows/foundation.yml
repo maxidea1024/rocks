@@ -37,6 +37,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       ROCKS_MSVC_TOOLSET: ${{ matrix.msvc }}
+      # Rocks.proj passes --require-verified-toolchain on: a compiler outside Build/Toolchain.json's verified list fails the build.
+      RequireVerifiedToolchain: 'on'
     defaults:
       run:
         shell: pwsh

@@ -282,6 +282,8 @@ public static class InstalledSdk
             Console.WriteLine(notice);
         }
 
+        BuildCommand.CheckToolchain(toolchain, options);
+
         var manifest = Verify(sdk, configuration, toolchain);
         Directory.CreateDirectory(output);
         Directory.CreateDirectory(Path.Combine(output, "Generated"));
