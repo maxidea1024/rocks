@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Rocks.Build;
 using Rocks.Tooling.Checks;
 using Rocks.Tooling.Common;
 
@@ -651,6 +652,129 @@ internal static partial class SelfTests
                 [(module + "P.cpp", 2, "unity-pragma-balance"), (module + "P.cpp", 3, "unity-pragma-balance"), (module + "P.cpp", 4, "unity-pragma-balance")]),
                 "unbalanced pragmas");
         });
+        // 매크로를 남기는 헤더(같은 문서 6.1절): Windows 플랫폼의 모든 모듈에서 C++ 소스·PCH 헤더와 거기서 닿는 저장소 헤더는 Windows SDK
+        // 헤더를 WindowsHeadersBegin.h/WindowsHeadersEnd.h 쌍 안에서만 include한다. 쌍 밖에 둘 수 있는 것은 저장소 헤더, 생성 헤더, 깨끗한
+        // 시스템 헤더 목록의 헤더뿐이다.
+        suite.Add("Policy.WindowsMacroLeaksRejectIncludesOutsideThePair", () =>
+        {
+            using TemporaryDirectory temporary = new();
+            const string module = "Engine/Source/Runtime/Probe/";
+            const string library = "Engine/Source/ThirdParty/Lib/";
+            const string begin = "#include <Platform/Win64/WindowsHeadersBegin.h>\n";
+            const string end = "#include <Platform/Win64/WindowsHeadersEnd.h>\n";
+            // 외부 라이브러리 모듈이다. 그 소스는 검사하지 않고(원본), public 헤더는 의존 모듈이 include하면 따라가서 읽는다.
+            NativeModuleInput lib = new()
+            {
+                Name = "Lib",
+                Sources = [library + "Private/lib.cpp"],
+                PublicIncludeDirectories = [library + "Public"]
+            };
+            temporary.Write(library + "Private/lib.cpp", "#include <windows.h>\n#include <lib/api.h>\n");
+            NativeModuleInput Probe(params string[] sources) => new()
+            {
+                Name = "Probe",
+                Sources = sources.Select(source => module + source).ToArray(),
+                PrivateIncludeDirectories = [module + "Private"],
+                PublicIncludeDirectories = [module + "Public"],
+                PublicDependencies = ["Lib"]
+            };
+            HashSet<(string Path, int Line)> Leaks(params NativeModuleInput[] modules)
+            {
+                var failures = PolicyChecks.WindowsMacroLeaks(temporary.Root, modules);
+                Verify.That(failures.All(failure => failure.Rule == "windows-macro-leak"), "rule name");
+                return failures.Select(failure => (failure.Path, failure.Line)).ToHashSet();
+            }
+
+            HashSet<(string Path, int Line)> Check(params (string Name, string Text)[] files)
+            {
+                foreach ((string name, string text) in files)
+                {
+                    temporary.Write(module + name, text);
+                }
+
+                return Leaks(Probe(files.Where(file => file.Name.EndsWith(".cpp", StringComparison.Ordinal)).Select(file => file.Name).ToArray()), lib);
+            }
+
+            // 통과: 감싼 include(조건 안도), 깨끗한 시스템 헤더(C·C++ 표준, CRT, intrinsic), 생성 헤더, 주석 안의 include, 감싼 헤더를 거친
+            // include.
+            Verify.That(Check(
+                ("Private/Good.cpp", "#include \"Wrapped.h\"\n#include <stdio.h>\n#include <atomic>\n#include <intrin.h>\n#include <sys/stat.h>\n" +
+                    "#include <Probe/Types.generated.h>\n" + begin + "\n#include <Windows.h>\n#include <d3d11_4.h>\n#include <fileapi.h>\n\n" + end +
+                    "// #include <Windows.h>\n/* #include <fileapi.h> */\n#if X\n" + begin + "#include <objbase.h>\n" + end + "#endif\n"),
+                ("Private/Wrapped.h", "#pragma once\n" + begin + "#include <Unknwn.h>\n" + end)).Count == 0, "wrapped includes were rejected");
+            // 통과: 이름이 SDK 헤더 접두(d3d·dxgi)와 겹치는 저장소 헤더는 SDK 헤더가 아니다. 따라가서 읽는다.
+            temporary.Write(module + "Public/DxgiProbe/DxgiAdapter.h", "#pragma once\n" + begin + "#include <dxgi1_6.h>\n" + end);
+            Verify.That(Check(
+                ("Private/D3D12Caps.cpp", "#include \"D3D12Caps.h\"\n#include <DxgiProbe/DxgiAdapter.h>\n"),
+                ("Private/D3D12Caps.h", "#pragma once\n" + begin + "#include <d3d12.h>\n" + end)).Count == 0, "repository headers named like SDK headers");
+            // 위반: 쌍 밖의 SDK 헤더. 이름을 몰라도(fileapi.h, xaudio2.h) 걸리고, 철자의 대소문자와 지시문의 공백은 상관없다. 저장소 헤더를
+            // 거친 include는 그 헤더의 줄로 보고한다. 첫 include 앞에서 #define하는 소스도 본다.
+            temporary.Write(module + "Public/Probe/Api.h", "#pragma once\n#include <dxgi1_6.h>\n");
+            Verify.That(Check(
+                ("Private/Bad.cpp", "#include <stdio.h>\n#include <WINDOWS.H>\n#include <wrl/client.h>\n#include \"Leaky.h\"\n#include <Probe/Api.h>\n" +
+                    "#include <fileapi.h>\n  #  include  <xaudio2.h>\n#include \"synchapi.h\"\n"),
+                ("Private/Leaky.h", "#pragma once\n\n#include <ShlObj.h>\n"),
+                ("Private/Defined.cpp", "#define SETTING 1\n#include <Windows.h>\n")).SetEquals(
+                [(module + "Private/Bad.cpp", 2), (module + "Private/Bad.cpp", 3), (module + "Private/Bad.cpp", 6), (module + "Private/Bad.cpp", 7),
+                    (module + "Private/Bad.cpp", 8), (module + "Private/Leaky.h", 3), (module + "Public/Probe/Api.h", 2),
+                    (module + "Private/Defined.cpp", 2)]),
+                "includes outside the pair");
+            // 위반: 줄 이음으로 나눈 include(첫 줄로 보고한다)와 리터럴이 아닌 include. 쌍 안에서는 둘 다 통과한다.
+            Verify.That(Check(
+                ("Private/Spliced.cpp", "#include \\\n    <synchapi.h>\n#define HEADER <Windows.h>\n#include HEADER\n#include \\\n<stdio.h>\n" +
+                    begin + "#include \\\n<synchapi.h>\n#include HEADER\n" + end)).SetEquals(
+                [(module + "Private/Spliced.cpp", 1), (module + "Private/Spliced.cpp", 4)]), "spliced and non-literal includes");
+            // 위반: Begin 없는 End, 닫지 않은 Begin, 이미 연 Begin, 쌍 안의 저장소 헤더.
+            Verify.That(Check(
+                ("Private/Pair.cpp", end + begin + "#include <Windows.h>\n" + begin + "#include \"Plain.h\"\n"),
+                ("Private/Plain.h", "#pragma once\n")).SetEquals(
+                [(module + "Private/Pair.cpp", 1), (module + "Private/Pair.cpp", 4), (module + "Private/Pair.cpp", 5)]), "unbalanced pairs");
+            // 외부 라이브러리 헤더는 따라가서 읽는다(의존 모듈의 public include 경로로 찾는다). SDK 헤더를 여는 것(다른 헤더를 거쳐도, 조건
+            // 갈래 안이어도)은 쌍 안에 있어야 하고, 열지 않는 것은 다른 플랫폼의 시스템 헤더를 include해도 쌍 밖에 둔다. 서로를 include하는
+            // 헤더에서도 끝난다. 외부 라이브러리의 소스(lib.cpp)는 보지 않는다.
+            temporary.Write(library + "Public/lib/api.h", "#pragma once\n#include \"detail.h\"\n");
+            temporary.Write(library + "Public/lib/detail.h", "#pragma once\n#include \"api.h\"\n#ifdef _WIN32\n#include <windows.h>\n#else\n" +
+                "#include <unistd.h>\n#endif\n");
+            temporary.Write(library + "Public/lib/clean.h", "#pragma once\n#include <unistd.h>\n#include <stdio.h>\n#include \"other.h\"\n");
+            temporary.Write(library + "Public/lib/other.h", "#pragma once\n#include \"clean.h\"\n");
+            Verify.That(Check(
+                ("Private/Third.cpp", "#include <lib/clean.h>\n#include <lib/api.h>\n#include <lib/detail.h>\n" + begin + "#include <lib/api.h>\n" +
+                    "#include <lib/clean.h>\n" + end)).SetEquals(
+                [(module + "Private/Third.cpp", 2), (module + "Private/Third.cpp", 3)]), "third-party headers that open Windows SDK headers");
+            // 외부 라이브러리 헤더의 SDK include가 저장소가 정의하지 않는 매크로의 갈래에만 있다고 확인해 적어 둔 헤더(zconf.h)는 걸리지
+            // 않는다. 같은 내용이라도 적어 두지 않은 경로의 헤더는 걸린다.
+            const string zconf = "#pragma once\n#ifdef ZLIB_WINAPI\n#include <windows.h>\n#endif\n";
+            temporary.Write("Core/Source/ThirdParty/Zlib/zlib-1.4/zlib.h", "#pragma once\n#include \"zconf.h\"\n");
+            temporary.Write("Core/Source/ThirdParty/Zlib/zlib-1.4/zconf.h", zconf);
+            temporary.Write("Core/Source/ThirdParty/Zlib/zlib-9.9/zlib.h", "#pragma once\n#include \"zconf.h\"\n");
+            temporary.Write("Core/Source/ThirdParty/Zlib/zlib-9.9/zconf.h", zconf);
+            temporary.Write(module + "Private/Codec.cpp", "#include <zlib.h>\n");
+            Verify.That(Leaks(Probe("Private/Codec.cpp") with { PrivateIncludeDirectories = ["Core/Source/ThirdParty/Zlib/zlib-1.4"] }).Count == 0,
+                "a third-party header with a confirmed unused Windows branch");
+            Verify.That(Leaks(Probe("Private/Codec.cpp") with { PrivateIncludeDirectories = ["Core/Source/ThirdParty/Zlib/zlib-9.9"] }).SetEquals(
+                [(module + "Private/Codec.cpp", 1)]), "the same header at an unconfirmed path");
+            // 모듈 선별: 유니티를 끈 모듈과 UnityExclude의 소스도 본다. 모듈 PCH 헤더는 소스가 include하지 않아도 읽고, 쌍은 PCH 헤더 안에
+            // 있어도 된다. C 소스는 보지 않는다. 같은 헤더를 두 모듈이 include해도 위반은 한 번만 낸다.
+            temporary.Write(module + "Private/Plain.cpp", "#include <Windows.h>\n");
+            temporary.Write(module + "Private/Value.c", "#include <Windows.h>\n");
+            temporary.Write(module + "Private/ProbePch.h", "#pragma once\n" + begin + "#include <Windows.h>\n" + end + "#include <d3d12.h>\n");
+            temporary.Write(module + "Private/UsesApi.cpp", "#include <Probe/Api.h>\n");
+            Verify.That(Leaks(Probe("Private/Plain.cpp", "Private/Value.c") with { Unity = UnityMode.Off }).SetEquals(
+                [(module + "Private/Plain.cpp", 1)]), "a module without unity is checked");
+            Verify.That(Leaks(Probe("Private/Plain.cpp") with { Unity = UnityMode.On, UnityExclude = [module + "Private/Plain.cpp"] }).SetEquals(
+                [(module + "Private/Plain.cpp", 1)]), "a UnityExclude source is checked");
+            Verify.That(Leaks(Probe("Private/Good.cpp") with { PrivatePchHeader = module + "Private/ProbePch.h" }).SetEquals(
+                [(module + "Private/ProbePch.h", 5)]), "the module PCH header is read");
+            Verify.Equal(1, PolicyChecks.WindowsMacroLeaks(temporary.Root, [Probe("Private/UsesApi.cpp"),
+                Probe("Private/UsesApi.cpp") with { Name = "Other" }]).Count, "a header shared by two modules is reported once");
+            Verify.That(PolicyChecks.IsCleanSystemHeader("type_traits") && PolicyChecks.IsCleanSystemHeader("STDIO.H") &&
+                PolicyChecks.IsCleanSystemHeader("immintrin.h") && PolicyChecks.IsCleanSystemHeader("Probe/Types.generated.h") &&
+                !PolicyChecks.IsCleanSystemHeader("Windows.h") && !PolicyChecks.IsCleanSystemHeader("rpcndr.h") &&
+                !PolicyChecks.IsCleanSystemHeader("vulkan/vulkan.h") && !PolicyChecks.IsCleanSystemHeader("sys/socket.h"), "clean header classification");
+            Verify.That(PolicyChecks.IsWindowsSdkHeaderName("Windows.h") && PolicyChecks.IsWindowsSdkHeaderName("d3d12.h") &&
+                PolicyChecks.IsWindowsSdkHeaderName("wrl/client.h") && !PolicyChecks.IsWindowsSdkHeaderName("unistd.h") &&
+                !PolicyChecks.IsWindowsSdkHeaderName("stdio.h"), "Windows SDK header names");
+        });
         // PCH 헤더 직접 include 금지(같은 문서 8.1·10절): 공유 PCH 헤더의 철자와 모듈 PCH 헤더의 상대 경로를 include하면 위반이고,
         // PCH 헤더끼리의 include, 주석 안의 예시, 문자열 안의 철자, 다른 헤더는 통과한다.
         suite.Add("Policy.PchHeaderIncludesAreRejected", () =>
@@ -849,6 +973,22 @@ internal static partial class SelfTests
             {
                 temporary.Write(directory + "Probe.h", unguarded);
                 Verify.Equal(1, PolicyChecks.PlatformBoundary(temporary.Root).Count, "unguarded Platform/Win64 header accepted: " + unguarded);
+            }
+
+            // 4. Windows SDK 헤더를 감싸는 쌍은 여러 번 include하는 조각이다: #pragma once가 없어야 하고 나머지 틀은 같다.
+            temporary.Write(directory + "Probe.h", guarded);
+            foreach (string fragment in new[] { "WindowsHeadersBegin.h", "WindowsHeadersEnd.h" })
+            {
+                temporary.Write(directory + fragment, "#include <Base/Compiler.h>\n#if ROCKS_PLATFORM_WINDOWS\n#undef small\n#endif\n");
+                NoFailures(PolicyChecks.PlatformBoundary(temporary.Root));
+                foreach (string wrong in new[] { guarded, "#include <Base/Compiler.h>\n#undef small\n",
+                    "#include <Base/Compiler.h>\n#if ROCKS_PLATFORM_WINDOWS\n#pragma once\n#undef small\n#endif\n" })
+                {
+                    temporary.Write(directory + fragment, wrong);
+                    Verify.Equal(1, PolicyChecks.PlatformBoundary(temporary.Root).Count, "wrong repeatedly included header accepted: " + wrong);
+                }
+
+                File.Delete(Path.Combine(temporary.Root, directory + fragment));
             }
         });
         suite.Add("Policy.TargetMacroControls", () =>

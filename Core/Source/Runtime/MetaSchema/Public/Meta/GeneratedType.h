@@ -26,10 +26,11 @@ struct ReflectedDeclarationProbe {
 // T가 리플렉션 클래스·struct로 선언됐는지다(정의 안의 ROCKS_GENERATED_BODY()). 타입의 선언만으로
 // 정해지므로 생성 헤더를 include했는지와 무관하게 번역 단위마다 같은 값이다
 // (Docs/Design/ReflectionGeneratedSources.ko.md 8.1절). enum과 Binds 미러의 실제 타입에는 표지가
-// 없다. T는 완전한 타입이어야 한다(전방 선언만 보이면 거짓이다).
+// 없다. cv 한정자는 떼고 본다(const S도 S와 같다). T는 완전한 타입이어야 한다(전방 선언만 보이면
+// 거짓이다).
 template <class T>
 inline constexpr bool ReflectedDeclarationV =
-    IsClassV<T> && detail::ReflectedDeclarationProbe::Own<T>;
+    IsClassV<T> && detail::ReflectedDeclarationProbe::Own<RemoveCvT<T>>;
 
 namespace detail {
 
@@ -41,10 +42,21 @@ namespace detail {
 // 사용 예:
 //   static constexpr bool Supported =
 //       IsClassV<T> && detail::GeneratedHeaderVisible<T>() && requires { GeneratedType<T>::Id(); };
+//
+// 표지는 완전한 타입에서만 읽을 수 있으므로 전방 선언만 보이는 클래스 타입은 받지 않는다.
+// GeneratedType은 cv 한정자 없는 타입에만 특수화되므로, 리플렉션 타입에 const·volatile을 붙여
+// 넘기는 것도 받지 않는다(생성 헤더가 있어도 "아닌 경우"의 길로 간다).
 template <class T>
 constexpr bool GeneratedHeaderVisible() noexcept {
     static_assert(
-        !ReflectedDeclarationV<T> || requires { sizeof(GeneratedType<T>); },
+        !IsClassV<T> || requires { sizeof(T); },
+        "reflection templates need a complete type here; include the header that defines it");
+    static_assert(
+        !ReflectedDeclarationV<T> || IsSameV<T, RemoveCvT<T>>,
+        "this type is reflected (ROCKS_GENERATED_BODY): pass it to reflection templates without "
+        "const or volatile");
+    static_assert(
+        !ReflectedDeclarationV<T> || requires { sizeof(GeneratedType<RemoveCvT<T>>); },
         "this type is reflected (ROCKS_GENERATED_BODY) but its generated header is not included "
         "in this translation unit; include <Module/Header.generated.h> before this use");
     return requires { sizeof(GeneratedType<T>); };

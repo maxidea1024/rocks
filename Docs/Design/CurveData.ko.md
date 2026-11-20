@@ -98,7 +98,12 @@ private:
 };
 
 ROCKS_STRUCT(Atomic)
-struct PlainCurveKey { ROCKS_GENERATED_BODY() ROCKS_PROPERTY() float time = 0; ROCKS_PROPERTY() float value = 0; };
+struct PlainCurveKey {
+    ROCKS_GENERATED_BODY()
+
+    ROCKS_PROPERTY() float time = 0;
+    ROCKS_PROPERTY() float value = 0;
+};
 
 ROCKS_STRUCT()
 struct PlainCurve : ScalarCurveBase {

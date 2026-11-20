@@ -505,8 +505,9 @@ CrashDumpFile OpenCrashDumpFile(const wchar_t* folder, const wchar_t* name) noex
 
     // 다 쓰기 전에는 삭제 예약 상태로 둔다. 쓰는 프로세스가 도중에 끝나도(크래시한 스레드의 총
     // 예산이 끝남) 열 수 없는 덤프가 남지 않는다. 다 쓰면 예약을 푼다.
-    FILE_DISPOSITION_INFO disposition{};
-    disposition.DeleteFile = TRUE;
+    // 유일한 멤버(삭제 예약 여부)는 이름 없이 채운다. 멤버 이름 DeleteFile은 선언될 때 A/W 매크로로
+    // 바뀌어 있고, 그 매크로는 WindowsHeadersEnd.h가 숨긴다.
+    FILE_DISPOSITION_INFO disposition{TRUE};
     file.pendingDelete = SetFileInformationByHandle(file.handle, FileDispositionInfo, &disposition,
                                                     sizeof(disposition)) != FALSE;
     return file;
@@ -584,7 +585,7 @@ CrashDumpWrite WriteOpenedCrashDumpFile(CrashDumpFile& opened, const wchar_t* fo
     const DWORD error = written ? ERROR_SUCCESS : GetLastError();
     bool kept = false;
     if (written) {
-        disposition.DeleteFile = FALSE;
+        disposition = FILE_DISPOSITION_INFO{FALSE};
         kept = !pendingDelete || SetFileInformationByHandle(file, FileDispositionInfo, &disposition,
                                                             sizeof(disposition)) != FALSE;
     }

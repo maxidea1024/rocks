@@ -4,7 +4,12 @@
 #include <Platform/Sync.h>
 #include <Base/Checked.h>
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
+
 #include <malloc.h>
 #include <stdlib.h>
 

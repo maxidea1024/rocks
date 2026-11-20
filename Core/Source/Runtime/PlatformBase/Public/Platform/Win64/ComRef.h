@@ -6,9 +6,13 @@
 // 컴파일 검사가 모든 플랫폼에서 이 헤더를 컴파일한다).
 #if ROCKS_PLATFORM_WINDOWS
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
 #include <Unknwn.h>
 #include <objbase.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
 
 // Windows COM 객체 참조를 소유하는 도구다(UE Core/Public/Microsoft/COMPointer.h의 TComPtr 대응).
 // D3D11·D3D12·DXGI backend, DXC 호출, Windows 전용 도구가 함께 쓴다. Private/Win64 같은 Windows

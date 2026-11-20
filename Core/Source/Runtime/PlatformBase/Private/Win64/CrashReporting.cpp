@@ -7,11 +7,15 @@
 #include <Platform/Fatal.h>
 #include <Platform/Win64/WideString.h>
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
 #include <crtdbg.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <werapi.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
 
 #if ROCKS_ADDRESS_SANITIZER
 // ASan runtime의 보고 뒤 콜백 등록이다(sanitizer/common_interface_defs.h와 같은 선언).

@@ -1,0 +1,180 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::buildReversedIndexBuffer",
+      "id": "4f8d9921782945279e7e2c3ee19afe41",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::buildScale",
+      "id": "3532fb6e2c3148db82db4a41ca534ce1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::computeWeightedNormals",
+      "id": "74fcf4c026bf4f88a77c142f6f408b43",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::distanceFieldResolutionScale",
+      "id": "40e21c08639e430bba6a8b81cdb60c6e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::dstLightmapIndex",
+      "id": "5310fa52728b4e30a42a725cd874b2d3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::generateDistanceFieldAsIfTwoSided",
+      "id": "4dbfd43d12d946a08d5d3efc99d7e688",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::generateLightmapUVs",
+      "id": "3e8ee63031d7497c8de1fd17025ebdf4",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::maxLumenMeshCards",
+      "id": "cfef085fa77b48728929c11ce91bf02d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::minLightmapResolution",
+      "id": "775f175fa4ed4f4ca1b59738fc8a4964",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::recomputeNormals",
+      "id": "d0a289eda3694b9a842d95d077ca6776",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::recomputeTangents",
+      "id": "1ef1276e7188484ea1b5066ea4fe9650",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::removeDegenerates",
+      "id": "301cdf7d29b34b61aaad49eee6f6a469",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::srcLightmapIndex",
+      "id": "dde0004f0d7a4b5e981157104c9d0136",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::supportFaceRemap",
+      "id": "4b77ac35d35341098fde18c48bf0f06a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::useFullPrecisionUVs",
+      "id": "10b7ef598805446e9d1ebc81a9776e06",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::useHighPrecisionTangentBasis",
+      "id": "984e672b25a64ff6bb333d9b7d0ecad7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshBuildSettings::useMikkTSpace",
+      "id": "a0cc65e4575e4cc6b393bfc8ca4add77",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedMeshBuildSettings::boneInfluenceLimit",
+      "id": "bf5399a89531429fb51f4b8348807418",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedMeshBuildSettings::morphThresholdPosition",
+      "id": "2f0da8e091ac4350a2fa240589a3901e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedMeshBuildSettings::thresholdPosition",
+      "id": "514b9d84f5054432bbfaf2b0a1526733",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedMeshBuildSettings::thresholdTangentNormal",
+      "id": "5148d126e8fb4e05a56db845c22e8685",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedMeshBuildSettings::thresholdUV",
+      "id": "bd5cfc2be0024841a33e0a08acb71ed8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkinnedMeshBuildSettings::useHighPrecisionSkinWeights",
+      "id": "5267afbf6f7740fcaa0b77fdff82ca74",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::MeshBuildSettings",
+      "id": "5a5e1138c19c41fa870a58eeb11173ba",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SkinnedMeshBuildSettings",
+      "id": "aa7f91f544414a35a12c42342829cf8c",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}

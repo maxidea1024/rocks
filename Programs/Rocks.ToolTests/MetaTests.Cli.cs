@@ -7,6 +7,13 @@ namespace Rocks.ToolTests;
 internal static partial class MetaTests
 {
     // fixture 결정성·include 바인딩·진단·컴파일러 옵션·prefix class·private GENERATED_BODY·abstract 시험이다.
+    // 표지 시험의 입력이다: struct Leaf(String 멤버)와 class Holder. 인자에 따라 ROCKS_GENERATED_BODY()를 둔다.
+    private static string MarkerSource(bool leaf, bool holder) =>
+        Preamble + "ROCKS_STRUCT()\nstruct Leaf {\n" + (leaf ? "ROCKS_GENERATED_BODY()\n" : "") +
+        "ROCKS_PROPERTY() rocks::String label;\nexplicit Leaf(rocks::Allocator& allocator) noexcept : label(allocator) {}\n};\n" +
+        "ROCKS_CLASS()\nclass Holder : public rocks::Object {\n" + (holder ? "ROCKS_GENERATED_BODY()\n" : "") +
+        "public:\nHolder() noexcept {}\n};\n}\n";
+
     private static void RegisterCli(MetaContext context)
     {
         var (suite, options, actualEnvironment, generator, compiler) = context;
@@ -25,45 +32,85 @@ internal static partial class MetaTests
                 reason: "definitions header not found");
         });
         // 표지 규칙(Docs/Design/ReflectionGeneratedSources.ko.md 8.1절). --require-generated-body를 주면 ROCKS_GENERATED_BODY()가 없는
-        // 리플렉션 클래스·struct를 RMC2211로 거부한다(옵션이 없으면 받는다). 표지가 있는 타입을 생성 헤더 없이 리플렉션 템플릿에 쓰면
-        // 관문이 컴파일 오류를 내고, 생성 헤더를 include하면 컴파일된다. 표지가 없는 타입은 같은 코드가 조용히 컴파일된다(규칙을 두는
-        // 이유다).
-        suite.Add("Meta.GeneratedBodyMarkerIsRequiredAndGuardsTemplates", async () =>
+        // 리플렉션 클래스·struct를 RMC2211로 거부한다(옵션이 없으면 받는다. 중첩 타입도 대상이고 Binds 미러는 예외다).
+        suite.Add("Meta.GeneratedBodyMarkerIsRequired", async () =>
         {
             using Probe probe = new(options, actualEnvironment, generator, compiler);
-            const string body = "ROCKS_PROPERTY() rocks::String label;\nexplicit Leaf(rocks::Allocator& allocator) noexcept : label(allocator) {}\n};\n" +
-                "ROCKS_CLASS()\nclass Holder : public rocks::Object {\n";
-            string unmarked = Preamble + "ROCKS_STRUCT()\nstruct Leaf {\n" + body + "public:\nHolder() noexcept {}\n};\n}\n";
-            string marked = Preamble + "ROCKS_STRUCT()\nstruct Leaf {\nROCKS_GENERATED_BODY()\n" + body +
-                "ROCKS_GENERATED_BODY()\npublic:\nHolder() noexcept {}\n};\n}\n";
-            string halfMarked = Preamble + "ROCKS_STRUCT()\nstruct Leaf {\nROCKS_GENERATED_BODY()\n" + body +
-                "public:\nHolder() noexcept {}\n};\n}\n";
-            await probe.GenerateAsync(unmarked);
-            await probe.GenerateAsync(unmarked, extra: ["--require-generated-body"], expectedCode: "RMC2211",
+            await probe.GenerateAsync(MarkerSource(leaf: false, holder: false));
+            await probe.GenerateAsync(MarkerSource(leaf: false, holder: false), extra: ["--require-generated-body"], expectedCode: "RMC2211",
                 reason: "probe::Leaf: a reflected struct must contain ROCKS_GENERATED_BODY()");
-            await probe.GenerateAsync(halfMarked, extra: ["--require-generated-body"], expectedCode: "RMC2211",
+            await probe.GenerateAsync(MarkerSource(leaf: true, holder: false), extra: ["--require-generated-body"], expectedCode: "RMC2211",
                 reason: "probe::Holder: a reflected class must contain ROCKS_GENERATED_BODY()");
-            await probe.GenerateAsync(unmarked, extra: ["--require-generated-body", "--require-generated-body"], expectedCode: "RMC1000",
-                reason: "duplicate option --require-generated-body");
-
-            // 소비자: 값 복사(ValueCopy 일반형)와 필드 형질(ReflectedStructField)을 쓴다.
-            string Consumer(bool generatedHeader) =>
-                (generatedHeader ? $"#include <{probe.IncludeSpelling[..^2]}.generated.h>\n" : $"#include <{probe.IncludeSpelling}>\n") +
-                "#include <Object/ValueCopy.h>\n" +
+            await probe.GenerateAsync(MarkerSource(leaf: true, holder: true), extra: ["--require-generated-body"]);
+            await probe.GenerateAsync(MarkerSource(leaf: true, holder: true), extra: ["--require-generated-body", "--require-generated-body"],
+                expectedCode: "RMC1000", reason: "duplicate option --require-generated-body");
+            // 클래스 안에 중첩한 리플렉션 struct도 표지를 둔다.
+            await probe.GenerateAsync(Preamble + "ROCKS_CLASS()\nstruct Outer : public rocks::Object {\nROCKS_GENERATED_BODY()\nOuter() noexcept {}\n" +
+                "ROCKS_STRUCT()\nstruct Inner {\n};\n};\n}\n", extra: ["--require-generated-body"], expectedCode: "RMC2211",
+                reason: "probe::Outer::Inner: a reflected struct must contain ROCKS_GENERATED_BODY()");
+            // Binds 미러 선언은 실제 타입이 따로 있으므로 표지 없이 받는다.
+            using Probe binds = new(options, actualEnvironment, generator, compiler, BindsModule);
+            await binds.GenerateAsync(BindsPreamble + BindsVec3 + "}\n", extra: ["--require-generated-body"]);
+        });
+        // 표지와 관문(같은 절). 표지는 타입의 선언만으로 판정되고(class의 private 구역, cv 한정자, 표지 없는 파생 타입), 표지가 있는
+        // 타입을 생성 헤더 없이 리플렉션 템플릿에 쓰면 관문마다 컴파일 오류가 난다 — 소비 번역 단위를 관문마다 따로 두어 하나라도
+        // 빠지면 드러나게 한다. 생성 헤더를 include하면 모두 컴파일되고, 표지가 없는 타입은 같은 코드가 조용히 컴파일된다(규칙을 두는
+        // 이유다). 표지가 있는 타입에 const를 붙여 넘기는 것과 전방 선언만 보이는 타입도 거부한다.
+        suite.Add("Meta.GeneratedBodyMarkerGuardsEachTemplate", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            const string valueCopy = "#include <Object/ValueCopy.h>\n" +
                 "rocks::Result<void> Copy(probe::Leaf& to, const probe::Leaf& from, rocks::Allocator& allocator) noexcept {\n" +
-                "    return rocks::detail::TryCopyValue(to, from, allocator);\n}\n" +
-                "bool IsStruct() noexcept { return rocks::detail::ReflectedStructField<probe::Leaf>::Supported; }\n" +
-                "static_assert(rocks::ReflectedDeclarationV<probe::Leaf> == PROBE_MARKED);\n" +
-                "static_assert(!rocks::ReflectedDeclarationV<rocks::String> && !rocks::ReflectedDeclarationV<int>);\n";
-            await probe.GenerateAsync(unmarked);
-            var silent = await probe.CompileSourceAsync("#define PROBE_MARKED false\n" + Consumer(generatedHeader: false));
+                "    return rocks::detail::TryCopyValue(to, from, allocator);\n}\n";
+            (string Name, string Code)[] gates =
+            [
+                ("ValueCopy", valueCopy),
+                ("ValueValidate", "#include <Object/ValueCopy.h>\nbool Hook() noexcept { return rocks::detail::ValueValidate<probe::Leaf>::HasHook; }\n"),
+                ("ReflectedStructField", "#include <Object/GeneratedFieldAccess.h>\n" +
+                    "bool IsStruct() noexcept { return rocks::detail::ReflectedStructField<probe::Leaf>::Supported; }\n"),
+                ("HasLogStructure", "#include <Core/Diagnostics/LogStructure.h>\n#include <Object/GeneratedFieldAccess.h>\nbool Logs() noexcept { return rocks::HasLogStructure<probe::Leaf>; }\n"),
+                ("CheckRenderTransfer", "#include <Engine/Source/Runtime/RenderBase/Public/RenderBase/RenderTransfer.h>\n" +
+                    "ROCKS_RENDER_TRANSFERABLE(probe::Leaf);\n" +
+                    "rocks::Result<void> Check() noexcept { return rocks::render::CheckRenderTransfer<probe::Leaf>(); }\n")
+            ];
+            const string reflected = "#include <Probe.h>\n";
+            const string generated = "#include <Probe.generated.h>\n";
+
+            // 표지 없는 타입: 생성 헤더 없이도 조용히 컴파일된다.
+            await probe.GenerateAsync(MarkerSource(leaf: false, holder: false));
+            var silent = await probe.CompileSourceAsync(reflected + valueCopy + "static_assert(!rocks::ReflectedDeclarationV<probe::Leaf>);\n");
             Verify.Equal(0, silent.ExitCode, "an unmarked type compiles without its generated header (the silent path): " + silent.StdOut + silent.StdErr);
-            await probe.GenerateAsync(marked, extra: ["--require-generated-body"]);
-            var guarded = await probe.CompileSourceAsync("#define PROBE_MARKED true\n" + Consumer(generatedHeader: false));
-            Verify.That(guarded.ExitCode != 0, "a marked type without its generated header must not compile");
-            Verify.Contains("its generated header is not included", guarded.StdOut + guarded.StdErr, "the gate must name the cause");
-            var included = await probe.CompileSourceAsync("#define PROBE_MARKED true\n" + Consumer(generatedHeader: true));
-            Verify.Equal(0, included.ExitCode, "a marked type with its generated header must compile: " + included.StdOut + included.StdErr);
+
+            await probe.GenerateAsync(MarkerSource(leaf: true, holder: true), extra: ["--require-generated-body"]);
+            // 표지의 판정: struct, class의 private 구역, cv 한정자. 표지를 물려받기만 한 파생 타입과 리플렉션이 아닌 타입은 거짓이다.
+            var marker = await probe.CompileSourceAsync(reflected +
+                "static_assert(rocks::ReflectedDeclarationV<probe::Leaf> && rocks::ReflectedDeclarationV<const probe::Leaf> &&\n" +
+                "    rocks::ReflectedDeclarationV<volatile probe::Leaf>);\n" +
+                "static_assert(rocks::ReflectedDeclarationV<probe::Holder>);\n" +
+                "struct Derived : probe::Leaf { using probe::Leaf::Leaf; };\nclass DerivedHolder : public probe::Holder {};\n" +
+                "static_assert(!rocks::ReflectedDeclarationV<Derived> && !rocks::ReflectedDeclarationV<DerivedHolder>);\n" +
+                "static_assert(!rocks::ReflectedDeclarationV<rocks::String> && !rocks::ReflectedDeclarationV<int>);\n");
+            Verify.Equal(0, marker.ExitCode, "marker detection: " + marker.StdOut + marker.StdErr);
+
+            foreach ((string name, string code) in gates)
+            {
+                var guarded = await probe.CompileSourceAsync(reflected + code);
+                Verify.That(guarded.ExitCode != 0, $"{name}: a marked type without its generated header must not compile");
+                Verify.Contains("its generated header is not included", guarded.StdOut + guarded.StdErr, $"{name}: the gate must name the cause");
+                var included = await probe.CompileSourceAsync(generated + code);
+                Verify.Equal(0, included.ExitCode, $"{name}: a marked type with its generated header must compile: " + included.StdOut + included.StdErr);
+            }
+
+            // cv 한정자를 붙인 리플렉션 타입은 생성 헤더가 있어도 거부한다(GeneratedType은 한정자 없는 타입에만 있다).
+            var qualified = await probe.CompileSourceAsync(generated + "#include <Object/GeneratedFieldAccess.h>\n" +
+                "bool IsStruct() noexcept { return rocks::detail::ReflectedStructField<const probe::Leaf>::Supported; }\n");
+            Verify.That(qualified.ExitCode != 0, "a const-qualified reflected type must not pass the gate");
+            Verify.Contains("without const or volatile", qualified.StdOut + qualified.StdErr, "the gate must name the cv qualifier");
+            // 전방 선언만 보이는 타입은 표지를 읽을 수 없으므로 거부한다.
+            var incomplete = await probe.CompileSourceAsync("#include <Object/GeneratedFieldAccess.h>\nnamespace probe { struct Later; }\n" +
+                "bool IsStruct() noexcept { return rocks::detail::ReflectedStructField<probe::Later>::Supported; }\n");
+            Verify.That(incomplete.ExitCode != 0, "an incomplete class type must not pass the gate");
+            Verify.Contains("need a complete type", incomplete.StdOut + incomplete.StdErr, "the gate must name the incomplete type");
         });
         suite.Add("Meta.FixtureDeterminismTimestampAndStaleCheck", async () =>
         {

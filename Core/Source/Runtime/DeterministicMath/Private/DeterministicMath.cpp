@@ -260,6 +260,59 @@ double CosKernel(double t) noexcept {
     return sum;
 }
 
+// asin Taylor 계수 c_k = (2k)!/(4^k·(k!)²·(2k+1))(k = 1..AsinTerms)다. 앞 인수 b_k = b_{k−1}·(2k −
+// 1)/(2k)를 컴파일 시점 IEEE 연산으로 이어 만들므로 모든 대상에서 같은 상수다.
+constexpr int AsinTerms = 30;
+
+struct AsinCoefficients {
+    double value[AsinTerms + 1];
+};
+
+constexpr AsinCoefficients MakeAsinCoefficients() noexcept {
+    AsinCoefficients table{};
+    double binomial = 1.0;
+    for (int k = 1; k <= AsinTerms; ++k) {
+        binomial = binomial * static_cast<double>(2 * k - 1) / static_cast<double>(2 * k);
+        table.value[k] = binomial / static_cast<double>(2 * k + 1);
+    }
+
+    return table;
+}
+
+constexpr AsinCoefficients AsinSeries = MakeAsinCoefficients();
+
+// π의 double-double(hi = 가장 가까운 double, lo = 나머지의 가장 가까운 double)이다.
+constexpr DoubleDouble PiExtended{Pi, BitCast<double>(uint64{0x3CA1A62633145C07})};
+
+// asin(s) − s = s·y·P(y), y = s²(|s| ≤ ½). 30항이면 s = ½에서 나머지가 s의 2^−60배 아래다.
+double AsinTail(double s) noexcept {
+    const double y = s * s;
+    double sum = AsinSeries.value[AsinTerms];
+    for (int k = AsinTerms - 1; k >= 1; --k) {
+        sum = sum * y + AsinSeries.value[k];
+    }
+
+    return s * y * sum;
+}
+
+// 1 미만 양의 정규 수 z의 제곱근 근사다(상대 오차 1 ulp 남짓). z = m·2^(2h), m ∈ [1, 4)로 나눠
+// m에서 Newton 반복을 고정 횟수만 한다(시작 오차 25% 이하 → 6회면 수렴). 기본 연산만 쓰므로
+// 결정적이다. 호출자(Acos)는 남은 오차를 z − s²로 따로 보정한다.
+constexpr int SqrtNewtonIterations = 6;
+
+double SqrtApproximation(double z) noexcept {
+    const int exponent = static_cast<int>(BitCast<uint64>(z) >> 52) - 1023;
+    // z < 1이라 지수가 음수다: h = ⌊지수/2⌋.
+    const int half = -((1 - exponent) / 2);
+    const double m = z * PowerOfTwo(-2 * half);
+    double y = 0.5 * (1.0 + m);
+    for (int iteration = 0; iteration < SqrtNewtonIterations; ++iteration) {
+        y = 0.5 * (y + m / y);
+    }
+
+    return y * PowerOfTwo(half);
+}
+
 // sin(π(n/2 + r))를 4분면으로 나눠 계산한다(|r| ≤ ¼, quadrant = n mod 4).
 double SinPiQuadrant(double r, int64 quadrant) noexcept {
     const double t = r * Pi;
@@ -452,6 +505,41 @@ double Lanczos(double x, int lobes) noexcept {
         magnitude >= 0.5 * support ? SinPi((support - magnitude) / support) : SinPi(ratio);
     const double window = windowNumerator / (Pi * ratio);
     return Sinc(magnitude) * window;
+}
+
+double Acos(double x) noexcept {
+    if (IsNaN(x) || Magnitude(x) > 1.0) {
+        return NaN();
+    }
+
+    const double magnitude = Magnitude(x);
+    if (magnitude <= 0.5) {
+        // acos(x) = π/2 − x − (asin(x) − x). 앞 두 항을 오차 없이 더하고 꼬리를 모아 한 번
+        // 반올림한다.
+        const DoubleDouble head = TwoSum(0.5 * PiExtended.hi, -x);
+        return Canonical(head.hi + (head.lo + (0.5 * PiExtended.lo - AsinTail(x))));
+    }
+
+    if (magnitude == 1.0) {
+        return x > 0.0 ? 0.0 : PiExtended.hi;
+    }
+
+    // |x| > ½: acos(|x|) = 2·asin(√z), z = (1 − |x|)/2(Sterbenz로 정확, 2^−54 이상의 정규 수).
+    // s = √z 근사의 오차는 c = (z − s²)/(2s)로 보정한다(z − s²는 오차 없는 곱으로 정확). asin(s +
+    // c) ≈ asin(s) + c·(1 + s²/2)이고 c가 ulp 수준이라 그 이후 항은 무시된다.
+    const double z = 0.5 * (1.0 - magnitude);
+    const double s = SqrtApproximation(z);
+    const DoubleDouble square = TwoProduct(s, s);
+    const double correction = ((z - square.hi) - square.lo) / (2.0 * s) * (1.0 + 0.5 * z);
+    const double tail = AsinTail(s) + correction;
+    if (x > 0.0) {
+        const DoubleDouble sum = FastTwoSum(2.0 * s, 2.0 * tail);
+        return Canonical(sum.hi + sum.lo);
+    }
+
+    // acos(x) = π − 2·asin(√z)(x < −½).
+    const DoubleDouble head = TwoSum(PiExtended.hi, -2.0 * s);
+    return Canonical(head.hi + (head.lo + (PiExtended.lo - 2.0 * tail)));
 }
 
 double SrgbToLinear(double encoded) noexcept {

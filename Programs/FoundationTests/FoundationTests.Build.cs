@@ -24,24 +24,22 @@ public abstract class TestsModule : ModuleRules
     private static readonly string[] ObjectTestModules = ["ObjectRuntime", "ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig", "Curves"];
 
     // Tests of engine layer modules (EngineTests only). Paths are Group/Module under Engine/Source.
-    private static readonly string[] EngineTestModules = ["Runtime/Input", "Runtime/PlatformWindow", "Runtime/World", "Runtime/Engine", "Runtime/GraphicsTypes", "Runtime/Graphics", "Runtime/RenderBase", "Runtime/RenderGraph", "Runtime/AssetRuntime", "Developer/AssetTools", "Developer/ShaderToolTable", "Developer/ShaderToolLoader", "Developer/ShaderCompiler", "Developer/ShaderFormatVulkan", "Runtime/VulkanGraphics", "Runtime/SpatialIndex", "Runtime/MeshSource", "Runtime/SparksCompiler", "Developer/SparksTestHost"];
+    private static readonly string[] EngineTestModules = ["Runtime/Input", "Runtime/PlatformWindow", "Runtime/World", "Runtime/Engine", "Runtime/GraphicsTypes", "Runtime/Graphics", "Runtime/RenderBase", "Runtime/RenderGraph", "Runtime/AssetRuntime", "Developer/AssetTools", "Developer/ShaderToolTable", "Developer/ShaderToolLoader", "Developer/ShaderCompiler", "Developer/ShaderFormatVulkan", "Runtime/VulkanGraphics", "Runtime/SpatialIndex", "Runtime/MeshSource", "Developer/MeshTools", "Runtime/Animation", "Runtime/SparksCompiler", "Developer/SparksTestHost"];
 
     // Engine modules EngineTests links (only the top modules tests use; lower dependencies propagate).
-    private static readonly string[] EngineTestDependencies = ["PlatformWindow", "Engine", "Graphics", "RenderBase", "RenderGraph", "SpirvReflect", "ShaderToolLoader", "ShaderCompiler", "ShaderFormatVulkan", "VulkanGraphics", "SpatialIndex", "MeshSource", "SparksTestHost"];
+    private static readonly string[] EngineTestDependencies = ["PlatformWindow", "Engine", "Graphics", "RenderBase", "RenderGraph", "SpirvReflect", "ShaderToolLoader", "ShaderCompiler", "ShaderFormatVulkan", "VulkanGraphics", "SpatialIndex", "MeshSource", "MeshTools", "MikkTSpace", "Animation", "SparksTestHost"];
 
-    // Libraries included by the EngineTests shader tool external library tests (Programs/FoundationTests/Engine). Headers enter only through this executable's
-    // Private includes (adapter approach) and must produce zero warnings under the engine warning rules (Docs/Design/ShaderSystem.ko.md section 8).
-    private static readonly string[] EngineThirdPartyHeaders = ["VulkanHeaders", "SpirvReflect", "SpirvCross", "SpirvTools"];
+    // Libraries included by the EngineTests shader tool external library tests (Programs/FoundationTests/Engine) and the MeshTools MikkTSpace reference
+    // comparison test. Headers enter only through this executable's Private includes (adapter approach) and must produce zero warnings under the engine
+    // warning rules (Docs/Design/ShaderSystem.ko.md section 8).
+    private static readonly string[] EngineThirdPartyHeaders = ["VulkanHeaders", "SpirvReflect", "SpirvCross", "SpirvTools", "MikkTSpace"];
 
     // Unity build (Docs/Design/UnityBuildPch.ko.md section 9.3). Test sources keep their file-local helpers and TEST bodies in a namespace
     // unique to the file (<file>_file), so helpers with the same name in two sources never meet in one batch. The sources below stay standalone
     // translation units: their helpers are used from another namespace of the same file (specializations of rocks templates for test types,
-    // host service macros, probes called from the runner), so they cannot be enclosed mechanically. WindowsComRefTests.cpp is standalone for
-    // another reason: it includes the Windows COM headers, whose macros (small, interface, ...) would leak into every source that follows
-    // it in a batch (which sources follow depends on the batch boundaries, so adding an unrelated source could break the build).
+    // host service macros, probes called from the runner), so they cannot be enclosed mechanically.
     private static readonly string[] UnityStandaloneSources =
     [
-        "Core/Source/Developer/TestSupport/Private/Win64/WindowsComRefTests.cpp",
         "Core/Source/Runtime/Base/Tests/BaseTests.cpp",
         "Core/Source/Runtime/Config/Tests/ConsoleInputTests.cpp",
         "Core/Source/Runtime/Core/Tests/BinnedAllocatorFailureControls.cpp",

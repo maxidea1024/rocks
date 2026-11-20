@@ -1,6 +1,10 @@
 #include <TestSupport/OsThread.h>
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
 
 namespace rocks::test {
 namespace {

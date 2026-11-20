@@ -3,7 +3,11 @@
 #include <Platform/File.h>
 #include <Platform/Win64/WideString.h>
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
 
 // PlatformBase 공개 API가 문자열을 호출자 버퍼로 돌려주는 규칙이다. UTF-8·UTF-16 변환 자체는 공개
 // 헤더 Platform/Win64/WideString.h에 있고, 여기는 그 결과를 공개 API 계약의 오류 코드로 옮기기만

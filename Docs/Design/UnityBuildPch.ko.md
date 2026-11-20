@@ -168,11 +168,61 @@ compile action identity에서 모듈 전체 소스 목록을 빼고 그 action�
 모듈의 C++ 소스(`NativeLanguage.Cpp`) 중 다음을 뺀 나머지를 묶는다.
 - C 소스(`.c`). 언어가 다르다.
 - BuildInfo TU와 규칙 생성 TU(`GeneratedSources`). 생성 시점과 빈도가 다르다.
-- 규칙이 단독으로 지정한 파일(`UnityExclude`). 큰 파일이나 특수 플래그 파일이다. **뒤 소스로 새는 매크로를 정의하는 헤더를 include하는 파일**도 여기다(예: `TestSupport/Private/Win64/WindowsComRefTests.cpp` — Windows COM 헤더가 `small`·`interface` 같은 매크로를 남긴다). 묶음에서 그 파일 뒤에 오는 소스가 묶음 경계에 따라 달라지므로, 상관없는 소스를 더하기만 해도 빌드가 깨진다(2026-11-20, rocks-73이 EngineTests 묶음 경계가 바뀌며 발견). 파일 지역 이름과 달리 매크로 누출은 정책 검사가 아직 잡지 않는다.
+- 규칙이 단독으로 지정한 파일(`UnityExclude`). 큰 파일이나 특수 플래그 파일이다. **뒤 소스로 새는 매크로를 정의하는 헤더를 include하는데 감쌀 수 없는 파일**도 여기다(Windows SDK 헤더는 예외 없이 감싼다 — 아래). Windows COM 헤더는 `small`·`interface` 같은 매크로를 남기고, 묶음에서 그 파일 뒤에 오는 소스가 묶음 경계에 따라 달라지므로, 상관없는 소스를 더하기만 해도 빌드가 깨진다(2026-11-20, rocks-73이 EngineTests 묶음 경계가 바뀌며 발견 — 그때는 `TestSupport/Private/Win64/WindowsComRefTests.cpp`를 단독으로 뺐다). 이 누출은 아래 "매크로를 남기는 헤더"의 규칙과 정책 검사가 막는다. 그 규칙이 생기면서 `WindowsComRefTests.cpp`는 묶음으로 돌아왔다.
 - **첫 `#include` 앞에서 `#define`하는 파일**(예: `Core/Tests/StlCompatibilityTests.cpp`의 `_HAS_EXCEPTIONS 0`). 같은 묶음의 앞 파일이나 PCH가 그 헤더를 이미 처리했으면 설정이 조용히 무효가 된다. 빌드가 토큰 단위로 찾아내 단독 TU로 컴파일하고 PCH도 끈다. 빌드 보고에 파일 목록을 남긴다.
 - 상한보다 큰 파일. 단독 TU다.
 
 모듈 규칙 `Unity`가 `Off`면 묶지 않는다. 외부 라이브러리 모듈(`Core/Source/ThirdParty`)의 기본은 `Off`다. upstream이 유니티를 전제하지 않는다.
+
+**매크로를 남기는 헤더**
+- Windows SDK 헤더는 평범한 이름의 매크로를 번역 단위 끝까지 남긴다. `minwindef.h`의 `near`·`far`·`pascal`·`cdecl`, `rpcndr.h`의 `small`·`hyper`, `combaseapi.h`의 `interface`, 그리고 `CreateDirectory`·`GetObject`·`RegisterClass` 같은 A/W 함수 이름 매크로다. 묶음에서는 이 매크로가 그 파일 뒤의 구성원까지 살아남아, 같은 이름을 변수·멤버·함수로 쓰는 소스를 깨뜨린다. 어느 소스가 뒤에 오는지는 묶음 경계에 달려 있다.
+- 규칙: Windows에서 빌드하는 모든 모듈의 소스, 그 소스가 include하는 저장소 헤더, 모듈 PCH 헤더는 Windows SDK 헤더를 **감싸서** include한다. 외부 라이브러리 원본(`ThirdParty`)만 대상이 아니다.
+  ```cpp
+  #include <Platform/Win64/WindowsHeadersBegin.h>
+
+  #include <d3d11_4.h>
+  #include <dxgi1_6.h>
+
+  #include <Platform/Win64/WindowsHeadersEnd.h>
+  ```
+  - 유니티를 끈 모듈과 `UnityExclude`의 소스도 대상이다. 쌍이 매크로를 숨긴 뒤에는 같은 번역 단위에서 뒤에 여는 SDK 헤더도 쌍 안이어야 파싱되기 때문이다. `Platform/Win64/ComRef.h`처럼 쌍으로 끝나는 헤더를 include한 소스가 그 뒤에 `<d3d12.h>`를 쌍 밖에서 열면 `interface`가 없어 깨진다. 묶음과 상관없는 일이므로 예외를 두지 않는다.
+  - `WindowsHeadersEnd.h`는 아래 이름을 `#undef`한다. 상태를 저장하지 않는다.
+    - 평범한 이름: `near`·`far`·`small`·`interface`·`pascal`·`cdecl`·`hyper`·`min`·`max`. `FAR`·`NEAR`는 빈 매크로로 바꾼다. `DEFINE_GUID`나 `FD_SET` 같은 SDK 매크로는 쓰는 자리에서 `FAR`로 펼쳐지는데, 원래 정의(`#define FAR far`)는 `far`를 지운 뒤에는 컴파일되지 않는다.
+    - A/W 함수 이름: UE가 `Windows/PostWindowsApi.h`에서 지우는 A/W 이름 33개와, 엔진 식별자와 실제로 겹친 `RegisterClass`·`FindFirstFile`이다.
+  - `WindowsHeadersBegin.h`는 `Windows.h`를 열고 End를 거친 뒤(A/W 이름을 지운다) 평범한 이름을 SDK와 같은 정의로 다시 `#define`한다(`near`·`far`·`cdecl`은 빈 매크로, `pascal`은 `__stdcall`, `small`은 `char`, `hyper`는 `__int64`, `interface`는 `__STRUCT__`, `FAR`·`NEAR`는 `far`·`near`). 그래서 감싼 구간의 헤더는 언제나 A/W 이름 매크로가 없고 평범한 이름 매크로는 있는 상태로 파싱된다.
+    - `ID3D12InfoQueue::GetMessage`나 `ID2D1RenderTarget::DrawText` 같은 COM 메서드가 include 순서와 상관없이 제 이름으로 선언된다.
+    - Windows 헤더는 include guard 때문에 `interface`나 `far`를 다시 정의하지 않는데, 뒤에 처음 include되는 COM·DirectX 헤더는 그것이 있어야 파싱된다. SDK 헤더가 같은 이름을 다시 정의해도 토큰이 같아 경고가 없다.
+    - 구간에 `Windows.h`를 따로 적지 않아도 된다(적어도 해가 없다).
+    - `min`·`max`는 되돌리지 않는다. 빌드가 `NOMINMAX`를 전역으로 정의하므로 처음부터 없다. End의 `#undef`는 안전장치다.
+  - 두 헤더는 `#pragma push_macro`/`pop_macro`를 쓰지 않는다. clang의 PCH는 push 스택을 저장하지 않아서, PCH 안에서 End가 저장한 것을 PCH를 쓰는 번역 단위의 Begin이 되돌리지 못한다(경고 뒤 `interface`가 없어 SDK 헤더가 깨진다). 정의를 직접 다시 쓰면 번역 단위나 PCH 경계를 넘는 상태가 없다. 쌍은 PCH 헤더 안에 있어도 되고 PCH를 쓰는 소스에 있어도 된다.
+  - 두 헤더는 `#pragma once` 없이 여러 번 include하는 조각이다. `Platform/Win64/`에 있고 Windows native backend 소스만 include한다(정책 `platform-boundary`). 그 정책은 `Platform/Win64/` 헤더의 틀(`#pragma once`, `#include <Base/Compiler.h>`, `#if ROCKS_PLATFORM_WINDOWS` … `#endif`)에서 이 둘만 `#pragma once`를 빼고 받는다. 이 둘에 `#pragma once`가 있으면 어느 줄이든 거부한다(두 번째 include가 비어 버린다).
+  - 감싼 구간 안에는 Windows SDK 헤더와, SDK 헤더를 여는 외부 라이브러리 헤더만 둔다(저장소 헤더를 넣으면 그 헤더가 매크로가 살아 있는 상태로 파싱된다).
+  - 감싼 뒤의 코드는 숨긴 매크로를 쓸 수 없다. A/W 함수는 `W` 이름을 직접 쓴다(`CreateDirectoryW`). `Windows.h` 자신이 선언하는 struct의 멤버 이름이 함수 이름 매크로와 겹치면(`FILE_DISPOSITION_INFO::DeleteFile`은 선언될 때 `DeleteFileA`/`DeleteFileW`가 된다) 이름 없이 초기화한다(`FILE_DISPOSITION_INFO{TRUE}`).
+- 정책 검사 `windows-macro-leak`(9.2절)이 쌍 밖의 include를 거부한다. Windows 플랫폼의 모듈 규칙만 평가한다(다른 플랫폼의 소스는 Windows 헤더를 열지 않는다).
+  - 읽는 범위: 모듈의 C++ 소스와 PCH 헤더, 거기서 include로 닿는 저장소 헤더다. 줄 이음(`\`)을 먼저 잇고, 전처리 조건은 평가하지 않고 두 갈래를 모두 읽는다.
+  - 쌍 밖에 둘 수 있는 include는 셋뿐이다: 저장소 헤더, 생성 헤더(`*.generated.h`), **깨끗한 시스템 헤더 목록**에 있는 헤더(C·C++ 표준 헤더, CRT, 컴파일러 intrinsic 헤더 — `Rocks.Tooling.Checks`의 목록). 그 밖의 include는 Windows SDK 헤더로 보고 쌍 안에 있어야 한다. 처음 쓰는 SDK 헤더는 이름을 몰라도 걸린다. 매크로를 남기지 않는 새 시스템 헤더는 목록에 더한다.
+  - 외부 라이브러리 헤더(저장소의 `ThirdParty`)는 따라가서 읽는다. 그 헤더나 그 헤더가 include하는 외부 라이브러리 헤더가 알려진 Windows SDK 헤더 이름(`windows.h`, `winsock2.h`, `unknwn.h`, `d3d*.h` 등)을 include하면, 저장소 소스가 그 외부 헤더를 include하는 줄이 쌍 안에 있어야 한다. 전처리 조건을 평가하지 않으므로, SDK include가 저장소가 정의하지 않는 매크로의 갈래에만 있다고 확인한 헤더는 정책의 목록에 경로로 적어 봐준다(`zconf.h`의 `ZLIB_WINAPI` 갈래, `vulkan/vulkan.h`의 `VK_USE_PLATFORM_WIN32_KHR` 갈래). 경로에 버전이 들어 있어, 라이브러리를 올리면 다시 걸리고 그때 갈래를 다시 확인한다.
+  - 꺾쇠나 따옴표가 아닌 include(`#include HEADER_MACRO`)는 판정할 수 없으므로 쌍 밖에서는 거부한다.
+  - 쌍이 어긋난 것(Begin 없는 End, 닫지 않은 Begin, 이미 연 Begin)과 쌍 안의 저장소 헤더도 거부한다. 쌍은 파일마다 스스로 닫아야 한다.
+- UE 대응: UE는 `Windows/WindowsHWrapper.h`(Pre·MinWindows·Post)로만 `windows.h`를 열어 A/W 이름 매크로를 바로 지우고, 다른 Windows 헤더는 `AllowWindowsPlatformTypes.h`/`HideWindowsPlatformTypes.h` 쌍으로 감싼다.
+  - Rocks는 쌍 하나로 둘을 겸한다(Begin이 `Windows.h`를 열고 지우는 순서가 같다). 감싸지 않은 include는 정책 검사가 거부한다(UE는 관례다).
+  - UE의 `push_macro`/`pop_macro`는 Pre/Post 한 쌍 안에서 끝난다(`PreWindowsApi.h`가 저장한 `TEXT`·`TRUE`·`FALSE` 등을 `PostWindowsApi.h`가 되돌린다). `WindowsHWrapper.h` 한 헤더 안에서 열고 닫으므로 PCH 경계를 넘지 않는다. Rocks가 처음 쓴 방식은 End가 저장하고 다음 Begin이 되돌려서 경계를 넘었다.
+  - `PostWindowsApi.h`는 A/W 이름 말고도 `INT`·`UINT`·`DWORD`·`FLOAT`와 `InterlockedIncrement` 같은 atomics 매크로도 지운다. Rocks는 A/W 이름만 따른다. UE는 같은 이름의 자기 타입과 함수가 있어서 지우는데, Rocks에는 그 이름의 식별자가 없고(정수 타입은 `i32`·`u32`, atomics는 `Platform/Atomics.h`), Windows backend 소스는 쌍 뒤에서 SDK의 `DWORD`·`InterlockedIncrement`를 그대로 쓴다.
+  - UE 5.8은 `near`·`far`·`small`·`interface`를 남긴다(그 이름을 식별자로 쓰지 않는 관례로 피한다). Rocks는 그것들도 숨긴다.
+- 버린 대안:
+  - End가 `#pragma push_macro`로 저장하고 다음 Begin이 `pop_macro`로 되돌리는 방식(처음 구현). 저장한 스택이 PCH 경계를 넘지 못한다(위). A/W 이름까지 되돌리면 `Windows.h`와 같은 구간에서 파싱된 COM 헤더는 메서드를 `GetMessageA`로 선언하고 뒤 구간에서 파싱된 헤더는 `GetMessage`로 선언해서, 같은 호출이 include 순서와 묶음 구성에 따라 컴파일되거나 깨진다.
+  - 정책이 누출 헤더를 이름 목록으로 고르는 방식(처음 구현). `fileapi.h`·`rpcndr.h`·`dxcore.h`·`xaudio2.h`·`commctrl.h`처럼 목록에 없는 SDK 헤더가 통과한다. 깨끗한 헤더 목록으로 뒤집으면 모르는 헤더가 걸린다.
+  - include가 툴체인의 Windows Kits 디렉터리로 해석되는지로 판정하는 방식. 정책 검사는 Linux·macOS CI에서도 도는데 그 기기에는 Windows SDK가 없어, 같은 위반이 기기에 따라 통과한다.
+  - 유니티를 켠 모듈의 묶이는 소스만 검사하는 방식(처음 구현). 유니티를 끈 모듈(`ShaderToolSpike`)이 쌍으로 끝나는 `ComRef.h` 뒤에 `<d3d12.h>`를 쌍 밖에서 열어 빌드가 깨졌고, CI가 빌드하지 않는 모듈이라 드러나지 않았다.
+  - 빌드가 묶음 구성원 사이에 `#ifdef near` → `#error` 검사를 끼우는 방식. 묶음일 때만 잡고, 단독 번역 단위 검증 빌드와 정책 검사 단계에서는 보이지 않는다.
+  - Windows 소스를 모두 `UnityExclude`에 두는 방식. Windows backend 모듈(D3D11·D3D12·PlatformBase)은 소스 대부분이 Windows 헤더를 써서 묶음 이득을 잃고, 숨긴 뒤의 include 문제는 그대로다.
+- 한계:
+  - 숨기는 이름은 고정 목록이다. 목록에 없는 A/W 매크로(`CreateFile`, `CreateWindow`, `GetModuleHandle` 등 수백 개)와 대문자 매크로(`DELETE`, `ERROR`, `IN`, `OUT`), `uuid_t`·`lstrlen` 같은 소문자 매크로는 End 뒤에도 남는다. 엔진 식별자와 겹치는 것이 나오면 End의 목록에 더한다. 2026-11-21에 SDK 10.0.22621의 매크로 덤프(쌍 뒤에 남는 이름 중 소문자가 섞인 1,733개)를 저장소 소스의 식별자와 대조해 겹치는 셋(`pascal`·`RegisterClass`·`FindFirstFile`)을 더했다.
+  - 검사는 include 줄의 철자와 순서만 본다. 전처리 조건을 평가하지 않으므로, 외부 라이브러리 헤더가 쓰이지 않는 갈래에서만 `windows.h`를 열어도 걸린다(확인한 뒤 위 목록에 적는다). 외부 라이브러리 헤더 안의 SDK include는 알려진 이름으로만 알아보므로, 낯선 SDK 헤더만 여는 외부 헤더는 놓친다.
+  - C 소스(`.c`)는 보지 않는다. 묶지 않고, 쌍은 C++ 헤더(`Base/Compiler.h`)를 거친다.
+- 시험:
+  - 쌍: native 시험 `TestSupport/Private/Win64/WindowsHeadersTests.cpp`(숨긴 이름을 식별자로 쓰기, A/W 매크로가 지워졌는지, COM 메서드가 제 이름인지)와 빌드 시험 `Rocks.Build.Tests`의 `windows-headers` 묶음(쌍으로 끝나는 PCH 헤더를 `/Yc`·`/Yu`로 쓰는 소스, PCH를 끄고 `/FI`로 받는 변형, `Windows.h`가 쌍보다 먼저 쌍 밖에서 열린 소스).
+  - 정책: `Policy.WindowsMacroLeaksRejectIncludesOutsideThePair`(양성·음성 대조)와 `Policy.WindowsPublicHeadersStayNarrow`(쌍 헤더의 틀).
 
 UB1 동안 모든 모듈의 기본은 `Off`다. UB2·UB3에서 충돌을 정리한 모듈부터 켠다(9.3절).
 
@@ -399,6 +449,7 @@ README의 "action key·`compile_commands.json`·BuildInfo manifest는 모두 `Na
 | 파일 범위 using | 파일 범위 `using namespace`는 `rocks`와 그 하위 namespace만 허용한다. 2026-11-18 기준 322개 파일이 `using namespace rocks`를 쓴다. 그 밖은 함수나 namespace 안으로 옮긴다 |
 | `.cpp` 매크로 | `.cpp`에서 `#define`한 매크로는 그 파일 끝까지 `#undef`해야 한다. 첫 include 앞의 `#define`은 6.1절 자동 제외 대상이므로 이 검사에서 뺀다 |
 | pragma 균형 | `#pragma warning(push)`, `clang diagnostic push`, `pack(push)`는 같은 파일에서 pop해야 한다 |
+| 매크로를 남기는 헤더(`windows-macro-leak`) | Windows 플랫폼의 모든 모듈(외부 라이브러리 원본 제외)에서, C++ 소스·PCH 헤더와 거기서 닿는 저장소 헤더가 `WindowsHeadersBegin.h`/`WindowsHeadersEnd.h` 쌍 밖에서 include할 수 있는 것은 저장소 헤더, 생성 헤더, 깨끗한 시스템 헤더 목록의 헤더뿐이다. 그 밖의 include(Windows SDK 헤더, SDK 헤더를 여는 외부 라이브러리 헤더, 리터럴이 아닌 include)가 쌍 밖에 있으면 오류. 쌍이 맞지 않아도(Begin 없는 End, 닫지 않은 Begin), 쌍 안에 저장소 헤더를 두어도 오류. 유니티를 끈 모듈과 `UnityExclude`의 소스도 본다(6.1절) |
 
 - 검사는 토큰 단위 근사다. 주석, 문자열, 전처리 조건을 처리하지만 컴파일러 AST 수준의 정확성은 요구하지 않는다. 놓친 것은 드러나는 경우 컴파일 오류로 남는다.
 - 이름 충돌은 파일마다 고유한 이름의 namespace로 옮기거나(예: `namespace rocks::detail::JsonReaderLocal`) 이름을 바꿔서 푼다. 익명 namespace 자체는 금지하지 않는다.
@@ -548,3 +599,5 @@ UB6에서 묶음 TU와 PCH action의 최대 메모리를 실측해, 동시 실�
 | 1(검증 기록) | 2026-11-20 | 끝에 한 번 돌린 검증의 결과다(Windows, Debug, `--adaptive off --timing on`, 8 병렬, 다른 세션의 빌드로 CPU가 포화된 장비). **결과.** Foundation: 746 action(compile 711·PCH 2·archive 32·link 1), 시험 2,549개 실패 0, 도구 시험 self 148·native 124·meta 246 통과, 무변경 재빌드 0 action. EngineTests: 887 action(compile 834·PCH 2·archive 50·link 1), 시험 2,954개 실패 0, self 148·native 42·meta 246 통과, 무변경 재빌드 0 action. `Rocks.Build.Tests` 61묶음, 통합 시험(설치 SDK 게임 포함), format, policy(묶음 충돌·`pch-header-include` 포함) 통과. 검증 변형(유니티·PCH 끔)의 Foundation Debug 빌드도 통과했다(1,337 action — 소스마다 단독 번역 단위). Android(NDK)는 빌드하지 않고, EngineTests 계획이 쓴 실제 묶음 파일 103개를 공유 PCH 헤더를 강제 include한 논리 명령으로 문법 검사해 통과했다(clang++ PCH 생성·사용은 `Rocks.Build.Tests`의 교차 빌드 fixture가 본다). **검증에서 고친 것.** (1) 첫 Foundation 빌드에서 시험 실행 파일의 묶음 3개가 `detail`이 모호하다는 오류로 실패했다. 원인은 둘이다 — `TestSupport/Private/Win64`의 시험 4개가 감싸기 대상(`Tests/` 디렉터리)에서 빠져 파일 범위 `using namespace rocks::platform;`이 묶음의 다음 파일로 샜고, 하위 namespace using에 기대어 `detail::`을 쓰던 시험 3개가 공유 PCH와 다른 디렉터리의 구성원이 들여온 `rocks::detail` 때문에 모호해졌다. 4개를 파일 고유 namespace로 감싸고 3개는 `platform::detail::`·`deterministic::detail::`로 한정했다. 시험 모듈의 사전 검사는 디렉터리 단위였는데 실제 묶음은 경로 순서로 디렉터리를 넘는다 — 사전 검사는 실제 묶음 파일로 해야 한다. (2) `--timing` 집계의 헤더 목록이 비어 있었다. clang은 `Source`(파일 하나의 파싱)를 길이가 아니라 시작·끝 쌍(`ph` `b`·`e`)으로 쓴다. 쌍의 시각 차를 더하고 묶음 구성원 소스는 헤더 목록에서 빼게 고쳤으며, 손으로 만든 trace로 시험한다(UB5 때 "세밀도보다 짧아서"라고 본 것은 틀린 진단이었다). clang-cl `/Yc`는 PCH 생성과 stub 컴파일 두 단계로 돌고 trace는 뒤 단계 것만 남으므로, PCH action의 시간은 trace가 아니라 action 소요 시간으로 본다(검증에서 0.4–0.8 s). (3) 통합 시험 두 곳이 낡아 있었다. SDK 게임 빌드는 SDK가 나른 공유 PCH 헤더를 게임 출력에 한 번 미리 컴파일하므로(모듈 이름이 제공 모듈인 Pch action) "게임 모듈의 action만 있다"는 확인을 그에 맞췄고, 필드를 더한 뒤의 게시는 타입별 생성 헤더가 아니라 생성 소스와 descriptor로 확인한다(GS2 뒤 헤더는 그대로다). C# 서식 위반 두 곳도 고쳤다. **수치**(Foundation clean build, 같은 장비 — 부하가 달라 벽시계는 거친 비교다). 이전(GS0 전: 생성 소스 분리·유니티·PCH 없음): 1,278 action, compile 시간 합 5,799.5 s(시험 실행 파일 386 TU 3,970.6 s, 공개 헤더 검사 401 TU 693.6 s), 메타 생성 229.5 s + native 776.5 s. 생성 소스 분리만(검증 변형 — 유니티·PCH 끔): 1,337 action, compile 시간 합 752.8 s(시험 실행 파일 390 TU 262.1 s, 공개 헤더 검사 405 TU 151.0 s), 메타 단계 72.8 s + native 103.3 s. 기본 변형(유니티·PCH 켬): 746 action, compile 시간 합 529.6 s(시험 실행 파일 59 TU 133.0 s, 공개 헤더 검사 405 TU 154.4 s), 도구 빌드·메타 생성·compile·archive까지 138 s(link 전에 위 묶음 3개가 실패한 첫 실행이고 장비 부하가 더 컸다). compile 시간 합으로 보면 생성 소스 분리(GS0–GS2)가 7.7분의 1로 줄였고, 유니티와 PCH가 거기서 30%를 더 줄였다(시험 실행 파일은 절반). 유니티의 나머지 이득은 프로세스 수(1,304 → 711)와 link 입력 수다. EngineTests clean build: 887 action, compile 시간 합 1,003.8 s(공개 헤더 검사 488 TU 484.0 s, 시험 실행 파일 70 TU 143.2 s, Sodium 142 TU 123.0 s), PCH action 2개 1.6 s. **UD20 확인.** 8 병렬의 두 빌드에서 메모리 부족이 없었다 — 메모리 기반 병렬도 제한은 두지 않는다(13절). **돌리지 않은 것.** Release·ASan·Development 구성, macOS(로컬 툴체인 없음 — 유니티는 꺼져 있고 PCH·감싼 시험·바꾼 이름은 macOS에서 컴파일해 보지 않았다), Android 전체 빌드, Sandbox·Commandlet·벤치 타깃 빌드(계획 생성까지만), 12절의 반복 측정 |
 | 1(경로 철자) | 2026-11-20 | 4.4절을 더했다: 빌드가 받은 경로를 디스크에 있는 철자로 맞춘다(`PathSpelling`). 같은 트리를 `c:\`와 `C:\`처럼 철자만 다르게 실행하면 전부 다시 컴파일되던 문제다. UE `FindCorrectCase`와 같은 방식(성분마다 부모 디렉터리에서 이름을 찾음)이고 링크는 풀지 않는다. |
 | 1(macOS 유니티) | 2026-11-20 | macOS에서도 유니티 빌드를 켰다(`RepositoryUnity.VerifiedPlatforms`에 macOS). POSIX 공통 소스는 NDK 묶음 문법 검사로 먼저 보고, macOS 전용 소스(PlatformBase의 `Mac`·`Apple`, ShaderToolLoader의 `Mac`)는 CI macOS job으로 확인했다. 로컬 macOS 툴체인이 없으므로 macOS 전용 소스를 고치면 CI로 확인한다 |
+| 1(매크로 누출) | 2026-11-21 | 6.1절에 "매크로를 남기는 헤더"의 규칙을 더했다: Windows SDK 계열 헤더는 `Platform/Win64/WindowsHeadersBegin.h`/`WindowsHeadersEnd.h` 쌍으로 감싼다. Begin이 `Windows.h`를 열고 A/W 함수 이름 매크로를 지운 뒤 앞서 숨긴 `near`·`far`·`small`·`interface`·`min`·`max`를 되돌리고, End가 다시 숨긴다. 정책 검사 `unity-macro-leak`(9.2절)이 감싸지 않은 include를 거부하고, `platform-boundary`는 이 쌍을 `#pragma once` 없는 조각으로 받는다. 유니티를 켠 모듈의 기존 Windows 소스·헤더 39개를 감쌌고, 누출 때문에 단독이던 `WindowsComRefTests.cpp`를 묶음으로 되돌렸다. 쌍 자체의 시험은 `TestSupport/Private/Win64/WindowsHeadersTests.cpp`다(동작은 그대로다. `CrashFiles.cpp`의 `FILE_DISPOSITION_INFO::DeleteFile` 대입 두 곳은 이름 없는 초기화로 바꿨다) |
+| 1(매크로 누출 리뷰 반영) | 2026-11-21 | 6.1절 "매크로를 남기는 헤더"를 고쳤다. (1) 규칙과 정책 검사의 범위를 유니티를 켠 모듈에서 Windows 플랫폼의 모든 모듈로 넓혔다(숨긴 뒤 쌍 밖에서 SDK 헤더를 여는 `ShaderToolSpike` 빌드가 깨졌다). 정책 이름은 `windows-macro-leak`이다. (2) 쌍이 `push_macro`/`pop_macro` 대신 정의를 직접 다시 쓴다(clang PCH가 push 스택을 저장하지 않는다). (3) 정책이 이름 목록 대신 깨끗한 시스템 헤더 목록으로 판정하고, 외부 라이브러리 헤더를 따라가며, 줄 이음과 리터럴이 아닌 include를 다룬다. Windows 플랫폼만 평가하고 파일 해석을 캐시한다. (4) 숨기는 이름에 `pascal`·`cdecl`·`hyper`·`RegisterClass`·`FindFirstFile`을 더했다. (5) UE 대응 서술을 바로잡았다(A/W 이름만 같다) |

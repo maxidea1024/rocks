@@ -3,8 +3,12 @@
 
 #include <Platform/Path.h>
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <KnownFolders.h>
 #include <ShlObj.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
 
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "ole32.lib")

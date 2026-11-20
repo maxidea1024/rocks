@@ -7,7 +7,12 @@
 #include <Platform/Memory.h>
 #include <Platform/SecureRandom.h>
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
+
 #include <new>
 
 namespace rocks::platform {

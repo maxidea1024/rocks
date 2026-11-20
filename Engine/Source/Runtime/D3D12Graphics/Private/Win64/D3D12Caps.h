@@ -2,9 +2,13 @@
 
 #include <Graphics/DeviceCaps.h>
 
+#include <Platform/Win64/WindowsHeadersBegin.h>
+
 #include <Windows.h>
 #include <d3d12.h>
 #include <dxgi1_6.h>
+
+#include <Platform/Win64/WindowsHeadersEnd.h>
 
 // D3D12 장치 능력 질의다(RenderBase 4.4절 GX1). 장치를 만든 직후 한 번 부른다.
 namespace rocks::graphics::d3d12 {

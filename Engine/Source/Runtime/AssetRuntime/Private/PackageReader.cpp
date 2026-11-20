@@ -830,6 +830,22 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "NonNormalizedWeights";
     case AssetDiagnosticCode::TooManyInfluences:
         return "TooManyInfluences";
+    case AssetDiagnosticCode::MaterialSlotFallback:
+        return "MaterialSlotFallback";
+    case AssetDiagnosticCode::NegativeBuildScale:
+        return "NegativeBuildScale";
+    case AssetDiagnosticCode::InfluencesTrimmed:
+        return "InfluencesTrimmed";
+    case AssetDiagnosticCode::MissingInfluences:
+        return "MissingInfluences";
+    case AssetDiagnosticCode::UnsupportedSetting:
+        return "UnsupportedSetting";
+    case AssetDiagnosticCode::InvalidSetting:
+        return "InvalidSetting";
+    case AssetDiagnosticCode::InvalidSkeletonData:
+        return "InvalidSkeletonData";
+    case AssetDiagnosticCode::SkeletonMismatch:
+        return "SkeletonMismatch";
     }
 
     return "Unknown";
