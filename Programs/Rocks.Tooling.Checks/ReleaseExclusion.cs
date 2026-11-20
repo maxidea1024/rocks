@@ -106,26 +106,9 @@ public static class ReleaseExclusion
         var violations = new List<ReleaseViolation>();
         foreach ((string target, IReadOnlyList<string> selected) in gameTargets)
         {
-            var reached = new SortedSet<string>(StringComparer.Ordinal);
-            var pending = new Stack<string>(selected);
-            while (pending.Count != 0)
-            {
-                string name = pending.Pop();
-                if (!reached.Add(name))
-                {
-                    continue;
-                }
-
-                if (!byName.TryGetValue(name, out NativeModuleInput? module))
-                {
-                    throw new ArgumentException($"target {target}: unknown module {name}");
-                }
-
-                foreach (string dependency in module.Dependencies)
-                {
-                    pending.Push(dependency);
-                }
-            }
+            // 실행 중 적재 모듈도 Monolithic 실행 파일에 링크되므로 배제 정책의 도달 집합이다(Docs/Design/ModuleLoader.ko.md 3.8절).
+            var reached = new SortedSet<string>(LinkClosure.Reachable(selected, byName,
+                (name, _) => throw new ArgumentException($"target {target}: unknown module {name}")), StringComparer.Ordinal);
 
             foreach (string name in reached)
             {

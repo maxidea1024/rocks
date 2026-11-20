@@ -64,6 +64,16 @@ public static class MetadataRunner
             Reach(name);
         }
 
+        // 실행 중 적재 모듈(DynamicModules)도 생성 대상이다. 링크 폐포를 다 본 뒤 따로 닿으므로 동적 관계는 순환 검사의 참조 사슬이 아니다
+        // (Docs/Design/ModuleLoader.ko.md 3.8절). 그 모듈의 descriptor import는 링크 의존만 따르므로 후위 순서가 그대로 생성 순서다.
+        for (int index = 0; index < order.Count; ++index)
+        {
+            foreach (string dynamic in byName[order[index]].DynamicModules)
+            {
+                Reach(dynamic);
+            }
+        }
+
         var metadata = plan.Generated.ToDictionary(module => module.Name, StringComparer.OrdinalIgnoreCase);
         HashSet<string> entryModules = ModuleDefinitions.EntryModules(plan.Modules);
         List<MetadataModule> runs = order.Where(metadata.ContainsKey).Select(name => metadata[name]).ToList();

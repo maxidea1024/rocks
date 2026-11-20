@@ -271,6 +271,16 @@ internal static class DescriptorTests
         NativeModuleInput[] usesWeather = [.. rules.Where(rule => rule.Name != "Game"), Rule("Game", "Weather")];
         ExpectFailure(() => development.Apply(usesWeather, ["Game"]), "included module depended on a disabled plugin module",
             "module 'Game' uses module 'Weather'");
+        // 실행 중 적재 관계(DynamicModules — Docs/Design/ModuleLoader.ko.md 3.8절)도 같은 type 검사를 받는다(Monolithic이 링크한다):
+        // Runtime 모듈이 Editor 모듈을, Release에서 Developer 모듈을 적재 목록에 두면 거부한다. 들어가는 모듈을 두면 그대로 통과한다.
+        NativeModuleInput[] WithGameDynamic(string dynamic) =>
+            [.. rules.Where(rule => rule.Name != "Game"), Rule("Game", "Water", "ObjectRuntime") with { DynamicModules = [dynamic] }];
+        ExpectFailure(() => development.Apply(WithGameDynamic("GameEditor"), ["Game"]), "a run-time loaded Editor module",
+            "module 'Game' uses module 'GameEditor'");
+        ExpectFailure(() => release.Apply(WithGameDynamic("GameTools"), ["Game"]), "a run-time loaded Developer module in Release",
+            "Developer modules are not built in Release");
+        Check(Names(development.Apply(WithGameDynamic("GameTools"), ["Game"])).Contains("GameTools"),
+            "a run-time loaded module that the target may include is accepted");
 
         // 규칙과 기술자 불일치: 선언 없는 규칙, 규칙 없는 선언, 대소문자 차이.
         ExpectFailure(() => development.Apply([.. rules, Rule("Stray")], ["Game"]), "rules without a descriptor",

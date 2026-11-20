@@ -178,26 +178,10 @@ namespace Rocks.Build.Cli
                 if (rules.Target.CheckPublicHeaders)
                 {
                     var sources = new List<string>();
-                    var reached = new HashSet<string>(StringComparer.Ordinal);
-                    void Reach(string name)
-                    {
-                        if (!reached.Add(name))
-                        {
-                            return;
-                        }
-
-                        var module = modules.SingleOrDefault(item => item.Name == name)
-                            ?? throw new ArgumentException($"Unknown dependency {name}");
-                        foreach (var dependency in module.Dependencies)
-                        {
-                            Reach(dependency);
-                        }
-                    }
-
-                    foreach (var name in targets)
-                    {
-                        Reach(name);
-                    }
+                    // 실행 중 적재 모듈도 빌드하므로 공개 헤더 검사 대상이다(Docs/Design/ModuleLoader.ko.md 3.8절).
+                    HashSet<string> reached = LinkClosure.Reachable(targets,
+                        modules.ToDictionary(module => module.Name, StringComparer.OrdinalIgnoreCase),
+                        (name, _) => throw new ArgumentException($"Unknown dependency {name}"));
 
                     foreach (var includeDirectory in modules.Where(module => reached.Contains(module.Name)).SelectMany(module => module.PublicIncludeDirectories).Distinct())
                     {
