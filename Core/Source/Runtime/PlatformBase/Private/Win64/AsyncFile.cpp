@@ -1,9 +1,9 @@
 #include "../Common/AsyncFileInternal.h"
 #include "WindowsFileCommon.h"
 
+#include <Base/PlacementNew.h>
 #include <Platform/Fatal.h>
 
-#include <new>
 #include <Platform/Memory.h>
 
 // Windows backend다. Native는 FILE_FLAG_OVERLAPPED 핸들과 IO completion port, 전용 완료 스레드를

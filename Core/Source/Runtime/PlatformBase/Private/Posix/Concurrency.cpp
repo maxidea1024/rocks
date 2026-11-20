@@ -1,3 +1,4 @@
+#include <Base/PlacementNew.h>
 #include <Platform/CrashReporting.h>
 #include <Platform/Thread.h>
 #include <Platform/Atomics.h>
@@ -10,7 +11,6 @@
 #include <sched.h>
 #include <time.h>
 #include <unistd.h>
-#include <new>
 
 namespace rocks::platform {
 

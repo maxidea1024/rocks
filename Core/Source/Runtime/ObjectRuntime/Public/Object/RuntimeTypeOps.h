@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/PlacementNew.h>
 #include <Object/ReferenceLayout.h>
 #include <Base/TypeTraits.h>
 #include <Core/Containers/Array.h>
@@ -12,7 +13,6 @@
 #include <Meta/PropertyPathSchema.h>
 #include <Object/ObjectAccessContext.h>
 #include <Object/Object.h>
-#include <new>
 
 namespace rocks {
 

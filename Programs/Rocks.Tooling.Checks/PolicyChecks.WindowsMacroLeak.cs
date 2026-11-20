@@ -29,7 +29,7 @@ public static partial class PolicyChecks
         "setjmp.h", "signal.h", "stdalign.h", "stdarg.h", "stdatomic.h", "stdbool.h", "stddef.h", "stdint.h", "stdio.h", "stdlib.h",
         "stdnoreturn.h", "string.h", "tgmath.h", "threads.h", "time.h", "uchar.h", "wchar.h", "wctype.h",
         "conio.h", "crtdbg.h", "direct.h", "eh.h", "excpt.h", "fcntl.h", "io.h", "malloc.h", "memory.h", "process.h", "sal.h", "share.h",
-        "sys/stat.h", "sys/timeb.h", "sys/types.h", "sys/utime.h", "vcruntime.h",
+        "sys/stat.h", "sys/timeb.h", "sys/types.h", "sys/utime.h", "vcruntime.h", "vcruntime_new.h",
         // 다른 CPU·컴파일러 갈래의 intrinsic 헤더다(전처리 조건의 두 갈래를 모두 읽는다).
         "arm_acle.h", "arm_neon.h", "cpuid.h"
     };

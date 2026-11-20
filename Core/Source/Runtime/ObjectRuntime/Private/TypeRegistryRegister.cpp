@@ -1,11 +1,11 @@
 #include "TypeRegistryInternal.h"
 #include "TypeRegistryRegisterInternal.h"
 
+#include <Base/PlacementNew.h>
 #include <Object/TypeRegistry.h>
 #include <Core/Algorithms.h>
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
-#include <new>
 
 // TypeRegistry 클래스 등록(Register)과 클래스·struct가 함께 쓰는 필드 서술 검사(ValidateFieldList·
 // CarriesValueNativeType)·식별자 판정(IsAsciiIdentifier)이다. enum 등록은

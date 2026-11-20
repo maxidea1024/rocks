@@ -934,6 +934,27 @@ internal static partial class SelfTests
                 temporary.Write(lookalike, "#pragma once\n");
             }
         });
+        // placement new 헤더(Docs/Design/UnityBuildPch.ko.md 8.4절): 시험 소스 밖에서는 <new> 대신 <Base/PlacementNew.h>를 쓴다.
+        suite.Add("Policy.PlacementNewHeaderReplacesNew", () =>
+        {
+            using TemporaryDirectory temporary = new();
+            // 통과: 그 헤더 자신, 시험 소스(모듈 Tests/·FoundationTests), 주석 속 언급, 이름이 비슷한 다른 헤더.
+            temporary.Write("Core/Source/Runtime/Base/Public/Base/PlacementNew.h", "#pragma once\n#include <new>\n");
+            temporary.Write("Core/Source/Runtime/Core/Tests/OperatorNewCounter.cpp", "#include <new>\n");
+            temporary.Write("Programs/FoundationTests/Engine/ProbeTests.cpp", "#include <new>\n");
+            temporary.Write("Core/Source/Runtime/Core/Public/Core/Move.h",
+                "#pragma once\n#include <Base/PlacementNew.h>\n// #include <new> is heavy\n#include <newer.h>\n#include <new.h>\n");
+            NoFailures(PolicyChecks.PlacementNewHeaders(temporary.Root));
+            // 위반: 공개 헤더, private 소스, 모듈에 컴파일되는 Private/Tests, 따옴표와 공백이 다른 철자.
+            temporary.Write("Core/Source/Runtime/Core/Public/Core/Bad.h", "#pragma once\n#include <new>\n");
+            temporary.Write("Engine/Source/Runtime/Probe/Private/Bad.cpp", "#include <stdio.h>\n  #  include  \"new\"\n");
+            temporary.Write("Engine/Source/Runtime/Probe/Private/Tests/Probe.cpp", "#include <new>\n");
+            var failures = PolicyChecks.PlacementNewHeaders(temporary.Root);
+            Verify.That(failures.All(failure => failure.Rule == "placement-new-header") &&
+                failures.Select(failure => (failure.Path, failure.Line)).ToHashSet().SetEquals(
+                [("Core/Source/Runtime/Core/Public/Core/Bad.h", 2), ("Engine/Source/Runtime/Probe/Private/Bad.cpp", 2),
+                    ("Engine/Source/Runtime/Probe/Private/Tests/Probe.cpp", 1)]), "includes of <new> outside tests");
+        });
         suite.Add("Policy.WindowsPublicHeadersStayNarrow", () =>
         {
             using TemporaryDirectory temporary = new();

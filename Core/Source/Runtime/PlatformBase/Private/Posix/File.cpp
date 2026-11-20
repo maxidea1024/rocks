@@ -1,3 +1,4 @@
+#include <Base/PlacementNew.h>
 #include <Platform/File.h>
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
@@ -12,7 +13,6 @@
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <new>
 
 namespace rocks::platform {
 namespace {

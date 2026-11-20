@@ -1,10 +1,10 @@
 #include "TypeRegistryInternal.h"
 #include "TypeRegistryRegisterInternal.h"
 
+#include <Base/PlacementNew.h>
 #include <Object/TypeRegistry.h>
 #include <Platform/Clock.h>
 #include <Platform/Fatal.h>
-#include <new>
 
 // TypeRegistry enum 등록(RegisterEnum)과 enum 도구 이름 검사(IsEnumToolName·EnumToolNamesCollide)다
 // (Docs/Design/ReflectionFoundations.ko.md 3.4절). 등록 파일이 함께 쓰는 도우미는

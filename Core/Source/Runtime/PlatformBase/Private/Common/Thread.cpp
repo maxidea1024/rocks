@@ -2,9 +2,9 @@
 #include "ThreadInternal.h"
 #include "WaitDeadline.h"
 #include <Base/Compiler.h>
+#include <Base/PlacementNew.h>
 #include <Platform/CrashReporting.h>
 #include <Platform/Fatal.h>
-#include <new>
 
 namespace rocks::platform::detail {
 namespace {

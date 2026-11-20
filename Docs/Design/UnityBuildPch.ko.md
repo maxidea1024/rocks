@@ -382,7 +382,32 @@ ObjectRuntime — `Object/ObjectSharedPch.h`(소비 번역 단위 567개 기준:
 - 계획(EngineTests·Foundation·Sandbox Debug)에서 변형은 제공 모듈마다 하나다(PCH action 2개). EngineTests 논리 명령 1,565개 중 634개가 ObjectRuntime, 213개가 Core의 공유 PCH를 쓴다. 나머지는 C 소스·외부 라이브러리·생성 TU·공개 헤더 단독 컴파일 검사·Core 아래 모듈(Base·PlatformBase)이다.
 - 엔진 헤더는 STL을 거의 쓰지 않아 파싱이 싸다. clang-cl `/Zs` 단일 TU 실측으로 `Core/CoreSharedPch.h` 전체가 0.15 s, `Object/ObjectSharedPch.h` 전체가 0.19 s다(프로세스 기동 0.05 s 포함). 공유 PCH의 절감은 번역 단위당 0.1–0.15 s 수준이다.
 - 검증 빌드의 `--timing` 집계(Foundation Debug)로 보면 PCH를 쓰지 않는 번역 단위에서 `Core/Result.h`의 포함 시간이 평균 0.13 s(348개)이고, 그 거의 전부가 `Core/Move.h`가 include하는 `<new>`다(0.126 s — MSVC 헤더에서 `<exception>`·`<type_traits>`를 끌어온다). 엔진 소유 코드(외부 라이브러리와 공개 헤더 단독 컴파일 검사 제외)는 118 번역 단위·219.7 s이므로, 공유 PCH가 줄이는 몫은 소유 코드 컴파일 시간의 7% 안팎이다(추정 — PCH만 끈 대조 빌드는 돌리지 않았다). 작업 파일 분리(7절)로 단독 컴파일되는 파일의 반복 시간에도 같은 만큼 듣는다.
-- 같은 집계로, 남은 컴파일 시간의 큰 몫은 공개 헤더 단독 컴파일 검사(405 번역 단위, 113.7 s — 그중 `<new>` 사슬이 45%)와 외부 라이브러리(190 번역 단위, 125.0 s)다. `Core/Move.h`가 `<new>` 대신 placement new 선언만 갖게 하면 PCH를 쓰지 않는 번역 단위마다 0.13 s가 준다(후속 후보 — 이 스펙 범위 밖).
+- 같은 집계로, 남은 컴파일 시간의 큰 몫은 공개 헤더 단독 컴파일 검사(405 번역 단위, 113.7 s — 그중 `<new>` 사슬이 45%)와 외부 라이브러리(190 번역 단위, 125.0 s)다. `Core/Move.h`가 `<new>` 대신 placement new 선언만 갖게 하면 PCH를 쓰지 않는 번역 단위마다 0.13 s가 준다(아래 "placement new 헤더"로 반영했다).
+
+**placement new 헤더(`Base/PlacementNew.h`)**
+- 문제: `::new (storage) T(...)`를 쓰려면 `operator new(size_t, void*)` 선언이 보여야 하고, 표준은 그것을 `<new>`에 둔다. MSVC STL의 `<new>`는 `<exception>`을 include하고 그것이 `<type_traits>`·`<cstdlib>` 등을 끌어와, 번역 단위마다 0.126 s가 든다. `Core/Move.h`가 `<new>`를 include하므로 Core 헤더를 쓰는 거의 모든 번역 단위가 이 값을 낸다. 공유 PCH를 쓰는 번역 단위는 PCH가 한 번 내지만, 공개 헤더 단독 컴파일 검사(PCH·유니티 없음 — 10절)와 PCH를 쓰지 않는 번역 단위는 매번 낸다.
+- 구조: `Base/PlacementNew.h`가 placement new 선언만 여는 가장 가벼운 헤더를 고른다.
+  - `<vcruntime_new.h>`가 있으면(MSVC 런타임) 그것을 include한다. MSVC의 `<new>`가 `<exception>` 다음에 include하는 바로 그 헤더이고, `operator new`·`operator delete` 선언, placement new·delete, `std::align_val_t`·`std::nothrow`를 담는다. `<vcruntime.h>`만 끌어온다.
+  - 없으면(libc++·libstdc++) `<new>`를 include한다. 그쪽 `<new>`는 가볍다.
+  - 판정은 `__has_include`로 한다. OS가 아니라 표준 라이브러리 구현을 가르는 것이어서 플랫폼 분기(`ROCKS_PLATFORM_*`)를 쓰지 않는다.
+- 규칙: 엔진 소스와 헤더는 placement new를 쓸 때 `<new>` 대신 `<Base/PlacementNew.h>`를 include한다(`Core/Move.h`의 `ConstructAt`·`InitializeAt`을 거치면 따로 include하지 않아도 된다). 시험 소스는 `<new>`를 include할 수 있다(전역 `operator new` 교체처럼 `<new>`의 다른 것이 필요한 시험이 있다). 정책 검사 `placement-new-header`(9.2절)가 시험 밖의 `#include <new>`를 거부한다.
+- 한계: `<vcruntime_new.h>`는 `std::launder`, `std::bad_alloc`, `std::hardware_destructive_interference_size`를 선언하지 않는다. 엔진 코드는 지금 이것들을 쓰지 않는다. 필요해지면 그 소스에서 정책 예외와 함께 `<new>`를 include한다. `<new>`가 끌어오던 `<cstdlib>`·`<cstdint>` 등에 기대던 소스는 필요한 헤더를 직접 include해야 한다.
+- UE 대응: UE 5.8은 `<new>`를 그대로 include한다(`HAL/PlatformCrt.h`, `Templates/MemoryOps.h`, `Templates/TypeCompatibleBytes.h`, `Misc/Launder.h`). 거의 모든 번역 단위가 공유 PCH를 쓰므로 비용이 PCH에 한 번 들어간다. Rocks는 공개 헤더 단독 컴파일 검사가 PCH 없이 헤더마다 번역 단위를 하나씩 만들기 때문에 이 비용이 그대로 곱해진다. 그래서 UE와 달리 가벼운 헤더로 바꾼다.
+- 버린 대안:
+  - `void* operator new(usize, void*) noexcept;`를 직접 선언하는 방식. libc++는 이 함수를 `_LIBCPP_HIDE_FROM_ABI`(`abi_tag` 속성)로 선언하므로, 속성 없는 선언이 앞서 있으면 `<new>`를 함께 include한 번역 단위가 오류다(NDK r29 libc++ `new:245`로 확인).
+  - `__PLACEMENT_NEW_INLINE`을 정의하고 inline 정의를 직접 두는 방식. 런타임 헤더의 내부 guard 이름에 기댄다. 같은 선언을 담은 헤더를 include하는 쪽이 낫다.
+  - 꼬리표 인자를 받는 자체 placement 연산자(`new (Placement{}, storage) T`). 표준이 예약한 형식이 아니어서 컴파일러가 호출과 null 검사를 만든다(Debug에서 컨테이너 원소 생성마다 함수 호출). 모든 호출부도 바꿔야 한다.
+- 수치(Foundation Debug 검증 빌드의 `--timing` 집계, 같은 기기): 아래 표. 전은 UB6 최종 검증 빌드, 후는 이 변경의 검증 빌드다.
+
+| 항목 | 전 | 후 |
+|---|---|---|
+| 공개 헤더 단독 컴파일 검사 | 405 번역 단위, 113.7 s(평균 0.281 s) | 417 번역 단위, 88.7 s(평균 0.213 s) |
+| `Core/Result.h` 포함 시간(번역 단위 평균) | 0.13 s(348개) | 0.016 s(361개) |
+| placement new 선언을 여는 헤더(번역 단위 평균) | `<new>` 0.126 s | `<vcruntime_new.h>` 0.009 s(370개) |
+
+- 두 빌드는 커밋이 다르고(공개 헤더가 12개 늘었다) 기기 부하도 달라, 검사 합계의 차이(25.0 s)가 전부 이 변경의 몫은 아니다. 이 변경의 몫은 헤더 행에 보인다: `<new>`·`<exception>`·`<type_traits>`는 집계의 상위 헤더 100개에서 빠졌고, 번역 단위마다 0.12 s쯤 줄었다.
+- 유니티·PCH를 끈 EngineTests 빌드(번역 단위 1,837개를 단독으로 컴파일)가 그대로 통과했다. `<new>`가 끌어오던 헤더에 기대던 소스는 없었다.
+
 
 **설치 SDK 게임 빌드**
 - SDK manifest가 제공 모듈의 `SharedPchHeader` 철자와 공유 정의를 함께 나른다.
@@ -449,6 +474,7 @@ README의 "action key·`compile_commands.json`·BuildInfo manifest는 모두 `Na
 | 파일 범위 using | 파일 범위 `using namespace`는 `rocks`와 그 하위 namespace만 허용한다. 2026-11-18 기준 322개 파일이 `using namespace rocks`를 쓴다. 그 밖은 함수나 namespace 안으로 옮긴다 |
 | `.cpp` 매크로 | `.cpp`에서 `#define`한 매크로는 그 파일 끝까지 `#undef`해야 한다. 첫 include 앞의 `#define`은 6.1절 자동 제외 대상이므로 이 검사에서 뺀다 |
 | pragma 균형 | `#pragma warning(push)`, `clang diagnostic push`, `pack(push)`는 같은 파일에서 pop해야 한다 |
+| placement new 헤더(`placement-new-header`) | 시험 소스 밖의 `#include <new>`는 오류. `<Base/PlacementNew.h>`를 쓴다(8.4절 "placement new 헤더") |
 | 매크로를 남기는 헤더(`windows-macro-leak`) | Windows 플랫폼의 모든 모듈(외부 라이브러리 원본 제외)에서, C++ 소스·PCH 헤더와 거기서 닿는 저장소 헤더가 `WindowsHeadersBegin.h`/`WindowsHeadersEnd.h` 쌍 밖에서 include할 수 있는 것은 저장소 헤더, 생성 헤더, 깨끗한 시스템 헤더 목록의 헤더뿐이다. 그 밖의 include(Windows SDK 헤더, SDK 헤더를 여는 외부 라이브러리 헤더, 리터럴이 아닌 include)가 쌍 밖에 있으면 오류. 쌍이 맞지 않아도(Begin 없는 End, 닫지 않은 Begin), 쌍 안에 저장소 헤더를 두어도 오류. 유니티를 끈 모듈과 `UnityExclude`의 소스도 본다(6.1절) |
 
 - 검사는 토큰 단위 근사다. 주석, 문자열, 전처리 조건을 처리하지만 컴파일러 AST 수준의 정확성은 요구하지 않는다. 놓친 것은 드러나는 경우 컴파일 오류로 남는다.
@@ -601,3 +627,4 @@ UB6에서 묶음 TU와 PCH action의 최대 메모리를 실측해, 동시 실�
 | 1(macOS 유니티) | 2026-11-20 | macOS에서도 유니티 빌드를 켰다(`RepositoryUnity.VerifiedPlatforms`에 macOS). POSIX 공통 소스는 NDK 묶음 문법 검사로 먼저 보고, macOS 전용 소스(PlatformBase의 `Mac`·`Apple`, ShaderToolLoader의 `Mac`)는 CI macOS job으로 확인했다. 로컬 macOS 툴체인이 없으므로 macOS 전용 소스를 고치면 CI로 확인한다 |
 | 1(매크로 누출) | 2026-11-21 | 6.1절에 "매크로를 남기는 헤더"의 규칙을 더했다: Windows SDK 계열 헤더는 `Platform/Win64/WindowsHeadersBegin.h`/`WindowsHeadersEnd.h` 쌍으로 감싼다. Begin이 `Windows.h`를 열고 A/W 함수 이름 매크로를 지운 뒤 앞서 숨긴 `near`·`far`·`small`·`interface`·`min`·`max`를 되돌리고, End가 다시 숨긴다. 정책 검사 `unity-macro-leak`(9.2절)이 감싸지 않은 include를 거부하고, `platform-boundary`는 이 쌍을 `#pragma once` 없는 조각으로 받는다. 유니티를 켠 모듈의 기존 Windows 소스·헤더 39개를 감쌌고, 누출 때문에 단독이던 `WindowsComRefTests.cpp`를 묶음으로 되돌렸다. 쌍 자체의 시험은 `TestSupport/Private/Win64/WindowsHeadersTests.cpp`다(동작은 그대로다. `CrashFiles.cpp`의 `FILE_DISPOSITION_INFO::DeleteFile` 대입 두 곳은 이름 없는 초기화로 바꿨다) |
 | 1(매크로 누출 리뷰 반영) | 2026-11-21 | 6.1절 "매크로를 남기는 헤더"를 고쳤다. (1) 규칙과 정책 검사의 범위를 유니티를 켠 모듈에서 Windows 플랫폼의 모든 모듈로 넓혔다(숨긴 뒤 쌍 밖에서 SDK 헤더를 여는 `ShaderToolSpike` 빌드가 깨졌다). 정책 이름은 `windows-macro-leak`이다. (2) 쌍이 `push_macro`/`pop_macro` 대신 정의를 직접 다시 쓴다(clang PCH가 push 스택을 저장하지 않는다). (3) 정책이 이름 목록 대신 깨끗한 시스템 헤더 목록으로 판정하고, 외부 라이브러리 헤더를 따라가며, 줄 이음과 리터럴이 아닌 include를 다룬다. Windows 플랫폼만 평가하고 파일 해석을 캐시한다. (4) 숨기는 이름에 `pascal`·`cdecl`·`hyper`·`RegisterClass`·`FindFirstFile`을 더했다. (5) UE 대응 서술을 바로잡았다(A/W 이름만 같다) |
+| 1(placement new 헤더) | 2026-11-21 | 8.4절에 "placement new 헤더"를 더했다: `Base/PlacementNew.h`가 MSVC 런타임에서는 `<vcruntime_new.h>`를, 그 밖에서는 `<new>`를 include하고, 엔진 소스는 `<new>` 대신 이 헤더를 쓴다(정책 `placement-new-header`, 9.2절). 공개 헤더 단독 컴파일 검사와 PCH를 쓰지 않는 번역 단위에서 `<new>` 사슬(번역 단위당 0.126 s)이 빠진다 |

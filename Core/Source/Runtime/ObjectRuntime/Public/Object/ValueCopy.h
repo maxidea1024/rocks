@@ -1,10 +1,9 @@
 #pragma once
 
+#include <Base/PlacementNew.h>
 #include <Base/TypeTraits.h>
 #include <Object/GeneratedFieldAccess.h>
 #include <Object/RuntimeTypeOps.h>
-
-#include <new>
 
 // 리플렉션 값의 타입 무관 깊은 복사·교환·생성·소멸이다(리플렉션 B9i3c0 —
 // Docs/Design/ReflectionExtensions.ko.md 10.2절 "구현(B9i3c0)에서 정한 점"). UE의
