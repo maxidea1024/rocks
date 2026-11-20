@@ -132,7 +132,10 @@ public abstract class TestsModule : ModuleRules
             // FOUNDATION_TEST_RUNNER_LAYER picks the runner name in Private/Main.cpp (0 Core, 1 Foundation, 2 Engine).
             PrivateDefines = ["ROCKS_TESTING=1", $"FOUNDATION_TEST_RUNNER_LAYER={(int)Layer}",
                 .. (Layer == TestLayer.Engine ? ThirdPartyModuleRules.ConsumerDefines(context, EngineThirdPartyHeaders) : [])],
-            Dependencies = [.. dependencies, .. fixtures]
+            // ModuleLoader tests load DynamicModuleTestFixture at run time (Docs/Design/ModuleLoader.ko.md section 3.8): it is linked into this
+            // executable and has a module table row, but its headers stay off this module's include path; tests use DynamicModuleTestApi.
+            Dependencies = [.. dependencies, .. fixtures, "DynamicModuleTestApi"],
+            DynamicModules = ["DynamicModuleTestFixture"]
         };
     }
 }

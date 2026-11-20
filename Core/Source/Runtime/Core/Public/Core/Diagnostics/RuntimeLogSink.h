@@ -163,7 +163,10 @@ private:
 //   tpl     원본 템플릿
 //   msg     렌더된 메시지
 //   props   {이름: 값} — LogPropertyKind에 따라 Signed·Unsigned는 정수, Float는 실수, Bool은
-//           불리언, String(NaN·무한대 포함)은 문자열
+//           불리언, String(NaN·무한대 포함)은 문자열, Null은 null. 펼친 값("{@Name}", LG16)은
+//           중첩 객체 {"$type": 태그, 필드…}(태그가 있을 때만 "$type", 잘렸으면 "$truncated":
+//           true)이고 그 안 배열은 JSON 배열(원소를 버렸으면 {"$count": 전체 수, "$items":
+//           [...]})이다
 //   ctx     {이름: 값 문자열} 문맥
 //   src     {"file", "line", "func"} 호출 위치(파일이 없으면 null)
 //   thread  스레드 이름, 없으면 id의 10진 문자열

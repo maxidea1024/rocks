@@ -3,6 +3,7 @@
 #include <Core/Diagnostics/Log.h>
 #include <Core/Diagnostics/LogCapture.h>
 #include <Core/Diagnostics/LogSystem.h>
+#include <Core/Time/TimeSpan.h>
 
 namespace rocks {
 
@@ -11,6 +12,12 @@ inline constexpr LogCategory LogLogging{"Log"};
 
 // 로그 모듈이 스스로 만드는 알림 한 줄의 버퍼 byte 수다.
 inline constexpr usize LogNoticeBytes = 256;
+
+// 시간 단위다. UTC tick(DateTime·TimeSpan) 하나는 100 ns다.
+inline constexpr uint64 LogNanosecondsPerMillisecond = 1000000;
+inline constexpr uint64 LogNanosecondsPerUtcTick = 100;
+static_assert(TimeSpan::TicksPerSecond * LogNanosecondsPerUtcTick == 1000000000,
+              "a DateTime tick must be 100 ns");
 
 } // namespace rocks
 
@@ -91,7 +98,9 @@ void LogTo(LogSystem& system, LogLevel level, const LogCategory& category,
         SubmitToLogSystem(system, level, category, ToCaptureTemplate(text), nullptr, 0);
     } else {
         const FormatArg list[] = {MakeLogArg(args)...};
-        SubmitToLogSystem(system, level, category, ToCaptureTemplate(text), list, sizeof...(Args));
+        SubmitToLogSystem(system, level, category,
+                          WithArgumentInfo<Args...>(ToCaptureTemplate(text)), list,
+                          sizeof...(Args));
     }
 }
 

@@ -1,6 +1,6 @@
 # 모듈 로더 설계
 
-기준일: 2026-11-19, 개정 3. 모듈의 수명(시작·종료)과 적재를 맡는 모듈 로더를 정한다. UE 5.8 `IModuleInterface`·`FModuleManager`·로딩 단계(`ELoadingPhase`)에 해당한다.
+기준일: 2026-11-20, 개정 4. 모듈의 수명(시작·종료)과 적재를 맡는 모듈 로더를 정한다. UE 5.8 `IModuleInterface`·`FModuleManager`·로딩 단계(`ELoadingPhase`)에 해당한다.
 
 [빌드 타깃 설계](BuildTargets.ko.md) 3.8절은 Editor 타깃을 UE와 같이 모듈식(`Modular`)으로 링크하기로 정했다(BD17). 그리고 모듈 로더를 별도 스펙으로 넘기며 네 가지 계약을 요구했다(BD30).
 1. 같은 소스가 `Monolithic`·`Modular`에서 같은 순서·결과로 동작한다.
@@ -12,7 +12,7 @@
 
 UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`, commit `f45729c0b6f0`)이고, 경로는 `Engine/Source/` 기준이다. UE 이름은 대응표와 근거에만 적는다. hot reload·Live Coding(코드 다시 불러오기)은 범위 밖이다(9.2절).
 
-상태: **설계 초안**(결정 MD1–MD22, 모두 권장안). 구현 단계는 ML0–ML6(6절)이며 착수 시점은 사용자가 정한다. ML0 구현·병합(개정 2에 구현 세부). ML2는 ML1(Launch 병합 대기) 전에 하는 연결을 3.10절(개정 3)에 정했고, [리플렉션 생성 소스](ReflectionGeneratedSources.ko.md) GS1 병합 뒤 그 구조 위에서 구현했다(2026-11-20 — ML1 뒤로 넘긴 것은 3.10절 끝). ML0–ML4는 Rocks Studio(BS5) 전에, ML5는 BS4·BS5와 함께 한다. Modular 적재(ML4)는 [빌드 타깃](BuildTargets.ko.md) BS8 뒤다. 초안을 서브에이전트 1개로 교차 검증해 반영했다(10절).
+상태: **설계 초안**(결정 MD1–MD22, 모두 권장안). 구현 단계는 ML0–ML6(6절)이며 착수 시점은 사용자가 정한다. ML0 구현·병합(개정 2에 구현 세부). ML2는 ML1(Launch 병합 대기) 전에 하는 연결을 3.10절(개정 3)에 정했고, [리플렉션 생성 소스](ReflectionGeneratedSources.ko.md) GS1 병합 뒤 그 구조 위에서 구현했다(2026-11-20 — ML1 뒤로 넘긴 것은 3.10절 끝). ML3(`DynamicModules`)은 개정 4에서 UE 근거로 순환 규칙을 고쳐(3.8절) 구현했다. ML0–ML4는 Rocks Studio(BS5) 전에, ML5는 BS4·BS5와 함께 한다. Modular 적재(ML4)는 [빌드 타깃](BuildTargets.ko.md) BS8 뒤다. 초안을 서브에이전트 1개로 교차 검증해 반영했다(10절).
 
 ## 1. 현재 상태
 
@@ -141,7 +141,7 @@ ROCKS_IMPLEMENT_MODULE(CurvesModule, Curves)
   - 엔진 묶음(`PreDefault`–`PostEngineInit`): `Engine` 수명에 묶인다. 한 프로세스에서 Engine을 차례로 여러 번 만들면 Engine마다 시작·종료한다. 동시에 둘 이상 있으면 처음 Engine이 시작하고 마지막 Engine이 내린다(참조 수).
   - `None` 모듈과 `DynamicModules`는 적재될 때 로더의 현재 묶음(가장 안쪽 묶음)에 속한다.
 - **단계 순서 검사(MD6)**: 모듈의 의존 모듈은 단계가 같거나 더 이르거나 `None`이어야 한다. 빌드가 규칙 로드 때 검사한다(위반은 오류). 의존 시작(3.4절)이 늦은 단계 모듈을 조용히 앞당기지 않게 하기 위해서다.
-- **단계 실행**: `ModuleLoader::StartPhase(phase)`가 그 단계 모듈을 manifest 순서(의존 순서)로 시작한다.
+- **단계 실행**: `ModuleLoader::StartPhase(phase)`가 그 단계 모듈을 manifest 순서(의존 순서)로 시작한다. 요청 시 적재 행(`DynamicModules` 관계로만 표에 든 모듈 — 3.8절)은 단계와 무관하게 대상이 아니다(UE `None`과 같다).
   - 아직 돌지 않은 앞 단계가 있으면 그 단계부터 차례로 돈다. 그래서 설정을 쓰지 않는 도구가 Engine을 만들어도 단계를 건너뛰지 않는다(그 경우 `PostConfigInit` 모듈은 `ConfigContext` 없이 시작하며, 필요한 서비스가 없으면 그 모듈의 `Startup`이 실패를 돌려준다).
   - 이미 돈 단계를 다시 부르면 할 일이 없고 성공이다(UE도 같은 단계 재호출을 허용한다 — `Runtime/Projects/Private/PluginManager.cpp:2909-2913`). 지금 묶음보다 앞 묶음의 단계를 부르는 것은 계약 위반 오류다(UE는 더 이른 단계 호출을 Error 로그로 알린다 — 같은 파일 2842-2937행).
   - 엔진 묶음을 내리면 엔진 단계는 다시 돌 수 있는 상태가 된다(다음 Engine).
@@ -288,8 +288,24 @@ public:
 - UE `DynamicallyLoadedModuleNames`(링크하지 않고 실행 중에 적재하는 모듈)에 해당하는 모듈 규칙 `DynamicModules`를 둔다(MD11).
   - 빌드는 이 모듈을 타깃에 넣어 빌드하고 manifest에 싣지만, 소비 모듈에 링크하지 않는다(Modular). Monolithic에서는 정적 라이브러리를 실행 파일에 링크한다(UE와 같다).
   - 소비 모듈의 include 경로에는 들어가지 않는다. 쓰는 쪽은 `Find<T>(name)`으로 얻고, T(공개 interface)는 별도 모듈(링크 의존 가능)에 둔다.
-  - 의존 규칙: `DynamicModules` 관계에도 모듈 type 포함 규칙([빌드 타깃](BuildTargets.ko.md) BD25)과 순환 검사를 적용한다. 단계 순서 검사(MD6)는 링크 의존이 아니므로 적용하지 않는다. 이런 모듈의 단계는 보통 `None`이다.
+  - 의존 규칙: `DynamicModules` 관계에도 모듈 type 포함 규칙([빌드 타깃](BuildTargets.ko.md) BD25)을 적용한다. 순환 검사의 참조 사슬에는 넣지 않는다(링크 의존만의 순환은 거부 — 아래 ML3 세부). 단계 순서 검사(MD6)는 링크 의존이 아니므로 적용하지 않는다. 이런 모듈은 단계 실행 대상이 아니다(아래 "요청 시 적재 행").
 - 서드파티 도구 DLL(DXC 등)을 실행 중에 여는 경로는 모듈이 아니다. 지금처럼 `DynamicLibrary`로 직접 연다([빌드 타깃](BuildTargets.ko.md) 9.1절).
+- **ML3 구현 세부(개정 4)** — UE 근거는 UnrealBuildTool(`Programs/UnrealBuildTool/`) 기준이다.
+  - 규칙: `NativeModuleInput.DynamicModules`(모듈 이름 목록)이고, 엔진 모듈 규칙(`SourceModuleRules`)은 `DynamicModules` 속성으로 채운다. 게임·플러그인 규칙은 `NativeModuleInput`을 직접 채운다. 기술자(`modules[]`)에는 두지 않는다(UE도 `ModuleRules.DynamicallyLoadedModuleNames`만 있다 — `Configuration/Rules/ModuleRules.cs:1416-1419`).
+  - **순환(MD11 개정)**: `DynamicModules` 관계는 순환 검사의 참조 사슬에 넣지 않는다. 링크 의존만으로 된 순환은 지금처럼 거부한다. 그래서 링크 의존을 거꾸로 닫는 관계(Engine이 `DynamicModules`로 둔 렌더러·플러그인 모듈이 Engine에 링크 의존)를 허용한다. UE도 같다 — 동적 적재 모듈을 만들 때 참조 사슬을 비운 채 시작하고(`Configuration/UEBuildModule.cs:1300-1301` "Dynamic loads aren't considered a reference chain"), UE의 대표적 쓰임(엔진이 렌더러·플랫폼 모듈을 실행 중에 적재하고 그 모듈이 엔진에 링크)이 바로 이 모양이다. 개정 3까지의 "순환 검사를 적용한다"를 따르면 이 쓰임이 막히므로 버렸다. 이 관계는 시작 순서를 만들지 않으므로(`Load`가 따라가지 않는다) 실행 중 순환 문제도 없다.
+  - 대신 거부하는 것(입력 오류): 같은 모듈을 `Dependencies`와 `DynamicModules`에 함께 둠(UE도 오류 — `Configuration/UEBuildModuleCPP.cs:369-374`), 자기 자신, 실행 파일 모듈, 모르는 이름, 모듈 이름과 대소문자만 다른 철자(MD17), 같은 이름 중복. 모듈 표를 만드는 빌드에서는 진입점 모듈이 아닌 모듈(header-only·서드파티·Core 아래·표 제공 모듈에 닿지 않는 모듈 — 표에 행이 없어 `Load(이름)`이 찾지 못한다)도 거부한다.
+  - **type 포함 규칙(BD25)**: 빌드의 의존 검사를 `DynamicModules` 관계에도 똑같이 한다(UE도 범위·플러그인 검사에 동적 적재 모듈을 넣는다 — `Configuration/UEBuildTarget.cs:1567, 1625`). BD25의 type 쌍 표는 아직 구현 전(BS2)이고, 지금 있는 형태는 기술자 모듈의 제외 검사다(Editor 모듈·Release의 Developer 모듈·지원하지 않는 플랫폼 — 빠진 모듈을 쓰면 오류). 이 검사를 `DynamicModules`에도 하고, Release 배제 정책(BD20)의 도달 집합도 `DynamicModules`를 따라간다(Monolithic은 링크하므로). BS2가 type 쌍 규칙을 넣을 때 같은 관계 목록에 적용한다.
+  - **Monolithic 링크**: 실행 파일은 자기 링크 폐포의 모든 모듈이 `DynamicModules`로 둔 모듈과 그 링크 폐포를 함께 링크한다(동적 모듈의 `DynamicModules`도 따라간다). UE도 Monolithic 실행 파일에 동적 적재 모듈을 넣는다(`Configuration/UEBuildTarget.cs:2809-2822` `GetAllDependencyModules(bIncludeDynamicallyLoaded: true, …)`). 링크 순서는 링크 폐포 뒤에 동적 모듈 쪽을 더한 것이다(정적 라이브러리 순서 — 의존하는 쪽이 앞).
+  - **include 경로·정의**: 소비 모듈의 컴파일에 동적 모듈의 public include·정의가 들어가지 않는다. UE도 컴파일 환경은 public·private 의존과 include 경로 모듈만 모은다(`Configuration/UEBuildModule.cs:627-648`).
+  - **모듈 표(Monolithic manifest)**: 동적 모듈과 그 링크 폐포의 진입점 모듈도 행으로 싣는다. 위치는 실행 파일 링크 폐포의 행 뒤, 실행 파일 행 앞이다(실행 파일이 마지막인 규칙 유지). 행의 의존은 지금처럼 링크 의존만이다. 그래서 `Load(실행 파일)`은 동적 모듈을 따라 시작하지 않고, 코드가 `Load(이름)`으로 시작한다(시작하면 그 링크 의존을 먼저 시작). 단계 실행도 시작하지 않는다(다음 항목). 설정 등록(3.5절)은 표의 모든 행이 대상이므로 동적 모듈의 설정도 파일을 읽기 전에 등록된다(UE `Prepare`와 같은 범위).
+  - **빌드 대상**: 타깃 도달 집합에 동적 모듈과 그 링크 폐포를 넣는다(빌드·메타데이터 생성·공개 헤더 검사). UE도 동적 적재 모듈을 바이너리에 묶어 빌드한다(`Configuration/UEBuildTarget.cs:4554-4565`).
+  - **설치 SDK**: `SdkModule`에 `DynamicModules`를 싣는다(SDK manifest 10). 게임 실행 파일이 SDK 모듈을 링크하면 그 동적 모듈도 함께 링크해야 하기 때문이다.
+  - **요청 시 적재 행(개정 4 리뷰 결정, UE 방식)**: 실행 파일의 링크 의존 폐포로는 닿지 않고 `DynamicModules` 관계로만 표에 든 행은 단계 실행(`StartPhase`) 대상이 아니다. 행의 단계 값(엔진 모듈은 `Default`)과 무관하게 코드의 `Load(이름)`으로만 시작한다. 링크 의존으로도 닿는 모듈(예: 실행 파일이 링크하고 다른 모듈이 적재 목록에도 둔 모듈)은 보통 행이다.
+    - UE 근거: 단계 적재는 기술자(`.uplugin`·`.uproject`)의 모듈 목록만 돈다. `FModuleDescriptor::LoadModulesForPhase`가 `LoadingPhase == Descriptor.LoadingPhase`인 기술자 모듈만 `LoadModuleWithFailureReason`으로 적재한다(`Runtime/Projects/Private/ModuleDescriptor.cpp:779-806`, 플러그인마다 `Runtime/Projects/Private/PluginManager.cpp:2734`). 기술자에 없는 엔진 모듈 — `DynamicallyLoadedModuleNames`로 빌드에 들어간 모듈 — 은 코드가 `LoadModule`을 부를 때만 적재된다. 이는 `ELoadingPhase::None`의 뜻 "Do not automatically load this module"(`Runtime/Projects/Public/ModuleDescriptor.h:55-56`)과 같다. 그래서 요청 시 적재 행은 UE `None`에 대응한다.
+    - 표지: 빌드가 행에 남긴다. ML1이 `ModuleTableRow`에 칸(요청 시 적재 표지)을 더하고 생성기가 `LinkClosure`의 동적 쪽 목록(링크 폐포 밖)으로 채우며, `StartPhase`가 그 행을 건너뛴다. 지금 표 생성기는 그 목록을 계산할 수 있다(`LinkClosure.Of(…, out onRequest)`). 칸은 Core 행 형식과 모든 시험 표를 함께 바꾸므로 단계 실행과 같이 ML1에서 넣는다.
+    - 기술자 모듈(게임·플러그인)이 기술자의 단계로 자동 시작하려면 링크 의존이나 플러그인 활성(ML1·ML5의 기술자 모듈 행)으로 표에 들어가야 한다(UE도 단계 적재는 기술자 목록 소관이다).
+  - **묶음(3.3절)**: 동적 모듈은 `Startup`에 들어갈 때 로더의 현재 묶음을 기록한다(ML0 구현 그대로). 묶음을 단계로 정하는 일은 ML1이다.
+  - **Modular(ML4)**: manifest에 싣고 소비 모듈에 링크하지 않는 일은 ML4에서 한다(지금 빌드는 Monolithic뿐이다).
 
 ### 3.9 소유와 시작 흐름
 
@@ -378,7 +394,7 @@ ML1(로딩 단계·묶음 전환·Launch 통합)은 crash-launch 병합을 기�
 | MD8 | 적재 결과는 `ModuleLoadReport`(코드·모듈·처음 실패한 모듈·`nativeError`·단계·문구), 해제 결과는 `ModuleUnloadReport`다. 로더는 기록하지 않고 실패를 확정하는 계층이 한 번 기록한다 | 권장안 |
 | MD9 | 단계는 프로세스·호스트·엔진 묶음으로 나누고, 묶음마다 UE 절차(자동 종료 대상의 PreUnload 전부 → Shutdown 역순, 타입 해제, 공유 라이브러리는 해제하지 않음)로 내린다. 엔진 묶음은 `Engine::Shutdown`에서 TypeRegistry 종료 전, 호스트 묶음은 LogHost·HostSettings 정리 전, 프로세스 묶음은 Launch 정리에서 도구 로그 정리 전. 엔진 묶음은 Engine 수명에 묶이고 동시에 여럿이면 참조 수로 센다. 종료 절차에서는 `Changed`를 내지 않는다 | 권장안 |
 | MD10 | 실행 중 해제는 먼저 `SupportsUnload`·부트 모듈·의존 모듈·타입 해제 가능 여부를 검사해 `Unsupported`·`Busy`로 거부한다(바뀌는 것 없음). 내린 뒤 lease가 남으면 공유 라이브러리 해제를 미룬다. 플러그인 끄기는 전체를 먼저 검사한다 | 권장안 |
-| MD11 | 모듈 규칙 `DynamicModules`(UE `DynamicallyLoadedModuleNames`): Modular에서 링크하지 않고 manifest에만 싣는다. Monolithic은 링크한다. type 포함 규칙과 순환 검사는 적용하고 단계 순서 검사는 적용하지 않는다 | 권장안 |
+| MD11 | 모듈 규칙 `DynamicModules`(UE `DynamicallyLoadedModuleNames`): Modular에서 링크하지 않고 manifest에만 싣는다. Monolithic은 링크한다. type 포함 규칙은 적용하고 단계 순서 검사는 적용하지 않는다. 순환 검사의 참조 사슬에는 넣지 않는다(UE와 같다 — 개정 4, 3.8절). `Dependencies`와 겹치거나 자기 자신이거나 모듈 표에 행이 없는 모듈이면 오류다. `DynamicModules`로만 표에 든 행은 단계 실행 대상이 아니다(UE `None`과 같다 — 개정 4 리뷰) | 권장안 |
 | MD12 | Modular manifest `<Target>[-<Platform>-<Configuration>].modules.json`(`buildId`·`modules`의 `file`·`size`·`dependencies`·`loadingPhase`), 링크 성공 뒤 원자적으로 쓴다. 엔진·게임·플러그인 `Binaries/<Platform>/`의 manifest만 읽고 폴더를 훑지 않는다. 모르는 키는 오류 | 권장안 |
 | MD13 | `ModuleBuildId`는 UE처럼 출력 폴더의 이전 값을 재사용하고 엔진 버전·툴체인 fingerprint가 바뀌면 새로 만든다. manifest에만 둔다(코드에 넣지 않음). 설치 SDK manifest에 실린다. 다르면 `Incompatible`, 파일 크기가 manifest와 다르면 `Incompatible` | 권장안 |
 | MD14 | 의존을 먼저 적재하므로 OS 탐색은 같은 폴더만 쓴다. Linux는 `-soname`을 넣는다. POSIX `dlerror` 문구를 report로 넘기도록 `DynamicLibrary`를 보강한다 | 권장안 |
@@ -396,9 +412,9 @@ ML1(로딩 단계·묶음 전환·Launch 통합)은 crash-launch 병합을 기�
 | 단계 | 내용 | 완료 기준 |
 |---|---|---|
 | ML0 | Core: 수명 객체·진입 기술·진입점 매크로(Monolithic)·모듈 표 형식(개정 2). `ModuleLoader` 모듈: `ModuleStartContext`·`HostServices`(형식 키 매크로)·빌드 생성 모듈 표·의존 순서 시작·상태·`Changed`·report 두 종·묶음 종료·시작 실패 정리. `DynamicLibrary` POSIX `dlerror` 보강. 모든 기존 C++ 모듈에 `ROCKS_IMPLEMENT_MODULE`(대부분 기본 구현). 빌드: 모듈 이름 대소문자 충돌 검사(MD17) | 의존 순서 시작·역순 종료·실패 중단과 역순 정리·`Cycle`·`WrongThread`·`ShuttingDown`·`Failed` 재시도 시험, 매크로 누락·이름 불일치 링크·컴파일 오류 시험, 대소문자 충돌 거부 시험 |
-| ML1 | 로딩 단계와 묶음: 기술자 `PostEngineInit`·`None`, 엔진 모듈 규칙 `LoadingPhase`, 단계 순서 빌드 검사(MD6), 부트 모듈 단계 강제, `StartPhase`의 앞 단계 차례 실행, Launch 통합(crash-launch 병합 뒤), 엔진 호스트의 `PostConfigInit`·호스트 묶음 종료, `Engine::Initialize`·`Shutdown`의 엔진 묶음과 참조 수 | Sandbox 엔진 호스트가 모든 단계를 지나 부트·종료한다. 한 프로세스에서 Engine을 차례로 여러 번 만드는 시험이 엔진 묶음을 매번 시작·종료한다. 단계별 시작·종료 순서 시험 |
+| ML1 | 로딩 단계와 묶음: 기술자 `PostEngineInit`·`None`, 엔진 모듈 규칙 `LoadingPhase`, 모듈 표 행의 요청 시 적재 표지와 `StartPhase`의 건너뜀(3.8절), 단계 순서 빌드 검사(MD6), 부트 모듈 단계 강제, `StartPhase`의 앞 단계 차례 실행, Launch 통합(crash-launch 병합 뒤), 엔진 호스트의 `PostConfigInit`·호스트 묶음 종료, `Engine::Initialize`·`Shutdown`의 엔진 묶음과 참조 수 | Sandbox 엔진 호스트가 모든 단계를 지나 부트·종료한다. 한 프로세스에서 Engine을 차례로 여러 번 만드는 시험이 엔진 묶음을 매번 시작·종료한다. 단계별 시작·종료 순서 시험 |
 | ML2 | 타입 등록기(MD15)·모듈별 `ModuleRegistration`·모듈 자신의 타입만 등록하는 생성 함수, 실제 `ModuleLease`(MD16)와 생성 등록 함수의 lease 인자, 설정 등록(MD22, Monolithic), 기존 모듈별 등록 래퍼를 `Startup`·`RegisterSettings`로 옮기기, CVar·trace 채널 등록의 lease. ML1 전 연결과 ML1 뒤로 넘긴 것은 3.10절(개정 3) | 호스트 코드의 모듈별 명시 등록 호출이 HostSettings 설정 타입 외에 0. 늦은 단계 모듈의 CVar가 `ReportUnresolved` 경고 없이 설정 값을 받는 시험. 종료 뒤 남은 lease 진단 시험 |
-| ML3 | `DynamicModules`(MD11)와 Monolithic 링크 규칙, type·순환 검사 | 실행 중 적재 모듈을 `Load`·`Find<T>(name)`으로 쓰는 시험 |
+| ML3 | `DynamicModules`(MD11)와 Monolithic 링크 규칙, type 검사, 링크 의존만의 순환 거부(동적 관계는 참조 사슬 아님), 표에 행이 없는 모듈 거부 | 실행 중 적재 모듈을 `Load`·`Find<T>(name)`으로 쓰는 시험 |
 | ML4 | Modular 적재 — 선행: [빌드 타깃](BuildTargets.ko.md) BS8. manifest 쓰기·읽기(원자적 쓰기, 모르는 키 거부), `ModuleBuildId` 재사용·SDK manifest, 파일 크기 대조, export 진입점과 강제 참조, `Prepare`, 실행 파일의 부트 모듈 import와 호스트 모듈(MD21), Linux `-soname`, OS 적재·report, `Modular` FoundationTests를 로더로 실행 | `Modular` FoundationTests가 Windows·macOS에서 로더로 모듈을 적재해 통과한다. `buildId` 불일치·크기 불일치·의존 DLL 누락·진입점 없음·모르는 키의 report 시험. 증분 빌드에서 `buildId`가 바뀌지 않는 시험 |
 | ML5 | Rocks Studio 적재 — BS4·BS5와 함께: 프로젝트·플러그인 manifest, 플러그인 조건 해석, 빌드 목록 대조(MD19) | 게임·플러그인 모듈이 있는 프로젝트를 Rocks Studio가 열고 닫는다 |
 | ML6 | 실행 중 해제(MD10)와 플러그인 끄기, 공유 라이브러리 지연 해제 | `Busy`(의존 모듈·살아 있는 인스턴스)·`Unsupported` 시험(아무것도 바뀌지 않음), 해제 뒤 다시 적재 시험(Modular), lease가 남은 경우의 지연 해제 시험 |
@@ -459,6 +475,7 @@ ML1(로딩 단계·묶음 전환·Launch 통합)은 crash-launch 병합을 기�
 
 | 개정 | 날짜 | 내용 |
 |---|---|---|
+| 4 | 2026-11-20 | ML3 구현. UE UnrealBuildTool 근거로 MD11을 고쳤다: `DynamicModules` 관계는 순환 검사의 참조 사슬에 넣지 않는다(UE "Dynamic loads aren't considered a reference chain" — 엔진이 동적 적재하는 모듈이 엔진에 링크하는 쓰임을 막지 않게). 대신 `Dependencies`와 겹침·자기 자신·실행 파일·모르는 이름·대소문자 철자를 거부한다. 3.8절에 ML3 구현 세부를 더했다: 규칙 속성, type 검사(BD25 구현 전에는 기술자 모듈 제외 검사와 Release 배제 도달 집합), Monolithic 링크와 링크 순서, include 경로 제외, 모듈 표의 동적 모듈 행 위치(실행 파일 행 앞, 행 의존은 링크 의존만), 빌드 대상·메타데이터 도달 집합, SDK manifest 10, 묶음 기록은 ML0 그대로, Modular는 ML4. 같은 날 리뷰 반영: 3.8절 옛 글머리·6절 ML3 행을 개정 MD11과 맞춤, 요청 시 적재 행 결정(UE `LoadModulesForPhase`는 기술자 목록만 돌므로 `DynamicModules`로만 닿는 행은 단계 실행 대상이 아니다 — 표지와 건너뜀은 ML1), 표에 행이 없는 모듈(header-only·서드파티·Core 아래·표 제공 모듈에 닿지 않음)과 중복 거부 |
 | 3 | 2026-11-19 | ML2 착수. ML1 전의 연결을 3.10절에 정했다: 모듈 생성 소스(리플렉션 생성 소스 5.5절)의 자기 타입 함수 `RegisterModuleOwnTypes`와 `ROCKS_MODULE_TYPES`로 진입 기술 `registerTypes`를 채움(소스 없는 메타데이터 모듈은 빌드 진입점 TU로 진입점 모듈이 됨), `unregisterTypes` 제거(`ModuleEntryVersion` 2), `ModuleTypeRegistrar`·`AttachTypeRegistrar`·`DetachTypeRegistrar`와 일반 구현 `ModuleTypeRegistrations`(ObjectRuntime), `EngineConfig::modules`와 Engine 대체 로더, `HostSettingsOptions::modules`·`ConfigContext::RetainModule`과 모듈 `RegisterSettings`, Sandbox의 프로세스 로더, `ModulesWithLeases` 진단. ML1 뒤로 넘긴 것: 서비스를 쓰는 `Startup` 등록(trace 채널·타입), 엔진 묶음 참조 수, 핸들 단위 CVar lease. 같은 날 리플렉션 생성 소스 작업(rocks-78, GS1)과 생성기·빌드 파일이 겹쳐 착수한 코드를 되돌리고, 생성 등록 함수를 그 구조(모듈 생성 소스 정의·모듈 생성 헤더는 선언만)에 맞춰 고쳐 적었다. 구현은 그 병합 뒤 재개한다. 2026-11-20 GS1 병합 뒤 재개하며 GS1 위 세부를 3.10절에 더했다: 진입점 판정이 리플렉션 생성 소스를 세고 SDK 표지 `ReflectionOnlyLibrary`를 없앰(SDK manifest 8), `ROCKS_MODULE_TYPES`를 `ReflectionSources`로 판정, 재귀 등록 함수는 그대로 두고 `RegisterModuleOwnTypes`를 모듈 생성 소스에 더함. 같은 날 구현하고 교차 검증을 반영했다: 3.4절 API 목록에 `Table`·`AcquireLease`·`ModulesWithLeases`·`AttachTypeRegistrar`·`DetachTypeRegistrar`·`TypeRegistrar`, 3.10절에 로더 조회 API, 상태 줄·3.2절 `ModuleEntryVersion` 2·MD2 진입 기술 칸(해제 제거) 정정, 이전 버전 SDK manifest는 엄격한 읽기 전에 버전부터 비교해 버전 불일치로 안내 |
 | 2 | 2026-11-19 | ML0 구현 반영. 진입점 계약을 Core(`Core/Module/ModuleImplementation.h`·`ModuleEntry.h`)로 옮겼다(`ModuleLoader`는 Core에 의존하므로 Core와 다른 모든 모듈이 매크로를 쓰려면 Core에 있어야 한다 — 3.1절). Core 아래 모듈(PlatformBase·DeterministicMath) 면제와 실행 파일 모듈 포함(3.1절), 진입 기술 칸 형식·매크로 이름 인자 펼침·식별자 이름 규칙·모듈 표 TU 형식·면제 모듈을 거치는 의존 대체·기술자 단계(3.2절), `TryCreate`·`State`·`LeaseCount`·`Services`, `Changed`를 `MulticastDelegate`로, `StartPhase`는 ML1·`Unload`는 ML6에 공개, 소멸 동작, report 고정 길이 칸(3.4절), 의존 철자 대소문자 검사(3.4절 MD17), `ShutdownGroup`의 안쪽 묶음 포함과 수명 객체 파괴(3.7절), `DynamicLibraryError`(3.5절), 빌드 표지 `ProvidesModuleTable`·`ThirdParty`·`LoadingPhase`와 SDK manifest 6(3.9절)을 적었다. 같은 날 서브에이전트 교차 검증을 반영했다: 종료 중 조회를 UE에 맞춤(모듈은 자기 `Shutdown` 직전에만 `ShuttingDown`), `Load` 진행 중(`Changed` 구독자 포함) `ShutdownGroup` Fatal, `RegisterSettings` 이름 감지를 접근 권한·오버로드와 무관하게(3.1절), 자동 종료 거부 모듈의 소멸 순서를 시작 역순으로, 실패 상태·`ShutdownGroup` 스레드 위반·부트 모듈 목록·ML0 행·1절 표·3.4절 코드 블록의 모순 정정 |
 | 1 | 2026-11-19 | 첫 초안. [빌드 타깃](BuildTargets.ko.md) BD30이 넘긴 모듈 로더를 UE 5.8 `IModuleInterface`·`FModuleManager`·`ELoadingPhase` 기준으로 정했다. 사용자 지시("애매하면 언리얼 방식")에 따라 UE 구조를 따르고, 전역 생성자 금지·`Result` 오류·명시 소유와 부딪히는 곳만 7절에 차이로 적었다. 서브에이전트 1개로 교차 검증해 반영했다: 종료를 프로세스·호스트·엔진 묶음별로(모듈 `Shutdown` 때 로그·설정이 살아 있게), 실행 중 해제의 검사 순서와 lease 역할 분리·지연 해제, 한 프로세스의 여러 Engine(엔진 묶음·참조 수, 앞 단계 차례 실행), 타입 등록 시점과 실패 처리, 설정 등록 시점(바이너리 준비 + `RegisterSettings`), Modular 실행 파일의 부트 모듈 import와 호스트 모듈, `ModuleBuildId` 재사용과 파일 크기 대조, `Find<T>(name)`과 서비스 형식 키, Launch 단계 위치, 모듈 자신의 타입만 등록하는 생성 함수, 부트 모듈 정의, 해제 report, `Failed` 재시도, 종료 중 이벤트 없음, lease 원자 수, Linux `-soname`, Modular 시험 등록, 인용 정정(UE 진입점 주 경로·같은 단계 재호출) |

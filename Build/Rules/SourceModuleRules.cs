@@ -24,6 +24,17 @@ public abstract class SourceModuleRules : ModuleRules
     /// <summary>Names of direct module dependencies. Only lower modules of the same layer or modules of a lower layer.</summary>
     protected abstract string[] RequiredModules { get; }
 
+    /// <summary>
+    /// Modules loaded at run time with <c>ModuleLoader::Load(name)</c> instead of being linked as dependencies (counterpart of UE
+    /// ModuleRules.DynamicallyLoadedModuleNames, Docs/Design/ModuleLoader.ko.md section 3.8). Their headers are not on this module's include
+    /// path; code reaches them through an interface in a linked module and <c>Find&lt;T&gt;(name)</c>. A monolithic executable that reaches this
+    /// module links them too. A listed module may depend back on this module. Example:
+    /// <code>
+    /// protected override string[] DynamicModules => ["DynamicModuleTestFixture"];
+    /// </code>
+    /// </summary>
+    protected virtual string[] DynamicModules => [];
+
     /// <summary>Group under Source (Runtime, Developer or Editor).</summary>
     protected virtual string Group => "Runtime";
 
@@ -127,6 +138,7 @@ public abstract class SourceModuleRules : ModuleRules
             PrivateIncludeDirectories = PrivateIncludeDirectories(context),
             PrivateDefines = PrivateDefines(context),
             Dependencies = RequiredModules,
+            DynamicModules = DynamicModules,
             Optimization = Optimization,
             Unity = UnityFor(context),
             UnityExclude = UnityExclude(context),
@@ -140,6 +152,7 @@ public abstract class SourceModuleRules : ModuleRules
             Name = ModuleName,
             PublicIncludeDirectories = [context.PathInRoot($"{ModuleDirectory}/Public")],
             Dependencies = RequiredModules,
+            DynamicModules = DynamicModules,
             Metadata = Metadata,
             ModuleDirectory = ModuleDirectory
         };

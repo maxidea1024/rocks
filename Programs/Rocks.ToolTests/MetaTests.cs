@@ -98,6 +98,7 @@ internal static partial class MetaTests
         RegisterArrayRestrictions(context);
         RegisterNative(context);
         RegisterSettings(context);
+        RegisterLogFieldVisitors(context);
         RegisterRejectedCells(context);
         RegisterRejectedSpecifiers(context);
     }

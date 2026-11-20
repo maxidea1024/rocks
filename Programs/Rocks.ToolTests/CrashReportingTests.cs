@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection.PortableExecutable;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -85,6 +86,106 @@ internal static partial class CrashReportingTests
 
     [GeneratedRegex(@"crash probe helper pid=(\d+)")]
     private static partial Regex HelperLine();
+
+    // CreateProcessW 생성 플래그다(job breakaway 전제 측정).
+    private const uint CreateSuspended = 0x00000004;
+
+    private const uint CreateBreakawayFromJob = 0x01000000;
+
+    private const uint CreateNoWindow = 0x08000000;
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct StartupInfo
+    {
+        public int Size;
+        public IntPtr Reserved;
+        public IntPtr Desktop;
+        public IntPtr Title;
+        public int X;
+        public int Y;
+        public int XSize;
+        public int YSize;
+        public int XCountChars;
+        public int YCountChars;
+        public int FillAttribute;
+        public int Flags;
+        public short ShowWindow;
+        public short Reserved2Size;
+        public IntPtr Reserved2;
+        public IntPtr StandardInput;
+        public IntPtr StandardOutput;
+        public IntPtr StandardError;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ProcessInformation
+    {
+        public IntPtr Process;
+        public IntPtr Thread;
+        public int ProcessId;
+        public int ThreadId;
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "CreateProcessW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreateProcess(string applicationName, IntPtr commandLine, IntPtr processAttributes, IntPtr threadAttributes,
+        [MarshalAs(UnmanagedType.Bool)] bool inheritHandles, uint creationFlags, IntPtr environment, string? currentDirectory,
+        ref StartupInfo startupInfo, out ProcessInformation processInformation);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsProcessInJob(IntPtr process, IntPtr job, [MarshalAs(UnmanagedType.Bool)] out bool result);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool TerminateProcess(IntPtr process, uint exitCode);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr handle);
+
+    // 이 시험 실행기 자리에서 CREATE_BREAKAWAY_FROM_JOB으로 만든 자식이 어느 job에도 없는가다(설계 17절 job 시험의 전제). 도우미와
+    // 같은 호출을 직접 해 본다: executable을 CREATE_SUSPENDED로 띄워(실행되지 않는다) IsProcessInJob(child, null)을 보고 바로 끝낸다.
+    // 바깥 job이 breakaway를 막으면 생성이 ERROR_ACCESS_DENIED로 실패한다. QueryInformationJobObject(null)는 바로 위 job만 보므로
+    // 중첩 job에서 쓰지 않는다. 그 밖의 생성 실패는 전제를 정할 수 없으므로 예외다(시험 실패).
+    private static bool BreakawayLeavesAllJobs(string executable)
+    {
+        const int AccessDenied = 5;
+        const uint TerminateExitCode = 1;
+        const uint WaitMilliseconds = 10000;
+        var startup = new StartupInfo { Size = Marshal.SizeOf<StartupInfo>() };
+        if (!CreateProcess(executable, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, false,
+            CreateSuspended | CreateBreakawayFromJob | CreateNoWindow, IntPtr.Zero, null, ref startup, out ProcessInformation process))
+        {
+            int error = Marshal.GetLastWin32Error();
+            if (error == AccessDenied)
+            {
+                return false;
+            }
+
+            throw new InvalidOperationException("breakaway probe process could not start: Win32 error " + error);
+        }
+
+        try
+        {
+            if (!IsProcessInJob(process.Process, IntPtr.Zero, out bool inJob))
+            {
+                throw new InvalidOperationException("IsProcessInJob failed: Win32 error " + Marshal.GetLastWin32Error());
+            }
+
+            return !inJob;
+        }
+        finally
+        {
+            _ = TerminateProcess(process.Process, TerminateExitCode);
+            _ = WaitForSingleObject(process.Process, WaitMilliseconds);
+            _ = CloseHandle(process.Thread);
+            _ = CloseHandle(process.Process);
+        }
+    }
 
     private sealed record ProbeResult(uint ExitCode, int ProcessId, int HelperPid, bool HelperAliveAtExit, string StdErr,
         IReadOnlyDictionary<string, ulong> Threads, IReadOnlyList<Match> Callbacks);
@@ -837,13 +938,29 @@ internal static partial class CrashReportingTests
             return Task.CompletedTask;
         });
 
-        // breakaway를 허락하는 KILL_ON_JOB_CLOSE job이다. 도우미는 job을 빠져나가지만 VA clone은 job에 남을 수 있다(이 OS는 clone의
-        // breakaway 플래그를 받지 않는다). 부모는 clone이 job 안이면 기본 덤프가 끝날 때까지 기다린다(그 전에 job이 닫히면 덤프를 잃는다).
+        // breakaway를 허락하는 KILL_ON_JOB_CLOSE job이다. VA clone은 job에 남을 수 있다(이 OS는 clone의 breakaway 플래그를 받지 않는다).
+        // 부모는 clone이 job 안이면 기본 덤프가 끝날 때까지 기다린다(그 전에 job이 닫히면 덤프를 잃는다). 도우미가 빠져나가는지는 시험
+        // 실행기가 바깥 job 안에 있는지에 달렸으므로 기대값을 측정한 전제에서 정한다(설계 17절): 이 자리에서 breakaway한 자식이 어느 job에도
+        // 없으면 도우미도 job 밖이고, 바깥 job이 막으면 도우미는 job 안이다. 어느 쪽이든 덤프·CrashInfo.json은 온전해야 한다(공통 단언).
         AddCrash(new("job-kill-on-close-breakaway", "main", AccessViolation, ReasonException, "Exception", "FaultAccess"), (result, folder) =>
         {
+            bool leaves = BreakawayLeavesAllJobs(executable);
             using var metadata = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(folder, "CrashInfo.json")));
-            Verify.That(!metadata.RootElement.GetProperty("helper").GetProperty("inJob").GetBoolean(),
-                "job-kill-on-close-breakaway helper must leave the job: " + metadata.RootElement.GetProperty("helper"));
+            JsonElement helper = metadata.RootElement.GetProperty("helper");
+            Verify.Equal(!leaves, helper.GetProperty("inJob").GetBoolean(),
+                "job-kill-on-close-breakaway helper inJob (breakaway from this harness " + (leaves ? "leaves" : "does not leave") +
+                " every job): " + helper);
+            return Task.CompletedTask;
+        });
+
+        // 바깥 job이 breakaway를 막는 경우(CI 러너 조건)를 어디서나 결정적으로 만든다: probe가 breakaway를 막은 job에 먼저 들어간 뒤 breakaway
+        // 허용 KILL_ON_JOB_CLOSE job을 만든다. 도우미는 job 안에 남고, 부모가 기본 덤프까지 기다려 덤프·CrashInfo.json이 온전하다.
+        AddCrash(new("job-kill-on-close-breakaway-blocked", "main", AccessViolation, ReasonException, "Exception", "FaultAccess"),
+            (result, folder) =>
+        {
+            using var metadata = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(folder, "CrashInfo.json")));
+            Verify.That(metadata.RootElement.GetProperty("helper").GetProperty("inJob").GetBoolean(),
+                "job-kill-on-close-breakaway-blocked helper must stay in the job: " + metadata.RootElement.GetProperty("helper"));
             return Task.CompletedTask;
         });
 

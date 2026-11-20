@@ -1,6 +1,6 @@
 # 공통 실행 진입점과 네이티브 크래시 수집 설계
 
-기준일: 2026-11-19, 개정 4(LC1–LC7 구현 반영, LC8 문서 마무리). 결정은 22절, 단계는 23절, 미확인 사실은 24절, 바뀐 점과 단계별로 설계와 다르게 정한 점은 25절에 있다. 사용법은 [공통 실행 진입점과 크래시 수집 사용 안내](../Implementation/CrashHandlingAndLaunch.ko.md)에 있다.
+기준일: 2026-11-20, 개정 5(19.6절: 로깅 쪽 반영 완료 — 로깅 문서 개정 번호 재정리, LogFile·LogDirectory 칸). 개정 4(LC1–LC7 구현 반영, LC8 문서 마무리). 결정은 22절, 단계는 23절, 미확인 사실은 24절, 바뀐 점과 단계별로 설계와 다르게 정한 점은 25절에 있다. 사용법은 [공통 실행 진입점과 크래시 수집 사용 안내](../Implementation/CrashHandlingAndLaunch.ko.md)에 있다.
 
 이 문서는 두 가지를 정한다.
 - **공통 실행 진입점(Launch).** 실행 파일마다 흩어진 `main`·`wmain`의 시작·종료 처리를 한 계층으로 모은다. 플랫폼 진입점 연결, 이른 크래시 처리 설치, 인자 전달, 공통 서비스 시작·종료, 프로그램 본문 호출, 종료 코드 전달, 크래시 처리 해제 시점이 대상이다. 엔진 수명(`Engine::Initialize`·`Run`·`Shutdown`)은 다시 만들지 않는다.
@@ -1177,6 +1177,14 @@ Rocks는 이 값을 쓰지 않는다.
 - **시험용 짧은 예산.** probe는 설정으로 예산을 줄인다. 캡처 2 s, 콜백 500 ms, 덤프 Standard 20 s, 겹친 스레드 여유 1 s를 쓴다. 시간 초과 시험이 빨리 끝나게 하려는 것이다.
 - **LC1 probe의 설치 방식.** LC1의 probe는 Launch가 아직 없으므로 `InstallCrashReporting`을 직접 부른다. LC4에서 Launch 설정으로 바꾼다.
 
+**job 시험의 전제(바깥 job의 breakaway 허용 여부).**
+- 도우미는 `CREATE_BREAKAWAY_FROM_JOB`으로 먼저 띄운다(11.2절). job이 중첩돼 있으면 한 단계라도 breakaway를 허락하지 않을 때 이 호출이 `ERROR_ACCESS_DENIED`로 실패하고, 도우미는 플래그 없이 job 안에 뜬다. 그래서 probe가 만든 job이 breakaway를 허락해도, 시험 실행기가 이미 breakaway를 막은 바깥 job 안에 있으면 도우미는 job 안에 남는다. GitHub Windows 러너가 그렇다(run 44643005452, `job-kill-on-close-breakaway`가 `inJob: true`로 실패). 수집기의 동작(job 안이면 부모가 기본 덤프까지 기다림)은 두 경우 모두 맞다. 틀린 것은 환경과 무관하게 "빠져나간다"를 단언한 시험이었다.
+- **기대값은 측정한 전제에서 정한다. 건너뛰지 않는다.** 시험 실행기(C#)가 시작 때 같은 호출을 직접 해 본다: `CreateProcessW`에 `CREATE_BREAKAWAY_FROM_JOB | CREATE_SUSPENDED | CREATE_NO_WINDOW`로 무해한 프로세스(시험 실행 파일 자신, 실행되지 않음)를 띄우고, 성공하면 `IsProcessInJob(child, null)`을 본 뒤 곧바로 `TerminateProcess`한다. 성공하고 자식이 어느 job에도 없으면 "breakaway 가능"이다. `QueryInformationJobObject(null)`는 바로 위 job만 보므로 중첩 job에서 쓰지 않는다.
+  - breakaway 가능: `job-kill-on-close-breakaway`의 도우미 `inJob`은 false다.
+  - 불가능: `inJob`은 true다. 덤프와 `CrashInfo.json`이 온전한지(`AddCrash`의 공통 단언) 본다.
+- **두 갈래를 로컬에서도 결정적으로 돈다.** 변형 `job-kill-on-close-breakaway-blocked`는 probe가 breakaway를 막은 바깥 job(제한 없음, KILL_ON_JOB_CLOSE 없음)에 먼저 들어간 뒤 breakaway 허용 KILL_ON_JOB_CLOSE job을 만든다. 환경과 무관하게 `inJob`은 true이고 덤프가 온전해야 한다. 그래서 개발 기계에서도 CI 조건의 경로가 검증된다.
+- `job-kill-on-close`(breakaway 금지)는 환경과 무관하게 `inJob` true다. `job-after-helper`는 `inJob`을 단언하지 않는다(도우미는 부모가 job에 들어가기 전에 뜬다. 바깥 job이 breakaway를 막으면 바깥 job 안에 있다). 두 시험 모두 공통 단언(덤프·메타데이터)만으로 환경에 기대지 않는다.
+
 **덤프 판독.**
 - **구조 판독.** C# 최소 minidump 판독기(`Rocks.ToolTests`)로 다음을 확인한다.
   - 머리·stream 목록이 유효한가
@@ -1223,6 +1231,7 @@ Rocks는 이 값을 쓰지 않는다.
 | ASan 정책 | Asan 구성의 `asan-uaf`·접근 위반 | ASan 보고 문구 있음, `dump.status = Unsupported`, 예산 안 종료 |
 | Debug·Release·ThinLTO | 위 Windows 시험을 Debug와 Release(ThinLTO)로 | 둘 다 통과. Release stack에 실패 함수가 남는다(noinline 확인) |
 | POSIX | Android NDK 빌드(단계마다), 에뮬레이터가 있으면 SIGSEGV·Fatal probe | 이전 동작 복원·tombstone, `Unsupported` 표시. 못 돌린 것은 통과로 적지 않는다 |
+| job과 도우미 breakaway | probe가 KILL_ON_JOB_CLOSE job(breakaway 허용·금지)에 들어간 뒤 접근 위반. 바깥 job이 breakaway를 막는 변형은 probe가 breakaway를 막은 job에 먼저 들어가고 그 안에 breakaway 허용 job을 만든다 | 도우미 `inJob`이 아래 전제에서 정한 값, 덤프·`CrashInfo.json` 온전(부모가 기본 덤프까지 기다림) |
 | 유니코드 인자 | 한글·이모지·`"` 포함 인자로 자식 실행 | 본문이 받은 UTF-8이 같다 |
 | GUI subsystem | `WindowsSubsystem=Windows` 시험 실행 파일 | 링크·실행, 인자 전달, 종료 코드 |
 
@@ -1380,11 +1389,11 @@ bool SetCrashAnnotation(CrashAnnotation slot, const char* text, usize bytes) noe
 
 로깅 문서는 로깅 세션(rocks-1e) 소유다. 이 문서는 참조와 인터페이스만 맞춘다.
 
-- **이관 반영.** 로깅 문서의 이관 개정(`feature/logging` `060b687b`까지, 이 구현이 engine-runtime에 병합되기를 기다림, 그 브랜치에서 "개정 13")이 19.2절 표의 마지막 줄을 반영했다. engine-runtime의 로깅 문서도 "개정 13"(2026-11-20, sink 수명 계약 L28과 POSIX self-pipe)이라 번호가 겹친다. 병합 때 로깅 세션이 번호를 다시 매긴다. 14.1.8절이 "처리기는 수집기 소유, 로깅은 종료 콜백 하나", 콜백 본문(`FlushInstalledLogForTermination`·`WriterThreadFailed`·결과 값), Fatal 표시(`MarkFatalFlushAttempted`), `LogFile` 칸 쓰는 쪽·512 B 초과 때 비우기를 적는다. engine-runtime 판의 14.1.8은 아직 로깅 소유 처리기(flush 전용 스레드, self-pipe)를 적는다.
-- **코드 쪽 상태.** 19.4절의 등록·콜백 본문·Fatal 표시·probe 수정은 LC1a에서 이쪽이 함께 바꾸고 로깅이 리뷰했다(`LogSystem.cpp`의 `RegisterTerminationCallback`, `MarkFatalFlushAttempted`). 남은 것은 로깅 몫이다.
-  - `FileLogSink`가 파일을 열 때와 회전할 때 `SetCrashAnnotation(CrashAnnotation::LogFile, ...)`(병합 뒤).
-  - `CrashAnnotation::LogDirectory` 칸은 쓰는 쪽을 정하지 않았다(로깅 문서 개정 13에도 없다). 로그 폴더를 정하는 LogHost가 쓰는 것을 권한다.
-- **인터페이스 차이 확인.** 로깅 문서 개정 13의 서술은 19.3절의 지금 인터페이스(멈춘 스레드 수는 원자 포인터, `Unregister`는 참조로 받아 비움, 공용 마감 기본 2초는 Launch `crashCallbackBudgetMilliseconds`로 바꿀 수 있음)와 어긋나는 곳이 없다. 마감을 Launch 설정으로 바꿀 수 있다는 점은 그 문서에 없다.
+- **이관 반영(2026-11-20, engine-runtime 83beb840).** 크래시 수집 병합(e6f6151b) 뒤 로깅 세션이 `feature/logging`을 병합하며 로깅 문서 개정 번호를 다시 매겼다: 개정 13 sink 수명 계약(L28), 개정 14 크래시 수집 이관, 개정 15 LG16, 개정 16 크래시 기록 칸. 이 이관은 개정 14다. 로깅 문서 14.1.8절이 "처리기는 수집기 소유, 로깅은 종료 콜백 하나", 콜백 본문(`FlushInstalledLogForTermination`·`WriterThreadFailed`·결과 값), Fatal 표시(`MarkFatalFlushAttempted`), Asan 경로와 한계를 적는다. 병합 전의 번호 겹침(두 브랜치 모두 "개정 13")은 이것으로 풀렸다.
+- **코드 쪽 상태.** 19.4절은 모두 반영됐다. 등록·콜백 본문·Fatal 표시·probe 수정은 LC1a에서 이쪽이 함께 바꾸고 로깅이 리뷰했다(`LogSystem.cpp`의 `RegisterTerminationCallback`, `MarkFatalFlushAttempted`). 나머지 칸은 로깅 세션이 넣었다(83beb840).
+  - `CrashAnnotation::LogFile`: `FileLogSinkConfig::crashAnnotation`을 켠 sink(LogHost의 파일 sink 하나)가 파일을 열 때와 회전할 때 출력 스레드에서 쓴다. 경로가 512 B를 넘으면 칸을 비우고 Warning을 한 번 남긴다. 상대 로그 폴더는 Open 때 절대 경로로 굳힌다.
+  - `CrashAnnotation::LogDirectory`: 로그 폴더를 정하는 LogHost가 쓴다(로깅 결정 L29).
+- **인터페이스 차이 확인.** 로깅 문서 14.1.8절의 서술은 19.3절의 지금 인터페이스(멈춘 스레드 수는 원자 포인터, `Unregister`는 참조로 받아 비움)와 어긋나는 곳이 없다. 공용 마감 기본 2초를 Launch `crashCallbackBudgetMilliseconds`로 바꿀 수 있다는 점도 그 절에 들어갔다.
 
 ## 20. 종료 요청과 엔진 스레드 규약
 

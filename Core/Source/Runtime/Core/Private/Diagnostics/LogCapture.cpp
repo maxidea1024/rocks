@@ -1,4 +1,5 @@
 #include "../Text/DecimalConversion.h"
+#include "LogStructureEncoding.h"
 
 #include <Core/Diagnostics/LogCapture.h>
 #include <Platform/Clock.h>
@@ -31,6 +32,10 @@ constexpr usize FixedCaptureBytes(usize count, usize contexts, bool correlation 
     return LogCaptureMinimumBytes(count) + contexts * sizeof(LogCaptureContext) +
            (correlation ? sizeof(CorrelationIds) : 0);
 }
+
+// 펼친 값("{@Name}")의 값 칸 종류다. FormatArgKind 밖의 값이며 bytes·payload는 펼친 값 인코딩
+// (LogStructureEncoding.h)의 위치다.
+constexpr uint8 CaptureStructureKind = static_cast<uint8>(FormatArgKind::Custom) + 1;
 
 // LogCaptureValue::flags
 constexpr uint8 ValueInBlock = 1u << 0;
@@ -131,7 +136,58 @@ public:
         MarkTruncated(value, text.Truncated());
     }
 
+    // "{@Name}" 자리 인자를 펼쳐 인코딩한다(LogStructure<T>::Write는 한 번만 부른다).
+    // - 남은 영역이 블록보다 작으면 블록에 먼저 인코딩하고, 공간 때문에 잘리지 않았고 남은 영역에
+    //   들어가면 옮긴 뒤 블록을 돌려준다(StoreCustom과 같은 규칙). 상한 잘림은 영역 크기와
+    //   무관하므로 옮겨도 같다.
+    // - 블록이 없으면 남은 영역에 인코딩한다(넘치는 필드는 버리고 잘림 표시).
+    void StoreStructure(const FormatArg& arg, detail::LogStructureWrite write,
+                        LogCaptureValue& value) noexcept {
+        value.kind = CaptureStructureKind;
+        LogBlock block;
+        if (target_.blocks != nullptr && Remaining() < target_.blocks->BlockBytes() &&
+            target_.blocks->TryBorrow(block)) {
+            bool truncated = false;
+            bool spaceShort = false;
+            const usize bytes = EncodeStructure(block.bytes, arg, write, truncated, spaceShort);
+            if (!spaceShort && bytes <= Remaining()) {
+                StoreInline(StringView(reinterpret_cast<const char*>(block.bytes.Data()), bytes),
+                            value);
+                target_.blocks->Release(block.index);
+                MarkTruncated(value, truncated);
+                return;
+            }
+
+            value.flags |= ValueInBlock;
+            value.payload = block.index;
+            value.bytes = static_cast<uint32>(bytes);
+            MarkTruncated(value, truncated);
+            return;
+        }
+
+        bool truncated = false;
+        bool spaceShort = false;
+        const usize bytes =
+            EncodeStructure(Span<uint8>(target_.buffer.Data() + cursor_, Remaining()), arg, write,
+                            truncated, spaceShort);
+        value.payload = cursor_;
+        value.bytes = static_cast<uint32>(bytes);
+        cursor_ += bytes;
+        MarkTruncated(value, truncated);
+    }
+
 private:
+    static usize EncodeStructure(Span<uint8> area, const FormatArg& arg,
+                                 detail::LogStructureWrite write, bool& truncated,
+                                 bool& spaceShort) noexcept {
+        LogStructureWriter writer(area);
+        write(writer, arg.custom.object);
+        writer.Finish();
+        spaceShort = writer.SpaceShort() || writer.Bytes() == 0;
+        truncated = writer.Truncated() || spaceShort;
+        return writer.Bytes();
+    }
+
     void RenderIntoBlock(const FormatArg& arg, StringView spec, const LogBlock& block,
                          LogCaptureValue& value) noexcept {
         FixedStringBuilder text(BlockChars(block));
@@ -217,8 +273,12 @@ LogCaptureValue EncodeScalar(const FormatArg& arg) noexcept {
 
 bool IsTextValue(const LogCaptureValue& value) noexcept {
     const auto kind = static_cast<FormatArgKind>(value.kind);
-    return kind == FormatArgKind::Text ||
+    return kind == FormatArgKind::Text || value.kind == CaptureStructureKind ||
            (kind == FormatArgKind::Custom && (value.flags & ValueFormatError) == 0);
+}
+
+bool IsStructureValue(const LogCaptureValue& value) noexcept {
+    return value.kind == CaptureStructureKind;
 }
 
 // 읽기: 캡처 머리와 값 칸을 꺼내고 텍스트 위치를 확인한다.
@@ -248,7 +308,7 @@ public:
         platform::MemoryCopy(values_, capture_.Data() + sizeof(LogCaptureHeader),
                              header_.valueCount * sizeof(LogCaptureValue));
         for (usize index = 0; index < header_.valueCount; ++index) {
-            if (values_[index].kind > static_cast<uint8>(FormatArgKind::Custom)) {
+            if (values_[index].kind > CaptureStructureKind) {
                 return false;
             }
         }
@@ -277,12 +337,17 @@ public:
         return correlation_;
     }
 
-    // 모든 텍스트 값(런타임 템플릿 포함)의 위치가 캡처·블록 안인지 검사한다. 렌더 전에 한 번
-    // 부른다.
+    // 모든 텍스트 값(런타임 템플릿 포함)의 위치가 캡처·블록 안인지 검사한다. 펼친 값은 인코딩
+    // 모양까지 검사한다. 렌더 전에 한 번 부른다.
     bool ValidateTexts() const noexcept {
         StringView text;
         for (usize index = 0; index < header_.valueCount; ++index) {
             if (IsTextValue(values_[index]) && !Text(values_[index], text)) {
+                return false;
+            }
+
+            if (IsStructureValue(values_[index]) &&
+                !detail::log_structure::Validate(StructureBytes(text))) {
                 return false;
             }
         }
@@ -332,6 +397,11 @@ public:
         text =
             StringView(reinterpret_cast<const char*>(capture_.Data() + value.payload), value.bytes);
         return true;
+    }
+
+    // 펼친 값 텍스트 칸의 인코딩 byte다.
+    static Span<const uint8> StructureBytes(StringView text) noexcept {
+        return Span<const uint8>(reinterpret_cast<const uint8*>(text.Data()), text.ByteCount());
     }
 
     bool IsRuntimeTemplate() const noexcept {
@@ -407,6 +477,12 @@ bool RenderHole(FixedStringBuilder& out, const CaptureReader& reader, const LogC
     bool rendered = false;
     StringView text;
     const auto kind = static_cast<FormatArgKind>(value.kind);
+    if (IsStructureValue(value)) {
+        // 펼친 값은 실패해도 그 값만 표시가 남는다(잘못된 UTF-8 문자열 등). 되돌리지 않는다.
+        (void)reader.Text(value, text); // ValidateTexts가 이미 확인했다
+        return !detail::log_structure::AppendText(out, CaptureReader::StructureBytes(text));
+    }
+
     if (kind == FormatArgKind::Custom) {
         // 캡처 때 spec까지 적용해 렌더한 텍스트다. 그대로 붙인다.
         rendered = (value.flags & ValueFormatError) == 0 && reader.Text(value, text) &&
@@ -609,26 +685,45 @@ Result<usize> WriteLogCapture(const LogCaptureTarget& target, LogLevel level,
 
     // 사용자 Formatter 인자의 spec: 리터럴 템플릿은 컴파일 타임에 계산한 위치를 쓰고, 런타임
     // 템플릿만 여기서 해석한다(템플릿이 잘못됐으면 오류 앞까지만 찾고 나머지는 빈 spec).
+    // 펼치기 자리("{@Name}")도 리터럴 템플릿은 컴파일 타임 비트 집합을, 런타임 템플릿은 같은 해석
+    // 결과(layout.structured)를 쓴다. LogStructure가 없는 인자는 펼치지 않는다(렌더가 템플릿 오류로
+    // 낸다).
     bool hasCustom = false;
     FormatArgKind kinds[MaxLogArguments]{};
+    uint8 traits[MaxLogArguments]{};
     for (usize index = 0; index < count; ++index) {
         kinds[index] = args[index].kind;
         hasCustom = hasCustom || args[index].kind == FormatArgKind::Custom;
+        traits[index] = LogArgFormattable;
+        if (text.structures != nullptr && text.structures[index] != nullptr) {
+            traits[index] |= LogArgStructurable;
+        }
     }
 
     LogTemplateLayout layout;
     if (hasCustom && text.specs == nullptr) {
         // 렌더 쪽은 인자 타입을 모르므로 사용자 Formatter spec 검사 결과는 여기서 표시로 남긴다.
-        if (AnalyzeLogTemplate(text.text, kinds, count, layout, text.checks) ==
+        if (AnalyzeLogTemplate(text.text, kinds, count, layout, text.checks, traits) ==
             LogTemplateError::InvalidFormatterSpec) {
             header.flags |= CaptureFormatterSpecRejected;
         }
     }
 
+    bool structured[MaxLogArguments]{};
+    for (usize index = 0; index < count; ++index) {
+        const bool hole = text.runtime ? layout.structured[index]
+                                       : (text.structureMask & (uint32{1} << index)) != 0;
+        structured[index] = hole && text.structures != nullptr &&
+                            text.structures[index] != nullptr &&
+                            args[index].kind == FormatArgKind::Custom;
+    }
+
     LogCaptureValue values[MaxLogArguments];
     for (usize index = 0; index < count; ++index) {
         const FormatArg& arg = args[index];
-        if (arg.kind == FormatArgKind::Text) {
+        if (structured[index]) {
+            writer.StoreStructure(arg, text.structures[index], values[index]);
+        } else if (arg.kind == FormatArgKind::Text) {
             values[index].kind = static_cast<uint8>(FormatArgKind::Text);
             writer.StoreText(StringView(arg.text.data, arg.text.bytes), values[index]);
         } else if (arg.kind == FormatArgKind::Custom) {
@@ -695,6 +790,13 @@ Result<void> RenderLogCapture(Span<const uint8> capture, const LogBlockProvider*
     }
 
     FixedStringBuilder message(target.message);
+    // 인자별 메시지 안 렌더 구간(offset·byte 수)이다. 펼친 값 속성의 text가 쓴다.
+    struct TextRange {
+        usize offset = 0;
+        usize bytes = 0;
+    };
+
+    TextRange structureText[MaxLogArguments]{};
     detail::LogTemplateLayout layout;
     LogTemplateError error = LogTemplateError::None;
     const bool templateTruncated =
@@ -707,13 +809,20 @@ Result<void> RenderLogCapture(Span<const uint8> capture, const LogBlockProvider*
 
         flags = flags | LogEventFlags::MessageTruncated;
     } else {
-        // 리터럴 템플릿도 같은 검증을 거친다(컴파일 타임에 통과했으므로 늘 성공한다).
+        // 리터럴 템플릿도 같은 검증을 거친다(컴파일 타임에 통과했으므로 늘 성공한다). 펼친 값은
+        // "{@Name}" 자리에만, 그 밖의 값은 다른 자리에만 맞는다(런타임 템플릿에서 LogStructure 없는
+        // 인자를 "{@Name}"에 쓰면 여기서 StructureWithoutLogStructure가 된다).
         detail::FormatArgKind kinds[MaxLogArguments]{};
+        uint8 traits[MaxLogArguments]{};
         for (usize index = 0; index < count; ++index) {
-            kinds[index] = static_cast<detail::FormatArgKind>(reader.Value(index).kind);
+            const LogCaptureValue& value = reader.Value(index);
+            const bool structure = IsStructureValue(value);
+            kinds[index] =
+                structure ? FormatArgKind::Custom : static_cast<FormatArgKind>(value.kind);
+            traits[index] = structure ? detail::LogArgStructurable : detail::LogArgFormattable;
         }
 
-        error = detail::AnalyzeLogTemplate(templateText, kinds, count, layout);
+        error = detail::AnalyzeLogTemplate(templateText, kinds, count, layout, nullptr, traits);
         if (error == LogTemplateError::None && (header.flags & CaptureFormatterSpecRejected) != 0) {
             error = LogTemplateError::InvalidFormatterSpec;
         }
@@ -721,7 +830,7 @@ Result<void> RenderLogCapture(Span<const uint8> capture, const LogBlockProvider*
         if (error != LogTemplateError::None) {
             RenderTemplateError(message, templateText, error, flags);
         } else {
-            detail::FormatParser parser(templateText, true);
+            detail::FormatParser parser(templateText, true, true);
             detail::FormatToken token;
             while (parser.Next(token)) {
                 if (token.kind == detail::FormatTokenKind::Literal) {
@@ -729,8 +838,14 @@ Result<void> RenderLogCapture(Span<const uint8> capture, const LogBlockProvider*
                     continue;
                 }
 
+                // 펼친 값의 속성 텍스트는 메시지에 렌더한 구간이다(따로 렌더하지 않는다).
+                const usize start = message.ByteCount();
                 if (!RenderHole(message, reader, reader.Value(token.argument), token)) {
                     flags = flags | LogEventFlags::FormatError;
+                }
+
+                if (token.argument < MaxLogArguments) {
+                    structureText[token.argument] = {start, message.ByteCount() - start};
                 }
             }
         }
@@ -742,15 +857,37 @@ Result<void> RenderLogCapture(Span<const uint8> capture, const LogBlockProvider*
     char emptyTexts[1];
     FixedStringBuilder texts(target.propertyText.Size() != 0 ? target.propertyText
                                                              : Span<char>(emptyTexts));
+    detail::log_structure::NodeFill nodes;
+    nodes.nodes = target.structureNodes;
+    nodes.texts = &texts;
     for (usize index = 0; index < filled; ++index) {
         LogProperty& property = target.properties[index];
+        property = LogProperty{};
         property.name = named ? layout.names[index] : PositionalPropertyNames[index];
-        if (FillProperty(reader, reader.Value(index), texts, property)) {
+        const LogCaptureValue& value = reader.Value(index);
+        if (IsStructureValue(value)) {
+            // 펼친 값: 텍스트는 메시지 안 구간, 노드는 structureNodes에 앞 순서로 채운다.
+            StringView stream;
+            (void)reader.Text(value, stream); // ValidateTexts가 이미 확인했다
+            detail::log_structure::FillNodes(CaptureReader::StructureBytes(stream), property,
+                                             nodes);
+            const TextRange range = structureText[index];
+            property.text = range.bytes == 0
+                                ? StringView()
+                                : StringView(message.View().Data() + range.offset, range.bytes);
+            continue;
+        }
+
+        if (FillProperty(reader, value, texts, property)) {
             flags = flags | LogEventFlags::FormatError;
         }
     }
 
-    if (message.Truncated() || texts.Truncated() || filled < count) {
+    if (nodes.formatError) {
+        flags = flags | LogEventFlags::FormatError;
+    }
+
+    if (message.Truncated() || texts.Truncated() || filled < count || nodes.overflow) {
         flags = flags | LogEventFlags::MessageTruncated;
     }
 
@@ -780,6 +917,7 @@ Result<void> RenderLogCapture(Span<const uint8> capture, const LogBlockProvider*
     event.eventId = header.eventId;
     event.message = message.View();
     event.properties = Span<const LogProperty>(target.properties.Data(), filled);
+    event.structureNodes = Span<const LogProperty>(target.structureNodes.Data(), nodes.used);
     event.context = Span<const LogProperty>(target.context.Data(), contextFilled);
     event.location = header.location;
     event.threadId = header.threadId;

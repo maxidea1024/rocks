@@ -1,5 +1,6 @@
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Module/ModuleEntry.h>
+#include <DynamicModuleTestApi/DynamicProbe.h>
 #include <ModuleLoader/HostServices.h>
 #include <ModuleLoader/ModuleLoader.h>
 #include <ModuleLoader/ModuleStartContext.h>
@@ -637,12 +638,18 @@ TEST(ModuleLoaderStartsThisExecutableModuleTable) {
     UniquePtr<ModuleLoader> loader = Move(created.Value());
     const ModuleLoadReport report = loader->Load(ROCKS_MODULE_NAME_TEXT);
     CHECK(report.IsOk());
+    // 실행 중 적재 모듈(DynamicModules — 3.8절)은 표에 있어도 실행 파일 Load가 시작하지 않는다
+    // (DynamicModuleTests).
     for (const ModuleTableRow& row : table) {
-        CHECK(loader->IsStarted(row.name));
+        CHECK(loader->IsStarted(row.name) ==
+              (strcmp(row.name, rocks::test::DynamicProbe::ModuleName) != 0));
     }
 
     loader->ShutdownGroup(ModuleGroup::Process);
     for (const ModuleTableRow& row : table) {
-        CHECK(HasState(*loader, row.name, ModuleState::Stopped));
+        CHECK(HasState(*loader, row.name,
+                       strcmp(row.name, rocks::test::DynamicProbe::ModuleName) == 0
+                           ? ModuleState::NotLoaded
+                           : ModuleState::Stopped));
     }
 }

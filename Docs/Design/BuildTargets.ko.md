@@ -1,6 +1,6 @@
 # 빌드 타깃·모듈 의존·플러그인 조건 설계
 
-기준일: 2026-11-20, 개정 3. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
+기준일: 2026-11-20, 개정 4. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
 - **타깃 종류 확장**: Editor·Client·Server 타깃과, 타깃 종류에 따라 코드·데이터를 컴파일에서 빼는 매크로.
 - **모듈 의존 공개 범위**: 의존마다 Public(소비자에게 include·정의를 넘김)과 Private(이 모듈 안에서만 씀)을 나눈다.
 - **플러그인 활성 조건**: 프로젝트가 플러그인을 특정 타깃·플랫폼·구성에서만 켠다.
@@ -114,7 +114,7 @@ type 값은 `{ Runtime, Developer, Editor, ServerOnly, ClientOnly }`다(BD4). �
 - 엔진 모듈(Core·Engine): 규칙 기반 클래스 `SourceModuleRules`에 `ModuleType` 속성을 더한다. 기본값은 `Group` 폴더에서 온다(`Runtime`→Runtime, `Developer`→Developer, `Editor`→Editor). `ServerOnly`·`ClientOnly`는 규칙이 명시한다. 엔진 모듈은 **걸러 내지 않고 검사만 한다.** 타깃 도달 집합에 들어갈 수 없는 type의 모듈이 있으면 빌드 오류다. UE도 엔진 모듈은 기술자 type으로 걸러 내지 않고 타깃 참조로 정해진다. Rocks는 거기에 검사를 더한다.
 - 설치 SDK manifest의 `SdkModule`에 type을 싣는다. 게임 빌드가 같은 검사를 한다.
 
-**type 사이 의존 규칙(BD25)**: 모듈 A가 모듈 B에 의존하려면, A가 들어갈 수 있는 (타깃 종류, 구성) 집합이 B의 집합에 포함되어야 한다. 그렇지 않으면 A를 넣는 타깃에서 B가 빠져 빌드가 깨진다(예: Runtime 모듈이 ClientOnly 모듈에 의존하면 모든 Server 타깃이 실패한다). 3.1절 표에서 나오는 결과는 다음과 같다. 위반은 타깃과 무관하게 규칙 로드 때 오류다.
+**type 사이 의존 규칙(BD25)**: 모듈 A가 모듈 B에 의존하려면, A가 들어갈 수 있는 (타깃 종류, 구성) 집합이 B의 집합에 포함되어야 한다. 그렇지 않으면 A를 넣는 타깃에서 B가 빠져 빌드가 깨진다(예: Runtime 모듈이 ClientOnly 모듈에 의존하면 모든 Server 타깃이 실패한다). 3.1절 표에서 나오는 결과는 다음과 같다. 위반은 타깃과 무관하게 규칙 로드 때 오류다. 의존에는 실행 중 적재 관계(`DynamicModules` — [모듈 로더](ModuleLoader.ko.md) 3.8절)도 든다. Monolithic이 그 모듈을 링크하기 때문이다(UE도 동적 적재 모듈을 같은 검사에 넣는다).
 
 | 모듈 type | 의존할 수 있는 type |
 |---|---|
@@ -475,3 +475,4 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 | 1 | 2026-11-19 | 첫 초안. UE 5.8 Templates 대조에서 나온 빌드 공백(타깃 종류, 의존 공개 범위, 플러그인 활성 조건)을 정리했다. 전용 서버 필수 요구(사용자 지시 — 네트워크 구성 뒤, 서버 플랫폼 Windows·macOS·Linux)로 3.7절·BD18·BS6·BS7을 더했다. 서브에이전트 3개(이 문서 UE·Rocks 코드 대조, UI 툴킷 7.3절 대조, Templates 독립 재대조)로 교차 검증해 반영했다: 플러그인 조건 해석을 UE 의미론으로 바꿈(치명), `bCompileAgainstEditor` 인용, 템플릿 사실, 에디터 데이터의 생성 코드·descriptor·로드 계약, UHT식 선언 규칙, 엔진 모듈 type, Release 배제 확장, 매크로 주입 위치, SDK 변형 key와 Program 기본 조합, 플러그인 처리 순서, 의존 소비처 전부, 서드파티 우회 제거, 시험 실행 파일 규칙, UnityBuildPch 제공 모듈 선택, depfile 선행, 9.1 표 보강. 반영본을 서브에이전트 1개로 다시 검증해 반영했다: 대리 클래스·interface 다중 상속(UI 툴킷 7.3절 (f)), 블록 안 허용 선언의 범위(BD6), 어휘 스캔 판정 수단, 에디터 패키지 저장 거부(BD26), `SourceGroups`(BD22), 타깃 종류별 Release 평가 플랫폼, type 사이 의존 규칙(BD25), 7절 표 보강, 인용 행 정정 |
 | 2 | 2026-11-19 | BD17을 사용자 결정("언리얼 방식대로")으로 확정했다. 3.8절 링크 방식을 더했다: `LinkType`(Editor 기본 `Modular`), `ROCKS_MONOLITHIC`, 모듈 API 매크로(BD27), 리플렉션 타입 정보 항상 export(BD28), 공개 헤더 정적 저장소·`thread_local` 금지와 서드파티 단일 소비(BD29), 모듈 로더 별도 스펙과 공유 빌드 환경(BD30), `Modular` 시험 빌드(BD31), 단계 BS8. BD5에 Editor 변형을 더하고 BS5·7절·9절을 고쳤다. 서브에이전트 1개로 교차 검증해 반영했다: 생성 코드가 모두 inline이고 타입 키가 주소라 `Modular`에서 갈라짐(BD28을 생성 `.cpp`로), 비공개 심볼을 쓰는 시험의 `Modular` 링크(BD31), `CompileWithEditor` Program의 SDK 변형 key, 서드파티 다중 소비 현황(UE와 같이 허용하고 전역 상태만 제한), 가시성 옵션을 UE와 같게(`-fvisibility-ms-compat`), rpath·install name·`-fPIC`, 상속 export, export 수 상한, 위반 목록 보강, 인용 행 정정. 같은 날 [모듈 로더](ModuleLoader.ko.md) 개정 1을 쓰며 BD30(단계 관계·실행 파일 import 범위), 3.8절 Linux `-soname`, BS8 빌드 정보 정의 위치를 고쳤다 |
 | 3 | 2026-11-20 | 3.6절에 첫 엔진 플러그인 `Engine/Plugins/Importers/UnrealExchange`(Unreal 교환 스펙 UXR7)를 적었다: Developer 모듈 하나라 Release 게임에서 빠짐, 기본 비활성·Commandlet이 켬, 명령 확장점과 플러그인 콘텐츠 마운트는 UX1에서 정함 |
+| 4 | 2026-11-20 | BD25의 의존에 실행 중 적재 관계(`DynamicModules` — [모듈 로더](ModuleLoader.ko.md) 개정 4, 3.8절)를 넣었다. Monolithic이 그 모듈을 링크하므로 같은 type 검사를 받는다(UE도 동적 적재 모듈을 범위 검사에 넣는다) |

@@ -29,6 +29,10 @@
 // - 사용자 Formatter<T> 타입: 캡처할 때 FixedStringBuilder로 렌더한다.
 //   객체 수명이 끝날 수 있기 때문이다. Formatter는 한 번만 부른다.
 //   같은 인자를 여러 자리에 쓰면 spec이 모두 같아야 한다(템플릿 검증).
+// - "{@Name}" 자리 인자: LogStructure<T>::Write로 필드를 펼쳐 인코딩한다
+//   (LG16, LogStructure.h). 필드 이름은 정적 포인터, 값은 사본이다.
+//   객체를 다시 읽지 않으므로 캡처 뒤 원본을 바꾸거나 파괴해도 출력은
+//   같다.
 // - 슬롯에 남은 영역에 들어가지 않는 값은 LogBlockProvider의 블록을 빌린다. 블록이 없으면
 //   UTF-8 문자 경계에서 잘라 LogEventFlags::ValueTruncated를 세운다.
 //
@@ -90,12 +94,15 @@ struct LogCaptureTarget {
 // ContextTruncated다.
 // tickFrequency는 캡처 tick의 초당 수다(0이면 platform::MonotonicTickFrequency). LogEvent의
 // monotonicNanoseconds를 이것으로 환산한다.
+// structureNodes는 펼친 값("{@Name}")의 노드 칸이다(MaxLogStructureNodes칸이면 충분하다). 비우면
+// 노드를 채우지 않는다(메시지는 그대로 렌더한다). 모자라면 MessageTruncated다.
 struct LogRenderTarget {
     Span<char> message;
     Span<char> propertyText;
     Span<LogProperty> properties;
     Span<LogProperty> context;
     uint64 tickFrequency = 0;
+    Span<LogProperty> structureNodes{};
 };
 
 namespace detail {
@@ -155,6 +162,12 @@ struct LogCaptureTemplate {
     // runtime일 때 인자별 사용자 Formatter spec 검사 함수다(CaptureWithArgs가 채운다, 없으면
     // nullptr). 리터럴 템플릿은 컴파일 타임에 검사했으므로 쓰지 않는다.
     const LogSpecCheck* checks = nullptr;
+    // 인자별 맨 위 값 쓰기 함수다(LogStructure가 없는 인자는 nullptr, 어느 인자에도 없으면 배열
+    // 자체가 nullptr). WithArgumentInfo가 채운다.
+    const LogStructureWrite* structures = nullptr;
+    // 리터럴 템플릿의 "{@Name}" 자리 인자 비트 집합이다(LogTemplate::StructureMask). 런타임
+    // 템플릿은 캡처 때 해석한다.
+    uint32 structureMask = 0;
 };
 
 // 타입을 지운 인자 배열로 캡처한다. 공개 진입점은 CaptureLog다.
@@ -162,11 +175,29 @@ Result<usize> WriteLogCapture(const LogCaptureTarget& target, LogLevel level,
                               const LogCategory& category, const LogCaptureTemplate& text,
                               const FormatArg* args, usize count) noexcept;
 
-// 로그 인자 하나를 지운다. Formatter가 없는 enum은 바탕 정수로 담는다.
+// LogStructure만 가진 타입을 "{@Name}"이 아닌 자리(런타임 템플릿)에
+// 썼을 때의 서식 함수다. 그 자리만 "<format error>"가 된다(리터럴
+// 템플릿은 컴파일 때 StructureArgumentWithoutAt로 거부한다).
+inline Result<void> FormatLogStructureOnly(StringBuilderBase&, const void*, StringView) noexcept {
+    return Result<void>::Failure(ErrorCode::Unsupported);
+}
+
+// 로그 인자 하나를 지운다. Formatter가 없는 enum은 바탕 정수로 담는다. LogStructure만 가진 타입은
+// 객체 주소만 담고(캡처가 "{@Name}" 자리에서 LogStructure로 펼친다) 서식은 실패하는 함수를 단다.
 template <typename T>
 FormatArg MakeLogArg(const T& value) noexcept {
     using U = RemoveCvRefT<T>;
-    if constexpr (!HasFormatter<U> && IsEnumV<U>) {
+    if constexpr (IsLogStructureOnly<U>) {
+        FormatArg arg;
+        arg.kind = FormatArgKind::Custom;
+        arg.custom.object = &value;
+        arg.custom.format = &FormatLogStructureOnly;
+        return arg;
+    } else if constexpr (IsUnloggableClass<U>) {
+        // LogArgKindOf의 static_assert가 영어 안내로 거부한다(서식 쪽 static_assert보다 먼저).
+        (void)LogArgKindOf<U>();
+        return FormatArg{};
+    } else if constexpr (!HasFormatter<U> && IsEnumV<U>) {
         using Underlying = UnderlyingTypeT<U>;
         FormatArg arg;
         if constexpr (IsSignedV<Underlying>) {
@@ -183,18 +214,27 @@ FormatArg MakeLogArg(const T& value) noexcept {
     }
 }
 
-// 런타임 템플릿이면 인자별 사용자 Formatter spec 검사 함수 배열을 붙인다(공용 FormatArg를 늘리지
-// 않으려고 로그 캡처 전용 배열로 넘긴다). 리터럴 템플릿은 컴파일 타임에 검사했으므로 그대로다.
-// 모든 런타임 템플릿 진입점(CaptureLog, Log::Write)이 이 함수를 거친다.
+// 인자 타입에서만 알 수 있는 정보를 템플릿 정보에 붙인다(공용 FormatArg를 늘리지 않으려고 로그
+// 캡처 전용 배열로 넘긴다).
+// - 런타임 템플릿이면 인자별 사용자 Formatter spec 검사 함수 배열
+//   (리터럴 템플릿은 컴파일 타임에 검사했다)
+// - LogStructure를 가진 인자가 있으면 인자별 맨 위 값 쓰기 함수 배열
+// 인자를 받는 모든 캡처 진입점(CaptureLog, Log의 기록 함수, LogLine::Write,
+// Log::Fatal, 내부 알림 LogTo)이 이 함수를 거친다.
 template <typename... Args>
-LogCaptureTemplate WithRuntimeSpecChecks(const LogCaptureTemplate& text) noexcept {
+LogCaptureTemplate WithArgumentInfo(const LogCaptureTemplate& text) noexcept {
     if constexpr (sizeof...(Args) == 0) {
         return text;
     } else {
         static constexpr LogSpecCheck checks[] = {LogSpecCheckOf<Args>()...};
+        static constexpr LogStructureWrite structures[] = {LogStructureWriteOf<Args>()...};
         LogCaptureTemplate checked = text;
         if (checked.runtime) {
             checked.checks = checks;
+        }
+
+        if constexpr ((HasLogStructure<RemoveCvRefT<Args>> || ...)) {
+            checked.structures = structures;
         }
 
         return checked;
@@ -211,7 +251,7 @@ Result<usize> CaptureWithArgs(const LogCaptureTarget& target, LogLevel level,
         return WriteLogCapture(target, level, category, text, nullptr, 0);
     } else {
         const FormatArg list[] = {MakeLogArg(args)...};
-        return WriteLogCapture(target, level, category, WithRuntimeSpecChecks<Args...>(text), list,
+        return WriteLogCapture(target, level, category, WithArgumentInfo<Args...>(text), list,
                                sizeof...(Args));
     }
 }
@@ -220,7 +260,8 @@ Result<usize> CaptureWithArgs(const LogCaptureTarget& target, LogLevel level,
 // 않는다.
 template <typename... Args>
 LogCaptureTemplate ToCaptureTemplate(const LogTemplate<Args...>& text) noexcept {
-    return {text.Text(), text.EventId(), text.Location(), false, text.ArgumentSpecs()};
+    return {text.Text(),          text.EventId(), text.Location(), false,
+            text.ArgumentSpecs(), nullptr,        nullptr,         text.StructureMask()};
 }
 
 inline LogCaptureTemplate ToCaptureTemplate(const RuntimeTemplate& text) noexcept {
@@ -280,8 +321,9 @@ Result<usize> CaptureLog(const LogCaptureTarget& target, LogLevel level,
 
 // 캡처 한 건을 렌더하고 event를 채운다.
 //
-// 채우는 칸: level, category, messageTemplate, eventId, message, properties, location, threadId,
-// frame, monotonicTicks·monotonicNanoseconds, flags. context·threadName·utcTicks는 건드리지 않는다.
+// 채우는 칸: level, category, messageTemplate, eventId, message, properties, structureNodes,
+// location, threadId, frame, monotonicTicks·monotonicNanoseconds, flags.
+// context·threadName·utcTicks는 건드리지 않는다.
 //
 // 결과:
 // - 런타임 템플릿 오류: message는 원본 템플릿 + " [template error: <code>]"이고 TemplateError다.
