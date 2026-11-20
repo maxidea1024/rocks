@@ -18,6 +18,14 @@ bool DumpDxilReflection(const shader::DxcFunctions&, Span<const uint8>, Report&)
     return false;
 }
 
+bool ReadDxilRequires(const shader::DxcFunctions&, Span<const uint8>, ShaderRequires&) noexcept {
+    return false;
+}
+
+bool ReadDxbcRequires(const shader::FxcFunctions&, Span<const uint8>, ShaderRequires&) noexcept {
+    return false;
+}
+
 bool CompileWithFxc(const shader::FxcFunctions&, StringView, const char*, const char*, const char*,
                     ByteArray&, StringBuilderBase& diagnostics) noexcept {
     diagnostics.Append(StringView("FXC is Windows only"));

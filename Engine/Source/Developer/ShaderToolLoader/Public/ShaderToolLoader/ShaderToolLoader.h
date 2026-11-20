@@ -196,7 +196,8 @@ struct FxcFunctions {
 };
 
 // SPIRV-Cross C API(spirv_cross_c.h): 버전, 문맥, SPIR-V 해석, backend 컴파일러와 옵션, GLSL 결합
-// 샘플러 만들기(HLSL의 분리 Texture·SamplerState를 ESSL sampler2D로 바꾼다), 출력.
+// 샘플러 만들기(HLSL의 분리 Texture·SamplerState를 ESSL sampler2D로 바꾼다)와 그 목록·변수 이름
+// 읽기, 출력.
 struct SpirvCrossFunctions {
     enum Index : usize {
         GetVersion,
@@ -211,6 +212,8 @@ struct SpirvCrossFunctions {
         CompilerOptionsSetUint,
         CompilerInstallCompilerOptions,
         CompilerBuildCombinedImageSamplers,
+        CompilerGetCombinedImageSamplers,
+        CompilerGetName,
         CompilerCompile,
         Count
     };
@@ -227,6 +230,8 @@ struct SpirvCrossFunctions {
                                                    "spvc_compiler_options_set_uint",
                                                    "spvc_compiler_install_compiler_options",
                                                    "spvc_compiler_build_combined_image_samplers",
+                                                   "spvc_compiler_get_combined_image_samplers",
+                                                   "spvc_compiler_get_name",
                                                    "spvc_compiler_compile"};
     void* address[Count] = {};
 };
