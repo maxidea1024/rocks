@@ -1,6 +1,7 @@
 #include "CompilationChecker.h"
 #include "LanguageNames.h"
 #include "NameBinder.h"
+#include "TypeChecker.h"
 
 // 이름 해석의 공통 부분과 언어 이름·엔진 schema 선언·해석이다(Docs/Design/SparksLanguage.ko.md
 // 3.9절 "이름의 출처"·"타입 표기 해석", 10.2절).
@@ -58,9 +59,14 @@ Result<void> NameBinder::Run() noexcept {
         return resized;
     }
 
+    if (auto resized = c.exprTypes_.TryResize(total); !resized) {
+        return resized;
+    }
+
     for (usize index = 0; index < total; ++index) {
         c.nodeSymbols_[index] = NotRecorded;
         c.nodeTypes_[index] = NotRecorded;
+        c.exprTypes_[index] = NotRecorded;
     }
 
     if (auto resized = c.nodeBase_.TryResize(moduleCount); !resized) {
@@ -79,6 +85,7 @@ Result<void> NameBinder::Run() noexcept {
     DeclareLanguageNames();
     DeclareEngine();
     ResolveEngine();
+    DeclarePreludeMembers();
     for (uint32 module = 0; module < moduleCount; ++module) {
         if (c.nodeBase_[module] != NoNode) {
             DeclareModule(module);
@@ -116,6 +123,12 @@ Result<void> NameBinder::Run() noexcept {
         if (c.nodeBase_[module] != NoNode) {
             BindBodies(module);
         }
+    }
+
+    // 타입 검사(LC2c). 이름 해석의 결과와 이름 공간을 그대로 쓴다.
+    if (error_ == ErrorCode::None && c.lastStage_ >= CompilationStage::Types) {
+        TypeChecker checker(*this);
+        checker.Run();
     }
 
     CheckServices();
@@ -395,6 +408,7 @@ void NameBinder::DeclareEngine() noexcept {
                 symbol.owner = owner;
                 symbol.index = schemaIndex;
                 symbol.item = function;
+                symbol.arity = source.typeParameterCount;
                 symbol.flags = (source.isStatic ? SymbolFlags::Static : 0) |
                                (source.isAsync ? SymbolFlags::Async : 0) |
                                (source.overridable ? SymbolFlags::Overridable : 0);
@@ -732,7 +746,11 @@ bool NameBinder::IsTypeSymbol(uint32 symbol) const noexcept {
     case SymbolKind::Interface:
         return true;
     case SymbolKind::PreludeType:
-        return LanguageNames()[entry.index].kind != LanguageNameKind::ReservedType;
+        // 언어 이름 표 밖의 언어 타입(문맥 이름 Time의 타입)도 타입이다.
+        return entry.index >= LanguageNames().Size() ||
+               LanguageNames()[entry.index].kind != LanguageNameKind::ReservedType;
+    case SymbolKind::LanguageTypeParameter:
+        return true;
     default:
         return false;
     }

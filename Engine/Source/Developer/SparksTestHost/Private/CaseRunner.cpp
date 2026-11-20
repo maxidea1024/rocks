@@ -103,7 +103,7 @@ Result<void> CompareNames(Allocator& allocator, const CaseInput& input, const So
                           Report& report) noexcept {
     StringBuilder<detail::MessageInlineBytes> message(allocator);
     StringBuilder<detail::MessageInlineBytes> dump(allocator);
-    bool resolved = stage == CompilationStage::Names;
+    bool resolved = stage >= CompilationStage::Names;
     if (resolved && !input.folder) {
         auto dumped = compilation.AppendNameDump(dump, mainModule);
         if (!dumped && dumped.Error() != ErrorCode::InvalidArgument) {

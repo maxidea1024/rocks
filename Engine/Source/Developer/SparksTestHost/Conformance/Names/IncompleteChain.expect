@@ -1,3 +1,5 @@
 # A class that derives from an incomplete class (unknown base or a cycle) is incomplete too.
 error S0318 1:16
 error S0323 10:16
+# Names only: type rules (LC2c) are checked in the Types area.
+stage names

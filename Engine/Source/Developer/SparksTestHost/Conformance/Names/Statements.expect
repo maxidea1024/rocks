@@ -2,3 +2,5 @@
 # with default, '?? return', index, map literal, interpolation, unary, parentheses, type
 # arguments in expressions, 'this' event paths and extension event parameters.
 clean
+# Names only: type rules (LC2c) are checked in the Types area.
+stage names

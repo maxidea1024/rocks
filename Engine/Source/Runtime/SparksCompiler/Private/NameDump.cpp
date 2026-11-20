@@ -73,6 +73,14 @@ StringView KindWord(SymbolKind kind) noexcept {
         return "param";
     case SymbolKind::Local:
         return "local";
+    case SymbolKind::LanguageField:
+        return "lang-field";
+    case SymbolKind::LanguageFunction:
+        return "lang-fn";
+    case SymbolKind::LanguageEvent:
+        return "lang-event";
+    case SymbolKind::LanguageTypeParameter:
+        return "type-param";
     }
 
     return "?";
@@ -86,6 +94,15 @@ Result<void> Compilation::AppendSymbolName(StringBuilderBase& out, uint32 symbol
     case SymbolKind::EngineType:
         out.Append(EnginePackageName).Append(".").Append(entry.name);
         break;
+    case SymbolKind::LanguageField:
+    case SymbolKind::LanguageFunction:
+    case SymbolKind::LanguageEvent:
+        if (entry.owner != NoSymbol && entry.owner != symbol) {
+            out.Append(symbols_[entry.owner].name).Append(".");
+        }
+
+        out.Append(entry.name);
+        break;
     case SymbolKind::EngineField:
     case SymbolKind::EngineFunction:
     case SymbolKind::EngineEvent:
@@ -96,6 +113,11 @@ Result<void> Compilation::AppendSymbolName(StringBuilderBase& out, uint32 symbol
             .Append(entry.name);
         break;
     case SymbolKind::EnumCase:
+        if (entry.module == NoModule && symbols_[entry.owner].kind != SymbolKind::EngineType) {
+            out.Append(symbols_[entry.owner].name).Append(".").Append(entry.name);
+            break;
+        }
+
         if (entry.module == NoModule) {
             out.Append(EnginePackageName)
                 .Append(".")

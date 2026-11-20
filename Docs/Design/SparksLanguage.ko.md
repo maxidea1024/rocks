@@ -117,7 +117,7 @@ class PlayerCharacter : Character {                  // Pawn 파생(Character는
     }
 
     on Tick() {                                      // 인자 dt는 필요할 때만 선언
-        let moveInput = MoveAction.Value;            // vec2
+        let moveInput = MoveAction.Value;            // vec3(2축 action은 X·Y)
         if (moveInput.Length() > 0.0) {
             let dir = GetForwardVector() * moveInput.Y + GetRightVector() * moveInput.X;
             AddMovement(dir.Normalize() * MoveSpeed); // 초당 속도. dt는 엔진이 적용
@@ -539,6 +539,122 @@ VerbatimLit  = '@"' { VerbatimChar | '""' } '"' ;                 (* escape·보
 | `Tag`·`TagSet` | `Tag.Find(s)`, `TagSet`: `Has` `HasAny(set)` `HasAll(set)` `Add` `Remove` | |
 | 설정 | `CVars.Find<T>(s)`, `CVarRef<T>.Value`, `Settings.Get<T>()` | §10.4 |
 
+#### 부록 B 시그니처(LC2c 확정, SD67)
+
+위 표의 정확한 시그니처다. 컴파일러가 이 목록을 언어 소유 멤버 표로 그대로 가진다. 표기: `fn 이름(매개변수): 반환`(반환이 없으면 `void`), `let 이름: 타입`은 읽기 전용 속성, `var 이름: 타입`은 쓸 수 있는 필드, `static`은 타입 이름으로 부른다, `await`는 대기를 돌려준다(그 값의 타입은 `:` 뒤 — §3.10), `event`는 기다릴 수 있고 `on`으로 받는 이벤트다. `N`은 모든 숫자 타입(오버로딩, §3.1), `S`는 부호 있는 정수·실수 타입, `I`는 정수 타입, `V`는 `vec2`·`vec3`·`vec4`, `T`·`K`는 그 타입의 타입 인자다. `[==]`는 `==`를 쓸 수 있는 원소일 때만, `[<]`는 `<`를 쓸 수 있는 원소일 때만, `[값]`·`[객체]`는 원소가 값·객체 타입일 때만 있는 멤버다.
+
+~~~text
+namespace Math {
+    fn Min(a: N, b: N): N            fn Max(a: N, b: N): N
+    fn Abs(x: S): S                  fn Sign(x: S): S
+    fn Clamp(x: N, lo: N, hi: N): N  fn Div(a: I, b: I): I
+    fn Floor(x: float): float        fn Ceil(x: float): float
+    fn Round(x: float): float        fn Trunc(x: float): float
+    fn FloorToInt(x: float): int     fn CeilToInt(x: float): int
+    fn RoundToInt(x: float): int     fn TruncToInt(x: float): int
+    fn Sqrt(x: float): float         fn Pow(x: float, y: float): float
+    fn Exp(x: float): float          fn Ln(x: float): float
+    fn Sin(x: float): float          fn Cos(x: float): float          fn Tan(x: float): float
+    fn Asin(x: float): float         fn Acos(x: float): float         fn Atan(x: float): float
+    fn Atan2(y: float, x: float): float
+    fn Radians(degrees: float): float   fn Degrees(radians: float): float
+    fn Lerp(a: float, b: float, t: float): float
+    fn InverseLerp(a: float, b: float, value: float): float
+    fn EaseIn(t: float): float       fn EaseOut(t: float): float      fn EaseInOut(t: float): float
+    fn NearlyEqual(a: float, b: float, tolerance: float): bool
+    fn NearlyEqual(a: V, b: V, tolerance: float): bool
+    fn Scale(a: V, b: V): V
+    let Pi: float
+}
+vec2 { var X: float; var Y: float }     vec3 { …, var Z: float }     vec4 { …, var W: float }
+V {                                     // vec2·vec3·vec4 공통, 생성 vec3(x, y, z)
+    fn Dot(other: V): float             fn Length(): float           fn LengthSquared(): float
+    fn Distance(other: V): float        fn Normalize(): V
+}
+vec3 { fn Cross(other: vec3): vec3 }
+quat {                                  // 생성 quat(x, y, z, w)
+    var X: float; var Y: float; var Z: float; var W: float
+    fn Rotate(v: vec3): vec3            fn Inverse(): quat           fn ToRotator(): Rotator
+    static fn FromAxisAngle(axis: vec3, radians: float): quat
+}
+Rotator {                               // 이름 지정 생성 Rotator(Pitch:, Yaw:, Roll:)
+    var Pitch: float; var Yaw: float; var Roll: float
+    fn ToQuat(): quat   fn Forward(): vec3   fn Right(): vec3   fn Up(): vec3
+}
+Transform {                             // 이름 지정 생성 Transform(Location:, Rotation:, Scale:)
+    var Location: vec3; var Rotation: quat; var Scale: vec3
+    fn TransformPosition(v: vec3): vec3      fn InverseTransformPosition(v: vec3): vec3
+    fn TransformVector(v: vec3): vec3        fn ToMatrix(): mat4
+}
+mat4 { fn TransformPosition(v: vec3): vec3 }
+Color { var R: float; var G: float; var B: float; var A: float }   // 이름 지정 생성
+string {
+    let Length: int                     fn CharCount(): int
+    fn Contains(text: string): bool     fn StartsWith(text: string): bool   fn EndsWith(text: string): bool
+    fn Find(text: string): int?         fn Slice(start: int, end: int): string
+    fn Split(separator: string): Array<string>
+    fn Trim(): string                   fn ToUpperAscii(): string            fn ToLowerAscii(): string
+}
+namespace Format {
+    fn Fixed(value: float, decimals: int): string
+    fn Padded(value: int, width: int): string
+}
+namespace Parse { fn Int(text: string): int?     fn Float(text: string): float? }
+Array<T> {                              // [i] 읽기 T?, [i] = v
+    fn Add(value: T)    fn Insert(index: int, value: T)    fn RemoveAt(index: int)
+    fn Clear()          fn Reverse()
+    [==] fn Contains(value: T): bool    [==] fn IndexOf(value: T): int?    [==] fn Remove(value: T): bool
+    [<] fn Sort()
+    [값] let Count: int
+    [객체] let SlotCount: int    [객체] fn AliveCount(): int    [객체] fn Compact()
+}
+Map<K, V> {                             // [k] 읽기 V?, [k] = v
+    let Count: int      fn ContainsKey(key: K): bool    fn Remove(key: K): bool
+    fn Keys(): Array<K> fn Values(): Array<V>           fn Clear()
+}
+Set<T> {
+    let Count: int      fn Add(value: T): bool    fn Remove(value: T): bool
+    fn Contains(value: T): bool                   fn Clear()
+}
+Result<T> { let Value: T?  /* Result<void>에는 없다 */   let Error: Error? }
+namespace Log {
+    fn Info(message: string)  fn Warning(message: string)  fn Error(message: string)  fn Debug(message: string)
+}
+fn Assert(condition: bool, message: string)
+namespace Random {
+    fn Int(min: int, maxExclusive: int): int
+    fn Float(min: float, max: float): float
+    fn Chance(probability: float): bool
+}
+Time { let Delta: float; let FixedDelta: float; let UiDelta: float; let GameSeconds: float; let Frame: int }
+enum Clock { Game, UI }
+fn Delay(seconds: float, clock: Clock): await void
+fn NextTick(): await void               fn NextFixedTick(): await void
+fn All(waits...): await void            fn Race(waits...): await void    // 대기 1개 이상(§6.1)
+namespace Assets {
+    fn LoadAll<T>(assets: Array<Soft<T>>): LoadRequest<Array<T>>
+    fn Find<T>(path: string): Soft<T>?
+}
+Soft<T> { fn Load(): LoadRequest<T> }   // T는 에셋 타입
+LoadRequest<T> { let IsDone: bool; let Progress: float }   // await 결과는 Result<T>
+Tag { static fn Find(name: string): Tag? }
+TagSet {
+    fn Has(tag: Tag): bool      fn HasAny(tags: TagSet): bool    fn HasAll(tags: TagSet): bool
+    fn Add(tag: Tag)            fn Remove(tag: Tag)
+}
+InputAction {
+    let Value: vec3             // UE FInputActionValue처럼 3축(1축·bool은 X, 2축은 X·Y)
+    event Started   event Triggered   event Ongoing   event Completed   event Cancelled
+}
+Text { static fn Find(key: string): Text? }
+namespace CVars { fn Find<T>(name: string): CVarRef<T>? }
+CVarRef<T> { let Value: T }
+namespace Settings { fn Get<T>(): T }
+Class<T> { fn Create(): T }             // full, T는 class 타입
+~~~
+
+`Row<T>`의 조회(`T.FindRow`)와 `Input`·`World`·`Session`·`Caller`의 멤버는 엔진 binding schema가 정한다(문맥 이름의 타입은 §3.10). `WorldPosition`의 멤버는 그 규격을 정할 때 더한다.
+
 ### 3.9 이름 해석 세부(LC2b 확정)
 
 이 절은 §3.1·§3.4의 이름 규칙을 컴파일러가 판정하는 방식으로 확정한다. 진단 코드는 §8.1 "이름 해석" 표다.
@@ -559,7 +675,7 @@ VerbatimLit  = '@"' { VerbatimChar | '""' } '"' ;                 (* escape·보
 | 내장 타입(언어) | `bool` `int` `float` `int8`–`int64` `uint8`–`uint64` `float32` `float64` `string` `vec2` `vec3` `vec4` `quat` `mat4` `void` |
 | prelude 타입(언어 소유) | 제네릭 `Array<T>` `Set<T>` `Map<K, V>` `Result<T>` `Soft<T>` `Row<T>` `Class<T>` `CVarRef<T>` `LoadRequest<T>`, 그 밖 `Text` `Tag` `TagSet` `InputAction` `Rotator` `Transform` `Color`, enum `Clock`(`Game`·`UI` — 타입이며 `Clock.Game`처럼 값으로도 쓴다). `WorldPosition`은 언어 소유 이름으로 예약만 한다(규격이 정해지면 이 표에 정의한다 — 연동 요구 SE-G13. 그때까지 쓰면 S0318) |
 | prelude 값(언어 소유) | `Log` `Assert` `Math` `Random` `Format` `Parse` `Delay` `NextTick` `NextFixedTick` `All` `Race` `Assets` `CVars` `Settings`, 검증 리터럴 `Tag` `Action` `Asset` `Row` `Loc` `CVar`(`Tag`·`Row`는 타입이기도 하다) |
-| 엔진 패키지 `Rocks`(binding schema) | schema의 모든 타입. 부록 A의 핵심 엔진 타입과 `Connection`·`PlaySession`·`Hit`·`Error`(닫힌 enum)는 schema가 제공한다 |
+| 엔진 패키지 `Rocks`(binding schema) | schema의 모든 타입. 부록 A의 핵심 엔진 타입과 `Connection`·`PlaySession`·`Hit`·`Error`(닫힌 enum), 문맥 이름 `Input`의 타입 `InputSystem`(LC2c)은 schema가 제공한다 |
 | 문맥 이름 | `World` `Session` `Input` `Time` `Caller` |
 | RPC 접두 | `Server` `AllClients` `OwnerClient`(쓰임 규칙은 LC3) |
 
@@ -616,6 +732,109 @@ VerbatimLit  = '@"' { VerbatimChar | '""' } '"' ;                 (* escape·보
 **manifest `services`(S0325).** 항목의 마지막 구간을 뺀 경로가 같은 패키지 모듈의 import 경로이고, 마지막 구간이 그 모듈 최상위 class의 이름이며, 그 class의 기반 체인에 `WorldService`가 있어야 한다. 어긋나면 manifest의 그 항목에 S0325다. 그 모듈에 어휘·구문 진단이 있거나(선언이 빠졌을 수 있다) 그 class가 불완전하면(기반을 모른다) 내지 않는다. 해석하지 못한 import는 그 모듈의 선언을 없애지 않으므로 이유가 되지 않는다.
 
 **이름 해석 덤프(SD58 확장, `AppendNameDump`).** 모듈 하나의 해석 결과를 결정적인 텍스트로 적는다(형식은 `SparksCompiler/Compilation.h`). corpus 사례 옆의 `<사례>.names`가 golden이다(§13.1). 선언 이름(`decl` 줄 — 최상위·멤버·case·별칭·매개변수·지역 이름), 해석한 자리(단순 이름·`on`·`emit` 경로 첫 이름), 타입 표기(`type` 줄)마다 한 줄이며 원문 위치 순서다. 대상은 선언 종류와 정규 이름(`패키지:모듈 경로.이름`, 엔진은 `Rocks.이름`)으로 적고, 지역 이름·매개변수는 선언 위치를 함께 적는다. 확장 이벤트는 매개변수 이름·타입만 LC2b가 검사하고(다른 매개변수 목록과 같다) 대상과 이벤트 이름은 LC3다.
+
+### 3.10 타입 검사(LC2c 확정)
+
+이 절은 §3.3·§4의 식·타입 규칙을 컴파일러가 판정하는 방식으로 확정한다. 진단 코드는 §8.1 "null·타입"(S04xx)·"숫자·상수식"(S05xx) 표와 S0326이다. LC2c는 식마다 타입을 정하고(기대 타입 전달 포함) 아래 규칙을 검사한다. 뒤로 넘기는 것: 흐름에 기대는 규칙(await 이후 `T?`, 미사용, 대입 가능 경로·`let` — LC2d), 실행 문맥·효과(await·emit·생성을 쓸 수 있는 곳 — LC3), 검증 리터럴의 사전 대조(태그·action·에셋·row·catalog·CVar 사전이 있어야 한다 — 연동 EI1·EI4), 프로필(LC2d).
+
+**타입의 종류.** 값 타입(내장 타입, prelude 값 타입, struct, enum, 컨테이너·`Result`·`Soft`·`Row` 등 prelude 제네릭), 참조 타입(엔진 `object`·`asset`과 Sparks class·interface), 선택 타입 `T?`(T는 `?`가 아닌 타입), 그리고 식에만 있는 다섯 가지다.
+
+| 식 전용 타입 | 뜻 | 쓰이는 곳 |
+|---|---|---|
+| 타입 없는 정수·실수 상수 | 숫자 리터럴과 그 상수식(Go의 untyped constant) | 기대 타입으로 바뀌고, 없으면 `int`·`float` |
+| `null` | `null` 리터럴 | 기대 타입 `T?`로 바뀐다. 기대 타입이 없으면 S0417 |
+| 대기 | `async fn` 호출, `Delay`·`NextTick`·`NextFixedTick`·`All`·`Race`, 이벤트(`X.Event`), 로드 요청 | `await`의 피연산자와 `All`·`Race`의 인자로만 쓴다(그 밖은 S0422) |
+| 타입 이름 | 식에 쓴 타입(`DoorState`, `Math`가 아닌 `vec3` 등) | 멤버 접근(enum case·static 함수)과 생성·변환 호출의 대상으로만 쓴다(그 밖은 S0405) |
+| 이름 공간 | prelude 값(`Math`·`Log`·`Random`·`Format`·`Parse`·`Assets`·`CVars`·`Settings`)과 import 별칭 | 멤버 접근으로만 쓴다(S0405) |
+
+`void`는 값이 아니다. `void` 결과를 값 자리에 쓰면 S0405이다.
+
+**대입 가능(타입 A의 값을 타입 B 자리에).** 다음 중 하나일 때만이다. 그 밖은 S0401이다.
+
+1. A와 B가 같은 타입이다(`int`와 `int64`는 같다).
+2. A가 타입 없는 상수이고 아래 "숫자 상수" 규칙으로 B(또는 `B?`의 B)가 된다.
+3. B가 `T?`이고 A가 `T`·`T?`로 대입 가능하거나 A가 `null`이다.
+4. A·B가 참조 타입이고 A가 B의 파생(기반 체인·구현한 interface — schema `base`·Sparks 기반 목록)이다. 컨테이너·`Result`·`Soft` 등 제네릭의 타입 인자는 같아야 한다(무공변 — `Array<Derived>`는 `Array<Base>`가 아니다).
+5. 검증 리터럴·컬렉션 리터럴은 아래 각 규칙대로 B에 맞춰진다.
+
+숫자 사이에는 암묵 변환이 없다(SD56). `float32` 값을 `float` 자리에 쓰려면 `float(x)`다.
+
+**기대 타입.** 다음 자리는 기대 타입을 아래로 전달한다: 타입을 쓴 지역·필드 선언의 초기값, const 초기값, 대입의 오른쪽(왼쪽의 타입), 호출 인자(매개변수 타입), 이름 지정 인자(그 필드 타입), `return`의 값(함수 반환 타입, `Result<T>`면 아래 반환 규칙), `emit` 인자(이벤트 매개변수 타입), 컬렉션 리터럴 원소(원소·key·값 타입), `??`의 오른쪽(왼쪽의 `T?`이면 `T`), 이항 산술·비교의 상대 피연산자(한쪽이 정해진 타입일 때), `switch` case 값(대상의 타입), 괄호 안. 기대 타입은 검사 순서를 바꾸지 않는다(왼쪽에서 오른쪽).
+
+**숫자 상수(SD66).** 정수·실수 리터럴과 그 상수식(단항 `-`, 괄호, 상수끼리의 `+`·`-`·`*`·`%`, 실수 상수의 `/`)은 타입 없는 상수다.
+
+- 타입 없는 정수 상수는 −2^63부터 2^64−1까지의 정확한 정수다. 계산 중 이 범위를 벗어나면 S0503이다. 타입 없는 실수 상수는 double로 계산하며 NaN·Inf가 되면 S0505다.
+- 정해진 숫자 타입 자리에서 그 타입이 된다. 정수 상수는 정수·실수 타입 자리에 모두 쓸 수 있고 값이 그 타입에 정확히 들어가야 한다(정수는 범위, 실수는 float32·float64로 정확히 표현 — 그렇지 않으면 S0109). 실수 상수는 정수 자리에 쓸 수 없다(S0509). 실수 상수가 float32 자리에 오면 최근접 짝수로 반올림하며, 범위를 넘으면 S0109다.
+- 자리의 타입이 없으면 정수 상수는 `int`, 실수 상수는 `float`가 된다(`var x = 1`).
+- 정수 상수끼리의 `/`는 SD17대로 S0501이다. 상수 `%`·`Math.Div`의 0은 S0504다.
+- 이름 붙은 `const`는 선언 타입을 가진 정해진 상수다(타입 없는 상수가 아니다).
+
+**연산자.** 피연산자의 타입이 맞지 않으면 S0406이다(숫자 타입이 섞이면 S0507). 한쪽이 타입 없는 상수면 다른 쪽 타입으로 맞춘다.
+
+| 연산 | 피연산자 | 결과 |
+|---|---|---|
+| `+` `-` `*` | 같은 숫자 타입 | 그 타입 |
+| `/` | 같은 실수 타입(정수는 S0501) | 그 타입 |
+| `%` | 같은 정수 타입 | 그 타입 |
+| 단항 `-` | 부호 있는 정수·실수 타입(부호 없는 타입은 S0506), 벡터 | 그 타입 |
+| `+` `-`(벡터) | 같은 `vec2`–`vec4` | 그 타입 |
+| `*` `/`(벡터·실수) | `vecN * float`, `float * vecN`, `vecN / float` | `vecN` |
+| `*`(합성) | `quat * quat`, `mat4 * mat4` | 같은 타입 |
+| `<` `<=` `>` `>=` | 같은 숫자 타입, `string`(UTF-8 byte 순), 같은 enum(선언 순) | `bool` |
+| `==` `!=` | §3.3 "비교"의 타입끼리(같은 타입, 또는 한쪽이 다른 쪽의 기반인 객체, `T?`와 `T`·`null`) — 그 밖은 S0407 | `bool` |
+| `!` | `bool` | `bool` |
+| `&&` `\|\|` | `bool` | `bool` |
+| `??` | 왼쪽 `T?`(아니면 S0414), 오른쪽 `T`·`T?`·`Exit` | `T`, `T?`, `T` |
+
+문자열 `+`는 없다(S0406, 수정 예는 보간). 복합 대입 `x op= v`는 `x = x op v`의 연산 규칙을 따르고 정수 `/=`는 S0501이다.
+
+**변환.** 숫자 타입 이름을 함수처럼 부른 `T(x)`(인자 하나, 위치 인자)는 숫자 변환이다. x는 숫자 타입이나 타입 없는 상수여야 한다(그 밖은 S0508). 실수 → 정수 타입은 S0502이며 `Math.FloorToInt` 등을 제시한다. 상수의 변환은 컴파일 때 판정한다(정수 상수가 대상 범위 밖이면 S0109). 숫자가 아닌 내장 타입(`bool`·`string`)의 변환 호출은 없다(S0508).
+
+**멤버 접근(`.`, S0326).** 수신자의 종류마다 찾는 곳이 다르며 없으면 S0326이다(비슷한 멤버 이름을 제시).
+
+- 값(struct·enum 아닌 값 타입·prelude 값 타입): 그 타입의 필드·함수(부록 B, schema). 선택 타입 `T?`에 `.`을 쓰면 S0412이다(`?.`·`if (let)`·`??`를 제시).
+- 참조: 그 타입과 기반 체인의 필드·함수·이벤트(Sparks 멤버 포함). 이벤트 `X.E`는 대기다.
+- 타입 이름: enum case(`DoorState.Open`, 엔진 enum 포함)와 static 함수(schema `static`, 부록 B의 `Tag.Find` 등). 그 밖의 멤버는 S0425이다(인스턴스 멤버를 타입으로 부름). 거꾸로 인스턴스로 static 함수를 부르면 S0425이다.
+- 이름 공간: prelude 이름 공간의 멤버(부록 B), 별칭은 그 모듈의 최상위 선언(타입이면 타입 이름, 함수·const면 그 값).
+- `?.`: 수신자가 `T?`여야 하고(아니면 S0414) 결과는 멤버 타입의 선택 타입이다(이미 `?`면 그대로, `void`면 `void`).
+- 문맥 이름의 타입: `World` → schema `World`, `Session` → schema `PlaySession`, `Input` → schema `InputSystem`, `Caller` → schema `Connection`, `Time` → 언어 타입 `Time`(부록 B).
+
+**호출.**
+
+- 함수 값(최상위 fn, 멤버 함수, static 함수, prelude 함수)의 호출은 위치 인자만 쓴다(이름 지정 인자는 S0404). 인자 수가 다르면 S0403, 인자 타입은 매개변수 타입에 대입 가능해야 한다(S0401). 함수가 아닌 것을 부르면 S0402이다.
+- schema 제네릭 함수(`Find<T: Component>`)는 타입 인자를 명시해야 하며(추론하지 않는다 — 빠지면 S0411), 타입 인자는 제약 타입의 파생이어야 한다(S0411). 그 밖의 함수에 타입 인자를 붙이면 S0320이다.
+- `async fn`·대기를 돌려주는 호출의 결과는 대기다(`await` 없이 값으로 쓰면 S0422).
+- 생성: struct·schema struct·component(`object` 중 `Component` 파생)·`Rotator`·`Color`·`Transform`의 타입 이름 호출은 이름 지정 인자만 쓴다(위치 인자는 S0404). 인자 이름은 그 타입의 필드여야 하고(S0326) 중복은 S0404, 기본값이 없는 필드(§3.2 — `?` 없는 에셋·`Soft<T>`·`Row<T>`·`Tag`·`InputAction` 필드)를 빠뜨리면 S0404다. schema struct는 `constructible: true`일 때만 생성한다(S0402). 그 밖의 참조 타입(Actor 등)은 생성 호출이 없다(S0402 — 생성은 `World.Spawn` 등 엔진 API). component 생성이 놓일 수 있는 자리(`let` 필드 초기값 — §4.5)는 LC3이 검사한다.
+- `vec2`–`vec4`·`quat`의 생성은 위치 인자(성분 수만큼, 실수)다. `mat4`의 직접 생성은 없다(S0402).
+- `Math`의 숫자 공용 함수(`Min`·`Max`·`Abs`·`Clamp`·`Sign`)는 §3.1 오버로딩 규칙이다: 인자를 모두 같은 숫자 타입으로 맞추고(상수는 다른 인자의 타입, 모두 상수면 `int`·`float`), 맞는 판이 없으면 S0401이다. `Abs`·`Sign`은 부호 없는 타입에 없다(S0401).
+
+**`this`.** class의 함수·handler·필드 초기값에서 그 class 타입의 값이다. struct·최상위 fn·const 초기값의 `this`는 S0423다. 자기 멤버를 `this.X`로 쓰면 S0423다(§3.3 — `on this.E`·`emit this.E`는 예외).
+
+**선택 타입 연산(S0414).** `?.`·`??`의 왼쪽과 `if (let x = e)`의 `e`는 `T?`여야 한다. `if (let)`의 `e`가 `bool?`이면 S0414다(`e ?? false`·`e != null`을 제시, §4.3). `?` 없는 `T`와 `null`의 비교는 S0407이다.
+
+**검증 리터럴(S0424).** `Tag`·`Action`·`Asset`·`Row`·`Loc`·`CVar`의 첫 인자는 보간 없는 문자열 리터럴이어야 한다. `Tag(...)` → `Tag`, `Action(...)` → `InputAction`, `Loc(key, 이름: 값...)` → `Text`(key 뒤는 이름 지정 인자, 값은 보간할 수 있는 타입). `Asset(...)`은 기대 타입이 에셋 타입 `T`·`T?`이면 하드 참조, `Soft<T>`·`Soft<T>?`면 소프트 참조이고, `Row(...)`는 기대 타입 `Row<T>`·`Row<T>?`, `CVar(...)`는 `CVarRef<T>`가 있어야 한다(없으면 S0417). 사전과의 대조는 연동 단계다.
+
+**컬렉션 리터럴(S0417·S0418).** `[...]`는 기대 타입이 `Array<T>`·`Set<T>`이면 원소 리터럴, `Map<K, V>`이면 `키: 값` 리터럴이며 원소마다 T(K·V)를 기대 타입으로 검사한다. 기대 타입이 없으면 원소가 하나 이상이고 모두 같은 타입일 때 `Array<그 타입>`이다(정수 상수와 실수 상수가 섞이면 `float` — §3.3, 그 밖에 타입이 다르면 S0418, 기반 타입으로 합치지 않는다). 빈 `[]`·Map 리터럴·`Set`은 기대 타입이 있어야 한다(S0417). 원소 타입은 `?`일 수 없다(§4.2 — S0401).
+
+**문자열 보간(S0419).** `${}` 안의 식은 `bool`·숫자 타입·`string`·enum·`Tag`·`vec2`–`vec4`·`quat`·`Rotator`·`Color`·`Transform` 타입이어야 한다. `T?`·객체·struct·컨테이너·`Text`는 S0419다.
+
+**조건(S0408).** `if`·`while`의 조건, `!`·`&&`·`||`의 피연산자, `Assert`의 첫 인자는 `bool`이다(`bool?`도 아니다).
+
+**`as?`(S0420).** 피연산자는 참조 타입(`T?` 포함), 대상은 class·interface 타입이며 결과는 대상의 `?`다. 대상이 피연산자 타입 자신이거나 그 기반이면(올림 변환) S0420이다. class끼리는 대상이 피연산자의 파생이어야 하고(관계없는 class는 S0420), interface가 끼면 관계없이 허용한다(실행 중 조회).
+
+**`await`·`try`(S0421).** `await e`의 `e`는 대기여야 하고 결과는 그 값의 타입이다: `async fn`은 반환 타입, 로드 요청 `LoadRequest<T>`는 `Result<T>`, 그 밖의 대기는 `void`. `try e`의 `e`는 `Result<T>`(`try await`면 await 결과가 `Result<T>`)이며 결과는 `T`(`Result<void>`면 `void`)다. 둘을 쓸 수 있는 자리는 §3.3(구문, S0212)과 LC3(실행 문맥)이다.
+
+**반환(S0409·S0410).**
+
+- 반환 타입이 없거나 `void`인 함수·handler의 `return e;`는 S0410, 반환 타입이 있는 함수의 `return;`도 S0410이다. `Result<void>` 함수는 `return;`이 성공이다.
+- `Result<T>` 함수의 `return e`는 `e`가 `T`에 대입 가능하면 성공, `Error` 값(엔진 enum `Error`)이면 실패다. 둘 다 아니면 S0401이다. `Result<T?>`는 S0401(§3.2)이다.
+- 반환 타입이 있고 `Result<void>`가 아닌 함수는 본문이 "끝나는 문장"으로 끝나야 한다(S0409, 위치는 함수 본문의 닫는 `}`). 끝나는 문장: `return`, 마지막 문장이 끝나는 문장인 블록, `else`가 있고 두 갈래가 모두 끝나는 `if`, `default`가 있거나(enum이면 모든 case를 다룬) 모든 갈래가 끝나는 `switch`. `while`은 끝나는 문장이 아니다.
+
+**switch(S0415·S0416).** 대상은 `==`를 쓸 수 있는 타입이고 case 값은 대상 타입의 상수식이다(enum case, 숫자·문자열 상수, const — S0401). 같은 값의 case가 두 번 나오면 S0416이다. enum 대상은 모든 case를 다뤄야 하며 `default`가 없다(S0415 — 빠진 case를 메시지에 적는다). 엔진 `Error`와 enum이 아닌 대상은 `default`가 있어야 한다(S0415).
+
+**타입 인자 제약.** 컨테이너의 원소·key 타입과 `Result`·`Soft`·`Row`·`LoadRequest`·`CVarRef`·`Class`의 타입 인자는 `?`일 수 없다(S0401). `Map`의 key·`Set`의 원소는 `==`를 쓸 수 있는 타입이어야 한다(S0407). `void`는 `Result<void>`의 타입 인자로만 쓴다(그 밖의 `void` 타입 표기는 S0405). `Soft<T>`의 T는 에셋 타입, `Class<T>`의 T는 class 타입이어야 한다(S0411).
+
+**연쇄 방지(LC2c).** 해석하지 못한 이름·타입(NoType)이 낀 식은 더 검사하지 않고 결과 타입도 해석하지 못한 것이다(S04xx·S05xx를 더 내지 않는다). 식 하나에 S04xx·S05xx는 하나다(바깥 식은 안쪽 식이 진단을 받았으면 그 결과를 해석하지 못한 것으로 본다).
 
 ## 4. 타입·참조·값
 
@@ -1117,6 +1336,45 @@ Characters/PlayerCharacter.spark:42:5: error S0731: Cannot assign to a function 
 | S0323 | `inheritance-cycle` | Sparks 클래스 상속이 순환한다(순환 하나에 하나) | 순환을 끊는다 |
 | S0324 | `interface-not-implemented` | class가 기반 interface의 메서드를 같은 이름·시그니처로 구현하지 않았다 | 그 시그니처의 `fn`을 더한다 |
 | S0325 | `invalid-service` | manifest `services` 항목이 같은 패키지 모듈의 `WorldService` 파생 최상위 class가 아니다 | 모듈 경로와 class 이름을 고친다 |
+| S0326 | `unknown-member` | `.`·`?.` 뒤 멤버나 이름 지정 인자의 필드를 찾지 못했다(LC2c, §3.10) | 비슷한 멤버 이름 |
+
+- **null·타입(S04xx, LC2c)·숫자·상수식(S05xx, LC2c):** 규칙과 위치는 §3.10이다. 위치는 그 식(또는 피연산자·인자·멤버 이름)의 시작이며, S0409는 함수 본문의 닫는 `}`다. S0109(`integer-literal-too-large`)는 어휘 대역 번호이지만 타입을 아는 이 단계가 낸다. S0413은 LevelScript(§8.1 위)이며 LC3에서 검사한다.
+
+| 코드 | 이름 | 조건 | 수정 예 |
+|---|---|---|---|
+| S0401 | `type-mismatch` | 값의 타입이 자리의 타입에 대입 가능하지 않다(§3.10 "대입 가능"), `?` 타입 인자, `Result<T?>` | 변환하거나 맞는 타입의 값 |
+| S0402 | `not-callable` | 함수가 아닌 것을 불렀다, 생성할 수 없는 타입(`constructible: false`, Actor 등 참조 타입, `mat4`) | 함수 이름이나 엔진 생성 API |
+| S0403 | `argument-count` | 인자 수가 매개변수 수와 다르다 | 시그니처대로 |
+| S0404 | `argument-form` | 함수 호출의 이름 지정 인자, 생성의 위치 인자, 이름 중복, 기본값 없는 필드를 빠뜨림 | 함수는 위치 인자, 생성은 `Field: 값` |
+| S0405 | `not-a-value` | 타입 이름·이름 공간·`void`를 값으로 썼다, `Result<void>` 밖의 `void` 타입 | 값을 쓴다 |
+| S0406 | `invalid-operator` | 연산자가 그 피연산자 타입에 없다(문자열 `+` 포함) | 보간·맞는 타입 |
+| S0407 | `not-comparable` | `==`·`!=`를 쓸 수 없는 타입, `?` 없는 값과 `null`, `==`를 쓸 수 없는 Map key·Set 원소 | `Math.NearlyEqual` 등 |
+| S0408 | `condition-not-bool` | 조건·논리 연산의 피연산자가 `bool`이 아니다 | `x != null`·`x ?? false` |
+| S0409 | `missing-return` | 반환 타입이 있는 함수가 끝나는 문장으로 끝나지 않는다 | `return`을 더한다 |
+| S0410 | `return-value` | `void` 함수의 `return 값`, 반환 타입이 있는 함수의 `return;` | 값을 지우거나 더한다 |
+| S0411 | `type-argument-rule` | 제네릭 함수의 타입 인자가 없거나 제약의 파생이 아니다, `Soft<T>`·`Class<T>`의 T가 맞지 않는다 | `Find<Health>()` |
+| S0412 | `may-be-null` | `T?` 값에 `.`을 썼다 | `?.`, `if (let)`, `??` |
+| S0414 | `not-optional` | `?.`·`??`·`if (let)`의 대상이 `T?`가 아니다, `if (let)`의 `bool?` | 그 연산을 지운다 |
+| S0415 | `switch-coverage` | enum switch가 case를 빠뜨렸거나 `default`가 있다, enum이 아닌·엔진 `Error` switch에 `default`가 없다 | 빠진 case나 `default` |
+| S0416 | `duplicate-case` | 같은 값의 case가 다시 나온다 | 한 case로 |
+| S0417 | `no-expected-type` | 기대 타입이 필요한 `[]`·Map 리터럴·`null`·`Asset(...)`·`Row(...)`·`CVar(...)`에 기대 타입이 없다 | 타입을 적는다 |
+| S0418 | `mixed-collection-types` | 기대 타입 없는 배열 리터럴의 원소 타입이 다르다 | 타입을 적거나 맞춘다 |
+| S0419 | `interpolation-type` | 보간할 수 없는 타입(§3.3) | 그 값의 표시용 문자열 |
+| S0420 | `invalid-cast` | `as?`의 피연산자·대상이 맞지 않거나 올림 변환이다 | `as?`를 지운다 |
+| S0421 | `await-try-operand` | `await`의 대상이 대기가 아니다, `try`의 대상이 `Result`가 아니다 | 그 키워드를 지운다 |
+| S0422 | `unawaited` | 대기(`async fn` 호출·`Delay`·이벤트 등)를 `await` 없이 값으로 썼다 | `await` |
+| S0423 | `this-misuse` | struct·최상위 fn·const의 `this`, 자기 멤버의 `this.X` | 이름만 쓴다 |
+| S0424 | `validated-literal-form` | 검증 리터럴의 첫 인자가 보간 없는 문자열 리터럴이 아니다 | `Tag("A.B")` |
+| S0425 | `static-instance-mismatch` | 타입 이름으로 인스턴스 멤버를, 인스턴스로 static 함수를 불렀다 | 맞는 쪽으로 |
+| S0501 | `integer-division` | 정수(상수 포함)끼리의 `/`, 정수 변수의 `/=` | `Math.Div(a, b)`, `float(a) / float(b)` |
+| S0502 | `float-to-int-conversion` | 실수 → 정수 타입 변환 호출 | `Math.FloorToInt` 등 |
+| S0503 | `constant-overflow` | 타입 없는 정수 상수식이 −2^63..2^64−1을 벗어난다 | 값을 줄인다 |
+| S0504 | `constant-division-by-zero` | 상수 `%`·`Math.Div`의 0 | 0이 아닌 값 |
+| S0505 | `non-finite-constant` | 실수 상수식이 NaN·Inf다 | 값을 고친다 |
+| S0506 | `unsigned-negation` | 부호 없는 정수 타입의 단항 `-` | 부호 있는 타입 |
+| S0507 | `mixed-numeric-types` | 다른 숫자 타입끼리 계산·비교했다 | `float(x)` 등으로 맞춘다 |
+| S0508 | `invalid-conversion` | 숫자 변환 호출의 인자가 숫자가 아니다, `bool`·`string` 변환 | `Parse.Int` 등 |
+| S0509 | `float-constant-in-integer` | 실수 상수를 정수 자리에 썼다 | 정수 상수나 `Math.RoundToInt` |
 
 - **패키지(S11xx, LC2a):** manifest·모듈 경로·패키지 의존·binding schema 파일이다. 위치 규칙은 §3.4와 §10.2 "binding schema 파일 형식"에 있다. 코드 대역의 나머지(reload·backend)는 해당 마일스톤에서 더한다.
 
@@ -1825,7 +2083,7 @@ LC2는 범위가 커서 하위 단계로 나눈다(각 단계가 corpus 영역 �
 |---|---|
 | LC2a 컴파일 입력 | binding schema 파일 형식과 reader, 시험용 가짜 엔진 schema, 패키지 manifest reader, 모듈 경로 규칙, 패키지 의존(없음·순환), import 해석, 컴파일 단위(`Compilation`), corpus 패키지 사례. 진단 S0301–S0305, S1101–S1112, S1120 |
 | LC2b 선언·이름 | prelude와 부록 A·B 선언 표, 선언 수집, 명명 규칙, 예약 이름, 이름 하나에 대상 하나, import한 이름의 충돌, 별칭, 문맥 이름, 상속 멤버·`override` 대상, 기반 목록·interface 구현, 타입 표기 해석(소스·schema), manifest `services` 해석, 이름 해석 덤프(`.names`). 규칙은 §3.9. 진단 S0306–S0325, schema S1120(이름) |
-| LC2c 타입·숫자 | 식의 타입, 숫자(타입 없는 상수·변환·나눗셈·비교·상수 overflow), 문자열 보간, 컨테이너·리터럴과 기대 타입, 호출·인자 형태·생성, 검증 리터럴, `as?`, switch, 조건, 반환 경로. 진단 S04xx 일부·S05xx |
+| LC2c 타입·숫자 | 식의 타입, 숫자(타입 없는 상수·변환·나눗셈·비교·상수 overflow), 문자열 보간, 컨테이너·리터럴과 기대 타입, 멤버 접근(부록 B 시그니처·schema), 호출·인자 형태·생성, 검증 리터럴(형식만), `as?`, `await`·`try`의 타입, switch, 조건, 반환 경로. 규칙은 §3.10. 진단 S0326, S0401–S0425(S0413 제외), S0501–S0509, S0109 |
 | LC2d 흐름·대입·마무리 | null 흐름(`T?`, `?.`·`??`·`if (let)`·Exit, await 이후 `T?`), 대입·`let`(S07xx), 미사용 이름·결과, 상수식과 const 순환, 필드 기본값 규칙, 프로필 검사, §2 예시 통과 |
 
 순서는 LC0 → LC7이 한 줄이다. LC8의 CLI는 LC3 뒤부터 단계마다 넓히고(check → build → test), 언어 서버는 LC3 뒤에 시작할 수 있다. LC9는 LC6 뒤다.
@@ -1860,7 +2118,7 @@ LC2는 범위가 커서 하위 단계로 나눈다(각 단계가 corpus 영역 �
 
 ## 19. 결정 사항
 
-2026.11.12 검토에서 초안의 권고안 10건(SD1–SD10)을 채택하였고, 같은 날 4차 검증에서 도출된 11건(SD11–SD21)을 채택하였다. 2026.11.18 5차 검증(초안 1.3)에서 사용자 요구(핫 리로드 필수·오류 방어·선택형 AOT·`WeakObjectRef` 명칭)와 권장안으로 24건(SD22–SD45)을 확정하였다. 2026.11.20 초안 1.5에서 구현 순서 3건(SD51–SD53)을, 같은 날 언어 코어 구현 중 리터럴·숫자 타입·덤프 5건(SD54–SD58)을 사용자 결정으로 더하였다. 언어 코어 구현의 LC2a에서 컴파일 입력 3건(SD59–SD61)을, LC2b(2026.11.21)에서 이름 해석 4건(SD62–SD65)을 권장안으로 확정하였다. 2026.11.20 레벨 스크립트 설계 확정([LevelScript](LevelScript.ko.md) LD1–LD20, 모두 권장안)에서 언어에 걸리는 결정을 5건(SD46–SD50)으로 요약해 더하였다. SD4는 기본값만 확정하고 target별 값은 마켓 규정 검토 후 정한다. SD3·SD9·SD20은 엔진 수준 결정이며 전체 계획 개정 1.7·1.8의 §5.2·§20.2에 반영되어 있다.
+2026.11.12 검토에서 초안의 권고안 10건(SD1–SD10)을 채택하였고, 같은 날 4차 검증에서 도출된 11건(SD11–SD21)을 채택하였다. 2026.11.18 5차 검증(초안 1.3)에서 사용자 요구(핫 리로드 필수·오류 방어·선택형 AOT·`WeakObjectRef` 명칭)와 권장안으로 24건(SD22–SD45)을 확정하였다. 2026.11.20 초안 1.5에서 구현 순서 3건(SD51–SD53)을, 같은 날 언어 코어 구현 중 리터럴·숫자 타입·덤프 5건(SD54–SD58)을 사용자 결정으로 더하였다. 언어 코어 구현의 LC2a에서 컴파일 입력 3건(SD59–SD61)을, LC2b(2026.11.21)에서 이름 해석 4건(SD62–SD65)을, LC2c에서 타입 검사 3건(SD66–SD68)을 권장안으로 확정하였다. 2026.11.20 레벨 스크립트 설계 확정([LevelScript](LevelScript.ko.md) LD1–LD20, 모두 권장안)에서 언어에 걸리는 결정을 5건(SD46–SD50)으로 요약해 더하였다. SD4는 기본값만 확정하고 target별 값은 마켓 규정 검토 후 정한다. SD3·SD9·SD20은 엔진 수준 결정이며 전체 계획 개정 1.7·1.8의 §5.2·§20.2에 반영되어 있다.
 
 - **SD1. 확장자:** 소스 `.spark`, 컴파일 모듈 `.sparkc`. `.sparkc`는 빌드 출력 폴더에만 생성한다. 초안의 `.sparks`는 언어 이름과 철자가 같아 혼동되므로 사용자 결정(2026-11-12)으로 `.sparkc`로 정정하였다.
 - **SD2. C++ 리플렉션 필드 이름:** 첫 글자를 대문자로 바꾸고 끝의 `_`를 제거하여 노출하며, 그 밖의 `_`가 있으면 `ScriptName`이 필요하다(§10.3). 리플렉션 필드를 C++에서도 PascalCase로 선언하도록 규약을 개정하는 대안은 채택하지 않는다.
@@ -1928,6 +2186,10 @@ LC2는 범위가 커서 하위 단계로 나눈다(각 단계가 corpus 영역 �
 - **SD63. 대소문자 비교:** 이름 찾기는 철자가 정확히 같은 대상이다. 충돌 판정은 같은 선언 공간 안과 값 이름(지역 이름·매개변수·Sparks 멤버·문맥 이름)끼리는 ASCII 대소문자를 무시하고, 그 밖은 정확히 같을 때만이다(§3.1의 규칙을 선언 공간 안으로 넓힌 것, §3.9).
 - **SD64. 이름 해석의 연쇄 방지:** 어휘·구문 진단이 있는 모듈, 해석하지 못한 import가 있는 모듈, 어휘·구문 진단이 있는 모듈을 직접 import한 모듈 안에서는 "찾지 못함"(S0317·S0318)을 내지 않고, 기반을 해석하지 못한 class 안에서는 기반에 기대는 검사도 하지 않는다. 같은 철자의 대상이 둘이면 진단을 받지 않은 쪽을 가리킨다(원인 하나에 진단 하나, §3.9).
 - **SD65. 재정의 가능 함수의 표시:** binding schema 함수에 `overridable`을 두어 엔진 가상 함수 중 Sparks가 재정의할 수 있는 것을 표시한다. `override fn`의 대상은 이것과 Sparks `open fn`·`override fn`뿐이다(§3.9, 연동 요구 SE-R4).
+
+- **SD66. 타입 없는 숫자 상수의 범위:** 타입 없는 정수 상수는 −2^63..2^64−1의 정확한 정수(int64·uint64 자리를 모두 덮는 범위)로 계산하고 벗어나면 S0503, 실수 상수는 double로 계산하고 NaN·Inf는 S0505다. 자리에 들어갈 때 그 타입의 범위를 다시 본다(S0109, §3.10).
+- **SD67. 부록 B는 시그니처 목록이다:** 표준 API의 정확한 시그니처를 부록 B 시그니처로 확정하고 컴파일러는 그 목록을 언어 소유 멤버 표로 가진다. `InputAction.Value`는 UE `FInputActionValue`처럼 3축 `vec3`이고(1축·bool은 X), `Input`의 타입은 엔진 schema `InputSystem`이다(§3.10).
+- **SD68. 타입 검사의 경계:** 숫자 사이 암묵 변환 없음, 제네릭 무공변, 타입 인자는 추론하지 않는다(명시), 생성은 이름 지정 인자, 함수 호출은 위치 인자, 반환 경로는 "끝나는 문장"(Go의 terminating statement) 규칙이다(§3.10).
 
 ## 20. 교차 검증 기록
 

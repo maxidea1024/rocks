@@ -7,6 +7,8 @@
 #include <Core/Text/StringBuilder.h>
 #include <SparksCompiler/Compilation.h>
 
+#include "PreludeMembers.h"
+
 // 이름 해석(LC2b)이다(Docs/Design/SparksLanguage.ko.md 3.9절, S0306–S0325, schema S1120의 이름
 // 부분). Compilation::Check가 import 해석 뒤에 부른다. 기능별 파일로 나뉜다:
 //   BindSetup.cpp         진단·심볼·이름 공간·타입 intern, 언어 이름, 엔진 schema 선언과 해석
@@ -99,6 +101,8 @@ struct BodyContext {
     bool reportContext = true; // S0321을 내는지(기반을 모르는 class는 아니다)
 };
 
+class TypeChecker;
+
 class NameBinder final {
 public:
     NameBinder(Compilation& compilation, DiagnosticList& diagnostics) noexcept;
@@ -106,6 +110,8 @@ public:
     Result<void> Run() noexcept;
 
 private:
+    friend class TypeChecker;
+
     // ---- 공통(BindSetup.cpp) ----
     void Report(DiagnosticCode code, SourceId source, SourceSpan span, StringView message,
                 StringView explanation, StringView fix) noexcept;
@@ -126,6 +132,21 @@ private:
     void DeclareLanguageNames() noexcept;
     void DeclareEngine() noexcept;
     void ResolveEngine() noexcept;
+
+    // ---- 부록 B 멤버(BindPrelude.cpp) ----
+    struct PreludeScope {
+        uint32 owner = NoSymbol;    // 주인 타입(타입 인자 `T` 등을 찾는다)
+        uint32 function = NoSymbol; // 함수 자기 타입 매개변수(`<T>`)
+        uint32 vector = NoSymbol;   // 벡터 공통 멤버의 `$V`
+    };
+
+    void DeclarePreludeMembers() noexcept;
+    void DeclarePreludeMember(const PreludeMember& member, uint32 index, uint32 owner,
+                              uint32 vector) noexcept;
+    uint32 ParsePreludeType(StringView text, usize& index, const PreludeScope& scope) noexcept;
+    uint32 ParsePreludeSignature(StringView text, PreludeScope scope, uint32& flags) noexcept;
+    uint32 Malformed() noexcept;
+    uint32 MalformedSignature() noexcept;
     // schema 타입 표기를 해석한다. 못 하면 S1120을 내고 NoType.
     uint32 ResolveNotation(uint32 schema, uint32 function, StringView text,
                            SourceSpan span) noexcept;
@@ -231,6 +252,10 @@ private:
     uint32 widgetController_ = NoSymbol;
     uint32 worldService_ = NoSymbol;
     uint32 voidType_ = NoType;
+    // 부록 B 자리표시($N·$S·$I·$F·$V 순)와 문맥 이름 Time의 타입 심볼이다.
+    static constexpr usize PlaceholderCount = 5;
+    uint32 placeholders_[PlaceholderCount] = {NoSymbol, NoSymbol, NoSymbol, NoSymbol, NoSymbol};
+    uint32 timeType_ = NoSymbol;
     uint32 firstContextSymbol_ = NoSymbol; // ContextNames 순서로 이어진다
     ErrorCode error_ = ErrorCode::None;
 };

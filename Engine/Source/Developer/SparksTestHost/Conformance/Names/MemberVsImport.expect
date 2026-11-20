@@ -3,3 +3,5 @@
 error S0310 Main.spark 5:9
 error S0310 Main.spark 6:9
 error S0312 Main.spark 7:9
+# Names only: type rules (LC2c) are checked in the Types area.
+stage names

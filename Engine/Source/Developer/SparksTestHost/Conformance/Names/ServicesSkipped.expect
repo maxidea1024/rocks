@@ -2,3 +2,5 @@
 # again (S0325 only after those are fixed).
 error S0201 Broken.spark 2:1
 error S0318 Lost.spark 1:16
+# Names only: type rules (LC2c) are checked in the Types area.
+stage names

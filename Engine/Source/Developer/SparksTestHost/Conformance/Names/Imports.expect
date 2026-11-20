@@ -9,3 +9,5 @@ error S0311 Game/Main.spark 6:25
 error S0306 Game/Main.spark 7:26
 error S0318 Game/Main.spark 13:24
 error S0318 Game/Main.spark 14:16
+# Names only: type rules (LC2c) are checked in the Types area.
+stage names

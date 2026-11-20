@@ -41,7 +41,8 @@ enum class CompilationStage : uint8 {
     Syntax,  // schema·manifest·모듈 경로·의존·어휘·구문 분석까지
     Imports, // 위에 더해 import 해석(LC2a)
     Names,   // 위에 더해 이름 해석(LC2b)
-    All = Names
+    Types,   // 위에 더해 타입 검사(LC2c)
+    All = Types
 };
 
 // 모듈·패키지 번호가 없음을 나타낸다.
@@ -61,6 +62,7 @@ struct ImportResolution {
 namespace detail {
 class CompilationChecker;
 class NameBinder;
+class TypeChecker;
 } // namespace detail
 
 class Compilation final {
@@ -169,6 +171,10 @@ public:
     // Type 노드와 기반 목록·`as?`의 Path 노드가 나타내는 타입이다. 없거나 해석하지 못했으면 NoType.
     uint32 NodeType(uint32 module, uint32 node) const noexcept;
 
+    // 식 노드의 타입이다(LC2c — 기대 타입에 맞춘 뒤의 타입, 상수는 그 자리의 타입). 값이 아닌 식
+    // (타입 이름·void·대기 등)이거나 해석하지 못했으면 NoType.
+    uint32 ExpressionType(uint32 module, uint32 node) const noexcept;
+
     // 타입의 정규 표기를 붙인다: 내장 타입은 정규 이름(`int64` → `int`), prelude는 그 이름, 엔진
     // 타입은 `Rocks.이름`, 사용자 타입은 `패키지:모듈.이름`, 타입 매개변수는 그 이름, 제네릭은
     // `Map<string, int>`, 선택은 끝의 `?`, NoType은 `?`. 실패: 할당 실패.
@@ -190,6 +196,7 @@ public:
 private:
     friend class detail::CompilationChecker;
     friend class detail::NameBinder;
+    friend class detail::TypeChecker;
 
     // 타입 intern 색인이다. 열쇠는 타입 번호이고 해시·비교는 그 타입의 심볼·인자·선택 여부로 한다.
     struct TypeProbe {
@@ -290,6 +297,7 @@ private:
     // 분석하지 않은 모듈은 NoNode).
     Array<uint32> nodeSymbols_;
     Array<uint32> nodeTypes_;
+    Array<uint32> exprTypes_;
     Array<uint32> nodeBase_;
     // 패키지마다 경로가 맞는 모듈 번호를 import 경로 byte 순으로 담는다(packages_와 같은 번호, 그
     // 구간이 sortedModules_ 안의 [first, first + count)).

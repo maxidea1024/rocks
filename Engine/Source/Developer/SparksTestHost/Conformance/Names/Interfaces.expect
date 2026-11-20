@@ -3,3 +3,5 @@
 # functions count.
 error S0324 6:7
 error S0324 11:8
+# Names only: type rules (LC2c) are checked in the Types area.
+stage names

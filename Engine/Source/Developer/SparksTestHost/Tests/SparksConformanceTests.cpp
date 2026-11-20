@@ -115,8 +115,9 @@ TEST(SparksConformance_RejectsMalformedExpectations) {
             "stage syntax\n",
             "line 0: the file has no directive; write 'clean' when no diagnostic is expected",
             allocator));
-        CHECK(ParseFails("stage types\nclean\n",
-                         "line 1: unknown stage (expected 'syntax', 'imports' or 'names')",
+        CHECK(ParseFails("stage values\nclean\n",
+                         "line 1: unknown stage (expected 'syntax', 'imports', 'names' or "
+                         "'types')",
                          allocator));
         CHECK(ParseFails("stage syntax\nstage names\nclean\n", "line 2: 'stage' appears twice",
                          allocator));

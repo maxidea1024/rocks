@@ -5,3 +5,5 @@ error S0207 Broken.spark 1:12
 error S0317 Fine.spark 1:22
 error S0318 Fine.spark 3:11
 error S0301 Main.spark 1:8
+# Names only: type rules (LC2c) are checked in the Types area.
+stage names
