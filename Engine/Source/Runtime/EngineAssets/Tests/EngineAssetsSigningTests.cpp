@@ -238,4 +238,41 @@ TEST(EngineAssets_SignedContentRejections) {
     }
 }
 
+// 봉투 자리가 디렉터리(7절 4): 존재 확인은 일반 파일만 참이라 봉투가 없는 것과 같다 — Release는
+// NotFound(content signature), 그 밖은 서명 안 됨 Warning 한 번 뒤 rman으로 시작한다(서명 아님).
+TEST(EngineAssets_EnvelopeDirectoryIsAbsent) {
+    ManualEngineAssetsLogs logs;
+    LogInstallScope installed(logs.logs);
+    DiskScene disk("sign-directory");
+    REQUIRE(disk.Write(false));
+    Array<uint8> manifest(disk.env.allocator);
+    REQUIRE(WriteCookedManifest(disk.env.allocator, disk.scene.manifest, manifest));
+    REQUIRE(disk.WriteRootFile(CookedManifestFileName, manifest.View()));
+    StringBuilder<160> path(disk.env.allocator);
+    REQUIRE(path.TryAppend(disk.Root()));
+    REQUIRE(path.TryAppend("/"));
+    REQUIRE(path.TryAppend(ContentEnvelopeFileName));
+    REQUIRE(platform::MakeDirectoryTree(platform::PhysicalFileSystem(), path.View().Data(),
+                                        path.View().ByteCount()));
+    ConfigFixture fixture(DevelopmentRules());
+    REQUIRE(PrepareSettings(fixture.Context(), disk.Root()));
+    logs.Pump();
+    CapturedLogs.Reset();
+    SystemAllocator allocator;
+    const EngineSubsystemType subsystems[] = {EngineAssetsSubsystemType()};
+    Engine engine(allocator);
+    const auto initialized =
+        engine.Initialize(MakeEngineConfig(&fixture.Context(), subsystems, nullptr));
+    logs.Pump();
+    if constexpr (IsReleaseBuild) {
+        CHECK(initialized.Error() == ErrorCode::NotFound);
+        CHECK(LoggedAs({ErrorCode::NotFound, "content signature", "None"}, 0));
+    } else {
+        REQUIRE(initialized);
+        CHECK(LoggedAs({}, 1));
+        CHECK(!engine.GetSubsystem<EngineAssetsSubsystem>()->Stats().contentSigned);
+        CHECK(engine.Shutdown());
+    }
+}
+
 } // namespace engine_assets_signing_tests_file

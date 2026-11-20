@@ -232,6 +232,22 @@ try
     File.WriteAllBytes(manifest, EmptyCookedManifest("Windows"));
     File.WriteAllBytes(notManifest, [1, 2, 3, 4]);
     string[] scope = ["--product", "rocks.game", "--channel", "live"];
+    // 독립 참조 구현(Ed25519phReference)이 golden 봉투를 다시 만든다 — C++ ContentSignature_GoldenEnvelope의 기대 byte와 같다.
+    byte[] goldenSeed = Enumerable.Range(1, 32).Select(value => (byte)value).ToArray();
+    byte[] goldenKeyId = Enumerable.Range(0x40, 16).Select(value => (byte)value).ToArray();
+    byte[] goldenScope = System.Security.Cryptography.SHA256.HashData("rocks.test\0main"u8.ToArray());
+    byte[] goldenEnvelope = Ed25519phReference.Envelope(goldenSeed, goldenKeyId, 7, goldenScope,
+        "cooked-manifest-golden-bytes-v1"u8.ToArray());
+    bool goldenSame = Convert.ToHexStringLower(Ed25519phReference.PublicKey(goldenSeed)) ==
+                      "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664" &&
+                      Convert.ToHexStringLower(goldenEnvelope) == GoldenEnvelopeHex &&
+                      Ed25519phReference.VerifyEnvelope(Ed25519phReference.PublicKey(goldenSeed), goldenEnvelope);
+    Console.WriteLine($"content-sign golden envelope (independent Ed25519ph): {(goldenSame ? "PASS" : "FAIL")}");
+    if (!goldenSame)
+    {
+        ++failures;
+    }
+
     await Check("content-sign usage", ["content-sign"], 2, "", "content-sign keygen");
     await Check("content-sign help", ["content-sign", "--help"], 0, "content-sign verify", "");
     await Check("content-sign keygen without password", ["content-sign", "keygen", keyBlob, publicLine], 2, "",
@@ -255,6 +271,21 @@ try
         "--password-file", password, "--version", "9", .. scope], 0, "content version 9", "");
     await Check("content-sign verify", ["content-sign", "verify", envelope, "--trust", publicLine, .. scope,
         "--minimum-version", "9"], 0, "content-sign verify: OK", "");
+    // content-sign이 쓴 서명을 독립 참조 구현으로 확인하고, 헤더의 keyId·버전·scope·길이 칸을 대조한다.
+    byte[] signedBytes = File.ReadAllBytes(envelope);
+    byte[] publicKeyBytes = Convert.FromHexString(line[33..97]);
+    byte[] expectedScope = System.Security.Cryptography.SHA256.HashData("rocks.game\0live"u8.ToArray());
+    bool independent = Ed25519phReference.VerifyEnvelope(publicKeyBytes, signedBytes) &&
+                       Convert.ToHexStringLower(signedBytes.AsSpan(8, 16)) == line[..32] &&
+                       BitConverter.ToUInt64(signedBytes, 24) == 9 &&
+                       signedBytes.AsSpan(32, 32).SequenceEqual(expectedScope) &&
+                       BitConverter.ToUInt64(signedBytes, 64) == (ulong)(signedBytes.Length - 136) &&
+                       signedBytes.AsSpan(136).SequenceEqual(File.ReadAllBytes(manifest));
+    Console.WriteLine($"content-sign envelope verifies independently: {(independent ? "PASS" : "FAIL")}");
+    if (!independent)
+    {
+        ++failures;
+    }
     await Check("content-sign verify other channel", ["content-sign", "verify", envelope, "--trust", publicLine,
         "--product", "rocks.game", "--channel", "beta"], 1, "", "rejected at Scope");
     await Check("content-sign verify higher minimum", ["content-sign", "verify", envelope, "--trust", publicLine,
@@ -268,7 +299,7 @@ try
         "--password-file", password, "--version", "10", .. scope], 0, "content version 10", "");
     await Check("content-sign verify replaced", ["content-sign", "verify", envelope, "--trust", publicLine, .. scope,
         "--minimum-version", "10"], 0, "content version 10", "");
-    bool noTemporary = !File.Exists(envelope + ".tmp");
+    bool noTemporary = Directory.GetFiles(signDirectory, "*.tmp").Length == 0;
     Console.WriteLine($"content-sign leaves no temporary file: {(noTemporary ? "PASS" : "FAIL")}");
     if (!noTemporary)
     {
@@ -291,6 +322,77 @@ try
     await Check("content-sign verify not a key line", ["content-sign", "verify", envelope, "--trust", keyBlob,
         .. scope], 1, "", "is not a content public key line");
     await Check("content-sign unknown subcommand", ["content-sign", "seal"], 2, "", "usage:");
+    await Check("content-sign keygen missing positional", ["content-sign", "keygen", keyBlob, "--password-file", password],
+        2, "", "usage:");
+    await Check("content-sign keygen missing password file",
+        ["content-sign", "keygen", Path.Combine(signDirectory, "k2.key"), Path.Combine(signDirectory, "k2.pub"),
+         "--password-file", Path.Combine(signDirectory, "missing.txt")], 1, "", "cannot open");
+    // 공개 파일 자리만 이미 있으면 방금 만든 키 파일을 지우고 실패한다(짝이 맞지 않는 파일을 남기지 않는다).
+    string loneKey = Path.Combine(signDirectory, "lone.key");
+    await Check("content-sign keygen with an existing public path",
+        ["content-sign", "keygen", loneKey, publicLine, "--password-file", password], 1, "", "cannot create");
+    bool loneClean = !File.Exists(loneKey);
+    Console.WriteLine($"content-sign keygen leaves no half pair: {(loneClean ? "PASS" : "FAIL")}");
+    if (!loneClean)
+    {
+        ++failures;
+    }
+
+    await Check("content-sign sign missing key option", ["content-sign", "sign", manifest, envelope,
+        "--password-file", password, "--version", "9", .. scope], 2, "", "usage:");
+    await Check("content-sign sign missing manifest", ["content-sign", "sign", Path.Combine(signDirectory, "none.rman"),
+        envelope, "--key", keyBlob, "--password-file", password, "--version", "9", .. scope], 1, "", "cannot open");
+    // 다른 종류의 키 파일(log 개인키 — KeyBlob이 아니다)은 열지 않는다.
+    string logPublic = Path.Combine(signDirectory, "log.pub");
+    string logPrivate = Path.Combine(signDirectory, "log.key");
+    await Check("content-sign log keygen", ["log", "keygen", logPublic, logPrivate], 0, "log.file.recipient_key", "");
+    await Check("content-sign sign other key kind", ["content-sign", "sign", manifest, envelope, "--key", logPrivate,
+        "--password-file", password, "--version", "9", .. scope], 1, "", "not a content signing key");
+    // 출력 디렉터리가 없으면 임시 파일을 만들 수 없고, 출력 자리가 디렉터리면 교체가 실패한다(임시 파일은 지운다).
+    await Check("content-sign sign into a missing directory", ["content-sign", "sign", manifest,
+        Path.Combine(signDirectory, "missing", "out.rsig"), "--key", keyBlob, "--password-file", password,
+        "--version", "9", .. scope], 1, "", "cannot create");
+    string directoryTarget = Path.Combine(signDirectory, "target.rsig");
+    Directory.CreateDirectory(directoryTarget);
+    await Check("content-sign sign onto a directory", ["content-sign", "sign", manifest, directoryTarget, "--key",
+        keyBlob, "--password-file", password, "--version", "9", .. scope], 1, "", "cannot replace");
+    bool cleaned = Directory.GetFiles(signDirectory, "*.tmp").Length == 0;
+    Console.WriteLine($"content-sign failed replace removes the temporary file: {(cleaned ? "PASS" : "FAIL")}");
+    if (!cleaned)
+    {
+        ++failures;
+    }
+
+    await Check("content-sign verify missing product", ["content-sign", "verify", envelope, "--trust", publicLine,
+        "--channel", "live"], 2, "", "usage:");
+    await Check("content-sign verify bad minimum", ["content-sign", "verify", envelope, "--trust", publicLine, .. scope,
+        "--minimum-version", "-1"], 2, "", "usage:");
+    await Check("content-sign verify missing envelope", ["content-sign", "verify",
+        Path.Combine(signDirectory, "none.rsig"), "--trust", publicLine, .. scope], 1, "", "cannot open");
+    await Check("content-sign verify missing trust file", ["content-sign", "verify", envelope, "--trust",
+        Path.Combine(signDirectory, "none.pub"), .. scope], 1, "", "cannot open");
+    // 사용법 오류: 위치 인자 부족, 필수 선택지 없음, 빈 값, 모르는 이름, 도움말 뒤 인자.
+    await Check("content-sign keygen no positional", ["content-sign", "keygen"], 2, "", "usage:");
+    await Check("content-sign sign one positional", ["content-sign", "sign", manifest], 2, "", "usage:");
+    await Check("content-sign sign missing password option", ["content-sign", "sign", manifest, envelope, "--key",
+        keyBlob, "--version", "9", .. scope], 2, "", "usage:");
+    await Check("content-sign sign missing version", ["content-sign", "sign", manifest, envelope, "--key", keyBlob,
+        "--password-file", password, .. scope], 2, "", "usage:");
+    await Check("content-sign sign empty value", ["content-sign", "sign", manifest, envelope, "--key", keyBlob,
+        "--password-file", password, "--version", "", .. scope], 2, "", "usage:");
+    await Check("content-sign sign bogus option", ["content-sign", "sign", manifest, envelope, "--bogus", "1",
+        "--key", keyBlob, "--password-file", password, "--version", "9", .. scope], 2, "", "usage:");
+    await Check("content-sign verify no positional", ["content-sign", "verify"], 2, "", "usage:");
+    await Check("content-sign verify missing trust", ["content-sign", "verify", envelope, .. scope], 2, "", "usage:");
+    await Check("content-sign help with extra", ["content-sign", "--help", "extra"], 2, "", "usage:");
+    await Check("content-sign sign missing key file", ["content-sign", "sign", manifest, envelope, "--key",
+        Path.Combine(signDirectory, "none.key"), "--password-file", password, "--version", "9", .. scope], 1, "",
+        "cannot open");
+    await Check("content-sign sign missing password file", ["content-sign", "sign", manifest, envelope, "--key",
+        keyBlob, "--password-file", Path.Combine(signDirectory, "none.txt"), "--version", "9", .. scope], 1, "",
+        "cannot open");
+    await Check("content-sign verify not an envelope", ["content-sign", "verify", manifest, "--trust", publicLine,
+        .. scope], 1, "", "rejected at File");
 }
 finally
 {
@@ -391,4 +493,17 @@ static uint Crc32(byte[] bytes)
     }
 
     return ~crc;
+}
+
+// golden 봉투 hex다(seed 1..32, keyId 0x40..0x4f, 버전 7, scope("rocks.test", "main"), 매니페스트 "cooked-manifest-golden-
+// bytes-v1" — C++ ContentSignatureTests.cpp의 GoldenEnvelopeHex와 같다).
+partial class Program
+{
+    private const string GoldenEnvelopeHex =
+        "5253494701020000404142434445464748494a4b4c4d4e4f0700000000000000" +
+        "90247830ed4611caa2c6bbd614ba47aadb1a18adf4272a86df95503548e1116a" +
+        "1f000000000000009ac8d7fc0045177e58f04bd19bcb4eeddef81c7481abdba6" +
+        "c98b2884f1f8b4f5c6906590e651aaf9fa8c0db558cfaaa938279f4c3365b6a9" +
+        "3e59b49b4f5d130f636f6f6b65642d6d616e69666573742d676f6c64656e2d62" +
+        "797465732d7631";
 }

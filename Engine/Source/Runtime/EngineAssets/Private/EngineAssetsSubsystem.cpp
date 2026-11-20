@@ -21,7 +21,8 @@ constexpr LogCategory LogEngineAssets{"EngineAssets"};
 constexpr uint64 AssetContextHigh = 0x524f434b53415354ull;
 uint64 NextAssetContext = 0;
 
-// 등록된 콘텐츠 서명 신뢰 정보다(SetContentTrust — 게임 스레드, 엔진 초기화 전).
+// 등록된 콘텐츠 서명 신뢰 정보다(SetContentTrust). 여러 스레드가 각자 엔진을 초기화해도 경쟁이 없게
+// 원자적으로 쓰고 읽는다(release·acquire — 가리키는 값은 등록 전에 다 만들어져 있다).
 const ContentTrust* ContentTrustSource = nullptr;
 
 // 봉투 검증 실패 단계 이름("content signature (<칸>)")의 버퍼 byte 수다.
@@ -91,7 +92,7 @@ EngineAssetsSubsystem::~EngineAssetsSubsystem() {
 }
 
 void EngineAssetsSubsystem::SetContentTrust(const ContentTrust* trust) noexcept {
-    ContentTrustSource = trust;
+    platform::AtomicStore<platform::MemoryOrder::Release>(&ContentTrustSource, trust);
 }
 
 Result<void> EngineAssetsSubsystem::Initialize(Engine& engine) noexcept {
@@ -163,13 +164,15 @@ Result<void> EngineAssetsSubsystem::Initialize(Engine& engine) noexcept {
         platform::FileSystem& files = platform::PhysicalFileSystem();
         auto envelope = ReadManifestFile(files, path.View(), ContentEnvelopeMaxBytes, bytes);
         if (envelope) {
-            if (ContentTrustSource == nullptr) {
+            const ContentTrust* trust =
+                platform::AtomicLoad<platform::MemoryOrder::Acquire>(&ContentTrustSource);
+            if (trust == nullptr) {
                 return fail("content trust", ErrorCode::InvalidArgument);
             }
 
             ContentEnvelopeInfo info;
-            auto verified = VerifyContentEnvelope(allocator, bytes.View(), *ContentTrustSource,
-                                                  &info, &diagnostic);
+            auto verified =
+                VerifyContentEnvelope(allocator, bytes.View(), *trust, &info, &diagnostic);
             if (!verified) {
                 // 걸린 봉투 칸을 단계 이름에 담는다(4절 "단계는 진단 로그에만").
                 char stage[ContentStageBytes];

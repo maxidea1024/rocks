@@ -11,6 +11,7 @@
 #include <Crypto/Bytes.h>
 #include <Crypto/KeyBlob.h>
 #include <Crypto/PasswordHash.h>
+#include <Crypto/Random.h>
 #include <Platform/File.h>
 
 // content-sign 명령 구현이다(Docs/Design/ContentSigning.ko.md 5·7절 — A1f). 봉투 형식·검증은
@@ -41,8 +42,11 @@ constexpr StringView Usage =
 // 명령이 만드는 진단 한 줄의 버퍼 byte 수다(경로는 인수 상한까지 들어간다).
 constexpr usize MessageBytes = CommandletRegistry::MaxArgumentBytes * 2 + 256;
 
-// 출력 파일을 쓸 임시 파일 접미사다(쓴 뒤 Replace로 바꾼다 — CS1 원자적 교체).
+// 출력 파일을 쓸 임시 파일은 "<출력>.<무작위 hex>.tmp"다(쓴 뒤 Replace로 바꾼다 — CS1 원자적 교체).
+// 무작위 부분이 있어 같은 출력을 동시에 서명해도 임시 파일이 겹치지 않고, CreateNew로 만들어 남의
+// 파일을 덮어쓰지 않는다.
 constexpr StringView TemporarySuffix = ".tmp";
+constexpr usize TemporaryRandomBytes = 8;
 
 Result<int32> Write(CommandletOutput& output, CommandletStream stream, StringView text,
                     int32 code) noexcept {
@@ -116,13 +120,14 @@ struct Options {
         }
 
         for (usize index = 0; index < args.Size(); index += 2) {
-            bool known = false;
+            // 모르는 이름(slot 없음)과 다른 하위 명령의 이름(allowed 밖)을 모두 거부한다.
+            StringView* slot = Slot(args[index]);
+            bool allowedHere = false;
             for (StringView name : allowed) {
-                known = known || name == args[index];
+                allowedHere = allowedHere || name == args[index];
             }
 
-            StringView* slot = known ? Slot(args[index]) : nullptr;
-            if (slot == nullptr || !slot->IsEmpty() || args[index + 1].IsEmpty()) {
+            if (slot == nullptr || !allowedHere || !slot->IsEmpty() || args[index + 1].IsEmpty()) {
                 return false;
             }
 
@@ -248,16 +253,23 @@ Result<int32> KeyGen(Span<const StringView> args, CommandletOutput& output,
     return Write(output, CommandletStream::Output, message.View(), 0);
 }
 
-// path 뒤에 접미사를 붙인 NUL 종료 경로다.
+// path 뒤에 "."·무작위 hex·접미사를 붙인 NUL 종료 경로다. 인수 상한 안의 경로는 늘 들어가므로
+// valid가 거짓인 것은 OS 난수 실패뿐이다.
 struct TemporaryPath {
     explicit TemporaryPath(StringView path) noexcept {
+        uint8 random[TemporaryRandomBytes];
+        char hex[TemporaryRandomBytes * 2 + 1];
         FixedStringBuilder builder{Span<char>(text, sizeof(text) - 1)};
-        valid = builder.TryAppend(path).IsOk() && builder.TryAppend(TemporarySuffix).IsOk();
+        valid = crypto::TryFillRandom(Span<uint8>(random)).IsOk() &&
+                crypto::TryToHex(Span<const uint8>(random), Span<char>(hex)).IsOk() &&
+                builder.TryAppend(path).IsOk() && builder.TryAppend(".").IsOk() &&
+                builder.TryAppend(StringView(hex, TemporaryRandomBytes * 2)).IsOk() &&
+                builder.TryAppend(TemporarySuffix).IsOk();
         bytes = builder.View().ByteCount();
         text[bytes] = '\0';
     }
 
-    char text[CommandletRegistry::MaxArgumentBytes + 16];
+    char text[CommandletRegistry::MaxArgumentBytes + 1 + TemporaryRandomBytes * 2 + 8];
     usize bytes = 0;
     bool valid = false;
 };
@@ -268,13 +280,13 @@ Result<int32> ReplaceFile(CommandletOutput& output, StringView path,
     const PathText target(path);
     const TemporaryPath temporary(path);
     if (!temporary.valid) {
-        return UsageError(output);
+        return Fail(output, 1, "cannot make a temporary file name (OS random failure)");
     }
 
     const StringView temporaryView(temporary.text, temporary.bytes);
     platform::File file;
     if (const platform::FileStatus opened =
-            file.Open(temporary.text, platform::FileOpenMode::CreateAlways);
+            file.Open(temporary.text, platform::FileOpenMode::CreateNew);
         !opened) {
         return ReportFileFailure(output, CommandName, "create", temporaryView, opened);
     }

@@ -88,9 +88,10 @@ public:
     ~EngineAssetsSubsystem() override;
 
     // 콘텐츠 서명 신뢰 정보를 등록한다(ContentSigning.ko.md 7절 3 — 신뢰 공개키·최소 버전·scope는
-    // 실행 파일 안에 있어야 한다). 엔진 초기화 전에 게임 스레드에서 부르고, trust와 그 키 배열은 그
-    // 뒤 초기화하는 모든 엔진보다 오래 살아야 한다. nullptr은 해제다(쿠킹 루트에 서명 봉투가 있으면
-    // 초기화가 InvalidArgument로 실패한다).
+    // 실행 파일 안에 있어야 한다). 그 뒤 초기화하는 엔진이 쓴다(어느 스레드에서 불러도 되고 등록은
+    // 원자적이다 — 이미 초기화한 엔진은 영향이 없다). trust와 그 키 배열은 그 엔진들보다 오래
+    // 살아야 한다. nullptr은 해제다(쿠킹 루트에 서명 봉투가 있으면 초기화가 InvalidArgument로
+    // 실패한다).
     //
     // 사용 예(게임 진입점 — 빌드 규칙이 생성할 신뢰 목록 대신):
     //   static const TrustedContentKey keys[] = {{keyId, publicKey}};
