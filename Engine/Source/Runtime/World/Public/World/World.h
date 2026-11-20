@@ -96,6 +96,12 @@ struct WorldGcSchedule {
     double fullCollectionIntervalSeconds = DefaultFullCollectionIntervalSeconds;
     // 회수 대기가 있을 때 프레임마다 회수에 쓰는 예산이다(ObjectRegistry::DrainRetired).
     GcBudget reclaimBudget{GcBudget::DefaultMaxObjects, DefaultReclaimNanoseconds};
+    // 전체 수집의 회수가 끝난 GC 단계(미룬 회수가 다 빠졌을 때 — 회수할 것이 없었으면 수집 직후)에
+    // World의 allocator에 Allocator::TrimMemory를 부른다: 쥐고만 있는 메모리를 OS에 돌려준다(UE가
+    // GC purge 끝에 FMemory::Trim을 부르는 것에 대응 — GC 설계 18.11.6절). Engine도 이 World를
+    // 파괴한 뒤에 같은 값을 보고 부른다. 증분 cycle이 끝날 때는 부르지 않는다. 끄면 호스트가 필요할
+    // 때 TrimMemory를 직접 부른다.
+    bool trimMemory = true;
 };
 
 // Actor Spawn 옵션이다.
@@ -262,6 +268,11 @@ public:
     //   world.DestroyLevel(level);
     //   world.RequestFullCollection();
     void RequestFullCollection() noexcept;
+
+    // 이 World의 GC 일정이다(WorldDesc::gcSchedule의 사본).
+    const WorldGcSchedule& GcSchedule() const noexcept {
+        return gcSchedule_;
+    }
 
     // GC 표식에 쓰는 병렬 scheduler다(WorldDesc::gcScheduler — 없으면 nullptr, 직렬).
     WorkerScheduler* GcScheduler() const noexcept {
@@ -649,6 +660,9 @@ private:
     bool RunFullCollection() noexcept;
     // Registry가 Idle이고 회수 대기가 있으면 reclaimBudget만큼 회수한다(GC 설계 17.3절).
     void DrainDeferredReclaim() noexcept;
+    // 전체 수집 뒤의 회수가 다 끝났으면 allocator의 TrimMemory를 한 번 부른다
+    // (WorldGcSchedule::trimMemory). 전체 수집마다 한 번이다.
+    void TrimAfterFullCollection() noexcept;
     // World가 소유한 객체의 RequestDestroy다. 결과를 확인한다(클러스터 이탈이 실패하면 고아 소속이
     // 남는다 — 13.3절). 이미 파괴됐거나 종료 중이면 무시하고, 그 밖의 실패는 불변식 위반으로
     // Fatal이다.
@@ -713,6 +727,8 @@ private:
     uint32 fullCollectionRequested_ = 0;
     // 회수 대기를 프레임마다 나눠 회수하는 중이다(끝날 때 한 번 기록한다).
     bool drainingDeferred_ = false;
+    // 전체 수집을 했고 그 회수가 끝나면 TrimMemory를 부를 차례다.
+    bool trimPending_ = false;
     uint32 componentCount_ = 0;
     uint64 spawnedTotal_ = 0;
     uint64 destroyedTotal_ = 0;
