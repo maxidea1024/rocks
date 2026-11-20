@@ -1487,6 +1487,37 @@ A1f 상태(2026-11-21): **완료**(리뷰 3회 — 미충족 2회 반영 뒤 충
 - coverage(14.1.12): 닿지 않은 곳은 모두 근거
 - 빠진 시험 관점 리뷰어 판정: 1회 미충족(commandlet coverage 측정 밖) → 측정·시험·근거 반영, 2회 미충족(verify 깨진 매니페스트 근거가 사실 아님 — 참조 구현으로 만들 수 있음) → 시험으로 닿게 함, 3회 **충족**
 
+#### 14.1.13 요구 대조표(A2a — 경로·배치·잠금·주입점)
+
+시험은 EngineTests `Engine/Source/Developer/AssetDatabase/Tests/`(`LogicalPathTests.cpp`·`ProjectLayoutTests.cpp`·`AssetDatabaseLockTests.cpp`, 공용 `AssetDatabaseTestSupport.h` — 정의된 시험 18개를 모두 인용한다). 다른 프로세스의 잠금은 자식 프로세스(`--process-probe asset-database-lock`)와 표준 입출력 pipe gate로 순서를 정한다(시간에 기대지 않는다). OS 감시 확인만 Wait 반복 상한(200 ms × 50)으로 끝난다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 논리 경로(4.2, 7.1-10) | 양성: 마운트 철자 정규화(대소문자 무시), 숫자 첫 문자, '_'·'-', 비ASCII(L*), NFD 입력의 NFC 정규화, 접근자(Text·Key·Name·Directory·Relative·Mount) | `LogicalPath_ValidPaths` |
+| | 음성(판정 순서): 빈 값, 앞 '/' 없음, '', 빈 구성 요소('/'·'//'·끝 '/'), 마운트뿐, 모르는 마운트(잘못된 UTF-8 포함), 구성 요소 규칙 위반 전부(`.`·`..`·'_' 첫 문자 InvalidFirst, 공백·'.' InvalidCharacter와 offset, CON·com1·LPT¹ 예약 이름, U+200B Default_Ignorable, 잘못된 UTF-8, NUL, 65 byte TooLong), 전체 256 초과, 겹친 위반 다섯 쌍 | `LogicalPath_InvalidPaths` |
+| | 경계: 구성 요소 64 byte·전체 256 byte 받음, 257 거부, 정규화 뒤 길이로 셈(NFD가 NFC로 줄어 받음) | `LogicalPath_LengthBoundaries` |
+| | 비교 키: 대소문자·정규화 형태만 다르면 같은 키, simple case folding('ß' ≠ "ss"), 다른 경로는 다른 키 | `LogicalPath_CaselessKeys` |
+| | 복사, 사유 이름(고유·범위 밖 "Unknown"), 모든 할당 지점 실패(비ASCII 긴 경로·TooLong 전에 자라는 경로·NFC 뒤에도 애매한 결합 문자 q + U+0301, 복사) — OutOfMemory·사유 None, 실패 없으면 같은 결과 | `LogicalPath_CloneAndNames`, `LogicalPath_AllocationFailures` |
+| 배치(4.2, 7.1-10) | 디렉터리 이름(Content·Config·Intermediate·Saved), ''→'/', 끝 구분자 제거, 루트 "/"·상대 루트, 빈 루트 InvalidArgument(이전 값 유지) | `ProjectLayout_Directories` |
+| | 논리 경로 → 새 파일 경로 → 논리 경로 왕복, 패키지가 아닌 이름(대소문자 다른 확장자·임시 파일·확장자뿐·확장자 없음·다른 확장자·빈 값 — 사유 None), 규칙 위반 이름의 사유 | `ProjectLayout_PathRoundTrip`, `ProjectLayout_NonPackageNames` |
+| | 비 NFC 파일 이름: byte 비교 파일 시스템 NotNfcOnDisk, 이름 정규화 파일 시스템(macOS)은 NFC 경로로 받음, NFC 이름은 어느 쪽이든 받음, 사유 자리 없이도 같은 판정 | `ProjectLayout_NonNfcFileNames` |
+| | OS 경로 상한(임시 접미사 41 byte 포함): 같으면 받음, 넘으면 CapacityExceeded(out 그대로) | `ProjectLayout_NativePathLimit` |
+| | 모든 할당 지점 실패(600 byte 넘는 루트·640 byte 넘는 상대 이름 — 인라인 저장소를 넘겨 자람, 긴 이름은 TooLong): 그 오류, Initialize는 이전 값 유지 | `ProjectLayout_AllocationFailures` |
+| 쓰기 잠금(8, 7.1-4) | Intermediate를 만들고 잠금, 같은 객체 다시 잡기 AlreadyExists, 같은 프로세스 다른 객체 Busy(대기 0), 놓으면 다른 객체가 잡음, 두 번 놓기 무동작 | `AssetDatabaseLock_SameProcess` |
+| | 다른 프로세스: 자식이 쥐면 부모 Busy, gate 뒤 자식이 놓으면 부모가 잡음, 부모가 쥐면 자식 Busy | `AssetDatabaseLock_OtherProcess` |
+| | Intermediate 자리가 파일이면 그 파일 오류(잡지 않음), 잠금 경로가 OS 상한을 넘으면 CapacityExceeded, 긴 경로의 모든 할당 지점 실패 | `AssetDatabaseLock_Failures`, `AssetDatabaseLock_AllocationFailures` |
+| 주입점(7.1-9) | 시스템 시계(UtcTicks 표현), 시험 시계(고정·Advance), 단위 상수 | `AssetClock_Sources` |
+| | OS 감시 공급(`WatcherChangeSource`)이 만든 파일의 Added를 Wait·Poll로 전달 | `WatcherChangeSource_ReportsAddedFile` |
+| 조합(14 완료 조건 2) | 논리 경로 규칙은 판정 순서가 있는 단일 축이라 조합 대신 규칙별 양성·음성과 이웃한 규칙의 겹친 위반 다섯 쌍으로 덮는다. 잠금은 보유자(없음·같은 객체·같은 프로세스 다른 객체·다른 프로세스) × 요청자 축을 위 시험이 모두 지난다 | 위 시험 |
+
+#### 14.1.14 Coverage(A2a)
+
+측정(2026-11-21, `pwsh -NoProfile -File Build/MeasureCoverage.ps1 -Target EngineTests -Filter LogicalPath,ProjectLayout,AssetDatabaseLock,AssetClock,WatcherChangeSource -Sources Engine/Source/Developer/AssetDatabase/Private,Engine/Source/Developer/AssetDatabase/Public`): 줄 100%(366/366)·분기 100%(146/146)·함수 100%(38/38) — `LogicalPath.cpp`·`ProjectLayout.cpp`·`AssetDatabaseLock.cpp`·`AssetClock.cpp`·`AssetDatabaseInternal.h`와 공개 헤더. 닿지 않은 곳 없음.
+
+닿게 한 방법: 할당 실패 시험의 입력을 임시 저장소의 인라인 크기(경로 320 byte·잠금 경로 512 byte)를 넘는 길이로 골라 저장소가 자라는 지점을 지나게 했고, 짧은 조각 여러 개를 한 호출(`AppendAll`)로 묶어 실패 지점을 실제로 자랄 수 있는 곳으로 모았다. 도달할 수 없던 조건(정규 경로의 이름 찾기에서 시작 위치 0 검사)은 코드에서 뺐다.
+
+A2a 상태(2026-11-21): **구현**(리뷰어 판정 전). 완료 조건: 대조표(14.1.13) 시험 없는 항목 0·정의된 시험 18개 모두 인용, 조합(위 표 마지막 행), coverage 100%, 리뷰어 판정 대기.
+
 ## 15. PNG 디코더 범위
 
 색 형식 0/2/3/4/6, 비트 깊이 1–16, Adam7, PLTE·tRNS, chunk CRC, zlib(Core `Compression`)·Adler-32, 한 변 16384·해제 크기 = IHDR 계산값. gAMA·cHRM·sRGB·iCCP는 변환하지 않고 sRGB로 보며 sRGB가 아닌 표시가 있으면 `NonSrgbSource` 경고. APNG는 기본 이미지. 시험은 PngSuite(자유 사용 라이선스, `TextureTools/Tests/Fixtures/PngSuite`).
