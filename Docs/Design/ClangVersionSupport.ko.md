@@ -1,6 +1,6 @@
 # Clang 버전 지원 설계
 
-기준일: 2026-11-20, 개정 2. Clang 22가 JSON AST에서 `ElaboratedType`을 없애, MetaCompiler가 읽던 타입 철자가 바뀌었다. 이 문서는 두 가지를 정한다.
+기준일: 2026-11-20, 개정 3. Clang 22가 JSON AST에서 `ElaboratedType`을 없애, MetaCompiler가 읽던 타입 철자가 바뀌었다. 이 문서는 두 가지를 정한다.
 - **정규 형식 탐침**: MetaCompiler가 타입 철자를 첫 실행 JSON의 `qualType`·`desugaredQualType`에서 읽지 않고, Clang이 출력한 정규 형식(완전 한정 철자)으로 읽게 한다. 그러면 Clang 21과 22의 AST 모양 차이가 철자에 닿지 않는다.
 - **도구 모음 버전 정책**: 검증한 LLVM 버전, `ROCKS_MSVC_TOOLSET`, `Build/InstallLlvm.ps1`, CI, 그리고 MSVC 14.44 고정을 언제 푸는지.
 
@@ -17,7 +17,7 @@
 
 측정 도구 모음: LLVM 21.1.6·22.1.8 공식 Windows x64 배포(설치 파일을 풀어 씀), 로컬 MSVC 14.29(Visual Studio 2019 STL), clang-format 21.1.6. UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`)의 UnrealBuildTool·UnrealHeaderTool이다. UE 이름은 12절 대응표에만 적는다.
 
-상태: **설계**(결정 CLGD1–CLGD15, 권장안으로 확정). 구현 단계는 CLG0–CLG4(10절)다. 시제품(커밋하지 않음)으로 실제 헤더에서 확인했다(1.4절). 개정 2는 리뷰어 교차 검증(Clang 21.1.6·22.1.8 양쪽 탐침)을 적용했다(14절).
+상태: **구현 중**(결정 CLGD1–CLGD15, 권장안으로 확정). 구현 단계는 CLG0–CLG4(10절)다. CLG0–CLG2를 구현했다(개정 3 — 구현하며 정한 점은 14절). 시제품(커밋하지 않음)으로 실제 헤더에서 확인한 측정은 1.4절이다. 개정 2는 리뷰어 교차 검증(Clang 21.1.6·22.1.8 양쪽 탐침)을 적용했다.
 
 ## 1. 현재 상태와 측정
 
@@ -246,7 +246,7 @@ NATIVE 멤버의 강한 참조(RMC2205)·WorldOnly 소유자 형질(RMC2206) 재
 정규 형식 탐침 뒤에도 첫 실행 JSON 모양에 기대는 곳은 아래다. 실제 컴파일러 두 모양(Windows LLVM 22 leg와 macOS Apple clang leg)에서 도는 meta 시험이 고정한다(5.2절). 따로 모아 두는 기계적 리팩터링(개정 1의 `ClangAstShape`)은 하지 않는다.
 - 노드 `kind`: `NamespaceDecl`·`CXXRecordDecl`·`ClassTemplateDecl`·`ClassTemplateSpecializationDecl`·`EnumDecl`·`EnumConstantDecl`·`FieldDecl`·`VarDecl`·`CXXMethodDecl`·`FunctionTemplateDecl`·`TypeAliasDecl`·`TypedefDecl`·`FriendDecl`·`UsingDecl`·`AccessSpecDecl`·`AnnotateAttr`·`ConstantExpr`·`IntegerLiteral`·`StringLiteral`·`CXXBoolLiteralExpr`·`ImplicitCastExpr`·`ParenExpr`·`TemplateArgument`.
 - 키: `inner`·`name`·`id`·`loc`·`range`(위치 변형 — `ClangAstParser.Locations.cs`)·`completeDefinition`·`tagUsed`·`access`·`bases`(`access`·`isVirtual`·`type`)·`definitionData.isAbstract`·`isBitfield`·`storageClass`·`value`·`isInline`.
-- 형식 철자로 남는 셋(4.1절): enum `fixedUnderlyingType`의 desugar(typedef → builtin이라 두 버전 같다), Validate hook·GENERATED_BODY 표지의 함수 형식 `qualType`(한정 선택 정규식, 생성 `static_assert`가 정확히 대조), base 식별자 추출(4.3절). bitfield 정수 판정(`IsIntegerSpelling`)은 멤버 형식 질문의 답으로 바꾼다.
+- 형식 철자로 남는 셋(4.1절): enum `fixedUnderlyingType`의 desugar(typedef → builtin이라 두 버전 같다), Validate hook·GENERATED_BODY 표지의 함수 형식 `qualType`(한정 선택 정규식, 생성 `static_assert`가 정확히 대조), base 식별자 추출(4.3절). bitfield 정수 판정(`IsIntegerSpelling`)은 첫 실행 철자로 남긴다(개정 3 — builtin 정수만 받고 typedef → builtin desugar는 두 모양에서 같다. 정수가 아닌 형식은 두 모양 모두 거부된다).
 - 키가 없을 때 조용히 거짓이 되는 읽기(`Flag`)는 그 키에 기대는 meta 시험(추상 클래스, bitfield, 정의 여부)이 두 모양에서 잡는다.
 
 ### 4.7 기존 탐침과의 관계
@@ -455,3 +455,4 @@ UE와 다르게 정한 점:
 |---|---|---|
 | 1 | 2026-11-20 | Clang 22 지원 설계. Clang 21·22 JSON 차이 실측(1.1절), MetaCompiler 의존 조사(1.2절), 고치지 않은 MetaCompiler의 실패 실측(1.3절 — 실제 헤더와 meta 시험 56건, 조용한 GC 안전 검사 누락 3건), 정규 형식 탐침 시제품 실측(1.4절 — 두 버전 생성물 byte 동일, meta 시험 통과, Clang 22 C++ 경고 0), 설계(4절 — base는 정교한 형식 지정자와 이름공간 별칭, `bool` 사실 인자는 `int`로), 두 모양 시험(5절), 도구 모음 정책(6절), 결정 CLGD1–CLGD14, 단계 CLG0–CLG4 |
 | 2 | 2026-11-20 | 리뷰어 교차 검증 적용(Clang 21.1.6·22.1.8 양쪽 탐침, 13건 모두 받아들임). 레코드 닫힘(4.4절): 패턴 필드 근사만 지우고 템플릿 인자 걷기는 하한으로 남김(`Optional`·`Result`·`Variant`·`InlineArray`·`SharedPtr`가 T를 바이트 저장소에 숨긴다), 특수화의 필드·base는 첫 실행의 특수화 노드에서 읽고 노드 → 정규 철자는 형식 철자 질문으로 대응, inline 이름공간 레코드도 정규 철자 열쇠, 색인에 없는 class는 `IsClassV`로 가려 RMC2205 cannot verify, 불완전한 중첩 포인터 대상은 직접 멤버처럼 다시 물은 뒤 허용(`World*`가 판정된다는 개정 1 서술 정정). base(4.3절): 확인을 `IsBaseOfV && !IsSameV`로(`Rec<2>::Rec`가 자신을 답함), 특수화 소유자의 base는 특수화 노드에서, 식별자는 `TypeSpelling`의 마지막 식별자(별칭 템플릿·멤버 typedef·`decltype` base 해결, 별칭 id 색인 삭제), 파생 이름 비교는 템플릿 이름으로, 1 실패 시 이름공간 별칭으로 다시 묻기, 템플릿 매개변수 base 한계 삭제(실제로 풀린다), 4.1절 예외 셋. 정적 배열(4.7절): 실행만 합치고 나누기는 Clang 형판. 시험(5.2절·CLGD7·CLGD8): JSON fixture·갱신 명령·`ClangAstShape` 삭제, 항상 도는 교차 확인 삭제(MSVC 14.52에서 LLVM 21이 `STL1000`), 실제 컴파일러 두 모양의 meta 시험으로 고정. 도구 모음(6절): Windows LLVM 21 leg는 CLG4에서 14.44 고정과 함께 삭제, MSVC별 최소 Clang 표 대신 `yvals_core.h` 읽기, `Build/Toolchain.json`은 C# 도구 포함 리소스(설치 SDK), Android는 최소만, CI는 `--require-verified-toolchain`. 단계: CLG0은 격리 helper만, `InstallLlvm.ps1 -Version`과 LLVM 22 leg를 CLG2로 당기고 CLG1+CLG2 병합 조건(`[ci]`, macOS·Windows 두 leg)을 CLGD15로 더함. 한계(11절)에 이름공간 별칭의 접근 검사, 같은 식별자 base 경로가 실측이 아님을 적음. 결정 CLGD1–CLGD15 |
+| 3(구현 기록) | 2026-11-20 | CLG0–CLG2 구현(`feature/clang-version-support`). 구현하며 정한 점: (가) 공용 실행·격리는 `ClangProbe`(질문 한 줄 = `<stdin>` 한 줄, 판정 형판·정규 형식 탐침·공개 헤더로 다시 묻기가 함께 쓴다). (나) 사실 질문은 `long long` 인자다(C 배열 크기가 `size_t`). (다) bitfield 정수 판정은 첫 실행 철자로 남긴다(4.6절). (라) 레코드 닫힘의 포인터 판정은 필드가 아니라 **정규 형식 철자**로 묻는다(`RocksProbeVerdict<rocks::Allocator *>` — 접근 검사 면제는 명시적 인스턴스화 인자 전체에 걸린다). 그래서 템플릿 인자로만 보이는 포인터(`Optional<Node *>`)도 하한 걷기에서 판정된다. (마) 1단계는 첫 실행과 같은 include 순서, 레코드 닫힘과 그 공개 헤더 재질문은 NATIVE 판정과 같은 순서(이 모듈 출력 루트 제외)로 돈다. (바) 특수화 노드의 `bool` 인자는 패턴의 템플릿 매개변수 종류로 `true`·`false`로 쓴다(덤퍼는 -1을 낸다). (사) 배열 원소 실패 진단(`ArrayElementFailure`)은 문구에만 쓰는 쓴 철자 재귀(기존 `StrongReferencePath`)를 그대로 쓴다 — 판정이 아니고, 찾지 못하면 Clang 원문 진단으로 거부된다. (아) 레코드 닫힘이 한 번에 걷는 형식 4,096개·라운드 32회를 넘으면 cannot verify다. (자) `_Atomic(…)`·벡터 형식은 따라가지 않는다(전과 같다). 시험: `MetaTests.CanonicalTypes.cs`(8절 CLG1·CLG2 항목). 비템플릿 별칭 Binds 새 시험은 두지 않았다 — 실제 헤더의 Binds 28개가 정규 철자로 같고, 기존 Binds 시험이 두 모양에서 돈다 |
