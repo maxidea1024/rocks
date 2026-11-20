@@ -59,8 +59,8 @@ void CheckAllocatorIsEmpty(BinnedAllocator& allocator) {
 
 } // namespace
 
-// GC scheduler(worker 스레드)가 있는 엔진: worker가 표식 큐 블록을 같은 할당자에서 주고받고, 전체
-// 수집 요청으로 파괴한 Actor가 회수된다.
+// GC scheduler(worker 스레드)가 있는 엔진에서 Actor를 만들고 파괴한 뒤 전체 수집을 요청해 돌린다.
+// 엔진이 살아 있는 동안 받은 할당자에 할당이 있고(엔진이 그 할당자를 쓴다), 끝나면 모두 돌아온다.
 TEST(Engine_RunsOnBinnedAllocatorWithGcWorkers) {
     SystemAllocator system;
     {
@@ -118,6 +118,8 @@ TEST(Engine_RunsOnBinnedAllocatorWithSerialMarking) {
             REQUIRE(created);
             constexpr uint32 Frames = 32;
             CHECK(SpawnAndDestroy(engine, *created.Value(), Frames) == 0);
+            // 엔진이 받은 할당자를 쓴다.
+            CHECK(allocator.Stats().liveAllocations != 0);
             REQUIRE(engine.Shutdown());
         }
 
@@ -147,6 +149,8 @@ TEST(Engine_RestartsOnTheSameBinnedAllocator) {
                 REQUIRE(created);
                 constexpr uint32 Frames = 8;
                 CHECK(SpawnAndDestroy(engine, *created.Value(), Frames) == 0);
+                // 엔진이 받은 할당자를 쓴다.
+                CHECK(allocator.Stats().liveAllocations != 0);
                 REQUIRE(engine.Shutdown());
             }
 
