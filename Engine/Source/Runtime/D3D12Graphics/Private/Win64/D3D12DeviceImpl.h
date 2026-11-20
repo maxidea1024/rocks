@@ -39,6 +39,7 @@
 // - D3D12Upload.cpp: 업로드 기록·ring·staging·readback
 // - D3D12Timing.cpp: timestamp·calibration·marker
 // - D3D12Compute.cpp: async compute queue(RG4): queue·fence·기록 저장소·제출·queue 사이 대기
+// - D3D12Transient.cpp: transient heap·placed 자원·aliasing 획득(GX12)
 namespace rocks::graphics::d3d12 {
 
 // "stage failed (HRESULT 0x...)" 진단 한 줄의 버퍼 byte 수다.
@@ -164,6 +165,9 @@ struct BufferRecord {
     D3D12_GPU_VIRTUAL_ADDRESS address = 0;
     uint64 size = 0;
     BufferDesc desc;
+    // placed 버퍼(CreatePlacedBuffer)면 그 transient heap이다. 메모리는 heap 소유이고, 회수 뒤
+    // heap의 placed 수를 줄인다(GX12).
+    SlotHandle heap;
 };
 
 // 버퍼 view(GX2)다. 버퍼 자원 참조를 쥐므로 버퍼를 먼저 놓아도 산다. descriptor는 shader-visible
@@ -179,6 +183,8 @@ struct BufferViewRecord {
     PixelShaderType shaderType = PixelShaderType::None;
     // 구조화 view의 원소 byte다(셰이더 선언 stride와 대조한다).
     uint32 stride = 0;
+    // placed 버퍼의 view면 그 heap이다. view가 버퍼 자원을 붙드는 동안 heap도 놓지 않는다(GX12).
+    SlotHandle heap;
 };
 
 struct TextureRecord {
@@ -234,6 +240,9 @@ struct TextureRecord {
     SubresourceStates<D3D12_RESOURCE_STATES> current;
     // 기록 중인 프레임이 current를 바꿨다(touchedTextures_에 있다).
     bool touched = false;
+    // placed 텍스처(CreatePlacedTexture)면 그 transient heap이다(BufferRecord::heap, view는 비어
+    // 있다).
+    SlotHandle heap;
 };
 
 // mip level 하나의 데이터 byte다(모든 slice·깊이 면, TextureMipBytes와 같은 값).
@@ -292,6 +301,35 @@ struct Retired {
     int64 srv = -1;
     int64 rtv = -1;
     int64 dsv = -1;
+    // placed 자원·placed 버퍼 view의 heap이다. 자원을 놓은 뒤 heap의 placed 수를 줄인다
+    // (ReleasePlacement, GX12).
+    SlotHandle heap;
+};
+
+// transient heap 안 placed 자원 하나의 구간과 aliasing 활성 여부다(GX12). 획득이 자원을 활성으로
+// 만들고, 같은 heap에서 구간이 겹치는 다른 자원을 비활성으로 돌린다. 자원 종류는 heap 종류로
+// 정해진다(Buffers는 버퍼, 그 밖은 텍스처).
+struct PlacedRange {
+    SlotHandle resource;
+    uint64 offset = 0;
+    uint64 bytes = 0;
+    bool active = false;
+};
+
+// transient heap(GX12)이다. ID3D12Heap 하나를 placed 자원이 offset으로 나눠 쓴다. 회수 대기
+// (retirePending)여도 placed 자원·view가 남아 있으면 표에 두고, 마지막이 회수될 때 heap을 놓는다.
+struct TransientHeapRecord {
+    explicit TransientHeapRecord(Allocator& allocator) noexcept : ranges(allocator) {
+    }
+
+    ComRef<ID3D12Heap> heap;
+    uint64 size = 0;
+    TransientHeapKind kind = TransientHeapKind::Buffers;
+    // 아직 회수되지 않은 placed 자원과 placed 버퍼 view 수다.
+    uint32 placedCount = 0;
+    bool retirePending = false;
+    // 살아 있는(Retire 전) placed 자원의 구간이다.
+    Array<PlacedRange> ranges;
 };
 
 // 고정 용량 descriptor 힙의 빈 칸 관리다.
@@ -639,7 +677,86 @@ public:
 
     uint64 ValidationErrorCount() const noexcept override;
 
+    // --- transient heap·placed 자원(GX12, D3D12Transient.cpp) ---
+
+    // 다른 스레드에서도 부를 수 있다(concurrentResourceCreation).
+    Result<TransientHeapHandle>
+    CreateTransientHeap(const TransientHeapDesc& desc) noexcept override;
+    void RetireTransientHeap(TransientHeapHandle heap) noexcept override;
+    // 스레드 안전하다(장치 생성 뒤 바뀌지 않는 표와 GetResourceAllocationInfo만 쓴다).
+    Result<TransientPlacement> GetTexturePlacement(const TextureDesc& desc) const noexcept override;
+    Result<TransientPlacement> GetBufferPlacement(const BufferDesc& desc) const noexcept override;
+    Result<TextureHandle> CreatePlacedTexture(TransientHeapHandle heap, uint64 offset,
+                                              const TextureDesc& desc) noexcept override;
+    Result<BufferHandle> CreatePlacedBuffer(TransientHeapHandle heap, uint64 offset,
+                                            const BufferDesc& desc) noexcept override;
+
 private:
+    // placed 자원을 둘 heap 구간이다(CreatePlacedTexture·CreatePlacedBuffer).
+    struct Placement {
+        SlotHandle heap;
+        uint64 offset = 0;
+    };
+
+    // 텍스처 desc 검사 결과다. code가 None이 아니면 실패이고, unsupportedFormat이면 형식 문구,
+    // detail이 있으면 그 문구를 LastError에 남긴다.
+    struct TextureDescCheck {
+        ErrorCode code = ErrorCode::None;
+        bool unsupportedFormat = false;
+        const char* detail = nullptr;
+    };
+
+    // CreateTexture와 placement 질의가 함께 쓰는 desc 검사다(잠금 밖, 스레드 안전).
+    TextureDescCheck CheckTextureDesc(const TextureDesc& desc, usize pixelBytes) const noexcept;
+
+    // 텍스처 desc의 D3D12 자원 설정이다(committed·placed·placement 질의가 같은 값을 쓴다).
+    static D3D12_RESOURCE_DESC TextureResourceFor(const TextureDesc& desc) noexcept;
+
+    // 버퍼 desc의 D3D12 자원 설정이다.
+    static D3D12_RESOURCE_DESC BufferResourceFor(const BufferDesc& desc) noexcept;
+
+    // 텍스처·버퍼 생성 본체다. placement가 있으면 그 heap 구간에 placed 자원으로 두고(초기 데이터
+    // 없음) 없으면 committed 자원이다. view·descriptor·상태 추적은 같다.
+    Result<TextureHandle> CreateTextureIn(const TextureDesc& desc, Span<const uint8> pixels,
+                                          const Placement* placement) noexcept;
+    Result<BufferHandle> CreateBufferIn(const BufferDesc& desc, Span<const uint8> initial,
+                                        const Placement* placement) noexcept;
+
+    // placement 구간을 확인하고 heap 기록을 돌려준다(잠금 안). heap이 없거나 회수 대기면
+    // StaleHandle, 종류가 다르거나 offset이 정렬·범위 밖이면 InvalidArgument다. 성공하면 bytes에
+    // 자원 크기를 두고 구간 목록에 칸 하나를 미리 잡는다(TrackPlaced가 실패하지 않게).
+    Result<TransientHeapRecord*> CheckPlacement(const Placement& placement, TransientHeapKind kind,
+                                                const D3D12_RESOURCE_DESC& resource,
+                                                uint64& bytes) noexcept;
+
+    // 표에 넣은 placed 자원을 heap 구간 목록에 더하고 placed 수를 올린다(잠금 안, 비활성으로
+    // 시작한다).
+    void TrackPlaced(SlotHandle heap, SlotHandle resource, uint64 offset, uint64 bytes) noexcept;
+
+    // Retire한 placed 자원을 heap 구간 목록에서 뺀다(잠금 안). 메모리는 회수 뒤
+    // ReleasePlacement가 놓는다.
+    void ForgetPlaced(SlotHandle heap, SlotHandle resource) noexcept;
+
+    // placed 자원·view 하나가 회수됐다(잠금 안). heap이 회수 대기이고 마지막이면 heap을 놓는다.
+    void ReleasePlacement(SlotHandle heap) noexcept;
+
+    // placed 자원을 활성으로 만든다(잠금 안, graphics 기록). 이미 활성이면 거짓이다. 아니면
+    // aliasing barrier(앞 자원 null)를 내고 같은 heap에서 구간이 겹치는 다른 자원을 비활성으로
+    // 돌린 뒤 참이다.
+    bool ActivatePlaced(SlotHandle heap, SlotHandle resource, ID3D12Resource* object) noexcept;
+
+    // placed 텍스처의 aliasing 획득이다(ResourceTransition::acquire·attachment acquire, 잠금 안).
+    // 새로 활성이 된 렌더 타깃·깊이는 전체를 RENDER_TARGET·DEPTH_WRITE로 바꿔 DiscardResource로
+    // 초기화한다(D3D12 규칙). cleared면 패스의 attachment clear가 자원 전체를 초기화하므로
+    // Discard를 생략한다. compute 기록에서는 하지 않고 IgnoredDraws로 센다.
+    void AcquireTexture(TextureRecord& record, SlotHandle slot, bool cleared = false) noexcept;
+
+    // placed 버퍼의 aliasing 획득이다(AcquireTexture와 같은 규칙, 초기화는 없다).
+    void AcquireBuffer(const BufferRecord& record, SlotHandle slot) noexcept;
+
+    // 획득 전이의 before가 Discard가 아니면 검증 오류로 센다(검증 장치, 획득은 그대로 한다).
+    void CheckAcquireBefore(const ResourceTransition& transition) noexcept;
+
     // 기록 저장소 하나와 그것으로 마지막에 제출한 fence 값이다(0이면 쓴 적 없음).
     struct AllocatorRecord {
         ComRef<ID3D12CommandAllocator> allocator;
@@ -931,14 +1048,17 @@ private:
     void* Scratch(SIZE_T length) const noexcept;
 
     // 모든 D3D 인터페이스는 IUnknown을 단일 상속하므로 포인터 변환이 안전하다.
+    // heap은 placed 자원·view의 transient heap이다(회수 뒤 ReleasePlacement).
     template <class T>
-    void Defer(ComRef<T>&& object, int64 srv, int64 rtv, int64 dsv = -1) noexcept {
+    void Defer(ComRef<T>&& object, int64 srv, int64 rtv, int64 dsv = -1,
+               SlotHandle heap = {}) noexcept {
         ComRef<IUnknown> unknown;
         unknown.Attach(object.Detach());
-        RetireObject(Move(unknown), srv, rtv, dsv);
+        RetireObject(Move(unknown), srv, rtv, dsv, heap);
     }
 
-    void RetireObject(ComRef<IUnknown>&& object, int64 srv, int64 rtv, int64 dsv = -1) noexcept;
+    void RetireObject(ComRef<IUnknown>&& object, int64 srv, int64 rtv, int64 dsv = -1,
+                      SlotHandle heap = {}) noexcept;
 
     // 살아 있는 자원이 모두 retire되어도 목록이 자라지 않도록 용량을 확보한다. Retire가 할당 실패로
     // GPU 사용 중인 자원을 놓는 경로를 없앤다.
@@ -1052,6 +1172,8 @@ private:
     SlotArray<TextureRecord> textures_;
     SlotArray<PipelineRecord> pipelines_;
     SlotArray<SwapChainRecord> swapChains_;
+    // transient heap(GX12)이다.
+    SlotArray<TransientHeapRecord> heaps_;
     Array<Retired> retired_;
     DescriptorPool rtvs_;
     DescriptorPool dsvs_;
@@ -1171,6 +1293,12 @@ private:
     bool recording_ = false;
     bool validation_ = false;
     bool software_ = false;
+    // D3D12_HEAP_FLAG_CREATE_NOT_ZEROED를 받는 런타임이다(ID3D12Device8, UE D3D12Adapter.cpp와
+    // 같다).
+    bool heapNotZeroed_ = false;
+    // 기록 중인 프레임이 placed 자원을 활성으로 만들었다. 제출하지 못하면 모든 구간을 비활성으로
+    // 돌린다(다음 획득이 aliasing barrier를 다시 낸다).
+    bool placedActivated_ = false;
     // --- async compute queue(RG4) ---
     // compute queue와 그 fence·list다. 만들지 못했으면 queue가 없다.
     ComRef<ID3D12CommandQueue> computeQueue_;

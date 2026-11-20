@@ -13,6 +13,7 @@
 #include "StorageTargetSelfTest.h"
 #include "ViewDimensionSelfTest.h"
 #include "TextureViewSelfTest.h"
+#include "TransientHeapSelfTest.h"
 #include "VertexSelfTest.h"
 
 #include <Core/Containers/Array.h>
@@ -712,6 +713,8 @@ void RunBackend(const char* name, Result<UniquePtr<graphics::Device>> created,
     failures += RunCommandChecks(name, device, result.triangle.GetAllocator());
     // 렌더 그래프(RG1): 그래프 텍스처·명시 전이·culling·history export/import.
     failures += RunRenderGraphChecks(name, device, renderer, result.triangle.GetAllocator());
+    // transient heap·placed 자원·aliasing 획득(GX12): 같은 heap 구간의 렌더 타깃·버퍼 이어 쓰기.
+    failures += RunTransientHeapChecks(name, device, result.triangle.GetAllocator());
     // GPU 계측(GX9): timestamp 쌍·slot 재사용·calibration·debug marker.
     failures += RunTimingChecks(name, device, renderer, result.triangle.GetAllocator());
     Check(device.ValidationErrorCount() == 0, name, "no validation errors");

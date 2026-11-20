@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Core/Containers/Array.h>
+#include <Graphics/DeviceTypes.h>
 #include <Platform/Sync.h>
 #include <RenderBase/RenderHandle.h>
 
@@ -37,6 +38,8 @@ struct RenderNotice {
     uint64 frame = 0;
     RenderHandle handle;
     uint64 value = 0;
+    // GpuTimestamp를 쓴 기록의 queue다(query 번호는 queue마다 따로다, RenderBase 8절 RG4).
+    graphics::QueueKind queue = graphics::QueueKind::Graphics;
 };
 
 // 완료 통지 큐다. 렌더 lane(과 그 fence 통지)이 넣고 게임 lane이 프레임 시작 때 비운다. 셰이더

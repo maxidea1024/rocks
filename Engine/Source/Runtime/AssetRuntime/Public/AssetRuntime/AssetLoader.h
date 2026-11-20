@@ -336,6 +336,16 @@ const char* AssetLoaderUnitPhaseName(AssetLoaderUnitPhase phase) noexcept;
 const char* AssetLoaderPackagePhaseName(AssetLoaderPackagePhase phase) noexcept;
 const char* AssetLoaderWaitName(AssetLoaderWait wait) noexcept;
 
+// PostLoad까지 끝난 공개 패키지 하나다(TakePublished — 11.7절 2). group은 같은 단위(SCC)로 함께
+// 끝난 패키지가 같은 값을 갖는 순번(로더 수명 동안 증가)이고, slot은 로더가 쥔 RootRef 칸 번호다
+// (ReleaseRetired에 넘긴다).
+struct AssetLoaderPublished {
+    AssetId asset;
+    ObjectHandle package{};
+    uint64 group = 0;
+    uint32 slot = 0;
+};
+
 class AssetLoader final : public PackageImportResolver {
 public:
     explicit AssetLoader(const AssetLoaderConfig& config) noexcept;
@@ -397,6 +407,31 @@ public:
     // 공개한 패키지를 찾는다(InstantiatePackages의 묶음 밖 import 해석). 없으면 NotFound, 다른
     // 스레드 WrongThread다.
     Result<ObjectHandle> FindPackage(AssetId asset) noexcept override;
+
+    // 마지막 호출 뒤 PostLoad까지 끝난 단위의 패키지를 끝난 순서대로 out 뒤에 붙이고 로더 쪽 목록을
+    // 비운다(11.7절 2 — AssetManager가 상주 단위를 만든다. PostLoading 단위는 넘기지 않는다).
+    // 오류: 초기화 전 InvalidArgument, 다른 스레드 WrongThread, 콜백 중 WrongContext, 할당 실패는
+    // 그 오류(목록과 out은 그대로).
+    Result<void> TakePublished(Array<AssetLoaderPublished>& out) noexcept;
+
+    // 진행 중(공개 전) 단위 가운데 공개된 패키지 asset에 Hard로 기대는 단위 수다(11.4절 "로드
+    // 작업의 내부 보유" — 0이 아니면 그 패키지를 Discard하면 안 된다). 공개되지 않았으면 0이다.
+    // 오류: 매니페스트에 없는 id NotFound, 초기화 전 InvalidArgument, 다른 스레드 WrongThread.
+    Result<uint32> PublishedHolds(AssetId asset) const noexcept;
+
+    // PostLoad까지 마친 공개 패키지들을 공개되지 않은 것으로 돌린다(11.7절 2 — AssetManager가 그
+    // 단위의 Discard를 시작했다). 이후 같은 id의 Request는 새 로드, FindPackage는 NotFound, 해석은
+    // 새 단위를 만든다. RootRef는 칸에 그대로 쥔다(ReleaseRetired가 놓는다). 모두 확인한 뒤에만
+    // 바꾸고 할당하지 않는다. 오류: 매니페스트에 없는 id NotFound, 공개되지 않았거나 PostLoad
+    // 중이거나 공개 보유가 남은 id· 같은 id 두 번은 InvalidArgument, 초기화 전 InvalidArgument,
+    // 다른 스레드 WrongThread, 콜백 중 WrongContext, Shutdown 뒤 ShuttingDown.
+    Result<void> RetirePublished(Span<const AssetId> assets) noexcept;
+
+    // RetirePublished로 퇴출된 칸의 RootRef를 놓고 칸을 돌려준다(Discard를 마친 단위). 모두 확인한
+    // 뒤에만 바꾼다. 오류: 퇴출 상태가 아닌 칸·같은 칸 두 번 InvalidArgument, 초기화 전
+    // InvalidArgument, 다른 스레드 WrongThread, 콜백 중 WrongContext, 할당 실패는 그 오류(아무것도
+    // 바꾸지 않는다).
+    Result<void> ReleaseRetired(Span<const uint32> slots) noexcept;
 
     // Pending 요청을 ShuttingDown으로 끝내고 미공개 단위를 버린 뒤 진행 중 IO·worker를 기다리고
     // 공개한 패키지의 RootRef를 놓는다. 두 번째 호출은 아무것도 하지 않는다. 오류: WrongThread.

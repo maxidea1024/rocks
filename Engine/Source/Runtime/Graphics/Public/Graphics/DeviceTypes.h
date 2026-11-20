@@ -814,6 +814,9 @@ struct ColorAttachment {
     uint32 slice = 0;
     uint32 resolveMipLevel = 0;
     uint32 resolveSlice = 0;
+    // placed 텍스처의 aliasing 획득이다(ResourceTransition::acquire와 같은 뜻, RenderBase 8절
+    // GX12). 패스 시작의 attachment 전이 전에 한다. load는 Load일 수 없다(이전 내용이 없다).
+    bool acquire = false;
 };
 
 // 패스의 깊이·스텐실 attachment다(DepthStencil 텍스처). readOnly면 깊이·스텐실을 읽기 전용으로
@@ -831,6 +834,8 @@ struct DepthAttachment {
     // 붙일 mip과 slice(배열 층·cube 면)다(ColorAttachment와 같은 규칙, 3D 깊이는 없다).
     uint32 mipLevel = 0;
     uint32 slice = 0;
+    // placed 텍스처의 aliasing 획득이다(ColorAttachment::acquire).
+    bool acquire = false;
 };
 
 // attachment(mipLevel, slice)가 텍스처 안인지다. slice 상한은 3D면 그 mip의 깊이, 아니면 slice
@@ -845,6 +850,45 @@ enum class QueueKind : uint8 {
     Graphics,
     AsyncCompute
 };
+
+// --- transient heap(RenderBase 8절 GX12) ---
+
+// transient heap 종류다. 버퍼, 렌더 타깃·깊이가 아닌 텍스처, 렌더 타깃·깊이 텍스처를 늘 다른 heap에
+// 둔다(D3D12 resource heap tier 1 규칙, Vulkan은 선형·최적 자원을 나눠 bufferImageGranularity를
+// 따로 맞추지 않는다).
+enum class TransientHeapKind : uint8 {
+    Buffers,
+    Textures,
+    Targets
+};
+
+// transient heap handle이다(Device::CreateTransientHeap). 놓기는 Device::RetireTransientHeap이다.
+struct TransientHeapHandle {
+    SlotHandle slot;
+
+    bool IsNull() const noexcept {
+        return slot.IsNull();
+    }
+
+    bool operator==(const TransientHeapHandle&) const noexcept = default;
+};
+
+// transient heap 설정이다. bytes는 0보다 크다.
+struct TransientHeapDesc {
+    uint64 bytes = 0;
+    TransientHeapKind kind = TransientHeapKind::Buffers;
+};
+
+// 자원 하나를 heap에 둘 때의 크기·정렬과 heap 종류다(Device::GetTexturePlacement·
+// GetBufferPlacement). offset은 alignment 배수여야 한다.
+struct TransientPlacement {
+    uint64 bytes = 0;
+    uint64 alignment = 0;
+    TransientHeapKind kind = TransientHeapKind::Buffers;
+};
+
+// 텍스처 desc의 heap 종류다(RenderTarget·DepthStencil 용도면 Targets, 아니면 Textures).
+TransientHeapKind TransientHeapKindOf(const TextureDesc& desc) noexcept;
 
 // 패스 시작 설정이다(Device::BeginPass, GX4). 색 attachment는 앞에서부터 colorCount개를 쓴다. 모든
 // attachment의 크기(attachment mip의 크기)와 표본 수(TextureDesc::sampleCount)가 같아야 한다. 색도

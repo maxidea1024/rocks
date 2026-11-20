@@ -78,6 +78,7 @@ TraceScopeName ResolveScopeName("SelfTest.ResolveScope");
 TraceScopeName HzbReduceName("SelfTest.HzbReduce");
 TraceScopeName AsyncSceneName("SelfTest.AsyncScene");
 TraceScopeName AsyncProbeName("SelfTest.AsyncProbe");
+TraceScopeName TransientName("SelfTest.Transient");
 
 // 업로드·복사 시험 버퍼 크기다(4 byte 배수).
 constexpr uint32 CopyBytes = 256;
@@ -245,7 +246,10 @@ void PrintGraphError(const RenderGraph& graph) noexcept {
 // output(B를 합성) · second(C를 합성). B가 빨강이면 C가 A의 객체를 이어 쓴 뒤에도 앞 pass의 결과가
 // 맞고, C가 파랑이면 이어 쓴 객체의 이전 내용이 새지 않았다.
 bool RunReuseGraph(GraphBench& bench, RenderHandle output, RenderHandle second) noexcept {
-    RenderGraph graph(bench.Desc());
+    // RG2 풀 재사용 시험이라 transient aliasing(RG5)을 끈다(aliasing은 RunTransientGraph).
+    RenderGraphDesc desc = bench.Desc();
+    desc.transientAliasing = false;
+    RenderGraph graph(desc);
     auto first = graph.ImportTexture(output, "Output");
     auto other = graph.ImportTexture(second, "Second");
     auto a = graph.CreateTexture(TargetDesc(), "A");
@@ -857,6 +861,54 @@ bool RunAsyncComputeGraph(GraphBench& bench, Allocator& allocator, RenderHandle 
     return ok;
 }
 
+// RG5: 크기가 다른 렌더 타깃 사슬(32 → 16 → 32 → 출력)이다. 앞 결과를 읽어 다음에 그리므로
+// 첫 텍스처가 놓인 뒤 셋째 텍스처가 그 heap 구간을 이어 받는다(aliasing). aliasing이 꺼져 있으면
+// 풀(RG2)이다. 출력은 빨강이어야 한다.
+bool RunTransientGraph(GraphBench& bench, RenderHandle output, bool aliasing,
+                       rocks::render::GraphStats& stats) noexcept {
+    RenderGraphDesc desc = bench.Desc();
+    desc.transientAliasing = aliasing;
+    RenderGraph graph(desc);
+    TextureDesc small = TargetDesc();
+    small.width = TargetSize / 2;
+    small.height = TargetSize / 2;
+    auto first = graph.CreateTexture(TargetDesc(), "TransientFirst");
+    auto second = graph.CreateTexture(small, "TransientSecond");
+    auto third = graph.CreateTexture(TargetDesc(), "TransientThird");
+    auto target = graph.ImportTexture(output, "Output");
+    bool ok = first && second && third && target;
+    sample::Renderer* renderer = bench.renderer;
+    if (ok) {
+        GraphPassAccesses accesses(graph);
+        accesses.RenderTarget(first.Value(), GraphLoadAction::Clear, {0, 0, 0, 1});
+        ok = graph
+                 .AddPass(TransientName, GraphPassKind::Raster, GraphPassFlags::None, accesses,
+                          FullScreen(renderer, bench.redTexture, {}, LinearColor(1, 1, 1, 1)))
+                 .IsOk();
+    }
+
+    const GraphTexture chain[] = {
+        first ? first.Value() : GraphTexture{}, second ? second.Value() : GraphTexture{},
+        third ? third.Value() : GraphTexture{}, target ? target.Value() : GraphTexture{}};
+    for (uint32 step = 0; ok && step + 1 < 4; ++step) {
+        GraphPassAccesses accesses(graph);
+        accesses.Texture(chain[step], ResourceAccess::SrvGraphics)
+            .RenderTarget(chain[step + 1], GraphLoadAction::DontCare);
+        ok = graph
+                 .AddPass(TransientName, GraphPassKind::Raster, GraphPassFlags::None, accesses,
+                          FullScreen(renderer, {}, chain[step], LinearColor(1, 1, 1, 1)))
+                 .IsOk();
+    }
+
+    ok = ok && graph.Execute().IsOk();
+    if (!ok) {
+        PrintGraphError(graph);
+    }
+
+    stats = graph.Stats();
+    return ok;
+}
+
 // RG1 남은 것 설계 2: 그래프 MSAA pass가 마젠타로 clear한 4x 텍스처를 1표본 그래프 텍스처로
 // resolve하고, 다음 pass가 그 대상을 SRV로 읽어 output에 합성한다. 두 pass는 그래프 구간 안이고
 // GpuTrace marker를 켠다(기록마다 marker 짝이 맞아야 검증 계층이 조용하다).
@@ -1237,6 +1289,50 @@ uint32 RunRenderGraphChecks(const char* name, Device& device, sample::Renderer& 
                device.Caps().features.textureViewRanges ? "0 (range views)"
                                                         : "first mip (whole texture)");
     }
+    // RG5: transient aliasing 켬·끔의 출력이 같고(빨강), 켜면 heap에서 실제로 쓴 최대 크기가 자원
+    // 크기 합보다 작다(첫 텍스처의 구간을 셋째가 이어 받는다). transient heap이 없는 장치는 둘 다
+    // 풀이다.
+    if (ok) {
+        Array<uint8> aliased(allocator);
+        Array<uint8> pooled(allocator);
+        rocks::render::GraphStats aliasedStats;
+        rocks::render::GraphStats pooledStats;
+        const bool sized =
+            aliased.TryResize(pixels.Size()).IsOk() && pooled.TryResize(pixels.Size()).IsOk();
+        auto cleared = arena.Reset();
+        (void)cleared;
+        const bool pooledOk = sized &&
+                              RunTransientGraph(bench, output.Value(), false, pooledStats) &&
+                              device.ReadPixels(outputTexture.Value(), pooled.View()).IsOk();
+        cleared = arena.Reset();
+        (void)cleared;
+        const bool aliasedOk = sized &&
+                               RunTransientGraph(bench, output.Value(), true, aliasedStats) &&
+                               device.ReadPixels(outputTexture.Value(), aliased.View()).IsOk();
+        const bool heaps = device.Caps().features.transientHeaps;
+        Check(pooledOk && aliasedOk, "the transient chain runs with and without aliasing");
+        Check(pooledOk && aliasedOk &&
+                  platform::MemoryEquals(pooled.Data(), aliased.Data(), pooled.Size()) &&
+                  CenterIs(aliased, 255, 0, 0),
+              "aliasing on and off give the same (red) output");
+        Check(pooledStats.transientResources == 0 &&
+                  aliasedStats.transientResources == (heaps ? 3u : 0u),
+              "transient resources use heaps only when the device has them");
+        if (heaps) {
+            Check(aliasedStats.aliasedResources == 1 &&
+                      aliasedStats.transientPeakBytes < aliasedStats.transientBytes,
+                  "aliasing lowers the transient peak");
+        }
+
+        printf("  %s render graph transient aliasing: heaps %s, resources %u, aliased %u, bytes "
+               "%llu, peak %llu, heaps used %u\n",
+               name, heaps ? "yes" : "no", aliasedStats.transientResources,
+               aliasedStats.aliasedResources,
+               static_cast<unsigned long long>(aliasedStats.transientBytes),
+               static_cast<unsigned long long>(aliasedStats.transientPeakBytes),
+               aliasedStats.transientHeaps);
+    }
+
     // RG4: async compute와 graphics pipe 실행의 결과(합성 출력·probe 픽셀·HZB mip)가 같다. compute
     // queue가 있는 장치는 Always가 compute queue를 쓰고, 겹침은 queue별 timestamp로 재어 출력만
     // 한다(시간에 기대는 단언은 하지 않는다).

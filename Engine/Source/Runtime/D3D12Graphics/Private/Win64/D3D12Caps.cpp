@@ -173,6 +173,9 @@ DeviceCaps QueryDeviceCaps(ID3D12Device* device, IDXGIAdapter1* adapter,
     // VS UAV는 FL 11.1 이상이다(FL 11.0은 PS·CS만).
     features.vertexStores = featureLevel >= D3D_FEATURE_LEVEL_11_1;
     features.pixelStores = true;
+    // transient heap·placed 자원(GX12)은 D3D12 core 기능이다(CreateHeap·CreatePlacedResource,
+    // heap은 종류마다 나눠 resource heap tier 1에서도 된다).
+    features.transientHeaps = true;
     features.hdrOutput = dxgi::AdapterHasHdrOutput(adapter);
     // async compute 효율 판단(RenderBase 8절 RG4, UE 5.8 D3D12Adapter.cpp:1447–1484와 같다): AMD는
     // 참, NVIDIA는 OPTIONS6 PerPrimitiveShadingRateSupportedWithViewportIndexing(Ampere 이후)일

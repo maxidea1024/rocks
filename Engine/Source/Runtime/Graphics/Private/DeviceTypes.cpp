@@ -184,6 +184,12 @@ Result<ResolvedSubresourceRange> ResolveTextureViewRange(TextureDimension dimens
     return Result<ResolvedSubresourceRange>::Success(range);
 }
 
+TransientHeapKind TransientHeapKindOf(const TextureDesc& desc) noexcept {
+    return HasTextureUsage(desc.usage, TextureUsage::RenderTarget | TextureUsage::DepthStencil)
+               ? TransientHeapKind::Targets
+               : TransientHeapKind::Textures;
+}
+
 bool IsAttachmentInRange(TextureDimension dimension, uint32 depth, uint32 mipLevels, uint32 slices,
                          uint32 mipLevel, uint32 slice) noexcept {
     if (mipLevel >= mipLevels) {

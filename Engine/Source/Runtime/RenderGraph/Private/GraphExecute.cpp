@@ -13,9 +13,52 @@ namespace rocks::render::detail {
 
 using graphics::ResourceAccess;
 
+Result<void> AcquireTransientHeaps(GraphState& state) noexcept {
+    for (TransientHeapPlan& plan : state.transientHeaps) {
+        auto acquired = state.pool->AcquireTransientHeap(plan.kind, plan.capacity, state.frame);
+        if (!acquired) {
+            return Result<void>::Failure(RecordGraphError(state, acquired.Error(), false,
+                                                          "transient heap allocation failed ({})",
+                                                          ErrorCodeName(acquired.Error())));
+        }
+
+        plan.pool = acquired.Value();
+    }
+
+    return Result<void>::Success();
+}
+
 Result<void> AllocateResource(FrameArena& arena, GraphState& state, uint32 index) noexcept {
     ResourceRecord& resource = state.resources[index];
     if (resource.allocated) {
+        return Result<void>::Success();
+    }
+
+    // transient 자원(RG5)은 계획한 heap 구간의 placed 자원이다(풀 캐시가 같은 자리·desc를 다시
+    // 준다).
+    if (resource.transient) {
+        const TransientHeapPlan& plan = state.transientHeaps[resource.transientHeap];
+        Result<SlotHandle> placed = Result<SlotHandle>::Failure(ErrorCode::InvalidArgument);
+        if (resource.kind == GraphResourceKind::Texture) {
+            auto texture = state.pool->PlacedTexture(plan.pool, resource.transientOffset,
+                                                     resource.textureDesc, state.frame);
+            placed = texture ? Result<SlotHandle>::Success(texture.Value().slot)
+                             : Result<SlotHandle>::Failure(texture.Error());
+        } else {
+            auto buffer = state.pool->PlacedBuffer(plan.pool, resource.transientOffset,
+                                                   resource.bufferDesc, state.frame);
+            placed = buffer ? Result<SlotHandle>::Success(buffer.Value().slot)
+                            : Result<SlotHandle>::Failure(buffer.Error());
+        }
+
+        if (!placed) {
+            return Result<void>::Failure(RecordGraphError(
+                state, placed.Error(), false, "'{}' could not be placed in a transient heap ({})",
+                resource.name, ErrorCodeName(placed.Error())));
+        }
+
+        resource.device = placed.Value();
+        resource.allocated = true;
         return Result<void>::Success();
     }
 
@@ -156,6 +199,22 @@ Result<void> CloseRecording(GraphState& state) noexcept {
     }
 
     const bool compute = state.recordingQueue == graphics::QueueKind::AsyncCompute;
+    // compute 장부의 GPU 프레임은 마지막 async pass가 든 compute 기록에서 닫는다.
+    if (compute && state.computeFrameOpen) {
+        bool last = true;
+        for (uint32 pass = state.computeRunStart; pass < state.passes.Size(); ++pass) {
+            const PassRecord& record = state.passes[pass];
+            if (!record.culled && record.async && !record.executed) {
+                last = false;
+            }
+        }
+
+        if (last) {
+            state.computeTrace->EndFrame(*state.commands);
+            state.computeFrameOpen = false;
+        }
+    }
+
     state.commands = nullptr;
     state.recordingPass = GraphIndexNone;
     state.recordingQueue = graphics::QueueKind::Graphics;
@@ -230,6 +289,7 @@ graphics::ResourceTransition ToDevice(const GraphState& state,
 
     transition.before = record.before;
     transition.after = record.after;
+    transition.acquire = record.acquire;
     return transition;
 }
 
@@ -445,6 +505,10 @@ Result<void> OpenComputeRecording(GraphState& state, uint32 pass) noexcept {
     state.commands = begun.Value();
     state.recordingQueue = graphics::QueueKind::AsyncCompute;
     state.computeRunStart = pass;
+    if (state.computeTrace != nullptr && !state.computeFrameOpen) {
+        state.computeTrace->BeginFrame(*state.device, *state.commands, state.frame);
+        state.computeFrameOpen = true;
+    }
     ++state.stats.recordings;
     ++state.stats.computeRecordings;
     RestoreScopeMarkers(state);
@@ -843,6 +907,24 @@ Result<void> ExecutePass(RenderGraph& graph, FrameArena& arena, GraphState& stat
                 desc.depth.slice = depth.slice;
             }
 
+            // transient attachment의 첫 사용은 BeginPass가 aliasing 획득을 한다(RG5).
+            for (const GraphTransitionRecord& transition : state.transitions) {
+                if (transition.pass != pass || !transition.attachment || !transition.acquire) {
+                    continue;
+                }
+
+                for (uint32 index = 0; index < record.target.colorCount; ++index) {
+                    desc.colors[index].acquire =
+                        desc.colors[index].acquire ||
+                        record.target.colors[index].texture.index == transition.resource;
+                }
+
+                if (record.target.hasDepth) {
+                    desc.depth.acquire = desc.depth.acquire ||
+                                         record.target.depth.texture.index == transition.resource;
+                }
+            }
+
             begun = state.device->BeginPass(desc);
         } else {
             begun = state.device->BeginFrame(record.target.swapChain, record.target.clear);
@@ -1066,6 +1148,16 @@ Result<void> FinishGraph(FrameArena& arena, GraphState& state, bool success) noe
         resource.allocated = false;
     }
 
+    // transient heap을 돌려준다(RG5). 다음 그래프는 두 queue의 이 마지막 사용이 끝난 뒤에 받는다.
+    for (TransientHeapPlan& plan : state.transientHeaps) {
+        if (plan.pool != GraphIndexNone) {
+            state.pool->ReleaseTransientHeap(
+                plan.pool, lastUse,
+                state.device->LastSubmittedFence(graphics::QueueKind::AsyncCompute), state.frame);
+            plan.pool = GraphIndexNone;
+        }
+    }
+
     // 풀에서 받은 자리를 그래프 끝에 한 번씩 돌려준다(같은 그래프 안에서 여러 자원이 쓴 자리도
     // 하나다). export한 자리는 handle이 가진다.
     for (PhysicalResource& physical : state.physicals) {
@@ -1096,7 +1188,13 @@ void GraphExecutionAccess::Run(RenderGraph& graph, GraphPassExecutor& executor,
         return;
     }
 
-    // compute 기록은 GPU 구간 없이 marker만 둔다(RG4).
+    // compute 기록: compute 장부가 있으면 그 장부의 GPU 구간, 없으면 marker만 둔다(RG4).
+    if (state.computeTrace != nullptr) {
+        GpuScope gpu(*state.computeTrace, commands, name);
+        executor.Execute(context);
+        return;
+    }
+
     const bool marker = state.trace != nullptr && state.trace->MarkersEnabled();
     if (marker) {
         commands.PushMarker(StringView(name.Name()));
@@ -1123,6 +1221,11 @@ Result<void> GraphExecutionAccess::Replay(RenderGraph& graph, const GraphCommand
     TraceScopeName& name = *state.passes[pass].name;
     if (state.trace != nullptr && state.recordingQueue == graphics::QueueKind::Graphics) {
         GpuScope gpu(*state.trace, commands, name);
+        return list.Replay(commands);
+    }
+
+    if (state.computeTrace != nullptr) {
+        GpuScope gpu(*state.computeTrace, commands, name);
         return list.Replay(commands);
     }
 

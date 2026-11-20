@@ -4,17 +4,41 @@
 
 namespace rocks::graphics {
 
-static_assert(sizeof(ResourceTransition) ==
-                  4 * sizeof(uint32) + sizeof(SubresourceRange) + 2 * sizeof(ResourceAccess),
-              "ResourceTransition must have no padding bytes for its fingerprint");
+namespace {
+
+// 전이 하나의 fingerprint 단어 수다(handle 둘의 칸 4, 범위 4, 상태 2, 획득 1).
+// ResourceTransition에는 padding byte가 있으므로(acquire) 구조체 byte 대신 칸을 단어로 옮겨
+// 해시한다.
+constexpr usize TransitionWords = 11;
+
+} // namespace
+
+// 칸이 늘면 아래 단어 목록도 늘려야 한다(bool acquire 뒤 padding까지 4 byte 한 칸).
+static_assert(sizeof(ResourceTransition) == 4 * sizeof(uint32) + sizeof(SubresourceRange) +
+                                                2 * sizeof(ResourceAccess) + sizeof(uint32),
+              "ResourceTransition fields changed: update the split transition fingerprint words");
 
 SplitTransitionTracker::SplitTransitionTracker(Allocator& allocator) noexcept : open_(allocator) {
 }
 
 uint64 SplitTransitionTracker::Fingerprint(Span<const ResourceTransition> transitions) noexcept {
-    return HashCombine(
-        transitions.Size(),
-        SipHash24(HashSeed{}, transitions.Data(), transitions.Size() * sizeof(ResourceTransition)));
+    uint64 hash = transitions.Size();
+    for (const ResourceTransition& transition : transitions) {
+        const uint32 words[TransitionWords] = {transition.texture.slot.index,
+                                               transition.texture.slot.generation,
+                                               transition.buffer.slot.index,
+                                               transition.buffer.slot.generation,
+                                               transition.range.firstMip,
+                                               transition.range.mipCount,
+                                               transition.range.firstSlice,
+                                               transition.range.sliceCount,
+                                               static_cast<uint32>(transition.before),
+                                               static_cast<uint32>(transition.after),
+                                               transition.acquire ? 1u : 0u};
+        hash = HashCombine(hash, SipHash24(HashSeed{}, words, sizeof(words)));
+    }
+
+    return hash;
 }
 
 SplitTransition SplitTransitionTracker::Begin(Span<const ResourceTransition> transitions) noexcept {

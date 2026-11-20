@@ -72,6 +72,8 @@ namespace {
         platform::Fatal("Object::GetType failed: AlreadyRegistered");
     case ErrorCode::ScopeClosed:
         platform::Fatal("Object::GetType failed: ScopeClosed");
+    case ErrorCode::NotReady:
+        platform::Fatal("Object::GetType failed: NotReady");
     case ErrorCode::None:
         platform::Fatal("Object::GetType failed: unexpected success code");
     }
@@ -123,6 +125,8 @@ namespace {
         platform::Fatal("Object::IsDestroyRequested failed: AlreadyRegistered");
     case ErrorCode::ScopeClosed:
         platform::Fatal("Object::IsDestroyRequested failed: ScopeClosed");
+    case ErrorCode::NotReady:
+        platform::Fatal("Object::IsDestroyRequested failed: NotReady");
     case ErrorCode::None:
         platform::Fatal("Object::IsDestroyRequested failed: unexpected success code");
     }
