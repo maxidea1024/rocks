@@ -309,6 +309,7 @@ try
     {
         ++failures;
     }
+
     await Check("content-sign verify other channel", ["content-sign", "verify", envelope, "--trust", publicLine,
         "--product", "rocks.game", "--channel", "beta"], 1, "", "rejected at Scope");
     await Check("content-sign verify higher minimum", ["content-sign", "verify", envelope, "--trust", publicLine,
