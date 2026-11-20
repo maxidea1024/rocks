@@ -5,6 +5,7 @@
 #include <Core/Function.h>
 #include <Object/ObjectRegistry.h>
 #include <Object/ReferenceObserver.h>
+#include <Task/TaskLane.h>
 
 // 에셋 관리자다(Docs/Design/AssetSystem.ko.md 11.1·11.4·11.7절). 에셋 객체 Registry와 로더를
 // 소유하고, 요청 관심(LoadTicket)·상주 수명(AssetLease)·수명 범위(AssetScope)·미준비 대상
@@ -35,13 +36,6 @@ class AssetScope;
 enum class ReadyMask : uint8 {
     Cpu = 1u << 0,
     Render = 1u << 1
-};
-
-// callback을 부를 실행 lane이다. 이번 엔진은 Game 스레드 하나라 Game만 된다(나머지 Unsupported).
-enum class TaskLane : uint8 {
-    Game,
-    Worker,
-    Render
 };
 
 // 아직 준비되지 않은 대상에 대한 명령의 정책이다(11.7절 9).
@@ -285,7 +279,8 @@ public:
     Result<LoadTicket> RequestAsset(const AssetRequest& request,
                                     AssetDiagnostic* failure = nullptr) noexcept;
 
-    // 티켓의 준비 callback을 등록한다(11.7절 5). 끝나면 다음 Pump에서 정확히 한 번 부른다.
+    // 티켓의 준비 callback을 등록한다(11.7절 5). 끝나면 다음 Pump에서 정확히 한 번 부른다. lane은
+    // Task 모듈의 TaskLane이고 이번 엔진은 Game만 된다(Game 스레드 하나 — 11.1절).
     // 오류: WrongThread, 무효 티켓 StaleHandle, 이미 등록 AlreadyRegistered(callback은 그대로
     // caller에 남는다), lane이 Game이 아니면 Unsupported, 빈 callback InvalidArgument.
     Result<void> OnReady(LoadTicket& ticket, TaskLane lane, AssetReadyCallback&& callback) noexcept;

@@ -21,6 +21,13 @@ struct ReadyRecord {
     Array<AssetLease> leases;
 };
 
+// id 하나의 요청이다(나머지는 기본값).
+inline AssetRequest RequestOf(uint64 id) noexcept {
+    AssetRequest request;
+    request.id = FixedId(id);
+    return request;
+}
+
 inline AssetReadyCallback RecordReady(Allocator& allocator, ReadyRecord& record) noexcept {
     auto made = AssetReadyCallback::TryCreate(
         allocator, [&record](Result<AssetLease> lease, const AssetDiagnostic& diagnostic) noexcept {
