@@ -903,6 +903,27 @@ internal static partial class CrashReportingTests
         // 프로세스 안 fallback이고 helper.status에 사유가 남는다(설계 11.5절 표).
         AddCrash(new("inprocess-access-violation", "main", AccessViolation, ReasonException, "Exception", "FaultAccess",
             Writer: "InProcess", HelperStatus: null));
+        // 프로세스 안 덤프가 다른 스레드를 멈추는 단계에서 그 스레드가 프로세스 heap lock을 쥐고 있어도(시험 gate) 크래시 처리는 끝난다
+        // (설계 11.5절). 덤프는 자기 snapshot에서 쓰므로 마감을 집행하는 크래시한 스레드가 멈추지 않고, 마감에 원래 코드로 프로세스를
+        // 끝낸다. 덤프는 heap lock에서 막히므로 최종본 없이 예비 CrashInfo.json(complete false, dump Pending)만 남고 보고 줄도 없다.
+        // 살아 있는 자기 프로세스를 덤프하던 이전 코드에서는 dbghelp가 크래시한 스레드까지 멈춰 이 시험이 끝나지 않았다.
+        suite.Add("Native.Crash.inprocess-dump-lock-holder", async () =>
+        {
+            const string mode = "inprocess-dump-lock-holder";
+            using var directory = new TemporaryDirectory();
+            string root = directory.FilePath("Crashes");
+            ProbeResult result = await Run(mode, root);
+            VerifyExit(result, AccessViolation, mode);
+            Verify.Equal(ReasonException, int.Parse(SingleCallback(result, mode).Groups[1].Value), mode + " callback reason");
+            string folder = SingleCrashFolder(root, result, mode, reportLine: false);
+            Verify.That(!result.StdErr.Contains("Rocks crash report: ", StringComparison.Ordinal), mode + " report line without a final record");
+            using var metadata = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(folder, "CrashInfo.json")));
+            JsonElement json = metadata.RootElement;
+            Verify.That(!json.GetProperty("complete").GetBoolean(), mode + " complete: " + json);
+            JsonElement dump = json.GetProperty("dump");
+            Verify.Equal("Pending", dump.GetProperty("status").GetString(), mode + " dump status: " + dump);
+            Verify.Equal("InProcess", dump.GetProperty("writer").GetString(), mode + " dump writer: " + dump);
+        });
         AddCrash(new("helper-start-failure", "main", AccessViolation, ReasonException, "Exception", "FaultAccess",
             Writer: "InProcess", HelperStatus: "StartFailed"), (result, folder) =>
         {

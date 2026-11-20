@@ -141,7 +141,7 @@ compile action identity에서 모듈 전체 소스 목록을 빼고 그 action�
 모듈의 C++ 소스(`NativeLanguage.Cpp`) 중 다음을 뺀 나머지를 묶는다.
 - C 소스(`.c`). 언어가 다르다.
 - BuildInfo TU와 규칙 생성 TU(`GeneratedSources`). 생성 시점과 빈도가 다르다.
-- 규칙이 단독으로 지정한 파일(`UnityExclude`). 큰 파일이나 특수 플래그 파일이다.
+- 규칙이 단독으로 지정한 파일(`UnityExclude`). 큰 파일이나 특수 플래그 파일이다. **뒤 소스로 새는 매크로를 정의하는 헤더를 include하는 파일**도 여기다(예: `TestSupport/Private/Win64/WindowsComRefTests.cpp` — Windows COM 헤더가 `small`·`interface` 같은 매크로를 남긴다). 묶음에서 그 파일 뒤에 오는 소스가 묶음 경계에 따라 달라지므로, 상관없는 소스를 더하기만 해도 빌드가 깨진다(2026-11-20, rocks-73이 EngineTests 묶음 경계가 바뀌며 발견). 파일 지역 이름과 달리 매크로 누출은 정책 검사가 아직 잡지 않는다.
 - **첫 `#include` 앞에서 `#define`하는 파일**(예: `Core/Tests/StlCompatibilityTests.cpp`의 `_HAS_EXCEPTIONS 0`). 같은 묶음의 앞 파일이나 PCH가 그 헤더를 이미 처리했으면 설정이 조용히 무효가 된다. 빌드가 토큰 단위로 찾아내 단독 TU로 컴파일하고 PCH도 끈다. 빌드 보고에 파일 목록을 남긴다.
 - 상한보다 큰 파일. 단독 TU다.
 

@@ -70,9 +70,9 @@ struct RegisteredProcessProbe {
 };
 
 // 등록 자리 수다. 넘치면 등록이 false이고 그 probe를 쓰는 시험의 "…ProbeRegistered" 검사가
-// 실패한다. 실행 파일 하나에 등록되는 probe 수(지금 EngineTests 9개)보다 넉넉히 둔다 — 8일 때 서로
-// 다른 세션이 하나씩 더한 probe가 병합에서 만나 넘쳤다.
-static constexpr usize MaxRegisteredProcessProbes = 16;
+// 실패한다. 실행 파일 하나에 등록되는 probe 수(EngineTests는 에셋 로더 probe를 더해 10개를 넘는다)보다
+// 넉넉히 둔다 — 8일 때 서로 다른 세션이 하나씩 더한 probe가 병합에서 만나 넘쳤다.
+static constexpr usize MaxRegisteredProcessProbes = 32;
 static RegisteredProcessProbe registeredProcessProbes[MaxRegisteredProcessProbes];
 static usize registeredProcessProbeCount = 0;
 

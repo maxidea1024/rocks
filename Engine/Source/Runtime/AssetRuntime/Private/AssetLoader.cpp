@@ -8,6 +8,7 @@
 #include <Object/ConstructionContext.h>
 #include <Platform/Atomics.h>
 #include <Platform/Clock.h>
+#include <Platform/Fatal.h>
 #include <Platform/Sync.h>
 #include <Task/WorkerScheduler.h>
 
@@ -65,7 +66,9 @@ struct LoaderPackageJob {
     ErrorCode workerError = ErrorCode::None;
     AssetDiagnostic workerDiagnostic;
     LoaderPackageJob* nextCompletion = nullptr;
+    // 패키지의 임시 byte(파일 + bulkRawBytes, 포화)와 그중 tempBytesInFlight에 실제로 더한 양이다.
     uint64 tempBytes = 0;
+    uint64 accountedBytes = 0;
     uint64 phaseStart = 0;
     uint64 phaseNanoseconds[AssetLoaderPackagePhaseCount] = {};
 };
@@ -173,6 +176,8 @@ struct LoaderUnit {
     uint32 interest = 0;
     uint32 preparedPackages = 0;
     uint32 aliveJobs = 0;
+    // PostLoading 단위에서 다음에 PostLoad할 구성 번호다.
+    uint32 postLoadNext = 0;
     LoadPriority priority = LoadPriority::Normal;
     uint64 sequence = 0;
     uint64 queuedAt = 0;
@@ -194,6 +199,12 @@ struct LoaderTarjanFrame {
 
 // 여러 할당 단계의 처음 실패를 first에 남긴다(단계는 모두 실행한다 — 실패 뒤 단계는 버릴 상태에
 // 용량만 더 잡는다).
+// 포화 덧셈이다(임시 byte 합 — bulkRawBytes는 u64 최댓값까지 유효하다, 11.6절 9).
+uint64 SaturatingAdd(uint64 left, uint64 right) noexcept {
+    return right > NumericLimits<uint64>::Max() - left ? NumericLimits<uint64>::Max()
+                                                       : left + right;
+}
+
 void KeepFirst(ErrorCode& first, Result<void>&& result) noexcept {
     if (first == ErrorCode::None && !result) {
         first = result.Error();
@@ -212,11 +223,11 @@ struct AssetLoader::Impl {
           access(config.registry->OwnerAccess()), root(allocator), entryUnit(allocator),
           entryLoaded(allocator), keyBytes(allocator), keyOffsets(allocator), keyOrder(allocator),
           loadedRoots(allocator), loadedHandles(allocator), requests(allocator), units(allocator),
-          admitCandidates(allocator), readyUnits(allocator), tarjanIndex(allocator),
-          tarjanLow(allocator), tarjanOnStack(allocator), tarjanVisited(allocator),
-          tarjanFrames(allocator), tarjanStack(allocator), sccMembers(allocator),
-          sccStarts(allocator), newUnits(allocator), dependencyCounts(allocator),
-          workStack(allocator) {
+          admitCandidates(allocator), readyUnits(allocator), postLoadUnits(allocator),
+          tarjanIndex(allocator), tarjanLow(allocator), tarjanOnStack(allocator),
+          tarjanVisited(allocator), tarjanFrames(allocator), tarjanStack(allocator),
+          sccMembers(allocator), sccStarts(allocator), newUnits(allocator),
+          dependencyCounts(allocator), workStack(allocator) {
     }
 
     AssetLoader& owner;
@@ -248,6 +259,8 @@ struct AssetLoader::Impl {
     // 잡는다(추가에 할당이 없다).
     Array<uint32> admitCandidates;
     Array<uint32> readyUnits;
+    // PostLoad를 기다리는 공개된 단위다(용량은 위 둘과 같이 잡는다).
+    Array<uint32> postLoadUnits;
     uint32 retireHead = LoaderNoIndex;
     uint32 retireTail = LoaderNoIndex;
 
@@ -273,6 +286,8 @@ struct AssetLoader::Impl {
     uint64 nextSequence = 0;
     uint64 syncWaits = 0;
     uint64 syncWaitNanoseconds = 0;
+    // 최근 동기 대기 고리(다음 쓸 자리 = syncWaits % 용량)다.
+    AssetLoaderSyncWait recentWaits[AssetLoaderSnapshot::RecentSyncWaitCapacity] = {};
 
     uint64 Now() const noexcept {
         return config.clock != nullptr ? config.clock(config.clockContext)
@@ -357,6 +372,11 @@ struct AssetLoader::Impl {
 
     Result<void> Initialize(AssetDiagnostic* failure) noexcept {
         const usize count = config.manifest->entries.Size();
+        // 검증하지 않은 모델의 빠진 Hard 대상은 해석에서 범위 밖 색인이 된다(11.6절 1).
+        if (auto valid = ValidateCookedManifest(*config.manifest, allocator, failure); !valid) {
+            return valid;
+        }
+
         if (auto checked =
                 CheckCookedManifestProfile(*config.manifest, config.runtimeProfile, failure);
             !checked) {
@@ -426,6 +446,7 @@ struct AssetLoader::Impl {
         unit.interest = 0;
         unit.preparedPackages = 0;
         unit.aliveJobs = 0;
+        unit.postLoadNext = 0;
         unit.tempBytes = 0;
         unit.retire = LoaderRetire::None;
         unit.nextRetire = LoaderNoIndex;
@@ -633,13 +654,13 @@ struct AssetLoader::Impl {
                 const auto count =
                     static_cast<uint32>(config.manifest->entries[member].dependencies.Size());
                 for (uint32 position = 0; position < count; ++position) {
+                    // PostLoad를 마친 패키지는 단위가 없다(entryUnit 없음). PostLoading 단위는
+                    // 공개됐어도 이 단위의 PostLoad가 기다리는 의존이다.
                     const uint32 target = HardTarget(member, position);
-                    if (target == LoaderNoIndex || entryLoaded[target] != LoaderNoIndex) {
-                        continue;
-                    }
-
-                    const uint32 other = entryUnit[target];
-                    if (other == unit || units[unit].dependencies.Contains(other)) {
+                    const uint32 other =
+                        target == LoaderNoIndex ? LoaderNoIndex : entryUnit[target];
+                    if (other == LoaderNoIndex || other == unit ||
+                        units[unit].dependencies.Contains(other)) {
                         continue;
                     }
 
@@ -663,6 +684,7 @@ struct AssetLoader::Impl {
 
         KeepFirst(reserved, admitCandidates.TryReserve(units.Size()));
         KeepFirst(reserved, readyUnits.TryReserve(units.Size()));
+        KeepFirst(reserved, postLoadUnits.TryReserve(units.Size()));
         KeepFirst(reserved, workStack.TryReserve(units.Size()));
         KeepFirst(reserved, units[entryUnit[rootEntry]].requests.TryReserve(1));
         if (reserved != ErrorCode::None) {
@@ -682,7 +704,10 @@ struct AssetLoader::Impl {
                 LoaderUnit& target = units[other];
                 (void)target.dependents.TryPushBack(unit);
                 ++target.interest;
-                ++made.waitingDependencies;
+                if (target.phase != AssetLoaderUnitPhase::PostLoading) {
+                    ++made.waitingDependencies;
+                }
+
                 if (target.phase == AssetLoaderUnitPhase::Queued) {
                     ++made.unadmittedDependencies;
                 }
@@ -753,9 +778,11 @@ struct AssetLoader::Impl {
     // ---- 정리(실패·버림 — 침입 목록, 할당 없음) ----
 
     void QueueRetire(uint32 unit, LoaderRetire kind) noexcept {
-        // 이미 정리 중인(Failed·Abandoned) 단위는 어느 목록에도 남지 않아 여기 오지 않는다.
+        // 이미 정리 중인(Failed·Abandoned) 단위는 어느 목록에도 남지 않아 여기 오지 않는다. 공개된
+        // 단위(PostLoading)는 관심이 0이어도 PostLoad를 마친다(버리지 않는다).
         LoaderUnit& target = units[unit];
-        if (target.retire != LoaderRetire::None) {
+        if (target.retire != LoaderRetire::None ||
+            target.phase == AssetLoaderUnitPhase::PostLoading) {
             return;
         }
 
@@ -798,7 +825,7 @@ struct AssetLoader::Impl {
     // 작업은 지우지 않는다.
     void DestroyJob(LoaderPackageJob* job) noexcept {
         --packagesInFlight;
-        tempBytesInFlight -= job->tempBytes;
+        tempBytesInFlight -= job->accountedBytes;
         Allocator& owner = allocator;
         job->~LoaderPackageJob();
         (void)owner.Deallocate(job);
@@ -890,7 +917,7 @@ struct AssetLoader::Impl {
         uint64 bytes = 0;
         for (uint32 member : unit.members) {
             const CookedManifestEntry& entry = config.manifest->entries[member];
-            bytes += entry.packageBytes + entry.bulkRawBytes;
+            bytes = SaturatingAdd(bytes, SaturatingAdd(entry.packageBytes, entry.bulkRawBytes));
         }
 
         return bytes;
@@ -918,8 +945,9 @@ struct AssetLoader::Impl {
         (void)target.jobs.TryPushBack(job);
         ++target.aliveJobs;
         ++packagesInFlight;
-        job->tempBytes = entry.packageBytes + entry.bulkRawBytes;
-        tempBytesInFlight += job->tempBytes;
+        job->tempBytes = SaturatingAdd(entry.packageBytes, entry.bulkRawBytes);
+        job->accountedBytes = SaturatingAdd(tempBytesInFlight, job->tempBytes) - tempBytesInFlight;
+        tempBytesInFlight += job->accountedBytes;
         job->queue = &queue;
         job->manifest = config.manifest;
         job->entry = member;
@@ -1015,7 +1043,8 @@ struct AssetLoader::Impl {
             const auto count = static_cast<uint32>(unit.members.Size());
             const uint64 bytes = UnitBytes(unit);
             const bool overCount = packagesInFlight + count > config.limits.maxPackagesInFlight;
-            const bool overBytes = tempBytesInFlight + bytes > config.limits.maxTempBytes;
+            const bool overBytes =
+                SaturatingAdd(tempBytesInFlight, bytes) > config.limits.maxTempBytes;
             if (packagesInFlight > 0 && (overCount || overBytes)) {
                 break;
             }
@@ -1233,21 +1262,14 @@ struct AssetLoader::Impl {
         for (usize index = 0; index < count; ++index) {
             const uint32 member = target.jobs[index]->entry;
             entryLoaded[member] = static_cast<uint32>(loadedRoots.Size());
-            entryUnit[member] = LoaderNoIndex;
             (void)loadedRoots.TryPushBack(Move(roots[index]));
             (void)loadedHandles.TryPushBack(handles[index]);
         }
 
-        for (uint32 index : target.requests) {
-            FinishRequest(index, AssetLoadState::Succeeded, ErrorCode::None, AssetDiagnostic{},
-                          loadedHandles[entryLoaded[requests[index].entry]]);
-        }
-
-        target.requests.Clear();
+        // 기대는 단위는 공개를 기다리지 않게 되지만(공개 대기 수), PostLoad는 이 단위가 끝날
+        // 때까지 기다린다(의존 목록에 남긴다).
         for (uint32 other : target.dependents) {
-            LoaderUnit& dependent = units[other];
-            RemoveValue(dependent.dependencies, unit);
-            --dependent.waitingDependencies;
+            --units[other].waitingDependencies;
             MarkReadyIfDone(other);
         }
 
@@ -1256,7 +1278,60 @@ struct AssetLoader::Impl {
         }
 
         target.jobs.Clear();
+        target.aliveJobs = 0;
+        target.phase = AssetLoaderUnitPhase::PostLoading;
+        target.postLoadNext = 0;
+        if (config.postLoad == nullptr) {
+            FinishUnit(unit);
+            return;
+        }
+
+        (void)postLoadUnits.TryPushBack(unit);
+    }
+
+    // PostLoad를 마친 단위를 끝낸다: 요청 Succeeded, 기대는 단위의 의존 목록에서 빠지고 칸을
+    // 돌려준다.
+    void FinishUnit(uint32 unit) noexcept {
+        RemoveValue(postLoadUnits, unit);
+        LoaderUnit& target = units[unit];
+        for (uint32 index : target.requests) {
+            FinishRequest(index, AssetLoadState::Succeeded, ErrorCode::None, AssetDiagnostic{},
+                          loadedHandles[entryLoaded[requests[index].entry]]);
+        }
+
+        target.requests.Clear();
+        for (uint32 other : target.dependents) {
+            RemoveValue(units[other].dependencies, unit);
+        }
+
+        for (uint32 member : target.members) {
+            entryUnit[member] = LoaderNoIndex;
+        }
+
         FreeUnitSlot(unit);
+    }
+
+    // PostLoad 차례인 단위(의존 단위의 PostLoad가 모두 끝남) 중 가장 먼저인 것이다(없으면 NoIndex).
+    uint32 PickPostLoad() const noexcept {
+        uint32 best = LoaderNoIndex;
+        for (uint32 candidate : postLoadUnits) {
+            if (units[candidate].dependencies.IsEmpty() &&
+                (best == LoaderNoIndex || Before(candidate, best))) {
+                best = candidate;
+            }
+        }
+
+        return best;
+    }
+
+    // 단위 unit의 다음 구성 패키지 하나를 PostLoad한다.
+    void PostLoadNext(uint32 unit) noexcept {
+        LoaderUnit& target = units[unit];
+        const uint32 member = target.members[target.postLoadNext++];
+        config.postLoad->PostLoad(loadedHandles[entryLoaded[member]], EntryAsset(member));
+        if (target.postLoadNext == target.members.Size()) {
+            FinishUnit(unit);
+        }
     }
 
     // ---- Pump ----
@@ -1266,13 +1341,13 @@ struct AssetLoader::Impl {
         result.completions = DrainCompletions();
         CheckCancellations();
         result.admittedUnits = Admit();
-        // 시계는 공개 구간에서만 읽는다(단위 사이 검사 — 11.6절 10).
-        if (readyUnits.IsEmpty()) {
+        // 시계는 공개·PostLoad 구간에서만 읽는다(단위·호출 사이 검사 — 11.6절 10·16).
+        if (readyUnits.IsEmpty() && PickPostLoad() == LoaderNoIndex) {
             return result;
         }
 
         const uint64 start = Now();
-        for (;;) {
+        while (!readyUnits.IsEmpty()) {
             InstantiateUnit(PickReady());
             ProcessRetire();
             ++result.instantiatedUnits;
@@ -1283,8 +1358,22 @@ struct AssetLoader::Impl {
             if (result.instantiatedUnits >= budget.maxUnits ||
                 Now() - start >= budget.maxNanoseconds) {
                 result.budgetExhausted = true;
+                return result;
+            }
+        }
+
+        // PostLoad는 공개를 다 한 뒤에 한다(공개가 예산을 다 쓰지 않았으면). 준비된 것이 있으면
+        // 적어도 하나를 부른다.
+        for (uint32 unit = PickPostLoad(); unit != LoaderNoIndex; unit = PickPostLoad()) {
+            const bool first = result.postLoads == 0;
+            if (!first && (result.postLoads >= budget.maxPostLoads ||
+                           Now() - start >= budget.maxNanoseconds)) {
+                result.budgetExhausted = true;
                 break;
             }
+
+            PostLoadNext(unit);
+            ++result.postLoads;
         }
 
         return result;
@@ -1312,6 +1401,14 @@ struct AssetLoader::Impl {
             (void)DrainCompletions();
         }
 
+        // 공개된 채 PostLoad를 기다리던 단위는 남은 PostLoad를 부르지 않고 놓는다(11.6절 16).
+        for (usize index = 0; index < units.Size(); ++index) {
+            if (units[index].used) {
+                RemoveValue(postLoadUnits, static_cast<uint32>(index));
+                FreeUnitSlot(static_cast<uint32>(index));
+            }
+        }
+
         loadedRoots.Clear();
         loadedHandles.Clear();
         for (usize index = 0; index < entryLoaded.Size(); ++index) {
@@ -1322,6 +1419,10 @@ struct AssetLoader::Impl {
     void WaitCompletions() noexcept {
         queue.mutex.Lock();
         while (queue.head == nullptr && asyncInFlight > 0) {
+            if (config.waitEntered != nullptr) {
+                config.waitEntered(config.waitEnteredContext);
+            }
+
             (void)queue.changed.Wait(queue.mutex);
         }
 
@@ -1386,6 +1487,8 @@ const char* AssetLoaderUnitPhaseName(AssetLoaderUnitPhase phase) noexcept {
         return "Abandoned";
     case AssetLoaderUnitPhase::Failed:
         return "Failed";
+    case AssetLoaderUnitPhase::PostLoading:
+        return "PostLoading";
     }
 
     return "Unknown";
@@ -1424,6 +1527,10 @@ const char* AssetLoaderWaitName(AssetLoaderWait wait) noexcept {
         return "Worker";
     case AssetLoaderWait::Pump:
         return "Pump";
+    case AssetLoaderWait::PostLoadDependency:
+        return "PostLoadDependency";
+    case AssetLoaderWait::PostLoad:
+        return "PostLoad";
     }
 
     return "Unknown";
@@ -1435,6 +1542,10 @@ AssetLoader::AssetLoader(const AssetLoaderConfig& config) noexcept : config_(con
 AssetLoader::~AssetLoader() {
     if (impl_ == nullptr) {
         return;
+    }
+
+    if (!impl_->OnOwnerThread()) {
+        platform::Fatal("AssetLoader destroyed outside its owner thread");
     }
 
     (void)Shutdown();
@@ -1547,13 +1658,14 @@ Result<AssetLoadHandle> AssetLoader::Request(const AssetLoadRequest& request,
     slot.package = ObjectHandle{};
     slot.unit = LoaderNoIndex;
     const AssetLoadHandle handle{index, slot.generation};
-    if (impl.entryLoaded[entry] != LoaderNoIndex) {
+    // 공개됐어도 PostLoad를 기다리는 단위면 합류한다(PostLoad가 끝나야 Succeeded).
+    uint32 unit = impl.entryUnit[entry];
+    if (unit == LoaderNoIndex && impl.entryLoaded[entry] != LoaderNoIndex) {
         slot.state = AssetLoadState::Succeeded;
         slot.package = impl.loadedHandles[impl.entryLoaded[entry]];
         return Result<Out>::Success(handle);
     }
 
-    uint32 unit = impl.entryUnit[entry];
     if (unit == LoaderNoIndex) {
         auto resolved = impl.Resolve(entry);
         if (!resolved) {
@@ -1754,13 +1866,14 @@ Result<AssetLoadStatus> AssetLoader::WaitFor(AssetLoadHandle handle, const char*
     }
 
     const uint64 elapsed = impl.Now() - start;
+    AssetLoaderSyncWait wait;
+    wait.site = site;
+    wait.asset = impl.EntryAsset(impl.requests[handle.index].entry);
+    wait.nanoseconds = elapsed;
+    impl.recentWaits[impl.syncWaits % AssetLoaderSnapshot::RecentSyncWaitCapacity] = wait;
     ++impl.syncWaits;
     impl.syncWaitNanoseconds += elapsed;
     if (config_.observer != nullptr) {
-        AssetLoaderSyncWait wait;
-        wait.site = site;
-        wait.asset = impl.EntryAsset(impl.requests[handle.index].entry);
-        wait.nanoseconds = elapsed;
         config_.observer->OnSyncWait(wait);
     }
 
@@ -1816,7 +1929,7 @@ Result<void> AssetLoader::Describe(AssetLoaderSnapshot& out) const noexcept {
         info.preparedPackages = unit.preparedPackages;
         info.interest = unit.interest;
         for (const LoaderPackageJob* job : unit.jobs) {
-            info.tempBytes += job->tempBytes;
+            info.tempBytes = SaturatingAdd(info.tempBytes, job->tempBytes);
         }
 
         if (unit.phase == AssetLoaderUnitPhase::Queued) {
@@ -1830,6 +1943,16 @@ Result<void> AssetLoader::Describe(AssetLoaderSnapshot& out) const noexcept {
             }
         } else if (unit.phase == AssetLoaderUnitPhase::Ready) {
             info.waiting = AssetLoaderWait::Pump;
+        } else if (unit.phase == AssetLoaderUnitPhase::PostLoading) {
+            info.waiting = AssetLoaderWait::PostLoad;
+            if (!unit.dependencies.IsEmpty()) {
+                info.waiting = AssetLoaderWait::PostLoadDependency;
+                info.waitingOn = impl.EntryAsset(impl.units[unit.dependencies[0]].members[0]);
+            }
+        } else if (unit.phase == AssetLoaderUnitPhase::Failed) {
+            info.failedAsset = impl.EntryAsset(unit.failedEntry);
+            info.failError = unit.failError;
+            info.failDiagnostic = unit.failDiagnostic;
         } else if (unit.phase == AssetLoaderUnitPhase::Loading) {
             for (const LoaderPackageJob* job : unit.jobs) {
                 if (job->phase == AssetLoaderPackagePhase::Reading) {
@@ -1842,12 +1965,18 @@ Result<void> AssetLoader::Describe(AssetLoaderSnapshot& out) const noexcept {
                 }
             }
 
-            // IO·worker에 없는 Loading 단위는 모든 패키지가 Prepared이고 공개 안 된 의존이
-            // 있다(아니면
-            // Ready다).
+            // IO·worker에 없는 Loading 단위는 모든 패키지가 Prepared이고 공개 안 된 의존이 있다
+            // (아니면 Ready다 — 그래서 아래 탐색은 목록 안에서 멈춘다). 의존 목록에는 공개된 채
+            // PostLoad 중인 단위도 있으므로 공개 안 된 것을 고른다.
             if (info.waiting == AssetLoaderWait::None) {
                 info.waiting = AssetLoaderWait::Dependency;
-                info.waitingOn = impl.EntryAsset(impl.units[unit.dependencies[0]].members[0]);
+                usize at = 0;
+                while (impl.units[unit.dependencies[at]].phase ==
+                       AssetLoaderUnitPhase::PostLoading) {
+                    ++at;
+                }
+
+                info.waitingOn = impl.EntryAsset(impl.units[unit.dependencies[at]].members[0]);
             }
         }
 
@@ -1877,12 +2006,23 @@ Result<void> AssetLoader::Describe(AssetLoaderSnapshot& out) const noexcept {
     out.tempBytesInFlight = impl.tempBytesInFlight;
     out.syncWaits = impl.syncWaits;
     out.syncWaitNanoseconds = impl.syncWaitNanoseconds;
+    // 고리에서 오래된 것부터 옮긴다.
+    constexpr uint64 Capacity = AssetLoaderSnapshot::RecentSyncWaitCapacity;
+    const uint64 kept = impl.syncWaits < Capacity ? impl.syncWaits : Capacity;
+    out.recentSyncWaitCount = static_cast<uint32>(kept);
+    for (uint64 index = 0; index < kept; ++index) {
+        out.recentSyncWaits[index] = impl.recentWaits[(impl.syncWaits - kept + index) % Capacity];
+    }
     return Result<void>::Success();
 }
 
 Result<ObjectHandle> AssetLoader::FindPackage(AssetId asset) noexcept {
     if (impl_ == nullptr) {
         return Result<ObjectHandle>::Failure(ErrorCode::NotFound);
+    }
+
+    if (!impl_->OnOwnerThread()) {
+        return Result<ObjectHandle>::Failure(ErrorCode::WrongThread);
     }
 
     const CookedManifestEntry* found = config_.manifest->Find(asset);

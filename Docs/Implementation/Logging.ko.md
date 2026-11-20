@@ -194,7 +194,7 @@ Rocks 실행 파일은 Launch 진입점(`ROCKS_IMPLEMENT_APPLICATION`)으로 시
 
 namespace {
 int Run(rocks::launch::ApplicationContext& context) noexcept {
-    Allocator& allocator = context.SystemAllocator();
+    Allocator& allocator = context.DefaultAllocator();      // 범용 할당자(BinnedAllocator). 본문이 돌아가기 전에 모두 반환
     StderrLogSink console;                                    // 기본 콘솔 레이아웃. LogSystem보다 먼저 선언
     LogSystem logs(allocator, LogSystemConfig::ForEngineHost()); // 명령줄 도구는 ForTool()
     (void)logs.AddSink(console);

@@ -361,6 +361,15 @@ public:
         }
     }
 
+    // 쌓인 완료를 뒤에서부터(늦게 시작한 것 먼저) 모두 내보낸다.
+    void CompleteReverse() noexcept {
+        while (!held.IsEmpty()) {
+            Held entry = held[held.Size() - 1];
+            (void)held.TryPopBack();
+            entry.read->complete(*entry.read, entry.result);
+        }
+    }
+
     // path로 시작한 첫 쌓인 완료를 내보낸다.
     bool CompletePath(StringView path) noexcept {
         for (usize index = 0; index < held.Size(); ++index) {
@@ -418,9 +427,20 @@ public:
     }
 
     void RunFirst() noexcept {
-        const Pending first = pending[0];
-        (void)pending.TryRemoveAt(0);
-        first.job(first.context);
+        RunAt(0);
+    }
+
+    void RunAt(usize index) noexcept {
+        const Pending chosen = pending[index];
+        (void)pending.TryRemoveAt(index);
+        chosen.job(chosen.context);
+    }
+
+    // 쌓인 작업을 뒤에서부터 모두 실행한다.
+    void RunAllReverse() noexcept {
+        while (!pending.IsEmpty()) {
+            RunAt(pending.Size() - 1);
+        }
     }
 
     Array<Pending> pending;
@@ -443,6 +463,41 @@ inline UniquePtr<ObjectRegistry> MakeLoaderRegistry(AssetEnv& env, uint64 contex
                                                    ContextId{LoaderContextHigh, context}, options);
     return made ? Move(made.Value()) : UniquePtr<ObjectRegistry>();
 }
+
+// 할당 수를 세고 아래 allocator로 넘긴다.
+class CountingAllocator final : public Allocator {
+public:
+    explicit CountingAllocator(Allocator& inner) noexcept : inner_(inner) {
+    }
+
+    Result<void*> Allocate(usize bytes, usize alignment, uint32 tag = 0) noexcept override {
+        ++allocations;
+        return inner_.Allocate(bytes, alignment, tag);
+    }
+
+    Result<void> Deallocate(void* address) noexcept override {
+        return inner_.Deallocate(address);
+    }
+
+    uint64 allocations = 0;
+
+private:
+    Allocator& inner_;
+};
+
+// PostLoad 호출 순서를 적는 handler다.
+class RecordingPostLoad final : public AssetPostLoadHandler {
+public:
+    explicit RecordingPostLoad(Allocator& allocator) noexcept : order(allocator) {
+    }
+
+    void PostLoad(ObjectHandle package, AssetId asset) noexcept override {
+        (void)package;
+        (void)order.TryPushBack(asset);
+    }
+
+    Array<AssetId> order;
+};
 
 // id 요청이다(우선순위 Normal, 취소 없음).
 inline AssetLoadRequest LoaderRequestOf(uint64 id) noexcept {
@@ -544,6 +599,36 @@ struct LoaderRig {
         StringBuilder<128> path(env.allocator);
         return LoaderPackagePath(path, scene.root, id, entry.packageSha256) &&
                io.Add(path.View(), file.View());
+    }
+
+    // 쌓인 IO·worker를 순서(앞부터 또는 뒤부터)대로 내보내며 Pump를 단위가 없어질 때까지
+    // 되풀이한다.
+    bool SettleHeld(bool reverse, uint32 limit = 1000) noexcept {
+        for (uint32 round = 0; round < limit; ++round) {
+            if (reverse) {
+                io.CompleteReverse();
+                worker.RunAllReverse();
+            } else {
+                io.Complete();
+                worker.RunAll();
+            }
+
+            if (!loader->Pump()) {
+                return false;
+            }
+
+            AssetLoaderSnapshot snapshot(env.allocator);
+            if (!loader->Describe(snapshot)) {
+                return false;
+            }
+
+            if (snapshot.units.IsEmpty() && io.held.IsEmpty() && worker.pending.IsEmpty() &&
+                io.active == 0) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     bool IsLoaded(uint64 id) noexcept {

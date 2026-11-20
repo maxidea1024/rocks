@@ -112,12 +112,36 @@ void StopWorkers(AsyncContextState& context, uint32 started) noexcept {
 
 } // namespace
 
-void CompleteAsyncRequest(AsyncRequestState& request, const AsyncIoResult& result) noexcept {
+bool TakeAsyncFaultLocked(AsyncContextState& context, AsyncIoFaultPoint point,
+                          FileStatus& status) noexcept {
+    if (!context.faultArmed || context.fault.point != point) {
+        return false;
+    }
+
+    if (context.fault.skip > 0) {
+        --context.fault.skip;
+        return false;
+    }
+
+    context.faultArmed = false;
+    status = context.fault.status;
+    return true;
+}
+
+void CompleteAsyncRequest(AsyncRequestState& request, const AsyncIoResult& completed) noexcept {
     AsyncContextState& context = *request.context;
     AsyncIoCallback callback = nullptr;
     void* callbackContext = nullptr;
+    AsyncIoResult result = completed;
     {
         LockGuard lock(context.mutex);
+        // 결과 주입(Completion)은 게시·보류 전에 결과를 바꾼다(두 backend 공통).
+        if (FileStatus injected;
+            TakeAsyncFaultLocked(context, AsyncIoFaultPoint::Completion, injected)) {
+            result.status = injected;
+            result.bytes = 0;
+        }
+
         // Native 제출 스레드가 OS 호출 직후 요청을 다시 확인하는 동안에는 게시하지 않는다.
         while (request.submitting) {
             if (context.changed.Wait(context.mutex) == WaitResult::Failed) {
@@ -319,6 +343,19 @@ FileStatus AsyncIoContext::ResumeCompletions() noexcept {
     return {};
 }
 
+void AsyncIoContext::InjectFault(const AsyncIoFault& fault) noexcept {
+    AsyncContextState& context = detail::ContextOf(storage_);
+    LockGuard lock(context.mutex);
+    context.fault = fault;
+    context.faultArmed = true;
+}
+
+void AsyncIoContext::ClearFault() noexcept {
+    AsyncContextState& context = detail::ContextOf(storage_);
+    LockGuard lock(context.mutex);
+    context.faultArmed = false;
+}
+
 uint64 AsyncIoContext::HeldCompletionCount() const noexcept {
     const AsyncContextState& context = detail::ContextOf(storage_);
     LockGuard lock(context.mutex);
@@ -455,6 +492,15 @@ FileStatus SizeFileState(const AsyncFileState& file, uint64& bytes) noexcept {
     if (!file.open) {
         return {FileCode::NotOpen, 0};
     }
+
+    {
+        LockGuard lock(file.context->mutex);
+        if (FileStatus injected;
+            TakeAsyncFaultLocked(*file.context, AsyncIoFaultPoint::Size, injected)) {
+            return injected;
+        }
+    }
+
     return AsyncSizeNative(file.handle, bytes);
 }
 
@@ -480,6 +526,10 @@ FileStatus SubmitFileRequest(AsyncFileState& file, AsyncRequestState& request, u
         }
         if (IsInFlight(request)) {
             return {FileCode::Busy, 0};
+        }
+        if (FileStatus injected;
+            TakeAsyncFaultLocked(context, AsyncIoFaultPoint::Submit, injected)) {
+            return injected;
         }
         if (request.context != nullptr && request.context != &context) {
             // 다른 context로 재사용하면 대기자가 잘못된 mutex를 잡는다.

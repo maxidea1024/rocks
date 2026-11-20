@@ -492,16 +492,6 @@ void CopyRequest() noexcept {
     }
 }
 
-DWORD CaptureFlags(CrashDumpDetail detail) noexcept {
-    const DWORD base = PSS_CAPTURE_VA_CLONE | PSS_CAPTURE_THREADS | PSS_CAPTURE_THREAD_CONTEXT;
-    // 핸들 데이터 덤프(Detailed·Full)는 핸들 캡처가 있어야 한다(없으면 ERROR_NOT_FOUND).
-    return detail == CrashDumpDetail::Standard
-               ? base
-               : base | PSS_CAPTURE_HANDLES | PSS_CAPTURE_HANDLE_NAME_INFORMATION |
-                     PSS_CAPTURE_HANDLE_BASIC_INFORMATION |
-                     PSS_CAPTURE_HANDLE_TYPE_SPECIFIC_INFORMATION;
-}
-
 uint64 DeadlineAfter(uint32 milliseconds) noexcept {
     return MonotonicNanoseconds() + uint64{milliseconds} * NanosecondsPerMillisecond;
 }
@@ -534,17 +524,9 @@ void HandleRequest(HANDLE parent) noexcept {
     HPSS snapshot = nullptr;
     // VA clone 프로세스는 job이 허락하면 job에서 빠지게 먼저 청한다(job을 닫아도 덤프 원본이
     // 남는다). 이 OS가 그 플래그 조합을 받지 않으면(ERROR_INVALID_PARAMETER, Windows 11 26200에서
-    // 확인) 플래그 없이 다시 캡처한다. 그때 job 안 부모는 기본 덤프가 끝날 때까지 job을 닫지
-    // 않는다(FinishCrashHelperReport).
-    DWORD captured = PssCaptureSnapshot(
-        parent,
-        static_cast<PSS_CAPTURE_FLAGS>(CaptureFlags(detail) | PSS_CREATE_BREAKAWAY_OPTIONAL),
-        CONTEXT_ALL, &snapshot);
-    if (captured == ERROR_INVALID_PARAMETER) {
-        snapshot = nullptr;
-        captured = PssCaptureSnapshot(parent, static_cast<PSS_CAPTURE_FLAGS>(CaptureFlags(detail)),
-                                      CONTEXT_ALL, &snapshot);
-    }
+    // 확인) 플래그 없이 다시 캡처한다(CaptureCrashSnapshot). 그때 job 안 부모는 기본 덤프가 끝날
+    // 때까지 job을 닫지 않는다(FinishCrashHelperReport).
+    const DWORD captured = CaptureCrashSnapshot(parent, detail, snapshot);
     if (captured != ERROR_SUCCESS) {
         // 부모가 프로세스 안 fallback으로 쓴다. 이 도우미는 더 쓰지 않는다.
         block->captureError = captured;

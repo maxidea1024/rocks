@@ -92,6 +92,18 @@ protected:
     ~AssetLoaderObserver() = default;
 };
 
+// PostLoad 단계 handler다(11.6절 16, UE UObject::PostLoad 호출 단계 대응). 공개한 단위의 패키지마다
+// Game 스레드에서 한 번 불린다(의존 단위의 PostLoad가 끝난 뒤, 단위 안은 AssetId 순). 실패하지
+// 않으며 로더 상태를 바꾸는 함수를 부르면 안 된다. 클래스별 dispatch는 handler를 준 쪽(EngineAssets
+// — A5에서 클래스 hook과 연결)이 정한다.
+class AssetPostLoadHandler {
+public:
+    virtual void PostLoad(ObjectHandle package, AssetId asset) noexcept = 0;
+
+protected:
+    ~AssetPostLoadHandler() = default;
+};
+
 // 동시 진행·임시 메모리 상한이다(11.6절 9).
 struct AssetLoaderLimits {
     static constexpr uint32 DefaultMaxPackagesInFlight = 32;
@@ -133,6 +145,12 @@ struct AssetLoaderConfig {
     // "프레임 실행 중" 판정이다(참이면 WaitFor가 WrongContext). null이면 언제나 거짓이다.
     bool (*inFrame)(void* context) noexcept = nullptr;
     void* inFrameContext = nullptr;
+    // PostLoad 단계 handler다(null이면 공개와 함께 PostLoad가 끝난 것으로 본다).
+    AssetPostLoadHandler* postLoad = nullptr;
+    // 시험 hook: 완료 대기가 조건 변수에서 실제로 기다리기 직전에 불린다(완료 큐 뮤텍스를 쥔 채 —
+    // 로더를 부르면 안 된다, 11.6절 17).
+    void (*waitEntered)(void* context) noexcept = nullptr;
+    void* waitEnteredContext = nullptr;
 };
 
 // 요청이다(AS 11.1절 AssetRequest의 로더 쪽 부분 — expectedType·ReadyMask·scope는 AssetManager).
@@ -178,6 +196,8 @@ struct AssetLoaderPumpBudget {
 
     uint32 maxUnits = UnlimitedUnits;
     uint64 maxNanoseconds = UnlimitedNanoseconds;
+    // PostLoad 호출 수 상한이다(시간 예산은 공개와 같이 쓴다, 11.6절 16).
+    uint32 maxPostLoads = UnlimitedUnits;
 };
 
 struct AssetLoaderPumpResult {
@@ -185,8 +205,10 @@ struct AssetLoaderPumpResult {
     uint32 completions = 0;
     // 허가한 단위 수다.
     uint32 admittedUnits = 0;
-    // 공개한 단위 수다.
+    // 공개를 시도한 단위 수다(실패 포함).
     uint32 instantiatedUnits = 0;
+    // 부른 PostLoad 수다.
+    uint32 postLoads = 0;
     // 예산 때문에 남긴 공개 준비 단위가 있는지다.
     bool budgetExhausted = false;
 };
@@ -202,7 +224,9 @@ enum class AssetLoaderUnitPhase : uint8 {
     // 관심이 0이 돼 버렸고 진행 중 IO·worker가 끝나기를 기다린다.
     Abandoned,
     // 실패했고 진행 중 IO·worker가 끝나기를 기다린다.
-    Failed
+    Failed,
+    // 공개했고 PostLoad를 기다리거나 하는 중이다(요청은 PostLoad가 끝나야 Succeeded).
+    PostLoading
 };
 
 enum class AssetLoaderPackagePhase : uint8 {
@@ -228,7 +252,11 @@ enum class AssetLoaderWait : uint8 {
     Io,
     Worker,
     // 공개 준비가 끝나 Pump 예산을 기다린다.
-    Pump
+    Pump,
+    // 의존 단위(waitingOn)의 PostLoad를 기다린다.
+    PostLoadDependency,
+    // 자기 PostLoad 차례(Pump 예산)를 기다린다.
+    PostLoad
 };
 
 struct AssetLoaderRequestInfo {
@@ -256,6 +284,10 @@ struct AssetLoaderUnitInfo {
     // waiting이 의존이면 그 단위의 첫 패키지 에셋이다.
     AssetId waitingOn{};
     uint64 tempBytes = 0;
+    // phase가 Failed면 처음 실패한 패키지·오류·진단이다(11.6절 12).
+    AssetId failedAsset{};
+    ErrorCode failError = ErrorCode::None;
+    AssetDiagnostic failDiagnostic;
 };
 
 struct AssetLoaderPackageInfo {
@@ -268,6 +300,9 @@ struct AssetLoaderPackageInfo {
 };
 
 struct AssetLoaderSnapshot {
+    // 남기는 최근 동기 대기 수다(11.5절 3의 강제 대기 위치).
+    static constexpr uint32 RecentSyncWaitCapacity = 8;
+
     explicit AssetLoaderSnapshot(Allocator& allocator) noexcept
         : requests(allocator), units(allocator), packages(allocator) {
     }
@@ -280,6 +315,9 @@ struct AssetLoaderSnapshot {
     uint64 tempBytesInFlight = 0;
     uint64 syncWaits = 0;
     uint64 syncWaitNanoseconds = 0;
+    // 최근 동기 대기(오래된 것부터 recentSyncWaitCount개)다.
+    AssetLoaderSyncWait recentSyncWaits[RecentSyncWaitCapacity] = {};
+    uint32 recentSyncWaitCount = 0;
 };
 
 // 이름이다(로그·도구용, 정적 수명). 모르는 값은 "Unknown"이다.
@@ -292,7 +330,8 @@ const char* AssetLoaderWaitName(AssetLoaderWait wait) noexcept;
 class AssetLoader final : public PackageImportResolver {
 public:
     explicit AssetLoader(const AssetLoaderConfig& config) noexcept;
-    // Shutdown하지 않았으면 Shutdown한다(소유 스레드에서 파괴한다).
+    // Shutdown하지 않았으면 Shutdown한다. 초기화된 로더를 소유 스레드가 아닌 곳에서 파괴하면
+    // platform::Fatal이다(진행 중 IO·worker를 남긴 채 상태를 지우는 수명 오류).
     ~AssetLoader();
     AssetLoader(const AssetLoader&) = delete;
     AssetLoader& operator=(const AssetLoader&) = delete;
@@ -300,7 +339,9 @@ public:
     // 설정을 확인하고 경로 색인·항목 표를 만든다. 이 함수를 부른 스레드가 소유 스레드가 된다.
     //
     // 오류: null 포인터·0 한도·패키지 정책이 아닌 Registry·Registry와 다른 TypeRegistry는
-    // InvalidArgument, 두 번째 호출은 InvalidArgument, 매니페스트 profileId ≠ runtimeProfile은
+    // InvalidArgument, 두 번째 호출은 InvalidArgument, 매니페스트 규칙 위반은
+    // ValidateCookedManifest의 진단(CorruptPackage / InvalidArgument), 매니페스트 profileId ≠
+    // runtimeProfile은
     // IncompatibleCook / Unsupported(section = ProfileId), 할당 실패는 그 오류(진단 None)다.
     Result<void> Initialize(AssetDiagnostic* failure = nullptr) noexcept;
 
@@ -344,7 +385,8 @@ public:
     // 상태 표를 채운다(out의 배열은 비우고 다시 채운다). 오류: WrongThread, 할당 실패.
     Result<void> Describe(AssetLoaderSnapshot& out) const noexcept;
 
-    // 공개한 패키지를 찾는다(InstantiatePackages의 묶음 밖 import 해석). 없으면 NotFound다.
+    // 공개한 패키지를 찾는다(InstantiatePackages의 묶음 밖 import 해석). 없으면 NotFound, 다른
+    // 스레드 WrongThread다.
     Result<ObjectHandle> FindPackage(AssetId asset) noexcept override;
 
     // Pending 요청을 ShuttingDown으로 끝내고 미공개 단위를 버린 뒤 진행 중 IO·worker를 기다리고

@@ -1,6 +1,6 @@
 # 공통 실행 진입점과 네이티브 크래시 수집 설계
 
-기준일: 2026-11-20, 개정 8(7.4·8.1·8.2·18절: 범용 할당자 — `ApplicationSettings::defaultAllocator`·`ApplicationContext::DefaultAllocator()`, 기본은 Launch의 `SystemAllocator` 위에 둔 `BinnedAllocator`. GC 규모 세션의 AL6, 사용자 지시). 개정 7(10.5·13.2절: Asan 구성의 stack 보장분을 ASan stack overflow 보고에 맞춰 키움). 개정 6(macOS CI 두 건: 14.1절 굳힌 뿌리 상한을 플랫폼 공통으로, 8.7·17절 POSIX abort 재진입의 기대값). 개정 5(19.6절: 로깅 쪽 반영 완료 — 로깅 문서 개정 번호 재정리, LogFile·LogDirectory 칸). 개정 4(LC1–LC7 구현 반영, LC8 문서 마무리). 결정은 22절, 단계는 23절, 미확인 사실은 24절, 바뀐 점과 단계별로 설계와 다르게 정한 점은 25절에 있다. 사용법은 [공통 실행 진입점과 크래시 수집 사용 안내](../Implementation/CrashHandlingAndLaunch.ko.md)에 있다.
+기준일: 2026-11-20, 개정 9(11.5절: 프로세스 안 덤프를 자기 snapshot에서 써서 마감 집행 스레드가 멈추지 않게 함). 개정 8(7.4·8.1·8.2·18절: 범용 할당자 — `ApplicationSettings::defaultAllocator`·`ApplicationContext::DefaultAllocator()`, 기본은 Launch의 `SystemAllocator` 위에 둔 `BinnedAllocator`. GC 규모 세션의 AL6, 사용자 지시). 개정 7(10.5·13.2절: Asan 구성의 stack 보장분을 ASan stack overflow 보고에 맞춰 키움). 개정 6(macOS CI 두 건: 14.1절 굳힌 뿌리 상한을 플랫폼 공통으로, 8.7·17절 POSIX abort 재진입의 기대값). 개정 5(19.6절: 로깅 쪽 반영 완료 — 로깅 문서 개정 번호 재정리, LogFile·LogDirectory 칸). 개정 4(LC1–LC7 구현 반영, LC8 문서 마무리). 결정은 22절, 단계는 23절, 미확인 사실은 24절, 바뀐 점과 단계별로 설계와 다르게 정한 점은 25절에 있다. 사용법은 [공통 실행 진입점과 크래시 수집 사용 안내](../Implementation/CrashHandlingAndLaunch.ko.md)에 있다.
 
 이 문서는 두 가지를 정한다.
 - **공통 실행 진입점(Launch).** 실행 파일마다 흩어진 `main`·`wmain`의 시작·종료 처리를 한 계층으로 모은다. 플랫폼 진입점 연결, 이른 크래시 처리 설치, 인자 전달, 공통 서비스 시작·종료, 프로그램 본문 호출, 종료 코드 전달, 크래시 처리 해제 시점이 대상이다. 엔진 수명(`Engine::Initialize`·`Run`·`Shutdown`)은 다시 만들지 않는다.
@@ -961,7 +961,13 @@ Rocks가 다른 호스트 프로세스 안에 라이브러리로 들어간 경�
 | 캡처 뒤 도우미가 죽거나 덤프가 실패함 | 부모는 이미 끝났을 수 있다 | fallback 하지 않는다(부모가 없다). 예비 `CrashInfo.json`이 남는다 | `"complete": false` |
 | 덤프 마감 초과 | CancelCallback | 취소된 파일은 지운다. 추가 덤프가 취소돼도 기본 덤프는 남는다 | `dump.status`·`detailDump.status = "Cancelled"` |
 
-- **프로세스 안 덤프의 한계를 결과에 표시한다.** 다른 스레드가 heap·loader lock을 쥔 채 멈춰 있으면 `MiniDumpWriteDump`와 파일 API가 막힐 수 있다. 예산이 끝을 보장한다.
+- **프로세스 안 덤프의 한계를 결과에 표시한다.** 다른 스레드가 heap·loader lock을 쥔 채 멈춰 있으면 `MiniDumpWriteDump`와 파일 API가 막힐 수 있다. 크래시한 스레드의 마감 대기(`TotalWaitMilliseconds`)가 끝을 보장한다. 단, 그 스레드가 멈추지 않아야 한다(아래).
+- **프로세스 안 덤프는 자기 snapshot에서 쓴다(개정 9).** 살아 있는 자기 프로세스를 `MiniDumpWriteDump`로 덤프하면 dbghelp가 스레드 목록 단계(IncludeThreadCallback) 뒤 호출 스레드 밖의 모든 스레드를 덤프가 끝날 때까지 suspend한다. 여기에는 마감을 집행하는 크래시한 스레드도 들어간다. 그 순간 heap lock·loader lock을 쥐고 있던 스레드가 함께 멈추고 dbghelp가 그 lock을 기다리면, 덤프도 마감 집행도 영원히 멈춘다. CancelCallback은 dbghelp가 부를 때만 돌므로 이것을 끊지 못한다.
+  - 확인(2026-11-20, 시험 프로그램): (1) 덤프 callback 안에서 다른 스레드의 `SuspendThread` 이전 횟수가 스레드 목록 단계 뒤로 계속 1이다(dbghelp가 멈춰 둠). (2) 덤프의 스레드 목록 단계 callback에서 다른 스레드가 heap lock(`HeapLock`)이나 loader lock(`LdrLockLoaderLock`)을 잡게 gate로 맞추면, 덤프가 멈추고 5초 마감을 가진 스레드도 끝내 돌지 않는다(20초 넘게 멈춤). (3) 같은 장면에서 `PssCaptureSnapshot`(VA clone)으로 자기를 캡처한 뒤 snapshot을 덤프하면 dbghelp가 살아 있는 스레드를 멈추지 않아 마감 스레드가 제때 프로세스를 끝낸다.
+  - 그래서 W는 `PssCaptureSnapshot`으로 자기 프로세스를 캡처하고(도우미와 같은 플래그), 덤프를 그 snapshot에서 쓴다. 캡처는 커널이 짧게 하므로 사용자 공간 lock에 기대지 않는다. 캡처가 실패하면 살아 있는 프로세스를 덤프하지 않고 `dump.status = "Failed"`(캡처 오류 코드, 사유 "process snapshot unavailable")로 남긴다. 덤프를 잃는 쪽이 끝나지 않는 쪽보다 낫다.
+  - 남는 한계: snapshot 덤프도 dbghelp가 자기 프로세스의 heap·loader lock을 쓴다. 그 lock을 쥔 스레드가 멈춰 있으면 W는 덤프에서 막힌다. 이때는 크래시한 스레드가 마감에 프로세스를 끝내고 예비 `CrashInfo.json`(`"complete": false`)이 남는다.
+  - 시험 `Native.Crash.inprocess-dump-lock-holder`: 시험용 hook이 덤프의 스레드 목록 단계에서 다른 스레드가 프로세스 heap lock을 잡고 멈추게 한다(gate). 크래시한 스레드가 마감에 원래 코드로 끝내고, 예비 `CrashInfo.json`이 남는지 본다. 살아 있는 프로세스를 덤프하던 이전 코드에서는 이 시험이 끝나지 않는다.
+  - 도우미 경로(`Full`)는 이 문제가 없다. 덤프는 도우미 프로세스가 snapshot에서 쓰고, 부모의 스레드를 멈추는 것은 캡처 순간뿐이다.
 - **외부 프로세스를 쓴다고 모든 크래시를 잡는다고 주장하지 않는다.** 도우미가 캡처하려면 부모의 처리기가 먼저 돌아야 한다. fast-fail·외부 강제 종료·정적 초기화 크래시는 9절 표대로 잡지 못한다.
 
 ### 11.6 DbgHelp 직렬화
@@ -1821,3 +1827,7 @@ bool SetCrashAnnotation(CrashAnnotation slot, const char* text, usize bytes) noe
   - 실행 단계에 "Launch.DefaultAllocator"를 더했다(종료 요청 처리기 뒤, 도구 로그 앞 — 8.2절의 역순 정리에서 도구 로그 다음에 파괴된다).
   - Sandbox 엔진 호스트가 `DefaultAllocator()`를 모듈 로더·설정 문맥·LogHost·엔진에 넘기고, self-test는 그래픽 self-test(창·그래픽 장치·worker scheduler)에 넘긴다.
   - 8.1절 표에 6a단계, 7.4절 목록에 `DefaultAllocatorKind`, 18절 표에 예약 비용을 더했다(리뷰 반영).
+- 크래시 처리 멈춤 분석(2026-11-20, 개정 9, rocks-73 관찰: EngineTests 전체 실행 중 `Engine_CrashDuringInitializeAndShutdownRecordsTheStage`의 shutdown 자식이 120초 제한에 한 번 걸림).
+  - **경로.** 그 probe(`engine-crash-stage`)는 `CrashHelperPolicy::InProcess`로 설치한다. 그래서 W가 종료 콜백 뒤 프로세스 안 덤프를 쓴다. 크래시 때 엔진의 worker 스레드가 살아 있다(`BeginShutdown`은 executor를 멈추기 전이다).
+  - **유일한 무기한 대기.** 크래시한 스레드의 대기(`HandleCrash`의 `WaitForSingleObject(reportFinished, TotalWaitMilliseconds)` 뒤 `TerminateProcess`)와 겹친 스레드의 대기(`WaitForOwner`, 마감 + 여유 뒤 종료)는 모두 유한하다. 종료 콜백은 공용 마감을 지키고 로그 flush는 막히는 lock을 쓰지 않는다. 마감 집행을 무력하게 만드는 곳은 살아 있는 자기 프로세스의 `MiniDumpWriteDump`뿐이었다(11.5절: dbghelp가 마감 스레드까지 suspend). 그 순간 worker가 heap 할당 중(`SystemAllocator` → 프로세스 heap)이거나 스레드 생성·종료(loader lock) 중이면 영원히 멈춘다. 부하가 큰 전체 실행에서만 드물게 나는 관찰과 맞는다.
+  - **수정.** 프로세스 안 덤프를 자기 snapshot에서 쓴다(11.5절). gate로 결정적으로 재현하는 시험을 더했다.
