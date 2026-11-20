@@ -1,5 +1,7 @@
 #include "AssetManagerInternal.h"
 
+#include <Base/Checked.h>
+
 #include <Core/Text/NameComponent.h>
 #include <Core/Text/StringBuilder.h>
 #include <Platform/Thread.h>
@@ -191,15 +193,18 @@ uint32 AssetManager::Impl::DeliverPrimary() noexcept {
         }
     }
 
+    // callback 안의 요청이 전달 목록을 다시 잡을 수 있으므로 색인으로 돈다(11.7절 5 재진입).
     uint32 delivered = 0;
-    for (uint32 index : deliver) {
+    const usize count = deliver.Size();
+    for (usize position = 0; position < count; ++position) {
+        const uint32 index = deliver[position];
         PrimaryReadyCallback callback = Move(primaries[index].callback);
         primaries[index].callbackDelivered = true;
         AssetDiagnostic diagnostic;
         ErrorCode error = primaries[index].stop;
-        for (usize position = 0;
-             error == ErrorCode::None && position < primaries[index].tickets.Size(); ++position) {
-            const ManagerTicket& ticket = tickets[primaries[index].tickets[position]];
+        for (usize member = 0; error == ErrorCode::None && member < primaries[index].tickets.Size();
+             ++member) {
+            const ManagerTicket& ticket = tickets[primaries[index].tickets[member]];
             if (ticket.error != ErrorCode::None) {
                 error = ticket.error;
                 diagnostic = ticket.diagnostic;
@@ -402,8 +407,13 @@ AssetManager::EstimatePrimaryAsset(AssetId asset, Span<const StringView> bundles
     while (!stack.IsEmpty()) {
         const CookedManifestEntry& entry = manifest.entries[stack.TryPopBack().Value()];
         ++footprint.packages;
-        footprint.packageBytes += entry.packageBytes;
-        footprint.bulkRawBytes += entry.bulkRawBytes;
+        // bulkRawBytes는 u64 최댓값까지 받으므로 포화 덧셈이다(11.7절 10).
+        auto saturate = [](uint64 left, uint64 right) noexcept {
+            uint64 sum = 0;
+            return TryAdd(left, right, sum) ? sum : NumericLimits<uint64>::Max();
+        };
+        footprint.packageBytes = saturate(footprint.packageBytes, entry.packageBytes);
+        footprint.bulkRawBytes = saturate(footprint.bulkRawBytes, entry.bulkRawBytes);
         for (const CookedManifestDependency& dependency : entry.dependencies) {
             if (dependency.kind == PackageDependencyKind::Hard) {
                 visit(dependency.asset);

@@ -518,11 +518,20 @@ TEST(AssetManager_DescribeReportsState) {
     CHECK(failures >= 2);
 }
 
-// 보유 종류 × 단위 모양 × 해제 순서 조합(11.7절 3·4·10): 티켓·lease·묶음 lease(PrimaryAssetLease —
-// 묶음 티켓은 callback 뒤 놓는다)·들어오는 하드 간선(따로 상주한 3에서) 넷을 단일·순환(1 ↔ 2)·사슬
-// (1 → 2) 단위의 1에 걸고 4! = 24가지 순서로 놓는다(72 조합). 마지막 보유를 놓기 전에는 단위가
-// Resident로 상주하고 남은 보유 수가 정확하며, 마지막을 놓은 Pump에서 1의 단위가 Discard된다(순환은
-// 2도 같이, 사슬은 다음 Pump에 2가 이어서). 보유자 3은 끝까지 남는다.
+// 보유 조합(11.7절 3·4·6·7·9·10, 14 완료 조건 2): 오래 쥐는 보유 넷(티켓·lease·묶음 lease
+// (PrimaryAssetLease — 묶음 티켓은 callback 뒤 놓는다)·들어오는 하드 간선(따로 상주한 3에서))을
+// 단일·순환(1 ↔ 2)·사슬(1 → 2) 단위의 1에 걸고, 4! = 24가지 순서 × 해제 방식 셋(객체 소멸·scope
+// Revoke·다른 스레드 소멸 → Join — 간선은 늘 필드를 비운다) × 마지막 보유 뒤의 꼬리 넷으로 놓는다
+// (864 조합). 꼬리:
+// - 없음: 마지막을 놓은 Pump에서 Discard.
+// - 보류 명령: 같은 프레임에 RunWhenReady(Fail)를 걸면 그 Pump는 보류 명령이 붙잡고(run 한 번) 다음
+//   Pump에서 Discard(보류 명령은 한 Pump만 사는 보유라 순서 축이 아니라 꼬리다).
+// - 로더 공개 보유: 같은 프레임에 1에 Hard로 기대는 4를 요청하면 4의 IO 동안 로더 공개 보유가, 4가
+//   공개되면 Commit 간선이 붙잡고, 4를 놓아 4가 Discard된 다음 Pump에서 1이 Discard(로더 보유는
+//   간선 보유로 넘어가므로 순서 축이 아니라 꼬리다).
+// - revive: Discard 예산 0으로 Closing에 멈춘 뒤 같은 id 요청이 되살리고, 그것을 놓으면 Discard.
+// 마지막 보유 전까지 단위는 Resident이고 남은 보유 수가 정확하다. 순환은 2도 같이, 사슬은 다음
+// Pump에 2가 이어서 Discard되고, 보유자 3은 끝까지 남는다.
 enum class UnitShape : uint8 {
     Single,
     Cycle,
@@ -536,7 +545,23 @@ enum class HoldKind : uint8 {
     Edge
 };
 
+enum class ReleaseMode : uint8 {
+    Destroy,
+    Revoke,
+    OtherThread
+};
+
+enum class Tail : uint8 {
+    None,
+    Deferred,
+    LoaderHold,
+    Revive
+};
+
 constexpr UnitShape AllShapes[] = {UnitShape::Single, UnitShape::Cycle, UnitShape::Chain};
+constexpr ReleaseMode AllModes[] = {ReleaseMode::Destroy, ReleaseMode::Revoke,
+                                    ReleaseMode::OtherThread};
+constexpr Tail AllTails[] = {Tail::None, Tail::Deferred, Tail::LoaderHold, Tail::Revive};
 
 constexpr uint32 HoldKindCount = 4;
 constexpr uint32 ReleaseOrderCount = 24;
@@ -558,11 +583,245 @@ void ReleaseOrderAt(uint32 order, HoldKind (&out)[HoldKindCount]) noexcept {
     }
 }
 
+// handle을 다른 스레드에서 소멸하고 Join한다(해제 큐 — 다음 Pump가 반영).
+template <class Handle>
+bool DestroyOnOtherThread(Handle& handle) noexcept {
+    Handle moved = Move(handle);
+    platform::Thread thread;
+    if (thread.Start(
+            [](void* context) noexcept { Handle local = Move(*static_cast<Handle*>(context)); },
+            &moved) != platform::ThreadStatus::Success) {
+        return false;
+    }
+
+    return thread.Join() == platform::ThreadStatus::Success;
+}
+
+// 한 조합을 돈다. 실패는 CHECK로 남기고 진행할 수 없으면 false다.
+bool RunHoldCombination(AssetEnv& env, UnitShape shape, const HoldKind (&order)[HoldKindCount],
+                        ReleaseMode mode, Tail tail) noexcept {
+    ManagerRig rig(env);
+    rig.scene.Add(1);
+    rig.scene.Add(2);
+    rig.scene.Add(3);
+    rig.scene.Add(4);
+    rig.scene.Hard(4, 1);
+    if (shape != UnitShape::Single) {
+        rig.scene.Hard(1, 2);
+    }
+
+    if (shape == UnitShape::Cycle) {
+        rig.scene.Hard(2, 1);
+    }
+
+    if (!rig.Cook()) {
+        return false;
+    }
+
+    rig.scene.EntryOf(1).flags = static_cast<uint32>(CookedManifestFlags::PrimaryAsset);
+    if (!rig.Start()) {
+        return false;
+    }
+
+    const bool revoke = mode == ReleaseMode::Revoke;
+    auto ticketScope = rig.manager->CreateScope();
+    auto leaseScope = rig.manager->CreateScope();
+    auto primaryScope = rig.manager->CreateScope();
+    if (!ticketScope || !leaseScope || !primaryScope) {
+        return false;
+    }
+
+    LoadTicket owner = rig.Request(3);
+    LoadTicket ticket = rig.Request(1, revoke ? &ticketScope.Value() : nullptr);
+    if (!rig.Settle()) {
+        return false;
+    }
+
+    AssetRequest leaseRequest = RequestOf(1);
+    leaseRequest.scope = revoke ? &leaseScope.Value() : nullptr;
+    auto blocking = rig.manager->LoadBlocking(leaseRequest, "ManagerFailureTests.Order");
+    if (!blocking) {
+        return false;
+    }
+
+    AssetLease lease = Move(blocking.Value());
+    PrimaryAssetLease primaryLease(env.allocator);
+    {
+        auto primary = rig.manager->LoadPrimaryAsset(FixedId(1), {}, LoadPriority::Normal,
+                                                     revoke ? &primaryScope.Value() : nullptr);
+        auto callback = PrimaryReadyCallback::TryCreate(
+            env.allocator,
+            [&primaryLease](Result<PrimaryAssetLease> made, const AssetDiagnostic&) noexcept {
+                if (made) {
+                    primaryLease = Move(made.Value());
+                }
+            });
+        if (!primary || !callback ||
+            !rig.manager->OnReady(primary.Value(), TaskLane::Game, Move(callback.Value())) ||
+            !rig.Pump() || primaryLease.Leases().Size() != 1) {
+            return false;
+        }
+    }
+
+    if (!rig.SetHard(3, 1) || !rig.Pump()) {
+        return false;
+    }
+
+    uint32 tickets = 1;
+    uint32 leases = 2;
+    uint32 edges = 1;
+    uint32 runs = 0;
+    LoadTicket four;
+    DeferredCommand command;
+    for (uint32 step = 0; step < HoldKindCount; ++step) {
+        const auto unit = rig.UnitOf(1);
+        if (!unit.found) {
+            return false;
+        }
+
+        CHECK(unit.info.state == ResidentUnitState::Resident);
+        CHECK(unit.info.tickets == tickets && unit.info.leases == leases &&
+              unit.info.inboundEdges == edges);
+        CHECK(unit.assets == (shape == UnitShape::Cycle ? 2u : 1u));
+        const bool last = step + 1 == HoldKindCount;
+        if (last && tail == Tail::LoaderHold) {
+            four = rig.Request(4);
+        }
+
+        bool released = true;
+        switch (order[step]) {
+        case HoldKind::Ticket:
+            released = mode == ReleaseMode::Revoke        ? ticketScope.Value().Revoke().IsOk()
+                       : mode == ReleaseMode::OtherThread ? DestroyOnOtherThread(ticket)
+                                                          : (ticket = LoadTicket(), true);
+            tickets = 0;
+            break;
+        case HoldKind::Lease:
+            released = mode == ReleaseMode::Revoke        ? leaseScope.Value().Revoke().IsOk()
+                       : mode == ReleaseMode::OtherThread ? DestroyOnOtherThread(lease)
+                                                          : (lease = AssetLease(), true);
+            --leases;
+            break;
+        case HoldKind::PrimaryLease:
+            released = mode == ReleaseMode::Revoke ? primaryScope.Value().Revoke().IsOk()
+                       : mode == ReleaseMode::OtherThread
+                           ? DestroyOnOtherThread(primaryLease)
+                           : (primaryLease = PrimaryAssetLease(env.allocator), true);
+            --leases;
+            break;
+        case HoldKind::Edge:
+            released = rig.SetHard(3, 0);
+            edges = 0;
+            break;
+        }
+
+        if (!released) {
+            return false;
+        }
+
+        if (last && tail == Tail::Deferred) {
+            auto run = DeferredRun::TryCreate(env.allocator,
+                                              [&runs](const AssetLease&) noexcept { ++runs; });
+            auto fail = DeferredFail::TryCreate(env.allocator,
+                                                [](ErrorCode, const AssetDiagnostic&) noexcept {});
+            if (!run || !fail) {
+                return false;
+            }
+
+            auto made = rig.manager->RunWhenReady(FixedId(1), NotReadyPolicy::Fail, nullptr,
+                                                  Move(run.Value()), Move(fail.Value()));
+            if (!made) {
+                return false;
+            }
+
+            command = Move(made.Value());
+        }
+
+        AssetManagerPumpBudget budget;
+        if (last && tail == Tail::Revive) {
+            budget.maxDiscards = 0;
+        }
+
+        if (!rig.Pump(budget)) {
+            return false;
+        }
+
+        CHECK(rig.IsLoaded(1) == (!last || tail != Tail::None));
+    }
+
+    switch (tail) {
+    case Tail::None:
+        break;
+    case Tail::Deferred:
+        CHECK(runs == 1 && rig.UnitOf(1).info.deferred == 0);
+        if (!rig.Pump()) {
+            return false;
+        }
+
+        break;
+    case Tail::LoaderHold: {
+        CHECK(rig.UnitOf(1).info.loaderHolds == 1);
+        constexpr uint32 PumpLimit = 64;
+        for (uint32 round = 0; round < PumpLimit && !rig.IsLoaded(4); ++round) {
+            rig.io.Complete();
+            rig.worker.RunAll();
+            if (!rig.Pump()) {
+                return false;
+            }
+
+            CHECK(rig.IsLoaded(1));
+        }
+
+        CHECK(rig.IsLoaded(4) && rig.UnitOf(1).info.loaderHolds == 0 &&
+              rig.UnitOf(1).info.inboundEdges == 1);
+        four = LoadTicket();
+        if (!rig.Pump()) {
+            return false;
+        }
+
+        CHECK(!rig.IsLoaded(4) && rig.IsLoaded(1));
+        if (!rig.Pump()) {
+            return false;
+        }
+
+        break;
+    }
+    case Tail::Revive: {
+        CHECK(rig.UnitOf(1).info.state == ResidentUnitState::Closing);
+        LoadTicket revive = rig.Request(1);
+        if (!rig.Pump()) {
+            return false;
+        }
+
+        CHECK(rig.UnitOf(1).info.state == ResidentUnitState::Resident);
+        revive = LoadTicket();
+        if (!rig.Pump()) {
+            return false;
+        }
+
+        break;
+    }
+    }
+
+    CHECK(!rig.UnitOf(1).found && !rig.IsLoaded(1));
+    if (shape == UnitShape::Chain) {
+        CHECK(rig.IsLoaded(2));
+        if (!rig.Pump()) {
+            return false;
+        }
+    }
+
+    CHECK(!rig.IsLoaded(2));
+    CHECK(rig.IsLoaded(3) && rig.UnitCount() == 1);
+    return true;
+}
+
 TEST(AssetManager_HoldReleaseOrderCombinations) {
     AssetEnv env;
     REQUIRE(env.Ready());
     uint32 cases = 0;
-    bool seenOrders[256] = {};
+    constexpr uint32 OrderKeys = 256;
+    bool seenOrders[OrderKeys] = {};
     for (const UnitShape shape : AllShapes) {
         for (uint32 orderIndex = 0; orderIndex < ReleaseOrderCount; ++orderIndex) {
             HoldKind order[HoldKindCount];
@@ -573,89 +832,15 @@ TEST(AssetManager_HoldReleaseOrderCombinations) {
             }
 
             seenOrders[key] = true;
-            ManagerRig rig(env);
-            rig.scene.Add(1);
-            rig.scene.Add(2);
-            rig.scene.Add(3);
-            if (shape != UnitShape::Single) {
-                rig.scene.Hard(1, 2);
-            }
+            for (const ReleaseMode mode : AllModes) {
+                for (const Tail tail : AllTails) {
+                    if (!RunHoldCombination(env, shape, order, mode, tail)) {
+                        test::RecordFailure("hold combination could not run", __FILE__, __LINE__);
+                    }
 
-            if (shape == UnitShape::Cycle) {
-                rig.scene.Hard(2, 1);
-            }
-
-            REQUIRE(rig.Cook());
-            rig.scene.EntryOf(1).flags = static_cast<uint32>(CookedManifestFlags::PrimaryAsset);
-            REQUIRE(rig.Start());
-            LoadTicket owner = rig.Request(3);
-            LoadTicket ticket = rig.Request(1);
-            REQUIRE(rig.Settle());
-            auto blocking = rig.manager->LoadBlocking(RequestOf(1), "ManagerFailureTests.Order");
-            REQUIRE(blocking);
-            AssetLease lease = Move(blocking.Value());
-            PrimaryAssetLease primaryLease(env.allocator);
-            {
-                auto primary = rig.manager->LoadPrimaryAsset(FixedId(1), {});
-                REQUIRE(primary);
-                auto callback = PrimaryReadyCallback::TryCreate(
-                    env.allocator, [&primaryLease](Result<PrimaryAssetLease> made,
-                                                   const AssetDiagnostic&) noexcept {
-                        if (made) {
-                            primaryLease = Move(made.Value());
-                        }
-                    });
-                REQUIRE(callback);
-                REQUIRE(
-                    rig.manager->OnReady(primary.Value(), TaskLane::Game, Move(callback.Value())));
-                REQUIRE(rig.Pump());
-                REQUIRE(primaryLease.Leases().Size() == 1);
-            }
-
-            REQUIRE(rig.SetHard(3, 1));
-            REQUIRE(rig.Pump());
-            uint32 tickets = 1;
-            uint32 leases = 2;
-            uint32 edges = 1;
-            for (uint32 step = 0; step < HoldKindCount; ++step) {
-                const auto unit = rig.UnitOf(1);
-                REQUIRE(unit.found);
-                CHECK(unit.info.state == ResidentUnitState::Resident);
-                CHECK(unit.info.tickets == tickets && unit.info.leases == leases &&
-                      unit.info.inboundEdges == edges);
-                CHECK(unit.assets == (shape == UnitShape::Cycle ? 2u : 1u));
-                switch (order[step]) {
-                case HoldKind::Ticket:
-                    ticket = LoadTicket();
-                    tickets = 0;
-                    break;
-                case HoldKind::Lease:
-                    lease = AssetLease();
-                    --leases;
-                    break;
-                case HoldKind::PrimaryLease:
-                    primaryLease = PrimaryAssetLease(env.allocator);
-                    --leases;
-                    break;
-                case HoldKind::Edge:
-                    REQUIRE(rig.SetHard(3, 0));
-                    edges = 0;
-                    break;
+                    ++cases;
                 }
-
-                REQUIRE(rig.Pump());
-                CHECK(rig.IsLoaded(1) == (step + 1 < HoldKindCount));
             }
-
-            CHECK(!rig.UnitOf(1).found);
-            if (shape == UnitShape::Chain) {
-                CHECK(rig.IsLoaded(2));
-                REQUIRE(rig.Pump());
-            }
-
-            CHECK(!rig.IsLoaded(2));
-            CHECK(rig.IsLoaded(3) && rig.UnitCount() == 1);
-            ++cases;
         }
     }
 
@@ -666,7 +851,7 @@ TEST(AssetManager_HoldReleaseOrderCombinations) {
     }
 
     CHECK(distinct == ReleaseOrderCount);
-    constexpr uint32 ExpectedCases = 72;
+    constexpr uint32 ExpectedCases = 864;
     CHECK(cases == ExpectedCases);
 }
 

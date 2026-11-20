@@ -333,7 +333,13 @@ public:
     // 오류: 설정 오류 InvalidArgument, 로더 초기화 오류(진단 포함), 두 번째 호출 InvalidArgument.
     Result<void> Initialize(AssetDiagnostic* failure = nullptr) noexcept;
 
+    // AssetManager가 소유한 에셋 객체 Registry다(Initialize 뒤, 소유 스레드). 객체 읽기·필드 쓰기·
+    // 하드 참조 편집과 상주 패키지 안 생성 트랜잭션은 된다(간선 변화는 계수된다). 넘겨받은 패키지와
+    // 그 객체의 수명 변경(Discard·RequestDestroy·패키지 RootRef 조작)은 계약 위반이다(11.7절 1).
     ObjectRegistry& Registry() noexcept;
+    // AssetManager가 소유한 로더다(Initialize 뒤, 소유 스레드). 조회(FindPackage·FindByPath·Status·
+    // Describe·PublishedHolds)만 한다. 요청·해제·우선순위·Pump·WaitFor·Shutdown·넘겨받기 API를
+    // 직접 부르는 것은 계약 위반이다 — 티켓·상주 단위 계수를 우회한다(11.7절 1).
     AssetLoader& Loader() noexcept;
 
     // 수명 범위를 만든다. 오류: WrongThread, Shutdown 뒤 ShuttingDown, 할당 실패.

@@ -758,4 +758,235 @@ TEST(AssetManager_RevokeSkipsReleasedLease) {
     CHECK(rig.UnitCount() == 0);
 }
 
+// 끝난 티켓을 전달 전에 놓기(11.7절 5): 상주 대상의 티켓은 요청 자리에서 끝나고 보유가 걸린다.
+// callback 전달 전에 티켓을 놓으면(등록 뒤 놓기, 끝난 뒤 늦게 등록하고 놓기 둘 다) callback은
+// Cancelled를 한 번 받고 보유가 남지 않아 다른 보유가 없으면 다음 Pump에 Discard된다.
+TEST(AssetManager_DoneTicketDroppedBeforeDeliveryIsCancelled) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    for (uint32 lateRegistration = 0; lateRegistration < 2; ++lateRegistration) {
+        ManagerRig rig(env);
+        rig.scene.Add(1);
+        REQUIRE(rig.Cook());
+        REQUIRE(rig.Start());
+        {
+            LoadTicket warm = rig.Request(1);
+            REQUIRE(rig.Settle());
+            ReadyRecord ready(env.allocator);
+            {
+                LoadTicket ticket = rig.Request(1);
+                REQUIRE(ticket.IsValid());
+                if (lateRegistration != 0) {
+                    // 끝난 티켓에 늦게 등록한다(다음 Pump에서 부를 차례).
+                    REQUIRE(rig.Pump());
+                }
+
+                REQUIRE(rig.manager->OnReady(ticket, TaskLane::Game,
+                                             RecordReady(env.allocator, ready)));
+                CHECK(rig.UnitOf(1).info.tickets == 2);
+            }
+
+            REQUIRE(rig.Pump());
+            CHECK(ready.calls == 1 && ready.error == ErrorCode::Cancelled);
+            CHECK(ready.leases.IsEmpty());
+            CHECK(rig.UnitOf(1).info.tickets == 1 && rig.UnitOf(1).info.leases == 0);
+        }
+
+        REQUIRE(rig.Pump());
+        CHECK(!rig.IsLoaded(1) && rig.UnitCount() == 0);
+    }
+}
+
+// callback 안의 허용된 호출(11.7절 5 재진입): 빈 티켓 칸이 없을 때 첫 callback이 요청·등록·묶음
+// 로드·보류 명령·lease 놓기를 하면 표와 전달 목록 용량이 다시 잡힌다. 같은 목록의 둘째 callback도
+// 정확히 한 번 불린다. callback 안에서 낸 티켓의 callback은 다음 Pump, 묶음 callback·보류 명령은
+// 같은 Pump (8)의 뒤 차례(티켓 → 묶음 → 보류 명령)에서 한 번씩 불린다.
+TEST(AssetManager_CallbackMayRequestAndRelease) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    ManagerRig rig(env);
+    REQUIRE(CookPrimary(rig));
+    REQUIRE(rig.Start());
+    LoadTicket keepOne = rig.Request(1);
+    LoadTicket keepTwo = rig.Request(2);
+    REQUIRE(rig.Settle());
+
+    struct Inner {
+        uint32 firstCalls = 0;
+        uint32 secondCalls = 0;
+        uint32 nestedCalls = 0;
+        uint32 primaryCalls = 0;
+        uint32 runs = 0;
+        LoadTicket nested;
+        PrimaryAssetTicket primary;
+        DeferredCommand command;
+        bool requested = false;
+    };
+    Inner inner;
+    ReadyRecord nestedRecord(env.allocator);
+    LoadTicket first = rig.Request(1);
+    LoadTicket second = rig.Request(2);
+    auto onFirst = AssetReadyCallback::TryCreate(
+        env.allocator, [&](Result<AssetLease> lease, const AssetDiagnostic&) noexcept {
+            ++inner.firstCalls;
+            auto nested = rig.manager->RequestAsset(RequestOf(2));
+            auto nestedReady = AssetReadyCallback::TryCreate(
+                env.allocator, [&inner](Result<AssetLease>, const AssetDiagnostic&) noexcept {
+                    ++inner.nestedCalls;
+                });
+            auto primary = rig.manager->LoadPrimaryAsset(FixedId(1), {});
+            auto primaryReady = PrimaryReadyCallback::TryCreate(
+                env.allocator, [&inner](Result<PrimaryAssetLease>,
+                                        const AssetDiagnostic&) noexcept { ++inner.primaryCalls; });
+            auto run = DeferredRun::TryCreate(
+                env.allocator, [&inner](const AssetLease&) noexcept { ++inner.runs; });
+            if (!nested || !nestedReady || !primary || !primaryReady || !run) {
+                return;
+            }
+
+            inner.nested = Move(nested.Value());
+            inner.primary = Move(primary.Value());
+            inner.requested =
+                rig.manager->OnReady(inner.nested, TaskLane::Game, Move(nestedReady.Value()))
+                    .IsOk() &&
+                rig.manager->OnReady(inner.primary, TaskLane::Game, Move(primaryReady.Value()))
+                    .IsOk();
+            auto command = rig.manager->RunWhenReady(FixedId(2), NotReadyPolicy::Fail, nullptr,
+                                                     Move(run.Value()), NoFail(env.allocator));
+            inner.requested = inner.requested && command.IsOk();
+            if (command) {
+                inner.command = Move(command.Value());
+            }
+
+            // 받은 lease는 callback 안에서 놓는다(해제 큐).
+            if (lease) {
+                AssetLease dropped = Move(lease.Value());
+            }
+        });
+    auto onSecond = AssetReadyCallback::TryCreate(
+        env.allocator,
+        [&inner](Result<AssetLease>, const AssetDiagnostic&) noexcept { ++inner.secondCalls; });
+    REQUIRE(onFirst && onSecond);
+    REQUIRE(rig.manager->OnReady(first, TaskLane::Game, Move(onFirst.Value())));
+    REQUIRE(rig.manager->OnReady(second, TaskLane::Game, Move(onSecond.Value())));
+    REQUIRE(rig.Pump());
+    CHECK(inner.firstCalls == 1 && inner.secondCalls == 1 && inner.requested);
+    // 티켓 callback 목록은 이미 정해졌으므로 새 티켓은 다음 Pump이고, 묶음 전달·보류 명령은 같은
+    // Pump (8)의 뒤 차례에서 목록을 정하므로 이번에 불린다.
+    CHECK(inner.nestedCalls == 0 && inner.primaryCalls == 1 && inner.runs == 1);
+    REQUIRE(rig.Pump());
+    CHECK(inner.nestedCalls == 1 && inner.primaryCalls == 1 && inner.runs == 1);
+    REQUIRE(rig.Pump());
+    CHECK(inner.firstCalls == 1 && inner.secondCalls == 1 && inner.nestedCalls == 1 &&
+          inner.primaryCalls == 1 && inner.runs == 1);
+}
+
+// 종료 전달 안의 새 일(11.7절 12): Shutdown이 전달하는 callback·보류 명령 fail·묶음 callback 안의
+// 요청·보류 명령·묶음 로드·scope 만들기는 모두 ShuttingDown이다(그 뒤 Pump가 없으므로 받아 주면
+// callback이 영영 불리지 않는다).
+TEST(AssetManager_ShutdownDeliveryRejectsNewWork) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    ManagerRig rig(env);
+    REQUIRE(CookPrimary(rig));
+    REQUIRE(rig.Start());
+    constexpr usize Probes = 4;
+    struct Seen {
+        uint32 calls = 0;
+        ErrorCode delivered = ErrorCode::None;
+        ErrorCode errors[Probes] = {};
+    };
+    auto probe = [&rig, &env](Seen& seen) noexcept {
+        AssetManager& manager = *rig.manager;
+        seen.errors[0] = ErrorOf(manager.RequestAsset(RequestOf(2)));
+        seen.errors[1] = ErrorOf(manager.RunWhenReady(FixedId(2), NotReadyPolicy::Defer, nullptr,
+                                                      NoRun(env.allocator), NoFail(env.allocator)));
+        seen.errors[2] = ErrorOf(manager.LoadPrimaryAsset(FixedId(1), {}));
+        seen.errors[3] = ErrorOf(manager.CreateScope());
+    };
+    // 로더 Pump 전이라 허가·IO가 없다(종료가 IO를 기다리지 않는다).
+    Seen ticketSeen;
+    LoadTicket ticket = rig.Request(1);
+    auto ready = AssetReadyCallback::TryCreate(
+        env.allocator, [&](Result<AssetLease> lease, const AssetDiagnostic&) noexcept {
+            ++ticketSeen.calls;
+            ticketSeen.delivered = lease ? ErrorCode::None : lease.Error();
+            probe(ticketSeen);
+        });
+    Seen commandSeen;
+    auto fail = DeferredFail::TryCreate(env.allocator,
+                                        [&](ErrorCode error, const AssetDiagnostic&) noexcept {
+                                            ++commandSeen.calls;
+                                            commandSeen.delivered = error;
+                                            probe(commandSeen);
+                                        });
+    Seen primarySeen;
+    auto primaryReady = PrimaryReadyCallback::TryCreate(
+        env.allocator, [&](Result<PrimaryAssetLease> lease, const AssetDiagnostic&) noexcept {
+            ++primarySeen.calls;
+            primarySeen.delivered = lease ? ErrorCode::None : lease.Error();
+            probe(primarySeen);
+        });
+    REQUIRE(ready && fail && primaryReady);
+    REQUIRE(rig.manager->OnReady(ticket, TaskLane::Game, Move(ready.Value())));
+    auto command = rig.manager->RunWhenReady(FixedId(2), NotReadyPolicy::Defer, nullptr,
+                                             NoRun(env.allocator), Move(fail.Value()));
+    REQUIRE(command);
+    auto primary = rig.manager->LoadPrimaryAsset(FixedId(1), {});
+    REQUIRE(primary);
+    REQUIRE(rig.manager->OnReady(primary.Value(), TaskLane::Game, Move(primaryReady.Value())));
+    REQUIRE(rig.manager->Shutdown());
+    const Seen* const seens[] = {&ticketSeen, &commandSeen, &primarySeen};
+    for (const Seen* seen : seens) {
+        CHECK(seen->calls == 1 && seen->delivered == ErrorCode::ShuttingDown);
+        for (ErrorCode error : seen->errors) {
+            CHECK(error == ErrorCode::ShuttingDown);
+        }
+    }
+}
+
+// 동기 대기 중 프레임 판정(11.7절 8): LoadBlocking이 처음 본 판정은 거짓이지만 로더 WaitFor가 다시
+// 볼 때 참이면 로더가 WrongContext로 거절하고 LoadBlocking은 그 오류를 돌려준다. 티켓·lease가 남지
+// 않는다.
+TEST(AssetManager_LoadBlockingFrameTurnsDuringWait) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    ManagerRig rig(env);
+    rig.scene.Add(1);
+    REQUIRE(rig.Cook());
+    uint32 frameQueries = 0;
+    rig.config.loader.inFrame = [](void* context) noexcept {
+        return (*static_cast<uint32*>(context))++ > 0;
+    };
+    rig.config.loader.inFrameContext = &frameQueries;
+    REQUIRE(rig.Start());
+    CHECK(ErrorOf(rig.manager->LoadBlocking(RequestOf(1), "Turns")) == ErrorCode::WrongContext);
+    CHECK(frameQueries == 2);
+    AssetManagerSnapshot snapshot(env.allocator);
+    REQUIRE(rig.manager->Describe(snapshot));
+    CHECK(snapshot.liveTickets == 0 && snapshot.liveLeases == 0);
+}
+
+// 용량 추정 포화(11.7절 10): bulkRawBytes가 u64 최댓값인 항목 둘(1 → 2 Hard)의 합은 감기지 않고
+// 최댓값이다.
+TEST(AssetManager_EstimatePrimaryAssetSaturates) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    ManagerRig rig(env);
+    rig.scene.Add(1);
+    rig.scene.Add(2);
+    rig.scene.Hard(1, 2);
+    REQUIRE(rig.Cook());
+    rig.scene.EntryOf(1).flags = static_cast<uint32>(CookedManifestFlags::PrimaryAsset);
+    rig.scene.EntryOf(1).bulkRawBytes = NumericLimits<uint64>::Max();
+    rig.scene.EntryOf(2).bulkRawBytes = NumericLimits<uint64>::Max();
+    REQUIRE(rig.Start());
+    auto footprint = rig.manager->EstimatePrimaryAsset(FixedId(1), {});
+    REQUIRE(footprint);
+    CHECK(footprint.Value().packages == 2);
+    CHECK(footprint.Value().bulkRawBytes == NumericLimits<uint64>::Max());
+    CHECK(footprint.Value().packageBytes ==
+          rig.scene.EntryOf(1).packageBytes + rig.scene.EntryOf(2).packageBytes);
+}
+
 } // namespace manager_contract_tests_file

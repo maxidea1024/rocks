@@ -578,14 +578,15 @@ Result<void> AssetManager::Shutdown() noexcept {
         return Result<void>::Success();
     }
 
-    // 모든 티켓·lease·보류 명령을 회수하고 아직 부르지 않은 callback·fail에 ShuttingDown을 한 번
-    // 전달한다(11.7절 12). 그 뒤 해제 큐를 비운다(이미 소멸한 handle의 슬롯).
+    // 먼저 종료 중으로 표시해 이어지는 전달의 callback·fail 안에서 낸 요청도 ShuttingDown이 되게
+    // 한다. 모든 티켓·lease·보류 명령을 회수하고 아직 부르지 않은 callback·fail에 ShuttingDown을 한
+    // 번 전달한다(11.7절 12). 그 뒤 해제 큐를 비운다(이미 소멸한 handle의 슬롯).
+    impl.shutDown = true;
     impl.RevokeScope(ManagerNoIndex, ErrorCode::ShuttingDown);
     (void)impl.DeliverCallbacks();
     (void)impl.DeliverPrimary();
     (void)impl.RunDeferred();
     impl.DrainReleases();
-    impl.shutDown = true;
     (void)impl.loader->Shutdown();
     return Result<void>::Success();
 }

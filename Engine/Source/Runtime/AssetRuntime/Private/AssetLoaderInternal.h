@@ -235,14 +235,14 @@ struct LoaderTarjanFrame {
     uint32 position = 0;
 };
 
-// 여러 할당 단계의 처음 실패를 first에 남긴다(단계는 모두 실행한다 — 실패 뒤 단계는 버릴 상태에
-// 용량만 더 잡는다).
 // 포화 덧셈이다(임시 byte 합 — bulkRawBytes는 u64 최댓값까지 유효하다, 11.6절 9).
 inline uint64 LoaderSaturatingAdd(uint64 left, uint64 right) noexcept {
     return right > NumericLimits<uint64>::Max() - left ? NumericLimits<uint64>::Max()
                                                        : left + right;
 }
 
+// 여러 할당 단계의 처음 실패를 first에 남긴다(단계는 모두 실행한다 — 실패 뒤 단계는 버릴 상태에
+// 용량만 더 잡는다).
 inline void LoaderKeepFirst(ErrorCode& first, Result<void>&& result) noexcept {
     if (first == ErrorCode::None && !result) {
         first = result.Error();

@@ -1,6 +1,7 @@
 #include "ManagerTestSupport.h"
 
 #include <AssetTestFixtures/TestAssets.generated.h>
+#include <Object/ConstructionContext.h>
 
 // AssetManager 단위 그래프 시험이다(Docs/Design/AssetSystem.ko.md 11.7절 3·4): 순환 탐색의
 // 전방·후방 경계(도달 뒤 더 가는 단위, 전방 집합 밖에서 오는 간선), 한 묶음의 여러 새 간선이 같은
@@ -191,6 +192,78 @@ TEST(AssetManager_ConcurrentPostLoadUnitsMergeOnIngest) {
     nine = LoadTicket();
     REQUIRE(rig.Pump());
     CHECK(rig.UnitCount() == 0);
+}
+
+// 한 묶음 안 같은 쌍의 여러 항목(11.7절 3): 관찰자 키는 원인·트랜잭션까지 나누므로 "1의 대표 에셋
+// X → 2 설정(Edit +1), 1 안 새 객체 Y → 2 Commit(Commit +1), X → 2 지움, Y → 2 지움"은 한 묶음에
+// [Edit −1, Commit +1]로 온다. 쌍별로 합쳐 판정하므로 다중도는 0이고(Fatal 없음) 보유가 바뀌지
+// 않는다. 변형: 0인 쌍만(묶음 끝에서 뺀다), 0인 쌍 뒤에 다른 쌍 2 → 1(가운데서 뺀다), Y → 2를
+// 남김(순 변화 +1이 보유 — 2 → 1과 순환이라 한 단위).
+enum class BatchShape : uint8 {
+    ZeroOnly,
+    ZeroThenOther,
+    KeepCommitted
+};
+
+TEST(AssetManager_EdgeBatchCoalescesPerPair) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    const BatchShape shapes[] = {BatchShape::ZeroOnly, BatchShape::ZeroThenOther,
+                                 BatchShape::KeepCommitted};
+    for (const BatchShape shape : shapes) {
+        const bool keepCommitted = shape == BatchShape::KeepCommitted;
+        ManagerRig rig(env);
+        rig.scene.Add(1);
+        rig.scene.Add(2);
+        REQUIRE(rig.Cook());
+        REQUIRE(rig.Start());
+        LoadTicket one = rig.Request(1);
+        LoadTicket two = rig.Request(2);
+        REQUIRE(rig.Settle());
+        ObjectRegistry& registry = rig.manager->Registry();
+        const ObjectAccessContext access = registry.OwnerAccess();
+        const ObjectHandle target = rig.AssetObject(2);
+
+        REQUIRE(rig.SetHard(1, 2));
+        ConstructionContext transaction(registry, access);
+        auto made = transaction.Create<TestAsset>(TestAssetType(), rig.AssetObject(1), "Y");
+        REQUIRE(made);
+        const ObjectHandle created = made.Value();
+        auto staged = transaction.GetForWrite<TestAsset>(created);
+        REQUIRE(staged);
+        REQUIRE(transaction.SetReference(created, staged.Value()->hard, target));
+        auto committed = transaction.Commit();
+        REQUIRE(committed);
+        REQUIRE(rig.SetHard(1, 0));
+        if (!keepCommitted) {
+            auto borrow = registry.ResolveForWrite<TestAsset>(access, created);
+            REQUIRE(borrow);
+            REQUIRE(registry.SetReference(access, created, borrow.Value().Get().Value()->hard,
+                                          ObjectHandle{}));
+        }
+
+        // 같은 묶음의 다른 쌍(2 → 1): 패키지 칸 순서상 합이 0인 쌍(1 → 2) 뒤에 온다 — 합친 뒤 0인
+        // 쌍을 빼고 다음 쌍을 그 자리에 둔다.
+        REQUIRE(rig.manager->Loader().FindPackage(FixedId(1)).Value().slot <
+                rig.manager->Loader().FindPackage(FixedId(2)).Value().slot);
+        if (shape != BatchShape::ZeroOnly) {
+            REQUIRE(rig.SetHard(2, 1));
+        }
+
+        REQUIRE(rig.Pump());
+        if (!keepCommitted) {
+            // 1 → 2의 순 변화가 0이라 2는 보유가 없고, 2 → 1만 1의 보유다.
+            const uint32 expected = shape == BatchShape::ZeroThenOther ? 1 : 0;
+            CHECK(rig.UnitOf(2).info.inboundEdges == 0 &&
+                  rig.UnitOf(1).info.inboundEdges == expected);
+            CHECK(rig.UnitCount() == 2);
+        } else {
+            // 남은 Y → 2와 2 → 1이 순환이라 한 단위로 합쳐진다(내부 간선은 보유가 아니다).
+            CHECK(rig.UnitCount() == 1 && rig.UnitOf(2).info.inboundEdges == 0);
+        }
+
+        committed.Value().Reset();
+    }
 }
 
 } // namespace manager_graph_tests_file

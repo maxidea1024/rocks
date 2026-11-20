@@ -293,6 +293,7 @@ struct AssetManager::Impl {
     void AddHold(uint32 package, uint64 ManagerUnit::* counter) noexcept;
     void DropHold(uint32 package, uint64 ManagerUnit::* counter) noexcept;
     Result<void> ApplyEdgeChanges() noexcept;
+    void CoalesceChanges() noexcept;
     void LinkEdge(ObjectHandle owner, ObjectHandle target) noexcept;
     void UnlinkEdge(ObjectHandle owner, ObjectHandle target) noexcept;
     int64 InboundOf(uint32 unit) const noexcept;

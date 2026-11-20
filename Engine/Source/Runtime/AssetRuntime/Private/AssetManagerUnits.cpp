@@ -238,13 +238,61 @@ void AssetManager::Impl::UnlinkEdge(ObjectHandle owner, ObjectHandle target) noe
     removeFrom(target, owner, false);
 }
 
-// 관찰자 묶음을 간선 표에 적용한다(11.7절 3 — 묶음은 키마다 순 변화라 키마다 전후 값으로 판정한다).
+namespace {
+
+// 묶음의 handle은 모두 이 AssetManager의 Registry 것이라 칸·세대만 비교한다.
+bool HandleLess(ObjectHandle left, ObjectHandle right) noexcept {
+    if (left.slot != right.slot) {
+        return left.slot < right.slot;
+    }
+
+    return left.generation < right.generation;
+}
+
+} // namespace
+
+// 관찰자 키는 원인·트랜잭션까지 나누므로 같은 (소유, 대상) 쌍이 여러 항목으로 온다(순서는 키가 처음
+// 생긴 순서). 쌍별로 합쳐야 판정이 실제 다중도 변화를 본다(11.7절 3) — 제자리 정렬 뒤 이웃을
+// 합산하고 0인 쌍은 뺀다(할당 없음).
+void AssetManager::Impl::CoalesceChanges() noexcept {
+    changes.Sort([](const ReferenceEdgeDelta& left, const ReferenceEdgeDelta& right) noexcept {
+        if (!(left.ownerPackage == right.ownerPackage)) {
+            return HandleLess(left.ownerPackage, right.ownerPackage);
+        }
+
+        return HandleLess(left.targetPackage, right.targetPackage);
+    });
+    usize kept = 0;
+    for (usize index = 0; index < changes.Size(); ++index) {
+        if (kept != 0 && changes[kept - 1].ownerPackage == changes[index].ownerPackage &&
+            changes[kept - 1].targetPackage == changes[index].targetPackage) {
+            changes[kept - 1].delta += changes[index].delta;
+            continue;
+        }
+
+        if (kept != 0 && changes[kept - 1].delta == 0) {
+            --kept;
+        }
+
+        changes[kept++] = changes[index];
+    }
+
+    if (kept != 0 && changes[kept - 1].delta == 0) {
+        --kept;
+    }
+
+    (void)changes.TryResize(kept);
+}
+
+// 관찰자 묶음을 간선 표에 적용한다(11.7절 3 — 묶음을 쌍별로 합친 뒤 쌍마다 전후 값으로 판정한다).
 // 할당은 모두 먼저 잡고 실패하면 묶음을 쥔 채 다음 Pump에서 다시 한다.
 Result<void> AssetManager::Impl::ApplyEdgeChanges() noexcept {
     if (changes.IsEmpty()) {
         if (auto taken = observer->TakeChanges(changes); !taken) {
             return taken;
         }
+
+        CoalesceChanges();
     }
 
     usize newKeys = 0;

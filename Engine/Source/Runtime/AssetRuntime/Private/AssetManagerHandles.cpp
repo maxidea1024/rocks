@@ -115,8 +115,10 @@ void AssetManager::Impl::DrainReleases() noexcept {
             ManagerTicket& ticket = tickets[slot.record];
             ticket.released = true;
             ticket.slot = ManagerNoIndex;
+            // 끝나기 전이거나 callback을 아직 부르지 않았으면 Cancelled로 끝낸다(11.7절 5 — 끝난
+            // 티켓도 전달 전이면 그 결과 대신 Cancelled를 받는다).
             if (!slot.revoked) {
-                if (!ticket.done) {
+                if (!ticket.done || (ticket.callbackRegistered && !ticket.callbackDelivered)) {
                     EndTicket(slot.record, ErrorCode::Cancelled);
                 } else {
                     ReleaseTicketHold(slot.record);
@@ -332,8 +334,11 @@ uint32 AssetManager::Impl::DeliverCallbacks() noexcept {
         }
     }
 
+    // callback 안의 요청이 전달 목록을 다시 잡을 수 있으므로 색인으로 돈다(11.7절 5 재진입).
     uint32 delivered = 0;
-    for (uint32 index : deliver) {
+    const usize count = deliver.Size();
+    for (usize position = 0; position < count; ++position) {
+        const uint32 index = deliver[position];
         AssetReadyCallback callback = Move(tickets[index].callback);
         tickets[index].callbackDelivered = true;
         const AssetDiagnostic diagnostic = tickets[index].diagnostic;
