@@ -35,8 +35,9 @@ namespace Rocks.Build.Cli
     {
         public static Task<int> RunAsync(string[] args, CancellationToken cancellationToken) => RunAsync(args, cancellationToken, null);
 
-        // profile이 있으면 묶음 크기 실측의 조합 하나를 도는 build다(UnityProfileCommand가 부른다 — Docs/Design/UnityBuildPch.ko.md 12절).
-        // 그 모듈에만 조합을 재정의로 얹고, 빌드 대상을 그 모듈로 줄이고, 그 모듈의 object를 지워 처음부터 컴파일한 뒤 결과 행을 채운다.
+        // profile이 있으면 묶음 크기 실측의 실행 하나를 도는 build다(UnityProfileCommand가 부른다 — Docs/Design/UnityBuildPch.ko.md 12절).
+        // 조합이 있으면 그 모듈에만 조합을 재정의로 얹고, 빌드 대상을 그 모듈로 줄이고, 그 모듈의 object를 지워 처음부터 컴파일한 뒤 결과
+        // 행을 채운다. 조합이 없으면(준비 실행) 그 모듈이 의존하는 모듈만 빌드한다. 출력은 이 명령의 것이어야 한다(평소 빌드 출력 거부).
         internal static async Task<int> RunAsync(string[] args, CancellationToken cancellationToken, UnityProfileRun? profile)
         {
             if (args.Length == 0)
@@ -144,6 +145,12 @@ namespace Rocks.Build.Cli
                 throw new ArgumentException($"--output must be under {Path.Combine(root, "out")} (build evidence location): {output}");
             }
 
+            // 실측 실행은 그 모듈의 object를 지우고 보고서·증분 기록을 덮어쓴다. 출력을 만지기 전에 이 명령의 출력인지 다시 확인한다.
+            if (profile is not null)
+            {
+                UnityProfile.RequireClaimedOutput(output);
+            }
+
             // 엔진 버전의 단일 출처(Build/Build.version)를 이 실행에서 한 번만 읽는다(Docs/Design/ReflectionFoundations.ko.md 8.2절).
             // 값은 NativeBuildRequest.EngineVersion(BuildInfo 생성 TU)과 SDK manifest로만 가고 action key·ContextFingerprint에는 넣지
             // 않는다 — 넣으면 버전을 올릴 때마다 모든 compile key가 바뀐다.
@@ -167,6 +174,12 @@ namespace Rocks.Build.Cli
             var context = new BuildContext(root, output, toolchain.Platform, toolchain.Architecture, configuration);
             var rulesPath = options.GetValueOrDefault("rules", HostTool(root, "Rocks.Engine.Rules"));
             var rules = RuleLoader.Load(rulesPath, targetName, context);
+            // 모르는 모듈 이름은 출력과 잠금을 만들기 전에 알린다(메타 생성까지 가지 않는다).
+            if (profile is not null && !rules.Modules.Any(module => string.Equals(module.Name, profile.Module, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new ArgumentException($"Unknown module {profile.Module}: no module rule has that name.");
+            }
+
             // 설치 SDK의 엔진 라이브러리는 구성 기본 로그 하한으로 빌드되어야 한다. 게임은 같은 기본값으로 컴파일되므로 다르면 ODR 위반이다.
             if (args[0] == "sdk" && rules.Target.LinkType != NativeLinkType.Monolithic)
             {
@@ -233,14 +246,32 @@ namespace Rocks.Build.Cli
                         throw new ArgumentException($"Module {profile.Module} is not built by target {targetName}.");
                     }
 
-                    modules[index] = UnityProfile.Apply(modules[index], profile.Case);
-                    targets = [modules[index].Name];
-                    // 조합마다 처음부터 컴파일하게 그 모듈의 object와 묶음 파일을 지운다(의존 모듈은 cache hit으로 남는다).
-                    foreach (string directory in UnityProfile.ModuleOutputDirectories(output, modules[index].Name))
+                    // 규칙의 정식 이름이다(명령줄 철자의 대소문자와 다를 수 있다). 보고서 이름과 행 계산이 이 이름을 쓴다.
+                    string profiled = modules[index].Name;
+                    profile.ResolvedModule = profiled;
+                    // 평소 빌드의 증거와 구별되게 실측 실행임을 남긴다.
+                    evidence.RecordStep(UnityProfileCommand.Name, [UnityProfileCommand.Name, profiled, profile.Case?.Name ?? "prepare"], 0, TimeSpan.Zero);
+                    if (profile.Case is null)
                     {
-                        if (Directory.Exists(directory))
+                        // 준비 실행: 그 모듈이 의존하는 모듈만 빌드한다(그 모듈 자신은 조합마다 한 번씩만 컴파일한다).
+                        targets = modules[index].AllDependencies.Concat(modules[index].DynamicModules).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                        if (targets.Count == 0)
                         {
-                            Directory.Delete(directory, recursive: true);
+                            var prepared = await evidence.FinishAsync();
+                            return prepared.Status == "PASS" ? 0 : 1;
+                        }
+                    }
+                    else
+                    {
+                        modules[index] = UnityProfile.Apply(modules[index], profile.Case);
+                        targets = [profiled];
+                        // 조합마다 처음부터 컴파일하게 그 모듈의 object·묶음 파일과 PCH를 지운다(의존 모듈의 object는 cache hit으로 남는다).
+                        foreach (string directory in UnityProfile.ModuleOutputDirectories(output, profiled))
+                        {
+                            if (Directory.Exists(directory))
+                            {
+                                Directory.Delete(directory, recursive: true);
+                            }
                         }
                     }
                 }
@@ -309,8 +340,10 @@ namespace Rocks.Build.Cli
                     Timing = Timing(options),
                     TimingLabel = targetName,
                     PlanOnly = planOnly,
-                    MeasureProcesses = profile is not null
+                    MeasureProcesses = profile?.Case is not null
                 }, cancellationToken);
+                // 벽시계는 native 단계가 끝난 바로 이 자리에서 잡는다(뒤의 출력·보고서 쓰기를 넣지 않는다).
+                TimeSpan nativeElapsed = System.Diagnostics.Stopwatch.GetElapsedTime(nativeStart);
                 if (result.PlanOnly)
                 {
                     Console.WriteLine($"Plan only: wrote {result.CompilationDatabasePath} and {result.UnityBatches} unity batch file(s); no action was run.");
@@ -320,16 +353,22 @@ namespace Rocks.Build.Cli
 
                 Print(result);
                 AtomicFile.WriteIfChanged(Path.Combine(output, "action-report.json"), JsonSerializer.Serialize(result, JsonOptions));
-                evidence.RecordStep("native", ["Rocks.Build", targetName, configuration.ToString()], result.Succeeded ? 0 : 1, System.Diagnostics.Stopwatch.GetElapsedTime(nativeStart));
+                evidence.RecordStep("native", ["Rocks.Build", targetName, configuration.ToString()], result.Succeeded ? 0 : 1, nativeElapsed);
                 if (!result.Succeeded)
                 {
+                    if (profile is not null)
+                    {
+                        NativeActionResult? failed = result.Actions.FirstOrDefault(action => action.Executed && !action.Succeeded);
+                        profile.Failure = UnityProfile.FirstErrorLine(failed is null ? result.Failure : failed.StdErr + "\n" + failed.StdOut + "\n" + result.Failure);
+                    }
+
                     await evidence.FinishAsync(result.Failure);
                     return 1;
                 }
 
-                if (profile is not null)
+                if (profile?.Case is not null)
                 {
-                    profile.Row = UnityProfile.Row(profile.Case, result, targets[0], System.Diagnostics.Stopwatch.GetElapsedTime(nativeStart));
+                    profile.Row = UnityProfile.Row(profile.Case, result, targets[0], nativeElapsed);
                 }
 
                 if (args[0] == "sdk")

@@ -21,9 +21,11 @@ public sealed record ProcessSpec(
     bool MeasureUsage = false);
 
 /// <summary>
-/// 프로세스 하나가 쓴 자원이다. <c>CpuTime</c>은 사용자·커널 CPU 시간의 합, <c>PeakWorkingSetBytes</c>는 실행 중 가장 컸던 working set이다.
+/// 프로세스 하나가 쓴 자원이다. <c>CpuTime</c>은 사용자·커널 CPU 시간의 합이다. <c>PeakWorkingSetBytes</c>는 실행 중 가장 컸던
+/// working set(실제로 쥔 물리 메모리 — 기기가 메모리 압박을 받으면 작게 나온다), <c>PeakCommitBytes</c>는 가장 컸던 commit(pagefile
+/// 사용량 — 압박과 무관하게 요구한 양)이다. 그 프로세스가 띄운 자식 프로세스는 들어가지 않는다.
 /// </summary>
-public sealed record ProcessUsage(TimeSpan CpuTime, long PeakWorkingSetBytes);
+public sealed record ProcessUsage(TimeSpan CpuTime, long PeakWorkingSetBytes, long PeakCommitBytes);
 
 public sealed record ProcessResult(int ExitCode, string StdOut, string StdErr)
 {
@@ -319,7 +321,7 @@ internal static class ProcessUsageReader
         {
             TimeSpan cpu = process.TotalProcessorTime;
             return GetProcessMemoryInfo(process.SafeHandle, out MemoryCounters counters, (uint)Marshal.SizeOf<MemoryCounters>())
-                ? new(cpu, checked((long)counters.PeakWorkingSetSize))
+                ? new(cpu, checked((long)counters.PeakWorkingSetSize), checked((long)counters.PeakPagefileUsage))
                 : null;
         }
         catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)

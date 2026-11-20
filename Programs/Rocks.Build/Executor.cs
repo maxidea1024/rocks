@@ -182,6 +182,7 @@ internal static class Executor
             DurationMilliseconds = (long)time.GetElapsedTime(started).TotalMilliseconds,
             CpuMilliseconds = usage is null ? 0 : (long)usage.CpuTime.TotalMilliseconds,
             PeakMemoryBytes = usage?.PeakWorkingSetBytes ?? 0,
+            PeakCommitBytes = usage?.PeakCommitBytes ?? 0,
             ProcessMeasured = usage is not null
         };
     }
