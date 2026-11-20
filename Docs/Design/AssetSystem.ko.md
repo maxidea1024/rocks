@@ -16,11 +16,11 @@
 | Curve | Core 수학·리플렉션(설계는 착수 때 — 2026-11-15 사용자 결정 "B9 직후, A0-G 앞"): UE 5.8 `FInterpCurve<T>`·`FInterpCurvePoint`(Core/Public/Math — 키별 보간 모드·접선 자동 계산·값·미분 평가·루프·최근접 탐색, 스플라인 기반) 대응 Core 수학 층(**구현됨** 2026-11-16 — `InterpCurve<T>`, [키 커브](../Implementation/InterpCurve.ko.md))과 `FRichCurve`·`FSimpleCurve`·`FRealCurve`·`FIndexedCurve`·`FKeyHandle`·`FIntegralCurve`·`FNameCurve`·`FStringCurve`·`FCompressedRichCurve`(Engine/Classes/Curves — 가중 접선·외삽·압축) 대응 값 타입과 리플렉션 미러 — **Curve 단계 CV1–CV10 완료**(2026-11-18, [커브 데이터](CurveData.ko.md) 17절): Core `KeyCurveMath`·`FrameRate`, `Curves` 모듈(`TangentCurve`·`PlainCurve`·계단 커브 셋·`CurveKeyHandleTable`·`PackedTangentCurve`), 리플렉션 struct 검증 hook·`Array<uint8>` Bytes wire·Core enum Binds, CoreTypeBindings `InterpCurve` 미러 다섯 형식·`TryCalcBounds`. 에셋 층(`UCurveFloat`·`UCurveVector`·`UCurveLinearColor`·`UCurveTable`·`FRuntimeFloatCurve`·`FCurveTableRowHandle`)은 A1 에셋 시스템 뒤 A 단계 에셋 타입이고 경계는 커브 데이터 14절이다 | 수학 층: `MathInterpCurveTests`·`MathInterpCurveGoldenTests`·`MathInterpCurveBoundsTests`·`MathKeyCurve*Tests`·`FrameRateTests`. 값 타입: `Curves/Tests`(UE 5.8 식 참조 golden·독립 고정 벡터·편집·핸들 표·압축 byte 대조·리플렉션 왕복·hook 거부 — 커브 데이터 16절) |
 | A0-G | GraphicsTypes·Graphics: 차원(2D·Cube·3D·2DArray·CubeArray)·형식(R8·RG8·RGBA8·R16·RG16·RGBA16·R16F·RG16F·RGBA16F·R32F·RG32F·RGBA32F·BGRA8, sRGB 변형)·view swizzle(D3D12 `Shader4ComponentMapping`, OpenGL 채널별 `TEXTURE_SWIZZLE_R/G/B/A` — `TEXTURE_SWIZZLE_RGBA`는 OpenGL ES에 없다)·샘플러 W축 주소·필터 5종(Point·Bilinear·Trilinear·AnisotropicPoint·AnisotropicLinear — 기존 `Nearest`·`Anisotropic`의 이름 변경 포함)·**깊이 비교 샘플러**(비교 함수, 그림자용 — [렌더 기반](RenderBase.ko.md) SX13), 쿠킹 데이터 샘플러 D3D12·OpenGL. 착수 전 반영할 셰이더·렌더 요구: [셰이더 시스템](ShaderSystem.ko.md) 5.2절 G1(backend 중립 정의, Vulkan·Metal·GLES로 옮길 수 있을 것, 지원 표와 `UnsupportedCapability`)·G2(OpenGL 구현은 OpenGL ES 3.2 공통 API, 데스크톱 전용 DSA를 늘리지 않음, ES 확장 의존 형식·필터 조건)·G3(VulkanGraphics가 A0-G 범위를 받음, SH2), 텍스처 desc의 샘플러는 기본값이고 바인딩 때 다른 샘플러를 지정할 수 있게 둔다(렌더 기반 결정 R12, 바인딩 쪽은 GX2). **구현**(2026-11-18, 렌더 세션과 범위 확정 — 형식 목록은 [픽셀 형식](PixelFormat.ko.md) PF1–PF3에서 이미 끝났고, MSAA 텍스처·resolve, mip·slice 개별 view와 attachment, 바인딩 샘플러(GX6·SH2)는 렌더 세션 몫): GraphicsTypes `TextureDimension`(UE `ETextureDimension` 순서)·`CubeFace`(+X·−X·+Y·−Y·+Z·−Z, UE `ECubeFace`·D3D 면 순서와 방향)·`SwizzleSource`·`ChannelSwizzle`(`ComposeSwizzle`)·`CompareFunction`(Graphics `PipelineState.h`에서 옮겨 깊이 상태와 샘플러가 함께 쓴다)·`SamplerDesc`(`Filter` 5종 UE `ESamplerFilter` 순서, `addressW`, `comparison`·`compare`). Graphics `TextureDesc{dimension, depth, arraySize, swizzle}`·`TextureViewDesc::swizzle`·`ValidateTextureDesc`·`CheckTextureLimits`·`TextureSliceCount`·`TextureMipBytes`·`TextureDataBytes`, subresource = mip × slice(`SubresourceRange` slice 범위, `SubresourceStates`, 분리 전이 목록 지문은 slice 범위를 포함하고, begin·end 사이 접근 검사는 기록 장치(RenderBase 시험용 `RecordingDevice`)만 slice까지 본다 — 실제 backend는 이 검사를 하지 않고 D3D12 end·Vulkan begin 때 before 상태를 대조한다), 네 backend(D3D12·D3D11·Vulkan·OpenGL ES)의 차원별 생성·업로드·SRV·`ReadTexture`·전이, RenderGraph 풀 키(차원·깊이·층·swizzle)와 slice 단위 전이 기록. 지원 표는 [렌더 기반](RenderBase.ko.md) 4.4절 GX2 "구현(A0-G)"이다. 스펙과 다르게 정한 것: (1) 지원하지 않는 조합의 오류는 `UnsupportedCapability`가 아니라 Graphics의 기존 장치 능력 오류 `Unsupported`다(`UnsupportedCapability`는 A1에서 Core에 더하며, 그때 Graphics 계약을 함께 바꿀지 정한다). (2) 초기 픽셀·`UpdateTexture`·`ReadTexture`의 배치는 mip 우선(mip 하나 = 그 mip의 모든 slice·깊이 면)이다(mip별 스트리밍과 같은 단위). (3) view swizzle은 원 텍스처의 `TextureDesc::swizzle`을 이어받지 않는 view 형식 기준 대응이다. (4) D3D11은 view swizzle이 없어 항등이 아니면 `Unsupported`(셰이더 대체 없음). `AnisotropicPoint`는 하드웨어 대응이 없는 backend(D3D11, OPTIONS19 `AnisoFilterWithPointMipSupported`가 없는 D3D12)에서 UE처럼 `AnisotropicLinear`로 만든다(2026-11-18 사용자 결정 — 바꾼 사실은 `DeviceFeatures::anisotropicPointFilter` 거짓과 처음 한 번의 Debug 로그로 드러나고, 쿠킹 프로필은 UE 기본값(World 그룹 aniso + point)을 그대로 쓴다). 비교 샘플러는 깊이 형식(Depth·DepthStencil)에만 붙고(아니면 `InvalidArgument`), 그 텍스처의 view는 깊이 plane만 읽는다. (5) 비교 샘플러는 UE의 `SCF_Never`·`SCF_Less`가 아니라 `comparison` 표시 + `CompareFunction` 전체다. (6) 2D가 아닌 RenderTarget·DepthStencil과 다중 plane 형식(D24S8·D32S8·비디오)의 2D 아닌 차원은 `Unsupported`, OpenGL ES의 2D 아닌 깊이 텍스처 `ReadTexture`는 `Unsupported`다. (7) "쿠킹 데이터 샘플러 D3D12·OpenGL"은 AssetRuntime(A1)이 아직 없어 장치 계약 쪽만 했다: `TextureDesc::sampler`의 모든 값(필터·이방성·U·V·W 주소·border 색·비교)을 네 backend가 그대로 쓴다. `TexturePlatformData` → `TextureDesc` 연결은 A1·A5다 | self-test 확장(Sandbox `--self-test` RunTextureChecks: 차원별 왕복·셰이더 읽기·cube 면 방향·slice 전이, staging 업로드(배열·cube·3D, offset 0·512), BC1 배열·cube·3D 왕복, swizzle·A8 합성·view 독립, swizzle은 attachment·ReadTexture에 적용되지 않음, W축 주소, 비교 샘플러(점·선형 PCF), 필터 5종) |
 | A1 | AssetRuntime: 패키지 포맷 v1, `Package`·`Asset`, 에셋 객체 Registry, 쿠킹 매니페스트(`CookedManifest.rman`), 로더(worker IO·압축 해제, Game 스레드 객체 생성, SCC), `AssetManager`(scope·PrimaryAsset·bundle), `CancelToken`·`TaskLane`·`LoadPriority`, Core ErrorCode 추가(`UnsupportedCapability`·`AlreadyRegistered`·`ScopeClosed`), EngineAssets 모듈 | 포맷·SCC·수명·scope 시험 |
-| A2 | AssetDatabase: `ProjectLayout`, 경로 정책, 인덱스(검색·의존·별칭·진단·캐시·감시), 저장·dirty, 이동·복제·삭제, 임포트 프레임워크 | 인덱스·이동·동시 쓰기 시험 |
+| A2 | AssetDatabase(7.1절, 하위 단계 A2a–A2f): `ProjectLayout`, 경로 정책, 인덱스(검색·의존·별칭·진단·캐시·감시), 저장·dirty, 이동·복제·삭제, 임포트 프레임워크, 각 단계의 13절 명령 | 인덱스·이동·동시 쓰기 시험(하위 단계마다 A1과 같은 완료 조건 넷) |
 | A3 | AssetNugget | 적중·무효화·손상·동시 기록·GC 시험 |
 | A4 | AssetCooker | 원본 없이 쿠킹·재현성·부분 쿠킹 시험 |
 | A5 | 텍스처: `Texture` 계열, `TextureSource`, ImageCore(BMP·TGA·PNG·PSD·DDS·TIFF·Radiance HDR·무손실 OpenEXR — 12.2절), TextureTools(임포터·빌드·쿠킹 처리기), 클래스 기본값 레코드·차이 쓰기·override 집합·지문(cookKey·Summary 지문 열 — A1 Summary·A4 cookKey 산출물을 이때 고친다, RuntimeClassMetadata '클래스 기본값 결정') | 14절 텍스처 시나리오 |
-| A6 | 명령행·문서·검증 보고 | 14절 결과 기록 |
+| A6 | 남은 명령행(쿠킹·너겟 — A2 명령은 각 하위 단계에서 더한다)·문서·검증 보고 | 14절 결과 기록 |
 
 ## 2. 사전 조사(2026-11-12)
 
@@ -61,7 +61,7 @@
 
 ```
 Programs/Commandlet → TextureTools → { AssetCooker, AssetDatabase, AssetNugget, ImageCore, Texture }
-AssetCooker → { AssetDatabase, AssetNugget }        AssetDatabase → AssetRuntime
+AssetCooker → { AssetDatabase, AssetNugget }        AssetDatabase(Developer) → { AssetRuntime, HostConfig }
 Texture(Runtime) → { AssetRuntime, GraphicsTypes }       ImageCore(Developer) → { Core, Compression }
 AssetRuntime → { ObjectSerialization, ObjectRuntime, Serialization, Task, Compression }
 EngineAssets(Runtime, 신규) → { Engine, AssetRuntime }   — AssetManager를 EngineSubsystem으로 붙이는 연결 모듈
@@ -270,7 +270,7 @@ A1a 구현(`Engine/Source/Runtime/AssetRuntime` — `PackageFormat.h`·`PackageW
 16. **resolver 결과와 Prepare의 allocator**:
     - `PackageImportResolver`가 준 handle은 그 에셋의 공개된 `Package`여야 한다. null·회수된 handle·Package가 아닌 객체·다른 AssetId는 진단 None + `InvalidArgument`다(`AssetPackage_ResolverResultIsValidated` — 처음 구현은 조용히 잘못 이었다).
     - `Prepare`(아무 스레드)는 상태 allocator만 쓰고 Registry allocator(소유 스레드 전용 — ObjectRegistry `ObjectAllocator`)는 `InstantiatePackages`(소유 스레드)만 쓴다. 압축을 푼 bulk 저장소는 상태 allocator로 잡고 Package가 복사 없이 이어받는다(bulk가 GB일 수 있어 소유 스레드에서 다시 복사하는 비용을 피한다). 그래서 상태 allocator는 그 상태로 만든 Package(Registry)보다 오래 살아야 한다 — 런타임 로더(A1c)는 엔진 수명의 로더 allocator를 쓴다. 시험은 할당 스레드를 기록하는 allocator로 Registry를 만들어 worker Prepare 동안 Registry allocator가 불리지 않음을 단언한다(`AssetPackage_PrepareUsesOnlyStateAllocator`).
-17. **ImportOwner·Tags**: ImportRecord의 내용 스키마(ownerAssetId 포함)는 A2(AssetDatabase)가 정하므로 ImportOwner 의존과 ImportRecord의 로드 대조는 A2로 미룬다(지금은 ImportOwner·Build 의존을 쓰고 읽되 대조하지 않는다 — `AssetPackage_ImportOwnerCrossCheckDeferredToA2`). 여러 ImportOwner 항목과 required의 뜻도 A2가 ImportRecord 스키마와 함께 정한다. Tags는 Record envelope·TLV 구조와 키(필드 ID) 엄격 오름차순을 reader와 writer 옵션 검증이 같이 본다(값 스키마는 A2 — `AssetPackage_TagsKeysAreSorted`).
+17. **ImportOwner·Tags**: ImportRecord의 내용 스키마(ownerAssetId 포함)는 A2(AssetDatabase)가 정하므로 ImportOwner 의존과 ImportRecord의 로드 대조는 A2로 미룬다(지금은 ImportOwner·Build 의존을 쓰고 읽되 대조하지 않는다 — `AssetPackage_ImportOwnerCrossCheckDeferredToA2`). 여러 ImportOwner 항목과 required의 뜻도 A2가 ImportRecord 스키마와 함께 정한다. Tags는 Record envelope·TLV 구조와 키(필드 ID) 엄격 오름차순을 reader와 writer 옵션 검증이 같이 본다(값 스키마는 A2 — `AssetPackage_TagsKeysAreSorted`). A2는 값 스키마를 문자열 키 → 문자열 목록으로 정하고 이 검증을 바꾸며, ImportOwner 대조는 AssetDatabase가 한다(7.1절 2·7).
 18. **에디터 읽기 전용 열기의 기대 결과**: 더 새 데이터(모르는 필드·더 새 타입·커스텀 버전·Required가 아닌 모르는 섹션)를 담은 에디터 파일은 `Prepare`가 읽기 전용으로 받고 `InstantiatePackages`·Commit까지 간다. 모르는 필드는 건너뛰므로 그 안의 Hard·Soft·bulk 참조는 기본값(null·빈 값)으로 남고, Dependencies는 부분집합만, 쓰이지 않는 import·bulk entry는 검사하지 않으며, Package는 bulk entry를 그대로 가진다(`AssetPackage_EditorReadOnlyLoadsEndToEnd`). 현재 클래스가 없는 export 타입(미등록, 또는 등록됐지만 클래스가 아닌 타입 id)은 reader가 읽기 전용으로 표시하고(헤더·인덱스 도구) `PackageContents::unavailableExportType`에 남긴다. 객체를 만들 클래스가 없으므로 `Prepare`는 그래프 1단계 전에 이 reader 판정으로 Summary `UnsupportedVersion`(`Unsupported`)을 낸다. 그래프 1단계의 TypeMismatch로 분류하지 않는 것은 그 오류가 노드 Record 손상에서도 나기 때문이다(처음 구현은 미등록은 그래프 NotFound → `UnsupportedVersion`, 클래스가 아닌 타입은 그래프 TypeMismatch → `CorruptPackage`로 갈렸다 — `AssetPackage_NonClassTypeHasNoCurrentVersion`). 미등록 클래스의 자리표시 객체(UE의 누락 클래스 처리)는 그래프 복원에 노드 생략·참조 null화를 더해야 하는 설계 변경이라 이 단계에서 하지 않는다(5.7절 9의 "에디터는 읽기 전용"은 reader 판정의 뜻이다).
 19. **로드의 타입·객체 조회 실패**(판정 리뷰 반영): 로드가 찾은 객체·등록 저장소에 다시 묻는 조회의 실패는 단언하지 않고 진단 None + 원래 오류로 돌려준다.
     - import 대상(대표 에셋·하위 객체)의 `AcquireType`: 단언하지 않고 진단 None으로 그 오류를 돌려준다. 파생 판정은 그 lease(`TypeLease::IsA`)로 해 등록 저장소를 다시 묻지 않는다. 닿는 경로는 `InstantiatePackages` 도중 닫히는 TypeRegistry다: `FindObject`·`FindChild`·`Resolve`는 ObjectRegistry의 종료만 보지만 `AcquireType`은 객체의 타입 lease를 복제하고(`AcquireTypeChecked` → `TypeLease::Clone`), 그 복제는 TypeRegistry가 닫혔으면 `ShuttingDown`이다. `TypeRegistry::Shutdown`은 lease가 남아 `Busy`를 돌려줄 때도 닫힘 표시를 먼저 세운다. 시험 `AssetPackage_TypeRegistryClosesDuringInstantiate`는 상태 allocator가 Prepare 뒤 n번째 할당(첫 할당은 import 해석 전의 대상 표 예약)에서 Shutdown을 부르게 해(모든 n) 결과가 성공이거나 진단 None + `ShuttingDown`임을 보고, resolver 장면(Hard 의존의 대표 에셋 대조)과 묶음 장면(EditorOnly 참조만 — 대조 없이 import 대상 조회) 양쪽에서 ObjectImports 지점에 닿음을 센다. 처음 이 항목은 "지금 엔진에서 닿는 로드 경로가 없다"고 적었는데 이 경로를 놓쳤다. 판정 리뷰가 처음 든 경로(정책 없는 Registry의 `RequestDestroy`만 받은 대상)는 그런 Registry에 패키지를 로드할 수 없어 닿지 않는다 — 패키지는 `packageNativeType = Package`인 Registry에만 로드한다(`InstantiatePackages` 인자 `InvalidArgument` — 정책 없음·다른 타입 모두, `AssetPackage_LoadRequiresPackagePolicyRegistry`; 처음 구현은 그런 Registry로 연 트랜잭션도 받아 그래프 생성 단계가 Objects `CorruptPackage`로 거부했다).
@@ -281,7 +281,7 @@ A1a 구현(`Engine/Source/Runtime/AssetRuntime` — `PackageFormat.h`·`PackageW
 
 ### 6.1 객체 통합
 
-- 로드된 패키지·에셋은 `AssetManager`가 소유하는 **에셋 객체 Registry**(고유 ContextId, 엔진 TypeRegistry 공유)에 있다. World Registry와 분리한다(여러 World·Tryout 공유, 에셋끼리 ObjectRef 가능). 접근은 `AssetManager::With`(에셋 문맥 ObjectAccessScope를 중첩해 연다).
+- 로드된 쿠킹 패키지·에셋은 `AssetManager`가 소유하는 **에셋 객체 Registry**(고유 ContextId, 엔진 TypeRegistry 공유)에 있다. 에디터 패키지는 AssetDatabase `EditorPackageSet`이 소유하는 **에디터 객체 Registry**(같은 패키지 정책 Registry·`ReferenceObserver`)에 있다(7.1절 3 — AssetManager·AssetLoader는 쿠킹 매니페스트 전용이다). World Registry와 분리한다(여러 World·Tryout 공유, 에셋끼리 ObjectRef 가능). 접근은 `AssetManager::With`(에셋 문맥 ObjectAccessScope를 중첩해 연다).
 - `Package : Object`(Outer·이름 없음 — 정체성은 AssetId): `ROCKS_PROPERTY(Transient, ReadOnly) AssetId id`, 플래그, 하드 의존 패키지 목록(`ROCKS_PROPERTY(Transient) ObjectRefArray<Package>` — AssetManager 조회용 사본이며 GC 보존 역할은 없다, 존치 여부는 A1이 정한다), bulk 접근자(`ROCKS_NATIVE`: 에디터 패키지 파일의 열린 핸들 + BulkIndex. 지연 읽기를 하며 저장 성공 후 새 파일로 다시 잇는다, 5.5절). 소속 객체(export)는 목록이 아니라 Registry 자식 고리가 붙잡고(패키지 정책 Registry의 outer → inner 강한 간선 — [ObjectFoundations](ObjectFoundations.ko.md) 1.7절) export 순서는 `CollectInners(DepthFirst)`다. `Asset : Object`(`ROCKS_CLASS(Abstract)`)의 Outer는 Package. inner → outer 강한 간선(계획 §5.2)과 패키지 정책의 outer → inner 강한 간선이 함께 있다.
 - 저장 속성은 `ROCKS_PROPERTY`. 대용량 데이터는 `ROCKS_STRUCT BulkDataRef`(bulkId 1부터·rawBytes·`Sha256Digest`) 필드이고 내용은 Bulk 섹션. 쿠킹 플랫폼 데이터의 mip별 entry도 bulkId로 가리킨다(파일 offset은 BulkIndex만 안다).
 - 대표 에셋의 AssetId는 `ROCKS_PROPERTY(Transient, ReadOnly) AssetId`이며 로드 때 `prepare` hook이 Commit 전에 설정한다.
@@ -320,6 +320,61 @@ World 객체는 에셋 객체 Registry 밖에 있어 `ObjectRef<에셋>`을 걸 
 - 캐시: `Intermediate/AssetIndex.cache`(형식·Unicode·스키마 버전 키 — 도구 빌드 ID는 header에 진단용으로만 기록해 엔진을 다시 빌드할 때마다 캐시가 무효화되지 않게, 원자적 기록, 잠금 보유 프로세스만 기록 — 읽기 명령은 캐시를 읽기만). 파일별 헤더+섹션 표 SHA-256과 요약. 시작 시 범위(약 1 KiB)만 읽어 비교, 다르면 그 파일만 다시 읽음. 범위 읽기는 WorkerScheduler 병렬.
 - `Verify()`: 4.6절 진단 보고만.
 - 원본 감시: 원본 SHA-256이 ImportRecord와 다르면 `SourceChanged`. 자동 재임포트는 기본 꺼짐, 켜면 debounce(500 ms) 후 재임포트, 실패 시 기존 보존·진단(계획 §9.4).
+
+### 7.1 구현에서 정한 점(A2 — AssetDatabase, 설계 2026-11-21)
+
+A2는 에디터 쪽 에셋 데이터베이스다(4·5.4·5.5·7·8·13·16절). 출발점은 AssetRuntime의 패키지 writer(메모리 sink)·reader(전체 파일·헤더만)·동기 로드(`PackageLoadState`)·`NewPackage`, PlatformBase의 `FileLock`·`DirectoryWatcher`·`Replace`·`Move`·`SyncDirectory`, Core의 `ValidateNameComponent`·`TryMakeNameComponentKey`·`TryMakeCaselessKey`·JSON, HostConfig의 `FindProjectFrom`이다. 애매한 곳은 UE 5.8을 따른다(`FPackageName` 마운트, `SavePackage`의 임시 파일 → 이동, `FAssetData`·`DiskCachedAssetData`, `MarkPackageDirty`, `GetAssetRegistryTags`, 누락 import는 경고 + null — `LinkerLoad.cpp` ImportFailure, 이동·삭제 전 `ResetLoaders`). 설계 초안은 리뷰 1회로 고쳤다(아래 결정의 "리뷰" 표시).
+
+1. **모듈과 이름**: `Engine/Source/Developer/AssetDatabase`(Developer — 에디터·도구만 링크, 게임은 쿠킹 결과만 읽는다), 의존 `AssetRuntime`·`HostConfig`(프로젝트 탐색 재사용 — 리뷰). 13절 서비스 API의 이름은 `AssetService`이고(명령과 1:1), 그 아래 부품이 `ProjectLayout`·`AssetIndex`·`EditorPackageSet`이다. 시험은 EngineTests(`Engine/Source/Developer/AssetDatabase/Tests`), 시험 에셋 타입은 `AssetTestFixtures`.
+
+2. **AssetRuntime에 더하는 것**(리뷰 — 처음 적은 "부분 읽기와 파일 sink만"은 틀렸다):
+   - 범위 읽기 인터페이스 `PackageRangeReader { virtual Result<void> ReadAt(uint64 offset, Span<uint8> out) noexcept = 0; virtual uint64 FileBytes() const noexcept = 0; }`와 메모리·파일 구현.
+   - 부분 읽기 `ReadPackageIndex(Allocator&, PackageRangeReader&, const PackageReadOptions&, PackageIndexView& out, AssetDiagnostic*)`: 헤더·섹션 표와 Summary·Exports·ObjectImports·Dependencies·ImportRecord·Tags를 범위 읽기로 가져와 5.1절 1–4의 같은 판정과 그 섹션 CRC를 본다. Objects·Bulk·BulkIndex의 내용은 읽지 않는다(표의 위치·겹침·패딩 판정은 표만으로 하고, 패딩 byte 0 검사는 읽지 않는 구간이라 하지 않는다). 결과는 소유 버퍼다(`PackageContents`처럼 파일 byte를 빌리지 않는다).
+   - 고정 버퍼 재검증 `VerifyPackageFile(PackageRangeReader&, scratch)`(5.5절 5 — 헤더·표·모든 섹션 CRC·bulk entry CRC를 일정 크기 버퍼로 훑는다).
+   - 파일 sink `FilePackageSink`(`platform::File` 위 `Append`·`WriteAt`).
+   - bulk 저장소 `PackageBulkStore`(Package의 bulk 접근 추상 — 6.1절의 "열린 핸들 + BulkIndex"): 런타임은 지금처럼 메모리 구현, 에디터는 AssetDatabase의 파일 구현(지연 읽기·`Detach`·저장 뒤 새 파일로 다시 잇기). `PackageLoadState`에 bulk를 풀지 않고 저장소만 잇는 선택지를 더한다.
+   - `RemapBulkReferences(registry, package, remap)`: 저장 뒤 패키지 객체의 `BulkDataRef` 필드(struct·배열·map 안 포함)를 리플렉션으로 찾아 (옛 id → 새 id)로 바꾼다(5.5절 7).
+   - 메모리 bulk id 이름 공간(리뷰): 저장하지 않은 새 bulk는 `BulkDataRef::bulkId`의 최상위 bit(`UnsavedBulkIdBit = 0x80000000`)가 선 id를 쓰고, 파일 bulk는 1–0x7FFFFFFF다. writer는 저장마다 모두 1부터 다시 매기고 재매핑 표의 키는 옛 id 하나로 유일하다. 패키지 reader는 최상위 bit가 선 id를 `CorruptPackage`로 거부한다.
+   - Tags 값 스키마(리뷰 — 5.7절 17이 미룬 것): Tags 섹션은 Record 하나이고 필드 1 = `RecordList[{ key: string, values: string list }]`, key는 byte 순 엄격 오름차순·유일, 값은 문자열 목록(한 값이면 원소 하나 — UE `FAssetData` 태그는 이름 → 문자열이고 목록 키(7절 `UnrealExchange.FormerPaths`)는 원소마다 색인). writer 검증(`ValidateTagsRecord`)을 이 스키마로 바꾼다(하위 호환 없음).
+   - `DependencyDeclarer`(16.2절)와 타입별 태그 hook `AssetTagProvider`(UE `UObject::GetAssetRegistryTags` 대응)는 타입 등록과 함께 AssetRuntime 인터페이스로 둔다(구현은 타입 모듈).
+
+3. **에디터 Registry**(리뷰 — 6.1절을 고친다): 에디터·도구의 패키지는 `EditorPackageSet`이 소유한 **에디터 객체 Registry**(패키지 정책 Registry, 고유 ContextId, `ReferenceObserver` 포함)에 있다. 쿠킹 매니페스트를 읽는 `AssetManager`·`AssetLoader`는 에디터 패키지를 읽지 않으므로 쓰지 않는다. A4 쿠커도 이 Registry에서 에디터 패키지를 읽는다. 6.1절의 "도구도 AssetManager를 소유"는 쿠킹 결과를 읽는 도구(`asset-load-cooked`)에만 해당한다.
+
+4. **하위 단계와 순서**(리뷰 — 저장이 색인의 부분 읽기·검색에 기대므로 순서를 바꿨다. 각 단계는 A1과 같은 완료 조건 넷이고, 그 단계의 서비스 API가 생기면 13절 명령도 함께 더한다 — 1절 표의 A6은 문서·검증 보고만):
+
+| 단계 | 내용 | 13절 명령 |
+|---|---|---|
+| A2a | `ProjectLayout`(프로젝트 루트·`Content`·`Config`·`Intermediate`·`Saved`, 마운트 표 `/Game`), 논리 경로(파싱·NFC·caseless 키·OS 이름 대응), 쓰기 잠금 `AssetDatabaseLock`, 시계·감시 변경 공급 인터페이스(9) | — |
+| A2b | AssetRuntime 범위 읽기·부분 읽기, `AssetIndex` 검색·조회·진단(캐시·감시 없이 — 전체 검색) | `asset-list`·`asset-info`·`asset-index-verify` |
+| A2c | 저장·열기: 파일 sink·재검증·bulk 저장소·재매핑, `EditorPackageSet`(열기·Hard import 재귀·누락 import는 null + `MissingDependency`), 저장 절차(5.5절 1–8), dirty(5), Tags·Build·ImportOwner 생성(`AssetTagProvider`·`DependencyDeclarer`·ImportRecord 스키마·파서 — 리뷰: 저장이 쓰므로 여기), 인덱스 갱신 | `asset-new`·`asset-set` |
+| A2d | 색인 캐시(`Intermediate/AssetIndex.cache`)·감시 갱신(7절) | `asset-index-rebuild` |
+| A2e | 작업: 별칭 표, 이동·이름 변경(파일·디렉터리), 복제, 삭제, 중복 ID 해결, 고아 출력(16.1절), `Detach`(6) | `asset-move`·`asset-duplicate`·`asset-delete`·`asset-fix-duplicate-id`·`asset-alias-*`·`asset-orphans-*` |
+| A2f | 임포트 프레임워크: `Importer`(입력 원본 byte·옵션 → 출력 그래프·bulk), 원본 루트(`Config/AssetSources.json`), 임포트·재임포트(제자리 갱신 — 8), `SourceChanged`, ImportOwner 대조(7) | `asset-import`·`asset-reimport`(시험 임포터로 확인, 텍스처 임포터는 A5) |
+
+5. **dirty**(리뷰): 명시 `EditorPackageSet::MarkDirty(package)`(UE `MarkPackageDirty`)와 에디터 Registry `ReferenceObserver`가 보고한 패키지 사이 간선 변경이 세대를 올린다. 서비스 API(`asset-set` 등)는 편집 뒤 `MarkDirty`를 부른다. 저장은 직렬화 시작 때의 세대를 기억하고 끝에 같을 때만 dirty를 지운다(5.5절 7).
+
+6. **열린 패키지와 파일 작업**(리뷰): 이동·삭제·덮어쓰기 전에 그 파일(디렉터리면 아래 모든 파일)의 패키지를 `Detach`한다 — 아직 읽지 않은 bulk를 메모리로 읽어 저장소를 메모리로 바꾸고 파일 핸들을 닫는다(UE `ResetLoaders`). 이동 뒤 `EditorPackageSet`의 경로 표를 고친다. dirty 패키지의 이동은 허용하고(내용은 메모리에 있다) 다음 저장은 새 경로에 쓴다.
+
+7. **ImportRecord**: 스키마는 5.4절 그대로이고 파서·writer는 AssetDatabase에 둔다(AssetRuntime은 스키마를 모른다). ImportOwner 대조(5.7절 17)는 AssetDatabase의 열기·색인이 한다: 자기 자신이 아닌 `ownerAssetId`면 Dependencies에 그 id의 ImportOwner 항목이 정확히 하나(required)여야 하고, 자기 자신이면 ImportOwner 항목이 없어야 한다. 위반은 `CorruptPackage`. 여러 ImportOwner는 허용하지 않는다.
+
+8. **재임포트**: 기존 객체를 제자리에서 갱신한다(UE 재임포트와 같이 출력 객체의 정체성·참조자의 ObjectRef 유지). 임포터가 같은 출력 키에 같은 타입을 내면 필드를 덮어쓰고, 사라진 출력은 `OrphanedOutput`, 타입이 바뀐 출력은 새 객체로 바꾸고 진단한다.
+
+9. **결정적 시험을 위한 주입점**(리뷰):
+   - 시계 `AssetClock { virtual int64 NowTicks() noexcept = 0; }` — RootLost 재확인(1초), 쓰는 중 파일 대기(최대 10초, 두 번 연속 같음), 원본 debounce(500 ms), 별칭 생성 UTC·만료 계산이 모두 이 시계를 쓴다. 갱신은 `AssetIndex::Pump(now)`처럼 시각을 받는 호출이라 시험이 고정 시각을 단언한다.
+   - 감시 변경 공급 `DirectoryChangeSource`(`DirectoryWatcher`는 `final`이라 감싼다) — 시험은 이벤트를 주입하고, 실제 OS 감시는 `Wait` 루프와 실패 상한으로 한 번만 확인한다(sleep 없음).
+   - 파일 시스템은 `platform::FileSystem&`로 받는다(고장 주입 — A1e `ReadManifestFile`과 같은 방식). "저장 중 편집"은 고장 FileSystem의 Flush·Replace hook이 소유 스레드에서 편집을 넣는다.
+   - 두 프로세스 잠금·동시 쓰기는 `Platform/Process` 자식과 파이프 gate로 순서를 정한다(Busy는 대기 0으로, "대기 후 성공"은 해제 gate 뒤 획득으로 단언).
+   - 병렬 부분 읽기의 결과·진단은 키 순으로 정렬해 완료 순서와 무관하게 한다.
+
+10. **경로**(A2a, 리뷰):
+    - 논리 경로 파싱은 4.2절 규칙을 순서대로 판정하고(앞 `/` → 구분자·빈 구성 요소 → 마운트 → 구성 요소마다 NFC 정규화 뒤 `ValidateNameComponent` → 전체 256 byte) 실패하면 `InvalidPath`와 이유(구성 요소 index·`NameComponentError`).
+    - OS 이름 대응: 색인 항목은 실제 OS 상대 이름(열거한 byte 그대로)을 보관하고, 있는 파일의 OS 경로는 색인에서 얻는다. 새로 만드는 파일은 NFC 이름으로 만든다. 열거한 이름이 NFC가 아니면 NFC로 바꿔 논리 경로를 만들되, 바이트로 비교하는 파일 시스템(Linux·NTFS)에서는 그 NFC 이름이 실제 파일을 가리키지 않으므로 `InvalidPath`로 남기고 색인하지 않는다(macOS는 NFD 저장이 정상이라 받는다). caseless 키가 같은 두 파일은 `DuplicatePath`(둘 다 진단, 경로 조회에서 뺀다 — ID 조회는 된다).
+    - 경로 상한: 논리 경로 256 byte(4.2절)가 프로젝트 기준 이식 가능한 상한이고, 절대 OS 경로(임시 접미사 `.<guid 36>.tmp` 41 byte 포함)는 플랫폼 상한으로 검사한다(Windows 긴 경로 32767 UTF-16 단위, macOS PATH_MAX 1024, Linux 4096 — 넘으면 `InvalidPath`).
+    - 프로젝트 탐색은 HostConfig `FindProjectFrom`을 쓴다(13절 `--project` 기본값).
+
+11. **색인**(A2b·A2d): 항목은 `{assetId, 논리 경로, key, OS 상대 이름, 대표 타입, 지문, 크기, 수정 시각, dependencies, tags, ImportRecord 요약, readOnly}`. 조회는 7절 목록이고 타입 상속 조회는 등록된 타입만 상속을 따르며 등록되지 않은 타입 id는 정확 일치만 한다(리뷰). 캐시는 7절 그대로 범위 읽기로 지문을 비교한다(리뷰 — 크기·수정 시각만 보는 UE `DiskCachedAssetData` 방식은 FAT 2초 해상도와 같은 크기 편집을 놓친다). 부분 읽기와 전체 읽기의 판정 관계는 시험 표로 둔다: 헤더·섹션 표·읽은 섹션의 손상은 같은 진단, Objects·Bulk 내용과 그 패딩의 손상은 부분 읽기 통과·열기 실패.
+
+12. **그 밖**(리뷰 권장): 다중 출력 임포트의 출력 경로는 `<주 출력 경로>_<출력 키>`(UE 다중 임포트의 접미 규칙)이고 충돌하면 임포트를 거부한다. 임포트 옵션의 텍스트 표기는 `ReflectionText`를 쓴다. 별칭이 있는 경로에 새 에셋을 만들거나 이동해 오면 그 경로가 점유된 것으로 보고 거부한다(UE redirector가 경로를 점유하는 것과 같다 — 별칭을 지운 뒤 쓴다). 고아 임시 파일(`*.rasset.<guid>.tmp`)은 잠금을 쥔 저장이 그 디렉터리에서, 잠금을 쥔 전체 검색(`asset-index-rebuild`)이 전체에서 지운다.
 
 ## 8. 동시성
 
@@ -860,7 +915,7 @@ nugget-gc --max-bytes=<n> --unused-days=<n>
 - 종료 코드: 0 성공(경고만 있어도 0), 1 실행 실패(진단은 표준 오류에 `<진단 코드>: <path>: <설명>` 한 줄씩 — 임포터가 거부한 옵션 값은 `InvalidImportOption`), 2 사용법 오류(모르는 명령·옵션, 같은 옵션 두 번, 값이 필요한 옵션에 값 없음, 위치 인자 수·조합 오류).
 - 쓰기 잠금(8절)을 잡는 명령: `asset-import`·`asset-reimport`·`asset-new`·`asset-set`·`asset-move`·`asset-duplicate`·`asset-delete`·`asset-fix-duplicate-id`·`asset-alias-remove`·`asset-alias-prune`·`asset-orphans-delete`·`asset-index-rebuild`(캐시 기록)·`asset-cook`(쿠킹 동안 에디터 패키지가 바뀌지 않게, 쿠킹 출력 보호). 나머지는 잠금 없이 읽는다(캐시는 읽기만).
 
-서비스 API(`AssetService`, AssetDatabase)는 명령과 1:1 함수이며 에디터가 나중에 같은 함수를 쓴다.
+서비스 API(`AssetService`, AssetDatabase)는 명령과 1:1 함수이며 에디터가 나중에 같은 함수를 쓴다. A2 명령은 그 서비스 API가 생기는 하위 단계에서 함께 더한다(7.1절 4 표).
 
 ## 14. 검증 시나리오
 
