@@ -251,7 +251,10 @@ internal static class BuildInfoTests
                      (NativePlatform.Windows, "clang version 21.1.6", Stl1452, "STL1000"),
                      (NativePlatform.MacOS, "Apple clang version 16.0.0 (clang-1600.0.26.6)", null, "minimum Apple clang"),
                      // Apple clang 번호와 업스트림 번호는 다른 계열이다: Homebrew LLVM 18은 Apple 최소 17이 아니라 업스트림 최소로 본다.
-                     (NativePlatform.MacOS, "Homebrew clang version 18.1.8", null, "minimum Clang")
+                     (NativePlatform.MacOS, "Homebrew clang version 18.1.8", null, "minimum Clang"),
+                     // 러너 이미지의 기본 NDK(27.3, clang 18.0.4)는 Android 최소 미만이다. 거부 문구는 고정 NDK를 안내한다.
+                     (NativePlatform.Android, "Android (12285214, +pgo, +bolt, +lto, +mlgo, based on r522817b) clang version 18.0.4 (d8003a456d14a3deb8054cdaa529ffbf02d9b262)",
+                         null, "android.ndk.version")
                  })
         {
             try

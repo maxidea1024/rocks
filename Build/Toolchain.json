@@ -12,6 +12,11 @@
   "clangFormat": {
     "version": "21.1.6"
   },
+  "android": {
+    "ndk": {
+      "version": "29.0.14206865"
+    }
+  },
   "clang": {
     "minimum": {
       "appleClang": 17,

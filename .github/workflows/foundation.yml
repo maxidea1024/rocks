@@ -51,6 +51,10 @@ jobs:
           global-json-file: global.json
       - name: Install verified native formatter
         run: ./Build/InstallFormatter.ps1
+      # The images default ANDROID_NDK_HOME to an NDK whose clang is below the Android minimum of Build/Toolchain.json; Rocks.Build.Tests
+      # cross-builds with the NDK, so select the pinned one (android.ndk.version).
+      - name: Select pinned Android NDK
+        run: ./Build/SelectAndroidNdk.ps1
       # Windows puts the leg's pinned LLVM first on PATH. The verified leg pairs LLVM 21.1.6 (same as local builds) with the MSVC 14.44
       # toolset that the image installs next to 14.52 (ROCKS_MSVC_TOOLSET above); STL 14.52 rejects Clang older than 22 (STL1000).
       - name: Install pinned LLVM (Windows)

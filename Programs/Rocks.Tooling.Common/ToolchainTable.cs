@@ -23,6 +23,9 @@ public static class ToolchainTable
     /// <summary>고정한 clang-format 버전이다(예: <c>21.1.6</c>). 서식 검사와 MetaCompiler가 이 버전만 받는다(<see cref="IsClangFormatVersion"/>).</summary>
     public static string ClangFormatVersion => Document.Value.RootElement.GetProperty("clangFormat").GetProperty("version").GetString()!;
 
+    /// <summary>CI가 쓰는 Android NDK 버전이다(<c>android.ndk.version</c>, 예: <c>29.0.14206865</c> — <c>Build/SelectAndroidNdk.ps1</c>가 고른다).</summary>
+    public static string AndroidNdkVersion => Document.Value.RootElement.GetProperty("android").GetProperty("ndk").GetProperty("version").GetString()!;
+
     /// <summary>
     /// clang-format <c>--version</c> 출력이 고정한 버전인지다. <c>version 21.1.6</c> 뒤가 공백·끝이어야 한다(<c>21.1.60</c>은 다른 버전이다).
     /// 서식 검사(FormatCheck)와 MetaCompiler(RMC3100)가 함께 쓴다.

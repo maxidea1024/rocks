@@ -28,8 +28,11 @@ public static class ToolchainCheck
 
         if (ToolchainTable.MinimumClangMajor(name, appleClang) is int minimum && major < minimum)
         {
+            string remedy = platform == NativePlatform.Android
+                ? $"use Android NDK {ToolchainTable.AndroidNdkVersion} (Build/Toolchain.json android.ndk.version) through ANDROID_NDK_HOME or --android-ndk"
+                : appleClang ? "install a newer Xcode" : "install a newer LLVM (Windows: pwsh Build/InstallLlvm.ps1)";
             throw new InvalidOperationException($"{(appleClang ? "Apple clang" : "Clang")} {version} is older than the minimum {(appleClang ? "Apple clang" : "Clang")} " +
-                $"{minimum} for {name} (Build/Toolchain.json); install a newer toolchain (Windows: pwsh Build/InstallLlvm.ps1).");
+                $"{minimum} for {name} (Build/Toolchain.json); {remedy}.");
         }
 
         if (stlHeader is not null && ToolchainTable.ParseStlClangMinimum(stlHeader) is int stl && major < stl)
