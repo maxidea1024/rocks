@@ -153,6 +153,7 @@ TEST(AssetDatabaseLock_SameProcess) {
 TEST(AssetDatabaseLock_OtherProcess) {
     // Android는 자식 프로세스를 시작하지 않는다(platform::Process — Unsupported).
     if constexpr (IsAndroid) {
+        printf("  skipped: no child processes on Android\n");
         return;
     }
 
@@ -188,7 +189,10 @@ TEST(AssetDatabaseLock_OtherProcess) {
         CHECK(lock.Acquire(layout, 0).Error() == ErrorCode::Busy);
         REQUIRE(child.Terminate());
         CHECK(child.Wait() == platform::WaitResult::Signaled);
-        CHECK(lock.Acquire(layout, 0));
+        // OS는 끝난 프로세스의 잠금을 풀지만 그 시점은 정하지 않는다(LockFileEx — 시스템 자원에
+        // 따름). 대기는 실패 상한으로만 쓴다.
+        constexpr uint32 ReleaseWaitMilliseconds = 60000;
+        CHECK(lock.Acquire(layout, ReleaseWaitMilliseconds));
     }
 }
 

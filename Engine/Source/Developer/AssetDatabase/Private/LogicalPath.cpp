@@ -97,6 +97,11 @@ Result<LogicalPath> LogicalPath::TryClone() const noexcept {
 }
 
 StringView LogicalPath::Mount() const noexcept {
+    // 옮겨 간 값은 텍스트가 비고 mountBytes_만 남는다 — 빈 view를 준다.
+    if (text_.View().IsEmpty()) {
+        return StringView();
+    }
+
     return StringView(text_.View().Data(), mountBytes_);
 }
 

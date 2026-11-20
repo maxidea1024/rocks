@@ -312,7 +312,11 @@ TEST(LogicalPath_CloneAndNames) {
     CHECK(moved.Text() == "/Game/A/B/C");
     CHECK(copy.Value().Text().IsEmpty() && copy.Value().Key().IsEmpty());
     CHECK(copy.Value().Name().IsEmpty() && copy.Value().Relative().IsEmpty());
-    CHECK(copy.Value().Directory().IsEmpty());
+    CHECK(copy.Value().Directory().IsEmpty() && copy.Value().Mount().IsEmpty());
+    // 옮겨 간 값의 복사도 빈 값이다.
+    auto emptyCopy = copy.Value().TryClone();
+    REQUIRE(emptyCopy);
+    CHECK(emptyCopy.Value().Text().IsEmpty() && emptyCopy.Value().Mount().IsEmpty());
 }
 
 namespace {
