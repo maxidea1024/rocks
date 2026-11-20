@@ -558,7 +558,7 @@ UE와 다른 점과 이유:
 6. **종료**(엔진 순서: BeginShutdown → client 종료 → World 파괴 → CompleteInFlightWork(Subsystem 역순 → hooks) → Subsystem 정리(역순) → 엔진 Registry 최종 GC → hook 정리):
    - `CompleteInFlightWork`: `AssetManager::Shutdown` — 아직 부르지 않은 callback·보류 명령에 `ShuttingDown`을 전달하고 로더가 진행 중 IO·worker를 기다린다(엔진의 "진행 중 비동기 작업 완료" 단계 계약). 결과는 엔진 Shutdown 결과로 보고된다.
    - `Deinitialize`: AssetManager 파괴 → loader worker·scheduler 종료 → IO 구성 종료 → AsyncIoContext 종료(4의 역순, 각 결과 기록).
-   - 계약: lease·티켓·scope·명령 handle 객체는 EngineAssets Subsystem 정리 전에 소멸해야 한다 — World가 쥔 것은 World 파괴가, `EngineClient` 구현은 `OnEngineShutdown`까지, `EngineLoopHooks`는 `CompleteInFlightWork`까지, EngineAssets에 의존하는 다른 Subsystem은 자기 Deinitialize(EngineAssets보다 먼저 불린다)까지 놓는다. 남으면 AssetManager 파괴 `platform::Fatal`(11.7절 6, 6.1절 종료 순서 계약). `AssetLease` 리플렉션 필드는 WorldOnly 클래스만 가진다(5.6절)라 엔진 Registry 객체는 lease를 필드로 쥐지 않는다.
+   - 계약: lease·티켓·scope·명령 handle 객체는 EngineAssets Subsystem 정리 전에 소멸해야 한다 — World가 쥔 것은 World 파괴가, `EngineClient` 구현은 `OnEngineShutdown`까지(`OnEngineStart`가 실패를 돌려주면 `OnEngineShutdown`이 불리지 않으므로 그 반환 전에 — 리뷰 2 권장), `EngineLoopHooks`는 `CompleteInFlightWork`까지, EngineAssets에 의존하는 다른 Subsystem은 자기 Deinitialize(EngineAssets보다 먼저 불린다)까지 놓는다. 남으면 AssetManager 파괴 `platform::Fatal`(11.7절 6, 6.1절 종료 순서 계약). `AssetLease` 리플렉션 필드는 WorldOnly 클래스만 가진다(5.6절)라 엔진 Registry 객체는 lease를 필드로 쥐지 않는다.
    - 버린 대안: AssetManager 파괴를 엔진 Registry 최종 GC 뒤로 미루는 hook — 엔진 종료 단계를 늘리고, 그 사이 회수되는 객체의 handle 소멸이 Subsystem 정리 뒤 상태를 건드린다.
 7. **Engine 변경**(작게, 공개 함수 둘과 표지 둘): `bool Engine::IsInFrame() const`(게임 스레드 — `RunFrame` 전체 표지, 5), `config::ConfigContext* Engine::Settings() const`(빌린 설정 문맥 — 없으면 null, 3), `Engine::Shutdown` 재진입 Busy(초기화 중 — Subsystem Initialize·client 시작 함수·초기화 실패 정리와 그 안의 callback — 이나 종료 단계 안 — 종료 hook·Subsystem·client 함수와 그 안에서 불린 callback, 예: `CompleteInFlightWork`나 초기화 실패 정리의 AssetManager 파괴가 전달한 `ShuttingDown` callback — 에서 부르면 종료 단계를 돌아 바깥 호출(Initialize·Shutdown)이 쓰는 상태를 지우므로 거절한다. 리뷰 두 번에서 찾았다 — 그 전에는 callback 안 재종료가 정리 중인 AssetManager에 닿아 Fatal이었다).
 8. **시험**(EngineTests `EngineAssets/Tests` — 14.1.9절 대조표, 시간·경쟁에 기대지 않는다):
@@ -1369,11 +1369,11 @@ A1d 상태(2026-11-21): **구현**. 완료 조건 넷을 모두 갖췄다. 빠�
 - 구현 중 발견해 설계를 고친 것: CVar 첫 마디 `asset`은 기본 영역 표에 없어 등록이 거부됐다(등록 함수가 영역을 더한다). 설정 문맥이 없으면 CVar 읽기가 Fatal이라 Initialize가 먼저 거부한다. 프레임 안 Pump 실패는 되돌아오지 않아 회복 요약을 뺐다. Discard 객체를 게임 코드가 쥔 채 cycle이 끝나면 다음 Discard까지 회수되지 않는 빈 곳이 있어 UE 주기 수집처럼 재시도 시간(`asset.gc.retry_seconds`, 기본 60 s)을 더했다. `DrainRetired` 분기는 에셋 Registry에 회수 보유가 없어 닿을 수 없어 빼고 A5로 넘겼다.
 - 리뷰(1회 — 미충족) 뒤 고친 것: 콜백 안 엔진 재종료가 Fatal로 끝나던 경로(`Engine::Shutdown` 재진입 Busy), 실행 파일 경로를 진입점 캡처(`ProcessCommandLine`)에서 얻기(4096 byte 버퍼 OS 조회 제거), 모르는 플랫폼의 기본 프로파일을 빌드 오류로(`static_assert`), `asset.io.workers`가 Windows IOCP에서 무시됨을 설명, 로더 worker 수 관측(`loaderWorkers`), 그리고 끝 상태 단언을 강화하다 찾은 `ReleaseRetired` 할당 실패 뒤 GC 요청 누락(`AssetManagerPumpResult::releasedPackages`로 GC를 건다 — 11.7절 3).
 
-A1e 상태(2026-11-21): **구현, 리뷰 2회 반영**(재판정 대기). 완료 조건:
+A1e 상태(2026-11-21): **완료**(리뷰 3회 — 미충족 2회 반영 뒤 충족). 완료 조건:
 - 요구 대조표(14.1.9): 시험 없는 항목 0, 정의된 시험 28개를 모두 인용
 - 조합: 초기화 12개·GC 16개·허가 4개·종료 4개 전부
 - coverage(14.1.10): 닿지 않은 곳은 모두 근거
-- 빠진 시험 관점 리뷰어 판정: 1회 미충족 → 반영, 2회 미충족(초기화 중 재종료 1건) → 반영, 재판정 대기
+- 빠진 시험 관점 리뷰어 판정: 1회 미충족 → 반영, 2회 미충족(초기화 중 재종료 1건) → 반영, 3회 **충족**
 
 ## 15. PNG 디코더 범위
 

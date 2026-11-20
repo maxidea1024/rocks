@@ -24,9 +24,10 @@
 //   LoadTicket ticket = assets.RequestAsset(request).Value();
 //
 // 종료 계약(11.8절 6): lease·티켓·scope·명령 handle 객체는 이 Subsystem의 정리 전에 소멸해야 한다 —
-// World가 쥔 것은 World 파괴가, EngineClient는 OnEngineShutdown까지, EngineLoopHooks는
-// CompleteInFlightWork까지, 이 Subsystem에 의존하는 다른 Subsystem은 자기 Deinitialize까지 놓는다.
-// 남으면 AssetManager 파괴가 platform::Fatal이다.
+// World가 쥔 것은 World 파괴가, EngineClient는 OnEngineShutdown까지(OnEngineStart가 실패를 돌려주면
+// OnEngineShutdown이 불리지 않으므로 그 반환 전에), EngineLoopHooks는 CompleteInFlightWork까지, 이
+// Subsystem에 의존하는 다른 Subsystem은 자기 Deinitialize까지 놓는다. 남으면 AssetManager 파괴가
+// platform::Fatal이다.
 namespace rocks {
 
 namespace config {
