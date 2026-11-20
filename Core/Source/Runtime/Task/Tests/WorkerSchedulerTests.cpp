@@ -1,7 +1,9 @@
 #include <TestSupport/Test.h>
 #include <TestSupport/NFailAllocator.h>
 #include <Core/Memory/SystemAllocator.h>
+#include <Platform/Atomics.h>
 #include <Platform/Clock.h>
+#include <Platform/Sync.h>
 #include <Task/AsyncIoEvent.h>
 #include <Task/WorkerScheduler.h>
 
@@ -954,6 +956,105 @@ TEST(WorkerSchedulerEventMoveAssignAndOutOfMemory) {
         CHECK(scheduler.Stats().reservedSubmissions == 0);
         REQUIRE(scheduler.Shutdown());
     }
+    CHECK(system.Stats().liveAllocations == 0);
+}
+
+namespace {
+
+// 이 스레드가 마지막으로 알린 것이 "쉰다"인지와, 쉰다고 알린 적이 있는지다.
+thread_local bool threadMarkedIdle = false;
+thread_local bool threadCountedIdle = false;
+
+// worker의 쉬는 표시를 세는 allocator다(할당은 상위로 넘긴다).
+class IdleMarkAllocator final : public Allocator {
+public:
+    explicit IdleMarkAllocator(Allocator& backing) noexcept : backing_(backing) {
+    }
+
+    Result<void*> Allocate(usize bytes, usize alignment, uint32 tag = 0) noexcept override {
+        return backing_.Allocate(bytes, alignment, tag);
+    }
+
+    Result<void> Deallocate(void* address) noexcept override {
+        return backing_.Deallocate(address);
+    }
+
+    void MarkThreadIdle() noexcept override {
+        threadMarkedIdle = true;
+        LockGuard lock(mutex_);
+        ++idleMarks_;
+        if (!threadCountedIdle) {
+            threadCountedIdle = true;
+            ++idleThreads_;
+            changed_.NotifyAll();
+        }
+    }
+
+    void MarkThreadActive() noexcept override {
+        threadMarkedIdle = false;
+        LockGuard lock(mutex_);
+        ++activeMarks_;
+    }
+
+    // 서로 다른 스레드 count개가 쉰다고 알릴 때까지 기다린다.
+    void WaitForIdleThreads(uint32 count) noexcept {
+        LockGuard lock(mutex_);
+        while (idleThreads_ < count) {
+            (void)changed_.Wait(mutex_);
+        }
+    }
+
+    uint64 IdleMarks() noexcept {
+        LockGuard lock(mutex_);
+        return idleMarks_;
+    }
+
+    uint64 ActiveMarks() noexcept {
+        LockGuard lock(mutex_);
+        return activeMarks_;
+    }
+
+private:
+    Allocator& backing_;
+    Mutex mutex_;
+    ConditionVariable changed_;
+    uint64 idleMarks_ = 0;
+    uint64 activeMarks_ = 0;
+    uint32 idleThreads_ = 0;
+};
+
+} // namespace
+
+// worker는 작업이 없어 막히는 대기 앞에서 allocator에 쉰다고 알리고, 깨어나면 다시 쓴다고 알린 뒤에
+// 작업을 돌린다(Allocator::MarkThreadIdle·MarkThreadActive — 그 사이에 다른 스레드의 TrimMemory가
+// worker의 스레드 캐시를 비울 수 있다).
+TEST(WorkerSchedulerWorkersMarkIdleAroundTheirWait) {
+    constexpr uint32 Workers = 4;
+    SystemAllocator system;
+    {
+        IdleMarkAllocator allocator(system);
+        WorkerScheduler scheduler(allocator);
+        REQUIRE(scheduler.Start({Workers, 32, 8}));
+        // 작업이 없으므로 모든 worker가 대기에 들어가며 쉰다고 알린다.
+        allocator.WaitForIdleThreads(Workers);
+        // 0·1 값이다(본문이 쓰고 이 스레드가 읽는다).
+        uint32 idleInBody = 1;
+        auto body = Body::TryCreate(allocator, [&idleInBody](WorkerTaskContext&) noexcept {
+            AtomicStore<MemoryOrder::Release>(&idleInBody,
+                                              threadMarkedIdle ? uint32{1} : uint32{0});
+        });
+        REQUIRE(body);
+        auto submitted = scheduler.Submit(Move(body.Value()));
+        REQUIRE(submitted);
+        CheckTerminal(submitted.Value(), WorkerTaskState::Succeeded);
+        // 본문은 "다시 쓴다"고 알린 뒤에 돈다.
+        CHECK(AtomicLoad<MemoryOrder::Acquire>(&idleInBody) == 0);
+        REQUIRE(scheduler.Shutdown());
+        // worker가 모두 끝났다: 대기마다 두 표시가 짝을 이뤘다.
+        CHECK(allocator.IdleMarks() >= Workers);
+        CHECK(allocator.IdleMarks() == allocator.ActiveMarks());
+    }
+
     CHECK(system.Stats().liveAllocations == 0);
 }
 } // namespace worker_scheduler_tests_file

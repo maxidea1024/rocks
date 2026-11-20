@@ -873,7 +873,16 @@ void WorkerScheduler::RunWorker(void* raw) noexcept {
                     CancelStalledEvents(state)) {
                     continue;
                 }
+                // 막히는 대기 앞뒤에서 이 스레드가 쉰다는 것을 allocator에 알린다: 그 사이에 다른
+                // 스레드의 TrimMemory가 이 worker의 스레드 캐시를 비울 수 있다(Allocator.h). 앞의
+                // 표시는 gate를 쥔 채 부른다 — 풀었다 잡으면 그 사이에 온 신호를 놓친다(막히지 않는
+                // 계약이다). 뒤의 표시는 막힐 수 있어서 gate를 풀고 부른다: 깨어난 worker는 바로
+                // 아래에서 gate를 쥐고 작업을 다시 훑으므로 그 사이의 변화를 놓치지 않는다.
+                state.allocator->MarkThreadIdle();
                 ROCKS_ASSERT(state.changed.Wait(state.gate) != platform::WaitResult::Failed);
+                state.gate.Unlock();
+                state.allocator->MarkThreadActive();
+                state.gate.Lock();
             }
         }
         {
