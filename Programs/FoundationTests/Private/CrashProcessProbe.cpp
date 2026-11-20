@@ -326,7 +326,8 @@ bool configureFailed = false;
 
 bool IsJobMode(const char* mode) noexcept {
     return CrashModeIs(mode, "job-kill-on-close") ||
-           CrashModeIs(mode, "job-kill-on-close-breakaway");
+           CrashModeIs(mode, "job-kill-on-close-breakaway") ||
+           CrashModeIs(mode, "job-kill-on-close-breakaway-blocked");
 }
 
 } // namespace
@@ -369,7 +370,12 @@ void ConfigureCrashProbe(const char* mode, const char* directory,
     // 프로세스가 끝나면 job이 닫혀 job 안 프로세스가 끝난다. breakaway를 막은 job은 도우미가 job
     // 안에 남고, 허락한 job은 도우미만 빠져나가고 VA clone은 job에 남을 수 있다(부모는 어느 쪽이든
     // 기본 덤프가 끝날 때까지 기다려야 한다).
-    if (IsJobMode(mode) && !EnterKillOnCloseJob(CrashModeIs(mode, "job-kill-on-close-breakaway"))) {
+    // -blocked 변형은 breakaway를 막은 바깥 job에 먼저 들어간다(시험 실행기가 그런 job 안에 있는 CI
+    // 러너 조건, 설계 17절). 안쪽 job이 허락해도 도우미는 job 안에 남는다.
+    const bool blocked = CrashModeIs(mode, "job-kill-on-close-breakaway-blocked");
+    const bool allowBreakaway = blocked || CrashModeIs(mode, "job-kill-on-close-breakaway");
+    if (IsJobMode(mode) &&
+        ((blocked && !EnterBreakawayBlockingJob()) || !EnterKillOnCloseJob(allowBreakaway))) {
         configureFailed = true;
     }
 }

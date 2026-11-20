@@ -309,4 +309,19 @@ bool EnterKillOnCloseJob(bool allowBreakaway) noexcept {
     return true;
 }
 
+bool EnterBreakawayBlockingJob() noexcept {
+    const HANDLE job = CreateJobObjectW(nullptr, nullptr);
+    if (job == nullptr) {
+        return false;
+    }
+
+    // 제한을 걸지 않은 새 job은 breakaway를 허락하지 않는다(JOB_OBJECT_LIMIT_BREAKAWAY_OK 없음).
+    if (!AssignProcessToJobObject(job, GetCurrentProcess())) {
+        CloseHandle(job);
+        return false;
+    }
+
+    return true;
+}
+
 } // namespace rocks::test

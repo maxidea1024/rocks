@@ -69,6 +69,12 @@ bool InstallCrashHelperTestMode() noexcept;
 // 시험용이다. Windows만이고 다른 플랫폼은 false다.
 bool EnterKillOnCloseJob(bool allowBreakaway) noexcept;
 
+// 이 프로세스를 breakaway를 허락하지 않는 job에 넣는다(제한 없음, KILL_ON_JOB_CLOSE 없음, 중첩
+// job). 그 안에서 만든 job이 breakaway를 허락해도 CREATE_BREAKAWAY_FROM_JOB은 실패한다(바깥 job이
+// 막는 CI 러너 조건을 재현한다 — Docs/Design/CrashHandlingAndLaunch.ko.md 17절). job 핸들은 일부러
+// 닫지 않는다. Windows만이고 다른 플랫폼은 false다.
+bool EnterBreakawayBlockingJob() noexcept;
+
 // 처리되지 않은 예외 filter 교환 확인(platform::CheckUnhandledCrashFilter) 시험용이다(Windows).
 // Replace는 시험 filter로 바꾸고 바꾸기 전 filter를 기억한다. IsCurrent는 시험 filter가 지금
 // filter인지 교환으로 확인한다(확인 뒤 그대로 둔다). Restore는 기억한 filter로 되돌린다. 다른

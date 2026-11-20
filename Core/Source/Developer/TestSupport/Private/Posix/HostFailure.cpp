@@ -118,4 +118,8 @@ bool EnterKillOnCloseJob(bool) noexcept {
     return false;
 }
 
+bool EnterBreakawayBlockingJob() noexcept {
+    return false;
+}
+
 } // namespace rocks::test
