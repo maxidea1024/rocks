@@ -207,6 +207,7 @@ public static class InstalledSdk
         }
 
         BuildCommand.Timing(options);
+        bool requireVerified = ToolchainCheck.RequireVerified(options.GetValueOrDefault(ToolchainCheck.RequireVerifiedOption));
 
         var sdk = PathSpelling.OnDisk(Path.GetFullPath(options["sdk"]));
         var project = PathSpelling.OnDisk(Path.GetFullPath(options["project"]));
@@ -224,9 +225,10 @@ public static class InstalledSdk
         BuildCommand.WritePendingReport(output, "Current game build has not completed.");
         var status = "FAIL";
         string? failure = null;
+        var toolchainRecord = new GameToolchainRecord();
         try
         {
-            var result = await BuildGameCoreAsync(options, cancellationToken);
+            var result = await BuildGameCoreAsync(options, requireVerified, toolchainRecord, cancellationToken);
             status = result == 0 ? "PASS" : "FAIL";
             return result;
         }
@@ -244,9 +246,20 @@ public static class InstalledSdk
                 finishedUtc = DateTime.UtcNow,
                 sdk,
                 project,
+                toolchainVerified = toolchainRecord.Verified,
+                stlClangCheck = toolchainRecord.StlClangCheck,
                 error = failure
             }, BuildCommand.JsonOptions));
         }
+    }
+
+    // 게임 evidence에 남길 도구 모음 확인 결과다(build-evidence와 같은 toolchainVerified·stlClangCheck — Docs/Design/ClangVersionSupport.ko.md
+    // 6.2절). discovery 전에 실패하면 비어 있다.
+    private sealed class GameToolchainRecord
+    {
+        public bool? Verified { get; set; }
+
+        public string? StlClangCheck { get; set; }
     }
 
     public static DateTime BeginGameEvidence(string output, string sdk, string project)
@@ -264,7 +277,8 @@ public static class InstalledSdk
         return started;
     }
 
-    private static async Task<int> BuildGameCoreAsync(Dictionary<string, string> options, CancellationToken cancellationToken)
+    private static async Task<int> BuildGameCoreAsync(Dictionary<string, string> options, bool requireVerified, GameToolchainRecord toolchainRecord,
+        CancellationToken cancellationToken)
     {
         // 받은 경로는 디스크에 있는 철자로 맞춘다(Docs/Design/UnityBuildPch.ko.md 4.4절).
         var sdk = PathSpelling.OnDisk(Path.GetFullPath(options["sdk"]));
@@ -282,7 +296,18 @@ public static class InstalledSdk
             Console.WriteLine(notice);
         }
 
-        BuildCommand.CheckToolchain(toolchain, options);
+        // 확인 결과를 evidence 기록에 먼저 남긴 뒤 검증 요구를 적용한다(실패도 game-build-evidence.json에 FAIL로 남는다).
+        toolchainRecord.Verified = toolchain.ToolchainVerified;
+        toolchainRecord.StlClangCheck = toolchain.StlClangCheck;
+        if (ToolchainCheck.Enforce(toolchain, requireVerified) is string rejected)
+        {
+            throw new ArgumentException(rejected);
+        }
+
+        if (!requireVerified && ToolchainCheck.Notice(toolchain) is string unverified)
+        {
+            Console.WriteLine(unverified);
+        }
 
         var manifest = Verify(sdk, configuration, toolchain);
         Directory.CreateDirectory(output);

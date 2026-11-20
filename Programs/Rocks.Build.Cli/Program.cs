@@ -142,7 +142,13 @@ namespace Rocks.Build.Cli
                 Console.WriteLine(notice);
             }
 
-            CheckToolchain(toolchain, options);
+            // 옵션 값은 출력을 만들기 전에 확인하고, 미검증 실패는 아래 evidence를 시작한 뒤 FAIL로 남긴다(6.2절).
+            bool requireVerified = ToolchainCheck.RequireVerified(options.GetValueOrDefault(ToolchainCheck.RequireVerifiedOption));
+            if (!requireVerified && ToolchainCheck.Notice(toolchain) is string unverified)
+            {
+                Console.WriteLine(unverified);
+            }
+
             var context = new BuildContext(root, output, toolchain.Platform, toolchain.Architecture, configuration);
             var rulesPath = options.GetValueOrDefault("rules", HostTool(root, "Rocks.Engine.Rules"));
             var rules = RuleLoader.Load(rulesPath, targetName, context);
@@ -160,7 +166,14 @@ namespace Rocks.Build.Cli
             Directory.CreateDirectory(Path.Combine(output, "Generated"));
             var evidence = await BuildEvidence.StartAsync(root, Path.GetRelativePath(Path.Combine(root, "out"), output), toolchain.Environment);
             evidence.SetConfiguration(configuration.ToString(), targetName, configuration == NativeConfiguration.Asan ? "address" : "none", toolchain.CompilerPath, toolchain.Identity);
-            evidence.SetToolchainVerified(toolchain.ToolchainVerified);
+            evidence.SetToolchainVerified(toolchain.ToolchainVerified, toolchain.StlClangCheck);
+            if (ToolchainCheck.Enforce(toolchain, requireVerified) is string rejected)
+            {
+                await Console.Error.WriteLineAsync(rejected);
+                await evidence.FinishAsync(rejected);
+                return 1;
+            }
+
             try
             {
                 // 모듈 소유 메타데이터의 배치(생성 include 디렉터리·명세 경로·검증)를 타깃에서 도달하는 모듈에 대해 정한다.
@@ -447,27 +460,8 @@ namespace Rocks.Build.Cli
             };
 
         // --require-verified-toolchain on|off(기본 off): on이면 검증 목록(Build/Toolchain.json) 밖의 컴파일러로 빌드하지 않는다(CI — Docs/Design/
-        // ClangVersionSupport.ko.md 6.2절). off면 한 줄 알리고 진행한다(build-evidence에 toolchainVerified: false).
-        internal const string RequireVerifiedToolchainOption = "require-verified-toolchain";
-
-        internal static void CheckToolchain(NativeToolchain toolchain, Dictionary<string, string> options)
-        {
-            bool required = options.GetValueOrDefault(RequireVerifiedToolchainOption, "off") switch
-            {
-                "on" => true,
-                "off" => false,
-                _ => throw new ArgumentException($"{RequireVerifiedToolchainOption} must be on or off.")
-            };
-            if (ToolchainCheck.Notice(toolchain) is string notice)
-            {
-                if (required)
-                {
-                    throw new ArgumentException(notice + $"; --{RequireVerifiedToolchainOption} on accepts only verified toolchains.");
-                }
-
-                Console.WriteLine(notice);
-            }
-        }
+        // ClangVersionSupport.ko.md 6.2절). off면 한 줄 알리고 진행한다(build-evidence에 toolchainVerified: false). 판정은 ToolchainCheck가 한다.
+        internal const string RequireVerifiedToolchainOption = ToolchainCheck.RequireVerifiedOption;
 
         internal static Dictionary<string, string> Parse(string[] args)
         {

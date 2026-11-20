@@ -274,7 +274,8 @@ internal static class Executor
 
             for (int index = 0; index < outputs.Count; ++index)
             {
-                File.Move(staged[index], outputs[index], true);
+                // 대상을 다른 핸들(백신·인덱서)이 열고 있어도 삭제 공유면 바꾸고, 실패하면 경로를 담아 알린다(FileReplace).
+                FileReplace.Move(staged[index], outputs[index]);
                 published.Add(outputs[index]);
             }
         }
@@ -284,7 +285,7 @@ internal static class Executor
             {
                 if (backups.TryGetValue(output, out string? backup))
                 {
-                    File.Move(backup, output, true);
+                    FileReplace.Move(backup, output);
                 }
                 else
                 {

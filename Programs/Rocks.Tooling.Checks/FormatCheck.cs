@@ -63,8 +63,7 @@ public static class FormatCheck
     {
         var version = await ProcessRunner.RunAsync(new(formatter, ["--version"], root, environment,
             Timeout: TimeSpan.FromSeconds(15)), cancellationToken);
-        if (version.ExitCode != 0 || !Regex.IsMatch(version.StdOut,
-            $@"version\s+{Regex.Escape(RequiredVersion)}(?:\s|$)", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)))
+        if (version.ExitCode != 0 || !ToolchainTable.IsClangFormatVersion(version.StdOut))
         {
             throw new InvalidOperationException("Rocks requires clang-format " + RequiredVersion);
         }

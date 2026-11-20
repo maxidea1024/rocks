@@ -14,13 +14,16 @@
   },
   "clang": {
     "minimum": {
-      "Windows": 21,
-      "MacOS": 17,
-      "Android": 20
+      "appleClang": 17,
+      "llvm": {
+        "Windows": 21,
+        "MacOS": 21,
+        "Android": 20
+      }
     },
     "verified": {
-      "Windows": ["21.1.6", "22.1.8"],
-      "MacOS": ["17.0.0"]
+      "Windows": ["clang version 21.1.6", "clang version 22.1.8 (ca7933e47d3a3451d81e72ac174dcb5aa28b59d1)"],
+      "MacOS": ["Apple clang version 17.0.0 (clang-1700.0.13.5)"]
     }
   }
 }

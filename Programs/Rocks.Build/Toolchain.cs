@@ -169,6 +169,7 @@ public static class NativeToolchains
             (compilerDigest, linkerDigest) = await MacBinaryDigestsAsync(compilerPath, xcrun!, environment, cancellationToken);
         }
 
+        (string? stlHeader, string? stlProblem) = windows ? ReadStlHeader(EnvironmentValue("VCToolsInstallDir")) : (null, null);
         var abi = new List<string> { "rocks-native-abi-v2", windows ? "Windows" : "MacOS", RuntimeInformation.ProcessArchitecture.ToString() };
         abi.AddRange(AbiVersionLines(version.StdOut, compilerVersion, triple));
         abi.AddRange(sdkAbi);
@@ -187,8 +188,8 @@ public static class NativeToolchains
             FingerprintPaths = paths.Distinct(PathComparer).ToArray(),
             RuntimeFiles = runtime,
             CompilerVersion = compilerVersion,
-            ToolchainVerified = ToolchainCheck.Verify(windows ? NativePlatform.Windows : NativePlatform.MacOS, compilerVersion,
-                windows ? ReadStlHeader(EnvironmentValue("VCToolsInstallDir")) : null),
+            ToolchainVerified = ToolchainCheck.Verify(windows ? NativePlatform.Windows : NativePlatform.MacOS, compilerVersion, stlHeader),
+            StlClangCheck = windows ? ToolchainCheck.StlStatus(stlHeader, stlProblem) : null,
             TargetTriple = triple,
             CompilerDigest = compilerDigest,
             LinkerDigest = linkerDigest,
@@ -289,16 +290,24 @@ public static class NativeToolchains
         };
     }
 
-    // 고른 MSVC 도구 모음의 STL 설정 헤더(yvals_core.h) 본문이다(도구 모음 경로를 모르거나 파일이 없으면 null — 확인을 건너뛴다).
-    private static string? ReadStlHeader(string toolsInstallDirectory)
+    // 고른 MSVC 도구 모음의 STL 설정 헤더(yvals_core.h) 본문이다. 읽지 못하면(도구 모음 경로를 모름, 파일 없음, 입출력 오류) 본문 대신 이유를
+    // 돌려준다 — discovery를 실패시키지 않고 build-evidence의 stlClangCheck에 남긴다(Docs/Design/ClangVersionSupport.ko.md 6.2절).
+    private static (string? Text, string? Problem) ReadStlHeader(string toolsInstallDirectory)
     {
         if (toolsInstallDirectory.Length == 0)
         {
-            return null;
+            return (null, "VCToolsInstallDir is not set");
         }
 
         string header = Path.Combine(toolsInstallDirectory, "include", "yvals_core.h");
-        return File.Exists(header) ? File.ReadAllText(header) : null;
+        try
+        {
+            return File.Exists(header) ? (File.ReadAllText(header), null) : (null, header + " does not exist");
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            return (null, $"cannot read {header}: {error.Message}");
+        }
     }
 
     /// <summary>
