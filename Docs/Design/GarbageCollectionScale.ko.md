@@ -51,16 +51,17 @@ UE 소스는 설계 사실의 대조에만 쓰고 코드를 옮기지 않는다.
 
 남은 한계(빠짐없이):
 
-- **제품 연결은 Sandbox 엔진 호스트까지다(개정 15 — 18.10절).** 실행 진입점(Launch)이 `SystemAllocator` 위에 `BinnedAllocator`를 하나 두고 범용 할당자(`ApplicationContext::DefaultAllocator()`)로 내주며, Sandbox의 엔진 호스트가 그것을 엔진에 넘긴다. Commandlet과 벤치 도구는 아직 `SystemAllocator`를 쓴다(후속). `Trim`을 부르는 시점(레벨을 내린 뒤 등)은 아직 어디에도 없다 — 빈 slab은 보관 한도(4 MiB)를 넘는 만큼만 그때그때 풀린다. 큰 블록(8 KB 초과)은 원장을 두 번 지난다(`BinnedAllocator`의 큰 할당 원장과 상위 `SystemAllocator`의 원장).
-- **ASan 미실행.** `BinnedAllocator`의 수동 poison 경로는 Asan 구성의 구문 검사와 리뷰의 경로 추적만 거쳤다. 실행한 적이 없고, CI의 AddressSanitizer 단계도 다른 세션의 실패로 그 앞에서 멈춰 아직 돌지 못했다.
+- **제품 연결은 Sandbox 엔진 호스트까지다(개정 15 — 18.10절).** 실행 진입점(Launch)이 `SystemAllocator` 위에 `BinnedAllocator`를 하나 두고 범용 할당자(`ApplicationContext::DefaultAllocator()`)로 내주며, Sandbox의 엔진 호스트가 그것을 엔진에 넘긴다. Commandlet·벤치 도구와 게임 템플릿(`Templates/Game/Foundation/Source/Main.cpp` — 엔진 호스트 종류인데 `context.SystemAllocator()`를 쓴다)은 아직 `SystemAllocator`를 쓴다(후속 — 템플릿을 바꾸면 통합 빌드 시험을 돌려야 한다). `Trim`을 부르는 시점(레벨을 내린 뒤 등)은 아직 어디에도 없다 — 빈 slab은 보관 한도(4 MiB)를 넘는 만큼만 그때그때 풀린다. 큰 블록(8 KB 초과)은 원장을 두 번 지난다(`BinnedAllocator`의 큰 할당 원장과 상위 `SystemAllocator`의 원장).
+- **ASan은 로컬에서 돌리지 않았다.** `BinnedAllocator`의 수동 poison 경로는 Windows CI의 AddressSanitizer 단계(run 44656731971, dd157ca6 — Asan 구성 Foundation)에서 처음 실행돼 통과했다(메인 세션 확인: 2,659개 가운데 실패 0 — `CoreBinned` 27·`GcSoak` 9·`ThreadExitSlot` 4 포함. 그 단계 자체는 다른 세션의 크래시 시험 둘로 실패했다). macOS에서는 그 단계가 아직 돌지 못했다(앞 단계의 다른 세션 실패). 그 앞의 efd940ac에서는 같은 단계가 `TryMarkReturned`의 비교 교환을 use-after-poison으로 잡았다 — 중복 반환 경쟁 시험에서 한 스레드가 블록을 닫은 뒤 다른 스레드가 계측되는 원자 연산으로 읽었다. 그 코드와 시험은 개정 13에서 없어졌다. 개정 15(AL6)의 코드는 그 단계에서 아직 돌지 않았다.
 - **다른 스레드 캐시의 `Trim`은 후속.** `Trim`은 호출 스레드의 캐시만 비운다. 쉬는 스레드가 쥘 수 있는 상한은 스레드 × 인스턴스당 2,361,856 byte(`BinnedAllocator::MaxThreadCacheBytes`)이고, 그 블록이 붙드는 commit은 가장 나쁜 경우 195 MiB다(18.8절).
 - **스레드 종료 순서의 남는 경우**(18.4절). 할당자의 종료 hook이 지나간 뒤 같은 스레드의 뒤 순번 종료 정리가 allocator를 쓰는 경우와, 스레드의 첫 allocator 사용이 자기 종료 정리 안인 경우 — 기록 하나가 새고 그 캐시는 인스턴스 파괴 때 회수된다(해제된 메모리를 만지지는 않는다). fiber에서는 `ThreadExitSlot`을 쓰지 않는다.
 - **겹친 중복 반환**(18.4절). 같은 블록을 두 스레드가 같은 순간에 반환하면 둘 다 성공으로 돌아올 수 있다. 그 블록을 두 번째로 내줄 때 Fatal로 잡지만, 그 사이에 다시 반환되거나 slab으로 돌아가면 놓치고 slab 계수가 어긋날 수 있다. 오용 검출은 그 slab의 decommit·재사용과 겹치면 보장되지 않는다(한계 2).
 - **GC churn 회수의 이득은 작다**(gate A7). 일반 그래프의 churn 회수는 `BinnedAllocator`에서 플랫폼 할당의 0.89배다(개정 13 구현 — 비교 교환 구현에서는 같은 수준이었다). `SystemAllocator`에 견주면 0.37배다(실험 25.10절). 할당자만 바꿔 잰 객체 비교에서는 churn 회수 0.81배·종료 회수 0.75배이고, 큰 이득은 뜨거운 쌍·여러 스레드 쪽이다.
 - **측정의 한계.** 측정은 다른 세션의 빌드 부하가 드나드는 기계에서 했다(판정에는 round의 최솟값·중앙값을 썼고, 마지막 재측정 때의 부하는 30% 안팎이었다). gate A5(8 스레드 배수)는 경계다. 실제 엔진의 객체 크기 분포는 재지 않았다(메모리 +6.8%는 벤치의 객체 크기에서의 값이다). 3M 객체 시나리오는 재지 않았다.
 - **플랫폼.** 이 기계는 Windows만 빌드한다. macOS는 CI로, Android는 NDK 구문 검사로만 봤다.
+- **검증의 한계.** origin을 충돌 없이 병합한 뒤에는 다시 검증하지 않는다(작업 규칙). 양쪽이 같은 고정 크기 등록부에 더하는 변경은 충돌 없이도 깨진다 — 시험 실행기의 자식 probe 등록부(8칸)에서 AL5의 probe와 다른 세션의 probe가 병합으로 만나 아홉이 됐고, EngineTests의 시험 넷이 dd157ca6부터 실패했다. AL6의 전체 실행에서 찾아 고쳤다(16칸). 같은 실행에서 엔진 단계 크래시 시험의 자식 하나가 120초 시한에 걸린 것을 한 번 봤다 — 재현되지 않았고 멈춘 자리를 가르지 못했다(실험 25.10절).
 - **4절 gate 가운데 남은 것.** 일반 그래프의 STW 병렬 표식(×8 16.7–17.2ms — 목표 15ms의 1.1–1.15배), 증분 Step p99(부하 아래 판정 불가 — 재측정 필요), Slot 정보 합계(hot 64B는 충족, 전체 192.3B — 11절 결정 5).
-- **리뷰의 후속 목록**(실험 25.9절): 겹친 중복 반환의 slab 경로 보강, 캐시 줄 크기, 종료 hook의 전역 잠금 구간, 시험이 없는 경로 넷, `FlsGetValue`의 last-error 등.
+- **리뷰의 후속 목록**(실험 25.9·25.10절): 겹친 중복 반환의 slab 경로 보강, 캐시 줄 크기, 종료 hook의 전역 잠금 구간, 시험이 없는 경로, 엔진 시험의 변별력, 내장 진입의 파괴 경로 시험 등.
 
 ## 1. 결정 요약
 
@@ -678,7 +679,7 @@ GC 구현(`Core/Source/Runtime/ObjectRuntime/Private/`)을 기능별 파일로 �
 - 주기 간격의 실시간 기준(R3 결정)은 일시정지 중에도 수집을 멈추지 않는다. 일시정지 중 수집을 막아야 하는 앱은 `Incremental` 모드나 요청만 쓴다.
 - GC 전용 scheduler와 다른 작업 스레드의 코어 공유(17.4절)는 엔진 범용 작업 scheduler가 생길 때 정한다.
 
-## 18. 공용 할당자 (GC-S6, 8단계, 개정 7–13, 2026-11-20)
+## 18. 공용 할당자 (GC-S6, 8단계, 개정 7–15, 2026-11-20)
 
 6절 GC-S6의 상세 설계다. 코드는 Core(`Core/Source/Runtime/Core` Memory)이고 ObjectRuntime 전용 할당자는 두지 않는다. 다른 세션이 할당자를 맡고 있지 않음을 확인했다(2026-11-19: 원격·로컬 브랜치와 worktree, Core/Memory의 최근 변경은 FrameArena와 개명뿐). 이 절의 설계는 AL0–AL5로 구현하고 쟀다(18.9절 단계, 실험 25절).
 
@@ -774,7 +775,7 @@ UE 5.8.4의 작은 블록 할당자(`Runtime/Core` — `Public/HAL/MallocBinned2
 - **스레드 종료와 수명**(메인 세션 검토 F3). PlatformBase에는 스레드 종료를 알리는 기능이 없다(FLS·pthread key 소멸자를 쓰는 코드가 없음). `platform::Thread`로 만들지 않은 스레드(OS 스레드 풀, 외부 라이브러리)도 캐시를 받으므로 OS의 스레드별 소멸 hook이 필요하다.
   - PlatformBase에 `platform::ThreadExitSlot`을 더한다(`Platform/Thread.h`): 스레드별 포인터 칸 하나와, 값이 null이 아닌 스레드가 끝날 때 **그 스레드에서** 불리는 정리 함수다. Windows는 `FlsAlloc`의 callback, POSIX는 `pthread_key_create`의 소멸자다. API는 생성자(callback)·`IsValid()`·`Get()`·`Set(value)`이고 프로세스 수명 동안 유지한다(소멸자는 칸을 해제하지 않는다 — Windows `FlsFree`는 남은 값마다 callback을 부른다). OS가 칸을 주지 않으면 `IsValid()`가 거짓이고 그 스레드들은 캐시 없는 경로로 간다. `Thread::Join`은 이 정리가 끝난 뒤에 돌아온다(시험이 순서를 Join으로 만든다).
   - UE 5.8도 같은 장치를 쓴다(`Runtime/Core/Private/Windows/WindowsPlatformTLS.cpp` 104: `FlsAlloc(&OnThreadExit)`, 119–135: callback이 값을 먼저 지운다 — "clear the value otherwise this function will be called again"). Windows 구현(AL3): FLS callback은 값만 받으므로 칸마다 다른 trampoline을 건다(그래서 칸 수에 상한 `MaxThreadExitSlots` 8을 두고 POSIX도 같은 상한을 지킨다). trampoline은 그 스레드의 값을 먼저 지우고, 프로세스 종료 절차 중이면(`RtlDllShutdownInProgress`) 부르지 않고, 아니면 callback을 부른다. POSIX의 key 소멸자는 값을 지운 뒤에 불리고 `main` 반환·`exit`에서는 불리지 않으므로 두 플랫폼의 계약이 같다: callback 안에서 `Get()`은 null이고, 프로세스가 끝날 때는 불리지 않는다.
-  - OS 오류 값 보존(개정 15 — 리뷰 S1): `Get`·`Set`은 호출 스레드의 OS 오류 값(Windows last-error, POSIX `errno`)을 바꾸지 않는다. Windows의 `FlsGetValue`는 성공해도 last-error를 0으로 지운다(측정 — Windows 11 26200: 값이 있든 없든 `FlsGetValue` 뒤 last-error가 0, `FlsSetValue`는 성공하면 그대로). 할당자의 느린 경로(스레드의 첫 호출)가 이 조회를 지나므로, 제품에 연결하면 실패한 Win32 호출과 그 뒤의 `GetLastError` 사이에 할당이 끼어 오류 값이 지워질 수 있다. 그래서 Windows 구현이 호출 앞뒤로 last-error를 보존한다(읽기 하나와 쓰기 하나 — 느린 경로에만 든다). POSIX의 `pthread_getspecific`·`pthread_setspecific`은 성공할 때 `errno`를 바꾸지 않는다(시험이 고정한다).
+  - OS 오류 값 보존(개정 15 — 리뷰 S1): `Get`·`Set`은 호출 스레드의 OS 오류 값(Windows last-error, POSIX `errno`)을 바꾸지 않는다(성공하든 실패하든 — 두 구현 모두 호출 앞뒤로 저장·복원한다). Windows의 `FlsGetValue`는 성공해도 last-error를 0으로 지운다(측정 — Windows 11 26200: 값이 있든 없든 `FlsGetValue` 뒤 last-error가 0, `FlsSetValue`는 성공하면 그대로). 할당자의 느린 경로(스레드의 첫 호출)가 이 조회를 지나므로, 제품에 연결하면 실패한 Win32 호출과 그 뒤의 `GetLastError` 사이에 할당이 끼어 오류 값이 지워질 수 있다. 그래서 Windows 구현이 호출 앞뒤로 last-error를 보존한다(읽기 하나와 쓰기 하나 — 느린 경로에만 든다). POSIX의 `pthread_getspecific`·`pthread_setspecific`은 성공할 때 `errno`를 바꾸지 않지만 실패한 `pthread_setspecific`이 바꾸는 libc가 있어(리뷰 지적 — 확인하지는 못했다) POSIX 구현도 같은 모양으로 보존한다. 시험은 성공 경로와 유효하지 않은 칸을 본다(OS 호출이 실패하는 경로는 만들지 못한다).
   - 계약: callback은 짧은 정리(잠금, 메모리 반환)만 하고 스레드 생성·모듈 로드·다른 스레드 대기를 하지 않는다. 다른 TLS 소멸과의 순서는 정하지 않는다. 프로세스가 끝날 때는 불리지 않는다: POSIX는 `main` 반환·`exit`에서 key 소멸자를 부르지 않고, Windows는 종료를 부른 스레드에서 FLS callback을 부르지만 그때 다른 스레드는 이미 강제 종료돼 잠금을 쥔 채일 수 있어(정리 함수가 잠금을 기다리면 종료가 멈춘다) 구현이 걸러 낸다. 프로세스 수명과 같은 자원은 OS가 거둔다. `thread_local`(개정 12 — macOS CI에서 깨져 좁혔다): trivial한 `thread_local` 변수는 callback 안에서 읽고 쓸 수 있지만(접근은 된다) **그 스레드가 두었던 값이 남아 있다는 보장은 없다. callback은 인자로 받은 값만 믿는다.** 이 한 줄이 모든 플랫폼의 계약이고, 시험도 접근만 본다(쓰고 읽으면 쓴 값 — 두었던 값이 남았는지는 단언하지 않는다). 개정 11까지는 "읽고 쓸 수 있다"만 적고 시험이 값 유지를 단언했는데 Windows에서만 성립했다.
     - macOS(CI run 44636348775에서 확인 — callback이 읽은 값이 초기값. 원인은 소스로 확인: dyld `libdyld/ThreadLocalVariables.cpp`, libpthread `src/pthread_tsd.c`): 이미지의 `thread_local` 저장소가 pthread key의 값이고 그 소멸자가 `free`다. libpthread는 동적 key를 번호 오름차순으로 돌고 새 key는 가장 낮은 빈 번호를 받는다 — 저장소의 key가 우리 칸(처음 쓸 때 만든다)보다 먼저 만들어져 저장소가 먼저 해제된다(이 순서는 CI 결과와 맞는 추론이다). 그 뒤의 접근은 초기 내용으로 저장소를 다시 만들어 key에 다시 걸고(그래서 접근은 된다), 값이 남은 key는 `PTHREAD_DESTRUCTOR_ITERATIONS`회까지 다시 돌므로 다음 회차에 또 해제된다.
     - Windows(측정 — Windows 11 26200, clang-cl `/MDd`·`/MT` 탐침 각 3회): FLS callback이 non-trivial `thread_local` 소멸자보다 먼저 불리고, callback이 읽은 값은 스레드가 둔 값이며, callback이 쓴 값을 뒤에 도는 `thread_local` 소멸자가 그대로 읽는다 — 저장소는 둘이 모두 끝난 뒤까지 남는다. 문서로 보장된 순서는 아니다(OS 구현의 순서를 잰 것).
@@ -817,9 +818,9 @@ UE 5.8.4의 작은 블록 할당자(`Runtime/Core` — `Public/HAL/MallocBinned2
 
     최장 탐사는 채움 0.74에서 16 B 간격 13,469칸, 64 B 간격 4,371칸이다(기본 hash는 120–200칸). 실제 `HashMap`으로 잰 부하율 1/2의 최장 탐사(65,536개)도 이어지는 주소에서 16 B 1,765 · 32 B 1,416 · 64 B 1,080 · 208 B 217칸이었다(기본 hash는 24–45칸).
   - 잰 벤치(1M, 채움 0.48, 객체 간격 100 B대)는 이 표의 가장 좋은 구석이다. 같은 객체로 살아 있는 수가 1.5M만 돼도 채움이 0.72가 된다. 빨라지는 지점은 벤치 하나의 모양이고, 느려지는 쪽은 블록 간격과 채움에 따라 한계가 없다.
-  - (개정 13: 개정 11은 여기에 "1M 작은 객체의 제품 경로는 `BinnedAllocator`라 이득이 걸리는 제품 경로가 없다"를 근거로 더했다. 사실이 아니어서 뺐다 — 지금 제품 코드는 엔진에 `SystemAllocator`를 넘긴다(18절 머리). 버린 근거는 위의 군집 절벽 하나다.)
+  - (개정 13: 개정 11은 여기에 "1M 작은 객체의 제품 경로는 `BinnedAllocator`라 이득이 걸리는 제품 경로가 없다"를 근거로 더했다. 사실이 아니어서 뺐다 — 그때 제품 코드는 엔진에 `SystemAllocator`를 넘겼다(18절 머리. 개정 15에서 연결했다 — 18.10절). 버린 근거는 위의 군집 절벽 하나다.)
   - 그래서 예측할 수 있는 상수 배(churn 회수 3.0–3.2배 — 옛 기준(platform-counted). 계수 없는 플랫폼 기준으로는 3.8–4.3배)를 받고, 채움과 주소 모양에 기대는 절벽을 기본 할당자 밑에 두지 않는다. 원장은 주소를 통째로 섞는 기본 hash를 쓰고, 시험 `CoreAddressLedgerProbeLengthByAddressPattern`·`CoreAddressLedgerProbeLengthWhileTombstonesAccumulate`가 "주소 모양이 군집을 만들지 않는다"를 지킨다(주소 모양 8종과, 창을 밀며 삭제 칸을 쌓는 주기 내내 최장 탐사 64칸 이하 — 지역성 hash를 넣으면 잡힌다).
-  - 군집 없이 지역성을 얻는 길은 페이지 디렉터리와 페이지별 표(2단 구조)다. `HashMap`을 버리고 전용 구조를 만드는 일이라 넣지 않았다. 지금 제품 코드가 엔진에 넘기는 것이 `SystemAllocator`이므로(18절 머리) 이 배수는 1M 규모의 제품 경로에 걸린다 — `BinnedAllocator` 연결 결정과 함께 다시 본다(연결하면 작은 블록은 원장을 지나지 않는다).
+  - 군집 없이 지역성을 얻는 길은 페이지 디렉터리와 페이지별 표(2단 구조)다. `HashMap`을 버리고 전용 구조를 만드는 일이라 넣지 않았다. 지금 제품 코드가 엔진에 넘기는 것이 `SystemAllocator`이므로(18절 머리) 이 배수는 1M 규모의 제품 경로에 걸린다 — `BinnedAllocator` 연결 결정과 함께 다시 본다(연결하면 작은 블록은 원장을 지나지 않는다). (개정 15: 연결했다 — 18.10절. Sandbox 엔진 호스트에서는 작은 블록이 원장을 지나지 않는다. 아직 `SystemAllocator`를 쓰는 곳 — 게임 템플릿, Commandlet, 벤치 도구 — 에는 이 배수가 그대로 걸린다.)
   - `AddressLedger::Remove`는 `Find` 뒤 `Erase`로 두 번 찾는다. 둘째 조회는 방금 지난 칸이라 캐시에 있다. `HashMap`에 한 번에 꺼내는 API가 없고 따로 잰 이득이 없어 더하지 않았다.
 - 고침(AL1b — AL1에서 발견): `HashMap::Erase`는 원소가 0개가 되면 묘비(삭제 칸)가 하나뿐이어도 모든 칸을 비웠다(`ClearSlots` — 용량에 비례). 살아 있는 수가 큰 고점 뒤에 0과 1 사이를 오가면 쌍마다 표 전체를 다시 써서 상환 O(1)이 깨진다(1M 고점이면 쌍마다 64 MB). 기본 할당자 밑에 이 절벽을 두지 않도록 원장을 감싸지 않고 컨테이너를 고친다.
   - 규칙: `Erase`로 0개가 됐을 때 삭제 칸이 칸 수의 1/4(`HashMap::EmptyClearDivisor`) 이상일 때만 비운다. 그 밖에는 삭제 칸을 그대로 두고 삽입의 정리(`SettleDeletedSlots`)에 맡긴다. `EraseIf`·`Clear`는 어차피 모든 칸을 보므로 전처럼 비운다. `HashSet`은 `HashMap` 위에 있어 같이 바뀐다.
@@ -872,6 +873,7 @@ UE 5.8.4의 작은 블록 할당자(`Runtime/Core` — `Public/HAL/MallocBinned2
 | AL3 | `platform::ThreadExitSlot`(Windows FLS callback, POSIX pthread key 소멸자)과 그 시험, 스레드 캐시·이전 칸(가득 묶음만)·스레드 종료 hook·인스턴스 파괴 |
 | AL4 | `Trim`·통계(`ReservedBytes`·`fallbackAllocations`)·ASan(`ROCKS_NO_SANITIZE_ADDRESS` 내부 접근)·범위 소진 경로 |
 | AL5 | 측정(18.8절)·GC churn 재측정·문서(실험 25절, 0절 갱신) |
+| AL6 | 제품 연결(18.10절 — 개정 15): Launch의 범용 할당자, Sandbox 엔진 호스트, `ThreadExitSlot`의 OS 오류 값 보존 |
 
 시험(단계마다 음성 대조와 함께):
 
@@ -894,12 +896,12 @@ UE 5.8.4의 작은 블록 할당자(`Runtime/Core` — `Public/HAL/MallocBinned2
 - **소유는 실행 진입점(Launch)이다.** UE가 프로세스의 기본 할당자를 Binned로 두는 것과 같은 자리다. `ApplicationRunner`가 지금의 `SystemAllocator` 위에 `BinnedAllocator`를 하나 두고, `ApplicationContext::DefaultAllocator()`가 그것을 프로세스의 범용 할당자로 내준다. 이름이 `Allocator()`가 아닌 까닭은 멤버 함수 이름이 타입 `Allocator`를 가리지 않게 하려는 것이다. `SystemAllocator()`는 그대로 둔다(상위 할당자, 도구 로그가 계속 쓴다).
 - **고를 수 있다.** `ApplicationSettings::defaultAllocator`(`DefaultAllocatorKind::Binned`가 기본, `System`)를 `configure`가 바꿀 수 있다. `System`이면 `DefaultAllocator()`가 `SystemAllocator()`와 같은 객체를 돌려준다 — 문제를 가를 때 쓰는 비교 수단이다(UE의 할당자 선택 스위치 대응). 명령줄 옵션은 이번에 넣지 않는다.
 - **상위는 그 `SystemAllocator`다.** 새 공개 클래스를 만들지 않는다. 한계: 큰 블록(8 KB 초과)은 원장을 두 번 지난다(`BinnedAllocator`의 큰 할당 원장과 `SystemAllocator`의 원장 — 큰 블록마다 hash 넣기·지우기가 한 번씩 더 든다). 큰 블록은 드물다(1M 그래프에서 살아 있는 할당 290만 가운데 1.6만 — 실험 25.8절).
-- **수명 순서.** 설정 적용(`configure` 뒤) → 범용 할당자 생성 → 도구 로그 시작 → 본문 → 도구 로그 정지 → `BinnedAllocator` 파괴 → (실행 상태 소멸 때) `SystemAllocator` 파괴. 남은 할당 계약은 지금과 같다: 본문이 범용 할당자의 할당을 남긴 채 돌아오면 `BinnedAllocator` 파괴가 Fatal `BinnedAllocator destroyed with live allocations`다(`SystemAllocator`를 쓸 때의 Fatal과 같은 자리). 본문이 만든 스레드는 본문이 돌아오기 전에 끝나 있어야 한다는 것도 같다(살아 있더라도 파괴가 그 스레드의 캐시까지 회수하지만, 그 스레드가 그 뒤에 할당자를 부르면 안 된다).
+- **수명 순서.** 설정 적용(`configure` 뒤) → 범용 할당자 생성 → 도구 로그 시작 → 본문 → 도구 로그 정지 → `BinnedAllocator` 파괴 → (실행 상태 소멸 때) `SystemAllocator` 파괴. 남은 할당 계약은 지금과 같다: 본문이 범용 할당자의 할당을 남긴 채 돌아오면 `BinnedAllocator` 파괴가 Fatal `BinnedAllocator destroyed with live allocations`다. 계약은 `SystemAllocator`를 쓸 때와 같고 자리는 다르다(리뷰 지적): `BinnedAllocator`의 Fatal은 보호 프레임 안의 정리 단계에서 나므로 크래시 수집이 걸려 있으면 보고가 남고, `SystemAllocator`의 Fatal은 크래시 수집을 뗀 뒤 실행 상태가 소멸할 때 나서 stderr 한 줄만 남는다. 본문이 만든 스레드는 본문이 돌아오기 전에 끝나 있어야 한다는 것도 같다(살아 있더라도 파괴가 그 스레드의 캐시까지 회수하지만, 그 스레드가 그 뒤에 할당자를 부르면 안 된다).
 - **`RequestExitWithoutStaticTeardown` 경로.** 정리(도구 로그, 종료 요청 처리기, 크래시 수집 해제) 뒤 `_Exit`로 끝나는 경로에서는 `BinnedAllocator`를 파괴하지 않는다(`SystemAllocator`를 파괴하지 않는 것과 같다 — 이 경로는 멈춘 스레드가 할당을 쥔 채일 수 있어 남은 할당 Fatal을 내면 안 된다). 내장 진입은 이 요청을 무시하므로 언제나 파괴한다.
 - **내장 진입.** `RunEmbeddedApplication` 실행마다 인스턴스 하나다(실행 상태와 수명이 같다).
 - **비용.** 인스턴스 하나의 예약(주소 범위 16 GiB — Android 4 GiB, commit 아님)과 slab 표·비트맵(약 290 KB의 플랫폼 할당)이 Launch를 쓰는 모든 실행 파일에 든다(본문이 범용 할당자를 쓰지 않아도). 스레드 캐시는 그 할당자를 쓴 스레드마다 최대 2,361,856 byte(약 2.25 MiB)다(18.8절 "쉬는 스레드의 캐시").
 - **Sandbox.** 엔진 호스트(`EngineHost.cpp`의 실행 경로 둘)와 self-test가 `context.DefaultAllocator()`를 엔진·모듈 로더·LogHost에 넘긴다. 같은 파일의 지역 `SystemAllocator`는 무엇에 쓰이는지 보고 엔진·모듈 로더로 가는 것만 바꾼다(구현에서 확인해 실험 문서에 적는다).
-- **넣지 않는 것(후속).** `Trim`을 부르는 시점(레벨을 내린 뒤, 메모리 압박), 다른 스레드 캐시의 `Trim`, Commandlet·벤치 도구의 연결, 명령줄 옵션.
+- **넣지 않는 것(후속).** `Trim`을 부르는 시점(레벨을 내린 뒤, 메모리 압박), 다른 스레드 캐시의 `Trim`, Commandlet·벤치 도구와 게임 템플릿의 연결, 명령줄 옵션.
 - **시험.** Launch probe(자식 프로세스): 기본이 `BinnedAllocator`인지(범용 할당자가 시스템 할당자와 다른 객체이고, 작은 요청은 시스템 할당자의 살아 있는 할당 수를 늘리지 않으며 큰 요청은 하나 늘린다), `System` 설정이면 같은 객체인지, 본문이 할당을 남기면 Fatal인지, `RequestExitWithoutStaticTeardown`이면 남겨도 Fatal 없이 끝나는지. EngineTests: 엔진을 `BinnedAllocator` 위에서 초기화·프레임·GC·종료(끝에 남은 할당 0, `Trim` 뒤 commit 0). `ThreadExitSlot`: `Get`·`Set`이 OS 오류 값을 바꾸지 않는다. 음성 대조: Launch가 설정과 무관하게 시스템 할당자를 내줌, 설정을 무시하고 언제나 `BinnedAllocator`를 만듦.
 - **측정(실험 25.10절).** `GcBench`의 일반 그래프 시나리오(1M · 간선 4)를 `SystemAllocator`와 `BinnedAllocator` 위에서 같은 round에 번갈아 쟀다(5 round의 중앙값): 생성 824 → 441 ms(0.54배), 연결 1,106 → 818 ms(0.74배), churn 생성+연결 175 → 127 ms(0.72배), churn 회수 414 → 152 ns/객체(0.37배), churn Collect 전체 107.5 → 81.5 ms(0.76배), 회수를 미뤘을 때 2 ms 예산의 프레임 수 24 → 10. 종료 회수는 이 시나리오가 재지 않아 할당자 비교의 값을 쓴다(383 → 139 ns/객체 — 25.8절).
 - **구현에서 정한 것.** Sandbox `EngineHost.cpp`의 지역 `SystemAllocator` 둘은 그대로 뒀다 — 하나는 self-test 단계가 trace 파일을 읽어 들이는 버퍼이고 다른 하나는 self-test의 기기 특성 확인(`CheckDeviceTraitsFromCaps`)이라 엔진·모듈 로더로 가지 않는다. 시험 지원에 OS 오류 값을 쓰고 읽는 `test::SetSystemError`·`SystemError`를 더했다. 그 소스를 더하자 FoundationTests의 유니티 묶음 경계가 옮겨져 `WindowsComRefTests.cpp`(Windows COM 헤더의 `small` 같은 매크로)가 Compression 시험과 한 묶음의 앞에 놓여 컴파일이 깨졌다 — 그 시험 소스를 유니티 단독 소스로 뺐다(`FoundationTests.Build.cs`).

@@ -484,6 +484,8 @@ enum class ApplicationKind : uint8 {
 
 enum class ToolLogging : uint8 { None, Stderr };  // Stderr: Sync LogSystem + stderr sink + LogInstallScope
 
+enum class DefaultAllocatorKind : uint8 { Binned, System };  // 범용 할당자(개정 6). Binned: SystemAllocator 위의 BinnedAllocator
+
 enum class CrashReportingMode : uint8 {
     Full,       // OS 처리기 + 도우미(실패하면 fallback)
     InProcess,  // OS 처리기 + 프로세스 안 덤프
@@ -571,7 +573,7 @@ bool IsTerminationRequested() noexcept;
   - 본문은 엔진·모듈·컨테이너에 `DefaultAllocator()`를 넘긴다. `SystemAllocator()`는 범용 할당자의 상위이고 Launch의 도구 로그가 쓴다 — 본문이 직접 쓸 일은 비교·진단뿐이다.
   - 수명: 설정 적용 뒤·도구 로그 앞에 만들고, 도구 로그를 멈춘 뒤에 파괴한다(8.2절). 본문이 범용 할당자의 할당을 남긴 채 돌아오면 파괴가 Fatal이다(`SystemAllocator`의 남은 할당 계약과 같다). `RequestExitWithoutStaticTeardown`이면 파괴하지 않고 `_Exit`한다(내장 진입은 그 요청을 무시하므로 파괴한다). 내장 진입은 실행마다 인스턴스 하나다.
   - 비용: 주소 범위 예약(16 GiB — Android 4 GiB, commit 아님)과 약 290 KB의 표가 Launch를 쓰는 모든 실행 파일에 든다. 범용 할당자를 쓴 스레드마다 캐시가 최대 약 2.25 MiB(`BinnedAllocator::MaxThreadCacheBytes`)다.
-  - 지금 쓰는 곳은 Sandbox 엔진 호스트다. Commandlet·벤치 도구는 후속이다.
+  - 지금 쓰는 곳은 Sandbox 엔진 호스트다. Commandlet·벤치 도구와 게임 템플릿(`Templates/Game/Foundation/Source/Main.cpp` — 아직 `context.SystemAllocator()`)은 후속이다.
 
 ## 8. 흐름
 
@@ -586,12 +588,13 @@ bool IsTerminationRequested() noexcept;
 | 4 | `configure(arguments, settings)`(선택) | — |
 | 5 | 설정 적용: 대화상자 억제, 크래시 모드·예산 변경, 출력 폴더, **도우미 시작**(Full). 수집 방식·예산이 바뀌면 새 옵션을 `ValidateCrashReportingOptions`로 먼저 검사하고(잘못되면 지금 설치 유지), 1단계를 뗀 뒤 다시 건다. 다시 걸기가 실패하면 이전 설정·이전 폴더로 되돌려 건다. 폴더만 바뀌었거나 되돌린 경우의 새 폴더는 `SetCrashOutputDirectory`로 바꾼다(실패하면 이전 폴더 유지). `Off`면 1단계를 뗀다(도우미는 아직 없으므로 알릴 것이 없다). 내장 여부는 진입 함수가 정하므로 이 단계에서 바뀌지 않는다 | 검사 실패·재설치 실패·폴더 실패·도우미 시작 실패는 `Log::Warning` 뒤 계속한다(fallback) |
 | 6 | 종료 요청 처리기(선택) | 실패는 경고만 |
+| 6a | 범용 할당자(개정 6 — `defaultAllocator`가 `Binned`면 `SystemAllocator` 위에 `BinnedAllocator`를 만든다. 번호를 밀지 않으려고 6a로 둔다) | 실패하지 않는다(내부 상태를 할당하지 못하면 Fatal) |
 | 7 | 도구 로그 서비스(`ToolLogging::Stderr`) | stderr 한 줄, 로그 없이 계속(D22) |
 | 8 | `SetRunPhase(Running, "Main")` → `run(context)` | 본문의 반환값 |
-| 9 | 7 → 6 역순 정리, `SetRunPhase(Shutdown, ...)` | 정리 실패는 stderr. 종료 코드는 본문 값을 유지한다 |
+| 9 | 7 → 6a → 6 역순 정리, `SetRunPhase(Shutdown, ...)` | 정리 실패는 stderr. 종료 코드는 본문 값을 유지한다 |
 | 10 | 보호 프레임을 나와 `RemoveCrashReporting`(도우미에 `Shutdown`을 먼저 쓴다) → 종료 코드 반환(또는 `_Exit`) | — |
 
-- **초기화 실패는 성공한 단계만 역순으로 정리한다.** Launch의 단계는 3–7뿐이다. 각 단계의 정리는 "시작됐는지" 표시로 판단한다. 엔진 호스트의 내부 단계(HostSettings·LogHost·Trace·Engine)는 지금처럼 본문의 범위 객체와 `Engine`의 역순 정리가 맡는다.
+- **초기화 실패는 성공한 단계만 역순으로 정리한다.** Launch의 단계는 3–7뿐이다(6a 포함). 각 단계의 정리는 "시작됐는지" 표시로 판단한다. 엔진 호스트의 내부 단계(HostSettings·LogHost·Trace·Engine)는 지금처럼 본문의 범위 객체와 `Engine`의 역순 정리가 맡는다.
 - **크래시 처리를 설정보다 먼저 건다(요구 10절).** 설정 로딩·LogHost·Engine 초기화는 모두 8단계 본문 안이다.
 - **모듈 로더(ML1, 아직 없음).** [모듈 로더](ModuleLoader.ko.md) 3.9절은 7단계 뒤·8단계 전에 로더 생성·`Prepare`·부트 모듈과 `EarliestPossible` 시작을, 9단계에서 도구 로그 정리 전에 프로세스 묶음 종료를 넣는다. 지금(ML0)은 Launch가 로더를 만들지 않는다. 모듈 진입점(`ROCKS_IMPLEMENT_MODULE`)은 상수 기술과 함수뿐이라 실행 순서가 없고, 프로세스 진입점(`ROCKS_IMPLEMENT_APPLICATION`)과 겹치지 않는다(21절).
 - **정상 종료 정리는 한 번만 한다.** `RunApplication`은 반환 경로가 하나다. 크래시 종료는 이 경로를 타지 않는다(8.3절).
@@ -1250,7 +1253,7 @@ Rocks는 이 값을 쓰지 않는다.
 |---|---|---|
 | 프레임마다 | 없음. 할당·전역 lock·원자 연산을 더하지 않는다. `SetRunPhase`는 단계가 바뀔 때만 부른다 | Release Sandbox `--engine` 프레임 시간 비교(앞뒤 차이가 측정 잡음 안) |
 | 스레드 시작마다 | `SetThreadStackGuarantee` 한 번(32 KiB가 그 스레드 stack 안에서 예약된다). SEH 보호는 x64 표 기반이라 실행 비용이 없다 | `platform::Thread` 시작·join 왕복 시간 비교 |
-| 프로세스당 | W 스레드 하나(256 KiB 예약, 실제 commit은 수 KiB), 이벤트 둘(도우미가 있으면 다섯 더), 정적 저장소 약 40 KiB(BSS), 교환 블록 64 KiB(Full), dbghelp.dll 로드, 도우미 프로세스 하나(Full) | 시작 시간(설치~본문 진입), 도우미 작업 집합, FoundationTests 전체 시간 비교 |
+| 프로세스당 | W 스레드 하나(256 KiB 예약, 실제 commit은 수 KiB), 이벤트 둘(도우미가 있으면 다섯 더), 정적 저장소 약 40 KiB(BSS), 교환 블록 64 KiB(Full), dbghelp.dll 로드, 도우미 프로세스 하나(Full). 개정 6: 범용 할당자의 주소 범위 예약 16 GiB(Android 4 GiB — commit 아님)와 표 약 290 KB(시작 시간은 다시 재지 않았다) | 시작 시간(설치~본문 진입), 도우미 작업 집합, FoundationTests 전체 시간 비교 |
 | 시작 지연 | 도우미 `CreateProcessW` 한 번(기다리지 않는다), dbghelp 로드 | 같음. 시험 실행기의 자식 probe는 `Off`라 비용이 없다 |
 | 크래시 때 | 부모 최대 총 대기(도우미 있음 13 s, fallback 35 s). 도우미의 덤프 작성은 부모 종료 뒤에도 종류별 마감까지 이어진다 | 시험에서 예산 안 종료를 단언 |
 
@@ -1803,4 +1806,5 @@ bool SetCrashAnnotation(CrashAnnotation slot, const char* text, usize bytes) noe
 - 개정 6(2026-11-20): 범용 할당자(GC 규모 세션의 AL6 — 사용자 지시 "엔진에 BinnedAllocator 연결해", GC 규모 설계 18.10절).
   - `ApplicationSettings::defaultAllocator`(`DefaultAllocatorKind` — 기본 `Binned`, `System`)와 `ApplicationContext::DefaultAllocator()`를 더했다(7.4절). `SystemAllocator()`는 그대로다.
   - 실행 단계에 "Launch.DefaultAllocator"를 더했다(종료 요청 처리기 뒤, 도구 로그 앞 — 8.2절의 역순 정리에서 도구 로그 다음에 파괴된다).
-  - Sandbox 엔진 호스트와 self-test가 `DefaultAllocator()`를 엔진에 넘긴다.
+  - Sandbox 엔진 호스트가 `DefaultAllocator()`를 모듈 로더·설정 문맥·LogHost·엔진에 넘기고, self-test는 그래픽 self-test(창·그래픽 장치·worker scheduler)에 넘긴다.
+  - 8.1절 표에 6a단계, 7.4절 목록에 `DefaultAllocatorKind`, 18절 표에 예약 비용을 더했다(리뷰 반영).
