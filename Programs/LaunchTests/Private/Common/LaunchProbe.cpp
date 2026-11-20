@@ -2,6 +2,7 @@
 
 #include <Base/Compiler.h>
 #include <Core/Diagnostics/Log.h>
+#include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/StringBuilder.h>
 #include <Platform/CrashReporting.h>
 #include <Platform/Fatal.h>
@@ -137,6 +138,46 @@ int WriteState(ApplicationContext& context) noexcept {
     return 0;
 }
 
+// 범용 할당자를 통해 받은 할당이 Launch의 시스템 할당자에 닿는지 본다. BinnedAllocator면 작은
+// 블록은 닿지 않고(예약 범위의 slab에서 나온다) 큰 블록만 닿는다. SystemAllocator면 모두 닿는다.
+int WriteAllocatorState(ApplicationContext& context) noexcept {
+    constexpr usize SmallBlocks = 64;
+    constexpr usize SmallBytes = 48;
+    constexpr usize LargeBytes = 64 * 1024;
+    constexpr usize BlockAlignment = 16;
+    Allocator& memory = context.DefaultAllocator();
+    // Launch의 시스템 할당자는 rocks::SystemAllocator다(Launch/Application.h — 범용 할당자의 상위).
+    const auto& system = static_cast<const SystemAllocator&>(context.SystemAllocator());
+    const uint64 before = system.Stats().liveAllocations;
+    void* small[SmallBlocks] = {};
+    bool clean = true;
+    for (void*& block : small) {
+        auto result = memory.Allocate(SmallBytes, BlockAlignment);
+        clean = clean && result;
+        block = result ? result.Value() : nullptr;
+    }
+
+    const uint64 afterSmall = system.Stats().liveAllocations;
+    auto large = memory.Allocate(LargeBytes, BlockAlignment);
+    const uint64 afterLarge = system.Stats().liveAllocations;
+    clean = clean && large && memory.Deallocate(large.Value());
+    for (void* block : small) {
+        clean = clean && block != nullptr && memory.Deallocate(block);
+    }
+
+    clean = clean && system.Stats().liveAllocations == before;
+    char line[LineBytes];
+    FixedStringBuilder text{Span<char>(line)};
+    (void)text.TryAppendFormat(
+        "LAUNCH ALLOCATOR kind={} distinct={} smallInSystem={} largeInSystem={} clean={}",
+        StringView(context.Settings().defaultAllocator == DefaultAllocatorKind::Binned ? "binned"
+                                                                                       : "system"),
+        &memory != &context.SystemAllocator() ? 1 : 0, afterSmall - before, afterLarge - afterSmall,
+        clean ? 1 : 0);
+    WriteProbeLine(line);
+    return clean ? 0 : 1;
+}
+
 } // namespace
 
 void WriteProbeLine(const char* text) noexcept {
@@ -169,6 +210,8 @@ void Configure(Span<const StringView> arguments, ApplicationSettings& settings) 
             settings.toolLogging = ToolLogging::Stderr;
         } else if (Is(argument, "--terminate")) {
             settings.handleTerminationRequests = true;
+        } else if (Is(argument, "--system-allocator")) {
+            settings.defaultAllocator = DefaultAllocatorKind::System;
         } else if (Is(argument, "--reset-sigint")) {
             ResetIgnoredTerminationSignal();
         } else if (Is(argument, "--ignore-sigint")) {
@@ -304,6 +347,25 @@ int Run(ApplicationContext& context) noexcept {
         (void)text.TryAppendFormat("LAUNCH THREADS {} {}", roundTrips, elapsed);
         WriteProbeLine(line);
         return elapsed != 0 ? 0 : 1;
+    }
+
+    if (Is(mode, "allocator")) {
+        return WriteAllocatorState(context);
+    }
+
+    if (Is(mode, "allocator-leak") || Is(mode, "allocator-leak-no-teardown")) {
+        constexpr usize LeakedBytes = 48;
+        constexpr usize LeakedAlignment = 16;
+        if (!context.DefaultAllocator().Allocate(LeakedBytes, LeakedAlignment)) {
+            return 1;
+        }
+
+        if (Is(mode, "allocator-leak-no-teardown")) {
+            context.RequestExitWithoutStaticTeardown();
+        }
+
+        WriteProbeLine("LAUNCH ALLOCATION LEFT");
+        return AllocatorLeakExitCode;
     }
 
     if (Is(mode, "teardown") || Is(mode, "no-teardown")) {

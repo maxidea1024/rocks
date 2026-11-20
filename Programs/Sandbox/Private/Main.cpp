@@ -119,7 +119,7 @@ int Run(rocks::launch::ApplicationContext& context) noexcept {
 
     options.arguments = Span<const StringView>(settingArguments, settingCount);
     return engine ? sandbox::RunEngineHost(context, options)
-                  : RunSelfTest(context.SystemAllocator());
+                  : RunSelfTest(context.DefaultAllocator());
 }
 
 const rocks::launch::ApplicationDescription& Describe() noexcept {

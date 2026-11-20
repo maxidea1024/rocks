@@ -13,6 +13,7 @@
 //   --bad-budget       범위 밖 크래시 예산(설정 단계가 경고하고 이전 설정을 유지한다)
 //   --tool-log         도구 로그(stderr sink)를 시작한다
 //   --terminate        종료 요청 처리기를 건다
+//   --system-allocator 범용 할당자를 SystemAllocator로 둔다(기본은 BinnedAllocator)
 //   --reset-sigint     물려받은 SIGINT 무시를 기본 동작으로 되돌린다(Launch 설치 전)
 //   --ignore-sigint    SIGINT를 무시로 둔다(Launch 설치 전, 상속된 무시 보존 시험)
 // mode(본문):
@@ -24,6 +25,13 @@
 //   log          도구 로그로 Info 한 줄을 남긴다
 //   crash        본문에서 접근 위반을 낸다
 //   fatal        본문에서 platform::Fatal을 부른다
+//   allocator    범용 할당자를 본다: 작은 블록 64개와 큰 블록 하나를 받고 돌려주며 Launch의 시스템
+//                할당자에 닿은 수를 적는다("LAUNCH ALLOCATOR kind=<binned|system> distinct=<0|1>
+//                smallInSystem=<n> largeInSystem=<n> clean=<0|1>"). 모두 돌려줬으면 0이다
+//   allocator-leak  범용 할당자의 할당 하나를 남긴 채 AllocatorLeakExitCode를 돌려준다(Launch의
+//                정리가 Fatal로 끝나야 한다)
+//   allocator-leak-no-teardown  같지만 RequestExitWithoutStaticTeardown을 부른다(Launch가 할당자를
+//                파괴하지 않으므로 Fatal 없이 그 종료 코드로 끝난다)
 //   teardown     정적 소멸자 표시를 건 뒤 7을 돌려준다(정적 소멸이 한 번 돈다)
 //   no-teardown  같지만 RequestExitWithoutStaticTeardown으로 정적 소멸 없이 끝낸다
 //   signal-self  실제 OS 종료 요청(Ctrl-Break·SIGINT)을 자신에게 보내고, 종료 요청 표시가 켜지면
@@ -41,6 +49,8 @@
 namespace rocks::launch::probe {
 
 inline constexpr int ProbeUsageExitCode = 64;
+// allocator-leak mode의 본문 종료 코드다(Fatal이 아니면 이 값으로 끝난다).
+inline constexpr int AllocatorLeakExitCode = 9;
 
 void Configure(Span<const StringView> arguments, ApplicationSettings& settings) noexcept;
 int Run(ApplicationContext& context) noexcept;

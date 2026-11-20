@@ -9,6 +9,7 @@
 #include <Core/Diagnostics/LogSystem.h>
 #include <Core/Diagnostics/RuntimeLogSink.h>
 #include <Core/Error.h>
+#include <Core/Memory/BinnedAllocator.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Text/StringBuilder.h>
 #include <Launch/Application.h>
@@ -105,7 +106,7 @@ public:
     }
 
 private:
-    static constexpr usize StageCount = 4;
+    static constexpr usize StageCount = 5;
 
     // 보호 프레임 안의 본문이다(인라인되지 않는 별도 함수, D34).
     static int GuardedStages(void* context) noexcept;
@@ -115,6 +116,8 @@ private:
     static bool StartSettings(ApplicationRunner& runner) noexcept;
     static bool StartTerminationRequests(ApplicationRunner& runner) noexcept;
     static void StopTerminationRequests(ApplicationRunner& runner) noexcept;
+    static bool StartDefaultAllocator(ApplicationRunner& runner) noexcept;
+    static void StopDefaultAllocator(ApplicationRunner& runner) noexcept;
     static bool StartToolLog(ApplicationRunner& runner) noexcept;
     static void StopToolLog(ApplicationRunner& runner) noexcept;
 
@@ -137,6 +140,10 @@ private:
     bool terminationHandlerInstalled_ = false;
     char identity_[detail::BuildIdentityBytes] = {};
     SystemAllocator allocator_;
+    // 범용 할당자(DefaultAllocatorKind::Binned)다. 설정을 적용한 뒤에 만든다(없으면 allocator_가
+    // 범용 할당자다).
+    alignas(BinnedAllocator) unsigned char binnedStorage_[sizeof(BinnedAllocator)] = {};
+    BinnedAllocator* binned_ = nullptr;
     ApplicationContext context_;
     // 도구 로그(ToolLogging::Stderr)다. 시작한 경우에만 만든다.
     alignas(LogSystem) unsigned char logStorage_[sizeof(LogSystem)] = {};
@@ -327,6 +334,33 @@ void ApplicationRunner::StopTerminationRequests(ApplicationRunner& runner) noexc
     }
 }
 
+bool ApplicationRunner::StartDefaultAllocator(ApplicationRunner& runner) noexcept {
+    if (runner.settings_.defaultAllocator == DefaultAllocatorKind::Binned) {
+        // 상위는 Launch의 SystemAllocator다(큰 블록과 예약하지 못했을 때의 모든 요청이 그리로
+        // 간다).
+        runner.binned_ = ::new (runner.binnedStorage_) BinnedAllocator(runner.allocator_);
+    }
+
+    return true;
+}
+
+void ApplicationRunner::StopDefaultAllocator(ApplicationRunner& runner) noexcept {
+    if (runner.binned_ == nullptr) {
+        return;
+    }
+
+    // 정적 소멸 없이 끝내는 경로(RequestExitWithoutStaticTeardown)는 남은 할당을 검사하지 않는다:
+    // 멈춘 스레드가 할당을 쥔 채일 수 있다. SystemAllocator를 파괴하지 않고 _Exit하는 것과 같다.
+    // 내장 진입은 그 요청을 무시하므로 파괴한다.
+    if (runner.context_.exitWithoutStaticTeardown_ && !runner.embedded_) {
+        return;
+    }
+
+    // 본문이 할당을 남겼으면 여기서 Fatal이다(BinnedAllocator의 계약).
+    runner.binned_->~BinnedAllocator();
+    runner.binned_ = nullptr;
+}
+
 bool ApplicationRunner::StartToolLog(ApplicationRunner& runner) noexcept {
     if (runner.settings_.toolLogging != ToolLogging::Stderr) {
         return true;
@@ -366,6 +400,11 @@ void ApplicationRunner::StopToolLog(ApplicationRunner& runner) noexcept {
 int ApplicationRunner::RunBody(ApplicationRunner& runner) noexcept {
     ApplicationContext& context = runner.context_;
     context.allocator_ = &runner.allocator_;
+    context.defaultAllocator_ = &runner.allocator_;
+    if (runner.binned_ != nullptr) {
+        context.defaultAllocator_ = runner.binned_;
+    }
+
     context.toolLog_ = runner.toolLog_;
     context.settings_ = &runner.settings_;
     const int exitCode = runner.description_.run(context);
@@ -380,6 +419,8 @@ ROCKS_NOINLINE int ApplicationRunner::GuardedStages(void* context) noexcept {
          runner.description_.commandLineFailureExitCode},
         {"Launch.Settings", &StartSettings, nullptr, detail::StageFailure::Continue, 0},
         {"Launch.TerminationRequests", &StartTerminationRequests, &StopTerminationRequests,
+         detail::StageFailure::Continue, 0},
+        {"Launch.DefaultAllocator", &StartDefaultAllocator, &StopDefaultAllocator,
          detail::StageFailure::Continue, 0},
         {"Launch.ToolLog", &StartToolLog, &StopToolLog, detail::StageFailure::Continue, 0},
     };
@@ -498,6 +539,10 @@ Span<const StringView> ApplicationContext::Arguments() const noexcept {
 
 StringView ApplicationContext::ExecutablePath() const noexcept {
     return ProcessCommandLine::Get().ExecutablePath();
+}
+
+Allocator& ApplicationContext::DefaultAllocator() noexcept {
+    return *defaultAllocator_;
 }
 
 Allocator& ApplicationContext::SystemAllocator() noexcept {

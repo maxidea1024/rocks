@@ -371,6 +371,24 @@ internal static class PchTests
         string untracked = writeRepository("sub dir/untracked 파일.cpp", "int Untracked();\n");
         IReadOnlySet<string> found = await SourceWorkingSet.QueryAsync(repository, null, CancellationToken.None);
         Check(found.SetEquals([tracked, untracked]) && !found.Contains(clean), "git working files: " + string.Join(", ", found));
+        // symlink(Windows는 junction)를 거친 철자로 물어도 그 철자의 경로다. git --show-toplevel은 링크를 푼 실제 경로를 내므로
+        // 그것을 루트로 쓰면 소스 철자와 갈린다(macOS 임시 폴더 /var → /private/var).
+        string linked = Path.Combine(root, "adaptive git link");
+        if (OperatingSystem.IsWindows())
+        {
+            ProcessResult junction = await ProcessRunner.RunAsync(new("cmd.exe", ["/d", "/c", "mklink", "/J", linked, repository], root));
+            Check(junction.ExitCode == 0, "mklink /J failed: " + junction.StdOut + junction.StdErr);
+        }
+        else
+        {
+            Directory.CreateSymbolicLink(linked, repository);
+        }
+
+        IReadOnlySet<string> viaLink = await SourceWorkingSet.QueryAsync(Path.Combine(linked, "sub dir"), null, CancellationToken.None);
+        string[] expectedViaLink = [Path.Combine(linked, "tracked.cpp"), Path.Combine(linked, "sub dir", "untracked 파일.cpp")];
+        Check(viaLink.SetEquals(expectedViaLink), "git working files through a link: " + string.Join(", ", viaLink));
+        // 링크만 지운다(대상 저장소는 그대로).
+        Directory.Delete(linked);
         // git은 object 파일을 읽기 전용으로 둔다. 시험 루트를 지울 수 있게 속성을 풀고 저장소를 지운다.
         foreach (string file in Directory.EnumerateFiles(repository, "*", SearchOption.AllDirectories))
         {

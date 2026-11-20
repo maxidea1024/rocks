@@ -26,6 +26,9 @@ internal static partial class LaunchTests
 
     private const int TeardownExitCode = 7;
 
+    // LaunchProbe.h의 allocator-leak 종료 코드다.
+    private const int AllocatorLeakExitCode = 9;
+
     // LaunchProbe.h의 signal-* 환경 종료 코드다.
     private const int SignalIgnoredExitCode = 65;
 
@@ -227,6 +230,33 @@ internal static partial class LaunchTests
             Verify.Equal(TeardownExitCode, skipped.ExitCode, "no-teardown exit\n" + skipped.StdErr);
             Verify.That(!skipped.StdErr.Contains(StaticTeardownLine, StringComparison.Ordinal), "static teardown ran after _Exit");
             Verify.That(skipped.HelperExitedWithParent, "no-teardown exit left the crash helper running");
+        });
+
+        // 범용 할당자(GC 규모 설계 18.10절): 기본은 Launch의 시스템 할당자 위에 둔 BinnedAllocator다 — 작은 요청은 시스템 할당자에
+        // 닿지 않고 큰 요청만 닿는다. System 설정이면 두 접근자가 같은 객체다. 본문이 할당을 남기면 Launch의 정리가 Fatal이고, 정적
+        // 소멸 없이 끝내는 경로는 할당자를 파괴하지 않아 Fatal 없이 본문의 종료 코드로 끝난다.
+        suite.Add("Native.Launch.default-allocator", async () =>
+        {
+            LaunchResult binned = await Run(console, "--crash-off", "allocator");
+            Verify.Equal(0, binned.ExitCode, "default allocator exit\n" + binned.StdErr);
+            Verify.Contains("LAUNCH ALLOCATOR kind=binned distinct=1 smallInSystem=0 largeInSystem=1 clean=1", binned.StdErr,
+                "default allocator is the binned allocator");
+            LaunchResult system = await Run(console, "--crash-off", "--system-allocator", "allocator");
+            Verify.Equal(0, system.ExitCode, "system allocator exit\n" + system.StdErr);
+            Verify.Contains("LAUNCH ALLOCATOR kind=system distinct=0 smallInSystem=64 largeInSystem=1 clean=1", system.StdErr,
+                "system setting hands out the system allocator");
+            LaunchResult leaked = await Run(console, "--crash-off", "allocator-leak");
+            Verify.Contains("LAUNCH ALLOCATION LEFT", leaked.StdErr, "leak probe body");
+            Verify.That(leaked.ExitCode != 0 && leaked.ExitCode != AllocatorLeakExitCode, "leaked allocation did not end in a fatal exit\n" + leaked.StdErr);
+            Verify.Contains("BinnedAllocator destroyed with live allocations", leaked.StdErr, "binned allocator leak diagnostic");
+            LaunchResult systemLeaked = await Run(console, "--crash-off", "--system-allocator", "allocator-leak");
+            Verify.That(systemLeaked.ExitCode != 0 && systemLeaked.ExitCode != AllocatorLeakExitCode,
+                "leaked system allocation did not end in a fatal exit\n" + systemLeaked.StdErr);
+            Verify.Contains("SystemAllocator destroyed with live allocations", systemLeaked.StdErr, "system allocator leak diagnostic");
+            LaunchResult skipped = await Run(console, "--crash-off", "allocator-leak-no-teardown");
+            Verify.Equal(AllocatorLeakExitCode, skipped.ExitCode, "no-teardown leak exit\n" + skipped.StdErr);
+            Verify.That(!skipped.StdErr.Contains("destroyed with live allocations", StringComparison.Ordinal),
+                "no-teardown exit destroyed the default allocator\n" + skipped.StdErr);
         });
 
         // 명령줄 캡처 실패(초기화 실패)는 본문을 부르지 않고 종료 코드 1과 원인 한 줄이다. 시작한 단계(이른 크래시 수집)만 정리한다.
