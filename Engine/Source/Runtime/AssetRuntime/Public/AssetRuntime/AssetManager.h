@@ -354,8 +354,9 @@ public:
 
     // 티켓의 준비 callback을 등록한다(11.7절 5). 끝나면 다음 Pump에서 정확히 한 번 부른다. lane은
     // Task 모듈의 TaskLane이고 이번 엔진은 Game만 된다(Game 스레드 하나 — 11.1절).
-    // 오류: WrongThread, 무효 티켓 StaleHandle, 이미 등록 AlreadyRegistered(callback은 그대로
-    // caller에 남는다), lane이 Game이 아니면 Unsupported, 빈 callback InvalidArgument.
+    // 오류: WrongThread, Shutdown 뒤(종료 전달 안 포함) ShuttingDown, 무효 티켓 StaleHandle, 이미
+    // 등록 AlreadyRegistered, lane이 Game이 아니면 Unsupported, 빈 callback InvalidArgument.
+    // 실패하면 callback은 등록되지 않고 caller에 남는다.
     Result<void> OnReady(LoadTicket& ticket, TaskLane lane, AssetReadyCallback&& callback) noexcept;
 
     // 결과가 나올 때까지 동기로 기다려 lease를 준다(도구·시험·초기화 전용 — 11.7절 8).

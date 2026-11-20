@@ -39,6 +39,12 @@ DeferredFail NoFail(Allocator& allocator) noexcept {
     return made ? Move(made.Value()) : DeferredFail();
 }
 
+AssetReadyCallback NoReady(Allocator& allocator) noexcept {
+    auto made = AssetReadyCallback::TryCreate(
+        allocator, [](Result<AssetLease>, const AssetDiagnostic&) noexcept {});
+    return made ? Move(made.Value()) : AssetReadyCallback();
+}
+
 PrimaryReadyCallback NoPrimary(Allocator& allocator) noexcept {
     auto made = PrimaryReadyCallback::TryCreate(
         allocator, [](Result<PrimaryAssetLease>, const AssetDiagnostic&) noexcept {});
@@ -360,8 +366,20 @@ TEST(AssetManager_AfterShutdown) {
     CHECK(ErrorOf(scope.Value().Revoke()) == ErrorCode::None);
     CHECK(!ready.leases[0].IsValid());
 
+    LoadTicket bare = rig.Request(2);
+    auto barePrimary = rig.manager->LoadPrimaryAsset(FixedId(1), {});
+    REQUIRE(bare.IsValid() && barePrimary);
     REQUIRE(rig.manager->Shutdown());
     CHECK(rig.manager->Shutdown());
+    // 종료 뒤 등록은 받지 않고 callback은 caller에 남는다(다시 전달할 Pump가 없다).
+    AssetReadyCallback late = RecordReady(env.allocator, ready);
+    PrimaryReadyCallback latePrimary = NoPrimary(env.allocator);
+    REQUIRE(late && latePrimary);
+    CHECK(ErrorOf(rig.manager->OnReady(bare, TaskLane::Game, Move(late))) ==
+          ErrorCode::ShuttingDown);
+    CHECK(ErrorOf(rig.manager->OnReady(barePrimary.Value(), TaskLane::Game, Move(latePrimary))) ==
+          ErrorCode::ShuttingDown);
+    CHECK(static_cast<bool>(late) && static_cast<bool>(latePrimary));
     CHECK(ErrorOf(rig.manager->CreateScope()) == ErrorCode::ShuttingDown);
     CHECK(ErrorOf(rig.manager->RequestAsset(RequestOf(1))) == ErrorCode::ShuttingDown);
     CHECK(ErrorOf(rig.manager->LoadBlocking(RequestOf(1), "Down")) == ErrorCode::ShuttingDown);
@@ -882,7 +900,8 @@ TEST(AssetManager_CallbackMayRequestAndRelease) {
 }
 
 // 종료 전달 안의 새 일(11.7절 12): Shutdown이 전달하는 callback·보류 명령 fail·묶음 callback 안의
-// 요청·보류 명령·묶음 로드·scope 만들기는 모두 ShuttingDown이다(그 뒤 Pump가 없으므로 받아 주면
+// 요청·보류 명령·묶음 로드·scope 만들기·callback 없는 다른 티켓·묶음 티켓의 OnReady는 모두
+// ShuttingDown이다(그 뒤 Pump가 없으므로 받아 주면
 // callback이 영영 불리지 않는다).
 TEST(AssetManager_ShutdownDeliveryRejectsNewWork) {
     AssetEnv env;
@@ -890,19 +909,26 @@ TEST(AssetManager_ShutdownDeliveryRejectsNewWork) {
     ManagerRig rig(env);
     REQUIRE(CookPrimary(rig));
     REQUIRE(rig.Start());
-    constexpr usize Probes = 4;
+    constexpr usize Probes = 6;
     struct Seen {
         uint32 calls = 0;
         ErrorCode delivered = ErrorCode::None;
         ErrorCode errors[Probes] = {};
     };
-    auto probe = [&rig, &env](Seen& seen) noexcept {
+    LoadTicket spare = rig.Request(2);
+    auto sparePrimary = rig.manager->LoadPrimaryAsset(FixedId(1), {});
+    REQUIRE(spare.IsValid() && sparePrimary);
+    auto probe = [&](Seen& seen) noexcept {
         AssetManager& manager = *rig.manager;
         seen.errors[0] = ErrorOf(manager.RequestAsset(RequestOf(2)));
         seen.errors[1] = ErrorOf(manager.RunWhenReady(FixedId(2), NotReadyPolicy::Defer, nullptr,
                                                       NoRun(env.allocator), NoFail(env.allocator)));
         seen.errors[2] = ErrorOf(manager.LoadPrimaryAsset(FixedId(1), {}));
         seen.errors[3] = ErrorOf(manager.CreateScope());
+        // callback이 없는 다른 티켓·묶음 티켓에 등록(전달 목록은 이미 정해졌다).
+        seen.errors[4] = ErrorOf(manager.OnReady(spare, TaskLane::Game, NoReady(env.allocator)));
+        seen.errors[5] = ErrorOf(
+            manager.OnReady(sparePrimary.Value(), TaskLane::Game, NoPrimary(env.allocator)));
     };
     // 로더 Pump 전이라 허가·IO가 없다(종료가 IO를 기다리지 않는다).
     Seen ticketSeen;

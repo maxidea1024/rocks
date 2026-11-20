@@ -735,6 +735,12 @@ bool RunHoldCombination(AssetEnv& env, UnitShape shape, const HoldKind (&order)[
             }
 
             command = Move(made.Value());
+            // 보류 명령의 보유는 티켓 칸이 아니라 보류 칸이다(11.7절 3·11). 방금 소멸한 티켓은
+            // 해제 큐에 있어 다음 Pump까지 티켓 칸에 남는다(Revoke는 그 자리에서 놓는다).
+            const bool ticketQueued =
+                order[step] == HoldKind::Ticket && mode != ReleaseMode::Revoke;
+            CHECK(rig.UnitOf(1).info.deferred == 1 &&
+                  rig.UnitOf(1).info.tickets == (ticketQueued ? 1u : tickets));
         }
 
         AssetManagerPumpBudget budget;
@@ -753,7 +759,7 @@ bool RunHoldCombination(AssetEnv& env, UnitShape shape, const HoldKind (&order)[
     case Tail::None:
         break;
     case Tail::Deferred:
-        CHECK(runs == 1 && rig.UnitOf(1).info.deferred == 0);
+        CHECK(runs == 1 && rig.UnitOf(1).info.deferred == 0 && rig.UnitOf(1).info.tickets == 0);
         if (!rig.Pump()) {
             return false;
         }

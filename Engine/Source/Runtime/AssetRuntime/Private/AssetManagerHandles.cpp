@@ -196,7 +196,8 @@ void AssetManager::Impl::FreeTicket(uint32 index) noexcept {
 // 로더 요청을 내고 티켓 기록을 만든다. 로더가 바로 Succeeded로 답하면(상주) 그 자리에서 보유를
 // 건다(11.7절 4 — revive).
 Result<uint32> AssetManager::Impl::StartTicket(const AssetRequest& request,
-                                               AssetDiagnostic* failure) noexcept {
+                                               AssetDiagnostic* failure,
+                                               bool deferredHold) noexcept {
     auto taken = TakeTicket();
     if (!taken) {
         return taken;
@@ -218,6 +219,7 @@ Result<uint32> AssetManager::Impl::StartTicket(const AssetRequest& request,
     ticket.scope = request.scope == nullptr ? ManagerNoIndex : request.scope->index_;
     ticket.loaderHandle = requested.Value();
     ticket.loaderHeld = true;
+    ticket.deferredHold = deferredHold;
     CompleteTicket(index);
     return Result<uint32>::Success(index);
 }
@@ -271,14 +273,15 @@ void AssetManager::Impl::FinishTicketResult(uint32 index, AssetLoadStatus status
         }
     }
 
-    AddHold(package, &ManagerUnit::tickets);
+    AddHold(package, ticket.deferredHold ? &ManagerUnit::deferred : &ManagerUnit::tickets);
     ticket.heldPackage = package;
 }
 
 void AssetManager::Impl::ReleaseTicketHold(uint32 index) noexcept {
     ManagerTicket& ticket = tickets[index];
     if (ticket.heldPackage != ManagerNoIndex) {
-        DropHold(ticket.heldPackage, &ManagerUnit::tickets);
+        DropHold(ticket.heldPackage,
+                 ticket.deferredHold ? &ManagerUnit::deferred : &ManagerUnit::tickets);
         ticket.heldPackage = ManagerNoIndex;
     }
 }

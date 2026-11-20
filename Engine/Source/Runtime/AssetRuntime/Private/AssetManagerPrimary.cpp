@@ -332,6 +332,11 @@ Result<void> AssetManager::OnReady(PrimaryAssetTicket& ticket, TaskLane lane,
         return Result<void>::Failure(ErrorCode::WrongThread);
     }
 
+    // 종료 뒤(종료 전달 안 포함)에는 다시 전달할 Pump가 없으므로 받지 않는다(11.7절 12).
+    if (impl.shutDown) {
+        return Result<void>::Failure(ErrorCode::ShuttingDown);
+    }
+
     if (ticket.manager_ != this ||
         !impl.ValidSlot(ticket.slot_, ticket.generation_, ManagerSlotKind::PrimaryTicket)) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
