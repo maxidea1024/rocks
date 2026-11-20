@@ -276,7 +276,10 @@ Result<void> BuildEdges(OrderState& state, const ExchangeOrderOptions& options) 
                 const ExchangeAsset& target = assets[dependency.target];
                 const bool build = IsBuildEdge(asset.exchangeClass, target.exchangeClass);
                 if (dependency.target == index) {
-                    node.selfBuild = node.selfBuild || build;
+                    if (build) {
+                        node.selfBuild = true;
+                    }
+
                     continue;
                 }
 
@@ -338,17 +341,14 @@ Result<void> EmitUnit(OrderState& state, ExchangeImportPlan& out, usize stackSta
     Array<uint32>& unitOf = ExchangePlanAccess::UnitOf(out);
     const uint32 unitIndex = static_cast<uint32>(units.Size());
     const usize firstMember = members.Size();
-    for (usize at = stackStart; at < state.stack.Size(); ++at) {
-        const uint32 member = state.stack[at];
+    while (state.stack.Size() > stackStart) {
+        // 비어 있지 않으므로 꺼내기는 실패하지 않는다.
+        const uint32 member = state.stack.TryPopBack().Value();
         state.nodes[member].onStack = false;
         unitOf[member] = unitIndex;
         if (auto pushed = members.TryPushBack(member); !pushed) {
             return pushed;
         }
-    }
-
-    if (auto resized = state.stack.TryResize(stackStart); !resized) {
-        return resized;
     }
 
     Span<uint32> unitMembers(members.Data() + firstMember, members.Size() - firstMember);
@@ -476,10 +476,8 @@ Result<void> VisitFrom(OrderState& state, ExchangeImportPlan& out, uint32 root) 
             continue;
         }
 
-        if (auto popped = state.frames.TryResize(top); !popped) {
-            return popped;
-        }
-
+        // 끝난 node의 frame을 꺼낸다(비어 있지 않으므로 실패하지 않는다).
+        const OrderFrame finished = state.frames.TryPopBack().Value();
         if (!state.frames.IsEmpty()) {
             OrderNode& parent = state.nodes[state.frames[state.frames.Size() - 1].node];
             parent.low = current.low < parent.low ? current.low : parent.low;
@@ -490,7 +488,7 @@ Result<void> VisitFrom(OrderState& state, ExchangeImportPlan& out, uint32 root) 
         }
 
         usize stackStart = state.stack.Size();
-        while (state.stack[stackStart - 1] != node) {
+        while (state.stack[stackStart - 1] != finished.node) {
             --stackStart;
         }
 

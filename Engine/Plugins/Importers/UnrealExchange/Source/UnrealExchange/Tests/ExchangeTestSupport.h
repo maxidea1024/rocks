@@ -25,11 +25,12 @@ inline constexpr StringView SyntheticDirectory = "Synthetic.rxbundle";
 // 메모리 파일에 주입하는 실패다.
 enum class FileFault : uint8 {
     None,
-    Open,    // 열기 실패
-    Size,    // 크기 조회 실패
-    Read,    // 읽기 실패
-    Short,   // 크기를 실제보다 1 크게 알림(읽는 중 파일이 줄어든 경우)
-    HugeSize // 크기를 UnrealExchangeMaxJsonBytes + 1로 알림(내용 없이 상한 시험)
+    Open,     // 열기 실패
+    Size,     // 크기 조회 실패
+    Read,     // 읽기 실패
+    Short,    // 크기를 실제보다 1 크게 알림(읽는 중 파일이 줄어든 경우)
+    HugeSize, // 크기를 UnrealExchangeMaxJsonBytes + 1로 알림(내용 없이 상한 시험)
+    ReadLate  // 첫 읽기는 성공하고 그다음 읽기부터 실패(조각 경계 뒤의 읽기 실패)
 };
 
 inline constexpr platform::FileStatus FaultStatus{platform::FileCode::SystemError, 0};
@@ -38,7 +39,9 @@ inline constexpr platform::FileStatus FaultStatus{platform::FileCode::SystemErro
 class MemoryHandle final : public platform::FileHandle {
 public:
     platform::FileTransfer Read(void* destination, usize bytes) noexcept override {
-        if (fault == FileFault::Read) {
+        const bool late = fault == FileFault::ReadLate && reads != 0;
+        ++reads;
+        if (fault == FileFault::Read || late) {
             return {FaultStatus, 0};
         }
 
@@ -88,6 +91,7 @@ public:
 
     const Array<uint8>* data = nullptr;
     usize position = 0;
+    usize reads = 0;
     FileFault fault = FileFault::None;
     bool inUse = false;
 };
@@ -186,6 +190,7 @@ public:
                 handle.inUse = true;
                 handle.data = found;
                 handle.position = 0;
+                handle.reads = 0;
                 handle.fault = faulty ? fault : FileFault::None;
                 out = &handle;
                 return {};

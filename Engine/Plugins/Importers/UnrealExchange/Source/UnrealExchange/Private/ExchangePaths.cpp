@@ -3,6 +3,7 @@
 #include <Core/Encoding/Sha256.h>
 #include <Core/Text/NameComponent.h>
 #include <Core/Text/Unicode.h>
+#include <Platform/Memory.h>
 #include <UnrealExchange/UnrealExchangeFormat.h>
 
 // UE 객체 경로 → Rocks 논리 경로 대응이다(Docs/Design/UnrealExchange.ko.md 9.1절, 10.4절 7·13번).
@@ -16,8 +17,11 @@ constexpr usize UnrealPathKeptBytes = UnrealPathComponentMaxBytes - 1 - UnrealPa
 
 constexpr char UnrealPathSeparator = '/';
 constexpr char UnrealObjectSeparator = '.';
-constexpr char UnrealPathReplacement = '_';
-constexpr char UnrealPathPrefix = 'U';
+constexpr StringView UnrealPathSeparatorText = "/";
+constexpr StringView UnrealPathReplacement = "_";
+constexpr StringView UnrealPathPrefix = "U";
+// 대응 중 결과가 커질 수 있는 최대 byte 수다(상한 + 구분자 + 구성 요소 하나).
+constexpr usize UnrealPathMappedCapacity = UnrealPathMaxBytes + 1 + UnrealPathComponentMaxBytes;
 constexpr char UnrealPathHashSeparator = '-';
 constexpr uint8 AsciiControlLast = 0x1f;
 constexpr uint8 AsciiDelete = 0x7f;
@@ -58,7 +62,8 @@ bool IsKeptCodePoint(char32_t point) noexcept {
 }
 
 // 구성 요소 하나를 정리해 out 뒤에 붙인다. original은 UE 구성 요소, prefix는 원래 경로의 그 구성
-// 요소까지 접두(해시 입력)다. 정리 규칙으로 바뀌었으면 renamed를 참으로 둔다.
+// 요소까지 접두(해시 입력)다. 정리 규칙으로 바뀌었으면 renamed를 참으로 둔다. 붙이는 결과는
+// UnrealPathComponentMaxBytes 이하다.
 Result<void> AppendCleanComponent(StringView original, StringView prefix, StringBuilderBase& out,
                                   bool& renamed) noexcept {
     Allocator& allocator = out.GetAllocator();
@@ -67,93 +72,69 @@ Result<void> AppendCleanComponent(StringView original, StringView prefix, String
         return made;
     }
 
-    // 1. 받지 않는 code point를 '_'로 바꾼다.
+    // 1. 받지 않는 code point를 '_'로 바꾼다. 2. 정리한 첫 문자가 L*·N*가 아니면 'U'를 붙인다
+    // (L*이어도 Default_Ignorable이면 '_'가 된다). NFC 결과는 유효한 UTF-8이므로 순회 준비는
+    // 실패하지 않는다.
     StringBuilder<UnrealPathComponentMaxBytes> cleaned(allocator);
     bool changed = false;
-    auto points = normalized.View().TryCodePoints();
-    if (!points) {
-        return Result<void>::Failure(points.Error());
-    }
-
     bool first = true;
-    for (char32_t point : points.Value()) {
+    const CodePointRange points = normalized.View().TryCodePoints().Value();
+    for (auto at = points.begin(); at != points.end(); ++at) {
+        const char32_t point = *at;
         const bool kept = IsKeptCodePoint(point);
-        // 2. 정리한 첫 문자가 L*·N*가 아니면 'U'를 붙인다(L*이어도 Default_Ignorable이면 '_'가
-        // 된다).
-        if (first && !(kept && IsLetterOrNumber(GetGeneralCategory(point)))) {
-            if (auto added = cleaned.TryAppendAscii(UnrealPathPrefix); !added) {
-                return added;
-            }
-
-            changed = true;
-        }
-
+        const bool prefixed = first && !(kept && IsLetterOrNumber(GetGeneralCategory(point)));
         first = false;
-        if (kept) {
-            if (auto added = cleaned.TryAppendCodePoint(static_cast<uint32>(point)); !added) {
-                return added;
-            }
-        } else {
-            if (auto added = cleaned.TryAppendAscii(UnrealPathReplacement); !added) {
-                return added;
-            }
-
-            changed = true;
-        }
+        changed = changed || prefixed || !kept;
+        auto next = at;
+        ++next;
+        const StringView bytes(at.Position(), static_cast<usize>(next.Position() - at.Position()));
+        cleaned.Append(prefixed ? UnrealPathPrefix : StringView())
+            .Append(kept ? bytes : UnrealPathReplacement);
     }
 
-    // 3. Windows 예약 이름이면 'U'를 붙인다(판정은 Core 이름 규칙).
+    if (auto status = cleaned.Status(); !status) {
+        return status;
+    }
+
+    // 3. Windows 예약 이름이면 'U'를 붙인다(판정은 Core 이름 규칙 — 할당 실패만 그 오류다).
     NameComponentError reason = NameComponentError::None;
-    if (auto valid = ValidateNameComponent(cleaned.View(), allocator, &reason); !valid) {
-        if (reason == NameComponentError::None) {
-            return valid;
-        }
+    if (auto valid = ValidateNameComponent(cleaned.View(), allocator, &reason);
+        !valid && reason == NameComponentError::None) {
+        return valid;
     }
 
+    const bool reserved = reason == NameComponentError::ReservedDeviceName;
+    changed = changed || reserved;
     StringBuilder<UnrealPathComponentMaxBytes> named(allocator);
-    if (reason == NameComponentError::ReservedDeviceName) {
-        if (auto added = named.TryAppendAscii(UnrealPathPrefix); !added) {
-            return added;
-        }
-
-        changed = true;
+    named.Append(reserved ? UnrealPathPrefix : StringView()).Append(cleaned.View());
+    if (auto status = named.Status(); !status) {
+        return status;
     }
 
     // 'U' 뒤에 결합 문자가 오면 합성될 수 있으므로 다시 NFC로 정규화한다.
     StringBuilder<UnrealPathComponentMaxBytes> composed(allocator);
-    if (auto added = named.TryAppend(cleaned.View()); !added) {
-        return added;
-    }
-
     if (auto made = TryNormalize(NormalizationForm::NFC, named.View(), composed); !made) {
         return made;
     }
 
     if (!changed && composed.ByteCount() <= UnrealPathComponentMaxBytes) {
-        return out.TryAppend(composed.View());
+        return out.Append(composed.View()).Status();
     }
 
-    // 4. 잘라서 원래 경로 접두의 해시를 붙인다.
+    // 4. 잘라서 원래 경로 접두의 해시를 붙인다(남긴 앞부분 ≤ 55 byte + '-' + 8자 = 64 byte 이하).
     renamed = true;
     const Sha256Digest digest = Sha256::Hash(
         Span<const uint8>(reinterpret_cast<const uint8*>(prefix.Data()), prefix.ByteCount()));
     char hex[Sha256Digest::HexBytes + 1];
     digest.ToHex(hex);
-    StringBuilder<UnrealPathComponentMaxBytes> suffixed(allocator);
-    if (auto added = suffixed.TryAppend(composed.View().LeftBytesAtCodePoint(UnrealPathKeptBytes));
-        !added) {
-        return added;
-    }
-
-    if (auto added = suffixed.TryAppendAscii(UnrealPathHashSeparator); !added) {
-        return added;
-    }
-
-    if (auto added = suffixed.TryAppend(StringView(hex, UnrealPathHashChars)); !added) {
-        return added;
-    }
-
-    return TryNormalize(NormalizationForm::NFC, suffixed.View(), out);
+    const StringView head = composed.View().LeftBytesAtCodePoint(UnrealPathKeptBytes);
+    char suffixed[UnrealPathComponentMaxBytes];
+    platform::MemoryCopy(suffixed, head.Data(), head.ByteCount());
+    usize length = head.ByteCount();
+    suffixed[length++] = UnrealPathHashSeparator;
+    platform::MemoryCopy(suffixed + length, hex, UnrealPathHashChars);
+    length += UnrealPathHashChars;
+    return TryNormalize(NormalizationForm::NFC, StringView(suffixed, length), out);
 }
 
 } // namespace
@@ -253,18 +234,20 @@ Result<void> MapUnrealObjectPath(StringView objectPath, StringView root, StringB
 
     Allocator& allocator = out.GetAllocator();
     if (auto valid = ValidateUnrealImportRoot(root, allocator); !valid) {
-        if (valid.Error() == ErrorCode::InvalidArgument) {
-            outcome.failure = ExchangePathOutcome::Failure::InvalidRoot;
-        }
-
+        outcome.failure = valid.Error() == ErrorCode::InvalidArgument
+                              ? ExchangePathOutcome::Failure::InvalidRoot
+                              : ExchangePathOutcome::Failure::None;
         return valid;
     }
 
+    // 구성 요소를 붙일 때마다 길이를 보므로 결과는 상한 + 구성 요소 하나를 넘지 않는다. 그만큼 미리
+    // 잡아 두면 root·구분자 붙이기는 실패하지 않는다.
     StringBuilder<UnrealPathMaxBytes> mapped(allocator);
-    if (auto added = mapped.TryAppend(root); !added) {
-        return added;
+    if (auto reserved = mapped.TryReserve(UnrealPathMappedCapacity); !reserved) {
+        return reserved;
     }
 
+    mapped.Append(root);
     bool renamed = false;
     usize start = 1;
     const usize size = package.ByteCount();
@@ -273,23 +256,20 @@ Result<void> MapUnrealObjectPath(StringView objectPath, StringView root, StringB
             continue;
         }
 
-        if (auto added = mapped.TryAppendAscii(UnrealPathSeparator); !added) {
-            return added;
-        }
-
+        mapped.Append(UnrealPathSeparatorText);
         if (auto added = AppendCleanComponent(StringView(package.Data() + start, at - start),
                                               StringView(package.Data(), at), mapped, renamed);
             !added) {
             return added;
         }
 
-        start = at + 1;
-    }
+        if (mapped.ByteCount() > UnrealPathMaxBytes) {
+            outcome.failure = ExchangePathOutcome::Failure::TooLong;
+            outcome.renamed = renamed;
+            return Result<void>::Failure(ErrorCode::CapacityExceeded);
+        }
 
-    if (mapped.ByteCount() > UnrealPathMaxBytes) {
-        outcome.failure = ExchangePathOutcome::Failure::TooLong;
-        outcome.renamed = renamed;
-        return Result<void>::Failure(ErrorCode::CapacityExceeded);
+        start = at + 1;
     }
 
     if (auto added = out.TryAppend(mapped.View()); !added) {

@@ -382,10 +382,6 @@ Result<bool> ReadManifestAssets(ReadScope& scope, JsonValue root, Allocator& all
         return OverLimit(scope, list.Position(), "assets");
     }
 
-    if (auto reserved = assets.TryReserve(list.Size()); !reserved) {
-        return Result<bool>::Failure(reserved.Error());
-    }
-
     for (usize index = 0; index < list.Size(); ++index) {
         const JsonValue item = list.At(index);
         if (!item.IsObject()) {
@@ -483,10 +479,6 @@ Result<bool> ReadRedirects(ReadScope& scope, JsonValue root, Span<const Exchange
 
     if (list.Size() > UnrealExchangeMaxRedirects) {
         return OverLimit(scope, list.Position(), "redirects");
-    }
-
-    if (auto reserved = redirects.TryReserve(list.Size()); !reserved) {
-        return Result<bool>::Failure(reserved.Error());
     }
 
     for (usize index = 0; index < list.Size(); ++index) {
@@ -640,10 +632,8 @@ Result<bool> CollectBlobRefs(ReadScope& scope, JsonValue root, Allocator& alloca
     }
 
     while (!pending.IsEmpty()) {
-        const JsonValue value = pending[pending.Size() - 1];
-        if (auto removed = pending.TryRemoveAt(pending.Size() - 1); !removed) {
-            return Result<bool>::Failure(removed.Error());
-        }
+        // 비어 있지 않으므로 꺼내기는 실패하지 않는다.
+        const JsonValue value = pending.TryPopBack().Value();
 
         if (value.IsObject() && value.Find(BlobKey).IsValid()) {
             ExchangeBlobRef blob;
@@ -700,10 +690,6 @@ Result<bool> ReadDependencies(ReadScope& scope, JsonValue root,
 
     if (list.Size() > UnrealExchangeMaxDependencies) {
         return OverLimit(scope, list.Position(), "dependencies");
-    }
-
-    if (auto reserved = dependencies.TryReserve(list.Size()); !reserved) {
-        return Result<bool>::Failure(reserved.Error());
     }
 
     for (usize index = 0; index < list.Size(); ++index) {
@@ -924,16 +910,17 @@ bool IsBlobUseBefore(const BlobUse& left, const BlobUse& right) noexcept {
     }
 
     const uint64 leftKey[] = {left.blob.bytes, static_cast<uint64>(left.blob.layout),
-                              left.blob.components, left.blob.count, left.asset};
+                              left.blob.components, left.blob.count};
     const uint64 rightKey[] = {right.blob.bytes, static_cast<uint64>(right.blob.layout),
-                               right.blob.components, right.blob.count, right.asset};
+                               right.blob.components, right.blob.count};
     for (usize index = 0; index < sizeof(leftKey) / sizeof(leftKey[0]); ++index) {
         if (leftKey[index] != rightKey[index]) {
             return leftKey[index] < rightKey[index];
         }
     }
 
-    return false;
+    // 한 에셋의 같은 사용은 하나로 모았으므로 에셋 번호까지 같은 두 사용은 없다.
+    return left.asset < right.asset;
 }
 
 // 에셋 하나를 blob 오류로 실패시킨다(이미 실패했으면 그대로 둔다).
@@ -1291,12 +1278,8 @@ Result<void> ReadExchangeBundle(platform::FileSystem& files, StringView director
 
 Result<void> ReadExchangeNumber(JsonValue value, double& out) noexcept {
     if (value.IsNumber()) {
-        auto number = value.TryGetDouble();
-        if (!number) {
-            return Result<void>::Failure(number.Error());
-        }
-
-        out = number.Value();
+        // JSON 숫자(Integer·Unsigned·Double)는 언제나 double로 읽힌다.
+        out = value.TryGetDouble().Value();
         return Result<void>::Success();
     }
 

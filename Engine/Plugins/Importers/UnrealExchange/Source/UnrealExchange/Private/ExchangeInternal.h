@@ -46,12 +46,10 @@ struct BlobCheckFailure {
     ErrorCode error = ErrorCode::None;
 };
 
-// directory 아래 relative를 `/`로 이어 out 뒤에 붙인다(directory 끝의 `/`·`\`는 겹치지 않는다).
+// directory 아래 relative를 `/`로 이어 out 뒤에 붙인다(directory가 비었거나 `/`·`\`로 끝나면
+// 구분자를 더하지 않는다). out은 새 builder여야 한다(실패하면 일부만 붙어 있을 수 있다).
 Result<void> AppendBundlePath(StringView directory, StringView relative,
                               StringBuilderBase& out) noexcept;
-
-// blob의 묶음 안 상대 경로 `blobs/<앞 2자>/<64자>.bin`을 out 뒤에 붙인다.
-Result<void> AppendBlobRelativePath(const Sha256Digest& digest, StringBuilderBase& out) noexcept;
 
 // blob 파일 하나의 크기·SHA-256·가변 배치를 확인한다. keep이 있으면 파일 내용을 거기 읽고(먼저
 // 비운다), 없으면 UnrealExchangeBlobChunkBytes 조각으로 흘려 읽는다. 반환: 통과 true, 검사 실패

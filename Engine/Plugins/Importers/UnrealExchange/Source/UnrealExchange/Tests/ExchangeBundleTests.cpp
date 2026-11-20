@@ -177,6 +177,16 @@ TEST(UnrealExchange_ManifestTampering) {
     const ManifestCase cases[] = {
         {"\"formatVersion\": 1,", "\"formatVersion\": 2,", ErrorCode::Unsupported,
          AssetDiagnosticCode::UnsupportedBundleVersion, ExchangeIssue::Version},
+        {"\"formatVersion\": 1,", "\"formatVersion\": 18446744073709551615,",
+         ErrorCode::Unsupported, AssetDiagnosticCode::UnsupportedBundleVersion,
+         ExchangeIssue::Version},
+        {"\"projectSettings\": {", "\"settings\": {", ErrorCode::InvalidArgument,
+         AssetDiagnosticCode::CorruptBundle, ExchangeIssue::MissingKey},
+        {"\"file\": \"assets/Game/Textures/T_Rock.json\"",
+         "\"path\": \"assets/Game/Textures/T_Rock.json\"", ErrorCode::InvalidArgument,
+         AssetDiagnosticCode::CorruptBundle, ExchangeIssue::MissingKey},
+        {"\"from\": \"/Game/Old/MI_Old.MI_Old\",", "\"source\": \"/Game/Old/MI_Old.MI_Old\",",
+         ErrorCode::InvalidArgument, AssetDiagnosticCode::CorruptBundle, ExchangeIssue::MissingKey},
         {"\"formatVersion\": 1,", "\"formatVersion\": -1,", ErrorCode::Unsupported,
          AssetDiagnosticCode::UnsupportedBundleVersion, ExchangeIssue::Version},
         {"\"formatVersion\": 1,", "\"formatVersion\": \"1\",", ErrorCode::InvalidArgument,
@@ -317,8 +327,9 @@ TEST(UnrealExchange_UnknownFieldsWarn) {
     {
         MemoryFiles files(allocator);
         REQUIRE(LoadFixture(allocator, files));
-        REQUIRE(EditFixture(allocator, files, "bundle.json",
-                            "\"createdUtc\":", "\"comment\": \"hello\", \"createdUtc\":"));
+        REQUIRE(EditFixture(
+            allocator, files, "bundle.json", "\"createdUtc\":",
+            "\"comment\": \"hello\", \"environment\": {\"rhi\": \"D3D12\"}, \"createdUtc\":"));
         REQUIRE(EditFixture(allocator, files, "bundle.json", "\"plugin\": \"RocksExport\",",
                             "\"plugin\": \"RocksExport\", \"build\": 7,"));
         REQUIRE(EditFixture(allocator, files, "bundle.json", "\"substrate\": false,",
@@ -326,6 +337,9 @@ TEST(UnrealExchange_UnknownFieldsWarn) {
         REQUIRE(EditFixture(allocator, files, "bundle.json",
                             "\"from\": \"/Game/Old/MI_Old.MI_Old\",",
                             "\"from\": \"/Game/Old/MI_Old.MI_Old\", \"reason\": \"rename\","));
+        REQUIRE(EditFixture(allocator, files, "bundle.json", "\"redirects\": [",
+                            "\"redirects\": [{\"from\": \"/Game/Ol/A.A\", \"to\": "
+                            "\"/Game/Textures/T_Rock.T_Rock\"}, "));
         REQUIRE(EditFixture(allocator, files, "bundle.json",
                             "\"file\": \"assets/Game/Textures/T_Rock.json\"",
                             "\"file\": \"assets/Game/Textures/T_Rock.json\", \"size\": 1"));
@@ -336,11 +350,13 @@ TEST(UnrealExchange_UnknownFieldsWarn) {
         REQUIRE(EditFixture(allocator, files, "assets/Game/Materials/MI_Rock.json",
                             "\"kind\": \"hard\"", "\"kind\": \"hard\", \"via\": \"Parent\""));
         REQUIRE(EditFixture(allocator, files, "assets/Game/Characters/SK_Hero.json",
-                            "\"severity\": \"info\",", "\"severity\": \"info\", \"line\": 3,"));
+                            "\"severity\": \"info\",", "\"severity\": \"warning\", \"line\": 3,"));
         ExchangeBundle bundle(allocator);
         ExchangeDiagnostics diagnostics(allocator);
         REQUIRE(ReadFixture(files, bundle, diagnostics));
         CHECK(diagnostics.Count(AssetDiagnosticCode::UnknownField) == 9);
+        CHECK(bundle.environment.IsObject() &&
+              bundle.environment.Find("rhi").GetString() == StringView("D3D12"));
         CHECK(diagnostics.Count(ExchangeSeverity::Error) == 0);
         for (const ExchangeAsset& asset : bundle.Assets()) {
             CHECK(asset.state != ExchangeAssetState::Failed);
@@ -388,6 +404,14 @@ TEST(UnrealExchange_AssetTampering) {
          "\"objectPath\": 3,", RockTextureAsset, ExchangeIssue::WrongType},
         {"assets/Game/Textures/T_Rock.json", "{\n  \"objectPath\"", "[{\n  \"objectPath\"",
          RockTextureAsset, ExchangeIssue::JsonSyntax},
+        {"assets/Game/Materials/MI_Rock.json", "\"kind\": \"hard\"", "\"type\": \"hard\"",
+         InstanceAsset, ExchangeIssue::MissingKey},
+        {"assets/Game/Characters/SK_Hero.json", "\"code\": \"GeneratedLodBaked\",",
+         "\"id\": \"GeneratedLodBaked\",", SkinnedMeshAsset, ExchangeIssue::MissingKey},
+        {"assets/Game/Characters/SK_Hero.json", "\"severity\": \"info\",", "\"level\": \"info\",",
+         SkinnedMeshAsset, ExchangeIssue::MissingKey},
+        {"assets/Game/Textures/T_Rock.json", "\"class\": \"Texture2D\",",
+         "\"kind\": \"Texture2D\",", RockTextureAsset, ExchangeIssue::MissingKey},
         {"assets/Game/Materials/MI_Rock.json", "\"kind\": \"hard\"", "\"kind\": \"weak\"",
          InstanceAsset, ExchangeIssue::InvalidValue},
         {"assets/Game/Materials/MI_Rock.json", "\"objectPath\": \"/Game/Materials/M_Base.M_Base\",",
@@ -419,6 +443,10 @@ TEST(UnrealExchange_AssetTampering) {
         // blob 참조 형식(3.3절).
         {"assets/Game/Textures/T_Rock.json", "\"count\": 4", "\"counts\": 4", RockTextureAsset,
          ExchangeIssue::MissingKey},
+        {"assets/Game/Textures/T_Rock.json", "\"count\": 4", "\"count\": 18446744073709551615",
+         RockTextureAsset, ExchangeIssue::InvalidValue},
+        {"assets/Game/Textures/T_Rock.json", "\"blob\": \"0334fbb1", "\"blob\": \"+334fbb1",
+         RockTextureAsset, ExchangeIssue::InvalidValue},
         {"assets/Game/Textures/T_Rock.json", "\"count\": 4", "\"count\": -4", RockTextureAsset,
          ExchangeIssue::InvalidValue},
         {"assets/Game/Textures/T_Rock.json", "\"count\": 4", "\"count\": 4.0", RockTextureAsset,

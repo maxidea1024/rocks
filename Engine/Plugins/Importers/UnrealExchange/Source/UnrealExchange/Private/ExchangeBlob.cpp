@@ -3,6 +3,7 @@
 #include <Core/FileError.h>
 #include <MeshSource/MeshSourceTypes.h>
 #include <Object/NameField.h>
+#include <Platform/Memory.h>
 
 // blob 파일 검사와 읽기다(Docs/Design/UnrealExchange.ko.md 3.3절, 10.4절 12번). 크기를 먼저 보고,
 // 읽는 모든 byte를 SHA-256에 넣으면서 가변 배치(MeshAnimationAssets 3.4.1절)를 함께 파싱한다.
@@ -17,23 +18,30 @@ constexpr uint64 BlobWordBytes = 4;
 constexpr uint64 BlobInfluenceBytes = 4;
 constexpr uint64 BlobVec3Bytes = 12;
 constexpr usize BlobHexPrefixChars = 2;
+constexpr StringView BlobDirectoryPrefix = "blobs/";
+constexpr StringView BlobFileSuffix = ".bin";
+// `blobs/<앞 2자>/<64자>.bin`의 byte 수다.
+constexpr usize BlobRelativePathBytes = BlobDirectoryPrefix.ByteCount() + BlobHexPrefixChars + 1 +
+                                        Sha256Digest::HexBytes + BlobFileSuffix.ByteCount();
 
-// 검사할 byte를 차례로 내주는 원천이다. 내준 모든 byte는 SHA-256에 들어간다.
+// 검사할 byte를 차례로 내주는 원천이다. 내준 모든 byte는 SHA-256에 들어간다. 할당하지 않으므로
+// 실패는 "끝·읽기 실패"(false) 하나다.
 class BlobSource {
 public:
-    virtual ~BlobSource() = default;
+    // little-endian uint32 하나를 읽는다. 끝이거나 읽지 못하면 false다.
+    virtual bool ReadWord(uint32& value) noexcept = 0;
 
-    // little-endian uint32 하나를 읽는다. 끝이면 false다.
-    virtual Result<bool> ReadWord(uint32& value) noexcept = 0;
-
-    // bytes를 건너뛴다(해시에는 넣는다). 끝을 넘으면 false다.
-    virtual Result<bool> Skip(uint64 bytes) noexcept = 0;
+    // bytes를 건너뛴다(해시에는 넣는다). 끝을 넘거나 읽지 못하면 false다.
+    virtual bool Skip(uint64 bytes) noexcept = 0;
 
     // 남은 byte 수다.
     virtual uint64 Remaining() const noexcept = 0;
 
-    // 남은 byte를 모두 해시에 넣고 digest를 돌려준다.
-    virtual Result<Sha256Digest> Finish() noexcept = 0;
+    // 남은 byte를 모두 해시에 넣고 digest를 쓴다. 읽지 못하면 false이고 error에 파일 오류를 쓴다.
+    virtual bool Finish(Sha256Digest& digest, ErrorCode& error) noexcept = 0;
+
+protected:
+    ~BlobSource() = default;
 };
 
 uint32 LoadWord(const uint8* bytes) noexcept {
@@ -47,32 +55,33 @@ public:
     explicit MemoryBlobSource(Span<const uint8> bytes) noexcept : bytes_(bytes) {
     }
 
-    Result<bool> ReadWord(uint32& value) noexcept override {
+    bool ReadWord(uint32& value) noexcept override {
         if (Remaining() < BlobWordBytes) {
-            return Result<bool>::Success(false);
+            return false;
         }
 
         value = LoadWord(bytes_.Data() + at_);
         at_ += BlobWordBytes;
-        return Result<bool>::Success(true);
+        return true;
     }
 
-    Result<bool> Skip(uint64 bytes) noexcept override {
+    bool Skip(uint64 bytes) noexcept override {
         if (Remaining() < bytes) {
-            return Result<bool>::Success(false);
+            return false;
         }
 
         at_ += static_cast<usize>(bytes);
-        return Result<bool>::Success(true);
+        return true;
     }
 
     uint64 Remaining() const noexcept override {
         return bytes_.Size() - at_;
     }
 
-    Result<Sha256Digest> Finish() noexcept override {
+    bool Finish(Sha256Digest& digest, ErrorCode&) noexcept override {
         at_ = bytes_.Size();
-        return Result<Sha256Digest>::Success(Sha256::Hash(bytes_));
+        digest = Sha256::Hash(bytes_);
+        return true;
     }
 
 private:
@@ -87,17 +96,11 @@ public:
         : file_(file), chunk_(chunk), remaining_(total) {
     }
 
-    // 마지막 읽기 실패다(성공이면 Success).
-    platform::FileStatus LastStatus() const noexcept {
-        return status_;
-    }
-
-    Result<bool> ReadWord(uint32& value) noexcept override {
+    bool ReadWord(uint32& value) noexcept override {
         uint8 bytes[BlobWordBytes];
         for (uint8& byte : bytes) {
-            auto filled = Fill();
-            if (!filled || !filled.Value()) {
-                return filled;
+            if (!Fill()) {
+                return false;
             }
 
             byte = chunk_[at_++];
@@ -105,56 +108,52 @@ public:
         }
 
         value = LoadWord(bytes);
-        return Result<bool>::Success(true);
+        return true;
     }
 
-    Result<bool> Skip(uint64 bytes) noexcept override {
+    bool Skip(uint64 bytes) noexcept override {
         if (bytes > remaining_) {
-            return Result<bool>::Success(false);
+            return false;
         }
 
         while (bytes != 0) {
-            auto filled = Fill();
-            if (!filled || !filled.Value()) {
-                return filled;
+            if (!Fill()) {
+                return false;
             }
 
-            const usize step = static_cast<usize>(
-                bytes < static_cast<uint64>(filled_ - at_) ? bytes : filled_ - at_);
+            const uint64 available = filled_ - at_;
+            const usize step = static_cast<usize>(bytes < available ? bytes : available);
             at_ += step;
             remaining_ -= step;
             bytes -= step;
         }
 
-        return Result<bool>::Success(true);
+        return true;
     }
 
     uint64 Remaining() const noexcept override {
         return remaining_;
     }
 
-    Result<Sha256Digest> Finish() noexcept override {
-        auto skipped = Skip(remaining_);
-        if (!skipped) {
-            return Result<Sha256Digest>::Failure(skipped.Error());
+    bool Finish(Sha256Digest& digest, ErrorCode& error) noexcept override {
+        if (!Skip(remaining_)) {
+            error = FileErrorCode(status_);
+            return false;
         }
 
-        if (!skipped.Value()) {
-            return Result<Sha256Digest>::Failure(FileErrorCode(status_));
-        }
-
-        return Result<Sha256Digest>::Success(hasher_.Finish());
+        digest = hasher_.Finish();
+        return true;
     }
 
 private:
     // 조각이 비었으면 다음 조각을 읽는다. 남은 byte가 없거나 읽지 못하면 false다(status_에 이유).
-    Result<bool> Fill() noexcept {
+    bool Fill() noexcept {
         if (at_ < filled_) {
-            return Result<bool>::Success(true);
+            return true;
         }
 
         if (remaining_ == 0) {
-            return Result<bool>::Success(false);
+            return false;
         }
 
         const usize want = static_cast<usize>(
@@ -162,13 +161,13 @@ private:
         const platform::FileTransfer read = file_.ReadExact(chunk_.Data(), want);
         if (!read.status) {
             status_ = read.status;
-            return Result<bool>::Success(false);
+            return false;
         }
 
         hasher_.Update(Span<const uint8>(chunk_.Data(), want));
         at_ = 0;
         filled_ = want;
-        return Result<bool>::Success(true);
+        return true;
     }
 
     platform::File& file_;
@@ -181,101 +180,68 @@ private:
 };
 
 // names: count × components개의 (uint32 길이 + byte)를 끝까지 정확히 소비한다.
-Result<bool> ParseNamesLayout(BlobSource& source, const ExchangeBlobRef& blob) noexcept {
+bool ParseNamesLayout(BlobSource& source, const ExchangeBlobRef& blob) noexcept {
     const uint64 total = source.Remaining();
     // 항목마다 길이 word가 있으므로 항목 수는 byte 수 / 4를 넘을 수 없다(곱 넘침 방지).
     if (blob.count > total / BlobWordBytes / blob.components) {
-        return Result<bool>::Success(false);
+        return false;
     }
 
     const uint64 entries = blob.count * blob.components;
     for (uint64 entry = 0; entry < entries; ++entry) {
         uint32 length = 0;
-        auto read = source.ReadWord(length);
-        if (!read || !read.Value()) {
-            return read;
-        }
-
-        if (length > MaxNameFieldBytes) {
-            return Result<bool>::Success(false);
-        }
-
-        auto skipped = source.Skip(length);
-        if (!skipped || !skipped.Value()) {
-            return skipped;
+        if (!source.ReadWord(length) || length > MaxNameFieldBytes || !source.Skip(length)) {
+            return false;
         }
     }
 
-    return Result<bool>::Success(source.Remaining() == 0);
+    return source.Remaining() == 0;
 }
 
 // boneInfluences: 시작 표(count + 1, 첫 값 0, 단조 증가, 차 ≤ MeshMaxSourceInfluences) + 영향.
-Result<bool> ParseInfluencesLayout(BlobSource& source, const ExchangeBlobRef& blob) noexcept {
+bool ParseInfluencesLayout(BlobSource& source, const ExchangeBlobRef& blob) noexcept {
     const uint64 total = source.Remaining();
-    if (blob.count >= total / BlobWordBytes) {
-        return Result<bool>::Success(false);
-    }
-
     uint32 previous = 0;
-    auto read = source.ReadWord(previous);
-    if (!read) {
-        return read;
-    }
-
-    if (previous != 0) {
-        return Result<bool>::Success(false);
+    if (blob.count >= total / BlobWordBytes || !source.ReadWord(previous) || previous != 0) {
+        return false;
     }
 
     for (uint64 index = 0; index < blob.count; ++index) {
         uint32 next = 0;
-        read = source.ReadWord(next);
-        if (!read || !read.Value()) {
-            return read;
-        }
-
-        if (next < previous || next - previous > MeshMaxSourceInfluences) {
-            return Result<bool>::Success(false);
+        if (!source.ReadWord(next) || next < previous ||
+            next - previous > MeshMaxSourceInfluences) {
+            return false;
         }
 
         previous = next;
     }
 
-    return Result<bool>::Success(source.Remaining() == previous * BlobInfluenceBytes);
+    return source.Remaining() == previous * BlobInfluenceBytes;
 }
 
 // sparseVec3: 개수 K + 번호 K(엄격 증가, < count) + Vec3 K.
-Result<bool> ParseSparseLayout(BlobSource& source, const ExchangeBlobRef& blob) noexcept {
+bool ParseSparseLayout(BlobSource& source, const ExchangeBlobRef& blob) noexcept {
     uint32 entries = 0;
-    auto read = source.ReadWord(entries);
-    if (!read || !read.Value()) {
-        return read;
-    }
-
-    if (entries > blob.count ||
+    if (!source.ReadWord(entries) || entries > blob.count ||
         source.Remaining() != static_cast<uint64>(entries) * (BlobWordBytes + BlobVec3Bytes)) {
-        return Result<bool>::Success(false);
+        return false;
     }
 
     uint64 next = 0;
     for (uint32 entry = 0; entry < entries; ++entry) {
         uint32 index = 0;
-        read = source.ReadWord(index);
-        if (!read || !read.Value()) {
-            return read;
-        }
-
-        if (index < next || index >= blob.count) {
-            return Result<bool>::Success(false);
+        if (!source.ReadWord(index) || index < next || index >= blob.count) {
+            return false;
         }
 
         next = static_cast<uint64>(index) + 1;
     }
 
-    return Result<bool>::Success(true);
+    return true;
 }
 
 // 배치를 파싱한다. 고정 크기 배치는 참조를 읽을 때 크기 곱을 확인했으므로 통과다.
-Result<bool> ParseBlobLayout(BlobSource& source, const ExchangeBlobRef& blob) noexcept {
+bool ParseBlobLayout(BlobSource& source, const ExchangeBlobRef& blob) noexcept {
     switch (blob.layout) {
     case ExchangeBlobLayout::Names:
         return ParseNamesLayout(source, blob);
@@ -284,45 +250,36 @@ Result<bool> ParseBlobLayout(BlobSource& source, const ExchangeBlobRef& blob) no
     case ExchangeBlobLayout::SparseVec3:
         return ParseSparseLayout(source, blob);
     default:
-        return Result<bool>::Success(true);
+        return true;
     }
 }
 
-// 배치 파싱과 해시 비교를 한다. 해시가 다르면 배치 결과와 무관하게 BlobHash다(변조가 먼저다).
-Result<bool> FinishBlobCheck(BlobSource& source, const ExchangeBlobRef& blob,
-                             exchange_detail::BlobCheckFailure& failure) noexcept {
-    auto parsed = ParseBlobLayout(source, blob);
-    if (!parsed) {
-        return parsed;
-    }
-
-    auto digest = source.Finish();
-    if (!digest) {
-        failure.issue = ExchangeIssue::ReadFailed;
-        failure.error = digest.Error();
-        return Result<bool>::Success(false);
-    }
-
-    if (!(digest.Value() == blob.digest)) {
-        failure.issue = ExchangeIssue::BlobHash;
-        failure.error = ErrorCode::InvalidArgument;
-        return Result<bool>::Success(false);
-    }
-
-    if (!parsed.Value()) {
-        failure.issue = ExchangeIssue::BlobLayout;
-        failure.error = ErrorCode::InvalidArgument;
-        return Result<bool>::Success(false);
-    }
-
-    return Result<bool>::Success(true);
-}
-
-Result<bool> FailBlobFile(exchange_detail::BlobCheckFailure& failure, ExchangeIssue issue,
-                          ErrorCode error) noexcept {
+bool FailBlobFile(exchange_detail::BlobCheckFailure& failure, ExchangeIssue issue,
+                  ErrorCode error) noexcept {
     failure.issue = issue;
     failure.error = error;
-    return Result<bool>::Success(false);
+    return false;
+}
+
+// 배치 파싱과 해시 비교를 한다. 읽기 실패가 먼저, 그다음 해시(변조), 마지막이 배치다.
+bool FinishBlobCheck(BlobSource& source, const ExchangeBlobRef& blob,
+                     exchange_detail::BlobCheckFailure& failure) noexcept {
+    const bool parsed = ParseBlobLayout(source, blob);
+    Sha256Digest digest;
+    ErrorCode error = ErrorCode::None;
+    if (!source.Finish(digest, error)) {
+        return FailBlobFile(failure, ExchangeIssue::ReadFailed, error);
+    }
+
+    if (!(digest == blob.digest)) {
+        return FailBlobFile(failure, ExchangeIssue::BlobHash, ErrorCode::InvalidArgument);
+    }
+
+    if (!parsed) {
+        return FailBlobFile(failure, ExchangeIssue::BlobLayout, ErrorCode::InvalidArgument);
+    }
+
+    return true;
 }
 
 } // namespace
@@ -376,54 +333,31 @@ namespace exchange_detail {
 
 Result<void> AppendBundlePath(StringView directory, StringView relative,
                               StringBuilderBase& out) noexcept {
-    if (auto added = out.TryAppend(directory); !added) {
-        return added;
-    }
-
     const usize size = directory.ByteCount();
     const bool separated =
-        size != 0 && (directory.Data()[size - 1] == '/' || directory.Data()[size - 1] == '\\');
-    if (!separated && size != 0) {
-        if (auto added = out.TryAppendAscii('/'); !added) {
-            return added;
-        }
-    }
-
-    return out.TryAppend(relative);
-}
-
-Result<void> AppendBlobRelativePath(const Sha256Digest& digest, StringBuilderBase& out) noexcept {
-    char hex[Sha256Digest::HexBytes + 1];
-    digest.ToHex(hex);
-    if (auto added = out.TryAppend("blobs/"); !added) {
-        return added;
-    }
-
-    if (auto added = out.TryAppend(StringView(hex, BlobHexPrefixChars)); !added) {
-        return added;
-    }
-
-    if (auto added = out.TryAppendAscii('/'); !added) {
-        return added;
-    }
-
-    if (auto added = out.TryAppend(StringView(hex, Sha256Digest::HexBytes)); !added) {
-        return added;
-    }
-
-    return out.TryAppend(".bin");
+        size == 0 || directory.Data()[size - 1] == '/' || directory.Data()[size - 1] == '\\';
+    out.Append(directory).Append(separated ? StringView() : StringView("/")).Append(relative);
+    return out.Status();
 }
 
 Result<bool> CheckBlobFile(platform::FileSystem& files, StringView directory,
                            const ExchangeBlobRef& blob, Allocator& allocator, Array<uint8>* keep,
                            BlobCheckFailure& failure) noexcept {
-    StringBuilder<256> relative(allocator);
-    if (auto made = AppendBlobRelativePath(blob.digest, relative); !made) {
-        return Result<bool>::Failure(made.Error());
-    }
-
+    // 묶음 안 상대 경로 `blobs/<앞 2자>/<64자>.bin`이다.
+    char hex[Sha256Digest::HexBytes + 1];
+    blob.digest.ToHex(hex);
+    char relative[BlobRelativePathBytes];
+    platform::MemoryCopy(relative, BlobDirectoryPrefix.Data(), BlobDirectoryPrefix.ByteCount());
+    usize at = BlobDirectoryPrefix.ByteCount();
+    platform::MemoryCopy(relative + at, hex, BlobHexPrefixChars);
+    at += BlobHexPrefixChars;
+    relative[at++] = '/';
+    platform::MemoryCopy(relative + at, hex, Sha256Digest::HexBytes);
+    at += Sha256Digest::HexBytes;
+    platform::MemoryCopy(relative + at, BlobFileSuffix.Data(), BlobFileSuffix.ByteCount());
     StringBuilder<512> path(allocator);
-    if (auto made = AppendBundlePath(directory, relative.View(), path); !made) {
+    if (auto made = AppendBundlePath(directory, StringView(relative, BlobRelativePathBytes), path);
+        !made) {
         return Result<bool>::Failure(made.Error());
     }
 
@@ -431,17 +365,20 @@ Result<bool> CheckBlobFile(platform::FileSystem& files, StringView directory,
     if (const platform::FileStatus opened = file.Open(files, path.CString(), path.ByteCount(),
                                                       platform::FileOpenMode::ReadExisting);
         !opened) {
-        return FailBlobFile(failure, ExchangeIssue::ReadFailed, FileErrorCode(opened));
+        return Result<bool>::Success(
+            FailBlobFile(failure, ExchangeIssue::ReadFailed, FileErrorCode(opened)));
     }
 
     uint64 size = 0;
     if (const platform::FileStatus sized = file.Size(size); !sized) {
-        return FailBlobFile(failure, ExchangeIssue::ReadFailed, FileErrorCode(sized));
+        return Result<bool>::Success(
+            FailBlobFile(failure, ExchangeIssue::ReadFailed, FileErrorCode(sized)));
     }
 
     // 크기를 먼저 본다(조작된 크기로 큰 할당을 만들지 못하게).
     if (size != blob.bytes) {
-        return FailBlobFile(failure, ExchangeIssue::BlobSize, ErrorCode::InvalidArgument);
+        return Result<bool>::Success(
+            FailBlobFile(failure, ExchangeIssue::BlobSize, ErrorCode::InvalidArgument));
     }
 
     if (keep != nullptr) {
@@ -451,18 +388,15 @@ Result<bool> CheckBlobFile(platform::FileSystem& files, StringView directory,
         }
 
         const platform::FileTransfer read = file.ReadExact(keep->Data(), keep->Size());
-        if (!read.status) {
-            keep->Clear();
-            return FailBlobFile(failure, ExchangeIssue::ReadFailed, FileErrorCode(read.status));
-        }
-
         MemoryBlobSource source(keep->View());
-        auto checked = FinishBlobCheck(source, blob, failure);
-        if (!checked || !checked.Value()) {
+        const bool checked = read.status ? FinishBlobCheck(source, blob, failure)
+                                         : FailBlobFile(failure, ExchangeIssue::ReadFailed,
+                                                        FileErrorCode(read.status));
+        if (!checked) {
             keep->Clear();
         }
 
-        return checked;
+        return Result<bool>::Success(checked);
     }
 
     Array<uint8> chunk(allocator);
@@ -473,7 +407,7 @@ Result<bool> CheckBlobFile(platform::FileSystem& files, StringView directory,
     }
 
     FileBlobSource source(file, size, chunk);
-    return FinishBlobCheck(source, blob, failure);
+    return Result<bool>::Success(FinishBlobCheck(source, blob, failure));
 }
 
 } // namespace exchange_detail

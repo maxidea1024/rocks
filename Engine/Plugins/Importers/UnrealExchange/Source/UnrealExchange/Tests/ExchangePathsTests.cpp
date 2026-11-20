@@ -274,29 +274,42 @@ TEST(UnrealExchange_MapPathFailures) {
         CHECK(outcome.failure == ExchangePathOutcome::Failure::InvalidRoot);
         CHECK(out.IsEmpty());
 
-        StringBuilder<256> expected(allocator);
-        REQUIRE(MapUnrealObjectPath("/Game/My Props/\xCC\x81 x.x", DefaultRoot, expected, outcome));
-        uint32 failures = 0;
-        for (uint64 attempt = 1;; ++attempt) {
-            test::NFailAllocator failing(allocator);
-            StringBuilder<8> small(failing);
-            failing.FailOnAttempt(attempt);
-            ExchangePathOutcome result;
-            auto made =
-                MapUnrealObjectPath("/Game/My Props/\xCC\x81 x.x", DefaultRoot, small, result);
-            if (!made) {
-                CHECK(made.Error() == ErrorCode::OutOfMemory && small.IsEmpty());
-                ++failures;
-                continue;
-            }
+        // 짧은 경로, 그리고 64 byte를 넘는 정리(builder가 자람)·예약 이름·결합 문자 root(검사에
+        // 할당이 든다)를 함께 쓰는 경로.
+        StringBuilder<16> longPath(allocator);
+        REQUIRE(longPath.TryAppend("/Game/con/\xCC\x81"));
+        for (uint32 index = 0; index < 25; ++index) {
+            REQUIRE(longPath.TryAppend("\xEA\xB0\x80"));
+        }
 
-            CHECK(small.View() == expected.View());
-            if (failing.Attempts() < attempt) {
-                break;
+        REQUIRE(longPath.TryAppend(" z.x"));
+        const StringView paths[] = {"/Game/My Props/\xCC\x81 x.x", longPath.View()};
+        const StringView roots[] = {DefaultRoot, "/Game/x\xCC\x81"};
+        uint32 failures = 0;
+        for (usize which = 0; which < 2; ++which) {
+            StringBuilder<256> expected(allocator);
+            REQUIRE(MapUnrealObjectPath(paths[which], roots[which], expected, outcome));
+            for (uint64 attempt = 1;; ++attempt) {
+                test::NFailAllocator failing(allocator);
+                StringBuilder<8> small(failing);
+                failing.FailOnAttempt(attempt);
+                ExchangePathOutcome result;
+                auto made = MapUnrealObjectPath(paths[which], roots[which], small, result);
+                if (!made) {
+                    CHECK(made.Error() == ErrorCode::OutOfMemory && small.IsEmpty());
+                    CHECK(result.failure == ExchangePathOutcome::Failure::None);
+                    ++failures;
+                    continue;
+                }
+
+                CHECK(small.View() == expected.View());
+                if (failing.Attempts() < attempt) {
+                    break;
+                }
             }
         }
 
-        CHECK(failures > 3);
+        CHECK(failures > 12);
     }
 
     CHECK(allocator.Stats().liveAllocations == 0);
@@ -326,7 +339,12 @@ TEST(UnrealExchange_MapPathFuzz) {
                                      "lpt",
                                      "e\xCC\x81",
                                      "\xE1\x85\x9F",
-                                     "\xEF\xBC\xA1"};
+                                     "\xEF\xBC\xA1",
+                                     "\xC7\x85",
+                                     "\xCA\xB0",
+                                     "\xE2\x85\xA3",
+                                     "\xE0\xA4\xBE",
+                                     "\xE2\x83\x9D"};
         constexpr uint32 PieceCount = sizeof(pieces) / sizeof(pieces[0]);
         RandomStream random(PathFuzzSeed);
         uint32 mapped = 0;
