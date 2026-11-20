@@ -1384,25 +1384,28 @@ TEST(LogStructureDoesNotAllocateAfterStart) {
     }
 }
 
-// LogLine::Write(Lazy)도 펼치기를 받는다.
+// LogLine::Write(Lazy)도 펼치기를 받는다. Lazy는 Trace·Debug에만 있으므로 Debug가 컴파일에서 빠진
+// 구성(Release)에서는 기록 자체가 없어 건너뛴다.
 TEST(LogStructureLazyLineWrite) {
-    ResetUninstalledDrops();
-    SystemAllocator allocator;
-    static MessageSink sink;
-    LogSystem logs(allocator, Config(LogMode::Manual));
-    sink.bytes = 0;
-    REQUIRE(logs.AddSink(sink).IsOk());
-    REQUIRE(logs.Start().IsOk());
-    {
-        LogInstallScope installed(logs);
-        Log::DebugLazy(LogStructureTests, [](LogLine& line) noexcept {
-            line.Write("lazy {@P}", Point{1, 2});
-            line.Write(" then {@E}", Empty{});
-        });
-        CHECK(logs.Pump() == 1);
-    }
+    if constexpr (LogLevel::Debug >= LogCompiledMinimum) {
+        ResetUninstalledDrops();
+        SystemAllocator allocator;
+        static MessageSink sink;
+        LogSystem logs(allocator, Config(LogMode::Manual));
+        sink.bytes = 0;
+        REQUIRE(logs.AddSink(sink).IsOk());
+        REQUIRE(logs.Start().IsOk());
+        {
+            LogInstallScope installed(logs);
+            Log::DebugLazy(LogStructureTests, [](LogLine& line) noexcept {
+                line.Write("lazy {@P}", Point{1, 2});
+                line.Write(" then {@E}", Empty{});
+            });
+            CHECK(logs.Pump() == 1);
+        }
 
-    CHECK(sink.View() == "lazy Point { X: 1, Y: 2 } then Empty {}\n");
+        CHECK(sink.View() == "lazy Point { X: 1, Y: 2 } then Empty {}\n");
+    }
 }
 
 namespace {
