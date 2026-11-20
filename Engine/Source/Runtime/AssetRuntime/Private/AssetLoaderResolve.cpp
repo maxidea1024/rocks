@@ -112,6 +112,7 @@ Result<void> AssetLoader::Impl::Initialize(AssetDiagnostic* failure) noexcept {
     ErrorCode sized = ErrorCode::None;
     LoaderKeepFirst(sized, entryUnit.TryResize(count));
     LoaderKeepFirst(sized, entryLoaded.TryResize(count));
+    LoaderKeepFirst(sized, publishedHolds.TryResize(count));
     LoaderKeepFirst(sized, tarjanIndex.TryResize(count));
     LoaderKeepFirst(sized, tarjanLow.TryResize(count));
     LoaderKeepFirst(sized, tarjanOnStack.TryResize(count));
@@ -122,6 +123,7 @@ Result<void> AssetLoader::Impl::Initialize(AssetDiagnostic* failure) noexcept {
     for (usize index = 0; index < count; ++index) {
         entryUnit[index] = LoaderNoIndex;
         entryLoaded[index] = LoaderNoIndex;
+        publishedHolds[index] = 0;
         tarjanIndex[index] = LoaderNoIndex;
     }
 
@@ -144,8 +146,25 @@ uint32 AssetLoader::Impl::TakeUnitSlot() noexcept {
     return index;
 }
 
+bool AssetLoader::Impl::IsBeforePublish(AssetLoaderUnitPhase phase) noexcept {
+    return phase == AssetLoaderUnitPhase::Queued || phase == AssetLoaderUnitPhase::Loading ||
+           phase == AssetLoaderUnitPhase::Ready;
+}
+
+void AssetLoader::Impl::ReleasePublishedHolds(LoaderUnit& unit) noexcept {
+    if (unit.publishedHeld) {
+        for (uint32 entry : unit.publishedDeps) {
+            --publishedHolds[entry];
+        }
+    }
+
+    unit.publishedDeps.Clear();
+    unit.publishedHeld = false;
+}
+
 void AssetLoader::Impl::FreeUnitSlot(uint32 index) noexcept {
     LoaderUnit& unit = units[index];
+    ReleasePublishedHolds(unit);
     unit.used = false;
     unit.members.Clear();
     unit.jobs.Clear();
@@ -358,6 +377,19 @@ Result<uint32> AssetLoader::Impl::Resolve(uint32 rootEntry) noexcept {
                 // PostLoad를 마친 패키지는 단위가 없다(entryUnit 없음). PostLoading 단위는
                 // 공개됐어도 이 단위의 PostLoad가 기다리는 의존이다.
                 const uint32 target = HardTarget(member, position);
+                // PostLoad까지 마친 공개 패키지는 단위가 없다 — 공개 보유로 붙잡는다(11.7절 2).
+                if (target != LoaderNoIndex && entryUnit[target] == LoaderNoIndex &&
+                    entryLoaded[target] != LoaderNoIndex) {
+                    if (!units[unit].publishedDeps.Contains(target)) {
+                        if (auto pushed = units[unit].publishedDeps.TryPushBack(target); !pushed) {
+                            unmark();
+                            return fail(pushed.Error());
+                        }
+                    }
+
+                    continue;
+                }
+
                 const uint32 other = target == LoaderNoIndex ? LoaderNoIndex : entryUnit[target];
                 if (other == LoaderNoIndex || other == unit ||
                     units[unit].dependencies.Contains(other)) {
@@ -372,14 +404,19 @@ Result<uint32> AssetLoader::Impl::Resolve(uint32 rootEntry) noexcept {
         }
     }
 
-    // 대상 단위의 dependents·목록 용량을 미리 잡는다(아래 잇기는 할당하지 않는다).
+    // 대상 단위의 dependents·목록 용량을 미리 잡는다(아래 잇기는 할당하지 않는다). 의존 단위가
+    // PostLoad를 마치면 그 구성 패키지가 공개 보유로 넘어오므로(FinishUnit) 그 용량도 잡는다.
     ErrorCode reserved = ErrorCode::None;
     for (uint32 unit : newUnits) {
+        usize transferable = units[unit].publishedDeps.Size();
         for (uint32 other : units[unit].dependencies) {
             LoaderUnit& target = units[other];
             LoaderKeepFirst(
                 reserved, target.dependents.TryReserve(target.dependents.Size() + newUnits.Size()));
+            transferable += target.members.Size();
         }
+
+        LoaderKeepFirst(reserved, units[unit].publishedDeps.TryReserve(transferable));
     }
 
     LoaderKeepFirst(reserved, admitCandidates.TryReserve(units.Size()));
@@ -400,6 +437,11 @@ Result<uint32> AssetLoader::Impl::Resolve(uint32 rootEntry) noexcept {
         made.priority = LoadPriority::Low;
         made.sequence = nextSequence++;
         made.queuedAt = admissions;
+        for (uint32 entry : made.publishedDeps) {
+            ++publishedHolds[entry];
+        }
+
+        made.publishedHeld = true;
         for (uint32 other : made.dependencies) {
             LoaderUnit& target = units[other];
             (void)target.dependents.TryPushBack(unit);

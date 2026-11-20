@@ -37,6 +37,8 @@ void AssetLoader::Impl::InstantiateUnit(uint32 unit) noexcept {
     LoaderKeepFirst(step, roots.TryResize(count));
     LoaderKeepFirst(step, loadedRoots.TryReserve(loadedRoots.Size() + count));
     LoaderKeepFirst(step, loadedHandles.TryReserve(loadedHandles.Size() + count));
+    LoaderKeepFirst(step, slotStates.TryReserve(slotStates.Size() + count));
+    LoaderKeepFirst(step, published.TryReserve(published.Size() + pendingPublished + count));
     if (step != ErrorCode::None) {
         diagnostic.error = step;
         FailUnit(unit, units[unit].members[0], step, diagnostic);
@@ -80,13 +82,28 @@ void AssetLoader::Impl::InstantiateUnit(uint32 unit) noexcept {
     }
 
     LoaderUnit& target = units[unit];
-    // jobs와 members는 같은 순서다(허가 때 members 순서로 만들었다).
+    // jobs와 members는 같은 순서다(허가 때 members 순서로 만들었다). ReleaseRetired가 돌려준 칸을
+    // 먼저 다시 쓴다(용량은 위에서 잡았다). 넘겨받을 기록은 PostLoad가 끝날 때(FinishUnit) 낸다.
+    pendingPublished += count;
     for (usize index = 0; index < count; ++index) {
         const uint32 member = target.jobs[index]->entry;
-        entryLoaded[member] = static_cast<uint32>(loadedRoots.Size());
-        (void)loadedRoots.TryPushBack(Move(roots[index]));
-        (void)loadedHandles.TryPushBack(handles[index]);
+        if (!freeLoadedSlots.IsEmpty()) {
+            // 비어 있지 않음을 위에서 봤다 — 꺼내기는 실패하지 않는다.
+            const uint32 slot = freeLoadedSlots.TryPopBack().Value();
+            entryLoaded[member] = slot;
+            loadedRoots[slot] = Move(roots[index]);
+            loadedHandles[slot] = handles[index];
+            slotStates[slot] = static_cast<uint8>(LoaderSlot::Published);
+        } else {
+            entryLoaded[member] = static_cast<uint32>(loadedRoots.Size());
+            (void)loadedRoots.TryPushBack(Move(roots[index]));
+            (void)loadedHandles.TryPushBack(handles[index]);
+            (void)slotStates.TryPushBack(static_cast<uint8>(LoaderSlot::Published));
+        }
     }
+
+    // 공개됐으니 공개 보유는 Commit이 보고한 간선 다중도가 대신한다(11.7절 2).
+    ReleasePublishedHolds(target);
 
     // 기대는 단위는 공개를 기다리지 않게 되지만(공개 대기 수), PostLoad는 이 단위가 끝날
     // 때까지 기다린다(의존 목록에 남긴다).
@@ -120,8 +137,26 @@ void AssetLoader::Impl::FinishUnit(uint32 unit) noexcept {
     }
 
     target.requests.Clear();
+    // PostLoad까지 끝났으니 AssetManager가 넘겨받을 기록을 낸다(용량은 공개 때 잡았다).
+    const uint64 group = nextPublishedGroup++;
+    for (uint32 member : target.members) {
+        const uint32 slot = entryLoaded[member];
+        (void)published.TryPushBack(
+            AssetLoaderPublished{EntryAsset(member), loadedHandles[slot], group, slot});
+    }
+
+    pendingPublished -= target.members.Size();
     for (uint32 other : target.dependents) {
-        RemoveValue(units[other].dependencies, unit);
+        LoaderUnit& dependent = units[other];
+        RemoveValue(dependent.dependencies, unit);
+        // 아직 공개 전인 기대는 단위는 이 단위의 패키지를 공개 보유로 이어서 붙잡는다(11.7절 2 —
+        // 단위가 사라져도 import 대상이 Discard되지 않게). 용량은 해석 때 잡았다.
+        if (dependent.publishedHeld && IsBeforePublish(dependent.phase)) {
+            for (uint32 member : target.members) {
+                (void)dependent.publishedDeps.TryPushBack(member);
+                ++publishedHolds[member];
+            }
+        }
     }
 
     for (uint32 member : target.members) {
@@ -237,8 +272,13 @@ void AssetLoader::Impl::ShutdownAll() noexcept {
 
     loadedRoots.Clear();
     loadedHandles.Clear();
+    slotStates.Clear();
+    freeLoadedSlots.Clear();
+    published.Clear();
+    pendingPublished = 0;
     for (usize index = 0; index < entryLoaded.Size(); ++index) {
         entryLoaded[index] = LoaderNoIndex;
+        publishedHolds[index] = 0;
     }
 }
 

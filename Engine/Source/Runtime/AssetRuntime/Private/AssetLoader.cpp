@@ -610,7 +610,7 @@ Result<void> AssetLoader::Describe(AssetLoaderSnapshot& out) const noexcept {
         }
     }
 
-    out.loadedPackages = static_cast<uint32>(impl.loadedRoots.Size());
+    out.loadedPackages = static_cast<uint32>(impl.loadedRoots.Size() - impl.freeLoadedSlots.Size());
     out.packagesInFlight = impl.packagesInFlight;
     out.tempBytesInFlight = impl.tempBytesInFlight;
     out.syncWaits = impl.syncWaits;
@@ -645,6 +645,136 @@ Result<ObjectHandle> AssetLoader::FindPackage(AssetId asset) noexcept {
     }
 
     return Result<ObjectHandle>::Success(impl_->loadedHandles[loaded]);
+}
+
+Result<void> AssetLoader::TakePublished(Array<AssetLoaderPublished>& out) noexcept {
+    if (impl_ == nullptr) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    Impl& impl = *impl_;
+    if (!impl.OnOwnerThread()) {
+        return Result<void>::Failure(ErrorCode::WrongThread);
+    }
+
+    if (impl.inCallback) {
+        return Result<void>::Failure(ErrorCode::WrongContext);
+    }
+
+    if (auto appended = out.TryAppend(impl.published.View()); !appended) {
+        return appended;
+    }
+
+    impl.published.Clear();
+    return Result<void>::Success();
+}
+
+Result<uint32> AssetLoader::PublishedHolds(AssetId asset) const noexcept {
+    if (impl_ == nullptr) {
+        return Result<uint32>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (!impl_->OnOwnerThread()) {
+        return Result<uint32>::Failure(ErrorCode::WrongThread);
+    }
+
+    const CookedManifestEntry* found = config_.manifest->Find(asset);
+    if (found == nullptr) {
+        return Result<uint32>::Failure(ErrorCode::NotFound);
+    }
+
+    return Result<uint32>::Success(impl_->publishedHolds[impl_->EntryIndex(found)]);
+}
+
+Result<void> AssetLoader::RetirePublished(Span<const AssetId> assets) noexcept {
+    if (impl_ == nullptr) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    Impl& impl = *impl_;
+    if (!impl.OnOwnerThread()) {
+        return Result<void>::Failure(ErrorCode::WrongThread);
+    }
+
+    if (impl.inCallback) {
+        return Result<void>::Failure(ErrorCode::WrongContext);
+    }
+
+    if (impl.shutDown) {
+        return Result<void>::Failure(ErrorCode::ShuttingDown);
+    }
+
+    // 모두 확인한 뒤에만 바꾼다: 매니페스트에 있고, PostLoad까지 마친 공개 패키지이고(단위 없음),
+    // 공개 보유가 없고, 같은 id가 두 번 나오지 않는다. 바꾸기는 할당하지 않는다(칸을 퇴출로 표시).
+    for (usize index = 0; index < assets.Size(); ++index) {
+        const CookedManifestEntry* found = config_.manifest->Find(assets[index]);
+        if (found == nullptr) {
+            return Result<void>::Failure(ErrorCode::NotFound);
+        }
+
+        const uint32 entry = impl.EntryIndex(found);
+        if (impl.entryLoaded[entry] == LoaderNoIndex || impl.entryUnit[entry] != LoaderNoIndex ||
+            impl.publishedHolds[entry] != 0) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        for (usize earlier = 0; earlier < index; ++earlier) {
+            if (assets[earlier] == assets[index]) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
+        }
+    }
+
+    for (AssetId asset : assets) {
+        const uint32 entry = impl.EntryIndex(config_.manifest->Find(asset));
+        impl.slotStates[impl.entryLoaded[entry]] = static_cast<uint8>(LoaderSlot::Retired);
+        impl.entryLoaded[entry] = LoaderNoIndex;
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> AssetLoader::ReleaseRetired(Span<const uint32> slots) noexcept {
+    if (impl_ == nullptr) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    Impl& impl = *impl_;
+    if (!impl.OnOwnerThread()) {
+        return Result<void>::Failure(ErrorCode::WrongThread);
+    }
+
+    if (impl.inCallback) {
+        return Result<void>::Failure(ErrorCode::WrongContext);
+    }
+
+    for (usize index = 0; index < slots.Size(); ++index) {
+        const uint32 slot = slots[index];
+        if (slot >= impl.slotStates.Size() ||
+            impl.slotStates[slot] != static_cast<uint8>(LoaderSlot::Retired)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        for (usize earlier = 0; earlier < index; ++earlier) {
+            if (slots[earlier] == slot) {
+                return Result<void>::Failure(ErrorCode::InvalidArgument);
+            }
+        }
+    }
+
+    if (auto reserved = impl.freeLoadedSlots.TryReserve(impl.freeLoadedSlots.Size() + slots.Size());
+        !reserved) {
+        return reserved;
+    }
+
+    for (uint32 slot : slots) {
+        impl.loadedRoots[slot].Reset();
+        impl.loadedHandles[slot] = ObjectHandle{};
+        impl.slotStates[slot] = static_cast<uint8>(LoaderSlot::Free);
+        (void)impl.freeLoadedSlots.TryPushBack(slot);
+    }
+
+    return Result<void>::Success();
 }
 
 Result<void> AssetLoader::Shutdown() noexcept {

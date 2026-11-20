@@ -42,6 +42,14 @@ enum class LoaderRetire : uint8 {
     Abandon
 };
 
+// RootRef 칸의 상태다(11.7절 2): 빈 칸, 공개(entryLoaded가 가리킴), 퇴출(RetirePublished 뒤 —
+// RootRef만 쥐고 ReleaseRetired를 기다림).
+enum class LoaderSlot : uint8 {
+    Free,
+    Published,
+    Retired
+};
+
 struct LoaderCompletionQueue;
 
 // 패키지 하나의 로드 작업이다. 주소가 고정이어야 하므로(IO·worker가 포인터를 쥔다) 하나씩 할당한다.
@@ -162,7 +170,7 @@ struct LoaderRequest {
 struct LoaderUnit {
     explicit LoaderUnit(Allocator& allocator) noexcept
         : members(allocator), jobs(allocator), dependencies(allocator), dependents(allocator),
-          requests(allocator) {
+          requests(allocator), publishedDeps(allocator) {
     }
 
     bool used = false;
@@ -176,6 +184,11 @@ struct LoaderUnit {
     Array<uint32> dependents;
     // 이 단위의 패키지를 기다리는 Pending 요청이다.
     Array<uint32> requests;
+    // 이 단위가 Hard로 기대는 공개된(PostLoad까지 마친) 패키지 항목이다(11.7절 2 — 공개 보유).
+    // 해석 때 만난 것과 의존 단위가 끝나며 넘어온 것이고, 용량은 해석 때 미리 잡는다.
+    Array<uint32> publishedDeps;
+    // publishedDeps의 보유를 publishedHolds에 걸었는지다(놓을 때 한 번만 놓는다).
+    bool publishedHeld = false;
     uint32 unadmittedDependencies = 0;
     uint32 waitingDependencies = 0;
     uint32 interest = 0;
@@ -245,11 +258,12 @@ struct AssetLoader::Impl {
         : owner(owner), config(config), allocator(*config.allocator),
           access(config.registry->OwnerAccess()), root(allocator), entryUnit(allocator),
           entryLoaded(allocator), keyBytes(allocator), keyOffsets(allocator), keyOrder(allocator),
-          loadedRoots(allocator), loadedHandles(allocator), requests(allocator), units(allocator),
-          admitCandidates(allocator), readyUnits(allocator), postLoadUnits(allocator),
-          tarjanIndex(allocator), tarjanLow(allocator), tarjanOnStack(allocator),
-          tarjanVisited(allocator), tarjanFrames(allocator), tarjanStack(allocator),
-          sccMembers(allocator), sccStarts(allocator), newUnits(allocator),
+          loadedRoots(allocator), loadedHandles(allocator), slotStates(allocator),
+          freeLoadedSlots(allocator), publishedHolds(allocator), published(allocator),
+          requests(allocator), units(allocator), admitCandidates(allocator), readyUnits(allocator),
+          postLoadUnits(allocator), tarjanIndex(allocator), tarjanLow(allocator),
+          tarjanOnStack(allocator), tarjanVisited(allocator), tarjanFrames(allocator),
+          tarjanStack(allocator), sccMembers(allocator), sccStarts(allocator), newUnits(allocator),
           dependencyCounts(allocator), workStack(allocator) {
     }
 
@@ -273,9 +287,19 @@ struct AssetLoader::Impl {
     Array<char> keyBytes;
     Array<uint64> keyOffsets;
     Array<uint32> keyOrder;
-    // 공개한 패키지다.
+    // 공개한 패키지다. 칸 상태(LoaderSlot)는 빈 칸·공개·퇴출이고, ReleaseRetired가 돌려준 칸은
+    // freeLoadedSlots로 다시 쓴다.
     Array<RootRef<Object>> loadedRoots;
     Array<ObjectHandle> loadedHandles;
+    Array<uint8> slotStates;
+    Array<uint32> freeLoadedSlots;
+    // 항목마다 그 공개 패키지에 기대는 진행 중 단위 수다(11.7절 2 — 공개 보유).
+    Array<uint32> publishedHolds;
+    // TakePublished가 꺼내 갈 기록(PostLoad까지 끝난 패키지)과 다음 순번이다. pendingPublished는
+    // 공개됐지만 아직 PostLoad 중인 패키지 수다(그 기록 용량을 공개 때 미리 잡는다).
+    Array<AssetLoaderPublished> published;
+    usize pendingPublished = 0;
+    uint64 nextPublishedGroup = 0;
 
     Array<LoaderRequest> requests;
     uint32 freeRequest = LoaderNoIndex;
@@ -342,6 +366,11 @@ struct AssetLoader::Impl {
 
     // 단위 칸 하나를 꺼낸다(용량은 호출자가 미리 잡았다 — 할당하지 않는다).
     uint32 TakeUnitSlot() noexcept;
+
+    static bool IsBeforePublish(AssetLoaderUnitPhase phase) noexcept;
+
+    // 단위가 건 공개 보유를 놓는다(공개·실패·버림·칸 반납 — 한 번만, 11.7절 2).
+    void ReleasePublishedHolds(LoaderUnit& unit) noexcept;
 
     void FreeUnitSlot(uint32 index) noexcept;
 
