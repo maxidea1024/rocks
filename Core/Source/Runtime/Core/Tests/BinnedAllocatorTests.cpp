@@ -624,7 +624,8 @@ static void CheckOwnershipChecksRejectWithoutStateChange(bool threadCaches) {
               ErrorCode::NotFound);
         CHECK(allocator.Deallocate(static_cast<uint8*>(tiny.Value()) + 8).Error() ==
               ErrorCode::NotFound);
-        const uptr slabStart = reinterpret_cast<uptr>(small.Value()) & ~(SlabBytes - 1);
+        const uptr slabStart = BinnedAllocatorTestAccess::SlabStart(allocator, small.Value());
+        REQUIRE(slabStart != 0);
         CHECK(allocator.Deallocate(reinterpret_cast<void*>(slabStart)).Error() ==
               ErrorCode::NotFound);
         CHECK(allocator.Deallocate(reinterpret_cast<void*>(slabStart + 16)).Error() ==
@@ -816,8 +817,8 @@ TEST(CoreBinnedEmptySlabsAreRetainedThenDecommitted) {
 
         auto again = allocator.Allocate(40, 16);
         REQUIRE(again);
-        CHECK((reinterpret_cast<uptr>(again.Value()) & ~(SlabBytes - 1)) ==
-              (lowest & ~(SlabBytes - 1)));
+        CHECK(BinnedAllocatorTestAccess::SlabStart(allocator, again.Value()) ==
+              BinnedAllocatorTestAccess::SlabStart(allocator, reinterpret_cast<void*>(lowest)));
         FillPattern(again.Value(), 40, 77);
         CHECK(allocator.Usage().committedBytes == SlabBytes);
         // 다시 commit한 slab에서 뗀 적 없는 블록은 소유가 아니다.
@@ -1136,7 +1137,8 @@ TEST(CoreBinnedCommitAndDecommitFailuresAreTransient) {
         BinnedAllocator allocator(system, config);
         auto kept = allocator.Allocate(64, 16);
         REQUIRE(kept);
-        const uptr firstSlab = reinterpret_cast<uptr>(kept.Value()) & ~(SlabBytes - 1);
+        const uptr firstSlab = BinnedAllocatorTestAccess::SlabStart(allocator, kept.Value());
+        REQUIRE(firstSlab != 0);
         VirtualMemoryTestAccess::FailCommitOnCall(1);
         auto fallback = allocator.Allocate(4000, 16);
         REQUIRE(fallback);
@@ -1148,7 +1150,7 @@ TEST(CoreBinnedCommitAndDecommitFailuresAreTransient) {
         REQUIRE(retried);
         CHECK(InsideRange(allocator, retried.Value()));
         // 실패한 slab 번호(첫 slab의 바로 다음)를 다시 commit해 쓴다.
-        CHECK((reinterpret_cast<uptr>(retried.Value()) & ~(SlabBytes - 1)) ==
+        CHECK(BinnedAllocatorTestAccess::SlabStart(allocator, retried.Value()) ==
               firstSlab + SlabBytes);
         CHECK(allocator.Usage().fallbackAllocations == 1);
         CHECK(allocator.Usage().committedBytes == 2 * SlabBytes);

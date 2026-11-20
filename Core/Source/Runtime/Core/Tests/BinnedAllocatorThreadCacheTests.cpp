@@ -407,7 +407,8 @@ TEST(CoreBinnedCacheRefillsByBundle) {
         CHECK(before.liveAllocations == 1);
         // 묶음으로 떼어 캐시에 든 블록(표지가 서 있다)과 그 뒤의 뗀 적 없는 블록이다. 떼는 순서는
         // 주소가 높은 쪽부터 내주므로 첫 블록 양옆을 모두 본다.
-        const uptr slabStart = reinterpret_cast<uptr>(first.Value()) & ~(SlabBytes - 1);
+        const uptr slabStart = BinnedAllocatorTestAccess::SlabStart(allocator, first.Value());
+        REQUIRE(slabStart != 0);
         constexpr usize SlabHeaderBytes = 64;
         uint32 rejected = 0;
         for (uint32 index = 0; index < 2 * limit; ++index) {

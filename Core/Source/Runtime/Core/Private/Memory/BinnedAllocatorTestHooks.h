@@ -87,6 +87,10 @@ struct BinnedAllocator::TestHooks {
 
     // ---- 상태 조회 ----
 
+    // address가 든 slab의 시작 주소다(예약 범위 밖이면 0). address를 읽지 않는다. 예약 범위의
+    // 시작은 페이지 정렬만 보장되므로(POSIX의 mmap — Windows만 64KB 단위다) slab 시작을 주소의 아래
+    // 비트를 지워서 구하면 안 된다.
+    static uptr SlabStart(BinnedAllocator& allocator, const void* address) noexcept;
     // SlabTableEntry가 예약 범위 밖 주소에 돌려주는 값이다.
     static constexpr uint8 OutsideRange = NumericLimits<uint8>::Max();
     // address가 든 slab의 표 값이다(0은 쓰지 않는 slab, 등급 + 1은 쓰는 slab). address를 읽지

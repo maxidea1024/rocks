@@ -284,6 +284,7 @@ ROCKS_NO_SANITIZE_ADDRESS bool TryClearMarker(void* block, uptr marker) noexcept
 [[noreturn]] ROCKS_NOINLINE void FailLostMarker() noexcept {
     platform::Fatal("BinnedAllocator free block lost its return marker");
 }
+
 // 비밀값의 최상위 비트를 세운다: 표지가 0·작은 정수·사용자 주소와 같아질 수 없다(그런 값을 둘째
 // word에 둔 살아 있는 블록의 반환이 NotFound가 되지 않는다).
 constexpr uptr SecretHighBit = uptr{1} << 63;
@@ -1722,6 +1723,17 @@ uint32 BinnedAllocator::TestHooks::ClassOf(usize bytes, usize alignment) noexcep
 bool BinnedAllocator::TestHooks::BlockIndexOf(uint32 sizeClass, usize offsetInSlab,
                                               uint32& blockIndex) noexcept {
     return BlockIndexOfOffset(sizeClass, offsetInSlab, blockIndex);
+}
+
+uptr BinnedAllocator::TestHooks::SlabStart(BinnedAllocator& allocator,
+                                           const void* address) noexcept {
+    const BinnedAllocator::State& state = *allocator.state_;
+    const uptr offset = reinterpret_cast<uptr>(address) - state.base;
+    if (offset >= state.reservedBytes) {
+        return 0;
+    }
+
+    return state.base + ((offset >> SlabShift) << SlabShift);
 }
 
 uint8 BinnedAllocator::TestHooks::SlabTableEntry(BinnedAllocator& allocator,
