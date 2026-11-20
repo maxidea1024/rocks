@@ -332,8 +332,9 @@ public static class InstalledSdk
                 $"set engineVersion to {engineVersion.Major}.{engineVersion.Minor} to upgrade the project.");
         }
 
-        var moduleSet = DescriptorModuleSet.Resolve(projectDescriptor,
-            PluginCatalog.Discover([Path.Combine(project, "Plugins")]), toolchain.Platform, configuration);
+        // 플러그인 기술자 검증은 규칙을 읽기 전에 한다. 켤 플러그인과 모듈 해석은 타깃 종류·타깃 플러그인 참조가 필요하므로 규칙 로드 뒤다
+        // (Docs/Design/BuildTargets.ko.md BD24, 3.9절).
+        var availablePlugins = PluginCatalog.Discover([Path.Combine(project, "Plugins")]);
         var rulesFiles = Directory.GetFiles(project, "*.cs", SearchOption.AllDirectories)
             .Where(file => !Inside(output, file) && (file.EndsWith(".Build.cs", StringComparison.Ordinal) || file.EndsWith(".Target.cs", StringComparison.Ordinal)))
             .Order(StringComparer.Ordinal).ToArray();
@@ -374,6 +375,8 @@ public static class InstalledSdk
                 "(the prebuilt engine libraries use the configuration default).");
         }
         // 규칙 모듈을 기술자와 대조하고, 켜지지 않은 플러그인·Editor·플랫폼 미지원 모듈 등을 뺀다.
+        var moduleSet = DescriptorModuleSet.Resolve(DescriptorOwner.ForProject(projectDescriptor, rules.Target.Name, rules.Target.Plugins),
+            availablePlugins, toolchain.Platform, configuration, rules.Target.Type);
         var projectModules = moduleSet.Apply(rules.Modules, rules.Target.Modules);
         // SDK 모듈은 다시 생성하지 않는다. 리플렉션 모듈이면 descriptor·명세를 ImportedMetadata로 넘긴다. 타입별 본문·등록 함수 등 생성
         // 소스의 object는 SDK 라이브러리(PrebuiltLibraries)에 들어 있으므로 ReflectionSources는 비어 있다 — 게임 소유 모듈만 자기 생성

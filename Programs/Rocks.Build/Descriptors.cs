@@ -52,6 +52,61 @@ public sealed record ModuleDescriptor(string Name, ModuleType Type, LoadingPhase
 public sealed record PluginReference(string Name, bool Enabled);
 
 /// <summary>
+/// 플러그인 참조를 적은 쪽이다(Docs/Design/BuildTargets.ko.md 3.9절). Label은 오류 문구의 주어("project", "target 'Commandlet'")이고,
+/// FilePath는 오류가 가리킬 기술자(타깃 규칙만이면 null)다.
+/// </summary>
+public sealed record PluginReferrer(string Label, string? FilePath)
+{
+    /// <summary>프로젝트 기술자다.</summary>
+    public static PluginReferrer Of(ProjectDescriptor project) => new("project", project.FilePath);
+
+    /// <summary>타깃 규칙이다(엔진 저장소 타깃은 기술자 파일이 없다).</summary>
+    public static PluginReferrer OfTarget(string targetName) => new($"target '{targetName}'", null);
+}
+
+/// <summary>
+/// 타깃 규칙의 플러그인 참조(TargetRules.Plugins)를 다룬다(Docs/Design/BuildTargets.ko.md 3.9절 BD33).
+/// </summary>
+public static class TargetPluginReferences
+{
+    private static readonly Regex Identifier = new("^[A-Za-z][A-Za-z0-9_]{0,63}$",
+        RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+
+    /// <summary>
+    /// 타깃 규칙의 참조 목록을 검사한다. 이름은 기술자와 같은 식별자여야 하고, 같은 이름(대소문자 무시)을 두 번 적으면 오류다.
+    /// 플러그인이 있는지는 해석(<see cref="PluginCatalog.ResolveEnabled"/>)이 본다.
+    /// </summary>
+    /// <exception cref="DescriptorException">이름 형식·중복.</exception>
+    public static void Validate(string targetName, IReadOnlyList<PluginReference> references)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (PluginReference reference in references)
+        {
+            if (!Identifier.IsMatch(reference.Name))
+            {
+                throw new DescriptorException(null,
+                    $"target '{targetName}' plugin reference '{reference.Name}' is not a valid name (letters, digits, '_', max 64).");
+            }
+
+            if (!names.Add(reference.Name))
+            {
+                throw new DescriptorException(null, $"target '{targetName}' references plugin '{reference.Name}' more than once.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// 타깃 참조와 프로젝트 참조를 합친다. 같은 이름은 타깃 참조가 이긴다(UE SetupPlugins가 타깃 목록을 먼저 처리하고 프로젝트 참조는
+    /// 이미 적힌 이름을 건너뛰는 것과 같다). 순서는 타깃 참조, 그 뒤 남은 프로젝트 참조다.
+    /// </summary>
+    public static IReadOnlyList<PluginReference> Combine(IReadOnlyList<PluginReference> target, IReadOnlyList<PluginReference> project)
+    {
+        var names = target.Select(reference => reference.Name).ToHashSet(StringComparer.Ordinal);
+        return [.. target, .. project.Where(reference => !names.Contains(reference.Name))];
+    }
+}
+
+/// <summary>
 /// 프로젝트가 대상으로 하는 엔진의 주·부 버전이다(engineVersion "주.부", 각 0–65535). 설치 SDK 게임 빌드가 SDK manifest의 엔진
 /// 버전과 주·부가 같은지 본다(<see cref="EngineVersion.CanLinkProject"/>, Docs/Design/ReflectionFoundations.ko.md 8.2절).
 /// </summary>
@@ -493,15 +548,19 @@ public static class PluginCatalog
     }
 
     /// <summary>
-    /// project가 쓸 플러그인을 의존 순서(의존하는 플러그인이 뒤)로 정한다.
-    /// 1) 프로젝트가 enabled: true로 적은 플러그인과, 적지 않은 플러그인 중 enabledByDefault인 것을 켠다.
-    ///    프로젝트가 enabled: false로 적은 플러그인은 기본값과 관계없이 끈다.
+    /// 참조 목록(references — 프로젝트 기술자의 plugins, 타깃 규칙의 Plugins, 또는 둘을 합친 것)으로 켤 플러그인을 의존 순서(의존하는
+    /// 플러그인이 뒤)로 정한다(Docs/Design/BuildTargets.ko.md 3.9절).
+    /// 1) enabled: true로 적은 플러그인을 켠다. applyDefaults면 적지 않은 플러그인 중 enabledByDefault인 것도 켠다(Game 타깃 — Program
+    ///    타깃은 명시한 것만, BD34). enabled: false로 적은 플러그인은 기본값과 관계없이 끈다.
     /// 2) 켠 플러그인의 의존 플러그인을 모두 켠다.
-    /// 오류(DescriptorException): 프로젝트·플러그인이 없는 플러그인을 참조, 켠 플러그인이 프로젝트가 끈
-    /// 플러그인에 의존, 의존 순환.
+    /// 오류(DescriptorException): 참조·플러그인이 없는 플러그인을 참조, 켠 플러그인이 참조가 끈 플러그인에 의존, 의존 순환,
+    /// 같은 이름의 참조가 둘. 오류 문구의 참조 주체와 파일은 referrer다. 사용 예:
+    /// <code>
+    /// var enabled = PluginCatalog.ResolveEnabled(project.Plugins, PluginReferrer.Of(project), available, applyDefaults: true);
+    /// </code>
     /// </summary>
-    public static IReadOnlyList<PluginDescriptor> ResolveEnabled(ProjectDescriptor project,
-        IReadOnlyList<PluginDescriptor> available)
+    public static IReadOnlyList<PluginDescriptor> ResolveEnabled(IReadOnlyList<PluginReference> references, PluginReferrer referrer,
+        IReadOnlyList<PluginDescriptor> available, bool applyDefaults)
     {
         var byName = new Dictionary<string, PluginDescriptor>(StringComparer.Ordinal);
         foreach (PluginDescriptor plugin in available)
@@ -513,21 +572,24 @@ public static class PluginCatalog
         }
 
         var explicitChoice = new Dictionary<string, bool>(StringComparer.Ordinal);
-        foreach (PluginReference reference in project.Plugins)
+        foreach (PluginReference reference in references)
         {
             if (!byName.ContainsKey(reference.Name))
             {
-                throw new DescriptorException(project.FilePath, $"project references unknown plugin '{reference.Name}'.");
+                throw new DescriptorException(referrer.FilePath, $"{referrer.Label} references unknown plugin '{reference.Name}'.");
             }
 
-            explicitChoice[reference.Name] = reference.Enabled;
+            if (!explicitChoice.TryAdd(reference.Name, reference.Enabled))
+            {
+                throw new DescriptorException(referrer.FilePath, $"{referrer.Label} references plugin '{reference.Name}' more than once.");
+            }
         }
 
         // 1) 처음 켤 플러그인.
         var enabled = new HashSet<string>(StringComparer.Ordinal);
         foreach (PluginDescriptor plugin in byName.Values)
         {
-            bool on = explicitChoice.TryGetValue(plugin.Name, out bool choice) ? choice : plugin.EnabledByDefault;
+            bool on = explicitChoice.TryGetValue(plugin.Name, out bool choice) ? choice : applyDefaults && plugin.EnabledByDefault;
             if (on)
             {
                 enabled.Add(plugin.Name);
@@ -553,8 +615,8 @@ public static class PluginCatalog
 
             if (requiredBy is not null && explicitChoice.TryGetValue(name, out bool choice) && !choice)
             {
-                throw new DescriptorException(project.FilePath,
-                    $"plugin '{requiredBy.Name}' requires '{name}', but the project disables it.");
+                throw new DescriptorException(referrer.FilePath,
+                    $"plugin '{requiredBy.Name}' requires '{name}', but the {referrer.Label} disables it.");
             }
 
             if (state.TryGetValue(name, out bool done))

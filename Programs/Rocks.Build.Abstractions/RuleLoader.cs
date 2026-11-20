@@ -2,11 +2,21 @@ using System.Runtime.Loader;
 
 namespace Rocks.Build.Rules;
 
-/// <summary>타깃 하나를 고른 규칙 평가 결과다. <see cref="Modules"/>는 모든 모듈 규칙의 Configure 결과다.</summary>
-public sealed record LoadedRules(IReadOnlyList<NativeModuleInput> Modules, TargetRules Target);
+/// <summary>
+/// 타깃 하나를 고른 규칙 평가 결과다. <see cref="Modules"/>는 모든 모듈 규칙의 Configure 결과이고, <see cref="Plugins"/>는 찾은 모든
+/// 플러그인(켜지 않은 것 포함)이다.
+/// </summary>
+public sealed record LoadedRules(IReadOnlyList<NativeModuleInput> Modules, TargetRules Target)
+{
+    public IReadOnlyList<Descriptors.PluginDescriptor> Plugins { get; init; } = [];
+}
 
 /// <summary>모든 타깃을 담은 규칙 평가 결과다(정책 검사가 타깃마다 도달 집합을 본다). 타깃은 이름 순이다.</summary>
-public sealed record LoadedRuleSet(IReadOnlyList<NativeModuleInput> Modules, IReadOnlyList<TargetRules> Targets);
+public sealed record LoadedRuleSet(IReadOnlyList<NativeModuleInput> Modules, IReadOnlyList<TargetRules> Targets)
+{
+    /// <summary>찾은 모든 플러그인(켜지 않은 것 포함, 이름 순)이다.</summary>
+    public IReadOnlyList<Descriptors.PluginDescriptor> Plugins { get; init; } = [];
+}
 
 /// <summary>
 /// 규칙 어셈블리(Rocks.Engine.Rules 또는 게임 규칙)를 읽어 모든 모듈 규칙을 한 문맥으로 평가한다. 빌드 CLI와 정책 검사(Release 배제,
@@ -32,16 +42,20 @@ public static class RuleLoader
             throw new ArgumentException("A target must select at least one module.");
         }
 
-        return new(set.Modules, selected);
+        return new(set.Modules, selected) { Plugins = set.Plugins };
     }
 
     /// <summary>
     /// 규칙 어셈블리의 모든 모듈 규칙을 평가하고 모든 타깃 규칙을 만든다. 규칙은 문맥(플랫폼·구성)마다 다시 평가해야 하므로 호출마다
-    /// Configure를 다시 부른다(어셈블리는 한 번만 올라간다).
+    /// Configure를 다시 부른다(어셈블리는 한 번만 올라간다). Configure 전에 <see cref="BuildContext.PluginRoot"/>의 플러그인을 찾아
+    /// <see cref="BuildContext.Plugins"/>에 넣는다(Docs/Design/BuildTargets.ko.md 3.9절 BD32 — 켜지 않은 플러그인의 기술자도 검증한다).
+    /// 평가한 모듈 규칙의 문맥은 결과에 실리지 않으므로 호출자가 플러그인 목록이 필요하면 <see cref="LoadedRuleSet.Plugins"/>를 쓴다.
     /// </summary>
     /// <exception cref="ArgumentException">규칙 생성·평가 실패, 같은 이름의 모듈·타깃.</exception>
+    /// <exception cref="Descriptors.DescriptorException">플러그인 기술자 오류·중복, 타깃 플러그인 참조의 이름 형식·중복.</exception>
     public static LoadedRuleSet LoadAll(string assemblyPath, BuildContext context)
     {
+        context = context with { Plugins = Descriptors.PluginCatalog.Discover([context.PluginRoot]) };
         var assembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.GetFullPath(assemblyPath));
         var types = assembly.GetTypes().Where(type => !type.IsAbstract).OrderBy(type => type.FullName, StringComparer.Ordinal).ToArray();
         var modules = types.Where(type => typeof(ModuleRules).IsAssignableFrom(type))
@@ -54,7 +68,12 @@ public static class RuleLoader
             throw new ArgumentException("Duplicate module/target rule name.");
         }
 
-        return new(modules, targets);
+        foreach (TargetRules target in targets)
+        {
+            Descriptors.TargetPluginReferences.Validate(target.Name, target.Plugins);
+        }
+
+        return new(modules, targets) { Plugins = context.Plugins };
     }
 
     private static T Create<T>(Type type)
