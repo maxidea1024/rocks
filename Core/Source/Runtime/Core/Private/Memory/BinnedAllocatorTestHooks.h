@@ -59,6 +59,9 @@ struct BinnedAllocator::TestHooks {
     static uint32 CurrentThreadRecordEntries() noexcept;
     // 인스턴스에 등록된 스레드 캐시 수다.
     static uint32 ThreadCacheCount(BinnedAllocator& allocator) noexcept;
+    // 인스턴스의 모든 스레드 캐시에 든 블록의 바이트 합이다(이전 칸은 세지 않는다). 다른 스레드가
+    // 이 인스턴스를 쓰지 않을 때만 부른다(그 스레드의 묶음 개수를 잠금 없이 읽는다).
+    static usize ThreadCacheBlockBytes(BinnedAllocator& allocator) noexcept;
     // sizeClass의 이전 칸 가운데 묶음이 든 칸 수와, 그 가운데 첫 묶음의 블록 수다(없으면 0).
     // TransferChainLength는 다른 스레드가 이 인스턴스를 쓰지 않을 때만 부른다.
     static uint32 TransferBundleCount(BinnedAllocator& allocator, uint32 sizeClass) noexcept;

@@ -330,6 +330,55 @@ void RunExitUseWork(void* context) noexcept {
     work.slotSet = exitUseSlot.Set(work.use);
 }
 
+// 캐시를 한도 넘게 채우려 하고 쉬는 스레드의 일이다: 등급마다 묶음 넷만큼 할당하고 셋만큼 반환한
+// 뒤(캐시에는 둘만 남고 하나는 이전 칸으로 밀려난다) 단계 1을 알리고 단계 2를 기다린다. 그 뒤 남은
+// 블록을 반환하고 끝난다.
+constexpr uint32 IdleCacheBundles = 4;
+constexpr uint32 IdleCacheFreedBundles = 3;
+// 스레드 캐시의 등급 하나에 남는 묶음 수다(부분·가득).
+constexpr uint32 IdleCacheHeldBundles = 2;
+constexpr uint32 MaxClasses = 32;
+constexpr uint32 MaxBundle = 64;
+
+struct IdleCacheWork {
+    BinnedAllocator* allocator = nullptr;
+    PhaseGate* gate = nullptr;
+    void* blocks[MaxClasses][IdleCacheBundles * MaxBundle]{};
+    uint32 failures = 0;
+    // 등급마다 반환한 직후의 캐시 바이트가 상한을 넘은 횟수다.
+    uint32 overLimit = 0;
+};
+
+void RunIdleCacheWork(void* context) noexcept {
+    auto& work = *static_cast<IdleCacheWork*>(context);
+    const uint32 classes = BinnedAllocatorTestAccess::ClassCount();
+    for (uint32 sizeClass = 0; sizeClass < classes; ++sizeClass) {
+        const usize bytes = BinnedAllocatorTestAccess::ClassBlockBytes(sizeClass);
+        const uint32 bundle = BinnedAllocatorTestAccess::BundleBlocks(sizeClass);
+        work.failures +=
+            AllocateMany(*work.allocator, bytes, work.blocks[sizeClass], IdleCacheBundles * bundle);
+        work.failures +=
+            FreeMany(*work.allocator, work.blocks[sizeClass], IdleCacheFreedBundles * bundle);
+        // 이 스레드만 이 인스턴스를 쓰는 동안이라 캐시를 읽어도 된다.
+        if (BinnedAllocatorTestAccess::ThreadCacheBlockBytes(*work.allocator) >
+            BinnedAllocator::MaxThreadCacheBytes) {
+            ++work.overLimit;
+        }
+    }
+
+    work.gate->Advance();
+    work.gate->WaitFor(2);
+    for (uint32 sizeClass = 0; sizeClass < classes; ++sizeClass) {
+        const uint32 bundle = BinnedAllocatorTestAccess::BundleBlocks(sizeClass);
+        const uint32 freed = IdleCacheFreedBundles * bundle;
+        for (uint32 index = freed; index < IdleCacheBundles * bundle; ++index) {
+            if (!work.allocator->Deallocate(work.blocks[sizeClass][index])) {
+                ++work.failures;
+            }
+        }
+    }
+}
+
 // 같은 주소를 두 스레드가 함께 반환한다. round마다 주 스레드가 주소를 걸고 번호를 올리면 두
 // worker가 그 번호를 보고 곧바로 반환한다(스레드를 round마다 만들지 않아 두 반환이 가깝게 겹친다).
 constexpr uint32 DuplicateRounds = 4096;
@@ -968,6 +1017,75 @@ TEST(CoreBinnedAllocatorUsedByAnotherThreadExitCleanup) {
         CHECK(allocator.Stats().totalAllocations == uint64{2} * ExitedThreadBlocks);
         allocator.Trim();
         CHECK(allocator.Usage().committedBytes == 0);
+    }
+
+    CHECK(system.Stats().liveAllocations == 0);
+}
+
+// 쉬는 스레드의 캐시가 쥐는 블록은 상한(BinnedAllocator::MaxThreadCacheBytes — 등급마다 한도만큼 찬
+// 묶음 둘)을 넘지 않는다: 묶음 셋만큼 반환해도 둘만 남고 하나는 이전 칸으로 간다. 모든 등급을
+// 그렇게 채우면 정확히 그 값이다. 그 스레드가 쉬는 동안 다른 스레드의 Trim은 이전 칸의 묶음은
+// 돌려받지만 캐시의 블록은 돌려받지 못하고(한계 — 설계 18.8절), 스레드가 끝나면 모두 돌아온다.
+TEST(CoreBinnedIdleThreadCacheIsBounded) {
+    REQUIRE(BinnedAllocatorTestAccess::ClassCount() == MaxClasses);
+    usize limit = 0;
+    uint64 liveBlocks = 0;
+    for (uint32 sizeClass = 0; sizeClass < MaxClasses; ++sizeClass) {
+        const uint32 bundle = BinnedAllocatorTestAccess::BundleBlocks(sizeClass);
+        REQUIRE(bundle <= MaxBundle);
+        limit += usize{IdleCacheHeldBundles} * bundle *
+                 BinnedAllocatorTestAccess::ClassBlockBytes(sizeClass);
+        liveBlocks += uint64{IdleCacheBundles - IdleCacheFreedBundles} * bundle;
+    }
+
+    CHECK(limit == BinnedAllocator::MaxThreadCacheBytes);
+    SystemAllocator system;
+    {
+        BinnedAllocator allocator(system);
+        PhaseGate gate;
+        // 블록 배열이 커서 스택에 두지 않는다.
+        auto storage = system.Allocate(sizeof(IdleCacheWork), alignof(IdleCacheWork));
+        REQUIRE(storage);
+        IdleCacheWork* work = ConstructAt<IdleCacheWork>(storage.Value());
+        work->allocator = &allocator;
+        work->gate = &gate;
+        platform::Thread thread;
+        StartWorker(thread, RunIdleCacheWork, work);
+        gate.WaitFor(1);
+        // worker는 문 앞에서 쉰다: 캐시가 상한만큼 차 있다.
+        CHECK(work->failures == 0);
+        CHECK(work->overLimit == 0);
+        CHECK(BinnedAllocatorTestAccess::ThreadCacheBlockBytes(allocator) ==
+              BinnedAllocator::MaxThreadCacheBytes);
+        CHECK(allocator.Stats().liveAllocations == liveBlocks);
+        // 밀려난 묶음은 등급마다 이전 칸에 하나씩 있다.
+        uint32 transferBundles = 0;
+        for (uint32 sizeClass = 0; sizeClass < MaxClasses; ++sizeClass) {
+            transferBundles += BinnedAllocatorTestAccess::TransferBundleCount(allocator, sizeClass);
+        }
+
+        CHECK(transferBundles == MaxClasses);
+        // 이 스레드의 Trim은 이전 칸을 비우지만 쉬는 스레드의 캐시는 돌려받지 못한다.
+        allocator.Trim();
+        transferBundles = 0;
+        for (uint32 sizeClass = 0; sizeClass < MaxClasses; ++sizeClass) {
+            transferBundles += BinnedAllocatorTestAccess::TransferBundleCount(allocator, sizeClass);
+        }
+
+        CHECK(transferBundles == 0);
+        CHECK(BinnedAllocatorTestAccess::ThreadCacheBlockBytes(allocator) ==
+              BinnedAllocator::MaxThreadCacheBytes);
+        CHECK(allocator.Usage().committedBytes >= BinnedAllocator::MaxThreadCacheBytes);
+        gate.Advance();
+        JoinWorker(thread);
+        CHECK(work->failures == 0);
+        CHECK(BinnedAllocatorTestAccess::ThreadCacheCount(allocator) == 0);
+        CHECK(BinnedAllocatorTestAccess::ThreadCacheBlockBytes(allocator) == 0);
+        CHECK(allocator.Stats().liveAllocations == 0);
+        allocator.Trim();
+        CHECK(allocator.Usage().committedBytes == 0);
+        // IdleCacheWork는 소멸이 trivial하다(저장소만 돌려준다).
+        REQUIRE(system.Deallocate(work));
     }
 
     CHECK(system.Stats().liveAllocations == 0);

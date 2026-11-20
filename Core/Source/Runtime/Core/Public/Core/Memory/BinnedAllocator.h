@@ -94,6 +94,13 @@ public:
     // 반환하지 않은 할당이 남아 있으면 Fatal이다. 예약한 주소 범위와 내부 저장소를 모두 푼다.
     ~BinnedAllocator() noexcept override;
 
+    // 스레드 하나가 이 인스턴스의 캐시에 쥘 수 있는 블록 바이트의 상한이다(등급 32개마다 묶음 둘 —
+    // 약 2.25 MiB, 블록 3,120개). 캐시의 블록은 그 스레드가 끝나거나 그 스레드가 Trim을 부를 때까지
+    // 남는다: 다른 스레드의 Trim은 건드리지 않으므로, 한 번 크게 쓰고 쉬는 스레드는 이만큼을 쥔
+    // 채로 있다. 캐시의 블록이 든 slab은 풀리지 않아서, 붙들리는 commit은 블록들이 slab에 흩어진
+    // 정도에 따라 이보다 클 수 있다(가장 나쁜 경우 블록마다 다른 slab — 3,120 × 64 KiB).
+    static constexpr usize MaxThreadCacheBytes = 2361856;
+
     BinnedAllocator(const BinnedAllocator&) = delete;
     BinnedAllocator& operator=(const BinnedAllocator&) = delete;
     BinnedAllocator(BinnedAllocator&&) = delete;

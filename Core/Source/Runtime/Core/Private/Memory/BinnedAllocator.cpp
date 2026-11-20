@@ -119,6 +119,23 @@ constexpr ClassTables BuildClassTables() noexcept {
 }
 
 constexpr ClassTables Classes = BuildClassTables();
+
+// 스레드 캐시의 등급 하나에 드는 묶음 수다(부분·가득).
+constexpr uint32 BundlesPerClass = 2;
+
+// 스레드 캐시 하나가 쥘 수 있는 블록 바이트의 상한이다(등급마다 한도만큼 찬 묶음 둘).
+constexpr usize ThreadCacheBytesLimit() noexcept {
+    usize total = 0;
+    for (uint32 sizeClass = 0; sizeClass < ClassCount; ++sizeClass) {
+        total += usize{BundlesPerClass} * Classes.bundleBlocks[sizeClass] *
+                 Classes.blockBytes[sizeClass];
+    }
+
+    return total;
+}
+
+static_assert(ThreadCacheBytesLimit() == BinnedAllocator::MaxThreadCacheBytes,
+              "MaxThreadCacheBytes must match the class tables");
 static_assert(Classes.blockBytes[0] == BlockGranularity, "the smallest class must be 16 bytes");
 static_assert(Classes.blockBytes[LinearClassCount - 1] == LinearClassLimit,
               "the linear classes must end at 128 bytes");
@@ -1589,6 +1606,25 @@ uint32 BinnedAllocator::TestHooks::ThreadCacheCount(BinnedAllocator& allocator) 
     }
 
     return count;
+}
+
+usize BinnedAllocator::TestHooks::ThreadCacheBlockBytes(BinnedAllocator& allocator) noexcept {
+    BinnedAllocator::State& state = *allocator.state_;
+    if (state.id == 0) {
+        return 0;
+    }
+
+    BinnedAllocator::State::Registry& registry = BinnedAllocator::State::GetRegistry();
+    platform::LockGuard lock(registry.mutex);
+    usize bytes = 0;
+    for (ThreadCache* cache = state.caches; cache != nullptr; cache = cache->next) {
+        for (uint32 sizeClass = 0; sizeClass < rocks::ClassCount; ++sizeClass) {
+            const ClassCache& slot = cache->classes[sizeClass];
+            bytes += (usize{slot.partial.count} + slot.full.count) * Classes.blockBytes[sizeClass];
+        }
+    }
+
+    return bytes;
 }
 
 uint32 BinnedAllocator::TestHooks::TransferBundleCount(BinnedAllocator& allocator,
