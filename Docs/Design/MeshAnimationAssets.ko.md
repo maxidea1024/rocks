@@ -1,6 +1,6 @@
 # 메시·스켈레톤·애니메이션 에셋 설계
 
-기준일: 2026-11-21, 개정 8(MA4a 구현 — 6.4절·12.3절). 개정 7(MA2a 구현 — 5.4절·12.2절). 개정 6(MA2a·MA4a 분리). 개정 5(MA1 구현 — 3.7절). 개정 4(MA2 전 결정 반영 — index 형식·통합 bone map·메시 LOD 스트리밍). 개정 3(15절 요구를 다른 문서에 반영하고 상태 열을 더함). 개정 2(교차 검증 반영 — 17절). 정적 메시·스켈레톤·스킨 메시·애니메이션 클립의 에셋 자료구조를 정한다. 범위는 원본 데이터(에디터 데이터), 저장 설정, 빌드 계약, 쿠킹 데이터, 모듈 배치다. [엔진 구현 계획](EngineImplementationPlan.ko.md) 13.1절(StaticMeshAsset)·15절(Skeleton·SkeletalMesh·AnimationClip)의 개요를 구현할 수 있는 수준으로 구체화한다. 텍스처는 [에셋 시스템](AssetSystem.ko.md) 12절, 머티리얼은 [머티리얼 시스템](MaterialSystem.ko.md) 4절이 이미 정했으므로 이 문서는 그 둘을 참조만 한다.
+기준일: 2026-11-21, 개정 9(MA3·MA5·MA6을 a·b로 나눔). 개정 8(MA4a 구현 — 6.4절·12.3절). 개정 7(MA2a 구현 — 5.4절·12.2절). 개정 6(MA2a·MA4a 분리). 개정 5(MA1 구현 — 3.7절). 개정 4(MA2 전 결정 반영 — index 형식·통합 bone map·메시 LOD 스트리밍). 개정 3(15절 요구를 다른 문서에 반영하고 상태 열을 더함). 개정 2(교차 검증 반영 — 17절). 정적 메시·스켈레톤·스킨 메시·애니메이션 클립의 에셋 자료구조를 정한다. 범위는 원본 데이터(에디터 데이터), 저장 설정, 빌드 계약, 쿠킹 데이터, 모듈 배치다. [엔진 구현 계획](EngineImplementationPlan.ko.md) 13.1절(StaticMeshAsset)·15절(Skeleton·SkeletalMesh·AnimationClip)의 개요를 구현할 수 있는 수준으로 구체화한다. 텍스처는 [에셋 시스템](AssetSystem.ko.md) 12절, 머티리얼은 [머티리얼 시스템](MaterialSystem.ko.md) 4절이 이미 정했으므로 이 문서는 그 둘을 참조만 한다.
 
 - 배경: 사용자 지시(2026-11-19). 엔진 시험용으로 UE에서 텍스처·정적 메시·머티리얼·애니메이션을 가져오는 기능을 넣는다. Rocks에 메시·애니메이션 자료구조가 아직 없으므로 함께 정한다. 가져오는 경로는 [Unreal 교환 형식](UnrealExchange.ko.md)이 정한다. 이 문서의 자료구조는 그 경로와 상관없이 쓰는 엔진 기반이며, 뒤에 올 glTF·FBX 임포터도 같은 구조로 들어온다.
 - UE 근거: UE 5.8.4(`release`, commit `f45729c0b6f0`, 로컬 클론 `C:\github\UnrealEngine`)를 읽어 확인했다. 경로 약어는 다음과 같다. `E/` = `Engine/Source/Runtime/Engine`, `RT/` = `Engine/Source/Runtime`, `Dev/` = `Engine/Source/Developer`. UE 이름은 대응표와 근거에만 쓰고, 타입 이름은 Rocks 이름으로 짓는다. 빌드 설정·축소 설정처럼 업계 공용 서술 이름은 그대로 쓴다.
@@ -766,19 +766,21 @@ Coverage(2026-11-21, clang source-based — `Build/MeasureCoverage.ps1`): 시험
 
 ## 13. 단계
 
-ID는 이 문서가 부여한다(MA). 착수는 사용자가 정하고, 고정 구현 순서를 바꾸지 않는다. 단, 사용자 지시(2026-11-21 "진행 가능한거부터")에 따라 에셋 DB·쿠커·머티리얼 클래스에 기대지 않는 부분을 MA2a·MA4a로 떼어 먼저 한다. 떼어 낸 부분은 순수 함수·값 타입·A1 수준 에셋 클래스뿐이라, 뒤 단계(MA2b·MA4b)가 그 위에 쿠킹 처리기·임포트 서비스를 얹을 때 바꿀 계약이 없다.
+ID는 이 문서가 부여한다(MA). 착수는 사용자가 정하고, 고정 구현 순서를 바꾸지 않는다. 단, 사용자 지시(2026-11-21 "진행 가능한거부터")에 따라 에셋 DB·쿠커·머티리얼 클래스에 기대지 않는 부분을 a 단계(MA2a·MA3a·MA4a·MA5a·MA6a)로 떼어 먼저 한다. 떼어 낸 부분은 순수 함수·값 타입·A1 수준 에셋 클래스뿐이라, 뒤 단계(MA2b·MA4b)가 그 위에 쿠킹 처리기·임포트 서비스를 얹을 때 바꿀 계약이 없다.
 
 | 단계 | 내용 | 선행 |
 |---|---|---|
 | MA1 | `MeshSource` 모듈: 저장 형식·검증·위상 조회·값 정리, 시험. **구현(2026-11-20, d5405bfa)**: 모듈 `Engine/Source/Runtime/MeshSource`, AssetRuntime `MemoryBulkSource`·메시 진단 코드 5개, 시험 52개 + AssetRuntime 3개(12.1절 대조표·coverage — 줄 99.05%, 분기 94.86%, 닿지 않은 분기는 단언·메모리 상한), 정한 점은 3.7절 | A1(패키지·Bulk) |
 | MA2a | 선행 조건에 기대지 않는 빌드 핵심: `Mesh` 모듈에 빌드 설정 값 타입(`MeshBuildSettings`), `MeshTools` 모듈에 `MeshSource` → 메모리 빌드 결과(렌더 정점·index·섹션·bounds) 순수 함수(5.2절 1–5·8–10·12단계, 6·7·11단계는 후속이라 경고 또는 원본 순서), 용접·퇴화 판정 임계값 상수를 UE 원본으로 확정, MikkTSpace ThirdParty(결정적 수학 패치)와 참조 구현 대조 시험, 필요한 결정적 초월 함수는 Core에 더함. 쿠킹 형식 패킹(13단계)·`StaticMesh` 클래스·슬롯 머티리얼 참조·쿠킹 처리기·임포트 서비스는 MA2b. 슬롯 대응(10단계)은 슬롯 이름 목록만 입력으로 받는다. **구현(2026-11-21, 미커밋)**: 모듈 `Mesh`·`MeshTools`, ThirdParty MikkTSpace(3e895b49d05e + Rocks.patch), Core `deterministic::Acos`, 진단 코드 4개, 시험 26개 + Core 2개(12.2절 대조표·coverage — Mesh·MeshTools 줄 99.7%, 분기 98.5%), 정한 점은 5.4절 | MA1 |
 | MA2b | `StaticMesh` 클래스·슬롯·섹션 정보·소켓, 쿠킹 렌더 데이터 패킹(5.3절), 쿠킹 처리기·임포트 서비스, CoreTypeBindings `Box<double>` 미러(MR8), `IndexFormat` GraphicsTypes 이동 확인(MR7) | MA2a, A2–A4, `Material` 에셋 클래스(MaterialSystem MS3) |
-| MA3 | 단순 충돌 데이터·검증 | MA2b |
+| MA3a | 단순 충돌 값 타입(4.6절 `SimpleCollision`·형상 struct·`CollisionComplexity`)과 검증(유한값·양의 크기·볼록 형상 bulk 길이·index 범위), `UnsupportedCollisionShape` 등록 — `Mesh` 모듈, `StaticMesh` 필드 연결은 MA2b | MA2a |
 | MA4a | `Animation` 모듈: `BoneHierarchy`(불변식 검증)·`Skeleton` 에셋 클래스(저장·로드 왕복), 병합 판정 함수(부모 사슬 대조, `SkeletonMismatch`)까지 — 에셋 DB 없이 되는 부분. **구현(2026-11-21, 미커밋)**: 모듈 `Engine/Source/Runtime/Animation`, 진단 코드 `InvalidSkeletonData`·`SkeletonMismatch`, 시험 15개(12.3절 대조표·coverage), 정한 점은 6.4절 | A1 |
 | MA4b | 스켈레톤 임포트 서비스·기존 스켈레톤 병합 저장·너겟 무효화 | MA4a, A2–A4 |
-| MA5 | 스킨 메시: 원본 스킨 가중치·morph, 빌드·쿠킹 | MA2b, MA4b |
-| MA6 | 애니메이션 클립: 원본·이벤트·설정, 쿠킹 v1, CoreTypeBindings `FrameRate` 미러(MR8) | MA4b, Curve 단계(완료) |
-| MA7 | 명령행·문서·검증 보고 | MA1–MA6 |
+| MA5a | 스킨 빌드 핵심(순수 함수): `SkinnedMeshBuildSettings`, 원본 스킨 가중치를 렌더 정점까지 옮기기(용접 비교에 영향 포함), 영향 줄이기·8/16비트 정규화(`InfluencesTrimmed`), LOD 통합 bone map·필요 본 목록·inverse-bind 행렬(MA4a `BoneHierarchy`), morph target 희소 변화량 빌드(`morphThresholdPosition`) — 메모리 결과까지 | MA2a, MA4a |
+| MA5b | `SkinnedAsset`·`SkeletalMesh` 클래스, 쿠킹 렌더 데이터 패킹(`SkinnedRenderLod`), 쿠킹 처리기·임포트 서비스, 스켈레톤 병합 저장 연결 | MA5a, MA2b, MA4b |
+| MA6a | 애니메이션 클립 핵심: `AnimationAsset`·`AnimationClip` 클래스(저장·로드 왕복), `ClipSourceData`·이벤트·동기 마커·설정 검증(`InvalidClipData`·`UnknownBoneTrack`), 원본 샘플링, 쿠킹 데이터 v1로 바꾸는 순수 함수(상수 트랙 접기·재샘플링)와 쿠킹 데이터 샘플링, CoreTypeBindings `FrameRate` 미러(MR8) | MA4a, Curve 단계(완료) |
+| MA6b | 클립 쿠킹 처리기·임포트 서비스·스켈레톤 병합 뒤 재쿠킹(너겟 무효화) | MA6a, MA4b |
+| MA7 | 명령행·문서·검증 보고 | MA1–MA6b |
 
 렌더 쪽 소비: Renderer RS0(정적 메시)가 MA2 결과를, RS12(skinned)가 MA5 결과를 쓴다(Renderer 17절 RQ19).
 
@@ -825,6 +827,8 @@ ID는 이 문서가 부여한다(MA). 착수는 사용자가 정하고, 고정 �
 - 개정 7(2026-11-21): MA2a 구현에서 정한 점을 5.4절에 적었다(API·입출력 형태, 지금 모듈 의존, 원본 사본의 범위, UE 원본 임계값 확정과 removeDegenerates를 끈 때의 정확 일치 퇴화 제거, 정점 단위 법선 묶음과 대각선 soft, 비유한 중간값, buildScale 검사(`InvalidSetting`), MikkTSpace 저자 원본·패치·원본 버그 수정·참조 글루, Core `Acos`, 용접 색 비교, 섹션·슬롯, 경고 순서, 결정성, 진단 등록, 시험 도우미 이동). 5.2절 9단계 임계값 문장, 12.2절 대조표, 13절 MA2a 상태를 고쳤다.
 
 - 개정 8(2026-11-21): MA4a 구현에서 정한 점을 6.4절에 적었다(모듈 의존, 계층 불변식의 순서와 경계, pose 정규화 함수, 스켈레톤 필드 규칙, 새 진단 코드 `InvalidSkeletonData`와 `SkeletonDiagnostic`, UE 기본 경로를 옮긴 병합 판정과 대소문자 이름 바꾸기, 결정성, 시험 환경). 11절 표에 `InvalidSkeletonData`를 더하고 12.3절 대조표, 13절 MA4a 상태를 고쳤다.
+
+- 개정 9(2026-11-21): MA3·MA5·MA6도 같은 방식으로 a·b로 나눴다(MA3a 충돌 값·검증, MA5a 스킨 빌드 핵심, MA6a 클립 핵심 — 에셋 DB·쿠커 없이 되는 부분). UX1a는 엔진 플러그인 빌드 지원(BuildTargets BS4 엔진 쪽)이 없어 보류했다.
 
 ## 17. 교차 검증 기록(개정 2)
 
