@@ -257,6 +257,83 @@ inline bool BuildUvSphere(MeshSource& mesh, float radius, uint32 segments, uint3
     return uv != MeshNoAttribute;
 }
 
+// settings의 field를 기본값이 아닌 값으로 바꾼다(실수 필드는 -0.0 등 bit만 다른 값도 쓴다 — 보존
+// 설정 경고 시험).
+inline void ChangeSetting(SkinnedMeshBuildSettings& settings,
+                          MeshBuildSettingField field) noexcept {
+    switch (field) {
+    case MeshBuildSettingField::RecomputeNormals:
+        settings.recomputeNormals = false;
+        break;
+    case MeshBuildSettingField::RecomputeTangents:
+        settings.recomputeTangents = false;
+        break;
+    case MeshBuildSettingField::UseMikkTSpace:
+        settings.useMikkTSpace = false;
+        break;
+    case MeshBuildSettingField::ComputeWeightedNormals:
+        settings.computeWeightedNormals = true;
+        break;
+    case MeshBuildSettingField::RemoveDegenerates:
+        settings.removeDegenerates = false;
+        break;
+    case MeshBuildSettingField::BuildReversedIndexBuffer:
+        settings.buildReversedIndexBuffer = false;
+        break;
+    case MeshBuildSettingField::UseHighPrecisionTangentBasis:
+        settings.useHighPrecisionTangentBasis = true;
+        break;
+    case MeshBuildSettingField::UseFullPrecisionUVs:
+        settings.useFullPrecisionUVs = true;
+        break;
+    case MeshBuildSettingField::GenerateLightmapUVs:
+        settings.generateLightmapUVs = false;
+        break;
+    case MeshBuildSettingField::MinLightmapResolution:
+        settings.minLightmapResolution = 128;
+        break;
+    case MeshBuildSettingField::SrcLightmapIndex:
+        settings.srcLightmapIndex = 1;
+        break;
+    case MeshBuildSettingField::DstLightmapIndex:
+        settings.dstLightmapIndex = 2;
+        break;
+    case MeshBuildSettingField::BuildScale:
+        settings.buildScale = Vec3d(2.0, 2.0, 2.0);
+        break;
+    case MeshBuildSettingField::GenerateDistanceFieldAsIfTwoSided:
+        settings.generateDistanceFieldAsIfTwoSided = true;
+        break;
+    case MeshBuildSettingField::DistanceFieldResolutionScale:
+        settings.distanceFieldResolutionScale = -0.0f;
+        break;
+    case MeshBuildSettingField::MaxLumenMeshCards:
+        settings.maxLumenMeshCards = 4;
+        break;
+    case MeshBuildSettingField::SupportFaceRemap:
+        settings.supportFaceRemap = true;
+        break;
+    case MeshBuildSettingField::UseHighPrecisionSkinWeights:
+        settings.useHighPrecisionSkinWeights = true;
+        break;
+    case MeshBuildSettingField::ThresholdPosition:
+        settings.thresholdPosition = 0.001f;
+        break;
+    case MeshBuildSettingField::ThresholdTangentNormal:
+        settings.thresholdTangentNormal = 0.001f;
+        break;
+    case MeshBuildSettingField::ThresholdUV:
+        settings.thresholdUV = 0.01f;
+        break;
+    case MeshBuildSettingField::MorphThresholdPosition:
+        settings.morphThresholdPosition = 0.5f;
+        break;
+    case MeshBuildSettingField::BoneInfluenceLimit:
+        settings.boneInfluenceLimit = 4;
+        break;
+    }
+}
+
 // 정규 byte에 값 하나를 붙인다.
 template <class T>
 bool AppendBytes(Array<uint8>& bytes, const T& value) noexcept {

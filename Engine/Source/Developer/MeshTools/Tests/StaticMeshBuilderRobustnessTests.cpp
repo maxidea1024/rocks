@@ -85,61 +85,10 @@ TEST(StaticMeshBuild_PreservedSettingsWarn) {
     StaticMeshBuildResult built(allocator);
     for (uint32 field = 0; field < MeshBuildSettingFieldCount; ++field) {
         StaticMeshBuildInput input = InputFor(mesh);
-        MeshBuildSettings& settings = input.settings;
-        switch (static_cast<MeshBuildSettingField>(field)) {
-        case MeshBuildSettingField::RecomputeNormals:
-            settings.recomputeNormals = false;
-            break;
-        case MeshBuildSettingField::RecomputeTangents:
-            settings.recomputeTangents = false;
-            break;
-        case MeshBuildSettingField::UseMikkTSpace:
-            settings.useMikkTSpace = false;
-            break;
-        case MeshBuildSettingField::ComputeWeightedNormals:
-            settings.computeWeightedNormals = true;
-            break;
-        case MeshBuildSettingField::RemoveDegenerates:
-            settings.removeDegenerates = false;
-            break;
-        case MeshBuildSettingField::BuildReversedIndexBuffer:
-            settings.buildReversedIndexBuffer = false;
-            break;
-        case MeshBuildSettingField::UseHighPrecisionTangentBasis:
-            settings.useHighPrecisionTangentBasis = true;
-            break;
-        case MeshBuildSettingField::UseFullPrecisionUVs:
-            settings.useFullPrecisionUVs = true;
-            break;
-        case MeshBuildSettingField::GenerateLightmapUVs:
-            settings.generateLightmapUVs = false;
-            break;
-        case MeshBuildSettingField::MinLightmapResolution:
-            settings.minLightmapResolution = 128;
-            break;
-        case MeshBuildSettingField::SrcLightmapIndex:
-            settings.srcLightmapIndex = 1;
-            break;
-        case MeshBuildSettingField::DstLightmapIndex:
-            settings.dstLightmapIndex = 2;
-            break;
-        case MeshBuildSettingField::BuildScale:
-            settings.buildScale = Vec3d(2.0, 2.0, 2.0);
-            break;
-        case MeshBuildSettingField::GenerateDistanceFieldAsIfTwoSided:
-            settings.generateDistanceFieldAsIfTwoSided = true;
-            break;
-        case MeshBuildSettingField::DistanceFieldResolutionScale:
-            settings.distanceFieldResolutionScale = -0.0f;
-            break;
-        case MeshBuildSettingField::MaxLumenMeshCards:
-            settings.maxLumenMeshCards = 4;
-            break;
-        case MeshBuildSettingField::SupportFaceRemap:
-            settings.supportFaceRemap = true;
-            break;
-        }
-
+        SkinnedMeshBuildSettings changed;
+        ChangeSetting(changed, static_cast<MeshBuildSettingField>(field));
+        input.settings = changed;
+        const MeshBuildSettings& settings = input.settings;
         const auto value = static_cast<MeshBuildSettingField>(field);
         CHECK(IsMeshBuildSettingChanged(settings, value));
         REQUIRE(BuildStaticMeshLod(input, built));
@@ -198,9 +147,17 @@ TEST(StaticMeshBuild_SettingFieldTable) {
     }
 
     CHECK(preserved == 9);
-    const auto outside = static_cast<MeshBuildSettingField>(MeshBuildSettingFieldCount);
+    const auto outside = static_cast<MeshBuildSettingField>(SkinnedMeshBuildSettingFieldCount);
     CHECK(StringView(MeshBuildSettingFieldName(outside)) == StringView("Unknown"));
     CHECK(!IsPreservedMeshBuildSetting(outside));
+    // 스킨 필드는 정적 판정에서 보존이 아니고 바뀐 것으로 보지 않는다.
+    for (uint32 field = MeshBuildSettingFieldCount; field < SkinnedMeshBuildSettingFieldCount;
+         ++field) {
+        const auto skinned = static_cast<MeshBuildSettingField>(field);
+        CHECK(!IsPreservedMeshBuildSetting(skinned) &&
+              !IsMeshBuildSettingChanged(MeshBuildSettings{}, skinned));
+    }
+
     MeshBuildSettings changed;
     changed.buildScale = Vec3d(1.0, 1.0, -0.0);
     CHECK(!IsMeshBuildSettingChanged(changed, outside));

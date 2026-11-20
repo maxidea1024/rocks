@@ -264,9 +264,28 @@ const char* MeshIssueName(MeshIssue issue) noexcept {
         return "UnsupportedSetting";
     case MeshIssue::InvalidBuildScale:
         return "InvalidBuildScale";
+    case MeshIssue::InfluencesTrimmed:
+        return "InfluencesTrimmed";
+    case MeshIssue::MissingInfluences:
+        return "MissingInfluences";
+    case MeshIssue::NonFiniteMorph:
+        return "NonFiniteMorph";
+    case MeshIssue::InvalidSettingValue:
+        return "InvalidSettingValue";
+    case MeshIssue::InvalidBoneHierarchy:
+        return "InvalidBoneHierarchy";
+    case MeshIssue::EmptyBoneHierarchy:
+        return "EmptyBoneHierarchy";
+    case MeshIssue::SingularBindPose:
+        return "SingularBindPose";
     }
 
     return "Unknown";
+}
+
+bool MatchesMeshAttributePrefix(StringView name, StringView prefix) noexcept {
+    return name.ByteCount() > prefix.ByteCount() &&
+           rocks::mesh_source_detail::StartsWithAsciiCaseless(name, prefix);
 }
 
 AssetDiagnostic ToAssetDiagnostic(const MeshDiagnostic& diagnostic, AssetId asset) noexcept {

@@ -12,8 +12,8 @@ namespace rocks {
 // 여기 값은 진단 이름과 1:1이며 저장 포맷이 아니다(순서를 바꿔도 된다). A1이 내는 것은 패키지·
 // 매니페스트·로드 쪽(CorruptPackage·UnsupportedVersion·NewerVersion·MissingDependency·TypeMismatch·
 // IncompatibleCook·UnpackagedReference·UnsupportedCycle)이고, 나머지는 A2–A5가 같은 이름표를 쓴다.
-// 메시 코드는 MeshSource 모듈(MA1)과 MeshTools 빌드(MA2a)가 MeshDiagnostic::code로, 스켈레톤 코드는
-// Animation 모듈(MA4a)이 SkeletonDiagnostic::code로 낸다.
+// 메시 코드는 MeshSource 모듈(MA1)과 MeshTools 빌드(MA2a·MA5a)가 MeshDiagnostic::code로, 스켈레톤
+// 코드는 Animation 모듈(MA4a)이 SkeletonDiagnostic::code로 낸다.
 enum class AssetDiagnosticCode : uint16 {
     None,
     // 식별·경로
@@ -46,6 +46,10 @@ enum class AssetDiagnosticCode : uint16 {
     TooManyInfluences,
     MaterialSlotFallback,
     NegativeBuildScale,
+    // 스킨 메시 빌드(MeshAnimationAssets.ko.md 6.5절 — MA5a): 정보 InfluencesTrimmed, 경고
+    // MissingInfluences.
+    InfluencesTrimmed,
+    MissingInfluences,
     // 임포트·설정(4.6절 — MA2a 메시 빌드가 처음 낸다)
     UnsupportedSetting,
     InvalidSetting,
