@@ -186,6 +186,7 @@ UB1 동안 모든 모듈의 기본은 `Off`다. UB2·UB3에서 충돌을 정리�
 ### 7.1 작업 파일 집합
 
 - 모듈 소스가 git 작업 사본 안이면 그 작업 사본 루트에서 `git --no-optional-locks status --porcelain=v1 -z --untracked-files=all`을 실행한다. 빌드 한 번에 저장소마다 한 번이다.
+  - 작업 사본 루트는 빌드 루트에서 올라갈 상대 경로(`git rev-parse --show-cdup`)로 정하고, 보고된 상대 경로를 그 루트에 붙여 소스와 같은 철자의 절대 경로를 만든다. `--show-toplevel`은 symlink·junction을 푼 실제 경로를 돌려주므로(macOS 임시 폴더 `/var` → `/private/var`, Windows junction) 소스 철자와 갈려 작업 파일이 하나도 잡히지 않는다(macOS CI에서 발견, 2026-11-20).
 - 각 항목의 상태 두 열(X·Y) 중 하나라도 공백이 아니면 작업 파일이다. 수정(`M`), 추가(`A`), 형식 변경(`T`), 충돌(`U`), 미추적(`??`)을 모두 포함한다. 이름 변경(`R`)과 복사(`C`)는 새 경로를 작업 파일로 본다.
 - **timeout을 두지 않는다.** 결과가 나올 때까지 기다리고, 실패(종료 코드 ≠ 0)면 빌드 오류로 알린다. git 상태가 정해지지 않은 채 묶음을 구성하면 같은 입력에서 다른 action이 나온다. UE는 15초 timeout 뒤 빈 집합으로 진행한다(`System/SourceFileWorkingSet.cs:118–165`).
 - 다음 경우는 빈 집합이다(분리 없음).
