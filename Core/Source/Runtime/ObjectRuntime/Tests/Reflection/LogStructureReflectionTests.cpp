@@ -1,5 +1,6 @@
 #include <ReflectionTestFixtures/ArrayFixture.generated.h>
 #include <ReflectionTestFixtures/BitfieldFixture.generated.h>
+#include <ReflectionTestFixtures/CoreValueFixture.generated.h>
 #include <ReflectionTestFixtures/OptionalFixture.generated.h>
 #include <ReflectionTestFixtures/StaticArrayFixture.generated.h>
 #include <ReflectionTestFixtures/StructFixture.generated.h>
@@ -22,8 +23,10 @@
 // JSON 중첩 객체, LogSystem 경로의 무할당을 확인한다.
 using namespace rocks;
 using reflection_fixture::ArrayTag;
+using reflection_fixture::BitfieldChild;
 using reflection_fixture::BitfieldFlags;
 using reflection_fixture::BitfieldHolder;
+using reflection_fixture::CoreValueBundle;
 using reflection_fixture::FixedMode;
 using reflection_fixture::FixedOwner;
 using reflection_fixture::OptionalPoint;
@@ -46,6 +49,11 @@ static_assert(HasLogStructure<FixedOwner> && HasLogStructure<BitfieldHolder>);
 static_assert(HasLogStructure<BitfieldFlags> && HasLogStructure<OptionalSlot>);
 // 리플렉션 enum·일반 값은 펼치지 않는다.
 static_assert(!HasLogStructure<TextureGroup> && !HasLogStructure<int32>);
+// 상속한 bitfield를 가진 파생 클래스도 펼친다. Binds 미러 대상 Core 값은 맨 위 인자로 펼치지
+// 않고(설계 14.1.6절 L30 — 생성 헤더 없이도 보이는 타입이라 번역 단위마다 판정이 갈리지 않게), 그런
+// 필드를 가진 리플렉션 타입은 펼친다.
+static_assert(HasLogStructure<BitfieldChild> && HasLogStructure<CoreValueBundle>);
+static_assert(!HasLogStructure<Vec2> && !HasLogStructure<Vec4d> && !HasLogStructure<IntVec2>);
 
 namespace {
 
@@ -102,7 +110,7 @@ struct JsonLine {
 
 } // namespace
 
-// 생성 struct 왕복: 스키마 순서의 필드, 중첩 struct, enum 이름, NATIVE 멤버 제외, 원본 변경 뒤
+// 생성 struct 왕복: 선언 순서의 필드, 중첩 struct, enum 이름, NATIVE 멤버 제외, 원본 변경 뒤
 // 불변.
 TEST(LogStructureRoundTripsGeneratedStruct) {
     SystemAllocator allocator;
@@ -235,6 +243,49 @@ TEST(LogStructureReflectsBitfieldsOptionalsAndArrays) {
     REQUIRE(rendered.From(Span<const uint8>(slot, used.Value())).IsOk());
     CHECK(rendered.event.message ==
           "ArrayTag { id: 9, label: \"\", codes: [0, 1, 2, 3, 4, 5, 6, 7, ... 10 items] }");
+}
+
+// 상속한 bitfield(base의 private 포함)는 생성 헤더 안에서 선언 타입으로 바꿔 직접 읽는다(base
+// 모듈의 생성 소스에 있는 Get_을 부르지 않는다). 필드 순서는 base의 필드부터다.
+TEST(LogStructureReflectsInheritedBitfields) {
+    SystemAllocator allocator;
+    BitfieldChild child(allocator);
+    child.on = 1;
+    child.SetHidden(true);
+    child.extra = 1;
+    static uint8 slot[4096];
+    const auto used =
+        CaptureLog({Span<uint8>(slot)}, LogLevel::Info, LogReflectionTests, "{@Child}", child);
+    REQUIRE(used.IsOk());
+    static Rendered rendered;
+    REQUIRE(rendered.From(Span<const uint8>(slot, used.Value())).IsOk());
+    CHECK(rendered.event.message ==
+          "BitfieldChild { on: true, off: false, big: false, locked: false, flags: "
+          "BitfieldFlags { first: false, second: false, wide: false, wider: false, widest: false, "
+          "plain: 0 }, list: [], hidden: true, extra: true }");
+}
+
+// Binds 미러 대상 Core 값 필드(Vec4d·Vec2·IntVec2 등)는 일반 특수화 없이 visitor가 방문 함수로 중첩
+// 객체로 펼친다.
+TEST(LogStructureExpandsBindsMirrorFields) {
+    CoreValueBundle bundle;
+    bundle.uv.x = 1.5f;
+    bundle.uv.y = -2.0f;
+    bundle.size.x = 7;
+    bundle.size.y = 8;
+    static uint8 slot[4096];
+    const auto used =
+        CaptureLog({Span<uint8>(slot)}, LogLevel::Info, LogReflectionTests, "{@Bundle}", bundle);
+    REQUIRE(used.IsOk());
+    static Rendered rendered;
+    REQUIRE(rendered.From(Span<const uint8>(slot, used.Value())).IsOk());
+    // 태그는 미러의 스키마 이름이다(실제 타입 이름이 아니다).
+    CHECK(rendered.event.message ==
+          "CoreValueBundle { thresholds: Vec4dBinding { x: 0, y: 0, z: 0, w: 0 }, uv: Vec2Binding "
+          "{ x: 1.5, y: -2 }, uvPrecise: Vec2dBinding { x: 0, y: 0 }, weights: Vec4Binding { x: 0, "
+          "y: 0, z: 0, w: 0 }, orientation: QuatdBinding { x: 0, y: 0, z: 0, w: 1 }, heading: "
+          "RotatorBinding { pitch: 0, yaw: 0, roll: 0 }, headingPrecise: RotatordBinding { pitch: "
+          "0, yaw: 0, roll: 0 }, size: IntVec2Binding { x: 7, y: 8 } }");
 }
 
 // JSON lines: props 안 중첩 객체, "$type"은 도구 이름, enum은 이름 문자열.

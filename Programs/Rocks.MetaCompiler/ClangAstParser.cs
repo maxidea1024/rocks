@@ -74,9 +74,10 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
         return classes;
     }
 
-    // ROCKS_NATIVE 재귀 검사용 레코드 색인이다(정규 이름 → 필드·base 타입 철자, WorldOnly 소유자 형질). 클래스
-    // 템플릿은 패턴 레코드를 템플릿 이름으로 둔다(특수화의 필드는 패턴 필드와 템플릿 인자로 근사한다).
-    private sealed record RecordInfo(List<string> Fields, List<string> Bases, bool RequiresWorldOnlyOwner);
+    // 배열 필드 실패 진단(FindFieldAt)의 쓴 철자 재귀용 레코드 색인이다(선언 이름 → 필드·base 타입 철자). 클래스
+    // 템플릿은 패턴 레코드를 템플릿 이름으로 둔다. 판정이 아니라 문구에만 쓴다 — NATIVE 멤버 판정은 정규 형식 탐침의 레코드 닫힘
+    // (ClangAstParser.Canonical.cs)이 한다.
+    private sealed record RecordInfo(List<string> Fields, List<string> Bases);
 
     private readonly Dictionary<string, RecordInfo> records = new(StringComparer.Ordinal);
 
@@ -137,7 +138,6 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
         {
             string qualified = string.Join("::", scope.Append(name));
             List<string> fields = [];
-            bool worldOnly = false;
             // 이름 없는 struct/union 멤버의 필드는 부모가 값으로 담으므로 부모 필드로 본다.
             void Collect(JsonElement record)
             {
@@ -152,10 +152,6 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
                     {
                         Collect(child);
                     }
-                    else if (childKind == "VarDecl" && Text(child, "name") == "RocksRequiresWorldOnlyOwner" && ContainsTrue(child))
-                    {
-                        worldOnly = true;
-                    }
                 }
             }
 
@@ -163,7 +159,7 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
 
             List<string> bases = node.TryGetProperty("bases", out JsonElement baseArray)
                 ? baseArray.EnumerateArray().Select(TypeSpelling).ToList() : [];
-            records.TryAdd(qualified, new(fields, bases, worldOnly));
+            records.TryAdd(qualified, new(fields, bases));
             foreach (JsonElement child in Children(node))
             {
                 IndexRecords(child, [.. scope, name]);
@@ -247,10 +243,6 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
         }
     }
 
-    private static bool ContainsTrue(JsonElement node) =>
-        (Text(node, "kind") == "CXXBoolLiteralExpr" && node.TryGetProperty("value", out JsonElement value) && value.ValueKind == JsonValueKind.True) ||
-        Children(node).Any(ContainsTrue);
-
     // 타입 철자를 cv·elaborated 키워드·앞의 ::없이 다듬는다(SchemaValidator가 NATIVE 멤버의 직접 타입을 찾을 때도 쓴다).
     internal static string CleanType(string type)
     {
@@ -274,30 +266,78 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
         return text.StartsWith("::", StringComparison.Ordinal) ? text[2..] : text;
     }
 
-    // 깊이 0의 template 인자 목록을 나눈다. 템플릿이 아니면 null이다.
+    // 철자에서 문자·문자열 리터럴 밖의 글자를 차례로 낸다: 위치, 글자, 꺾쇠 깊이, 괄호(`()`·`[]`) 깊이. 여는 글자는 열기 전, 닫는
+    // 글자는 닫은 뒤의 깊이라 바깥 템플릿 인자 목록의 `<`·`>`는 꺾쇠 깊이 0이다. Clang 정규 철자는 char 템플릿 인자를 문자 리터럴로
+    // 쓰므로(`ByChar<'>'>`) 리터럴 안의 글자는 세지 않는다.
+    private static IEnumerable<(int Index, char Character, int Angle, int Group)> CodeCharacters(string type)
+    {
+        int angle = 0;
+        int group = 0;
+        for (int index = 0; index < type.Length; ++index)
+        {
+            char c = type[index];
+            if (c is '\'' or '"')
+            {
+                for (++index; index < type.Length && type[index] != c; ++index)
+                {
+                    if (type[index] == '\\')
+                    {
+                        ++index;
+                    }
+                }
+
+                continue;
+            }
+
+            if (c == '>')
+            {
+                --angle;
+            }
+            else if (c is ')' or ']')
+            {
+                --group;
+            }
+
+            yield return (index, c, angle, group);
+            if (c == '<')
+            {
+                ++angle;
+            }
+            else if (c is '(' or '[')
+            {
+                ++group;
+            }
+        }
+    }
+
+    // 끝의 템플릿 인자 목록을 나눈다(`Outer<int>::Inner<T>` → `Outer<int>::Inner`와 `T`). 끝 `>`와 짝인 `<`에서 자르고, 인자는 그
+    // 목록 안의 꺾쇠·괄호 깊이 0 쉼표에서 나눈다. 끝이 템플릿 인자 목록이 아니면 null이다.
     private static (string Name, List<string> Arguments)? SplitTemplate(string type)
     {
-        int open = type.IndexOf('<');
-        if (open < 0 || !type.EndsWith('>'))
+        if (!type.EndsWith('>'))
+        {
+            return null;
+        }
+
+        int open = -1;
+        foreach ((int index, char c, int angle, int group) in CodeCharacters(type))
+        {
+            if (c == '<' && angle == 0 && group == 0)
+            {
+                open = index;
+            }
+        }
+
+        if (open < 0)
         {
             return null;
         }
 
         List<string> arguments = [];
-        int depth = 0;
         int start = open + 1;
-        for (int index = open + 1; index < type.Length - 1; ++index)
+        foreach ((int index, char c, int angle, int group) in CodeCharacters(type))
         {
-            char c = type[index];
-            if (c is '<' or '(' or '[')
-            {
-                ++depth;
-            }
-            else if (c is '>' or ')' or ']')
-            {
-                --depth;
-            }
-            else if (c == ',' && depth == 0)
+            if (index > open && index < type.Length - 1 && c == ',' && angle == 1 && group == 0)
             {
                 arguments.Add(type[start..index].Trim());
                 start = index + 1;
@@ -308,29 +348,31 @@ internal sealed partial class ClangAstParser(IReadOnlyList<ModuleInput> inputs, 
         return (type[..open].Trim(), arguments);
     }
 
-    // 템플릿 인자 밖(깊이 0)에서 token이 나오면 참이다(함수 포인터·참조 판정용).
-    private static bool TopLevelContains(string type, string token)
+    // 정규·desugar 철자의 마지막 식별자다: 꼬리 템플릿 인자를 걷고 꺾쇠·괄호 깊이 0의 마지막 `::` 뒤를 자른다
+    // (`probe::Outer<int>::Inner` → `Inner`, `rocks::Leaf<0, int>` → `Leaf`).
+    private static string LastIdentifier(string type)
     {
-        int depth = 0;
-        for (int index = 0; index < type.Length; ++index)
+        string text = CleanType(type);
+        if (SplitTemplate(text) is (string name, _))
         {
-            char c = type[index];
-            if (c == '<')
+            text = name;
+        }
+
+        int cut = 0;
+        foreach ((int index, char c, int angle, int group) in CodeCharacters(text))
+        {
+            if (c == ':' && angle == 0 && group == 0 && index + 2 < text.Length && text[index + 1] == ':')
             {
-                ++depth;
-            }
-            else if (c == '>')
-            {
-                --depth;
-            }
-            else if (depth == 0 && string.CompareOrdinal(type, index, token, 0, token.Length) == 0)
-            {
-                return true;
+                cut = index + 2;
             }
         }
 
-        return false;
+        return text[cut..].Trim();
     }
+
+    // 템플릿 인자 밖(꺾쇠 깊이 0, 리터럴 밖)에서 token이 나오면 참이다(포인터·참조·함수 포인터 판정용).
+    private static bool TopLevelContains(string type, string token) =>
+        CodeCharacters(type).Any(entry => entry.Angle == 0 && string.CompareOrdinal(type, entry.Index, token, 0, token.Length) == 0);
 
     // 선언의 물리 파일이 이 모듈 입력이면 그 입력을, 아니면 null을 돌려준다.
     private ModuleInput? OwningInput(string? file) =>

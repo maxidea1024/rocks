@@ -1,6 +1,6 @@
 # Clang 버전 지원 설계
 
-기준일: 2026-11-20, 개정 3. Clang 22가 JSON AST에서 `ElaboratedType`을 없애, MetaCompiler가 읽던 타입 철자가 바뀌었다. 이 문서는 두 가지를 정한다.
+기준일: 2026-11-20, 개정 4. Clang 22가 JSON AST에서 `ElaboratedType`을 없애, MetaCompiler가 읽던 타입 철자가 바뀌었다. 이 문서는 두 가지를 정한다.
 - **정규 형식 탐침**: MetaCompiler가 타입 철자를 첫 실행 JSON의 `qualType`·`desugaredQualType`에서 읽지 않고, Clang이 출력한 정규 형식(완전 한정 철자)으로 읽게 한다. 그러면 Clang 21과 22의 AST 모양 차이가 철자에 닿지 않는다.
 - **도구 모음 버전 정책**: 검증한 LLVM 버전, `ROCKS_MSVC_TOOLSET`, `Build/InstallLlvm.ps1`, CI, 그리고 MSVC 14.44 고정을 언제 푸는지.
 
@@ -17,7 +17,7 @@
 
 측정 도구 모음: LLVM 21.1.6·22.1.8 공식 Windows x64 배포(설치 파일을 풀어 씀), 로컬 MSVC 14.29(Visual Studio 2019 STL), clang-format 21.1.6. UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`)의 UnrealBuildTool·UnrealHeaderTool이다. UE 이름은 12절 대응표에만 적는다.
 
-상태: **구현 중**(결정 CLGD1–CLGD15, 권장안으로 확정). 구현 단계는 CLG0–CLG4(10절)다. CLG0–CLG2를 구현했다(개정 3 — 구현하며 정한 점은 14절). 시제품(커밋하지 않음)으로 실제 헤더에서 확인한 측정은 1.4절이다. 개정 2는 리뷰어 교차 검증(Clang 21.1.6·22.1.8 양쪽 탐침)을 적용했다.
+상태: **구현 중**(결정 CLGD1–CLGD15, 권장안으로 확정). 구현 단계는 CLG0–CLG4(10절)다. CLG0–CLG2를 구현했다(개정 3 — 구현하며 정한 점은 14절). 개정 4는 CLG1·CLG2 리뷰를 레코드 닫힘(4.4절)과 base 식별자(4.3절)에 반영했다. 시제품(커밋하지 않음)으로 실제 헤더에서 확인한 측정은 1.4절이다. 개정 2는 리뷰어 교차 검증(Clang 21.1.6·22.1.8 양쪽 탐침)을 적용했다.
 
 ## 1. 현재 상태와 측정
 
@@ -194,7 +194,7 @@ base는 `decltype`으로 이름할 수 없다. 그래서 파생 클래스를 거
 
 base 목록과 식별자:
 - 리플렉션 타입과 비템플릿 레코드는 첫 실행의 그 레코드 노드에서, 템플릿 특수화는 **특수화 노드**의 `bases`에서 base 목록을 읽는다. 특수화 노드의 base는 치환된 형식이다(`Leaf<I, T>...` → `rocks::Leaf<0, rocks::Payload>`·`rocks::Leaf<1, int>`, `Mixin<T> : T` → `rocks::Payload`, 두 버전 같음).
-- 질문에 쓸 식별자는 base `type`의 `TypeSpelling`(desugar 철자 우선)에서 템플릿 인자와 한정을 걷은 마지막 식별자다. 쓴 철자에서 뽑지 않는 이유: 별칭 템플릿(`BaseAlias<int>`), 특수화 안의 멤버 typedef(`Traits<int>::BaseType`), `decltype` base는 쓴 철자의 마지막 식별자가 base 클래스의 이름이 아니다. desugar 철자에서는 셋 다 `Base`가 나온다(리뷰어 실측, 두 버전 같음). 별칭 base(`ObjectAlias`)도 desugar 철자 `Object`·`rocks::Object`에서 `Object`가 나오므로 개정 1의 별칭 선언 id 색인은 필요 없다. 이 추출이 4.1절의 세 번째 예외다.
+- 질문에 쓸 식별자는 base `type`의 `TypeSpelling`(desugar 철자 우선)에서 꼬리 템플릿 인자를 걷고 꺾쇠·괄호 깊이 0의 마지막 `::` 뒤를 잘라 얻은 식별자다(`Outer<int>::Inner` → `Inner`, 개정 4 — 첫 `<`에서 자르면 `Outer`가 나와 간접 base를 답으로 받는다). 문자·문자열 리터럴(`ByChar<'>'>`) 안의 글자는 깊이에 세지 않는다. 쓴 철자에서 뽑지 않는 이유: 별칭 템플릿(`BaseAlias<int>`), 특수화 안의 멤버 typedef(`Traits<int>::BaseType`), `decltype` base는 쓴 철자의 마지막 식별자가 base 클래스의 이름이 아니다. desugar 철자에서는 셋 다 `Base`가 나온다(리뷰어 실측, 두 버전 같음). 별칭 base(`ObjectAlias`)도 desugar 철자 `Object`·`rocks::Object`에서 `Object`가 나오므로 개정 1의 별칭 선언 id 색인은 필요 없다. 이 추출이 4.1절의 세 번째 예외다.
 
 순서:
 1. **정교한 형식 지정자**로 묻는다: `struct ::Owner::식별자`(`Object` → `struct ::rocks::Actor::Object`, 특수화 소유자는 `struct ::rocks::Mixin<rocks::Payload>::Payload`). 정교한 형식 지정자의 조회는 형식이 아닌 이름을 건너뛰므로 파생 클래스의 같은 이름 데이터 멤버·멤버 함수(`struct Leaf : A { int32 A; }`)에 가려지지 않는다.
@@ -203,7 +203,7 @@ base 목록과 식별자:
    - 1이 어떤 이유로든 실패한 경우(4.5절 격리로 그 질문만 다시 묻는다).
 3. 둘 다 실패하면 거부한다: 리플렉션 타입은 RMC2001, 레코드 닫힘은 RMC2205 cannot verify.
 
-확인: `RocksCanonBase`의 `static_assert(IsBaseOfV<B, D> && !IsSameV<B, D>)`. `IsBaseOfV`만으로는 B == D를 받으므로, `struct ::rocks::Rec<2>::Rec`가 Rec<2> 자신을 조용히 답한다(리뷰어 실측). 파생 클래스가 base와 같은 이름의 **중첩 타입**을 선언하면 1의 조회가 그 타입을 찾고 이 확인이 실패해 2로 간다.
+확인: `RocksCanonBase`의 `static_assert(IsBaseOfV<B, D> && !IsSameV<B, D>)`. `IsBaseOfV`만으로는 B == D를 받으므로, `struct ::rocks::Rec<2>::Rec`가 Rec<2> 자신을 조용히 답한다(리뷰어 실측). 파생 클래스가 base와 같은 이름의 **중첩 타입**을 선언하면 1의 조회가 그 타입을 찾고 이 확인이 실패해 2로 간다. 1의 답은 마지막 식별자가 물은 식별자와 같을 때만 받는다(개정 4 — 같은 이름의 멤버 typedef가 다른 base를 가리키면 2로 간다).
 
 실측(모두 두 버전 같음):
 - 시제품(개정 1 방식 — 쓴 철자의 마지막 식별자, 별칭 id 색인): private base(`private detail::Leaf`), CRTP base, 별칭 base, `::rocks::Object`로 한정한 base, 같은 이름 데이터 멤버에 가려진 base(1), 파생과 같은 이름의 base(2), 중첩 클래스의 바깥 클래스 멤버 base(`struct Outer { struct Inner {}; struct Nested : Inner {}; }` — 1). 시제품 첫 판은 1을 정교한 형식 지정자 없이(`::Owner::A`) 물었고, meta 시험 246건 중 바로 이 두 경우(`Meta.StructInheritedToolNamesAreUnique`, `Meta.GeneratedBodyWorksInReflectedClass`)에서 탐침이 실패했다. 1·2 순서로 고친 뒤 두 시험이 통과했다.
@@ -215,19 +215,30 @@ base 목록과 식별자:
 
 NATIVE 멤버의 강한 참조(RMC2205)·WorldOnly 소유자 형질(RMC2206) 재귀 검사는 값으로 담은 레코드의 필드·base와 템플릿 인자를 따라간다. 방식:
 
-**레코드 색인.** 첫 실행 JSON에서 비템플릿 레코드 노드와 **특수화 노드**(암시적 인스턴스화, 부분·명시 특수화 — 첫 실행에서 완전한 것)의 필드 이름·base·WorldOnly 표지 변수(`RocksRequiresWorldOnlyOwner`)를 모은다. 패턴 레코드(`ClassTemplateDecl` 안의 `CXXRecordDecl`)는 색인하지 않는다 — 부분·명시 특수화는 패턴과 필드가 다르다(`Box<T, int>`의 필드는 패턴에 없어 `decltype(::rocks::Box<rocks::Payload, int>::data_)`가 "no member"로 실패한다, 리뷰어 실측). 특수화 노드의 필드·base는 두 버전에서 같다(실측).
+**레코드 색인.** 첫 실행 JSON에서 비템플릿 레코드 노드와 **특수화 노드**(암시적 인스턴스화, 부분·명시 특수화 — 첫 실행에서 완전한 것)의 필드 이름·base를 모은다. 개정 4에서 더한 것:
+- 불완전한 레코드·특수화 노드(앞 선언, 인스턴스화되지 않은 특수화)도 "불완전"으로 넣는다. 템플릿 인자 규칙(아래 걷기)이 쓴다. 같은 열쇠에 완전한 노드가 있으면 그것이 이긴다.
+- typedef로 이름을 받은 이름 없는 class(`typedef struct { … } Name;`)는 그 이름으로 넣는다. 정규 철자가 `ns::Name`이다(두 버전 같음, 실측).
+- 필드는 멤버 경로다. 익명 struct·union(바로 뒤에 암시적인 이름 없는 필드가 온다)의 필드는 부모 범위로 주입되므로 부모 필드로 묻는다. 선언자가 있는 이름 없는 struct(`struct { int x; } inner;`)의 필드는 `decltype(::R::inner.x)`(배열이면 `inner[0].x`)로 묻는다(두 버전에서 컴파일됨, 실측). base가 있는 이름 없는 struct 멤버는 따라갈 수 없음(cannot verify)이다.
+- WorldOnly 형질은 표지 변수를 읽지 않고 레코드마다 사실로 묻는다(아래 걷기). 암시적 인스턴스화 노드의 표지 변수에는 초기값이 없고, 패턴의 표지로 대신하면 부분·명시 특수화에서 틀린다(리뷰 실측).
+
+패턴 레코드(`ClassTemplateDecl` 안의 `CXXRecordDecl`)는 색인하지 않는다 — 부분·명시 특수화는 패턴과 필드가 다르다(`Box<T, int>`의 필드는 패턴에 없어 `decltype(::rocks::Box<rocks::Payload, int>::data_)`가 "no member"로 실패한다, 리뷰어 실측). 특수화 노드의 필드·base는 두 버전에서 같다(실측).
 
 **열쇠는 정규 철자다.** 걷기가 정규 철자로 레코드를 찾으므로 색인 열쇠도 정규 철자여야 한다.
 - 비템플릿 레코드는 선언 경로(이름공간·클래스 이름)가 열쇠다. 단 inline 이름공간 아래 레코드(`NamespaceDecl`의 `isInline`)는 정규 출력이 inline 이름공간을 뺀다(`rocks::v1::Inl` → `rocks::Inl`, libc++의 `std::__1`도 같다, 리뷰어 실측). 그런 레코드는 선언 경로로 쓴 형식 철자 질문(`RocksCanonType<N, ::rocks::v1::Inl>`)의 답을 열쇠로 쓴다.
 - 특수화 노드는 노드의 템플릿 인자(형식 인자는 정규 `qualType`, 정수 인자는 `value`, pack 인자는 펼친다)로 `::템플릿 이름<인자 전부>`를 만들어 같은 라운드에서 형식 철자를 묻고, 그 답을 열쇠로 쓴다. 문자열을 직접 비교하지 않는다: 정규 출력은 기본 인자를 생략한다(`rocks::ObjectRef<>`).
+- 정수 인자의 `value`는 덤퍼가 64비트 2의 보수로 낸다(`bool` true와 `unsigned long long` 최댓값이 -1, 실측). 그래서 패턴의 매개변수 형식(`NonTypeTemplateParmDecl`, pack 원소 포함)으로 쓴다(개정 4): `bool`이면 `true`·`false`, 그 밖은 `static_cast<P>(값LL)`이다. P는 builtin이면 그대로, 템플릿의 형식 매개변수면 그 인자의 정규 철자(`IntegerSequence<T, T...>`), enum·typedef면 템플릿을 둘러싼 이름공간에 같은 줄로 연 별칭(`namespace probe { using rocksCanonParam_N_0 = Kind; }`)이다. 클래스 안 템플릿은 둘러싼 클래스로 한정한 철자(`::probe::Outer::E`)로도 묻고 답한 쪽을 쓴다. 틀린 쪽은 변환 실패로 거부되므로 두 답이 갈리지 않는다.
+- 부를 수 없는 특수화: 템플릿 템플릿 인자, 주소·`nullptr`·class 값 인자, 다른 매개변수에 기대는 매개변수 형식(`typename T::X`, `auto`). 이런 레코드와 열쇠 질문이 실패한 레코드는 열쇠가 없다. 걷기가 같은 식별자의 형식에 닿아 열쇠로 찾지 못하면 그 이유를 붙여 cannot verify다(4.5절).
+- 열쇠를 얻은 특수화(와 그 안의 레코드)의 필드·base·사실 질문은 열쇠 답(정규 철자, `::`를 붙인다)으로 부른다.
 
 **걷기.** 1단계 탐침이 NATIVE 멤버의 정규 철자를 준 뒤, C#이 그 철자를 걸으며 값으로 닿는 형식을 모은다: 배열 원소, 템플릿 인자, 색인 레코드의 필드와 base.
 - **템플릿 인자 걷기는 하한으로 남긴다**(비소유 템플릿 `WeakObjectRef`·`SoftObjectRef` 제외, 지금 `ClangAstParser.Traits.cs:66–76`). `Optional`·`Result`·`Variant`·`InlineArray`·`SharedPtr`는 T를 `alignas(T) unsigned char storage_[]`에 숨기므로(`Optional.h:209`, `Result.h:108`, `Variant.h:325`, `InlineArray.h:267`, `SharedPtr.h:93`) 필드로는 T가 보이지 않는다. `Optional<ObjectRef<X>>`는 인자 걷기만 잡는다. 지우는 것은 **패턴 필드 근사**(특수화를 패턴 필드로 대신 걷던 것)뿐이다.
-- 아직 묻지 않은 레코드는 한 라운드에 묶어 묻는다: 필드마다 멤버 형식(`decltype(::열쇠::필드)`, 필드 이름은 그 레코드·특수화 노드에서), base마다 4.3절 질문, 그리고 `IsBaseOfV<rocks::Object, R>` 사실. 새 레코드가 없을 때까지 되풀이한다.
-- **색인에 없는 class는 거부한다.** 값으로 닿은 형식이 class인데 색인 열쇠에 없으면 RMC2205 cannot verify다. 선언만 있는 primary template(`Tuple.h:63`의 `TupleStorage` — 실제 정의는 부분 특수화), 열쇠 대응 실패, 첫 실행에서 불완전한 특수화가 여기에 든다. class 여부는 같은 라운드의 `IsClassV` 사실 질문으로 정한다. builtin·enum은 걷기가 끝난다. 조용히 건너뛰지 않는다.
-- **포인터·참조**로 닿는 대상은 걷지 않는다. 그 대상이 Object 파생인지는 그 필드의 형식을 NativeMemberProbe의 판정 형판(`RocksProbeVerdict<decltype(::R::field)>`)으로 같은 라운드에서 묻고, C#의 base 사슬 걷기(`IsObjectDerived`)는 지운다. 불완전한 대상은 직접 멤버와 같은 규칙을 따른다: 모듈 public 헤더를 더해 다시 묻고, 그래도 불완전하면 허용한다(빌린 back-pointer — `Actor::world_`의 `World*`가 이 경우다). 그래서 Clang 21에서도 놓치던 중첩 포인터 가운데 대상이 완전한 Object 파생인 것이 판정되고, 불완전한 대상은 지금처럼 허용된다.
+- 아직 묻지 않은 레코드는 한 라운드에 묶어 묻는다: 필드마다 멤버 형식(`decltype(::열쇠::필드)`, 필드 이름은 그 레코드·특수화 노드에서), base마다 4.3절 질문, 그리고 `IsBaseOfV<rocks::Object, R>`·`RequiresWorldOnlyOwner<R>` 사실(뒤의 것은 생성 `static_assert`와 같은 형질이다, 개정 4). 새 레코드가 없을 때까지 되풀이한다.
+- **색인에 없는 class는 거부한다.** 값으로 닿은 형식이 class인데 색인 열쇠에 없으면 RMC2205 cannot verify다. 부를 수 없는 특수화, 열쇠 질문 실패, 함수 안 지역 클래스가 여기에 든다. class 여부는 같은 라운드의 `IsClassV` 사실 질문으로 정한다. builtin·enum은 걷기가 끝난다. 조용히 건너뛰지 않는다.
+- **템플릿 인자로만 닿은 형식**도 같은 규칙이다(개정 4 — 개정 3은 색인에 없으면 건너뛰어 열쇠를 잘못 만든 특수화를 조용히 놓쳤다). 다른 점은 하나다: 색인에서 **불완전한** 레코드면 건너뛴다. 인자로 쓰였을 뿐 값으로 담기지 않았다(`IntegerSequence<…>` 같은 태그, 선언만 있는 태그 class — 그 템플릿이 바이트 저장소에 담았다면 첫 실행에서 인스턴스화되어 완전하다). 완전성을 `sizeof` 사실로 묻지 않는다: 탐침의 `sizeof`가 그 특수화를 인스턴스화해 첫 실행과 다른 답을 낸다.
+- **중복 제거.** 한 NATIVE 멤버의 걷기는 (형식, 직접 멤버인지, 템플릿 인자인지)를 열쇠로 한 번만 본다(개정 4 — 형식만 열쇠로 쓰면 직접 멤버 포인터나 인자 자리로 먼저 본 형식의 판정·class 질문이 빠져 결과가 NATIVE 순서에 따라 갈렸다).
+- **포인터·참조**로 닿는 대상은 걷지 않는다. 그 대상이 Object 파생인지는 그 필드의 형식을 NativeMemberProbe의 판정 형판(`RocksProbeVerdict<decltype(::R::field)>`)으로 같은 라운드에서 묻고, C#의 base 사슬 걷기(`IsObjectDerived`)는 지운다. 불완전한 대상은 직접 멤버와 같은 규칙을 따른다: 모듈 public 헤더를 더해 다시 묻고, 그래도 불완전하면 허용한다(빌린 back-pointer — `Actor::world_`의 `World*`가 이 경우다). 그래서 Clang 21에서도 놓치던 중첩 포인터 가운데 대상이 완전한 Object 파생인 것이 판정되고, 불완전한 대상은 지금처럼 허용된다. 포인터·참조인지는 정규 철자에서 템플릿 꺾쇠 밖의 `*`·`&`로 가르고, 문자 리터럴 인자(`ByChar<'>'> *`) 안의 글자는 세지 않는다(개정 4).
 - 전역 한정 철자로 부를 수 없는 레코드(함수 안 지역 클래스, 이름 없는 타입, 람다)에 값으로 닿으면 RMC2205 cannot verify다. 익명 이름공간은 한 칸을 빼고 부른다(`::ns::(anonymous namespace)::X` → `::ns::X`).
-- 한도는 지금과 같다(경로 방문 512). 라운드 수는 값으로 담는 중첩 깊이다. 실측 0–2회였다(1.4절).
+- 한도: NATIVE 멤버 하나가 걷는 형식 4,096개, 라운드 32회. 형식 수를 넘으면 그 NATIVE 위치에, 라운드 수를 넘으면 마지막 라운드에 물을 것이 남은 NATIVE 위치에 cannot verify다(개정 4 — 개정 3은 형식 수를 라운드의 모든 NATIVE가 함께 셌다). 라운드 수는 값으로 담는 중첩 깊이다. 실측 0–2회였다(1.4절).
 
 시제품은 비템플릿 레코드만 선언 경로 열쇠로 물었고(특수화는 패턴 근사 그대로), 포인터 대상의 Object 파생은 C#의 base 사슬로 판정했다. 특수화 노드 색인, 정규 철자 열쇠, `IsClassV` 거부, 판정 형판 재사용은 시제품에 넣지 않았다.
 
@@ -351,7 +362,7 @@ CLG4에서 (가) leg와 함께 CI의 `ROCKS_MSVC_TOOLSET: 14.44`를 뺀다. 조�
 |---|---|
 | CLG0 | 공용 격리 helper로 바꾼 NativeMemberProbe의 기존 meta 시험(격리·cannot verify 포함)이 그대로 통과 |
 | CLG1 | Clang 21.1.6으로 meta 시험 전체 통과, Foundation·EngineTests 생성물이 바뀌기 전과 byte 동일. Clang 22.1.8로 같은 생성물(로컬 대조). 새 시험: 한정 없는 레코드·enum 필드, `Object` base, 별칭 base, 별칭 템플릿·멤버 typedef·`decltype` base, private base, 데이터 멤버에 가려진 base, 파생과 같은 이름의 base, 같은 식별자 base 둘, 비템플릿 별칭 Binds, 비리플렉션 빈 base(이름공간 안), C 배열 원소가 함수 포인터·배열 포인터인 정적 배열 |
-| CLG2 | 새 시험: 중첩 레코드의 완전한 Object 파생 포인터(Clang 21에서도 놓치던 것)는 거부, 불완전한 대상 포인터는 허용, 중첩 WorldOnly 형질, 부분 특수화·명시 특수화를 값으로 담은 NATIVE, NATIVE `Optional<ObjectRef<…>>`·`Tuple<ObjectRef<…>>`, inline 이름공간 아래 레코드를 값으로 담은 NATIVE, 재귀 base(`Rec<N> : Rec<N - 1>`)·pack 확장 base를 가진 특수화, 지역 클래스·선언만 있는 primary에 닿는 NATIVE(cannot verify). 기존 RMC2205·2206 시험 통과. **CLG1+CLG2 병합 조건**: `[ci]` 커밋으로 Windows (가)·(나) leg와 macOS leg 통과 |
+| CLG2 | 새 시험: 중첩 레코드의 완전한 Object 파생 포인터(Clang 21에서도 놓치던 것)는 거부, 불완전한 대상 포인터는 허용, 중첩 WorldOnly 형질, 부분 특수화·명시 특수화를 값으로 담은 NATIVE, NATIVE `Optional<ObjectRef<…>>`·`Tuple<ObjectRef<…>>`, inline 이름공간 아래 레코드를 값으로 담은 NATIVE, 재귀 base(`Rec<N> : Rec<N - 1>`)·pack 확장 base를 가진 특수화, 지역 클래스·선언만 있는 primary에 닿는 NATIVE(cannot verify). 개정 4 리뷰 사례: 직접 멤버 포인터와 같은 중첩 포인터, 인자 자리 뒤 값 자리, enum·`bool` pack·`unsigned long long` 최댓값·형식 매개변수에 기대는 NTTP 특수화, 클래스 안 템플릿의 enum NTTP, 바이트 저장소 템플릿에 숨긴 enum NTTP 특수화·특수화 안 중첩 레코드·typedef 이름 struct, 부분 특수화에만 있는 WorldOnly 표지, 표지를 없앤 명시 특수화, 특수화를 거친 중첩 WorldOnly, 템플릿 안 중첩 레코드(값·WorldOnly), 간접 base 이름을 가진 중첩 base, private base, pack 확장 base, base를 가리는 중첩 타입, 선언자가 있는 이름 없는 struct·익명 union, 문자 리터럴 인자 포인터, 공개 헤더로 완전해지는 중첩 포인터 대상, 템플릿 템플릿 인자 특수화(cannot verify), 함수 포인터·배열 포인터 원소 C 배열의 `ElementSpelling`. 기존 RMC2205·2206 시험 통과. **CLG1+CLG2 병합 조건**: `[ci]` 커밋으로 Windows (가)·(나) leg와 macOS leg 통과 |
 | CLG3 | 도구 모음 확인의 거부·기록 시험(Rocks.Build.Tests — 최소 미만, `yvals_core.h`의 최소 Clang 미달, 검증 목록 밖 기록, `--require-verified-toolchain` 실패), 설치 SDK 게임 빌드가 SDK 도구의 표로 확인을 도는지(통합 시험) |
 | CLG4 | 검증 도구 모음 전환 뒤 CI 전체 통과, 13절 문서 개정 |
 
@@ -365,7 +376,7 @@ CLG4에서 (가) leg와 함께 CI의 `ROCKS_MSVC_TOOLSET: 14.44`를 뺀다. 조�
 | CLGD2 | 탐침은 명시적 인스턴스화의 템플릿 인자로 묻는다(접근 검사 면제, 정규 형식 저장). GENERATED_BODY friend에 기대지 않는다. 사실은 `int` 0·1로 넘긴다 | 확정 |
 | CLGD3 | 정규 형식 탐침은 모듈마다 한 번(1단계) + 레코드 닫힘 라운드다. StaticArrayProbe는 Clang 실행만 합치고 원소·크기 나누기는 Clang 형판에 남긴다. Binds·Within은 자기 실행에 래퍼만 붙이고, NativeMemberProbe는 그대로 둔다 | 확정 |
 | CLGD4 | base 목록은 레코드·특수화 노드에서 읽고, 식별자는 `TypeSpelling`의 마지막 식별자로 뽑는다. 정교한 형식 지정자(`struct ::Owner::식별자`)로 묻고, 파생(템플릿) 이름과 같거나 같은 식별자 base가 여럿이거나 1이 실패하면 둘러싼 이름공간 별칭으로 묻는다. 답은 `IsBaseOfV && !IsSameV`로 확인하고, 둘 다 실패하면 거부한다. 둘러싼 이름공간 순 탐색(`ResolveType`·`StructBase`)은 지운다 | 확정 |
-| CLGD5 | NATIVE 재귀 색인은 비템플릿 레코드와 특수화 노드에서 만들고 열쇠는 정규 철자다(inline 이름공간 레코드와 특수화는 형식 철자 질문의 답). 템플릿 인자 걷기는 하한으로 남기고 패턴 필드 근사만 지운다. 값으로 닿은 class가 색인에 없거나 부를 수 없으면 RMC2205 cannot verify(`IsClassV` 사실). 포인터 대상의 Object 파생은 NativeMemberProbe 판정 형판으로 묻고, 불완전한 대상은 직접 멤버처럼 다시 물은 뒤 허용한다 | 확정 |
+| CLGD5 | NATIVE 재귀 색인은 비템플릿 레코드와 특수화 노드에서 만들고 열쇠는 정규 철자다(inline 이름공간 레코드와 특수화는 형식 철자 질문의 답). 템플릿 인자 걷기는 하한으로 남기고 패턴 필드 근사만 지운다. 값으로 닿은 class가 색인에 없거나 부를 수 없으면 RMC2205 cannot verify(`IsClassV` 사실). 템플릿 인자로만 닿은 형식은 색인에서 불완전할 때만 건너뛴다. WorldOnly 형질은 `RequiresWorldOnlyOwner<R>` 사실로 묻는다(개정 4). 포인터 대상의 Object 파생은 NativeMemberProbe 판정 형판으로 묻고, 불완전한 대상은 직접 멤버처럼 다시 물은 뒤 허용한다 | 확정 |
 | CLGD6 | 탐침 실패는 `<stdin>` 줄로 질문에 대응해 격리한다(NativeMemberProbe의 격리를 공용으로). 리플렉션 선언은 RMC2001, 레코드 닫힘은 RMC2205 cannot verify, 대응 없는 실패는 RMC3000 | 확정 |
 | CLGD7 | 첫 실행 JSON에 남는 의존(4.6절)은 실제 컴파일러 두 모양에서 도는 meta 시험이 고정한다. JSON fixture와 `ClangAstShape` 리팩터링은 하지 않는다 | 확정 |
 | CLGD8 | 두 모양은 CI의 macOS leg(이전)와 Windows LLVM 22 leg(새)가 고정한다. 항상 도는 교차 확인(`--metadata-cross-check`)은 두지 않고, Clang major를 올릴 때 로컬에서 두 버전의 생성물·정규 철자를 한 번 대조한다 | 확정 |
@@ -397,6 +408,7 @@ CLG1만으로도 Clang 22 빌드는 통과하지만 NATIVE 재귀가 조용히 �
 - **진단 순서가 바뀐다.** NATIVE 강한 참조 검사가 첫 실행 순회 밖으로 가므로, 한 헤더에 오류가 여럿이면 먼저 나오는 진단이 달라질 수 있다.
 - **이름공간 별칭은 접근 검사를 받는다.** 4.3절의 2는 별칭 선언(명시적 인스턴스화가 아니다)이라, base가 다른 클래스의 protected·private 중첩 타입이면 거부될 수 있다. 1로 부를 수 있으면 생기지 않는다.
 - **base 이름 부르기의 남은 한계.** 1과 2로도 부르지 못하는 base(중첩 클래스가 바깥 클래스의 멤버 타입 둘을 같은 식별자로 base로 둔 경우 등)는 거부로 드러난다. 조용히 다른 타입을 고르지는 않는다(`IsBaseOfV && !IsSameV` 확인).
+- **레코드 닫힘이 따라가지 못하는 것.** 부를 수 없는 특수화(4.4절 열쇠 — 템플릿 템플릿 인자, `auto` NTTP, 바깥 클래스 템플릿 매개변수에 기대는 NTTP 형식), 이름 없는 struct를 가리키는 포인터, base가 있는 이름 없는 struct 멤버에 닿으면 cannot verify로 거부한다. 조용히 받지 않는 대신 그런 형식을 NATIVE로 값으로 담은 헤더는 바꿔야 한다.
 - **명시적 인스턴스화의 면제 범위.** 접근 검사 면제는 명시적 인스턴스화 선언의 이름에만 적용된다. 탐침 템플릿 본문(`RocksCanonBase`의 `static_assert`)은 템플릿 매개변수만 쓰므로 접근 문제가 없다.
 - **확인하지 못한 것.**
   - MSVC 14.52 STL + Clang 22, Clang 22의 Development·Release·Asan 구성, macOS·Android에서의 탐침(CLG1+CLG2 병합의 CI가 앞의 둘과 macOS를 확인한다).
@@ -423,6 +435,10 @@ CLG1만으로도 Clang 22 빌드는 통과하지만 NATIVE 재귀가 조용히 �
 | MSVC 도구 모음별 최소 Clang 표(개정 1) | 새 14.5x를 미리 알 수 없고 찾는 규칙도 따로 정해야 한다. 고른 STL의 `yvals_core.h`에서 읽는다 |
 | `Build/Toolchain.json`을 설치 SDK에 복사하고 `rocks-sdk.json`에 기록한다 | 두 배치(저장소·SDK)의 찾는 규칙과 SDK manifest 변경이 필요하다. C# 도구의 포함 리소스가 더 단순하다(도구가 SDK에 실린다) |
 | 정규 철자를 문자열로 나눠 정적 배열 원소·크기를 얻는다(개정 1) | `int (*[2])[5]`, `void (*[3])(int)`에서 틀린다. Clang 형판이 나눈다 |
+| 템플릿 인자로만 닿은 형식의 완전성을 `sizeof` 사실로 묻는다(개정 4 리뷰 제안) | 탐침의 `sizeof`가 그 특수화를 인스턴스화해 완전하게 만든다. 첫 실행 JSON의 노드가 완전한지로 가른다 |
+| 지역 클래스를 이름 목록으로 가른다(개정 3) | 이름만 비교해 다른 범위의 같은 이름을 잘못 가른다. 색인에 없으면 `IsClassV`로 가르는 규칙 하나로 덮는다 |
+| WorldOnly 표지를 첫 실행 JSON의 변수 초기값으로 읽고, 특수화는 패턴의 표지로 대신한다(개정 3) | 암시적 인스턴스화 노드의 표지에는 초기값이 없고, 부분 특수화에만 있는 표지를 놓치며 명시 특수화가 없앤 표지를 잘못 본다. 생성 코드와 같은 형질을 사실로 묻는다 |
+| NTTP 값을 정규 출력 문자열(`probe::Kind::B`, `true`)과 직접 맞춘다 | 정규 출력이 기본 인자를 생략해 노드의 인자 목록과 길이가 다르고, 값 표기(`(probe::Kind)5`, 접미 없는 큰 정수)가 Clang 출력 규칙에 묶인다. 노드의 값을 매개변수 형식으로 캐스트해 Clang에 묻는다 |
 
 UE와 다르게 정한 점:
 
@@ -456,3 +472,4 @@ UE와 다르게 정한 점:
 | 1 | 2026-11-20 | Clang 22 지원 설계. Clang 21·22 JSON 차이 실측(1.1절), MetaCompiler 의존 조사(1.2절), 고치지 않은 MetaCompiler의 실패 실측(1.3절 — 실제 헤더와 meta 시험 56건, 조용한 GC 안전 검사 누락 3건), 정규 형식 탐침 시제품 실측(1.4절 — 두 버전 생성물 byte 동일, meta 시험 통과, Clang 22 C++ 경고 0), 설계(4절 — base는 정교한 형식 지정자와 이름공간 별칭, `bool` 사실 인자는 `int`로), 두 모양 시험(5절), 도구 모음 정책(6절), 결정 CLGD1–CLGD14, 단계 CLG0–CLG4 |
 | 2 | 2026-11-20 | 리뷰어 교차 검증 적용(Clang 21.1.6·22.1.8 양쪽 탐침, 13건 모두 받아들임). 레코드 닫힘(4.4절): 패턴 필드 근사만 지우고 템플릿 인자 걷기는 하한으로 남김(`Optional`·`Result`·`Variant`·`InlineArray`·`SharedPtr`가 T를 바이트 저장소에 숨긴다), 특수화의 필드·base는 첫 실행의 특수화 노드에서 읽고 노드 → 정규 철자는 형식 철자 질문으로 대응, inline 이름공간 레코드도 정규 철자 열쇠, 색인에 없는 class는 `IsClassV`로 가려 RMC2205 cannot verify, 불완전한 중첩 포인터 대상은 직접 멤버처럼 다시 물은 뒤 허용(`World*`가 판정된다는 개정 1 서술 정정). base(4.3절): 확인을 `IsBaseOfV && !IsSameV`로(`Rec<2>::Rec`가 자신을 답함), 특수화 소유자의 base는 특수화 노드에서, 식별자는 `TypeSpelling`의 마지막 식별자(별칭 템플릿·멤버 typedef·`decltype` base 해결, 별칭 id 색인 삭제), 파생 이름 비교는 템플릿 이름으로, 1 실패 시 이름공간 별칭으로 다시 묻기, 템플릿 매개변수 base 한계 삭제(실제로 풀린다), 4.1절 예외 셋. 정적 배열(4.7절): 실행만 합치고 나누기는 Clang 형판. 시험(5.2절·CLGD7·CLGD8): JSON fixture·갱신 명령·`ClangAstShape` 삭제, 항상 도는 교차 확인 삭제(MSVC 14.52에서 LLVM 21이 `STL1000`), 실제 컴파일러 두 모양의 meta 시험으로 고정. 도구 모음(6절): Windows LLVM 21 leg는 CLG4에서 14.44 고정과 함께 삭제, MSVC별 최소 Clang 표 대신 `yvals_core.h` 읽기, `Build/Toolchain.json`은 C# 도구 포함 리소스(설치 SDK), Android는 최소만, CI는 `--require-verified-toolchain`. 단계: CLG0은 격리 helper만, `InstallLlvm.ps1 -Version`과 LLVM 22 leg를 CLG2로 당기고 CLG1+CLG2 병합 조건(`[ci]`, macOS·Windows 두 leg)을 CLGD15로 더함. 한계(11절)에 이름공간 별칭의 접근 검사, 같은 식별자 base 경로가 실측이 아님을 적음. 결정 CLGD1–CLGD15 |
 | 3(구현 기록) | 2026-11-20 | CLG0–CLG2 구현(`feature/clang-version-support`). 구현하며 정한 점: (가) 공용 실행·격리는 `ClangProbe`(질문 한 줄 = `<stdin>` 한 줄, 판정 형판·정규 형식 탐침·공개 헤더로 다시 묻기가 함께 쓴다). (나) 사실 질문은 `long long` 인자다(C 배열 크기가 `size_t`). (다) bitfield 정수 판정은 첫 실행 철자로 남긴다(4.6절). (라) 레코드 닫힘의 포인터 판정은 필드가 아니라 **정규 형식 철자**로 묻는다(`RocksProbeVerdict<rocks::Allocator *>` — 접근 검사 면제는 명시적 인스턴스화 인자 전체에 걸린다). 그래서 템플릿 인자로만 보이는 포인터(`Optional<Node *>`)도 하한 걷기에서 판정된다. (마) 1단계는 첫 실행과 같은 include 순서, 레코드 닫힘과 그 공개 헤더 재질문은 NATIVE 판정과 같은 순서(이 모듈 출력 루트 제외)로 돈다. (바) 특수화 노드의 `bool` 인자는 패턴의 템플릿 매개변수 종류로 `true`·`false`로 쓴다(덤퍼는 -1을 낸다). (사) 배열 원소 실패 진단(`ArrayElementFailure`)은 문구에만 쓰는 쓴 철자 재귀(기존 `StrongReferencePath`)를 그대로 쓴다 — 판정이 아니고, 찾지 못하면 Clang 원문 진단으로 거부된다. (아) 레코드 닫힘이 한 번에 걷는 형식 4,096개·라운드 32회를 넘으면 cannot verify다. (자) `_Atomic(…)`·벡터 형식은 따라가지 않는다(전과 같다). 시험: `MetaTests.CanonicalTypes.cs`(8절 CLG1·CLG2 항목). 비템플릿 별칭 Binds 새 시험은 두지 않았다 — 실제 헤더의 Binds 28개가 정규 철자로 같고, 기존 Binds 시험이 두 모양에서 돈다. 로컬 검증(MSVC 14.29 STL): Foundation·EngineTests Debug 빌드·시험(meta 252건 포함)이 Clang 21.1.6과 22.1.8에서 모두 통과했고, EngineTests 메타 모듈 12개(MA1의 MeshSource 포함) 생성물이 두 버전에서 byte 동일하며, Rocks.Build.Tests·format·policy가 통과했다 |
+| 4(리뷰 반영) | 2026-11-20 | CLG1·CLG2 리뷰(Clang 21.1.6·22.1.8 임시 meta 시험) 반영. 레코드 닫힘(4.4절): (가) 불완전한 레코드·특수화 노드도 색인한다. 템플릿 인자로만 닿은 형식은 색인에서 완전하면 걷고, 불완전하면 건너뛰고, 없으면 값 자리처럼 `IsClassV`로 가려 class면 cannot verify다(인자 자리에서 조용히 건너뛰던 퇴행 수정, 지역 클래스 이름 목록 삭제). (나) 특수화 열쇠의 NTTP 값은 패턴의 매개변수 형식으로 쓴다(`bool`은 `true`·`false`, 그 밖은 `static_cast<P>(값LL)`, P는 builtin·형식 매개변수의 인자·이름공간 별칭·둘러싼 클래스 한정). 부를 수 없는 특수화와 열쇠 질문이 실패한 레코드에 닿으면 cannot verify다. 열쇠를 얻은 특수화의 질문은 열쇠 답으로 부른다. (다) WorldOnly 형질은 레코드마다 `RequiresWorldOnlyOwner<R>` 사실로 묻는다(표지 초기값·패턴 표지 읽기 삭제). (라) 식별자는 꺾쇠·괄호 깊이 0의 마지막 `::` 뒤에서 꼬리 템플릿 인자를 걷어 얻고, 템플릿 인자 나누기는 끝 `>`와 짝인 `<`에서 하며, 문자·문자열 리터럴 안은 세지 않는다. 1단계 base 답은 마지막 식별자가 물은 식별자와 같아야 받는다(4.3절). (마) 걷기의 중복 제거 열쇠에 직접 멤버·템플릿 인자 여부를 넣는다. (바) 익명 struct·union만 부모 필드로 펼치고, 선언자가 있는 이름 없는 struct는 멤버 경로(`inner.x`, `arr[0].x`)로 묻는다. typedef 이름을 받은 이름 없는 class는 그 이름으로 색인한다. (사) 한도(개정 3 (아) 정정): 형식 4,096개는 NATIVE마다 세고, 넘친 NATIVE 위치에 cannot verify다. 라운드 32회를 넘으면 물을 것이 남은 NATIVE만 cannot verify다. 정리: 호출처 없는 `RequiresWorldOnlyOwnerPath`와 표지 초기값 읽기 삭제, NATIVE 탐침·레코드 색인 주석 갱신. 한계(11절)와 버린 대안(12절)에 부를 수 없는 특수화, `sizeof` 완전성 질문, 표지 초기값 읽기를 적음. 시험은 8절 CLG2 항목 |

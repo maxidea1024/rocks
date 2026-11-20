@@ -23,6 +23,7 @@
 // - VulkanDevice.cpp: 생성(instance·물리 장치·장치·queue), 정보, fence API, 소유권, 진단
 // - VulkanSubmission.cpp: 제출 fence·명령 버퍼 기록·완료 관찰·회수
 // - VulkanResources.cpp: 버퍼·텍스처·샘플러·Retire
+// - VulkanTransient.cpp: transient heap·placed 자원(GX12)
 // - VulkanBindings.cpp: 장치 능력(GX1), 버퍼 view·ReadBuffer(GX2), 그리기 descriptor set
 // - VulkanPipeline.cpp: render pass·파이프라인 layout·파이프라인
 // - VulkanCommands.cpp: 프레임 기록(CommandContext)·EndFrame
@@ -74,6 +75,10 @@ inline constexpr uint32 ConstantBytes = MaxDrawConstantBytes;
 inline constexpr uint64 RetainUntilDestructionFence = NumericLimits<uint64>::Max();
 // 한 업로드 묶음 안에서 겹침을 추적하는 버퍼 쓰기 구간 수다(넘치면 barrier를 두고 비운다).
 inline constexpr uint32 MaxTrackedBufferWrites = 64;
+// transient heap 메모리 종류를 정할 때 만드는 대표 자원의 크기다(버퍼 byte, 이미지 한 변). 메모리
+// 종류 bit는 크기와 무관하므로 작은 값이면 된다.
+inline constexpr uint64 HeapProbeBufferBytes = 64 * 1024;
+inline constexpr uint32 HeapProbeImageExtent = 64;
 
 // 접근 상태의 대표형이다. D3D12 상태 대응에서 같은 상태가 되는 접근을 하나로 모은다:
 // SrvGraphics는 compute 읽기도 포함하고(D3D12 PIXEL | NON_PIXEL_SHADER_RESOURCE), VertexOrIndex는
@@ -89,6 +94,9 @@ struct BufferRecord {
     // 이 버퍼를 가리키는 살아 있는 view 수다. 0이 아닐 때 Retire하면 버퍼·메모리는 orphanBuffers_로
     // 옮겨 마지막 view를 놓을 때 회수한다(view가 버퍼를 붙든다).
     uint32 viewCount = 0;
+    // placed 버퍼(CreatePlacedBuffer)면 그 transient heap이다. 메모리는 heap 소유라 memory는 비어
+    // 있고, 회수 뒤 heap의 placed 수를 줄인다.
+    SlotHandle heap;
 };
 
 // handle이 Retire됐지만 view가 아직 쓰는 버퍼다.
@@ -96,6 +104,19 @@ struct OrphanBuffer {
     VkBuffer buffer = VK_NULL_HANDLE;
     MemoryAllocation memory;
     uint32 viewCount = 0;
+    SlotHandle heap;
+};
+
+// transient heap(GX12)이다. VkDeviceMemory 하나를 placed 자원이 offset으로 나눠 쓴다. 회수 대기
+// (retirePending)이고 placed 자원이 모두 파괴되면(그 회수 fence가 끝났다) 메모리를 놓는다.
+struct TransientHeapRecord {
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    uint64 size = 0;
+    TransientHeapKind kind = TransientHeapKind::Buffers;
+    uint32 memoryType = 0;
+    // 아직 파괴되지 않은 placed 자원 수다(살아 있거나 회수 대기 중인 것).
+    uint32 placedCount = 0;
+    bool retirePending = false;
 };
 
 // 버퍼 view(GX2)다. typed는 VkBufferView, 구조화·raw는 (buffer, offset, range)를 descriptor에 쓴다.
@@ -164,6 +185,9 @@ struct TextureRecord {
     SubresourceStates<ResourceAccess> current;
     // 기록 중인 프레임이 current를 바꿨다(touchedTextures_에 있다).
     bool touched = false;
+    // placed 텍스처(CreatePlacedTexture)면 그 transient heap이다(BufferRecord::heap). 상태는
+    // Unknown(UNDEFINED)으로 시작하고, 획득 전이(acquire)는 이전 메모리 쓰기를 모두 기다린다.
+    SlotHandle heap;
 };
 
 // mip level의 깊이 면 수다(3D만 1보다 크다).
@@ -320,6 +344,10 @@ struct Retired {
     VkDescriptorSetLayout setLayouts[2] = {};
     VkBufferView bufferView = VK_NULL_HANDLE;
     MemoryAllocation memory;
+    // placed 자원의 heap이다. 자원을 파괴한 뒤 heap의 placed 수를 줄인다(ReleasePlacement).
+    SlotHandle heap;
+    // 회수한 transient heap의 메모리다(placed 자원이 모두 파괴된 뒤 heap의 마지막 사용 fence 뒤).
+    VkDeviceMemory heapMemory = VK_NULL_HANDLE;
     VkSwapchainKHR swapchain = VK_NULL_HANDLE;
     VkSurfaceKHR surface = VK_NULL_HANDLE;
     VkSemaphore semaphores[MaxSwapChainImages] = {};
@@ -493,6 +521,16 @@ public:
     uint64 IgnoredDraws() const noexcept override;
     uint64 ValidationErrorCount() const noexcept override;
     usize PendingRetireCount() const noexcept override;
+    // --- transient heap·placed 자원(GX12, VulkanTransient.cpp) ---
+    Result<TransientHeapHandle>
+    CreateTransientHeap(const TransientHeapDesc& desc) noexcept override;
+    void RetireTransientHeap(TransientHeapHandle heap) noexcept override;
+    Result<TransientPlacement> GetTexturePlacement(const TextureDesc& desc) const noexcept override;
+    Result<TransientPlacement> GetBufferPlacement(const BufferDesc& desc) const noexcept override;
+    Result<TextureHandle> CreatePlacedTexture(TransientHeapHandle heap, uint64 offset,
+                                              const TextureDesc& desc) noexcept override;
+    Result<BufferHandle> CreatePlacedBuffer(TransientHeapHandle heap, uint64 offset,
+                                            const BufferDesc& desc) noexcept override;
 
     // --- staging·timestamp 원천이 부른다 ---
     Result<StagingMemory> CreateStagingMemory(uint64 bytes) noexcept;
@@ -569,6 +607,23 @@ private:
         uint32 resolveSlices[MaxColorTargets] = {};
         uint32 depthMip = 0;
         uint32 depthSlice = 0;
+        // attachment마다 aliasing 획득(ColorAttachment·DepthAttachment::acquire)이다.
+        bool colorAcquire[MaxColorTargets] = {};
+        bool depthAcquire = false;
+    };
+
+    // placed 자원을 둘 heap 구간이다(CreatePlacedTexture·CreatePlacedBuffer).
+    struct Placement {
+        SlotHandle heap;
+        uint64 offset = 0;
+    };
+
+    // 텍스처 desc 검사 결과다(CreateTexture·GetTexturePlacement 공용). detail은 LastError에 남길
+    // 진단(없으면 null), unsupportedFormat이면 형식 이름 진단이다.
+    struct TextureDescCheck {
+        ErrorCode code = ErrorCode::None;
+        const char* detail = nullptr;
+        bool unsupportedFormat = false;
     };
 
     struct BoundVertexBuffer {
@@ -646,6 +701,19 @@ private:
                         bool& mipmaps) const noexcept;
     // 텍스처 기록 하나를 회수 대기로 넘기고 표에서 뺀다(잠금 안).
     void RetireTextureRecord(SlotHandle slot, TextureRecord& record) noexcept;
+    // desc를 형식 능력·규칙·장치 한도로 검사한다. pixelBytes는 초기 픽셀 byte다(잠금 밖에서
+    // 부른다).
+    TextureDescCheck CheckTextureDesc(const TextureDesc& desc, usize pixelBytes) const noexcept;
+    // desc 텍스처의 이미지 생성 정보다(CreateTexture와 placement 질의가 같은 값을 쓴다).
+    VkImageCreateInfo ImageInfoFor(const TextureDesc& desc) const noexcept;
+    // 버퍼 용도의 Vulkan buffer usage다(CreateBuffer와 placement 질의가 같은 값을 쓴다).
+    static VkBufferUsageFlags BufferUsageFor(BufferUsage usage) noexcept;
+    // 텍스처·버퍼 생성 본체다. placement가 있으면 그 heap 구간에 두고(초기 데이터 없음) 없으면
+    // 할당기 메모리에 둔다.
+    Result<TextureHandle> CreateTextureIn(const TextureDesc& desc, Span<const uint8> pixels,
+                                          const Placement* placement) noexcept;
+    Result<BufferHandle> CreateBufferIn(const BufferDesc& desc, Span<const uint8> initial,
+                                        const Placement* placement) noexcept;
 
     // --- VulkanSubmission.cpp ---
     Result<void> CreateCommandPool() noexcept;
@@ -679,6 +747,17 @@ private:
                                           ResourceShape shape, VkResult& result,
                                           ErrorCode& error) noexcept;
     void FreeMemoryLocked(const MemoryAllocation& allocation) noexcept;
+
+    // --- VulkanTransient.cpp ---
+    // 만든 image·buffer(하나만)를 placement 구간에 묶는다. heap 종류(kind)·정렬·범위가 틀리면
+    // InvalidArgument, 자원 메모리 종류가 heap 종류와 맞지 않거나 전용 할당이 필요하면
+    // Unsupported다 (잠금 안). 성공하면 heap의 placed 수를 올린다.
+    Result<void> BindPlaced(const Placement& placement, TransientHeapKind kind, VkImage image,
+                            VkBuffer buffer) noexcept;
+    // placed 자원 하나가 파괴됐다. heap이 회수 대기이고 마지막이면 메모리를 놓는다(잠금 안).
+    void ReleasePlacement(SlotHandle heap) noexcept;
+    // heap 종류의 메모리 종류를 대표 자원의 메모리 요구로 정한다.
+    Result<uint32> HeapMemoryType(TransientHeapKind kind) const noexcept;
 
     // --- VulkanPipeline.cpp ---
     Result<void> CreatePipelineLayout() noexcept;
@@ -762,9 +841,14 @@ private:
                           ResourceAccess to, bool toResting) noexcept;
     // 기록 중 프레임에서 텍스처 subresource 범위(mip × layer)를 after로 바꾼다(잠금 안). barrier가
     // 필요하면 열린 render pass를 먼저 닫는다(호출자가 ResumeRenderPass로 다시 연다).
+    // acquire면 placed 텍스처의 aliasing 획득이다: 추적 상태와 무관하게 범위를 UNDEFINED에서 이전
+    // 메모리 쓰기를 모두 기다려 바꾼다(RenderBase 8절 GX12).
     void TrackTransition(TextureRecord& record, SlotHandle slot,
-                         const ResolvedSubresourceRange& range, ResourceAccess after,
-                         bool uavOrder) noexcept;
+                         const ResolvedSubresourceRange& range, ResourceAccess after, bool uavOrder,
+                         bool acquire = false) noexcept;
+    // aliasing 획득 barrier 하나다(srcStage 모든 명령, srcAccess 메모리 쓰기, oldLayout UNDEFINED).
+    void AcquireBarrier(VkCommandBuffer buffer, const TextureRecord& record,
+                        const ResolvedSubresourceRange& range, ResourceAccess to) noexcept;
     // 범위를 (같은 상태 열의 layer 구간) × (같은 상태의 mip 구간) 직사각형으로 나눠 emit(firstMip,
     // mipCount, firstLayer, layerCount, from)을 부른다(barrier 수를 줄인다).
     template <class Emit>
@@ -901,6 +985,7 @@ private:
     SlotArray<SwapChainRecord> swapChains_;
     SlotArray<ReadbackRecord> readbacks_;
     SlotArray<BufferViewRecord> bufferViews_;
+    SlotArray<TransientHeapRecord> heaps_;
     Array<OrphanBuffer> orphanBuffers_;
     Array<Retired> retired_;
     SamplerEntry samplers_[SamplerCapacity];

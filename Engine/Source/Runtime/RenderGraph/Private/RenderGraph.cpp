@@ -327,6 +327,7 @@ RenderGraph::RenderGraph(const RenderGraphDesc& desc) noexcept : arena_(RequireA
     state_->handles = desc.handles;
     state_->pool = desc.pool;
     state_->trace = desc.trace;
+    state_->computeTrace = desc.computeTrace;
     state_->frame = desc.frame;
     state_->mode = desc.mode;
     state_->splitEnabled = desc.splitTransitions && desc.mode == GraphMode::Deferred;
@@ -343,6 +344,10 @@ RenderGraph::RenderGraph(const RenderGraphDesc& desc) noexcept : arena_(RequireA
             ? features.asyncCompute
             : desc.asyncCompute == GraphAsyncCompute::Auto && features.efficientAsyncCompute;
     state_->asyncEnabled = allowed && desc.mode == GraphMode::Deferred;
+    // transient aliasing(RG5): 즉시 실행 모드는 앞을 내다볼 수 없어 늘 끈다(UE와 같다).
+    state_->transientEnabled =
+        desc.transientAliasing && features.transientHeaps && desc.mode == GraphMode::Deferred;
+    state_->asyncComputeAliasing = desc.asyncComputeAliasing;
     state_->serial = NextGraphSerial();
 }
 
@@ -1254,6 +1259,11 @@ Result<void> RenderGraph::Execute() noexcept {
         // 업로드는 첫 pass 앞에서 한다(UE SubmitBufferUploads와 같은 자리, 기록이 열리기 전).
         if (outcome) {
             outcome = ExecuteUploads(arena_, state);
+        }
+
+        // transient heap(RG5)을 받는다(첫 할당 전에).
+        if (outcome && !state.transientHeaps.IsEmpty()) {
+            outcome = AcquireTransientHeaps(state);
         }
 
         // async compute: 그래프 시작 지점과 prologue fork 전이(RG4).

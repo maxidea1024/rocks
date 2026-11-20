@@ -16,9 +16,9 @@
 // 이 헤더를 include하면 MetaCompiler가 GeneratedType<T>::VisitFields를 낸 모든 타입에
 // LogStructure<T>가 생긴다. 그래서 "{@Name}" 자리에 리플렉션 값을 바로 쓸 수 있다.
 //
-// include 규칙(설계 14.2절 LG16): 생성 헤더는 이 헤더를 include하지 않는다. 리플렉션 타입을
-// "{@Name}"으로 쓰는 번역 단위가 직접 include한다. Formatter도 가진 리플렉션 타입은 그 타입을
-// 로그에 쓰는 모든 번역 단위에서 include한다(번역 단위마다 특수화 유무가 다르면 ODR 위반).
+// include 규칙(설계 14.1.6절 L30): 특수화의 선언은 모든 생성 헤더가 include하는
+// Object/GeneratedFieldAccess.h에 있고, 정의는 이 헤더에 있다. 리플렉션 타입을 로그 인자로 쓰는
+// 번역 단위는({Name}이든 "{@Name}"이든) 이 헤더를 include한다. 빠뜨리면 static_assert로 거부한다.
 //
 // 사용 예:
 //   #include <Game/Player.generated.h>
@@ -36,6 +36,8 @@
 // - Bool·정수·실수: 원시 값, String: byte 사본
 // - 리플렉션 enum: 생성 스키마의 열거자 이름(정적 문자열, 선언되지 않은 값이면 바탕 정수)
 // - 리플렉션 struct: 중첩 객체(재귀), 리플렉션 클래스 객체도 같다
+// - Binds 미러 대상 Core 값(Vec3·Quat·Transform 등): 필드 안에서는 중첩 객체다. 맨 위 "{@Name}"
+//   인자로는 쓸 수 없다(일반 특수화에서 뺐다 — 설계 14.1.6절 L30, Formatter나 직접 특수화를 쓴다)
 // - 배열(Array·ObjectRefArray·StructRefArray·정적 배열): 앞 MaxLogStructureElements개와 전체 개수
 // - Optional: 값이 있으면 그 값, 없으면 null
 // - ObjectRef·WeakObjectRef·ObjectRefArray 원소: 역참조하지 않고
@@ -55,6 +57,15 @@ namespace rocks {
 
 namespace detail {
 
+// 생성 타입의 로그 타입 태그다. 타입 도구 이름(기본은 한정하지 않은 C++ 이름,
+// ROCKS_STRUCT(Name="…")로 바꾼 이름)이고, 도구 이름이 없으면 스키마 이름이다.
+template <class T>
+StringView GeneratedLogTypeTag() noexcept {
+    const TypeSchema& schema = GeneratedType<T>::Schema();
+    const Span<const char> name = schema.toolName.Size() != 0 ? schema.toolName : schema.name;
+    return StringView(name.Data(), name.Size());
+}
+
 // 생성 필드 방문 함수가 부르는 visitor다. 필드마다 Field("이름", 값)이 불린다.
 class LogStructureFieldVisitor {
 public:
@@ -73,6 +84,10 @@ public:
         if constexpr (IsSameV<M, ObjectHandle>) {
             // ObjectRefArray의 원소다.
             WriteHandle(name, member);
+        } else if constexpr (GeneratedBindsMirror<M> && GeneratedFieldVisitor<M>) {
+            // Binds 미러 대상 struct(Vec3 등)는 일반 특수화가 없다(설계 14.1.6절 L30). 이 필드를
+            // 가진 타입의 생성 헤더가 미러의 생성 헤더를 include하므로 방문 함수로 바로 펼친다.
+            WriteGeneratedStruct(name, member);
         } else {
             constexpr ValueKind kind = FieldValueKind<M>();
             if constexpr (kind == ValueKind::ObjectReference ||
@@ -109,6 +124,15 @@ public:
     }
 
 private:
+    template <class M>
+    void WriteGeneratedStruct(LogStaticName name, const M& member) noexcept {
+        if (out_.BeginObject(name, LogStaticName::FromStatic(GeneratedLogTypeTag<M>()))) {
+            GeneratedType<M>::VisitFields(member, *this);
+        }
+
+        out_.EndObject();
+    }
+
     // handle을 "registry:slot:generation" 문자열로 담는다(역참조하지 않는다).
     // registry는 Registry 도메인 번호다. 프로세스 안에서 만든 순서대로 1부터
     // 매기는 수이고 주소가 아니라서, 같은 실행 순서면 출력이 같다.
@@ -157,23 +181,15 @@ private:
     LogStructureWriter& out_;
 };
 
-// MetaCompiler가 필드 방문 함수를 낸 타입이다.
-template <class T>
-concept GeneratedLogFields = requires(const T& value, LogStructureFieldVisitor& visitor) {
-    GeneratedType<T>::VisitFields(value, visitor);
-};
-
 } // namespace detail
 
-// 리플렉션 타입의 일반 특수화다. 타입 태그는 타입 도구 이름(기본은 한정하지 않은 C++ 이름,
-// ROCKS_STRUCT(Name="…")로 바꾼 이름)이고, 도구 이름이 없으면 스키마 이름이다.
+// 리플렉션 타입의 일반 특수화다(Binds 미러 대상은 빼고, 그런 필드는 visitor가 직접 펼친다). 타입
+// 태그는 GeneratedLogTypeTag다.
 template <class T>
     requires detail::GeneratedLogFields<T>
 struct LogStructure<T> {
     static StringView TypeTag() noexcept {
-        const TypeSchema& schema = GeneratedType<T>::Schema();
-        const Span<const char> name = schema.toolName.Size() != 0 ? schema.toolName : schema.name;
-        return StringView(name.Data(), name.Size());
+        return detail::GeneratedLogTypeTag<T>();
     }
 
     static void Write(LogStructureWriter& out, const T& value) noexcept {

@@ -111,6 +111,10 @@ struct RenderGraphDesc {
     // 있으면 pass마다 GpuScope(pass 이름) 구간을 두고, 그래프의 장치 기록 전체를 GPU 프레임 하나로
     // 묶는다(GpuTrace::BeginFrame·EndFrame을 그래프가 부른다, 13절).
     GpuTrace* trace = nullptr;
+    // 있으면 compute queue 기록(RG4)의 pass GPU 구간과 GPU 프레임을 이 장부에 쓴다
+    // (GpuTraceSettings::queue = AsyncCompute인 장부). 없으면 compute 기록에는 marker만 남는다.
+    // 그래프 구간(GraphScope)의 GPU 구간은 늘 trace(graphics) 장부다.
+    GpuTrace* computeTrace = nullptr;
     // 프레임 번호다(풀 축출 나이·GPU 프레임 번호).
     uint64 frame = 0;
     GraphMode mode = GraphMode::Deferred;
@@ -132,6 +136,14 @@ struct RenderGraphDesc {
     // pass 뒤)·join(그 결과를 처음 쓰는 graphics pass 앞)에서 Device::QueueWait로 두 queue를
     // 맞춘다. 그래프의 마지막 제출은 늘 graphics다(남은 compute 제출을 그래프 끝에서 기다린다).
     GraphAsyncCompute asyncCompute = GraphAsyncCompute::Auto;
+    // transient aliasing(RG5, RenderBase 8절 "GX12·RG5 transient aliasing 설계")이다. 장치에
+    // transientHeaps가 있고 Deferred면 수명이 겹치지 않는 그래프 자원이 transient heap 메모리를
+    // 나눠 쓴다(desc가 달라도). 끄거나 지원하지 않으면 풀(RG2)이다. UE r.RDG.TransientAllocator와
+    // 같은 자리다.
+    bool transientAliasing = true;
+    // async compute pass가 쓰는 자원도 aliasing한다(기본 끔, 1차). 켜면 그 자원은 fork·join으로
+    // 넓힌 수명으로 할당한다.
+    bool asyncComputeAliasing = false;
 };
 
 // 렌더 lane 프레임 작업에서 그래프 설정을 만든다: 장치·handle 표·그 slot의 프레임 arena·프레임

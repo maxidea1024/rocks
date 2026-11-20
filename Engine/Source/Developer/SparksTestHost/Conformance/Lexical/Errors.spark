@@ -1,0 +1,11 @@
+let move_speed = 1;
+let a = 1.;
+let b = 1e;
+let c = 1_;
+let d = 1 & 2;
+for (i in 0..n) { }
+let s = "\q";
+let t = "open
+let u = "${f("x")}";
+let v = 1.5f;
+let w = @"never closed

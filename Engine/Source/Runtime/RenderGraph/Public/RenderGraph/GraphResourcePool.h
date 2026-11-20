@@ -12,12 +12,26 @@ namespace rocks::render {
 inline constexpr uint64 DefaultGraphPoolBudgetBytes = uint64{256} << 20;
 inline constexpr uint32 DefaultGraphPoolRetainFrames = 3;
 
+// transient heap 캐시의 기본값이다(RenderBase 8절 GX12·RG5, UE 5.8과 같다): heap 최소 크기 128 MiB
+// (RHICore/Private/RHICoreTransientResourceAllocator.cpp:20, 524), 쓰지 않은 heap은 16 프레임 뒤
+// 놓는다(:41, 528), placed 자원 캐시는 32 프레임 뒤
+// 놓는다(RHICoreTransientResourceAllocator.h:159).
+inline constexpr uint64 DefaultTransientHeapBytes = uint64{128} << 20;
+inline constexpr uint32 DefaultTransientHeapRetainFrames = 16;
+inline constexpr uint32 DefaultPlacedRetainFrames = 32;
+
 struct GraphResourcePoolConfig {
     // 풀이 가진 자원(쓰는 중·export·반납 대기 포함) byte 합이 이 값을 넘을 때만 축출한다.
     uint64 budgetBytes = DefaultGraphPoolBudgetBytes;
     // 마지막으로 쓴 뒤 이 프레임 수가 지나야 축출 후보다(경과 프레임만으로는 축출하지 않는다:
     // 마지막 사용 fence 완료도 필요하다, 계획 8.2절).
     uint32 retainFrames = DefaultGraphPoolRetainFrames;
+    // transient heap 하나의 최소 크기다(자원 하나가 더 크면 그 크기로 만든다).
+    uint64 transientHeapBytes = DefaultTransientHeapBytes;
+    // 쓰지 않은 transient heap과 placed 자원을 놓기까지의 프레임 수다(마지막 사용 fence 완료도
+    // 필요하다).
+    uint32 transientHeapRetainFrames = DefaultTransientHeapRetainFrames;
+    uint32 placedRetainFrames = DefaultPlacedRetainFrames;
 };
 
 struct GraphPoolStats {
@@ -36,6 +50,12 @@ struct GraphPoolStats {
     uint64 evicted = 0;
     uint64 exports = 0;
     uint64 returned = 0;
+    // transient heap 캐시(RG5): heap 수와 byte 합, placed 자원 수, 누적 heap·placed 생성 수다.
+    usize transientHeaps = 0;
+    uint64 transientHeapBytes = 0;
+    usize placedResources = 0;
+    uint64 transientHeapsCreated = 0;
+    uint64 placedCreated = 0;
 };
 
 // 풀 자원 하나를 가리키는 표다(그래프가 쓰는 동안만 유효).
@@ -139,6 +159,29 @@ public:
         return config_;
     }
 
+    // --- transient heap 캐시(RenderBase 8절 GX12·RG5) ---
+
+    // 그래프가 쓸 kind heap을 준다: 쓰는 중이 아니고 마지막 사용(두 queue)이 GPU에서 끝났으며
+    // minBytes 이상인 heap 가운데 가장 작은 것, 없으면 max(minBytes, transientHeapBytes) 크기로
+    // 새로 만든다. 돌려준 번호는 ReleaseTransientHeap까지 그 그래프 것이다. 실패: 장치 생성 실패는
+    // 그 오류다.
+    Result<uint32> AcquireTransientHeap(graphics::TransientHeapKind kind, uint64 minBytes,
+                                        uint64 frame) noexcept;
+
+    // heap의 offset에 desc 자원을 준다(같은 heap·offset·desc의 placed 자원이 캐시에 있으면 그것,
+    // 없으면 장치에서 만든다). 실패: 모르는 heap StaleHandle, 장치 생성 실패는 그 오류다.
+    Result<graphics::TextureHandle> PlacedTexture(uint32 heap, uint64 offset,
+                                                  const graphics::TextureDesc& desc,
+                                                  uint64 frame) noexcept;
+    Result<graphics::BufferHandle> PlacedBuffer(uint32 heap, uint64 offset,
+                                                const graphics::BufferDesc& desc,
+                                                uint64 frame) noexcept;
+
+    // 그래프가 다 쓴 heap을 돌려준다. graphicsUse·computeUse는 그 heap을 마지막으로 쓴 두 queue의
+    // 제출 지점이다(둘 다 끝나야 다음 그래프가 받는다).
+    void ReleaseTransientHeap(uint32 heap, graphics::GpuFencePoint graphicsUse,
+                              graphics::GpuFencePoint computeUse, uint64 frame) noexcept;
+
     // 두 desc가 같은 풀 키인지다(그래프가 같은 그래프 안 재사용을 정할 때도 쓴다).
     static bool SameTextureKey(const graphics::TextureDesc& left,
                                const graphics::TextureDesc& right) noexcept;
@@ -178,6 +221,35 @@ private:
         RenderHandle handle;
     };
 
+    struct TransientHeapEntry {
+        graphics::TransientHeapHandle handle;
+        graphics::TransientHeapKind kind = graphics::TransientHeapKind::Buffers;
+        uint64 bytes = 0;
+        uint64 lastFrame = 0;
+        graphics::GpuFencePoint graphicsUse;
+        graphics::GpuFencePoint computeUse;
+        bool inUse = false;
+        bool live = false;
+    };
+
+    struct PlacedEntry {
+        uint32 heap = 0;
+        uint64 offset = 0;
+        Key key;
+        SlotHandle device;
+        uint64 lastFrame = 0;
+        bool live = false;
+        // 지금 그래프가 쓰는 중이다(그래프 하나 안에서 같은 객체를 두 자원에 주지 않는다).
+        bool inUse = false;
+    };
+
+    // heap의 두 queue 마지막 사용이 GPU에서 끝났는지다.
+    bool TransientHeapIdle(const TransientHeapEntry& heap) const noexcept;
+    // 쓰지 않는 오래된 heap·placed 자원을 놓는다(Evict가 부른다).
+    void EvictTransient(uint64 frame) noexcept;
+    void RetirePlaced(PlacedEntry& entry) noexcept;
+    Result<SlotHandle> Placed(uint32 heap, uint64 offset, const Key& key, uint64 frame) noexcept;
+
     static bool SameKey(const Key& left, const Key& right) noexcept;
     Result<Acquired> Acquire(const Key& key, Span<const uint8> pixels) noexcept;
     Result<void> FillTexture(const Entry& entry, Span<const uint8> pixels) noexcept;
@@ -187,6 +259,10 @@ private:
     graphics::Device& device_;
     GraphResourcePoolConfig config_;
     SlotArray<Entry> entries_;
+    Array<TransientHeapEntry> transientHeaps_;
+    Array<PlacedEntry> placed_;
+    uint64 transientHeapsCreated_ = 0;
+    uint64 placedCreated_ = 0;
     uint64 bytes_ = 0;
     // 마지막으로 본 프레임 번호다(반납 대기 자원의 나이).
     uint64 frame_ = 0;

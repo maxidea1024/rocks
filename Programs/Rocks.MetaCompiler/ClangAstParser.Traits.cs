@@ -1,8 +1,8 @@
 namespace Rocks.MetaCompiler;
 
-// ClangAstParser 중 NATIVE 멤버 형질 판정이다: Object 파생 여부(IsObjectDerived), 강한 객체 참조 경로
-// (StrongReferencePath — RMC2205), WorldOnly 소유자 형질 경로(RequiresWorldOnlyOwnerPath). 레코드 색인
-// (IndexRecords)은 ClangAstParser.cs에 있다.
+// ClangAstParser 중 배열 필드 실패 진단(FindFieldAt)이 문구에 붙이는 쓴 철자 재귀다: Object 파생 여부(IsObjectDerived), 강한 객체
+// 참조 경로(StrongReferencePath). 판정이 아니다 — NATIVE 멤버의 강한 참조·WorldOnly 형질 판정은 정규 형식 탐침의 레코드 닫힘
+// (ClangAstParser.Canonical.cs)이 한다. 레코드 색인(IndexRecords)은 ClangAstParser.cs에 있다.
 internal sealed partial class ClangAstParser
 {
     private bool IsObjectDerived(string record, HashSet<string> visited)
@@ -90,59 +90,6 @@ internal sealed partial class ClangAstParser
             foreach (string member in info.Fields.Concat(info.Bases))
             {
                 if (StrongReferencePath(member, visited) is string inner)
-                {
-                    return $"{text} -> {inner}";
-                }
-            }
-        }
-
-        return null;
-    }
-
-    // NATIVE 멤버 타입이 (값으로 담는 타입까지) RocksRequiresWorldOnlyOwner 형질을 가지면 그 경로를 돌려준다.
-    private string? RequiresWorldOnlyOwnerPath(string type, HashSet<string> visited)
-    {
-        string text = CleanType(type);
-        if (text.Length == 0 || !visited.Add(text) || visited.Count > 512 || text.EndsWith('*') || text.EndsWith('&') ||
-            TopLevelContains(text, "(*)") || TopLevelContains(text, "(&)"))
-        {
-            return null;
-        }
-
-        if (text.EndsWith(']'))
-        {
-            int bracket = text.LastIndexOf('[');
-            return bracket > 0 ? RequiresWorldOnlyOwnerPath(text[..bracket], visited) : null;
-        }
-
-        if (SplitTemplate(text) is (string name, List<string> arguments))
-        {
-            if (NonOwningTemplates.Contains(CleanType(name)))
-            {
-                return null;
-            }
-
-            foreach (string argument in arguments)
-            {
-                if (RequiresWorldOnlyOwnerPath(argument, visited) is string inner)
-                {
-                    return $"{text} -> {inner}";
-                }
-            }
-
-            text = CleanType(name);
-        }
-
-        if (records.TryGetValue(text, out RecordInfo? info))
-        {
-            if (info.RequiresWorldOnlyOwner)
-            {
-                return text;
-            }
-
-            foreach (string member in info.Fields.Concat(info.Bases))
-            {
-                if (RequiresWorldOnlyOwnerPath(member, visited) is string inner)
                 {
                     return $"{text} -> {inner}";
                 }
