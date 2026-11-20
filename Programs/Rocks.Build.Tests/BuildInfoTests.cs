@@ -235,6 +235,8 @@ internal static class BuildInfoTests
         Check(ToolchainCheck.Verify(NativePlatform.Windows, "clang version 22.1.8 (ca7933e47d3a3451d81e72ac174dcb5aa28b59d1)", Stl1452),
             "LLVM 22.1.8 with STL 14.52 is verified");
         Check(ToolchainCheck.Verify(NativePlatform.MacOS, "Apple clang version 17.0.0 (clang-1700.0.13.5)", null), "Apple clang 17.0.0 (Xcode 16.4) is verified");
+        Check(!ToolchainCheck.Verify(NativePlatform.Windows, "clang version 21.1.6", Stl1429),
+            "LLVM 21.1.6 with an older STL is above the Windows minimum but no longer verified");
         // 검증 목록은 첫 줄 전체로 대조한다: 같은 번호의 다른 Xcode 빌드·다른 commit의 빌드는 미검증이다.
         Check(!ToolchainCheck.Verify(NativePlatform.MacOS, "Apple clang version 17.0.0 (clang-1700.3.19.1)", null), "another Xcode build of Apple clang 17.0.0 is unverified");
         Check(!ToolchainCheck.Verify(NativePlatform.Windows, "clang version 22.1.8 (0123456789abcdef0123456789abcdef01234567)", Stl1452),
