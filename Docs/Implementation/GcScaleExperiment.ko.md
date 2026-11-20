@@ -1616,3 +1616,29 @@ AL3의 macOS CI(run 44636348775)에서 `ThreadExitSlot` 시험 둘이 실패했�
 - 두 경우 모두 해제된 메모리를 만지지는 않는다(캐시는 인스턴스가 소유한다). 표지만 두는 OS TLS 칸(소멸자 없는 key)을 더하면 첫째 한계는 없어진다 — 지금은 넣지 않았다.
 
 검증: Debug `Core` 대상 `CoreBinned` 26개·`ThreadExitSlot` 4개 통과. NDK `-fsyntax-only`(`BinnedAllocator.cpp`, 두 시험 파일, `Posix/Concurrency.cpp`) 통과, format·policy 통과. macOS는 push의 `[ci]`로 돈다. 이 push 앞에 origin(유니티 빌드·PCH, 1d5f9270)을 병합했다 — 충돌 없음, 새 시험은 파일 namespace(`…_tests_file`) 안에 넣었다.
+
+### 25.7 AL4: ASan 수동 poison과 `BinnedAllocator` 위의 장기 smoke
+
+설계 18.9절의 AL4 항목 가운데 `Trim`·통계(`ReservedBytes`·`fallbackAllocations`)·범위 소진 경로는 AL2·AL2b·AL3에서 이미 넣고 시험했다(`CoreBinnedEmptySlabsAreRetainedThenDecommitted`, `…SizesAlignmentAndStats`, `…ExhaustedRangeAndCommitFailureFallBack`, `…ReserveFailureShrinksThenRunsWithoutRange`, `…CommitAndDecommitFailuresAreTransient`). 이 단계에서 더한 것은 ASan과 장기 smoke다.
+
+ASan 수동 poison(설계 18.4절 "ASan"):
+
+- 불변식: 사용자에게 나가 있지 않은 블록(slab에서 뗀 블록, 캐시·이전 칸·slab 자유 목록의 블록)은 전체가 닫혀 있고, 나가 있는 블록은 요청 크기만 열려 있다. slab 머리는 닫지 않는다.
+- 뗄 때 닫고(`CloseBlock`), 내줄 때 요청 크기만 열고(`OpenBlock`), 돌려받을 때 블록 전체를 닫는다. ASan이 아닌 구성에서는 이 호출이 컴파일에서 빠진다(`AsanEnabled` 상수).
+- 닫힌 블록 안의 관리 word(연결·표지)는 `ROCKS_NO_SANITIZE_ADDRESS`(`Base/Compiler.h`에 추가)를 붙인 작은 내부 함수 `ReadLink`·`WriteLink`·`WriteMarker`로만 읽고 쓴다. 계측에서 빠지는 것은 그 함수 본문의 직접 접근뿐이다.
+- 표지를 세우는 비교 교환(`TryMarkReturned`)은 계측되는 원자 함수(`Platform/Atomics.h`)를 지나므로 그 word(8 byte)만 열고 한다. 성공하면 호출자가 블록 전체를 닫고, 실패하면(이미 닫힌 블록) 그 word를 다시 닫는다.
+- 주소 범위를 풀 때는 쓴 적 있는 slab을 모두 연다(같은 주소를 OS가 다른 용도로 다시 내줄 수 있다).
+- **실행 검증은 하지 않았다**(이 작업은 Asan을 돌리지 않는다). Asan 구성의 컴파일 명령으로 `BinnedAllocator.cpp`의 구문 검사(`-fsyntax-only`, `/fsanitize=address`)만 통과를 확인했다. poison·unpoison의 짝이 실제 ASan 실행에서 맞는지는 Asan 구성을 돌리는 쪽에서 확인해야 한다.
+
+장기 smoke(`GcSoakTests.cpp` 3개 추가 — `GcSoak` 9개):
+
+- `GcSoak_SerialCollectionOnBinnedAllocator`: 직렬 수집 3,000 tick(객체 상한 600). 객체 저장소와 Registry의 작은 할당은 스레드 캐시·slab을, GC 페이지·Slot chunk는 큰 경로를 지난다. 끝에 남은 할당 0, `fallbackAllocations` 0(작은 요청이 큰 경로로 밀리지 않음), `Trim` 뒤 commit 0.
+- `GcSoak_SchedulerCollectionOnBinnedAllocator`: worker 3개가 표식 큐 블록을 같은 allocator에서 받고 돌려준다(스레드마다 캐시가 생기고 scheduler가 멈추면 스레드 종료 정리로 돌아간다). 끝에 남은 할당 0, `Trim` 뒤 commit 0.
+- `GcSoak_ClusterWorldOnBinnedAllocator`: 클러스터 smoke(World Level 모양) 60 tick.
+- 모델 불변식(도달 가능한 객체가 살아 있고 쓰레기가 회수되는 것)은 기존 smoke와 같은 oracle이 본다.
+
+음성 대조 1종이 잡혔다(Debug Foundation `GcSoak`): 스레드 종료 hook이 캐시를 비우지 않게 하면(AL3의 C5) `GcSoak_SchedulerCollectionOnBinnedAllocator`가 실패한다(worker가 끝난 뒤 `Trim`해도 commit된 slab이 남는다).
+
+검증: Debug Foundation·EngineTests 빌드(origin 병합 뒤 전체 다시 컴파일) 뒤 범위 시험 — Foundation `GcSoak` 9·`CoreBinned` 26·`ThreadExitSlot` 4·`Thread` 61·`Allocator` 41·`Gc` 96, EngineTests `GcSoak` 9·`CoreBinned` 26·`ThreadExitSlot` 4·`Gc` 113·`World` 80·`Engine` 35·`Tick` 31 통과. NDK `-fsyntax-only`(`BinnedAllocator.cpp`, `Posix/Concurrency.cpp`, `Posix/VirtualMemory.cpp`, `Android/AndroidPosix.cpp`, 할당자·`ThreadExitSlot`·`VirtualMemory` 시험 파일)와 Asan 구성 구문 검사 통과, format·policy 통과. macOS는 push의 `[ci]`로 돈다.
+
+병합: 이 단계의 코드 커밋 뒤 origin(공통 실행 진입점·크래시 수집 — 142개 파일, `Compiler.h`·`Concurrency.cpp`·`Engine.cpp`·`GcBench`가 겹침)을 병합했다. 충돌은 없었고(`Compiler.h`는 자동 병합) 범위가 겹쳐 위 범위 시험과 음성 대조를 병합한 트리에서 다시 돌렸다(위 수치가 병합 뒤의 것이다). 25.6절 push(b7098021)의 macOS CI(run 44641007220)는 시험까지 가지 못했다 — 유니티 정리(c46511f6)가 `Posix/VirtualMemory.cpp`의 파일 지역 `Success`를 개명한 것과 AL2b가 옛 이름으로 더한 두 줄이 병합에서 어긋난 빌드 오류였고, 다른 세션이 76f7cef6으로 고쳤다. 그 뒤로는 origin을 병합할 때 양쪽이 건드린 POSIX 소스를 NDK로 구문 검사한다.
