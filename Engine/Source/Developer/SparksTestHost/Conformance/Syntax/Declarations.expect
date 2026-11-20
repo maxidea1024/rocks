@@ -1,0 +1,4 @@
+# Every top-level declaration form (3.6 File, Import, Decl). The imported modules do not exist in
+# this single-file case, so import resolution (LC2a) reports both imports; the tree is unaffected.
+error S0301 1:8
+error S0301 2:8

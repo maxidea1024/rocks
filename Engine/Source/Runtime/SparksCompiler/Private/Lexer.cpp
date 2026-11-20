@@ -222,6 +222,10 @@ private:
                 return reported;
             }
 
+            if (auto emitted = Emit(TokenKind::Invalid, offset_, offset_); !emitted) {
+                return emitted;
+            }
+
             if (auto emitted = Emit(TokenKind::StringEnd, offset_, offset_); !emitted) {
                 return emitted;
             }
@@ -324,11 +328,16 @@ private:
         }
 
         offset_ = text_.ByteCount();
-        return Report(DiagnosticCode::UnterminatedBlockComment, begin, begin + 2,
-                      "Block comment is not closed.",
-                      "A block comment starts with '/*' and ends with '*/'; block comments do not "
-                      "nest.",
-                      "Add '*/' where the comment ends.");
+        if (auto reported = Report(DiagnosticCode::UnterminatedBlockComment, begin, begin + 2,
+                                   "Block comment is not closed.",
+                                   "A block comment starts with '/*' and ends with '*/'; block "
+                                   "comments do not nest.",
+                                   "Add '*/' where the comment ends.");
+            !reported) {
+            return reported;
+        }
+
+        return Emit(TokenKind::Invalid, begin, begin + 2);
     }
 
     Result<void> LexName() noexcept {
@@ -612,7 +621,11 @@ private:
             return reported;
         }
 
-        return Emit(TokenKind::VerbatimString, begin, offset_);
+        if (auto emitted = Emit(TokenKind::VerbatimString, begin, offset_); !emitted) {
+            return emitted;
+        }
+
+        return Emit(TokenKind::Invalid, offset_, offset_);
     }
 
     Result<void> BeginString(usize begin) noexcept {
@@ -915,8 +928,13 @@ private:
             fix = "Remove the character or move the text into a string or comment.";
         }
 
-        return Report(DiagnosticCode::InvalidCharacter, begin, offset_, message.View(), explanation,
-                      fix);
+        if (auto reported = Report(DiagnosticCode::InvalidCharacter, begin, offset_, message.View(),
+                                   explanation, fix);
+            !reported) {
+            return reported;
+        }
+
+        return Emit(TokenKind::Invalid, begin, offset_);
     }
 
     const SourceFile& file_;
@@ -959,6 +977,8 @@ StringView TokenKindText(TokenKind kind) noexcept {
         return "documentation comment";
     case TokenKind::VerbatimString:
         return "verbatim string literal";
+    case TokenKind::Invalid:
+        return "invalid text";
     case TokenKind::LeftBrace:
         return "'{'";
     case TokenKind::RightBrace:
@@ -1045,6 +1065,10 @@ StringView TokenKindText(TokenKind kind) noexcept {
 
 bool IsKeyword(TokenKind kind) noexcept {
     return kind >= TokenKind::Import && kind <= TokenKind::Open;
+}
+
+bool IsKeywordText(StringView text) noexcept {
+    return KeywordKind(text) != TokenKind::Identifier;
 }
 
 Result<void> Tokenize(const SourceSet& sources, SourceId id, DiagnosticList& diagnostics,

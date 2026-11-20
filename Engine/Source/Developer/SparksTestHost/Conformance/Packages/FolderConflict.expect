@@ -1,0 +1,6 @@
+# A dependency name that is also a top-level folder or module of the package (S1111, at
+# the dependency entry), and the engine package name as a top-level module (S1111, a
+# diagnostic of the whole file). The import resolves to the dependency, as the first
+# segment names a dependency.
+error S1111 Game/Rocks.spark
+error S1111 Game/SparksPackage.json5 1:60

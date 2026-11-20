@@ -1,0 +1,3 @@
+# Two packages depend on each other (3.4): one diagnostic, in the manifest of the first
+# package by name, at its dependency entry inside the cycle.
+error S1107 A/SparksPackage.json5 1:57

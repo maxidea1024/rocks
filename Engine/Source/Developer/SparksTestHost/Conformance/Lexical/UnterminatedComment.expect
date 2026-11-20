@@ -1,1 +1,2 @@
+# The unclosed comment hides the rest of the file; the parser stays silent at its Invalid token.
 error S0106 1:1

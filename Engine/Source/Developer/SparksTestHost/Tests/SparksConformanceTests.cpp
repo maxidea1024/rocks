@@ -27,6 +27,16 @@ void PrintFailures(const Report& report) noexcept {
     }
 }
 
+// 구문 트리 golden 없이 사례 하나를 돈다.
+Result<void> Run(Allocator& allocator, StringView name, StringView source, StringView expect,
+                 Report& report) noexcept {
+    CaseInput input;
+    input.name = name;
+    input.source = source;
+    input.expect = expect;
+    return RunCase(allocator, input, report);
+}
+
 bool ParseFails(StringView text, StringView reason, Allocator& allocator) noexcept {
     Expectation expectation(allocator);
     String problem(allocator);
@@ -86,7 +96,12 @@ TEST(SparksConformance_RejectsMalformedExpectations) {
                          "line 1: position must look like 14:7 (line and column from 1)",
                          allocator));
         CHECK(ParseFails("error S0101 1:1 extra\n",
+                         "line 1: the file path comes before the position", allocator));
+        CHECK(ParseFails("error S0101 A.spark 1:1 extra\n",
                          "line 1: unknown directive (expected 'error' or 'clean')", allocator));
+        CHECK(ParseFails("error S0101 A.spark 1\n",
+                         "line 1: position must look like 14:7 (line and column from 1)",
+                         allocator));
         CHECK(ParseFails("clean extra\n", "line 1: unknown directive (expected 'error' or 'clean')",
                          allocator));
     }
@@ -97,11 +112,12 @@ TEST(SparksConformance_ReportsMatchesAndMismatches) {
     SystemAllocator allocator;
     {
         Report report(allocator);
-        REQUIRE(RunCase(allocator, "Area/Clean.spark", "let x = 1;\n", "clean\n", report));
-        REQUIRE(RunCase(allocator, "Area/Cr.spark", "a\rb", "error S0102 1:2\n", report));
-        REQUIRE(RunCase(allocator, "Area/Big.spark", "x", "error S0103\n", report));
-        REQUIRE(RunCase(allocator, "Area/Wrong.spark", "a\rb", "clean\n", report));
-        REQUIRE(RunCase(allocator, "Area/BadExpect.spark", "x", "", report));
+        REQUIRE(Run(allocator, "Area/Clean.spark", "const X: int = 1;\n", "clean\n", report));
+        REQUIRE(
+            Run(allocator, "Area/Cr.spark", "const A: int = 1;\r", "error S0102 1:18\n", report));
+        REQUIRE(Run(allocator, "Area/Big.spark", "", "error S0103\n", report));
+        REQUIRE(Run(allocator, "Area/Wrong.spark", "const A: int = 1;\r", "clean\n", report));
+        REQUIRE(Run(allocator, "Area/BadExpect.spark", "x", "", report));
         CHECK(report.CasesRun() == 5);
         REQUIRE(report.Failures().Size() == 3);
         CHECK(report.Failures()[0].View() ==
@@ -116,9 +132,10 @@ TEST(SparksConformance_ReportsMatchesAndMismatches) {
                        "  expected:\n"
                        "    clean\n"
                        "  actual:\n"
-                       "Area/Wrong.spark:1:2: error S0102: Carriage return without a line feed.\n"
-                       "    a b\n"
-                       "     ^\n"
+                       "Area/Wrong.spark:1:18: error S0102: Carriage return without a line "
+                       "feed.\n"
+                       "    const A: int = 1; \n"
+                       "                     ^\n"
                        "  Some editors treat a lone CR as a line break and others do not, so line "
                        "numbers would disagree.\n"
                        "  fix: Use LF or CRLF line endings.\n"));
@@ -141,9 +158,12 @@ TEST(SparksConformance_RepositoryCorpusPasses) {
         auto corpus = Path::Combine(allocator, StringView(engine, found.Value()),
                                     "Source/Developer/SparksTestHost/Conformance");
         REQUIRE(corpus);
+        auto schema = Path::Combine(allocator, StringView(engine, found.Value()),
+                                    "Source/Developer/SparksTestHost/Schema");
+        REQUIRE(schema);
         Report report(allocator);
-        REQUIRE(
-            RunCorpus(allocator, platform::PhysicalFileSystem(), corpus.Value().View(), report));
+        REQUIRE(RunCorpus(allocator, platform::PhysicalFileSystem(), corpus.Value().View(),
+                          schema.Value().View(), report));
         PrintFailures(report);
         CHECK(report.Failures().IsEmpty());
         CHECK(report.CasesRun() > 0);
@@ -183,32 +203,44 @@ TEST(SparksConformance_ReportsCorpusLayoutProblems) {
             const bool closed = static_cast<bool>(file.Close());
             return static_cast<bool>(written.status) && closed;
         };
-        REQUIRE(write(area.Value().View(), "Good.spark", "x\n"));
+        REQUIRE(write(area.Value().View(), "Good.spark", ""));
         REQUIRE(write(area.Value().View(), "Good.expect", "clean\n"));
-        REQUIRE(write(area.Value().View(), "NoExpect.spark", "x\n"));
+        REQUIRE(write(area.Value().View(), "Good.ast",
+                      "File @1:1-1:1\n  List @1:1-1:1\n  List @1:1-1:1\n"));
+        REQUIRE(write(area.Value().View(), "NoExpect.spark", ""));
+        REQUIRE(write(area.Value().View(), "NoExpect.ast", ""));
         REQUIRE(write(area.Value().View(), "NoSource.expect", "clean\n"));
+        REQUIRE(write(area.Value().View(), "NoSource.ast", ""));
+        REQUIRE(write(area.Value().View(), "OnlyTree.ast", ""));
         REQUIRE(write(area.Value().View(), "Notes.txt", "x"));
         REQUIRE(write(rootPath, "Stray.spark", "x"));
 
         Report report(allocator);
-        REQUIRE(RunCorpus(allocator, files, rootPath, report));
+        REQUIRE(RunCorpus(allocator, files, rootPath, "", report));
+        PrintFailures(report);
         CHECK(report.CasesRun() == 1);
-        REQUIRE(report.Failures().Size() == 4);
-        // 낯선 파일은 목록을 훑을 때, 짝 없는 파일은 stem 순으로 맞춰 볼 때 기록한다.
+        REQUIRE(report.Failures().Size() == 6);
+        // 낯선 파일은 목록을 훑을 때, 짝 없는 파일은 stem 순으로 맞춰 볼 때 기록한다. 같은 stem의
+        // 짝 없는 파일은 .expect, .ast 순이다.
         CHECK(report.Failures()[0].View() ==
-              StringView("Area/Notes.txt: unexpected file (only .spark and .expect)"));
+              StringView("Area/Notes.txt: unexpected file (only .spark, .expect, .ast and case "
+                         "folders)"));
         CHECK(report.Failures()[1].View() ==
               StringView("Area/NoExpect.spark: missing the .expect file"));
         CHECK(report.Failures()[2].View() ==
-              StringView("Area/NoSource.expect: missing the .spark file"));
+              StringView("Area/NoSource.expect: missing the .spark file or case folder"));
         CHECK(report.Failures()[3].View() ==
+              StringView("Area/NoSource.ast: missing the .spark file or case folder"));
+        CHECK(report.Failures()[4].View() ==
+              StringView("Area/OnlyTree.ast: missing the .spark file or case folder"));
+        CHECK(report.Failures()[5].View() ==
               StringView(
                   "Stray.spark: unexpected file at the corpus root (cases live in area folders)"));
 
         Report missing(allocator);
         auto absent = Path::Combine(allocator, rootPath, "Absent");
         REQUIRE(absent);
-        auto ran = RunCorpus(allocator, files, absent.Value().View(), missing);
+        auto ran = RunCorpus(allocator, files, absent.Value().View(), "", missing);
         CHECK(!ran && ran.Error() == ErrorCode::NotFound);
 
         CHECK(platform::DeleteDirectoryTree(files, rootPath.Data(), rootPath.ByteCount()));
@@ -251,26 +283,237 @@ TEST(SparksConformance_PairsCasesByStemAndRejectsOddLayouts) {
             const bool closed = static_cast<bool>(file.Close());
             return static_cast<bool>(written.status) && closed;
         };
-        REQUIRE(write(area.Value().View(), "Bom.spark", "x\n"));
+        REQUIRE(write(area.Value().View(), "Bom.spark", "\n"));
         REQUIRE(write(area.Value().View(), "Bom.expect", "clean\n"));
-        REQUIRE(write(area.Value().View(), "Bom.lf.spark", "y\n"));
+        REQUIRE(write(area.Value().View(), "Bom.lf.spark", "\n\n"));
         REQUIRE(write(area.Value().View(), "Bom.lf.expect", "clean\n"));
+        // golden도 stem으로 짝을 맞춘다(Bom.lf.ast는 Bom.lf 사례의 것이다).
+        REQUIRE(write(area.Value().View(), "Bom.lf.ast",
+                      "File @1:1-3:1\n  List @3:1-3:1\n  List @3:1-3:1\n"));
 
         Report report(allocator);
-        REQUIRE(RunCorpus(allocator, files, rootPath, report));
+        REQUIRE(RunCorpus(allocator, files, rootPath, "", report));
         CHECK(report.CasesRun() == 2);
         REQUIRE(report.Failures().Size() == 1);
-        CHECK(report.Failures()[0].View() ==
-              StringView("Area/Nested: unexpected folder in a corpus area"));
+        CHECK(report.Failures()[0].View() == StringView("Area/Nested: missing the .expect file"));
 
         // corpus 경로가 폴더가 아니면 실행기 오류다.
         auto notFolder = Path::Combine(allocator, area.Value().View(), "Bom.spark");
         REQUIRE(notFolder);
         Report fileRoot(allocator);
-        auto ran = RunCorpus(allocator, files, notFolder.Value().View(), fileRoot);
+        auto ran = RunCorpus(allocator, files, notFolder.Value().View(), "", fileRoot);
         CHECK(!ran && ran.Error() == ErrorCode::InvalidArgument);
 
         CHECK(platform::DeleteDirectoryTree(files, rootPath.Data(), rootPath.ByteCount()));
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// `.ast`가 있으면 구문 트리 덤프와 byte 단위로 비교한다. 다르면 첫 다른 줄과 실제 트리 전체를
+// 보인다. 원문 검사가 막아 트리가 없으면 그것도 실패다. 진단과 트리는 따로 판정한다.
+TEST(SparksConformance_ComparesSyntaxTreeGolden) {
+    SystemAllocator allocator;
+    {
+        constexpr StringView Tree = "File @1:1-2:1\n"
+                                    "  List @1:1-1:1\n"
+                                    "  List @1:1-1:18\n"
+                                    "    Const @1:1-1:18\n"
+                                    "      -\n"
+                                    "      List @1:1-1:1\n"
+                                    "      Name \"X\" @1:7-1:8\n"
+                                    "      Type @1:10-1:13\n"
+                                    "        Path @1:10-1:13\n"
+                                    "          Name \"int\" @1:10-1:13\n"
+                                    "        -\n"
+                                    "      IntegerLiteral \"1\" @1:16-1:17\n";
+        CaseInput input;
+        input.name = "Area/Tree.spark";
+        input.source = "const X: int = 1;\n";
+        input.expect = "clean\n";
+        input.hasSyntaxTree = true;
+        input.syntaxTree = Tree;
+        Report report(allocator);
+        REQUIRE(RunCase(allocator, input, report));
+        PrintFailures(report);
+        CHECK(report.Failures().IsEmpty());
+
+        // 끝의 LF 하나만 달라도 실패다.
+        input.syntaxTree = StringView(Tree.Data(), Tree.ByteCount() - 1);
+        REQUIRE(RunCase(allocator, input, report));
+        REQUIRE(report.Failures().Size() == 1);
+        CHECK(report.Failures()[0].View().StartsWith(
+            "Area/Tree.spark: syntax tree differs from .ast at line 13\n"
+            "  expected: \n"
+            "  actual:   \n"
+            "  actual tree:\nFile @1:1-2:1\n"));
+
+        input.syntaxTree = "File @1:1-2:1\n  List @1:1-1:2\n";
+        REQUIRE(RunCase(allocator, input, report));
+        REQUIRE(report.Failures().Size() == 2);
+        CHECK(report.Failures()[1].View().StartsWith(
+            "Area/Tree.spark: syntax tree differs from .ast at line 2\n"
+            "  expected:   List @1:1-1:2\n"
+            "  actual:     List @1:1-1:1\n"));
+
+        // 진단이 틀리고 트리도 틀리면 실패 항목이 둘이다.
+        input.expect = "error S0201 1:1\n";
+        REQUIRE(RunCase(allocator, input, report));
+        CHECK(report.Failures().Size() == 4);
+
+        // 원문 검사가 막으면(S0101) 트리가 없다.
+        CaseInput blocked;
+        blocked.name = "Area/Blocked.spark";
+        blocked.source = "\xFF";
+        blocked.expect = "error S0101 1:1\n";
+        blocked.hasSyntaxTree = true;
+        blocked.syntaxTree = Tree;
+        Report blockedReport(allocator);
+        REQUIRE(RunCase(allocator, blocked, blockedReport));
+        REQUIRE(blockedReport.Failures().Size() == 1);
+        CHECK(blockedReport.Failures()[0].View() ==
+              StringView("Area/Blocked.spark: has a .ast file but the source check stopped "
+                         "before parsing"));
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// 폴더 사례(13.1절 "패키지 사례"): 배치 오류는 사례마다 실패 하나이고, 폴더 사례의 지시는 파일
+// 경로를 쓰며 파일 사례는 쓰지 않는다. schema 폴더에는 *.sparkbind.json만 둔다.
+TEST(SparksConformance_FolderCasesAndSchemas) {
+    SystemAllocator allocator;
+    {
+        platform::FileSystem& files = platform::PhysicalFileSystem();
+        StringBuilder<64> root(allocator);
+        REQUIRE(root.TryAppendFormat("rocks-sparks-folders-{}-{}", platform::CurrentProcessId(),
+                                     platform::MonotonicTicks()));
+        const StringView rootPath = root.View();
+        auto write = [&](StringView relative, StringView content) noexcept -> bool {
+            auto path = Path::Combine(allocator, rootPath, relative);
+            if (!path) {
+                return false;
+            }
+
+            const StringView full = path.Value().View();
+            usize slash = full.ByteCount();
+            while (slash > 0 && full.Data()[slash - 1] != '/' && full.Data()[slash - 1] != '\\') {
+                --slash;
+            }
+
+            if (slash > 0 && !platform::MakeDirectoryTree(files, full.Data(), slash - 1)) {
+                return false;
+            }
+
+            platform::File file;
+            if (!file.Open(files, full.Data(), full.ByteCount(),
+                           platform::FileOpenMode::CreateAlways)) {
+                return false;
+            }
+
+            const platform::FileTransfer written =
+                file.WriteAll(content.Data(), content.ByteCount());
+            const bool closed = static_cast<bool>(file.Close());
+            return static_cast<bool>(written.status) && closed;
+        };
+        auto folder = [&](StringView relative) noexcept -> bool {
+            auto path = Path::Combine(allocator, rootPath, relative);
+            return path && static_cast<bool>(platform::MakeDirectoryTree(files, path.Value().Data(),
+                                                                         path.Value().ByteCount()));
+        };
+        constexpr StringView Manifest = "{ name: \"Game\", sparks: 1, profile: \"core\" }";
+        REQUIRE(write("Corpus/Area/Good/SparksPackage.json5", Manifest));
+        REQUIRE(write("Corpus/Area/Good/Combat/Main.spark", "import Combat.Main;\n"));
+        REQUIRE(write("Corpus/Area/Good.expect", "error S0304 Combat/Main.spark 1:8\n"));
+        REQUIRE(write("Corpus/Area/Good.ast", ""));
+        REQUIRE(write("Corpus/Area/Both.spark", ""));
+        REQUIRE(write("Corpus/Area/Both/SparksPackage.json5", Manifest));
+        REQUIRE(write("Corpus/Area/Both.expect", "clean\n"));
+        REQUIRE(folder("Corpus/Area/Empty"));
+        REQUIRE(write("Corpus/Area/Empty.expect", "clean\n"));
+        REQUIRE(write("Corpus/Area/File.spark", "import Nope;\n"));
+        REQUIRE(write("Corpus/Area/File.expect", "error S0301 Main.spark 1:8\n"));
+        REQUIRE(write("Corpus/Area/Nested/SparksPackage.json5", Manifest));
+        REQUIRE(write("Corpus/Area/Nested/Sub/SparksPackage.json5", Manifest));
+        REQUIRE(write("Corpus/Area/Nested.expect", "clean\n"));
+        REQUIRE(write("Corpus/Area/NoManifest/Lib/Main.spark", ""));
+        REQUIRE(write("Corpus/Area/NoManifest.expect", "clean\n"));
+        REQUIRE(write("Corpus/Area/Odd/SparksPackage.json5", Manifest));
+        REQUIRE(write("Corpus/Area/Odd/notes.txt", "x"));
+        REQUIRE(write("Corpus/Area/Odd.expect", "clean\n"));
+        REQUIRE(write("Corpus/Area/PathMissing/SparksPackage.json5", Manifest));
+        REQUIRE(write("Corpus/Area/PathMissing.expect", "error S1108 1:1\n"));
+        REQUIRE(write("Corpus/Area/RootFile/Main.spark", ""));
+        REQUIRE(write("Corpus/Area/RootFile.expect", "clean\n"));
+        // 두 패키지 사례: 경로는 사례 폴더 기준이다.
+        REQUIRE(write("Corpus/Area/Two/Game/SparksPackage.json5",
+                      "{ name: \"Game\", sparks: 1, profile: \"core\", dependencies: [\"Lib\"] }"));
+        REQUIRE(write("Corpus/Area/Two/Game/Main.spark", "import Lib.Util;\nimport Lib.Gone;\n"));
+        REQUIRE(write("Corpus/Area/Two/Lib/SparksPackage.json5",
+                      "{ name: \"Lib\", sparks: 1, profile: \"core\" }"));
+        REQUIRE(write("Corpus/Area/Two/Lib/Util.spark", ""));
+        REQUIRE(write("Corpus/Area/Two.expect", "error S0301 Game/Main.spark 2:8\n"));
+        REQUIRE(write("Schema/Engine.sparkbind.json",
+                      "{ \"format\": 1, \"package\": \"Rocks\", \"module\": \"Engine\", "
+                      "\"types\": [] }"));
+        REQUIRE(write("Schema/notes.txt", "x"));
+
+        auto corpus = Path::Combine(allocator, rootPath, "Corpus");
+        auto schema = Path::Combine(allocator, rootPath, "Schema");
+        REQUIRE(corpus);
+        REQUIRE(schema);
+        Report report(allocator);
+        REQUIRE(RunCorpus(allocator, files, corpus.Value().View(), schema.Value().View(), report));
+        PrintFailures(report);
+        CHECK(report.CasesRun() == 4); // File, Good, PathMissing, Two
+        REQUIRE(report.Failures().Size() == 10);
+        const StringView expected[] = {
+            "Schema/notes.txt: unexpected item (only .sparkbind.json)",
+            "Area/Both: a file case and a folder case share the name",
+            "Area/Empty: the case folder has no files",
+            "Area/File.spark: invalid .expect: a file case does not name files",
+            "Area/Good.ast: .ast is only for file cases",
+            "Area/Nested: 'Sub/SparksPackage.json5' is not at a package root",
+            "Area/NoManifest: package folder 'Lib' has no SparksPackage.json5",
+            "Area/Odd: unexpected file 'notes.txt' (only .spark and SparksPackage.json5)",
+            "Area/PathMissing: invalid .expect: a folder case names the file of every diagnostic",
+            "Area/RootFile: 'Main.spark' is at the case root, which has no SparksPackage.json5",
+        };
+        for (usize index = 0; index < report.Failures().Size(); ++index) {
+            CHECK(report.Failures()[index].View() == expected[index]);
+        }
+
+        // schema 폴더가 없으면 실행기 오류다.
+        auto absent = Path::Combine(allocator, rootPath, "NoSchema");
+        REQUIRE(absent);
+        Report missing(allocator);
+        auto ran =
+            RunCorpus(allocator, files, corpus.Value().View(), absent.Value().View(), missing);
+        CHECK(!ran && ran.Error() == ErrorCode::NotFound);
+
+        CHECK(platform::DeleteDirectoryTree(files, rootPath.Data(), rootPath.ByteCount()));
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// schema는 모든 사례와 함께 컴파일되며 진단 경로는 Schema/<파일>이다(파일 사례에서도 다른 파일의
+// 진단은 기대와 맞지 않는다).
+TEST(SparksConformance_SchemasCompileWithEveryCase) {
+    SystemAllocator allocator;
+    {
+        const CaseFile schemas[] = {{"Schema/Bad.sparkbind.json", "{}"}};
+        CaseInput input;
+        input.name = "Area/Clean.spark";
+        input.source = "";
+        input.expect = "clean\n";
+        input.schemas = schemas;
+        Report report(allocator);
+        REQUIRE(RunCase(allocator, input, report));
+        REQUIRE(report.Failures().Size() == 1);
+        CHECK(report.Failures()[0].View().StartsWith(
+            "Area/Clean.spark: diagnostics differ from .expect\n"
+            "  expected:\n"
+            "    clean\n"
+            "  actual:\n"
+            "Schema/Bad.sparkbind.json:1:1: error S1120:"));
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }
@@ -280,11 +523,13 @@ TEST(SparksConformance_OrderMatters) {
     SystemAllocator allocator;
     {
         Report report(allocator);
-        REQUIRE(RunCase(allocator, "Area/Order.spark", "a # b\nc # d",
-                        "error S0104 2:3\nerror S0104 1:3\n", report));
+        // `#`는 Invalid 토큰으로 남고 구문 분석은 그 자리에서 진단을 더 내지 않는다.
+        constexpr StringView Source = "const A: int = 1 # 2;\nconst B: int = 3 # 4;\n";
+        REQUIRE(Run(allocator, "Area/Order.spark", Source, "error S0104 2:18\nerror S0104 1:18\n",
+                    report));
         REQUIRE(report.Failures().Size() == 1);
-        REQUIRE(RunCase(allocator, "Area/Order.spark", "a # b\nc # d",
-                        "error S0104 1:3\nerror S0104 2:3\n", report));
+        REQUIRE(Run(allocator, "Area/Order.spark", Source, "error S0104 1:18\nerror S0104 2:18\n",
+                    report));
         CHECK(report.Failures().Size() == 1);
     }
     CHECK(allocator.Stats().liveAllocations == 0);

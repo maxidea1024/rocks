@@ -1,0 +1,2 @@
+# A class body holds members only.
+error S0204 1:15

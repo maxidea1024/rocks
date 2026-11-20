@@ -1,10 +1,14 @@
-let moveSpeed = 600.0;
-let ratio = .5;
-let big = 1_000_000 + 0xFF_FF + 0b1010_0101 + 007;
-for (i in 0..<count) { }
-let label = "HP ${current}/${max}";
-let path = @"C:\Games\Rocks ""quoted"" ${not interpolated}";
-let poem = @"first line
+fn Tokens() {
+    let moveSpeed = 600.0;
+    let ratio = .5;
+    let big = 1_000_000 + 0xFF_FF + 0b1010_0101 + 007;
+    for (i in 0..<count) { }
+    let label = "HP ${current}/${max}";
+    let path = @"C:\Games\Rocks ""quoted"" ${not interpolated}";
+    let poem = @"first line
 second line";
+    var x = 1; /* block comment */
+}
+
 /// Documentation comment.
-var x = 1; /* block comment */
+const Documented: int = 1;

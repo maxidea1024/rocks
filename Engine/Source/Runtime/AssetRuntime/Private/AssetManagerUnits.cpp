@@ -365,8 +365,8 @@ Result<void> AssetManager::Impl::ApplyEdgeChanges() noexcept {
 
     changes.Clear();
     for (usize index = 0; index < cycleOwners.Size(); ++index) {
-        // 앞의 병합으로 단위가 바뀌었을 수 있다 — 지금의 단위로 다시 본다(CheckCycle이 같은 단위·
-        // 지운 단위를 거른다).
+        // 앞의 병합이 단위를 지웠을 수 있다(CheckCycle이 지운 단위를 거른다 — 남은 두 단위는 여전히
+        // 다른 단위다).
         CheckCycle(cycleOwners[index], cycleTargets[index]);
     }
 
@@ -377,7 +377,8 @@ Result<void> AssetManager::Impl::ApplyEdgeChanges() noexcept {
 // 후방 도달 — 11.7절 3). Discarding 단위는 지나지 않는다. 작업 공간 용량은 Pump가 단위 표 크기로
 // 잡았다.
 void AssetManager::Impl::CheckCycle(uint32 from, uint32 to) noexcept {
-    if (from == to || !units[from].used || !units[to].used ||
+    // 쌓을 때 from ≠ to였고 병합은 단위를 지우기만 하므로 같은 단위는 오지 않는다.
+    if (!units[from].used || !units[to].used ||
         units[from].state == ResidentUnitState::Discarding ||
         units[to].state == ResidentUnitState::Discarding) {
         return;

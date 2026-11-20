@@ -1,0 +1,237 @@
+#include <SparksCompiler/Compilation.h>
+
+#include <Core/Hash.h>
+#include <Platform/Fatal.h>
+
+#include "CompilationChecker.h"
+
+// 컴파일 단위의 입력 API와 결과 접근이다(검사는 CompilationChecker.h의 파일들).
+
+namespace rocks::sparks {
+
+Compilation::Compilation(Allocator& allocator, const SourceSet& sources) noexcept
+    : allocator_(&allocator), sources_(&sources), text_(allocator), schemas_(allocator),
+      packages_(allocator), modules_(allocator), trees_(allocator), imports_(allocator),
+      modulePaths_(allocator, ModulePathHash{this}, ModulePathEqual{this}),
+      packagesByName_(allocator), sortedModules_(allocator), sortedFirst_(allocator),
+      sortedCount_(allocator) {
+}
+
+uint64 Compilation::ModulePathHash::operator()(uint32 module) const noexcept {
+    const ModuleEntry& entry = owner->modules_[module];
+    return (*this)(ModulePathProbe{entry.package, owner->Text(entry.path)});
+}
+
+uint64 Compilation::ModulePathHash::operator()(const ModulePathProbe& probe) const noexcept {
+    return HashCombine(HashStringBytes(probe.path), MixHash(probe.package));
+}
+
+bool Compilation::ModulePathEqual::operator()(uint32 left, uint32 right) const noexcept {
+    const ModuleEntry& entry = owner->modules_[right];
+    return (*this)(left, ModulePathProbe{entry.package, owner->Text(entry.path)});
+}
+
+bool Compilation::ModulePathEqual::operator()(uint32 left,
+                                              const ModulePathProbe& right) const noexcept {
+    const ModuleEntry& entry = owner->modules_[left];
+    return entry.package == right.package && owner->Text(entry.path) == right.path;
+}
+
+Result<void> Compilation::AddBindingSchema(SourceId id) noexcept {
+    if (checked_ || id.index >= sources_->Count()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return schemas_.TryPushBack(SchemaEntry{BindingSchema(*allocator_), id, false});
+}
+
+Result<uint32> Compilation::AddPackage(SourceId manifest) noexcept {
+    if (checked_ || manifest.index >= sources_->Count()) {
+        return Result<uint32>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (auto pushed =
+            packages_.TryPushBack(PackageEntry{PackageManifest(*allocator_), manifest, false});
+        !pushed) {
+        return Result<uint32>::Failure(pushed.Error());
+    }
+
+    return Result<uint32>::Success(static_cast<uint32>(packages_.Size() - 1));
+}
+
+Result<uint32> Compilation::AddModule(uint32 package, SourceId source, StringView path) noexcept {
+    if (checked_ || package >= packages_.Size() || source.index >= sources_->Count()) {
+        return Result<uint32>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (modulePaths_.Contains(ModulePathProbe{package, path})) {
+        return Result<uint32>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    ModuleEntry entry;
+    entry.package = package;
+    entry.source = source;
+    entry.path.offset = static_cast<uint32>(text_.Size());
+    entry.path.length = static_cast<uint32>(path.ByteCount());
+    if (auto appended = text_.TryAppend(Span<const char>(path.Data(), path.ByteCount()));
+        !appended) {
+        return Result<uint32>::Failure(appended.Error());
+    }
+
+    if (auto reserved = trees_.TryReserve(trees_.Size() + 1); !reserved) {
+        return Result<uint32>::Failure(reserved.Error());
+    }
+
+    if (auto pushed = modules_.TryPushBack(entry); !pushed) {
+        return Result<uint32>::Failure(pushed.Error());
+    }
+
+    // 색인에 넣지 못하면 모듈을 되돌린다(목록 불변).
+    if (auto added = modulePaths_.Add(static_cast<uint32>(modules_.Size() - 1)); !added) {
+        static_cast<void>(modules_.TryPopBack());
+        return Result<uint32>::Failure(added.Error());
+    }
+
+    // 용량을 미리 잡았으므로 실패하지 않는다.
+    static_cast<void>(trees_.TryPushBack(SyntaxTree(*allocator_)));
+    return Result<uint32>::Success(static_cast<uint32>(modules_.Size() - 1));
+}
+
+Result<void> Compilation::Check(DiagnosticList& diagnostics) noexcept {
+    if (checked_) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    checked_ = true;
+    detail::CompilationChecker checker(*this, diagnostics);
+    return checker.Run();
+}
+
+bool Compilation::SchemaIsValid(uint32 schema) const noexcept {
+    return schema < schemas_.Size() && schemas_[schema].valid;
+}
+
+const BindingSchema& Compilation::Schema(uint32 schema) const noexcept {
+    if (schema >= schemas_.Size()) {
+        platform::Fatal("Sparks schema number is out of range");
+    }
+
+    return schemas_[schema].schema;
+}
+
+bool Compilation::PackageIsValid(uint32 package) const noexcept {
+    return package < packages_.Size() && packages_[package].valid;
+}
+
+const PackageManifest& Compilation::Manifest(uint32 package) const noexcept {
+    if (package >= packages_.Size()) {
+        platform::Fatal("Sparks package number is out of range");
+    }
+
+    return packages_[package].manifest;
+}
+
+uint32 Compilation::FindPackage(StringView name) const noexcept {
+    const uint32 package = FindNamedPackage(name);
+    return package != NoPackage && packages_[package].valid ? package : NoPackage;
+}
+
+uint32 Compilation::FindNamedPackage(StringView name) const noexcept {
+    // 정렬된 색인에서 이분 탐색한다(같은 이름이면 번호가 작은 것이 앞).
+    usize low = 0;
+    usize high = packagesByName_.Size();
+    while (low < high) {
+        const usize middle = low + (high - low) / 2;
+        if (StringView::CompareBytes(packages_[packagesByName_[middle]].manifest.Name(), name) <
+            0) {
+            low = middle + 1;
+        } else {
+            high = middle;
+        }
+    }
+
+    if (low < packagesByName_.Size() && packages_[packagesByName_[low]].manifest.Name() == name &&
+        !name.IsEmpty()) {
+        return packagesByName_[low];
+    }
+
+    return NoPackage;
+}
+
+uint32 Compilation::ModulePackage(uint32 module) const noexcept {
+    if (module >= modules_.Size()) {
+        platform::Fatal("Sparks module number is out of range");
+    }
+
+    return modules_[module].package;
+}
+
+SourceId Compilation::ModuleSource(uint32 module) const noexcept {
+    if (module >= modules_.Size()) {
+        platform::Fatal("Sparks module number is out of range");
+    }
+
+    return modules_[module].source;
+}
+
+StringView Compilation::ModulePath(uint32 module) const noexcept {
+    if (module >= modules_.Size()) {
+        platform::Fatal("Sparks module number is out of range");
+    }
+
+    return Text(modules_[module].path);
+}
+
+StringView Compilation::ModuleImportPath(uint32 module) const noexcept {
+    if (module >= modules_.Size()) {
+        platform::Fatal("Sparks module number is out of range");
+    }
+
+    return Text(modules_[module].importPath);
+}
+
+const SyntaxTree* Compilation::ModuleTree(uint32 module) const noexcept {
+    if (module >= modules_.Size()) {
+        platform::Fatal("Sparks module number is out of range");
+    }
+
+    return modules_[module].parsed ? &trees_[module] : nullptr;
+}
+
+Span<const ImportResolution> Compilation::ModuleImports(uint32 module) const noexcept {
+    if (module >= modules_.Size()) {
+        platform::Fatal("Sparks module number is out of range");
+    }
+
+    const ModuleEntry& entry = modules_[module];
+    return Span<const ImportResolution>(imports_.Data() + entry.firstImport, entry.importCount);
+}
+
+uint32 Compilation::FindModule(uint32 package, StringView importPath) const noexcept {
+    if (package >= sortedFirst_.Size()) {
+        return NoModule;
+    }
+
+    // 정렬된 구간에서 이분 탐색한다.
+    usize low = sortedFirst_[package];
+    usize high = low + sortedCount_[package];
+    while (low < high) {
+        const usize middle = low + (high - low) / 2;
+        const int order =
+            StringView::CompareBytes(Text(modules_[sortedModules_[middle]].importPath), importPath);
+        if (order < 0) {
+            low = middle + 1;
+        } else {
+            high = middle;
+        }
+    }
+
+    if (low < sortedFirst_[package] + sortedCount_[package] &&
+        Text(modules_[sortedModules_[low]].importPath) == importPath) {
+        return sortedModules_[low];
+    }
+
+    return NoModule;
+}
+
+} // namespace rocks::sparks

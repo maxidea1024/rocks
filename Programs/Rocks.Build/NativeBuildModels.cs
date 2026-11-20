@@ -183,6 +183,14 @@ public sealed record NativeToolchain
     // 예: "clang version 21.1.6", "clang version 21.1.6 (a832a5222e48...)".
     public string CompilerVersion { get; init; } = "";
 
+    // 컴파일러가 검증한 도구 모음 목록(Build/Toolchain.json — Docs/Design/ClangVersionSupport.ko.md 6.2절)에 있는지다. discovery가 채우고,
+    // 수동으로 만든 툴체인(시험)은 참이다. 거짓이면 빌드 CLI가 한 줄 알리고 build-evidence에 남긴다.
+    public bool ToolchainVerified { get; init; } = true;
+
+    // Windows에서 고른 MSVC STL이 요구하는 최소 Clang 확인 결과다(build-evidence의 stlClangCheck — "requires Clang 22" 또는 "not checked: 이유").
+    // Windows 밖과 수동으로 만든 툴체인은 null이다.
+    public string? StlClangCheck { get; init; }
+
     // `-print-effective-triple`로 얻은 실제 대상 triple이다(compile 인자의 --target·배포 대상 반영).
     // 예: "x86_64-pc-windows-msvc19.29.30159", "arm64-apple-macosx13.0.0", "aarch64-unknown-linux-android26".
     public string TargetTriple { get; init; } = "";

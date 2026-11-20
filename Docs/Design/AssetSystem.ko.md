@@ -500,7 +500,7 @@ A1c 구현(`Engine/Source/Runtime/AssetRuntime` — `CancelToken.h`·`AssetLoade
 
 ### 11.7 구현에서 정한 점(A1d — AssetManager)
 
-A1d(`Engine/Source/Runtime/AssetRuntime` — `AssetManager.h`, 상태: 진행)가 11.1·11.4·11.5절 2와 6.1절에서 비어 있던 것을 다음과 같이 정했다. 애매한 곳은 UE 5.8 `UAssetManager`·`FStreamableManager`·`FStreamableHandle`을 따른다. 설계 교차 검증(리뷰어 1명, 지적 11개)을 반영했다.
+A1d(`Engine/Source/Runtime/AssetRuntime` — `AssetManager.h`, 상태: 구현)가 11.1·11.4·11.5절 2와 6.1절에서 비어 있던 것을 다음과 같이 정했다. 애매한 곳은 UE 5.8 `UAssetManager`·`FStreamableManager`·`FStreamableHandle`을 따른다. 설계 교차 검증(리뷰어 1명, 지적 11개)을 반영했다.
 
 1. **구성과 소유**: `AssetManager`가 에셋 객체 Registry(패키지 정책, 고유 ContextId, 엔진 TypeRegistry 공유, `ReferenceObserver` 설치 — 6.1절, 관찰자 `maxKeys`는 설정)와 `AssetLoader`(A1c)를 소유한다. 설정은 로더 설정(매니페스트·쿠킹 루트·IO·worker·시계·프레임 판정·PostLoad handler·상한)에 Registry 설정·관찰자 키 상한·보류 명령 큐 상한을 더한 것이다. 모든 공개 함수는 Game(Registry 소유) 스레드 전용이고(`WrongThread`), 예외는 `AssetLease`·`LoadTicket`·`PrimaryAssetTicket`·`PrimaryAssetLease`의 소멸(아무 스레드 — 해제 큐, 5)이다. `AssetScope`의 소멸은 Game 스레드 전용이다(다른 스레드면 `platform::Fatal`). 에셋 접근은 `With(lease, fn)`이 에셋 문맥 `ObjectAccessScope`를 열고 부른다 — lease가 있으면 보유가 1 이상이라 그 단위는 Closing·Discarding일 수 없다(불변식).
 2. **로더 확장**(A1c에 더하는 API — 공개 패키지의 수명 결정을 넘겨받는 경계):
@@ -520,10 +520,13 @@ A1d(`Engine/Source/Runtime/AssetRuntime` — `AssetManager.h`, 상태: 진행)�
 5. **티켓과 callback**(11.1절, UE `FStreamableHandle` 대응): `RequestAsset(request)`가 로더 요청 하나와 티켓 슬롯을 만들고 `LoadTicket`(move-only)을 준다. 같은 에셋의 요청은 로더에서 합류하고 티켓은 caller마다 따로다(개별 취소). `OnReady(ticket, lane, callback)`: 티켓당 하나(`AlreadyRegistered`), lane은 Game만(`Worker`·`Render`는 `Unsupported` — 11.1절), 등록 실패면 callback은 등록되지 않고 caller가 갖는다. callback은 그 요청이 끝난 뒤의 Pump (8)에서 정확히 한 번 `Result<AssetLease>`로 불린다: 성공이면 lease(보유 1), 실패면 로더 결과(오류·진단), `expectedType`이 있으면 대표 에셋이 그 타입(IsA)이 아닐 때 `TypeMismatch`, 티켓을 먼저 놓으면 `Cancelled`, scope Revoke면 `ScopeClosed`, Shutdown이면 `ShuttingDown`. 이미 끝난 티켓에 등록하면 다음 Pump에서 부른다(등록 함수 안에서 부르지 않는다 — 호출 문맥이 하나다). `ReadyMask::Render`는 `UnsupportedCapability`.
    - 재진입: callback은 내부 표 순회가 끝난 뒤 모아 둔 목록으로 부른다. callback 안에서 `RequestAsset`·`OnReady`·`Revoke`·티켓·lease 해제·`RunWhenReady`는 할 수 있고, `Pump`·`LoadBlocking`·`Shutdown`은 `WrongContext`다. 로더 콜백(PostLoad handler 등) 안에서는 로더 규칙(11.6절 18)대로 로더를 거치는 호출(`RequestAsset` 포함)이 `WrongContext`다.
 6. **lease·티켓 슬롯과 해제 큐**(11.1절): `AssetLease`(move-only)는 단위 보유 1이다. 해제(소멸)는 계수를 바로 바꾸지 않고 해제 큐에 넣는다 — 큐 노드는 슬롯 안에 있고, 슬롯은 주소가 고정된 블록(고정 크기 블록을 이어 붙이고 옮기지 않는다)에 둔다. 큐는 뮤텍스 + 침입 연결이라 소멸자(noexcept, GC 회수 중 포함, 아무 스레드)에서 할당하지 않는다. 세대 비교와 계수 변경은 Game 스레드 Pump에서만 한다. scope Revoke·Shutdown이 회수한 슬롯은 회수 표시만 하고(보유는 그때 줄인다), 그 lease·티켓 객체가 소멸해 큐를 거친 뒤에야 슬롯을 다시 쓴다(늦은 소멸이 새 lease의 노드를 넣지 않는다 — 이중 감소 없음). `LoadTicket`·`PrimaryAssetTicket`·`PrimaryAssetLease`도 같은 슬롯 방식이다.
+   - 상한: 슬롯 블록은 256칸, 블록 표는 4096칸(고정 크기 — 다른 스레드의 소멸이 Game 스레드의 표 확장과 경쟁하지 않는다)이라 동시에 살아 있는 handle 객체는 `AssetManagerMaxLiveHandles`(2²⁰)개까지다. 넘으면 새 요청·보류 명령·묶음 로드·동기 로드는 `CapacityExceeded`이고, 이미 걸어 둔 callback·보류 명령·묶음 callback은 lease를 만들 수 없어 그 오류를 받는다(조용히 버리지 않는다).
+   - 전달 목록: callback·묶음 callback을 부르기 전에 모으는 목록의 용량은 티켓·묶음 표가 자랄 때 함께 잡는다(`TakeTicket`·`TakePrimary` — 잡지 못하면 그 요청이 `OutOfMemory`). 그래서 Pump·Shutdown의 전달은 할당하지 않는다. 처음 구현은 Pump·Shutdown에서 목록을 잡았고, 그 할당이 실패하면 Shutdown이 `ShuttingDown` 전달을 건너뛸 수 있었다(coverage 작업 중 발견 — 고침).
+   - scope 회수와 해제 큐: 소멸했지만 아직 해제 큐에 남은 lease도 scope 회수가 회수한다(`objectAlive`는 큐를 처리할 때 칸과 함께 지운다). 큐 처리는 회수된 lease의 보유를 다시 빼지 않는다.
    - 수명: 6.1절 종료 순서(World 종료 → lease·scope 해제 → Registry 종료)가 계약이다. AssetManager를 파괴할 때 살아 있는 lease·티켓 객체가 있으면 `platform::Fatal`이다(큐가 사라진 뒤의 소멸을 조용히 넘기지 않는다 — Registry의 "남은 소유권을 무시한 파괴는 즉시 종료"와 같다). 버린 대안: 큐를 참조 계수 공유 상태로 AssetManager보다 오래 살리는 것(UE `TSharedPtr<FStreamableHandle>`) — 종료 순서 위반을 숨긴다.
 7. **scope**(11.1절): `CreateScope()`가 `AssetScope`(move-only 소유 handle)를 준다. `Revoke()` 뒤 그 scope의 새 `RequestAsset`·`LoadPrimaryAsset`·`RunWhenReady`는 `ScopeClosed`다. 그 scope의 티켓은 진행 중이든 Succeeded든 관심을 놓고(로더 요청 Release), 아직 부르지 않은 callback에 `ScopeClosed`를 한 번 전달하며, 그 scope의 lease·보류 명령은 회수된다(보유 감소, 보류 명령은 실패 함수에 `ScopeClosed`). 다른 scope의 같은 에셋 lease는 그대로다. callback 안에서도 Revoke할 수 있다. scope handle이 소멸되면 Revoke와 같다.
-8. **LoadBlocking**(11.1·11.5절 3): 프레임 판정이 참이거나 callback 안이면 `WrongContext`. 아니면 요청을 내고 로더 `WaitFor`(동기 대기 추적 — 호출 지점·대상·시간이 관찰자와 상태 조회에 남는다)와 AssetManager Pump 처리를 결과가 나올 때까지 되풀이해 lease를 준다.
-9. **미준비 대상 정책**(11.5절 2): `RunWhenReady(asset, policy, scope, run, fail)` — 정책은 `Fail`(기본 — 대상이 상주 Resident(PostLoad까지 끝남)가 아니면 새 오류 `NotReady`, Core `ErrorCode`와 이름 함수에 더한다), `Defer`(Normal 우선순위로 요청해 준비되면 실행), `PromoteAndDefer`(High로 요청 — 이미 진행 중이면 승격), 동기 대기는 이 함수에 없다(`LoadBlocking`만). 보류 명령은 등록 때부터 실행까지 내부 티켓을 쥔다 — 대상 로드를 붙잡고(로드 중이 아니면 요청을 낸다), 상주면 보유 1이라 그 사이 Closing·Discard되지 않는다(그래서 "다른 인스턴스에 실행" 문제가 생기지 않는다). 실행은 늘 Pump (8)에서 한다(준비돼 있어도 등록 함수 안에서 실행하지 않는다). 실행 직전에 scope가 열려 있는지 다시 본다. 로드 실패·scope Revoke·Shutdown·handle 취소면 `run` 대신 `fail`(오류·진단)을 정확히 한 번 부른다(조용히 버리지 않는다). 큐 상한(`maxDeferredCommands`, 기본 4096)을 넘으면 `CapacityExceeded`. UE에는 대응하는 일반 정책이 없다(게임 코드가 `FStreamableDelegate`로 직접 한다) — 계획 요구에 따라 Rocks가 정한다.
+8. **LoadBlocking**(11.1·11.5절 3): 프레임 판정이 참이거나 callback 안이면 `WrongContext`. 로더 콜백(PostLoad handler 등) 안이면 로더가 요청을 `WrongContext`로 거절해 그 오류를 돌려준다(`Pump`도 같다). 아니면 요청을 내고 로더 `WaitFor`(동기 대기 추적 — 호출 지점·대상·시간이 관찰자와 상태 조회에 남는다)와 AssetManager Pump 처리를 결과가 나올 때까지 되풀이해 lease를 준다.
+9. **미준비 대상 정책**(11.5절 2): `RunWhenReady(asset, policy, scope, run, fail)` — 정책은 `Fail`(기본 — 대상이 상주 Resident(PostLoad까지 끝남)가 아니면 새 오류 `NotReady`, Core `ErrorCode`와 이름 함수에 더한다), `Defer`(Normal 우선순위로 요청해 준비되면 실행), `PromoteAndDefer`(High로 요청 — 이미 진행 중이면 승격), 동기 대기는 이 함수에 없다(`LoadBlocking`만). 보류 명령은 등록 때부터 실행까지 내부 티켓을 쥔다 — 대상 로드를 붙잡고(로드 중이 아니면 요청을 낸다), 상주면 보유 1이라 그 사이 Closing·Discard되지 않는다(그래서 "다른 인스턴스에 실행" 문제가 생기지 않는다). 실행은 늘 Pump (8)에서 한다(준비돼 있어도 등록 함수 안에서 실행하지 않는다). scope 회수는 그 scope의 아직 실행하지 않은 명령에 실패 사유(`ScopeClosed`)를 바로 적으므로 실행 때 scope를 다시 보지 않는다(처음 구현의 실행 직전 재확인은 닿을 수 없는 분기라 뺐다). 끝난 명령의 handle을 먼저 놓아도 명령은 실행되고 그 뒤 칸이 회수된다. 두 번째 `Cancel`·끝난 뒤 `Cancel`은 무동작 성공이다. 로드 실패·scope Revoke·Shutdown·handle 취소면 `run` 대신 `fail`(오류·진단)을 정확히 한 번 부른다(조용히 버리지 않는다). 큐 상한(`maxDeferredCommands`, 기본 4096)을 넘으면 `CapacityExceeded`. UE에는 대응하는 일반 정책이 없다(게임 코드가 `FStreamableDelegate`로 직접 한다) — 계획 요구에 따라 Rocks가 정한다.
 10. **PrimaryAsset과 bundle**(계획 §24.2, UE `UAssetManager::LoadPrimaryAsset(id, bundles)` 대응): `LoadPrimaryAsset(asset, bundles, priority, scope)`는 매니페스트 항목이 PrimaryAsset인지(아니면 `InvalidArgument`) 보고, 이름마다 그 항목의 bundle이 있는지(caseless 키 — 10.1절 5, 없으면 `NotFound`) 본 뒤, 대표 에셋과 지정 bundle 구성원(bundle 사이 중복은 한 번)을 요청하는 묶음 티켓 `PrimaryAssetTicket`을 준다. 준비 callback은 구성 요청이 모두 끝나면 한 번이고, 성공이면 구성 lease 전부를 쥔 `PrimaryAssetLease`(bundle lease — 11.4절 정책), 하나라도 실패하면 처음 실패(구성 순서 — 대표 먼저, 그다음 AssetId 순)의 결과이고 이미 받은 lease는 놓는다. `PrimaryAssetTicket` 소멸은 구성 요청 전부를 취소한다. UE와 다른 점: UE는 일부가 실패해도 handle이 완료되고 실패한 에셋은 null이다 — Rocks는 6.2절 Hard 규칙(참조 대상 실패면 참조자도 실패)과 같은 엄격함으로 처음 실패로 끝낸다. 용량 audit(계획 §24.2): `EstimatePrimaryAsset(asset, bundles)`가 대표·구성원의 Hard 전이 폐포에 대한 매니페스트 packageBytes·bulkRawBytes 합을 준다(로드하지 않고 매니페스트만 읽는다).
 11. **관측**: `Describe(snapshot)`가 로더 상태(11.6절 12)에 상주 단위 표(구성·상태·보유 내역 — 티켓·lease·보류·로더 공개 보유·간선)와 보류 명령 수, `lateEdgesIntoDiscarding`을 더한다.
 12. **종료**: `Shutdown()`은 새 요청을 막고(`ShuttingDown`) 모든 scope를 Revoke하고 아직 부르지 않은 callback·보류 명령 실패 함수에 `ShuttingDown`을 한 번 전달한 뒤 로더를 Shutdown하고(공개 패키지 RootRef를 놓는다) Registry를 끝낸다. 그 뒤 lease·티켓 객체의 소멸은 회수된 슬롯이라 무동작이다. AssetManager 파괴 때 lease·티켓 객체가 남아 있으면 `platform::Fatal`(6).
@@ -1049,28 +1052,28 @@ A1a 상태(2026-11-20): **구현**. 완료 조건 넷을 모두 갖췄다. 빈�
 
 #### 14.1.3 요구 대조표(A1b — 쿠킹 매니페스트 v1)
 
-항목마다 그것을 확인하는 시험이다(EngineTests, `Engine/Source/Runtime/AssetRuntime/Tests/ManifestTests.cpp`·`ManifestScaleTests.cpp` — 정의된 시험 16개를 모두 표가 인용한다). 시험 도구(`ManifestTestSupport.h`)의 시험 인코더는 검증하지 않고 10.1절 1 배치로 쓰며(규칙을 어긴 모델을 reader에 넣는다), writer 출력과 byte가 같음을 왕복 시험이 확인한다.
+항목마다 그것을 확인하는 시험이다(EngineTests, `Engine/Source/Runtime/AssetRuntime/Tests/ManifestTests.cpp`·`ManifestScaleTests.cpp` — 정의된 시험 17개를 모두 표가 인용한다. A1d에서 bundle 구성원(10.1절 5)을 더하며 다시 맞췄다). 시험 도구(`ManifestTestSupport.h`)의 시험 인코더는 검증하지 않고 10.1절 1 배치로 쓰며(규칙을 어긴 모델을 reader에 넣는다), writer 출력과 byte가 같음을 왕복 시험이 확인한다.
 
 | 요구(절) | 항목 | 시험 |
 |---|---|---|
 | 배치·결정성(10.1-1) | 쓰고 읽으면 같은 모델, 다시 쓰면 같은 byte, 시험 인코더 = writer byte, 빈 매니페스트, 비ASCII NFC 경로·bundle(`/Game/Ärger`·`Äb`) 왕복, `Find`(기본 장면의 있는 id 셋, 10·12·14 장면에서 있는 id 셋·없는 id 앞 1·사이 11·13·뒤 15) | `CookedManifest_RoundTrip` |
 | | 고정 byte(고정 장면 출력 SHA-256, 체크인한 v1 byte와 같음, 그 byte를 읽고 다시 쓰면 같음) | `CookedManifest_GoldenBytes` |
 | 판정 순서·진단(10.1-2) | 최소 길이 미만(빈 입력·모든 길이), 파일 상한 초과(내용 읽기 전 — 길이만 큰 span이라 이 순서에 기댄다), magic 네 byte, formatVersion 0·2·최댓값(UnsupportedVersion / Unsupported, detail = NoEntry·asset null), CRC(끝 칸, 개수 칸 최상위 byte — CRC 미보정이면 Crc·보정하면 EntryCount라 CRC가 구조보다 먼저), 남는 byte, 모든 길이 자르기(CRC 맞춤 — 언제나 손상, 빈 매니페스트는 헤더 칸 다섯 각각의 잘림에 닿음) | `CookedManifest_StructureTampering` |
-| | 항목 칸 잘림: 항목 둘인 매니페스트를 항목 1 안의 모든 위치로 자름 → 칸 11개(assetId·typeId·경로·SHA-256·packageBytes·bulkRawBytes·cookKey·flags·bundle 개수·bundle·의존 개수) 범위표대로 그 칸·항목 1·asset(assetId 잘림은 null, 나머지 11) | `CookedManifest_EntryTruncation` |
+| | 항목 칸 잘림: 항목 둘인 매니페스트를 항목 1 안의 모든 위치로 자름 → 칸 12개(assetId·typeId·경로·SHA-256·packageBytes·bulkRawBytes·cookKey·flags·bundle 개수·bundle 이름·bundle 구성원 개수와 구성원·의존 개수) 범위표대로 그 칸·항목 1·asset(assetId 잘림은 null, 나머지 11) | `CookedManifest_EntryTruncation` |
 | | 겹친 위반의 우선순위 표 10줄: 길이 10 + magic → File, magic + 버전 → Magic, 버전 + CRC → UnsupportedVersion, 빈 프로파일 + CRC → Crc, 남는 byte + 빈 프로파일 → File, 항목 0 flags=2 + 항목 1 bundle 257개 → reader BundleCount/1·검증·writer Flags/0, 경로 중복 + 쿠킹되지 않은 Hard → PathHint/2(세 경로), 병합 profileId + cookerVersion → ProfileId, 패키지 대조 길이 다른 파일 + 다른 패키지 내용 → PackageBytes, SHA만 다른 파일 + 다른 패키지 내용 → PackageSha256(같은 파일이면 AssetId — 대조) | `CookedManifest_JudgementOrder` |
-| 상한(10.1-3) | 항목 수(모델 2²⁰ + 1 — 검증·쓰기, 항목 배열 약 226 MB를 한 번에 잡는 시험; 개수 칸 상한 + 1·남은 byte로 담을 수 없음·실제보다 큼·작음), bundle 256 받음·257 거부·개수 칸 초과, 의존 65536 받음·65537 거부·개수 칸 초과, 프로파일 4096 byte 받음(쓰기·읽기)·4 KiB + 1·길이 칸이 남은 byte보다 큼, 경로 256 받음·257 거부(정확히 상한 + 1)·265 거부 | `CookedManifest_FieldRules`, `CookedManifest_StructureTampering`, `CookedManifest_EntryCountLimit` |
+| 상한(10.1-3) | 항목 수(모델 2²⁰ + 1 — 검증·쓰기, 항목 배열 약 226 MB를 한 번에 잡는 시험; 개수 칸 상한 + 1·남은 byte로 담을 수 없음·실제보다 큼·작음), bundle 256 받음·257 거부·개수 칸 초과, bundle 구성원 65536 받음(모두 쿠킹된 Soft 의존 대상 — 65537개 항목 매니페스트 왕복)·65537 거부(`BundleMemberCount`), 의존 65536 받음·65537 거부·개수 칸 초과, 프로파일 4096 byte 받음(쓰기·읽기)·4 KiB + 1·길이 칸이 남은 byte보다 큼, 경로 256 받음·257 거부(정확히 상한 + 1)·265 거부 | `CookedManifest_FieldRules`, `CookedManifest_StructureTampering`, `CookedManifest_EntryCountLimit`, `CookedManifest_BundleMemberLimit` |
 | | 할당 상한: 개수 칸이 큰 입력(항목 1000·bundle 100000·의존 50000)과 정상 입력에서 reader의 가장 큰 할당 요청 ≤ 입력 byte × 4(기록 allocator) | `CookedManifest_AllocationBound` |
 | 헤더 칸(10.1-4) | 프로파일 빈 값·잘못된 UTF-8(byte), 엔진 버전 세 칸 각각 u16 초과·세 칸 모두 0xFFFF 받음 | `CookedManifest_FieldRules`, `CookedManifest_StructureTampering` |
 | 항목 칸(10.1-5) | 위반마다 칸·항목과 asset·related를 검증·writer·reader 세 경로에서 단언(헤더 칸 asset null, 경로 중복은 그 항목 asset), assetId null·중복·역순, typeId null, 경로(빈 값·상대·마운트만·빈 구성 요소·끝 '/'·공백·'.'·예약 이름·비 NFC·'\\'·길이·잘못된 UTF-8 byte), packageBytes 63 거부·64 받음·64 GiB 받음·+1 거부, bulkRawBytes 최댓값 받음, 정의되지 않은 flags 비트 | `CookedManifest_FieldRules`, `CookedManifest_StructureTampering` |
-| | bundle(PrimaryAsset이 아닌 항목·이름 규칙·역순·중복·caseless 중복(ASCII·비ASCII `Äb`·`äb`)·잘못된 UTF-8 byte), 의존(null — related null·자기·kind 0·3·4·5·6·최댓값·역순 — related 5·중복, 의존 위반은 related = 그 의존 대상) | `CookedManifest_FieldRules`, `CookedManifest_StructureTampering` |
-| 항목 사이(10.1-6) | 경로 caseless 중복(둘·셋·비ASCII `/Game/Ärger`·`/game/ärger` — 진단 항목은 정렬 뒤 첫 짝의 뒤), 쿠킹되지 않은 Hard 대상은 related = 그 대상(99), 쿠킹되지 않은 Hard 대상(작은 장면·2만 항목 사슬 가운데 삭제), 쿠킹되지 않은 Soft 대상 받음, Hard 순환 받음 | `CookedManifest_FieldRules`, `CookedManifest_LargeManifest`, `CookedManifest_AllCombinations` |
+| | bundle(PrimaryAsset이 아닌 항목·이름 규칙·역순·중복·caseless 중복(ASCII·비ASCII `Äb`·`äb`)·잘못된 UTF-8 byte), bundle 구성원(`BundleMember` — null·자기 자신·역순·중복·그 항목의 의존 대상 아님, related = 구성원), 의존(null — related null·자기·kind 0·3·4·5·6·최댓값·역순 — related 5·중복, 의존 위반은 related = 그 의존 대상) | `CookedManifest_FieldRules`, `CookedManifest_StructureTampering` |
+| 항목 사이(10.1-6) | 경로 caseless 중복(둘·셋·비ASCII `/Game/Ärger`·`/game/ärger` — 진단 항목은 정렬 뒤 첫 짝의 뒤), 쿠킹되지 않은 Hard 대상은 related = 그 대상(99), 매니페스트에 없는 bundle 구성원(Soft 의존 대상 99)은 `BundleMember`·related 99, 쿠킹되지 않은 Hard 대상(작은 장면·2만 항목 사슬 가운데 삭제), 쿠킹되지 않은 Soft 대상 받음, Hard 순환 받음 | `CookedManifest_FieldRules`, `CookedManifest_LargeManifest`, `CookedManifest_AllCombinations` |
 | writer(10.1-7) | 위반은 쓰지 않음(미리 채운 out `{0xAA, 0xBB}` 그대로·검증과 같은 진단 — 위반 목록 전부와 항목 수 상한) | `CookedManifest_FieldRules`, `CookedManifest_EntryCountLimit` |
 | | 파일 상한은 CRC 칸 포함 전체: `WriteCookedManifestWithLimit` 상한 = 출력 크기는 받음(공개 writer와 같은 byte), 출력 크기 − 1은 `CapacityExceeded`(진단 None, out 그대로) | `CookedManifest_WriteLimit` |
 | 대조(10.1-8) | 실행 프로파일 같음·다름·대소문자만 다름(IncompatibleCook), 병합 네 칸 각각 다름(그 칸)·엔진 버전만 다름은 받음 | `CookedManifest_ProfileAndMergeChecks` |
 | | 패키지 대조: A1a writer가 쓴 쿠킹 패키지(Hard·Soft 의존 — Soft 대상 1700이 Hard 대상 1801보다 앞인 (asset, kind) 순서, 같은 대상 Hard+Soft 패키지 — ·Zstd bulk, EditorOnly bulk는 raw 합에서 빠짐)가 그 결과로 만든 항목과 맞음, 크기(파일 덧붙임·항목)·SHA-256(파일·항목)·종류(에디터 패키지)·assetId·대표 에셋 타입·export 없는 내용·bulk raw 합(하나 작음·u64를 넘는 합 — 감으면 같은 값)·프로파일(id·설정·쿠커 버전)·의존(빠짐·남음·종류·대상·전부 없음·종류 먼저 순서·같은 대상의 Soft 빠짐·종류 뒤바뀜 — related는 처음 다른 의존 대상 1801·1900·1801·1899·1700) | `CookedManifest_PackageCrossCheck` |
 | 파일 경로(4.2) | `Packages/<a>/<A>-<h>.rpkg`(앞 내용 뒤에 붙임), 모든 할당 지점 실패 | `CookedManifest_PackagePath` |
-| 자원 실패 | 쓰기·읽기·검증의 모든 할당 지점(진단 None, 미리 채운 쓰기 out 그대로 — 비교 키 성장, NFC quick check가 MAYBE인 경로·bundle(U+1EA1 U+0301)의 NFC 확인 scratch와 비ASCII caseless 키 할당 포함) | `CookedManifest_AllocationFailures` |
-| 조합(14 완료 조건 2) | (PrimaryAsset × bundle 없음·하나·여럿 + 일반) 4 × 의존 특성 다섯(쿠킹된 Hard·Hard 순환·쿠킹된 Soft·쿠킹되지 않은 Soft·같은 대상 Hard+Soft)의 부분집합 32 × 경로(얕음·깊음·비ASCII NFC) 3 = 384 조합 전부(읽은 항목마다 조합 번호를 다시 계산해 만든 번호와 같음 — 일대일, 플래그가 늘면 `static_assert`가 막음), 금지 조합(일반 항목의 bundle)은 칸 규칙 | `CookedManifest_AllCombinations`, `CookedManifest_FieldRules` |
+| 자원 실패 | 쓰기·읽기·검증의 모든 할당 지점(진단 None, 미리 채운 쓰기 out 그대로 — 읽기의 bundle 구성원 목록 예약, 비교 키 성장, NFC quick check가 MAYBE인 경로·bundle(U+1EA1 U+0301)의 NFC 확인 scratch와 비ASCII caseless 키 할당 포함) | `CookedManifest_AllocationFailures` |
+| 조합(14 완료 조건 2) | (PrimaryAsset × bundle 없음·하나·여럿·하나(구성원)·여럿(구성원) + 일반) 6 × 의존 특성 다섯(쿠킹된 Hard·Hard 순환·쿠킹된 Soft·쿠킹되지 않은 Soft·같은 대상 Hard+Soft)의 부분집합 32 × 경로(얕음·깊음·비ASCII NFC) 3의 원시 공간 576에서 허용 조합 564개 전부(구성원 없는 모양 4 × 32 × 3 = 384, 구성원 있는 모양 2 × 쿠킹된 의존 대상이 있는 부분집합 30 × 3 = 180 — 구성원은 쿠킹된 의존 대상 전부). 읽은 항목마다 원시 번호를 다시 계산해 만든 번호(id)와 같고 허용 조합인지 봄 — 일대일, 조합 수와 플래그가 바뀌면 `static_assert`가 막음. 금지 조합(일반 항목의 bundle, 쿠킹된 의존 대상이 없는 항목의 구성원)은 칸 규칙 | `CookedManifest_AllCombinations`, `CookedManifest_FieldRules` |
 | 규모 | 항목 2만(깊이 2만 Hard 사슬·8개 단위 순환·쿠킹되지 않은 Soft·PrimaryAsset bundle) 왕복·Find·같은 byte | `CookedManifest_LargeManifest` |
 | 변조·퍼징 | 고정 seed 4000회(byte 바꾸기·자르기·덧붙이기, 절반 CRC 맞춤 — 정해진 진단만, 거부·받아들임 모두, 받아들인 입력은 다시 쓰면 같은 byte) | `CookedManifest_FixedSeedMutationFuzz` |
 | | 게시(임시 파일·Flush·Replace)·부분 쿠킹 병합 실행·cookKey 계산 | 범위 밖(A4 쿠커 — 대조 함수는 여기) |
@@ -1081,7 +1084,9 @@ A1a 상태(2026-11-20): **구현**. 완료 조건 넷을 모두 갖췄다. 빈�
 
 측정(2026-11-20, 14.1.2와 같은 명령에 filter `CookedManifest`를 더함 — `-Filter AssetPackage,FixtureAsset,CookedManifest`, AssetPackage 71개·FixtureAsset 8개·CookedManifest 16개 시험 모두 통과): 매니페스트 파일 `Private/CookedManifest.cpp` 줄 100%(540/540)·분기 100%(296/296)·함수 100%(24/24), `Public/AssetRuntime/CookedManifest.h` 줄 100%(6/6)·함수 100%(4/4)(분기 없음). 닿지 않은 분기가 없다. AssetRuntime 전체(A1a 파일 포함)는 줄 99.91%(3170/3173)·분기 97.56%(1842/1888)·함수 100%(150/150)이고 닿지 않은 분기는 14.1.2의 A1a 항목 그대로다.
 
-`ROCKS_ASSERT`는 쓰지 않지만, 결과를 확인하지 않는 불변식이 10곳 있다(`Result::Value()`는 실패 결과면 `platform::Fatal`로 멈추고, `(void)`로 버린 결과는 실패하면 조용히 빠진다 — 그래서 각각 입력으로 실패에 닿을 수 없음을 근거로 둔다). 위치는 `Private/CookedManifest.cpp`의 함수 이름으로 적는다(줄 번호는 병합·개명으로 밀린다).
+A1d 재측정(2026-11-20, bundle 구성원을 더한 뒤 — 14.1.8과 같은 명령): `Private/CookedManifest.cpp` 줄 100%(611/611)·분기 100%(340/340)·함수 100%(29/29). 처음 재측정에서 읽기의 구성원 목록 예약 실패 분기가 남아 할당 실패 sweep 장면에 구성원을 더했다.
+
+`ROCKS_ASSERT`는 쓰지 않지만, 결과를 확인하지 않는 불변식이 12곳 있다(`Result::Value()`는 실패 결과면 `platform::Fatal`로 멈추고, `(void)`로 버린 결과는 실패하면 조용히 빠진다 — 그래서 각각 입력으로 실패에 닿을 수 없음을 근거로 둔다). 위치는 `Private/CookedManifest.cpp`의 함수 이름으로 적는다(줄 번호는 병합·개명으로 밀린다).
 
 | 위치 | 불변식 | 근거 |
 |---|---|---|
@@ -1092,6 +1097,8 @@ A1a 상태(2026-11-20): **구현**. 완료 조건 넷을 모두 갖췄다. 빈�
 | `ReadCookedManifest` | 항목 수 칸 `in.ReadU32()` 결과의 `Value()` | 길이 ≥ `MinFileBytes`(magic·version·개수·crc)를 먼저 보아 개수 칸 4 byte가 있다 |
 | `ReadCookedManifest` | 항목 `manifest.entries.TryEmplaceBack(allocator)` 결과의 `Value()` | 개수 칸 값만큼 예약했다(항목 생성자는 할당하지 않는다) |
 | `ReadCookedManifest` | bundle `entry.bundles.TryEmplaceBack(allocator).Value()` | bundle 개수만큼 예약했다 |
+| `ReadCookedManifest` | bundle 구성원 `in.ReadGuid().Value()` | 구성원 개수 ≤ 남은 byte / 16을 먼저 보았다 — 구성원 칸은 잘리지 않는다 |
+| `ReadCookedManifest` | `(void)slot.members.TryPushBack(...)` | 구성원 개수만큼 예약했다 |
 | `ReadCookedManifest` | 의존 대상 `in.ReadGuid().Value()` | 의존 개수 ≤ 남은 byte / 20을 먼저 보았다 — 의존 칸은 잘리지 않는다 |
 | `ReadCookedManifest` | 의존 kind `in.ReadU32().Value()` | 같은 개수 검사 |
 | `ReadCookedManifest` | `(void)entry.dependencies.TryPushBack(...)` | 의존 개수만큼 예약했다 |
@@ -1179,6 +1186,92 @@ A1c 상태(2026-11-20): **구현**. 완료 조건 넷을 모두 갖췄다. 빠�
 - 조합: 단계 조합 3496개·결함 단계와 종료 조합 110개, 금지 조합은 명시하고 일대일·실행 수로 빠짐 검사
 - coverage(14.1.6): 닿지 않은 곳은 소멸자 Fatal 둘뿐(자식 probe가 문구 대조), Release 구성에서 빠지는 결과 주입은 따로 적음
 - 리뷰어 참고(병합을 막지 않음): `testHookAssetHooks`는 전역 하나라 시험 병렬 실행 때 다시 볼 것, 결함 단계와 종료 조합에는 취소·합류 축이 없다(`ShutdownDrainsAndReleases`가 덮음)
+
+#### 14.1.7 요구 대조표(A1d — AssetManager)
+
+항목마다 그것을 확인하는 시험이다(EngineTests, `Engine/Source/Runtime/AssetRuntime/Tests/ManagerLifetimeTests.cpp`·`ManagerHandleTests.cpp`·`ManagerPrimaryTests.cpp`·`ManagerFailureTests.cpp`·`ManagerContractTests.cpp`·`ManagerGraphTests.cpp`의 AssetManager 시험 45개와 `LoaderHandoffTests.cpp`의 로더 넘겨받기 시험 6개 — 정의된 시험 51개를 모두 표가 인용한다). 시험 도구(`ManagerTestSupport.h`)는 로더 시험의 쿠킹 장면·완료를 시험이 내보내는 IO·손으로 돌리는 worker 위에 AssetManager 하나를 띄우고, 상태 조회(`Describe`로 단위 찾기)·동적 하드 간선(`hard` 필드·`hardList` 쓰기·비우기)·callback 기록을 돕는다. 순서는 모두 시험이 정하고(시간·경쟁에 기대지 않는다), 다른 스레드 시험은 스레드 Join 뒤 Pump로 결과만 단언한다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 구성·소유·스레드(11.7-1) | Initialize 전 모든 API InvalidArgument(Shutdown은 무동작 성공), 설정 누락(allocator·TypeRegistry·매니페스트)·Registry를 넘김·관찰자 키 0·보류 명령 상한 0은 InvalidArgument와 진단, 두 번째 Initialize, 다른 스레드의 모든 API(scope Revoke·로더 넘겨받기 API·Shutdown 포함) WrongThread이고 상태 불변, 기본 scope의 Revoke InvalidArgument, `With`가 lease의 대표 에셋을 에셋 문맥으로 부름 | `AssetManager_UninitializedAndBadConfig`, `AssetManager_OffThreadCallsAreRejected`, `AssetManager_HandleEdgeCases` |
+| 로더 확장(11.7-2) | `TakePublished`는 PostLoad까지 끝난 단위만(PostLoad 예산 1로 순환 단위의 PostLoad 하나 뒤에는 넘기지 않음), 같은 단위는 같은 group·다른 slot, 다른 단위는 큰 group, out 기존 내용 유지, 다시 부르면 없음 | `AssetLoader_TakePublishedAfterPostLoad` |
+| | `PublishedHolds`: IO 중인 의존자가 있으면 1(그동안 퇴출 거부)·끝나면 0, 한 단위의 두 구성원이 같은 공개 패키지에 기대도 1, 공개 안 된 id 0·없는 id NotFound, 의존 단위가 PostLoad를 끝내기 전에 공개된 의존자는 넘겨받는 보유가 없음(공개 때 놓음) | `AssetLoader_PublishedHoldsTrackLoadingDependents`, `AssetLoader_DependencyFinishesAfterDependentPublished` |
+| | `RetirePublished`: 없는 id NotFound·공개 안 됨·PostLoad 중·같은 id 두 번 InvalidArgument이고 앞의 유효한 id도 그대로(모두 확인 뒤 바꿈), 퇴출 뒤 FindPackage NotFound·같은 id 요청은 새 로드, Shutdown 뒤 ShuttingDown. `ReleaseRetired`: 범위 밖·퇴출 아닌 칸·같은 칸 두 번 InvalidArgument, 할당 실패는 아무것도 바꾸지 않음, 돌려준 칸은 다음 공개가 다시 씀. `TakePublished` 할당 실패는 목록을 남김 | `AssetLoader_RetireAndReleaseRetired` |
+| | 네 API의 초기화 전 InvalidArgument·다른 스레드 WrongThread, PostLoad 안에서 `TakePublished`·`RetirePublished`·`ReleaseRetired` WrongContext(`PublishedHolds`는 읽기라 됨) | `AssetLoader_HandoffContractErrors` |
+| | 공개 패키지에 기대는 요청의 모든 할당 지점 실패 → 그 요청만 OutOfMemory, 공개 보유가 남지 않음, 다시 요청하면 성공 | `AssetLoader_PublishedHoldAllocationFailures` |
+| | 로드 중 의존자의 로더 공개 보유가 상주 의존을 붙잡고, 의존자가 공개되면 Commit 간선이 이어서 붙잡음 | `AssetManager_LoadingDependentHoldsResidentDependency` |
+| 상주 단위·계수(11.7-3, 시나리오 16·23·28) | 티켓·lease가 붙잡고 둘 다 놓으면 Discard, 같은 id는 새 로드(다른 패키지), 하드 순환 단위는 함께 Discard(내부 간선은 보유 아님), 의존 보유와 연쇄 Discard(다음 Pump), 동적 간선 다중도(필드 둘 → 2, 하나 지우면 1), 동적 순환 병합과 나누지 않음 | `AssetManager_ReleaseDiscardsAndReloads`, `AssetManager_HardCycleUnitReleasesTogether`, `AssetManager_DependencyHeldByEdgeUntilReferrerDiscarded`, `AssetManager_DynamicEdgeMultiplicityHolds`, `AssetManager_DynamicCycleMergesUnits` |
+| | 병합 경계: 순환 탐색은 닿은 뒤에도 더 가고 전방 집합 밖에서 오는 간선은 거름(11·12·13만 합침, 보유는 10에서 오는 간선 하나), 한 Pump에 몰린 네 간선은 지운 단위의 남은 후보를 건너뛰고 한 단위, 쿠킹 간선을 모두 지운 단위({1, 2})는 간선 칸 없는 멤버를 가진 채 남고 새 순환에서 셋을 합침·지운 간선 칸 재사용 | `AssetManager_CycleSearchBoundaries`, `AssetManager_BatchedEdgesMergeOnce`, `AssetManager_MergeKeepsEdgelessMembers` |
+| | 넘겨받기 전에 쌓인 간선: PostLoad 예산 1로 Commit과 넘겨받기 사이 Pump에 생긴 간선(상주 5 → 아직 넘어오지 않은 1)은 표에만 있고 순환을 보지 않음(아직 넘어오지 않은 1의 Commit 간선 1 → 5는 5의 보유), 넘겨받을 때 들어오는·나가는 간선으로 합침. 함께 PostLoad 중인 두 단위 사이 간선은 먼저 넘어오는 쪽이 상주 아닌 상대를 건너뛰고 나중에 합침, 그 사이 상주 단위끼리의 순환 탐색은 상주 아닌 패키지로 가는·에서 오는 간선을 지남 | `AssetManager_EdgesBeforeIngestMergeCycles`, `AssetManager_ConcurrentPostLoadUnitsMergeOnIngest` |
+| | Closing과 되살리기(Discard 예산 0으로 멈춤 → 요청이 그 자리에서 보유), 첫 Discard Busy(열린 `ConstructionContext`)면 Closing으로 남고 되살릴 수 있고 트랜잭션이 닫히면 Discard | `AssetManager_ClosingUnitRevivesOnRequest`, `AssetManager_DiscardBusyKeepsClosing` |
+| | Discarding: 순환 단위의 둘째가 Busy면 Discarding이고 로더에서 둘 다 퇴출, 같은 id는 새 로드(옛 단위와 함께), 옛 패키지로 생긴 늦은 간선은 `lateEdgesIntoDiscarding`(둘째부터 경고 없이 셈, 지우기는 세지 않음), 옛 패키지에서 나가는 새 간선은 보유지만 순환 후보 아님, 순환 탐색은 Discarding 단위를 지나지 않음, 트랜잭션이 닫히면 끝나고 반납 간선은 다음 Pump. Discard 예산 1이면 단위 중간에서 멈추고 다음 Pump가 이어감 | `AssetManager_DiscardingRetiresAndReportsLateEdges`, `AssetManager_DiscardBudgetStopsMidUnit` |
+| Pump 순서(11.7-4) | 요청이 상주 대상에 그 자리에서 보유(같은 Pump의 Closing에 먼저 Discard되지 않음), 연쇄 Discard가 다음 Pump, 넘겨받기가 간선 적용보다 먼저 | `AssetManager_ClosingUnitRevivesOnRequest`, `AssetManager_DependencyHeldByEdgeUntilReferrerDiscarded`, `AssetManager_EdgesBeforeIngestMergeCycles` |
+| 티켓·callback(11.7-5) | 끝난 뒤 Pump에서 정확히 한 번, AlreadyRegistered(callback은 caller에), Game이 아닌 lane Unsupported, 빈 callback InvalidArgument(묶음 callback 포함), 늦은 등록은 다음 Pump, 먼저 놓은 티켓 Cancelled, 로드 실패 진단, 기대 타입 TypeMismatch, Render 준비 UnsupportedCapability·모르는 비트·0 InvalidArgument, 기본 handle StaleHandle, 없는 id NotFound(티켓 칸을 남기지 않음), 무효 scope InvalidArgument | `AssetManager_ReadyCallbackContract`, `AssetManager_DroppedTicketCancelsAndFailureCarriesDiagnostic`, `AssetManager_ExpectedTypeAndReadyMask`, `AssetManager_InvalidHandlesAndArguments` |
+| | callback 안의 Pump·Shutdown·LoadBlocking WrongContext, 로더 PostLoad 안의 LoadBlocking·Pump WrongContext(로더가 거절) | `AssetManager_CallbackContextRejectsPumpAndShutdown`, `AssetManager_HandleEdgeCases`, `AssetManager_LoadBlockingFailures` |
+| 슬롯·해제 큐(11.7-6) | 다른 스레드 소멸 → 해제 큐 → 다음 Pump, handle 이동 대입(쥔 handle 위에 대입하면 옛 것을 놓음·자기 대입 무동작·scope는 Revoke), 기본 lease 무효(빈 id·handle), 소멸했지만 큐에 남은 lease도 scope 회수가 회수하고 큐 처리는 다시 빼지 않음, 상한 `AssetManagerMaxLiveHandles`(새 요청·보류 명령·묶음·동기 로드 CapacityExceeded, 걸어 둔 callback·보류 명령·묶음 callback은 그 오류, 하나 놓으면 다음 Pump 뒤 다시 됨) | `AssetManager_ReleaseFromOtherThread`, `AssetManager_HandleMoveAssignment`, `AssetManager_HandleEdgeCases`, `AssetManager_RevokeSkipsReleasedLease`, `AssetManager_HandleCapacity` |
+| | 수명 위반은 자식 프로세스 Fatal(문구 대조): 살아 있는 lease를 남긴 파괴, 소유 스레드 밖 파괴, 자기 callback 안 파괴, 소유 스레드 밖 scope 소멸 | `AssetManager_LifetimeViolationsAreFatal` |
+| scope(11.7-7) | Revoke: 진행 중 callback ScopeClosed 한 번·lease 회수·새 요청 ScopeClosed·다른 scope는 그대로·소멸도 Revoke, 닫은 scope 칸 재사용, 회수된 동기 lease의 `With`는 StaleHandle, 닫힌 scope의 LoadBlocking ScopeClosed, 두 번째 Revoke 무동작, Shutdown 뒤 회수하지 않은 scope의 Revoke·소멸은 다시 회수하지 않음 | `AssetManager_ScopeRevokeReclaims`, `AssetManager_HandleEdgeCases`, `AssetManager_InvalidHandlesAndArguments`, `AssetManager_AfterShutdown`, `AssetManager_ScopeOutlivesShutdown` |
+| LoadBlocking(11.7-8) | 결과까지 기다려 lease, 프레임 실행 중 WrongContext(Pump 중 판정과 설정 판정 둘 다), 없는 id NotFound와 진단, 손상 패키지는 오류와 진단을 failure에, 준비 수준 0 InvalidArgument, 열린 scope로 동기 로드 | `AssetManager_LoadBlockingWaitsAndRejectsFrames`, `AssetManager_LoadBlockingInFrame`, `AssetManager_LoadBlockingFailures`, `AssetManager_InvalidHandlesAndArguments`, `AssetManager_HandleEdgeCases` |
+| 미준비 대상(11.7-9) | Fail은 상주가 아니면 NotReady·상주면 다음 Pump run, Defer·PromoteAndDefer는 요청을 내고 준비되면 run, 실패·Cancel·scope Revoke는 fail 한 번, 큐 상한 CapacityExceeded, 빈 run·fail·범위 밖 정책 InvalidArgument, 끝난 명령 칸 재사용, 두 번 Cancel·끝난 뒤 Cancel 무동작(fail 한 번), 명령 handle을 먼저 놓아도 실행 | `AssetManager_RunWhenReadyPolicies`, `AssetManager_HandleEdgeCases`, `AssetManager_HandleMoveAssignment` |
+| PrimaryAsset·bundle(11.7-10) | bundle 없이는 대표와 Hard 의존만, caseless bundle 이름, 구성원 로드와 lease 순서(대표 → AssetId), bundle 사이 중복 한 번, 오류(PrimaryAsset 아님·없는 bundle·잘못된 UTF-8 이름 NotFound·없는 id·AlreadyRegistered·lane), 처음 실패, 먼저 놓은 묶음 티켓 Cancelled·scope Revoke ScopeClosed, 회수된 묶음은 티켓을 놓아도 ScopeClosed 한 번, 끝났지만 callback 전에 놓은 묶음은 Cancelled이고 같은 Pump의 회수가 다시 끝내지 않음, 용량 추정(로드 안 함) | `AssetManager_LoadPrimaryAssetWithBundles`, `AssetManager_LoadPrimaryAssetErrors`, `AssetManager_LoadPrimaryAssetFirstFailure`, `AssetManager_PrimaryTicketCancelAndRevoke`, `AssetManager_PrimaryReleaseOrderings`, `AssetManager_EstimatePrimaryAsset`, `AssetManager_InvalidHandlesAndArguments` |
+| 관측(11.7-11) | 단위별 보유 내역·멤버 id·살아 있는 티켓·lease·보류 명령 수·로더 상태, 다시 부르면 비우고 채움, 초기화 전 InvalidArgument·다른 스레드 WrongThread, out 할당의 모든 지점 OutOfMemory | `AssetManager_DescribeReportsState` |
+| 종료(11.7-12) | 아직 부르지 않은 callback·보류 명령 fail에 ShuttingDown 한 번, lease 회수, 뒤 요청·Pump·scope·보류 명령·묶음 로드 ShuttingDown, 두 번째 Shutdown 성공 | `AssetManager_ShutdownDeliversShuttingDown`, `AssetManager_AfterShutdown` |
+| 할당 실패 | AssetManager allocator의 모든 지점(Initialize·묶음 로드(전달 목록 확장을 묶음 쪽에서)·scope·요청·callback·보류 명령·비ASCII bundle 이름 키·용량 추정·넘겨받기·간선 표·병합·Discard·lease·동기 로드) 한 번 실패 → 상태 일관, 실패를 끄고 모두 놓으면 단위·handle·로더 단위 0, 마지막 실행은 실패 없이 전 과정 | `AssetManager_AllocationFailures` |
+| 조합(14 완료 조건 2) | 보유 4종(티켓·lease·묶음 lease·들어오는 하드 간선) × 단위 모양 3(단일·순환·사슬) × 해제 순서 4! = 24(계승 진법 — 서로 다른 순서 24개 확인) = 72 전부: 마지막 보유 전까지 Resident와 남은 보유 수, 마지막 Pump에 Discard(사슬은 다음 Pump에 의존), 보유자 유지 | `AssetManager_HoldReleaseOrderCombinations` |
+| | 매니페스트 bundle 구성원 축(564 조합)은 14.1.3 조합 행 | `CookedManifest_AllCombinations` |
+| | bundle 구성원 수집(리플렉션 `AssetBundles` 지정자 → 매니페스트) | 범위 밖(A4 쿠커 — 형식·로드는 여기) |
+| | 엔진 프레임 연결(EngineSubsystem 등록·프레임 Pump·에셋 Registry GC 조각·프레임 판정 주입·`-CookedRoot`) | 범위 밖(A1e EngineAssets — 판정 함수·Pump는 여기) |
+| | `ReadyMask::Render` 준비 | 범위 밖(렌더 단계 — 지금은 UnsupportedCapability) |
+
+#### 14.1.8 Coverage(A1d)
+
+측정(2026-11-20, `pwsh -NoProfile -File Build/MeasureCoverage.ps1 -Target EngineTests -Filter AssetPackage,FixtureAsset,CookedManifest,AssetLoader,AssetManager -Sources Engine/Source/Runtime/AssetRuntime/Private,Engine/Source/Runtime/AssetRuntime/Public`, AssetPackage 74개·FixtureAsset 8개·CookedManifest 17개·AssetLoader 53개·AssetManager 45개 시험 모두 통과):
+
+| 파일 | 줄 | 분기 | 함수 |
+|---|---|---|---|
+| `Private/AssetManager.cpp` | 98.5%(599/608) | 96.4%(266/276) | 100%(41/41) |
+| `Private/AssetManagerHandles.cpp` | 98.7%(386/391) | 95.1%(173/182) | 100%(22/22) |
+| `Private/AssetManagerPrimary.cpp` | 99.5%(363/365) | 98.8%(162/164) | 100%(17/17) |
+| `Private/AssetManagerUnits.cpp` | 98.8%(484/490) | 96.0%(240/250) | 100%(19/19) |
+| `Private/AssetManagerInternal.h` | 100%(8/8) | 분기 없음 | 100%(4/4) |
+| `Public/AssetRuntime/AssetManager.h` | 95.6%(43/45) | 50%(1/2) | 100%(20/20) |
+| `Private/AssetLoader.cpp`(분할 뒤 공개 API) | 99.4%(674/678) | 99.4%(336/338) | 100%(28/28) |
+| `Private/AssetLoaderResolve.cpp`·`AssetLoaderStages.cpp`·`AssetLoaderPublish.cpp`·`AssetLoaderInternal.h` | 100%(441/441·352/352·236/236·80/80) | 100%(164/164·108/108·104/104·16/16) | 100% |
+| `Private/CookedManifest.cpp` | 100%(611/611) | 100%(340/340) | 100%(29/29) |
+
+AssetRuntime 전체는 줄 99.54%(7137/7170)·분기 97.73%(3525/3607)·함수 100%(410/410)이고, A1a 파일의 닿지 않은 분기는 14.1.2 그대로다.
+
+닿지 않은 곳과 근거(위치는 함수 이름 — 줄 번호는 밀린다):
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| `~AssetManager`·`AssetScope::Close`·`~AssetLoader` | 소유 스레드 밖·자기 callback 안 파괴, 살아 있는 handle을 남긴 파괴, 소유 스레드 밖 scope 소멸의 `platform::Fatal` | 자식 프로세스 probe(`AssetManager_LifetimeViolationsAreFatal`·`AssetLoader_DestroyOffOwnerThreadIsFatal` — 문구 대조)가 지나지만 Fatal은 프로세스를 즉시 끝내 그 profile이 기록되지 않는다 |
+| `Impl::DrainReleases` | `ManagerSlotKind::Free` → Fatal, 해제 switch의 Free 쪽 | 해제 큐에는 살아 있는 handle 객체의 칸만 들어간다(소멸자가 넣고, 칸은 큐 처리 때만 Free가 된다) — 불변식 위반 진단 |
+| `Impl::ApplyEdgeChanges` | 다중도 음수 → Fatal, `before == 0`이면서 `after ≤ 0`, `after == 0`이면서 표에 없음, 새 키의 `after ≤ 0` | 관찰자 묶음은 키마다 순 변화이고 0인 키는 빼며(`TakeChanges`), 음수 변화는 이미 센 간선의 반납뿐이다 — 표에 없는 키의 변화는 늘 양수다 |
+| `Impl::ApplyEdgeChanges` | `TakeChanges` 실패 | 실패 조건(소유 스레드 아님·out이 비지 않음·다른 allocator·예약 콜백 재진입 Busy)을 AssetManager가 만들지 않는다: Pump는 소유 스레드 전용, 묶음을 다 적용한 뒤에만 비어 있는 `changes`로 부르고, 관찰자와 같은 allocator를 쓰고, 할당 콜백 안에서 Pump를 부를 수 없다(사용자 allocator의 재진입은 계약 위반) |
+| `Impl::UnlinkEdge` | 목록 끝까지 못 찾음 | 표에 있는 키의 간선은 양쪽 이웃 목록에 반드시 있다(`LinkEdge`가 같이 넣는다) |
+| `Impl::ProcessClosing` | `RetirePublished` 실패 → Fatal | 단위 멤버는 모두 PostLoad까지 마친 공개 패키지(넘겨받은 것)이고 같은 Pump의 판정이 로더 공개 보유 0을 보았으며 사이에 로더 활동이 없다. 콜백 밖·종료 전에서만 부른다 |
+| `Impl::LoaderHolds` | `PublishedHolds` 실패 | 멤버 id는 매니페스트 항목이다(NotFound 없음), 소유 스레드에서 부른다 |
+| `Impl::IngestPublished` | 대표 에셋 찾기 실패 | 로더는 대표 에셋 타입을 매니페스트와 대조한 패키지만 공개한다(A1c, 10.1-8) |
+| `Impl::ValidSlot`·`AssetLease::IsValid`·`OnReady`·`Cancel`·`BeginWith` | 칸 범위 밖·세대·종류·`objectAlive` 불일치 | handle 객체가 살아 있는 동안 그 칸은 같은 세대·종류로 살아 있다(칸은 객체가 소멸해 큐를 거친 뒤에만 다시 쓰고, 생성자는 비공개라 만들 수 없다). 다른 AssetManager·기본 handle은 `manager_` 비교에서 먼저 거른다(시험함) — 방어 검사 |
+| `Impl::TakeSlot`·`AssetScope::Close` | 세대 증가가 0으로 감김 | 한 칸을 2³²번 다시 써야 한다 |
+| `Impl::CompleteTicket` | 로더 `Status` 실패 | 티켓이 쥔 로더 handle은 끝낼 때까지 유효하다(놓을 때만 Release) |
+| `Impl::FinishTicketResult` | `AcquireType` 실패 | 대표 에셋은 넘겨받은 살아 있는 객체이고 그 타입은 등록돼 있다(실패하지 않는 쪽 `IsA` 불일치는 시험함) |
+| `AssetManager::LoadBlocking` | 로더 `WaitFor` 실패 | WaitFor의 실패 조건(초기화 전·다른 스레드·콜백 안·프레임 안·무효 handle·종료)을 LoadBlocking이 먼저 보거나 그 전 로더 `Request`가 같은 이유로 거절한다(로더 콜백 안 → Request WrongContext — 시험함) |
+| `AssetManager::EstimatePrimaryAsset` | 의존 대상이 매니페스트에 없음 | 설정의 매니페스트는 읽은(검증한) 것이다 — Hard 대상과 bundle 구성원은 매니페스트에 있다(10.1-6). 손으로 만든 매니페스트를 넘기는 계약 위반에 대한 방어 |
+| `AssetManager::With`(`AssetManager.h`) | 람다 타입마다 다른 인스턴스의 한쪽 분기 | 템플릿이 호출하는 람다마다 따로 인스턴스화되어 인스턴스별로 센다 — 성공·StaleHandle·InvalidArgument·WrongThread 쪽은 모두 시험이 지난다 |
+
+닿게 한 방법과 그 과정에서 바꾼 것:
+- 결정적 장면: Discard Busy는 그 패키지 부분 트리에 공개 전 객체를 만든 `ConstructionContext`(패키지 바로 아래는 대표 자식 규칙 때문에 대표 에셋 아래)를 열어 둔다. Commit과 넘겨받기 사이 간선은 PostLoad handler와 PostLoad 예산 1로 단위를 Pump 여러 번에 걸쳐 끝내 만든다(handler가 없으면 로더가 공개 자리에서 단위를 끝낸다). handle 상한은 실제로 2²⁰ − 4개 lease를 쥐어 닿는다(Debug 약 1 s). 비ASCII bundle 이름은 키 정규화가 할당하므로 할당 실패 sweep이 그 지점에 닿는다(ASCII 이름은 내장 용량 안이라 할당하지 않는다 — 이름 상한 64 byte와 키 내장 용량이 같다).
+- 시험이 찾은 결함: 할당 실패 시험이 `DisableFailure`(시도 수를 0으로 되돌림) 뒤에 실패 여부를 읽어 sweep이 일찍 끝났다(실패 여부를 먼저 읽게 고침). Pump·Shutdown의 전달 목록 할당이 실패하면 Shutdown이 `ShuttingDown` 전달을 건너뛸 수 있었다(용량을 표가 자랄 때 잡게 고침 — 11.7절 6).
+- 없앤 죽은 분기(입력으로 닿을 수 없음을 확인): 보류 명령 실행 직전의 scope 재확인(회수가 먼저 실패 사유를 적는다 — 11.7절 9), `ScopeOpen`의 "scope 없음" 쪽(부르는 곳이 모두 scope가 있을 때만 부른다), `CompleteTicket`의 로더 요청 없음(끝나지 않은 티켓은 늘 쥔다), 묶음을 두 번 앞당겨 끝내는 경우(묶음은 한 번만 — 놓기는 칸을 비우고 회수는 칸을 회수 표시한다), 묶음 전달의 "끝나지 않았지만 멈춤"(앞당겨 끝내면 구성 티켓이 모두 끝난다), 순환 검사의 같은 단위(쌓을 때 다르고 병합은 단위를 지우기만 한다), scope 회수의 `objectAlive` 거짓(큐 처리 때 칸과 함께 지운다), 로더 해석의 "단위 없음이면서 공개 안 됨"(FindComponents가 공개 안 된 Hard 대상을 모두 새 단위로 넣는다)과 의존 단위가 끝날 때 기대는 단위의 단계 검사(보유 표시는 공개 때 내리므로 표시가 있으면 공개 전이다 — `IsBeforePublish` 제거).
+
+
+A1d 상태(2026-11-20): **구현**(리뷰어 판정 전). 완료 조건:
+- 요구 대조표(14.1.7): 시험 없는 항목 0, 정의된 시험 51개를 모두 인용
+- 조합: 보유 종류 × 단위 모양 × 해제 순서 72개 전부(서로 다른 순서 확인), 매니페스트 bundle 구성원 축을 더한 564개(14.1.3)
+- coverage(14.1.8): 닿지 않은 곳은 모두 근거(Fatal probe·불변식·실패 조건을 만들지 않는 호출·템플릿 인스턴스)
+- 빠진 시험 관점 리뷰어 판정: 대기
 
 ## 15. PNG 디코더 범위
 

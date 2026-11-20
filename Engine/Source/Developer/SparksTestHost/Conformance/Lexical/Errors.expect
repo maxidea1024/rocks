@@ -1,12 +1,14 @@
-# One case per lexical code; positions point at the offending text.
-error S0105 1:5
-error S0110 2:9
-error S0110 3:9
-error S0110 4:9
-error S0104 5:11
-error S0112 6:12
-error S0108 7:10
-error S0107 8:9
-error S0111 9:14
-error S0114 10:9
-error S0107 11:9
+# One case per lexical code; positions point at the offending text. The parser reports nothing
+# more: malformed literals still form tokens, and invalid characters and unclosed strings leave
+# Invalid tokens where it stays silent (the unclosed verbatim string also hides the missing '}').
+error S0105 2:9
+error S0110 3:13
+error S0110 4:13
+error S0110 5:13
+error S0104 6:15
+error S0112 7:16
+error S0108 8:14
+error S0107 9:13
+error S0111 10:18
+error S0114 11:13
+error S0107 12:13

@@ -1,0 +1,312 @@
+{
+  "format": 1,
+  "package": "Rocks",
+  "module": "Engine",
+  "types": [
+    {
+      "name": "Actor",
+      "id": "5a7e0000000000000000000000000001",
+      "kind": "object",
+      "scriptExtensible": true,
+      "fields": [
+        {
+          "name": "Location",
+          "type": "vec3",
+          "access": "readWrite",
+          "computed": true
+        },
+        {
+          "name": "HasAuthority",
+          "id": "5a7e0000000000000000000000000102",
+          "type": "bool"
+        },
+        {
+          "name": "Tags",
+          "id": "5a7e0000000000000000000000000103",
+          "type": "TagSet"
+        }
+      ],
+      "functions": [
+        {
+          "name": "Find",
+          "id": "5a7e0000000000000000000000000201",
+          "typeParameters": [
+            {
+              "name": "T",
+              "constraint": "Component"
+            }
+          ],
+          "returns": "T?"
+        },
+        {
+          "name": "RequestDestroy",
+          "id": "5a7e0000000000000000000000000202"
+        },
+        {
+          "name": "GetForwardVector",
+          "id": "5a7e0000000000000000000000000203",
+          "returns": "vec3"
+        },
+        {
+          "name": "GetRightVector",
+          "id": "5a7e0000000000000000000000000204",
+          "returns": "vec3"
+        }
+      ]
+    },
+    {
+      "name": "Pawn",
+      "id": "5a7e0000000000000000000000000002",
+      "kind": "object",
+      "base": "Actor",
+      "scriptExtensible": true,
+      "functions": [
+        {
+          "name": "AddMovement",
+          "id": "5a7e0000000000000000000000000211",
+          "parameters": [
+            {
+              "name": "velocity",
+              "type": "vec3",
+              "perSecond": true
+            }
+          ]
+        },
+        {
+          "name": "LookAt",
+          "id": "5a7e0000000000000000000000000212",
+          "parameters": [
+            {
+              "name": "target",
+              "type": "vec3"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Character",
+      "id": "5a7e0000000000000000000000000003",
+      "kind": "object",
+      "base": "Pawn",
+      "scriptExtensible": true,
+      "functions": [
+        {
+          "name": "AddImpulse",
+          "id": "5a7e0000000000000000000000000221",
+          "parameters": [
+            {
+              "name": "impulse",
+              "type": "vec3"
+            }
+          ]
+        },
+        {
+          "name": "Jump",
+          "id": "5a7e0000000000000000000000000222"
+        }
+      ]
+    },
+    {
+      "name": "LevelScript",
+      "id": "5a7e0000000000000000000000000004",
+      "kind": "object",
+      "base": "Actor",
+      "scriptExtensible": true
+    },
+    {
+      "name": "Component",
+      "id": "5a7e0000000000000000000000000005",
+      "kind": "object",
+      "fields": [
+        {
+          "name": "Owner",
+          "id": "5a7e0000000000000000000000000131",
+          "type": "Actor"
+        }
+      ]
+    },
+    {
+      "name": "SceneComponent",
+      "id": "5a7e0000000000000000000000000006",
+      "kind": "object",
+      "base": "Component",
+      "fields": [
+        {
+          "name": "RelativeLocation",
+          "type": "vec3",
+          "access": "readWrite",
+          "computed": true
+        },
+        {
+          "name": "RelativeRotation",
+          "type": "Rotator",
+          "access": "readWrite",
+          "computed": true
+        }
+      ]
+    },
+    {
+      "name": "ScriptComponent",
+      "id": "5a7e0000000000000000000000000007",
+      "kind": "object",
+      "base": "Component",
+      "scriptExtensible": true
+    },
+    {
+      "name": "Collider",
+      "id": "5a7e0000000000000000000000000008",
+      "kind": "object",
+      "base": "SceneComponent"
+    },
+    {
+      "name": "SphereCollider",
+      "id": "5a7e0000000000000000000000000009",
+      "kind": "object",
+      "base": "Collider",
+      "fields": [
+        {
+          "name": "Radius",
+          "id": "5a7e0000000000000000000000000191",
+          "type": "float32",
+          "access": "readWrite"
+        }
+      ]
+    },
+    {
+      "name": "WorldService",
+      "id": "5a7e000000000000000000000000000a",
+      "kind": "object",
+      "scriptExtensible": true
+    },
+    {
+      "name": "Widget",
+      "id": "5a7e000000000000000000000000000b",
+      "kind": "object"
+    },
+    {
+      "name": "WidgetController",
+      "id": "5a7e000000000000000000000000000c",
+      "kind": "object",
+      "scriptExtensible": true,
+      "fields": [
+        {
+          "name": "Widget",
+          "id": "5a7e00000000000000000000000001c1",
+          "type": "Widget"
+        }
+      ]
+    },
+    {
+      "name": "DataAsset",
+      "id": "5a7e000000000000000000000000000d",
+      "kind": "asset",
+      "scriptExtensible": true
+    },
+    {
+      "name": "SoundAsset",
+      "id": "5a7e000000000000000000000000000e",
+      "kind": "asset"
+    },
+    {
+      "name": "AudioSystem",
+      "id": "5a7e000000000000000000000000000f",
+      "kind": "object",
+      "functions": [
+        {
+          "name": "PlayAt",
+          "id": "5a7e00000000000000000000000002f1",
+          "parameters": [
+            {
+              "name": "sound",
+              "type": "SoundAsset"
+            },
+            {
+              "name": "location",
+              "type": "vec3"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "World",
+      "id": "5a7e0000000000000000000000000010",
+      "kind": "object",
+      "fields": [
+        {
+          "name": "Audio",
+          "id": "5a7e0000000000000000000000000161",
+          "type": "AudioSystem"
+        }
+      ],
+      "functions": [
+        {
+          "name": "Service",
+          "id": "5a7e0000000000000000000000000261",
+          "typeParameters": [
+            {
+              "name": "T",
+              "constraint": "WorldService"
+            }
+          ],
+          "returns": "T"
+        }
+      ]
+    },
+    {
+      "name": "PlaySession",
+      "id": "5a7e0000000000000000000000000011",
+      "kind": "object"
+    },
+    {
+      "name": "Connection",
+      "id": "5a7e0000000000000000000000000012",
+      "kind": "object"
+    },
+    {
+      "name": "Hit",
+      "id": "5a7e0000000000000000000000000013",
+      "kind": "struct",
+      "constructible": false,
+      "fields": [
+        {
+          "name": "ImpactPoint",
+          "id": "5a7e0000000000000000000000000171",
+          "type": "vec3"
+        },
+        {
+          "name": "ImpactNormal",
+          "id": "5a7e0000000000000000000000000172",
+          "type": "vec3"
+        },
+        {
+          "name": "Normal",
+          "id": "5a7e0000000000000000000000000173",
+          "type": "vec3"
+        },
+        {
+          "name": "Distance",
+          "id": "5a7e0000000000000000000000000174",
+          "type": "float"
+        }
+      ]
+    },
+    {
+      "name": "Error",
+      "id": "5a7e0000000000000000000000000014",
+      "kind": "enum",
+      "cases": [
+        "NotFound",
+        "InvalidArgument",
+        "LoadFailed",
+        "SpawnFailed",
+        "NotAuthority",
+        "AlreadyTraveling",
+        "ModuleUnloading",
+        "Unsupported",
+        "Busy"
+      ]
+    }
+  ]
+}

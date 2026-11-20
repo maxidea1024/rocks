@@ -71,6 +71,8 @@ cache hit은 key와 모든 출력 파일이 기록과 일치할 때만 인정한
 - 묶음 파일: `<out>/Unity/<모듈>/<모듈>.Unity.<첫 구성원 경로 해시 12자리>.cpp`, 내용은 구성원마다 루트 기준 `#include "…"`다. 묶음 TU에만 `/I<root>`(출력 아래 구성원이면 `/I<out>`)를 include 목록 맨 뒤에 붙인다. `__FILE__`은 단독 TU와 같다.
 - object: `obj/<모듈>/<변형>/<해시>.obj`(+ 의존 기록 `.deps`). 변형은 `u<유니티>p<PCH>`(예: `u1p1`, 검증 빌드 `--unity off --pch off`는 `u0p0`)이고 compile action의 Id에도 들어간다 — 일반 빌드와 검증 빌드를 번갈아 돌려도 서로의 object와 기록을 덮어쓰지 않는다. 빌드가 성공하면 이번 변형 디렉터리와 묶음 디렉터리에서 이번 계획이 만들지 않은 파일을 지운다.
 - `compile_commands.json`은 원본 소스마다 논리 명령 하나이고(`output`은 그 소스가 단독 TU일 때의 object 경로다 — 묶인 소스의 그 파일은 없다), 도구 빌드 ID는 유니티 켬·끔과 묶음 구성에 따라 바뀌지 않는다(archive·link의 object는 원본 소스 키 목록으로 적는다).
+- 도구 모음 확인(`ToolchainCheck` — [Clang 버전 지원](../../Docs/Design/ClangVersionSupport.ko.md) 6.2절): discovery가 `Build/Toolchain.json`(Rocks.Tooling.Common 포함 리소스 `Rocks.Toolchain.json` — 설치 SDK 도구도 같은 표를 갖는다)으로 제조사별 최소 Clang과 Windows STL(`yvals_core.h`)이 요구하는 최소 Clang을 확인하고, 정규화한 `--version` 첫 줄 전체가 검증 목록에 있는지(`NativeToolchain.ToolchainVerified`)와 STL 확인 결과(`StlClangCheck`)를 남긴다. 빌드 CLI(`build`·`test`·`sdk`·`game`)는 둘을 build-evidence(`toolchainVerified`·`stlClangCheck`, 게임은 `game-build-evidence.json`)에 적고, `--require-verified-toolchain on|off`(기본 off, Rocks.proj `RequireVerifiedToolchain`)가 on이면 검증 목록 밖을 FAIL evidence로 끝낸다.
+- action 출력 게시(`FileReplace`): 임시 출력을 최종 경로로 옮길 때 Windows는 POSIX 의미 이름 바꾸기(`FileRenameInfoEx`, `REPLACE_IF_EXISTS | POSIX_SEMANTICS`)로 대상을 바꿔, 다른 프로세스(백신·인덱서)가 대상을 삭제 공유로 열고 있어도 성공한다. 실패하면 `Cannot publish 원본 -> 대상`으로 경로를 남긴다(대기·재시도 없음).
 - 명령 옵션: `--unity on|off`, `--pch on|off`, `--adaptive on|off`(기본 on). 켠 모듈은 묶음 충돌 정책 검사(`Rocks.ToolTests policy` — 파일 지역 이름, 파일 범위 using, `.cpp` 매크로, pragma 균형)의 대상이다. `Rocks.ToolTests unity-audit`는 설정과 무관하게 모든 엔진 모듈의 충돌을 센다.
 
 ## 정의 헤더·PCH·작업 파일 분리

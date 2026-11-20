@@ -1,21 +1,19 @@
-param([string]$Version = '21.1.6')
+param([string]$Version = '')
 $ErrorActionPreference = 'Stop'
-# Installs a pinned LLVM on Windows hosts (CI runner images ship whatever LLVM they carry, e.g. 20.1.8). The verified version is
-# 21.1.6 (paired with ROCKS_MSVC_TOOLSET=14.44; STL 14.52 requires Clang 22). -Version picks another pinned release (22.1.8 runs the
-# Clang 22 CI leg with the image's default MSVC — Docs/Design/ClangVersionSupport.ko.md section 6.3).
+# Installs a pinned LLVM on Windows hosts (CI runner images ship whatever LLVM they carry, e.g. 20.1.8). The default version and the
+# installer SHA-256 of every pinned version come from Build/Toolchain.json (Docs/Design/ClangVersionSupport.ko.md section 6.1);
+# -Version picks another pinned release. Pair the LLVM with an MSVC toolset whose STL accepts it (STL 14.52 requires Clang 22).
 # The official installer is unpacked with 7-Zip after the SHA-256 check; its install code is never run. The bin directory goes
 # first on PATH so Rocks.Build and the MetaCompiler discover this clang-cl, lld-link and llvm-lib together.
 if (-not $IsWindows) { throw 'Windows hosts only (macOS uses the Xcode toolchain).' }
 $architecture = [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString()
 if ($architecture -ne 'X64') { throw "Unsupported LLVM host architecture: $architecture" }
-$pinned = @{
-    '21.1.6' = '11d721f66d46b216f69a4a9db75ac8b36933c50c59da83c67129a06740af22fc'
-    '22.1.8' = '16e5709785fef73c854646241c4a92c5cd574318d1b33c63330dd7721903e55c'
-}
-if (-not $pinned.ContainsKey($Version)) { throw "LLVM $Version is not pinned (known: $($pinned.Keys -join ', '))." }
+$table = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Toolchain.json') -Raw | ConvertFrom-Json
+if (-not $Version) { $Version = $table.llvm.windows.version }
+$sha256 = $table.llvm.windows.installers.$Version
+if (-not $sha256) { throw "LLVM $Version is not pinned in Build/Toolchain.json." }
 $version = $Version
 $url = "https://github.com/llvm/llvm-project/releases/download/llvmorg-$version/LLVM-$version-win64.exe"
-$sha256 = $pinned[$version]
 $destination = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "../out/toolchains/llvm-$version"))
 $bin = Join-Path $destination 'bin'
 $compiler = Join-Path $bin 'clang-cl.exe'

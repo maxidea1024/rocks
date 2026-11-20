@@ -495,14 +495,8 @@ Result<AssetManagerPumpResult> AssetManager::Pump(const AssetManagerPumpBudget& 
         result.discardedPackages = impl.ProcessClosing(budget.maxDiscards);
     }
 
-    if (impl.deliver.TryReserve(impl.tickets.Size())) {
-        result.callbacks = impl.DeliverCallbacks();
-    }
-
-    if (impl.deliver.TryReserve(impl.primaries.Size())) {
-        result.callbacks += impl.DeliverPrimary();
-    }
-
+    result.callbacks = impl.DeliverCallbacks();
+    result.callbacks += impl.DeliverPrimary();
     result.deferredCommands = impl.RunDeferred();
     return Result<AssetManagerPumpResult>::Success(result);
 }
@@ -587,14 +581,8 @@ Result<void> AssetManager::Shutdown() noexcept {
     // 모든 티켓·lease·보류 명령을 회수하고 아직 부르지 않은 callback·fail에 ShuttingDown을 한 번
     // 전달한다(11.7절 12). 그 뒤 해제 큐를 비운다(이미 소멸한 handle의 슬롯).
     impl.RevokeScope(ManagerNoIndex, ErrorCode::ShuttingDown);
-    if (impl.deliver.TryReserve(impl.tickets.Size())) {
-        (void)impl.DeliverCallbacks();
-    }
-
-    if (impl.deliver.TryReserve(impl.primaries.Size())) {
-        (void)impl.DeliverPrimary();
-    }
-
+    (void)impl.DeliverCallbacks();
+    (void)impl.DeliverPrimary();
     (void)impl.RunDeferred();
     impl.DrainReleases();
     impl.shutDown = true;

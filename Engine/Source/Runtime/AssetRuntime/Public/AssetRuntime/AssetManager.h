@@ -250,6 +250,11 @@ using PrimaryReadyCallback = Function<void(Result<PrimaryAssetLease>, const Asse
 using DeferredRun = Function<void(const AssetLease&)>;
 using DeferredFail = Function<void(ErrorCode, const AssetDiagnostic&)>;
 
+// 동시에 살아 있을 수 있는 handle 객체(티켓·lease·보류 명령·묶음 티켓) 수 상한이다(11.7절 6 —
+// 슬롯 블록 256칸 × 블록 표 4096). 넘는 요청·lease는 CapacityExceeded다(callback·보류 명령은 그
+// 오류를 받는다). 소멸한 handle의 칸은 다음 Pump가 회수한다.
+inline constexpr uint32 AssetManagerMaxLiveHandles = 256u * 4096u;
+
 struct AssetManagerConfig {
     // 기본 허용 보류 명령 수다(11.7절 9).
     static constexpr uint32 DefaultMaxDeferredCommands = 4096;

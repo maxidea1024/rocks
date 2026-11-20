@@ -1,0 +1,2 @@
+# The body of 'if' is always a block.
+error S0201 1:17

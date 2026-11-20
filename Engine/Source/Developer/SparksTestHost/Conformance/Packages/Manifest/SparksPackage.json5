@@ -1,0 +1,6 @@
+{
+  name: "game",
+  sparks: 2,
+  profile: "core",
+  colour: 1,
+}

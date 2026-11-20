@@ -1,0 +1,2 @@
+# Comparisons do not chain.
+error S0209 1:20
