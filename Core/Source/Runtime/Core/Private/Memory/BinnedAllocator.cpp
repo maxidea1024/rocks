@@ -4,6 +4,8 @@
 #include "BinnedAllocatorTestHooks.h"
 
 #include <Base/Checked.h>
+#include <Base/Compiler.h>
+#include <Core/Memory/AddressSanitizer.h>
 #include <Core/Move.h>
 #include <Platform/Atomics.h>
 #include <Platform/Fatal.h>
@@ -198,15 +200,34 @@ struct FreeBlock {
 static_assert(sizeof(FreeBlock) == BlockGranularity,
               "free block words must fill the smallest block");
 
-void* ReadLink(void* block) noexcept {
+// ASan 구성에서만 수동 poison을 부른다(다른 구성에서는 호출 자체가 없다). 불변식: 사용자에게 나가
+// 있지 않은 블록(slab에서 뗀 블록, 캐시·이전 칸·slab 자유 목록의 블록)은 전체가 닫혀 있고, 나가
+// 있는 블록은 요청 크기만 열려 있다. slab 머리는 닫지 않는다.
+constexpr bool AsanEnabled = ROCKS_ADDRESS_SANITIZER != 0;
+
+void CloseBlock(void* address, usize bytes) noexcept {
+    if (AsanEnabled) {
+        AsanPoisonMemory(address, bytes);
+    }
+}
+
+void OpenBlock(void* address, usize bytes) noexcept {
+    if (AsanEnabled) {
+        AsanUnpoisonMemory(address, bytes);
+    }
+}
+
+// 자유 블록의 word 접근이다. ASan 구성에서는 자유 블록 전체가 닫혀 있으므로 계측에서 뺀다(이 함수들
+// 밖에서는 자유 블록의 내용을 읽고 쓰지 않는다).
+ROCKS_NO_SANITIZE_ADDRESS void* ReadLink(void* block) noexcept {
     return static_cast<FreeBlock*>(block)->next;
 }
 
-void WriteLink(void* block, void* next) noexcept {
+ROCKS_NO_SANITIZE_ADDRESS void WriteLink(void* block, void* next) noexcept {
     static_cast<FreeBlock*>(block)->next = next;
 }
 
-void WriteMarker(void* block, uptr marker) noexcept {
+ROCKS_NO_SANITIZE_ADDRESS void WriteMarker(void* block, uptr marker) noexcept {
     static_cast<FreeBlock*>(block)->marker = marker;
 }
 
@@ -214,9 +235,14 @@ void WriteMarker(void* block, uptr marker) noexcept {
 // 교환이라 같은 블록을 두 스레드가 함께 반환해도 한쪽만 참이다.
 bool TryMarkReturned(void* block, uptr marker) noexcept {
     uptr* word = &static_cast<FreeBlock*>(block)->marker;
+    // ASan 구성: 표지 word는 닫혀 있을 수 있다(이미 반환한 블록, 요청 크기가 16 byte보다 작은 살아
+    // 있는 블록). 원자 연산은 계측되는 함수이므로 그 word만 연다. 성공하면 호출자가 블록 전체를
+    // 닫고, 실패하면(사용자에게 나가 있지 않은 블록) 여기서 다시 닫는다.
+    OpenBlock(word, sizeof(uptr));
     uptr current = platform::AtomicLoad<MemoryOrder::Relaxed>(word);
     do {
         if (current == marker) {
+            CloseBlock(word, sizeof(uptr));
             return false;
         }
     } while (
@@ -356,7 +382,8 @@ struct BinnedAllocator::State {
     // 등급 잠금 안에서 부른다. 표지가 선 블록 하나를 자기 slab에 돌려준다(slab이 비면 푼다).
     void ReturnBlock(ClassState& group, void* block) noexcept;
 
-    void* AllocateDirect(uint32 sizeClass) noexcept;
+    // bytes는 요청 크기다(ASan 구성에서 그만큼만 연다).
+    void* AllocateDirect(uint32 sizeClass, usize bytes) noexcept;
     Result<void> DeallocateDirect(void* address, usize slabIndex, uint32 sizeClass,
                                   uint32 blockIndex) noexcept;
 
@@ -506,6 +533,11 @@ void BinnedAllocator::State::ReserveRange(usize requestedBytes) noexcept {
 }
 
 void BinnedAllocator::State::ReleaseRange() noexcept {
+    if (AsanEnabled && nextUnusedSlab != 0) {
+        // 닫아 둔 블록의 표시를 지운다: 이 주소 범위는 OS가 다른 용도로 다시 내줄 수 있다.
+        AsanUnpoisonMemory(reinterpret_cast<void*>(base), nextUnusedSlab << SlabShift);
+    }
+
     platform::AlignedFree(slabTable);
     platform::AlignedFree(releasedBits);
     slabTable = nullptr;
@@ -696,6 +728,7 @@ uint32 BinnedAllocator::State::TakeBlocks(ClassState& group, uint32 sizeClass, u
                 reinterpret_cast<uint8*>(slab) + SlabHeaderBytes + usize{carved} * slab->blockBytes;
             WriteMarker(block, MarkerOf(block));
             WriteLink(block, head);
+            CloseBlock(block, slab->blockBytes);
             head = block;
             ++carved;
             ++taken;
@@ -732,7 +765,7 @@ void BinnedAllocator::State::ReturnBlock(ClassState& group, void* block) noexcep
     }
 }
 
-void* BinnedAllocator::State::AllocateDirect(uint32 sizeClass) noexcept {
+void* BinnedAllocator::State::AllocateDirect(uint32 sizeClass, usize bytes) noexcept {
     ClassState& group = classes[sizeClass];
     void* block = nullptr;
     {
@@ -746,6 +779,7 @@ void* BinnedAllocator::State::AllocateDirect(uint32 sizeClass) noexcept {
 
     // 표지가 없는 블록은 사용자에게 나가 있는 블록뿐이다: 내주는 순간에만 지운다.
     WriteMarker(block, NoMarker);
+    OpenBlock(block, bytes);
     return block;
 }
 
@@ -771,6 +805,7 @@ Result<void> BinnedAllocator::State::DeallocateDirect(void* address, usize slabI
         return Result<void>::Failure(ErrorCode::NotFound);
     }
 
+    CloseBlock(address, Classes.blockBytes[sizeClass]);
     ReturnBlock(group, address);
     ++group.freed;
     return Result<void>::Success();
@@ -1339,10 +1374,11 @@ Result<void*> BinnedAllocator::Allocate(usize bytes, usize alignment, uint32 tag
             if (block != nullptr) {
                 // 표지가 없는 블록은 사용자에게 나가 있는 블록뿐이다: 내주는 순간에만 지운다.
                 WriteMarker(block, NoMarker);
+                OpenBlock(block, bytes);
                 platform::AtomicStore<MemoryOrder::Relaxed>(&slot.allocated, slot.allocated + 1);
                 return Result<void*>::Success(block);
             }
-        } else if (void* block = state.AllocateDirect(sizeClass)) {
+        } else if (void* block = state.AllocateDirect(sizeClass, bytes)) {
             return Result<void*>::Success(block);
         }
     }
@@ -1399,6 +1435,7 @@ Result<void> BinnedAllocator::Deallocate(void* address) noexcept {
         return Result<void>::Failure(ErrorCode::NotFound);
     }
 
+    CloseBlock(address, Classes.blockBytes[sizeClass]);
     ClassCache& slot = cache->classes[sizeClass];
     if (slot.partial.count == Classes.bundleBlocks[sizeClass]) {
         state.MakeRoom(*cache, sizeClass);
