@@ -341,10 +341,11 @@ public:
     }
 
     // 엔진을 정리한다. Uninitialized·Stopped·Failed에서는 아무것도 하지 않고 성공한다. 프레임 실행
-    // 중이면 Busy, World가 외부 보유권 때문에 끝나지 않으면 그 오류이며 Stopping에 머문다(반환 후
-    // 다시 호출 — 이미 부른 종료 hook은 다시 부르지 않는다). 종료 hook 단계가 실패하거나 최종 GC·
-    // 정리가 MaxShutdownCollectPasses 안에 닫히지 않으면(Busy) 나머지 단계를 마저 실행해 Stopped가
-    // 된 뒤 첫 오류를 돌려준다.
+    // 중이거나 종료 단계 안(종료 hook·Subsystem·client 함수와 그 안의 callback)에서 다시 부르면
+    // Busy, World가 외부 보유권 때문에 끝나지 않으면 그 오류이며 Stopping에 머문다(반환 후 다시
+    // 호출 — 이미 부른 종료 hook은 다시 부르지 않는다). 종료 hook 단계가 실패하거나 최종 GC·정리가
+    // MaxShutdownCollectPasses 안에 닫히지 않으면(Busy) 나머지 단계를 마저 실행해 Stopped가 된 뒤
+    // 첫 오류를 돌려준다.
     Result<void> Shutdown() noexcept;
 
     EngineState State() const noexcept {
@@ -486,6 +487,8 @@ private:
     bool inFrame_ = false;
     // RunFrame 전체 동안 참이다(IsInFrame — inFrame_은 5단계에서 잠시 거짓이다).
     bool frameRunning_ = false;
+    // Shutdown이 도는 동안 참이다(재진입 Busy).
+    bool shutdownRunning_ = false;
     bool exitRequested_ = false;
     // 엔진을 소유한 게임 스레드다(Initialize를 부른 스레드, 0이면 아직 없음). RequestExit 검사에
     // 쓴다.

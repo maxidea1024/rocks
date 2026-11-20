@@ -44,7 +44,10 @@ constinit BootCVar<int32> LoaderWorkersVar =
 
 constinit BootCVar<int32> IoWorkersVar =
     cvar::Boot("asset.io.workers", DefaultIoWorkers)
-        .Help("Asynchronous file IO threads of the asset loader. Fixed after startup.")
+        .Help(
+            "Worker threads of the asset loader's asynchronous file IO on the worker pool backend "
+            "(POSIX). The Windows native backend (IOCP) uses one completion thread and ignores "
+            "this value. Fixed after startup.")
         .Range(1, MaxWorkers);
 
 constinit BootCVar<int64> MaxPackagesInFlightVar =
@@ -184,6 +187,9 @@ StringView ResolveRuntimeProfile(StringView configured) noexcept {
         return configured;
     }
 
+    // 지원 플랫폼이 늘면(Linux 등) 여기서 이름을 정해야 한다 — 모르는 플랫폼은 빌드 오류다.
+    static_assert(IsWindows || IsMac || IsAndroid,
+                  "Add the default runtime profile id of the new platform");
     if constexpr (IsWindows) {
         return "Windows";
     } else if constexpr (IsMac) {

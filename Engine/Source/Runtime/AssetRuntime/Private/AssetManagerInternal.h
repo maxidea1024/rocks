@@ -233,6 +233,8 @@ struct AssetManager::Impl {
     uint32 freeUnit = ManagerNoIndex;
     uint64 stamp = 0;
     uint32 createdUnits = 0;
+    // 이번 Pump의 ProcessClosing이 RootRef를 놓은 패키지 수다(AssetManagerPumpResult).
+    uint32 releasedPackages = 0;
 
     HashMap<ManagerEdgeKey, int64> edges;
     HashMap<ObjectHandle, uint32> edgeNodeOf;

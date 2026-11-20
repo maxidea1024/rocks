@@ -498,7 +498,9 @@ Result<AssetManagerPumpResult> AssetManager::Pump(const AssetManagerPumpBudget& 
     if (edgesApplied && impl.scratchAssets.TryReserve(impl.packages.Size()) &&
         impl.scratchSlots.TryReserve(impl.packages.Size())) {
         impl.JudgeClosing();
+        impl.releasedPackages = 0;
         result.discardedPackages = impl.ProcessClosing(budget.maxDiscards);
+        result.releasedPackages = impl.releasedPackages;
     }
 
     result.callbacks = impl.DeliverCallbacks();

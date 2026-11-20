@@ -1,5 +1,6 @@
 #include "EngineAssetsInternal.h"
 
+#include <Core/App/ProcessCommandLine.h>
 #include <Core/Diagnostics/Log.h>
 #include <Core/FileError.h>
 #include <EngineAssets/EngineAssetsSubsystem.h>
@@ -18,9 +19,6 @@ constexpr LogCategory LogEngineAssets{"EngineAssets"};
 // 하위 값은 프로세스 안 순번이다(한 프로세스의 Engine이 여럿이어도 겹치지 않는다).
 constexpr uint64 AssetContextHigh = 0x524f434b53415354ull;
 uint64 NextAssetContext = 0;
-
-// 실행 파일 경로 버퍼의 크기다(경로가 더 길면 쿠킹 루트를 설정으로 준다 — 실패로 보고한다).
-constexpr usize ExecutablePathBytes = 4096;
 
 bool FrameRunning(void* context) noexcept {
     return static_cast<const Engine*>(context)->IsInFrame();
@@ -109,16 +107,13 @@ Result<void> EngineAssetsSubsystem::Initialize(Engine& engine) noexcept {
     // 쿠킹 루트·프로파일(부팅 CVar — 시작 때 한 번).
     const StringView configuredRoot = CookedRootVar.Get();
     StringView executableDir;
-    char executable[ExecutablePathBytes];
     if (configuredRoot.IsEmpty()) {
-        usize executableBytes = 0;
-        if (auto path =
-                platform::GetExecutablePath(executable, sizeof(executable), executableBytes);
-            !path) {
-            return fail("executable path", FileErrorCode(path));
+        // 진입점(Launch)이 캡처한 실행 파일 경로다(OS에서 얻은 절대 경로 — 긴 경로도 받는다).
+        if (!ProcessCommandLine::IsCaptured()) {
+            return fail("executable path", ErrorCode::InvalidArgument);
         }
 
-        executableDir = ExecutableDirectoryOf(StringView(executable, executableBytes));
+        executableDir = ExecutableDirectoryOf(ProcessCommandLine::Get().ExecutablePath());
     }
 
     cookedRoot_.Clear();
@@ -200,6 +195,7 @@ Result<void> EngineAssetsSubsystem::Initialize(Engine& engine) noexcept {
     }
 
     worker_ = Move(worker.Value());
+    stats_.loaderWorkers = scheduler_->Stats().workerCount;
 
     // AssetManager.
     AssetManagerConfig config;
@@ -247,11 +243,12 @@ void EngineAssetsSubsystem::OnFrameBegin(Engine&) noexcept {
         return;
     }
 
-    // 에셋 Registry 객체는 Discard로만 죽는다(6.1절) — Discard가 있었을 때만 수집한다.
-    if (pumped.Value().discardedPackages != 0) {
+    // 에셋 Registry 객체는 Discard로만 죽는다(6.1절) — Discard한 패키지의 로더 RootRef를 놓았을
+    // 때만 수집한다(그 전에는 회수할 수 없다 — 11.7절 3).
+    if (pumped.Value().releasedPackages != 0) {
         stats_.gcPending = true;
         if (manager_->Registry().CollectionPhase() != GcPhase::Idle) {
-            discardedDuringCycle_ = true;
+            releasedDuringCycle_ = true;
         }
     }
 }
@@ -292,7 +289,7 @@ void EngineAssetsSubsystem::StepGarbageCollection() noexcept {
             return;
         }
 
-        discardedDuringCycle_ = false;
+        releasedDuringCycle_ = false;
     }
 
     auto progress = registry.StepCollection(access, engine_assets_detail::ReadGcBudget(),
@@ -304,9 +301,9 @@ void EngineAssetsSubsystem::StepGarbageCollection() noexcept {
 
     if (progress.Value().IsComplete()) {
         ++stats_.gcCycles;
-        // cycle 시작 뒤 Discard가 더 있었으면 한 번 더 돈다.
-        stats_.gcPending = discardedDuringCycle_;
-        discardedDuringCycle_ = false;
+        // cycle 시작 뒤 RootRef를 놓은 패키지가 더 있었으면 한 번 더 돈다.
+        stats_.gcPending = releasedDuringCycle_;
+        releasedDuringCycle_ = false;
         // Discard된 객체가 남았으면(쥔 쪽이 있다) 재시도 시간 뒤에 다시 돈다.
         stats_.lingering = registry.Stats().destroyRequested != 0;
         lingerSeconds_ = 0.0;

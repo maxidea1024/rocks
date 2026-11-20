@@ -62,10 +62,12 @@ struct EngineAssetsStats {
     uint64 pumpFailures = 0;
     // 실패한 GC 조각 수(Busy 제외 — 매번 기록)다.
     uint64 gcFailures = 0;
-    // GC 수집 요청 대기 중인지다(Discard가 있었고 아직 cycle이 시작·완료되지 않음).
+    // GC 수집 요청 대기 중인지다(Discard한 패키지의 RootRef를 놓았고 아직 cycle이 끝나지 않음).
     bool gcPending = false;
     // 끝난 cycle 뒤에도 Discard된 객체가 남아 재시도 시간을 세는 중인지다(11.8절 5).
     bool lingering = false;
+    // 로더 worker scheduler의 worker 수다(asset.loader.workers — 초기화 뒤).
+    uint32 loaderWorkers = 0;
 };
 
 class EngineAssetsSubsystem final : public EngineSubsystem {
@@ -128,8 +130,8 @@ private:
     UniquePtr<WorkerSchedulerLoaderWorker> worker_;
     UniquePtr<AssetManager> manager_;
     EngineAssetsStats stats_;
-    // cycle 도중 Discard가 있었는지다(끝난 뒤 한 번 더 돈다).
-    bool discardedDuringCycle_ = false;
+    // cycle 도중 RootRef를 놓은 패키지가 있었는지다(끝난 뒤 한 번 더 돈다).
+    bool releasedDuringCycle_ = false;
     // lingering 동안 흐른 엔진 프레임 시간(delta 합, 초)이다.
     double lingerSeconds_ = 0.0;
 };

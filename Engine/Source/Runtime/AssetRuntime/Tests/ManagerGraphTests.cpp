@@ -89,7 +89,8 @@ TEST(AssetManager_BatchedEdgesMergeOnce) {
 }
 
 // Discard 예산(11.7절 3·4): 순환 단위 {1, 2}를 놓고 maxDiscards 1로 Pump하면 첫 패키지만 Discard해
-// Discarding으로 남고(로더에서는 둘 다 퇴출), 다음 Pump가 나머지를 Discard해 단위가 끝난다.
+// Discarding으로 남고(로더에서는 둘 다 퇴출, RootRef는 아직 쥔다 — releasedPackages 0), 다음 Pump가
+// 나머지를 Discard하고 RootRef를 놓아(releasedPackages 2) 단위가 끝난다.
 TEST(AssetManager_DiscardBudgetStopsMidUnit) {
     AssetEnv env;
     REQUIRE(env.Ready());
@@ -110,12 +111,15 @@ TEST(AssetManager_DiscardBudgetStopsMidUnit) {
     auto pumped = rig.manager->Pump(one);
     REQUIRE(pumped);
     CHECK(pumped.Value().discardedPackages == 1);
+    // RootRef는 단위 전부를 Discard한 뒤에 놓는다 — 아직 0이다.
+    CHECK(pumped.Value().releasedPackages == 0);
     REQUIRE(rig.UnitOf(1).found);
     CHECK(rig.UnitOf(1).info.state == ResidentUnitState::Discarding);
     CHECK(!rig.IsLoaded(1) && !rig.IsLoaded(2));
     pumped = rig.manager->Pump(one);
     REQUIRE(pumped);
     CHECK(pumped.Value().discardedPackages == 1);
+    CHECK(pumped.Value().releasedPackages == 2);
     CHECK(rig.UnitCount() == 0);
 }
 
