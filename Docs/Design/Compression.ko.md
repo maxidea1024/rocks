@@ -191,11 +191,11 @@ clang-cl `/W4 /WX`(`/Od`·`/O2`)와 GNU식 `-Wall -Wextra -Wpedantic -Werror`(`-
 
 ## 4. 동기 API — `Compression/Compression.h`
 
-모듈 `Compression`(Core 계층, `Core/Source/Runtime/Compression`)이다. RequiredModules는 `Core`와 ThirdParty `Lz4`·
+모듈 `Compression`(Core 계층, `Core/Source/Runtime/Compression`)이다. PublicDependencies는 `Core`와 ThirdParty `Lz4`·
 `Zstd`·`Zlib`·`Brotli`다. Core 모듈에 외부 의존이 생기지 않는다.
 
 WorkerScheduler(Task) 위의 비동기 API(5절)와 블록 컨테이너의 병렬 API(9절)는 모듈 `AsyncCompression`
-(`Core/Source/Runtime/AsyncCompression`, RequiredModules `Core`·`Task`·`Compression`)이다(2026-11-17 분리). Task 모듈이 trace 수집
+(`Core/Source/Runtime/AsyncCompression`, PublicDependencies `Core`·`Task`·`Compression`)이다(2026-11-17 분리). Task 모듈이 trace 수집
 (TraceCapture)을 쓰고 TraceCapture가 Compression을 쓰므로, Compression은 Task보다 아래 계층이어야 한다([trace](TraceSystem.ko.md) 3절).
 AsyncCompression은 동기 경로와 같은 코덱·블록 인코딩을 쓰려고 Compression의 내부 헤더(`Compression/Private`의
 `CompressionInternal.h`·`CompressedBlocksInternal.h`)를 Private 구현에서만 include한다.

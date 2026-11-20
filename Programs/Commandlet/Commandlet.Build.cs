@@ -18,6 +18,6 @@ public sealed class CommandletHost : ModuleRules
         // Compression: log decode/view read compressed log files (independent zstd frames per batch).
         // HostConfig: the config-dump command boots the same config context as the engine hosts (engine files, log.*, trace.*).
         // Launch: the common entry point (command line capture, crash reporting and the tool log, Docs/Design/CrashHandlingAndLaunch.ko.md).
-        Dependencies = ["Core", "Launch", "TraceAnalysis", "Crypto", "Compression", "HostConfig"]
+        PublicDependencies = ["Core", "Launch", "TraceAnalysis", "Crypto", "Compression", "HostConfig"]
     };
 }

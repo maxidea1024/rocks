@@ -10,6 +10,6 @@ public sealed class CompressionBenchProgram : ModuleRules
         Name = "CompressionBench",
         Kind = NativeModuleKind.Executable,
         Sources = context.Sources("Programs/CompressionBench/Private"),
-        Dependencies = ["Launch", "Compression", "AsyncCompression"]
+        PublicDependencies = ["Launch", "Compression", "AsyncCompression"]
     };
 }

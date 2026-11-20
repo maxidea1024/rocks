@@ -28,6 +28,13 @@
 - 증분: 생성 TU의 key는 cpp 내용이고 `<out>/BuildInfo`는 header 디렉터리가 아니다. ID가 같으면 생성 파일을 다시 쓰지 않아 no-op이 0 액션이고, Core에 닿는 실행 파일은 입력 byte가 하나만 바뀌어도(주석 포함) 생성 TU와 link가 다시 돈다. 첫 InputSnapshot은 Prepare가 읽은 digest·열거의 메모로 만들어 마지막 비교가 Prepare 읽기부터 빌드 끝까지를 덮는다.
 - `NativeBuildResult.ToolchainFingerprint`(대상이 없으면 null)·`ToolBuildIds`(link가 성공한 실행 파일만)는 action-report.json에 실린다.
 
+## 의존 공개 범위(ModuleVisibility)
+
+- 모듈은 `PublicDependencies`(공개 헤더가 쓰는 모듈)와 `PrivateDependencies`(구현만 쓰는 모듈) 두 목록으로 의존한다([빌드 타깃](../../Docs/Design/BuildTargets.ko.md) 3.5절, UE `PublicDependencyModuleNames`·`PrivateDependencyModuleNames`). 한 모듈을 두 목록에 함께 적으면 `InputValidation`이 거부한다.
+- 보임: `ModuleVisibility.Of`가 컴파일 환경에 보이는 의존 모듈을 계산한다 — 대상 모듈은 두 목록, 그 밖의 모듈은 공개 목록만 따라간다(의존 우선 후위 순서). include·정의·`AdditionalInputs`·공유 PCH 후보와 메타데이터의 include 순서·import 범위·생성 헤더 해석이 이 결과를 쓴다.
+- 도달: 링크·빌드 대상·순환 검사·`Closures`·모듈 표·SDK·기술자 검사·Release 배제는 `AllDependencies`(공개 다음 비공개)를 따라간다. 비공개 의존도 링크한다.
+- BS0 전환은 기존 모듈을 모두 공개 의존으로 옮겼고, 모든 타깃의 `compile_commands.json`이 전환 전과 같다.
+
 ## 모듈 표(ModuleTables)
 
 `NativeModuleInput.ProvidesModuleTable` 표지 모듈(엔진 Core — `Core/Module/ModuleEntry.h`)에 닿는 `Executable` 모듈마다 `ModuleTables.Add`가 `<실행 파일>.ModuleTable.cpp`를 그 모듈의 생성 소스로 더한다(`<out>/GeneratedSources/<실행 파일>/`, 규칙 생성 TU와 같은 경로·증분 — [모듈 로더](../../Docs/Design/ModuleLoader.ko.md) 3.2절). 이름 "Core"로 판정하지 않는다.

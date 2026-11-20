@@ -18,7 +18,7 @@ public sealed class AssetTestFixtures : EngineModuleRules
 
     // CoreTypeBindings: Transform, vector, rotator and InterpCurve mirrors. Localization: Text fields. Curves: TangentCurve fields.
     // MeshSource: MeshSourceData fields.
-    protected override string[] RequiredModules => ["AssetRuntime", "CoreTypeBindings", "Localization", "Curves", "MeshSource"];
+    protected override string[] PublicDependencies => ["AssetRuntime", "CoreTypeBindings", "Localization", "Curves", "MeshSource"];
 
     protected override bool HasSources => false;
 

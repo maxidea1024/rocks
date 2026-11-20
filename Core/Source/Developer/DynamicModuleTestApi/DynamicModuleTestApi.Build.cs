@@ -9,7 +9,7 @@ public sealed class DynamicModuleTestApi : CoreModuleRules
 
     protected override string ModuleName => "DynamicModuleTestApi";
 
-    protected override string[] RequiredModules => ["Core"];
+    protected override string[] PublicDependencies => ["Core"];
 
     protected override bool HasSources => false;
 }

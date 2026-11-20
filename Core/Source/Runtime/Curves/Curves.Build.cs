@@ -14,7 +14,7 @@ public sealed class Curves : CoreModuleRules
     // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
     protected override UnityMode Unity => UnityMode.On;
 
-    protected override string[] RequiredModules => ["ObjectRuntime"];
+    protected override string[] PublicDependencies => ["ObjectRuntime"];
 
     protected override IReadOnlyList<string> Metadata => ["Curves/CurveTypes.h", "Curves/TangentCurve.h", "Curves/PlainCurve.h", "Curves/StepCurves.h", "Curves/PackedTangentCurve.h"];
 }

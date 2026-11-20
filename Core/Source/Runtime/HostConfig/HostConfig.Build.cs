@@ -13,5 +13,5 @@ public sealed class HostConfig : CoreModuleRules
     protected override UnityMode Unity => UnityMode.On;
 
     // ModuleLoader: settings registration walks the module table (Docs/Design/ModuleLoader.ko.md section 3.10).
-    protected override string[] RequiredModules => ["LogHost", "TraceControl", "Config", "ModuleLoader"];
+    protected override string[] PublicDependencies => ["LogHost", "TraceControl", "Config", "ModuleLoader"];
 }

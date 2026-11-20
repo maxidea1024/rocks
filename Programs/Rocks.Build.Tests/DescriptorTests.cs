@@ -231,7 +231,7 @@ internal static class DescriptorTests
         ProjectDescriptor project = DescriptorReader.ReadProject(projectFile);
         IReadOnlyList<PluginDescriptor> available = PluginCatalog.Discover([plugins]);
 
-        NativeModuleInput Rule(string name, params string[] dependencies) => new() { Name = name, Dependencies = dependencies };
+        NativeModuleInput Rule(string name, params string[] dependencies) => new() { Name = name, PublicDependencies = dependencies };
         NativeModuleInput[] rules =
         [
             Rule("Game", "Water", "ObjectRuntime"), Rule("GameTools", "Game"), Rule("GameEditor", "GameTools"),

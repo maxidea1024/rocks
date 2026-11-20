@@ -176,7 +176,7 @@ internal static class UnityTests
             // 경로 해시 anchor를 없애 묶을 수 있는 소스 전부를 한 구간에 둔다.
             UnityAnchorFiles = int.MaxValue
         };
-        NativeModuleInput application = new() { Name = "UnityApp", Kind = NativeModuleKind.Executable, Sources = [main], Dependencies = ["UnityLib"] };
+        NativeModuleInput application = new() { Name = "UnityApp", Kind = NativeModuleKind.Executable, Sources = [main], PublicDependencies = ["UnityLib"] };
         NativeBuildRequest unity = request with
         {
             RootDirectory = fixture,
@@ -322,7 +322,7 @@ internal static class UnityTests
         {
             RootDirectory = fixture,
             OutputDirectory = output,
-            Modules = [reflected, new() { Name = "ReflectedApp", Kind = NativeModuleKind.Executable, Sources = [main], Dependencies = ["Reflected"] }],
+            Modules = [reflected, new() { Name = "ReflectedApp", Kind = NativeModuleKind.Executable, Sources = [main], PublicDependencies = ["Reflected"] }],
             Targets = ["ReflectedApp"]
         };
         // 손으로 쓴 소스는 모듈의 Unity 기본값(끔)을 따르고, 리플렉션 생성 소스는 기본으로 자기들끼리 묶인다.

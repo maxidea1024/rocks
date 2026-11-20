@@ -17,5 +17,5 @@ public sealed class ObjectRuntime : CoreModuleRules
     // (Docs/Design/ReflectionFoundations.ko.md section 6.4).
     // Localization: rocks::Text field values (Docs/Design/ReflectionExtensions.ko.md section 13).
     // ModuleLoader: ModuleTypeRegistrations implements the module loader's type registrar (Docs/Design/ModuleLoader.ko.md section 3.10).
-    protected override string[] RequiredModules => ["MetaSchema", "Task", "Serialization", "Localization", "ModuleLoader"];
+    protected override string[] PublicDependencies => ["MetaSchema", "Task", "Serialization", "Localization", "ModuleLoader"];
 }

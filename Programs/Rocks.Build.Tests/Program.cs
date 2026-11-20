@@ -55,8 +55,8 @@ try
     var modules = new NativeModuleInput[]
     {
         new() { Name = "Headers", PublicIncludeDirectories = [include] },
-        new() { Name = "Engine", Sources = [librarySource], Dependencies = ["Headers"] },
-        new() { Name = "Game", Kind = NativeModuleKind.Executable, Sources = [gameSource], Dependencies = ["Engine"] }
+        new() { Name = "Engine", Sources = [librarySource], PublicDependencies = ["Headers"] },
+        new() { Name = "Game", Kind = NativeModuleKind.Executable, Sources = [gameSource], PublicDependencies = ["Engine"] }
     };
     var request = new NativeBuildRequest
     {
@@ -102,6 +102,7 @@ try
         {
             case "dependency":
                 await DependencyTests.RunAsync(request, root, Pass);
+                DependencyScopeTests.Run(request, root, Pass);
                 break;
             case "unity":
                 await UnityTests.RunAsync(request, root, Pass);
@@ -264,7 +265,7 @@ try
 
     try
     {
-        await builder.BuildAsync(request with { Modules = [new() { Name = "A", Dependencies = ["B"] }, new() { Name = "B", Dependencies = ["A"] }], Targets = ["A"] });
+        await builder.BuildAsync(request with { Modules = [new() { Name = "A", PublicDependencies = ["B"] }, new() { Name = "B", PublicDependencies = ["A"] }], Targets = ["A"] });
         throw new InvalidOperationException("Cycle accepted");
     }
     catch (ArgumentException) { }
@@ -332,6 +333,7 @@ try
 
     // 정밀 헤더 의존(UB0): depfile 파서, 2단 key, 의존 기록, compile identity, 출력 검증 memo. 하위 묶음마다 PASS를 센다.
     await DependencyTests.RunAsync(request, root, Pass);
+    DependencyScopeTests.Run(request, root, Pass);
 
     // 유니티 묶기(UB1): 구성 결정성, include 앞 #define 판정, 실제 빌드(__FILE__·제외·논리 명령·변형 디렉터리·정리), 리플렉션 생성 소스 묶기.
     await UnityTests.RunAsync(request, root, Pass);

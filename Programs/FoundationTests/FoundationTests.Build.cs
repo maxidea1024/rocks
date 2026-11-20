@@ -137,7 +137,7 @@ public abstract class TestsModule : ModuleRules
                 .. (Layer == TestLayer.Engine ? ThirdPartyModuleRules.ConsumerDefines(context, EngineThirdPartyHeaders) : [])],
             // ModuleLoader tests load DynamicModuleTestFixture at run time (Docs/Design/ModuleLoader.ko.md section 3.8): it is linked into this
             // executable and has a module table row, but its headers stay off this module's include path; tests use DynamicModuleTestApi.
-            Dependencies = [.. dependencies, .. fixtures, "DynamicModuleTestApi"],
+            PublicDependencies = [.. dependencies, .. fixtures, "DynamicModuleTestApi"],
             DynamicModules = ["DynamicModuleTestFixture"]
         };
     }

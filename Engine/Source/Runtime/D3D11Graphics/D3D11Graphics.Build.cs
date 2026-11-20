@@ -10,7 +10,7 @@ public sealed class D3D11Graphics : EngineModuleRules
     // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
     protected override UnityMode Unity => UnityMode.On;
 
-    protected override string[] RequiredModules => ["Graphics", "DxgiGraphics"];
+    protected override string[] PublicDependencies => ["Graphics", "DxgiGraphics"];
 
     public override NativeModuleInput Configure(BuildContext context)
     {
@@ -24,7 +24,7 @@ public sealed class D3D11Graphics : EngineModuleRules
             // The entry point (Private/<Module>Module.cpp) is built on every platform.
             Sources = [ModuleEntrySource(context), .. context.Sources(windows ? $"{backend}/Win64" : $"{backend}/Unsupported")],
             PublicIncludeDirectories = [context.PathInRoot($"{ModuleDirectory}/Public")],
-            Dependencies = RequiredModules,
+            PublicDependencies = PublicDependencies,
             // Shaders are compiled at run time with D3DCompile (d3dcompiler_47, a system DLL) until cooked
             // D3D11_SM5 code arrives in SH5.
             SystemLibraries = windows ? ["d3d11", "dxgi", "d3dcompiler", "user32"] : []

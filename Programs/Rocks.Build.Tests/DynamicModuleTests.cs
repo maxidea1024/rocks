@@ -11,7 +11,7 @@ using Rocks.Tooling.Common;
 /// <item>Engine·Game 컴파일에 Plugin의 public include가 들어가지 않는다(Plugin 소스는 받는다).</item>
 /// <item>타깃이 직접 닿지 않아도 Plugin을 빌드하고, 바꾸면 Plugin·실행 파일만 다시 돈다.</item>
 /// <item>중첩 동적 모듈, 동적 모듈만 끌어오는 archive와 링크 순서, 링크 의존이기도 한 동적 모듈(행·archive 하나), 실행 파일 자신의 동적 모듈.</item>
-/// <item>거부: Dependencies와 겹침, 자기 자신, 실행 파일, 모르는 이름, 대소문자 철자, 중복, 표에 행이 없는 모듈(header-only·서드파티), 링크 의존만의
+/// <item>거부: 두 의존 목록과 겹침, 자기 자신, 실행 파일, 모르는 이름, 대소문자 철자, 중복, 표에 행이 없는 모듈(header-only·서드파티), 링크 의존만의
 /// 순환.</item>
 /// </list>
 /// </summary>
@@ -101,21 +101,21 @@ internal static class DynamicModuleTests
         NativeModuleInput[] modules =
         [
             new() { Name = "Core", Sources = [coreSource], PublicIncludeDirectories = [coreInclude], ProvidesModuleTable = true },
-            new() { Name = "Engine", Sources = [engineSource], Dependencies = ["Core"], DynamicModules = ["Plugin", "Shared"] },
+            new() { Name = "Engine", Sources = [engineSource], PublicDependencies = ["Core"], DynamicModules = ["Plugin", "Shared"] },
             new()
             {
-                Name = "Plugin", Sources = [pluginSource], PublicIncludeDirectories = [pluginInclude], Dependencies = ["Engine", "PluginHelper"],
+                Name = "Plugin", Sources = [pluginSource], PublicIncludeDirectories = [pluginInclude], PublicDependencies = ["Engine", "PluginHelper"],
                 DynamicModules = ["Nested"]
             },
-            new() { Name = "PluginHelper", Sources = [Simple("PluginHelper")], Dependencies = ["Core"] },
-            new() { Name = "Nested", Sources = [Simple("Nested")], Dependencies = ["Core"] },
-            new() { Name = "Shared", Sources = [Simple("Shared")], Dependencies = ["Core"] },
-            new() { Name = "Solo", Sources = [Simple("Solo")], Dependencies = ["Core"] },
-            new() { Name = "Headers", PublicIncludeDirectories = [headersInclude], Dependencies = ["Core"] },
+            new() { Name = "PluginHelper", Sources = [Simple("PluginHelper")], PublicDependencies = ["Core"] },
+            new() { Name = "Nested", Sources = [Simple("Nested")], PublicDependencies = ["Core"] },
+            new() { Name = "Shared", Sources = [Simple("Shared")], PublicDependencies = ["Core"] },
+            new() { Name = "Solo", Sources = [Simple("Solo")], PublicDependencies = ["Core"] },
+            new() { Name = "Headers", PublicIncludeDirectories = [headersInclude], PublicDependencies = ["Core"] },
             new() { Name = "Third", Sources = [thirdSource], ThirdParty = true },
             new()
             {
-                Name = "Game", Kind = NativeModuleKind.Executable, Sources = [mainSource], Dependencies = ["Engine", "Core", "Shared"],
+                Name = "Game", Kind = NativeModuleKind.Executable, Sources = [mainSource], PublicDependencies = ["Engine", "Core", "Shared"],
                 DynamicModules = ["Solo"]
             }
         ];
@@ -188,7 +188,7 @@ internal static class DynamicModuleTests
         NativeModuleInput plugin = byName["Plugin"];
         NativeModuleInput gameModule = byName["Game"];
         await Rejects(builder, game with { Modules = Replace(gameModule with { DynamicModules = ["Engine"] }) },
-            "both in Dependencies and DynamicModules", "a module that is both linked and loaded at run time");
+            "both a dependency and in DynamicModules", "a module that is both linked and loaded at run time");
         await Rejects(builder, game with { Modules = Replace(plugin with { DynamicModules = ["Plugin"] }) },
             "cannot load itself", "a module that loads itself");
         await Rejects(builder, game with { Modules = Replace(engine with { DynamicModules = ["Game"] }) },
@@ -205,7 +205,7 @@ internal static class DynamicModuleTests
         await Rejects(builder, game with { Modules = Replace(engine with { DynamicModules = ["Third"] }) },
             "cannot be loaded at run time", "a third-party module loaded at run time");
         // 링크 의존만으로 된 순환은 지금처럼 거부한다(동적 관계를 링크 의존으로 바꾸면 Engine ↔ Plugin 순환이다).
-        await Rejects(builder, game with { Modules = Replace(engine with { Dependencies = ["Core", "Plugin"], DynamicModules = [] }) },
+        await Rejects(builder, game with { Modules = Replace(engine with { PublicDependencies = ["Core", "Plugin"], DynamicModules = [] }) },
             "Module dependency cycle", "a link dependency cycle");
     }
 

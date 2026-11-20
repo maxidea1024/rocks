@@ -53,7 +53,7 @@ public static class ModuleTables
             }
 
             bool reaches = module.ProvidesModuleTable;
-            foreach (string dependency in module.Dependencies)
+            foreach (string dependency in module.AllDependencies)
             {
                 reaches |= Reaches(dependency);
             }
@@ -280,13 +280,13 @@ public static class ModuleTables
                 return;
             }
 
-            foreach (string next in dependency.Dependencies)
+            foreach (string next in dependency.AllDependencies)
             {
                 Add(next);
             }
         }
 
-        foreach (string dependency in module.Dependencies)
+        foreach (string dependency in module.AllDependencies)
         {
             Add(dependency);
         }

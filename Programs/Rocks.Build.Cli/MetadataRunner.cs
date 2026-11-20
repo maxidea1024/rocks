@@ -49,7 +49,7 @@ public static class MetadataRunner
                 throw new ArgumentException($"Target '{target.Name}': dependency cycle at '{module.Name}'.");
             }
 
-            foreach (string dependency in module.Dependencies)
+            foreach (string dependency in module.AllDependencies)
             {
                 Reach(dependency);
             }
@@ -116,6 +116,9 @@ public static class MetadataRunner
                 cancellationToken.ThrowIfCancellationRequested();
                 NativeModuleInput owner = byName[run.Name];
                 List<NativeModuleInput> dependencies = TransitiveDependencies(owner, byName);
+                // import 범위는 보임이 아니라 도달(두 목록)이다. import한 descriptor의 타입(그 모듈의 private 타입 포함)이 쓰는 다른
+                // 모듈 타입도 이어야 하므로 비공개 의존 쪽 descriptor까지 닫힌 집합이어야 한다(Docs/Design/BuildTargets.ko.md 3.5절 BD8).
+                NativeModuleInput[] importScope = LinkClosure.Of(owner.Name, byName, false).Select(name => byName[name]).ToArray();
                 var arguments = new List<string> { compilerTool, "--module", run.Name };
                 foreach (MetadataHeader header in run.Headers)
                 {
@@ -128,7 +131,7 @@ public static class MetadataRunner
 
                 arguments.AddRange(["--output-root", StageRoot(run.Name), "--descriptor", StageDescriptor(run.Name),
                     "--identity-manifest", run.Manifest, "--identity-inventory", Inventory(run.Name), "--compiler", toolchain.CompilerPath]);
-                foreach (NativeModuleInput dependency in dependencies)
+                foreach (NativeModuleInput dependency in importScope)
                 {
                     if (metadata.ContainsKey(dependency.Name))
                     {
@@ -305,32 +308,10 @@ public static class MetadataRunner
         return !string.Equals(name, swapped, StringComparison.Ordinal) && File.Exists(Path.Combine(Path.GetDirectoryName(existing)!, swapped));
     }
 
-    private static List<NativeModuleInput> TransitiveDependencies(NativeModuleInput module, IReadOnlyDictionary<string, NativeModuleInput> byName)
-    {
-        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var result = new List<NativeModuleInput>();
-        void Visit(string name)
-        {
-            NativeModuleInput current = byName[name];
-            if (!visited.Add(current.Name))
-            {
-                return;
-            }
-
-            foreach (string dependency in current.Dependencies)
-            {
-                Visit(dependency);
-            }
-
-            if (!string.Equals(current.Name, module.Name, StringComparison.OrdinalIgnoreCase))
-            {
-                result.Add(current);
-            }
-        }
-
-        Visit(module.Name);
-        return result;
-    }
+    // module의 컴파일 환경에 보이는 의존 모듈이다(전파 정의 — ModuleVisibility, Docs/Design/BuildTargets.ko.md 3.5절 BD8).
+    private static List<NativeModuleInput> TransitiveDependencies(NativeModuleInput module, IReadOnlyDictionary<string, NativeModuleInput> byName) =>
+        ModuleVisibility.Of(module, byName, (name, from) =>
+            throw new ArgumentException($"Module '{from}' depends on unknown module '{name}'."));
 
     private static async Task<int> RunIdsAsync(BuildContext context, NativeToolchain toolchain, string compilerTool,
         IReadOnlyList<string> command, CancellationToken cancellationToken)

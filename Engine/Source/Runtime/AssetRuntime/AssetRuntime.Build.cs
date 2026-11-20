@@ -15,7 +15,7 @@ public sealed class AssetRuntime : EngineModuleRules
     // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
     protected override UnityMode Unity => UnityMode.On;
 
-    protected override string[] RequiredModules => ["ObjectSerialization", "ObjectRuntime", "Serialization", "Task", "Compression"];
+    protected override string[] PublicDependencies => ["ObjectSerialization", "ObjectRuntime", "Serialization", "Task", "Compression"];
 
     protected override IReadOnlyList<string> Metadata => ["AssetRuntime/BulkData.h", "AssetRuntime/Package.h"];
 }
