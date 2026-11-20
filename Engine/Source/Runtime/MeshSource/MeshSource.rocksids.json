@@ -1,0 +1,131 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "rocks::MeshAttributeRecord::channels",
+      "id": "6f0a0baae7ed4563bb9680d46571d73c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshAttributeRecord::data",
+      "id": "4814420d7f19493dba82505c5d5375f3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshAttributeRecord::element",
+      "id": "31631229475a42638e10c99b20cb450b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshAttributeRecord::name",
+      "id": "a0e461d295c94aab8c4ec209b3954684",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshAttributeRecord::type",
+      "id": "8fc7aaa3219b43ebb66d88eada39ec37",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshSourceData::attributes",
+      "id": "add5ac7cb1ab4d13a88edf825f75d1bf",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshSourceData::cornerCount",
+      "id": "7d9b6a0178e44a0a932d01785fe1980a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshSourceData::edgeCount",
+      "id": "3e708b370d4348738e8314bd88d7f622",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshSourceData::formatVersion",
+      "id": "b6f4c78c05924f8ba05b941fce3d5cf2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshSourceData::polygonCount",
+      "id": "505173d732ca4f5898817d36c7d96c6a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshSourceData::polygonGroupCount",
+      "id": "d7f23f13b24244ab853f867cc1c5640d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshSourceData::topology",
+      "id": "4c2909907b2a4f7e9eaa35f85d38142f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshSourceData::triangleCount",
+      "id": "9b5b78f5e2e14fe88c9562df7f9200cd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::MeshSourceData::vertexCount",
+      "id": "d884456a6b004e3da57d24f8f7b3270f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::MeshAttributeRecord",
+      "id": "05becfcbc182445089d8a3638e44290b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::MeshElement",
+      "id": "22a91e90f67e4f2dad0eaf0395c1a1a7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::MeshSourceData",
+      "id": "38f92b938eb54bdbb43a4659cfb5bf29",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::MeshValueType",
+      "id": "f6f4da80fe8d435b942159c3cc02847e",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}

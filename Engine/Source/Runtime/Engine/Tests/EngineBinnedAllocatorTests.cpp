@@ -67,6 +67,7 @@ TEST(Engine_RunsOnBinnedAllocatorWithGcWorkers) {
         BinnedAllocator allocator(system);
         {
             EngineConfig config;
+            config.modules = &test::ProcessModules();
             config.fixedFrameDeltaSeconds = FrameSeconds;
             config.gcWorkers = 2;
             Engine engine(allocator);
@@ -107,6 +108,7 @@ TEST(Engine_RunsOnBinnedAllocatorWithSerialMarking) {
         BinnedAllocator allocator(system);
         {
             EngineConfig config;
+            config.modules = &test::ProcessModules();
             config.fixedFrameDeltaSeconds = FrameSeconds;
             config.gcWorkers = 0;
             Engine engine(allocator);
@@ -139,6 +141,7 @@ TEST(Engine_RestartsOnTheSameBinnedAllocator) {
         for (uint32 lifetime = 0; lifetime < Lifetimes; ++lifetime) {
             {
                 EngineConfig config;
+                config.modules = &test::ProcessModules();
                 config.fixedFrameDeltaSeconds = FrameSeconds;
                 config.gcWorkers = 2;
                 Engine engine(allocator);

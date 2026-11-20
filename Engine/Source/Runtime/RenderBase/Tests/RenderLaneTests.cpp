@@ -494,6 +494,7 @@ void EngineShutdownScenario(RenderLaneMode mode) noexcept {
 
     {
         EngineConfig engineConfig;
+        engineConfig.modules = &test::ProcessModules();
         engineConfig.hooks = &hooks;
         engineConfig.fixedFrameDeltaSeconds = 1.0 / 60.0;
         engineConfig.maxFrames = 3;

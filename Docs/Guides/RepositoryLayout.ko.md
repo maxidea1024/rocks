@@ -157,7 +157,7 @@ public sealed class Core : CoreModuleRules
 - 규칙 이름을 `Configure` 전에 알 수 있게 해(UBT처럼 파일·클래스 이름 규약) 빠질 모듈의 규칙을 실행하지 않는다.
 - 엔진 저장소 빌드(`Foundation`·`Engine` 타깃)의 `Engine/Plugins` 연동: 지금은 엔진 플러그인이 없어 게임 빌드만
   기술자를 적용한다. 설치 SDK는 엔진 플러그인을 내보내지 않는다.
-- `loadingPhase`의 런타임 반영(모듈 로더가 생기면).
+- `loadingPhase`의 런타임 반영: [모듈 로더](../Design/ModuleLoader.ko.md) 3.3·3.11절(ML1)이 모듈 표 행의 단계로 반영한다(`PostEngineInit`·`None` 포함). 기술자 모듈의 플러그인 활성 반영은 ML5다.
 - 소스 트리 프로젝트 빌드가 생기면 그 `.rocksproject`의 engineVersion을 `Build/Build.version`과 대조한다(지금 기술자는
   설치 SDK 게임 빌드에서만 읽고, 그때 SDK manifest의 엔진 버전과 대조한다).
 - 2026-11-12 이전 구조(`Engine/<Module>`, 최상위 `Tests/`·`Tools/`)를 가리키는 과거 검토·배포 문서

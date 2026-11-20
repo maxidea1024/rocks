@@ -1,6 +1,6 @@
 # 모듈 로더 설계
 
-기준일: 2026-11-20, 개정 4. 모듈의 수명(시작·종료)과 적재를 맡는 모듈 로더를 정한다. UE 5.8 `IModuleInterface`·`FModuleManager`·로딩 단계(`ELoadingPhase`)에 해당한다.
+기준일: 2026-11-20, 개정 5. 모듈의 수명(시작·종료)과 적재를 맡는 모듈 로더를 정한다. UE 5.8 `IModuleInterface`·`FModuleManager`·로딩 단계(`ELoadingPhase`)에 해당한다.
 
 [빌드 타깃 설계](BuildTargets.ko.md) 3.8절은 Editor 타깃을 UE와 같이 모듈식(`Modular`)으로 링크하기로 정했다(BD17). 그리고 모듈 로더를 별도 스펙으로 넘기며 네 가지 계약을 요구했다(BD30).
 1. 같은 소스가 `Monolithic`·`Modular`에서 같은 순서·결과로 동작한다.
@@ -12,7 +12,7 @@
 
 UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`, commit `f45729c0b6f0`)이고, 경로는 `Engine/Source/` 기준이다. UE 이름은 대응표와 근거에만 적는다. hot reload·Live Coding(코드 다시 불러오기)은 범위 밖이다(9.2절).
 
-상태: **설계 초안**(결정 MD1–MD22, 모두 권장안). 구현 단계는 ML0–ML6(6절)이며 착수 시점은 사용자가 정한다. ML0 구현·병합(개정 2에 구현 세부). ML2는 ML1(Launch 병합 대기) 전에 하는 연결을 3.10절(개정 3)에 정했고, [리플렉션 생성 소스](ReflectionGeneratedSources.ko.md) GS1 병합 뒤 그 구조 위에서 구현했다(2026-11-20 — ML1 뒤로 넘긴 것은 3.10절 끝). ML3(`DynamicModules`)은 개정 4에서 UE 근거로 순환 규칙을 고쳐(3.8절) 구현했다. ML0–ML4는 Rocks Studio(BS5) 전에, ML5는 BS4·BS5와 함께 한다. Modular 적재(ML4)는 [빌드 타깃](BuildTargets.ko.md) BS8 뒤다. 초안을 서브에이전트 1개로 교차 검증해 반영했다(10절).
+상태: **설계 초안**(결정 MD1–MD22, 모두 권장안). 구현 단계는 ML0–ML6(6절)이며 착수 시점은 사용자가 정한다. ML0 구현·병합(개정 2에 구현 세부). ML2는 ML1(Launch 병합 대기) 전에 하는 연결을 3.10절(개정 3)에 정했고, [리플렉션 생성 소스](ReflectionGeneratedSources.ko.md) GS1 병합 뒤 그 구조 위에서 구현했다(2026-11-20 — ML1 뒤로 넘긴 것은 3.10절 끝). ML3(`DynamicModules`)은 개정 4에서 UE 근거로 순환 규칙을 고쳐(3.8절) 구현했다. ML1(단계 실행·묶음·Launch 통합)은 crash-launch 병합 뒤 개정 5에서 3.11절로 정해 구현했다. ML0–ML4는 Rocks Studio(BS5) 전에, ML5는 BS4·BS5와 함께 한다. Modular 적재(ML4)는 [빌드 타깃](BuildTargets.ko.md) BS8 뒤다. 초안을 서브에이전트 1개로 교차 검증해 반영했다(10절).
 
 ## 1. 현재 상태
 
@@ -154,7 +154,11 @@ class ModuleLoader {
 public:
     static Result<UniquePtr<ModuleLoader>> TryCreate(Allocator& allocator, ModuleTable table) noexcept;
     ModuleLoadReport Load(StringView name) noexcept;              // 의존부터 시작, 이미 시작했으면 성공
-    ModuleLoadReport StartPhase(LoadingPhase phase) noexcept;     // ML1
+    ModuleLoadReport StartPhase(LoadingPhase phase) noexcept;     // ML1(3.11절)
+    ModuleLoadReport StartEngineGroup() noexcept;                 // 엔진 묶음 참조 수(ML1)
+    void ShutdownEngineGroup() noexcept;                          // ML1
+    bool PhaseStarted(LoadingPhase phase) const noexcept;         // ML1
+    ModuleGroup CurrentGroup() const noexcept;                    // ML1
     void ShutdownGroup(ModuleGroup group) noexcept;               // 3.7절
     ModuleUnloadReport Unload(StringView name) noexcept;          // 3.7절, ML6
     bool IsStarted(StringView name) const noexcept;
@@ -166,9 +170,9 @@ public:
     ModuleTable Table() const noexcept;                           // 만들 때 받은 모듈 표(ML2, 3.10절)
     Result<ModuleLease> AcquireLease(StringView name) noexcept;   // 모듈 lease 하나 더(ML2, 3.10절)
     usize ModulesWithLeases(Span<StringView> names) const noexcept; // 남은 lease 진단(ML2)
-    ModuleLoadReport AttachTypeRegistrar(ModuleTypeRegistrar& registrar) noexcept; // ML2
-    void DetachTypeRegistrar() noexcept;                          // ML2
-    ModuleTypeRegistrar* TypeRegistrar() const noexcept;          // 붙은 등록기(ML2)
+    ModuleLoadReport AttachTypeRegistrar(ModuleTypeRegistrar& registrar) noexcept; // ML2, 여럿(ML1)
+    void DetachTypeRegistrar(ModuleTypeRegistrar& registrar) noexcept; // ML2, 여럿(ML1)
+    usize TypeRegistrarCount() const noexcept;                    // 붙은 등록기 수(ML1)
     HostServices& Services() noexcept;
     MulticastDelegate<void(StringView, ModuleChange)> Changed;    // Started·Unloaded
 };
@@ -358,7 +362,7 @@ ML1(로딩 단계·묶음 전환·Launch 통합)은 crash-launch 병합을 기�
 - LogHost·TraceControl·Config 모듈의 설정 등록을 각 모듈 수명 객체의 `RegisterSettings`로 옮긴다. 공개 함수(`RegisterLogSettings` 등)는 시험이 쓰므로 남기고 호스트 코드는 부르지 않는다.
 - HostSettings 자기 레지스트리의 설정 타입 등록(Config·TraceControl 집계)은 3.6절대로 명시 등록으로 남는다.
 
-**호스트(MD4 대체, ML1까지).**
+**호스트(MD4 대체, ML1까지 — 개정 5에서 3.11절로 대체).**
 - Sandbox 엔진 호스트가 Launch를 대신해 프로세스 로더를 만든다: 이 실행 파일의 모듈 표로 만들고 실행 파일 모듈을 적재(모든 모듈 시작) → HostSettings·Engine에 넘김 → 끝에 `ShutdownGroup(Process)`. 로더는 HostSettings·Engine보다 오래 산다.
 - Commandlet·시험 runner는 로더를 만들지 않는다(대체 경로를 쓴다). WorldBench는 엔진 없이 World 레지스트리를 만들므로 자기 로더와 `ModuleTypeRegistrations`로 등록한다.
 - 남은 lease 진단(MD16): `ModuleLoader::ModulesWithLeases(names)`가 lease가 남은 모듈 이름과 수를 돌려준다. 호스트는 로더를 파괴하기 전에 불러 영어로 기록한다(이름은 상한까지, 넘친 모듈은 수만 — 로더 소멸의 Fatal은 마지막 안전장치로 남는다).
@@ -368,6 +372,55 @@ ML1(로딩 단계·묶음 전환·Launch 통합)은 crash-launch 병합을 기�
 - 모듈 `Startup`이 호스트 서비스(TraceSession·ConfigContext·Engine)를 쓰는 등록: 지금은 모든 모듈이 서비스가 생기기 전에 시작하므로(단계 없음) trace 채널·trace 타입 등록(`RegisterGpuTraceTypes` 등)과 그 lease, 콘솔 명령 등록을 `Startup`으로 옮길 수 없다.
 - 엔진 묶음의 참조 수(동시에 여러 Engine)와 등록기의 묶음별 시점(`Engine::Shutdown`의 엔진 묶음 종료).
 - 모듈별 CVar 핸들 단위 lease(지금은 문맥이 모듈 lease를 통째로 잡는다 — 실행 중 해제(ML6) 때 핸들 해제와 함께 정한다).
+
+### 3.11 ML1 구현 세부(개정 5)
+
+crash-launch(공통 실행 진입점 Launch) 병합 뒤 단계 실행·묶음·Launch 통합을 정한다. 애매한 곳은 UE 5.8을 따랐다. 3.10절의 "호스트(MD4 대체, ML1까지)"와 Engine 대체 로더는 이 절로 대체한다.
+
+**단계와 모듈 표.**
+- Core `LoadingPhase`에 `PostEngineInit`·`None`을 더한다(값 순서: `EarliestPossible`, `PostConfigInit`, `PreDefault`, `Default`, `PostDefault`, `PostEngineInit`, `None`). 빌드 기술자 `loadingPhase`도 같은 값을 받는다(MD5).
+- 엔진 모듈 규칙(`SourceModuleRules`)에 `LoadingPhase` 속성(기본 `Default`)을 둔다. 기술자 모듈은 지금처럼 기술자 값이다.
+- `ModuleTableRow`에 `onRequest`(요청 시 적재 행 — 3.8절)를 더한다. 생성기가 `LinkClosure.Of(…, out onRequest)`로 채운다. 행 형식은 실행 파일 안의 생성 TU와 로더 사이 계약이라 `ModuleEntryVersion`은 그대로다(진입 기술은 바뀌지 않는다).
+- 실행 파일 모듈 행의 단계는 늘 `None`이다(빌드가 규칙 값과 무관하게 싣는다). 본문은 이미 실행 중인 코드이고, 단계 실행이 실행 파일 행을 시작하면 그 의존(시험 fixture 같은 `None` 모듈 포함)을 모두 끌어 시작하기 때문이다. UE에서도 Program의 주 모듈은 로딩 단계로 적재하지 않는다(게임 주 모듈은 실행 파일이 아니라 기술자 모듈이다). 필요하면 본문이 `Load`로 시작한다.
+- 시험 fixture 모듈(ReflectionTestFixtures·ConfigTestFixtures·CurvesTestFixtures·WorldTestFixtures·AssetTestFixtures)은 규칙 단계가 `None`이다. 시험이 자기 레지스트리에 그 타입을 등록하므로, 시험 실행기의 엔진 묶음이 모든 Engine에 등록하면 겹친다(같은 이름 타입 `AlreadyExists`). UE에서도 시험·도구 모듈은 단계로 적재하지 않는다.
+
+**빌드 검사.**
+- **단계 순서(MD6)**: 모듈 표 행마다, 행의 의존(면제 모듈을 거친 대체 의존 포함 — 3.2절)의 단계는 그 행의 단계보다 늦을 수 없다(`None` 의존은 허용, `None` 행은 검사하지 않는다). 요청 시 적재 행도 같다. 실행 파일 행은 `None`이라 검사하지 않는다.
+- **층별 기본 단계(개정 5 리뷰)**: 엔진 모듈 규칙의 기본 단계는 층이 정한다. Core 층(`CoreModuleRules`)은 `PostConfigInit`, Engine 층(`EngineModuleRules`)은 `PreDefault`다. UE는 기술자 단계 전에 핵심 모듈을 따로 올린다 — `FEngineLoop::LoadCoreModules`가 CoreUObject를, `LoadPreInitModules`가 Engine·Renderer를 올린다(`Runtime/Launch/Private/LaunchEngineLoop.cpp:4424-4450`). 그래서 `PostConfigInit` 모듈이 설정·로그·trace 모듈에, `PreDefault` 게임·플러그인 모듈이 Engine·World에 의존할 수 있고, 호스트 서비스 모듈(Config·LogHost·HostConfig·TraceControl 등)은 엔진마다 다시 시작하지 않고 호스트 묶음으로 산다. 모두 `Default`로 두는 안은 이 두 의존을 MD6이 막고 호스트 서비스 모듈이 Engine마다 시작·종료돼 버렸다. 위반은 모듈 표를 만들 때 오류다(영어 문구에 두 모듈과 단계). 모듈 표에 드는 모듈만 보므로 면제 모듈의 단계는 뜻이 없다.
+- **부트 모듈(MD4)**: 새 표지 `ProvidesLaunch`(Launch 규칙이 켠다)를 둔다. 그 모듈의 링크 폐포에 든 진입점 모듈(지금은 Core·ModuleLoader·Launch)은 규칙 단계가 `EarliestPossible`이어야 한다. 아니면 오류다. 빌드가 몰래 바꾸지 않고 규칙에 적게 하는 것은 MD6 검사가 규칙 값으로 돌기 때문이다(Core가 `Default`로 남으면 `PostConfigInit` 모듈이 Core에 의존할 수 없다).
+- 설치 SDK manifest 11: `SdkModule`에 `LoadingPhase`·`ProvidesLaunch`를 싣는다. 게임 실행 파일의 모듈 표가 SDK 모듈의 단계를 알아야 MD6·부트 검사가 소스 빌드와 같은 판정을 하기 때문이다.
+
+**로더.**
+- `ModuleLoadReport StartPhase(LoadingPhase phase)`: 아직 돌지 않은 단계부터 `phase`까지 차례로 돈다. 단계마다 현재 묶음을 그 단계의 묶음(`EarliestPossible` → 프로세스, `PostConfigInit` → 호스트, `PreDefault`–`PostEngineInit` → 엔진)으로 바꾸고, 표 순서(의존 순서)로 그 단계 값을 가진 행 가운데 `onRequest`가 아닌 행을 시작한다(의존은 `Load`처럼 먼저 시작한다).
+  - 실패하면 그 단계를 멈추고 report를 돌려준다(`requested`는 실패한 단계 이름 — 부른 단계보다 앞일 수 있다). 그 단계는 돈 것으로 치지 않는다. 정리는 호출자가 그 묶음을 내린다(3.3절).
+  - 이미 돈 단계를 다시 부르면 할 일 없이 성공이다(UE `PluginManager.cpp:2909-2913`). 지금 묶음보다 앞 묶음의 단계를 부르면 계약 위반 Fatal이다(UE는 Error 로그 — 2842-2937행. Rocks는 호스트 순서 오류를 숨기지 않는다). `None`을 부르거나, 로더 스레드가 아니면(이 경우는 `WrongThread` report), `Load` 진행 중·묶음 종료 콜백 안에서 부르면 Fatal이다(`ShutdownGroup`과 같은 규칙).
+  - `ShutdownGroup(group)`은 그 묶음과 안쪽 묶음의 단계를 다시 돌 수 있게 되돌리고 현재 묶음을 바깥 묶음으로 돌린다(엔진 묶음을 내리면 다음 `StartPhase(PreDefault…)`가 다시 돈다 — 다음 Engine).
+  - 조회: `bool PhaseStarted(LoadingPhase)`(그 단계를 다 돌았는지), `ModuleGroup CurrentGroup()`.
+- **엔진 묶음 참조 수(MD9)**: `ModuleLoadReport StartEngineGroup()`은 참조 수를 올리고, 처음이면 `StartPhase(PostDefault)`를 돈다(엔진 앞 단계를 차례로). 실패하면 엔진 묶음을 스스로 내리고 참조 수를 되돌린 뒤 report를 돌려준다. `void ShutdownEngineGroup()`은 참조 수를 내리고 마지막이면 엔진 묶음을 내린다. 참조 수가 0이 아닐 때의 `ShutdownGroup`(어느 묶음이든)과 로더 파괴는 계약 위반 Fatal이다(엔진이 로더·호스트 묶음보다 먼저 끝나야 한다). `PostEngineInit`은 각 Engine이 `StartPhase(PostEngineInit)`으로 부른다(두 번째 Engine에는 할 일이 없다).
+- **타입 등록기 여럿(MD15 개정)**: 동시에 사는 Engine마다 자기 `TypeRegistry`가 있으므로 등록기를 `MaxTypeRegistrars`(4)개까지 붙인다. `AttachTypeRegistrar(registrar)`는 그 등록기에만 시작한 모듈을 몰아서 등록하고, 붙은 뒤 시작하는 모듈은 붙은 모든 등록기에 `Startup` 직전 등록한다(하나라도 실패하면 이 모듈이 이미 등록한 등록기를 되돌리고 `StartupFailed`). 묶음 종료는 모든 등록기에서 되돌린다. `DetachTypeRegistrar(registrar)`는 그 등록기의 등록만 되돌린다. 같은 등록기를 두 번 붙이거나 자리가 없으면 Fatal이다. 조회 `TypeRegistrarCount()`. UE는 UObject 레지스트리가 프로세스에 하나라 이 문제가 없다(7절).
+
+**Launch(MD4).**
+- Launch 모듈이 `ModuleLoader`에 의존한다. 시작 단계 `Launch.Modules`를 도구 로그 단계 뒤에 둔다: 범용 할당자(`DefaultAllocator`)와 이 실행 파일의 `GeneratedModuleTable()`로 로더를 만들고 `StartPhase(EarliestPossible)`(부트 모듈)을 돈다. Modular의 `Prepare`는 ML4다.
+  - 실패는 Launch가 Error로 한 번 기록하고(모듈·단계·문구) 본문 없이 `ModuleStartupFailureExitCode`(1)로 끝낸다(Abort 단계 — 시작한 단계만 역순 정리).
+  - 정리(본문 반환 뒤, 도구 로그 정리 전): `ShutdownGroup(Process)` → 남은 lease 진단(Error, 이름은 `MaxLeaseReportNames` 16까지, 넘친 수) → 로더 파괴. 본문이 `RequestExitWithoutStaticTeardown`을 불렀으면(멈춘 출력 스레드를 포기해 설정 문맥이 lease를 쥔 채) 로더를 내리지도 파괴하지도 않는다(범용 할당자와 같은 규칙, 내장 진입은 그 요청을 무시하므로 내린다).
+- `ApplicationContext::Modules()`가 그 로더다(본문 수명 동안 유효). 전역 접근자는 여전히 없다.
+
+**호스트.**
+- 엔진 호스트(Sandbox): `context.Modules()`를 쓴다. HostSettings(모든 모듈 `registerSettings`) → LogHost 시작 → `StartPhase(PostConfigInit)` → trace·엔진 → 엔진 종료 뒤 `ShutdownGroup(Host)` → LogHost 정지·HostSettings 파괴. 프로세스 묶음은 Launch가 내린다.
+- WorldBench(엔진 없는 World 레지스트리): `context.Modules()`에서 `Load("World")`(프로세스 묶음)와 자기 `ModuleTypeRegistrations` 등록기를 붙였다 뗀다.
+- 엔진 묶음의 범위: 실행 파일 표에서 엔진 단계 값을 가진 모든 행이다(3.10절 대체 로더는 Engine 모듈 폐포만 시작했다). 시험 실행기에서는 Engine마다 그래픽·셰이더·에셋 등 Engine 층 모듈을 시작·종료하고 그 메타데이터 타입을 각 Engine `TypeRegistry`에 등록한다. UE와 같은 동작이다. 같은 이름 타입이 겹치는 모듈(시험 fixture)은 `None`으로 뺀다.
+- 등록기 자리(`MaxTypeRegistrars`)를 넘는 동시 Engine은 Fatal이다(report가 아니다). 동시에 사는 Engine 수는 프로그램 구조가 정하는 상수라 실행 중 조건이 아니라 프로그램 버그이기 때문이다.
+- 시험 runner: Launch가 만든 로더를 시험 지원 함수 `test::ProcessModules()`(시험 runner 본문이 정의 — 실행 파일의 시험 전용 접근점, 제품 코드의 전역 접근자가 아니다)로 시험에 준다. 엔진을 만드는 시험은 이 로더를 `EngineConfig::modules`에 넣는다. 그래서 한 프로세스에서 Engine을 차례로 만드는 모든 시험이 같은 로더의 엔진 묶음을 매번 시작·종료한다. 로더 자체 시험은 지금처럼 자기 표로 따로 로더를 만든다.
+
+**엔진.**
+- `EngineConfig::modules`는 필수다. 없으면 `Initialize`가 `InvalidArgument`로 실패한다(Error 기록). 3.10절의 대체 로더와 `ROCKS_MODULE_NAME` 적재는 없앤다.
+- `Initialize`의 타입 단계: 엔진 `TypeRegistry`·`ModuleRegistration`을 만든 뒤 등록기를 붙이고(이미 시작한 프로세스·호스트 묶음 모듈을 몰아서 등록) `StartEngineGroup()`(엔진 단계 모듈을 `Startup` 직전 등록하며 시작) → 게임 리플렉션 모듈·native 타입 → ObjectRegistry … → `EngineClient::OnEngineStart` → `StartPhase(PostEngineInit)`. 마지막이 실패하면 client의 `OnEngineShutdown`을 부른 뒤 초기화 실패 정리를 한다.
+- `Shutdown`·초기화 실패 정리: World·ObjectRegistry 정리와 최종 GC 뒤, `ShutdownEngineGroup()` → 등록기 떼기 → `TypeRegistry::Shutdown`(3.7절 엔진 묶음 시점).
+
+**ML1 뒤 후속(이 단계에서 하지 않음).**
+- 호스트 서비스 등록(`ConfigContext`·`LogSystem`·`TraceSession`·`Engine`을 `HostServices`에): 서비스 키는 그 형식의 모듈이 `ModuleLoader`에 의존해야 정의할 수 있고, 지금 서비스를 찾는 모듈이 없다. 서비스를 쓰는 모듈이 생길 때 그 형식과 함께 더한다.
+- 3.10절 끝에 넘긴 것(서비스를 쓰는 `Startup` 등록 — trace 채널·trace 타입·콘솔 명령, 핸들 단위 CVar lease)은 그대로 후속이다. 단계가 생겨 `PostConfigInit` 모듈이 설정 확정 뒤 시작하므로 옮길 수 있는 조건은 갖췄다.
+- 기술자 모듈 행의 플러그인 활성(ML5)과 Modular `Prepare`(ML4).
 
 ## 4. 결정 요약
 
@@ -398,7 +451,7 @@ ML1(로딩 단계·묶음 전환·Launch 통합)은 crash-launch 병합을 기�
 | MD12 | Modular manifest `<Target>[-<Platform>-<Configuration>].modules.json`(`buildId`·`modules`의 `file`·`size`·`dependencies`·`loadingPhase`), 링크 성공 뒤 원자적으로 쓴다. 엔진·게임·플러그인 `Binaries/<Platform>/`의 manifest만 읽고 폴더를 훑지 않는다. 모르는 키는 오류 | 권장안 |
 | MD13 | `ModuleBuildId`는 UE처럼 출력 폴더의 이전 값을 재사용하고 엔진 버전·툴체인 fingerprint가 바뀌면 새로 만든다. manifest에만 둔다(코드에 넣지 않음). 설치 SDK manifest에 실린다. 다르면 `Incompatible`, 파일 크기가 manifest와 다르면 `Incompatible` | 권장안 |
 | MD14 | 의존을 먼저 적재하므로 OS 탐색은 같은 폴더만 쓴다. Linux는 `-soname`을 넣는다. POSIX `dlerror` 문구를 report로 넘기도록 `DynamicLibrary`를 보강한다 | 권장안 |
-| MD15 | 타입 등록은 레지스트리 주인이 `ModuleTypeRegistrar`(`Register`·`CanUnregister`·`Unregister`)로 한다. 엔진은 모듈마다 `ModuleRegistration`을 두고, 등록기를 `Engine::Initialize`에서 설정해 이미 시작한 모듈을 몰아서 등록하며 `Engine::Shutdown`에서 뗀다. 메타 컴파일러는 모듈 자신의 타입만 등록하는 함수를 더 낸다. HostSettings 레지스트리는 지금처럼 명시 등록 | 권장안 |
+| MD15 | 타입 등록은 레지스트리 주인이 `ModuleTypeRegistrar`(`Register`·`CanUnregister`·`Unregister`)로 한다. 동시에 사는 Engine마다 등록기를 붙일 수 있다(최대 4개 — 개정 5, 3.11절). 엔진은 모듈마다 `ModuleRegistration`을 두고, 등록기를 `Engine::Initialize`에서 설정해 이미 시작한 모듈을 몰아서 등록하며 `Engine::Shutdown`에서 뗀다. 메타 컴파일러는 모듈 자신의 타입만 등록하는 함수를 더 낸다. HostSettings 레지스트리는 지금처럼 명시 등록 | 권장안 |
 | MD16 | 로더가 모듈마다 실제 `ModuleLease`(원자적 수)를 발급하고, 생성 등록 함수와 모듈 코드를 가리키는 등록(CVar·trace 채널·delegate·서브시스템 클래스)이 그것을 잡는다. lease는 공유 라이브러리 해제 시점만 정한다 | 권장안 |
 | MD17 | 모듈 이름은 대소문자를 구분해 비교하고, 대소문자만 다른 이름은 빌드가 거부한다 | 권장안 |
 | MD18 | 형식 있는 조회는 `Find<T>(name)`이고 UE `GetModuleChecked<T>`처럼 검사 없는 `static_cast`다. `HostServices` 형식 키는 소유 모듈 cpp에 out-of-line으로 정의해 export한다 | 권장안 |
@@ -412,7 +465,7 @@ ML1(로딩 단계·묶음 전환·Launch 통합)은 crash-launch 병합을 기�
 | 단계 | 내용 | 완료 기준 |
 |---|---|---|
 | ML0 | Core: 수명 객체·진입 기술·진입점 매크로(Monolithic)·모듈 표 형식(개정 2). `ModuleLoader` 모듈: `ModuleStartContext`·`HostServices`(형식 키 매크로)·빌드 생성 모듈 표·의존 순서 시작·상태·`Changed`·report 두 종·묶음 종료·시작 실패 정리. `DynamicLibrary` POSIX `dlerror` 보강. 모든 기존 C++ 모듈에 `ROCKS_IMPLEMENT_MODULE`(대부분 기본 구현). 빌드: 모듈 이름 대소문자 충돌 검사(MD17) | 의존 순서 시작·역순 종료·실패 중단과 역순 정리·`Cycle`·`WrongThread`·`ShuttingDown`·`Failed` 재시도 시험, 매크로 누락·이름 불일치 링크·컴파일 오류 시험, 대소문자 충돌 거부 시험 |
-| ML1 | 로딩 단계와 묶음: 기술자 `PostEngineInit`·`None`, 엔진 모듈 규칙 `LoadingPhase`, 모듈 표 행의 요청 시 적재 표지와 `StartPhase`의 건너뜀(3.8절), 단계 순서 빌드 검사(MD6), 부트 모듈 단계 강제, `StartPhase`의 앞 단계 차례 실행, Launch 통합(crash-launch 병합 뒤), 엔진 호스트의 `PostConfigInit`·호스트 묶음 종료, `Engine::Initialize`·`Shutdown`의 엔진 묶음과 참조 수 | Sandbox 엔진 호스트가 모든 단계를 지나 부트·종료한다. 한 프로세스에서 Engine을 차례로 여러 번 만드는 시험이 엔진 묶음을 매번 시작·종료한다. 단계별 시작·종료 순서 시험 |
+| ML1 | 로딩 단계와 묶음: 기술자 `PostEngineInit`·`None`, 엔진 모듈 규칙 `LoadingPhase`, 모듈 표 행의 요청 시 적재 표지와 `StartPhase`의 건너뜀(3.8절), 단계 순서 빌드 검사(MD6), 부트 모듈 단계 강제, `StartPhase`의 앞 단계 차례 실행, Launch 통합(crash-launch 병합 뒤), 엔진 호스트의 `PostConfigInit`·호스트 묶음 종료, `Engine::Initialize`·`Shutdown`의 엔진 묶음과 참조 수, 타입 등록기 여럿. 세부는 3.11절(개정 5) | Sandbox 엔진 호스트가 모든 단계를 지나 부트·종료한다. 한 프로세스에서 Engine을 차례로 여러 번 만드는 시험이 엔진 묶음을 매번 시작·종료한다. 단계별 시작·종료 순서 시험 |
 | ML2 | 타입 등록기(MD15)·모듈별 `ModuleRegistration`·모듈 자신의 타입만 등록하는 생성 함수, 실제 `ModuleLease`(MD16)와 생성 등록 함수의 lease 인자, 설정 등록(MD22, Monolithic), 기존 모듈별 등록 래퍼를 `Startup`·`RegisterSettings`로 옮기기, CVar·trace 채널 등록의 lease. ML1 전 연결과 ML1 뒤로 넘긴 것은 3.10절(개정 3) | 호스트 코드의 모듈별 명시 등록 호출이 HostSettings 설정 타입 외에 0. 늦은 단계 모듈의 CVar가 `ReportUnresolved` 경고 없이 설정 값을 받는 시험. 종료 뒤 남은 lease 진단 시험 |
 | ML3 | `DynamicModules`(MD11)와 Monolithic 링크 규칙, type 검사, 링크 의존만의 순환 거부(동적 관계는 참조 사슬 아님), 표에 행이 없는 모듈 거부 | 실행 중 적재 모듈을 `Load`·`Find<T>(name)`으로 쓰는 시험 |
 | ML4 | Modular 적재 — 선행: [빌드 타깃](BuildTargets.ko.md) BS8. manifest 쓰기·읽기(원자적 쓰기, 모르는 키 거부), `ModuleBuildId` 재사용·SDK manifest, 파일 크기 대조, export 진입점과 강제 참조, `Prepare`, 실행 파일의 부트 모듈 import와 호스트 모듈(MD21), Linux `-soname`, OS 적재·report, `Modular` FoundationTests를 로더로 실행 | `Modular` FoundationTests가 Windows·macOS에서 로더로 모듈을 적재해 통과한다. `buildId` 불일치·크기 불일치·의존 DLL 누락·진입점 없음·모르는 키의 report 시험. 증분 빌드에서 `buildId`가 바뀌지 않는 시험 |
@@ -436,6 +489,8 @@ ML1(로딩 단계·묶음 전환·Launch 통합)은 crash-launch 병합을 기�
 | 로더 소유 | 전역 싱글톤 | Launch가 소유, 참조 전달 | 명시적 소유 원칙 |
 | 로딩 단계 | 시작·로딩 화면 단계 포함 | 화면 단계 없음, 의존 단계 순서 검사, 건너뛴 앞 단계를 차례로 실행 | 대응하는 시작 흐름이 아직 없다. 늦은 단계 모듈이 조용히 앞당겨지지 않게 |
 | 모듈 탐색 | 바이너리 폴더를 재귀로 훑어 manifest를 모은다 | 정해진 폴더의 manifest만 | 결과가 폴더 상태에 조용히 기대지 않게 |
+| 타입 등록 대상 | 프로세스에 UObject 레지스트리 하나 | 로더에 등록기 여럿(Engine마다 `TypeRegistry`) | 한 프로세스에 Engine이 여럿 살 수 있다(시험·도구). 엔진 묶음은 참조 수로 함께 쓴다 |
+| 앞 묶음 단계 재호출 | Error 로그 | 계약 위반 Fatal | 호스트 순서 오류를 숨기지 않는다 |
 
 ## 8. 다른 문서 개정
 
@@ -443,11 +498,11 @@ ML1(로딩 단계·묶음 전환·Launch 통합)은 crash-launch 병합을 기�
 - [빌드 타깃](BuildTargets.ko.md): 3.8절 BD30과 9.2절의 "별도 스펙 모듈 로더"를 이 문서로 링크했다. BD30에 단계 관계(ML0–ML4는 BS5 전, ML5는 BS5와 함께)와 실행 파일 import 범위(MD21)를 적었다. 3.8절 Linux 링크 옵션에 `-soname`을, BS8에 빌드 정보 생성 TU의 Modular 정의 위치를 더했다.
 
 구현 때 고칠 문서:
-- crash-launch 설계(`CrashHandlingAndLaunch.ko.md`, 병합 대기): 8.1절에 로더 생성·`Prepare`·`EarliestPossible`(7단계 뒤), 8.2절에 프로세스 묶음 종료(도구 로그 정리 전)를 더한다. 병합 뒤 ML1에서 고친다.
-- [CVar](CVarSystem.ko.md) "모듈 언로드 때 핸들 해제(결정 필요)": MD16·MD22로 답한다(등록은 `RegisterSettings`, 핸들이 모듈 lease를 잡고, 모듈 `Shutdown`이 해제한다).
-- [저장소 구성](../Guides/RepositoryLayout.ko.md) 게임 빌드 연동: `loadingPhase` 실행 중 반영을 이 문서로 링크한다(ML1).
+- [크래시 처리·실행](CrashHandlingAndLaunch.ko.md): 8.1절에 모듈 단계(로더 생성·`EarliestPossible`, 도구 로그 뒤), 8.2절에 프로세스 묶음 종료(도구 로그 정리 전)를 더했다(개정 5, ML1).
+- [CVar](CVarSystem.ko.md) "모듈 언로드 때 핸들 해제(결정 필요)": MD16·MD22로 답했다(등록은 `RegisterSettings`, 핸들이 모듈 lease를 잡고, 모듈 `Shutdown`이 해제한다 — 개정 5).
+- [저장소 구성](../Guides/RepositoryLayout.ko.md) 게임 빌드 연동: `loadingPhase` 실행 중 반영을 이 문서로 링크했다(개정 5).
 - [AppInfo·CommandLine](AppInfoCommandLine.ko.md) 11절: `BuildDescription`에 `ModuleBuildId`를 더한다(ML4).
-- [엔진 런타임](EngineRuntime.ko.md) 4.1·6절: `Engine::Initialize`·`Shutdown`의 엔진 묶음 호출과 타입 등록기(ML1·ML2).
+- [엔진 런타임](EngineRuntime.ko.md) 4.1·6절: `Engine::Initialize`·`Shutdown`의 엔진 묶음 호출과 타입 등록기를 적었다(개정 5).
 
 ## 9. 범위 밖과 채택하지 않은 UE 요소
 
@@ -475,6 +530,7 @@ ML1(로딩 단계·묶음 전환·Launch 통합)은 crash-launch 병합을 기�
 
 | 개정 | 날짜 | 내용 |
 |---|---|---|
+| 5 | 2026-11-20 | ML1 착수. 3.11절에 구현 세부를 정했다: `LoadingPhase`에 `PostEngineInit`·`None`, 엔진 모듈 규칙 `LoadingPhase`, 모듈 표 행 `onRequest`(요청 시 적재 — 단계 실행이 건너뜀), 실행 파일 행은 `None`(UE Program 주 모듈)·시험 fixture 모듈 `None`, 빌드의 단계 순서 검사(MD6, 모듈 표 행 기준)와 부트 모듈 검사(새 표지 `ProvidesLaunch`의 링크 폐포는 `EarliestPossible`이어야 함), SDK manifest 11(`LoadingPhase`·`ProvidesLaunch`), `StartPhase`(앞 단계 차례 실행, 이미 돈 단계는 성공, 앞 묶음 단계·`None`은 Fatal, 실패는 그 단계를 멈춤)와 `ShutdownGroup`의 단계 되돌림, 엔진 묶음 참조 수(`StartEngineGroup`·`ShutdownEngineGroup`), 타입 등록기 여럿(Engine마다, 최대 4 — MD15 개정), Launch가 로더를 소유(`Launch.Modules` 단계, `ApplicationContext::Modules()`, 정리에서 프로세스 묶음 종료·lease 진단), Sandbox `PostConfigInit`·호스트 묶음 종료, Engine 대체 로더 제거(`EngineConfig::modules` 필수), 시험 runner의 `test::ProcessModules()`. 후속: 호스트 서비스 등록·서비스를 쓰는 `Startup` 등록·핸들 단위 CVar lease. 다른 문서(8절)를 함께 고쳤다 |
 | 4 | 2026-11-20 | ML3 구현. UE UnrealBuildTool 근거로 MD11을 고쳤다: `DynamicModules` 관계는 순환 검사의 참조 사슬에 넣지 않는다(UE "Dynamic loads aren't considered a reference chain" — 엔진이 동적 적재하는 모듈이 엔진에 링크하는 쓰임을 막지 않게). 대신 `Dependencies`와 겹침·자기 자신·실행 파일·모르는 이름·대소문자 철자를 거부한다. 3.8절에 ML3 구현 세부를 더했다: 규칙 속성, type 검사(BD25 구현 전에는 기술자 모듈 제외 검사와 Release 배제 도달 집합), Monolithic 링크와 링크 순서, include 경로 제외, 모듈 표의 동적 모듈 행 위치(실행 파일 행 앞, 행 의존은 링크 의존만), 빌드 대상·메타데이터 도달 집합, SDK manifest 10, 묶음 기록은 ML0 그대로, Modular는 ML4. 같은 날 리뷰 반영: 3.8절 옛 글머리·6절 ML3 행을 개정 MD11과 맞춤, 요청 시 적재 행 결정(UE `LoadModulesForPhase`는 기술자 목록만 돌므로 `DynamicModules`로만 닿는 행은 단계 실행 대상이 아니다 — 표지와 건너뜀은 ML1), 표에 행이 없는 모듈(header-only·서드파티·Core 아래·표 제공 모듈에 닿지 않음)과 중복 거부 |
 | 3 | 2026-11-19 | ML2 착수. ML1 전의 연결을 3.10절에 정했다: 모듈 생성 소스(리플렉션 생성 소스 5.5절)의 자기 타입 함수 `RegisterModuleOwnTypes`와 `ROCKS_MODULE_TYPES`로 진입 기술 `registerTypes`를 채움(소스 없는 메타데이터 모듈은 빌드 진입점 TU로 진입점 모듈이 됨), `unregisterTypes` 제거(`ModuleEntryVersion` 2), `ModuleTypeRegistrar`·`AttachTypeRegistrar`·`DetachTypeRegistrar`와 일반 구현 `ModuleTypeRegistrations`(ObjectRuntime), `EngineConfig::modules`와 Engine 대체 로더, `HostSettingsOptions::modules`·`ConfigContext::RetainModule`과 모듈 `RegisterSettings`, Sandbox의 프로세스 로더, `ModulesWithLeases` 진단. ML1 뒤로 넘긴 것: 서비스를 쓰는 `Startup` 등록(trace 채널·타입), 엔진 묶음 참조 수, 핸들 단위 CVar lease. 같은 날 리플렉션 생성 소스 작업(rocks-78, GS1)과 생성기·빌드 파일이 겹쳐 착수한 코드를 되돌리고, 생성 등록 함수를 그 구조(모듈 생성 소스 정의·모듈 생성 헤더는 선언만)에 맞춰 고쳐 적었다. 구현은 그 병합 뒤 재개한다. 2026-11-20 GS1 병합 뒤 재개하며 GS1 위 세부를 3.10절에 더했다: 진입점 판정이 리플렉션 생성 소스를 세고 SDK 표지 `ReflectionOnlyLibrary`를 없앰(SDK manifest 8), `ROCKS_MODULE_TYPES`를 `ReflectionSources`로 판정, 재귀 등록 함수는 그대로 두고 `RegisterModuleOwnTypes`를 모듈 생성 소스에 더함. 같은 날 구현하고 교차 검증을 반영했다: 3.4절 API 목록에 `Table`·`AcquireLease`·`ModulesWithLeases`·`AttachTypeRegistrar`·`DetachTypeRegistrar`·`TypeRegistrar`, 3.10절에 로더 조회 API, 상태 줄·3.2절 `ModuleEntryVersion` 2·MD2 진입 기술 칸(해제 제거) 정정, 이전 버전 SDK manifest는 엄격한 읽기 전에 버전부터 비교해 버전 불일치로 안내 |
 | 2 | 2026-11-19 | ML0 구현 반영. 진입점 계약을 Core(`Core/Module/ModuleImplementation.h`·`ModuleEntry.h`)로 옮겼다(`ModuleLoader`는 Core에 의존하므로 Core와 다른 모든 모듈이 매크로를 쓰려면 Core에 있어야 한다 — 3.1절). Core 아래 모듈(PlatformBase·DeterministicMath) 면제와 실행 파일 모듈 포함(3.1절), 진입 기술 칸 형식·매크로 이름 인자 펼침·식별자 이름 규칙·모듈 표 TU 형식·면제 모듈을 거치는 의존 대체·기술자 단계(3.2절), `TryCreate`·`State`·`LeaseCount`·`Services`, `Changed`를 `MulticastDelegate`로, `StartPhase`는 ML1·`Unload`는 ML6에 공개, 소멸 동작, report 고정 길이 칸(3.4절), 의존 철자 대소문자 검사(3.4절 MD17), `ShutdownGroup`의 안쪽 묶음 포함과 수명 객체 파괴(3.7절), `DynamicLibraryError`(3.5절), 빌드 표지 `ProvidesModuleTable`·`ThirdParty`·`LoadingPhase`와 SDK manifest 6(3.9절)을 적었다. 같은 날 서브에이전트 교차 검증을 반영했다: 종료 중 조회를 UE에 맞춤(모듈은 자기 `Shutdown` 직전에만 `ShuttingDown`), `Load` 진행 중(`Changed` 구독자 포함) `ShutdownGroup` Fatal, `RegisterSettings` 이름 감지를 접근 권한·오버로드와 무관하게(3.1절), 자동 종료 거부 모듈의 소멸 순서를 시작 역순으로, 실패 상태·`ShutdownGroup` 스레드 위반·부트 모듈 목록·ML0 행·1절 표·3.4절 코드 블록의 모순 정정 |

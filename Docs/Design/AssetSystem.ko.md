@@ -52,7 +52,7 @@
 | Cooker | AssetCooker | 구현(비압축 형식), 블록 압축 계약 |
 | Runtime Asset Loader | AssetRuntime `AssetLoader` | 구현(CPU ready), `Render` ready 계약 |
 | Asset Manager | AssetRuntime `AssetManager` | 구현(scope·PrimaryAsset·bundle·즉시 해제), 예산 LRU 해제 후속 |
-| 메시·스켈레톤·애니메이션 에셋 | `MeshSource`·`Mesh`·`Animation`(Runtime), `MeshTools`·`AnimationTools`(Developer) | 설계([MeshAnimationAssets](MeshAnimationAssets.ko.md) 8절, MA1–MA7) |
+| 메시·스켈레톤·애니메이션 에셋 | `MeshSource`·`Mesh`·`Animation`(Runtime), `MeshTools`·`AnimationTools`(Developer) | `MeshSource` 구현(MA1 — 원본 메시 저장·검증·위상 조회, bulk 쓰기는 `MemoryBulkSource`), 나머지 설계([MeshAnimationAssets](MeshAnimationAssets.ko.md) 8절·3.7절, MA2–MA7) |
 | 외부 엔진 교환 임포터 | 엔진 플러그인 `UnrealExchange`(Developer) | 설계([Unreal 교환 형식](UnrealExchange.ko.md) 10절, UX1–UX8) |
 
 이름 구분: 에셋 객체가 사는 `ObjectRegistry`는 **에셋 객체 Registry**, 에디터 패키지 인덱스는 **AssetIndex**(UE AssetRegistry 대응), 쿠킹 결과의 런타임 목록은 **쿠킹 매니페스트**(`CookedManifest.rman`, 10절)라 부른다.
@@ -122,7 +122,7 @@ AssetRuntime은 Engine을 모른다. 도구는 Engine을 링크하지 않고 `As
 | `ImporterOutdated`, `InvalidImportOption`, `OrphanedOutput`, `UnknownProperty`(모르는 속성 이름), `UnsupportedSetting`(계약 설정의 기본값이 아닌 값), `InvalidSetting`(모순된 조합·숨김 값), `SrgbIgnored`(경고 — 선형 설정·float 출력의 SRGB), `PreserveBorderWithWrap`(경고) | 임포트·설정 |
 | `CorruptEntry`(에셋 너겟 항목·게시 패키지 파일 손상), `IncompatibleCook`(부분 쿠킹 병합 불가·런타임 프로파일 불일치), `NeverCookReferenced` | 에셋 너겟·쿠킹 |
 | `AliasResolved`, `RootLost`(감시 루트 소실) | 그 밖 |
-| `InvalidMeshData`, `NonFiniteAttribute`, `UvOutOfRange`, `NonNormalizedWeights`, `TooManyInfluences`, `InfluencesTrimmed`, `MaterialSlotFallback`, `NegativeBuildScale`, `UnsupportedCollisionShape`, `SkeletonMismatch`, `UnknownBoneTrack`, `InvalidClipData`, `EventPropertiesDropped` | 메시·애니메이션(설계 — [MeshAnimationAssets](MeshAnimationAssets.ko.md) 11절) |
+| `InvalidMeshData`, `NonFiniteAttribute`, `UvOutOfRange`, `NonNormalizedWeights`, `TooManyInfluences`, `InfluencesTrimmed`, `MaterialSlotFallback`, `NegativeBuildScale`, `UnsupportedCollisionShape`, `SkeletonMismatch`, `UnknownBoneTrack`, `InvalidClipData`, `EventPropertiesDropped` | 메시·애니메이션([MeshAnimationAssets](MeshAnimationAssets.ko.md) 11절 — 앞 다섯 코드는 MA1이 `AssetDiagnosticCode`에 등록, 나머지는 설계) |
 | `DuplicateLevelScript`(`levelScript` 말고 또 있는 LevelScript 파생 Actor), `LevelScriptNotInLevel`(`levelScript`가 `actors` 원소가 아님), `CrossLevelReference`(레벨에 저장하는 참조가 다른 Level, 또는 영속 Entity 참조 전 다른 셀의 객체를 가리킴), `NotPlaceableClass`(편집기 배치 명령이 `NotPlaceable` 클래스를 받음), `LevelScriptCollider`(LevelScript의 Collider component) | 레벨(설계 — [레벨 스크립트](LevelScript.ko.md) 4.9절. 저장·쿡은 InvalidArgument, cooked 로드는 CorruptPackage) |
 | `CorruptBundle`, `UnsupportedBundleVersion`, `UnknownField`, `UnsupportedAsset`, `LossyOriginAccepted`, `UnsupportedSourceLayout`, `GammaMismatch`, `GeneratedLodBaked`, `BakedColorQuantized`, `UnrealPathRenamed`, `UnrealPathTooLong`, `UnrealPathCollision`, `MissingUnrealDependency`, `UntranslatedMaterialNode`, `MaterialBakedFallback`, `ParameterDefaultConflict`, `ParameterResolveMismatch` | Unreal 교환 임포트(설계 — [Unreal 교환 형식](UnrealExchange.ko.md) 10.3절) |
 
@@ -493,8 +493,8 @@ A1c 구현(`Engine/Source/Runtime/AssetRuntime` — `CancelToken.h`·`AssetLoade
 15. **스레드**: 로더의 모든 공개 함수(`FindPackage` 포함)는 Game(에셋 객체 Registry 소유) 스레드 전용이다. 다른 스레드에서 부르면 `WrongThread`다. 소유 스레드가 아닌 곳에서 초기화된 로더를 파괴하면 진행 중 IO·worker를 남긴 채 상태를 지우게 되므로 `platform::Fatal`이다(수명 오류). worker는 패키지 작업의 `PackageLoadState`·버퍼만 만지고, 버린 표시는 원자 값으로 본다.
 16. **PostLoad 단계**(11.2절, UE AsyncLoading2 `EAsyncPackageLoadingState2::PostLoad`·`DeferredPostLoad` 대응): 단위를 공개한 뒤 구성 패키지마다 설정의 `AssetPostLoadHandler::PostLoad(package, asset)`을 Game 스레드에서 부른다. 순서: 그 단위가 기대는 단위의 PostLoad가 모두 끝난 뒤, 단위 안은 AssetId 순이다(UE도 import 패키지의 PostLoad를 먼저 끝낸다). 다른 패키지의 PostLoad를 동기 대기하지 않고 Pump 사이로 나눈다 — Pump 예산 `maxPostLoads`(호출 수)와 공개와 같은 시간 예산이 묶는다. 준비된 PostLoad가 있으면 한 Pump에 적어도 하나를 부른다 — 공개가 단위 수·시간 예산을 다 써도 PostLoad 하나는 부르고 소진을 표시한다(공개할 단위가 계속 들어와도 PostLoad와 요청 완료가 밀리지 않게). 요청은 그 단위의 PostLoad가 끝나야 Succeeded다(공개만 된 채 PostLoad 대기면 Pending — 상태 관측의 대기 이유 PostLoad). PostLoad는 실패하지 않는다(UE `UObject::PostLoad`와 같다 — 실패할 수 있는 처리는 그 타입이 자기 상태로 남긴다). PostLoad 대기 중 취소는 그 요청만 Cancelled이고 공개된 단위는 PostLoad를 마친다. 종료는 남은 PostLoad를 부르지 않는다. handler가 없으면 공개와 함께 PostLoad가 끝난 것으로 본다. `FindPackage`는 PostLoad 전 패키지도 돌려준다(다른 단위의 import 해석이 공개된 패키지를 찾아야 하므로 — PostLoad 완료 여부는 요청 결과로 본다).
    - 판단 근거: ObjectRuntime·리플렉션에는 클래스별 PostLoad(`UObject::PostLoad` 대응 가상 함수·클래스 메타데이터 hook)가 없다. 단계의 순서·분할·대기 규칙은 로더가 정해야 하므로 단계와 호출 경계는 A1c가 구현한다. 객체마다 어느 함수를 부를지(클래스 hook 등록·dispatch)는 그것이 처음 필요한 A5(텍스처 — 플랫폼 데이터 정리)가 RuntimeClassMetadata와 함께 정하고, 그 dispatch를 이 handler로 연결한다(EngineAssets가 handler를 준다). 그때까지 빠지는 것: 클래스가 스스로 선언하는 PostLoad 처리(로드 뒤 파생 상태 계산 등)는 handler를 준 쪽만 할 수 있다.
-17. **시험 hook**: `AssetLoaderConfig::waitEntered`는 완료 대기가 실제로 조건 변수에서 기다리기 직전(큐 뮤텍스를 쥔 채)에 불린다. 시험이 "Game 스레드가 기다리기 시작한 뒤"를 사건으로 받아 완료를 내보내게 한다(시간에 기대지 않는다). 로더를 다시 부르면 안 된다.
-18. **콜백 재진입**: PostLoad handler·관찰자(`OnSyncWait`)·시험 hook(`waitEntered`)이 불리는 동안 로더는 "콜백 중" 표시를 쥔다. 그 사이 상태를 바꾸는 공개 함수(`Request`·`SetPriority`·`Release`·`Pump`·`WaitForCompletions`·`WaitFor`·`Shutdown`)는 `WrongContext`를 돌려주고 아무것도 바꾸지 않는다(단위 표 재할당·같은 단위의 중첩 완료를 막는다). 읽기(`Status`·`Describe`·`FindByPath`·`FindPackage`)는 된다. 콜백이 더 일을 시키려면 돌아간 뒤 Pump 밖에서 한다(UE도 PostLoad 안 동기 로드는 금지·경고한다).
+17. **시험 hook**: `AssetLoaderConfig::waitEntered`는 완료 대기가 실제로 조건 변수에서 기다리기 직전(큐 뮤텍스를 쥔 채)에 불린다. 시험이 "Game 스레드가 기다리기 시작한 뒤"를 사건으로 받아 완료를 내보내게 한다(시간에 기대지 않는다). 다른 콜백과 같이 18의 재진입 규칙을 따른다 — 상태를 바꾸는 호출은 `WrongContext`이고(큐 뮤텍스를 다시 잡는 경로 — 완료 대기·Pump의 완료 처리 — 에 닿기 전에 거부되므로 교착이 없다), 읽기(`Status`·`Describe`·`FindByPath`·`FindPackage`)는 큐 뮤텍스를 잡지 않고 Game 스레드가 상태를 바꾸지 않는 동안 불리므로 허용한다.
+18. **콜백 재진입**: 로더가 Game 스레드에서 동기로 부르는 모든 바깥 코드 — PostLoad handler·관찰자(`OnSyncWait`)·시험 hook(`waitEntered`)·IO(`CookedPackageIo::Begin`·`Release`)·worker(`AssetLoaderWorker::Run`)·시계(`clock`)·프레임 판정(`inFrame`) — 가 불리는 동안 로더는 "콜백 중" 표시를 쥔다(허가 순회가 단위 참조를 쥔 채 Begin을 부르는 등, 그 사이 상태가 바뀌면 같은 수명 결함이 나므로 주석이 아니라 표시로 막는다). 그 사이 상태를 바꾸는 공개 함수(`Request`·`SetPriority`·`Release`·`Pump`·`WaitForCompletions`·`WaitFor`·`Shutdown`)는 `WrongContext`를 돌려주고 아무것도 바꾸지 않는다(단위 표 재할당·같은 단위의 중첩 완료를 막는다). 읽기(`Status`·`Describe`·`FindByPath`·`FindPackage`)는 된다. 콜백이 더 일을 시키려면 돌아간 뒤 Pump 밖에서 한다(UE도 PostLoad 안 동기 로드는 금지·경고한다). 콜백 안에서 로더를 파괴하면 돌아온 뒤 해제된 상태를 읽으므로 소멸자가 `platform::Fatal`로 수명 오류를 드러낸다.
 
 ## 12. 텍스처
 
@@ -1077,7 +1077,7 @@ A1b 상태(2026-11-20): **구현**. 완료 조건 넷을 모두 갖췄다. 빠�
 
 #### 14.1.5 요구 대조표(A1c — 로더)
 
-항목마다 그것을 확인하는 시험이다(EngineTests, `Engine/Source/Runtime/AssetRuntime/Tests/LoaderTests.cpp`·`LoaderFailureTests.cpp`·`LoaderIoTests.cpp`·`LoaderStageTests.cpp`·`LoaderCombinationTests.cpp`·`LoaderStagedCombinationTests.cpp` — 정의된 시험 44개를 모두 표가 인용한다. PlatformBase 결과 주입은 `AsyncFile_InjectedFaultsAreDeterministic`). 시험 도구(`LoaderTestSupport.h`)는 A1a writer로 쓴 쿠킹 패키지와 그 결과로 만든 매니페스트(장면), 완료를 시험이 내보내는 IO(`TestPackageIo` — 경로마다 없음·완료 오류·Begin 즉시 실패를 끼운다), 손으로 돌리는 worker(`TestLoaderWorker`), 부를 때마다 정해진 만큼 가는 시계를 준다. 실제 스레드를 쓰는 시험(디스크 IO·WorkerScheduler·다른 스레드 호출·종료 대기)은 결과만 단언한다.
+항목마다 그것을 확인하는 시험이다(EngineTests, `Engine/Source/Runtime/AssetRuntime/Tests/LoaderTests.cpp`·`LoaderFailureTests.cpp`·`LoaderIoTests.cpp`·`LoaderStageTests.cpp`·`LoaderCombinationTests.cpp`·`LoaderStagedCombinationTests.cpp`·`LoaderFaultCombinationTests.cpp` — 정의된 시험 46개를 모두 표가 인용한다. PlatformBase 결과 주입은 `AsyncFile_InjectedFaultsAreDeterministic`). 시험 도구(`LoaderTestSupport.h`)는 A1a writer로 쓴 쿠킹 패키지와 그 결과로 만든 매니페스트(장면), 완료를 시험이 내보내는 IO(`TestPackageIo` — 경로마다 없음·완료 오류·Begin 즉시 실패를 끼운다), 손으로 돌리는 worker(`TestLoaderWorker`), 부를 때마다 정해진 만큼 가는 시계를 준다. 실제 스레드를 쓰는 시험(디스크 IO·WorkerScheduler·다른 스레드 호출·종료 대기)은 결과만 단언한다.
 
 | 요구(절) | 항목 | 시험 |
 |---|---|---|
@@ -1086,8 +1086,8 @@ A1b 상태(2026-11-20): **구현**. 완료 조건 넷을 모두 갖췄다. 빠�
 | | `FindByPath`(caseless 키·없는 경로 NotFound·규칙 위반 InvalidArgument, 비ASCII NFC 경로를 대문자 Ạ·소문자 마운트로 찾음) | `AssetLoader_FindByPath`, `AssetLoader_FindByPathNonAscii` |
 | | 공개된 의존에 기대는 요청(단위 하나·대기 이유 Admission·Hard 참조 연결), 허가된 의존 단위에 기대는 늦은 요청 | `AssetLoader_PublishedDependencyIsResolved`, `AssetLoader_LoadsChainAndJoins` |
 | 패키지 단계(11.6-3) | IO → worker(크기·SHA-256 → Prepare → 내용 대조) → Prepared → 의존 공개 대기 → Pump 공개, 단계별 대기 이유·누적 시간·임시 byte | `AssetLoader_DescribeTracksStages` |
-| 경로·IO(11.6-4) | `<루트>/` + `AppendCookedPackagePath`, 디스크 파일을 AsyncReadFile 조각 읽기로(bulk 그대로), 파일 없음 NotFound / MissingFile, 디스크 크기 다름 PackageBytes, 완료 오류 → 진단 None과 그 오류, Begin 즉시 실패(순환 둘째 패키지에서 — 첫째 IO는 끝난 뒤 버림), 기본 IO의 OS 오류(결과 주입 — 크기 조회·둘째 조각 제출·첫 조각 완료 실패 → 진단 None·DependencyFailed), 짧게 읽힘(완료 게시 보류 사이 파일을 1/4로 다시 씀 → InvalidArgument·진단 None) | `AssetLoader_LoadsFromDiskWithWorkers`, `AssetLoader_IoAndWorkerErrors` |
-| | PlatformBase 결과 주입(Size·Submit·Completion, skip, 한 번 뒤 사라짐, ClearFault, 두 backend) | `AsyncFile_InjectedFaultsAreDeterministic` |
+| 경로·IO(11.6-4) | `<루트>/` + `AppendCookedPackagePath`, 디스크 파일을 AsyncReadFile 조각 읽기로(bulk 그대로), 파일 없음 NotFound / MissingFile, 디스크 크기 다름 PackageBytes, 완료 오류 → 진단 None과 그 오류, Begin 즉시 실패(순환 둘째 패키지에서 — 첫째 IO는 끝난 뒤 버림), 기본 IO의 OS 오류(결과 주입 — 크기 조회·둘째 조각 제출·첫 조각 완료 실패 → 진단 None·DependencyFailed — 결과 주입은 Release 구성에 없어 이 장면은 Release에서 빠진다), 짧게 읽힘(완료 게시 보류 사이 파일을 1/4로 다시 씀 → InvalidArgument·진단 None) | `AssetLoader_LoadsFromDiskWithWorkers`, `AssetLoader_IoAndWorkerErrors` |
+| | PlatformBase 결과 주입(Size·Submit·Completion, skip, 한 번 뒤 사라짐, ClearFault, 두 backend — Release 구성에서는 시험째 빠진다) | `AsyncFile_InjectedFaultsAreDeterministic` |
 | worker(11.6-5) | WorkerScheduler worker로 끝까지 로드, 제출 실패(scheduler 시작 전·작업 묶음 할당 실패) → 그 오류·실행 안 함, 로더 worker 제출 실패 → 요청 실패 | `AssetLoader_LoadsFromDiskWithWorkers`, `AssetLoader_SchedulerWorkerReportsSubmitFailures`, `AssetLoader_IoAndWorkerErrors` |
 | 손상(11.6-3·4, 10.1-8) | SHA-256 → PackageSha256, 짧은 파일 → PackageBytes, 내용 손상(매니페스트 SHA·내용 주소 맞춤) → 패키지 reader CorruptPackage, bulkRawBytes가 실제보다 작음 → `maxBulkRawBytes` CapacityExceeded, 큼 → BulkRawBytes, 의존 → PackageDependencies, 대표 타입 → TypeId, 오래된 의존 쿠킹 결과의 대표 타입이 기대 타입이 아님 → 공개 단계 TypeMismatch(의존 2·3은 공개된 채) | `AssetLoader_CorruptionIsDiagnosed`, `AssetLoader_StaleDependencyTypeFailsInstantiate` |
 | 실패 전파(11.6-6) | 사슬(손상 3 → 2·1 DependencyFailed / MissingDependency, related 3), SCC 형제, 다이아몬드(다른 가지 단독 요청은 성공), 한 정리 묶음에서 두 번 닿는 단위(82 → 81 → 80, 82 → 80 — 원인 80 유지), Soft 대상 손상 무영향(읽지 않음), 파일을 고친 뒤 다시 요청하면 새로 로드, 허가 전(Queued) 단위의 의존 실패(Begin 없이 DependencyFailed) | `AssetLoader_HardFailurePropagates`, `AssetLoader_AllCombinations`, `AssetLoader_QueuedUnitsFailWithTheirDependency` |
@@ -1102,10 +1102,11 @@ A1b 상태(2026-11-20): **구현**. 완료 조건 넷을 모두 갖췄다. 빠�
 | 할당 실패(11.6-13) | 로더·Registry allocator 모든 지점(초기화·요청·합류·허가·긴 루트 경로·비ASCII 경로 색인·완료·Prepare·공개·Commit·상태 조회) → 그 단계 OutOfMemory(진단 None) 또는 의존 DependencyFailed, 독립 요청 50과 요청 1 계열이 함께 실패하지 않음(그 요청만), 같은 로더에서 실패를 끄고 다시 요청하면 성공 | `AssetLoader_AllocationFailures` |
 | 종료(11.6-14) | Pending → ShuttingDown, 진행 중 IO가 끝날 때까지 대기(다른 스레드가 Game 스레드의 대기 진입 hook 뒤에 완료 — 대기 분기가 일정과 무관하게 닿는다), 버린·실패한 단위가 IO를 기다리는 채 종료, 허가 전 사슬, 공개 패키지 놓음, 뒤 Request·Pump·WaitFor ShuttingDown, 두 번째 Shutdown 성공 | `AssetLoader_ShutdownDrainsAndReleases` |
 | 스레드·초기화(11.6-15) | 다른 스레드 호출 WrongThread(FindPackage 포함 모든 공개 함수·Shutdown), 소유 스레드 밖 소멸은 자식 프로세스 Fatal(문구 대조), 설정 누락·0 한도·다른 TypeRegistry InvalidArgument, 프로파일 다름 IncompatibleCook, 두 번째 Initialize, 초기화 전 호출, 상태 할당 실패(진단 out 없음) | `AssetLoader_RejectsOtherThreads`, `AssetLoader_DestroyOffOwnerThreadIsFatal`, `AssetLoader_InitializeAndArguments` |
-| PostLoad(11.6-16) | 의존 단위 먼저·단위 안 AssetId 순(2·3·4·1), maxPostLoads(0이어도 Pump마다 하나)·시간 예산(첫 호출 뒤 다하면 소진 표시)·공개가 단위 예산을 다 써도 PostLoad 하나(굶주림 방지), 요청은 PostLoad 뒤 Succeeded(그 전 PostLoading — 의존 PostLoad 대기 → 자기 차례), PostLoading 단위 합류, PostLoading 중 취소는 Cancelled지만 PostLoad 불림, PostLoad 중인 의존에 기대는 새 단위는 그 뒤(그 의존을 공개 대기로 세지 않음), 종료는 남은 PostLoad를 부르지 않음, PostLoad 대기 중 기대는 단위가 실패해도 그 단위는 버려지지 않고 PostLoad됨·고쳐 다시 요청하면 그 뒤에 PostLoad, handler가 받은 package = FindPackage | `AssetLoader_PostLoadOrderAndBudget`, `AssetLoader_PostLoadTimeBudget`, `AssetLoader_PostLoadRunsWhenInstantiateBudgetIsSpent`, `AssetLoader_DependentFailsWhileDependencyPostLoads`, `AssetLoader_PostLoadJoinCancelAndShutdown`, `AssetLoader_DependencyWaitSkipsPostLoadingUnits` |
-| 콜백 재진입(11.6-18) | PostLoad handler·동기 대기 관찰자 안의 Request·SetPriority·Release·Pump·WaitForCompletions·WaitFor·Shutdown은 WrongContext, Status·Describe·FindByPath는 됨, 로더는 이어서 정상 완료 | `AssetLoader_CallbacksCannotReenter` |
+| PostLoad(11.6-16) | 의존 단위 먼저·단위 안 AssetId 순(2·3·4·1), maxPostLoads(0이어도 Pump마다 하나)·시간 예산(첫 호출 뒤 다하면 소진 표시)·공개가 단위 예산을 다 써도 PostLoad 하나(굶주림 방지), 요청은 PostLoad 뒤 Succeeded(그 전 PostLoading — 의존 PostLoad 대기 → 자기 차례), PostLoading 단위 합류, PostLoading 중 취소는 Cancelled지만 PostLoad 불림, PostLoad 중인 의존에 기대는 새 단위는 그 뒤(그 의존을 공개 대기로 세지 않음), 종료는 남은 PostLoad를 부르지 않음, PostLoad 대기 중 기대는 단위가 실패해도 그 단위는 버려지지 않고 PostLoad됨·의존이 아직 PostLoad 대기일 때 고쳐 다시 요청하면 새 단위는 바로 허가 후보(Admission)이고 공개 뒤 PostLoadDependency로 기다려 의존 뒤에 PostLoad, handler가 받은 package = FindPackage | `AssetLoader_PostLoadOrderAndBudget`, `AssetLoader_PostLoadTimeBudget`, `AssetLoader_PostLoadRunsWhenInstantiateBudgetIsSpent`, `AssetLoader_DependentFailsWhileDependencyPostLoads`, `AssetLoader_PostLoadJoinCancelAndShutdown`, `AssetLoader_DependencyWaitSkipsPostLoadingUnits` |
+| 콜백 재진입(11.6-17·18) | PostLoad handler·동기 대기 관찰자·완료 대기 진입 hook(큐 뮤텍스를 쥔 채 — 다른 스레드가 그 뒤에 완료)·IO Begin·worker Run·시계·프레임 판정 안의 Request·SetPriority·Release·Pump·WaitForCompletions·WaitFor·Shutdown은 WrongContext, Status·Describe·FindByPath는 됨(교착 없음), 로더는 이어서 정상 완료, 콜백 안 파괴는 자식 프로세스 Fatal(문구 대조) | `AssetLoader_CallbacksCannotReenter`, `AssetLoader_BoundaryCallbacksCannotReenter`, `AssetLoader_DestroyOffOwnerThreadIsFatal` |
 | 조합(14 완료 조건 2) | 요청 단위 모양 3 × 의존 4 × 결함 5 × 진행 방식 2의 허가 조합 106개 전부(금지: 단일의 형제 손상·의존 없음의 의존 손상), 번호 ↔ 조합 일대일·실행 수로 빠짐 검사 | `AssetLoader_AllCombinations` |
 | | 단계 조합: 모양 2 × 의존 상태 5(없음·새로·진행 중·PostLoad 대기·공개됨) × 결함 3 × 합류 3(없음·처음·PostLoad 대기 때) × 취소 시점 6(없음·허가 전·IO·worker·Ready·PostLoad 대기) × 완료 순서 2 × PostLoad handler 2(없음·기록)의 허가 조합 1264개(handler 있음 864·없음 400 — 금지: 의존 없음·PostLoad 대기·공개된 의존의 의존 손상, handler 없이 PostLoad 대기 의존·합류·취소), 조합마다 요청 상태·모든 구성·의존 패키지의 공개 여부·PostLoad 정확히 한 번·의존 먼저·handler package = FindPackage, 끝나면 단위·IO·임시 byte 0, 번호 ↔ 조합 일대일·실행 수(시험 시간 약 0.4 s) | `AssetLoader_StagedCombinations` |
+| | 결함 단계·종료 조합: 결함 단계 5(없음·IO 완료 오류·Begin 즉시 실패·worker 손상·공개 실패 — 오래된 의존 쿠킹 결과의 대표 타입) × 의존 2(없음·Hard) × 종료 시점 5(없음·IO·worker·Ready·PostLoad 대기) × 허가 상한 2(무제한·1)의 허가 조합 54개(금지: 의존 없는 공개 실패, 상한 1과 종료 시점 — 상한 1은 단위를 하나씩 진행해 조합 단계가 맞지 않아 끝까지 간 결과만 본다), 결함별 진단·종료 시점까지 확정된 실패 또는 ShuttingDown·종료 뒤 패키지 놓음·남은 PostLoad 부르지 않음·상한 1이면 의존이 먼저 끝까지, 번호 ↔ 조합 일대일·실행 수(시험 시간 약 0.02 s) | `AssetLoader_FaultStageAndShutdownCombinations` |
 | | 요청 관심·lease·scope·OnReady callback·상주 단위 해제(Closing·Discard)·ReadyMask·expectedType | 범위 밖(A1d AssetManager) |
 | | 클래스별 PostLoad dispatch(`UObject::PostLoad` 대응 클래스 hook 등록) | 범위 밖(A5 — RuntimeClassMetadata와 함께, 단계·handler 경계는 여기) |
 | | 미준비 객체 동작 정책(11.5절 2) | 범위 밖(A1d) |
@@ -1113,19 +1114,21 @@ A1b 상태(2026-11-20): **구현**. 완료 조건 넷을 모두 갖췄다. 빠�
 
 #### 14.1.6 Coverage(A1c)
 
-측정(2026-11-20, 14.1.4와 같은 명령에 filter `AssetLoader`를 더함 — `-Filter AssetPackage,FixtureAsset,CookedManifest,AssetLoader`, AssetPackage 71개·FixtureAsset 8개·CookedManifest 16개·AssetLoader 44개 시험 모두 통과):
+측정(2026-11-20, 14.1.4와 같은 명령에 filter `AssetLoader`를 더함 — `-Filter AssetPackage,FixtureAsset,CookedManifest,AssetLoader`, AssetPackage 71개·FixtureAsset 8개·CookedManifest 16개·AssetLoader 46개 시험 모두 통과):
 
 | 파일 | 줄 | 분기 | 함수 |
 |---|---|---|---|
-| `Private/AssetLoader.cpp` | 99.9%(1591/1593) | 99.8%(643/644) | 100%(87/87) |
+| `Private/AssetLoader.cpp` | 99.8%(1612/1616) | 99.7%(644/646) | 100%(87/87) |
 | `Private/CancelToken.cpp` | 100%(90/90) | 100%(24/24) | 100%(17/17) |
 | `Private/CookedPackageIo.cpp` | 100%(77/77) | 100%(24/24) | 100%(6/6) |
 | `Private/CookedManifest.cpp`(파일·내용 대조 분리 뒤) | 100%(559/559) | 100%(298/298) | 100%(28/28) |
 | `Public/AssetRuntime/AssetLoader.h`·`CancelToken.h` | 100%(7/7·8/8) | 분기 없음 | 100%(3/3·4/4) |
 
-AssetRuntime 전체는 줄 99.90%(4963/4968)·분기 98.10%(2533/2582)·함수 100%(271/271)이고, A1a 파일의 닿지 않은 분기는 14.1.2 그대로다.
+AssetRuntime 전체는 줄 99.86%(4984/4991)·분기 98.14%(2536/2584)·함수 100%(271/271)이고, A1a 파일의 닿지 않은 분기는 14.1.2 그대로다.
 
-닿지 않은 곳(`AssetLoader.cpp` 한 분기와 그 두 줄): 소멸자의 "소유 스레드가 아님 → `platform::Fatal`"이다. 자식 프로세스 probe(`AssetLoader_DestroyOffOwnerThreadIsFatal` — 문구 대조)가 실제로 지나지만, Fatal은 프로세스를 즉시 끝내 그 자식의 coverage profile이 기록되지 않는다(측정은 부모 프로세스 profile만 모은다).
+이 측정은 Coverage 구성(개발용 기능이 있는 비 Release)이다. Release 구성(UE Shipping)에서는 PlatformBase 결과 주입이 빠지므로 `CookedPackageIo.cpp`의 OS 오류 세 분기(읽기 완료 실패·즉시 제출 실패·크기 조회 실패)는 구성상 닿지 않는다(짧은 읽기는 결과 주입 없이 닿는다). Release에서 돈 시험(2026-11-20): EngineTests Release `--filter AssetLoader` 46개 통과(디스크 시험의 결과 주입 장면은 빠진 채), FoundationTests Release `--filter AsyncFile` 13개 통과(`AsyncFile_InjectedFaultsAreDeterministic`는 Release에 없다).
+
+닿지 않은 곳(`AssetLoader.cpp` 두 분기와 그 네 줄): 소멸자의 "소유 스레드가 아님 → `platform::Fatal`"과 "콜백 안 파괴 → `platform::Fatal`"이다. 자식 프로세스 probe(`AssetLoader_DestroyOffOwnerThreadIsFatal` — 문구 대조)가 실제로 지나지만, Fatal은 프로세스를 즉시 끝내 그 자식의 coverage profile이 기록되지 않는다(측정은 부모 프로세스 profile만 모은다).
 
 닿게 한 방법과 그 과정에서 바꾼 것:
 - 결정적 순서: IO·worker를 시험이 내보내는 구현(`TestPackageIo`·`TestLoaderWorker` — 앞부터·뒤부터 완료)으로 단계마다 멈추고, 실제 스레드 시험(디스크·WorkerScheduler·다른 스레드 호출·종료)은 결과만 단언한다. 종료 대기는 대기 진입 hook(11.6절 17)이 보낸 사건 뒤에 다른 스레드가 완료를 내보내 대기 분기에 일정과 무관하게 닿는다. 시간 예산은 부를 때마다 정해진 만큼 가는 시계로 본다.

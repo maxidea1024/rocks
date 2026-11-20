@@ -69,6 +69,38 @@ void WriteReportName(ModuleLoadReport& report, char (&field)[ModuleLoadReport::M
     }
 }
 
+// 단계 값의 순서 번호다(LoadingPhase 값 순서가 단계 순서다).
+constexpr uint8 PhaseOrder(LoadingPhase phase) noexcept {
+    return static_cast<uint8>(phase);
+}
+
+// 묶음의 첫 단계다. 묶음을 내리면 그 단계부터 다시 돈다.
+constexpr LoadingPhase FirstPhaseOf(ModuleGroup group) noexcept {
+    switch (group) {
+    case ModuleGroup::Process:
+        return LoadingPhase::EarliestPossible;
+    case ModuleGroup::Host:
+        return LoadingPhase::PostConfigInit;
+    case ModuleGroup::Engine:
+        return LoadingPhase::PreDefault;
+    }
+
+    return LoadingPhase::EarliestPossible;
+}
+
+// 묶음의 바깥 묶음이다. 프로세스 묶음은 그대로다.
+constexpr ModuleGroup OuterGroupOf(ModuleGroup group) noexcept {
+    return group == ModuleGroup::Engine ? ModuleGroup::Host : ModuleGroup::Process;
+}
+
+// 등록기 자리 하나의 비트다.
+constexpr uint32 SlotBit(usize slot) noexcept {
+    return uint32{1} << slot;
+}
+
+static_assert(MaxTypeRegistrars <= sizeof(uint32) * 8,
+              "Record::registeredSlots must hold one bit per type registrar slot");
+
 } // namespace
 
 const char* ModuleStateName(ModuleState state) noexcept {
@@ -198,14 +230,22 @@ ModuleLoader::~ModuleLoader() noexcept {
         platform::Fatal("ModuleLoader destroyed off the loader thread");
     }
 
+    // Engine이 로더보다 먼저 끝나야 한다(엔진 묶음 사용자가 남은 채 로더를 파괴하면 Engine이
+    // 파괴된 로더를 부른다).
+    if (engineUsers_ != 0) {
+        platform::Fatal("ModuleLoader destroyed while engine group users remain");
+    }
+
     // 남은 모듈은 바깥 묶음까지 한 번의 종료 절차로 내린다(안쪽 묶음 모듈이 나중에 시작했으므로
     // 시작 역순이 곧 안쪽부터다). 자동 종료를 거부한 모듈은 Shutdown 없이 객체만 파괴한다(UE와
     // 같다).
     ShutdownRecords(ModuleGroup::Process);
     // 자동 종료를 거부해 남은 모듈의 타입 등록도 되돌린다(등록기는 아직 살아 있어야 한다 — 계약).
-    if (registrar_ != nullptr) {
-        UnregisterAllTypes();
-        registrar_ = nullptr;
+    for (usize slot = 0; slot < MaxTypeRegistrars; ++slot) {
+        if (registrars_[slot] != nullptr) {
+            UnregisterSlotTypes(slot);
+            registrars_[slot] = nullptr;
+        }
     }
 
     // 남은 객체(자동 종료를 거부한 모듈)를 시작 역순으로 파괴한다. 나중에 시작한 모듈이 먼저 시작한
@@ -254,28 +294,49 @@ usize ModuleLoader::IndexOf(StringView name) const noexcept {
     return IndexNone;
 }
 
-ModuleLoadReport ModuleLoader::Load(StringView name) noexcept {
-    ModuleLoadReport report;
-    WriteReportName(report, report.requested, name);
+bool ModuleLoader::RejectStart(ModuleLoadReport& report, StringView requested,
+                               bool phase) const noexcept {
+    // requested는 모듈 이름(Load)이나 단계 이름(StartPhase·StartEngineGroup)이다.
     if (!OnLoaderThread()) {
         report.code = ModuleLoadCode::WrongThread;
-        WriteReportName(report, report.failed, name);
-        WriteReportText(report, report.stage, "Load");
+        WriteReportName(report, report.failed, requested);
+        WriteReportText(report, report.stage, phase ? "StartPhase" : "Load");
         WriteReportText(report, report.message,
-                        "Module {} must be loaded on the thread that created the module loader",
-                        name);
-        return report;
+                        phase ? "Loading phase {} must be started on the thread that created the "
+                                "module loader"
+                              : "Module {} must be loaded on the thread that created the module "
+                                "loader",
+                        requested);
+        return true;
     }
 
     if (shutdownInProgress_ || processShutdown_) {
         report.code = ModuleLoadCode::ShuttingDown;
-        WriteReportName(report, report.failed, name);
-        WriteReportText(report, report.stage, "Load");
-        WriteReportText(report, report.message,
-                        processShutdown_
-                            ? "Module {} cannot be loaded after process shutdown started"
-                            : "Module {} cannot be loaded while a module group is shutting down",
-                        name);
+        WriteReportName(report, report.failed, requested);
+        WriteReportText(report, report.stage, phase ? "StartPhase" : "Load");
+        const char* message = nullptr;
+        if (phase) {
+            message = processShutdown_
+                          ? "Loading phase {} cannot be started after process shutdown started"
+                          : "Loading phase {} cannot be started while a module group is shutting "
+                            "down";
+        } else {
+            message = processShutdown_
+                          ? "Module {} cannot be loaded after process shutdown started"
+                          : "Module {} cannot be loaded while a module group is shutting down";
+        }
+
+        WriteReportText(report, report.message, message, requested);
+        return true;
+    }
+
+    return false;
+}
+
+ModuleLoadReport ModuleLoader::Load(StringView name) noexcept {
+    ModuleLoadReport report;
+    WriteReportName(report, report.requested, name);
+    if (RejectStart(report, name, false)) {
         return report;
     }
 
@@ -355,9 +416,9 @@ bool ModuleLoader::StartRecord(usize index, ModuleLoadReport& report) noexcept {
         platform::Fatal("ModuleLoader could not issue a module lease");
     }
 
-    // 타입 등록기가 붙어 있으면 Startup 직전에 이 모듈의 타입을 등록한다(UE도 StartupModule 전에
-    // UObject를 등록한다). 실패하면 Startup·Shutdown을 부르지 않는다.
-    if (!RegisterRecordTypes(index, report)) {
+    // 타입 등록기가 붙어 있으면 Startup 직전에 이 모듈의 타입을 모든 등록기에 등록한다(UE도
+    // StartupModule 전에 UObject를 등록한다). 실패하면 Startup·Shutdown을 부르지 않는다.
+    if (!RegisterRecordTypesAll(index, report)) {
         record.owned.Reset();
         AtomicStore<MemoryOrder::Release>(&record.state, ModuleState::Failed);
         return false;
@@ -374,7 +435,7 @@ bool ModuleLoader::StartRecord(usize index, ModuleLoadReport& report) noexcept {
     if (!started) {
         // 실패한 Startup은 스스로 부분 등록을 되돌렸다(계약). Shutdown은 부르지 않는다. 로더가 한
         // 타입 등록은 로더가 되돌린다.
-        UnregisterRecordTypes(index);
+        UnregisterRecordTypesAll(index);
         AtomicStore<MemoryOrder::Release>(&record.object,
                                           static_cast<ModuleImplementation*>(nullptr));
         record.owned.Reset();
@@ -397,17 +458,32 @@ bool ModuleLoader::StartRecord(usize index, ModuleLoadReport& report) noexcept {
     return true;
 }
 
-void ModuleLoader::ShutdownGroup(ModuleGroup group) noexcept {
+void ModuleLoader::CheckShutdownCall(bool engineGroup) const noexcept {
     if (!OnLoaderThread()) {
-        platform::Fatal("ModuleLoader::ShutdownGroup called off the loader thread");
+        platform::Fatal(engineGroup
+                            ? "ModuleLoader::ShutdownEngineGroup called off the loader thread"
+                            : "ModuleLoader::ShutdownGroup called off the loader thread");
     }
 
     if (loadDepth_ != 0) {
-        platform::Fatal("ModuleLoader::ShutdownGroup called while a module load is in progress");
+        platform::Fatal(
+            engineGroup
+                ? "ModuleLoader::ShutdownEngineGroup called while a module load is in progress"
+                : "ModuleLoader::ShutdownGroup called while a module load is in progress");
     }
 
     if (shutdownInProgress_) {
-        platform::Fatal("ModuleLoader::ShutdownGroup called from a module shutdown callback");
+        platform::Fatal(
+            engineGroup ? "ModuleLoader::ShutdownEngineGroup called from a module shutdown callback"
+                        : "ModuleLoader::ShutdownGroup called from a module shutdown callback");
+    }
+}
+
+void ModuleLoader::ShutdownGroup(ModuleGroup group) noexcept {
+    CheckShutdownCall(false);
+    // 엔진 묶음 사용자(Engine)가 남아 있는데 묶음을 내리면 그 Engine의 모듈이 사라진다.
+    if (engineUsers_ != 0) {
+        platform::Fatal("ModuleLoader::ShutdownGroup called while engine group users remain");
     }
 
     if (group == ModuleGroup::Process) {
@@ -415,6 +491,112 @@ void ModuleLoader::ShutdownGroup(ModuleGroup group) noexcept {
     }
 
     ShutdownRecords(group);
+}
+
+ModuleLoadReport ModuleLoader::StartPhase(LoadingPhase phase) noexcept {
+    ModuleLoadReport report;
+    const StringView phaseName = LoadingPhaseName(phase);
+    WriteReportName(report, report.requested, phaseName);
+    if (RejectStart(report, phaseName, true)) {
+        return report;
+    }
+
+    if (phase == LoadingPhase::None) {
+        platform::Fatal("ModuleLoader::StartPhase called with LoadingPhase::None");
+    }
+
+    if (loadDepth_ != 0) {
+        platform::Fatal("ModuleLoader::StartPhase called while a module load is in progress");
+    }
+
+    // 이미 돈 단계다. 같은 묶음 안이면 할 일이 없고(UE도 같은 단계 재호출을 허용한다), 앞 묶음의
+    // 단계면 호스트의 순서 오류다.
+    if (PhaseOrder(phase) < PhaseOrder(nextPhase_)) {
+        if (LoadingPhaseGroup(phase) < currentGroup_) {
+            platform::Fatal("ModuleLoader::StartPhase called for a phase of a group before the "
+                            "current one (host start order error)");
+        }
+
+        return report;
+    }
+
+    ++loadDepth_;
+    bool started = true;
+    while (started && PhaseOrder(nextPhase_) <= PhaseOrder(phase)) {
+        started = RunPhase(nextPhase_, report);
+        if (started) {
+            nextPhase_ = static_cast<LoadingPhase>(PhaseOrder(nextPhase_) + 1);
+        } else {
+            // 실패한 단계를 알린다(부른 단계보다 앞 단계일 수 있다).
+            WriteReportName(report, report.requested, LoadingPhaseName(nextPhase_));
+        }
+    }
+
+    --loadDepth_;
+    return report;
+}
+
+bool ModuleLoader::RunPhase(LoadingPhase phase, ModuleLoadReport& report) noexcept {
+    // 이 단계에서 시작하는 모듈은 이 단계의 묶음에 속한다.
+    currentGroup_ = LoadingPhaseGroup(phase);
+    for (usize index = 0; index < records_.Size(); ++index) {
+        const ModuleTableRow& row = *records_[index].row;
+        if (row.phase != phase || row.onRequest) {
+            continue;
+        }
+
+        if (!StartRecord(index, report)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool ModuleLoader::PhaseStarted(LoadingPhase phase) const noexcept {
+    return phase != LoadingPhase::None && PhaseOrder(phase) < PhaseOrder(nextPhase_);
+}
+
+ModuleLoadReport ModuleLoader::StartEngineGroup() noexcept {
+    ModuleLoadReport report;
+    WriteReportName(report, report.requested, LoadingPhaseName(LoadingPhase::PostDefault));
+    if (RejectStart(report, LoadingPhaseName(LoadingPhase::PostDefault), true)) {
+        return report;
+    }
+
+    // 첫 사용자가 아니어도 StartPhase와 같은 계약을 지킨다(모듈 Startup 안에서 Engine을 만들지
+    // 않는다).
+    if (loadDepth_ != 0) {
+        platform::Fatal("ModuleLoader::StartEngineGroup called while a module load is in progress");
+    }
+
+    if (engineUsers_ != 0) {
+        ++engineUsers_;
+        return report;
+    }
+
+    report = StartPhase(LoadingPhase::PostDefault);
+    if (!report.IsOk()) {
+        // 처음 사용자의 시작이 실패했다. 이 묶음에서 시작한 모듈을 내려 다음 시도가 처음부터 하게
+        // 한다(사용자 수는 0 그대로).
+        ShutdownRecords(ModuleGroup::Engine);
+        return report;
+    }
+
+    engineUsers_ = 1;
+    return report;
+}
+
+void ModuleLoader::ShutdownEngineGroup() noexcept {
+    CheckShutdownCall(true);
+    if (engineUsers_ == 0) {
+        platform::Fatal("ModuleLoader::ShutdownEngineGroup called without an engine group user");
+    }
+
+    --engineUsers_;
+    if (engineUsers_ == 0) {
+        ShutdownRecords(ModuleGroup::Engine);
+    }
 }
 
 void ModuleLoader::ShutdownRecords(ModuleGroup group) noexcept {
@@ -473,13 +655,23 @@ void ModuleLoader::ShutdownRecords(ModuleGroup group) noexcept {
         record.pendingShutdown = false;
         AtomicStore<MemoryOrder::Release>(&record.state, ModuleState::ShuttingDown);
         record.owned->Shutdown();
-        // 모듈 코드가 내려간 뒤 그 모듈의 타입을 되돌린다(3.7절 3단계).
-        UnregisterRecordTypes(next);
+        // 모듈 코드가 내려간 뒤 그 모듈의 타입을 모든 등록기에서 되돌린다(3.7절 3단계).
+        UnregisterRecordTypesAll(next);
         AtomicStore<MemoryOrder::Release>(&record.object,
                                           static_cast<ModuleImplementation*>(nullptr));
         record.owned.Reset();
         record.startOrder = 0;
         AtomicStore<MemoryOrder::Release>(&record.state, ModuleState::Stopped);
+    }
+
+    // 내린 묶음과 안쪽 묶음의 단계는 다시 돌 수 있다(다음 Engine). 지금 묶음은 바깥 묶음이다.
+    const LoadingPhase first = FirstPhaseOf(group);
+    if (PhaseOrder(first) < PhaseOrder(nextPhase_)) {
+        nextPhase_ = first;
+    }
+
+    if (currentGroup_ >= group) {
+        currentGroup_ = OuterGroupOf(group);
     }
 
     shutdownInProgress_ = false;
@@ -566,12 +758,24 @@ ModuleLoadReport ModuleLoader::AttachTypeRegistrar(ModuleTypeRegistrar& registra
         return report;
     }
 
-    if (registrar_ != nullptr) {
+    if (SlotOf(registrar) != IndexNone) {
         platform::Fatal("ModuleLoader type registrar is already attached");
     }
 
     CheckRegistrarCall();
-    registrar_ = &registrar;
+    usize slot = IndexNone;
+    for (usize candidate = 0; candidate < MaxTypeRegistrars; ++candidate) {
+        if (registrars_[candidate] == nullptr) {
+            slot = candidate;
+            break;
+        }
+    }
+
+    if (slot == IndexNone) {
+        platform::Fatal("ModuleLoader has no free type registrar slot (MaxTypeRegistrars)");
+    }
+
+    registrars_[slot] = &registrar;
     // 이미 시작한 모듈을 시작 순서(순번 오름차순)로 등록한다. 고르는 동안 할당하지 않도록 순번이
     // 작은 것부터 하나씩 찾는다(모듈 수가 작다).
     uint64 floor = 0;
@@ -590,10 +794,10 @@ ModuleLoadReport ModuleLoader::AttachTypeRegistrar(ModuleTypeRegistrar& registra
         }
 
         floor = records_[next].startOrder;
-        if (!RegisterRecordTypes(next, report)) {
+        if (!RegisterRecordTypes(next, slot, report)) {
             // 이번에 등록한 것을 시작 역순으로 되돌리고 붙이지 않는다.
-            UnregisterAllTypes();
-            registrar_ = nullptr;
+            UnregisterSlotTypes(slot);
+            registrars_[slot] = nullptr;
             return report;
         }
     }
@@ -601,23 +805,57 @@ ModuleLoadReport ModuleLoader::AttachTypeRegistrar(ModuleTypeRegistrar& registra
     return report;
 }
 
-void ModuleLoader::DetachTypeRegistrar() noexcept {
+void ModuleLoader::DetachTypeRegistrar(ModuleTypeRegistrar& registrar) noexcept {
     if (!OnLoaderThread()) {
         platform::Fatal("ModuleLoader::DetachTypeRegistrar called off the loader thread");
     }
 
-    if (registrar_ == nullptr) {
+    const usize slot = SlotOf(registrar);
+    if (slot == IndexNone) {
         return;
     }
 
     CheckRegistrarCall();
-    UnregisterAllTypes();
-    registrar_ = nullptr;
+    UnregisterSlotTypes(slot);
+    registrars_[slot] = nullptr;
 }
 
-bool ModuleLoader::RegisterRecordTypes(usize index, ModuleLoadReport& report) noexcept {
+usize ModuleLoader::TypeRegistrarCount() const noexcept {
+    usize count = 0;
+    for (const ModuleTypeRegistrar* registrar : registrars_) {
+        if (registrar != nullptr) {
+            ++count;
+        }
+    }
+
+    return count;
+}
+
+usize ModuleLoader::SlotOf(const ModuleTypeRegistrar& registrar) const noexcept {
+    for (usize slot = 0; slot < MaxTypeRegistrars; ++slot) {
+        if (registrars_[slot] == &registrar) {
+            return slot;
+        }
+    }
+
+    return IndexNone;
+}
+
+bool ModuleLoader::RegisterRecordTypesAll(usize index, ModuleLoadReport& report) noexcept {
+    for (usize slot = 0; slot < MaxTypeRegistrars; ++slot) {
+        if (registrars_[slot] != nullptr && !RegisterRecordTypes(index, slot, report)) {
+            // 이 모듈을 이미 등록한 다른 등록기를 되돌린다(Startup은 부르지 않는다).
+            UnregisterRecordTypesAll(index);
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool ModuleLoader::RegisterRecordTypes(usize index, usize slot, ModuleLoadReport& report) noexcept {
     Record& record = records_[index];
-    if (registrar_ == nullptr || record.entry->registerTypes == nullptr) {
+    if (record.entry->registerTypes == nullptr) {
         return true;
     }
 
@@ -627,7 +865,7 @@ bool ModuleLoader::RegisterRecordTypes(usize index, ModuleLoadReport& report) no
         platform::Fatal("ModuleLoader could not issue a module lease");
     }
 
-    auto registered = registrar_->Register(name, record.entry->registerTypes, lease.Value());
+    auto registered = registrars_[slot]->Register(name, record.entry->registerTypes, lease.Value());
     if (!registered) {
         report.code = ModuleLoadCode::StartupFailed;
         report.error = registered.Error();
@@ -639,28 +877,35 @@ bool ModuleLoader::RegisterRecordTypes(usize index, ModuleLoadReport& report) no
         return false;
     }
 
-    record.typesRegistered = true;
+    record.registeredSlots |= SlotBit(slot);
     return true;
 }
 
-void ModuleLoader::UnregisterRecordTypes(usize index) noexcept {
+void ModuleLoader::UnregisterRecordTypes(usize index, usize slot) noexcept {
     Record& record = records_[index];
-    if (!record.typesRegistered) {
+    if ((record.registeredSlots & SlotBit(slot)) == 0) {
         return;
     }
 
-    record.typesRegistered = false;
-    registrar_->Unregister(record.row->name);
+    record.registeredSlots &= ~SlotBit(slot);
+    registrars_[slot]->Unregister(record.row->name);
 }
 
-void ModuleLoader::UnregisterAllTypes() noexcept {
+void ModuleLoader::UnregisterRecordTypesAll(usize index) noexcept {
+    // 붙인 역순(자리 번호 역순)으로 되돌린다.
+    for (usize slot = MaxTypeRegistrars; slot-- > 0;) {
+        UnregisterRecordTypes(index, slot);
+    }
+}
+
+void ModuleLoader::UnregisterSlotTypes(usize slot) noexcept {
     // 시작 역순이다. 등록한 모듈은 모두 시작해 있다(Startup 실패는 그 자리에서 되돌렸다).
     uint64 ceiling = NumericLimits<uint64>::Max();
     while (true) {
         usize next = IndexNone;
         for (usize index = 0; index < records_.Size(); ++index) {
             const Record& record = records_[index];
-            if (record.typesRegistered && record.startOrder < ceiling &&
+            if ((record.registeredSlots & SlotBit(slot)) != 0 && record.startOrder < ceiling &&
                 (next == IndexNone || record.startOrder > records_[next].startOrder)) {
                 next = index;
             }
@@ -671,7 +916,7 @@ void ModuleLoader::UnregisterAllTypes() noexcept {
         }
 
         ceiling = records_[next].startOrder;
-        UnregisterRecordTypes(next);
+        UnregisterRecordTypes(next, slot);
     }
 }
 

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using Rocks.Build.Descriptors;
 
 namespace Rocks.Build;
 
@@ -109,6 +110,7 @@ public static class ModuleTables
             }
         }
 
+        ValidateBootModules(modules, entries);
         IEnumerable<string> roots = request.Targets.Count == 0 ? modules.Keys : request.Targets;
         // 동적 모듈은 실행 파일이 아니므로(입력 검사) 따라가도 표를 만들 실행 파일이 늘지 않는다. 대상 집합의 뜻을 빌드 대상과 맞춘다.
         HashSet<string> reachable = LinkClosure.Reachable(roots, modules);
@@ -135,16 +137,76 @@ public static class ModuleTables
     }
 
     /// <summary>
+    /// 부트 모듈 검사다(Docs/Design/ModuleLoader.ko.md 3.11절, MD4). 공통 실행 진입점 표지(<see cref="NativeModuleInput.ProvidesLaunch"/>)를 켠
+    /// 모듈의 링크 폐포에 든 진입점 모듈은 로더가 만들어진 직후 시작하므로 단계가 EarliestPossible이어야 한다. 빌드가 몰래 바꾸지 않고 규칙에
+    /// 적게 하는 것은 단계 순서 검사(MD6)가 규칙 값으로 돌기 때문이다. 어기면 <see cref="ArgumentException"/>이다.
+    /// </summary>
+    internal static void ValidateBootModules(IReadOnlyDictionary<string, NativeModuleInput> modules, HashSet<string> entries)
+    {
+        foreach (NativeModuleInput launch in modules.Values.Where(module => module.ProvidesLaunch).OrderBy(module => module.Name, StringComparer.Ordinal))
+        {
+            List<string> closure = LinkClosure.Of(launch.Name, modules, out HashSet<string> onRequest);
+            foreach (string name in closure.Append(launch.Name))
+            {
+                if (onRequest.Contains(name) || !modules.TryGetValue(name, out NativeModuleInput? module) || !entries.Contains(name))
+                {
+                    continue;
+                }
+
+                if (module.LoadingPhase != LoadingPhase.EarliestPossible)
+                {
+                    throw new ArgumentException($"Module {module.Name}: boot module (in the dependency closure of {launch.Name}) must use the " +
+                        $"EarliestPossible loading phase, not {module.LoadingPhase} (Docs/Design/ModuleLoader.ko.md section 3.11).");
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// 단계 순서 검사다(Docs/Design/ModuleLoader.ko.md MD6). 행의 의존(면제 모듈을 거친 대체 의존 포함)의 단계가 그 행보다 늦으면 단계
+    /// 실행이 늦은 단계 모듈을 조용히 앞당기므로 거부한다. None 의존은 허용하고 None 행은 검사하지 않는다(코드가 Load로 시작한다).
+    /// </summary>
+    internal static void ValidatePhaseOrder(NativeModuleInput module, IReadOnlyDictionary<string, NativeModuleInput> modules, List<string> dependencies)
+    {
+        LoadingPhase phase = RowPhase(module);
+        if (phase == LoadingPhase.None)
+        {
+            return;
+        }
+
+        foreach (string name in dependencies)
+        {
+            NativeModuleInput dependency = modules[name];
+            LoadingPhase dependencyPhase = RowPhase(dependency);
+            if (dependencyPhase != LoadingPhase.None && dependencyPhase > phase)
+            {
+                throw new ArgumentException($"Module {module.Name} (loading phase {phase}) depends on {dependency.Name} (loading phase " +
+                    $"{dependencyPhase}); a dependency must not use a later loading phase (use the same or an earlier phase, None, or " +
+                    "DynamicModules — Docs/Design/ModuleLoader.ko.md MD6).");
+            }
+        }
+    }
+
+    /// <summary>
+    /// 모듈 표 행에 싣는 단계다. 실행 파일 모듈은 늘 None이다(Docs/Design/ModuleLoader.ko.md 3.11절): 본문은 이미 실행 중인 코드이고, 단계
+    /// 실행이 실행 파일 행을 시작하면 그 의존(시험 fixture 같은 None 모듈 포함)을 모두 끌어 시작한다. UE에서도 Program의 주 모듈은 로딩 단계로
+    /// 적재하지 않는다. 필요하면 본문이 Load(이름)로 시작한다.
+    /// </summary>
+    internal static LoadingPhase RowPhase(NativeModuleInput module) =>
+        module.Kind == NativeModuleKind.Executable ? LoadingPhase.None : module.LoadingPhase;
+
+    /// <summary>
     /// 실행 파일 <paramref name="executable"/>의 모듈 표 TU 내용이다. 행은 의존 우선 깊이 탐색의 후위 순서(의존 목록 순서대로)에서 진입점
     /// 모듈만 고른 것이고, 그 뒤에 실행 중 적재 모듈(DynamicModules) 쪽이 같은 규칙으로 붙으며 실행 파일이 마지막이다. 행의 의존은 직접
-    /// 의존 가운데 진입점 모듈이며, 면제 모듈을 거치는 의존은 그 너머의 진입점 모듈로 바꿔 싣는다(중복 제거, 처음 만난 순서).
+    /// 의존 가운데 진입점 모듈이며, 면제 모듈을 거치는 의존은 그 너머의 진입점 모듈로 바꿔 싣는다(중복 제거, 처음 만난 순서). 링크 폐포
+    /// 밖에서 DynamicModules로만 든 행은 요청 시 적재 행(onRequest)이다 — 단계 실행이 건너뛴다(3.8·3.11절). 행마다 단계 순서를 검사한다(MD6).
     /// </summary>
     internal static string Generate(string executable, IReadOnlyDictionary<string, NativeModuleInput> modules, HashSet<string> entries)
     {
         // 실행 파일이 링크하는 모듈(링크 폐포 다음 동적 모듈 쪽 — LinkClosure)에서 진입점 모듈만 고르고 실행 파일을 끝에 둔다. 동적 모듈
         // 행은 실행 파일 행 앞에 오며, 행의 의존은 링크 의존뿐이라 Load(실행 파일)가 동적 모듈을 시작하지 않는다(Docs/Design/ModuleLoader.ko.md
         // 3.8절).
-        var order = LinkClosure.Of(executable, modules).Append(executable)
+        var order = LinkClosure.Of(executable, modules, out HashSet<string> onRequest).Append(executable)
             .Where(name => modules.ContainsKey(name) && entries.Contains(name)).Select(name => modules[name]).ToList();
         foreach (NativeModuleInput module in order)
         {
@@ -158,7 +220,8 @@ public static class ModuleTables
         var text = new StringBuilder();
         text.Append("// Generated by Rocks.Build. Do not edit.\n");
         text.Append(CultureInfo.InvariantCulture, $"// Module table of executable {executable} (Docs/Design/ModuleLoader.ko.md section 3.2): every C++ module\n");
-        text.Append("// of the executable in dependency order with its direct dependencies and loading phase. Referencing every\n");
+        text.Append("// of the executable in dependency order with its direct dependencies, loading phase and on-request flag (a\n");
+        text.Append("// module reached only through DynamicModules, skipped by phase start). Referencing every\n");
         text.Append("// RocksModuleEntry_<Name> makes a missing ROCKS_IMPLEMENT_MODULE a link error.\n");
         text.Append("#include <Core/Module/ModuleEntry.h>\n\n");
         foreach (NativeModuleInput module in order)
@@ -171,6 +234,7 @@ public static class ModuleTables
         foreach (NativeModuleInput module in order)
         {
             List<string> direct = EntryDependencies(module, modules, entries);
+            ValidatePhaseOrder(module, modules, direct);
             dependencies[module.Name] = direct;
             if (direct.Count != 0)
             {
@@ -185,8 +249,9 @@ public static class ModuleTables
         {
             List<string> direct = dependencies[module.Name];
             string list = direct.Count == 0 ? "nullptr" : "RocksModuleDependencies_" + module.Name;
+            string requested = onRequest.Contains(module.Name) ? "true" : "false";
             text.Append(CultureInfo.InvariantCulture,
-                $"    {{\"{module.Name}\", &RocksModuleEntry_{module.Name}, {list}, {direct.Count}, ::rocks::LoadingPhase::{module.LoadingPhase}}},\n");
+                $"    {{\"{module.Name}\", &RocksModuleEntry_{module.Name}, {list}, {direct.Count}, ::rocks::LoadingPhase::{RowPhase(module)}, {requested}}},\n");
         }
 
         text.Append("};\n\n} // namespace\n\n");

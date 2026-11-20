@@ -3,6 +3,12 @@
 #include <Core/Memory/Allocator.h>
 #include <Graphics/Device.h>
 
+namespace rocks {
+
+class ModuleLoader;
+
+} // namespace rocks
+
 namespace sandbox {
 
 // 렌더 lane(RenderBase RB1)을 실제 장치로 확인한다. 헤드리스 Engine 루프가 매 프레임 장면을 추출해
@@ -11,7 +17,9 @@ namespace sandbox {
 // hook(CP6)이 렌더 lane 종료 순서(5.5절)를 실행한 뒤 장치 소유권이 돌아왔는지, 마지막 프레임 픽셀이
 // 맞는지 본다. Thread·Inline 두 모드를 돌린다. device는 호출 스레드가 소유하고 있어야 한다. 실패
 // 수를 돌려준다(진단은 stdout).
+// modules는 Launch의 프로세스 모듈 로더다(엔진이 엔진 단계를 돈다 — EngineConfig::modules).
 rocks::uint32 RunRenderLaneChecks(const char* name, rocks::graphics::Device& device,
-                                  rocks::Allocator& allocator) noexcept;
+                                  rocks::Allocator& allocator,
+                                  rocks::ModuleLoader& modules) noexcept;
 
 } // namespace sandbox
