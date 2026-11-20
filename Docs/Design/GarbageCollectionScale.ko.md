@@ -793,7 +793,7 @@ UE 5.8.4의 작은 블록 할당자(`Runtime/Core` — `Public/HAL/MallocBinned2
 - **정렬.** 블록은 16 byte 정렬이다. 16 초과 64 이하 정렬은 블록 크기가 그 정렬의 배수인 첫 등급으로 올린다(머리 64 B와 블록 크기가 모두 배수라 블록 주소가 정렬된다 — UE `PromoteToLargerBin`과 같다).
 - **통계.** `Stats()`(할당 수·byte)와 `Usage()`(실제 예약 크기, commit한 slab byte, 보관 중인 빈 slab 수, 살아 있는 큰 할당 수, 큰 경로로 간 작은 요청의 누적 수)로 나눠 낸다. 다른 스레드가 쓰는 중에는 한 블록의 반환 계수를 할당 계수보다 먼저 읽을 수 있으므로 등급별로 음수가 되지 않게 자른다. `liveAllocations`·`totalAllocations`는 스레드 캐시의 계수(소유 스레드만 쓰는 relaxed atomic)와 인스턴스 합계를 더한 값이다. `liveBytes`는 요청 크기가 아니라 **블록 크기의 합**이다(반환 때 요청 크기를 알 수 없다 — `Allocator.h`의 "요청 크기"와 다른 점을 클래스 주석에 적는다). 다른 스레드가 쓰는 중의 `Stats`는 그 순간의 근사다.
 - **ASan**(메인 세션 검토 F5). ASan 구성에서는 반환한 블록 전체를 `AsanPoisonMemory`로 닫고 할당 때 요청 크기만 연다(기존 `AddressSanitizer.h` 규칙). 할당자 자신은 닫힌 블록의 연결 word·표지를 읽고 쓰므로, 그 접근은 계측에서 뺀 내부 함수 둘(word 읽기·쓰기)로만 한다 — `Base/Compiler.h`에 `ROCKS_NO_SANITIZE_ADDRESS`(clang `no_sanitize("address")`)를 더한다. slab 머리는 닫지 않는다. 구현(AL4)에서 정한 점: slab에서 뗀 블록도 그 자리에서 닫는다(불변식 — 사용자에게 나가 있지 않은 블록은 모두 닫혀 있고, 나가 있는 블록은 요청 크기만 열려 있다). 계측에서 빠지는 것은 그 함수 본문의 직접 접근뿐이라(그 함수가 부른 함수의 접근은 검사된다) 연결·표지의 단순 읽기·쓰기만 내부 함수로 하고, 표지를 세우는 비교 교환은 계측되는 원자 함수(`Platform/Atomics.h` — 원자 builtin을 직접 쓰지 않는 정책)를 지나므로 그 word(8 byte)만 열고 한다: 성공하면 호출자가 블록 전체를 닫고, 실패하면(이미 닫힌 블록) 그 word를 다시 닫는다(개정 13: 표지를 단순 대입으로 되돌리면서 이 처리는 없어졌다 — 표지 접근은 모두 계측 제외 함수의 직접 접근이다). 주소 범위를 풀 때는 쓴 적 있는 slab을 모두 연다(같은 주소를 OS가 다른 용도로 다시 내줄 수 있다). ASan이 아닌 구성에서는 이 호출들이 컴파일에서 빠진다. 버린 대안: 앞 16 byte를 열어 두기(가장 작은 등급은 검사가 없어지고 모든 블록의 첫 두 word가 빠진다), 내부 접근마다 열고 닫기(느리고, 열린 사이의 사용자 오용을 놓친다).
-- **계약.** 0 byte는 성공한 nullptr, 잘못된 정렬은 `InvalidArgument`, 미소유·중복·중간 주소 반환은 `NotFound`(범위 밖·안 쓰는 slab·중간 주소는 역참조 없이, 그 밖은 위 한계 2 안에서), 남은 할당이 있으면 파괴 Fatal, `Trim`은 호출 스레드 캐시·이전 칸·빈 slab 보관소를 비워 decommit한다(다른 스레드의 캐시는 건드리지 않는다). 지금의 "같은 스레드 재진입은 Busy" 규칙은 없앤다(작은 경로는 상위 allocator를 부르지 않고, 큰 경로는 잠금 밖에서 부른다). `Trim`은 값을 돌려주지 않는다(살아 있는 할당이 있어도 되고 실패할 것이 없다 — 전의 `Busy`가 없어진다). `Shutdown`은 없앤다(닫힌 상태를 따로 두지 않는다 — 수명은 객체 파괴로 끝난다).
+- **계약.** 0 byte는 성공한 nullptr, 잘못된 정렬은 `InvalidArgument`, 미소유·중복·중간 주소 반환은 `NotFound`(범위 밖·안 쓰는 slab·중간 주소는 역참조 없이, 그 밖은 위 한계 2 안에서), 남은 할당이 있으면 파괴 Fatal, `Trim`은 호출 스레드 캐시·이전 칸·빈 slab 보관소를 비워 decommit한다(다른 스레드의 캐시는 건드리지 않는다 — 개정 16: 이름이 `TrimMemory`가 됐고 쉰다고 표시한 스레드의 캐시는 비운다, 18.11.4절). 지금의 "같은 스레드 재진입은 Busy" 규칙은 없앤다(작은 경로는 상위 allocator를 부르지 않고, 큰 경로는 잠금 밖에서 부른다). `Trim`은 값을 돌려주지 않는다(살아 있는 할당이 있어도 되고 실패할 것이 없다 — 전의 `Busy`가 없어진다). `Shutdown`은 없앤다(닫힌 상태를 따로 두지 않는다 — 수명은 객체 파괴로 끝난다).
 
 ### 18.5 크기 등급
 
@@ -940,7 +940,7 @@ UE 5.8.4의 작은 블록 할당자(`Runtime/Core` — `Public/HAL/MallocBinned2
 - **쉬는 스레드의 캐시.** 스레드 캐시(`FPerThreadFreeBlockLists` — `Core/Public/HAL/MallocBinnedCommon.h:500`)마다 mutex가 있고 소유 스레드가 쓰는 동안 쥔다(`bLockedByOwnerThread` — `:642`).
   - worker는 막히는 대기 앞뒤에서 표시한다: `FMemory::MarkTLSCachesAsUnusedOnCurrentThread()` → 대기 → `MarkTLSCachesAsUsedOnCurrentThread()`(`Core/Private/Async/Fundamental/WaitingQueue.cpp:119–125`). 앞의 것이 mutex를 풀고(`UnlockTLS` — `MallocBinnedCommon.h:535`) 뒤의 것이 다시 잠근다(`LockTLS` — `:544`, 비우는 쪽이 쥐고 있으면 기다린다).
   - 빠른 경로의 `Get()`(`:504`)은 `bLockedByOwnerThread`가 거짓이면 null을 돌려준다 — 쉰다고 표시한 사이의 할당(대기 구현이 할당할 때)은 캐시 없이 간다.
-  - `Trim`(`Core/Public/HAL/MallocBinnedCommonUtils.h:143`)은 epoch(`MemoryTrimEpoch`)를 올린다. 비데스크톱에서는 등록된 캐시를 돌며 `TryLock`에 성공한 것(쉬는 스레드의 것)을 그 자리에서 비운다(`:152–170`). 데스크톱에서는 그 순회를 건너뛴다("we may have too many threads and this could cause some hitches") — 깨어 있던 스레드가 다음에 쉴 때 epoch가 올랐으면 스스로 비운다(`MarkTLSCachesAsUnusedOnCurrentThread` → `FlushCurrentThreadCacheInternal(bNewEpochOnly)` — `MallocBinnedCommon.h:809`).
+  - `Trim`(`Core/Public/HAL/MallocBinnedCommonUtils.h:143`)은 epoch(`MemoryTrimEpoch`)를 올린다. 비데스크톱에서는 등록된 캐시를 돌며 `TryLock`에 성공한 것(쉬는 스레드의 것)을 그 자리에서 비운다(`:152–170`). 데스크톱에서는 그 순회를 건너뛴다("we may have too many threads and this could cause some hitches"). 이어서 named thread(게임·렌더·RHI 등)에 broadcast를 보내 각자 자기 캐시를 비우게 한다(`:172–188` — 비데스크톱은 task thread에도 보낸다). 그래서 데스크톱의 task worker만 Trim 때 비워지지 않고, 깨어 있던 worker가 다음에 쉴 때 epoch가 올랐으면 스스로 비운다(`MarkTLSCachesAsUnusedOnCurrentThread` → `FlushCurrentThreadCacheInternal(bNewEpochOnly)` — `MallocBinnedCommon.h:809`). `FMemory::Trim`은 주 스레드에서만 부른다(`UnrealMemory.h:226`).
 
 #### 18.11.3 `Allocator` 인터페이스
 
@@ -955,7 +955,7 @@ UE 5.8.4의 작은 블록 할당자(`Runtime/Core` — `Public/HAL/MallocBinned2
 
 #### 18.11.4 `BinnedAllocator`
 
-- **캐시 상태.** 스레드 캐시마다 상태 하나를 둔다(원자 word, 뜨거운 등급 칸과 다른 캐시 줄): 쓰는 중 · 쉬는 중 · 비우는 중. 쓰는 중 ↔ 쉬는 중은 소유 스레드만, 쉬는 중 ↔ 비우는 중은 등록부 잠금을 쥔 스레드만 바꾼다. 모두 비교 교환이다.
+- **캐시 상태.** 스레드 캐시마다 상태 하나를 둔다(원자 word, 뜨거운 등급 칸과 다른 캐시 줄): 쓰는 중 · 쉬는 중 · 비우는 중. 쓰는 중 ↔ 쉬는 중은 소유 스레드만, 쉬는 중 ↔ 비우는 중은 등록부 잠금을 쥔 스레드만 바꾼다. 잠금 없이 다투는 전이(쓰는 중 → 쉬는 중, 쉬는 중 → 쓰는 중, 쉬는 중 → 비우는 중)는 비교 교환이고, 등록부 잠금을 쥔 채 하는 되돌림(비우는 중 → 쉬는 중)과 비우기를 기다린 소유 스레드의 "쓰는 중" 쓰기는 단순 대입이다(그 잠금을 쥔 동안 다른 쓰는 쪽이 없다).
 - **`MarkThreadIdle`.** 호출 스레드의 이 인스턴스 캐시(없으면 아무것도 안 한다)를 쓰는 중 → 쉬는 중으로 바꾸고, 스레드 기록의 "마지막에 쓴 인스턴스" 지름길이 이 인스턴스면 지운다. 잠금을 잡지 않는다.
 - **`TrimMemory`.** 순서: 호출 스레드의 캐시가 쓰는 중이면 비운다 → 등록부 잠금 아래에서 이 인스턴스의 캐시 목록을 돌며 쉬는 중 → 비우는 중으로 바꾼 캐시의 묶음을 slab으로 돌려주고 쉬는 중으로 되돌린다 → 이전 칸을 비운다 → 보관한 빈 slab을 decommit한다. 쓰는 중인 다른 스레드의 캐시는 건드리지 않는다. 계수(내준·돌려받은 누적 수)는 캐시에 그대로 둔다 — 블록만 옮긴다.
 - **`MarkThreadActive`.** 쉬는 중 → 쓰는 중 비교 교환이 되면 끝이다(잠금 없음). 비우는 중이면 등록부 잠금을 얻어(비우는 쪽이 그 잠금을 쥐고 있으므로 끝날 때까지 기다린다) 쓰는 중으로 둔다.
@@ -965,7 +965,8 @@ UE 5.8.4의 작은 블록 할당자(`Runtime/Core` — `Public/HAL/MallocBinned2
 - **한계.**
   - 표시하지 않고 쉬는 스레드(엔진의 다른 스레드 — 로그 출력, 비동기 파일, trace 등)와 Trim 때 깨어 있던 스레드의 캐시는 그대로 남는다(18.8절의 상한 그대로). UE의 epoch(Trim 때 깨어 있던 스레드가 다음에 쉴 때 스스로 비움)는 넣지 않았다(후속).
   - 한 스레드가 여러 인스턴스의 캐시를 가지면 표시한 인스턴스의 캐시만 쉰다.
-  - UE 데스크톱과 다르다: UE는 데스크톱에서 쉬는 캐시를 Trim이 직접 비우지 않는다(스레드 수가 많아 hitch를 우려). 여기서는 플랫폼을 가르지 않고 직접 비운다 — 표시하는 스레드가 `WorkerScheduler`의 worker뿐이고 캐시 상한이 2.25 MiB라 비용이 작다(측정은 실험 25.11절).
+  - UE는 Trim 때 named thread(게임·렌더·RHI 등)에 broadcast를 보내 각자 캐시를 비우게 한다. 여기서는 호출 스레드와 쉰다고 표시한 스레드만 비운다(리뷰 지적).
+  - UE 데스크톱과 다르다: UE는 데스크톱에서 쉬는 task worker의 캐시를 Trim이 직접 비우지 않는다(스레드 수가 많아 hitch를 우려). 여기서는 플랫폼을 가르지 않고 직접 비운다 — 표시하는 스레드가 `WorkerScheduler`의 worker뿐이고 캐시 상한이 2.25 MiB라 비용이 작다(측정은 실험 25.11절).
 
 #### 18.11.5 `WorkerScheduler`
 
@@ -980,7 +981,7 @@ UE 5.8.4의 작은 블록 할당자(`Runtime/Core` — `Public/HAL/MallocBinned2
   2. Engine: World를 파괴한 뒤(`Engine::DestroyWorldNow`가 World 객체까지 해제한 다음). UE의 맵 로드 Trim(`UEngine::TrimMemory`)에 대응한다.
 - **증분 cycle이 끝날 때는 부르지 않는다.** UE는 purge가 끝날 때마다 부르지만 UE의 GC는 주기(기본 약 60초)마다 한 번이고, Rocks의 증분 cycle은 World 파괴가 있으면 프레임마다 이어질 수 있어 그보다 잦다. Trim은 호출 스레드의 캐시를 비우고 빈 slab을 decommit하므로 잦으면 다시 commit하는 비용이 든다.
 - **끄는 설정은 하나다**: `WorldGcSchedule::trimMemory`(기본 켬). World의 자리는 자기 일정을, Engine의 자리는 파괴하는 World의 일정을 본다.
-- 한계: 기본 방식(`WorldGcMode::Incremental`)에서는 전체 수집을 요청하거나 World를 파괴하기 전까지 엔진이 Trim을 부르지 않는다. 호스트가 `Allocator::TrimMemory()`를 직접 부를 수 있다. lease 같은 보유 때문에 회수가 밀린 객체가 남아 있는 동안은 1번 자리의 Trim도 밀린다. 메모리 압박 신호에 따른 Trim은 넣지 않는다(신호를 내는 플랫폼 계층이 없다 — 17.3절).
+- 한계: 기본 방식(`WorldGcMode::Incremental`)에서는 전체 수집을 요청하거나 World를 파괴하기 전까지 엔진이 Trim을 부르지 않는다. 호스트가 `Allocator::TrimMemory()`를 직접 부를 수 있다. lease 같은 보유 때문에 회수가 지연된 객체는 1번 자리의 Trim을 미루지 않는다 — 첫 회수가 그 객체를 지연 목록으로 옮기고 `HasPendingReclaim`은 그 목록을 세지 않는다. 그 객체가 나중에 회수될 때는 다시 부르지 않는다(리뷰 지적 — 처음에는 반대로 적었다). 메모리 압박 신호에 따른 Trim은 넣지 않는다(신호를 내는 플랫폼 계층이 없다 — 17.3절).
 
 #### 18.11.7 리뷰 후속 가운데 넣는 것
 

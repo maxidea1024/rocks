@@ -1958,7 +1958,7 @@ gate 확정(설계 18.8절, 개정 13):
 | 대조 | 바꾼 것 | 잡은 시험 |
 |---|---|---|
 | N1 | `TrimMemory`가 쉬는 표시를 무시하고 쓰는 중인 캐시까지 비움 | `CoreBinnedTrimMemoryLeavesActiveThreadCaches` |
-| N2 | 깨어난 소유 스레드가 비우기가 끝나기를 기다리지 않음 | `CoreBinnedOwnerWaitsForTrimInProgress`(멈추지 않고 실패) |
+| N2 | 깨어난 소유 스레드가 비우기가 끝나기를 기다리지 않음(기다리는 경로를 통째로 뺀 변형) | `CoreBinnedOwnerWaitsForTrimInProgress`(멈추지 않고 실패). 한계: 알림 hook은 두고 잠금만 뺀 변형은 소유 스레드의 읽기와 비우는 쪽의 마무리가 경쟁해 드물게 통과할 수 있다 — 잠금에서 기다리는 것 자체를 밖에서 볼 수단이 없다 |
 | N3a | World가 전체 수집의 회수 뒤에 `TrimMemory`를 부르지 않음 | `Engine_TrimsMemoryAfterFullCollectionReclaimAndWorldDestroy` |
 | N3b | Engine이 World 파괴 뒤에 `TrimMemory`를 부르지 않음 | 같은 시험(파괴 뒤의 단언) |
 | N4 | `trimMemory` 설정을 무시하고 언제나 부름 | `Engine_DoesNotTrimMemoryOnIncrementalCyclesOrWhenDisabled` |
