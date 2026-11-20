@@ -32,6 +32,9 @@ inline constexpr uint32 CookedManifestMaxEntries = uint32{1} << 20;
 // 항목당 bundle 수 상한이다.
 inline constexpr uint32 CookedManifestMaxBundles = 256;
 
+// bundle 하나의 구성원 수 상한이다(의존 상한과 같다 — 구성원은 그 항목의 의존 대상이다).
+inline constexpr uint32 CookedManifestMaxBundleMembers = 65536;
+
 // 항목당 런타임 의존 수 상한이다.
 inline constexpr uint32 CookedManifestMaxDependencies = 65536;
 
@@ -76,7 +79,10 @@ enum class CookedManifestField : uint32 {
     // 패키지 대조(CheckCookedPackage) 전용 칸이다.
     PackageKind,
     PackageProfile,
-    PackageDependencies
+    PackageDependencies,
+    // bundle 구성원 개수 칸과 구성원(AS 10.1절 5 — A1d 개정)이다.
+    BundleMemberCount,
+    BundleMember
 };
 
 // 헤더 칸 진단의 detail 값이다(항목 번호가 없다).
@@ -86,6 +92,23 @@ inline constexpr uint64 CookedManifestNoEntry = NumericLimits<uint64>::Max();
 struct CookedManifestDependency {
     AssetId asset{};
     PackageDependencyKind kind = PackageDependencyKind::Hard;
+};
+
+// PrimaryAsset bundle 하나다(AS 10.1절 5 — UE FAssetBundleData의 bundle별 에셋 목록 대응). 그
+// bundle을 로드할 때 대표 에셋과 함께 로드할 구성원이고, 구성원은 그 항목의 런타임 의존 대상이다.
+struct CookedManifestBundle {
+    explicit CookedManifestBundle(Allocator& allocator) noexcept
+        : name(allocator), members(allocator) {
+    }
+
+    CookedManifestBundle(CookedManifestBundle&&) noexcept = default;
+    CookedManifestBundle& operator=(CookedManifestBundle&&) noexcept = default;
+    CookedManifestBundle(const CookedManifestBundle&) = delete;
+    CookedManifestBundle& operator=(const CookedManifestBundle&) = delete;
+
+    String name;
+    // AssetId 엄격 오름차순이다.
+    Array<AssetId> members;
 };
 
 // 쿠킹한 패키지 하나의 항목이다.
@@ -111,8 +134,8 @@ struct CookedManifestEntry {
     Sha256Digest cookKey{};
     // CookedManifestFlags 비트 합이다.
     uint32 flags = 0;
-    // PrimaryAsset bundle 이름이다(byte 엄격 오름차순).
-    Array<String> bundles;
+    // PrimaryAsset bundle이다(이름 byte 엄격 오름차순).
+    Array<CookedManifestBundle> bundles;
     // (asset, kind) 엄격 오름차순이다.
     Array<CookedManifestDependency> dependencies;
 };

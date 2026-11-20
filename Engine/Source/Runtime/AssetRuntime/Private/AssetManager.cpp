@@ -10,11 +10,11 @@ namespace rocks {
 AssetManager::Impl::Impl(AssetManager& owner, const AssetManagerConfig& config) noexcept
     : owner(owner), config(config), allocator(*config.loader.allocator),
       loaderConfig(config.loader), tickets(allocator), deferred(allocator), scopes(allocator),
-      packages(allocator), entryPackage(allocator), packageOf(allocator), units(allocator),
-      edges(allocator), edgeNodeOf(allocator), edgeNodes(allocator), freeEdgeNodes(allocator),
-      published(allocator), changes(allocator), workStack(allocator), mergeSet(allocator),
-      cycleOwners(allocator), cycleTargets(allocator), scratchAssets(allocator),
-      scratchSlots(allocator), deliver(allocator) {
+      primaries(allocator), packages(allocator), entryPackage(allocator), packageOf(allocator),
+      units(allocator), edges(allocator), edgeNodeOf(allocator), edgeNodes(allocator),
+      freeEdgeNodes(allocator), published(allocator), changes(allocator), workStack(allocator),
+      mergeSet(allocator), cycleOwners(allocator), cycleTargets(allocator),
+      scratchAssets(allocator), scratchSlots(allocator), deliver(allocator) {
 }
 
 AssetManager::Impl::~Impl() {
@@ -22,6 +22,7 @@ AssetManager::Impl::~Impl() {
     // 순으로 놓는다(Registry가 관찰자보다 먼저 사라져야 한다).
     tickets.Clear();
     deferred.Clear();
+    primaries.Clear();
     loader.Reset();
     registry.Reset();
     observer.Reset();
@@ -498,6 +499,10 @@ Result<AssetManagerPumpResult> AssetManager::Pump(const AssetManagerPumpBudget& 
         result.callbacks = impl.DeliverCallbacks();
     }
 
+    if (impl.deliver.TryReserve(impl.primaries.Size())) {
+        result.callbacks += impl.DeliverPrimary();
+    }
+
     result.deferredCommands = impl.RunDeferred();
     return Result<AssetManagerPumpResult>::Success(result);
 }
@@ -584,6 +589,10 @@ Result<void> AssetManager::Shutdown() noexcept {
     impl.RevokeScope(ManagerNoIndex, ErrorCode::ShuttingDown);
     if (impl.deliver.TryReserve(impl.tickets.Size())) {
         (void)impl.DeliverCallbacks();
+    }
+
+    if (impl.deliver.TryReserve(impl.primaries.Size())) {
+        (void)impl.DeliverPrimary();
     }
 
     (void)impl.RunDeferred();

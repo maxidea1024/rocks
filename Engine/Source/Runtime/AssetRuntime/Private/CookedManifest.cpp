@@ -23,7 +23,8 @@ constexpr usize MinFileBytes = MagicBytes + 3 * sizeof(uint32);
 // 항목 하나의 최소 byte다(문자열은 길이 칸만, 개수 칸은 0) — 개수 칸을 남은 byte로 묶는다.
 constexpr usize MinEntryBytes = 2 * GuidBytes + LengthPrefixBytes + DigestBytes +
                                 2 * sizeof(uint64) + DigestBytes + 3 * sizeof(uint32);
-constexpr usize MinBundleBytes = LengthPrefixBytes;
+// bundle 하나의 최소 byte다(이름 길이 칸 + 구성원 개수 칸).
+constexpr usize MinBundleBytes = LengthPrefixBytes + sizeof(uint32);
 constexpr usize DependencyBytes = GuidBytes + sizeof(uint32);
 // 비교 키·식별자 문자열 builder의 내장 용량이다. 키 길이는 경로 상한까지 다양하므로 작게 두고
 // allocator로 자라게 한다(할당 실패는 그 오류로 돌려준다).
@@ -152,12 +153,12 @@ Result<void> ValidateBundles(const CookedManifestEntry& entry, uint64 index, All
     }
 
     for (usize bundle = 0; bundle < count; ++bundle) {
-        const StringView name = entry.bundles[bundle].View();
+        const StringView name = entry.bundles[bundle].name.View();
         if (auto valid = ValidateNameComponent(name, scratch); !valid) {
             return FieldFailure<void>(failure, valid.Error(), Field::Bundle, index, entry.asset);
         }
 
-        if (bundle > 0 && !ByteLess(entry.bundles[bundle - 1].View(), name)) {
+        if (bundle > 0 && !ByteLess(entry.bundles[bundle - 1].name.View(), name)) {
             return ManifestCorrupt<void>(failure, Field::Bundle, index, entry.asset);
         }
 
@@ -175,6 +176,40 @@ Result<void> ValidateBundles(const CookedManifestEntry& entry, uint64 index, All
         for (usize other = 0; other < bundle; ++other) {
             if (keys[other].View() == key.View()) {
                 return ManifestCorrupt<void>(failure, Field::Bundle, index, entry.asset);
+            }
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+// bundle 구성원(AS 10.1절 5 — 의존 검증 뒤): 개수 상한, AssetId 엄격 오름차순, null·자기 자신 금지,
+// 그 항목의 런타임 의존 대상. 구성원과 의존은 모두 AssetId 오름차순이라 함께 걸으며 본다.
+Result<void> ValidateBundleMembers(const CookedManifestEntry& entry, uint64 index,
+                                   AssetDiagnostic* failure) noexcept {
+    for (const CookedManifestBundle& bundle : entry.bundles) {
+        if (bundle.members.Size() > CookedManifestMaxBundleMembers) {
+            return ManifestCorrupt<void>(failure, Field::BundleMemberCount, index, entry.asset);
+        }
+
+        usize dependency = 0;
+        for (usize position = 0; position < bundle.members.Size(); ++position) {
+            const AssetId member = bundle.members[position];
+            if (member.IsNull() || member == entry.asset ||
+                (position > 0 && !GuidLess(bundle.members[position - 1].value, member.value))) {
+                return ManifestCorrupt<void>(failure, Field::BundleMember, index, entry.asset,
+                                             member);
+            }
+
+            while (dependency < entry.dependencies.Size() &&
+                   GuidLess(entry.dependencies[dependency].asset.value, member.value)) {
+                ++dependency;
+            }
+
+            if (dependency == entry.dependencies.Size() ||
+                !(entry.dependencies[dependency].asset == member)) {
+                return ManifestCorrupt<void>(failure, Field::BundleMember, index, entry.asset,
+                                             member);
             }
         }
     }
@@ -227,7 +262,11 @@ Result<void> ValidateEntry(const CookedManifestEntry& entry, uint64 index, Alloc
         return bundles;
     }
 
-    return ValidateManifestDependencies(entry, index, failure);
+    if (auto dependencies = ValidateManifestDependencies(entry, index, failure); !dependencies) {
+        return dependencies;
+    }
+
+    return ValidateBundleMembers(entry, index, failure);
 }
 
 } // namespace
@@ -315,6 +354,16 @@ Result<void> ValidateCookedManifest(const CookedManifest& manifest, Allocator& s
                                              dependency.asset);
             }
         }
+
+        // bundle 구성원도 매니페스트에 있다(구성원은 CookSoftReferences와 무관하게 쿠킹한다).
+        for (const CookedManifestBundle& bundle : entry.bundles) {
+            for (AssetId member : bundle.members) {
+                if (manifest.Find(member) == nullptr) {
+                    return ManifestCorrupt<void>(failure, Field::BundleMember, index, entry.asset,
+                                                 member);
+                }
+            }
+        }
     }
 
     return Result<void>::Success();
@@ -373,8 +422,12 @@ Result<void> WriteCookedManifestWithLimit(Allocator& allocator, const CookedMani
         step(writer.WriteRaw(Span<const uint8>(entry.cookKey.bytes, DigestBytes)));
         step(writer.WriteU32(entry.flags));
         step(writer.WriteU32(static_cast<uint32>(entry.bundles.Size())));
-        for (const String& bundle : entry.bundles) {
-            step(writer.WriteString(bundle.View()));
+        for (const CookedManifestBundle& bundle : entry.bundles) {
+            step(writer.WriteString(bundle.name.View()));
+            step(writer.WriteU32(static_cast<uint32>(bundle.members.Size())));
+            for (AssetId member : bundle.members) {
+                step(writer.WriteGuid(member.value));
+            }
         }
 
         step(writer.WriteU32(static_cast<uint32>(entry.dependencies.Size())));
@@ -560,10 +613,26 @@ Result<CookedManifest> ReadCookedManifest(Allocator& allocator, Span<const uint8
                 return ManifestCorrupt<Out>(failure, Field::Bundle, index, entry.asset);
             }
 
-            // bundle 수만큼 예약했다(빈 String 추가는 할당하지 않는다).
-            String& slot = *entry.bundles.TryEmplaceBack(allocator).Value();
-            if (auto assigned = slot.TryAssign(name.Value()); !assigned) {
+            // bundle 수만큼 예약했다(빈 이름·구성원 추가는 할당하지 않는다).
+            CookedManifestBundle& slot = *entry.bundles.TryEmplaceBack(allocator).Value();
+            if (auto assigned = slot.name.TryAssign(name.Value()); !assigned) {
                 return ManifestResource<Out>(failure, assigned.Error(), index, entry.asset);
+            }
+
+            // 구성원 개수는 남은 byte로 먼저 묶는다(작은 파일이 큰 할당을 요구하지 못하게).
+            auto members = in.ReadU32();
+            if (!members || members.Value() > CookedManifestMaxBundleMembers ||
+                members.Value() > in.Remaining() / GuidBytes) {
+                return ManifestCorrupt<Out>(failure, Field::BundleMemberCount, index, entry.asset);
+            }
+
+            if (auto reserved = slot.members.TryReserve(members.Value()); !reserved) {
+                return ManifestResource<Out>(failure, reserved.Error(), index, entry.asset);
+            }
+
+            for (uint32 member = 0; member < members.Value(); ++member) {
+                // 개수를 남은 byte로 묶었다 — 구성원 칸은 잘리지 않는다(예약도 했다).
+                (void)slot.members.TryPushBack(AssetId{in.ReadGuid().Value()});
             }
         }
 

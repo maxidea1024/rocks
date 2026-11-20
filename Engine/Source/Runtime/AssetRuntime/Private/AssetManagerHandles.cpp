@@ -142,6 +142,19 @@ void AssetManager::Impl::DrainReleases() noexcept {
             }
 
             break;
+        case ManagerSlotKind::PrimaryTicket:
+            if (!slot.revoked) {
+                ReleasePrimary(slot.record);
+            } else {
+                ManagerPrimary& primary = primaries[slot.record];
+                primary.released = true;
+                primary.slot = ManagerNoIndex;
+                if (!(primary.callbackRegistered && !primary.callbackDelivered)) {
+                    FreePrimary(slot.record);
+                }
+            }
+
+            break;
         case ManagerSlotKind::Free:
             platform::Fatal("AssetManager released a free handle slot");
         }
@@ -446,6 +459,27 @@ void AssetManager::Impl::RevokeScope(uint32 scope, ErrorCode reason) noexcept {
         if (command.used && !command.done && command.stop == ErrorCode::None &&
             (all || command.scope == scope)) {
             command.stop = reason;
+        }
+    }
+
+    for (usize index = 0; index < primaries.Size(); ++index) {
+        ManagerPrimary& primary = primaries[index];
+        if (!primary.used || primary.slot == ManagerNoIndex || (!all && primary.scope != scope)) {
+            continue;
+        }
+
+        ManagerSlot& slot = Slot(primary.slot);
+        if (slot.revoked) {
+            continue;
+        }
+
+        slot.revoked = true;
+        if (!primary.callbackDelivered) {
+            EndPrimary(static_cast<uint32>(index), reason);
+        } else {
+            for (uint32 ticket : primary.tickets) {
+                ReleaseTicketHold(ticket);
+            }
         }
     }
 }
