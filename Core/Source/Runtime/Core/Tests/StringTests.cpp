@@ -121,6 +121,39 @@ TEST(StringUtf8ScalarBoundariesAndByteCounts) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
+// FindInvalidUtf8는 처음 잘못된 sequence의 leading byte 위치를 돌려주고, 유효하면 IndexNone이다.
+// 컴파일러 진단이 이 위치로 줄·열을 계산하므로 sequence 중간이 아니라 시작을 가리켜야 한다.
+TEST(StringViewFindInvalidUtf8ReportsTheLeadingByte) {
+    CHECK(StringView("").FindInvalidUtf8() == IndexNone);
+    CHECK(StringView(Korean).FindInvalidUtf8() == IndexNone);
+    CHECK(StringView(Emoji).FindInvalidUtf8() == IndexNone);
+
+    struct Case {
+        StringView text;
+        usize offset;
+    };
+    const Case cases[] = {
+        {StringView("\x80"), 0},                     // 홀로 선 continuation
+        {StringView("ab\xFF"), 2},                   // 잘못된 leading
+        {StringView("ab\xC0\x80"), 2},               // overlong
+        {StringView("\xED\x95\x9C\xED\xA0\x80"), 3}, // 유효한 글자 뒤의 surrogate
+        {StringView("a\xE1\x80"), 1},                // 끝에서 잘림
+        {StringView("a\xE1\x80"
+                    "Z"),
+         1},                                                 // continuation 자리에 ASCII
+        {StringView("\xF0\x9F\x8E\xAE\xF4\x90\x80\x80"), 4}, // U+10FFFF 초과
+    };
+    for (const Case& item : cases) {
+        CHECK(item.text.FindInvalidUtf8() == item.offset);
+        CHECK(!item.text.IsValidUtf8());
+        CHECK(!item.text.ValidateUtf8());
+    }
+
+    // 컴파일 타임에도 같은 판정이다.
+    static_assert(StringView("\xC3\xA9x\xFF").FindInvalidUtf8() == 3, "invalid byte offset");
+    static_assert(StringView("\xC3\xA9x").FindInvalidUtf8() == IndexNone, "valid text");
+}
+
 TEST(StringRejectsMalformedUtf8WithoutMutation) {
     const StringView malformed[] = {
         "\xC0\x80",

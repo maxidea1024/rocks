@@ -893,6 +893,18 @@ Characters/PlayerCharacter.spark:42:5: error S0731: Cannot assign to a function 
 - **코드 대역:** S01xx 어휘, S02xx 구문, S03xx 이름 해석, S04xx null·타입, S05xx 숫자·상수식, S06xx 실행 문맥·효과, S07xx 대입·`let`, S08xx 이벤트·수명 hook·재진입, S09xx 유지 자원·로드, S10xx 저장·ID·호환성, S11xx 패키지·reload·backend. 코드는 한 번 발급하면 의미를 바꾸지 않는다. 엔진 공통 진단 코드 등록부(RMC#### 메타 컴파일러, UI validate 코드와 함께)는 CompilerDiagnostics 문서에 둔다(§17.2).
 - **LevelScript 코드(초안 1.4):** S0413 `LevelScript`의 `@edit` 객체 필드에 `?`가 없다(§3.2), S0801 `LevelScript`가 물리 hook을 선언했다, S0802 `LevelScript`가 `let` Collider component 필드를 선언했다. 메시지와 수정 예는 [LevelScript](LevelScript.ko.md) 4.9절에 있다.
 - 진단은 원인 하나를 작성한 코드 그대로 보이고 수정 예를 포함한다. 한 원인에서 파생된 연쇄 오류는 표시하지 않는다.[R23] 수정 예는 이름 규칙(§3.1)을 지키도록 생성한다. 지역 이름은 멤버 이름이 아니라 타입 이름에서 도출한다(`Target: Health?` → `health`). 유사 이름 제시는 Core `EditDistance`와 이름 붙은 문턱 상수를 쓴다.
+- **위치:** 줄과 열은 1부터 센다. 열은 그 줄의 처음부터 센 Unicode code point 수이며 tab도 1이다(바이트 수가 아니다 — 주석·문자열에 한글이 있어도 열이 편집기와 맞는다). 언어 서버는 LSP가 요구하는 UTF-16 단위로 바꿔 보낸다. 줄 끝은 LF이고 LF 바로 앞의 CR은 줄 끝의 일부다.
+- **출력 세부:** 첫 줄 `경로:줄:열: error S코드: 메시지`, 둘째 줄은 원문 줄을 공백 4칸 들여 보이고(tab은 공백 1칸으로 보인다 — 열 계산과 맞추기 위해서다), 셋째 줄은 같은 들여쓰기로 범위 아래에 `^`를 둔다. `^`의 수는 범위의 code point 수이며 최소 1이고, 범위가 줄 끝을 넘으면 그 줄 끝에서 자른다(여러 줄 범위는 첫 줄만 표시). 그 뒤 설명 줄들과 `fix:` 줄은 공백 2칸 들여 쓴다. 설명이나 수정 예가 없으면 그 줄을 생략한다. 원문이 없는 진단(파일 전체 크기 초과 등)은 첫 줄과 설명만 낸다. 동아시아 넓은 문자는 터미널에서 두 칸을 차지해 `^`가 어긋날 수 있다(표시 한계, 위치 값은 정확하다).
+- **순서:** 한 번의 컴파일이 낸 진단은 (파일 경로 byte 순, 시작 위치, 코드) 순으로 정렬해 낸다. 같은 입력이면 출력이 바이트 단위로 같다.
+- **원문 검사(S01xx 앞부분, LC0):** 컴파일러는 원문을 받으면 먼저 다음을 검사한다. 원문 처음의 UTF-8 BOM(EF BB BF)은 허용하고 무시한다(편집기가 붙이는 경우가 많다). 원문 크기 상한은 16 MiB(`MaxSourceBytes`)다.
+
+| 코드 | 이름 | 조건 | 수정 예 |
+|---|---|---|---|
+| S0101 | `invalid-utf8` | UTF-8이 아닌 바이트 열(overlong·surrogate·U+10FFFF 초과·잘린 sequence). 위치는 처음 잘못된 바이트이며 파일당 하나만 낸다 | 파일을 UTF-8로 다시 저장 |
+| S0102 | `lone-carriage-return` | LF가 뒤따르지 않는 CR. 줄 끝 해석이 편집기마다 달라지므로 오류다 | 줄 끝을 LF 또는 CRLF로 |
+| S0103 | `source-too-large` | 원문이 16 MiB를 넘는다 | 파일을 나눈다 |
+
+  S0101이나 S0103이 나면 그 파일의 뒤 단계(어휘 분석 이후)를 실행하지 않는다.
 - 사전 대조 리터럴(`Tag`·`Action`·`CVar`)이 사전에서 이름이 바뀐 경우 사전의 redirect(`@formerly`와 같은 역할)를 따라 자동 변환하고 빠른 수정으로 소스를 고친다. redirect도 없으면 오류다.
 
 ### 8.2 Result와 try
@@ -1328,6 +1340,13 @@ class DoorLogic : ScriptComponent {
 - `@test fn`(full 또는 패키지 manifest의 test 패키지)은 headless World fixture에서 실행한다. 시험 시계는 `NextTick`·`Delay`를 결정적으로 진행하며 실제 시간에 기대지 않는다(sleep 금지). `Assert`가 실패 판정이다.
 - CLI `sparks test <패키지>`가 실행하고 결과는 진단과 같은 형식으로 보고한다. 같은 corpus를 VM·AOT 차등 시험(G6)에도 쓴다.
 - **conformance corpus:** `Conformance/<영역>/<사례>.spark`와 `.expect`. `.expect`에는 진단 코드·줄·열, 또는 실행 trace(전달 순서·fault 종류·위치 ID·ledger counter)를 적는다. 본문의 "오류다" 문장과 SD마다 음성 사례를 1개 이상 둔다. 영역은 진단 코드 대역(§8.1)과 같다.
+- **`.expect` 형식(LC0):** UTF-8 텍스트이며 한 줄에 지시 하나다. 빈 줄과 `#`로 시작하는 줄은 주석이다.
+  - `error S0412 14:14` — 이 위치에 이 코드의 진단이 나야 한다. 여러 줄이면 §8.1의 순서대로 모두 일치해야 하며 빠지거나 더 나온 진단은 실패다.
+  - `error S0103` — 위치를 적지 않으면 원문 위치가 없는 진단(파일 전체)이다.
+  - `clean` — 진단이 없어야 한다. `error`와 함께 쓸 수 없다.
+  - 지시가 하나도 없는 `.expect`, 알 수 없는 지시, `.expect`가 없는 `.spark`, `.spark`가 없는 `.expect`는 corpus 오류로 실패한다(빈 기대값이 조용히 통과하지 않게 한다).
+  - 실행 결과 지시(`result`·`fault`·`trace`)는 해당 마일스톤(LC5·LC6)에서 더한다.
+- corpus는 `Engine/Source/Developer/SparksTestHost/Conformance`에 두고 시험이 실행 중 엔진 디렉터리 탐색으로 찾는다. 저장소가 줄 끝을 LF로 정규화하므로 CRLF·잘못된 UTF-8·BOM처럼 바이트가 중요한 사례는 C++ 시험에 직접 넣는다.
 - 제안 목표(미측정): 파일 1,000개 기준 자동완성 p95 100 ms, 편집 후 진단 p95 300 ms. 검증: 후보 golden test, prefix fuzz, CLI와의 진단 동등성, rename 후 저장 데이터 보존.
 
 ## 14. 네트워크
@@ -1481,12 +1500,13 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 | 모듈 | 위치 | 내용 | 의존 |
 |---|---|---|---|
 | `SparksVm` | `Engine/Source/Runtime` | bytecode와 `.sparkc` 형식, verifier, interpreter, 값 버퍼, 실행·발행 큐·ledger, 핫 리로드, host interface | Core |
-| `SparksCompiler` | `Engine/Source/Runtime` | lexer, parser, 검사기, typed IR, bytecode 생성, 진단, schema·manifest reader, formatter | Core, SparksVm |
-| `SparksTestHost` | `Engine/Source/Developer` | 가짜 host, conformance runner | Core, SparksVm, SparksCompiler |
+| `SparksCompiler` | `Engine/Source/Runtime` | 원문 관리, 진단, lexer, parser, 검사기, typed IR, bytecode 생성, schema·manifest reader, formatter | Core(LC4부터 SparksVm) |
+| `SparksTestHost` | `Engine/Source/Developer` | 가짜 host, conformance runner | Core, SparksCompiler(LC5부터 SparksVm) |
 | `Sparks`(CLI) | `Programs` | `sparks check`·`build`·`test`·`fmt` | 위 모듈, Launch |
 | `SparksLsp` | `Programs` | 언어 서버 `sparks-lsp` | SparksCompiler, Launch |
 | `ScriptRuntime`(연동, EI2) | `Engine/Source/Runtime` | host 구현, native call thunk, Sparks 클래스의 타입 등록 | SparksVm, ObjectRuntime, MetaSchema, Task |
 
+- 모듈은 필요해질 때 만든다. LC0은 `SparksCompiler`(원문·진단)와 `SparksTestHost`(conformance runner)만 만들고, `SparksVm`은 bytecode 형식이 생기는 LC4에서 만든다(빈 자리표시 모듈을 두지 않는다).
 - 언어 모듈을 Engine 층에 두는 이유는 Core 층을 가볍게 유지하기 위해서다(엔진 기능 모듈은 Engine 층 — SpatialIndex와 같다). 의존은 Core뿐이므로 World·RHI 없이 링크된다.
 - `SparksCompiler`가 Runtime에 있는 이유는 런타임 eval이 켜진 target의 실행 파일에 들어갈 수 있어야 하기 때문이다(SD5). `ScriptEval=Off`인 target은 링크하지 않는다(§12.6).
 - 언어 코어가 쓰는 기반은 모두 이미 있다: Core의 컨테이너(`Array`·`HashMap`·`OrderedMap`·`OrderedSet`·`Span`), 문자열(`String`·`StringView`·`StringBuilder`의 최단 실수 표기·`Unicode`·`NumberText`·`EditDistance`·`Path`), `ArenaAllocator`·`BudgetAllocator`, `Result`, `Hash`·`Sha256`, `Json`(읽기·쓰기, JSON5 읽기), `ByteReader`·`ByteWriter`, `RandomStream`, 로그, Base의 overflow 검사 도우미(`Base/Checked.h`), PlatformBase의 파일 API(읽기·디렉터리 열거)와 원자 연산.

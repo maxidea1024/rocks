@@ -1,0 +1,180 @@
+#pragma once
+
+#include <Core/Containers/Array.h>
+#include <Core/Containers/Span.h>
+#include <Core/Memory/Allocator.h>
+#include <Core/Result.h>
+#include <Core/Text/String.h>
+#include <Core/Text/StringBuilder.h>
+#include <Core/Text/StringView.h>
+#include <SparksCompiler/Source.h>
+
+// Sparks 컴파일 진단이다(Docs/Design/SparksLanguage.ko.md 8.1절).
+//
+// 진단은 오류뿐이다(경고 없음). 진단 하나는 코드(S0100–S1199), 원문 위치, 영어 메시지, 설명, 수정
+// 예를 가진다. DiagnosticList가 모으고 8.1절 순서로 정렬하며, AppendDiagnostics가 8.1절 형식으로
+// 쓴다.
+//
+// 사용 예:
+//   DiagnosticList diagnostics(allocator);
+//   auto added = diagnostics.TryAdd(DiagnosticCode::InvalidUtf8, id, SourceSpan{7, 8},
+//                                   "Source is not valid UTF-8.", "explanation", "fix");
+//   diagnostics.Sort(sources);
+//   StringBuilder<256> out(allocator);
+//   auto written = AppendDiagnostics(out, sources, diagnostics);
+//
+// 출력 형식(각 줄은 LF로 끝난다):
+//   Door.spark:3:5: error S0101: Source is not valid UTF-8.
+//       let x = ?;
+//           ^
+//     설명 줄(여러 줄이면 줄마다 2칸 들여쓰기)
+//     fix: 수정 예
+// 원문 위치가 없는 진단(파일 전체)은 "경로: error S코드: 메시지"와 설명·수정 예만 쓴다.
+
+namespace rocks::sparks {
+
+// 진단 코드다. 값이 표시 번호다(S0101 → 101). 대역 배정은 8.1절, 엔진 공통 등록부는
+// Docs/Design/CompilerDiagnostics.ko.md "진단 코드 등록부". 한 번 정한 번호의 뜻은 바꾸지 않는다.
+enum class DiagnosticCode : uint16 {
+    InvalidUtf8 = 101,
+    LoneCarriageReturn = 102,
+    SourceTooLarge = 103
+};
+
+// 코드 표의 한 행이다. name은 kebab-case 영어 이름이며 사람이 코드를 찾을 때 쓴다.
+struct DiagnosticCodeInfo {
+    DiagnosticCode code;
+    StringView name;
+};
+
+// 정의된 모든 코드다(번호 오름차순).
+Span<const DiagnosticCodeInfo> AllDiagnosticCodes() noexcept;
+
+// 표시 번호로 코드를 찾는다. 없는 번호면 nullptr이다(.expect 해석 등 외부 입력용).
+const DiagnosticCodeInfo* FindDiagnosticCode(uint32 number) noexcept;
+
+// 진단 하나다. DiagnosticList만 만든다.
+class Diagnostic final {
+public:
+    Diagnostic(Diagnostic&&) noexcept = default;
+    Diagnostic& operator=(Diagnostic&&) noexcept = default;
+    Diagnostic(const Diagnostic&) = delete;
+    Diagnostic& operator=(const Diagnostic&) = delete;
+    ~Diagnostic() noexcept = default;
+
+    DiagnosticCode Code() const noexcept {
+        return code_;
+    }
+
+    SourceId Source() const noexcept {
+        return source_;
+    }
+
+    // 원문 위치가 있는지다. 없으면(파일 전체 진단) Span()은 의미가 없다.
+    bool HasSpan() const noexcept {
+        return hasSpan_;
+    }
+
+    SourceSpan Span() const noexcept {
+        return span_;
+    }
+
+    // 한 문장 영어 메시지다(마침표로 끝난다).
+    StringView Message() const noexcept {
+        return message_.View();
+    }
+
+    // 원인 설명이다. 비어 있을 수 있고 여러 줄이면 LF로 나뉜다.
+    StringView Explanation() const noexcept {
+        return explanation_.View();
+    }
+
+    // 수정 예다. 비어 있을 수 있다.
+    StringView Fix() const noexcept {
+        return fix_.View();
+    }
+
+private:
+    friend class DiagnosticList;
+
+    explicit Diagnostic(Allocator& allocator) noexcept;
+
+    String message_;
+    String explanation_;
+    String fix_;
+    SourceSpan span_;
+    SourceId source_;
+    uint32 sequence_ = 0;
+    DiagnosticCode code_ = DiagnosticCode::InvalidUtf8;
+    bool hasSpan_ = false;
+};
+
+// 한 번의 컴파일이 낸 진단 목록이다. 한 스레드에서 쓴다. allocator가 목록보다 오래 살아야 한다.
+class DiagnosticList final {
+public:
+    explicit DiagnosticList(Allocator& allocator) noexcept;
+
+    DiagnosticList(const DiagnosticList&) = delete;
+    DiagnosticList& operator=(const DiagnosticList&) = delete;
+    DiagnosticList(DiagnosticList&&) = delete;
+    DiagnosticList& operator=(DiagnosticList&&) = delete;
+    ~DiagnosticList() noexcept = default;
+
+    // 원문 위치가 있는 진단을 더한다. message는 비어 있으면 안 된다. explanation·fix는 비어 있으면
+    // 출력에서 생략한다. 문자열은 복사한다.
+    // 실패: message가 비었거나 문자열이 UTF-8이 아니거나 span.begin > span.end면 InvalidArgument,
+    // 할당 실패는 그 오류. 실패하면 목록은 바뀌지 않는다.
+    Result<void> TryAdd(DiagnosticCode code, SourceId source, SourceSpan span, StringView message,
+                        StringView explanation, StringView fix) noexcept;
+
+    // 원문 위치가 없는 진단(파일 전체)을 더한다. 실패 규칙은 TryAdd와 같다.
+    Result<void> TryAddFileLevel(DiagnosticCode code, SourceId source, StringView message,
+                                 StringView explanation, StringView fix) noexcept;
+
+    usize Count() const noexcept {
+        return items_.Size();
+    }
+
+    bool IsEmpty() const noexcept {
+        return items_.IsEmpty();
+    }
+
+    const Diagnostic& operator[](usize index) const noexcept {
+        return items_[index];
+    }
+
+    Span<const Diagnostic> View() const noexcept {
+        return items_.View();
+    }
+
+    // 8.1절 순서로 정렬한다: 파일 경로 byte 순 → 시작 위치(파일 전체 진단이 먼저) → 코드 → 더한
+    // 순서. sources는 진단이 가리키는 파일을 모두 가진 SourceSet이어야 한다. 할당하지 않는다.
+    void Sort(const SourceSet& sources) noexcept;
+
+private:
+    friend class SourceSet;
+
+    // SourceSet::TryAdd가 원자적으로 쓰는 두 단계다. Prepare는 진단을 만들기만 하고(목록 불변),
+    // Commit은 미리 확보한 용량에 넣는다(실패하지 않는다).
+    Result<Diagnostic> TryPrepare(DiagnosticCode code, SourceId source, bool hasSpan,
+                                  SourceSpan span, StringView message, StringView explanation,
+                                  StringView fix) noexcept;
+    Result<void> TryReserveMore(usize count) noexcept;
+    void Commit(Diagnostic&& diagnostic) noexcept;
+
+    Allocator* allocator_;
+    Array<Diagnostic> items_;
+    uint32 nextSequence_ = 0;
+};
+
+// 진단 하나를 8.1절 형식으로 out에 붙인다. 원문 줄은 제어 문자를 공백으로, 잘못된 UTF-8 byte를
+// U+FFFD로 바꿔 보인다(출력은 항상 UTF-8이다).
+// 실패: out의 할당 실패. 실패하면 out에 일부가 남을 수 있다(호출자가 버린다).
+Result<void> AppendDiagnostic(StringBuilderBase& out, const SourceSet& sources,
+                              const Diagnostic& diagnostic) noexcept;
+
+// 목록 전체를 지금 순서대로 붙인다(정렬은 하지 않는다 — 먼저 Sort를 부른다).
+Result<void> AppendDiagnostics(StringBuilderBase& out, const SourceSet& sources,
+                               const DiagnosticList& diagnostics) noexcept;
+
+} // namespace rocks::sparks
