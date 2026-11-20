@@ -51,6 +51,40 @@
           "name": "GetRightVector",
           "id": "5a7e0000000000000000000000000204",
           "returns": "vec3"
+        },
+        {
+          "name": "MoveTo",
+          "id": "5a7e0000000000000000000000000205",
+          "async": true,
+          "parameters": [
+            {
+              "name": "target",
+              "type": "vec3"
+            }
+          ],
+          "returns": "bool"
+        },
+        {
+          "name": "CountAll",
+          "id": "5a7e0000000000000000000000000206",
+          "static": true,
+          "returns": "int"
+        }
+      ],
+      "events": [
+        {
+          "name": "Destroyed",
+          "id": "5a7e0000000000000000000000000207"
+        },
+        {
+          "name": "Damaged",
+          "id": "5a7e0000000000000000000000000208",
+          "parameters": [
+            {
+              "name": "amount",
+              "type": "float"
+            }
+          ]
         }
       ]
     },
@@ -309,6 +343,60 @@
           "name": "Distance",
           "id": "5a7e0000000000000000000000000174",
           "type": "float"
+        }
+      ]
+    },
+    {
+      "name": "SpawnParams",
+      "id": "5a7e0000000000000000000000000015",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "Count",
+          "id": "5a7e0000000000000000000000000181",
+          "type": "int"
+        },
+        {
+          "name": "Label",
+          "id": "5a7e0000000000000000000000000182",
+          "type": "string"
+        },
+        {
+          "name": "Category",
+          "id": "5a7e0000000000000000000000000183",
+          "type": "Tag"
+        },
+        {
+          "name": "Sound",
+          "id": "5a7e0000000000000000000000000184",
+          "type": "SoundAsset?"
+        },
+        {
+          "name": "Id",
+          "id": "5a7e0000000000000000000000000185",
+          "type": "int",
+          "access": "read"
+        }
+      ]
+    },
+    {
+      "name": "CollisionChannel",
+      "id": "5a7e0000000000000000000000000016",
+      "kind": "enum",
+      "cases": [
+        "Visibility",
+        "Camera"
+      ]
+    },
+    {
+      "name": "InputSystem",
+      "id": "5a7e0000000000000000000000000017",
+      "kind": "object",
+      "fields": [
+        {
+          "name": "Jump",
+          "id": "5a7e00000000000000000000000001a1",
+          "type": "InputAction"
         }
       ]
     },

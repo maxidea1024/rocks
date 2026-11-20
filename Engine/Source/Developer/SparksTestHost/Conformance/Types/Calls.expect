@@ -1,0 +1,52 @@
+# Calls (3.10): positional arguments, arity, argument types, generic type arguments and constraints, waits,
+# construction by named fields (struct, engine struct, component, Rotator/Color/Transform) and positional vectors,
+# Math overloading by placeholder (N, S, I, V); one diagnostic per argument or call.
+error S0404 27:16
+error S0404 93:15
+error S0403 94:9
+error S0403 95:9
+error S0401 96:15
+error S0402 97:9
+error S0411 98:9
+error S0411 99:9
+error S0320 100:9
+error S0422 101:16
+error S0422 102:9
+error S0422 103:5
+error S0404 104:15
+error S0326 105:15
+error S0404 106:21
+error S0404 107:9
+error S0326 108:21
+error S0404 109:9
+error S0404 110:28
+error S0401 111:18
+error S0402 112:9
+error S0402 113:9
+error S0402 114:9
+error S0320 115:14
+error S0320 116:13
+error S0320 117:14
+error S0320 118:12
+error S0320 119:12
+error S0411 120:9
+error S0326 122:16
+error S0402 124:9
+error S0402 125:9
+error S0402 126:9
+error S0402 127:9
+error S0404 128:14
+error S0403 129:9
+error S0401 130:14
+error S0404 131:17
+error S0326 132:15
+error S0401 133:21
+error S0401 134:18
+error S0401 135:18
+error S0401 136:19
+error S0403 137:11
+error S0422 138:16
+error S0317 139:15
+error S0401 140:21
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

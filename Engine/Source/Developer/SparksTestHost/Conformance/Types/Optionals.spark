@@ -1,0 +1,46 @@
+fn Valid(opt: int?, actorOpt: Actor?, flagOpt: bool?) {
+    if (let x = opt) {
+        _ = x + 1;
+    }
+
+    if (let actor = actorOpt) {
+        _ = actor.Location;
+    } else {
+        _ = actorOpt == null;
+    }
+
+    let component = actorOpt?.Find<ScriptComponent>()?.Owner;
+    _ = component;
+    _ = flagOpt ?? false;
+    _ = flagOpt != null;
+    let y = opt ?? return;
+    _ = y * 2;
+}
+
+fn Count(opt: int?): int {
+    let value = opt ?? return 0;
+    return value;
+}
+
+fn Errors(i: int, flag: bool, flagOpt: bool?, actor: Actor) {
+    if (let x = i) {
+    }
+
+    if (let b = flagOpt) {
+    }
+
+    let z = i ?? return;
+    let s: string = flagOpt ?? return;
+    _ = actor?.Owner;
+    _ = flag ?? true;
+}
+
+fn ReturnValueInVoid(opt: int?) {
+    let value = opt ?? return 1;
+    _ = value;
+}
+
+fn ReturnNothing(opt: int?): int {
+    let value = opt ?? return;
+    return value;
+}

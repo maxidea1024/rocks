@@ -1,0 +1,10 @@
+import Other;
+
+struct Alpha {
+    var Count: int;
+    var Next: Beta?;
+}
+
+fn Use() {
+    _ = Alpha();
+}

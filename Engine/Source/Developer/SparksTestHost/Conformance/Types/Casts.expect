@@ -1,0 +1,13 @@
+# 'as?' (3.10): reference operand, class or interface target, result is the target with '?'; S0420 for the same type or an
+# upcast, value operands, non-class targets and unrelated classes (interfaces are checked at run time).
+error S0420 18:9
+error S0420 19:9
+error S0420 20:9
+error S0420 21:9
+error S0420 22:9
+error S0420 23:9
+error S0420 24:9
+error S0317 25:9
+error S0417 26:9
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

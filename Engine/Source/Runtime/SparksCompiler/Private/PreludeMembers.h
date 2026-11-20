@@ -3,15 +3,16 @@
 #include <Core/Containers/Span.h>
 #include <Core/Text/StringView.h>
 
-// 언어 소유 멤버 표다(Docs/Design/SparksLanguage.ko.md 3.8절 "부록 B 시그니처", SD67). 컴파일러는 이
-// 목록을 그대로 가지며 타입 검사(LC2c)가 멤버 접근과 호출을 이 표로 해석한다.
+// 언어 소유 멤버 표다(Docs/Design/SparksLanguage.ko.md 3.8절 "부록 B 시그니처", SD67). 컴파일러는
+// 이 목록을 그대로 가지며 타입 검사(LC2c)가 멤버 접근과 호출을 이 표로 해석한다.
 //
-// 시그니처 표기: `(이름: 타입, ...): 반환`(반환이 없으면 void). 타입은 3.6절 `Type`과 같은 문자열이며
-// 다음 자리표시를 쓴다: `$N` 모든 숫자 타입, `$S` 부호 있는 정수·실수 타입, `$I` 정수 타입, `$F`
-// float 또는 벡터, `$V` 벡터(vec2·vec3·vec4 — 벡터 공통 멤버에서는 주인 타입 자신). Math의 자리표시는
-// 오버로딩이다(인자를 모두 같은 타입으로 맞춘다, 3.1절). `T`·`K`·`V`는 주인 제네릭 타입의 타입 인자
-// (Array<T>, Map<K, V> 등), 함수 자기 타입 매개변수는 `<T>(...)`처럼 앞에 쓴다. 반환 앞의 `await`는
-// 대기를 돌려준다는 뜻이다(값의 타입은 `await` 뒤). `(...)`는 대기 1개 이상을 받는 All·Race다.
+// 시그니처 표기: `(이름: 타입, ...): 반환`(반환이 없으면 void). 타입은 3.6절 `Type`과 같은
+// 문자열이며 다음 자리표시를 쓴다: `$N` 모든 숫자 타입, `$S` 부호 있는 정수·실수 타입, `$I` 정수
+// 타입, `$F` float 또는 벡터, `$V` 벡터(vec2·vec3·vec4 — 벡터 공통 멤버에서는 주인 타입 자신).
+// Math의 자리표시는 오버로딩이다(인자를 모두 같은 타입으로 맞춘다, 3.1절). `T`·`K`·`V`는 주인
+// 제네릭 타입의 타입 인자 (Array<T>, Map<K, V> 등), 함수 자기 타입 매개변수는 `<T>(...)`처럼 앞에
+// 쓴다. 반환 앞의 `await`는 대기를 돌려준다는 뜻이다(값의 타입은 `await` 뒤). `(...)`는 대기 1개
+// 이상을 받는 All·Race다.
 
 namespace rocks::sparks::detail {
 
@@ -38,8 +39,9 @@ enum class PreludeCondition : uint8 {
 };
 
 struct PreludeMember {
-    // 주인: 언어 이름 표의 타입·이름 공간(`vec3`, `Array`, `Math`), 벡터 공통은 `$V`(vec2·vec3·vec4에
-    // 각각 넣는다), 문맥 이름 Time의 타입은 `Time`, 최상위 prelude 함수는 빈 문자열.
+    // 주인: 언어 이름 표의 타입·이름 공간(`vec3`, `Array`, `Math`), 벡터 공통은
+    // `$V`(vec2·vec3·vec4에 각각 넣는다), 문맥 이름 Time의 타입은 `Time`, 최상위 prelude 함수는 빈
+    // 문자열.
     StringView owner;
     StringView name;
     PreludeMemberForm form;

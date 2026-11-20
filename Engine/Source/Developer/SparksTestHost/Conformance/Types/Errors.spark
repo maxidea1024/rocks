@@ -1,0 +1,49 @@
+enum Mode { A, B }
+
+struct Box { var Size: int; }
+
+fn F(): int {
+    let a: int = 1.5;
+    let b: uint8 = 300;
+    let c: uint8 = -1;
+    let d = 7 / 2;
+    let e: int32 = 1;
+    let f: int64 = e;
+    let g = e + f;
+    let h = "a" + "b";
+    let i = 1.0 % 2.0;
+    let j: uint32 = 1;
+    let k = -j;
+    let l = int(1.5);
+    let m = float32(true);
+    let n = null;
+    let o = [];
+    let p = [1, "x"];
+    let q: Box = Box(1);
+    let r = Box(Size: 1, Size: 2);
+    let s = Box(Bogus: 1);
+    let t = Twice(1, 2);
+    let u = Mode.C;
+    let v: Mode = Mode.A;
+    let w = v.A;
+    let x: Box? = null;
+    let y = x.Size;
+    let z = 1.0 == 2.0;
+    if (1) { }
+    switch (v) {
+        case Mode.A: { }
+    }
+}
+
+fn Twice(value: int): int {
+    return value;
+}
+
+fn NoReturn(): int {
+    let x = 1;
+    _ = x;
+}
+
+fn Wrong() {
+    return 1;
+}

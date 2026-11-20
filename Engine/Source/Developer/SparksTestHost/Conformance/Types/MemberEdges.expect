@@ -1,0 +1,12 @@
+# Members of untyped constants are members of int/float, members of null are S0417, '?.' on a namespace or
+# type name is S0414; S0326 suggests a similar member name (checked in SparksTypesTests).
+error S0326 4:9
+error S0326 5:9
+error S0417 6:9
+error S0417 7:9
+error S0414 8:9
+error S0414 9:9
+error S0326 10:9
+error S0326 11:9
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

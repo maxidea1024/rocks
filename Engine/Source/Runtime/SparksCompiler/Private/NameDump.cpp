@@ -301,4 +301,52 @@ Result<void> Compilation::AppendNameDump(StringBuilderBase& out, uint32 module) 
     return out.Status();
 }
 
+Result<void> Compilation::AppendTypeDump(StringBuilderBase& out, uint32 module) const noexcept {
+    if (module >= modules_.Size() || !modules_[module].parsed || module >= nodeBase_.Size() ||
+        nodeBase_[module] == NoNode || exprTypes_.IsEmpty() ||
+        lastStage_ < CompilationStage::Types) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const SyntaxTree& tree = trees_[module];
+    const uint32 base = nodeBase_[module];
+    Array<uint32> nodes(*allocator_);
+    for (uint32 node = 0; node < tree.NodeCount(); ++node) {
+        const uint32 type = exprTypes_[base + node];
+        if (type == detail::NotRecorded || type == NoType) {
+            continue;
+        }
+
+        if (auto pushed = nodes.TryPushBack(node); !pushed) {
+            return pushed;
+        }
+    }
+
+    // 시작이 앞선 식 먼저, 같으면 넓은(바깥) 식 먼저, 그래도 같으면 노드 번호 순이다.
+    algo::Sort(nodes.View(), [&](uint32 left, uint32 right) noexcept {
+        const SourceSpan a = tree.Node(left).span;
+        const SourceSpan b = tree.Node(right).span;
+        if (a.begin != b.begin) {
+            return a.begin < b.begin;
+        }
+
+        return a.end != b.end ? a.end > b.end : left < right;
+    });
+    const SourceFile& file = sources_->Get(modules_[module].source);
+    for (const uint32 node : nodes) {
+        const SourceSpan span = tree.Node(node).span;
+        const SourceLocation begin = file.Locate(span.begin);
+        const SourceLocation end = file.Locate(span.end);
+        out.AppendFormat("{}:{}-{}:{} {} ", begin.line, begin.column, end.line, end.column,
+                         SyntaxKindName(tree.Node(node).kind));
+        if (auto type = AppendTypeText(out, exprTypes_[base + node]); !type) {
+            return type;
+        }
+
+        out.Append("\n");
+    }
+
+    return out.Status();
+}
+
 } // namespace rocks::sparks

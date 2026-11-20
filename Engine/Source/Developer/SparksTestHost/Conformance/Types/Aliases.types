@@ -1,0 +1,11 @@
+== Main.spark
+4:9-4:19 Call int
+5:9-5:16 Member int
+6:9-6:21 Member Game:Tools.Kind
+7:9-7:28 Call Game:Tools.Hammer
+7:26-7:27 IntegerLiteral int
+8:24-8:36 Member Game:Tools.Kind
+9:9-9:13 Identifier Game:Tools.Kind
+== Tools.spark
+7:20-7:21 IntegerLiteral int
+10:12-10:17 Identifier int

@@ -119,6 +119,8 @@ enum class DiagnosticCode : uint16 {
     ThisMisuse = 423,
     ValidatedLiteralForm = 424,
     StaticInstanceMismatch = 425,
+    RecursiveStruct = 426,
+    InitializerTooDeep = 427,
     IntegerDivision = 501,
     FloatToIntConversion = 502,
     ConstantOverflow = 503,

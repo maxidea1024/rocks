@@ -1,0 +1,22 @@
+# Validated literals (3.10): Tag, Action, Asset (hard and soft by expected type), Row, CVar, Loc;
+# S0403 argument count, S0424 non-literal first argument, S0417 missing expected type, S0404/S0419 Loc arguments.
+error S0424 22:13
+error S0424 23:13
+error S0424 24:16
+error S0417 25:9
+error S0401 26:22
+error S0417 27:9
+error S0417 28:9
+error S0424 29:13
+error S0424 30:13
+error S0417 31:32
+error S0419 32:29
+error S0404 33:25
+error S0404 34:25
+error S0404 35:32
+error S0403 36:9
+error S0401 37:25
+error S0403 39:9
+error S0403 40:9
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

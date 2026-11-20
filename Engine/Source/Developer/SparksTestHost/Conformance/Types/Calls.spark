@@ -1,0 +1,141 @@
+enum Mode { A }
+
+struct Required {
+    var First: Tag;
+    var Count: int;
+    var Second: InputAction;
+}
+
+struct Point {
+    var X: int;
+    var Y: int = 2;
+
+    fn Scaled(factor: int): Point {
+        return Point(X: X * factor, Y: Y * factor);
+    }
+}
+
+class Spawner : WorldService {
+}
+
+class Spinner : ScriptComponent {
+    var Sound: SoundAsset;
+    var Speed: float;
+}
+
+class Wheel : ScriptComponent {
+    let Spin = Spinner();
+    let Given = Spinner(Sound: Asset("/Game/Spin"));
+}
+
+class Mover : ScriptComponent {
+    let Range = SphereCollider(Radius: 1.0);
+
+    fn Find(): Spawner {
+        return World.Service<Spawner>();
+    }
+}
+
+fn Twice(value: int): int {
+    return value * 2;
+}
+
+async fn Load(): int {
+    return 1;
+}
+
+async fn Valid(i: int, u: uint32, f: float, g: float32, a: Actor, p: Point, v: vec3) {
+    _ = Twice(2);
+    _ = p.Scaled(3);
+    _ = Actor.CountAll();
+    _ = a.Find<ScriptComponent>();
+    _ = a.Find<Mover>();
+    let loaded = await Load();
+    _ = loaded;
+    let moved = await a.MoveTo(v);
+    _ = moved;
+    await All(Delay(1.0, Clock.Game), NextTick());
+    await Race(a.Destroyed, NextFixedTick());
+    await a.Destroyed;
+    _ = Point(X: 1, Y: 2);
+    _ = Point();
+    _ = SpawnParams(Category: Tag("A.B"));
+    _ = SpawnParams(Count: 1, Label: "x", Category: Tag("A.B"), Sound: null);
+    _ = Rotator(Yaw: 90.0);
+    _ = Color(R: 1.0, G: 0.5, B: 0, A: 1.0);
+    _ = Transform(Location: v);
+    _ = vec3(1.0, 2.0, 3.0);
+    _ = vec2(1, 2);
+    _ = vec4(f, f, f, f);
+    _ = quat(0.0, 0.0, 0.0, 1.0);
+    _ = Math.Min(1, 2);
+    _ = Math.Min(1, 2.5);
+    _ = Math.Max(i, 2);
+    _ = Math.Max(g, 1.0);
+    _ = Math.Min(u, 3);
+    _ = Math.Clamp(f, 0, 1.0);
+    _ = Math.Abs(-3);
+    _ = Math.Abs(f);
+    _ = Math.Sign(i);
+    _ = Math.Div(i, 2);
+    _ = Math.Div(u, u);
+    _ = Math.NearlyEqual(v, v, 0.01);
+    _ = Math.NearlyEqual(f, 1.0, 0.01);
+    _ = Math.Scale(v, v);
+    _ = TagSet();
+    let actorOpt: Actor? = a;
+    let maybeMoved = await actorOpt?.MoveTo(v);
+    _ = maybeMoved;
+    await actorOpt?.Destroyed;
+}
+
+async fn Errors(i: int, u: uint32, f: float, a: Actor, p: Point, v: vec3) {
+    _ = Twice(value: 2);
+    _ = Twice();
+    _ = Twice(1, 2);
+    _ = Twice("a");
+    _ = p.X();
+    _ = a.Find();
+    _ = a.Find<Actor>();
+    _ = Twice<int>(1);
+    let wait = Load();
+    _ = Delay(1.0, Clock.Game);
+    NextTick();
+    _ = Point(1, 2);
+    _ = Point(Z: 1);
+    _ = Point(X: 1, X: 2);
+    _ = SpawnParams(Count: 1);
+    _ = SpawnParams(Categry: Tag("A.B"));
+    _ = Required();
+    _ = Required(Count: 1, 2);
+    _ = Point(X: "a");
+    _ = Hit();
+    _ = Actor();
+    _ = Actor(1);
+    _ = Point<int>(X: 1);
+    _ = vec3<float>(1.0, 2.0, 3.0);
+    _ = float<int>(i);
+    _ = Tag<int>("A");
+    _ = p.X<int>();
+    _ = Assets.Find<int>("x");
+    _ = SpawnParams(Category: Tag("A.B"), Id: 1);
+    _ = TagSet(X: 1);
+    _ = Math.NearlyEqual(1, 2, 0.1);
+    _ = mat4();
+    _ = Mode();
+    _ = Interactable();
+    _ = Spawner();
+    _ = vec3(X: 1.0);
+    _ = vec3(1.0, 2.0);
+    _ = vec3(i, 0.0, 0.0);
+    _ = Rotator(1.0, 2.0, 3.0);
+    _ = Color(Alpha: 1.0);
+    _ = Math.Min(i, f);
+    _ = Math.Abs(u);
+    _ = Math.Div(f, 2.0);
+    _ = Math.Sign(true);
+    await All();
+    await Race(1);
+    _ = Twice(Missing);
+    _ = Twice(Twice("a"));
+}

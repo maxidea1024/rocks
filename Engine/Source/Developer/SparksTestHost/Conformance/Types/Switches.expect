@@ -1,0 +1,20 @@
+# switch (3.10): enum subjects cover every case without default, other subjects need default (engine Error too),
+# case values are constants of the subject type; S0415, S0416, S0401, S0407 (subject without '=='), S0109.
+error S0407 41:13
+error S0407 46:13
+error S0416 52:14
+error S0416 53:14
+error S0416 59:14
+error S0415 63:13
+error S0415 69:9
+error S0415 72:13
+error S0416 77:22
+error S0416 83:14
+error S0401 88:14
+error S0401 93:14
+error S0407 97:13
+error S0415 101:13
+error S0109 106:14
+error S0416 112:14
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

@@ -1,0 +1,48 @@
+class Mover : ScriptComponent {
+}
+
+class Rules : DataAsset {
+}
+
+struct Holder {
+    var Nothing: void;
+}
+
+struct Point {
+    var X: int;
+}
+
+enum Mode { A }
+
+fn Valid(a: Map<string, Array<int>>, b: Set<Tag>, c: Soft<DataAsset>, d: Class<Mover>,
+         e: Result<void>, f: Array<Actor>, g: Map<Mode, int>, h: Class<Actor>, i: Soft<Rules>) {
+}
+
+fn Errors(a: Array<int?>, b: Map<float, int>, c: Set<vec3>, d: Result<int?>, e: Soft<int>,
+          f: Class<Point>, g: Array<void>, h: Map<string, int?>, i: Soft<DataAsset?>) {
+}
+
+fn TakesVoid(p: void) {
+}
+
+fn OptionalVoid(p: void?): void? {
+    var x: void? = null;
+    _ = x;
+}
+
+class Signals : ScriptComponent {
+    event Sent(value: void);
+}
+
+fn MoreArguments(a: Row<Mover?>, b: LoadRequest<DataAsset?>, c: CVarRef<int?>, d: Class<Interactable>) {
+}
+
+fn CallsVoid() {
+    TakesVoid(1);
+}
+
+fn VoidLocal(p: void, q: Class<DataAsset>, r: Class<Mover?>) {
+    var x: void = 1;
+    _ = x;
+    _ = p;
+}

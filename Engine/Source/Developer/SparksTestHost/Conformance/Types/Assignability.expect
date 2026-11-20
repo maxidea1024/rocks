@@ -1,0 +1,16 @@
+# Assignability (3.10): same type (int is int64), constants, T to T?, null to T?, derived to base and implemented
+# interfaces; S0401 for numeric widening, downcasts, unrelated classes, invariant generics and T? to T.
+error S0401 17:20
+error S0401 21:24
+error S0401 45:20
+error S0401 46:18
+error S0401 47:19
+error S0401 48:22
+error S0401 49:19
+error S0401 50:27
+error S0401 51:18
+error S0401 52:21
+error S0401 54:9
+error S0401 55:21
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

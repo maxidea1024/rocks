@@ -1,0 +1,9 @@
+# Events: 'emit' arguments take the event parameter types (S0403 count, S0401 types); events are waits (S0422 unawaited).
+error S0403 12:9
+error S0401 13:21
+error S0401 14:24
+error S0403 15:9
+error S0401 17:29
+error S0422 24:13
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

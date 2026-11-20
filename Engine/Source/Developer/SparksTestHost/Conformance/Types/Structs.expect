@@ -1,0 +1,10 @@
+# Struct values (3.10): S0426 once per cycle of struct fields (directly, through '?' or other structs; not through
+# containers or references); struct defaults follow fields, for engine structs too (S0404 for missing fields).
+error S0426 39:13
+error S0426 43:13
+error S0426 47:15
+error S0404 69:9
+error S0404 70:9
+error S0404 71:9
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

@@ -1,0 +1,4 @@
+# A program that uses most expression forms without errors; the .types golden records the type of every value.
+clean
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

@@ -1,0 +1,19 @@
+import Tools as T;
+
+fn Valid() {
+    _ = T.Helper();
+    _ = T.Limit;
+    _ = T.Kind.Large;
+    _ = T.Hammer(Weight: 2);
+    let kind: T.Kind = T.Kind.Small;
+    _ = kind;
+}
+
+fn Errors() {
+    _ = T.Missing;
+    _ = T;
+    _ = T.Kind;
+    _ = T.Helper;
+    _ = T.Kind.Medium;
+    _ = T?.Helper();
+}

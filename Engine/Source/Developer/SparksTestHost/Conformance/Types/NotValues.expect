@@ -1,0 +1,14 @@
+# S0405: type names, namespaces, functions, validated literal names and void results are not values.
+error S0405 8:9
+error S0405 9:9
+error S0405 10:9
+error S0405 11:18
+error S0405 12:9
+error S0405 13:9
+error S0405 14:13
+error S0405 15:13
+error S0405 16:15
+error S0405 17:9
+error S0405 18:9
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

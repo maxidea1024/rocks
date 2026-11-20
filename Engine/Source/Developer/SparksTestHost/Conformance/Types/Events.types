@@ -1,0 +1,17 @@
+6:21-6:22 Identifier Rocks.Actor
+6:24-6:25 IntegerLiteral int
+7:21-7:25 NullLiteral Rocks.Actor?
+7:27-7:28 IntegerLiteral int
+12:21-12:22 Identifier Rocks.Actor
+13:24-13:25 IntegerLiteral int
+14:21-14:22 Identifier Rocks.Actor
+14:24-14:27 String string
+16:26-16:30 NullLiteral Rocks.Actor?
+16:32-16:33 IntegerLiteral int
+17:26-17:27 Identifier Rocks.Actor
+17:29-17:32 String string
+21:15-21:16 Identifier Rocks.Actor
+22:15-22:16 Identifier Rocks.Actor
+23:15-23:25 Member InputAction
+23:15-23:20 Identifier Rocks.InputSystem
+24:13-24:14 Identifier Rocks.Actor

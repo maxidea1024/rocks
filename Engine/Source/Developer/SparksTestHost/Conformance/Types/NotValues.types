@@ -1,0 +1,5 @@
+4:12-4:21 Binary int
+4:12-4:17 Identifier int
+4:20-4:21 IntegerLiteral int
+11:27-11:30 String string
+18:18-18:21 String string

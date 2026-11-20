@@ -1,0 +1,57 @@
+interface Usable {
+    fn Use();
+}
+
+open class Base : ScriptComponent, Usable {
+    fn Use() {
+    }
+}
+
+class Derived : Base {
+}
+
+class Other : ScriptComponent {
+}
+
+const Count: int64 = 3;
+const Wrong: int = "a";
+
+struct Holder {
+    var Value: int = 1;
+    var Name: string = 2;
+}
+
+fn Valid(i: int, a: Actor, p: Pawn, d: Derived, b: Base, actors: Array<Actor>) {
+    let x: int64 = i;
+    let y: int = Count;
+    let maybe: int? = i;
+    let fromConst: int? = 3;
+    let nothing: Actor? = null;
+    let base: Actor = p;
+    let baseMaybe: Actor? = p;
+    let usable: Usable = d;
+    let sparksBase: Base = d;
+    let component: ScriptComponent = d;
+    var target: Actor? = a;
+    target = null;
+    target = p;
+    let copy: Array<Actor> = actors;
+    _ = x; _ = y; _ = maybe; _ = fromConst; _ = nothing; _ = base; _ = baseMaybe; _ = usable;
+    _ = sparksBase; _ = component; _ = copy;
+}
+
+fn Errors(i: int, small: int32, g: float32, a: Actor, b: Base, o: Other, pawns: Array<Pawn>,
+          maybe: int?) {
+    let x: float = g;
+    let y: int = small;
+    let z: Pawn = a;
+    let w: Derived = b;
+    let v: Base = o;
+    let u: Array<Actor> = pawns;
+    let t: int = maybe;
+    let s: string = i;
+    var r = i;
+    r = "a";
+    let q: Usable = o;
+    _ = x; _ = y; _ = z; _ = w; _ = v; _ = u; _ = t; _ = s; _ = q;
+}

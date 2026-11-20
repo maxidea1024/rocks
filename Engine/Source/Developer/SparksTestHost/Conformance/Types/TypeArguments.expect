@@ -1,0 +1,27 @@
+# Type argument rules (3.10) on every type annotation: no '?' arguments (S0401), '==' map keys and set elements (S0407),
+# Soft<asset> and Class<class> (S0411), 'void' only as a return type or Result<void> (S0405).
+error S0405 8:18
+error S0401 21:20
+error S0407 21:34
+error S0407 21:54
+error S0401 21:71
+error S0411 21:86
+error S0411 22:20
+error S0405 22:37
+error S0401 22:59
+error S0401 22:74
+error S0405 25:17
+error S0405 28:20
+error S0405 28:28
+error S0405 29:12
+error S0405 34:23
+error S0401 37:25
+error S0401 37:49
+error S0401 37:73
+error S0411 37:89
+error S0405 44:17
+error S0411 44:32
+error S0401 44:53
+error S0405 45:12
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

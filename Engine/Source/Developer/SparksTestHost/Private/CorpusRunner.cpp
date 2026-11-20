@@ -309,12 +309,12 @@ bool CheckFolderLayout(const Array<LoadedFile>& loaded, StringBuilderBase& reaso
 Result<void> RunPairedCase(Allocator& allocator, platform::FileSystem& files, StringView areaPath,
                            StringView areaName, StringView stem, StringView expectName,
                            StringView sourceName, StringView folderName, StringView syntaxTreeName,
-                           StringView namesName, Span<const CaseFile> schemas,
+                           StringView namesName, StringView typesName, Span<const CaseFile> schemas,
                            Report& report) noexcept {
     Array<LoadedFile> loaded(allocator);
-    // 0: .expect, 1: .spark 또는 없음, 2: .ast 또는 없음, 3: .names 또는 없음
-    const StringView names[] = {expectName, sourceName, syntaxTreeName, namesName};
-    bool present[] = {false, false, false, false};
+    // 0: .expect, 1: .spark 또는 없음, 2: .ast 또는 없음, 3: .names 또는 없음, 4: .types 또는 없음
+    const StringView names[] = {expectName, sourceName, syntaxTreeName, namesName, typesName};
+    bool present[] = {false, false, false, false, false};
     for (usize index = 0; index < sizeof(names) / sizeof(names[0]); ++index) {
         if (names[index].IsEmpty()) {
             continue;
@@ -407,6 +407,8 @@ Result<void> RunPairedCase(Allocator& allocator, platform::FileSystem& files, St
 
     input.hasNames = present[3];
     input.names = textOf(namesName);
+    input.hasTypes = present[4];
+    input.types = textOf(typesName);
     input.name = caseName.View();
     return RunCase(allocator, input, report);
 }
@@ -441,11 +443,11 @@ Result<void> RunArea(Allocator& allocator, platform::FileSystem& files, StringVi
         return report.TryAddFailure(message.View());
     }
 
-    // 0: .spark, 1: 폴더, 2: .expect, 3: .ast, 4: .names
-    constexpr usize KindCount = 5;
+    // 0: .spark, 1: 폴더, 2: .expect, 3: .ast, 4: .names, 5: .types
+    constexpr usize KindCount = 6;
     Array<CaseItem> lists[KindCount] = {Array<CaseItem>(allocator), Array<CaseItem>(allocator),
                                         Array<CaseItem>(allocator), Array<CaseItem>(allocator),
-                                        Array<CaseItem>(allocator)};
+                                        Array<CaseItem>(allocator), Array<CaseItem>(allocator)};
     for (usize index = 0; index < items.Size(); ++index) {
         const StringView name = items[index].name.View();
         usize kind = KindCount;
@@ -464,12 +466,16 @@ Result<void> RunArea(Allocator& allocator, platform::FileSystem& files, StringVi
         } else if (HasExtension(name, detail::NamesExtension)) {
             kind = 4;
             extension = detail::NamesExtension;
+        } else if (HasExtension(name, detail::TypesExtension)) {
+            kind = 5;
+            extension = detail::TypesExtension;
         }
 
         if (kind == KindCount) {
-            if (auto added = AddLayoutFailure(report, allocator, areaName, name,
-                                              "unexpected file (only .spark, .expect, .ast, .names "
-                                              "and case folders)");
+            if (auto added =
+                    AddLayoutFailure(report, allocator, areaName, name,
+                                     "unexpected file (only .spark, .expect, .ast, .names, "
+                                     ".types and case folders)");
                 !added) {
                 return added;
             }
@@ -489,7 +495,7 @@ Result<void> RunArea(Allocator& allocator, platform::FileSystem& files, StringVi
     }
 
     // 네 목록을 stem 순으로 함께 훑는다(같은 stem이 한 사례다).
-    usize next[KindCount] = {0, 0, 0, 0, 0};
+    usize next[KindCount] = {0, 0, 0, 0, 0, 0};
     while (true) {
         bool any = false;
         StringView stem;
@@ -522,8 +528,9 @@ Result<void> RunArea(Allocator& allocator, platform::FileSystem& files, StringVi
         const StringView& expectName = present[2];
         StringView syntaxTreeName = present[3];
         const StringView namesName = present[4];
+        const StringView typesName = present[5];
         if (sourceName.IsEmpty() && folderName.IsEmpty()) {
-            const StringView orphans[] = {expectName, syntaxTreeName, namesName};
+            const StringView orphans[] = {expectName, syntaxTreeName, namesName, typesName};
             for (const StringView& orphan : orphans) {
                 if (orphan.IsEmpty()) {
                     continue;
@@ -572,7 +579,7 @@ Result<void> RunArea(Allocator& allocator, platform::FileSystem& files, StringVi
 
         if (auto ran =
                 RunPairedCase(allocator, files, areaPath, areaName, stem, expectName, sourceName,
-                              folderName, syntaxTreeName, namesName, schemas, report);
+                              folderName, syntaxTreeName, namesName, typesName, schemas, report);
             !ran) {
             return ran;
         }

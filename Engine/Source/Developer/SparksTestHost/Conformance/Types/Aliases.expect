@@ -1,0 +1,10 @@
+# Members of an import alias (3.10): top-level types, functions, consts and enum cases of the module;
+# S0326 unknown members, S0405 for the alias, a type or a function used as a value.
+error S0326 Main.spark 13:9
+error S0405 Main.spark 14:9
+error S0405 Main.spark 15:9
+error S0405 Main.spark 16:9
+error S0326 Main.spark 17:9
+error S0414 Main.spark 18:9
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

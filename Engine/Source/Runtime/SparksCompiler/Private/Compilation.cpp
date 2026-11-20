@@ -16,8 +16,7 @@ Compilation::Compilation(Allocator& allocator, const SourceSet& sources) noexcep
       packagesByName_(allocator), symbols_(allocator), types_(allocator), typeArguments_(allocator),
       typeIndex_(allocator, TypeHash{this}, TypeEqual{this}), signatures_(allocator),
       signatureParameters_(allocator), symbolBases_(allocator), nodeSymbols_(allocator),
-      nodeTypes_(allocator), exprTypes_(allocator), nodeBase_(allocator),
-      sortedModules_(allocator),
+      nodeTypes_(allocator), exprTypes_(allocator), nodeBase_(allocator), sortedModules_(allocator),
       sortedFirst_(allocator), sortedCount_(allocator) {
 }
 

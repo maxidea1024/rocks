@@ -1,0 +1,12 @@
+# String interpolation (3.10): booleans, numbers, strings, enums, tags and math types are shown;
+# S0419 for '?' values, objects, structs, containers, Text and mat4; a failed part leaves the string unresolved.
+error S0419 16:12
+error S0419 17:12
+error S0419 18:12
+error S0419 19:12
+error S0419 20:12
+error S0419 21:12
+error S0417 22:12
+error S0317 23:12
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

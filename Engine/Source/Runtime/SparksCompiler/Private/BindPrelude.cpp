@@ -6,8 +6,8 @@
 #include "PreludeMembers.h"
 
 // 언어 소유 멤버(부록 B 시그니처, SD67)를 심볼로 만든다. 표는 컴파일러 안의 정적 자료이므로 형식이
-// 틀리면 진단이 아니라 Fatal이다(시험이 표 전체를 읽어 본다). Docs/Design/SparksLanguage.ko.md 3.8절,
-// 3.10절 "문맥 이름의 타입".
+// 틀리면 진단이 아니라 Fatal이다(시험이 표 전체를 읽어 본다).
+// Docs/Design/SparksLanguage.ko.md 3.8절, 3.10절 "문맥 이름의 타입".
 
 namespace rocks::sparks::detail {
 
@@ -21,10 +21,8 @@ struct Placeholder {
 };
 
 constexpr Placeholder Placeholders[] = {
-    {"$N", LanguageTypeParameterKind::Numeric},
-    {"$S", LanguageTypeParameterKind::Signed},
-    {"$I", LanguageTypeParameterKind::Integer},
-    {"$F", LanguageTypeParameterKind::FloatOrVector},
+    {"$N", LanguageTypeParameterKind::Numeric}, {"$S", LanguageTypeParameterKind::Signed},
+    {"$I", LanguageTypeParameterKind::Integer}, {"$F", LanguageTypeParameterKind::FloatOrVector},
     {"$V", LanguageTypeParameterKind::Vector},
 };
 
@@ -53,7 +51,8 @@ bool IsNameCharacter(char value) noexcept {
 } // namespace
 
 // 표기 하나를 읽는다(문법은 schema 표기와 같다).
-uint32 NameBinder::ParsePreludeType(StringView text, usize& index, const PreludeScope& scope) noexcept {
+uint32 NameBinder::ParsePreludeType(StringView text, usize& index,
+                                    const PreludeScope& scope) noexcept {
     const usize begin = index;
     while (index < text.ByteCount() && IsNameCharacter(text.Data()[index])) {
         ++index;
@@ -133,8 +132,8 @@ uint32 NameBinder::ParsePreludeType(StringView text, usize& index, const Prelude
     return InternType(symbol, arguments.View(), optional);
 }
 
-// `[<T>](매개변수): [await ]반환` 을 시그니처로 만든다. 함수 자기 타입 매개변수는 function의 매개변수
-// 공간에 넣는다.
+// `[<T>](매개변수): [await ]반환` 을 시그니처로 만든다. 함수 자기 타입 매개변수는 function의
+// 매개변수 공간에 넣는다.
 uint32 NameBinder::ParsePreludeSignature(StringView text, PreludeScope scope,
                                          uint32& flags) noexcept {
     usize index = 0;
@@ -363,7 +362,8 @@ void NameBinder::DeclarePreludeMembers() noexcept {
             continue;
         }
 
-        const uint32 owner = member.owner == TimeTypeName ? timeType_ : FindName(language, member.owner);
+        const uint32 owner =
+            member.owner == TimeTypeName ? timeType_ : FindName(language, member.owner);
         if (owner == NoSymbol) {
             Malformed();
             return;

@@ -1,0 +1,38 @@
+fn Valid(a: Actor, p: Pawn) {
+    let ints = [1, 2, 3];
+    let floats = [1, 2.5];
+    let texts = ["a", "b"];
+    let actors = [a, a];
+    let set: Set<int> = [1, 2];
+    let map: Map<string, int> = ["a": 1, "b": 2];
+    let empty: Array<int> = [];
+    let emptyMap: Map<string, Actor> = [];
+    let emptySet: Set<string> = [];
+    let based: Array<Actor> = [a, p];
+    let nested = [[1], [2, 3]];
+    let floatsTyped: Array<float32> = [1, 2.5];
+    _ = ints; _ = floats; _ = texts; _ = actors; _ = set; _ = map; _ = empty; _ = emptyMap;
+    _ = emptySet; _ = based; _ = nested; _ = floatsTyped;
+}
+
+fn Errors(a: Actor, p: Pawn, i: int, opt: int?, small: uint8) {
+    let mixed = [1, "x"];
+    let based = [a, p];
+    let empty = [];
+    let map = ["a": 1];
+    let wrongElement: Array<int> = ["x"];
+    let wrongKey: Map<string, int> = [1: 1];
+    let wrongValue: Map<string, int> = ["a": "b"];
+    let mapForArray: Array<int> = ["a": 1];
+    let arrayForMap: Map<string, int> = [1, 2];
+    let notCollection: int = [1];
+    let constFits: Array<uint8> = [1, 256];
+    let optionals = [opt, opt];
+    let bytes = [small, 300];
+    let wrongKind: int = [];
+    let nulls = [null];
+    let mixedConst = [i, 1.5];
+    _ = mixed; _ = based; _ = empty; _ = map; _ = wrongElement; _ = wrongKey; _ = wrongValue;
+    _ = mapForArray; _ = arrayForMap; _ = notCollection; _ = constFits; _ = i; _ = optionals; _ = bytes; _ = wrongKind; _ = nulls;
+    _ = mixedConst;
+}

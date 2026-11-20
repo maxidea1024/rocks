@@ -1,0 +1,100 @@
+enum Mode { A, B }
+
+fn Branches(flag: bool): int {
+    if (flag) {
+        return 1;
+    } else {
+        return 2;
+    }
+}
+
+fn ElseIf(i: int): int {
+    if (i > 0) {
+        return 1;
+    } else if (i < 0) {
+        return -1;
+    } else {
+        return 0;
+    }
+}
+
+fn Cases(mode: Mode): string {
+    switch (mode) {
+        case Mode.A: { return "a"; }
+        case Mode.B: { return "b"; }
+    }
+}
+
+fn Default(i: int): int {
+    switch (i) {
+        case 1: { return 10; }
+        default: { return 0; }
+    }
+}
+
+fn Fallible(flag: bool): Result<int> {
+    if (flag) {
+        return Error.NotFound;
+    }
+
+    return 3;
+}
+
+fn Checked(flag: bool): Result<void> {
+    if (flag) {
+        return Error.Busy;
+    }
+}
+
+fn Nothing() {
+    return;
+}
+
+fn ResultVoidValue(): Result<void> {
+    return 5;
+}
+
+fn ValueInVoid() {
+    return 1;
+}
+
+fn NothingFromInt(): int {
+    return;
+}
+
+fn WrongType(): int {
+    return "a";
+}
+
+fn WrongResult(): Result<int> {
+    return "a";
+}
+
+fn OptionalResult(): Result<int?> {
+    return null;
+}
+
+fn IfWithoutElse(flag: bool): int {
+    if (flag) {
+        return 1;
+    }
+}
+
+fn WhileLoop(): int {
+    while (true) {
+        return 1;
+    }
+}
+
+fn SwitchWithoutReturn(mode: Mode): int {
+    switch (mode) {
+        case Mode.A: { return 1; }
+        case Mode.B: { }
+    }
+}
+
+class Door : ScriptComponent {
+    on Tick(dt: float) {
+        return dt;
+    }
+}

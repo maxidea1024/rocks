@@ -1,0 +1,13 @@
+# for (3.10): Array (element, or index and element), Map (key, or key and value), Set (element), integer ranges;
+# S0406 extra binders, non-integer ranges and non-iterable values, S0412 optional collections, S0401/S0509 range bounds.
+error S0406 40:13
+error S0406 43:13
+error S0406 46:15
+error S0509 49:15
+error S0401 52:23
+error S0406 55:15
+error S0412 58:15
+error S0406 61:15
+error S0317 64:15
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

@@ -1,0 +1,21 @@
+# Typed constant folding (3.10): const names and typed constant expressions have compile-time values (switch
+# cases); overflow of the type is S0503, conversions are checked (S0109); a const whose initializer failed
+# is silent where it is used.
+error S0503 15:24
+error S0401 16:24
+error S0109 17:27
+error S0401 18:18
+error S0109 20:31
+error S0503 23:19
+error S0401 25:23
+error S0505 36:26
+error S0109 38:34
+error S0416 59:14
+error S0416 66:14
+error S0416 67:14
+error S0416 68:14
+error S0416 69:14
+error S0416 70:14
+error S0416 84:14
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

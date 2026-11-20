@@ -1,0 +1,38 @@
+struct Point {
+    var X: int;
+
+    fn Get(): int {
+        _ = this;
+        return X;
+    }
+}
+
+const Self: int = this;
+
+fn Top() {
+    _ = this;
+}
+
+class Door : ScriptComponent {
+    var Count = 0;
+    let Me = this;
+
+    event Opened(count: int);
+
+    fn Same(): Door {
+        return this;
+    }
+
+    fn Use() {
+        emit this.Opened(Count);
+        emit Opened(this.Count);
+        _ = Me.Count;
+        _ = this == Me;
+        _ = (this).Count;
+    }
+
+    on Tick(dt: float) {
+        _ = this;
+        _ = dt;
+    }
+}

@@ -1,0 +1,25 @@
+fn Valid(flag: bool, i: int) {
+    if (flag) {
+    }
+
+    while (i > 0 && flag) {
+    }
+
+    Assert(!flag || i == 0, "message");
+}
+
+fn Errors(i: int, flagOpt: bool?, text: string) {
+    if (i) {
+    }
+
+    if (flagOpt) {
+    }
+
+    while (text) {
+    }
+
+    Assert(i, "message");
+    Assert(true, 1);
+    if (Missing) {
+    }
+}

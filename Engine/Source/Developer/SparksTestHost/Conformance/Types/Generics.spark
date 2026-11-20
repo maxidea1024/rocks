@@ -1,0 +1,21 @@
+struct Rules {
+    var Speed: float = 1.0;
+}
+
+fn Valid(softs: Array<Soft<DataAsset>>, a: Actor) {
+    let rules = Settings.Get<Rules>();
+    let found = Assets.Find<DataAsset>("/Game/Data/Rules");
+    let all = Assets.LoadAll<DataAsset>(softs);
+    let cvar = CVars.Find<float>("r.Scale");
+    let component = a.Find<ScriptComponent>();
+    _ = rules.Speed; _ = found; _ = all; _ = cvar; _ = component;
+}
+
+fn Errors(softs: Array<Soft<SoundAsset>>, a: Actor) {
+    _ = Settings.Get();
+    _ = Assets.Find("/Game/Data/Rules");
+    _ = Assets.LoadAll<DataAsset>(softs);
+    _ = a.Find<int>();
+    _ = Settings.Get<Rules, Rules>();
+    _ = CVars.Find<float>(1);
+}

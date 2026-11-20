@@ -1,0 +1,12 @@
+31:24-31:48 Call Test:Main.Needs
+31:37-31:47 Call Tag
+31:41-31:46 String string
+60:9-60:18 Call Test:Main.Wrapper
+61:9-61:15 Call Test:Main.Node
+62:9-62:16 Call Test:Main.Given
+63:9-63:47 Call Test:Main.Outer
+63:22-63:46 Call Test:Main.Needs
+63:35-63:45 Call Tag
+63:39-63:44 String string
+64:9-64:19 Call Test:Main.SelfLoop
+65:9-65:16 Call Test:Main.First

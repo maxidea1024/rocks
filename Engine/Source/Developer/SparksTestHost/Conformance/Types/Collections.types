@@ -1,0 +1,70 @@
+2:16-2:25 CollectionLiteral Array<int>
+2:17-2:18 IntegerLiteral int
+2:20-2:21 IntegerLiteral int
+2:23-2:24 IntegerLiteral int
+3:18-3:26 CollectionLiteral Array<float>
+3:19-3:20 IntegerLiteral float
+3:22-3:25 FloatLiteral float
+4:17-4:27 CollectionLiteral Array<string>
+4:18-4:21 String string
+4:23-4:26 String string
+5:18-5:24 CollectionLiteral Array<Rocks.Actor>
+5:19-5:20 Identifier Rocks.Actor
+5:22-5:23 Identifier Rocks.Actor
+6:25-6:31 CollectionLiteral Set<int>
+6:26-6:27 IntegerLiteral int
+6:29-6:30 IntegerLiteral int
+7:33-7:49 CollectionLiteral Map<string, int>
+7:34-7:37 String string
+7:39-7:40 IntegerLiteral int
+7:42-7:45 String string
+7:47-7:48 IntegerLiteral int
+8:29-8:31 CollectionLiteral Array<int>
+9:40-9:42 CollectionLiteral Map<string, Rocks.Actor>
+10:33-10:35 CollectionLiteral Set<string>
+11:31-11:37 CollectionLiteral Array<Rocks.Actor>
+11:32-11:33 Identifier Rocks.Actor
+11:35-11:36 Identifier Rocks.Pawn
+12:18-12:31 CollectionLiteral Array<Array<int>>
+12:19-12:22 CollectionLiteral Array<int>
+12:20-12:21 IntegerLiteral int
+12:24-12:30 CollectionLiteral Array<int>
+12:25-12:26 IntegerLiteral int
+12:28-12:29 IntegerLiteral int
+13:39-13:47 CollectionLiteral Array<float32>
+13:40-13:41 IntegerLiteral float32
+13:43-13:46 FloatLiteral float32
+14:9-14:13 Identifier Array<int>
+14:19-14:25 Identifier Array<float>
+14:31-14:36 Identifier Array<string>
+14:42-14:48 Identifier Array<Rocks.Actor>
+14:54-14:57 Identifier Set<int>
+14:63-14:66 Identifier Map<string, int>
+14:72-14:77 Identifier Array<int>
+14:83-14:91 Identifier Map<string, Rocks.Actor>
+15:9-15:17 Identifier Set<string>
+15:23-15:28 Identifier Array<Rocks.Actor>
+15:34-15:40 Identifier Array<Array<int>>
+15:46-15:57 Identifier Array<float32>
+19:21-19:24 String string
+20:18-20:19 Identifier Rocks.Actor
+20:21-20:22 Identifier Rocks.Pawn
+22:16-22:19 String string
+23:37-23:40 String string
+24:42-24:43 IntegerLiteral int
+25:41-25:44 String string
+25:46-25:49 String string
+29:36-29:37 IntegerLiteral uint8
+30:22-30:25 Identifier int?
+30:27-30:30 Identifier int?
+31:18-31:23 Identifier uint8
+34:23-34:24 Identifier int
+35:51-35:63 Identifier Array<int>
+35:69-35:77 Identifier Map<string, int>
+35:83-35:93 Identifier Map<string, int>
+36:9-36:20 Identifier Array<int>
+36:26-36:37 Identifier Map<string, int>
+36:43-36:56 Identifier int
+36:62-36:71 Identifier Array<uint8>
+36:77-36:78 Identifier int
+36:110-36:119 Identifier int

@@ -148,6 +148,8 @@ struct CaseInput {
     StringView expect;            // `.expect` 내용
     bool hasSyntaxTree = false;   // `.ast`가 있는지(파일 사례만)
     StringView syntaxTree;        // `.ast` 내용(hasSyntaxTree일 때만)
+    bool hasTypes = false;        // `.types`가 있는지(식 타입 golden, AppendTypeDump)
+    StringView types;             // `.types` 내용(hasTypes일 때만)
     bool hasNames = false;        // `.names`가 있는지
     StringView names;             // `.names` 내용(hasNames일 때만)
 };

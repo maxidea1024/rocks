@@ -15,6 +15,9 @@ namespace {
 // 타입 없는 정수 상수의 범위(SD66): −2^63..2^64−1.
 constexpr uint64 MaxNegativeMagnitude = uint64(1) << 63;
 
+// float32 최근접 짝수 반올림이 무한대가 되는 절댓값(2^128 - 2^103)이다. 이보다 작으면 유한하다.
+constexpr double Float32RoundingLimit = 340282356779733661637539395458142568448.0;
+
 // float32·float64가 정수를 정확히 담는 가수 bit 수다.
 constexpr uint32 Float32Mantissa = 24;
 constexpr uint32 Float64Mantissa = 53;
@@ -93,7 +96,12 @@ bool IsFinite(double value) noexcept {
 
 StringView TypeChecker::TokenText(uint32 module, uint32 node) const noexcept {
     const SyntaxTree& tree = compilation_.trees_[module];
-    const SourceSpan span = tree.Tokens()[tree.Node(node).token].span;
+    const uint32 token = tree.Node(node).token;
+    if (token == NoToken) {
+        return StringView(); // 구문 오류로 빠진 이름(`p.` 뒤) — 진단은 구문 분석이 냈다
+    }
+
+    const SourceSpan span = tree.Tokens()[token].span;
     const StringView text = compilation_.sources_->Get(compilation_.modules_[module].source).Text();
     return StringView(text.Data() + span.begin, span.end - span.begin);
 }
@@ -103,6 +111,18 @@ void TypeChecker::Record(const CheckContext& context, uint32 node, uint32 type) 
     if (base != NoNode && node != NoNode) {
         compilation_.exprTypes_[base + node] = type;
     }
+}
+
+bool TypeChecker::ReportZeroDivisor(const CheckContext& context, const ExpressionValue& divisor,
+                                    uint32 node) noexcept {
+    if (divisor.constant.kind != ConstantValue::Kind::Integer || divisor.constant.magnitude != 0) {
+        return false;
+    }
+
+    Report(context, DiagnosticCode::ConstantDivisionByZero, node,
+           "The constant is divided by zero.", "Dividing by zero always fails.",
+           "Use a value other than 0.");
+    return true;
 }
 
 void TypeChecker::ReportAt(const CheckContext& context, DiagnosticCode code, SourceSpan span,
@@ -121,9 +141,9 @@ void TypeChecker::ReportMismatch(const CheckContext& context, uint32 node, uint3
                                  uint32 to) noexcept {
     StringBuilder<CompilationMessageInlineBytes> message(allocator_);
     message.Append("A value of type '");
-    static_cast<void>(compilation_.AppendTypeText(message, from));
+    AppendDisplayType(message, from);
     message.Append("' cannot be used as '");
-    static_cast<void>(compilation_.AppendTypeText(message, to));
+    AppendDisplayType(message, to);
     message.Append("'.");
     const bool numbers = Numeric(from).kind != NumericKind::None &&
                          Numeric(NonOptional(to)).kind != NumericKind::None;
@@ -181,7 +201,8 @@ bool TypeChecker::RequireValue(const CheckContext& context, const ExpressionValu
     return false;
 }
 
-bool TypeChecker::ConstantFits(const ConstantValue& constant, bool integer, uint32 type) const noexcept {
+bool TypeChecker::ConstantFits(const ConstantValue& constant, bool integer,
+                               uint32 type) const noexcept {
     const NumericInfo numeric = Numeric(type);
     if (numeric.kind == NumericKind::None) {
         return false;
@@ -192,8 +213,8 @@ bool TypeChecker::ConstantFits(const ConstantValue& constant, bool integer, uint
             return false;
         }
 
-        return numeric.bits == 64 || (constant.real <= NumericLimits<float>::Max() &&
-                                      constant.real >= -NumericLimits<float>::Max());
+        return numeric.bits == 64 ||
+               (constant.real < Float32RoundingLimit && constant.real > -Float32RoundingLimit);
     }
 
     if (numeric.kind == NumericKind::Float) {
@@ -220,11 +241,20 @@ bool TypeChecker::ConstantFits(const ConstantValue& constant, bool integer, uint
     return constant.negative ? constant.magnitude <= limit : constant.magnitude < limit;
 }
 
-uint32 TypeChecker::Coerce(const CheckContext& context, const ExpressionValue& value,
-                           uint32 type, uint32 node) noexcept {
+uint32 TypeChecker::Coerce(const CheckContext& context, const ExpressionValue& value, uint32 type,
+                           uint32 node) noexcept {
     using K = ExpressionValue::Kind;
+    if (type == UnresolvedType) {
+        return NoType; // 기대 타입을 모르는 자리(앞선 오류) — 더 알리지 않는다
+    }
+
     if (type == NoType) {
         return Materialize(context, value, node);
+    }
+
+    // `void` 자리(잘못된 `void` 표기 — S0405는 CheckTypeRules)에는 더 진단하지 않는다.
+    if (type == voidType_) {
+        return NoType;
     }
 
     switch (value.kind) {
@@ -255,7 +285,7 @@ uint32 TypeChecker::Coerce(const CheckContext& context, const ExpressionValue& v
                 message.Append("The constant does not fit in '");
             }
 
-            static_cast<void>(compilation_.AppendTypeText(message, target));
+            AppendDisplayType(message, target);
             message.Append("'.");
             if (binder_.Succeeded(message)) {
                 Report(context,
@@ -280,7 +310,7 @@ uint32 TypeChecker::Coerce(const CheckContext& context, const ExpressionValue& v
         if (!IsOptional(type)) {
             StringBuilder<CompilationMessageInlineBytes> message(allocator_);
             message.Append("'null' cannot be used as '");
-            static_cast<void>(compilation_.AppendTypeText(message, type));
+            AppendDisplayType(message, type);
             message.Append("'.");
             if (binder_.Succeeded(message)) {
                 Report(context, DiagnosticCode::TypeMismatch, node, message.View(),
@@ -309,8 +339,8 @@ uint32 TypeChecker::Materialize(const CheckContext& context, const ExpressionVal
     case K::UntypedFloat:
         return Coerce(context, value, floatType_, node);
     case K::Null:
-        Report(context, DiagnosticCode::NoExpectedType, node,
-               "'null' needs a type here.", "Nothing tells which type the value has.",
+        Report(context, DiagnosticCode::NoExpectedType, node, "'null' needs a type here.",
+               "Nothing tells which type the value has.",
                "Declare the type, as in 'var target: Actor? = null;'.");
         return NoType;
     default:
@@ -321,15 +351,74 @@ uint32 TypeChecker::Materialize(const CheckContext& context, const ExpressionVal
 
 ExpressionValue TypeChecker::Check(const CheckContext& context, uint32 node,
                                    uint32 expected) noexcept {
-    using K = ExpressionValue::Kind;
-    ExpressionValue result;
     if (node == NoNode || binder_.error_ != ErrorCode::None) {
-        return result;
+        return ExpressionValue{};
     }
 
+    // 식은 왼쪽으로 깊게 이어질 수 있다(구문 트리 깊이 상한 1024 — 8.1절). Debug 빌드의 stack 1 MiB
+    // 안에 들도록 재귀 경로의 frame에는 임시 값을 두지 않는다: 종류별 처리는 여기서 `return`으로
+    // 부르고(반환 자리에 바로 만든다), 판정·진단·타입 기록은 재귀가 끝난 뒤 부르는 함수가 한다.
+    // 기대 타입을 모르는 자리는 리터럴(컬렉션·검증 리터럴)만 구별하고 그 밖의 식에는 없음과 같다.
     const SyntaxTree& tree = compilation_.trees_[context.module];
-    const SyntaxNode& entry = tree.Node(node);
-    switch (entry.kind) {
+    switch (tree.Node(node).kind) {
+    case SyntaxKind::IntegerLiteral:
+    case SyntaxKind::FloatLiteral:
+    case SyntaxKind::BoolLiteral:
+    case SyntaxKind::NullLiteral:
+    case SyntaxKind::This:
+        return CheckLeaf(context, node);
+    case SyntaxKind::String:
+    case SyntaxKind::VerbatimString:
+        return CheckString(context, node);
+    case SyntaxKind::Identifier:
+        return CheckIdentifier(context, node);
+    case SyntaxKind::Member:
+        return CheckMember(context, node);
+    case SyntaxKind::Call:
+        return CheckCall(context, node, expected);
+    case SyntaxKind::Index:
+        return CheckIndex(context, node);
+    case SyntaxKind::Binary:
+        switch (tree.Tokens()[tree.Node(node).token].kind) {
+        case TokenKind::AmpersandAmpersand:
+        case TokenKind::PipePipe:
+            return CheckLogical(context, node);
+        case TokenKind::QuestionQuestion:
+            return CheckCoalesce(context, node, expected == UnresolvedType ? NoType : expected);
+        default:
+            return CheckBinary(context, node);
+        }
+    case SyntaxKind::Unary:
+        return CheckUnary(context, node, expected == UnresolvedType ? NoType : expected);
+    case SyntaxKind::CastTest:
+        return CheckCast(context, node);
+    case SyntaxKind::Try:
+    case SyntaxKind::Await:
+        return CheckAwaitTry(context, node);
+    case SyntaxKind::Parenthesized:
+        return CheckParenthesized(context, node, expected);
+    case SyntaxKind::CollectionLiteral:
+        return CheckCollection(context, node, expected);
+    default:
+        return ExpressionValue{};
+    }
+}
+
+ExpressionValue TypeChecker::CheckParenthesized(const CheckContext& context, uint32 node,
+                                                uint32 expected) noexcept {
+    const ExpressionValue value =
+        Check(context, compilation_.trees_[context.module].Child(node, 0), expected);
+    if (value.kind == ExpressionValue::Kind::Typed) {
+        Record(context, node, value.type);
+    }
+
+    return value;
+}
+
+ExpressionValue TypeChecker::CheckLeaf(const CheckContext& context, uint32 node) noexcept {
+    using K = ExpressionValue::Kind;
+    ExpressionValue result;
+    switch (compilation_.trees_[context.module].Node(node).kind) {
     case SyntaxKind::IntegerLiteral: {
         auto decoded = TryDecodeIntegerLiteral(TokenText(context.module, node));
         if (!decoded) {
@@ -346,8 +435,7 @@ ExpressionValue TypeChecker::Check(const CheckContext& context, uint32 node,
         return result;
     }
     case SyntaxKind::FloatLiteral: {
-        auto decoded =
-            TryDecodeFloatLiteral(allocator_, TokenText(context.module, node));
+        auto decoded = TryDecodeFloatLiteral(allocator_, TokenText(context.module, node));
         if (!decoded) {
             if (decoded.Error() == ErrorCode::OutOfMemory) {
                 binder_.error_ = decoded.Error();
@@ -371,12 +459,6 @@ ExpressionValue TypeChecker::Check(const CheckContext& context, uint32 node,
     case SyntaxKind::NullLiteral:
         result.kind = K::Null;
         return result;
-    case SyntaxKind::String:
-    case SyntaxKind::VerbatimString:
-        return CheckString(context, node);
-    case SyntaxKind::Identifier:
-        result = CheckIdentifier(context, node);
-        break;
     case SyntaxKind::This:
         if (context.thisType == NoType) {
             Report(context, DiagnosticCode::ThisMisuse, node,
@@ -388,48 +470,11 @@ ExpressionValue TypeChecker::Check(const CheckContext& context, uint32 node,
 
         result.kind = K::Typed;
         result.type = context.thisType;
-        break;
-    case SyntaxKind::Member:
-        result = CheckMember(context, node);
-        break;
-    case SyntaxKind::Call:
-        result = CheckCall(context, node, expected);
-        break;
-    case SyntaxKind::Index:
-        result = CheckIndex(context, node);
-        break;
-    case SyntaxKind::Binary:
-        result = CheckBinary(context, node, expected);
-        break;
-    case SyntaxKind::Unary:
-        result = CheckUnary(context, node, expected);
-        break;
-    case SyntaxKind::CastTest:
-        result = CheckCast(context, node);
-        break;
-    case SyntaxKind::Try:
-    case SyntaxKind::Await:
-        result = CheckAwaitTry(context, node);
-        break;
-    case SyntaxKind::Parenthesized:
-        result = Check(context, tree.Child(node, 0), expected);
-        if (result.kind == K::Typed) {
-            Record(context, node, result.type);
-        }
-
+        Record(context, node, result.type);
         return result;
-    case SyntaxKind::CollectionLiteral:
-        result = CheckCollection(context, node, expected);
-        break;
     default:
         return result;
     }
-
-    if (result.kind == K::Typed) {
-        Record(context, node, result.type);
-    }
-
-    return result;
 }
 
 ExpressionValue TypeChecker::CheckIdentifier(const CheckContext& context, uint32 node) noexcept {
@@ -438,7 +483,36 @@ ExpressionValue TypeChecker::CheckIdentifier(const CheckContext& context, uint32
         return ExpressionValue{};
     }
 
-    return ValueOfSymbol(context, symbol, context.thisType, true);
+    const ExpressionValue value = ValueOfSymbol(context, symbol, context.thisType, true);
+    if (value.kind != ExpressionValue::Kind::Function &&
+        value.kind != ExpressionValue::Kind::Error &&
+        RejectTypeArguments(context, compilation_.trees_[context.module].Child(node, 0),
+                            compilation_.symbols_[symbol].name)) {
+        return ExpressionValue{};
+    }
+
+    if (value.kind == ExpressionValue::Kind::Typed) {
+        Record(context, node, value.type);
+    }
+
+    return value;
+}
+
+bool TypeChecker::RejectTypeArguments(const CheckContext& context, uint32 typeArguments,
+                                      StringView name) noexcept {
+    if (typeArguments == NoNode) {
+        return false;
+    }
+
+    StringBuilder<CompilationMessageInlineBytes> message(allocator_);
+    message.AppendFormat("'{}' takes no type arguments.", name);
+    if (binder_.Succeeded(message)) {
+        Report(context, DiagnosticCode::TypeArgumentCount, typeArguments, message.View(),
+               "Only generic functions take type arguments in expressions.",
+               "Remove the type arguments.");
+    }
+
+    return true;
 }
 
 ExpressionValue TypeChecker::ValueOfSymbol(const CheckContext& context, uint32 symbol,
@@ -534,9 +608,8 @@ ExpressionValue TypeChecker::ValueOfSymbol(const CheckContext& context, uint32 s
             return result;
         }
 
-        result.kind = LanguageNames()[entry.index].kind == LanguageNameKind::Literal
-                          ? K::Literal
-                          : K::Namespace;
+        result.kind = LanguageNames()[entry.index].kind == LanguageNameKind::Literal ? K::Literal
+                                                                                     : K::Namespace;
         result.symbol = symbol;
         return result;
     case SymbolKind::Alias:
@@ -548,8 +621,156 @@ ExpressionValue TypeChecker::ValueOfSymbol(const CheckContext& context, uint32 s
     }
 }
 
-ExpressionValue TypeChecker::CheckBinary(const CheckContext& context, uint32 node,
-                                         uint32 expected) noexcept {
+ExpressionValue TypeChecker::CheckBinary(const CheckContext& context, uint32 node) noexcept {
+    // 왼쪽으로 깊은 연쇄(`a + b + c ...`)의 frame에는 두 값만 둔다(판정·기록은 CombineBinary).
+    const SyntaxTree& tree = compilation_.trees_[context.module];
+    const ExpressionValue left = Check(context, tree.Child(node, 0), NoType);
+    const ExpressionValue right =
+        Check(context, tree.Child(node, 1),
+              left.kind == ExpressionValue::Kind::Typed
+                  ? left.type
+                  : (left.kind == ExpressionValue::Kind::Error ? UnresolvedType : NoType));
+    return CombineBinary(context, node, left, right);
+}
+
+ExpressionValue TypeChecker::CheckLogical(const CheckContext& context, uint32 node) noexcept {
+    // 재귀 경로(`a && b && c ...`)의 frame에는 두 값만 둔다(CheckBinary 참고).
+    const SyntaxTree& tree = compilation_.trees_[context.module];
+    const ExpressionValue left = Check(context, tree.Child(node, 0), boolType_);
+    const ExpressionValue right = Check(context, tree.Child(node, 1), boolType_);
+    return CombineLogical(context, node, left, right);
+}
+
+ExpressionValue TypeChecker::CombineLogical(const CheckContext& context, uint32 node,
+                                            const ExpressionValue& left,
+                                            const ExpressionValue& right) noexcept {
+    // 판정이 끝난 값의 타입을 기록한다(재귀 경로 밖 — Check 참고).
+    const ExpressionValue value = CombineLogicalValue(context, node, left, right);
+    if (value.kind == ExpressionValue::Kind::Typed) {
+        Record(context, node, value.type);
+    }
+
+    return value;
+}
+
+ExpressionValue TypeChecker::CombineLogicalValue(const CheckContext& context, uint32 node,
+                                                 const ExpressionValue& left,
+                                                 const ExpressionValue& right) noexcept {
+    using K = ExpressionValue::Kind;
+    const SyntaxTree& tree = compilation_.trees_[context.module];
+    const StringView op = TokenText(context.module, node);
+    bool fine = true;
+    const ExpressionValue* values[] = {&left, &right};
+    for (uint32 side = 0; side < 2; ++side) {
+        const ExpressionValue& value = *values[side];
+        const uint32 sideNode = tree.Child(node, side);
+        if (value.kind == K::Error) {
+            fine = false;
+            continue;
+        }
+
+        if (!(value.kind == K::Typed && value.type == boolType_)) {
+            if (RequireValue(context, value, sideNode)) {
+                Report(context, DiagnosticCode::ConditionNotBool, sideNode,
+                       "The operand of '&&' and '||' must be 'bool'.",
+                       "Conditions are never made from other types silently.",
+                       "Compare it, as in 'x != null'.");
+            }
+
+            fine = false;
+        }
+    }
+
+    if (!fine) {
+        return ExpressionValue{};
+    }
+
+    ExpressionValue value;
+    value.kind = K::Typed;
+    value.type = boolType_;
+    static_cast<void>(FoldBinary(context, node, op, left, right, boolType_, value));
+    return value;
+}
+
+ExpressionValue TypeChecker::CheckCoalesce(const CheckContext& context, uint32 node,
+                                           uint32 expected) noexcept {
+    // 판정이 끝난 값의 타입을 기록한다(재귀 경로 밖 — Check 참고).
+    const ExpressionValue value = CheckCoalesceValue(context, node, expected);
+    if (value.kind == ExpressionValue::Kind::Typed) {
+        Record(context, node, value.type);
+    }
+
+    return value;
+}
+
+ExpressionValue TypeChecker::CheckCoalesceValue(const CheckContext& context, uint32 node,
+                                                uint32 expected) noexcept {
+    using K = ExpressionValue::Kind;
+    const SyntaxTree& tree = compilation_.trees_[context.module];
+    const uint32 leftNode = tree.Child(node, 0);
+    const uint32 rightNode = tree.Child(node, 1);
+    ExpressionValue result;
+    auto typed = [&](uint32 type) noexcept {
+        ExpressionValue value;
+        value.kind = type == NoType ? K::Error : K::Typed;
+        value.type = type;
+        return value;
+    };
+
+    const ExpressionValue left = Check(context, leftNode, MakeOptional(expected));
+    if (left.kind == K::Error) {
+        static_cast<void>(Check(context, rightNode, UnresolvedType));
+        return result;
+    }
+
+    if (left.kind != K::Typed || !IsOptional(left.type)) {
+        if (RequireValue(context, left, leftNode)) {
+            Report(context, DiagnosticCode::NotOptional, leftNode,
+                   "The left side of '?"
+                   "?' must have a type with '?'.",
+                   "'?"
+                   "?' chooses the right side when the left side is null.",
+                   "Remove '?? ...'.");
+        }
+
+        static_cast<void>(Check(context, rightNode, UnresolvedType));
+        return result;
+    }
+
+    const uint32 inner = NonOptional(left.type);
+    const ExpressionValue right = Check(context, rightNode, inner);
+    if (right.kind == K::Null) {
+        Record(context, rightNode, left.type); // `x ?? null`은 `T?`다
+        return typed(left.type);
+    }
+
+    if (right.kind == K::Typed && IsOptional(right.type)) {
+        if (!IsAssignable(right.type, left.type)) {
+            ReportMismatch(context, rightNode, right.type, left.type);
+            return result;
+        }
+
+        return typed(left.type);
+    }
+
+    return typed(Coerce(context, right, inner, rightNode) == NoType ? NoType : inner);
+}
+
+ExpressionValue TypeChecker::CombineBinary(const CheckContext& context, uint32 node,
+                                           const ExpressionValue& left,
+                                           const ExpressionValue& right) noexcept {
+    // 판정이 끝난 값의 타입을 기록한다(재귀 경로 밖 — Check 참고).
+    const ExpressionValue value = CombineBinaryValue(context, node, left, right);
+    if (value.kind == ExpressionValue::Kind::Typed) {
+        Record(context, node, value.type);
+    }
+
+    return value;
+}
+
+ExpressionValue TypeChecker::CombineBinaryValue(const CheckContext& context, uint32 node,
+                                                const ExpressionValue& left,
+                                                const ExpressionValue& right) noexcept {
     using K = ExpressionValue::Kind;
     const SyntaxTree& tree = compilation_.trees_[context.module];
     const StringView op = TokenText(context.module, node);
@@ -563,73 +784,26 @@ ExpressionValue TypeChecker::CheckBinary(const CheckContext& context, uint32 nod
         return value;
     };
 
-    if (op == "&&" || op == "||") {
-        bool fine = true;
-        const uint32 sides[] = {leftNode, rightNode};
-        for (const uint32 side : sides) {
-            const ExpressionValue value = Check(context, side, boolType_);
-            if (value.kind == K::Error) {
-                fine = false;
-                continue;
-            }
-
-            if (!(value.kind == K::Typed && value.type == boolType_)) {
-                if (RequireValue(context, value, side)) {
-                    Report(context, DiagnosticCode::ConditionNotBool, side,
-                           "The operand of '&&' and '||' must be 'bool'.",
-                           "Conditions are never made from other types silently.",
-                           "Compare it, as in 'x != null'.");
-                }
-
-                fine = false;
-            }
-        }
-
-        return fine ? typed(boolType_) : result;
-    }
-
-    if (op == "??") {
-        const ExpressionValue left = Check(context, leftNode, MakeOptional(expected));
-        if (left.kind == K::Error) {
-            static_cast<void>(Check(context, rightNode, NoType));
-            return result;
-        }
-
-        if (left.kind != K::Typed || !IsOptional(left.type)) {
-            if (RequireValue(context, left, leftNode)) {
-                Report(context, DiagnosticCode::NotOptional, leftNode,
-                       "The left side of '?" "?' must have a type with '?'.",
-                       "'?" "?' chooses the right side when the left side is null.",
-                       "Remove '?? ...'.");
-            }
-
-            static_cast<void>(Check(context, rightNode, NoType));
-            return result;
-        }
-
-        const uint32 inner = NonOptional(left.type);
-        const ExpressionValue right = Check(context, rightNode, inner);
-        if (right.kind == K::Typed && IsOptional(right.type)) {
-            if (!IsAssignable(right.type, left.type)) {
-                ReportMismatch(context, rightNode, right.type, left.type);
-                return result;
-            }
-
-            return typed(left.type);
-        }
-
-        return typed(Coerce(context, right, inner, rightNode) == NoType ? NoType : inner);
-    }
-
-    // 나머지는 두 피연산자의 타입을 맞춘다(한쪽이 상수·null이면 다른 쪽 타입으로).
-    ExpressionValue left = Check(context, leftNode, NoType);
-    const uint32 leftHint = left.kind == K::Typed ? left.type : NoType;
-    ExpressionValue right = Check(context, rightNode, leftHint);
+    // 두 피연산자의 타입을 맞춘다(한쪽이 상수·null이면 다른 쪽 타입으로).
     if (left.kind == K::Error || right.kind == K::Error) {
         return result;
     }
 
     if (!RequireValue(context, left, leftNode) || !RequireValue(context, right, rightNode)) {
+        return result;
+    }
+
+    // `null`과의 비교: 다른 쪽이 `T?` 값이어야 한다(3.10절 "선택 타입 연산", S0407).
+    if ((op == "==" || op == "!=") && (left.kind == K::Null || right.kind == K::Null)) {
+        const ExpressionValue& other = left.kind == K::Null ? right : left;
+        if (other.kind == K::Typed && IsOptional(other.type)) {
+            Record(context, left.kind == K::Null ? leftNode : rightNode, other.type);
+            return typed(boolType_);
+        }
+
+        Report(context, DiagnosticCode::NotComparable, node,
+               "Only a value whose type has '?' can be compared with 'null'.",
+               "A value of a type without '?' is never null.", "Remove the comparison.");
         return result;
     }
 
@@ -648,8 +822,8 @@ ExpressionValue TypeChecker::CheckBinary(const CheckContext& context, uint32 nod
         }
 
         if (op == "%" && !integer) {
-            Report(context, DiagnosticCode::InvalidOperator, node,
-                   "'%' is only for integers.", "", "Use integers.");
+            Report(context, DiagnosticCode::InvalidOperator, node, "'%' is only for integers.", "",
+                   "Use integers.");
             return result;
         }
 
@@ -659,8 +833,8 @@ ExpressionValue TypeChecker::CheckBinary(const CheckContext& context, uint32 nod
             folded.constant = left.constant;
             bool fine = true;
             if (op == "+") {
-                fine = AddConstant(folded.constant, right.constant.negative,
-                                   right.constant.magnitude);
+                fine =
+                    AddConstant(folded.constant, right.constant.negative, right.constant.magnitude);
             } else if (op == "-") {
                 fine = AddConstant(folded.constant,
                                    !right.constant.negative && right.constant.magnitude != 0,
@@ -669,9 +843,7 @@ ExpressionValue TypeChecker::CheckBinary(const CheckContext& context, uint32 nod
                 fine = MultiplyConstant(folded.constant, right.constant.negative,
                                         right.constant.magnitude);
             } else {
-                if (right.constant.magnitude == 0) {
-                    Report(context, DiagnosticCode::ConstantDivisionByZero, node,
-                           "The constant is divided by zero.", "", "Use a value other than 0.");
+                if (ReportZeroDivisor(context, right, rightNode)) {
                     return result;
                 }
 
@@ -706,40 +878,45 @@ ExpressionValue TypeChecker::CheckBinary(const CheckContext& context, uint32 nod
         return folded;
     }
 
-    // 한쪽만 상수·null이면 다른 쪽 타입으로 맞춘다.
+    // 한쪽만 상수·null이면 다른 쪽 타입으로 맞춘다. 다른 쪽이 숫자·벡터가 아니면 상수는 맞추지 않고
+    // 기본 타입(int·float)으로 보아 연산자 규칙으로 판정한다(3.10절 "연산자"). `T?` 숫자에는 `T`로
+    // 맞춘다(산술은 S0406, `==`는 `T?`와 `T`).
+    auto untyped = [](const ExpressionValue& value) noexcept {
+        return value.kind == K::UntypedInt || value.kind == K::UntypedFloat;
+    };
+    auto placeFor = [&](uint32 typedSide) noexcept {
+        const uint32 bare = NonOptional(typedSide);
+        return IsVector(bare) ? floatType_ : bare;
+    };
+    auto adapts = [&](uint32 typedSide) noexcept {
+        const uint32 bare = NonOptional(typedSide);
+        return Numeric(bare).kind != NumericKind::None || IsVector(bare);
+    };
     uint32 leftType = NoType;
     uint32 rightType = NoType;
     if (left.kind == K::Typed) {
         leftType = left.type;
         rightType = right.kind == K::Typed ? right.type
-                    : (op == "==" || op == "!=") && right.kind == K::Null
-                        ? (IsOptional(leftType) ? leftType : NoType)
-                        : Coerce(context, right, IsVector(leftType) ? floatType_ : leftType,
-                                 rightNode);
+                    : untyped(right) && !adapts(leftType)
+                        ? Materialize(context, right, rightNode)
+                        : Coerce(context, right, placeFor(leftType), rightNode);
     } else if (right.kind == K::Typed) {
         rightType = right.type;
-        leftType = (op == "==" || op == "!=") && left.kind == K::Null
-                       ? (IsOptional(rightType) ? rightType : NoType)
-                       : Coerce(context, left, IsVector(rightType) ? floatType_ : rightType,
-                                leftNode);
+        leftType = untyped(left) && !adapts(rightType)
+                       ? Materialize(context, left, leftNode)
+                       : Coerce(context, left, placeFor(rightType), leftNode);
+    } else if (untyped(left) && untyped(right)) {
+        // 상수끼리의 비교: 둘 다 정수면 int, 하나라도 실수면 float로 비교한다.
+        const uint32 common =
+            left.kind == K::UntypedFloat || right.kind == K::UntypedFloat ? floatType_ : intType_;
+        leftType = Coerce(context, left, common, leftNode);
+        rightType = Coerce(context, right, common, rightNode);
     } else {
         leftType = Materialize(context, left, leftNode);
         rightType = Materialize(context, right, rightNode);
     }
 
-    const bool nullComparison = (left.kind == K::Null || right.kind == K::Null);
     if (op == "==" || op == "!=") {
-        if (nullComparison) {
-            if (leftType == NoType && rightType == NoType) {
-                Report(context, DiagnosticCode::NotComparable, node,
-                       "Only a value whose type has '?' can be compared with 'null'.",
-                       "A value of a type without '?' is never null.", "Remove the comparison.");
-                return result;
-            }
-
-            return typed(boolType_);
-        }
-
         if (leftType == NoType || rightType == NoType) {
             return result;
         }
@@ -748,9 +925,12 @@ ExpressionValue TypeChecker::CheckBinary(const CheckContext& context, uint32 nod
         if (!related || !IsEquatable(NonOptional(leftType))) {
             StringBuilder<CompilationMessageInlineBytes> message(allocator_);
             message.Append("Values of type '");
-            static_cast<void>(compilation_.AppendTypeText(message, leftType));
-            message.Append("' and '");
-            static_cast<void>(compilation_.AppendTypeText(message, rightType));
+            AppendDisplayType(message, leftType);
+            if (rightType != leftType) {
+                message.Append("' and '");
+                AppendDisplayType(message, rightType);
+            }
+
             message.Append("' cannot be compared with '").Append(op).Append("'.");
             if (binder_.Succeeded(message)) {
                 Report(context,
@@ -767,7 +947,12 @@ ExpressionValue TypeChecker::CheckBinary(const CheckContext& context, uint32 nod
             return result;
         }
 
-        return typed(boolType_);
+        ExpressionValue value = typed(boolType_);
+        if (!FoldBinary(context, node, op, left, right, NonOptional(leftType), value)) {
+            return result;
+        }
+
+        return value;
     }
 
     if (leftType == NoType || rightType == NoType) {
@@ -780,9 +965,9 @@ ExpressionValue TypeChecker::CheckBinary(const CheckContext& context, uint32 nod
         leftType != rightType) {
         StringBuilder<CompilationMessageInlineBytes> message(allocator_);
         message.Append("'").Append(op).Append("' mixes '");
-        static_cast<void>(compilation_.AppendTypeText(message, leftType));
+        AppendDisplayType(message, leftType);
         message.Append("' and '");
-        static_cast<void>(compilation_.AppendTypeText(message, rightType));
+        AppendDisplayType(message, rightType);
         message.Append("'.");
         if (binder_.Succeeded(message)) {
             Report(context, DiagnosticCode::MixedNumericTypes, node, message.View(),
@@ -795,7 +980,12 @@ ExpressionValue TypeChecker::CheckBinary(const CheckContext& context, uint32 nod
 
     if (op == "<" || op == "<=" || op == ">" || op == ">=") {
         if (leftType == rightType && IsOrdered(leftType)) {
-            return typed(boolType_);
+            ExpressionValue value = typed(boolType_);
+            if (!FoldBinary(context, node, op, left, right, leftType, value)) {
+                return result;
+            }
+
+            return value;
         }
     } else if (leftNumeric.kind != NumericKind::None && leftType == rightType) {
         if (op == "/" && leftNumeric.kind != NumericKind::Float) {
@@ -807,12 +997,21 @@ ExpressionValue TypeChecker::CheckBinary(const CheckContext& context, uint32 nod
         }
 
         if (op == "%" && leftNumeric.kind == NumericKind::Float) {
-            Report(context, DiagnosticCode::InvalidOperator, node, "'%' is only for integers.",
-                   "", "Use integers.");
+            Report(context, DiagnosticCode::InvalidOperator, node, "'%' is only for integers.", "",
+                   "Use integers.");
             return result;
         }
 
-        return typed(leftType);
+        if (op == "%" && ReportZeroDivisor(context, right, rightNode)) {
+            return result;
+        }
+
+        ExpressionValue value = typed(leftType);
+        if (!FoldBinary(context, node, op, left, right, leftType, value)) {
+            return result;
+        }
+
+        return value;
     } else if ((op == "+" || op == "-") && IsVector(leftType) && leftType == rightType) {
         return typed(leftType);
     } else if (op == "*" && IsVector(leftType) && rightType == floatType_) {
@@ -828,18 +1027,21 @@ ExpressionValue TypeChecker::CheckBinary(const CheckContext& context, uint32 nod
     }
 
     const bool strings = op == "+" && IsLanguage(leftType, "string");
+    const bool optional = IsOptional(leftType) || IsOptional(rightType);
     StringBuilder<CompilationMessageInlineBytes> message(allocator_);
     message.Append("'").Append(op).Append("' is not defined for '");
-    static_cast<void>(compilation_.AppendTypeText(message, leftType));
+    AppendDisplayType(message, leftType);
     message.Append("' and '");
-    static_cast<void>(compilation_.AppendTypeText(message, rightType));
+    AppendDisplayType(message, rightType);
     message.Append("'.");
     if (binder_.Succeeded(message)) {
         Report(context, DiagnosticCode::InvalidOperator, node, message.View(),
-               strings ? StringView("Strings are joined with interpolation, not '+'.")
-                       : StringView(""),
-               strings ? StringView("Write \"${a}${b}\".")
-                       : StringView("Use operands of a type that has the operator."));
+               strings    ? StringView("Strings are joined with interpolation, not '+'.")
+               : optional ? StringView("A value whose type has '?' may be null.")
+                          : StringView(""),
+               strings    ? StringView("Write \"${a}${b}\".")
+               : optional ? StringView("Use '?? value' or 'if (let x = ...)' first.")
+                          : StringView("Use operands of a type that has the operator."));
     }
 
     return result;
@@ -847,6 +1049,17 @@ ExpressionValue TypeChecker::CheckBinary(const CheckContext& context, uint32 nod
 
 ExpressionValue TypeChecker::CheckUnary(const CheckContext& context, uint32 node,
                                         uint32 expected) noexcept {
+    // 판정이 끝난 값의 타입을 기록한다(재귀 경로 밖 — Check 참고).
+    const ExpressionValue value = CheckUnaryValue(context, node, expected);
+    if (value.kind == ExpressionValue::Kind::Typed) {
+        Record(context, node, value.type);
+    }
+
+    return value;
+}
+
+ExpressionValue TypeChecker::CheckUnaryValue(const CheckContext& context, uint32 node,
+                                             uint32 expected) noexcept {
     using K = ExpressionValue::Kind;
     const SyntaxTree& tree = compilation_.trees_[context.module];
     const StringView op = TokenText(context.module, node);
@@ -871,6 +1084,13 @@ ExpressionValue TypeChecker::CheckUnary(const CheckContext& context, uint32 node
 
         result.kind = K::Typed;
         result.type = boolType_;
+        if (operand.constant.kind == ConstantValue::Kind::Bool) {
+            result.constant = operand.constant;
+            result.constant.boolean = !operand.constant.boolean;
+        } else if (operand.constant.kind == ConstantValue::Kind::Invalid) {
+            result.constant.kind = ConstantValue::Kind::Invalid;
+        }
+
         return result;
     }
 
@@ -910,7 +1130,7 @@ ExpressionValue TypeChecker::CheckUnary(const CheckContext& context, uint32 node
     if (numeric.kind == NumericKind::None && !IsVector(type)) {
         StringBuilder<CompilationMessageInlineBytes> message(allocator_);
         message.Append("Unary '-' is not defined for '");
-        static_cast<void>(compilation_.AppendTypeText(message, type));
+        AppendDisplayType(message, type);
         message.Append("'.");
         if (binder_.Succeeded(message)) {
             Report(context, DiagnosticCode::InvalidOperator, node, message.View(), "",
@@ -922,16 +1142,58 @@ ExpressionValue TypeChecker::CheckUnary(const CheckContext& context, uint32 node
 
     result.kind = K::Typed;
     result.type = type;
+    // 정해진 상수의 부호 바꾸기(3.10절 "정해진 상수 접기").
+    if (operand.constant.kind == ConstantValue::Kind::Invalid) {
+        result.constant.kind = ConstantValue::Kind::Invalid;
+    } else if (operand.constant.kind == ConstantValue::Kind::Float) {
+        result.constant = operand.constant;
+        result.constant.real = -operand.constant.real;
+    } else if (operand.constant.kind == ConstantValue::Kind::Integer) {
+        result.constant = operand.constant;
+        result.constant.negative = !operand.constant.negative && operand.constant.magnitude != 0;
+        if (!ConstantFits(result.constant, true, type)) {
+            StringBuilder<CompilationMessageInlineBytes> message(allocator_);
+            message.Append("The constant expression overflows '");
+            AppendDisplayType(message, type);
+            message.Append("'.");
+            if (binder_.Succeeded(message)) {
+                Report(context, DiagnosticCode::ConstantOverflow, node, message.View(),
+                       "A constant expression of a typed constant must fit in its type.",
+                       "Use a value in range or a wider type.");
+            }
+
+            return ExpressionValue{};
+        }
+    }
+
     return result;
 }
 
 ExpressionValue TypeChecker::CheckIndex(const CheckContext& context, uint32 node) noexcept {
+    // 재귀 경로의 frame에는 받는 값만 둔다(`a[0][0]...` 연쇄 — CheckBinary와 같은 이유).
+    const ExpressionValue object =
+        Check(context, compilation_.trees_[context.module].Child(node, 0), NoType);
+    return IndexValue(context, node, object);
+}
+
+ExpressionValue TypeChecker::IndexValue(const CheckContext& context, uint32 node,
+                                        const ExpressionValue& object) noexcept {
+    // 판정이 끝난 값의 타입을 기록한다(재귀 경로 밖 — Check 참고).
+    const ExpressionValue value = JudgeIndex(context, node, object);
+    if (value.kind == ExpressionValue::Kind::Typed) {
+        Record(context, node, value.type);
+    }
+
+    return value;
+}
+
+ExpressionValue TypeChecker::JudgeIndex(const CheckContext& context, uint32 node,
+                                        const ExpressionValue& object) noexcept {
     using K = ExpressionValue::Kind;
     const SyntaxTree& tree = compilation_.trees_[context.module];
     ExpressionValue result;
-    const ExpressionValue object = Check(context, tree.Child(node, 0), NoType);
     if (object.kind == K::Error || !RequireValue(context, object, tree.Child(node, 0))) {
-        static_cast<void>(Check(context, tree.Child(node, 1), NoType));
+        static_cast<void>(Check(context, tree.Child(node, 1), UnresolvedType));
         return result;
     }
 
@@ -941,7 +1203,7 @@ ExpressionValue TypeChecker::CheckIndex(const CheckContext& context, uint32 node
                "The value may be null, so it cannot be indexed.",
                "A value whose type has '?' must be checked first.",
                "Use 'if (let x = value) { ... }'.");
-        static_cast<void>(Check(context, tree.Child(node, 1), NoType));
+        static_cast<void>(Check(context, tree.Child(node, 1), UnresolvedType));
         return result;
     }
 
@@ -956,14 +1218,14 @@ ExpressionValue TypeChecker::CheckIndex(const CheckContext& context, uint32 node
     } else {
         StringBuilder<CompilationMessageInlineBytes> message(allocator_);
         message.Append("A value of type '");
-        static_cast<void>(compilation_.AppendTypeText(message, type));
+        AppendDisplayType(message, type);
         message.Append("' cannot be indexed.");
         if (binder_.Succeeded(message)) {
             Report(context, DiagnosticCode::InvalidOperator, node, message.View(),
                    "Only arrays and maps are indexed.", "Use an array or a map.");
         }
 
-        static_cast<void>(Check(context, tree.Child(node, 1), NoType));
+        static_cast<void>(Check(context, tree.Child(node, 1), UnresolvedType));
         return result;
     }
 
@@ -984,6 +1246,7 @@ ExpressionValue TypeChecker::CheckString(const CheckContext& context, uint32 nod
     result.kind = K::Typed;
     result.type = stringType_;
     bool interpolated = false;
+    bool failed = false;
     if (tree.Node(node).kind == SyntaxKind::String) {
         for (const uint32 part : tree.Children(node)) {
             if (tree.Node(part).kind != SyntaxKind::Interpolation) {
@@ -994,14 +1257,17 @@ ExpressionValue TypeChecker::CheckString(const CheckContext& context, uint32 nod
             const uint32 inner = tree.Child(part, 0);
             const ExpressionValue value = Check(context, inner, NoType);
             if (value.kind == K::Error || !RequireValue(context, value, inner)) {
+                failed = true;
                 continue;
             }
 
             const uint32 type = Materialize(context, value, inner);
+            failed = failed || type == NoType;
             if (type != NoType && !IsInterpolatable(type)) {
+                failed = true;
                 StringBuilder<CompilationMessageInlineBytes> message(allocator_);
                 message.Append("A value of type '");
-                static_cast<void>(compilation_.AppendTypeText(message, type));
+                AppendDisplayType(message, type);
                 message.Append("' cannot be interpolated.");
                 if (binder_.Succeeded(message)) {
                     Report(context, DiagnosticCode::InterpolationType, inner, message.View(),
@@ -1012,6 +1278,11 @@ ExpressionValue TypeChecker::CheckString(const CheckContext& context, uint32 nod
                 }
             }
         }
+    }
+
+    // 보간 식에 진단이 있으면 문자열도 해석하지 못한 것이다(연쇄 방지).
+    if (failed) {
+        return ExpressionValue{};
     }
 
     if (!interpolated) {
@@ -1027,11 +1298,29 @@ ExpressionValue TypeChecker::CheckString(const CheckContext& context, uint32 nod
 }
 
 ExpressionValue TypeChecker::CheckCast(const CheckContext& context, uint32 node) noexcept {
+    // 재귀 경로의 frame에는 피연산자만 둔다(Check 참고).
+    const ExpressionValue operand =
+        Check(context, compilation_.trees_[context.module].Child(node, 0), NoType);
+    return CastOf(context, node, operand);
+}
+
+ExpressionValue TypeChecker::CastOf(const CheckContext& context, uint32 node,
+                                    const ExpressionValue& operand) noexcept {
+    // 판정이 끝난 값의 타입을 기록한다(재귀 경로 밖 — Check 참고).
+    const ExpressionValue value = CastOfValue(context, node, operand);
+    if (value.kind == ExpressionValue::Kind::Typed) {
+        Record(context, node, value.type);
+    }
+
+    return value;
+}
+
+ExpressionValue TypeChecker::CastOfValue(const CheckContext& context, uint32 node,
+                                         const ExpressionValue& operand) noexcept {
     using K = ExpressionValue::Kind;
     const SyntaxTree& tree = compilation_.trees_[context.module];
     ExpressionValue result;
     const uint32 operandNode = tree.Child(node, 0);
-    const ExpressionValue operand = Check(context, operandNode, NoType);
     const uint32 target = compilation_.NodeType(context.module, tree.Child(node, 1));
     if (operand.kind == K::Error || target == NoType ||
         !RequireValue(context, operand, operandNode)) {
@@ -1082,6 +1371,16 @@ ExpressionValue TypeChecker::CheckCast(const CheckContext& context, uint32 node)
 }
 
 ExpressionValue TypeChecker::CheckAwaitTry(const CheckContext& context, uint32 node) noexcept {
+    // 판정이 끝난 값의 타입을 기록한다(재귀 경로 밖 — Check 참고).
+    const ExpressionValue value = CheckAwaitTryValue(context, node);
+    if (value.kind == ExpressionValue::Kind::Typed) {
+        Record(context, node, value.type);
+    }
+
+    return value;
+}
+
+ExpressionValue TypeChecker::CheckAwaitTryValue(const CheckContext& context, uint32 node) noexcept {
     using K = ExpressionValue::Kind;
     const SyntaxTree& tree = compilation_.trees_[context.module];
     const SyntaxNode& entry = tree.Node(node);
@@ -1151,16 +1450,55 @@ ExpressionValue TypeChecker::CheckAwaitTry(const CheckContext& context, uint32 n
 
 ExpressionValue TypeChecker::CheckCollection(const CheckContext& context, uint32 node,
                                              uint32 expected) noexcept {
+    // 판정이 끝난 값의 타입을 기록한다(재귀 경로 밖 — Check 참고).
+    const ExpressionValue value = CheckCollectionValue(context, node, expected);
+    if (value.kind == ExpressionValue::Kind::Typed) {
+        Record(context, node, value.type);
+    }
+
+    return value;
+}
+
+ExpressionValue TypeChecker::CheckCollectionValue(const CheckContext& context, uint32 node,
+                                                  uint32 expected) noexcept {
     using K = ExpressionValue::Kind;
     const SyntaxTree& tree = compilation_.trees_[context.module];
     ExpressionValue result;
     const Span<const uint32> elements = tree.Children(node);
-    const bool entries =
-        !elements.IsEmpty() && tree.Node(elements[0]).kind == SyntaxKind::MapEntry;
+    const bool entries = !elements.IsEmpty() && tree.Node(elements[0]).kind == SyntaxKind::MapEntry;
+    // 안의 원소를 기대 타입 모름으로 검사한다(이름 검사만 — 연쇄 방지).
+    auto checkElements = [&]() noexcept {
+        for (const uint32 element : elements) {
+            if (tree.Node(element).kind == SyntaxKind::MapEntry) {
+                static_cast<void>(Check(context, tree.Child(element, 0), UnresolvedType));
+                static_cast<void>(Check(context, tree.Child(element, 1), UnresolvedType));
+            } else {
+                static_cast<void>(Check(context, element, UnresolvedType));
+            }
+        }
+    };
+    if (expected == UnresolvedType) {
+        checkElements();
+        return result;
+    }
+
     const uint32 target = NonOptional(expected);
     const bool isArray = IsLanguage(target, "Array");
     const bool isSet = IsLanguage(target, "Set");
     const bool isMap = IsLanguage(target, "Map");
+    if (expected != NoType && !isArray && !isSet && !isMap) {
+        StringBuilder<CompilationMessageInlineBytes> message(allocator_);
+        message.Append("A collection literal cannot be used as '");
+        AppendDisplayType(message, expected);
+        message.Append("'.");
+        if (binder_.Succeeded(message)) {
+            Report(context, DiagnosticCode::TypeMismatch, node, message.View(),
+                   "'[...]' makes an Array, a Set or a Map.", "Use a value of the expected type.");
+        }
+
+        checkElements();
+        return result;
+    }
     if (expected != NoType && (isArray || isSet || isMap)) {
         if (entries != isMap && !elements.IsEmpty()) {
             Report(context, DiagnosticCode::TypeMismatch, node,
@@ -1170,6 +1508,11 @@ ExpressionValue TypeChecker::CheckCollection(const CheckContext& context, uint32
             return result;
         }
 
+        bool failed = false;
+        auto checkElement = [&](uint32 at, uint32 type) noexcept {
+            const ExpressionValue value = Check(context, at, type);
+            return value.kind != K::Error && Coerce(context, value, type, at) != NoType;
+        };
         for (const uint32 element : elements) {
             if (isMap) {
                 if (tree.Node(element).kind != SyntaxKind::MapEntry) {
@@ -1178,14 +1521,16 @@ ExpressionValue TypeChecker::CheckCollection(const CheckContext& context, uint32
 
                 const uint32 keyNode = tree.Child(element, 0);
                 const uint32 valueNode = tree.Child(element, 1);
-                static_cast<void>(Coerce(context, Check(context, keyNode, Argument(target, 0)),
-                                         Argument(target, 0), keyNode));
-                static_cast<void>(Coerce(context, Check(context, valueNode, Argument(target, 1)),
-                                         Argument(target, 1), valueNode));
+                failed = !checkElement(keyNode, Argument(target, 0)) || failed;
+                failed = !checkElement(valueNode, Argument(target, 1)) || failed;
             } else {
-                static_cast<void>(Coerce(context, Check(context, element, Argument(target, 0)),
-                                         Argument(target, 0), element));
+                failed = !checkElement(element, Argument(target, 0)) || failed;
             }
+        }
+
+        // 원소에 진단이 있으면 리터럴도 해석하지 못한 것이다(연쇄 방지).
+        if (failed) {
+            return result;
         }
 
         result.kind = K::Typed;
@@ -1227,6 +1572,14 @@ ExpressionValue TypeChecker::CheckCollection(const CheckContext& context, uint32
             continue;
         }
 
+        if (value.kind == K::Null) {
+            Report(context, DiagnosticCode::NoExpectedType, element, "'null' needs a type here.",
+                   "Nothing tells which type the value has.",
+                   "Declare the array type; elements cannot be null (use 'Array<T>' without '?').");
+            failed = true;
+            continue;
+        }
+
         anyFloat = anyFloat || value.kind == K::UntypedFloat;
         anyInt = anyInt || value.kind == K::UntypedInt;
         if (value.kind == K::Typed) {
@@ -1251,8 +1604,20 @@ ExpressionValue TypeChecker::CheckCollection(const CheckContext& context, uint32
     }
 
     for (usize index = 0; index < elements.Size(); ++index) {
-        if (values[index].kind != K::Typed &&
-            Coerce(context, values[index], elementType, elements[index]) == NoType) {
+        if (values[index].kind == K::Typed) {
+            continue;
+        }
+
+        // 숫자가 아닌 원소 타입과 숫자 상수가 섞이면 원소 타입이 다른 것이다(S0418).
+        if (Numeric(elementType).kind == NumericKind::None) {
+            Report(context, DiagnosticCode::MixedCollectionTypes, elements[index],
+                   "The elements of the array literal have different types.",
+                   "Elements are not combined into a base type.",
+                   "Declare the array type, as in 'var items: Array<Actor> = [a, b];'.");
+            return result;
+        }
+
+        if (Coerce(context, values[index], elementType, elements[index]) == NoType) {
             return result;
         }
     }
@@ -1269,6 +1634,151 @@ ExpressionValue TypeChecker::CheckCollection(const CheckContext& context, uint32
     result.kind = K::Typed;
     result.type = binder_.InternType(arraySymbol, Span<const uint32>(&elementType, 1), false);
     return result;
+}
+
+bool TypeChecker::FoldBinary(const CheckContext& context, uint32 node, StringView op,
+                             const ExpressionValue& left, const ExpressionValue& right,
+                             uint32 operandType, ExpressionValue& result) noexcept {
+    using CK = ConstantValue::Kind;
+    const ConstantValue& a = left.constant;
+    const ConstantValue& b = right.constant;
+    if (a.kind == CK::Invalid || b.kind == CK::Invalid) {
+        result.constant.kind = CK::Invalid; // 앞선 진단의 상수 — 값 없이 더 알리지 않는다
+        return true;
+    }
+
+    if (a.kind == CK::None || b.kind == CK::None) {
+        return true;
+    }
+
+    auto setBool = [&](bool value) noexcept {
+        result.constant = ConstantValue{};
+        result.constant.kind = CK::Bool;
+        result.constant.boolean = value;
+    };
+    const bool equality = op == "==" || op == "!=";
+    const bool ordering = op == "<" || op == "<=" || op == ">" || op == ">=";
+    auto fromOrder = [&](int order) noexcept {
+        if (op == "==") {
+            return order == 0;
+        }
+
+        if (op == "!=") {
+            return order != 0;
+        }
+
+        if (op == "<") {
+            return order < 0;
+        }
+
+        if (op == "<=") {
+            return order <= 0;
+        }
+
+        return op == ">" ? order > 0 : order >= 0;
+    };
+    if (a.kind == CK::Bool && b.kind == CK::Bool) {
+        if (op == "&&") {
+            setBool(a.boolean && b.boolean);
+        } else if (op == "||") {
+            setBool(a.boolean || b.boolean);
+        } else if (equality) {
+            setBool(fromOrder(a.boolean == b.boolean ? 0 : 1));
+        }
+
+        return true;
+    }
+
+    if (a.kind == CK::Enum && b.kind == CK::Enum) {
+        if (equality) {
+            setBool(fromOrder(a.symbol == b.symbol ? 0 : 1));
+        }
+
+        return true; // enum 순서 비교는 선언 순서 — 접지 않는다
+    }
+
+    const NumericInfo numeric = Numeric(operandType);
+    if (numeric.kind == NumericKind::None || a.kind == CK::String || b.kind == CK::String) {
+        return true; // 문자열·그 밖의 타입은 접지 않는다
+    }
+
+    if (numeric.kind == NumericKind::Float) {
+        const double x = ToReal(a);
+        const double y = ToReal(b);
+        if (equality || ordering) {
+            setBool(fromOrder(x < y ? -1 : (x > y ? 1 : 0)));
+            return true;
+        }
+
+        double value = op == "+" ? x + y : op == "-" ? x - y : op == "*" ? x * y : x / y;
+        // float32는 최근접 짝수로 반올림하며 반올림이 무한대가 되는 값은 유한하지 않다.
+        const bool finite =
+            IsFinite(value) &&
+            (numeric.bits == 64 || (value < Float32RoundingLimit && value > -Float32RoundingLimit));
+        if (finite && numeric.bits == 32) {
+            value = static_cast<double>(static_cast<float>(value));
+        }
+
+        if (!finite) {
+            Report(context, DiagnosticCode::NonFiniteConstant, node,
+                   "The constant expression is not a finite number.",
+                   "Constant arithmetic that makes NaN or infinity is an error.",
+                   "Change the values.");
+            return false;
+        }
+
+        result.constant = ConstantValue{};
+        result.constant.kind = CK::Float;
+        result.constant.real = value;
+        return true;
+    }
+
+    if (a.kind != CK::Integer || b.kind != CK::Integer) {
+        return true;
+    }
+
+    if (equality || ordering) {
+        int order = 0;
+        if (a.negative != b.negative) {
+            order = a.negative ? -1 : 1;
+        } else if (a.magnitude != b.magnitude) {
+            order = (a.magnitude < b.magnitude) != a.negative ? -1 : 1;
+        }
+
+        setBool(fromOrder(order));
+        return true;
+    }
+
+    ConstantValue value = a;
+    bool fine = true;
+    if (op == "+") {
+        fine = AddConstant(value, b.negative, b.magnitude);
+    } else if (op == "-") {
+        fine = AddConstant(value, !b.negative && b.magnitude != 0, b.magnitude);
+    } else if (op == "*") {
+        fine = MultiplyConstant(value, b.negative, b.magnitude);
+    } else if (op == "%") {
+        value = RemainderConstant(a, b); // 0은 부르는 쪽이 막았다(S0504)
+    } else {
+        return true;
+    }
+
+    if (!fine || !ConstantFits(value, true, operandType)) {
+        StringBuilder<CompilationMessageInlineBytes> message(allocator_);
+        message.Append("The constant expression overflows '");
+        AppendDisplayType(message, operandType);
+        message.Append("'.");
+        if (binder_.Succeeded(message)) {
+            Report(context, DiagnosticCode::ConstantOverflow, node, message.View(),
+                   "A constant expression of a typed constant must fit in its type.",
+                   "Use a value in range or a wider type.");
+        }
+
+        return false;
+    }
+
+    result.constant = value;
+    return true;
 }
 
 } // namespace rocks::sparks::detail

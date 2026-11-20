@@ -1,0 +1,78 @@
+enum DoorState { Closed, Opening, Open }
+
+const MaxStack: int = 99;
+const Ratio: float = 0.5;
+const Small: uint8 = 255;
+
+struct HitInfo {
+    var Point: vec3;
+    var Damage: int = 1;
+
+    fn Scaled(factor: int): int {
+        return Damage * factor;
+    }
+}
+
+fn Twice(value: int): int {
+    return value * 2;
+}
+
+fn Describe(state: DoorState): string {
+    switch (state) {
+        case DoorState.Closed: { return "closed"; }
+        case DoorState.Opening, DoorState.Open: { return "open"; }
+    }
+}
+
+fn Sum(items: Array<int>): int {
+    var total = 0;
+    for (item in items) {
+        total += item;
+    }
+
+    for (i, item in items) {
+        total = total + i * item;
+    }
+
+    return total;
+}
+
+class DoorLogic : ScriptComponent {
+    var OpenAngle: float = 90.0;
+    var State = DoorState.Closed;
+    var Swing = 0.0;
+    var Hits: Array<HitInfo> = [];
+    var Scores: Map<string, int> = ["Red": 0, "Blue": 0];
+    var Target: Actor?;
+    let Range = SphereCollider(Radius: 200.0);
+
+    event Opened(by: Actor?);
+
+    on Tick(dt: float) {
+        if (State != DoorState.Opening) { return; }
+        Swing = Math.Min(Swing + dt / 0.6, 1.0);
+        let yaw = OpenAngle * Math.EaseOut(Swing);
+        Range.RelativeRotation.Yaw = yaw;
+        let label = "HP ${Swing}/${MaxStack}";
+        _ = label;
+        let ratio = float(Hits.Count) / float(Twice(3));
+        _ = ratio;
+        let spot = Target?.Location ?? vec3(0.0, 0.0, 0.0);
+        _ = spot.Length();
+        if (let actor = Target) {
+            _ = actor.Find<ScriptComponent>();
+        }
+
+        let first = Hits[0];
+        _ = first?.Damage ?? 0;
+        let score = Scores["Red"] ?? 0;
+        _ = Math.Div(score, 2);
+        _ = Small;
+        _ = Ratio * 2.0;
+        emit Opened(Target);
+    }
+
+    fn Distance(other: Actor): float {
+        return other.Location.Distance(Owner.Location);
+    }
+}

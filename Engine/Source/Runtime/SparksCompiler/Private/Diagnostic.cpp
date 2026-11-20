@@ -95,6 +95,8 @@ constexpr DiagnosticCodeInfo CodeTable[] = {
     {DiagnosticCode::ThisMisuse, "this-misuse"},
     {DiagnosticCode::ValidatedLiteralForm, "validated-literal-form"},
     {DiagnosticCode::StaticInstanceMismatch, "static-instance-mismatch"},
+    {DiagnosticCode::RecursiveStruct, "recursive-struct"},
+    {DiagnosticCode::InitializerTooDeep, "initializer-too-deep"},
     {DiagnosticCode::IntegerDivision, "integer-division"},
     {DiagnosticCode::FloatToIntConversion, "float-to-int-conversion"},
     {DiagnosticCode::ConstantOverflow, "constant-overflow"},

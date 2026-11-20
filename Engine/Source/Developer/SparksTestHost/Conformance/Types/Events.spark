@@ -1,0 +1,26 @@
+class Door : ScriptComponent {
+    event Opened(by: Actor?, count: int);
+    event Closed();
+
+    fn Open(a: Actor) {
+        emit Opened(a, 1);
+        emit Opened(null, 2);
+        emit Closed();
+    }
+
+    fn Wrong(a: Actor) {
+        emit Opened(a);
+        emit Opened(1, 2);
+        emit Opened(a, "x");
+        emit Closed(1);
+        emit this.Opened(null, 3);
+        emit this.Opened(a, "x");
+    }
+
+    async fn Wait(a: Actor) {
+        await a.Destroyed;
+        await a.Damaged;
+        await Input.Jump.Started;
+        _ = a.Destroyed;
+    }
+}

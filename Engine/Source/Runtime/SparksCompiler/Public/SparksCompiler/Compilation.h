@@ -193,6 +193,17 @@ public:
     // 실패: 분석하지 않은 모듈(ModuleTree가 nullptr)은 InvalidArgument, 할당 실패는 그 오류.
     Result<void> AppendNameDump(StringBuilderBase& out, uint32 module) const noexcept;
 
+    // 모듈 하나의 식 타입 덤프를 붙인다(SD58, corpus `.types` golden, LC2c). 형식: 한 줄(LF로 끝)에
+    // 식 하나, 시작이 앞선 식 먼저(같으면 끝이 먼 바깥 식 먼저, 그래도 같으면 노드 번호 순):
+    //   <줄>:<열>-<줄>:<열> <노드 종류> <정규 타입>
+    // 범위는 `.ast`와 같은 노드 범위(끝은 마지막 글자 다음)다.
+    // 노드 종류는 SyntaxKindName, 타입은 AppendTypeText 표기다(기대 타입에 맞춘 뒤의 타입 — 상수는
+    // 그 자리의 타입). 상수로 접힌 식(`1 + 2`)은 바깥 식 하나만 적고 안쪽 상수 피연산자는 적지
+    // 않는다. 값이 아닌 식(타입 이름·이름공간·void·대기)과 오류 난 식도 적지 않는다. 결정적이다.
+    // 실패: 타입 검사를 하지 않은 모듈(단계가 Types보다 앞이거나 이름 해석 전에 멈춘 모듈)은
+    // InvalidArgument, 할당 실패는 그 오류.
+    Result<void> AppendTypeDump(StringBuilderBase& out, uint32 module) const noexcept;
+
 private:
     friend class detail::CompilationChecker;
     friend class detail::NameBinder;

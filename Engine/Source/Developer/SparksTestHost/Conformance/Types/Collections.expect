@@ -1,0 +1,20 @@
+# Collection literals (3.10): element literals by expected Array/Set/Map type, inference without one (int and float
+# constants make float, no base types), S0417 empty or map literal without a type, S0418 mixed types, S0401 elements.
+error S0418 19:18
+error S0418 20:21
+error S0417 21:17
+error S0417 22:15
+error S0401 23:37
+error S0401 24:39
+error S0401 25:46
+error S0401 26:35
+error S0401 27:41
+error S0401 28:30
+error S0109 29:39
+error S0401 30:21
+error S0109 31:25
+error S0401 32:26
+error S0417 33:18
+error S0509 34:26
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

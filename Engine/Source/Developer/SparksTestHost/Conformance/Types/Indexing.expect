@@ -1,0 +1,12 @@
+# Element access (appendix B): Array and Map reads give T? and writes take T, index types are int and the key type;
+# S0401 index and value types, S0406 non-indexable values, S0412 optional collections.
+error S0401 15:15
+error S0401 16:15
+error S0401 17:16
+error S0406 18:9
+error S0406 19:9
+error S0412 20:9
+error S0401 21:16
+error S0406 23:9
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

@@ -1,0 +1,47 @@
+# Operators of 3.10: numbers, vectors, composition, ordering, equality, null comparison, logic, '??' and
+# compound assignment; one error per expression.
+error S0507 61:9
+error S0507 62:9
+error S0406 63:9
+error S0406 64:9
+error S0506 65:9
+error S0406 66:9
+error S0406 67:9
+error S0406 68:9
+error S0406 69:9
+error S0406 70:9
+error S0406 71:9
+error S0406 72:9
+error S0406 73:9
+error S0406 74:9
+error S0407 75:9
+error S0407 76:9
+error S0407 77:9
+error S0407 78:9
+error S0407 79:9
+error S0407 80:9
+error S0408 81:10
+error S0408 82:9
+error S0408 83:17
+error S0414 84:9
+error S0401 85:16
+error S0406 86:9
+error S0406 87:9
+error S0401 88:16
+error S0406 89:9
+error S0406 90:9
+error S0407 91:9
+error S0406 92:9
+error S0406 93:9
+error S0407 94:9
+error S0406 96:5
+error S0501 98:5
+error S0504 99:13
+error S0507 101:5
+error S0406 103:5
+error S0406 105:5
+error S0406 106:5
+error S0406 108:5
+error S0406 110:5
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

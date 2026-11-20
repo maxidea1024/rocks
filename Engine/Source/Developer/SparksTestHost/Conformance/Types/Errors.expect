@@ -1,0 +1,30 @@
+# One error per rule in a single function body (each line is independent of the others).
+error S0509 6:18
+error S0109 7:20
+error S0109 8:20
+error S0501 9:13
+error S0401 11:20
+error S0507 12:13
+error S0406 13:13
+error S0406 14:13
+error S0506 16:13
+error S0502 17:13
+error S0508 18:21
+error S0417 19:13
+error S0417 20:13
+error S0418 21:14
+error S0404 22:22
+error S0404 23:26
+error S0326 24:17
+error S0403 25:13
+error S0326 26:13
+error S0425 28:13
+error S0412 30:13
+error S0407 31:13
+error S0408 32:9
+error S0415 33:13
+error S0409 36:1
+error S0409 45:1
+error S0410 48:12
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

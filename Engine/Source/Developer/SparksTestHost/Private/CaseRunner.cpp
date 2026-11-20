@@ -96,16 +96,22 @@ Result<void> CompareSyntaxTree(Allocator& allocator, const CaseInput& input,
     return report.TryAddFailure(message.View());
 }
 
-// 이름 해석 golden을 비교하고 다르면 실패 항목을 더한다. 파일 사례는 그 모듈의 덤프, 폴더 사례는
-// 이름 해석을 한 모듈마다 "== <경로>" 줄과 덤프를 경로 byte 순으로 이은 것이다(13.1절).
-Result<void> CompareNames(Allocator& allocator, const CaseInput& input, const SourceSet& sources,
-                          const Compilation& compilation, uint32 mainModule, CompilationStage stage,
-                          Report& report) noexcept {
+// 덤프 golden(`.names`·`.types`)을 비교하고 다르면 실패 항목을 더한다. 파일 사례는 그 모듈의 덤프,
+// 폴더 사례는 분석한 모듈마다 "== <경로>" 줄과 덤프를 경로 byte 순으로 이은 것이다(13.1절).
+Result<void> CompareDump(Allocator& allocator, const CaseInput& input, const SourceSet& sources,
+                         const Compilation& compilation, uint32 mainModule, CompilationStage stage,
+                         bool types, Report& report) noexcept {
     StringBuilder<detail::MessageInlineBytes> message(allocator);
     StringBuilder<detail::MessageInlineBytes> dump(allocator);
-    bool resolved = stage >= CompilationStage::Names;
+    const StringView expected = types ? input.types : input.names;
+    const StringView label = types ? StringView(".types") : StringView(".names");
+    auto append = [&](StringBuilderBase& out, uint32 module) noexcept {
+        return types ? compilation.AppendTypeDump(out, module)
+                     : compilation.AppendNameDump(out, module);
+    };
+    bool resolved = stage >= (types ? CompilationStage::Types : CompilationStage::Names);
     if (resolved && !input.folder) {
-        auto dumped = compilation.AppendNameDump(dump, mainModule);
+        auto dumped = append(dump, mainModule);
         if (!dumped && dumped.Error() != ErrorCode::InvalidArgument) {
             return dumped;
         }
@@ -126,7 +132,7 @@ Result<void> CompareNames(Allocator& allocator, const CaseInput& input, const So
         });
         for (const uint32 module : modules) {
             StringBuilder<detail::MessageInlineBytes> one(allocator);
-            auto dumped = compilation.AppendNameDump(one, module);
+            auto dumped = append(one, module);
             if (!dumped) {
                 if (dumped.Error() != ErrorCode::InvalidArgument) {
                     return dumped;
@@ -149,7 +155,8 @@ Result<void> CompareNames(Allocator& allocator, const CaseInput& input, const So
 
     if (!resolved) {
         if (auto formatted = message.TryAppendFormat(
-                "{}: has a .names file but the module was not name-resolved", input.name);
+                "{}: has a {} file but the module was not {}", input.name, label,
+                types ? StringView("type-checked") : StringView("name-resolved"));
             !formatted) {
             return formatted;
         }
@@ -157,15 +164,17 @@ Result<void> CompareNames(Allocator& allocator, const CaseInput& input, const So
         return report.TryAddFailure(message.View());
     }
 
-    if (dump.View() == input.names) {
+    if (dump.View() == expected) {
         return Result<void>::Success();
     }
 
-    const LineDifference difference = FindLineDifference(input.names, dump.View());
-    if (auto formatted = message.TryAppendFormat(
-            "{}: names differ from .names at line {}\n"
-            "  expected: {}\n  actual:   {}\n  actual names:\n",
-            input.name, difference.line, difference.expected, difference.actual);
+    const LineDifference difference = FindLineDifference(expected, dump.View());
+    if (auto formatted =
+            message.TryAppendFormat("{}: {} differ from {} at line {}\n"
+                                    "  expected: {}\n  actual:   {}\n  actual {}:\n",
+                                    input.name, types ? StringView("types") : StringView("names"),
+                                    label, difference.line, difference.expected, difference.actual,
+                                    types ? StringView("types") : StringView("names"));
         !formatted) {
         return formatted;
     }
@@ -377,8 +386,16 @@ Result<void> RunCase(Allocator& allocator, const CaseInput& input, Report& repor
     }
 
     if (input.hasNames) {
-        if (auto compared = CompareNames(allocator, input, sources, compilation, mainModule,
-                                         expectation.Stage(), report);
+        if (auto compared = CompareDump(allocator, input, sources, compilation, mainModule,
+                                        expectation.Stage(), false, report);
+            !compared) {
+            return compared;
+        }
+    }
+
+    if (input.hasTypes) {
+        if (auto compared = CompareDump(allocator, input, sources, compilation, mainModule,
+                                        expectation.Stage(), true, report);
             !compared) {
             return compared;
         }

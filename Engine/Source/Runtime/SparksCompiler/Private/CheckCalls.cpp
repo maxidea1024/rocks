@@ -1,3 +1,5 @@
+#include <Core/Text/EditDistance.h>
+
 #include "CompilationChecker.h"
 #include "LanguageNames.h"
 #include "TypeChecker.h"
@@ -6,6 +8,13 @@
 // 검증 리터럴(S0417·S0424)이다. 규칙: Docs/Design/SparksLanguage.ko.md 3.10절, 부록 B 시그니처.
 
 namespace rocks::sparks::detail {
+
+namespace {
+
+// 찾지 못한 멤버에 비슷한 이름을 제시하는 편집 거리 상한이다(이름 해석과 같은 값).
+constexpr usize MaxMemberSuggestionDistance = 2;
+
+} // namespace
 
 namespace {
 
@@ -31,6 +40,19 @@ uint32 TypeChecker::FindMember(uint32 type, StringView name) const noexcept {
     return binder_.FindMemberInChain(symbol, name);
 }
 
+bool TypeChecker::HasIncompleteMembers(uint32 type) const noexcept {
+    uint32 symbol = SymbolOf(type);
+    for (uint32 step = 0; symbol != NoSymbol && step < compilation_.symbols_.Size(); ++step) {
+        if ((compilation_.symbols_[symbol].flags & SymbolFlags::Incomplete) != 0) {
+            return true;
+        }
+
+        symbol = compilation_.symbols_[symbol].base;
+    }
+
+    return false;
+}
+
 bool TypeChecker::MemberAvailable(uint32 member, uint32 receiver) const noexcept {
     const Symbol& entry = compilation_.symbols_[member];
     if (entry.kind != SymbolKind::LanguageField && entry.kind != SymbolKind::LanguageFunction) {
@@ -44,9 +66,9 @@ bool TypeChecker::MemberAvailable(uint32 member, uint32 receiver) const noexcept
     case PreludeCondition::Ordered:
         return IsOrdered(element);
     case PreludeCondition::ValueElement:
-        return !IsReference(element);
+        return !IsObjectType(element);
     case PreludeCondition::ObjectElement:
-        return IsReference(element);
+        return IsObjectType(element);
     case PreludeCondition::NotVoid:
         return element != voidType_;
     default:
@@ -55,31 +77,103 @@ bool TypeChecker::MemberAvailable(uint32 member, uint32 receiver) const noexcept
 }
 
 ExpressionValue TypeChecker::CheckMember(const CheckContext& context, uint32 node) noexcept {
+    // 재귀 경로(`a.b.c ...`)의 frame에는 받는 값만 둔다(CheckBinary 참고).
+    const ExpressionValue receiver =
+        Check(context, compilation_.trees_[context.module].Child(node, 0), NoType);
+    return MemberOf(context, node, receiver);
+}
+
+ExpressionValue TypeChecker::MemberOf(const CheckContext& context, uint32 node,
+                                      const ExpressionValue& receiver) noexcept {
+    // 판정이 끝난 값의 타입을 기록한다(재귀 경로 밖 — Check 참고).
+    const ExpressionValue value = MemberOfValue(context, node, receiver);
+    if (value.kind == ExpressionValue::Kind::Typed) {
+        Record(context, node, value.type);
+    }
+
+    return value;
+}
+
+ExpressionValue TypeChecker::MemberOfValue(const CheckContext& context, uint32 node,
+                                           const ExpressionValue& receiver) noexcept {
     using K = ExpressionValue::Kind;
     const SyntaxTree& tree = compilation_.trees_[context.module];
     const uint32 objectNode = tree.Child(node, 0);
     const bool chained = (tree.Node(node).flags & SyntaxFlags::NullConditional) != 0;
     const StringView name = TokenText(context.module, node);
-    const ExpressionValue receiver = Check(context, objectNode, NoType);
     ExpressionValue result;
-    if (receiver.kind == K::Error) {
-        return result;
+    if (receiver.kind == K::Error || name.IsEmpty()) {
+        return result; // 이름이 빠진 멤버 접근은 구문 오류(S0207)가 이미 있다
     }
 
-    auto unknown = [&](StringView owner) noexcept {
+    // S0326: 비슷한 멤버 이름을 제시한다(spaces는 찾은 이름 공간들).
+    auto unknown = [&](StringView owner, Span<const uint64> spaces, uint32 receiverType) noexcept {
         StringBuilder<CompilationMessageInlineBytes> message(allocator_);
         message.AppendFormat("'{}' has no member '{}'.", owner, name);
-        if (binder_.Succeeded(message)) {
+        StringBuilder<CompilationMessageInlineBytes> fix(allocator_);
+        const StringView similar = SimilarMember(spaces, receiverType, name);
+        if (similar.IsEmpty()) {
+            fix.Append("Check the member name.");
+        } else {
+            fix.AppendFormat("Did you mean '{}'?", similar);
+        }
+
+        if (binder_.Succeeded(message) && binder_.Succeeded(fix)) {
             Report(context, DiagnosticCode::UnknownMember, node, message.View(),
-                   "Members come from the type and its base types.",
-                   "Check the member name.");
+                   "Members come from the type and its base types.", fix.View());
         }
     };
     auto typeOwner = [&](uint32 type) noexcept {
+        if (HasIncompleteMembers(type)) {
+            return;
+        }
+
+        Array<uint64> spaces(allocator_);
+        uint32 at = SymbolOf(type);
+        for (uint32 step = 0; at != NoSymbol && step < compilation_.symbols_.Size(); ++step) {
+            if (auto pushed = spaces.TryPushBack(SpaceKey(NameSpaceKind::Members, at)); !pushed) {
+                binder_.error_ = pushed.Error();
+                return;
+            }
+
+            at = compilation_.symbols_[at].base;
+        }
+
         StringBuilder<CompilationMessageInlineBytes> text(allocator_);
-        static_cast<void>(compilation_.AppendTypeText(text, type));
-        unknown(text.View());
+        AppendDisplayType(text, type);
+        unknown(text.View(), spaces.View(), type);
     };
+    // 함수가 아닌 멤버에 붙은 타입 인자는 S0320이다.
+    auto finish = [&](const ExpressionValue& value) noexcept {
+        if (value.kind != K::Function && value.kind != K::Error &&
+            RejectTypeArguments(context, tree.Child(node, 1), name)) {
+            return ExpressionValue{};
+        }
+
+        return value;
+    };
+
+    // 이름 공간·타입 이름은 null이 아니다(3.10절 "멤버 접근").
+    if (chained && (receiver.kind == K::Namespace || receiver.kind == K::TypeName)) {
+        Report(context, DiagnosticCode::NotOptional, node,
+               "'?.' needs a value whose type has '?"
+               "'.",
+               "A type name or a namespace is never null.", "Write '.' instead of '?.'.");
+        return result;
+    }
+
+    // 자기 멤버는 `this.` 없이 쓴다(괄호로 감싼 `this`도 같다).
+    uint32 object = objectNode;
+    while (object != NoNode && tree.Node(object).kind == SyntaxKind::Parenthesized) {
+        object = tree.Child(object, 0);
+    }
+
+    if (object != NoNode && tree.Node(object).kind == SyntaxKind::This && !chained) {
+        Report(context, DiagnosticCode::ThisMisuse, node,
+               "A member of this class is written without 'this.'.",
+               "Inside a class its own members are used by name.", "Remove 'this.'.");
+        return result;
+    }
 
     uint32 member = NoSymbol;
     if (receiver.kind == K::Namespace) {
@@ -91,12 +185,15 @@ ExpressionValue TypeChecker::CheckMember(const CheckContext& context, uint32 nod
         }
 
         if (member == NoSymbol) {
-            unknown(entry.name);
+            const uint64 space = entry.kind == SymbolKind::Alias
+                                     ? SpaceKey(NameSpaceKind::ModuleTop, entry.index)
+                                     : SpaceKey(NameSpaceKind::Members, receiver.symbol);
+            unknown(entry.name, Span<const uint64>(&space, 1), NoType);
             return result;
         }
 
         binder_.SetNodeSymbol(context.module, node, member);
-        return ValueOfSymbol(context, member, NoType, false);
+        return finish(ValueOfSymbol(context, member, NoType, false));
     }
 
     if (receiver.kind == K::TypeName) {
@@ -109,33 +206,33 @@ ExpressionValue TypeChecker::CheckMember(const CheckContext& context, uint32 nod
 
         const Symbol& entry = compilation_.symbols_[member];
         if (entry.kind != SymbolKind::EnumCase && !IsStaticFunction(entry)) {
-            StringBuilder<CompilationMessageInlineBytes> message(allocator_);
-            message.AppendFormat("'{}' belongs to a value of the type, not to the type itself.",
-                                 name);
-            if (binder_.Succeeded(message)) {
-                Report(context, DiagnosticCode::StaticInstanceMismatch, node, message.View(),
-                       "Only enum cases and static functions are used through a type name.",
-                       "Use a value of the type.");
-            }
-
+            ReportStaticInstance(context, node, name, NoType);
             return result;
         }
 
         binder_.SetNodeSymbol(context.module, node, member);
-        return ValueOfSymbol(context, member, type, false);
+        return finish(ValueOfSymbol(context, member, type, false));
     }
 
-    if (receiver.kind != K::Typed) {
+    // 타입 없는 상수는 기본 타입(int·float)의 값이고, `null`의 멤버는 S0417이다.
+    uint32 type = receiver.type;
+    if (receiver.kind == K::UntypedInt || receiver.kind == K::UntypedFloat ||
+        receiver.kind == K::Null) {
+        type = Materialize(context, receiver, objectNode);
+        if (type == NoType) {
+            return result;
+        }
+    } else if (receiver.kind != K::Typed) {
         RequireValue(context, receiver, objectNode);
         return result;
     }
 
-    uint32 type = receiver.type;
     if (chained) {
         if (!IsOptional(type)) {
             Report(context, DiagnosticCode::NotOptional, node,
-                   "'?.' needs a value whose type has '?" "'.", "This value is never null.",
-                   "Write '.' instead of '?.'.");
+                   "'?.' needs a value whose type has '?"
+                   "'.",
+                   "This value is never null.", "Write '.' instead of '?.'.");
             return result;
         }
 
@@ -144,7 +241,8 @@ ExpressionValue TypeChecker::CheckMember(const CheckContext& context, uint32 nod
         Report(context, DiagnosticCode::MayBeNull, objectNode,
                "The value may be null, so its members cannot be used directly.",
                "A value whose type has '?' is null when the object is gone or missing.",
-               "Use '?.', 'if (let x = value) { ... }' or '?" "?'.");
+               "Use '?.', 'if (let x = value) { ... }' or '?"
+               "?'.");
         return result;
     }
 
@@ -156,14 +254,7 @@ ExpressionValue TypeChecker::CheckMember(const CheckContext& context, uint32 nod
 
     const Symbol& entry = compilation_.symbols_[member];
     if (entry.kind == SymbolKind::EnumCase || IsStaticFunction(entry)) {
-        StringBuilder<CompilationMessageInlineBytes> message(allocator_);
-        message.AppendFormat("'{}' belongs to the type, not to a value.", name);
-        if (binder_.Succeeded(message)) {
-            Report(context, DiagnosticCode::StaticInstanceMismatch, node, message.View(),
-                   "Enum cases and static functions are used through the type name.",
-                   "Write the type name before it.");
-        }
-
+        ReportStaticInstance(context, node, name, NonOptional(type));
         return result;
     }
 
@@ -174,19 +265,92 @@ ExpressionValue TypeChecker::CheckMember(const CheckContext& context, uint32 nod
         result.type = MakeOptional(result.type);
     }
 
-    return result;
+    return finish(result);
+}
+
+void TypeChecker::ReportStaticInstance(const CheckContext& context, uint32 node, StringView name,
+                                       uint32 valueType) noexcept {
+    StringBuilder<CompilationMessageInlineBytes> message(allocator_);
+    if (valueType == NoType) {
+        message.AppendFormat("'{}' belongs to a value of the type, not to the type itself.", name);
+        if (binder_.Succeeded(message)) {
+            Report(context, DiagnosticCode::StaticInstanceMismatch, node, message.View(),
+                   "Only enum cases and static functions are used through a type name.",
+                   "Use a value of the type.");
+        }
+
+        return;
+    }
+
+    message.AppendFormat("'{}' belongs to the type, not to a value.", name);
+    StringBuilder<CompilationMessageInlineBytes> fix(allocator_);
+    fix.Append("Write '");
+    AppendDisplayType(fix, valueType);
+    fix.Append(".").Append(name).Append("'.");
+    if (binder_.Succeeded(message) && binder_.Succeeded(fix)) {
+        Report(context, DiagnosticCode::StaticInstanceMismatch, node, message.View(),
+               "Enum cases and static functions are used through the type name.", fix.View());
+    }
+}
+
+StringView TypeChecker::SimilarMember(Span<const uint64> spaces, uint32 receiverType,
+                                      StringView name) const noexcept {
+    StringView best;
+    usize bestDistance = MaxMemberSuggestionDistance + 1;
+    binder_.names_.ForEach([&](const NameKey& key, const uint32& symbol) noexcept {
+        bool inSpace = false;
+        for (const uint64 space : spaces) {
+            inSpace = inSpace || key.space == space;
+        }
+
+        if (!inSpace || (receiverType != NoType && !MemberAvailable(symbol, receiverType))) {
+            return;
+        }
+
+        const usize distance = EditDistance(name, key.name, MaxMemberSuggestionDistance,
+                                            EditDistanceCase::AsciiInsensitive);
+        if (distance < bestDistance ||
+            (distance == bestDistance && distance <= MaxMemberSuggestionDistance &&
+             StringView::CompareBytes(key.name, best) < 0)) {
+            bestDistance = distance;
+            best = key.name;
+        }
+    });
+    return best;
+}
+
+bool TypeChecker::IsObjectType(uint32 type) const noexcept {
+    return type != NoType && IsReference(type) && !IsAssetType(type);
 }
 
 ExpressionValue TypeChecker::CheckCall(const CheckContext& context, uint32 node,
                                        uint32 expected) noexcept {
+    // 재귀 경로(`f().g().h() ...`)의 frame에는 부르는 값만 둔다(CheckBinary 참고).
+    const ExpressionValue callee =
+        Check(context, compilation_.trees_[context.module].Child(node, 0), NoType);
+    return CallValue(context, node, expected, callee);
+}
+
+ExpressionValue TypeChecker::CallValue(const CheckContext& context, uint32 node, uint32 expected,
+                                       const ExpressionValue& callee) noexcept {
+    // 판정이 끝난 값의 타입을 기록한다(재귀 경로 밖 — Check 참고).
+    const ExpressionValue value = JudgeCall(context, node, expected, callee);
+    if (value.kind == ExpressionValue::Kind::Typed) {
+        Record(context, node, value.type);
+    }
+
+    return value;
+}
+
+ExpressionValue TypeChecker::JudgeCall(const CheckContext& context, uint32 node, uint32 expected,
+                                       const ExpressionValue& callee) noexcept {
     using K = ExpressionValue::Kind;
     const SyntaxTree& tree = compilation_.trees_[context.module];
     const uint32 calleeNode = tree.Child(node, 0);
     const SyntaxKind calleeKind = tree.Node(calleeNode).kind;
     const uint32 typeArguments = calleeKind == SyntaxKind::Identifier ? tree.Child(calleeNode, 0)
-                                 : calleeKind == SyntaxKind::Member  ? tree.Child(calleeNode, 1)
-                                                                     : NoNode;
-    const ExpressionValue callee = Check(context, calleeNode, NoType);
+                                 : calleeKind == SyntaxKind::Member   ? tree.Child(calleeNode, 1)
+                                                                      : NoNode;
     ExpressionValue result;
     auto checkArguments = [&]() noexcept {
         const uint32 list = tree.Child(node, 1);
@@ -196,7 +360,7 @@ ExpressionValue TypeChecker::CheckCall(const CheckContext& context, uint32 node,
 
         for (const uint32 argument : tree.Children(list)) {
             if (tree.Node(argument).kind == SyntaxKind::Argument) {
-                static_cast<void>(Check(context, tree.Child(argument, 1), NoType));
+                static_cast<void>(Check(context, tree.Child(argument, 1), UnresolvedType));
             }
         }
     };
@@ -228,7 +392,8 @@ ExpressionValue TypeChecker::CheckCall(const CheckContext& context, uint32 node,
         return result;
     default:
         if (RequireValue(context, callee, calleeNode) && callee.kind != K::Function) {
-            Report(context, DiagnosticCode::NotCallable, calleeNode, "This value is not a function.",
+            Report(context, DiagnosticCode::NotCallable, calleeNode,
+                   "This value is not a function.",
                    "Only functions, types and validated literals are called.",
                    "Remove the parentheses.");
         }
@@ -273,7 +438,7 @@ ExpressionValue TypeChecker::CallFunction(const CheckContext& context, uint32 no
 
     if (entry.signature == NoSignature) {
         for (const uint32 argument : arguments) {
-            static_cast<void>(Check(context, tree.Child(argument, 1), NoType));
+            static_cast<void>(Check(context, tree.Child(argument, 1), UnresolvedType));
         }
 
         return result;
@@ -314,7 +479,7 @@ ExpressionValue TypeChecker::CallFunction(const CheckContext& context, uint32 no
         }
 
         for (const uint32 argument : arguments) {
-            static_cast<void>(Check(context, tree.Child(argument, 1), NoType));
+            static_cast<void>(Check(context, tree.Child(argument, 1), UnresolvedType));
         }
 
         return result;
@@ -338,7 +503,7 @@ ExpressionValue TypeChecker::CallFunction(const CheckContext& context, uint32 no
                 !IsDerived(argument, TypeOfSymbol(constraint))) {
                 StringBuilder<CompilationMessageInlineBytes> message(allocator_);
                 message.Append("Type argument '");
-                static_cast<void>(compilation_.AppendTypeText(message, argument));
+                AppendDisplayType(message, argument);
                 message.AppendFormat("' is not derived from '{}'.",
                                      compilation_.symbols_[constraint].name);
                 if (binder_.Succeeded(message)) {
@@ -350,6 +515,27 @@ ExpressionValue TypeChecker::CallFunction(const CheckContext& context, uint32 no
                 return result;
             }
         }
+    }
+
+    // `Assets.Find`·`Assets.LoadAll`의 T는 에셋 타입이다(3.10절 "호출").
+    if (entry.kind == SymbolKind::LanguageFunction && entry.owner != NoSymbol &&
+        compilation_.symbols_[entry.owner].name == "Assets" && typeArguments.Size() == 1 &&
+        typeArguments[0] != NoType && !IsAssetType(typeArguments[0])) {
+        StringBuilder<CompilationMessageInlineBytes> message(allocator_);
+        message.Append("Type argument '");
+        AppendDisplayType(message, typeArguments[0]);
+        message.Append("' is not an asset type.");
+        if (binder_.Succeeded(message)) {
+            Report(context, DiagnosticCode::TypeArgumentRule, tree.Child(node, 0), message.View(),
+                   "Assets are loaded by asset type.",
+                   "Use an asset type, as in 'Find<SoundAsset>'.");
+        }
+
+        for (const uint32 argument : arguments) {
+            static_cast<void>(Check(context, tree.Child(argument, 1), UnresolvedType));
+        }
+
+        return result;
     }
 
     // 대기 1개 이상(All·Race, 3.10절·6.1절 SD41).
@@ -395,7 +581,7 @@ ExpressionValue TypeChecker::CallFunction(const CheckContext& context, uint32 no
         }
 
         for (const uint32 argument : arguments) {
-            static_cast<void>(Check(context, tree.Child(argument, 1), NoType));
+            static_cast<void>(Check(context, tree.Child(argument, 1), UnresolvedType));
         }
 
         return result;
@@ -416,8 +602,9 @@ ExpressionValue TypeChecker::CallFunction(const CheckContext& context, uint32 no
         for (uint32 index = 0; index < signature.parameterCount; ++index) {
             const uint32 parameter =
                 compilation_.signatureParameters_[signature.firstParameter + index];
-            const ExpressionValue value = Check(context, tree.Child(arguments[index], 1),
-                                                ContainsPlaceholder(parameter) ? NoType : parameter);
+            const ExpressionValue value =
+                Check(context, tree.Child(arguments[index], 1),
+                      ContainsPlaceholder(parameter) ? NoType : parameter);
             if (auto pushed = values.TryPushBack(value); !pushed) {
                 binder_.error_ = pushed.Error();
                 return result;
@@ -432,7 +619,17 @@ ExpressionValue TypeChecker::CallFunction(const CheckContext& context, uint32 no
         }
 
         if (chosen == NoType) {
+            // 모두 상수: 실수 상수가 있거나 자리표시가 int를 받지 않으면 float, 아니면 int(3.10절).
             chosen = anyFloat ? floatType_ : intType_;
+            for (uint32 index = 0; index < signature.parameterCount && chosen == intType_;
+                 ++index) {
+                const uint32 parameter =
+                    compilation_.signatureParameters_[signature.firstParameter + index];
+                if (ContainsPlaceholder(parameter) &&
+                    !PlaceholderAccepts(SymbolOf(parameter), intType_)) {
+                    chosen = floatType_;
+                }
+            }
         }
 
         for (uint32 index = 0; index < signature.parameterCount; ++index) {
@@ -446,7 +643,7 @@ ExpressionValue TypeChecker::CallFunction(const CheckContext& context, uint32 no
             if (!PlaceholderAccepts(placeholder, chosen)) {
                 StringBuilder<CompilationMessageInlineBytes> message(allocator_);
                 message.AppendFormat("'{}' has no version for '", entry.name);
-                static_cast<void>(compilation_.AppendTypeText(message, chosen));
+                AppendDisplayType(message, chosen);
                 message.Append("'.");
                 if (binder_.Succeeded(message)) {
                     Report(context, DiagnosticCode::TypeMismatch, tree.Child(arguments[index], 1),
@@ -461,28 +658,61 @@ ExpressionValue TypeChecker::CallFunction(const CheckContext& context, uint32 no
     }
 
     bool failed = false;
+    // `Assert`의 첫 인자는 조건이다(3.10절 "조건", S0408).
+    const bool assertion = entry.kind == SymbolKind::PreludeValue && entry.name == "Assert";
     for (uint32 index = 0; index < signature.parameterCount; ++index) {
-        const uint32 parameter = Substitute(
-            compilation_.signatureParameters_[signature.firstParameter + index], callee.receiver,
-            typeArguments.View(), chosen);
+        const uint32 parameter =
+            Substitute(compilation_.signatureParameters_[signature.firstParameter + index],
+                       callee.receiver, typeArguments.View(), chosen);
         const uint32 valueNode = tree.Child(arguments[index], 1);
         const ExpressionValue value =
-            overloaded ? values[index] : Check(context, valueNode, parameter);
+            overloaded
+                ? values[index]
+                : Check(context, valueNode, parameter == NoType ? UnresolvedType : parameter);
         if (parameter == NoType) {
             continue;
         }
 
-        if (Coerce(context, value, parameter, valueNode) == NoType && value.kind != K::Error) {
+        if (assertion && index == 0 && value.kind != K::Error &&
+            !(value.kind == K::Typed && value.type == boolType_)) {
+            if (RequireValue(context, value, valueNode)) {
+                Report(context, DiagnosticCode::ConditionNotBool, valueNode,
+                       "The condition of 'Assert' must be 'bool'.",
+                       "Conditions are never made from other types silently.",
+                       "Compare it, as in 'x != null'.");
+            }
+
+            failed = true;
+            continue;
+        }
+
+        if (value.kind == K::Error || Coerce(context, value, parameter, valueNode) == NoType) {
             failed = true;
         }
     }
 
-    static_cast<void>(failed);
+    // 인자에 진단이 있으면 호출 결과도 해석하지 못한 것이다(연쇄 방지, 3.10절).
+    if (failed) {
+        return result;
+    }
+
+    // `Math.Div`의 0(S0504).
+    if (entry.kind == SymbolKind::LanguageFunction && entry.name == "Div" &&
+        entry.owner != NoSymbol && compilation_.symbols_[entry.owner].name == "Math" &&
+        values.Size() == 2 && ReportZeroDivisor(context, values[1], tree.Child(arguments[1], 1))) {
+        return result;
+    }
     const uint32 returnType =
         Substitute(signature.returnType, callee.receiver, typeArguments.View(), chosen);
     if (signature.isAsync) {
+        if (returnType == NoType) {
+            return result; // 해석하지 못한 반환 타입(연쇄 방지)
+        }
+
+        // `?.`로 부른 대기는 수신자가 null이면 바로 끝나므로 결과가 `R?`다.
         result.kind = K::Wait;
-        result.type = returnType == NoType ? voidType_ : returnType;
+        result.type =
+            callee.chained && returnType != voidType_ ? MakeOptional(returnType) : returnType;
         return result;
     }
 
@@ -518,8 +748,14 @@ ExpressionValue TypeChecker::Convert(const CheckContext& context, uint32 node,
     }
 
     if (arguments.Size() != 1 || tree.Child(arguments[0], 0) != NoNode) {
-        Report(context, DiagnosticCode::ArgumentCount, node,
-               "A conversion takes one positional argument.", "", "Write it as in 'float(x)'.");
+        Report(context,
+               arguments.Size() != 1 ? DiagnosticCode::ArgumentCount : DiagnosticCode::ArgumentForm,
+               node, "A conversion takes one positional argument.", "",
+               "Write it as in 'float(x)'.");
+        for (const uint32 argument : arguments) {
+            static_cast<void>(Check(context, tree.Child(argument, 1), UnresolvedType));
+        }
+
         return result;
     }
 
@@ -550,10 +786,52 @@ ExpressionValue TypeChecker::Convert(const CheckContext& context, uint32 node,
                "Only a number can be converted to a number type.", "",
                "Use 'Parse.Int(text)' or 'Parse.Float(text)' for strings.");
         return result;
+    } else if (value.constant.kind == ConstantValue::Kind::Integer &&
+               !ConstantFits(value.constant, true, target)) {
+        // 정해진 상수의 변환도 컴파일 때 판정한다(3.10절 "변환").
+        StringBuilder<CompilationMessageInlineBytes> message(allocator_);
+        message.Append("The constant does not fit in '");
+        AppendDisplayType(message, target);
+        message.Append("'.");
+        if (binder_.Succeeded(message)) {
+            Report(context, DiagnosticCode::IntegerLiteralTooLarge, valueNode, message.View(),
+                   "A constant must fit in the type of its place.",
+                   "Use a value in range or a wider type.");
+        }
+
+        return result;
+    } else if (value.constant.kind == ConstantValue::Kind::Float &&
+               !ConstantFits(value.constant, false, target)) {
+        StringBuilder<CompilationMessageInlineBytes> message(allocator_);
+        message.Append("The constant does not fit in '");
+        AppendDisplayType(message, target);
+        message.Append("'.");
+        if (binder_.Succeeded(message)) {
+            Report(context, DiagnosticCode::IntegerLiteralTooLarge, valueNode, message.View(),
+                   "A constant must fit in the type of its place.",
+                   "Use a value in range or a wider type.");
+        }
+
+        return result;
     }
 
     result.kind = K::Typed;
     result.type = target;
+    // 상수의 변환 결과도 상수다(정수 → 실수는 실수 값, float32는 반올림).
+    result.constant = value.constant;
+    if (result.constant.kind == ConstantValue::Kind::Integer && targetFloat) {
+        const double real = result.constant.negative
+                                ? -static_cast<double>(result.constant.magnitude)
+                                : static_cast<double>(result.constant.magnitude);
+        result.constant = ConstantValue{};
+        result.constant.kind = ConstantValue::Kind::Float;
+        result.constant.real = real;
+    }
+
+    if (result.constant.kind == ConstantValue::Kind::Float && Numeric(target).bits == 32) {
+        result.constant.real = static_cast<double>(static_cast<float>(result.constant.real));
+    }
+
     return result;
 }
 
@@ -565,15 +843,15 @@ ExpressionValue TypeChecker::Construct(const CheckContext& context, uint32 node,
     const uint32 type = TypeOfSymbol(typeSymbol);
     ExpressionValue result;
     const uint32 list = tree.Child(node, 1);
-    const Span<const uint32> arguments =
-        list != NoNode && tree.Node(list).kind == SyntaxKind::List ? tree.Children(list)
-                                                                   : Span<const uint32>();
+    const Span<const uint32> arguments = list != NoNode && tree.Node(list).kind == SyntaxKind::List
+                                             ? tree.Children(list)
+                                             : Span<const uint32>();
     auto notCallable = [&](StringView message) noexcept {
         Report(context, DiagnosticCode::NotCallable, tree.Child(node, 0), message,
                "Values of this type are created by the engine.",
                "Use the engine API that creates it.");
         for (const uint32 argument : arguments) {
-            static_cast<void>(Check(context, tree.Child(argument, 1), NoType));
+            static_cast<void>(Check(context, tree.Child(argument, 1), UnresolvedType));
         }
     };
 
@@ -591,6 +869,20 @@ ExpressionValue TypeChecker::Construct(const CheckContext& context, uint32 node,
             return result;
         }
 
+        // 이름 지정 인자(S0404)를 인자 수(S0403)보다 먼저 본다. 진단은 호출 하나에 하나다.
+        for (const uint32 argument : arguments) {
+            if (tree.Child(argument, 0) != NoNode) {
+                Report(context, DiagnosticCode::ArgumentForm, argument,
+                       "Vectors and quaternions take positional components.", "",
+                       "Remove the argument name.");
+                for (const uint32 each : arguments) {
+                    static_cast<void>(Check(context, tree.Child(each, 1), UnresolvedType));
+                }
+
+                return result;
+            }
+        }
+
         if (arguments.Size() != positional) {
             StringBuilder<CompilationMessageInlineBytes> message(allocator_);
             message.AppendFormat("'{}' takes {} components.", entry.name, positional);
@@ -599,20 +891,24 @@ ExpressionValue TypeChecker::Construct(const CheckContext& context, uint32 node,
                        "Pass one floating-point value per component.");
             }
 
+            for (const uint32 argument : arguments) {
+                static_cast<void>(Check(context, tree.Child(argument, 1), UnresolvedType));
+            }
+
             return result;
         }
 
+        bool failed = false;
         for (const uint32 argument : arguments) {
-            if (tree.Child(argument, 0) != NoNode) {
-                Report(context, DiagnosticCode::ArgumentForm, argument,
-                       "Vectors and quaternions take positional components.", "",
-                       "Remove the argument name.");
-                return result;
-            }
-
             const uint32 valueNode = tree.Child(argument, 1);
-            static_cast<void>(
-                Coerce(context, Check(context, valueNode, floatType_), floatType_, valueNode));
+            const ExpressionValue value = Check(context, valueNode, floatType_);
+            if (value.kind == K::Error || Coerce(context, value, floatType_, valueNode) == NoType) {
+                failed = true;
+            }
+        }
+
+        if (failed) {
+            return result;
         }
 
         result.kind = K::Typed;
@@ -623,7 +919,8 @@ ExpressionValue TypeChecker::Construct(const CheckContext& context, uint32 node,
     // 이름 지정 생성: struct, schema struct, component, Rotator·Color·Transform.
     bool allowed = entry.kind == SymbolKind::Struct;
     if (entry.kind == SymbolKind::PreludeType) {
-        allowed = entry.name == "Rotator" || entry.name == "Color" || entry.name == "Transform";
+        allowed = entry.name == "Rotator" || entry.name == "Color" || entry.name == "Transform" ||
+                  entry.name == "TagSet";
     } else if (entry.kind == SymbolKind::EngineType) {
         const SchemaType& source = compilation_.schemas_[entry.index].schema.Types()[entry.item];
         if (source.kind == SchemaTypeKind::Struct) {
@@ -638,6 +935,15 @@ ExpressionValue TypeChecker::Construct(const CheckContext& context, uint32 node,
                       binder_.EngineChainHas(typeSymbol, binder_.component_);
         }
     } else if (entry.kind == SymbolKind::Class) {
+        // 기반을 해석하지 못한 class는 component인지 모른다(연쇄 방지).
+        if (HasIncompleteMembers(type)) {
+            for (const uint32 argument : arguments) {
+                static_cast<void>(Check(context, tree.Child(argument, 1), UnresolvedType));
+            }
+
+            return result;
+        }
+
         uint32 at = typeSymbol;
         while (at != NoSymbol && compilation_.symbols_[at].kind == SymbolKind::Class) {
             at = compilation_.symbols_[at].base;
@@ -651,16 +957,25 @@ ExpressionValue TypeChecker::Construct(const CheckContext& context, uint32 node,
         return result;
     }
 
+    // 인자마다 이름·값을 검사한다. 위치 인자의 S0404는 첫 위치 인자 한 곳이고, 인자에 진단이
+    // 있으면 생성 결과는 해석하지 못한 것이다(3.10절 연쇄 방지).
     Array<uint32> given(allocator_);
+    bool failed = false;
+    bool positionalReported = false;
     for (const uint32 argument : arguments) {
         const uint32 nameNode = tree.Child(argument, 0);
         const uint32 valueNode = tree.Child(argument, 1);
         if (nameNode == NoNode) {
-            Report(context, DiagnosticCode::ArgumentForm, argument,
-                   "A value is created with named arguments.",
-                   "Each argument names the field it sets.",
-                   "Write it as in 'HitInfo(Damage: 1)'.");
-            static_cast<void>(Check(context, valueNode, NoType));
+            if (!positionalReported) {
+                Report(context, DiagnosticCode::ArgumentForm, argument,
+                       "A value is created with named arguments.",
+                       "Each argument names the field it sets.",
+                       "Write it as in 'HitInfo(Damage: 1)'.");
+                positionalReported = true;
+            }
+
+            failed = true;
+            static_cast<void>(Check(context, valueNode, UnresolvedType));
             continue;
         }
 
@@ -672,13 +987,14 @@ ExpressionValue TypeChecker::Construct(const CheckContext& context, uint32 node,
             fieldKind != SymbolKind::LanguageField) {
             StringBuilder<CompilationMessageInlineBytes> message(allocator_);
             message.AppendFormat("'{}' has no field '{}'.", entry.name, fieldName);
-            if (binder_.Succeeded(message)) {
+            if (!HasIncompleteMembers(type) && binder_.Succeeded(message)) {
                 Report(context, DiagnosticCode::UnknownMember, nameNode, message.View(),
                        "A named argument sets a field of the created value.",
                        "Check the field name.");
             }
 
-            static_cast<void>(Check(context, valueNode, NoType));
+            failed = true;
+            static_cast<void>(Check(context, valueNode, UnresolvedType));
             continue;
         }
 
@@ -695,6 +1011,8 @@ ExpressionValue TypeChecker::Construct(const CheckContext& context, uint32 node,
                        "Remove one of them.");
             }
 
+            failed = true;
+            static_cast<void>(Check(context, valueNode, UnresolvedType));
             continue;
         }
 
@@ -704,17 +1022,25 @@ ExpressionValue TypeChecker::Construct(const CheckContext& context, uint32 node,
         }
 
         binder_.SetNodeSymbol(context.module, nameNode, field);
-        const uint32 fieldType = fieldKind == SymbolKind::Field
-                                     ? FieldType(field)
-                                     : Substitute(compilation_.symbols_[field].type, type,
-                                                  Span<const uint32>(), NoType);
+        const uint32 fieldType =
+            fieldKind == SymbolKind::Field
+                ? FieldType(field)
+                : Substitute(compilation_.symbols_[field].type, type, Span<const uint32>(), NoType);
         const ExpressionValue value = Check(context, valueNode, fieldType);
-        if (fieldType != NoType) {
-            static_cast<void>(Coerce(context, value, fieldType, valueNode));
+        if (value.kind == K::Error ||
+            (fieldType != NoType && Coerce(context, value, fieldType, valueNode) == NoType)) {
+            failed = true;
         }
     }
 
-    // 기본값이 없는 필드는 지정해야 한다(Sparks struct·schema struct).
+    if (failed) {
+        return result;
+    }
+
+    // 기본값이 없는 필드는 지정해야 한다(Sparks struct·schema struct). 빠진 필드를 모아 호출
+    // 하나에 S0404 하나로 알린다(선언 순서).
+    StringBuilder<CompilationMessageInlineBytes> missing(allocator_);
+    uint32 missingCount = 0;
     auto requireField = [&](uint32 field, StringView fieldName, uint32 fieldType,
                             bool hasInitializer) noexcept {
         if (hasInitializer || fieldType == NoType || HasDefault(fieldType)) {
@@ -727,30 +1053,49 @@ ExpressionValue TypeChecker::Construct(const CheckContext& context, uint32 node,
             }
         }
 
-        StringBuilder<CompilationMessageInlineBytes> message(allocator_);
-        message.AppendFormat("Field '{}' must be given.", fieldName);
-        if (binder_.Succeeded(message)) {
-            Report(context, DiagnosticCode::ArgumentForm, node, message.View(),
-                   "The field has no default value (assets, Soft, Row, Tag and InputAction "
-                   "fields without '?').",
-                   "Pass it, as in 'Field: value'.");
+        missing.Append(missingCount == 0 ? "'" : ", '").Append(fieldName).Append("'");
+        ++missingCount;
+    };
+    // Sparks 선언의 필드(선언 순서).
+    auto requireDeclared = [&](uint32 declaration, uint32 membersChild) noexcept {
+        const Symbol& owner = compilation_.symbols_[declaration];
+        const SyntaxTree& ownerTree = compilation_.trees_[owner.module];
+        const uint32 members = ownerTree.Child(owner.node, membersChild);
+        if (members == NoNode || ownerTree.Node(members).kind != SyntaxKind::List) {
+            return;
+        }
+
+        for (const uint32 member : ownerTree.Children(members)) {
+            if (ownerTree.Node(member).kind != SyntaxKind::Field) {
+                continue;
+            }
+
+            const uint32 field = compilation_.NodeSymbol(owner.module, ownerTree.Child(member, 2));
+            if (field != NoSymbol) {
+                requireField(field, compilation_.symbols_[field].name, FieldType(field),
+                             ownerTree.Child(member, 4) != NoNode);
+            }
         }
     };
     if (entry.kind == SymbolKind::Struct) {
-        const SyntaxTree& owner = compilation_.trees_[entry.module];
-        const uint32 members = owner.Child(entry.node, 3);
-        if (members != NoNode && owner.Node(members).kind == SyntaxKind::List) {
-            for (const uint32 member : owner.Children(members)) {
-                if (owner.Node(member).kind != SyntaxKind::Field) {
-                    continue;
-                }
-
-                const uint32 field = compilation_.NodeSymbol(entry.module, owner.Child(member, 2));
-                if (field != NoSymbol) {
-                    requireField(field, compilation_.symbols_[field].name, FieldType(field),
-                                 owner.Child(member, 4) != NoNode);
-                }
+        requireDeclared(typeSymbol, 3);
+    } else if (entry.kind == SymbolKind::Class) {
+        // component: Sparks가 선언한 필드만(기반 class부터 — 엔진 필드는 엔진이 정한다).
+        Array<uint32> chain(allocator_);
+        uint32 at = typeSymbol;
+        for (uint32 step = 0; at != NoSymbol && step < compilation_.symbols_.Size() &&
+                              compilation_.symbols_[at].kind == SymbolKind::Class;
+             ++step) {
+            if (auto pushed = chain.TryPushBack(at); !pushed) {
+                binder_.error_ = pushed.Error();
+                return result;
             }
+
+            at = compilation_.symbols_[at].base;
+        }
+
+        for (usize index = chain.Size(); index > 0; --index) {
+            requireDeclared(chain[index - 1], 4);
         }
     } else if (entry.kind == SymbolKind::EngineType) {
         const BindingSchema& schema = compilation_.schemas_[entry.index].schema;
@@ -767,23 +1112,56 @@ ExpressionValue TypeChecker::Construct(const CheckContext& context, uint32 node,
         }
     }
 
+    if (missingCount != 0) {
+        StringBuilder<CompilationMessageInlineBytes> message(allocator_);
+        message.Append(missingCount == 1 ? "Field " : "Fields ")
+            .Append(missing.View())
+            .Append(" must be given.");
+        if (binder_.Succeeded(missing) && binder_.Succeeded(message)) {
+            Report(context, DiagnosticCode::ArgumentForm, node, message.View(),
+                   "A field without a default value (assets, Soft, Row, Tag and InputAction "
+                   "fields without '?') must be set when the value is created.",
+                   "Pass it, as in 'Field: value'.");
+        }
+
+        return result;
+    }
+
     result.kind = K::Typed;
     result.type = type;
     return result;
 }
 
-ExpressionValue TypeChecker::CheckLiteral(const CheckContext& context, uint32 node,
-                                          uint32 literal, uint32 expected) noexcept {
+ExpressionValue TypeChecker::CheckLiteral(const CheckContext& context, uint32 node, uint32 literal,
+                                          uint32 expected) noexcept {
     using K = ExpressionValue::Kind;
     const SyntaxTree& tree = compilation_.trees_[context.module];
     const StringView name = compilation_.symbols_[literal].name;
     ExpressionValue result;
     const uint32 list = tree.Child(node, 1);
-    const Span<const uint32> arguments =
-        list != NoNode && tree.Node(list).kind == SyntaxKind::List ? tree.Children(list)
-                                                                   : Span<const uint32>();
+    const Span<const uint32> arguments = list != NoNode && tree.Node(list).kind == SyntaxKind::List
+                                             ? tree.Children(list)
+                                             : Span<const uint32>();
+    // 인자 수(S0403)를 먼저 본다: `Loc`은 key 하나 이상, 나머지는 하나.
+    const bool isLoc = name == "Loc";
+    if (arguments.IsEmpty() || (!isLoc && arguments.Size() != 1)) {
+        StringBuilder<CompilationMessageInlineBytes> message(allocator_);
+        message.AppendFormat(isLoc ? "'{}' takes a key." : "'{}' takes one argument.", name);
+        if (binder_.Succeeded(message)) {
+            Report(context, DiagnosticCode::ArgumentCount, node, message.View(), "",
+                   isLoc ? StringView("Write it as in 'Loc(\"Hud.Title\")'.")
+                         : StringView("Pass one string literal."));
+        }
+
+        for (const uint32 argument : arguments) {
+            static_cast<void>(Check(context, tree.Child(argument, 1), UnresolvedType));
+        }
+
+        return result;
+    }
+
     // 첫 인자: 보간 없는 문자열 리터럴.
-    const uint32 first = arguments.IsEmpty() ? NoNode : tree.Child(arguments[0], 1);
+    const uint32 first = tree.Child(arguments[0], 1);
     bool literalText = false;
     if (first != NoNode && tree.Child(arguments[0], 0) == NoNode) {
         const SyntaxNode& value = tree.Node(first);
@@ -800,15 +1178,14 @@ ExpressionValue TypeChecker::CheckLiteral(const CheckContext& context, uint32 no
         StringBuilder<CompilationMessageInlineBytes> message(allocator_);
         message.AppendFormat("'{}' takes a string literal without interpolation.", name);
         if (binder_.Succeeded(message)) {
-            Report(context, DiagnosticCode::ValidatedLiteralForm, first == NoNode ? node : first,
-                   message.View(),
+            Report(context, DiagnosticCode::ValidatedLiteralForm, first, message.View(),
                    "The compiler checks the name against the engine data, so it must be "
                    "written in the source.",
                    "Write it as in 'Tag(\"Item.Key\")', or use 'Tag.Find(text)' at run time.");
         }
 
         for (usize index = 1; index < arguments.Size(); ++index) {
-            static_cast<void>(Check(context, tree.Child(arguments[index], 1), NoType));
+            static_cast<void>(Check(context, tree.Child(arguments[index], 1), UnresolvedType));
         }
 
         return result;
@@ -816,17 +1193,6 @@ ExpressionValue TypeChecker::CheckLiteral(const CheckContext& context, uint32 no
 
     Record(context, first, stringType_);
     const uint64 language = SpaceKey(NameSpaceKind::Language, 0);
-    const bool isLoc = name == "Loc";
-    if (!isLoc && arguments.Size() != 1) {
-        StringBuilder<CompilationMessageInlineBytes> message(allocator_);
-        message.AppendFormat("'{}' takes one argument.", name);
-        if (binder_.Succeeded(message)) {
-            Report(context, DiagnosticCode::ArgumentCount, node, message.View(), "",
-                   "Remove the extra arguments.");
-        }
-
-        return result;
-    }
 
     uint32 type = NoType;
     if (name == "Tag") {
@@ -834,34 +1200,76 @@ ExpressionValue TypeChecker::CheckLiteral(const CheckContext& context, uint32 no
     } else if (name == "Action") {
         type = TypeOfSymbol(binder_.FindName(language, "InputAction"));
     } else if (isLoc) {
+        // key 뒤는 이름 지정 인자다: 위치 인자는 첫 것 한 곳에 S0404, 같은 이름은 뒤 것에 S0404,
+        // 값은 보간할 수 있는 타입(S0419). 인자에 진단이 있으면 결과는 해석하지 못한 것이다.
+        bool failed = false;
+        bool positionalReported = false;
         for (usize index = 1; index < arguments.Size(); ++index) {
+            const uint32 nameNode = tree.Child(arguments[index], 0);
             const uint32 valueNode = tree.Child(arguments[index], 1);
-            if (tree.Child(arguments[index], 0) == NoNode) {
-                Report(context, DiagnosticCode::ArgumentForm, arguments[index],
-                       "The arguments after the key of 'Loc' are named.",
-                       "Each argument fills the named place in the catalog text.",
-                       "Write it as in 'Loc(\"Hud.Hp\", Current: hp)'.");
+            if (nameNode == NoNode) {
+                if (!positionalReported) {
+                    Report(context, DiagnosticCode::ArgumentForm, arguments[index],
+                           "The arguments after the key of 'Loc' are named.",
+                           "Each argument fills the named place in the catalog text.",
+                           "Write it as in 'Loc(\"Hud.Hp\", Current: hp)'.");
+                    positionalReported = true;
+                }
+
+                failed = true;
+                static_cast<void>(Check(context, valueNode, UnresolvedType));
+                continue;
+            }
+
+            const StringView argumentName = binder_.NodeText(context.module, nameNode);
+            bool repeated = false;
+            for (usize earlier = 1; earlier < index; ++earlier) {
+                const uint32 earlierName = tree.Child(arguments[earlier], 0);
+                repeated =
+                    repeated || (earlierName != NoNode &&
+                                 binder_.NodeText(context.module, earlierName) == argumentName);
+            }
+
+            if (repeated) {
+                StringBuilder<CompilationMessageInlineBytes> message(allocator_);
+                message.AppendFormat("Argument '{}' is given twice.", argumentName);
+                if (binder_.Succeeded(message)) {
+                    Report(context, DiagnosticCode::ArgumentForm, nameNode, message.View(), "",
+                           "Remove one of them.");
+                }
+
+                failed = true;
+                static_cast<void>(Check(context, valueNode, UnresolvedType));
                 continue;
             }
 
             const ExpressionValue value = Check(context, valueNode, NoType);
             if (value.kind == K::Error || !RequireValue(context, value, valueNode)) {
+                failed = true;
                 continue;
             }
 
             const uint32 valueType = Materialize(context, value, valueNode);
-            if (valueType != NoType && !IsInterpolatable(valueType)) {
+            if (valueType == NoType) {
+                failed = true;
+            } else if (!IsInterpolatable(valueType)) {
                 Report(context, DiagnosticCode::InterpolationType, valueNode,
                        "This value cannot be shown in a localized text.",
                        "Loc arguments take the types that interpolation shows.",
                        "Pass a field of it or check it for null first.");
+                failed = true;
             }
+        }
+
+        if (failed) {
+            return result;
         }
 
         type = TypeOfSymbol(binder_.FindName(language, "Text"));
     } else {
         // Asset·Row·CVar: 기대 타입이 정한다.
-        const uint32 target = NonOptional(expected);
+        const uint32 target =
+            expected == NoType || expected == UnresolvedType ? NoType : NonOptional(expected);
         bool fits = false;
         if (name == "Asset") {
             fits = target != NoType && (IsAssetType(target) || IsLanguage(target, "Soft"));
@@ -869,6 +1277,26 @@ ExpressionValue TypeChecker::CheckLiteral(const CheckContext& context, uint32 no
             fits = IsLanguage(target, "Row");
         } else {
             fits = IsLanguage(target, "CVarRef");
+        }
+
+        if (!fits && expected == UnresolvedType) {
+            return result; // 기대 타입을 모르는 자리(앞선 오류)
+        }
+
+        if (!fits && target != NoType) {
+            StringBuilder<CompilationMessageInlineBytes> message(allocator_);
+            message.AppendFormat("'{}(...)' cannot be used as '", name);
+            AppendDisplayType(message, expected);
+            message.Append("'.");
+            if (binder_.Succeeded(message)) {
+                Report(context, DiagnosticCode::TypeMismatch, node, message.View(),
+                       name == "Asset" ? StringView("'Asset(...)' is an asset type or a Soft<T>.")
+                       : name == "Row" ? StringView("'Row(...)' is a Row<T>.")
+                                       : StringView("'CVar(...)' is a CVarRef<T>."),
+                       "Use a value of the expected type.");
+            }
+
+            return result;
         }
 
         if (!fits) {

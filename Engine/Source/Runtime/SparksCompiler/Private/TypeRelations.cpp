@@ -15,24 +15,55 @@ struct NumericName {
 };
 
 constexpr NumericName NumericNames[] = {
-    {"int8", NumericKind::Signed, 8},     {"int16", NumericKind::Signed, 16},
-    {"int32", NumericKind::Signed, 32},   {"int", NumericKind::Signed, 64},
-    {"uint8", NumericKind::Unsigned, 8},  {"uint16", NumericKind::Unsigned, 16},
+    {"int8", NumericKind::Signed, 8},      {"int16", NumericKind::Signed, 16},
+    {"int32", NumericKind::Signed, 32},    {"int", NumericKind::Signed, 64},
+    {"uint8", NumericKind::Unsigned, 8},   {"uint16", NumericKind::Unsigned, 16},
     {"uint32", NumericKind::Unsigned, 32}, {"uint64", NumericKind::Unsigned, 64},
-    {"float32", NumericKind::Float, 32},  {"float", NumericKind::Float, 64},
+    {"float32", NumericKind::Float, 32},   {"float", NumericKind::Float, 64},
 };
 
 constexpr StringView VectorNames[] = {"vec2", "vec3", "vec4"};
-
-// 깊은 struct 중첩을 따라갈 때의 상한이다(순환 struct 방어).
-constexpr uint32 MaxDefaultDepth = 64;
 
 } // namespace
 
 TypeChecker::TypeChecker(NameBinder& binder) noexcept
     : binder_(binder), compilation_(binder.compilation_), allocator_(binder.allocator_),
       inference_(binder.allocator_), constants_(binder.allocator_),
-      exhaustiveSwitches_(binder.allocator_) {
+      exhaustiveSwitches_(binder.allocator_), structDefault_(binder.allocator_),
+      firstCase_(binder.allocator_), nextCase_(binder.allocator_) {
+}
+
+void TypeChecker::AppendDisplayType(StringBuilderBase& out, uint32 type) const noexcept {
+    if (type == NoType || type >= compilation_.types_.Size()) {
+        out.Append("?");
+        return;
+    }
+
+    const TypeEntry& entry = compilation_.types_[type];
+    const Symbol& symbol = compilation_.symbols_[entry.symbol];
+    if (symbol.kind == SymbolKind::BuiltinType) {
+        const StringView canonical = LanguageNames()[symbol.index].canonical;
+        out.Append(canonical.IsEmpty() ? symbol.name : canonical);
+    } else {
+        out.Append(symbol.name);
+    }
+
+    if (entry.argumentCount != 0) {
+        out.Append("<");
+        for (uint32 index = 0; index < entry.argumentCount; ++index) {
+            if (index != 0) {
+                out.Append(", ");
+            }
+
+            AppendDisplayType(out, compilation_.typeArguments_[entry.firstArgument + index]);
+        }
+
+        out.Append(">");
+    }
+
+    if (entry.optional) {
+        out.Append("?");
+    }
 }
 
 uint32 TypeChecker::SymbolOf(uint32 type) const noexcept {
@@ -136,8 +167,7 @@ bool TypeChecker::IsReference(uint32 type) const noexcept {
         return false;
     }
 
-    const SchemaTypeKind kind =
-        compilation_.schemas_[entry.index].schema.Types()[entry.item].kind;
+    const SchemaTypeKind kind = compilation_.schemas_[entry.index].schema.Types()[entry.item].kind;
     return kind == SchemaTypeKind::Object || kind == SchemaTypeKind::Asset ||
            kind == SchemaTypeKind::Interface;
 }
@@ -303,33 +333,18 @@ bool TypeChecker::HasDefault(uint32 type) const noexcept {
                  entry.name == "CVarRef" || entry.name == "Class");
     case SymbolKind::Enum:
         return true;
-    case SymbolKind::Struct: {
-        // 모든 필드에 초기값이 있거나 그 타입에 기본값이 있어야 한다(깊이 상한 안에서).
-        static_cast<void>(MaxDefaultDepth);
-        const SyntaxTree& tree = compilation_.trees_[entry.module];
-        const uint32 members = tree.Child(entry.node, 3);
-        if (members == NoNode || tree.Node(members).kind != SyntaxKind::List) {
-            return true;
-        }
-
-        for (const uint32 member : tree.Children(members)) {
-            if (tree.Node(member).kind != SyntaxKind::Field || tree.Child(member, 4) != NoNode) {
-                continue;
-            }
-
-            const uint32 field = compilation_.NodeSymbol(entry.module, tree.Child(member, 2));
-            const uint32 fieldType = field == NoSymbol ? NoType : compilation_.symbols_[field].type;
-            if (fieldType != NoType && SymbolOf(fieldType) != symbol && !HasDefault(fieldType)) {
-                return false;
-            }
-        }
-
-        return true;
-    }
+    case SymbolKind::Struct:
+        // 모든 필드에 초기값이 있거나 그 타입에 기본값이 있어야 한다(AnalyzeStructs가 정했다).
+        return symbol >= structDefault_.Size() || structDefault_[symbol] != StructDefaultMissing;
     case SymbolKind::EngineType: {
         const SchemaTypeKind kind =
             compilation_.schemas_[entry.index].schema.Types()[entry.item].kind;
-        return kind == SchemaTypeKind::Struct || kind == SchemaTypeKind::Enum;
+        if (kind == SchemaTypeKind::Struct) {
+            return symbol >= structDefault_.Size() ||
+                   structDefault_[symbol] != StructDefaultMissing;
+        }
+
+        return kind == SchemaTypeKind::Enum;
     }
     default:
         return false; // 객체·에셋·interface 참조
@@ -349,8 +364,8 @@ bool TypeChecker::IsInterpolatable(uint32 type) const noexcept {
         return true;
     }
 
-    constexpr StringView Names[] = {"bool", "string", "Tag", "quat", "Rotator", "Color",
-                                    "Transform"};
+    constexpr StringView Names[] = {"bool",    "string", "Tag",      "quat",
+                                    "Rotator", "Color",  "Transform"};
     for (const StringView name : Names) {
         if (IsLanguage(type, name)) {
             return true;
@@ -438,9 +453,8 @@ uint32 TypeChecker::Substitute(uint32 type, uint32 receiver, Span<const uint32> 
 
     Array<uint32> arguments(allocator_);
     for (uint32 index = 0; index < entry.argumentCount; ++index) {
-        const uint32 argument =
-            Substitute(compilation_.typeArguments_[entry.firstArgument + index], receiver,
-                       functionArguments, chosen);
+        const uint32 argument = Substitute(compilation_.typeArguments_[entry.firstArgument + index],
+                                           receiver, functionArguments, chosen);
         if (argument == NoType) {
             return NoType;
         }

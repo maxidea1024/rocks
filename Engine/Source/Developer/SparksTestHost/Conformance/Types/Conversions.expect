@@ -1,0 +1,20 @@
+# Numeric conversion calls T(x): integer and float targets, constants checked at compile time;
+# S0502 float to integer, S0508 non-numbers, S0403/S0404 argument shape, unresolved arguments do not cascade.
+error S0502 18:9
+error S0502 19:9
+error S0502 20:9
+error S0109 21:14
+error S0109 22:15
+error S0109 23:17
+error S0508 24:17
+error S0508 25:15
+error S0508 26:15
+error S0508 27:13
+error S0508 28:9
+error S0508 29:9
+error S0403 30:9
+error S0403 31:9
+error S0404 32:9
+error S0317 33:15
+# Type rules only: flow rules and unused names (LC2d) are checked elsewhere.
+stage types

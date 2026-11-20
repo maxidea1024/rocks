@@ -1,0 +1,48 @@
+2:17-2:25 Index int?
+2:17-2:22 Identifier Array<int>
+2:23-2:24 IntegerLiteral int
+3:19-3:27 Index int?
+3:19-3:24 Identifier Array<int>
+3:25-3:26 Identifier int
+4:17-4:30 Index float?
+4:17-4:23 Identifier Map<string, float>
+4:24-4:29 String string
+5:5-5:13 Index int
+5:5-5:10 Identifier Array<int>
+5:11-5:12 IntegerLiteral int
+5:16-5:17 IntegerLiteral int
+6:5-6:19 Index float
+6:5-6:11 Identifier Map<string, float>
+6:12-6:18 String string
+6:22-6:25 FloatLiteral float
+7:9-7:19 Binary int
+7:9-7:14 Identifier int?
+7:18-7:19 IntegerLiteral int
+8:9-8:16 Identifier int?
+9:9-9:21 Binary float
+9:9-9:14 Identifier float?
+9:18-9:21 FloatLiteral float
+10:9-10:25 Member int?
+10:9-10:17 Index string?
+10:9-10:14 Identifier Array<string>
+10:15-10:16 IntegerLiteral int
+15:9-15:14 Identifier Array<int>
+15:15-15:18 String string
+16:9-16:14 Identifier Array<int>
+16:15-16:16 Identifier float
+17:9-17:15 Identifier Map<string, float>
+18:9-18:14 Identifier Set<string>
+19:9-19:13 Identifier string
+20:9-20:14 Identifier Array<int>?
+21:5-21:13 Index int
+21:5-21:10 Identifier Array<int>
+21:11-21:12 IntegerLiteral int
+21:16-21:19 String string
+22:5-22:16 Index float
+22:5-22:11 Identifier Map<string, float>
+22:12-22:15 String string
+22:19-22:20 IntegerLiteral float
+23:9-23:17 Index int?
+23:9-23:14 Identifier Array<int>
+23:15-23:16 IntegerLiteral int
+23:20-23:21 IntegerLiteral int

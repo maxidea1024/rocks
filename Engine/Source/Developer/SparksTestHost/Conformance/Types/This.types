@@ -1,0 +1,15 @@
+6:16-6:17 Identifier int
+17:17-17:18 IntegerLiteral int
+18:14-18:18 This Test:Main.Door
+23:16-23:20 This Test:Main.Door
+27:26-27:31 Identifier int
+28:21-28:25 This Test:Main.Door
+29:13-29:21 Member int
+29:13-29:15 Identifier Test:Main.Door
+30:13-30:23 Binary bool
+30:13-30:17 This Test:Main.Door
+30:21-30:23 Identifier Test:Main.Door
+31:13-31:19 Parenthesized Test:Main.Door
+31:14-31:18 This Test:Main.Door
+35:13-35:17 This Test:Main.Door
+36:13-36:15 Identifier float
