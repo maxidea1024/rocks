@@ -101,7 +101,7 @@ Log::Info(LogGame, "Spawned {@Player} at {Frame}", player, frame);
 // Spawned Player { name: "Ann", hp: 30, team: Blue, scores: [3, 1, 4, ... 12 items] } at 42
 ```
 
-- **리플렉션 타입**(`ROCKS_STRUCT`·`ROCKS_CLASS`): 그 타입의 생성 헤더와 `<Object/LogStructure.h>`를 include하면 바로 쓸 수 있다. 생성 헤더는 이 헤더를 include하지 않는다. `{@Name}`으로 쓰는 번역 단위마다 직접 include한다. Formatter도 가진 리플렉션 타입은 그 타입을 로그에 쓰는 모든 번역 단위에서 include해야 한다. 어떤 곳은 펼치고 어떤 곳은 이 헤더 없이 Formatter로 쓰면 번역 단위마다 판정이 달라진다(ODR 위반, 설계 14.2절). MetaCompiler가 낸 필드 방문 함수(`GeneratedType<T>::VisitFields`)로 멤버를 직접 읽으므로 registry 조회·할당이 없다. 필드 이름은 C++ 멤버 이름, 타입 태그는 타입 도구 이름이다.
+- **리플렉션 타입**(`ROCKS_STRUCT`·`ROCKS_CLASS`): 그 타입의 생성 헤더와 `<Object/LogStructure.h>`를 include하면 바로 쓸 수 있다. 생성 헤더는 이 헤더를 include하지 않는다. 리플렉션 타입을 로그 인자로 쓰는 번역 단위는 `{Name}`이든 `{@Name}`이든 이 헤더를 직접 include한다. 빠뜨리면 `static_assert`("rocks::LogStructure<T> is declared but its ... not visible in this translation unit ...")로 컴파일되지 않는다. 특수화 선언은 생성 헤더 쪽에 있어 판정이 번역 단위마다 같고, 정의가 없는 곳에서 쓰는 것만 막는다(설계 14.1.6절 L30). MetaCompiler가 낸 필드 방문 함수(`GeneratedType<T>::VisitFields`)로 멤버를 직접 읽으므로 registry 조회·할당이 없다. 필드 이름은 C++ 멤버 이름, 타입 태그는 타입 도구 이름이다.
   - enum은 열거자 이름(선언되지 않은 값은 정수)이다.
   - `Optional`은 값 또는 `null`이다.
   - 객체 참조(`ObjectRef`·`WeakObjectRef`·`ObjectRefArray` 원소)는 대상을 읽지 않고 handle의 `"registry:slot:generation"`(null이면 `null`)만 담는다. registry는 프로세스 안에서 Registry를 만든 순서대로 1부터 매기는 번호다(주소가 아니다). 같은 실행 순서면 같고, 다른 실행과는 다를 수 있다.
@@ -136,7 +136,7 @@ Log::Info(LogGame, "Spawned {@Player} at {Frame}", player, frame);
   - `{@Name:spec}`은 `LogTemplateError_SpecOnStructure`다.
   - `{@Name}` 인자에 `LogStructure`가 없으면 `LogTemplateError_StructureWithoutLogStructure`다.
   - `LogStructure`만 있는 타입을 `{Name}`에 쓰면 `LogTemplateError_StructureArgumentWithoutAt`다.
-  - `Formatter`도 `LogStructure`도 없는 타입은 `static_assert`("Log argument type needs a rocks::Formatter<T> or rocks::LogStructure<T> specialization ...")로 거부한다. 리플렉션 타입이면 `<Object/LogStructure.h>` include를 빠뜨린 경우다.
+  - `Formatter`도 `LogStructure`도 없는 타입은 `static_assert`("Log argument type needs a rocks::Formatter<T> or rocks::LogStructure<T> specialization ...")로 거부한다. 리플렉션 타입의 include 누락은 이 문구가 아니라 위의 "is declared but ..." 문구로 드러난다.
   - `LogStructure`는 클래스 타입에만 특수화한다. enum·정수에 두면 `static_assert`("rocks::LogStructure<T> is only supported for class types ...")다.
   - `RuntimeTemplate`은 렌더 때 판정한다. `{@Name}`에 특수화 없는 인자와 `{@Name:spec}`은 `[template error: ...]`를 붙인다. `LogStructure`만 있는 타입을 일반 자리에 쓴 경우는 그 자리만 `<format error>`다(렌더 쪽은 인자 타입을 모른다).
 - **수명:** 캡처는 문자열 포인터만 담는다. 필드 이름 리터럴은 `VisitFields`·`Write`를 인스턴스화한 모듈에 있다. 타입 태그·enum 기호는 `Schema()`를 가진 모듈(생성 코드가 든 모듈)에 있다. 그 어느 모듈이든 내리기 전에 `LogSystem::Flush`로 기록을 비운다.

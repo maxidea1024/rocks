@@ -6,7 +6,7 @@ namespace Rocks.ToolTests;
 internal static partial class MetaTests
 {
     // struct·클래스마다 GeneratedType<T>::VisitFields를 낸다: 선언 순서(가장 먼 base 필드부터, 선언 타입 안에서는 소스 순서)대로 visitor.Field("이름", 값)이고, 값은
-    // 멤버 포인터 직접 읽기(클래스는 선언 클래스의 멤버 포인터, private 포함), 자기 bitfield는 헤더 안의 직접 읽기(Get_ 정의는 생성 소스에 있다), 상속한 bitfield는 base의 Get_이다. 필드가 없으면
+    // 멤버 포인터 직접 읽기(클래스는 선언 클래스의 멤버 포인터, private 포함), 자기 bitfield는 헤더 안의 직접 읽기(Get_ 정의는 생성 소스에 있다), 상속한 bitfield는 선언 타입으로 바꾼 직접 읽기다. 필드가 없으면
     // 매개변수 이름 없는 빈 본문이다. 생성 헤더를 ObjectRuntime 일반 특수화(Object/LogStructure.h)와 함께 컴파일해 템플릿을
     // 인스턴스화한다.
     private static void RegisterLogFieldVisitors(MetaContext context)
@@ -53,6 +53,32 @@ internal static partial class MetaTests
                 "}\n";
             ProcessResult compiled = await probe.CompileGeneratedAsync(consumer);
             Verify.Equal(0, compiled.ExitCode, "generated field visitors compile with the log structure specialization: " + compiled.StdOut + compiled.StdErr);
+        });
+
+        // 특수화 가시성(Docs/Design/LoggingSystem.ko.md 14.1.6절 L30): 일반 특수화의 선언은 생성 헤더가 include하는
+        // Object/GeneratedFieldAccess.h에 있으므로 Object/LogStructure.h 없이도 HasLogStructure 판정이 같고(정의만 안 보인다),
+        // 그 상태로 로그 인자 경로(캡처 쓰기 함수)를 인스턴스화하면 static_assert로 거부한다.
+        suite.Add("Meta.LogStructureDeclarationWithoutDefinitionHeader", async () =>
+        {
+            using Probe probe = new(options, actualEnvironment, generator, compiler);
+            string source = Preamble +
+                "ROCKS_STRUCT()\nstruct Leaf {\nROCKS_PROPERTY() rocks::int32 value = 0;\n};\n" +
+                "struct Plain {\nint value = 0;\n};\n}\n";
+            await probe.GenerateAsync(source);
+
+            const string declared = "#include <Core/Diagnostics/LogStructure.h>\n" +
+                "static_assert(rocks::HasLogStructure<probe::Leaf> && !rocks::detail::LogStructureDefined<probe::Leaf>);\n" +
+                "static_assert(!rocks::HasLogStructure<probe::Plain>);\n";
+            ProcessResult accepted = await probe.CompileGeneratedAsync(declared);
+            Verify.Equal(0, accepted.ExitCode, "reflected type has a declared log structure without the definition header: " + accepted.StdOut + accepted.StdErr);
+
+            const string used = "#include <Core/Diagnostics/LogStructure.h>\n" +
+                "constexpr rocks::detail::LogStructureWrite write = rocks::detail::LogStructureWriteOf<probe::Leaf>();\n";
+            ProcessResult rejected = await probe.CompileGeneratedAsync(used);
+            string output = rejected.StdOut + rejected.StdErr;
+            Verify.That(rejected.ExitCode != 0 && output.Contains("is declared but its", StringComparison.Ordinal) &&
+                output.Contains("<Object/LogStructure.h>", StringComparison.Ordinal),
+                "logging a reflected type without <Object/LogStructure.h> must fail with the definition static_assert: " + output);
         });
     }
 }

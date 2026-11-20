@@ -570,12 +570,13 @@ internal static class CppEmitter
         Line($"template <class Visitor> static constexpr void VisitFields(const {native}& value, Visitor& visitor) noexcept {{");
         foreach (FieldModel field in DeclarationOrder(schema, type))
         {
-            // 자기 bitfield는 헤더 안에서 직접 읽는다 — Get_ 정의는 생성 소스에 있어(GS2) 다른 모듈이 VisitFields를 인스턴스화하면
-            // 모듈 밖 함수를 부르게 된다. 상속한 bitfield는 base의 private 멤버라 base의 Get_을 부른다(생성 함수표와 같은 제약).
+            // bitfield는 멤버 포인터를 만들 수 없어 헤더 안에서 직접 읽는다. Get_ 정의는 생성 소스에 있어(GS2) 다른 모듈이
+            // VisitFields를 인스턴스화하면 export되지 않은 모듈 밖 함수를 부르게 된다. 상속한 bitfield는 선언 타입으로 바꿔
+            // 읽는다(ROCKS_GENERATED_BODY가 모든 GeneratedType을 friend로 두므로 base의 private 멤버도 읽을 수 있다).
             string read = field.Bitfield && field.Owner == type.Name
                 ? $"static_cast<bool>(value.{field.Name} != 0)"
                 : field.Bitfield
-                ? $"GeneratedType<::{schema.Find(field.Owner).NativeName}>::Get_{field.Name}(value)"
+                ? $"static_cast<bool>(static_cast<const ::{schema.Find(field.Owner).NativeName}&>(value).{field.Name} != 0)"
                 : $"value.*(&{string.Format(CultureInfo.InvariantCulture, ownerFormat, field.Owner)}::{field.Name})";
             Line($"visitor.Field({Label(field.Name)}, {read});");
         }
