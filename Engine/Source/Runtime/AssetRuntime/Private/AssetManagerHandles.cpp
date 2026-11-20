@@ -115,8 +115,10 @@ void AssetManager::Impl::DrainReleases() noexcept {
             ManagerTicket& ticket = tickets[slot.record];
             ticket.released = true;
             ticket.slot = ManagerNoIndex;
+            // 끝나기 전이거나 callback을 아직 부르지 않았으면 Cancelled로 끝낸다(11.7절 5 — 끝난
+            // 티켓도 전달 전이면 그 결과 대신 Cancelled를 받는다).
             if (!slot.revoked) {
-                if (!ticket.done) {
+                if (!ticket.done || (ticket.callbackRegistered && !ticket.callbackDelivered)) {
                     EndTicket(slot.record, ErrorCode::Cancelled);
                 } else {
                     ReleaseTicketHold(slot.record);
@@ -165,6 +167,11 @@ void AssetManager::Impl::DrainReleases() noexcept {
 
 Result<uint32> AssetManager::Impl::TakeTicket() noexcept {
     if (freeTicket == ManagerNoIndex) {
+        // 전달 목록은 티켓·묶음 표 크기만큼 늘 잡아 둔다(Pump·Shutdown의 전달은 할당하지 않는다).
+        if (auto reserved = deliver.TryReserve(tickets.Size() + 1); !reserved) {
+            return Result<uint32>::Failure(reserved.Error());
+        }
+
         if (auto added = tickets.TryEmplaceBack(); !added) {
             return Result<uint32>::Failure(added.Error());
         }
@@ -189,7 +196,8 @@ void AssetManager::Impl::FreeTicket(uint32 index) noexcept {
 // 로더 요청을 내고 티켓 기록을 만든다. 로더가 바로 Succeeded로 답하면(상주) 그 자리에서 보유를
 // 건다(11.7절 4 — revive).
 Result<uint32> AssetManager::Impl::StartTicket(const AssetRequest& request,
-                                               AssetDiagnostic* failure) noexcept {
+                                               AssetDiagnostic* failure,
+                                               bool deferredHold) noexcept {
     auto taken = TakeTicket();
     if (!taken) {
         return taken;
@@ -211,13 +219,15 @@ Result<uint32> AssetManager::Impl::StartTicket(const AssetRequest& request,
     ticket.scope = request.scope == nullptr ? ManagerNoIndex : request.scope->index_;
     ticket.loaderHandle = requested.Value();
     ticket.loaderHeld = true;
+    ticket.deferredHold = deferredHold;
     CompleteTicket(index);
     return Result<uint32>::Success(index);
 }
 
 void AssetManager::Impl::CompleteTicket(uint32 index) noexcept {
     ManagerTicket& ticket = tickets[index];
-    if (ticket.done || !ticket.loaderHeld) {
+    // 끝나지 않은 티켓은 로더 요청을 쥐고 있다(끝낼 때만 놓는다 — EndTicket·FinishTicketResult).
+    if (ticket.done) {
         return;
     }
 
@@ -263,14 +273,15 @@ void AssetManager::Impl::FinishTicketResult(uint32 index, AssetLoadStatus status
         }
     }
 
-    AddHold(package, &ManagerUnit::tickets);
+    AddHold(package, ticket.deferredHold ? &ManagerUnit::deferred : &ManagerUnit::tickets);
     ticket.heldPackage = package;
 }
 
 void AssetManager::Impl::ReleaseTicketHold(uint32 index) noexcept {
     ManagerTicket& ticket = tickets[index];
     if (ticket.heldPackage != ManagerNoIndex) {
-        DropHold(ticket.heldPackage, &ManagerUnit::tickets);
+        DropHold(ticket.heldPackage,
+                 ticket.deferredHold ? &ManagerUnit::deferred : &ManagerUnit::tickets);
         ticket.heldPackage = ManagerNoIndex;
     }
 }
@@ -321,13 +332,16 @@ uint32 AssetManager::Impl::DeliverCallbacks() noexcept {
     for (usize index = 0; index < tickets.Size(); ++index) {
         const ManagerTicket& ticket = tickets[index];
         if (ticket.used && ticket.done && ticket.callbackRegistered && !ticket.callbackDelivered) {
-            // 용량은 Pump가 티켓 표 크기로 잡았다.
+            // 용량은 티켓 표가 자랄 때 잡았다(TakeTicket).
             (void)deliver.TryPushBack(static_cast<uint32>(index));
         }
     }
 
+    // callback 안의 요청이 전달 목록을 다시 잡을 수 있으므로 색인으로 돈다(11.7절 5 재진입).
     uint32 delivered = 0;
-    for (uint32 index : deliver) {
+    const usize count = deliver.Size();
+    for (usize position = 0; position < count; ++position) {
+        const uint32 index = deliver[position];
         AssetReadyCallback callback = Move(tickets[index].callback);
         tickets[index].callbackDelivered = true;
         const AssetDiagnostic diagnostic = tickets[index].diagnostic;
@@ -365,14 +379,12 @@ uint32 AssetManager::Impl::RunDeferred() noexcept {
             continue;
         }
 
+        // scope 회수는 그 scope의 명령에 stop을 먼저 적는다(RevokeScope) — 닫힌 scope는 stop으로
+        // 온다.
         const uint32 ticketIndex = deferred[index].ticket;
-        ErrorCode stop = deferred[index].stop;
+        const ErrorCode stop = deferred[index].stop;
         if (stop == ErrorCode::None && !tickets[ticketIndex].done) {
             continue;
-        }
-
-        if (stop == ErrorCode::None && !ScopeOpen(deferred[index].scope)) {
-            stop = ErrorCode::ScopeClosed;
         }
 
         DeferredRun run = Move(deferred[index].run);
@@ -414,7 +426,7 @@ uint32 AssetManager::Impl::RunDeferred() noexcept {
 }
 
 bool AssetManager::Impl::ScopeOpen(uint32 scope) const noexcept {
-    return scope == ManagerNoIndex || !scopes[scope].revoked;
+    return !scopes[scope].revoked;
 }
 
 // scope(NoIndex면 전부 — Shutdown)의 티켓·lease·보류 명령을 회수한다(11.7절 7).
@@ -425,9 +437,10 @@ void AssetManager::Impl::RevokeScope(uint32 scope, ErrorCode reason) noexcept {
     }
 
     for (uint32 index = 0; index < blockCount * ManagerSlotsPerBlock; ++index) {
+        // 소멸했지만 해제 큐에 남은 lease도 여기서 회수한다(objectAlive는 큐를 처리할 때 칸과 함께
+        // 지운다) — 큐 처리는 회수된 lease의 보유를 다시 빼지 않는다.
         ManagerSlot& slot = Slot(index);
-        if (slot.kind != ManagerSlotKind::Lease || !slot.objectAlive || slot.revoked ||
-            (!all && slot.scope != scope)) {
+        if (slot.kind != ManagerSlotKind::Lease || slot.revoked || (!all && slot.scope != scope)) {
             continue;
         }
 

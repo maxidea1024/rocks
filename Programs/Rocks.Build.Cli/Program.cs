@@ -153,6 +153,12 @@ namespace Rocks.Build.Cli
             var rulesPath = options.GetValueOrDefault("rules", HostTool(root, "Rocks.Engine.Rules"));
             var rules = RuleLoader.Load(rulesPath, targetName, context);
             // 설치 SDK의 엔진 라이브러리는 구성 기본 로그 하한으로 빌드되어야 한다. 게임은 같은 기본값으로 컴파일되므로 다르면 ODR 위반이다.
+            if (args[0] == "sdk" && rules.Target.LinkType != NativeLinkType.Monolithic)
+            {
+                throw new ArgumentException($"Target {targetName}: an installed SDK is exported from a Monolithic build only (Modular SDK export is " +
+                    "not supported yet — BuildTargets BS8d).");
+            }
+
             if (args[0] == "sdk" && rules.Target.LogCompiledMinimum is not null)
             {
                 throw new ArgumentException($"Target {targetName}: LogCompiledMinimum cannot be overridden for an installed SDK export " +
@@ -242,6 +248,8 @@ namespace Rocks.Build.Cli
                     Toolchain = toolchain,
                     Configuration = configuration,
                     LogCompiledMinimum = rules.Target.LogCompiledMinimum,
+                    LinkType = rules.Target.LinkType,
+                    TargetName = rules.Target.Name,
                     RootDirectory = root,
                     OutputDirectory = output,
                     Modules = modules,
@@ -345,6 +353,7 @@ namespace Rocks.Build.Cli
                         // native 검사의 컴파일 시험(AlgorithmsCompilerTests 등)도 Core 헤더를 include하므로 구성·대상 OS 매크로를 받는다.
                         new[] { "native", "--root", root, "--native-executable", executable, "--compiler", toolchain.CompilerPath, "--compile-commands", result.CompilationDatabasePath,
                             "--clang-arg", "-D" + NativeConfigurations.BuildMacro(configuration), "--clang-arg", "-D" + NativeConfigurations.PlatformMacro(toolchain.Platform),
+                            "--clang-arg", "-D" + LinkTypes.MonolithicDefine(rules.Target.LinkType),
                             "--json", Path.Combine(output, "tool-native-report.json") }
                     };
                     if (configuration == NativeConfiguration.Asan)
@@ -358,6 +367,7 @@ namespace Rocks.Build.Cli
                         checks.Add(["meta", "--root", root, "--compiler", toolchain.CompilerPath, "--metacompiler", HostTool(root, "Rocks.MetaCompiler"),
                             "--clang-arg", "-D" + NativeConfigurations.BuildMacro(configuration),
                             "--clang-arg", "-D" + NativeConfigurations.PlatformMacro(toolchain.Platform),
+                            "--clang-arg", "-D" + LinkTypes.MonolithicDefine(rules.Target.LinkType),
                             "--json", Path.Combine(output, "tool-meta-report.json")]);
                     }
 

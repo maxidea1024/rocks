@@ -29,6 +29,7 @@ internal static class BuildInfoTests
 
         CompilerVersionAndTriple(toolchain);
         ToolchainVersionChecks(toolchain);
+        await BrokenAndroidNdkAsync(root);
         pass("BuildInfo: version line brackets, effective triple checks, real discovery identity without host paths");
 
         await EnvironmentHygieneAsync(request, root);
@@ -235,6 +236,8 @@ internal static class BuildInfoTests
         Check(ToolchainCheck.Verify(NativePlatform.Windows, "clang version 22.1.8 (ca7933e47d3a3451d81e72ac174dcb5aa28b59d1)", Stl1452),
             "LLVM 22.1.8 with STL 14.52 is verified");
         Check(ToolchainCheck.Verify(NativePlatform.MacOS, "Apple clang version 17.0.0 (clang-1700.0.13.5)", null), "Apple clang 17.0.0 (Xcode 16.4) is verified");
+        Check(!ToolchainCheck.Verify(NativePlatform.Windows, "clang version 21.1.6", Stl1429),
+            "LLVM 21.1.6 with an older STL is above the Windows minimum but no longer verified");
         // 검증 목록은 첫 줄 전체로 대조한다: 같은 번호의 다른 Xcode 빌드·다른 commit의 빌드는 미검증이다.
         Check(!ToolchainCheck.Verify(NativePlatform.MacOS, "Apple clang version 17.0.0 (clang-1700.3.19.1)", null), "another Xcode build of Apple clang 17.0.0 is unverified");
         Check(!ToolchainCheck.Verify(NativePlatform.Windows, "clang version 22.1.8 (0123456789abcdef0123456789abcdef01234567)", Stl1452),
@@ -282,8 +285,53 @@ internal static class BuildInfoTests
             ToolchainCheck.Enforce(toolchain with { ToolchainVerified = false }, false) is null &&
             ToolchainCheck.Enforce(toolchain with { ToolchainVerified = false }, true)?.Contains("accepts only verified toolchains", StringComparison.Ordinal) == true,
             "require-verified-toolchain on rejects only unverified toolchains");
+        // ROCKS_MSVC_TOOLSET(로컬에서 나란히 설치된 MSVC 도구 모음 고르기): 형식이 틀린 값과 만든 환경의 VCToolsVersion 불일치는 거부한다.
+        // CI 러너에 14.44가 없어도 도는 판정 시험이다(VsDevCmd는 부르지 않는다).
+        NativeEnvironment.CheckMsvcToolsetVersion("14.44");
+        NativeEnvironment.CheckMsvcToolsetVersion("14.44.35207");
+        NativeEnvironment.CheckActiveMsvcToolset("14.44", "14.44.35207");
+        NativeEnvironment.CheckActiveMsvcToolset("14.44.35207", "14.44.35207 ");
+        foreach (Action invalid in new Action[]
+                 {
+                     () => NativeEnvironment.CheckMsvcToolsetVersion("v143"),
+                     () => NativeEnvironment.CheckMsvcToolsetVersion("14.44 & calc"),
+                     () => NativeEnvironment.CheckActiveMsvcToolset("14.44", "14.52.36014"),
+                     () => NativeEnvironment.CheckActiveMsvcToolset("14.4", "14.44.35207"),
+                     () => NativeEnvironment.CheckActiveMsvcToolset("14.44", null)
+                 })
+        {
+            try
+            {
+                invalid();
+                throw new InvalidOperationException("ROCKS_MSVC_TOOLSET check accepted an invalid or inactive toolset");
+            }
+            catch (InvalidOperationException error) when (error.Message.Contains(NativeEnvironment.MsvcToolsetVariable, StringComparison.Ordinal))
+            {
+            }
+        }
+
         Check(ToolchainTable.IsClangFormatVersion("clang-format version " + ToolchainTable.ClangFormatVersion + "\n") &&
             !ToolchainTable.IsClangFormatVersion("clang-format version " + ToolchainTable.ClangFormatVersion + "0\n"), "clang-format version is matched exactly");
+    }
+
+    // NDK 설정이 아예 없을 때만 AndroidNdkNotConfiguredException이다(교차 빌드 시험이 건너뛰는 유일한 경우). 설정한 NDK가 망가졌으면
+    // (source.properties 없음, 도구 없음) FileNotFoundException으로 실패해 시험이 PASS로 건너뛰지 않는다.
+    private static async Task BrokenAndroidNdkAsync(string root)
+    {
+        string empty = Directory.CreateDirectory(Path.Combine(root, "broken ndk", "empty")).FullName;
+        string toolless = Directory.CreateDirectory(Path.Combine(root, "broken ndk", "toolless")).FullName;
+        File.WriteAllText(Path.Combine(toolless, "source.properties"), "Pkg.Desc = Android NDK\nPkg.Revision = " + ToolchainTable.AndroidNdkVersion + "\n");
+        foreach (string ndk in new[] { empty, toolless })
+        {
+            try
+            {
+                await NativeToolchains.DiscoverAndroidAsync("arm64", 26, ndk);
+                throw new InvalidOperationException("A broken Android NDK was accepted: " + ndk);
+            }
+            catch (FileNotFoundException)
+            {
+            }
+        }
     }
 
     // 2. 버전 줄 괄호 규칙과 effective triple 검사, 실제 discovery 신원.

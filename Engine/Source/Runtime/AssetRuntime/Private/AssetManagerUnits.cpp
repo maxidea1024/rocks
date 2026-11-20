@@ -238,13 +238,61 @@ void AssetManager::Impl::UnlinkEdge(ObjectHandle owner, ObjectHandle target) noe
     removeFrom(target, owner, false);
 }
 
-// 관찰자 묶음을 간선 표에 적용한다(11.7절 3 — 묶음은 키마다 순 변화라 키마다 전후 값으로 판정한다).
+namespace {
+
+// 묶음의 handle은 모두 이 AssetManager의 Registry 것이라 칸·세대만 비교한다.
+bool HandleLess(ObjectHandle left, ObjectHandle right) noexcept {
+    if (left.slot != right.slot) {
+        return left.slot < right.slot;
+    }
+
+    return left.generation < right.generation;
+}
+
+} // namespace
+
+// 관찰자 키는 원인·트랜잭션까지 나누므로 같은 (소유, 대상) 쌍이 여러 항목으로 온다(순서는 키가 처음
+// 생긴 순서). 쌍별로 합쳐야 판정이 실제 다중도 변화를 본다(11.7절 3) — 제자리 정렬 뒤 이웃을
+// 합산하고 0인 쌍은 뺀다(할당 없음).
+void AssetManager::Impl::CoalesceChanges() noexcept {
+    changes.Sort([](const ReferenceEdgeDelta& left, const ReferenceEdgeDelta& right) noexcept {
+        if (!(left.ownerPackage == right.ownerPackage)) {
+            return HandleLess(left.ownerPackage, right.ownerPackage);
+        }
+
+        return HandleLess(left.targetPackage, right.targetPackage);
+    });
+    usize kept = 0;
+    for (usize index = 0; index < changes.Size(); ++index) {
+        if (kept != 0 && changes[kept - 1].ownerPackage == changes[index].ownerPackage &&
+            changes[kept - 1].targetPackage == changes[index].targetPackage) {
+            changes[kept - 1].delta += changes[index].delta;
+            continue;
+        }
+
+        if (kept != 0 && changes[kept - 1].delta == 0) {
+            --kept;
+        }
+
+        changes[kept++] = changes[index];
+    }
+
+    if (kept != 0 && changes[kept - 1].delta == 0) {
+        --kept;
+    }
+
+    (void)changes.TryResize(kept);
+}
+
+// 관찰자 묶음을 간선 표에 적용한다(11.7절 3 — 묶음을 쌍별로 합친 뒤 쌍마다 전후 값으로 판정한다).
 // 할당은 모두 먼저 잡고 실패하면 묶음을 쥔 채 다음 Pump에서 다시 한다.
 Result<void> AssetManager::Impl::ApplyEdgeChanges() noexcept {
     if (changes.IsEmpty()) {
         if (auto taken = observer->TakeChanges(changes); !taken) {
             return taken;
         }
+
+        CoalesceChanges();
     }
 
     usize newKeys = 0;
@@ -365,8 +413,8 @@ Result<void> AssetManager::Impl::ApplyEdgeChanges() noexcept {
 
     changes.Clear();
     for (usize index = 0; index < cycleOwners.Size(); ++index) {
-        // 앞의 병합으로 단위가 바뀌었을 수 있다 — 지금의 단위로 다시 본다(CheckCycle이 같은 단위·
-        // 지운 단위를 거른다).
+        // 앞의 병합이 단위를 지웠을 수 있다(CheckCycle이 지운 단위를 거른다 — 남은 두 단위는 여전히
+        // 다른 단위다).
         CheckCycle(cycleOwners[index], cycleTargets[index]);
     }
 
@@ -377,7 +425,8 @@ Result<void> AssetManager::Impl::ApplyEdgeChanges() noexcept {
 // 후방 도달 — 11.7절 3). Discarding 단위는 지나지 않는다. 작업 공간 용량은 Pump가 단위 표 크기로
 // 잡았다.
 void AssetManager::Impl::CheckCycle(uint32 from, uint32 to) noexcept {
-    if (from == to || !units[from].used || !units[to].used ||
+    // 쌓을 때 from ≠ to였고 병합은 단위를 지우기만 하므로 같은 단위는 오지 않는다.
+    if (!units[from].used || !units[to].used ||
         units[from].state == ResidentUnitState::Discarding ||
         units[to].state == ResidentUnitState::Discarding) {
         return;

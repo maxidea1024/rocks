@@ -41,6 +41,32 @@ public static class NativeEnvironment
     /// </summary>
     public const string MsvcToolsetVariable = "ROCKS_MSVC_TOOLSET";
 
+    /// <summary>
+    /// <see cref="MsvcToolsetVariable"/> 값이 MSVC 도구 모음 버전 형식(<c>14.44</c>, <c>14.44.35207</c>)인지 본다. 아니면 InvalidOperationException이다
+    /// (VsDevCmd에 넘기기 전에 거부한다).
+    /// </summary>
+    public static void CheckMsvcToolsetVersion(string toolset)
+    {
+        if (!System.Text.RegularExpressions.Regex.IsMatch(toolset, @"^[0-9]{2}\.[0-9]{1,2}(\.[0-9]{1,5})?$",
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)))
+        {
+            throw new InvalidOperationException($"{MsvcToolsetVariable} must be an MSVC toolset version such as 14.44 or 14.44.35207: '{toolset}'.");
+        }
+    }
+
+    /// <summary>
+    /// 만든 환경의 <c>VCToolsVersion</c>(actual — 없으면 null)이 고른 도구 모음(wanted — <c>14.44</c>면 <c>14.44.*</c>)인지 본다. 아니면
+    /// InvalidOperationException이다.
+    /// </summary>
+    public static void CheckActiveMsvcToolset(string wanted, string? actual)
+    {
+        if (actual is null || !(actual.Trim() + ".").StartsWith(wanted + ".", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"{MsvcToolsetVariable}={wanted} is not the active MSVC toolset (VCToolsVersion={actual}); " +
+                "install that toolset or start from a shell without a Visual Studio environment.");
+        }
+    }
+
     /// <summary>Windows 대상의 Keyed 변수다(Visual Studio·Windows SDK 환경과 SOURCE_DATE_EPOCH).</summary>
     public static readonly IReadOnlyList<string> WindowsKeyedVariables =
     [
@@ -122,19 +148,15 @@ public static class NativeEnvironment
             {
                 throw new InvalidOperationException("Unsupported Visual Studio installation path.");
             }
-            // ROCKS_MSVC_TOOLSET(예: 14.44)은 같은 Visual Studio 안에 나란히 설치된 MSVC 도구 모음 중 하나를 고른다(VsDevCmd
-            // -vcvars_ver, UE의 선호 도구 모음 고정과 같은 목적). 비면 그 설치의 기본(최신) 도구 모음이다. MSVC STL은 받는 Clang
-            // 버전의 하한을 올리므로(14.52는 Clang 22 이상), 검증한 Clang과 짝이 맞는 도구 모음을 CI에서 고정할 때 쓴다.
+            // ROCKS_MSVC_TOOLSET(예: 14.44)은 로컬에서 같은 Visual Studio 안에 나란히 설치된 MSVC 도구 모음 중 하나를 고를 때 쓴다(VsDevCmd
+            // -vcvars_ver, UE의 선호 도구 모음 고정과 같은 목적). 비면 그 설치의 기본(최신) 도구 모음이다. MSVC STL은 받는 Clang 버전의
+            // 하한을 올리므로(14.52는 Clang 22 이상), 오래된 LLVM과 짝이 맞는 도구 모음을 고를 때 쓴다. CI는 쓰지 않는다
+            // (Docs/Design/ClangVersionSupport.ko.md 6.4절).
             List<string> developerArguments = ["/d", "/u", "/c", "call", script, "-no_logo", "-arch=x64", "-host_arch=x64"];
             string? toolset = source.TryGetValue(MsvcToolsetVariable, out string? pinned) && !string.IsNullOrEmpty(pinned) ? pinned : null;
             if (toolset is not null)
             {
-                if (!System.Text.RegularExpressions.Regex.IsMatch(toolset, @"^[0-9]{2}\.[0-9]{1,2}(\.[0-9]{1,5})?$",
-                    System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)))
-                {
-                    throw new InvalidOperationException($"{MsvcToolsetVariable} must be an MSVC toolset version such as 14.44 or 14.44.35207: '{toolset}'.");
-                }
-
+                CheckMsvcToolsetVersion(toolset);
                 developerArguments.Add("-vcvars_ver=" + toolset);
             }
 
@@ -157,13 +179,10 @@ public static class NativeEnvironment
             }
         }
 
-        if (OperatingSystem.IsWindows() && source.TryGetValue(MsvcToolsetVariable, out string? wanted) && !string.IsNullOrEmpty(wanted) &&
-            !(source.TryGetValue("VCToolsVersion", out string? actual) && actual is not null &&
-              (actual.Trim() + ".").StartsWith(wanted + ".", StringComparison.Ordinal)))
+        if (OperatingSystem.IsWindows() && source.TryGetValue(MsvcToolsetVariable, out string? wanted) && !string.IsNullOrEmpty(wanted))
         {
             // 이미 초기화된 환경(VCToolsInstallDir가 있는 셸)이나 VsDevCmd가 다른 도구 모음을 골랐으면 고정이 지켜지지 않은 것이다.
-            throw new InvalidOperationException($"{MsvcToolsetVariable}={wanted} is not the active MSVC toolset (VCToolsVersion={actual}); " +
-                "install that toolset or start from a shell without a Visual Studio environment.");
+            CheckActiveMsvcToolset(wanted, source.GetValueOrDefault("VCToolsVersion"));
         }
 
         // Visual Studio 환경 스크립트의 출력까지 합친 뒤 고른다. 아래 probe도 고른 환경으로 실행한다.

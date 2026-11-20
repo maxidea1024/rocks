@@ -1,6 +1,6 @@
 # 빌드 타깃·모듈 의존·플러그인 조건 설계
 
-기준일: 2026-11-20, 개정 5. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
+기준일: 2026-11-20, 개정 6. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
 - **타깃 종류 확장**: Editor·Client·Server 타깃과, 타깃 종류에 따라 코드·데이터를 컴파일에서 빼는 매크로.
 - **모듈 의존 공개 범위**: 의존마다 Public(소비자에게 include·정의를 넘김)과 Private(이 모듈 안에서만 씀)을 나눈다.
 - **플러그인 활성 조건**: 프로젝트가 플러그인을 특정 타깃·플랫폼·구성에서만 켠다.
@@ -288,6 +288,18 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
   - Windows: import 라이브러리를 링크하고, 실행 파일 폴더의 DLL은 기본 탐색으로 적재된다.
 - `Modular`는 Debug·Development 구성에서만 허용한다. Asan·Coverage 구성과 Release는 `Monolithic`만이다(Editor는 Release로 빌드하지 않는다 — BD20). 필요해지면 다시 본다.
 
+**BS8 하위 단계(개정 6).** BS8은 범위가 넓어(모든 모듈의 공개 헤더·생성 코드·정책·검사 체인) 넷으로 나눠 차례로 한다. 각 단계는 Monolithic 동작을 바꾸지 않는다(매크로 값만 더해진다).
+- **BS8a 빌드 기반**: 타깃 규칙 `LinkType`(Editor 기본 `Modular`, 나머지 `Monolithic`)과 요청 `NativeBuildRequest.LinkType`, `Modular` 거부(Android, Asan·Coverage·Release 구성), `ROCKS_MONOLITHIC`(구성 매크로처럼 모든 compile 인자 — 타깃 하나에 한 값, `Base/Compiler.h`가 기본값 없이 검사), `ROCKS_DLLEXPORT`·`ROCKS_DLLIMPORT`, 모듈 API 매크로 `ROCKS_<MODULE>_API`(대문자 모듈 이름) 주입, 예약 매크로 거부, `Modular` 공유 라이브러리 링크(파일 이름·import 라이브러리·install name·rpath·`-soname`·`-fPIC`·가시성 옵션). 완료 기준: Monolithic 모든 타깃의 `compile_commands.json`이 전환 전과 `ROCKS_MONOLITHIC=1` 인자와 정의 헤더 강제 include만 다르고(모든 C++ 모듈이 빈 값 API 매크로를 받아 정의가 없던 모듈도 정의 헤더가 생긴다 — 13개 타깃 파일별 대조로 확인), 시험 fixture(공유 라이브러리 둘과 실행 파일 — export·import 함수 호출)가 `Modular`로 Windows에서 링크·실행된다.
+- **BS8b 생성 코드 키**: `NativeTypeKey<T>()`·모듈 키·`Schema()`의 저장소를 생성 `.cpp`로 옮기고 모듈 API 매크로로 export(BD28).
+- **BS8c 공유 상태**: 정책 `public-header-static-storage`와 지금 위반 정리, 서드파티 `HasGlobalState` 표시와 단일 소비 검사(BD29).
+- **BS8d export와 검사 체인**: 기존 모듈 사이 API에 매크로 붙이기, 상속 export 진단·모듈별 export 수 진단, 빌드 정보(`ToolchainFingerprint`·`ToolBuildId`)의 Modular 정의 위치, `Private/` 시험 묶음의 모듈 내 링크, `Modular` FoundationTests 검사 체인(BD31 — Windows 로컬, macOS는 CI). 이 단계가 끝나면 BS8 완료 기준을 채운다. 모듈 로더 쪽 Modular 적재는 [모듈 로더](ModuleLoader.ko.md) ML4다.
+
+**BS8a 구현 세부(개정 6).**
+- 모듈 API 매크로는 모듈 정의 헤더(`<출력>/Definitions/<모듈>.Definitions.h`)에 들어간다: 자기 모듈과 컴파일 환경에 보이는 C++ 모듈(서드파티·header-only 제외 — 바이너리가 없다)마다 하나씩. 값은 `Monolithic`이면 빈 값, `Modular`면 자기 모듈은 `ROCKS_DLLEXPORT`, 다른 모듈은 `ROCKS_DLLIMPORT`와 같은 철자다(정의 헤더는 Base 헤더 없이도 쓰이도록 플랫폼 철자 `__declspec(dllexport)`·`__attribute__((visibility("default")))`를 직접 쓴다). 코드가 없는 모듈(header-only)은 `Modular`에서도 빈 값이다. 공유 PCH의 공유 정의는 제공 모듈 공개 환경의 API 매크로를 import 값으로 담는다(PCH 헤더가 그 매크로를 쓰므로). 그래서 `Modular`에서 제공 모듈 자신은 값이 달라 공유 PCH를 쓰지 않는다(기존 "같은 이름 다른 값이면 공유 PCH를 쓰지 않는다" 규칙).
+- 예약: 규칙·명령줄은 `ROCKS_MONOLITHIC`과 `ROCKS_*_API`를 정의할 수 없다(`ROCKS_MODULE_NAME`과 같은 `InputValidation` 검사).
+- `Modular` 링크: 라이브러리 모듈은 공유 라이브러리가 된다. Windows는 `<이름>.dll`과 import `<이름>.lib`(링크 `/DLL`), macOS는 `lib<이름>.dylib`(`-dynamiclib`, install name `@rpath/<파일>`), Linux는 `lib<이름>.so`(`-shared`, `-soname`). 이름은 `<타깃>-<모듈>`이고 Development가 아니면 `-<플랫폼>-<구성>`을 붙인다(3.8절). 공유 라이브러리와 실행 파일은 링크 폐포(두 의존 목록, 실행 파일은 `DynamicModules` 쪽 포함)의 공유 라이브러리(Windows는 import 라이브러리)를 링크한다. inline 헤더가 간접 의존 모듈의 함수를 부를 수 있기 때문이다. 서드파티·미리 빌드한 라이브러리는 정적으로 그것을 링크하는 공유 라이브러리마다 들어간다(사본마다 전역 상태가 따로 생길 수 있다 — BS8c의 `HasGlobalState` 단일 소비 검사가 맡는다). 실행 파일이 `DynamicModules` 쪽 import 라이브러리까지 링크하므로 요청 시 적재 모듈도 load-time 의존이 된다(한계 — ML4에서 manifest 적재로 바꾼다). BS8d·ML4 전에는 모듈 표·빌드 정보 제공 모듈(Core)에 닿는 타깃과 미리 빌드한 SDK 모듈, SDK 내보내기의 `Modular`를 거부한다. Modular 가시성 옵션은 서드파티 C 소스에도 붙는다(macOS C 모드의 `-fvisibility-inlines-hidden` 수용은 macOS 빌드에서 확인할 것). 실행 파일과 공유 라이브러리는 같은 출력 폴더(`bin`)에 두고 macOS·Linux는 `@loader_path`·`$ORIGIN` rpath를 받는다. 가시성: macOS `-fvisibility-ms-compat`·`-fvisibility-inlines-hidden`, Linux `-fvisibility-ms-compat`와 `-fPIC`.
+- 지금 실제 타깃은 모두 `Monolithic`이다(Editor 타깃이 없다). `Modular` 실제 타깃 빌드(모듈 표의 export 진입점·빌드 정보 정의 위치)는 BS8d·ML4 뒤에 된다.
+
 **모듈 API 매크로(BD27).**
 - 빌드가 C++ 모듈마다 `ROCKS_<MODULE>_API`(모듈 이름 대문자)를 정의한다. UE `<MODULE>_API`(`UEBuildModule.cs:223, 239`)에 해당하고, 이름은 Rocks 매크로 접두 규칙을 따른다.
 - 값은 UE와 같다(`UEBuildModule.cs:750-770`). `Monolithic`이면 빈 값이다. `Modular`이면 그 모듈 자신의 컴파일에서는 export, 다른 모듈의 컴파일에서는 import다.
@@ -487,3 +499,4 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 | 3 | 2026-11-20 | 3.6절에 첫 엔진 플러그인 `Engine/Plugins/Importers/UnrealExchange`(Unreal 교환 스펙 UXR7)를 적었다: Developer 모듈 하나라 Release 게임에서 빠짐, 기본 비활성·Commandlet이 켬, 명령 확장점과 플러그인 콘텐츠 마운트는 UX1에서 정함 |
 | 4 | 2026-11-20 | BD25의 의존에 실행 중 적재 관계(`DynamicModules` — [모듈 로더](ModuleLoader.ko.md) 개정 4, 3.8절)를 넣었다. Monolithic이 그 모듈을 링크하므로 같은 type 검사를 받는다(UE도 동적 적재 모듈을 범위 검사에 넣는다) |
 | 5 | 2026-11-20 | BS0 구현 세부(3.5절): 두 목록과 `AllDependencies`, 규칙 `PublicDependencies`·`PrivateDependencies`, 보임 계산 `ModuleVisibility` 한 곳, 도달은 두 목록, 두 목록 중복 거부, SDK manifest 12, 완료 기준을 모든 타깃 `compile_commands.json` 동일로 확인 |
+| 6 | 2026-11-20 | BS8을 BS8a(빌드 기반)·BS8b(생성 코드 키)·BS8c(공유 상태)·BS8d(export와 검사 체인)로 나눴다. BS8a 구현 세부: API 매크로는 모듈 정의 헤더(보이는 C++ 모듈마다), 공유 PCH 공유 정의에 import 값, 예약 매크로 거부, Modular 공유 라이브러리 파일·링크·rpath·가시성, 완료 기준(Monolithic 인자는 `ROCKS_MONOLITHIC=1`만 더해짐, Modular fixture 링크·실행) |

@@ -1,5 +1,7 @@
 #include "AssetManagerInternal.h"
 
+#include <Base/Checked.h>
+
 #include <Core/Text/NameComponent.h>
 #include <Core/Text/StringBuilder.h>
 #include <Platform/Thread.h>
@@ -92,6 +94,11 @@ Result<void> AssetManager::Impl::ResolvePrimary(AssetId asset, Span<const String
 
 Result<uint32> AssetManager::Impl::TakePrimary() noexcept {
     if (freePrimary == ManagerNoIndex) {
+        // 전달 목록 용량은 TakeTicket과 같은 규칙이다.
+        if (auto reserved = deliver.TryReserve(primaries.Size() + 1); !reserved) {
+            return Result<uint32>::Failure(reserved.Error());
+        }
+
         if (auto added = primaries.TryEmplaceBack(allocator); !added) {
             return Result<uint32>::Failure(added.Error());
         }
@@ -138,9 +145,8 @@ void AssetManager::Impl::EndPrimary(uint32 index, ErrorCode reason) noexcept {
         EndTicket(ticket, reason);
     }
 
-    if (record.stop == ErrorCode::None) {
-        record.stop = reason;
-    }
+    // 묶음 하나는 한 번만 앞당겨 끝난다(놓기는 끝낸 묶음 칸을 비우고, 회수는 칸을 회수 표시한다).
+    record.stop = reason;
 }
 
 // 묶음 티켓 객체가 소멸했다(해제 큐): 끝나기 전이면 취소, 끝났으면 관심을 놓는다.
@@ -180,21 +186,25 @@ uint32 AssetManager::Impl::DeliverPrimary() noexcept {
             done = done && tickets[ticket].done;
         }
 
-        if (done || record.stop != ErrorCode::None) {
-            // 용량은 Pump가 묶음 표 크기로 잡았다.
+        // 앞당겨 끝낸 묶음(EndPrimary)도 구성 티켓이 모두 끝나 있다.
+        if (done) {
+            // 용량은 묶음 표가 자랄 때 잡았다(TakePrimary).
             (void)deliver.TryPushBack(static_cast<uint32>(index));
         }
     }
 
+    // callback 안의 요청이 전달 목록을 다시 잡을 수 있으므로 색인으로 돈다(11.7절 5 재진입).
     uint32 delivered = 0;
-    for (uint32 index : deliver) {
+    const usize count = deliver.Size();
+    for (usize position = 0; position < count; ++position) {
+        const uint32 index = deliver[position];
         PrimaryReadyCallback callback = Move(primaries[index].callback);
         primaries[index].callbackDelivered = true;
         AssetDiagnostic diagnostic;
         ErrorCode error = primaries[index].stop;
-        for (usize position = 0;
-             error == ErrorCode::None && position < primaries[index].tickets.Size(); ++position) {
-            const ManagerTicket& ticket = tickets[primaries[index].tickets[position]];
+        for (usize member = 0; error == ErrorCode::None && member < primaries[index].tickets.Size();
+             ++member) {
+            const ManagerTicket& ticket = tickets[primaries[index].tickets[member]];
             if (ticket.error != ErrorCode::None) {
                 error = ticket.error;
                 diagnostic = ticket.diagnostic;
@@ -322,6 +332,11 @@ Result<void> AssetManager::OnReady(PrimaryAssetTicket& ticket, TaskLane lane,
         return Result<void>::Failure(ErrorCode::WrongThread);
     }
 
+    // 종료 뒤(종료 전달 안 포함)에는 다시 전달할 Pump가 없으므로 받지 않는다(11.7절 12).
+    if (impl.shutDown) {
+        return Result<void>::Failure(ErrorCode::ShuttingDown);
+    }
+
     if (ticket.manager_ != this ||
         !impl.ValidSlot(ticket.slot_, ticket.generation_, ManagerSlotKind::PrimaryTicket)) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
@@ -397,8 +412,13 @@ AssetManager::EstimatePrimaryAsset(AssetId asset, Span<const StringView> bundles
     while (!stack.IsEmpty()) {
         const CookedManifestEntry& entry = manifest.entries[stack.TryPopBack().Value()];
         ++footprint.packages;
-        footprint.packageBytes += entry.packageBytes;
-        footprint.bulkRawBytes += entry.bulkRawBytes;
+        // bulkRawBytes는 u64 최댓값까지 받으므로 포화 덧셈이다(11.7절 10).
+        auto saturate = [](uint64 left, uint64 right) noexcept {
+            uint64 sum = 0;
+            return TryAdd(left, right, sum) ? sum : NumericLimits<uint64>::Max();
+        };
+        footprint.packageBytes = saturate(footprint.packageBytes, entry.packageBytes);
+        footprint.bulkRawBytes = saturate(footprint.bulkRawBytes, entry.bulkRawBytes);
         for (const CookedManifestDependency& dependency : entry.dependencies) {
             if (dependency.kind == PackageDependencyKind::Hard) {
                 visit(dependency.asset);

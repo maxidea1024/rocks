@@ -15,11 +15,14 @@ namespace {
 static_assert(CookedManifestFlagsMask == 1,
               "Cooked manifest flags changed; extend the combination axes in this test");
 
-// 조합 축이다(AS 10.1절 5): PrimaryAsset·bundle 수, 의존 특성 다섯의 모든 부분집합, 경로 모양.
+// 조합 축이다(AS 10.1절 5): PrimaryAsset·bundle 수와 구성원(비었음·쿠킹된 의존 대상 전부), 의존
+// 특성 다섯의 모든 부분집합, 경로 모양.
 enum class BundleShape : uint32 {
     None,
     One,
     Many,
+    OneWithMembers,
+    ManyWithMembers,
     Count
 };
 
@@ -50,9 +53,33 @@ enum class PathShape : uint32 {
 
 constexpr uint32 BundleShapes = static_cast<uint32>(BundleShape::Count);
 constexpr uint32 PathShapes = static_cast<uint32>(PathShape::Count);
-// PrimaryAsset이 아닌 항목은 bundle이 없다(규칙) — 허용 조합은 (PrimaryAsset × bundle 셋 + 일반 ×
-// bundle 없음) × 의존 부분집합 × 경로다.
-constexpr uint32 AllowedCombinations = (BundleShapes + 1) * DependencySubsets * PathShapes;
+// 원시 조합 공간이다: (PrimaryAsset × bundle 모양 + 일반) × 의존 부분집합 × 경로. PrimaryAsset이
+// 아닌 항목은 bundle이 없고(그래서 일반은 한 칸), 구성원은 그 항목의 의존 대상이며 매니페스트에
+// 있어야 하므로 구성원 있는 모양은 쿠킹된 의존 대상이 있는 부분집합에서만 허용한다.
+constexpr uint32 RawCombinations = (BundleShapes + 1) * DependencySubsets * PathShapes;
+constexpr uint32 CookedTargetTraits = CookedHard | HardCycle | CookedSoft | SameTargetHardSoft;
+
+constexpr bool AllowedRaw(uint32 raw) noexcept {
+    const uint32 traits = raw / PathShapes % DependencySubsets;
+    const uint32 bundle = raw / PathShapes / DependencySubsets;
+    const bool members = bundle == static_cast<uint32>(BundleShape::OneWithMembers) ||
+                         bundle == static_cast<uint32>(BundleShape::ManyWithMembers);
+    return !members || (traits & CookedTargetTraits) != 0;
+}
+
+constexpr uint32 CountAllowed() noexcept {
+    uint32 count = 0;
+    for (uint32 raw = 0; raw < RawCombinations; ++raw) {
+        count += AllowedRaw(raw) ? 1 : 0;
+    }
+
+    return count;
+}
+
+constexpr uint32 AllowedCombinations = CountAllowed();
+// 구성원 없는 모양 4칸(PrimaryAsset 셋 + 일반) × 32 × 3 = 384, 구성원 있는 모양 2 × 쿠킹 대상 있는
+// 부분집합 30 × 3 = 180.
+static_assert(AllowedCombinations == 564, "Manifest combination count changed");
 // 조합 항목의 id는 이 값부터이고, 의존 대상 고정 항목(10–13)은 그보다 앞이다.
 constexpr uint64 ComboBase = 100;
 // 고정 항목 수다(10 Hard 대상·11 Soft 대상·12 순환 짝·13 같은 대상).
@@ -70,7 +97,7 @@ struct Combination {
     PathShape path;
 };
 
-// index번째 허용 조합이다(경로가 가장 빨리 바뀌고, 그다음 의존 부분집합, 그다음 bundle).
+// 원시 번호 index의 조합이다(경로가 가장 빨리 바뀌고, 그다음 의존 부분집합, 그다음 bundle).
 Combination CombinationAt(uint32 index) noexcept {
     const uint32 path = index % PathShapes;
     index /= PathShapes;
@@ -82,15 +109,19 @@ Combination CombinationAt(uint32 index) noexcept {
                        traits, static_cast<PathShape>(path)};
 }
 
-// 읽은 항목에서 조합 번호를 다시 계산한다(CombinationAt의 역 — 빠짐·겹침 검사).
+// 읽은 항목에서 원시 조합 번호를 다시 계산한다(CombinationAt의 역 — 빠짐·겹침 검사).
 uint32 ClassOf(const CookedManifest& manifest, const CookedManifestEntry& entry) noexcept {
     const bool primary =
         (entry.flags & static_cast<uint32>(CookedManifestFlags::PrimaryAsset)) != 0;
     uint32 bundle = BundleShapes;
     if (primary) {
-        bundle = entry.bundles.IsEmpty()     ? static_cast<uint32>(BundleShape::None)
-                 : entry.bundles.Size() == 1 ? static_cast<uint32>(BundleShape::One)
-                                             : static_cast<uint32>(BundleShape::Many);
+        const bool members = !entry.bundles.IsEmpty() && !entry.bundles[0].members.IsEmpty();
+        const BundleShape shape =
+            entry.bundles.IsEmpty() ? BundleShape::None
+            : entry.bundles.Size() == 1
+                ? (members ? BundleShape::OneWithMembers : BundleShape::One)
+                : (members ? BundleShape::ManyWithMembers : BundleShape::Many);
+        bundle = static_cast<uint32>(shape);
     }
 
     uint32 traits = 0;
@@ -169,7 +200,11 @@ bool MakeCombinations(CookedManifest& manifest) noexcept {
         return false;
     }
 
-    for (uint32 index = 0; index < AllowedCombinations; ++index) {
+    for (uint32 index = 0; index < RawCombinations; ++index) {
+        if (!AllowedRaw(index)) {
+            continue;
+        }
+
         const Combination combination = CombinationAt(index);
         char name[8] = {'C', static_cast<char>('a' + index / 26 / 26 % 26),
                         static_cast<char>('a' + index / 26 % 26),
@@ -192,12 +227,30 @@ bool MakeCombinations(CookedManifest& manifest) noexcept {
             }
         }
 
-        const uint32 bundles = combination.bundles == BundleShape::One    ? 1
-                               : combination.bundles == BundleShape::Many ? 3
-                                                                          : 0;
+        const bool members = combination.bundles == BundleShape::OneWithMembers ||
+                             combination.bundles == BundleShape::ManyWithMembers;
+        const uint32 bundles = combination.bundles == BundleShape::None ? 0
+                               : combination.bundles == BundleShape::One ||
+                                       combination.bundles == BundleShape::OneWithMembers
+                                   ? 1
+                                   : 3;
+        // 구성원은 쿠킹된 의존 대상 전부(오름차순 10 < 11 < 12 < 13)다.
+        uint64 targets[4] = {};
+        usize targetCount = 0;
+        const uint32 traits = combination.traits;
+        if (members) {
+            const uint64 candidates[] = {HardTarget, SoftTarget, CycleTarget, SharedTarget};
+            const uint32 bits[] = {CookedHard, CookedSoft, HardCycle, SameTargetHardSoft};
+            for (usize candidate = 0; candidate < 4; ++candidate) {
+                if ((traits & bits[candidate]) != 0) {
+                    targets[targetCount++] = candidates[candidate];
+                }
+            }
+        }
+
         const char* const names[] = {"Alpha", "Beta", "Gamma"};
         for (uint32 bundle = 0; bundle < bundles; ++bundle) {
-            if (!AddBundle(*entry, names[bundle])) {
+            if (!AddBundle(*entry, names[bundle], Span<const uint64>(targets, targetCount))) {
                 return false;
             }
         }
@@ -212,12 +265,13 @@ bool MakeCombinations(CookedManifest& manifest) noexcept {
 
 } // namespace
 
-// 조합(AS 10.1절 5): PrimaryAsset·bundle(없음·하나·여럿) 4 × 의존 특성(쿠킹된 Hard·Hard 순환·쿠킹된
-// Soft·쿠킹하지 않은 Soft·같은 대상 Hard+Soft) 다섯의 부분집합 32 × 경로(얕음·깊음·비ASCII NFC) 3의
-// 모든 허용 조합 384개를 한 매니페스트에 담아 왕복하고, 읽은 항목마다 조합 번호를 다시 계산해
-// 만든 번호와 같음을 본다(번호 ↔ 항목이 일대일 — 빠짐·겹침이 없다). 축이나 모양이 늘면
-// AllowedCombinations가 바뀌어 이 시험이 그 칸을 만들고, 플래그가 늘면 static_assert가 막는다.
-// 금지 조합(일반 항목의 bundle)은 CookedManifest_FieldRules가 본다.
+// 조합(AS 10.1절 5): PrimaryAsset·bundle(없음·하나·여럿 × 구성원 없음·쿠킹된 의존 대상 전부) +
+// 일반 × 의존 특성(쿠킹된 Hard·Hard 순환·쿠킹된 Soft·쿠킹하지 않은 Soft·같은 대상 Hard+Soft) 다섯의
+// 부분집합 32 × 경로(얕음·깊음·비ASCII NFC) 3의 모든 허용 조합 564개를 한 매니페스트에 담아
+// 왕복하고, 읽은 항목마다 원시 조합 번호를 다시 계산해 만든 번호(id)와 같고 허용 조합임을 본다(번호
+// ↔ 항목이 일대일 — 빠짐·겹침이 없다). 축이나 모양이 늘면 조합 수 static_assert가 막고, 플래그가
+// 늘면 플래그 static_assert가 막는다. 금지 조합(일반 항목의 bundle, 쿠킹된 의존 대상이 없는 항목의
+// 구성원 — 구성원은 의존 대상이고 매니페스트에 있어야 한다)은 CookedManifest_FieldRules가 본다.
 TEST(CookedManifest_AllCombinations) {
     AssetEnv env;
     REQUIRE(env.Ready());
@@ -230,17 +284,19 @@ TEST(CookedManifest_AllCombinations) {
     auto read = ReadCookedManifest(allocator, bytes.View(), &failure);
     REQUIRE(read);
     REQUIRE(read.Value().entries.Size() == AllowedCombinations + FixedEntries);
-    bool seen[AllowedCombinations] = {};
+    bool seen[RawCombinations] = {};
     bool matched = true;
     for (uint32 index = 0; index < AllowedCombinations; ++index) {
-        const uint32 kind = ClassOf(read.Value(), read.Value().entries[FixedEntries + index]);
-        matched = matched && kind == index && !seen[kind];
-        seen[kind < AllowedCombinations ? kind : 0] = true;
+        const CookedManifestEntry& entry = read.Value().entries[FixedEntries + index];
+        const uint32 kind = ClassOf(read.Value(), entry);
+        matched = matched && kind < RawCombinations && AllowedRaw(kind) && !seen[kind] &&
+                  entry.asset == FixedId(ComboBase + kind);
+        seen[kind < RawCombinations ? kind : 0] = true;
     }
 
     CHECK(matched);
-    for (uint32 kind = 0; kind < AllowedCombinations; ++kind) {
-        if (!seen[kind]) {
+    for (uint32 kind = 0; kind < RawCombinations; ++kind) {
+        if (AllowedRaw(kind) && !seen[kind]) {
             test::RecordFailure("manifest combination missing", __FILE__, __LINE__);
         }
     }
@@ -510,4 +566,53 @@ TEST(CookedManifest_FixedSeedMutationFuzz) {
     CHECK(rejected > Iterations / 2);
     CHECK(accepted > 0);
 }
+
+// bundle 구성원 상한(AS 10.1절 3·5): 구성원이 정확히 CookedManifestMaxBundleMembers(65536)개인
+// bundle(구성원 모두 쿠킹된 Soft 의존 대상)은 검증·쓰기·읽기를 통과하고 같은 구성원으로 읽힌다(하나
+// 더면 CookedManifest_FieldRules가 BundleMemberCount로 거부한다).
+TEST(CookedManifest_BundleMemberLimit) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Allocator& allocator = env.allocator;
+    CookedManifest manifest(allocator);
+    FillManifestHeader(manifest);
+    constexpr uint64 Primary = 1;
+    constexpr uint64 FirstMember = 2;
+    REQUIRE(manifest.entries.TryReserve(CookedManifestMaxBundleMembers + 1));
+    REQUIRE(AddEntry(manifest, Primary, "Primary",
+                     static_cast<uint32>(CookedManifestFlags::PrimaryAsset)) != nullptr);
+    Array<uint64> members(allocator);
+    REQUIRE(members.TryReserve(CookedManifestMaxBundleMembers));
+    for (uint32 index = 0; index < CookedManifestMaxBundleMembers; ++index) {
+        char name[8] = {'M',
+                        static_cast<char>('a' + index / 26 / 26 / 26 % 26),
+                        static_cast<char>('a' + index / 26 / 26 % 26),
+                        static_cast<char>('a' + index / 26 % 26),
+                        static_cast<char>('a' + index % 26),
+                        0};
+        const uint64 id = FirstMember + index;
+        REQUIRE(AddEntry(manifest, id, name) != nullptr);
+        REQUIRE(members.TryPushBack(id));
+    }
+
+    CookedManifestEntry& primary = manifest.entries[0];
+    REQUIRE(primary.dependencies.TryReserve(CookedManifestMaxBundleMembers));
+    for (uint64 id : members) {
+        REQUIRE(AddDependency(primary, id, PackageDependencyKind::Soft));
+    }
+
+    REQUIRE(AddBundle(primary, "All", members.View()));
+    AssetDiagnostic failure;
+    REQUIRE(ValidateCookedManifest(manifest, allocator, &failure));
+    Array<uint8> bytes(allocator);
+    REQUIRE(WriteCookedManifest(allocator, manifest, bytes, &failure));
+    auto read = ReadCookedManifest(allocator, bytes.View(), &failure);
+    REQUIRE(read);
+    const CookedManifestBundle& bundle = read.Value().entries[0].bundles[0];
+    REQUIRE(bundle.members.Size() == CookedManifestMaxBundleMembers);
+    CHECK(bundle.members[0] == FixedId(FirstMember));
+    CHECK(bundle.members[CookedManifestMaxBundleMembers - 1] ==
+          FixedId(FirstMember + CookedManifestMaxBundleMembers - 1));
+}
+
 } // namespace manifest_scale_tests_file

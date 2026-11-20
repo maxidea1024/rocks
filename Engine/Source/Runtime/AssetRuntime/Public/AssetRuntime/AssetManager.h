@@ -250,6 +250,11 @@ using PrimaryReadyCallback = Function<void(Result<PrimaryAssetLease>, const Asse
 using DeferredRun = Function<void(const AssetLease&)>;
 using DeferredFail = Function<void(ErrorCode, const AssetDiagnostic&)>;
 
+// 동시에 살아 있을 수 있는 handle 객체(티켓·lease·보류 명령·묶음 티켓) 수 상한이다(11.7절 6 —
+// 슬롯 블록 256칸 × 블록 표 4096). 넘는 요청·lease는 CapacityExceeded다(callback·보류 명령은 그
+// 오류를 받는다). 소멸한 handle의 칸은 다음 Pump가 회수한다.
+inline constexpr uint32 AssetManagerMaxLiveHandles = 256u * 4096u;
+
 struct AssetManagerConfig {
     // 기본 허용 보류 명령 수다(11.7절 9).
     static constexpr uint32 DefaultMaxDeferredCommands = 4096;
@@ -328,7 +333,13 @@ public:
     // 오류: 설정 오류 InvalidArgument, 로더 초기화 오류(진단 포함), 두 번째 호출 InvalidArgument.
     Result<void> Initialize(AssetDiagnostic* failure = nullptr) noexcept;
 
+    // AssetManager가 소유한 에셋 객체 Registry다(Initialize 뒤, 소유 스레드). 객체 읽기·필드 쓰기·
+    // 하드 참조 편집과 상주 패키지 안 생성 트랜잭션은 된다(간선 변화는 계수된다). 넘겨받은 패키지와
+    // 그 객체의 수명 변경(Discard·RequestDestroy·패키지 RootRef 조작)은 계약 위반이다(11.7절 1).
     ObjectRegistry& Registry() noexcept;
+    // AssetManager가 소유한 로더다(Initialize 뒤, 소유 스레드). 조회(FindPackage·FindByPath·Status·
+    // Describe·PublishedHolds)만 한다. 요청·해제·우선순위·Pump·WaitFor·Shutdown·넘겨받기 API를
+    // 직접 부르는 것은 계약 위반이다 — 티켓·상주 단위 계수를 우회한다(11.7절 1).
     AssetLoader& Loader() noexcept;
 
     // 수명 범위를 만든다. 오류: WrongThread, Shutdown 뒤 ShuttingDown, 할당 실패.
@@ -343,8 +354,9 @@ public:
 
     // 티켓의 준비 callback을 등록한다(11.7절 5). 끝나면 다음 Pump에서 정확히 한 번 부른다. lane은
     // Task 모듈의 TaskLane이고 이번 엔진은 Game만 된다(Game 스레드 하나 — 11.1절).
-    // 오류: WrongThread, 무효 티켓 StaleHandle, 이미 등록 AlreadyRegistered(callback은 그대로
-    // caller에 남는다), lane이 Game이 아니면 Unsupported, 빈 callback InvalidArgument.
+    // 오류: WrongThread, Shutdown 뒤(종료 전달 안 포함) ShuttingDown, 무효 티켓 StaleHandle, 이미
+    // 등록 AlreadyRegistered, lane이 Game이 아니면 Unsupported, 빈 callback InvalidArgument.
+    // 실패하면 callback은 등록되지 않고 caller에 남는다.
     Result<void> OnReady(LoadTicket& ticket, TaskLane lane, AssetReadyCallback&& callback) noexcept;
 
     // 결과가 나올 때까지 동기로 기다려 lease를 준다(도구·시험·초기화 전용 — 11.7절 8).

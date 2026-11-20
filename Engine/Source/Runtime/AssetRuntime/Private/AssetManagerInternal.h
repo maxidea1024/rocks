@@ -15,9 +15,12 @@ namespace rocks {
 
 constexpr uint32 ManagerNoIndex = NumericLimits<uint32>::Max();
 // handle 슬롯 블록 하나의 슬롯 수와 블록 표 크기다(11.7절 6 — 블록은 옮기지 않고 표는 고정 크기라
-// 다른 스레드의 소멸자가 Game 스레드의 확장과 경쟁하지 않는다). 최대 handle 수 = 둘의 곱.
+// 다른 스레드의 소멸자가 Game 스레드의 확장과 경쟁하지 않는다). 최대 handle 수 = 둘의 곱
+// (AssetManagerMaxLiveHandles).
 constexpr uint32 ManagerSlotsPerBlock = 256;
-constexpr uint32 ManagerMaxSlotBlocks = 4096;
+constexpr uint32 ManagerMaxSlotBlocks = AssetManagerMaxLiveHandles / ManagerSlotsPerBlock;
+static_assert(ManagerMaxSlotBlocks * ManagerSlotsPerBlock == AssetManagerMaxLiveHandles,
+              "AssetManagerMaxLiveHandles must be a whole number of slot blocks");
 
 enum class ManagerSlotKind : uint8 {
     Free,
@@ -72,6 +75,8 @@ struct ManagerTicket {
     AssetDiagnostic diagnostic;
     // 보유를 건 패키지 기록 번호다(성공해 관심을 쥔 동안 — 없으면 NoIndex).
     uint32 heldPackage = ManagerNoIndex;
+    // 보류 명령의 내부 티켓이면 보유를 단위의 deferred 칸에 건다(아니면 tickets 칸 — 11.7절 3·11).
+    bool deferredHold = false;
     // 공개 티켓 객체가 소멸했는지다(callback 전달이 남아 있으면 기록은 그 뒤에 지운다).
     bool released = false;
     AssetReadyCallback callback;
@@ -260,7 +265,9 @@ struct AssetManager::Impl {
 
     Result<uint32> TakeTicket() noexcept;
     void FreeTicket(uint32 index) noexcept;
-    Result<uint32> StartTicket(const AssetRequest& request, AssetDiagnostic* failure) noexcept;
+    // deferredHold면 보류 명령의 내부 티켓이다(보유를 deferred 칸에 건다).
+    Result<uint32> StartTicket(const AssetRequest& request, AssetDiagnostic* failure,
+                               bool deferredHold = false) noexcept;
     void CompleteTicket(uint32 index) noexcept;
     void FinishTicketResult(uint32 index, AssetLoadStatus status) noexcept;
     void ReleaseTicketHold(uint32 index) noexcept;
@@ -290,6 +297,7 @@ struct AssetManager::Impl {
     void AddHold(uint32 package, uint64 ManagerUnit::* counter) noexcept;
     void DropHold(uint32 package, uint64 ManagerUnit::* counter) noexcept;
     Result<void> ApplyEdgeChanges() noexcept;
+    void CoalesceChanges() noexcept;
     void LinkEdge(ObjectHandle owner, ObjectHandle target) noexcept;
     void UnlinkEdge(ObjectHandle owner, ObjectHandle target) noexcept;
     int64 InboundOf(uint32 unit) const noexcept;

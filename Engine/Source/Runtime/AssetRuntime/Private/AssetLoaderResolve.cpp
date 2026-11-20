@@ -146,11 +146,6 @@ uint32 AssetLoader::Impl::TakeUnitSlot() noexcept {
     return index;
 }
 
-bool AssetLoader::Impl::IsBeforePublish(AssetLoaderUnitPhase phase) noexcept {
-    return phase == AssetLoaderUnitPhase::Queued || phase == AssetLoaderUnitPhase::Loading ||
-           phase == AssetLoaderUnitPhase::Ready;
-}
-
 void AssetLoader::Impl::ReleasePublishedHolds(LoaderUnit& unit) noexcept {
     if (unit.publishedHeld) {
         for (uint32 entry : unit.publishedDeps) {
@@ -378,8 +373,9 @@ Result<uint32> AssetLoader::Impl::Resolve(uint32 rootEntry) noexcept {
                 // 공개됐어도 이 단위의 PostLoad가 기다리는 의존이다.
                 const uint32 target = HardTarget(member, position);
                 // PostLoad까지 마친 공개 패키지는 단위가 없다 — 공개 보유로 붙잡는다(11.7절 2).
-                if (target != LoaderNoIndex && entryUnit[target] == LoaderNoIndex &&
-                    entryLoaded[target] != LoaderNoIndex) {
+                // 공개되지 않은 Hard 대상은 FindComponents가 모두 새 단위로 넣었으므로 단위가 없는
+                // 대상은 공개 패키지다.
+                if (target != LoaderNoIndex && entryUnit[target] == LoaderNoIndex) {
                     if (!units[unit].publishedDeps.Contains(target)) {
                         if (auto pushed = units[unit].publishedDeps.TryPushBack(target); !pushed) {
                             unmark();

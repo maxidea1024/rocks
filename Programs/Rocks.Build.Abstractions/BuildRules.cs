@@ -58,6 +58,13 @@ public abstract class TargetRules
     public virtual TargetType Type => TargetType.Game;
 
     /// <summary>
+    /// 링크 방식이다(Docs/Design/BuildTargets.ko.md 3.8절 BD17, UE TargetRules.LinkType). Monolithic은 모든 모듈을 실행 파일 하나에 링크하고,
+    /// Modular는 모듈마다 공유 라이브러리를 만든다. Editor 타깃(BS2)은 Modular가 기본이 되고, 지금 타깃 종류는 모두 Monolithic이다.
+    /// Android와 Asan·Coverage·Release 구성은 Modular를 거부한다.
+    /// </summary>
+    public virtual NativeLinkType LinkType => NativeLinkType.Monolithic;
+
+    /// <summary>
     /// 로그 컴파일 하한의 타깃 재정의다(UE <c>COMPILED_IN_MINIMUM_VERBOSITY</c> 대응). null(기본)이면 구성 기본값(Debug: Trace,
     /// Development: Debug, Release: Info)이다. 이 레벨보다 낮은 로그 호출은 템플릿 문자열까지 바이너리에서 빠진다. 값은 타깃의 모든
     /// 모듈에 <c>ROCKS_LOG_COMPILED_MINIMUM</c>으로 같게 정의된다(모듈별 재정의는 ODR 위반이라 빌드 검사가 거부한다). 설치 SDK의
