@@ -13,6 +13,7 @@
 #include <Unknwn.h>
 #include <objidl.h>
 #include <d3dcompiler.h>
+#include <d3d11shader.h>
 #include <d3d12shader.h>
 #include <dxc/dxcapi.h>
 
@@ -93,6 +94,22 @@ void WriteSignature(ID3D12ShaderReflection* reflection, UINT count, bool input,
     }
 
     report.EndArray();
+}
+
+// DXC 리플렉션 부분을 IDxcUtils::CreateReflection으로 연다.
+bool OpenDxilReflection(const shader::DxcFunctions& dxc, Span<const uint8> reflectionPart,
+                        ComRef<ID3D12ShaderReflection>& reflection) noexcept {
+    const auto create =
+        reinterpret_cast<DxcCreateInstanceProc>(dxc.address[shader::DxcFunctions::CreateInstance]);
+    ComRef<IDxcUtils> utils;
+    if (create == nullptr || FAILED(create(CLSID_DxcUtils, IID_PPV_ARGS(utils.Out())))) {
+        return false;
+    }
+
+    DxcBuffer buffer = {};
+    buffer.Ptr = reflectionPart.Data();
+    buffer.Size = reflectionPart.Size();
+    return SUCCEEDED(utils->CreateReflection(&buffer, IID_PPV_ARGS(reflection.Out())));
 }
 
 } // namespace
@@ -190,18 +207,8 @@ bool CompileWithDxc(const shader::DxcFunctions& dxc, const ShaderInput& input, D
 
 bool DumpDxilReflection(const shader::DxcFunctions& dxc, Span<const uint8> reflectionPart,
                         Report& report) noexcept {
-    const auto create =
-        reinterpret_cast<DxcCreateInstanceProc>(dxc.address[shader::DxcFunctions::CreateInstance]);
-    ComRef<IDxcUtils> utils;
-    if (create == nullptr || FAILED(create(CLSID_DxcUtils, IID_PPV_ARGS(utils.Out())))) {
-        return false;
-    }
-
-    DxcBuffer buffer = {};
-    buffer.Ptr = reflectionPart.Data();
-    buffer.Size = reflectionPart.Size();
     ComRef<ID3D12ShaderReflection> reflection;
-    if (FAILED(utils->CreateReflection(&buffer, IID_PPV_ARGS(reflection.Out())))) {
+    if (!OpenDxilReflection(dxc, reflectionPart, reflection)) {
         return false;
     }
 
@@ -262,6 +269,39 @@ bool DumpDxilReflection(const shader::DxcFunctions& dxc, Span<const uint8> refle
     report.EndArray();
     WriteSignature(reflection.Get(), desc.InputParameters, true, report);
     WriteSignature(reflection.Get(), desc.OutputParameters, false, report);
+    return true;
+}
+
+bool ReadDxilRequires(const shader::DxcFunctions& dxc, Span<const uint8> reflectionPart,
+                      ShaderRequires& result) noexcept {
+    result = ShaderRequires{};
+    ComRef<ID3D12ShaderReflection> reflection;
+    if (!OpenDxilReflection(dxc, reflectionPart, reflection)) {
+        return false;
+    }
+
+    result.flags = reflection->GetRequiresFlags();
+    result.viewportAndLayerFromAnyShader =
+        (result.flags &
+         D3D_SHADER_REQUIRES_VIEWPORT_AND_RT_ARRAY_INDEX_FROM_ANY_SHADER_FEEDING_RASTERIZER) != 0;
+    return true;
+}
+
+bool ReadDxbcRequires(const shader::FxcFunctions& fxc, Span<const uint8> code,
+                      ShaderRequires& result) noexcept {
+    result = ShaderRequires{};
+    const auto reflect =
+        reinterpret_cast<decltype(&D3DReflect)>(fxc.address[shader::FxcFunctions::Reflect]);
+    ComRef<ID3D11ShaderReflection> reflection;
+    if (reflect == nullptr ||
+        FAILED(reflect(code.Data(), code.Size(), IID_PPV_ARGS(reflection.Out())))) {
+        return false;
+    }
+
+    result.flags = reflection->GetRequiresFlags();
+    result.viewportAndLayerFromAnyShader =
+        (result.flags &
+         D3D_SHADER_REQUIRES_VIEWPORT_AND_RT_ARRAY_INDEX_FROM_ANY_SHADER_FEEDING_RASTERIZER) != 0;
     return true;
 }
 

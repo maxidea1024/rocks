@@ -115,6 +115,15 @@ internal sealed class TestSuite
     // 다른 시험과 겹치지 않게 병렬 묶음이 끝난 뒤 하나씩 돈다.
     public void Add(string name, Func<Task> action, bool exclusive = false) => tests.Add(name, new TestCase(action, exclusive));
 
+    // 이름이 조건에 맞는 시험만 남긴다(--filter). 남은 시험이 없으면 RunAsync가 실패한다.
+    public void Retain(Func<string, bool> keep)
+    {
+        foreach (string name in tests.Keys.Where(name => !keep(name)).ToList())
+        {
+            tests.Remove(name);
+        }
+    }
+
     // parallelism은 동시에 실행할 시험 수다(1이면 이름 순서대로 하나씩). 병렬이면 [PASS]/[FAIL] 줄은 끝난
     // 순서로 찍히지만 JSON 보고서는 언제나 이름 순서다. 시험마다 자기 임시 디렉터리만 써야 한다.
     // only를 주면 그 이름의 시험만 돌린다(--only — 고친 시험만 다시 돌릴 때 쓴다). 등록되지 않은 이름은 오류다(오타로 0건이 통과로
@@ -300,7 +309,7 @@ internal sealed class Options
     {
         Options result = new();
         HashSet<string> allowed = new(StringComparer.Ordinal) { "root", "json", "seed", "native-executable",
-            "compiler", "metacompiler", "formatter", "dotnet", "compile-commands", "jobs", "only" };
+            "compiler", "metacompiler", "formatter", "dotnet", "compile-commands", "jobs", "filter", "only" };
         for (int index = 0; index < arguments.Length; ++index)
         {
             string argument = arguments[index];

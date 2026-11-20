@@ -1,4 +1,6 @@
+#include <Base/Compiler.h>
 #include <Config/ConfigContext.h>
+#include <Core/Assert.h>
 #include <Core/Module/ModuleEntry.h>
 #include <Core/Diagnostics/Log.h>
 #include <Core/Diagnostics/LogContext.h>
@@ -6,6 +8,7 @@
 #include <Engine/EngineLog.h>
 #include <Platform/Atomics.h>
 #include <Platform/Clock.h>
+#include <Platform/CrashReporting.h>
 #include <Platform/Thread.h>
 
 namespace rocks {
@@ -104,6 +107,29 @@ const char* EngineStateName(EngineState state) noexcept {
     return "Unknown";
 }
 
+namespace {
+
+// 초기화 동안 드라이버·외부 라이브러리가 처리되지 않은 예외 filter를 바꿨는지 본다(설계 8.6절).
+// 바꿨으면 그 filter를 두고(교환 확인이 되돌린다) 외부 스레드 크래시가 보고되지 않는다고 알린다.
+void WarnIfCrashFilterReplaced() noexcept {
+    if (!platform::CheckUnhandledCrashFilter()) {
+        Log::Warning(LogEngine,
+                     "Another component replaced the unhandled exception filter; crashes "
+                     "on threads outside Rocks may not be reported");
+    }
+}
+
+} // namespace
+
+void Engine::RequestExit() noexcept {
+    if constexpr (!IsReleaseBuild) {
+        // 소유 스레드 규약(설계 20절). Initialize 전에는 소유자가 없다.
+        ROCKS_ASSERT(ownerThread_ == 0 || ownerThread_ == platform::CurrentThreadId());
+    }
+
+    exitRequested_ = true;
+}
+
 Engine::Engine(Allocator& allocator) noexcept
     : allocator_(allocator), subsystems_(allocator), worlds_(allocator) {
 }
@@ -139,11 +165,17 @@ Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
     const uint64 started = platform::MonotonicNanoseconds();
     state_ = EngineState::Initializing;
     config_ = config;
+    ownerThread_ = platform::CurrentThreadId();
+    // 크래시 기록의 단계 이름이다(설계 LC6). 프레임마다가 아니라 단계가 바뀔 때만 쓴다.
+    platform::SetRunPhase(platform::RunPhase::Startup, EngineStageInitialize);
     // 실패를 확정하는 곳이 여기라 한 번만 기록한다(호스트는 다시 기록하지 않는다).
     auto fail = [this](InitStage stage, ErrorCode error) noexcept {
         Log::Error(LogEngine, "Engine initialization failed at {Stage}: {Error}",
                    InitStageName(stage), ErrorCodeName(error));
+        // 초기화 실패의 되돌리기는 정리 단계이고, 끝나면 정리 끝이다(설계 LC6 리뷰).
+        platform::SetRunPhase(platform::RunPhase::Shutdown, EngineStageShutdown);
         Teardown(initializedSteps_, InitStageName(stage));
+        platform::SetRunPhase(platform::RunPhase::Shutdown, EngineStageStopped);
         state_ = EngineState::Failed;
         return Result<void>::Failure(error);
     };
@@ -276,6 +308,8 @@ Result<void> Engine::Initialize(const EngineConfig& config) noexcept {
     }
 
     state_ = EngineState::Running;
+    platform::SetRunPhase(platform::RunPhase::Running, EngineStageReady);
+    WarnIfCrashFilterReplaced();
     lastClock_ = platform::MonotonicNanoseconds();
     Log::Info(LogEngine, "Engine initialized with {SubsystemCount} subsystems in {Ms:.2f} ms",
               static_cast<uint32>(subsystems_.Count()),
@@ -630,6 +664,7 @@ Result<void> Engine::Run() noexcept {
     }
 
     Result<void> outcome = Result<void>::Success();
+    platform::SetRunPhase(platform::RunPhase::Running, EngineStageRun);
     while (!exitRequested_) {
         auto frame = RunFrame();
         if (!frame) {
@@ -660,8 +695,11 @@ Result<void> Engine::Shutdown() noexcept {
         state_ = EngineState::Stopping;
     }
 
-    // 재시도(앞 호출이 실패해 Stopping에 머묾)에서는 시작을 다시 알리지 않는다.
+    // 재시도(앞 호출이 실패해 Stopping에 머묾)에서는 시작을 다시 알리지 않는다(단계 표시·filter
+    // 확인도 첫 호출에서만).
     if (shutdownProgress_ == ShutdownNotStarted) {
+        platform::SetRunPhase(platform::RunPhase::Shutdown, EngineStageShutdown);
+        WarnIfCrashFilterReplaced();
         Log::Info(LogEngine, "Engine shutting down with {Worlds} worlds after {Frames} frames",
                   static_cast<uint32>(worlds_.Size()), time_.frameIndex);
     }
@@ -758,6 +796,7 @@ Result<void> Engine::Shutdown() noexcept {
     initializedSteps_ = 0;
     shutdownProgress_ = ShutdownNotStarted;
     state_ = EngineState::Stopped;
+    platform::SetRunPhase(platform::RunPhase::Shutdown, EngineStageStopped);
 
     Log::Info(LogEngine, "Engine shut down");
     return outcome;

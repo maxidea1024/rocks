@@ -14,6 +14,8 @@ jobs:
       matrix:
         os: [windows-latest, macos-15]
     runs-on: ${{ matrix.os }}
+    env:
+      ROCKS_MSVC_TOOLSET: ${{ matrix.os == 'windows-latest' && '14.44' || '' }}
     defaults:
       run:
         shell: pwsh
@@ -26,6 +28,12 @@ jobs:
           global-json-file: global.json
       - name: Install verified native formatter
         run: ./Build/InstallFormatter.ps1
+      # Windows uses the verified toolchain: LLVM 21.1.6 (same as local builds) first on PATH, and the MSVC 14.44 toolset that the
+      # image installs next to 14.52 (ROCKS_MSVC_TOOLSET above). STL 14.52 rejects Clang older than 22 (STL1000), and the
+      # MetaCompiler does not support Clang 22's JSON AST type spellings yet.
+      - name: Install verified LLVM (Windows)
+        if: runner.os == 'Windows'
+        run: ./Build/InstallLlvm.ps1
       - name: Build and test Foundation through MSBuild
         run: dotnet msbuild Rocks.proj /t:Test /p:Adaptive=off /p:Configuration=Debug /p:RocksTarget=Foundation /v:minimal
       # Verification variant (Docs/Design/UnityBuildPch.ko.md section 11): every source is its own translation unit and no PCH is used, so a

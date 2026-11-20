@@ -121,6 +121,33 @@ internal static partial class SelfTests
             var actual = failures.Select(failure => (failure.Path, failure.Line)).ToHashSet();
             Verify.That(actual.SetEquals(expected), "CRT number conversion lines: " + string.Join("; ", failures));
         });
+        suite.Add("Policy.ProcessEntryPoints", () =>
+        {
+            NoFailures(PolicyChecks.ProcessEntryPoints(options.Root));
+            using TemporaryDirectory temporary = new();
+            // 양성: 직접 정의한 진입점 형태(줄마다 하나). 반환형이 윗줄에 있는 형태는 이름 줄에서 알린다.
+            string[] positives =
+            [
+                "int main(int argc, char** argv) {", "int wmain(int argc, wchar_t** argv) {",
+                "extern \"C\" int __stdcall wWinMain(HINSTANCE__*, HINSTANCE__*, wchar_t*, int) {", "int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {",
+                "INT CALLBACK WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {", "int PASCAL WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {",
+                "int _tmain(int argc, TCHAR** argv) {", "int APIENTRY _tWinMain(HINSTANCE, HINSTANCE, LPTSTR, int) {",
+                "auto main() -> int {", "[[nodiscard]] int main() {",
+            ];
+            temporary.Write("Programs/FakeTool/Private/Main.cpp", string.Join('\n', positives) + "\n");
+            temporary.Write("Programs/FakeTool/Private/Split.cc", "int\nmain(int argc, char** argv) {\n");
+            temporary.Write("Programs/FakeTool/Private/Entry.hpp", "int WINAPI\nwWinMain(HINSTANCE, HINSTANCE, wchar_t*, int);\n");
+            // 음성: 주석·문자열 안, 다른 이름, 진입점 매크로, 예외 목록의 파일.
+            temporary.Write("Programs/CleanTool/Private/Main.cpp", string.Join('\n',
+                "// int main(int argc, char** argv) {", "const char* text = \"int main(\";", "int mainLoop(int frames) {",
+                "int RunMain(launch::ApplicationContext& context) noexcept {", "ROCKS_IMPLEMENT_APPLICATION(Describe)") + "\n");
+            temporary.Write("Programs/LaunchTests/Private/Win64/EmbeddedHost.cpp", "int wmain(int argc, wchar_t** argv) {\n");
+            var failures = PolicyChecks.ProcessEntryPoints(temporary.Root);
+            var expected = Enumerable.Range(1, positives.Length).Select(line => ("Programs/FakeTool/Private/Main.cpp", line))
+                .Append(("Programs/FakeTool/Private/Split.cc", 2)).Append(("Programs/FakeTool/Private/Entry.hpp", 2)).ToHashSet();
+            var actual = failures.Select(failure => (failure.Path, failure.Line)).ToHashSet();
+            Verify.That(actual.SetEquals(expected), "process entry point lines: " + string.Join("; ", failures));
+        });
         suite.Add("Policy.DeterministicMathObjectRules", () =>
         {
             // 외부 심볼: 코드 생성 지원 심볼(COFF·ELF·Mach-O 이름)은 허용, CRT 수학·다른 모듈 함수는 거부.

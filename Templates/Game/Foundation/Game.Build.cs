@@ -11,7 +11,8 @@ public sealed class SampleGameModule : ModuleRules
         Kind = NativeModuleKind.Executable,
         Sources = context.Sources("Source"),
         PublicIncludeDirectories = [context.PathInRoot("Source")],
-        Dependencies = ["ObjectRuntime"],
+        // Launch: the common entry point (crash reporting, command line capture, exit code).
+        Dependencies = ["ObjectRuntime", "Launch"],
         Metadata = ["GameObject.h"],
         ModuleDirectory = "."
     };

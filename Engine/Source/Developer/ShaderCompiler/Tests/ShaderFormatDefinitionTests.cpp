@@ -231,11 +231,11 @@ TEST(ShaderFormat_EngineWindowsProfileCarriesDecisionsAndMeasurements) {
         CHECK(format.limits.rootConstantBytes == 128u);
     }
 
-    // 결정 12: VS layer·viewport 출력은 D3D12·Vulkan(·Metal)에 런타임 확인 기능으로 있고 D3D11(S14
-    // 뒤 SH5)·GLES에는 없다.
+    // 결정 12: VS layer·viewport 출력은 D3D12·Vulkan·D3D11(측정 S14: FXC vs_5_0이 받는다)(·Metal)에
+    // 런타임 확인 기능으로 있고 GLES에는 없다.
     CHECK((d3d12->features & ShaderFeatureVertexViewportLayerOutput) != 0);
     CHECK((vulkan->features & ShaderFeatureVertexViewportLayerOutput) != 0);
-    CHECK((d3d11->features & ShaderFeatureVertexViewportLayerOutput) == 0);
+    CHECK((d3d11->features & ShaderFeatureVertexViewportLayerOutput) != 0);
     CHECK((pc->features & ShaderFeatureVertexViewportLayerOutput) == 0);
     CHECK((android->features & ShaderFeatureVertexViewportLayerOutput) == 0);
     CHECK(IsRuntimeCheckedShaderFeature(ShaderFeatureVertexViewportLayerOutput));

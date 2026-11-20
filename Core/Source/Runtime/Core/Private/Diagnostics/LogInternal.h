@@ -70,9 +70,14 @@ void SubmitToLogSystem(LogSystem& system, LogLevel level, const LogCategory& cat
                        const LogCaptureTemplate& text, const FormatArg* args, usize count) noexcept;
 void DeliverFatalToLogSystem(LogSystem& system, Span<const uint8> capture) noexcept;
 
+// 출력 스레드의 CurrentThreadId 값이다(아직 없으면 0). 종료 flush의 출력 스레드 판정을 시험이
+// 재현할 때 쓴다.
+uint64 LogWriterThreadId(const LogSystem& system) noexcept;
+
 // AssertFailed의 보고 경로다(설계 11절): 비상 출력 → 설치된 LogSystem에 Fatal 기록 전달 → 종료.
-// 같은 스레드에서 Fatal 보고 중이면 바로 platform::Fatal로 간다.
-[[noreturn]] void ReportAssertFailure(const char* message) noexcept;
+// 같은 스레드에서 Fatal 보고 중이면 바로 platform::FatalAt으로 간다. 종료는
+// platform::FatalAt(file·line)이다.
+[[noreturn]] void ReportAssertFailure(const char* message, const char* file, uint32 line) noexcept;
 
 // 특정 LogSystem에 바로 기록한다(설치와 무관하게, 레벨 필터는 지난다). LogSystem 내부 알림용이다.
 template <typename... Args>

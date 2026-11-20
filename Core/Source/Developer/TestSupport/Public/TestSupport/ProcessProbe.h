@@ -11,12 +11,12 @@ namespace rocks::test {
 bool ProcessSpawnExpected() noexcept;
 
 // 현재 프로세스의 명령줄 인자를 UTF-8로 다시 읽는다. index 0은 실행 파일이다. 부모가 넘긴 인자를
-// byte 그대로 돌려주는 시험에 쓴다(Windows의 main argv는 ANSI 코드 페이지라 UTF-8 인자를 잃으므로
-// GetCommandLineW에서 다시 나눈다. POSIX는 main의 argv 그대로다).
-// buffer에 인자를 NUL로 구분해 쓰고 arguments[i]에 시작 위치를 둔다. 인자 수를 반환하며, 공간이
-// 부족하거나 변환에 실패하면 0이다.
-usize ReadUtf8Arguments(int argc, char** argv, char* buffer, usize capacity, const char** arguments,
-                        usize maxArguments) noexcept;
+// byte 그대로 돌려주는 시험에 쓴다. 시험 실행기의 argv는 Launch가 UTF-8로 캡처한 것이지만,
+// Windows는 Launch와 독립된 대조로 GetCommandLineW에서 다시 나눈다. POSIX는 argv 그대로다. buffer에
+// 인자를 NUL로 구분해 쓰고 arguments[i]에 시작 위치를 둔다. 인자 수를 반환하며, 공간이 부족하거나
+// 변환에 실패하면 0이다.
+usize ReadUtf8Arguments(int argc, const char* const* argv, char* buffer, usize capacity,
+                        const char** arguments, usize maxArguments) noexcept;
 
 // 표준 출력(stream 1)·표준 오류(stream 2)에 CRT 버퍼·텍스트 변환 없이 그대로 쓴다. 모두 썼으면
 // true다.

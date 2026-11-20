@@ -11,6 +11,6 @@ public sealed class MathBenchProgram : ModuleRules
         Name = "MathBench",
         Kind = NativeModuleKind.Executable,
         Sources = context.Sources("Programs/MathBench/Private"),
-        Dependencies = ["Core"]
+        Dependencies = ["Launch", "Core"]
     };
 }

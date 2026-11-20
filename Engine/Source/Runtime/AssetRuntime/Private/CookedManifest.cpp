@@ -1,3 +1,5 @@
+#include "PackageInternal.h"
+
 #include <AssetRuntime/CookedManifest.h>
 
 #include <Base/Endian.h>
@@ -318,14 +320,18 @@ Result<void> ValidateCookedManifest(const CookedManifest& manifest, Allocator& s
     return Result<void>::Success();
 }
 
-Result<void> WriteCookedManifest(Allocator& allocator, const CookedManifest& manifest,
-                                 Array<uint8>& out, AssetDiagnostic* failure) noexcept {
+namespace package_detail {
+
+Result<void> WriteCookedManifestWithLimit(Allocator& allocator, const CookedManifest& manifest,
+                                          uint64 maxFileBytes, Array<uint8>& out,
+                                          AssetDiagnostic* failure) noexcept {
     if (auto valid = ValidateCookedManifest(manifest, allocator, failure); !valid) {
         return valid;
     }
 
+    // 상한은 CRC 칸까지 포함한 파일 전체다(CRC 자리도 이 writer가 쓴다).
     ArchiveLimits limits;
-    limits.maxTotalBytes = static_cast<usize>(CookedManifestMaxFileBytes - sizeof(uint32));
+    limits.maxTotalBytes = static_cast<usize>(maxFileBytes);
     limits.maxValueBytes = PackageMaxStringBytes;
     limits.maxOperations = NumericLimits<uint64>::Max();
     limits.maxWork = NumericLimits<uint64>::Max();
@@ -379,6 +385,14 @@ Result<void> WriteCookedManifest(Allocator& allocator, const CookedManifest& man
     const usize body = out.Size() - sizeof(uint32);
     StoreLittleEndian<uint32>(out.Data() + body, Crc32(out.View().Slice(0, body)));
     return Result<void>::Success();
+}
+
+} // namespace package_detail
+
+Result<void> WriteCookedManifest(Allocator& allocator, const CookedManifest& manifest,
+                                 Array<uint8>& out, AssetDiagnostic* failure) noexcept {
+    return package_detail::WriteCookedManifestWithLimit(allocator, manifest,
+                                                        CookedManifestMaxFileBytes, out, failure);
 }
 
 Result<CookedManifest> ReadCookedManifest(Allocator& allocator, Span<const uint8> bytes,
@@ -630,12 +644,19 @@ Result<void> CheckCookedPackage(const CookedManifest& manifest, const CookedMani
         return ManifestCorrupt<void>(failure, Field::TypeId, CookedManifestNoEntry, asset);
     }
 
+    // 합이 u64를 넘으면(호출자가 준 내용이 손상) 같은 값일 수 없으므로 불일치다.
     uint64 rawBytes = 0;
+    bool overflow = false;
     for (const PackageBulkEntry& bulk : contents.bulkEntries) {
+        if (bulk.rawBytes > NumericLimits<uint64>::Max() - rawBytes) {
+            overflow = true;
+            break;
+        }
+
         rawBytes += bulk.rawBytes;
     }
 
-    if (rawBytes != entry.bulkRawBytes) {
+    if (overflow || rawBytes != entry.bulkRawBytes) {
         return ManifestCorrupt<void>(failure, Field::BulkRawBytes, CookedManifestNoEntry, asset);
     }
 

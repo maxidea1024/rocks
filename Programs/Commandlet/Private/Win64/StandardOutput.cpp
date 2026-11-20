@@ -2,11 +2,8 @@
 #include <Platform/Win64/WideString.h>
 #include <Windows.h>
 
+// Windows 표준 출력 채널이다. 콘솔이면 UTF-16 WriteConsoleW, 리디렉션이면 UTF-8 byte 그대로다.
 namespace {
-
-// 진입 인수는 프로세스 종료까지 보존한다. 대형 argv도 stack을 고갈시키지 않는다.
-char argumentStorage[rocks::CommandletRegistry::MaxArguments]
-                    [rocks::CommandletRegistry::MaxArgumentBytes + 1]{};
 
 rocks::Result<void> Write(void*, rocks::CommandletStream stream, rocks::StringView text) noexcept {
     if (!text.ValidateUtf8())
@@ -69,30 +66,14 @@ rocks::Result<void> Write(void*, rocks::CommandletStream stream, rocks::StringVi
 
 } // namespace
 
-int wmain(int argc, wchar_t** argv) {
-    if (argc < 1 || argv == nullptr ||
-        argc - 1 > static_cast<int>(rocks::CommandletRegistry::MaxArguments)) {
-        return Write(nullptr, rocks::CommandletStream::Error, "Too many or invalid arguments.\n")
-                   ? 2
-                   : 1;
-    }
-    rocks::StringView args[rocks::CommandletRegistry::MaxArguments];
-    for (int index = 1; index < argc; ++index) {
-        if (!argv[index])
-            return Write(nullptr, rocks::CommandletStream::Error, "Invalid argument.\n") ? 2 : 1;
-        const rocks::platform::windows::TextConversion converted =
-            rocks::platform::windows::ConvertWideToUtf8(
-                argv[index], static_cast<rocks::usize>(lstrlenW(argv[index])),
-                argumentStorage[index - 1], rocks::CommandletRegistry::MaxArgumentBytes + 1,
-                rocks::platform::windows::TextFit::Exact);
-        if (!converted) {
-            return Write(nullptr, rocks::CommandletStream::Error,
-                         "Invalid or oversized UTF-16 argument.\n")
-                       ? 2
-                       : 1;
-        }
-        args[index - 1] = rocks::StringView(argumentStorage[index - 1], converted.length);
-    }
-    return rocks::commandlet_host::Run({args, static_cast<rocks::usize>(argc - 1)},
-                                       {&Write, nullptr});
+namespace rocks::commandlet_host {
+
+CommandletOutput StandardOutput() noexcept {
+    return {&Write, nullptr};
 }
+
+bool PrepareStandardOutput() noexcept {
+    return true;
+}
+
+} // namespace rocks::commandlet_host

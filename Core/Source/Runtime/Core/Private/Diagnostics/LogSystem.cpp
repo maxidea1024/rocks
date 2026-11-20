@@ -136,6 +136,10 @@ struct LogSystemAccess {
     static void DeliverFatal(LogSystem& system, Span<const uint8> capture) noexcept {
         system.DeliverFatal(capture);
     }
+
+    static uint64 WriterThreadId(const LogSystem& system) noexcept {
+        return platform::AtomicLoad<MemoryOrder::Acquire>(&system.writerThread_);
+    }
 };
 
 void SubmitToLogSystem(LogSystem& system, LogLevel level, const LogCategory& category,
@@ -146,6 +150,10 @@ void SubmitToLogSystem(LogSystem& system, LogLevel level, const LogCategory& cat
 
 void DeliverFatalToLogSystem(LogSystem& system, Span<const uint8> capture) noexcept {
     LogSystemAccess::DeliverFatal(system, capture);
+}
+
+uint64 LogWriterThreadId(const LogSystem& system) noexcept {
+    return LogSystemAccess::WriterThreadId(system);
 }
 
 void RefreshLogFastMinimum(LogSystem& system, uint8 minimum) noexcept {
@@ -159,17 +167,49 @@ void RefreshLogFastMinimum(LogSystem& system, uint8 minimum) noexcept {
 
 // ---- LogInstallScope ----
 
-LogInstallScope::LogInstallScope(LogSystem& system) noexcept {
-    // platform::Fatal·OS 예외·신호 때 설치된 LogSystem을 flush하는 종료 hook을 건다. 바깥 범위가
-    // 이미 걸었으면 그대로 두고, 처음 거는 범위가 앞 hook을 기억해 해제 때 되돌린다(로그 hook은
-    // flush 뒤 앞 hook에 연쇄한다).
-    const platform::TerminationHook previousHook =
-        platform::SetTerminationHook(&detail::LogTerminationHook);
-    if (previousHook != &detail::LogTerminationHook) {
-        previousHook_ = previousHook;
-        ownsHook_ = true;
-        detail::SetChainedTerminationHook(previousHook);
+namespace {
+
+// 종료 콜백 등록 상태다(프로세스에서 한 번). 등록에 실패하면 다음 설치가 다시 시도한다.
+enum TerminationCallbackRegistration : uint32 {
+    CallbackUnregistered = 0,
+    CallbackRegistering = 1,
+    CallbackRegistered = 2,
+};
+
+constinit uint32 terminationCallbackRegistration = CallbackUnregistered;
+
+platform::TerminationCallbackResult
+LogTerminationCallback(const platform::TerminationContext& context, void*) noexcept {
+    return detail::FlushInstalledLogForTermination(context);
+}
+
+void RegisterLogTerminationCallbackOnce() noexcept {
+    uint32 expected = CallbackUnregistered;
+    if (!platform::AtomicCompareExchangeStrong<MemoryOrder::AcquireRelease, MemoryOrder::Acquire>(
+            &terminationCallbackRegistration, expected, static_cast<uint32>(CallbackRegistering))) {
+        return;
     }
+
+    platform::TerminationCallbackHandle handle;
+    if (platform::RegisterTerminationCallback(&LogTerminationCallback, nullptr, handle)) {
+        platform::AtomicStore<MemoryOrder::Release>(&terminationCallbackRegistration,
+                                                    static_cast<uint32>(CallbackRegistered));
+        return;
+    }
+
+    platform::AtomicStore<MemoryOrder::Release>(&terminationCallbackRegistration,
+                                                static_cast<uint32>(CallbackUnregistered));
+    detail::WriteLogEmergencyText(LogLevel::Error, LogLogging.Name(),
+                                  "The log termination callback could not be registered; "
+                                  "crashes will not flush queued records");
+}
+
+} // namespace
+
+LogInstallScope::LogInstallScope(LogSystem& system) noexcept {
+    // 크래시 때 설치된 LogSystem을 flush하는 종료 콜백을 프로세스에서 처음 한 번 등록한다. 해제하지
+    // 않는다(콜백은 그때 설치된 시스템을 LogReadScope로 찾는다).
+    RegisterLogTerminationCallbackOnce();
 
     uint64 dropped = 0;
     {
@@ -195,11 +235,6 @@ LogInstallScope::LogInstallScope(LogSystem& system) noexcept {
 }
 
 LogInstallScope::~LogInstallScope() noexcept {
-    if (ownsHook_) {
-        (void)platform::SetTerminationHook(previousHook_);
-        detail::SetChainedTerminationHook(nullptr);
-    }
-
     platform::LockGuard lock(InstallMutex());
     (void)platform::AtomicExchange<MemoryOrder::SequentiallyConsistent>(&installedSystem,
                                                                         previous_);
@@ -1096,38 +1131,59 @@ void LogSystem::DeliverFatal(Span<const uint8> capture) noexcept {
     }
 }
 
-bool LogSystem::FlushForTermination(uint32 timeoutMilliseconds) noexcept {
-    if (platform::AtomicLoad<MemoryOrder::Acquire>(&started_) == 0 || inSink ||
-        detail::OnLogWriterThread()) {
+bool LogSystem::WriterThreadFailed(uint64 failingThreadId,
+                                   Span<const uint64> stoppedThreadIds) const noexcept {
+    const uint64 writer = platform::AtomicLoad<MemoryOrder::Acquire>(&writerThread_);
+    if (writer == 0) {
         return false;
     }
 
-    // 종료를 부른 스레드(크래시한 스레드)가 출력 스레드 자신이면 큐를 비울 주체가 없다. 기다리지
+    if (failingThreadId == writer) {
+        return true;
+    }
+
+    for (const uint64 stopped : stoppedThreadIds) {
+        if (stopped == writer) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+platform::TerminationCallbackResult
+LogSystem::FlushForTermination(uint32 timeoutMilliseconds, uint64 failingThreadId,
+                               Span<const uint64> stoppedThreadIds) noexcept {
+    using platform::TerminationCallbackResult;
+    if (platform::AtomicLoad<MemoryOrder::Acquire>(&started_) == 0 || inSink ||
+        detail::OnLogWriterThread()) {
+        return TerminationCallbackResult::Skipped;
+    }
+
+    // 크래시한 스레드나 겹쳐 멈춘 스레드가 출력 스레드 자신이면 큐를 비울 주체가 없다. 기다리지
     // 않고 비상 경로로 알린다.
-    const uint64 terminating = platform::TerminatingThreadId();
-    if (terminating != 0 &&
-        terminating == platform::AtomicLoad<MemoryOrder::Acquire>(&writerThread_)) {
+    if (WriterThreadFailed(failingThreadId, stoppedThreadIds)) {
         detail::WriteLogEmergencyText(LogLevel::Error, LogLogging.Name(),
-                                      "The log writer thread itself terminated; queued records "
-                                      "are lost");
-        return false;
+                                      "The log writer thread itself crashed; queued records are "
+                                      "lost");
+        return TerminationCallbackResult::Skipped;
     }
 
     if (config_.mode == LogMode::Sync) {
         // 기록은 이미 sink에 갔다. 묶어 둔 출력(파일 묶음)만 비운다. lock을 쥔 스레드가 멈췄으면
         // 건너뛴다.
         if (!sinkMutex_.TryLock()) {
-            return false;
+            return TerminationCallbackResult::Skipped;
         }
 
         FlushSinks();
         sinkMutex_.Unlock();
-        return true;
+        return TerminationCallbackResult::Completed;
     }
 
     if (config_.mode != LogMode::Async ||
         platform::AtomicLoad<MemoryOrder::Acquire>(&emergency_) != 0) {
-        return false;
+        return TerminationCallbackResult::Skipped;
     }
 
     // 이 호출 전에 넣은 기록이 sink flush까지 끝나기를 lock 없이 기다린다. 깨우기는 막히지 않는
@@ -1138,23 +1194,69 @@ bool LogSystem::FlushForTermination(uint32 timeoutMilliseconds) noexcept {
                             static_cast<uint64>(timeoutMilliseconds) * NanosecondsPerMillisecond;
     while (platform::AtomicLoad<MemoryOrder::Acquire>(&drainedPosition_) < target) {
         if (platform::MonotonicNanoseconds() >= deadline) {
-            return false;
+            return TerminationCallbackResult::TimedOut;
         }
 
         (void)wake_.TrySignal();
         platform::YieldThread();
     }
 
-    return true;
+    return TerminationCallbackResult::Completed;
 }
 
 namespace detail {
 
-void FlushInstalledLogForTermination() noexcept {
+namespace {
+
+// Log::Fatal·assert의 flush 시도 표시다(프로세스 전역).
+constinit uint32 fatalFlushAttempted = 0;
+
+} // namespace
+
+void MarkFatalFlushAttempted() noexcept {
+    platform::AtomicStore<MemoryOrder::Release>(&fatalFlushAttempted, 1u);
+}
+
+bool FatalFlushAttempted() noexcept {
+    return platform::AtomicLoad<MemoryOrder::Acquire>(&fatalFlushAttempted) != 0;
+}
+
+platform::TerminationCallbackResult
+FlushInstalledLogForTermination(const platform::TerminationContext& context) noexcept {
     LogReadScope scope;
-    if (LogSystem* system = scope.System()) {
-        (void)system->FlushForTermination(system->config_.fatalFlushTimeoutMilliseconds);
+    LogSystem* system = scope.System();
+    if (system == nullptr) {
+        return platform::TerminationCallbackResult::Skipped;
     }
+
+    const uint32 stopped =
+        context.stoppedThreadCount != nullptr
+            ? platform::AtomicLoad<MemoryOrder::Acquire>(context.stoppedThreadCount)
+            : 0u;
+    const Span<const uint64> stoppedThreads(context.stoppedThreadIds,
+                                            context.stoppedThreadIds != nullptr ? stopped : 0u);
+
+    // 상한은 공용 마감에서 뒤 콜백 몫(TerminationCallbackReserveMilliseconds)을 뺀 시각이다.
+    constexpr uint64 NanosecondsPerMillisecond = 1000000;
+    const uint64 reserve =
+        uint64{TerminationCallbackReserveMilliseconds} * NanosecondsPerMillisecond;
+    const uint64 now = platform::MonotonicNanoseconds();
+    const uint64 limit =
+        context.deadlineNanoseconds > reserve ? context.deadlineNanoseconds - reserve : 0;
+    uint64 timeout = 0;
+    if (now < limit) {
+        timeout = (limit - now) / NanosecondsPerMillisecond;
+        if (timeout > NumericLimits<uint32>::Max()) {
+            timeout = NumericLimits<uint32>::Max();
+        }
+    }
+
+    if (!FatalFlushAttempted() && system->config_.fatalFlushTimeoutMilliseconds < timeout) {
+        timeout = system->config_.fatalFlushTimeoutMilliseconds;
+    }
+
+    return system->FlushForTermination(static_cast<uint32>(timeout), context.failingThreadId,
+                                       stoppedThreads);
 }
 
 } // namespace detail
