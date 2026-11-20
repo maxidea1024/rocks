@@ -128,6 +128,66 @@ TEST(EngineAssets_ShutdownCombinations) {
 
 namespace {
 
+// 시작 함수에서 상주하지 않은 3을 요청하고 실패하는 client다. 초기화 실패 정리(EngineAssets
+// Deinitialize의 AssetManager 파괴)가 callback에 ShuttingDown을 주고, callback은 엔진 Shutdown을
+// 다시 부른 뒤 티켓을 놓는다(OnEngineStart가 실패하면 OnEngineShutdown은 불리지 않는다).
+class FailingStartClient final : public EngineClient {
+public:
+    Result<void> OnEngineStart(Engine& engine) noexcept override {
+        AssetManager& assets = engine.GetSubsystem<EngineAssetsSubsystem>()->Manager();
+        auto made = assets.RequestAsset(RequestOf(3));
+        if (made) {
+            ticket = Move(made.Value());
+            auto callback = AssetReadyCallback::TryCreate(
+                engine.GetAllocator(),
+                [this, &engine](Result<AssetLease> lease, const AssetDiagnostic&) noexcept {
+                    ++calls;
+                    error = lease ? ErrorCode::None : lease.Error();
+                    stateInCallback = engine.State();
+                    reentered = engine.Shutdown().Error();
+                    ticket = LoadTicket();
+                });
+            requested =
+                callback && assets.OnReady(ticket, TaskLane::Game, Move(callback.Value())).IsOk();
+        }
+
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    bool requested = false;
+    uint32 calls = 0;
+    ErrorCode error = ErrorCode::None;
+    ErrorCode reentered = ErrorCode::None;
+    EngineState stateInCallback = EngineState::Uninitialized;
+    LoadTicket ticket;
+};
+
+} // namespace
+
+// 초기화 실패 정리 중 재종료(11.8절 6·7): client 시작 함수가 실패하면 엔진이 Subsystem을 정리하고,
+// 그때 AssetManager 파괴가 남은 요청 callback에 ShuttingDown을 한 번 준다. 그 callback 안에서 부른
+// 엔진 Shutdown은 Busy(상태는 아직 Initializing)이고, 초기화는 그 오류로 실패해 Failed로 정리된다.
+TEST(EngineAssets_ShutdownDuringFailedInitialization) {
+    DiskScene disk("init-reenter");
+    REQUIRE(disk.Write());
+    ConfigFixture fixture(DevelopmentRules());
+    REQUIRE(PrepareSettings(fixture.Context(), disk.Root()));
+    SystemAllocator allocator;
+    FailingStartClient client;
+    const EngineSubsystemType subsystems[] = {EngineAssetsSubsystemType()};
+    Engine engine(allocator);
+    CHECK(engine.Initialize(MakeEngineConfig(&fixture.Context(), subsystems, &client)).Error() ==
+          ErrorCode::InvalidArgument);
+    CHECK(engine.State() == EngineState::Failed);
+    REQUIRE(client.requested);
+    CHECK(client.calls == 1 && client.error == ErrorCode::ShuttingDown);
+    CHECK(client.stateInCallback == EngineState::Initializing);
+    CHECK(client.reentered == ErrorCode::Busy);
+    CHECK(!client.ticket.IsValid());
+}
+
+namespace {
+
 // 2·3을 상주시킨 뒤 둘 다 놓은 엔진 장면이다(다음 Pump가 Discard한다).
 struct ReleasedScene {
     explicit ReleasedScene(const char* tag) noexcept : disk(tag) {
@@ -213,7 +273,9 @@ TEST(EngineAssets_ShutdownDuringGcCycle) {
 // 회수하고, 쥔 객체는 여전히 남아 다시 기다린다(재시도 시간 1000 s — 그 전에는 재시도가 없다).
 TEST(EngineAssets_LingeringThenNewDiscard) {
     ReleasedScene scene("linger-discard");
-    const char* const assignments[] = {"asset.gc.retry_seconds", "1000"};
+    // GC 시간 예산을 넉넉히 줘 cycle 진행이 객체 수 예산(기본)으로만 정해지게 한다.
+    const char* const assignments[] = {"asset.gc.retry_seconds", "1000", "asset.gc.time_ms",
+                                       "60000"};
     REQUIRE(scene.Start(assignments));
     ObjectRegistry& registry = scene.assets->Manager().Registry();
     auto pinned = registry.TryPin(registry.OwnerAccess(), scene.two.Object());
@@ -233,7 +295,8 @@ TEST(EngineAssets_LingeringThenNewDiscard) {
     scene.three = AssetLease();
     REQUIRE(scene.engine.RunFrame());
     CHECK(!scene.Loaded(3));
-    CHECK(scene.assets->Stats().gcPending || scene.assets->Stats().gcCycles == 2);
+    // RootRef를 놓은 프레임 끝에서 새 cycle이 표식을 시작하고 회수는 다음 조각이다(표식 → 회수).
+    CHECK(scene.assets->Stats().gcPending && scene.assets->Stats().gcCycles == 1);
     const uint32 frames = scene.RunUntilCycles(2);
     CHECK(frames < FrameLimit);
     CHECK(scene.assets->Stats().gcCycles == 2);

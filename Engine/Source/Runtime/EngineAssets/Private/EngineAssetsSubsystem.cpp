@@ -292,8 +292,11 @@ void EngineAssetsSubsystem::StepGarbageCollection() noexcept {
         releasedDuringCycle_ = false;
     }
 
-    auto progress = registry.StepCollection(access, engine_assets_detail::ReadGcBudget(),
-                                            engine_->GcScheduler());
+    // 엔진 GC scheduler가 있으면 표식을 병렬로 한다(GC-S4) — 넘긴 조각 수를 센다.
+    WorkerScheduler* scheduler = engine_->GcScheduler();
+    stats_.gcParallelSteps += scheduler != nullptr ? 1u : 0u;
+    auto progress =
+        registry.StepCollection(access, engine_assets_detail::ReadGcBudget(), scheduler);
     if (!progress) {
         failed(progress.Error());
         return;

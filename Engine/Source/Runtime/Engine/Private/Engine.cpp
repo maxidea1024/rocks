@@ -713,9 +713,12 @@ Result<void> Engine::Shutdown() noexcept {
         return Result<void>::Failure(ErrorCode::Busy);
     }
 
-    // 종료 단계 안(Subsystem·hook·client의 종료 함수와 그 안에서 불린 callback)에서 다시 부르면
-    // Busy다 — 같은 단계를 다시 돌면 바깥 호출이 쓰는 상태(정리 중인 Subsystem 등)를 지운다.
-    if (shutdownRunning_) {
+    // 초기화 중(Subsystem Initialize·client OnEngineStart와 초기화 실패 정리 — 그 안에서 불린
+    // callback 포함)이나 종료 단계 안(Subsystem·hook·client의 종료 함수와 그 안에서 불린
+    // callback)에서 부르면 Busy다 — 종료 단계를 돌면 바깥 호출(Initialize·Shutdown)이 쓰는
+    // 상태(정리 중인 Subsystem·객체 Registry 등)를 지운다. 초기화 실패는 Initialize가 스스로
+    // 정리한다.
+    if (state_ == EngineState::Initializing || shutdownRunning_) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
 

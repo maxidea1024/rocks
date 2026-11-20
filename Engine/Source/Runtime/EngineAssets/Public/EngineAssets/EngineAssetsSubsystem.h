@@ -62,6 +62,8 @@ struct EngineAssetsStats {
     uint64 pumpFailures = 0;
     // 실패한 GC 조각 수(Busy 제외 — 매번 기록)다.
     uint64 gcFailures = 0;
+    // 엔진 GC scheduler를 넘겨 병렬 표식으로 돌린 GC 조각 수다(엔진 gcWorkers가 0이면 0).
+    uint64 gcParallelSteps = 0;
     // GC 수집 요청 대기 중인지다(Discard한 패키지의 RootRef를 놓았고 아직 cycle이 끝나지 않음).
     bool gcPending = false;
     // 끝난 cycle 뒤에도 Discard된 객체가 남아 재시도 시간을 세는 중인지다(11.8절 5).

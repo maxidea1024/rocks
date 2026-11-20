@@ -894,6 +894,11 @@ public:
         return Result<void>::Success();
     }
 
+    Result<void> OnEngineStart(Engine& engine) noexcept override {
+        CallShutdownAgain(engine);
+        return Result<void>::Success();
+    }
+
     void OnEngineShutdown(Engine& engine) noexcept override {
         CallShutdownAgain(engine);
     }
@@ -901,6 +906,11 @@ public:
 
 class ReentrantShutdownSubsystem final : public EngineSubsystem {
 public:
+    Result<void> Initialize(Engine& engine) noexcept override {
+        CallShutdownAgain(engine);
+        return Result<void>::Success();
+    }
+
     void BeginShutdown(Engine& engine) noexcept override {
         CallShutdownAgain(engine);
     }
@@ -917,9 +927,10 @@ public:
 
 } // namespace
 
-// 종료 재진입: 종료 단계 안(Subsystem BeginShutdown·CompleteInFlightWork·Deinitialize, client
-// OnEngineShutdown, hook 다섯 단계)에서 다시 부른 Shutdown은 모두 Busy이고 바깥 종료는 그대로
-// 끝난다(Stopped·성공). 끝난 뒤 다시 부르면 아무것도 하지 않고 성공한다.
+// 종료 재진입: 초기화 중(Subsystem Initialize, client OnEngineStart)과 종료 단계 안(Subsystem
+// BeginShutdown·CompleteInFlightWork·Deinitialize, client OnEngineShutdown, hook 다섯 단계)에서
+// 부른 Shutdown은 모두 Busy이고, 초기화는 그대로 Running이 되며 바깥 종료는 그대로 끝난다
+// (Stopped·성공). 끝난 뒤 다시 부르면 아무것도 하지 않고 성공한다.
 TEST(Engine_ReentrantShutdownIsBusy) {
     SystemAllocator allocator;
     reentrantShutdown = ReentrantShutdownState{};
@@ -933,9 +944,13 @@ TEST(Engine_ReentrantShutdownIsBusy) {
     config.subsystems = subsystems;
     Engine engine(allocator);
     REQUIRE(engine.Initialize(config));
+    CHECK(engine.State() == EngineState::Running);
+    constexpr uint32 InitializationStages = 2;
+    CHECK(reentrantShutdown.calls == InitializationStages);
+    CHECK(reentrantShutdown.busy == InitializationStages);
     CHECK(engine.Shutdown());
     CHECK(engine.State() == EngineState::Stopped);
-    constexpr uint32 ReentrantStages = 9;
+    constexpr uint32 ReentrantStages = InitializationStages + 9;
     CHECK(reentrantShutdown.calls == ReentrantStages);
     CHECK(reentrantShutdown.busy == ReentrantStages);
     CHECK(engine.Shutdown());

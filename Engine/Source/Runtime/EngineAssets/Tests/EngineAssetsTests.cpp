@@ -219,6 +219,8 @@ TEST(EngineAssets_GarbageCollectionCombinations) {
                     CHECK(assets->Stats().gcCycles == expectedCycles && !assets->Stats().gcPending);
                     CHECK((assets->Stats().gcBusySkips != 0) == (busyFrame != 0));
                     CHECK(assets->Stats().gcFailures == 0 && !assets->Stats().lingering);
+                    // 병렬 축은 모든 조각을 엔진 GC scheduler로 돌렸다.
+                    CHECK((assets->Stats().gcParallelSteps != 0) == (parallel != 0));
                     CHECK(registry.Stats().liveObjects < liveBefore);
                     extra.Value() = AssetLease();
                     CHECK(engine.Shutdown());
@@ -713,6 +715,7 @@ TEST(EngineAssets_InitializationAllocationFailures) {
                 CHECK(engine.RunFrame());
                 CHECK(engine.Shutdown());
             } else {
+                CHECK(initialized.Error() == ErrorCode::OutOfMemory);
                 CHECK(engine.State() == EngineState::Failed);
             }
         }
