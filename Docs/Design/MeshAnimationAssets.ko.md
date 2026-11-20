@@ -1,6 +1,6 @@
 # 메시·스켈레톤·애니메이션 에셋 설계
 
-기준일: 2026-11-21, 개정 11(MA6a 구현 — 7.5절·12.5절). 개정 10(MA5a 구현 — 6.5절·12.4절). 개정 9(MA3·MA5·MA6을 a·b로 나눔). 개정 8(MA4a 구현 — 6.4절·12.3절). 개정 7(MA2a 구현 — 5.4절·12.2절). 개정 6(MA2a·MA4a 분리). 개정 5(MA1 구현 — 3.7절). 개정 4(MA2 전 결정 반영 — index 형식·통합 bone map·메시 LOD 스트리밍). 개정 3(15절 요구를 다른 문서에 반영하고 상태 열을 더함). 개정 2(교차 검증 반영 — 17절). 정적 메시·스켈레톤·스킨 메시·애니메이션 클립의 에셋 자료구조를 정한다. 범위는 원본 데이터(에디터 데이터), 저장 설정, 빌드 계약, 쿠킹 데이터, 모듈 배치다. [엔진 구현 계획](EngineImplementationPlan.ko.md) 13.1절(StaticMeshAsset)·15절(Skeleton·SkeletalMesh·AnimationClip)의 개요를 구현할 수 있는 수준으로 구체화한다. 텍스처는 [에셋 시스템](AssetSystem.ko.md) 12절, 머티리얼은 [머티리얼 시스템](MaterialSystem.ko.md) 4절이 이미 정했으므로 이 문서는 그 둘을 참조만 한다.
+기준일: 2026-11-21, 개정 12(MA3a 구현 — 4.8절·12.6절). 개정 11(MA6a 구현 — 7.5절·12.5절). 개정 10(MA5a 구현 — 6.5절·12.4절). 개정 9(MA3·MA5·MA6을 a·b로 나눔). 개정 8(MA4a 구현 — 6.4절·12.3절). 개정 7(MA2a 구현 — 5.4절·12.2절). 개정 6(MA2a·MA4a 분리). 개정 5(MA1 구현 — 3.7절). 개정 4(MA2 전 결정 반영 — index 형식·통합 bone map·메시 LOD 스트리밍). 개정 3(15절 요구를 다른 문서에 반영하고 상태 열을 더함). 개정 2(교차 검증 반영 — 17절). 정적 메시·스켈레톤·스킨 메시·애니메이션 클립의 에셋 자료구조를 정한다. 범위는 원본 데이터(에디터 데이터), 저장 설정, 빌드 계약, 쿠킹 데이터, 모듈 배치다. [엔진 구현 계획](EngineImplementationPlan.ko.md) 13.1절(StaticMeshAsset)·15절(Skeleton·SkeletalMesh·AnimationClip)의 개요를 구현할 수 있는 수준으로 구체화한다. 텍스처는 [에셋 시스템](AssetSystem.ko.md) 12절, 머티리얼은 [머티리얼 시스템](MaterialSystem.ko.md) 4절이 이미 정했으므로 이 문서는 그 둘을 참조만 한다.
 
 - 배경: 사용자 지시(2026-11-19). 엔진 시험용으로 UE에서 텍스처·정적 메시·머티리얼·애니메이션을 가져오는 기능을 넣는다. Rocks에 메시·애니메이션 자료구조가 아직 없으므로 함께 정한다. 가져오는 경로는 [Unreal 교환 형식](UnrealExchange.ko.md)이 정한다. 이 문서의 자료구조는 그 경로와 상관없이 쓰는 엔진 기반이며, 뒤에 올 glTF·FBX 임포터도 같은 구조로 들어온다.
 - UE 근거: UE 5.8.4(`release`, commit `f45729c0b6f0`, 로컬 클론 `C:\github\UnrealEngine`)를 읽어 확인했다. 경로 약어는 다음과 같다. `E/` = `Engine/Source/Runtime/Engine`, `RT/` = `Engine/Source/Runtime`, `Dev/` = `Engine/Source/Developer`. UE 이름은 대응표와 근거에만 쓰고, 타입 이름은 Rocks 이름으로 짓는다. 빌드 설정·축소 설정처럼 업계 공용 서술 이름은 그대로 쓴다.
@@ -274,6 +274,18 @@ StaticMesh: simpleCollision, complexity CollisionComplexity { Default, SimpleAnd
 ### 4.7 LOD 화면 크기와 플랫폼별 값
 
 LOD 화면 크기(UE `FPerPlatformFloat ScreenSize`, StaticMeshSourceData.h:177-182)와 최소 LOD는 플랫폼별 값이다. 텍스처의 플랫폼별 설정과 같은 장치(기본값 + TargetProfile 이름별 덮어쓰기 표, AssetSystem 12.4절)를 쓴다. `autoComputeLodScreenSize`(UE `GetAutoComputeLODScreenSize()` — 멤버 직접 접근은 5.7부터 deprecated, StaticMesh.h:720)와 `lodGroup Name`도 둔다. 메시 LOD 그룹 표는 TargetProfile에 텍스처 LOD 그룹과 나란히 둔다(요구 MR9).
+
+### 4.8 구현에서 정한 점(MA3a)
+
+MA3a 구현(`Mesh` 모듈의 `Mesh/SimpleCollision.h`) 중 4.6절이 정하지 않았거나 다르게 정한 점이다. 모두 권장안으로 확정했다. UE 근거는 E/Classes/PhysicsEngine/ShapeElem.h·SphereElem.h·BoxElem.h·SphylElem.h·TaperedCapsuleElem.h·ConvexElem.h·AggregateGeom.h, E/Private/Collision/KAggregateGeom.cpp(생성자 기본값), E/Classes/Engine/EngineTypes.h(`ECollisionEnabled`)다.
+
+1. **타입.** 형상 struct 여섯(`CollisionSphere`·`CollisionBox`·`CollisionCapsule`·`CollisionTaperedCapsule`·`CollisionCylinder`·`CollisionConvex`)은 공통 필드(`name`·`contributeToMass` 기본 참·`collisionEnabled` 기본 `QueryAndPhysics`·`restOffset` 기본 0 — UE `FKShapeElem`)를 각자 갖는다. 공통 기반 struct로 상속하지 않는 까닭은 UE도 형상마다 독립 USTRUCT 필드를 저장하고, 필드 순서가 저장 의미에 들어가지 않아 기반을 둘 이점이 없기 때문이다(버린 대안: `CollisionShapeBase` 상속 — 필드 경로가 형상마다 같아지는 것 말고는 얻는 것이 없다). 크기 기본값은 UE 생성자와 같다(구 반경 1, 상자 1·1·1, 캡슐 반경 1·길이 1, 테이퍼드 캡슐 1·1·1). 실린더 기본값은 캡슐과 같게 반경 1·길이 1로 둔다. `CollisionEnabled`는 UE 값 여섯(`NoCollision`·`QueryOnly`·`PhysicsOnly`·`QueryAndPhysics`·`ProbeOnly`·`QueryAndProbe`)을 같은 번호로 둔다. `CollisionComplexity`는 4.6절 넷이고, `StaticMesh` 필드 연결은 MA2b다.
+2. **크기 규칙(UE 의미, 물리 사상 가능성 기준).** 모든 실수는 유한이어야 한다. 구 반경 > 0, 상자 `size` 세 성분 > 0, 캡슐 반경 > 0·길이 ≥ 0(0이면 구와 같다 — UE가 받는 값), 테이퍼드 캡슐 두 반경 > 0·길이 ≥ 0, 실린더 반경 > 0·길이 > 0(길이 0은 원판이라 축을 정할 수 없다 — [Cylinder 형상 설계](CylinderShape.ko.md) 3.3절), `restOffset`은 유한(부호 제한 없음 — UE도 음수를 받는다). 회전(`Rotator<double>`, 도)은 유한이면 범위를 두지 않는다(UE 편집 범위 ±360은 UI 제한이다). UE는 이 값을 검사하지 않고 물리 생성 때 잘라 쓰지만, Rocks는 데이터 단계에서 거부해 물리 어댑터가 받는 값을 좁힌다.
+3. **볼록 형상.** 점은 `Vec3d`(little-endian double 셋, 24 byte), index는 `uint32`(4 byte) bulk이고 bulk는 늘 있다(0 byte index도 entry — 3.7절 3과 같다). 점 수는 `CollisionConvexMinVertices`(4 — 부피가 있는 hull의 최소) 이상 `CollisionConvexMaxVertices`(65535) 이하, index 수는 3의 배수, 각 index < 점 수, 삼각형 수 ≤ 2 × 점 수 − 4(닫힌 볼록 다면체 삼각 분할의 상한 — Euler 공식)다. index가 비어도 된다(UE `IndexData`는 hull에서 다시 만드는 값이다). `transform`은 성분 유한, 회전 |길이² − 1| ≤ `CollisionRotationNormalizedTolerance`(0.01, UE `THRESH_QUAT_NORMALIZED`), 크기 세 성분 ≠ 0이다. UE의 `ElemBox`(점에서 다시 계산하는 캐시)는 저장하지 않는다. 메모리 형태는 `ConvexGeometry{vertices, indices}`이고 `StoreConvexGeometry`·`LoadConvexGeometry`가 bulk와 오간다. 점 수 상한은 데이터 상한이고 Jolt hull 점 수 한도(256)는 쿠킹(물리 단계)이 다룬다.
+4. **형상 수 상한.** 형상 수 합 ≤ `CollisionMaxElements`(65535)다(compound 자식 번호를 16비트로 담을 수 있게).
+5. **검증 함수.** `ValidateSimpleCollision`은 값 필드만 본다(형상 수, 형상 종류 순서 구·상자·캡슐·테이퍼드·실린더·볼록, 배열 번호 순). bulk는 `ValidateSimpleCollisionBulk`(볼록 형상마다 `LoadConvexGeometry`)가 본다. 위반은 새 진단 `InvalidCollisionData`(오류 — 11절 표에 더했다)이고 결과는 `CollisionDiagnostic{code, error, issue(CollisionIssue), shape(CollisionShapeKind), index, related, count}`다. 로드 중 bulk 배치 위반은 `CorruptPackage`다.
+6. **받지 않는 형상 진단.** `UnsupportedCollisionShape`(경고)는 임포터가 낸다. 형식은 `MakeUnsupportedCollisionWarning(feature, count)` — issue `UnsupportedFeature`, `related` = `UnsupportedCollisionFeature`(level set·skinned level set·ML level set·skinned triangle mesh, 테이퍼드 캡슐 `Width` ≠ 0·`bOneSidedCollision` — 4.6절의 "기본값이 아니면 경고"를 같은 코드로 낸다), `count` = 버린 형상(또는 그 값을 가진 테이퍼드 캡슐) 수다.
+7. **결정성.** 검증은 첫 위반이 입력만으로 정해진다. 부동소수점 계산은 사칙연산과 비교뿐이다.
 
 ## 5. 정적 메시 `StaticMesh`
 
@@ -663,6 +675,7 @@ AssetSystem 4.6절 진단 표에 등록한다(요구 MR10).
 | `NegativeBuildScale` | 경고 | buildScale 음수 성분 홀수 개(winding 반전 없음) |
 | `UnsupportedSetting` | 경고 | 보존 상태 설정이 기본값이 아님 |
 | `UnsupportedCollisionShape` | 경고 | level set 등 받지 않는 충돌 형상 |
+| `InvalidCollisionData` | 오류 | 단순 충돌 값·볼록 형상 bulk 규칙 위반(4.8절 — MA3a에서 더함) |
 | `InvalidSkeletonData` | 오류 | 본 계층·스켈레톤 불변식 위반(6.4절 — MA4a에서 더함) |
 | `SkeletonMismatch` | 오류 | 본 병합 때 부모 사슬 불일치 |
 | `UnknownBoneTrack` | 경고 | 스켈레톤에 없는 본의 트랙 |
@@ -884,6 +897,24 @@ Coverage(2026-11-21, clang source-based — `Build/MeasureCoverage.ps1`, 필터 
 
 닿지 않은 분기 7개 가운데 6개는 `ROCKS_ASSERT`의 실패 쪽이다(용량을 미리 잡은 뒤의 추가 넷 — 트랙 이름 표·정렬 표·저장 트랙·로드 트랙, 커브 이름 표 하나, 상수 접기의 줄이는 크기 조정 하나). 나머지 하나는 12.3절에 적은 MA4a의 `FindNamed` 다른 pool 비교다. 측정 중 닿을 수 없음을 확인한 구조는 고쳤다: 커브 키 재검증(TangentCurve API·검증 hook이 이미 지킨다 — 7.5절 7), 샘플링의 `TryAsFrameTime` 실패·음수 프레임(양수 시간만 그 경로로 간다), 유한 판정의 성분별 단락(v − v 합 한 번), 쿠킹 로드의 원소별 유한 단락(개수 세기), 상수 접기의 빈 배열.
 
+### 12.6 요구 대조표(MA3a — 단순 충돌 값·검증)
+
+시험은 EngineTests의 `Collision_*`(`Engine/Source/Runtime/Mesh/Tests`, 8개)다. 패키지 왕복은 fixture 에셋 `TestCollisionAsset`(AssetTestFixtures `MeshAssets.h` — `SimpleCollision` 필드·배열·EditorOnly 사본, `CollisionComplexity`)으로 한다. 진단 이름표는 `AssetPackage_DiagnosticNames`가 새 코드까지 본다.
+
+| 요구 | 시험 |
+|---|---|
+| 4.6·4.8절 1 형상 struct·공통 필드의 UE 기본값, 열거 번호 | `Collision_Defaults` |
+| 4.8절 2 형상 규칙마다 하나씩(위치·회전·restOffset 비유한, 크기 0·음수·비유한과 성분 번호, 길이 음수·0 허용, 실린더 길이 0) | `Collision_ValidateRules` |
+| 4.8절 3 볼록 transform(비유한·정규화·크기 0, 허용 경계)과 점·index 규칙(점 수 하한·상한 경계, 비유한 점, index 수·범위, 삼각형 수 2V − 4, index 없음 허용) | `Collision_ValidateRules`, `Collision_ConvexGeometryRules` |
+| 4.8절 4 형상 수 상한(경계 포함) | `Collision_ValidateRules` |
+| 저장 → 로드 → 재저장 byte 일치(에디터·쿠킹), 두 번 쓴 byte 일치, 볼록 bulk(점 double bit·index) 왕복, EditorOnly 제외 | `Collision_PackageRoundTripResaveIdentical` |
+| 4.8절 3·5 볼록 bulk 변조(길이·빈 ref·점 수·index 범위 — CorruptPackage), bulk 검증의 형상 번호, 저장 거부 | `Collision_LoadRejectsConvexBytes` |
+| 할당 실패 주입(저장·로드·bulk 검증 — 결과 그대로·같은 결과) | `Collision_AllocationFailures` |
+| 고정 seed 퍼징(형상 값·볼록 점 400개 — 같은 진단, 저장 byte 결정성) | `Collision_FuzzValues` |
+| 11 `InvalidCollisionData`·`UnsupportedCollisionShape` 등록·이름, 받지 않는 형상 경고 형식(4.8절 6), 4.6절 변환 | `Collision_DiagnosticNames`, `AssetPackage_DiagnosticNames` |
+
+Coverage(2026-11-21, clang source-based — `Build/MeasureCoverage.ps1`, 필터 `Collision_`): 시험 8개 모두 통과. `SimpleCollision.cpp` 줄 375/375(100%), 분기 182/182(100%), 함수 27/27, `SimpleCollision.h` 줄 9/9. 측정 중 형상 종류별 템플릿 인스턴스마다 위치 판정 분기가 따로 세어져(구 등 일부 종류에서 회전 비유한을 만들 수 없는 조합) 위치·크기·길이 판정을 템플릿 밖 함수 하나(`CheckSized`)로 모았고, 점·index bulk 추가를 같은 자리에서 실패를 처리하는 반복으로 바꿨다(두 번째 entry 추가 실패는 bulk 원본의 용량이 미리 잡혀 있어 따로 닿지 않는다).
+
 ## 13. 단계
 
 ID는 이 문서가 부여한다(MA). 착수는 사용자가 정하고, 고정 구현 순서를 바꾸지 않는다. 단, 사용자 지시(2026-11-21 "진행 가능한거부터")에 따라 에셋 DB·쿠커·머티리얼 클래스에 기대지 않는 부분을 a 단계(MA2a·MA3a·MA4a·MA5a·MA6a)로 떼어 먼저 한다. 떼어 낸 부분은 순수 함수·값 타입·A1 수준 에셋 클래스뿐이라, 뒤 단계(MA2b·MA4b)가 그 위에 쿠킹 처리기·임포트 서비스를 얹을 때 바꿀 계약이 없다.
@@ -893,7 +924,7 @@ ID는 이 문서가 부여한다(MA). 착수는 사용자가 정하고, 고정 �
 | MA1 | `MeshSource` 모듈: 저장 형식·검증·위상 조회·값 정리, 시험. **구현(2026-11-20, d5405bfa)**: 모듈 `Engine/Source/Runtime/MeshSource`, AssetRuntime `MemoryBulkSource`·메시 진단 코드 5개, 시험 52개 + AssetRuntime 3개(12.1절 대조표·coverage — 줄 99.05%, 분기 94.86%, 닿지 않은 분기는 단언·메모리 상한), 정한 점은 3.7절 | A1(패키지·Bulk) |
 | MA2a | 선행 조건에 기대지 않는 빌드 핵심: `Mesh` 모듈에 빌드 설정 값 타입(`MeshBuildSettings`), `MeshTools` 모듈에 `MeshSource` → 메모리 빌드 결과(렌더 정점·index·섹션·bounds) 순수 함수(5.2절 1–5·8–10·12단계, 6·7·11단계는 후속이라 경고 또는 원본 순서), 용접·퇴화 판정 임계값 상수를 UE 원본으로 확정, MikkTSpace ThirdParty(결정적 수학 패치)와 참조 구현 대조 시험, 필요한 결정적 초월 함수는 Core에 더함. 쿠킹 형식 패킹(13단계)·`StaticMesh` 클래스·슬롯 머티리얼 참조·쿠킹 처리기·임포트 서비스는 MA2b. 슬롯 대응(10단계)은 슬롯 이름 목록만 입력으로 받는다. **구현(2026-11-21, 미커밋)**: 모듈 `Mesh`·`MeshTools`, ThirdParty MikkTSpace(3e895b49d05e + Rocks.patch), Core `deterministic::Acos`, 진단 코드 4개, 시험 26개 + Core 2개(12.2절 대조표·coverage — Mesh·MeshTools 줄 99.7%, 분기 98.5%), 정한 점은 5.4절 | MA1 |
 | MA2b | `StaticMesh` 클래스·슬롯·섹션 정보·소켓, 쿠킹 렌더 데이터 패킹(5.3절), 쿠킹 처리기·임포트 서비스, CoreTypeBindings `Box<double>` 미러(MR8), `IndexFormat` GraphicsTypes 이동 확인(MR7) | MA2a, A2–A4, `Material` 에셋 클래스(MaterialSystem MS3) |
-| MA3a | 단순 충돌 값 타입(4.6절 `SimpleCollision`·형상 struct·`CollisionComplexity`)과 검증(유한값·양의 크기·볼록 형상 bulk 길이·index 범위), `UnsupportedCollisionShape` 등록 — `Mesh` 모듈, `StaticMesh` 필드 연결은 MA2b | MA2a |
+| MA3a | 단순 충돌 값 타입(4.6절 `SimpleCollision`·형상 struct·`CollisionComplexity`)과 검증(유한값·양의 크기·볼록 형상 bulk 길이·index 범위), `UnsupportedCollisionShape` 등록 — `Mesh` 모듈, `StaticMesh` 필드 연결은 MA2b. **구현(2026-11-21, 미커밋)**: `Mesh/SimpleCollision.h`(형상 struct 여섯·`CollisionEnabled`·`CollisionComplexity`·`SimpleCollision`, 검증, 볼록 bulk 저장·로드), 진단 코드 `InvalidCollisionData`·`UnsupportedCollisionShape`, 시험 8개(12.6절 대조표·coverage), 시험 fixture `TestCollisionAsset`, 정한 점은 4.8절 | MA2a |
 | MA4a | `Animation` 모듈: `BoneHierarchy`(불변식 검증)·`Skeleton` 에셋 클래스(저장·로드 왕복), 병합 판정 함수(부모 사슬 대조, `SkeletonMismatch`)까지 — 에셋 DB 없이 되는 부분. **구현(2026-11-21, 미커밋)**: 모듈 `Engine/Source/Runtime/Animation`, 진단 코드 `InvalidSkeletonData`·`SkeletonMismatch`, 시험 15개(12.3절 대조표·coverage), 정한 점은 6.4절 | A1 |
 | MA4b | 스켈레톤 임포트 서비스·기존 스켈레톤 병합 저장·너겟 무효화 | MA4a, A2–A4 |
 | MA5a | 스킨 빌드 핵심(순수 함수): `SkinnedMeshBuildSettings`, 원본 스킨 가중치를 렌더 정점까지 옮기기(용접 비교에 영향 포함), 영향 줄이기·8/16비트 정규화(`InfluencesTrimmed`), LOD 통합 bone map·필요 본 목록·inverse-bind 행렬(MA4a `BoneHierarchy`), morph target 희소 변화량 빌드(`morphThresholdPosition`) — 메모리 결과까지. **구현(2026-11-21, 미커밋)**: `Mesh`의 `SkinnedMeshBuildSettings`(리플렉션 파생 struct), `MeshTools`의 `BuildSkinnedMeshLod`·`ReduceBoneInfluences`·`QuantizeSkinWeights8`(5.2절 단계 함수는 공용 파일로 옮김), 진단 코드 `InfluencesTrimmed`·`MissingInfluences`, 시험 16개(12.4절 대조표·coverage), 정한 점은 6.5절 | MA2a, MA4a |
@@ -953,6 +984,8 @@ ID는 이 문서가 부여한다(MA). 착수는 사용자가 정하고, 고정 �
 - 개정 10(2026-11-21): MA5a 구현에서 정한 점을 6.5절에 적었다(API·결과 형태, 설정 struct 상속과 필드 번호, 스킨 빌드의 buildScale 보존, 설정 검사와 영향 상한 기본값, 가중치를 담은 원본 사본, 스킨 임계값과 번호가 겹친 삼각형 제외, 영향 줄이기와 루트 본 대체(`MissingInfluences` — 새 경고), 용접의 스킨 항목(영향·프로필·morph), 가중치 프로필 빌드, 쿠킹 칸 수와 8비트 잔차, bone map과 필요 본, inverse-bind와 `SingularBindPose`, morph target 짝·법선 재계산·담는 조건, 경고 순서, 정적 빌드와의 단계 공유, 진단 등록, 결정성). 11절 표에 `MissingInfluences`를 더하고 12.4절 대조표, 13절 MA5a 상태를 고쳤다.
 
 - 개정 11(2026-11-21): MA6a 구현에서 정한 점을 7.5절에 적었다(파일·의존, `AnimationAsset`과 Build 의존 시점, CoreTypeBindings `FrameRate` 미러와 검증 hook, 플랫폼별 목표 비율 `PlatformFrameRate`, 커브 표시 bool과 변환 커브 채널 배열, 원본 bulk 배치·정렬·상수 접기, 원본 검증, UE `Evaluate`와 같은 샘플링 규칙(7.4절의 slerp를 UE nlerp로 바꿈), 쿠킹 변환의 정수 표본 수·트랙 대응·변환 커브 제외, 쿠킹 bulk 배치, 클립 검증·정렬, 진단 등록, 결정성). 13절 MA6a 상태, 15절 MR8 상태, 12.5절 대조표를 고쳤다.
+
+- 개정 12(2026-11-21): MA3a 구현에서 정한 점을 4.8절에 적었다(형상 struct와 공통 필드·UE 기본값·열거 번호, 크기 규칙(반경·크기 양수, 캡슐 길이 0 허용, 실린더 길이 양수, 유한값), 볼록 형상 bulk 배치와 점 수·index·삼각형 수 상한·transform 규칙, 형상 수 상한, 검증 함수와 새 진단 `InvalidCollisionData`, 임포터의 `UnsupportedCollisionShape` 형식, 결정성). 11절 표에 `InvalidCollisionData`를 더하고 12.6절 대조표, 13절 MA3a 상태를 고쳤다.
 
 ## 17. 교차 검증 기록(개정 2)
 

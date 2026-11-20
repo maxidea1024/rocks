@@ -54,6 +54,10 @@ enum class AssetDiagnosticCode : uint16 {
     // MissingInfluences.
     InfluencesTrimmed,
     MissingInfluences,
+    // 단순 충돌(MeshAnimationAssets.ko.md 4.8절 — MA3a): 오류 InvalidCollisionData, 임포터 경고
+    // UnsupportedCollisionShape.
+    InvalidCollisionData,
+    UnsupportedCollisionShape,
     // 임포트·설정(4.6절 — MA2a 메시 빌드가 처음 낸다)
     UnsupportedSetting,
     InvalidSetting,

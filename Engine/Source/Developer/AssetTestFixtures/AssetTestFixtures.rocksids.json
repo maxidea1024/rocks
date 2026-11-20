@@ -2642,6 +2642,34 @@
     },
     {
       "kind": "field",
+      "name": "rocks::asset_fixture::TestCollisionAsset::collision",
+      "id": "611decaba33c4a1c80122d6fe1f5bec2",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::TestCollisionAsset::complexity",
+      "id": "d4311d5ca37d48cd906d118e21fc8a82",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::TestCollisionAsset::editorCollision",
+      "id": "c2232f5bffcb4b32afc6db82da11563e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::TestCollisionAsset::variants",
+      "id": "1d2dd042bce245d6b7a0a3c1223db083",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::asset_fixture::TestHookAsset::typed",
       "id": "185dc68d22f74976b4b5909d61027314",
       "aliases": [],
@@ -3218,6 +3246,13 @@
       "kind": "type",
       "name": "rocks::asset_fixture::TestAsset",
       "id": "985f83177cf2447d9e089bee68fb04a8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::asset_fixture::TestCollisionAsset",
+      "id": "b95c89530fe94e868dbe29a645450ce6",
       "aliases": [],
       "retired": false
     },
