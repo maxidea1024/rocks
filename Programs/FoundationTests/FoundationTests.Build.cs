@@ -26,6 +26,11 @@ public abstract class TestsModule : ModuleRules
     // Tests of engine layer modules (EngineTests only). Paths are Group/Module under Engine/Source.
     private static readonly string[] EngineTestModules = ["Runtime/Input", "Runtime/PlatformWindow", "Runtime/World", "Runtime/Engine", "Runtime/GraphicsTypes", "Runtime/Graphics", "Runtime/RenderBase", "Runtime/RenderGraph", "Runtime/AssetRuntime", "Runtime/EngineAssets", "Developer/AssetTools", "Developer/ShaderToolTable", "Developer/ShaderToolLoader", "Developer/ShaderCompiler", "Developer/ShaderFormatVulkan", "Runtime/VulkanGraphics", "Runtime/SpatialIndex", "Runtime/MeshSource", "Runtime/Mesh", "Developer/MeshTools", "Runtime/Animation", "Runtime/SparksCompiler", "Developer/SparksTestHost"];
 
+    // Engine plugin modules whose tests EngineTests runs (Docs/Design/BuildTargets.ko.md section 3.9 BD40), as "<plugin path under Engine/Plugins>/<module>".
+    // The tests live in <plugin>/Source/<module>/Tests/ and include module Private headers as <Module/Private/...> through <plugin>/Source. The
+    // EngineTests target enables these plugins (EngineTestsTarget.Plugins); EngineTests links their modules.
+    private static readonly string[] PluginTestModules = ["Importers/UnrealExchange/UnrealExchange"];
+
     // Engine modules EngineTests links (only the top modules tests use; lower dependencies propagate).
     private static readonly string[] EngineTestDependencies = ["PlatformWindow", "Engine", "Graphics", "RenderBase", "RenderGraph", "SpirvReflect", "ShaderToolLoader", "ShaderCompiler", "ShaderFormatVulkan", "VulkanGraphics", "SpatialIndex", "MeshSource", "MeshTools", "MikkTSpace", "Animation", "SparksTestHost", "EngineAssets"];
 
@@ -72,6 +77,12 @@ public abstract class TestsModule : ModuleRules
         "Programs/FoundationTests/Private/NumberCorpus.cpp",
     ];
 
+    // <plugin>/Source of a PluginTestModules entry ("Importers/UnrealExchange/UnrealExchange" -> "Engine/Plugins/Importers/UnrealExchange/Source").
+    private static string PluginSourceDirectory(string module) => $"Engine/Plugins/{module[..module.LastIndexOf('/')]}/Source";
+
+    // Module name of a PluginTestModules entry ("Importers/UnrealExchange/UnrealExchange" -> "UnrealExchange").
+    private static string PluginModuleName(string module) => module[(module.LastIndexOf('/') + 1)..];
+
     protected abstract TestLayer Layer { get; }
 
     protected abstract string ExecutableName { get; }
@@ -92,6 +103,7 @@ public abstract class TestsModule : ModuleRules
         {
             directories.AddRange(EngineTestModules.Select(module => $"Engine/Source/{module}/Tests")
                 .Where(directory => Directory.Exists(context.PathInRoot(directory))));
+            directories.AddRange(PluginTestModules.Select(module => $"{PluginSourceDirectory(module)}/{PluginModuleName(module)}/Tests"));
             directories.Add("Programs/FoundationTests/Engine");
         }
 
@@ -105,7 +117,7 @@ public abstract class TestsModule : ModuleRules
             TestLayer.Core => ["Launch", "Task", "Localization", "Serialization", "Compression", "AsyncCompression", "Crypto", "TraceCapture", "ModuleLoader", .. DeveloperTestModules],
             TestLayer.Foundation => ["Launch", "ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig", "Localization", "Compression", "AsyncCompression", "Crypto", "TraceCapture", "ModuleLoader", .. DeveloperTestModules, .. ObjectDeveloperModules],
             _ => ["Launch", "ObjectSerialization", "ReflectionText", "Config", "LogHost", "TraceControl", "HostConfig", "Localization", "Compression", "AsyncCompression", "Crypto", "TraceCapture", "ModuleLoader", .. DeveloperTestModules, .. ObjectDeveloperModules,
-                .. EngineTestDependencies]
+                .. EngineTestDependencies, .. PluginTestModules.Select(PluginModuleName)]
         };
 
         // Object family tests depend on the reflection fixture module (config layer tests on ConfigTestFixtures, curve tests on CurvesTestFixtures). Generated headers (<ReflectionTestFixtures/*.generated.h>)
@@ -129,6 +141,7 @@ public abstract class TestsModule : ModuleRules
             // nested working copies do not enter the include inventory).
             PrivateIncludeDirectories = [context.PathInRoot("Core/Source/Runtime"), context.PathInRoot($"{support}/Public"),
                 .. (Layer == TestLayer.Engine ? [context.PathInRoot("Engine/Source/Runtime")] : Array.Empty<string>()),
+                .. (Layer == TestLayer.Engine ? PluginTestModules.Select(module => context.PathInRoot(PluginSourceDirectory(module))).ToArray() : Array.Empty<string>()),
                 .. (Layer == TestLayer.Engine ? ThirdPartyModuleRules.ConsumerIncludeDirectories(context, EngineThirdPartyHeaders) : [])],
             // FOUNDATION_TEST_RUNNER_LAYER picks the runner name in Private/Main.cpp (0 Core, 1 Foundation, 2 Engine).
             PrivateDefines = ["ROCKS_TESTING=1", $"FOUNDATION_TEST_RUNNER_LAYER={(int)Layer}",

@@ -1,6 +1,6 @@
 # 빌드 타깃·모듈 의존·플러그인 조건 설계
 
-기준일: 2026-11-21, 개정 11. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
+기준일: 2026-11-21, 개정 12. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
 - **타깃 종류 확장**: Editor·Client·Server 타깃과, 타깃 종류에 따라 코드·데이터를 컴파일에서 빼는 매크로.
 - **모듈 의존 공개 범위**: 의존마다 Public(소비자에게 include·정의를 넘김)과 Private(이 모듈 안에서만 씀)을 나눈다.
 - **플러그인 활성 조건**: 프로젝트가 플러그인을 특정 타깃·플랫폼·구성에서만 켠다.
@@ -423,6 +423,11 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 - `LinkClosure`는 루트의 링크 폐포 다음에 `PluginModules`와 그 링크 폐포를 링크 쪽(요청 시 적재 아님)에 넣고, 그 뒤에 동적 모듈을 넣는다. 그래서 모듈 표 생성기와 링크 명령은 고치지 않고 BD36 순서를 얻는다. `Reachable`, 액션 그래프의 계획 순서(실행 파일을 플러그인 archive 뒤로), 메타데이터 생성 순서도 `PluginModules`를 따른다. 플러그인 모듈은 실행 파일의 의존이 아니므로 실행 파일 컴파일에 include·정의가 들어가지 않는다.
 - 빌드 CLI는 모든 엔진 타깃에서 `DescriptorOwner.ForEngine`으로 해석한다. 메타데이터·공개 헤더 검사·빌드의 근은 `Modules`에 `IncludedPluginModules`를 더한 것이다. SDK export 타깃은 켠 플러그인이 하나라도 있으면(Game 타깃의 `enabledByDefault` 포함) 거부한다. 게임 빌드도 `LinkIntoPrimary`를 쓴다.
 
+**BS9d 구현 세부(개정 12).**
+- 첫 엔진 플러그인 `Engine/Plugins/Importers/UnrealExchange`에는 기술자(`enabledByDefault: false`, 모듈 `UnrealExchange` Developer, 단계 Default), `PluginModuleRules` 규칙(공개 의존 Core), 진입점 `Private/UnrealExchangeModule.cpp`, 공개 헤더 `UnrealExchange/UnrealExchangeFormat.h`(묶음 `formatVersion` 상수), 시험 하나가 있다. 리더·명령 등록은 UX1a·UX1b가 채운다.
+- Commandlet·EngineTests 타깃이 `Plugins`로 켠다. EngineTests 규칙의 `PluginTestModules`(`Importers/UnrealExchange/UnrealExchange`)는 시험 폴더, `<플러그인>/Source` include 루트, 그 모듈 공개 의존을 더한다.
+- 엔진 저장소 규칙 어셈블리는 모든 타깃의 모듈을 담는다. 그래서 엔진 주인의 `Apply`는 결과와 빠진 모듈 사용 검사를 타깃 모듈과 켠 플러그인 모듈에서 닿는 모듈로 줄인다. 그렇지 않으면 플러그인을 켜지 않은 타깃(Foundation 등)이 EngineTests 모듈의 플러그인 의존 때문에 실패한다.
+
 ## 4. 결정 요약
 
 1. 타깃 종류는 UE와 같은 다섯 가지다(Game·Editor·Client·Server·Program).
@@ -593,3 +598,4 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 | 9 | 2026-11-21 | BS9a 구현 세부(3.9절): `PluginReferrer`·`DescriptorOwner`·`TargetPluginReferences`, `BuildContext.PluginRoot`·`Plugins`, `TargetType`을 `Rocks.Build` 어셈블리로 옮김, 게임 빌드 해석을 규칙 로드 뒤로 |
 | 10 | 2026-11-21 | BS9b 구현 세부(3.9절): `PluginModuleRules`(봉인 Configure, 기술자 값), `SourceModuleRules.ModuleType`과 정책 `module-type-group`, `Apply`의 위치·계층 검사(`EngineRoot`), Release 배제의 플러그인 해석과 `release-plugin-resolution`, `plugin-module-rules-base` 범위. [모듈 로더](ModuleLoader.ko.md) 개정 7 |
 | 11 | 2026-11-21 | BS9c 구현 세부(3.9절): `PluginModules`와 `LinkIntoPrimary`, `LinkClosure` 순서(링크 폐포 → 플러그인 모듈 → 동적 모듈), CLI 엔진 해석과 빌드 근, SDK export·`Modular` 거부 |
+| 12 | 2026-11-21 | BS9d 구현 세부(3.9절): UnrealExchange 플러그인 골격, Commandlet·EngineTests의 `Plugins`, `PluginTestModules`, 엔진 주인 `Apply`의 도달 범위 축소 |

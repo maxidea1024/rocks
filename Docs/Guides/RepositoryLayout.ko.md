@@ -136,14 +136,17 @@ public sealed class Core : CoreModuleRules
    기술자가 선언하지 않은 모듈, 선언은 있는데 규칙이 없는 모듈, 대소문자만 다른 이름, 여러 기술자의 같은 모듈
    이름은 오류다.
 4. 다음 모듈은 이번 빌드에서 뺀다. 타깃이나 남은 모듈이 빠진 모듈을 쓰면 이유와 함께 오류다.
-5. 켠 플러그인의 남은 모듈은 타깃이 참조하지 않아도 빌드한다(UE처럼). 정적 링크이므로 실행 파일에는
-   참조한 모듈만 들어간다.
+5. 켠 플러그인의 남은 모듈은 타깃이 참조하지 않아도 빌드하고 타깃의 주 실행 파일(`Modules` 첫 항목)에 링크해
+   모듈 표에 기술자 단계로 싣는다(UE처럼 — [빌드 타깃](../Design/BuildTargets.ko.md) 3.9절). Program 타깃은
+   `enabledByDefault`를 받지 않고 명시한 플러그인만 켠다. 타깃 규칙 `Plugins`가 같은 이름의 프로젝트 참조를 이긴다.
+   엔진 저장소 빌드도 `Engine/Plugins`에 같은 규칙을 적용한다(플러그인 모듈 규칙은 `PluginModuleRules`). 설치 SDK는 엔진
+   플러그인을 내보내지 않는다.
 
 | 조건 | 이유 |
 |---|---|
 | 켜지지 않은 플러그인의 모듈 | 프로젝트가 끄거나 `enabledByDefault`가 false이고 아무도 요구하지 않음 |
 | `type: Editor` | 에디터 타깃이 아직 없음 |
-| `type: Developer`이고 Release | 배포 빌드에 개발 도구를 넣지 않음. UE 5.8의 `DeveloperTool`과 같은 의미다(`bBuildDeveloperTools` 기본값 — 에디터·프로그램 타깃이거나 Test·Shipping이 아닌 구성. UE `Developer`는 에디터·프로그램 타깃 전용. UnrealBuildTool `Configuration/Descriptors/ModuleDescriptor.cs` 794–797행, `Configuration/Rules/TargetRules.cs` 1212행) |
+| `type: Developer`이고 Game 타깃의 Release | 배포 빌드에 개발 도구를 넣지 않음. UE 5.8의 `DeveloperTool`과 같은 의미다(`bBuildDeveloperTools` 기본값 — 에디터·프로그램 타깃이거나 Test·Shipping이 아닌 구성. UE `Developer`는 에디터·프로그램 타깃 전용. UnrealBuildTool `Configuration/Descriptors/ModuleDescriptor.cs` 794–797행, `Configuration/Rules/TargetRules.cs` 1212행) |
 | `platforms`에 이번 플랫폼이 없음 | 플랫폼 전용 모듈 |
 
 규칙 계약: 규칙 로더는 모듈 이름을 알기 위해 모든 모듈 규칙의 `Configure`를 먼저 실행한 뒤 위 필터를 적용한다.
@@ -155,8 +158,6 @@ public sealed class Core : CoreModuleRules
   활성 조건(타깃·플랫폼·구성), 모듈 type ServerOnly·ClientOnly: [빌드 타깃 설계](../Design/BuildTargets.ko.md). 구현하면 위 기술자 표·모듈
   type 표·게임 빌드 연동 절을 함께 고친다.
 - 규칙 이름을 `Configure` 전에 알 수 있게 해(UBT처럼 파일·클래스 이름 규약) 빠질 모듈의 규칙을 실행하지 않는다.
-- 엔진 저장소 빌드(`Foundation`·`Engine` 타깃)의 `Engine/Plugins` 연동: 지금은 엔진 플러그인이 없어 게임 빌드만
-  기술자를 적용한다. 설치 SDK는 엔진 플러그인을 내보내지 않는다.
 - `loadingPhase`의 런타임 반영: [모듈 로더](../Design/ModuleLoader.ko.md) 3.3·3.11절(ML1)이 모듈 표 행의 단계로 반영한다(`PostEngineInit`·`None` 포함). 기술자 모듈의 플러그인 활성 반영은 ML5다.
 - 소스 트리 프로젝트 빌드가 생기면 그 `.rocksproject`의 engineVersion을 `Build/Build.version`과 대조한다(지금 기술자는
   설치 SDK 게임 빌드에서만 읽고, 그때 SDK manifest의 엔진 버전과 대조한다).

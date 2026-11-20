@@ -172,7 +172,7 @@ public sealed class DescriptorModuleSet
     /// 규칙 모듈(ruleModules)을 기술자와 대조하고 이번 빌드에 넣을 모듈만 돌려준다(입력 순서 유지).
     /// targetModules는 타깃이 고른 모듈이다. 게임 빌드는 프로젝트 규칙 모듈만 넘기며(SDK 엔진 모듈은 넣지 않는다) 모든 규칙 모듈에 기술자가
     /// 있어야 한다. 엔진 저장소 빌드(owner에 프로젝트가 없음)는 모든 규칙 모듈을 넘기고, 기술자가 선언하지 않은 모듈(Core·Engine 모듈)은
-    /// 그대로 통과시킨다.
+    /// 그대로 통과시키며, 결과는 타깃 모듈과 켠 플러그인 모듈에서 닿는 모듈로 줄인다(빠진 모듈 사용 검사도 그 범위다).
     /// </summary>
     public IReadOnlyList<NativeModuleInput> Apply(IReadOnlyList<NativeModuleInput> ruleModules, IReadOnlyList<string> targetModules)
     {
@@ -225,6 +225,15 @@ public sealed class DescriptorModuleSet
         }
 
         var included = ruleModules.Where(rule => !modules.TryGetValue(rule.Name, out DescribedModule? module) || module.Included).ToList();
+        if (Owner.Project is null)
+        {
+            // 엔진 저장소 규칙 어셈블리는 모든 타깃의 모듈을 담는다. 이 타깃이 빌드하는 모듈(타깃 모듈과 켠 플러그인 모듈에서 닿는 모듈)만
+            // 남겨, 다른 타깃이 켠 플러그인에 의존하는 모듈(예: 플러그인 시험을 모으는 EngineTests)이 이 타깃의 해석을 막지 않게 한다.
+            var byName = included.ToDictionary(rule => rule.Name, StringComparer.OrdinalIgnoreCase);
+            HashSet<string> reached = LinkClosure.Reachable(targetModules.Concat(IncludedPluginModules), byName);
+            included = included.Where(rule => reached.Contains(rule.Name)).ToList();
+        }
+
         foreach (NativeModuleInput rule in included)
         {
             // 실행 중 적재 모듈도 같다(Monolithic이 링크한다 — Docs/Design/ModuleLoader.ko.md 3.8절, BuildTargets BD25).
