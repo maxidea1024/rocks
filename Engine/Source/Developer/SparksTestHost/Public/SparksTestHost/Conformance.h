@@ -15,13 +15,16 @@
 //
 // 사용 예:
 //   conformance::Report report(allocator);
-//   auto ran = conformance::RunCorpus(allocator, platform::PhysicalFileSystem(), corpusPath,
-//   report); if (ran && report.Failures().IsEmpty()) { /* 모두 통과 */ }
+//   platform::FileSystem& files = platform::PhysicalFileSystem();
+//   auto ran = conformance::RunCorpus(allocator, files, corpusPath, report);
+//   bool passed = ran && report.Failures().IsEmpty();
 //
-// corpus 구조: <corpus>/<영역>/<사례>.spark 와 같은 이름의 <사례>.expect. 영역 아래에 다른 파일이나
-// 폴더가 있거나 짝이 맞지 않으면 그 자리의 실패로 기록한다(빈 기대값이 조용히 통과하지 않게).
+// corpus 구조: <corpus>/<영역>/<사례>.spark 와 같은 이름(stem)의 <사례>.expect. 사례 이름에는 점이
+// 들어가도 된다(stem으로 짝을 맞춘다). 영역 아래에 다른 파일이나 폴더가 있거나 짝이 맞지 않으면
+// 그 자리의 실패로 기록한다(빈 기대값이 조용히 통과하지 않게).
 //
-// `.expect` 형식(LC0): 한 줄에 지시 하나, 빈 줄과 '#'로 시작하는 줄은 주석.
+// `.expect` 형식(13.1절): UTF-8 텍스트(처음의 BOM은 무시), 한 줄에 지시 하나, 단어는 공백이나
+// tab으로 나눈다. 빈 줄과 '#'로 시작하는 줄은 주석.
 //   error S0412 14:14   이 위치에 이 코드의 진단이 나야 한다(8.1절 순서대로 모두 일치)
 //   error S0103         원문 위치가 없는 진단(파일 전체)
 //   clean               진단이 없어야 한다(error와 함께 쓸 수 없다)

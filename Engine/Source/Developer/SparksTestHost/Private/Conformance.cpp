@@ -6,8 +6,8 @@
 #include <Core/Text/Path.h>
 #include <Core/Text/StringBuilder.h>
 #include <Platform/Fatal.h>
-#include <Platform/Memory.h>
 #include <SparksCompiler/Diagnostic.h>
+#include <SparksCompiler/Lexer.h>
 #include <SparksCompiler/Source.h>
 
 namespace rocks::sparks::conformance {
@@ -17,30 +17,22 @@ namespace {
 constexpr StringView SourceExtension = ".spark";
 constexpr StringView ExpectExtension = ".expect";
 
-// 진단 코드 표기 "S0412"의 숫자 자리 수다.
-constexpr usize CodeDigits = 4;
-
 // 실패 문장을 담을 builder의 inline 크기다(넘치면 allocator에서 늘린다).
 constexpr usize MessageInlineBytes = 256;
 
 // corpus 파일 하나의 상한이다. 원문 상한보다 크면 S0103 사례가 되므로 그보다 한 byte 많게 둔다.
 constexpr usize MaxCorpusFileBytes = MaxSourceBytes + 1;
 
-// '\r'·공백을 양 끝에서 뗀다.
-StringView TrimLine(StringView line) noexcept {
-    if (!line.IsEmpty() && line.Data()[line.ByteCount() - 1] == '\r') {
-        line = StringView(line.Data(), line.ByteCount() - 1);
-    }
-
-    return line.TrimAscii();
+constexpr bool IsWordSeparator(char value) noexcept {
+    return value == ' ' || value == '\t';
 }
 
-// 공백으로 나눈 단어를 최대 capacity개 꺼낸다. 단어가 더 있으면 capacity + 1을 돌려준다.
+// 공백·tab으로 나눈 단어를 최대 capacity개 꺼낸다. 단어가 더 있으면 capacity + 1을 돌려준다.
 usize SplitWords(StringView line, StringView* words, usize capacity) noexcept {
     usize count = 0;
     usize index = 0;
     while (index < line.ByteCount()) {
-        while (index < line.ByteCount() && line.Data()[index] == ' ') {
+        while (index < line.ByteCount() && IsWordSeparator(line.Data()[index])) {
             ++index;
         }
 
@@ -49,7 +41,7 @@ usize SplitWords(StringView line, StringView* words, usize capacity) noexcept {
         }
 
         const usize begin = index;
-        while (index < line.ByteCount() && line.Data()[index] != ' ') {
+        while (index < line.ByteCount() && !IsWordSeparator(line.Data()[index])) {
             ++index;
         }
 
@@ -63,64 +55,66 @@ usize SplitWords(StringView line, StringView* words, usize capacity) noexcept {
     return count;
 }
 
-// "S0412" → 412. 형식이 틀리면 false.
-bool ParseCode(StringView text, uint32& code) noexcept {
-    if (text.ByteCount() != CodeDigits + 1 || text.Data()[0] != 'S') {
+// 10진 숫자만으로 된 uint32다(부호·공백 없음). 형식이 틀리면 false.
+bool ParseDecimal(StringView text, uint32& value) noexcept {
+    if (text.IsEmpty()) {
         return false;
     }
 
-    auto parsed = TryParseUInt32(StringView(text.Data() + 1, CodeDigits));
+    for (const char character : text) {
+        if (character < '0' || character > '9') {
+            return false;
+        }
+    }
+
+    auto parsed = TryParseUInt32(text);
     if (!parsed) {
         return false;
     }
 
-    code = parsed.Value();
+    value = parsed.Value();
     return true;
+}
+
+// "S0412" → 412. 형식이 틀리면 false.
+bool ParseCode(StringView text, uint32& code) noexcept {
+    if (text.ByteCount() != DiagnosticCodeDigits + 1 || text.Data()[0] != 'S') {
+        return false;
+    }
+
+    return ParseDecimal(StringView(text.Data() + 1, DiagnosticCodeDigits), code);
 }
 
 // "14:14" → 줄·열(둘 다 1 이상). 형식이 틀리면 false.
 bool ParsePosition(StringView text, uint32& line, uint32& column) noexcept {
     StringView left;
     StringView right;
-    if (!text.Split(":", left, right)) {
+    if (!text.Split(":", left, right, StringComparison::CaseSensitive)) {
         return false;
     }
 
-    auto parsedLine = TryParseUInt32(left);
-    auto parsedColumn = TryParseUInt32(right);
-    if (!parsedLine || !parsedColumn || parsedLine.Value() == 0 || parsedColumn.Value() == 0) {
-        return false;
-    }
-
-    line = parsedLine.Value();
-    column = parsedColumn.Value();
-    return true;
+    return ParseDecimal(left, line) && ParseDecimal(right, column) && line != 0 && column != 0;
 }
 
-bool EndsWith(StringView text, StringView suffix) noexcept {
-    return text.ByteCount() >= suffix.ByteCount() &&
-           platform::MemoryCompare(text.Data() + text.ByteCount() - suffix.ByteCount(),
-                                   suffix.Data(), suffix.ByteCount()) == 0;
-}
-
-bool NameLess(StringView left, StringView right) noexcept {
-    const usize shared =
-        left.ByteCount() < right.ByteCount() ? left.ByteCount() : right.ByteCount();
-    const int prefix = platform::MemoryCompare(left.Data(), right.Data(), shared);
-    if (prefix != 0) {
-        return prefix < 0;
-    }
-
-    return left.ByteCount() < right.ByteCount();
+bool HasExtension(StringView name, StringView extension) noexcept {
+    return name.ByteCount() > extension.ByteCount() &&
+           name.EndsWith(extension, StringComparison::CaseSensitive);
 }
 
 Result<void> FormatExpected(StringBuilderBase& out, const ExpectedDiagnostic& expected) noexcept {
-    if (expected.line == 0) {
-        return out.TryAppendFormat("    error S{:04}\n", expected.code);
+    if (auto appended = out.TryAppend("    error "); !appended) {
+        return appended;
     }
 
-    return out.TryAppendFormat("    error S{:04} {}:{}\n", expected.code, expected.line,
-                               expected.column);
+    if (auto appended = AppendDiagnosticCode(out, expected.code); !appended) {
+        return appended;
+    }
+
+    if (expected.line == 0) {
+        return out.TryAppendAscii('\n');
+    }
+
+    return out.TryAppendFormat(" {}:{}\n", expected.line, expected.column);
 }
 
 // 디렉터리 항목 하나다(열거 결과를 이름 순으로 정렬해 쓴다).
@@ -151,6 +145,10 @@ bool CollectItem(const platform::DirectoryEntry& entry, void* context) noexcept 
     return true;
 }
 
+bool ItemLess(const DirectoryItem& left, const DirectoryItem& right) noexcept {
+    return StringView::CompareBytes(left.name.View(), right.name.View()) < 0;
+}
+
 // 폴더 항목을 이름 순으로 모은다. Result 실패는 할당 실패, 값 false는 파일 오류(status에 원인).
 Result<bool> ListDirectory(Allocator& allocator, platform::FileSystem& files, StringView path,
                            Array<DirectoryItem>& items, platform::FileStatus& status) noexcept {
@@ -164,13 +162,11 @@ Result<bool> ListDirectory(Allocator& allocator, platform::FileSystem& files, St
         return Result<bool>::Success(false);
     }
 
-    algo::Sort(items.View(), [](const DirectoryItem& left, const DirectoryItem& right) noexcept {
-        return NameLess(left.name.View(), right.name.View());
-    });
+    algo::Sort(items.View(), ItemLess);
     return Result<bool>::Success(true);
 }
 
-// 파일 전체를 읽는다. Result 실패는 할당 실패, 값 false는 파일 오류나 크기 초과(problem에 이유).
+// 파일 전체를 읽는다. Result 실패는 할당 실패, 값 false는 읽지 못한 것(problem에 이유).
 Result<bool> ReadWholeFile(platform::FileSystem& files, StringView path, Array<char>& out,
                            StringBuilderBase& problem) noexcept {
     platform::File file;
@@ -184,32 +180,45 @@ Result<bool> ReadWholeFile(platform::FileSystem& files, StringView path, Array<c
         return Result<bool>::Success(false);
     }
 
+    StringView reason;
     uint64 size = 0;
-    bool ok = static_cast<bool>(file.Size(size));
-    if (ok && size > MaxCorpusFileBytes) {
-        ok = false;
-    }
-
-    if (ok) {
-        if (auto resized = out.TryResize(static_cast<usize>(size)); !resized) {
-            static_cast<void>(file.Close());
-            return Result<bool>::Failure(resized.Error());
-        }
-
+    if (!file.Size(size)) {
+        reason = "cannot read the file size";
+    } else if (size > MaxCorpusFileBytes) {
+        reason = "the file is larger than a corpus file may be";
+    } else if (auto resized = out.TryResize(static_cast<usize>(size)); !resized) {
+        static_cast<void>(file.Close());
+        return Result<bool>::Failure(resized.Error());
+    } else {
         const platform::FileTransfer read = file.ReadExact(out.Data(), out.Size());
-        ok = static_cast<bool>(read.status) && read.bytes == out.Size();
-    }
-
-    const bool closed = static_cast<bool>(file.Close());
-    if (!ok || !closed) {
-        if (auto appended = problem.TryAppend("cannot read the file"); !appended) {
-            return Result<bool>::Failure(appended.Error());
+        if (!read.status || read.bytes != out.Size()) {
+            reason = "cannot read the file";
         }
-
-        return Result<bool>::Success(false);
     }
 
-    return Result<bool>::Success(true);
+    if (!file.Close() && reason.IsEmpty()) {
+        reason = "cannot close the file";
+    }
+
+    if (reason.IsEmpty()) {
+        return Result<bool>::Success(true);
+    }
+
+    if (auto appended = problem.TryAppend(reason); !appended) {
+        return Result<bool>::Failure(appended.Error());
+    }
+
+    return Result<bool>::Success(false);
+}
+
+// 이름에서 확장자를 뗀 사례 이름(stem)과 그 항목 번호다.
+struct CaseFile {
+    StringView stem;
+    usize item = 0;
+};
+
+bool CaseFileLess(const CaseFile& left, const CaseFile& right) noexcept {
+    return StringView::CompareBytes(left.stem, right.stem) < 0;
 }
 
 } // namespace
@@ -228,7 +237,6 @@ Result<bool> TryParseExpectation(StringView text, Expectation& out, String& prob
     out.clean_ = false;
     bool sawDirective = false;
     uint32 lineNumber = 0;
-    usize begin = 0;
     StringBuilder<MessageInlineBytes> message(problem.GetAllocator());
     auto fail = [&](StringView reason) noexcept -> Result<bool> {
         if (auto formatted = message.TryAppendFormat("line {}: {}", lineNumber, reason);
@@ -243,6 +251,13 @@ Result<bool> TryParseExpectation(StringView text, Expectation& out, String& prob
         return Result<bool>::Success(false);
     };
 
+    if (!text.IsValidUtf8()) {
+        return fail("the file is not valid UTF-8");
+    }
+
+    // 편집기가 붙이는 처음의 BOM은 무시한다.
+    constexpr StringView Bom = "\xEF\xBB\xBF";
+    usize begin = text.StartsWith(Bom, StringComparison::CaseSensitive) ? Bom.ByteCount() : 0;
     while (begin < text.ByteCount()) {
         usize end = begin;
         while (end < text.ByteCount() && text.Data()[end] != '\n') {
@@ -250,7 +265,7 @@ Result<bool> TryParseExpectation(StringView text, Expectation& out, String& prob
         }
 
         ++lineNumber;
-        const StringView line = TrimLine(StringView(text.Data() + begin, end - begin));
+        const StringView line = StringView(text.Data() + begin, end - begin).TrimAscii();
         begin = end + 1;
         if (line.IsEmpty() || line.Data()[0] == '#') {
             continue;
@@ -330,6 +345,14 @@ Result<void> RunCase(Allocator& allocator, StringView caseName, StringView sourc
         return Result<void>::Failure(added.Error());
     }
 
+    // 컴파일 단계: 원문 검사(LC0) → 어휘 분석(LC1). 원문 검사가 막으면 뒤 단계를 돌리지 않는다.
+    if (sources.Get(added.Value()).IsUsable()) {
+        Array<Token> tokens(allocator);
+        if (auto lexed = Tokenize(sources, added.Value(), diagnostics, tokens); !lexed) {
+            return lexed;
+        }
+    }
+
     diagnostics.Sort(sources);
     const SourceFile& file = sources.Get(added.Value());
     const Span<const ExpectedDiagnostic> expected = expectation.Diagnostics();
@@ -388,10 +411,64 @@ Result<void> RunCase(Allocator& allocator, StringView caseName, StringView sourc
 
 namespace {
 
-// 영역 폴더 하나의 사례를 돈다.
+Result<void> AddLayoutFailure(Report& report, Allocator& allocator, StringView areaName,
+                              StringView name, StringView reason) noexcept {
+    StringBuilder<MessageInlineBytes> message(allocator);
+    if (auto formatted = message.TryAppendFormat("{}/{}: {}", areaName, name, reason); !formatted) {
+        return formatted;
+    }
+
+    return report.TryAddFailure(message.View());
+}
+
+// 사례 하나(짝이 맞은 두 파일)를 읽어 돈다. 읽기 실패는 그 파일 이름과 이유로 기록한다.
+Result<void> RunPairedCase(Allocator& allocator, platform::FileSystem& files, StringView areaPath,
+                           StringView areaName, StringView stem, StringView expectName,
+                           StringView sourceName, Report& report) noexcept {
+    auto expectPath = Path::Combine(allocator, areaPath, expectName);
+    if (!expectPath) {
+        return Result<void>::Failure(expectPath.Error());
+    }
+
+    auto sourcePath = Path::Combine(allocator, areaPath, sourceName);
+    if (!sourcePath) {
+        return Result<void>::Failure(sourcePath.Error());
+    }
+
+    Array<char> expectBytes(allocator);
+    Array<char> sourceBytes(allocator);
+    StringBuilder<MessageInlineBytes> problem(allocator);
+    auto expectRead = ReadWholeFile(files, expectPath.Value().View(), expectBytes, problem);
+    if (!expectRead) {
+        return Result<void>::Failure(expectRead.Error());
+    }
+
+    if (!expectRead.Value()) {
+        return AddLayoutFailure(report, allocator, areaName, expectName, problem.View());
+    }
+
+    auto sourceRead = ReadWholeFile(files, sourcePath.Value().View(), sourceBytes, problem);
+    if (!sourceRead) {
+        return Result<void>::Failure(sourceRead.Error());
+    }
+
+    if (!sourceRead.Value()) {
+        return AddLayoutFailure(report, allocator, areaName, sourceName, problem.View());
+    }
+
+    StringBuilder<MessageInlineBytes> caseName(allocator);
+    if (auto formatted = caseName.TryAppendFormat("{}/{}{}", areaName, stem, SourceExtension);
+        !formatted) {
+        return formatted;
+    }
+
+    return RunCase(allocator, caseName.View(), StringView(sourceBytes.Data(), sourceBytes.Size()),
+                   StringView(expectBytes.Data(), expectBytes.Size()), report);
+}
+
+// 영역 폴더 하나의 사례를 돈다. 짝은 stem(확장자를 뗀 이름)으로 맞춘다.
 Result<void> RunArea(Allocator& allocator, platform::FileSystem& files, StringView areaPath,
                      StringView areaName, Report& report) noexcept {
-    StringBuilder<MessageInlineBytes> message(allocator);
     Array<DirectoryItem> items(allocator);
     platform::FileStatus status;
     auto listed = ListDirectory(allocator, files, areaPath, items, status);
@@ -400,6 +477,7 @@ Result<void> RunArea(Allocator& allocator, platform::FileSystem& files, StringVi
     }
 
     if (!listed.Value()) {
+        StringBuilder<MessageInlineBytes> message(allocator);
         if (auto formatted = message.TryAppendFormat("{}: cannot list the folder", areaName);
             !formatted) {
             return formatted;
@@ -408,118 +486,88 @@ Result<void> RunArea(Allocator& allocator, platform::FileSystem& files, StringVi
         return report.TryAddFailure(message.View());
     }
 
-    // 이름 순으로 정렬되어 있으므로 같은 줄기의 ".expect"와 ".spark"는 이웃한다("X.expect" <
-    // "X.spark").
-    usize index = 0;
-    while (index < items.Size()) {
-        message.Clear();
+    Array<CaseFile> sources(allocator);
+    Array<CaseFile> expects(allocator);
+    for (usize index = 0; index < items.Size(); ++index) {
         const StringView name = items[index].name.View();
         if (items[index].directory) {
-            if (auto formatted = message.TryAppendFormat(
-                    "{}/{}: unexpected folder in a corpus area", areaName, name);
-                !formatted) {
-                return formatted;
-            }
-
-            if (auto added = report.TryAddFailure(message.View()); !added) {
+            if (auto added = AddLayoutFailure(report, allocator, areaName, name,
+                                              "unexpected folder in a corpus area");
+                !added) {
                 return added;
             }
 
-            ++index;
             continue;
         }
 
-        const bool isSource = EndsWith(name, SourceExtension);
-        const bool isExpect = EndsWith(name, ExpectExtension);
+        const bool isSource = HasExtension(name, SourceExtension);
+        const bool isExpect = HasExtension(name, ExpectExtension);
         if (!isSource && !isExpect) {
-            if (auto formatted = message.TryAppendFormat(
-                    "{}/{}: unexpected file (only .spark and .expect)", areaName, name);
-                !formatted) {
-                return formatted;
-            }
-
-            if (auto added = report.TryAddFailure(message.View()); !added) {
+            if (auto added = AddLayoutFailure(report, allocator, areaName, name,
+                                              "unexpected file (only .spark and .expect)");
+                !added) {
                 return added;
             }
 
-            ++index;
             continue;
         }
 
-        const StringView stem(name.Data(),
-                              name.ByteCount() - (isSource ? SourceExtension.ByteCount()
-                                                           : ExpectExtension.ByteCount()));
-        bool paired = false;
-        if (isExpect && index + 1 < items.Size() && !items[index + 1].directory) {
-            const StringView next = items[index + 1].name.View();
-            paired = next.ByteCount() == stem.ByteCount() + SourceExtension.ByteCount() &&
-                     EndsWith(next, SourceExtension) &&
-                     platform::MemoryCompare(next.Data(), stem.Data(), stem.ByteCount()) == 0;
+        const StringView extension = isSource ? SourceExtension : ExpectExtension;
+        const CaseFile file{StringView(name.Data(), name.ByteCount() - extension.ByteCount()),
+                            index};
+        if (auto pushed = (isSource ? sources : expects).TryPushBack(file); !pushed) {
+            return pushed;
         }
+    }
 
-        if (!paired) {
-            if (auto formatted = message.TryAppendFormat("{}/{}: missing {}", areaName, name,
-                                                         isSource ? StringView("the .expect file")
-                                                                  : StringView("the .spark file"));
-                !formatted) {
-                return formatted;
-            }
-
-            if (auto added = report.TryAddFailure(message.View()); !added) {
-                return added;
-            }
-
-            ++index;
-            continue;
-        }
-
-        auto expectPath = Path::Combine(allocator, areaPath, name);
-        auto sourcePath = Path::Combine(allocator, areaPath, items[index + 1].name.View());
-        if (!expectPath || !sourcePath) {
-            return Result<void>::Failure(!expectPath ? expectPath.Error() : sourcePath.Error());
-        }
-
-        Array<char> expectBytes(allocator);
-        Array<char> sourceBytes(allocator);
-        StringBuilder<MessageInlineBytes> problem(allocator);
-        auto expectRead = ReadWholeFile(files, expectPath.Value().View(), expectBytes, problem);
-        if (!expectRead) {
-            return Result<void>::Failure(expectRead.Error());
-        }
-
-        auto sourceRead = expectRead.Value() ? ReadWholeFile(files, sourcePath.Value().View(),
-                                                             sourceBytes, problem)
-                                             : Result<bool>::Success(false);
-        if (!sourceRead) {
-            return Result<void>::Failure(sourceRead.Error());
-        }
-
-        if (!sourceRead.Value()) {
-            if (auto formatted =
-                    message.TryAppendFormat("{}/{}: {}", areaName, stem, problem.View());
-                !formatted) {
-                return formatted;
-            }
-
-            if (auto added = report.TryAddFailure(message.View()); !added) {
-                return added;
-            }
+    // 두 목록을 stem 순으로 정렬해 함께 훑는다(같은 stem이 짝이다).
+    algo::Sort(sources.View(), CaseFileLess);
+    algo::Sort(expects.View(), CaseFileLess);
+    usize source = 0;
+    usize expect = 0;
+    while (source < sources.Size() || expect < expects.Size()) {
+        int order = 0;
+        if (source == sources.Size()) {
+            order = 1;
+        } else if (expect == expects.Size()) {
+            order = -1;
         } else {
-            if (auto formatted =
-                    message.TryAppendFormat("{}/{}{}", areaName, stem, SourceExtension);
-                !formatted) {
-                return formatted;
-            }
-
-            if (auto ran = RunCase(allocator, message.View(),
-                                   StringView(sourceBytes.Data(), sourceBytes.Size()),
-                                   StringView(expectBytes.Data(), expectBytes.Size()), report);
-                !ran) {
-                return ran;
-            }
+            order = StringView::CompareBytes(sources[source].stem, expects[expect].stem);
         }
 
-        index += 2;
+        if (order < 0) {
+            if (auto added = AddLayoutFailure(report, allocator, areaName,
+                                              items[sources[source].item].name.View(),
+                                              "missing the .expect file");
+                !added) {
+                return added;
+            }
+
+            ++source;
+            continue;
+        }
+
+        if (order > 0) {
+            if (auto added = AddLayoutFailure(report, allocator, areaName,
+                                              items[expects[expect].item].name.View(),
+                                              "missing the .spark file");
+                !added) {
+                return added;
+            }
+
+            ++expect;
+            continue;
+        }
+
+        if (auto ran = RunPairedCase(allocator, files, areaPath, areaName, sources[source].stem,
+                                     items[expects[expect].item].name.View(),
+                                     items[sources[source].item].name.View(), report);
+            !ran) {
+            return ran;
+        }
+
+        ++source;
+        ++expect;
     }
 
     return Result<void>::Success();

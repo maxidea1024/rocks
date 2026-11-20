@@ -3,7 +3,6 @@
 #include <Core/Algorithms.h>
 #include <Core/Move.h>
 #include <Platform/Fatal.h>
-#include <Platform/Memory.h>
 
 #include "TextColumns.h"
 
@@ -16,6 +15,17 @@ constexpr DiagnosticCodeInfo CodeTable[] = {
     {DiagnosticCode::InvalidUtf8, "invalid-utf8"},
     {DiagnosticCode::LoneCarriageReturn, "lone-carriage-return"},
     {DiagnosticCode::SourceTooLarge, "source-too-large"},
+    {DiagnosticCode::InvalidCharacter, "invalid-character"},
+    {DiagnosticCode::UnderscoreInIdentifier, "underscore-in-identifier"},
+    {DiagnosticCode::UnterminatedBlockComment, "unterminated-block-comment"},
+    {DiagnosticCode::UnterminatedString, "unterminated-string"},
+    {DiagnosticCode::InvalidEscape, "invalid-escape"},
+    {DiagnosticCode::IntegerLiteralTooLarge, "integer-literal-too-large"},
+    {DiagnosticCode::MalformedNumber, "malformed-number"},
+    {DiagnosticCode::StringInInterpolation, "string-in-interpolation"},
+    {DiagnosticCode::RangeOperator, "range-operator"},
+    {DiagnosticCode::FloatLiteralOutOfRange, "float-literal-out-of-range"},
+    {DiagnosticCode::NumericSuffix, "numeric-suffix"},
 };
 
 constexpr bool CodeTableIsSorted() noexcept {
@@ -39,28 +49,30 @@ constexpr StringView FixPrefix = "fix: ";
 // 표시에서 잘못된 UTF-8 byte 대신 쓰는 U+FFFD다.
 constexpr uint32 ReplacementCharacter = 0xFFFDu;
 
-// C0 제어 문자 끝(U+001F)과 DEL(U+007F)이다. 원문 줄을 보일 때 공백으로 바꾼다(tab 포함 — 열 계산과
-// 맞추고, CR 같은 문자가 터미널 출력을 흐트러뜨리지 않게).
-constexpr uint8 LastControlCharacter = 0x1Fu;
-constexpr uint8 DeleteCharacter = 0x7Fu;
-
-// 두 경로를 byte 순으로 비교한다(음수: left가 앞).
-int ComparePaths(StringView left, StringView right) noexcept {
-    const usize shared =
-        left.ByteCount() < right.ByteCount() ? left.ByteCount() : right.ByteCount();
-    const int prefix = platform::MemoryCompare(left.Data(), right.Data(), shared);
-    if (prefix != 0) {
-        return prefix;
-    }
-
-    if (left.ByteCount() == right.ByteCount()) {
-        return 0;
-    }
-
-    return left.ByteCount() < right.ByteCount() ? -1 : 1;
+// 원문 줄을 보일 때 공백으로 바꾸는 문자다: C0 제어 문자(tab·CR 포함), DEL, C1 제어 문자, 그리고
+// 표시 순서를 바꾸는 bidi 제어 문자(ALM·LRM·RLM·LRE–RLO·LRI–PDI). 열 계산과 맞추고(한 문자 = 한 칸)
+// 터미널 출력을 흐트러뜨리거나 원문을 다르게 보이게 하지 않으려는 것이다.
+constexpr bool IsHiddenInDisplay(uint32 codePoint) noexcept {
+    constexpr uint32 LastC0 = 0x1Fu;
+    constexpr uint32 Delete = 0x7Fu;
+    constexpr uint32 FirstC1 = 0x80u;
+    constexpr uint32 LastC1 = 0x9Fu;
+    constexpr uint32 ArabicLetterMark = 0x061Cu;
+    constexpr uint32 LeftToRightMark = 0x200Eu;
+    constexpr uint32 RightToLeftMark = 0x200Fu;
+    constexpr uint32 FirstEmbedding = 0x202Au; // LRE·RLE·PDF·LRO·RLO
+    constexpr uint32 LastEmbedding = 0x202Eu;
+    constexpr uint32 FirstIsolate = 0x2066u; // LRI·RLI·FSI·PDI
+    constexpr uint32 LastIsolate = 0x2069u;
+    return codePoint <= LastC0 || codePoint == Delete ||
+           (codePoint >= FirstC1 && codePoint <= LastC1) || codePoint == ArabicLetterMark ||
+           codePoint == LeftToRightMark || codePoint == RightToLeftMark ||
+           (codePoint >= FirstEmbedding && codePoint <= LastEmbedding) ||
+           (codePoint >= FirstIsolate && codePoint <= LastIsolate);
 }
 
-// 원문 줄을 보이는 형태로 붙인다: 제어 문자는 공백, 잘못된 UTF-8 byte는 U+FFFD 하나씩.
+// 원문 줄을 보이는 형태로 붙인다: 숨길 문자(IsHiddenInDisplay)는 공백, 잘못된 UTF-8 byte는 U+FFFD
+// 하나씩.
 Result<void> AppendDisplayLine(StringBuilderBase& out, StringView line) noexcept {
     usize offset = 0;
     while (offset < line.ByteCount()) {
@@ -68,13 +80,18 @@ Result<void> AppendDisplayLine(StringBuilderBase& out, StringView line) noexcept
         const usize invalid = rest.FindInvalidUtf8();
         const usize validBytes = invalid == IndexNone ? rest.ByteCount() : invalid;
         usize runBegin = 0;
-        for (usize index = 0; index < validBytes; ++index) {
-            const auto value = static_cast<uint8>(rest.Data()[index]);
-            if (value > LastControlCharacter && value != DeleteCharacter) {
+        usize cursor = 0;
+        while (cursor < validBytes) {
+            usize width = 0;
+            const uint32 codePoint =
+                detail::DecodeCodePoint(rest.Data() + cursor, validBytes - cursor, width);
+            if (!IsHiddenInDisplay(codePoint)) {
+                cursor += width;
                 continue;
             }
 
-            if (auto appended = out.TryAppend(StringView(rest.Data() + runBegin, index - runBegin));
+            if (auto appended =
+                    out.TryAppend(StringView(rest.Data() + runBegin, cursor - runBegin));
                 !appended) {
                 return appended;
             }
@@ -83,7 +100,8 @@ Result<void> AppendDisplayLine(StringBuilderBase& out, StringView line) noexcept
                 return appended;
             }
 
-            runBegin = index + 1;
+            cursor += width;
+            runBegin = cursor;
         }
 
         if (auto appended =
@@ -105,7 +123,7 @@ Result<void> AppendDisplayLine(StringBuilderBase& out, StringView line) noexcept
     return Result<void>::Success();
 }
 
-// 설명을 줄마다 들여 쓴다. 끝의 LF는 빈 줄을 만들지 않는다.
+// 설명을 줄마다 들여 쓴다. 끝의 LF는 빈 줄을 만들지 않고, 중간의 빈 줄은 들여쓰기 없이 쓴다.
 Result<void> AppendNoteLines(StringBuilderBase& out, StringView text) noexcept {
     usize begin = 0;
     while (begin < text.ByteCount()) {
@@ -114,8 +132,10 @@ Result<void> AppendNoteLines(StringBuilderBase& out, StringView text) noexcept {
             ++end;
         }
 
-        if (auto appended = out.TryAppendRepeated(' ', NoteIndent); !appended) {
-            return appended;
+        if (end > begin) {
+            if (auto appended = out.TryAppendRepeated(' ', NoteIndent); !appended) {
+                return appended;
+            }
         }
 
         if (auto appended = out.TryAppend(StringView(text.Data() + begin, end - begin));
@@ -138,6 +158,11 @@ uint32 CodeNumber(DiagnosticCode code) noexcept {
 }
 
 } // namespace
+
+Result<void> AppendDiagnosticCode(StringBuilderBase& out, uint32 number) noexcept {
+    static_assert(DiagnosticCodeDigits == 4, "the format below writes four digits");
+    return out.TryAppendFormat("S{:04}", number);
+}
 
 Span<const DiagnosticCodeInfo> AllDiagnosticCodes() noexcept {
     return Span<const DiagnosticCodeInfo>(CodeTable, sizeof(CodeTable) / sizeof(CodeTable[0]));
@@ -174,7 +199,11 @@ DiagnosticList::DiagnosticList(Allocator& allocator) noexcept
 Result<Diagnostic> DiagnosticList::TryPrepare(DiagnosticCode code, SourceId source, bool hasSpan,
                                               SourceSpan span, StringView message,
                                               StringView explanation, StringView fix) noexcept {
-    if (message.IsEmpty() || (hasSpan && span.begin > span.end)) {
+    // 메시지와 수정 예는 한 줄이다(첫 줄 형식을 problem matcher가 읽는다). 설명만 여러 줄이다.
+    const bool multiLine =
+        message.Find("\n", StringComparison::CaseSensitive) != StringView::NotFound ||
+        fix.Find("\n", StringComparison::CaseSensitive) != StringView::NotFound;
+    if (message.IsEmpty() || multiLine || (hasSpan && span.begin > span.end)) {
         return Result<Diagnostic>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -244,8 +273,8 @@ Result<void> DiagnosticList::TryAddFileLevel(DiagnosticCode code, SourceId sourc
 void DiagnosticList::Sort(const SourceSet& sources) noexcept {
     algo::Sort(items_.View(), [&sources](const Diagnostic& left, const Diagnostic& right) noexcept {
         if (left.source_.index != right.source_.index) {
-            const int paths =
-                ComparePaths(sources.Get(left.source_).Path(), sources.Get(right.source_).Path());
+            const int paths = StringView::CompareBytes(sources.Get(left.source_).Path(),
+                                                       sources.Get(right.source_).Path());
             if (paths != 0) {
                 return paths < 0;
             }
@@ -274,30 +303,38 @@ void DiagnosticList::Sort(const SourceSet& sources) noexcept {
 Result<void> AppendDiagnostic(StringBuilderBase& out, const SourceSet& sources,
                               const Diagnostic& diagnostic) noexcept {
     const SourceFile& file = sources.Get(diagnostic.Source());
-    const uint32 code = CodeNumber(diagnostic.Code());
-    if (!diagnostic.HasSpan()) {
-        if (auto appended = out.TryAppendFormat("{}: error S{:04}: {}\n", file.Path(), code,
-                                                diagnostic.Message());
-            !appended) {
-            return appended;
-        }
-    } else {
-        const SourceSpan span = diagnostic.Span();
-        const SourceLocation location = file.Locate(span.begin);
-        if (auto appended =
-                out.TryAppendFormat("{}:{}:{}: error S{:04}: {}\n", file.Path(), location.line,
-                                    location.column, code, diagnostic.Message());
-            !appended) {
-            return appended;
-        }
+    SourceLocation location;
+    if (diagnostic.HasSpan()) {
+        location = file.Locate(diagnostic.Span().begin);
+    }
 
+    // 첫 줄: "경로:줄:열: error S코드: 메시지"(파일 전체 진단은 "경로: error S코드: 메시지").
+    if (auto appended = diagnostic.HasSpan() ? out.TryAppendFormat("{}:{}:{}: error ", file.Path(),
+                                                                   location.line, location.column)
+                                             : out.TryAppendFormat("{}: error ", file.Path());
+        !appended) {
+        return appended;
+    }
+
+    if (auto appended = AppendDiagnosticCode(out, CodeNumber(diagnostic.Code())); !appended) {
+        return appended;
+    }
+
+    if (auto appended = out.TryAppendFormat(": {}\n", diagnostic.Message()); !appended) {
+        return appended;
+    }
+
+    if (diagnostic.HasSpan()) {
+        const SourceSpan span = diagnostic.Span();
         // 원문 줄과 밑줄. 밑줄은 범위가 그 줄 안에 있는 code point 수다(최소 1, 줄 끝에서 자름).
+        // BOM 안에서 시작하는 범위는 줄 시작(BOM 뒤)부터 센다.
         const uint32 lineBegin = file.LineBegin(location.line);
         const StringView line = file.LineText(location.line);
         const uint32 lineEnd = lineBegin + static_cast<uint32>(line.ByteCount());
+        const uint32 underlineBegin = span.begin > lineBegin ? span.begin : lineBegin;
         const uint32 underlineEnd = span.end < lineEnd ? span.end : lineEnd;
-        uint32 width = span.begin < underlineEnd
-                           ? detail::CountColumns(file.Text().Data() + span.begin,
+        uint32 width = underlineBegin < underlineEnd
+                           ? detail::CountColumns(file.Text().Data() + underlineBegin,
                                                   file.Text().Data() + underlineEnd)
                            : 0;
         if (width == 0) {

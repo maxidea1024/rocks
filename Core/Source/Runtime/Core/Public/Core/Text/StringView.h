@@ -232,6 +232,19 @@ public:
     StringView TrimAsciiEnd() const noexcept;
     StringView TrimAscii() const noexcept;
 
+    // byte 순 비교다(음수: left가 앞, 0: 같음, 양수: left가 뒤). 앞부분이 같으면 짧은 쪽이 앞이다.
+    // 유효한 UTF-8끼리는 code point 순과 같다. 경로·이름을 결정적인 순서로 정렬할 때 쓴다
+    // (locale·대소문자 접기 없음). 할당하지 않는다.
+    static int CompareBytes(StringView left, StringView right) noexcept {
+        const usize shared = left.bytes_ < right.bytes_ ? left.bytes_ : right.bytes_;
+        const int prefix = platform::MemoryCompare(left.data_, right.data_, shared);
+        if (prefix != 0 || left.bytes_ == right.bytes_) {
+            return prefix;
+        }
+
+        return left.bytes_ < right.bytes_ ? -1 : 1;
+    }
+
     friend constexpr bool operator==(StringView left, StringView right) noexcept {
         if (left.bytes_ != right.bytes_) {
             return false;

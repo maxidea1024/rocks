@@ -38,8 +38,25 @@ namespace rocks::sparks {
 enum class DiagnosticCode : uint16 {
     InvalidUtf8 = 101,
     LoneCarriageReturn = 102,
-    SourceTooLarge = 103
+    SourceTooLarge = 103,
+    InvalidCharacter = 104,
+    UnderscoreInIdentifier = 105,
+    UnterminatedBlockComment = 106,
+    UnterminatedString = 107,
+    InvalidEscape = 108,
+    IntegerLiteralTooLarge = 109,
+    MalformedNumber = 110,
+    StringInInterpolation = 111,
+    RangeOperator = 112,
+    FloatLiteralOutOfRange = 113,
+    NumericSuffix = 114
 };
+
+// 진단 코드 표기의 숫자 자리 수다("S0412").
+inline constexpr usize DiagnosticCodeDigits = 4;
+
+// 표시 번호를 "S0412" 형태로 out에 붙인다. 실패: out의 할당 실패.
+Result<void> AppendDiagnosticCode(StringBuilderBase& out, uint32 number) noexcept;
 
 // 코드 표의 한 행이다. name은 kebab-case 영어 이름이며 사람이 코드를 찾을 때 쓴다.
 struct DiagnosticCodeInfo {
@@ -121,9 +138,10 @@ public:
     ~DiagnosticList() noexcept = default;
 
     // 원문 위치가 있는 진단을 더한다. message는 비어 있으면 안 된다. explanation·fix는 비어 있으면
-    // 출력에서 생략한다. 문자열은 복사한다.
-    // 실패: message가 비었거나 문자열이 UTF-8이 아니거나 span.begin > span.end면 InvalidArgument,
-    // 할당 실패는 그 오류. 실패하면 목록은 바뀌지 않는다.
+    // 출력에서 생략한다. message와 fix는 한 줄이고 explanation만 LF로 여러 줄을 쓸 수 있다.
+    // 문자열은 복사한다. 실패: message가 비었거나, message·fix에 LF가 있거나, 문자열이 UTF-8이
+    // 아니거나, span.begin > span.end면 InvalidArgument, 할당 실패는 그 오류. 실패하면 목록은
+    // 바뀌지 않는다.
     Result<void> TryAdd(DiagnosticCode code, SourceId source, SourceSpan span, StringView message,
                         StringView explanation, StringView fix) noexcept;
 

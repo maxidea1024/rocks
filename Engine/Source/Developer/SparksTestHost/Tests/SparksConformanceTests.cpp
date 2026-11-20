@@ -194,12 +194,13 @@ TEST(SparksConformance_ReportsCorpusLayoutProblems) {
         REQUIRE(RunCorpus(allocator, files, rootPath, report));
         CHECK(report.CasesRun() == 1);
         REQUIRE(report.Failures().Size() == 4);
+        // 낯선 파일은 목록을 훑을 때, 짝 없는 파일은 stem 순으로 맞춰 볼 때 기록한다.
         CHECK(report.Failures()[0].View() ==
-              StringView("Area/NoExpect.spark: missing the .expect file"));
-        CHECK(report.Failures()[1].View() ==
-              StringView("Area/NoSource.expect: missing the .spark file"));
-        CHECK(report.Failures()[2].View() ==
               StringView("Area/Notes.txt: unexpected file (only .spark and .expect)"));
+        CHECK(report.Failures()[1].View() ==
+              StringView("Area/NoExpect.spark: missing the .expect file"));
+        CHECK(report.Failures()[2].View() ==
+              StringView("Area/NoSource.expect: missing the .spark file"));
         CHECK(report.Failures()[3].View() ==
               StringView(
                   "Stray.spark: unexpected file at the corpus root (cases live in area folders)"));
@@ -211,6 +212,104 @@ TEST(SparksConformance_ReportsCorpusLayoutProblems) {
         CHECK(!ran && ran.Error() == ErrorCode::NotFound);
 
         CHECK(platform::DeleteDirectoryTree(files, rootPath.Data(), rootPath.ByteCount()));
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// 사례 이름에 점이 있어도 stem으로 짝을 맞춘다("Bom.expect" < "Bom.lf.expect" < "Bom.lf.spark" <
+// "Bom.spark" 순서라 이웃한 이름으로 맞추면 틀린다). 영역 안의 폴더와 파일인 corpus 경로도
+// 시험한다.
+TEST(SparksConformance_PairsCasesByStemAndRejectsOddLayouts) {
+    SystemAllocator allocator;
+    {
+        platform::FileSystem& files = platform::PhysicalFileSystem();
+        StringBuilder<64> root(allocator);
+        REQUIRE(root.TryAppendFormat("rocks-sparks-stem-{}-{}", platform::CurrentProcessId(),
+                                     platform::MonotonicTicks()));
+        const StringView rootPath = root.View();
+        auto area = Path::Combine(allocator, rootPath, "Area");
+        REQUIRE(area);
+        auto nested = Path::Combine(allocator, area.Value().View(), "Nested");
+        REQUIRE(nested);
+        REQUIRE(
+            platform::MakeDirectoryTree(files, nested.Value().Data(), nested.Value().ByteCount()));
+        auto write = [&](StringView directory, StringView name,
+                         StringView content) noexcept -> bool {
+            auto path = Path::Combine(allocator, directory, name);
+            if (!path) {
+                return false;
+            }
+
+            platform::File file;
+            if (!file.Open(files, path.Value().Data(), path.Value().ByteCount(),
+                           platform::FileOpenMode::CreateAlways)) {
+                return false;
+            }
+
+            const platform::FileTransfer written =
+                file.WriteAll(content.Data(), content.ByteCount());
+            const bool closed = static_cast<bool>(file.Close());
+            return static_cast<bool>(written.status) && closed;
+        };
+        REQUIRE(write(area.Value().View(), "Bom.spark", "x\n"));
+        REQUIRE(write(area.Value().View(), "Bom.expect", "clean\n"));
+        REQUIRE(write(area.Value().View(), "Bom.lf.spark", "y\n"));
+        REQUIRE(write(area.Value().View(), "Bom.lf.expect", "clean\n"));
+
+        Report report(allocator);
+        REQUIRE(RunCorpus(allocator, files, rootPath, report));
+        CHECK(report.CasesRun() == 2);
+        REQUIRE(report.Failures().Size() == 1);
+        CHECK(report.Failures()[0].View() ==
+              StringView("Area/Nested: unexpected folder in a corpus area"));
+
+        // corpus 경로가 폴더가 아니면 실행기 오류다.
+        auto notFolder = Path::Combine(allocator, area.Value().View(), "Bom.spark");
+        REQUIRE(notFolder);
+        Report fileRoot(allocator);
+        auto ran = RunCorpus(allocator, files, notFolder.Value().View(), fileRoot);
+        CHECK(!ran && ran.Error() == ErrorCode::InvalidArgument);
+
+        CHECK(platform::DeleteDirectoryTree(files, rootPath.Data(), rootPath.ByteCount()));
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// 진단 순서도 비교 대상이다(8.1절 순서). 같은 진단을 다른 순서로 적으면 실패다.
+TEST(SparksConformance_OrderMatters) {
+    SystemAllocator allocator;
+    {
+        Report report(allocator);
+        REQUIRE(RunCase(allocator, "Area/Order.spark", "a # b\nc # d",
+                        "error S0104 2:3\nerror S0104 1:3\n", report));
+        REQUIRE(report.Failures().Size() == 1);
+        REQUIRE(RunCase(allocator, "Area/Order.spark", "a # b\nc # d",
+                        "error S0104 1:3\nerror S0104 2:3\n", report));
+        CHECK(report.Failures().Size() == 1);
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// `.expect`는 처음의 BOM을 무시하고 tab을 단어 구분으로 받는다. 숫자는 0–9만 받으며 UTF-8이
+// 아니면 형식 오류다.
+TEST(SparksConformance_ExpectationEncodingAndNumbers) {
+    SystemAllocator allocator;
+    {
+        Expectation expectation(allocator);
+        String problem(allocator);
+        auto bomTabs = TryParseExpectation("\xEF\xBB\xBF"
+                                           "error\tS0101\t2:3\n",
+                                           expectation, problem);
+        REQUIRE(bomTabs && bomTabs.Value());
+        REQUIRE(expectation.Diagnostics().Size() == 1);
+        CHECK(expectation.Diagnostics()[0].line == 2 && expectation.Diagnostics()[0].column == 3);
+
+        CHECK(ParseFails("error S+101 1:1\n", "line 1: diagnostic code must look like S0412",
+                         allocator));
+        CHECK(ParseFails("error S0101 +1:+1\n",
+                         "line 1: position must look like 14:7 (line and column from 1)",
+                         allocator));
+        CHECK(ParseFails("clean\n\xFF\n", "line 0: the file is not valid UTF-8", allocator));
     }
     CHECK(allocator.Stats().liveAllocations == 0);
 }

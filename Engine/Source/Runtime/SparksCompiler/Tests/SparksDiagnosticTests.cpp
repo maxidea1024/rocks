@@ -248,9 +248,111 @@ TEST(SparksDiagnostic_CodeTableIsSortedAndSearchable) {
     }
 
     CHECK(FindDiagnosticCode(0) == nullptr);
-    CHECK(FindDiagnosticCode(104) == nullptr);
+    CHECK(FindDiagnosticCode(199) == nullptr);
     CHECK(FindDiagnosticCode(9999) == nullptr);
     CHECK(FindDiagnosticCode(101)->name == StringView("invalid-utf8"));
+}
+
+// 밑줄 경계: BOM 안에서 시작하는 범위는 BOM 뒤부터 세고, 줄 끝(LF 위치)의 빈 범위는 줄 끝 열의 `^`
+// 하나다.
+TEST(SparksDiagnostic_UnderlinesFromBomAndAtLineEnd) {
+    SystemAllocator allocator;
+    {
+        SourceSet sources(allocator);
+        DiagnosticList ignored(allocator);
+        auto id = sources.TryAdd("B.spark",
+                                 "\xEF\xBB\xBF"
+                                 "abc\nd",
+                                 ignored);
+        REQUIRE(id);
+        DiagnosticList fromBom(allocator);
+        REQUIRE(fromBom.TryAdd(DiagnosticCode::InvalidCharacter, id.Value(), SourceSpan{0, 5},
+                               "From BOM.", "", ""));
+        CHECK(RendersAs(sources, fromBom,
+                        "B.spark:1:1: error S0104: From BOM.\n"
+                        "    abc\n"
+                        "    ^^\n",
+                        allocator));
+
+        DiagnosticList atEnd(allocator);
+        REQUIRE(atEnd.TryAdd(DiagnosticCode::InvalidCharacter, id.Value(), SourceSpan{6, 6},
+                             "At end.", "", ""));
+        CHECK(RendersAs(sources, atEnd,
+                        "B.spark:1:4: error S0104: At end.\n"
+                        "    abc\n"
+                        "       ^\n",
+                        allocator));
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// C1 제어 문자(U+0085)와 bidi override(U+202E)는 공백 한 칸으로 보인다(원문이 다르게 보이지 않게).
+// 설명의 빈 줄은 들여쓰지 않는다.
+TEST(SparksDiagnostic_HidesBidiAndC1ControlsAndKeepsBlankNoteLines) {
+    SystemAllocator allocator;
+    {
+        SourceSet sources(allocator);
+        DiagnosticList ignored(allocator);
+        auto id = sources.TryAdd("H.spark",
+                                 "a\xC2\x85"
+                                 "b\xE2\x80\xAE"
+                                 "c",
+                                 ignored);
+        REQUIRE(id);
+        DiagnosticList diagnostics(allocator);
+        REQUIRE(diagnostics.TryAdd(DiagnosticCode::InvalidCharacter, id.Value(), SourceSpan{7, 8},
+                                   "Hidden.", "first\n\nthird", ""));
+        CHECK(RendersAs(sources, diagnostics,
+                        "H.spark:1:5: error S0104: Hidden.\n"
+                        "    a b c\n"
+                        "        ^\n"
+                        "  first\n"
+                        "\n"
+                        "  third\n",
+                        allocator));
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// 메시지와 수정 예는 한 줄이어야 한다(첫 줄 형식).
+TEST(SparksDiagnostic_RejectsMultiLineMessageAndFix) {
+    SystemAllocator allocator;
+    {
+        SourceSet sources(allocator);
+        DiagnosticList diagnostics(allocator);
+        auto id = sources.TryAdd("A.spark", "abc", diagnostics);
+        REQUIRE(id);
+        auto message = diagnostics.TryAdd(DiagnosticCode::InvalidCharacter, id.Value(),
+                                          SourceSpan{0, 1}, "two\nlines", "", "");
+        CHECK(!message && message.Error() == ErrorCode::InvalidArgument);
+        auto fix = diagnostics.TryAddFileLevel(DiagnosticCode::InvalidCharacter, id.Value(), "m",
+                                               "", "a\nb");
+        CHECK(!fix && fix.Error() == ErrorCode::InvalidArgument);
+        REQUIRE(diagnostics.TryAdd(DiagnosticCode::InvalidCharacter, id.Value(), SourceSpan{0, 1},
+                                   "m", "explanation\nmay span lines", "one line"));
+        CHECK(diagnostics.Count() == 1);
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// 같은 경로의 서로 다른 파일은 더한 순서로 정렬한다.
+TEST(SparksDiagnostic_SamePathFilesSortInAddOrder) {
+    SystemAllocator allocator;
+    {
+        SourceSet sources(allocator);
+        DiagnosticList diagnostics(allocator);
+        auto first = sources.TryAdd("Same.spark", "xyz", diagnostics);
+        auto second = sources.TryAdd("Same.spark", "xyz", diagnostics);
+        REQUIRE(first && second);
+        REQUIRE(diagnostics.TryAdd(DiagnosticCode::InvalidCharacter, second.Value(),
+                                   SourceSpan{0, 1}, "second", "", ""));
+        REQUIRE(diagnostics.TryAdd(DiagnosticCode::InvalidCharacter, first.Value(),
+                                   SourceSpan{2, 3}, "first", "", ""));
+        diagnostics.Sort(sources);
+        CHECK(diagnostics[0].Message() == StringView("first"));
+        CHECK(diagnostics[1].Message() == StringView("second"));
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
 }
 
 } // namespace sparks_diagnostic_tests_file

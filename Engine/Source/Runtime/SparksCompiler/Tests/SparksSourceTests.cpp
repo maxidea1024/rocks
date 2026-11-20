@@ -237,4 +237,115 @@ TEST(SparksSource_AddIsAtomicUnderAllocationFailure) {
     }
 }
 
+// 원문 경계: BOM만 있는 원문, BOM 바로 뒤·줄 처음·LF 바로 앞의 잘못된 byte.
+TEST(SparksSource_BoundaryPositions) {
+    SystemAllocator allocator;
+    {
+        SourceSet sources(allocator);
+        DiagnosticList diagnostics(allocator);
+        auto bomOnly = sources.TryAdd("BomOnly.spark", "\xEF\xBB\xBF", diagnostics);
+        REQUIRE(bomOnly);
+        const SourceFile& bomFile = sources.Get(bomOnly.Value());
+        CHECK(bomFile.IsUsable());
+        CHECK(bomFile.LineCount() == 1);
+        CHECK(bomFile.LineText(1).IsEmpty());
+        const SourceLocation bomEnd = bomFile.Locate(static_cast<uint32>(Utf8BomBytes));
+        CHECK(bomEnd.line == 1 && bomEnd.column == 1);
+        CHECK(diagnostics.IsEmpty());
+
+        struct Case {
+            StringView text;
+            uint32 offset;
+            uint32 line;
+            uint32 column;
+        };
+        const Case cases[] = {
+            {StringView("\xEF\xBB\xBF\xFF"), 3, 1, 1}, // BOM 바로 뒤
+            {StringView("\xFF\nx"), 0, 1, 1},          // 줄 처음
+            {StringView("a\xFF\n"), 1, 1, 2},          // LF 바로 앞
+            {StringView("ok\n\xC3"), 3, 2, 1},         // 파일 끝에서 잘린 sequence
+        };
+        for (const Case& item : cases) {
+            DiagnosticList invalid(allocator);
+            auto id = sources.TryAdd("Invalid.spark", item.text, invalid);
+            REQUIRE(id);
+            REQUIRE(invalid.Count() == 1);
+            CHECK(invalid[0].Code() == DiagnosticCode::InvalidUtf8);
+            CHECK(invalid[0].Span().begin == item.offset);
+            const SourceLocation location = sources.Get(id.Value()).Locate(item.offset);
+            CHECK(location.line == item.line && location.column == item.column);
+        }
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// CRLF의 CR·LF 위치는 LF만 쓴 파일의 LF 위치와 같은 열(줄 끝)이다. BOM과 CRLF가 함께 있어도 같다.
+// 홀로 선 CR이 있는 줄의 내용에는 그 CR이 남는다(줄을 나누지 않는다).
+TEST(SparksSource_LineEndColumnsMatchAcrossLineEndings) {
+    SystemAllocator allocator;
+    {
+        SourceSet sources(allocator);
+        DiagnosticList diagnostics(allocator);
+        auto lf = sources.TryAdd("Lf.spark", "ab\ncd", diagnostics);
+        auto crlf = sources.TryAdd("CrLf.spark",
+                                   "\xEF\xBB\xBF"
+                                   "ab\r\ncd",
+                                   diagnostics);
+        REQUIRE(lf && crlf);
+        CHECK(diagnostics.IsEmpty());
+        const SourceLocation lfEnd = sources.Get(lf.Value()).Locate(2);
+        CHECK(lfEnd.line == 1 && lfEnd.column == 3);
+        const SourceFile& crlfFile = sources.Get(crlf.Value());
+        const SourceLocation atCr = crlfFile.Locate(static_cast<uint32>(Utf8BomBytes) + 2);
+        const SourceLocation atLf = crlfFile.Locate(static_cast<uint32>(Utf8BomBytes) + 3);
+        CHECK(atCr.line == 1 && atCr.column == 3);
+        CHECK(atLf.line == 1 && atLf.column == 3);
+        CHECK(crlfFile.LineText(1) == StringView("ab"));
+        const SourceLocation c = crlfFile.Locate(static_cast<uint32>(Utf8BomBytes) + 4);
+        CHECK(c.line == 2 && c.column == 1);
+
+        DiagnosticList loneCr(allocator);
+        auto lone = sources.TryAdd("Lone.spark", "a\rb\nc", loneCr);
+        REQUIRE(lone);
+        CHECK(sources.Get(lone.Value()).LineText(1) == StringView("a\rb"));
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// 이미 파일과 진단이 있는 상태에서 실패를 주입해도 기존 내용은 그대로이고, 이후 성공한 진단은 앞
+// 진단 뒤에 정렬된다(실패가 순서 번호를 소비해도 순서가 뒤집히지 않는다).
+TEST(SparksSource_FailedAddKeepsExistingContents) {
+    SystemAllocator backing;
+    for (uint64 failAt = 1;; ++failAt) {
+        test::NFailAllocator allocator(backing);
+        bool succeeded = false;
+        {
+            SourceSet sources(allocator);
+            DiagnosticList diagnostics(allocator);
+            REQUIRE(sources.TryAdd("First.spark", "a\rb", diagnostics));
+            REQUIRE(diagnostics.Count() == 1);
+            allocator.FailOnAttempt(failAt);
+            auto second = sources.TryAdd("First.spark", "c\rd", diagnostics);
+            allocator.DisableFailure();
+            if (second) {
+                succeeded = true;
+                CHECK(sources.Count() == 2);
+                REQUIRE(diagnostics.Count() == 2);
+                diagnostics.Sort(sources);
+                CHECK(diagnostics[0].Source() == SourceId{0});
+                CHECK(diagnostics[1].Source() == SourceId{1});
+            } else {
+                CHECK(sources.Count() == 1);
+                CHECK(diagnostics.Count() == 1);
+                CHECK(sources.Get(SourceId{0}).Path() == StringView("First.spark"));
+            }
+        }
+
+        CHECK(backing.Stats().liveAllocations == 0);
+        if (succeeded) {
+            break;
+        }
+    }
+}
+
 } // namespace sparks_source_tests_file

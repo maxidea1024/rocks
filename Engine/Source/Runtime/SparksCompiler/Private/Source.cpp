@@ -2,8 +2,10 @@
 
 #include <Base/NumericLimits.h>
 #include <Core/Move.h>
+#include <Core/Optional.h>
 #include <Core/Text/StringBuilder.h>
 #include <Platform/Fatal.h>
+#include <Platform/Memory.h>
 #include <SparksCompiler/Diagnostic.h>
 
 #include "TextColumns.h"
@@ -91,12 +93,20 @@ SourceLocation SourceFile::Locate(uint32 offset) const noexcept {
     }
 
     const uint32 lineBegin = lineStarts_[low];
+    // CRLF의 CR은 줄 끝의 일부이므로 그 LF 위치는 CR 위치와 같은 열(줄 끝)이다. LF만 쓴 파일과 같은
+    // 자리가 같은 열이 된다.
+    uint32 counted = offset;
+    if (counted > lineBegin && counted < text_.Size() && text_[counted] == LineFeed &&
+        text_[counted - 1] == CarriageReturn) {
+        --counted;
+    }
+
     SourceLocation location;
     location.line = static_cast<uint32>(low) + 1;
     location.column =
-        offset <= lineBegin
+        counted <= lineBegin
             ? 1
-            : detail::CountColumns(text_.Data() + lineBegin, text_.Data() + offset) + 1;
+            : detail::CountColumns(text_.Data() + lineBegin, text_.Data() + counted) + 1;
     return location;
 }
 
@@ -142,11 +152,9 @@ Result<SourceId> SourceSet::TryAdd(StringView path, StringView text,
         return Result<SourceId>::Failure(assigned.Error());
     }
 
-    // 진단은 먼저 만들어 두고, 용량을 확보한 뒤 파일과 함께 한 번에 넣는다(실패하면 둘 다 그대로).
-    Array<Diagnostic> prepared(*allocator_);
-    if (auto reserved = prepared.TryReserve(1); !reserved) {
-        return Result<SourceId>::Failure(reserved.Error());
-    }
+    // 원문 검사 진단은 많아야 하나다. 먼저 만들어 두고, 용량을 확보한 뒤 파일과 함께 한 번에 넣는다
+    // (실패하면 둘 다 그대로).
+    Optional<Diagnostic> prepared;
 
     if (text.ByteCount() > MaxSourceBytes) {
         // 원문을 복사하지 않는다. 줄 표는 빈 원문의 한 줄이다.
@@ -168,17 +176,13 @@ Result<SourceId> SourceSet::TryAdd(StringView path, StringView text,
             return Result<SourceId>::Failure(diagnostic.Error());
         }
 
-        if (!prepared.TryPushBack(Move(diagnostic.Value()))) {
-            platform::Fatal("Sparks reserved diagnostic push failed");
-        }
+        prepared.Emplace(Move(diagnostic.Value()));
     } else {
         if (auto resized = file.text_.TryResize(text.ByteCount()); !resized) {
             return Result<SourceId>::Failure(resized.Error());
         }
 
-        for (usize index = 0; index < text.ByteCount(); ++index) {
-            file.text_[index] = text.Data()[index];
-        }
+        platform::MemoryCopy(file.text_.Data(), text.Data(), text.ByteCount());
 
         file.contentBegin_ = StartsWithUtf8Bom(text) ? static_cast<uint32>(Utf8BomBytes) : 0;
         if (auto pushed = file.lineStarts_.TryPushBack(file.contentBegin_); !pushed) {
@@ -216,9 +220,7 @@ Result<SourceId> SourceSet::TryAdd(StringView path, StringView text,
                 return Result<SourceId>::Failure(diagnostic.Error());
             }
 
-            if (!prepared.TryPushBack(Move(diagnostic.Value()))) {
-                platform::Fatal("Sparks reserved diagnostic push failed");
-            }
+            prepared.Emplace(Move(diagnostic.Value()));
         } else {
             const usize loneCr = FindLoneCarriageReturn(text, file.contentBegin_);
             if (loneCr != IndexNone) {
@@ -230,9 +232,7 @@ Result<SourceId> SourceSet::TryAdd(StringView path, StringView text,
                     return Result<SourceId>::Failure(diagnostic.Error());
                 }
 
-                if (!prepared.TryPushBack(Move(diagnostic.Value()))) {
-                    platform::Fatal("Sparks reserved diagnostic push failed");
-                }
+                prepared.Emplace(Move(diagnostic.Value()));
             }
         }
     }
@@ -241,7 +241,7 @@ Result<SourceId> SourceSet::TryAdd(StringView path, StringView text,
         return Result<SourceId>::Failure(reserved.Error());
     }
 
-    if (auto reserved = diagnostics.TryReserveMore(prepared.Size()); !reserved) {
+    if (auto reserved = diagnostics.TryReserveMore(prepared ? 1 : 0); !reserved) {
         return Result<SourceId>::Failure(reserved.Error());
     }
 
@@ -250,8 +250,8 @@ Result<SourceId> SourceSet::TryAdd(StringView path, StringView text,
         platform::Fatal("Sparks reserved source push failed");
     }
 
-    for (usize index = 0; index < prepared.Size(); ++index) {
-        diagnostics.Commit(Move(prepared[index]));
+    if (prepared) {
+        diagnostics.Commit(Move(prepared.Value()));
     }
 
     return Result<SourceId>::Success(id);

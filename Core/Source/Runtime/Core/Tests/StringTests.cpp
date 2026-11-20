@@ -154,6 +154,21 @@ TEST(StringViewFindInvalidUtf8ReportsTheLeadingByte) {
     static_assert(StringView("\xC3\xA9x").FindInvalidUtf8() == IndexNone, "valid text");
 }
 
+// CompareBytes는 byte 순이며 앞부분이 같으면 짧은 쪽이 앞이다(locale·대소문자 접기 없음).
+TEST(StringViewCompareBytesOrdersByBytes) {
+    CHECK(StringView::CompareBytes("", "") == 0);
+    CHECK(StringView::CompareBytes("abc", "abc") == 0);
+    CHECK(StringView::CompareBytes("", "a") < 0);
+    CHECK(StringView::CompareBytes("a", "") > 0);
+    CHECK(StringView::CompareBytes("ab", "abc") < 0);
+    CHECK(StringView::CompareBytes("abd", "abc") > 0);
+    CHECK(StringView::CompareBytes("B", "a") < 0); // 대문자가 소문자보다 앞(byte 값)
+    CHECK(StringView::CompareBytes("Bom.expect", "Bom.lf.expect") < 0);
+    // ASCII 밖 byte는 부호 없는 값으로 비교한다(UTF-8 code point 순).
+    CHECK(StringView::CompareBytes("z", "\xED\x95\x9C") < 0);
+    CHECK(StringView::CompareBytes(StringView("a\0b", 3), StringView("a\0c", 3)) < 0);
+}
+
 TEST(StringRejectsMalformedUtf8WithoutMutation) {
     const StringView malformed[] = {
         "\xC0\x80",
