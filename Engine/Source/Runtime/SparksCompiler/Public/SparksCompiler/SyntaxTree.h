@@ -157,8 +157,8 @@ public:
 
     SyntaxTree(const SyntaxTree&) = delete;
     SyntaxTree& operator=(const SyntaxTree&) = delete;
-    SyntaxTree(SyntaxTree&&) = delete;
-    SyntaxTree& operator=(SyntaxTree&&) = delete;
+    SyntaxTree(SyntaxTree&&) noexcept = default;
+    SyntaxTree& operator=(SyntaxTree&&) noexcept = default;
     ~SyntaxTree() noexcept = default;
 
     SourceId Source() const noexcept {

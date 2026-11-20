@@ -1,0 +1,5 @@
+# Every manifest problem is reported (3.4); the modules of a package whose manifest is
+# wrong are not analyzed, so the syntax error in Main.spark is not reported.
+error S1104 SparksPackage.json5 2:9
+error S1105 SparksPackage.json5 3:11
+error S1102 SparksPackage.json5 5:11

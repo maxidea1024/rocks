@@ -1,0 +1,1 @@
+{ name: "A", sparks: 1, profile: "core", dependencies: ["B"] }

@@ -119,4 +119,8 @@ StringView TokenKindText(TokenKind kind) noexcept;
 // 키워드 토큰인지다.
 bool IsKeyword(TokenKind kind) noexcept;
 
+// text가 키워드 철자(`class`, `in` 등 3.1절 키워드)인지다. binding schema처럼 소스 밖에서 온 이름이
+// 키워드와 겹치는지 볼 때 쓴다.
+bool IsKeywordText(StringView text) noexcept;
+
 } // namespace rocks::sparks

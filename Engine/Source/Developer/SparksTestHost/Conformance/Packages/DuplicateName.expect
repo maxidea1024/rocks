@@ -1,0 +1,3 @@
+# Two packages whose names differ only in letter case (S1112): the later one is reported
+# at its name and is not analyzed.
+error S1112 B/SparksPackage.json5 1:9

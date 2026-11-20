@@ -1067,6 +1067,10 @@ bool IsKeyword(TokenKind kind) noexcept {
     return kind >= TokenKind::Import && kind <= TokenKind::Open;
 }
 
+bool IsKeywordText(StringView text) noexcept {
+    return KeywordKind(text) != TokenKind::Identifier;
+}
+
 Result<void> Tokenize(const SourceSet& sources, SourceId id, DiagnosticList& diagnostics,
                       Array<Token>& tokens) noexcept {
     const SourceFile& file = sources.Get(id);

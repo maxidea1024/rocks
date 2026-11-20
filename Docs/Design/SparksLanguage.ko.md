@@ -344,9 +344,31 @@ _ = bag.Add(item);                                      // 결과를 버릴 때�
 ### 3.4 파일·import·패키지·문맥 이름
 
 - 파일 하나가 하나의 소스 모듈이며 패키지 루트 기준 파일 경로가 import 경로다. 경로의 폴더·파일 이름은 대문자로 시작하는 ASCII 식별자이고 대소문자를 구분해 비교한다. 대소문자만 다른 두 경로는 오류다(파일 시스템마다 결과가 달라지므로). 같은 폴더에 `X.spark`와 폴더 `X/`를 함께 둘 수 없다.
-- **패키지 manifest:** 패키지 루트의 `SparksPackage.json5`(파일 이름 규칙은 JSON5 2단계 결정을 따른다)는 `name`(PascalCase), `sparks`(언어 버전, 정수), `profile`(`core`·`full`), `dependencies`(패키지 이름과 interface 호환 범위), `services`(World마다 생성할 `WorldService` 클래스 목록), `logCategory`(생략 시 패키지 이름)를 가진다. 알 수 없는 key는 오류다.
+- **모듈 경로(LC2a 확정):** 패키지 루트 기준 경로를 `/`로 나눈 구간이다. 마지막 구간은 `.spark`로 끝나며 확장자를 뗀 것이 모듈 이름이다. 구간은 모두 영문 대문자로 시작하고 ASCII 영문자·숫자만 쓴다(`_`·공백·점 없음 — S1108). import 경로는 구간을 `.`로 이은 것이다(`Combat/Score.spark` → `Combat.Score`). 대소문자만 다른 두 경로는 S1109(폴더 구간끼리도 비교한다. ASCII 대소문자를 접어 같은 철자 무리에서 byte 순으로 처음인 철자는 그대로 두고, 그 밖의 철자를 쓰는 모듈 파일마다 하나씩 낸다), 같은 폴더의 `X.spark`와 폴더 `X/`는 S1110(위치는 `X.spark`)이며 셋 다 그 파일의 파일 전체 진단이다. S1109–S1111은 경로가 맞는(S1108이 아닌) 모듈만 본다.
+- **패키지 manifest:** 패키지 루트의 `SparksPackage.json5`(파일 이름 규칙은 JSON5 2단계 결정을 따른다)는 `name`(PascalCase), `sparks`(언어 버전, 정수), `profile`(`core`·`full`), `dependencies`(의존 패키지 이름 목록, SD59), `services`(World마다 생성할 `WorldService` 클래스 목록), `logCategory`(생략 시 패키지 이름)를 가진다. 알 수 없는 key는 오류다. 형식(LC2a 확정)은 JSON5(Core `JsonSyntax::Json5` — 중복 key는 오류)의 객체 하나다.
+
+  | key | 필수 | 값 |
+  |---|---|---|
+  | `name` | 예 | 패키지 이름. 영문 대문자로 시작하는 ASCII 영문자·숫자(`_` 없음, 56 byte 이하 — `logCategory`를 생략하면 이 이름이므로 그 상한과 같다). `Rocks`는 엔진 패키지 이름이라 쓸 수 없다 |
+  | `sparks` | 예 | 언어 버전. JSON5 정수 값이어야 하고(10진·16진 — `0x1`도 된다. `1.0`·`1e0`처럼 소수·지수 표기는 정수가 아니어서 S1104) 지금은 `1`뿐이다(1이 아닌 정수는 S1105) |
+  | `profile` | 예 | `"core"` 또는 `"full"`(§1.3) |
+  | `dependencies` | 아니오 | 의존 패키지 이름의 배열. 중복·자기 자신·`Rocks`는 오류다(`Rocks`에는 언제나 의존한다). 호환 범위는 패키지 버전이 생기는 단계에서 더한다(SD59) |
+  | `services` | 아니오 | `WorldService` 클래스 경로의 배열: 모듈 import 경로 뒤에 클래스 이름(`Combat.Score.ScoreKeeper`). 중복은 오류다. 그 클래스가 있고 `WorldService` 파생인지는 이름 해석(LC2b)이 검사한다 |
+  | `logCategory` | 아니오 | 영문 대문자로 시작하는 ASCII 영문자·숫자 구간을 점으로 이은 이름, 7구간·56 byte 이하(엔진 카테고리 `Script.<logCategory>`가 LoggingSystem 6.2절 문법 — 8구간·63 byte — 에 들게). 생략하면 패키지 이름 |
+
+  manifest 진단(S11xx)의 위치: JSON5 문법 오류는 그 오류 위치, 값 오류는 그 값의 시작, 알 수 없는 key와 key 이름 오류는 그 key 값의 시작(Core JSON은 key 위치를 따로 두지 않는다), 빠진 필수 key는 최상위 객체의 시작이다. 한 manifest의 오류는 모두 알린다(첫 오류에서 멈추지 않는다).
+
+  **manifest 오류**는 S1101–S1105와, manifest 파일을 읽지 못하게 하는 원문 검사(S0101 잘못된 UTF-8·S0103 크기 초과 — 이때는 manifest를 읽지 않는다)다. S0102(외톨이 CR)는 그 자리를 알리고 그대로 읽으며 manifest 오류가 아니다. binding schema 파일도 같다(S0101·S0103이면 읽지 않고 그 파일은 무효다). 다른 key에 오류가 있어도 `name` 값 자체가 맞으면 그 패키지는 **이름이 있다**(S1112 비교와 의존 대상 찾기에 쓴다). 이름이 없는 패키지는 manifest를 읽지 못했거나 `name`이 없거나 틀린 것이다.
+
+  manifest 오류가 있는 패키지와 이름이 겹친 뒤쪽 패키지(S1112)는 **무효**이며 모듈을 분석하지 않는다(모듈 경로 검사·구문 분석·import 해석 모두 — manifest가 정하는 `profile`·의존 없이는 검사 결과가 달라지므로). 무효인 의존 패키지와 없는 의존 패키지를 가리키는 import는 판정하지 않는다(이미 그 원인을 알렸다). `dependencies`에 없는 다른 패키지를 가리키는 import는 그 패키지가 무효여도 S0302다(고칠 것은 이쪽 manifest이므로).
 - import는 그 모듈의 모든 최상위 선언을 짧은 이름으로 도입한다. 도입한 이름이 다른 import·현재 파일의 선언·prelude와 같으면 그 import 줄에서 오류다. `import Weapons.Sword as Blades;`처럼 모듈 별칭을 붙이면 그 모듈의 이름은 `Blades.Sword`로만 쓴다. 그 밖의 한정 경로(`Weapons.Sword.Sword`)는 없다.
-- 의존 패키지의 모듈은 `import 패키지.경로;`로, 현재 패키지의 모듈은 패키지 이름 없이 import한다. 패키지 이름은 현재 패키지의 최상위 폴더 이름과 같을 수 없다.
+- 의존 패키지의 모듈은 `import 패키지.경로;`로, 현재 패키지의 모듈은 패키지 이름 없이 import한다. 의존 패키지 이름은 현재 패키지의 최상위 폴더·최상위 모듈 이름과 같을 수 없다(아래 S1111).
+- **import 해석(LC2a 확정):** import 경로의 첫 구간이 manifest `dependencies`에 있는 패키지 이름이면 나머지 구간이 그 패키지의 모듈 경로이고, 아니면 경로 전체가 현재 패키지의 모듈 경로다. 그래서 의존 패키지 이름(과 `Rocks`)은 현재 패키지의 최상위 폴더 이름·최상위 모듈 이름과 같을 수 없다(S1111 — 첫 구간의 뜻이 둘이 되지 않게. 위치는 manifest의 그 의존 항목이고, `Rocks`는 의존 항목이 없으므로 그 이름으로 시작하는 첫 모듈(import 경로 byte 순)의 파일 전체 진단이다). 해석 결과가 없는 경로는 S0301이다(첫 구간이 의존 패키지 이름뿐이면 "패키지는 모듈이 아니다"로, 현재 패키지 자신의 이름으로 시작하면 "같은 패키지의 모듈은 패키지 이름 없이 import한다"로 설명하고 이름을 뗀 경로가 모듈이면 그것을 제시한다). 첫 구간이 이 컴파일에 있는 다른 패키지 이름(이름이 있는 패키지 — 정확히 같은 철자)인데 `dependencies`에 없으면 S0302, 같은 모듈을 두 번 import하면(별칭 유무와 무관) 두 번째 줄부터 줄마다 S0303, 자기 모듈의 import는 줄마다 S0304, `import Rocks…`는 S0305다. import 진단의 위치는 import 경로의 시작이다. 경로에 구문 오류가 있거나 경로 토큰 안에서 시작하는 어휘 진단(S01xx — 예: `_`가 든 이름의 S0105)이 있는 import와 선언 뒤의 import(S0210 — 구문 트리에 남지 않는다)는 판정하지 않는다(이미 그 원인을 알렸다).
+- **`Rocks` 패키지(LC2a 확정, SD60):** 엔진 binding schema가 정의하는 `Rocks` 패키지의 모든 타입은 import 없이 보인다(§2 예시의 `Character`·`SphereCollider`·`SoundAsset`). 그래서 `Rocks`는 import하지 않으며, 사용자 이름과의 충돌은 이름 하나에 대상 하나 규칙(§3.1)이 판정한다(부록 A의 핵심 엔진 타입은 예약 이름이다).
+- **패키지 사이 의존:** 한 컴파일에 함께 넣은 소스 패키지만 의존 대상이다(binding schema 패키지는 `Rocks`뿐이고 `Rocks`는 의존 목록에 쓰지 않는다). 의존 이름은 정확히 같은 철자의 이름이 있는 패키지 중 먼저 더한 것을 가리킨다.
+  - 없는 패키지는 S1106(위치는 그 의존 항목)이다. 단, 이름이 없는 패키지가 하나라도 있으면 그것이 그 의존일 수 있으므로 S1106을 내지 않는다(그 manifest의 진단이 이미 있다).
+  - 순환은 S1107이다. 유효한 패키지 사이의 의존 간선으로 강하게 연결된 묶음(SCC)을 찾아 묶음 하나에 진단 하나를 낸다. 위치는 묶음에서 이름 byte 순으로 처음인 패키지의 manifest에서 묶음 안을 가리키는 첫 의존 항목이고, 메시지는 그 항목에서 시작해 처음 패키지로 돌아오는 가장 짧은 길(간선은 manifest 순서로 넓이 우선)이다. 자기 자신 의존은 S1104이므로 묶음은 둘 이상이다.
+  - 같은 이름의 패키지 둘은 S1112다. 이름이 있는 패키지끼리 ASCII 대소문자를 무시하고 비교한다(이름이 폴더·파일 이름이 되고 파일 시스템마다 대소문자 구분이 다르므로). 다른 manifest 오류와 무관하게 비교하며, 같은 무리에서 먼저 더한 패키지가 이름을 갖고 뒤의 것마다 그 `name` 값에 S1112를 내고 무효로 한다(먼저 더한 것이 무효여도 그렇다 — 한 이름이 둘을 가리키지 않게).
 - 파일 사이의 순환 참조는 허용하고 순환하는 `const` 초기화만 오류다. 패키지는 빌드·로드·reload 단위이며 패키지 사이의 순환 의존은 금지한다.
 - 엔진 API는 `Rocks` 패키지에 있고 핵심 타입과 prelude 이름(부록 A)은 자동으로 import한다.
 - 변경 가능한 전역 변수는 없다. 공유 상태는 `class X : WorldService`로 선언하고 manifest `services`에 등록한다(전체 계획 §22.6 PI03). WorldService는 World마다 생성되는 Object 기반 스크립트 수명 타입이며, 엔진 쪽 호스트는 World의 `WorldSubsystem` 하나(ScriptServiceHost)가 맡는다(SD22). travel·World 종료 때 정상 종료된다. 접근은 `World.Service<T>(): T`이며 등록되지 않은 타입은 컴파일 오류다.
@@ -988,6 +1010,34 @@ Characters/PlayerCharacter.spark:42:5: error S0731: Cannot assign to a function 
   - 목록 끝의 쉼표는 enum case 목록만 받는다. 인자·매개변수·컬렉션 리터럴·case 값 목록의 끝 쉼표는 다음 원소가 빠진 것이다(S0202·S0207).
   - `try`와 `await`를 함께 쓸 때는 `try await F()` 순서다(`await try F()`는 S0212, 순서를 고치라는 문장).
   - 식 안의 `?? return`·`?? break`·`?? continue`는 `??`의 오른쪽 피연산자로 읽지 않는다(지역 선언의 Exit이거나 S0213).
+- **이름 해석(S03xx, LC2):** import·이름·명명 규칙이다. LC2a는 import 해석(§3.4 "import 해석")만 정하고 나머지 코드는 LC2b에서 더한다.
+
+| 코드 | 이름 | 조건 | 수정 예 |
+|---|---|---|---|
+| S0301 | `unknown-module` | import 경로가 현재 패키지·의존 패키지의 모듈이 아니다. 첫 구간이 의존 패키지 이름뿐이면(`import Weapons;`) 패키지는 모듈이 아니라고, 자기 패키지 이름으로 시작하면 패키지 이름 없이 import한다고 설명한다 | 경로를 고친다(비슷한 모듈 이름 제시) |
+| S0302 | `undeclared-dependency` | import 경로의 첫 구간이 이 컴파일의 다른 패키지인데 manifest `dependencies`에 없다 | `dependencies`에 그 패키지를 더한다 |
+| S0303 | `duplicate-import` | 같은 모듈을 다시 import했다(별칭 유무와 무관, 두 번째 줄부터 줄마다) | 한 줄을 지운다 |
+| S0304 | `self-import` | 자기 모듈을 import했다(줄마다) | 지운다 |
+| S0305 | `rocks-import` | `Rocks` 패키지를 import했다(엔진 타입·prelude는 자동으로 보인다, SD60) | 지운다 |
+
+- **패키지(S11xx, LC2a):** manifest·모듈 경로·패키지 의존·binding schema 파일이다. 위치 규칙은 §3.4와 §10.2 "binding schema 파일 형식"에 있다. 코드 대역의 나머지(reload·backend)는 해당 마일스톤에서 더한다.
+
+| 코드 | 이름 | 조건 | 수정 예 |
+|---|---|---|---|
+| S1101 | `manifest-syntax` | manifest가 JSON5 객체 하나가 아니다(문법 오류, 중복 key, 최상위가 객체가 아님) | JSON5 문법을 고친다 |
+| S1102 | `unknown-manifest-key` | 알 수 없는 key | 그 key를 지운다(비슷한 key 제시) |
+| S1103 | `missing-manifest-key` | 필수 key(`name`·`sparks`·`profile`)가 없다 | 그 key를 더한다 |
+| S1104 | `invalid-manifest-value` | 값의 종류·형식이 틀리다(이름 규칙, `profile` 값, 배열 원소, 중복, 자기 자신·`Rocks` 의존, 길이) | 표(§3.4)의 형식대로 |
+| S1105 | `unsupported-language-version` | `sparks`가 이 컴파일러가 아는 언어 버전이 아니다(지금은 1뿐) | `sparks: 1` |
+| S1106 | `missing-dependency` | 의존 패키지가 이 컴파일에 없다(이름이 없는 패키지가 있으면 내지 않는다) | 패키지 이름을 고치거나 패키지를 더한다 |
+| S1107 | `dependency-cycle` | 패키지 사이 의존이 순환한다(강하게 연결된 묶음 하나에 하나, 메시지에 순환 경로) | 순환을 끊는다 |
+| S1108 | `invalid-module-path` | 모듈 경로가 규칙에 맞지 않는다(구간 이름, `.spark` 확장자) | 대문자로 시작하는 영문자·숫자 이름으로 |
+| S1109 | `module-path-case-conflict` | 대소문자만 다른 두 경로(처음 철자가 아닌 쪽의 모듈 파일마다) | 한쪽 이름을 바꾼다 |
+| S1110 | `module-folder-conflict` | 같은 폴더의 `X.spark`와 폴더 `X/` | 한쪽 이름을 바꾼다 |
+| S1111 | `package-folder-conflict` | 의존 패키지 이름(과 `Rocks`)이 현재 패키지의 최상위 폴더·최상위 모듈 이름과 같다 | 폴더 이름을 바꾼다 |
+| S1112 | `duplicate-package` | 한 컴파일에 같은 이름(ASCII 대소문자만 다른 것 포함)의 패키지가 둘 있다 | 한쪽 이름을 바꾼다 |
+| S1120 | `invalid-binding-schema` | binding schema 파일이 §10.2 형식이 아니다(문법, key, kind가 허용하지 않는 key, 값, 이름 규칙·키워드, ID 표기·중복, 타입 표기 문법, 중복 이름, 파일 사이 타입 이름·ID·모듈 중복) | 생성기를 다시 돌린다(손으로 고치지 않는다) |
+
 - 사전 대조 리터럴(`Tag`·`Action`·`CVar`)이 사전에서 이름이 바뀐 경우 사전의 redirect(`@formerly`와 같은 역할)를 따라 자동 변환하고 빠른 수정으로 소스를 고친다. redirect도 없으면 오류다.
 
 ### 8.2 Result와 try
@@ -1191,6 +1241,50 @@ Sparks에서는 `var MaxHealth: int32`(편집·저장), 읽기 전용 속성 `Cu
 | 자원 정책 | 반환하는 것의 종류: 유지 자원(로드 요청 `LoadRequest<T>` 포함) / 일회성 효과 / 값. 기다리는 API는 고립 완료 해제 경로를 선언. 선언이 없으면 노출 불가 |
 | 파괴 지연 | 엔진 객체를 파괴하는 함수는 스크립트 단계 끝 deferred command로 처리함을 선언(SD3) |
 | 이벤트 | `FieldKind::Event`, FieldId, 인자 이름(`Params`)·형식, 발행 lane, 발행 측(서버·소유 클라이언트·모든 기기), 스크립트 단계 안 `Broadcast`의 큐 기록, VM 연결 thunk |
+
+#### binding schema 파일 형식(LC2a 확정, SD61)
+
+파일 하나는 엔진 C++ 모듈 하나의 바인딩이며 이름은 `<모듈>.sparkbind.json`이다. 엄격한 JSON(Core `JsonSyntax::Strict`, 생성기는 Canonical 출력)이고 알 수 없는 key·빠진 필수 key·값 종류 오류는 S1120이다(위치는 그 값의 시작, 빠진 key는 그 객체의 시작). 생성기(EI1, 연동 요구 SE-R4)는 이 형식을 쓴다. 표의 key는 LC2(이름·타입)가 쓰는 것이며, 효과·lane·자원 정책·파괴 지연 등 §10.2 표의 나머지는 그것을 쓰는 마일스톤(LC3 이후)이 key를 더하면서 이 표에 적는다(형식 번호는 EI1 출시 전까지 1을 유지한다).
+
+| 위치 | key | 필수 | 값 |
+|---|---|---|---|
+| 최상위 | `format` | 예 | `1` |
+| 최상위 | `package` | 예 | 패키지 이름. 지금은 엔진 패키지 `Rocks`뿐이다(엔진 플러그인 패키지는 그 단계에서 정한다 — 그 밖의 이름은 S1120). 여러 파일이 같은 패키지를 이룬다 |
+| 최상위 | `module` | 예 | C++ 모듈 이름(ASCII 영문자·숫자, 영문 대문자로 시작) |
+| 최상위 | `types` | 예 | 타입 객체 배열 |
+| 타입 | `name` | 예 | 스크립트 타입 이름(영문 대문자로 시작하는 ASCII 영문자·숫자). 한 패키지 안에서 중복 불가 |
+| 타입 | `id` | 예 | TypeId. `.rocksids.json`과 같은 32자리 소문자 16진(모두 `0`은 안 된다). 모든 schema에서 중복 불가(FieldId·FunctionId와도) |
+| 타입 | `kind` | 예 | `object`(엔진 객체 — Actor·Component·Service·WidgetController 계열), `asset`(에셋 타입), `struct`(native 값 struct), `enum`, `interface`(CU9) |
+| 타입 | `base` | 아니오 | 기반 타입 이름. `object`·`asset`·`interface`만 쓴다 |
+| 타입 | `scriptExtensible` | 아니오 | bool(기본 false). Sparks class가 상속할 수 있는지. `object`·`asset`만 |
+| 타입 | `constructible` | 아니오 | bool(기본 true). 이름 지정 인자로 생성할 수 있는지. `struct`만 |
+| 타입 | `fields` | 아니오 | 필드 객체 배열. `object`·`asset`·`struct`만 |
+| 타입 | `functions` | 아니오 | 함수 객체 배열. `enum` 밖 |
+| 타입 | `events` | 아니오 | 이벤트 객체 배열. `object`만 |
+| 타입 | `cases` | `enum`이면 예 | case 이름 문자열 배열(선언 순서, 하나 이상, 중복 불가, 영문 대문자로 시작). `enum`만 |
+| 필드 | `name` | 예 | §10.3 변환을 마친 스크립트 이름(영문 대문자로 시작) |
+| 필드 | `id` | `computed`가 아니면 예 | FieldId |
+| 필드 | `type` | 예 | 타입 표기(아래) |
+| 필드 | `access` | 아니오 | `"read"`(기본) 또는 `"readWrite"`. 엔진 객체 필드의 `readWrite`는 `ScriptWritable`이고, struct 필드의 `readWrite`는 대입할 수 있는 경로(§4.4)로 쓸 수 있다는 뜻이다 |
+| 필드 | `computed` | 아니오 | bool(기본 false). getter·setter로 만든 계산 속성(§10.2) |
+| 필드 | `changed` | 아니오 | bool(기본 false). `X.Changed`를 받을 수 있는지(CU5) |
+| 함수 | `name` | 예 | 스크립트 이름(영문 대문자로 시작, `TryX` → `X` 변환을 마친 것) |
+| 함수 | `id` | 예 | FunctionId |
+| 함수 | `static` | 아니오 | bool(기본 false). 타입 이름으로 부르는 함수 |
+| 함수 | `async` | 아니오 | bool(기본 false). `await`로 부르는 함수 |
+| 함수 | `typeParameters` | 아니오 | `{ "name": 영문 대문자 하나로 시작하는 이름, "constraint": 기반 타입 이름(생략 가능) }` 배열(`Find<T: Component>` 꼴) |
+| 함수 | `parameters` | 아니오 | `{ "name": lowerCamel 이름(키워드 아님), "type": 타입 표기, "perSecond": bool(기본 false) }` 배열. 이름 중복 불가 |
+| 함수 | `returns` | 아니오 | 반환 타입 표기. 없으면 `void` |
+| 이벤트 | `name` | 예 | 이벤트 이름(영문 대문자로 시작) |
+| 이벤트 | `id` | 예 | FieldId(`FieldKind::Event`) |
+| 이벤트 | `parameters` | 아니오 | `{ "name": lowerCamel 이름(키워드 아님), "type": 타입 표기 }` 배열. 이름 중복 불가 |
+| 이벤트 | `publisher` | 아니오 | `"server"`·`"owner"`·`"all"`(기본) |
+
+- **타입 표기:** §3.6 `Type`과 같은 문자열의 정규형이다(`int32`, `Actor?`, `Array<Actor>`, `Map<string, int32>`, `Result<void>`, `Soft<SoundAsset>`, 타입 매개변수 `T?`). 문법은 `표기 = 이름 {"." 이름} ["<" 표기 {", " 표기} ">"] ["?"]`이고 공백은 쉼표 뒤 한 칸만 쓴다(생성기 출력이 하나로 정해지게). 이름은 ASCII 영문자로 시작하는 영문자·숫자이며 키워드(§3.1)일 수 없고, 꺾쇠 중첩은 §8.1 구문 깊이 상한(128)까지다. schema reader는 표기의 문법만 검사하고(S1120), 이름이 가리키는 타입(같은·의존 패키지의 타입, prelude 타입, 내장 타입, 그 함수의 타입 매개변수)은 이름 해석(LC2b)이 검사한다.
+- 한 타입 안의 필드·함수·이벤트 이름은 한 이름 공간이다(§3.1). 중복은 메타 컴파일러가 막지만 reader도 S1120으로 거부한다(손으로 쓴 schema·손상된 파일 방어).
+- 타입의 `kind`가 허용하지 않는 key(표의 "만" 조건)는 S1120 하나만 내고 그 값은 검사하지 않는다(진단이 겹치지 않게). `kind`가 없거나 틀리면 어느 key도 거부하지 않고 모든 값을 검사한다(`cases`가 하나 이상이어야 한다는 규칙은 `enum`일 때만).
+- 한 파일 안의 중복(타입 이름, 한 타입의 멤버 이름, 매개변수·타입 매개변수 이름, enum case, ID)은 원문에서 뒤에 나온 것마다 하나씩 낸다(세 번 나오면 둘).
+- 한 컴파일의 schema 파일들은 패키지 하나의 타입 이름 공간과 ID 공간을 함께 쓰고, C++ 모듈 하나에 파일 하나다. 파일을 더한 순서로 훑으며 앞서 받아들인 파일하고만 비교한다(이미 거부한 파일과 겹치는 것은 문제 삼지 않는다). 겹치는 타입 이름(그 `name` 값)·ID(그 `id` 값)·`module` 값(그 값)마다 S1120을 내고 그 파일을 쓰지 않는다. 형식 오류가 있는 파일과 원문 검사가 막은 파일(S0101·S0103)도 쓰지 않는다.
 
 ### 10.3 이름·노출과 API 규칙
 
@@ -1434,7 +1528,12 @@ class DoorLogic : ScriptComponent {
   - `clean` — 진단이 없어야 한다. `error`와 함께 쓸 수 없다.
   - 지시가 하나도 없는 `.expect`, 알 수 없는 지시, `.expect`가 없는 `.spark`, `.spark`가 없는 `.expect`는 corpus 오류로 실패한다(빈 기대값이 조용히 통과하지 않게 한다).
   - 실행 결과 지시(`result`·`fault`·`trace`)는 해당 마일스톤(LC5·LC6)에서 더한다.
-- **구문 트리 golden(LC1b, SD58):** 사례 옆에 `<사례>.ast`가 있으면 그 사례의 구문 트리 덤프(`AppendSyntaxDump`, 형식은 `SyntaxTree.h`)가 파일 내용과 바이트 단위로 같아야 한다(끝의 LF 포함). `.ast`는 선택이며 `.spark` 없이 있으면 corpus 오류이고, 원문 검사가 막아(S0101·S0103) 트리가 없는 사례에 `.ast`가 있어도 실패다. 진단(`.expect`)과 트리는 따로 판정한다. 다르면 첫 다른 줄과 실제 트리 전체를 보인다(검토 뒤 golden 갱신에 쓴다). 사례 실행은 원문 검사 → 어휘·구문 분석(`ParseFile`)이다. 이후 IR·bytecode 덤프 golden도 같은 방식(`.ir`·`.bytecode`)으로 더한다.
+- **패키지 사례(LC2a):** 사례는 파일 하나(`<사례>.spark`) 또는 폴더 하나(`<사례>/`)다.
+  - 파일 사례는 manifest가 `{ name: "Test", sparks: 1, profile: "full" }`인 패키지의 모듈 하나(모듈 경로 `Main` — 사례 이름에는 점이 들어갈 수 있으므로 사례 이름과 무관하다)로 컴파일한다. 진단 경로는 `<영역>/<사례>.spark`이고 `.expect`의 `error` 지시에는 경로를 쓰지 않는다.
+  - 폴더 사례는 폴더 바로 아래에 `SparksPackage.json5`가 있으면 그 폴더가 패키지 하나이고, 없으면 바로 아래 폴더 하나하나가 패키지다(각자 `SparksPackage.json5` 필수). 패키지 안에는 `.spark`와 `SparksPackage.json5`(루트)만 둔다. `.expect`는 폴더와 같은 stem으로 영역에 두며 `error` 지시에 사례 폴더 기준 경로(`/` 구분)를 쓴다: `error S0301 Game/Combat/Score.spark 3:8`, 파일 전체 진단은 `error S1108 Game/combat.spark`. 진단 경로도 사례 폴더 기준이다. 그 밖의 파일, 파일이 하나도 없는 사례 폴더, manifest 없는 패키지 폴더, 패키지 루트가 아닌 곳의 `SparksPackage.json5`는 corpus 오류다(모듈이 없는 패키지 — manifest만 있는 폴더 — 는 쓸 수 있다).
+  - 모든 사례는 시험용 가짜 엔진 schema(`SparksTestHost/Schema/*.sparkbind.json`, 패키지 `Rocks`)를 함께 컴파일한다. 진단 경로는 `Schema/<파일 이름>`이다.
+  - `.ast`(구문 트리 golden)는 파일 사례에만 둔다(폴더 사례 옆의 `.ast`는 corpus 오류).
+- **구문 트리 golden(LC1b, SD58):** 사례 옆에 `<사례>.ast`가 있으면 그 사례의 구문 트리 덤프(`AppendSyntaxDump`, 형식은 `SyntaxTree.h`)가 파일 내용과 바이트 단위로 같아야 한다(끝의 LF 포함). `.ast`는 선택이며 `.spark` 없이 있으면 corpus 오류이고, 원문 검사가 막아(S0101·S0103) 트리가 없는 사례에 `.ast`가 있어도 실패다. 진단(`.expect`)과 트리는 따로 판정한다. 다르면 첫 다른 줄과 실제 트리 전체를 보인다(검토 뒤 golden 갱신에 쓴다). 사례 실행은 컴파일(LC2a부터 manifest·schema·모듈 경로·어휘·구문 분석·import 해석, 마일스톤마다 늘어난다)이다. 이후 IR·bytecode 덤프 golden도 같은 방식(`.ir`·`.bytecode`)으로 더한다.
 - corpus는 `Engine/Source/Developer/SparksTestHost/Conformance`에 두고 시험이 실행 중 엔진 디렉터리 탐색으로 찾는다. 저장소가 줄 끝을 LF로 정규화하므로 CRLF·잘못된 UTF-8·BOM처럼 바이트가 중요한 사례는 C++ 시험에 직접 넣는다.
 - 제안 목표(미측정): 파일 1,000개 기준 자동완성 p95 100 ms, 편집 후 진단 p95 300 ms. 검증: 후보 golden test, prefix fuzz, CLI와의 진단 동등성, rename 후 저장 데이터 보존.
 
@@ -1579,7 +1678,7 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 
 언어 코어가 엔진 없이 완결되도록 경계를 둘로 정한다(SD52).
 
-- **binding schema는 파일이다.** 컴파일러는 엔진 API를 C++ 리플렉션에서 직접 읽지 않고 binding schema 파일(`<모듈>.sparkbind.json`)과 사전 파일(Tag·Action·CVar·에셋·`Loc` catalog)에서만 읽는다. 내용은 §10.2의 표(타입·필드·계산 속성·함수·자원 정책·파괴 지연·이벤트)다. 언어 코어는 손으로 쓴 시험용 schema(가짜 엔진: `Actor`·`Component`·`ScriptComponent`·`SceneComponent`와 §2 예시가 쓰는 타입)로 개발하고, 실제 엔진 선언에서 이 파일을 생성하는 것은 연동 단계 EI1이다. 언어 서버가 엔진 없이 동작하는 것(§13)도 같은 파일 덕분이다. 세부 형식은 LC2 착수 때 이 절에 확정한다.
+- **binding schema는 파일이다.** 컴파일러는 엔진 API를 C++ 리플렉션에서 직접 읽지 않고 binding schema 파일(`<모듈>.sparkbind.json`)과 사전 파일(Tag·Action·CVar·에셋·`Loc` catalog)에서만 읽는다. 내용은 §10.2의 표(타입·필드·계산 속성·함수·자원 정책·파괴 지연·이벤트)다. 언어 코어는 손으로 쓴 시험용 schema(가짜 엔진: `Actor`·`Component`·`ScriptComponent`·`SceneComponent`와 §2 예시가 쓰는 타입, `Engine/Source/Developer/SparksTestHost/Schema/*.sparkbind.json`)로 개발하고, 실제 엔진 선언에서 이 파일을 생성하는 것은 연동 단계 EI1이다. 언어 서버가 엔진 없이 동작하는 것(§13)도 같은 파일 덕분이다. 파일 형식은 §10.2 "binding schema 파일 형식"(LC2a 확정)이다.
 - **VM은 엔진을 host interface로만 부른다.** VM이 밖으로 부르는 것은 객체 handle의 생존·타입 판정, native 필드 읽기·쓰기, native 함수 호출(FunctionId와 bank 창), native 이벤트 연결·해제, 파괴·활성 전환 적용 요청(§4.3), 유지 자원 해제, 로드 요청과 lease 반환, 시계(§6.1), 로그·fault 보고다. host가 VM에 들어오는 것은 instance 생성·Detach, 수명 hook 실행, 스크립트 단계 열기·닫기, 이벤트 항목 넣기, 재개, revision 게시, CloseSession이다. 엔진의 `ScriptRuntime` 모듈(EI2)이 이 interface를 ObjectRuntime·World 위에 구현한다. 세부 API는 LC5(1차)·LC6(2차) 착수 때 이 절에 확정한다.
 - **Sparks 필드의 저장소는 VM이 가진다.** Sparks 클래스의 필드는 VM의 instance 저장소에 있고, 엔진에는 연동 단계에서 런타임 타입 등록으로 보인다(연동 요구 SE-O3). 그래서 필드 migration(R2)까지 언어 코어 안에서 완결된다.
 - **가짜 host로 시험한다.** `SparksTestHost`는 가짜 객체표(handle + generation), 결정적 시험 시계, 수명 hook·tick phase driver, 가짜 native 함수·이벤트·유지 자원·로드를 가진 headless host다. conformance corpus(§13.1)와 `@test`가 이 host에서 돈다. 실제 시간에 기대지 않는다.
@@ -1617,6 +1716,15 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 | LC7 핫 리로드 | R1 본문 교체, R2 스크립트 필드 migration과 구독 연결 재구성, `ReloadExecutions`, 계획·판정·원자적 적용의 언어 쪽(§12.4), 증분 재컴파일 | Gate G5의 R1·R2 행, 본문 reload 2 s 측정 | 없음 |
 | LC8 도구 | CLI(`sparks check·build·test·fmt·dump`), formatter, `@test` 실행, 언어 서버(진단·의미 강조 → 자동완성·hover·빠른 수정) | CLI와 언어 서버의 진단 동등성, 자동완성 후보 golden | 표준 입출력 API(연동 요구 SE-B7 — CLI의 표준 출력, 언어 서버의 표준 입력). formatter와 `@test` 실행기 라이브러리는 없음 |
 | LC9 AOT 생성 | typed IR → C++ 생성기, 동등성 규칙(§12.5), VM·AOT 혼합 진입 표 | Gate G6(TestHost에서 VM·AOT 차등) | 없음. 시험은 corpus의 생성 C++을 golden으로 커밋해 시험 실행 파일에 컴파일하고, 다시 생성한 바이트가 golden과 같은지 대조한다. target 빌드 편입은 EI8(SE-B2) |
+
+LC2는 범위가 커서 하위 단계로 나눈다(각 단계가 corpus 영역 하나 이상과 리뷰 1회로 끝난다).
+
+| 하위 단계 | 내용 |
+|---|---|
+| LC2a 컴파일 입력 | binding schema 파일 형식과 reader, 시험용 가짜 엔진 schema, 패키지 manifest reader, 모듈 경로 규칙, 패키지 의존(없음·순환), import 해석, 컴파일 단위(`Compilation`), corpus 패키지 사례. 진단 S0301–S0305, S1101–S1112, S1120 |
+| LC2b 선언·이름 | prelude와 부록 A·B 선언 표, 선언 수집, 명명 규칙, 예약 이름, 이름 하나에 대상 하나, import한 이름의 충돌, 별칭, 문맥 이름, 상속 멤버·`override` 대상, 타입 표기 해석(소스·schema), manifest `services` 해석. 진단 S03xx 나머지 |
+| LC2c 타입·숫자 | 식의 타입, 숫자(타입 없는 상수·변환·나눗셈·비교·상수 overflow), 문자열 보간, 컨테이너·리터럴과 기대 타입, 호출·인자 형태·생성, 검증 리터럴, `as?`, switch, 조건, 반환 경로. 진단 S04xx 일부·S05xx |
+| LC2d 흐름·대입·마무리 | null 흐름(`T?`, `?.`·`??`·`if (let)`·Exit, await 이후 `T?`), 대입·`let`(S07xx), 미사용 이름·결과, 상수식과 const 순환, 필드 기본값 규칙, 프로필 검사, §2 예시 통과 |
 
 순서는 LC0 → LC7이 한 줄이다. LC8의 CLI는 LC3 뒤부터 단계마다 넓히고(check → build → test), 언어 서버는 LC3 뒤에 시작할 수 있다. LC9는 LC6 뒤다.
 
@@ -1710,6 +1818,9 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 - **SD56. 숫자 타입은 Go 수준:** `int8`–`int64`, `uint8`–`uint64`, `float32`, `float64`를 두고 기본형 `int`(=`int64`)·`float`(=`float64`)를 유지한다. 변환은 Go처럼 타입 이름으로만 하고 서로 다른 숫자 타입은 섞지 않으며, 리터럴은 Go의 untyped 상수처럼 쓰는 자리의 타입을 따른다(사용자 결정 2026-11-20, §3.3).
 - **SD57. 정수 overflow는 fault:** 모든 정수 타입의 범위 초과 산술과 정확하지 않은 변환은 `IntegerOverflow` fault다. Go의 wrap과 다르게 정한 이유는 방어적 설계(조용히 틀린 값을 내지 않음)다(사용자 결정 2026-11-20).
 - **SD58. 덤프는 필수:** 구문 트리(LC1)·typed IR·bytecode(LC4)를 결정적인 텍스트로 덤프하는 기능을 둔다. 검증 목적이며 golden 시험과 CLI `sparks dump`가 쓴다(사용자 결정 2026-11-20, §11).
+- **SD59. manifest 의존은 이름 목록:** `dependencies`는 패키지 이름 배열이다. 패키지에 아직 버전이 없으므로 초안의 "interface 호환 범위"는 패키지 버전이 생기는 단계(배포·EI9)에서 더한다(LC2a, 2026-11-20).
+- **SD60. `Rocks`는 import하지 않는다:** 엔진 binding schema의 `Rocks` 패키지 타입은 모두 import 없이 보이고(§2 예시가 그렇게 쓴다) `import Rocks…`는 S0305다. 충돌은 이름 하나에 대상 하나 규칙으로 판정한다(LC2a).
+- **SD61. binding schema 파일 형식:** 모듈마다 `<모듈>.sparkbind.json`, 엄격한 JSON, 타입·필드·함수·이벤트·enum case와 32자리 16진 ID, 타입은 Sparks 타입 표기 문자열(§10.2). key는 쓰는 마일스톤이 더한다(LC2a).
 
 ## 20. 교차 검증 기록
 

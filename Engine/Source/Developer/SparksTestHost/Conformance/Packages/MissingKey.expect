@@ -1,0 +1,2 @@
+# A required key that is missing (S1103) is reported at the start of the object.
+error S1103 SparksPackage.json5 1:1

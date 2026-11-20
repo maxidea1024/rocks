@@ -1,0 +1,3 @@
+# A manifest that is not valid JSON5 (S1101) is reported at the error position; its
+# modules are not analyzed.
+error S1101 SparksPackage.json5 1:27

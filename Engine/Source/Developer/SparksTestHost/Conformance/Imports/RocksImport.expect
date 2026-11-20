@@ -1,0 +1,2 @@
+# Engine types are visible without an import (SD60).
+error S0305 1:8

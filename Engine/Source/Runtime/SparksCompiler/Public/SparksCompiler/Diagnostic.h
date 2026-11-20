@@ -68,7 +68,25 @@ enum class DiagnosticCode : uint16 {
     RangeOutsideFor = 216,
     MisplacedDefault = 217,
     MixedCollectionLiteral = 218,
-    EmptyEnum = 219
+    EmptyEnum = 219,
+    UnknownModule = 301,
+    UndeclaredDependency = 302,
+    DuplicateImport = 303,
+    SelfImport = 304,
+    RocksImport = 305,
+    ManifestSyntax = 1101,
+    UnknownManifestKey = 1102,
+    MissingManifestKey = 1103,
+    InvalidManifestValue = 1104,
+    UnsupportedLanguageVersion = 1105,
+    MissingDependency = 1106,
+    DependencyCycle = 1107,
+    InvalidModulePath = 1108,
+    ModulePathCaseConflict = 1109,
+    ModuleFolderConflict = 1110,
+    PackageFolderConflict = 1111,
+    DuplicatePackage = 1112,
+    InvalidBindingSchema = 1120
 };
 
 // 진단 코드 표기의 숫자 자리 수다("S0412").
