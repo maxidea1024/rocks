@@ -184,7 +184,69 @@ private:
 };
 
 // 준비 callback이다. 실패면 lease 자리에 오류가, diagnostic에 로더 진단(없으면 빈 값)이 온다.
+// PrimaryAsset과 지정 bundle 구성원의 lease 묶음이다(bundle lease — 11.4절 정책, 11.7절 10). 쥐고
+// 있는 동안 모두 상주한다. 소멸은 어느 스레드에서도 된다(안의 lease가 해제 큐로 간다).
+class PrimaryAssetLease {
+public:
+    explicit PrimaryAssetLease(Allocator& allocator) noexcept : leases_(allocator) {
+    }
+
+    PrimaryAssetLease(PrimaryAssetLease&&) noexcept = default;
+    PrimaryAssetLease& operator=(PrimaryAssetLease&&) noexcept = default;
+    PrimaryAssetLease(const PrimaryAssetLease&) = delete;
+    PrimaryAssetLease& operator=(const PrimaryAssetLease&) = delete;
+
+    // 대표 에셋이 먼저이고 그다음 구성원이 AssetId 순이다.
+    Span<const AssetLease> Leases() const noexcept {
+        return leases_.View();
+    }
+
+private:
+    friend class AssetManager;
+
+    Array<AssetLease> leases_;
+};
+
+// LoadPrimaryAsset의 묶음 티켓이다(move-only). 놓으면 구성 요청이 모두 취소되고 등록된 callback은
+// Cancelled를 한 번 받는다. 소멸은 어느 스레드에서도 된다.
+class PrimaryAssetTicket {
+public:
+    PrimaryAssetTicket() noexcept = default;
+    PrimaryAssetTicket(PrimaryAssetTicket&& other) noexcept;
+    PrimaryAssetTicket& operator=(PrimaryAssetTicket&& other) noexcept;
+    PrimaryAssetTicket(const PrimaryAssetTicket&) = delete;
+    PrimaryAssetTicket& operator=(const PrimaryAssetTicket&) = delete;
+    ~PrimaryAssetTicket();
+
+    bool IsValid() const noexcept {
+        return manager_ != nullptr;
+    }
+
+private:
+    friend class AssetManager;
+
+    PrimaryAssetTicket(AssetManager* manager, uint32 slot, uint32 generation) noexcept
+        : manager_(manager), slot_(slot), generation_(generation) {
+    }
+
+    void Drop() noexcept;
+
+    AssetManager* manager_ = nullptr;
+    uint32 slot_ = 0;
+    uint32 generation_ = 0;
+};
+
+// 매니페스트로 셈한 용량이다(EstimatePrimaryAsset — 계획 §24.2 용량 audit).
+struct AssetFootprint {
+    uint32 packages = 0;
+    uint64 packageBytes = 0;
+    uint64 bulkRawBytes = 0;
+};
+
 using AssetReadyCallback = Function<void(Result<AssetLease>, const AssetDiagnostic&)>;
+// PrimaryAsset 준비 callback이다. 실패면 처음 실패(대표 먼저, 그다음 구성원 AssetId 순)의 오류와
+// 진단이 온다.
+using PrimaryReadyCallback = Function<void(Result<PrimaryAssetLease>, const AssetDiagnostic&)>;
 using DeferredRun = Function<void(const AssetLease&)>;
 using DeferredFail = Function<void(ErrorCode, const AssetDiagnostic&)>;
 
@@ -296,6 +358,25 @@ public:
     Result<DeferredCommand> RunWhenReady(AssetId asset, NotReadyPolicy policy, AssetScope* scope,
                                          DeferredRun&& run, DeferredFail&& fail) noexcept;
 
+    // PrimaryAsset과 지정 bundle 구성원을 요청한다(11.7절 10, UE UAssetManager::LoadPrimaryAsset).
+    // bundle 이름은 caseless로 찾고 bundle 사이 구성원 중복은 한 번만 요청한다. 오류:
+    // PrimaryAsset이 아닌 항목 InvalidArgument, 없는 bundle 이름 NotFound(진단 asset = 대표),
+    // 매니페스트에 없는 id NotFound, Revoke된 scope ScopeClosed, 그 밖은 RequestAsset과 같다.
+    Result<PrimaryAssetTicket> LoadPrimaryAsset(AssetId asset, Span<const StringView> bundles,
+                                                LoadPriority priority = LoadPriority::Normal,
+                                                AssetScope* scope = nullptr,
+                                                AssetDiagnostic* failure = nullptr) noexcept;
+
+    // 묶음 티켓의 준비 callback이다(구성 요청이 모두 끝나면 다음 Pump에서 한 번). 오류는 티켓
+    // OnReady와 같다.
+    Result<void> OnReady(PrimaryAssetTicket& ticket, TaskLane lane,
+                         PrimaryReadyCallback&& callback) noexcept;
+
+    // 대표·지정 bundle 구성원의 Hard 전이 폐포에 대한 매니페스트 packageBytes·bulkRawBytes 합이다
+    // (로드하지 않는다). 오류는 LoadPrimaryAsset의 인자 오류와 같고, 할당 실패는 그 오류다.
+    Result<AssetFootprint> EstimatePrimaryAsset(AssetId asset,
+                                                Span<const StringView> bundles) const noexcept;
+
     // 보류 명령을 취소한다(fail에 Cancelled를 다음 Pump에서 한 번). 이미 끝났으면 무동작.
     // 오류: WrongThread, 무효 handle StaleHandle.
     Result<void> Cancel(DeferredCommand& command) noexcept;
@@ -329,6 +410,7 @@ public:
 private:
     friend class AssetLease;
     friend class LoadTicket;
+    friend class PrimaryAssetTicket;
     friend class DeferredCommand;
     friend class AssetScope;
 

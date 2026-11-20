@@ -23,7 +23,8 @@ enum class ManagerSlotKind : uint8 {
     Free,
     Ticket,
     Lease,
-    Deferred
+    Deferred,
+    PrimaryTicket
 };
 
 // 공개 handle 객체(LoadTicket·AssetLease·DeferredCommand) 하나의 슬롯이다. 주소가 고정이다.
@@ -90,6 +91,25 @@ struct ManagerDeferred {
     // 끝을 앞당긴 원인(Cancelled·ScopeClosed·ShuttingDown — 없으면 None)이다.
     ErrorCode stop = ErrorCode::None;
     bool done = false;
+};
+
+// PrimaryAsset 묶음 티켓 기록이다(11.7절 10). 구성 요청마다 내부 티켓을 쥔다(대표가 먼저, 그다음
+// 구성원 AssetId 순).
+struct ManagerPrimary {
+    explicit ManagerPrimary(Allocator& allocator) noexcept : tickets(allocator) {
+    }
+
+    bool used = false;
+    uint32 nextFree = ManagerNoIndex;
+    uint32 slot = ManagerNoIndex;
+    uint32 scope = ManagerNoIndex;
+    Array<uint32> tickets;
+    PrimaryReadyCallback callback;
+    bool callbackRegistered = false;
+    bool callbackDelivered = false;
+    bool released = false;
+    // 끝을 앞당긴 원인(Cancelled·ScopeClosed·ShuttingDown — 없으면 None)이다.
+    ErrorCode stop = ErrorCode::None;
 };
 
 struct ManagerScope {
@@ -196,6 +216,8 @@ struct AssetManager::Impl {
     uint32 activeDeferred = 0;
     Array<ManagerScope> scopes;
     uint32 freeScope = ManagerNoIndex;
+    Array<ManagerPrimary> primaries;
+    uint32 freePrimary = ManagerNoIndex;
 
     Array<ManagerPackage> packages;
     uint32 freePackage = ManagerNoIndex;
@@ -249,6 +271,15 @@ struct AssetManager::Impl {
     uint32 RunDeferred() noexcept;
     void FreeDeferred(uint32 index) noexcept;
     void RevokeScope(uint32 scope, ErrorCode reason) noexcept;
+
+    // ---- PrimaryAsset·bundle(AssetManagerPrimary.cpp) ----
+    Result<void> ResolvePrimary(AssetId asset, Span<const StringView> bundles, Array<AssetId>& out,
+                                AssetDiagnostic* failure) const noexcept;
+    Result<uint32> TakePrimary() noexcept;
+    void FreePrimary(uint32 index) noexcept;
+    void EndPrimary(uint32 index, ErrorCode reason) noexcept;
+    void ReleasePrimary(uint32 index) noexcept;
+    uint32 DeliverPrimary() noexcept;
     bool ScopeOpen(uint32 scope) const noexcept;
 
     // ---- 상주 단위(AssetManagerUnits.cpp) ----
