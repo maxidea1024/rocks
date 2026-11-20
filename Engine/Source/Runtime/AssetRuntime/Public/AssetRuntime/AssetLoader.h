@@ -82,8 +82,8 @@ struct AssetLoaderSyncWait {
     uint64 nanoseconds = 0;
 };
 
-// 로더 관찰자다(Rocks Lens 연결은 EngineAssets가 이것으로 한다). Game 스레드에서 불리며 로더 상태를
-// 바꾸는 함수를 부르면 안 된다.
+// 로더 관찰자다(Rocks Lens 연결은 EngineAssets가 이것으로 한다). Game 스레드에서 불리며 그동안 로더
+// 상태를 바꾸는 함수는 WrongContext다(11.6절 18 — PostLoad handler와 같다).
 class AssetLoaderObserver {
 public:
     virtual void OnSyncWait(const AssetLoaderSyncWait& wait) noexcept = 0;
@@ -94,8 +94,9 @@ protected:
 
 // PostLoad 단계 handler다(11.6절 16, UE UObject::PostLoad 호출 단계 대응). 공개한 단위의 패키지마다
 // Game 스레드에서 한 번 불린다(의존 단위의 PostLoad가 끝난 뒤, 단위 안은 AssetId 순). 실패하지
-// 않으며 로더 상태를 바꾸는 함수를 부르면 안 된다. 클래스별 dispatch는 handler를 준 쪽(EngineAssets
-// — A5에서 클래스 hook과 연결)이 정한다.
+// 않는다. 도는 동안 로더 상태를 바꾸는 함수(Request·SetPriority·Release·Pump·WaitForCompletions·
+// WaitFor·Shutdown)는 WrongContext이고 읽기(Status·Describe·FindByPath·FindPackage)는 된다(11.6절
+// 18). 클래스별 dispatch는 handler를 준 쪽(EngineAssets — A5에서 클래스 hook과 연결)이 정한다.
 class AssetPostLoadHandler {
 public:
     virtual void PostLoad(ObjectHandle package, AssetId asset) noexcept = 0;
@@ -148,7 +149,7 @@ struct AssetLoaderConfig {
     // PostLoad 단계 handler다(null이면 공개와 함께 PostLoad가 끝난 것으로 본다).
     AssetPostLoadHandler* postLoad = nullptr;
     // 시험 hook: 완료 대기가 조건 변수에서 실제로 기다리기 직전에 불린다(완료 큐 뮤텍스를 쥔 채 —
-    // 로더를 부르면 안 된다, 11.6절 17).
+    // 로더 읽기도 하지 않는다, 11.6절 17·18).
     void (*waitEntered)(void* context) noexcept = nullptr;
     void* waitEnteredContext = nullptr;
 };

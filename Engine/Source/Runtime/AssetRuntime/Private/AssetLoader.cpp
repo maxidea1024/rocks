@@ -237,6 +237,9 @@ struct AssetLoader::Impl {
     uint64 ownerThread = 0;
     StringBuilder<LoaderPathInlineBytes> root;
     bool shutDown = false;
+    // PostLoad handler·관찰자·시험 hook이 불리는 중인지다(11.6절 18 — 상태를 바꾸는 공개 함수는
+    // WrongContext).
+    bool inCallback = false;
 
     // 매니페스트 항목마다 진행 중 단위 번호와 공개 번호(없으면 LoaderNoIndex)다.
     Array<uint32> entryUnit;
@@ -1324,12 +1327,15 @@ struct AssetLoader::Impl {
         return best;
     }
 
-    // 단위 unit의 다음 구성 패키지 하나를 PostLoad한다.
+    // 단위 unit의 다음 구성 패키지 하나를 PostLoad한다. handler가 도는 동안은 콜백 중 표시를
+    // 쥐고(상태를
+    // 바꾸는 재진입 거부), 단위 참조를 쥐지 않는다(돌아온 뒤 다시 찾는다).
     void PostLoadNext(uint32 unit) noexcept {
-        LoaderUnit& target = units[unit];
-        const uint32 member = target.members[target.postLoadNext++];
+        const uint32 member = units[unit].members[units[unit].postLoadNext++];
+        inCallback = true;
         config.postLoad->PostLoad(loadedHandles[entryLoaded[member]], EntryAsset(member));
-        if (target.postLoadNext == target.members.Size()) {
+        inCallback = false;
+        if (units[unit].postLoadNext == units[unit].members.Size()) {
             FinishUnit(unit);
         }
     }
@@ -1358,8 +1364,18 @@ struct AssetLoader::Impl {
             if (result.instantiatedUnits >= budget.maxUnits ||
                 Now() - start >= budget.maxNanoseconds) {
                 result.budgetExhausted = true;
-                return result;
+                break;
             }
+        }
+
+        // 공개가 예산을 다 써도 준비된 PostLoad 하나는 부른다(굶주림 방지 — 11.6절 16).
+        if (result.budgetExhausted) {
+            if (const uint32 unit = PickPostLoad(); unit != LoaderNoIndex) {
+                PostLoadNext(unit);
+                ++result.postLoads;
+            }
+
+            return result;
         }
 
         // PostLoad는 공개를 다 한 뒤에 한다(공개가 예산을 다 쓰지 않았으면). 준비된 것이 있으면
@@ -1420,7 +1436,9 @@ struct AssetLoader::Impl {
         queue.mutex.Lock();
         while (queue.head == nullptr && asyncInFlight > 0) {
             if (config.waitEntered != nullptr) {
+                inCallback = true;
                 config.waitEntered(config.waitEnteredContext);
+                inCallback = false;
             }
 
             (void)queue.changed.Wait(queue.mutex);
@@ -1618,6 +1636,10 @@ Result<AssetLoadHandle> AssetLoader::Request(const AssetLoadRequest& request,
         return fail(ErrorCode::WrongThread, AssetDiagnosticCode::None, request.id);
     }
 
+    if (impl.inCallback) {
+        return fail(ErrorCode::WrongContext, AssetDiagnosticCode::None, request.id);
+    }
+
     if (impl.shutDown) {
         return fail(ErrorCode::ShuttingDown, AssetDiagnosticCode::None, request.id);
     }
@@ -1763,6 +1785,10 @@ Result<void> AssetLoader::SetPriority(AssetLoadHandle handle, LoadPriority prior
         return Result<void>::Failure(ErrorCode::WrongThread);
     }
 
+    if (impl.inCallback) {
+        return Result<void>::Failure(ErrorCode::WrongContext);
+    }
+
     if (!impl.ValidHandle(handle)) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
@@ -1786,6 +1812,10 @@ Result<void> AssetLoader::Release(AssetLoadHandle handle) noexcept {
     Impl& impl = *impl_;
     if (!impl.OnOwnerThread()) {
         return Result<void>::Failure(ErrorCode::WrongThread);
+    }
+
+    if (impl.inCallback) {
+        return Result<void>::Failure(ErrorCode::WrongContext);
     }
 
     if (!impl.ValidHandle(handle)) {
@@ -1812,6 +1842,10 @@ Result<AssetLoaderPumpResult> AssetLoader::Pump(const AssetLoaderPumpBudget& bud
         return Result<Out>::Failure(ErrorCode::WrongThread);
     }
 
+    if (impl.inCallback) {
+        return Result<Out>::Failure(ErrorCode::WrongContext);
+    }
+
     if (impl.shutDown) {
         return Result<Out>::Failure(ErrorCode::ShuttingDown);
     }
@@ -1828,6 +1862,10 @@ Result<void> AssetLoader::WaitForCompletions() noexcept {
         return Result<void>::Failure(ErrorCode::WrongThread);
     }
 
+    if (impl_->inCallback) {
+        return Result<void>::Failure(ErrorCode::WrongContext);
+    }
+
     impl_->WaitCompletions();
     return Result<void>::Success();
 }
@@ -1841,6 +1879,10 @@ Result<AssetLoadStatus> AssetLoader::WaitFor(AssetLoadHandle handle, const char*
     Impl& impl = *impl_;
     if (!impl.OnOwnerThread()) {
         return Result<Out>::Failure(ErrorCode::WrongThread);
+    }
+
+    if (impl.inCallback) {
+        return Result<Out>::Failure(ErrorCode::WrongContext);
     }
 
     if (config_.inFrame != nullptr && config_.inFrame(config_.inFrameContext)) {
@@ -1874,7 +1916,9 @@ Result<AssetLoadStatus> AssetLoader::WaitFor(AssetLoadHandle handle, const char*
     ++impl.syncWaits;
     impl.syncWaitNanoseconds += elapsed;
     if (config_.observer != nullptr) {
+        impl.inCallback = true;
         config_.observer->OnSyncWait(wait);
+        impl.inCallback = false;
     }
 
     return Status(handle);
@@ -2046,6 +2090,10 @@ Result<void> AssetLoader::Shutdown() noexcept {
     Impl& impl = *impl_;
     if (!impl.OnOwnerThread()) {
         return Result<void>::Failure(ErrorCode::WrongThread);
+    }
+
+    if (impl.inCallback) {
+        return Result<void>::Failure(ErrorCode::WrongContext);
     }
 
     if (impl.shutDown) {

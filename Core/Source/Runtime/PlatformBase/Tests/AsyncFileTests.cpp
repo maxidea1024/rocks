@@ -255,6 +255,7 @@ TEST(AsyncFile_CloseIsBusyWhileRequestsAreInFlight) {
 // 결과 주입(PlatformLayer 결과 주입): Size는 OS를 부르지 않고 그 status, Submit은 요청을 바꾸지
 // 않는 즉시 실패, Completion은 skip개를 지나보낸 뒤 하나의 완료만 status·0 byte로 바뀌고(callback도
 // 같은 값) 주입은 한 번 뒤 사라진다. ClearFault는 걸어 둔 주입을 지운다. 두 backend 공통이다.
+#if !ROCKS_BUILD_RELEASE
 TEST(AsyncFile_InjectedFaultsAreDeterministic) {
     PatternFile pattern;
     REQUIRE(pattern.Create(PatternBytes));
@@ -309,6 +310,7 @@ TEST(AsyncFile_InjectedFaultsAreDeterministic) {
         CHECK(file.Close());
     });
 }
+#endif
 
 namespace {
 
