@@ -27,14 +27,16 @@ internal sealed class FieldModel
 
     public required string Owner { get; init; }
 
-    public required string NativeSpelling { get; init; }
+    // 필드 형식의 Clang 정규 철자다. 첫 실행 철자로 시작하고 정규 형식 탐침이 바꾼다(Docs/Design/ClangVersionSupport.ko.md 4절 —
+    // PROPERTY bitfield는 "bool"이다).
+    public required string NativeSpelling { get; set; }
 
     // 폭 1 부호 없는 정수 bitfield를 Bool로 받은 필드다(리플렉션 B9m — Docs/Design/ReflectionExtensions.ko.md 14절). 생성 코드는
     // 멤버 포인터 대신 GeneratedType<Owner>::Get_·Set_ 접근자를 쓰고, descriptor는 `"bitfield": true`로 의존 모듈에 알린다.
     public bool Bitfield { get; init; }
 
-    // C 배열 PROPERTY의 정규 철자(`원소[N]` — 원소는 Clang 정규 형식)다. 첫 실행 철자는 원소를 쓰인 그대로(별칭·한정 없는 이름) 내므로
-    // StaticArrayProbe가 두 번째 Clang 실행으로 채운다(리플렉션 B9g). 배열이 아니면 null이다.
+    // C 배열 PROPERTY의 정규 철자(`원소[N]` — 원소는 Clang 정규 형식)다. 원소·크기는 정규 형식 탐침이 Clang 형판으로 나눠 채운다
+    // (리플렉션 B9g, Docs/Design/ClangVersionSupport.ko.md 4.7절). 배열이 아니면 null이다.
     public string? CanonicalSpelling { get; set; }
 
     public required PropertySpec Spec { get; init; }
@@ -548,7 +550,7 @@ internal sealed record EnumeratorModel(string Name, string ToolName, string Disp
     public string EffectiveToolName => ToolName.Length != 0 ? ToolName : Name;
 }
 
-// ROCKS_NATIVE 멤버다. Spelling은 Clang이 desugar한 타입 철자이고, 직접 타입이 리플렉션 struct면 Struct가 그
+// ROCKS_NATIVE 멤버다. Spelling은 Clang 정규 철자(정규 형식 탐침)이고, 직접 타입이 리플렉션 struct면 Struct가 그
 // 정규 이름이다(SchemaValidator가 채운다 — 생성 코드가 그 struct의 생성 형질로 RMC2205·2206을 한 번 더 확인한다).
 internal sealed class NativeMemberModel
 {
@@ -557,11 +559,11 @@ internal sealed class NativeMemberModel
     // 정수·bool bitfield 멤버다(리플렉션 B9m — 생성 struct 값 복사가 참조 대신 대입을 쓴다).
     public bool Bitfield { get; init; }
 
-    public required string Spelling { get; init; }
+    public required string Spelling { get; set; }
 
     public required SourceSite Site { get; init; }
 
-    // C 배열 멤버의 모든 차원을 벗긴 원소 정규 철자다(StaticArrayProbe — 리플렉션 B9g). 배열이 아니면 null이다.
+    // C 배열 멤버의 모든 차원을 벗긴 원소 정규 철자다(정규 형식 탐침 — 리플렉션 B9g). 배열이 아니면 null이다.
     public string? ElementSpelling { get; set; }
 
     public string? Struct { get; set; }

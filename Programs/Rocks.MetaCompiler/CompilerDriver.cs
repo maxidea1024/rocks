@@ -80,7 +80,14 @@ internal static class CompilerDriver
 
         // 검증 컴파일은 같은 플래그에 include만 바꿔 쓴다(AST dump 제외).
         List<string> validationArguments = arguments.Where(argument => argument is not ("/clang:-Xclang" or "/clang:-ast-dump=json" or "-Xclang" or "-ast-dump=json")).ToList();
-        List<string> probeArguments = [.. arguments];
+        // 탐침(NATIVE 판정·레코드 닫힘)은 include 검색 순서에서 이 모듈의 출력(생성) 루트를 뺀다 — 이번 실행이 만드는 중인 생성 헤더가
+        // 깨끗한 빌드에서는 없고 출력을 유지한 빌드에서는 낡은 채 있어, 그것을 (public 헤더를 거쳐) include하는 헤더의 판정이 빌드
+        // 상태에 따라 갈리지 않게 한다.
+        List<string> probeIncludeArguments = [.. arguments];
+        StringComparer probePathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        string[] ownOutputRoots = [Path.Combine(options.OutputRoot, "Public"), Path.Combine(options.OutputRoot, "Private")];
+        AddIncludes(probeIncludeArguments, includes.Where(directory => !ownOutputRoots.Contains(Path.TrimEndingDirectorySeparator(directory), probePathComparer)));
+        probeIncludeArguments.AddRange(clangArguments);
         AddIncludes(arguments, includes);
         arguments.AddRange(clangArguments);
         arguments.Add("-");
@@ -122,6 +129,22 @@ internal static class CompilerDriver
         try
         {
             Dictionary<string, ClassModel> declared = parser.Parse(compiled.StdOut);
+            // 형식 철자는 첫 실행 JSON의 qualType·desugaredQualType이 아니라 정규 형식 탐침이 돌려준 Clang 정규 철자로 판단한다
+            // (Docs/Design/ClangVersionSupport.ko.md 4절 — Clang 22는 한정 없이 쓴 비템플릿 레코드의 desugar 철자를 내지 않는다). 1단계는
+            // PROPERTY·NATIVE 형식, C 배열 원소·크기, base이고, 레코드 닫힘은 NATIVE 멤버가 값으로 닿는 레코드를 따라가 강한 참조·WorldOnly
+            // 형질 경로를 본다(검증보다 먼저 — WorldOnly 경로가 형질 계산에 들어간다).
+            List<string> canonicalArguments = [.. arguments.Take(arguments.Count - 1)];
+            canonicalArguments.AddRange(clangCl ? ["/w", "/clang:-Xclang", "/clang:-ast-dump-filter=" + CanonicalTypeProbe.Filter] : ["-w", "-Xclang", "-ast-dump-filter=" + CanonicalTypeProbe.Filter]);
+            canonicalArguments.Add("-");
+            await parser.CanonicalizeAsync(declared, new ClangProbe.Session<string>(options.Inputs.Count,
+                extra => ProcessRunner.RunAsync(new(compiler, canonicalArguments, root, environment, ValidateGeneratedCode(unit + extra), TimeSpan.FromMinutes(2))),
+                CanonicalTypeProbe.Read));
+            List<string> closureArguments = [.. probeIncludeArguments];
+            closureArguments.AddRange(clangCl ? ["/w", "/clang:-Xclang", "/clang:-ast-dump-filter=" + CanonicalTypeProbe.Filter] : ["-w", "-Xclang", "-ast-dump-filter=" + CanonicalTypeProbe.Filter]);
+            closureArguments.Add("-");
+            await parser.VerifyNativeMembersAsync(declared, new ClangProbe.Session<string>(options.Inputs.Count,
+                extra => ProcessRunner.RunAsync(new(compiler, closureArguments, root, environment, ValidateGeneratedCode(unit + extra), TimeSpan.FromMinutes(2))),
+                CanonicalTypeProbe.Read), () => ModulePublicHeaders(options));
             // Binds 미러의 실제 타입 철자는 문자열로 비교하지 않고 같은 번역 단위에 별칭을 붙인 두 번째 Clang 실행으로
             // 정규화한다(Docs/Design/ReflectionFoundations.ko.md 4.6절 Binds). 필드 형식 해석이 그 철자를 쓰므로 검증 전에 한다.
             List<string> bindsArguments = [.. arguments.Take(arguments.Count - 1)];
@@ -131,13 +154,6 @@ internal static class CompilerDriver
                 extra => ProcessRunner.RunAsync(new(compiler, bindsArguments, root, environment, ValidateGeneratedCode(unit + extra), TimeSpan.FromMinutes(2))));
             // Binds enum 미러는 실제 enum의 열거자 목록(첫 실행의 AST)과 1:1이어야 한다(RMC2401).
             parser.VerifyEnumMirrors(declared.Values);
-            // 정적 배열 PROPERTY의 원소 형식도 같은 번역 단위에 탐침 변수를 붙인 Clang 실행으로 정규 철자를 얻는다(리플렉션 B9g —
-            // StaticArrayProbe). 정적 배열이 없으면 실행하지 않는다.
-            List<string> staticArguments = [.. arguments.Take(arguments.Count - 1)];
-            staticArguments.AddRange(clangCl ? ["/w", "/clang:-Xclang", "/clang:-ast-dump-filter=rocksStatic_"] : ["-w", "-Xclang", "-ast-dump-filter=rocksStatic_"]);
-            staticArguments.Add("-");
-            await StaticArrayProbe.ResolveAsync(declared,
-                extra => ProcessRunner.RunAsync(new(compiler, staticArguments, root, environment, ValidateGeneratedCode(unit + extra), TimeSpan.FromMinutes(2))));
             // Within="…" 철자도 Binds처럼 별칭을 붙인 Clang 실행으로 정규 이름을 얻는다(리플렉션 B9h2 — Within이 없으면 실행하지 않는다).
             List<string> withinArguments = [.. arguments.Take(arguments.Count - 1)];
             withinArguments.AddRange(clangCl ? ["/w", "/clang:-Xclang", "/clang:-ast-dump-filter=rocksWithin_"] : ["-w", "-Xclang", "-ast-dump-filter=rocksWithin_"]);
@@ -194,13 +210,8 @@ internal static class CompilerDriver
 
         // ROCKS_NATIVE 멤버의 직접 타입이 Object 파생 클래스를 가리키는지는 같은 번역 단위 끝에 탐침을 붙인 Clang 실행이
         // 판정한다(NativeMemberProbe — Binds 해석처럼 탐침 선언만 덤프한다). 탐침 실행은 경고를 끈다: 경고는 첫 실행과 실제
-        // 빌드가 이미 강제하고, 탐침 코드의 경고가 판정을 막지 않게 한다. include 검색 순서에서 이 모듈의 출력(생성) 루트는
-        // 뺀다 — 이번 실행이 만드는 중인 생성 헤더가 깨끗한 빌드에서는 없고 출력을 유지한 빌드에서는 낡은 채 있어, 그것을
-        // (public 헤더를 거쳐) include하는 헤더의 판정이 빌드 상태에 따라 갈리지 않게 한다.
-        StringComparer probePathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
-        string[] ownOutputRoots = [Path.Combine(options.OutputRoot, "Public"), Path.Combine(options.OutputRoot, "Private")];
-        AddIncludes(probeArguments, includes.Where(directory => !ownOutputRoots.Contains(Path.TrimEndingDirectorySeparator(directory), probePathComparer)));
-        probeArguments.AddRange(clangArguments);
+        // 빌드가 이미 강제하고, 탐침 코드의 경고가 판정을 막지 않게 한다. include는 첫 실행에서 이 모듈 출력 루트를 뺀 순서다.
+        List<string> probeArguments = [.. probeIncludeArguments];
         probeArguments.AddRange(clangCl ? ["/w", "/clang:-Xclang", "/clang:-ast-dump-filter=rocksProbe_"] : ["-w", "-Xclang", "-ast-dump-filter=rocksProbe_"]);
         probeArguments.Add("-");
         await NativeMemberProbe.VerifyAsync(schema.Ordered, options.Inputs.Count, () => ModulePublicHeaders(options),
@@ -665,6 +676,14 @@ internal static class CompilerDriver
             aliases.Append($"using rocksWithin_{index} = {(spelling.StartsWith("::", StringComparison.Ordinal) ? spelling : "::" + spelling)};\n");
         }
 
+        // 별칭의 desugar 철자 대신 정규 형식 래퍼의 템플릿 인자를 읽는다(Docs/Design/ClangVersionSupport.ko.md 4.7절 — 비템플릿 타입을 가리키는
+        // 별칭은 Clang 22에서 desugar 철자가 한정되지 않는다).
+        aliases.Append(CanonicalTypeProbe.WrapperTemplate("rocksWithin_canon"));
+        for (int index = 0; index < classes.Length; ++index)
+        {
+            aliases.Append(CanonicalTypeProbe.WrapperLine("rocksWithin_canon", index, $"rocksWithin_{index}"));
+        }
+
         ProcessResult result = await run(aliases.ToString());
         if (result.ExitCode != 0)
         {
@@ -674,17 +693,12 @@ internal static class CompilerDriver
                 "RMC2208", "Spell the Within class fully qualified from the global scope and include its header before this class.").At(failed.Site);
         }
 
-        Utf8JsonReader reader = new(Encoding.UTF8.GetBytes(result.StdOut), new JsonReaderOptions { AllowMultipleValues = true, MaxDepth = 2048 });
-        while (reader.Read())
+        Dictionary<int, string> resolved = CanonicalTypeProbe.Read(result.StdOut) ?? [];
+        for (int index = 0; index < classes.Length; ++index)
         {
-            using JsonDocument alias = JsonDocument.ParseValue(ref reader);
-            JsonElement node = alias.RootElement;
-            string name = node.TryGetProperty("name", out JsonElement value) ? value.GetString() ?? "" : "";
-            if (node.TryGetProperty("kind", out JsonElement kind) && kind.GetString() == "TypeAliasDecl" &&
-                name.StartsWith("rocksWithin_", StringComparison.Ordinal) && int.TryParse(name["rocksWithin_".Length..], out int index) &&
-                index >= 0 && index < classes.Length)
+            if (resolved.TryGetValue(index, out string? canonical))
             {
-                classes[index].WithinResolved = ClangAstParser.CleanType(ClangAstParser.TypeSpelling(node));
+                classes[index].WithinResolved = ClangAstParser.CleanType(canonical);
             }
         }
 
@@ -725,6 +739,13 @@ internal static class CompilerDriver
                 : $"static_assert(sizeof(rocksBinds_{index}) > 0 && ::rocks::IsClassV<rocksBinds_{index}>, \"Binds target must be a complete class type\");\n");
         }
 
+        // 별칭의 desugar 철자 대신 정규 형식 래퍼의 템플릿 인자를 읽는다(4.7절). 래퍼는 미러 두 줄씩 뒤에 붙여 실패 줄 대응을 바꾸지 않는다.
+        aliases.Append(CanonicalTypeProbe.WrapperTemplate("rocksBinds_canon"));
+        for (int index = 0; index < mirrors.Length; ++index)
+        {
+            aliases.Append(CanonicalTypeProbe.WrapperLine("rocksBinds_canon", index, $"rocksBinds_{index}"));
+        }
+
         const string hint = "Spell the real type fully qualified from the global scope as it is declared (e.g. rocks::Vector3<float> or an alias such as rocks::Vec3) and include its header before the mirror declaration.";
         ProcessResult result = await run(aliases.ToString());
         if (result.ExitCode != 0 || result.StdErr.Contains("warning:", StringComparison.OrdinalIgnoreCase))
@@ -739,17 +760,12 @@ internal static class CompilerDriver
                 "RMC3000", hint).At(mirror.BindsSite ?? mirror.Site);
         }
 
-        Utf8JsonReader reader = new(Encoding.UTF8.GetBytes(result.StdOut), new JsonReaderOptions { AllowMultipleValues = true, MaxDepth = 2048 });
-        while (reader.Read())
+        Dictionary<int, string> resolved = CanonicalTypeProbe.Read(result.StdOut) ?? [];
+        for (int index = 0; index < mirrors.Length; ++index)
         {
-            using JsonDocument alias = JsonDocument.ParseValue(ref reader);
-            JsonElement node = alias.RootElement;
-            string name = node.TryGetProperty("name", out JsonElement value) ? value.GetString() ?? "" : "";
-            if (node.TryGetProperty("kind", out JsonElement kind) && kind.GetString() == "TypeAliasDecl" &&
-                name.StartsWith("rocksBinds_", StringComparison.Ordinal) && int.TryParse(name["rocksBinds_".Length..], out int index) &&
-                index >= 0 && index < mirrors.Length)
+            if (resolved.TryGetValue(index, out string? canonical))
             {
-                mirrors[index].Binds = ClangAstParser.CleanType(ClangAstParser.TypeSpelling(node));
+                mirrors[index].Binds = ClangAstParser.CleanType(canonical);
             }
         }
 
