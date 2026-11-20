@@ -165,6 +165,15 @@ protected:
     ~EngineClient() = default;
 };
 
+// 크래시 기록의 단계 이름이다(platform::SetRunPhase, CrashInfo.json "stage", 설계 LC6). 단계가 바뀔
+// 때만 쓴다(프레임마다 쓰지 않는다). 초기화 중 Initialize, 초기화 뒤 Run 전 Ready, 프레임 반복 Run,
+// 정리 중 Shutdown, 정리 끝 Stopped다.
+inline constexpr char EngineStageInitialize[] = "Engine.Initialize";
+inline constexpr char EngineStageReady[] = "Engine.Ready";
+inline constexpr char EngineStageRun[] = "Engine.Run";
+inline constexpr char EngineStageShutdown[] = "Engine.Shutdown";
+inline constexpr char EngineStageStopped[] = "Engine.Stopped";
+
 // 엔진 설정이다. 포인터 필드는 엔진보다 오래 살아야 한다.
 struct EngineConfig {
     // 엔진 Registry(World보다 오래 사는 객체, 예: GameInstance)의 실행 문맥이다.
@@ -293,8 +302,9 @@ struct EngineStats {
 // 호스트는 반환된 오류를 다시 기록하지 않는다. 호출 순서 오류(InvalidArgument·Busy)는 기록하지
 // 않는다.
 //
-// 스레드: 생성한 게임 스레드에서만 사용한다(Initialize·Shutdown·소멸도 같은 스레드 — GC scheduler와
-// World 수명이 그 스레드의 순서에 기댄다). 예외는 RequestFullCollection이다(어느 스레드에서나).
+// 스레드: Initialize를 부른 게임 스레드에서만 사용한다(Shutdown·소멸도 같은 스레드 — GC scheduler와
+// World 수명이 그 스레드의 순서에 기댄다). RequestExit는 Debug·Development에서 검사한다. 예외는
+// RequestFullCollection이다(어느 스레드에서나).
 class Engine {
 public:
     explicit Engine(Allocator& allocator) noexcept;
@@ -315,10 +325,13 @@ public:
     // 필요).
     Result<void> Run() noexcept;
 
-    // 다음 프레임 경계에서 Run을 끝내도록 요청한다. 언제 호출해도 안전하다.
-    void RequestExit() noexcept {
-        exitRequested_ = true;
-    }
+    // 다음 프레임 경계에서 Run을 끝내도록 요청한다. 엔진을 소유한 게임 스레드(Initialize를 부른
+    // 스레드)에서만 부른다. 다른 스레드의 종료 요청(Ctrl-C 처리기, 다른 작업 스레드)은 원자
+    // 표시(예: launch::RequestTermination)로 남기고, 게임 스레드가 PumpEvents에서 그 표시를 보고 이
+    // 함수를 부른다(Docs/Design/CrashHandlingAndLaunch.ko.md 20절). 원자 변수로 바꾸지 않는 이유는
+    // 다른 스레드의 요청이 어느 프레임 경계에서 멈출지를 경쟁에 맡기지 않기 위해서다.
+    // Debug·Development는 다른 스레드에서 부르면 assert 실패다(Release는 검사하지 않는다).
+    void RequestExit() noexcept;
 
     bool IsExitRequested() const noexcept {
         return exitRequested_;
@@ -458,6 +471,9 @@ private:
     uint32 fullCollectionRequested_ = 0;
     bool inFrame_ = false;
     bool exitRequested_ = false;
+    // 엔진을 소유한 게임 스레드다(Initialize를 부른 스레드, 0이면 아직 없음). RequestExit 검사에
+    // 쓴다.
+    uint64 ownerThread_ = 0;
     // maxFrames에 닿아 스스로 종료를 요청했는지다(Run 종료 사유).
     bool maxFramesReached_ = false;
     // 설정 Sync가 실패하고 있는지다(연속 실패는 첫 번째만 Error로 남긴다).

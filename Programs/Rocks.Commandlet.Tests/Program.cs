@@ -35,6 +35,11 @@ await Check("invalid help", ["--help", "extra"], 2, "", "accepts no arguments");
 await Check("invalid check argument", ["core-check", "한글🎮"], 2, "", "accepts no arguments");
 await Check("empty command", [""], 2, "", "Unknown command");
 await Check("oversized argument", [new string('a', 4097)], 2, "", "argument");
+if (OperatingSystem.IsWindows())
+{
+    // 짝 없는 UTF-16 surrogate는 Launch가 명령줄을 캡처하지 못한다. Commandlet은 사용법 오류 2와 Launch 문구다.
+    await Check("invalid UTF-16 argument", ["bad\uD800"], 2, "", "command line arguments could not be captured (InvalidArgument)");
+}
 
 // config-dump: 엔진 호스트와 같은 설정 부트를 거친 값과 출처(엔진 층 Engine.json의 TracePresets 포함).
 await Check("config dump", ["config-dump"], 0, "\"section\": \"TracePresets\"", "");

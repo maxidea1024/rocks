@@ -2,9 +2,7 @@
 #include <Platform/Fatal.h>
 #include <Platform/Memory.h>
 #include <Platform/Sync.h>
-#include <Platform/Thread.h>
 #include <Base/Checked.h>
-#include "../Common/TerminationInternal.h"
 #include "PosixPlatform.h"
 #include <pthread.h>
 #include <errno.h>
@@ -132,24 +130,6 @@ void WriteDiagnostic(const char* bytes, usize count) noexcept {
         bytes += written;
         count -= static_cast<usize>(written);
     }
-}
-
-[[noreturn]] void Fatal(const char* message) noexcept {
-    const char* text = message != nullptr ? message : "Rocks fatal error";
-    usize length = 0;
-    while (length < 4096 && text[length] != '\0') {
-        ++length;
-    }
-
-    // CRT FILE lock을 거치지 않는다. 출력 오류가 발생해도 무제한 재시도나 heap formatting은 하지
-    // 않는다.
-    const auto ignoredText = write(STDERR_FILENO, text, length);
-    const auto ignoredNewline = write(STDERR_FILENO, "\n", 1);
-    (void)ignoredText;
-    (void)ignoredNewline;
-    detail::RecordTerminatingThread(CurrentThreadId());
-    detail::RunTerminationHook(text, length);
-    abort();
 }
 
 } // namespace rocks::platform

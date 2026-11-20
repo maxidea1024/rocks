@@ -17,7 +17,8 @@ using namespace rocks::spatial;
 // 다시 띄운 probe이고 오류 대화상자를 띄우지 않는다(PrepareFatalTestProcess). 순서는 수면이나 경쟁
 // 운이 아니라 호출 구조로 만든다: visitor 안의 변경, 변경 중 할당 콜백 안의 읽기 범위 생성.
 namespace rocks::test {
-bool RegisterProcessProbe(const char* mode, int (*function)(int, char**) noexcept) noexcept;
+bool RegisterProcessProbe(const char* mode,
+                          int (*function)(int, const char* const*) noexcept) noexcept;
 } // namespace rocks::test
 
 namespace loose_octree_concurrency_tests_file {
@@ -72,7 +73,7 @@ SpatialProxyDesc UnitProxy() noexcept {
 
 // 자식 쪽이다. Fatal이 나면 돌아오지 않는다. 돌아오면 검출이 빠졌다는 뜻이므로 0을 돌려 부모가
 // 실패로 본다. 준비 실패는 0이 아닌 다른 값(20번대)으로 구분하되 부모는 메시지로 확인한다.
-int SpatialIndexFatalProbe(int argc, char** argv) noexcept {
+int SpatialIndexFatalProbe(int argc, const char* const* argv) noexcept {
     rocks::test::PrepareFatalTestProcess();
     if (argc < 4) {
         return 20;

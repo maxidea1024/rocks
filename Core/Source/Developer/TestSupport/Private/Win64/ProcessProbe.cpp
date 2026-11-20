@@ -13,8 +13,8 @@ bool ProcessSpawnExpected() noexcept {
     return true;
 }
 
-usize ReadUtf8Arguments(int, char**, char* buffer, usize capacity, const char** arguments,
-                        usize maxArguments) noexcept {
+usize ReadUtf8Arguments(int, const char* const*, char* buffer, usize capacity,
+                        const char** arguments, usize maxArguments) noexcept {
     int count = 0;
     LPWSTR* wide = CommandLineToArgvW(GetCommandLineW(), &count);
     if (wide == nullptr || count < 0 || static_cast<usize>(count) > maxArguments) {

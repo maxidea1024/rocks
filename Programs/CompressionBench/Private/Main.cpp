@@ -8,6 +8,7 @@
 #include <Platform/File.h>
 #include <Platform/Memory.h>
 #include <Task/WorkerScheduler.h>
+#include <Launch/EntryPoint.h>
 
 #include <stdio.h>
 
@@ -559,32 +560,35 @@ int Run(const Options& options) {
     return RunBrotli(options.brotli, input, options.rounds, allocator);
 }
 
-bool Parse(int argc, char** argv, Options& options) {
-    for (int index = 1; index < argc; ++index) {
-        const bool hasValue = index + 1 < argc;
-        if (platform::CStringEquals(argv[index], "--file") && hasValue) {
-            options.file = argv[++index];
-        } else if (platform::CStringEquals(argv[index], "--brotli") && hasValue) {
-            options.brotli = argv[++index];
-        } else if (platform::CStringEquals(argv[index], "--size") && hasValue) {
+bool Parse(Span<const StringView> arguments, Options& options) {
+    for (usize index = 0; index < arguments.Size(); ++index) {
+        const bool hasValue = index + 1 < arguments.Size();
+        if (platform::CStringEquals(arguments[index].Data(), "--file") && hasValue) {
+            options.file = arguments[++index].Data();
+        } else if (platform::CStringEquals(arguments[index].Data(), "--brotli") && hasValue) {
+            options.brotli = arguments[++index].Data();
+        } else if (platform::CStringEquals(arguments[index].Data(), "--size") && hasValue) {
             options.sizeMiB = 0;
-            for (const char* digit = argv[++index]; *digit >= '0' && *digit <= '9'; ++digit) {
+            for (const char* digit = arguments[++index].Data(); *digit >= '0' && *digit <= '9';
+                 ++digit) {
                 options.sizeMiB = options.sizeMiB * 10 + static_cast<usize>(*digit - '0');
             }
             if (options.sizeMiB == 0 || options.sizeMiB > 4096) {
                 return false;
             }
-        } else if (platform::CStringEquals(argv[index], "--rounds") && hasValue) {
+        } else if (platform::CStringEquals(arguments[index].Data(), "--rounds") && hasValue) {
             options.rounds = 0;
-            for (const char* digit = argv[++index]; *digit >= '0' && *digit <= '9'; ++digit) {
+            for (const char* digit = arguments[++index].Data(); *digit >= '0' && *digit <= '9';
+                 ++digit) {
                 options.rounds = options.rounds * 10 + static_cast<uint32>(*digit - '0');
             }
             if (options.rounds == 0 || options.rounds > 100) {
                 return false;
             }
-        } else if (platform::CStringEquals(argv[index], "--workers") && hasValue) {
+        } else if (platform::CStringEquals(arguments[index].Data(), "--workers") && hasValue) {
             options.workers = 0;
-            for (const char* digit = argv[++index]; *digit >= '0' && *digit <= '9'; ++digit) {
+            for (const char* digit = arguments[++index].Data(); *digit >= '0' && *digit <= '9';
+                 ++digit) {
                 options.workers = options.workers * 10 + static_cast<uint32>(*digit - '0');
             }
             if (options.workers == 0 || options.workers > 64) {
@@ -597,14 +601,23 @@ bool Parse(int argc, char** argv, Options& options) {
     return true;
 }
 
-} // namespace
-
-int main(int argc, char** argv) {
+// 실행 본문이다(Launch 공통 실행 계층이 크래시 수집·명령줄 캡처 뒤 부른다).
+int RunMain(launch::ApplicationContext& context) noexcept {
     Options options;
-    if (!Parse(argc, argv, options)) {
+    if (!Parse(context.Arguments(), options)) {
         printf("usage: CompressionBench [--file <path>] [--size <MiB 1-4096>] [--rounds <1-100>] "
                "[--workers <1-64>] [--brotli <file.br>]\n");
         return 1;
     }
     return Run(options);
 }
+
+const launch::ApplicationDescription& Describe() noexcept {
+    static constexpr launch::ApplicationDescription Description{
+        .name = "CompressionBench", .kind = launch::ApplicationKind::Tool, .run = &RunMain};
+    return Description;
+}
+
+} // namespace
+
+ROCKS_IMPLEMENT_APPLICATION(Describe)

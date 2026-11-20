@@ -1,4 +1,4 @@
-#include <Platform/CrashHandler.h>
+#include <Platform/CrashReporting.h>
 #include <Platform/Thread.h>
 #include <Platform/Atomics.h>
 #include <Platform/Fatal.h>

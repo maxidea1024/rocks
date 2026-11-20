@@ -94,14 +94,15 @@ internal static class LoggerOutputTests
             });
         }
 
-        // 비정상 종료(platform::Fatal·접근 위반·stack overflow) 직전의 Async 기록이 종료 hook으로 파일에
-        // 남는다(설계 14.1.8, L24·L25). 판정은 비정상 종료, 파일 내용, stderr다. 멈춘 sink 안의 Fatal은
-        // flush 제한 시간 뒤에 끝난다(파일 없음). 시험 쪽 제한 시간(60초)은 flush 상한(2초)보다 넉넉하다.
-        foreach ((string control, int mode, bool expectsFile, string stderrText) in new[] {
-            ("log-crash-platform-fatal", 0, true, "log crash probe: platform fatal"),
-            ("log-crash-access-violation", 1, true, ""),
-            ("log-crash-stack-overflow", 2, true, ""),
-            ("log-crash-stuck-sink", 3, false, "log crash probe: fatal inside a stuck sink") })
+        // 비정상 종료(platform::Fatal·접근 위반·stack overflow) 직전의 Async 기록이 크래시 수집기의 종료 콜백
+        // (크래시 처리 스레드의 flush)으로 파일에 남는다(Docs/Design/CrashHandlingAndLaunch.ko.md 19절). 판정은
+        // 종료 코드(Windows는 정확한 코드), 파일 내용, stderr다. 멈춘 sink 안의 Fatal은 flush 제한 시간 뒤에 끝난다
+        // (파일 없음). 시험 쪽 제한 시간(60초)은 콜백 예산(2초)과 여유(1초)보다 넉넉하다.
+        foreach ((string control, int mode, bool expectsFile, string stderrText, uint windowsExitCode) in new[] {
+            ("log-crash-platform-fatal", 0, true, "log crash probe: platform fatal", 0xE0524B46u),
+            ("log-crash-access-violation", 1, true, "", 0xC0000005u),
+            ("log-crash-stack-overflow", 2, true, "", 0xC00000FDu),
+            ("log-crash-stuck-sink", 3, false, "log crash probe: fatal inside a stuck sink", 0xE0524B46u) })
         {
             suite.Add("Native.Logger.Crash." + control, async () =>
             {
@@ -121,6 +122,13 @@ internal static class LoggerOutputTests
                     // 20–23은 probe 준비 실패·크래시 없음이다(LoggerProcessProbe.cpp RunLogCrashProbe).
                     Verify.That(process.ExitCode != 0 && (process.ExitCode < 20 || process.ExitCode > 23),
                         control + " did not crash as intended: " + process.ExitCode);
+                    if (OperatingSystem.IsWindows())
+                    {
+                        // Asan 구성은 하드웨어 예외를 ASan이 보고한 뒤 death callback이 Fatal 경로로 끝낸다(설계 13.2절, Rocks Fatal 코드).
+                        uint expectedExit = options.Asan ? 0xE0524B46u : windowsExitCode;
+                        Verify.Equal(expectedExit, unchecked((uint)process.ExitCode), control + " exit code");
+                    }
+
                     string expected = "last record before crash mode " + mode;
                     bool found = Directory.GetFiles(directory, "Probe-*.log")
                         .Any(path => File.ReadAllText(path).Contains(expected, StringComparison.Ordinal));

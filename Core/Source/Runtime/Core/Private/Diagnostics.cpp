@@ -24,16 +24,17 @@ namespace rocks {
     append(":");
     char digits[11]{};
     usize count = 0;
+    uint32 remaining = line;
     do {
-        digits[count++] = static_cast<char>('0' + line % 10);
-        line /= 10;
-    } while (line != 0);
+        digits[count++] = static_cast<char>('0' + remaining % 10);
+        remaining /= 10;
+    } while (remaining != 0);
     while (count != 0 && used + 1 < sizeof(buffer)) {
         buffer[used++] = digits[--count];
     }
     append(")");
     buffer[used] = '\0';
     // 로그 시스템의 Fatal 경로(비상 출력 → 설치된 LogSystem에 전달 → 종료)로 보낸다(설계 11절).
-    detail::ReportAssertFailure(buffer);
+    detail::ReportAssertFailure(buffer, file, line);
 }
 } // namespace rocks

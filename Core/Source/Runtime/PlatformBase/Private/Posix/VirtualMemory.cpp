@@ -86,7 +86,7 @@ VirtualMemoryResult CommitVirtualMemory(void* address, usize bytes,
     if (access == VirtualMemoryAccess::Open) {
         // 접근은 이미 열려 있다. OS별 힌트만 준다(Apple은 다시 쓴다고 알림, 그 밖은 할 일이 없다).
         detail::PosixOpenCommit(address, bytes);
-        return Success();
+        return VirtualMemoryLocalSuccess();
     }
 
     if (mprotect(address, bytes, PROT_READ | PROT_WRITE) != 0) {
@@ -103,7 +103,7 @@ VirtualMemoryResult DecommitVirtualMemory(void* address, usize bytes,
             return OsFailure();
         }
 
-        return Success();
+        return VirtualMemoryLocalSuccess();
     }
 
     if (mprotect(address, bytes, PROT_NONE) != 0) {
