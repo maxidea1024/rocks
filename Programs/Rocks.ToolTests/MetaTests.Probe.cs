@@ -86,10 +86,12 @@ internal static partial class MetaTests
             // 않게 한다.
             bool extraDefinesBuild = extra?.Any(argument => argument.Contains("ROCKS_BUILD_", StringComparison.Ordinal)) == true;
             bool extraDefinesPlatform = extra?.Any(argument => argument.Contains("ROCKS_PLATFORM_", StringComparison.Ordinal)) == true;
+            bool extraDefinesLink = extra?.Any(argument => argument.Contains(Rocks.Build.LinkTypes.MonolithicMacroName, StringComparison.Ordinal)) == true;
             foreach (string argument in options.ClangArguments)
             {
                 if ((extraDefinesBuild && argument.Contains("ROCKS_BUILD_", StringComparison.Ordinal)) ||
-                    (extraDefinesPlatform && argument.Contains("ROCKS_PLATFORM_", StringComparison.Ordinal)))
+                    (extraDefinesPlatform && argument.Contains("ROCKS_PLATFORM_", StringComparison.Ordinal)) ||
+                    (extraDefinesLink && argument.Contains(Rocks.Build.LinkTypes.MonolithicMacroName, StringComparison.Ordinal)))
                 {
                     continue;
                 }

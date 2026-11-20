@@ -16,27 +16,17 @@ jobs:
     if: github.event_name != 'push' || contains(github.event.head_commit.message, '[ci]')
     strategy:
       fail-fast: false
-      # Windows runs two legs (Docs/Design/ClangVersionSupport.ko.md section 6.3): the verified toolchain (LLVM 21.1.6 with the MSVC 14.44
-      # toolset) and LLVM 22.1.8 with the image's default MSVC (14.52), whose STL requires Clang 22. The Clang 22 leg runs the Foundation
-      # tests (Debug, Asan, Release — the meta tests are part of them) and the EngineTests Debug build.
+      # Windows uses the verified toolchain of Build/Toolchain.json (LLVM 22.1.8) with the image's default MSVC; macOS keeps the older
+      # JSON AST shape covered (Apple clang 17), so both shapes run the meta tests (Docs/Design/ClangVersionSupport.ko.md section 6.3).
       matrix:
         include:
           - os: windows-latest
             leg: windows
-            llvm: '21.1.6'
-            msvc: '14.44'
-          - os: windows-latest
-            leg: windows-clang22
-            llvm: '22.1.8'
-            msvc: ''
           - os: macos-15
             leg: macos
-            llvm: ''
-            msvc: ''
     name: native (${{ matrix.leg }})
     runs-on: ${{ matrix.os }}
     env:
-      ROCKS_MSVC_TOOLSET: ${{ matrix.msvc }}
       # Rocks.proj passes --require-verified-toolchain on: a compiler outside Build/Toolchain.json's verified list fails the build.
       RequireVerifiedToolchain: 'on'
     defaults:
@@ -55,11 +45,10 @@ jobs:
       # cross-builds with the NDK, so select the pinned one (android.ndk.version).
       - name: Select pinned Android NDK
         run: ./Build/SelectAndroidNdk.ps1
-      # Windows puts the leg's pinned LLVM first on PATH. The verified leg pairs LLVM 21.1.6 (same as local builds) with the MSVC 14.44
-      # toolset that the image installs next to 14.52 (ROCKS_MSVC_TOOLSET above); STL 14.52 rejects Clang older than 22 (STL1000).
+      # Windows puts the verified LLVM of Build/Toolchain.json first on PATH (the image's own LLVM is older than the STL accepts).
       - name: Install pinned LLVM (Windows)
         if: runner.os == 'Windows'
-        run: ./Build/InstallLlvm.ps1 -Version ${{ matrix.llvm }}
+        run: ./Build/InstallLlvm.ps1
       - name: Build and test Foundation through MSBuild
         run: dotnet msbuild Rocks.proj /t:Test /p:Adaptive=off /p:Configuration=Debug /p:RocksTarget=Foundation /v:minimal
       # Verification variant (Docs/Design/UnityBuildPch.ko.md section 11): every source is its own translation unit and no PCH is used, so a
@@ -70,11 +59,10 @@ jobs:
       - name: Verify stable identity merge history
         if: github.event_name == 'pull_request'
         run: ./Build/CheckIdentityMerges.ps1 -MetaCompiler out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll
-      - name: Build EngineTests (Clang 22 leg)
-        if: matrix.leg == 'windows-clang22'
+      - name: Build EngineTests (Windows)
+        if: runner.os == 'Windows'
         run: dotnet msbuild Rocks.proj /t:Build /p:Adaptive=off /p:Configuration=Debug /p:RocksTarget=EngineTests /p:NativeOutput=out/ci-engine /v:minimal
       - name: Build and test headless commandlet
-        if: matrix.leg != 'windows-clang22'
         run: |
           dotnet msbuild Rocks.proj /t:Build /p:Adaptive=off /p:Configuration=Debug /p:RocksTarget=Commandlet /p:NativeOutput=out/ci-commandlet /v:minimal
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -83,13 +71,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       # C++ uses clang-format 21.1.6 installed above; C# uses dotnet format of the SDK pinned by global.json (Build/Format/Rocks.Format.slnx).
       - name: Verify C++ and C# formatting
-        if: matrix.leg != 'windows-clang22'
         run: dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll format --root .
       - name: Verify native action graph and incremental failures
-        if: matrix.leg != 'windows-clang22'
         run: dotnet run --project Programs/Rocks.Build.Tests -- --root .
       - name: Verify installed SDK and external game
-        if: matrix.leg != 'windows-clang22'
         run: dotnet run --project Programs/Rocks.Build.IntegrationTests -- --root .
       - name: AddressSanitizer
         run: dotnet msbuild Rocks.proj /t:Test /p:Adaptive=off /p:Configuration=Asan /p:RocksTarget=Foundation /v:minimal

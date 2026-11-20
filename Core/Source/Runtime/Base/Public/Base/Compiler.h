@@ -120,6 +120,24 @@
     "Exactly one of ROCKS_BUILD_DEBUG, ROCKS_BUILD_DEVELOPMENT and ROCKS_BUILD_RELEASE must be 1 (set by Rocks.Build)."
 #endif
 
+// 링크 방식이다(Docs/Design/BuildTargets.ko.md 3.8절 BD17, UE IS_MONOLITHIC). 빌드 시스템이 타깃
+// 하나에 한 값(1 Monolithic, 0 Modular)을 모든 번역 단위에 정의한다. 기본값이 없다(빠지면 컴파일
+// 오류).
+#if !defined(ROCKS_MONOLITHIC) || (ROCKS_MONOLITHIC != 0 && ROCKS_MONOLITHIC != 1)
+#error "ROCKS_MONOLITHIC must be defined to 0 or 1 by Rocks.Build."
+#endif
+
+// 공유 라이브러리 export·import 철자다(BuildTargets 3.8절 BD27). 모듈 API 매크로
+// ROCKS_<MODULE>_API는 빌드가 모듈 정의 헤더에 넣고(Monolithic이면 빈 값), 같은 철자를 쓴다. 모듈
+// API 매크로가 아닌 곳(Modular 진입점 등)이 직접 쓴다.
+#if ROCKS_PLATFORM_WINDOWS
+#define ROCKS_DLLEXPORT __declspec(dllexport)
+#define ROCKS_DLLIMPORT __declspec(dllimport)
+#else
+#define ROCKS_DLLEXPORT __attribute__((visibility("default")))
+#define ROCKS_DLLIMPORT __attribute__((visibility("default")))
+#endif
+
 // AddressSanitizer 계측 여부다. Asan 구성에서 계측하는 번역 단위만 1이다(계측을 끈 외부
 // 라이브러리는 0). 자체 할당기의 수동 poison(Core/Memory/AddressSanitizer.h)이 쓴다. 기능 선택에는
 // 쓰지 않는다.

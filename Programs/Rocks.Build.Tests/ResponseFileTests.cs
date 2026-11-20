@@ -286,7 +286,7 @@ internal static class ResponseFileTests
     }
 
     // NDK가 있으면 Android 교차 빌드의 모든 action을 response file로 강제한다: clang++는 호스트와 무관하게 GNU 규칙, llvm-ar는 호스트
-    // 규칙이다(실행은 하지 않는다). NDK가 없으면 false다.
+    // 규칙이다(실행은 하지 않는다). NDK 설정이 아예 없으면 false다(설정했는데 망가진 NDK는 실패한다).
     private static async Task<bool> AndroidForcedBuildAsync(NativeBuildRequest request, string root)
     {
         NativeToolchain android;
@@ -294,7 +294,7 @@ internal static class ResponseFileTests
         {
             android = await NativeToolchains.DiscoverAndroidAsync("arm64", 26);
         }
-        catch (FileNotFoundException)
+        catch (AndroidNdkNotConfiguredException)
         {
             return false;
         }

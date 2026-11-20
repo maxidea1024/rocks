@@ -20,6 +20,7 @@ internal static class InputValidation
     public static void Validate(NativeBuildRequest request)
     {
         RequireAbsoluteRoots(request);
+        ValidateLinkType(request);
         if (request.MaxParallelism < 1 || request.MaxParallelism > ProcessRunner.MaximumConcurrentProcesses)
         {
             throw new ArgumentOutOfRangeException(nameof(request.MaxParallelism),
@@ -132,6 +133,14 @@ internal static class InputValidation
                 throw new ArgumentException($"Module {module.Name}: reserved filesystem name.");
             }
 
+            // C++ 모듈 이름은 모듈 API 매크로(ROCKS_<MODULE>_API)와 진입점 기호를 만들므로 C 식별자여야 한다(Docs/Design/BuildTargets.ko.md
+            // 3.8절 BD27). 서드파티 모듈은 매크로를 받지 않는다.
+            if (!module.ThirdParty && !ModuleTables.IsIdentifier(module.Name))
+            {
+                throw new ArgumentException($"Module {module.Name}: a C++ module must have a C identifier name (letters, digits and '_', not " +
+                    "starting with a digit) — it names ROCKS_<MODULE>_API.");
+            }
+
             bool posix = request.Toolchain.Platform != NativePlatform.Windows;
             GeneratedSources.Validate(module);
             ValidateReflectionSources(module);
@@ -184,6 +193,12 @@ internal static class InputValidation
                     throw new ArgumentException($"Module {module.Name}: define '{define}' is reserved; the build defines " +
                         $"{name} for every module that implements a module entry point.");
                 }
+                // 링크 방식·모듈 API 매크로는 빌드가 타깃·모듈마다 정의한다(Docs/Design/BuildTargets.ko.md 3.8절 BD27).
+                if (name == LinkTypes.MonolithicMacroName || LinkTypes.IsApiMacro(name))
+                {
+                    throw new ArgumentException($"Module {module.Name}: define '{define}' is reserved; the build defines {LinkTypes.MonolithicMacroName} " +
+                        "for the target and ROCKS_<MODULE>_API for every module.");
+                }
                 // 로그 컴파일 하한은 타깃 전체에 하나다(LogCompiledMinimums). 모듈이 바꾸면 Log.h inline 본문이 TU마다 달라져 ODR 위반이다.
                 if (name == LogCompiledMinimums.MacroName)
                 {
@@ -198,6 +213,50 @@ internal static class InputValidation
                         "declare external files as inputs (include directories, AdditionalInputs, PrebuiltLibraries) instead.");
                 }
             }
+        }
+    }
+
+    // 링크 방식(Docs/Design/BuildTargets.ko.md 3.8절 BD17). Modular는 Android(UE도 모바일에서 거부)와 Asan·Coverage·Release 구성에서 쓰지
+    // 않는다(Editor는 Release로 빌드하지 않는다 — BD20).
+    private static void ValidateLinkType(NativeBuildRequest request)
+    {
+        if (!Enum.IsDefined(request.LinkType))
+        {
+            throw new ArgumentException($"Invalid link type: {request.LinkType}.");
+        }
+
+        if (request.LinkType != NativeLinkType.Modular)
+        {
+            return;
+        }
+
+        if (request.Toolchain.Platform == NativePlatform.Android)
+        {
+            throw new ArgumentException("Modular linking is not supported on Android; use LinkType Monolithic.");
+        }
+
+        if (request.Configuration is not (NativeConfiguration.Debug or NativeConfiguration.Development))
+        {
+            throw new ArgumentException($"Modular linking supports only the Debug and Development configurations, not {request.Configuration}.");
+        }
+
+        if (request.TargetName is null && request.Targets.Count != 1)
+        {
+            throw new ArgumentException("Modular linking needs a target name for shared library file names (NativeBuildRequest.TargetName).");
+        }
+
+        // 모듈 표·빌드 정보가 Modular에서 정의될 자리(export 진입점·Core 공유 라이브러리의 빌드 정보)는 BS8d·ML4다. 그 전에는 늦고 알기
+        // 어려운 링크 오류 대신 여기서 거부한다.
+        if (request.Modules.Any(module => module.ProvidesModuleTable || module.ProvidesBuildInfo))
+        {
+            throw new ArgumentException("Modular linking of a target that reaches the module table or build information provider (Core) " +
+                "needs the Modular module entry points and build information placement (BuildTargets BS8d, ModuleLoader ML4); use Monolithic.");
+        }
+
+        // 미리 빌드한 라이브러리만 있는 모듈(설치 SDK 모듈)은 아직 공유 라이브러리로 나르지 않는다.
+        if (request.Modules.FirstOrDefault(module => !module.ThirdParty && module.PrebuiltLibraries.Count != 0) is { } prebuilt)
+        {
+            throw new ArgumentException($"Module {prebuilt.Name}: Modular linking of prebuilt (installed SDK) modules is not supported yet; use Monolithic.");
         }
     }
 

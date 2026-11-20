@@ -374,7 +374,7 @@ detail::StructFieldOps<&::S::m>(MemberId, &detail::PathStructMember<&::S::m, Val
 ```text
 dotnet build Programs/Rocks.Tools.csproj
 dotnet out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll --module SampleGame --input Templates/Game/Foundation/Source/GameObject.h --include GameObject.h --output-root out/Generated/SampleGame --descriptor out/Metadata/SampleGame.rocksmeta.json --identity-manifest Templates/Game/Foundation/SampleGame.rocksids.json --compiler clang-cl
-dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll meta --root . --compiler clang-cl --metacompiler out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll --clang-arg=-DROCKS_BUILD_DEBUG=1 --clang-arg=-DROCKS_PLATFORM_WINDOWS=1
+dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll meta --root . --compiler clang-cl --metacompiler out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll --clang-arg=-DROCKS_BUILD_DEBUG=1 --clang-arg=-DROCKS_PLATFORM_WINDOWS=1 --clang-arg=-DROCKS_MONOLITHIC=1
 ```
 
 Core 헤더를 컴파일하는 검사는 구성 매크로와 대상 OS 매크로(`ROCKS_PLATFORM_WINDOWS`·`ROCKS_PLATFORM_MAC`·`ROCKS_PLATFORM_ANDROID` 중 하나)를 함께 받는다. 빌드(`Rocks.Build.Cli`)는 `NativeConfigurations.BuildMacro`·`PlatformMacro`로 둘 다 넘긴다.

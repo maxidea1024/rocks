@@ -397,6 +397,59 @@ public sealed record NativeGeneratedSource(string FileName, string Content);
 /// <summary>설치 SDK가 동봉한 모듈 메타데이터다(절대 경로).</summary>
 public sealed record ImportedMetadata(string Descriptor, string IdentityManifest);
 
+/// <summary>
+/// 링크 방식이다(Docs/Design/BuildTargets.ko.md 3.8절 BD17, UE TargetLinkType). Monolithic은 모든 모듈을 정적 라이브러리로 실행 파일 하나에
+/// 링크하고, Modular는 서드파티가 아닌 라이브러리 모듈마다 공유 라이브러리 하나를 만든다.
+/// </summary>
+public enum NativeLinkType { Monolithic, Modular }
+
+/// <summary>링크 방식 매크로와 모듈 API 매크로·공유 라이브러리 이름 규칙이다(Docs/Design/BuildTargets.ko.md 3.8절 BD17·BD27).</summary>
+public static class LinkTypes
+{
+    /// <summary>링크 방식 매크로 이름이다(UE IS_MONOLITHIC). 모든 compile이 0·1 중 하나를 받고 Base/Compiler.h가 기본값 없이 검사한다.</summary>
+    public const string MonolithicMacroName = "ROCKS_MONOLITHIC";
+
+    /// <summary>compile 인자로 넘기는 링크 방식 정의(<c>ROCKS_MONOLITHIC=1</c> 또는 <c>=0</c>)다.</summary>
+    public static string MonolithicDefine(NativeLinkType linkType) => MonolithicMacroName + "=" + (linkType == NativeLinkType.Monolithic ? "1" : "0");
+
+    /// <summary>모듈 API 매크로 이름이다(UE &lt;MODULE&gt;_API): <c>ROCKS_&lt;대문자 모듈 이름&gt;_API</c>.</summary>
+    public static string ApiMacro(string module) => "ROCKS_" + module.ToUpperInvariant() + "_API";
+
+    /// <summary>빌드가 정의하는 모듈 API 매크로 철자인가(<c>ROCKS_</c>로 시작해 <c>_API</c>로 끝나는 이름 — 규칙은 정의할 수 없다).</summary>
+    public static bool IsApiMacro(string name) =>
+        name.Length > "ROCKS__API".Length && name.StartsWith("ROCKS_", StringComparison.Ordinal) && name.EndsWith("_API", StringComparison.Ordinal);
+
+    /// <summary>export 철자다(Base/Compiler.h의 ROCKS_DLLEXPORT와 같다). 정의 헤더가 Base 헤더 없이도 쓸 수 있게 플랫폼 철자를 직접 쓴다.</summary>
+    public static string ExportSpelling(NativePlatform platform) =>
+        platform == NativePlatform.Windows ? "__declspec(dllexport)" : "__attribute__((visibility(\"default\")))";
+
+    /// <summary>import 철자다(Base/Compiler.h의 ROCKS_DLLIMPORT와 같다).</summary>
+    public static string ImportSpelling(NativePlatform platform) =>
+        platform == NativePlatform.Windows ? "__declspec(dllimport)" : "__attribute__((visibility(\"default\")))";
+
+    /// <summary>
+    /// 모듈 하나의 API 매크로 정의(<c>이름=값</c>)다. Monolithic이거나 공유 라이브러리를 만들지 않는 모듈(컴파일할 코드가 없는 모듈 —
+    /// header-only, 미리 빌드한 라이브러리만 있는 모듈)이면 빈 값, Modular면 그 모듈 자신의 compile에서는 export, 다른 모듈의 compile에서는
+    /// import다(UE UEBuildModule.cs:750-770). 판정은 ActionGraph가 공유 라이브러리를 만드는 조건과 같다.
+    /// </summary>
+    public static string ApiDefine(NativeModuleInput module, bool own, NativeLinkType linkType, NativePlatform platform)
+    {
+        bool hasBinary = module.Sources.Count != 0 || module.GeneratedSources.Count != 0 || module.ReflectionSources.Count != 0;
+        string value = linkType == NativeLinkType.Monolithic || !hasBinary ? "" : own ? ExportSpelling(platform) : ImportSpelling(platform);
+        return ApiMacro(module.Name) + "=" + value;
+    }
+
+    /// <summary>
+    /// Modular 공유 라이브러리 파일 이름(확장자 앞까지)이다: <c>&lt;타깃&gt;-&lt;모듈&gt;</c>, Development가 아니면
+    /// <c>-&lt;플랫폼&gt;-&lt;구성&gt;</c>을 붙이고 macOS·Linux는 <c>lib</c> 접두를 붙인다(UE UEBuildTarget.cs:5400, 5473-5508).
+    /// </summary>
+    public static string SharedLibraryStem(string target, string module, NativePlatform platform, NativeConfiguration configuration)
+    {
+        string stem = target + "-" + module + (configuration == NativeConfiguration.Development ? "" : "-" + platform + "-" + configuration);
+        return platform == NativePlatform.Windows ? stem : "lib" + stem;
+    }
+}
+
 public sealed record NativeBuildRequest
 {
     public required NativeToolchain Toolchain { get; init; }
@@ -412,6 +465,13 @@ public sealed record NativeBuildRequest
     // 로그 컴파일 하한의 타깃 재정의다(TargetRules.LogCompiledMinimum). null이면 구성 기본값이다. 모든 compile action이 같은 값을
     // 받는다(LogCompiledMinimums).
     public LogLevel? LogCompiledMinimum { get; init; }
+
+    // 링크 방식이다(TargetRules.LinkType — Docs/Design/BuildTargets.ko.md 3.8절). Modular는 Android와 Asan·Coverage·Release 구성에서
+    // 입력 오류다.
+    public NativeLinkType LinkType { get; init; } = NativeLinkType.Monolithic;
+
+    // Modular 공유 라이브러리 이름의 타깃 부분이다(TargetRules.Name). null이면 대상 목록이 하나일 때 그 이름이다.
+    public string? TargetName { get; init; }
 
     // 빈 목록은 모든 모듈을 뜻한다. 지정하면 도달하는 dependency만 빌드한다.
     public IReadOnlyList<string> Targets { get; init; } = [];

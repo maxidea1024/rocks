@@ -895,7 +895,7 @@ internal static class CompilerDriver
         {
             "--no-default-config", "-std=c++23", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-fno-rtti",
             "-fno-exceptions", "-ffp-contract=off", "-O2", "-O0", "-g", "-fsanitize=address",
-            "-fno-omit-frame-pointer", "-fPIC"
+            "-fno-omit-frame-pointer", "-fPIC", "-fvisibility-ms-compat", "-fvisibility-inlines-hidden"
         };
         string? sdk = null;
         var groups = new Dictionary<string, string>(StringComparer.Ordinal);

@@ -233,7 +233,7 @@ internal static class ActionGraph
                 .Distinct(NativeToolchains.PathComparer).ToArray();
             // 모듈 정의: 모듈 public·private 정의와 의존 모듈의 public 정의, 진입점 모듈이면 ROCKS_MODULE_NAME(ModuleDefinitions — 리플렉션 AST
             // 생성도 같은 함수로 같은 정의를 받는다).
-            string[] defines = ModuleDefinitions.Of(module, dependencies, entryModules.Contains(module.Name));
+            string[] defines = ModuleDefinitions.Of(module, dependencies, entryModules.Contains(module.Name), request.LinkType, request.Toolchain.Platform);
 
             // 리플렉션 생성 소스는 모듈 소스와 같은 인자로 컴파일해 같은 archive·실행 파일에 넣는다(목록만 따로다 —
             // NativeModuleInput.ReflectionSources).
@@ -291,7 +291,7 @@ internal static class ActionGraph
                 var arguments = new List<string>();
                 arguments.AddRange(module.AdditionalCompileArguments);
                 // 계측을 끈 모듈은 sanitizer 인자만 빠진다(프레임 포인터 등 나머지 Asan 프로필은 같다).
-                arguments.AddRange(NativeCompileProfile.ModuleArguments(request.Toolchain, request.Configuration, module, language));
+                arguments.AddRange(NativeCompileProfile.ModuleArguments(request.Toolchain, request.Configuration, module, language, request.LinkType));
                 // ThinLTO는 코드 생성 옵션이라 AST 프로필(NativeCompileProfile)에 넣지 않는다. 모듈이 끄면(LinkTimeOptimization)
                 // Release에서도 일반 object로 남는다.
                 if (module.LinkTimeOptimization && UsesThinLto(request.Configuration, module.Optimization))
@@ -485,15 +485,27 @@ internal static class ActionGraph
                 continue;
             }
 
-            string finalPath = Path.Combine(output, module.Kind == NativeModuleKind.StaticLibrary ? "lib" : "bin",
-                module.Name + (module.Kind == NativeModuleKind.StaticLibrary ? (windows ? ".lib" : ".a") : (windows ? ".exe" : "")));
-            string terminalId = module.Name + (module.Kind == NativeModuleKind.StaticLibrary ? ":archive" : ":link");
+            // Modular(Docs/Design/BuildTargets.ko.md 3.8절 BS8a): 서드파티가 아닌 라이브러리 모듈은 공유 라이브러리가 된다. 서드파티는
+            // 정적 라이브러리로 남아 소비 모듈에 들어간다. 공유 라이브러리는 실행 파일과 같은 bin 폴더에 둔다(Windows import 라이브러리는
+            // lib 폴더).
+            bool sharedLibrary = request.LinkType == NativeLinkType.Modular && module.Kind == NativeModuleKind.StaticLibrary && !module.ThirdParty;
+            bool archive = module.Kind == NativeModuleKind.StaticLibrary && !sharedLibrary;
+            bool mac = request.Toolchain.Platform == NativePlatform.MacOS;
+            string sharedStem = sharedLibrary
+                ? LinkTypes.SharedLibraryStem(request.TargetName ?? request.Targets[0], module.Name, request.Toolchain.Platform, request.Configuration)
+                : "";
+            string sharedFile = sharedStem + (windows ? ".dll" : mac ? ".dylib" : ".so");
+            string finalPath = archive ? Path.Combine(output, "lib", module.Name + (windows ? ".lib" : ".a"))
+                : sharedLibrary ? Path.Combine(output, "bin", sharedFile)
+                : Path.Combine(output, "bin", module.Name + (windows ? ".exe" : ""));
+            string? importLibrary = sharedLibrary && windows ? Path.Combine(output, "lib", sharedStem + ".lib") : null;
+            string terminalId = module.Name + (archive ? ":archive" : ":link");
             var finalArguments = new List<string>();
             var finalOutputs = new List<string> { finalPath };
             var finalInputs = new List<string>(objectPaths);
             var predecessors = new List<string>(compileIds);
             string tool;
-            if (module.Kind == NativeModuleKind.StaticLibrary)
+            if (archive)
             {
                 tool = request.Toolchain.ArchiverPath;
                 finalArguments.AddRange(windows ? ["/nologo", "/out:{OUTPUT0}"] : ["rcs", "{OUTPUT0}"]);
@@ -577,8 +589,16 @@ internal static class ActionGraph
                         finalInputs.Add(profileLibrary);
                     }
 
-                    string subsystem = module.WindowsSubsystem == WindowsSubsystem.Windows ? "/SUBSYSTEM:WINDOWS" : "/SUBSYSTEM:CONSOLE";
-                    finalArguments.AddRange(["/Fe{OUTPUT0}", "/link", "/INCREMENTAL:NO", subsystem, "/MANIFEST:EMBED"]);
+                    if (sharedLibrary)
+                    {
+                        finalArguments.AddRange(["/Fe{OUTPUT0}", "/link", "/DLL", "/INCREMENTAL:NO"]);
+                    }
+                    else
+                    {
+                        string subsystem = module.WindowsSubsystem == WindowsSubsystem.Windows ? "/SUBSYSTEM:WINDOWS" : "/SUBSYSTEM:CONSOLE";
+                        finalArguments.AddRange(["/Fe{OUTPUT0}", "/link", "/INCREMENTAL:NO", subsystem, "/MANIFEST:EMBED"]);
+                    }
+
                     if (asanThunk != null)
                     {
                         finalArguments.AddRange(["/INCLUDE:__asan_seh_interceptor", "/WHOLEARCHIVE:" + asanThunk]);
@@ -589,19 +609,39 @@ internal static class ActionGraph
                     // 링크 임시 폴더 경로가 배포 실행 파일에 새지 않고, 디버거는 기호 경로에서 이름·GUID·age로 찾는다
                     // (Docs/Design/CrashHandlingAndLaunch.ko.md 14.4절 D16).
                     finalArguments.AddRange(["/DEBUG:FULL", "/PDB:{OUTPUT1}", "/PDBALTPATH:%_PDB%"]);
+                    if (importLibrary is not null)
+                    {
+                        // 소비 모듈·실행 파일이 링크하는 import 라이브러리다.
+                        finalOutputs.Add(importLibrary);
+                        finalArguments.Add("/IMPLIB:{OUTPUT2}");
+                    }
+
                     finalArguments.AddRange(new[] { "kernel32", "user32", "gdi32", "winspool", "shell32", "ole32", "oleaut32", "uuid", "comdlg32", "advapi32" }
                         .Select(value => "/DEFAULTLIB:" + value + ".lib"));
                 }
                 else
                 {
+                    if (sharedLibrary)
+                    {
+                        // install name·soname은 파일 이름만 담는다(실행 중 탐색은 rpath — 같은 폴더).
+                        finalArguments.AddRange(mac ? ["-dynamiclib", "-install_name", "@rpath/" + sharedFile] : ["-shared", "-Wl,-soname," + sharedFile]);
+                    }
+
+                    if (request.LinkType == NativeLinkType.Modular)
+                    {
+                        // 같은 폴더의 공유 라이브러리를 찾는다(UE MacToolChain.cs:578-584 — @loader_path·@executable_path 둘 다).
+                        finalArguments.AddRange(mac ? ["-Wl,-rpath,@loader_path/", "-Wl,-rpath,@executable_path/"] : ["-Wl,-rpath,$ORIGIN"]);
+                    }
+
                     finalArguments.AddRange(["-o", "{OUTPUT0}"]);
                 }
             }
 
-            actions.Add(new(terminalId, module.Name, module.Kind == NativeModuleKind.StaticLibrary ? "Archive" : "Link",
+            actions.Add(new(terminalId, module.Name, archive ? "Archive" : "Link",
                 tool, finalArguments, finalOutputs, finalInputs, [], extraInputs, predecessors,
                 [request.ContextFingerprint, request.Configuration.ToString()]));
-            outputs[module.Name] = finalPath;
+            // 소비 모듈이 링크하는 파일이다(Windows 공유 라이브러리는 import 라이브러리).
+            outputs[module.Name] = importLibrary ?? finalPath;
             terminalActions[module.Name] = terminalId;
         }
 
@@ -707,7 +747,8 @@ internal static class ActionGraph
         Path.GetExtension(source).Equals(".c", StringComparison.Ordinal) ? NativeLanguage.C : NativeLanguage.Cpp;
 
     internal static IEnumerable<string> CompileFlags(NativeToolchain toolchain, NativeConfiguration configuration,
-        CodeOptimization optimization = CodeOptimization.Default, NativeLanguage language = NativeLanguage.Cpp)
+        CodeOptimization optimization = CodeOptimization.Default, NativeLanguage language = NativeLanguage.Cpp,
+        NativeLinkType linkType = NativeLinkType.Monolithic)
     {
         if (!Enum.IsDefined(language))
         {
@@ -747,6 +788,7 @@ internal static class ActionGraph
             yield return "/DWIN32_LEAN_AND_MEAN";
             yield return "/D" + NativeConfigurations.PlatformMacro(NativePlatform.Windows);
             yield return "/D" + buildMacro;
+            yield return "/D" + LinkTypes.MonolithicDefine(linkType);
             // 디버그 CRT는 Debug에서만 쓴다. 모듈 재정의는 CRT를 바꾸지 않는다(링크 시 CRT 불일치 방지).
             yield return configuration == NativeConfiguration.Debug ? "/MDd" : "/MD";
             yield return optimize ? "/O2" : "/Od";
@@ -781,6 +823,18 @@ internal static class ActionGraph
             yield return "-D" + NativeConfigurations.PlatformMacro(toolchain.Platform);
 
             yield return "-D" + buildMacro;
+            yield return "-D" + LinkTypes.MonolithicDefine(linkType);
+            // Modular 공유 라이브러리의 가시성(UE bHideSymbolsByDefault — Docs/Design/BuildTargets.ko.md 3.8절 BD27): 함수·변수는 기본으로
+            // 숨기고 타입 정보는 보인다(Android는 Modular를 거부하므로 여기에 오지 않는다).
+            if (linkType == NativeLinkType.Modular)
+            {
+                yield return "-fvisibility-ms-compat";
+                if (toolchain.Platform == NativePlatform.MacOS)
+                {
+                    yield return "-fvisibility-inlines-hidden";
+                }
+            }
+
             yield return optimize ? "-O2" : "-O0";
             if (release)
             {
