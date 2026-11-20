@@ -248,6 +248,29 @@ try
         ++failures;
     }
 
+    // 참조 구현 자체를 RFC 8032 7.3 Ed25519ph 벡터("abc")로 확인한다.
+    byte[] rfcSeed = Convert.FromHexString("833fe62409237b9d62ec77587520911e9a759cec1d19755b7da901b96dca3d42");
+    bool rfcSame = Convert.ToHexStringLower(Ed25519phReference.PublicKey(rfcSeed)) ==
+                   "ec172b93ad5e563bf4932c70e1245034c35467ef2efd4d64ebf819683467e2bf" &&
+                   Convert.ToHexStringLower(Ed25519phReference.Sign(rfcSeed, "abc"u8.ToArray())) ==
+                   "98a70222f0b8121aa9d30f813d683f809e462b469c7ff87639499bb94e6dae41" +
+                   "31f85042463c2a355a2003d062adf5aaa10b8c61e636062aaad11c2a26083406";
+    Console.WriteLine($"content-sign reference RFC 8032 Ed25519ph vector: {(rfcSame ? "PASS" : "FAIL")}");
+    if (!rfcSame)
+    {
+        ++failures;
+    }
+
+    // 신뢰 키로 서명했지만 안의 매니페스트가 깨진 봉투는 verify가 매니페스트 판정에서 거부한다(봉투는 통과).
+    string badManifestEnvelope = Path.Combine(signDirectory, "bad-manifest.rsig");
+    string goldenTrust = Path.Combine(signDirectory, "golden.pub");
+    File.WriteAllBytes(badManifestEnvelope,
+        Ed25519phReference.Envelope(goldenSeed, goldenKeyId, 7, goldenScope, [1, 2, 3, 4]));
+    File.WriteAllText(goldenTrust, Convert.ToHexStringLower(goldenKeyId) + " " +
+                                   Convert.ToHexStringLower(Ed25519phReference.PublicKey(goldenSeed)) + "\n");
+    await Check("content-sign verify signed bad manifest", ["content-sign", "verify", badManifestEnvelope, "--trust",
+        goldenTrust, "--product", "rocks.test", "--channel", "main"], 1, "", "holds a bad cooked manifest");
+
     await Check("content-sign usage", ["content-sign"], 2, "", "content-sign keygen");
     await Check("content-sign help", ["content-sign", "--help"], 0, "content-sign verify", "");
     await Check("content-sign keygen without password", ["content-sign", "keygen", keyBlob, publicLine], 2, "",

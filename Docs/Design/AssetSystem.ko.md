@@ -1377,7 +1377,7 @@ A1e 상태(2026-11-21): **완료**(리뷰 3회 — 미충족 2회 반영 뒤 충
 
 #### 14.1.11 요구 대조표(A1f — 콘텐츠 서명)
 
-설계는 [ContentSigning](ContentSigning.ko.md) 3·4·7절이다. 시험은 셋이다: AssetRuntime `Tests/ContentSignatureTests.cpp`(EngineTests, 11개 — 봉투 형식·검증·키 줄), EngineAssets `Tests/EngineAssetsSigningTests.cpp`(3개 — 엔진 정책)와 시험 장면(`DiskScene`이 시험 키로 서명한 봉투를 쓰고 신뢰 정보를 등록 — EngineAssets 시험 31개 전부가 서명 봉투 경로로 시작하므로 Release 구성에서도 돈다), `Programs/Rocks.Commandlet.Tests`(C#, content-sign 51항목). golden은 독립 구현이 만든 byte다: 처음에는 RFC 8032 5.1 순수 Python 구현(RFC 7.3 벡터로 확인)으로 만들었고, 재현할 수 있게 같은 알고리즘의 C# 구현 `Programs/Rocks.Commandlet.Tests/Ed25519phReference.cs`(BigInteger, 엔진·libsodium 코드 없음 — 리뷰 권장)를 저장소에 두었다. C# 시험이 그것으로 golden 봉투를 다시 만들어 hex를 대조하고, `content-sign sign`이 쓴 봉투의 서명과 헤더 칸도 엔진과 무관하게 확인한다.
+설계는 [ContentSigning](ContentSigning.ko.md) 3·4·7절이다. 시험은 셋이다: AssetRuntime `Tests/ContentSignatureTests.cpp`(EngineTests, 11개 — 봉투 형식·검증·키 줄), EngineAssets `Tests/EngineAssetsSigningTests.cpp`(3개 — 엔진 정책)와 시험 장면(`DiskScene`이 시험 키로 서명한 봉투를 쓰고 신뢰 정보를 등록 — EngineAssets 시험 31개 전부가 서명 봉투 경로로 시작하므로 Release 구성에서도 돈다), `Programs/Rocks.Commandlet.Tests`(C#, content-sign 53항목). golden은 독립 구현이 만든 byte다: 처음에는 RFC 8032 5.1 순수 Python 구현(RFC 7.3 벡터로 확인)으로 만들었고, 재현할 수 있게 같은 알고리즘의 C# 구현 `Programs/Rocks.Commandlet.Tests/Ed25519phReference.cs`(BigInteger, 엔진·libsodium 코드 없음 — 리뷰 권장)를 저장소에 두었다. C# 시험이 참조 구현을 RFC 8032 7.3 Ed25519ph 벡터("abc")로 먼저 확인하고, 그것으로 golden 봉투를 다시 만들어 hex를 대조하며, `content-sign sign`이 쓴 봉투의 서명과 헤더 칸도 엔진과 무관하게 확인한다. 신뢰 키로 서명한 깨진 매니페스트 봉투도 참조 구현으로 만들어 `content-sign verify`의 매니페스트 판정을 확인한다.
 
 | 요구(절) | 항목 | 시험 |
 |---|---|---|
@@ -1394,7 +1394,7 @@ A1e 상태(2026-11-21): **완료**(리뷰 3회 — 미충족 2회 반영 뒤 충
 | | 봉투 자리가 디렉터리면 봉투 없음과 같다(Release NotFound, 그 밖 Warning 한 번 뒤 rman), 봉투 읽기·검증 상태의 할당 실패가 단계 이름(`content signature read`·`content signature (None)`)으로 기록됨 | `EngineAssets_EnvelopeDirectoryIsAbsent`, `EngineAssets_InitializationAllocationFailures` |
 | | 시험 키 서명이라도 낮은 contentVersion(ContentVersion)·다른 scope(Scope) 거부, 최소와 같은 버전 통과, 등록한 신뢰 정보가 잘못됐으면 InvalidArgument(칸 None), 봉투 안 매니페스트가 깨지면 봉투 통과 뒤 manifest parse(CorruptPackage) | `EngineAssets_SignedContentRejections` |
 | | 신뢰 정보 등록(`SetContentTrust`)·해제, 서명 봉투로 시작하는 기존 엔진 경로 전부(초기화 조합·할당 실패·프레임·종료) | `EngineAssets_*`(30개 — `DiskScene`) |
-| commandlet(5, 7-5) | keygen(공개 줄 98 byte 형식, 덮어쓰기 거부, 공개 자리만 있으면 만든 키 파일을 지움, 비밀번호 선택지 없음 사용법 2·파일 없음 1·빈 비밀번호 1), sign(성공·다시 서명은 원자적 교체·임시 파일 없음, 출력 디렉터리 없음·출력 자리가 디렉터리면 실패하고 임시 파일을 지움, 틀린 비밀번호, 다른 종류 키 파일, 매니페스트 아님·없음, 키·비밀번호 파일 없음, 위치 인자 부족·필수 선택지 없음·빈 값·버전·product 형식·같은 선택지 두 번·다른 하위 명령 선택지·모르는 이름 사용법 2), verify(성공, 다른 channel Scope, 높은 최소 버전 ContentVersion, 변조 Signature, 봉투 아님 File, 키 줄 아님, 봉투·공개 파일 없음, 위치 인자·trust·product 없음·최소 버전 형식 사용법 2), 하위 명령 없음·모름·도움말 뒤 인자 사용법 2, 도움말, 독립 구현으로 golden 재생성·sign 출력 서명 확인 | `Rocks.Commandlet.Tests`(content-sign 51항목) |
+| commandlet(5, 7-5) | keygen(공개 줄 98 byte 형식, 덮어쓰기 거부, 공개 자리만 있으면 만든 키 파일을 지움, 비밀번호 선택지 없음 사용법 2·파일 없음 1·빈 비밀번호 1), sign(성공·다시 서명은 원자적 교체·임시 파일 없음, 출력 디렉터리 없음·출력 자리가 디렉터리면 실패하고 임시 파일을 지움, 틀린 비밀번호, 다른 종류 키 파일, 매니페스트 아님·없음, 키·비밀번호 파일 없음, 위치 인자 부족·필수 선택지 없음·빈 값·버전·product 형식·같은 선택지 두 번·다른 하위 명령 선택지·모르는 이름 사용법 2), verify(성공, 다른 channel Scope, 높은 최소 버전 ContentVersion, 변조 Signature, 봉투 아님 File, 신뢰 키로 서명된 깨진 매니페스트(참조 구현이 만든 봉투), 키 줄 아님, 봉투·공개 파일 없음, 위치 인자·trust·product 없음·최소 버전 형식 사용법 2), 하위 명령 없음·모름·도움말 뒤 인자 사용법 2, 도움말, 참조 구현의 RFC 8032 벡터 확인·golden 재생성·sign 출력 서명 확인 | `Rocks.Commandlet.Tests`(content-sign 53항목) |
 | 조합(14 완료 조건 2) | 신뢰: 최소 버전 3(봉투보다 낮음·같음·높음) × 키 위치 3(하나·여럿 가운데 마지막·없음) × scope 2 = 18 — 겹치면 Key → ContentVersion → Scope | `ContentSignature_TrustCombinations` |
 | | 엔진 정책: 봉투 3 × 신뢰 등록 2 × rman 2 = 12, 기대값은 구성(IsReleaseBuild)으로 고르고 Debug·Release 실행이 양쪽을 덮는다 | `EngineAssets_SigningPolicyCombinations` |
 | | 패처 (keyId → 받은 최고 버전) 기록, 빌드 규칙의 신뢰 정보 생성, 부분 읽기 조각 해시 | 범위 밖(ContentSigning 7-6 — 후속) |
@@ -1407,7 +1407,7 @@ A1e 상태(2026-11-21): **완료**(리뷰 3회 — 미충족 2회 반영 뒤 충
 |---|---|---|---|
 | `AssetRuntime/Private/ContentSignature.cpp` | 98.1%(257/262) | 97.9%(137/140) | 100%(14/14) |
 | `EngineAssets/Private/EngineAssetsSubsystem.cpp` | 95.4%(329/345) | 94.7%(108/114) | 100%(17/17) |
-| `Programs/Commandlet/Private/Common/ContentSignCommandlet.cpp` | 92.1%(316/343) | 84.1%(138/164) | 100%(14/14) |
+| `Programs/Commandlet/Private/Common/ContentSignCommandlet.cpp` | 93.0%(319/343) | 84.8%(139/164) | 100%(14/14) |
 | `Programs/Commandlet/Private/Common/CommandletFiles.cpp` | 75.0%(51/68) | 59.1%(13/22) | 100%(6/6) |
 
 commandlet은 리뷰 지적으로 측정했다(처음 측정은 EngineTests만이었다): `pwsh -NoProfile -File Build/MeasureCoverage.ps1 -Target Commandlet -Executable RocksCommandlet -Runner 'dotnet,run,--project,Programs/Rocks.Commandlet.Tests,--,--executable,{executable}' -Sources Programs/Commandlet/Private/Common` — 스크립트에 외부 구동기(`-Runner`)와 실행 파일 이름(`-Executable`) 인자를 더했다. 함께 잰 기존 파일(`LogCommandlet.cpp` 82.9%·`CommandletHost.cpp` 76.6%)은 A1f 범위 밖이다(파일 도우미를 `CommandletFiles`로 옮긴 것 말고 바꾸지 않았다).
@@ -1424,14 +1424,13 @@ commandlet은 리뷰 지적으로 측정했다(처음 측정은 EngineTests만�
 | `ContentSignCommandlet` keygen | 두 파일을 만든 뒤 쓰기·닫기 실패와 두 파일 정리 | 새로 만든 파일의 쓰기·닫기 실패(디스크 가득 참·장치 오류)다. 정리 순서는 log keygen과 같고 공개 자리만 있는 경우의 정리는 시험이 닿는다 |
 | `ContentSignCommandlet` 임시 파일 | OS 난수 실패로 이름 만들기 실패, 임시 파일 쓰기·flush·닫기 실패와 그 정리 | OS 조건(디스크 가득 참·장치 오류). 만들기 실패·교체 실패와 그 정리는 시험이 닿는다 |
 | `ContentSignCommandlet` sign | 봉투 쓰기 실패 | 입력이 이미 검증한 매니페스트(상한 안)·연 키·non-null keyId라 남은 실패는 할당 실패다 |
-| `ContentSignCommandlet` verify | 봉투는 통과했는데 안의 매니페스트가 깨진 경우 | 신뢰 키로 서명된 깨진 매니페스트가 있어야 한다. `content-sign sign`은 서명 전에 매니페스트를 검증하므로 이 도구로는 만들 수 없다(다른 서명 도구를 막는 방어). 엔진 쪽 같은 조건은 `EngineAssets_SignedContentRejections`(CorruptManifest)가 닿는다 |
 | `ContentSignCommandlet`·`CommandletFiles` | 출력 채널 쓰기 실패 분기(`Write`), 파일 크기·읽기·쓰기·닫기 실패, 읽기 버퍼 할당 실패 | 표준 출력·오류 실패와 OS 파일 오류·할당 실패다. 출력 실패는 Windows 무효 핸들 시험이 사용법 경로에서 닿는다(같은 `Write` 패턴) |
 
-A1f 상태(2026-11-21): **구현, 리뷰 1회 반영**(재판정 대기). 완료 조건:
+A1f 상태(2026-11-21): **구현, 리뷰 2회 반영**(재판정 대기). 완료 조건:
 - 요구 대조표(14.1.11): 시험 없는 항목 0
 - 조합: 신뢰 18·엔진 정책 12·bit 변조 1336·자르기 전 길이
 - coverage(14.1.12): 닿지 않은 곳은 모두 근거
-- 빠진 시험 관점 리뷰어 판정: 1회 미충족(commandlet coverage 측정 밖) → 측정·시험·근거 반영, 재판정 대기
+- 빠진 시험 관점 리뷰어 판정: 1회 미충족(commandlet coverage 측정 밖) → 측정·시험·근거 반영, 2회 미충족(verify 깨진 매니페스트 근거가 사실 아님 — 참조 구현으로 만들 수 있음) → 시험으로 닿게 함, 재판정 대기
 
 ## 15. PNG 디코더 범위
 
