@@ -256,6 +256,14 @@ const char* MeshIssueName(MeshIssue issue) noexcept {
         return "UvOutOfRange";
     case MeshIssue::NonNormalizedWeights:
         return "NonNormalizedWeights";
+    case MeshIssue::MaterialSlotFallback:
+        return "MaterialSlotFallback";
+    case MeshIssue::NegativeBuildScale:
+        return "NegativeBuildScale";
+    case MeshIssue::UnsupportedSetting:
+        return "UnsupportedSetting";
+    case MeshIssue::InvalidBuildScale:
+        return "InvalidBuildScale";
     }
 
     return "Unknown";

@@ -106,7 +106,7 @@ uint8 LinearToSrgbByte(float linear) noexcept;   // 경계 표 이분 탐색. Na
   - `Exp2`(double-double 지수 t): n = RoundHalfEven(t.hi), r = t − n(정확), a = r·ln2(double-double), e^a = 1 + a + a²·Q(a)(Q는 18차 Taylor)에서 큰 항을 정확히 더하고 작은 항을 모아 한 번 반올림한 뒤 2^n을 곱한다(정규 결과는 정확, 비정규 결과는 한 번 더 반올림).
   - `Pow` = Exp2(y · Log2 x)를 지수까지 double-double로 계산한다(|y·log2 x|가 1100을 넘으면 +Inf·0이 확실). sRGB 함수는 상수 0.055·1.055와 밑 (x + 0.055)/1.055를 double-double로, 지수는 정확한 12/5·5/12로 계산하고, LinearToSrgb는 거듭제곱을 double-double로 남겨 1.055·p − 0.055의 상쇄가 오차를 키우지 않게 한다. Gamma22는 정확한 11/5 지수.
   - 계수는 1/n!·1/(2k+1)을 컴파일 시점 IEEE 나눗셈으로 만든 상수다(clang의 상수 접기는 대상과 무관하다). ln2·1/ln2·0.055·1.055(각 hi·lo)·π·√2는 비트 패턴으로 고정한다. 정확도와 무관하게 **결과 비트의 결정성**이 계약이다.
-  - 정확도(가장 가까운 double까지의 비트 거리, 2.3의 생성 기준값 표로 시험): 상한 Exp2·Log2 1, Pow·SinPi·CosPi·sRGB·Gamma22 2(비정규 결과는 1 더). 측정 최대: Log2 0, 나머지 모두 1(교차검증에서 찾은 최악 입력 — 예: Pow(0.77…, 2701.28…) 이전 9 ulp — 포함).
+  - 정확도(가장 가까운 double까지의 비트 거리, 2.3의 생성 기준값 표로 시험): 상한 Exp2·Log2 1, Pow·SinPi·CosPi·sRGB·Gamma22 2(비정규 결과는 1 더). 측정 최대: Log2 0, 나머지 모두 1(Acos 1)(교차검증에서 찾은 최악 입력 — 예: Pow(0.77…, 2701.28…) 이전 9 ulp — 포함).
 - 표 생성(`Rocks.ToolTests math-tables --root . [--write]`, 정책 검사로 갱신 여부 확인): x^2.4·x^(1/2.4)·x^2.2는 유리수가 아니므로 반올림 경계 판정을 정수 비교로 한다. 지수 12/5이면 후보 값 m에 대해 m^5와 q^12를 BigInteger 분수로 정확히 비교한다(2.2 = 11/5, 1/2.4 = 5/12도 같은 방식).
   - `SrgbByteToLinear` 표: decode(k/255)를 정확히 반올림한 float.
   - `LinearToSrgbByte` 경계: t_k = decode((k + 0.5)/255)(부호화 공간의 중간점 — AssetSystem 12.2절의 round-half-up 양자화와 같다)이고, 표에는 t_k 이상인 가장 작은 float를 저장한다(가장 가까운 float가 아니다). 그래서 8비트 경로는 정확한 반올림이고, 16비트·float 경로(`LinearToSrgb`)는 근사 Pow를 쓰는 다른 의미다(문서화).

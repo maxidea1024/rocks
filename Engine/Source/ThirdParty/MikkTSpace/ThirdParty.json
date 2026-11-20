@@ -1,0 +1,52 @@
+{
+  "schema": 1,
+  "name": "MikkTSpace",
+  "version": "3e895b49d05e (mmikk/MikkTSpace master, 2020-03-26)",
+  "upstreamDirectory": "mikktspace-3e895b49d05e",
+  "source": {
+    "url": "https://github.com/mmikk/MikkTSpace/archive/3e895b49d05ea07e4c2133156cfa94369e19e409.tar.gz",
+    "sha256": "aeba65ddee85a679133d510d71d00b108f603752f90b15b9ecf7777033f6e351",
+    "verification": "GitHub HTTPS commit archive of the author's repository (head of master = 3e895b49d05ea07e4c2133156cfa94369e19e409), downloaded on 2026-11-21 and its SHA-256 recorded. Upstream publishes no releases, signatures or hashes, so it is pinned by the commit and the archive hash. Imported files are mikktspace.c and mikktspace.h (README.md is not imported)."
+  },
+  "licenses": [
+    {
+      "spdx": "Zlib",
+      "upstreamExpression": "zlib license text in the header comment of mikktspace.h and mikktspace.c (Copyright (C) 2011 by Morten S. Mikkelsen)",
+      "file": "mikktspace-3e895b49d05e/mikktspace.h",
+      "binaryNoticeRequired": false
+    }
+  ],
+  "translationUnits": [
+    "mikktspace-3e895b49d05e/mikktspace.c",
+    "MikkTSpaceReference.c"
+  ],
+  "includeDirectories": [
+    "mikktspace-3e895b49d05e"
+  ],
+  "defines": [],
+  "platformDefines": {},
+  "consumerDefines": [],
+  "adapterHeaders": [
+    "mikktspace-3e895b49d05e/mikktspace.h"
+  ],
+  "files": {
+    "mikktspace.c": "d302c5f938ff5c863b28ad6393942c76cba4063288758d942f9af4994a8c089f",
+    "mikktspace.h": "17fc433894f24c73753d548086cc4d8c5c0379f4a6edfb98b5da243e4f0bc3d0"
+  },
+  "pragmaDirectives": [],
+  "notes": [
+    "Reference tangent space generator used by the static mesh build (Docs/Design/MeshAnimationAssets.ko.md section 5.2 and decision MA-D5). Pinned to the author's repository (UE ships an older copy with an extra m_bIgnoreDegenerates field; Rocks uses upstream as is, which also has the later all-NaN guard in MergeVertsFast).",
+    "Rocks.patch routes cos and acos through hooks backed by Rocks deterministic math (RocksMikkTSpaceCosPi, RocksMikkTSpaceAcos) and malloc/free through the caller's allocator (RocksMikkTSpaceAllocate, RocksMikkTSpaceFree). MeshTools defines the hooks, so only MeshTools links this library. cos(t*pi/180) becomes cospi(t/180), the same function; the default 180 degree threshold gives -1 in both.",
+    "The allocation-failure fallback GenerateSharedVerticesIndexListSlow is broken upstream (index2rec is never assigned); Rocks.patch fixes it, and the fixed fallback gives the same tangents as the hashed path (MeshTools allocation failure test). The reference glue builds the same fixed source.",
+    "MikkTSpaceReference.c is Rocks glue that rebuilds the same source with the original upstream expressions (CRT cos/acos and malloc/free) under renamed entry points (RocksMikkTSpaceReferenceGenTangSpace*). Only the comparison tests call it; it is never referenced by production code.",
+    "The upstream code indexes faces with int (MakeIndex shifts the face index by 2), so callers must keep the face count at or below INT_MAX >> 2."
+  ],
+  "modifications": [
+    {
+      "file": "mikktspace.c",
+      "upstreamSha256": "de87e74107df766ce68108801262bd8d53899414236b59810509a8fc2a51e288",
+      "reason": "Route cos and acos through Rocks deterministic math hooks and malloc/free through allocator hooks (decision MA-D5: the CRT result bits differ between hosts, breaking cooking determinism); store the matched index in GenerateSharedVerticesIndexListSlow (upstream never assigns index2rec, so this allocation-failure fallback wrote -1 into the vertex list and read out of bounds); and remove the counters iNumUniqueVerts and iUniqueTspaces that are set but never read: -Wunused-but-set-variable (-Wall)"
+    }
+  ],
+  "patch": "Rocks.patch"
+}

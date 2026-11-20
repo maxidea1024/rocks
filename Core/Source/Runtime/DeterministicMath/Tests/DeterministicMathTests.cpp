@@ -85,6 +85,10 @@ uint64 SubnormalDigest() noexcept {
     return hash;
 }
 
+// Acos 표본의 출력 비트 digest다(DeterministicMath_AcosSpecialValuesAndDigest — Version과 함께
+// 고정).
+constexpr uint64 AcosDigestValue = 0x9D39856476F69144ull;
+
 // 기본 환경에서의 SubnormalDigest 값이다(Version과 함께 고정 — 비정규 결과 비트도 계약에 든다).
 constexpr uint64 SubnormalDigestValue = 0x05879A39715B3F0Dull;
 
@@ -172,6 +176,52 @@ TEST(DeterministicMath_AccuracyAgainstReferenceTables) {
                    [](double x, double) { return LinearToSrgb(x); });
     CheckReference("Gamma22ToLinear", reference::Gamma22Reference, 2,
                    [](double x, double) { return Gamma22ToLinear(x); });
+    CheckReference("Acos", reference::AcosReference, 1, [](double x, double) { return Acos(x); });
+}
+
+// Acos의 끝점·특수값·단조성과 결과 비트 고정(Docs/Design/CoreDataFoundations.ko.md 2.2절 —
+// MikkTSpace 패치·가중 법선이 쓴다). 기존 함수의 digest(DeterministicMath_GoldenDigest)와 따로
+// 고정한다.
+TEST(DeterministicMath_AcosSpecialValuesAndDigest) {
+    constexpr uint64 HalfPiBits = 0x3FF921FB54442D18ull;
+    constexpr uint64 PiBits = 0x400921FB54442D18ull;
+    CHECK(Bits(Acos(1.0)) == Bits(0.0) && Bits(Acos(-1.0)) == PiBits);
+    CHECK(Bits(Acos(0.0)) == HalfPiBits && Bits(Acos(-0.0)) == HalfPiBits);
+    const double payload = BitCast<double>(uint64{0xFFF8000000000ABC});
+    const double infinity = 1e300 * 1e300;
+    CHECK(Bits(Acos(payload)) == CanonicalNaN && Bits(Acos(infinity)) == CanonicalNaN);
+    CHECK(Bits(Acos(-infinity)) == CanonicalNaN);
+    CHECK(Bits(Acos(BitCast<double>(uint64{0x3FF0000000000001}))) == CanonicalNaN);
+    CHECK(Bits(Acos(BitCast<double>(uint64{0xBFF0000000000001}))) == CanonicalNaN);
+    // 1 바로 아래·−1 바로 위(√ 보정 경로의 가장 작은 z = 2^−54)와 비정규 입력.
+    CHECK(Acos(BitCast<double>(uint64{0x3FEFFFFFFFFFFFFF})) > 0.0);
+    CHECK(Acos(BitCast<double>(uint64{0xBFEFFFFFFFFFFFFF})) < BitCast<double>(PiBits));
+    CHECK(Bits(Acos(BitCast<double>(uint64{1}))) == HalfPiBits);
+
+    // [−1, 1]을 고르게 훑으면 단조 감소한다(분기 경계 ±½ 포함).
+    double previous = Acos(-1.0);
+    for (int step = 1; step <= 4096; ++step) {
+        const double x = -1.0 + static_cast<double>(step) / 2048.0;
+        const double value = Acos(x);
+        CHECK(value <= previous);
+        previous = value;
+    }
+
+    uint64 hash = 0xCBF29CE484222325ull;
+    uint32 state = 2027;
+    for (int sample = 0; sample < 4096; ++sample) {
+        state = state * 1664525u + 1013904223u;
+        const double x = static_cast<double>(state) / 2147483648.0 - 1.0; // [−1, 1)
+        hash = Fnv(hash, Bits(Acos(x)));
+        hash = Fnv(hash, Bits(Acos(x * 1e-6)));
+        hash = Fnv(hash, Bits(Acos(1.0 - (x + 1.0) * 1e-9)));
+    }
+
+    // 결과 비트가 바뀌면(Version을 올려야 하는 변경) 이 값과 Version을 함께 갱신한다.
+    printf("DeterministicMath Acos digest (Version %u): 0x%016llX\n", Version,
+           static_cast<unsigned long long>(hash));
+    CHECK(Version == 1);
+    CHECK(hash == AcosDigestValue);
 }
 
 TEST(DeterministicMath_SrgbByteTablesAreExact) {
