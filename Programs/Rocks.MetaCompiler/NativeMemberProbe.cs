@@ -137,12 +137,13 @@ internal static class NativeMemberProbe
 
         """;
 
-    // 판정 템플릿의 줄 수다(끝 줄바꿈 포함 — 탐침 변수의 `<stdin>` 줄 번호를 계산한다).
-    private static readonly int TemplateLines = Templates.Count(character => character == '\n');
-
     private const string ProbePrefix = "rocksProbe_";
 
-    // 탐침 변수의 desugar된 형식이다: const RocksProbeCode<판정, 대상의 정규 철자>(판정 0이면 대상은 void).
+    // 판정 형판이다(레코드 닫힘이 중첩 포인터·참조 필드의 판정에 다시 쓴다 — Docs/Design/ClangVersionSupport.ko.md 4.4절).
+    internal static string VerdictTemplates => Templates;
+
+    // 판정 형식 철자다: (const) RocksProbeCode<판정, 대상의 정규 철자>(판정 0이면 대상은 void). 탐침 변수의 desugar 철자와
+    // 정규 형식 탐침의 템플릿 인자가 같은 모양이다.
     private static readonly Regex VerdictType = new(@"^(?:const )?rocks_meta_probe::RocksProbeCode<(?<code>[0-3]), (?<target>.+)>$",
         RegexOptions.CultureInvariant | RegexOptions.Singleline, TimeSpan.FromSeconds(1));
 
@@ -152,108 +153,34 @@ internal static class NativeMemberProbe
         public string Symbol => Owner + "::" + Native.Name;
     }
 
-    private readonly record struct Verdict(int Code, string Target);
+    internal readonly record struct Verdict(int Code, string Target);
 
-    // 탐침 실행 하나의 결과다. 성공이면 Verdicts(모든 멤버의 판정), 실패면 null과 Failure(Clang의 첫 error 줄)·Blamed(오류의
-    // `<stdin>` 위치가 탐침 변수 줄에 대응한 멤버 → 그 오류 줄)·Unattributed(어느 멤버에도 대응하지 않는 오류가 있거나 위치가
-    // 있는 오류가 없음)다.
-    private sealed record ProbeRun(Dictionary<int, Verdict>? Verdicts, string Failure, Dictionary<int, string> Blamed, bool Unattributed);
-
-    private sealed class Outcome
+    // 판정 형식 철자 하나를 판정으로 읽는다(모양이 다르면 null).
+    internal static Verdict? ParseVerdict(string spelling)
     {
-        public Dictionary<int, Verdict> Verdicts { get; } = [];
-
-        public Dictionary<int, string> Failures { get; } = [];
+        Match match = VerdictType.Match(spelling);
+        return match.Success ? new Verdict(match.Groups["code"].Value[0] - '0', match.Groups["target"].Value) : null;
     }
 
-    // baseLines는 첫 실행 합성 번역 단위의 줄 수(입력 헤더 include 줄), run은 그 단위 끝에 텍스트를 붙여 경고를 끄고 탐침 변수만
-    // 덤프하는 Clang 실행이다.
-    private sealed class Session(int baseLines, Func<string, Task<ProcessResult>> run)
+    // headers(두 번째 탐침의 public 헤더) include 뒤에 판정 템플릿과 GeneratedType 특수화의 여는 줄을 둔다. 멤버별 탐침 변수가 질문
+    // 줄이고 닫는 줄이 뒷부분이다(ClangProbe).
+    private static string Prelude(IReadOnlyList<string> headers)
     {
-        // headers(두 번째 탐침의 public 헤더) include 뒤에 판정 템플릿과 멤버별 탐침 변수를 붙여 실행한다. members가 비면 판정
-        // 템플릿(과 헤더)만 컴파일된다.
-        public async Task<ProbeRun> RunAsync(IReadOnlyList<Member> members, IReadOnlyList<string> headers)
+        StringBuilder text = new();
+        foreach (string header in headers)
         {
-            StringBuilder text = new();
-            int line = baseLines + 1;
-            foreach (string header in headers)
-            {
-                text.Append($"#include \"{header.Replace('\\', '/')}\"\n");
-                ++line;
-            }
-
-            text.Append(Templates);
-            line += TemplateLines;
-            text.Append("template <>\nstruct rocks::GeneratedType<rocks_meta_probe::RocksProbeTag> {\n");
-            line += 2;
-            Dictionary<int, int> memberLines = [];
-            foreach (Member member in members)
-            {
-                memberLines.Add(line++, member.Index);
-                text.Append(CultureInfo.InvariantCulture,
-                    $"static constexpr ::rocks_meta_probe::RocksProbeVerdict<decltype(::{member.Owner}::{member.Native.Name})> {ProbePrefix}{member.Index}{{}};\n");
-            }
-
-            text.Append("};\n");
-            ProcessResult result = await run(text.ToString());
-            if (result.ExitCode != 0)
-            {
-                Dictionary<int, string> blamed = [];
-                bool unattributed = Attribute(result.StdErr, memberLines, blamed);
-                return new(null, FirstError(result), blamed, unattributed);
-            }
-
-            Dictionary<int, Verdict>? verdicts = ReadVerdicts(result.StdOut);
-            if (verdicts is null || members.Any(member => !verdicts.ContainsKey(member.Index)))
-            {
-                return new(null, "Clang reported no verdict for the member", [], true);
-            }
-
-            return new(verdicts, "", [], false);
+            text.Append($"#include \"{header.Replace('\\', '/')}\"\n");
         }
 
-        // known(이미 실행한 결과)이 있으면 그것부터 쓴다. 실패한 멤버는 Failures에, 나머지는 Verdicts에 담는다. 오류가 멤버에
-        // 대응하면 그 멤버를 빼고 나머지를 다시 실행하고, 대응하지 않으면 묶음을 반으로 나눈다(실행 순서와 결과는 결정적이다).
-        public async Task JudgeAsync(IReadOnlyList<Member> members, IReadOnlyList<string> headers, Outcome outcome, ProbeRun? known = null)
-        {
-            if (members.Count == 0)
-            {
-                return;
-            }
-
-            ProbeRun probe = known ?? await RunAsync(members, headers);
-            if (probe.Verdicts is not null)
-            {
-                foreach (Member member in members)
-                {
-                    outcome.Verdicts[member.Index] = probe.Verdicts[member.Index];
-                }
-
-                return;
-            }
-
-            if (probe.Blamed.Count != 0)
-            {
-                foreach ((int index, string failure) in probe.Blamed)
-                {
-                    outcome.Failures[index] = failure;
-                }
-
-                await JudgeAsync(members.Where(member => !probe.Blamed.ContainsKey(member.Index)).ToList(), headers, outcome);
-                return;
-            }
-
-            if (members.Count == 1)
-            {
-                outcome.Failures[members[0].Index] = probe.Failure;
-                return;
-            }
-
-            int half = members.Count / 2;
-            await JudgeAsync(members.Take(half).ToList(), headers, outcome);
-            await JudgeAsync(members.Skip(half).ToList(), headers, outcome);
-        }
+        return text.Append(Templates).Append("template <>\nstruct rocks::GeneratedType<rocks_meta_probe::RocksProbeTag> {\n").ToString();
     }
+
+    private const string Epilogue = "};\n";
+
+    private static List<ClangProbe.Question> Questions(IEnumerable<Member> members) => members
+        .Select(member => new ClangProbe.Question(member.Index, string.Create(CultureInfo.InvariantCulture,
+            $"static constexpr ::rocks_meta_probe::RocksProbeVerdict<decltype(::{member.Owner}::{member.Native.Name})> {ProbePrefix}{member.Index}{{}};")))
+        .ToList();
 
     // types는 이 모듈 타입(생성 순서), baseLines는 합성 번역 단위의 줄 수, publicHeaders는 불완전한 대상이 있을 때만 부르는 모듈
     // public 헤더 목록이다(절대 경로). Object 파생 대상·강한 참조 래퍼가 있으면 첫 멤버를, 없고 판정하지 못한 멤버가 있으면 그
@@ -276,13 +203,15 @@ internal static class NativeMemberProbe
             return;
         }
 
-        Session session = new(baseLines, run);
-        Outcome outcome = new();
-        ProbeRun first = await session.RunAsync(members, []);
-        if (first.Verdicts is null && first.Unattributed)
+        ClangProbe.Session<Verdict> session = new(baseLines, run, ReadVerdicts);
+        ClangProbe.Outcome<Verdict> outcome = new();
+        string prelude = Prelude([]);
+        List<ClangProbe.Question> questions = Questions(members);
+        ClangProbe.Run<Verdict> first = await session.RunAsync(prelude, questions, Epilogue);
+        if (first.Answers is null && first.Unattributed)
         {
-            ProbeRun bare = await session.RunAsync([], []);
-            if (bare.Verdicts is null)
+            ClangProbe.Run<Verdict> bare = await session.RunAsync(prelude, [], Epilogue);
+            if (bare.Answers is null)
             {
                 throw new MetadataException($"{members[0].Symbol}: Clang rejected the ROCKS_NATIVE member probe itself, before any member (Clang: {bare.Failure})", "RMC3000",
                     "The probe appended after the reflected headers failed with no member in it; check for a macro or declaration in the reflected headers that collides with the probe (rocks_meta_probe, RocksProbe*, rocksProbe*) and use the supported Clang toolchain.")
@@ -290,16 +219,22 @@ internal static class NativeMemberProbe
             }
         }
 
-        await session.JudgeAsync(members, [], outcome, first);
-        List<Member> incomplete = members.Where(member => outcome.Verdicts.TryGetValue(member.Index, out Verdict verdict) && verdict.Code == Incomplete).ToList();
+        await session.JudgeAsync(prelude, questions, Epilogue, outcome, first);
+        List<Member> incomplete = members.Where(member => outcome.Answers.TryGetValue(member.Index, out Verdict verdict) && verdict.Code == Incomplete).ToList();
         if (incomplete.Count != 0)
         {
-            await WidenAsync(session, incomplete, publicHeaders(), outcome.Verdicts);
+            if (await ClangProbe.WidenAsync(session, Prelude, Epilogue, Questions(incomplete), publicHeaders()) is ClangProbe.Outcome<Verdict> widened)
+            {
+                foreach ((int index, Verdict verdict) in widened.Answers)
+                {
+                    outcome.Answers[index] = verdict;
+                }
+            }
         }
 
         foreach (Member member in members)
         {
-            if (outcome.Verdicts.TryGetValue(member.Index, out Verdict verdict) && verdict.Code is ObjectTarget or StrongWrapper)
+            if (outcome.Answers.TryGetValue(member.Index, out Verdict verdict) && verdict.Code is ObjectTarget or StrongWrapper)
             {
                 string path = verdict.Code == ObjectTarget ? "raw pointer to Object-derived " + verdict.Target : verdict.Target;
                 throw new MetadataException($"{member.Symbol}: ROCKS_NATIVE member holds a strong object reference ({path})", "RMC2205",
@@ -316,105 +251,6 @@ internal static class NativeMemberProbe
                     .At(member.Native.Site);
             }
         }
-    }
-
-    // 불완전한 대상을 public 헤더를 더해 다시 판정한다(판정을 verdicts에 덮어쓴다). 멤버에 대응하지 않는 실패면 헤더를 하나씩
-    // (멤버 없이) 컴파일해 실패하는 헤더를 빼고 다시 실행한다 — 이 비용은 실패할 때만 든다. 남은 헤더로도 판정 템플릿조차
-    // 컴파일되지 않거나 남은 헤더가 없으면 아무것도 바꾸지 않는다(불완전 판정이 남아 허용된다). 실패한 멤버도 불완전 판정 그대로
-    // 허용된다.
-    private static async Task WidenAsync(Session session, List<Member> incomplete, IReadOnlyList<string> headers, Dictionary<int, Verdict> verdicts)
-    {
-        if (headers.Count == 0)
-        {
-            return;
-        }
-
-        ProbeRun wide = await session.RunAsync(incomplete, headers);
-        if (wide.Verdicts is null && wide.Unattributed)
-        {
-            List<string> usable = [];
-            foreach (string header in headers)
-            {
-                if ((await session.RunAsync([], [header])).Verdicts is not null)
-                {
-                    usable.Add(header);
-                }
-            }
-
-            if (usable.Count == 0)
-            {
-                return;
-            }
-
-            if (usable.Count != headers.Count)
-            {
-                headers = usable;
-                wide = await session.RunAsync(incomplete, headers);
-            }
-
-            if (wide.Verdicts is null && wide.Unattributed && (await session.RunAsync([], headers)).Verdicts is null)
-            {
-                return;
-            }
-        }
-
-        Outcome widened = new();
-        await session.JudgeAsync(incomplete, headers, widened, wide);
-        foreach ((int index, Verdict verdict) in widened.Verdicts)
-        {
-            verdicts[index] = verdict;
-        }
-    }
-
-    // 실패한 탐침 실행의 진단을 error(또는 fatal error)와 딸린 note 묶음으로 나눠, 묶음의 `<stdin>` 위치 중 탐침 변수 줄이 있으면
-    // 그 멤버에 그 error 줄을 대응시킨다(blamed). 어느 멤버에도 대응하지 않는 묶음이 있거나 위치가 있는 error가 없으면 참이다.
-    // Clang 진단 문구는 지역화될 수 있으므로 위치·심각도 형식만 해석한다(clang `file:line:col:`·clang-cl `file(line,col):`).
-    private static bool Attribute(string diagnostics, Dictionary<int, int> memberLines, Dictionary<int, string> blamed)
-    {
-        bool unattributed = false;
-        bool sawError = false;
-        string? current = null;
-        bool currentMapped = false;
-        foreach (string raw in diagnostics.Split('\n'))
-        {
-            string line = raw.Trim();
-            Match match = CompilerDriver.ClangLocation.Match(line);
-            if (!match.Success)
-            {
-                match = CompilerDriver.ClangClLocation.Match(line);
-            }
-
-            if (!match.Success)
-            {
-                continue;
-            }
-
-            string severity = match.Groups["severity"].Value;
-            if (severity is "error" or "fatal error")
-            {
-                unattributed |= current is not null && !currentMapped;
-                current = line;
-                currentMapped = false;
-                sawError = true;
-            }
-            else if (severity != "note")
-            {
-                unattributed |= current is not null && !currentMapped;
-                current = null;
-                continue;
-            }
-
-            if (current is not null && match.Groups["file"].Value == "<stdin>" &&
-                int.TryParse(match.Groups["line"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out int number) &&
-                memberLines.TryGetValue(number, out int index))
-            {
-                blamed.TryAdd(index, current);
-                currentMapped = true;
-            }
-        }
-
-        unattributed |= current is not null && !currentMapped;
-        return unattributed || !sawError;
     }
 
     private static Dictionary<int, Verdict>? ReadVerdicts(string output)
@@ -435,10 +271,9 @@ internal static class NativeMemberProbe
                     continue;
                 }
 
-                Match match = VerdictType.Match(ClangAstParser.TypeSpelling(node));
-                if (match.Success)
+                if (ParseVerdict(ClangAstParser.TypeSpelling(node)) is Verdict verdict)
                 {
-                    verdicts[index] = new(match.Groups["code"].Value[0] - '0', match.Groups["target"].Value);
+                    verdicts[index] = verdict;
                 }
             }
         }
@@ -448,33 +283,5 @@ internal static class NativeMemberProbe
         }
 
         return verdicts;
-    }
-
-    // 탐침 실행의 첫 error(또는 fatal error) 줄이다. 위치·심각도 형식만 해석하고 그 줄을 그대로 옮긴다. 그런 줄이 없으면 비어
-    // 있지 않은 첫 줄이다.
-    private static string FirstError(ProcessResult result)
-    {
-        string? fallback = null;
-        foreach (string raw in result.StdErr.Split('\n'))
-        {
-            string line = raw.Trim();
-            Match match = CompilerDriver.ClangLocation.Match(line);
-            if (!match.Success)
-            {
-                match = CompilerDriver.ClangClLocation.Match(line);
-            }
-
-            if (match.Success && match.Groups["severity"].Value is "error" or "fatal error")
-            {
-                return line;
-            }
-
-            if (fallback is null && line.Length != 0)
-            {
-                fallback = line;
-            }
-        }
-
-        return fallback ?? $"exit code {result.ExitCode}";
     }
 }

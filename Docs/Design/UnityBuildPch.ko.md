@@ -15,7 +15,7 @@
 
 UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`)의 UnrealBuildTool이다. 경로는 `Engine/Source/Programs/UnrealBuildTool/` 기준이다. UE 이름은 대응표와 근거에만 적는다. 레거시와 deprecated 경로는 따르지 않는다(`bChainPCHs`, `IncludeOrderVersion` 호환, BuildSettingsVersion별 분기, Perforce read-only 판별). clang 동작은 Rocks 툴체인(clang-cl·clang++ 21.1.6)으로 실측했다.
 
-상태: **설계 확정**(결정 UD1–UD20, 2026-11-18 사용자 승인 — 권장안). 리뷰어 교차 검증을 반영했다. 구현 단계는 UB0–UB6(15절)이다. 2026-11-20 사용자 결정으로 착수했고, 단계별 전체 빌드·기준 측정 없이 이어서 구현한 뒤 끝에 한 번 검증한다(12절의 반복 측정은 하지 않는다). 구현 상태와 구현하며 정한 점은 개정 이력에 단계마다 적는다. **UB0–UB6을 구현했다**(2026-11-20). 남은 일은 `unity-profile`과 기준 시나리오 반복 측정(12절), macOS에서 유니티 켜기(9.3절), Engine 공유 PCH와 `Object/Object.h` 계열의 PCH 편입(8.4절)이다.
+상태: **설계 확정**(결정 UD1–UD20, 2026-11-18 사용자 승인 — 권장안). 리뷰어 교차 검증을 반영했다. 구현 단계는 UB0–UB6(15절)이다. 2026-11-20 사용자 결정으로 착수했고, 단계별 전체 빌드·기준 측정 없이 이어서 구현한 뒤 끝에 한 번 검증한다(12절의 반복 측정은 하지 않는다). 구현 상태와 구현하며 정한 점은 개정 이력에 단계마다 적는다. **UB0–UB6을 구현했다**(2026-11-20). 남은 일은 `unity-profile`과 기준 시나리오 반복 측정(12절), Engine 공유 PCH와 `Object/Object.h` 계열의 PCH 편입(8.4절)이다.
 
 ## 1. 현재 상태와 문제
 
@@ -112,6 +112,33 @@ compile action identity에서 모듈 전체 소스 목록을 빼고 그 action�
 - 현재 cache hit은 모든 출력의 실제 SHA-256이 일치해야 한다(README "입력과 증분 계약"). PCH는 수십–수백 MB라서 무변경 빌드(I0 ≤2 s)마다 다시 해시하면 목표를 넘는다.
 - 출력 검증은 (크기, 수정 시각, 파일 ID)가 기록과 모두 같으면 기록된 해시를 쓰고, 하나라도 다르면 다시 해시한다. 시각만으로 hit를 판정하는 것은 아니다. 기록된 해시는 key와 묶여 있고, 메타데이터가 바뀌면 내용을 다시 본다.
 - 같은 plan 안의 산출물(PCH·archive)을 입력으로 받는 action은 그 산출물의 기록 해시를 입력 해시로 쓰고, 파일을 다시 읽지 않는다.
+
+### 4.4 경로 철자
+
+**문제**
+- Windows와 macOS(기본 APFS)의 파일 시스템은 대소문자를 구분하지 않고 보존한다. 같은 디렉터리를 `c:\work\rocks`로도 `C:\Work\Rocks`로도 열 수 있다.
+- 빌드는 받은 철자를 그대로 인자(include 디렉터리·소스 경로)와 action key에 넣었다. 그래서 같은 트리를 철자만 다르게 실행하면(작업 디렉터리의 드라이브 문자가 소문자인 셸, 다른 대소문자를 넘기는 스크립트) 모든 action이 다시 실행되고 `compile_commands.json`의 경로도 달라졌다.
+
+**규칙**: 빌드는 받은 경로를 디스크에 있는 철자로 바꿔서 쓴다(`Rocks.Build/PathSpelling.cs`의 `PathSpelling.OnDisk`).
+- 드라이브 문자는 대문자로 한다.
+- 루트부터 성분마다, 그 이름의 항목이 부모 디렉터리에 있으면 파일 시스템이 알려 주는 이름으로 바꾼다. 없는 성분부터는 받은 그대로 둔다(아직 만들지 않은 출력 디렉터리).
+- 링크는 풀지 않는다. symlink·junction·`subst` 드라이브를 거친 경로도 받은 성분의 이름만 바로잡는다.
+- 대소문자를 구분하는 파일 시스템에서는 정확히 같은 이름을 먼저 찾으므로 받은 철자가 바뀌지 않는다.
+
+**적용 지점**
+- `NativeBuildEngine.BuildAsync`가 요청을 받자마자 한 번 한다. 대상은 `RootDirectory`·`OutputDirectory`·`SdkDirectory`, 모듈의 경로 목록(`Sources`·`ReflectionSources`·include 디렉터리·`PrebuiltLibraries`·`AdditionalInputs`·`UnityExclude`·`PrivatePchHeader`), 툴체인의 compiler·archiver·linker 경로다. 상대 경로는 루트 기준으로 푼 뒤 바꾼다. 그 뒤의 단계(모듈 표, 생성 소스, BuildInfo, 액션 그래프, compile DB, 실행기)는 모두 바꾼 요청을 본다.
+- CLI는 `--root`·`--output`·`--sdk`·`--project`·`--destination`·`--compiler`를 읽을 때 한다. 규칙 평가와 메타 생성이 빌드 엔진보다 먼저 이 경로로 파일을 쓰기 때문이다.
+- 그래서 action key, 의존 기록, `compile_commands.json`, 도구 빌드 ID가 실행할 때 쓴 철자와 무관하다.
+
+**근거와 버린 대안**
+- UE도 사용자가 준 경로를 성분마다 디스크의 철자로 바로잡는다. `EpicGames.Core/DirectoryUtils.cs:18`의 `FindCorrectCase`가 부모 디렉터리를 열거해 이름을 맞추고 드라이브 문자를 대문자로 하며, 없는 경로는 그대로 둔다. UBT는 프로젝트 파일 경로에 쓴다(`UnrealBuildTool/Configuration/Descriptors/TargetDescriptor.cs:509`).
+- 최종 경로(`GetFinalPathNameByHandle`)는 쓰지 않는다. 철자뿐 아니라 symlink·junction·`subst`를 풀어 다른 경로를 돌려준다. 출력이 루트 아래인지 보는 검사와, 다른 루트·`subst`·junction에서도 같은 도구 빌드 ID(8.7절)가 받은 경로의 모양에 기댄다.
+- key를 계산할 때만 대소문자를 접는 방법도 쓰지 않는다. 인자와 compile DB, 진단에 찍히는 경로는 여전히 실행마다 달라지고, 대소문자를 구분하는 파일 시스템에서는 서로 다른 파일을 같게 본다.
+
+**한계**
+- 있는 경로의 8.3 짧은 이름(`PROGRA~1`)은 긴 이름이 된다(.NET `Path.GetFullPath`가 편다). 아직 없는 경로의 짧은 이름은 받은 그대로다.
+- 환경 변수(`INCLUDE`·`LIB`)에 적힌 경로의 철자는 바꾸지 않는다.
+- 비용은 성분마다 디렉터리 조회 한 번이고, 같은 디렉터리는 요청 하나에서 한 번만 조회한다.
 
 ## 5. 결정 요약
 
@@ -519,3 +546,5 @@ UB6에서 묶음 TU와 PCH action의 최대 메모리를 실측해, 동시 실�
 | 1(구현 기록 UB5 후속) | 2026-11-20 | 엔진 모듈에 공유 PCH 제공 모듈을 정했다(사용자 요청 — 제공 모듈이 없으면 공유 PCH 기구가 아무 일도 하지 않는다). Core `Core/CoreSharedPch.h`(26개)와 ObjectRuntime `Object/ObjectSharedPch.h`(Core 목록 + 15개)이고, 고른 방법·기준·목록·넣지 않은 것(`Object/Object.h` 계열, Engine·Graphics 제공 모듈)은 8.4절에 적었다. 의존 기록 대신 include 그래프 정적 분석과 4주 커밋 수를 썼다(이 작업 트리에 UB0 뒤 빌드 출력이 없었다). 함께 고친 것: 공개 헤더 단독 컴파일 검사 모듈은 유니티·PCH를 끈다(10절 — 빠져 있었다), 정책 검사 `pch-header-include`(10절), `Rocks.proj`의 `-p:Timing`. 시험: `Rocks.Build.Tests`의 PCH 묶음이 NDK가 있으면 같은 fixture(정의 헤더·모듈 PCH·공유 PCH)를 clang++로 교차 빌드한다(GNU 드라이버의 `-x c++-header`·`-include-pch` 경로 — macOS도 이 경로다), `--group dependency|unity|pch`로 묶음 하나만 돌릴 수 있다. 확인: PCH 묶음 5개 PASS(NDK 포함), 정책 검사 통과와 `Policy.PchHeaderIncludesAreRejected`, EngineTests·Foundation·Sandbox·Commandlet 계획 생성(변형은 제공 모듈마다 1개), 고친 모듈·시험 디렉터리의 한 TU 문법 검사(공유 PCH 헤더를 강제 include한 논리 명령으로) |
 | 1(구현 기록 UB6) | 2026-11-20 | 기본값과 UD20을 정했다. 반복 측정 없이 권장안으로 정한다는 사용자 결정에 따랐다. (1) **기본값.** CLI `--unity`·`--pch`·`--adaptive`는 모두 on이고 CI는 `--adaptive off`다(11절 그대로). 손으로 쓴 소스의 유니티는 규칙에서 켠 모듈만 묶는다(`UnityBuild.DefaultOn = false`) — 켠 모듈은 묶음 충돌 정책 검사의 대상이므로 정리해 통과한 모듈만 켠다. 지금 켜진 것은 엔진 모듈 40개와 시험 실행 파일이고, 꺼 둔 것은 Sandbox·Commandlet·벤치 프로그램·DeterministicMath다(게임 모듈도 기본은 끔이다). 리플렉션 생성 소스는 기본으로 묶는다(GSD9). `UnityAnchorFiles` 16, `UnityBatchBytes` 384 KiB, `PrivatePchMinTus` 3은 그대로다. (2) **UD20.** `-fpch-codegen`·`-fpch-debuginfo`는 쓰지 않는다 — PCH object를 링크해야 하고 정적 라이브러리 경계와 얽히는데, 엔진 헤더의 파싱·inline 코드 생성 몫이 작아(8.4절 실측) 얻을 것이 적다. 메모리 기반 병렬도 제한은 두지 않는다(13절). C++ modules는 도입하지 않는다. (3) **하지 않은 것.** `unity-profile`(12절 — 계측 기구가 필요하고 결과를 쓸 측정 빌드가 없다)과 기준 시나리오 20회 반복 측정(사용자 결정). 대신 끝의 검증 빌드 한 번의 수치를 이 이력에 적는다. (4) **CI.** Windows에서 검증 변형(`/p:Unity=off /p:Pch=off`) Debug 빌드를 한 번 돈다(UD14 — 링크까지, 시험은 돌리지 않는다). 기본 변형과 같은 출력 디렉터리의 다른 object 변형 경로(`obj/<모듈>/u0p0/`)를 쓰며 모든 모듈을 다시 컴파일한다. (5) **남은 일.** `unity-profile`과 반복 측정, macOS에서 유니티 켜기(CI에서 한 번 확인한 뒤 `RepositoryUnity.VerifiedPlatforms`에 더한다 — 9.3절), Engine 공유 PCH와 `Object/Object.h` 계열의 PCH 편입(8.4절), 작업 파일 분리와 PCH를 켠 채로 I3(private `.cpp` 하나) 반복 시간 측정 |
 | 1(검증 기록) | 2026-11-20 | 끝에 한 번 돌린 검증의 결과다(Windows, Debug, `--adaptive off --timing on`, 8 병렬, 다른 세션의 빌드로 CPU가 포화된 장비). **결과.** Foundation: 746 action(compile 711·PCH 2·archive 32·link 1), 시험 2,549개 실패 0, 도구 시험 self 148·native 124·meta 246 통과, 무변경 재빌드 0 action. EngineTests: 887 action(compile 834·PCH 2·archive 50·link 1), 시험 2,954개 실패 0, self 148·native 42·meta 246 통과, 무변경 재빌드 0 action. `Rocks.Build.Tests` 61묶음, 통합 시험(설치 SDK 게임 포함), format, policy(묶음 충돌·`pch-header-include` 포함) 통과. 검증 변형(유니티·PCH 끔)의 Foundation Debug 빌드도 통과했다(1,337 action — 소스마다 단독 번역 단위). Android(NDK)는 빌드하지 않고, EngineTests 계획이 쓴 실제 묶음 파일 103개를 공유 PCH 헤더를 강제 include한 논리 명령으로 문법 검사해 통과했다(clang++ PCH 생성·사용은 `Rocks.Build.Tests`의 교차 빌드 fixture가 본다). **검증에서 고친 것.** (1) 첫 Foundation 빌드에서 시험 실행 파일의 묶음 3개가 `detail`이 모호하다는 오류로 실패했다. 원인은 둘이다 — `TestSupport/Private/Win64`의 시험 4개가 감싸기 대상(`Tests/` 디렉터리)에서 빠져 파일 범위 `using namespace rocks::platform;`이 묶음의 다음 파일로 샜고, 하위 namespace using에 기대어 `detail::`을 쓰던 시험 3개가 공유 PCH와 다른 디렉터리의 구성원이 들여온 `rocks::detail` 때문에 모호해졌다. 4개를 파일 고유 namespace로 감싸고 3개는 `platform::detail::`·`deterministic::detail::`로 한정했다. 시험 모듈의 사전 검사는 디렉터리 단위였는데 실제 묶음은 경로 순서로 디렉터리를 넘는다 — 사전 검사는 실제 묶음 파일로 해야 한다. (2) `--timing` 집계의 헤더 목록이 비어 있었다. clang은 `Source`(파일 하나의 파싱)를 길이가 아니라 시작·끝 쌍(`ph` `b`·`e`)으로 쓴다. 쌍의 시각 차를 더하고 묶음 구성원 소스는 헤더 목록에서 빼게 고쳤으며, 손으로 만든 trace로 시험한다(UB5 때 "세밀도보다 짧아서"라고 본 것은 틀린 진단이었다). clang-cl `/Yc`는 PCH 생성과 stub 컴파일 두 단계로 돌고 trace는 뒤 단계 것만 남으므로, PCH action의 시간은 trace가 아니라 action 소요 시간으로 본다(검증에서 0.4–0.8 s). (3) 통합 시험 두 곳이 낡아 있었다. SDK 게임 빌드는 SDK가 나른 공유 PCH 헤더를 게임 출력에 한 번 미리 컴파일하므로(모듈 이름이 제공 모듈인 Pch action) "게임 모듈의 action만 있다"는 확인을 그에 맞췄고, 필드를 더한 뒤의 게시는 타입별 생성 헤더가 아니라 생성 소스와 descriptor로 확인한다(GS2 뒤 헤더는 그대로다). C# 서식 위반 두 곳도 고쳤다. **수치**(Foundation clean build, 같은 장비 — 부하가 달라 벽시계는 거친 비교다). 이전(GS0 전: 생성 소스 분리·유니티·PCH 없음): 1,278 action, compile 시간 합 5,799.5 s(시험 실행 파일 386 TU 3,970.6 s, 공개 헤더 검사 401 TU 693.6 s), 메타 생성 229.5 s + native 776.5 s. 생성 소스 분리만(검증 변형 — 유니티·PCH 끔): 1,337 action, compile 시간 합 752.8 s(시험 실행 파일 390 TU 262.1 s, 공개 헤더 검사 405 TU 151.0 s), 메타 단계 72.8 s + native 103.3 s. 기본 변형(유니티·PCH 켬): 746 action, compile 시간 합 529.6 s(시험 실행 파일 59 TU 133.0 s, 공개 헤더 검사 405 TU 154.4 s), 도구 빌드·메타 생성·compile·archive까지 138 s(link 전에 위 묶음 3개가 실패한 첫 실행이고 장비 부하가 더 컸다). compile 시간 합으로 보면 생성 소스 분리(GS0–GS2)가 7.7분의 1로 줄였고, 유니티와 PCH가 거기서 30%를 더 줄였다(시험 실행 파일은 절반). 유니티의 나머지 이득은 프로세스 수(1,304 → 711)와 link 입력 수다. EngineTests clean build: 887 action, compile 시간 합 1,003.8 s(공개 헤더 검사 488 TU 484.0 s, 시험 실행 파일 70 TU 143.2 s, Sodium 142 TU 123.0 s), PCH action 2개 1.6 s. **UD20 확인.** 8 병렬의 두 빌드에서 메모리 부족이 없었다 — 메모리 기반 병렬도 제한은 두지 않는다(13절). **돌리지 않은 것.** Release·ASan·Development 구성, macOS(로컬 툴체인 없음 — 유니티는 꺼져 있고 PCH·감싼 시험·바꾼 이름은 macOS에서 컴파일해 보지 않았다), Android 전체 빌드, Sandbox·Commandlet·벤치 타깃 빌드(계획 생성까지만), 12절의 반복 측정 |
+| 1(경로 철자) | 2026-11-20 | 4.4절을 더했다: 빌드가 받은 경로를 디스크에 있는 철자로 맞춘다(`PathSpelling`). 같은 트리를 `c:\`와 `C:\`처럼 철자만 다르게 실행하면 전부 다시 컴파일되던 문제다. UE `FindCorrectCase`와 같은 방식(성분마다 부모 디렉터리에서 이름을 찾음)이고 링크는 풀지 않는다. |
+| 1(macOS 유니티) | 2026-11-20 | macOS에서도 유니티 빌드를 켰다(`RepositoryUnity.VerifiedPlatforms`에 macOS). POSIX 공통 소스는 NDK 묶음 문법 검사로 먼저 보고, macOS 전용 소스(PlatformBase의 `Mac`·`Apple`, ShaderToolLoader의 `Mac`)는 CI macOS job으로 확인했다. 로컬 macOS 툴체인이 없으므로 macOS 전용 소스를 고치면 CI로 확인한다 |

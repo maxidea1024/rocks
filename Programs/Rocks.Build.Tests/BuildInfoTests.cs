@@ -48,6 +48,12 @@ internal static class BuildInfoTests
         await ConfigurationsAndFailuresAsync(request, root);
         pass("BuildInfo: configurations share the fingerprint, ext keys, inventory exclusions, failed link, empty identity and engine version");
 
+        await PathSpellingRulesAsync(root);
+        pass("path spelling: on-disk names, missing tail kept, drive letter, short names, trailing separator, links not resolved");
+
+        await RespelledTreeAsync(request, root);
+        pass("path spelling: the same tree built through another spelling runs zero actions, same compile database and tool build ID");
+
         await PathAndRootRulesAsync(request, root);
         pass("BuildInfo: host path boundaries, single percent-encoding, owned roots inside sources, absolute roots, argument layout");
     }
@@ -964,6 +970,125 @@ internal static class BuildInfoTests
             "           static_cast<unsigned>(version.minorVersion), static_cast<unsigned>(version.patchVersion));\n" +
             "    return EngineValue() + Helper() == 10 ? 0 : 1;\n" +
             "}\n");
+    }
+
+    // 경로 철자(Docs/Design/UnityBuildPch.ko.md 4.4절): 있는 성분은 디스크의 이름으로, 없는 성분부터는 받은 그대로, 드라이브 문자는
+    // 대문자로, 끝 구분자는 받은 대로, 링크는 풀지 않는다. 대소문자를 구분하는 파일 시스템에서는 철자만 다른 경로가 없는 경로이므로
+    // 그대로 돌아오는 것만 본다.
+    private static async Task PathSpellingRulesAsync(string root)
+    {
+        string fixture = Directory.CreateDirectory(Path.Combine(root, "Spelling Fixture 한글")).FullName;
+        string inner = Directory.CreateDirectory(Path.Combine(fixture, "Inner Dir")).FullName;
+        string file = Path.Combine(inner, "File.Name.txt");
+        File.WriteAllText(file, "x");
+        string separator = Path.DirectorySeparatorChar.ToString();
+        string tail = Path.Combine("Spelling Fixture 한글", "Inner Dir", "File.Name.txt");
+        string onDisk = PathSpelling.OnDisk(file);
+        Check(onDisk.EndsWith(separator + tail, StringComparison.Ordinal), "an on-disk spelling must be kept: " + onDisk);
+        try
+        {
+            PathSpelling.OnDisk(Path.Combine("relative", "path"));
+            throw new InvalidOperationException("a relative path was accepted");
+        }
+        catch (ArgumentException)
+        {
+        }
+
+        string otherCase = Path.Combine(root, "SPELLING FIXTURE 한글", "inner dir", "FILE.NAME.TXT");
+        if (!File.Exists(otherCase))
+        {
+            // 대소문자를 구분하는 파일 시스템이다.
+            Check(PathSpelling.OnDisk(otherCase) == otherCase, "a missing path must keep the given spelling: " + PathSpelling.OnDisk(otherCase));
+            return;
+        }
+
+        Check(PathSpelling.OnDisk(otherCase) == onDisk, "another case must resolve to the on-disk spelling: " + PathSpelling.OnDisk(otherCase));
+        // 없는 성분부터는 받은 그대로다. 그 앞의 있는 성분은 바로잡는다.
+        string missing = PathSpelling.OnDisk(Path.Combine(root, "SPELLING FIXTURE 한글", "Missing DIR", "New.TXT"));
+        Check(missing.EndsWith(separator + Path.Combine("Spelling Fixture 한글", "Missing DIR", "New.TXT"), StringComparison.Ordinal),
+            "a missing tail must keep the given spelling: " + missing);
+        // 끝 구분자는 받은 대로, .과 ..은 정리한다.
+        string directory = PathSpelling.OnDisk(Path.Combine(root, "spelling fixture 한글", "INNER DIR") + separator);
+        Check(directory.EndsWith(separator + Path.Combine("Spelling Fixture 한글", "Inner Dir") + separator, StringComparison.Ordinal),
+            "a trailing separator must be kept: " + directory);
+        Check(PathSpelling.OnDisk(Path.Combine(inner, "..", "INNER DIR", ".", "file.name.txt")) == onDisk, "dot segments must be normalized");
+        // 인스턴스 하나로 여러 경로를 바꿔도 같다(디렉터리 조회를 기억한다).
+        var spelling = new PathSpelling();
+        Check(spelling.Resolve(otherCase) == onDisk && spelling.Resolve(Path.Combine(root, "spelling fixture 한글", "inner dir", "file.name.txt")) == onDisk &&
+            spelling.Resolve(Path.Combine(root, "SPELLING FIXTURE 한글")) == PathSpelling.OnDisk(fixture), "a shared instance must give the same spellings");
+        // 링크는 풀지 않는다: 링크를 거친 경로는 링크 이름 아래에 남고 성분의 철자만 바뀐다.
+        string link = Path.Combine(root, "Spelling Link");
+        if (OperatingSystem.IsWindows())
+        {
+            var linked = await ProcessRunner.RunAsync(new("cmd.exe", ["/d", "/c", "mklink", "/J", link, fixture], root));
+            Check(linked.ExitCode == 0, "mklink /J failed: " + linked.StdOut + linked.StdErr);
+        }
+        else
+        {
+            Directory.CreateSymbolicLink(link, fixture);
+        }
+
+        try
+        {
+            string through = PathSpelling.OnDisk(Path.Combine(root, "SPELLING LINK", "inner dir", "FILE.NAME.TXT"));
+            Check(through.EndsWith(separator + Path.Combine("Spelling Link", "Inner Dir", "File.Name.txt"), StringComparison.Ordinal),
+                "a link must not be resolved: " + through);
+        }
+        finally
+        {
+            Directory.Delete(link);
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            // 드라이브 문자는 대문자다.
+            string lowerDrive = char.ToLowerInvariant(file[0]) + file[1..];
+            Check(PathSpelling.OnDisk(lowerDrive) == onDisk && char.IsAsciiLetterUpper(onDisk[0]), "a drive letter must be upper case: " + PathSpelling.OnDisk(lowerDrive));
+            // 있는 경로의 8.3 짧은 이름은 긴 이름이 된다(짧은 이름을 만들지 않는 볼륨이면 건너뛴다).
+            string shortFixture = ShortPath(fixture);
+            if (!string.Equals(shortFixture, fixture, StringComparison.OrdinalIgnoreCase))
+            {
+                string expanded = PathSpelling.OnDisk(Path.Combine(Path.GetDirectoryName(fixture)!, Path.GetFileName(shortFixture), "inner dir"));
+                Check(expanded == PathSpelling.OnDisk(inner), "a short name must become the long name: " + expanded);
+            }
+        }
+    }
+
+    // 같은 트리를 철자만 바꿔(대소문자, Windows에서는 드라이브 문자도) 다시 빌드하면 action을 하나도 실행하지 않고, compile DB와 도구
+    // 빌드 ID, 산출물 경로가 그대로다. 대소문자를 구분하는 파일 시스템에서는 철자만 다른 경로가 없으므로 건너뛴다.
+    private static async Task RespelledTreeAsync(NativeBuildRequest request, string root)
+    {
+        string fixture = Directory.CreateDirectory(Path.Combine(root, "Respelled Tree")).FullName;
+        WriteFixture(fixture);
+        string output = Path.Combine(fixture, "Out Dir");
+        var builder = new NativeBuildEngine();
+        NativeBuildResult first = await Succeeded(builder, FixtureRequest(request, fixture, output), "build through the on-disk spelling");
+        Check(first.ExecutedActions == 6, "the first build must run every action: " + Describe(first));
+        // 임시 디렉터리까지는 그대로 두고 그 아래 두 성분(시험 루트와 fixture)만 바꾼다 — 임시 디렉터리 경로에는 8.3 짧은 이름이 있을
+        // 수 있고 그 철자는 건드리지 않는다.
+        string testRoot = Path.GetDirectoryName(fixture)!;
+        string respelled = Path.Combine(Path.GetDirectoryName(testRoot)!, Path.GetFileName(testRoot).ToUpperInvariant(),
+            Path.GetFileName(fixture).ToUpperInvariant());
+        if (OperatingSystem.IsWindows())
+        {
+            respelled = char.ToLowerInvariant(respelled[0]) + respelled[1..];
+        }
+
+        if (!Directory.Exists(respelled))
+        {
+            return;
+        }
+
+        byte[] database = File.ReadAllBytes(first.CompilationDatabasePath);
+        NativeBuildResult second = await Succeeded(builder, FixtureRequest(request, respelled, Path.Combine(respelled, "OUT DIR")),
+            "build through another spelling");
+        Check(second.ExecutedActions == 0, "another spelling of the same tree must not run actions: " + Describe(second));
+        Check(second.ToolBuildIds["Game"] == first.ToolBuildIds["Game"] && second.CompilationDatabasePath == first.CompilationDatabasePath &&
+            second.ModuleOutputs["Game"] == first.ModuleOutputs["Game"] && File.ReadAllBytes(second.CompilationDatabasePath).SequenceEqual(database),
+            "another spelling must not change the tool build ID, the outputs or the compile database: " + second.CompilationDatabasePath);
+        // 철자를 섞어도(루트만 다른 철자) 같다. 모듈 경로는 루트와 따로 바로잡힌다.
+        NativeBuildRequest mixed = FixtureRequest(request, fixture, output) with { RootDirectory = respelled };
+        Check((await Succeeded(builder, mixed, "build with only the root respelled")).ExecutedActions == 0, "a respelled root alone must not run actions");
     }
 
     private static NativeBuildRequest FixtureRequest(NativeBuildRequest template, string fixture, string output) => template with

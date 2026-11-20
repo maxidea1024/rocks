@@ -2,18 +2,25 @@
 
 #include <AssetTestFixtures/TestAssets.generated.h>
 
-// 로더 단계 조합 시험이다(Docs/Design/AssetSystem.ko.md 11.6절 6·7·16, 14절 완료 조건 2): 요청 단위
-// 모양(단일·둘 순환) × 의존 상태(없음·새로·진행 중 — 먼저 요청해 IO 보류·PostLoad 대기 — 먼저
-// 공개하고 PostLoad를 Critical 감시 단위들이 가져가 대기에 둔다·공개됨) × 결함(없음·요청 패키지
-// 손상·의존 손상) × 합류(없음·처음에 두 번째 요청·PostLoad 대기 때 요청) × 취소 시점(없음·허가
-// 전·IO·worker·Ready· PostLoad 대기) × 완료 순서(앞부터·뒤부터) × PostLoad handler(없음·기록)의
-// 허가 조합 전부.
+// 로더 단계 조합 시험이다(Docs/Design/AssetSystem.ko.md 11.6절 4·6·7·16, 14절 완료 조건 2): 요청
+// 단위 모양(단일·둘 순환) × 의존 상태(없음·새로·진행 중 — 먼저 요청해 IO 보류·PostLoad 대기 — 먼저
+// 공개하고 PostLoad를 Critical 감시 단위들이 가져가 대기에 둔다·공개됨) × 결함 단계(없음·IO 완료
+// 오류·Begin 즉시 실패·worker 손상·공개 실패 — 오래된 쿠킹 결과(대표 타입이 기대와 다름)를 Hard로
+// 가리킨다) × 결함 대상(요청 패키지·의존) × 합류(없음·처음에 두 번째 요청·PostLoad 대기 때 요청) ×
+// 취소 시점(없음·허가 전·IO·worker·Ready·PostLoad 대기) × 완료 순서(앞부터·뒤부터) × PostLoad
+// handler(없음·기록)의 허가 조합 전부.
 //
-// 취소 시점이 Ready·PostLoad 대기이고 결함이 있으면 실패가 먼저 확정된다(실패·취소 겹침). PostLoad
-// 대기 중 취소는 그 요청만 Cancelled이고 공개된 단위는 PostLoad를 마친다. 조합마다 요청
-// 상태(합류·진행 중 의존 요청 포함), 모든 구성·의존 패키지의 공개 여부, handler가 있으면 공개된
-// 패키지마다 PostLoad가 정확히 한 번이고 의존이 먼저인지를 단언하고, 끝나면 단위·IO·임시 byte가
-// 남지 않는지 본다. 번호 ↔ 조합 일대일과 실행 수로 빠짐을 본다.
+// 금지 조합: 결함 없음의 대상 의존(대상이 없어 요청 패키지 조합과 같다), 의존 없음·PostLoad 대기·
+// 공개된 의존의 의존 결함(실패할 의존이 없거나 이미 공개됐다), handler 없이 PostLoad 대기 의존·
+// 합류·취소(PostLoad 대기가 생기지 않는다).
+//
+// 실패와 취소가 겹치면 같은 Pump에서 완료 처리가 취소 확인보다 먼저다: Begin 실패는 허가 전 취소
+// 밖에서, IO 완료 오류는 IO 취소부터, worker 손상은 Ready 취소부터, 공개 실패는 PostLoad 대기
+// 취소에서만 실패가 먼저 확정된다(Ready 취소는 공개 전에 버린다). PostLoad 대기 중 취소는 그 요청만
+// Cancelled이고 공개된 단위는 PostLoad를 마친다. 조합마다 요청 상태(결함별 진단, 합류·진행 중 의존
+// 요청 포함), 모든 구성·의존·오래된 대상 패키지의 공개 여부, handler가 있으면 공개된 패키지마다
+// PostLoad가 정확히 한 번이고 의존이 먼저인지를 단언하고, 끝나면 단위·IO·임시 byte가 남지 않는지
+// 본다. 번호 ↔ 조합 일대일과 실행 수로 빠짐을 본다.
 using namespace rocks;
 namespace loader_staged_combination_tests_file {
 
@@ -38,6 +45,14 @@ enum class StagedDependency : uint32 {
 
 enum class StagedFault : uint32 {
     None,
+    IoComplete,
+    Begin,
+    Worker,
+    Instantiate,
+    Count
+};
+
+enum class StagedTarget : uint32 {
     Requested,
     Dependency,
     Count
@@ -75,21 +90,27 @@ enum class StagedHandler : uint32 {
 constexpr uint32 StagedShapes = static_cast<uint32>(StagedShape::Count);
 constexpr uint32 StagedDependencies = static_cast<uint32>(StagedDependency::Count);
 constexpr uint32 StagedFaults = static_cast<uint32>(StagedFault::Count);
+constexpr uint32 StagedTargets = static_cast<uint32>(StagedTarget::Count);
 constexpr uint32 StagedJoins = static_cast<uint32>(StagedJoin::Count);
 constexpr uint32 StagedCancels = static_cast<uint32>(StagedCancel::Count);
 constexpr uint32 StagedOrders = static_cast<uint32>(StagedOrder::Count);
 constexpr uint32 StagedHandlers = static_cast<uint32>(StagedHandler::Count);
 constexpr uint32 StagedSceneProduct =
-    StagedShapes * StagedDependencies * StagedFaults * StagedJoins;
+    StagedShapes * StagedDependencies * StagedFaults * StagedTargets * StagedJoins;
 constexpr uint32 StagedRunProduct = StagedCancels * StagedOrders * StagedHandlers;
-// 허가 조합 수다(금지: 의존 없음·PostLoad 대기·공개된 의존의 의존 손상, handler 없이 PostLoad 대기
-// 의존·PostLoad 대기 때 합류·PostLoad 대기 때 취소).
-//   handler 있음: (2 × 5 × 3 × 3 − 3 × 2 × 3) 장면 × 6 취소 × 2 순서 = 72 × 12 = 864
-//   handler 없음: (2 × 4 × 3 × 2 − 2 × 2 × 2) 장면 × 5 취소 × 2 순서 = 40 × 10 = 400
-constexpr uint32 StagedAllowed = 864 + 400;
+// 허가 조합 수다. 결함은 (모양·의존·합류)마다 요청 패키지 대상 5개(없음 포함)와, 의존이 새로·진행
+// 중일 때만 의존 대상 4개다: 의존 상태별 5·9·9·5·5.
+//   handler 있음: 2 모양 × 3 합류 × (5 + 9 + 9 + 5 + 5) = 198 장면 × 6 취소 × 2 순서 = 2376
+//   handler 없음(PostLoad 대기 의존·합류 제외): 2 × 2 × (5 + 9 + 9 + 5) = 112 장면 × 5 취소 × 2
+//   순서 = 1120
+constexpr uint32 StagedAllowed = 2376 + 1120;
 constexpr uint64 StagedBase = 1000;
 constexpr uint64 StagedStride = 10;
 constexpr uint64 StagedDependencyOffset = 5;
+// 공개 실패 결함의 오래된 쿠킹 결과 패키지다(결함 대상이 Hard로 가리킨다).
+constexpr uint64 StagedStaleOffset = 7;
+// worker 손상 위치(파일 앞 헤더 뒤 — SHA-256만 바뀐다)다.
+constexpr usize StagedCorruptOffset = 70;
 // PostLoad를 가져가는 Critical 감시 단위다(handler가 있을 때 PostLoad 대기 상태를 만든다).
 constexpr uint64 SentinelBase = 900;
 constexpr uint32 Sentinels = 16;
@@ -99,6 +120,7 @@ struct StagedScene {
     StagedShape shape;
     StagedDependency dependency;
     StagedFault fault;
+    StagedTarget target;
     StagedJoin join;
 };
 
@@ -111,19 +133,24 @@ struct StagedRun {
 StagedScene DecodeScene(uint32 index) noexcept {
     const uint32 join = index % StagedJoins;
     index /= StagedJoins;
+    const uint32 target = index % StagedTargets;
+    index /= StagedTargets;
     const uint32 fault = index % StagedFaults;
     index /= StagedFaults;
     const uint32 dependency = index % StagedDependencies;
     index /= StagedDependencies;
     return StagedScene{static_cast<StagedShape>(index), static_cast<StagedDependency>(dependency),
-                       static_cast<StagedFault>(fault), static_cast<StagedJoin>(join)};
+                       static_cast<StagedFault>(fault), static_cast<StagedTarget>(target),
+                       static_cast<StagedJoin>(join)};
 }
 
 uint32 EncodeScene(const StagedScene& scene) noexcept {
-    return ((static_cast<uint32>(scene.shape) * StagedDependencies +
-             static_cast<uint32>(scene.dependency)) *
-                StagedFaults +
-            static_cast<uint32>(scene.fault)) *
+    return (((static_cast<uint32>(scene.shape) * StagedDependencies +
+              static_cast<uint32>(scene.dependency)) *
+                 StagedFaults +
+             static_cast<uint32>(scene.fault)) *
+                StagedTargets +
+            static_cast<uint32>(scene.target)) *
                StagedJoins +
            static_cast<uint32>(scene.join);
 }
@@ -144,10 +171,12 @@ uint32 EncodeRun(const StagedRun& run) noexcept {
 }
 
 bool AllowedScene(const StagedScene& scene) noexcept {
-    return !(scene.fault == StagedFault::Dependency &&
-             (scene.dependency == StagedDependency::None ||
-              scene.dependency == StagedDependency::PostLoading ||
-              scene.dependency == StagedDependency::Published));
+    if (scene.target == StagedTarget::Requested) {
+        return true;
+    }
+
+    return scene.fault != StagedFault::None && (scene.dependency == StagedDependency::New ||
+                                                scene.dependency == StagedDependency::InFlight);
 }
 
 bool AllowedRun(const StagedRun& run) noexcept {
@@ -168,6 +197,11 @@ uint64 BaseOf(uint32 index) noexcept {
     return StagedBase + index * StagedStride;
 }
 
+// 결함을 끼우는 패키지(요청 패키지 또는 의존)다.
+uint64 FaultTargetOf(uint64 base, const StagedScene& combination) noexcept {
+    return combination.target == StagedTarget::Requested ? base : base + StagedDependencyOffset;
+}
+
 void AddStagedScene(LoaderScene& scene, uint32 index, const StagedScene& combination) noexcept {
     const uint64 base = BaseOf(index);
     scene.Add(base);
@@ -181,23 +215,50 @@ void AddStagedScene(LoaderScene& scene, uint32 index, const StagedScene& combina
         scene.Add(base + StagedDependencyOffset);
         scene.Hard(base, base + StagedDependencyOffset);
     }
+
+    // 공개 실패: 결함 대상이 오래된 쿠킹 결과를 Hard로 가리킨다(대상의 공개가 TypeMismatch).
+    if (combination.fault == StagedFault::Instantiate) {
+        scene.Add(base + StagedStaleOffset).staleType = true;
+        scene.Hard(FaultTargetOf(base, combination), base + StagedStaleOffset);
+    }
 }
 
-// 취소가 닿지 않은 요청 결과가 기대와 같은지다.
-bool UncancelledOutcome(const AssetLoadStatus& status, uint64 base,
-                        const StagedScene& combination) noexcept {
+// 결함을 IO 장면에 끼운다(파일 byte·경로별 오류).
+void InjectStagedFault(LoaderRig& rig, uint64 base, const StagedScene& combination) noexcept {
+    const uint64 target = FaultTargetOf(base, combination);
+    TestPackageIo::File* file = rig.io.FindFile(rig.scene.PathOf(target));
     switch (combination.fault) {
+    case StagedFault::IoComplete:
+        file->completeError = ErrorCode::Unsupported;
+        break;
+    case StagedFault::Begin:
+        file->beginError = ErrorCode::Busy;
+        break;
+    case StagedFault::Worker:
+        rig.scene.FileOf(target)[StagedCorruptOffset] ^= 0x01;
+        break;
     case StagedFault::None:
-        return status.state == AssetLoadState::Succeeded;
-    case StagedFault::Requested:
-        return status.state == AssetLoadState::Failed &&
-               status.diagnostic.code == AssetDiagnosticCode::CorruptPackage &&
-               status.diagnostic.asset == FixedId(base);
-    case StagedFault::Dependency:
-        return status.state == AssetLoadState::Failed &&
-               status.error == ErrorCode::DependencyFailed &&
-               status.diagnostic.code == AssetDiagnosticCode::MissingDependency &&
-               status.diagnostic.related == FixedId(base + StagedDependencyOffset);
+    case StagedFault::Instantiate:
+    case StagedFault::Count:
+        break;
+    }
+}
+
+// 취소 시점에 실패가 이미 확정돼 있는지다(같은 Pump에서 완료 처리가 취소 확인보다 먼저 —
+// Begin은 허가 Pump, IO 완료 오류는 IO 완료 Pump, worker 손상은 worker 완료 Pump, 공개 실패는 공개
+// Pump에서 확정되고 취소 확인은 그 Pump의 완료 처리 뒤·허가와 공개 앞이다).
+bool FailureBeforeCancel(StagedFault fault, StagedCancel cancel) noexcept {
+    switch (fault) {
+    case StagedFault::None:
+        return false;
+    case StagedFault::Begin:
+        return cancel != StagedCancel::BeforeAdmission;
+    case StagedFault::IoComplete:
+        return cancel != StagedCancel::BeforeAdmission;
+    case StagedFault::Worker:
+        return cancel == StagedCancel::Ready || cancel == StagedCancel::PostLoading;
+    case StagedFault::Instantiate:
+        return cancel == StagedCancel::PostLoading;
     case StagedFault::Count:
         break;
     }
@@ -205,11 +266,52 @@ bool UncancelledOutcome(const AssetLoadStatus& status, uint64 base,
     return false;
 }
 
-// 첫 요청(취소 token 있음)의 기대 결과다. 결함이 있으면 Ready·PostLoad 대기 취소보다 실패가 먼저다.
+// 취소가 닿지 않은 요청 결과가 기대와 같은지다(결함별 진단).
+bool UncancelledOutcome(const AssetLoadStatus& status, uint64 base,
+                        const StagedScene& combination) noexcept {
+    if (combination.fault == StagedFault::None) {
+        return status.state == AssetLoadState::Succeeded;
+    }
+
+    if (status.state != AssetLoadState::Failed) {
+        return false;
+    }
+
+    if (combination.target == StagedTarget::Dependency) {
+        return status.error == ErrorCode::DependencyFailed &&
+               status.diagnostic.code == AssetDiagnosticCode::MissingDependency &&
+               status.diagnostic.related == FixedId(base + StagedDependencyOffset);
+    }
+
+    if (status.diagnostic.asset != FixedId(base)) {
+        return false;
+    }
+
+    switch (combination.fault) {
+    case StagedFault::IoComplete:
+        return status.error == ErrorCode::Unsupported &&
+               status.diagnostic.code == AssetDiagnosticCode::None;
+    case StagedFault::Begin:
+        return status.error == ErrorCode::Busy &&
+               status.diagnostic.code == AssetDiagnosticCode::None;
+    case StagedFault::Worker:
+        return status.diagnostic.code == AssetDiagnosticCode::CorruptPackage &&
+               status.diagnostic.section == static_cast<uint32>(CookedManifestField::PackageSha256);
+    case StagedFault::Instantiate:
+        return status.error == ErrorCode::TypeMismatch &&
+               status.diagnostic.related == FixedId(base + StagedStaleOffset);
+    case StagedFault::None:
+    case StagedFault::Count:
+        break;
+    }
+
+    return false;
+}
+
+// 첫 요청(취소 token 있음)의 기대 결과다. 취소 시점에 실패가 이미 확정됐으면 실패가 먼저다.
 bool FirstOutcome(const AssetLoadStatus& status, uint64 base, const StagedScene& combination,
                   StagedCancel cancel) noexcept {
-    const bool lateCancel = cancel == StagedCancel::Ready || cancel == StagedCancel::PostLoading;
-    if (cancel == StagedCancel::None || (lateCancel && combination.fault != StagedFault::None)) {
+    if (cancel == StagedCancel::None || FailureBeforeCancel(combination.fault, cancel)) {
         return UncancelledOutcome(status, base, combination);
     }
 
@@ -225,7 +327,7 @@ struct StagedHandles {
 
 } // namespace
 
-// 단계 조합 전부(14절 완료 조건 2): 허가 조합 1264개(handler 있음 864, 없음 400)를 실행 22번으로
+// 단계 조합 전부(14절 완료 조건 2): 허가 조합 3496개(handler 있음 2376, 없음 1120)를 실행 22번으로
 // 돈다.
 TEST(AssetLoader_StagedCombinations) {
     for (uint32 index = 0; index < StagedSceneProduct; ++index) {
@@ -253,14 +355,9 @@ TEST(AssetLoader_StagedCombinations) {
     REQUIRE(rig.Cook());
     for (uint32 index = 0; index < StagedSceneProduct; ++index) {
         const StagedScene combination = DecodeScene(index);
-        if (!AllowedScene(combination) || combination.fault == StagedFault::None) {
-            continue;
+        if (AllowedScene(combination)) {
+            InjectStagedFault(rig, BaseOf(index), combination);
         }
-
-        const uint64 corrupt = combination.fault == StagedFault::Requested
-                                   ? BaseOf(index)
-                                   : BaseOf(index) + StagedDependencyOffset;
-        rig.scene.FileOf(corrupt)[70] ^= 0x01;
     }
 
     rig.config.limits.maxPackagesInFlight = StagedInFlight;
@@ -426,6 +523,15 @@ TEST(AssetLoader_StagedCombinations) {
             bool membersLoaded =
                 first.state == AssetLoadState::Succeeded ||
                 (cancel == StagedCancel::PostLoading && combination.fault == StagedFault::None);
+            // 요청 단위가 공개 Pump까지 살아 있는지다(그 앞 취소는 버린다 — 취소 token 없는 처음
+            // 합류는 붙잡고, 늦은 합류는 버린 뒤에도 새로 로드해 공개까지 간다). 공개 실패는 그
+            // Pump에서 의존·오래된 대상을 먼저 공개한다.
+            const bool aliveAtPublish = cancel == StagedCancel::None ||
+                                        cancel == StagedCancel::PostLoading ||
+                                        combination.join == StagedJoin::AtStart ||
+                                        combination.join == StagedJoin::AtPostLoading;
+            const bool instantiateFault = combination.fault == StagedFault::Instantiate;
+            const bool dependencyFault = combination.target == StagedTarget::Dependency;
             if (combination.join == StagedJoin::AtStart) {
                 const AssetLoadStatus second = rig.StatusOf(handles[index].start);
                 ok = ok && UncancelledOutcome(second, base, combination);
@@ -451,10 +557,11 @@ TEST(AssetLoader_StagedCombinations) {
             case StagedDependency::None:
                 break;
             case StagedDependency::New:
-                dependencyLoaded = membersLoaded;
+                dependencyLoaded =
+                    membersLoaded || (instantiateFault && !dependencyFault && aliveAtPublish);
                 break;
             case StagedDependency::InFlight:
-                dependencyLoaded = combination.fault != StagedFault::Dependency;
+                dependencyLoaded = !dependencyFault;
                 ok = ok && (rig.StateOf(handles[index].dependency) == AssetLoadState::Succeeded) ==
                                dependencyLoaded;
                 break;
@@ -475,6 +582,19 @@ TEST(AssetLoader_StagedCombinations) {
                     // 의존의 PostLoad가 구성 패키지보다 먼저다.
                     ok = ok && (!membersLoaded || recording.IndexOf(FixedId(dependency)) <
                                                       recording.IndexOf(FixedId(base)));
+                }
+            }
+
+            // 오래된 대상은 그 주인(요청 패키지 또는 의존)이 공개 Pump까지 살아 있으면 공개된 채
+            // 남는다(진행 중 의존은 자기 요청이 붙잡는다).
+            if (instantiateFault) {
+                const uint64 stale = base + StagedStaleOffset;
+                const bool staleLoaded =
+                    aliveAtPublish ||
+                    (dependencyFault && combination.dependency == StagedDependency::InFlight);
+                ok = ok && rig.IsLoaded(stale) == staleLoaded;
+                if (handler) {
+                    ok = ok && recording.CountOf(FixedId(stale)) == (staleLoaded ? 1u : 0u);
                 }
             }
 

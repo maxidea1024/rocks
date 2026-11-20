@@ -194,19 +194,11 @@ internal static partial class SchemaValidator
                 return spelling;
             }
 
+            // base·참조 대상 철자는 Clang 정규 철자(완전 한정)다(Docs/Design/ClangVersionSupport.ko.md 4.3절 — 둘러싼 이름공간 순 근사 탐색은
+            // 하지 않는다).
             if (Candidate(spelling) is string direct)
             {
                 return direct;
-            }
-
-            string[] scope = owner.Split("::");
-            for (int count = scope.Length - 1; count > 0; --count)
-            {
-                string candidate = string.Join("::", scope.Take(count)) + "::" + spelling;
-                if (Candidate(candidate) is string found)
-                {
-                    return found;
-                }
             }
 
             throw new MetadataException($"{owner}: base/reference type '{spelling}' is not reflected in this module or its imported dependencies",
@@ -518,27 +510,10 @@ internal static partial class SchemaValidator
             field.ReferenceId = valueReferenceId;
         }
 
-        // struct base 철자를 리플렉션 struct(이 모듈·import — 둘러싼 이름공간 순으로 찾는다) 하나와 필드 없는 비리플렉션 base로
-        // 나눈다(리플렉션 B9k). 리플렉션 base가 둘 이상이거나 Binds 미러면 RMC2301이다.
-        ClassModel? StructBase(string spelling, string owner, SourceSite site)
-        {
-            string name = spelling.StartsWith("::", StringComparison.Ordinal) ? spelling[2..] : spelling;
-            if (ValueType(name, true, owner, site) is ClassModel direct)
-            {
-                return direct;
-            }
-
-            string[] scope = owner.Split("::");
-            for (int count = scope.Length - 1; count > 0; --count)
-            {
-                if (ValueType(string.Join("::", scope.Take(count)) + "::" + name, true, owner, site) is ClassModel found)
-                {
-                    return found;
-                }
-            }
-
-            return null;
-        }
+        // struct base 철자(Clang 정규 철자)를 리플렉션 struct(이 모듈·import) 하나와 필드 없는 비리플렉션 base로 나눈다(리플렉션 B9k).
+        // 리플렉션 base가 둘 이상이거나 Binds 미러면 RMC2301이다.
+        ClassModel? StructBase(string spelling, string owner, SourceSite site) =>
+            ValueType(spelling.StartsWith("::", StringComparison.Ordinal) ? spelling[2..] : spelling, true, owner, site);
 
         foreach (ClassModel model in classes.Values.Where(model => !model.IsEnum))
         {
