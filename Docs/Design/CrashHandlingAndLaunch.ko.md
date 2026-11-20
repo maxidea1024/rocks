@@ -1,6 +1,6 @@
 # 공통 실행 진입점과 네이티브 크래시 수집 설계
 
-기준일: 2026-11-20, 개정 5(19.6절: 로깅 쪽 반영 완료 — 로깅 문서 개정 번호 재정리, LogFile·LogDirectory 칸). 개정 4(LC1–LC7 구현 반영, LC8 문서 마무리). 결정은 22절, 단계는 23절, 미확인 사실은 24절, 바뀐 점과 단계별로 설계와 다르게 정한 점은 25절에 있다. 사용법은 [공통 실행 진입점과 크래시 수집 사용 안내](../Implementation/CrashHandlingAndLaunch.ko.md)에 있다.
+기준일: 2026-11-20, 개정 6(7.4·8.2절: 범용 할당자 — `ApplicationSettings::defaultAllocator`·`ApplicationContext::DefaultAllocator()`, 기본은 Launch의 `SystemAllocator` 위에 둔 `BinnedAllocator`. GC 규모 세션의 AL6, 사용자 지시). 개정 5(19.6절: 로깅 쪽 반영 완료 — 로깅 문서 개정 번호 재정리, LogFile·LogDirectory 칸). 개정 4(LC1–LC7 구현 반영, LC8 문서 마무리). 결정은 22절, 단계는 23절, 미확인 사실은 24절, 바뀐 점과 단계별로 설계와 다르게 정한 점은 25절에 있다. 사용법은 [공통 실행 진입점과 크래시 수집 사용 안내](../Implementation/CrashHandlingAndLaunch.ko.md)에 있다.
 
 이 문서는 두 가지를 정한다.
 - **공통 실행 진입점(Launch).** 실행 파일마다 흩어진 `main`·`wmain`의 시작·종료 처리를 한 계층으로 모은다. 플랫폼 진입점 연결, 이른 크래시 처리 설치, 인자 전달, 공통 서비스 시작·종료, 프로그램 본문 호출, 종료 코드 전달, 크래시 처리 해제 시점이 대상이다. 엔진 수명(`Engine::Initialize`·`Run`·`Shutdown`)은 다시 만들지 않는다.
@@ -506,13 +506,16 @@ struct ApplicationSettings {
     bool suppressSystemErrorDialogs = false;  // TestRunner 기본 true
     bool handleTerminationRequests = false;   // Ctrl-C·SIGINT·SIGTERM을 원자 표시로(첫 번째만)
     ToolLogging toolLogging = ToolLogging::None;
+    // 범용 할당자의 종류(개정 6). Binned: SystemAllocator 위의 BinnedAllocator, System: SystemAllocator 그대로.
+    DefaultAllocatorKind defaultAllocator = DefaultAllocatorKind::Binned;
 };
 
 class ApplicationContext {
 public:
     Span<const StringView> Arguments() const noexcept;
     StringView ExecutablePath() const noexcept;
-    Allocator& SystemAllocator() noexcept;  // Launch가 소유한 SystemAllocator
+    Allocator& DefaultAllocator() noexcept;  // 프로세스의 범용 할당자(개정 6). 엔진·모듈에 넘긴다
+    Allocator& SystemAllocator() noexcept;  // Launch가 소유한 SystemAllocator(범용 할당자의 상위, 도구 로그)
     LogSystem* ToolLog() noexcept;          // ToolLogging::Stderr일 때만
     void SetStage(platform::RunPhase phase, const char* stageName) noexcept;  // 정적 문자열
     // 본문이 정적 소멸·CRT 종료를 돌리면 안 된다고 판단했을 때(멈춘 로그 출력 스레드 등). Launch가 정리 뒤
@@ -563,6 +566,12 @@ bool IsTerminationRequested() noexcept;
   - 진입점 매크로와 맞지 않으면 링크 오류(진입 기호 없음)로 드러난다.
   - 기존 도구는 모두 Console로 남는다(요구 4절).
 - **본문 서명이 `ApplicationContext&` 하나인 이유.** 인자·할당기·도구 로그·단계 표시를 모두 거기서 얻는다. 그래서 프로그램마다 시작 코드를 되풀이하지 않는다.
+- **범용 할당자(개정 6 — GC 규모 설계 18.10절, 사용자 지시 "엔진에 BinnedAllocator 연결해").** Launch가 프로세스의 범용 할당자를 소유한다(UE가 프로세스 기본 할당자를 Binned로 두는 자리).
+  - `ApplicationSettings::defaultAllocator`가 `DefaultAllocatorKind::Binned`(기본)이면 Launch가 자기 `SystemAllocator`를 상위로 `BinnedAllocator`를 하나 만들고 `ApplicationContext::DefaultAllocator()`가 그것을 돌려준다. `System`이면 `DefaultAllocator()`가 `SystemAllocator()`와 같은 객체다(문제를 가를 때의 비교 수단). `configure`가 바꿀 수 있다. 명령줄 옵션은 두지 않는다.
+  - 본문은 엔진·모듈·컨테이너에 `DefaultAllocator()`를 넘긴다. `SystemAllocator()`는 범용 할당자의 상위이고 Launch의 도구 로그가 쓴다 — 본문이 직접 쓸 일은 비교·진단뿐이다.
+  - 수명: 설정 적용 뒤·도구 로그 앞에 만들고, 도구 로그를 멈춘 뒤에 파괴한다(8.2절). 본문이 범용 할당자의 할당을 남긴 채 돌아오면 파괴가 Fatal이다(`SystemAllocator`의 남은 할당 계약과 같다). `RequestExitWithoutStaticTeardown`이면 파괴하지 않고 `_Exit`한다(내장 진입은 그 요청을 무시하므로 파괴한다). 내장 진입은 실행마다 인스턴스 하나다.
+  - 비용: 주소 범위 예약(16 GiB — Android 4 GiB, commit 아님)과 약 290 KB의 표가 Launch를 쓰는 모든 실행 파일에 든다. 범용 할당자를 쓴 스레드마다 캐시가 최대 약 2.25 MiB(`BinnedAllocator::MaxThreadCacheBytes`)다.
+  - 지금 쓰는 곳은 Sandbox 엔진 호스트다. Commandlet·벤치 도구는 후속이다.
 
 ## 8. 흐름
 
@@ -590,7 +599,7 @@ bool IsTerminationRequested() noexcept;
 ### 8.2 정상 종료
 
 1. 본문이 반환한다. 엔진 호스트는 그 전에 `Engine::Shutdown` → trace 정지 → `LogHost::Stop`을 마쳤다.
-2. Launch가 도구 로그를 멈추고 종료 요청 처리기를 뗀다.
+2. Launch가 도구 로그를 멈추고, 범용 할당자가 `BinnedAllocator`면 파괴하고(남은 할당이 있으면 Fatal — 개정 6. `RequestExitWithoutStaticTeardown`이면 파괴하지 않는다), 종료 요청 처리기를 뗀다.
 3. `RemoveCrashReporting`이 다음 순서로 정리한다.
    1. `crashOwner`를 sentinel(`ShutdownOwner`)로 CAS한다. 실패하면 이미 보고가 진행 중이라는 뜻이다. 그때는 돌아오지 않고 기다리며, 종료는 소유자 T가 한다(B11).
    2. 교환 블록 상태를 `Shutdown`으로 쓰고 도우미를 깨운다.
@@ -1791,3 +1800,7 @@ bool SetCrashAnnotation(CrashAnnotation slot, const char* text, usize bytes) noe
   - **ML2와 정적 소멸 없는 종료.** 멈춘 로그 출력 스레드를 포기하면 설정 문맥이 모듈 lease를 잡은 채 남는다. 그때는 프로세스 로더를 내리거나 파괴하지 않고 정적 저장소로 옮겨 둔 채 돌아온다(Launch가 `_Exit`로 끝낸다). 로더를 파괴하면 남은 lease로 Fatal이다.
   - **유니티 빌드(UB2·UB3).** 유니티를 켠 PlatformBase·FoundationTests에서 겹친 파일 지역 이름을 파일 고유 이름으로 바꿨다(CrashModule·CrashHelper·POSIX CrashReporting·POSIX ProcessEntry·CrashProcessProbe, 동작 불변). 새 시험 파일 넷(LaunchTests·CrashReportingTests·ProcessEntryTests·ProcessCommandLineTests)은 파일 지역 부분을 `<파일>_file` namespace로 감싸고 `detail::`을 `platform::detail::`로 한정했다.
   - **origin 결함 하나.** WorldBench가 ML2 뒤에도 옛 `ModuleRegistration`의 `modules.Unregister()`를 불러 컴파일되지 않았다(origin은 이 실행 파일을 빌드하지 않는다). 모듈 타입은 `DetachTypes`가 되돌리므로 그 호출을 뺐다.
+- 개정 6(2026-11-20): 범용 할당자(GC 규모 세션의 AL6 — 사용자 지시 "엔진에 BinnedAllocator 연결해", GC 규모 설계 18.10절).
+  - `ApplicationSettings::defaultAllocator`(`DefaultAllocatorKind` — 기본 `Binned`, `System`)와 `ApplicationContext::DefaultAllocator()`를 더했다(7.4절). `SystemAllocator()`는 그대로다.
+  - 실행 단계에 "Launch.DefaultAllocator"를 더했다(종료 요청 처리기 뒤, 도구 로그 앞 — 8.2절의 역순 정리에서 도구 로그 다음에 파괴된다).
+  - Sandbox 엔진 호스트와 self-test가 `DefaultAllocator()`를 엔진에 넘긴다.
