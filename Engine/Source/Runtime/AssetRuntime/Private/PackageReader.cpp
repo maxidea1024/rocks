@@ -820,6 +820,16 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "IncompatibleCook";
     case AssetDiagnosticCode::NeverCookReferenced:
         return "NeverCookReferenced";
+    case AssetDiagnosticCode::InvalidMeshData:
+        return "InvalidMeshData";
+    case AssetDiagnosticCode::NonFiniteAttribute:
+        return "NonFiniteAttribute";
+    case AssetDiagnosticCode::UvOutOfRange:
+        return "UvOutOfRange";
+    case AssetDiagnosticCode::NonNormalizedWeights:
+        return "NonNormalizedWeights";
+    case AssetDiagnosticCode::TooManyInfluences:
+        return "TooManyInfluences";
     }
 
     return "Unknown";
