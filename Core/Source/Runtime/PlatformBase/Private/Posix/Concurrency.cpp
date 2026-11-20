@@ -137,11 +137,29 @@ ThreadExitSlot::ThreadExitSlot(Callback callback) noexcept {
 }
 
 void* ThreadExitSlot::Get() const noexcept {
-    return valid_ ? pthread_getspecific(static_cast<pthread_key_t>(native_)) : nullptr;
+    if (!valid_) {
+        return nullptr;
+    }
+
+    // 계약: OS 오류 값(errno)을 바꾸지 않는다. pthread_getspecific은 errno를 건드리지 않게 돼
+    // 있지만 Windows 구현과 같은 모양으로 보존해 libc에 기대지 않는다.
+    const int savedError = errno;
+    void* value = pthread_getspecific(static_cast<pthread_key_t>(native_));
+    errno = savedError;
+    return value;
 }
 
 bool ThreadExitSlot::Set(void* value) noexcept {
-    return valid_ && pthread_setspecific(static_cast<pthread_key_t>(native_), value) == 0;
+    if (!valid_) {
+        return false;
+    }
+
+    // 실패한 pthread_setspecific(저장소 할당 실패)이 errno를 바꾸는 libc가 있다. 호출자는 반환값만
+    // 보므로 보존한다(Get과 같은 계약).
+    const int savedError = errno;
+    const bool stored = pthread_setspecific(static_cast<pthread_key_t>(native_), value) == 0;
+    errno = savedError;
+    return stored;
 }
 
 namespace detail {
