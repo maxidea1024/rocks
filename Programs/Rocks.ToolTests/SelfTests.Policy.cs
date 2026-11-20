@@ -935,26 +935,53 @@ internal static partial class SelfTests
                 temporary.Write(lookalike, "#pragma once\n");
             }
         });
-        // placement new 헤더(Docs/Design/UnityBuildPch.ko.md 8.4절): 시험 소스 밖에서는 <new> 대신 <Base/PlacementNew.h>를 쓴다.
+        // placement new 헤더(Docs/Design/UnityBuildPch.ko.md 8.4절): 시험 소스 밖에서는 <new> 대신 <Base/PlacementNew.h>를 쓴다. MSVC
+        // 런타임 헤더 <vcruntime_new.h>는 Base/PlacementNew.h만 include한다.
         suite.Add("Policy.PlacementNewHeaderReplacesNew", () =>
         {
             using TemporaryDirectory temporary = new();
-            // 통과: 그 헤더 자신, 시험 소스(모듈 Tests/·FoundationTests), 주석 속 언급, 이름이 비슷한 다른 헤더.
-            temporary.Write("Core/Source/Runtime/Base/Public/Base/PlacementNew.h", "#pragma once\n#include <new>\n");
+            const string header = "Core/Source/Runtime/Base/Public/Base/PlacementNew.h";
+            HashSet<(string Path, int Line)> Check(IReadOnlyDictionary<string, string>? allowances = null)
+            {
+                var failures = PolicyChecks.PlacementNewHeaders(temporary.Root, allowances);
+                Verify.That(failures.All(failure => failure.Rule == "placement-new-header"), "rule name");
+                return failures.Select(failure => (failure.Path, failure.Line)).ToHashSet();
+            }
+
+            // 통과: 그 헤더 자신(두 헤더 모두), 시험 소스(모듈 Tests/·FoundationTests)의 <new>, 주석 속 언급(줄 주석, 여러 줄 블록 주석),
+            // 이름이 비슷한 다른 헤더.
+            temporary.Write(header, "#pragma once\n#if __has_include(<vcruntime_new.h>)\n#include <vcruntime_new.h>\n#else\n#include <new>\n#endif\n");
             temporary.Write("Core/Source/Runtime/Core/Tests/OperatorNewCounter.cpp", "#include <new>\n");
             temporary.Write("Programs/FoundationTests/Engine/ProbeTests.cpp", "#include <new>\n");
             temporary.Write("Core/Source/Runtime/Core/Public/Core/Move.h",
-                "#pragma once\n#include <Base/PlacementNew.h>\n// #include <new> is heavy\n#include <newer.h>\n#include <new.h>\n");
-            NoFailures(PolicyChecks.PlacementNewHeaders(temporary.Root));
-            // 위반: 공개 헤더, private 소스, 모듈에 컴파일되는 Private/Tests, 따옴표와 공백이 다른 철자.
-            temporary.Write("Core/Source/Runtime/Core/Public/Core/Bad.h", "#pragma once\n#include <new>\n");
-            temporary.Write("Engine/Source/Runtime/Probe/Private/Bad.cpp", "#include <stdio.h>\n  #  include  \"new\"\n");
+                "#pragma once\n#include <Base/PlacementNew.h>\n// #include <new> is heavy\n/* the old include:\n#include <new>\n#include <vcruntime_new.h>\n*/\n" +
+                "#include <newer.h>\n#include <new.h>\n#include <Probe/new>\n");
+            Verify.That(PolicyChecks.PlacementNewAllowances.ContainsKey(header) && Check().Count == 0, "allowed includes were rejected");
+            // 위반(<new>): 공개 헤더, private 소스, 모듈에 컴파일되는 Private/Tests. 공백 없는 철자, 따옴표, 대소문자, 줄 이음도 같다.
+            temporary.Write("Core/Source/Runtime/Core/Public/Core/Bad.h", "#pragma once\n#include<new>\n");
+            temporary.Write("Engine/Source/Runtime/Probe/Private/Bad.cpp", "#include <stdio.h>\n  #  include  \"new\"\n#include <NEW>\n#include \\\n<new>\n");
             temporary.Write("Engine/Source/Runtime/Probe/Private/Tests/Probe.cpp", "#include <new>\n");
-            var failures = PolicyChecks.PlacementNewHeaders(temporary.Root);
-            Verify.That(failures.All(failure => failure.Rule == "placement-new-header") &&
-                failures.Select(failure => (failure.Path, failure.Line)).ToHashSet().SetEquals(
-                [("Core/Source/Runtime/Core/Public/Core/Bad.h", 2), ("Engine/Source/Runtime/Probe/Private/Bad.cpp", 2),
-                    ("Engine/Source/Runtime/Probe/Private/Tests/Probe.cpp", 1)]), "includes of <new> outside tests");
+            (string, int)[] newIncludes =
+            [
+                ("Core/Source/Runtime/Core/Public/Core/Bad.h", 2), ("Engine/Source/Runtime/Probe/Private/Bad.cpp", 2),
+                ("Engine/Source/Runtime/Probe/Private/Bad.cpp", 3), ("Engine/Source/Runtime/Probe/Private/Bad.cpp", 4),
+                ("Engine/Source/Runtime/Probe/Private/Tests/Probe.cpp", 1)
+            ];
+            Verify.That(Check().SetEquals(newIncludes), "includes of <new> outside tests");
+            // 허용 목록(경로와 사유)에 올린 파일은 <new>를 include할 수 있다. 다른 파일의 위반은 그대로다.
+            Verify.That(Check(new Dictionary<string, string>
+            {
+                [header] = "the placement new header itself",
+                ["Core/Source/Runtime/Core/Public/Core/Bad.h"] = "uses std::launder"
+            }).SetEquals(newIncludes[1..]), "an allowed path");
+            // 위반(<vcruntime_new.h>): 시험 소스와 허용 목록의 파일도 직접 include할 수 없다.
+            temporary.Write("Core/Source/Runtime/Core/Public/Core/Bad.h", "#pragma once\n#include <vcruntime_new.h>\n");
+            temporary.Write("Engine/Source/Runtime/Probe/Private/Bad.cpp", "#include <stdio.h>\n");
+            temporary.Write("Engine/Source/Runtime/Probe/Private/Tests/Probe.cpp", "#pragma once\n");
+            temporary.Write("Core/Source/Runtime/Core/Tests/OperatorNewCounter.cpp", "#include <new>\n#include <VCRuntime_New.h>\n");
+            Verify.That(Check(new Dictionary<string, string> { ["Core/Source/Runtime/Core/Public/Core/Bad.h"] = "uses std::launder" }).SetEquals(
+                [("Core/Source/Runtime/Core/Public/Core/Bad.h", 2), ("Core/Source/Runtime/Core/Tests/OperatorNewCounter.cpp", 2),
+                    (header, 5)]), "direct includes of <vcruntime_new.h>");
         });
         suite.Add("Policy.WindowsPublicHeadersStayNarrow", () =>
         {

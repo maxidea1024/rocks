@@ -75,6 +75,33 @@ internal static class WindowsHeaderPairTests
         await Build(build with { Unity = false, Pch = false, OutputDirectory = Path.Combine(fixture, "out-plain") },
             "the pair must survive a forced include boundary");
         pass("Windows header pair survives PCH and forced include boundaries and an earlier Windows.h");
+        await RuntimeLibraryRecordAsync(request, fixture, engineIncludes);
+        pass("Base/Compiler.h records the MSVC runtime library choice in objects without STL headers");
+    }
+
+    // Base/Compiler.h가 CRT 선택을 object에 기록하는지 본다(Docs/Design/UnityBuildPch.ko.md 8.4절 "placement new 헤더" — CRT 선택 기록).
+    // STL 헤더를 include하지 않는 번역 단위에는 yvals.h의 기록이 없으므로 이 기록이 링커의 LNK2038 검사를 받친다. clang-cl은
+    // #pragma detect_mismatch를 object의 linker directive(/FAILIFMISMATCH:"이름=값")로 쓴다.
+    private static async Task RuntimeLibraryRecordAsync(NativeBuildRequest request, string fixture, string[] engineIncludes)
+    {
+        string source = Path.Combine(fixture, "runtime", "value.cpp");
+        Directory.CreateDirectory(Path.GetDirectoryName(source)!);
+        File.WriteAllText(source, "#include <Base/Compiler.h>\nint RuntimeValue() noexcept { return 1; }\n");
+        NativeModuleInput module = new() { Name = "RuntimeRecord", Sources = [source], PrivateIncludeDirectories = engineIncludes };
+        NativeBuildRequest build = request with
+        {
+            RootDirectory = fixture,
+            OutputDirectory = Path.Combine(fixture, "out-runtime"),
+            Modules = [module],
+            Targets = ["RuntimeRecord"]
+        };
+        await Build(build, "the runtime library record fixture must build");
+        NativeAction compile = ActionGraph.Create(build).Actions.Single(action => action.Kind == "Compile" && action.Source == source);
+        string objectFile = compile.Outputs.First(output => output.EndsWith(".obj", StringComparison.Ordinal));
+        // 빌드가 Debug면 /MDd, 그 밖에는 /MD를 넘긴다(ActionGraph).
+        string expected = "RuntimeLibrary=" + (request.Configuration == NativeConfiguration.Debug ? "MDd_DynamicDebug" : "MD_DynamicRelease");
+        Check(System.Text.Encoding.Latin1.GetString(File.ReadAllBytes(objectFile)).Contains(expected, StringComparison.Ordinal),
+            $"the object of a source that includes only Base/Compiler.h must carry the linker directive {expected}");
     }
 
     private static async Task Build(NativeBuildRequest request, string message)
