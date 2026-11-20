@@ -16,6 +16,7 @@ TEST(Engine_OwnsGcSchedulerAndLendsItToWorlds) {
     SystemAllocator allocator;
     {
         EngineConfig config;
+        config.modules = &test::ProcessModules();
         config.fixedFrameDeltaSeconds = 1.0 / 60.0;
         config.gcWorkers = 2;
         Engine engine(allocator);
@@ -54,6 +55,7 @@ TEST(Engine_GcWorkersAboveLimitFailsInitialize) {
     SystemAllocator allocator;
     {
         EngineConfig config;
+        config.modules = &test::ProcessModules();
         config.gcWorkers = EngineConfig::MaxGcWorkers + 1;
         Engine engine(allocator);
         CHECK(engine.Initialize(config).Error() == ErrorCode::InvalidArgument);
@@ -67,6 +69,7 @@ TEST(Engine_GcWorkersZeroMeansSerialMarking) {
     SystemAllocator allocator;
     {
         EngineConfig config;
+        config.modules = &test::ProcessModules();
         config.fixedFrameDeltaSeconds = 1.0 / 60.0;
         config.gcWorkers = 0;
         Engine engine(allocator);

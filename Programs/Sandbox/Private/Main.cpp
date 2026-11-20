@@ -62,8 +62,8 @@ bool ParseFrames(StringView text, rocks::uint64& frames) noexcept {
 
 // 자체 검사(Launch 도구 로그가 설치된 상태)다. 도구 로그를 시작하지 못했어도 검사는 돈다(Warning
 // 이상은 비상 경로로 stderr에 간다).
-int RunSelfTest(rocks::Allocator& allocator) noexcept {
-    const int graphics = sandbox::RunGraphicsSelfTest(allocator);
+int RunSelfTest(rocks::Allocator& allocator, rocks::ModuleLoader& modules) noexcept {
+    const int graphics = sandbox::RunGraphicsSelfTest(allocator, modules);
     const rocks::uint32 engine = sandbox::RunEngineHostSelfTest();
     return graphics == 0 && engine == 0 ? 0 : 1;
 }
@@ -119,7 +119,7 @@ int Run(rocks::launch::ApplicationContext& context) noexcept {
 
     options.arguments = Span<const StringView>(settingArguments, settingCount);
     return engine ? sandbox::RunEngineHost(context, options)
-                  : RunSelfTest(context.DefaultAllocator());
+                  : RunSelfTest(context.DefaultAllocator(), context.Modules());
 }
 
 const rocks::launch::ApplicationDescription& Describe() noexcept {

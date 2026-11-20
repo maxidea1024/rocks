@@ -3,6 +3,7 @@
 #include <Core/App/ProcessCommandLine.h>
 #include <Launch/EntryPoint.h>
 #include <Platform/Clock.h>
+#include <Platform/Fatal.h>
 #include <Platform/Sync.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,6 +43,7 @@ int RunDelegateRebindDuringTargetDestructionControl() noexcept;
 int RunUniquePtrNullDeleterControl() noexcept;
 int RunDelegateExecuteUnboundControl() noexcept;
 int RunModuleLoaderShutdownDuringLoadControl() noexcept;
+int RunModuleLoaderPhaseMisuseControl(uint32 operation) noexcept;
 int RunDelegateRebindDuringExecutionControl() noexcept;
 int RunSpanSliceOutOfBoundsControl() noexcept;
 int RunRandomStreamPreconditionControl(uint32 operation) noexcept;
@@ -56,6 +58,8 @@ static TestCase* first = nullptr;
 static uint64 failures = 0;
 static platform::Mutex failureMutex;
 static uint64 seed = 1;
+// Launch가 소유한 프로세스 모듈 로더다(RunRunner가 본문 동안 건다).
+static ModuleLoader* processModules = nullptr;
 static int (*objectScopeNegativeControl)(bool) noexcept = nullptr;
 static int (*destroyRequestedNegativeControl)(bool) noexcept = nullptr;
 static int (*typeConvenienceNegativeControl)(uint32) noexcept = nullptr;
@@ -70,8 +74,8 @@ struct RegisteredProcessProbe {
 };
 
 // 등록 자리 수다. 넘치면 등록이 false이고 그 probe를 쓰는 시험의 "…ProbeRegistered" 검사가
-// 실패한다. 실행 파일 하나에 등록되는 probe 수(EngineTests는 에셋 로더 probe를 더해 10개를 넘는다)보다
-// 넉넉히 둔다 — 8일 때 서로 다른 세션이 하나씩 더한 probe가 병합에서 만나 넘쳤다.
+// 실패한다. 실행 파일 하나에 등록되는 probe 수(EngineTests는 에셋 로더 probe를 더해 10개를
+// 넘는다)보다 넉넉히 둔다 — 8일 때 서로 다른 세션이 하나씩 더한 probe가 병합에서 만나 넘쳤다.
 static constexpr usize MaxRegisteredProcessProbes = 32;
 static RegisteredProcessProbe registeredProcessProbes[MaxRegisteredProcessProbes];
 static usize registeredProcessProbeCount = 0;
@@ -117,6 +121,14 @@ void RecordFailure(const char* expression, const char* file, int line) noexcept 
     platform::LockGuard lock(failureMutex);
     ++failures;
     fprintf(stderr, "CHECK FAILED: %s (%s:%d)\n", expression, file, line);
+}
+
+ModuleLoader& ProcessModules() noexcept {
+    if (processModules == nullptr) {
+        platform::Fatal("test::ProcessModules called outside the test runner body");
+    }
+
+    return *processModules;
 }
 
 uint64 CurrentSeed() noexcept {
@@ -349,6 +361,10 @@ static int RunTestRunner(int argc, const char* const* argv) {
                 return test::RunDelegateExecuteUnboundControl();
             } else if (strcmp(control, "module-loader-shutdown-during-load") == 0) {
                 return test::RunModuleLoaderShutdownDuringLoadControl();
+            } else if (strncmp(control, "module-loader-phase-misuse-", 27) == 0 &&
+                       control[27] >= '0' && control[27] <= '2' && control[28] == '\0') {
+                return test::RunModuleLoaderPhaseMisuseControl(
+                    static_cast<uint32>(control[27] - '0'));
             } else if (strcmp(control, "delegate-rebind-during-execution") == 0) {
                 return test::RunDelegateRebindDuringExecutionControl();
             } else if (strcmp(control, "span-slice-out-of-bounds") == 0) {
@@ -595,7 +611,10 @@ int RunRunner(launch::ApplicationContext& context) noexcept {
         argv[index + 1] = arguments[index].Data();
     }
 
-    return RunTestRunner(static_cast<int>(arguments.Size() + 1), argv);
+    rocks::test::processModules = &context.Modules();
+    const int exitCode = RunTestRunner(static_cast<int>(arguments.Size() + 1), argv);
+    rocks::test::processModules = nullptr;
+    return exitCode;
 }
 
 const launch::ApplicationDescription& Describe() noexcept {

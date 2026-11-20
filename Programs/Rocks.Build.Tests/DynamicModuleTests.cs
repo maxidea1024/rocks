@@ -42,7 +42,7 @@ internal static class DynamicModuleTests
 
         """;
 
-    // 표 행을 "이름|의존,의존"으로 출력한다. 실행 파일은 Plugin 헤더를 보지 못하므로 Plugin 코드는 표의 진입 함수 참조로만 링크된다.
+    // 표 행을 "이름|의존,의존"(요청 시 적재 행이면 "|request"를 덧붙임)으로 출력한다. 실행 파일은 Plugin 헤더를 보지 못하므로 Plugin 코드는 표의 진입 함수 참조로만 링크된다.
     private const string MainSource = """
         #include <Core/Module/ModuleEntry.h>
         #include <stdio.h>
@@ -66,7 +66,7 @@ internal static class DynamicModuleTests
                     printf("%s%s", dependency == 0 ? "" : ",", row.dependencies[dependency]);
                 }
 
-                printf("\n");
+                printf("%s\n", row.onRequest ? "|request" : "");
             }
 
             return 0;
@@ -168,7 +168,7 @@ internal static class DynamicModuleTests
         {
             ProcessResult run = await ProcessRunner.RunAsync(new(cold.ModuleOutputs["Game"], [], fixture, request.Toolchain.Environment));
             Check(run.ExitCode == 0 && run.StdOut.Replace("\r", "", StringComparison.Ordinal) ==
-                "Core|\nEngine|Core\nShared|Core\nSolo|Core\nPluginHelper|Core\nPlugin|Engine,PluginHelper\nNested|Core\nGame|Engine,Core,Shared\n",
+                "Core|\nEngine|Core\nShared|Core\nSolo|Core|request\nPluginHelper|Core|request\nPlugin|Engine,PluginHelper|request\nNested|Core|request\nGame|Engine,Core,Shared\n",
                 "module table rows of run-time loaded modules:\n" + run.StdOut + run.StdErr);
         }
 

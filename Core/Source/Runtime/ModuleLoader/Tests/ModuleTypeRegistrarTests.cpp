@@ -194,7 +194,7 @@ TEST(ModuleLoaderRegistersModuleTypesThroughRegistrar) {
     CHECK(loader->Load("Beta").IsOk());
     const ModuleLoadReport attached = loader->AttachTypeRegistrar(registrar);
     CHECK(attached.IsOk());
-    CHECK(loader->TypeRegistrar() == &registrar);
+    CHECK(loader->TypeRegistrarCount() == 1);
     CHECK(loader->LeaseCount("Alpha") == 1);
     CHECK(loader->LeaseCount("Beta") == 1);
 
@@ -214,8 +214,8 @@ TEST(ModuleLoaderRegistersModuleTypesThroughRegistrar) {
     CHECK(loader->ModulesWithLeases(Span<StringView>(holders)) == 0);
 
     // 남은 등록이 없으므로 떼어도 기록이 늘지 않는다.
-    loader->DetachTypeRegistrar();
-    CHECK(loader->TypeRegistrar() == nullptr);
+    loader->DetachTypeRegistrar(registrar);
+    CHECK(loader->TypeRegistrarCount() == 0);
     CHECK(journal.count == 18);
 }
 
@@ -236,7 +236,7 @@ TEST(ModuleLoaderRollsBackModuleTypesOnFailure) {
     CHECK(refused.error == ErrorCode::Unsupported);
     CHECK(strcmp(refused.failed, "Beta") == 0);
     CHECK(strcmp(refused.stage, "RegisterTypes") == 0);
-    CHECK(loader->TypeRegistrar() == nullptr);
+    CHECK(loader->TypeRegistrarCount() == 0);
     CHECK(loader->LeaseCount("Alpha") == 0);
 
     registrar.failOn = nullptr;
@@ -254,7 +254,7 @@ TEST(ModuleLoaderRollsBackModuleTypesOnFailure) {
     CHECK(strcmp(started.stage, "Startup") == 0);
     CHECK(loader->LeaseCount("Delta") == 0);
 
-    loader->DetachTypeRegistrar();
+    loader->DetachTypeRegistrar(registrar);
     const char* const expected[] = {"start:Alpha",   "start:Beta",   "types:Alpha",
                                     "untypes:Alpha", "types:Alpha",  "types:Beta",
                                     "types:Delta",   "start:Delta",  "untypes:Delta",
@@ -262,6 +262,53 @@ TEST(ModuleLoaderRollsBackModuleTypesOnFailure) {
     CHECK(JournalIs(expected));
     CHECK(loader->LeaseCount("Alpha") == 0);
     CHECK(loader->LeaseCount("Beta") == 0);
+}
+
+// 등록기 여럿(3.11절 — 동시에 사는 Engine마다 자기 TypeRegistry): 붙인 등록기마다 이미 시작한
+// 모듈을 몰아서 등록하고, 붙은 뒤 시작하는 모듈은 모든 등록기에 등록한다. 한 등록기가 거부하면 이
+// 모듈을 이미 등록한 등록기를 되돌리고 Startup을 부르지 않는다. 떼면 그 등록기의 등록만 시작
+// 역순으로 되돌리고, 묶음 종료는 남은 등록기에서 되돌린다. lease는 등록기마다 하나다.
+TEST(ModuleLoaderRegistersModuleTypesWithEveryRegistrar) {
+    Reset();
+    SystemAllocator allocator;
+    RecordingRegistrar first;
+    RecordingRegistrar second;
+    UniquePtr<ModuleLoader> loader = MakeLoader(allocator);
+    REQUIRE(loader);
+    CHECK(loader->Load("Beta").IsOk());
+    CHECK(loader->AttachTypeRegistrar(first).IsOk());
+    CHECK(loader->AttachTypeRegistrar(second).IsOk());
+    CHECK(loader->TypeRegistrarCount() == 2);
+    CHECK(loader->LeaseCount("Alpha") == 2);
+
+    second.failOn = "Delta";
+    const ModuleLoadReport refused = loader->Load("Delta");
+    CHECK(refused.code == ModuleLoadCode::StartupFailed);
+    CHECK(strcmp(refused.stage, "RegisterTypes") == 0);
+    CHECK(loader->State("Delta").Value() == ModuleState::Failed);
+    CHECK(loader->LeaseCount("Delta") == 0);
+
+    second.failOn = nullptr;
+    CHECK(loader->Load("Delta").IsOk());
+    CHECK(loader->LeaseCount("Delta") == 2);
+
+    loader->DetachTypeRegistrar(first);
+    CHECK(loader->TypeRegistrarCount() == 1);
+    CHECK(loader->LeaseCount("Alpha") == 1);
+    CHECK(!first.leases[0] && second.leases[0]);
+
+    loader->ShutdownGroup(ModuleGroup::Process);
+    loader->DetachTypeRegistrar(second);
+    CHECK(loader->TypeRegistrarCount() == 0);
+    const char* const expected[] = {
+        "start:Alpha",    "start:Beta",      "types:Alpha",    "types:Beta",    "types:Alpha",
+        "types:Beta",     "types:Delta",     "untypes:Delta",  "types:Delta",   "types:Delta",
+        "start:Delta",    "untypes:Delta",   "untypes:Beta",   "untypes:Alpha", "preunload:Delta",
+        "preunload:Beta", "preunload:Alpha", "shutdown:Delta", "untypes:Delta", "shutdown:Beta",
+        "untypes:Beta",   "shutdown:Alpha",  "untypes:Alpha"};
+    CHECK(JournalIs(expected));
+    StringView holders[ProbeCount];
+    CHECK(loader->ModulesWithLeases(Span<StringView>(holders)) == 0);
 }
 
 // 남은 lease 진단(MD16): 모듈 코드를 가리키는 등록(여기서는 Startup에서 복사한 lease)을 Shutdown이

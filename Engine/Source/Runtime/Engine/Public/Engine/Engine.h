@@ -147,8 +147,9 @@ protected:
 // 구현한다.
 class EngineClient {
 public:
-    // 엔진 초기화의 마지막 단계다. 실패하면 엔진 초기화가 실패하고 OnEngineShutdown은 호출되지
-    // 않는다.
+    // 엔진 초기화의 클라이언트 단계다(그 뒤 PostEngineInit 단계 모듈이 시작한다). 실패하면 엔진
+    // 초기화가 실패하고 OnEngineShutdown은 호출되지 않는다. 뒤의 PostEngineInit 단계가 실패하면
+    // OnEngineShutdown이 한 번 불린 뒤 초기화가 실패한다.
     virtual Result<void> OnEngineStart(Engine&) noexcept {
         return Result<void>::Success();
     }
@@ -185,14 +186,15 @@ struct EngineConfig {
     double fixedFrameDeltaSeconds = 0.0;
     // 0이 아니면 Run이 이 프레임 수를 실행한 뒤 스스로 종료 요청한다.
     uint64 maxFrames = 0;
-    // 프로세스 모듈 로더다(선택, Docs/Design/ModuleLoader.ko.md 3.10절). 있으면 Initialize가 엔진
-    // TypeRegistry의 타입 등록기(ModuleTypeRegistrations)를 이 로더에 붙여 시작한 모듈의 리플렉션
-    // 타입을 시작 순서로 등록하고(로더가 발급한 모듈 lease로), Shutdown이 TypeRegistry 종료 전에
-    // 뗀다. 로더에는 이미 Engine 모듈(의존 폐포 — World 등)이 시작해 있어야 한다. 로더 스레드가
-    // 엔진 스레드이고 엔진보다 오래 산다. 등록기는 로더마다 하나라 이 로더를 쓰는 Engine은 한 번에
-    // 하나다(여러 Engine의 참조 수는 ML1).
-    // 없으면(ML1 전 호스트·시험) Engine이 이 실행 파일의 모듈 표(GeneratedModuleTable)로 자기
-    // 로더를 만들어 Engine 모듈을 적재하고 같은 방식으로 등록한다. 그 로더는 엔진 종료 때 내린다.
+    // 프로세스 모듈 로더다(필수, Docs/Design/ModuleLoader.ko.md 3.11절 — 보통
+    // launch::ApplicationContext::Modules(), 시험은 test::ProcessModules()). Initialize가 엔진
+    // TypeRegistry의 타입 등록기(ModuleTypeRegistrations)를 이 로더에 붙여 이미 시작한 모듈의
+    // 리플렉션 타입을 시작 순서로 등록하고(로더가 발급한 모듈 lease로), 엔진 묶음
+    // (StartEngineGroup — PreDefault·Default·PostDefault 단계 모듈, World·Engine 등)을 시작한 뒤
+    // 클라이언트 시작 뒤 PostEngineInit 단계를 돈다. Shutdown이 TypeRegistry 종료 전에 엔진 묶음을
+    // 놓고(마지막 Engine이면 내린다) 등록기를 뗀다. 로더 스레드가 엔진 스레드이고 로더는 엔진보다
+    // 오래 산다. 같은 로더를 쓰는 Engine은 동시에 여럿일 수 있다(엔진 묶음 참조 수, 등록기는
+    // ModuleLoader::MaxTypeRegistrars까지). 없으면 Initialize가 InvalidArgument로 실패한다.
     ModuleLoader* modules = nullptr;
     // 로더 밖 게임 리플렉션 모듈의 등록 함수다(선택). 모듈 타입 다음, native 타입 전에 엔진
     // TypeRegistry의 별도 ModuleRegistration에 부른다. 게임 모듈의 생성 집계 함수
@@ -278,20 +280,21 @@ struct EngineStats {
 //
 // 수명 규약:
 // - 초기화 순서: TypeRegistry·ModuleRegistration -> 타입 등록(로더의 모듈 타입 — 타입 등록기를
-//   붙여 시작한 모듈의 타입을 시작 순서로 -> EngineConfig.registerModuleTypes ->
-//   EngineConfig.registerTypes(native, 마지막)) -> 엔진
-//   Registry -> EngineSubsystem -> EngineClient. 어느 단계든 실패하면 이미 한 단계를 역순으로
-//   정리하고 Failed가 된다.
+//   붙여 시작한 모듈의 타입을 시작 순서로, 그다음 엔진 묶음 모듈을 Startup 직전 등록하며 시작 ->
+//   EngineConfig.registerModuleTypes -> EngineConfig.registerTypes(native, 마지막)) -> 엔진
+//   Registry -> EngineSubsystem -> EngineClient -> PostEngineInit 단계 모듈. 어느 단계든 실패하면
+//   이미 한 단계를 역순으로 정리하고 Failed가 된다(PostEngineInit 실패는 client.OnEngineShutdown
+//   뒤).
 // - 종료 순서(계획 3.2절): BeginShutdown(Subsystem 역순 → hooks) -> client.OnEngineShutdown -> 모든
 //   World Shutdown·파괴 -> CompleteInFlightWork(Subsystem 역순 → hooks) -> Subsystem 역순 정리 ->
 //   [엔진 Registry 최종 GC -> hooks.DrainShutdownCleanup]을 둘 다 0이 될 때까지 반복(최대
 //   MaxShutdownCollectPasses) -> hooks.VerifyShutdownClosure -> hooks.StopExecutors -> 엔진
-//   Registry 종료 -> ModuleRegistration 파괴(붙잡은 lease 해제) -> 로더에서 타입 등록기 떼기(모듈
-//   기록 놓기) -> TypeRegistry::Shutdown -> (대체 로더면) 로더 종료. 타입은
-//   Unregister하지 않는다 — 게임이 토큰을 버린 native 파생이 리플렉션 base의 dependent로 남아
-//   Unregister가 Busy로 멈추기 때문이다. Shutdown은 남은 lease만 검사하고 dependent 순서로 레코드를
-//   반납한다. 초기화 실패 경로는 hook 단계 없이 같은 정리 순서다. 프레임 실행 중(hook 안)에는
-//   Busy이므로 RequestExit 후 Run이 돌아온 뒤 호출한다.
+//   Registry 종료 -> ModuleRegistration 파괴(붙잡은 lease 해제) -> 엔진 묶음 놓기(마지막 Engine이면
+//   엔진 묶음 모듈 종료) -> 로더에서 타입 등록기 떼기(모듈 기록 놓기) -> TypeRegistry::Shutdown.
+//   타입은 Unregister하지 않는다 — 게임이 토큰을 버린 native 파생이 리플렉션 base의 dependent로
+//   남아 Unregister가 Busy로 멈추기 때문이다. Shutdown은 남은 lease만 검사하고 dependent 순서로
+//   레코드를 반납한다. 초기화 실패 경로는 hook 단계 없이 같은 정리 순서다. 프레임 실행 중(hook
+//   안)에는 Busy이므로 RequestExit 후 Run이 돌아온 뒤 호출한다.
 // - World는 Engine이 소유한다. 프레임 안에서 DestroyWorld를 호출하면 5단계(지연 작업)에서 파괴된다.
 //
 // 로그(Docs/Design/LoggingSystem.ko.md 13절, 카테고리 LogEngine): 초기화 성공·단계별 실패, Run
@@ -433,20 +436,19 @@ private:
     Result<void> StopGcScheduler() noexcept;
     // 종료 실패를 남은 World·지연 파괴·살아 있는 객체 수와 함께 한 번 기록한다.
     void LogShutdownFailure(const char* stage, ErrorCode error) const noexcept;
-    // 모듈 로더에 엔진 타입 등록기를 붙인다(없으면 대체 로더를 만든다 — EngineConfig::modules).
+    // 모듈 로더(EngineConfig::modules)에 엔진 타입 등록기를 붙이고 엔진 묶음을 시작한다.
     Result<void> AttachModuleTypes() noexcept;
-    // 타입 등록기를 떼고 모듈 기록을 놓는다(TypeRegistry 종료 전).
+    // PostEngineInit 단계 모듈을 시작한다(클라이언트 시작 뒤).
+    Result<void> StartPostEngineInitModules() noexcept;
+    // 엔진 묶음을 놓고 타입 등록기를 떼어 모듈 기록을 놓는다(TypeRegistry 종료 전).
     void DetachModuleTypes() noexcept;
-    // 대체 로더를 내린다(TypeRegistry 종료 뒤 — 타입이 잡은 모듈 lease가 모두 풀린 뒤).
-    void ReleaseOwnModuleLoader() noexcept;
 
     Allocator& allocator_;
     EngineConfig config_;
-    // EngineConfig::modules가 없을 때 만든 대체 로더다. TypeRegistry보다 먼저 선언해 나중에
-    // 소멸시킨다(타입이 그 로더의 모듈 lease를 잡는다).
-    UniquePtr<ModuleLoader> ownModules_;
-    // 타입 등록기를 붙인 로더다(config_.modules 또는 ownModules_). 붙어 있지 않으면 null이다.
+    // 타입 등록기를 붙인 로더다(config_.modules). 붙어 있지 않으면 null이다.
     ModuleLoader* attachedModules_ = nullptr;
+    // 이 Engine이 로더의 엔진 묶음 사용자다(StartEngineGroup 성공).
+    bool engineGroupStarted_ = false;
     UniquePtr<TypeRegistry> types_;
     // TypeRegistry 뒤에 선언해 먼저 소멸시킨다(붙잡은 lease를 TypeRegistry::Shutdown 전에 놓는다).
     UniquePtr<ModuleRegistration> modules_;

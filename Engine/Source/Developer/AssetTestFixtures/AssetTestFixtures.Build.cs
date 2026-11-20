@@ -1,3 +1,4 @@
+using Rocks.Build.Descriptors;
 using Rocks.Build.Rules;
 
 // Asset runtime reflection test fixture module (Docs/Design/AssetSystem.ko.md section 14). Owns test asset classes that derive from AssetRuntime's
@@ -9,6 +10,10 @@ public sealed class AssetTestFixtures : EngineModuleRules
     protected override string Group => "Developer";
 
     protected override string ModuleName => "AssetTestFixtures";
+
+    // Test fixture: not started by phase (Docs/Design/ModuleLoader.ko.md section 3.11). Tests register its types into their own registries;
+    // the engine group of a test executable must not register them into every engine.
+    protected override LoadingPhase LoadingPhase => LoadingPhase.None;
 
     // CoreTypeBindings: Transform, vector, rotator and InterpCurve mirrors. Localization: Text fields. Curves: TangentCurve fields.
     protected override string[] RequiredModules => ["AssetRuntime", "CoreTypeBindings", "Localization", "Curves"];

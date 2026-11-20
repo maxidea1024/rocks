@@ -30,15 +30,23 @@ class ConfigContext;
 
 } // namespace config
 
-// 모듈을 자동으로 시작하는 시점이다(UE ELoadingPhase의 일부, 기술자 loadingPhase와 같은 값·순서).
-// 빌드가 모듈 표 행에 싣는다. 기술자 모듈(게임·플러그인)은 기술자의 값, 엔진 모듈은 Default다.
-// 단계 실행(StartPhase)과 PostEngineInit·None은 ML1에 더한다.
+// 모듈을 자동으로 시작하는 시점이다(UE ELoadingPhase의 일부, 기술자 loadingPhase와 같은 값·순서 —
+// Docs/Design/ModuleLoader.ko.md 3.3·3.11절). 빌드가 모듈 표 행에 싣는다. 기술자
+// 모듈(게임·플러그인)은 기술자의 값, 엔진 모듈은 규칙의 LoadingPhase(기본 Default)다. 로더의
+// StartPhase가 앞 단계부터 차례로 돈다. 값 순서가 단계 순서다.
 enum class LoadingPhase : uint8 {
+    // 로더 생성 직후(Launch가 부트 모듈과 함께 시작한다). 프로세스 묶음.
     EarliestPossible,
+    // HostSettings가 설정을 확정하고 LogHost가 시작한 뒤. 호스트 묶음.
     PostConfigInit,
+    // Engine::Initialize 안, 엔진 TypeRegistry를 만든 뒤(아래 셋). 엔진 묶음.
     PreDefault,
     Default,
-    PostDefault
+    PostDefault,
+    // EngineClient::OnEngineStart 뒤, 첫 프레임 전. 엔진 묶음.
+    PostEngineInit,
+    // 자동으로 시작하지 않는다. 코드가 ModuleLoader::Load로 시작한다.
+    None
 };
 
 // 진단용 단계 이름이다(예: LoadingPhase::Default → "Default"). 모르는 값은 "Unknown"이다. 반환
@@ -55,6 +63,10 @@ constexpr const char* LoadingPhaseName(LoadingPhase phase) noexcept {
         return "Default";
     case LoadingPhase::PostDefault:
         return "PostDefault";
+    case LoadingPhase::PostEngineInit:
+        return "PostEngineInit";
+    case LoadingPhase::None:
+        return "None";
     }
 
     return "Unknown";
@@ -105,6 +117,10 @@ struct ModuleTableRow {
     const char* const* dependencies = nullptr;
     usize dependencyCount = 0;
     LoadingPhase phase = LoadingPhase::Default;
+    // 요청 시 적재 행이다(실행 파일의 링크 의존으로는 닿지 않고 DynamicModules 관계로만 표에 든
+    // 모듈 — Docs/Design/ModuleLoader.ko.md 3.8절). 단계 실행(StartPhase)이 건너뛰고 코드의
+    // Load(이름)으로만 시작한다(UE LoadingPhase None과 같다).
+    bool onRequest = false;
 };
 
 // 모듈 표다. 행 배열은 정적 수명이다.

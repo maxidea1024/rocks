@@ -314,9 +314,15 @@ public sealed record NativeModuleInput
     // 않는다(Docs/Design/ModuleLoader.ko.md 3.1절 면제). 설치 SDK가 함께 나른다.
     public bool ThirdParty { get; init; }
 
-    // 모듈 표 행에 싣는 로딩 단계다(Docs/Design/ModuleLoader.ko.md 3.3절). 기술자 모듈(게임·플러그인)은 기술자의 loadingPhase를
-    // DescriptorModuleSet.Apply가 넣고, 엔진 모듈은 기본 Default다(엔진 모듈 규칙의 단계는 ML1).
+    // 모듈 표 행에 싣는 로딩 단계다(Docs/Design/ModuleLoader.ko.md 3.3·3.11절). 기술자 모듈(게임·플러그인)은 기술자의 loadingPhase를
+    // DescriptorModuleSet.Apply가 넣고, 엔진 모듈은 규칙의 LoadingPhase(기본 Default)다. 모듈 표를 만들 때 행의 의존이 이 단계보다 늦으면
+    // 오류다(MD6 — None 의존은 허용).
     public Descriptors.LoadingPhase LoadingPhase { get; init; } = Descriptors.LoadingPhase.Default;
+
+    // 이 모듈이 공통 실행 진입점(Launch — 프로세스 모듈 로더를 소유한다)이라는 표지다(Docs/Design/ModuleLoader.ko.md 3.9·3.11절). 이 모듈의
+    // 링크 폐포에 든 진입점 모듈이 부트 모듈이고, 모듈 표를 만들 때 그 모듈들의 단계가 EarliestPossible이 아니면 오류다. 엔진 Launch 규칙이
+    // 켜고 설치 SDK가 함께 나른다. 이름 "Launch"로 판정하지 않는다.
+    public bool ProvidesLaunch { get; init; }
 
     // 유니티 빌드 설정이다(Docs/Design/UnityBuildPch.ko.md 6.1절). 켜면 이 모듈의 손으로 쓴 C++ 소스를 묶음 번역 단위로 컴파일한다.
     // C 소스, BuildInfo·규칙 생성 TU, UnityExclude, 첫 #include 앞에서 #define하는 파일, UnityBatchBytes보다 큰 파일은 언제나 단독

@@ -7,7 +7,7 @@ using Rocks.Tooling.Common;
 /// <see cref="NativeModuleInput.ProvidesModuleTable"/>, 최소 <c>Core/Module/ModuleEntry.h</c>)와 그 아래 모듈·header-only·서드파티·엔진·게임
 /// 실행 파일이다. 확인하는 것: 표 행(의존 순서, 면제 모듈 제외, 면제 모듈을 거치는 의존의 대체, 기술자 단계), 진입점 모듈만 받는
 /// <c>ROCKS_MODULE_NAME</c>, 증분 no-op, 매크로가 빠진 모듈의 링크 오류, 대소문자만 다른 모듈 이름·의존 철자 거부(MD17), 예약 매크로 거부,
-/// 식별자가 아닌 진입점 모듈 이름 거부, 표지가 없는 빌드의 무변화.
+/// 식별자가 아닌 진입점 모듈 이름 거부, 표지가 없는 빌드의 무변화, 단계 순서(MD6)·부트 모듈 단계 거부(3.11절).
 /// </summary>
 internal static class ModuleTableTests
 {
@@ -18,7 +18,7 @@ internal static class ModuleTableTests
 
         namespace rocks {
 
-        enum class LoadingPhase : unsigned char { EarliestPossible, PostConfigInit, PreDefault, Default, PostDefault };
+        enum class LoadingPhase : unsigned char { EarliestPossible, PostConfigInit, PreDefault, Default, PostDefault, PostEngineInit, None };
 
         struct ModuleEntry {
             const char* name;
@@ -32,6 +32,7 @@ internal static class ModuleTableTests
             const char* const* dependencies;
             unsigned long long dependencyCount;
             LoadingPhase phase;
+            bool onRequest;
         };
 
         struct ModuleTable {
@@ -123,7 +124,7 @@ internal static class ModuleTableTests
             new()
             {
                 Name = "Game", Kind = NativeModuleKind.Executable, Sources = [mainSource], Dependencies = ["Engine", "Core"],
-                LoadingPhase = LoadingPhase.PostConfigInit
+                LoadingPhase = LoadingPhase.PostDefault
             }
         ];
         NativeBuildRequest game = request with
@@ -144,9 +145,10 @@ internal static class ModuleTableTests
         if (request.Toolchain.Platform != NativePlatform.Android)
         {
             ProcessResult run = await ProcessRunner.RunAsync(new(cold.ModuleOutputs["Game"], [], fixture, request.Toolchain.Environment));
-            // Engine의 의존 Headers(header-only)는 그 너머의 Core로 바뀐다. Game의 직접 의존 Core는 그대로 남는다.
+            // Engine의 의존 Headers(header-only)는 그 너머의 Core로 바뀐다. Game의 직접 의존 Core는 그대로 남는다. 실행 파일 행의 단계는
+            // 규칙 값(PostDefault)과 무관하게 None이다(단계 실행 대상이 아니다 — Docs/Design/ModuleLoader.ko.md 3.11절).
             Check(run.ExitCode == 0 && run.StdOut.Replace("\r", "", StringComparison.Ordinal) ==
-                "Core||3\nEngine|Core|3\nGame|Engine,Core|1\nname=Game,Engine\n", "module table rows and ROCKS_MODULE_NAME:\n" + run.StdOut + run.StdErr);
+                "Core||3\nEngine|Core|3\nGame|Engine,Core|6\nname=Game,Engine\n", "module table rows and ROCKS_MODULE_NAME:\n" + run.StdOut + run.StdErr);
         }
 
         NativeBuildResult warm = await builder.BuildAsync(game);
@@ -196,6 +198,27 @@ internal static class ModuleTableTests
             Modules = modules.Select(module => module.Name == "Engine" ? module with { Name = "Engine-2" }
                 : module.Name == "Game" ? module with { Dependencies = ["Engine-2", "Core"] } : module).ToArray()
         }, "must have a C identifier name", "a non-identifier entry module name");
+
+        // MD6: 의존의 단계가 행보다 늦으면 거부한다(Engine Default → Core PostEngineInit). 실행 파일 행은 None이라 검사하지 않는다.
+        await Rejects(builder, game with
+        {
+            Modules = modules.Select(module => module.Name == "Core" ? module with { LoadingPhase = LoadingPhase.PostEngineInit } : module).ToArray()
+        }, "depends on Core (loading phase PostEngineInit)", "a dependency in a later loading phase");
+        // None 행은 검사하지 않고 None 의존은 늦은 단계가 아니다(코드가 Load로 시작한다).
+        NativeBuildResult manual = await builder.BuildAsync(game with
+        {
+            OutputDirectory = Path.Combine(fixture, "out-none"),
+            Modules = modules.Select(module => module.Name == "Engine" ? module with { LoadingPhase = LoadingPhase.None }
+                : module.Name == "Core" ? module with { LoadingPhase = LoadingPhase.PostEngineInit } : module).ToArray(),
+            Targets = ["Engine"]
+        });
+        Check(manual.Succeeded, "a None module may depend on a later phase: " + Failure(manual));
+        // 부트 모듈(공통 실행 진입점 표지 모듈의 링크 폐포)은 EarliestPossible이어야 한다.
+        await Rejects(builder, game with
+        {
+            Modules = modules.Select(module => module.Name == "Engine" ? module with { ProvidesLaunch = true, LoadingPhase = LoadingPhase.EarliestPossible }
+                : module).ToArray()
+        }, "Module Core: boot module (in the dependency closure of Engine) must use the EarliestPossible loading phase", "a boot module in a later phase");
     }
 
     private static async Task Rejects(NativeBuildEngine builder, NativeBuildRequest request, string expected, string name)

@@ -324,7 +324,7 @@ void LaneCheck(bool condition, const char* name, const char* mode, const char* w
 }
 
 void RunMode(const char* name, render::RenderLaneMode mode, graphics::Device& device,
-             Allocator& allocator) noexcept {
+             Allocator& allocator, ModuleLoader& modules) noexcept {
     const char* modeName = mode == render::RenderLaneMode::Thread ? "thread" : "inline";
     if (const char* reason = WindowPresentUnavailableReason(device)) {
         printf("  [NOT RUN] %s render lane (%s): %s\n", name, modeName, reason);
@@ -376,6 +376,7 @@ void RunMode(const char* name, render::RenderLaneMode mode, graphics::Device& de
     {
         EngineConfig engineConfig;
         engineConfig.hooks = &hooks;
+        engineConfig.modules = &modules;
         engineConfig.maxFrames = LaneFrames;
         engineConfig.fixedFrameDeltaSeconds = 1.0 / 60.0;
         Engine engine(allocator);
@@ -440,11 +441,11 @@ void RunMode(const char* name, render::RenderLaneMode mode, graphics::Device& de
 
 } // namespace
 
-uint32 RunRenderLaneChecks(const char* name, graphics::Device& device,
-                           Allocator& allocator) noexcept {
+uint32 RunRenderLaneChecks(const char* name, graphics::Device& device, Allocator& allocator,
+                           ModuleLoader& modules) noexcept {
     laneFailures = 0;
-    RunMode(name, render::RenderLaneMode::Thread, device, allocator);
-    RunMode(name, render::RenderLaneMode::Inline, device, allocator);
+    RunMode(name, render::RenderLaneMode::Thread, device, allocator, modules);
+    RunMode(name, render::RenderLaneMode::Inline, device, allocator, modules);
     return laneFailures;
 }
 
