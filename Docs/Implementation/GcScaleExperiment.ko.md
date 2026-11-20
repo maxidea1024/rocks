@@ -52,7 +52,7 @@
 
 남은 한계(설계 0절과 같다):
 
-- **제품 연결은 Sandbox 엔진 호스트와 게임 템플릿까지다(25.10절, 설계 개정 16).** 실행 진입점(Launch)이 `SystemAllocator` 위에 `BinnedAllocator`를 하나 두고 범용 할당자(`ApplicationContext::DefaultAllocator()`)로 내주며 Sandbox의 엔진 호스트와 게임 템플릿(`Templates/Game/Foundation/Source/Main.cpp`)이 그것을 쓴다. Commandlet·벤치 도구는 `SystemAllocator`를 그대로 쓴다(짧은 단일 스레드 작업). `Trim`을 부르는 시점은 아직 어디에도 없다. 큰 블록(8 KB 초과)은 원장을 두 번 지난다.
+- **제품 연결은 Sandbox 엔진 호스트까지다(25.10절).** 실행 진입점(Launch)이 `SystemAllocator` 위에 `BinnedAllocator`를 하나 두고 범용 할당자(`ApplicationContext::DefaultAllocator()`)로 내주며 Sandbox의 엔진 호스트가 그것을 엔진에 넘긴다. Commandlet·벤치 도구와 게임 템플릿(`Templates/Game/Foundation/Source/Main.cpp`)은 아직 `SystemAllocator`를 쓴다(후속). `Trim`을 부르는 시점은 아직 어디에도 없다. 큰 블록(8 KB 초과)은 원장을 두 번 지난다.
 - **ASan은 로컬에서 돌리지 않았다.** `BinnedAllocator`의 수동 poison 경로는 Windows CI의 AddressSanitizer 단계(run 44656731971, dd157ca6 — Asan 구성 Foundation)에서 처음 실행돼 통과했다(메인 세션 확인: 2,659개 가운데 실패 0 — `CoreBinned` 27·`GcSoak` 9·`ThreadExitSlot` 4 포함. 그 단계 자체는 다른 세션의 크래시 시험 둘로 실패했다). macOS에서는 그 단계가 아직 돌지 못했다(앞 단계의 다른 세션 실패). 그 앞의 efd940ac에서는 같은 단계가 `TryMarkReturned`의 비교 교환을 use-after-poison으로 잡았다 — 중복 반환 경쟁 시험에서 한 스레드가 블록을 닫은 뒤 다른 스레드가 계측되는 원자 연산으로 읽었다. 그 코드와 시험은 개정 13에서 없어졌다. 개정 15(AL6)의 코드는 그 단계에서 아직 돌지 않았다.
 - **다른 스레드 캐시의 `Trim`은 후속.** `Trim`은 호출 스레드의 캐시만 비운다. 쉬는 스레드가 쥘 수 있는 상한은 스레드 × 인스턴스당 2,361,856 byte(`BinnedAllocator::MaxThreadCacheBytes`)이고, 그 블록이 붙드는 commit은 가장 나쁜 경우 195 MiB다(설계 18.8절).
 - **스레드 종료 순서의 남는 경우**(설계 18.4절). 할당자의 종료 hook이 지나간 뒤 같은 스레드의 뒤 순번 종료 정리가 allocator를 쓰는 경우와, 스레드의 첫 allocator 사용이 자기 종료 정리 안인 경우 — 기록 하나가 새고 그 캐시는 인스턴스 파괴 때 회수된다(해제된 메모리를 만지지는 않는다). fiber에서는 `ThreadExitSlot`을 쓰지 않는다.
