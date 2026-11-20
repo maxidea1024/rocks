@@ -31,8 +31,8 @@
 | 증분 cycle | ≤ 60프레임 | 기본 예산 30,941 Step(60fps 약 8.6분) | 직렬 49–51, 병렬 ×8 기본 28·2ms 14 Step(20절) | 3–5 Step | 충족 |
 | 증분 Step p99 | ≤ 2ms | 2ms 예산 2.02ms(cycle 669ms) | p95 2.1ms, p99는 부하 아래 판정 불가 | — | 재측정 필요 |
 | Slot 정보 | ≤ 64B | 192B | hot 64B(슬롯 전체 192.3B) + 20.8B | 장부 + 24B | hot 충족(17절), 슬롯 전체는 192B |
-| churn 회수(약 98K) | — | 17.8ms | 묶음 회수로 같은 round 5–9% 감소(22.3–24.1ms), 회수를 미루면 프레임 2ms 예산으로 12–16프레임(24절) | — | 회수 예산 충족. 객체당 비용은 할당자를 바꿔도 줄지 않았다(gate A7 미충족 — 플랫폼 168.9 대 `BinnedAllocator` 163.3 ns/객체, 잡음 안: 25.8절) |
-| 1M 생성·회수(System·Binned 할당자) | — | 측정 불가(100K 이상이 끝나지 않음) | `SystemAllocator` 생성 1,954 · churn 회수 344 · 종료 회수 383 ns/객체(플랫폼 할당의 1.37–1.45배 · 3.8–4.3배 · 2.1–2.8배), `BinnedAllocator` 1,341 · 66.5 · 139 ns/객체(0.97배 · 0.81배 · 0.75배) — 25.8절 | — | 끝난다. 할당자 gate A1–A6 충족, A7 미충족(0.3절). 제품 경로는 아직 `SystemAllocator` |
+| churn 회수(약 98K) | — | 17.8ms | 묶음 회수로 같은 round 5–9% 감소(22.3–24.1ms), 회수를 미루면 프레임 2ms 예산으로 12–16프레임(24절) | — | 회수 예산 충족. 객체당 회수는 `BinnedAllocator`에서 플랫폼 할당의 0.89배, `SystemAllocator`의 0.37배다(중앙값 170.0 · 414.3 · 151.5 ns/객체 — 25.10절) |
+| 1M 생성·회수(System·Binned 할당자) | — | 측정 불가(100K 이상이 끝나지 않음) | `SystemAllocator` 생성 1,954 · churn 회수 344 · 종료 회수 383 ns/객체(플랫폼 할당의 1.37–1.45배 · 3.8–4.3배 · 2.1–2.8배), `BinnedAllocator` 1,341 · 66.5 · 139 ns/객체(0.97배 · 0.81배 · 0.75배) — 25.8절 | — | 끝난다. 할당자 gate A1–A4·A6·A7 충족, A5 경계(0.3절). Sandbox 엔진 호스트는 `BinnedAllocator`를 쓴다(25.10절) |
 
 처음에는 1M에서 표식 0.8초, 증분 cycle 8.6분, 병렬이 직렬보다 6배 느려 사실상 쓸 수 없었다. 지금은 cycle이 1초 안에 끝나고 Begin·sweep 판정이 1ms 아래이며, 클러스터가 맞는 그래프는 표식 gate를 모두 충족한다. Phase 4 측정은 부하 100% 아래라 병렬·p99 수치는 판정용이 아니다.
 
@@ -44,21 +44,21 @@
 |---|---|---|---|
 | A1 `SystemAllocator`(1M 생성·회수) | 끝난다. 플랫폼 할당 대비 생성 2배·종료 회수 3배·churn 회수 4.5배 이내 | 생성 1.37–1.45배, 종료 회수 2.1–2.8배, churn 회수 3.8–4.3배(1,954 · 383 · 344 ns/객체) | 충족 |
 | A2 `BinnedAllocator`(같은 측정) | 객체당 시간이 플랫폼 할당 이하 | 생성 0.97배, churn 생성 0.96배, churn 회수 0.81배, 종료 회수 0.75배(1,341 · 1,289 · 66.5 · 139 ns/객체) | 충족 |
-| A3 할당·반환 쌍 | 40 ns 이하 | 12.4–13.0 ns(부하가 걸린 round. 부하 없는 round의 검사 없는 변형은 7.2–7.3 ns) | 충족 |
-| A4 다른 스레드가 반환 | 같은 스레드의 3배 이내 | 2.1–2.9배(부하가 걸린 round 하나는 3.7배) | 충족 |
-| A5 8 스레드 처리량 | 1 스레드의 4배 이상 | 4.0–4.7배(부하 없는 round의 검사 없는 변형) | 충족 |
+| A3 할당·반환 쌍 | 40 ns 이하 | 7.2–7.4 ns | 충족 |
+| A4 다른 스레드가 반환 | 같은 스레드의 3배 이내 | 2.2–2.6배 | 충족 |
+| A5 8 스레드 처리량 | 1 스레드의 4배 이상 | round별 3.6–6.9배, 중앙 4.0배(다섯 round 가운데 둘이 4배 미만 — 다른 세션의 부하가 30% 안팎인 기계) | 경계 |
 | A6 메모리 | 요청 byte 대비 +20% 이하 | +6.8%(churn 뒤 +9.7%) | 충족 |
-| A7 GC churn 회수 | 플랫폼 할당보다 줄어든다 | 같은 수준(168.9 대 163.3 ns/객체 — 잡음 안) | 미충족 |
+| A7 GC churn 회수 | 플랫폼 할당보다 줄어든다 | 다섯 round 모두 낮다 — 중앙값 151.5 대 170.0 ns/객체(0.89배, round별 0.85–0.97배) | 충족 |
 
 남은 한계(설계 0절과 같다):
 
-- **제품 경로 미연결.** 지금 제품 코드는 엔진에 `SystemAllocator`를 넘긴다(`launch::ApplicationContext` → Sandbox `EngineHost`). `BinnedAllocator`를 엔진·응용 프로그램에 연결하는 일은 후속 작업(결정 대기)이다. 그때까지 1M 규모의 제품 경로에는 `SystemAllocator`의 배수(churn 회수가 플랫폼 할당의 3.8–4.3배)가 걸린다.
+- **제품 연결은 Sandbox 엔진 호스트까지다(25.10절).** 실행 진입점(Launch)이 `SystemAllocator` 위에 `BinnedAllocator`를 하나 두고 범용 할당자(`ApplicationContext::DefaultAllocator()`)로 내주며 Sandbox의 엔진 호스트가 그것을 엔진에 넘긴다. Commandlet과 벤치 도구는 아직 `SystemAllocator`를 쓴다(후속). `Trim`을 부르는 시점은 아직 어디에도 없다. 큰 블록(8 KB 초과)은 원장을 두 번 지난다.
 - **ASan 미실행.** `BinnedAllocator`의 수동 poison 경로는 Asan 구성의 구문 검사와 리뷰의 경로 추적만 거쳤다. 실행한 적이 없고, CI의 AddressSanitizer 단계도 다른 세션의 실패로 그 앞에서 멈춰 아직 돌지 못했다.
 - **다른 스레드 캐시의 `Trim`은 후속.** `Trim`은 호출 스레드의 캐시만 비운다. 쉬는 스레드가 쥘 수 있는 상한은 스레드 × 인스턴스당 2,361,856 byte(`BinnedAllocator::MaxThreadCacheBytes`)이고, 그 블록이 붙드는 commit은 가장 나쁜 경우 195 MiB다(설계 18.8절).
 - **스레드 종료 순서의 남는 경우**(설계 18.4절). 할당자의 종료 hook이 지나간 뒤 같은 스레드의 뒤 순번 종료 정리가 allocator를 쓰는 경우와, 스레드의 첫 allocator 사용이 자기 종료 정리 안인 경우 — 기록 하나가 새고 그 캐시는 인스턴스 파괴 때 회수된다(해제된 메모리를 만지지는 않는다). fiber에서는 `ThreadExitSlot`을 쓰지 않는다.
 - **겹친 중복 반환**(설계 18.4절). 같은 블록을 두 스레드가 같은 순간에 반환하면 둘 다 성공으로 돌아올 수 있다. 그 블록을 두 번째로 내줄 때 Fatal로 잡지만, 그 사이에 다시 반환되거나 slab으로 돌아가면 놓치고 slab 계수가 어긋날 수 있다. 오용 검출은 그 slab의 decommit·재사용과 겹치면 보장되지 않는다(한계 2).
-- **GC churn 회수는 줄지 않았다**(gate A7). 일반 그래프의 churn 회수는 `BinnedAllocator`에서도 플랫폼 할당과 같은 수준이다. 할당자만 바꿔 잰 객체 비교에서는 churn 회수 0.81배·종료 회수 0.75배이고, 큰 이득은 뜨거운 쌍·여러 스레드 쪽이다.
-- **측정의 한계.** 개정 13 구현의 작은 벤치와 A7은 다른 세션의 빌드로 기계가 100% 찬 채로만 쟀다(판정에는 부하 없는 round의 값을 썼다). 실제 엔진의 객체 크기 분포는 재지 않았다(메모리 +6.8%는 벤치의 객체 크기에서의 값이다). 3M 객체 시나리오는 재지 않았다.
+- **GC churn 회수의 이득은 작다**(gate A7). 일반 그래프의 churn 회수는 `BinnedAllocator`에서 플랫폼 할당의 0.89배다(개정 13 구현 — 비교 교환 구현에서는 같은 수준이었다). `SystemAllocator`에 견주면 0.37배다(25.10절). 할당자만 바꿔 잰 객체 비교에서는 churn 회수 0.81배·종료 회수 0.75배이고, 큰 이득은 뜨거운 쌍·여러 스레드 쪽이다.
+- **측정의 한계.** 측정은 다른 세션의 빌드 부하가 드나드는 기계에서 했다(판정에는 round의 최솟값·중앙값을 썼고, 마지막 재측정 때의 부하는 30% 안팎이었다). gate A5(8 스레드 배수)는 경계다. 실제 엔진의 객체 크기 분포는 재지 않았다(메모리 +6.8%는 벤치의 객체 크기에서의 값이다). 3M 객체 시나리오는 재지 않았다.
 - **플랫폼.** 이 기계는 Windows만 빌드한다. macOS는 CI로, Android는 NDK 구문 검사로만 봤다.
 - **4절 gate 가운데 남은 것.** 일반 그래프의 STW 병렬 표식(×8 16.7–17.2ms — 목표 15ms의 1.1–1.15배), 증분 Step p99(부하 아래 판정 불가 — 재측정 필요), Slot 정보 합계(hot 64B는 충족, 전체 192.3B — 설계 11절 결정 5).
 - **리뷰의 후속 목록**(실험 25.9절): 겹친 중복 반환의 slab 경로 보강, 캐시 줄 크기, 종료 hook의 전역 잠금 구간, 시험이 없는 경로 넷, `FlsGetValue`의 last-error 등.
@@ -1756,7 +1756,7 @@ GC churn 회수(gate A7 — 일반 그래프 시나리오 1M · 간선 4 · `--c
 | 비교 교환 구현, 부하 없는 3 round | 197.4 · 170.3 · 168.9 | 163.3 · 175.3 · 171.5 |
 | 개정 13 구현, 부하 걸린 5 round | 242.1 · 238.4 · 406.2 · 408.8 · 386.0 | 259.5 · 276.0 · 264.0 · 203.1 · 200.1 |
 
-- 같은 수준이다(부하 없는 실행의 최솟값 168.9 대 163.3, 중앙값 170.3 대 171.5). "플랫폼 할당보다 줄어든다"를 채웠다고 할 수 없다. 개정 13 구현은 기계가 100% 찬 채로만 쟀고 round 사이 흔들림(200–409 ns)이 할당자 차이보다 커서 판정에 쓰지 않는다 — 객체 비교에서 본 표지 방식의 이득(객체당 6–12 ns)은 이 시나리오의 잡음 안이다.
+- (25.10절에서 개정 13 구현을 부하가 적을 때 다시 쟀다 — 다섯 round 모두 `BinnedAllocator`가 낮아 판정을 충족으로 고쳤다. 아래는 AL5 때의 판단이다.) 같은 수준이다(부하 없는 실행의 최솟값 168.9 대 163.3, 중앙값 170.3 대 171.5). "플랫폼 할당보다 줄어든다"를 채웠다고 할 수 없다. 개정 13 구현은 기계가 100% 찬 채로만 쟀고 round 사이 흔들림(200–409 ns)이 할당자 차이보다 커서 판정에 쓰지 않는다 — 객체 비교에서 본 표지 방식의 이득(객체당 6–12 ns)은 이 시나리오의 잡음 안이다.
 - 실험 24절의 235–250 ns보다 부하 없는 실행이 낮은 것은 기계 부하와 빌드 구성(유니티)이 달라서이고 할당자 때문이 아니다.
 - 이 시나리오에서는 `BenchAllocator`가 머리 16 byte를 더해 요청하므로 `BinnedAllocator`의 등급이 한 칸씩 올라간다(48 → 64 등). 끝난 뒤 `BinnedAllocator`의 commit은 5.8 MiB(보관한 빈 slab 64개 4 MiB와 주 스레드 캐시의 블록이 붙든 slab)이고 큰 경로로 밀린 작은 요청은 0이다.
 
@@ -1779,20 +1779,20 @@ gate 확정(설계 18.8절, 개정 13):
 |---|---|---|---|
 | A1 `SystemAllocator` | 끝난다. 플랫폼 대비 생성 2배·종료 회수 3배·churn 회수 4.5배 이내 | 생성 1.37–1.45배, 종료 회수 2.1–2.8배, churn 회수 3.8–4.3배 | 충족(할당자는 그대로이고 잣대가 바뀌어 다시 정한 값이다) |
 | A2 `BinnedAllocator` | 객체당 시간이 플랫폼 이하 | 0.97 · 0.96 · 0.81 · 0.75배(몫은 churn 회수 64%, 종료 회수 44%) | 충족 |
-| A3 쌍 | 40 ns 이하 | 부하 걸린 round 12.4–13.0 ns(부하 없는 round의 검사 없는 변형 7.2–7.3 ns) | 충족 |
-| A4 다른 스레드 반환 | 같은 스레드의 3배 이내 | 2.1–2.9배(부하 걸린 round 하나 3.7배), 부하 없는 round의 검사 없는 변형 2.3–2.7배 | 충족(부하 없는 round 기준) |
-| A5 8 스레드 | 1 스레드의 4배 이상 | 부하 없는 round의 검사 없는 변형 4.0–4.7배(부하 걸린 round 6.7–7.2배) | 충족 |
+| A3 쌍 | 40 ns 이하 | 7.2–7.4 ns(25.10절의 재측정. AL5 때는 부하가 걸린 round의 12.4–13.0 ns뿐이었다) | 충족 |
+| A4 다른 스레드 반환 | 같은 스레드의 3배 이내 | 2.2–2.6배(25.10절의 재측정) | 충족 |
+| A5 8 스레드 | 1 스레드의 4배 이상 | round별 3.6–6.9배, 중앙 4.0배(25.10절의 재측정 — 다섯 round 가운데 둘이 4배 미만) | 경계(AL5 때는 검사 없는 변형의 4.0–4.7배로 충족이라 적었다) |
 | A6 메모리 | 요청 대비 +20% 이하 | +6.8%(churn 뒤 +9.7%) | 충족 |
-| A7 GC churn 회수 | 플랫폼보다 줄어든다 | 같은 수준(168.9 대 163.3 ns — 잡음 안) | 미충족 — 줄지 않는다 |
+| A7 GC churn 회수 | 플랫폼보다 줄어든다 | 다섯 round 모두 낮다 — 중앙값 151.5 대 170.0 ns/객체(25.10절의 재측정) | 충족(AL5 때는 비교 교환 구현의 값으로 "같은 수준 — 미충족"이라 적었다) |
 
 남은 한계와 후속:
 
-- 제품 경로 미연결: 엔진에는 `SystemAllocator`가 넘어가므로 지금 1M 규모의 제품 경로에는 A1의 배수(churn 회수가 플랫폼의 3.8–4.3배)가 걸린다. `BinnedAllocator` 연결은 후속 작업(결정 대기)이다.
+- 제품 경로: AL5 때는 엔진에 `SystemAllocator`가 넘어갔다. 25.10절에서 Sandbox 엔진 호스트를 `BinnedAllocator`에 연결했다(Commandlet·벤치 도구는 후속).
 - ASan 경로는 실행 검증이 없다(25.7절). CI의 AddressSanitizer 단계도 아직 돌지 못했다.
 - 다른 스레드 캐시의 `Trim`은 후속이다(쉬는 스레드가 쥐는 상한 2,361,856 byte).
 - 스레드 종료 순서의 남는 경우(25.6절): hook 뒤 회차의 종료 정리, 스레드의 첫 allocator 사용이 자기 종료 정리 안인 경우 — 기록 하나가 새고 캐시는 인스턴스 파괴 때 회수된다.
 - 겹친 중복 반환은 둘 다 성공으로 돌아올 수 있다(두 번째로 내줄 때 Fatal. 그 사이 다시 반환되거나 slab으로 돌아가면 놓치고 slab 계수가 어긋날 수 있다).
-- 개정 13 구현의 작은 벤치와 A7은 부하가 걸린 채로만 쟀다(위). 조용한 기계에서 다시 재면 표의 "부하 걸린 round" 줄이 바뀐다.
+- 개정 13 구현의 작은 벤치와 A7은 AL5 때 부하가 걸린 채로만 쟀다. 25.10절에서 다시 쟀다(부하 30% 안팎).
 - 실제 엔진의 크기 분포는 재지 않았다(벤치의 객체 크기에서 +6.8%).
 
 검증: Debug `Core` 대상 `CoreBinned` 27개 통과, NDK `-fsyntax-only`(`BinnedAllocator.cpp`, 두 시험 파일)와 Asan 구성 구문 검사 통과, format·policy 통과. 전체 Foundation·EngineTests는 8단계 끝에 한 번 돌린다(아래 25.9절).
@@ -1831,5 +1831,49 @@ gate 확정(설계 18.8절, 개정 13):
 
 - AddressSanitizer 실행(수동 poison 경로) — 이 작업의 규칙으로 돌리지 않았고 CI의 그 단계도 아직 돌지 못했다.
 - macOS·Android 실행 — macOS는 push의 CI로만 본다(D1의 고침, 개정 13의 Fatal 대조는 이 push의 CI가 첫 실행이다). Android는 구문 검사뿐이다(자식 프로세스 Fatal 대조는 Android에서 건너뛴다 — 프로세스 생성 미지원).
-- 조용한 기계에서의 재측정 — 개정 13 구현의 작은 벤치와 A7은 부하가 걸린 채로만 쟀다(25.8절).
+- 조용한 기계에서의 재측정 — 25.10절에서 했다(부하 30% 안팎. 완전히 빈 기계는 아니다).
 - Release·Development 구성의 시험 실행(벤치만 Development로 빌드했다).
+
+### 25.10 AL6: 제품 연결과 재측정 (설계 개정 15, 2026-11-20)
+
+사용자 지시 "엔진에 BinnedAllocator 연결해"로 설계 11절 결정 8을 확정하고 연결했다(설계 18.10절, Launch 설계 개정 6).
+
+한 것:
+
+- **Launch.** `ApplicationSettings::defaultAllocator`(`DefaultAllocatorKind` — 기본 `Binned`, `System`)와 `ApplicationContext::DefaultAllocator()`를 더했다. 실행 단계 "Launch.DefaultAllocator"(종료 요청 처리기 뒤, 도구 로그 앞)가 Launch의 `SystemAllocator` 위에 `BinnedAllocator`를 하나 만들고, 역순 정리에서 도구 로그를 멈춘 뒤에 파괴한다. 본문이 할당을 남기면 그 파괴가 Fatal이다. `RequestExitWithoutStaticTeardown`이면(내장 진입 제외) 파괴하지 않는다. `System` 설정이면 만들지 않고 `DefaultAllocator()`가 `SystemAllocator()`와 같은 객체다.
+- **Sandbox.** 엔진 호스트의 두 경로(`RunEngineHost`, `RunEngineHostWithModules`)와 self-test가 `context.DefaultAllocator()`를 쓴다 — 모듈 로더, 설정 문맥, LogHost, 엔진이 그 할당자를 받는다. 같은 파일의 지역 `SystemAllocator` 둘(self-test가 trace 파일을 읽는 버퍼, 기기 특성 확인)은 엔진으로 가지 않아 그대로 뒀다.
+- **`ThreadExitSlot`의 OS 오류 값 보존**(리뷰 S1). 탐침으로 확인했다(Windows 11 26200): `FlsGetValue`는 값이 있든 없든 성공하면 last-error를 0으로 지우고, `FlsSetValue`는 성공하면 그대로 둔다. Windows 구현의 `Get`·`Set`이 호출 앞뒤로 last-error를 보존하고, 계약(`Thread.h`)에 "OS 오류 값을 바꾸지 않는다"를 적었다. 시험 지원에 `test::SetSystemError`·`SystemError`(Windows last-error, POSIX `errno`)를 더했다.
+- **빌드 규칙.** 시험 지원 소스 둘을 더하자 FoundationTests의 유니티 묶음 경계가 옮겨져 `WindowsComRefTests.cpp`가 Compression 시험과 한 묶음의 앞에 놓였고, Windows COM 헤더의 매크로(`small`)가 뒤 소스로 새어 컴파일이 깨졌다(작업 파일 분리를 꺼도 같았다). 그 시험 소스를 유니티 단독 소스로 뺐다(`Programs/FoundationTests/FoundationTests.Build.cs`). 다른 세션(빌드)의 파일이라 한 줄만 더했다.
+
+시험:
+
+- `Native.Launch.default-allocator`(Rocks.ToolTests — `LaunchProbe`를 자식으로 다섯 번 띄운다): 기본 설정에서 범용 할당자가 시스템 할당자와 다른 객체이고 작은 블록 64개는 시스템 할당자의 살아 있는 할당 수를 늘리지 않으며 큰 블록 하나는 하나 늘린다(`kind=binned distinct=1 smallInSystem=0 largeInSystem=1 clean=1`). `--system-allocator`면 같은 객체다(`distinct=0 smallInSystem=64`). 할당을 남기면 비정상 종료이고 stderr에 `BinnedAllocator destroyed with live allocations`(System 설정은 `SystemAllocator destroyed with live allocations`)가 있다. `RequestExitWithoutStaticTeardown`이면 Fatal 없이 본문의 종료 코드로 끝난다.
+- `EngineBinnedAllocatorTests.cpp` 3개(EngineTests): GC worker 둘이 있는 엔진(전체 수집 요청으로 파괴한 Actor 회수), scheduler 없는 엔진(직렬 표식·증분 일정), 같은 할당자 위에서 엔진을 두 번 살리기. Actor 512개를 만들어 절반을 파괴하고 프레임을 돌린다. 끝에 남은 할당 0, 큰 경로로 밀린 작은 요청 0, `Trim` 뒤 commit 0, 상위 `SystemAllocator`도 남은 할당 0.
+- `ThreadExitSlot_GetAndSetKeepTheSystemErrorValue`: 빈 칸의 `Get`, `Set`, 값이 든 칸의 `Get`, 지우는 `Set`, 유효하지 않은 칸의 `Get`·`Set` 뒤에 OS 오류 값이 그대로다.
+- 음성 대조 3종이 모두 잡혔다(Debug Foundation, `Native.Launch.default-allocator`): L1 Launch가 `BinnedAllocator`를 만들고도 시스템 할당자를 내줌, L2 설정을 무시하고 언제나 `BinnedAllocator`를 만듦, L3 정적 소멸 없이 끝내는 경로에서도 파괴함.
+
+측정 — 일반 그래프 시나리오(1M · 간선 4 · `--churn-only`, 5 round를 할당자마다 번갈아. 모두 `BenchAllocator`의 계수 아래이고 다른 세션의 부하는 30% 안팎이었다. 값은 중앙값(최솟값)):
+
+| 할당자 | 생성 ms | 연결 ms | churn 생성+연결 ms | churn 회수 ns/객체 | churn Collect 전체 ms | 미룬 회수의 프레임(2 ms 예산) |
+|---|---|---|---|---|---|---|
+| platform | 492(473) | 844(815) | 130(124) | 170.0(165.3) | 86.5(83.0) | 10–12 |
+| `SystemAllocator`(연결 전의 제품 경로) | 824(787) | 1,106(1,044) | 175(167) | 414.3(401.9) | 107.5(106.6) | 23–25 |
+| `BinnedAllocator`(연결 뒤) | 441(436) | 818(787) | 127(122) | 151.5(145.1) | 81.5(77.7) | 9–10 |
+
+- 연결로 바뀌는 것(`SystemAllocator` → `BinnedAllocator`, 중앙값): 생성 0.54배, 연결 0.74배, churn 생성+연결 0.72배, churn 회수 0.37배, churn Collect 전체 0.76배, 미룬 회수의 프레임 수 24 → 10.
+- 종료 회수는 이 시나리오가 재지 않는다. 할당자 비교의 값은 383–501 → 139–142 ns/객체다(25.8절).
+- gate A7(플랫폼 대 `BinnedAllocator`): round별 168.1 · 170.0 · 165.3 · 179.4 · 170.6 대 163.7 · 145.1 · 149.4 · 159.4 · 151.5 ns/객체 — 다섯 round 모두 `BinnedAllocator`가 낮다(0.85–0.97배, 중앙값 0.89배). AL5 때의 "같은 수준"은 비교 교환 구현으로 잰 값이었고, 개정 13 구현은 그때 부하가 걸린 채로만 쟀다. 판정을 충족으로 고친다.
+
+작은 벤치의 재측정(개정 13 구현, 같은 조건 — gate A3·A4·A5. 5 round의 가장 좋은 값(중앙값)):
+
+| 할당자 | 쌍(16–8192 B) | 묶음 4096×64 B | 인계: 다른 스레드 / 같은 스레드 | 동시 1 스레드 | 동시 8 스레드 |
+|---|---|---|---|---|---|
+| platform | 24.5–25.3 ns(25.0–31.2) | 25.4 ns/op | 97.6 / 30.8 ns/쌍 | 38.2 M쌍/s(31.3) | 175.2 M쌍/s(129.5) — 같은 round 비 4.0–4.7배 |
+| `BinnedAllocator` | 7.2–7.4 ns(7.3–8.9) | 5.3 ns/op | 17.6 / 7.9 ns/쌍 — 같은 round 비 2.2–2.6배 | 123.5 M쌍/s(118.5) | 637.3 M쌍/s(455.2) — 같은 round 비 3.6 · 3.8 · 4.0 · 5.2 · 6.9배 |
+
+- A3 7.2–7.4 ns, A4 2.2–2.6배는 충족이다.
+- A5는 경계다: round별 배수의 중앙값이 4.0배이고 다섯 가운데 둘이 4배 미만이다(6.9배는 그 round의 1 스레드 값이 66 M쌍/s로 눌린 것). 비교 교환을 뺀 뒤 1 스레드 값이 104 → 120 M쌍/s로 오른 만큼 배수가 내려갔다 — 8 스레드의 처리량 자체는 416–637 M쌍/s로 비교 교환 때(359–510)보다 높다. AL5 때 "충족"이라 적은 4.0–4.7배는 검사 없는 변형을 다른 때에 잰 값이었다.
+
+검증: Debug Foundation·EngineTests·Sandbox 빌드(작업 파일 분리 끔 — CI와 같은 묶음 구성). 바뀐 시험: Foundation `ThreadExitSlot` 5개, EngineTests `Engine_` 23개(새 시험 3개 포함), `Native.Launch.default-allocator` 통과. Sandbox `--self-test`는 19개 통과·1개 미실행(Vulkan 소프트웨어 기기 없음 — 환경), `--engine --frames 3`은 종료 코드 0이다(범용 할당자에 남은 할당이 없어 Launch의 정리가 Fatal 없이 끝난다). 전체 Foundation·EngineTests와 리뷰 결과는 아래에 덧붙인다.
+
+후속(넣지 않은 것): `Trim`을 부르는 시점(레벨을 내린 뒤, 메모리 압박), 다른 스레드 캐시의 `Trim`, Commandlet·벤치 도구의 연결, 범용 할당자를 고르는 명령줄 옵션, 큰 블록이 원장을 두 번 지나는 것.
