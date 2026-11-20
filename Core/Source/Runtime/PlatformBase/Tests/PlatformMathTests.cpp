@@ -180,6 +180,43 @@ TEST(PlatformMath_AbsAndCopySignHandleSignedZeroAndNaN) {
     CHECK(PlatformMath::CopySign(-2.0, 1.0) == 2.0);
 }
 
+TEST(PlatformMath_Atan2FloatMatchesUnrealMinimaxBitwise) {
+    // UE FGenericPlatformMath::Atan2(float)(GenericPlatformMath.cpp:33-76) 식을 float 연산 단계마다
+    // 반올림해 따라간 독립 계산(numpy float32)의 bit다. C atan2f(1, 1) = 0x3f490fdb와 달리
+    // 0x3f490fda다.
+    struct Golden {
+        float y;
+        float x;
+        uint32 bits;
+    };
+
+    const Golden cases[] = {
+        {1.0f, 1.0f, 0x3f490fdau},   {1.0f, 2.0f, 0x3eed632eu},      {-3.0f, -4.0f, 0xc01fe0bcu},
+        {0.5f, -0.25f, 0x40023453u}, {-2.5f, 0.001f, 0xbfc902c0u},   {1.0f, 0.0f, 0x3fc90fdbu},
+        {0.0f, -1.0f, 0x40490fdbu},  {1.0e-30f, -1.0f, 0x40490fdbu},
+    };
+    for (const Golden& item : cases) {
+        CHECK(SameFloat(PlatformMath::Atan2(item.y, item.x), FloatBits(item.bits)));
+    }
+
+    // 부호 있는 0은 UE를 따른다(C atan2f와 다르다): Y < 0일 때만 부호를 뒤집으므로 -0은 +pi,
+    // 두 0은 +0이다.
+    CHECK(SameFloat(PlatformMath::Atan2(-0.0f, -1.0f), FloatBits(0x40490fdbu)));
+    CHECK(SameFloat(PlatformMath::Atan2(-0.0f, -0.0f), 0.0f));
+    CHECK(SameFloat(PlatformMath::Atan2(0.0f, -0.0f), 0.0f));
+    // 두 무한대는 UE와 같이 NaN이고, NaN 입력은 NaN이다(UE의 Atan2(NaN, 0) = 0만 Rocks가 다르다).
+    const float infinity = FloatBits(0x7f800000u);
+    const float nan = FloatBits(0x7fc00000u);
+    CHECK(PlatformMath::IsNaN(PlatformMath::Atan2(infinity, infinity)));
+    CHECK(PlatformMath::IsNaN(PlatformMath::Atan2(nan, 0.0f)));
+    CHECK(PlatformMath::IsNaN(PlatformMath::Atan2(1.0f, nan)));
+    // 한쪽만 무한대면 유한 결과다(UE와 같다).
+    CHECK(SameFloat(PlatformMath::Atan2(infinity, 1.0f), FloatBits(0x3fc90fdbu)));
+    // double은 UE와 같이 (0, 0)만 +0이고 그 밖은 C atan2다.
+    CHECK(SameDouble(PlatformMath::Atan2(-0.0, -0.0), 0.0));
+    CHECK(PlatformMath::Atan2(-0.0, -1.0) == -3.141592653589793);
+}
+
 TEST(PlatformMath_SqrtMatchesGenericBitwise) {
     for (float value : SpecialFloats) {
         CHECK(SameFloat(PlatformMath::Sqrt(value), GenericPlatformMath::Sqrt(value)));

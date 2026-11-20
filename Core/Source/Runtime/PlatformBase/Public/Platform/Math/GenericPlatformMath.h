@@ -243,12 +243,65 @@ struct GenericPlatformMath {
         return ::atan(value);
     }
 
-    // 결과 범위는 [-pi, pi]다. Atan2(±0, -0)처럼 부호 있는 0의 결과는 C atan2를 따른다.
+    // y/x의 편각(라디안)이다. UE FGenericPlatformMath::Atan2
+    // (GenericPlatformMath.cpp:33-110)와 같은 식이다.
+    // - float: C atan2f가 아니라 UE의 7차 minimax 다항식이다(C atan2f 대비 최대 상대 오차
+    //   7.15e-7). 계수·연산 순서·분기가 UE와 같고 순수 float 연산이라(-ffp-contract=off)
+    //   플랫폼과 무관하게 UE와 같은 bit를 낸다. C atan2f는 libm마다 마지막 bit가 달라
+    //   (Apple libm은 atan2f(0, -1)이 float pi보다 1 ulp 작다) Rotator float 경로의 결과가
+    //   플랫폼마다 갈렸다. 결과 범위는 [-pi, pi]에 float pi(0x40490FDB)를 포함한다.
+    //   부호 있는 0은 UE를 따른다: Atan2(-0, 음수) = +pi(C는 -pi), Atan2(±0, ±0) = +0
+    //   (C는 ±0·±pi). 두 무한대는 NaN이다(UE와 같다, C는 ±pi/4·±3pi/4). NaN 입력은 NaN이다.
+    //   UE는 Atan2(NaN, ±0)에 0을 내지만 Rocks 수학의 NaN 전파 계약을 지키려고 이 경우만
+    //   다르다.
+    // - double: UE와 같이 (0, 0)은 +0, 그 밖은 C atan2다(부호 있는 0의 결과도 C를 따른다).
+    //   const float yaw = PlatformMath::Atan2(1.0f, 0.0f); // 1.5707964f(= 0.5f * float pi)
     static float Atan2(float y, float x) noexcept {
-        return ::atan2f(y, x);
+        if (IsNaN(y) || IsNaN(x)) {
+            return y + x;
+        }
+
+        constexpr float Atan2Pi = 3.1415926535897932f;
+        constexpr float Atan2HalfPi = 0.5f * Atan2Pi;
+        // UE 계수 c[0..6](높은 차수부터)이다. 마지막 1.0f까지 Horner 순서로 곱해 t/(1 + ...)가
+        // 아니라 t * P(t^2)로 atan(t)를 근사한다.
+        constexpr float Atan2Coefficient0 = +7.2128853633444123e-03f;
+        constexpr float Atan2Coefficient1 = -3.5059680836411644e-02f;
+        constexpr float Atan2Coefficient2 = +8.1675882859940430e-02f;
+        constexpr float Atan2Coefficient3 = -1.3374657325451267e-01f;
+        constexpr float Atan2Coefficient4 = +1.9856563505717162e-01f;
+        constexpr float Atan2Coefficient5 = -3.3324998579202170e-01f;
+        constexpr float Atan2Coefficient6 = +1.0f;
+        const float absX = Abs(x);
+        const float absY = Abs(y);
+        const bool yAbsBigger = absY > absX;
+        float larger = yAbsBigger ? absY : absX;
+        const float smaller = yAbsBigger ? absX : absY;
+        if (larger == 0.0f) {
+            return 0.0f;
+        }
+
+        float ratio = smaller / larger;
+        const float ratioSquared = ratio * ratio;
+        larger = Atan2Coefficient0;
+        larger = larger * ratioSquared + Atan2Coefficient1;
+        larger = larger * ratioSquared + Atan2Coefficient2;
+        larger = larger * ratioSquared + Atan2Coefficient3;
+        larger = larger * ratioSquared + Atan2Coefficient4;
+        larger = larger * ratioSquared + Atan2Coefficient5;
+        larger = larger * ratioSquared + Atan2Coefficient6;
+        ratio = larger * ratio;
+        ratio = yAbsBigger ? Atan2HalfPi - ratio : ratio;
+        ratio = (x < 0.0f) ? Atan2Pi - ratio : ratio;
+        ratio = (y < 0.0f) ? -ratio : ratio;
+        return ratio;
     }
 
     static double Atan2(double y, double x) noexcept {
+        if (x == 0.0 && y == 0.0) {
+            return 0.0;
+        }
+
         return ::atan2(y, x);
     }
 

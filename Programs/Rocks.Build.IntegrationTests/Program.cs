@@ -72,10 +72,11 @@ try
         Require(bindingsEntry.GetProperty("Descriptor").GetString() == "Metadata/CoreTypeBindings/CoreTypeBindings.rocksmeta.json" &&
             bindingsEntry.GetProperty("IdentityManifest").GetString() == "Metadata/CoreTypeBindings/CoreTypeBindings.rocksids.json",
             "Engine SDK manifest does not name the CoreTypeBindings descriptor and identity manifest");
-        // manifest 버전 8: 5는 Build/Build.version 값을 EngineVersion {Major, Minor, Patch}로 담고(그 파일 자체는 SDK에 없다), 6은 모듈 표
+        // manifest 버전 10: 5는 Build/Build.version 값을 EngineVersion {Major, Minor, Patch}로 담고(그 파일 자체는 SDK에 없다), 6은 모듈 표
         // 표지를 담고(Core가 ProvidesModuleTable, 서드파티 모듈이 ThirdParty — Docs/Design/ModuleLoader.ko.md 3.9절), 8은 리플렉션 전용
         // 라이브러리 표지를 없앴다(메타데이터 모듈도 진입점 모듈이다 — 3.10절). 9는 타입별 본문이 생성 헤더가 아니라 SDK 라이브러리에 있고
         // (Docs/Design/ReflectionGeneratedSources.ko.md 5절) 공유 PCH 제공 모듈의 SharedPchHeader를 싣는다(Docs/Design/UnityBuildPch.ko.md 8.4절).
+        // 10은 모듈마다 실행 중 적재 모듈 목록 DynamicModules를 싣는다(Docs/Design/ModuleLoader.ko.md 3.8절 — 엔진 모듈은 아직 쓰지 않아 비어 있다).
         var sdkModules = engineManifest.RootElement.GetProperty("Modules").EnumerateArray().ToArray();
         // 손으로 쓴 소스가 없던 리플렉션 모듈(CoreTypeBindings)이 모듈 생성 소스(등록 함수 정의)와 진입점 TU를 담은 라이브러리를 갖는다.
         // 표지 칸은 없다.
@@ -87,11 +88,13 @@ try
             sdkModules.Single(module => module.GetProperty("Name").GetString() == "Zstd").GetProperty("ThirdParty").GetBoolean() &&
             !sdkModules.Single(module => module.GetProperty("Name").GetString() == "Core").GetProperty("ThirdParty").GetBoolean(),
             "Engine SDK manifest does not carry the module table markers");
+        Require(sdkModules.All(module => module.GetProperty("DynamicModules").ValueKind == JsonValueKind.Array),
+            "Engine SDK manifest does not carry the DynamicModules list of every module");
         var sdkEngine = engineManifest.RootElement.GetProperty("EngineVersion");
-        Require(engineManifest.RootElement.GetProperty("Version").GetInt32() == 9 &&
+        Require(engineManifest.RootElement.GetProperty("Version").GetInt32() == 10 &&
             sdkEngine.GetProperty("Major").GetInt32() == engineVersion.Major && sdkEngine.GetProperty("Minor").GetInt32() == engineVersion.Minor &&
             sdkEngine.GetProperty("Patch").GetInt32() == engineVersion.Patch && sdkEngine.EnumerateObject().Count() == 3,
-            "Engine SDK manifest version 9 does not carry the Build/Build.version engine version: " + sdkEngine.GetRawText());
+            "Engine SDK manifest version 10 does not carry the Build/Build.version engine version: " + sdkEngine.GetRawText());
     }
 
     Require(!Directory.GetFiles(sdk, "Build.version", SearchOption.AllDirectories).Any(), "Installed SDK copied Build/Build.version");
@@ -907,13 +910,13 @@ try
     Pass("sdk-configuration-mismatch", timer.Elapsed);
 
     // 이전 SDK(manifest 버전 7 — 메타데이터 모듈 라이브러리에 진입점이 없고 모듈마다 ReflectionOnlyLibrary 칸이 있다)는 지금 없는 칸이
-    // 있어도 알 수 없는 칸 오류가 아니라 버전 불일치로 거부하고, 버전 9인데 EngineVersion이 없거나 칸이 빠진 manifest는 다른 값(저장소
+    // 있어도 알 수 없는 칸 오류가 아니라 버전 불일치로 거부하고, 버전 10인데 EngineVersion이 없거나 칸이 빠진 manifest는 다른 값(저장소
     // Build/Build.version 등)으로 대신하지 않고 다시 내보내라고 거부한다.
     timer.Restart();
     var sdkManifestPath = Path.Combine(sdk, "rocks-sdk.json");
     var sdkManifestBytes = File.ReadAllBytes(sdkManifestPath);
     var sdkManifestText = File.ReadAllText(sdkManifestPath);
-    Require(sdkManifestText.Contains("\"Version\": 9,", StringComparison.Ordinal), "SDK manifest is not version 9:\n" + sdkManifestText);
+    Require(sdkManifestText.Contains("\"Version\": 10,", StringComparison.Ordinal), "SDK manifest is not version 10:\n" + sdkManifestText);
     SetReadOnly(sdkManifestPath, false);
     try
     {
@@ -946,6 +949,24 @@ try
             var rejected = await Game();
             Require(rejected.ExitCode != 0 && rejected.StdErr.Contains("SDK manifest has no valid EngineVersion", StringComparison.Ordinal) &&
                 rejected.StdErr.Contains("Re-export", StringComparison.Ordinal), $"An SDK manifest with {name} was not rejected: " + rejected.StdErr);
+        }
+
+        // 실행 중 적재 모듈 목록(DynamicModules — Docs/Design/ModuleLoader.ko.md 3.8절)도 SDK 안의 모듈 이름이어야 하고 칸이 있어야 한다.
+        foreach ((string name, Action<System.Text.Json.Nodes.JsonObject> edit, string expected) in
+                 new (string, Action<System.Text.Json.Nodes.JsonObject>, string)[]
+                 {
+                     ("an unknown DynamicModules name", manifestJson => manifestJson["Modules"]![0]!["DynamicModules"] =
+                         new System.Text.Json.Nodes.JsonArray("MissingDynamicModule"), "unknown dependency 'MissingDynamicModule'"),
+                     ("no DynamicModules list", manifestJson => manifestJson["Modules"]![0]!.AsObject().Remove("DynamicModules"),
+                         "has incomplete declarations")
+                 })
+        {
+            var manifestNode = System.Text.Json.Nodes.JsonNode.Parse(sdkManifestText)!.AsObject();
+            edit(manifestNode);
+            File.WriteAllText(sdkManifestPath, manifestNode.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            var rejected = await Game();
+            Require(rejected.ExitCode != 0 && rejected.StdErr.Contains(expected, StringComparison.Ordinal),
+                $"An SDK manifest with {name} was not rejected: " + rejected.StdErr);
         }
     }
     finally

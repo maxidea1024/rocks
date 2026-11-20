@@ -30,11 +30,18 @@
 //
 // 사용:
 //   GcBench                          기본 표(100K·1M × 간선 4·8, 1M 잎 50%)
-//   GcBench --objects 100000 --refs 4 [--leaf 50] [--reps 5] [--workers 8]
-//   GcBench --allocators [--objects N] [--allocator-kind K]
+//   GcBench --objects 100000 --refs 4 [--leaf 50] [--reps 5] [--workers 8] [--allocator-kind K]
+//                                    K(1·4 platform·2 System·3 Binned)로 블록을 받는 할당자를
+//                                    고른다(없으면 platform — 범주별 계수는 어느 쪽이든 센다)
+//   GcBench --allocators [--objects N] [--allocator-kind K] [--allocator-memory]
 //                                    할당자 비교(그래프 생성·churn 회수·종료 —
-//                                    bump·platform·System· Binned, K는 0–3으로 하나만 고른다.
-//                                    할당자 몫은 bump를 뺀 값이다)
+//                                    bump·platform·System·Binned·platform-counted, K는 0–4로
+//                                    하나만 고른다. 할당자 몫은 bump를 뺀 값이다. platform은 계수
+//                                    없는 플랫폼 할당이고 platform-counted는 범주 계수를 세는
+//                                    BenchAllocator다 — 비교의 기준은 platform). System·Binned는
+//                                    생성 뒤와 churn 뒤의 메모리(요청·블록·commit)도 낸다.
+//                                    --allocator-memory는 요청 크기 분포를 더 낸다(통과 allocator를
+//                                    끼우므로 그 실행의 시간은 비교에 쓰지 않는다)
 //   GcBench --allocator-micro [--allocator-kind K]
 //                                    할당자 작은 벤치(쌍·묶음·스레드 사이·동시 —
 //                                    AllocatorMicroBench.h)
@@ -94,13 +101,32 @@ Category CategoryOf(uint32 tag) noexcept {
 // atomic으로 센다(worker의 capture 정리가 다른 스레드에서 반환한다).
 class BenchAllocator final : public Allocator {
 public:
+    BenchAllocator() noexcept = default;
+
+    // backing이 있으면 블록을 플랫폼 대신 그 allocator에서 받는다(GC 시나리오를 다른 할당자 위에서
+    // 잴 때 — 머리 16 byte를 더한 크기로 요청한다). backing은 이 객체보다 오래 살고 여러 스레드에서
+    // 부를 수 있어야 한다.
+    explicit BenchAllocator(Allocator* backing) noexcept : backing_(backing) {
+    }
+
     Result<void*> Allocate(usize bytes, usize alignment, uint32 tag) noexcept override {
         if (bytes == 0) {
             return Result<void*>::Success(nullptr);
         }
 
         const usize prefix = alignment > sizeof(Header) ? alignment : sizeof(Header);
-        void* base = platform::AlignedAllocate(bytes + prefix, prefix);
+        void* base = nullptr;
+        if (backing_ != nullptr) {
+            auto block = backing_->Allocate(bytes + prefix, prefix, tag);
+            if (!block) {
+                return Result<void*>::Failure(block.Error());
+            }
+
+            base = block.Value();
+        } else {
+            base = platform::AlignedAllocate(bytes + prefix, prefix);
+        }
+
         if (base == nullptr) {
             return Result<void*>::Failure(ErrorCode::OutOfMemory);
         }
@@ -134,7 +160,12 @@ public:
                                                                  header->bytes);
         platform::AtomicFetchSub<platform::MemoryOrder::Relaxed>(&total_, header->bytes);
         platform::AtomicFetchSub<platform::MemoryOrder::Relaxed>(&allocations_, 1);
-        platform::AlignedFree(user - header->prefix);
+        void* base = user - header->prefix;
+        if (backing_ != nullptr) {
+            return backing_->Deallocate(base);
+        }
+
+        platform::AlignedFree(base);
         return Result<void>::Success();
     }
 
@@ -168,6 +199,7 @@ private:
 
     static_assert(sizeof(Header) == 16, "BenchAllocator header must stay 16 bytes");
 
+    Allocator* backing_ = nullptr;
     uint64 live_[static_cast<uint32>(Category::Count)] = {};
     uint64 total_ = 0;
     uint64 peak_ = 0;
@@ -259,16 +291,100 @@ public:
     }
 };
 
+// 요청 크기 분포를 세는 측정용 통과 allocator다(--allocator-memory — gate A6의 "벤치 객체 크기").
+// 한 스레드 전용이다(계수가 atomic이 아니다 — 할당자 비교 시나리오는 한 스레드에서 돈다). 반환은
+// 크기를 모르므로 세지 않는다: 분포는 Reset 뒤에 "요청한 것"의 분포다.
+class RequestCountingAllocator final : public Allocator {
+public:
+    // 이 크기까지는 크기마다 센다(BinnedAllocator의 작은 블록 상한). 넘는 요청은 한데 센다.
+    static constexpr usize MaxCountedBytes = BinnedAllocator::MaxSmallBytes;
+
+    explicit RequestCountingAllocator(Allocator& backing) noexcept : backing_(backing) {
+    }
+
+    Result<void*> Allocate(usize bytes, usize alignment, uint32 tag) noexcept override {
+        if (bytes <= MaxCountedBytes) {
+            ++counts_[bytes];
+        } else {
+            ++largeCount_;
+            largeBytes_ += bytes;
+        }
+
+        return backing_.Allocate(bytes, alignment, tag);
+    }
+
+    Result<void> Deallocate(void* address) noexcept override {
+        return backing_.Deallocate(address);
+    }
+
+    // 요청 바이트가 많은 크기부터 rows줄을 낸다.
+    void Print(uint32 rows) const noexcept {
+        uint64 smallCount = 0;
+        uint64 smallBytes = 0;
+        for (usize bytes = 1; bytes <= MaxCountedBytes; ++bytes) {
+            smallCount += counts_[bytes];
+            smallBytes += counts_[bytes] * bytes;
+        }
+
+        printf("    requests: small %llu (%llu bytes), large %llu (%llu bytes)\n",
+               static_cast<unsigned long long>(smallCount),
+               static_cast<unsigned long long>(smallBytes),
+               static_cast<unsigned long long>(largeCount_),
+               static_cast<unsigned long long>(largeBytes_));
+        usize previous = MaxCountedBytes + 1;
+        uint64 previousTotal = NumericLimits<uint64>::Max();
+        for (uint32 row = 0; row < rows; ++row) {
+            // 앞 줄보다 작거나 같은 것 가운데 가장 큰 것을 고른다(같은 값은 크기가 큰 쪽부터).
+            usize best = 0;
+            uint64 bestTotal = 0;
+            for (usize bytes = 1; bytes <= MaxCountedBytes; ++bytes) {
+                const uint64 total = counts_[bytes] * bytes;
+                const bool before =
+                    total < previousTotal || (total == previousTotal && bytes < previous);
+                if (total != 0 && before &&
+                    (total > bestTotal || (total == bestTotal && bytes > best))) {
+                    best = bytes;
+                    bestTotal = total;
+                }
+            }
+
+            if (best == 0) {
+                break;
+            }
+
+            printf("    request %5llu B x %9llu = %6.1f%% of small bytes\n",
+                   static_cast<unsigned long long>(best),
+                   static_cast<unsigned long long>(counts_[best]),
+                   100.0 * static_cast<double>(bestTotal) /
+                       static_cast<double>(smallBytes == 0 ? 1 : smallBytes));
+            previous = best;
+            previousTotal = bestTotal;
+        }
+    }
+
+private:
+    Allocator& backing_;
+    uint64 counts_[MaxCountedBytes + 1] = {};
+    uint64 largeCount_ = 0;
+    uint64 largeBytes_ = 0;
+};
+
 // 할당자 비교·작은 벤치의 할당자 종류다(--allocator-kind의 값).
+// - Platform: 계수·머리 없는 플랫폼 할당이다(RawPlatformAllocator — 비교의 기준).
+// - PlatformCounted: 범주 계수를 세는 BenchAllocator다(GC 시나리오의 메모리 표를 위한 장치 — 할당·
+//   반환마다 atomic 계수와 머리 16 byte가 든다). 처음에는 이것을 "platform"으로 쟀다. 계수의 몫이
+//   기준에 섞이지 않게 따로 둔다.
 enum class AllocatorKind : uint32 {
     Bump,
     Platform,
     System,
     Binned,
+    PlatformCounted,
     Count
 };
 
-constexpr const char* AllocatorKindNames[] = {"bump", "platform", "SystemAllocator", "Binned"};
+constexpr const char* AllocatorKindNames[] = {"bump", "platform", "SystemAllocator", "Binned",
+                                              "platform-counted"};
 static_assert(sizeof(AllocatorKindNames) / sizeof(AllocatorKindNames[0]) ==
                   static_cast<usize>(AllocatorKind::Count),
               "AllocatorKindNames must match AllocatorKind");
@@ -372,6 +488,8 @@ struct Options {
     bool allocatorMicro = false;
     uint32 allocatorKind = 0;
     bool allocatorKindSet = false;
+    // 할당자 비교에서 요청 크기 분포를 낸다(--allocator-memory).
+    bool allocatorMemory = false;
     bool clusters = false;
     bool packages = false;
     // 참조 위치 표(M3)를 끈다(RegistryOptions::referenceTables — 비교 측정).
@@ -707,12 +825,29 @@ struct Scenario {
     uint32 reps;
 };
 
-// 시나리오 하나를 BenchAllocator로 측정한다. 실패하면 0이 아닌 종료 코드다.
+// 시나리오 하나를 BenchAllocator로 측정한다. 실패하면 0이 아닌 종료 코드다. 블록은
+// --allocator-kind로 고른 할당자에서 받는다(없으면 platform). bump는 한 스레드 전용이라 받지 않는다
+// (worker 스레드가 할당한다).
 int RunScenario(const Scenario& scenario, const Options& options) noexcept {
+    const AllocatorKind kind = options.allocatorKindSet
+                                   ? static_cast<AllocatorKind>(options.allocatorKind)
+                                   : AllocatorKind::Platform;
+    if (kind == AllocatorKind::Bump) {
+        printf("the general scenario allocates on worker threads; --allocator-kind 0 (bump) is "
+               "single-threaded\n");
+        return 1;
+    }
+
     printf("\n== objects %u, refs avg %u, leaf %u%%, reps %u ==\n", scenario.objects, scenario.refs,
            scenario.leafPercent, scenario.reps);
+    printf("  allocator: %s\n", AllocatorKindNames[static_cast<uint32>(kind)]);
     fflush(stdout);
-    BenchAllocator memory;
+    // 고르지 않은 할당자도 만들어 둔다(쓰지 않는 BinnedAllocator는 주소 범위만 예약한다). 이
+    // 시나리오는 언제나 BenchAllocator가 계수하므로 platform과 platform-counted가 같다.
+    SystemAllocator system;
+    BinnedAllocator binned(system);
+    Allocator* const backings[] = {nullptr, nullptr, &system, &binned, nullptr};
+    BenchAllocator memory(backings[static_cast<uint32>(kind)]);
     int status = 0;
     {
         TypeRegistry types(memory);
@@ -1013,6 +1148,15 @@ int RunScenario(const Scenario& scenario, const Options& options) noexcept {
         printf("  leaked allocations: %llu\n",
                static_cast<unsigned long long>(memory.Allocations()));
         status = 8;
+    }
+
+    if (kind == AllocatorKind::Binned) {
+        const BinnedAllocatorUsage usage = binned.Usage();
+        printf("  Binned at exit: committed %.1f MiB (retained empty slabs %llu), small requests "
+               "sent to the backing %llu\n",
+               static_cast<double>(usage.committedBytes) / 1048576.0,
+               static_cast<unsigned long long>(usage.retainedSlabs),
+               static_cast<unsigned long long>(usage.fallbackAllocations));
     }
 
     fflush(stdout);
@@ -1702,9 +1846,12 @@ int RunClusterScenarios(const Options& options) noexcept {
 
 // 할당자 비교다(Docs/Design/GarbageCollectionScale.ko.md 18.2절). 같은 그래프의 생성·연결, churn
 // 생성과 회수, 종료 회수를 할당자마다 객체당 시간으로 낸다. bump(반환이 무동작)가 바닥이고, 다른
-// 할당자의 값에서 bump의 값을 뺀 것이 그 할당자의 몫이다. --objects로 규모를 정한다(기본 20K).
+// 할당자의 값에서 bump의 값을 뺀 것이 그 할당자의 몫이다. 다른 할당자를 견주는 기준은 platform(계수
+// 없는 플랫폼 할당)이다. --objects로 규모를 정한다(기본 20K).
 constexpr uint32 DefaultAllocatorObjects = 20000;
 constexpr uint32 AllocatorChurnRounds = 5;
+// --allocator-memory가 내는 요청 크기 줄 수다.
+constexpr uint32 RequestRows = 8;
 
 int RunAllocatorComparison(const Options& options) noexcept {
     const uint32 liveObjects = options.objects != 0 ? options.objects : DefaultAllocatorObjects;
@@ -1716,11 +1863,39 @@ int RunAllocatorComparison(const Options& options) noexcept {
         }
 
         BumpAllocator bump;
-        BenchAllocator platformMemory;
+        RawPlatformAllocator rawPlatform;
+        BenchAllocator countedPlatform;
         SystemAllocator system;
         BinnedAllocator binned(system);
-        Allocator* const choices[] = {&bump, &platformMemory, &system, &binned};
-        Allocator* memory = choices[kind];
+        Allocator* const choices[] = {&bump, &rawPlatform, &system, &binned, &countedPlatform};
+        RequestCountingAllocator counting(*choices[kind]);
+        Allocator* memory = options.allocatorMemory ? &counting : choices[kind];
+        // 메모리(gate A6): SystemAllocator의 liveBytes는 요청 크기의 합이고, BinnedAllocator의
+        // liveBytes는 작은 블록 크기의 합 + 큰 요청 크기다(큰 요청은 backing인 system이 센다).
+        // 같은 그래프라 두 실행의 할당 수가 같으므로, 작은 요청 바이트 = (System 실행의 요청 합)
+        // − (Binned 실행의 큰 요청 합)이다.
+        auto printMemory = [&](const char* when) noexcept {
+            if (kind == static_cast<uint32>(AllocatorKind::System)) {
+                const AllocationStats stats = system.Stats();
+                printf("    memory %s: live allocations %llu, requested %llu bytes\n", when,
+                       static_cast<unsigned long long>(stats.liveAllocations),
+                       static_cast<unsigned long long>(stats.liveBytes));
+            } else if (kind == static_cast<uint32>(AllocatorKind::Binned)) {
+                const AllocationStats stats = binned.Stats();
+                const AllocationStats large = system.Stats();
+                const BinnedAllocatorUsage usage = binned.Usage();
+                printf("    memory %s: live allocations %llu, block bytes %llu (large %llu "
+                       "allocations, %llu bytes), committed %llu bytes, retained empty slabs %llu, "
+                       "small requests sent to the backing %llu\n",
+                       when, static_cast<unsigned long long>(stats.liveAllocations),
+                       static_cast<unsigned long long>(stats.liveBytes),
+                       static_cast<unsigned long long>(large.liveAllocations),
+                       static_cast<unsigned long long>(large.liveBytes),
+                       static_cast<unsigned long long>(usage.committedBytes),
+                       static_cast<unsigned long long>(usage.retainedSlabs),
+                       static_cast<unsigned long long>(usage.fallbackAllocations));
+            }
+        };
         uint64 buildTime = 0;
         uint64 createTotal = 0;
         uint64 reclaimTotal = 0;
@@ -1748,6 +1923,11 @@ int RunAllocatorComparison(const Options& options) noexcept {
                 }
 
                 buildTime = platform::MonotonicNanoseconds() - buildStarted;
+                printMemory("after build");
+                if (options.allocatorMemory) {
+                    counting.Print(RequestRows);
+                }
+
                 for (uint32 round = 0; round < AllocatorChurnRounds; ++round) {
                     Array<ObjectHandle> garbage(*memory);
                     Array<ObjectHandle> garbageNodes(*memory);
@@ -1770,6 +1950,7 @@ int RunAllocatorComparison(const Options& options) noexcept {
                 }
 
                 liveBeforeTeardown = registry.Stats().liveObjects;
+                printMemory("after churn");
                 roots.Clear();
                 const uint64 teardown = platform::MonotonicNanoseconds();
                 if (!registry.Shutdown(access)) {
@@ -1800,8 +1981,7 @@ int RunAllocatorComparison(const Options& options) noexcept {
     return 0;
 }
 
-// 할당자 작은 벤치다(AllocatorMicroBench.h). bump는 반환이 무동작이라 넣지 않고, platform은 계수
-// 없는 플랫폼 할당이다.
+// 할당자 작은 벤치다(AllocatorMicroBench.h). bump는 반환이 무동작이라 넣지 않는다.
 int RunAllocatorMicro(const Options& options) noexcept {
     printf("\n== allocator micro bench ==\n");
     for (uint32 kind = static_cast<uint32>(AllocatorKind::Platform);
@@ -1810,10 +1990,11 @@ int RunAllocatorMicro(const Options& options) noexcept {
             continue;
         }
 
-        RawPlatformAllocator platformMemory;
+        RawPlatformAllocator rawPlatform;
+        BenchAllocator countedPlatform;
         SystemAllocator system;
         BinnedAllocator binned(system);
-        Allocator* const choices[] = {nullptr, &platformMemory, &system, &binned};
+        Allocator* const choices[] = {nullptr, &rawPlatform, &system, &binned, &countedPlatform};
         if (const int status =
                 gc_bench::RunAllocatorMicroBench(*choices[kind], AllocatorKindNames[kind]);
             status != 0) {
@@ -1985,6 +2166,8 @@ bool Parse(Span<const StringView> arguments, Options& options) noexcept {
             options.allocators = true;
         } else if (platform::CStringEquals(argument, "--allocator-micro")) {
             options.allocatorMicro = true;
+        } else if (platform::CStringEquals(argument, "--allocator-memory")) {
+            options.allocatorMemory = true;
         } else if (platform::CStringEquals(argument, "--clusters")) {
             options.clusters = true;
         } else if (platform::CStringEquals(argument, "--packages")) {

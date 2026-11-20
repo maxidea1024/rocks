@@ -218,35 +218,11 @@ public static class MetadataLayout
         return new NativeGeneratedSource(module + ModuleEntrySuffix, text.ToString());
     }
 
-    /// <summary>roots에서 의존 관계로 도달하는 모듈 이름이다. 없는 모듈은 이름과 함께 거부한다.</summary>
-    public static HashSet<string> Reachable(IEnumerable<string> roots, IReadOnlyDictionary<string, NativeModuleInput> byName)
-    {
-        var reached = new HashSet<string>(NameComparer);
-        void Reach(string name, string from)
-        {
-            if (!byName.TryGetValue(name, out NativeModuleInput? module))
-            {
-                throw new ArgumentException($"Module '{from}' depends on unknown module '{name}'.");
-            }
-
-            if (!reached.Add(module.Name))
-            {
-                return;
-            }
-
-            foreach (string dependency in module.Dependencies)
-            {
-                Reach(dependency, module.Name);
-            }
-        }
-
-        foreach (string root in roots)
-        {
-            Reach(root, "target");
-        }
-
-        return reached;
-    }
+    /// <summary>roots에서 의존 관계(링크 의존과 DynamicModules)로 도달하는 모듈 이름이다. 없는 모듈은 이름과 함께 거부한다.</summary>
+    public static HashSet<string> Reachable(IEnumerable<string> roots, IReadOnlyDictionary<string, NativeModuleInput> byName) =>
+        // 실행 중 적재 모듈(DynamicModules)도 빌드하므로 메타데이터 대상이다(Docs/Design/ModuleLoader.ko.md 3.8절).
+        LinkClosure.Reachable(roots, byName, (name, from) =>
+            throw new ArgumentException($"Module '{from ?? "target"}' depends on unknown module '{name}'."));
 
     /// <summary>ActionGraph와 같은 include 검색 순서다: 자기 public, 자기 private, 의존 모듈 public(후위 순서).</summary>
     public static IReadOnlyList<string> IncludeOrder(NativeModuleInput module, IReadOnlyDictionary<string, NativeModuleInput> byName)

@@ -230,6 +230,14 @@ public sealed record NativeModuleInput
 
     public IReadOnlyList<string> Dependencies { get; init; } = [];
 
+    // 실행 중에 ModuleLoader::Load(이름)으로 적재하는 모듈이다(UE DynamicallyLoadedModuleNames 대응, Docs/Design/ModuleLoader.ko.md 3.8절
+    // MD11). 이 모듈의 컴파일에 그 모듈의 include·정의를 넣지 않는다(쓰는 쪽은 별도 모듈의 interface와 Find<T>(이름)로 쓴다). 빌드는
+    // 그 모듈과 링크 폐포를 타깃에 넣어 빌드하고, 이 모듈에 닿는 실행 파일이 함께 링크하며(Monolithic) 실행 파일 모듈 표에 행을 싣는다.
+    // 순환 검사의 참조 사슬에는 넣지 않는다(UE와 같다 — Engine이 적재하는 모듈이 Engine에 링크 의존해도 된다). Dependencies와 겹치거나
+    // 자기 자신·실행 파일·모르는 이름이면 입력 오류다(InputValidation). 사용 예(엔진 모듈 규칙):
+    // protected override string[] DynamicModules => ["RendererPlugin"];
+    public IReadOnlyList<string> DynamicModules { get; init; } = [];
+
     public IReadOnlyList<string> AdditionalCompileArguments { get; init; } = [];
 
     public IReadOnlyList<string> AdditionalLinkArguments { get; init; } = [];
