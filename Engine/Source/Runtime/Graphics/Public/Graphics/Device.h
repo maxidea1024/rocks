@@ -11,6 +11,14 @@ namespace rocks::graphics {
 
 // 한 프레임(또는 offscreen 패스)의 그리기 명령 기록기다. Device::BeginFrame·BeginPass가
 // 돌려주며 EndFrame까지만 유효하다. 기록 순서대로 실행된다.
+//
+// async compute 기록(PassDesc::queue = AsyncCompute, RenderBase 8절 RG4)은 compute 명령만 받는다:
+// SetPipeline(compute 파이프라인)·SetTexture·SetBufferView·SetWritableBufferView·
+// SetWritableTexture·SetDrawConstants·Dispatch·DispatchIndirect·ClearWritableBufferView·CopyBuffer·
+// 전이(IsComputeQueueAccess 상태 사이, 분리 전이 포함)·WriteTimestamp·PushMarker·PopMarker. 그 밖의
+// 호출(그리기·viewport·scissor·스텐실 기준·graphics 파이프라인·그 밖 상태의 전이)은 무시하고
+// IgnoredDraws를 올린다. 값을 돌려주는 CopyTexture·CopyPassTarget은 InvalidArgument다. 장치가
+// 메우는 암묵 전이도 compute 상태 사이만 낸다(아니면 그 묶기를 무시한다).
 class CommandContext {
 public:
     // 파이프라인을 묶는다. 이미 묶인 정점 버퍼는 새 파이프라인 배치의 stride로 다시 묶인다.
@@ -491,10 +499,34 @@ public:
         return BeginPass(pass);
     }
 
-    // 기록을 graphics queue에 제출하고 그 완료 지점을 돌려준다. BeginFrame이었으면 present한다.
-    // 진행 중인 프레임이 없으면 InvalidArgument다. 제출은 했지만 present가 실패하면 실패를
-    // 돌려주며 제출의 완료 지점은 LastSubmittedFence로 읽는다. 장치 손실이 드러나면 Destroyed다.
+    // 기록을 그 기록의 queue(PassDesc::queue)에 제출하고 그 완료 지점을 돌려준다.
+    // BeginFrame이었으면 present한다. compute queue 기록이면 쌓인 업로드를 먼저 graphics queue에
+    // 제출하고 compute 제출이 그것을 기다린다(업로드는 다음 제출 전에 실행된다). 진행 중인 프레임이
+    // 없으면 InvalidArgument다. 제출은 했지만 present가 실패하면 실패를 돌려주며 제출의 완료 지점은
+    // LastSubmittedFence로 읽는다. 장치 손실이 드러나면 Destroyed다.
     virtual Result<GpuFencePoint> EndFrame() noexcept = 0;
+
+    // 이 호출 뒤 queue에 내는 모든 제출이 point(다른 queue에 제출한 지점)가 끝난 뒤에 실행되게
+    // 한다(GPU 쪽 대기, CPU는 기다리지 않는다. RenderBase 8절 RG4의 fork·join). 같은 queue의 지점은
+    // 제출 순서로 이미 지켜지므로 할 일이 없다. 두 queue가 같은 자원을 겹쳐 쓰지 않게 하는 것은
+    // 호출자의 몫이다(장치는 경쟁을 찾지 않는다).
+    //
+    // 사용 예(graphics 생산 → async compute 소비 → graphics 소비):
+    //   auto produced = device.EndFrame();                         // graphics 기록
+    //   device.QueueWait(QueueKind::AsyncCompute, produced.Value());
+    //   PassDesc compute; compute.queue = QueueKind::AsyncCompute;
+    //   auto commands = device.BeginPass(compute);  ... Dispatch ...
+    //   auto computed = device.EndFrame();
+    //   device.QueueWait(QueueKind::Graphics, computed.Value());   // 다음 graphics 제출부터
+    //
+    // backend: D3D12는 ID3D12CommandQueue::Wait, Vulkan은 그 queue의 이후 제출마다 상대 queue
+    // timeline semaphore 대기를 붙인다. compute queue가 없는 장치(D3D11·OpenGL ES)는 graphics
+    // 지점끼리만 받는다.
+    //
+    // 실패: 다른 장치(epoch)의 지점 WrongContext, 제출하지 않은 값 InvalidArgument, compute queue가
+    // 없는 장치에서 AsyncCompute 쪽(queue 또는 point) Unsupported, 장치 손실 Destroyed. null 지점은
+    // 할 일이 없다.
+    virtual Result<void> QueueWait(QueueKind queue, GpuFencePoint point) noexcept = 0;
 
     // RenderTarget 텍스처를 out(width*height*4바이트, 행 위→아래)으로 읽는다. GPU 완료를 기다린다
     // (시험·캡처용, 프레임 경로에서 쓰지 않는다). 크기가 다르면 InvalidArgument다.
@@ -596,12 +628,18 @@ public:
     // GPU tick과 CPU 시각(platform::MonotonicNanoseconds 시간축) 한 쌍을 얻는다(소유 스레드).
     // GpuTicksToCpuNanoseconds로 timestamp를 CPU trace와 같은 시간축에 놓는다. 실패: 지원하지
     // 않으면 Unsupported(DeviceInfo::clockCalibration), 장치 손실 Destroyed.
-    virtual Result<ClockCalibration> CalibrateClocks() noexcept = 0;
+    //
+    // queue마다 시간축이 다를 수 있다(D3D12는 queue마다 clock calibration). compute queue
+    // timestamp(TimestampSample::queue)는 CalibrateClocks(QueueKind::AsyncCompute)로 바꾼다.
+    // compute queue가 없으면 그 queue는 Unsupported다.
+    virtual Result<ClockCalibration>
+    CalibrateClocks(QueueKind queue = QueueKind::Graphics) noexcept = 0;
 
     // --- 스레드 안전 fence API(어느 스레드에서나 부를 수 있다) ---
 
-    // 마지막으로 제출한 graphics queue 지점이다. 제출이 없으면 null 지점이다.
-    virtual GpuFencePoint LastSubmittedFence() const noexcept = 0;
+    // queue에 마지막으로 제출한 지점이다. 제출이 없거나 그 queue가 없으면 null 지점이다.
+    virtual GpuFencePoint
+    LastSubmittedFence(QueueKind queue = QueueKind::Graphics) const noexcept = 0;
 
     // point가 GPU에서 끝났는지다. 실패: 다른 장치(epoch)·queue의 지점 WrongContext, 제출되지 않은
     // 값 InvalidArgument, 끝나기 전 장치 손실 Destroyed. null 지점은 끝난 것으로 본다.

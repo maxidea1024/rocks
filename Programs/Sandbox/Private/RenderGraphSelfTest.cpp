@@ -15,6 +15,7 @@ namespace {
 
 using namespace rocks;
 using namespace rocks::graphics;
+using rocks::render::GraphAsyncCompute;
 using rocks::render::GraphBuffer;
 using rocks::render::GraphLoadAction;
 using rocks::render::GraphPassAccesses;
@@ -75,6 +76,8 @@ struct TintConstants {
 TraceScopeName MsaaName("SelfTest.Msaa");
 TraceScopeName ResolveScopeName("SelfTest.ResolveScope");
 TraceScopeName HzbReduceName("SelfTest.HzbReduce");
+TraceScopeName AsyncSceneName("SelfTest.AsyncScene");
+TraceScopeName AsyncProbeName("SelfTest.AsyncProbe");
 
 // 업로드·복사 시험 버퍼 크기다(4 byte 배수).
 constexpr uint32 CopyBytes = 256;
@@ -589,6 +592,271 @@ bool RunHzbGraph(GraphBench& bench, Allocator& allocator) noexcept {
     return ok;
 }
 
+// RG4 async compute 시험 결과다.
+struct AsyncComputeRun {
+    uint32 asyncPasses = 0;
+    uint32 computeRecordings = 0;
+    uint32 queueWaits = 0;
+    uint32 mismatchedMips = 0;
+    // queue별 timestamp로 잰 구간(ms)이다(통계만, 단언하지 않는다).
+    bool measured = false;
+    double graphicsMs = 0.0;
+    double computeMs = 0.0;
+    double overlapMs = 0.0;
+};
+
+// pass 기록 함수가 쓴 timestamp 번호다(장치 query 번호, queue마다 따로).
+struct AsyncStamps {
+    uint64 sceneBegin = 0;
+    uint64 sceneEnd = 0;
+    uint64 compositeBegin = 0;
+    uint64 compositeEnd = 0;
+    uint64 computeBegin = 0;
+    uint64 computeEnd = 0;
+    uint32 written = 0;
+};
+
+// 겹침 계측이 쓰는 timestamp 수(장면·합성 시작·끝, compute 시작·끝)와 결과 버퍼 크기다.
+constexpr uint32 AsyncStampCount = 6;
+constexpr usize AsyncTimestampCapacity = 256;
+constexpr double NanosecondsPerMillisecond = 1000000.0;
+
+// query 번호의 tick을 그 queue의 calibration으로 CPU ns로 옮긴다. 찾지 못하면 false다.
+bool StampNanoseconds(Span<const TimestampSample> samples, QueueKind queue, uint64 query,
+                      const ClockCalibration& calibration, double& nanoseconds) noexcept {
+    for (const TimestampSample& sample : samples) {
+        if (sample.queue == queue && sample.query == query && !sample.disjoint &&
+            calibration.gpuFrequency != 0) {
+            const double ticks =
+                static_cast<double>(sample.ticks) - static_cast<double>(calibration.gpuTicks);
+            nanoseconds = static_cast<double>(calibration.cpuNanoseconds) +
+                          ticks * 1e9 / static_cast<double>(calibration.gpuFrequency);
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void WriteStamp(CommandContext& commands, uint64& slot, AsyncStamps& stamps) noexcept {
+    auto written = commands.WriteTimestamp();
+    if (written) {
+        slot = written.Value();
+        ++stamps.written;
+    }
+}
+
+// RG4: graphics pass(장면 → 합성)와 async compute HZB(fill·reduce)가 섞인 그래프다. HZB는 graphics
+// 생산자가 없어 그래프 시작에서 fork하고, probe pass가 pyramid를 읽어 join한다. setting이
+// Disabled면 같은 그래프를 graphics pipe로 실행한다. probe 픽셀과 HZB mip을 돌려준다.
+bool RunAsyncComputeGraph(GraphBench& bench, Allocator& allocator, RenderHandle output,
+                          PipelineHandle fillPipeline, PipelineHandle reducePipeline,
+                          GraphAsyncCompute setting, Array<uint8>& probePixels,
+                          AsyncComputeRun& run) noexcept {
+    Device& device = *bench.device;
+    RenderGraphDesc desc = bench.Desc();
+    desc.asyncCompute = setting;
+    AsyncStamps stamps;
+    RenderHandle pyramidHandle;
+    RenderHandle probeHandle;
+    bool ok = false;
+    {
+        RenderGraph graph(desc);
+        auto scene = graph.CreateTexture(TargetDesc(), "AsyncScene");
+        auto probe = graph.CreateTexture(TargetDesc(), "AsyncProbe");
+        auto pyramid = graph.CreateTexture(hzb::PyramidDesc(), "AsyncHzb");
+        auto target = graph.ImportTexture(output, "Output");
+        GraphTextureView reads[hzb::Mips];
+        GraphTextureView writes[hzb::Mips];
+        ok = scene && probe && pyramid && target;
+        for (uint32 mip = 0; ok && mip < hzb::Mips; ++mip) {
+            TextureViewDesc view;
+            view.firstMip = mip;
+            view.mipCount = 1;
+            auto read = graph.CreateTextureView(pyramid.Value(), view);
+            view.access = ViewAccess::ReadWrite;
+            auto write = graph.CreateTextureView(pyramid.Value(), view);
+            ok = read && write;
+            if (ok) {
+                reads[mip] = read.Value();
+                writes[mip] = write.Value();
+            }
+        }
+
+        AsyncStamps* stamp = &stamps;
+        sample::Renderer* renderer = bench.renderer;
+        const TextureHandle red = bench.redTexture;
+        if (ok) {
+            GraphPassAccesses accesses(graph);
+            accesses.RenderTarget(scene.Value(), GraphLoadAction::Clear, {0, 0, 0, 1});
+            ok = graph
+                     .AddPass(AsyncSceneName, GraphPassKind::Raster, GraphPassFlags::None, accesses,
+                              [renderer, red, stamp](GraphPassContext& pass) noexcept {
+                                  WriteStamp(pass.Commands(), stamp->sceneBegin, *stamp);
+                                  FullScreen(renderer, red, {}, LinearColor(1, 1, 1, 1))(pass);
+                                  WriteStamp(pass.Commands(), stamp->sceneEnd, *stamp);
+                              })
+                     .IsOk();
+        }
+
+        if (ok) {
+            GraphPassAccesses accesses(graph);
+            accesses.TextureView(writes[0], ResourceAccess::UavCompute);
+            const GraphTextureView first = writes[0];
+            ok = graph
+                     .AddPass(HzbFillName, GraphPassKind::AsyncCompute, GraphPassFlags::None,
+                              accesses,
+                              [fillPipeline, first, stamp](GraphPassContext& pass) noexcept {
+                                  WriteStamp(pass.Commands(), stamp->computeBegin, *stamp);
+                                  pass.Commands().SetPipeline(fillPipeline);
+                                  pass.Commands().SetWritableTexture(0, pass.View(first));
+                                  pass.Commands().Dispatch(1, 1);
+                              })
+                     .IsOk();
+        }
+
+        for (uint32 mip = 0; ok && mip + 1 < hzb::Mips; ++mip) {
+            GraphPassAccesses accesses(graph);
+            accesses.TextureView(reads[mip], ResourceAccess::SrvCompute)
+                .TextureView(writes[mip + 1], ResourceAccess::UavCompute);
+            const GraphTextureView read = reads[mip];
+            const GraphTextureView write = writes[mip + 1];
+            const uint32 size = hzb::Extent >> (mip + 1);
+            const bool last = mip + 2 == hzb::Mips;
+            ok = graph
+                     .AddPass(
+                         HzbReduceName, GraphPassKind::AsyncCompute, GraphPassFlags::None, accesses,
+                         [reducePipeline, read, write, size, last,
+                          stamp](GraphPassContext& pass) noexcept {
+                             hzb::LevelConstants level;
+                             level.values[0] = static_cast<float>(pass.ViewBaseMip(read));
+                             level.values[1] = static_cast<float>(size);
+                             CommandContext& commands = pass.Commands();
+                             commands.SetPipeline(reducePipeline);
+                             commands.SetTexture(pass.View(read));
+                             commands.SetWritableTexture(0, pass.View(write));
+                             Check(commands.SetDrawConstants(DrawConstantBytes(level)).IsOk(),
+                                   "async HZB reduce draw constants are accepted");
+                             const uint32 groups = (size + hzb::ReduceGroup - 1) / hzb::ReduceGroup;
+                             commands.Dispatch(groups, groups);
+                             if (last) {
+                                 WriteStamp(commands, stamp->computeEnd, *stamp);
+                             }
+                         })
+                     .IsOk();
+        }
+
+        // 합성은 compute와 겹치는 graphics pass다(HZB에 기대지 않는다).
+        if (ok) {
+            GraphPassAccesses accesses(graph);
+            accesses.Texture(scene.Value(), ResourceAccess::SrvGraphics)
+                .RenderTarget(target.Value());
+            const GraphTexture source = scene.Value();
+            ok = graph
+                     .AddPass(CompositeName, GraphPassKind::Raster, GraphPassFlags::None, accesses,
+                              [renderer, source, stamp](GraphPassContext& pass) noexcept {
+                                  WriteStamp(pass.Commands(), stamp->compositeBegin, *stamp);
+                                  FullScreen(renderer, {}, source, LinearColor(1, 1, 1, 1))(pass);
+                                  WriteStamp(pass.Commands(), stamp->compositeEnd, *stamp);
+                              })
+                     .IsOk();
+        }
+
+        // probe가 pyramid를 graphics에서 읽는다(join: compute 제출을 기다린 뒤 전이).
+        if (ok) {
+            GraphPassAccesses accesses(graph);
+            accesses.Texture(pyramid.Value(), ResourceAccess::SrvGraphics)
+                .RenderTarget(probe.Value(), GraphLoadAction::Clear, {0, 0, 0, 1});
+            ok = graph
+                     .AddPass(AsyncProbeName, GraphPassKind::Raster, GraphPassFlags::None, accesses,
+                              FullScreen(renderer, {}, pyramid.Value(), LinearColor(1, 1, 1, 1)))
+                     .IsOk();
+        }
+
+        auto exportedProbe = ok ? graph.ExportTexture(probe.Value())
+                                : Result<RenderHandle>::Failure(ErrorCode::InvalidArgument);
+        auto exportedPyramid = ok ? graph.ExportTexture(pyramid.Value())
+                                  : Result<RenderHandle>::Failure(ErrorCode::InvalidArgument);
+        ok = exportedProbe && exportedPyramid && graph.Execute().IsOk();
+        if (exportedProbe) {
+            probeHandle = exportedProbe.Value();
+        }
+
+        if (exportedPyramid) {
+            pyramidHandle = exportedPyramid.Value();
+        }
+
+        if (!ok) {
+            PrintGraphError(graph);
+        }
+
+        const rocks::render::GraphStats stats = graph.Stats();
+        run.asyncPasses = stats.asyncComputePasses;
+        run.computeRecordings = stats.computeRecordings;
+        run.queueWaits = stats.queueWaits;
+    }
+
+    ok = ok && device.WaitIdle().IsOk();
+    auto probeTexture = ok ? bench.handles->Texture(probeHandle)
+                           : Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
+    auto pyramidTexture = ok ? bench.handles->Texture(pyramidHandle)
+                             : Result<TextureHandle>::Failure(ErrorCode::InvalidArgument);
+    ok = probeTexture && pyramidTexture &&
+         device.ReadPixels(probeTexture.Value(), probePixels.View()).IsOk();
+    run.mismatchedMips =
+        ok ? hzb::CountMismatchedMips(device, allocator, pyramidTexture.Value()) : hzb::Mips;
+
+    // 겹침 계측(통계만): queue별 timestamp를 그 queue의 calibration으로 CPU 시간축에 놓고, compute
+    // 구간이 graphics pass 구간(장면·합성)과 겹친 시간을 더한다. graphics pipe 실행은 compute가 두
+    // pass 사이에 직렬이라 0에 가깝다.
+    const QueueKind computeQueue =
+        run.asyncPasses != 0 ? QueueKind::AsyncCompute : QueueKind::Graphics;
+    TimestampSample samples[AsyncTimestampCapacity];
+    const usize count = ok && stamps.written == AsyncStampCount
+                            ? device.CollectTimestamps(Span<TimestampSample>(samples))
+                            : 0;
+    auto graphicsClock = device.CalibrateClocks(QueueKind::Graphics);
+    auto computeClock = device.CalibrateClocks(computeQueue);
+    const uint64 graphicsQueries[] = {stamps.sceneBegin, stamps.sceneEnd, stamps.compositeBegin,
+                                      stamps.compositeEnd};
+    double graphics[4] = {};
+    double computeBegin = 0.0;
+    double computeEnd = 0.0;
+    const Span<const TimestampSample> collected(samples, count);
+    bool measured = count != 0 && graphicsClock && computeClock &&
+                    StampNanoseconds(collected, computeQueue, stamps.computeBegin,
+                                     computeClock.Value(), computeBegin) &&
+                    StampNanoseconds(collected, computeQueue, stamps.computeEnd,
+                                     computeClock.Value(), computeEnd);
+    for (uint32 index = 0; measured && index < 4; ++index) {
+        measured = StampNanoseconds(collected, QueueKind::Graphics, graphicsQueries[index],
+                                    graphicsClock.Value(), graphics[index]);
+    }
+
+    run.measured = measured;
+    if (measured) {
+        run.computeMs = (computeEnd - computeBegin) / NanosecondsPerMillisecond;
+        for (uint32 pair = 0; pair < 2; ++pair) {
+            const double begin = graphics[pair * 2];
+            const double end = graphics[pair * 2 + 1];
+            const double start = begin > computeBegin ? begin : computeBegin;
+            const double stop = end < computeEnd ? end : computeEnd;
+            run.graphicsMs += (end - begin) / NanosecondsPerMillisecond;
+            run.overlapMs += stop > start ? (stop - start) / NanosecondsPerMillisecond : 0.0;
+        }
+    }
+
+    if (!probeHandle.IsNull()) {
+        RetireExport(*bench.handles, device, probeHandle);
+    }
+
+    if (!pyramidHandle.IsNull()) {
+        RetireExport(*bench.handles, device, pyramidHandle);
+    }
+
+    return ok;
+}
+
 // RG1 남은 것 설계 2: 그래프 MSAA pass가 마젠타로 clear한 4x 텍스처를 1표본 그래프 텍스처로
 // resolve하고, 다음 pass가 그 대상을 SRV로 읽어 output에 합성한다. 두 pass는 그래프 구간 안이고
 // GpuTrace marker를 켠다(기록마다 marker 짝이 맞아야 검증 계층이 조용하다).
@@ -969,6 +1237,86 @@ uint32 RunRenderGraphChecks(const char* name, Device& device, sample::Renderer& 
                device.Caps().features.textureViewRanges ? "0 (range views)"
                                                         : "first mip (whole texture)");
     }
+    // RG4: async compute와 graphics pipe 실행의 결과(합성 출력·probe 픽셀·HZB mip)가 같다. compute
+    // queue가 있는 장치는 Always가 compute queue를 쓰고, 겹침은 queue별 timestamp로 재어 출력만
+    // 한다(시간에 기대는 단언은 하지 않는다).
+    if (ok && device.Caps().features.computeShaders &&
+        HasPixelFormatCaps(device.GetPixelFormatCaps(hzbDesc.format),
+                           RequiredPixelFormatCaps(hzbDesc))) {
+        auto fill = device.CreateComputePipeline(hzb::FillPipelineDesc());
+        auto reduce = device.CreateComputePipeline(hzb::ReducePipelineDesc());
+        Array<uint8> graphicsProbe(allocator);
+        Array<uint8> asyncProbe(allocator);
+        Array<uint8> graphicsOutput(allocator);
+        Array<uint8> asyncOutput(allocator);
+        const bool ready = fill && reduce && graphicsProbe.TryResize(pixels.Size()).IsOk() &&
+                           asyncProbe.TryResize(pixels.Size()).IsOk() &&
+                           graphicsOutput.TryResize(pixels.Size()).IsOk() &&
+                           asyncOutput.TryResize(pixels.Size()).IsOk();
+        Check(ready, "async compute HZB pipelines and readback buffers");
+        AsyncComputeRun graphicsRun;
+        AsyncComputeRun asyncRun;
+        bool ran = false;
+        if (ready) {
+            auto cleared = arena.Reset();
+            (void)cleared;
+            const bool graphicsOk =
+                RunAsyncComputeGraph(bench, allocator, output.Value(), fill.Value(), reduce.Value(),
+                                     GraphAsyncCompute::Disabled, graphicsProbe, graphicsRun);
+            const bool graphicsRead =
+                device.ReadPixels(outputTexture.Value(), graphicsOutput.View()).IsOk();
+            cleared = arena.Reset();
+            (void)cleared;
+            const bool asyncOk =
+                RunAsyncComputeGraph(bench, allocator, output.Value(), fill.Value(), reduce.Value(),
+                                     GraphAsyncCompute::Always, asyncProbe, asyncRun);
+            const bool asyncRead =
+                device.ReadPixels(outputTexture.Value(), asyncOutput.View()).IsOk();
+            ran = graphicsOk && asyncOk && graphicsRead && asyncRead;
+        }
+
+        const bool queue = device.Caps().features.asyncCompute;
+        Check(ran, "the async compute graph runs on the graphics pipe and with async compute");
+        Check(ran && graphicsRun.mismatchedMips == 0 && asyncRun.mismatchedMips == 0,
+              "async and graphics-pipe HZB mips match the CPU reference");
+        Check(ran && platform::MemoryEquals(graphicsProbe.Data(), asyncProbe.Data(),
+                                            graphicsProbe.Size()),
+              "async and graphics-pipe runs give the same probe pixels");
+        Check(ran &&
+                  platform::MemoryEquals(graphicsOutput.Data(), asyncOutput.Data(),
+                                         graphicsOutput.Size()) &&
+                  CenterIs(asyncOutput, 255, 0, 0),
+              "async and graphics-pipe runs give the same composite (red)");
+        Check(graphicsRun.asyncPasses == 0 && asyncRun.asyncPasses == (queue ? hzb::Mips : 0),
+              "async compute passes run on the compute queue only when the device has one");
+        if (queue) {
+            Check(asyncRun.computeRecordings == 1 && asyncRun.queueWaits == 2,
+                  "one compute recording with a fork and a join wait");
+        }
+
+        printf("  %s render graph async compute: queue %s (efficient %s), async passes %u, "
+               "compute recordings %u, queue waits %u\n",
+               name, queue ? "yes" : "no",
+               device.Caps().features.efficientAsyncCompute ? "yes" : "no", asyncRun.asyncPasses,
+               asyncRun.computeRecordings, asyncRun.queueWaits);
+        if (asyncRun.measured) {
+            printf("  %s render graph async compute overlap: graphics %.3f ms, compute %.3f ms, "
+                   "overlap %.3f ms (graphics pipe run: overlap %.3f ms)\n",
+                   name, asyncRun.graphicsMs, asyncRun.computeMs, asyncRun.overlapMs,
+                   graphicsRun.overlapMs);
+        } else {
+            printf("  %s render graph async compute overlap: not measured (no timestamps)\n", name);
+        }
+
+        if (fill) {
+            device.Retire(fill.Value());
+        }
+
+        if (reduce) {
+            device.Retire(reduce.Value());
+        }
+    }
+
     printf("  %s render graph split transitions: native %s\n", name,
            device.Caps().features.splitTransitions ? "yes" : "no (lowered at end)");
 

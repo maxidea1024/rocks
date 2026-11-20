@@ -361,8 +361,13 @@ DeviceInfo D3D11Device::Info() const noexcept {
     return info;
 }
 
-GpuFencePoint D3D11Device::LastSubmittedFence() const noexcept {
-    return timeline_.LastSubmitted();
+// compute queue가 없다(DeviceFeatures::asyncCompute 거짓, RenderBase 8절 RG4).
+GpuFencePoint D3D11Device::LastSubmittedFence(QueueKind queue) const noexcept {
+    return queue == QueueKind::Graphics ? timeline_.LastSubmitted() : GpuFencePoint{};
+}
+
+Result<void> D3D11Device::QueueWait(QueueKind queue, GpuFencePoint point) noexcept {
+    return SingleQueueWait(timeline_, queue, point);
 }
 
 Result<bool> D3D11Device::IsFenceComplete(GpuFencePoint point) const noexcept {

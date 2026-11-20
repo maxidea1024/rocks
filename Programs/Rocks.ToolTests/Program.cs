@@ -14,7 +14,7 @@ internal static class Program
         {
             if (args.Length == 0)
             {
-                throw new ArgumentException("Expected self, native, meta, policy, format or scaffold");
+                throw new ArgumentException("Expected self, native, meta, log-release, policy, format or scaffold");
             }
 
             if (args[0] == "child")
@@ -48,6 +48,10 @@ internal static class Program
                     // host에서 빌드 오브젝트만 검사한다(native 실행 파일이 필요 없다 — Android 교차 빌드용).
                     NativeTests.RegisterObjectChecks(suite, options, await NativeEnvironment.CreateAsync(options.Optional("compiler")),
                         options.Required("compile-commands"));
+                    break;
+                case "log-release":
+                    // Release LogBench 실행 파일(--native-executable)의 로그 문자열 제외 검사다(LoggingSystem 7절).
+                    LogReleaseTests.Register(suite, options);
                     break;
                 case "meta":
                     // meta 시험은 저마다 임시 디렉터리에서 MetaCompiler·Clang 프로세스를 띄우므로 서로 독립이다.

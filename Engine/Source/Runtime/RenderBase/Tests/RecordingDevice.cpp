@@ -9,10 +9,11 @@ namespace rocks::render::testing {
 using namespace rocks::graphics;
 
 RecordingDevice::RecordingDevice(Allocator& allocator) noexcept
-    : timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics), buffers_(allocator),
-      allocator_(allocator), textures_(allocator), transitions_(allocator), splits_(allocator),
-      pendingSplits_(allocator), pipelines_(allocator), swapChains_(allocator), retired_(allocator),
-      readbacks_(allocator),
+    : timeline_(allocator, NewDeviceEpoch(), QueueKind::Graphics),
+      computeTimeline_(allocator, timeline_.DeviceEpoch(), QueueKind::AsyncCompute),
+      textureUses_(allocator), bufferUses_(allocator), buffers_(allocator), allocator_(allocator),
+      textures_(allocator), transitions_(allocator), splits_(allocator), pendingSplits_(allocator),
+      pipelines_(allocator), swapChains_(allocator), retired_(allocator), readbacks_(allocator),
       staging_(allocator, stagingSource_, graphics::DefaultStagingBudgetBytes),
       timestamps_(allocator), timestampPool_(allocator) {
     stagingSource_.allocator = &allocator;
@@ -202,6 +203,70 @@ void RecordingDevice::ReleaseReadback(ReadbackHandle readback) noexcept {
 
 RecordingDevice::~RecordingDevice() {
     timeline_.Close();
+    computeTimeline_.Close();
+}
+
+void RecordingDevice::SetAsyncCompute(bool available, bool efficient) noexcept {
+    caps_.features.asyncCompute = available;
+    caps_.features.efficientAsyncCompute = available && efficient;
+}
+
+uint64 RecordingDevice::SubmittedCompute() const noexcept {
+    return computeTimeline_.LastSubmitted().value;
+}
+
+void RecordingDevice::CompleteCompute(uint64 value) noexcept {
+    computeTimeline_.Publish(value);
+}
+
+const FenceTimeline* RecordingDevice::TimelineOf(GpuFencePoint point) const noexcept {
+    return point.queue == QueueKind::AsyncCompute ? &computeTimeline_ : &timeline_;
+}
+
+void RecordingDevice::TouchResource(Array<QueueUse>& uses, uint32 index) noexcept {
+    if (!recording_) {
+        return;
+    }
+
+    if (index >= uses.Size() && !uses.TryResize(static_cast<usize>(index) + 1)) {
+        platform::Fatal("RecordingDevice queue use table allocation failed");
+    }
+
+    // 이 기록의 fence 값(제출하면 받을 값)이다.
+    const bool compute = recordingQueue_ == QueueKind::AsyncCompute;
+    const uint64 current = compute ? computeFenceValue_ + 1 : fenceValue_ + 1;
+    QueueUse& use = uses[index];
+    if (use.value != 0 && use.queue != recordingQueue_ &&
+        waited_[static_cast<uint32>(recordingQueue_)] < use.value) {
+        ++validationErrors_;
+    }
+
+    use.queue = recordingQueue_;
+    use.value = current;
+}
+
+void RecordingDevice::TouchTexture(SlotHandle texture) noexcept {
+    const TextureState* state = textures_.Find(texture);
+    if (state == nullptr) {
+        return;
+    }
+
+    TouchResource(textureUses_, state->view ? state->source.index : texture.index);
+}
+
+void RecordingDevice::TouchBuffer(SlotHandle buffer) noexcept {
+    if (buffers_.IsValid(buffer)) {
+        TouchResource(bufferUses_, buffer.index);
+    }
+}
+
+bool RecordingDevice::RejectOnComputeQueue() noexcept {
+    if (recording_ && recordingQueue_ == QueueKind::AsyncCompute) {
+        ++validationErrors_;
+        return true;
+    }
+
+    return false;
 }
 
 void RecordingDevice::HoldCompletions(bool hold) noexcept {
@@ -215,10 +280,12 @@ void RecordingDevice::Complete(uint64 value) noexcept {
 
 void RecordingDevice::CompleteAll() noexcept {
     timeline_.Publish(Submitted());
+    computeTimeline_.Publish(SubmittedCompute());
 }
 
 void RecordingDevice::InjectLost() noexcept {
     timeline_.MarkLost();
+    computeTimeline_.MarkLost();
 }
 
 void RecordingDevice::GateAcquire() noexcept {
@@ -408,6 +475,7 @@ Result<CommandContext*> RecordingDevice::BeginFrame(SwapChainHandle swapChain,
     }
 
     recording_ = true;
+    recordingQueue_ = QueueKind::Graphics;
     Record(Op::BeginFrame);
     return Result<CommandContext*>::Success(this);
 }
@@ -425,6 +493,23 @@ Result<CommandContext*> RecordingDevice::BeginPass(const PassDesc& pass) noexcep
 
     if (recording_) {
         return Result<CommandContext*>::Failure(ErrorCode::Busy);
+    }
+
+    // async compute 기록이다: attachment가 없어야 하고 compute queue가 있어야 한다.
+    if (pass.queue == QueueKind::AsyncCompute) {
+        if (!caps_.features.asyncCompute) {
+            return Result<CommandContext*>::Failure(ErrorCode::Unsupported);
+        }
+
+        if (pass.colorCount != 0 || !pass.depth.texture.IsNull()) {
+            return Result<CommandContext*>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        recording_ = true;
+        recordingQueue_ = QueueKind::AsyncCompute;
+        resolveCount_ = 0;
+        Record(Op::BeginCompute);
+        return Result<CommandContext*>::Success(this);
     }
 
     // attachment는 살아 있는 텍스처여야 한다(attachment 없는 패스는 compute·복사 기록이다).
@@ -470,6 +555,18 @@ Result<CommandContext*> RecordingDevice::BeginPass(const PassDesc& pass) noexcep
     }
 
     recording_ = true;
+    recordingQueue_ = QueueKind::Graphics;
+    for (uint32 index = 0; index < pass.colorCount; ++index) {
+        TouchTexture(pass.colors[index].texture.slot);
+        if (!pass.colors[index].resolveTarget.IsNull()) {
+            TouchTexture(pass.colors[index].resolveTarget.slot);
+        }
+    }
+
+    if (!pass.depth.texture.IsNull()) {
+        TouchTexture(pass.depth.texture.slot);
+    }
+
     Record(Op::BeginOffscreen);
     return Result<CommandContext*>::Success(this);
 }
@@ -485,6 +582,41 @@ Result<GpuFencePoint> RecordingDevice::EndFrame() noexcept {
     }
 
     recording_ = false;
+    if (recordingQueue_ == QueueKind::AsyncCompute) {
+        recordingQueue_ = QueueKind::Graphics;
+        validationErrors_ += splits_.Close();
+        pendingSplits_.Clear();
+        const uint64 value = ++computeFenceValue_;
+        for (Retired& entry : retired_) {
+            if (entry.computePending) {
+                entry.computePending = false;
+                entry.computeFenceValue = value;
+            }
+        }
+
+        while (markerDepth_ != 0) {
+            PopMarker();
+        }
+
+        computeTimeline_.Submitted(value, nullptr);
+        Record(Op::EndCompute, value);
+        bool hold = false;
+        {
+            platform::LockGuard lock(gate_);
+            hold = hold_;
+        }
+
+        if (!hold) {
+            computeTimeline_.Publish(value);
+        }
+
+        if (computeTimeline_.IsLost()) {
+            return Result<GpuFencePoint>::Failure(ErrorCode::Destroyed);
+        }
+
+        return Result<GpuFencePoint>::Success(computeTimeline_.Point(value));
+    }
+
     for (uint32 index = 0; index < resolveCount_; ++index) {
         TextureState* state = textures_.Find(resolves_[index].texture);
         if (state != nullptr) {
@@ -541,19 +673,22 @@ Result<void> RecordingDevice::ReadPixels(TextureHandle target, Span<uint8> out) 
 }
 
 void RecordingDevice::Defer() noexcept {
+    // queue마다 마지막 사용이다: 열린 기록의 queue는 그 기록의 값, 다른 queue는 마지막 제출이다.
     Retired entry;
     entry.fenceValue = fenceValue_;
-    entry.pending = recording_;
+    entry.pending = recording_ && recordingQueue_ == QueueKind::Graphics;
+    entry.computeFenceValue = computeFenceValue_;
+    entry.computePending = recording_ && recordingQueue_ == QueueKind::AsyncCompute;
     auto pushed = retired_.TryPushBack(entry);
     if (!pushed) {
         platform::Fatal("RecordingDevice retire list allocation failed");
     }
 }
 
-// 기록 장치는 능력 질의·버퍼 view를 쓰지 않는 시험용이다(빈 능력, view Unsupported).
+// 기록 장치는 능력 질의·버퍼 view를 쓰지 않는 시험용이다(compute queue 표시 말고는 빈 능력, view
+// Unsupported).
 const DeviceCaps& RecordingDevice::Caps() const noexcept {
-    static const DeviceCaps none;
-    return none;
+    return caps_;
 }
 
 uint32 RecordingDevice::GetPixelFormatSampleCounts(PixelFormat format) const noexcept {
@@ -730,10 +865,12 @@ void RecordingDevice::ReclaimCompleted() noexcept {
     }
 
     const uint64 completed = timeline_.Completed();
+    const uint64 computeCompleted = computeTimeline_.Completed();
     staging_.Reclaim(completed);
     for (usize index = retired_.Size(); index > 0; --index) {
         const Retired& entry = retired_[index - 1];
-        if (!entry.pending && entry.fenceValue <= completed) {
+        if (!entry.pending && entry.fenceValue <= completed && !entry.computePending &&
+            entry.computeFenceValue <= computeCompleted) {
             auto removed = retired_.TryRemoveAtSwap(index - 1);
             (void)removed;
             ++reclaimed_;
@@ -751,30 +888,61 @@ Result<void> RecordingDevice::WaitIdle() noexcept {
     // 실제 장치처럼 제출한 모든 작업이 끝날 때까지 기다린다. 시험이 완료를 미루면 그 게시를
     // 기다린다.
     auto waited = timeline_.Wait(timeline_.LastSubmitted());
+    auto computeWaited = computeTimeline_.Wait(computeTimeline_.LastSubmitted());
     ReclaimCompleted();
     if (!waited) {
         return Result<void>::Failure(waited.Error());
     }
 
+    if (!computeWaited) {
+        return Result<void>::Failure(computeWaited.Error());
+    }
+
     return Result<void>::Success();
 }
 
-GpuFencePoint RecordingDevice::LastSubmittedFence() const noexcept {
-    return timeline_.LastSubmitted();
+GpuFencePoint RecordingDevice::LastSubmittedFence(QueueKind queue) const noexcept {
+    return queue == QueueKind::AsyncCompute ? computeTimeline_.LastSubmitted()
+                                            : timeline_.LastSubmitted();
+}
+
+Result<void> RecordingDevice::QueueWait(QueueKind queue, GpuFencePoint point) noexcept {
+    auto owner = ownership_.Check();
+    if (!owner) {
+        return owner;
+    }
+
+    if (!caps_.features.asyncCompute) {
+        return SingleQueueWait(timeline_, queue, point);
+    }
+
+    auto checked = TimelineOf(point)->IsComplete(point);
+    if (!checked) {
+        return Result<void>::Failure(checked.Error());
+    }
+
+    if (point.IsNull() || point.queue == queue) {
+        return Result<void>::Success();
+    }
+
+    uint64& waited = waited_[static_cast<uint32>(queue)];
+    waited = point.value > waited ? point.value : waited;
+    Record(Op::QueueWait, QueueWaitValue(queue, point.value));
+    return Result<void>::Success();
 }
 
 Result<bool> RecordingDevice::IsFenceComplete(GpuFencePoint point) const noexcept {
-    return timeline_.IsComplete(point);
+    return TimelineOf(point)->IsComplete(point);
 }
 
 Result<platform::WaitResult> RecordingDevice::WaitFence(GpuFencePoint point,
                                                         uint32 timeoutMs) noexcept {
-    return timeline_.Wait(point, timeoutMs);
+    return const_cast<FenceTimeline*>(TimelineOf(point))->Wait(point, timeoutMs);
 }
 
 Result<void> RecordingDevice::NotifyFence(GpuFencePoint point, FenceCallback callback,
                                           void* context) noexcept {
-    return timeline_.Notify(point, callback, context);
+    return const_cast<FenceTimeline*>(TimelineOf(point))->Notify(point, callback, context);
 }
 
 bool RecordingDevice::IsLost() const noexcept {
@@ -970,6 +1138,18 @@ void RecordingDevice::ApplyTransitions(Span<const ResourceTransition> transition
             continue;
         }
 
+        // async compute 기록은 compute 상태 사이 전이만 낸다(Device.h CommandContext 주석).
+        if (recordingQueue_ == QueueKind::AsyncCompute &&
+            (!IsComputeQueueAccess(transition.before) || !IsComputeQueueAccess(transition.after))) {
+            ++validationErrors_;
+        }
+
+        if (!transition.buffer.IsNull()) {
+            TouchBuffer(transition.buffer.slot);
+        } else {
+            TouchTexture(transition.texture.slot);
+        }
+
         TransitionCall call;
         call.range = transition.range;
         call.before = transition.before;
@@ -1053,6 +1233,11 @@ void RecordingDevice::SetIndexBuffer(BufferHandle buffer, IndexFormat format,
 
 void RecordingDevice::SetTexture(TextureHandle texture) noexcept {
     const TextureState* state = textures_.Find(texture.slot);
+    TouchTexture(texture.slot);
+    // async compute 기록은 compute 읽기 상태여야 한다.
+    const ResourceAccess wholeRead = recordingQueue_ == QueueKind::AsyncCompute
+                                         ? ResourceAccess::SrvCompute
+                                         : ResourceAccess::SrvGraphics;
     // view는 그 범위만 셰이더 읽기(그래픽·compute) 상태여야 한다.
     if (state != nullptr && state->view) {
         if (state->access != ViewAccess::Read) {
@@ -1062,7 +1247,7 @@ void RecordingDevice::SetTexture(TextureHandle texture) noexcept {
         }
     } else if (state != nullptr) {
         for (uint32 index = 0; index < state->states.Count(); ++index) {
-            if (!HasAnyAccess(state->states[index], ResourceAccess::SrvGraphics)) {
+            if (!HasAnyAccess(state->states[index], wholeRead)) {
                 ++validationErrors_;
                 break;
             }
@@ -1090,12 +1275,20 @@ Result<void> RecordingDevice::SetDrawConstants(Span<const uint8> bytes) noexcept
 }
 
 void RecordingDevice::Draw(uint32 vertexCount, uint32 instanceCount, uint32 firstVertex) noexcept {
+    if (RejectOnComputeQueue()) {
+        return;
+    }
+
     Record(Op::Draw, (static_cast<uint64>(vertexCount) << 40) |
                          (static_cast<uint64>(instanceCount) << 20) | firstVertex);
 }
 
 void RecordingDevice::DrawIndexed(uint32 indexCount, uint32 instanceCount,
                                   uint32 firstIndex) noexcept {
+    if (RejectOnComputeQueue()) {
+        return;
+    }
+
     Record(Op::DrawIndexed, (static_cast<uint64>(indexCount) << 40) |
                                 (static_cast<uint64>(instanceCount) << 20) | firstIndex);
 }
@@ -1166,8 +1359,9 @@ usize RecordingDevice::CollectTimestamps(Span<TimestampSample> out) noexcept {
     return timestamps_.Collect(out);
 }
 
-Result<ClockCalibration> RecordingDevice::CalibrateClocks() noexcept {
-    if (!timestampsSupported_) {
+Result<ClockCalibration> RecordingDevice::CalibrateClocks(QueueKind queue) noexcept {
+    if (!timestampsSupported_ ||
+        (queue == QueueKind::AsyncCompute && !caps_.features.asyncCompute)) {
         return Result<ClockCalibration>::Failure(ErrorCode::Unsupported);
     }
 

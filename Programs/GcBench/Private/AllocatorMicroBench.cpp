@@ -1,8 +1,13 @@
 #include "AllocatorMicroBench.h"
 
+#include <Core/Memory/BinnedAllocator.h>
+#include <Core/Memory/SystemAllocator.h>
+#include <Core/Move.h>
+#include <Platform/Atomics.h>
 #include <Platform/Clock.h>
 #include <Platform/Sync.h>
 #include <Platform/Thread.h>
+#include <Task/WorkerScheduler.h>
 
 #include <stdio.h>
 
@@ -291,7 +296,213 @@ bool MeasureConcurrent(Allocator& allocator, uint32 threads,
     return ok;
 }
 
+// ---- 쉬는 worker의 캐시와 TrimMemory ----
+
+// worker가 캐시를 채울 때 쓰는 요청 크기와, 크기마다 할당했다가 반환하는 블록 수다.
+constexpr usize IdleTrimSizes[] = {16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192};
+constexpr uint32 IdleTrimBlocksPerSize = 256;
+constexpr uint32 IdleTrimWaitMs = 60000;
+constexpr double BytesPerKiB = 1024.0;
+constexpr double NanosecondsPerMicrosecond = 1000.0;
+constexpr uint32 IdleTrimMaxWorkers = 64;
+
+// 지금 쉬고 있는 worker 수를 따라가는 통과 allocator다. forwardMarks가 거짓이면 쉬는 표시를 상위로
+// 넘기지 않는다(대조).
+class IdleTrackingAllocator final : public Allocator {
+public:
+    IdleTrackingAllocator(Allocator& backing, bool forwardMarks) noexcept
+        : backing_(backing), forwardMarks_(forwardMarks) {
+    }
+
+    Result<void*> Allocate(usize bytes, usize alignment, uint32 tag = 0) noexcept override {
+        return backing_.Allocate(bytes, alignment, tag);
+    }
+
+    Result<void> Deallocate(void* address) noexcept override {
+        return backing_.Deallocate(address);
+    }
+
+    void TrimMemory() noexcept override {
+        backing_.TrimMemory();
+    }
+
+    void MarkThreadIdle() noexcept override {
+        if (forwardMarks_) {
+            backing_.MarkThreadIdle();
+        }
+
+        platform::LockGuard lock(mutex_);
+        ++idleNow_;
+        changed_.NotifyAll();
+    }
+
+    void MarkThreadActive() noexcept override {
+        {
+            platform::LockGuard lock(mutex_);
+            --idleNow_;
+        }
+
+        if (forwardMarks_) {
+            backing_.MarkThreadActive();
+        }
+    }
+
+    // 쉬는 worker가 count개가 될 때까지 기다린다.
+    void WaitForIdle(uint32 count) noexcept {
+        platform::LockGuard lock(mutex_);
+        while (idleNow_ != count) {
+            (void)changed_.Wait(mutex_);
+        }
+    }
+
+private:
+    Allocator& backing_;
+    bool forwardMarks_;
+    platform::Mutex mutex_;
+    platform::ConditionVariable changed_;
+    uint32 idleNow_ = 0;
+};
+
+// worker 작업들이 함께 쓰는 상태다.
+struct IdleTrimShared {
+    Allocator* allocator = nullptr;
+    platform::Semaphore* entered = nullptr;
+    platform::ManualResetEvent* release = nullptr;
+    // 실패 수다(원자 접근).
+    uint32 failures = 0;
+};
+
+// 크기마다 블록을 할당했다가 모두 반환해 이 스레드의 캐시를 채운다.
+void FillThreadCache(IdleTrimShared& shared) noexcept {
+    void* blocks[IdleTrimBlocksPerSize];
+    uint32 failures = 0;
+    for (usize bytes : IdleTrimSizes) {
+        for (uint32 index = 0; index < IdleTrimBlocksPerSize; ++index) {
+            auto block = shared.allocator->Allocate(bytes, BlockAlignment);
+            blocks[index] = block ? block.Value() : nullptr;
+            if (blocks[index] == nullptr) {
+                ++failures;
+                continue;
+            }
+
+            Touch(blocks[index], index);
+        }
+
+        for (uint32 index = 0; index < IdleTrimBlocksPerSize; ++index) {
+            if (blocks[index] != nullptr && !shared.allocator->Deallocate(blocks[index])) {
+                ++failures;
+            }
+        }
+    }
+
+    if (failures != 0) {
+        (void)platform::AtomicFetchAdd<platform::MemoryOrder::Relaxed>(&shared.failures, failures);
+    }
+}
+
+struct IdleTrimResult {
+    usize committedBefore = 0;
+    usize committedAfter = 0;
+    uint64 trimNanoseconds = 0;
+};
+
+bool MeasureIdleTrim(uint32 workers, bool forwardMarks, IdleTrimResult& result) noexcept {
+    SystemAllocator system;
+    BinnedAllocator binned(system);
+    IdleTrackingAllocator tracked(binned, forwardMarks);
+    bool ok = true;
+    {
+        platform::Semaphore entered(0, workers);
+        platform::ManualResetEvent release;
+        IdleTrimShared shared;
+        shared.allocator = &tracked;
+        shared.entered = &entered;
+        shared.release = &release;
+        WorkerScheduler scheduler(tracked);
+        WorkerSchedulerConfig config;
+        config.workerCount = workers;
+        if (!scheduler.Start(config)) {
+            return false;
+        }
+
+        // worker마다 작업 하나를 잡게 한다: 모든 작업이 캐시를 채우고 들어왔다고 알릴 때까지
+        // 붙든다.
+        WorkerTaskHandle handles[IdleTrimMaxWorkers];
+        for (uint32 index = 0; index < workers && ok; ++index) {
+            auto body = Function<void(WorkerTaskContext&)>::TryCreate(
+                tracked, [&shared](WorkerTaskContext&) noexcept {
+                    FillThreadCache(shared);
+                    (void)shared.entered->Release();
+                    (void)shared.release->Wait(IdleTrimWaitMs);
+                });
+            if (!body) {
+                ok = false;
+                break;
+            }
+
+            auto submitted = scheduler.Submit(Move(body.Value()));
+            if (!submitted) {
+                ok = false;
+                break;
+            }
+
+            handles[index] = Move(submitted.Value());
+        }
+
+        for (uint32 index = 0; index < workers && ok; ++index) {
+            ok = entered.Wait(IdleTrimWaitMs) == platform::WaitResult::Signaled;
+        }
+
+        release.Signal();
+        for (uint32 index = 0; index < workers && ok; ++index) {
+            auto waited = handles[index].Wait(IdleTrimWaitMs);
+            ok = waited && waited.Value() == platform::WaitResult::Signaled;
+        }
+
+        if (ok) {
+            // 모든 worker가 대기에 들어간 뒤에 잰다.
+            tracked.WaitForIdle(workers);
+            result.committedBefore = binned.Usage().committedBytes;
+            const uint64 opened = platform::MonotonicNanoseconds();
+            tracked.TrimMemory();
+            result.trimNanoseconds = platform::MonotonicNanoseconds() - opened;
+            result.committedAfter = binned.Usage().committedBytes;
+        }
+
+        ok = scheduler.Shutdown() && ok;
+        ok = ok && platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&shared.failures) == 0;
+    }
+
+    return ok && binned.Stats().liveAllocations == 0;
+}
+
 } // namespace
+
+int RunIdleTrimBench(uint32 workers) noexcept {
+    if (workers == 0 || workers > IdleTrimMaxWorkers) {
+        printf("allocator idle trim bench: workers must be 1..%u\n", IdleTrimMaxWorkers);
+        return 9;
+    }
+
+    const bool modes[] = {true, false};
+    for (const bool forwardMarks : modes) {
+        IdleTrimResult result;
+        if (!MeasureIdleTrim(workers, forwardMarks, result)) {
+            printf("allocator idle trim bench failed\n");
+            return 9;
+        }
+
+        printf("  idle trim x%u workers, idle marks %s: committed %.0f KiB -> %.0f KiB, "
+               "TrimMemory %.0f us\n",
+               workers, forwardMarks ? "forwarded" : "dropped (control)",
+               static_cast<double>(result.committedBefore) / BytesPerKiB,
+               static_cast<double>(result.committedAfter) / BytesPerKiB,
+               static_cast<double>(result.trimNanoseconds) / NanosecondsPerMicrosecond);
+        fflush(stdout);
+    }
+
+    return 0;
+}
 
 int RunAllocatorMicroBench(Allocator& allocator, const char* name) noexcept {
     printf("  %-16s pairs ns:", name);

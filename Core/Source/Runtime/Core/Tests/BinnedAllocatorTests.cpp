@@ -12,7 +12,7 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/ProcessProbe.h>
 #include <TestSupport/Test.h>
-#include <cstdlib>
+#include <stdlib.h>
 #include <string.h>
 
 // BinnedAllocator의 계약·소유 판정·slab 수명·실패 경로다(Docs/Design/GarbageCollectionScale.ko.md
@@ -302,6 +302,9 @@ constexpr char LostMarkerDuplicate[] = "duplicate-cached";
 constexpr char LostMarkerOverwriteCached[] = "overwrite-cached";
 constexpr char LostMarkerOverwriteLocked[] = "overwrite-locked";
 constexpr char LostMarkerMessage[] = "BinnedAllocator free block lost its return marker";
+// 같은 probe의 다른 시나리오다: 나가 있는 블록이 없는 slab에 블록이 또 돌아온다.
+constexpr char SlabUnderflowScenario[] = "slab-underflow";
+constexpr char SlabUnderflowMessage[] = "BinnedAllocator slab block count underflow";
 constexpr usize LostMarkerRequest = 48;
 // 반환한 블록의 둘째 word에 쓰는 값이다(표지가 아닌 아무 값).
 constexpr uptr UseAfterFreeValue = 0x5a5a5a5a5a5a5a5aULL;
@@ -326,6 +329,23 @@ int LostMarkerProbe(int argc, const char* const* argv) noexcept {
     }
 
     const char* scenario = argv[LostMarkerScenarioArgument];
+    if (strcmp(scenario, SlabUnderflowScenario) == 0) {
+        // 겹친 중복 반환이 slab 경로로 간 결과다: 하나뿐인 블록을 반환해 slab이 빈 뒤에 같은 블록이
+        // 한 번 더 slab으로 돌아온다.
+        SystemAllocator system;
+        BinnedAllocatorConfig config;
+        config.threadCaches = false;
+        BinnedAllocator allocator(system, config);
+        auto block = allocator.Allocate(LostMarkerRequest, 16);
+        if (!block || !allocator.Deallocate(block.Value())) {
+            return LostMarkerSetupFailed;
+        }
+
+        (void)BinnedAllocatorTestAccess::ReturnToSlabAgain(allocator, block.Value());
+        // Fatal이 아니면 여기에 온다.
+        _Exit(0);
+    }
+
     const bool duplicate = strcmp(scenario, LostMarkerDuplicate) == 0;
     const bool overwriteLocked = strcmp(scenario, LostMarkerOverwriteLocked) == 0;
     if (!duplicate && !overwriteLocked && strcmp(scenario, LostMarkerOverwriteCached) != 0) {
@@ -358,7 +378,7 @@ int LostMarkerProbe(int argc, const char* const* argv) noexcept {
     (void)allocator.Allocate(LostMarkerRequest, 16);
     (void)allocator.Allocate(LostMarkerRequest, 16);
     // Fatal이 아니면 여기에 온다(파괴의 "남은 할당" Fatal로 넘어가지 않게 바로 끝낸다).
-    std::_Exit(0);
+    _Exit(0);
 }
 
 const bool LostMarkerProbeRegistered =
@@ -484,7 +504,9 @@ static void CheckSizesAlignmentAndStats(bool threadCaches) {
         BinnedAllocatorConfig config;
         config.threadCaches = threadCaches;
         BinnedAllocator allocator(system, config);
-        CHECK(allocator.ReservedBytes() == BinnedAllocator::DefaultReserveBytes);
+        // 예약은 기본 크기이거나, OS가 거부해 절반씩 줄인 크기다(환경에 따라 다르다).
+        CHECK(allocator.ReservedBytes() <= BinnedAllocator::DefaultReserveBytes);
+        CHECK(allocator.ReservedBytes() >= BinnedAllocator::MinReserveBytes);
         auto empty = allocator.Allocate(0, 8);
         REQUIRE(empty);
         CHECK(empty.Value() == nullptr);
@@ -757,7 +779,7 @@ TEST(CoreBinnedNeverIssuedBlocksAreNotOwned) {
     CheckNeverIssuedBlocksAreNotOwned(true);
 }
 
-// 빈 slab은 한도까지 commit한 채 보관하고 넘으면 decommit한다. 풀린 slab은 표가 0이고, Trim이
+// 빈 slab은 한도까지 commit한 채 보관하고 넘으면 decommit한다. 풀린 slab은 표가 0이고, TrimMemory가
 // 보관분을 모두 decommit하며, decommit한 slab은 낮은 번호부터 다시 쓴다.
 TEST(CoreBinnedEmptySlabsAreRetainedThenDecommitted) {
     SystemAllocator system;
@@ -786,8 +808,8 @@ TEST(CoreBinnedEmptySlabsAreRetainedThenDecommitted) {
 
         CHECK(allocator.Usage().committedBytes == Slabs * SlabBytes);
         CHECK(allocator.Usage().retainedSlabs == 0);
-        // 쓰는 중에는 Trim이 아무것도 풀지 않는다.
-        allocator.Trim();
+        // 쓰는 중에는 TrimMemory가 아무것도 풀지 않는다.
+        allocator.TrimMemory();
         CHECK(allocator.Usage().committedBytes == Slabs * SlabBytes);
         for (uint32 index = 0; index < count; ++index) {
             CHECK(CheckPattern(blocks[index], Request, static_cast<uint8>(index)));
@@ -803,7 +825,7 @@ TEST(CoreBinnedEmptySlabsAreRetainedThenDecommitted) {
             REQUIRE(allocator.Deallocate(blocks[index]).Error() == ErrorCode::NotFound);
         }
 
-        allocator.Trim();
+        allocator.TrimMemory();
         CHECK(allocator.Usage().retainedSlabs == 0);
         CHECK(allocator.Usage().committedBytes == 0);
         CHECK(allocator.Deallocate(blocks[0]).Error() == ErrorCode::NotFound);
@@ -826,7 +848,7 @@ TEST(CoreBinnedEmptySlabsAreRetainedThenDecommitted) {
                   .Error() == ErrorCode::NotFound);
         CHECK(CheckPattern(again.Value(), 40, 77));
         REQUIRE(allocator.Deallocate(again.Value()));
-        allocator.Trim();
+        allocator.TrimMemory();
         CHECK(allocator.Usage().committedBytes == 0);
     }
 
@@ -945,7 +967,7 @@ TEST(CoreBinnedReserveFailureShrinksThenRunsWithoutRange) {
             CHECK(allocator.Deallocate(blocks[index]).Error() == ErrorCode::NotFound);
         }
 
-        allocator.Trim();
+        allocator.TrimMemory();
         CHECK(allocator.Stats().liveAllocations == 0);
         CHECK(allocator.Stats().liveBytes == 0);
         CHECK(allocator.Stats().totalAllocations == SizeCount);
@@ -1061,8 +1083,9 @@ TEST(CoreBinnedExhaustedRangeAndCommitFailureFallBack) {
 }
 
 // commit·decommit 실패는 일시적이다(설계 18.4절, AL2b): commit이 실패한 요청은 큰 경로로 가고 다음
-// 요청이 같은 slab을 다시 얻는다. decommit이 실패한 slab은 commit된 채 보관해 다시 쓰고 다음 Trim이
-// 다시 푼다. 한 번의 실패가 주소 범위를 닫지 않으므로 그 뒤에도 Trim이 메모리를 돌려준다.
+// 요청이 같은 slab을 다시 얻는다. decommit이 실패한 slab은 commit된 채 보관해 다시 쓰고 다음
+// TrimMemory가 다시 푼다. 한 번의 실패가 주소 범위를 닫지 않으므로 그 뒤에도 TrimMemory가 메모리를
+// 돌려준다.
 TEST(CoreBinnedCommitAndDecommitFailuresAreTransient) {
     SystemAllocator system;
     {
@@ -1092,7 +1115,8 @@ TEST(CoreBinnedCommitAndDecommitFailuresAreTransient) {
         CHECK(allocator.Usage().retainedSlabs == 0);
         CHECK(allocator.Usage().committedBytes == 0);
 
-        // slab 둘 가운데 하나만 실패하면 Trim이 나머지를 풀고, 다음 Trim이 실패한 것을 다시 푼다.
+        // slab 둘 가운데 하나만 실패하면 TrimMemory가 나머지를 풀고, 다음 TrimMemory가 실패한 것을
+        // 다시 푼다.
         constexpr usize Request = BinnedAllocator::MaxSmallBytes;
         const uint32 perSlab = BinnedAllocatorTestAccess::ClassCapacity(
             BinnedAllocatorTestAccess::ClassOf(Request, 16));
@@ -1117,10 +1141,10 @@ TEST(CoreBinnedCommitAndDecommitFailuresAreTransient) {
         CHECK(allocator.Usage().retainedSlabs == 2);
         CHECK(allocator.Usage().committedBytes == 2 * SlabBytes);
         VirtualMemoryTestAccess::FailDecommitOnCall(1);
-        allocator.Trim();
+        allocator.TrimMemory();
         CHECK(allocator.Usage().retainedSlabs == 1);
         CHECK(allocator.Usage().committedBytes == SlabBytes);
-        allocator.Trim();
+        allocator.TrimMemory();
         VirtualMemoryTestAccess::ClearFaults();
         CHECK(allocator.Usage().retainedSlabs == 0);
         CHECK(allocator.Usage().committedBytes == 0);
@@ -1129,7 +1153,7 @@ TEST(CoreBinnedCommitAndDecommitFailuresAreTransient) {
 
     {
         // commit 실패: 그 요청만 큰 경로로 가고, 다음 요청은 같은 slab 번호를 다시 얻는다. 그 뒤의
-        // Trim도 보관분을 돌려준다(실패가 주소 범위를 닫지 않는다).
+        // TrimMemory도 보관분을 돌려준다(실패가 주소 범위를 닫지 않는다).
         BinnedAllocatorConfig config;
         config.reserveBytes = MiB;
         config.retainedEmptySlabs = 4;
@@ -1158,12 +1182,12 @@ TEST(CoreBinnedCommitAndDecommitFailuresAreTransient) {
         CHECK(CheckPattern(retried.Value(), 4000, 9));
         REQUIRE(allocator.Deallocate(retried.Value()));
         CHECK(allocator.Usage().retainedSlabs == 1);
-        allocator.Trim();
+        allocator.TrimMemory();
         CHECK(allocator.Usage().retainedSlabs == 0);
         CHECK(allocator.Usage().committedBytes == SlabBytes);
         REQUIRE(allocator.Deallocate(fallback.Value()));
         REQUIRE(allocator.Deallocate(kept.Value()));
-        allocator.Trim();
+        allocator.TrimMemory();
         CHECK(allocator.Usage().committedBytes == 0);
         CHECK(allocator.Stats().liveAllocations == 0);
     }
@@ -1250,8 +1274,8 @@ TEST(CoreBinnedLargePathFailuresRollBack) {
     CHECK(system.Stats().liveAllocations == 0);
 }
 
-// 무작위 할당·반환을 그림자 표와 대조한다: 내용 보존(겹침 없음), 통계 일치, 끝에 Trim 뒤 commit된
-// slab 0.
+// 무작위 할당·반환을 그림자 표와 대조한다: 내용 보존(겹침 없음), 통계 일치, 끝에 TrimMemory 뒤
+// commit된 slab 0.
 static void CheckRandomChurnMatchesShadowModel(bool threadCaches) {
     SystemAllocator system;
     SystemAllocator shadowMemory;
@@ -1333,7 +1357,7 @@ static void CheckRandomChurnMatchesShadowModel(bool threadCaches) {
         CHECK(allocator.Stats().liveBytes == 0);
         CHECK(allocator.Usage().largeAllocations == 0);
         CHECK(allocator.Usage().retainedSlabs <= config.retainedEmptySlabs);
-        allocator.Trim();
+        allocator.TrimMemory();
         CHECK(allocator.Usage().committedBytes == 0);
         CHECK(allocator.Usage().retainedSlabs == 0);
     }
@@ -1375,7 +1399,7 @@ static void CheckConcurrentAllocationStress(bool threadCaches) {
         CHECK(allocator.Stats().liveAllocations == 0);
         CHECK(allocator.Stats().liveBytes == 0);
         CHECK(allocator.Stats().totalAllocations == uint64{Workers} * StressIterations);
-        allocator.Trim();
+        allocator.TrimMemory();
         CHECK(allocator.Usage().committedBytes == 0);
     }
 
@@ -1445,5 +1469,19 @@ TEST(CoreBinnedIssuingBlockWithoutMarkerIsFatal) {
         CHECK(run.abnormal);
         CHECK(strstr(run.error, LostMarkerMessage) != nullptr);
     }
+}
+
+// slab으로 돌아오는 블록이 그 slab의 "나가 있는 블록 수"를 0 아래로 내리면 Fatal이다(설계 18.11.7절
+// — 겹친 중복 반환이 캐시를 거쳐 slab까지 간 경우의 일부). 위반은 자식에서 확인한다.
+TEST(CoreBinnedReturningBlockToEmptySlabIsFatal) {
+    if (!rocks::test::ProcessSpawnExpected()) {
+        return;
+    }
+
+    REQUIRE(LostMarkerProbeRegistered);
+    const LostMarkerRun run = RunLostMarkerProbe(SlabUnderflowScenario);
+    REQUIRE(run.ran);
+    CHECK(run.abnormal);
+    CHECK(strstr(run.error, SlabUnderflowMessage) != nullptr);
 }
 } // namespace binned_allocator_tests_file

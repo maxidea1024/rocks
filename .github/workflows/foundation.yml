@@ -67,6 +67,15 @@ jobs:
         run: dotnet msbuild Rocks.proj /t:Test /p:Adaptive=off /p:Configuration=Asan /p:RocksTarget=Foundation /v:minimal
       - name: Release with ThinLTO
         run: dotnet msbuild Rocks.proj /t:Test /p:Adaptive=off /p:Configuration=Release /p:RocksTarget=Foundation /v:minimal
+      # Compiled-out log templates must be absent from the Release link result (Docs/Design/LoggingSystem.ko.md section 7). The check fails
+      # when the executable is missing, so it always inspects the LogBench built from this commit.
+      - name: Release LogBench excludes compiled-out log templates
+        run: |
+          dotnet msbuild Rocks.proj /t:Build /p:Adaptive=off /p:Configuration=Release /p:RocksTarget=LogBench /p:NativeOutput=out/ci-logbench-release /v:minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $executable = if ($IsWindows) { 'out/ci-logbench-release/bin/LogBench.exe' } else { 'out/ci-logbench-release/bin/LogBench' }
+          dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll log-release --root . --native-executable $executable
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Preserve reports
         if: always()
         uses: actions/upload-artifact@v7

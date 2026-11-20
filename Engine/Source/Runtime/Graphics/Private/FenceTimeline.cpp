@@ -359,4 +359,18 @@ usize FenceTimeline::PendingNotifications() const noexcept {
     return waiters_.Size();
 }
 
+Result<void> SingleQueueWait(const FenceTimeline& timeline, QueueKind queue,
+                             GpuFencePoint point) noexcept {
+    if (queue != QueueKind::Graphics || (!point.IsNull() && point.queue != QueueKind::Graphics)) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
+    auto checked = timeline.IsComplete(point);
+    if (!checked) {
+        return Result<void>::Failure(checked.Error());
+    }
+
+    return Result<void>::Success();
+}
+
 } // namespace rocks::graphics

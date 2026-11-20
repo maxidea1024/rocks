@@ -64,6 +64,19 @@ public:
         return released;
     }
 
+    // 상위 allocator에 그대로 넘긴다(Allocator.h).
+    void TrimMemory() noexcept override {
+        backing_.TrimMemory();
+    }
+
+    void MarkThreadIdle() noexcept override {
+        backing_.MarkThreadIdle();
+    }
+
+    void MarkThreadActive() noexcept override {
+        backing_.MarkThreadActive();
+    }
+
     uint64 Allocations() const noexcept {
         return allocations_;
     }

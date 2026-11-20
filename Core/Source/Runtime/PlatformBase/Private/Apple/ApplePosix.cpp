@@ -110,7 +110,11 @@ int PosixDecommitAdvice() noexcept {
 // 가능으로 표시해 사용량 통계에서 빼고 OS가 거둘 수 있게 한다), commit은 MADV_FREE_REUSE(다시
 // 쓴다고 알린다).
 void PosixOpenCommit(void* address, usize bytes) noexcept {
+    // 실패를 무시하는 힌트이므로 호출 스레드의 errno도 건드리지 않는다: 이 호출은 할당자의 느린
+    // 경로(slab commit)에 있어, 실패한 OS 호출과 그 errno를 읽는 코드 사이에 낄 수 있다.
+    const int savedError = errno;
     static_cast<void>(madvise(address, bytes, MADV_FREE_REUSE));
+    errno = savedError;
 }
 
 int PosixOpenDecommit(void* address, usize bytes) noexcept {

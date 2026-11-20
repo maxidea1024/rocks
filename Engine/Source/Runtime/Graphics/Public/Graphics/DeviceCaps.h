@@ -122,6 +122,15 @@ struct DeviceLimits {
 
 // 장치 기능 표시다. 장치가 지원하고 이 backend가 켠 것만 참이다.
 struct DeviceFeatures {
+    // graphics queue와 따로 도는 compute queue가 있다(QueueKind::AsyncCompute 기록·QueueWait,
+    // RenderBase 8절 RG4). D3D12는 늘 참이다. Vulkan은 graphics와 다른 compute 전용 queue family와
+    // timeline semaphore가 있을 때다. D3D11·OpenGL ES는 거짓이다.
+    bool asyncCompute = false;
+    // compute queue와 graphics queue를 겹쳐 이득이 난다고 보는 장치다(렌더 그래프
+    // GraphAsyncCompute::Auto가 compute queue를 쓰는 조건, UE와 같은 판단). D3D12는 AMD, 또는
+    // NVIDIA의 D3D12_OPTIONS6 PerPrimitiveShadingRateSupportedWithViewportIndexing(Ampere 이후)일
+    // 때다. Vulkan은 asyncCompute와 같다. asyncCompute가 거짓이면 늘 거짓이다.
+    bool efficientAsyncCompute = false;
     // compute 셰이더를 실행할 수 있다(D3D FL 11.0·Vulkan·OpenGL ES 3.1은 늘 참).
     bool computeShaders = false;
     // 깊이 clamp(깊이 clip 끄기)를 쓸 수 있다(D3D 늘 참, Vulkan depthClamp, OpenGL ES

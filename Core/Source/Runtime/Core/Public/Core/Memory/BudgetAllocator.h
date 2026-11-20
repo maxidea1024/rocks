@@ -38,6 +38,19 @@ public:
     // 현재 live byte보다 작게 줄일 수 없다. 실패 시 기존 상한은 유지된다.
     Result<void> SetLimit(uint64 limitBytes) noexcept;
 
+    // 상위 allocator에 그대로 넘긴다(Allocator.h). 이 래퍼의 잠금을 잡지 않는다(상한·통계와 무관).
+    void TrimMemory() noexcept override {
+        backing_.TrimMemory();
+    }
+
+    void MarkThreadIdle() noexcept override {
+        backing_.MarkThreadIdle();
+    }
+
+    void MarkThreadActive() noexcept override {
+        backing_.MarkThreadActive();
+    }
+
     // 한 시점에 완료되어 게시된 요청 byte 기준 통계다. 진행 중 상위 호출은 포함하지 않는다.
     // 0인 스냅샷을 다른 스레드의 호출 종료·객체 파괴 안전성의 증거로 사용하면 안 된다.
     AllocationStats Stats() const noexcept;

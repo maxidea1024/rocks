@@ -336,6 +336,10 @@ Result<CommandContext*> VulkanDevice::BeginPass(const PassDesc& pass) noexcept {
         auto failed = FailCode("BeginPass", code, detail);
         return Result<CommandContext*>::Failure(failed.Error());
     };
+    if (pass.queue != QueueKind::Graphics) {
+        return fail(ErrorCode::Unsupported, "the device has no async compute queue");
+    }
+
     if (pass.colorCount > MaxColorTargets) {
         return fail(ErrorCode::InvalidArgument,
                     "pass has more color attachments than MaxColorTargets");

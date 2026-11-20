@@ -63,6 +63,11 @@ Result<GpuFencePoint> D3D12Device::EndFrame() noexcept {
         return Result<GpuFencePoint>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // compute queue 기록은 compute queue에 제출한다(RG4).
+    if (computeRecording_) {
+        return EndComputeRecording();
+    }
+
     // 끝나지 않은 분리 전이는 적용하지 않는다(계약 위반이므로 검증 장치는 오류로 센다).
     const usize unended = splits_.Close();
     if (validation_ && unended != 0) {
@@ -111,7 +116,7 @@ Result<GpuFencePoint> D3D12Device::EndFrame() noexcept {
         return FailWith<GpuFencePoint>("command list close failed");
     }
 
-    ID3D12CommandList* lists[] = {list_.Get()};
+    ID3D12CommandList* lists[] = {list_};
     queue_->ExecuteCommandLists(1, lists);
     SettleTracking(true);
 
@@ -163,6 +168,10 @@ void D3D12Device::ApplyVertexBuffer(uint32 stream) noexcept {
     view.BufferLocation = buffer->address + boundVertex_[stream].offset;
     view.SizeInBytes = static_cast<UINT>(buffer->size - boundVertex_[stream].offset);
     view.StrideInBytes = pipeline != nullptr ? pipeline->strides[stream] : 0u;
+    if (computeRecording_) {
+        return;
+    }
+
     list_->IASetVertexBuffers(stream, 1, &view);
 }
 
@@ -203,6 +212,11 @@ Result<void> D3D12Device::BeginRecording() noexcept {
     recordingAllocator_ = picked.Value();
     record.inUse = true;
     recording_ = true;
+    ResetBindings();
+    return Result<void>::Success();
+}
+
+void D3D12Device::ResetBindings() noexcept {
     markerDepth_ = 0;
     boundPipeline_ = {};
     for (BoundVertexBuffer& bound : boundVertex_) {
@@ -227,7 +241,6 @@ Result<void> D3D12Device::BeginRecording() noexcept {
     bufferStates_.Clear();
     platform::MemoryZero(constants_, sizeof(constants_));
     stencilReference_ = 0;
-    return Result<void>::Success();
 }
 
 void D3D12Device::StartPass(const PassDesc& pass) noexcept {
@@ -322,6 +335,13 @@ void D3D12Device::SetPipeline(PipelineHandle handle) noexcept {
         return;
     }
 
+    // compute 기록은 compute 파이프라인만 받는다(RG4).
+    if (computeRecording_ && !record->compute) {
+        boundPipeline_ = {};
+        ++ignoredDraws_;
+        return;
+    }
+
     list_->SetPipelineState(record->state.Get());
     boundPipeline_ = handle.slot;
     if (record->compute) {
@@ -363,6 +383,11 @@ void D3D12Device::SetIndexBuffer(BufferHandle buffer, IndexFormat format, uint64
     view.BufferLocation = record->address + offset;
     view.SizeInBytes = static_cast<UINT>(record->size - offset);
     view.Format = format == IndexFormat::UInt16 ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT;
+    if (computeRecording_) {
+        ++ignoredDraws_;
+        return;
+    }
+
     list_->IASetIndexBuffer(&view);
 }
 
@@ -408,6 +433,11 @@ void D3D12Device::SetTexture(TextureHandle handle) noexcept {
         }
 
         boundTexture_ = slot;
+        // compute 기록에는 graphics root가 없다(compute t0·s0는 dispatch 때 건다, RG4).
+        if (computeRecording_) {
+            return;
+        }
+
         list_->SetGraphicsRootDescriptorTable(RootTexture, srvs_.Gpu(record->srv));
         list_->SetGraphicsRootDescriptorTable(RootSampler, samplers_.Gpu(record->sampler));
     }
@@ -428,6 +458,10 @@ Result<void> D3D12Device::SetDrawConstants(Span<const uint8> bytes) noexcept {
     // 그래픽 root에는 바로 올리고(compute 파이프라인이 묶여 있어도 다음 그리기가 같은 값을 본다),
     // compute는 dispatch 때 같은 값을 compute root 상수로 올린다.
     platform::MemoryCopy(constants_, bytes.Data(), bytes.Size());
+    if (computeRecording_) {
+        return Result<void>::Success();
+    }
+
     list_->SetGraphicsRoot32BitConstants(
         RootConstants, static_cast<UINT>(bytes.Size() / sizeof(uint32)), constants_, 0);
     return Result<void>::Success();
@@ -443,6 +477,10 @@ void D3D12Device::SetBufferView(uint32 slot, BufferViewHandle handle) noexcept {
     const BufferViewRecord* view = bufferViews_.Find(handle.slot);
     const bool readable = view != nullptr && view->access == ViewAccess::Read;
     boundViews_[slot] = readable ? handle : BufferViewHandle{};
+    if (computeRecording_) {
+        return;
+    }
+
     list_->SetGraphicsRootDescriptorTable(RootBufferViews + slot,
                                           srvs_.Gpu(readable ? view->descriptor : nullBufferSrv_));
 }
@@ -641,6 +679,13 @@ void D3D12Device::TransitionLocked(Span<const ResourceTransition> transitions) n
             }
         }
 
+        // compute 기록은 compute queue 상태 사이 전이만 낸다(RG4, Device.h CommandContext 주석).
+        if (computeRecording_ &&
+            (!IsComputeQueueAccess(transition.before) || !IsComputeQueueAccess(transition.after))) {
+            ++ignoredDraws_;
+            continue;
+        }
+
         const D3D12_RESOURCE_STATES after = StatesFor(transition.after);
         const bool uav = HasAnyAccess(transition.after, UavAccessMask);
         TrackTransition(*record, slot, range, after, uav);
@@ -704,6 +749,25 @@ void D3D12Device::ResolveAttachments() noexcept {
 void D3D12Device::TrackTransition(TextureRecord& record, SlotHandle slot,
                                   const ResolvedSubresourceRange& range,
                                   D3D12_RESOURCE_STATES after, bool uavOrder) noexcept {
+    // compute 기록: 픽셀 셰이더 읽기 비트를 빼고, compute queue가 받지 않는 상태 사이 전이(암묵
+    // 전이 포함)는 내지 않는다(RG4).
+    if (computeRecording_) {
+        bool allowed = AdaptForQueue(after);
+        for (uint32 slice = range.firstSlice;
+             allowed && slice < range.firstSlice + range.sliceCount; ++slice) {
+            for (uint32 mip = range.firstMip; mip < range.firstMip + range.mipCount; ++mip) {
+                D3D12_RESOURCE_STATES before = record.current.At(mip, slice);
+                allowed =
+                    allowed && AdaptForQueue(before) && before == record.current.At(mip, slice);
+            }
+        }
+
+        if (!allowed) {
+            ++ignoredDraws_;
+            return;
+        }
+    }
+
     const D3D12_RESOURCE_STATES firstState = record.current.At(range.firstMip, range.firstSlice);
     bool uniform = range.mipCount == record.mipLevels && range.sliceCount == record.slices;
     for (uint32 index = 0; index < record.current.Count() && uniform; ++index) {

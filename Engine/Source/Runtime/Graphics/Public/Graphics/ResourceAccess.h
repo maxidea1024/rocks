@@ -5,8 +5,9 @@
 
 // 명시 접근 상태와 전이다(Docs/Design/RenderBase.ko.md 4.4절 GX5, UE ERHIAccess·FRHITransitionInfo
 // 대응). 렌더 그래프가 pass마다 자원 접근을 모아 전이를 계산하고, 장치는 그 전이를 자기 API로
-// 낮춘다(CommandContext::Transition, 분리 전이는 BeginTransitions·EndTransitions). 1차 범위는
-// graphics queue 하나이므로 pipe(그래픽·async compute) 구분은 아직 없다(RG4에서 더한다).
+// 낮춘다(CommandContext::Transition, 분리 전이는 BeginTransitions·EndTransitions). async compute
+// 기록(QueueKind::AsyncCompute)에서는 IsComputeQueueAccess인 상태 사이 전이만 낸다(RG4). queue 사이
+// 전이는 graphics 기록이 낸다.
 namespace rocks::graphics {
 
 // 자원 하나(또는 subresource 범위)의 GPU 접근 상태다. 읽기 비트끼리는 함께 켤 수 있다(여러 읽기를
@@ -103,9 +104,23 @@ inline constexpr ResourceAccess WritableAccessMask = WriteOnlyAccessMask | UavAc
 inline constexpr ResourceAccess AllAccessMask =
     ReadableAccessMask | WritableAccessMask | ResourceAccess::Discard;
 
+// async compute 기록이 다룰 수 있는 접근 비트다(RenderBase 8절 RG4). D3D12 compute 명령 목록은
+// 픽셀 셰이더 읽기·렌더 타깃·깊이·resolve·present 상태 barrier를 받지 않고, Vulkan compute queue는
+// graphics stage를 받지 않는다(UE D3D12LegacyBarriers.cpp의 같은 제약).
+inline constexpr ResourceAccess ComputeQueueAccessMask =
+    ResourceAccess::Constant | ResourceAccess::IndirectArgs | ResourceAccess::SrvCompute |
+    ResourceAccess::UavCompute | ResourceAccess::CopySource | ResourceAccess::CopyDestination;
+
 // mask의 비트가 하나라도 켜져 있는지다.
 constexpr bool HasAnyAccess(ResourceAccess value, ResourceAccess mask) noexcept {
     return (value & mask) != ResourceAccess::Unknown;
+}
+
+// async compute 기록에서 전이의 before·after로 쓸 수 있는지다: ComputeQueueAccessMask 안의 비트만
+// 있거나, before 자리의 Unknown·Discard(장치 추적 상태가 compute 상태일 때만 낸다)다.
+constexpr bool IsComputeQueueAccess(ResourceAccess value) noexcept {
+    return value == ResourceAccess::Unknown || value == ResourceAccess::Discard ||
+           (value & ~ComputeQueueAccessMask) == ResourceAccess::Unknown;
 }
 
 // 쓰기 비트가 하나라도 있는지다(UAV 포함).

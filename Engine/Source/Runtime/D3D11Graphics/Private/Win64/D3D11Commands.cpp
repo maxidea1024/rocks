@@ -228,6 +228,10 @@ Result<CommandContext*> D3D11Device::BeginPass(const PassDesc& pass) noexcept {
         (void)assigned;
         return Result<CommandContext*>::Failure(code);
     };
+    if (pass.queue != QueueKind::Graphics) {
+        return fail(ErrorCode::Unsupported, "D3D11 has no async compute queue");
+    }
+
     if (pass.colorCount > MaxColorTargets) {
         return fail(ErrorCode::InvalidArgument,
                     "pass has more color attachments than MaxColorTargets");

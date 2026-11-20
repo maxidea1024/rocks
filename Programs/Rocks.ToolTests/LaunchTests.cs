@@ -91,6 +91,12 @@ internal static partial class LaunchTests
             return exitCode is PosixSegmentationFaultExitCode or PosixBusErrorExitCode or PosixBusErrorLinuxExitCode;
         }
 
+        // 크래시 수집 없이 난 Fatal의 종료 코드다(Windows는 Rocks Fatal 코드, POSIX는 SIGABRT).
+        bool FatalExit(int exitCode)
+        {
+            return windows ? unchecked((uint)exitCode) == RocksFatal : exitCode == PosixAbortExitCode;
+        }
+
         string Program(string name) => Path.Combine(directory, name + (windows ? ".exe" : ""));
         string console = Program("LaunchProbe");
         string windowed = Program("LaunchWindowedProbe");
@@ -247,11 +253,11 @@ internal static partial class LaunchTests
                 "system setting hands out the system allocator");
             LaunchResult leaked = await Run(console, "--crash-off", "allocator-leak");
             Verify.Contains("LAUNCH ALLOCATION LEFT", leaked.StdErr, "leak probe body");
-            Verify.That(leaked.ExitCode != 0 && leaked.ExitCode != AllocatorLeakExitCode, "leaked allocation did not end in a fatal exit\n" + leaked.StdErr);
+            Verify.That(FatalExit(leaked.ExitCode), "leaked allocation did not end in a fatal exit: 0x" + leaked.ExitCode.ToString("X8") + "\n" + leaked.StdErr);
             Verify.Contains("BinnedAllocator destroyed with live allocations", leaked.StdErr, "binned allocator leak diagnostic");
             LaunchResult systemLeaked = await Run(console, "--crash-off", "--system-allocator", "allocator-leak");
-            Verify.That(systemLeaked.ExitCode != 0 && systemLeaked.ExitCode != AllocatorLeakExitCode,
-                "leaked system allocation did not end in a fatal exit\n" + systemLeaked.StdErr);
+            Verify.That(FatalExit(systemLeaked.ExitCode),
+                "leaked system allocation did not end in a fatal exit: 0x" + systemLeaked.ExitCode.ToString("X8") + "\n" + systemLeaked.StdErr);
             Verify.Contains("SystemAllocator destroyed with live allocations", systemLeaked.StdErr, "system allocator leak diagnostic");
             LaunchResult skipped = await Run(console, "--crash-off", "allocator-leak-no-teardown");
             Verify.Equal(AllocatorLeakExitCode, skipped.ExitCode, "no-teardown leak exit\n" + skipped.StdErr);
@@ -507,6 +513,12 @@ internal static partial class LaunchTests
             string[] otherFolders = Directory.GetDirectories(otherRoot, "LaunchEmbeddedHost-*");
             Verify.Equal(1, otherFolders.Length, "embedded --in-process crash folders\n" + inProcess.StdErr);
             Verify.That(!File.Exists(Path.Combine(otherFolders[0], "Minidump.dmp")), "embedded --in-process wrote a dump");
+            // 내장 진입은 정적 소멸 없이 끝내라는 요청을 무시하므로 범용 할당자를 파괴한다: 본문이 할당을 남기면 그 요청이 있어도
+            // Fatal이다(단독 진입은 파괴하지 않고 본문의 종료 코드로 끝난다 — Native.Launch.default-allocator).
+            LaunchResult embeddedLeak = await Run(embedded, "--crash-off", "allocator-leak-no-teardown");
+            Verify.Contains("LAUNCH ALLOCATION LEFT", embeddedLeak.StdErr, "embedded leak probe body");
+            Verify.Equal(unchecked((int)RocksFatal), embeddedLeak.ExitCode, "embedded no-teardown leak exit\n" + embeddedLeak.StdErr);
+            Verify.Contains("BinnedAllocator destroyed with live allocations", embeddedLeak.StdErr, "embedded leak diagnostic");
             LaunchResult noTeardown = await Run(embedded, "no-teardown");
             Verify.Equal(TeardownExitCode, noTeardown.ExitCode, "embedded no-teardown exit\n" + noTeardown.StdErr);
             Verify.Contains(StaticTeardownLine, noTeardown.StdErr, "embedded no-teardown skipped static teardown");
