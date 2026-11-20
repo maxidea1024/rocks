@@ -521,13 +521,27 @@ README의 "action key·`compile_commands.json`·BuildInfo manifest는 모두 `Na
 - 공유 PCH 헤더 구성(8.4절)은 이 목록으로 정한다.
 
 **묶음 크기 실측**
-- `Rocks.Build.Cli unity-profile --module <M>`은 다음 조합으로 clean compile을 실측한다.
-  - 유니티 끔
-  - `UnityAnchorFiles` 4단계(8·16·24·32)
-  - 상한 3단계(256·384·512 KiB)
-- 결과는 모듈별 CPU 시간, 벽시계 시간, 최대 메모리 표로 낸다.
-- 모듈 재정의 값은 이 결과로만 정한다. UE `-Mode=ProfileUnitySizes`에 대응한다.
-- **아직 구현하지 않았다**(UB6, 2026-11-20). 조합 13개를 모듈마다 clean compile하면서 프로세스별 CPU 시간과 최대 메모리를 재려면 실행기의 프로세스 계측과 모듈 단독 실행이 필요한데, 측정용 빌드를 돌리지 않기로 한 이번 작업에서는 결과를 쓸 곳이 없다. 그때까지 `UnityAnchorFiles` 16과 상한 384 KiB를 그대로 쓰고, 모듈 재정의는 두지 않는다.
+- `Rocks.Build.Cli unity-profile --root <루트> --module <M>`은 모듈 하나를 다음 조합마다 처음부터 컴파일해 잰다(UE `-Mode=ProfileUnitySizes` 대응).
+  - 유니티 끔(그 모듈만)
+  - `UnityAnchorFiles` 4단계(8·16·24·32) × 상한 3단계(256·384·512 KiB)
+- 결과는 조합별 표다: 번역 단위 수, CPU 시간, 벽시계 시간, 최대 메모리. 표준 출력과 `<출력>/UnityProfile/<M>.unity-profile.json`에 쓴다. 모듈 재정의 값(`UnityAnchorFiles`·`UnityBatchBytes`)은 이 결과로만 정한다.
+- 옵션: `--target`(기본 Foundation — 그 모듈을 빌드하는 타깃), `--configuration`, `--compiler`, `--rules`, `--jobs`, `--output`(기본 `out/unity-profile-<타깃>-<구성>` — 평소 빌드 출력을 건드리지 않는다), `--anchor-files`·`--batch-kib`(쉼표로 나눈 값 목록 — 기본은 위 단계).
+- 동작:
+  - 조합마다 build 명령과 같은 흐름(규칙 평가, 메타 생성, 계획, 실행)을 그대로 탄다. 다른 것은 셋이다: 대상 모듈에만 조합을 재정의로 얹는다(`Unity`·`UnityAnchorFiles`·`UnityBatchBytes`), 빌드 대상을 그 모듈 하나로 줄인다(공개 헤더 단독 컴파일 검사와 하위 실행 파일 링크가 빠진다), 작업 파일 분리를 끈다.
+  - 처음부터 컴파일하게 하려고, 조합마다 빌드 전에 그 모듈의 object 디렉터리(`obj/<M>`)와 묶음 디렉터리(`Unity/<M>`)를 지운다. 의존 모듈은 그대로 cache hit이다. 그 모듈의 compile action 가운데 실행되지 않은 것이 있으면 측정으로 받지 않고 오류다.
+  - 측정 전에 준비 실행을 한 번 한다(의존 모듈과 생성 코드를 빌드한다 — 결과는 버린다).
+- 재는 값:
+  - CPU 시간: 그 모듈 compile action의 컴파일러 프로세스 CPU 시간(사용자 + 커널)의 합.
+  - 최대 메모리: 그 컴파일러 프로세스들의 최대 working set 가운데 가장 큰 값(프로세스 하나의 값이다 — 동시에 도는 프로세스의 합이 아니다).
+  - 벽시계 시간: native 빌드 단계 전체. 의존 모듈의 cache 검사와 그 모듈의 archive·link가 들어간다(조합 사이에 같은 몫이다).
+  - 번역 단위 수: 그 모듈의 compile action 수(묶음, 단독 소스, 생성 TU).
+- 프로세스 계측: 실행기가 `NativeBuildRequest.MeasureProcesses`일 때만 프로세스마다 CPU 시간과 최대 working set을 읽어 `NativeActionResult`(`CpuMilliseconds`·`PeakMemoryBytes`·`ProcessMeasured`)에 싣는다. 측정값이라 action key에 들어가지 않는다. 평소 빌드는 읽지 않는다.
+- 한계:
+  - CPU 시간과 최대 메모리는 Windows 호스트에서만 잰다(종료한 프로세스의 handle로 읽는다). 다른 호스트에서는 벽시계 시간과 번역 단위 수만 나오고 두 칸은 `n/a`다.
+  - 조합마다 한 번만 잰다. 반복과 통계는 없다. 기기 부하에 따라 값이 흔들리므로, 재정의 값을 정할 때는 조용한 기기에서 돌리고 차이가 작으면 기본값을 둔다.
+  - 조합 13개에 준비 실행을 더해 그 모듈을 14번 컴파일한다. PCH는 조합과 무관해서 다시 만들지 않고 재지도 않는다.
+  - 명령 전체를 도는 시험은 CI에 없다(모듈 하나를 여러 번 컴파일하는 비용). 조합·재정의·행 계산·프로세스 계측은 `Rocks.Build.Tests`의 `unity-profile` 묶음이 fixture 모듈로 확인한다.
+- 지금 기본값: 측정으로 바꾼 것이 없어 `UnityAnchorFiles` 16과 상한 384 KiB를 그대로 쓰고, 모듈 재정의는 두지 않는다.
 
 **기준 시나리오**(계획 27.8)
 - 같은 장비, 같은 commit에서 기존 방식(UB0 전), UB0, UB2(유니티), UB5(PCH)를 각각 측정한다.
@@ -639,3 +653,4 @@ UB6에서 묶음 TU와 PCH action의 최대 메모리를 실측해, 동시 실�
 | 1(매크로 누출 리뷰 반영) | 2026-11-21 | 6.1절 "매크로를 남기는 헤더"를 고쳤다. (1) 규칙과 정책 검사의 범위를 유니티를 켠 모듈에서 Windows 플랫폼의 모든 모듈로 넓혔다(숨긴 뒤 쌍 밖에서 SDK 헤더를 여는 `ShaderToolSpike` 빌드가 깨졌다). 정책 이름은 `windows-macro-leak`이다. (2) 쌍이 `push_macro`/`pop_macro` 대신 정의를 직접 다시 쓴다(clang PCH가 push 스택을 저장하지 않는다). (3) 정책이 이름 목록 대신 깨끗한 시스템 헤더 목록으로 판정하고, 외부 라이브러리 헤더를 따라가며, 줄 이음과 리터럴이 아닌 include를 다룬다. Windows 플랫폼만 평가하고 파일 해석을 캐시한다. (4) 숨기는 이름에 `pascal`·`cdecl`·`hyper`·`RegisterClass`·`FindFirstFile`을 더했다. (5) UE 대응 서술을 바로잡았다(A/W 이름만 같다) |
 | 1(placement new 헤더) | 2026-11-21 | 8.4절에 "placement new 헤더"를 더했다: `Base/PlacementNew.h`가 MSVC 런타임에서는 `<vcruntime_new.h>`를, 그 밖에서는 `<new>`를 include하고, 엔진 소스는 `<new>` 대신 이 헤더를 쓴다(정책 `placement-new-header`, 9.2절). 공개 헤더 단독 컴파일 검사와 PCH를 쓰지 않는 번역 단위에서 `<new>` 사슬(번역 단위당 0.126 s)이 빠진다 |
 | 1(placement new 헤더 리뷰 반영) | 2026-11-21 | 8.4절 "placement new 헤더": 정책의 허용 목록(`PlacementNewAllowances`)과 `<vcruntime_new.h>` 직접 include 거부를 적고, 보장 집합(MSVC 기준)과 그 밖의 이름 목록을 명시했다. `Base/Compiler.h`가 CRT 선택(`RuntimeLibrary`)을 직접 기록한다. 수치 문장의 방향을 바로잡았다. 16절 표에 placement new와 Windows 헤더 매크로 행을 더했다 |
+| 1(unity-profile) | 2026-11-21 | 12절 "묶음 크기 실측"을 구현에 맞게 고쳤다: `Rocks.Build.Cli unity-profile`이 모듈 하나를 조합 13개로 처음부터 컴파일해 번역 단위 수·CPU 시간·벽시계 시간·최대 메모리 표를 낸다. 실행기에 프로세스 계측(`MeasureProcesses`)을 더했다. CPU·메모리는 Windows 호스트에서만 잰다 |

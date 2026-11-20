@@ -99,6 +99,13 @@ Result<void> MergeBoneHierarchy(const BoneHierarchy& skeleton, const BoneHierarc
         return valid;
     }
 
+    // UE IsCompatibleMesh는 맞는 본이 하나도 없으면(NumOfBoneMatches == 0) 거부하고,
+    // CreateReferenceSkeletonFromMesh도 본이 없으면 만들지 않는다 — 본 없는 메시는 병합하지 않는다.
+    if (mesh.bones.IsEmpty()) {
+        return Mismatch(failure, SkeletonIssue::EmptyMeshHierarchy, SkeletonNoIndex,
+                        SkeletonNoIndex);
+    }
+
     Array<NamedItem> skeletonNames(allocator);
     Array<NamedItem> meshNames(allocator);
     if (auto built = BuildBoneNameTable(skeleton, skeletonNames); !built) {

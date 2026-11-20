@@ -1,0 +1,10 @@
+{
+  "fileVersion": 1,
+  "version": 1,
+  "versionName": "0.1",
+  "friendlyName": "Unreal Exchange",
+  "description": "Imports Unreal exchange bundles (textures, meshes, skeletons, animation clips, materials) written by the RocksExport Unreal Engine plugin.",
+  "category": "Importers",
+  "enabledByDefault": false,
+  "modules": [ { "name": "UnrealExchange", "type": "Developer" } ]
+}

@@ -1,6 +1,6 @@
 # 메시·스켈레톤·애니메이션 에셋 설계
 
-기준일: 2026-11-21, 개정 12(MA3a 구현 — 4.8절·12.6절). 개정 11(MA6a 구현 — 7.5절·12.5절). 개정 10(MA5a 구현 — 6.5절·12.4절). 개정 9(MA3·MA5·MA6을 a·b로 나눔). 개정 8(MA4a 구현 — 6.4절·12.3절). 개정 7(MA2a 구현 — 5.4절·12.2절). 개정 6(MA2a·MA4a 분리). 개정 5(MA1 구현 — 3.7절). 개정 4(MA2 전 결정 반영 — index 형식·통합 bone map·메시 LOD 스트리밍). 개정 3(15절 요구를 다른 문서에 반영하고 상태 열을 더함). 개정 2(교차 검증 반영 — 17절). 정적 메시·스켈레톤·스킨 메시·애니메이션 클립의 에셋 자료구조를 정한다. 범위는 원본 데이터(에디터 데이터), 저장 설정, 빌드 계약, 쿠킹 데이터, 모듈 배치다. [엔진 구현 계획](EngineImplementationPlan.ko.md) 13.1절(StaticMeshAsset)·15절(Skeleton·SkeletalMesh·AnimationClip)의 개요를 구현할 수 있는 수준으로 구체화한다. 텍스처는 [에셋 시스템](AssetSystem.ko.md) 12절, 머티리얼은 [머티리얼 시스템](MaterialSystem.ko.md) 4절이 이미 정했으므로 이 문서는 그 둘을 참조만 한다.
+기준일: 2026-11-21, 개정 13(MA 묶음 리뷰 반영 — 3.7절 12, 5.4절 16·17, 6.4절 6, 7.5절 10, 12·13절). 개정 12(MA3a 구현 — 4.8절·12.6절). 개정 11(MA6a 구현 — 7.5절·12.5절). 개정 10(MA5a 구현 — 6.5절·12.4절). 개정 9(MA3·MA5·MA6을 a·b로 나눔). 개정 8(MA4a 구현 — 6.4절·12.3절). 개정 7(MA2a 구현 — 5.4절·12.2절). 개정 6(MA2a·MA4a 분리). 개정 5(MA1 구현 — 3.7절). 개정 4(MA2 전 결정 반영 — index 형식·통합 bone map·메시 LOD 스트리밍). 개정 3(15절 요구를 다른 문서에 반영하고 상태 열을 더함). 개정 2(교차 검증 반영 — 17절). 정적 메시·스켈레톤·스킨 메시·애니메이션 클립의 에셋 자료구조를 정한다. 범위는 원본 데이터(에디터 데이터), 저장 설정, 빌드 계약, 쿠킹 데이터, 모듈 배치다. [엔진 구현 계획](EngineImplementationPlan.ko.md) 13.1절(StaticMeshAsset)·15절(Skeleton·SkeletalMesh·AnimationClip)의 개요를 구현할 수 있는 수준으로 구체화한다. 텍스처는 [에셋 시스템](AssetSystem.ko.md) 12절, 머티리얼은 [머티리얼 시스템](MaterialSystem.ko.md) 4절이 이미 정했으므로 이 문서는 그 둘을 참조만 한다.
 
 - 배경: 사용자 지시(2026-11-19). 엔진 시험용으로 UE에서 텍스처·정적 메시·머티리얼·애니메이션을 가져오는 기능을 넣는다. Rocks에 메시·애니메이션 자료구조가 아직 없으므로 함께 정한다. 가져오는 경로는 [Unreal 교환 형식](UnrealExchange.ko.md)이 정한다. 이 문서의 자료구조는 그 경로와 상관없이 쓰는 엔진 기반이며, 뒤에 올 glTF·FBX 임포터도 같은 구조로 들어온다.
 - UE 근거: UE 5.8.4(`release`, commit `f45729c0b6f0`, 로컬 클론 `C:\github\UnrealEngine`)를 읽어 확인했다. 경로 약어는 다음과 같다. `E/` = `Engine/Source/Runtime/Engine`, `RT/` = `Engine/Source/Runtime`, `Dev/` = `Engine/Source/Developer`. UE 이름은 대응표와 근거에만 쓰고, 타입 이름은 Rocks 이름으로 짓는다. 빌드 설정·축소 설정처럼 업계 공용 서술 이름은 그대로 쓴다.
@@ -69,7 +69,7 @@
 - 다각형 둘레는 `MeshMinPolygonCorners`(= 3)코너 이상이다. 둘레를 잇는 변은 변 목록에 있어야 한다. 같은 정점 쌍의 변이 둘 이상이면 안 된다. 같은 정점을 잇는 변(정점 쌍이 같음)은 없다. 퇴화 다각형의 둘레는 그 변을 건너뛴다.
 - 다각형 하나의 삼각형 수는 둘레 코너 수 − 2다(구멍 있는 다각형은 받지 않는다. UE도 둘레 하나만 갖는다).
 - 위치는 유한값이어야 한다. 아니면 `InvalidMeshData` 오류다. 속성 값의 비유한값은 3.3절 규칙으로 고친다.
-- 요소 수는 `MeshMaxElements`(= 2^31 − 1) 이하다(번호 계산의 넘침 방지).
+- 요소 수는 `MeshMaxElements`(= 2^31 − 1) 이하다(번호 계산의 넘침 방지). 다각형 묶음 수는 `MeshMaxPolygonGroups`(= 65535) 이하다(3.7절 12 — 묶음 수는 위상·위치 bulk에 묶인 개수가 아니라서 따로 묶는다).
 - 속성 검증은 3.5절이다.
 
 UE의 UV 공유 요소(채널별 UV 정점 — MeshDescription.h:131-149)는 저장하지 않는다. 빌드와 UE 빌더가 쓰는 값은 코너의 UV 속성이고, UV 공유 요소는 UV 편집 도구의 위상 정보라 코너 UV에서 다시 만들 수 있다. UV 편집 도구를 만들 때 다시 검토한다.
@@ -196,6 +196,7 @@ MA1 구현(모듈 `Engine/Source/Runtime/MeshSource`) 중 위 절이 정하지 �
 9. **가변 길이 값의 메모리 형태.** Name·BoneInfluences는 요소마다 (offset, 개수) 범위와 덧붙이기 저장소를 갖는다. 같은 길이 이하로 다시 쓰면 제자리, 더 길면 저장소 끝에 덧붙인다(앞 자리는 Store가 압축할 때까지 남는다). 요소를 하나씩 더하고 값을 순서대로 쓰는 임포트가 O(전체)로 끝나게 하려는 것이다. 버린 대안: 저장 배치 그대로 메모리에 두기(중간 값을 바꾸면 뒤를 모두 옮겨 O(N²)).
 10. **진단.** 실패·경고는 `MeshDiagnostic{code(AssetDiagnosticCode), error, issue(MeshIssue), element, attribute, index, count}`로 돌려준다. `code`가 AssetSystem 4.6절 진단 이름이고 `issue`는 어긴 규칙 하나를 가리키는 세부 분류다(시험이 정확히 그 규칙이 걸렸는지 대조한다). `ToAssetDiagnostic`이 4.6절 `AssetDiagnostic`으로 옮긴다. MA1이 등록한 코드는 `InvalidMeshData`·`NonFiniteAttribute`·`UvOutOfRange`·`NonNormalizedWeights`·`TooManyInfluences`다(나머지 11절 코드는 MA2 이후 단계가 등록한다).
 11. **위상 조회 `MeshTopologyIndex`.** `ValidateMeshSource`를 통과한 메시에서 만든다(통과하지 않은 메시는 계약 위반 — 범위 단언). 다각형 → 삼각형, 묶음 → 다각형, 정점 → 코너·변, 코너 → 삼각형·다각형, 변 → 다각형(퇴화 변은 건너뜀)과 `FindEdge`를 준다. 만들기 실패는 할당 오류뿐이다.
+12. **로드 할당은 bulk 크기에 묶는다(리뷰 반영, 개정 13).** 요소 수 다섯(정점·코너·변·다각형·삼각형)은 위상 blob·`Position` bulk 길이 판정이 할당보다 먼저라 변조된 수가 큰 할당을 만들지 못한다. 그렇지 않던 두 곳을 고쳤다. (1) Name 값 bulk는 값마다 길이 word가 있으므로 N × C × 4 byte보다 짧으면 범위 표를 잡기 전에 `AttributeLength`다(정점 Name 속성은 이름 순서상 `Position`보다 먼저 읽힐 수 있다 — 예: "Alpha"). (2) 다각형 묶음 수는 어느 bulk에도 묶이지 않아(속성 없는 묶음은 bulk가 없다) 크게 써도 로드·검증을 지나고 빌드가 묶음·섹션·위상 표를 그 수만큼 만들었다. 그래서 이름 있는 상한 `MeshMaxPolygonGroups`(65535)를 두고 로드(`ElementCountTooLarge`)와 `AddPolygonGroup`(`CapacityExceeded`)이 지킨다. 묶음은 머티리얼 섹션 하나라 65535는 섹션·슬롯 번호를 16비트로 담는 값이다(UE 고전 정적 메시에는 섹션 수 상한이 없고 Nanite는 64 — NaniteBuilder.h `MaxSectionArraySize`). 버린 대안: `≤ max(다각형 수, 작은 상수)`(빈 묶음을 허용하는 UE 의미와 겹쳐 규칙이 복잡해진다).
 
 ## 4. 메시 공통 설정과 구성 요소
 
@@ -384,6 +385,8 @@ MA2a 구현(모듈 `Engine/Source/Runtime/Mesh`, `Engine/Source/Developer/MeshTo
 13. **결정성.** 빌드 전체를 `RunWithDeterministicFloatingPoint` 안에서 하고(호출 전 FTZ가 켜져 있어도 같은 결과 — 시험), 초월 함수는 Core 결정적 수학만, √는 정확 반올림 명령(`math::Sqrt`)만 쓴다. 스레드를 쓰지 않으므로 12절의 "스레드 수 바꿔서" 시험은 대상이 없어 두지 않는다(스레드를 쓰게 되면 그때 더한다). 11단계는 원본 순서다.
 14. **진단 등록.** `AssetDiagnosticCode`에 `MaterialSlotFallback`·`NegativeBuildScale`(메시)과 `UnsupportedSetting`·`InvalidSetting`(임포트·설정 — 4.6절에 이름만 있던 것)을, `MeshIssue`에 빌드 세부 규칙 넷(`MaterialSlotFallback`·`NegativeBuildScale`·`UnsupportedSetting`·`InvalidBuildScale`)을 더했다. 원본 검증 실패는 `ValidateMeshSource`의 진단 그대로, 할당 실패·용량 초과는 진단 코드 없이 그 오류다.
 15. **시험 도우미.** MA1 퍼저의 무작위 메시 생성기(`RandomFuzzMesh`·`RandomFuzzAttributes`)를 `MeshSourceTestSupport.h`로 옮겨 빌드 퍼징이 같은 생성기를 쓴다(동작 불변 이동).
+16. **겹치는 코너 정렬 키(리뷰 반영, 개정 13).** 처음 구현은 z만으로 정렬해 평면 메시(z가 모두 같다)에서 훑기가 O(n²)였다. UE `FindOverlappingCorners`는 `FIndexAndZ` 키 `0.30X + 0.33Y + 0.37Z`(float, 이 순서의 곱·합 — StaticMeshOperations.cpp)로 정렬하고 키 차가 임계값을 넘으면 끊는다. Rocks도 같은 식·연산 순서의 float 키를 쓰고, 같은 키는 wedge 번호 순으로 끊어 결정적이다(UE는 불안정 정렬이라 같은 키의 순서가 정해지지 않는다). 성분마다 |차| ≤ t인 두 점의 키 차는 계수 합(1.00) × t 이내라 끊는 조건이 일치 쌍을 놓치지 않는다(float 반올림 경계는 UE와 같다). 훑기의 비교 횟수를 내부 표에 세어 평면 대형 격자 시험이 결정적으로 단언한다.
+17. **MikkTSpace 느린 경로 방어와 오브젝트 검사(리뷰 반영, 개정 13).** 느린 경로의 `index2rec` 시작값을 −1 대신 자기 index로 바꿨다(NaN 입력이면 `veq`가 자기 자신과도 거짓이라 아무것도 맞지 않는다 — 그때도 범위 밖 번호를 쓰지 않게). `Rocks.patch`·manifest를 갱신했다. 패치된 mikktspace 오브젝트의 외부 심볼에 CRT 초월 함수·`malloc`이 없는지 보는 오브젝트 검사(DeterministicMath의 `DeterministicMathObjectCheck`와 같은 방식)는 이번에 더하지 않았다: 그 검사는 ToolTests 네이티브 단계의 구성별 compile DB에서만 돌고, mikktspace 번역 단위는 `assert`(구성마다 다른 CRT 심볼 — `_wassert`·`__assert_fail`)와 `sqrtf`를 부르며 같은 폴더의 참조 글루(`MikkTSpaceReference.c`)는 일부러 CRT를 쓰므로, 구성·플랫폼별 허용 목록과 파일 제외 규칙을 따로 세워야 한다. 지금은 패치(정책이 역적용으로 원본 일치를 본다)와 훅 정의가 MeshTools 링크에만 있다는 점(훅이 없으면 링크가 실패한다)으로 지킨다. 물리 쿠킹이 같은 ThirdParty 검사를 필요로 할 때 일반화해 더한다.
 
 ## 6. 스켈레톤과 스킨 메시
 
@@ -444,7 +447,7 @@ MA4a 구현(모듈 `Engine/Source/Runtime/Animation`) 중 6.1·6.2절이 정하�
 3. **pose 정규화(`NormalizeBoneReferencePose`).** 6.1절 "저장 전에 정규화"를 함수로 둔다: 길이² = 1이 아닌 유한 회전을 1/√길이²로 나누고, 길이²가 `BoneRotationMinimumLengthSquared`(1e-8, UE `FQuat::Normalize`의 `UE_SMALL_NUMBER`) 미만이면 단위 회전으로 바꾼다. 비유한 회전은 그대로 둔다(검증이 거부한다). 저장 경로(임포트·병합 저장)가 부르는 것은 MA4b다.
 4. **스켈레톤 불변식(`ValidateSkeleton`).** 계층 다음에 `retargetModes` 길이 = 본 수·값이 열거 안, 가상 본(이름은 "VB " 접두사로 시작하고 접두사보다 길다 — ASCII 대소문자 무시, UE `CheckVirtualBonePrefix`의 `StartsWith` 기본과 같다, 이름이 본·앞 가상 본과 겹치지 않음, (원본, 대상) 쌍이 앞 가상 본과 같지 않음 — UE `AddNewVirtualBone`, 원본·대상은 본 또는 **앞** 가상 본 — 사슬은 되지만 순환은 막는다), 소켓(이름 유일, 본은 원본 본 또는 가상 본, 상대 변환 유한), 커브(이름 유일, `linkedBones`는 원본 본만 — UE `FCurveMetaData::LinkedBones`가 raw 본 참조다), 슬롯 묶음(이름 유일, 슬롯 이름은 모든 묶음을 통틀어 유일 — UE에서 슬롯은 묶음 하나에만 속한다), 리타깃 원본(이름 유일, pose 유한 — 보존 필드라 길이는 보지 않는다) 순이다. `compatibleSkeletons`는 soft 참조라 보지 않는다. 가상 본 접두사는 원문이 필요해 `ValidateSkeleton`만 `NamePool`을 받고, 원문을 읽지 못하면(다른 pool·stale 토큰) 그 pool 오류다.
 5. **진단.** 6.1·6.2절 불변식 위반은 새 코드 `InvalidSkeletonData`(오류 — 11절 표에 더했다)이고, 병합의 부모 사슬 실패는 `SkeletonMismatch`다. 둘을 `AssetDiagnosticCode`에 등록했다. 결과는 `SkeletonDiagnostic{code, error, issue(SkeletonIssue), role(Skeleton·Mesh), index, related}`이고 `ToAssetDiagnostic`이 4.6절 형식(detail = index)으로 옮긴다. 할당 실패는 진단 코드 없이 그 오류다. 버린 대안: 계층 위반도 `SkeletonMismatch`(병합 실패와 입력 손상을 가를 수 없다), `InvalidMeshData`(메시가 아니다).
-6. **병합(`MergeBoneHierarchy`).** UE `MergeBonesToBoneTree`의 기본 경로(부모 사슬 검사 켬 — `a.AllowIncompatibleSkeletalMeshMerge` 끔)를 순수 함수로 옮긴다. 두 입력을 검증하고(진단의 role로 어느 쪽인지), 스켈레톤이 비었으면 결과는 메시 그대로(UE `CreateReferenceSkeletonFromMesh`)다. 아니면 메시 본마다 UE `IsCompatibleMesh`대로 같은 이름 본 또는 스켈레톤에 있는 가장 가까운 메시 조상에서 `DoesParentChainMatch`(부모 이름을 차례로 비교하고 한쪽이 루트에 닿으면 다른 쪽도 루트, 시작 본이 스켈레톤 루트면 두 루트 이름만 비교)를 한다. 실패는 `ParentChainMismatch`(index = 메시 본, related = 대조한 스켈레톤 본), 조상이 하나도 없으면 `MissingAncestor`다. 통과하면 스켈레톤 본을 번호 그대로 두고 없는 메시 본을 메시 순서로 뒤에 더한다(부모 = 메시 부모의 결과 번호 — 부모가 앞이라 늘 있다, pose = 메시 pose). 이미 있는 본은 이름이 대소문자만 다르면(같은 토큰 id, 다른 표시) UE `Rename`처럼 메시 표시와 `exportName`으로 바꾼다(`renamedBones`). UE의 둘째 단계(부모가 바뀐 본 옮기기)는 사슬 검사를 켠 경로에서 일어나지 않으므로 두지 않는다. 결과 본 수가 `MeshMaxBones`를 넘으면 `InvalidSkeletonData`·`TooManyBones`·`CapacityExceeded`다. 결과는 계층 + 메시 본 → 결과 본 대응표(`meshToMerged`)이고, 실패하면 out은 그대로다. `retargetModes` 등 스켈레톤의 본 길이 배열을 늘리는 것과 저장은 MA4b다(새 본의 리타깃 방식은 UE 기본 `Animation`).
+6. **병합(`MergeBoneHierarchy`).** UE `MergeBonesToBoneTree`의 기본 경로(부모 사슬 검사 켬 — `a.AllowIncompatibleSkeletalMeshMerge` 끔)를 순수 함수로 옮긴다. 두 입력을 검증하고(진단의 role로 어느 쪽인지), 메시 본이 없으면 UE처럼 거부한다(`SkeletonMismatch`·`EmptyMeshHierarchy` — UE `IsCompatibleMesh`는 맞는 본이 하나도 없으면 거짓이고 `CreateReferenceSkeletonFromMesh`도 본이 없으면 만들지 않는다, 리뷰 반영 개정 13). 스켈레톤이 비었으면 결과는 메시 그대로(UE `CreateReferenceSkeletonFromMesh`)다. 아니면 메시 본마다 UE `IsCompatibleMesh`대로 같은 이름 본 또는 스켈레톤에 있는 가장 가까운 메시 조상에서 `DoesParentChainMatch`(부모 이름을 차례로 비교하고 한쪽이 루트에 닿으면 다른 쪽도 루트, 시작 본이 스켈레톤 루트면 두 루트 이름만 비교)를 한다. 실패는 `ParentChainMismatch`(index = 메시 본, related = 대조한 스켈레톤 본), 조상이 하나도 없으면 `MissingAncestor`다. 통과하면 스켈레톤 본을 번호 그대로 두고 없는 메시 본을 메시 순서로 뒤에 더한다(부모 = 메시 부모의 결과 번호 — 부모가 앞이라 늘 있다, pose = 메시 pose). 이미 있는 본은 이름이 대소문자만 다르면(같은 토큰 id, 다른 표시) UE `Rename`처럼 메시 표시와 `exportName`으로 바꾼다(`renamedBones`). UE의 둘째 단계(부모가 바뀐 본 옮기기)는 사슬 검사를 켠 경로에서 일어나지 않으므로 두지 않는다. 결과 본 수가 `MeshMaxBones`를 넘으면 `InvalidSkeletonData`·`TooManyBones`·`CapacityExceeded`다. 결과는 계층 + 메시 본 → 결과 본 대응표(`meshToMerged`)이고, 실패하면 out은 그대로다. `retargetModes` 등 스켈레톤의 본 길이 배열을 늘리는 것과 저장은 MA4b다(새 본의 리타깃 방식은 UE 기본 `Animation`).
 7. **결정성.** 검증은 첫 위반 규칙과 위치가 입력만으로 정해지고(이름 중복은 정렬 뒤 가장 작은 두 번째 번호), 병합은 메시 순서를 따르므로 같은 입력이면 같은 결과다. 부동소수점은 정규화의 √ 하나뿐이다(IEEE 정확 반올림). 스레드를 쓰지 않는다.
 8. **시험 환경.** 패키지 왕복은 AssetRuntime 시험의 `AssetEnv`에 `RegisterAnimationTypes`를 더 불러 실제 `Skeleton` 클래스로 한다(새 fixture 모듈을 두지 않는다 — 같은 의존 모듈 타입은 lease로 공유된다).
 
@@ -596,7 +599,7 @@ MA6a 구현(`Animation` 모듈의 클립 클래스·원본·쿠킹 데이터, Co
 7. **원본 검증(`ValidateClipSource`).** 차례로 비율 ≤ `ClipMaxFrameRate`(1000 fps — `FrameRate`는 이미 양수), `frameCount` ≤ `ClipMaxFrames`, 트랙 수 ≤ `MeshMaxBones`, 트랙마다(이름 None 아님, 성분 원소 수 1 또는 키 수, 값 유한, 회전 |길이² − 1| ≤ `BoneRotationNormalizedTolerance`), 이름 중복(Name 비교 규칙 — 두 번째 트랙 번호가 가장 작은 쌍)이다. 순서는 `Store`가 정하므로 보지 않는다(pool이 필요 없다). 위반은 `InvalidClipData`, 할당 실패는 그 오류다. 커브 키(시간 순·유한)는 `TangentCurve` API와 리플렉션 검증 hook이 이미 지키므로 다시 보지 않는다.
 8. **샘플링 규칙(UE `UAnimDataModel::Evaluate`).** 시간 t(초, double)가 0 이하이거나 키가 하나면 키 0, `FrameRate::AsFrameTime(t)`가 마지막 키 이상이면 마지막 키, 아니면 키 = 프레임, α = subframe이다. Step이면 α = 0이고, α < `ClipKeySnapThreshold`(1e-4, UE `KINDA_SMALL_NUMBER`)면 앞 키, α > 1 − 그 값이면 다음 키, 그 밖은 UE `FTransform::Blend`처럼 이동·크기는 선형, 회전은 `FastLerp`(내적 부호로 최단 경로를 고른 nlerp) 뒤 정규화(제곱합 < 1e-8이면 단위)다. 성분이 1키면 그 값이다. **7.4절의 slerp 대신 UE와 같은 nlerp를 쓴다** — UE 평가·재샘플링이 nlerp이고 초월 함수가 없어 결정성도 쉽다.
 9. **쿠킹 변환(`BuildClipPlayback`).** 목표 비율이 원본과 같으면(`FrameRate` ==) 키를 그대로 옮긴다. 다르면 표본 수 N = frameCount × 목표/원본이 정수여야 한다(정수 연산으로 확인 — 아니면 `InvalidClipData`·`IncompatibleTargetFrameRate`. UE는 `ensure`만 하고 내림해 끝 프레임을 잃는다), N ≤ `ClipMaxFrames`이다. 키 k는 목표 비율의 k 프레임 시간(초)에서 8의 규칙(클립 보간 방식)으로 원본을 평가한 값이다(UE도 시간으로 평가한다). 그다음 성분마다 상수 접기를 한다. 트랙은 원본 순서대로 스켈레톤 원본 본 이름(`FindBoneIndex`)과 맞추고 없는 트랙은 뺀다. 원본 본도 가상 본도 아닌 이름은 `UnknownBoneTrack` 경고(index = 원본 트랙), 가상 본 트랙은 경고 없이 뺀다(가상 본은 평가가 계산한다). 커브는 그대로 복사하고, 변환 커브는 쿠킹 v1에 들어가지 않는다(UE는 본 트랙에 bake한다 — bake는 후속) — 사용 중(disabled 아님)인 수를 결과 `skippedTransformCurves`로 돌려준다. 전체를 `RunWithDeterministicFloatingPoint` 안에서 한다.
-10. **쿠킹 bulk 배치.** `tracks` bulk 하나에 트랙마다 원소 수 `uint32` 셋(이동·회전·크기, 각 1 또는 `sampleCount`)과 그 값들을 잇는다(6과 같은 원소 배치). `trackToBone` 길이 = 트랙 수, `sampleCount` = 표본 수(키 수)다. 로드는 배치·길이·값 유한을 보고 어기면 `CorruptPackage`다. 쿠킹 데이터 샘플링은 8과 같은 규칙에 `sampleRate`·`sampleCount`를 쓴다.
+10. **쿠킹 bulk 배치.** `tracks` bulk 하나에 트랙마다 원소 수 `uint32` 셋(이동·회전·크기, 각 1 또는 `sampleCount`)과 그 값들을 잇는다(6과 같은 원소 배치). `trackToBone` 길이 = 트랙 수, `sampleCount` = 표본 수(키 수)다. 로드는 배치·길이·값 유한을 보고 어기면 `CorruptPackage`다. 쿠킹 데이터 샘플링은 8과 같은 규칙에 `sampleRate`·`sampleCount`를 쓴다. 로드 머리 판정의 진단은 규칙마다 다르다: `sampleCount` 0은 `NoSamples`, 프레임 상한 초과는 `TooManyFrames`, 비율 상한 초과는 `FrameRateTooHigh`, `trackToBone` 길이 불일치는 `TrackBoneLength`다(리뷰 반영 개정 13 — 처음엔 모두 `TrackBoneLength`였다). `trackToBone`의 본 번호와 회전 정규화는 스켈레톤을 알아야 하므로 이 로드는 보지 않는다 — 쿠킹 로드(MA6b)가 스켈레톤과 대조하기 전에는 믿을 수 없다(헤더 계약에 적었다).
 11. **클립 검증(`ValidateAnimationClip`).** 에디터 데이터가 있는 클립을 본다(원본 머리·커브 이름(None·중복)·변환 커브 채널 수 + 설정 + 이벤트). 길이 = frameCount / 원본 비율(UE `GetPlayLength`). 이벤트: 시간 유한·[0, 길이], duration 유한·0 이상·끝 ≤ 길이, `triggerChance` ∈ [0, 1], track ≥ 0이고 `eventTracks`가 있으면 그 범위, 정렬(시간 오름차순, 같으면 track 오름차순 — UE `operator<`의 근사 비교 대신 정확 비교). 동기 마커: 이름 None 아님, 시간 [0, 길이], track 규칙 같음, 시간 오름차순(UE `SortSyncMarkers`. UE는 범위 밖을 잘라 넣지만 Rocks는 거부한다). `rateScale` 유한, `basePoseFrame` ≥ 0, 목표 비율(기본·덮어쓰기)이 `ClipMaxFrameRate` 이하. 정렬 도우미 `SortClipEvents`·`SortClipSyncMarkers`(안정 정렬)를 둔다. 쿠킹 클립의 검증은 쿠킹 로드(MA6b)가 한다.
 12. **진단 등록.** `AssetDiagnosticCode`에 `InvalidClipData`·`UnknownBoneTrack`·`EventPropertiesDropped`(임포터가 내는 경고 — MA6b·UX 임포터가 쓴다)를 더했다.
 13. **결정성.** 정렬은 원문 byte·정확 비교로 입력만으로 정해지고, 부동소수점은 √(정확 반올림)와 사칙연산뿐이다. 스레드를 쓰지 않는다.
@@ -687,8 +690,8 @@ AssetSystem 4.6절 진단 표에 등록한다(요구 MR10).
 에셋 시스템 시험 원칙(변조·실패 주입·취소·동시성·퍼징까지 넓게 시험한다)을 따른다.
 
 - **원본 메시**: 위상·속성 불변식별 위반 fixture(번호 범위, 중복 변, 둘레 3 미만, 삼각형 수 불일치, 비유한 위치, offset 비단조, 희소 번호 중복·역순·범위 밖, Name 길이 넘침, 대소문자만 다른 속성 이름, boneIndex 범위 밖). 코너 공유·퇴화 삼각형이 있는 정상 메시. 저장·로드 왕복의 비트 일치. bulk 길이 변조·잘림·SHA 불일치(`CorruptPackage`). 무작위 위상·속성 퍼징(검증이 오류를 내거나 통과하고, 통과한 것은 빌드가 범위 검사 단언에 걸리지 않고 끝남). morph 희소 저장의 `-0.0` 보존.
-- **빌드**: 결정성(같은 입력 두 번, 스레드 수 바꿔서). 용접(속성 하나만 다른 코너는 합치지 않음). 퇴화 삼각형 제거 on/off와 UE 판정식(일직선 위 세 점은 남김). 슬롯 대응·대체 경고. `buildScale` 음수 성분(winding 유지, 경고). MikkTSpace 참조 구현과의 대조(공개 시험 메시, 패치 전후 차이 상한).
-- **스켈레톤·스킨**: 계층 불변식, 병합 성공·부모 사슬 실패, 병합 뒤 클립 재쿠킹(너겟 무효화), 영향 줄이기 결정성(가중치 동률), 정규화 잔차, palette 분할 경계.
+- **빌드**: 결정성(같은 입력 두 번 — 스레드는 쓰지 않으므로 "스레드 수 바꿔서"는 5.4절 13대로 대상이 없다). 용접(속성 하나만 다른 코너는 합치지 않음). 퇴화 삼각형 제거 on/off와 UE 판정식(일직선 위 세 점은 남김). 슬롯 대응·대체 경고. `buildScale` 음수 성분(winding 유지, 경고). MikkTSpace 참조 구현과의 대조(공개 시험 메시, 패치 전후 차이 상한).
+- **스켈레톤·스킨**: 계층 불변식, 병합 성공·부모 사슬 실패, 영향 줄이기 결정성(가중치 동률), 정규화 잔차. "병합 뒤 클립 재쿠킹(너겟 무효화)"은 MA4b·MA6b 시험으로 넘긴다(에셋 DB·쿠커가 필요하다). "palette 분할 경계"는 섹션을 본 수로 나누지 않으므로(RenderBase R18 — 6.3절) 대상이 없다.
 - **클립**: 상수 트랙 접기의 비트 보존, 재샘플링(원본 비율 = 목표 비율이면 키 그대로), 상한 초과, 스켈레톤에 없는 트랙, 커브 왕복, 이벤트 정렬.
 
 ### 12.1 요구 대조표(MA1 — 원본 메시)
@@ -703,7 +706,7 @@ AssetSystem 4.6절 진단 표에 등록한다(요구 MR10).
 | 3.1 둘레 ≥ 3·둘레 변 존재·퇴화 변 건너뜀 | `MeshSource_ValidRejectsBadPolygons`, `MeshSource_ValidAcceptsSharedAndDegenerate` |
 | 3.1 다각형별 삼각형 수·둘레 소속 | `MeshSource_ValidRejectsBadTriangles` |
 | 3.1 위치 유한값(MA-D9) | `MeshSource_ValidRejectsNonFinitePosition` |
-| 3.1 요소 수 ≤ `MeshMaxElements`(경계 포함) | `MeshSource_LoadRejectsFormatFields` |
+| 3.1 요소 수 ≤ `MeshMaxElements`·묶음 수 ≤ `MeshMaxPolygonGroups`(경계 포함, 여섯 종류 모두 큰 할당 없이 — 3.7절 12) | `MeshSource_LoadRejectsFormatFields`, `MeshSource_LoadBoundsElementAllocations` |
 | 3.2 엔진 이름 속성 형태·대소문자·접두 | `MeshSource_ValidRejectsEngineAttributeShapes`, `MeshSource_LoadRejectsCaseOnlyDuplicateNames` |
 | 3.2 기본값(Color 흰색)·속성 추가 규칙 | `MeshSource_AttributeDefaults`, `MeshSource_AddAttributeRejectsBadArguments`, `MeshSource_AddAttributeNamesAreUniquePerElement` |
 | 3.2 스킨 가중치 상한·같은 본·boneIndex 범위 | `MeshSource_ValidRejectsAttributeValues`, `MeshSource_LoadRejectsInfluenceBytes` |
@@ -746,6 +749,8 @@ Coverage(2026-11-20, clang source-based — Rocks.Build `Coverage` 구성, Swift
 
 입력 변조·실패 주입으로 닿을 수 있는 오류 분기는 모두 시험으로 닿게 했다. 측정 중 닿을 수 없음을 확인한 분기는 구조를 고쳤다: 저장 후 정렬 비교의 빈 이름 경로(레코드 이름은 비지 않는다), 64비트에서 늘 거짓인 크기 검사, 저장 경로의 `Invalid` 값 타입 case, 미리 잡은 변 표 삽입의 실패(단언으로), 엔진 규칙의 최소 채널(늘 1 이상), 속성 이름 내용 검사(만드는 두 길이 모두 지킨다 — 3.7절 4).
 
+개정 13(리뷰 반영) 뒤 다시 잰 값: `MeshSource.cpp` 줄 474/488·분기 266/307(`AddPolygonGroup`의 상한 거부가 `MeshMaxPolygonGroups`로 닿게 되어 위 메모리 상한 10개 가운데 하나가 빠졌다), `MeshSourceStorage.cpp` 줄 688/691·분기 339/346(Name 값 bulk 최소 길이 판정 포함, 남은 미달은 위와 같다). MeshTools `MeshOverlappingCorners.cpp`는 줄 76/76·분기 38/38, Animation `SkeletonMerge.cpp`는 줄 133/133·분기 64/64, `ClipPlayback.cpp`는 줄 320/320·분기 154/155(상수 접기 단언)다.
+
 ### 12.2 요구 대조표(MA2a — 정적 메시 빌드 핵심)
 
 시험은 EngineTests의 `StaticMeshBuild_*`(`Engine/Source/Developer/MeshTools/Tests`, 26개)와 Core의 `DeterministicMath_AccuracyAgainstReferenceTables`(Acos 표)·`DeterministicMath_AcosSpecialValuesAndDigest`다. 진단 이름표는 `AssetPackage_DiagnosticNames`·`MeshSource_DiagnosticNames`가 새 코드까지 본다.
@@ -755,7 +760,7 @@ Coverage(2026-11-20, clang source-based — Rocks.Build `Coverage` 구성, Swift
 | 5.2 1단계 원본 검증(실패는 검증 진단 그대로) | `StaticMeshBuild_RejectsInvalidInputs`, `StaticMeshBuild_FuzzSourceMeshes` |
 | 5.2 2단계 값 정리(사본에만, 경고는 원본 속성 번호) | `StaticMeshBuild_SanitizeWarningsUseSourceAttributes`, `StaticMeshBuild_RecomputesOnlyZeroCorners`(NaN 법선) |
 | 5.2 3단계 삼각형 기저(UV 경로·UV 없는 Duff·Frisvad 경로) | `StaticMeshBuild_QuadBasics`, `StaticMeshBuild_TangentsWithoutUvs`, `StaticMeshBuild_AveragedTangentsMatchConvention` |
-| 5.2 4단계 겹치는 코너(위치 임계값 경계 안·밖, 임계값 0) | `StaticMeshBuild_WeldPositionThreshold` |
+| 5.2 4단계 겹치는 코너(위치 임계값 경계 안·밖, 임계값 0, UE 가중합 정렬 키 — 평면 격자 비교 횟수, 5.4절 16) | `StaticMeshBuild_WeldPositionThreshold`, `StaticMeshBuild_OverlapKeySpreadsFlatMeshes` |
 | 5.2 5단계 0 벡터 코너만 재계산·가중 법선·hard edge·대각선 soft·MikkTSpace | `StaticMeshBuild_RecomputesOnlyZeroCorners`, `StaticMeshBuild_WeightedNormals`, `StaticMeshBuild_HardEdgeSplitsNormals`, `StaticMeshBuild_NgonDiagonalsAreSoft`, `StaticMeshBuild_MikkTSpaceMatchesReference` |
 | 5.2 6·7단계 보존 설정 경고 | `StaticMeshBuild_PreservedSettingsWarn` |
 | 5.2 8단계 buildScale(음수 성분 winding 유지·경고 홀짝, 비균일 역전치, 잘못된 값) | `StaticMeshBuild_NegativeBuildScale`, `StaticMeshBuild_NonUniformScaleNormals`, `StaticMeshBuild_RejectsInvalidInputs` |
@@ -809,7 +814,7 @@ Coverage(2026-11-21, clang source-based — `Build/MeasureCoverage.ps1`과 같�
 | 6.1 기준 pose 정규화 | `Skeleton_NormalizeReferencePose` |
 | 6.2 스켈레톤 필드 하나씩 변조 거부(리타깃 방식·가상 본·소켓·커브·슬롯 묶음·리타깃 원본, 다른 pool 이름) | `Skeleton_ValidateRejectsEachField` |
 | 6.2 저장 → 로드 → 재저장 byte 일치, 두 번 쓴 byte 일치(결정성) | `Skeleton_PackageRoundTripResaveIdentical` |
-| 6.2 병합 성공(빈 스켈레톤, 없는 본 더하기·대응표·pose, 대소문자 이름 바꾸기, 결정성) | `Skeleton_MergeIntoEmptySkeleton`, `Skeleton_MergeAddsMissingBones`, `Skeleton_MergeCaseOnlyRename` |
+| 6.2 병합 거부(본 없는 메시 — `EmptyMeshHierarchy`)·병합 성공(빈 스켈레톤, 없는 본 더하기·대응표·pose, 대소문자 이름 바꾸기, 결정성) | `Skeleton_MergeIntoEmptySkeleton`, `Skeleton_MergeAddsMissingBones`, `Skeleton_MergeCaseOnlyRename` |
 | 6.2 부모 사슬 실패(`SkeletonMismatch` — 중간 본 빠짐·조상 사슬 다름·루트 다름) | `Skeleton_MergeRejectsParentChain` |
 | 병합 입력 검증(role)과 결과 상한 | `Skeleton_MergeRejectsInvalidInputs` |
 | 할당 실패 주입(결과 그대로·같은 결과) | `Skeleton_MergeAllocationFailures`, `Skeleton_ValidateAllocationFailures` |
@@ -880,7 +885,7 @@ Coverage(2026-11-21, clang source-based — `Build/MeasureCoverage.ps1`, 필터 
 | 7.5절 8 샘플링 규칙(0 이하·NaN·끝 이후, 선형·nlerp 최단 경로, α 문턱, Step, 상수·1키, 0 길이 회전) | `Clip_SampleSourceRules`, `Clip_SamplePlaybackRules` |
 | 7.5절 9 쿠킹 변환: 원본 비율 = 목표 비율이면 키 그대로(bit), 상수 접기, 트랙 대응·가상 본·`UnknownBoneTrack`, 커브 복사·변환 커브 수, 쿠킹 샘플링 = 원본 샘플링 | `Clip_BuildSameRateKeepsKeys` |
 | 7.5절 9 재샘플링(30 → 60 짝수 표본 = 원본 키, 홀수 = 중간, Step, NTSC, 정수가 아닌 표본 수·상한 초과 `IncompatibleTargetFrameRate`, 0 프레임) | `Clip_BuildResamples` |
-| 7.5절 10 쿠킹 bulk 변조(원소 수, 짧은 bulk, 성분별 비유한, trackToBone 길이, sampleCount 0·상한, 비율 상한, 빈 ref, 트랙 수 상한)와 저장 인자 오류 | `Clip_LoadRejectsPlaybackBytes` |
+| 7.5절 10 쿠킹 bulk 변조(원소 수, 짧은 bulk, 성분별 비유한, trackToBone 길이, sampleCount 0(`NoSamples`)·상한(`TooManyFrames`), 비율 상한(`FrameRateTooHigh`), 빈 ref, 트랙 수 상한)와 저장 인자 오류 | `Clip_LoadRejectsPlaybackBytes` |
 | 7.5절 13 결정성(두 번, 호출 전 FTZ, 비정규 값, 저장 SHA-256) | `Clip_DeterministicBuild`, `Clip_FuzzSources` |
 | 할당 실패 주입(쿠킹 변환·원본·쿠킹 저장·검증·트랙 찾기·원본·쿠킹 로드 — 결과 그대로·같은 결과) | `Clip_AllocationFailures`, `Clip_LoadAllocationFailures` |
 | 고정 seed 퍼징(무작위 원본 300개 — 검증, 쿠킹 불변식, 두 번 변환 일치) | `Clip_FuzzSources` |
@@ -923,14 +928,14 @@ ID는 이 문서가 부여한다(MA). 착수는 사용자가 정하고, 고정 �
 |---|---|---|
 | MA1 | `MeshSource` 모듈: 저장 형식·검증·위상 조회·값 정리, 시험. **구현(2026-11-20, d5405bfa)**: 모듈 `Engine/Source/Runtime/MeshSource`, AssetRuntime `MemoryBulkSource`·메시 진단 코드 5개, 시험 52개 + AssetRuntime 3개(12.1절 대조표·coverage — 줄 99.05%, 분기 94.86%, 닿지 않은 분기는 단언·메모리 상한), 정한 점은 3.7절 | A1(패키지·Bulk) |
 | MA2a | 선행 조건에 기대지 않는 빌드 핵심: `Mesh` 모듈에 빌드 설정 값 타입(`MeshBuildSettings`), `MeshTools` 모듈에 `MeshSource` → 메모리 빌드 결과(렌더 정점·index·섹션·bounds) 순수 함수(5.2절 1–5·8–10·12단계, 6·7·11단계는 후속이라 경고 또는 원본 순서), 용접·퇴화 판정 임계값 상수를 UE 원본으로 확정, MikkTSpace ThirdParty(결정적 수학 패치)와 참조 구현 대조 시험, 필요한 결정적 초월 함수는 Core에 더함. 쿠킹 형식 패킹(13단계)·`StaticMesh` 클래스·슬롯 머티리얼 참조·쿠킹 처리기·임포트 서비스는 MA2b. 슬롯 대응(10단계)은 슬롯 이름 목록만 입력으로 받는다. **구현(2026-11-21, 미커밋)**: 모듈 `Mesh`·`MeshTools`, ThirdParty MikkTSpace(3e895b49d05e + Rocks.patch), Core `deterministic::Acos`, 진단 코드 4개, 시험 26개 + Core 2개(12.2절 대조표·coverage — Mesh·MeshTools 줄 99.7%, 분기 98.5%), 정한 점은 5.4절 | MA1 |
-| MA2b | `StaticMesh` 클래스·슬롯·섹션 정보·소켓, 쿠킹 렌더 데이터 패킹(5.3절), 쿠킹 처리기·임포트 서비스, CoreTypeBindings `Box<double>` 미러(MR8), `IndexFormat` GraphicsTypes 이동 확인(MR7) | MA2a, A2–A4, `Material` 에셋 클래스(MaterialSystem MS3) |
+| MA2b | `StaticMesh` 클래스·슬롯·섹션 정보·소켓, 쿠킹 렌더 데이터 패킹(5.3절), 쿠킹 처리기·임포트 서비스, 로드 경로에서 `ValidateSimpleCollision`·`ValidateSimpleCollisionBulk`를 부른다, CoreTypeBindings `Box<double>` 미러(MR8), `IndexFormat` GraphicsTypes 이동 확인(MR7) | MA2a, A2–A4, `Material` 에셋 클래스(MaterialSystem MS3) |
 | MA3a | 단순 충돌 값 타입(4.6절 `SimpleCollision`·형상 struct·`CollisionComplexity`)과 검증(유한값·양의 크기·볼록 형상 bulk 길이·index 범위), `UnsupportedCollisionShape` 등록 — `Mesh` 모듈, `StaticMesh` 필드 연결은 MA2b. **구현(2026-11-21, 미커밋)**: `Mesh/SimpleCollision.h`(형상 struct 여섯·`CollisionEnabled`·`CollisionComplexity`·`SimpleCollision`, 검증, 볼록 bulk 저장·로드), 진단 코드 `InvalidCollisionData`·`UnsupportedCollisionShape`, 시험 8개(12.6절 대조표·coverage), 시험 fixture `TestCollisionAsset`, 정한 점은 4.8절 | MA2a |
 | MA4a | `Animation` 모듈: `BoneHierarchy`(불변식 검증)·`Skeleton` 에셋 클래스(저장·로드 왕복), 병합 판정 함수(부모 사슬 대조, `SkeletonMismatch`)까지 — 에셋 DB 없이 되는 부분. **구현(2026-11-21, 미커밋)**: 모듈 `Engine/Source/Runtime/Animation`, 진단 코드 `InvalidSkeletonData`·`SkeletonMismatch`, 시험 15개(12.3절 대조표·coverage), 정한 점은 6.4절 | A1 |
-| MA4b | 스켈레톤 임포트 서비스·기존 스켈레톤 병합 저장·너겟 무효화 | MA4a, A2–A4 |
+| MA4b | 스켈레톤 임포트 서비스·기존 스켈레톤 병합 저장·너겟 무효화, 로드 경로에서 `ValidateSkeleton`을 부른다 | MA4a, A2–A4 |
 | MA5a | 스킨 빌드 핵심(순수 함수): `SkinnedMeshBuildSettings`, 원본 스킨 가중치를 렌더 정점까지 옮기기(용접 비교에 영향 포함), 영향 줄이기·8/16비트 정규화(`InfluencesTrimmed`), LOD 통합 bone map·필요 본 목록·inverse-bind 행렬(MA4a `BoneHierarchy`), morph target 희소 변화량 빌드(`morphThresholdPosition`) — 메모리 결과까지. **구현(2026-11-21, 미커밋)**: `Mesh`의 `SkinnedMeshBuildSettings`(리플렉션 파생 struct), `MeshTools`의 `BuildSkinnedMeshLod`·`ReduceBoneInfluences`·`QuantizeSkinWeights8`(5.2절 단계 함수는 공용 파일로 옮김), 진단 코드 `InfluencesTrimmed`·`MissingInfluences`, 시험 16개(12.4절 대조표·coverage), 정한 점은 6.5절 | MA2a, MA4a |
 | MA5b | `SkinnedAsset`·`SkeletalMesh` 클래스, 쿠킹 렌더 데이터 패킹(`SkinnedRenderLod`), 쿠킹 처리기·임포트 서비스, 스켈레톤 병합 저장 연결 | MA5a, MA2b, MA4b |
 | MA6a | 애니메이션 클립 핵심: `AnimationAsset`·`AnimationClip` 클래스(저장·로드 왕복), `ClipSourceData`·이벤트·동기 마커·설정 검증(`InvalidClipData`·`UnknownBoneTrack`), 원본 샘플링, 쿠킹 데이터 v1로 바꾸는 순수 함수(상수 트랙 접기·재샘플링)와 쿠킹 데이터 샘플링, CoreTypeBindings `FrameRate` 미러(MR8). **구현(2026-11-21, 미커밋)**: `Animation`의 `AnimationClip.h`(리플렉션)·`ClipSource.h`(메모리 형태·검증·Load·Store·샘플링·`BuildClipPlayback`), CoreTypeBindings `FrameRate` 미러, 진단 코드 `InvalidClipData`·`UnknownBoneTrack`·`EventPropertiesDropped`, 시험 15개(12.5절 대조표·coverage), 정한 점은 7.5절 | MA4a, Curve 단계(완료) |
-| MA6b | 클립 쿠킹 처리기·임포트 서비스·스켈레톤 병합 뒤 재쿠킹(너겟 무효화) | MA6a, MA4b |
+| MA6b | 클립 쿠킹 처리기·임포트 서비스·스켈레톤 병합 뒤 재쿠킹(너겟 무효화), 로드 경로에서 `ValidateAnimationClip`(에디터)과 쿠킹 데이터의 스켈레톤 대조(`trackToBone` 본 번호 < 스켈레톤 본 수·중복 없음, 회전 키 |길이² − 1| ≤ `BoneRotationNormalizedTolerance`)를 부른다 | MA6a, MA4b |
 | MA7 | 명령행·문서·검증 보고 | MA1–MA6b |
 
 렌더 쪽 소비: Renderer RS0(정적 메시)가 MA2 결과를, RS12(skinned)가 MA5 결과를 쓴다(Renderer 17절 RQ19).
@@ -986,6 +991,8 @@ ID는 이 문서가 부여한다(MA). 착수는 사용자가 정하고, 고정 �
 - 개정 11(2026-11-21): MA6a 구현에서 정한 점을 7.5절에 적었다(파일·의존, `AnimationAsset`과 Build 의존 시점, CoreTypeBindings `FrameRate` 미러와 검증 hook, 플랫폼별 목표 비율 `PlatformFrameRate`, 커브 표시 bool과 변환 커브 채널 배열, 원본 bulk 배치·정렬·상수 접기, 원본 검증, UE `Evaluate`와 같은 샘플링 규칙(7.4절의 slerp를 UE nlerp로 바꿈), 쿠킹 변환의 정수 표본 수·트랙 대응·변환 커브 제외, 쿠킹 bulk 배치, 클립 검증·정렬, 진단 등록, 결정성). 13절 MA6a 상태, 15절 MR8 상태, 12.5절 대조표를 고쳤다.
 
 - 개정 12(2026-11-21): MA3a 구현에서 정한 점을 4.8절에 적었다(형상 struct와 공통 필드·UE 기본값·열거 번호, 크기 규칙(반경·크기 양수, 캡슐 길이 0 허용, 실린더 길이 양수, 유한값), 볼록 형상 bulk 배치와 점 수·index·삼각형 수 상한·transform 규칙, 형상 수 상한, 검증 함수와 새 진단 `InvalidCollisionData`, 임포터의 `UnsupportedCollisionShape` 형식, 결정성). 11절 표에 `InvalidCollisionData`를 더하고 12.6절 대조표, 13절 MA3a 상태를 고쳤다.
+
+- 개정 13(2026-11-21): MA 묶음 리뷰를 반영했다. 원본 로드의 Name 값 bulk 최소 길이 판정과 다각형 묶음 수 상한 `MeshMaxPolygonGroups`(3.1절, 3.7절 12), 겹치는 코너의 UE 가중합 정렬 키(5.4절 16), MikkTSpace 느린 경로의 자기 index 방어와 오브젝트 검사를 미룬 사유(5.4절 17), 본 없는 메시 병합 거부(6.4절 6), 쿠킹 데이터 로드의 규칙별 진단과 신뢰 범위(7.5절 10), 12절 머리 목록(스레드·palette·재쿠킹 항목 정리), 13절 b 단계 행의 로드 경로 검증 항목.
 
 ## 17. 교차 검증 기록(개정 2)
 

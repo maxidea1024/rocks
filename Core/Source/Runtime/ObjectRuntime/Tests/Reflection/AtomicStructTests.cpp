@@ -350,16 +350,18 @@ TEST(AtomicStruct_CoreValueMirrorsAreAtomicExceptTransform) {
          "rocks::core_type_bindings::Transform3dBinding", true},
         {TypeIdOf<Transform>(), NativeTypeKey<Transform>(),
          "rocks::core_type_bindings::TransformBinding", false},
+        {TypeIdOf<FrameRate>(), NativeTypeKey<FrameRate>(),
+         "rocks::core_type_bindings::FrameRateBinding", true},
     };
     constexpr usize MirrorCount = sizeof(mirrors) / sizeof(mirrors[0]);
-    static_assert(MirrorCount == 17, "CoreTypeBindings declares 17 Core value type mirrors");
+    static_assert(MirrorCount == 18, "CoreTypeBindings declares 18 Core value type mirrors");
 
     SystemAllocator allocator;
     TypeRegistry types(allocator);
     {
         ModuleRegistration registration(types, allocator);
         REQUIRE(generated::CoreTypeBindings::RegisterModuleTypes(registration));
-        // 모듈이 값 타입 미러 17종과 InterpCurve 미러 11종(enum 1·키 5·커브 5 — CurveData CV9)을
+        // 모듈이 값 타입 미러 18종과 InterpCurve 미러 11종(enum 1·키 5·커브 5 — CurveData CV9)을
         // 등록한다(표의 ID가 모두 다르고 빠진 미러가 없다).
         constexpr usize InterpCurveMirrorCount = 11;
         CHECK(types.Stats().registeredTypes == MirrorCount + InterpCurveMirrorCount);
@@ -374,7 +376,7 @@ TEST(AtomicStruct_CoreValueMirrorsAreAtomicExceptTransform) {
             atomic += mirror.atomic ? 1 : 0;
         }
 
-        CHECK(atomic == 16);
+        CHECK(atomic == 17);
         {
             auto transform = types.AcquireValueType(TypeIdOf<Transform>(), TypeKind::Struct);
             REQUIRE(transform);

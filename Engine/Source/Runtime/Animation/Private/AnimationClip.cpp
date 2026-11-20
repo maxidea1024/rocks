@@ -225,6 +225,8 @@ const char* ClipIssueName(ClipIssue issue) noexcept {
         return "BulkLength";
     case ClipIssue::TrackBoneLength:
         return "TrackBoneLength";
+    case ClipIssue::NoSamples:
+        return "NoSamples";
     case ClipIssue::InvalidCurveName:
         return "InvalidCurveName";
     case ClipIssue::DuplicateCurve:

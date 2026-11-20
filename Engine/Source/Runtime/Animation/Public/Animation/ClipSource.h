@@ -189,9 +189,15 @@ Result<void> FindUnknownBoneTracks(const ClipSource& source, const Skeleton& ske
 Result<void> StoreClipPlayback(const ClipPlayback& playback, MemoryBulkSource& bulk,
                                ClipPlaybackData& data) noexcept;
 
-// data를 package에서 읽어 out을 다시 만든다(배치·길이·값 유한·sampleCount ≥ 1을 본다). 오류: 위반은
-// CorruptPackage·InvalidArgument(issue로 규칙), bulk를 못 읽으면 그 오류, 할당 실패는 그 오류다.
-// 실패하면 out은 그대로다.
+// data를 package에서 읽어 out을 다시 만든다(배치·길이·값 유한, sampleCount 1–ClipMaxFrames + 1,
+// 비율 ≤ ClipMaxFrameRate, trackToBone 길이 = 트랙 수를 본다). 오류: 위반은
+// CorruptPackage·InvalidArgument (issue로 규칙 —
+// NoSamples·TooManyFrames·FrameRateTooHigh·BulkLength·TrackKeyCount·NonFiniteKey·
+// TrackBoneLength·TooManyTracks), bulk를 못 읽으면 그 오류, 할당 실패는 그 오류다. 실패하면 out은
+// 그대로다.
+//
+// 신뢰 범위: trackToBone의 본 번호(스켈레톤 본 수 미만·중복 없음)와 회전 키 정규화는 여기서 보지
+// 않는다 — 스켈레톤을 알아야 하므로 쿠킹 로드(MA6b)가 스켈레톤과 대조한 뒤에야 믿을 수 있다.
 Result<void> LoadClipPlayback(const ClipPlaybackData& data, const Package& package,
                               ClipPlayback& out, ClipDiagnostic* failure = nullptr) noexcept;
 

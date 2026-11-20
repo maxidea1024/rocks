@@ -1,3 +1,4 @@
+using Rocks.Build.Descriptors;
 using Rocks.Build.Rules;
 
 // Engine module test executable target. Foundation tests up to the Object family; Core tests only the lower modules without Object.
@@ -26,6 +27,9 @@ public sealed class EngineTestsTarget : TargetRules
     public override TargetType Type => TargetType.Program;
 
     public override IReadOnlyList<string> Modules => ["EngineTests", .. LaunchTestPrograms.Names];
+
+    // Engine plugins whose module tests EngineTests runs (FoundationTests.Build.cs PluginTestModules, Docs/Design/BuildTargets.ko.md section 3.9 BD40).
+    public override IReadOnlyList<PluginReference> Plugins => [new("UnrealExchange", true)];
 
     public override bool CheckPublicHeaders => true;
 

@@ -253,6 +253,13 @@ internal static class InputValidation
                 "needs the Modular module entry points and build information placement (BuildTargets BS8d, ModuleLoader ML4); use Monolithic.");
         }
 
+        // 켠 플러그인 모듈의 공유 라이브러리 위치(플러그인 Binaries manifest)는 ML4다(Docs/Design/BuildTargets.ko.md 3.9절 BD41).
+        if (request.Modules.FirstOrDefault(module => module.PluginModules.Count != 0) is { } host)
+        {
+            throw new ArgumentException($"Module {host.Name}: Modular linking of a target that enables plugins is not supported until the plugin " +
+                "binary manifest (ModuleLoader ML4); use Monolithic.");
+        }
+
         // 미리 빌드한 라이브러리만 있는 모듈(설치 SDK 모듈)은 아직 공유 라이브러리로 나르지 않는다.
         if (request.Modules.FirstOrDefault(module => !module.ThirdParty && module.PrebuiltLibraries.Count != 0) is { } prebuilt)
         {
@@ -316,6 +323,40 @@ internal static class InputValidation
         }
 
         ValidateDynamicModules(modules, byFolded);
+        ValidatePluginModules(modules, byFolded);
+    }
+
+    // 실행 파일에 링크할 켠 플러그인 모듈 목록(NativeModuleInput.PluginModules — Docs/Design/BuildTargets.ko.md 3.9절 BD36)이다. 빌드가
+    // 주 실행 파일에만 채운다. 표에 있는 라이브러리 모듈을 정확한 철자로 한 번씩 가리켜야 한다.
+    private static void ValidatePluginModules(IReadOnlyList<NativeModuleInput> modules, Dictionary<string, string> byFolded)
+    {
+        var kinds = new Dictionary<string, NativeModuleKind>(StringComparer.OrdinalIgnoreCase);
+        foreach (NativeModuleInput module in modules)
+        {
+            kinds.TryAdd(module.Name, module.Kind);
+        }
+
+        foreach (NativeModuleInput module in modules.Where(module => module.PluginModules.Count != 0))
+        {
+            if (module.Kind != NativeModuleKind.Executable)
+            {
+                throw new ArgumentException($"Module {module.Name}, PluginModules: only an executable links plugin modules.");
+            }
+
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string plugin in module.PluginModules)
+            {
+                if (!byFolded.TryGetValue(plugin, out string? actual) || !string.Equals(actual, plugin, StringComparison.Ordinal))
+                {
+                    throw new ArgumentException($"Module {module.Name}, PluginModules: unknown module {plugin}.");
+                }
+
+                if (!seen.Add(plugin) || kinds[plugin] == NativeModuleKind.Executable)
+                {
+                    throw new ArgumentException($"Module {module.Name}, PluginModules: {plugin} is listed twice or is an executable.");
+                }
+            }
+        }
     }
 
     // 실행 중 적재 모듈 목록(NativeModuleInput.DynamicModules — Docs/Design/ModuleLoader.ko.md 3.8절 MD11)이다. 표에 있는 라이브러리 모듈을

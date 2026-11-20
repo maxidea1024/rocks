@@ -3,7 +3,7 @@ namespace Rocks.Build;
 /// <summary>
 /// 실행 파일이 링크하는 모듈 집합이다(Docs/Design/ModuleLoader.ko.md 3.8절, Monolithic). 링크 의존(두 의존 목록 —
 /// <see cref="NativeModuleInput.AllDependencies"/>) 폐포에, 그 폐포의 모듈(과 이어서 더해진 모듈)이 <see cref="NativeModuleInput.DynamicModules"/>로 둔 모듈과 그 링크 폐포를 더한다.
-/// 동적 관계는 순환 검사의 참조 사슬이 아니므로(UE와 같다) 이미 닿은 모듈로 돌아가는 관계는 건너뛴다. 이름을 모르는 모듈은 건너뛴다
+/// 실행 파일은 링크 폐포 뒤에 켠 플러그인 모듈(<see cref="NativeModuleInput.PluginModules"/>)과 그 링크 폐포를 링크한다. 동적 관계는 순환 검사의 참조 사슬이 아니므로(UE와 같다) 이미 닿은 모듈로 돌아가는 관계는 건너뛴다. 이름을 모르는 모듈은 건너뛴다
 /// (그 오류는 입력 검사·액션 그래프가 알린다).
 /// </summary>
 public static class LinkClosure
@@ -66,6 +66,13 @@ public static class LinkClosure
             Visit(dependency);
         }
 
+        // 실행 파일에 링크하는 켠 플러그인 모듈(Docs/Design/BuildTargets.ko.md 3.9절 BD36)은 링크 폐포 뒤, 동적 모듈 앞이다. 링크하므로
+        // 요청 시 적재 행이 아니다.
+        foreach (string plugin in rootModule.PluginModules)
+        {
+            Visit(plugin);
+        }
+
         linked = order.Count;
         // 동적 모듈은 링크 폐포를 다 모은 뒤에 더한다. 더해진 모듈의 동적 모듈도 따라간다(목록이 자라는 동안 끝까지 돈다). index -1은
         // root 자신의 동적 모듈이다.
@@ -82,7 +89,7 @@ public static class LinkClosure
     }
 
     /// <summary>
-    /// roots에서 링크 의존과 동적 모듈 관계로 닿는 모듈 이름 집합이다(빌드 대상·메타데이터·검사 범위·설치 SDK). 이름을 모르는 모듈은
+    /// roots에서 링크 의존·실행 파일의 플러그인 모듈(<see cref="NativeModuleInput.PluginModules"/>)·동적 모듈 관계로 닿는 모듈 이름 집합이다(빌드 대상·메타데이터·검사 범위·설치 SDK). 이름을 모르는 모듈은
     /// unknown(모르는 이름, 그 이름을 가리킨 모듈 — roots면 null)을 부르고 건너뛴다. unknown이 null이면 조용히 건너뛴다. 이름 비교는
     /// 대소문자를 무시한다(액션 그래프와 같다).
     /// </summary>
@@ -105,7 +112,7 @@ public static class LinkClosure
                 continue;
             }
 
-            foreach (string next in module.AllDependencies.Concat(module.DynamicModules).Reverse())
+            foreach (string next in module.AllDependencies.Concat(module.PluginModules).Concat(module.DynamicModules).Reverse())
             {
                 pending.Push((next, module.Name));
             }

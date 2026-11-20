@@ -1,5 +1,5 @@
 diff --git a/mikktspace.c b/mikktspace.c
-index 0342ae0..692d062 100644
+index 0342ae0..dcfc91b 100644
 --- a/mikktspace.c
 +++ b/mikktspace.c
 @@ -30,6 +30,26 @@
@@ -197,7 +197,18 @@ index 0342ae0..692d062 100644
  	for (t=0; t<iNrTrianglesIn; t++)
  	{
  		for (i=0; i<3; i++)
-@@ -753,7 +773,11 @@ static void GenerateSharedVerticesIndexListSlow(int piTriList_in_and_out[], cons
+@@ -741,7 +761,9 @@ static void GenerateSharedVerticesIndexListSlow(int piTriList_in_and_out[], cons
+ 			const SVec3 vT = GetTexCoord(pContext, index);
+ 
+ 			tbool bFound = TFALSE;
+-			int t2=0, index2rec=-1;
++			/* Rocks modification: start from the vertex itself so that a vertex no comparison matches (a NaN position,
++			 * normal or texcoord makes veq fail even against itself) keeps its own index instead of -1. */
++			int t2=0, index2rec=index;
+ 			while (!bFound && t2<=t)
+ 			{
+ 				int j=0;
+@@ -753,7 +775,11 @@ static void GenerateSharedVerticesIndexListSlow(int piTriList_in_and_out[], cons
  					const SVec3 vT2 = GetTexCoord(pContext, index2);
  					
  					if (veq(vP,vP2) && veq(vN,vN2) && veq(vT,vT2))
@@ -209,7 +220,7 @@ index 0342ae0..692d062 100644
  					else
  						++j;
  				}
-@@ -762,7 +786,6 @@ static void GenerateSharedVerticesIndexListSlow(int piTriList_in_and_out[], cons
+@@ -762,7 +788,6 @@ static void GenerateSharedVerticesIndexListSlow(int piTriList_in_and_out[], cons
  
  			assert(bFound);
  			// if we found our own
@@ -217,7 +228,7 @@ index 0342ae0..692d062 100644
  
  			piTriList_in_and_out[offs] = index2rec;
  		}
-@@ -1048,14 +1071,14 @@ static void InitTriInfo(STriInfo pTriInfos[], const int piTriListIn[], const SMi
+@@ -1048,14 +1073,14 @@ static void InitTriInfo(STriInfo pTriInfos[], const int piTriListIn[], const SMi
  	
  	// match up edge pairs
  	{
@@ -234,7 +245,7 @@ index 0342ae0..692d062 100644
  		}
  	}
  }
-@@ -1202,7 +1225,7 @@ static tbool GenerateTSpaces(STSpace psTspace[], const STriInfo pTriInfos[], con
+@@ -1202,7 +1227,7 @@ static tbool GenerateTSpaces(STSpace psTspace[], const STriInfo pTriInfos[], con
  	STSpace * pSubGroupTspace = NULL;
  	SSubGroup * pUniSubGroups = NULL;
  	int * pTmpMembers = NULL;
@@ -243,7 +254,7 @@ index 0342ae0..692d062 100644
  	for (g=0; g<iNrActiveGroups; g++)
  		if (iMaxNrFaces < pGroups[g].iNrFaces)
  			iMaxNrFaces = pGroups[g].iNrFaces;
-@@ -1210,19 +1233,18 @@ static tbool GenerateTSpaces(STSpace psTspace[], const STriInfo pTriInfos[], con
+@@ -1210,19 +1235,18 @@ static tbool GenerateTSpaces(STSpace psTspace[], const STriInfo pTriInfos[], con
  	if (iMaxNrFaces == 0) return TTRUE;
  
  	// make initial allocations
@@ -269,7 +280,7 @@ index 0342ae0..692d062 100644
  	for (g=0; g<iNrActiveGroups; g++)
  	{
  		const SGroup * pGroup = &pGroups[g];
-@@ -1307,16 +1329,16 @@ static tbool GenerateTSpaces(STSpace psTspace[], const STriInfo pTriInfos[], con
+@@ -1307,16 +1331,16 @@ static tbool GenerateTSpaces(STSpace psTspace[], const STriInfo pTriInfos[], con
  			if (!bFound)
  			{
  				// insert new subgroup
@@ -291,7 +302,7 @@ index 0342ae0..692d062 100644
  					return TFALSE;
  				}
  				pUniSubGroups[iUniqueSubGroups].iNrFaces = iMembers;
-@@ -1352,14 +1374,13 @@ static tbool GenerateTSpaces(STSpace psTspace[], const STriInfo pTriInfos[], con
+@@ -1352,14 +1376,13 @@ static tbool GenerateTSpaces(STSpace psTspace[], const STriInfo pTriInfos[], con
  
  		// clean up and offset iUniqueTspaces
  		for (s=0; s<iUniqueSubGroups; s++)
@@ -310,7 +321,7 @@ index 0342ae0..692d062 100644
  
  	return TTRUE;
  }
-@@ -1414,7 +1435,7 @@ static STSpace EvalTspace(int face_indices[], const int iFaces, const int piTriL
+@@ -1414,7 +1437,7 @@ static STSpace EvalTspace(int face_indices[], const int iFaces, const int piTriL
  			// weight contribution by the angle
  			// between the two edge vectors
  			fCos = vdot(v1,v2); fCos=fCos>1?1:(fCos<(-1) ? (-1) : fCos);
