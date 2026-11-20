@@ -6,6 +6,8 @@
 #include <Core/Math/Transform.h>
 #include <Core/Math/Vector2.h>
 #include <Core/Math/Vector4.h>
+#include <Core/Result.h>
+#include <Core/Time/FrameRate.h>
 #include <Meta/Annotations.h>
 
 // Core 값 타입의 리플렉션 미러 선언이다(Docs/Design/ReflectionFoundations.ko.md 4.5절, UE
@@ -177,6 +179,24 @@ struct Transform3dBinding {
     ROCKS_PROPERTY() Quatd rotation;
     ROCKS_PROPERTY() Vec3d translation;
     ROCKS_PROPERTY() Vec3d scale = Vec3d::One();
+};
+
+// 프레임 속도(rocks::FrameRate — UE FFrameRate)다. 초당 numerator / denominator 프레임이고 두 값은
+// 양수다. Core FrameRate의 private 멤버를 GeneratedType friend로 읽고 쓰며(InterpCurve 미러와 같은
+// 방식), 도구 이름은 UE와 같은 numerator·denominator다. 검증 hook Validate가 0·음수 값을 거부한다
+// (FrameRate::TryCreate와 같은 불변식 — Docs/Design/MeshAnimationAssets.ko.md 7.5절 3).
+ROCKS_STRUCT(Binds = "rocks::FrameRate", Atomic, Version = 1)
+struct FrameRateBinding {
+    ROCKS_PROPERTY(Name = "numerator") int32 numerator_ = 60000;
+    ROCKS_PROPERTY(Name = "denominator") int32 denominator_ = 1;
+
+    static Result<void> Validate(const FrameRate& rate) noexcept {
+        if (rate.Numerator() <= 0 || rate.Denominator() <= 0) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        return Result<void>::Success();
+    }
 };
 
 } // namespace rocks::core_type_bindings

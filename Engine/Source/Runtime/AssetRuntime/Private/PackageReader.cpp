@@ -846,6 +846,12 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "InvalidSkeletonData";
     case AssetDiagnosticCode::SkeletonMismatch:
         return "SkeletonMismatch";
+    case AssetDiagnosticCode::InvalidClipData:
+        return "InvalidClipData";
+    case AssetDiagnosticCode::UnknownBoneTrack:
+        return "UnknownBoneTrack";
+    case AssetDiagnosticCode::EventPropertiesDropped:
+        return "EventPropertiesDropped";
     }
 
     return "Unknown";
