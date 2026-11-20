@@ -1,13 +1,13 @@
 # Clang 버전 지원 설계
 
-기준일: 2026-11-20, 개정 8. Clang 22가 JSON AST에서 `ElaboratedType`을 없애, MetaCompiler가 읽던 타입 철자가 바뀌었다. 이 문서는 두 가지를 정한다.
+기준일: 2026-11-20, 개정 9. Clang 22가 JSON AST에서 `ElaboratedType`을 없애, MetaCompiler가 읽던 타입 철자가 바뀌었다. 이 문서는 두 가지를 정한다.
 - **정규 형식 탐침**: MetaCompiler가 타입 철자를 첫 실행 JSON의 `qualType`·`desugaredQualType`에서 읽지 않고, Clang이 출력한 정규 형식(완전 한정 철자)으로 읽게 한다. 그러면 Clang 21과 22의 AST 모양 차이가 철자에 닿지 않는다.
 - **도구 모음 버전 정책**: 검증한 LLVM 버전, `ROCKS_MSVC_TOOLSET`, `Build/InstallLlvm.ps1`, CI, 그리고 MSVC 14.44 고정을 언제 푸는지.
 
 배경:
 - GitHub `windows-latest` 이미지(windows-2025-vs2026, 20261116)가 MSVC 14.52로 올라갔다. 그 STL은 Clang 22 미만을 `STL1000`으로 거부하고, 이미지의 LLVM은 20.1.8이다.
 - a0704772가 CI를 MSVC 14.44(`ROCKS_MSVC_TOOLSET` → VsDevCmd `-vcvars_ver`)와 LLVM 21.1.6(`Build/InstallLlvm.ps1`)으로 고정해 피했다. LLVM 22.1.8로 올린 CI 실행은 MetaCompiler에서 `DeviceProfileSettings.h:37: error RMC2000: rocks::config::DeviceCondition::trait: unsupported field type 'String'`으로 멈췄다.
-- macOS는 Apple clang 17.0.0(Xcode 16, macOS 15 이미지), Android는 NDK r29 clang(`clang version 20.0.0`, r547379)을 쓴다. 이 둘은 Clang 22보다 오래된 AST 모양이다. 그래서 한동안 두 모양을 함께 받아야 한다.
+- macOS는 Apple clang 17.0.0(Xcode 16, macOS 15 이미지), Android는 NDK r29 clang을 쓴다(개정 1 실측은 로컬 r29-beta1의 `clang version 20.0.0`(r547379)이고, CI에 고정한 정식 29.0.14206865는 `clang version 21.0.0`(r563880c)이다 — 개정 9). 이 둘은 Clang 22보다 오래된 AST 모양이다. 그래서 한동안 두 모양을 함께 받아야 한다.
 
 다른 문서와의 관계:
 - [리플렉션 기반](ReflectionFoundations.ko.md) 1.3절(합성 번역 단위), 2.4절(NATIVE 재귀 검사), 4.6절(Binds 철자 해석)의 구현 방식을 바꾼다. 규칙(무엇을 거부하는지)은 바꾸지 않는다.
@@ -17,7 +17,7 @@
 
 측정 도구 모음: LLVM 21.1.6·22.1.8 공식 Windows x64 배포(설치 파일을 풀어 씀), 로컬 MSVC 14.29(Visual Studio 2019 STL), clang-format 21.1.6. UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`)의 UnrealBuildTool·UnrealHeaderTool이다. UE 이름은 12절 대응표에만 적는다.
 
-상태: **구현 완료**(결정 CLGD1–CLGD15, 권장안으로 확정). 구현 단계 CLG0–CLG4(10절)를 모두 engine-runtime에 병합했다: CLG0–CLG2(53bce26c), CLG1·CLG2 리뷰 반영(개정 4, 7ee2b0d5), CLG3(개정 5, c4c0a535)과 리뷰 반영(개정 6, 7325c337), CI의 Android NDK 고정(개정 7, f17e6501), CLG4(개정 8). 구현하며 정한 점은 14절 개정 3·5·6·7·8이다. 시제품(커밋하지 않음)으로 실제 헤더에서 확인한 측정은 1.4절이다. 개정 2는 리뷰어 교차 검증(Clang 21.1.6·22.1.8 양쪽 탐침)을 적용했다.
+상태: **구현 완료(CI 확인 대기)**(결정 CLGD1–CLGD15, 권장안으로 확정). 8절 CLG4의 완료 기준(CI 전체 통과)은 CLG4 `[ci]` 실행이 끝나면 확인한다. 구현 단계 CLG0–CLG4(10절)를 모두 engine-runtime에 병합했다: CLG0–CLG2(53bce26c), CLG1·CLG2 리뷰 반영(개정 4, 7ee2b0d5), CLG3(개정 5, c4c0a535)과 리뷰 반영(개정 6, 7325c337), CI의 Android NDK 고정(개정 7, f17e6501), CLG4(개정 8)와 그 리뷰 반영(개정 9). 구현하며 정한 점은 14절 개정 3·5·6·7·8·9이다. 시제품(커밋하지 않음)으로 실제 헤더에서 확인한 측정은 1.4절이다. 개정 2는 리뷰어 교차 검증(Clang 21.1.6·22.1.8 양쪽 탐침)을 적용했다.
 
 ## 1. 현재 상태와 측정
 
@@ -296,7 +296,7 @@ NATIVE 멤버의 강한 참조(RMC2205)·WorldOnly 소유자 형질(RMC2206) 재
 | Windows(로컬·CI (가) leg) | LLVM 21.1.6 clang-cl, MSVC 14.44 | 이전 | CLG4까지 |
 | Windows(CI (나) leg, 이미지 기본 MSVC 14.52) | LLVM 22.1.8 clang-cl | 새 | CLG1+CLG2 병합부터 둘째 leg, CLG4부터 검증 도구 모음 |
 | macOS(CI) | Apple clang 17.0.0(Xcode 16) | 이전 | Xcode가 LLVM 22 기반으로 올라갈 때까지 |
-| Android(CI 없음) | NDK r29 clang 20.0.0 | 이전(실측: 1.1절 시험 파일의 JSON과 탐침 출력이 21.1.6과 같다) | NDK가 Clang 22로 올라갈 때까지 |
+| Android(CI 없음) | NDK r29-beta1 clang 20.0.0(개정 1 실측), CI에 고정한 29.0.14206865는 clang 21.0.0 | 이전(실측: 1.1절 시험 파일의 JSON과 탐침 출력이 21.1.6과 같다) | NDK가 Clang 22로 올라갈 때까지 |
 
 정규 형식 탐침 뒤에는 형식 철자가 모양과 무관하므로 MetaCompiler에 버전별 분기를 두지 않는다. 버전 차이는 4.6절의 구조 읽기에만 남는다.
 
@@ -317,8 +317,8 @@ NATIVE 멤버의 강한 참조(RMC2205)·WorldOnly 소유자 형질(RMC2206) 재
 | `llvm.windows.version`, `llvm.windows.installers`(버전별 설치 파일 SHA-256) | 22.1.8 | `InstallLlvm.ps1`, CI |
 | `clangFormat.version` | 21.1.6 | `InstallFormatter.ps1`(wheel URL·SHA-256 표는 스크립트에 두고 버전이 표와 같은지 확인한다), `FormatCheck`, MetaCompiler RMC3100 |
 | `clang.minimum.appleClang` | 17 | Rocks.Build 도구 모음 확인(첫 줄이 `Apple clang version`인 컴파일러) |
-| `clang.minimum.llvm`(플랫폼별) | Windows 21, macOS 21, Android 20(NDK r29 — Android 빌드 CI가 없으므로 검증 목록 없이 최소만 둔다) | Rocks.Build 도구 모음 확인(그 밖의 Clang — 공식 배포·Homebrew·NDK·포크) |
-| `android.ndk.version` | 29.0.14206865(r29, `clang version 21.0.0`, r563880c — 로컬 실측) | CI의 NDK 고르기(`Build/SelectAndroidNdk.ps1`) |
+| `clang.minimum.llvm`(플랫폼별) | Windows 21, macOS 21, Android 20(r29-beta1의 clang 20.0.0까지 받는다 — Android 빌드 CI가 없으므로 검증 목록 없이 최소만 둔다) | Rocks.Build 도구 모음 확인(그 밖의 Clang — 공식 배포·Homebrew·NDK·포크) |
+| `android.ndk.version` | 29.0.14206865(r29, `clang version 21.0.0`, r563880c — 로컬 실측) | CI의 NDK 고르기(`Build/SelectAndroidNdk.ps1`), 최소 미만 NDK의 거부 문구(`ToolchainCheck` — 이 버전과 `ANDROID_NDK_HOME`·`--android-ndk`를 안내) |
 | `clang.verified`(플랫폼별 목록, CI가 있는 플랫폼만) | 정규화한 `--version` 첫 줄 전체: Windows `clang version 22.1.8 (ca7933e47d3a3451d81e72ac174dcb5aa28b59d1)`, macOS `Apple clang version 17.0.0 (clang-1700.0.13.5)` | build-evidence 기록, CI 거부 |
 
 CLG4 전에는 Windows `llvm.windows.version`이 21.1.6이고 `clang.verified`에 `clang version 21.1.6`(공식 배포는 괄호를 내지 않는다)도 있다. MSVC 도구 모음별 최소 Clang은 표에 두지 않는다(6.2절 — 고른 도구 모음의 STL 헤더에서 읽는다). CI의 MSVC 고정값도 표에 두지 않고 CI 행렬 한 곳에 둔다(행렬 값은 정적이어야 한다, 개정 5).
@@ -415,7 +415,8 @@ CLG1만으로도 Clang 22 빌드는 통과하지만 NATIVE 재귀가 조용히 �
 - **레코드 닫힘이 따라가지 못하는 것.** 부를 수 없는 특수화(4.4절 열쇠 — 템플릿 템플릿 인자, `auto` NTTP, 바깥 클래스 템플릿 매개변수에 기대는 NTTP 형식), 이름 없는 struct를 가리키는 포인터, base가 있는 이름 없는 struct 멤버에 닿으면 cannot verify로 거부한다. 조용히 받지 않는 대신 그런 형식을 NATIVE로 값으로 담은 헤더는 바꿔야 한다.
 - **명시적 인스턴스화의 면제 범위.** 접근 검사 면제는 명시적 인스턴스화 선언의 이름에만 적용된다. 탐침 템플릿 본문(`RocksCanonBase`의 `static_assert`)은 템플릿 매개변수만 쓰므로 접근 문제가 없다.
 - **확인하지 못한 것.**
-  - MSVC 14.52 STL + Clang 22, Clang 22의 Development·Release·Asan 구성, macOS·Android에서의 탐침(CLG1+CLG2 병합의 CI가 앞의 둘과 macOS를 확인한다).
+  - Android에서의 탐침(Android 빌드 CI가 없다). MSVC 14.52 STL + Clang 22와 Clang 22의 Debug·Asan·Release는 CLG1+CLG2 병합 뒤 CI의 LLVM 22 갈래가, macOS는 macOS 갈래가 확인했다(개정 9).
+  - `ROCKS_MSVC_TOOLSET`의 VsDevCmd `-vcvars_ver` 경로는 CLG4 뒤 CI에서 돌지 않는다(로컬에서 나란히 설치된 도구 모음을 고를 때만 쓴다). 값 형식과 만든 환경의 `VCToolsVersion` 불일치 판정은 Rocks.Build.Tests가 본다.
   - 개정 2 방식(4.3절의 `TypeSpelling` 식별자·`IsSameV` 확인·2로 다시 묻기, 4.4절의 특수화 노드 색인·정규 철자 열쇠·`IsClassV` 거부·판정 형판 재사용)은 작은 시험 파일로만 확인했고 시제품에는 없다.
   - 리플렉션 타입에 같은 식별자 base가 둘인 경로: 시제품은 RMC2001로 멈출 뿐 2로 다시 묻는 것을 실제 헤더에서 재지 않았다(1.4절의 실측이 아니다).
   - 배열 원소 진단의 철자.
@@ -481,3 +482,4 @@ UE와 다르게 정한 점:
 | 6(리뷰 반영) | 2026-11-20 | CLG3 리뷰 반영. (가) 검증 목록은 정규화한 `--version` 첫 줄 전체로 대조하고, 최소 Clang은 제조사로 나눈다(`clang.minimum.appleClang`, `clang.minimum.llvm` — 6.1절). (나) `--require-verified-toolchain` 판정을 Rocks.Build(`ToolchainCheck.RequireVerified`·`Enforce`)로 옮겨 on·off·틀린 값을 Rocks.Build.Tests가 보고, 통합 시험이 SDK 도구의 표 리소스와 `game --require-verified-toolchain on`을 본다. (다) 미검증 실패는 build-evidence를 시작하고 `toolchainVerified`를 적은 뒤 확인해 FAIL evidence로 끝낸다. 게임 evidence에도 `toolchainVerified`·`stlClangCheck`를 싣는다. (라) Rocks.Build.Tests는 발견한 도구 모음의 `ToolchainVerified`가 표 판정과 같은지만 단언한다(로컬 도구 모음이 미검증이어도 깨지지 않는다). (마) `yvals_core.h`를 읽지 못하거나(입출력 오류 포함) 조건을 찾지 못하면 evidence `stlClangCheck`에 이유를 남기고, 조건 정규식은 `#error STL1000` 줄까지 묶는다(6.2절). (바) 6.1절 표·6.2절·8절을 개정 5 결정에 맞췄다. (사) clang-format 버전 판정은 `ToolchainTable.IsClangFormatVersion` 하나로 `FormatCheck`와 MetaCompiler RMC3100이 함께 쓴다(`version 21.1.60`을 받지 않는다). (아) 빌드 안내와 `Programs/Rocks.Build/README.ko.md`에 `Build/Toolchain.json`과 `RequireVerifiedToolchain`·`--require-verified-toolchain`을 적었다. (자) CLG3 검증에서 드러난 출력 게시 실패(CLG3과 무관): 컴파일 action의 출력 게시(`Executor.PublishOutputs`)가 대상 .obj를 다른 핸들(백신·인덱서)이 열고 있으면 경로 없는 "Access to the path is denied"로 실패했다. 게시 실패는 단계와 경로를 담은 오류("Cannot publish 원본 -> 대상")로 감싸고, Windows의 대상 교체는 `SetFileInformationByHandle(FileRenameInfoEx, REPLACE_IF_EXISTS | POSIX_SEMANTICS)`로 한다 — 보유자가 삭제 공유를 주면 성공한다(대기·재시도는 쓰지 않는다). 이를 지원하지 않는 파일 시스템이면 기존 교체로 돌아간다. 시험은 Rocks.Build.Tests(삭제 공유로 연 대상은 교체, 삭제 공유 없이 연 대상은 경로를 담은 실패) |
 | 7(CI 수정) | 2026-11-20 | CLG3 뒤 CI의 Windows·macOS job이 Rocks.Build.Tests에서 실패했다: 러너 기본 NDK 27.3(clang 18.0.4)이 Android 최소 Clang 20 미만이다. CI가 검증한 NDK r29(29.0.14206865)를 쓰도록 `Build/Toolchain.json`에 `android.ndk.version`을 두고, 두 job이 `Build/SelectAndroidNdk.ps1`로 그 NDK를 `ANDROID_NDK_HOME`·`ANDROID_NDK_ROOT`로 고른다(이미지에 없으면 `sdkmanager`로 설치, 6.3절). 최소 미만 NDK의 거부 문구는 LLVM 설치 안내 대신 NDK 버전과 `ANDROID_NDK_HOME`·`--android-ndk`를 안내한다. 최소 미만을 시험이 건너뛰게 하지는 않는다 |
 | 8(구현 기록) | 2026-11-20 | CLG4 구현. `Build/Toolchain.json`의 Windows 기본 LLVM과 검증 목록을 22.1.8(`clang version 22.1.8 (ca7933e4…)`)로 바꿨다. CI는 Windows 갈래 하나(LLVM 22.1.8·이미지 기본 MSVC)와 macOS 갈래로 줄이고 `ROCKS_MSVC_TOOLSET`·LLVM 21.1.6 갈래를 뺐다. Windows 갈래가 이전 (가) 갈래의 단계 전부(유니티·PCH 끔 검증 빌드, commandlet, 서식, Rocks.Build.Tests, 통합 시험)와 (나) 갈래의 EngineTests Debug 빌드를 맡는다. 구현하며 정한 점: (가) Windows 업스트림 최소 Clang은 21로 둔다 — 로컬 LLVM 21.1.6(오래된 STL과 함께)은 빌드되고 검증 목록 밖으로 기록된다. 21.1.6 설치 파일 SHA-256도 표에 남겨 `InstallLlvm.ps1 -Version 21.1.6`으로 깔 수 있다. (나) Rocks.Build.Tests는 21.1.6이 최소 이상이지만 미검증인지 단언한다(발견한 도구 모음은 개정 6대로 표 판정과 같은지만 본다). (다) `ROCKS_MSVC_TOOLSET` 기능은 남긴다(6.4절). 빌드 안내 요구 사항 절을 같은 내용으로 고쳤다 |
+| 9(리뷰 반영) | 2026-11-20 | CLG4·NDK 고정 리뷰 반영. (가) 상태를 CI 확인 전까지 "구현 완료(CI 확인 대기)"로 둔다. (나) NDK 설정이 아예 없을 때만 discovery가 `AndroidNdkNotConfiguredException`을 내고 교차 빌드 시험(PCH·response file)이 그것만 건너뛴다. 설정했는데 망가진 NDK(`source.properties`·`clang++`·`llvm-ar`·`ld.lld` 없음)는 실패한다. `SelectAndroidNdk.ps1`은 `clang++`와 `Pkg.Revision`(접미사 포함 정확히 같음)도 확인하고, sdkmanager로 설치할 때는 러너의 `JAVA_HOME_21_*`·`JAVA_HOME_17_*`를 `JAVA_HOME`으로 둔다. Android SDK 위치는 discovery와 스크립트 모두 `ANDROID_HOME`을 먼저 본다. (다) `ROCKS_MSVC_TOOLSET`은 로컬 전용으로 주석을 고치고, 값 형식·`VCToolsVersion` 불일치 판정을 함수로 빼 시험을 더했다(11절에 CI 미검증을 적음). (라) NDK clang 버전을 r29-beta1(20.0.0, 개정 1 실측)과 고정한 29.0.14206865(21.0.0)로 나눠 적고 Android 최소 20의 근거를 적었다. 11절의 확인하지 못한 것을 갱신했다. (마) 빌드 안내에 NDK 선택을 적었다 |
