@@ -21,6 +21,9 @@ public sealed class NativeBuildEngine
             SdkDirectory = request.SdkDirectory is null ? null : Path.GetFullPath(request.SdkDirectory)
         };
         InputValidation.Validate(request);
+        // 경로를 디스크에 있는 철자로 맞춘다(Docs/Design/UnityBuildPch.ko.md 4.4절). 같은 트리를 c:\와 C:\처럼 철자만 다르게 실행해도
+        // 인자·action key·compile DB·도구 빌드 ID가 같다. 검증은 받은 그대로의 요청으로 먼저 한다.
+        request = PathSpelling.OnDisk(request);
         Directory.CreateDirectory(request.OutputDirectory);
         await using var outputLock = await AcquireOutputLockAsync(request.OutputDirectory, cancellationToken);
         // 실행 파일마다 모듈 표 TU를 생성 소스로 더한다(Docs/Design/ModuleLoader.ko.md 3.2절). 아래에서 규칙 생성 TU와 함께 쓴다.
