@@ -9,7 +9,7 @@ namespace rocks::commandlet_host {
 //   log decode <file> --key <private key file> [--json]
 //   log seal <plain input> <out-file> --public <public key file>
 // 개인키는 저장소·쿠킹 결과에 넣지 않는다(도움말에도 적는다). 사용법 오류 2, 파일·복호 오류 1,
-// 성공 0이다.
+// 성공 0이다. context는 작업 메모리에 쓰는 Allocator*다(commandlet_host::Run이 건다).
 Result<int32> RunLogCommand(void* context, Span<const StringView> args,
                             CommandletOutput& output) noexcept;
 

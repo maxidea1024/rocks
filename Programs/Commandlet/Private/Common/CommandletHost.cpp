@@ -52,8 +52,10 @@ Result<int32> FileFailure(CommandletOutput& output, const char* action, StringVi
 }
 
 // trace-report <input.rtrace> [<output.json>]: trace 파일의 결정적 JSON report(TraceAnalysis)를
-// 쓴다. 출력 경로가 없으면 표준 출력으로 낸다. 사용법 오류 2, 파일·분석 오류 1, 성공 0이다.
-Result<int32> TraceReport(void*, Span<const StringView> args, CommandletOutput& output) noexcept {
+// 쓴다. 출력 경로가 없으면 표준 출력으로 낸다. 사용법 오류 2, 파일·분석 오류 1, 성공 0이다. 문맥은
+// 실행 진입점이 넘긴 범용 할당자다(파일 전체와 분석 모델이 거기서 나온다).
+Result<int32> TraceReport(void* context, Span<const StringView> args,
+                          CommandletOutput& output) noexcept {
     if (args.Size() != 1 && args.Size() != 2) {
         auto written = output.write(output.context, CommandletStream::Error,
                                     "usage: trace-report <input.rtrace> [<output.json>]\n");
@@ -63,7 +65,7 @@ Result<int32> TraceReport(void*, Span<const StringView> args, CommandletOutput& 
     // 경로는 NUL로 끝나야 하므로 복사한다(인수 view는 NUL 종료를 보장하지 않는다).
     char input[CommandletRegistry::MaxArgumentBytes + 1] = {};
     platform::MemoryCopy(input, args[0].Data(), args[0].ByteCount());
-    SystemAllocator allocator;
+    Allocator& allocator = *static_cast<Allocator*>(context);
     Array<uint8> bytes(allocator);
     {
         platform::File file;
@@ -152,10 +154,10 @@ bool BootSettings(HostSettings& settings) noexcept {
 } // namespace
 
 // 명령을 등록하고 실행한다. 명령의 Log 호출은 Launch가 설치한 도구 로그로 간다(명령이 로그를
-// 남기지 않으면 출력은 그대로다).
-int Run(Span<const StringView> args, CommandletOutput output) noexcept {
-    SystemAllocator settingsAllocator;
-    HostSettings settings(settingsAllocator);
+// 남기지 않으면 출력은 그대로다). 설정 문맥과 명령의 작업 메모리는 allocator(실행 진입점의 범용
+// 할당자)에서 나온다 — core-check만 자기 SystemAllocator를 만든다(그 명령이 점검하는 대상이다).
+int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocator) noexcept {
+    HostSettings settings(allocator);
     const bool settingsReady = BootSettings(settings);
     CommandletRegistry registry;
     auto registered = registry.Register(
@@ -165,13 +167,13 @@ int Run(Span<const StringView> args, CommandletOutput output) noexcept {
     }
     registered =
         registry.Register({"trace-report", "Write a deterministic JSON report of a .rtrace file.",
-                           &TraceReport, nullptr});
+                           &TraceReport, &allocator});
     if (!registered) {
         return 1;
     }
     registered = registry.Register(
         {"log", "Log file tools: keygen, decode, seal. Never commit or cook the private key.",
-         &RunLogCommand, nullptr});
+         &RunLogCommand, &allocator});
     if (!registered) {
         return 1;
     }
