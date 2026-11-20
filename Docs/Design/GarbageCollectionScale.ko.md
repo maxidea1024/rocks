@@ -646,6 +646,7 @@ GC 구현(`Core/Source/Runtime/ObjectRuntime/Private/`)을 기능별 파일로 �
 - 6절은 jemalloc·TCMalloc 바인딩으로 할당자 몫을 떼어 재자고 했다. 그 라이브러리는 저장소에 없고 C++ 쪽 외부 편의 라이브러리를 들이지 않는다는 원칙이 있다. 대신 **bump 할당자**(반환이 무동작, 주소만 올리는 벤치 전용 할당자)를 바닥으로 쓴다: 같은 시나리오의 시간에서 bump의 시간을 뺀 것이 그 할당자의 몫이다.
 - `GcBench --allocators`를 1M까지 늘리고 할당자를 고르게 한다(bump · 플랫폼(`BenchAllocator`) · `SystemAllocator` · `BinnedAllocator`). 생성+연결, churn 회수, 종료 회수를 객체당 ns로 낸다.
 - 작은 벤치(`GcBench --allocator-micro`): 크기 16–8192의 할당·반환 쌍(단일 스레드), 한 스레드가 할당하고 다른 스레드가 반환하는 흐름(명시 handoff — 시간에 기대지 않는다), 8 스레드 동시 할당·반환 처리량.
+- gate A6·A7의 측정 통로(AL5): `--allocators`가 `SystemAllocator`·`BinnedAllocator` 실행에서 생성 뒤와 churn 뒤의 메모리를 낸다 — `SystemAllocator`의 `liveBytes`는 요청 크기의 합이고 `BinnedAllocator`의 `liveBytes`는 작은 블록 크기의 합 + 큰 요청 크기이며(큰 요청은 backing인 `SystemAllocator`가 센다), 같은 그래프라 두 실행의 할당 수가 같으므로 작은 요청 바이트 = (System 실행의 요청 합) − (Binned 실행의 큰 요청 합)이다. `--allocator-memory`는 요청 크기 분포를 더 낸다(통과 allocator를 끼우므로 그 실행의 시간은 쓰지 않는다). 일반 그래프 시나리오(`--objects N`)는 `--allocator-kind`로 블록을 받는 할당자를 고른다(범주별 계수를 세는 `BenchAllocator`가 머리 16 byte를 더한 크기로 그 할당자에 요청한다 — 플랫폼 쪽도 같은 머리를 두므로 조건이 같다). bump는 한 스레드 전용이라 이 시나리오에 쓰지 않는다.
 
 ### 18.3 UE 5.8과의 대조
 
@@ -792,7 +793,14 @@ UE 5.8.4의 작은 블록 할당자(`Runtime/Core` — `Public/HAL/MallocBinned2
 | A6 | 1M 객체 저장소의 메모리 | 요청 byte 대비 추가 20% 이하(등급 올림 + slab 머리·꼬리 — 벤치 객체 크기에서의 값을 함께 적는다) |
 | A7 | GC churn 회수(실험 24절 — 객체당 약 235–250ns) | `BinnedAllocator`에서 플랫폼 할당보다 줄어든다(목표값은 A2 측정 뒤 적는다) |
 
-한계로 남길 것: 실제 엔진의 크기 분포 미측정(상한 8192·등급 표), `PoolAllocator` 반환의 chunk 검색(그대로 — 이 할당자는 더는 쓰지 않는다), 다른 스레드 캐시의 Trim(UE는 epoch로 잠들 때 비운다 — 후속), 오용 검출의 동시성 한계(18.4절 한계 2 — 그 slab의 decommit·재사용과 겹치면 fault 또는 미검출), 반환 표지의 값 일치(2^-64), 예약하지 못한 기기에서는 모든 요청이 큰 경로(느리지만 맞다).
+한계로 남길 것: 실제 엔진의 크기 분포 미측정(상한 8192·등급 표), `PoolAllocator` 반환의 chunk 검색(그대로 — 이 할당자는 더는 쓰지 않는다), 다른 스레드 캐시의 Trim(후속 — 아래 "쉬는 스레드의 캐시"), 오용 검출의 동시성 한계(18.4절 한계 2 — 그 slab의 decommit·재사용과 겹치면 fault 또는 미검출), 반환 표지의 값 일치(2^-64), 예약하지 못한 기기에서는 모든 요청이 큰 경로(느리지만 맞다).
+
+쉬는 스레드의 캐시(AL5 — 위 한계를 판단할 수치): `Trim`은 호출 스레드의 캐시만 비우므로, 한 번 크게 쓰고 쉬는 스레드는 캐시를 쥔 채로 있다(그 스레드가 끝나거나 그 스레드가 `Trim`을 부를 때까지).
+
+- 상한을 공개 상수 `BinnedAllocator::MaxThreadCacheBytes`로 둔다: 등급마다 한도만큼 찬 묶음 둘(부분·가득)의 합 = 2,361,856 byte(약 2.25 MiB), 블록 3,120개다(1024 이하 등급 20개는 묶음 64개, 그 위 12개는 64KB를 넘지 않는 개수). 스레드 하나 × 인스턴스 하나의 값이다. 상수는 등급 표에서 계산한 값과 `static_assert`로 묶고(표가 바뀌면 컴파일이 멈춘다), 시험이 모든 등급을 한도까지 채운 쉬는 스레드에서 이 값을 본다.
+- 붙들리는 commit은 이보다 클 수 있다: 캐시의 블록이 든 slab은 "쓰는 블록"이 있어 풀리지 않는다. 가장 나쁜 경우는 캐시의 블록마다 다른 slab의 마지막 쓰는 블록인 때로 3,120 × 64 KiB = 195 MiB다(반환이 slab마다 하나씩 흩어진 경우 — 회수는 보통 주소가 모여 있어 여기서 멀다).
+- UE 5.8의 처리(`Public/HAL/MallocBinnedCommonUtils.h` 143–189, `MallocBinnedCommon.h` 809–821): `Trim`이 trim epoch를 올리고, 스레드는 잠들 때(`MarkTLSCachesAsUnusedOnCurrentThread`) epoch가 바뀌었으면 자기 캐시를 비운다. 데스크톱이 아닌 플랫폼은 `Trim`을 부른 스레드가 등록된 캐시를 `TryLock`으로 직접 비우고, 데스크톱은 named 스레드에만 비우기를 방송하고 task 스레드를 건너뛴다("too slow and they don't have much memory").
+- 같은 것을 넣으려면 캐시마다 잠금(쓰는 구간 표시)과 scheduler의 "잠듦·깸" 알림이 allocator까지 내려와야 한다(Task → Core 할당자 통지 통로). 지금은 넣지 않는다 — 상한이 스레드당 2.25 MiB로 정해져 있고 worker 스레드 수는 수십이다. 메모리 압박 대응(Trim을 실제로 부르는 쪽)이 생길 때 함께 넣는다.
 
 ### 18.9 단계와 시험 계획
 
