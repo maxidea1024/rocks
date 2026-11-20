@@ -67,7 +67,7 @@ public static class SourceWorkingSet
         ProcessResult top;
         try
         {
-            top = await ProcessRunner.RunAsync(new("git", ["-C", directory, "rev-parse", "--show-toplevel"], directory, environment, Timeout: NoTimeout),
+            top = await ProcessRunner.RunAsync(new("git", ["-C", directory, "rev-parse", "--show-cdup"], directory, environment, Timeout: NoTimeout),
                 cancellationToken);
         }
         catch (Exception error) when (error is System.ComponentModel.Win32Exception or FileNotFoundException)
@@ -81,7 +81,11 @@ public static class SourceWorkingSet
             return files;
         }
 
-        string root = top.StdOut.Trim();
+        // 작업 사본 루트는 directory에서 올라갈 상대 경로(--show-cdup, 루트면 빈 줄)로 정한다. --show-toplevel은 symlink·junction을
+        // 푼 실제 경로를 돌려주므로(macOS 임시 폴더 /var → /private/var, Windows junction) 빌드가 쓰는 철자의 소스 경로와 맞지 않아
+        // 어떤 파일도 작업 파일로 잡히지 않는다. directory 기준으로 만들면 소스와 같은 철자다.
+        string up = top.StdOut.Trim();
+        string root = Path.GetFullPath(up.Length == 0 ? "." : up, Path.GetFullPath(directory));
         ProcessResult status = await ProcessRunner.RunAsync(new("git",
             ["--no-optional-locks", "-C", root, "status", "--porcelain=v1", "-z", "--untracked-files=all"], directory, environment, Timeout: NoTimeout),
             cancellationToken);

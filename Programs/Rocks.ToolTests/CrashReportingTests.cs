@@ -51,6 +51,11 @@ internal static partial class CrashReportingTests
 
     private const uint PosixAbort = 128 + 6;
 
+    // POSIX SIGABRT 번호와 신호 경로의 종료 사유 문구다(CrashInfo.json "signal"·"message", 설계 8.7절).
+    private const int SignalAbort = 6;
+
+    private const string PosixAbortMessage = "Fatal signal 6";
+
     // CrashReportingInternal.h의 덤프 사용자 stream 종류·형식 이름과 probe가 넣는 값이다(CrashProcessProbe.cpp).
     private const uint CrashRecordStreamType = 0x524B0001;
 
@@ -710,12 +715,14 @@ internal static partial class CrashReportingTests
         });
 
         // 종료 콜백 안에서 다시 실패해도(크래시 처리 스레드의 실패) 남은 콜백만 포기하고 파일 단계를 이어 간다. 프로세스는 원래
-        // 코드로 끝난다. abort는 SIGABRT 처리기가 반환하지 않으므로 종료 코드가 3이 아니다(abort 재진입).
-        foreach ((string mode, uint code, string kind, int reason, string stderrText) in new[] {
+        // 코드로 끝난다. abort는 SIGABRT 처리기가 반환하지 않으므로 종료 코드가 3이 아니다(abort 재진입). 처음 abort의 사유는
+        // 플랫폼마다 남는 곳이 다르다(설계 8.7절·17절): Windows는 SIGABRT 처리기가 Fatal 경로로 가 stderr에 "abort() was called"를
+        // 쓰고, POSIX는 신호 경로라 stderr 사유 줄이 없고 CrashInfo.json의 signal 6·message "Fatal signal 6"에 남는다(stderrText null).
+        foreach ((string mode, uint code, string kind, int reason, string? stderrText) in new (string, uint, string, int, string?)[] {
             ("callback-fault", AccessViolation, windows ? "Exception" : "Signal", hardwareReason, "Rocks crash reporter thread failed"),
             ("callback-fatal", AccessViolation, windows ? "Exception" : "Signal", hardwareReason,
                 "crash probe: fatal inside a termination callback"),
-            ("callback-abort", RocksFatal, "Abort", ReasonAbort, "abort() was called") })
+            ("callback-abort", RocksFatal, "Abort", ReasonAbort, windows ? "abort() was called" : null) })
         {
             suite.Add("Native.Crash." + mode, async () =>
             {
@@ -725,7 +732,11 @@ internal static partial class CrashReportingTests
                 VerifyExit(result, code, mode);
                 Verify.That(result.ExitCode != 3, mode + " abort handler returned (exit code 3)");
                 Verify.Equal(0, result.Callbacks.Count, mode + " callback lines");
-                Verify.Contains(stderrText, result.StdErr, mode + " stderr");
+                if (stderrText != null)
+                {
+                    Verify.Contains(stderrText, result.StdErr, mode + " stderr");
+                }
+
                 Verify.Contains("Rocks crash reporter thread failed; skipping the remaining termination callbacks", result.StdErr,
                     mode + " reporter failure");
                 string folder = SingleCrashFolder(root, result, mode);
@@ -735,6 +746,11 @@ internal static partial class CrashReportingTests
                 Verify.That(json.GetProperty("reporterFailed").GetBoolean(), mode + " reporterFailed");
                 Verify.Equal("ReporterFailed", json.GetProperty("terminationCallbacks").GetProperty("status").GetString(), mode + " callbacks status");
                 Verify.Contains("reporterFailed", json.GetProperty("incompleteReasons").ToString(), mode + " incompleteReasons");
+                if (stderrText == null)
+                {
+                    Verify.Equal(SignalAbort, json.GetProperty("signal").GetInt32(), mode + " signal");
+                    Verify.Equal(PosixAbortMessage, json.GetProperty("message").GetString(), mode + " message");
+                }
             });
         }
 
