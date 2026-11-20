@@ -1,6 +1,6 @@
 # 로깅 시스템 설계
 
-기준일: 2026-11-20, 개정 17. 엔진 전반에서 쓰는 **로그**(사람이 읽는 사건 기록)의 호출 API, 카테고리·레벨 필터, 비동기 기록 경로, 출력 형식, 장애 격리, 엔진 적용 범위를 정한다.
+기준일: 2026-11-20, 개정 18. 엔진 전반에서 쓰는 **로그**(사람이 읽는 사건 기록)의 호출 API, 카테고리·레벨 필터, 비동기 기록 경로, 출력 형식, 장애 격리, 엔진 적용 범위를 정한다.
 
 요구는 다음 문서에서 온다.
 - [엔진 구현 계획](EngineImplementationPlan.ko.md) 29.4절(필수 로깅·프로파일러: level/category, UTC+monotonic, rate limit·중복 집계, compile/runtime level, error/fatal 비상 경로, 임계 구간에서 file IO·heap·lock wait 금지)
@@ -24,7 +24,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론)의 현재 기본 경로다. 경�
 
 UE의 매크로 중심 API(`UE_LOG`, `DECLARE_LOG_CATEGORY_*`)는 따르지 않는다. 일반 로그는 함수 호출로 쓴다. 메시지 템플릿과 출력 레이아웃은 Serilog·log4j의 개념을 Rocks 이름으로 가져온다. UE 이름은 대응표(4절)에만 둔다.
 
-상태: LG0–LG19 **구현 완료**(결정 L1–L29, 구현과 다르게 정한 점은 14.2절). LG16(`{@Obj}`)은 개정 15에서 구현했다(MetaCompiler `VisitFields` 생성·ObjectRuntime `Object/LogStructure.h` 포함). 개정 16에서 크래시 기록의 로그 칸(`LogFile`·`LogDirectory`)을 붙였다(14.1.8절, L29). 단계는 14절, 다른 세션과의 순서는 15절, 결정은 17절이다.
+상태: LG0–LG19 **구현 완료**(결정 L1–L30, 구현과 다르게 정한 점은 14.2절). LG16(`{@Obj}`)은 개정 15에서 구현했다(MetaCompiler `VisitFields` 생성·ObjectRuntime `Object/LogStructure.h` 포함). 개정 16에서 크래시 기록의 로그 칸(`LogFile`·`LogDirectory`)을 붙였다(14.1.8절, L29). 개정 18에서 리플렉션 타입 특수화의 ODR 위험을 컴파일 오류로 바꿨다(14.1.6절, L30). 단계는 14절, 다른 세션과의 순서는 15절, 결정은 17절이다.
 
 ## 1. 결정 요약
 
@@ -648,7 +648,7 @@ LG11–LG19의 검증도 같다: Debug 빌드, format, policy, 바뀐 부분 시
 - **캡처 시점 값 복사(L19):** 렌더는 출력 스레드가 나중에 하므로 그때 객체가 살아 있다는 보장이 없다(스택 객체, GC). 게임 스레드 밖에서 객체를 읽으면 경쟁이기도 하다. 그래서 생산자 5단계에서 값을 복사한다. 필드 이름은 생성 코드의 정적 리터럴 포인터를 담고, 값은 원시 값·문자열 바이트를 복사한다. UE도 호출 지점에서 필드를 compact binary로 직렬화해 기록이 사본을 가진다(`SLC:1398–1418`, `SerializeLogFields` `SLC:1302`, 사용자 타입은 `SerializeForLog` `SL:297`).
 - **상한:** 깊이 4, 필드 32, 배열은 앞 8원소와 전체 개수. 넘치면 `truncated`. 크기는 슬롯·블록 한도(8.3)를 따른다.
 - **리플렉션 연결과 의존 방향:** Core는 확장점만 정의한다(Core는 리플렉션 모듈 아래다).
-  - 리플렉션 타입의 일반 특수화는 **ObjectRuntime** 헤더 `Object/LogStructure.h`가 `requires` 조건으로 제공한다. 객체 참조(`ObjectRefs.h`)·`AssetId`·약한 참조와 생성 필드 접근(`GeneratedFieldAccess.h`)이 ObjectRuntime에 있어서다. MetaSchema에는 `GeneratedType<T>`와 스키마만 있다.
+  - 리플렉션 타입의 일반 특수화는 **ObjectRuntime** 헤더 `Object/LogStructure.h`가 `requires` 조건으로 정의한다(선언은 생성 헤더가 include하는 `Object/GeneratedFieldAccess.h`, 14.1.6절 L30). 객체 참조(`ObjectRefs.h`)·`AssetId`·약한 참조와 생성 필드 접근(`GeneratedFieldAccess.h`)이 ObjectRuntime에 있어서다. MetaSchema에는 `GeneratedType<T>`와 스키마만 있다.
   - 필드 값 읽기는 **MetaCompiler가 새로 생성하는 constexpr 필드 방문 함수**(`GeneratedType<T>::VisitFields(const T&, Visitor&)`, 멤버 포인터로 직접 읽기)로 한다.
   - 지금 공개된 값 읽기(`PathRead`·`FieldValue`)는 ObjectRegistry가 필요하고 문자열을 할당한다(`Object/RuntimeTypeOps.h`, `Object/PropertyPath.h`). 그래서 생산자 경로에 쓸 수 없다. `TypeOf<T>()`는 registry 없이 필드 이름·종류를 주지만 값 접근이 없다.
 - **종류:** Bool·정수·실수는 원시 값, Enum은 생성 이름(없으면 정수), Utf8String은 바이트 복사, 중첩 Struct는 재귀, 배열은 위 상한. Name·Text·AssetId 등 다른 종류는 `Formatter`가 있으면 캡처 때 그 렌더 문자열을 담고, 없으면 `<unsupported>`. 객체 참조는 역참조하지 않고 id만 담는다(GC·스레드 안전).
@@ -793,12 +793,23 @@ LG11–LG19의 검증도 같다: Debug 빌드, format, policy, 바뀐 부분 시
     - 맨 위 `Structure`의 `text`는 메시지에 렌더한 구간이다.
   - **리플렉션 연결:**
     - `VisitFields`는 `template <class Visitor> static constexpr void VisitFields(const T&, Visitor&) noexcept`다. 클래스·struct 모두, 상속 필드를 포함해 선언 순서(가장 먼 base의 필드부터, 선언 타입 안에서는 소스 순서)로 `visitor.Field("멤버 이름", 값)`을 부른다. 스키마 필드 배열(안정 ID 순)과 순서가 다르다. 로그가 소스 순서로 읽히게 하려는 것이다.
-    - 값은 멤버 포인터 직접 읽기다(Trace와 같은 철자). 자기 bitfield는 헤더 안에서 직접 읽는다(`static_cast<bool>(value.x != 0)`). 생성 접근자 `Get_`의 정의가 생성 소스로 옮겨 가서(생성 소스 분리 GS2), 다른 모듈이 `VisitFields`를 인스턴스화할 때 모듈 밖 함수를 부르지 않게 하려는 것이다. 상속한 bitfield는 base의 private 멤버라 base의 `Get_`을 부른다(생성 함수표 `Ops()`와 같은 제약).
+    - **제한(L19 검토, 2026-11-20):**
+      - 다른 모듈에서 import한 base의 필드는 선언 순서를 모른다. module descriptor에 선언 번호가 없어서, 같은 선언 타입 안 끝에 스키마 순서(안정 ID 순)로 둔다. 결정적이지만 소스 순서와 다르다. descriptor에 선언 번호를 싣는 것은 후속이다.
+      - 필드는 base부터 쓰므로 `MaxLogStructureFields`(32)를 넘는 깊은 계층에서는 파생 타입 자기 필드가 먼저 잘린다(잘림 표시는 남는다). 늘리거나 순서를 바꾸는 것은 실제 요구가 생기면 정한다.
+      - flags enum의 조합 값(선언된 열거자와 같지 않은 값)은 바탕 정수로 나온다. 비트별 이름으로 펼치지 않는다.
+    - 값은 멤버 포인터 직접 읽기다(Trace와 같은 철자). 자기 bitfield는 헤더 안에서 직접 읽는다(`static_cast<bool>(value.x != 0)`). 생성 접근자 `Get_`의 정의가 생성 소스로 옮겨 가서(생성 소스 분리 GS2), 다른 모듈이 `VisitFields`를 인스턴스화할 때 모듈 밖 함수를 부르지 않게 하려는 것이다. 상속한 bitfield도 선언 타입으로 바꿔 직접 읽는다(`static_cast<bool>(static_cast<const Base&>(value).x != 0)`). `ROCKS_GENERATED_BODY`가 모든 `GeneratedType`을 friend로 두므로 base의 private 멤버도 읽을 수 있다. 처음에는 base의 `Get_`을 불렀는데, 그 정의가 base 모듈의 생성 소스에 있고 export 대상(BD28)이 아니라 다른 모듈의 파생 타입을 펼치면 링크되지 않았다(개정 18, L19 검토).
     - 타입 태그는 타입 도구 이름(없으면 스키마 이름)이고, enum 값의 기호는 C++ 열거자 이름이다. 태그는 사람이 타입을 알아보는 이름이라 한정 없는 도구 이름(기본은 C++ 이름, `Name="…"`로 바꾼 이름)을 쓴다. 기호는 코드와 그대로 맞춰 찾을 수 있게 C++ 이름을 쓴다. 도구 이름(`ROCKS_ENUMERATOR(Name="8BitData")`)은 숫자로 시작할 수 있고 접두(ToolPrefix)를 뗀 이름이라 코드 검색과 어긋난다.
-    - 특수화 가시성(ODR) — include 규칙: 리플렉션 타입의 일반 특수화는 `<Object/LogStructure.h>`를 include한 번역 단위에서만 보인다. 그래서 다음을 규칙으로 둔다.
-      - 리플렉션 타입을 `{@Name}`으로 쓰는 번역 단위는 `<Object/LogStructure.h>`를 include한다. 빠뜨리면 그 타입은 Formatter가 없는 한 `static_assert`("Log argument type needs ... specialization")로 컴파일되지 않으므로 대부분 바로 드러난다.
-      - Formatter도 가진 리플렉션 타입은 이 헤더 유무에 따라 `HasLogStructure<T>`와 그에 기댄 인라인 템플릿(`LogArgTraitsOf` 등)이 번역 단위마다 달라질 수 있다(ODR 위반). 그런 타입은 그 타입을 로그에 쓰는 모든 번역 단위에서 이 헤더를 include한다. 가장 쉬운 방법은 타입을 선언한 헤더 옆 공용 헤더에서 생성 헤더와 함께 include하는 것이다.
-      - 처음 구현은 생성 헤더가 이 헤더를 include해 규칙을 없앴다. 그러나 생성 소스 빌드 작업(rocks-78, 생성 헤더에 새 include를 더하지 않는다)과 맞추느라 되돌렸다. 모든 생성 헤더가 이미 include하는 ObjectRuntime 헤더(`Object/GeneratedFieldAccess.h`)에서 include하는 안도 검토했다. 하지만 `Object/LogStructure.h`가 그 헤더의 형질(`FieldValueKind`·`ArrayField` 등)을 써서 include가 순환한다. 파일 끝 include로 순환을 피하는 것은 깨지기 쉽고, 그 헤더를 쓰는 ObjectRuntime 코드 전체로 로깅 의존이 퍼진다. 그래서 문서 규칙으로 두었다. 생성 헤더 include 줄이기(ReflectionGeneratedSources GSD5)는 GS2 뒤에도 보류이므로, GS3에서 GSD5를 다시 볼 때 함께 다시 정한다.
+    - 특수화 가시성(ODR) — 선언과 정의를 나눈다(개정 18, L30):
+      - **문제:** 리플렉션 타입의 일반 특수화 정의는 `<Object/LogStructure.h>`에 있다. 특수화가 보이는지로 `HasLogStructure<T>`를 판정하면, 이 헤더를 include했는지에 따라 판정과 그에 기댄 인라인 템플릿(`LogStructureWriteOf`·`WithArgumentInfo`·`LogArgTraitsOf`)이 번역 단위마다 달라진다. Formatter도 가진 리플렉션 타입은 헤더 없이도 컴파일되므로 이것이 진단 없는 ODR 위반이 된다.
+      - **판정은 선언으로:** Core의 기본 템플릿 `LogStructure<T>`는 정의를 두고 "특수화 없음" 표지(`NotSpecialized`)만 가진다. `HasLogStructure<T>`는 이 표지가 없는지로 판정한다. 특수화는 정의가 없는 선언만 보여도 표지가 없으므로, 특수화가 선언된 타입은 정의가 보이든 말든 판정이 true로 같다.
+      - **선언은 생성 헤더 쪽:** 일반 특수화의 선언(`template <class T> requires detail::GeneratedLogFields<T> struct LogStructure<T>;`)과 그 제약 `detail::GeneratedLogFields`는 모든 생성 헤더가 이미 include하는 `Object/GeneratedFieldAccess.h`에 둔다. 기본 템플릿과 방문자는 이름만 앞선 선언하므로 include가 늘지 않고 생성 헤더도 바뀌지 않는다. 정의는 `<Object/LogStructure.h>`에 그대로 둔다.
+      - **정의가 없으면 컴파일 오류:** 특수화를 쓰는 곳(`LogStructureWriteOf`·중첩 `Write`)은 `Write`가 보이는지 영어 `static_assert`로 확인한다("rocks::LogStructure<T> is declared but not defined in this translation unit; for reflected types include <Object/LogStructure.h> ..."). 리플렉션 타입을 로그 인자로 쓰는 번역 단위는 `{Name}`이든 `{@Name}`이든 `<Object/LogStructure.h>`를 include해야 하며, 빠뜨리면 이 오류로 드러난다. 예전 문서 규칙("Formatter도 가진 리플렉션 타입은 이 헤더를 include한다")을 컴파일러가 강제하는 셈이다.
+      - **Binds 미러 대상은 뺀다:** Vec3·Quat·Transform 같은 Core 값은 Binds 미러(`ROCKS_STRUCT(Binds = "...")`)로 리플렉션된다. 실제 타입이 Core에 있어 미러의 생성 헤더 없이도 보이므로, 일반 특수화에 넣으면 그 생성 헤더를 본 번역 단위와 안 본 번역 단위의 판정이 갈린다(Formatter를 더하면 진단 없는 위반). 그래서 제약에서 뺀다(`!detail::GeneratedBindsMirror<T>`, 생성 코드가 Binds 미러에만 내는 `VerifyBinds`로 판정). 맨 위 `{@Pos}`에는 쓸 수 없고(Formatter나 직접 특수화), 리플렉션 타입 안의 Binds 필드는 visitor가 방문 함수로 직접 중첩 객체로 펼친다. 그 필드를 가진 타입의 생성 헤더가 미러 생성 헤더를 include하므로 그 경로의 판정은 같다. 태그는 미러의 스키마 이름(`Vec2Binding`)이다.
+      - **한계:** 한 번역 단위 안에서 헤더를 첫 로그 호출 뒤에 include하면 `Write` 확인이 위치에 따라 달라진다(그 번역 단위 안에서는 진단 없는 위반). 생성 헤더와 함께 위에서 include하면 생기지 않는다. 손으로 쓴 특수화는 지금처럼 쓰는 모든 곳에서 보여야 한다(Formatter와 같은 C++ 규칙).
+      - **버린 대안:**
+        - 생성 헤더가 `<Object/LogStructure.h>`를 include한다: 처음 구현이었다. 생성 소스 빌드 작업(rocks-78, 생성 헤더에 새 include를 더하지 않는다)과 맞추느라 되돌렸다.
+        - `Object/GeneratedFieldAccess.h`가 `<Object/LogStructure.h>`를 include한다: `Object/LogStructure.h`가 그 헤더의 형질(`FieldValueKind`·`ArrayField` 등)을 써서 include가 순환한다. 그 헤더를 쓰는 ObjectRuntime 코드 전체로 로깅 의존도 퍼진다.
+        - 문서 규칙만 둔다(개정 15–17): 어겨도 아무것도 막지 않았다.
     - `LogStructure<T>`는 클래스 타입에만 둔다. enum·정수에 특수화하면 쓰는 곳(템플릿 검증 `LogArgTraitsOf`, 런타임 템플릿의 `LogStructureWriteOf`, 중첩 `Write`)에서 영어 `static_assert`("rocks::LogStructure<T> is only supported for class types ...")로 거부한다. 캡처는 클래스 인자의 객체 주소로 펼치고 정수·enum은 원시 값으로 캡처한다. 그래서 그대로 두면 컴파일은 되고 런타임에 템플릿 오류가 났다.
     - 내부 알림 `detail::LogTo`(LogInternal.h, 종료 경로 밖)도 `WithArgumentInfo`를 거쳐 `{@Name}`을 받는다.
     - 종류별 처리:
@@ -894,7 +905,7 @@ LG11–LG19 중 다른 세션 소유 모듈을 고쳐야 하는 곳이다. 그 �
 | L16 | trace `log` 채널은 TraceCapture의 `TraceLogSink`가 쓴다. `Trace.LogMessageSpec`(세션·호출 지점(EventId·카테고리·위치)당 1회, 쓰기 성공 뒤 표에 넣음, 표가 차면 기록에 카테고리·템플릿을 실음)과 `Trace.LogMessage`(캡처 tick·생산자 스레드·spec id·상관 id 명시, 렌더된 메시지)다. 기록 머리는 tick을 캡처한다(LG13). 속성은 보내지 않는다 | 결정됨(2026-11-18, 권장안 — trace 세션 합의 필요) |
 | L17 | 레이아웃 설정 `log.console.layout`·`log.file.layout`은 시작 뒤 고정(`BootCVar`)이고, 잘못된 패턴은 설정 단계에서 `Validate(CheckLogLayoutSyntax)`가 거부한다(CVR7 — 개정 12). Start의 Error 1회 + 기본 레이아웃은 방어로 남는다. jsonlines 파일에서 `log.file.layout`은 Warning 후 무시 | 결정됨(2026-11-18, 권장안 — 개정 12에서 CVR7 반영) |
 | L18 | Config에 검증 hook을 더하지 않는다. 설정 단계 거부는 CVar `Validate`(CVarSystem VD10)로 한다 — CVR7에서 `log.levels`·`log.rate_limits`·두 레이아웃에 걸었다. 적용 시점에는 적용 실패만 Warning으로 알린다 | 결정됨(2026-11-18, 권장안 — 개정 10에서 CVar 설계 확정에 맞춰 바꿈, 개정 12에서 CVR7 반영) |
-| L19 | `{@Obj}`는 캡처 시점에 값을 복사한다. Core는 `LogStructure<T>` 확장점만 두고, 일반 특수화는 ObjectRuntime이 MetaCompiler 생성 필드 방문 함수로 registry·할당 없이 읽는다. 객체 참조는 역참조하지 않는다 | 결정됨(2026-11-18, 권장안 — 리플렉션 세션 합의 필요), 개정 15 구현 |
+| L19 | `{@Obj}`는 캡처 시점에 값을 복사한다. Core는 `LogStructure<T>` 확장점만 두고, 일반 특수화는 ObjectRuntime이 MetaCompiler 생성 필드 방문 함수로 registry·할당 없이 읽는다. 객체 참조는 역참조하지 않는다 | 결정됨(2026-11-18, 권장안), 개정 15 구현. 리플렉션 쪽 검토는 담당 세션이 없어 검토 에이전트로 대신했고 개정 18에서 반영했다(상속 bitfield 직접 읽기, Binds 미러 제외, 제한 셋 — 14.1.6절) |
 | L20 | 사용자 Formatter spec 검증은 선택 멤버 `static constexpr bool IsValidSpec(StringView)`이다. 리터럴 템플릿은 컴파일 타임에, 런타임 템플릿은 로그 캡처 전용 함수 포인터 배열로 검사하고, 없으면 캡처 때 판단한다 | 결정됨(2026-11-18, 권장안) |
 | L21 | 카테고리별 rate limit은 접두사별 1초 창이고, 창 번호(32-bit)와 수(32-bit)를 `Atomic<uint64>` 하나에 묶어 CAS로 바꾼다(창마다 통과 수 정확히 상한). 최대 16칸, Trace–Warning에만 적용, Error·Fatal 제외. 버린 수는 출력 스레드가 1초에 한 번까지 알린다 | 결정됨(2026-11-18, 권장안) |
 | L22 | 시간 기준 회전은 벽시계 날짜가 아니라 그 파일 첫 기록 뒤 경과 시간(기록의 단조 시각)으로 판정한다 | 결정됨(2026-11-18, 권장안) |
@@ -905,6 +916,7 @@ LG11–LG19 중 다른 세션 소유 모듈을 고쳐야 하는 곳이다. 그 �
 | L27 | WorkerScheduler 지연·포화 진단은 단계로 두지 않는다. Engine의 스케줄러 소유와 스케줄러 통계 확장이 선행 조건이다(16절) | 결정됨(2026-11-18, 권장안) |
 | L28 | sink 수명은 `RemoveSink` 성공 또는 LogSystem 파괴까지다(`Stop`만으로는 안 됨). `RuntimeLogSink`가 등록 계수를 갖고 등록된 채 파괴되면 Fatal(8.4절) | 결정됨(2026-11-20, macOS CI 결함에서 — 권장안) |
 | L29 | 크래시 기록의 `LogFile` 칸은 `FileLogSinkConfig::crashAnnotation`을 켠 sink 하나(`LogHost`가 설치하는 파일 sink)만 쓰고, `LogDirectory`는 `LogHost`가 쓴다. 상대 로그 폴더는 Open 때 절대 경로로 굳힌다(9.1·14.1.8절) | 결정됨(2026-11-20, 크래시 수집 병합 뒤 — 권장안) |
+| L30 | `HasLogStructure<T>`는 특수화 선언으로 판정한다(기본 템플릿의 `NotSpecialized` 표지). 리플렉션 일반 특수화의 선언은 `Object/GeneratedFieldAccess.h`, 정의는 `<Object/LogStructure.h>`이고 정의가 없는 번역 단위에서 쓰면 `static_assert`로 거부한다. Binds 미러 대상은 일반 특수화에서 빼고 필드 안에서만 펼친다(14.1.6절) | 결정됨(2026-11-20, 권장안 — 문서 규칙을 대체) |
 
 ## 18. 개정 이력
 
@@ -931,6 +943,7 @@ LG11–LG19 중 다른 세션 소유 모듈을 고쳐야 하는 곳이다. 그 �
 - 개정 9(2026-11-18): 후속 설계 확정 — 16절 항목을 LG11–LG19로 설계했다(14.1절, 결정 L14–L27). 상관 id 스택을 Core로 내리고 trace `log` 채널은 `TraceLogSink`가 쓴다. 레이아웃 설정과 Config 검증 hook, 카테고리별 rate limit, `{@Obj}` 캡처 시점 복사와 생성 필드 방문 함수, Formatter spec 검증 규약, 시간 회전과 묶음별 zstd 압축(압축 뒤 봉인), `platform::Fatal` hook, `log view`를 다룬다. WorkerScheduler 진단은 선행 조건만 적었다. UE 5.8.4 `StructuredLog`·`LogTrace`·`OutputDeviceFile`·`FileHelper`·`OutputDeviceRedirector::Panic`을 확인했다. 다른 세션 조율은 15.1절이다. 리뷰 반영: 상관 id 스택에 확장 칸·관찰자 hook(H1), rate limit 창·수 단일 원자 값(M1), Compression 고정 작업 공간 문맥 요청(M2), 종료 hook `const char*`·막히지 않는 flush(M3), `log.levels` 거부 범위(M5), `{@Obj}` 특수화를 ObjectRuntime으로(M6), 런타임 템플릿 spec 검사 경로·전파 분기 하나·`DedicatedLane` 전파·tick 캡처·LG17 시험 방식·validate reason(Low). L25는 사용자 선택 A로 확정했고, L24·L26은 개정 8의 16절 밖 새 범위로 표시했다.
 - 개정 16(2026-11-20): 크래시 수집 병합(e6f6151b) 뒤 로깅 몫. 크래시 기록의 로그 칸(L29): `FileLogSinkConfig::crashAnnotation`과 `LogHost`의 `LogDirectory`, 상대 로그 폴더를 Open 때 절대 경로로(9.1절), 처음 설계의 "설치된 LogSystem의 sink만"을 설치하는 쪽의 설정 칸으로 바꿈. 14.1.8절에 공용 마감을 Launch 설정으로 바꿀 수 있음과 Asan 구성의 콜백 경로·한계를 적었다.
 - 개정 17(2026-11-20): Release 문자열 제외 검사를 `self`에서 전용 명령 `log-release`로 옮김(7절). 실행 파일은 인자로 받고 없으면 실패하며, CI Release 단계 뒤에 LogBench를 Release로 빌드해 돌린다.
+- 개정 18(2026-11-20): LG16 특수화 가시성(ODR)을 문서 규칙에서 컴파일 검사로 바꿈(14.1.6절, L30). 판정은 특수화 선언(기본 템플릿의 `NotSpecialized` 표지)으로, 리플렉션 일반 특수화의 선언은 모든 생성 헤더가 include하는 `Object/GeneratedFieldAccess.h`로, 정의가 없으면 `static_assert`. 생성 헤더 include는 늘지 않으므로 GSD5 재검토를 기다리지 않는다. L19 검토 반영: 상속 bitfield를 base의 `Get_`(다른 모듈의 생성 소스, export 대상 아님) 대신 헤더 안에서 직접 읽음, Binds 미러 대상을 일반 특수화에서 빼고 필드 안에서는 visitor가 직접 펼침, import한 base 필드 순서·32필드 잘림·flags enum 조합 값을 제한으로 적음.
 - 개정 15(2026-11-20): LG16 구현 반영(14.1.6의 세부와 다르게 정한 점은 14.2절 LG16). 특수화 없는 타입 거부(static_assert와 템플릿 오류 셋), `LogStaticName`, `LogStructureWriter` 쓰기 함수, 인코딩·상한 세부, 텍스트·JSON 모양, `LogProperty`의 `Structure`·`Array`·`Null`과 하위 트리 범위, `LogEvent::structureNodes`, 생성 `VisitFields` 모양과 생성 크기를 적었다. 리뷰 반영: 노드 칸 넘침·공간 잘림을 열린 조상 모두에 표시, 빈 노드 span은 잘림이 아님, `LogStructure`는 클래스 타입만(static_assert), `Object/LogStructure.h` include 규칙(ODR, 생성 헤더 include는 rocks-78과 맞춰 되돌림), `detail::LogTo`의 `{@Name}`, 객체 참조에 registry 번호, enum 기호·태그 이름 규칙과 수명 문구, 8.6절 메모리 표. 생성 소스 분리(GS2) 병합 때 자기 bitfield를 `Get_` 대신 헤더 안 직접 읽기로 바꾸고 ODR 재검토 시점을 GSD5 재검토로 옮겼다.
 - 개정 14(2026-11-20): LG18 처리기를 크래시 수집기로 옮긴 것을 반영했다(14.1.8, L24·L25, 9.2절 호스트 순서, 14.2절, 15.1절). 로깅은 첫 `LogInstallScope` 설치 때 종료 콜백 하나를 등록하고 해제하지 않는다. `Log::Fatal`·assert의 프로세스 Fatal 표시, `failingThreadId`·`stoppedThreadIds`로 출력 스레드 판정, `FlushForTermination`의 결과 값을 정했다. `SetTerminationHook`·hook 연쇄·로깅 자체 처리기와 스레드별 중복 판정을 버린 이유와, 예약 뒤 게시 전 멈춘 칸의 한계를 적었다. 코드는 크래시 수집 LC1a(rocks-36)가 함께 바꿨고 로깅이 리뷰했다.
 - 개정 13(2026-11-20): sink 수명 계약을 `RemoveSink` 성공 또는 LogSystem 파괴까지로 좁히고 등록 계수로 위반을 Fatal로 잡는다(8.4절, L28). macOS CI에서 시험이 sink를 LogSystem보다 나중에 선언해 파괴된 sink를 flush하던 결함(31곳 선언 순서 정정)에서 나왔다. POSIX 크래시 처리기 깨우기를 self-pipe로(14.1.8, L25).

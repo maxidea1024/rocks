@@ -1003,3 +1003,45 @@ Result<void> WriteGeneratedStagedField(ConstructionContext& construction, Object
 }
 
 } // namespace rocks::detail
+
+namespace rocks {
+
+// 로그 구조체 펼치기의 확장점이다(정의는 Core/Diagnostics/LogStructure.h).
+template <class T>
+struct LogStructure;
+
+namespace detail {
+
+// 생성 필드 방문 함수가 부르는 visitor다(정의는 Object/LogStructure.h).
+class LogStructureFieldVisitor;
+
+// Binds 미러(ROCKS_STRUCT(Binds = "...")) 대상 타입이다. 생성 코드가 Binds 미러에만 VerifyBinds를
+// 낸다.
+template <class T>
+concept GeneratedBindsMirror = requires(const T& value) { GeneratedType<T>::VerifyBinds(value); };
+
+// MetaCompiler가 필드 방문 함수를 낸 타입이다.
+template <class T>
+concept GeneratedFieldVisitor = requires(const T& value, LogStructureFieldVisitor& visitor) {
+    GeneratedType<T>::VisitFields(value, visitor);
+};
+
+// 로그 일반 특수화를 받는 타입이다. Binds 미러 대상(Vec3·Transform 등)은 뺀다: 실제 타입이 Core에
+// 있어 생성 헤더 없이도 보이므로, 넣으면 생성 헤더를 본 번역 단위와 안 본 번역 단위의 판정이
+// 갈린다. 리플렉션 타입 안의 Binds 필드는 Object/LogStructure.h의 visitor가 방문 함수로 직접
+// 펼친다.
+template <class T>
+concept GeneratedLogFields = GeneratedFieldVisitor<T> && !GeneratedBindsMirror<T>;
+
+} // namespace detail
+
+// 리플렉션 타입의 로그 일반 특수화 선언이다. 정의는 <Object/LogStructure.h>에 있다.
+// 모든 생성 헤더가 이 헤더를 include하므로, 리플렉션 타입이 보이는 번역 단위에서는 정의가 없어도
+// HasLogStructure<T>가 같은 값이 된다(번역 단위마다 판정이 달라지는 ODR 위반을 막는다). 정의 없이
+// 그 타입을 로그 인자로 쓰면 static_assert로 거부한다(Docs/Design/LoggingSystem.ko.md 14.1.6절
+// L30).
+template <class T>
+    requires detail::GeneratedLogFields<T>
+struct LogStructure<T>;
+
+} // namespace rocks

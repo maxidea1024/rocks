@@ -99,25 +99,42 @@ class LogStructureWriter;
 //   태그다. 정적 저장소 문자열이어야 한다. 없으면 태그가 없다.
 // "{@Name}" 자리 인자의 타입에 특수화가 없으면 템플릿이 컴파일되지 않는다. T는 클래스 타입이어야
 // 한다(enum·정수에 특수화하면 쓰는 곳에서 static_assert로 거부한다).
+//
+// 기본 템플릿은 "특수화 없음" 표지(NotSpecialized)만 가진다. 특수화는 이 이름을 두지 않는다.
+// HasLogStructure는 이 표지로 판정하므로, 특수화가 정의 없이 선언만 보이는 번역 단위에서도 판정이
+// 같다(설계 14.1.6절 L30 — 리플렉션 타입의 일반 특수화는 생성 헤더 쪽에서 선언하고
+// <Object/LogStructure.h>에서 정의한다). 선언만 보이는 곳에서 그 타입을 로그 인자로 쓰면
+// static_assert로 거부한다.
 template <class T>
-struct LogStructure;
-
-// T에 LogStructure 특수화(Write)가 있는지다.
-template <class T>
-concept HasLogStructure = requires(LogStructureWriter& out, const T& value) {
-    { LogStructure<T>::Write(out, value) } noexcept;
+struct LogStructure {
+    using NotSpecialized = void;
 };
+
+// T에 LogStructure 특수화가 선언돼 있는지다(정의가 보이는지는 따지지 않는다).
+template <class T>
+concept HasLogStructure = !requires { typename LogStructure<T>::NotSpecialized; };
 
 namespace detail {
 
 // LogStructure 특수화는 클래스 타입에만 둔다. 캡처는 클래스 인자의 객체 주소로 펼치고, 정수·enum은
 // 원시 값으로 캡처하므로 "{@Name}"에 쓸 수 없다(템플릿 검증과 런타임이 어긋나지 않게 컴파일 때
 // 막는다).
+// 이 번역 단위에서 특수화의 Write가 보이는지다. 선언만 보이면 false다.
+template <class T>
+concept LogStructureDefined = requires(LogStructureWriter& out, const T& value) {
+    { LogStructure<T>::Write(out, value) } noexcept;
+};
+
 template <class U>
 consteval void CheckLogStructureType() noexcept {
     static_assert(IsClassV<U>,
                   "rocks::LogStructure<T> is only supported for class types; log enums and "
                   "scalars with {Name} holes instead");
+    static_assert(
+        LogStructureDefined<U>,
+        "rocks::LogStructure<T> is declared but its 'static void Write(LogStructureWriter&, "
+        "const T&) noexcept' is not visible in this translation unit; for a reflected "
+        "type include <Object/LogStructure.h> in every translation unit that logs it");
 }
 
 template <class T>
