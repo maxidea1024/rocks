@@ -74,6 +74,9 @@ struct LoaderNode {
     // 쿠킹 결과로 바꾼다 — 이 패키지를 Hard로 가리키는 패키지는 TestAsset을 기대하고 쓰였으므로
     // 공개 단계에서 TypeMismatch다(오래된 의존 쿠킹 결과).
     bool staleType = false;
+    // 참이면 대표 에셋을 TestHookAsset으로 만들고 첫 Hard 대상(hard[0])을 typed로 가리킨다(생성자·
+    // 소멸자 hook — 공개 트랜잭션 안의 사용자 코드 시험). 나머지 Hard·Soft·bulk는 쓰지 않는다.
+    bool hookType = false;
 };
 
 // 쿠킹 패키지 장면이다: 노드를 더하고 Cook하면 패키지 byte와 매니페스트가 생긴다.
@@ -125,7 +128,10 @@ public:
             }
 
             const ObjectHandle asset =
-                Make<TestAsset>(source, TestAssetType(), made.Value().Handle(), "");
+                node.hookType ? Make<asset_fixture::TestHookAsset>(
+                                    source, GeneratedType<asset_fixture::TestHookAsset>::Id(),
+                                    made.Value().Handle(), "")
+                              : Make<TestAsset>(source, TestAssetType(), made.Value().Handle(), "");
             if (asset.IsNull() || !packages.TryPushBack(Move(made.Value())) ||
                 !assets.TryPushBack(asset)) {
                 return false;
@@ -136,6 +142,23 @@ public:
         for (usize index = 0; index < nodes_.Size(); ++index) {
             const LoaderNode& node = nodes_[index];
             const ObjectHandle asset = assets[index];
+            if (node.hookType) {
+                bool linked = node.hardCount == 0;
+                if (!linked) {
+                    auto* hook = Pointer<asset_fixture::TestHookAsset>(source, asset);
+                    linked = hook != nullptr && source
+                                                    .SetReference(access, asset, hook->typed,
+                                                                  assets[IndexOf(node.hard[0])])
+                                                    .IsOk();
+                }
+
+                if (!linked) {
+                    return false;
+                }
+
+                continue;
+            }
+
             bool ok = WithBorrow<TestAsset>(source, asset, [&](TestAsset& owner) {
                 for (uint32 edge = 0; edge < node.hardCount; ++edge) {
                     const ObjectHandle target = assets[IndexOf(node.hard[edge])];
@@ -388,6 +411,9 @@ public:
     void Release(CookedPackageRead&) noexcept override {
         ++released;
         --active;
+        if (onRelease != nullptr) {
+            onRelease(onReleaseContext);
+        }
     }
 
     // 쌓인 완료를 앞에서 count개 내보낸다.
@@ -424,9 +450,11 @@ public:
         return false;
     }
 
-    // 시험 hook: Begin마다 불린다(로더 재진입 시험).
+    // 시험 hook: Begin·Release마다 불린다(로더 재진입 시험).
     void (*onBegin)(void* context) noexcept = nullptr;
     void* onBeginContext = nullptr;
+    void (*onRelease)(void* context) noexcept = nullptr;
+    void* onReleaseContext = nullptr;
     Array<File> files;
     Array<Held> held;
     // Begin을 부른 경로(순서대로)다.

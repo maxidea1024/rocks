@@ -768,9 +768,9 @@ TEST(AssetLoader_CallbacksCannotReenter) {
     REQUIRE(rig.loader->Release(handle));
 }
 
-// 바깥 경계 재진입(11.6절 18): IO Begin·worker Run·시계·프레임 판정 안에서도 상태를 바꾸는 공개
-// 함수는 모두 WrongContext이고(허가 순회가 단위 참조를 쥔 채 Begin을 부른다) 로더는 이어서 정상으로
-// 끝난다.
+// 바깥 경계 재진입(11.6절 18): IO Begin·IO Release·worker Run·시계·프레임 판정 안에서도 상태를
+// 바꾸는 공개 함수는 모두 WrongContext이고(허가 순회가 단위 참조를 쥔 채 Begin을 부른다) 로더는
+// 이어서 정상으로 끝난다.
 TEST(AssetLoader_BoundaryCallbacksCannotReenter) {
     AssetEnv env;
     REQUIRE(env.Ready());
@@ -779,12 +779,15 @@ TEST(AssetLoader_BoundaryCallbacksCannotReenter) {
     rig.scene.Add(9);
     REQUIRE(rig.Cook());
     ReentrantCalls begin;
+    ReentrantCalls release;
     ReentrantCalls run;
     ReentrantClock clock;
     ReentrantCalls frame;
     clock.calls.describe = false;
     rig.io.onBegin = ReentrantOnce;
     rig.io.onBeginContext = &begin;
+    rig.io.onRelease = ReentrantOnce;
+    rig.io.onReleaseContext = &release;
     rig.worker.onRun = ReentrantOnce;
     rig.worker.onRunContext = &run;
     rig.config.clock = ReentrantClockRead;
@@ -793,7 +796,7 @@ TEST(AssetLoader_BoundaryCallbacksCannotReenter) {
     rig.config.inFrameContext = &frame;
     REQUIRE(rig.Start());
     const AssetLoadHandle handle = rig.Request(1);
-    ReentrantCalls* const sides[] = {&begin, &run, &clock.calls, &frame};
+    ReentrantCalls* const sides[] = {&begin, &release, &run, &clock.calls, &frame};
     for (ReentrantCalls* calls : sides) {
         calls->allocator = &env.allocator;
         calls->handle = handle;
@@ -806,7 +809,88 @@ TEST(AssetLoader_BoundaryCallbacksCannotReenter) {
         CHECK(calls->AllRefused());
     }
 
-    CHECK(!rig.IsLoaded(9));
+    CHECK(!rig.IsLoaded(9) && rig.io.released == 1);
+}
+
+namespace {
+
+// 공개 트랜잭션 안의 사용자 코드 쪽이다: TestHookAsset 생성자·소멸자 hook에서 재진입을 시도하고
+// 불린 횟수를 센다.
+struct TransactionHooks {
+    ReentrantCalls constructed;
+    ReentrantCalls destroyed;
+    uint32 constructions = 0;
+    uint32 destructions = 0;
+};
+
+void TransactionConstructed(void* context) noexcept {
+    auto& hooks = *static_cast<TransactionHooks*>(context);
+    ++hooks.constructions;
+    ReentrantOnce(&hooks.constructed);
+}
+
+void TransactionDestroyed(void* context) noexcept {
+    auto& hooks = *static_cast<TransactionHooks*>(context);
+    ++hooks.destructions;
+    ReentrantOnce(&hooks.destroyed);
+}
+
+// 시험이 건 TestHookAsset hook을 범위 끝에서 푼다(뒤 GC·Registry 소멸이 부르지 않게).
+struct TransactionHookScope {
+    explicit TransactionHookScope(TransactionHooks& hooks) noexcept {
+        asset_fixture::testHookAssetHooks.constructed = TransactionConstructed;
+        asset_fixture::testHookAssetHooks.destroyed = TransactionDestroyed;
+        asset_fixture::testHookAssetHooks.context = &hooks;
+    }
+
+    ~TransactionHookScope() {
+        asset_fixture::testHookAssetHooks = asset_fixture::TestHookAssetHooks{};
+    }
+
+    TransactionHookScope(const TransactionHookScope&) = delete;
+    TransactionHookScope& operator=(const TransactionHookScope&) = delete;
+};
+
+} // namespace
+
+// 공개 트랜잭션 안의 사용자 코드 재진입(11.6절 18): 클래스 생성자(InstantiatePackages — 1(Hook →
+// 2))와 공개 실패 롤백의 소멸자(3(Hook → 4, 오래된 쿠킹 결과) → TypeMismatch) 안에서 상태를 바꾸는
+// 공개 함수는 모두 WrongContext이고 읽기는 된다. hook은 실제로 불리고, 로더는 이어서 정상으로
+// 끝난다(1 Succeeded·공개, 3 TypeMismatch, 9는 요청되지 않았다).
+TEST(AssetLoader_TransactionCodeCannotReenter) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    LoaderRig rig(env);
+    rig.scene.Add(1).hookType = true;
+    rig.scene.Add(2);
+    rig.scene.Add(3).hookType = true;
+    rig.scene.Add(4).staleType = true;
+    rig.scene.Add(9);
+    rig.scene.Hard(1, 2);
+    rig.scene.Hard(3, 4);
+    REQUIRE(rig.Cook());
+    REQUIRE(rig.Start());
+    TransactionHooks hooks;
+    const TransactionHookScope armed(hooks);
+    const AssetLoadHandle loaded = rig.Request(1);
+    ReentrantCalls* const sides[] = {&hooks.constructed, &hooks.destroyed};
+    for (ReentrantCalls* calls : sides) {
+        calls->allocator = &env.allocator;
+        calls->handle = loaded;
+        calls->loader = rig.loader.Get();
+    }
+
+    REQUIRE(rig.PumpUntilSettled());
+    CHECK(rig.StateOf(loaded) == AssetLoadState::Succeeded && rig.IsLoaded(1));
+    CHECK(hooks.constructions >= 1 && hooks.destructions == 0 && hooks.constructed.AllRefused());
+    const AssetLoadHandle failed = rig.Request(3);
+    REQUIRE(rig.PumpUntilSettled());
+    const AssetLoadStatus status = rig.StatusOf(failed);
+    CHECK(status.state == AssetLoadState::Failed && status.error == ErrorCode::TypeMismatch &&
+          status.diagnostic.related == FixedId(4));
+    CHECK(hooks.destructions >= 1 && hooks.destroyed.AllRefused());
+    CHECK(!rig.IsLoaded(3) && rig.IsLoaded(4) && !rig.IsLoaded(9));
+    REQUIRE(rig.loader->Shutdown());
 }
 
 // PostLoad 대기 중 의존 실패와 재요청(11.6절 6·16): U(2)가 공개된 채 PostLoad를 기다리는
