@@ -64,7 +64,7 @@ internal static class Program
                         .Concat(PolicyChecks.TargetIntrinsics(root)).Concat(PolicyChecks.TestAccess(root))
                         .Concat(PolicyChecks.SourceWarnings(root)).Concat(PolicyChecks.OptimizationOverrides(root))
                         .Concat(PolicyChecks.CompilerBuiltins(root)).Concat(PolicyChecks.RawLimitLiterals(root)).Concat(PolicyChecks.InitializerListDeductions(root)).Concat(PolicyChecks.CVarRegistrations(root)).Concat(PolicyChecks.CompileTimeMessages(root)).Concat(PolicyChecks.EnglishSourceLiterals(root)).Concat(PolicyChecks.EnglishBuildFiles(root)).Concat(PolicyChecks.DeterministicMathSources(root)).Concat(PolicyChecks.CrtNumberConversions(root)).Concat(UnicodeTables.Check(root)).Concat(Json5UnicodeTablesGenerator.Check(root)).Concat(MathTables.Check(root)).Concat(NumberTables.Check(root))
-                        .Concat(PolicyChecks.PythonFreeMainPath(root)).Concat(PolicyChecks.ThirdParty(root)).Concat(PolicyChecks.DerivedSources(root)).Concat(PolicyChecks.ForeignEngineBoundary(root))
+                        .Concat(PolicyChecks.PythonFreeMainPath(root)).Concat(PolicyChecks.ThirdParty(root)).Concat(PolicyChecks.DerivedSources(root)).Concat(PolicyChecks.ForeignEngineBoundary(root)).Concat(PolicyChecks.PluginModuleRules(root))
                         .Concat(PolicyChecks.ShaderToolReferences(root)).Concat(PolicyChecks.ProcessEntryPoints(root)).ToList();
                     // Release 배제(셰이더 시스템 9절)는 규칙 어셈블리를 평가한다. 알려진 예외는 실패가 아니지만 조용히 넘기지 않고 출력한다.
                     string rulesAssembly = options.Optional("rules") ?? ReleaseExclusion.DefaultRulesAssembly(root);

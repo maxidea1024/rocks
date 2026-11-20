@@ -63,14 +63,34 @@ public static partial class PolicyChecks
     // 엔진이 소유한 C++ 소스의 최상위 폴더다(서식·경고·플랫폼 경계 검사 범위).
     private static readonly string[] OwnedSourceRoots = ["Core", "Engine", "Programs", "Templates"];
 
-    // 시험 실행 파일에 들어가는 소스다. 모듈 시험은 <루트>/Source/<그룹>/<모듈>/Tests/ 아래(FoundationTests.Build.cs가 모으는
-    // 곳)이고 runner는 Programs/FoundationTests/다. 모듈 Private/ 아래의 Tests 디렉터리(UE의 Private/Tests 관례)는 모듈 소스로
+    // 시험 실행 파일에 들어가는 소스다. 모듈 시험은 <루트>/Source/<그룹>/<모듈>/Tests/ 아래와 엔진 플러그인의
+    // Engine/Plugins/…/<플러그인>/Source/<모듈>/Tests/ 아래(FoundationTests.Build.cs가 모으는 곳 — BuildTargets 3.9절 BD40·BD42)이고
+    // runner는 Programs/FoundationTests/다. 모듈 Private/ 아래의 Tests 디렉터리(UE의 Private/Tests 관례)는 모듈 소스로
     // 컴파일되어 출하되므로 시험 소스가 아니다.
     private static bool IsTestSource(string relative)
     {
         string[] parts = relative.Split('/');
-        return (parts.Length > 5 && parts[1] == "Source" && parts[4] == "Tests") ||
+        return (parts.Length > 5 && parts[1] == "Source" && parts[4] == "Tests") || IsPluginModuleSubfolder(parts, "Tests") ||
                relative.StartsWith("Programs/FoundationTests/", StringComparison.Ordinal);
+    }
+
+    // Engine/Plugins/…/Source/<모듈>/<folder>/ 아래 파일인가(플러그인 모듈의 하위 폴더).
+    private static bool IsPluginModuleSubfolder(string[] parts, string folder)
+    {
+        if (parts.Length < 7 || parts[0] != "Engine" || parts[1] != "Plugins")
+        {
+            return false;
+        }
+
+        for (int index = 3; index + 3 < parts.Length; ++index)
+        {
+            if (parts[index] == "Source" && parts[index + 2] == folder)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // 리플렉션 필드 템플릿(rocks::Array·ObjectRefArray·StructRefArray·ObjectRefMap·ObjectRef·WeakObjectRef·SoftObjectRef·ClassRef)의 명시적 인스턴스화·extern

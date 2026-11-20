@@ -21,6 +21,9 @@ public sealed record DescribedModule(ModuleDescriptor Descriptor, string OwnerNa
 /// </summary>
 public sealed record DescriptorOwner(ProjectDescriptor? Project, IReadOnlyList<PluginReference> Plugins, PluginReferrer Referrer)
 {
+    /// <summary>엔진 저장소 루트다(엔진 타깃만). 플러그인 모듈 폴더·계층 검사가 규칙의 ModuleDirectory(루트 기준)와 대조할 때 쓴다.</summary>
+    public string? EngineRoot { get; init; }
+
     /// <summary>
     /// 프로젝트와 그 타깃이다. 타깃 참조가 같은 이름의 프로젝트 참조를 이긴다(<see cref="TargetPluginReferences.Combine"/>).
     /// </summary>
@@ -33,11 +36,11 @@ public sealed record DescriptorOwner(ProjectDescriptor? Project, IReadOnlyList<P
         return new(project, TargetPluginReferences.Combine(targetPlugins, project.Plugins), referrer);
     }
 
-    /// <summary>엔진 저장소 타깃이다(프로젝트 없음).</summary>
-    public static DescriptorOwner ForEngine(string targetName, IReadOnlyList<PluginReference> targetPlugins)
+    /// <summary>엔진 저장소(rootDirectory) 타깃이다(프로젝트 없음).</summary>
+    public static DescriptorOwner ForEngine(string targetName, IReadOnlyList<PluginReference> targetPlugins, string rootDirectory)
     {
         TargetPluginReferences.Validate(targetName, targetPlugins);
-        return new(null, targetPlugins, PluginReferrer.OfTarget(targetName));
+        return new(null, targetPlugins, PluginReferrer.OfTarget(targetName)) { EngineRoot = Path.GetFullPath(rootDirectory) };
     }
 }
 
@@ -77,12 +80,15 @@ public sealed class DescriptorModuleSet
 {
     private readonly Dictionary<string, DescribedModule> modules;
 
+    private readonly Dictionary<string, PluginDescriptor> plugins;
+
     private DescriptorModuleSet(DescriptorOwner owner, Dictionary<string, DescribedModule> modules,
-        IReadOnlyList<PluginDescriptor> enabledPlugins)
+        IReadOnlyList<PluginDescriptor> enabledPlugins, IReadOnlyList<PluginDescriptor> available)
     {
         Owner = owner;
         this.modules = modules;
         EnabledPlugins = enabledPlugins;
+        plugins = available.ToDictionary(plugin => plugin.Name, StringComparer.Ordinal);
     }
 
     public DescriptorOwner Owner { get; }
@@ -147,7 +153,7 @@ public sealed class DescriptorModuleSet
             }
         }
 
-        return new(owner, result, enabled);
+        return new(owner, result, enabled, available);
     }
 
     /// <summary>
@@ -203,6 +209,8 @@ public sealed class DescriptorModuleSet
             }
         }
 
+        ValidateLayers(ruleModules);
+
         void RequireIncluded(string name, string user)
         {
             if (modules.TryGetValue(name, out DescribedModule? module) && !module.Included)
@@ -231,4 +239,66 @@ public sealed class DescriptorModuleSet
             ? rule with { LoadingPhase = module.Descriptor.LoadingPhase }
             : rule).ToList();
     }
+
+    /// <summary>
+    /// 플러그인 모듈의 위치와 계층 의존을 검사한다(Docs/Design/BuildTargets.ko.md 3.9절 BD37·BD39). 타깃과 무관한 구조 규칙이라 모든 규칙
+    /// 모듈(빠진 모듈 포함)을 본다. 의존은 링크 의존과 실행 중 적재(DynamicModules) 둘 다다.
+    /// <list type="bullet">
+    /// <item>엔진 저장소: 플러그인 모듈의 ModuleDirectory는 &lt;플러그인&gt;/Source/&lt;모듈&gt;이다(PluginModuleRules).</item>
+    /// <item>엔진 저장소: Core·Engine/Source 모듈은 플러그인 모듈에 의존하지 않는다(UE scope 검사와 같다).</item>
+    /// <item>플러그인 모듈이 다른 플러그인의 모듈에 의존하면 그 플러그인을 자기 .rocksplugin plugins에 적어야 한다.</item>
+    /// </list>
+    /// </summary>
+    private void ValidateLayers(IReadOnlyList<NativeModuleInput> ruleModules)
+    {
+        DescribedModule? PluginModule(string name) =>
+            modules.TryGetValue(name, out DescribedModule? module) && module.FromPlugin ? module : null;
+
+        foreach (NativeModuleInput rule in ruleModules)
+        {
+            DescribedModule? self = PluginModule(rule.Name);
+            if (Owner.EngineRoot is string root && self is not null)
+            {
+                string expected = Relative(root, Path.Combine(Path.GetDirectoryName(self.OwnerFile)!, "Source", rule.Name));
+                if (!string.Equals(rule.ModuleDirectory?.Replace('\\', '/'), expected, StringComparison.Ordinal))
+                {
+                    throw new DescriptorException(self.OwnerFile,
+                        $"plugin module '{rule.Name}' must live in {expected} (its rules give '{rule.ModuleDirectory}'); derive its rules from PluginModuleRules.");
+                }
+            }
+
+            bool engineModule = Owner.EngineRoot is not null && self is null && IsEngineLayer(rule.ModuleDirectory);
+            foreach (string dependency in rule.AllDependencies.Concat(rule.DynamicModules))
+            {
+                if (PluginModule(dependency) is not DescribedModule target)
+                {
+                    continue;
+                }
+
+                if (engineModule)
+                {
+                    throw new DescriptorException(target.OwnerFile,
+                        $"engine module '{rule.Name}' must not depend on plugin module '{dependency}' of plugin '{target.OwnerName}'; " +
+                        "Core and Engine/Source modules never reference plugins.");
+                }
+
+                if (self is not null && target.OwnerName != self.OwnerName &&
+                    !plugins[self.OwnerName].Plugins.Any(reference => reference.Name == target.OwnerName))
+                {
+                    throw new DescriptorException(self.OwnerFile,
+                        $"plugin module '{rule.Name}' depends on module '{dependency}' of plugin '{target.OwnerName}'; add " +
+                        $"{{ \"name\": \"{target.OwnerName}\", \"enabled\": true }} to \"plugins\" of {Path.GetFileName(self.OwnerFile)}.");
+                }
+            }
+        }
+    }
+
+    // Core·Engine/Source 아래 모듈(엔진 계층)인가. Engine/Plugins와 Programs는 아니다.
+    private static bool IsEngineLayer(string? moduleDirectory)
+    {
+        string? path = moduleDirectory?.Replace('\\', '/');
+        return path is not null && (path.StartsWith("Core/", StringComparison.Ordinal) || path.StartsWith("Engine/Source/", StringComparison.Ordinal));
+    }
+
+    private static string Relative(string root, string path) => Path.GetRelativePath(root, path).Replace('\\', '/');
 }

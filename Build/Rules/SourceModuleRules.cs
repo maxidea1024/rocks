@@ -65,6 +65,18 @@ public abstract class SourceModuleRules : ModuleRules
     /// <summary>Group under Source (Runtime, Developer or Editor).</summary>
     protected virtual string Group => "Runtime";
 
+    /// <summary>
+    /// Module type (Docs/Design/BuildTargets.ko.md section 3.9, BD38). Engine modules take it from the Group folder; plugin modules take it
+    /// from the plugin descriptor. The Release exclusion policy reads it. Rules that override Configure start from base.Configure so the
+    /// type is kept.
+    /// </summary>
+    protected virtual ModuleType ModuleType => Group switch
+    {
+        "Developer" => ModuleType.Developer,
+        "Editor" => ModuleType.Editor,
+        _ => ModuleType.Runtime
+    };
+
     /// <summary>Whether Private/ contains implementation sources. Header-only modules set this to false.</summary>
     protected virtual bool HasSources => true;
 
@@ -122,7 +134,7 @@ public abstract class SourceModuleRules : ModuleRules
     protected UnityMode UnityFor(BuildContext context) => RepositoryUnity.Effective(Unity, context);
 
     /// <summary>Module folder relative to the repository root. Example: Core/Source/Runtime/Core.</summary>
-    protected string ModuleDirectory => $"{Layer}/Source/{Group}/{ModuleName}";
+    protected virtual string ModuleDirectory => $"{Layer}/Source/{Group}/{ModuleName}";
 
     /// <summary>
     /// Absolute path of the module entry point source <c>Private/&lt;ModuleName&gt;Module.cpp</c>, which holds the module's
@@ -173,6 +185,7 @@ public abstract class SourceModuleRules : ModuleRules
             UnityExclude = UnityExclude(context),
             PrivatePchHeader = PrivatePchHeader is null ? null : context.PathInRoot($"{ModuleDirectory}/{PrivatePchHeader}"),
             SharedPchHeader = SharedPchHeader,
+            Type = ModuleType,
             Metadata = Metadata,
             ModuleDirectory = ModuleDirectory
         }
@@ -184,6 +197,7 @@ public abstract class SourceModuleRules : ModuleRules
             PrivateDependencies = PrivateDependencies,
             DynamicModules = DynamicModules,
             LoadingPhase = LoadingPhase,
+            Type = ModuleType,
             Metadata = Metadata,
             ModuleDirectory = ModuleDirectory
         };
@@ -238,4 +252,59 @@ public abstract class EngineModuleRules : SourceModuleRules
     // Engine modules start first in the engine group, before game and plugin Default modules (UE LoadPreInitModules, Docs/Design/ModuleLoader.ko.md
     // section 3.11), so a PreDefault game or plugin module may depend on them.
     protected override LoadingPhase LoadingPhase => LoadingPhase.PreDefault;
+}
+
+/// <summary>
+/// Rules for engine plugin modules (Engine/Plugins, Docs/Design/BuildTargets.ko.md section 3.9, BD37). The plugin descriptor
+/// (&lt;Plugin&gt;.rocksplugin) is the single source of the module's folder, type and loading phase: the module lives in
+/// &lt;Plugin&gt;/Source/&lt;Module&gt;/ (UE plugin layout) and its rules only name the module and list dependencies. A module that no
+/// descriptor declares is an error. Usage example (Engine/Plugins/Importers/UnrealExchange/Source/UnrealExchange/UnrealExchange.Build.cs):
+/// <code>
+/// public sealed class UnrealExchange : PluginModuleRules
+/// {
+///     protected override string ModuleName => "UnrealExchange";
+///     protected override string[] PublicDependencies => ["Core"];
+/// }
+/// </code>
+/// Configure is sealed: the build of a disabled plugin still evaluates these rules, so they must not depend on anything but the context.
+/// </summary>
+public abstract class PluginModuleRules : SourceModuleRules
+{
+    private PluginDescriptor? plugin;
+
+    private ModuleDescriptor? descriptor;
+
+    private string? moduleDirectory;
+
+    protected sealed override string Layer => "Engine";
+
+    protected sealed override string ModuleDirectory =>
+        moduleDirectory ?? throw new InvalidOperationException($"Module '{ModuleName}': ModuleDirectory is known only inside Configure.");
+
+    protected sealed override ModuleType ModuleType => Descriptor.Type;
+
+    protected sealed override LoadingPhase LoadingPhase => Descriptor.LoadingPhase;
+
+    /// <summary>Plugin that declares this module. Available inside Configure.</summary>
+    protected PluginDescriptor Plugin =>
+        plugin ?? throw new InvalidOperationException($"Module '{ModuleName}': the plugin is known only inside Configure.");
+
+    private ModuleDescriptor Descriptor =>
+        descriptor ?? throw new InvalidOperationException($"Module '{ModuleName}': the descriptor is known only inside Configure.");
+
+    public sealed override NativeModuleInput Configure(BuildContext context)
+    {
+        var owners = context.Plugins.Where(candidate => candidate.Modules.Any(module => module.Name == ModuleName)).ToArray();
+        if (owners.Length != 1)
+        {
+            throw new ArgumentException(owners.Length == 0
+                ? $"Module '{ModuleName}' derives from PluginModuleRules, but no plugin under {context.PluginRoot} declares it in \"modules\"."
+                : $"Module '{ModuleName}' is declared by several plugins: {string.Join(", ", owners.Select(owner => owner.Name))}.");
+        }
+
+        plugin = owners[0];
+        descriptor = plugin.Modules.Single(module => module.Name == ModuleName);
+        moduleDirectory = Path.GetRelativePath(context.RootDirectory, Path.Combine(plugin.RootDirectory, "Source", ModuleName)).Replace(Path.DirectorySeparatorChar, '/');
+        return base.Configure(context);
+    }
 }

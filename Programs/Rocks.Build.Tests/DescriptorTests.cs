@@ -346,18 +346,49 @@ internal static class DescriptorTests
         Check(targetDisables.EnabledPlugins.Count == 0, "a target reference overrides the project reference");
 
         // 엔진 저장소 타깃(프로젝트 없음): 기술자가 없는 엔진 모듈은 대조 없이 통과하고, 켠 플러그인 모듈만 더해진다. 플랫폼 검사는 없다.
-        NativeModuleInput[] engineRules = [Rule("Core"), Rule("Engine", "Core"), Rule("Water", "Engine"), Rule("Weather", "Engine")];
-        var engine = DescriptorModuleSet.Resolve(DescriptorOwner.ForEngine("EngineTests", [new("Water", true)]), available,
+        string engineRoot = Path.Combine(root, "Game");
+        NativeModuleInput EngineRule(string name, string directory, params string[] dependencies) =>
+            Rule(name, dependencies) with { ModuleDirectory = directory };
+        NativeModuleInput[] engineRules =
+        [
+            EngineRule("Core", "Core/Source/Runtime/Core"), EngineRule("Engine", "Engine/Source/Runtime/Engine", "Core"),
+            EngineRule("Water", "Plugins/Water/Source/Water", "Engine"), EngineRule("Weather", "Plugins/Weather/Source/Weather", "Engine")
+        ];
+        var engine = DescriptorModuleSet.Resolve(DescriptorOwner.ForEngine("EngineTests", [new("Water", true)], engineRoot), available,
             NativePlatform.Android, NativeConfiguration.Release, TargetType.Program);
         Check(Names(engine.Apply(engineRules, ["Engine"])).SequenceEqual(["Core", "Engine", "Water"]),
             "an engine target keeps engine modules and adds enabled plugin modules");
         Check(engine.IncludedPluginModules.SequenceEqual(["Water"]), "engine target plugin modules");
         ExpectFailure(() => engine.Apply([.. engineRules, Rule("Tool", "Weather")], ["Tool"]),
             "an engine module used a disabled plugin module", "plugin 'Weather' is not enabled");
-        var engineNone = DescriptorModuleSet.Resolve(DescriptorOwner.ForEngine("Foundation", []), available, NativePlatform.Windows,
+        var engineNone = DescriptorModuleSet.Resolve(DescriptorOwner.ForEngine("Foundation", [], engineRoot), available, NativePlatform.Windows,
             NativeConfiguration.Debug, TargetType.Program);
         Check(engineNone.EnabledPlugins.Count == 0 && Names(engineNone.Apply(engineRules, ["Engine"])).SequenceEqual(["Core", "Engine"]),
             "an engine target without plugin references builds no plugin module");
+
+        // 계층(BD37·BD39): 플러그인 모듈의 폴더는 <플러그인>/Source/<모듈>, 엔진 계층 모듈은 플러그인 모듈에 링크·적재 의존하지 않는다,
+        // 프로그램 모듈은 켠 플러그인 모듈을 쓸 수 있다, 플러그인 사이 의존은 .rocksplugin plugins에 적어야 한다.
+        NativeModuleInput[] Replace(NativeModuleInput replacement) =>
+            [.. engineRules.Where(rule => rule.Name != replacement.Name), replacement];
+        ExpectFailure(() => engine.Apply(Replace(EngineRule("Water", "Engine/Source/Developer/Water", "Engine")), ["Engine"]),
+            "plugin module outside its plugin folder", "must live in Plugins/Water/Source/Water");
+        ExpectFailure(() => engine.Apply(Replace(EngineRule("Engine", "Engine/Source/Runtime/Engine", "Core", "Water")), ["Engine"]),
+            "engine module linked to a plugin module", "engine module 'Engine' must not depend on plugin module 'Water'");
+        ExpectFailure(() => engine.Apply(Replace(EngineRule("Core", "Core/Source/Runtime/Core") with { DynamicModules = ["Water"] }), ["Engine"]),
+            "engine module loading a plugin module at run time", "engine module 'Core' must not depend on plugin module 'Water'");
+        Check(Names(engine.Apply([.. engineRules, Rule("Tool", "Water")], ["Tool"])).Contains("Tool"),
+            "a program module may use an enabled plugin module");
+        ExpectFailure(() => engine.Apply(Replace(EngineRule("Water", "Plugins/Water/Source/Water", "Weather")), ["Engine"]),
+            "plugin module used another plugin without declaring it", "add { \"name\": \"Weather\", \"enabled\": true } to \"plugins\" of Water.rocksplugin");
+        Write(plugins, "Storm/Storm.rocksplugin", """
+            { "fileVersion": 1, "version": 1, "versionName": "1.0", "friendlyName": "Storm",
+              "modules": [ { "name": "Storm", "type": "Developer" } ], "plugins": [ { "name": "Weather", "enabled": true } ] }
+            """);
+        var storm = DescriptorModuleSet.Resolve(DescriptorOwner.ForEngine("Commandlet", [new("Storm", true)], engineRoot),
+            PluginCatalog.Discover([plugins]), NativePlatform.Windows, NativeConfiguration.Release, TargetType.Program);
+        Check(Names(storm.Apply([.. engineRules, EngineRule("Storm", "Plugins/Storm/Source/Storm", "Weather")], ["Engine"]))
+            .SequenceEqual(["Core", "Engine", "Weather", "Storm"]), "a plugin module may use a declared dependency plugin");
+        File.Delete(Path.Combine(plugins, "Storm", "Storm.rocksplugin"));
     }
 
     // 설치 SDK 게임 빌드의 Game 타깃(타깃 참조 없음)이다.

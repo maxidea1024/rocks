@@ -1,6 +1,6 @@
 # 빌드 타깃·모듈 의존·플러그인 조건 설계
 
-기준일: 2026-11-21, 개정 9. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
+기준일: 2026-11-21, 개정 10. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
 - **타깃 종류 확장**: Editor·Client·Server 타깃과, 타깃 종류에 따라 코드·데이터를 컴파일에서 빼는 매크로.
 - **모듈 의존 공개 범위**: 의존마다 Public(소비자에게 include·정의를 넘김)과 Private(이 모듈 안에서만 씀)을 나눈다.
 - **플러그인 활성 조건**: 프로젝트가 플러그인을 특정 타깃·플랫폼·구성에서만 켠다.
@@ -411,6 +411,13 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 - `TargetType`은 기술자 해석이 쓰므로 규칙 기반 어셈블리에서 `Rocks.Build` 어셈블리로 옮겼다(이름공간 `Rocks.Build.Rules`는 그대로).
 - 게임 빌드는 기술자 검증(`Discover`)을 규칙 컴파일 전에 하고, 해석(`Resolve`)은 규칙 로드 뒤 타깃 종류·타깃 참조로 한다(BD24). 결과로 게임 프로젝트의 Program 타깃도 `enabledByDefault`를 받지 않는다(BD34).
 
+**BS9b 구현 세부(개정 10).**
+- `PluginModuleRules`는 `SourceModuleRules`를 상속하고 `Configure`를 봉인한다. `Configure`가 `BuildContext.Plugins`에서 모듈을 선언한 플러그인을 하나 찾고(없거나 둘 이상이면 오류), `ModuleDirectory`(`<플러그인>/Source/<모듈>`)·`ModuleType`·`LoadingPhase`를 기술자 값으로 정한다. 플러그인 규칙은 이 값을 바꿀 수 없다.
+- `SourceModuleRules.ModuleType`은 Group 폴더에서 온다. `Configure`를 재정의한 엔진 규칙은 `base.Configure`에서 시작해야 종류가 남는다. 이를 정책 `module-type-group`(Release 배제 검사의 일부)이 확인한다. Group 폴더(`<계층>/Source/Developer|Editor/`)와 종류 칸이 다르면 실패이고, 플러그인 경로는 보지 않는다.
+- 위치·계층 검사(BD37·BD39)는 `DescriptorModuleSet.Apply`가 한다. 엔진 타깃 주인은 저장소 루트(`DescriptorOwner.EngineRoot`)를 갖고, 기술자 모듈 규칙의 `ModuleDirectory`를 기대 경로와 대조한다. 대상은 타깃과 무관하게 모든 규칙 모듈(빠진 모듈 포함)이고, 의존은 링크 의존과 `DynamicModules`다. 엔진 계층은 `ModuleDirectory`가 `Core/` 또는 `Engine/Source/`로 시작하는 모듈이다.
+- Release 배제는 Game 타깃마다 엔진 주인으로 해석해 `IncludedPluginModules`를 도달 근에 더한다. 해석이 실패하면(끈 플러그인 모듈 사용 등) `release-plugin-resolution` 실패다.
+- `plugin-module-rules-base` 검사 대상은 두 가지다. 규칙 파일이 `<플러그인>/Source/<모듈>/<모듈>.Build.cs`이고 그 플러그인 폴더에 `<플러그인>.rocksplugin`이 있는지, 그리고 `class <모듈> : PluginModuleRules` 선언인지(다른 규칙 기반 클래스 금지)다.
+
 ## 4. 결정 요약
 
 1. 타깃 종류는 UE와 같은 다섯 가지다(Game·Editor·Client·Server·Program).
@@ -579,3 +586,4 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 | 7 | 2026-11-21 | BS8b 구현 세부(사용자 결정 — UE 방식): `ROCKS_GENERATED_BODY()` 의무(리플렉션 쪽 RMC2211·`ReflectedDeclarationV`를 씀), `GeneratedType<X>::NativeKey()`(생성 `.cpp` 저장소, API 매크로), `NativeTypeKey<T>()`는 리플렉션 클래스면 그것을 쓰고(클래스 키 연산표는 함수 안 정적 표) 생성 헤더가 없으면 `static_assert`, 생성 소스는 클래스 대상 생성 헤더 include, struct·enum·native 등록 타입은 inline 키 유지(한계 — struct는 헤더 템플릿 상수 연산표). 버린 안: 리플렉션 헤더의 생성 헤더 include, 이름 해시 키 |
 | 8 | 2026-11-21 | 3.9절 엔진 플러그인 빌드를 더했다(BD32–BD42, BS9a–BS9d, 4절 10항, 7절 세 행). 사용자 지시 "진행 가능한거부터"에 따라 Unreal 교환 리더(UX1a)를 막는 빈 곳을 메운다. rocks-07과 조율해 rocks-ff가 맡는다. UE 근거는 5.8.4 UBT(`Plugins.cs`·`EnumeratePlugins.cs`·`UEBuildTarget.SetupPlugins`·`PreBuildSetup`·`ModuleDescriptor.IsCompiledInConfiguration`·`TargetRules`의 플러그인 목록과 `bBuildDeveloperTools`·`RulesCompiler`) |
 | 9 | 2026-11-21 | BS9a 구현 세부(3.9절): `PluginReferrer`·`DescriptorOwner`·`TargetPluginReferences`, `BuildContext.PluginRoot`·`Plugins`, `TargetType`을 `Rocks.Build` 어셈블리로 옮김, 게임 빌드 해석을 규칙 로드 뒤로 |
+| 10 | 2026-11-21 | BS9b 구현 세부(3.9절): `PluginModuleRules`(봉인 Configure, 기술자 값), `SourceModuleRules.ModuleType`과 정책 `module-type-group`, `Apply`의 위치·계층 검사(`EngineRoot`), Release 배제의 플러그인 해석과 `release-plugin-resolution`, `plugin-module-rules-base` 범위. [모듈 로더](ModuleLoader.ko.md) 개정 7 |
