@@ -5,6 +5,7 @@
 #include "LooseOctreeAdapter.h"
 #include "SceneOctree.h"
 #include "UnityOctreePort.h"
+#include <Launch/EntryPoint.h>
 
 #include <Base/Compiler.h>
 #include <Core/Algorithms.h>
@@ -161,41 +162,41 @@ bool ForEachToken(const char* list, Visit&& visit) noexcept {
     }
 }
 
-bool Parse(int argc, char** argv, Options& options) noexcept {
-    for (int index = 1; index < argc; ++index) {
-        const bool hasValue = index + 1 < argc;
-        if (platform::CStringEquals(argv[index], "--group") && hasValue) {
-            options.group = argv[++index];
-        } else if (platform::CStringEquals(argv[index], "--out") && hasValue) {
-            options.out = argv[++index];
-        } else if (platform::CStringEquals(argv[index], "--profile") && hasValue) {
-            options.profile = argv[++index];
-        } else if (platform::CStringEquals(argv[index], "--counters")) {
+bool Parse(Span<const StringView> arguments, Options& options) noexcept {
+    for (usize index = 0; index < arguments.Size(); ++index) {
+        const bool hasValue = index + 1 < arguments.Size();
+        if (platform::CStringEquals(arguments[index].Data(), "--group") && hasValue) {
+            options.group = arguments[++index].Data();
+        } else if (platform::CStringEquals(arguments[index].Data(), "--out") && hasValue) {
+            options.out = arguments[++index].Data();
+        } else if (platform::CStringEquals(arguments[index].Data(), "--profile") && hasValue) {
+            options.profile = arguments[++index].Data();
+        } else if (platform::CStringEquals(arguments[index].Data(), "--counters")) {
             options.counters = true;
-        } else if (platform::CStringEquals(argv[index], "--no-scenarios")) {
+        } else if (platform::CStringEquals(arguments[index].Data(), "--no-scenarios")) {
             options.scenarios = false;
-        } else if (platform::CStringEquals(argv[index], "--scenarios-only")) {
+        } else if (platform::CStringEquals(arguments[index].Data(), "--scenarios-only")) {
             options.scenariosOnly = true;
-        } else if (platform::CStringEquals(argv[index], "--looseness") && hasValue) {
-            if (!ParseRatio(argv[++index], options.looseness)) {
+        } else if (platform::CStringEquals(arguments[index].Data(), "--looseness") && hasValue) {
+            if (!ParseRatio(arguments[++index].Data(), options.looseness)) {
                 return false;
             }
-        } else if (platform::CStringEquals(argv[index], "--large-half") && hasValue) {
-            if (!ParseRatio(argv[++index], options.largeHalf)) {
+        } else if (platform::CStringEquals(arguments[index].Data(), "--large-half") && hasValue) {
+            if (!ParseRatio(arguments[++index].Data(), options.largeHalf)) {
                 return false;
             }
-        } else if (platform::CStringEquals(argv[index], "--root-level") && hasValue) {
+        } else if (platform::CStringEquals(arguments[index].Data(), "--root-level") && hasValue) {
             uint64 value = 0;
-            if (!ParseUnsigned(argv[++index], value) || value == 0 || value > 24) {
+            if (!ParseUnsigned(arguments[++index].Data(), value) || value == 0 || value > 24) {
                 return false;
             }
             options.rootLevel = static_cast<uint32>(value);
-        } else if (platform::CStringEquals(argv[index], "--seed") && hasValue) {
-            if (!ParseUnsigned(argv[++index], options.seed)) {
+        } else if (platform::CStringEquals(arguments[index].Data(), "--seed") && hasValue) {
+            if (!ParseUnsigned(arguments[++index].Data(), options.seed)) {
                 return false;
             }
-        } else if (platform::CStringEquals(argv[index], "--dists") && hasValue) {
-            if (!ForEachToken(argv[++index], [&](const char* token) noexcept {
+        } else if (platform::CStringEquals(arguments[index].Data(), "--dists") && hasValue) {
+            if (!ForEachToken(arguments[++index].Data(), [&](const char* token) noexcept {
                     Distribution distribution;
                     if (!ParseDistribution(token, distribution) ||
                         options.distCount >= static_cast<uint32>(Distribution::Count)) {
@@ -206,8 +207,8 @@ bool Parse(int argc, char** argv, Options& options) noexcept {
                 })) {
                 return false;
             }
-        } else if (platform::CStringEquals(argv[index], "--sizes") && hasValue) {
-            if (!ForEachToken(argv[++index], [&](const char* token) noexcept {
+        } else if (platform::CStringEquals(arguments[index].Data(), "--sizes") && hasValue) {
+            if (!ForEachToken(arguments[++index].Data(), [&](const char* token) noexcept {
                     uint64 value = 0;
                     if (!ParseUnsigned(token, value) || value < 16 || value > 1000000 ||
                         options.sizeCount >= 8) {
@@ -1218,7 +1219,8 @@ void ForGroup(const GroupChoice& choice, Allocator& allocator, const Dataset* da
     }
 }
 
-void WriteEnvironment(JsonWriter& json, const Options& options, int argc, char** argv) noexcept {
+void WriteEnvironment(JsonWriter& json, const Options& options,
+                      const launch::ApplicationContext& context) noexcept {
     json.Field("tool", "SpatialIndexBench");
     json.FieldInteger("schema", 1);
     json.Field("group", options.group);
@@ -1227,8 +1229,10 @@ void WriteEnvironment(JsonWriter& json, const Options& options, int argc, char**
     json.FieldInteger("seed", options.seed);
     json.Key("argv");
     json.BeginArray();
-    for (int index = 0; index < argc; ++index) {
-        json.String(argv[index]);
+    // 0번은 실행 파일의 절대 경로다(Launch가 OS에서 얻는다). 그 뒤는 인자 원문 순서다.
+    json.String(context.ExecutablePath().Data());
+    for (const StringView argument : context.Arguments()) {
+        json.String(argument.Data());
     }
     json.EndArray();
     json.Key("build");
@@ -1251,11 +1255,10 @@ void WriteEnvironment(JsonWriter& json, const Options& options, int argc, char**
                "(runtime branch remains)");
 }
 
-} // namespace
-
-int main(int argc, char** argv) {
+// 실행 본문이다(Launch 공통 실행 계층이 크래시 수집·명령줄 캡처 뒤 부른다).
+int RunMain(launch::ApplicationContext& launchContext) noexcept {
     Options options;
-    if (!Parse(argc, argv, options)) {
+    if (!Parse(launchContext.Arguments(), options)) {
         printf(
             "usage: SpatialIndexBench --group <A1|A2|A2s|B|C16|C256|D|D-variant> --out <file.json> "
             "[--profile full|large|variant|combo|parallel|flat] [--counters] [--dists a,b] "
@@ -1299,7 +1302,7 @@ int main(int argc, char** argv) {
                     &rightIds, &referenceStorage};
 
     json.BeginObject();
-    WriteEnvironment(json, options, argc, argv);
+    WriteEnvironment(json, options, launchContext);
     if (choice.kind == GroupKind::D) {
         WriteVariant(json, choice);
     }
@@ -1392,3 +1395,13 @@ int main(int argc, char** argv) {
     printf("wrote %s\n", options.out);
     return 0;
 }
+
+const launch::ApplicationDescription& Describe() noexcept {
+    static constexpr launch::ApplicationDescription Description{
+        .name = "SpatialIndexBench", .kind = launch::ApplicationKind::Tool, .run = &RunMain};
+    return Description;
+}
+
+} // namespace
+
+ROCKS_IMPLEMENT_APPLICATION(Describe)

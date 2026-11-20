@@ -10,6 +10,6 @@ public sealed class LogBenchProgram : ModuleRules
         Name = "LogBench",
         Kind = NativeModuleKind.Executable,
         Sources = context.Sources("Programs/LogBench/Private"),
-        Dependencies = ["Core", "Task", "TraceCapture"]
+        Dependencies = ["Launch", "Core", "Task", "TraceCapture"]
     };
 }

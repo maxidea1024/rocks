@@ -15,7 +15,8 @@ using namespace rocks;
 // 띄운 자식에서 확인한다(PrepareFatalTestProcess로 오류 대화상자를 막는다). 여러 스레드의 순서는
 // 수면이 아닌 명시적 이벤트로 만든다.
 namespace rocks::test {
-bool RegisterProcessProbe(const char* mode, int (*function)(int, char**) noexcept) noexcept;
+bool RegisterProcessProbe(const char* mode,
+                          int (*function)(int, const char* const*) noexcept) noexcept;
 } // namespace rocks::test
 
 namespace access_overlap_checker_tests_file {
@@ -44,7 +45,7 @@ void HoldRead(void* context) noexcept {
 
 // 자식 쪽이다. Fatal이 나면 돌아오지 않는다. 돌아오면 검출이 빠졌다는 뜻이므로 0을 돌려 부모가
 // 실패로 본다.
-int AccessOverlapProbe(int argc, char** argv) noexcept {
+int AccessOverlapProbe(int argc, const char* const* argv) noexcept {
     rocks::test::PrepareFatalTestProcess();
     if (argc < 4) {
         return 20;

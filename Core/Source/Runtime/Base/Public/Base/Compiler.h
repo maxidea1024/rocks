@@ -136,6 +136,10 @@
 // 인라인하지 않는다. 드문 오류 경로·큰 진단 함수를 hot path 밖으로 뺄 때 쓴다.
 #define ROCKS_NOINLINE __attribute__((noinline))
 
+// 이 함수를 부른 호출자의 복귀 주소다(const void*). 치명 오류 보고가 발생 위치를 남길 때
+// 쓴다(부르는 함수는 ROCKS_NOINLINE이어야 호출자가 바뀌지 않는다).
+#define ROCKS_RETURN_ADDRESS() static_cast<const void*>(__builtin_return_address(0))
+
 // 도달할 수 없는 지점이다. 도달하면 정의되지 않은 동작이므로 계약 위반 검사(Fatal) 대신 쓰지
 // 않는다.
 #define ROCKS_UNREACHABLE() __builtin_unreachable()

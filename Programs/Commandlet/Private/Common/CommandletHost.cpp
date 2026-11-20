@@ -1,8 +1,6 @@
 #include "CommandletHost.h"
 #include "LogCommandlet.h"
 #include <Config/ConfigDump.h>
-#include <Core/Diagnostics/LogSystem.h>
-#include <Core/Diagnostics/RuntimeLogSink.h>
 #include <Core/Memory/SystemAllocator.h>
 #include <HostConfig/HostSettings.h>
 #include <Platform/File.h>
@@ -137,29 +135,6 @@ Result<int32> TraceReport(void*, Span<const StringView> args, CommandletOutput& 
     return Result<int32>::Success(0);
 }
 
-// 명령을 등록하고 실행한다.
-int RunCommands(Span<const StringView> args, CommandletOutput output) noexcept;
-
-// logs를 설치한 채 RunCommands를 부른다.
-int RunInstalled(LogSystem& logs, Span<const StringView> args, CommandletOutput output) noexcept;
-
-} // namespace
-
-int Run(Span<const StringView> args, CommandletOutput output) noexcept {
-    // 명령줄 도구는 Sync LogSystem과 stderr sink를 쓴다(Docs/Design/LoggingSystem.ko.md 5.1절).
-    // 명령이 로그를 남기지 않으면 출력은 그대로다. 시작하지 못하면 설치 없이 계속한다(Warning
-    // 이상은 비상 경로로 stderr에 간다).
-    SystemAllocator logAllocator;
-    StderrLogSink stderrSink;
-    LogSystem logs(logAllocator, LogSystemConfig::ForTool());
-    const bool logging = logs.AddSink(stderrSink).IsOk() && logs.Start().IsOk();
-    const int exitCode = logging ? RunInstalled(logs, args, output) : RunCommands(args, output);
-    logs.Stop();
-    return exitCode;
-}
-
-namespace {
-
 // config-dump가 보는 설정 문맥이다. 엔진 호스트와 같은 부트(HostSettings — log.*·trace.*·
 // TracePresets 등록 → 엔진 층 파일 → CompleteStartup)를 거친다. 실행 파일 위에 Engine/Config가
 // 없으면 엔진 층 파일 없이 코드 기본값이다. 실패는 HostSettings가 기록했다(config-dump만 빠진다).
@@ -174,7 +149,11 @@ bool BootSettings(HostSettings& settings) noexcept {
            settings.CompleteStartup().IsOk();
 }
 
-int RunCommands(Span<const StringView> args, CommandletOutput output) noexcept {
+} // namespace
+
+// 명령을 등록하고 실행한다. 명령의 Log 호출은 Launch가 설치한 도구 로그로 간다(명령이 로그를
+// 남기지 않으면 출력은 그대로다).
+int Run(Span<const StringView> args, CommandletOutput output) noexcept {
     SystemAllocator settingsAllocator;
     HostSettings settings(settingsAllocator);
     const bool settingsReady = BootSettings(settings);
@@ -213,12 +192,5 @@ int RunCommands(Span<const StringView> args, CommandletOutput output) noexcept {
     }
     return static_cast<int>(result.Value());
 }
-
-int RunInstalled(LogSystem& logs, Span<const StringView> args, CommandletOutput output) noexcept {
-    LogInstallScope installed(logs);
-    return RunCommands(args, output);
-}
-
-} // namespace
 
 } // namespace rocks::commandlet_host

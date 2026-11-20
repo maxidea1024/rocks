@@ -44,7 +44,4 @@ void ProbeOpenGl(StringView, StringView, Report& report) noexcept {
     report.EndObject();
 }
 
-void PrepareSpikeProcess() noexcept {
-}
-
 } // namespace rocks::spike

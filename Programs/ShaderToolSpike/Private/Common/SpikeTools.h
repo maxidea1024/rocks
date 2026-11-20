@@ -70,9 +70,6 @@ void ProbeD3D12ShaderModel(Report& report) noexcept;
 // (WGL_EXT_create_context_es2_profile)가 되면 거기서도 같은 원문을 시험한다.
 void ProbeOpenGl(StringView vertexEssl, StringView pixelEssl, Report& report) noexcept;
 
-// 자동 실행이 멈추지 않도록 CRT·OS 오류 대화상자를 끈다(abort·assert는 stderr와 종료 코드로).
-void PrepareSpikeProcess() noexcept;
-
 // SPIR-V 검증(spirv-val과 같은 spvValidateWithOptions, target env vulkan1.1)이다. 실패 문구는
 // diagnostics에 남는다.
 bool ValidateSpirv(const shader::SpirvToolsFunctions& tools, Span<const uint8> code,
