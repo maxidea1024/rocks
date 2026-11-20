@@ -146,23 +146,33 @@ TEST(Rotator_GeneralAnglesMatchUnrealGolden) {
 
 TEST(Rotator_FromQuaternionMatchesUnrealGolden) {
     // UE FQuat::Rotator(UnrealMath.cpp:640-719) probe 값. 아래 입력은 asin·atan2 인자가
-    // 정확한 값이라 float·double 모두 결과가 정확히 같다. yaw·roll의 -180은 UE와 같이 그대로 나온다
-    // (atan2(-0, 음수) = -pi).
+    // 정확한 값이라 결과가 정확히 표현된다. double은 C atan2라 atan2(-0, 음수) = -pi로 roll -180이
+    // 그대로 나오고, float은 UE FGenericPlatformMath::Atan2(minimax, Y < 0일 때만 부호를
+    // 뒤집는다)라 같은 자리가 +180이다(UE FQuat4f::Rotator와 같다). float 경로는 libm을 쓰지 않아
+    // 플랫폼과 무관하게 같은 bit다(C atan2f를 쓰던 때는 Apple libm에서 179.99998이 나왔다).
     struct SpecialGolden {
         Quatd input;
         Rotator<double> expected;
+        Rotator<float> single;
     };
 
     const SpecialGolden cases[] = {
-        {Quatd(0.0, 0.0, 0.0, 1.0), Rotator<double>(0.0, 0.0, 0.0)},
-        {Quatd(0.0, 0.0, 1.0, 0.0), Rotator<double>(0.0, 180.0, 0.0)},
-        {Quatd(0.0, 0.0, -1.0, 0.0), Rotator<double>(0.0, 180.0, 0.0)},
-        {Quatd(1.0, 0.0, 0.0, 0.0), Rotator<double>(0.0, 0.0, -180.0)},
-        {Quatd(-1.0, 0.0, 0.0, 0.0), Rotator<double>(0.0, 0.0, -180.0)},
-        {Quatd(0.0, 1.0, 0.0, 0.0), Rotator<double>(0.0, 180.0, -180.0)},
+        {Quatd(0.0, 0.0, 0.0, 1.0), Rotator<double>(0.0, 0.0, 0.0),
+         Rotator<float>(0.0f, 0.0f, 0.0f)},
+        {Quatd(0.0, 0.0, 1.0, 0.0), Rotator<double>(0.0, 180.0, 0.0),
+         Rotator<float>(0.0f, 180.0f, 0.0f)},
+        {Quatd(0.0, 0.0, -1.0, 0.0), Rotator<double>(0.0, 180.0, 0.0),
+         Rotator<float>(0.0f, 180.0f, 0.0f)},
+        {Quatd(1.0, 0.0, 0.0, 0.0), Rotator<double>(0.0, 0.0, -180.0),
+         Rotator<float>(0.0f, 0.0f, 180.0f)},
+        {Quatd(-1.0, 0.0, 0.0, 0.0), Rotator<double>(0.0, 0.0, -180.0),
+         Rotator<float>(0.0f, 0.0f, 180.0f)},
+        {Quatd(0.0, 1.0, 0.0, 0.0), Rotator<double>(0.0, 180.0, -180.0),
+         Rotator<float>(0.0f, 180.0f, 180.0f)},
         // 비단위 입력, 특이점(s = 0.5 > 0.4999995): pitch 90, roll 0,
         // yaw = NormalizeAxis(-180) = 180.
-        {Quatd(-1.0, -0.0, -1.0, -0.0), Rotator<double>(90.0, 180.0, 0.0)},
+        {Quatd(-1.0, -0.0, -1.0, -0.0), Rotator<double>(90.0, 180.0, 0.0),
+         Rotator<float>(90.0f, 180.0f, 0.0f)},
     };
     for (const SpecialGolden& item : cases) {
         auto precise = Rotator<double>::TryFromQuaternion(item.input);
@@ -172,9 +182,9 @@ TEST(Rotator_FromQuaternionMatchesUnrealGolden) {
         CHECK(precise.Value().roll == item.expected.roll);
         auto single = Rotator<float>::TryFromQuaternion(Quat(item.input));
         REQUIRE(single);
-        CHECK(single.Value().pitch == static_cast<float>(item.expected.pitch));
-        CHECK(single.Value().yaw == static_cast<float>(item.expected.yaw));
-        CHECK(single.Value().roll == static_cast<float>(item.expected.roll));
+        CHECK(single.Value().pitch == item.single.pitch);
+        CHECK(single.Value().yaw == item.single.yaw);
+        CHECK(single.Value().roll == item.single.roll);
     }
 
     // 비단위 입력은 정규화 뒤 UE 식이다(이전 Rocks 회귀 입력 — 지금은 UE와 같이 roll -180).
