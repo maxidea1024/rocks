@@ -368,7 +368,7 @@ World 객체는 에셋 객체 Registry 밖에 있어 `ObjectRef<에셋>`을 걸 
 - 전체 쿠킹(`asset-cook --profile=X`)은 매니페스트를 바꾼 뒤 새 매니페스트가 가리키지 않는 패키지 파일을 지운다(이전 매니페스트로 이미 실행 중인 게임은 그 파일을 `NotFound`로 받는다 — 개발용 쿠킹 디렉터리의 한계이며 배포본은 바뀌지 않는다). 부분 쿠킹은 대상만 다시 만들고 기존 매니페스트에 병합하며 패키지 파일은 지우지 않는다(사라진 에셋의 매니페스트 항목만 뺀다). 병합은 기존 매니페스트의 프로파일 id·프로파일 출력 설정 SHA-256·CookSettings SHA-256·쿠커 버전이 모두 같을 때만 하고, 다르면 `IncompatibleCook`(전체 쿠킹 필요)이다. 처리기·포맷·타입 스키마·툴체인 변화는 항목별 cookKey가 잡는다(위 지역 입력).
 - 매니페스트 v1(`CookedManifest.rman`): 헤더 `{ "RMAN", 버전 1, 항목 수, 프로파일 id, 프로파일 출력 설정 SHA-256, CookSettings SHA-256, 쿠커 버전, cookedByEngineVersion(주·부·패치 — 진단용, 병합·로드 판정에 쓰지 않음) }` + 항목 `{ assetId, typeId, 경로 힌트, 패키지 SHA-256, 패키지 크기, bulkRawBytes(BulkIndex rawBytes 합 — 10.1절 5), cookKey, PrimaryAsset 표시, bundle 목록, 런타임 의존 목록 { assetId, kind(Hard·Soft) } }`(AssetId 정렬) + 파일 전체 CRC32. 손상은 `CorruptPackage`, 버전 불일치는 `UnsupportedVersion`. 로더는 시작할 때 매니페스트 프로파일 id가 실행 플랫폼의 프로파일과 같은지 확인하고(다르면 `IncompatibleCook`), 패키지를 열 때 크기·SHA-256을 먼저 보고 그다음 패키지 종류·assetId·대표 에셋 타입·bulk raw 합·Summary 프로파일 칸·Dependencies(Hard·Soft)를 매니페스트와 대조한다(다르면 `CorruptPackage` — 10.1절 8 `CheckCookedPackage`). SCC 계산은 매니페스트의 Hard 의존으로 로드 전에 한다.
 - 도구 빌드 ID·엔진 버전: 빌드 시스템이 쿠커·에디터 도구 실행 파일마다 주입하는 값이며 진단·추적용이다(병합 조건이 아니다). 쿠킹 보고서(엔진 버전은 CookedManifest 헤더의 cookedByEngineVersion에도)에 기록하고 쿠킹 패키지 Summary·cookKey에는 넣지 않는다 — Summary에 있으면 구성 사이 쿠킹 byte 동일(시나리오 13·25)이 깨지고 쿠킹 패키지 이름(내용 주소)이 엔진 빌드마다 바뀐다.
-- 런타임 쿠킹 루트: 도구(`asset-load-cooked`)는 `<Project>/Saved/Cooked/<Profile>/`. 게임은 `EngineAssets`가 명령행 `-CookedRoot=<dir>`(없으면 실행 파일 디렉터리의 `Cooked/`)를 `AssetManager`에 넘긴다. 쿠킹 결과를 배포 위치로 옮기는 패키징 단계는 후속이다.
+- 런타임 쿠킹 루트: 도구(`asset-load-cooked`)는 `<Project>/Saved/Cooked/<Profile>/`. 게임은 `EngineAssets`가 부팅 CVar `asset.cooked_root`(설정 파일 또는 `--set=asset.cooked_root=<dir>`, 비면 실행 파일 디렉터리의 `Cooked/`)를 `AssetManager`에 넘긴다(11.8절 3). 쿠킹 결과를 배포 위치로 옮기는 패키징 단계는 후속이다.
 - 쿠킹 bulk codec: 프로파일 설정(None·Zstd, 기본 None — 후속 스트리밍의 mip 단위 접근을 위해 entry 단위 압축).
 - 결정성(범위: 같은 도구 빌드에서 호스트 무관하게 같은 바이트): 정렬된 순회, 병렬 결과 정렬 후 기록, ID는 에디터 값 복사, 패딩 0. 이미지 처리 모듈은 SIMD 분기 없이 스칼라 경로만 쓰고, 초월 함수(pow·exp2·log2·sin)와 sRGB·감마 변환은 CRT를 쓰지 않는 Core 결정적 수학(A0-C)으로 하며 쿠킹 작업 동안 부동소수점 환경 guard(A0-C)를 건다. 현재 Core `LinearColor::ToSRGB`는 CRT `pow`를 써서 호스트마다 결과가 다를 수 있으므로(Color.h 주석) A0-C에서 결정적 수학의 표·함수로 바꾼다(런타임과 쿠킹의 sRGB 구현을 하나로). 결정적 수학 버전은 너겟 키와 cookKey에 들어간다. 시험: 결정적 수학의 기준값 표, CRT 미사용 링크 검사, 에셋 너겟 빈/찬 상태 출력 비교.
 - 오류: 에셋별 원인·경로를 모아 보고, 하나라도 실패하면 게시하지 않는다.
@@ -532,6 +532,46 @@ A1d(`Engine/Source/Runtime/AssetRuntime` — `AssetManager.h`, 상태: 구현)�
 11. **관측**: `Describe(snapshot)`가 로더 상태(11.6절 12)에 상주 단위 표(구성·상태·보유 내역 — 티켓·lease·보류·로더 공개 보유·간선)와 보류 명령 수, `lateEdgesIntoDiscarding`을 더한다.
 12. **종료**: `Shutdown()`은 먼저 종료 중으로 표시해 새 요청을 막고(`ShuttingDown` — 이어지는 전달의 callback·`fail` 안에서 낸 요청·보류 명령·묶음 로드·scope와 티켓·묶음 티켓의 `OnReady` 등록도 `ShuttingDown`이다 — 다시 전달할 Pump가 없으므로 받지 않고 callback은 caller에 남는다. 처음 구현은 전달 뒤에 표시해 그 안에서 낸 요청의 callback이 영영 불리지 않을 수 있었다 — 리뷰 지적, 고침) 모든 scope를 Revoke하고 아직 부르지 않은 callback·보류 명령 실패 함수에 `ShuttingDown`을 한 번 전달한 뒤 로더를 Shutdown하고(공개 패키지 RootRef를 놓는다) Registry를 끝낸다. 그 뒤 lease·티켓 객체의 소멸은 회수된 슬롯이라 무동작이다. AssetManager 파괴 때 lease·티켓 객체가 남아 있으면 `platform::Fatal`(6).
 13. **시험 방법**: Discard Busy는 그 패키지 아래 공개 전 객체를 만든 `ConstructionContext`를 열어 두어 결정적으로 만든다(Discard 계약 — 부분 트리에 Reserved 객체가 있으면 Busy). 다른 스레드 해제는 스레드에서 lease 소멸 → Join → Pump(명시 순서). 시나리오 23·28은 상태(Resident·Closing·revive·Discarding·끝)와 전이마다 시험을 대응시킨다(14.1.7절 대조표).
+
+### 11.8 구현에서 정한 점(A1e — EngineAssets)
+
+A1e(`Engine/Source/Runtime/EngineAssets`, 상태: 설계)가 3절의 연결 모듈과 11.4절(런타임 쿠킹 루트)·11.5절 3(프레임 판정 주입)·6.1절(GC·종료)을 다음과 같이 정한다. 애매한 곳은 UE 5.8을 따른다: 비동기 로드 진행은 World Tick 전(`UGameEngine::Tick`의 `StaticTick` → `ProcessAsyncLoading`, GameEngine.cpp:1854), 로드·GC 시간 예산은 console 변수(`s.AsyncLoadingTimeLimit` 기본 5 ms — CoreSettings.cpp:14, GC 증분 5 ms — GarbageCollection.cpp:310). 설계 교차 검증(리뷰어 1명, 필수 4·권장 8)을 반영했다.
+
+UE와 다른 점과 이유:
+- UE는 엔진이 늘 AssetManager를 만든다(`UEngine::InitializeObjectReferences`, 클래스가 틀리면 Fatal — UnrealEngine.cpp:3817–3834). Rocks는 게임이 Subsystem을 넣어야 생긴다: Engine은 AssetRuntime에 의존하지 않고(3절 계층) 쿠킹 콘텐츠 없는 헤드리스 실행이 있다.
+- UE는 종료 전에 `FlushAsyncLoading`으로 대기 로드를 끝내고(LaunchEngineLoop.cpp:5053) AssetManager는 UObject 종료와 함께 사라진다. Rocks는 대기 요청을 취소(`ShuttingDown` 전달)하고 엔진 종료 단계 안에서 명시 순서로 끝낸다(6) — 종료가 남은 로드 시간에 기대지 않게.
+
+1. **모듈**: `EngineAssets`(Runtime) → PublicDependencies {Engine, AssetRuntime}(Config·Task는 Engine이 공개 의존으로 준다 — 3절 그래프와 같다). Engine 층 기본 로딩 단계 `PreDefault`(ModuleLoader 3.11절 — 엔진 묶음)이고 진입점 파일과 `RegisterSettings`(CVar 등록 — LogHost 모듈 방식)를 둔다. 시험은 `EngineAssets/Tests`(EngineTests). AssetRuntime은 계속 Engine을 모른다.
+2. **등록과 접근**: `EngineAssetsSubsystem : EngineSubsystem`이 `AssetManager` 하나를 소유한다. 게임은 `EngineConfig::subsystems`에 `EngineAssetsSubsystemType()`을 넣는다(엔진은 Subsystem을 스스로 더하지 않는다). 접근은 `engine.GetSubsystem<EngineAssetsSubsystem>()->Manager()`. 한 프로세스의 Engine이 여럿이면 각자 하나씩이고 에셋 Registry 문맥 id는 이 모듈 고정 상위 값(엔진 문맥·World 문맥과 겹치지 않는 값) + 프로세스 안 순번이다.
+3. **설정**(CVar — `asset.*`, Engine 층 모듈은 설정 struct를 등록할 경로가 없어 CVar로 둔다: HostSettings가 모듈 `RegisterSettings`를 엔진 묶음 타입 등록 전에 부르므로 리플렉션 설정 struct의 TypeId가 아직 없다. UE도 같은 값들이 console 변수다):
+   - 부팅 고정(`cvar::Boot` — 시작 때 한 번 읽는다): `asset.cooked_root`(String, 빈 값이면 실행 파일 디렉터리 + `/Cooked`), `asset.runtime_profile`(String, 빈 값이면 빌드 플랫폼 이름 — 전용 서버 타깃이면 플랫폼 이름 + `Server`; 10절 TargetProfile id), `asset.loader.workers`(int32, 로더 worker 수, 기본 2), `asset.io.workers`(int32, 비동기 IO 스레드 수, 기본 2), `asset.loader.max_packages_in_flight`·`asset.loader.max_temp_bytes`(11.6절 9 기본값).
+   - 실행 중 조정(`cvar::Var` — 프레임마다 설정 sync 뒤 읽는다): `asset.pump.time_ms`(double, 기본 5 — UE `s.AsyncLoadingTimeLimit`), `asset.pump.max_units`·`asset.pump.max_post_loads`(무제한), `asset.pump.max_discards`(무제한), `asset.gc.time_ms`(double, 기본 5), `asset.gc.max_objects`(GcBudget 기본).
+   - 명령행은 따로 두지 않는다: `--set=asset.cooked_root=<dir>`(Config 세션 층 — 다른 설정과 같은 규약). 11.4절의 `-CookedRoot` 표기는 이것으로 바뀐다. 개발 실행은 프로젝트 설정 파일에 `{SavedDir}/Cooked/<profile>` 같은 값을 둔다(도구 `asset-load-cooked`와 같은 위치).
+   - 엔진에 설정 문맥이 없으면 CVar 기본값이다.
+   - 쿠킹 루트 결정(설정 값 → 실행 파일 기본)은 순수 함수 `ResolveCookedRoot(configured, executableDir, out)`이고 시험이 직접 부른다.
+4. **초기화**(`Initialize(Engine&)` — 생성 순서, 멤버는 이 순서로 선언해 역순으로 소멸한다): 쿠킹 루트 결정 → `<root>/CookedManifest.rman`을 동기로 읽어(크기 상한 `CookedManifestMaxFileBytes`) `ReadCookedManifest`(검증 포함 — A1f에서 서명 봉투 `CookedManifest.rsig`로 바뀐다) → `platform::AsyncIoContext::Start(backend, asset.io.workers)` → `AsyncCookedPackageIo` → 로더 `WorkerScheduler`(`asset.loader.workers`) → `WorkerSchedulerLoaderWorker` → `AssetManagerConfig`(allocator = `engine.GetAllocator()` — 여러 스레드의 할당·해제를 받아야 한다는 로더 요구, TypeRegistry = 엔진 TypeRegistry, 프레임 판정 = `Engine::IsInFrame`, 로더 관찰자·PostLoad handler 없음 — 9) → `AssetManager::Initialize`. 실패하면 Initialize가 자기 부분 상태를 역순으로 되돌리고(실패한 Subsystem은 Deinitialize되지 않는다 — Subsystem 규칙) 엔진 초기화가 실패한다. 쿠킹 루트·파일 경로·오류·진단을 한 번 기록한다(`LogEngineAssets`, 영어). 매니페스트가 없는 것도 실패다(빈 콘텐츠로 돌지 않는다). 소멸자는 부분 초기화에도 안전하다.
+5. **프레임**:
+   - `OnFrameBegin`(엔진 3단계 — World Tick 전): `AssetManager::Pump`(CVar 예산). 그 프레임의 World Tick이 결과·callback을 본다(UE 순서). Pump 실패는 첫 번째만 Error로 남기고 연속 실패는 회복 때 한 번 요약한다(엔진 World Tick 실패 기록과 같은 규칙).
+   - callback은 엔진 접근 범위 안에서 불린다(Pump가 엔진 단계 안이다). World 객체를 다루는 callback은 스스로 그 World 접근 범위(`World::With`)로 들어간다. callback은 World 객체를 raw 포인터로 붙잡지 않는다(약한 참조 `WeakObjectRef`) — World 파괴 뒤에도 놓인 티켓의 `Cancelled`·종료의 `ShuttingDown`이 전달된다(11.7절 5·12).
+   - `OnFrameEnd`(엔진 6단계): 에셋 객체 Registry GC. 에셋 Registry 객체는 Discard로만 죽으므로(6.1절) Discard 주도다: Pump 결과 `discardedPackages > 0`이면 수집 요청 표시를 세운다. 표시가 있고 Registry가 Idle이면 `BeginCollection` 뒤 `StepCollection`(CVar 예산, scheduler는 `engine.GcScheduler()` — World GC와 같은 게임 스레드에서 차례로 쓴다), 진행 중이면 `StepCollection`만 한다. cycle 도중 Discard가 더 있으면 끝난 뒤 한 번 더 돈다. Idle이고 회수 대기(`HasPendingReclaim`)가 있으면 `DrainRetired`. Busy(열린 `ConstructionContext`·Borrow)는 이번 프레임을 건너뛴다(정상 — 기록하지 않음). 그 밖의 실패(OutOfMemory)는 Pump처럼 첫 번째만 기록한다. `Engine::RequestFullCollection`(World 객체용)에는 참여하지 않는다 — Discard가 없으면 에셋 Registry에서 더 회수할 것이 없다.
+   - 프레임 판정 `Engine::IsInFrame()`: `RunFrame` 전체(1–6단계, 5단계 World 지연 파괴 포함) 동안 참인 새 표지다(기존 `inFrame_`은 5단계에서 거짓이라 쓰지 않는다). 프레임 안 `LoadBlocking`은 `WrongContext`(11.5절 3). 로딩 화면은 프레임 밖 초기화 단계나 `RequestAsset`을 쓴다.
+6. **종료**(엔진 순서: BeginShutdown → client 종료 → World 파괴 → CompleteInFlightWork(Subsystem 역순 → hooks) → Subsystem 정리(역순) → 엔진 Registry 최종 GC → hook 정리):
+   - `CompleteInFlightWork`: `AssetManager::Shutdown` — 아직 부르지 않은 callback·보류 명령에 `ShuttingDown`을 전달하고 로더가 진행 중 IO·worker를 기다린다(엔진의 "진행 중 비동기 작업 완료" 단계 계약). 결과는 엔진 Shutdown 결과로 보고된다.
+   - `Deinitialize`: AssetManager 파괴 → loader worker·scheduler 종료 → IO 구성 종료 → AsyncIoContext 종료(4의 역순, 각 결과 기록).
+   - 계약: lease·티켓·scope·명령 handle 객체는 EngineAssets Subsystem 정리 전에 소멸해야 한다 — World가 쥔 것은 World 파괴가, `EngineClient` 구현은 `OnEngineShutdown`까지, `EngineLoopHooks`는 `CompleteInFlightWork`까지, EngineAssets에 의존하는 다른 Subsystem은 자기 Deinitialize(EngineAssets보다 먼저 불린다)까지 놓는다. 남으면 AssetManager 파괴 `platform::Fatal`(11.7절 6, 6.1절 종료 순서 계약). `AssetLease` 리플렉션 필드는 WorldOnly 클래스만 가진다(5.6절)라 엔진 Registry 객체는 lease를 필드로 쥐지 않는다.
+   - 버린 대안: AssetManager 파괴를 엔진 Registry 최종 GC 뒤로 미루는 hook — 엔진 종료 단계를 늘리고, 그 사이 회수되는 객체의 handle 소멸이 Subsystem 정리 뒤 상태를 건드린다.
+7. **Engine 변경**(작게, 공개 함수 하나와 표지 하나): `bool Engine::IsInFrame() const`(게임 스레드 — `RunFrame` 전체 표지, 5). 설정은 CVar라 Engine 접근자가 필요 없다.
+8. **시험**(EngineTests `EngineAssets/Tests` — 14.1.9절 대조표, 시간·경쟁에 기대지 않는다):
+   - 픽스처: AssetRuntime의 `PackageWriter`·`WriteCookedManifest`로 시험 임시 디렉터리에 쿠킹 장면을 쓴다(AssetCooker 의존 없음). 설정 문맥에 `asset.cooked_root`를 넣어 엔진을 띄운다.
+   - 결정적 로드 순서: 프레임 밖(Run 전) `LoadBlocking`으로 상주시키고(동기 — 완료까지 기다림), 프레임 안(client Tick)에서 같은 에셋을 `RequestAsset`하면 다음 프레임 Pump에서 callback이 World Tick 전에 불린다. 디스크 IO가 끝나는 프레임에 기대는 단언은 없다.
+   - client Tick·World 지연 파괴 단계 안 `LoadBlocking` WrongContext, 프레임 밖 성공
+   - GC: 놓은 패키지가 Discard된 뒤 GC 조각들로 회수됨(시간 예산 CVar를 크게, 객체 수 예산으로 조각 수를 정한다), cycle 도중 Discard면 한 번 더, 열린 `ConstructionContext` 프레임은 건너뜀, 회수 대기 `DrainRetired`
+   - 초기화 실패: 매니페스트 없음·손상·프로파일 다름(IncompatibleCook)·IO context 시작 실패·할당 실패의 모든 지점 → 엔진 초기화 실패, 기록 한 번, 누수 없음
+   - `ResolveCookedRoot`: 설정 값 있음·없음, 실행 파일 디렉터리 기본
+   - 종료: World 파괴 뒤 놓인 티켓의 callback이 Cancelled(약한 참조는 null), CompleteInFlightWork에서 대기 callback ShuttingDown, client가 놓지 않은 lease → 자식 프로세스 Fatal(문구 대조), 규칙대로 놓으면 정상 종료
+   - CVar: 실행 중 Pump·GC 예산 변경이 다음 프레임부터 적용, 부팅 고정 값은 시작 뒤 바뀌지 않음
+   - Pump 연속 실패 기록 규칙
+9. **후속**: Rocks Lens 이벤트(로더 관찰자 → Trace, TraceSystem), 클래스별 PostLoad dispatch(A5 — handler를 여기서 연결), 서명 봉투 검증(A1f — 4의 매니페스트 읽기를 바꾼다), 쿠킹 결과를 배포 위치로 옮기는 패키징(후속).
 
 ## 12. 텍스처
 
