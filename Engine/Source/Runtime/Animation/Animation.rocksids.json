@@ -1,0 +1,292 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "rocks::AnimSlotGroup::name",
+      "id": "1802d5f5383644e7a6052e0d97e25d1f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::AnimSlotGroup::slots",
+      "id": "8c1faf25e2cd4ff6b11a0d352f1af4c3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BoneHierarchy::bones",
+      "id": "a683087fb916453bb261c6974ee52707",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BoneHierarchy::referencePose",
+      "id": "e2ab5f4a561b475e8928f758d61d510f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BoneInfo::exportName",
+      "id": "5396918d452244f5bf76840c4cd8d96d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BoneInfo::name",
+      "id": "85c54f5178f541eeb6351fdebefd3d6f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BoneInfo::parentIndex",
+      "id": "360a7a5c8033440082f3dc76355dba03",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BoneSocket::boneName",
+      "id": "684424c2048742769f232e9aa0ec3e72",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BoneSocket::forceAlwaysAnimated",
+      "id": "8bbd983e2b684153a47fef9909d8dcc9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BoneSocket::name",
+      "id": "073693650d4d47b18c6cc99a0b64cb14",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BoneSocket::relativeLocation",
+      "id": "93e6b87561064d9db75e45a6c9ff41d0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BoneSocket::relativeRotation",
+      "id": "c95e778365aa47809f0d1945489b183a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::BoneSocket::relativeScale",
+      "id": "66aa0cb19b4541cbba33d14708adc6df",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::NamedReferencePose::name",
+      "id": "e55bb8ea1c7a4d1abc603a60471a5463",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::NamedReferencePose::pose",
+      "id": "0e7cd3b01fc0423695e0ae1373940785",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Skeleton::bones",
+      "id": "459ee0c1a99a46758dfeb883c7f970d6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Skeleton::compatibleSkeletons",
+      "id": "8f680ba622cd470d9ade1c336fd9ae00",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Skeleton::curves",
+      "id": "f89a7a2508de44b0a0978c69fabd89d1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Skeleton::retargetModes",
+      "id": "14dd9b698d69473b83604aae80caf437",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Skeleton::retargetSources",
+      "id": "87c96d2ac5de40098bb414cefc2804e1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Skeleton::slotGroups",
+      "id": "2c14255bd26b489c821bc1a9b2838a0a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Skeleton::sockets",
+      "id": "7f832b03dc6e4d168817454004599183",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Skeleton::useRetargetModesFromCompatibleSkeleton",
+      "id": "bda876ec4d464de58a03946401288989",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::Skeleton::virtualBones",
+      "id": "aadf9f0407e045d8af07bca16c2765c3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletonCurveInfo::isMaterial",
+      "id": "28d141eb39214c0a82b69cced69b88ce",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletonCurveInfo::isMorphTarget",
+      "id": "17c5c4bd16d047a4a9e3854a40e483c3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletonCurveInfo::linkedBones",
+      "id": "5989b24c11d34366a41d62e8eb60a34d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletonCurveInfo::maxLod",
+      "id": "4d87442c394c4e1fa8a811cc28f3df1b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::SkeletonCurveInfo::name",
+      "id": "0f49373171ca48f2bc0c5687ae74db3e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::VirtualBone::name",
+      "id": "c527e78f8786454c9b78597b5a46dd45",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::VirtualBone::sourceBone",
+      "id": "6162ba5be38c4ac190d8bf9e0695e95a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::VirtualBone::targetBone",
+      "id": "524fa1038e994e34adfc3713b6e9f0ed",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::AnimSlotGroup",
+      "id": "755480bc2caf45afb454b6439c2edb0a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::BoneHierarchy",
+      "id": "df8e3084a5234486b1bbc63cb9acae60",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::BoneInfo",
+      "id": "77a93ef14ffa42babf673bb72649f555",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::BoneSocket",
+      "id": "77cdc56436624db99acc10c27d9c2f57",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::BoneTranslationRetarget",
+      "id": "c42b83f510294b67941c18ff6f5480ba",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::NamedReferencePose",
+      "id": "2926ca70c2ef46c18d18f2f5361524aa",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::Skeleton",
+      "id": "4b4bd4a0b39641bc9f79018bed4f1532",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::SkeletonCurveInfo",
+      "id": "ef076f65524f4bf99d23edcda02dc852",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::VirtualBone",
+      "id": "0b66d240e2cf46e09adb564676867f95",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}
