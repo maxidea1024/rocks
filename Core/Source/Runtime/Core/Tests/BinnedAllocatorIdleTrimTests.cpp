@@ -334,6 +334,16 @@ void UseOnce(IdleUse& use, BinnedAllocator& allocator) noexcept {
     Expect(use, block && block.Value() != nullptr && allocator.Deallocate(block.Value()));
 }
 
+// 쉬는 사이의 사용이다: 할당도 반환도 이 스레드의 캐시(cached byte)를 건드리지 않는다. 할당과 반환
+// 사이에서도 본다 — 캐시에서 꺼냈다가 도로 넣는 구현은 끝에서만 보면 같아 보인다.
+void UseWithoutCache(IdleUse& use, BinnedAllocator& allocator, usize cached) noexcept {
+    auto block = allocator.Allocate(SmallRequest, 16);
+    Expect(use, block && block.Value() != nullptr);
+    Expect(use, BinnedAllocatorTestAccess::CurrentThreadCacheBlockBytes(allocator) == cached);
+    Expect(use, block && allocator.Deallocate(block.Value()));
+    Expect(use, BinnedAllocatorTestAccess::CurrentThreadCacheBlockBytes(allocator) == cached);
+}
+
 void RunIdleUse(void* context) noexcept {
     auto& use = *static_cast<IdleUse*>(context);
     BinnedAllocator& first = *use.first;
@@ -351,14 +361,12 @@ void RunIdleUse(void* context) noexcept {
     first.MarkThreadIdle();
     Expect(use, !BinnedAllocatorTestAccess::IsCurrentThreadShortcut(first));
     Expect(use, BinnedAllocatorTestAccess::IdleThreadCacheCount(first) == 1);
-    UseOnce(use, first);
-    Expect(use, BinnedAllocatorTestAccess::CurrentThreadCacheBlockBytes(first) == cached);
+    UseWithoutCache(use, first, cached);
     Expect(use, !BinnedAllocatorTestAccess::IsCurrentThreadShortcut(first));
     // 그 사이에 다른 인스턴스를 써서 지름길이 그쪽을 가리켜도 같다.
     UseOnce(use, second);
     Expect(use, BinnedAllocatorTestAccess::IsCurrentThreadShortcut(second));
-    UseOnce(use, first);
-    Expect(use, BinnedAllocatorTestAccess::CurrentThreadCacheBlockBytes(first) == cached);
+    UseWithoutCache(use, first, cached);
     Expect(use, BinnedAllocatorTestAccess::IsCurrentThreadShortcut(second));
     // 두 번 알려도 한 번 깨우면 쓰는 중이다.
     first.MarkThreadIdle();
@@ -382,8 +390,7 @@ void RunIdleUse(void* context) noexcept {
     Expect(use, BinnedAllocatorTestAccess::IsCurrentThreadShortcut(second));
     first.MarkThreadIdle();
     Expect(use, BinnedAllocatorTestAccess::IsCurrentThreadShortcut(second));
-    UseOnce(use, first);
-    Expect(use, BinnedAllocatorTestAccess::CurrentThreadCacheBlockBytes(first) == cached);
+    UseWithoutCache(use, first, cached);
     Expect(use, !BinnedAllocatorTestAccess::IsCurrentThreadShortcut(first));
 
     // 쉬는 스레드가 스스로 TrimMemory를 불러도 자기 캐시가 비고 표시는 남는다.

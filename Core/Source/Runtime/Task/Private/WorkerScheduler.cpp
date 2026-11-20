@@ -873,6 +873,7 @@ void WorkerScheduler::RunWorker(void* raw) noexcept {
                     CancelStalledEvents(state)) {
                     continue;
                 }
+
                 // 막히는 대기 앞뒤에서 이 스레드가 쉰다는 것을 allocator에 알린다: 그 사이에 다른
                 // 스레드의 TrimMemory가 이 worker의 스레드 캐시를 비울 수 있다(Allocator.h). 앞의
                 // 표시는 gate를 쥔 채 부른다 — 풀었다 잡으면 그 사이에 온 신호를 놓친다(막히지 않는
@@ -901,8 +902,8 @@ void WorkerScheduler::RunWorker(void* raw) noexcept {
                     selected->status.state = WorkerTaskState::Completing;
                 }
             }
-            // 사용자 코드와 allocator 콜백은 모두 gate 밖이다. 재진입 Submit/Cancel/Stats가
-            // 가능하다.
+            // 사용자 코드와 allocator의 할당·해제 콜백은 모두 gate 밖이다. 재진입
+            // Submit/Cancel/Stats가 가능하다(대기 앞의 MarkThreadIdle만 gate 안에서 부른다 — 위).
             body.Reset();
         }
         ClearDependencies(*selected);

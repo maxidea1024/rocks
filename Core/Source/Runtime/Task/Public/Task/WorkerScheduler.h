@@ -198,7 +198,10 @@ struct WorkerSchedulerStats {
 };
 
 // 기준 구현은 mutex 보호 선형 ready 탐색이다. 우선순위/work stealing/lock-free는 제공하지 않는다.
-// allocator는 병행 Allocate/Deallocate를 지원해야 한다. worker<=64, inFlight<=65536,
+// allocator는 병행 Allocate/Deallocate를 지원해야 한다. worker는 작업이 없어 막히는 대기 앞뒤에서
+// allocator의 MarkThreadIdle·MarkThreadActive를 부른다(Allocator.h — 스레드 캐시가 있는 allocator가
+// 쉬는 worker의 캐시를 TrimMemory로 비울 수 있게). MarkThreadIdle은 scheduler 내부 잠금을 쥔 채
+// 부르므로 그 구현은 오래 막히거나 이 scheduler를 다시 부르면 안 된다. worker<=64, inFlight<=65536,
 // deps<=64이며 inFlight 한도는 pending+running+capture cleanup+제출 예약의 합이다.
 // Start/Shutdown은 생성 thread 전용이다. Submit/Stats와 별도 handle 호출은 병행 가능하다.
 // scheduler 파괴 전 모든 외부 API 호출을 종료한다. callback에서 scheduler 자체 파괴는 금지다.

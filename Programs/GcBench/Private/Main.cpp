@@ -43,11 +43,11 @@
 //                                    --allocator-memory는 요청 크기 분포를 더 낸다(통과 allocator를
 //                                    끼우므로 그 실행의 시간은 비교에 쓰지 않는다)
 //   GcBench --allocator-micro [--allocator-kind K]
-//   GcBench --allocator-trim-idle [--workers W]   쉬는 worker W개가 캐시를 쥔 상태에서 TrimMemory
-//   전후의
-//                                    commit(BinnedAllocator — 쉬는 표시를 넘긴 경우와 넘기지 않은
-//                                    대조) 할당자 작은 벤치(쌍·묶음·스레드 사이·동시 —
+//                                    할당자 작은 벤치(쌍·묶음·스레드 사이·동시 —
 //                                    AllocatorMicroBench.h)
+//   GcBench --allocator-trim-idle [--workers W]
+//                                    쉬는 worker W개가 캐시를 쥔 상태에서 TrimMemory 앞뒤의 commit
+//                                    (BinnedAllocator — 쉬는 표시를 넘긴 경우와 넘기지 않은 대조)
 //   GcBench --soak 200000 [--seed 7] [--soak-objects 4000] [--soak-workers --workers 4]
 //                  [--soak-time-budget]
 //                                    장기 tick 시뮬레이터(GcSoak)를 돌리고 불변식 위반을 보고한다

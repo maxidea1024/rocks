@@ -779,7 +779,7 @@ TEST(CoreBinnedNeverIssuedBlocksAreNotOwned) {
     CheckNeverIssuedBlocksAreNotOwned(true);
 }
 
-// 빈 slab은 한도까지 commit한 채 보관하고 넘으면 decommit한다. 풀린 slab은 표가 0이고, TrimMemory이
+// 빈 slab은 한도까지 commit한 채 보관하고 넘으면 decommit한다. 풀린 slab은 표가 0이고, TrimMemory가
 // 보관분을 모두 decommit하며, decommit한 slab은 낮은 번호부터 다시 쓴다.
 TEST(CoreBinnedEmptySlabsAreRetainedThenDecommitted) {
     SystemAllocator system;
@@ -808,7 +808,7 @@ TEST(CoreBinnedEmptySlabsAreRetainedThenDecommitted) {
 
         CHECK(allocator.Usage().committedBytes == Slabs * SlabBytes);
         CHECK(allocator.Usage().retainedSlabs == 0);
-        // 쓰는 중에는 TrimMemory이 아무것도 풀지 않는다.
+        // 쓰는 중에는 TrimMemory가 아무것도 풀지 않는다.
         allocator.TrimMemory();
         CHECK(allocator.Usage().committedBytes == Slabs * SlabBytes);
         for (uint32 index = 0; index < count; ++index) {
@@ -1084,7 +1084,7 @@ TEST(CoreBinnedExhaustedRangeAndCommitFailureFallBack) {
 
 // commit·decommit 실패는 일시적이다(설계 18.4절, AL2b): commit이 실패한 요청은 큰 경로로 가고 다음
 // 요청이 같은 slab을 다시 얻는다. decommit이 실패한 slab은 commit된 채 보관해 다시 쓰고 다음
-// TrimMemory이 다시 푼다. 한 번의 실패가 주소 범위를 닫지 않으므로 그 뒤에도 TrimMemory이 메모리를
+// TrimMemory가 다시 푼다. 한 번의 실패가 주소 범위를 닫지 않으므로 그 뒤에도 TrimMemory가 메모리를
 // 돌려준다.
 TEST(CoreBinnedCommitAndDecommitFailuresAreTransient) {
     SystemAllocator system;
@@ -1115,7 +1115,7 @@ TEST(CoreBinnedCommitAndDecommitFailuresAreTransient) {
         CHECK(allocator.Usage().retainedSlabs == 0);
         CHECK(allocator.Usage().committedBytes == 0);
 
-        // slab 둘 가운데 하나만 실패하면 TrimMemory이 나머지를 풀고, 다음 TrimMemory이 실패한 것을
+        // slab 둘 가운데 하나만 실패하면 TrimMemory가 나머지를 풀고, 다음 TrimMemory가 실패한 것을
         // 다시 푼다.
         constexpr usize Request = BinnedAllocator::MaxSmallBytes;
         const uint32 perSlab = BinnedAllocatorTestAccess::ClassCapacity(

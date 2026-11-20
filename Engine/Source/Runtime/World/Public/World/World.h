@@ -661,7 +661,7 @@ private:
     // Registry가 Idle이고 회수 대기가 있으면 reclaimBudget만큼 회수한다(GC 설계 17.3절).
     void DrainDeferredReclaim() noexcept;
     // 전체 수집 뒤의 회수가 다 끝났으면 allocator의 TrimMemory를 한 번 부른다
-    // (WorldGcSchedule::trimMemory). 전체 수집마다 한 번이다.
+    // (WorldGcSchedule::trimMemory). 회수가 끝나기 전에 전체 수집이 겹치면 합쳐서 한 번이다.
     void TrimAfterFullCollection() noexcept;
     // World가 소유한 객체의 RequestDestroy다. 결과를 확인한다(클러스터 이탈이 실패하면 고아 소속이
     // 남는다 — 13.3절). 이미 파괴됐거나 종료 중이면 무시하고, 그 밖의 실패는 불변식 위반으로

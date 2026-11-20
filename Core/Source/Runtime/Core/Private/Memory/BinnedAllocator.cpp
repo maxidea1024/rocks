@@ -335,7 +335,9 @@ struct alignas(CacheLineSize) ClassCache {
 static_assert(sizeof(ClassCache) == CacheLineSize, "a class cache must be one cache line");
 
 // 스레드 캐시의 상태다(ThreadCache::state — 설계 18.11.4절). 쓰는 중 ↔ 쉬는 중은 소유 스레드만,
-// 쉬는 중 ↔ 비우는 중은 등록부 잠금을 쥔 스레드만 바꾼다(모두 비교 교환).
+// 쉬는 중 ↔ 비우는 중은 등록부 잠금을 쥔 스레드만 바꾼다. 잠금 없이 다투는 전이는 비교 교환이고,
+// 등록부 잠금을 쥔 채 하는 쓰기(비우는 중 → 쉬는 중, 기다린 소유 스레드의 쓰는 중)는 단순 대입이다.
+//
 // 소유 스레드가 쓴다(기본). 소유 스레드만 묶음을 만진다.
 constexpr uint32 CacheActive = 0;
 // 소유 스레드가 쉰다고 표시했다(MarkThreadIdle). TrimMemory가 대신 비울 수 있다.
