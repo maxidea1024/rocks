@@ -39,9 +39,6 @@ internal static partial class MetaTests
         // 마지막으로 생성한 헤더의 타입별 생성 소스(본문) 경로다.
         public string Source => MetaCompilerArguments.GeneratedSourcePath(temporary.Root, lastInclude);
 
-        // 마지막으로 생성한 리플렉션 헤더의 include 철자다(예: Probe.h).
-        public string IncludeSpelling => lastInclude;
-
         // 생성 헤더와 그 생성 소스의 글이다(헤더가 먼저다). 선언·형질·inline Trace는 헤더에, 본문(Schema·Ops·Register·정적 검사)은 생성
         // 소스에 있으므로(Docs/Design/ReflectionGeneratedSources.ko.md 5.1절) 생성 코드의 문구를 보는 시험은 둘을 이어 읽는다.
         public string GeneratedText() => File.ReadAllText(Output) + File.ReadAllText(Source);
@@ -345,7 +342,7 @@ internal static partial class MetaTests
             CompileSourceAsync($"#include <{lastInclude[..^2]}.generated.h>\n#include \"{Source.Replace('\\', '/')}\"\n{consumer}");
 
         // 소비 번역 단위 하나를 소비자와 같은 경고 프로필로 구문 검사한다. 무엇을 include할지는 text가 정한다(생성 헤더를 빼고
-        // 리플렉션 헤더만 include한 소비자를 볼 때 쓴다). 마지막으로 생성한 헤더의 include 철자는 IncludeSpelling이다.
+        // 리플렉션 헤더만 include한 소비자를 볼 때 쓴다). probe 입력의 include 철자는 Probe.h다.
         public async Task<ProcessResult> CompileSourceAsync(string text)
         {
             bool clangCl = Path.GetFileNameWithoutExtension(compiler).Contains("clang-cl", StringComparison.OrdinalIgnoreCase);

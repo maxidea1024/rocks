@@ -120,6 +120,8 @@ ROCKS_ENUM() enum class MeshValueType : uint8 { Invalid = 0, Float = 1, Vec2 = 2
 
 ROCKS_STRUCT()
 struct MeshAttributeRecord {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() Name name;
     ROCKS_PROPERTY() MeshElement element = MeshElement::Invalid;
     ROCKS_PROPERTY() MeshValueType type = MeshValueType::Invalid;
@@ -129,6 +131,8 @@ struct MeshAttributeRecord {
 
 ROCKS_STRUCT()
 struct MeshSourceData {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() uint32 formatVersion = 1;
     ROCKS_PROPERTY() uint32 vertexCount = 0;
     ROCKS_PROPERTY() uint32 cornerCount = 0;
@@ -223,6 +227,8 @@ UE `DistanceFieldReplacementMesh`(:3024)는 객체 참조라 빌드 설정 struc
 ```cpp
 ROCKS_STRUCT()
 struct MeshMaterialSlot {                                            // 참조 struct
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() Name slotName;                                  // 사용자에게 보이는 이름
     ROCKS_PROPERTY(EditorOnly) Name importedSlotName;                // 다각형 묶음 MaterialSlotName과 맞추는 키
     ROCKS_PROPERTY() ObjectRef<MaterialBase> material;               // Hard. 비면 엔진 기본 머티리얼
@@ -356,6 +362,8 @@ inline constexpr int32 NoParentBone = -1;
 
 ROCKS_STRUCT()
 struct BoneInfo {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() Name name;                         // 본의 안정 식별자(UE와 같이 이름으로 식별)
     ROCKS_PROPERTY() int32 parentIndex = NoParentBone;  // 루트만 NoParentBone
     ROCKS_PROPERTY(EditorOnly) String exportName;       // 대소문자를 보존한 원래 이름(UE ExportName)
@@ -363,6 +371,8 @@ struct BoneInfo {
 
 ROCKS_STRUCT()
 struct BoneHierarchy {
+    ROCKS_GENERATED_BODY()
+
     ROCKS_PROPERTY() Array<BoneInfo> bones;
     ROCKS_PROPERTY() Array<Transform> referencePose;    // 부모 기준 local, double(UE FTransform)
 };

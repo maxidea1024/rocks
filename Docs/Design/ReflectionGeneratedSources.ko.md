@@ -273,11 +273,19 @@ GS2(타입별 본문 분리)는 소비 코드를 고치지 않는다.
   - 빌드의 메타 단계가 표지 없는 리플렉션 클래스·struct를 거부한다(`RMC2211`, MetaCompiler `--require-generated-body` — `MetadataRunner`가 늘 넘긴다). Binds 미러 선언은 대상이 아니다(실제 타입은 미러가 아니다).
 - 탐지 지점은 한 관문(`detail::GeneratedHeaderVisible<T>()`)을 거친다. 표지가 있는 타입인데 `GeneratedType<T>`가 보이지 않으면 `static_assert`로 컴파일 오류를 내고 include할 헤더를 안내한다. 위 표의 "조용히 갈림" 다섯 지점에 넣는다.
 - 탐지식을 새로 쓸 때는 이 관문을 쓴다(`requires { GeneratedType<T>::… }`만으로 고르지 않는다).
+- 판정은 cv 한정자를 뗀 타입으로 한다. `GeneratedType`은 한정자 없는 타입에만 특수화되므로, 표지가 있는 타입을 `const`·`volatile`을 붙인 채 관문에 넘기면 컴파일 오류다(한정자를 떼고 쓰라고 안내한다). 그대로 두면 생성 헤더를 include해도 "리플렉션 타입이 아닌 경우"의 길로 간다.
+- 관문은 완전한 타입만 받는다. 전방 선언만 보이는 클래스 타입을 넘기면 컴파일 오류다(표지를 읽을 수 없어 조용히 통과하는 것을 막는다).
+- 메타 단계의 규칙(`RMC2211`)과 C++ 관문은 같은 것을 본다: 파서는 매크로가 남긴 접근 표지(`rocksGeneratedAccessMarker`)와 자기 타입 표지(`rocksReflectedSelf`)가 둘 다 있어야 `ROCKS_GENERATED_BODY()`가 있다고 본다.
+
+**로그 인자**
+- 로그 호출은 인자마다 로그 구조 특수화가 있는지 본다(`Core/Diagnostics/LogCapture.h`의 `WithArgumentInfo`가 모든 인자에 `HasLogStructure`를 평가한다). 그래서 표지가 있는 타입의 값을 로그에 넘기는 번역 단위는 그 타입에 `Formatter`가 따로 있어도 생성 헤더를 include해야 한다. 생성 헤더를 본 번역 단위와 판정이 갈리면 ODR 위반이므로 맞는 동작이다.
 
 **한계**
 - 리플렉션 enum에는 표지를 둘 자리가 없다(enum 정의에는 본문 매크로를 넣을 수 없다). enum의 탐지 지점은 생성 헤더가 없으면 컴파일 오류이거나(`ReflectedEnum`) 결과가 같다(값 복사).
 - Binds 미러의 실제 타입(`Vector3` 등)에는 표지가 없다. 이 타입들은 평범한 값이라 일반형의 동작이 생성 특수화와 같고, 로그 구조는 처음부터 Binds 미러를 뺀다(`GeneratedLogFields`).
-- 표지는 완전한 타입에서만 판정된다. 전방 선언만 보이는 지점에서 먼저 판정하면 그 번역 단위에서는 표지가 없는 것으로 남는다.
+- 관문의 판정은 번역 단위 안에서 처음 평가한 값으로 고정된다. 유니티 묶음에서는 앞 구성원이 생성 헤더를 include하면, include를 빠뜨린 뒤 구성원도 통과한다(거짓 오류는 없다). 유니티를 끈 검증 변형([유니티 빌드·PCH](UnityBuildPch.ko.md) 11절 — CI의 Windows 단계)이 소스마다 따로 컴파일해 이것을 잡는다.
+- 리플렉션 헤더 자신이 템플릿이 아닌 inline 코드에서 자기 타입으로 이 템플릿들을 쓰면(예: 멤버 함수 안의 `TryCopyValue(*this, …)`), 그 헤더만 보는 번역 단위 — MetaCompiler의 파싱과 공개 헤더 단독 컴파일 검사 — 에서 관문 오류가 난다. 생성 헤더는 리플렉션 헤더 뒤에야 올 수 있으므로 그런 코드는 `.cpp`나 템플릿으로 옮긴다.
+- 매크로 이름 `ROCKS_GENERATED_BODY`가 문자열로 박힌 곳이 있다. 매크로를 개명할 때 함께 바꾼다: `Meta/GeneratedType.h`의 관문 문구, MetaCompiler의 `RMC2211` 메시지와 hint(`ClangAstParser.cs`), 옵션 설명(`CompilerOptions.cs`), 도구 시험의 기대 문구(`Rocks.ToolTests/MetaTests.Cli.cs`).
 - MetaCompiler를 `--require-generated-body` 없이 직접 돌리면(도구 시험의 작은 입력) 표지 없는 타입도 받는다. 그런 타입은 관문이 지켜 주지 않는다.
 
 ## 9. 측정과 수용 기준
@@ -375,3 +383,4 @@ GS0·GS1 측정 조건(2026-11-20): 같은 장비에서 두 commit을 각각 내
 | 3(병합 기록) | 2026-11-20 | 모듈 로더 ML2(engine-runtime f5b448c8)와 GS2·유니티 PCH 작업을 병합했다. 설치 SDK manifest 8은 ML2의 `ReflectionOnlyLibrary` 제거가 가졌고, GS2(타입별 본문이 SDK 라이브러리에 있음)와 공유 PCH 헤더 칸은 함께 9다("2(구현 기록 2)"의 "manifest 8"은 병합 전 번호다). 모듈 정의가 정의 헤더로 가므로([유니티 빌드·PCH](UnityBuildPch.ko.md) 8.2절) ML2의 `ROCKS_MODULE_TYPES`도 `ROCKS_MODULE_NAME`과 함께 정의 헤더에 들어가고, AST 생성과 native compile이 같은 헤더를 받는다. ML2가 모듈 생성 소스 끝에 더한 `RegisterModuleOwnTypes`는 그대로다 |
 | 3(검증 기록) | 2026-11-20 | GS2의 첫 전체 빌드와 시험을 유니티·PCH 작업 끝의 검증에서 함께 돌렸다([유니티 빌드·PCH](UnityBuildPch.ko.md) 개정 이력 "검증 기록"). Foundation·EngineTests Debug 빌드와 시험(2,549개·2,954개), 도구 시험 meta 246건, 통합 시험(설치 SDK 게임, Release ThinLTO SDK·게임 포함) 통과, 무변경 재빌드 0 action. 통합 시험 한 곳이 GS2에 맞지 않아 고쳤다 — 필드를 더해도 타입별 생성 헤더는 그대로이므로 게시 여부를 생성 소스와 descriptor로 확인한다. 수치(Foundation Debug clean build, 유니티·PCH를 끈 검증 변형이라 생성 소스 분리의 몫만 보인다): compile 시간 합 5,799.5 s → 752.8 s(1,278 → 1,337 action), 시험 실행 파일 3,970.6 s(386 TU) → 262.1 s(390 TU), 공개 헤더 단독 컴파일 검사 693.6 s → 151.0 s, 리플렉션 fixture 모듈의 생성 소스 26 TU 58.2 s. native 단계 벽시계는 776.5 s → 103.3 s다(장비 부하가 달라 거친 비교다) |
 | 4 | 2026-11-21 | 8.1절을 더했다(GSD15·GSD16): 생성 헤더가 보이지 않는 번역 단위에서 템플릿이 오류 없이 다른 길로 가는 지점을 조사하고, `ROCKS_GENERATED_BODY()`의 표지와 탐지 관문으로 컴파일 오류가 되게 했다. 표지를 위해 저장소의 리플렉션 클래스·struct에 `ROCKS_GENERATED_BODY()`를 넣었다(동작은 그대로다) |
+| 4(리뷰 반영) | 2026-11-21 | 8.1절 보강: 판정을 cv 한정자를 뗀 타입으로 하고 한정자 붙은 타입·불완전 타입은 관문이 거부, 파서가 두 표지를 함께 요구, 로그 인자에도 생성 헤더가 필요함, 유니티 묶음에서 놓치는 경우와 그것을 잡는 검증 변형, 리플렉션 헤더의 inline 코드 한계, 매크로 이름이 박힌 곳 목록. 관문마다 따로 실패를 확인하는 시험을 더했다 |
