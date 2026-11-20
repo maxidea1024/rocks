@@ -1,4 +1,5 @@
 #include <Base/Compiler.h>
+#include <Core/Diagnostics/Log.h>
 #include <Core/Diagnostics/LogSystem.h>
 #include <Core/Diagnostics/RuntimeLogSink.h>
 #include <Core/Memory/SystemAllocator.h>
@@ -1177,8 +1178,11 @@ TEST(EngineLog_DeferredWorldDestroyWarnsOnceAndReportsResolution) {
     }
 
     logs.Pump();
+    // Debug 기록은 컴파일 하한(LogCompiledMinimum — Release는 Info)보다 낮으면 빠진다.
+    const usize expectedDebug = LogLevel::Debug >= LogCompiledMinimum ? 1 : 0;
     CHECK(capturedLogs.Count(LogLevel::Debug,
-                             "World {World} destroy deferred: {Error}; retrying each frame") == 1);
+                             "World {World} destroy deferred: {Error}; retrying each frame") ==
+          expectedDebug);
     const char* const warning = "World {World} destroy still deferred after {Frames} frames: "
                                 "{Error}; something outside still holds its objects";
     CHECK(capturedLogs.Count(LogLevel::Warning, warning) == 1);

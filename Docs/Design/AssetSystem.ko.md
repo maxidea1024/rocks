@@ -535,7 +535,7 @@ A1d(`Engine/Source/Runtime/AssetRuntime` — `AssetManager.h`, 상태: 구현)�
 
 ### 11.8 구현에서 정한 점(A1e — EngineAssets)
 
-A1e(`Engine/Source/Runtime/EngineAssets`, 상태: 설계)가 3절의 연결 모듈과 11.4절(런타임 쿠킹 루트)·11.5절 3(프레임 판정 주입)·6.1절(GC·종료)을 다음과 같이 정한다. 애매한 곳은 UE 5.8을 따른다: 비동기 로드 진행은 World Tick 전(`UGameEngine::Tick`의 `StaticTick` → `ProcessAsyncLoading`, GameEngine.cpp:1854), 로드·GC 시간 예산은 console 변수(`s.AsyncLoadingTimeLimit` 기본 5 ms — CoreSettings.cpp:14, GC 증분 5 ms — GarbageCollection.cpp:310). 설계 교차 검증(리뷰어 1명, 필수 4·권장 8)을 반영했다.
+A1e(`Engine/Source/Runtime/EngineAssets`, 상태: 구현 — 14.1.9·14.1.10절)가 3절의 연결 모듈과 11.4절(런타임 쿠킹 루트)·11.5절 3(프레임 판정 주입)·6.1절(GC·종료)을 다음과 같이 정한다. 애매한 곳은 UE 5.8을 따른다: 비동기 로드 진행은 World Tick 전(`UGameEngine::Tick`의 `StaticTick` → `ProcessAsyncLoading`, GameEngine.cpp:1854), 로드·GC 시간 예산은 console 변수(`s.AsyncLoadingTimeLimit` 기본 5 ms — CoreSettings.cpp:14, GC 증분 5 ms — GarbageCollection.cpp:310). 설계 교차 검증(리뷰어 1명, 필수 4·권장 8)을 반영했다.
 
 UE와 다른 점과 이유:
 - UE는 엔진이 늘 AssetManager를 만든다(`UEngine::InitializeObjectReferences`, 클래스가 틀리면 Fatal — UnrealEngine.cpp:3817–3834). Rocks는 게임이 Subsystem을 넣어야 생긴다: Engine은 AssetRuntime에 의존하지 않고(3절 계층) 쿠킹 콘텐츠 없는 헤드리스 실행이 있다.
@@ -543,34 +543,34 @@ UE와 다른 점과 이유:
 
 1. **모듈**: `EngineAssets`(Runtime) → PublicDependencies {Engine, AssetRuntime}(Config·Task는 Engine이 공개 의존으로 준다 — 3절 그래프와 같다). Engine 층 기본 로딩 단계 `PreDefault`(ModuleLoader 3.11절 — 엔진 묶음)이고 진입점 파일과 `RegisterSettings`(CVar 등록 — LogHost 모듈 방식)를 둔다. 시험은 `EngineAssets/Tests`(EngineTests). AssetRuntime은 계속 Engine을 모른다.
 2. **등록과 접근**: `EngineAssetsSubsystem : EngineSubsystem`이 `AssetManager` 하나를 소유한다. 게임은 `EngineConfig::subsystems`에 `EngineAssetsSubsystemType()`을 넣는다(엔진은 Subsystem을 스스로 더하지 않는다). 접근은 `engine.GetSubsystem<EngineAssetsSubsystem>()->Manager()`. 한 프로세스의 Engine이 여럿이면 각자 하나씩이고 에셋 Registry 문맥 id는 이 모듈 고정 상위 값(엔진 문맥·World 문맥과 겹치지 않는 값) + 프로세스 안 순번이다.
-3. **설정**(CVar — `asset.*`, Engine 층 모듈은 설정 struct를 등록할 경로가 없어 CVar로 둔다: HostSettings가 모듈 `RegisterSettings`를 엔진 묶음 타입 등록 전에 부르므로 리플렉션 설정 struct의 TypeId가 아직 없다. UE도 같은 값들이 console 변수다):
-   - 부팅 고정(`cvar::Boot` — 시작 때 한 번 읽는다): `asset.cooked_root`(String, 빈 값이면 실행 파일 디렉터리 + `/Cooked`), `asset.runtime_profile`(String, 빈 값이면 빌드 플랫폼 이름 — 전용 서버 타깃이면 플랫폼 이름 + `Server`; 10절 TargetProfile id), `asset.loader.workers`(int32, 로더 worker 수, 기본 2), `asset.io.workers`(int32, 비동기 IO 스레드 수, 기본 2), `asset.loader.max_packages_in_flight`·`asset.loader.max_temp_bytes`(11.6절 9 기본값).
-   - 실행 중 조정(`cvar::Var` — 프레임마다 설정 sync 뒤 읽는다): `asset.pump.time_ms`(double, 기본 5 — UE `s.AsyncLoadingTimeLimit`), `asset.pump.max_units`·`asset.pump.max_post_loads`(무제한), `asset.pump.max_discards`(무제한), `asset.gc.time_ms`(double, 기본 5), `asset.gc.max_objects`(GcBudget 기본).
+3. **설정**(CVar — `asset.*`, 등록 함수가 콘솔 이름 영역 `asset`을 먼저 더한다(`RegisterConsoleRegion` — 기본 표에 없다, TraceControl의 `trace`와 같은 방식, 두 번째 등록은 그대로 성공), Engine 층 모듈은 설정 struct를 등록할 경로가 없어 CVar로 둔다: HostSettings가 모듈 `RegisterSettings`를 엔진 묶음 타입 등록 전에 부르므로 리플렉션 설정 struct의 TypeId가 아직 없다. UE도 같은 값들이 console 변수다):
+   - 부팅 고정(`cvar::Boot` — 시작 때 한 번 읽는다): `asset.cooked_root`(String, 빈 값이면 실행 파일 디렉터리 + `/Cooked`), `asset.runtime_profile`(String, 빈 값이면 빌드 플랫폼 이름 `Windows`·`Mac`·`Android` — 10절 TargetProfile id. 전용 서버 타깃은 아직 없고(BuildTargets — TargetType Game·Program) 생기면 플랫폼 이름 + `Server`를 기본으로 더한다), `asset.loader.workers`(int32, 로더 worker 수, 기본 2), `asset.io.workers`(int32, 비동기 IO 스레드 수, 기본 2), `asset.loader.max_packages_in_flight`·`asset.loader.max_temp_bytes`(11.6절 9 기본값).
+   - 실행 중 조정(`cvar::Var` — 프레임마다 설정 sync 뒤 읽는다): `asset.pump.time_ms`(double, 기본 5 — UE `s.AsyncLoadingTimeLimit`), `asset.pump.max_units`·`asset.pump.max_post_loads`(무제한), `asset.pump.max_discards`(무제한), `asset.gc.time_ms`(double, 기본 5), `asset.gc.max_objects`(GcBudget 기본), `asset.gc.retry_seconds`(double, 기본 60 — 5).
    - 명령행은 따로 두지 않는다: `--set=asset.cooked_root=<dir>`(Config 세션 층 — 다른 설정과 같은 규약). 11.4절의 `-CookedRoot` 표기는 이것으로 바뀐다. 개발 실행은 프로젝트 설정 파일에 `{SavedDir}/Cooked/<profile>` 같은 값을 둔다(도구 `asset-load-cooked`와 같은 위치).
-   - 엔진에 설정 문맥이 없으면 CVar 기본값이다.
+   - 설정 문맥이 필수다: CVar `Get()`은 이 스레드에 묶인 설정 snapshot을 읽고 묶음이 없으면 `platform::Fatal`이며(CVarSystem 7.1절), 부팅 값은 `CompleteStartup` 뒤 봉인된 snapshot을 읽는다. 그래서 `Initialize`는 먼저 `Engine::Settings()`가 null이면 `InvalidArgument`로 실패한다(기록 — "EngineAssets requires an engine config context"). CVar 등록은 모듈 `RegisterSettings`(호스트의 HostSettings가 부른다)가 하고, 시험은 같은 공개 함수 `RegisterEngineAssetsSettings(ConfigContext&)`를 직접 부른다. 등록 누락은 Policy `cvar-registration`이 빌드에서 잡는다.
    - 쿠킹 루트 결정(설정 값 → 실행 파일 기본)은 순수 함수 `ResolveCookedRoot(configured, executableDir, out)`이고 시험이 직접 부른다.
 4. **초기화**(`Initialize(Engine&)` — 생성 순서, 멤버는 이 순서로 선언해 역순으로 소멸한다): 쿠킹 루트 결정 → `<root>/CookedManifest.rman`을 동기로 읽어(크기 상한 `CookedManifestMaxFileBytes`) `ReadCookedManifest`(검증 포함 — A1f에서 서명 봉투 `CookedManifest.rsig`로 바뀐다) → `platform::AsyncIoContext::Start(backend, asset.io.workers)` → `AsyncCookedPackageIo` → 로더 `WorkerScheduler`(`asset.loader.workers`) → `WorkerSchedulerLoaderWorker` → `AssetManagerConfig`(allocator = `engine.GetAllocator()` — 여러 스레드의 할당·해제를 받아야 한다는 로더 요구, TypeRegistry = 엔진 TypeRegistry, 프레임 판정 = `Engine::IsInFrame`, 로더 관찰자·PostLoad handler 없음 — 9) → `AssetManager::Initialize`. 실패하면 Initialize가 자기 부분 상태를 역순으로 되돌리고(실패한 Subsystem은 Deinitialize되지 않는다 — Subsystem 규칙) 엔진 초기화가 실패한다. 쿠킹 루트·파일 경로·오류·진단을 한 번 기록한다(`LogEngineAssets`, 영어). 매니페스트가 없는 것도 실패다(빈 콘텐츠로 돌지 않는다). 소멸자는 부분 초기화에도 안전하다.
 5. **프레임**:
-   - `OnFrameBegin`(엔진 3단계 — World Tick 전): `AssetManager::Pump`(CVar 예산). 그 프레임의 World Tick이 결과·callback을 본다(UE 순서). Pump 실패는 첫 번째만 Error로 남기고 연속 실패는 회복 때 한 번 요약한다(엔진 World Tick 실패 기록과 같은 규칙).
-   - callback은 엔진 접근 범위 안에서 불린다(Pump가 엔진 단계 안이다). World 객체를 다루는 callback은 스스로 그 World 접근 범위(`World::With`)로 들어간다. callback은 World 객체를 raw 포인터로 붙잡지 않는다(약한 참조 `WeakObjectRef`) — World 파괴 뒤에도 놓인 티켓의 `Cancelled`·종료의 `ShuttingDown`이 전달된다(11.7절 5·12).
-   - `OnFrameEnd`(엔진 6단계): 에셋 객체 Registry GC. 에셋 Registry 객체는 Discard로만 죽으므로(6.1절) Discard 주도다: Pump 결과 `discardedPackages > 0`이면 수집 요청 표시를 세운다. 표시가 있고 Registry가 Idle이면 `BeginCollection` 뒤 `StepCollection`(CVar 예산, scheduler는 `engine.GcScheduler()` — World GC와 같은 게임 스레드에서 차례로 쓴다), 진행 중이면 `StepCollection`만 한다. cycle 도중 Discard가 더 있으면 끝난 뒤 한 번 더 돈다. Idle이고 회수 대기(`HasPendingReclaim`)가 있으면 `DrainRetired`. Busy(열린 `ConstructionContext`·Borrow)는 이번 프레임을 건너뛴다(정상 — 기록하지 않음). 그 밖의 실패(OutOfMemory)는 Pump처럼 첫 번째만 기록한다. `Engine::RequestFullCollection`(World 객체용)에는 참여하지 않는다 — Discard가 없으면 에셋 Registry에서 더 회수할 것이 없다.
+   - `OnFrameBegin`(엔진 3단계 — World Tick 전): `AssetManager::Pump`(CVar 예산). 그 프레임의 World Tick이 결과·callback을 본다(UE 순서). Pump 실패는 처음 한 번만 Error로 남기고 횟수를 센다 — 프레임 안 Pump가 실패하는 경우(AssetManager를 직접 Shutdown한 뒤 ShuttingDown 등)는 되돌아오지 않으므로 회복 기록이 없다.
+   - callback은 엔진 접근 범위 안에서 불린다(Pump가 엔진 단계 안이다). World 객체를 다루는 callback은 스스로 그 World 접근 범위(`World::With`)로 들어간다. World 파괴 뒤에도 놓인 티켓의 `Cancelled`·종료의 `ShuttingDown`이 전달되므로 callback은 World 객체를 raw 포인터로 붙잡지 않는다(약한 참조 `WeakObjectRef` — 11.7절 5·12, 사용 규칙).
+   - `OnFrameEnd`(엔진 6단계): 에셋 객체 Registry GC. 에셋 Registry 객체는 Discard로만 죽으므로(6.1절) Discard 주도다: Pump 결과 `discardedPackages > 0`이면 수집 요청 표시를 세운다. 표시가 있고 Registry가 Idle이면 `BeginCollection` 뒤 `StepCollection`(CVar 예산, scheduler는 `engine.GcScheduler()` — World GC와 같은 게임 스레드에서 차례로 쓴다), 진행 중이면 `StepCollection`만 한다. cycle 도중 Discard가 더 있으면 끝난 뒤 한 번 더 돈다. cycle이 끝났는데 Discard된 객체가 남아 있으면(`ObjectStats::destroyRequested` — 게임 코드의 RootRef·Borrow·하드 간선이 쥐고 있다) 엔진 프레임 시간(delta 합)으로 `asset.gc.retry_seconds`(기본 60 — UE `gc.TimeBetweenPurgingPendingKillObjects` 60 s, UnrealEngine.cpp:1777)가 지난 뒤 cycle을 다시 돈다(쥔 쪽이 놓았으면 그때 회수한다 — Discard 주도만으로는 다음 Discard까지 남는다). 회수 보유(`BackendLease` 등)가 풀린 Retired 객체의 `DrainRetired`는 에셋 Registry 객체에 그런 보유가 생기는 A5(텍스처 렌더 자원)에서 더한다. Busy(열린 `ConstructionContext`·Borrow)는 이번 프레임을 건너뛴다(정상 — 기록하지 않음). 그 밖의 실패(OutOfMemory)는 그 프레임만의 일이라 매번 기록하고 다음 프레임에 다시 한다. `Engine::RequestFullCollection`(World 객체용)에는 참여하지 않는다 — Discard가 없으면 에셋 Registry에서 더 회수할 것이 없다.
    - 프레임 판정 `Engine::IsInFrame()`: `RunFrame` 전체(1–6단계, 5단계 World 지연 파괴 포함) 동안 참인 새 표지다(기존 `inFrame_`은 5단계에서 거짓이라 쓰지 않는다). 프레임 안 `LoadBlocking`은 `WrongContext`(11.5절 3). 로딩 화면은 프레임 밖 초기화 단계나 `RequestAsset`을 쓴다.
 6. **종료**(엔진 순서: BeginShutdown → client 종료 → World 파괴 → CompleteInFlightWork(Subsystem 역순 → hooks) → Subsystem 정리(역순) → 엔진 Registry 최종 GC → hook 정리):
    - `CompleteInFlightWork`: `AssetManager::Shutdown` — 아직 부르지 않은 callback·보류 명령에 `ShuttingDown`을 전달하고 로더가 진행 중 IO·worker를 기다린다(엔진의 "진행 중 비동기 작업 완료" 단계 계약). 결과는 엔진 Shutdown 결과로 보고된다.
    - `Deinitialize`: AssetManager 파괴 → loader worker·scheduler 종료 → IO 구성 종료 → AsyncIoContext 종료(4의 역순, 각 결과 기록).
    - 계약: lease·티켓·scope·명령 handle 객체는 EngineAssets Subsystem 정리 전에 소멸해야 한다 — World가 쥔 것은 World 파괴가, `EngineClient` 구현은 `OnEngineShutdown`까지, `EngineLoopHooks`는 `CompleteInFlightWork`까지, EngineAssets에 의존하는 다른 Subsystem은 자기 Deinitialize(EngineAssets보다 먼저 불린다)까지 놓는다. 남으면 AssetManager 파괴 `platform::Fatal`(11.7절 6, 6.1절 종료 순서 계약). `AssetLease` 리플렉션 필드는 WorldOnly 클래스만 가진다(5.6절)라 엔진 Registry 객체는 lease를 필드로 쥐지 않는다.
    - 버린 대안: AssetManager 파괴를 엔진 Registry 최종 GC 뒤로 미루는 hook — 엔진 종료 단계를 늘리고, 그 사이 회수되는 객체의 handle 소멸이 Subsystem 정리 뒤 상태를 건드린다.
-7. **Engine 변경**(작게, 공개 함수 하나와 표지 하나): `bool Engine::IsInFrame() const`(게임 스레드 — `RunFrame` 전체 표지, 5). 설정은 CVar라 Engine 접근자가 필요 없다.
+7. **Engine 변경**(작게, 공개 함수 둘과 표지 하나): `bool Engine::IsInFrame() const`(게임 스레드 — `RunFrame` 전체 표지, 5), `config::ConfigContext* Engine::Settings() const`(빌린 설정 문맥 — 없으면 null, 3).
 8. **시험**(EngineTests `EngineAssets/Tests` — 14.1.9절 대조표, 시간·경쟁에 기대지 않는다):
    - 픽스처: AssetRuntime의 `PackageWriter`·`WriteCookedManifest`로 시험 임시 디렉터리에 쿠킹 장면을 쓴다(AssetCooker 의존 없음). 설정 문맥에 `asset.cooked_root`를 넣어 엔진을 띄운다.
    - 결정적 로드 순서: 프레임 밖(Run 전) `LoadBlocking`으로 상주시키고(동기 — 완료까지 기다림), 프레임 안(client Tick)에서 같은 에셋을 `RequestAsset`하면 다음 프레임 Pump에서 callback이 World Tick 전에 불린다. 디스크 IO가 끝나는 프레임에 기대는 단언은 없다.
    - client Tick·World 지연 파괴 단계 안 `LoadBlocking` WrongContext, 프레임 밖 성공
-   - GC: 놓은 패키지가 Discard된 뒤 GC 조각들로 회수됨(시간 예산 CVar를 크게, 객체 수 예산으로 조각 수를 정한다), cycle 도중 Discard면 한 번 더, 열린 `ConstructionContext` 프레임은 건너뜀, 회수 대기 `DrainRetired`
+   - GC: 놓은 패키지가 Discard된 뒤 GC 조각들로 회수됨(시간 예산 CVar를 크게, 객체 수 예산으로 조각 수를 정한다), cycle 도중 Discard면 한 번 더, 열린 `ConstructionContext` 프레임은 건너뜀, RootRef로 쥔 Discard 객체는 놓은 뒤 재시도 시간이 지나면 다음 cycle이 회수(고정 delta로 결정적)
    - 초기화 실패: 매니페스트 없음·손상·프로파일 다름(IncompatibleCook)·IO context 시작 실패·할당 실패의 모든 지점 → 엔진 초기화 실패, 기록 한 번, 누수 없음
    - `ResolveCookedRoot`: 설정 값 있음·없음, 실행 파일 디렉터리 기본
-   - 종료: World 파괴 뒤 놓인 티켓의 callback이 Cancelled(약한 참조는 null), CompleteInFlightWork에서 대기 callback ShuttingDown, client가 놓지 않은 lease → 자식 프로세스 Fatal(문구 대조), 규칙대로 놓으면 정상 종료
+   - 종료: World Subsystem이 쥔 티켓은 World 파괴 뒤 다음 Pump에서 callback이 Cancelled, CompleteInFlightWork에서 대기 callback ShuttingDown, client가 놓지 않은 lease → 자식 프로세스 Fatal(문구 대조), 규칙대로 놓으면 정상 종료
    - CVar: 실행 중 Pump·GC 예산 변경이 다음 프레임부터 적용, 부팅 고정 값은 시작 뒤 바뀌지 않음
-   - Pump 연속 실패 기록 규칙
+   - Pump 실패 기록(처음 한 번, 횟수), GC 조각 할당 실패(매번 기록, 다음 프레임에 다시)
 9. **후속**: Rocks Lens 이벤트(로더 관찰자 → Trace, TraceSystem), 클래스별 PostLoad dispatch(A5 — handler를 여기서 연결), 서명 봉투 검증(A1f — 4의 매니페스트 읽기를 바꾼다), 쿠킹 결과를 배포 위치로 옮기는 패키징(후속).
 
 ## 12. 텍스처
@@ -1317,6 +1317,57 @@ A1d 상태(2026-11-21): **구현**. 완료 조건 넷을 모두 갖췄다. 빠�
 - 조합: 보유 4종 × 단위 모양 3 × 해제 순서 24 × 해제 방식 3 × 꼬리 4 = 864개 전부(서로 다른 순서 확인), 매니페스트 bundle 구성원 축을 더한 564개(14.1.3)
 - coverage(14.1.8): 닿지 않은 곳은 모두 근거(Fatal probe·불변식·실패 조건을 만들지 않는 호출·템플릿 인스턴스)
 - 빠진 시험 관점 리뷰어 판정: 충족
+
+#### 14.1.9 요구 대조표(A1e — EngineAssets)
+
+항목마다 그것을 확인하는 시험이다(EngineTests, `Engine/Source/Runtime/EngineAssets/Tests/EngineAssetsTests.cpp`·`EngineAssetsSettingsTests.cpp`·`EngineAssetsManifestFileTests.cpp` — 정의된 시험 19개를 모두 표가 인용한다). 시험 장면은 AssetRuntime 시험 도구(`LoaderScene`)로 쿠킹해 시험 임시 디렉터리(`rocks-engine-assets-<tag>-<pid>`)에 패키지와 `CookedManifest.rman`을 쓰고, 설정 문맥(`ConfigFixture`)에 `asset.*`를 넣은 엔진(`test::ProcessModules()`, 시험 에셋 타입은 `registerModuleTypes`)을 띄운다. 로드 순서는 프레임 밖 동기 로드로 상주시킨 뒤 프레임 안 요청의 다음 Pump callback으로 정하고, GC 조각 수는 객체 수 예산으로 정한다(디스크 IO 완료 시점에 기대는 단언 없음). 고정 delta(1/60 s)로 엔진 시간이 결정적이다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 모듈·등록(11.8-1·2) | 모듈 표의 EngineAssets 행에 `RegisterSettings`(HostSettings 경로)가 있고 영역·변수를 등록, Subsystem 생성 정보로 엔진이 만들고 `GetSubsystem`으로 접근 | `EngineAssets_ModuleEntryRegistersSettings`, `EngineAssets_LoadsThroughEngineFrames` |
+| 설정(11.8-3) | 등록 함수가 영역 `asset`을 더하고 두 번째 호출도 성공(멱등), 다른 스레드 WrongThread, 부팅 변수는 시작 뒤 쓰기 거부, 실행 중 변수(Pump 개수 예산 1 — 같은 프레임에 놓은 두 단위를 Pump마다 하나씩 Discard, GC 객체 수·시간, 재시도 시간)가 다음 sync부터 적용 | `EngineAssets_RegisterSettings`, `EngineAssets_PumpFailureAndBootValues`, `EngineAssets_PumpBudgetVariables`, `EngineAssets_GarbageCollectionCombinations`, `EngineAssets_HeldDiscardedObjectsRetry` |
+| | 쿠킹 루트 결정(설정 값 그대로·비면 실행 파일 디렉터리 + /Cooked·둘 다 없으면 InvalidArgument·할당 실패), 실행 프로파일 기본값(플랫폼 이름), 실행 파일 디렉터리(구분자 '/'·'\\'·섞임·루트·없음), 설정이 비면 실행 파일 옆 Cooked를 찾음(없음 NotFound) | `EngineAssets_ResolveCookedRoot`, `EngineAssets_ResolveRuntimeProfile`, `EngineAssets_ExecutableDirectoryOf`, `EngineAssets_ManifestLocationFailures` |
+| 초기화(11.8-4) | 설정 문맥 없음 InvalidArgument(기록), 매니페스트 상태 5 × 프로파일 2 조합(아래), 결정된 쿠킹 루트·프로파일, 엔진 할당의 모든 지점 실패 → 그 오류로 Failed(정리)·성공이면 프레임·종료 정상 | `EngineAssets_InitializationFailures`, `EngineAssets_InitializationCombinations`, `EngineAssets_LoadsThroughEngineFrames`, `EngineAssets_InitializationAllocationFailures` |
+| | 매니페스트 파일 읽기(고장 난 FileSystem): 존재 확인·열기·크기·읽기·닫기 실패는 그 파일 오류, 없음 NotFound, 상한 초과 CapacityExceeded(읽지 않음), 빈 파일, 정상 내용, 할당 실패 | `EngineAssets_ManifestFileReadFailures` |
+| 프레임(11.8-5) | 프레임 밖 LoadBlocking 성공·IsInFrame 거짓, client Tick(3단계) IsInFrame 참·LoadBlocking WrongContext, 상주 에셋 요청 callback은 다음 프레임 World Tick 전 Pump에서 한 번, World 지연 파괴(5단계) 안 IsInFrame 참 | `EngineAssets_LoadsThroughEngineFrames`, `EngineAssets_WorldReleasedTicketIsCancelled` |
+| | GC: Discard 주도(Discard 전 프레임은 수집하지 않음), 조각 크기 × cycle 도중 Discard × 열린 트랜잭션 프레임 조합(아래), 쥔 Discard 객체는 lingering이 되고 재시도 시간(엔진 프레임 시간)마다 다시 돌며 놓은 뒤 회수 | `EngineAssets_GarbageCollectionCombinations`, `EngineAssets_HeldDiscardedObjectsRetry` |
+| | Pump 실패(AssetManager를 직접 Shutdown한 뒤): 처음 한 번 기록·횟수, 프레임은 계속, 엔진 종료 성공. 프레임 할당 실패(Discard 프레임과 다음 프레임의 모든 지점): 그 프레임만 실패·GC 조각 실패 기록·이어지는 프레임이 cycle을 끝내고 남은 회수 없음 | `EngineAssets_PumpFailureAndBootValues`, `EngineAssets_FrameAllocationFailures` |
+| 종료(11.8-6) | 마지막 프레임의 요청(Pump 전)은 CompleteInFlightWork에서 ShuttingDown 한 번, World Subsystem이 쥔 티켓은 World 파괴 뒤 다음 Pump에서 Cancelled, client가 OnEngineShutdown에서 놓으면 정상 종료·놓지 않은 lease는 Subsystem 정리에서 자식 프로세스 Fatal(문구 대조) | `EngineAssets_ShutdownDeliversShuttingDown`, `EngineAssets_WorldReleasedTicketIsCancelled`, `EngineAssets_LeaseHeldPastShutdownIsFatal` |
+| Engine 변경(11.8-7) | `IsInFrame`(RunFrame 전체 — 3·5단계 참, 밖 거짓), `Settings`(없으면 null → InvalidArgument) | `EngineAssets_LoadsThroughEngineFrames`, `EngineAssets_WorldReleasedTicketIsCancelled`, `EngineAssets_InitializationFailures` |
+| 조합(14 완료 조건 2) | 초기화: 매니페스트 상태 5(정상·없음·자리가 디렉터리·빈 파일·손상) × 프로파일 2(일치·불일치) = 10 — 정상·일치만 성공, 매니페스트 실패는 프로파일과 무관(검사 순서), 정상·불일치 Unsupported/IncompatibleCook | `EngineAssets_InitializationCombinations` |
+| | GC: 조각 크기 2(무제한·객체 1) × cycle 도중 Discard 2 × 열린 트랜잭션 프레임 2 = 8 — cycle 수(1 + 도중 Discard), Busy 횟수, 예산 1이 무제한보다 많은 프레임, 회수 뒤 객체 감소·실패 없음·lingering 없음 | `EngineAssets_GarbageCollectionCombinations` |
+| | 로더 관찰자(Rocks Lens)·클래스별 PostLoad dispatch·서명 봉투·패키징 | 범위 밖(9 — 후속·A5·A1f) |
+
+#### 14.1.10 Coverage(A1e)
+
+측정(2026-11-21, `pwsh -NoProfile -File Build/MeasureCoverage.ps1 -Target EngineTests -Filter EngineAssets,Engine_ -Sources Engine/Source/Runtime/EngineAssets/Private,Engine/Source/Runtime/EngineAssets/Public`, EngineAssets 19개·Engine 28개 시험 모두 통과):
+
+| 파일 | 줄 | 분기 | 함수 |
+|---|---|---|---|
+| `Private/EngineAssetsSubsystem.cpp` | 95.3%(282/296) | 95.1%(97/102) | 100%(15/15) |
+| `Private/EngineAssetsSettings.cpp` | 100%(65/65) | 100%(22/22) | 100%(8/8) |
+| `Private/EngineAssetsModule.cpp` | 100%(3/3) | 분기 없음 | 100%(1/1) |
+| `Public/EngineAssets/EngineAssetsSubsystem.h` | 100%(12/12) | 분기 없음 | 100%(4/4) |
+
+닿지 않은 곳과 근거:
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| `Initialize` | 실행 파일 경로 조회 실패 | 자기 실행 파일의 OS 조회이고 4096 byte 버퍼다 — 경로가 더 길거나 OS 조회가 실패해야 한다(주입 지점 없음). 그런 환경은 `asset.cooked_root`를 설정하면 이 조회를 하지 않는다 |
+| `Initialize` | 비동기 IO context 시작 실패 | worker 수는 CVar 범위(1–64)로 막혀 있고 남은 실패는 스레드·OS 객체 생성 실패다(AsyncIoContext 결과 주입은 크기·제출·완료 지점만 — PlatformLayer) |
+| `CompleteInFlightWork` | `AssetManager::Shutdown` 실패 기록 | 실패 조건(소유 스레드 밖·callback 안)을 엔진 종료가 만들지 않는다(게임 스레드의 Engine::Shutdown 단계) |
+| `Teardown` | loader scheduler·IO context 종료 실패 기록 | scheduler는 게임 스레드에서 끝내고(worker 스레드 호출이 아니다), IO context는 로더 종료와 package IO 파괴 뒤라 열린 파일이 없다(Busy 조건 없음) |
+
+닿게 한 방법과 그 과정에서 바꾼 것:
+- 결정적 장면: 디스크 IO 완료 프레임에 기대지 않게 프레임 밖 동기 로드로 상주시킨 뒤 프레임 안에서 요청한다. GC 조각 수는 객체 수 예산, 재시도 시간은 고정 delta 엔진 시간으로 정한다. 매니페스트 파일의 OS 오류는 `ReadManifestFile`이 `FileSystem&`를 받게 해 고장 난 FileSystem으로 닿는다(처음 구현은 물리 파일 시스템을 직접 썼다).
+- 구현 중 발견해 설계를 고친 것: CVar 첫 마디 `asset`은 기본 영역 표에 없어 등록이 거부됐다(등록 함수가 영역을 더한다). 설정 문맥이 없으면 CVar 읽기가 Fatal이라 Initialize가 먼저 거부한다. 프레임 안 Pump 실패는 되돌아오지 않아 회복 요약을 뺐다. Discard 객체를 게임 코드가 쥔 채 cycle이 끝나면 다음 Discard까지 회수되지 않는 빈 곳이 있어 UE 주기 수집처럼 재시도 시간(`asset.gc.retry_seconds`, 기본 60 s)을 더했다. `DrainRetired` 분기는 에셋 Registry에 회수 보유가 없어 닿을 수 없어 빼고 A5로 넘겼다.
+
+
+A1e 상태(2026-11-21): **구현**(리뷰어 판정 전). 완료 조건:
+- 요구 대조표(14.1.9): 시험 없는 항목 0, 정의된 시험 19개를 모두 인용
+- 조합: 초기화 10개·GC 8개 전부
+- coverage(14.1.10): 닿지 않은 곳은 모두 근거
+- 빠진 시험 관점 리뷰어 판정: 대기
 
 ## 15. PNG 디코더 범위
 

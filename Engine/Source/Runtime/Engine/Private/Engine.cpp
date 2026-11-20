@@ -565,6 +565,7 @@ Result<void> Engine::RunFrame() noexcept {
 
     const uint64 frameStart = platform::MonotonicNanoseconds();
     inFrame_ = true;
+    frameRunning_ = true;
     // hook은 Registry scope 없이 부른다(World 객체는 World::With가 자기 scope를 세운다). 엔진
     // Registry를 다루는 Subsystem·client 호출 구간에만 엔진 scope를 세운다.
 
@@ -668,6 +669,7 @@ Result<void> Engine::RunFrame() noexcept {
     }
 
     inFrame_ = false;
+    frameRunning_ = false;
     frameNanoseconds_ = platform::MonotonicNanoseconds() - frameStart;
     if (config_.maxFrames != 0 && time_.frameIndex >= config_.maxFrames) {
         exitRequested_ = true;

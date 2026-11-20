@@ -351,6 +351,18 @@ public:
         return state_;
     }
 
+    // RunFrame이 도는 동안(1–6단계 전체 — 5단계 World 지연 파괴 포함) 참이다. 게임 스레드에서
+    // 읽는다. 프레임 안에서 금지된 동기 대기(에셋 LoadBlocking 등)의 판정 함수로 쓴다
+    // (Docs/Design/AssetSystem.ko.md 11.8절 5).
+    bool IsInFrame() const noexcept {
+        return frameRunning_;
+    }
+
+    // 호스트가 빌려준 설정 문맥이다(EngineConfig::settings — 없으면 null). 게임 스레드에서 쓴다.
+    config::ConfigContext* Settings() const noexcept {
+        return config_.settings;
+    }
+
     // --- World ---
 
     // World를 만들어 초기화한다(desc.beginPlay면 BeginPlay까지). Running에서만 가능하다. 반환
@@ -472,6 +484,8 @@ private:
     // 전체 수집 요청 표지다(0·1, platform atomic — 다른 스레드가 세우고 프레임이 소비한다).
     uint32 fullCollectionRequested_ = 0;
     bool inFrame_ = false;
+    // RunFrame 전체 동안 참이다(IsInFrame — inFrame_은 5단계에서 잠시 거짓이다).
+    bool frameRunning_ = false;
     bool exitRequested_ = false;
     // 엔진을 소유한 게임 스레드다(Initialize를 부른 스레드, 0이면 아직 없음). RequestExit 검사에
     // 쓴다.
