@@ -9,8 +9,8 @@
 
 // 에디터 패키지 색인이다(Docs/Design/AssetSystem.ko.md 7절, 7.1절 11·13 — A2b, UE AssetRegistry
 // 대응). 패키지 파일이 유일한 진실이고 색인은 `Content/` 아래 `.rasset`의 헤더·섹션 표·Summary·
-// Exports·Dependencies·ImportRecord·Tags만 부분 읽기로 읽은 요약이다. A2b는 전체 검색만 한다(캐시·
-// 감시 갱신은 A2d).
+// Exports·Dependencies·ImportRecord·Tags만 부분 읽기로 읽은 요약이다. 전체 검색(Rebuild — 캐시
+// 재사용 A2d1)과 부분 갱신(Refresh·RefreshPaths — 저장·감시 A2d3)이 바꾼다.
 //
 // 사용 예:
 //   AssetIndex index(allocator, layout);
@@ -111,6 +111,35 @@ struct AssetIndexDiagnostic {
 class AssetIndex;
 class AssetIndexCache;
 
+// 여러 파일·하위 트리를 한 번에 다시 읽는 입력이다(AssetIndex::RefreshPaths — 7.1절 16 A2d3).
+// 이름은 모두 Content 상대 이름 규칙(유효한 UTF-8, 구분자 '/', 앞뒤 '/'·빈 구성 요소·"."·".."
+// 없음)을 따른다. 같은 이름이 여러 번 나와도 되고 하위 트리 안의 파일·하위 트리는 그 트리가 덮는다.
+//
+// 사용 예(감시가 모은 이름):
+//   const StringView changed[] = {"Hero.rasset"};
+//   const StringView moved[] = {"Characters"};
+//   AssetIndexRefreshPaths paths;
+//   paths.files = changed;
+//   paths.subtrees = moved;
+//   if (auto refreshed = index.RefreshPaths(files, paths, readOptions); !refreshed) { ... }
+struct AssetIndexRefreshPaths {
+    // 다시 읽을 패키지 파일(`.rasset`)이다. 없어졌으면 빼고 새 파일이면 더한다(Refresh와 같다).
+    Span<const StringView> files;
+    // 다시 검색할 하위 트리다(빈 문자열은 Content 전체). 그 이름 자신과 그 아래의 항목·진단을 지금
+    // 파일 상태로 바꾼다(없어진 것은 뺀다). 이름이 디렉터리가 아니면 그 아래는 비어 있고, 이름이
+    // 패키지 파일이면 그 파일을 읽는다.
+    Span<const StringView> subtrees;
+    // 비어 있지 않으면 files와 같은 길이다. 참인 파일은 쓰는 중으로 보이면(패키지를 읽지 못해 항목
+    // 없이 CorruptPackage이거나 열기·읽기가 Busy) 그 파일의 항목·진단을 바꾸지 않고 deferred에 그
+    // 위치(files 첨자 — 같은 이름이 여럿이면 모두)를 붙인다. 같은 이름 중 하나라도 거짓이면 미루지
+    // 않는다. 하위 트리가 덮는 파일은 미루지 않는다.
+    Span<const bool> mayDefer;
+    Array<usize>* deferred = nullptr;
+    // 이름 정규화 파일 시스템인지다(참이면 이름 대조를 NFC로 한다 — macOS 이벤트 이름이 열거
+    // 이름과 다른 정규형이어도 같은 파일로 본다).
+    bool normalizesNames = FileSystemNormalizesNames;
+};
+
 // 색인 게시 준비다(AssetIndex::PrepareRefresh가 채우고 CommitRefresh가 쓴다 — 7.1절 15 A2c2b). 새
 // 항목·진단, 정렬 순서, 같은 id·경로 진단과 결과 배열 자리를 모두 할당해 두고 지금 색인의 항목·
 // 진단은 자리 포인터로 가리킨다(옮기지 않는다). 그래서 준비와 확정 사이에 그 색인을 바꾸면 안
@@ -133,6 +162,9 @@ public:
 
 private:
     friend class AssetIndex;
+
+    // 준비 전 상태로 비운다(용량은 남긴다).
+    void Reset() noexcept;
 
     // 다시 읽은 파일의 항목(0·1개)과 그 파일 진단, 같은 id·경로 진단이다.
     Array<AssetIndexEntry> added_;
@@ -192,6 +224,30 @@ public:
                                 StringView readPath, const PackageReadOptions& options,
                                 AssetIndexRefresh& plan) noexcept;
     void CommitRefresh(AssetIndexRefresh& plan) noexcept;
+
+    // paths의 파일·하위 트리를 다시 읽어 그 이름들의 항목·진단을 지금 상태로 바꾸고 같은 id·경로
+    // 진단과 표시는 전체에서 다시 정한다(7.1절 16 A2d3 — 감시 갱신이 쓴다). 다시 읽기는 Rebuild와
+    // 같은 규칙이고(캐시는 쓰지 않는다) 하위 트리의 열거 실패는 진단이다 — 단 빈 하위 트리(Content
+    // 전체)의 열거 실패는 Rebuild처럼 오류다. 오류: 이름 규칙 위반·mayDefer 길이 불일치·mayDefer가
+    // 있는데 deferred가 없으면 InvalidArgument, Content 열거 실패, 할당 실패 — 모두 색인
+    // 그대로다(deferred는 붙인 것이 남을 수 있다). 두 단계(PrepareRefreshPaths + CommitRefresh)로도
+    // 할 수 있다(규칙은 PrepareRefresh와 같다).
+    Result<void> RefreshPaths(platform::FileSystem& files, const AssetIndexRefreshPaths& paths,
+                              const PackageReadOptions& options) noexcept;
+    Result<void> PrepareRefreshPaths(platform::FileSystem& files,
+                                     const AssetIndexRefreshPaths& paths,
+                                     const PackageReadOptions& options,
+                                     AssetIndexRefresh& plan) noexcept;
+
+    // 감시 루트(Content)가 사라졌다: 항목을 모두 빼고 진단을 RootLost(이름은 빈 문자열 — Content
+    // 자신, 원본 오류 NotFound) 하나로 둔다(7.1절 16 A2d3 — 파일이 진실이다, 열린 패키지는
+    // 그대로). 오류: 할당 실패(색인 그대로).
+    Result<void> MarkRootLost() noexcept;
+
+    // 색인이 쓰는 배치다.
+    const ProjectLayout& Layout() const noexcept {
+        return *layout_;
+    }
 
     // 항목 수와 index번째 항목(경로 키 → 파일 이름 순)이다.
     usize Count() const noexcept {
@@ -254,6 +310,17 @@ private:
     Result<bool> IndexCached(platform::FileSystem& files, const AssetIndexCache& cache,
                              const String& relative, int64 modifiedTicks,
                              Array<AssetIndexEntry>& found) const noexcept;
+    // start(Content 상대 — 빈 문자열은 Content)부터 깊이 우선으로 걸어 found·diagnostics에 더한다
+    // (Rebuild·RefreshPaths 공용). Content 자신의 열거 실패만 오류다.
+    Result<void> ScanTree(platform::FileSystem& files, const PackageReadOptions& editor,
+                          const AssetIndexCache* cache, StringView start,
+                          Array<AssetIndexEntry>& found,
+                          Array<AssetIndexDiagnostic>& diagnostics) const noexcept;
+    // fileName 한 파일을 Stat해 다시 읽는다(Refresh·RefreshPaths 공용 — 없어졌으면 아무것도 더하지
+    // 않는다).
+    Result<void> RereadFile(platform::FileSystem& files, const PackageReadOptions& editor,
+                            StringView fileName, StringView readPath, Array<AssetIndexEntry>& found,
+                            Array<AssetIndexDiagnostic>& diagnostics) const noexcept;
     // 항목·진단 자리로 게시를 준비한다(정렬·같은 id·경로 진단·결과 자리 — 할당은 모두 여기서).
     Result<void> PlanPublish(Span<AssetIndexEntry* const> entries,
                              Span<AssetIndexDiagnostic* const> diagnostics,

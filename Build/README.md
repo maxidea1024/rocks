@@ -19,7 +19,7 @@ dotnet msbuild Rocks.proj /t:Test /p:Configuration=Asan /p:RocksTarget=Foundatio
 dotnet msbuild Rocks.proj /t:Build /p:Configuration=Release /p:RocksTarget=Engine
 ```
 
-Visual Studio 솔루션·프로젝트 파일 생성(UE GenerateProjectFiles 대응)은 설계만 있고 아직 구현하지 않았다([설계](../Docs/Design/ProjectFiles.ko.md)).
+Visual Studio 솔루션·프로젝트 파일(UE GenerateProjectFiles 대응, [설계](../Docs/Design/ProjectFiles.ko.md))은 도구를 빌드한 뒤 `dotnet out/dotnet/bin/Rocks.Build.Cli/Debug/net10.0/Rocks.Build.Cli.dll projectfiles --root .`로 만든다. 루트에 `Rocks.slnx`, `out/ProjectFiles/`에 프로젝트가 생기고 바뀐 파일만 다시 쓴다. Visual Studio 2026과 구성 요소 "C++ Clang tools for Windows"(`Microsoft.VisualStudio.Component.VC.Llvm.ClangToolset`, IntelliSense가 ClangCL 모드로 돈다)가 필요하다. 지금은 탐색과 IntelliSense까지이고, Visual Studio 안 빌드(`Build/IdeBuild.bat`)와 `GenerateProjectFiles.bat`은 다음 단계(PJ2)다. 시작 프로젝트는 처음 한 번 고른다("Set as Startup Project" — 솔루션 직렬화기가 항목을 이름순으로 써서 생성기가 정할 수 없다). 루트에 `Rocks.proj`와 `Rocks.slnx`가 함께 있으므로 `dotnet msbuild`·`dotnet build`에는 늘 `Rocks.proj`를 적는다(적지 않으면 MSB1011).
 
 ### 빌드 구성
 

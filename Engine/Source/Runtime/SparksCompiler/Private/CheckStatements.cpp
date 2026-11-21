@@ -155,6 +155,7 @@ void TypeChecker::Run() noexcept {
     stringType_ = TypeOfSymbol(binder_.FindName(language, "string"));
     voidType_ = binder_.voidType_;
     errorEnum_ = binder_.FindName(SpaceKey(NameSpaceKind::Engine, 0), "Error");
+    flow_ = c.lastStage_ >= CompilationStage::Flow;
     if (auto resized = inference_.TryResize(c.symbols_.Size()); !resized) {
         binder_.error_ = resized.Error();
         return;
@@ -217,6 +218,10 @@ void TypeChecker::Run() noexcept {
     // 추론한 필드 타입까지 넣어 값 struct 순환을 알린다(S0426).
     if (binder_.error_ == ErrorCode::None) {
         AnalyzeStructs(true);
+    }
+
+    if (flow_ && binder_.error_ == ErrorCode::None) {
+        CheckConstCycles(); // 3.11절 S0511
     }
 }
 
@@ -289,8 +294,9 @@ ConstantValue TypeChecker::ConstOf(uint32 symbol) noexcept {
         const ExpressionValue value =
             Check(context, initializer, entry.type == NoType ? UnresolvedType : entry.type);
         if (entry.type != NoType && value.kind != ExpressionValue::Kind::Error &&
-            Coerce(context, value, entry.type, initializer) != NoType) {
-            constant = value.constant;
+            Coerce(context, value, entry.type, initializer) != NoType &&
+            value.constant.kind != ConstantValue::Kind::None) {
+            constant = value.constant; // 상수식이 아닌 초기값(S0510)은 값 없이 Invalid
         }
 
         --initializerDepth_;
@@ -307,6 +313,19 @@ void TypeChecker::CheckModule(uint32 module) noexcept {
     const uint32 declarations = tree.Child(tree.Root(), 1);
     CheckContext moduleContext;
     moduleContext.module = module;
+    if (flow_) {
+        if (auto resized = staleRead_.TryResize(tree.NodeCount()); !resized) {
+            binder_.error_ = resized.Error();
+            return;
+        }
+
+        for (uint8& stale : staleRead_) {
+            stale = 0;
+        }
+
+        staleModule_ = module;
+    }
+
     CheckTypeRules(module);
     for (const uint32 node : tree.Children(declarations)) {
         if (binder_.error_ != ErrorCode::None) {
@@ -360,6 +379,11 @@ void TypeChecker::CheckModule(uint32 module) noexcept {
             break;
         }
     }
+
+    if (flow_ && binder_.error_ == ErrorCode::None) {
+        CheckDeclarationRules(module); // 3.11절 필드·상수식·프로필
+        CheckUnusedImports(module);    // 3.11절 S0714
+    }
 }
 
 void TypeChecker::CheckFunction(const CheckContext& outer, uint32 function,
@@ -389,7 +413,15 @@ void TypeChecker::CheckFunction(const CheckContext& outer, uint32 function,
     }
 
     const uint32 block = tree.Child(function, handler ? 4 : 5);
+    if (flow_) {
+        AnalyzeFlow(context, function, true); // await 뒤 읽기(3.11절 — 본문 검사 전)
+    }
+
     CheckStatement(context, block);
+    if (flow_ && binder_.error_ == ErrorCode::None) {
+        AnalyzeFlow(context, function, false); // S0710–S0712
+    }
+
     if (!context.returnKnown || context.returnType == voidType_ ||
         (context.resultFunction && context.resultValue == voidType_) || block == NoNode ||
         tree.Node(block).kind != SyntaxKind::Block) {
@@ -975,8 +1007,15 @@ void TypeChecker::CheckSimpleStatement(const CheckContext& context, uint32 node)
 
         const ExpressionValue value =
             Check(context, valueNode, target.kind == K::Typed ? type : UnresolvedType);
+        const SyntaxKind targetKind = tree.Node(targetNode).kind;
+        if (target.kind != K::Error &&
+            (targetKind == SyntaxKind::Identifier || targetKind == SyntaxKind::Member ||
+             targetKind == SyntaxKind::Index)) {
+            CheckWritablePath(context, targetNode, targetNode); // 3.11절(S0211 대상은 제외)
+        }
+
         if (target.kind != K::Typed) {
-            break; // 대상에 진단이 있다(또는 대입할 수 없는 대상 — LC2d)
+            break; // 대상에 진단이 있거나 값이 아닌 대상(S0706)이다
         }
 
         if (op == "=") {
@@ -1003,6 +1042,13 @@ void TypeChecker::CheckSimpleStatement(const CheckContext& context, uint32 node)
         } else if (value.kind == K::TypeName || value.kind == K::Namespace ||
                    value.kind == K::Function || value.kind == K::Literal) {
             RequireValue(context, value, valueNode);
+        } else if (flow_ && (value.kind == K::Typed || value.kind == K::UntypedInt ||
+                             value.kind == K::UntypedFloat || value.kind == K::Null)) {
+            // 버린 결과(3.11절, S0713).
+            Report(context, DiagnosticCode::DiscardedResult, valueNode,
+                   "The result of this expression is not used.",
+                   "A value that is computed and dropped is usually a mistake.",
+                   "Use the value, or write '_ = ...' to discard it on purpose.");
         }
 
         break;

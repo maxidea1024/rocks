@@ -2,7 +2,7 @@ interface Usable {
     fn Use();
 }
 
-open class Base : ScriptComponent, Usable {
+open class Base : ScriptableComponent, Usable {
     fn Use() {
     }
 }
@@ -10,7 +10,7 @@ open class Base : ScriptComponent, Usable {
 class Derived : Base {
 }
 
-class Other : ScriptComponent {
+class Other : ScriptableComponent {
 }
 
 const Count: int64 = 3;
@@ -31,7 +31,7 @@ fn Valid(i: int, a: Actor, p: Pawn, d: Derived, b: Base, actors: Array<Actor>) {
     let baseMaybe: Actor? = p;
     let usable: Usable = d;
     let sparksBase: Base = d;
-    let component: ScriptComponent = d;
+    let component: ScriptableComponent = d;
     var target: Actor? = a;
     target = null;
     target = p;

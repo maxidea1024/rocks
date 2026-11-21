@@ -18,17 +18,17 @@ struct Point {
 class Spawner : WorldService {
 }
 
-class Spinner : ScriptComponent {
+class Spinner : ScriptableComponent {
     var Sound: SoundAsset;
     var Speed: float;
 }
 
-class Wheel : ScriptComponent {
+class Wheel : ScriptableComponent {
     let Spin = Spinner();
     let Given = Spinner(Sound: Asset("/Game/Spin"));
 }
 
-class Mover : ScriptComponent {
+class Mover : ScriptableComponent {
     let Range = SphereCollider(Radius: 1.0);
 
     fn Find(): Spawner {
@@ -48,7 +48,7 @@ async fn Valid(i: int, u: uint32, f: float, g: float32, a: Actor, p: Point, v: v
     _ = Twice(2);
     _ = p.Scaled(3);
     _ = Actor.CountAll();
-    _ = a.Find<ScriptComponent>();
+    _ = a.Find<ScriptableComponent>();
     _ = a.Find<Mover>();
     let loaded = await Load();
     _ = loaded;

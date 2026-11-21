@@ -1,4 +1,4 @@
-class Mover : ScriptComponent {
+class Mover : ScriptableComponent {
     fn Start() { }
     fn OnTick() { }
     fn Update() { }

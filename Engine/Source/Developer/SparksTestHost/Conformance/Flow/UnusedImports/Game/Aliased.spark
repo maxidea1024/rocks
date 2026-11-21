@@ -1,0 +1,3 @@
+fn Thing(): int {
+    return 1;
+}

@@ -1,0 +1,6 @@
+interface Pingable {
+    fn Ping();
+}
+
+open class Root : ScriptableComponent {
+}

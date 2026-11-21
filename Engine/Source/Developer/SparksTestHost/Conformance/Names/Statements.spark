@@ -29,7 +29,7 @@ class Walker : Character {
 
         let names: Map<string, float> = ["${index}": sum, "b": !true ?? sum];
         let first = Speeds[0] ?? return sum;
-        let found = Find<ScriptComponent>();
+        let found = Find<ScriptableComponent>();
         let other = Owner2.Find<SphereCollider>();
         _ = names;
         _ = found;

@@ -198,8 +198,11 @@ Result<bool> TryParseExpectation(StringView text, Expectation& out, String& prob
                 out.stage_ = CompilationStage::Names;
             } else if (words[1] == StringView("types")) {
                 out.stage_ = CompilationStage::Types;
+            } else if (words[1] == StringView("flow")) {
+                out.stage_ = CompilationStage::Flow;
             } else {
-                return fail("unknown stage (expected 'syntax', 'imports', 'names' or 'types')");
+                return fail(
+                    "unknown stage (expected 'syntax', 'imports', 'names', 'types' or 'flow')");
             }
 
             continue; // 단계만으로는 기대 진단 지시가 아니다

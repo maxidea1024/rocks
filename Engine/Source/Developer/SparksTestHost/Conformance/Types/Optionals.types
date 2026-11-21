@@ -8,8 +8,8 @@
 9:13-9:29 Binary bool
 9:13-9:21 Identifier Rocks.Actor?
 9:25-9:29 NullLiteral Rocks.Actor?
-12:21-12:61 Member Rocks.Actor?
-12:21-12:54 Call Rocks.ScriptComponent?
+12:21-12:65 Member Rocks.Actor?
+12:21-12:58 Call Rocks.ScriptableComponent?
 12:21-12:29 Identifier Rocks.Actor?
 13:9-13:18 Identifier Rocks.Actor?
 14:9-14:25 Binary bool

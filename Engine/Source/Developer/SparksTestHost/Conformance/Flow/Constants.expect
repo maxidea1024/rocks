@@ -1,0 +1,13 @@
+# Constant expressions (3.11): const cycles (S0511, one per cycle), non-constant values (S0510), const types (S0512)
+# and field initial values that must be constant (component construction allowed).
+error S0511 26:7
+error S0511 28:7
+error S0510 29:20
+error S0510 30:30
+error S0512 31:16
+error S0512 32:14
+error S0512 33:16
+error S0510 45:17
+error S0510 46:16
+error S0510 47:17
+error S0510 49:41

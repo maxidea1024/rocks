@@ -116,8 +116,8 @@ TEST(SparksConformance_RejectsMalformedExpectations) {
             "line 0: the file has no directive; write 'clean' when no diagnostic is expected",
             allocator));
         CHECK(ParseFails("stage values\nclean\n",
-                         "line 1: unknown stage (expected 'syntax', 'imports', 'names' or "
-                         "'types')",
+                         "line 1: unknown stage (expected 'syntax', 'imports', 'names', "
+                         "'types' or 'flow')",
                          allocator));
         CHECK(ParseFails("stage syntax\nstage names\nclean\n", "line 2: 'stage' appears twice",
                          allocator));
@@ -645,7 +645,8 @@ TEST(SparksConformance_FolderCasesAndSchemas) {
         REQUIRE(write("Corpus/Area/Two/Lib/SparksPackage.json5",
                       "{ name: \"Lib\", sparks: 1, profile: \"core\" }"));
         REQUIRE(write("Corpus/Area/Two/Lib/Util.spark", ""));
-        REQUIRE(write("Corpus/Area/Two.expect", "error S0301 Game/Main.spark 2:8\n"));
+        REQUIRE(write("Corpus/Area/Two.expect",
+                      "error S0714 Game/Main.spark 1:8\nerror S0301 Game/Main.spark 2:8\n"));
         REQUIRE(write("Schema/Engine.sparkbind.json",
                       "{ \"format\": 1, \"package\": \"Rocks\", \"module\": \"Engine\", "
                       "\"types\": [] }"));

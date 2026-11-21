@@ -1,0 +1,38 @@
+import Types;
+import Funcs;
+import Idle;
+import Aliased as A;
+import Quiet as Q;
+import Bases;
+import Casts;
+import Enums;
+import Consts;
+import Generic;
+import Events;
+import Emits;
+import Lib.Shared;
+import Lib.Spare;
+import Bounds;
+import Ranges as R;
+
+class Hero : Root {
+    var Total = 0;
+    var Bag: Array<Item> = [];
+    @edit(Min: MinSpeed, Max: R.Top) var Speed: float = 1.0;
+
+    fn Take(p: Point) {
+        Total += p.X;
+    }
+
+    fn Run(a: Actor, c: ScriptableComponent) {
+        Total += Twice(1) + A.Thing() + Limit + Help();
+        _ = c as? Special;
+        _ = Shade.Dark;
+        _ = Bag;
+        emit a.Shoved(Owner);
+    }
+
+    on Owner.Poked(by: Actor) {
+        _ = by;
+    }
+}

@@ -1,0 +1,5 @@
+class Pickup : ScriptableComponent {
+    fn Collect(by: Actor) {
+        _ = by;
+    }
+}

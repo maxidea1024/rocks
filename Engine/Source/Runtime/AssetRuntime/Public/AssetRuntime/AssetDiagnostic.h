@@ -80,7 +80,10 @@ enum class AssetDiagnosticCode : uint16 {
     UnrealPathRenamed,
     UnrealPathTooLong,
     UnrealPathCollision,
-    MissingUnrealDependency
+    MissingUnrealDependency,
+    // 감시 갱신(AssetSystem.ko.md 7.1절 16 — A2d3): 감시 루트(Content)가 사라졌다(색인을 비우고
+    // 다시 나타나면 전체 검색).
+    RootLost
 };
 
 // 진단 이름이다(예: CorruptPackage → "CorruptPackage"). 모르는 값은 "Unknown"이다. 반환 문자열은

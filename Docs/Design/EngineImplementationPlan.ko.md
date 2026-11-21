@@ -32,7 +32,7 @@ STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-d
 
 **1.15 에디터 내 실행 이름 Tryout:** 사용자 결정(2026-11-19)으로 UE PIE에 대응하는 Rocks 기능 이름을 Tryout으로 정한다. 이름의 뜻·표기 규칙·변형 이름·버린 후보는 22.6절에 둔다. 이 문서와 Docs/Design의 다른 설계 문서, Docs/Implementation의 개념 표기를 함께 바꾸었다. 이어서 코드 식별자도 바꾸었다: 필드 지정자·`FieldFlags` 값 `NonPIEDuplicateTransient` → `NonTryoutDuplicateTransient`(비트 32는 그대로), 텍스트 용도 `TextUse::PieCopy` → `TextUse::TryoutCopy`, 그것을 설명하는 Docs/Implementation 표기와 게임 템플릿 README. 하위호환 별칭은 두지 않는다. 옛 지정자 이름은 MetaCompiler가 알 수 없는 지정자로 거부한다.
 
-**1.16 레벨 스크립트:** 사용자 결정(2026-11-20, 모든 항목 권장안)으로 Blueprint 제외를 유지하고, UE Level Blueprint에 해당하는 빈 곳을 Sparks 기반 타입 `LevelScript`(레벨마다 숨은 Actor 0 또는 1개, 배치 불가)로 채운다. 노드 기반 시각 편집기는 보류 선택지로만 둔다(만든다면 Sparks 코드로 내보내고 실행은 Sparks). 엔진 Actor가 물리 이벤트 `TriggerEntered`·`TriggerExited`·`CollisionEntered`·`CollisionExited`를 노출하고, 배치한 Actor에 편집기에서 ScriptComponent를 붙일 수 있음을 명시한다. 정본은 [레벨 스크립트](LevelScript.ko.md)(결정 LD1–LD20)다. 개정 범위는 표지·20.2·20.4·20.5·22.1·22.3·23.1·24.1·33.2·33.7·33.19절이다.
+**1.16 레벨 스크립트:** 사용자 결정(2026-11-20, 모든 항목 권장안)으로 Blueprint 제외를 유지하고, UE Level Blueprint에 해당하는 빈 곳을 Sparks 기반 타입 `LevelScript`(레벨마다 숨은 Actor 0 또는 1개, 배치 불가)로 채운다. 노드 기반 시각 편집기는 보류 선택지로만 둔다(만든다면 Sparks 코드로 내보내고 실행은 Sparks). 엔진 Actor가 물리 이벤트 `TriggerEntered`·`TriggerExited`·`CollisionEntered`·`CollisionExited`를 노출하고, 배치한 Actor에 편집기에서 ScriptableComponent를 붙일 수 있음을 명시한다. 정본은 [레벨 스크립트](LevelScript.ko.md)(결정 LD1–LD20)다. 개정 범위는 표지·20.2·20.4·20.5·22.1·22.3·23.1·24.1·33.2·33.7·33.19절이다.
 
 ## 1. 목표와 실행 전략
 
@@ -1795,7 +1795,7 @@ tick group은 PrePhysics, PhysicsSync, PostPhysics, AnimationFinalize, LateUpdat
 
 singleton-per-entity·required component·mutually exclusive 규칙을 type metadata로 표현한다. editor가 자동 추가하는 종속 component는 transaction에 포함한다. cook은 순환 종속·누락 필수 component를 검사한다. constructor에서 backend world에 즉시 등록하지 않으며 Register가 실패하면 backend의 부분 등록을 해제하고, 이미 Commit된 객체는 5.3절의 RequestDestroy·정상 retire 경로로 정리한다. 미공개 rollback과 구분한다. editor에는 component tree, active state, tick 의존성, native handle 상태를 표시한다.
 
-editor는 배치한 Actor에 ScriptComponent를 바로 붙일 수 있다. 직접 배치한 Actor는 그 component 목록에 추가해 레벨과 함께 저장하고, prefab 배치는 instance override의 노드 추가로 저장한다(Prefab PF4 선행). 이것은 레벨·배치 데이터 편집이므로 Sparks core에서도 되며, 실행 중 스크립트가 component를 추가하는 것(Sparks full 전용)과 구분한다([레벨 스크립트](LevelScript.ko.md) LD15).
+editor는 배치한 Actor에 ScriptableComponent를 바로 붙일 수 있다. 직접 배치한 Actor는 그 component 목록에 추가해 레벨과 함께 저장하고, prefab 배치는 instance override의 노드 추가로 저장한다(Prefab PF4 선행). 이것은 레벨·배치 데이터 편집이므로 Sparks core에서도 되며, 실행 중 스크립트가 component를 추가하는 것(Sparks full 전용)과 구분한다([레벨 스크립트](LevelScript.ko.md) LD15).
 
 ### 20.3 프리팹·중첩·변형·인스턴스 오버라이드
 
@@ -2015,7 +2015,7 @@ import Gameplay.Interaction;      // event Entity.Interacted(actor: Entity);
 
 enum DoorState { Closed, Opening, Open }
 
-class DoorLogic : ScriptComponent {
+class DoorLogic : ScriptableComponent {
     @edit @save var OpenAngle: float = 90.0;      // Rotator 각도: 도(UE FRotator와 같음)
     @edit var Hinge: TransformComponent;          // 같은 prefab 안의 필수 참조
     @net var State = DoorState.Closed;
@@ -2652,7 +2652,7 @@ line coverage는 누락 후보 탐색 수단이며 안정성 증명이 아니다
 | M1 · 2–3개월 | M0 | Core library·thread/task/IO·Registry·handle/reference·manual TypeInfo·Object 생성/파괴 | F1–F4 정확성·stress·no-op baseline |
 | M2 · 4–6개월 | M1 | ClassDefaults/instancing·full GC·barrier API·Archive·Clang 최소 생성기·UI용 리플렉션 계약 CU1–CU9·Core 보강 CB1–CB3·Foundation 통합 | CF01–CF12·B0/B1 정확성 통과, 후속 착수 gate |
 | M3 · 기존 7–9개월 참고 | Foundation Gate | Rocks Build/local cache·asset/에셋 너겟·5종 RHI/RG 기본 개발·Deferred/Forward·texture/builtin·Material MAT0/MAT1·UI 툴킷 UT1–UT4(Studio 기초)·UT5 착수·script L0/L1·spatial upscale | import→edit→save→cook→run, Win/Mac Studio·CPU headless·기본 Tryout·UI 기준값 UV1–UV6·UV8·iteration trace |
-| M4 · 기존 10–12개월 참고 | M3 | 5종 RHI 기본 Gate·lightmap/probe·정식 Tryout·템플릿·애니메이션·물리/audio/input/AI·게임 UI runtime/Designer·Material MAT2·ScriptComponent·TAAU·기본 nested 컷씬·post, Incredibuild/분산 worker | gameplay+2분 컷씬, 두 렌더 경로·API/TX/BR/PI 전체 기본 profile 및 LT/TT/MT의 단계별 필수 subset·offscreen·UI callback·build adapter |
+| M4 · 기존 10–12개월 참고 | M3 | 5종 RHI 기본 Gate·lightmap/probe·정식 Tryout·템플릿·애니메이션·물리/audio/input/AI·게임 UI runtime/Designer·Material MAT2·ScriptableComponent·TAAU·기본 nested 컷씬·post, Incredibuild/분산 worker | gameplay+2분 컷씬, 두 렌더 경로·API/TX/BR/PI 전체 기본 profile 및 LT/TT/MT의 단계별 필수 subset·offscreen·UI callback·build adapter |
 | M5 · 13–16개월 | M4 | replication/subobject·travel·nested prefab·능력 기초·script debugger/async·FSR·UI binding/animation·Material layer MAT3·adaptive probe/scenario·고급 post | B3/B5/B6/B8·I0–I6, GC 병렬/점진 최적화·agent 장애·headless server |
 | M6 · 17–20개월 | M5 | 컷씬/capture·EXR/AOV·HDR/post·DLSS/XeSS·ability/feature·UI 전문 Designer·Material MAT3·기본 고급 재질 | B7·UI/headless GPU 회귀·script reload·feature teardown·link profile |
 | M7 · 21–24개월 | M6 | World Partition·HLOD·대량 AI·rig/retarget·terrain·PCG·audio graph, GPU-driven 정식화 | B4, long traversal·teleport·producer 경험·SoA budget |

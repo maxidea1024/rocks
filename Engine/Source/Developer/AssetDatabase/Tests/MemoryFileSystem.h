@@ -373,7 +373,7 @@ public:
         info.type = node->type;
         info.isLink = node->isLink;
         info.size = node->content.Get() != nullptr ? node->content.Get()->Size() : 0;
-        info.modifiedTicks = static_cast<int64>(info.size) + 1;
+        info.modifiedTicks = static_cast<int64>(info.size) + 1 + modifiedShift;
         return {};
     }
 
@@ -470,7 +470,7 @@ public:
             entry.info.type = child.type;
             entry.info.isLink = child.isLink;
             entry.info.size = child.content.Get() != nullptr ? child.content.Get()->Size() : 0;
-            entry.info.modifiedTicks = static_cast<int64>(entry.info.size) + 1;
+            entry.info.modifiedTicks = static_cast<int64>(entry.info.size) + 1 + modifiedShift;
             if (!visitor(entry, context)) {
                 break;
             }
@@ -480,6 +480,8 @@ public:
     }
 
     MemoryFaults faults;
+    // 모든 수정 시각에 더하는 값이다(크기는 같고 시각만 바뀐 파일 — 감시의 관찰).
+    int64 modifiedShift = 0;
     uint32 opens = 0;
     uint32 deletes = 0;
     uint32 replaces = 0;

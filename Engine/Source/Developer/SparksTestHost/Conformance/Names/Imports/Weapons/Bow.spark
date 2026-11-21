@@ -1,1 +1,1 @@
-class Bow : ScriptComponent { }
+class Bow : ScriptableComponent { }

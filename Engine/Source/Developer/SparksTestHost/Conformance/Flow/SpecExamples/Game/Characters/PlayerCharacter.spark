@@ -1,0 +1,45 @@
+import Weapons.Sword;
+import Items.Pickup;
+import Characters.Enemy;
+
+class PlayerCharacter : Character {                  // Pawn 파생(Character는 자리표시): 자기 자신은 this
+    @edit @net var MoveSpeed: float = 600.0;         // 초당 600 cm
+    @edit let MaxHealth: float = 100.0;              // 생성 후 바뀌지 않는다
+
+    let PickupRange = SphereCollider(Radius: 200.0); // 소유 component, 반지름 cm
+    let MoveAction = Action("Gameplay.Move");        // 입력 action, 컴파일 시 검증
+    let JumpAction = Action("Gameplay.Jump");        // 기반 멤버 Jump()와 이름이 겹치지 않게
+    var CurrentTarget: Enemy?;                       // 다른 Actor: 파괴되면 null (기본값 null)
+    var EquippedSword: Sword?;
+
+    fn CalculateDamage(base: float, multiplier: float): float {
+        return base * multiplier;
+    }
+
+    on Start() {
+        PickupRange.RelativeLocation = vec3(0.0, 0.0, 80.0);   // cm
+        Log.Info("Rocks Engine & Sparks Ready!");   // 카테고리 Script.Characters
+    }
+
+    on JumpAction.Triggered() {                      // 입력 phase 이름 그대로(SD35)
+        AddImpulse(vec3(0.0, 0.0, 500.0));          // kg·cm/s(PhysicsJoltAdapter 3절 U1)
+    }
+
+    on Tick() {                                      // 인자 dt는 필요할 때만 선언
+        let moveInput = MoveAction.Value;            // vec3(2축 action은 X·Y)
+        if (moveInput.Length() > 0.0) {
+            let dir = GetForwardVector() * moveInput.Y + GetRightVector() * moveInput.X;
+            AddMovement(dir.Normalize() * MoveSpeed); // 초당 속도. dt는 엔진이 적용
+        }
+        if (let target = CurrentTarget) {
+            LookAt(target.Location);
+        }
+    }
+
+    on TriggerEnter(other: Actor, trigger: Collider) {   // 자기 Actor의 모든 collider에서 온다
+        if (trigger != PickupRange) { return; }
+        if (let pickup = other.Find<Pickup>()) {
+            pickup.Collect(this);
+        }
+    }
+}

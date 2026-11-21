@@ -4,3 +4,5 @@
 # segment names a dependency.
 error S1111 Game/Rocks.spark
 error S1111 Game/SparksPackage.json5 1:60
+# Import rules only: unused imports (S0714, LC2d) are checked in the Flow area.
+stage imports

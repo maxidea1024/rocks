@@ -1,0 +1,41 @@
+# Assignment paths (3.11): writes to let locals and fields (S0701), parameters and binders (S0702),
+# fields of another object, also of the same class (S0703), read-only engine properties (S0704), struct fields
+# from a struct function (S0705), non-assignable targets (S0706) and value call results or '?.' paths (S0731);
+# mutating methods (Array, Map, Set, TagSet) count as writes; a property of an object returned by a call can be
+# written; S0211 targets get no further diagnostic.
+error S0705 10:9
+error S0701 50:9
+error S0701 51:9
+error S0701 52:9
+error S0702 53:9
+error S0702 54:9
+error S0702 55:9
+error S0701 56:9
+error S0701 57:9
+error S0703 58:9
+error S0704 59:9
+error S0702 60:9
+error S0704 62:9
+error S0706 63:9
+error S0706 64:9
+error S0706 65:9
+error S0706 66:9
+error S0326 67:9
+error S0702 69:13
+error S0702 73:13
+error S0701 77:9
+error S0731 78:9
+error S0731 79:9
+error S0704 80:9
+error S0703 96:9
+error S0701 101:9
+error S0702 103:13
+error S0702 104:9
+error S0702 105:13
+error S0702 106:13
+error S0702 107:9
+error S0702 108:9
+error S0702 109:9
+error S0731 110:9
+error S0211 113:9
+error S0211 115:9

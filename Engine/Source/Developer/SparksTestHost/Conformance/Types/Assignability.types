@@ -10,7 +10,7 @@
 31:29-31:30 Identifier Rocks.Pawn
 32:26-32:27 Identifier Test:Main.Derived
 33:28-33:29 Identifier Test:Main.Derived
-34:38-34:39 Identifier Test:Main.Derived
+34:42-34:43 Identifier Test:Main.Derived
 35:26-35:27 Identifier Rocks.Actor
 36:5-36:11 Identifier Rocks.Actor?
 36:14-36:18 NullLiteral Rocks.Actor?
@@ -26,7 +26,7 @@
 39:72-39:81 Identifier Rocks.Actor?
 39:87-39:93 Identifier Test:Main.Usable
 40:9-40:19 Identifier Test:Main.Base
-40:25-40:34 Identifier Rocks.ScriptComponent
+40:25-40:34 Identifier Rocks.ScriptableComponent
 40:40-40:44 Identifier Array<Rocks.Actor>
 45:20-45:21 Identifier float32
 46:18-46:23 Identifier int32

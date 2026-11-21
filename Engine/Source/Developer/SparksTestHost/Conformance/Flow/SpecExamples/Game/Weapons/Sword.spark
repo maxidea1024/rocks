@@ -1,0 +1,2 @@
+class Sword : ScriptableComponent {
+}

@@ -1,6 +1,6 @@
 fn Helper() { }
 
-class Door : ScriptComponent {
+class Door : ScriptableComponent {
     var A: Server;
     var B: Helper;
     fn Run(count: int) {

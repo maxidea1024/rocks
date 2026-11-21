@@ -21,7 +21,7 @@
 15:12 value -> param value@14:10
 15:20 MaxStack -> const Test:Main.MaxStack
 18:7 decl class Test:Main.DoorLogic
-18:19 type Rocks.ScriptComponent
+18:19 type Rocks.ScriptableComponent
 19:9 decl field Test:Main.DoorLogic.OpenAngle
 19:20 type float
 20:9 decl field Test:Main.DoorLogic.State

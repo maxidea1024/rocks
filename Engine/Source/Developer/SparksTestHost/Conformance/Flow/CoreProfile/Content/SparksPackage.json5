@@ -1,0 +1,1 @@
+{ name: "Content", sparks: 1, profile: "core", dependencies: ["Shared"] }

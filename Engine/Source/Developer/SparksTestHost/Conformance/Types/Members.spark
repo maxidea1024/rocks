@@ -8,7 +8,7 @@ struct Point {
     }
 }
 
-open class Base : ScriptComponent {
+open class Base : ScriptableComponent {
     var Health = 10;
 
     fn Heal(amount: int) {
@@ -78,7 +78,7 @@ fn Valid(v: vec3, w: vec2, q: quat, r: Rotator, t: Transform, text: string, item
     _ = Tag.Find("A.B");
     _ = actorOpt?.Location;
     actorOpt?.RequestDestroy();
-    _ = actorOpt?.Find<ScriptComponent>();
+    _ = actorOpt?.Find<ScriptableComponent>();
     _ = textOpt?.Length;
     _ = textOpt?.Find("a");
     _ = p.X;

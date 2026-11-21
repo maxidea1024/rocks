@@ -5,11 +5,11 @@ class Mover : Character {
     override fn Jump() { }
 }
 
-class Panel : ScriptComponent {
+class Panel : ScriptableComponent {
     override fn DescribeState(detailed: int): string { return ""; }
 }
 
-class Panel2 : ScriptComponent {
+class Panel2 : ScriptableComponent {
     override fn DescribeState(_: bool): string { return ""; }
     open fn Extra() { }
 }
@@ -22,7 +22,7 @@ struct Data {
     open fn B() { }
 }
 
-open class Base : ScriptComponent {
+open class Base : ScriptableComponent {
     open fn Step(count: int) { }
     fn Fixed() { }
 }

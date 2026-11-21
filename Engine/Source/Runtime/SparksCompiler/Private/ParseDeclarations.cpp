@@ -238,7 +238,7 @@ uint32 SyntaxTreeBuilder::ParseClass(uint32 begin, uint32 doc, uint32 attributes
     Push(attributes);
     Push(ParseName("after 'class'"));
     const bool hasBases = Expect(TokenKind::Colon, "after the class name",
-                                 "Name the base type, as in 'class Door : ScriptComponent'.");
+                                 "Name the base type, as in 'class Door : ScriptableComponent'.");
     const uint32 basesBegin = CurrentBegin();
     const usize basesMark = Mark();
     if (hasBases) {

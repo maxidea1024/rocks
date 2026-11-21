@@ -1,0 +1,61 @@
+import Gameplay.Interaction;     // @authorityOnly event Actor.Interacted(actor: Actor);
+import Items.Inventory;
+
+enum DoorState { Closed, Opening, Open }
+
+class DoorLogic : ScriptableComponent {
+    @edit @save var OpenAngle: float = 90.0;           // Rotator 각도: 도
+    @edit var Hinge: SceneComponent;               // ? 없음: 같은 prefab 안에서 반드시 지정
+    @edit @save var RequiredKey = Tag("Item.Key.Iron");
+    @edit(Min: 0.05) var SwingSeconds: float = 0.6;     // 0으로 나누기 방지
+    @edit var OpenSound: SoundAsset = Asset("/Game/Audio/DoorOpen");
+    @net var State = DoorState.Closed;
+    var ShownState = DoorState.Closed;                 // 이 기기에 마지막으로 반영한 상태(복제하지 않음)
+    var Swing = 0.0;                                   // 이 기기의 회전 진행률 0–1(복제하지 않음)
+
+    event Opened(by: Actor?);
+
+    on Enable() {                                       // 활성화될 때마다 현재 상태 반영
+        ShownState = State;
+        ApplyPose();
+    }
+
+    @skipWhileBusy                                      // 여는 동안 온 상호작용은 버린다
+    on Owner.Interacted(actor: Actor) {                // 상호작용 시스템이 서버에서 발행
+        if (State != DoorState.Closed || !HasKey(actor)) { return; }
+        State = DoorState.Opening;
+        await Delay(SwingSeconds, Clock.Game);
+        State = DoorState.Open;
+        emit Opened(actor);                             // await 이후 actor는 Actor?
+    }
+
+    on Disable() {                                      // 여는 도중 취소되면 권한 측이 되돌린다
+        if (Owner.HasAuthority && State == DoorState.Opening) { State = DoorState.Closed; }
+    }
+
+    on State.Changed() {                                // 모든 기기에서 실행, await 불가
+        if (ShownState == DoorState.Closed) {           // 닫힘에서 벗어나는 전이에만 소리
+            World.Audio.PlayAt(OpenSound, Owner.Location);   // 일회성 효과: handle 없음
+        }
+        ShownState = State;
+        ApplyPose();
+    }
+
+    on Tick(dt: float) {                                // 모든 기기에서 회전 연출
+        if (State != DoorState.Opening) { return; }
+        Swing = Math.Min(Swing + dt / SwingSeconds, 1.0);
+        Hinge.RelativeRotation.Yaw = OpenAngle * Math.EaseOut(Swing);
+    }
+
+    fn ApplyPose() {
+        if (State == DoorState.Closed) { Swing = 0.0; }
+        if (State == DoorState.Open) { Swing = 1.0; }
+        Hinge.RelativeRotation.Yaw = OpenAngle * Math.EaseOut(Swing);
+    }
+
+    fn HasKey(actor: Actor): bool {
+        if (actor.Tags.Has(RequiredKey)) { return true; }
+        let bag = actor.Find<Inventory>() ?? return false;
+        return bag.Contains(RequiredKey);
+    }
+}

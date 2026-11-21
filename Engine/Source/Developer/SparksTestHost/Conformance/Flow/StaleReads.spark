@@ -1,0 +1,299 @@
+enum Mode { A, B }
+
+class Door : ScriptableComponent {
+    var Level = 0;
+
+    fn Open() {
+    }
+}
+
+class Tester : ScriptableComponent {
+    @edit var Partner: Door;
+    var Flag = false;
+    var Kind = Mode.A;
+    var Count = 0;
+    var Items: Array<Door> = [];
+
+    async fn Wait() {
+        await NextTick();
+    }
+
+    async fn LoadDoor(): Door {
+        await Wait();
+        return Partner;
+    }
+
+    async fn LoadRadius(): float {
+        await Wait();
+        return 1.0;
+    }
+
+    fn Find(): Door? {
+        return Partner;
+    }
+
+    fn Use(d: Door) {
+        d.Open();
+    }
+
+    fn NoAwait(d: Door) {
+        d.Open();
+        d.Open();
+    }
+
+    async fn Before(d: Door, a: Actor) {
+        d.Open();
+        let moved = await a.MoveTo(a.Location);
+        _ = moved;
+    }
+
+    async fn After(d: Door, thing: Interactable) {
+        await Wait();
+        d.Open();
+        (d).Open();
+        thing.Interact(Owner);
+        d?.Open();
+        if (let again = d) {
+            again.Open();
+        }
+
+        _ = d == null;
+        Partner.Open();
+        _ = Owner.Location;
+    }
+
+    async fn Reassign(d: Door) {
+        var t = d;
+        await Wait();
+        t = Partner;
+        t.Open();
+        let u = Partner;
+        await Wait();
+        u.Open();
+        t.Open();
+    }
+
+    async fn Declared() {
+        await Wait();
+        let fresh = Partner;
+        fresh.Open();
+        let loaded = await LoadDoor();
+        loaded.Open();
+    }
+
+    async fn Branches(d: Door) {
+        var t = d;
+        if (Flag) {
+            await Wait();
+        }
+
+        t.Open();
+        if (Flag) {
+            await Wait();
+            t = Partner;
+        } else {
+            t = Partner;
+        }
+
+        t.Open();
+    }
+
+    async fn LoopBack(d: Door) {
+        while (Flag) {
+            d.Open();
+            await Wait();
+        }
+    }
+
+    async fn LoopFresh() {
+        var t = Partner;
+        while (Flag) {
+            t = Partner;
+            t.Open();
+            await Wait();
+        }
+    }
+
+    async fn ForBinder(d: Door) {
+        for (door in Items) {
+            door.Open();
+            await Wait();
+        }
+
+        for (other in Items) {
+            other.Open();
+            d.Open();
+        }
+    }
+
+    async fn ForBreak(d: Door) {
+        for (door in Items) {
+            door.Open();
+            await Wait();
+            break;
+        }
+
+        d.Open();
+    }
+
+    async fn ContinuePath(d: Door) {
+        while (Flag) {
+            if (Flag) {
+                await Wait();
+                continue;
+            }
+
+            d.Open();
+        }
+    }
+
+    async fn BreakPath(d: Door) {
+        while (Flag) {
+            await Wait();
+            break;
+        }
+
+        d.Open();
+    }
+
+    async fn CaseAwait(d: Door) {
+        switch (Count) {
+            case 1: {
+                await Wait();
+            }
+            default: {
+            }
+        }
+
+        d.Open();
+    }
+
+    async fn NoDefault(d: Door) {
+        var t = d;
+        await Wait();
+        switch (Kind) {
+            case Mode.A: {
+                t = Partner;
+            }
+            case Mode.B: {
+                t = Partner;
+            }
+        }
+
+        t.Open();
+    }
+
+    async fn WithDefault(d: Door) {
+        var t = d;
+        await Wait();
+        switch (Count) {
+            case 1: {
+                t = Partner;
+            }
+            default: {
+                t = Partner;
+            }
+        }
+
+        t.Open();
+    }
+
+    async fn TargetAfterValue(c: SphereCollider) {
+        c.Radius = await LoadRadius();
+    }
+
+    async fn ValueTypes(n: int, v: vec3, s: string, list: Array<Door>, asset: DataAsset) {
+        await Wait();
+        _ = n + 1;
+        _ = v.X;
+        _ = s.Length;
+        _ = list.SlotCount;
+        _ = asset;
+    }
+
+    async fn Mismatch(d: Door) {
+        await Wait();
+        Use(d);
+    }
+
+    async fn ExitReturn() {
+        await Wait();
+        let found = Find() ?? return;
+        found.Open();
+    }
+
+    async fn LoadCount(): Result<int> {
+        await Wait();
+        return 1;
+    }
+
+    async fn TryAwait(d: Door): Result<void> {
+        let n = try await LoadCount();
+        _ = n;
+        d.Open();
+        return;
+    }
+
+    async fn ExitAfter(d: Door): int {
+        await Wait();
+        let found = Find() ?? return d.Level;
+        return found.Level;
+    }
+
+    async fn IfLetElse(d: Door) {
+        await Wait();
+        if (let found = Find()) {
+            found.Open();
+        } else {
+            d.Open();
+        }
+    }
+
+    async fn Polling(d: Door) {
+        var e = d;
+        while (true) {
+            e = Partner;
+            if (Flag) {
+                break;
+            }
+
+            await Wait();
+        }
+
+        e.Open();
+    }
+
+    async fn PollingParenthesized(d: Door) {
+        var e = d;
+        while ((true)) {
+            e = Partner;
+            if (Flag) {
+                break;
+            }
+
+            await Wait();
+        }
+
+        e.Open();
+    }
+
+    async fn PollingFalse(d: Door) {
+        var e = d;
+        while (Flag) {
+            e = Partner;
+            if (Flag) {
+                break;
+            }
+
+            await Wait();
+        }
+
+        e.Open();
+    }
+
+    on Start() {
+        let d = Partner;
+        await Wait();
+        d.Open();
+    }
+}

@@ -1,6 +1,8 @@
 #pragma once
 
 #include <AssetDatabase/ProjectLayout.h>
+#include <Core/Algorithms.h>
+#include <Core/Containers/Array.h>
 #include <Core/Containers/Span.h>
 #include <Core/Guid.h>
 #include <Core/Result.h>
@@ -93,5 +95,104 @@ inline bool EditorIsOrphanTempName(StringView name) noexcept {
     return stem.ByteCount() > EditorPackageExtension.ByteCount() &&
            stem.EndsWith(EditorPackageExtension);
 }
+
+// Content 상대 이름 규칙(RefreshPaths 입력·감시 이벤트 경로): 비지 않은 유효한 UTF-8, 앞뒤 '/'
+// 없음, 빈 구성 요소·
+// "."·".." 없음.
+inline bool IsContentRelativeName(StringView name) noexcept {
+    if (name.IsEmpty() || !name.IsValidUtf8()) {
+        return false;
+    }
+
+    usize start = 0;
+    for (usize at = 0; at <= name.ByteCount(); ++at) {
+        if (at < name.ByteCount() && name.Data()[at] != '/') {
+            continue;
+        }
+
+        const StringView component(name.Data() + start, at - start);
+        if (component.IsEmpty() || component == "." || component == "..") {
+            return false;
+        }
+
+        start = at + 1;
+    }
+
+    return true;
+}
+
+// 비교 키 집합이다(Add로 모으고 Finish가 정렬·중복 제거한 뒤 찾는다 — RefreshPaths·감시의 이름
+// 대조, O(log n) 찾기).
+class NameSet {
+public:
+    explicit NameSet(Allocator& allocator) noexcept : keys_(allocator) {
+    }
+
+    Result<void> Add(StringView key) noexcept {
+        String copy(keys_.GetAllocator());
+        if (auto assigned = copy.TryAssign(key); !assigned) {
+            return assigned;
+        }
+
+        return keys_.TryPushBack(Move(copy));
+    }
+
+    void Finish() noexcept {
+        algo::Sort(keys_.View(), [](const String& left, const String& right) noexcept {
+            return StringView::CompareBytes(left.View(), right.View()) < 0;
+        });
+        usize kept = 0;
+        for (usize at = 0; at < keys_.Size(); ++at) {
+            if (kept != 0 && keys_[kept - 1].View() == keys_[at].View()) {
+                continue;
+            }
+
+            if (kept != at) {
+                keys_[kept] = Move(keys_[at]);
+            }
+
+            ++kept;
+        }
+
+        while (keys_.Size() > kept) {
+            (void)keys_.TryPopBack();
+        }
+    }
+
+    bool Contains(StringView key) const noexcept {
+        const usize at =
+            algo::LowerBound(keys_.View(), key, [](const String& value, StringView probe) noexcept {
+                return StringView::CompareBytes(value.View(), probe) < 0;
+            });
+        return at != keys_.Size() && keys_[at].View() == key;
+    }
+
+    // key의 조상(빈 문자열 = Content 포함, key 자신 제외)이 집합에 있는지다.
+    bool Above(StringView key) const noexcept {
+        if (key.IsEmpty()) {
+            return false;
+        }
+
+        if (Contains(StringView())) {
+            return true;
+        }
+
+        for (usize at = 0; at < key.ByteCount(); ++at) {
+            if (key.Data()[at] == '/' && Contains(StringView(key.Data(), at))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // key 자신이나 그 조상이 집합에 있는지다.
+    bool Covers(StringView key) const noexcept {
+        return Contains(key) || Above(key);
+    }
+
+private:
+    Array<String> keys_;
+};
 
 } // namespace rocks::asset_database_detail

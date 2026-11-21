@@ -488,7 +488,16 @@ A2는 에디터 쪽 에셋 데이터베이스다(4·5.4·5.5·7·8·13·16절). 
       - 경로 대조: 이벤트 경로는 OS byte 그대로 오므로 색인 항목의 `fileName`(OS byte)과 byte로 대조한다(NFC·caseless 키로 대조하면 Linux에서 대소문자만 다른 두 파일이 합쳐진다). 이름 정규화 FS(macOS — `FileSystemNormalizesNames`)에서만 NFC 대조를 더한다.
       - 새 API `AssetIndex::RefreshPaths(files, fileNames, subtrees, options)`: PrepareRefresh·CommitRefresh의 일반화(여러 파일·하위 트리를 한 번에 준비·확정 — 하위 트리는 다시 열거해 없어진 항목을 뺀다). 교체 뒤 실패 없음 계약을 잇는다(할당 실패면 색인 그대로). 기존 Refresh는 그 특수한 경우다.
       - 쓰는 중인 파일: 다시 읽기가 CorruptPackage·Busy면 대기 목록에 넣고, 크기·시각이 같은 관찰이 `AssetClock`으로 500 ms(7절 debounce와 같은 값) 이상 떨어져 두 번 나오면 다시 읽는다(Pump 횟수가 아니라 시간 — 에디터 tick마다 Pump해도 쓰는 도중을 안정으로 보지 않게). 처음 본 뒤 10초를 넘기면 다시 읽어 그 진단을 남기고 뺀다. sleep 없음 — 호출자가 Pump를 돈다.
-      - 시험: 가짜 원천으로 이벤트 종류 × 순서 × Overflow·RootRemoved·재열기·쓰는 중 대기(수동 시계), 실제 감시 한 번(Wait는 이벤트 gate, 상한은 실패 판정용으로만).
+      - 시험: 가짜 원천으로 이벤트 종류 × 순서 × Overflow·RootRemoved·재열기·쓰는 중 대기(수동 시계), 실제 감시 한 번(Wait는 이벤트 gate, 상한은 실패 판정용으로만). 상태: **구현** — 대조표 14.1.29절, coverage 14.1.30절.
+      - 구현 세부(2026-11-21, 권장안으로 확정):
+        - `RefreshPaths` 입력 `AssetIndexRefreshPaths{files, subtrees, mayDefer, deferred, normalizesNames}`. 이름은 Content 상대 규칙(유효한 UTF-8, 앞뒤 `/`·빈 구성 요소·`.`·`..` 없음 — 하위 트리만 빈 문자열 = Content 전체 허용), 어기면 InvalidArgument. 같은 이름 여럿·트리 안 트리·트리 안 파일은 정렬 대조로 한 번만 읽는다(이벤트 수천 개에도 O(n log n) — 쌍마다 대조하지 않는다). 하위 트리의 시작 이름은 먼저 Stat: 없음 → 비어 있음, 링크·그 밖의 종류 → 그 아래 없음, `.rasset` 파일 → 그 파일, 디렉터리 → 걷기, 그 밖의 Stat 실패 → 진단 None. Content 전체(빈 이름)의 열거 실패만 오류다(Rebuild와 같다). 캐시는 쓰지 않는다 — 같은 지문 파일도 다시 읽는다(결과가 같으므로 정확성 문제는 없고 비용은 A2d2가 본다).
+        - 빼는 것의 대조: 항목은 OS 이름, 진단은 표시 이름(`AssetIndexDiagnostic::fileName`)으로 한다. 하위 트리 아래 진단은 유효한 UTF-8 이름의 표시와 잘못된 UTF-8 이름(0x80 이상 byte까지 escape)의 표시 둘 다로 접두를 본다 — 표시 escape는 `/`를 바꾸지 않고, 유효한 이름의 표시에는 0x80 이상 byte의 escape가 없고 역슬래시는 `\x5c`로 바뀌므로 다른 이름과 겹치지 않는다. `normalizesNames`(기본 `FileSystemNormalizesNames`)면 두 쪽을 NFC로 대조한다(`/`는 결합하지 않아 구성 요소 경계가 유지된다). 새 항목의 이름은 이벤트 철자다(한계).
+        - 쓰는 중 대기: `mayDefer`가 참인 파일의 다시 읽기가 패키지를 읽지 못해(항목 없이 진단 하나) CorruptPackage이거나 진단 None·Busy면(읽혀서 항목이 있는 파일의 Tags·ImportRecord 손상 진단은 다 쓴 파일이라 미루지 않는다) 그 파일의 지금 항목·진단을 바꾸지 않고(기다리는 동안 옛 항목이 남는다 — 저장 도중 에셋이 사라졌다 나타나지 않게) `deferred`에 위치를 붙인다. 같은 이름 중 하나라도 거짓이면 미루지 않는다.
+        - `AssetIndex::MarkRootLost()`: 항목을 비우고 진단을 `RootLost`(이름 빈 문자열, 원본 오류 NotFound) 하나로 둔다. 할당 실패면 색인 그대로이고 감시가 다음 Pump에 다시 한다. 진단 줄은 `RootLost: Content/: the content directory disappeared`.
+        - 감시: `Start(cache)`는 원천 열기 → Rebuild(실패하면 원천을 닫는다). `Pump()`는 시작 전 InvalidArgument. 원천 Poll 오류와 이벤트 기록의 할당 실패는 전체 다시 검색으로 접는다(`DirectoryWatcher`가 메모리 부족을 루트 Overflow로 접는 것과 같다 — 이벤트는 늘 소비한다). 유효한 UTF-8이 아닌 경로는 첫 잘못된 구성 요소 앞 디렉터리(없으면 전체), 규칙에 안 맞는 경로는 전체다. 다시 읽기 실패면 색인 그대로·모은 일 유지(다음 Pump가 다시). 새 대기 목록은 확정 전에 모두 만든다(확정 뒤 실패 없음). 대기 관찰은 복사본에서 하고 성공할 때만 바꾼다(실패하면 대기 그대로 — 다시 읽을 것이 없는 Pump도 관찰은 남긴다, 버리면 안정 판정이 끝나지 않는다). 다시 읽은 이름·덮은 트리·이미 있는 대기의 대조는 정렬 표의 이진 검색이다(A2d3 리뷰 필수 — 이벤트·대기가 수만 개여도 쌍마다 대조하지 않는다).
+        - 대기 파일은 Pump마다 관찰한다: 처음 본 뒤 10초 → 다시 읽기(미루지 않음), Stat 실패·일반 파일 아님 → 다시 읽기, 크기·시각이 지난 관찰과 다르면 관찰 갱신, 같고 500 ms 이상 지났으면 다시 읽기. 다시 읽은 결과(손상이어도)를 남기고 대기에서 뺀다. 새 이벤트는 다시 미룰 수 있다(처음 본 시각은 유지 — 10초 상한은 그대로). 다시 검색한 하위 트리가 덮는 대기 파일은 뺀다(검색이 결과를 남겼다 — 대조는 byte, 정규화 철자 차이면 상한까지 남을 뿐이다).
+        - 루트 소실 뒤: 1초 간격으로 다시 열기(NotFound는 조용히 다음 간격, 그 밖의 원천 오류는 Pump 오류), 열리면 `RefreshPaths(전체)` — 실패하면 RootLost 색인 그대로이고 다음 간격에 검색만 다시 한다. 시계가 뒤로 가면 기준 시각을 지금으로 당긴다(기다림이 길어질 뿐).
+        - `PrepareRefresh`도 `options.types`를 비운다(Rebuild·캐시와 같은 형식 판정만 — A2d1의 결정을 저장 갱신에도 맞춤).
     - **A2d2 병렬 범위 읽기**: Rebuild를 걷기(파일 목록)와 읽기로 나누고 읽기를 `WorkerScheduler`(주입 — 없으면 직렬)로 파일마다 지문·부분 읽기를 해 파일별 결과 칸에 둔다. 결과는 목록 순서로 모아 지금과 같은 정렬·게시를 한다(직렬과 byte 같은 결과를 단언). 계약: 색인 allocator와 `FileSystem` 모두 동시 호출이 안전해야 한다(`PhysicalFileSystem`은 그렇다 — 시험 `MemoryFileSystem`은 잠금을 더하거나 직렬 시험만). 할당 실패는 어느 작업이든 전체 실패(색인 그대로). 완료 조건에 큰 합성 프로젝트(예: 5만 패키지)의 직렬 대 병렬 측정 수치를 넣는다.
 
 ## 8. 동시성
@@ -2011,6 +2020,49 @@ A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항�
 | 명령 파일들 | 할당 실패(출력 줄·목록·검색·Verify·정리), rebuild의 정리 오류(할당 밖) | 프로세스 시험은 명령 allocator에 실패를 주입할 수 없다(14.1.26과 같다 — 같은 경로는 C++ 할당 실패 시험이 돈다). 정리 오류는 Content·Intermediate 뿌리의 열거 실패뿐인데 그 둘은 앞 단계(검색 — cannot scan, 잠금 — cannot lock)가 먼저 실패시킨다(C# 시험) |
 
 시험이 찾은 것: (1) 잘린 항목의 몇 단계(의존 읽기)는 앞의 개수 상한 검사 때문에 닿을 수 없었다 — 그 `reader.Failed()` 검사를 지우고 근거를 적었다. 헤더 읽기의 실패 검사도 크기 검사 뒤라 지웠다. (2) 고아 정리가 템플릿이라 두 인스턴스의 분기가 따로 셌다 — 판정 함수 포인터로 바꿨다. (3) 경로 버퍼(inline StringBuilder)는 짧은 경로에서 할당하지 않아 할당 실패에 닿지 않았다 — 할당하는 String으로 바꿨다. (4) Windows는 대소문자를 구분하지 않아 대문자 guid 파일과 소문자 고아가 같은 파일이었다(C# 시험 이름을 바꿨다).
+
+#### 14.1.29 요구 대조표(A2d3 — 부분 갱신·감시)
+
+시험은 EngineTests `Engine/Source/Developer/AssetDatabase/Tests/AssetIndexWatchTests.cpp`(12개)다. 장면은 루트를 디스크 임시 디렉터리로 두고 그 루트에 놓인 메모리 파일 시스템에 Content(Base·Hero·Sub/Leaf)를 둔다. 결과는 늘 지금 파일 상태의 새 검색(`Rebuild`)과 항목·진단의 모든 칸이 같은지(`AssetIndexCompare.h`의 `SameIndex` — 캐시 시험과 공용)로 단언한다. 감시 시험은 가짜 원천(`FakeChangeSource` — 이벤트·열기·Poll 오류·호출 수)과 수동 시계로 결정적이다. 실제 감시기는 한 번 돈다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 파일 갱신(7.1-16 A2d3) | 내용 바뀜·새 파일·없어짐·디렉터리가 됨·같은 이름 여러 번(한 번 읽음 — 열기 수)·바뀌지 않은 이름, 같은 id 진단이 생기고 사라짐, 빈 입력, 읽기·Stat IO 진단, Refresh도 TypeRegistry를 쓰지 않음 | `AssetIndexRefreshPaths_FilesMatchRebuild` |
+| 하위 트리(7.1-16 A2d3) | 새 중첩 디렉터리·없어진 디렉터리·디렉터리가 파일이 됨·이름이 패키지 파일·링크·없는 이름·열거 실패·Stat 실패(진단, 다시 읽으면 빠짐)·트리 안 트리·트리 안 파일(한 번), 잘못된 UTF-8 이름 아래 진단(유효한 비ASCII 디렉터리 아래 — escape가 다른 표시)과 유효한 디렉터리 아래 둘 다 빠짐, Content 전체(빈 이름 — 다른 트리·파일을 덮음), Content 열거 실패는 오류·색인 그대로 | `AssetIndexRefreshPaths_Subtrees` |
+| 입력 검사(7.1-16 A2d3) | 파일 11종(빈 이름·앞뒤 `/`·빈 구성 요소·`.`·`..`·중간 `.`·`..`·확장자 아님·확장자뿐·잘못된 UTF-8)·트리 7종, mayDefer 길이 불일치·deferred 없음 — InvalidArgument·색인 그대로 | `AssetIndexRefreshPaths_RejectsInvalidInput` |
+| 쓰는 중 미루기(7.1-16 A2d3) | 손상·Busy·새 파일 손상 미룸(같은 이름 위치 모두, 색인 그대로), 같은 이름 중 거짓 하나면 안 미룸, 트리가 덮으면 안 미룸, 읽기 IO 실패·Tags 손상(항목 있음)·InvalidPath·없는 파일은 안 미룸, 완성되면 바꿈 | `AssetIndexRefreshPaths_Defers` |
+| 정규화 대조(7.1-16 A2d3) | 끄면 NFD 이름이 다른 이름, 켜면 NFD 파일·트리가 NFC 항목·진단을 가리킴, 같은 키(NFC·NFD)는 한 번 읽음 | `AssetIndexRefreshPaths_NormalizesNames` |
+| 할당 실패(7.1-16 A2d3) | 파일·트리·미루기·정규화를 섞은 갱신의 모든 할당 실패 OutOfMemory·색인 그대로, 끝 상태는 실패 없는 기준과 같음, MarkRootLost 할당 실패 | `AssetIndexRefreshPaths_AllocationFailures` |
+| RootLost(4.6, 7.1-16 A2d3) | 항목 비움·진단 하나(빈 이름·NotFound)·조회 NotFound·진단 줄·코드 이름·Layout | `AssetIndex_MarkRootLost` |
+| 시작·정지(7.1-16 A2d3) | Start 전 Pump·두 번 Start InvalidArgument, 원천 열기 실패(시작 안 함), Rebuild 실패(원천 닫음), 캐시 사용, Content 경로로 열기, 이벤트 없는 Pump, Stop 두 번, 소멸자가 닫음 | `AssetIndexWatch_StartsAndStops` |
+| 이벤트 대응(7.1-16 A2d3) | Added·Removed·Modified × (`.rasset` 파일·모름 → 파일, `.rasset` 디렉터리 → 트리만, 그 밖 디렉터리·모름 → 트리, 그 밖 파일 → 무시), Renamed 파일·디렉터리 옛·새 이름 | `AssetIndexWatch_MapsEvents` |
+| 다시 검색 범위(7.1-16 A2d3) | Overflow(경로)는 그 트리만, 전체로 접힘 다섯(Overflow 빈 경로·원천 Poll 오류·앞 `/`·빈 구성 요소·첫 구성 요소 잘못된 UTF-8), 전체가 잡힌 뒤 경로는 더하지 않음, 중간 잘못된 UTF-8은 그 앞 디렉터리 | `AssetIndexWatch_RescansOnOverflow` |
+| 루트 소실(7.1-16 A2d3) | RootRemoved·같은 Poll 뒤 이벤트 버림, MarkRootLost 할당 실패는 다음 Pump가 Poll 없이, 1초 전 안 엶, NotFound 조용히, 그 밖 원천 오류는 Pump 오류, 시계 역행은 다시 1초, 다시 검색 실패는 RootLost 그대로·원천 열린 채·다음 간격에 검색만, 성공하면 새 검색과 같음, 다시 감시 | `AssetIndexWatch_RecoversLostRoot` |
+| 쓰는 중 대기(7.1-16 A2d3) | 같은 파일 이벤트 둘은 대기 하나, 499 ms 아직·500 ms 다시 읽어 손상 남김, 크기 바뀜은 관찰 재시작·완성 이벤트는 대기 뺌, 계속 바뀌어도 10초 상한(새 이벤트가 처음 본 시각을 바꾸지 않음), Busy, 사라짐·디렉터리가 됨·링크가 됨은 바로 다시 읽음, 시각만 바뀜도 관찰 재시작, 트리 덮음(같은 이름·그 아래는 빼고 접두만 같은 이름·트리보다 짧은 이름은 남김), 시계 역행, 전체 다시 검색이 덮음, 정지가 대기·모은 일을 버림 | `AssetIndexWatch_WaitsForWritingFiles` |
+| 감시 할당 실패(7.1-16 A2d3) | 대기 관찰(복사본)·이벤트·트리·Renamed·새 대기·정렬 대조 표를 섞은 Pump의 모든 할당 실패: 실패면 색인·대기 그대로·다음 Pump가 기준과 같게, 이벤트 기록 실패는 전체로 접혀 성공(새 검색과 같음), 전체 다시 검색의 할당 실패(전체 대기 유지 → 다음 Pump) | `AssetIndexWatch_AllocationFailures` |
+| 실제 감시기(7.1-16 A2d3) | 디스크에 쓰기·고쳐 쓰기·지우기가 이벤트로 색인에 반영(Wait는 이벤트 gate, 횟수 상한은 실패 판정용), 없는 디렉터리 열기 NotFound | `AssetIndexWatch_RealWatcher` |
+| 조합(14 완료 조건 2) | 이벤트 종류 × 항목 종류 × 이름 종류, 다시 볼 곳(파일·트리·전체) × 겹침(중복·덮음·트리 안 트리), 파일 상태(새·바뀜·없어짐·디렉터리·링크·손상·Busy·IO 실패·이름 위반) × 미루기(참·거짓·섞임), 대기 상태(새·관찰·안정·바뀜·상한·사라짐·덮임) × 시계(앞·역행), 루트(있음·소실·재열기 실패 종류·검색 실패) | 위 시험 |
+
+#### 14.1.30 Coverage(A2d3)
+
+측정(2026-11-21, Windows, `ROCKS_MSVC_TOOLSET=14.44`): `-Target EngineTests -Filter AssetIndexRefreshPaths,AssetIndex_,AssetIndexWatch,AssetIndexCache,AssetService_,EditorPackage -Sources Engine/Source/Developer/AssetDatabase/Private`.
+
+| 파일 | 줄 | 분기 | 함수 |
+|---|---|---|---|
+| `AssetIndexWatch.cpp`(리뷰 반영 — 정렬 대조·복사본 관찰) | 100%(406/406) | 99.5%(191/192) | 100%(24/24) |
+| `AssetIndex.cpp`(부분 갱신·RootLost 포함) | 100%(1186/1186) | 99.5%(628/631) | 100%(46/46) |
+| `AssetDatabaseInternal.h`(이름 규칙·`NameSet` — 색인·감시 공용) | 100%(133/133) | 100%(84/84) | 100%(14/14) |
+
+닿지 않은 곳과 근거:
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| `PlatformAssetChangeSource::Poll` 실패 | 분기 | OS 감시 오류(`ReadDirectoryChangesExW` 실패 등)라 시험이 만들 수 없다. 감시의 Poll 오류 처리(전체 다시 검색)는 가짜 원천으로 시험한다 |
+| `AssetIndex.cpp` 분기 3개 | 14.1.22·14.1.28과 같다 | `ROCKS_ASSERT` 전개 2개(확정의 준비 상태·세대 대조), `IndexCached` 논리 경로의 배치 allocator 할당 실패 |
+
+리뷰가 찾은 것: 감시의 대조(다시 읽은 이름·대기·덮은 트리)가 이중 반복이었다(이벤트·대기가 수만 개면 Pump 한 번에 수십억 비교) — 정렬 표의 이진 검색으로 바꿨다. 관찰을 대기 그 자리에서 바꿔 실패해도 대기가 바뀌었다 — 복사본에서 하고 성공할 때만(관찰만 있는 Pump도) 바꾼다.
+
+시험이 찾은 것: (1) 다시 검색한 하위 트리가 덮은 대기 파일이 그 Pump에 다시 읽을 차례가 아니면 대기에 남았다 — 덮인 대기를 빼게 고쳤다. (2) 쓰는 중 판정이 "진단 코드가 CorruptPackage"여서 다 쓴 파일의 Tags 손상(항목이 있음)도 미뤘다 — "항목 없이 진단 하나"로 좁혔다. (3) 정규화 키의 비할당 실패 대체·`ValidPrefix`의 마지막 반환·누적 `||`는 입력 계약상 닿을 수 없었다 — 구조를 바꿔 없앴다(단언으로 바꾸지 않았다). (4) 메모리 파일 시스템은 크기와 시각이 함께 바뀌어 "시각만 바뀜"에 닿지 않았다 — 시각 이동 값(`modifiedShift`)을 더했다.
 
 ## 15. PNG 디코더 범위
 

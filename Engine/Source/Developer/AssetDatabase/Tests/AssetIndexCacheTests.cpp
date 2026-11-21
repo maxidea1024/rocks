@@ -1,6 +1,7 @@
 #include "../../../Runtime/AssetRuntime/Tests/AssetFixtureValues.h"
 #include "../../../Runtime/AssetRuntime/Tests/PackageEditing.h"
 #include "AssetDatabaseTestSupport.h"
+#include "AssetIndexCompare.h"
 #include "EditorPackageSetTestSupport.h"
 
 #include <AssetDatabase/AssetIndexCache.h>
@@ -127,65 +128,6 @@ PackageReadOptions ReadOptions() noexcept {
     options.expectedKind = PackageKind::Editor;
     options.engineVersion = TestEngineVersion;
     return options;
-}
-
-bool SameEntry(const AssetIndexEntry& left, const AssetIndexEntry& right) noexcept {
-    if (!(left.id == right.id) || !(left.type == right.type) ||
-        !(left.fingerprint == right.fingerprint) || left.fileBytes != right.fileBytes ||
-        left.modifiedTicks != right.modifiedTicks || left.readOnly != right.readOnly ||
-        left.path.View() != right.path.View() || left.key.View() != right.key.View() ||
-        left.fileName.View() != right.fileName.View() || left.duplicateId != right.duplicateId ||
-        left.duplicatePath != right.duplicatePath ||
-        left.dependencies.Size() != right.dependencies.Size() ||
-        left.tags.Size() != right.tags.Size() ||
-        left.importRecord.present != right.importRecord.present ||
-        !(left.importRecord.owner == right.importRecord.owner) ||
-        !(left.importRecord.importerId == right.importRecord.importerId) ||
-        left.importRecord.importerName.View() != right.importRecord.importerName.View() ||
-        left.importRecord.importerVersion != right.importRecord.importerVersion ||
-        left.importRecord.outputCount != right.importRecord.outputCount) {
-        return false;
-    }
-
-    for (usize index = 0; index < left.dependencies.Size(); ++index) {
-        const PackageDependencyEntry& a = left.dependencies[index];
-        const PackageDependencyEntry& b = right.dependencies[index];
-        if (!(a.asset == b.asset) || a.kind != b.kind || !(a.expectedType == b.expectedType) ||
-            a.required != b.required) {
-            return false;
-        }
-    }
-
-    for (usize index = 0; index < left.tags.Size(); ++index) {
-        if (left.tags[index].key.View() != right.tags[index].key.View() ||
-            left.tags[index].value.View() != right.tags[index].value.View()) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-bool SameIndex(const AssetIndex& left, const AssetIndex& right) noexcept {
-    if (left.Count() != right.Count() || left.Diagnostics().Size() != right.Diagnostics().Size()) {
-        return false;
-    }
-
-    for (usize index = 0; index < left.Count(); ++index) {
-        if (!SameEntry(left.At(index), right.At(index))) {
-            return false;
-        }
-    }
-
-    for (usize index = 0; index < left.Diagnostics().Size(); ++index) {
-        const AssetIndexDiagnostic& a = left.Diagnostics()[index];
-        const AssetIndexDiagnostic& b = right.Diagnostics()[index];
-        if (a.code != b.code || a.error != b.error || a.fileName.View() != b.fileName.View()) {
-            return false;
-        }
-    }
-
-    return true;
 }
 
 // 본문 SHA-256(과 본문 byte 수)을 다시 쓴다(손상을 SHA-256 검사 뒤 단계에 닿게).

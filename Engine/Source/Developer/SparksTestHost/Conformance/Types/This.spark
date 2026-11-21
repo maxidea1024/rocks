@@ -13,7 +13,7 @@ fn Top() {
     _ = this;
 }
 
-class Door : ScriptComponent {
+class Door : ScriptableComponent {
     var Count = 0;
     let Me = this;
 

@@ -969,10 +969,11 @@ TEST(SparksParser_Declarations) {
     CHECK(FileIs("import Weapons; import Weapons.Sword as Sword;",
                  "(File [(Import Weapons -) (Import Weapons.Sword Sword)] [])"));
     CHECK(FileIs("const MaxStack: int = 99;", "(File [] [(Const - [] MaxStack int 99)])"));
-    CHECK(FileIs("class Door : ScriptComponent { }",
-                 "(File [] [(Class - [] Door [ScriptComponent] [])])"));
-    CHECK(FileIs("open class Base : ScriptComponent, IUsable, Game.ITarget { }",
-                 "(File [] [(Class:open - [] Base [ScriptComponent IUsable Game.ITarget] [])])"));
+    CHECK(FileIs("class Door : ScriptableComponent { }",
+                 "(File [] [(Class - [] Door [ScriptableComponent] [])])"));
+    CHECK(
+        FileIs("open class Base : ScriptableComponent, IUsable, Game.ITarget { }",
+               "(File [] [(Class:open - [] Base [ScriptableComponent IUsable Game.ITarget] [])])"));
     CHECK(FileIs("struct Hit { var amount: int = 0; fn Twice(): int { return amount * 2; } }",
                  "(File [] [(Struct - [] Hit [(Field - [] amount int 0) (Function - [] Twice [] "
                  "int (Block (Return (Binary * amount 2))))])])"));

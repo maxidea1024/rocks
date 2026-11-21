@@ -1,0 +1,10 @@
+# Object fields without '?' (S0428, 3.11): allowed for owned components (let + construction) and @edit fields of
+# lifecycle classes and LevelScript; other classes, plain fields and struct fields need '?'.
+error S0428 9:15
+error S0428 10:19
+error S0428 11:9
+error S0428 12:17
+error S0428 17:23
+error S0428 21:23
+error S0428 26:23
+error S0428 34:15

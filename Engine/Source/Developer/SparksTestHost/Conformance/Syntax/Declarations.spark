@@ -3,7 +3,7 @@ import Weapons.Sword as Sword;
 
 /// A door that opens.
 @edit
-open class Door : ScriptComponent, IUsable {
+open class Door : ScriptableComponent, IUsable {
 }
 
 struct Hit {

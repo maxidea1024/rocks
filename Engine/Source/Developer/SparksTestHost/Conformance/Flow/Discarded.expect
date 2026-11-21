@@ -1,0 +1,8 @@
+# Discarded results (S0713, 3.11): values of calls (Result<void> included), awaited values and 'try' results;
+# void calls, awaits of void waits, 'try' of Result<void> and '_ = ...' are statements.
+error S0713 24:5
+error S0713 25:5
+error S0713 26:5
+error S0713 28:5
+error S0713 30:5
+error S0713 32:5

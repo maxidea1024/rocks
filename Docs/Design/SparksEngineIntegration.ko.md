@@ -52,7 +52,7 @@ SE-R8의 파서 확장(새 kind와 Sparks 이름 키)은 메타 컴파일러의 
 | SE-W1 | 스크립트 단계 hook: 입력 batch·재개·reload 경계를 실행할 프레임 지점 | 없음 | `WorldSubsystem`의 가상 함수는 `Initialize`·`OnWorldBeginPlay`·`Deinitialize`뿐이다. `TickPhase`는 PrePhysics·Physics·PostPhysics·LateUpdate·PreRender | EI3 | EngineRuntime 8절, SL 5.4절 |
 | SE-W2 | Component용 시작 준비 hook(`IsReadyToStart`) | 없음 | `World/Actor.h`에만 있고 `World/Component.h`의 가상 함수 목록에 없다 | EI3 | EngineRuntime 7.2절, SL SD24 |
 | SE-W3 | 파괴·활성 전환 bridge 큐 계약, 격리 bridge 계약, 프레임 끝 정리 반복 상한 | 없음(문서) | EngineRuntime 7절에 아직 없다 | EI3 | EngineRuntime 7.4절, SL SD25·8.3절 |
-| SE-W4 | `ScriptComponent`, `WorldService` 호스트(World마다 하나인 subsystem), `LevelScript` 타입 | 없음 | World 공개 헤더에 없다 | EI3 | SL 3.4절, LevelScript |
+| SE-W4 | `ScriptableComponent`, `WorldService` 호스트(World마다 하나인 subsystem), `LevelScript` 타입 | 없음 | World 공개 헤더에 없다 | EI3 | SL 3.4절, LevelScript |
 | SE-W5 | 시작 뒤 Tick 설정 변경(reload 때 `TickSettings` 재등록) | 일부 | `Actor::SetTickEnabled`는 있다. 설정은 `OnStart` 때 한 번 등록한다 | EI6 | SL 12.4절 |
 | SE-W6 | UI 시계(`Clock.UI`) | 일부 | `Core/Time/GameClock.h`에 pause·배율과 무관한 `UnscaledTimeSeconds()`는 있다. 별도 UI 시계 타입은 없다 | EI5 | SL 6.1절 |
 | SE-W7 | 스트리밍 셀, `Teleport`의 prefetch, data layer, 셀 사이 영속 Actor 참조(SoftEntityId) | 없음 | World 공개 헤더에 없다 | EI4 | 전체 계획 10절, SL 7.6절 |
@@ -112,7 +112,7 @@ SE-B7은 Commandlet의 표준 출력 구현을 PlatformBase로 올리고 표준 
 |---|---|---|---|
 | EI1 binding 생성 | 실제 엔진 선언에서 `.sparkbind.json`을 생성하고 컴파일러가 실제 엔진 API로 타입을 검사한다 | SE-R1·R2·R3·R4 | LC2 |
 | EI2 ScriptRuntime | 모듈 `ScriptRuntime`(ObjectRuntime 위의 host 구현): Ref bank와 객체 handle 연결, native call thunk, Sparks 클래스의 타입 등록 | SE-R1·R5·R8, SE-O1·O2(등록)·O3 | LC5 |
-| EI3 World bridge | `ScriptComponent`, 수명 hook, 스크립트 단계, 이벤트 연결, 파괴·활성 지연, 격리 | SE-R2·R7, SE-C1–C4, SE-W1–W4·W8, SE-B8 | LC6 |
+| EI3 World bridge | `ScriptableComponent`, 수명 hook, 스크립트 단계, 이벤트 연결, 파괴·활성 지연, 격리 | SE-R2·R7, SE-C1–C4, SE-W1–W4·W8, SE-B8 | LC6 |
 | EI4 에셋·생성 | `Load`·`LoadAll`, 하드·소프트 참조, `World.Spawn(prefab, at)`, 데이터 에셋·테이블, 스트리밍 | SE-A1·A2·A3·A5, SE-W7 | LC6 |
 | EI5 게임 시스템 | 입력·Tag·`Loc`·CVar·물리·UI·오디오·게임 프레임 | 시스템별로 SE-G1–G7·G11–G13, SE-R6, SE-W6 | LC6 |
 | EI6 편집기 핫 리로드 | 저장 → compile action → 실행 중 World 적용, R3 instance 재생성 | SE-B1, SE-O2(reload), SE-A3, SE-W5, SE-G10 | LC7 |

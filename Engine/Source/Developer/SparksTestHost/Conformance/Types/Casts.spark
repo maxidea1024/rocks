@@ -1,11 +1,11 @@
-class Mover : ScriptComponent {
+class Mover : ScriptableComponent {
 }
 
 struct Point {
     var X: int;
 }
 
-fn Valid(a: Actor, actorOpt: Actor?, component: ScriptComponent, thing: Interactable) {
+fn Valid(a: Actor, actorOpt: Actor?, component: ScriptableComponent, thing: Interactable) {
     _ = a as? Pawn;
     _ = actorOpt as? Character;
     _ = a as? Interactable;
@@ -14,7 +14,7 @@ fn Valid(a: Actor, actorOpt: Actor?, component: ScriptComponent, thing: Interact
     _ = component as? Mover;
 }
 
-fn Errors(a: Actor, p: Pawn, i: int, component: ScriptComponent, point: Point) {
+fn Errors(a: Actor, p: Pawn, i: int, component: ScriptableComponent, point: Point) {
     _ = a as? Actor;
     _ = p as? Actor;
     _ = i as? Pawn;

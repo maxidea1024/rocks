@@ -16,7 +16,7 @@ interface usable {
     fn use(Who: int);
 }
 
-class door : ScriptComponent {
+class door : ScriptableComponent {
     event opened(By: Actor?);
     on Start() {
         for (I in 0..<3) { _ = I; }

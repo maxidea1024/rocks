@@ -27,6 +27,13 @@ if (args.Length == 1 && args[0] == "--platform-path-header")
     }
 }
 
+// Visual Studio 프로젝트 파일 쓰기 시험만 돈다(Docs/Design/ProjectFiles.ko.md 16절 V2–V5). 현재 디렉터리가 저장소 루트여야 한다.
+if (args.Length == 1 && args[0] == "--project-files")
+{
+    await ProjectFilesWriterTests.RunAsync(Path.GetFullPath("."));
+    return 0;
+}
+
 // unity-profile 명령의 입력 거부만 돈다(현재 디렉터리가 저장소 루트여야 한다).
 if (args.Length == 1 && args[0] == "--unity-profile-command")
 {
@@ -75,6 +82,7 @@ try
     MetadataOutputTransactionTests.Run();
     MetadataLayoutTests.Run();
     TargetDefinitionsTests.Run();
+    await ProjectFilesWriterTests.RunAsync(root);
     MetadataTemporaryCleanupTests.Run();
     await PlatformPrivateHeaderTests.RunAsync(toolchain, Path.Combine(fixture, "platform-header"));
     await UnityProfileCommandTests.RunAsync(root, Directory.CreateDirectory(Path.Combine(fixture, "unity-profile-command")).FullName,

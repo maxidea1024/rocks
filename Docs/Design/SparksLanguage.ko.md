@@ -4,7 +4,7 @@
 
 **설계 기준일 2026.11.20 · 초안 1.5 · 상태: 설계 제안 / 미구현 · 성능 미측정**
 
-이 문서는 [전체 계획](EngineImplementationPlan.ko.md) §23이 요구하는 Rocks 게임플레이 언어 Sparks를 정의한다. 프로그래머가 아닌 사용자도 쓸 수 있도록 Go처럼 단순하게, 실수할 여지가 적게, 메모리·리소스 누수가 생길 수 없는 구조로 설계한다. 기준은 엔진 구현 상태가 아니라 전체 계획 §23과 이 언어가 연결되는 전체 계획 §5·§6·§8·§9·§10·§16·§17·§20·§21·§24·§29의 계약이다. 이 문서의 문법·이름·API는 설계 제안이며 구현·측정 결과가 아니다. 예시의 엔진 API 이름(`AddMovement`, `World.Spawn` 등)은 바인딩 규칙을 보이기 위한 예시이며 실제 이름은 각 모듈의 C++ 선언에서 생성된다. 아직 엔진에 없는 게임 타입(`Character`, `Collider`·`SphereCollider`, `SoundAsset`, `Sequence`, `DataAsset`, `ScriptComponent`, `WidgetController`, `PlaySession`)은 자리표시 이름이며 해당 모듈이 들어올 때 확정한다(§17.2).
+이 문서는 [전체 계획](EngineImplementationPlan.ko.md) §23이 요구하는 Rocks 게임플레이 언어 Sparks를 정의한다. 프로그래머가 아닌 사용자도 쓸 수 있도록 Go처럼 단순하게, 실수할 여지가 적게, 메모리·리소스 누수가 생길 수 없는 구조로 설계한다. 기준은 엔진 구현 상태가 아니라 전체 계획 §23과 이 언어가 연결되는 전체 계획 §5·§6·§8·§9·§10·§16·§17·§20·§21·§24·§29의 계약이다. 이 문서의 문법·이름·API는 설계 제안이며 구현·측정 결과가 아니다. 예시의 엔진 API 이름(`AddMovement`, `World.Spawn` 등)은 바인딩 규칙을 보이기 위한 예시이며 실제 이름은 각 모듈의 C++ 선언에서 생성된다. 아직 엔진에 없는 게임 타입(`Character`, `Collider`·`SphereCollider`, `SoundAsset`, `Sequence`, `DataAsset`, `ScriptableComponent`, `WidgetController`, `PlaySession`)은 자리표시 이름이며 해당 모듈이 들어올 때 확정한다(§17.2).
 
 초안 1.3은 구현 착수 전 스펙 완비를 위한 개정이다. 엔진 런타임(Actor·World 코드)·Prefab 개정 3·리플렉션 B9·주변 시스템 스펙(로깅·CVar·입력·UI·콘텐츠 서명)과 이름·시점을 맞추고, 사용자 핵심 요구 3가지 — **핫 리로드 필수(§12.4), 오류 방어(§8.4), 선택형 native AOT(§12.5, Unity IL2CPP와 같은 backend 선택)** — 를 규격으로 확정하였다. 미정 값(전달 수 상한·예산·interface·CU9)을 정하고 표준 API(부록 B)를 추가하였다. 구현 순서는 초안 1.5의 §18을 따른다.
 
@@ -148,7 +148,7 @@ import Items.Inventory;
 
 enum DoorState { Closed, Opening, Open }
 
-class DoorLogic : ScriptComponent {
+class DoorLogic : ScriptableComponent {
     @edit @save var OpenAngle: float = 90.0;           // Rotator 각도: 도
     @edit var Hinge: SceneComponent;               // ? 없음: 같은 prefab 안에서 반드시 지정
     @edit @save var RequiredKey = Tag("Item.Key.Iron");
@@ -232,7 +232,7 @@ class DoorLogic : ScriptComponent {
 
 | Unity (C#) | Sparks | 차이 |
 |---|---|---|
-| `class X : MonoBehaviour` | `class X : ScriptComponent` | — |
+| `class X : MonoBehaviour` | `class X : ScriptableComponent` | — |
 | `[SerializeField]`, public 필드 | `@edit`, `@save` | 편집기 노출과 저장을 구분 |
 | `Awake` · `OnEnable` · `Start` | `on Awake()` · `on Enable()` · `on Start()` | Start는 준비 대기(로드 등)만 기다릴 수 있고 끝날 때까지 Tick은 시작되지 않는다(SD12). 현재 상태 반영은 활성화마다 실행되는 Enable에서 한다 |
 | `Update` · `FixedUpdate` · `LateUpdate` | `on Tick()` · `on FixedTick()` · `on LateTick()` | Tick 계열에서는 기다리기·생성·자원 획득 불가 |
@@ -279,7 +279,7 @@ class DoorLogic : ScriptComponent {
 
 | 선언 | 의미 | 예 |
 |---|---|---|
-| `class` | 엔진 수명 타입(`ScriptComponent`, Actor·Pawn 파생 `Character`, Actor 파생 `LevelScript`, `WorldService`, `WidgetController`) 또는 `DataAsset`을 상속. 기반 타입이 수명과 문맥 이름을 정한다(§3.4). core에서 기반은 엔진 C++ 타입뿐이고 Sparks 클래스는 상속할 수 없다. full에서는 `open class`로 선언한 Sparks 클래스도 기반이 될 수 있다(SD27) | `class DoorLogic : ScriptComponent { }` |
+| `class` | 엔진 수명 타입(`ScriptableComponent`, Actor·Pawn 파생 `Character`, Actor 파생 `LevelScript`, `WorldService`, `WidgetController`) 또는 `DataAsset`을 상속. 기반 타입이 수명과 문맥 이름을 정한다(§3.4). core에서 기반은 엔진 C++ 타입뿐이고 Sparks 클래스는 상속할 수 없다. full에서는 `open class`로 선언한 Sparks 클래스도 기반이 될 수 있다(SD27) | `class DoorLogic : ScriptableComponent { }` |
 | `struct` | 값 타입. 상속 없음. 스크립트 데이터는 struct로 표현한다 | `struct HitInfo { var Point: vec3; var Damage: int = 1; }` |
 | `enum` | 열거. 플래그 조합은 `Set<E>` | `enum DamageKind { Physical, Fire, Poison }` |
 | `event` | 클래스 안의 멤버 이벤트, 최상위의 Actor 확장 이벤트·World 이벤트 | `event Died(killer: Actor?);` · `event Actor.Interacted(actor: Actor);` · `event World.GameStarted();` |
@@ -377,7 +377,7 @@ _ = bag.Add(item);                                      // 결과를 버릴 때�
 
 | 기반 타입 | 문맥 이름 |
 |---|---|
-| `ScriptComponent`, `WidgetController`, Actor 파생(`Pawn`·`Character`·`LevelScript` 등) | `World`·`Session`·`Input`·`Time` |
+| `ScriptableComponent`, `WidgetController`, Actor 파생(`Pawn`·`Character`·`LevelScript` 등) | `World`·`Session`·`Input`·`Time` |
 | `WorldService` | `World`·`Session`·`Time` |
 | `DataAsset`, struct `fn`, 최상위 `fn` | 없음 |
 | 서버 RPC 함수 본문(full) | 위에 더해 `Caller: Connection`(호출한 connection) |
@@ -498,7 +498,7 @@ VerbatimLit  = '@"' { VerbatimChar | '""' } '"' ;                 (* escape·보
 | 내장 타입 | `bool` `int` `float` `int8` `int16` `int32` `int64` `uint8` `uint16` `uint32` `uint64` `float32` `float64` `string` `vec2` `vec3` `vec4` `quat` `mat4`, `void`(`Result<void>`의 타입 인자 전용) | 식별자로 쓸 수 없다. 타입과 생성·변환 호출로만 쓴다 |
 | prelude | `Log` `Assert` `Math` `Random` `Format` `Parse` `Delay` `NextTick` `NextFixedTick` `All` `Race` `Assets` `CVars` `Settings` `Clock` `Error` | 사용자 선언 이름으로 쓸 수 없다 |
 | prelude 타입 | `Array` `Map` `Set` `Result` `Soft` `Row` `Text` `TagSet` `InputAction` `LoadRequest` `Connection` `PlaySession` `Class` `CVarRef` `Rotator` `Transform` `WorldPosition` `Color` `Hit` | 사용자 선언 이름으로 쓸 수 없다 |
-| 핵심 엔진 타입(언어 버전 1에 고정) | `Actor` `Pawn` `Component` `SceneComponent` `ScriptComponent` `LevelScript` `WorldService` `WidgetController` `Widget` `DataAsset` `Collider` `World` | 사용자 선언 이름으로 쓸 수 없다. 그 밖의 `Rocks` 패키지 타입은 이름 하나에 대상 하나 규칙(§3.1)으로만 충돌을 판정한다 |
+| 핵심 엔진 타입(언어 버전 1에 고정) | `Actor` `Pawn` `Component` `SceneComponent` `ScriptableComponent` `LevelScript` `WorldService` `WidgetController` `Widget` `DataAsset` `Collider` `World` | 사용자 선언 이름으로 쓸 수 없다. 그 밖의 `Rocks` 패키지 타입은 이름 하나에 대상 하나 규칙(§3.1)으로만 충돌을 판정한다 |
 | 검증 리터럴 | `Tag` `Action` `Asset` `Row` `Loc` `CVar` | 사용자 선언 이름으로 쓸 수 없다 |
 | 문맥 이름 | `World` `Session` `Input` `Time` `Caller` | 사용자 선언 이름으로 쓸 수 없다 |
 | RPC 접두 | `Server` `AllClients` `OwnerClient` | 사용자 선언 이름으로 쓸 수 없다 |
@@ -769,7 +769,7 @@ Class<T> { fn Create(): T }             // full, T는 class 타입
 - 정수 상수끼리의 `/`는 SD17대로 S0501이다. `%`의 오른쪽이나 `Math.Div`의 둘째 인자가 값 0인 정수 상수(타입 없는 상수식·`const` 이름)면 왼쪽이 상수가 아니어도 S0504다(위치는 그 0). 실수 `/`의 0은 오류가 아니다(IEEE 754).
 - 이름 붙은 `const`는 선언 타입을 가진 정해진 상수다(타입 없는 상수가 아니다).
 - 타입 없는 상수끼리의 비교는 둘 다 정수면 정수 비교, 하나라도 실수면 실수 비교다(`1 < 2.5`는 `bool`, `1 == 1.5`는 실수 `==`라 S0407).
-- **정해진 상수 접기.** 피연산자가 모두 상수(타입 없는 상수·`const` 이름·enum case·`true`·`false`·보간 없는 문자열)인 정해진 타입의 식 — 단항 `-`·`!`, `+`·`-`·`*`·`%`, 실수 `/`, 비교, `&&`·`||`, 숫자 변환 `T(c)` — 은 컴파일 때 값이 정해진다. 정수 결과가 그 타입의 범위를 벗어나면 S0503, 실수 결과가 NaN·Inf면 S0505다. switch case 값과 0 나누기 판정은 이 값을 쓴다. const 초기값이 상수식이어야 한다는 규칙과 const 순환 진단은 LC2d다(그 전에는 값을 정하지 못한 const를 case 값으로 쓰면 S0401이다).
+- **정해진 상수 접기.** 피연산자가 모두 상수(타입 없는 상수·`const` 이름·enum case·`true`·`false`·보간 없는 문자열)인 정해진 타입의 식 — 단항 `-`·`!`, `+`·`-`·`*`·`%`, 실수 `/`, 비교, `&&`·`||`, 숫자 변환 `T(c)` — 은 컴파일 때 값이 정해진다. 정수 결과가 그 타입의 범위를 벗어나면 S0503, 실수 결과가 NaN·Inf면 S0505다. switch case 값과 0 나누기 판정은 이 값을 쓴다. const 초기값이 상수식이어야 한다는 규칙과 const 순환은 §3.11이다(S0510·S0511 — 값을 정하지 못한 const를 쓰는 자리는 더 진단하지 않는다).
 
 **연산자.** 피연산자의 타입이 맞지 않으면 S0406이다(숫자 타입이 섞이면 S0507). 한쪽이 타입 없는 상수면 다른 쪽 타입으로 맞춘다. 다른 쪽이 숫자·벡터가 아닌 타입이면 맞추지 않고 상수를 `int`·`float`로 보아 연산자 규칙으로 판정한다(`"a" + 1`·`q * 2`·`mode < 1`은 S0406, `flag == 1`은 S0407). `T?` 값의 산술·순서 비교는 S0406이다(`??`·`if (let)`로 먼저 푼다).
 
@@ -851,6 +851,40 @@ Class<T> { fn Create(): T }             // full, T는 class 타입
 
 **초기값 깊이(S0427).** 필드·const의 타입·값은 초기값을 검사해 정하므로 초기값이 다른 필드·const를 따라간다. 이름(`X`, 별칭의 `Alias.X`)으로 가리키는 의존은 의존 순서대로 미리 정해 깊이를 쓰지 않는다. 그 밖(값의 멤버 등)으로 이어지는 연쇄가 64단계를 넘으면 넘은 초기값에 S0427 하나이며 그 필드·const는 해석하지 못한 것이다(악의적·생성된 원문이 컴파일러 stack을 넘치게 하지 못하게 — §8.1 S0215와 같은 이유).
 
+### 3.11 흐름·대입·마무리(LC2d 확정)
+
+이 절은 §1.3·§3.2·§3.3·§4.3–§4.5의 흐름·대입·미사용·상수식·필드·프로필 규칙을 컴파일러가 판정하는 방식으로 확정한다. 진단 코드는 §8.1의 S0428, S0510–S0512, S07xx, S1113이다. 뒤로 넘기는 것: attribute 이름·인자의 검사(이 절은 `@edit`가 있는지만 본다 — LC3), 실행 문맥·효과(await·emit을 쓸 수 있는 곳, 최상위 fn의 엔진 변경 API — LC3), 유지 자원을 `_ =`로 버리는 것의 금지(LC3), LevelScript의 `@edit` 객체 필드(S0413 — LC3), 권한 구역(LC3), component 생성이 놓이는 자리(LC3), `@edit` 지정 누락(쿡 단계 — SD19).
+
+**대입 경로(S0701–S0706·S0731, SD73).** `x = v`·`x op= v`의 대상과, 값 타입 경로를 바꾸는 변경 메서드 호출(부록 B: Array의 `Add`·`Insert`·`RemoveAt`·`Clear`·`Reverse`·`Remove`·`Sort`·`Compact`, Map의 `Remove`·`Clear`, Set의 `Add`·`Remove`·`Clear`, TagSet의 `Add`·`Remove`)의 수신자를 경로로 본다. 경로는 뿌리(이름, `this`를 생략한 자기 필드) 뒤에 멤버(`.`)·원소(`[]`)가 이어진 것이며, 뿌리에서 끝으로 보아 처음 어긋난 곳의 진단 하나를 낸다. 위치는 대입 대상(변경 메서드 호출은 그 호출)의 시작이다.
+
+- 경로에 호출 결과나 `?.`가 있으면 S0731이다(`GetTransform().Location.Z = 1`, `a?.B = 1`, `Make().Items.Add(1)`). 다만 호출 결과나 그 뒤의 중간 값(끝 구간의 값 제외)이 참조 타입이면 그 객체의 속성 쓰기이므로 아래 참조 규칙을 따른다(`GetOwner().Location = v`). `?.`가 든 경로는 언제나 S0731이다. 맨 바깥이 이름·멤버·원소가 아닌 대상(S0211)은 이 절의 검사를 하지 않는다. `this.X`는 S0423이다(§3.10).
+- 뿌리: 지역 `var`는 쓸 수 있다. 지역 `let`과 `const`는 S0701, 함수·handler 인자와 반복 변수·`if (let)` binding은 S0702, 문맥 이름·타입 이름·이름 공간·함수·enum case 자체에 대입하면 S0706이다. 이름만 쓴 자기 필드는 `var`면 쓸 수 있고 `let`이면 S0701이며, struct 함수 안의 자기 필드는 S0705다(struct 함수는 자기 필드를 쓰지 않는다 — 새 값을 돌려준다).
+- 경로가 참조 타입 값(엔진 `object`·Sparks class·interface)을 지나면 그 뒤는 그 객체의 속성 쓰기이며 앞 경로의 규칙과 무관하다(`let` handle의 속성은 쓸 수 있다 — §3.2). 객체의 멤버 중 Sparks class 필드는 뿌리가 이름만 쓴 자기 필드가 아니면 S0703(다른 객체의 Sparks 필드는 읽기만 한다 — 같은 class의 다른 instance여도), 엔진 필드는 schema `access: readWrite`가 아니면 S0704다.
+- 값 타입 값(struct·수학 타입·컨테이너·`TagSet` 등)의 멤버·원소 쓰기와 변경 메서드는 그 값을 담은 경로를 바꾸므로 앞 경로가 쓸 수 있어야 한다(위 규칙을 그 경로에 적용 — `let p = vec3(...); p.X = 1;`은 S0701). 부록 B의 언어 멤버는 `var`만 쓸 수 있고 `let` 속성은 S0704다(`text.Length = 1`). 쓸 수 있는 엔진 필드의 값 멤버(`Hinge.RelativeRotation.Yaw = 30.0`)는 읽기 → 수정 → 쓰기다.
+
+**버린 결과(S0713).** 식 문장의 값이 `void`가 아니면 S0713이다: 값을 돌려주는 호출(`Result<void>` 포함), `await`로 얻은 값(`await LoadCount();`), `try`로 꺼낸 값. `void` 호출, 결과가 `void`인 대기의 `await`, `try`로 꺼낸 `void`는 문장이 된다. 버리려면 `_ = ...`로 쓴다(대기는 S0422 — §3.10).
+
+**사용하지 않는 이름과 값(S0710–S0712·S0714, SD74).** "읽기"는 이름을 값으로 쓰는 모든 자리다: 식, 멤버 접근·변경 메서드 호출의 수신자, `return`·`emit`의 인자, 대입 오른쪽. 대입의 왼쪽 이름(값 타입 경로의 뿌리 포함)은 읽기가 아니다. 참조 타입 값을 지나는 경로(`a.Health = 3`)의 뿌리는 읽기다. 변경 메서드 호출(`list.Add(x)`)은 수신자의 읽기이며 S0711의 쓰기가 아니다.
+
+- S0710: 지역 변수(`var`·`let`·`?? return`이 선언한 이름)·`if (let)` binding·반복 변수 중 어디에서도 읽지 않는 이름이다. 위치는 그 이름의 선언이다. 쓰지 않는 반복 변수는 `_`로 쓴다.
+- S0711: 지역 `var`에 쓴 값(대입·복합 대입·멤버·원소 쓰기 — 선언의 초기값은 제외)을 그 뒤 어느 경로에서도 읽지 않는다(§4.4의 사본 수정 포함). 경로는 분기와 반복의 되돌아가는 경로(back-edge)를 따른다. 위치는 그 대입 대상이다. 선언 초기값을 읽기 전에 모든 경로에서 덮어쓰는 것은 오류가 아니다. `=`로 이름 전체에 쓰면 앞에 쓴 값은 그 뒤 경로에서 사라지고, 복합 대입과 멤버·원소 쓰기는 앞 값을 바탕으로 하므로 앞 값의 읽기로 센다(`p.X = 1; p.Y = 2; Use(p);`는 오류가 아니다). 어디에서도 읽지 않는 이름은 S0710 하나만 낸다(그 이름의 대입에 S0711을 더하지 않는다).
+- S0712: 본문이 있는 함수·handler의 인자 중 읽지 않는 인자다. 시그니처가 정해진 자리(`override fn`, 파생 class가 다시 정의할 `open fn`, 기반 interface의 메서드를 구현하는 함수, handler)의 쓰지 않는 인자는 이름을 `_`로 쓰고, 그 밖의 함수는 쓰지 않는 인자를 지운다(이름 `_` 인자도 S0712). 위치는 그 인자 이름이다.
+- S0714: import한 모듈의 선언(타입·함수·const·별칭)을 그 모듈에서 하나도 쓰지 않는다. 위치는 import 경로다. 확장 이벤트의 사용(§5.2)은 이벤트 해석(LC3) 전까지 이름으로 본다: 이 모듈의 `on`·`emit` 경로 끝 이름이 대상 모듈이 선언한 확장 이벤트 이름과 같으면 그 import를 쓴 것이다.
+- attribute 인자는 LC3 전까지 결합하지 않으므로 S0714에서는 이름으로 본다: 이 모듈의 attribute 인자 안의 식별자가 대상 모듈의 최상위 선언 이름이거나 그 import의 별칭이면 그 import를 쓴 것이다(`@edit(Min: MinSpeed)`).
+- 연쇄 방지: 구문 오류(S01xx·S02xx)가 있는 모듈은 S0710–S0712·S0714를 판정하지 않는다(복구가 건너뛴 원문의 사용이 보이지 않는다). 이름을 해석하지 못한 식별자가 있는 함수·handler는 S0710–S0712를, 선언 이름에 진단이 있는 함수(S0313 등 — `override`를 빠뜨렸을 수 있다)는 S0712를, 이름·타입을 찾지 못한 진단(S0317·S0318)이 있는 모듈은 S0714를 판정하지 않는다(찾지 못한 이름이 그 지역 이름·import를 가리키려던 것일 수 있다).
+
+**await 뒤의 객체 지역 이름(S0412, SD75).** §4.3 "await 이후"는 함수 본문의 문장을 실행 순서대로 따라가는 경로 분석이다(분기 합류와 반복의 되돌아가는 경로를 고정점까지 따른다). `await`가 든 문장을 지나면 그때 보이는 모든 지역 이름(인자·지역 변수·binding·반복 변수)이 "기다린 뒤" 상태가 되고, 그 이름에 값을 넣으면(선언·대입·`if (let)`·반복의 새 값) 풀린다. 어느 경로로든 "기다린 뒤" 상태로 도달하는 읽기에서 이름의 타입이 객체 타입(엔진 `object`·Sparks class·interface — 에셋 제외)이면 그 읽기의 타입은 `T?`다. 한 문장 안에서 `await` 앞에서 읽는 이름(`let r = await a.MoveTo(p);`의 `a`·`p`, `x = await F(x);`의 오른쪽 `x`)은 그 문장의 `await` 전이다. 그 읽기에 `.`을 쓰면 S0412이며 메시지는 기다리는 동안 객체가 사라질 수 있음을 알리고 `if (let)`로 다시 확인하라고 제시한다. 대입은 오른쪽 값을 먼저 계산하고 왼쪽 경로를 그 뒤에 읽는다(`a.Health = await F();`의 `a`는 `await` 뒤의 읽기다). 조건이 리터럴 `true`인 `while`(괄호 포함)은 조건이 거짓인 경로가 없어 `break`로만 끝난다. `emit` 대상 이름(`emit d.Interacted()`의 `d`)의 판정은 이벤트 해석(LC3)과 함께 한다. 이 분석은 타입 검사 전에 끝나야 하므로(읽기의 타입을 정한다) default 없는 switch는 모든 case를 다룬 enum switch라도 어느 case도 실행하지 않고 지나가는 경로를 둔다. S0711의 경로 분석도 같은 규칙을 쓴다.
+
+**상수식(S0510–S0512, SD76).** 상수식은 리터럴(`null` 포함), 보간 없는 문자열, 검증 리터럴, enum case, const 이름, 이들의 단항·이항 연산(산술·비교·논리)과 괄호, 숫자 변환 `T(c)`, 수학 타입·struct 생성, 배열·Map 리터럴, `Math.Radians`·`Math.Degrees`다(인자·원소도 상수식). 그 밖의 호출·필드·지역·인자·문맥 이름·`this`는 상수식이 아니다.
+
+- const의 타입은 `bool`·숫자 타입·`string`·enum(엔진 enum·`Clock` 포함)·`Tag`·`vec2`–`vec4`·`quat`·`Rotator`·`Color`·`Transform`이다. 그 밖은 S0512이며 위치는 타입 표기다.
+- const 초기값은 상수식이어야 한다. 필드 초기값은 상수식이거나, 초기값 자체(괄호 안 포함)가 component 생성(인자는 상수식)이어야 한다 — 원소·인자 안의 component 생성은 상수식이 아니다. 어기면 S0510이며 위치는 처음으로 상수식이 아닌 하위 식이다(왼쪽부터).
+- const 초기값이 서로를 가리키면(자기 자신 포함) 순환 하나에 S0511 하나다. 위치는 순환에 든 const 중 (패키지 이름, 모듈 import 경로, 원문 위치) byte 순으로 처음인 것의 이름이다(S0323과 같은 순서). 순환에 든 const와 S0510을 받은 const의 값은 정해지지 않으며 그 const를 쓰는 자리(case 값 등)는 더 진단하지 않는다.
+
+**객체 필드(S0428).** `?` 없는 객체 타입(엔진 `object`·Sparks class·interface) 필드는 class의 (a) component 생성을 초기값으로 둔 `let` 필드와 (b) Component·Actor 파생 class(LevelScript 파생 제외 — S0413, LC3)의 `@edit` 필드에만 쓴다. 그 밖(struct 필드, WorldService·WidgetController·DataAsset 파생 class의 필드, `@edit`도 component 생성도 없는 필드)은 S0428이며 `T?`를 제시한다. 위치는 필드의 타입 표기(표기가 없으면 필드 이름)다.
+
+**프로필(S1113).** `profile: "core"` 패키지의 모듈에서 full 문법을 쓰면 S1113이며 기능 이름과 core 대안을 제시한다. 이 단계가 보는 full 문법은 `interface` 선언, `open` class·fn, Sparks class·interface를 기반으로 쓰는 것(core의 기반은 엔진 타입뿐 — full 의존 패키지의 것도), `Class<T>` 타입 표기, full 전용 attribute 이름(`@rpc`·`@worker`·`@deterministic`·`@pure`·`@tick`·`@cheat`·`@editorButton`·`@cvar`·`@test`), hook `on Validate()`다. 위치는 그 선언의 이름(`interface`·`open class`·`open fn`), Sparks 기반마다 그 기반 경로, 타입 표기, attribute(`@`부터), handler 이름이며 full 문법 하나에 하나다. 실행 중 component 추가·우선순위 지정 로드처럼 API 단위의 full 기능은 binding schema에 표시해 연동 단계에서 본다.
+
 ## 4. 타입·참조·값
 
 ### 4.1 값과 참조
@@ -925,7 +959,7 @@ other.Current = 0;                        // 오류(other: Health): 다른 객�
 ### 4.5 생성과 기본값 순서
 
 - struct와 component는 필드 이름으로 생성한다(`HitInfo(Point: p)`). 지정하지 않은 필드는 기본값을 사용하며 기본값이 없는 필드(§3.2)는 반드시 지정한다.
-- component는 `let` 필드의 초기값으로만 생성한다(실행 중 추가는 full). 편집기에서 배치한 Actor에 ScriptComponent를 붙이는 것은 스크립트의 생성이 아니라 레벨·배치 데이터 편집이며 core에서도 된다: 직접 배치 Actor는 그 `components`에 추가해 레벨에 저장하고, prefab 배치는 instance override의 노드 추가로 저장한다(Prefab PF4 선행, [LevelScript](LevelScript.ko.md) LD15). 필드 초기값은 상수식과 component 생성만 허용하고 클래스 기본값 레코드에 반영한다 — 레코드는 가장 가까운 C++ base의 생성자 결과 위에 컴파일된 초기값을 덮어 합성한다(RCM '클래스 기본값 결정'). component 생성 초기값은 클래스 원형의 default subobject(Prefab PF1)가 선행 조건이며 그때까지 미지원이다. 상수식은 리터럴, 검증 리터럴, enum 값, const 이름, 이들의 산술·비교, 수학 타입·struct 생성, 배열·Map 리터럴, `Math.Radians`·`Math.Degrees`이며 그 밖의 함수 호출과 필드 참조는 포함하지 않는다. 컴파일 시 overflow는 오류다. C++ 생성자 안에서 스크립트 코드를 실행하지 않는다.
+- component는 `let` 필드의 초기값으로만 생성한다(실행 중 추가는 full). 편집기에서 배치한 Actor에 ScriptableComponent를 붙이는 것은 스크립트의 생성이 아니라 레벨·배치 데이터 편집이며 core에서도 된다: 직접 배치 Actor는 그 `components`에 추가해 레벨에 저장하고, prefab 배치는 instance override의 노드 추가로 저장한다(Prefab PF4 선행, [LevelScript](LevelScript.ko.md) LD15). 필드 초기값은 상수식과 component 생성만 허용하고 클래스 기본값 레코드에 반영한다 — 레코드는 가장 가까운 C++ base의 생성자 결과 위에 컴파일된 초기값을 덮어 합성한다(RCM '클래스 기본값 결정'). component 생성 초기값은 클래스 원형의 default subobject(Prefab PF1)가 선행 조건이며 그때까지 미지원이다. 상수식은 리터럴, 검증 리터럴, enum 값, const 이름, 이들의 산술·비교, 수학 타입·struct 생성, 배열·Map 리터럴, `Math.Radians`·`Math.Degrees`이며 그 밖의 함수 호출과 필드 참조는 포함하지 않는다. 컴파일 시 overflow는 오류다. C++ 생성자 안에서 스크립트 코드를 실행하지 않는다.
 - 기본값 순서는 전체 계획 §5.3과 Prefab 3.1절을 따른다: native → Sparks 필드 초기값(이 둘의 결과가 클래스 기본값 레코드다) → subobject 기본값 레코드 → prefab·variant → instance override → spawn parameter. 코드의 기본값 변경은 override하지 않은 instance에 반영하고 override한 instance를 편집기에 표시한다.
 - 소유 component 필드에도 안정 ID(SubobjectGuid)를 부여하므로 이름을 바꿔도 prefab override가 유지된다(전체 계획 §5.3).
 
@@ -973,7 +1007,7 @@ Unity의 hook 체계(종류·의미)를 따르고 이름은 Rocks 어휘를 사�
 이벤트(클래스 일부):
 
 ~~~text
-class Health : ScriptComponent {
+class Health : ScriptableComponent {
     @edit @save var MaxHealth: int = 100;
     @net var Current: int = 100;
     event Died(killer: Actor?);
@@ -1070,7 +1104,7 @@ Sparks 코드는 엔진의 정해진 지점에서 실행되며 이 실행 묶음
 handler 안에서 기다리기(싱글플레이 예):
 
 ~~~text
-class CutsceneTrigger : ScriptComponent {
+class CutsceneTrigger : ScriptableComponent {
     @edit var Cutscene: Soft<Sequence>;
     let Skip = Action("UI.Skip");
 
@@ -1383,6 +1417,7 @@ Characters/PlayerCharacter.spark:42:5: error S0731: Cannot assign to a function 
 | S0425 | `static-instance-mismatch` | 타입 이름으로 인스턴스 멤버를, 인스턴스로 static 함수를 불렀다 | 맞는 쪽으로 |
 | S0426 | `recursive-struct` | struct가 필드로 자신을 값으로 담는다(직접·다른 struct를 거쳐, 순환 하나에 하나) | 컨테이너에 담거나 class로 |
 | S0427 | `initializer-too-deep` | 필드·const 초기값이 다른 초기값을 따라가는 연쇄가 64단계를 넘는다(이름 의존은 미리 정하므로 값의 멤버 등으로 이어진 연쇄) | 중간 값을 const·지역으로 나눈다 |
+| S0428 | `object-field-needs-optional` | `?` 없는 객체 타입 필드가 §3.11의 허용 자리(component 생성 `let` 필드, Component·Actor 파생 class의 `@edit` 필드)가 아니다 | `T?` |
 | S0501 | `integer-division` | 정수(상수 포함)끼리의 `/`, 정수 변수의 `/=` | `Math.Div(a, b)`, `float(a) / float(b)` |
 | S0502 | `float-to-int-conversion` | 실수 → 정수 타입 변환 호출 | `Math.FloorToInt` 등 |
 | S0503 | `constant-overflow` | 타입 없는 정수 상수식이 −2^63..2^64−1을 벗어난다, 정해진 상수 식이 그 타입의 범위를 벗어난다 | 값을 줄인다 |
@@ -1392,6 +1427,26 @@ Characters/PlayerCharacter.spark:42:5: error S0731: Cannot assign to a function 
 | S0507 | `mixed-numeric-types` | 다른 숫자 타입끼리 계산·비교했다 | `float(x)` 등으로 맞춘다 |
 | S0508 | `invalid-conversion` | 숫자 변환 호출의 인자가 숫자가 아니다, `bool`·`string` 변환 | `Parse.Int` 등 |
 | S0509 | `float-constant-in-integer` | 실수 상수를 정수 자리에 썼다 | 정수 상수나 `Math.RoundToInt` |
+| S0510 | `not-constant` | const 초기값이 상수식이 아니다, 필드 초기값이 상수식·component 생성이 아니다(§3.11) | 상수식으로, 실행 중 값은 `on Start()`에서 |
+| S0511 | `const-cycle` | const 초기값이 순환한다(순환 하나에 하나) | 순환을 끊는다 |
+| S0512 | `const-type` | const의 타입이 §3.11의 목록에 없다 | `let` 필드나 함수로 |
+
+- **대입·`let`·미사용(S07xx, LC2d):** 규칙과 위치는 §3.11이다.
+
+| 코드 | 이름 | 조건 | 수정 예 |
+|---|---|---|---|
+| S0701 | `let-write` | `let`·const 이름·필드에 대입, `let` 값 타입의 멤버·원소 쓰기와 변경 메서드 호출 | `var`로 선언 |
+| S0702 | `parameter-write` | 인자·반복 변수·`if (let)` binding을 바꾼다 | 지역 `var`에 복사해 바꾼다 |
+| S0703 | `foreign-field-write` | 다른 객체의 Sparks 필드를 쓴다 | 그 class의 함수를 부른다 |
+| S0704 | `read-only-property` | 엔진의 읽기 전용 필드·부록 B `let` 속성을 쓴다 | 쓰기 API를 쓴다 |
+| S0705 | `struct-self-write` | struct 함수가 자기 필드를 쓴다 | 바꾼 값을 돌려준다 |
+| S0706 | `not-assignable` | 문맥 이름·타입 이름·이름 공간·함수·enum case에 대입 | 변수에 대입 |
+| S0710 | `unused-local` | 지역 변수·binding·반복 변수를 어디에서도 읽지 않는다 | 지우거나 `_` |
+| S0711 | `unread-store` | 지역 `var`에 쓴 값을 그 뒤 어느 경로에서도 읽지 않는다(사본 수정 포함) | 원래 경로에 쓰거나 지운다 |
+| S0712 | `unused-parameter` | 본문에서 읽지 않는 인자(시그니처가 정해지지 않은 함수의 `_` 포함) | 지우거나 정해진 자리면 `_` |
+| S0713 | `discarded-result` | 식 문장의 값이 `void`가 아니다 | 값을 쓰거나 `_ = ...` |
+| S0714 | `unused-import` | import한 모듈의 선언을 쓰지 않는다 | import를 지운다 |
+| S0731 | `assign-to-call-result` | 대입·변경 경로에 호출 결과(그 뒤가 참조 타입 값을 지나지 않을 때)나 `?.`가 있다 | 지역 변수에 받아 바꾼 뒤 되돌려 쓴다 |
 
 - **패키지(S11xx, LC2a):** manifest·모듈 경로·패키지 의존·binding schema 파일이다. 위치 규칙은 §3.4와 §10.2 "binding schema 파일 형식"에 있다. 코드 대역의 나머지(reload·backend)는 해당 마일스톤에서 더한다.
 
@@ -1409,6 +1464,7 @@ Characters/PlayerCharacter.spark:42:5: error S0731: Cannot assign to a function 
 | S1110 | `module-folder-conflict` | 같은 폴더의 `X.spark`와 폴더 `X/` | 한쪽 이름을 바꾼다 |
 | S1111 | `package-folder-conflict` | 의존 패키지 이름(과 `Rocks`)이 현재 패키지의 최상위 폴더·최상위 모듈 이름과 같다 | 폴더 이름을 바꾼다 |
 | S1112 | `duplicate-package` | 한 컴파일에 같은 이름(ASCII 대소문자만 다른 것 포함)의 패키지가 둘 있다 | 한쪽 이름을 바꾼다 |
+| S1113 | `full-profile-only` | `profile: "core"` 패키지에서 full 문법(§1.3·§3.11)을 썼다 | `profile: "full"` 또는 core 대안 |
 | S1120 | `invalid-binding-schema` | binding schema 파일이 §10.2 형식이 아니다(문법, key, kind가 허용하지 않는 key, 값, 이름 규칙·키워드, ID 표기·중복, 타입 표기 문법, 중복 이름, 파일 사이 타입 이름·ID·모듈 중복) | 생성기를 다시 돌린다(손으로 고치지 않는다) |
 
 - 사전 대조 리터럴(`Tag`·`Action`·`CVar`)이 사전에서 이름이 바뀐 경우 사전의 redirect(`@formerly`와 같은 역할)를 따라 자동 변환하고 빠른 수정으로 소스를 고친다. redirect도 없으면 오류다.
@@ -1876,7 +1932,7 @@ LSP 서버 `sparks-lsp`를 VS Code 확장과 Rocks Studio Script Editor가 공�
 자동완성 위치(`|` = 커서):
 
 ~~~text
-class DoorLogic : ScriptComponent {
+class DoorLogic : ScriptableComponent {
     @edit var RequiredKey = Tag("Item.|");        // 태그 사전
     on |                                           // Awake, Start, Tick, TriggerEnter, Owner.Interacted, State.Changed …
     on Target.|                                    // Target 타입의 이벤트와 필드 Changed
@@ -1901,7 +1957,7 @@ class DoorLogic : ScriptComponent {
   - `error S0412 14:14` — 이 위치에 이 코드의 진단이 나야 한다. 여러 줄이면 §8.1의 순서대로 모두 일치해야 하며 빠지거나 더 나온 진단은 실패다.
   - `error S0103` — 위치를 적지 않으면 원문 위치가 없는 진단(파일 전체)이다.
   - `clean` — 진단이 없어야 한다. `error`와 함께 쓸 수 없다.
-  - `stage syntax`·`stage imports`·`stage names`·`stage types` — 그 단계까지만 컴파일한다(`syntax`는 manifest·schema·모듈 경로·의존·어휘·구문 분석, `imports`는 거기에 import 해석, `names`는 거기에 이름 해석, `types`는 거기에 타입 검사 — LC2c). 한 번만 쓰며 없으면 전체 단계다. 구문 사례(`Lexical`·`Syntax`·`SyntaxErrors` 영역)와 이름 사례(`Names` 영역)가 뒤 단계 규칙(이름·타입·미사용)에 묶이지 않게 한다(LC2b·LC2c). 단계만으로는 기대 지시가 아니다(`error`나 `clean`이 함께 있어야 한다).
+  - `stage syntax`·`stage imports`·`stage names`·`stage types`·`stage flow` — 그 단계까지만 컴파일한다(`syntax`는 manifest·schema·모듈 경로·의존·어휘·구문 분석, `imports`는 거기에 import 해석, `names`는 거기에 이름 해석, `types`는 거기에 타입 검사 — LC2c, `flow`는 거기에 흐름·대입·미사용·상수식·필드·프로필 검사 — LC2d §3.11). 한 번만 쓰며 없으면 전체 단계다. 구문 사례(`Lexical`·`Syntax`·`SyntaxErrors` 영역)와 이름 사례(`Names` 영역)가 뒤 단계 규칙(이름·타입·미사용)에 묶이지 않게 한다(LC2b·LC2c). 단계만으로는 기대 지시가 아니다(`error`나 `clean`이 함께 있어야 한다).
   - 지시가 하나도 없는 `.expect`, 알 수 없는 지시, `.expect`가 없는 `.spark`, `.spark`가 없는 `.expect`는 corpus 오류로 실패한다(빈 기대값이 조용히 통과하지 않게 한다).
   - 실행 결과 지시(`result`·`fault`·`trace`)는 해당 마일스톤(LC5·LC6)에서 더한다.
 - **패키지 사례(LC2a):** 사례는 파일 하나(`<사례>.spark`) 또는 폴더 하나(`<사례>/`)다.
@@ -1920,7 +1976,7 @@ class DoorLogic : ScriptComponent {
 replication · RPC:
 
 ~~~text
-class Weapon : ScriptComponent {
+class Weapon : ScriptableComponent {
     @net var Ammo: int = 30;
     @net(OwnerOnly) var Reserve: int = 90;
     let ReloadKey = Action("Gameplay.Reload");
@@ -1954,7 +2010,7 @@ struct LootRow {
     var Weight: float;
 }
 
-class Chest : ScriptComponent {
+class Chest : ScriptableComponent {
     @edit var Lid: SceneComponent;                 // 같은 prefab 안의 필수 참조
     @edit var Loot: Row<LootRow> = Row("Chest.Common");
     @edit(Min: 0, Max: 10) var Uses: int = 3;
@@ -2042,7 +2098,7 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 | CompilerDiagnostics | 엔진 공통 진단 코드 등록부(Sparks S0100–S1199, 메타 컴파일러 RMC####, UI validate 코드) | LC0와 함께 |
 | ContentSigning 1절 | `ExternalModules=Signed` 예외와 모듈 서명 봉투(§12.7) | EI9 전 |
 | CVarSystem 14.5절 | Sparks 노출 문법(§10.4) 반영 | 다음 CVar 문서 개정 |
-| 게임 타입 자리표시 | `Character`·`Collider`·`SphereCollider`·`SoundAsset`·`Sequence`·`DataAsset`·`ScriptComponent`·`WidgetController`·`PlaySession`의 Rocks 이름 확정(Rocks 고유 이름 원칙) | 해당 모듈 진입 시 |
+| 게임 타입 자리표시 | `Character`·`Collider`·`SphereCollider`·`SoundAsset`·`Sequence`·`DataAsset`·`ScriptableComponent`·`WidgetController`·`PlaySession`의 Rocks 이름 확정(Rocks 고유 이름 원칙) | 해당 모듈 진입 시 |
 | ID 개념 이름 | `SoftEntityId`·영속 Entity Guid·파생 Entity ID를 Actor 계열 이름으로 바꿀지 Prefab과 함께 결정 | Prefab PF 단계 |
 | (초안 1.4) 편집기 | Outliner "레벨 스크립트" 항목, 레벨 스크립트 명령·템플릿(전체 계획 §22.3), `sparks-lsp` 명령 `sparks.levelScript.*`(§13) | 편집기 단계 |
 
@@ -2056,7 +2112,7 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 
 언어 코어가 엔진 없이 완결되도록 경계를 둘로 정한다(SD52).
 
-- **binding schema는 파일이다.** 컴파일러는 엔진 API를 C++ 리플렉션에서 직접 읽지 않고 binding schema 파일(`<모듈>.sparkbind.json`)과 사전 파일(Tag·Action·CVar·에셋·`Loc` catalog)에서만 읽는다. 내용은 §10.2의 표(타입·필드·계산 속성·함수·자원 정책·파괴 지연·이벤트)다. 언어 코어는 손으로 쓴 시험용 schema(가짜 엔진: `Actor`·`Component`·`ScriptComponent`·`SceneComponent`와 §2 예시가 쓰는 타입, `Engine/Source/Developer/SparksTestHost/Schema/*.sparkbind.json`)로 개발하고, 실제 엔진 선언에서 이 파일을 생성하는 것은 연동 단계 EI1이다. 언어 서버가 엔진 없이 동작하는 것(§13)도 같은 파일 덕분이다. 파일 형식은 §10.2 "binding schema 파일 형식"(LC2a 확정)이다.
+- **binding schema는 파일이다.** 컴파일러는 엔진 API를 C++ 리플렉션에서 직접 읽지 않고 binding schema 파일(`<모듈>.sparkbind.json`)과 사전 파일(Tag·Action·CVar·에셋·`Loc` catalog)에서만 읽는다. 내용은 §10.2의 표(타입·필드·계산 속성·함수·자원 정책·파괴 지연·이벤트)다. 언어 코어는 손으로 쓴 시험용 schema(가짜 엔진: `Actor`·`Component`·`ScriptableComponent`·`SceneComponent`와 §2 예시가 쓰는 타입, `Engine/Source/Developer/SparksTestHost/Schema/*.sparkbind.json`)로 개발하고, 실제 엔진 선언에서 이 파일을 생성하는 것은 연동 단계 EI1이다. 언어 서버가 엔진 없이 동작하는 것(§13)도 같은 파일 덕분이다. 파일 형식은 §10.2 "binding schema 파일 형식"(LC2a 확정)이다.
 - **VM은 엔진을 host interface로만 부른다.** VM이 밖으로 부르는 것은 객체 handle의 생존·타입 판정, native 필드 읽기·쓰기, native 함수 호출(FunctionId와 bank 창), native 이벤트 연결·해제, 파괴·활성 전환 적용 요청(§4.3), 유지 자원 해제, 로드 요청과 lease 반환, 시계(§6.1), 로그·fault 보고다. host가 VM에 들어오는 것은 instance 생성·Detach, 수명 hook 실행, 스크립트 단계 열기·닫기, 이벤트 항목 넣기, 재개, revision 게시, CloseSession이다. 엔진의 `ScriptRuntime` 모듈(EI2)이 이 interface를 ObjectRuntime·World 위에 구현한다. 세부 API는 LC5(1차)·LC6(2차) 착수 때 이 절에 확정한다.
 - **Sparks 필드의 저장소는 VM이 가진다.** Sparks 클래스의 필드는 VM의 instance 저장소에 있고, 엔진에는 연동 단계에서 런타임 타입 등록으로 보인다(연동 요구 SE-O3). 그래서 필드 migration(R2)까지 언어 코어 안에서 완결된다.
 - **가짜 host로 시험한다.** `SparksTestHost`는 가짜 객체표(handle + generation), 결정적 시험 시계, 수명 hook·tick phase driver, 가짜 native 함수·이벤트·유지 자원·로드를 가진 headless host다. conformance corpus(§13.1)와 `@test`가 이 host에서 돈다. 실제 시간에 기대지 않는다.
@@ -2102,7 +2158,7 @@ LC2는 범위가 커서 하위 단계로 나눈다(각 단계가 corpus 영역 �
 | LC2a 컴파일 입력 | binding schema 파일 형식과 reader, 시험용 가짜 엔진 schema, 패키지 manifest reader, 모듈 경로 규칙, 패키지 의존(없음·순환), import 해석, 컴파일 단위(`Compilation`), corpus 패키지 사례. 진단 S0301–S0305, S1101–S1112, S1120 |
 | LC2b 선언·이름 | prelude와 부록 A·B 선언 표, 선언 수집, 명명 규칙, 예약 이름, 이름 하나에 대상 하나, import한 이름의 충돌, 별칭, 문맥 이름, 상속 멤버·`override` 대상, 기반 목록·interface 구현, 타입 표기 해석(소스·schema), manifest `services` 해석, 이름 해석 덤프(`.names`). 규칙은 §3.9. 진단 S0306–S0325, schema S1120(이름) |
 | LC2c 타입·숫자 | 식의 타입, 숫자(타입 없는 상수·변환·나눗셈·비교·상수 overflow), 문자열 보간, 컨테이너·리터럴과 기대 타입, 멤버 접근(부록 B 시그니처·schema), 호출·인자 형태·생성, 검증 리터럴(형식만), `as?`, `await`·`try`의 타입, switch, `for`, 조건, 반환 경로, 식 타입 덤프(`.types`). 규칙은 §3.10. 진단 S0326, S0401–S0427(S0413 제외), S0501–S0509, S0109 |
-| LC2d 흐름·대입·마무리 | null 흐름(`T?`, `?.`·`??`·`if (let)`·Exit, await 이후 `T?`), 대입·`let`(S07xx), 미사용 이름·결과, 상수식과 const 순환, 필드 기본값 규칙, 프로필 검사, §2 예시 통과 |
+| LC2d 흐름·대입·마무리 | await 이후 `T?`, 대입 경로·`let`, 미사용 이름·값·결과·import, 상수식과 const 순환·타입, `?` 없는 객체 필드, 프로필 검사, §2 예시 통과. 규칙은 §3.11. 진단 S0412(await 뒤), S0428, S0510–S0512, S0701–S0706, S0710–S0714, S0731, S1113 |
 
 순서는 LC0 → LC7이 한 줄이다. LC8의 CLI는 LC3 뒤부터 단계마다 넓히고(check → build → test), 언어 서버는 LC3 뒤에 시작할 수 있다. LC9는 LC6 뒤다.
 
@@ -2114,7 +2170,7 @@ LC2는 범위가 커서 하위 단계로 나눈다(각 단계가 corpus 영역 �
 |---|---|---|
 | EI1 binding 생성 | 실제 엔진 선언에서 binding schema 생성(함수 리플렉션 CU2·이벤트 필드 CU3·스크립트 지정자) | LC2 |
 | EI2 ScriptRuntime | ObjectRuntime 위의 host 구현, native call, Sparks 클래스의 타입 등록 | LC5 |
-| EI3 World bridge | `ScriptComponent`, 수명 hook, 스크립트 단계, 이벤트 연결, 파괴·활성 지연 | LC6 |
+| EI3 World bridge | `ScriptableComponent`, 수명 hook, 스크립트 단계, 이벤트 연결, 파괴·활성 지연 | LC6 |
 | EI4 에셋·생성 | `Load`·`LoadAll`, `World.Spawn(prefab, at)` | LC6 |
 | EI5 게임 시스템 | 입력·Tag·`Loc`·CVar·물리·UI·오디오(시스템마다 따로) | LC6 |
 | EI6 편집기 핫 리로드 | 저장 → compile action → 실행 중 World 적용, R3 instance 재생성 | LC7 |
@@ -2136,7 +2192,7 @@ LC2는 범위가 커서 하위 단계로 나눈다(각 단계가 corpus 영역 �
 
 ## 19. 결정 사항
 
-2026.11.12 검토에서 초안의 권고안 10건(SD1–SD10)을 채택하였고, 같은 날 4차 검증에서 도출된 11건(SD11–SD21)을 채택하였다. 2026.11.18 5차 검증(초안 1.3)에서 사용자 요구(핫 리로드 필수·오류 방어·선택형 AOT·`WeakObjectRef` 명칭)와 권장안으로 24건(SD22–SD45)을 확정하였다. 2026.11.20 초안 1.5에서 구현 순서 3건(SD51–SD53)을, 같은 날 언어 코어 구현 중 리터럴·숫자 타입·덤프 5건(SD54–SD58)을 사용자 결정으로 더하였다. 언어 코어 구현의 LC2a에서 컴파일 입력 3건(SD59–SD61)을, LC2b(2026.11.21)에서 이름 해석 4건(SD62–SD65)을, LC2c에서 타입 검사 7건(SD66–SD72 — SD69–SD72는 교차 검증 뒤의 보완)을 권장안으로 확정하였다. 2026.11.20 레벨 스크립트 설계 확정([LevelScript](LevelScript.ko.md) LD1–LD20, 모두 권장안)에서 언어에 걸리는 결정을 5건(SD46–SD50)으로 요약해 더하였다. SD4는 기본값만 확정하고 target별 값은 마켓 규정 검토 후 정한다. SD3·SD9·SD20은 엔진 수준 결정이며 전체 계획 개정 1.7·1.8의 §5.2·§20.2에 반영되어 있다.
+2026.11.12 검토에서 초안의 권고안 10건(SD1–SD10)을 채택하였고, 같은 날 4차 검증에서 도출된 11건(SD11–SD21)을 채택하였다. 2026.11.18 5차 검증(초안 1.3)에서 사용자 요구(핫 리로드 필수·오류 방어·선택형 AOT·`WeakObjectRef` 명칭)와 권장안으로 24건(SD22–SD45)을 확정하였다. 2026.11.20 초안 1.5에서 구현 순서 3건(SD51–SD53)을, 같은 날 언어 코어 구현 중 리터럴·숫자 타입·덤프 5건(SD54–SD58)을 사용자 결정으로 더하였다. 언어 코어 구현의 LC2a에서 컴파일 입력 3건(SD59–SD61)을, LC2b(2026.11.21)에서 이름 해석 4건(SD62–SD65)을, LC2c에서 타입 검사 7건(SD66–SD72 — SD69–SD72는 교차 검증 뒤의 보완)을, LC2d에서 흐름·대입 4건(SD73–SD76)을 권장안으로 확정하였다. 2026.11.20 레벨 스크립트 설계 확정([LevelScript](LevelScript.ko.md) LD1–LD20, 모두 권장안)에서 언어에 걸리는 결정을 5건(SD46–SD50)으로 요약해 더하였다. SD4는 기본값만 확정하고 target별 값은 마켓 규정 검토 후 정한다. SD3·SD9·SD20은 엔진 수준 결정이며 전체 계획 개정 1.7·1.8의 §5.2·§20.2에 반영되어 있다.
 
 - **SD1. 확장자:** 소스 `.spark`, 컴파일 모듈 `.sparkc`. `.sparkc`는 빌드 출력 폴더에만 생성한다. 초안의 `.sparks`는 언어 이름과 철자가 같아 혼동되므로 사용자 결정(2026-11-12)으로 `.sparkc`로 정정하였다.
 - **SD2. C++ 리플렉션 필드 이름:** 첫 글자를 대문자로 바꾸고 끝의 `_`를 제거하여 노출하며, 그 밖의 `_`가 있으면 `ScriptName`이 필요하다(§10.3). 리플렉션 필드를 C++에서도 PascalCase로 선언하도록 규약을 개정하는 대안은 채택하지 않는다.
@@ -2187,7 +2243,7 @@ LC2는 범위가 커서 하위 단계로 나눈다(각 단계가 corpus 영역 �
 - **SD47. LevelScript의 참조:** `@edit` 객체 필드는 `T?`만 허용하고(S0413), 대상은 같은 Level의 배치 Actor와 그 component다. 다른 Level은 저장 거부, 셀 사이는 영속 Entity 참조 전까지 거부(§4.3), prefab 배치가 펼친 Actor는 배치 정체와 노드 경로로 저장한다(Prefab D22). 레벨 사이 연락은 World 이벤트로 하며 이름 문자열 호출은 없다(LevelScript LD6·LD7·LD10·LD17).
 - **SD48. LevelScript의 수명:** 레벨 편입에서 그 Level의 모든 배치 Actor 뒤에 Awake·Enable하고, Start는 같은 프레임에 준비된 활성 배치 Actor 뒤에 시작하되 기다리지 않는다. Level을 내릴 때는 먼저 Disable·Destroy한다. `RequestDestroy`로 파괴할 수 없고 Level 파괴만 파괴한다(§5.1, LevelScript LD8·LD11·LD16).
 - **SD49. Actor 물리 이벤트와 LevelScript의 물리 금지:** 엔진 `Actor`가 `TriggerEntered`·`TriggerExited`·`CollisionEntered`·`CollisionExited` 이벤트를 노출해 다른 객체가 `on X.TriggerEntered(...)`로 받는다. 같은 물리 batch에서 hook 다음에 발행하고 지연 slot 표로 구독이 있을 때만 비용이 든다. 이름은 hook과 겹치지 않게 과거형이다. LevelScript는 물리 hook(S0801)과 Collider component(S0802)를 가질 수 없다(§5.2·§5.5, LevelScript LD9·LD18).
-- **SD50. 편집기 진입:** "레벨 스크립트 열기"·"참조 추가"·"이벤트 추가" 명령과 언어 서버 명령 채널(§13), 생성 경로 `<패키지>/Levels/<레벨 경로 이름>.spark`를 둔다. 배치한 Actor(직접 배치·prefab 배치)에 편집기에서 ScriptComponent를 붙이는 것은 core에서도 되며 실행 중 추가(full)와 다르다(§4.5, LevelScript LD14·LD15).
+- **SD50. 편집기 진입:** "레벨 스크립트 열기"·"참조 추가"·"이벤트 추가" 명령과 언어 서버 명령 채널(§13), 생성 경로 `<패키지>/Levels/<레벨 경로 이름>.spark`를 둔다. 배치한 Actor(직접 배치·prefab 배치)에 편집기에서 ScriptableComponent를 붙이는 것은 core에서도 되며 실행 중 추가(full)와 다르다(§4.5, LevelScript LD14·LD15).
 - **SD51. 언어 코어 우선:** 엔진 요소와 무관한 언어 코어(LC0–LC9)를 먼저 구현하고 엔진 연동(EI1–EI9)은 엔진이 준비되는 대로 하나씩 더한다(사용자 결정 2026-11-20). 엔진·도구 쪽 요구는 [연동 요구 목록](SparksEngineIntegration.ko.md)에 따로 모으고, 구현 중 새로 드러난 요구도 코어 안에서 우회하지 않고 그 목록에 더한다(§18).
 - **SD52. host 경계:** 컴파일러는 엔진 API를 binding schema 파일로만 알고, VM은 엔진을 host interface로만 부른다. Sparks 필드의 저장소는 VM이 가진다. 언어 코어는 Core 층에만 의존하고 가짜 host(`SparksTestHost`)로 시험한다(§18.1).
 - **SD53. 모듈 배치:** `SparksVm`·`SparksCompiler`는 `Engine/Source/Runtime`, `SparksTestHost`는 `Engine/Source/Developer`, CLI와 언어 서버는 `Programs`에 둔다. 엔진 쪽 host 구현은 `ScriptRuntime` 모듈이다(§18.1).
@@ -2212,6 +2268,10 @@ LC2는 범위가 커서 하위 단계로 나눈다(각 단계가 corpus 영역 �
 - **SD70. 정해진 상수 접기:** `const`와 상수만 쓰는 정해진 타입의 식은 컴파일 때 값을 정하고(범위 밖 S0503, NaN·Inf S0505) switch case·0 나누기 판정에 쓴다. 상수식 요구와 const 순환 진단은 LC2d다(§3.10 숫자 상수).
 - **SD71. 값 struct 순환과 초기값 깊이:** struct가 필드로 자신을 값으로 담으면(추론한 필드 포함) 순환 하나에 S0426, 이름이 아닌 길로 64단계를 넘는 초기값 연쇄는 S0427이다. 이름 의존은 의존 순서로 미리 정해 컴파일러가 재귀 깊이를 쓰지 않는다(§3.10).
 - **SD72. 확정한 세부 규칙:** 로드 요청은 대기가 아닌 값, 제네릭 함수(부록 B 포함)의 타입 인자는 언제나 명시, `?.`로 부른 대기의 결과는 `R?`, switch 대상은 정수·`bool`·`string`·enum, 복합 대입은 `x = x op v`의 규칙(원소 대상은 읽기 타입 `T?`), 생성은 읽기 전용 필드도 정한다, `Math` 자리표시 함수의 상수만 인자는 자리표시가 `int`를 받지 않으면 `float`(§3.10).
+- **SD73. 대입 경로:** 대입·변경 메서드의 경로를 뿌리부터 보아 처음 어긋난 곳의 진단 하나를 낸다. 참조 타입 값을 지나면 그 뒤는 객체 속성 쓰기이며 다른 객체의 Sparks 필드는 같은 class라도 읽기만 한다(§3.11).
+- **SD74. 미사용 판정:** 읽지 않는 지역·binding·반복 변수·인자와 그 뒤 읽지 않는 대입 값은 오류이고 선언 초기값의 덮어쓰기는 오류가 아니다. `_` 인자는 시그니처가 정해진 자리에서만 쓴다(§3.11).
+- **SD75. await 뒤 판정:** 문장 단위의 경로 분석(분기 합류·back-edge, 고정점)으로 "기다린 뒤" 상태를 정하고 객체 타입 지역 이름의 그 읽기만 `T?`로 본다(§3.11).
+- **SD76. 상수식과 const 타입:** 상수식 목록과 const 타입 목록(§3.11)을 확정하고, 순환·비상수 const의 값은 정하지 않아 쓰는 자리는 조용하다.
 
 ## 20. 교차 검증 기록
 

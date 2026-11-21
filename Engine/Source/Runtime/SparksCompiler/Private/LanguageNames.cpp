@@ -67,10 +67,10 @@ constexpr LanguageName Names[] = {
 
 // schema가 제공하는 예약 이름(핵심 엔진 타입과 엔진 쪽 prelude 타입, 부록 A)이다.
 constexpr StringView EngineReservedNames[] = {
-    "Actor",           "Pawn",        "Component",    "SceneComponent",
-    "ScriptComponent", "LevelScript", "WorldService", "WidgetController",
-    "Widget",          "DataAsset",   "Collider",     "World",
-    "Connection",      "PlaySession", "Hit",          "Error"};
+    "Actor",       "Pawn",         "Component",        "SceneComponent", "ScriptableComponent",
+    "LevelScript", "WorldService", "WidgetController", "Widget",         "DataAsset",
+    "Collider",    "World",        "Connection",       "PlaySession",    "Hit",
+    "Error"};
 
 // 예약 이벤트 이름이다(`X.Changed`).
 constexpr StringView ChangedEventName = "Changed";
