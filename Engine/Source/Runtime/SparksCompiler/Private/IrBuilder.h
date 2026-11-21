@@ -9,7 +9,9 @@
 namespace rocks::sparks::detail {
 
 // Sparks 값 하나의 slot 배치다(2절 표).
-inline constexpr uint32 MaxIrSlots = 17; // mat4 16 + 있음 표지 1
+// 값 하나의 slot 수 상한이다: 가장 큰 값은 `Result<mat4>?`(mat4 16 + 오류 코드 1 + 있음 표지 1)다
+// (`Result<T?>`·`T??`는 타입 오류다).
+inline constexpr uint32 MaxIrSlots = 18;
 
 struct IrLayout {
     IrBank bank = IrBank::Scalar;
@@ -27,6 +29,10 @@ public:
 
     // 타입의 slot 배치다.
     static IrLayout Layout(TypeChecker& checker, uint32 type) noexcept;
+
+    // 내린 함수의 구조 불변식을 본다(끝 명령·분기 대상·레지스터 범위·묶음 크기). false는 내림의
+    // 결함이다.
+    bool Validate() const noexcept;
 
 private:
     bool Failed() const noexcept;
@@ -56,7 +62,12 @@ private:
     uint32 AddString(StringView text) noexcept;
 
     // ---- 상수·식(IrLower.cpp) ----
+    // 정해진 숫자·bool 상수식(리터럴, 숫자 const, 단항, + - * / %)의 값이다. 아니면 false.
     bool EvaluateConstant(uint32 node, ConstantValue& value) noexcept;
+    bool EvaluateBinaryConstant(uint32 node, ConstantValue& value) noexcept;
+    // 접힌 값이 없는 const(수학 값·Tag·언어 함수 결과)는 초기값 식을 쓴 자리에서 내린다.
+    uint32 LowerConstInitializer(uint32 constSymbol, uint32 useNode) noexcept;
+    uint32 LowerConst(uint32 symbol, uint32 type, uint32 node) noexcept;
     uint32 LoadConstant(const ConstantValue& value, uint32 type, uint32 node) noexcept;
     uint32 LoadConstantOrString(const ConstantValue& value, uint32 type, uint32 node) noexcept;
     uint64 EnumIndex(uint32 caseSymbol) const noexcept;
@@ -87,7 +98,7 @@ private:
     uint32 LowerCall(uint32 node, uint32 expected) noexcept;
     // 함수 callee를 수신자(없으면 NoIrRegister)와 인자로 부른다. 결과는 type의 값 또는 대기 handle.
     uint32 EmitCall(uint32 node, uint32 callee, uint32 receiver, Span<const uint32> arguments,
-                    uint32 type, bool rpc) noexcept;
+                    uint32 type, uint8 sub) noexcept;
     uint32 LowerConstruct(uint32 node, uint32 typeSymbol, Span<const uint32> arguments,
                           uint32 type) noexcept;
     uint32 LowerLiteralCall(uint32 node, uint32 literal, Span<const uint32> arguments,
@@ -97,6 +108,8 @@ private:
     uint32 LowerCollection(uint32 node, uint32 expected) noexcept;
     uint32 LowerCast(uint32 node) noexcept;
     uint32 LowerAwait(uint32 node, uint32 operandNode) noexcept;
+    // `await a?.F()`: a가 있을 때만 부르고 기다린다(결과 `R?`).
+    uint32 LowerChainedAwait(uint32 node, uint32 call) noexcept;
     // 대기 피연산자가 재개 때 돌려주는 값의 타입이다.
     uint32 AwaitResultType(uint32 operandNode) noexcept;
     uint32 LowerTry(uint32 node) noexcept;
@@ -106,8 +119,23 @@ private:
     void LowerBlock(uint32 node) noexcept;
     void LowerLocal(uint32 node) noexcept;
     void LowerAssignment(uint32 node) noexcept;
-    // 대입 대상 식에 값을 쓴다(값 타입 경로는 바깥 값에 다시 쓴다).
-    void Store(uint32 target, uint32 value) noexcept;
+    // 값 경로의 한 단계다(대입 대상·값을 바꾸는 메서드의 수신자). 객체·key는 한 번만 평가한다.
+    struct PathStep {
+        uint8 kind = 0;       // PathStepKind
+        bool chained = false; // object가 앞 단계의 값이다(다시 쓰기가 앞 단계로 이어진다)
+        uint32 node = NoNode;
+        uint32 symbol = NoSymbol; // 지역·필드 심볼
+        uint32 object = NoIrRegister;
+        uint32 key = NoIrRegister;
+        uint32 offset = 0; // 수학 타입 필드의 slot 구간
+        uint32 count = 0;
+    };
+
+    // 경로 node를 왼쪽부터 평가해 단계를 path에 더하고 그 자리의 현재 값을 돌려준다(readLeaf가
+    // false면 마지막 단계의 값은 읽지 않는다 — 단순 대입).
+    uint32 EvaluatePath(uint32 node, Array<PathStep>& path, bool readLeaf) noexcept;
+    // 경로의 끝에 value를 쓰고, 값 타입을 지난 단계는 바깥 값에 차례로 다시 쓴다.
+    void StorePath(Span<const PathStep> path, uint32 value) noexcept;
     void LowerIf(uint32 node) noexcept;
     void LowerWhile(uint32 node) noexcept;
     void LowerFor(uint32 node) noexcept;
@@ -128,7 +156,12 @@ private:
     TypeChecker& checker_;
     Compilation& c_;
     IrFunction& function_;
-    const SyntaxTree& tree_;
+    // 내리는 식의 모듈·구문 트리다(다른 모듈 const의 초기값을 그 자리에서 내릴 때 잠시 바뀐다).
+    const SyntaxTree* tree_;
+    uint32 module_;
+    // 0이 아니면 명령의 원문 위치를 이 범위로 둔다(다른 모듈 const를 쓴 자리의 위치).
+    SourceSpan spanOverride_;
+    bool overrideSpan_ = false;
     uint32 current_ = NoIrBlock;
     uint32 this_ = NoIrRegister;
     uint32 returnType_ = 0;

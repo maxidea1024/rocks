@@ -1,4 +1,5 @@
 #include <Core/Text/StringBuilder.h>
+#include <Platform/Fatal.h>
 
 #include "CompilationChecker.h"
 #include "IrBuilder.h"
@@ -391,8 +392,23 @@ private:
             break;
         case IrOp::Call:
             Assign(i.a);
-            out_.Append(i.sub == IrCallRpc ? "CALL.RPC " : "CALL ");
+            out_.Append(i.sub == IrCallRpc        ? "CALL.RPC "
+                        : i.sub == IrCallMutating ? "CALL.MUT "
+                                                  : "CALL ");
             SymbolName(i.extra);
+            if (i.types != NoIrRegister) {
+                out_.Append("<");
+                for (uint32 index = 0; index < function_.operands[i.types]; ++index) {
+                    if (index != 0) {
+                        out_.Append(", ");
+                    }
+
+                    checker_.AppendDisplayType(out_, function_.operands[i.types + 1 + index]);
+                }
+
+                out_.Append(">");
+            }
+
             List(i.b, i.c);
             break;
         case IrOp::Emit:
@@ -421,6 +437,11 @@ private:
         case IrOp::Try:
             Assign(i.a);
             out_.Append("TRY ");
+            Register(i.b);
+            out_.AppendFormat(" -> L{} else L{}", i.extra, i.c);
+            break;
+        case IrOp::ReturnError:
+            out_.Append("    RETURN.ERROR ");
             Register(i.b);
             break;
         case IrOp::New:
@@ -524,6 +545,10 @@ void TypeChecker::LowerModule(uint32 module) noexcept {
         IrBuilder builder(*this, function);
         if (!builder.Build()) {
             return;
+        }
+
+        if (!builder.Validate()) {
+            platform::Fatal("Sparks typed IR invariant violated"); // 내림의 결함
         }
 
         if (!out.View().IsEmpty()) {

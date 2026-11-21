@@ -4,39 +4,37 @@ function Wrap(s0)
   s2: bool [Bool]
   s3: Error [Enum]
   s4..s7: Result<vec3> [Flag F64 F64 F64]
-  s8: int [I64]
-  s9..s11: vec3 [F64 F64 F64]
+  s8..s10: vec3 [F64 F64 F64]
+  s11: float [F64]
   s12: float [F64]
   s13: float [F64]
-  s14: float [F64]
-  s15..s18: Result<vec3> [Flag F64 F64 F64]
+  s14..s17: Result<vec3> [Flag F64 F64 F64]
 L0:
     s1 = LOADINT 0    ; 4:14
     s2 = EQ s0, s1    ; 4:9
     BRANCH s2, L1, L2    ; 4:9
 L1:
     s3 = LOADINT 2    ; 5:16
-    s8 = LOADINT 1    ; 5:9
-    s4 = ADD.Flag s3, s8    ; 5:9
+    s4 = LOADINT 3    ; 5:9
     s5 = LOADINT 0    ; 5:9
     s6 = LOADINT 0    ; 5:9
     s7 = LOADINT 0    ; 5:9
     RETURN s4    ; 5:9
 L2:
+    s8 = LOADFLOAT 0    ; 8:12
     s9 = LOADFLOAT 0    ; 8:12
     s10 = LOADFLOAT 0    ; 8:12
-    s11 = LOADFLOAT 0    ; 8:12
-    s12 = LOADFLOAT 1    ; 8:17
-    s9 = MOVE s12    ; 8:17
-    s13 = LOADFLOAT 2    ; 8:22
-    s10 = MOVE s13    ; 8:22
-    s14 = LOADFLOAT 3    ; 8:27
-    s11 = MOVE s14    ; 8:27
-    s15 = LOADINT 0    ; 8:5
+    s11 = LOADFLOAT 1    ; 8:17
+    s8 = MOVE s11    ; 8:17
+    s12 = LOADFLOAT 2    ; 8:22
+    s9 = MOVE s12    ; 8:22
+    s13 = LOADFLOAT 3    ; 8:27
+    s10 = MOVE s13    ; 8:27
+    s14 = LOADINT 0    ; 8:5
+    s15 = MOVE s8    ; 8:5
     s16 = MOVE s9    ; 8:5
     s17 = MOVE s10    ; 8:5
-    s18 = MOVE s11    ; 8:5
-    RETURN s15    ; 8:5
+    RETURN s14    ; 8:5
 
 function Mover.SetSpeed(s1)
   r0 this: Mover
@@ -66,20 +64,18 @@ function Mover.Check(s1)
   s3: bool [Bool]
   s4: Error [Enum]
   s5: Result<void> [Flag]
-  s6: int [I64]
-  s7: Result<void> [Flag]
+  s6: Result<void> [Flag]
 L0:
     s2 = LOADINT 0    ; 25:17
     s3 = LT s1, s2    ; 25:13
     BRANCH s3, L1, L2    ; 25:13
 L1:
     s4 = LOADINT 3    ; 26:20
-    s6 = LOADINT 1    ; 26:13
-    s5 = ADD.Flag s4, s6    ; 26:13
+    s5 = LOADINT 4    ; 26:13
     RETURN s5    ; 26:13
 L2:
-    s7 = LOADINT 0    ; 29:9
-    RETURN s7    ; 29:9
+    s6 = LOADINT 0    ; 29:9
+    RETURN s6    ; 29:9
 
 function Mover.Run()
   r0 this: Mover
@@ -101,19 +97,25 @@ L0:
     r1 = CALL Mover.Fetch(r0)    ; 33:27
     s2 = AWAIT r1 -> L1    ; 33:17
 L1:
-    s4 = TRY s2    ; 33:17
+    s4 = TRY s2 -> L2 else L3    ; 33:17
+L2:
     s5 = MOVE s4    ; 33:9
     r6 = CALL Mover.Check(r0, s5)    ; 34:19
-    s7 = AWAIT r6 -> L2    ; 34:9
-L2:
-    TRY s7    ; 34:9
+    s7 = AWAIT r6 -> L4    ; 34:9
+L3:
+    RETURN.ERROR s2    ; 33:17
+L4:
+    TRY s7 -> L5 else L6    ; 34:9
+L5:
     r8 = CALL NextTick()    ; 35:19
     s9 = LOADFLOAT 0.5    ; 35:37
     s10 = LOADINT 0    ; 35:42
     r11 = CALL Delay(s9, s10)    ; 35:31
     r12 = CALL All(r8, r11)    ; 35:15
-    AWAIT r12 -> L3    ; 35:9
-L3:
+    AWAIT r12 -> L7    ; 35:9
+L6:
+    RETURN.ERROR s7    ; 34:9
+L7:
     s13 = LOADINT 1    ; 36:20
     s14 = ADD.I64 s5, s13    ; 36:16
     s15 = LOADINT 0    ; 36:9

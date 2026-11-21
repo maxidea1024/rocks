@@ -77,8 +77,8 @@ uint32 IrBuilder::AddOperands(Span<const uint32> values) noexcept {
 }
 
 uint32 IrBuilder::LowerMember(uint32 node) noexcept {
-    const uint32 symbol = c_.NodeSymbol(function_.module, node);
-    const uint32 type = c_.ExpressionType(function_.module, node);
+    const uint32 symbol = c_.NodeSymbol(module_, node);
+    const uint32 type = c_.ExpressionType(module_, node);
     if (symbol == NoSymbol) {
         return NoIrRegister;
     }
@@ -93,8 +93,7 @@ uint32 IrBuilder::LowerMember(uint32 node) noexcept {
     }
 
     if (entry.kind == SymbolKind::Const) {
-        return LoadConstantOrString(checker_.ConstOf(symbol), type != NoType ? type : entry.type,
-                                    node);
+        return LowerConst(symbol, type != NoType ? type : entry.type, node);
     }
 
     if (entry.kind != SymbolKind::Field && entry.kind != SymbolKind::EngineField &&
@@ -102,8 +101,8 @@ uint32 IrBuilder::LowerMember(uint32 node) noexcept {
         return NoIrRegister; // 함수·이벤트(호출·await가 본다)
     }
 
-    const uint32 objectNode = tree_.Child(node, 0);
-    const bool chained = (tree_.Node(node).flags & SyntaxFlags::NullConditional) != 0;
+    const uint32 objectNode = tree_->Child(node, 0);
+    const bool chained = (tree_->Node(node).flags & SyntaxFlags::NullConditional) != 0;
     const uint32 object = Lower(objectNode, NoType);
     if (object == NoIrRegister) {
         return NoIrRegister;
@@ -114,7 +113,12 @@ uint32 IrBuilder::LowerMember(uint32 node) noexcept {
         return ReadMember(object, objectType, symbol, type, node);
     }
 
-    // a?.f: a가 있으면 f의 값(T?), 없으면 없음.
+    // a?.f: a가 있으면 f의 값(T?), 없으면 없음. f가 이미 `T?`로 선언됐으면 그 값을 그대로
+    // 쓴다(Scalar `T?`의 있음 표지를 잃지 않게).
+    const uint32 declared =
+        entry.kind == SymbolKind::Field ? checker_.FieldType(symbol) : entry.type;
+    const uint32 readType =
+        declared != NoType && checker_.IsOptional(declared) ? type : checker_.NonOptional(type);
     const uint32 result = NewValue(type);
     const uint32 some = NewValue(checker_.boolType_);
     Add(IrOp::IsSome, some, object, NoIrRegister, 0, node);
@@ -124,8 +128,7 @@ uint32 IrBuilder::LowerMember(uint32 node) noexcept {
     Add(IrOp::Branch, present, some, absent, 0, node);
     StartBlock(present);
     const uint32 inner = checker_.NonOptional(objectType);
-    const uint32 value =
-        ReadMember(Unwrap(object, inner, node), inner, symbol, checker_.NonOptional(type), node);
+    const uint32 value = ReadMember(Unwrap(object, inner, node), inner, symbol, readType, node);
     MoveValue(result, Coerce(value, type, node), node);
     Add(IrOp::Jump, done, NoIrRegister, NoIrRegister, 0, node);
     StartBlock(absent);
@@ -169,13 +172,13 @@ void IrBuilder::LoadNone(uint32 value, uint32 node) noexcept {
 }
 
 uint32 IrBuilder::LowerCall(uint32 node, uint32 expected) noexcept {
-    const uint32 calleeNode = tree_.Child(node, 0);
-    const uint32 list = tree_.Child(node, 1);
-    const Span<const uint32> arguments = list != NoNode && tree_.Node(list).kind == SyntaxKind::List
-                                             ? tree_.Children(list)
-                                             : Span<const uint32>();
+    const uint32 calleeNode = tree_->Child(node, 0);
+    const uint32 list = tree_->Child(node, 1);
+    const Span<const uint32> arguments =
+        list != NoNode && tree_->Node(list).kind == SyntaxKind::List ? tree_->Children(list)
+                                                                     : Span<const uint32>();
     const uint32 type = TypeOf(node, expected);
-    const uint32 callee = c_.NodeSymbol(function_.module, calleeNode);
+    const uint32 callee = c_.NodeSymbol(module_, calleeNode);
     if (callee == NoSymbol) {
         return NoIrRegister;
     }
@@ -194,18 +197,22 @@ uint32 IrBuilder::LowerCall(uint32 node, uint32 expected) noexcept {
         return LowerLiteralCall(node, callee, arguments, type);
     }
 
-    // 수신자: 메서드의 수신자는 `.` 앞 값, 이름만 쓴 자기 메서드는 this, RPC 접두는 this.
+    // 수신자: 메서드의 수신자는 `.` 앞 값, 이름만 쓴 자기 메서드는 this, RPC 접두는 this. 값을
+    // 바꾸는 언어 메서드(`Add`·`Remove`…, SL §3.11)의 수신자는 값 경로로 한 번 평가하고 호출 뒤 그
+    // 경로에 다시 쓴다(수신자 묶음은 호출이 바꾸는 in/out 인자다).
     uint32 receiver = NoIrRegister;
     bool rpc = false;
     bool chained = false;
-    if (tree_.Node(calleeNode).kind == SyntaxKind::Member) {
-        uint32 objectNode = tree_.Child(calleeNode, 0);
-        while (objectNode != NoNode && tree_.Node(objectNode).kind == SyntaxKind::Parenthesized) {
-            objectNode = tree_.Child(objectNode, 0);
+    const bool mutating = checker_.IsMutatingMember(callee);
+    Array<PathStep> path(checker_.allocator_);
+    if (tree_->Node(calleeNode).kind == SyntaxKind::Member) {
+        uint32 objectNode = tree_->Child(calleeNode, 0);
+        while (objectNode != NoNode && tree_->Node(objectNode).kind == SyntaxKind::Parenthesized) {
+            objectNode = tree_->Child(objectNode, 0);
         }
 
-        const uint32 objectSymbol = tree_.Node(objectNode).kind == SyntaxKind::Identifier
-                                        ? c_.NodeSymbol(function_.module, objectNode)
+        const uint32 objectSymbol = tree_->Node(objectNode).kind == SyntaxKind::Identifier
+                                        ? c_.NodeSymbol(module_, objectNode)
                                         : NoSymbol;
         const SymbolKind objectKind =
             objectSymbol == NoSymbol ? SymbolKind::BuiltinType : c_.symbols_[objectSymbol].kind;
@@ -215,9 +222,11 @@ uint32 IrBuilder::LowerCall(uint32 node, uint32 expected) noexcept {
             objectKind == SymbolKind::Class || objectKind == SymbolKind::Struct ||
             objectKind == SymbolKind::Enum || objectKind == SymbolKind::EngineType ||
             objectKind == SymbolKind::BuiltinType || objectKind == SymbolKind::PreludeType;
-        chained = (tree_.Node(calleeNode).flags & SyntaxFlags::NullConditional) != 0;
+        chained = (tree_->Node(calleeNode).flags & SyntaxFlags::NullConditional) != 0;
         if (rpc) {
             receiver = this_;
+        } else if (mutating && !chained) {
+            receiver = EvaluatePath(objectNode, path, true);
         } else if (!staticTarget || objectSymbol == NoSymbol) {
             receiver = Lower(objectNode, NoType);
         }
@@ -226,7 +235,15 @@ uint32 IrBuilder::LowerCall(uint32 node, uint32 expected) noexcept {
     }
 
     if (!chained || receiver == NoIrRegister) {
-        return EmitCall(node, callee, receiver, arguments, type, rpc);
+        const uint32 result = EmitCall(node, callee, receiver, arguments, type,
+                                       rpc        ? IrCallRpc
+                                       : mutating ? IrCallMutating
+                                                  : IrCallDirect);
+        if (mutating && !path.IsEmpty()) {
+            StorePath(path.View(), receiver);
+        }
+
+        return result;
     }
 
     // a?.F(...): a가 있으면 꺼낸 수신자로 부르고(인자도 그때만 계산한다) 결과는 T?, 없으면 없음.
@@ -239,10 +256,17 @@ uint32 IrBuilder::LowerCall(uint32 node, uint32 expected) noexcept {
     Add(IrOp::Branch, present, some, absent, 0, node);
     StartBlock(present);
     const uint32 receiverType = checker_.NonOptional(function_.registers[receiver].type);
-    const uint32 inner =
-        type == NoType || type == checker_.voidType_ ? type : checker_.NonOptional(type);
-    const uint32 value =
-        EmitCall(node, callee, Unwrap(receiver, receiverType, node), arguments, inner, false);
+    // 결과가 이미 `T?`로 선언된 함수는 그 값 그대로(있음 표지를 잃지 않게), 아니면 `T`로 받아
+    // 올린다.
+    const uint32 signature = entry.signature;
+    const uint32 declared =
+        signature == NoSignature ? NoType : c_.signatures_[signature].returnType;
+    const bool optionalResult = declared != NoType && checker_.IsOptional(declared);
+    const uint32 inner = type == NoType || type == checker_.voidType_ || optionalResult
+                             ? type
+                             : checker_.NonOptional(type);
+    const uint32 value = EmitCall(node, callee, Unwrap(receiver, receiverType, node), arguments,
+                                  inner, mutating ? IrCallMutating : IrCallDirect);
     MoveValue(result, Coerce(value, type, node), node);
     Add(IrOp::Jump, done, NoIrRegister, NoIrRegister, 0, node);
     StartBlock(absent);
@@ -253,7 +277,7 @@ uint32 IrBuilder::LowerCall(uint32 node, uint32 expected) noexcept {
 }
 
 uint32 IrBuilder::EmitCall(uint32 node, uint32 callee, uint32 receiver,
-                           Span<const uint32> arguments, uint32 type, bool rpc) noexcept {
+                           Span<const uint32> arguments, uint32 type, uint8 sub) noexcept {
     const Symbol& entry = c_.symbols_[callee];
     Array<uint32> values(checker_.allocator_);
     if (receiver != NoIrRegister) {
@@ -273,8 +297,8 @@ uint32 IrBuilder::EmitCall(uint32 node, uint32 callee, uint32 receiver,
                 c_.signatureParameters_[c_.signatures_[signature].firstParameter + index];
         }
 
-        const uint32 valueNode = tree_.Child(arguments[index], 1);
-        const uint32 argumentType = c_.ExpressionType(function_.module, valueNode);
+        const uint32 valueNode = tree_->Child(arguments[index], 1);
+        const uint32 argumentType = c_.ExpressionType(module_, valueNode);
         // 자리표시·제네릭 매개변수는 실제 타입을 쓴다(검사기가 인자 식의 타입을 기록했다).
         const bool concrete =
             parameterType != NoType && !checker_.ContainsPlaceholder(parameterType);
@@ -294,8 +318,35 @@ uint32 IrBuilder::EmitCall(uint32 node, uint32 callee, uint32 receiver,
     const bool wait = signature != NoSignature && c_.signatures_[signature].isAsync;
     const uint32 result = wait ? NewWait() : NewValue(type);
     const uint32 operands = AddOperands(values.View());
-    Add(IrOp::Call, result, operands, static_cast<uint32>(values.Size()), callee, node,
-        rpc ? IrCallRpc : IrCallDirect);
+    Add(IrOp::Call, result, operands, static_cast<uint32>(values.Size()), callee, node, sub);
+    // 명시한 타입 인자(`Find<Lamp>()`·`LoadAll<T>(...)`)는 호출의 타입 인자 목록으로 둔다(실행 중
+    // native 호출이 받는다).
+    const uint32 calleeNode = tree_->Child(node, 0);
+    const uint32 typeList =
+        calleeNode == NoNode                                     ? NoNode
+        : tree_->Node(calleeNode).kind == SyntaxKind::Member     ? tree_->Child(calleeNode, 1)
+        : tree_->Node(calleeNode).kind == SyntaxKind::Identifier ? tree_->Child(calleeNode, 0)
+                                                                 : NoNode;
+    if (typeList != NoNode && tree_->Node(typeList).kind == SyntaxKind::List &&
+        tree_->Node(typeList).childCount > 0 && !function_.instructions.IsEmpty()) {
+        const uint32 first = static_cast<uint32>(function_.operands.Size());
+        const uint32 count = tree_->Node(typeList).childCount;
+        if (auto pushed = function_.operands.TryPushBack(count); !pushed) {
+            Fail(pushed.Error());
+            return result;
+        }
+
+        for (const uint32 typeNode : tree_->Children(typeList)) {
+            if (auto pushed = function_.operands.TryPushBack(c_.NodeType(module_, typeNode));
+                !pushed) {
+                Fail(pushed.Error());
+                return result;
+            }
+        }
+
+        function_.instructions[function_.instructions.Size() - 1].types = first;
+    }
+
     return result;
 }
 
@@ -311,18 +362,18 @@ uint32 IrBuilder::LowerConstruct(uint32 node, uint32 typeSymbol, Span<const uint
 
     // 숫자·bool·string 변환(`int8(x)`·`float(n)`·`string(x)`).
     if (entry.kind == SymbolKind::BuiltinType && arguments.Size() == 1 &&
-        tree_.Child(arguments[0], 0) == NoNode && layout.bank == IrBank::Scalar &&
+        tree_->Child(arguments[0], 0) == NoNode && layout.bank == IrBank::Scalar &&
         layout.slots == 1) {
-        const uint32 valueNode = tree_.Child(arguments[0], 1);
-        const uint32 operand = Lower(valueNode, c_.ExpressionType(function_.module, valueNode));
+        const uint32 valueNode = tree_->Child(arguments[0], 1);
+        const uint32 operand = Lower(valueNode, c_.ExpressionType(module_, valueNode));
         const uint32 result = NewValue(type);
         Add(IrOp::Convert, result, operand, NoIrRegister, 0, node);
         return result;
     }
 
-    if (entry.kind == SymbolKind::BuiltinType && entry.name == "string") {
-        const uint32 valueNode = tree_.Child(arguments[0], 1);
-        const uint32 operand = Lower(valueNode, c_.ExpressionType(function_.module, valueNode));
+    if (entry.kind == SymbolKind::BuiltinType && entry.name == "string" && arguments.Size() == 1) {
+        const uint32 valueNode = tree_->Child(arguments[0], 1);
+        const uint32 operand = Lower(valueNode, c_.ExpressionType(module_, valueNode));
         const uint32 result = NewValue(type);
         Add(IrOp::Convert, result, operand, NoIrRegister, 0, node);
         return result;
@@ -346,13 +397,13 @@ uint32 IrBuilder::LowerConstruct(uint32 node, uint32 typeSymbol, Span<const uint
         }
 
         for (usize index = 0; index < arguments.Size(); ++index) {
-            const uint32 nameNode = tree_.Child(arguments[index], 0);
-            const uint32 valueNode = tree_.Child(arguments[index], 1);
+            const uint32 nameNode = tree_->Child(arguments[index], 0);
+            const uint32 valueNode = tree_->Child(arguments[index], 1);
             uint32 offset = static_cast<uint32>(index);
             uint32 count = 1;
             uint32 fieldType = checker_.floatType_;
             if (nameNode != NoNode) {
-                const uint32 field = c_.NodeSymbol(function_.module, nameNode);
+                const uint32 field = c_.NodeSymbol(module_, nameNode);
                 if (field == NoSymbol ||
                     !MathFieldSlots(type, c_.symbols_[field].name, offset, count)) {
                     continue;
@@ -373,10 +424,9 @@ uint32 IrBuilder::LowerConstruct(uint32 node, uint32 typeSymbol, Span<const uint
     // struct·엔진 struct·component·TagSet: NEW(타입, (필드, 값) 쌍). 빠진 필드는 실행 중 기본값.
     Array<uint32> values(checker_.allocator_);
     for (const uint32 argument : arguments) {
-        const uint32 nameNode = tree_.Child(argument, 0);
-        const uint32 valueNode = tree_.Child(argument, 1);
-        const uint32 field =
-            nameNode == NoNode ? NoSymbol : c_.NodeSymbol(function_.module, nameNode);
+        const uint32 nameNode = tree_->Child(argument, 0);
+        const uint32 valueNode = tree_->Child(argument, 1);
+        const uint32 field = nameNode == NoNode ? NoSymbol : c_.NodeSymbol(module_, nameNode);
         if (field == NoSymbol) {
             continue;
         }
@@ -402,12 +452,11 @@ uint32 IrBuilder::LowerLiteralCall(uint32 node, uint32 literal, Span<const uint3
     // 검증 리터럴: 첫 인자(이름 문자열)와 나머지 인자(Loc의 이름 지정 인자)를 NEW로 넘긴다.
     Array<uint32> values(checker_.allocator_);
     for (const uint32 argument : arguments) {
-        const uint32 valueNode = tree_.Child(argument, 1);
-        const uint32 nameNode = tree_.Child(argument, 0);
-        const uint32 value = Lower(valueNode, c_.ExpressionType(function_.module, valueNode));
-        const uint32 name = nameNode == NoNode
-                                ? NoSymbol
-                                : AddString(checker_.binder_.NodeText(function_.module, nameNode));
+        const uint32 valueNode = tree_->Child(argument, 1);
+        const uint32 nameNode = tree_->Child(argument, 0);
+        const uint32 value = Lower(valueNode, c_.ExpressionType(module_, valueNode));
+        const uint32 name =
+            nameNode == NoNode ? NoSymbol : AddString(checker_.binder_.NodeText(module_, nameNode));
         if (!values.TryPushBack(name) || !values.TryPushBack(value)) {
             Fail(ErrorCode::OutOfMemory);
             return NoIrRegister;
@@ -421,8 +470,8 @@ uint32 IrBuilder::LowerLiteralCall(uint32 node, uint32 literal, Span<const uint3
 }
 
 uint32 IrBuilder::LowerIndex(uint32 node) noexcept {
-    const uint32 object = Lower(tree_.Child(node, 0), NoType);
-    const uint32 keyNode = tree_.Child(node, 1);
+    const uint32 object = Lower(tree_->Child(node, 0), NoType);
+    const uint32 keyNode = tree_->Child(node, 1);
     const uint32 objectType = object == NoIrRegister ? NoType : function_.registers[object].type;
     // 키 타입: Array는 int, Map은 K.
     uint32 keyType = checker_.intType_;
@@ -431,43 +480,42 @@ uint32 IrBuilder::LowerIndex(uint32 node) noexcept {
     }
 
     const uint32 key = Coerce(Lower(keyNode, keyType), keyType, keyNode);
-    const uint32 result = NewValue(c_.ExpressionType(function_.module, node));
+    const uint32 result = NewValue(c_.ExpressionType(module_, node));
     Add(IrOp::GetElement, result, object, key, 0, node);
     return result;
 }
 
 uint32 IrBuilder::LowerString(uint32 node) noexcept {
     const uint32 type = checker_.stringType_;
-    if (tree_.Node(node).kind == SyntaxKind::VerbatimString) {
+    if (tree_->Node(node).kind == SyntaxKind::VerbatimString) {
         const uint32 result = NewValue(type);
-        Add(IrOp::LoadString, result, AddString(checker_.TokenText(function_.module, node)),
-            NoIrRegister, 0, node);
+        Add(IrOp::LoadString, result, AddString(checker_.TokenText(module_, node)), NoIrRegister, 0,
+            node);
         return result;
     }
 
     // 보간 없는 문자열(조각 0·1개)은 상수 하나다.
-    const Span<const uint32> parts = tree_.Children(node);
+    const Span<const uint32> parts = tree_->Children(node);
     if (parts.Size() == 0 ||
-        (parts.Size() == 1 && tree_.Node(parts[0]).kind == SyntaxKind::StringText)) {
+        (parts.Size() == 1 && tree_->Node(parts[0]).kind == SyntaxKind::StringText)) {
         const uint32 result = NewValue(type);
         Add(IrOp::LoadString, result,
-            AddString(parts.Size() == 0 ? StringView()
-                                        : checker_.TokenText(function_.module, parts[0])),
+            AddString(parts.Size() == 0 ? StringView() : checker_.TokenText(module_, parts[0])),
             NoIrRegister, 0, node, IrStringPiece);
         return result;
     }
 
     // 조각: 글자 조각은 원문 글자(escape를 풀지 않은 것 — bytecode가 푼다), 보간은 값의 문자열.
     Array<uint32> pieces(checker_.allocator_);
-    for (const uint32 part : tree_.Children(node)) {
+    for (const uint32 part : tree_->Children(node)) {
         uint32 piece = NoIrRegister;
-        if (tree_.Node(part).kind == SyntaxKind::StringText) {
+        if (tree_->Node(part).kind == SyntaxKind::StringText) {
             piece = NewValue(type);
-            Add(IrOp::LoadString, piece, AddString(checker_.TokenText(function_.module, part)),
-                NoIrRegister, 0, part, IrStringPiece);
+            Add(IrOp::LoadString, piece, AddString(checker_.TokenText(module_, part)), NoIrRegister,
+                0, part, IrStringPiece);
         } else {
-            const uint32 valueNode = tree_.Child(part, 0);
-            const uint32 value = Lower(valueNode, c_.ExpressionType(function_.module, valueNode));
+            const uint32 valueNode = tree_->Child(part, 0);
+            const uint32 value = Lower(valueNode, c_.ExpressionType(module_, valueNode));
             piece = NewValue(type);
             Add(IrOp::Convert, piece, value, NoIrRegister, 0, part);
         }
@@ -492,10 +540,10 @@ uint32 IrBuilder::LowerCollection(uint32 node, uint32 expected) noexcept {
     const uint32 elementType = map ? checker_.Argument(value, 1) : checker_.Argument(value, 0);
     const uint32 keyType = map ? checker_.Argument(value, 0) : NoType;
     Array<uint32> values(checker_.allocator_);
-    for (const uint32 element : tree_.Children(node)) {
-        if (tree_.Node(element).kind == SyntaxKind::MapEntry) {
-            const uint32 keyNode = tree_.Child(element, 0);
-            const uint32 itemNode = tree_.Child(element, 1);
+    for (const uint32 element : tree_->Children(node)) {
+        if (tree_->Node(element).kind == SyntaxKind::MapEntry) {
+            const uint32 keyNode = tree_->Child(element, 0);
+            const uint32 itemNode = tree_->Child(element, 1);
             const uint32 key = Coerce(Lower(keyNode, keyType), keyType, keyNode);
             const uint32 item = Coerce(Lower(itemNode, elementType), elementType, itemNode);
             if (!values.TryPushBack(key) || !values.TryPushBack(item)) {
@@ -521,9 +569,9 @@ uint32 IrBuilder::LowerCollection(uint32 node, uint32 expected) noexcept {
 
 uint32 IrBuilder::LowerCast(uint32 node) noexcept {
     // x as? T: 실행 중 타입 시험 — 맞으면 T?의 값, 아니면 없음.
-    const uint32 operand = Lower(tree_.Child(node, 0), NoType);
-    const uint32 type = c_.ExpressionType(function_.module, node);
-    const uint32 target = c_.NodeType(function_.module, tree_.Child(node, 1));
+    const uint32 operand = Lower(tree_->Child(node, 0), NoType);
+    const uint32 type = c_.ExpressionType(module_, node);
+    const uint32 target = c_.NodeType(module_, tree_->Child(node, 1));
     const uint32 result = NewValue(type);
     Add(IrOp::Convert, result, operand, NoIrRegister, checker_.SymbolOf(target), node,
         IrConvertCast);
@@ -533,27 +581,82 @@ uint32 IrBuilder::LowerCast(uint32 node) noexcept {
 uint32 IrBuilder::LowerAwait(uint32 node, uint32 operandNode) noexcept {
     // await w: 대기 값(호출·요청·Delay)이나 이벤트로 AWAIT 정지 — 재개하면 결과를 받고 재개
     // 블록으로.
-    while (operandNode != NoNode && tree_.Node(operandNode).kind == SyntaxKind::Parenthesized) {
-        operandNode = tree_.Child(operandNode, 0);
+    while (operandNode != NoNode && tree_->Node(operandNode).kind == SyntaxKind::Parenthesized) {
+        operandNode = tree_->Child(operandNode, 0);
+    }
+
+    // `await a?.F()`(async F): a가 있으면 부르고 기다려 결과를 `R?`로, 없으면 기다리지 않고 없음.
+    if (operandNode != NoNode && tree_->Node(operandNode).kind == SyntaxKind::Call) {
+        const uint32 calleeNode = tree_->Child(operandNode, 0);
+        if (calleeNode != NoNode && tree_->Node(calleeNode).kind == SyntaxKind::Member &&
+            (tree_->Node(calleeNode).flags & SyntaxFlags::NullConditional) != 0) {
+            return LowerChainedAwait(node, operandNode);
+        }
     }
 
     const uint32 resultType = AwaitResultType(operandNode);
-
-    const uint32 operandSymbol = c_.NodeSymbol(function_.module, operandNode);
-    const bool event = operandNode != NoNode &&
-                       tree_.Node(operandNode).kind == SyntaxKind::Member &&
-                       operandSymbol != NoSymbol &&
-                       (c_.symbols_[operandSymbol].kind == SymbolKind::Event ||
-                        c_.symbols_[operandSymbol].kind == SymbolKind::EngineEvent ||
-                        c_.symbols_[operandSymbol].kind == SymbolKind::LanguageEvent);
-    const uint32 source =
-        event ? Lower(tree_.Child(operandNode, 0), NoType)
-              : Lower(operandNode, c_.ExpressionType(function_.module, operandNode));
+    const uint32 operandSymbol = c_.NodeSymbol(module_, operandNode);
+    const SyntaxKind operandKind =
+        operandNode == NoNode ? SyntaxKind::Error : tree_->Node(operandNode).kind;
+    const bool event =
+        operandSymbol != NoSymbol &&
+        (operandKind == SyntaxKind::Member || operandKind == SyntaxKind::Identifier) &&
+        (c_.symbols_[operandSymbol].kind == SymbolKind::Event ||
+         c_.symbols_[operandSymbol].kind == SymbolKind::EngineEvent ||
+         c_.symbols_[operandSymbol].kind == SymbolKind::LanguageEvent);
+    // 이벤트의 발행자: `x.E`면 x, 이름만 쓴 `E`면 자기 객체다.
+    const uint32 source = !event ? Lower(operandNode, c_.ExpressionType(module_, operandNode))
+                          : operandKind == SyntaxKind::Member
+                              ? Lower(tree_->Child(operandNode, 0), NoType)
+                              : this_;
     const uint32 result = NewValue(resultType);
     const uint32 resume = NewBlock();
     Add(IrOp::Await, result, source, resume, event ? operandSymbol : 0, node,
         event ? IrAwaitEvent : IrAwaitValue);
     StartBlock(resume);
+    return result;
+}
+
+uint32 IrBuilder::LowerChainedAwait(uint32 node, uint32 call) noexcept {
+    const uint32 calleeNode = tree_->Child(call, 0);
+    const uint32 callee = c_.NodeSymbol(module_, calleeNode);
+    if (callee == NoSymbol) {
+        return NoIrRegister;
+    }
+
+    const uint32 inner = AwaitResultType(call); // 대기가 돌려주는 R
+    const bool value = inner != NoType && inner != checker_.voidType_;
+    const uint32 resultType = value ? checker_.MakeOptional(inner) : checker_.voidType_;
+    const uint32 list = tree_->Child(call, 1);
+    const Span<const uint32> arguments =
+        list != NoNode && tree_->Node(list).kind == SyntaxKind::List ? tree_->Children(list)
+                                                                     : Span<const uint32>();
+    const uint32 receiver = Lower(tree_->Child(calleeNode, 0), NoType);
+    if (receiver == NoIrRegister) {
+        return NoIrRegister;
+    }
+
+    const uint32 result = NewValue(resultType);
+    const uint32 some = NewValue(checker_.boolType_);
+    Add(IrOp::IsSome, some, receiver, NoIrRegister, 0, node);
+    const uint32 present = NewBlock();
+    const uint32 absent = NewBlock();
+    const uint32 done = NewBlock();
+    Add(IrOp::Branch, present, some, absent, 0, node);
+    StartBlock(present);
+    const uint32 receiverType = checker_.NonOptional(function_.registers[receiver].type);
+    const uint32 wait = EmitCall(call, callee, Unwrap(receiver, receiverType, node), arguments,
+                                 NoType, IrCallDirect);
+    const uint32 awaited = NewValue(inner);
+    const uint32 resume = NewBlock();
+    Add(IrOp::Await, awaited, wait, resume, 0, node, IrAwaitValue);
+    StartBlock(resume);
+    MoveValue(result, Coerce(awaited, resultType, node), node);
+    Add(IrOp::Jump, done, NoIrRegister, NoIrRegister, 0, node);
+    StartBlock(absent);
+    LoadNone(result, node);
+    Add(IrOp::Jump, done, NoIrRegister, NoIrRegister, 0, node);
+    StartBlock(done);
     return result;
 }
 
@@ -565,8 +668,8 @@ uint32 IrBuilder::AwaitResultType(uint32 operandNode) noexcept {
         return checker_.voidType_;
     }
 
-    if (tree_.Node(operandNode).kind == SyntaxKind::Call) {
-        const uint32 callee = c_.NodeSymbol(function_.module, tree_.Child(operandNode, 0));
+    if (tree_->Node(operandNode).kind == SyntaxKind::Call) {
+        const uint32 callee = c_.NodeSymbol(module_, tree_->Child(operandNode, 0));
         const uint32 signature = callee == NoSymbol ? NoSignature : c_.symbols_[callee].signature;
         if (signature != NoSignature && c_.signatures_[signature].isAsync) {
             const uint32 returns = c_.signatures_[signature].returnType;
@@ -574,7 +677,7 @@ uint32 IrBuilder::AwaitResultType(uint32 operandNode) noexcept {
         }
     }
 
-    const uint32 type = c_.ExpressionType(function_.module, operandNode);
+    const uint32 type = c_.ExpressionType(module_, operandNode);
     if (type != NoType && !checker_.IsOptional(type) && checker_.IsLanguage(type, "LoadRequest")) {
         const uint32 element = checker_.Argument(type, 0);
         const uint32 result =
@@ -587,13 +690,20 @@ uint32 IrBuilder::AwaitResultType(uint32 operandNode) noexcept {
 
 uint32 IrBuilder::LowerTry(uint32 node) noexcept {
     // try x / try await x: Result가 실패면 그 오류로 함수에서 반환, 성공이면 값.
-    const uint32 operandNode = tree_.Child(node, 0);
-    const bool awaited = (tree_.Node(node).flags & SyntaxFlags::Await) != 0;
-    const uint32 value = awaited
-                             ? LowerAwait(node, operandNode)
-                             : Lower(operandNode, c_.ExpressionType(function_.module, operandNode));
-    const uint32 result = NewValue(c_.ExpressionType(function_.module, node));
-    Add(IrOp::Try, result, value, NoIrRegister, 0, node);
+    const uint32 operandNode = tree_->Child(node, 0);
+    const bool awaited = (tree_->Node(node).flags & SyntaxFlags::Await) != 0;
+    const uint32 value = awaited ? LowerAwait(node, operandNode)
+                                 : Lower(operandNode, c_.ExpressionType(module_, operandNode));
+    // 성공이면 값을 꺼내 다음 블록으로, 실패면 지역 유지 자원을 모두 해제하고(D5 — 함수를 떠나는
+    // 경로) 같은 오류를 이 함수의 Result로 반환한다.
+    const uint32 result = NewValue(c_.ExpressionType(module_, node));
+    const uint32 success = NewBlock();
+    const uint32 failure = NewBlock();
+    Add(IrOp::Try, result, value, failure, success, node);
+    StartBlock(failure);
+    ReleaseHeld(0, node);
+    Add(IrOp::ReturnError, NoIrRegister, value, NoIrRegister, 0, node);
+    StartBlock(success);
     return result;
 }
 

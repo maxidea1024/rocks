@@ -174,7 +174,6 @@ function Containers(b0, b1)
   s43: int [I64]
   s44: int [I64]
   s45: int [I64]
-  s46: int [I64]
 L0:
     s2 = LOADINT 1    ; 26:17
     s3 = LOADINT 2    ; 26:20
@@ -239,13 +238,12 @@ L10:
     s41 = MOVE s43    ; 30:29
     JUMP L12    ; 30:29
 L11:
-    s44 = LOADINT 1    ; 30:44
-    s45 = NEG.I64 s44    ; 30:43
-    s41 = MOVE s45    ; 30:29
+    s44 = LOADINT -1    ; 30:43
+    s41 = MOVE s44    ; 30:29
     JUMP L12    ; 30:29
 L12:
-    s46 = ADD.I64 s37, s41    ; 30:12
-    RETURN s46    ; 30:5
+    s45 = ADD.I64 s37, s41    ; 30:12
+    RETURN s45    ; 30:5
 
 function Structs()
   s0: int [I64]

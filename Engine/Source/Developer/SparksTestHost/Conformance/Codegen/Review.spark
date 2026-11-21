@@ -1,0 +1,84 @@
+const Spot: vec3 = vec3(1.0, 2.0, 3.0);
+const Home: Tag = Tag("Game.Home");
+
+class Hp : ScriptableComponent {
+    var Shield: int?;
+    var Points: Array<vec3> = [];
+    var Names: Array<string> = [];
+    @edit var Cue: SoundAsset;
+    var Hum: LoopHandle?;
+    var Cursor = 0;
+
+    event Opened();
+
+    fn Next(): int {
+        Cursor += 1;
+        return Cursor;
+    }
+
+    async fn Fetch(): Result<int> {
+        await NextTick();
+        return 1;
+    }
+
+    async fn Compute(): int {
+        await NextTick();
+        return 2;
+    }
+
+    async fn Hold(): Result<int> {
+        let siren = World.Audio.StartLoop(Cue);
+        let n = try await Fetch();
+        await Delay(1.0, Clock.Game);
+        siren?.Pause();
+        return n;
+    }
+
+    fn Equal(x: int?): bool {
+        return x == 5 || 5 == x;
+    }
+
+    fn Read(h: Hp?): int {
+        return h?.Shield ?? -1;
+    }
+
+    async fn Chain(target: Hp?): int {
+        let n = await target?.Compute();
+        return n ?? 0;
+    }
+
+    fn Paths() {
+        Names[Next()] = "y";
+        Names.Add("x");
+        Hum = World.Audio.StartLoop(Cue);
+        Hum = null;
+        let small: uint8 = 300 - 100;
+        let tiny: float32 = 0.1;
+        _ = small;
+        _ = tiny;
+        for (_ in 0..<small) {
+            Cursor += 1;
+        }
+    }
+
+    fn Consts(): float {
+        let home = Home;
+        _ = home;
+        return Spot.Y;
+    }
+
+    @skipWhileBusy
+    on Owner.Damaged(amount: float) {
+        if (let loop = World.Audio.StartLoop(Cue)) {
+            if (amount > 1.0) {
+                return;
+            }
+
+            await Opened;
+            loop?.Pause();
+        }
+
+        let first = Owner.Find<Hp>();
+        _ = first;
+    }
+}
