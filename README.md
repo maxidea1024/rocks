@@ -35,7 +35,7 @@ Templates/   게임 프로젝트 템플릿
 Windows/macOS의 .NET 10 SDK와 Clang 도구 체인을 사용한다. 처음 설치는 [빌드 환경 설정](Docs/Guides/BuildEnvironment.ko.md)을 따른다. 명령과 설치 SDK·게임 빌드 옵션은 [빌드 안내](Build/README.md)를 참고한다.
 
 ```text
-dotnet msbuild Rocks.proj /t:Test /p:Configuration=Debug /p:RocksTarget=Foundation
+dotnet msbuild Rocks.proj -t:Test -p:Configuration=Debug -p:RocksTarget=Foundation
 ```
 
 기본 구성은 Debug이며 Release·ASan과 Core 전용 대상을 선택할 수 있다. CI 설정과 실제 플랫폼별 실행 결과를 구분한다.

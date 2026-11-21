@@ -6,13 +6,16 @@
 
 **Windows**
 
-1. Git을 설치하고 저장소를 받는다(GitHub 로그인 창이 뜨면 로그인한다).
+1. Git을 설치한다.
    ```powershell
-   winget install --id Git.Git -e
+   winget install --id Git.Git -e --source winget
+   ```
+2. **새 터미널을 열고** 저장소를 받는다(방금 설치한 git은 새 터미널부터 보인다. GitHub 로그인 창이 뜨면 로그인한다).
+   ```powershell
    git clone https://github.com/maxidea1024/rocks.git C:\work\rocks
    ```
-2. 탐색기에서 `C:\work\rocks\Setup.bat`을 두 번 누르고, `Install the missing items? [Y/n]`에 Enter를 누른다.
-3. 새 터미널을 열고 빌드한다.
+3. 탐색기에서 `C:\work\rocks\Setup.bat`을 두 번 누르고, `Install the missing items? [Y/n]`에 Enter를 누른다.
+4. 새 터미널을 열고 빌드한다.
    ```powershell
    cd C:\work\rocks
    dotnet msbuild Rocks.proj -t:Test -p:Configuration=Debug -p:RocksTarget=Foundation
@@ -42,12 +45,13 @@
 
 ```text
 Rocks setup for Windows (C:\work\rocks)
-[1/6] Git              OK         2.55.0.windows.3, core.longpaths=true
-[2/6] .NET SDK         OK         10.0.302
-[3/6] PowerShell 7     OK         7.7.0
-[4/6] C++ build tools  OK         Visual Studio Community 2026 18.12.12412.261, MSVC 14.52.37025, Windows SDK 10.0.26100.0
-[5/6] LLVM             OK         clang version 22.1.8 at C:\Users\<사용자>\AppData\Local\Rocks\toolchains\llvm-22.1.8\bin
-[6/6] clang-format     OK         21.1.6 at C:\Users\<사용자>\AppData\Local\Rocks\toolchains\clang-format-21.1.6\clang-format.exe
+[1/7] Git              OK         2.55.0.windows.3, core.longpaths=true
+[2/7] .NET SDK         OK         10.0.302
+[3/7] PowerShell 7     OK         7.7.0
+[4/7] C++ build tools  OK         Visual Studio Community 2026 18.12.12412.261, MSVC 14.52.37025, Windows SDK 10.0.26100.0
+[5/7] FXC SDK          OK         Windows SDK 10.0.22621.0 (d3dcompiler_47.dll)
+[6/7] LLVM             OK         clang version 22.1.8 at C:\Users\<사용자>\AppData\Local\Rocks\toolchains\llvm-22.1.8\bin
+[7/7] clang-format     OK         21.1.6 at C:\Users\<사용자>\AppData\Local\Rocks\toolchains\clang-format-21.1.6\clang-format.exe
 
 Setup is complete. Open a new terminal (or restart your IDE) and run:
 ```
@@ -55,13 +59,15 @@ Setup is complete. Open a new terminal (or restart your IDE) and run:
 | 항목 | Windows | macOS |
 |---|---|---|
 | Git | winget, `core.longpaths=true` | Command Line Tools에 들어 있다 |
-| .NET SDK | `global.json` 버전(10.0.302, 10.0.3xx)을 winget으로 | 같은 버전을 `~/.dotnet`에 |
-| PowerShell 7 | winget | Homebrew |
-| C++ 도구 | Visual Studio가 없으면 **Build Tools for Visual Studio 2026**(IDE 없음) | **Command Line Tools** |
+| .NET SDK | `global.json` 버전(10.0.302, 10.0.3xx)을 winget으로 | 같은 버전의 공식 압축 파일을 SHA-512로 확인하고 `~/.dotnet`에 |
+| PowerShell 7 | winget | `--android`일 때만, Homebrew |
+| C++ 도구 | Visual Studio 17.8 이상이 없으면 **Build Tools for Visual Studio 2026**(IDE 없음) | **Command Line Tools** |
+| FXC SDK | 셰이더 시험용 Windows SDK 10.0.22621 | (해당 없음) |
 | LLVM | 검증 LLVM 22.1.8을 `%LOCALAPPDATA%\Rocks\toolchains`에 받고 사용자 PATH 맨 앞에 | (Apple clang을 쓴다) |
-| clang-format | 21.1.6을 같은 곳에 받고 `ROCKS_CLANG_FORMAT` 설정 | `~/Library/Application Support/Rocks/toolchains`, 시작 파일에 설정 |
+| clang-format | 21.1.6을 같은 곳에 받고 `ROCKS_CLANG_FORMAT` 설정 | 같은 파일을 SHA-256으로 확인하고 `~/Library/Application Support/Rocks/toolchains`에, 시작 파일에 설정 |
 
-- 기본은 IDE 없는 Build Tools(Windows)·Command Line Tools(macOS)다. IDE는 옵션이다(3절).
+- 기본은 IDE 없는 Build Tools(Windows)·Command Line Tools(macOS)다. IDE는 옵션이다(3절). macOS는 Homebrew 없이 끝난다.
+- 받는 파일의 URL과 해시는 `Build/Toolchain.json`이 고정한다.
 - Visual Studio Installer와 winget 설치 프로그램이 UAC 창을 띄울 수 있다. 마법사 자신은 관리자 권한이 필요 없다.
 - 이미 떠 있는 터미널·VS Code·Visual Studio는 바뀐 PATH와 환경 변수를 모른다. 마법사가 끝나면 모두 다시 연다.
 - 실패하면 그 줄에 원인과 `Next:`(다음 할 일)가 나온다. 고친 뒤 마법사를 다시 실행한다.
@@ -70,15 +76,17 @@ Setup is complete. Open a new terminal (or restart your IDE) and run:
 |---|---|
 | `-Check` / `--check` | 점검만 한다. 모두 통과하면 종료 코드 0 |
 | `-Yes` / `--yes` | 묻지 않고 설치한다 |
-| `-WithIde` | Visual Studio Community와 Clang IntelliSense 구성 요소(`.vsconfig`)도 설치한다 |
+| `-WithIde` | Visual Studio Community와 Clang IntelliSense 구성 요소(`.vsconfig`)를 먼저 설치하고 빌드에도 그것을 쓴다 |
 | `-Android` / `--android` | Android NDK도 점검·설치한다(6절) |
+| `-Skip 'FXC SDK'` | 셰이더 시험을 돌리지 않을 때 그 항목을 뺀다 |
 
 터미널에서는 `.\Setup.bat -Check`, `./Setup.sh --check`처럼 쓴다. 설계는 [설치 마법사](../Design/SetupWizard.ko.md)에 있다.
 
 ## 3. Visual Studio가 꼭 있어야 하나요?
 
 **Windows**
-- 빌드만 하려면 Visual Studio IDE는 필요 없다. **Build Tools for Visual Studio 2026**(무료, IDE 없음)이면 된다.
+- 빌드만 하려면 Visual Studio IDE는 필요 없다. **Build Tools for Visual Studio 2026**(무료, IDE 없음)이면 된다. 이미 있는 Visual Studio나
+  Build Tools는 17.8 이상(MSVC 14.38 이상)이어야 쓴다. VS 2019는 쓰지 않는다.
 - 그래도 Build Tools는 꼭 필요하다. clang-cl이 MSVC의 표준 라이브러리·C 런타임과 Windows SDK를 쓰고, Rocks.Build가 vswhere로 그것을 찾는다.
 - Visual Studio에서 편집하려면 Community(또는 상위 판)에 Clang 구성 요소 두 개("Windows용 C++ Clang 컴파일러",
   "LLVM(clang-cl) 도구 집합에 대한 MSBuild 지원")를 더 설치한다. `Setup.bat -WithIde`가 해 준다.
@@ -109,23 +117,12 @@ Visual Studio 솔루션 생성은 아직 없다([설계](../Design/ProjectFiles.
 ## 5. Linux
 
 지금 Linux 호스트는 C++ 빌드를 받지 않는다(`Only Windows and macOS native hosts are supported.`). Linux 빌드 플랫폼(전용 서버·기반 시험)은
-계획 단계다([빌드 타깃](../Design/BuildTargets.ko.md) 3.7절). 지금은 C# 도구 빌드와 정책·서식 검사만 된다(코드 기준, 로컬 미검증).
+계획 단계다([빌드 타깃](../Design/BuildTargets.ko.md) 3.7절). 지금은 C# 도구 빌드와 정책·서식 검사만 된다(x86_64, 로컬 미검증).
 
-1. Git·curl을 설치하고 저장소를 받는다(예: `sudo apt install git curl`).
-2. `./Setup.sh`로 점검한다. Linux에서는 설치하지 않고 무엇이 빠졌는지만 알린다.
-3. .NET SDK를 받는다.
-   ```sh
-   curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
-   bash /tmp/dotnet-install.sh --version 10.0.302 --install-dir "$HOME/.dotnet"
-   export PATH="$HOME/.dotnet:$PATH"
-   ```
-4. clang-format 21.1.6을 받고 `ROCKS_CLANG_FORMAT`에 둔다(설치 스크립트가 Linux를 받지 않아 같은 PyPI 패키지를 쓴다).
-   ```sh
-   sudo apt install pipx
-   pipx install clang-format==21.1.6
-   export ROCKS_CLANG_FORMAT="$HOME/.local/bin/clang-format"
-   ```
-5. C# 도구를 빌드하고 검사한다.
+1. Git·curl·unzip을 설치하고 저장소를 받는다(예: `sudo apt install git curl unzip`).
+2. `./Setup.sh`를 실행한다. .NET SDK와 clang-format 21.1.6을 고정 파일(SHA 확인)로 사용자 디렉터리에 받고, PATH와 `ROCKS_CLANG_FORMAT`을
+   시작 파일(bash는 `~/.bashrc`)에 남긴다.
+3. 새 터미널에서 C# 도구를 빌드하고 검사한다.
    ```sh
    dotnet build Programs/Rocks.Tools.csproj
    dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll policy --root .
@@ -178,8 +175,8 @@ pwsh Build/InstallLlvm.ps1 -Version 21.1.6 -ToolchainRoot "$env:LOCALAPPDATA\Roc
 사용자 PATH 맨 앞을 `%LOCALAPPDATA%\Rocks\toolchains\llvm-21.1.6\bin`으로 바꾸고 프로그램을 다시 연다.
 
 **셰이더 도구 바이너리.** DXC·SPIRV-Cross·SPIRV-Tools·FXC를 여는 시험만 필요하다. 없으면 그 시험은 SKIP이다.
-`dotnet msbuild Rocks.proj -t:ThirdPartyBootstrap`으로 받는다. FXC는 Windows SDK 10.0.22621.0의 `d3dcompiler_47.dll`을 SHA-256으로
-확인하므로 `Microsoft.VisualStudio.Component.Windows11SDK.22621`도 필요하다. 바이너리를 직접 다시 빌드할 때만 CMake·Ninja·Python 3이
+`dotnet msbuild Rocks.proj -t:ThirdPartyBootstrap`으로 받는다. FXC는 Windows SDK 10.0.22621.0의 버전별 사본
+`bin\10.0.22621.0\x64\d3dcompiler_47.dll`을 SHA-256으로 확인하고 복사한다. 마법사의 "FXC SDK" 항목이 그 SDK를 설치한다. 바이너리를 직접 다시 빌드할 때만 CMake·Ninja·Python 3이
 필요하다([빌드 안내](../../Build/README.md#미리-빌드한-바이너리bootstrap)). Vulkan SDK는 빌드에 필요 없다(검증 층을 켤 때만 설치한다).
 
 ## 8. 문제 해결
@@ -191,7 +188,10 @@ pwsh Build/InstallLlvm.ps1 -Version 21.1.6 -ToolchainRoot "$env:LOCALAPPDATA\Roc
 | `... --require-verified-toolchain on accepts only verified toolchains` | `-p:RequireVerifiedToolchain=on`(또는 같은 환경 변수)에서 미검증 도구 모음 | 검증 도구 모음을 쓰거나 옵션을 뺀다 |
 | `Executable not found on PATH.`(clang-cl) | PATH에 LLVM `bin`이 없다 | 마법사 실행 뒤 새 터미널 |
 | `Clang 20.1.8 is older than the minimum Clang 21 for Windows` | 옛 LLVM이 PATH 앞에 있다 | `where.exe clang-cl`로 찾아 순서를 고친다(마법사가 `Next:`로 알린다) |
-| `Visual Studio C++ toolchain not found.` | vswhere가 완전한 C++ 도구 설치를 못 찾았다. 미완료 설치는 건너뛴다 | 마법사 실행(Build Tools 설치) 또는 Visual Studio Installer에서 복구 |
+| `Visual Studio C++ toolchain 17.8 or newer not found ...` | vswhere가 17.8 이상의 완전한 C++ 도구 설치를 못 찾았다(VS 2019·미완료 설치는 건너뛴다) | 마법사 실행(Build Tools 설치) 또는 Visual Studio Installer에서 복구 |
+| `MSVC toolset 14.29... is older than the minimum 14.38.33130` | Developer 셸이나 `ROCKS_MSVC_TOOLSET`이 옛 도구 모음을 골랐다 | 보통 터미널에서 실행하거나 `ROCKS_MSVC_TOOLSET`을 지운다 |
+| `winget not found` | Windows Server·LTSC 등 winget이 없는 Windows다 | Microsoft Store의 App Installer를 설치하거나 부록 A |
+| 내려받기 실패(`Could not download ...`) | 네트워크·프록시 | 프록시면 `HTTPS_PROXY`를 설정하고 마법사를 다시 실행한다 |
 | `Visual Studio environment initialization failed: ...` | VsDevCmd 실패(SDK 누락, 깨진 설치) | Visual Studio Installer에서 Windows 11 SDK 추가 또는 복구 |
 | `ROCKS_MSVC_TOOLSET=14.44 is not the active MSVC toolset` | 그 도구 모음이 없거나 Developer PowerShell에서 실행했다 | 7절의 구성 요소 설치, 보통 터미널에서 실행 |
 | `RMC3100: Rocks requires clang-format 21.1.6`(MetaCompiler) 또는 `Rocks requires clang-format 21.1.6` | `ROCKS_CLANG_FORMAT`이 비어 PATH의 다른 clang-format(LLVM 22.1.8에 든 22.1.8 등)을 썼다 | 마법사 실행 뒤 프로그램을 다시 연다 |
@@ -213,18 +213,19 @@ pwsh Build/InstallLlvm.ps1 -Version 21.1.6 -ToolchainRoot "$env:LOCALAPPDATA\Roc
 
 1. 도구를 설치한다. .NET SDK는 버전을 정해야 한다(빼면 10.0.4xx가 깔려 `global.json`과 맞지 않는다).
    ```powershell
-   winget install --id Microsoft.DotNet.SDK.10 -e --version 10.0.302
-   winget install --id Microsoft.PowerShell -e
-   winget install --id 7zip.7zip -e
+   winget install --id Microsoft.DotNet.SDK.10 -e --source winget --version 10.0.302
+   winget install --id Microsoft.PowerShell -e --source winget
+   winget install --id 7zip.7zip -e --source winget
    git config --global core.longpaths true
    ```
+   winget이 없으면 각 제품의 공식 설치 파일을 쓴다(.NET SDK는 정확히 10.0.302).
 2. Build Tools를 설치한다. IDE로 편집하려면 대신 Community를 `--config C:\work\rocks\.vsconfig`로 설치한다.
    ```powershell
-   winget install --id Microsoft.VisualStudio.BuildTools -e --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows11SDK.26100"
+   winget install --id Microsoft.VisualStudio.BuildTools -e --source winget --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows11SDK.26100 --add Microsoft.VisualStudio.Component.Windows11SDK.22621"
    ```
-   이미 설치한 Visual Studio·Build Tools에는 `setup.exe modify`로 더한다.
+   이미 설치한 Visual Studio·Build Tools(17.8 이상)에는 `setup.exe modify`로 더한다.
    ```powershell
-   & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe" modify --installPath "<설치 경로>" --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows11SDK.26100 --passive
+   & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe" modify --installPath "<설치 경로>" --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows11SDK.26100 --add Microsoft.VisualStudio.Component.Windows11SDK.22621 --passive
    ```
 3. LLVM과 clang-format을 저장소 밖 고정 위치에 받는다. `-ToolchainRoot`를 빼면 저장소 `out\toolchains`에 풀려 `out`을 지울 때 PATH가 깨진다.
    ```powershell
@@ -252,18 +253,12 @@ pwsh Build/InstallLlvm.ps1 -Version 21.1.6 -ToolchainRoot "$env:LOCALAPPDATA\Roc
 CI 기준, 로컬 미검증. 저장소 루트에서 진행한다.
 
 1. `xcode-select --install`로 Command Line Tools를 설치한다(Xcode 앱을 쓰려면 `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`).
-2. .NET SDK를 버전을 정해 설치한다(Homebrew의 `dotnet-sdk`는 다른 버전대일 수 있다).
-   ```sh
-   curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
-   bash /tmp/dotnet-install.sh --version 10.0.302 --install-dir "$HOME/.dotnet"
-   echo 'export PATH="$HOME/.dotnet:$PATH"' >> ~/.zshrc
-   ```
-3. PowerShell 7과 clang-format을 설치한다.
-   ```sh
-   brew install --cask powershell
-   pwsh Build/InstallFormatter.ps1 -ToolchainRoot "$HOME/Library/Application Support/Rocks/toolchains"
-   echo 'export ROCKS_CLANG_FORMAT="$HOME/Library/Application Support/Rocks/toolchains/clang-format-21.1.6/clang-format"' >> ~/.zshrc
-   ```
+2. .NET SDK 10.0.302를 설치한다. Microsoft 다운로드 페이지의 macOS 설치 파일(정확히 10.0.302)을 쓰거나, `Build/Toolchain.json`의
+   `dotnet.sdk.archives`에 적힌 압축 파일을 받아 `shasum -a 512`가 같은 값인지 확인한 뒤 `~/.dotnet`에 풀고
+   `export PATH="$HOME/.dotnet:$PATH"`를 `~/.zshrc`에 더한다. Homebrew의 `dotnet-sdk`는 다른 버전대일 수 있다.
+3. clang-format 21.1.6을 설치한다. `Build/Toolchain.json`의 `clangFormat.packages`에 적힌 wheel을 받아 `shasum -a 256`을 확인하고,
+   `unzip -p <wheel> clang_format/data/bin/clang-format`으로 꺼낸 파일을 `~/Library/Application Support/Rocks/toolchains/clang-format-21.1.6/`에
+   두고 실행 권한을 준다. 그 경로를 `export ROCKS_CLANG_FORMAT="..."`로 `~/.zshrc`에 더한다.
 4. 새 터미널에서 확인한다: `which clang++`는 `/usr/bin/clang++`, `clang++ --version` 첫 줄은 `Apple clang version 17...`,
    `"$ROCKS_CLANG_FORMAT" --version`은 `clang-format version 21.1.6`. Homebrew LLVM이 PATH 앞에 있으면 그 Clang으로 빌드되므로 뺀다.
 
@@ -272,5 +267,6 @@ CI 기준, 로컬 미검증. 저장소 루트에서 진행한다.
 | 개정 | 날짜 | 내용 |
 |---|---|---|
 | 1 | 2026-11-21 | 첫 판. 설치 마법사(`Setup.bat`·`Setup.sh`)를 기본 흐름으로 두고 수동 설치는 부록으로. Windows는 이 PC에서 확인했다(마법사 `-Check`·자체 시험, `InstallLlvm.ps1`·`InstallFormatter.ps1`, Foundation Debug 빌드·시험 전부 통과). macOS는 CI의 `Setup.sh --check`만, Linux·Android는 코드 기준이다 |
+| 2 | 2026-11-21 | 리뷰 반영: 빠른 시작에서 Git 설치 뒤 새 터미널, FXC SDK 항목(셰이더 시험용 SDK 10.0.22621), VS 17.8·MSVC 14.38 하한, macOS·Linux의 고정 내려받기(Homebrew 불필요, `dotnet-install.sh` 제거), Linux 마법사 설치와 영구 설정, 문제 해결 행 추가 |
 
 TODO: VS 프로젝트 파일 생성([설계](../Design/ProjectFiles.ko.md))이 구현되면 3절에 생성 명령과 IDE에서 빌드·디버그하는 순서를 더한다.
