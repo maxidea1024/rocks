@@ -93,6 +93,11 @@ Result<AssetId> AssetTextResolver::ResolveId(StringView head) noexcept {
 
     auto entry = index_->FindByPath(path.Value());
     if (!entry) {
+        // 색인에 없는 경로는 별칭으로 푼다(옛 경로 — 같은 경로 키 둘은 그대로 오류).
+        if (entry.Error() == ErrorCode::NotFound && aliases_ != nullptr) {
+            return aliases_->ResolveAlias(path.Value(), warnings_);
+        }
+
         return Result<AssetId>::Failure(entry.Error());
     }
 

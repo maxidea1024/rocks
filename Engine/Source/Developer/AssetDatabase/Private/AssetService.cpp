@@ -4,6 +4,7 @@
 #include <AssetDatabase/LogicalPath.h>
 #include <AssetRuntime/Package.generated.h>
 #include <AssetRuntime/Package.h>
+#include <Core/Assert.h>
 #include <Core/Text/Json.h>
 #include <Core/Text/StringBuilder.h>
 #include <Object/AssetId.h>
@@ -74,7 +75,8 @@ AssetService::AssetService(Allocator& allocator, const ProjectLayout& layout,
       set_(allocator, MakeSetConfig(config, layout, index_)), read_(config.packages.read),
       types_(config.packages.types), files_(config.packages.files),
       cacheFiles_(config.cacheFiles != nullptr ? config.cacheFiles : config.packages.files),
-      useCache_(config.useCache) {
+      useCache_(config.useCache), aliases_(allocator, layout), aliasLookup_(*this),
+      clock_(config.clock), aliasSearch_(config.aliasSearch) {
     read_.expectedKind = PackageKind::Editor;
 }
 
@@ -104,6 +106,95 @@ Result<void> AssetService::Initialize() noexcept {
 
     initialized_ = true;
     return Result<void>::Success();
+}
+
+Result<AssetAliasTable*> AssetService::Aliases(AssetDiagnostic* failure) noexcept {
+    if (!initialized_) {
+        return FailAsset<AssetAliasTable*>(failure, AssetDiagnosticCode::None,
+                                           ErrorCode::InvalidArgument);
+    }
+
+    if (!aliases_.IsLoaded()) {
+        if (auto loaded = aliases_.Load(*files_, failure); !loaded) {
+            return Result<AssetAliasTable*>::Failure(loaded.Error());
+        }
+    }
+
+    return Result<AssetAliasTable*>::Success(&aliases_);
+}
+
+StringView AssetService::AliasPath(uint64 detail) const noexcept {
+    ROCKS_ASSERT(detail < aliases_.Count());
+    return aliases_.At(static_cast<usize>(detail)).path.View();
+}
+
+Result<AssetId> AssetService::AliasLookup::ResolveAlias(const LogicalPath& path,
+                                                        Array<EditorWarning>* warnings) noexcept {
+    return service_->ResolveAliasPath(path, warnings, nullptr);
+}
+
+Result<AssetId> AssetService::ResolveAliasPath(const LogicalPath& path,
+                                               Array<EditorWarning>* warnings,
+                                               AssetDiagnostic* failure) noexcept {
+    auto aliases = Aliases(failure);
+    if (!aliases) {
+        return Result<AssetId>::Failure(aliases.Error());
+    }
+
+    const usize at = aliases.Value()->Find(path.Key());
+    if (at == AssetAliasNone) {
+        return Result<AssetId>::Failure(ErrorCode::NotFound);
+    }
+
+    const AssetId target = aliases.Value()->At(at).asset;
+    if (warnings != nullptr) {
+        EditorWarning warning;
+        warning.kind = EditorWarningKind::AliasResolved;
+        warning.diagnostic.code = AssetDiagnosticCode::AliasResolved;
+        warning.diagnostic.asset = target;
+        warning.diagnostic.detail = at;
+        if (auto pushed = warnings->TryPushBack(warning); !pushed) {
+            return Result<AssetId>::Failure(pushed.Error());
+        }
+    }
+
+    return Result<AssetId>::Success(target);
+}
+
+Result<void> AssetService::AliasRemove(const AssetDatabaseLock& lock, StringView path,
+                                       bool& notDurable, AssetDiagnostic* failure) noexcept {
+    notDurable = false;
+    auto aliases = Aliases(failure);
+    if (!aliases) {
+        return Result<void>::Failure(aliases.Error());
+    }
+
+    auto parsed = ParseLogicalPath(*allocator_, path);
+    if (!parsed) {
+        return FailAsset<void>(failure,
+                               parsed.Error() == ErrorCode::InvalidArgument
+                                   ? AssetDiagnosticCode::InvalidPath
+                                   : AssetDiagnosticCode::None,
+                               parsed.Error());
+    }
+
+    if (aliases.Value()->Find(parsed.Value().Key()) == AssetAliasNone) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, ErrorCode::NotFound);
+    }
+
+    const StringView keys[] = {parsed.Value().Key()};
+    return aliases.Value()->Write(*files_, lock, keys, {}, notDurable, failure);
+}
+
+Result<void> AssetService::AliasPrune(const AssetDatabaseLock& lock, AssetAliasPruneReport& report,
+                                      AssetDiagnostic* failure) noexcept {
+    auto aliases = Aliases(failure);
+    if (!aliases) {
+        return Result<void>::Failure(aliases.Error());
+    }
+
+    AssetClock& clock = clock_ != nullptr ? *clock_ : systemClock_;
+    return aliases.Value()->Prune(*files_, lock, clock.NowTicks(), aliasSearch_, report, failure);
 }
 
 Result<void> AssetService::FlushCache(const AssetDatabaseLock& lock) noexcept {
@@ -146,7 +237,25 @@ Result<ObjectHandle> AssetService::OpenTarget(StringView target, AssetId& id,
                                            path.Error());
         }
 
-        opened = set_.Open(path.Value(), warnings, failure);
+        AssetDiagnostic missing;
+        opened = set_.Open(path.Value(), warnings, &missing);
+        // 색인에 없는 경로(진단 None의 NotFound — 파일이 사라진 MissingFile과 다르다)는 별칭으로
+        // 푼다(7.1절 17 A2e1).
+        if (!opened && opened.Error() == ErrorCode::NotFound &&
+            missing.code == AssetDiagnosticCode::None) {
+            auto aliased = ResolveAliasPath(path.Value(), warnings, failure);
+            if (!aliased) {
+                if (aliased.Error() == ErrorCode::NotFound && failure != nullptr) {
+                    *failure = missing;
+                }
+
+                return Result<ObjectHandle>::Failure(aliased.Error());
+            }
+
+            opened = set_.Open(aliased.Value(), warnings, failure);
+        } else if (failure != nullptr && !opened) {
+            *failure = missing;
+        }
     } else {
         auto parsed = AssetId::TryParse(target);
         if (!parsed || parsed.Value().IsNull()) {
@@ -194,12 +303,30 @@ Result<AssetId> AssetService::New(const AssetDatabaseLock& lock, StringView type
                                   parsed.Error());
     }
 
+    // 별칭이 있는 경로는 점유된 것이다(7.1절 12·17 — 별칭을 지운 뒤 쓴다).
+    auto aliases = Aliases(failure);
+    if (!aliases) {
+        return Result<AssetId>::Failure(aliases.Error());
+    }
+
+    if (const usize alias = aliases.Value()->Find(parsed.Value().Key()); alias != AssetAliasNone) {
+        if (failure != nullptr) {
+            *failure = AssetDiagnostic{};
+            failure->code = AssetDiagnosticCode::DuplicatePath;
+            failure->error = ErrorCode::AlreadyExists;
+            failure->related = aliases.Value()->At(alias).asset;
+        }
+
+        return Result<AssetId>::Failure(ErrorCode::AlreadyExists);
+    }
+
     auto lease = FindClass(type, true, failure);
     if (!lease) {
         return Result<AssetId>::Failure(lease.Error());
     }
 
     AssetTextResolver resolver(*allocator_, set_, index_, warnings);
+    resolver.SetAliases(&aliasLookup_);
     const TextCodecOptions options = CodecOptions(set_, resolver);
     AssignInitializer initializer(assignments, options, diagnostics);
     auto created = set_.Create(parsed.Value(), lease.Value().Id(), {}, failure, &initializer);
@@ -238,6 +365,7 @@ Result<void> AssetService::Set(const AssetDatabaseLock& lock, StringView target,
     }
 
     AssetTextResolver resolver(*allocator_, set_, index_, warnings);
+    resolver.SetAliases(&aliasLookup_);
     resolver.SetWeakScope(id);
     const TextCodecOptions options = CodecOptions(set_, resolver);
     auto prepared = reflection_text::PrepareAssignments(
@@ -271,6 +399,7 @@ Result<void> AssetService::Info(StringView target, const AssetInfoOptions& optio
     }
 
     AssetTextResolver resolver(*allocator_, set_, index_, warnings);
+    resolver.SetAliases(&aliasLookup_);
     TextCodecOptions codec = CodecOptions(set_, resolver);
     codec.use = options.all ? TextUse::Report : TextUse::Edit;
     const AssignmentTarget live =

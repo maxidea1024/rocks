@@ -83,7 +83,10 @@ enum class EditorWarningKind : uint8 {
     // 저장: 교체는 보이지만 디렉터리 동기화를 확인하지 못했다(진단 NotDurable — 저장은 성공).
     NotDurable,
     // 저장: 그 디렉터리의 고아 임시 파일을 지우지 못했다(진단 None과 그 오류 — 저장은 성공).
-    OrphanNotDeleted
+    OrphanNotDeleted,
+    // 해석: 색인에 없는 논리 경로를 별칭으로 풀었다(진단 AliasResolved, asset = 대상, detail = 별칭
+    // 표의 항목 번호 — 7.1절 17 A2e1).
+    AliasResolved
 };
 
 struct EditorWarning {

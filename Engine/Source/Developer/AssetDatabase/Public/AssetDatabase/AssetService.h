@@ -1,7 +1,10 @@
 #pragma once
 
 #include <AssetDatabase/AssetDatabaseLock.h>
+#include <AssetDatabase/AssetAliasTable.h>
+#include <AssetDatabase/AssetClock.h>
 #include <AssetDatabase/AssetIndex.h>
+#include <AssetDatabase/AssetTextResolver.h>
 #include <AssetDatabase/EditorPackageSet.h>
 #include <AssetDatabase/ProjectLayout.h>
 #include <ReflectionText/TextAssignments.h>
@@ -40,6 +43,11 @@ struct AssetServiceConfig {
     // 색인 검색의 파일 읽기를 나눌 scheduler다(7.1절 16 A2d2 — null이면 직렬). 있으면
     // packages.files와 서비스 allocator가 동시 호출을 받아야 한다(AssetIndex 생성자 계약).
     WorkerScheduler* scheduler = nullptr;
+    // 별칭의 만든 시각·prune 판정 시계(null이면 시스템 시계 — 시험은 수동 시계), 새 별칭의 만료
+    // 일수, prune의 텍스트 검색 상한이다(7.1절 17 A2e1).
+    AssetClock* clock = nullptr;
+    uint32 aliasDays = AssetAliasDefaultDays;
+    AssetAliasSearchLimits aliasSearch{};
 };
 
 // asset-info 출력 선택이다(13절).
@@ -133,7 +141,44 @@ public:
     // 보고 한다). 오류: Initialize 전 InvalidArgument, WriteAssetIndexCache의 오류.
     Result<void> FlushCache(const AssetDatabaseLock& lock) noexcept;
 
+    // 별칭 표다(처음 부를 때 packages.files에서 읽는다 — 7.1절 17 A2e1, 실패하면 다음 호출이 다시
+    // 읽는다). 오류(failure 진단): Initialize 전 InvalidArgument, AssetAliasTable::Load의 오류.
+    Result<AssetAliasTable*> Aliases(AssetDiagnostic* failure = nullptr) noexcept;
+
+    // 이 서비스가 낸 경고 AliasResolved의 옛 경로다(detail = 별칭 표 항목 번호 — 그 경고 뒤 별칭
+    // 표를 바꾸지 않았어야 한다, 계약 위반은 단언).
+    StringView AliasPath(uint64 detail) const noexcept;
+
+    // asset-alias-remove <옛 path>: 그 경로 키의 별칭을 지워 쓴다. notDurable은 교체 뒤 동기화를
+    // 확인하지 못했는지다. 오류(failure 진단): Aliases의 오류, 경로 규칙 위반 InvalidPath /
+    // InvalidArgument, 별칭이 없으면 NotFound(진단 None), AssetAliasTable::Write의 오류.
+    Result<void> AliasRemove(const AssetDatabaseLock& lock, StringView path, bool& notDurable,
+                             AssetDiagnostic* failure = nullptr) noexcept;
+
+    // asset-alias-prune: 지금 시각(config.clock)으로 만료 항목 가운데 Config 텍스트에서 쓰이지 않은
+    // 것을 지운다(AssetAliasTable::Prune). 오류: Aliases의 오류, Prune의 오류.
+    Result<void> AliasPrune(const AssetDatabaseLock& lock, AssetAliasPruneReport& report,
+                            AssetDiagnostic* failure = nullptr) noexcept;
+
 private:
+    // path의 별칭 대상 id다(경고 AliasResolved — 별칭 표 읽기 실패는 failure 진단). 오류: 별칭이
+    // 없으면 NotFound, Aliases의 오류, 할당 실패.
+    Result<AssetId> ResolveAliasPath(const LogicalPath& path, Array<EditorWarning>* warnings,
+                                     AssetDiagnostic* failure) noexcept;
+
+    // 해석기에 주는 별칭 길이다(서비스의 지연 적재 별칭 표).
+    class AliasLookup final : public AssetAliasResolver {
+    public:
+        explicit AliasLookup(AssetService& service) noexcept : service_(&service) {
+        }
+
+        Result<AssetId> ResolveAlias(const LogicalPath& path,
+                                     Array<EditorWarning>* warnings) noexcept override;
+
+    private:
+        AssetService* service_;
+    };
+
     // `<path|AssetId>`의 패키지를 열고(열린 패키지면 그대로) 대표 에셋을 준다. id에 패키지 id를
     // 둔다.
     Result<ObjectHandle> OpenTarget(StringView target, AssetId& id, Array<EditorWarning>* warnings,
@@ -151,6 +196,11 @@ private:
     platform::FileSystem* files_;
     platform::FileSystem* cacheFiles_;
     bool useCache_;
+    AssetAliasTable aliases_;
+    AliasLookup aliasLookup_;
+    SystemAssetClock systemClock_;
+    AssetClock* clock_;
+    AssetAliasSearchLimits aliasSearch_;
     bool initialized_ = false;
 };
 

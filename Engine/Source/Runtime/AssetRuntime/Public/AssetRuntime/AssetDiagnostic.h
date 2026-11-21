@@ -83,7 +83,15 @@ enum class AssetDiagnosticCode : uint16 {
     MissingUnrealDependency,
     // 감시 갱신(AssetSystem.ko.md 7.1절 16 — A2d3): 감시 루트(Content)가 사라졌다(색인을 비우고
     // 다시 나타나면 전체 검색).
-    RootLost
+    RootLost,
+    // 별칭(AssetSystem.ko.md 4.3절, 7.1절 17 — A2e1): 경고 AliasResolved(옛 경로를 별칭으로
+    // 풀었다)· AliasInUse(prune이 만료 항목의 텍스트 사용을 찾아 남겼다)·AliasSearchTruncated(prune
+    // 검색이 상한에 닿아 아무것도 지우지 않았다), 오류 CorruptAliasTable(Config/AssetAliases.json
+    // 형식 위반).
+    AliasResolved,
+    AliasInUse,
+    AliasSearchTruncated,
+    CorruptAliasTable
 };
 
 // 진단 이름이다(예: CorruptPackage → "CorruptPackage"). 모르는 값은 "Unknown"이다. 반환 문자열은

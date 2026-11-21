@@ -205,21 +205,15 @@ bool ParseEdit(Span<const StringView> args, const EditGrammar& grammar, EditArgs
            ParseWaitMilliseconds(out.wait, milliseconds);
 }
 
+// 편집 경고 이름이다(EditorWarningKind 순서).
 const char* WarningName(EditorWarningKind kind) noexcept {
-    switch (kind) {
-    case EditorWarningKind::ExcludedDependency:
-        return "ExcludedDependency";
-    case EditorWarningKind::UnresolvedImport:
-        return "UnresolvedImport";
-    case EditorWarningKind::DroppedUnresolvedImport:
-        return "DroppedUnresolvedImport";
-    case EditorWarningKind::NotDurable:
-        return "NotDurable";
-    case EditorWarningKind::OrphanNotDeleted:
-        return "OrphanNotDeleted";
-    }
-
-    return "Warning";
+    constexpr const char* Names[] = {"ExcludedDependency",      "UnresolvedImport",
+                                     "DroppedUnresolvedImport", "NotDurable",
+                                     "OrphanNotDeleted",        "AliasResolved"};
+    static_assert(sizeof(Names) / sizeof(Names[0]) ==
+                      static_cast<usize>(EditorWarningKind::AliasResolved) + 1,
+                  "every editor warning needs a name");
+    return Names[static_cast<usize>(kind)];
 }
 
 // 진단 코드 이름이다(None이면 원본 오류 이름).
@@ -229,9 +223,21 @@ const char* DiagnosticName(const AssetDiagnostic& diagnostic, ErrorCode error) n
 }
 
 Result<int32> WriteWarnings(CommandletOutput& output, Allocator& allocator, StringView command,
-                            const Array<EditorWarning>& warnings) noexcept {
+                            const Array<EditorWarning>& warnings, AssetService& service) noexcept {
     for (const EditorWarning& warning : warnings) {
         const AssetDiagnostic& diagnostic = warning.diagnostic;
+        // 별칭으로 푼 경로는 옛 경로와 대상을 쓴다(그 경고를 낸 서비스의 별칭 표 항목).
+        if (warning.kind == EditorWarningKind::AliasResolved) {
+            auto written = Fail(output, allocator, command, 0,
+                                "AliasResolved: {}: warning resolved through an alias to {}",
+                                service.AliasPath(diagnostic.detail), diagnostic.asset);
+            if (!written) {
+                return written;
+            }
+
+            continue;
+        }
+
         auto written = Fail(output, allocator, command, 0, "{}: {}: warning {} (related {})",
                             DiagnosticName(diagnostic, diagnostic.error), diagnostic.asset,
                             WarningName(warning.kind), diagnostic.related);
@@ -357,7 +363,8 @@ Result<int32> RunAssetNewCommand(void* context, Span<const StringView> args,
     auto made = session.service->New(session.lock, parsed.positional[0], parsed.positional[1],
                                      parsed.assignments.View(), session.diagnostics,
                                      &session.warnings, &diagnostic);
-    if (auto warned = WriteWarnings(output, allocator, NewName, session.warnings); !warned) {
+    if (auto warned = WriteWarnings(output, allocator, NewName, session.warnings, *session.service);
+        !warned) {
         return warned;
     }
 
@@ -414,7 +421,8 @@ Result<int32> RunAssetSetCommand(void* context, Span<const StringView> args,
     auto set =
         session.service->Set(session.lock, parsed.positional[0], parsed.assignments.View(),
                              parsed.force, session.diagnostics, &session.warnings, &diagnostic);
-    if (auto warned = WriteWarnings(output, allocator, SetName, session.warnings); !warned) {
+    if (auto warned = WriteWarnings(output, allocator, SetName, session.warnings, *session.service);
+        !warned) {
         return warned;
     }
 
@@ -453,7 +461,9 @@ Result<int32> RunAssetInfoCommand(void* context, Span<const StringView> args,
     AssetDiagnostic diagnostic;
     auto shown =
         session.service->Info(parsed.positional[0], options, text, &session.warnings, &diagnostic);
-    if (auto warned = WriteWarnings(output, allocator, InfoName, session.warnings); !warned) {
+    if (auto warned =
+            WriteWarnings(output, allocator, InfoName, session.warnings, *session.service);
+        !warned) {
         return warned;
     }
 
