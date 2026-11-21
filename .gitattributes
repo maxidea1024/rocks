@@ -6,6 +6,8 @@
 *.hpp text eol=lf
 *.h text eol=lf
 *.c text eol=lf
+# cmd.exe mislabels goto targets and labels in LF-only batch files.
+*.bat text eol=crlf
 # External library sources (<root>/<Lib>/<lib>-<version>/, where the roots are Core/Source/ThirdParty and Engine/Source/ThirdParty) are kept
 # byte for byte (no line ending conversion). Each library's ThirdParty.json verifies them with per-file SHA-256. Rocks glue lives directly under <Lib>/
 # and is outside this rule.

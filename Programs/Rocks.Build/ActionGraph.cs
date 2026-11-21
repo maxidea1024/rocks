@@ -85,8 +85,9 @@ internal sealed record NativeAction(string Id, string Module, string Kind, strin
 /// <see cref="Object"/>다. Action은 이 소스를 실제로 컴파일하는 물리 action의 Id다.
 /// </summary>
 /// ForcedIncludes는 이 명령이 강제 include하는 생성 헤더(정의 헤더)와 PCH 헤더다 — 도구 빌드 ID의 입력이다.
+/// PchHeader는 이 명령이 강제 include하는 PCH 헤더다(PCH를 쓰지 않으면 null — IDE IntelliSense의 PCH 경계, Docs/Design/ProjectFiles.ko.md 8.4절).
 internal sealed record LogicalCompile(string Module, string Source, string Tool, IReadOnlyList<string> Arguments, string Object, string Action,
-    IReadOnlyList<string> ForcedIncludes);
+    IReadOnlyList<string> ForcedIncludes, string? PchHeader = null);
 
 /// <summary>엔진이 action을 돌리기 전에 쓰는 생성 파일이다(정의 헤더, PCH stub 소스). 내용이 같으면 다시 쓰지 않는다.</summary>
 internal sealed record PlannedFile(string Path, string Content);
@@ -112,6 +113,7 @@ internal static class ActionGraph
 
         string root = Path.GetFullPath(request.RootDirectory);
         string output = Path.GetFullPath(request.OutputDirectory, root);
+        bool ide = request.PlanMode == NativePlanMode.Ide;
         string[] targetArguments = TargetCompileArguments(request, root).ToArray();
         var modules = new Dictionary<string, NativeModuleInput>(StringComparer.OrdinalIgnoreCase);
         foreach (var module in request.Modules)
@@ -242,6 +244,13 @@ internal static class ActionGraph
             var reflectionSet = new HashSet<string>(reflectionSources, NativeToolchains.PathComparer);
             string? reflectionNote = module.ReflectionSourceFailureNote.Length == 0 ? null : module.ReflectionSourceFailureNote;
             string[] sources = module.Sources.Select(Absolute).Concat(reflectionSources).Order(StringComparer.Ordinal).ToArray();
+            // IDE 계획(Docs/Design/ProjectFiles.ko.md 8.1절)은 손으로 쓴 소스만 본다. 출력 아래 소스(리플렉션 생성 소스, 모듈 표·BuildInfo·
+            // 규칙 생성 TU)는 생성 전에는 없고 IDE 파일 목록의 대상도 아니다.
+            if (ide)
+            {
+                sources = sources.Where(source => !Fingerprints.IsUnder(source, output)).ToArray();
+            }
+
             if (sources.Distinct(NativeToolchains.PathComparer).Count() != sources.Length)
             {
                 throw new ArgumentException($"Duplicate source in {module.Name}");
@@ -255,7 +264,7 @@ internal static class ActionGraph
                 }
             }
 
-            foreach (string include in includes)
+            foreach (string include in ide ? [] : includes)
             {
                 if (!Directory.Exists(include))
                 {
@@ -407,15 +416,19 @@ internal static class ActionGraph
             var units = singles.Select(source => (File: source, Members: new[] { source }, Roots: Array.Empty<string>()))
                 .Concat(batches.Select(batch => (batch.File, Members: batch.Members.ToArray(), Roots: batch.IncludeRoots.ToArray())))
                 .OrderBy(unit => unit.Members[0], StringComparer.Ordinal).ToArray();
+            // PCH를 쓸 수 있는 번역 단위다(C++, 6.1의 제외 파일 없음). 논리 명령은 이것만으로 정한다 — 유니티·작업 파일 분리와 무관하다
+            // (Docs/Design/UnityBuildPch.ko.md 8.6절). 물리 action은 분리된 번역 단위에 AdaptivePch를 더 적용한다(7.2절).
+            bool PchEligible((string File, string[] Members, string[] Roots) unit) =>
+                LanguageOf(unit.File) == NativeLanguage.Cpp && !unit.Members.Any(withoutPch.Contains);
             bool UsesPch((string File, string[] Members, string[] Roots) unit) =>
-                LanguageOf(unit.File) == NativeLanguage.Cpp && !unit.Members.Any(withoutPch.Contains) &&
-                (module.AdaptivePch || separated is null || !unit.Members.Any(separated.Contains));
+                PchEligible(unit) && (module.AdaptivePch || separated is null || !unit.Members.Any(separated.Contains));
 
             // PCH(8절): 모듈 PCH가 있으면 그것을, 없으면 쓸 수 있는 공유 PCH를 쓴다. 소스는 PCH 헤더를 include하지 않는다 — 빌드가 강제
             // include한다. 강제 include 순서는 [PCH 앞부분: 정의 헤더] → [PCH 헤더] → [소비 모듈 추가 정의 헤더]이고 PCH 앞부분은
             // 생성과 사용에서 같은 파일이다(clang-cl /Yu는 through header 앞의 /FI를 검증 없이 건너뛴다).
             PchPlan? pch = null;
-            int pchUsers = units.Count(UsesPch);
+            // 모듈 PCH 하한은 번역 단위가 아니라 원본 소스로 센다(8.1절). 번역 단위로 세면 유니티 설정에 따라 PCH 유무가 갈라진다.
+            int pchUsers = units.Where(PchEligible).Sum(unit => unit.Members.Length);
             if (pchWanted && pchUsers != 0)
             {
                 pch = PchBuild.Plan(request, module, dependencies, includes, defines, Common(NativeLanguage.Cpp), definitionsHeader, definitionsContent,
@@ -451,8 +464,9 @@ internal static class ActionGraph
                 // 물리 인자: PCH를 쓰면 PCH 바이너리를, 아니면 정의 헤더를 강제 include한다. 논리 인자: PCH 바이너리 대신 PCH 앞부분·PCH
                 // 헤더·추가 정의 헤더를 같은 순서로 강제 include한다(8.6절 — clangd와 정책 감사가 실제 컴파일과 같은 매크로·include를 본다).
                 string[] forced = usesPch ? pch!.UseArguments : Forced(definitionsHeader);
-                string[] logicalForced = usesPch ? pch!.LogicalArguments : Forced(definitionsHeader);
-                string[] forcedFiles = usesPch ? pch!.LogicalFiles : definitionsHeader is null ? [] : [definitionsHeader];
+                bool logicalPch = pch is not null && PchEligible(unit);
+                string[] logicalForced = logicalPch ? pch!.LogicalArguments : Forced(definitionsHeader);
+                string[] forcedFiles = logicalPch ? pch!.LogicalFiles : definitionsHeader is null ? [] : [definitionsHeader];
                 string[] unitInputs = [.. batch ? [unit.File, .. unit.Members] : new[] { unit.File },
                     .. usesPch ? pch!.ConsumerInputs : definitionsHeader is null ? [] : [definitionsHeader]];
                 // identity는 이 번역 단위의 구성(단독 TU면 소스 하나, 묶음이면 구성원 목록)이다. 모듈의 전체 소스 목록은 넣지 않는다 —
@@ -472,7 +486,7 @@ internal static class ActionGraph
                     // 논리 명령은 묶음과 무관하게 원본 소스 하나의 단독 컴파일이다(8.6절). 출력은 그 소스가 단독 TU일 때의 object 경로다.
                     logicalCompiles.Add(new(module.Name, member, request.Toolchain.CompilerPath,
                         [.. batch ? Common(LanguageOf(member)) : arguments, .. logicalForced, .. TranslationUnit(member, LanguageOf(member))],
-                        batch ? ObjectOf(member) : objectPath, id, forcedFiles));
+                        batch ? ObjectOf(member) : objectPath, id, forcedFiles, logicalPch ? pch!.Action.Source : null));
                 }
 
                 objectPaths.Add(objectPath);
@@ -495,11 +509,18 @@ internal static class ActionGraph
             string sharedStem = sharedLibrary
                 ? LinkTypes.SharedLibraryStem(request.TargetName ?? request.Targets[0], module.Name, request.Toolchain.Platform, request.Configuration)
                 : "";
-            string sharedFile = sharedStem + (windows ? ".dll" : mac ? ".dylib" : ".so");
+            string sharedFile = sharedStem + LinkTypes.SharedLibraryExtension(request.Toolchain.Platform);
             string finalPath = archive ? Path.Combine(output, "lib", module.Name + (windows ? ".lib" : ".a"))
                 : sharedLibrary ? Path.Combine(output, "bin", sharedFile)
                 : Path.Combine(output, "bin", module.Name + (windows ? ".exe" : ""));
             string? importLibrary = sharedLibrary && windows ? Path.Combine(output, "lib", sharedStem + ".lib") : null;
+            if (ide)
+            {
+                // IDE 계획은 archive·link를 세우지 않고 출력 경로만 적는다(prebuilt·ASan 런타임 존재 확인도 하지 않는다).
+                outputs[module.Name] = importLibrary ?? finalPath;
+                continue;
+            }
+
             string terminalId = module.Name + (archive ? ":archive" : ":link");
             var finalArguments = new List<string>();
             var finalOutputs = new List<string> { finalPath };
@@ -593,6 +614,11 @@ internal static class ActionGraph
                     if (sharedLibrary)
                     {
                         finalArguments.AddRange(["/Fe{OUTPUT0}", "/link", "/DLL", "/INCREMENTAL:NO"]);
+                        // 진입점 모듈은 export 진입점을 강제 참조한다(매크로가 빠지면 링크 오류 — BuildTargets BS8d1).
+                        if (entryModules.Contains(module.Name))
+                        {
+                            finalArguments.Add("/INCLUDE:" + ModuleTables.EntryAnchorPrefix + module.Name);
+                        }
                     }
                     else
                     {
@@ -626,6 +652,12 @@ internal static class ActionGraph
                     {
                         // install name·soname은 파일 이름만 담는다(실행 중 탐색은 rpath — 같은 폴더).
                         finalArguments.AddRange(mac ? ["-dynamiclib", "-install_name", "@rpath/" + sharedFile] : ["-shared", "-Wl,-soname," + sharedFile]);
+                        // 진입점 모듈은 export 진입점을 강제 참조한다(Mach-O 기호는 앞에 밑줄이 붙는다 — BuildTargets BS8d1). ELF -shared 링크는
+                        // 미해결 기호를 허용하므로 Linux(BS6)는 -Wl,-z,defs를 함께 넣어야 이 참조가 링크 오류가 된다.
+                        if (entryModules.Contains(module.Name))
+                        {
+                            finalArguments.Add("-Wl,-u," + (mac ? "_" : "") + ModuleTables.EntryAnchorPrefix + module.Name);
+                        }
                     }
 
                     if (request.LinkType == NativeLinkType.Modular)

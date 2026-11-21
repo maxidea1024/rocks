@@ -464,6 +464,18 @@ public static class LinkTypes
         string stem = target + "-" + module + (configuration == NativeConfiguration.Development ? "" : "-" + platform + "-" + configuration);
         return platform == NativePlatform.Windows ? stem : "lib" + stem;
     }
+
+    /// <summary>공유 라이브러리 확장자다(Windows <c>.dll</c>, macOS <c>.dylib</c>, 그 밖 <c>.so</c>).</summary>
+    public static string SharedLibraryExtension(NativePlatform platform) =>
+        platform == NativePlatform.Windows ? ".dll" : platform == NativePlatform.MacOS ? ".dylib" : ".so";
+
+    /// <summary>
+    /// 공유 라이브러리 파일 이름이다(<see cref="SharedLibraryStem"/>과 확장자). 사용 예:
+    /// <c>LinkTypes.SharedLibraryFileName("Editor", "Core", NativePlatform.Windows, NativeConfiguration.Debug)</c>는
+    /// <c>"Editor-Core-Windows-Debug.dll"</c>이다.
+    /// </summary>
+    public static string SharedLibraryFileName(string target, string module, NativePlatform platform, NativeConfiguration configuration) =>
+        SharedLibraryStem(target, module, platform, configuration) + SharedLibraryExtension(platform);
 }
 
 public sealed record NativeBuildRequest
@@ -539,6 +551,10 @@ public sealed record NativeBuildRequest
     // (증분 기록도 건드리지 않는다). clangd 입력이나 묶음 구성을 빌드 없이 얻을 때 쓴다. 결과의 Actions는 비어 있고 PlanOnly가 참이다.
     public bool PlanOnly { get; init; }
 
+    // 계획 방식이다(Docs/Design/ProjectFiles.ko.md 8.1절). Ide는 IDE 프로젝트 파일 생성용 계획으로, 출력에 아무것도 쓰지 않고 생성물의
+    // 존재를 요구하지 않는다. BuildAsync는 받지 않는다(IdePlanner.Plan만 쓴다).
+    public NativePlanMode PlanMode { get; init; } = NativePlanMode.Build;
+
     // response file 사용 방식이다(NativeCommandLine). 기본 Auto이며 시험만 Always·Never로 경로를 강제한다. key에 들어가지 않는다.
     internal ResponseFileMode ResponseFiles { get; init; } = ResponseFileMode.Auto;
 }
@@ -607,4 +623,8 @@ public sealed record NativeBuildResult
 
     // 실행 파일 모듈 이름 → 도구 빌드 ID(SHA-256 소문자 hex)다. link가 성공한 BuildInfo 대상 실행 파일만 담는다.
     public IReadOnlyDictionary<string, string> ToolBuildIds { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
+
+    // Modular 타깃의 모듈 manifest 경로다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d1 — ModuleManifests). Monolithic·모듈 표 제공 모듈에 닿지
+    // 않는 빌드·실패한 빌드는 null이다.
+    public string? ModuleManifestPath { get; init; }
 }

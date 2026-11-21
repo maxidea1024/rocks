@@ -13,6 +13,12 @@ public sealed class NativeBuildEngine
     {
         // 루트는 절대 경로만 받는다(상대 경로를 어느 기준으로 풀지 — 작업 디렉터리·소스 루트 — 가 단계마다 달라지지 않게).
         InputValidation.RequireAbsoluteRoots(request);
+        // IDE 계획 모드는 action을 세우지 않는다(IdePlanner.Plan만 쓴다, Docs/Design/ProjectFiles.ko.md 8.1절).
+        if (request.PlanMode != NativePlanMode.Build)
+        {
+            throw new ArgumentException("BuildAsync accepts PlanMode Build only; IDE plans go through IdePlanner.Plan.");
+        }
+
         string root = Path.GetFullPath(request.RootDirectory);
         request = request with
         {
@@ -127,9 +133,12 @@ public sealed class NativeBuildEngine
         }
 
         bool succeeded = stable && results.All(value => value.Succeeded);
+        string? moduleManifest = null;
         if (succeeded)
         {
             RemoveStaleOutputs(request, plan);
+            // Modular 타깃의 모듈 manifest는 링크가 모두 성공한 뒤에 쓴다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d1).
+            moduleManifest = ModuleManifests.Write(request, plan);
             if (request.Timing)
             {
                 TimingReport.Write(request, plan);
@@ -162,7 +171,8 @@ public sealed class NativeBuildEngine
             Failure = !stable ? "Source/toolchain inputs changed during the build." :
                 results.FirstOrDefault(value => !value.Succeeded)?.StdErr,
             ToolchainFingerprint = prepared.ToolchainFingerprint,
-            ToolBuildIds = toolBuildIds
+            ToolBuildIds = toolBuildIds,
+            ModuleManifestPath = moduleManifest
         };
 
         async Task<NativeActionResult> RunAsync(NativeAction action, Task<NativeActionResult>[] dependencies)

@@ -154,6 +154,13 @@ public static partial class PolicyChecks
     private static readonly Regex ForcedInline = Pattern(
         "__attribute__\\s*\\(\\(\\s*(?:__)?always_inline|\\[\\[\\s*(?:clang|gnu)\\s*::\\s*always_inline|__forceinline\\b");
 
+    // 최적화 인자가 정의하는 미리 정의 매크로다. Visual Studio IntelliSense는 최적화 인자를 받지 않으므로(Docs/Design/ProjectFiles.ko.md
+    // 8.2절) 제품 소스가 이 매크로로 분기하면 IDE가 빌드와 다른 코드를 본다.
+    private static readonly Regex IdeInvisibleMacro = Pattern("\\b__(?:OPTIMIZE|OPTIMIZE_SIZE|NO_INLINE)__\\b");
+
+    // ide-invisible-macro 예외다: 구성별 최적화 여부(__OPTIMIZE__)가 빌드 프로필과 맞는지 검증하는 시험이다.
+    private static readonly HashSet<string> IdeInvisibleMacroAllowances = new(StringComparer.Ordinal) { "Core/Source/Runtime/Base/Tests/BaseTests.cpp" };
+
     private const string OptimizationMacroHeader = "Core/Source/Runtime/Base/Public/Base/Compiler.h";
 
     /// <summary>
@@ -180,6 +187,22 @@ public static partial class PolicyChecks
 
             ScanFile(path, relative, ForcedInline, "forced-inline",
                 "forced inlining is not used; let Clang optimization and ThinLTO decide", failures);
+            // 최적화 미리 정의 매크로는 시험 소스를 포함해 거부한다(주석·리터럴은 지우고 본다). 빌드 구성 매크로 자체를 검증하는 시험만
+            // 예외다.
+            if (!IdeInvisibleMacroAllowances.Contains(relative))
+            {
+                int line = 0;
+                foreach (string text in WithoutCommentsAndLiterals(File.ReadAllText(path, StrictUtf8)).Split('\n'))
+                {
+                    ++line;
+                    if (IdeInvisibleMacro.IsMatch(text))
+                    {
+                        failures.Add(new(relative, line, "ide-invisible-macro",
+                            "optimization predefined macros (__OPTIMIZE__, __OPTIMIZE_SIZE__, __NO_INLINE__) are not visible to IDE IntelliSense"));
+                    }
+                }
+            }
+
             if (IsTestSource(relative))
             {
                 continue;

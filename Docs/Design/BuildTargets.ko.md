@@ -1,6 +1,6 @@
 # 빌드 타깃·모듈 의존·플러그인 조건 설계
 
-기준일: 2026-11-21, 개정 14. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
+기준일: 2026-11-21, 개정 15. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
 - **타깃 종류 확장**: Editor·Client·Server 타깃과, 타깃 종류에 따라 코드·데이터를 컴파일에서 빼는 매크로.
 - **모듈 의존 공개 범위**: 의존마다 Public(소비자에게 include·정의를 넘김)과 Private(이 모듈 안에서만 씀)을 나눈다.
 - **플러그인 활성 조건**: 프로젝트가 플러그인을 특정 타깃·플랫폼·구성에서만 켠다.
@@ -329,6 +329,21 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
   7. **BS8d5 검사 체인**: `Modular` FoundationTests를 로더로 실행해 통과(Windows 로컬, macOS CI) — BS8·ML4 완료 기준.
 - 버린 안: 실행 파일이 모듈 표를 export하고 Core가 OS 기호 조회로 찾는 임시 방식(UE에 없고 ML4가 대체하면 버릴 코드다).
 
+**BS8d1 구현 세부(개정 15).**
+- 빌드 정보: Modular에서 빌드 정보 TU(`<Target>.BuildInfo.cpp` — `ToolchainFingerprint()`·`ToolBuildId()`·`CurrentEngineVersion()`)를 실행 파일이 아니라 그 타깃이 닿는 빌드 정보 제공 모듈(`ProvidesBuildInfo`, Core)의 공유 라이브러리 소스에 넣는다. 공유 라이브러리 이름이 타깃마다 따로라(`<Target>-Core`) 타깃마다 한 벌이다. 세 함수의 선언(`Core/Build/BuildInfo.h`)은 `ROCKS_CORE_API`를 단다. Monolithic은 지금처럼 실행 파일에 넣는다(매크로는 빈 값).
+- 모듈 표: Modular에서는 실행 파일 모듈 표 TU를 만들지 않는다. 같은 행(진입점 모듈의 의존 순서, 의존 이름, 단계, 요청 시 적재 표지, 실행 파일 행)을 manifest에 쓴다.
+- 진입점: 빌드가 공유 라이브러리로 컴파일하는 진입점 모듈의 소스에 `ROCKS_MODULE_SHARED_LIBRARY=1`을 정의한다(다른 모듈·실행 파일·Monolithic은 0, 규칙·명령줄은 정의할 수 없다). 그 값이 1이면 `ROCKS_IMPLEMENT_MODULE`이 공유 라이브러리마다 하나뿐인 export 진입점 `extern "C" ROCKS_DLLEXPORT const ModuleEntry* RocksModuleEntry() noexcept`를 더 정의한다([모듈 로더](ModuleLoader.ko.md) 3.2절). 같은 자리에서 export하지 않는 모듈별 C 기호 `RocksModuleEntryOf_<Name>`도 정의하고, 빌드는 그 링크에 이 기호를 강제 참조로 넣는다: Windows `/INCLUDE:RocksModuleEntryOf_<Name>`, macOS `-Wl,-u,_RocksModuleEntryOf_<Name>`, Linux `-Wl,-u,RocksModuleEntryOf_<Name>`. 매크로가 빠진 진입점 모듈은 링크 오류다. export 진입점 이름(`RocksModuleEntry`)으로 강제 참조하면 의존 모듈의 import 라이브러리가 같은 이름을 내서 빠짐을 잡지 못한다(구현 중 시험으로 확인). 실행 파일은 export 진입점을 두지 않는다(실행 파일 행은 manifest에 이름만 싣고 진입 기술은 실행 파일이 자기 것을 쓴다 — ML4b).
+- manifest: 링크가 모두 성공하고 입력이 바뀌지 않은 빌드 끝에 `<out>/bin/<Target>[-<Platform>-<Configuration>].modules.json`(접미사는 공유 라이브러리 이름 규칙과 같다)을 원자적으로 쓴다. 모듈 표 제공 모듈에 닿는 Modular 타깃만 쓴다. 키는 영어이고 모르는 키는 읽는 쪽이 거부한다(ML4a).
+  - `schema`(1), `buildId`, `engineVersion`(`"M.m.p"`), `toolchainFingerprint`(64자 소문자 16진), `modules`(배열 — JSON 객체의 키 순서는 의미가 없으므로 의존 순서를 배열로 싣는다).
+  - `modules[]` 항목: `name`, `file`(bin 폴더 기준 파일 이름 — 실행 파일 행은 실행 파일), `size`(링크가 끝난 파일의 바이트 수), `dependencies`(행 이름 배열), `loadingPhase`(단계 이름), `onRequest`(true·false).
+  - `buildId`(MD13): 같은 경로의 이전 manifest를 읽어 `schema`·`engineVersion`·`toolchainFingerprint`가 같으면 그 `buildId`를 다시 쓰고, 없거나 다르거나 읽을 수 없으면 새 GUID(32자 소문자 16진)다. 값은 manifest에만 있어 증분 빌드가 다시 컴파일하지 않는다(UE `CanRecycleBuildId`와 같다 — 실행할 때마다 달라지는 값이라 시험은 재사용·갱신 조건만 확인한다).
+  - 엔진 버전·툴체인 신원은 빌드 정보 TU와 같은 값이다.
+- 입력 검사: Core에 닿는 타깃의 Modular 거부를 모듈 표·빌드 정보 대신 실행 파일 연결 기준으로 좁힌다 — 타깃이 Launch(`ProvidesLaunch`)에 닿으면 ML4b 전까지 거부한다(Launch가 Monolithic 모듈 표 `GeneratedModuleTable()`을 부르므로 Modular 링크가 미해결 기호로 실패한다. HostConfig의 HostSettings도 부르지만 그 소비 타깃은 모두 Launch에 닿는다 — ML4b가 둘 다 바꾼다). 모듈 표·빌드 정보 제공 모듈에 닿는 대상 실행 파일(대상이 비면 전부에서 닿는 것)이 둘 이상이면 거부하고, 하나면 엔진 버전이 있어야 한다(manifest·빌드 정보는 타깃 하나 몫이다 — 링크가 끝난 뒤 실패하지 않게). manifest의 실행 파일 선택은 모듈 표 TU와 같은 규칙이다(`ModuleTables.TableExecutables`).
+- 한계:
+  - macOS Modular는 소비 모듈이 `.dylib` 자체를 링크 입력으로 가진다. 도구 빌드 ID는 도달 집합의 입력이 한 바이트만 바뀌어도 달라지고 그 정의 TU가 Core 공유 라이브러리에 있으므로, 소스 하나를 고쳐도 Core가 다시 링크되고 Core에 닿는 공유 라이브러리·실행 파일이 줄줄이 다시 링크된다(Windows는 import 라이브러리 내용이 같으면 멈춘다). Editor 반복 속도에 걸리므로 BS8d5 전에 다시 본다 — 후보: 소비 링크 key에 export 인터페이스만 쓰기(`.tbd`), Modular에서 도구 빌드 ID를 manifest나 작은 별도 라이브러리로 옮기기.
+  - ELF `-shared` 링크는 미해결 기호를 허용하므로 Linux(BS6)는 `-Wl,-z,defs`를 함께 넣어야 강제 참조가 링크 오류가 된다.
+- 시험: 빌드 시험 `modular` 묶음에 가짜 Core(모듈 표·빌드 정보 제공, 최소 진입 헤더)를 둔 Modular fixture를 더한다. 확인: 빌드 정보 기호가 Core 공유 라이브러리에서 export되고 실행 파일이 부른다, 공유 라이브러리마다 `RocksModuleEntry` export(매크로가 빠지면 링크 오류), 모듈 표 TU 없음, manifest 내용(행 순서·크기·의존·단계)과 `buildId` 재사용·갱신, 입력 거부(Launch·실행 파일 둘·엔진 버전 없음), Monolithic 무변화. 실제 `ModuleEntry.h`는 도구 시험(`ModuleEntryCompilerTests`)이 `ROCKS_MODULE_SHARED_LIBRARY=1`로 PCH 없이 컴파일한다.
+
 **모듈 API 매크로(BD27).**
 - 빌드가 C++ 모듈마다 `ROCKS_<MODULE>_API`(모듈 이름 대문자)를 정의한다. UE `<MODULE>_API`(`UEBuildModule.cs:223, 239`)에 해당하고, 이름은 Rocks 매크로 접두 규칙을 따른다.
 - 값은 UE와 같다(`UEBuildModule.cs:750-770`). `Monolithic`이면 빈 값이다. `Modular`이면 그 모듈 자신의 컴파일에서는 export, 다른 모듈의 컴파일에서는 import다.
@@ -622,3 +637,4 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 | 12 | 2026-11-21 | BS9d 구현 세부(3.9절): UnrealExchange 플러그인 골격, Commandlet·EngineTests의 `Plugins`, `PluginTestModules`, 엔진 주인 `Apply`의 도달 범위 축소 |
 | 13 | 2026-11-21 | BS8c 구현 세부: BD29 판정을 Clang AST 대신 공개 헤더 검사의 `-Wunique-object-duplication`(LLVM Clang 20+, Apple clang 제외)과 `thread_local` 어휘 정책 `public-header-static-storage`로, 지금 위반 정리(할당기·Correlation·TraceLogSink·CVar 바인딩·기본값 쓰기 탐침·fixture), 서드파티 `ThirdParty.json` `globalState` 필수 키와 단일 직접 소비 검사(Sodium만 true). 한계: 템플릿 문맥 저장소 |
 | 14 | 2026-11-21 | BS8d와 ML4를 한 묶음으로(사용자 결정): Modular에서 모듈 표·빌드 정보가 풀리지 않는 문제, 순서 BS8d1(빌드 기반·manifest 쓰기) → ML4a(manifest 적재) → ML4b(실행 파일 연결) → BS8d2(export) → BS8d3(진단) → BS8d4(남은 키) → BS8d5(검사 체인). BS8 완료 기준은 ML4와 함께 채운다. 버린 안: 실행 파일 표 export·OS 기호 조회 |
+| 15 | 2026-11-21 | BS8d1 구현 세부: Modular 빌드 정보 TU를 Core 공유 라이브러리에(`ROCKS_CORE_API`), 모듈 표 TU 대신 manifest(`.modules.json` — 행 배열·크기·`buildId` 재사용), `ROCKS_MODULE_SHARED_LIBRARY`와 export 진입점 `RocksModuleEntry`·강제 참조, Modular 거부를 Launch 기준으로 좁힘 |

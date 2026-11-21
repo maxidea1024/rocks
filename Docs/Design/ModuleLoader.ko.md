@@ -109,7 +109,7 @@ ROCKS_IMPLEMENT_MODULE(CurvesModule, Curves)
   - `ModuleEntry`: `entryVersion`(구조체 ABI 버전), `name`, `create`(수명 객체를 만드는 함수), `registerTypes`(이 모듈 자신의 타입만 등록하는 생성 함수, 리플렉션이 없으면 null — 3.6절. 해제는 모듈별 `ModuleRegistration`이 기록으로 되돌리므로 함수를 따로 두지 않는다 — 개정 3), `registerSettings`(3.1절, 없으면 null).
   - 기술은 상수 초기화다(전역 생성자 없음). 수명 객체는 로더가 시작할 때 `create`로 만든다(UE도 첫 적재 때 만든다).
 - **Monolithic**: 빌드가 실행 파일마다 모듈 표 TU를 만든다. 타깃에 들어간 모든 C++ 모듈의 `RocksModuleEntry_<Name>()`을 의존 순서로 나열하고, 모듈별 의존 이름·로딩 단계(3.3절)를 함께 싣는다. 이 표가 Monolithic의 manifest다. 표가 모든 진입 함수를 직접 참조하므로 정적 라이브러리에서 진입점 object가 빠지지 않고, `ROCKS_IMPLEMENT_MODULE`이 빠진 모듈은 링크 오류가 난다(UE `IMPLEMENT_MODULE_<Name>` 강제 참조와 같은 역할 — `ModuleManager.h:950, 968`).
-- **Modular**: 매크로는 위에 더해 공유 라이브러리마다 하나뿐인 export 진입점 `extern "C" ROCKS_DLLEXPORT const ModuleEntry* RocksModuleEntry()`를 정의한다. UE의 주 경로는 정적 목록 `FModuleInitializerEntry::FindModule`이고 `GetDllExport("InitializeModule")`는 fallback이다(`ModuleManager.cpp:1222-1229`). Rocks는 그 fallback과 같은 방식만 쓴다. 빌드는 모듈 링크에 이 기호를 강제 참조로 넣어(Windows `/INCLUDE`, ELF·Mach-O `-u`) 매크로 누락을 링크 오류로 만든다.
+- **Modular**: 매크로는 위에 더해 공유 라이브러리마다 하나뿐인 export 진입점 `extern "C" ROCKS_DLLEXPORT const ModuleEntry* RocksModuleEntry()`를 정의한다. UE의 주 경로는 정적 목록 `FModuleInitializerEntry::FindModule`이고 `GetDllExport("InitializeModule")`는 fallback이다(`ModuleManager.cpp:1222-1229`). Rocks는 그 fallback과 같은 방식만 쓴다. 빌드는 매크로가 같은 자리에 정의하는 export하지 않는 모듈별 C 기호 `RocksModuleEntryOf_<Name>`을 모듈 링크에 강제 참조로 넣어(Windows `/INCLUDE`, ELF·Mach-O `-u`) 매크로 누락을 링크 오류로 만든다(export 이름은 의존 모듈의 import 라이브러리도 내므로 그 이름으로는 잡지 못한다 — [빌드 타깃](BuildTargets.ko.md) BS8d1).
 - 매크로 이름 인자가 빌드가 넣는 모듈 이름 정의(`ROCKS_MODULE_NAME`)와 다르면 `static_assert` 오류다(UE는 경고 — `ModuleManager.h:950`).
 - 한 모듈에 매크로가 둘이면 링크 오류(같은 기호 중복)다.
 - 시험 실행 파일·도구도 모듈 표를 가진다. 그래서 시험이 모듈 로더를 거쳐 모듈을 시작한다(ML0).
@@ -229,7 +229,7 @@ public:
 
 - **manifest 파일**: 빌드가 Modular 타깃마다 `<Target>[-<Platform>-<Configuration>].modules.json`을 공유 라이브러리와 같은 폴더에 쓴다(UE `<App>.modules` — `Programs/UnrealBuildTool/System/ModuleManifest.cs:77-89`). 키는 영어다.
   - `buildId`: `ModuleBuildId` 문자열.
-  - `modules`: 모듈 이름 → `{ file, size, dependencies[], loadingPhase }`. 의존 순서로 나열한다. `size`는 링크가 끝난 공유 라이브러리의 바이트 수다.
+  - `modules`: 행 배열 `{ name, file, size, dependencies[], loadingPhase, onRequest }`. 의존 순서로 나열한다(JSON 객체의 키 순서는 의미가 없어 배열이다 — [빌드 타깃](BuildTargets.ko.md) BS8d1). `size`는 링크가 끝난 파일의 바이트 수다. `schema`·`engineVersion`·`toolchainFingerprint`도 싣는다(`buildId` 재사용 판정).
   - 모르는 키는 오류다(UE 파서도 거부한다 — `Runtime/Core/Private/Modules/ModuleManifest.cpp:101-229`).
   - manifest는 링크가 모두 성공한 뒤 원자적으로 쓴다(임시 파일 → 이름 바꾸기).
 - **manifest 위치**: 엔진 `Binaries/<Platform>/`, 게임 프로젝트 `Binaries/<Platform>/`, 켠 플러그인마다 `<Plugin>/Binaries/<Platform>/`(UE와 같다 — `LaunchEngineLoop.cpp:2541-2543`, `PluginManager.cpp:1856`). 로더는 이 폴더들의 manifest만 읽는다. 폴더를 훑어 파일을 찾지 않는다.

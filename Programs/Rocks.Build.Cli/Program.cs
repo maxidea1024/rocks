@@ -42,12 +42,17 @@ namespace Rocks.Build.Cli
         {
             if (args.Length == 0)
             {
-                throw new ArgumentException("Expected build, test, sdk, game, bootstrap, or unity-profile command.");
+                throw new ArgumentException("Expected build, test, sdk, game, bootstrap, unity-profile, or projectfiles command.");
             }
 
             if (args[0] == UnityProfileCommand.Name)
             {
                 return await UnityProfileCommand.RunAsync(args.Skip(1).ToArray(), cancellationToken);
+            }
+
+            if (args[0] == ProjectFilesCommand.Name)
+            {
+                return await ProjectFilesCommand.RunAsync(args.Skip(1).ToArray(), cancellationToken);
             }
 
             if (profile is not null && args[0] != "build")
@@ -138,7 +143,7 @@ namespace Rocks.Build.Cli
             string platformName = android ? "android-" + androidAbi : OperatingSystem.IsWindows() ? "windows" : "macos";
             // 끝 구분자를 뗀다(out\custom\이면 아래 증거 preset이 빈 조각을 가져 거부됐다).
             var output = PathSpelling.OnDisk(Path.TrimEndingDirectorySeparator(Path.GetFullPath(options.GetValueOrDefault("output",
-                Path.Combine(root, "out", $"dotnet-{platformName}-{targetName.ToLowerInvariant()}-{configuration.ToString().ToLowerInvariant()}")))));
+                EnginePlanning.DefaultOutput(root, platformName, targetName, configuration)))));
             // build·test·sdk의 증거는 <root>/out/<preset>에 쓰므로 출력은 그 아래여야 한다. 출력·잠금을 만들기 전에 알린다.
             if (!DirectoryPath.IsStrictlyUnder(output, Path.Combine(root, "out")))
             {
@@ -214,17 +219,17 @@ namespace Rocks.Build.Cli
                 // 아래 모든 단계가 이 결과를 쓰고, 검증 실패도 build-evidence에 기록된다.
                 // 엔진 플러그인(Docs/Design/BuildTargets.ko.md 3.9절): 타깃이 켠 플러그인의 모듈만 기술자 종류대로 남기고(끈 플러그인 모듈과
                 // 그 사용은 오류), 주 실행 파일에 링크하도록 표시한다. 켠 플러그인 모듈은 타깃이 참조하지 않아도 빌드 대상이다.
-                var pluginSet = DescriptorModuleSet.Resolve(DescriptorOwner.ForEngine(rules.Target.Name, rules.Target.Plugins, root), rules.Plugins,
-                    toolchain.Platform, configuration, rules.Target.Type);
+                // 규칙 해석·플러그인 적용·메타 배치는 projectfiles와 같은 함수다(Docs/Design/ProjectFiles.ko.md 8.1절).
+                EngineLayout layout = EnginePlanning.Layout(rules, context, root, toolchain, configuration, createDirectories: true);
+                var pluginSet = layout.PluginSet;
                 if (args[0] == "sdk" && pluginSet.EnabledPlugins.Count != 0)
                 {
                     throw new ArgumentException($"Target {targetName}: an installed SDK does not carry engine plugins; the export target enables " +
                         string.Join(", ", pluginSet.EnabledPlugins.Select(plugin => plugin.Name)) + ".");
                 }
 
-                var ruleModules = pluginSet.LinkIntoPrimary(pluginSet.Apply(rules.Modules, rules.Target.Modules), rules.Target.Modules);
-                string[] buildRoots = [.. rules.Target.Modules.Concat(pluginSet.IncludedPluginModules).Distinct(StringComparer.OrdinalIgnoreCase)];
-                var plan = MetadataLayout.Apply(context, ruleModules, buildRoots);
+                string[] buildRoots = layout.BuildRoots;
+                var plan = layout.Metadata;
                 var metaStart = System.Diagnostics.Stopwatch.GetTimestamp();
                 var metadata = await MetadataRunner.GenerateAsync(context, toolchain, plan, rules.Target,
                     HostTool(root, "Rocks.MetaCompiler"), cancellationToken, buildRoots, jobs: Jobs(options), verifySources: VerifyMetadataSources(options));
@@ -327,20 +332,9 @@ namespace Rocks.Build.Cli
                     _ => throw new ArgumentException($"{PlanOnlyOption} must be on or off.")
                 };
                 var nativeStart = System.Diagnostics.Stopwatch.GetTimestamp();
-                var result = await new NativeBuildEngine().BuildAsync(new()
+                var result = await new NativeBuildEngine().BuildAsync(EnginePlanning.Request(toolchain, configuration, rules.Target, root, output,
+                    modules, targets, engineVersion, Jobs(options)) with
                 {
-                    Toolchain = toolchain,
-                    Configuration = configuration,
-                    LogCompiledMinimum = rules.Target.LogCompiledMinimum,
-                    LinkType = rules.Target.LinkType,
-                    TargetName = rules.Target.Name,
-                    RootDirectory = root,
-                    OutputDirectory = output,
-                    Modules = modules,
-                    Targets = targets,
-                    MaxParallelism = Jobs(options),
-                    ContextFingerprint = "rocks-build-rules-v1",
-                    EngineVersion = engineVersion,
                     Unity = Switch(options, UnityOption),
                     Pch = Switch(options, PchOption),
                     Adaptive = Switch(options, AdaptiveOption),
@@ -573,7 +567,7 @@ namespace Rocks.Build.Cli
 
         internal static Dictionary<string, string> Parse(string[] args)
         {
-            var allowed = new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination", "sdk", "project", "platform", "android-abi", "android-api", "android-ndk", "adb", "library", "store", "mirror", "offline", MetadataLayout.VerifySourcesOption, PlanOnlyOption, .. BuildModeOptions, "windows-sdk", RequireVerifiedToolchainOption, .. UnityProfileCommand.Options], StringComparer.Ordinal);
+            var allowed = new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination", "sdk", "project", "platform", "android-abi", "android-api", "android-ndk", "adb", "library", "store", "mirror", "offline", MetadataLayout.VerifySourcesOption, PlanOnlyOption, .. BuildModeOptions, "windows-sdk", RequireVerifiedToolchainOption, .. UnityProfileCommand.Options, .. ProjectFilesCommand.Options], StringComparer.Ordinal);
             var values = new Dictionary<string, string>(StringComparer.Ordinal);
             for (var index = 0; index < args.Length; index += 2)
             {

@@ -23,6 +23,16 @@ public static class ToolchainTable
     /// <summary>고정한 clang-format 버전이다(예: <c>21.1.6</c>). 서식 검사와 MetaCompiler가 이 버전만 받는다(<see cref="IsClangFormatVersion"/>).</summary>
     public static string ClangFormatVersion => Document.Value.RootElement.GetProperty("clangFormat").GetProperty("version").GetString()!;
 
+    /// <summary>
+    /// 받는 Visual Studio(Build Tools 포함)의 최소 버전이다(<c>visualStudio.minimumVersion</c>, 예: <c>17.8</c>). vswhere 조회에
+    /// <c>-version [17.8,)</c>로 준다. UE 5.8 <c>Windows_SDK.json</c>의 최소값과 같다(Docs/Design/ClangVersionSupport.ko.md 6.2절).
+    /// </summary>
+    public static string MinimumVisualStudioVersion =>
+        Document.Value.RootElement.GetProperty("visualStudio").GetProperty("minimumVersion").GetString()!;
+
+    /// <summary>받는 MSVC 도구 모음의 최소 버전이다(<c>visualStudio.minimumMsvc</c>, 예: <c>14.38.33130</c>). 만든 환경의 <c>VCToolsVersion</c>과 비교한다.</summary>
+    public static string MinimumMsvcToolset => Document.Value.RootElement.GetProperty("visualStudio").GetProperty("minimumMsvc").GetString()!;
+
     /// <summary>CI가 쓰는 Android NDK 버전이다(<c>android.ndk.version</c>, 예: <c>29.0.14206865</c> — <c>Build/SelectAndroidNdk.ps1</c>가 고른다).</summary>
     public static string AndroidNdkVersion => Document.Value.RootElement.GetProperty("android").GetProperty("ndk").GetProperty("version").GetString()!;
 
@@ -74,13 +84,14 @@ public static class ToolchainTable
             : null;
     }
 
-    // STL1000 조건이다: `#if __clang_major__ < N` 바로 다음 줄이 `#error STL1000`이어야 한다(다른 `__clang_major__` 비교를 잡지 않게).
-    private static readonly Regex StlClangMinimum = new(@"#if __clang_major__ < (?<major>\d+)[ \t]*\r?\n[ \t]*#error STL1000",
+    // STL1000 조건이다: `#if __clang_major__ < N` 바로 다음 줄이 STL1000 오류여야 한다(다른 `__clang_major__` 비교를 잡지 않게). 오류 줄은
+    // 14.29의 `#error STL1000: ...`와 14.44·14.52의 `_EMIT_STL_ERROR(STL1000, "...");` 두 형식이다(Docs/Design/ClangVersionSupport.ko.md 6.2절).
+    private static readonly Regex StlClangMinimum = new(@"#if __clang_major__ < (?<major>\d+)[ \t]*\r?\n[ \t]*(?:#error[ \t]+|_EMIT_STL_ERROR\([ \t]*)STL1000\b",
         RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
     /// <summary>
     /// MSVC STL <c>yvals_core.h</c> 본문에서 그 STL이 요구하는 최소 Clang major를 읽는다(<c>#if __clang_major__ &lt; N</c> 바로 다음이
-    /// <c>#error STL1000</c>). 그 조건을 찾지 못하면 null이다(형식이 바뀐 STL — 호출자는 evidence에 남기고 첫 컴파일의 <c>STL1000</c>이 알린다).
+    /// <c>#error STL1000</c> 또는 <c>_EMIT_STL_ERROR(STL1000, …)</c>). 그 조건을 찾지 못하면 null이다(형식이 바뀐 STL — 호출자는 evidence에 남기고 첫 컴파일의 <c>STL1000</c>이 알린다).
     /// </summary>
     public static int? ParseStlClangMinimum(string yvalsCore)
     {

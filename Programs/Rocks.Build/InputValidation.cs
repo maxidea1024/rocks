@@ -188,7 +188,7 @@ internal static class InputValidation
                 }
                 // 모듈 이름·자기 타입 표지 매크로는 빌드가 진입점 모듈마다 정의한다(ModuleTables). 규칙이 정의하면 진입점 매크로의 이름
                 // 대조가 무의미해지거나 진입 기술이 없는 타입 등록 함수를 가리킨다.
-                if (name == ModuleTables.ModuleNameMacro || name == ModuleTables.ModuleTypesMacro)
+                if (name == ModuleTables.ModuleNameMacro || name == ModuleTables.ModuleTypesMacro || name == ModuleTables.SharedLibraryMacro)
                 {
                     throw new ArgumentException($"Module {module.Name}: define '{define}' is reserved; the build defines " +
                         $"{name} for every module that implements a module entry point.");
@@ -245,12 +245,40 @@ internal static class InputValidation
             throw new ArgumentException("Modular linking needs a target name for shared library file names (NativeBuildRequest.TargetName).");
         }
 
-        // 모듈 표·빌드 정보가 Modular에서 정의될 자리(export 진입점·Core 공유 라이브러리의 빌드 정보)는 BS8d·ML4다. 그 전에는 늦고 알기
-        // 어려운 링크 오류 대신 여기서 거부한다.
-        if (request.Modules.Any(module => module.ProvidesModuleTable || module.ProvidesBuildInfo))
+        // Modular에서 모듈 표는 manifest이고 빌드 정보는 Core 공유 라이브러리에 든다(BuildTargets BS8d1). Launch는 아직 Monolithic 모듈
+        // 표(GeneratedModuleTable)를 부르므로 실행 파일 연결(ModuleLoader ML4b) 전에는 늦고 알기 어려운 링크 오류 대신 여기서 거부한다.
+        // HostConfig(HostSettings)도 그 표를 부르지만 그 소비 타깃은 모두 Launch에 닿는다 — ML4b가 둘 다 로더 표로 바꾼다.
+        if (request.Modules.Any(module => module.ProvidesLaunch))
         {
-            throw new ArgumentException("Modular linking of a target that reaches the module table or build information provider (Core) " +
-                "needs the Modular module entry points and build information placement (BuildTargets BS8d, ModuleLoader ML4); use Monolithic.");
+            throw new ArgumentException("Modular linking of a target that reaches the launch module needs the Modular executable connection " +
+                "(the module loader reading the module manifest, ModuleLoader ML4b); use Monolithic.");
+        }
+
+        // 빌드 정보 TU와 manifest는 타깃 하나 몫이다: 모듈 표·빌드 정보 제공 모듈에 닿는 대상 실행 파일은 하나 이하이고, 있으면 엔진 버전이
+        // 있어야 한다(manifest·빌드 정보가 싣는다 — 링크가 모두 끝난 뒤 실패하지 않게).
+        var byName = new Dictionary<string, NativeModuleInput>(StringComparer.OrdinalIgnoreCase);
+        foreach (NativeModuleInput module in request.Modules)
+        {
+            byName.TryAdd(module.Name, module);
+        }
+
+        if (byName.Values.Any(module => module.ProvidesModuleTable || module.ProvidesBuildInfo))
+        {
+            IEnumerable<string> roots = request.Targets.Count == 0 ? byName.Keys : request.Targets;
+            HashSet<string> reachable = LinkClosure.Reachable(roots, byName);
+            string[] executables = byName.Values.Where(module => module.Kind == NativeModuleKind.Executable && reachable.Contains(module.Name) &&
+                    LinkClosure.Reachable([module.Name], byName).Any(name => byName[name].ProvidesModuleTable || byName[name].ProvidesBuildInfo))
+                .Select(module => module.Name).Order(StringComparer.Ordinal).ToArray();
+            if (executables.Length > 1)
+            {
+                throw new ArgumentException("Modular linking builds the module manifest and build information for one executable, but the " +
+                    $"targets reach {string.Join(", ", executables)}; build one target at a time.");
+            }
+
+            if (executables.Length == 1 && request.EngineVersion is not { IsEmpty: false })
+            {
+                throw new ArgumentException($"Modular linking of {executables[0]} needs NativeBuildRequest.EngineVersion for its module manifest.");
+            }
         }
 
         // 켠 플러그인 모듈의 공유 라이브러리 위치(플러그인 Binaries manifest)는 ML4다(Docs/Design/BuildTargets.ko.md 3.9절 BD41).

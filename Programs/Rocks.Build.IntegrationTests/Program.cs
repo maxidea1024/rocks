@@ -74,6 +74,7 @@ try
     await OutputInvocationLockTests.RunAsync();
     MetadataOutputTransactionTests.Run();
     MetadataLayoutTests.Run();
+    TargetDefinitionsTests.Run();
     MetadataTemporaryCleanupTests.Run();
     await PlatformPrivateHeaderTests.RunAsync(toolchain, Path.Combine(fixture, "platform-header"));
     await UnityProfileCommandTests.RunAsync(root, Directory.CreateDirectory(Path.Combine(fixture, "unity-profile-command")).FullName,

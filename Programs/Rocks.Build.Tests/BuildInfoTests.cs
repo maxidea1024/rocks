@@ -224,10 +224,17 @@ internal static class BuildInfoTests
     {
         Check(toolchain.ToolchainVerified == ToolchainCheck.Verify(toolchain.Platform, toolchain.CompilerVersion, null),
             $"discovered toolchain '{toolchain.CompilerVersion}' verification does not match Build/Toolchain.json");
-        const string Stl1452 = "#elif defined(__clang__)\n#if __clang_major__ < 22\n#error STL1000: Unexpected compiler version, expected Clang 22.0.0 or newer.\n";
+        // 고른 도구 모음의 실제 yvals_core.h에서 조건을 찾아야 한다(형식이 바뀌면 "not checked"로 조용히 넘어가므로 여기서 잡는다).
+        Check(toolchain.Platform != NativePlatform.Windows || toolchain.StlClangCheck?.StartsWith("requires Clang ", StringComparison.Ordinal) == true,
+            $"STL1000 condition is read from the selected yvals_core.h ({toolchain.StlClangCheck})");
+        // 실제 yvals_core.h의 줄이다: 14.52(921–923행)와 14.44(906–908행)는 _EMIT_STL_ERROR, 14.29(569–571행)는 #error 형식이다.
+        const string Stl1452 = "#elif defined(__clang__)\n#if __clang_major__ < 22\n_EMIT_STL_ERROR(STL1000, \"Unexpected compiler version, expected Clang 22 or newer.\");\n";
+        const string Stl1444 = "#elif defined(__clang__)\r\n#if __clang_major__ < 19\r\n_EMIT_STL_ERROR(STL1000, \"Unexpected compiler version, expected Clang 19.0.0 or newer.\");\r\n";
         const string Stl1429 = "#elif defined(__clang__)\r\n#if __clang_major__ < 11\r\n#error STL1000: Unexpected compiler version, expected Clang 11.0.0 or newer.\r\n";
         const string OtherCondition = "#if defined(__clang__)\n#if __clang_major__ < 19\n#define _STL_OLD_CLANG 1\n#endif\n#endif\n";
-        Check(ToolchainTable.ParseStlClangMinimum(Stl1452) == 22 && ToolchainTable.ParseStlClangMinimum(Stl1429) == 11 &&
+        const string OtherError = "#if __clang_major__ < 19\n_EMIT_STL_ERROR(STL1001, \"Unexpected compiler version.\");\n";
+        Check(ToolchainTable.ParseStlClangMinimum(Stl1452) == 22 && ToolchainTable.ParseStlClangMinimum(Stl1444) == 19 &&
+            ToolchainTable.ParseStlClangMinimum(Stl1429) == 11 && ToolchainTable.ParseStlClangMinimum(OtherError) is null &&
             ToolchainTable.ParseStlClangMinimum("#define _MSVC_STL_VERSION 143\n") is null && ToolchainTable.ParseStlClangMinimum(OtherCondition) is null,
             "STL minimum Clang is read only from the STL1000 condition of yvals_core.h");
         Check(ToolchainCheck.StlStatus(Stl1452, null) == "requires Clang 22" &&
@@ -314,6 +321,23 @@ internal static class BuildInfoTests
                 throw new InvalidOperationException("ROCKS_MSVC_TOOLSET check accepted an invalid or inactive toolset");
             }
             catch (InvalidOperationException error) when (error.Message.Contains(NativeEnvironment.MsvcToolsetVariable, StringComparison.Ordinal))
+            {
+            }
+        }
+
+        // Visual Studio·MSVC 하한(UE 5.8과 같은 값, ClangVersionSupport 6.2절): 하한 이상만 받고, 옛 도구 모음과 값 없음은 거부한다.
+        Check(ToolchainTable.MinimumVisualStudioVersion == "17.8" && ToolchainTable.MinimumMsvcToolset == "14.38.33130",
+            "Visual Studio and MSVC minimums come from Build/Toolchain.json");
+        NativeEnvironment.CheckMinimumMsvcToolset("14.38.33130");
+        NativeEnvironment.CheckMinimumMsvcToolset("14.52.37025 ");
+        foreach (string? old in new[] { "14.29.30133", "14.38.33129", null, "v143" })
+        {
+            try
+            {
+                NativeEnvironment.CheckMinimumMsvcToolset(old);
+                throw new InvalidOperationException($"MSVC minimum accepted '{old}'");
+            }
+            catch (InvalidOperationException error) when (error.Message.Contains("visualStudio.minimumMsvc", StringComparison.Ordinal))
             {
             }
         }

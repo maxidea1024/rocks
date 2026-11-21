@@ -75,7 +75,7 @@
 
 - `source-literal-english`(`PolicyChecks.EnglishSourceLiterals`): `Core/Source/Runtime`·`Core/Source/Developer`·`Engine/Source/Runtime`·`Engine/Source/Developer`·`Engine/Plugins`·`Programs`·`Build`의 C++(.h·.c·.cpp·.mm)·C#(.cs) 소스에서 주석 밖의 한글(문자열·문자 리터럴 등)을 거부한다. 주석(`//`·`/* */`·`///`)은 보지 않는다.
 - `build-file-english`(`PolicyChecks.EnglishBuildFiles`): 다음 파일은 주석을 포함해 파일 전체에서 한글을 거부한다.
-  - 저장소 루트의 `Rocks.proj`·`.editorconfig`·`.gitattributes`·`.gitignore`·`.clang-format`·`global.json`·`Directory.Build.rsp`
+  - 저장소 루트의 `Rocks.proj`·`.editorconfig`·`.gitattributes`·`.gitignore`·`.clang-format`·`global.json`·`Directory.Build.rsp`·`.vsconfig`와 설치 마법사 진입 스크립트 `Setup.bat`·`Setup.sh`
   - `.github/workflows/` 아래 파일
   - 모든 `*.Build.cs`·`*.Target.cs`·`*.csproj`·`*.props`·`*.targets`·`*.slnx`·`*.proj`(시험 실행 파일·시험 fixture 모듈의 규칙 포함)
   - `Build/` 아래 모든 파일: 스크립트·설정(`*.ps1`·`*.sh`·`*.cmake`·`Build.version` 등)과 모듈·타깃 규칙 기반 클래스(`Build/Rules/*.cs`). 빌드 출력 디렉터리는 제외한다.
