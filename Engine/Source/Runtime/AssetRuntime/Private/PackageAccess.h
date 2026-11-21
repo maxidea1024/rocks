@@ -14,6 +14,10 @@ struct PackageAccess {
         package.bulkSlots_ = Move(bulkSlots);
     }
 
+    static void SetBulkStore(Package& package, UniquePtr<PackageBulkStore>&& store) noexcept {
+        package.bulkStore_ = Move(store);
+    }
+
     static void SetAssetId(Asset& asset, AssetId id) noexcept {
         asset.assetId_ = id;
     }
