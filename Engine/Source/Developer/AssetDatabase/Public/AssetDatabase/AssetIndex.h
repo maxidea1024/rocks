@@ -112,6 +112,13 @@ struct AssetIndexDiagnostic {
 class AssetIndex;
 class AssetIndexCache;
 
+// 이름 바꾸기 하나다(RefreshPaths — 7.1절 17 A2e2). from(Content 상대 — 패키지 파일 또는
+// 디렉터리)의 지금 내용을 to 이름으로 색인한다(OS 이동 전에 준비하고 이동 뒤에 확정한다).
+struct AssetIndexMove {
+    StringView from;
+    StringView to;
+};
+
 // 여러 파일·하위 트리를 한 번에 다시 읽는 입력이다(AssetIndex::RefreshPaths — 7.1절 16 A2d3).
 // 이름은 모두 Content 상대 이름 규칙(유효한 UTF-8, 구분자 '/', 앞뒤 '/'·빈 구성 요소·"."·".."
 // 없음)을 따른다. 같은 이름이 여러 번 나와도 되고 하위 트리 안의 파일·하위 트리는 그 트리가 덮는다.
@@ -136,6 +143,11 @@ struct AssetIndexRefreshPaths {
     // 않는다. 하위 트리가 덮는 파일은 미루지 않는다.
     Span<const bool> mayDefer;
     Array<usize>* deferred = nullptr;
+    // 이름 바꾸기다: from과 to 이름 자신과 그 아래의 항목·진단을 빼고, 지금 from에 있는 것(파일이면
+    // 그 파일, 디렉터리면 그 아래 — 하위 트리 검색과 같은 규칙)을 to 아래 이름으로 읽어 더한다.
+    // 이름 규칙은 같고, from과 to가 같은 키가 아니면 서로의 아래일 수 없다(InvalidArgument).
+    // 대소문자만 다른 이름(같은 키)도 받는다.
+    Span<const AssetIndexMove> moves;
     // 이름 정규화 파일 시스템인지다(참이면 이름 대조를 NFC로 한다 — macOS 이벤트 이름이 열거
     // 이름과 다른 정규형이어도 같은 파일로 본다).
     bool normalizesNames = FileSystemNormalizesNames;
@@ -319,10 +331,13 @@ private:
                              Array<AssetIndexEntry>& found) const noexcept;
     // 걷기가 모은 패키지 후보다(Content 상대 이름과 열거한 수정 시각).
     struct ScanCandidate {
-        explicit ScanCandidate(Allocator& allocator) noexcept : relative(allocator) {
+        explicit ScanCandidate(Allocator& allocator) noexcept
+            : relative(allocator), readPath(allocator) {
         }
 
         String relative;
+        // 이름 바꾸기면 내용을 읽을 경로(Content의 지금 이름)다 — 비면 Content/relative.
+        String readPath;
         int64 modifiedTicks = 0;
     };
 
@@ -338,8 +353,10 @@ private:
 
     // start(Content 상대 — 빈 문자열은 Content)부터 깊이 우선으로 걸어 found·diagnostics에 더한다
     // (Rebuild·RefreshPaths 공용). Content 자신의 열거 실패만 오류다.
+    // renameTo가 비지 않으면 start 아래 이름을 renameTo 아래 이름으로 색인한다(내용은 지금 이름에서
+    // 읽는다 — 이동 전 준비, 캐시는 쓰지 않는다).
     Result<void> ScanTree(platform::FileSystem& files, const PackageReadOptions& editor,
-                          const AssetIndexCache* cache, StringView start,
+                          const AssetIndexCache* cache, StringView start, StringView renameTo,
                           Array<AssetIndexEntry>& found,
                           Array<AssetIndexDiagnostic>& diagnostics) const noexcept;
     // 후보를 읽어(캐시 재사용 또는 부분 읽기 — scheduler가 있으면 병렬) 후보 순서대로 더한다.

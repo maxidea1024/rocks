@@ -2,11 +2,13 @@
 
 #include <AssetDatabase/EditorPackageSet.h>
 #include <AssetDatabase/ImportRecord.h>
+#include <AssetDatabase/LogicalPath.h>
 #include <AssetRuntime/Package.generated.h>
 #include <AssetRuntime/Package.h>
 #include <AssetRuntime/PackageRangeReader.h>
 #include <AssetRuntime/PackageWriter.h>
 #include <Core/Algorithms.h>
+#include <Core/Assert.h>
 #include <Core/Build/BuildInfo.h>
 #include <Core/FileError.h>
 #include <Object/ConstructionContext.h>
@@ -16,9 +18,12 @@ namespace rocks {
 
 namespace {
 
+using asset_database_detail::AfterComponents;
 using asset_database_detail::EditorAppendGuidText;
 using asset_database_detail::EditorIsOrphanTempName;
 using asset_database_detail::EditorTempSuffix;
+using asset_database_detail::IsSameOrUnder;
+using asset_database_detail::LogicalComponents;
 
 // 진단 하나를 채운다(Open 실패·경고 공통).
 AssetDiagnostic EditorDiagnostic(AssetDiagnosticCode code, ErrorCode error, AssetId asset,
@@ -196,6 +201,127 @@ usize EditorPackageSet::LowerBound(AssetId id) const noexcept {
                             [](const EditorPackageInfo& info, AssetId key) noexcept {
                                 return GuidLess(info.id.value, key.value);
                             });
+}
+
+Result<void> EditorPackageSet::PrepareRelocate(const LogicalPath& from, const LogicalPath& to,
+                                               StringView fromFile, StringView toFile,
+                                               EditorRelocation& plan,
+                                               AssetDiagnostic* failure) noexcept {
+    plan.ready_ = false;
+    plan.changes_.Clear();
+    const usize components = LogicalComponents(from.Text());
+    for (const EditorPackageInfo& info : open_) {
+        EditorRelocation::Change change(*allocator_);
+        change.id = info.id;
+        if (!info.unsaved) {
+            // 저장된 패키지: OS 이동과 같은 규칙(이름 앞부분 바꾸기 — 디스크의 실제 이름).
+            if (fromFile.IsEmpty() || !IsSameOrUnder(info.fileName.View(), fromFile)) {
+                continue;
+            }
+
+            Result<void> step = change.fileName.TryAssign(toFile);
+            if (step) {
+                step = change.fileName.TryAppend(
+                    StringView(info.fileName.View().Data() + fromFile.ByteCount(),
+                               info.fileName.View().ByteCount() - fromFile.ByteCount()));
+            }
+
+            if (step) {
+                step = plan.changes_.TryPushBack(Move(change));
+            }
+
+            if (!step) {
+                return step;
+            }
+
+            continue;
+        }
+
+        // 저장하지 않은 새 패키지: 논리 경로(첫 저장의 경로)를 to 아래로.
+        auto current = ParseLogicalPath(*allocator_, info.logicalPath.View());
+        if (!current) {
+            return Result<void>::Failure(current.Error());
+        }
+
+        if (!IsSameOrUnder(current.Value().Key(), from.Key())) {
+            continue;
+        }
+
+        String text(*allocator_);
+        Result<void> step = text.TryAssign(to.Text());
+        if (step) {
+            step = text.TryAppend(AfterComponents(current.Value().Text(), components));
+        }
+
+        if (!step) {
+            return step;
+        }
+
+        auto moved = ParseLogicalPath(*allocator_, text.View());
+        String file(*allocator_);
+        Result<void> made = moved ? config_.layout->TryMakeFilePath(moved.Value(), file)
+                                  : Result<void>::Failure(moved.Error());
+        if (!made) {
+            if (made.Error() == ErrorCode::OutOfMemory) {
+                return made;
+            }
+
+            if (failure != nullptr) {
+                *failure = AssetDiagnostic{};
+                failure->code = AssetDiagnosticCode::InvalidPath;
+                failure->error = made.Error();
+                failure->asset = info.id;
+            }
+
+            return made;
+        }
+
+        step = change.logicalPath.TryAssign(moved.Value().Text());
+        if (step) {
+            step = plan.changes_.TryPushBack(Move(change));
+        }
+
+        if (!step) {
+            return step;
+        }
+    }
+
+    plan.openCount_ = open_.Size();
+    plan.ready_ = true;
+    return Result<void>::Success();
+}
+
+void EditorPackageSet::CommitRelocate(EditorRelocation& plan) noexcept {
+    ROCKS_ASSERT(plan.ready_ && plan.openCount_ == open_.Size());
+    for (EditorRelocation::Change& change : plan.changes_) {
+        const usize at = LowerBound(change.id);
+        ROCKS_ASSERT(at < open_.Size() && open_[at].id == change.id);
+        EditorPackageInfo& info = open_[at];
+        if (info.unsaved) {
+            info.logicalPath = Move(change.logicalPath);
+        } else {
+            info.fileName = Move(change.fileName);
+        }
+    }
+
+    plan.changes_.Clear();
+    plan.ready_ = false;
+}
+
+Result<void> EditorPackageSet::DetachUnder(StringView fromFile, AssetDiagnostic* failure) noexcept {
+    for (EditorPackageInfo& info : open_) {
+        // 저장하지 않은 새 패키지는 파일이 없다.
+        if (info.unsaved || info.store == nullptr || fromFile.IsEmpty() ||
+            !IsSameOrUnder(info.fileName.View(), fromFile)) {
+            continue;
+        }
+
+        if (auto detached = info.store->Detach(failure); !detached) {
+            return detached;
+        }
+    }
+
+    return Result<void>::Success();
 }
 
 const EditorPackageInfo* EditorPackageSet::Find(AssetId id) const noexcept {

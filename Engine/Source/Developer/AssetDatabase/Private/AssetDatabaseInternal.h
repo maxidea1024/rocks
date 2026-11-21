@@ -243,4 +243,42 @@ private:
     Array<String> keys_;
 };
 
+// key가 base와 같거나 그 아래인지다(구성 요소 경계 '/' — 논리 경로 키·Content 상대 이름 공용).
+inline bool IsSameOrUnder(StringView key, StringView base) noexcept {
+    if (key == base) {
+        return true;
+    }
+
+    return key.ByteCount() > base.ByteCount() &&
+           key.StartsWith(base, StringComparison::CaseSensitive) &&
+           key.Data()[base.ByteCount()] == '/';
+}
+
+// text(구성 요소를 '/'로 이은 이름)에서 앞 components개 구성 요소를 뺀 나머지다(앞 '/' 포함 —
+// 없으면 빈 문자열). 논리 경로 텍스트의 앞부분(마운트·디렉터리)을 바꿀 때 쓴다(키와 텍스트의 byte
+// 수가 달라 구성 요소 수로 자른다).
+inline StringView AfterComponents(StringView text, usize components) noexcept {
+    usize seen = 0;
+    for (usize at = 0; at < text.ByteCount(); ++at) {
+        if (text.Data()[at] == '/' && at != 0) {
+            ++seen;
+            if (seen == components) {
+                return StringView(text.Data() + at, text.ByteCount() - at);
+            }
+        }
+    }
+
+    return StringView();
+}
+
+// 논리 경로 텍스트의 구성 요소 수다(앞 '/' 다음부터 '/'로 나눈 것 — "/Game/A"는 2).
+inline usize LogicalComponents(StringView text) noexcept {
+    usize count = 0;
+    for (usize at = 0; at < text.ByteCount(); ++at) {
+        count += text.Data()[at] == '/' ? 1 : 0;
+    }
+
+    return count;
+}
+
 } // namespace rocks::asset_database_detail
