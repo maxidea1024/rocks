@@ -665,12 +665,34 @@ void TypeChecker::LowerModule(uint32 module) noexcept {
                 continue;
             }
 
+            // 줄 끝의 `    ; <줄>:<열>` 접미만 뗀다(문자열 조각 안의 같은 글자는 그대로 둔다).
             StringView line(functionText.Data() + lineStart, at - lineStart);
-            for (usize mark = 0; mark + LocationMark.ByteCount() <= line.ByteCount(); ++mark) {
-                if (StringView(line.Data() + mark, LocationMark.ByteCount()) == LocationMark) {
-                    line = StringView(line.Data(), mark);
-                    break;
+            for (usize mark = line.ByteCount(); mark >= LocationMark.ByteCount(); --mark) {
+                const usize begin = mark - LocationMark.ByteCount();
+                if (StringView(line.Data() + begin, LocationMark.ByteCount()) != LocationMark) {
+                    continue;
                 }
+
+                usize digits = 0;
+                usize colons = 0;
+                bool location = mark < line.ByteCount();
+                for (usize index = mark; index < line.ByteCount() && location; ++index) {
+                    const char c = line.Data()[index];
+                    if (c == ':') {
+                        location = digits > 0 && colons == 0;
+                        ++colons;
+                        digits = 0;
+                    } else {
+                        location = c >= '0' && c <= '9';
+                        ++digits;
+                    }
+                }
+
+                if (location && colons == 1 && digits > 0) {
+                    line = StringView(line.Data(), begin);
+                }
+
+                break;
             }
 
             hasher.Update(

@@ -2,7 +2,7 @@ module "Main"
 compiler "sparks 0.4.0"
 profile full
 content 952fed61677bb6cec0ed21413bf3aaa036a47b49596564be633cd0e1f15ccc73
-interface 9442d3cf115daa2cc4dbe4380d6a0968c2c0fe85650cf7ebc8b95f4c71ae6380
+interface 3b8905df816ecd5eaed1c5f53e0505dc9bc42e18c57e5f0e2961768a812a5125
 k0 = 0x3ff8000000000000
 k1 = 0x4024000000000000
 t0 = "Door.on Enable"

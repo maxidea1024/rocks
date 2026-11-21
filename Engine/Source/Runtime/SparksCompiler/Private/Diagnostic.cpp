@@ -158,6 +158,8 @@ constexpr DiagnosticCodeInfo CodeTable[] = {
     {DiagnosticCode::RpcCall, "rpc-call"},
     {DiagnosticCode::DataIdLost, "data-id-lost"},
     {DiagnosticCode::InvalidIdManifest, "invalid-id-manifest"},
+    {DiagnosticCode::IdNameReserved, "id-name-reserved"},
+    {DiagnosticCode::IdClaimedTwice, "id-claimed-twice"},
     {DiagnosticCode::ManifestSyntax, "manifest-syntax"},
     {DiagnosticCode::UnknownManifestKey, "unknown-manifest-key"},
     {DiagnosticCode::MissingManifestKey, "missing-manifest-key"},

@@ -80,10 +80,39 @@ internal static class StableIdMergeTests
             StableIdEntry[] extended = [Type("sample::A"), Field("sample::A::value")];
             StableIdEntry[] merged = [Type("sample::A", FirstId, true),
                 new("field", "sample::A::value", FieldId, [], true)];
-            Has(Compare(ancestor, retired, extended, merged), "type retirement conflicts with field changes");
-            Has(Compare(ancestor, extended, retired, merged), "type retirement conflicts with field changes");
+            Has(Compare(ancestor, retired, extended, merged), "type retirement conflicts with member changes");
+            Has(Compare(ancestor, extended, retired, merged), "type retirement conflicts with member changes");
             Verify.Equal(0, Compare(ancestor, retired, ancestor, retired).Count,
                 "one-sided retirement without field changes rejected");
+        });
+        suite.Add("IdentityMerge.SparksMemberNames", () =>
+        {
+            // Sparks 이름 키(`<패키지>/<모듈>.<타입>.<멤버>`)와 멤버 kind 전부를 C++ 이름과 같은 규칙으로 본다
+            // (Docs/Design/SparksBytecode.ko.md 6.1절).
+            const string Door = "Game/Doors/Door.Door";
+            const string Gate = "Game/Doors/Door.Gate";
+            const string MemberId = "30000000000000000000000000000001";
+            StableIdEntry[] ancestor = [Type(Door), Field(Door + ".Open"),
+                new("subobject", Door + ".Hinge", MemberId, [], false)];
+            StableIdEntry[] renamed = [Type(Gate, FirstId, false, Door), Field(Gate + ".Open", Door + ".Open"),
+                new("subobject", Gate + ".Hinge", MemberId, [Door + ".Hinge"], false)];
+            StableIdEntry[] extra = [.. ancestor, new("enumCase", "Game/Doors/Door.State.Closed", SecondId, [], false),
+                Type("Game/Doors/Door.State", "40000000000000000000000000000001")];
+            StableIdEntry[] merged = [.. renamed, new("enumCase", "Game/Doors/Door.State.Closed", SecondId, [], false),
+                Type("Game/Doors/Door.State", "40000000000000000000000000000001")];
+            Verify.Equal(0, Compare(ancestor, renamed, extra, merged).Count, "valid Sparks merge rejected");
+            // 멤버가 다른 타입으로 옮겨 가면(주인 ID가 바뀜) subobject도 거부한다.
+            StableIdEntry[] two = [Type(Door), Type(Gate, SecondId), Field(Door + ".Open"),
+                new("subobject", Door + ".Hinge", MemberId, [], false)];
+            StableIdEntry[] moved = [Type(Door), Type(Gate, SecondId), Field(Door + ".Open"),
+                new("subobject", Gate + ".Hinge", MemberId, [], false)];
+            Has(Compare(two, moved, two, moved), "subobject ID " + MemberId + " changed or lost its owning type");
+            // 한쪽이 타입을 은퇴하는 동안 다른 쪽이 function 멤버를 더했다.
+            StableIdEntry[] retired = [Type(Door, FirstId, true), new("field", Door + ".Open", FieldId, [], true),
+                new("subobject", Door + ".Hinge", MemberId, [], true)];
+            StableIdEntry[] extended = [.. ancestor, new("function", Door + ".on(Owner.Destroyed)", SecondId, [], false)];
+            StableIdEntry[] mergedRetired = [.. retired, new("function", Door + ".on(Owner.Destroyed)", SecondId, [], true)];
+            Has(Compare(ancestor, retired, extended, mergedRetired), "type retirement conflicts with member changes");
         });
     }
 

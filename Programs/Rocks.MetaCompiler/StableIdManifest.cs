@@ -453,7 +453,7 @@ internal sealed class StableIdManifest
 
     // 멤버 kind(이름의 주인 type이 같은 명세에 있어야 하는 것)다. C++은 field뿐이고 Sparks는 subobject·function·
     // rpc·enumCase를 더 쓴다(Docs/Design/SparksBytecode.ko.md 6.1절, SE-R8).
-    private static bool IsMember(string kind) => kind is "field" or "subobject" or "function" or "rpc" or "enumCase";
+    internal static bool IsMember(string kind) => kind is "field" or "subobject" or "function" or "rpc" or "enumCase";
 
     private static bool IsIdentifier(string part) => part.Length > 0 && (char.IsAsciiLetter(part[0]) || part[0] == '_') &&
         part.All(ch => char.IsAsciiLetterOrDigit(ch) || ch == '_');
@@ -514,8 +514,9 @@ internal sealed class StableIdManifest
         }
     }
 
-    // 멤버 이름의 주인 type 이름이다(C++은 마지막 `::` 앞, Sparks는 모듈 경로 뒤 첫 `.`의 선언까지).
-    private static string Owner(string name)
+    // 멤버 이름의 주인 type 이름이다(C++은 마지막 `::` 앞, Sparks는 모듈 경로 뒤 첫 `.`의 선언까지). 병합 검사
+    // (StableIdMergeValidator)도 같은 규칙을 쓴다.
+    internal static string Owner(string name)
     {
         if (!name.Contains('/'))
         {

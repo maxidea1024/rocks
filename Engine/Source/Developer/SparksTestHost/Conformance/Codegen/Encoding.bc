@@ -2,7 +2,7 @@ module "Main"
 compiler "sparks 0.4.0"
 profile full
 content 344dd5d096faa381d5eed78528048670110234c31866e387aeb8973658acb044
-interface cd096996f82cbed9b0a581f1555627e520524d00f07177be1efa1effc6ad70af
+interface 7e2c736882c02e52d2cb6cedeb5e833fc20fb4578445d82d1269c9e3ac46d524
 t0 = "Probe.Order"
 t1 = "m"
 t2 = ""

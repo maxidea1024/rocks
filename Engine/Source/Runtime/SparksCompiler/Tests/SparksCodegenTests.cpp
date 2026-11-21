@@ -395,6 +395,90 @@ TEST(SparksCodegen_RecompileScope) {
     }
 }
 
+namespace {
+
+// 세 모듈(A, A를 import하는 B, B를 import하는 C) 패키지를 schema와 함께 컴파일한다.
+bool CompileChain(Fixture& fixture, StringView a, StringView b, StringView c) noexcept {
+    if (!fixture.Schema(EngineSchema)) {
+        return false;
+    }
+
+    const uint32 game = fixture.Package("Game");
+    fixture.Module(game, "Game", "A.spark", a);
+    fixture.Module(game, "Game", "B.spark", b);
+    fixture.Module(game, "Game", "C.spark", c);
+    return fixture.Check() && fixture.diagnostics.Count() == 0;
+}
+
+constexpr StringView ChainA = "fn Label(): string {\n    return \"a    ; 1:1\";\n}\n\n"
+                              "class Box : ScriptableComponent {\n    var Size = 1+1;\n}\n";
+constexpr StringView ChainB = "import A;\n\nfn Twice(): string {\n    return Label();\n}\n";
+constexpr StringView ChainC = "import B;\n\nfn Use(): string {\n    return Twice();\n}\n\n"
+                              "class Door : ScriptableComponent {\n"
+                              "    on Owner.Destroyed() {\n    }\n}\n";
+
+} // namespace
+
+TEST(SparksCodegen_RecompileScopeEdges) {
+    SystemAllocator allocator;
+    Fixture before(allocator);
+    REQUIRE(CompileChain(before, ChainA, ChainB, ChainC));
+    auto scope = [&](StringView a, StringView b, StringView c, Array<uint32>& modules,
+                     Array<uint64>& functions) noexcept {
+        Fixture after(allocator);
+        return CompileChain(after, a, b, c) &&
+               static_cast<bool>(
+                   FindRecompileScope(before.compilation, after.compilation, modules, functions));
+    };
+    {
+        // 문자열 안의 `    ; 1:1`은 위치 주석이 아니다: 그 글자만 바뀌어도 body hash가 바뀐다.
+        Array<uint32> modules(allocator);
+        Array<uint64> functions(allocator);
+        REQUIRE(scope("fn Label(): string {\n    return \"a    ; 2:2\";\n}\n\n"
+                      "class Box : ScriptableComponent {\n    var Size = 1+1;\n}\n",
+                      ChainB, ChainC, modules, functions));
+        CHECK(modules.IsEmpty());
+        REQUIRE(functions.Size() == 1);
+        CHECK(functions[0] == ((uint64(0) << 32) | 0));
+    }
+    {
+        // 초기값의 공백만 바뀌면 interface가 같다(토큰 정규화).
+        Array<uint32> modules(allocator);
+        Array<uint64> functions(allocator);
+        REQUIRE(scope("fn Label(): string {\n    return \"a    ; 1:1\";\n}\n\n"
+                      "class Box : ScriptableComponent {\n    var Size = 1 + /* two */ 1;\n}\n",
+                      ChainB, ChainC, modules, functions));
+        CHECK(modules.IsEmpty());
+        CHECK(functions.IsEmpty());
+    }
+    {
+        // interface 변경은 import 전이 폐포(A → B → C)를 다시 검사하고, 그 모듈의 함수는 따로
+        // 내리지 않는다.
+        Array<uint32> modules(allocator);
+        Array<uint64> functions(allocator);
+        REQUIRE(scope("fn Label(): string {\n    return \"b\";\n}\n\n"
+                      "class Box : ScriptableComponent {\n    var Size = 3;\n}\n",
+                      ChainB, ChainC, modules, functions));
+        REQUIRE(modules.Size() == 3);
+        CHECK(modules[0] == 0);
+        CHECK(modules[1] == 1);
+        CHECK(modules[2] == 2);
+        CHECK(functions.IsEmpty());
+    }
+    {
+        // handler를 지우면(interface에 없다) 그 모듈을 다시 검사한다(reload가 옛 구독을 버리게).
+        Array<uint32> modules(allocator);
+        Array<uint64> functions(allocator);
+        REQUIRE(scope(ChainA, ChainB,
+                      "import B;\n\nfn Use(): string {\n    return Twice();\n}\n\n"
+                      "class Door : ScriptableComponent {\n}\n",
+                      modules, functions));
+        REQUIRE(modules.Size() == 1);
+        CHECK(modules[0] == 2);
+        CHECK(functions.IsEmpty());
+    }
+}
+
 TEST(SparksCodegen_AllocationFailureEverywhere) {
     SystemAllocator backing;
     uint64 checkAttempts = 0;
