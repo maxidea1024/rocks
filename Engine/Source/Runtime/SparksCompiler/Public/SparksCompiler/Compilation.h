@@ -64,6 +64,7 @@ struct ImportResolution {
 namespace detail {
 class CompilationChecker;
 class FlowAnalyzer;
+class IrBuilder;
 class NameBinder;
 class TypeChecker;
 } // namespace detail
@@ -210,6 +211,7 @@ public:
 private:
     friend class detail::CompilationChecker;
     friend class detail::FlowAnalyzer;
+    friend class detail::IrBuilder;
     friend class detail::NameBinder;
     friend class detail::TypeChecker;
 

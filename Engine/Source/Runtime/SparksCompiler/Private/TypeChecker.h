@@ -95,6 +95,7 @@ struct CheckContext {
 };
 
 class FlowAnalyzer;
+class IrBuilder;
 
 class TypeChecker final {
 public:
@@ -104,6 +105,7 @@ public:
 
 private:
     friend class FlowAnalyzer;
+    friend class IrBuilder;
 
     // 노드 대표 토큰의 글자다(연산자·멤버 이름·리터럴).
     StringView TokenText(uint32 module, uint32 node) const noexcept;
@@ -253,8 +255,17 @@ private:
 
     // ---- 권한·RPC·저장 타입(CheckNetwork.cpp, 3.15절 — Rules 단계) ----
     // 저장 가능 타입(objects면 객체 참조를 더한 복제 타입)인지다.
-    bool IsStorableType(uint32 type, bool objects, uint32 depth) noexcept;
-    // `@rpc` 함수의 대상 접두 이름(`Server` 등)이다. RPC가 아니면 빈 글자, 대상을 모르면 "?".
+    // 타입별 판정을 storable_에 기억한다(계산 중인 타입은 가능 — 컨테이너를 거친 재귀 struct).
+    bool IsStorableType(uint32 type, bool objects) noexcept;
+    bool ComputeStorable(uint32 value, bool objects) noexcept;
+    // 타입이나 그 타입 인자가 유지 자원인지다(S0904가 알리므로 저장·복제 판정은 건너뛴다).
+    bool ContainsHeldType(uint32 type) noexcept;
+    // 재정의(override) 함수가 대신하는 기반 사슬의 멤버다(재정의가 아니면 NoSymbol).
+    uint32 OverriddenMember(uint32 function) const noexcept;
+    // 재정의 사슬이 엔진 overridable 함수에 닿는지다(엔진이 직접 부르는 진입 본문).
+    bool OverridesEngineFunction(uint32 function) const noexcept;
+    // `@rpc` 함수의 대상 접두 이름(`Server` 등)이다. 재정의는 기반의 것을 잇는다. RPC가 아니면
+    // 빈 글자, 대상을 모르면 "?".
     StringView RpcTarget(uint32 function) const noexcept;
     // `Server.F` 등 RPC 접두 뒤의 멤버다(S1004).
     ExpressionValue RpcMember(const CheckContext& context, uint32 node, uint32 prefix,
@@ -262,6 +273,10 @@ private:
     void CheckNetwork(uint32 module) noexcept;
     // 권한 시험(`Owner.HasAuthority`, Actor의 `HasAuthority`, 그것을 한 항으로 둔 `&&`)인지다.
     bool IsAuthorityTest(uint32 module, uint32 expression) const noexcept;
+    // 부정 권한 시험(`!HasAuthority`, 그것을 한 항으로 둔 `||`)인지다: 거짓이면 권한이 있다.
+    bool IsNegatedAuthorityTest(uint32 module, uint32 expression) const noexcept;
+    // 문장이 반드시 `return`으로 끝나는지다(`return` 또는 마지막 문장이 그런 블록).
+    bool AlwaysReturns(uint32 module, uint32 statement) const noexcept;
 
     // ---- 유지 자원·로드(CheckResources.cpp, 3.14절 — Rules 단계) ----
     // 유지 자원 타입(schema `held` 엔진 객체, `LoadRequest<T>`, 그 `T?`)인지다.
@@ -497,6 +512,8 @@ private:
     Array<uint64> resourceWaits_;
     // 권한 이벤트(`@authorityOnly`·server 발행) handler((모듈 << 32) | 노드)다(3.15절).
     Array<uint64> authorityHandlers_;
+    // IsStorableType 기억 표(타입 × 객체 허용 여부 → StorableState).
+    Array<uint8> storable_;
     Array<uint32> dispatchFirst_;
     Array<uint32> dispatchBodies_;
 };

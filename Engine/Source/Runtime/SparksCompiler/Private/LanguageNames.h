@@ -34,6 +34,9 @@ Span<const LanguageName> LanguageNames() noexcept;
 // 쓸 수 없다.
 bool IsLanguageOwnedName(StringView name) noexcept;
 
+// 예약 이벤트 이름이다(`X.Changed`, §5.2).
+inline constexpr StringView ChangedEventName = "Changed";
+
 // 문맥 이름이다(3.4절 표).
 inline constexpr StringView ContextNames[] = {"World", "Session", "Input", "Time", "Caller"};
 

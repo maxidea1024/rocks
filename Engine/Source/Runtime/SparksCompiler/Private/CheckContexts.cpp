@@ -879,16 +879,27 @@ void TypeChecker::CollectBodyEffects(uint32 bodyIndex) noexcept {
             break;
         }
 
-        // `if`의 참 분기는 조건이 권한 시험이면 권한 구역이다.
-        const uint32 thenNode = entry.kind == SyntaxKind::If ? tree.Child(node, 1) : NoNode;
-        const bool authority =
-            entry.kind == SyntaxKind::If && IsAuthorityTest(module, tree.Child(node, 0));
+        // 권한 구역(3.15절): 권한 시험 `if`의 참 분기, 부정 권한 시험 `if`의 else 분기, 그리고
+        // 블록에서 "부정 권한 시험이면 반환"하는 `if` 뒤의 문장(조기 반환 관용구).
+        const bool isIf = entry.kind == SyntaxKind::If;
+        const uint32 thenNode = isIf ? tree.Child(node, 1) : NoNode;
+        const uint32 elseNode = isIf && entry.childCount > 2 ? tree.Child(node, 2) : NoNode;
+        const bool authority = isIf && IsAuthorityTest(module, tree.Child(node, 0));
+        const bool negated = isIf && IsNegatedAuthorityTest(module, tree.Child(node, 0));
+        bool guarded = false;
         for (const uint32 child : tree.Children(node)) {
             if (child == NoNode) {
                 continue;
             }
 
-            const bool childZone = zone || (authority && child == thenNode);
+            const bool childZone = zone || guarded || (authority && child == thenNode) ||
+                                   (negated && child == elseNode);
+            if (entry.kind == SyntaxKind::Block && tree.Node(child).kind == SyntaxKind::If &&
+                IsNegatedAuthorityTest(module, tree.Child(child, 0)) &&
+                AlwaysReturns(module, tree.Child(child, 1))) {
+                guarded = true;
+            }
+
             if (auto pushed = pending.TryPushBack((uint64(childZone ? 1 : 0) << 32) | child);
                 !pushed) {
                 binder_.error_ = pushed.Error();
@@ -1363,12 +1374,15 @@ void TypeChecker::CheckBodyContext(uint32 bodyIndex) noexcept {
         if (context == "pure") {
             forbidden = EffectBits::Write | EffectBits::ObjectWrite | EffectBits::EditWrite |
                         EffectBits::Emit | Await | EffectBits::Spawn | EffectBits::Acquire |
-                        EffectBits::Load | EffectBits::EngineCall | EffectBits::OneShotCall;
+                        EffectBits::Load | EffectBits::EngineCall | EffectBits::OneShotCall |
+                        EffectBits::Rpc;
         } else if (context == "worker") {
             forbidden = EffectBits::ObjectRef | EffectBits::Acquire | EffectBits::Load | Await |
-                        EffectBits::Emit;
+                        EffectBits::Emit | EffectBits::Rpc;
         } else if (context == "deterministic") {
-            forbidden = EffectBits::Io | EffectBits::AwaitOther | EffectBits::AwaitReady;
+            // RPC는 네트워크 송신이라 재생하면 다시 나간다.
+            forbidden =
+                EffectBits::Io | EffectBits::AwaitOther | EffectBits::AwaitReady | EffectBits::Rpc;
         }
 
         // 최상위 fn은 순수 계산 함수다(3.1절): 대기·발행·엔진 변경 API·객체 쓰기를 쓸 수 없다.
@@ -1381,6 +1395,7 @@ void TypeChecker::CheckBodyContext(uint32 bodyIndex) noexcept {
                    "Top-level functions are plain calculations; they never wait.",
                    "Remove 'async', or move the function into a class.");
         }
+
         if (topLevel) {
             forbidden |= Await | EffectBits::Emit | EffectBits::Spawn | EffectBits::Acquire |
                          EffectBits::Load | EffectBits::EngineCall | EffectBits::OneShotCall |
@@ -1396,17 +1411,30 @@ void TypeChecker::CheckBodyContext(uint32 bodyIndex) noexcept {
 
     CheckContext context;
     context.module = body.module;
+    // 같은 위치의 진단은 하나다(S0602·S1003 공통 — 알린 위치의 목록, 알림은 드물어 선형 검색).
+    Array<uint32> reported(allocator_);
+    auto firstAt = [&](uint32 node) noexcept {
+        const uint32 at = tree.Node(node).span.begin;
+        for (const uint32 previous : reported) {
+            if (previous == at) {
+                return false;
+            }
+        }
+
+        if (auto pushed = reported.TryPushBack(at); !pushed) {
+            binder_.error_ = pushed.Error();
+            return false;
+        }
+
+        return true;
+    };
     if (forbidden != 0 && binder_.Succeeded(where)) {
-        uint32 reportedAt = NumericLimits<uint32>::Max(); // 같은 위치의 진단은 하나
         for (uint32 index = body.firstSite; index < body.firstSite + body.siteCount; ++index) {
             const EffectSite& site = effectSites_[index];
             const uint32 bits = SiteEffects(site) & forbidden;
-            const uint32 at = tree.Node(site.node).span.begin;
-            if (bits == 0 || at == reportedAt) {
+            if (bits == 0 || !firstAt(site.node)) {
                 continue;
             }
-
-            reportedAt = at;
 
             StringView verb;
             for (const EffectText& text : EffectTexts) {
@@ -1433,14 +1461,17 @@ void TypeChecker::CheckBodyContext(uint32 bodyIndex) noexcept {
         }
     }
 
-    // 권한 구역 밖의 `@net` 쓰기(3.15절 S1003): 진입 본문(handler·hook·`@rpc` 함수)에서 본다.
+    // 권한 구역 밖의 `@net` 쓰기(3.15절 S1003): 진입 본문(handler·hook·`@rpc` 함수·엔진
+    // overridable 재정의·`@cheat` 함수)에서 본다.
     const bool entryBody =
-        handler || (body.symbol != NoSymbol && !RpcTarget(body.symbol).IsEmpty());
+        handler || (body.symbol != NoSymbol &&
+                    (!RpcTarget(body.symbol).IsEmpty() || OverridesEngineFunction(body.symbol) ||
+                     HasAttribute(body.module, body.node, "cheat")));
     if (entryBody) {
         const bool actor = binder_.EngineChainHas(body.owner, binder_.actor_);
         for (uint32 index = body.firstSite; index < body.firstSite + body.siteCount; ++index) {
             const EffectSite& site = effectSites_[index];
-            if ((SiteEffects(site) & EffectBits::NetWrite) == 0) {
+            if ((SiteEffects(site) & EffectBits::NetWrite) == 0 || !firstAt(site.node)) {
                 continue;
             }
 
@@ -1593,10 +1624,16 @@ bool TypeChecker::IsAuthorityTest(uint32 module, uint32 expression) const noexce
                IsAuthorityTest(module, tree.Child(expression, 1));
     }
 
-    auto hasAuthority = [&](uint32 node) noexcept {
+    // 이름이 아니라 Actor의 `HasAuthority`·Component의 `Owner` 심볼인지 본다(다른 타입의 같은
+    // 이름 필드는 권한 시험이 아니다).
+    auto engineMember = [&](uint32 node, uint32 owner, StringView name) noexcept {
         const uint32 symbol = c.NodeSymbol(module, node);
-        return symbol != NoSymbol && c.symbols_[symbol].kind == SymbolKind::EngineField &&
-               c.symbols_[symbol].name == "HasAuthority";
+        return symbol != NoSymbol && owner != NoSymbol &&
+               c.symbols_[symbol].kind == SymbolKind::EngineField &&
+               c.symbols_[symbol].owner == owner && c.symbols_[symbol].name == name;
+    };
+    auto hasAuthority = [&](uint32 node) noexcept {
+        return engineMember(node, binder_.actor_, "HasAuthority");
     };
     if (entry.kind == SyntaxKind::Identifier) {
         return hasAuthority(expression); // Actor 파생의 `HasAuthority`
@@ -1612,11 +1649,44 @@ bool TypeChecker::IsAuthorityTest(uint32 module, uint32 expression) const noexce
         object = tree.Child(object, 0);
     }
 
-    const uint32 owner = object == NoNode || tree.Node(object).kind != SyntaxKind::Identifier
-                             ? NoSymbol
-                             : c.NodeSymbol(module, object);
-    return owner != NoSymbol && c.symbols_[owner].kind == SymbolKind::EngineField &&
-           c.symbols_[owner].name == "Owner";
+    return object != NoNode && tree.Node(object).kind == SyntaxKind::Identifier &&
+           engineMember(object, binder_.component_, "Owner");
+}
+
+bool TypeChecker::IsNegatedAuthorityTest(uint32 module, uint32 expression) const noexcept {
+    const SyntaxTree& tree = compilation_.trees_[module];
+    while (expression != NoNode && tree.Node(expression).kind == SyntaxKind::Parenthesized) {
+        expression = tree.Child(expression, 0);
+    }
+
+    if (expression == NoNode) {
+        return false;
+    }
+
+    const SyntaxNode& entry = tree.Node(expression);
+    if (entry.kind == SyntaxKind::Binary && TokenText(module, expression) == "||") {
+        return IsNegatedAuthorityTest(module, tree.Child(expression, 0)) ||
+               IsNegatedAuthorityTest(module, tree.Child(expression, 1));
+    }
+
+    return entry.kind == SyntaxKind::Unary && TokenText(module, expression) == "!" &&
+           IsAuthorityTest(module, tree.Child(expression, 0));
+}
+
+bool TypeChecker::AlwaysReturns(uint32 module, uint32 statement) const noexcept {
+    // `return` 하나이거나 마지막 문장이 `return`인 블록이다(조기 반환 관용구의 모양만 본다).
+    const SyntaxTree& tree = compilation_.trees_[module];
+    if (statement == NoNode) {
+        return false;
+    }
+
+    if (tree.Node(statement).kind == SyntaxKind::Return) {
+        return true;
+    }
+
+    const SyntaxNode& entry = tree.Node(statement);
+    return entry.kind == SyntaxKind::Block && entry.childCount > 0 &&
+           AlwaysReturns(module, tree.Child(statement, entry.childCount - 1));
 }
 
 } // namespace rocks::sparks::detail

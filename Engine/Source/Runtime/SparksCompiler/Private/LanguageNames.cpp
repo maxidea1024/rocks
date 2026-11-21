@@ -72,9 +72,6 @@ constexpr StringView EngineReservedNames[] = {
     "Collider",    "World",        "Connection",       "PlaySession",    "Hit",
     "Error"};
 
-// 예약 이벤트 이름이다(`X.Changed`).
-constexpr StringView ChangedEventName = "Changed";
-
 constexpr StringView HookNames[] = {
     "Awake",          "Enable",        "Start",   "Tick",         "FixedTick",
     "LateTick",       "Disable",       "Destroy", "TriggerEnter", "TriggerExit",

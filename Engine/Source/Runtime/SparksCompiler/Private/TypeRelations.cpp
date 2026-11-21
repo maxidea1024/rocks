@@ -34,8 +34,8 @@ TypeChecker::TypeChecker(NameBinder& binder) noexcept
       extensionEvents_(binder.allocator_), effectBodies_(binder.allocator_),
       effectSites_(binder.allocator_), effectOfSymbol_(binder.allocator_),
       dispatchPairs_(binder.allocator_), resourceWaits_(binder.allocator_),
-      authorityHandlers_(binder.allocator_), dispatchFirst_(binder.allocator_),
-      dispatchBodies_(binder.allocator_) {
+      authorityHandlers_(binder.allocator_), storable_(binder.allocator_),
+      dispatchFirst_(binder.allocator_), dispatchBodies_(binder.allocator_) {
 }
 
 void TypeChecker::AppendDisplayType(StringBuilderBase& out, uint32 type) const noexcept {

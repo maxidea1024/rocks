@@ -1,6 +1,7 @@
 #include <Core/Text/EditDistance.h>
 
 #include "CompilationChecker.h"
+#include "LanguageNames.h"
 #include "TypeChecker.h"
 
 // 이벤트·hook 선언 규칙이다(Docs/Design/SparksLanguage.ko.md 3.12절): hook 이름·인자(S0803–S0805),
@@ -45,9 +46,6 @@ constexpr HookEntry HookEntries[] = {
 // 재진입 표시 attribute 이름이다(SD11).
 constexpr StringView SkipWhileBusyAttribute = "skipWhileBusy";
 constexpr StringView RestartAttribute = "restart";
-
-// 예약 이벤트 이름이다(§5.2).
-constexpr StringView ChangedEventName = "Changed";
 
 // hook 이름 제안의 편집 거리 상한이다.
 constexpr usize MaxHookSuggestionDistance = 2;

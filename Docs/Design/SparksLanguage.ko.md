@@ -959,11 +959,12 @@ Class<T> { fn Create(): T }             // full, T는 class 타입
 | 객체 쓰기 | 쓰기 중 참조 타입 값을 지나는 경로(다른 객체의 속성) |
 | 엔진 호출 | schema `pure`가 아닌 엔진 함수 호출 |
 | 입출력 | schema `effects`에 `io`·`wallClock`이 있는 함수 |
+| RPC 호출 | `Server.F(...)` 등 RPC 접두 호출(§3.15 — 네트워크 송신) |
 | 객체 참조 | 엔진 객체·Sparks class·interface 타입의 값(인자·지역·필드·`this`·문맥 이름)을 쓰는 것 |
 
 호출은 부른 함수의 효과를 더한다(호출 그래프의 전이 폐포, 재귀는 고정점). 수신자가 `this`가 아닌 다른 객체인 메서드 호출에서 부른 함수의 쓰기는 객체 쓰기다. `await`의 피연산자가 `async fn` 호출이면 그 `await` 자체는 대기 효과가 아니다. `open`·엔진 `overridable` 함수의 호출은 그 함수와 컴파일 안의 모든 `override`(여러 단계의 재정의 포함)의 효과를, interface 메서드(Sparks·엔진)의 호출은 그것을 구현한 모든 class 함수(상속한 함수로 구현한 것 포함)의 효과를 더한다(재정의·구현이 기반 문맥이 금지하는 동작을 숨길 수 없다). `override fn`은 자기 문맥 attribute가 없으면 재정의한 기반 함수 사슬의 문맥 attribute(`@pure`·`@worker`·`@deterministic`)를 따른다. 계산은 호출 그래프의 역방향 worklist로 하므로 사슬 길이와 무관하게 간선 수에 비례한다. S0601을 받은 `await`는 효과로 전하지 않는다(부르는 쪽의 연쇄 방지). 대기를 만드는 호출(`async fn`을 `All`·`Race`의 인자로 넘기는 것 포함)도 부른 것이다.
 
-**문맥.** 다음 본문은 표의 효과를 쓸 수 없다. 직접 쓰면 그 자리(`await`·`emit`·대입·호출)에, 호출이 가져오면 그 호출에 S0602를 내며 메시지는 문맥과 효과, 호출이면 부른 함수 이름을 적는다(호출 하나에 진단 하나, 같은 위치에도 하나 — 걸린 효과 중 더 구체적인 것: 대기, 생성, 자원 획득, 로드, 발행, 직렬화 필드 쓰기, 객체 쓰기, 쓰기, 엔진 호출, 일회성 효과, 입출력, 객체 참조 순).
+**문맥.** 다음 본문은 표의 효과를 쓸 수 없다. 직접 쓰면 그 자리(`await`·`emit`·대입·호출)에, 호출이 가져오면 그 호출에 S0602를 내며 메시지는 문맥과 효과, 호출이면 부른 함수 이름을 적는다(호출 하나에 진단 하나, 같은 위치에도 하나 — 걸린 효과 중 더 구체적인 것: 대기, 생성, 자원 획득, 로드, 발행, 직렬화 필드 쓰기, 객체 쓰기, 쓰기, 엔진 호출, 일회성 효과, RPC 호출, 입출력, 객체 참조 순). 같은 위치에 S0602와 S1003(§3.15)이 함께 걸리면 S0602 하나만 낸다.
 
 | 본문 | 금지 효과 |
 |---|---|
@@ -976,9 +977,9 @@ Class<T> { fn Create(): T }             // full, T는 class 타입
 | `on Destroy` | 대기·준비 대기·생성·자원 획득·발행·객체 쓰기·엔진 호출(schema `pure`·`oneShot` 함수는 된다) |
 | `on Validate` (full) | 대기·준비 대기·생성·입출력·직렬화 필드(`@edit`·`@save`·`@net`) 쓰기·RPC 호출(§3.15) |
 | 최상위 `fn` | 대기·준비 대기·발행·생성·자원 획득·로드·엔진 호출·일회성 효과·객체 쓰기(§3.1 "순수 계산 함수"). 최상위 `async fn`은 S0601이다. `@test` 함수는 시험 World의 진입점이라 이 제한이 없다(§13) |
-| `@pure fn` (full) | 쓰기·발행·대기·준비 대기·생성·자원 획득·로드·엔진 호출·일회성 효과 |
-| `@worker fn` (full) | 객체 참조·자원 획득·로드·대기·준비 대기·발행 |
-| `@deterministic fn` (full) | 입출력·대기(`NextFixedTick()`의 대기만 된다)·준비 대기. `Random`은 instance별 결정적 stream이므로 된다(§6.3) |
+| `@pure fn` (full) | 쓰기·발행·대기·준비 대기·생성·자원 획득·로드·엔진 호출·일회성 효과·RPC 호출 |
+| `@worker fn` (full) | 객체 참조·자원 획득·로드·대기·준비 대기·발행·RPC 호출 |
+| `@deterministic fn` (full) | 입출력·대기(`NextFixedTick()`의 대기만 된다)·준비 대기·RPC 호출(재생하면 다시 보낸다). `Random`은 instance별 결정적 stream이므로 된다(§6.3) |
 
 **`await`를 쓸 수 있는 곳(S0601).** `await`는 `async fn`과 handler·hook 본문에만 쓴다. 그 밖(`async`가 아닌 `fn`)의 `await`는 S0601이며 `async fn`으로 선언하라고 제시한다. hook 문맥이 대기를 금지하는 것은 S0602다.
 
@@ -1014,19 +1015,23 @@ Class<T> { fn Create(): T }             // full, T는 class 타입
 
 이 절은 §14의 복제 필드·권한 구역(SD45)·RPC와 §15의 저장 가능 타입을 컴파일러가 판정하는 방식으로 확정한다. 진단 코드는 §8.1의 S10xx다. 뒤로 넘기는 것: 저장 호환성(필드 삭제 `retire`·형식 변경 migration — 이전 빌드의 ID manifest가 필요하다, LC4 §12.2), 실행 중 권한 판정·`ContractViolation`(LC6·연동), interest set·빈도 제한(연동 EI7).
 
-**저장 가능 타입(S1001).** `bool`·숫자 타입·수학 타입(`vec2`–`vec4`·`quat`·`Rotator`·`Color`·`Transform`)·`string`·enum(Sparks·엔진)·`Tag`·`TagSet`·`Soft<T>`·`Row<T>`, 그 `T?`, 이들로만 된 struct(Sparks·엔진)와 `Array`·`Map`·`Set`이다. `@save` 필드의 타입이 아니면 S1001이며 위치는 타입 표기(없으면 필드 이름)다. 엔진 객체·Sparks class·interface, 로드한 에셋 값(`T` — `Soft<T>`를 제시), `Text`, `Result`, 유지 자원은 저장할 수 없다.
+**저장 가능 타입(S1001).** `bool`·숫자 타입·수학 타입(`vec2`–`vec4`·`quat`·`mat4`·`Rotator`·`Color`·`Transform`)·`string`·enum(Sparks·엔진)·`Clock`·`Tag`·`TagSet`·`Soft<T>`·`Row<T>`·`Class<T>`(클래스 경로로 저장 — UE `TSubclassOf`), 그 `T?`, 이들로만 된 struct(Sparks·엔진)와 `Array`·`Map`·`Set`이다. 컨테이너를 거쳐 자기 자신을 담는 struct(`struct Tree { var Kids: Array<Tree>; }` — S0426은 컨테이너를 거친 것을 순환으로 보지 않는다)도 저장 가능하다: 판정은 타입마다 한 번 하고 계산 중인 타입은 가능으로 본다. `@save` 필드의 타입이 아니면 S1001이며 위치는 타입 표기(없으면 필드 이름)다. 엔진 객체·Sparks class·interface, 로드한 에셋 값(`T` — `Soft<T>`를 제시), `Text`, `Result`, 유지 자원은 저장할 수 없다. 유지 자원을 타입 인자로 담은 타입은 S0904(§3.14)만 내고 S1001·S1002를 더하지 않는다.
 
-**복제 타입(S1002).** `@net` 필드와 RPC 함수의 매개변수는 저장 가능 타입에 객체 참조(엔진 객체·Sparks class·interface, 그 `T?`, 그것을 담은 컨테이너·struct)를 더한 타입만 쓴다. 로드한 에셋 값은 S1002이며 `Soft<T>`를 제시한다. RPC 함수의 반환 타입은 `void`뿐이다(S1002).
+**복제 타입(S1002).** `@net` 필드와 RPC 함수의 매개변수는 저장 가능 타입에 객체 참조(엔진 객체·Sparks class·interface, 그 `T?`, 그것을 담은 컨테이너·struct)를 더한 타입만 쓴다. 로드한 에셋 값은 S1002이며 `Soft<T>`를 제시한다. RPC 함수의 반환 타입은 `void`뿐이다(`: void`는 쓸 수 있다 — §3.4, 다른 반환 타입은 S1002).
 
 **권한 구역(S1003, SD45).** `@net` 필드(자기 필드 — 이름만 쓴 것이나 그 값 타입 경로·변경 메서드)의 쓰기는 권한 구역 안에서만 한다. 권한 구역은 다음이다.
 
-- 조건이 권한 시험이거나 `&&`의 한 항이 권한 시험인 `if`의 참 분기(괄호 무시). 권한 시험은 `Owner.HasAuthority`(component)와 `HasAuthority`(Actor 파생 — 엔진 필드)의 읽기다. `on Disable`·`on Destroy` 안에서도 같다.
+- 조건이 권한 시험이거나 `&&`의 한 항이 권한 시험인 `if`의 참 분기(괄호 무시). 권한 시험은 `Owner.HasAuthority`(component)와 `HasAuthority`(Actor 파생)의 읽기이며, 이름이 아니라 바인더가 정한 엔진 심볼(Component의 `Owner`, Actor의 `HasAuthority`)로 판정한다. 구역 안의 중첩 `if`·`else if` 사슬의 갈래도 구역이다. `on Disable`·`on Destroy` 안에서도 같다.
+- 조건이 부정 권한 시험(`!` 권한 시험, 또는 그것을 한 항으로 둔 `||`)인 `if`의 else 분기.
+- 조기 반환 관용구: 블록 안에서 조건이 부정 권한 시험이고 참 분기가 반드시 `return`으로 끝나는(`return` 하나이거나 마지막 문장이 `return`인 블록) `if` 뒤의 같은 블록 문장(UE의 `if (!HasAuthority()) return;`).
 - 서버 RPC(`@rpc(Server ...)`) 본문.
 - `@authorityOnly` 이벤트(멤버·확장)와 schema `publisher: "server"` 엔진 이벤트의 handler 본문.
 
-함수의 `@net` 쓰기는 LC3b 효과처럼 호출로 전해지며, 권한 구역 안의 호출은 그 쓰기를 전하지 않는다. 진입 본문(hook·handler·`@rpc` 함수)에 권한 구역 밖의 `@net` 쓰기가 남으면 그 자리(대입·호출)에 S1003이고 `if (Owner.HasAuthority)`(Actor 파생은 `if (HasAuthority)`) 감싸기를 제시한다. 어느 진입 본문에서도 부르지 않는 함수는 판정하지 않는다.
+`||`의 한 항인 권한 시험과 `!` 권한 시험의 참 분기는 구역이 아니다. 함수의 `@net` 쓰기는 LC3b 효과처럼 호출로 전해지며, 권한 구역 안의 호출은 그 쓰기를 전하지 않는다. 다른 객체의 함수 호출(`other.SetOpen()`)이 가져오는 그 객체의 `@net` 쓰기도 같다: 권한은 서버·클라이언트 world 단위이므로 자기 객체의 권한 시험이 구역을 연다. 진입 본문(hook·handler·`@rpc` 함수, 엔진 `overridable` 함수의 재정의, `@cheat` 함수 — 엔진이 직접 부르는 본문)에 권한 구역 밖의 `@net` 쓰기가 남으면 그 자리(대입·호출)에 S1003이고 `if (Owner.HasAuthority)`(Actor 파생은 `if (HasAuthority)`) 감싸기를 제시한다. `@editorButton`은 편집기 world(항상 권한이 있다)에서만 돌므로 진입 본문이 아니다. 어느 진입 본문에서도 부르지 않는 함수는 판정하지 않는다.
 
-**RPC 호출(S1004).** RPC는 자기 객체의 `@rpc` 함수를 그 대상 접두로만 부른다: `@rpc(Server)`는 `Server.F(...)`, `@rpc(AllClients)`는 `AllClients.F(...)`, `@rpc(OwnerClient)`는 `OwnerClient.F(...)`. 접두 없이 부르기, 다른 대상 접두, `@rpc`가 아닌 함수에 접두, 접두 뒤의 멤버가 함수가 아닌 것은 S1004다. RPC 호출은 보내기만 하므로 부른 쪽 본문에 그 함수의 효과를 더하지 않고 효과 "RPC 호출"이 된다(`on Validate`가 금지 — §3.13).
+**RPC 호출(S1004).** RPC는 자기 객체의 `@rpc` 함수를 그 대상 접두로만 부른다: `@rpc(Server)`는 `Server.F(...)`, `@rpc(AllClients)`는 `AllClients.F(...)`, `@rpc(OwnerClient)`는 `OwnerClient.F(...)`(접두를 괄호로 감싸도 같다). 접두 없이 부르기, 다른 대상 접두, `@rpc`가 아닌 함수에 접두, 접두 뒤의 멤버가 함수가 아닌 것(`Server.Open` 필드), 자기 객체가 없는 곳(최상위 `fn`, struct 메서드)의 접두는 S1004다. `@rpc` 함수를 재정의한 `override fn`은 `@rpc`를 다시 쓰지 않아도 기반의 RPC 대상을 잇는다(UE처럼 재정의는 RPC의 구현만 바꾼다 — 서버 RPC의 재정의 본문도 권한 구역이다). `async` RPC는 S0621이다(RPC는 보내기만 한다). RPC 호출은 보내기만 하므로 부른 쪽 본문에 그 함수의 효과를 더하지 않고 효과 "RPC 호출"이 된다(`on Validate`·`@pure`·`@worker`·`@deterministic`이 금지 — §3.13).
+
+**`Caller`.** RPC 본문의 문맥 이름 `Caller`는 LC3에서 이름·위치 모양만 본다. 보낸 연결의 실제 검증(소유 연결인지)은 실행 중 판정이라 네트워크 연동(EI7)에서 정한다.
 
 ## 4. 타입·참조·값
 

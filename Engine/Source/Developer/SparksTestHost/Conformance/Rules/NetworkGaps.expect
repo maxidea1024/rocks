@@ -1,0 +1,24 @@
+# Authority, RPC and storage gaps (3.15): recursive structs through containers, Class<T>, mat4, Clock, maps,
+# sets, engine structs and enums are saveable; interfaces replicate but are not saved; held type arguments are
+# reported once (S0904); authority zones include nested ifs, else-if, the else of a negated test and the code after
+# 'if (!HasAuthority) { return; }', but not '||' or '!' bodies; Changed handlers, '@cheat' functions and engine
+# overrides are entry bodies, '@editorButton' is not; calls on other objects count; server-published engine events
+# and '@authorityOnly' self events are authority zones; overrides keep the base RPC target; '(Server).F()' works; a
+# field after a prefix, prefixes outside classes and RPCs from '@pure' are errors; one diagnostic per position.
+error S1001 22:15
+error S1001 24:23
+error S1001 27:23
+error S0904 28:27
+error S1003 58:13
+error S1003 62:13
+error S1003 92:9
+error S1003 102:13
+error S1004 107:9
+error S1003 112:9
+error S1003 121:9
+error S0602 130:9
+error S0602 130:20
+error S0602 134:9
+error S0602 138:9
+error S1004 169:9
+error S1004 174:5

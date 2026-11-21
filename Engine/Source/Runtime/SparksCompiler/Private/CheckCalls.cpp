@@ -408,9 +408,13 @@ ExpressionValue TypeChecker::JudgeCall(const CheckContext& context, uint32 node,
     case K::Function:
         // RPC는 대상 접두로만 부른다(3.15절 S1004).
         if (rules_ && !RpcTarget(callee.symbol).IsEmpty()) {
-            const uint32 object = tree.Node(calleeNode).kind == SyntaxKind::Member
-                                      ? tree.Child(calleeNode, 0)
-                                      : NoNode;
+            uint32 object = tree.Node(calleeNode).kind == SyntaxKind::Member
+                                ? tree.Child(calleeNode, 0)
+                                : NoNode;
+            while (object != NoNode && tree.Node(object).kind == SyntaxKind::Parenthesized) {
+                object = tree.Child(object, 0);
+            }
+
             const uint32 prefix =
                 object == NoNode ? NoSymbol : compilation_.NodeSymbol(context.module, object);
             if (prefix == NoSymbol || compilation_.symbols_[prefix].kind != SymbolKind::RpcPrefix) {

@@ -102,6 +102,11 @@
               "type": "Collider"
             }
           ]
+        },
+        {
+          "name": "Respawned",
+          "id": "5a7e000000000000000000000000020a",
+          "publisher": "server"
         }
       ]
     },
