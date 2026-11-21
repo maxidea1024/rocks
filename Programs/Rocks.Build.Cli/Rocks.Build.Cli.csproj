@@ -3,4 +3,8 @@
   <ItemGroup>
     <ProjectReference Include="../Rocks.Build.Abstractions/Rocks.Build.Abstractions.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Writes Rocks.slnx (Docs/Design/ProjectFiles.ko.md section 6.1; the same package UnrealBuildTool uses). -->
+    <PackageReference Include="Microsoft.VisualStudio.SolutionPersistence" Version="1.0.52" />
+  </ItemGroup>
 </Project>
