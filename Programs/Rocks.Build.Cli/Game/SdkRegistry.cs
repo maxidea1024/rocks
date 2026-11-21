@@ -98,6 +98,7 @@ internal static class SdkRegistries
             }
             catch (IOException error) when (Contended(error) && waited.Elapsed < LockLimit)
             {
+                ContentionObserved?.Invoke(lockFile);
                 Thread.Sleep(LockRetry);
             }
             catch (IOException error) when (Contended(error))
@@ -117,6 +118,9 @@ internal static class SdkRegistries
     private static bool Contended(IOException error) => OperatingSystem.IsWindows()
         ? error.HResult is SharingViolation or LockViolation
         : error.HResult is UnixWouldBlockLinux or UnixWouldBlockMac;
+
+    /// <summary>시험 hook: 다른 핸들이 잠금 파일을 쥐어 다시 열어 볼 때마다 부른다(경합을 시간 대기 없이 관찰한다).</summary>
+    internal static Action<string>? ContentionObserved { get; set; }
 
     /// <summary>레지스트리 등록부 잠금(%LOCALAPPDATA%의 Rocks/SdkRegistry.lock) 안에서 읽기-고치기-쓰기를 한다.</summary>
     internal static T ExclusiveRegistry<T>(Func<T> change) =>

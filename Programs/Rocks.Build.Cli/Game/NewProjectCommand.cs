@@ -47,7 +47,8 @@ internal static class NewProjectCommand
 
     // 소문자 형(namespace)이 될 수 없는 매크로·전역 이름이다: 표준 C(errno·stdin·stdout·stderr), Windows 헤더(near·far·interface),
     // GNU 사전 정의(linux·unix). 매크로로 바뀌면 생성 코드가 깨진다.
-    private static readonly HashSet<string> MacroNames = new(["errno", "stdin", "stdout", "stderr", "near", "far", "interface", "linux", "unix"],
+    private static readonly HashSet<string> MacroNames = new(["errno", "stdin", "stdout", "stderr", "near", "far", "interface", "linux", "unix", "small", "hyper",
+        "pascal", "cdecl"],
         StringComparer.Ordinal);
 
     // 소문자 형이 namespace가 되므로 C++ 키워드와 같으면 안 된다(C++23 키워드와 대체 토큰).
