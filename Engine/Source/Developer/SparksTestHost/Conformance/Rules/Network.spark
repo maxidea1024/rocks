@@ -1,0 +1,108 @@
+event Actor.Hailed(by: Actor);
+@authorityOnly event Actor.Ordered(by: Actor);
+
+struct Stats {
+    var Level: int = 1;
+    var Tags2: TagSet;
+}
+
+struct Linked {
+    var Peer: Actor?;
+}
+
+class Door : ScriptableComponent {
+    @net var Open = false;
+    @net(OwnerOnly) var Secret = 0;
+    @net var Target: Actor?;
+    @net var Info = Stats();
+    @net var Icon: Soft<DataAsset>?;
+    @save var Count = 0;
+    @save var Names: Array<string> = [];
+    @save var Saved = Stats();
+    @save var Where: Soft<DataAsset>?;
+    @save var Who: Actor?;
+    @save var Link = Linked();
+    @save var Words: Text?;
+    @net var Loaded: DataAsset?;
+    var Local = 0;
+
+    on Enable() {
+        Local = 1;
+        if (Owner.HasAuthority) {
+            Open = true;
+            Info.Level = 2;
+        }
+
+        if (Owner.HasAuthority && Local > 0) {
+            Secret = 1;
+        } else {
+            Secret = 2;
+        }
+
+        Open = false;
+        SetOpen();
+        if ((Owner.HasAuthority)) {
+            SetOpen();
+        }
+    }
+
+    fn SetOpen() {
+        Open = true;
+    }
+
+    on Owner.Ordered(by: Actor) {
+        _ = by;
+        Open = true;
+    }
+
+    on Owner.Hailed(by: Actor) {
+        _ = by;
+        Open = true;
+    }
+
+    @rpc(Server, Reliable) fn RequestOpen(by: Actor?) {
+        _ = by;
+        Open = true;
+    }
+
+    @rpc(AllClients) fn Announce(level: int) {
+        _ = level;
+        Open = true;
+    }
+
+    @rpc(OwnerClient) fn Tell(asset: DataAsset) {
+        _ = asset;
+    }
+
+    @rpc(Server) fn Ask(): int {
+        return 1;
+    }
+
+    fn Plain() {
+    }
+
+    on Tick() {
+        Server.RequestOpen(null);
+        AllClients.Announce(1);
+        RequestOpen(null);
+        AllClients.RequestOpen(null);
+        Server.Plain();
+        Server.Missing();
+    }
+
+    on Validate() {
+        Server.RequestOpen(null);
+    }
+}
+
+class Gate : Actor {
+    @net var Up = false;
+
+    on Enable() {
+        if (HasAuthority) {
+            Up = true;
+        }
+
+        Up = false;
+    }
+}

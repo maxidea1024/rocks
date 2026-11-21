@@ -701,6 +701,24 @@ void TypeChecker::CheckPathHandler(const CheckContext& context, uint32 handler) 
 
     CheckHandlerParameters(context, handler, name, expected.View(),
                            DiagnosticCode::HandlerSignature);
+    // 권한 이벤트(`@authorityOnly`·server 발행)의 handler 본문은 권한 구역이다(3.15절).
+    if (!changed) {
+        const Symbol& resolved = c.symbols_[event];
+        const bool authority =
+            (resolved.kind == SymbolKind::Event &&
+             HasAttribute(resolved.module, resolved.node, "authorityOnly")) ||
+            (resolved.kind == SymbolKind::EngineEvent &&
+             c.schemas_[resolved.index].schema.Events()[resolved.item].publisher ==
+                 SchemaPublisher::Server);
+        if (authority) {
+            if (auto pushed =
+                    authorityHandlers_.TryPushBack((uint64(context.module) << 32) | handler);
+                !pushed) {
+                binder_.error_ = pushed.Error();
+                return;
+            }
+        }
+    }
     CheckReentrancy(context, handler, !changed,
                     ContainsAwait(context.module, tree.Child(handler, 4)), path);
 }

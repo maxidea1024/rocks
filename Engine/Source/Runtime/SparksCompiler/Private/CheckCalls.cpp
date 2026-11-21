@@ -178,6 +178,10 @@ ExpressionValue TypeChecker::MemberOfValue(const CheckContext& context, uint32 n
     uint32 member = NoSymbol;
     if (receiver.kind == K::Namespace) {
         const Symbol& entry = compilation_.symbols_[receiver.symbol];
+        if (entry.kind == SymbolKind::RpcPrefix) {
+            return RpcMember(context, node, receiver.symbol, name);
+        }
+
         if (entry.kind == SymbolKind::Alias) {
             member = binder_.FindName(SpaceKey(NameSpaceKind::ModuleTop, entry.index), name);
         } else {
@@ -402,6 +406,26 @@ ExpressionValue TypeChecker::JudgeCall(const CheckContext& context, uint32 node,
 
     switch (callee.kind) {
     case K::Function:
+        // RPC는 대상 접두로만 부른다(3.15절 S1004).
+        if (rules_ && !RpcTarget(callee.symbol).IsEmpty()) {
+            const uint32 object = tree.Node(calleeNode).kind == SyntaxKind::Member
+                                      ? tree.Child(calleeNode, 0)
+                                      : NoNode;
+            const uint32 prefix =
+                object == NoNode ? NoSymbol : compilation_.NodeSymbol(context.module, object);
+            if (prefix == NoSymbol || compilation_.symbols_[prefix].kind != SymbolKind::RpcPrefix) {
+                StringBuilder<CompilationMessageInlineBytes> fix(allocator_);
+                fix.AppendFormat("Write '{}.{}(...)'.", RpcTarget(callee.symbol),
+                                 compilation_.symbols_[callee.symbol].name);
+                if (binder_.Succeeded(fix)) {
+                    Report(context, DiagnosticCode::RpcCall, calleeNode,
+                           "An RPC is called with its target prefix.",
+                           "The prefix shows at the call that the function runs elsewhere.",
+                           fix.View());
+                }
+            }
+        }
+
         // 값 타입 경로를 바꾸는 변경 메서드는 그 경로가 쓸 수 있어야 한다(3.11절).
         if (callee.instance && IsMutatingMember(callee.symbol) &&
             tree.Node(calleeNode).kind == SyntaxKind::Member) {

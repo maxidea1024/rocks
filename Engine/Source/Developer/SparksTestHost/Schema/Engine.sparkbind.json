@@ -281,6 +281,11 @@
       "kind": "asset"
     },
     {
+      "name": "HandleBase",
+      "id": "5a7e00000000000000000000000002d0",
+      "kind": "object"
+    },
+    {
       "name": "LoopHandle",
       "id": "5a7e00000000000000000000000002e0",
       "kind": "object",
@@ -296,7 +301,8 @@
           "returns": "bool",
           "pure": true
         }
-      ]
+      ],
+      "base": "HandleBase"
     },
     {
       "name": "AudioSystem",

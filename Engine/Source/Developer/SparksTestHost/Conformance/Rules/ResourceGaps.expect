@@ -1,0 +1,9 @@
+# Resource gaps (3.13, 3.14): an interface call reaches an inherited implementation, 'if (let)' acquisitions wait in
+# the then block, a held resource cannot be kept in a base type name, a wait counts only if it really suspends
+# (awaiting an async function that never waits does not), '?? return' acquisitions, and '@test' top-level
+# functions may wait.
+error S0602 22:9
+error S0905 29:13
+error S0905 41:17
+error S0902 45:36
+error S0902 47:17

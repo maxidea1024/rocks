@@ -507,6 +507,9 @@ private:
         type.scriptExtensible = allowExtensible && ReadBool(object, "scriptExtensible", false);
         type.constructible = !allowConstructible || ReadBool(object, "constructible", true);
         type.held = allowHeld && ReadBool(object, "held", false);
+        if (type.held && type.scriptExtensible) {
+            ReportAt(object.Find("held"), "A held resource type is not script extensible.");
+        }
 
         memberNames_.Clear();
         type.firstField = static_cast<uint32>(out_.fields_.Size());

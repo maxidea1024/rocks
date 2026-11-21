@@ -108,7 +108,8 @@ void TypeChecker::CheckResources(uint32 module) noexcept {
                 continue;
             }
 
-            const uint32 owner = parent[parent[node]];
+            const uint32 list = parent[node];
+            const uint32 owner = list == NoNode ? NoNode : parent[list];
             const bool inClass = owner != NoNode && tree.Node(owner).kind == SyntaxKind::Class;
             const bool attributes = HasAttribute(module, node, "save") ||
                                     HasAttribute(module, node, "edit") ||
@@ -159,27 +160,10 @@ void TypeChecker::CheckResources(uint32 module) noexcept {
                 continue;
             }
 
-            const uint32 block = parent[node];
-            bool waits = false;
-            bool after = false;
-            if (block != NoNode && tree.Node(block).kind == SyntaxKind::Block) {
-                for (const uint32 statement : tree.Children(block)) {
-                    waits = waits || (after && ContainsAwait(module, statement));
-                    after = after || statement == node;
-                }
-            }
-
-            if (!waits) {
-                StringBuilder<CompilationMessageInlineBytes> message(allocator_);
-                message.AppendFormat("'{}' stops at the end of this block without waiting.",
-                                     c.symbols_[local].name);
-                if (binder_.Succeeded(message)) {
-                    Report(context, DiagnosticCode::ResourceWithoutWait, nameNode, message.View(),
-                           "A local held resource stops when its block ends; without 'await' it "
-                           "stops in the same script step.",
-                           "Keep it in a 'var' field to hold it, or add 'await Delay(...)' to "
-                           "hold it for a while.");
-                }
+            // 기다리는지는 효과 분석 뒤에 본다(실제로 정지하는 await — CheckResourceWaits).
+            if (auto pushed = resourceWaits_.TryPushBack((uint64(module) << 32) | node); !pushed) {
+                binder_.error_ = pushed.Error();
+                return;
             }
 
             continue;
@@ -204,7 +188,23 @@ void TypeChecker::CheckResources(uint32 module) noexcept {
         const SyntaxNode& upEntry = tree.Node(up);
         if (entry.kind == SyntaxKind::Call) {
             // 획득(담는 자리 — 규칙 1).
+            // 받는 이름의 타입도 유지 자원 타입이어야 한다(기반 타입으로 담아 옮기는 길을 막는다).
             if (upEntry.kind == SyntaxKind::LocalVariable && tree.Child(up, 2) == self) {
+                const uint32 nameNode = tree.Child(up, 0);
+                const uint32 local = nameNode == NoNode ? NoSymbol : c.NodeSymbol(module, nameNode);
+                if (local == NoSymbol || IsHeldType(c.symbols_[local].type)) {
+                    continue;
+                }
+            }
+
+            // `if (let s = World.Audio.StartLoop(...))`: binding이 담고 then 블록이 끝나면 멈춘다.
+            if (upEntry.kind == SyntaxKind::IfLet && tree.Child(up, 1) == self) {
+                if (auto pushed = resourceWaits_.TryPushBack((uint64(module) << 32) | up);
+                    !pushed) {
+                    binder_.error_ = pushed.Error();
+                    return;
+                }
+
                 continue;
             }
 
@@ -235,7 +235,8 @@ void TypeChecker::CheckResources(uint32 module) noexcept {
                 const bool request = IsLanguage(NonOptional(type), "LoadRequest");
                 const bool varLocal =
                     kind == SymbolKind::Local && (c.symbols_[symbol].flags & SymbolFlags::Let) == 0;
-                if (varLocal || (kind == SymbolKind::Field && !request)) {
+                if ((varLocal || (kind == SymbolKind::Field && !request)) &&
+                    IsHeldType(c.symbols_[symbol].type)) {
                     continue;
                 }
             }
@@ -281,6 +282,69 @@ void TypeChecker::CheckResources(uint32 module) noexcept {
     }
 }
 
+void TypeChecker::CheckResourceWaits() noexcept {
+    // 획득한 지역 자원(지역 선언·`if (let)` binding) 뒤에 실제로 정지하는 await가 있는지다(S0905).
+    const Compilation& c = compilation_;
+    for (const uint64 key : resourceWaits_) {
+        if (binder_.error_ != ErrorCode::None) {
+            return;
+        }
+
+        const uint32 module = static_cast<uint32>(key >> 32);
+        const uint32 node = static_cast<uint32>(key);
+        const SyntaxTree& tree = c.trees_[module];
+        CheckContext context;
+        context.module = module;
+        bool waits = false;
+        uint32 nameNode = tree.Child(node, 0);
+        if (tree.Node(node).kind == SyntaxKind::IfLet) {
+            // then 블록(If의 둘째 자식)이 그 binding의 범위다.
+            for (uint32 candidate = node + 1; candidate < tree.NodeCount(); ++candidate) {
+                if (tree.Node(candidate).kind == SyntaxKind::If &&
+                    tree.Child(candidate, 0) == node) {
+                    waits = StatementWaits(module, tree.Child(candidate, 1));
+                    break;
+                }
+            }
+        } else {
+            // 같은 블록의 뒤 문장들(블록 노드는 자식 뒤에 만들어진다 — 뒤에서 찾는다).
+            for (uint32 candidate = node + 1; candidate < tree.NodeCount() && !waits; ++candidate) {
+                if (tree.Node(candidate).kind != SyntaxKind::Block) {
+                    continue;
+                }
+
+                bool after = false;
+                bool found = false;
+                for (const uint32 statement : tree.Children(candidate)) {
+                    found = found || statement == node;
+                    waits = waits || (after && StatementWaits(module, statement));
+                    after = after || statement == node;
+                }
+
+                if (found) {
+                    break;
+                }
+            }
+        }
+
+        if (waits || nameNode == NoNode) {
+            continue;
+        }
+
+        const uint32 local = c.NodeSymbol(module, nameNode);
+        StringBuilder<CompilationMessageInlineBytes> message(allocator_);
+        message.AppendFormat("'{}' stops at the end of this block without waiting.",
+                             local == NoSymbol ? StringView("This") : c.symbols_[local].name);
+        if (binder_.Succeeded(message)) {
+            Report(context, DiagnosticCode::ResourceWithoutWait, nameNode, message.View(),
+                   "A local held resource stops when its block ends; without a wait it stops in "
+                   "the same script step.",
+                   "Keep it in a 'var' field to hold it, or add 'await Delay(...)' to hold it for "
+                   "a while.");
+        }
+    }
+}
+
 void TypeChecker::CheckAcquireReturns() noexcept {
     const Compilation& c = compilation_;
     for (uint32 id = 0; id < c.symbols_.Size() && binder_.error_ == ErrorCode::None; ++id) {
@@ -291,16 +355,48 @@ void TypeChecker::CheckAcquireReturns() noexcept {
 
         const auto& schema = c.schemas_[entry.index];
         const SchemaFunction& function = schema.schema.Functions()[entry.item];
-        if ((function.effects & SchemaEffects::Acquire) == 0 ||
-            IsHeldType(c.signatures_[entry.signature].returnType)) {
+        const bool acquire = (function.effects & SchemaEffects::Acquire) != 0;
+        const bool held = IsHeldType(c.signatures_[entry.signature].returnType);
+        if (acquire == held) {
             continue;
         }
 
         binder_.Report(DiagnosticCode::InvalidBindingSchema, schema.source,
                        function.returnsSpan.end != 0 ? function.returnsSpan : function.span,
-                       "An 'acquire' function returns a held resource type.",
+                       acquire ? StringView("An 'acquire' function returns a held resource type.")
+                               : StringView("A function that returns a held resource is marked "
+                                            "'acquire'."),
                        "Acquiring returns the held resource that the caller keeps.",
-                       "Return a type marked 'held: true', or remove 'acquire'.");
+                       acquire
+                           ? StringView("Return a type marked 'held: true', or remove 'acquire'.")
+                           : StringView("Add 'acquire' to 'effects'."));
+    }
+}
+
+void TypeChecker::CheckHeldEvents() noexcept {
+    // 엔진 이벤트는 유지 자원을 인자로 넘기지 않는다(handler가 받을 수 없다 — S1120).
+    const Compilation& c = compilation_;
+    for (uint32 id = 0; id < c.symbols_.Size() && binder_.error_ == ErrorCode::None; ++id) {
+        const Symbol& entry = c.symbols_[id];
+        if (entry.kind != SymbolKind::EngineEvent || entry.signature == NoSignature) {
+            continue;
+        }
+
+        const Signature& signature = c.signatures_[entry.signature];
+        for (uint32 index = 0; index < signature.parameterCount; ++index) {
+            if (!IsHeldType(c.signatureParameters_[signature.firstParameter + index])) {
+                continue;
+            }
+
+            const auto& schema = c.schemas_[entry.index];
+            binder_.Report(DiagnosticCode::InvalidBindingSchema, schema.source,
+                           schema.schema.Events()[entry.item].span,
+                           "An event cannot pass a held resource.",
+                           "A handler could not keep it: held resources live only in the "
+                           "variable that acquired them.",
+                           "Pass a value or an object reference instead.");
+            break;
+        }
     }
 }
 

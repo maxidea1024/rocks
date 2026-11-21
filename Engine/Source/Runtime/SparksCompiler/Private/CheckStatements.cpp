@@ -232,7 +232,9 @@ void TypeChecker::Run() noexcept {
 
     if (rules_ && binder_.error_ == ErrorCode::None) {
         AnalyzeEffects();      // 3.13절 S0601–S0603
+        CheckResourceWaits();  // 3.14절 S0905(실제로 정지하는 await)
         CheckAcquireReturns(); // 3.14절 schema `acquire`
+        CheckHeldEvents();     // 3.14절 schema 이벤트 인자
     }
 }
 
@@ -404,6 +406,7 @@ void TypeChecker::CheckModule(uint32 module) noexcept {
         if (rules_) {
             CheckAttributes(module); // 3.13절 S0620–S0623(attribute 인자의 const 사용을 표시한다)
             CheckResources(module);  // 3.14절 S0901–S0905
+            CheckNetwork(module);    // 3.15절 S1001·S1002
         }
 
         CheckUnusedImports(module); // 3.11절 S0714

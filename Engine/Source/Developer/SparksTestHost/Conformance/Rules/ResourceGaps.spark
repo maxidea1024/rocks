@@ -1,0 +1,63 @@
+interface Damageable {
+    fn ApplyDamage(amount: int);
+}
+
+open class Base2 : ScriptableComponent {
+    fn ApplyDamage(amount: int) {
+        _ = amount;
+        _ = World.Spawn();
+    }
+}
+
+class Derived2 : Base2, Damageable {
+}
+
+class Player : ScriptableComponent {
+    @edit var Cue: SoundAsset;
+    @edit var Thing: Damageable;
+    var Hum: LoopHandle?;
+    var Plain: HandleBase?;
+
+    on Tick() {
+        Thing.ApplyDamage(1);
+    }
+
+    async fn Helper() {
+    }
+
+    async fn Hollow() {
+        let idle = World.Audio.StartLoop(Cue);
+        idle?.Pause();
+        await Helper();
+    }
+
+    @skipWhileBusy
+    on Owner.Damaged(_: float) {
+        if (let s = World.Audio.StartLoop(Cue)) {
+            s.Pause();
+            await Delay(1.0, Clock.Game);
+        }
+
+        if (let quick = World.Audio.StartLoop(Cue)) {
+            quick.Pause();
+        }
+
+        let wrapped: HandleBase? = World.Audio.StartLoop(Cue);
+        _ = wrapped;
+        Plain = World.Audio.StartLoop(Cue);
+        let nested = World.Audio.StartLoop(Cue);
+        nested?.Pause();
+        for (i in 0..<2) {
+            _ = i;
+            await NextTick();
+        }
+
+        let early = World.Audio.StartLoop(Cue) ?? return;
+        early.Pause();
+        await NextTick();
+    }
+}
+
+@test async fn Smoke() {
+    await NextTick();
+}

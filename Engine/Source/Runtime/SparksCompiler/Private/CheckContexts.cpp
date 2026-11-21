@@ -31,6 +31,11 @@ struct EffectBits {
     static constexpr uint32 AnyAwait = AwaitOther | AwaitFixed | AwaitReady;
     // 호출 자리 표지: 수신자가 다른 객체다(그 호출의 쓰기는 객체 쓰기 — 효과가 아니다).
     static constexpr uint32 ForeignReceiver = 1u << 14;
+    static constexpr uint32 NetWrite = 1u << 15; // `@net` 필드 쓰기(3.15절)
+    static constexpr uint32 Rpc = 1u << 16;      // RPC 호출(3.15절)
+    // 자리 표지: 권한 구역 안이다(그 자리의 `@net` 쓰기는 전하지 않는다 — 효과가 아니다).
+    static constexpr uint32 InAuthority = 1u << 17;
+    static constexpr uint32 Markers = ForeignReceiver | InAuthority;
 };
 
 // 진단 문장의 효과 설명(비트 순서 — 표 순서로 처음 걸린 효과를 알린다)이다.
@@ -52,6 +57,7 @@ constexpr EffectText EffectTexts[] = {
     {EffectBits::Write, "change fields"},
     {EffectBits::EngineCall, "call engine functions that change state"},
     {EffectBits::OneShotCall, "play one-shot effects"},
+    {EffectBits::Rpc, "call RPCs"},
     {EffectBits::Io, "use input, output or the wall clock"},
     {EffectBits::ObjectRef, "use engine objects or script objects"},
 };
@@ -640,6 +646,11 @@ uint32 TypeChecker::AwaitEffect(uint32 module, uint32 operand) noexcept {
                 bool ready = list != NoNode && tree.Node(list).childCount != 0;
                 for (const uint32 argument :
                      list == NoNode ? Span<const uint32>() : tree.Children(list)) {
+                    if (tree.Node(argument).kind != SyntaxKind::Argument) {
+                        ready = false;
+                        continue;
+                    }
+
                     const uint32 value = tree.Child(argument, 1);
                     const uint32 type = value == NoNode ? NoType : c.ExpressionType(module, value);
                     ready = ready && type != NoType && IsLanguage(NonOptional(type), "LoadRequest");
@@ -710,6 +721,10 @@ uint32 TypeChecker::WriteEffect(uint32 module, uint32 target) noexcept {
                 HasAttribute(field.module, field.node, "net")) {
                 bits |= EffectBits::EditWrite;
             }
+
+            if (HasAttribute(field.module, field.node, "net")) {
+                bits |= EffectBits::NetWrite;
+            }
         }
     }
 
@@ -727,23 +742,40 @@ void TypeChecker::CollectBodyEffects(uint32 bodyIndex) noexcept {
     CheckContext context;
     context.module = module;
     effectBodies_[bodyIndex].firstSite = static_cast<uint32>(effectSites_.Size());
-    Array<uint32> pending(allocator_);
+    // 본문 전체가 권한 구역인지다: 서버 RPC, 권한 이벤트 handler(3.15절).
+    const uint64 key = (uint64(module) << 32) | function;
+    bool authorityBody = !handler && effectBodies_[bodyIndex].symbol != NoSymbol &&
+                         RpcTarget(effectBodies_[bodyIndex].symbol) == "Server";
+    for (const uint64 recorded : authorityHandlers_) {
+        authorityBody = authorityBody || recorded == key;
+    }
+
+    // 자리마다 권한 구역 안인지 함께 둔다((구역 << 32) | 노드).
+    Array<uint64> pending(allocator_);
     if (block != NoNode) {
-        if (auto pushed = pending.TryPushBack(block); !pushed) {
+        if (auto pushed = pending.TryPushBack((uint64(authorityBody ? 1 : 0) << 32) | block);
+            !pushed) {
             binder_.error_ = pushed.Error();
             return;
         }
     }
 
+    bool zone = false;
     auto site = [&](uint32 bits, uint32 node, uint32 callee) noexcept {
-        effectBodies_[bodyIndex].direct |= bits & ~EffectBits::ForeignReceiver;
+        if (zone) {
+            bits = (bits & ~EffectBits::NetWrite) | EffectBits::InAuthority;
+        }
+
+        effectBodies_[bodyIndex].direct |= bits & ~EffectBits::Markers;
         if (auto pushed = effectSites_.TryPushBack(EffectSite{bodyIndex, node, bits, callee});
             !pushed) {
             binder_.error_ = pushed.Error();
         }
     };
     while (!pending.IsEmpty() && binder_.error_ == ErrorCode::None) {
-        const uint32 node = pending.TryPopBack().Value(); // 비어 있지 않다
+        const uint64 item = pending.TryPopBack().Value(); // 비어 있지 않다
+        const uint32 node = static_cast<uint32>(item);
+        zone = (item >> 32) != 0;
         const SyntaxNode& entry = tree.Node(node);
         switch (entry.kind) {
         case SyntaxKind::Await:
@@ -788,8 +820,12 @@ void TypeChecker::CollectBodyEffects(uint32 bodyIndex) noexcept {
             }
 
             const bool foreign = object != NoNode && tree.Node(object).kind != SyntaxKind::This;
-            if (target.kind == SymbolKind::Function || target.kind == SymbolKind::Method ||
-                target.kind == SymbolKind::InterfaceMethod) {
+            const uint32 prefix = object == NoNode ? NoSymbol : c.NodeSymbol(module, object);
+            if (prefix != NoSymbol && c.symbols_[prefix].kind == SymbolKind::RpcPrefix) {
+                site(EffectBits::Rpc, node,
+                     NoSymbol); // RPC는 보내기만 한다(그 함수의 효과는 오지 않는다)
+            } else if (target.kind == SymbolKind::Function || target.kind == SymbolKind::Method ||
+                       target.kind == SymbolKind::InterfaceMethod) {
                 site(foreign ? EffectBits::ForeignReceiver : 0, node, symbol);
             } else if (target.kind == SymbolKind::EngineFunction) {
                 const SchemaFunction& schema =
@@ -843,12 +879,18 @@ void TypeChecker::CollectBodyEffects(uint32 bodyIndex) noexcept {
             break;
         }
 
+        // `if`의 참 분기는 조건이 권한 시험이면 권한 구역이다.
+        const uint32 thenNode = entry.kind == SyntaxKind::If ? tree.Child(node, 1) : NoNode;
+        const bool authority =
+            entry.kind == SyntaxKind::If && IsAuthorityTest(module, tree.Child(node, 0));
         for (const uint32 child : tree.Children(node)) {
             if (child == NoNode) {
                 continue;
             }
 
-            if (auto pushed = pending.TryPushBack(child); !pushed) {
+            const bool childZone = zone || (authority && child == thenNode);
+            if (auto pushed = pending.TryPushBack((uint64(childZone ? 1 : 0) << 32) | child);
+                !pushed) {
                 binder_.error_ = pushed.Error();
                 return;
             }
@@ -928,6 +970,56 @@ void TypeChecker::AddDispatch(uint32 body) noexcept {
     }
 }
 
+void TypeChecker::AddInheritedImplementations() noexcept {
+    // class가 구현하는 interface 메서드의 실제 구현이 기반 class의 것이면(상속한 함수로 구현) 그
+    // 본문을 interface 메서드의 디스패치에 더한다.
+    const Compilation& c = compilation_;
+    for (uint32 id = 0; id < c.symbols_.Size() && binder_.error_ == ErrorCode::None; ++id) {
+        const Symbol& classEntry = c.symbols_[id];
+        if (classEntry.kind != SymbolKind::Class) {
+            continue;
+        }
+
+        for (uint32 index = 0; index < classEntry.baseCount; ++index) {
+            const uint32 base = c.symbolBases_[classEntry.firstBase + index];
+            if (c.symbols_[base].kind != SymbolKind::Interface) {
+                continue;
+            }
+
+            const Symbol& face = c.symbols_[base];
+            const SyntaxTree& tree = c.trees_[face.module];
+            const uint32 methods = tree.Child(face.node, 3);
+            if (methods == NoNode || tree.Node(methods).kind != SyntaxKind::List) {
+                continue;
+            }
+
+            for (const uint32 method : tree.Children(methods)) {
+                const uint32 required = tree.Node(method).kind == SyntaxKind::InterfaceMethod
+                                            ? c.NodeSymbol(face.module, tree.Child(method, 2))
+                                            : NoSymbol;
+                if (required == NoSymbol) {
+                    continue;
+                }
+
+                const uint32 implementation =
+                    binder_.FindMemberInChain(id, c.symbols_[required].name);
+                if (implementation == NoSymbol || c.symbols_[implementation].owner == id) {
+                    continue; // 없거나 자기 함수(AddDispatch가 더했다)
+                }
+
+                const uint32 body = effectOfSymbol_[implementation];
+                if (body != NoLocalIndex) {
+                    if (auto pushed = dispatchPairs_.TryPushBack((uint64(required) << 32) | body);
+                        !pushed) {
+                        binder_.error_ = pushed.Error();
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
 template <typename Visit>
 void TypeChecker::ForEachCallTarget(uint32 callee, Visit&& visit) const noexcept {
     if (callee == NoSymbol) {
@@ -945,12 +1037,17 @@ void TypeChecker::ForEachCallTarget(uint32 callee, Visit&& visit) const noexcept
 }
 
 uint32 TypeChecker::SiteEffects(const EffectSite& site) const noexcept {
-    uint32 bits = site.bits & ~EffectBits::ForeignReceiver;
+    uint32 bits = site.bits & ~EffectBits::Markers;
     ForEachCallTarget(site.callee,
                       [&](uint32 body) noexcept { bits |= effectBodies_[body].total; });
     // 다른 객체의 함수가 바꾸는 필드는 이 본문에서 보면 객체 쓰기다.
     if ((site.bits & EffectBits::ForeignReceiver) != 0 && (bits & EffectBits::Write) != 0) {
         bits |= EffectBits::ObjectWrite;
+    }
+
+    // 권한 구역 안의 자리는 `@net` 쓰기를 전하지 않는다(3.15절).
+    if ((site.bits & EffectBits::InAuthority) != 0) {
+        bits &= ~EffectBits::NetWrite;
     }
 
     return bits;
@@ -1019,6 +1116,8 @@ void TypeChecker::AnalyzeEffects() noexcept {
         CollectBodyEffects(index);
         AddDispatch(index);
     }
+
+    AddInheritedImplementations();
 
     // 디스패치 표(기반·interface 함수 심볼 → 그것을 대신하는 본문들)다.
     algo::Sort(dispatchPairs_.View());
@@ -1250,7 +1349,8 @@ void TypeChecker::CheckBodyContext(uint32 bodyIndex) noexcept {
                 forbidden = Await | EffectBits::Spawn | EffectBits::Acquire | EffectBits::Emit |
                             EffectBits::ObjectWrite | EffectBits::EngineCall;
             } else if (name == "Validate") {
-                forbidden = Await | EffectBits::Spawn | EffectBits::Io | EffectBits::EditWrite;
+                forbidden = Await | EffectBits::Spawn | EffectBits::Io | EffectBits::EditWrite |
+                            EffectBits::Rpc;
             }
 
             where.AppendFormat("'on {}()'", name);
@@ -1272,7 +1372,15 @@ void TypeChecker::CheckBodyContext(uint32 bodyIndex) noexcept {
         }
 
         // 최상위 fn은 순수 계산 함수다(3.1절): 대기·발행·엔진 변경 API·객체 쓰기를 쓸 수 없다.
-        const bool topLevel = body.owner == NoSymbol;
+        // `@test` 함수는 시험 World에서 도는 진입점이라 제외한다(§13).
+        const bool test = HasAttribute(body.module, body.node, "test");
+        const bool topLevel = body.owner == NoSymbol && !test;
+        if (topLevel && (entry.flags & SyntaxFlags::Async) != 0) {
+            Report(CheckContext{body.module}, DiagnosticCode::AwaitOutsideAsync,
+                   tree.Child(body.node, 2), "A top-level function cannot be 'async'.",
+                   "Top-level functions are plain calculations; they never wait.",
+                   "Remove 'async', or move the function into a class.");
+        }
         if (topLevel) {
             forbidden |= Await | EffectBits::Emit | EffectBits::Spawn | EffectBits::Acquire |
                          EffectBits::Load | EffectBits::EngineCall | EffectBits::OneShotCall |
@@ -1289,12 +1397,16 @@ void TypeChecker::CheckBodyContext(uint32 bodyIndex) noexcept {
     CheckContext context;
     context.module = body.module;
     if (forbidden != 0 && binder_.Succeeded(where)) {
+        uint32 reportedAt = NumericLimits<uint32>::Max(); // 같은 위치의 진단은 하나
         for (uint32 index = body.firstSite; index < body.firstSite + body.siteCount; ++index) {
             const EffectSite& site = effectSites_[index];
             const uint32 bits = SiteEffects(site) & forbidden;
-            if (bits == 0) {
+            const uint32 at = tree.Node(site.node).span.begin;
+            if (bits == 0 || at == reportedAt) {
                 continue;
             }
+
+            reportedAt = at;
 
             StringView verb;
             for (const EffectText& text : EffectTexts) {
@@ -1317,6 +1429,35 @@ void TypeChecker::CheckBodyContext(uint32 bodyIndex) noexcept {
                        "execution context table).",
                        "Move this code to a hook or function that allows it, such as 'on Start()' "
                        "or an event handler.");
+            }
+        }
+    }
+
+    // 권한 구역 밖의 `@net` 쓰기(3.15절 S1003): 진입 본문(handler·hook·`@rpc` 함수)에서 본다.
+    const bool entryBody =
+        handler || (body.symbol != NoSymbol && !RpcTarget(body.symbol).IsEmpty());
+    if (entryBody) {
+        const bool actor = binder_.EngineChainHas(body.owner, binder_.actor_);
+        for (uint32 index = body.firstSite; index < body.firstSite + body.siteCount; ++index) {
+            const EffectSite& site = effectSites_[index];
+            if ((SiteEffects(site) & EffectBits::NetWrite) == 0) {
+                continue;
+            }
+
+            StringBuilder<CompilationMessageInlineBytes> message(allocator_);
+            if (site.callee != NoSymbol) {
+                message.AppendFormat("'{}' writes a replicated field outside an authority zone.",
+                                     c.symbols_[site.callee].name);
+            } else {
+                message.Append("A replicated field is written outside an authority zone.");
+            }
+
+            if (binder_.Succeeded(message)) {
+                Report(context, DiagnosticCode::NetWriteOutsideAuthority, site.node, message.View(),
+                       "'@net' fields change only where this object has authority, so every "
+                       "machine sees the same value.",
+                       actor ? StringView("Wrap it in 'if (HasAuthority) { ... }'.")
+                             : StringView("Wrap it in 'if (Owner.HasAuthority) { ... }'."));
             }
         }
     }
@@ -1433,6 +1574,49 @@ uint8 TypeChecker::WaitStates(uint32 module, uint32 node, uint8 states,
     default:
         return StatementWaits(module, node) ? WaitStateWaited : states;
     }
+}
+
+bool TypeChecker::IsAuthorityTest(uint32 module, uint32 expression) const noexcept {
+    const Compilation& c = compilation_;
+    const SyntaxTree& tree = c.trees_[module];
+    while (expression != NoNode && tree.Node(expression).kind == SyntaxKind::Parenthesized) {
+        expression = tree.Child(expression, 0);
+    }
+
+    if (expression == NoNode) {
+        return false;
+    }
+
+    const SyntaxNode& entry = tree.Node(expression);
+    if (entry.kind == SyntaxKind::Binary && TokenText(module, expression) == "&&") {
+        return IsAuthorityTest(module, tree.Child(expression, 0)) ||
+               IsAuthorityTest(module, tree.Child(expression, 1));
+    }
+
+    auto hasAuthority = [&](uint32 node) noexcept {
+        const uint32 symbol = c.NodeSymbol(module, node);
+        return symbol != NoSymbol && c.symbols_[symbol].kind == SymbolKind::EngineField &&
+               c.symbols_[symbol].name == "HasAuthority";
+    };
+    if (entry.kind == SyntaxKind::Identifier) {
+        return hasAuthority(expression); // Actor 파생의 `HasAuthority`
+    }
+
+    if (entry.kind != SyntaxKind::Member || !hasAuthority(expression)) {
+        return false;
+    }
+
+    // `Owner.HasAuthority`(component).
+    uint32 object = tree.Child(expression, 0);
+    while (object != NoNode && tree.Node(object).kind == SyntaxKind::Parenthesized) {
+        object = tree.Child(object, 0);
+    }
+
+    const uint32 owner = object == NoNode || tree.Node(object).kind != SyntaxKind::Identifier
+                             ? NoSymbol
+                             : c.NodeSymbol(module, object);
+    return owner != NoSymbol && c.symbols_[owner].kind == SymbolKind::EngineField &&
+           c.symbols_[owner].name == "Owner";
 }
 
 } // namespace rocks::sparks::detail

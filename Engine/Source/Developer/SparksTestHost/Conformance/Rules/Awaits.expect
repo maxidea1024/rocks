@@ -5,11 +5,13 @@
 error S0601 2:5
 error S0601 3:13
 error S0602 3:23
+error S0601 7:10
 error S0602 8:5
 error S0603 43:9
 error S0603 51:9
 error S0603 57:9
 error S0603 88:9
+error S0601 107:10
 error S0602 108:5
 error S0602 112:5
 error S0603 117:5

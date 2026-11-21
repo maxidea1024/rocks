@@ -33,7 +33,8 @@ TypeChecker::TypeChecker(NameBinder& binder) noexcept
       firstCase_(binder.allocator_), nextCase_(binder.allocator_), staleRead_(binder.allocator_),
       extensionEvents_(binder.allocator_), effectBodies_(binder.allocator_),
       effectSites_(binder.allocator_), effectOfSymbol_(binder.allocator_),
-      dispatchPairs_(binder.allocator_), dispatchFirst_(binder.allocator_),
+      dispatchPairs_(binder.allocator_), resourceWaits_(binder.allocator_),
+      authorityHandlers_(binder.allocator_), dispatchFirst_(binder.allocator_),
       dispatchBodies_(binder.allocator_) {
 }
 

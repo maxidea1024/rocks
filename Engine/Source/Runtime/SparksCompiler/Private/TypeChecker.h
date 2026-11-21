@@ -236,6 +236,7 @@ private:
     void CheckBodyContext(uint32 bodyIndex) noexcept;
     // 이 본문(class 메서드)이 대신하는 기반·interface 함수를 dispatchPairs_에 더한다.
     void AddDispatch(uint32 body) noexcept;
+    void AddInheritedImplementations() noexcept;
     // 호출 대상 심볼이 부를 수 있는 본문(자기 본문, 재정의, interface 구현)마다 visit(본문)이다.
     template <typename Visit>
     void ForEachCallTarget(uint32 callee, Visit&& visit) const noexcept;
@@ -250,12 +251,27 @@ private:
     // 있으면 continuesWithoutWait를 켠다.
     uint8 WaitStates(uint32 module, uint32 node, uint8 states, bool& continuesWithoutWait) noexcept;
 
+    // ---- 권한·RPC·저장 타입(CheckNetwork.cpp, 3.15절 — Rules 단계) ----
+    // 저장 가능 타입(objects면 객체 참조를 더한 복제 타입)인지다.
+    bool IsStorableType(uint32 type, bool objects, uint32 depth) noexcept;
+    // `@rpc` 함수의 대상 접두 이름(`Server` 등)이다. RPC가 아니면 빈 글자, 대상을 모르면 "?".
+    StringView RpcTarget(uint32 function) const noexcept;
+    // `Server.F` 등 RPC 접두 뒤의 멤버다(S1004).
+    ExpressionValue RpcMember(const CheckContext& context, uint32 node, uint32 prefix,
+                              StringView name) noexcept;
+    void CheckNetwork(uint32 module) noexcept;
+    // 권한 시험(`Owner.HasAuthority`, Actor의 `HasAuthority`, 그것을 한 항으로 둔 `&&`)인지다.
+    bool IsAuthorityTest(uint32 module, uint32 expression) const noexcept;
+
     // ---- 유지 자원·로드(CheckResources.cpp, 3.14절 — Rules 단계) ----
     // 유지 자원 타입(schema `held` 엔진 객체, `LoadRequest<T>`, 그 `T?`)인지다.
     bool IsHeldType(uint32 type) noexcept;
     void CheckResources(uint32 module) noexcept;
     // `acquire` 효과의 엔진 함수가 유지 자원 타입을 돌려주는지 본다(S1120).
     void CheckAcquireReturns() noexcept;
+    void CheckHeldEvents() noexcept;
+    // 획득한 지역 자원 뒤의 정지하는 await(S0905 — 효과 분석 뒤).
+    void CheckResourceWaits() noexcept;
 
     // ---- 흐름 분석(CheckFlow.cpp, 3.11절) ----
     // stale이면 await 뒤 객체 지역 이름의 읽기를 staleRead_에 표시하고(본문 검사 전), 아니면
@@ -477,6 +493,10 @@ private:
     Array<uint32> effectOfSymbol_;
     // 디스패치 표: (기반·interface 함수 심볼 << 32 | 본문) 쌍과, 심볼 → dispatchBodies_ 구간.
     Array<uint64> dispatchPairs_;
+    // S0905를 볼 지역 자원 선언·`if (let)`((모듈 << 32) | 노드)이다.
+    Array<uint64> resourceWaits_;
+    // 권한 이벤트(`@authorityOnly`·server 발행) handler((모듈 << 32) | 노드)다(3.15절).
+    Array<uint64> authorityHandlers_;
     Array<uint32> dispatchFirst_;
     Array<uint32> dispatchBodies_;
 };
