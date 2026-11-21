@@ -1,0 +1,79 @@
+enum Side { Left, Right, Up }
+
+fn Sum(limit: int): int {
+    var total = 0;
+    for (i in 0..<limit) {
+        if (i % 2 == 0) {
+            continue;
+        }
+
+        total += i;
+    }
+
+    return total;
+}
+
+fn Fib(n: int): int {
+    if (n < 2) {
+        return n;
+    }
+
+    return Fib(n - 1) + Fib(n - 2);
+}
+
+fn Down(n: int): int {
+    if (n == 0) {
+        return 0;
+    }
+
+    return Down(n - 1) + 1;
+}
+
+fn Spin(limit: int): int {
+    var count = 0;
+    for (i in 0..<limit) {
+        count += i - i + 1;
+    }
+
+    return count;
+}
+
+fn Score(side: Side): int {
+    switch (side) {
+        case Side.Left: {
+            return 10;
+        }
+        case Side.Right: {
+            return 20;
+        }
+        case Side.Up: {
+            return 0;
+        }
+    }
+}
+
+fn Code(n: int): int {
+    switch (n) {
+        case -1: {
+            return 100;
+        }
+        case 0, 1: {
+            return 200;
+        }
+        default: {
+            return n;
+        }
+    }
+}
+
+fn Flip(side: Side): Side {
+    if (side == Side.Left) {
+        return Side.Right;
+    }
+
+    return Side.Left;
+}
+
+fn Both(a: bool, b: bool): bool {
+    return a && !b || !a && b;
+}

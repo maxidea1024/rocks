@@ -1,0 +1,39 @@
+fn Add(a: int, b: int): int {
+    return a + b;
+}
+
+fn Sub8(a: int8, b: int8): int8 {
+    return a - b;
+}
+
+fn SubU8(a: uint8, b: uint8): uint8 {
+    return a - b;
+}
+
+fn Mul16(a: int16, b: int16): int16 {
+    return a * b;
+}
+
+fn MulU16(a: uint16, b: uint16): uint16 {
+    return a * b;
+}
+
+fn MulU64(a: uint64, b: uint64): uint64 {
+    return a * b;
+}
+
+fn Mod(a: int, b: int): int {
+    return a % b;
+}
+
+fn ModU8(a: uint8, b: uint8): uint8 {
+    return a % b;
+}
+
+fn Neg32(a: int32): int32 {
+    return -a;
+}
+
+fn Neg8(a: int8): int8 {
+    return -a;
+}
