@@ -9,6 +9,13 @@ namespace rocks::sparks::detail {
 
 namespace {
 
+// `Math.Pi`의 double 값이다(SL 부록 B — 접는 상수).
+constexpr double MathPi = 3.141592653589793;
+
+} // namespace
+
+namespace {
+
 // 수학 타입 필드의 slot 구간이다(2절 표의 성분 순서).
 struct MathField {
     StringView type;
@@ -84,6 +91,16 @@ uint32 IrBuilder::LowerMember(uint32 node) noexcept {
     }
 
     const Symbol& entry = c_.symbols_[symbol];
+    // 이름 공간의 언어 상수(`Math.Pi`)는 접는다(SparksVm 6a절).
+    if (entry.kind == SymbolKind::LanguageField && entry.owner != NoSymbol &&
+        c_.symbols_[entry.owner].kind == SymbolKind::PreludeValue &&
+        c_.symbols_[entry.owner].name == "Math" && entry.name == "Pi") {
+        ConstantValue value;
+        value.kind = ConstantValue::Kind::Float;
+        value.real = MathPi;
+        return LoadConstant(value, type != NoType ? type : checker_.floatType_, node);
+    }
+
     if (entry.kind == SymbolKind::EnumCase) {
         ConstantValue value;
         value.kind = ConstantValue::Kind::Enum;
@@ -152,7 +169,16 @@ uint32 IrBuilder::ReadMember(uint32 object, uint32 objectType, uint32 member, ui
         return result;
     }
 
+    // 언어 필드(`string.Length`·`Array.Count`·`Result.Value` 등)는 수신자 하나의 언어 함수 호출이다
+    // (CALLL — SparksVm 6a절).
     const uint32 result = NewValue(type);
+    if (c_.symbols_[member].kind == SymbolKind::LanguageField) {
+        const uint32 operands[] = {object};
+        Add(IrOp::Call, result, AddOperands(Span<const uint32>(operands, 1)), 1, member, node,
+            IrCallDirect);
+        return result;
+    }
+
     Add(IrOp::GetField, result, object, NoIrRegister, member, node);
     return result;
 }
@@ -443,7 +469,17 @@ uint32 IrBuilder::LowerConstruct(uint32 node, uint32 typeSymbol, Span<const uint
         }
     }
 
-    if (entry.kind == SymbolKind::Struct) {
+    bool active = false;
+    for (const uint32 symbol : defaulting_) {
+        active = active || symbol == typeSymbol;
+    }
+
+    if (entry.kind == SymbolKind::Struct && !active) {
+        if (!defaulting_.TryPushBack(typeSymbol)) {
+            Fail(ErrorCode::OutOfMemory);
+            return NoIrRegister;
+        }
+
         const SyntaxTree& tree = c_.trees_[entry.module];
         const uint32 members = tree.Child(entry.node, 3);
         const usize given = values.Size();
@@ -470,6 +506,8 @@ uint32 IrBuilder::LowerConstruct(uint32 node, uint32 typeSymbol, Span<const uint
                 return NoIrRegister;
             }
         }
+
+        static_cast<void>(defaulting_.TryResize(defaulting_.Size() - 1));
     }
 
     const uint32 result = NewValue(type);

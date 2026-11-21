@@ -99,6 +99,7 @@ constexpr DiagnosticCodeInfo CodeTable[] = {
     {DiagnosticCode::RecursiveStruct, "recursive-struct"},
     {DiagnosticCode::InitializerTooDeep, "initializer-too-deep"},
     {DiagnosticCode::ObjectFieldNeedsOptional, "object-field-needs-optional"},
+    {DiagnosticCode::StructDefaultCycle, "struct-default-cycle"},
     {DiagnosticCode::IntegerDivision, "integer-division"},
     {DiagnosticCode::FloatToIntConversion, "float-to-int-conversion"},
     {DiagnosticCode::ConstantOverflow, "constant-overflow"},

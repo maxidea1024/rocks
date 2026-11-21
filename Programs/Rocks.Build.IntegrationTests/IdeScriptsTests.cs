@@ -41,7 +41,7 @@ internal static class IdeScriptsTests
         await NMakeCommandsAsync(repository);
         await StalenessAsync(repository);
         Console.WriteLine("PASS IDE scripts: clean boundaries, setup self test (-Command and -File, pwsh and 5.1), SDK scripts, IDE build lock order, tool inputs and rebuild decisions, Visual Studio or NMake build/clean/rebuild, " +
-            "terminal no-op, failure exit codes, RPF0001");
+            "terminal no-op, failure exit codes, RPF0001, compile one file");
     }
 
     private static async Task CleanBoundariesAsync(string repository)
@@ -225,7 +225,8 @@ internal static class IdeScriptsTests
         }
 
         string[] Build(params string[] extra) => ["build", "--root", repository, "--target", SmallTarget, "--configuration", "Debug", .. extra];
-        bool Stale(string output) => output.Contains("warning RPF0001", StringComparison.Ordinal);
+        // 터미널(CLI 직접)에서는 note 형식이다(Rocks.proj의 -warnAsError가 경고 형식을 오류로 바꾸지 않게, 9절).
+        bool Stale(string output) => output.Contains("note RPF0001:", StringComparison.Ordinal);
         await Cli("projectfiles", "--root", repository);
         Require(!Stale(await Cli(Build())), "a fresh build reported stale project files");
         foreach (string[] mode in new[] { new[] { "--unity", "off" }, ["--adaptive", "off"], ["--pch", "off"] })
@@ -347,6 +348,50 @@ internal static class IdeScriptsTests
             "the terminal build after the IDE build was not a no-op: " + terminal.StdOut);
         Require(!terminal.StdOut.Contains("RPF0001", StringComparison.Ordinal), "the terminal build reported stale project files: " + terminal.StdOut);
 
+        // 파일 하나 컴파일(Ctrl+F7): 논리 명령·별도 object·증분 기록 불변, -WorkingDir 상대 경로. 그 뒤 터미널 빌드는 여전히 0 action이다.
+        using (var database = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(outputDirectory, "compile_commands.json"))))
+        {
+            string source = database.RootElement.EnumerateArray().Select(entry => Path.GetFullPath(entry.GetProperty("file").GetString()!))
+                .First(file => file.StartsWith(Path.Combine(repository, "Programs", SmallTarget) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) &&
+                    file.EndsWith(".cpp", StringComparison.OrdinalIgnoreCase));
+            // 헤더는 확장자로 거부하므로 있을 필요가 없다(MathBench에는 헤더가 없다).
+            string header = Path.Combine(repository, "Programs", SmallTarget, "Private", "Selected.h");
+            await CompileSelectedAsync(project, "Debug", outputDirectory, [source], header, repository);
+        }
+
+        var afterCompile = await ProcessRunner.RunAsync(new("dotnet", ["msbuild", Path.Combine(repository, "Rocks.proj"), "-t:Build", "-nologo",
+            "-p:RocksTarget=" + SmallTarget, "-p:Configuration=Debug", "-p:Compiler=" + Compiler(build)], repository));
+        Require(afterCompile.ExitCode == 0 && afterCompile.StdOut.Contains("executed=0;", StringComparison.Ordinal),
+            "the terminal build after compiling one file was not a no-op: " + afterCompile.StdOut);
+
+        // 두 파일(공백·한글 이름)을 한 번에 고른다: 빌드해 compile_commands.json에 넣은 뒤 Ctrl+F7로 함께 컴파일하고, 지운 뒤 다시 빌드한다.
+        string[] probes = [Path.Combine(repository, "Programs", SmallTarget, "Private", "Selected One.cpp"),
+            Path.Combine(repository, "Programs", SmallTarget, "Private", "선택 둘.cpp")];
+        try
+        {
+            for (int index = 0; index < probes.Length; ++index)
+            {
+                File.WriteAllText(probes[index], $"int RocksSelectedProbe{index}() noexcept;\nint RocksSelectedProbe{index}() noexcept {{ return {index}; }}\n");
+            }
+
+            var withProbes = await ProcessRunner.RunAsync(new("dotnet", ["msbuild", Path.Combine(repository, "Rocks.proj"), "-t:Build", "-nologo",
+                "-p:RocksTarget=" + SmallTarget, "-p:Configuration=Debug", "-p:Compiler=" + Compiler(build)], repository));
+            Require(withProbes.ExitCode == 0, "building with the selection probes failed: " + withProbes.StdOut);
+            await CompileSelectedAsync(project, "Debug", outputDirectory, probes, Path.Combine(repository, "Programs", SmallTarget, "Private", "Selected.h"),
+                repository);
+        }
+        finally
+        {
+            foreach (string probe in probes)
+            {
+                File.Delete(probe);
+            }
+        }
+
+        var withoutProbes = await ProcessRunner.RunAsync(new("dotnet", ["msbuild", Path.Combine(repository, "Rocks.proj"), "-t:Build", "-nologo",
+            "-p:RocksTarget=" + SmallTarget, "-p:Configuration=Debug", "-p:Compiler=" + Compiler(build)], repository));
+        Require(withoutProbes.ExitCode == 0, "building after removing the selection probes failed: " + withoutProbes.StdOut);
+
         // 도구를 다시 빌드한 회차에도 실패는 실패다(도구 빌드 출력이 종료 코드에 섞이지 않는다).
         File.Delete(Path.Combine(repository, "out", "dotnet", ".rocks-tools.json"));
         var failing = await ProcessRunner.RunAsync(new("pwsh", ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
@@ -384,6 +429,114 @@ internal static class IdeScriptsTests
             await process.WaitForExitAsync();
             Require(process.ExitCode == 0, what + " failed: " + await output + await errors);
         }
+    }
+
+    /// <summary>
+    /// 파일 하나 컴파일(Ctrl+F7, Docs/Design/ProjectFiles.ko.md 7.4절) 시험: Visual Studio 18이 있으면 그 MSBuild로
+    /// <c>-t:NMakeCompileSelectedFiles -p:SelectedFiles=&lt;프로젝트 디렉터리 상대 경로;…&gt;</c>를 실제로 돌린다(VS가 타는 경로 — NMakeCompile item
+    /// 메타데이터). 없으면 item 정의의 NMakeCompileFileCommandLine을 평가해 cmd로 돌린다. 소스마다 object가 생기고, 기록한 인자가 빌드한
+    /// compile_commands.json의 그 소스 명령(object 경로 제외)과 같고, native-cache.json·action-report.json이 byte 그대로다. 헤더를 고르면 실패한다.
+    /// </summary>
+    internal static async Task CompileSelectedAsync(string projectPath, string configuration, string output, IReadOnlyList<string> sources, string header,
+        string workingDirectory, IReadOnlyDictionary<string, string?>? environment = null)
+    {
+        byte[] Bytes(string name) => File.ReadAllBytes(Path.Combine(output, name));
+        byte[] cache = Bytes("native-cache.json");
+        byte[] report = Bytes("action-report.json");
+        string Relative(string path) => Path.GetRelativePath(Path.GetDirectoryName(projectPath)!, path);
+        await CompileSelectedFilesAsync(projectPath, configuration, string.Join(';', sources.Select(Relative)), workingDirectory, environment, expectSuccess: true);
+        static string[] WithoutObject(IEnumerable<string> arguments) => [.. CompileObjectArguments.Without([.. arguments])];
+        using var database = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "compile_commands.json")));
+        string[] records = Directory.GetFiles(Path.Combine(output, "SingleFile"), "*.json");
+        foreach (string source in sources)
+        {
+            using var record = System.Text.Json.JsonDocument.Parse(File.ReadAllText(records.Single(path =>
+                string.Equals(System.Text.Json.JsonDocument.Parse(File.ReadAllText(path)).RootElement.GetProperty("source").GetString(), source,
+                    StringComparison.OrdinalIgnoreCase))));
+            string objectPath = record.RootElement.GetProperty("object").GetString()!;
+            Require(File.Exists(objectPath) && Path.GetDirectoryName(objectPath)!.EndsWith("SingleFile", StringComparison.Ordinal), "single-file object " + objectPath);
+            string[] compiled = WithoutObject(record.RootElement.GetProperty("arguments").EnumerateArray().Select(item => item.GetString()!));
+            bool matched = database.RootElement.EnumerateArray().Where(entry => string.Equals(Path.GetFullPath(entry.GetProperty("file").GetString()!), source,
+                StringComparison.OrdinalIgnoreCase)).Any(entry => WithoutObject(entry.GetProperty("arguments").EnumerateArray().Skip(1).Select(item => item.GetString()!))
+                .SequenceEqual(compiled, StringComparer.Ordinal));
+            Require(matched, $"the single-file command of {source} is not the logical command of the build: " + string.Join(' ', compiled));
+        }
+
+        Require(Bytes("native-cache.json").AsSpan().SequenceEqual(cache) && Bytes("action-report.json").AsSpan().SequenceEqual(report),
+            "compiling one file changed the incremental record or the action report");
+        await CompileSelectedFilesAsync(projectPath, configuration, Relative(header), workingDirectory, environment, expectSuccess: false);
+    }
+
+    // Visual Studio 18이 있으면 그 MSBuild의 NMakeCompileSelectedFiles를, 없으면 평가한 item 정의의 명령을 cmd로 돌린다.
+    private static async Task CompileSelectedFilesAsync(string projectPath, string configuration, string selected, string workingDirectory,
+        IReadOnlyDictionary<string, string?>? environment, bool expectSuccess)
+    {
+        string? msbuild = await ProjectFilesWriterTests.VisualStudioMSBuildAsync();
+        if (msbuild is not null)
+        {
+            // 명령줄 -p:는 ';'를 속성 구분자로 읽으므로 %3B로 이스케이프한다(MSBuild가 값에서 되돌린다).
+            var result = await ProcessRunner.RunAsync(new(msbuild, [projectPath, "-nologo", "-t:NMakeCompileSelectedFiles", "-p:Configuration=" + configuration,
+                "-p:Platform=x64", "-p:SelectedFiles=" + selected.Replace(";", "%3B", StringComparison.Ordinal)], Path.GetDirectoryName(projectPath)!,
+                MergedVisualStudioEnvironment(environment), Timeout: TimeSpan.FromMinutes(10)));
+            Require((result.ExitCode == 0) == expectSuccess && !result.StdOut.Contains("MSB8005", StringComparison.Ordinal),
+                $"Visual Studio NMakeCompileSelectedFiles ({selected}): exit code {result.ExitCode}: " + result.StdOut + result.StdErr);
+            return;
+        }
+
+        string command = CompileFileCommand(projectPath, configuration, selected);
+        Require(command.Contains("-Action Compile", StringComparison.Ordinal), "NMakeCompileFileCommandLine: " + command);
+        await RunCommand(command, "compile one file", workingDirectory, environment, expectSuccess);
+    }
+
+    // Visual Studio MSBuild 환경(.NET SDK MSBuild 변수 제거)에 시험이 준 변수(시험 등록부 등)를 얹는다.
+    private static Dictionary<string, string?> MergedVisualStudioEnvironment(IReadOnlyDictionary<string, string?>? environment)
+    {
+        Dictionary<string, string?> merged = ProjectFilesWriterTests.VisualStudioEnvironment();
+        foreach ((string key, string? value) in environment ?? new Dictionary<string, string?>())
+        {
+            if (key.StartsWith("ROCKS_", StringComparison.OrdinalIgnoreCase))
+            {
+                merged[key] = value;
+            }
+        }
+
+        return merged;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static string CompileFileCommand(string path, string configuration, string selected)
+    {
+        using var collection = new ProjectCollection();
+        var project = new Project(path, new Dictionary<string, string> { ["Configuration"] = configuration, ["Platform"] = "x64", ["SelectedFiles"] = selected },
+            null, collection, ProjectLoadSettings.IgnoreMissingImports | ProjectLoadSettings.IgnoreInvalidImports);
+        return project.ItemDefinitions.TryGetValue("NMakeCompile", out ProjectItemDefinition? definition)
+            ? definition.GetMetadataValue("NMakeCompileFileCommandLine") : "";
+    }
+
+    // NMake처럼 명령줄 문자열을 cmd에 그대로 넘긴다.
+    private static async Task RunCommand(string command, string what, string directory, IReadOnlyDictionary<string, string?>? environment, bool expectSuccess)
+    {
+        var start = new ProcessStartInfo("cmd.exe", "/d /s /c \"" + command + "\"")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            WorkingDirectory = directory
+        };
+        if (environment is not null)
+        {
+            start.Environment.Clear();
+            foreach ((string key, string? value) in environment)
+            {
+                start.Environment[key] = value;
+            }
+        }
+
+        using var process = Process.Start(start)!;
+        Task<string> output = process.StandardOutput.ReadToEndAsync();
+        Task<string> errors = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        Require((process.ExitCode == 0) == expectSuccess, $"{what}: exit code {process.ExitCode}: " + await output + await errors);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

@@ -286,8 +286,8 @@ TEST(SparksVmString_MemoryBudgetAndLimits) {
     REQUIRE(Verify(assembler));
     VmExecution execution(allocator);
     VmLimits limits;
-    const uint64 one = sizeof(VmBuffer) + 104; // 100 byte를 8의 배수로
-    limits.memoryBytes = one * 2;              // 조각 둘까지만
+    const uint64 one = VmBufferHeaderBytes + 104; // 100 byte를 8의 배수로
+    limits.memoryBytes = one * 2;                 // 조각 둘까지만
     auto concat = execution.Call(assembler.module, 0, Span<const uint64>(), {}, {}, limits);
     REQUIRE(concat);
     CHECK(concat.Value().fault.kind == VmFaultKind::BudgetExceeded);

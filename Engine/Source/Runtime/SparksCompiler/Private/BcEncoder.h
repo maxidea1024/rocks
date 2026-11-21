@@ -39,11 +39,17 @@ private:
     uint32 AddString(StringView text) noexcept;
     // 리터럴 원문(따옴표 포함) 또는 보간 조각(piece)의 escape를 풀어 문자열 표에 넣는다.
     uint32 AddDecodedString(StringView text, bool piece) noexcept;
-    uint32 AddRef(BytecodeRefKind kind, uint32 name, uint32 detail) noexcept;
+    // 참조를 더한다(같은 것은 한 번). arguments가 있으면(언어 함수 서술자) 그것이 같은 참조의
+    // 열쇠다.
+    uint32 AddRef(BytecodeRefKind kind, uint32 name, uint32 detail,
+                  uint32 arguments = NoBytecodeIndex) noexcept;
+    // 언어 함수 호출의 피연산자 서술자(SparksVm 6a절)를 out에 붙인다.
+    void AppendDescriptor(StringBuilderBase& out, uint32 type) noexcept;
     // 다른 모듈의 Sparks 선언이면 name에 `<import 경로>:`를 붙이고 true.
     bool Qualify(StringBuilderBase& name, uint32 symbol) noexcept;
     // types는 호출의 타입 인자 목록(IrInstruction::types), 없으면 NoIrRegister.
-    uint32 SymbolRef(BytecodeRefKind kind, uint32 symbol, uint32 types = NoIrRegister) noexcept;
+    uint32 SymbolRef(BytecodeRefKind kind, uint32 symbol, uint32 types = NoIrRegister,
+                     uint32 arguments = NoBytecodeIndex) noexcept;
     uint32 TypeRef(uint32 type) noexcept;
     // Sparks struct·enum 심볼의 TYPE 표 번호다(처음이면 배치를 더한다 — SparksBytecode 5절). 그
     // 밖은 NoBytecodeIndex.

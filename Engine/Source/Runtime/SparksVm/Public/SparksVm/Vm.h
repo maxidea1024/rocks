@@ -2,6 +2,7 @@
 
 #include <Core/Containers/Array.h>
 #include <Core/Containers/Span.h>
+#include <Core/Math/RandomStream.h>
 #include <Core/Memory/Allocator.h>
 #include <Core/Result.h>
 #include <SparksVm/Bytecode.h>
@@ -32,6 +33,10 @@
 // 모듈은 여러 실행 문맥이 함께 읽어도 된다.
 
 namespace rocks::sparks {
+
+namespace detail {
+class VmLibrary;
+} // namespace detail
 
 // 실행 조각 하나의 기본 명령어 예산이다(SL 9.3절).
 inline constexpr uint64 DefaultInstructionBudget = 1000000;
@@ -82,7 +87,19 @@ struct VmLimits {
     uint64 instructions = DefaultInstructionBudget;
     uint32 callDepth = MaxCallDepth;
     uint64 memoryBytes = DefaultMemoryBudget;
+    // `Random`의 결정적 생성기 씨앗이다(SparksVm 6a절 — instance·session 씨앗은 LC6).
+    uint64 randomSeed = 0;
 };
+
+// `Log.*` 기록의 수준이다(SparksVm 6a절 — host 로그 연결은 LC5d).
+enum class VmLogLevel : uint8 {
+    Info,
+    Warning,
+    Error,
+    Debug
+};
+
+const char* VmLogLevelName(VmLogLevel level) noexcept;
 
 struct VmCallResult {
     VmOutcome outcome = VmOutcome::Returned;
@@ -135,8 +152,37 @@ public:
     // OutOfMemory.
     Result<VmBuffer*> NewString(StringView text) noexcept;
 
+    // host의 컨테이너 값(Array·Map·Set)을 만든다(참조 하나 — host가 Release로 놓는다). marker는
+    // 원소 배치(EncodeContainerMarker — Array·Set은 값 자리, Map은 값과 key), elements는 원소마다
+    // slot 묶음(Map은 key slot 뒤 값 slot)을 이은 것이다. Buf slot의 버퍼는 빌려 준다(컨테이너가
+    // 참조를 더한다 — null은 null 값). ledger가 세고 예산은 보지 않는다(host 입력이다). 실패:
+    // 종류가 컨테이너가 아니거나 배치·slot 수가 맞지 않거나 Map·Set에 같은 key가 둘이면
+    // InvalidArgument, 단일 버퍼 상한을 넘으면 CapacityExceeded, 할당 실패는 OutOfMemory. 원소 값의
+    // 정규형은 Call의 Scalar 인자와 같은 호출자 책임이다.
+    Result<VmBuffer*> NewContainer(VmBufferKind kind, uint32 marker,
+                                   Span<const uint64> elements) noexcept;
+
     // 참조 하나를 놓는다(0이면 해제 — 원소의 버퍼도). null이면 아무것도 하지 않는다.
     void Release(VmBuffer* buffer) noexcept;
+
+    // 마지막 Call의 `Log.*` 기록이다(다음 Call 전까지 유효 — 할당 실패한 기록은 빠진다).
+    uint32 LogCount() const noexcept {
+        return static_cast<uint32>(logs_.Size());
+    }
+
+    VmLogLevel LogLevel(uint32 index) const noexcept {
+        return logs_[index].level;
+    }
+
+    StringView LogMessage(uint32 index) const noexcept {
+        return StringView(logText_.Data() + logs_[index].offset, logs_[index].length);
+    }
+
+    // 마지막 Call에서 할당 실패로 빠진 `Log.*` 기록 수다(로그는 실행 결과를 바꾸지 않으므로 fault가
+    // 아니다 — 기록이 온전해야 하는 host·시험이 본다).
+    uint32 DroppedLogs() const noexcept {
+        return droppedLogs_;
+    }
 
     // ledger: 살아 있는 버퍼 수와 논리 byte다.
     uint64 LiveBuffers() const noexcept {
@@ -148,6 +194,14 @@ public:
     }
 
 private:
+    friend class detail::VmLibrary;
+
+    struct LogEntry {
+        VmLogLevel level = VmLogLevel::Info;
+        uint32 offset = 0;
+        uint32 length = 0;
+    };
+
     struct Frame {
         uint32 function = 0;
         uint32 pc = 0; // 이 frame으로 돌아왔을 때 실행할 명령의 모듈 단어 번호
@@ -195,6 +249,9 @@ private:
     // struct·Buf Result 명령(NEWS·GETSF·SETSF·OK·ERR — VmStructs.cpp)을 실행한다.
     VmFaultKind Structured(Opcode op, uint32 word, uint32 extra, const Banks& banks, uint64 budget,
                            ErrorCode& error) noexcept;
+    // 언어 함수 참조 ref를 창 window로 부른다(VmLibrary.cpp — SparksVm 6a절).
+    VmFaultKind CallLanguage(uint32 ref, const Banks& window, uint64 budget,
+                             ErrorCode& error) noexcept;
     // 오류 코드 code의 Buf Result(값 없음)를 만든다.
     Allocation MakeErrorResult(uint64 code, uint64 budget) noexcept;
     void Retain(VmBuffer* buffer) noexcept {
@@ -214,6 +271,13 @@ private:
     Array<VmBuffer*> returnedBuffers_;
     uint64 liveBuffers_ = 0;
     uint64 liveBytes_ = 0;
+    // 언어 함수 묶음(참조 번호별 — VmLibrary가 배치를 정한다)과 그 모듈, Random·로그 상태.
+    Array<uint64> bindings_;
+    const BytecodeModule* boundModule_ = nullptr;
+    RandomStream random_{0};
+    Array<LogEntry> logs_;
+    uint32 droppedLogs_ = 0;
+    Array<char> logText_;
 };
 
 } // namespace rocks::sparks

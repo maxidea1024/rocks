@@ -331,7 +331,12 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
             StringBuilder<VmFormatInlineBytes> text(*allocator_);
             if ((extra >> 16) == static_cast<uint32>(ScalarKind::Enum)) {
                 // enum은 TYPE 구역의 case 이름이다(SparksVm 2.2절).
-                const BytecodeType& type = module.types[module.refs[extra & MaxBx].detail];
+                const uint32 typeIndex = module.refs[extra & MaxBx].detail;
+                if (typeIndex == NoBytecodeIndex) {
+                    return MakeFault(VmFaultKind::ContractViolation, at, steps); // 엔진 enum(LC5d)
+                }
+
+                const BytecodeType& type = module.types[typeIndex];
                 if (s[bb] >= type.fieldCount) {
                     return MakeFault(VmFaultKind::Unreachable, at, steps);
                 }
@@ -664,6 +669,26 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
 
             pc = frames_[frames_.Size() - 1].pc;
             reload();
+            break;
+        }
+        case Opcode::CallL: {
+            // 언어 함수(SparksVm 6a절): 창은 이 frame의 bank별 할당 수 위다.
+            const BytecodeFunction& current =
+                module.functions[frames_[frames_.Size() - 1].function];
+            Banks window;
+            window.s = s + current.registers[0];
+            window.r = r + current.registers[1];
+            window.b = b + current.registers[2];
+            ErrorCode error = ErrorCode::None;
+            fault = CallLanguage(DecodeBx(word), window, limits.memoryBytes, error);
+            if (error != ErrorCode::None) {
+                return failed(error);
+            }
+
+            if (fault != VmFaultKind::None) {
+                return MakeFault(fault, at, steps);
+            }
+
             break;
         }
         case Opcode::Fault:

@@ -524,7 +524,7 @@ VerbatimLit  = '@"' { VerbatimChar | '""' } '"' ;                 (* escape·보
 | `Color` | 필드 `R` `G` `B` `A`(선형 float), 이름 지정 생성 | 기본값 (0, 0, 0, 0) |
 | `string` | `Length`(UTF-8 byte 수), `CharCount()`(code point 수), `Contains` `StartsWith` `EndsWith`, `Find(s): int?`(byte 위치), `Slice(start, end)`, `Split(sep): Array<string>`, `Trim()`, `ToUpperAscii()` `ToLowerAscii()` | `Slice`의 범위 밖 또는 code point 경계가 아닌 위치는 `IndexOutOfRange`. 화면 표시는 `Text`(§3.5) |
 | `Format` | `Format.Fixed(x: float, decimals: int): string`, `Format.Padded(i: int, width: int): string` | 보간 `${}`의 최단 표기 외 서식. `decimals`는 0–9, 밖이면 `AssertFailed` |
-| `Parse` | `Parse.Int(s): int?`, `Parse.Float(s): float?` | 10진·`FloatLit` 문법만, 실패는 `null` |
+| `Parse` | `Parse.Int(s): int?`, `Parse.Float(s): float?` | 부호(`+`·`-`) 선택 뒤 10진 숫자(`Int`), `Float`는 `숫자[.숫자]`·`.숫자`와 지수 선택(`FloatLit`에 정수 표기 허용). 자릿수 구분자 `_`·16진·공백·`inf`·`nan`·범위 밖은 `null` |
 | `Array<T>` | `[i]` 읽기 `T?`, `[i] = v`, `Add` `Insert(i, v)` `RemoveAt(i)` `Clear()` `Reverse()`, `==` 가능한 원소: `Contains` `IndexOf: int?` `Remove(v): bool`, `<` 가능한 원소(int·float·string·enum): `Sort()`. 값 원소: `Count`. 객체 원소: `SlotCount`(파괴된 자리 포함) `AliveCount()` `Compact()` | 객체 원소 Array에는 `Count`가 없다(SD40). `Compact()`는 파괴된 자리를 제거한다. 순회는 시작 시점 내용의 사본이다 |
 | `Map<K, V>` | `[k]` 읽기 `V?`, `[k] = v`, `Count` `ContainsKey` `Remove(k): bool` `Keys(): Array<K>` `Values(): Array<V>` `Clear()` | 삽입 순서 |
 | `Set<T>` | `Count` `Add(v): bool` `Remove(v): bool` `Contains` `Clear()` | 삽입 순서 |
@@ -879,6 +879,7 @@ Class<T> { fn Create(): T }             // full, T는 class 타입
 
 - const의 타입은 `bool`·숫자 타입·`string`·enum(엔진 enum·`Clock` 포함)·`Tag`·`vec2`–`vec4`·`quat`·`Rotator`·`Color`·`Transform`이다. 그 밖은 S0512이며 위치는 타입 표기다.
 - const 초기값은 상수식이어야 한다. 필드 초기값은 상수식이거나, 초기값 자체(괄호 안 포함)가 component 생성(인자는 상수식)이어야 한다 — 원소·인자 안의 component 생성은 상수식이 아니다. 어기면 S0510이며 위치는 처음으로 상수식이 아닌 하위 식이다(왼쪽부터).
+- struct 필드 초기값이 생성하는 struct(`T(...)` — 배열·Map 리터럴 안 포함)를 따라 그 struct로 돌아오면 S0429다(`struct Tree { var Kids: Array<Tree> = [Tree()]; }` — 기본값이 끝없이 커진다). 같은 강한 연결 묶음 안의 생성 식마다 하나이며 위치는 그 생성 식이다. 값 순환(S0426)과 달리 컨테이너를 거쳐도 순환이다.
 - const 초기값이 서로를 가리키면(자기 자신 포함) 순환 하나에 S0511 하나다. 위치는 순환에 든 const 중 (패키지 이름, 모듈 import 경로, 원문 위치) byte 순으로 처음인 것의 이름이다(S0323과 같은 순서). 순환에 든 const와 S0510을 받은 const의 값은 정해지지 않으며 그 const를 쓰는 자리(case 값 등)는 더 진단하지 않는다.
 
 **객체 필드(S0428).** `?` 없는 객체 타입(엔진 `object`·Sparks class·interface) 필드는 class의 (a) component 생성을 초기값으로 둔 `let` 필드와 (b) Component·Actor 파생 class(LevelScript 파생 제외 — S0413, LC3)의 `@edit` 필드에만 쓴다. 그 밖(struct 필드, WorldService·WidgetController·DataAsset 파생 class의 필드, `@edit`도 component 생성도 없는 필드)은 S0428이며 `T?`를 제시한다. 위치는 필드의 타입 표기(표기가 없으면 필드 이름)다.
@@ -1566,6 +1567,7 @@ Characters/PlayerCharacter.spark:42:5: error S0731: Cannot assign to a function 
 | S0426 | `recursive-struct` | struct가 필드로 자신을 값으로 담는다(직접·다른 struct를 거쳐, 순환 하나에 하나) | 컨테이너에 담거나 class로 |
 | S0427 | `initializer-too-deep` | 필드·const 초기값이 다른 초기값을 따라가는 연쇄가 64단계를 넘는다(이름 의존은 미리 정하므로 값의 멤버 등으로 이어진 연쇄) | 중간 값을 const·지역으로 나눈다 |
 | S0428 | `object-field-needs-optional` | `?` 없는 객체 타입 필드가 §3.11의 허용 자리(component 생성 `let` 필드, Component·Actor 파생 class의 `@edit` 필드)가 아니다 | `T?` |
+| S0429 | `struct-default-cycle` | struct 필드 초기값이 생성하는 struct를 따라 같은 struct로 돌아온다(기본값이 끝없다 — §3.11) | 필드를 빈 값(`[]`)으로 시작하고 함수에서 채운다 |
 | S0501 | `integer-division` | 정수(상수 포함)끼리의 `/`, 정수 변수의 `/=` | `Math.Div(a, b)`, `float(a) / float(b)` |
 | S0502 | `float-to-int-conversion` | 실수 → 정수 타입 변환 호출 | `Math.FloorToInt` 등 |
 | S0503 | `constant-overflow` | 타입 없는 정수 상수식이 −2^63..2^64−1을 벗어난다, 정해진 상수 식이 그 타입의 범위를 벗어난다 | 값을 줄인다 |

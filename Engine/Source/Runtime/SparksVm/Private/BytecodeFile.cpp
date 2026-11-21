@@ -578,9 +578,11 @@ public:
                                ? ref.detail < module_.types.Size()
                                : ref.detail < module_.refs.Size() &&
                                      module_.refs[ref.detail].kind == BytecodeRefKind::Type);
-            const bool argumentsOk =
-                ref.arguments == NoBytecodeIndex ||
-                (ref.kind == BytecodeRefKind::Literal && ref.arguments < strings);
+            // 리터럴 인자 표·언어 함수 서술자(SparksVm 6a절)는 문자열이다.
+            const bool argumentsOk = ref.arguments == NoBytecodeIndex ||
+                                     ((ref.kind == BytecodeRefKind::Literal ||
+                                       ref.kind == BytecodeRefKind::LanguageFunction) &&
+                                      ref.arguments < strings);
             // 같은 모듈 함수 참조는 함수 표 번호가 있어야 한다(CALL이 그 함수로 간다).
             const bool functionOk =
                 ref.kind != BytecodeRefKind::Function || ref.detail != NoBytecodeIndex;
@@ -686,10 +688,14 @@ private:
     }
 
     bool Marker(uint32 marker) const noexcept {
+        // Ref·Buf 묶음은 slot 하나다(값 하나 — VM은 그 자리를 하나의 handle·버퍼로 다룬다).
         const uint32 valueBank = (marker >> 5) & 0x3;
         const uint32 keyBank = (marker >> 13) & 0x3;
+        const uint32 valueSlots = marker & 0x1F;
+        const uint32 keySlots = (marker >> 8) & 0x1F;
         return valueBank < BytecodeBankCount && keyBank < BytecodeBankCount &&
-               (marker & 0x1F) <= MaxMarkerSlots && ((marker >> 8) & 0x1F) <= MaxMarkerSlots &&
+               valueSlots <= MaxMarkerSlots && keySlots <= MaxMarkerSlots &&
+               (valueBank == 0 || valueSlots <= 1) && (keyBank == 0 || keySlots <= 1) &&
                (marker >> 15) == 0;
     }
 
@@ -948,10 +954,11 @@ private:
                    : !Ref(bx, BytecodeRefKind::Context) ? BytecodeLoadError::BadReference
                                                         : BytecodeLoadError::None;
         case Opcode::NewS:
-            // TYPE의 struct여야 한다(배치로 0·null 버퍼를 만든다).
+            // TYPE이 있으면 struct여야 한다(배치로 0·null 버퍼를 만든다). 엔진 struct·TagSet은
+            // TYPE이 없다(host 배치 — LC5d, VM은 그때까지 ContractViolation).
             return !Tuple(B, a, 1)                   ? BytecodeLoadError::BadRegister
                    : !Ref(bx, BytecodeRefKind::Type) ? BytecodeLoadError::BadReference
-                   : module_.refs[bx].detail == NoBytecodeIndex ||
+                   : module_.refs[bx].detail != NoBytecodeIndex &&
                            module_.types[module_.refs[bx].detail].kind != BytecodeTypeKind::Struct
                        ? BytecodeLoadError::BadReference
                        : BytecodeLoadError::None;
@@ -1014,7 +1021,7 @@ private:
         case Opcode::TryB:
             return !target(static_cast<int64>(address) + 2 + DecodeSAx(extra))
                        ? BytecodeLoadError::BadBranch
-                   : (c >> 5) >= BytecodeBankCount
+                   : (c >> 5) >= BytecodeBankCount || ((c >> 5) != 0 && (c & 0x1F) > 1)
                        ? BytecodeLoadError::BadOperand
                        : ok(Tuple(B, b, 1) && ((c & 0x1F) == 0 || Tuple(c >> 5, a, c & 0x1F)),
                             BytecodeLoadError::BadRegister);
@@ -1092,10 +1099,12 @@ private:
                 return BytecodeLoadError::BadOperand;
             }
 
+            // enum 표시의 Type 참조는 TYPE이 있으면 enum이어야 한다(엔진 enum은 host 이름 표 —
+            // LC5d).
             if (display == static_cast<uint32>(ScalarKind::Enum) &&
                 (!Ref(ax & MaxBx, BytecodeRefKind::Type) ||
-                 module_.refs[ax & MaxBx].detail == NoBytecodeIndex ||
-                 module_.types[module_.refs[ax & MaxBx].detail].kind != BytecodeTypeKind::Enum)) {
+                 (module_.refs[ax & MaxBx].detail != NoBytecodeIndex &&
+                  module_.types[module_.refs[ax & MaxBx].detail].kind != BytecodeTypeKind::Enum))) {
                 return BytecodeLoadError::BadReference;
             }
 
@@ -1172,7 +1181,8 @@ private:
         case Opcode::Ok: {
             const uint32 valueBank = ax >> 8;
             const uint32 slots = ax & 0xFF;
-            return valueBank >= BytecodeBankCount || slots > MaxMarkerSlots
+            return valueBank >= BytecodeBankCount || slots > MaxMarkerSlots ||
+                           (valueBank != 0 && slots > 1)
                        ? BytecodeLoadError::BadOperand
                        : ok(Tuple(B, a, 1) && (slots == 0 || Tuple(valueBank, b, slots)),
                             BytecodeLoadError::BadRegister);

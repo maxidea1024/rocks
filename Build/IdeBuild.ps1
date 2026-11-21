@@ -2,6 +2,10 @@
 # runs this script.
 #
 #   IdeBuild.ps1 -Action Build|Rebuild|Clean -Target <target> -Configuration <configuration> [-Platform Windows|Android] [-Compiler <clang-cl>]
+#   IdeBuild.ps1 -Action Compile -WorkingDir <project directory> -Files <selected files> ... (Ctrl+F7, section 7.4)
+#
+# Compile splits -Files on ';', resolves each entry against -WorkingDir (Visual Studio passes $(SelectedFiles) relative to the project
+# file) and compiles only those sources with their logical commands (build --files / game --files).
 #
 #   IdeBuild.ps1 -Action Build|Rebuild|Clean -Project <game.rocksproject> -Sdk <installed SDK> -Target <target> -Configuration <configuration>
 #                [-Compiler <clang-cl>]
@@ -13,13 +17,15 @@
 # the tools are prepared (built only when their inputs changed) inside the same lock, so no build overwrites a tool another build runs.
 # -Compiler is the clang-cl the project files were generated with; Visual Studio rewrites PATH before NMake, so the build does not search it.
 param(
-    [Parameter(Mandatory)][ValidateSet('Build', 'Rebuild', 'Clean')][string] $Action,
+    [Parameter(Mandatory)][ValidateSet('Build', 'Rebuild', 'Clean', 'Compile')][string] $Action,
     [Parameter(Mandatory)][string] $Target,
     [Parameter(Mandatory)][string] $Configuration,
     [ValidateSet('Windows', 'Android')][string] $Platform = 'Windows',
     [string] $Compiler,
     [string] $Project,
-    [string] $Sdk
+    [string] $Sdk,
+    [string] $WorkingDir,
+    [string] $Files
 )
 
 Set-StrictMode -Version Latest
@@ -85,6 +91,17 @@ function Invoke-RocksIdeAction {
     }
 
     $result = 0
+    if ($Action -eq 'Compile') {
+        if (-not $WorkingDir -or -not $Files) {
+            [Console]::Out.WriteLine('error RB0002: -Action Compile needs -WorkingDir and -Files (select a source file).')
+            return 1
+        }
+
+        $selected = @($Files -split ';' | Where-Object { $_.Trim() } | ForEach-Object { [System.IO.Path]::GetFullPath($_.Trim(), $WorkingDir) }) -join ';'
+        & dotnet $cli @buildCommand @common @compilerArguments --files $selected | Out-Host
+        return [int] $LASTEXITCODE
+    }
+
     if ($Action -eq 'Clean' -or $Action -eq 'Rebuild') {
         & dotnet $cli clean @common | Out-Host
         $result = $LASTEXITCODE

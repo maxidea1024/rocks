@@ -1,0 +1,6 @@
+# Language-owned Clock has case names in the TYPE section; engine enums, engine structs and TagSet need the host (LC5d) and fault as placeholders.
+ClockName(Game) -> "Game" (4 steps)
+ClockName(UI) -> "UI" (4 steps)
+ChannelName(Visibility) -> fault ContractViolation at 6:13 (1 steps)
+Tags() -> fault ContractViolation at 10:9 (1 steps)
+Params() -> fault ContractViolation at 15:41 (3 steps)

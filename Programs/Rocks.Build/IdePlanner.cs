@@ -100,9 +100,9 @@ public static class IdePlanner
     /// </summary>
     public static string Fingerprint(IReadOnlyList<IdeCompile> compiles, string? executable, string toolchain)
     {
-        // object 경로는 유니티·PCH 변형 디렉터리에 따라 달라 지문에서 뺀다.
+        // object 경로(/Fo…, -o <경로>)는 유니티·PCH 변형 디렉터리에 따라 달라 지문에서 뺀다.
         string[] lines = [.. compiles.Select(compile => string.Join(Field, compile.Module, compile.Source,
-                string.Join(Item, compile.Arguments.Where(argument => !argument.StartsWith("/Fo", StringComparison.Ordinal))),
+                string.Join(Item, CompileObjectArguments.Without(compile.Arguments)),
                 string.Join(Item, compile.ForcedIncludes), compile.PchHeader ?? ""))
             .Order(StringComparer.Ordinal)];
         string text = string.Join(Line, [toolchain, executable ?? "", .. lines]);

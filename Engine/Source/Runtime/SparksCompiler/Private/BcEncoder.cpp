@@ -201,19 +201,21 @@ uint32 BytecodeEncoder::AddDecodedString(StringView text, bool piece) noexcept {
     return AddString(StringView(decoded.Data(), decoded.Size()));
 }
 
-uint32 BytecodeEncoder::AddRef(BytecodeRefKind kind, uint32 name, uint32 detail) noexcept {
+uint32 BytecodeEncoder::AddRef(BytecodeRefKind kind, uint32 name, uint32 detail,
+                               uint32 arguments) noexcept {
     if (checker_.binder_.error_ != ErrorCode::None) {
         return 0;
     }
 
+    const uint32 distinct = arguments != NoBytecodeIndex ? arguments : detail;
     const uint64 key =
-        (uint64(kind) << 56) | (uint64(name & 0x0FFFFFFF) << 28) | uint64(detail & 0x0FFFFFFF);
+        (uint64(kind) << 56) | (uint64(name & 0x0FFFFFFF) << 28) | uint64(distinct & 0x0FFFFFFF);
     if (const uint32* found = refIndex_.Find(key)) {
         return *found;
     }
 
     const uint32 index = static_cast<uint32>(out_.refs.Size());
-    if (auto pushed = out_.refs.TryPushBack(BytecodeRef{kind, name, detail}); !pushed) {
+    if (auto pushed = out_.refs.TryPushBack(BytecodeRef{kind, name, detail, arguments}); !pushed) {
         Fail(pushed.Error());
         return 0;
     }
@@ -257,7 +259,8 @@ bool BytecodeEncoder::Qualify(StringBuilderBase& name, uint32 symbol) noexcept {
     return true;
 }
 
-uint32 BytecodeEncoder::SymbolRef(BytecodeRefKind kind, uint32 symbol, uint32 types) noexcept {
+uint32 BytecodeEncoder::SymbolRef(BytecodeRefKind kind, uint32 symbol, uint32 types,
+                                  uint32 arguments) noexcept {
     // 표시 이름은 `[모듈:]Owner.Name[<타입 인자>]`이다(LC4d가 안정 ID를 더한다).
     StringBuilder<128> name(checker_.allocator_);
     const Symbol& entry = c_.symbols_[symbol];
@@ -304,7 +307,95 @@ uint32 BytecodeEncoder::SymbolRef(BytecodeRefKind kind, uint32 symbol, uint32 ty
         detail = found == nullptr ? NoBytecodeIndex : *found;
     }
 
-    return AddRef(kind, AddString(name.View()), detail);
+    return AddRef(kind, AddString(name.View()), detail, arguments);
+}
+
+void BytecodeEncoder::AppendDescriptor(StringBuilderBase& out, uint32 type) noexcept {
+    // 타입 글자(SparksVm 6a절). 모르는 타입은 배치(`z<bank 글자><slot 수>`)로 쓴다.
+    if (type == NoType || type == checker_.voidType_) {
+        out.Append("void");
+        return;
+    }
+
+    if (checker_.IsOptional(type)) {
+        out.Append("?<");
+        AppendDescriptor(out, checker_.NonOptional(type));
+        out.Append(">");
+        return;
+    }
+
+    const uint32 symbol = checker_.SymbolOf(type);
+    const Symbol* entry = symbol == NoSymbol ? nullptr : &c_.symbols_[symbol];
+    const StringView name = entry == nullptr ? StringView() : entry->name;
+    struct Letter {
+        StringView name;
+        StringView code;
+    };
+    constexpr Letter Letters[] = {
+        {"bool", "b"},     {"int8", "i8"},    {"int16", "i16"},   {"int32", "i32"},
+        {"int64", "i64"},  {"int", "i64"},    {"uint8", "u8"},    {"uint16", "u16"},
+        {"uint32", "u32"}, {"uint64", "u64"}, {"float32", "f32"}, {"float64", "f64"},
+        {"float", "f64"},  {"vec2", "v2"},    {"vec3", "v3"},     {"vec4", "v4"},
+        {"quat", "q"},     {"Rotator", "r"},  {"Color", "c"},     {"Transform", "t"},
+        {"mat4", "m"},     {"string", "s"},   {"Tag", "n"},       {"Clock", "e"}};
+    if (entry != nullptr &&
+        (entry->kind == SymbolKind::BuiltinType || entry->kind == SymbolKind::PreludeType)) {
+        for (const Letter& letter : Letters) {
+            if (letter.name == name) {
+                out.Append(letter.code);
+                return;
+            }
+        }
+
+        const TypeEntry& shape = c_.types_[type];
+        auto argument = [&](uint32 index) noexcept {
+            AppendDescriptor(out, c_.typeArguments_[shape.firstArgument + index]);
+        };
+        if ((name == "Array" || name == "Set") && shape.argumentCount == 1) {
+            out.Append(name == "Array" ? "A<" : "S<");
+            argument(0);
+            out.Append(">");
+            return;
+        }
+
+        if (name == "Map" && shape.argumentCount == 2) {
+            out.Append("M<");
+            argument(0);
+            out.Append(",");
+            argument(1);
+            out.Append(">");
+            return;
+        }
+
+        if (name == "Result" && shape.argumentCount == 1) {
+            out.Append("R<");
+            argument(0);
+            out.Append(">");
+            return;
+        }
+    }
+
+    if (entry != nullptr && entry->kind == SymbolKind::Enum) {
+        out.Append("e");
+        return;
+    }
+
+    if (entry != nullptr && entry->kind == SymbolKind::Struct) {
+        out.Append("st");
+        return;
+    }
+
+    const IrLayout layout = IrBuilder::Layout(checker_, type);
+    if (layout.bank == IrBank::Ref && layout.slots == 1) {
+        out.Append("x");
+        return;
+    }
+
+    out.AppendFormat("z{}{}",
+                     layout.bank == IrBank::Scalar ? 's'
+                     : layout.bank == IrBank::Ref  ? 'r'
+                                                   : 'b',
+                     layout.slots);
 }
 
 uint32 BytecodeEncoder::TypeRef(uint32 type) noexcept {
@@ -321,9 +412,14 @@ uint32 BytecodeEncoder::TypeRef(uint32 type) noexcept {
 }
 
 uint32 BytecodeEncoder::TypeTable(uint32 symbol) noexcept {
+    // Sparks struct·enum과 언어 소유 enum `Clock`(case는 언어 표 순 — TOSTR가 이름을 쓴다).
+    // 엔진 enum·struct는 host 이름 표·배치(LC5d)라 TYPE에 없다.
+    const bool clock = symbol != NoSymbol && symbol < c_.symbols_.Size() &&
+                       c_.symbols_[symbol].kind == SymbolKind::PreludeType &&
+                       c_.symbols_[symbol].name == "Clock";
     if (symbol == NoSymbol || symbol >= c_.symbols_.Size() ||
         (c_.symbols_[symbol].kind != SymbolKind::Struct &&
-         c_.symbols_[symbol].kind != SymbolKind::Enum)) {
+         c_.symbols_[symbol].kind != SymbolKind::Enum && !clock)) {
         return NoBytecodeIndex;
     }
 
@@ -354,17 +450,27 @@ uint32 BytecodeEncoder::TypeTable(uint32 symbol) noexcept {
 
     // 필드(case)는 선언 순이다. struct 필드는 bank 묶음(Scalar·Ref·Buf) 안의 절대 slot 위치를
     // 받는다.
-    const SyntaxTree& tree = c_.trees_[entry.module];
-    const uint32 members = tree.Child(entry.node, 3);
     Array<uint32> fields(checker_.allocator_);
-    if (members != NoNode && tree.Node(members).kind == SyntaxKind::List) {
-        for (const uint32 member : tree.Children(members)) {
-            const SyntaxKind kind = tree.Node(member).kind;
+    if (clock) {
+        for (uint32 at = 0; at < c_.symbols_.Size(); ++at) {
+            if (c_.symbols_[at].kind == SymbolKind::EnumCase && c_.symbols_[at].owner == symbol &&
+                !fields.TryPushBack(at)) {
+                Fail(ErrorCode::OutOfMemory);
+                return NoBytecodeIndex;
+            }
+        }
+    }
+
+    const SyntaxTree* tree = clock ? nullptr : &c_.trees_[entry.module];
+    const uint32 members = clock ? NoNode : tree->Child(entry.node, 3);
+    if (members != NoNode && tree->Node(members).kind == SyntaxKind::List) {
+        for (const uint32 member : tree->Children(members)) {
+            const SyntaxKind kind = tree->Node(member).kind;
             if (kind != SyntaxKind::Field && kind != SyntaxKind::EnumCase) {
                 continue;
             }
 
-            const uint32 field = c_.NodeSymbol(entry.module, tree.Child(member, 2));
+            const uint32 field = c_.NodeSymbol(entry.module, tree->Child(member, 2));
             if (field != NoSymbol && !fields.TryPushBack(field)) {
                 Fail(ErrorCode::OutOfMemory);
                 return NoBytecodeIndex;
@@ -372,7 +478,7 @@ uint32 BytecodeEncoder::TypeTable(uint32 symbol) noexcept {
         }
     }
 
-    uint16 slots[BytecodeBankCount] = {};
+    uint32 slots[BytecodeBankCount] = {};
     for (const uint32 field : fields) {
         BytecodeTypeField item;
         item.name = AddString(c_.symbols_[field].name);
@@ -381,7 +487,11 @@ uint32 BytecodeEncoder::TypeTable(uint32 symbol) noexcept {
             item.bank = static_cast<uint8>(layout.bank);
             item.slots = static_cast<uint8>(layout.slots);
             item.offset = slots[item.bank]; // 묶음 안 위치 — 아래에서 절대 위치로 옮긴다
-            slots[item.bank] = static_cast<uint16>(slots[item.bank] + layout.slots);
+            slots[item.bank] += layout.slots;
+            if (slots[item.bank] > NumericLimits<uint16>::Max()) {
+                TooLarge(); // struct 하나의 bank별 slot 합은 16비트(TYPE 구역) — S1150
+                return NoBytecodeIndex;
+            }
         }
 
         if (!fieldIndex_.Insert(uint64(field), static_cast<uint32>(out_.typeFields.Size())) ||
@@ -394,7 +504,7 @@ uint32 BytecodeEncoder::TypeTable(uint32 symbol) noexcept {
     BytecodeType& stored = out_.types[index];
     stored.fieldCount = static_cast<uint32>(fields.Size());
     for (uint32 bank = 0; bank < BytecodeBankCount; ++bank) {
-        stored.slots[bank] = slots[bank];
+        stored.slots[bank] = static_cast<uint16>(slots[bank]);
     }
 
     for (uint32 at = stored.firstField; at < stored.firstField + stored.fieldCount; ++at) {
@@ -419,6 +529,7 @@ uint32 BytecodeEncoder::CallRef(uint32 callee, uint8 sub, uint32 types, Opcode& 
         op = Opcode::CallN;
         return SymbolRef(BytecodeRefKind::NativeFunction, callee, types);
     case SymbolKind::LanguageFunction:
+    case SymbolKind::LanguageField:
     case SymbolKind::PreludeValue:
         op = Opcode::CallL;
         return SymbolRef(BytecodeRefKind::LanguageFunction, callee, types);
@@ -1581,7 +1692,42 @@ void BytecodeEncoder::EncodeCall(const IrInstruction& i) noexcept {
     const IrFunction& f = *f_;
     const SourceSpan span = i.span;
     Opcode op = Opcode::Call;
-    const uint32 ref = Bx(CallRef(i.extra, i.sub, i.types, op));
+    const SymbolKind calleeKind = c_.symbols_[i.extra].kind;
+    const bool language = i.sub != IrCallRpc && (calleeKind == SymbolKind::LanguageFunction ||
+                                                 calleeKind == SymbolKind::LanguageField ||
+                                                 calleeKind == SymbolKind::PreludeValue);
+    uint32 ref = language ? 0 : Bx(CallRef(i.extra, i.sub, i.types, op));
+    if (language) {
+        op = Opcode::CallL;
+        // 언어 함수: 피연산자(수신자 먼저)와 결과의 서술자를 리터럴 인자 자리에 싣는다(SparksVm
+        // 6a절 — 오버로드·원소 타입을 VM이 이것으로 고른다).
+        StringBuilder<128> descriptor(checker_.allocator_);
+        // 대기 handle(타입이 없는 Ref 값 — `NextTick()`의 결과, `All`의 인자)은 `w`다.
+        auto operand = [&](uint32 vreg) noexcept {
+            if (vreg != NoIrRegister && f.registers[vreg].type == NoType &&
+                f.registers[vreg].bank == IrBank::Ref) {
+                descriptor.Append("w");
+            } else {
+                AppendDescriptor(descriptor,
+                                 vreg == NoIrRegister ? NoType : f.registers[vreg].type);
+            }
+        };
+        for (uint32 index = 0; index < i.c; ++index) {
+            descriptor.Append(index == 0 ? "" : ",");
+            operand(f.operands[i.b + index]);
+        }
+
+        descriptor.Append(">");
+        operand(i.a);
+        if (descriptor.HasFailed()) {
+            Fail(descriptor.Status().Error());
+            return;
+        }
+
+        ref = Bx(SymbolRef(BytecodeRefKind::LanguageFunction, i.extra, i.types,
+                           AddString(descriptor.View())));
+    }
+
     ToWindow(Span<const uint32>(f.operands.Data() + i.b, i.c), span);
     Word(EncodeABx(op, 0, ref), span);
     const bool mutating = i.sub == IrCallMutating && i.c > 0;
@@ -1603,8 +1749,9 @@ void BytecodeEncoder::EncodeNew(const IrInstruction& i) noexcept {
     const uint32 type = f.registers[i.a].type;
     switch (i.sub) {
     case IrNewStruct: {
-        const Symbol& entry = c_.symbols_[i.extra];
-        const bool component = entry.kind == SymbolKind::Class;
+        // 결과가 Ref면 객체(Sparks class·엔진 component — NEWC), 아니면 값 struct(NEWS — Sparks
+        // struct는 TYPE이 있고 엔진 struct·TagSet은 host 배치라 없다, LC5d).
+        const bool component = BankOf(i.a) == 1;
         Word(EncodeABx(component ? Opcode::NewC : Opcode::NewS, Phys(i.a), Bx(TypeRef(type))),
              span);
         for (uint32 pair = 0; pair < i.c; ++pair) {

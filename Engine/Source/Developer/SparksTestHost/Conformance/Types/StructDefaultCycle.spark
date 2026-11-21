@@ -1,0 +1,26 @@
+struct Tree {
+    var Kids: Array<Tree> = [Tree()];
+}
+
+struct Left {
+    var Other = Right();
+}
+
+struct Right {
+    var Lefts: Map<string, Left> = ["a": Left()];
+}
+
+struct Fine {
+    var Items: Array<int> = [1, 2];
+    var Inner = Leaf();
+}
+
+struct Leaf {
+    var Value: int = 1;
+}
+
+fn Use() {
+    _ = Tree();
+    _ = Left();
+    _ = Fine();
+}

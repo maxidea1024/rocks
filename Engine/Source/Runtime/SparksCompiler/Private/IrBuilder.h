@@ -178,6 +178,8 @@ private:
     // 살아 있는 지역 유지 자원의 첫 레지스터(선언 순)다.
     Array<uint32> held_;
     Array<Loop> loops_;
+    // 기본값을 내리는 중인 struct 심볼들이다(S0429가 막는 순환의 방어 — 끝없는 재귀를 막는다).
+    Array<uint32> defaulting_;
 };
 
 } // namespace rocks::sparks::detail

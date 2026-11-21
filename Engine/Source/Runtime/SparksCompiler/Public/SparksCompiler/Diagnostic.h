@@ -123,6 +123,7 @@ enum class DiagnosticCode : uint16 {
     RecursiveStruct = 426,
     InitializerTooDeep = 427,
     ObjectFieldNeedsOptional = 428,
+    StructDefaultCycle = 429,
     IntegerDivision = 501,
     FloatToIntConversion = 502,
     ConstantOverflow = 503,

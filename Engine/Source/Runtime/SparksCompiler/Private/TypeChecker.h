@@ -388,6 +388,9 @@ private:
     // cycles=false: 표기한 필드만으로 기본값을 정한다(검사 전). cycles=true: 추론한 필드까지 넣어
     // 순환을 알린다(검사 뒤).
     void AnalyzeStructs(bool cycles) noexcept;
+    // struct 필드 초기값이 생성하는 struct를 따라 자기 자신으로 돌아오는 생성을 알린다(S0429 —
+    // 기본값이 끝없이 커진다, CheckStructs.cpp).
+    void CheckDefaultCycles() noexcept;
     // 필드·const 초기값을 이름 의존 순서대로 미리 정한다(재귀 깊이를 쓰지 않게 — S0427 앞 단계).
     void PrepareInitializers() noexcept;
     // 초기값 깊이를 하나 들어간다. 상한을 넘으면 S0427을 내고 false(그 초기값은 해석하지 못함).
