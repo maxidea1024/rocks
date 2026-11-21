@@ -1,0 +1,23 @@
+{
+  "objectPath": "/Game/Meshes/SM_Rock_Collision.SM_Rock_Collision",
+  "class": "StaticMesh",
+  "ueClass": "/Script/Engine.StaticMesh",
+  "dependencies": [
+    {
+      "objectPath": "/Game/Meshes/SM_Rock.SM_Rock",
+      "class": "StaticMesh",
+      "kind": "hard"
+    }
+  ],
+  "diagnostics": [],
+  "settings": {},
+  "data": {
+    "positions": {
+      "blob": "4fb8f2852abd9d09c1bffa387cb002163d2be61141df31898e80fe15aaf76148",
+      "bytes": 36,
+      "layout": "f32",
+      "components": 3,
+      "count": 3
+    }
+  }
+}

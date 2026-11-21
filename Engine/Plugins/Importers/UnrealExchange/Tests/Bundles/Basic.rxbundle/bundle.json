@@ -1,0 +1,72 @@
+{
+  "formatVersion": 1,
+  "exporter": {
+    "plugin": "RocksExport",
+    "pluginVersion": "1.0.0",
+    "engineVersion": "5.8.4",
+    "engineCommit": "f45729c0b6f0"
+  },
+  "projectSettings": {
+    "substrate": false,
+    "retainJpegFormat": true
+  },
+  "createdUtc": "2026-11-21T00:00:00Z",
+  "assets": [
+    {
+      "objectPath": "/Game/Characters/SKEL_Hero.SKEL_Hero",
+      "class": "Skeleton",
+      "file": "assets/Game/Characters/SKEL_Hero.json"
+    },
+    {
+      "objectPath": "/Game/Characters/SK_Hero.SK_Hero",
+      "class": "SkeletalMesh",
+      "file": "assets/Game/Characters/SK_Hero.json"
+    },
+    {
+      "objectPath": "/Game/Functions/MF_Noise.MF_Noise",
+      "class": "MaterialFunction",
+      "file": "assets/Game/Functions/MF_Noise.json"
+    },
+    {
+      "objectPath": "/Game/Levels/L_Main.L_Main",
+      "class": "World",
+      "file": "assets/Game/Levels/L_Main.json"
+    },
+    {
+      "objectPath": "/Game/Materials/MI_Rock.MI_Rock",
+      "class": "MaterialInstanceConstant",
+      "file": "assets/Game/Materials/MI_Rock.json"
+    },
+    {
+      "objectPath": "/Game/Materials/M_Base.M_Base",
+      "class": "Material",
+      "file": "assets/Game/Materials/M_Base.json"
+    },
+    {
+      "objectPath": "/Game/Meshes/SM_Rock.SM_Rock",
+      "class": "StaticMesh",
+      "file": "assets/Game/Meshes/SM_Rock.json"
+    },
+    {
+      "objectPath": "/Game/Meshes/SM_Rock_Collision.SM_Rock_Collision",
+      "class": "StaticMesh",
+      "file": "assets/Game/Meshes/SM_Rock_Collision.json"
+    },
+    {
+      "objectPath": "/Game/My Props/_Shared._Shared",
+      "class": "Texture2D",
+      "file": "assets/Game/My Props/_Shared.json"
+    },
+    {
+      "objectPath": "/Game/Textures/T_Rock.T_Rock",
+      "class": "Texture2D",
+      "file": "assets/Game/Textures/T_Rock.json"
+    }
+  ],
+  "redirects": [
+    {
+      "from": "/Game/Old/MI_Old.MI_Old",
+      "to": "/Game/Materials/MI_Rock.MI_Rock"
+    }
+  ]
+}

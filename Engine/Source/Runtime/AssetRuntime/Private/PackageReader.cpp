@@ -859,6 +859,22 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "UnknownBoneTrack";
     case AssetDiagnosticCode::EventPropertiesDropped:
         return "EventPropertiesDropped";
+    case AssetDiagnosticCode::CorruptBundle:
+        return "CorruptBundle";
+    case AssetDiagnosticCode::UnsupportedBundleVersion:
+        return "UnsupportedBundleVersion";
+    case AssetDiagnosticCode::UnknownField:
+        return "UnknownField";
+    case AssetDiagnosticCode::UnsupportedAsset:
+        return "UnsupportedAsset";
+    case AssetDiagnosticCode::UnrealPathRenamed:
+        return "UnrealPathRenamed";
+    case AssetDiagnosticCode::UnrealPathTooLong:
+        return "UnrealPathTooLong";
+    case AssetDiagnosticCode::UnrealPathCollision:
+        return "UnrealPathCollision";
+    case AssetDiagnosticCode::MissingUnrealDependency:
+        return "MissingUnrealDependency";
     }
 
     return "Unknown";

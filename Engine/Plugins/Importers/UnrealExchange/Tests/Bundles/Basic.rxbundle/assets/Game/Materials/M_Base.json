@@ -1,0 +1,30 @@
+{
+  "objectPath": "/Game/Materials/M_Base.M_Base",
+  "class": "Material",
+  "ueClass": "/Script/Engine.Material",
+  "dependencies": [
+    {
+      "objectPath": "/Game/Functions/MF_Noise.MF_Noise",
+      "class": "MaterialFunction",
+      "kind": "hard"
+    },
+    {
+      "objectPath": "/Game/Textures/T_Missing.T_Missing",
+      "class": "Texture2D",
+      "kind": "hard"
+    },
+    {
+      "objectPath": "/Game/Textures/T_Rock.T_Rock",
+      "class": "Texture2D",
+      "kind": "hard"
+    }
+  ],
+  "diagnostics": [],
+  "settings": {
+    "TwoSided": false,
+    "OpacityMaskClipValue": 0.333333343
+  },
+  "data": {
+    "expressions": []
+  }
+}

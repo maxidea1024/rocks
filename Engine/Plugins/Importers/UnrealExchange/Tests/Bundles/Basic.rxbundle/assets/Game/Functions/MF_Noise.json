@@ -1,0 +1,11 @@
+{
+  "objectPath": "/Game/Functions/MF_Noise.MF_Noise",
+  "class": "MaterialFunction",
+  "ueClass": "/Script/Engine.MaterialFunction",
+  "dependencies": [],
+  "diagnostics": [],
+  "settings": {},
+  "data": {
+    "expressions": []
+  }
+}
