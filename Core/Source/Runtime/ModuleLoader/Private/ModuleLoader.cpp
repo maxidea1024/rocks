@@ -137,7 +137,6 @@ Result<UniquePtr<ModuleLoader>> ModuleLoader::TryCreate(Allocator& allocator,
 
 Result<UniquePtr<ModuleLoader>>
 ModuleLoader::TryCreateFromManifest(Allocator& allocator, StringView manifestPath,
-                                    ModuleEntryFunction executableEntry,
                                     ModuleLoadReport& report) noexcept {
     using Created = Result<UniquePtr<ModuleLoader>>;
     report = ModuleLoadReport{};
@@ -226,7 +225,7 @@ ModuleLoader::TryCreateFromManifest(Allocator& allocator, StringView manifestPat
     }
 
     if (!detail::ParseModuleManifest(StringView(text.Data(), text.Size()), *data.Value(), report) ||
-        !detail::PrepareModuleBinaries(directory, *data.Value(), executableEntry, report)) {
+        !detail::PrepareModuleBinaries(directory, *data.Value(), report)) {
         return failed();
     }
 
@@ -253,6 +252,22 @@ ModuleLoader::TryCreateFromManifest(Allocator& allocator, StringView manifestPat
     }
 
     return Created::Success(Move(loader));
+}
+
+bool ModuleLoader::FindHostSymbol(const char* symbol, void*& address,
+                                  platform::DynamicLibraryLease& lease) const noexcept {
+    address = nullptr;
+    if (!manifest_) {
+        return false;
+    }
+
+    for (usize index = 0; index < manifest_->host.Size(); ++index) {
+        if (manifest_->host[index]) {
+            return static_cast<bool>(manifest_->libraries[index].Find(symbol, address, lease));
+        }
+    }
+
+    return false;
 }
 
 const ModuleEntry& ModuleLoader::EntryAt(usize index) const noexcept {

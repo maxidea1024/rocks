@@ -127,9 +127,13 @@ struct ModuleTableRow {
 // 모듈 표다. 행 배열은 정적 수명이다.
 using ModuleTable = Span<const ModuleTableRow>;
 
+#if ROCKS_MONOLITHIC
 // 이 실행 파일의 모듈 표다. 빌드가 실행 파일마다 만드는 생성 TU(<실행 파일>.ModuleTable.cpp)가
-// 정의한다. 로더를 만드는 쪽(Launch·시험 runner)이 ModuleLoader::TryCreate에 넘긴다.
+// 정의한다. 로더를 만드는 쪽(Launch·시험 runner)이 ModuleLoader::TryCreate에 넘긴다. Modular에는
+// 없다 — 모듈 표는 manifest이고 Launch의 Modular 진입이 로더를 만든다
+// (Docs/Design/ModuleLoader.ko.md 3.14절). 그래서 Modular에서 부르면 컴파일 오류다.
 ModuleTable GeneratedModuleTable() noexcept;
+#endif
 
 namespace detail {
 
