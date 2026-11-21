@@ -2,6 +2,8 @@
 
 #include <Core/Containers/Array.h>
 #include <Core/Memory/Allocator.h>
+#include <Core/Result.h>
+#include <Core/Text/StringBuilder.h>
 #include <Core/Text/StringView.h>
 #include <SparksVm/Opcode.h>
 
@@ -124,5 +126,11 @@ public:
     Array<BytecodeAwaitPoint> awaits;
     Array<BytecodeLiveRange> liveRanges;
 };
+
+// 모듈의 bytecode 덤프(Docs/Design/SparksBytecode.ko.md 4.6절 `.bc`)를 out에 붙인다:
+// 상수·문자열·참조 표, 함수마다 머리 줄(bank별 할당 수/frame 크기, 매개변수 slot 수)·await
+// 지점·switch 표·명령(주소, opcode 이름, 피연산자, 원문 위치). 결정적이다. 실패: out의 할당 실패는
+// 그 오류.
+Result<void> AppendBytecodeDump(StringBuilderBase& out, const BytecodeModule& module) noexcept;
 
 } // namespace rocks::sparks

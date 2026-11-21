@@ -12,6 +12,7 @@
 #include <SparksCompiler/Diagnostic.h>
 #include <SparksCompiler/PackageManifest.h>
 #include <SparksCompiler/Source.h>
+#include <SparksVm/Bytecode.h>
 #include <SparksCompiler/Symbols.h>
 #include <SparksCompiler/SyntaxTree.h>
 
@@ -67,6 +68,7 @@ class CompilationChecker;
 class FlowAnalyzer;
 class IrBuilder;
 class IrWriter;
+class BytecodeEncoder;
 class NameBinder;
 class TypeChecker;
 } // namespace detail
@@ -216,11 +218,20 @@ public:
     // 않은 컴파일은 InvalidArgument, 할당 실패는 그 오류.
     Result<void> AppendIrDump(StringBuilderBase& out, uint32 module) const noexcept;
 
+    // 모듈의 bytecode(Docs/Design/SparksBytecode.ko.md 4절)다. Codegen 단계까지 검사했고 진단이
+    // 없는 컴파일에서만 있다(아니면 nullptr). 컴파일이 살아 있는 동안 유효하다.
+    const BytecodeModule* ModuleBytecode(uint32 module) const noexcept;
+
+    // 모듈의 bytecode 덤프(`.bc` — AppendBytecodeDump)를 out에 붙인다. 실패: bytecode가 없으면
+    // InvalidArgument, 할당 실패는 그 오류.
+    Result<void> AppendBytecodeDump(StringBuilderBase& out, uint32 module) const noexcept;
+
 private:
     friend class detail::CompilationChecker;
     friend class detail::FlowAnalyzer;
     friend class detail::IrBuilder;
     friend class detail::IrWriter;
+    friend class detail::BytecodeEncoder;
     friend class detail::NameBinder;
     friend class detail::TypeChecker;
 
@@ -332,6 +343,8 @@ private:
     Array<uint32> sortedCount_;
     // 모듈마다 IR 덤프 글자(text_ 안 — Codegen 단계에서 내린 모듈만)다.
     Array<TextRef> irDumps_;
+    // 모듈마다 bytecode(Codegen 단계에서 내린 컴파일만 — 모듈 번호와 같은 순서).
+    Array<BytecodeModule> bytecode_;
     CompilationStage lastStage_ = CompilationStage::All;
     bool checked_ = false;
 };

@@ -97,6 +97,7 @@ struct CheckContext {
 class FlowAnalyzer;
 class IrBuilder;
 class IrWriter;
+class BytecodeEncoder;
 
 class TypeChecker final {
 public:
@@ -108,6 +109,7 @@ private:
     friend class FlowAnalyzer;
     friend class IrBuilder;
     friend class IrWriter;
+    friend class BytecodeEncoder;
 
     // 노드 대표 토큰의 글자다(연산자·멤버 이름·리터럴).
     StringView TokenText(uint32 module, uint32 node) const noexcept;

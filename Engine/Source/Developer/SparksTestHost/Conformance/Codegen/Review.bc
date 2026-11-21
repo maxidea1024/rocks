@@ -1,0 +1,262 @@
+k0 = 0x3ff0000000000000
+k1 = 0x3fb99999a0000000
+k2 = 0x0000000000000000
+k3 = 0x4000000000000000
+k4 = 0x4008000000000000
+t0 = "Hp.Next"
+t1 = "Hp.Cursor"
+t2 = "Hp.Fetch"
+t3 = "NextTick"
+t4 = "Hp.Compute"
+t5 = "Hp.Hold"
+t6 = "World"
+t7 = "World.Audio"
+t8 = "Hp.Cue"
+t9 = "AudioSystem.StartLoop"
+t10 = "Delay"
+t11 = "LoopHandle.Pause"
+t12 = "Hp.Equal"
+t13 = "Hp.Read"
+t14 = "Hp.Shield"
+t15 = "Hp.Chain"
+t16 = "Hp.Paths"
+t17 = "Hp.Names"
+t18 = "y"
+t19 = "x"
+t20 = "Array.Add"
+t21 = "Hp.Hum"
+t22 = "Hp.Consts"
+t23 = "Game.Home"
+t24 = "Tag"
+t25 = "Hp.on Owner.Damaged"
+t26 = "Component.Owner"
+t27 = "Actor.Find"
+t28 = "Hp.Opened"
+ref0 = field Hp.Cursor
+ref1 = language NextTick
+ref2 = context World
+ref3 = field World.Audio
+ref4 = field Hp.Cue
+ref5 = native AudioSystem.StartLoop
+ref6 = function Hp.Fetch #1
+ref7 = language Delay
+ref8 = native LoopHandle.Pause
+ref9 = field Hp.Shield
+ref10 = function Hp.Compute #2
+ref11 = field Hp.Names
+ref12 = function Hp.Next #0
+ref13 = language Array.Add
+ref14 = field Hp.Hum
+ref15 = literal Tag "Game.Home"
+ref16 = field Component.Owner
+ref17 = native Actor.Find
+ref18 = event Hp.Opened
+
+function Hp.Next  scalar=2/2 ref=1/1 buf=0/0 params=0/1/0
+  0000  GETF.S  s0, r0, ref0    ; 15:9
+  0002  LOADI  s1, 1    ; 15:19
+  0003  ADD.I64  s0, s0, s1    ; 15:9
+  0004  SETF.S  r0, s0, ref0    ; 15:9
+  0006  GETF.S  s0, r0, ref0    ; 16:16
+  0008  RET  s0 x1    ; 16:9
+
+function Hp.Fetch  scalar=3/3 ref=2/3 buf=0/0 params=0/1/0
+  await 0002  live
+  0000  CALLL  ref1    ; 20:15
+  0001  MOV.R  r1, r2    ; 20:15
+  0002  AWAIT  -, r1    ; 20:9
+  0004  LOADI  s0, 1    ; 21:16
+  0005  LOADI  s1, 0    ; 21:9
+  0006  MOV.S  s2, s0    ; 21:9
+  0007  RET  s1 x2    ; 21:9
+
+function Hp.Compute  scalar=1/1 ref=2/3 buf=0/0 params=0/1/0
+  await 0002  live
+  0000  CALLL  ref1    ; 25:15
+  0001  MOV.R  r1, r2    ; 25:15
+  0002  AWAIT  -, r1    ; 25:9
+  0004  LOADI  s0, 2    ; 26:16
+  0005  RET  s0 x1    ; 26:9
+
+function Hp.Hold  scalar=5/7 ref=3/5 buf=0/0 params=0/1/0
+  await 0012  live r1
+  await 0022  live s0..s2 r1
+  0000  GETCTX  r1, ref2    ; 30:21
+  0001  GETF.R  r1, r1, ref3    ; 30:21
+  0003  GETF.R  r2, r0, ref4    ; 30:43
+  0005  MOV.R  r3, r1    ; 30:21
+  0006  MOV.R  r4, r2    ; 30:21
+  0007  CALLN  ref5    ; 30:21
+  0008  MOV.R  r1, r3    ; 30:21
+  0009  MOV.R  r3, r0    ; 31:27
+  0010  CALL  ref6    ; 31:27
+  0011  MOV.R  r2, r3    ; 31:27
+  0012  AWAIT  s0 x2, r2    ; 31:17
+  0014  TRY.S  s2, s0 x2, else 0025    ; 31:17
+  0016  LOADK  s3, k0    ; 32:21
+  0017  LOADI  s4, 0    ; 32:26
+  0018  MOV.S  s5, s3    ; 32:15
+  0019  MOV.S  s6, s4    ; 32:15
+  0020  CALLL  ref7    ; 32:15
+  0021  MOV.R  r2, r3    ; 32:15
+  0022  AWAIT  -, r2    ; 32:9
+  0024  JMP  0027    ; 32:9
+  0025  RELEASE  r1    ; 31:17
+  0026  RETERR.S  s0 x2    ; 31:17
+  0027  ISSOME.R  s0, r1    ; 33:9
+  0028  BRF  s0, 0033    ; 33:9
+  0029  MOV.R  r2, r1    ; 33:9
+  0030  MOV.R  r3, r2    ; 33:9
+  0031  CALLN  ref8    ; 33:9
+  0032  JMP  0033    ; 33:9
+  0033  LOADI  s0, 0    ; 34:9
+  0034  MOV.S  s1, s2    ; 34:9
+  0035  RELEASE  r1    ; 34:9
+  0036  RET  s0 x2    ; 34:9
+
+function Hp.Equal  scalar=6/6 ref=1/1 buf=0/0 params=2/1/0
+  0000  LOADI  s2, 5    ; 38:21
+  0001  LOADI  s3, 1    ; 38:21
+  0002  MOV.S  s4, s2    ; 38:21
+  0003  EQN  s2, s0, s3 x2    ; 38:16
+  0005  BRF  s2, 0008    ; 38:16
+  0006  LOADI  s2, 1    ; 38:16
+  0007  RET  s2 x1    ; 38:9
+  0008  LOADI  s3, 5    ; 38:26
+  0009  LOADI  s4, 1    ; 38:26
+  0010  MOV.S  s5, s3    ; 38:26
+  0011  EQN  s3, s4, s0 x2    ; 38:26
+  0013  MOV.S  s2, s3    ; 38:16
+  0014  JMP  0007    ; 38:16
+
+function Hp.Read  scalar=4/4 ref=3/3 buf=0/0 params=0/2/0
+  0000  ISSOME.R  s0, r1    ; 42:16
+  0001  BRF  s0, 0008    ; 42:16
+  0002  MOV.R  r2, r1    ; 42:16
+  0003  GETF.S  s0, r2, ref9    ; 42:16
+  0005  MOV.S  s2, s0    ; 42:16
+  0006  MOV.S  s3, s1    ; 42:16
+  0007  JMP  0010    ; 42:16
+  0008  LOADI  s2, 0    ; 42:16
+  0009  LOADI  s3, 0    ; 42:16
+  0010  MOV.S  s0, s2    ; 42:16
+  0011  BRF  s0, 0014    ; 42:16
+  0012  MOV.S  s0, s3    ; 42:16
+  0013  JMP  0016    ; 42:16
+  0014  LOADI  s1, -1    ; 42:29
+  0015  MOV.S  s0, s1    ; 42:16
+  0016  RET  s0 x1    ; 42:9
+
+function Hp.Chain  scalar=7/7 ref=3/4 buf=0/0 params=0/2/0
+  await 0006  live
+  0000  ISSOME.R  s0, r1    ; 46:17
+  0001  BRF  s0, 0009    ; 46:17
+  0002  MOV.R  r2, r1    ; 46:17
+  0003  MOV.R  r3, r2    ; 46:23
+  0004  CALL  ref10    ; 46:23
+  0005  MOV.R  r2, r3    ; 46:23
+  0006  AWAIT  s0 x1, r2    ; 46:17
+  0008  JMP  0016    ; 46:17
+  0009  LOADI  s1, 0    ; 46:17
+  0010  LOADI  s2, 0    ; 46:17
+  0011  MOV.S  s3, s1    ; 46:9
+  0012  MOV.S  s4, s2    ; 46:9
+  0013  MOV.S  s5, s3    ; 47:16
+  0014  BRT  s5, 0021    ; 47:16
+  0015  JMP  0023    ; 47:16
+  0016  LOADI  s5, 1    ; 46:17
+  0017  MOV.S  s6, s0    ; 46:17
+  0018  MOV.S  s1, s5    ; 46:17
+  0019  MOV.S  s2, s6    ; 46:17
+  0020  JMP  0011    ; 46:17
+  0021  MOV.S  s0, s4    ; 47:16
+  0022  JMP  0025    ; 47:16
+  0023  LOADI  s1, 0    ; 47:21
+  0024  MOV.S  s0, s1    ; 47:16
+  0025  RET  s0 x1    ; 47:9
+
+function Hp.Paths  scalar=4/5 ref=3/5 buf=2/4 params=0/1/0
+  0000  GETF.B  b0, r0, ref11    ; 51:9
+  0002  MOV.R  r3, r0    ; 51:15
+  0003  CALL  ref12    ; 51:15
+  0004  MOV.S  s0, s4    ; 51:15
+  0005  LOADSTR  b1, t18    ; 51:25
+  0006  SETE  b0, s0, b1 [bx1 key sx1]    ; 51:9
+  0008  SETF.B  r0, b0, ref11    ; 51:9
+  0010  GETF.B  b0, r0, ref11    ; 52:9
+  0012  LOADSTR  b1, t19    ; 52:19
+  0013  MOV.B  b2, b0    ; 52:9
+  0014  MOV.B  b3, b1    ; 52:9
+  0015  CALLL  ref13    ; 52:9
+  0016  MOV.B  b0, b2    ; 52:9
+  0017  SETF.B  r0, b0, ref11    ; 52:9
+  0019  GETCTX  r1, ref2    ; 53:15
+  0020  GETF.R  r1, r1, ref3    ; 53:15
+  0022  GETF.R  r2, r0, ref4    ; 53:37
+  0024  MOV.R  r3, r1    ; 53:15
+  0025  MOV.R  r4, r2    ; 53:15
+  0026  CALLN  ref5    ; 53:15
+  0027  MOV.R  r1, r3    ; 53:15
+  0028  SETF.R  r0, r1, ref14    ; 53:9
+  0030  LOADNULL.R  r1    ; 54:15
+  0031  SETF.R  r0, r1, ref14    ; 54:9
+  0033  LOADI  s0, 200    ; 55:28
+  0034  LOADK  s1, k1    ; 56:29
+  0035  LOADI  s1, 0    ; 59:19
+  0036  LT.U  s2, s1, s0    ; 59:9
+  0037  BRF  s2, 0047    ; 59:9
+  0038  GETF.S  s2, r0, ref0    ; 60:13
+  0040  LOADI  s3, 1    ; 60:23
+  0041  ADD.I64  s2, s2, s3    ; 60:13
+  0042  SETF.S  r0, s2, ref0    ; 60:13
+  0044  LOADI  s2, 1    ; 59:9
+  0045  ADD.U8  s1, s1, s2    ; 59:9
+  0046  JMP  0036    ; 59:9
+  0047  RET  -    ; 62:5
+
+function Hp.Consts  scalar=4/4 ref=1/1 buf=1/1 params=0/1/0
+  0000  LOADSTR  b0, t23    ; 65:20
+  0001  NEWLIT  #0, ref15 args 0    ; 65:20
+  0003  LOADK  s0, k2    ; 67:16
+  0004  LOADK  s1, k2    ; 67:16
+  0005  LOADK  s2, k2    ; 67:16
+  0006  LOADK  s3, k0    ; 67:16
+  0007  MOV.S  s0, s3    ; 67:16
+  0008  LOADK  s3, k3    ; 67:16
+  0009  MOV.S  s1, s3    ; 67:16
+  0010  LOADK  s3, k4    ; 67:16
+  0011  MOV.S  s2, s3    ; 67:16
+  0012  MOV.S  s0, s1    ; 67:16
+  0013  RET  s0 x1    ; 67:9
+
+function Hp.on Owner.Damaged  scalar=2/2 ref=3/5 buf=0/0 params=1/1/0
+  await 0023  live r0..r1
+  0000  GETCTX  r1, ref2    ; 72:24
+  0001  GETF.R  r1, r1, ref3    ; 72:24
+  0003  GETF.R  r2, r0, ref4    ; 72:46
+  0005  MOV.R  r3, r1    ; 72:24
+  0006  MOV.R  r4, r2    ; 72:24
+  0007  CALLN  ref5    ; 72:24
+  0008  MOV.R  r1, r3    ; 72:24
+  0009  ISSOME.R  s1, r1    ; 72:13
+  0010  BRF  s1, 0015    ; 72:13
+  0011  LOADK  s1, k0    ; 73:26
+  0012  LT.F  s1, s1, s0    ; 73:17
+  0013  BRT  s1, 0021    ; 73:17
+  0014  JMP  0023    ; 73:17
+  0015  GETF.R  r2, r0, ref16    ; 81:21
+  0017  MOV.R  r3, r2    ; 81:21
+  0018  CALLN  ref17    ; 81:21
+  0019  MOV.R  r2, r3    ; 81:21
+  0020  RET  -    ; 83:5
+  0021  RELEASE  r1    ; 74:17
+  0022  RET  -    ; 74:17
+  0023  AWAITEV  r0, ref18    ; 77:13
+  0025  MOV.R  r2, r1    ; 78:13
+  0026  ISSOME.R  s1, r2    ; 78:13
+  0027  BRF  s1, 0031    ; 78:13
+  0028  MOV.R  r3, r2    ; 78:13
+  0029  CALLN  ref8    ; 78:13
+  0030  JMP  0031    ; 78:13
+  0031  RELEASE  r1    ; 72:52
+  0032  JMP  0015    ; 72:9

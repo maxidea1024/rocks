@@ -193,7 +193,8 @@ enum class DiagnosticCode : uint16 {
     PackageFolderConflict = 1111,
     DuplicatePackage = 1112,
     FullProfileOnly = 1113,
-    InvalidBindingSchema = 1120
+    InvalidBindingSchema = 1120,
+    FunctionTooLarge = 1150
 };
 
 // 진단 코드 표기의 숫자 자리 수다("S0412").

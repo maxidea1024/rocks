@@ -100,32 +100,41 @@ Result<void> CompareSyntaxTree(Allocator& allocator, const CaseInput& input,
 enum class DumpKind : uint8 {
     Names,
     Types,
-    Ir
+    Ir,
+    Bytecode
 };
 
-// 덤프 golden(`.names`·`.types`·`.ir`)을 비교하고 다르면 실패 항목을 더한다. 파일 사례는 그 모듈의
-// 덤프, 폴더 사례는 분석한 모듈마다 "== <경로>" 줄과 덤프를 경로 byte 순으로 이은 것이다(13.1절).
+// 덤프 golden(`.names`·`.types`·`.ir`·`.bc`)을 비교하고 다르면 실패 항목을 더한다. 파일 사례는 그
+// 모듈의 덤프, 폴더 사례는 분석한 모듈마다 "== <경로>" 줄과 덤프를 경로 byte 순으로 이은
+// 것이다(13.1절).
 Result<void> CompareDump(Allocator& allocator, const CaseInput& input, const SourceSet& sources,
                          const Compilation& compilation, uint32 mainModule, CompilationStage stage,
                          DumpKind kind, Report& report) noexcept {
     StringBuilder<detail::MessageInlineBytes> message(allocator);
     StringBuilder<detail::MessageInlineBytes> dump(allocator);
     const bool types = kind == DumpKind::Types;
-    const StringView expected = kind == DumpKind::Ir ? input.ir : types ? input.types : input.names;
-    const StringView label = kind == DumpKind::Ir ? StringView(".ir")
-                             : types              ? StringView(".types")
-                                                  : StringView(".names");
-    const StringView noun = kind == DumpKind::Ir ? StringView("ir")
-                            : types              ? StringView("types")
-                                                 : StringView("names");
+    const bool lowered = kind == DumpKind::Ir || kind == DumpKind::Bytecode;
+    const StringView expected = kind == DumpKind::Ir         ? input.ir
+                                : kind == DumpKind::Bytecode ? input.bytecode
+                                : types                      ? input.types
+                                                             : input.names;
+    const StringView label = kind == DumpKind::Ir         ? StringView(".ir")
+                             : kind == DumpKind::Bytecode ? StringView(".bc")
+                             : types                      ? StringView(".types")
+                                                          : StringView(".names");
+    const StringView noun = kind == DumpKind::Ir         ? StringView("ir")
+                            : kind == DumpKind::Bytecode ? StringView("bytecode")
+                            : types                      ? StringView("types")
+                                                         : StringView("names");
     auto append = [&](StringBuilderBase& out, uint32 module) noexcept {
-        return kind == DumpKind::Ir ? compilation.AppendIrDump(out, module)
-               : types              ? compilation.AppendTypeDump(out, module)
-                                    : compilation.AppendNameDump(out, module);
+        return kind == DumpKind::Ir         ? compilation.AppendIrDump(out, module)
+               : kind == DumpKind::Bytecode ? compilation.AppendBytecodeDump(out, module)
+               : types                      ? compilation.AppendTypeDump(out, module)
+                                            : compilation.AppendNameDump(out, module);
     };
-    const CompilationStage needed = kind == DumpKind::Ir ? CompilationStage::Codegen
-                                    : types              ? CompilationStage::Types
-                                                         : CompilationStage::Names;
+    const CompilationStage needed = lowered ? CompilationStage::Codegen
+                                    : types ? CompilationStage::Types
+                                            : CompilationStage::Names;
     bool resolved = stage >= needed;
     if (resolved && !input.folder) {
         auto dumped = append(dump, mainModule);
@@ -173,9 +182,9 @@ Result<void> CompareDump(Allocator& allocator, const CaseInput& input, const Sou
     if (!resolved) {
         if (auto formatted = message.TryAppendFormat(
                 "{}: has a {} file but the module was not {}", input.name, label,
-                kind == DumpKind::Ir ? StringView("lowered to IR (it has diagnostics)")
-                : types              ? StringView("type-checked")
-                                     : StringView("name-resolved"));
+                lowered ? StringView("lowered to IR (it has diagnostics)")
+                : types ? StringView("type-checked")
+                        : StringView("name-resolved"));
             !formatted) {
             return formatted;
         }
@@ -421,6 +430,14 @@ Result<void> RunCase(Allocator& allocator, const CaseInput& input, Report& repor
     if (input.hasIr) {
         if (auto compared = CompareDump(allocator, input, sources, compilation, mainModule,
                                         expectation.Stage(), DumpKind::Ir, report);
+            !compared) {
+            return compared;
+        }
+    }
+
+    if (input.hasBytecode) {
+        if (auto compared = CompareDump(allocator, input, sources, compilation, mainModule,
+                                        expectation.Stage(), DumpKind::Bytecode, report);
             !compared) {
             return compared;
         }

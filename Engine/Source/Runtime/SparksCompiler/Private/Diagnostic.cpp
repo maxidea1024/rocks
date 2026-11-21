@@ -170,6 +170,7 @@ constexpr DiagnosticCodeInfo CodeTable[] = {
     {DiagnosticCode::DuplicatePackage, "duplicate-package"},
     {DiagnosticCode::FullProfileOnly, "full-profile-only"},
     {DiagnosticCode::InvalidBindingSchema, "invalid-binding-schema"},
+    {DiagnosticCode::FunctionTooLarge, "function-too-large"},
 };
 
 constexpr bool CodeTableIsSorted() noexcept {

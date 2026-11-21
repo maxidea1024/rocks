@@ -154,6 +154,8 @@ struct CaseInput {
     StringView types;             // `.types` 내용(hasTypes일 때만)
     bool hasIr = false;           // `.ir`가 있는지(typed IR golden, AppendIrDump)
     StringView ir;                // `.ir` 내용(hasIr일 때만)
+    bool hasBytecode = false;     // `.bc`가 있는지(bytecode golden, AppendBytecodeDump)
+    StringView bytecode;          // `.bc` 내용(hasBytecode일 때만)
     bool hasNames = false;        // `.names`가 있는지
     StringView names;             // `.names` 내용(hasNames일 때만)
 };

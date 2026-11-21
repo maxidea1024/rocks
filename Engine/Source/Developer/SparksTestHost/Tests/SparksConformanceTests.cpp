@@ -250,7 +250,7 @@ TEST(SparksConformance_ReportsCorpusLayoutProblems) {
         // 짝 없는 파일은 .expect, .ast, .names, .types, .ir 순이다.
         CHECK(report.Failures()[0].View() ==
               StringView("Area/Notes.txt: unexpected file (only .spark, .expect, .ast, .names, "
-                         ".types, .ir and case folders)"));
+                         ".types, .ir, .bc and case folders)"));
         CHECK(report.Failures()[1].View() ==
               StringView("Area/NoExpect.spark: missing the .expect file"));
         CHECK(report.Failures()[2].View() ==

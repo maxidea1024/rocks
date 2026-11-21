@@ -98,14 +98,14 @@ bytecode 형식(opcode 번호·명령 모양·함수 표·상수 표)은 새 모
 ### 4.1 frame과 호출 창(LC4b 확정)
 
 - **frame:** 함수 하나의 frame은 bank마다 레지스터 배열이다(Scalar·Ref·Buf 각각 0–255). 매개변수는 선언 순서로 bank마다 0번부터(값 묶음은 연속), class 본문의 `this`는 Ref 0번이고 나머지 Ref 매개변수가 1번부터다. 반환값은 bank의 0번부터 돌려준다.
-- **호출 창(Lua 방식 register window):** 호출은 부르는 쪽 frame의 bank마다 맨 위 구간(창 base — 할당된 레지스터 수)에 인자를 놓고 `CALL`한다. 부르는 함수의 frame은 창 base에서 시작한다(창이 곧 부르는 쪽의 0번). 반환값은 창 base로 돌아오고, 부르는 쪽이 결과 레지스터로 옮긴다. 창은 할당에 참여하지 않으며 frame 크기는 `할당한 수 + 가장 큰 창`이다(bank마다 256 이하, 넘으면 S1201).
-- **창 쓰는 명령:** `CALL`·`EMIT`·`NEW`(생성 인자)·`CONCAT`은 인자 묶음을 창에 둔다(IR의 피연산자 목록 → 창으로 이동). 수신자는 Ref 창의 첫 칸이다.
+- **호출 창(Lua 방식 register window):** 호출은 부르는 쪽 frame의 bank마다 맨 위 구간(창 base — 할당된 레지스터 수)에 인자를 놓고 `CALL`한다. 부르는 함수의 frame은 창 base에서 시작한다(창이 곧 부르는 쪽의 0번). 반환값은 창 base로 돌아오고, 부르는 쪽이 결과 레지스터로 옮긴다. 창은 할당에 참여하지 않으며 frame 크기는 `할당한 수 + 가장 큰 창`이다(bank마다 256 이하, 넘으면 S1150).
+- **창 쓰는 명령:** `CALL`·`EMIT`·`NEWLIT`(이름 지정 인자)·`CONCAT`은 인자 묶음을 창에 둔다(IR의 피연산자 목록 → 창으로 이동, bank마다 차례로). 수신자는 그 bank 창의 첫 칸이다. 구조체·컬렉션 생성은 창 없이 `NEWS`·`NEWA` 뒤 필드·원소마다 `SETSF`·`APPEND`·`PUT`이다.
 
 ### 4.2 할당
 
-- 가상 레지스터 묶음 하나(값 하나)가 실제 레지스터 연속 구간 하나다. 살아 있는 구간은 블록 배치 순서의 명령 번호로 센다: 묶음을 쓰는 첫 명령부터 마지막 읽기까지, 반복의 back-edge가 걸친 구간은 반복 끝까지 늘린다(블록 단위 생존 분석 — 블록 끝에서 살아 있는 묶음은 블록 끝까지).
+- 가상 레지스터 묶음 하나(값 하나)가 실제 레지스터 연속 구간 하나다. 생존은 가상 레지스터 slot마다 블록 단위로 구하고(역방향 고정점), 묶음의 구간은 블록 배치 순서의 명령 번호(읽기 2k·쓰기 2k + 1)로 slot 구간들을 합친 것이다(블록 입구·출구에서 살아 있으면 그 경계까지). 도달하지 않는 블록은 내지 않는다. 구간은 배치 순서의 연속 구간이라 실제 생존의 상위 집합이다(await 지점 표도 같다 — 보수적).
 - bank마다 구간 시작 순으로 선형 스캔해 끝난 구간의 레지스터를 다시 쓴다(묶음 크기만큼 연속으로 빈 곳 중 가장 낮은 번호). 매개변수·`this`는 고정 번호다. 결정적이다(같은 IR → 같은 번호).
-- bank 레지스터 256개를 넘거나 함수 명령이 32,767개를 넘으면(분기 거리 16비트) S1201 "function is too large"다(위치는 함수 이름).
+- bank 레지스터 256개를 넘거나 함수 명령이 32,767개를 넘으면(분기 거리 16비트) S1150 "function is too large"다(위치는 함수 이름).
 
 ### 4.3 명령 형식
 
@@ -135,11 +135,12 @@ bytecode 형식(opcode 번호·명령 모양·함수 표·상수 표)은 새 모
 | | `GETSF.S/R/B` `SETSF.S/R/B` + EXTRA | struct 값(Buf)의 필드 읽기·쓰기(COW) |
 | | `GETCTX` A Bx | Ref A ← 문맥 이름 표[Bx](`World`·`Time`…) |
 | 컨테이너 | `GETE` `SETE` `LEN` `GETKEY` `GETVAL` + EXTRA(key bank·원소 bank·원소 slot 수) | `GETE`는 `T?`를 돌려준다(SL §3.10 인덱스) |
-| 호출 | `CALL` Bx(모듈 함수 표 — 사용자 함수), `CALLV` Bx(open·interface — 실행 중 대상 결정), `CALLN` Bx(import 표의 native 함수), `CALLL` Bx(언어 함수 — 부록 B 번호), `CALLRPC` Bx | 각 명령 앞의 `WINDOW` A B C가 bank별 창 base(Scalar A·Ref B·Buf C)를 준다. 대기를 만드는 함수의 결과는 Ref 창 0번의 대기 handle |
-| 이벤트 | `EMIT` Bx(이벤트 표) | `WINDOW` 뒤. 대상은 Ref 창 0번(자기 객체면 this) |
+| 호출 | `CALL` Bx(모듈 함수 표 — 사용자 함수), `CALLV` Bx(open·interface — 실행 중 대상 결정), `CALLN` Bx(import 표의 native 함수), `CALLL` Bx(언어 함수 — 부록 B 번호), `CALLRPC` Bx | 창 base는 함수 표의 bank별 할당 수(`registers`)다. 대기를 만드는 함수의 결과는 Ref 창 0번의 대기 handle. `CALL.MUT`(값을 바꾸는 언어 메서드)는 수신자를 창 0번에서 돌려받고 같은 bank의 결과는 그 다음 자리에서 받는다 |
+| 이벤트 | `EMIT` Bx(이벤트 표) | 대상은 Ref 창 0번(자기 객체면 this), 인자는 그 뒤 |
 | 대기 | `AWAIT` A B + EXTRA(결과 bank·slot 수) | 대기 handle B로 정지, 재개하면 결과를 A에. 블록 끝 명령이며 재개는 다음 명령 |
 | | `AWAITEV` B + EXTRA(이벤트 번호) | 발행자 B의 이벤트를 기다린다 |
-| Result | `TRY.S` A B C(slot 수) `TRY.B` A B | 오류면 같은 오류로 반환, 아니면 값을 A에 |
+| Result | `TRY.S` A B C(slot 수) `TRY.B` A B + EXTRA(부호 있는 24비트 거리) | 성공이면 값을 A에 두고 다음 명령, 오류면 EXTRA 거리(EXTRA 다음 단어 기준)의 실패 블록으로 |
+| | `RETERR.S` A B(slot 수) `RETERR.B` A | Result의 오류를 이 함수의 Result로 반환 |
 | 생성 | `NEWS` A Bx(struct 타입 — 기본값), `NEWC` A Bx(component), `NEWA`·`NEWSET` A Bx(원소 타입), `NEWM` A Bx(Map 타입), `APPEND` A B, `PUT` A B C, `NEWLIT` A Bx(리터럴 표 — 쿡 GUID·이름), `OK` `ERR` | 구조체 생성은 `NEWS` 뒤에 필드마다 `SETSF` |
 | 문자열 | `CONCAT` A B C | Buf A ← 창의 B부터 C개 조각 |
 | 자원 | `RELEASE` A | Ref A의 유지 자원을 해제(null이면 아무것도 안 함) |
@@ -175,7 +176,7 @@ bytecode 형식(opcode 번호·명령 모양·함수 표·상수 표)은 새 모
 
 - **D1 값 표현:** 수학 타입은 Scalar 펼침, struct·문자열·컨테이너는 Buf(COW). 대안(모든 값 타입을 Buf)은 수학 연산마다 할당이 생기고, 대안(struct도 펼침)은 표현이 둘이 된다.
 - **D2 IR 형식:** 비SSA 3-주소, 지역 이름 = 가상 레지스터 묶음. 최적화는 범위 밖이므로 SSA 구성·해체 비용이 이득이 없다.
-- **D3 레지스터 상한:** bank마다 256(8비트), 함수 명령 32,767개(16비트 분기 거리). 넘으면 컴파일 오류(S1201). 대안(16비트 피연산자)은 명령이 64비트가 되어 SL §11의 32비트 고정 명령과 어긋난다.
+- **D3 레지스터 상한:** bank마다 256(8비트), 함수 명령 32,767개(16비트 분기 거리). 넘으면 컴파일 오류(S1150). 대안(16비트 피연산자)은 명령이 64비트가 되어 SL §11의 32비트 고정 명령과 어긋난다.
 - **D7 호출 규약:** bank별 register window(Lua 방식). 대안(호출마다 인자 배열 할당)은 호출당 할당이 생기고, 대안(모든 값을 한 bank)은 SL §11의 3 bank 결정과 어긋난다.
 - **D4 상수 표 범위:** 모듈 하나. 함수마다 두면 본문 reload가 쉬우나 중복이 많다 — 본문 reload(LC7)는 함수 단위 상수 구간을 따로 두지 않고 모듈 상수 표를 덧붙이는 방식으로 한다.
 - **D5 유지 자원 해제:** 컴파일러가 블록을 떠나는 모든 경로에 `RELEASE`를 낸다(실행 중 범위 추적 없이). fault·취소는 LC6 실행이 frame의 유지 자원 표로 해제한다.

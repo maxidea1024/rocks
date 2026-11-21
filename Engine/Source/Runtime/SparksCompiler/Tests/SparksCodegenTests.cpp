@@ -160,7 +160,8 @@ bool LowerProgram(Allocator& allocator, StringView program, StringBuilderBase& d
         return false;
     }
 
-    return static_cast<bool>(fixture.compilation.AppendIrDump(dump, module));
+    return fixture.compilation.AppendIrDump(dump, module) &&
+           fixture.compilation.AppendBytecodeDump(dump, module);
 }
 
 } // namespace
@@ -262,6 +263,60 @@ TEST(SparksCodegen_DeepChainsStayWithinTheStack) {
     CHECK(dump.View().StartsWith("function F("));
 }
 
+TEST(SparksCodegen_FunctionTooLargeS1150) {
+    // 동시에 살아 있는 Scalar 값이 256 slot을 넘는 함수는 S1150이다(위치는 함수 이름). 같은 수의
+    // 값이 차례로 죽으면(앞 값을 다 쓴 뒤 다음 값) 레지스터를 다시 써 통과한다.
+    SystemAllocator allocator;
+    constexpr uint32 Values = 300;
+    StringBuilder<32768> wide(allocator);
+    wide.Append("fn Wide(x: int): int {\n");
+    for (uint32 index = 0; index < Values; ++index) {
+        wide.AppendFormat("    let a{} = x + {};\n", index, index);
+    }
+
+    wide.Append("    return a0");
+    for (uint32 index = 1; index < Values; ++index) {
+        wide.AppendFormat(" + a{}", index);
+    }
+
+    wide.Append(";\n}\n");
+    REQUIRE(!wide.HasFailed());
+    Fixture fixture(allocator);
+    const uint32 game = fixture.Package("Game");
+    fixture.Module(game, "Game", "Main.spark", wide.View());
+    REQUIRE(fixture.compilation.Check(fixture.diagnostics));
+    fixture.diagnostics.Sort(fixture.sources);
+    REQUIRE(fixture.diagnostics.Count() == 1);
+    const Diagnostic& diagnostic = fixture.diagnostics[0];
+    CHECK(diagnostic.Code() == DiagnosticCode::FunctionTooLarge);
+    const SourceLocation at =
+        fixture.sources.Get(diagnostic.Source()).Locate(diagnostic.Span().begin);
+    CHECK(at.line == 1);
+    CHECK(at.column == 4);
+    CHECK(diagnostic.Message() == StringView("The function is too large to compile."));
+    CHECK(fixture.compilation.ModuleBytecode(0) == nullptr ||
+          fixture.compilation.ModuleBytecode(0)->functions.Size() <= 1);
+
+    // 같은 수의 값이 차례로 죽으면 통과한다(값 300개가 몇 개의 레지스터를 돌려 쓴다).
+    StringBuilder<32768> narrow(allocator);
+    narrow.Append("fn Narrow(x: int): int {\n    var total = 0;\n");
+    for (uint32 index = 0; index < Values; ++index) {
+        narrow.AppendFormat("    let b{} = x + {};\n    total += b{};\n", index, index, index);
+    }
+
+    narrow.Append("    return total;\n}\n");
+    REQUIRE(!narrow.HasFailed());
+    Fixture second(allocator);
+    const uint32 package = second.Package("Game");
+    const uint32 module = second.Module(package, "Game", "Main.spark", narrow.View());
+    REQUIRE(second.Check());
+    CHECK(second.diagnostics.Count() == 0);
+    const BytecodeModule* bytecode = second.compilation.ModuleBytecode(module);
+    REQUIRE(bytecode != nullptr);
+    REQUIRE(bytecode->functions.Size() == 1);
+    CHECK(bytecode->functions[0].registers[0] < 8);
+}
+
 TEST(SparksCodegen_AllocationFailureEverywhere) {
     SystemAllocator backing;
     uint64 checkAttempts = 0;
@@ -287,9 +342,11 @@ TEST(SparksCodegen_AllocationFailureEverywhere) {
                 checkAttempts = attempts;
                 REQUIRE(fixture.diagnostics.Count() == 0);
                 REQUIRE(fixture.compilation.AppendIrDump(clean, module));
+                REQUIRE(fixture.compilation.AppendBytecodeDump(clean, module));
             } else if (checked) {
                 StringBuilder<16384> text(backing);
                 REQUIRE(fixture.compilation.AppendIrDump(text, module));
+                REQUIRE(fixture.compilation.AppendBytecodeDump(text, module));
                 CHECK(text.View() == clean.View());
             } else {
                 ++failures;

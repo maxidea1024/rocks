@@ -128,6 +128,8 @@ enum class Opcode : uint8 {
     Brf,
     Switch,
     Ret,
+    RetErrS, // Scalar Result A..A+B의 오류를 이 함수의 Result로 반환
+    RetErrB, // Buf Result A의 오류를 이 함수의 Result로 반환
     // optional
     IsSomeR,
     IsSomeB,
@@ -161,8 +163,8 @@ enum class Opcode : uint8 {
     // 대기·Result
     Await,   // + EXTRA(결과 bank << 8 | slot 수)
     AwaitEv, // + EXTRA(이벤트 참조)
-    TryS,
-    TryB,
+    TryS,    // A ← Result B..B+C의 값, 오류면 EXTRA(부호 있는 거리)로 분기
+    TryB,    // A ← Buf Result B의 값, 오류면 EXTRA(부호 있는 거리)로 분기
     // 생성
     NewS,
     NewC,
@@ -261,6 +263,31 @@ constexpr int32 DecodeSBx(uint32 word) noexcept {
 constexpr uint32 DecodeAx(uint32 word) noexcept {
     return (word >> 8) & MaxAx;
 }
+
+// EXTRA의 Ax를 부호 있는 24비트 거리로 읽는다(TRY의 실패 분기).
+constexpr int32 DecodeSAx(uint32 word) noexcept {
+    const uint32 ax = DecodeAx(word);
+    return (ax & 0x800000) != 0 ? static_cast<int32>(ax | 0xFF000000u) : static_cast<int32>(ax);
+}
+
+// EXTRA 컨테이너 표지(GETE·SETE·GETKEY·GETVAL·APPEND·PUT)다: 값 bank·slot 수와 key bank·slot 수.
+constexpr uint32 EncodeContainerMarker(uint32 valueBank, uint32 valueSlots, uint32 keyBank,
+                                       uint32 keySlots) noexcept {
+    return (valueSlots & 0x1F) | ((valueBank & 0x3) << 5) | ((keySlots & 0x1F) << 8) |
+           ((keyBank & 0x3) << 13);
+}
+
+// TOSTR의 표시 종류다: 0–15는 ScalarKind, 그 위는 수학 타입(성분 double 묶음).
+enum class DisplayKind : uint8 {
+    Vec2 = 16,
+    Vec3,
+    Vec4,
+    Quat,
+    Rotator,
+    Color,
+    Transform,
+    Mat4
+};
 
 // Scalar 값의 해석이다(CONV의 C·TOSTR 표시 종류·덤프). 번호는 형식에 묶인다.
 enum class ScalarKind : uint8 {

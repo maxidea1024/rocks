@@ -2,6 +2,7 @@
 #include <Platform/Fatal.h>
 
 #include "CompilationChecker.h"
+#include "BcEncoder.h"
 #include "IrBuilder.h"
 
 // 모듈 전체의 IR 내림과 IR 덤프(`.ir`)다(Docs/Design/SparksBytecode.ko.md 3.2절, LC4a). 오류 없는
@@ -518,6 +519,11 @@ void TypeChecker::LowerProgram() noexcept {
 
     for (uint32 module = 0; module < c.modules_.Size() && binder_.error_ == ErrorCode::None;
          ++module) {
+        if (auto pushed = c.bytecode_.TryPushBack(BytecodeModule(*c.allocator_)); !pushed) {
+            binder_.error_ = pushed.Error();
+            return;
+        }
+
         if (c.nodeBase_[module] != NoNode) {
             LowerModule(module);
         }
@@ -525,11 +531,15 @@ void TypeChecker::LowerProgram() noexcept {
 }
 
 void TypeChecker::LowerModule(uint32 module) noexcept {
-    // 최상위 함수와 class·struct의 함수·handler를 선언 순으로 내린다.
+    // 최상위 함수와 class·struct의 함수·handler를 선언 순으로 내린다. 같은 모듈 함수의 번호를 먼저
+    // 정해 두고(앞선 함수가 뒤 함수를 부르는 CALL의 참조) 함수마다 IR → bytecode로 쓴다.
     Compilation& c = compilation_;
     const SyntaxTree& tree = c.trees_[module];
     StringBuilder<CompilationMessageInlineBytes> out(allocator_);
-    auto lower = [&](uint32 node, uint32 owner) noexcept {
+    Array<uint64> bodies(allocator_); // (owner << 32) | node
+    const uint32 root = tree.Root();
+    const uint32 declarations = root == NoNode ? NoNode : tree.Child(root, 1);
+    auto collect = [&](uint32 node, uint32 owner) noexcept {
         const SyntaxNode& entry = tree.Node(node);
         const bool handler = entry.kind == SyntaxKind::Handler;
         if ((!handler && entry.kind != SyntaxKind::Function) ||
@@ -537,6 +547,49 @@ void TypeChecker::LowerModule(uint32 module) noexcept {
             return;
         }
 
+        if (auto pushed = bodies.TryPushBack((uint64(owner) << 32) | node); !pushed) {
+            binder_.error_ = pushed.Error();
+        }
+    };
+    if (declarations != NoNode) {
+        for (const uint32 declaration : tree.Children(declarations)) {
+            const SyntaxKind kind = tree.Node(declaration).kind;
+            if (kind == SyntaxKind::Function) {
+                collect(declaration, NoSymbol);
+                continue;
+            }
+
+            if (kind != SyntaxKind::Class && kind != SyntaxKind::Struct) {
+                continue;
+            }
+
+            const uint32 owner = c.NodeSymbol(module, tree.Child(declaration, 2));
+            const uint32 members = tree.Child(declaration, kind == SyntaxKind::Class ? 4 : 3);
+            if (members == NoNode || tree.Node(members).kind != SyntaxKind::List) {
+                continue;
+            }
+
+            for (const uint32 member : tree.Children(members)) {
+                collect(member, owner);
+            }
+        }
+    }
+
+    BytecodeEncoder encoder(*this, module, c.bytecode_[module]);
+    for (usize index = 0; index < bodies.Size(); ++index) {
+        const uint32 node = static_cast<uint32>(bodies[index]);
+        if (tree.Node(node).kind == SyntaxKind::Function) {
+            const uint32 symbol = c.NodeSymbol(module, tree.Child(node, 2));
+            if (symbol != NoSymbol) {
+                encoder.Declare(symbol, static_cast<uint32>(index));
+            }
+        }
+    }
+
+    for (usize index = 0; index < bodies.Size() && binder_.error_ == ErrorCode::None; ++index) {
+        const uint32 node = static_cast<uint32>(bodies[index]);
+        const uint32 owner = static_cast<uint32>(bodies[index] >> 32);
+        const bool handler = tree.Node(node).kind == SyntaxKind::Handler;
         IrFunction function(allocator_);
         function.module = module;
         function.node = node;
@@ -555,33 +608,30 @@ void TypeChecker::LowerModule(uint32 module) noexcept {
             out.Append("\n"); // 함수 사이의 빈 줄
         }
 
+        const usize headerStart = out.View().ByteCount();
         IrWriter(*this, function, out).Write();
-    };
-    const uint32 root = tree.Root();
-    const uint32 declarations = root == NoNode ? NoNode : tree.Child(root, 1);
-    if (declarations == NoNode) {
-        return;
-    }
-
-    for (const uint32 declaration : tree.Children(declarations)) {
-        const SyntaxKind kind = tree.Node(declaration).kind;
-        if (kind == SyntaxKind::Function) {
-            lower(declaration, NoSymbol);
-            continue;
+        // 함수 표시 이름은 IR 덤프 머리 줄의 "function "·"handler " 뒤, 매개변수 앞이다.
+        const StringView dump = out.View();
+        usize begin = headerStart;
+        while (begin < dump.ByteCount() && dump.Data()[begin] != ' ') {
+            ++begin;
         }
 
-        if (kind != SyntaxKind::Class && kind != SyntaxKind::Struct) {
-            continue;
+        usize finish = begin + 1;
+        while (finish < dump.ByteCount() && dump.Data()[finish] != '(') {
+            ++finish;
         }
 
-        const uint32 owner = c.NodeSymbol(module, tree.Child(declaration, 2));
-        const uint32 members = tree.Child(declaration, kind == SyntaxKind::Class ? 4 : 3);
-        if (members == NoNode || tree.Node(members).kind != SyntaxKind::List) {
-            continue;
+        const StringView name(dump.Data() + begin + 1, finish > begin + 1 ? finish - begin - 1 : 0);
+        StringBuilder<128> owned(allocator_);
+        owned.Append(name);
+        if (!binder_.Succeeded(owned)) {
+            return;
         }
 
-        for (const uint32 member : tree.Children(members)) {
-            lower(member, owner);
+        const uint32 nameNode = tree.Child(node, 2);
+        if (!encoder.Encode(function, static_cast<uint32>(index), owned.View(), nameNode)) {
+            return;
         }
     }
 
@@ -604,6 +654,22 @@ void TypeChecker::LowerModule(uint32 module) noexcept {
 } // namespace rocks::sparks::detail
 
 namespace rocks::sparks {
+
+const BytecodeModule* Compilation::ModuleBytecode(uint32 module) const noexcept {
+    return module < bytecode_.Size() && lastStage_ >= CompilationStage::Codegen &&
+                   module < irDumps_.Size()
+               ? &bytecode_[module]
+               : nullptr;
+}
+
+Result<void> Compilation::AppendBytecodeDump(StringBuilderBase& out, uint32 module) const noexcept {
+    const BytecodeModule* bytecode = ModuleBytecode(module);
+    if (bytecode == nullptr) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return rocks::sparks::AppendBytecodeDump(out, *bytecode);
+}
 
 Result<void> Compilation::AppendIrDump(StringBuilderBase& out, uint32 module) const noexcept {
     if (module >= irDumps_.Size() || lastStage_ < CompilationStage::Codegen) {

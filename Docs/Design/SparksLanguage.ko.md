@@ -1668,6 +1668,7 @@ Characters/PlayerCharacter.spark:42:5: error S0731: Cannot assign to a function 
 | S1112 | `duplicate-package` | 한 컴파일에 같은 이름(ASCII 대소문자만 다른 것 포함)의 패키지가 둘 있다 | 한쪽 이름을 바꾼다 |
 | S1113 | `full-profile-only` | `profile: "core"` 패키지에서 full 문법(§1.3·§3.11)을 썼다 | `profile: "full"` 또는 core 대안 |
 | S1120 | `invalid-binding-schema` | binding schema 파일이 §10.2 형식이 아니다(문법, key, kind가 허용하지 않는 key, 값, 이름 규칙·키워드, ID 표기·중복, 타입 표기 문법, 중복 이름, 파일 사이 타입 이름·ID·모듈 중복) | 생성기를 다시 돌린다(손으로 고치지 않는다) |
+| S1150 | `function-too-large` | 함수가 bytecode 한계를 넘는다(bank마다 동시에 쓰는 값 256 slot, 명령 32,767개 — [SparksBytecode](SparksBytecode.ko.md) 4.2절, LC4b). 위치는 함수 이름 | 함수를 작은 함수로 나눈다 |
 
 - 사전 대조 리터럴(`Tag`·`Action`·`CVar`)이 사전에서 이름이 바뀐 경우 사전의 redirect(`@formerly`와 같은 역할)를 따라 자동 변환하고 빠른 수정으로 소스를 고친다. redirect도 없으면 오류다.
 
