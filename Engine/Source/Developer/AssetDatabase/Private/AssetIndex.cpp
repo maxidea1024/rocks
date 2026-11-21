@@ -269,6 +269,224 @@ AssetIndex::AssetIndex(Allocator& allocator, const ProjectLayout& layout) noexce
       diagnostics_(allocator) {
 }
 
+// 패키지 파일 하나(Content 상대 이름 relative)를 부분 읽기해 found에 항목을, diagnostics에 그
+// 파일의 진단을 더한다(Rebuild·Refresh 공용). 이름 규칙 위반·패키지 판정·IO 실패는 진단이고 항목을
+// 더하지 않는다. 오류: 할당 실패.
+Result<void> AssetIndex::IndexFile(platform::FileSystem& files, const PackageReadOptions& editor,
+                                   String&& relative, int64 modifiedTicks,
+                                   Array<AssetIndexEntry>& found,
+                                   Array<AssetIndexDiagnostic>& diagnostics) noexcept {
+    const StringView content = layout_->ContentDirectory();
+    LogicalPathFailure pathFailure;
+    auto path = layout_->TryMakeLogicalPath(relative.View(), &pathFailure);
+    if (!path) {
+        if (path.Error() == ErrorCode::OutOfMemory) {
+            return Result<void>::Failure(path.Error());
+        }
+
+        if (auto added = AddDiagnostic(diagnostics, AssetDiagnosticCode::InvalidPath, path.Error(),
+                                       relative.View());
+            !added) {
+            return added;
+        }
+
+        // 확장자뿐인 이름(".rasset")은 배치가 "패키지 파일 아님"(사유 None)으로 보지만
+        // 확장자 검사는 통과했다 — 이름이 비었으므로 하위 디렉터리의 같은 이름
+        // ("Dir/.rasset" → 끝 '/')과 같은 EmptyComponent로 진단한다.
+        diagnostics[diagnostics.Size() - 1].pathError = pathFailure.error == LogicalPathError::None
+                                                            ? LogicalPathError::EmptyComponent
+                                                            : pathFailure.error;
+        return Result<void>::Success();
+    }
+
+    StringBuilder<IndexPathBytes> full(*allocator_);
+    const StringView fullPieces[] = {content, "/", relative.View()};
+    if (auto built = AppendAll(full, fullPieces); !built) {
+        return built;
+    }
+
+    FilePackageRangeReader reader;
+    AssetDiagnostic failure;
+    auto opened = reader.Open(files, full.View());
+    Result<PackageIndexView> view = opened ? ReadPackageIndex(*allocator_, reader, editor, &failure)
+                                           : Result<PackageIndexView>::Failure(opened.Error());
+
+    if (!view) {
+        if (view.Error() == ErrorCode::OutOfMemory) {
+            return Result<void>::Failure(view.Error());
+        }
+
+        // 열거 뒤 사라진 파일은 MissingFile, 그 밖의 IO 실패는 진단 None과 그 오류다
+        // (쿠킹 로더 10.1절과 같은 규칙 — 색인에서 빼고 계속한다).
+        const AssetDiagnosticCode code =
+            failure.code == AssetDiagnosticCode::None && view.Error() == ErrorCode::NotFound
+                ? AssetDiagnosticCode::MissingFile
+                : failure.code;
+        if (auto added = AddDiagnostic(diagnostics, code, view.Error(), relative.View()); !added) {
+            return added;
+        }
+
+        diagnostics[diagnostics.Size() - 1].section = failure.section;
+        diagnostics[diagnostics.Size() - 1].detail = failure.detail;
+        diagnostics[diagnostics.Size() - 1].asset = failure.asset;
+        return Result<void>::Success();
+    }
+
+    PackageContents& contents = view.Value().contents;
+    AssetIndexEntry entry(*allocator_);
+    entry.id = contents.header.assetId;
+    entry.type = contents.exports[0].type;
+    entry.fingerprint = contents.fingerprint;
+    entry.fileBytes = reader.FileBytes();
+    entry.modifiedTicks = modifiedTicks;
+    entry.readOnly = contents.readOnly;
+    if (auto assigned = entry.path.TryAssign(path.Value().Text()); !assigned) {
+        return assigned;
+    }
+
+    if (auto assigned = entry.key.TryAssign(path.Value().Key()); !assigned) {
+        return assigned;
+    }
+
+    entry.fileName = Move(relative);
+    if (auto appended = entry.dependencies.TryAppend(contents.dependencies.View()); !appended) {
+        return appended;
+    }
+
+    auto tags = ReadPackageTags(*allocator_, contents.tags);
+    if (tags) {
+        entry.tags = Move(tags.Value());
+    } else if (tags.Error() == ErrorCode::OutOfMemory) {
+        return Result<void>::Failure(tags.Error());
+    } else {
+        // 다른 스키마의 Tags는 형식으로 유효하다 — 태그 없이 색인하고 진단만 남긴다.
+        const AssetDiagnosticCode code = tags.Error() == ErrorCode::Unsupported
+                                             ? AssetDiagnosticCode::UnsupportedVersion
+                                             : AssetDiagnosticCode::CorruptPackage;
+        if (auto added = AddDiagnostic(diagnostics, code, tags.Error(), entry.fileName.View());
+            !added) {
+            return added;
+        }
+
+        diagnostics[diagnostics.Size() - 1].asset = entry.id;
+        diagnostics[diagnostics.Size() - 1].section = static_cast<uint32>(PackageSectionKind::Tags);
+    }
+
+    if (auto indexed = IndexImportRecord(*allocator_, contents.importRecord, entry, diagnostics);
+        !indexed) {
+        return indexed;
+    }
+
+    if (auto pushed = found.TryPushBack(Move(entry)); !pushed) {
+        return pushed;
+    }
+    return Result<void>::Success();
+}
+
+// found(순서 없음)와 diagnostics(이름 진단·파일 진단)를 정렬하고 같은 id·경로 진단을 더해 게시한다
+// (Rebuild·Refresh 공용 — 같은 id·경로 표시는 여기서 처음부터 다시 정한다).
+Result<void> AssetIndex::Publish(Array<AssetIndexEntry>& found,
+                                 Array<AssetIndexDiagnostic>& diagnostics) noexcept {
+    for (AssetIndexEntry& entry : found) {
+        entry.duplicateId = false;
+        entry.duplicatePath = false;
+    }
+
+    // 경로 키 → 파일 이름 순으로 정렬한다(완료 순서와 무관 — 7.1절 9). Core 정렬은 안정 정렬이
+    // 아니지만 Content 상대 이름은 파일마다 달라 이 비교가 전순서다.
+    Array<usize> order(*allocator_);
+    if (auto made = MakeOrder(order, found.Size()); !made) {
+        return made;
+    }
+
+    algo::Sort(order.View(), [&](usize left, usize right) noexcept {
+        int compared = StringView::CompareBytes(found[left].key.View(), found[right].key.View());
+        if (compared == 0) {
+            compared =
+                StringView::CompareBytes(found[left].fileName.View(), found[right].fileName.View());
+        }
+
+        return compared < 0;
+    });
+    Array<AssetIndexEntry> sorted(*allocator_);
+    if (auto reserved = sorted.TryReserve(found.Size()); !reserved) {
+        return reserved;
+    }
+
+    for (usize index : order) {
+        (void)sorted.TryPushBack(Move(found[index]));
+    }
+
+    // 같은 경로 키(DuplicatePath — 경로 키 순에서 이웃)와 같은 id(DuplicateAssetId — id 순에서
+    // 이웃)를 모두 진단한다.
+    Array<usize> byId(*allocator_);
+    if (auto made = MakeOrder(byId, sorted.Size()); !made) {
+        return made;
+    }
+
+    if (auto diagnosed = DiagnoseNeighbors(
+            sorted, byId.View(),
+            [&](usize left, usize right) noexcept {
+                return sorted[left].key.View() == sorted[right].key.View();
+            },
+            &AssetIndexEntry::duplicatePath, AssetDiagnosticCode::DuplicatePath, diagnostics);
+        !diagnosed) {
+        return diagnosed;
+    }
+
+    // id → 경로 순 위치(같은 id는 경로 순).
+    algo::Sort(byId.View(), [&](usize left, usize right) noexcept {
+        const int compared = CompareId(sorted[left].id, sorted[right].id);
+        return compared != 0 ? compared < 0 : left < right;
+    });
+    if (auto diagnosed = DiagnoseNeighbors(
+            sorted, byId.View(),
+            [&](usize left, usize right) noexcept {
+                return CompareId(sorted[left].id, sorted[right].id) == 0;
+            },
+            &AssetIndexEntry::duplicateId, AssetDiagnosticCode::DuplicateAssetId, diagnostics);
+        !diagnosed) {
+        return diagnosed;
+    }
+
+    // 진단은 파일 이름 → 코드 → 칸 순이다. 한 이름(파일·디렉터리)의 진단은 (코드, 칸)마다
+    // 하나뿐이라(경로·패키지 판정 진단은 서로 배타이고 그 밖의 항목 진단과도 배타, 항목 진단은
+    // Tags· ImportRecord·Dependencies 칸마다 하나, 같은 id·경로 진단은 각각 하나 — 칸 0) 이 비교가
+    // 전순서다.
+    Array<usize> diagnosticOrder(*allocator_);
+    if (auto made = MakeOrder(diagnosticOrder, diagnostics.Size()); !made) {
+        return made;
+    }
+
+    algo::Sort(diagnosticOrder.View(), [&](usize left, usize right) noexcept {
+        const int name = StringView::CompareBytes(diagnostics[left].fileName.View(),
+                                                  diagnostics[right].fileName.View());
+        if (name != 0) {
+            return name < 0;
+        }
+
+        if (diagnostics[left].code != diagnostics[right].code) {
+            return static_cast<uint32>(diagnostics[left].code) <
+                   static_cast<uint32>(diagnostics[right].code);
+        }
+
+        return diagnostics[left].section < diagnostics[right].section;
+    });
+    Array<AssetIndexDiagnostic> sortedDiagnostics(*allocator_);
+    if (auto reserved = sortedDiagnostics.TryReserve(diagnostics.Size()); !reserved) {
+        return reserved;
+    }
+
+    for (usize index : diagnosticOrder) {
+        (void)sortedDiagnostics.TryPushBack(Move(diagnostics[index]));
+    }
+
+    entries_ = Move(sorted);
+    byId_ = Move(byId);
+    diagnostics_ = Move(sortedDiagnostics);
+    return Result<void>::Success();
+}
+
 Result<void> AssetIndex::Rebuild(platform::FileSystem& files,
                                  const PackageReadOptions& options) noexcept {
     entries_.Clear();
@@ -391,211 +609,15 @@ Result<void> AssetIndex::Rebuild(platform::FileSystem& files,
                 continue;
             }
 
-            LogicalPathFailure pathFailure;
-            auto path = layout_->TryMakeLogicalPath(relative.View(), &pathFailure);
-            if (!path) {
-                if (path.Error() == ErrorCode::OutOfMemory) {
-                    return Result<void>::Failure(path.Error());
-                }
-
-                if (auto added = AddDiagnostic(diagnostics, AssetDiagnosticCode::InvalidPath,
-                                               path.Error(), relative.View());
-                    !added) {
-                    return added;
-                }
-
-                // 확장자뿐인 이름(".rasset")은 배치가 "패키지 파일 아님"(사유 None)으로 보지만
-                // 확장자 검사는 통과했다 — 이름이 비었으므로 하위 디렉터리의 같은 이름
-                // ("Dir/.rasset" → 끝 '/')과 같은 EmptyComponent로 진단한다.
-                diagnostics[diagnostics.Size() - 1].pathError =
-                    pathFailure.error == LogicalPathError::None ? LogicalPathError::EmptyComponent
-                                                                : pathFailure.error;
-                continue;
-            }
-
-            StringBuilder<IndexPathBytes> full(*allocator_);
-            const StringView fullPieces[] = {content, "/", relative.View()};
-            if (auto built = AppendAll(full, fullPieces); !built) {
-                return built;
-            }
-
-            FilePackageRangeReader reader;
-            AssetDiagnostic failure;
-            auto opened = reader.Open(files, full.View());
-            Result<PackageIndexView> view =
-                opened ? ReadPackageIndex(*allocator_, reader, editor, &failure)
-                       : Result<PackageIndexView>::Failure(opened.Error());
-
-            if (!view) {
-                if (view.Error() == ErrorCode::OutOfMemory) {
-                    return Result<void>::Failure(view.Error());
-                }
-
-                // 열거 뒤 사라진 파일은 MissingFile, 그 밖의 IO 실패는 진단 None과 그 오류다
-                // (쿠킹 로더 10.1절과 같은 규칙 — 색인에서 빼고 계속한다).
-                const AssetDiagnosticCode code =
-                    failure.code == AssetDiagnosticCode::None && view.Error() == ErrorCode::NotFound
-                        ? AssetDiagnosticCode::MissingFile
-                        : failure.code;
-                if (auto added = AddDiagnostic(diagnostics, code, view.Error(), relative.View());
-                    !added) {
-                    return added;
-                }
-
-                diagnostics[diagnostics.Size() - 1].section = failure.section;
-                diagnostics[diagnostics.Size() - 1].detail = failure.detail;
-                diagnostics[diagnostics.Size() - 1].asset = failure.asset;
-                continue;
-            }
-
-            PackageContents& contents = view.Value().contents;
-            AssetIndexEntry entry(*allocator_);
-            entry.id = contents.header.assetId;
-            entry.type = contents.exports[0].type;
-            entry.fingerprint = contents.fingerprint;
-            entry.fileBytes = reader.FileBytes();
-            entry.modifiedTicks = child.info.modifiedTicks;
-            entry.readOnly = contents.readOnly;
-            if (auto assigned = entry.path.TryAssign(path.Value().Text()); !assigned) {
-                return assigned;
-            }
-
-            if (auto assigned = entry.key.TryAssign(path.Value().Key()); !assigned) {
-                return assigned;
-            }
-
-            entry.fileName = Move(relative);
-            if (auto appended = entry.dependencies.TryAppend(contents.dependencies.View());
-                !appended) {
-                return appended;
-            }
-
-            auto tags = ReadPackageTags(*allocator_, contents.tags);
-            if (tags) {
-                entry.tags = Move(tags.Value());
-            } else if (tags.Error() == ErrorCode::OutOfMemory) {
-                return Result<void>::Failure(tags.Error());
-            } else {
-                // 다른 스키마의 Tags는 형식으로 유효하다 — 태그 없이 색인하고 진단만 남긴다.
-                const AssetDiagnosticCode code = tags.Error() == ErrorCode::Unsupported
-                                                     ? AssetDiagnosticCode::UnsupportedVersion
-                                                     : AssetDiagnosticCode::CorruptPackage;
-                if (auto added =
-                        AddDiagnostic(diagnostics, code, tags.Error(), entry.fileName.View());
-                    !added) {
-                    return added;
-                }
-
-                diagnostics[diagnostics.Size() - 1].asset = entry.id;
-                diagnostics[diagnostics.Size() - 1].section =
-                    static_cast<uint32>(PackageSectionKind::Tags);
-            }
-
-            if (auto indexed =
-                    IndexImportRecord(*allocator_, contents.importRecord, entry, diagnostics);
+            if (auto indexed = IndexFile(files, editor, Move(relative), child.info.modifiedTicks,
+                                         found, diagnostics);
                 !indexed) {
                 return indexed;
             }
-
-            if (auto pushed = found.TryPushBack(Move(entry)); !pushed) {
-                return pushed;
-            }
         }
     }
 
-    // 경로 키 → 파일 이름 순으로 정렬한다(완료 순서와 무관 — 7.1절 9). Core 정렬은 안정 정렬이
-    // 아니지만 Content 상대 이름은 파일마다 달라 이 비교가 전순서다.
-    Array<usize> order(*allocator_);
-    if (auto made = MakeOrder(order, found.Size()); !made) {
-        return made;
-    }
-
-    algo::Sort(order.View(), [&](usize left, usize right) noexcept {
-        int compared = StringView::CompareBytes(found[left].key.View(), found[right].key.View());
-        if (compared == 0) {
-            compared =
-                StringView::CompareBytes(found[left].fileName.View(), found[right].fileName.View());
-        }
-
-        return compared < 0;
-    });
-    Array<AssetIndexEntry> sorted(*allocator_);
-    if (auto reserved = sorted.TryReserve(found.Size()); !reserved) {
-        return reserved;
-    }
-
-    for (usize index : order) {
-        (void)sorted.TryPushBack(Move(found[index]));
-    }
-
-    // 같은 경로 키(DuplicatePath — 경로 키 순에서 이웃)와 같은 id(DuplicateAssetId — id 순에서
-    // 이웃)를 모두 진단한다.
-    Array<usize> byId(*allocator_);
-    if (auto made = MakeOrder(byId, sorted.Size()); !made) {
-        return made;
-    }
-
-    if (auto diagnosed = DiagnoseNeighbors(
-            sorted, byId.View(),
-            [&](usize left, usize right) noexcept {
-                return sorted[left].key.View() == sorted[right].key.View();
-            },
-            &AssetIndexEntry::duplicatePath, AssetDiagnosticCode::DuplicatePath, diagnostics);
-        !diagnosed) {
-        return diagnosed;
-    }
-
-    // id → 경로 순 위치(같은 id는 경로 순).
-    algo::Sort(byId.View(), [&](usize left, usize right) noexcept {
-        const int compared = CompareId(sorted[left].id, sorted[right].id);
-        return compared != 0 ? compared < 0 : left < right;
-    });
-    if (auto diagnosed = DiagnoseNeighbors(
-            sorted, byId.View(),
-            [&](usize left, usize right) noexcept {
-                return CompareId(sorted[left].id, sorted[right].id) == 0;
-            },
-            &AssetIndexEntry::duplicateId, AssetDiagnosticCode::DuplicateAssetId, diagnostics);
-        !diagnosed) {
-        return diagnosed;
-    }
-
-    // 진단은 파일 이름 → 코드 → 칸 순이다. 한 이름(파일·디렉터리)의 진단은 (코드, 칸)마다
-    // 하나뿐이라(경로·패키지 판정 진단은 서로 배타이고 그 밖의 항목 진단과도 배타, 항목 진단은
-    // Tags· ImportRecord·Dependencies 칸마다 하나, 같은 id·경로 진단은 각각 하나 — 칸 0) 이 비교가
-    // 전순서다.
-    Array<usize> diagnosticOrder(*allocator_);
-    if (auto made = MakeOrder(diagnosticOrder, diagnostics.Size()); !made) {
-        return made;
-    }
-
-    algo::Sort(diagnosticOrder.View(), [&](usize left, usize right) noexcept {
-        const int name = StringView::CompareBytes(diagnostics[left].fileName.View(),
-                                                  diagnostics[right].fileName.View());
-        if (name != 0) {
-            return name < 0;
-        }
-
-        if (diagnostics[left].code != diagnostics[right].code) {
-            return static_cast<uint32>(diagnostics[left].code) <
-                   static_cast<uint32>(diagnostics[right].code);
-        }
-
-        return diagnostics[left].section < diagnostics[right].section;
-    });
-    Array<AssetIndexDiagnostic> sortedDiagnostics(*allocator_);
-    if (auto reserved = sortedDiagnostics.TryReserve(diagnostics.Size()); !reserved) {
-        return reserved;
-    }
-
-    for (usize index : diagnosticOrder) {
-        (void)sortedDiagnostics.TryPushBack(Move(diagnostics[index]));
-    }
-
-    entries_ = Move(sorted);
-    byId_ = Move(byId);
-    diagnostics_ = Move(sortedDiagnostics);
-    return Result<void>::Success();
+    return Publish(found, diagnostics);
 }
 
 Result<const AssetIndexEntry*> AssetIndex::FindById(AssetId id) const noexcept {

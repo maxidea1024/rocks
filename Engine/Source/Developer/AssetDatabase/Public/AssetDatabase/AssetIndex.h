@@ -176,6 +176,12 @@ public:
     Result<void> Verify(TypeRegistry* types, Array<AssetIndexDiagnostic>& out) const noexcept;
 
 private:
+    Result<void> IndexFile(platform::FileSystem& files, const PackageReadOptions& editor,
+                           String&& relative, int64 modifiedTicks, Array<AssetIndexEntry>& found,
+                           Array<AssetIndexDiagnostic>& diagnostics) noexcept;
+    Result<void> Publish(Array<AssetIndexEntry>& found,
+                         Array<AssetIndexDiagnostic>& diagnostics) noexcept;
+
     Allocator* allocator_;
     const ProjectLayout* layout_;
     Array<AssetIndexEntry> entries_;
