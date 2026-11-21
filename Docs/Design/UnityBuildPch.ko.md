@@ -359,7 +359,7 @@ UB1 동안 모든 모듈의 기본은 `Off`다. UB2·UB3에서 충돌을 정리�
 - 기준: 제공 모듈 의존 closure의 public 헤더 가운데 다음을 모두 만족하는 것만 넣는다.
   - 그 PCH를 쓰게 될 번역 단위의 30% 이상이 닿는다. 대상은 그 제공 모듈이 선택되는 런타임 모듈의 소스이고, ObjectRuntime은 시험 소스(시험 실행 파일이 이 PCH를 쓴다)를 더한다.
   - 자신과 include closure의 어느 헤더도 최근 4주 동안 12회 넘게 바뀌지 않았다. PCH에 든 헤더가 바뀌면 그 PCH를 쓰는 번역 단위가 모두 다시 컴파일되기 때문이다.
-  - 소비 모듈마다 다른 정의(`ROCKS_MODULE_NAME`·`ROCKS_MODULE_TYPES`·모듈 private define)를 전처리 조건에 쓰지 않는다(추가 정의 검사).
+  - 소비 모듈마다 다른 정의(`ROCKS_MODULE_NAME`·`ROCKS_MODULE_TYPES`·`ROCKS_MODULE_SHARED_LIBRARY`·모듈 private define)를 전처리 조건에 쓰지 않는다(추가 정의 검사).
   - Private 헤더와 생성 헤더는 넣지 않는다.
 
 Core — `Core/CoreSharedPch.h`(소비 번역 단위 257개 기준, 괄호는 닿는 비율 %)

@@ -132,6 +132,7 @@ try
                 break;
             case "modular":
                 await ModularLinkTests.RunAsync(request, root, Pass);
+                await ModularManifestTests.RunAsync(request, root, Pass);
                 break;
             case "buildinfo":
                 await BuildInfoTests.RunAsync(request, root, Pass);
@@ -354,6 +355,7 @@ try
     await DependencyTests.RunAsync(request, root, Pass);
     DependencyScopeTests.Run(request, root, Pass);
     await ModularLinkTests.RunAsync(request, root, Pass);
+    await ModularManifestTests.RunAsync(request, root, Pass);
 
     // 유니티 묶기(UB1): 구성 결정성, include 앞 #define 판정, 실제 빌드(__FILE__·제외·논리 명령·변형 디렉터리·정리), 리플렉션 생성 소스 묶기.
     await UnityTests.RunAsync(request, root, Pass);

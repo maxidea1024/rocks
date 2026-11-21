@@ -11,7 +11,9 @@
 // - 여기에는 Base·PlatformBase·Core의 public 헤더 가운데 이 PCH를 쓰는 번역 단위의 30% 이상이
 //   include하고 잘 바뀌지 않는 것만 둔다(고른 방법과 수치는 스펙 8.4절). 이 목록의 헤더가 바뀌면
 //   이 PCH를 쓰는 번역 단위가 모두 다시 컴파일되므로, 자주 바뀌는 헤더는 넣지 않는다.
-// - 소비 모듈마다 다른 정의(ROCKS_MODULE_NAME, ROCKS_MODULE_TYPES, 모듈 private define)를 전처리
+// - 소비 모듈마다 다른 정의(ROCKS_MODULE_NAME, ROCKS_MODULE_TYPES, ROCKS_MODULE_SHARED_LIBRARY,
+// 모듈
+//   private define)를 전처리
 //   조건에 쓰는 헤더는 넣지 못한다(그 정의는 PCH 뒤에 오므로 빌드가 오류로 막는다 — 예:
 //   Core/Module/ModuleEntry.h).
 // - 헤더를 더하거나 뺄 때는 스펙 8.4절의 목록도 함께 고친다.

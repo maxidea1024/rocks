@@ -495,7 +495,7 @@ internal static class ActionGraph
             string sharedStem = sharedLibrary
                 ? LinkTypes.SharedLibraryStem(request.TargetName ?? request.Targets[0], module.Name, request.Toolchain.Platform, request.Configuration)
                 : "";
-            string sharedFile = sharedStem + (windows ? ".dll" : mac ? ".dylib" : ".so");
+            string sharedFile = sharedStem + LinkTypes.SharedLibraryExtension(request.Toolchain.Platform);
             string finalPath = archive ? Path.Combine(output, "lib", module.Name + (windows ? ".lib" : ".a"))
                 : sharedLibrary ? Path.Combine(output, "bin", sharedFile)
                 : Path.Combine(output, "bin", module.Name + (windows ? ".exe" : ""));
@@ -593,6 +593,11 @@ internal static class ActionGraph
                     if (sharedLibrary)
                     {
                         finalArguments.AddRange(["/Fe{OUTPUT0}", "/link", "/DLL", "/INCREMENTAL:NO"]);
+                        // 진입점 모듈은 export 진입점을 강제 참조한다(매크로가 빠지면 링크 오류 — BuildTargets BS8d1).
+                        if (entryModules.Contains(module.Name))
+                        {
+                            finalArguments.Add("/INCLUDE:" + ModuleTables.EntryAnchorPrefix + module.Name);
+                        }
                     }
                     else
                     {
@@ -626,6 +631,12 @@ internal static class ActionGraph
                     {
                         // install name·soname은 파일 이름만 담는다(실행 중 탐색은 rpath — 같은 폴더).
                         finalArguments.AddRange(mac ? ["-dynamiclib", "-install_name", "@rpath/" + sharedFile] : ["-shared", "-Wl,-soname," + sharedFile]);
+                        // 진입점 모듈은 export 진입점을 강제 참조한다(Mach-O 기호는 앞에 밑줄이 붙는다 — BuildTargets BS8d1). ELF -shared 링크는
+                        // 미해결 기호를 허용하므로 Linux(BS6)는 -Wl,-z,defs를 함께 넣어야 이 참조가 링크 오류가 된다.
+                        if (entryModules.Contains(module.Name))
+                        {
+                            finalArguments.Add("-Wl,-u," + (mac ? "_" : "") + ModuleTables.EntryAnchorPrefix + module.Name);
+                        }
                     }
 
                     if (request.LinkType == NativeLinkType.Modular)

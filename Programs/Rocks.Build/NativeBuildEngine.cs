@@ -127,9 +127,12 @@ public sealed class NativeBuildEngine
         }
 
         bool succeeded = stable && results.All(value => value.Succeeded);
+        string? moduleManifest = null;
         if (succeeded)
         {
             RemoveStaleOutputs(request, plan);
+            // Modular 타깃의 모듈 manifest는 링크가 모두 성공한 뒤에 쓴다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d1).
+            moduleManifest = ModuleManifests.Write(request, plan);
             if (request.Timing)
             {
                 TimingReport.Write(request, plan);
@@ -162,7 +165,8 @@ public sealed class NativeBuildEngine
             Failure = !stable ? "Source/toolchain inputs changed during the build." :
                 results.FirstOrDefault(value => !value.Succeeded)?.StdErr,
             ToolchainFingerprint = prepared.ToolchainFingerprint,
-            ToolBuildIds = toolBuildIds
+            ToolBuildIds = toolBuildIds,
+            ModuleManifestPath = moduleManifest
         };
 
         async Task<NativeActionResult> RunAsync(NativeAction action, Task<NativeActionResult>[] dependencies)
