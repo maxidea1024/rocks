@@ -2163,7 +2163,7 @@ class DoorLogic : ScriptableComponent {
   - `error S0412 14:14` — 이 위치에 이 코드의 진단이 나야 한다. 여러 줄이면 §8.1의 순서대로 모두 일치해야 하며 빠지거나 더 나온 진단은 실패다.
   - `error S0103` — 위치를 적지 않으면 원문 위치가 없는 진단(파일 전체)이다.
   - `clean` — 진단이 없어야 한다. `error`와 함께 쓸 수 없다.
-  - `stage syntax`·`stage imports`·`stage names`·`stage types`·`stage flow`·`stage rules` — 그 단계까지만 컴파일한다(`syntax`는 manifest·schema·모듈 경로·의존·어휘·구문 분석, `imports`는 거기에 import 해석, `names`는 거기에 이름 해석, `types`는 거기에 타입 검사 — LC2c, `flow`는 거기에 흐름·대입·미사용·상수식·필드·프로필 검사 — LC2d §3.11, `rules`는 거기에 문맥·수명 규칙 — LC3 §3.12–). 한 번만 쓰며 없으면 전체 단계다. 구문 사례(`Lexical`·`Syntax`·`SyntaxErrors` 영역)와 이름 사례(`Names` 영역)가 뒤 단계 규칙(이름·타입·미사용)에 묶이지 않게 한다(LC2b·LC2c). 단계만으로는 기대 지시가 아니다(`error`나 `clean`이 함께 있어야 한다).
+  - `stage syntax`·`stage imports`·`stage names`·`stage types`·`stage flow`·`stage rules`·`stage codegen` — 그 단계까지만 컴파일한다(`syntax`는 manifest·schema·모듈 경로·의존·어휘·구문 분석, `imports`는 거기에 import 해석, `names`는 거기에 이름 해석, `types`는 거기에 타입 검사 — LC2c, `flow`는 거기에 흐름·대입·미사용·상수식·필드·프로필 검사 — LC2d §3.11, `rules`는 거기에 문맥·수명 규칙 — LC3 §3.12–, `codegen`은 거기에 진단 없는 컴파일의 typed IR 내림 — LC4, [SparksBytecode](SparksBytecode.ko.md)). 사례는 `.ir`(typed IR 덤프 golden — 진단 없는 사례만)도 둘 수 있다. 한 번만 쓰며 없으면 전체 단계다. 구문 사례(`Lexical`·`Syntax`·`SyntaxErrors` 영역)와 이름 사례(`Names` 영역)가 뒤 단계 규칙(이름·타입·미사용)에 묶이지 않게 한다(LC2b·LC2c). 단계만으로는 기대 지시가 아니다(`error`나 `clean`이 함께 있어야 한다).
   - 지시가 하나도 없는 `.expect`, 알 수 없는 지시, `.expect`가 없는 `.spark`, `.spark`가 없는 `.expect`는 corpus 오류로 실패한다(빈 기대값이 조용히 통과하지 않게 한다).
   - 실행 결과 지시(`result`·`fault`·`trace`)는 해당 마일스톤(LC5·LC6)에서 더한다.
 - **패키지 사례(LC2a):** 사례는 파일 하나(`<사례>.spark`) 또는 폴더 하나(`<사례>/`)다.

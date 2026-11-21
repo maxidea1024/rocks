@@ -1,0 +1,290 @@
+function Widths(s0, s1, s2, s3, s4, s5, s6)
+  s0 a: int16 [I16]
+  s1 b: int32 [I32]
+  s2 c: uint8 [U8]
+  s3 d: uint16 [U16]
+  s4 e: uint32 [U32]
+  s5 f: uint64 [U64]
+  s6 g: float32 [F32]
+  s7: int16 [I16]
+  s8 sum: int16 [I16]
+  s9: int32 [I32]
+  s10 more: int32 [I32]
+  s11: uint8 [U8]
+  s12 tiny: uint8 [U8]
+  s13: uint16 [U16]
+  s14 mid: uint16 [U16]
+  s15: uint32 [U32]
+  s16 big: uint32 [U32]
+  s17: uint64 [U64]
+  s18 huge: uint64 [U64]
+  s19: float32 [F32]
+L0:
+    s7 = ADD.I16 s0, s0    ; 6:15
+    s8 = MOVE s7    ; 6:5
+    s9 = MUL.I32 s1, s1    ; 7:16
+    s10 = MOVE s9    ; 7:5
+    s11 = SUB.U8 s2, s2    ; 8:16
+    s12 = MOVE s11    ; 8:5
+    s13 = ADD.U16 s3, s3    ; 9:15
+    s14 = MOVE s13    ; 9:5
+    s15 = MOD.U32 s4, s4    ; 10:15
+    s16 = MOVE s15    ; 10:5
+    s17 = ADD.U64 s5, s5    ; 11:16
+    s18 = MOVE s17    ; 11:5
+    s19 = MUL.F32 s6, s6    ; 18:12
+    RETURN s19    ; 18:5
+
+function Compare(s0, s1, s2, s5)
+  s0 a: int [I64]
+  s1 b: int [I64]
+  s2..s4 v: vec3 [F64 F64 F64]
+  s5..s7 w: vec3 [F64 F64 F64]
+  s8: bool [Bool]
+  s9: bool [Bool]
+  s10: float [F64]
+  s11: float [F64]
+  s12: bool [Bool]
+  s13: float [F64]
+  s14: float [F64]
+  s15: bool [Bool]
+L0:
+    s8 = LE s0, s1    ; 22:11
+    BRANCH s8, L3, L1    ; 22:11
+L1:
+    s10 = MOVE s2    ; 23:16
+    s11 = MOVE s5    ; 23:22
+    s12 = LT s10, s11    ; 23:16
+    RETURN s12    ; 23:9
+L2:
+    s13 = MOVE s3    ; 26:12
+    s14 = MOVE s6    ; 26:19
+    s15 = GE s13, s14    ; 26:12
+    RETURN s15    ; 26:5
+L3:
+    s9 = GE s0, s1    ; 22:22
+    BRANCH s9, L1, L2    ; 22:22
+
+function Label(s0, b1)
+  s0 code: int [I64]
+  b1 name: string
+  b2: string
+  b3: string
+  b4: string
+  s5: bool [Bool]
+  b6: string
+  s7: bool [Bool]
+  b8: string
+  b9: string
+  b10: string
+L0:
+    SWITCH s0 [-1: L3, 7: L4] else L2    ; 30:5
+L1:
+    b4 = LOADSTR.PIECE "a"    ; 42:14
+    s5 = EQ b1, b4    ; 42:14
+    BRANCH s5, L7, L8    ; 42:14
+L2:
+    JUMP L1    ; 37:9
+L3:
+    b2 = LOADSTR @"none"    ; 32:20
+    RETURN b2    ; 32:13
+L4:
+    b3 = LOADSTR.PIECE "special"    ; 35:20
+    RETURN b3    ; 35:13
+L5:
+    FAULT 1    ; 49:1
+L6:
+    b9 = CONVERT s0    ; 46:21
+    b10 = CONCAT(b9)    ; 46:20
+    RETURN b10    ; 46:13
+L7:
+    b8 = LOADSTR.PIECE "early"    ; 43:20
+    RETURN b8    ; 43:13
+L8:
+    b6 = LOADSTR.PIECE "b"    ; 42:19
+    s7 = EQ b1, b6    ; 42:19
+    BRANCH s7, L7, L9    ; 42:19
+L9:
+    JUMP L6    ; 41:5
+
+function Validate(b0)
+  b0 text: string
+  b1: string
+  s2: bool [Bool]
+  s3: Error [Enum]
+  b4: Result<string>
+  b5: Result<string>
+L0:
+    b1 = LOADSTR.PIECE ""    ; 52:17
+    s2 = EQ b0, b1    ; 52:9
+    BRANCH s2, L1, L2    ; 52:9
+L1:
+    s3 = LOADINT 2    ; 53:16
+    b4 = NEW.ERROR Result(s3)    ; 53:9
+    RETURN b4    ; 53:9
+L2:
+    b5 = NEW.OK Result(b0)    ; 56:5
+    RETURN b5    ; 56:5
+
+function Sum(b0, b1)
+  b0 items: Array<int>
+  b1 tags: Set<Tag>
+  s2: int [I64]
+  s3 total: int [I64]
+  b4: Array<int>
+  s5: int [I64]
+  s6: int [I64]
+  s7: bool [Bool]
+  s8 item: int [I64]
+  s9: int [I64]
+  s10: int [I64]
+  b11: Set<Tag>
+  s12: int [I64]
+  s13: int [I64]
+  s14: bool [Bool]
+  s15 tag: Tag [Name]
+  s16: int [I64]
+  s17: int [I64]
+  s18: int [I64]
+  s19..s21: vec3 [F64 F64 F64]
+  s22: float [F64]
+  s23: float [F64]
+  s24: float [F64]
+  s25..s27 scale: vec3 [F64 F64 F64]
+  s28: float [F64]
+  s29..s31: vec3 [F64 F64 F64]
+  s32: float [F64]
+  s33..s35: vec3 [F64 F64 F64]
+L0:
+    s2 = LOADINT 0    ; 60:17
+    s3 = MOVE s2    ; 60:5
+    b4 = MOVE b0    ; 61:5
+    s5 = LOADINT 0    ; 61:5
+    s6 = LEN b4    ; 61:5
+    JUMP L1    ; 61:5
+L1:
+    s7 = LT s5, s6    ; 61:5
+    BRANCH s7, L2, L4    ; 61:5
+L2:
+    s8 = GETE b4[s5]    ; 61:10
+    s9 = ADD.I64 s3, s8    ; 62:9
+    s3 = MOVE s9    ; 62:9
+    JUMP L3    ; 61:5
+L3:
+    s10 = LOADINT 1    ; 61:5
+    s5 = ADD.I64 s5, s10    ; 61:5
+    JUMP L1    ; 61:5
+L4:
+    b11 = MOVE b1    ; 65:5
+    s12 = LOADINT 0    ; 65:5
+    s13 = LEN b11    ; 65:5
+    JUMP L5    ; 65:5
+L5:
+    s14 = LT s12, s13    ; 65:5
+    BRANCH s14, L6, L8    ; 65:5
+L6:
+    s15 = GETKEY b11[s12]    ; 65:10
+    s16 = LOADINT 2    ; 67:18
+    s17 = MUL.I64 s3, s16    ; 67:9
+    s3 = MOVE s17    ; 67:9
+    JUMP L7    ; 65:5
+L7:
+    s18 = LOADINT 1    ; 65:5
+    s12 = ADD.I64 s12, s18    ; 65:5
+    JUMP L5    ; 65:5
+L8:
+    s19 = LOADFLOAT 0    ; 70:17
+    s20 = LOADFLOAT 0    ; 70:17
+    s21 = LOADFLOAT 0    ; 70:17
+    s22 = LOADFLOAT 1    ; 70:22
+    s19 = MOVE s22    ; 70:22
+    s23 = LOADFLOAT 1    ; 70:27
+    s20 = MOVE s23    ; 70:27
+    s24 = LOADFLOAT 1    ; 70:32
+    s21 = MOVE s24    ; 70:32
+    s25 = MOVE s19    ; 70:5
+    s26 = MOVE s20    ; 70:5
+    s27 = MOVE s21    ; 70:5
+    s28 = LOADFLOAT 2    ; 71:14
+    s29 = MUL.F64 s25, s28    ; 71:5
+    s30 = MUL.F64 s26, s28    ; 71:5
+    s31 = MUL.F64 s27, s28    ; 71:5
+    s25 = MOVE s29    ; 71:5
+    s26 = MOVE s30    ; 71:5
+    s27 = MOVE s31    ; 71:5
+    s32 = LOADFLOAT 4    ; 72:14
+    s33 = DIV.F64 s25, s32    ; 72:5
+    s34 = DIV.F64 s26, s32    ; 72:5
+    s35 = DIV.F64 s27, s32    ; 72:5
+    s25 = MOVE s33    ; 72:5
+    s26 = MOVE s34    ; 72:5
+    s27 = MOVE s35    ; 72:5
+    RETURN s3    ; 74:5
+
+handler Beacon.on this.Pinged(s1)
+  r0 this: Beacon
+  s1 level: int [I64]
+  r2: World
+  r3: AudioSystem
+  r4: SoundAsset
+  r5: LoopHandle?
+  r6 hum: LoopHandle?
+  r7: World
+  r8: AudioSystem
+  r9: SoundAsset
+  r10: LoopHandle?
+  r11: wait
+  r12: Actor?
+  s13: bool [Bool]
+  r14 watched: Actor
+  r15: Actor
+  s16: bool [Bool]
+  r17: LoopHandle
+L0:
+    r2 = GETF World    ; 83:19
+    r3 = GETF r2.World.Audio    ; 83:19
+    r4 = GETF r0.Beacon.Cue    ; 83:41
+    r5 = CALL AudioSystem.StartLoop(r3, r4)    ; 83:19
+    r6 = MOVE r5    ; 83:9
+    r7 = GETF World    ; 84:15
+    r8 = GETF r7.World.Audio    ; 84:15
+    r9 = GETF r0.Beacon.Cue    ; 84:37
+    r10 = CALL AudioSystem.StartLoop(r8, r9)    ; 84:15
+    RELEASE r6    ; 84:9
+    r6 = MOVE r10    ; 84:9
+    r11 = CALL NextTick()    ; 85:16
+    AWAIT r11 -> L1    ; 85:9
+L1:
+    r12 = GETF r0.Beacon.Target    ; 86:27
+    s13 = ISSOME r12    ; 86:13
+    BRANCH s13, L2, L3    ; 86:13
+L2:
+    r15 = MOVE r12    ; 86:13
+    r14 = MOVE r15    ; 86:13
+    AWAIT r14.Actor.Destroyed -> L4    ; 87:13
+L3:
+    s16 = ISSOME r6    ; 90:9
+    BRANCH s16, L5, L6    ; 90:9
+L4:
+    JUMP L3    ; 86:9
+L5:
+    r17 = MOVE r6    ; 90:9
+    CALL LoopHandle.Pause(r17)    ; 90:9
+    JUMP L7    ; 90:9
+L6:
+    JUMP L7    ; 90:9
+L7:
+    RELEASE r6    ; 82:32
+    RETURN    ; 92:5
+
+function Beacon.Ping(r1)
+  r0 this: Beacon
+  r1 other: Actor
+  s2: int [I64]
+  s3: int [I64]
+L0:
+    s2 = LOADINT 1    ; 95:26
+    EMIT r0.Actor.Pinged(s2)    ; 95:9
+    s3 = LOADINT 2    ; 96:27
+    EMIT r1.Actor.Pinged(s3)    ; 96:9
+    RETURN    ; 97:5

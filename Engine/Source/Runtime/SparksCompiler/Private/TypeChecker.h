@@ -96,6 +96,7 @@ struct CheckContext {
 
 class FlowAnalyzer;
 class IrBuilder;
+class IrWriter;
 
 class TypeChecker final {
 public:
@@ -106,6 +107,7 @@ public:
 private:
     friend class FlowAnalyzer;
     friend class IrBuilder;
+    friend class IrWriter;
 
     // 노드 대표 토큰의 글자다(연산자·멤버 이름·리터럴).
     StringView TokenText(uint32 module, uint32 node) const noexcept;
@@ -285,6 +287,10 @@ private:
     // `acquire` 효과의 엔진 함수가 유지 자원 타입을 돌려주는지 본다(S1120).
     void CheckAcquireReturns() noexcept;
     void CheckHeldEvents() noexcept;
+
+    // ---- typed IR 내림(IrDump.cpp, LC4 — Codegen 단계, 진단 없는 컴파일에서만) ----
+    void LowerProgram() noexcept;
+    void LowerModule(uint32 module) noexcept;
     // 획득한 지역 자원 뒤의 정지하는 await(S0905 — 효과 분석 뒤).
     void CheckResourceWaits() noexcept;
 

@@ -1,0 +1,88 @@
+enum Mode {
+    Idle,
+    Busy,
+    Done
+}
+
+struct Stats {
+    var Level: int = 1;
+    var Offset: vec3;
+}
+
+class Door : ScriptableComponent {
+    @edit var Cue: SoundAsset;
+    var Open = false;
+    var Info = Stats();
+    var State = Mode.Idle;
+    var Names: Array<string> = [];
+    var Scores: Map<string, int> = [];
+    var Hum: LoopHandle?;
+
+    event Opened(by: Actor);
+
+    on Enable() {
+        Hum = World.Audio.StartLoop(Cue);
+        Info.Level = 2;
+        Info.Offset.X = 1.5;
+        Names[0] = "front";
+        Scores["a"] = 1;
+    }
+
+    on Disable() {
+        Hum?.Pause();
+        Hum = null;
+    }
+
+    fn Toggle(by: Actor) {
+        Open = !Open;
+        if (Open) {
+            emit Opened(by);
+        }
+    }
+
+    fn Describe(): string {
+        switch (State) {
+            case Mode.Idle: {
+                return "idle";
+            }
+            case Mode.Busy, Mode.Done: {
+                return "working";
+            }
+        }
+    }
+
+    fn Total(): int {
+        var sum = 0;
+        for (name, score in Scores) {
+            _ = name;
+            sum += score;
+        }
+
+        for (index, name in Names) {
+            if (name == "skip") {
+                break;
+            }
+
+            sum += index;
+        }
+
+        return sum;
+    }
+
+    @skipWhileBusy
+    on Owner.Damaged(amount: float) {
+        let siren = World.Audio.StartLoop(Cue);
+        if (amount > 10.0) {
+            return;
+        }
+
+        await NextTick();
+        siren?.Pause();
+    }
+
+    fn Find(): Actor? {
+        let pawn = Owner as? Pawn;
+        let actor = pawn ?? return null;
+        return actor;
+    }
+}

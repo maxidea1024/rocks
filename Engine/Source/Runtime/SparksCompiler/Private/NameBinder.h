@@ -103,6 +103,7 @@ struct BodyContext {
 
 class FlowAnalyzer;
 class IrBuilder;
+class IrWriter;
 class TypeChecker;
 
 class NameBinder final {
@@ -114,6 +115,7 @@ public:
 private:
     friend class FlowAnalyzer;
     friend class IrBuilder;
+    friend class IrWriter;
     friend class TypeChecker;
 
     // ---- 공통(BindSetup.cpp) ----

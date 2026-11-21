@@ -1,0 +1,145 @@
+function Add(s0, s1)
+  s0 a: int [I64]
+  s1 b: int [I64]
+  s2: int [I64]
+  s3: int [I64]
+  s4: int [I64]
+L0:
+    s2 = LOADINT 2    ; 2:20
+    s3 = MUL.I64 s1, s2    ; 2:16
+    s4 = ADD.I64 s0, s3    ; 2:12
+    RETURN s4    ; 2:5
+
+function Scale(s0, s3)
+  s0..s2 v: vec3 [F64 F64 F64]
+  s3 k: float [F64]
+  s4..s6: vec3 [F64 F64 F64]
+  s7..s9 w: vec3 [F64 F64 F64]
+  s10..s12: vec3 [F64 F64 F64]
+  s13: float [F64]
+  s14: float [F64]
+  s15: float [F64]
+  s16..s18: vec3 [F64 F64 F64]
+L0:
+    s4 = MUL.F64 s0, s3    ; 6:13
+    s5 = MUL.F64 s1, s3    ; 6:13
+    s6 = MUL.F64 s2, s3    ; 6:13
+    s7 = MOVE s4    ; 6:5
+    s8 = MOVE s5    ; 6:5
+    s9 = MOVE s6    ; 6:5
+    s10 = LOADFLOAT 0    ; 7:16
+    s11 = LOADFLOAT 0    ; 7:16
+    s12 = LOADFLOAT 0    ; 7:16
+    s13 = LOADFLOAT 1    ; 7:21
+    s10 = MOVE s13    ; 7:21
+    s14 = LOADFLOAT 0    ; 7:26
+    s11 = MOVE s14    ; 7:26
+    s15 = LOADFLOAT 0    ; 7:31
+    s12 = MOVE s15    ; 7:31
+    s16 = ADD.F64 s7, s10    ; 7:12
+    s17 = ADD.F64 s8, s11    ; 7:12
+    s18 = ADD.F64 s9, s12    ; 7:12
+    RETURN s16    ; 7:5
+
+function Count(s0)
+  s0 limit: int [I64]
+  s1: int [I64]
+  s2 total: int [I64]
+  s3: int [I64]
+  s4: int [I64]
+  s5: int [I64]
+  s6: bool [Bool]
+  s7 i: int [I64]
+  s8: int [I64]
+  s9: int [I64]
+  s10: int [I64]
+  s11: bool [Bool]
+  s12: int [I64]
+  s13: int [I64]
+L0:
+    s1 = LOADINT 0    ; 11:17
+    s2 = MOVE s1    ; 11:5
+    s4 = LOADINT 0    ; 12:15
+    s3 = MOVE s4    ; 12:5
+    s5 = MOVE s0    ; 12:5
+    JUMP L1    ; 12:5
+L1:
+    s6 = LT s3, s5    ; 12:5
+    BRANCH s6, L2, L4    ; 12:5
+L2:
+    s7 = MOVE s3    ; 12:5
+    s8 = LOADINT 2    ; 13:17
+    s9 = MOD.I64 s7, s8    ; 13:13
+    s10 = LOADINT 0    ; 13:22
+    s11 = EQ s9, s10    ; 13:13
+    BRANCH s11, L5, L6    ; 13:13
+L3:
+    s13 = LOADINT 1    ; 12:5
+    s3 = ADD.I64 s3, s13    ; 12:5
+    JUMP L1    ; 12:5
+L4:
+    RETURN s2    ; 20:5
+L5:
+    JUMP L3    ; 14:13
+L6:
+    s12 = ADD.I64 s2, s7    ; 17:9
+    s2 = MOVE s12    ; 17:9
+    JUMP L3    ; 12:5
+
+function Pick(s0, s1, s3)
+  s0 flag: bool [Bool]
+  s1..s2 a: int? [Flag I64]
+  s3 b: int [I64]
+  s4: int [I64]
+  s5: bool [Bool]
+  s6: int [I64]
+  s7: bool [Bool]
+  s8: int [I64]
+  s9: bool [Bool]
+  s10 value: int [I64]
+  s11: int [I64]
+  s12: int [I64]
+L0:
+    BRANCH s0, L3, L2    ; 24:9
+L1:
+    s7 = ISSOME s1    ; 25:16
+    BRANCH s7, L4, L5    ; 25:16
+L2:
+    s9 = ISSOME s1    ; 28:9
+    BRANCH s9, L7, L8    ; 28:9
+L3:
+    s4 = LOADINT 0    ; 24:21
+    s5 = GT s3, s4    ; 24:17
+    BRANCH s5, L1, L2    ; 24:17
+L4:
+    s8 = MOVE s2    ; 25:16
+    s6 = MOVE s8    ; 25:16
+    JUMP L6    ; 25:16
+L5:
+    s6 = MOVE s3    ; 25:16
+    JUMP L6    ; 25:16
+L6:
+    RETURN s6    ; 25:9
+L7:
+    s11 = MOVE s2    ; 28:9
+    s10 = MOVE s11    ; 28:9
+    RETURN s10    ; 29:9
+L8:
+    s12 = NEG.I64 s3    ; 32:12
+    RETURN s12    ; 32:5
+
+function Greet(b0, s1)
+  b0 name: string
+  s1 n: int [I64]
+  b2: string
+  b3: string
+  b4: string
+  b5: string
+  b6: string
+L0:
+    b2 = LOADSTR.PIECE "Hello "    ; 36:13
+    b3 = CONVERT b0    ; 36:19
+    b4 = LOADSTR.PIECE " x"    ; 36:26
+    b5 = CONVERT s1    ; 36:28
+    b6 = CONCAT(b2, b3, b4, b5)    ; 36:12
+    RETURN b6    ; 36:5

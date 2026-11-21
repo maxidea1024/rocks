@@ -1,0 +1,241 @@
+handler Door.on Enable()
+  r0 this: Door
+  r1: World
+  r2: AudioSystem
+  r3: SoundAsset
+  r4: LoopHandle?
+  s5: int [I64]
+  b6: Stats
+  s7: float [F64]
+  b8: Stats
+  s9..s11: vec3 [F64 F64 F64]
+  b12: Stats
+  b13: string
+  b14: Array<string>
+  s15: int [I64]
+  s16: int [I64]
+  b17: Map<string, int>
+  b18: string
+L0:
+    r1 = GETF World    ; 24:15
+    r2 = GETF r1.World.Audio    ; 24:15
+    r3 = GETF r0.Door.Cue    ; 24:37
+    r4 = CALL AudioSystem.StartLoop(r2, r3)    ; 24:15
+    SETF r0.Door.Hum, r4    ; 24:9
+    s5 = LOADINT 2    ; 25:22
+    b6 = GETF r0.Door.Info    ; 25:9
+    SETF b6.Stats.Level, s5    ; 25:9
+    SETF r0.Door.Info, b6    ; 25:9
+    s7 = LOADFLOAT 1.5    ; 26:25
+    b8 = GETF r0.Door.Info    ; 26:9
+    s9 = GETF b8.Stats.Offset    ; 26:9
+    s9 = MOVE s7    ; 26:9
+    b12 = GETF r0.Door.Info    ; 26:9
+    SETF b12.Stats.Offset, s9    ; 26:9
+    SETF r0.Door.Info, b12    ; 26:9
+    b13 = LOADSTR.PIECE "front"    ; 27:20
+    b14 = GETF r0.Door.Names    ; 27:9
+    s15 = LOADINT 0    ; 27:15
+    SETE b14[s15], b13    ; 27:9
+    SETF r0.Door.Names, b14    ; 27:9
+    s16 = LOADINT 1    ; 28:23
+    b17 = GETF r0.Door.Scores    ; 28:9
+    b18 = LOADSTR.PIECE "a"    ; 28:16
+    SETE b17[b18], s16    ; 28:9
+    SETF r0.Door.Scores, b17    ; 28:9
+    RETURN    ; 29:5
+
+handler Door.on Disable()
+  r0 this: Door
+  r1: LoopHandle?
+  s2: bool [Bool]
+  r3: LoopHandle
+  r4: LoopHandle?
+L0:
+    r1 = GETF r0.Door.Hum    ; 32:9
+    s2 = ISSOME r1    ; 32:9
+    BRANCH s2, L1, L2    ; 32:9
+L1:
+    r3 = MOVE r1    ; 32:9
+    CALL LoopHandle.Pause(r3)    ; 32:9
+    JUMP L3    ; 32:9
+L2:
+    JUMP L3    ; 32:9
+L3:
+    r4 = LOADNULL    ; 33:15
+    SETF r0.Door.Hum, r4    ; 33:9
+    RETURN    ; 34:5
+
+function Door.Toggle(r1)
+  r0 this: Door
+  r1 by: Actor
+  s2: bool [Bool]
+  s3: bool [Bool]
+  s4: bool [Bool]
+L0:
+    s2 = GETF r0.Door.Open    ; 37:17
+    s3 = NOT.Bool s2    ; 37:16
+    SETF r0.Door.Open, s3    ; 37:9
+    s4 = GETF r0.Door.Open    ; 38:13
+    BRANCH s4, L1, L2    ; 38:13
+L1:
+    EMIT this.Door.Opened(r1)    ; 39:13
+    JUMP L2    ; 38:9
+L2:
+    RETURN    ; 41:5
+
+function Door.Describe()
+  r0 this: Door
+  s1: Mode [Enum]
+  b2: string
+  b3: string
+L0:
+    s1 = GETF r0.Door.State    ; 44:17
+    SWITCH s1 [0: L2, 1: L3, 2: L3] else L1    ; 44:9
+L1:
+    FAULT 1    ; 52:5
+L2:
+    b2 = LOADSTR.PIECE "idle"    ; 46:24
+    RETURN b2    ; 46:17
+L3:
+    b3 = LOADSTR.PIECE "working"    ; 49:24
+    RETURN b3    ; 49:17
+
+function Door.Total()
+  r0 this: Door
+  s1: int [I64]
+  s2 sum: int [I64]
+  b3: Map<string, int>
+  b4: Map<string, int>
+  s5: int [I64]
+  s6: int [I64]
+  s7: bool [Bool]
+  b8 name: string
+  s9 score: int [I64]
+  s10: int [I64]
+  s11: int [I64]
+  b12: Array<string>
+  b13: Array<string>
+  s14: int [I64]
+  s15: int [I64]
+  s16: bool [Bool]
+  s17 index: int [I64]
+  b18 name: string
+  b19: string
+  s20: bool [Bool]
+  s21: int [I64]
+  s22: int [I64]
+L0:
+    s1 = LOADINT 0    ; 55:19
+    s2 = MOVE s1    ; 55:9
+    b4 = GETF r0.Door.Scores    ; 56:29
+    b3 = MOVE b4    ; 56:9
+    s5 = LOADINT 0    ; 56:9
+    s6 = LEN b3    ; 56:9
+    JUMP L1    ; 56:9
+L1:
+    s7 = LT s5, s6    ; 56:9
+    BRANCH s7, L2, L4    ; 56:9
+L2:
+    b8 = GETKEY b3[s5]    ; 56:14
+    s9 = GETVALUE b3[s5]    ; 56:20
+    s10 = ADD.I64 s2, s9    ; 58:13
+    s2 = MOVE s10    ; 58:13
+    JUMP L3    ; 56:9
+L3:
+    s11 = LOADINT 1    ; 56:9
+    s5 = ADD.I64 s5, s11    ; 56:9
+    JUMP L1    ; 56:9
+L4:
+    b13 = GETF r0.Door.Names    ; 61:29
+    b12 = MOVE b13    ; 61:9
+    s14 = LOADINT 0    ; 61:9
+    s15 = LEN b12    ; 61:9
+    JUMP L5    ; 61:9
+L5:
+    s16 = LT s14, s15    ; 61:9
+    BRANCH s16, L6, L8    ; 61:9
+L6:
+    s17 = MOVE s14    ; 61:9
+    b18 = GETE b12[s14]    ; 61:21
+    b19 = LOADSTR.PIECE "skip"    ; 62:25
+    s20 = EQ b18, b19    ; 62:17
+    BRANCH s20, L9, L10    ; 62:17
+L7:
+    s22 = LOADINT 1    ; 61:9
+    s14 = ADD.I64 s14, s22    ; 61:9
+    JUMP L5    ; 61:9
+L8:
+    RETURN s2    ; 69:9
+L9:
+    JUMP L8    ; 63:17
+L10:
+    s21 = ADD.I64 s2, s17    ; 66:13
+    s2 = MOVE s21    ; 66:13
+    JUMP L7    ; 61:9
+
+handler Door.on Owner.Damaged(s1)
+  r0 this: Door
+  s1 amount: float [F64]
+  r2: World
+  r3: AudioSystem
+  r4: SoundAsset
+  r5: LoopHandle?
+  r6 siren: LoopHandle?
+  s7: float [F64]
+  s8: bool [Bool]
+  r9: wait
+  s10: bool [Bool]
+  r11: LoopHandle
+L0:
+    r2 = GETF World    ; 74:21
+    r3 = GETF r2.World.Audio    ; 74:21
+    r4 = GETF r0.Door.Cue    ; 74:43
+    r5 = CALL AudioSystem.StartLoop(r3, r4)    ; 74:21
+    r6 = MOVE r5    ; 74:9
+    s7 = LOADFLOAT 10    ; 75:22
+    s8 = GT s1, s7    ; 75:13
+    BRANCH s8, L1, L2    ; 75:13
+L1:
+    RELEASE r6    ; 76:13
+    RETURN    ; 76:13
+L2:
+    r9 = CALL NextTick()    ; 79:15
+    AWAIT r9 -> L3    ; 79:9
+L3:
+    s10 = ISSOME r6    ; 80:9
+    BRANCH s10, L4, L5    ; 80:9
+L4:
+    r11 = MOVE r6    ; 80:9
+    CALL LoopHandle.Pause(r11)    ; 80:9
+    JUMP L6    ; 80:9
+L5:
+    JUMP L6    ; 80:9
+L6:
+    RELEASE r6    ; 73:37
+    RETURN    ; 81:5
+
+function Door.Find()
+  r0 this: Door
+  r1: Actor
+  r2: Pawn?
+  r3 pawn: Pawn?
+  s4: bool [Bool]
+  r5: Actor?
+  r6 actor: Pawn
+  r7: Pawn
+  r8: Actor?
+L0:
+    r1 = GETF r0.Component.Owner    ; 84:20
+    r2 = CAST r1 as Pawn    ; 84:20
+    r3 = MOVE r2    ; 84:9
+    s4 = ISSOME r3    ; 85:9
+    BRANCH s4, L1, L2    ; 85:9
+L1:
+    r7 = MOVE r3    ; 85:9
+    r6 = MOVE r7    ; 85:9
+    r8 = MOVE r6    ; 86:16
+    RETURN r8    ; 86:9
+L2:
+    r5 = LOADNULL    ; 85:36
+    RETURN r5    ; 85:26

@@ -18,6 +18,7 @@ inline constexpr StringView ExpectExtension = ".expect";
 inline constexpr StringView SyntaxTreeExtension = ".ast";
 inline constexpr StringView NamesExtension = ".names";
 inline constexpr StringView TypesExtension = ".types";
+inline constexpr StringView IrExtension = ".ir";
 inline constexpr StringView SchemaExtension = ".sparkbind.json";
 
 // 실패 문장을 담을 builder의 inline 크기다(넘치면 allocator에서 늘린다).

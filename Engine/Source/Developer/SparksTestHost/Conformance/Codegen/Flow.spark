@@ -1,0 +1,56 @@
+event Actor.Pushed(by: Actor);
+
+fn Wrap(n: int): Result<vec3> {
+    if (n == 0) {
+        return Error.NotFound;
+    }
+
+    return vec3(1.0, 2.0, 3.0);
+}
+
+class Mover : ScriptableComponent {
+    @edit var Cue: SoundAsset;
+    @net var Speed = 1.0;
+
+    @rpc(Server) fn SetSpeed(value: float) {
+        Speed = value;
+    }
+
+    async fn Fetch(): Result<int> {
+        await NextTick();
+        return 1;
+    }
+
+    async fn Check(n: int): Result<void> {
+        if (n < 0) {
+            return Error.InvalidArgument;
+        }
+
+        return;
+    }
+
+    async fn Run(): Result<int> {
+        let n = try await Fetch();
+        try await Check(n);
+        await All(NextTick(), Delay(0.5, Clock.Game));
+        return n + 1;
+    }
+
+    @skipWhileBusy
+    on Owner.Damaged(amount: float) {
+        var left = 3;
+        while (left > 0) {
+            let loop = World.Audio.StartLoop(Cue);
+            left -= 1;
+            if (amount > 5.0) {
+                loop?.Pause();
+                break;
+            }
+
+            await Delay(0.1, Clock.Game);
+        }
+
+        Server.SetSpeed(amount);
+        emit Owner.Pushed(Owner);
+    }
+}

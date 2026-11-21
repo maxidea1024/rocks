@@ -1044,6 +1044,7 @@ uint32 TypeChecker::ResolveEmit(const CheckContext& context, uint32 node) noexce
                            : FindExtensionEvent(context.module, target, name, &hidden, &other);
     if (extension != NoSymbol) {
         binder_.NoteUse(context.module, extension);
+        binder_.SetNodeSymbol(context.module, last, extension); // IR 내림이 읽는다
         if (other != NoModule) {
             ReportAmbiguousExtension(context, last, extension, other);
             return NoSignature;
