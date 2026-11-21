@@ -29,6 +29,9 @@ internal sealed class SdkAssembly : IDisposable
     private readonly SortedDictionary<NativeConfiguration, SdkConfiguration> configurations = [];
     private NativeToolchain? toolchain;
     private EngineVersion? engineVersion;
+    // 첫 구성 빌드가 시작할 때의 엔진 입력(규칙·소스) snapshot이다. 모든 구성이 같은 입력으로 빌드됐어야 게시한다.
+    private SourceSnapshot? source;
+    private NativeConfiguration firstConfiguration;
 
     /// <summary>
     /// 대상 디렉터리 옆에 stage를 만든다. 대상은 새 경로여야 하고 파일시스템 루트가 아니어야 한다.
@@ -55,12 +58,19 @@ internal sealed class SdkAssembly : IDisposable
     public string Destination { get; }
 
     /// <summary>
-    /// 빌드한 구성 하나를 더한다. 모든 구성은 같은 도구 모음(플랫폼·ABI)과 엔진 버전이어야 한다.
+    /// 빌드한 구성 하나를 더한다. 모든 구성은 같은 도구 모음(플랫폼·ABI)과 엔진 버전이어야 하고, 같은 엔진 입력으로 빌드됐어야 한다
+    /// (configurationSource는 그 구성 빌드가 시작할 때의 저장소 snapshot — build-evidence의 sourceBefore).
     /// </summary>
     public async Task AddConfigurationAsync(string root, NativeConfiguration configuration, NativeToolchain configurationToolchain,
-        EngineVersion configurationEngine, IReadOnlyList<NativeModuleInput> modules, IReadOnlyList<MetadataModule> metadata, NativeBuildResult build,
-        CancellationToken cancellationToken)
+        EngineVersion configurationEngine, SourceSnapshot configurationSource, IReadOnlyList<NativeModuleInput> modules,
+        IReadOnlyList<MetadataModule> metadata, NativeBuildResult build, CancellationToken cancellationToken)
     {
+        if (source is not null && source != configurationSource)
+        {
+            throw new InvalidOperationException($"The engine sources or rules changed between the {firstConfiguration} and {configuration} SDK builds; " +
+                "export the SDK again from an unchanged working copy.");
+        }
+
         if (configurationEngine.IsEmpty)
         {
             throw new ArgumentException("SDK export requires the engine version (0.0.x is the empty value).", nameof(configurationEngine));
@@ -102,8 +112,14 @@ internal sealed class SdkAssembly : IDisposable
             }
         }
 
+        if (source is null)
+        {
+            firstConfiguration = configuration;
+        }
+
         toolchain ??= configurationToolchain;
         engineVersion ??= configurationEngine;
+        source ??= configurationSource;
         cancellationToken.ThrowIfCancellationRequested();
         await Task.CompletedTask;
     }
@@ -169,12 +185,20 @@ internal sealed class SdkAssembly : IDisposable
         }
     }
 
-    /// <summary>manifest를 쓰고 stage를 대상으로 옮긴다.</summary>
-    public void Publish()
+    /// <summary>
+    /// manifest를 쓰고 stage를 대상으로 옮긴다. root가 있으면 저장소의 엔진 입력이 첫 구성 빌드 시작 때와 같은지 먼저 본다(마지막 구성 빌드 중의
+    /// 변경도 잡는다).
+    /// </summary>
+    public void Publish(string? root = null)
     {
         if (configurations.Count == 0 || toolchain is null || engineVersion is not EngineVersion version)
         {
             throw new InvalidOperationException("The SDK has no configuration to publish.");
+        }
+
+        if (root is not null && SourceSnapshot.Capture(root) != source)
+        {
+            throw new InvalidOperationException("The engine sources or rules changed during the SDK export; export the SDK again from an unchanged working copy.");
         }
 
         RequireSameSharedFiles();

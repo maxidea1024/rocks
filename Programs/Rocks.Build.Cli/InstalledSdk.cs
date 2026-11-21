@@ -358,7 +358,9 @@ public static class InstalledSdk
             Console.WriteLine(unverified);
         }
 
-        var manifest = Verify(sdk, configuration, toolchain);
+        // SDK 내용은 빌드마다 한 번만 해시한다. 끝 검사는 그때 기록한 (크기, 수정 시각)과 파일 목록을 다시 본다(Docs/Design/ProjectFiles.ko.md 10.3절).
+        var verified = VerifyStamped(sdk, configuration, toolchain);
+        var manifest = verified.Manifest;
         SdkModule[] sdkModules = manifest.Configurations[configuration.ToString()].Modules;
         Directory.CreateDirectory(output);
         Directory.CreateDirectory(Path.Combine(output, "Generated"));
@@ -491,15 +493,24 @@ public static class InstalledSdk
         BuildCommand.Print(result);
         // 최종 검사 전 성공 보고서를 게시하면 SDK/입력 변경에 따른 실패가 PASS로 보일 수 있다.
         PublishVerifiedGameResult(sdk, configuration, toolchain, project, output, initialProject,
-            initialDeclared, declaredInputs, result);
+            initialDeclared, declaredInputs, result, verified);
         return result.Succeeded ? 0 : 1;
     }
 
     public static void PublishVerifiedGameResult(string sdk, NativeConfiguration configuration, NativeToolchain toolchain,
         string project, string output, string initialProject, string initialDeclared,
-        IReadOnlyList<string> declaredInputs, NativeBuildResult result)
+        IReadOnlyList<string> declaredInputs, NativeBuildResult result, VerifiedSdk? verified = null)
     {
-        Verify(sdk, configuration, toolchain);
+        // 빌드 시작에 검증한 SDK면 그 뒤 바뀌지 않았는지만 본다(파일 목록 + 크기·수정 시각). 없으면 전체를 검증한다.
+        if (verified is null)
+        {
+            Verify(sdk, configuration, toolchain);
+        }
+        else
+        {
+            RequireUnchanged(sdk, verified);
+        }
+
         if (GameInputSnapshot.Capture(project, output, sdk, []) != initialProject ||
             GameInputSnapshot.Capture(project, output, sdk, declaredInputs) != initialDeclared)
         {
@@ -520,7 +531,31 @@ public static class InstalledSdk
             : null;
     }
 
-    public static SdkManifest Verify(string sdk, NativeConfiguration configuration, NativeToolchain toolchain)
+    /// <summary>검증한 SDK와 그때 본 파일의 (크기, 수정 시각)이다. 빌드 끝 검사가 다시 해시하지 않고 변경을 잡는 데 쓴다.</summary>
+    public sealed record VerifiedSdk(SdkManifest Manifest, IReadOnlyDictionary<string, (long Length, DateTime Written)> Stamp);
+
+    public static SdkManifest Verify(string sdk, NativeConfiguration configuration, NativeToolchain toolchain) =>
+        VerifyStamped(sdk, configuration, toolchain).Manifest;
+
+    // 빌드 시작 뒤 SDK가 바뀌었으면 거부한다. 파일 목록은 전체를, 크기·수정 시각은 시작 때 해시한 파일(한 벌 + 선택 구성)을 본다.
+    private static void RequireUnchanged(string sdk, VerifiedSdk verified)
+    {
+        if (!Inventory(sdk).SetEquals(verified.Manifest.Files.Keys))
+        {
+            throw new InvalidDataException("SDK file inventory changed. Re-export instead of adding/removing installed headers or tools.");
+        }
+
+        foreach ((string relative, (long length, DateTime written)) in verified.Stamp)
+        {
+            var file = new FileInfo(SafePath(sdk, relative));
+            if (!file.Exists || file.Length != length || file.LastWriteTimeUtc != written)
+            {
+                throw new InvalidDataException($"SDK file changed or missing: {relative}");
+            }
+        }
+    }
+
+    public static VerifiedSdk VerifyStamped(string sdk, NativeConfiguration configuration, NativeToolchain toolchain)
     {
         string manifestText = File.ReadAllText(Path.Combine(sdk, "rocks-sdk.json"));
         // 버전을 먼저 본다. 다른 버전의 manifest는 칸이 달라(예: 7의 ReflectionOnlyLibrary) 엄격한 역직렬화가 버전 불일치 안내
@@ -582,29 +617,7 @@ public static class InstalledSdk
         var configurationFiles = selected.Files.ToHashSet(StringComparer.Ordinal);
         SdkModule[] modules = selected.Modules;
 
-        var actual = new HashSet<string>(StringComparer.Ordinal);
-        void Inventory(string directory)
-        {
-            foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
-            {
-                if ((File.GetAttributes(entry) & FileAttributes.ReparsePoint) != 0)
-                {
-                    throw new InvalidDataException("SDK inventory must not contain linked files/directories.");
-                }
-
-                if (Directory.Exists(entry))
-                {
-                    Inventory(entry);
-                }
-                else if (Path.GetRelativePath(sdk, entry) != "rocks-sdk.json")
-                {
-                    actual.Add(Path.GetRelativePath(sdk, entry).Replace('\\', '/'));
-                }
-            }
-        }
-
-        Inventory(sdk);
-        if (!actual.SetEquals(manifest.Files.Keys))
+        if (!Inventory(sdk).SetEquals(manifest.Files.Keys))
         {
             throw new InvalidDataException("SDK file inventory changed. Re-export instead of adding/removing installed headers or tools.");
         }
@@ -614,9 +627,20 @@ public static class InstalledSdk
             throw new InvalidDataException("SDK contains duplicate module names.");
         }
 
-        foreach (var pair in manifest.Files)
+        // 내용 해시는 한 벌 파일과 요청 구성의 파일만 본다(다른 구성의 라이브러리는 이 빌드가 읽지 않는다). 파일 목록은 위에서 전체를 봤다.
+        // 크기·수정 시각을 해시 전에 기록해, 해시 뒤의 변경도 빌드 끝 검사가 잡는다.
+        var stamp = new Dictionary<string, (long Length, DateTime Written)>(StringComparer.Ordinal);
+        foreach (var pair in manifest.Files.Where(pair => !pair.Key.StartsWith(SdkAssembly.ConfigurationsDirectory + "/", StringComparison.Ordinal) ||
+            configurationFiles.Contains(pair.Key)))
         {
-            if (!File.Exists(SafePath(sdk, pair.Key)) || Hashing.Sha256File(SafePath(sdk, pair.Key)) != pair.Value)
+            var file = new FileInfo(SafePath(sdk, pair.Key));
+            if (!file.Exists)
+            {
+                throw new InvalidDataException($"SDK file changed or missing: {pair.Key}");
+            }
+
+            stamp[pair.Key] = (file.Length, file.LastWriteTimeUtc);
+            if (Hashing.Sha256File(file.FullName) != pair.Value)
             {
                 throw new InvalidDataException($"SDK file changed or missing: {pair.Key}");
             }
@@ -669,7 +693,36 @@ public static class InstalledSdk
             }
         }
 
-        return manifest;
+        return new VerifiedSdk(manifest, stamp);
+    }
+
+    // manifest를 뺀 SDK 파일의 상대 경로 전체다. 링크(symlink·junction)는 거부한다. OneDrive 자리 표시자·중복 제거 파일처럼 링크가 아닌 reparse
+    // point는 보통 파일이다(Docs/Design/ProjectFiles.ko.md 10.6절).
+    private static HashSet<string> Inventory(string sdk)
+    {
+        var actual = new HashSet<string>(StringComparer.Ordinal);
+        void Visit(string directory)
+        {
+            foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
+            {
+                if (FileLinks.IsLink(entry))
+                {
+                    throw new InvalidDataException("SDK inventory must not contain linked files/directories.");
+                }
+
+                if (Directory.Exists(entry))
+                {
+                    Visit(entry);
+                }
+                else if (Path.GetRelativePath(sdk, entry) != "rocks-sdk.json")
+                {
+                    actual.Add(Path.GetRelativePath(sdk, entry).Replace('\\', '/'));
+                }
+            }
+        }
+
+        Visit(sdk);
+        return actual;
     }
 
     // manifest가 가진 구성 이름 목록이다(오류 안내용).
@@ -712,9 +765,9 @@ public static class InstalledSdk
         Directory.CreateDirectory(destination);
         foreach (var entry in Directory.EnumerateFileSystemEntries(source))
         {
-            if ((File.GetAttributes(entry) & FileAttributes.ReparsePoint) != 0)
+            if (FileLinks.IsLink(entry))
             {
-                throw new IOException("SDK packaging does not accept symbolic links/reparse points.");
+                throw new IOException("SDK packaging does not accept symbolic links or junctions.");
             }
 
             var target = Path.Combine(destination, Path.GetFileName(entry));

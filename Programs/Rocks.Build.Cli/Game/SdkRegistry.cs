@@ -37,8 +37,15 @@ internal static class SdkRegistries
     /// <summary>등록부 JSON 파일을 대신 지정하는 환경 변수다.</summary>
     public const string OverrideVariable = "ROCKS_SDK_REGISTRY";
 
-    // 등록·해제의 읽기-고치기-쓰기를 직렬화하는 이름 있는 mutex다(같은 사용자 세션의 두 CLI가 서로의 항목을 지우지 않게).
-    private const string LockName = @"Local\Rocks.SdkRegistry";
+    // 레지스트리 등록부의 읽기-고치기-쓰기를 직렬화하는 mutex 이름 접두다. Global\ + 사용자 SID라 같은 사용자의 모든 로그온 세션(콘솔·SSH·서비스)
+    // 사이에서 배제하고 다른 사용자와는 겹치지 않는다(Local\은 로그온 세션 단위다).
+    private const string RegistryLockPrefix = @"Global\Rocks.SdkRegistry.";
+
+    // JSON 등록부 잠금 파일을 다시 열어 보는 간격이다. 순서는 잠금이 정하고 간격은 응답성만 정한다.
+    private static readonly TimeSpan LockRetry = TimeSpan.FromMilliseconds(50);
+
+    // JSON 등록부 잠금을 기다리는 상한이다. 넘으면 잠금 파일을 쥔 프로세스를 알리고 실패한다(무한히 멈추지 않는다).
+    private static readonly TimeSpan LockLimit = TimeSpan.FromMinutes(2);
 
     public static ISdkRegistry Default() => Environment.GetEnvironmentVariable(OverrideVariable) is { Length: > 0 } file
         ? new JsonSdkRegistry(System.IO.Path.GetFullPath(file))
@@ -61,10 +68,46 @@ internal static class SdkRegistries
     internal static string? PathProblem(string id, string path) =>
         System.IO.Path.IsPathFullyQualified(path) ? null : $"registry entry {id}: '{path}' is not an absolute path; ignored";
 
-    /// <summary>등록부 잠금 안에서 읽기-고치기-쓰기를 한다.</summary>
-    internal static T Exclusive<T>(Func<T> change)
+    /// <summary>
+    /// JSON 등록부 잠금 안에서 읽기-고치기-쓰기를 한다. 잠금은 <c>&lt;등록부&gt;.lock</c>을 공유 없이(<see cref="FileShare.None"/>) 연 핸들이다 —
+    /// 프로세스·세션·호스트와 무관하게 같은 파일을 쓰는 모든 CLI 사이에서 배제한다(macOS·Linux의 이름 있는 mutex는 세션 범위다). 프로세스가
+    /// 죽으면 운영체제가 핸들을 닫아 잠금이 풀린다. 잠금 파일은 지우지 않는다(지우면 다른 프로세스가 연 다른 inode와 갈린다).
+    /// </summary>
+    internal static T ExclusiveFile<T>(string file, Func<T> change)
     {
-        using var mutex = new Mutex(false, LockName);
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(file)!);
+        string lockFile = file + ".lock";
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        FileStream? held = null;
+        while (held is null)
+        {
+            try
+            {
+                held = new FileStream(lockFile, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException) when (waited.Elapsed < LockLimit)
+            {
+                Thread.Sleep(LockRetry);
+            }
+            catch (IOException error)
+            {
+                throw new IOException($"The SDK registry lock {lockFile} is held by another process. Next: let that sdk-register or sdk-unregister finish, " +
+                    "then run the command again.", error);
+            }
+        }
+
+        using (held)
+        {
+            return change();
+        }
+    }
+
+    /// <summary>레지스트리 등록부 잠금(사용자 SID 이름의 전역 mutex) 안에서 읽기-고치기-쓰기를 한다.</summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    internal static T ExclusiveRegistry<T>(Func<T> change)
+    {
+        using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+        using var mutex = new Mutex(false, RegistryLockPrefix + identity.User!.Value);
         try
         {
             mutex.WaitOne();
@@ -120,7 +163,7 @@ internal sealed class WindowsSdkRegistry(string subKey) : ISdkRegistry
     public string Register(string path)
     {
         string full = PathSpelling.OnDisk(System.IO.Path.GetFullPath(path));
-        return SdkRegistries.Exclusive(() =>
+        return SdkRegistries.ExclusiveRegistry(() =>
         {
             if (List().FirstOrDefault(entry => SdkRegistries.SamePath(entry.Path, full)) is SdkRegistration existing)
             {
@@ -134,7 +177,7 @@ internal sealed class WindowsSdkRegistry(string subKey) : ISdkRegistry
         });
     }
 
-    public bool Unregister(string idOrPath) => SdkRegistries.Exclusive(() =>
+    public bool Unregister(string idOrPath) => SdkRegistries.ExclusiveRegistry(() =>
     {
         // 형식이 틀린 값도 ID로는 지울 수 있다(List가 뺀 값).
         using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(subKey, writable: true);
@@ -179,7 +222,7 @@ internal sealed class JsonSdkRegistry(string file) : ISdkRegistry
     public string Register(string path)
     {
         string full = PathSpelling.OnDisk(System.IO.Path.GetFullPath(path));
-        return SdkRegistries.Exclusive(() =>
+        return SdkRegistries.ExclusiveFile(file, () =>
         {
             (JsonObject root, JsonArray sdks) = LoadForWrite();
             if (Entries(sdks, null).FirstOrDefault(entry => SdkRegistries.SamePath(entry.Path, full)) is SdkRegistration existing)
@@ -194,7 +237,7 @@ internal sealed class JsonSdkRegistry(string file) : ISdkRegistry
         });
     }
 
-    public bool Unregister(string idOrPath) => SdkRegistries.Exclusive(() =>
+    public bool Unregister(string idOrPath) => SdkRegistries.ExclusiveFile(file, () =>
     {
         if (!File.Exists(file))
         {
@@ -223,7 +266,8 @@ internal sealed class JsonSdkRegistry(string file) : ISdkRegistry
     {
         try
         {
-            if (JsonNode.Parse(File.ReadAllText(file)) is not JsonObject root)
+            // 중복 키는 JsonException으로 거부한다(허용하면 JsonObject 접근이 ArgumentException을 던져 너그러운 읽기가 죽는다).
+            if (JsonNode.Parse(File.ReadAllText(file), documentOptions: new JsonDocumentOptions { AllowDuplicateProperties = false }) is not JsonObject root)
             {
                 return (null, null, $"{file}: not a JSON object");
             }

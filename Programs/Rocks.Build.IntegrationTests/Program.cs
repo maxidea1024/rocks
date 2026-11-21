@@ -41,6 +41,13 @@ if (args.Length == 1 && args[0] == "--ide-scripts")
     return 0;
 }
 
+// 등록부 교차 프로세스 시험의 자식이다: --registry-writer json|windows <파일 또는 하위 키> <접두> <개수>.
+if (args.Length == 5 && args[0] == "--registry-writer")
+{
+    GameProjectTests.WriteRegistry(args[1], args[2], args[3], int.Parse(args[4], System.Globalization.CultureInfo.InvariantCulture));
+    return 0;
+}
+
 // 게임 프로젝트 선행 작업(SDK 연결·등록부, snapshot·규칙 탐색 제외, 게임 clean) 시험만 돈다(16절 V8·V9).
 if (args.Length == 1 && args[0] == "--game-project")
 {
@@ -1325,23 +1332,52 @@ try
     Require(trailingReport.Succeeded && trailingReport.ExecutedActions == 0,
         $"A trailing-separator NativeOutput did not reuse the same output ({trailingReport.ExecutedActions} actions)");
     var trailingSdk = Path.Combine(fixture, "installed-trailing");
+    // --register on은 게시한 뒤 등록부에 넣는다(Docs/Design/ProjectFiles.ko.md 10.2절).
     var trailingExport = await Cli("sdk", "--root", root, "--target", "Engine", "--configurations", "Debug",
-        "--destination", trailingSdk + Path.DirectorySeparatorChar);
+        "--destination", trailingSdk + Path.DirectorySeparatorChar, "--register", "on");
     Require(trailingExport.ExitCode == 0 && File.Exists(Path.Combine(trailingSdk, "rocks-sdk.json")) &&
         !Directory.EnumerateDirectories(trailingSdk, "*.staging-*").Any(),
         "SDK export to a trailing-separator destination failed: " + trailingExport.StdOut + trailingExport.StdErr);
+    Require(new JsonSdkRegistry(registryFile).List().Any(entry => string.Equals(Path.GetFullPath(entry.Path), Path.GetFullPath(trailingSdk),
+        StringComparison.OrdinalIgnoreCase)), "sdk --register on did not register the SDK");
     Pass("trailing-separator-directory-arguments", timer.Elapsed);
+
+    // 다중 구성 내보내기의 입력 거부와 실패 원자성(10.3절): sdk는 --configuration을 받지 않고, 구성이 둘 이상이면 --output을 받지 않는다. 앞
+    // 구성을 합친 뒤 실패하면(시험 hook) 대상도 stage도 남지 않는다.
+    timer.Restart();
+    var rejectedSdk = Path.Combine(fixture, "installed-rejected");
+    var singleOption = await Tool("sdk", "--root", root, "--target", "Engine", "--configuration", "Debug", "--destination", rejectedSdk);
+    Require(singleOption.ExitCode != 0 && singleOption.StdErr.Contains("not --configuration", StringComparison.Ordinal),
+        "sdk accepted --configuration: " + singleOption.StdOut + singleOption.StdErr);
+    var sharedOutput = await Tool("sdk", "--root", root, "--target", "Engine", "--configurations", "Debug+Release", "--output",
+        Path.Combine(root, "out", "sdk-shared-output"), "--destination", rejectedSdk);
+    Require(sharedOutput.ExitCode != 0 && sharedOutput.StdErr.Contains("only with a single SDK configuration", StringComparison.Ordinal),
+        "sdk accepted --output with two configurations: " + sharedOutput.StdOut + sharedOutput.StdErr);
+    var failingEnvironment = new Dictionary<string, string?>(cliEnvironment, cliEnvironment.Comparer)
+    {
+        ["ROCKS_SDK_EXPORT_TEST"] = "1",
+        ["ROCKS_SDK_EXPORT_TEST_FAIL_AFTER"] = "Debug"
+    };
+    var interrupted = await ProcessRunner.RunAsync(new("dotnet", [cli, "sdk", "--root", root, "--target", "Engine", "--configurations", "Debug+Release",
+        "--destination", rejectedSdk, "--compiler", toolchain.CompilerPath], root, failingEnvironment, Timeout: TimeSpan.FromMinutes(20)));
+    Require(interrupted.ExitCode != 0 && interrupted.StdErr.Contains("Test failure after the Debug SDK configuration", StringComparison.Ordinal) &&
+        !Directory.Exists(rejectedSdk) && !Directory.EnumerateDirectories(fixture, "installed-rejected.staging-*").Any(),
+        "A failure after the first SDK configuration left an SDK or a stage: " + interrupted.StdOut + interrupted.StdErr);
+    Pass("sdk-export-rejections-and-atomicity", timer.Elapsed);
 
     // Release SDK: 엔진 라이브러리는 ThinLTO bitcode이고, 게임 Release가 같은 LLVM으로 link해 실행된다.
     timer.Restart();
     var releaseSdk = Path.Combine(fixture, "installed-release");
-    // --register on은 내보낸 뒤 등록부에 넣는다(Docs/Design/ProjectFiles.ko.md 10.2절).
     // 두 구성 SDK(Docs/Design/ProjectFiles.ko.md 10.3절, V10): Debug와 Release를 한 SDK로 조립한다(Debug 엔진은 앞에서 빌드해 0 action이다).
-    var releaseExport = await Cli("sdk", "--root", root, "--target", "Engine", "--configurations", "Debug,Release", "--destination", releaseSdk,
-        "--register", "on");
-    Require(releaseExport.ExitCode == 0, "Release SDK export failed: " + releaseExport.StdErr);
-    Require(new JsonSdkRegistry(registryFile).List().Any(entry => string.Equals(Path.GetFullPath(entry.Path), Path.GetFullPath(releaseSdk),
-        StringComparison.OrdinalIgnoreCase)), "sdk --register on did not register the SDK");
+    // 문서의 명령 그대로 pwsh에서 Rocks.proj /t:InstalledSdk와 -p:SdkConfigurations=Debug+Release로 부른다(MSBuild -p:는 쉼표·세미콜론을
+    // 속성 구분자로 읽는다).
+    static string Quoted(string value) => "'" + value.Replace("'", "''", StringComparison.Ordinal) + "'";
+    var releaseExport = await ProcessRunner.RunAsync(new("pwsh", ["-NoLogo", "-NoProfile", "-Command",
+        $"& dotnet msbuild {Quoted(Path.Combine(root, "Rocks.proj"))} -t:InstalledSdk -p:SdkConfigurations=Debug+Release -p:SdkTarget=Engine " +
+        $"{Quoted("-p:SdkDestination=" + releaseSdk)} {Quoted("-p:Compiler=" + toolchain.CompilerPath)} -nologo; exit $LASTEXITCODE"], root, cliEnvironment,
+        Timeout: TimeSpan.FromMinutes(30)));
+    File.AppendAllText(Path.Combine(reports, "sdk-integration.log"), "msbuild InstalledSdk Debug+Release\n" + releaseExport.StdOut + releaseExport.StdErr + "\n");
+    Require(releaseExport.ExitCode == 0, "Release SDK export through Rocks.proj failed: " + releaseExport.StdOut + releaseExport.StdErr);
     static bool ContainsBitcode(string path)
     {
         byte[] bytes = File.ReadAllBytes(path);
@@ -1381,7 +1417,8 @@ try
     // 등록부로 고를 때 구성도 본다(10.1절): 같은 엔진 패치의 Debug SDK와 Debug·Release SDK를 함께 등록하면 Release 빌드는 Release를 가진 SDK를
     // 모호함 없이 고르고(바로 앞에서 같은 SDK로 빌드했으므로 0 action이다), 둘 다 가진 Debug는 동률 오류다.
     timer.Restart();
-    Require((await Tool("sdk-register", "--sdk", sdk)).ExitCode == 0, "sdk-register of the Debug SDK failed");
+    Require((await Tool("sdk-register", "--sdk", sdk)).ExitCode == 0 && (await Tool("sdk-register", "--sdk", releaseSdk)).ExitCode == 0,
+        "sdk-register failed");
     var chosen = await Cli("game", "--project", game, "--configuration", "Release");
     var chosenReport = JsonSerializer.Deserialize<NativeBuildResult>(File.ReadAllText(Path.Combine(GameProjectLayout.DefaultOutput(game, "Game",
         NativeConfiguration.Release), "action-report.json")))!;
@@ -1391,8 +1428,8 @@ try
     Require(tied.ExitCode != 0 && (tied.StdOut + tied.StdErr).Contains("all fit engineVersion", StringComparison.Ordinal),
         "Two registered SDKs with Debug at the same patch must be ambiguous: " + tied.StdOut + tied.StdErr);
 
-    Require((await Tool("sdk-unregister", "--sdk", sdk)).ExitCode == 0 && (await Tool("sdk-unregister", "--sdk", releaseSdk)).ExitCode == 0,
-        "sdk-unregister failed");
+    Require((await Tool("sdk-unregister", "--sdk", sdk)).ExitCode == 0 && (await Tool("sdk-unregister", "--sdk", releaseSdk)).ExitCode == 0 &&
+        (await Tool("sdk-unregister", "--sdk", trailingSdk)).ExitCode == 0, "sdk-unregister failed");
     Pass("sdk-registry-picks-by-configuration", timer.Elapsed);
     success = true;
     return 0;

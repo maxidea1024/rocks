@@ -5,8 +5,9 @@
     <RocksTarget Condition="'$(RocksTarget)' == ''">Foundation</RocksTarget>
     <SdkTarget Condition="'$(SdkTarget)' == ''">Engine</SdkTarget>
     <GameTarget Condition="'$(GameTarget)' == ''">Game</GameTarget>
-    <!-- Configurations of the installed SDK (Docs/Design/ProjectFiles.ko.md 10.3), separated by semicolons: -p:SdkConfigurations="Debug;Release". -->
-    <SdkConfigurations Condition="'$(SdkConfigurations)' == ''">Debug;Development;Release</SdkConfigurations>
+    <!-- Configurations of the installed SDK (Docs/Design/ProjectFiles.ko.md 10.3), joined with '+': -p:SdkConfigurations=Debug+Release.
+         MSBuild reads ',' and ';' in -p: as property separators. -->
+    <SdkConfigurations Condition="'$(SdkConfigurations)' == ''">Debug+Development+Release</SdkConfigurations>
     <Jobs Condition="'$(Jobs)' == ''">8</Jobs>
     <!-- Directory values passed in quotes get a doubled trailing backslash. Passing a drive root (Z:\) as "Z:\" makes \" read as a quote escape
          (CommandLineToArgvW rules), and all following arguments join into one argument. "Z:\\" reads as a single Z:\. -->
@@ -59,8 +60,9 @@
     <Exec Command="$(Tool) bootstrap --root &quot;$(RocksRoot).&quot;" />
   </Target>
   <Target Name="InstalledSdk" DependsOnTargets="BootstrapTools">
+    <Warning Condition="'$(Configuration)' != 'Debug'" Text="InstalledSdk ignores Configuration=$(Configuration); the SDK configurations come from SdkConfigurations ($(SdkConfigurations))." />
     <Error Condition="'$(SdkDestination)' == ''" Text="SdkDestination is required; use a new versioned directory." />
-    <Exec Command="$(Tool) sdk --root &quot;$(RocksRoot).&quot; --configurations &quot;$(SdkConfigurations)&quot; --jobs $(Jobs) $(CompilerArgument) $(OutputArgument) $(PlatformArgument) $(BuildModeArguments) --target $(SdkTarget) --destination &quot;$(SdkDestinationText)&quot;" />
+    <Exec Command="$(Tool) sdk --root &quot;$(RocksRoot).&quot; --configurations $(SdkConfigurations) --jobs $(Jobs) $(CompilerArgument) $(OutputArgument) $(PlatformArgument) $(BuildModeArguments) --target $(SdkTarget) --destination &quot;$(SdkDestinationText)&quot;" />
   </Target>
   <Target Name="Game" DependsOnTargets="BootstrapTools">
     <Error Condition="'$(GameDirectory)' == ''" Text="GameDirectory is required." />
