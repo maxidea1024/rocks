@@ -440,7 +440,19 @@ internal static class GameProjectTests
         Write(failed, "game-build-evidence.json", "{}");
         Require(await CleanCommand.RunAsync(Options(("configuration", "Development")), CancellationToken.None) == 0 &&
             Directory.EnumerateFileSystemEntries(failed).Select(Path.GetFileName).SequenceEqual([".rocks-invocation.lock"]),
-            "an output with only the invocation lock is a Rocks output");
+            "an output with the invocation lock and a build record is a Rocks output");
+        // 호출 잠금만 있고 실행 기록이 없으면(예: 생성 영역 밖의 다른 잠금 사용자) 거부한다.
+        Write(failed, "kept.txt", "x");
+        await Expect(() => CleanCommand.RunAsync(Options(("configuration", "Development")), CancellationToken.None), "has no .native-build.lock");
+        // 프로젝트 파일 생성 영역은 호출 잠금과 실행 기록이 있어도 늘 거부한다(게임·엔진 모두).
+        string projectFiles = Path.Combine(project, "out", "ProjectFiles");
+        Write(projectFiles, ".rocks-invocation.lock", "");
+        Write(projectFiles, "action-report.json", "{}");
+        Write(projectFiles, "Game.vcxproj", "<Project />");
+        await Expect(() => CleanCommand.RunAsync(Options(("output", projectFiles)), CancellationToken.None), "generated project files area");
+        await Expect(() => CleanCommand.RunAsync(Options(("output", Path.Combine(projectFiles, "Programs"))), CancellationToken.None), "generated project files area");
+        await Expect(() => CleanCommand.CleanAsync(root, Path.Combine(root, "out", "ProjectFiles"), CancellationToken.None), "generated project files area");
+        Require(File.Exists(Path.Combine(projectFiles, "Game.vcxproj")), "clean touched the project files area");
 
         await Expect(() => CleanCommand.RunAsync(Options(("output", Path.Combine(project, "out"))), CancellationToken.None), "only build outputs under");
         await Expect(() => CleanCommand.RunAsync(Options(("output", Path.Combine(project, "Source"))), CancellationToken.None), "only build outputs under");
@@ -518,6 +530,11 @@ internal static class GameProjectTests
         catch (IOException error) when (error.Message.Contains("already exists", StringComparison.Ordinal))
         {
         }
+
+        // 게임 프로젝트 파일의 구성은 SDK 구성 ∩ IDE 구성이다(구성 순서, Coverage는 빠진다).
+        Require(GameProjectFiles.Configurations(["Release", "Coverage", "Asan", "Development"])
+            .SequenceEqual([NativeConfiguration.Development, NativeConfiguration.Release, NativeConfiguration.Asan]) &&
+            GameProjectFiles.Configurations(["Coverage"]).Length == 0, "game project files configuration intersection");
 
         // 구성 목록: 쉼표·세미콜론, 구성 순서로 정렬, 이름은 정확히, 중복·빈 칸 거부.
         Require(SdkExportCommand.Parse("Release;Debug").SequenceEqual([NativeConfiguration.Debug, NativeConfiguration.Release]) &&

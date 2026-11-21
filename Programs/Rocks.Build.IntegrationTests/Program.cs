@@ -57,8 +57,22 @@ if (args.Length == 3 && args[0] == "--game-project-files")
     }
 
     var gameToolchain = await NativeToolchains.DiscoverAsync();
-    await GameProjectFilesTests.RunAsync(Path.GetFullPath("out/dotnet/bin/Rocks.Build.Cli/Debug/net10.0/Rocks.Build.Cli.dll"), Path.GetFullPath(args[1]),
-        Path.GetFullPath(args[2]), gameToolchain.CompilerPath, gameToolchain.Environment);
+    // 사용자 등록부를 읽지 않게 빈 시험 등록부를 준다(본 흐름과 같다).
+    string isolated = Directory.CreateTempSubdirectory("rocks-game-project-files-registry-").FullName;
+    try
+    {
+        var gameEnvironment = new Dictionary<string, string?>(gameToolchain.Environment, StringComparer.OrdinalIgnoreCase)
+        {
+            [SdkRegistries.OverrideVariable] = Path.Combine(isolated, "Sdks.json")
+        };
+        await GameProjectFilesTests.RunAsync(Path.GetFullPath("out/dotnet/bin/Rocks.Build.Cli/Debug/net10.0/Rocks.Build.Cli.dll"), Path.GetFullPath(args[1]),
+            Path.GetFullPath(args[2]), gameToolchain.CompilerPath, gameEnvironment);
+    }
+    finally
+    {
+        Directory.Delete(isolated, recursive: true);
+    }
+
     return 0;
 }
 

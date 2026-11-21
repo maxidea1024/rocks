@@ -37,9 +37,15 @@ internal static class SdkRegistries
     /// <summary>등록부 JSON 파일을 대신 지정하는 환경 변수다.</summary>
     public const string OverrideVariable = "ROCKS_SDK_REGISTRY";
 
-    // 레지스트리 등록부의 읽기-고치기-쓰기를 직렬화하는 mutex 이름 접두다. Global\ + 사용자 SID라 같은 사용자의 모든 로그온 세션(콘솔·SSH·서비스)
-    // 사이에서 배제하고 다른 사용자와는 겹치지 않는다(Local\은 로그온 세션 단위다).
-    private const string RegistryLockPrefix = @"Global\Rocks.SdkRegistry.";
+    // 레지스트리 등록부의 잠금 파일 이름이다(%LOCALAPPDATA%\Rocks 아래, 확장자 .lock은 ExclusiveFile이 붙인다). 사용자 프로필 안이라 같은 사용자의
+    // 모든 로그온 세션(콘솔·SSH·서비스)이 같은 파일을 보고 다른 사용자와는 겹치지 않는다. 이름 있는 mutex는 Local\이 세션 단위이고, Global\은
+    // 다른 사용자·높은 무결성 프로세스가 먼저 만들면 열 수 없다.
+    private const string RegistryLockName = "SdkRegistry";
+
+    // Windows 공유 위반 HRESULT다(ERROR_SHARING_VIOLATION·ERROR_LOCK_VIOLATION). 잠금 파일을 다시 열어 보는 것은 이때뿐이다.
+    private const int SharingViolation = unchecked((int)0x80070020);
+
+    private const int LockViolation = unchecked((int)0x80070021);
 
     // JSON 등록부 잠금 파일을 다시 열어 보는 간격이다. 순서는 잠금이 정하고 간격은 응답성만 정한다.
     private static readonly TimeSpan LockRetry = TimeSpan.FromMilliseconds(50);
@@ -85,11 +91,11 @@ internal static class SdkRegistries
             {
                 held = new FileStream(lockFile, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             }
-            catch (IOException) when (waited.Elapsed < LockLimit)
+            catch (IOException error) when (Contended(error) && waited.Elapsed < LockLimit)
             {
                 Thread.Sleep(LockRetry);
             }
-            catch (IOException error)
+            catch (IOException error) when (Contended(error))
             {
                 throw new IOException($"The SDK registry lock {lockFile} is held by another process. Next: let that sdk-register or sdk-unregister finish, " +
                     "then run the command again.", error);
@@ -102,30 +108,14 @@ internal static class SdkRegistries
         }
     }
 
-    /// <summary>레지스트리 등록부 잠금(사용자 SID 이름의 전역 mutex) 안에서 읽기-고치기-쓰기를 한다.</summary>
-    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
-    internal static T ExclusiveRegistry<T>(Func<T> change)
-    {
-        using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
-        using var mutex = new Mutex(false, RegistryLockPrefix + identity.User!.Value);
-        try
-        {
-            mutex.WaitOne();
-        }
-        catch (AbandonedMutexException)
-        {
-            // 앞 소유자가 잠금을 쥔 채 끝났다. 쓰기는 원자적 파일 교체·레지스트리 값 하나라 반쯤 쓴 상태가 없으므로 이어서 쓴다.
-        }
+    // 다른 핸들이 잠금 파일을 쥐고 있어 열지 못했는가. Windows는 공유 위반 HRESULT, 그 밖은 flock 경합(.NET이 IOException으로 낸다)이다.
+    private static bool Contended(IOException error) => OperatingSystem.IsWindows()
+        ? error.HResult is SharingViolation or LockViolation
+        : error is not (FileNotFoundException or DirectoryNotFoundException or PathTooLongException);
 
-        try
-        {
-            return change();
-        }
-        finally
-        {
-            mutex.ReleaseMutex();
-        }
-    }
+    /// <summary>레지스트리 등록부 잠금(%LOCALAPPDATA%의 Rocks/SdkRegistry.lock) 안에서 읽기-고치기-쓰기를 한다.</summary>
+    internal static T ExclusiveRegistry<T>(Func<T> change) =>
+        ExclusiveFile(System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Rocks", RegistryLockName), change);
 }
 
 /// <summary>Windows 레지스트리 등록부다. 값 이름 = ID, 값 = SDK 경로(REG_SZ). 시험은 임시 하위 키를 준다.</summary>
