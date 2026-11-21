@@ -37,26 +37,39 @@ constexpr uint64 FreshId = 2850;
 constexpr bool OwnedCases[] = {true, false};
 constexpr bool FreshCases[] = {false, true};
 
-// 메모리 프로젝트 저장 장면이다: Base·Derived·Hero·Villain·Leaf 파일, 색인, 열린 집합, 잡은
-// 잠금(잠금 파일만 디스크의 임시 프로젝트에 둔다 — 메모리 루트는 디스크에 없다).
+// 저장 집합 설정이다(hook 표를 넘긴다 — 저장에 필수).
+EditorPackageSetConfig SaveConfig(AssetEnv& env, Project& project,
+                                  const AssetTypeHookTable& hooks) noexcept {
+    EditorPackageSetConfig config = Config(env, project);
+    config.hooks = &hooks;
+    return config;
+}
+
+// 저장 장면이다: 루트는 디스크 임시 디렉터리(잠금 파일 — 이 프로젝트의 잠금), Content는 메모리의
+// Base·Derived·Hero·Villain·Leaf 파일, 색인, 빈 hook 표로 연 집합, 잡은 잠금.
 struct SaveScene {
     SaveScene(AssetEnv& env, Sources& sources) noexcept
-        : project(env.allocator), lockProject("save-lock"), lockLayout(env.allocator),
-          set(env.allocator, Config(env, project)) {
+        : root("save-scene"), project(env.allocator, root.Root()), hooks(env.allocator, env.types),
+          set(env.allocator, SaveConfig(env, project, hooks)) {
         MemoryFileSystem& files = project.files;
-        ready =
-            project.ready && files.Ready() && files.AddFile("Base.rasset", sources.base.View()) &&
-            files.AddFile("Derived.rasset", sources.derived.View()) &&
-            files.AddFile("Hero.rasset", sources.hero.View()) &&
-            files.AddFile("Villain.rasset", sources.villain.View()) &&
-            files.AddFile("Leaf.rasset", sources.leaf.View()) && project.Rebuild() &&
-            lockProject.made && static_cast<bool>(lockLayout.Initialize(lockProject.Root())) &&
-            static_cast<bool>(lock.Acquire(lockLayout, 0)) && static_cast<bool>(set.Initialize());
+        ready = project.ready && files.Ready() &&
+                files.AddFile("Base.rasset", sources.base.View()) &&
+                files.AddFile("Derived.rasset", sources.derived.View()) &&
+                files.AddFile("Hero.rasset", sources.hero.View()) &&
+                files.AddFile("Villain.rasset", sources.villain.View()) &&
+                files.AddFile("Leaf.rasset", sources.leaf.View()) && project.Rebuild() &&
+                root.made && static_cast<bool>(lock.Acquire(project.layout, 0)) &&
+                static_cast<bool>(set.Initialize());
     }
 
+    // 같은 프로젝트·빈 hook 표의 다른 집합 설정이다.
+    EditorPackageSetConfig Config(AssetEnv& env) noexcept {
+        return SaveConfig(env, project, hooks);
+    }
+
+    TempProject root;
     Project project;
-    TempProject lockProject;
-    ProjectLayout lockLayout;
+    AssetTypeHookTable hooks;
     AssetDatabaseLock lock;
     EditorPackageSet set;
     bool ready = false;
@@ -293,7 +306,7 @@ TEST(EditorPackageSave_NewPackage) {
     CHECK(failure.code == AssetDiagnosticCode::None && failure.error != ErrorCode::None);
     CHECK(set.Count() == count + 1);
 
-    EditorPackageSet idle(env.allocator, Config(env, scene.project));
+    EditorPackageSet idle(env.allocator, scene.Config(env));
     CHECK(idle.Create(third.Value(), TestAssetType()).Error() == ErrorCode::InvalidArgument);
 }
 
@@ -376,12 +389,10 @@ TEST(EditorPackageSave_NewPackageRefusals) {
     REQUIRE(longSet.Initialize());
     auto big = ParseLogicalPath(env.allocator, "/Game/Big");
     REQUIRE(big);
-    auto bigMade = longSet.Create(big.Value(), TestAssetType());
-    REQUIRE(bigMade);
-    CHECK(longSet.Save(longSet.At(0).id, scene.lock, EditorSaveOptions{}, nullptr, &failure)
-              .Error() == ErrorCode::CapacityExceeded);
+    CHECK(longSet.Create(big.Value(), TestAssetType(), {}, &failure).Error() ==
+          ErrorCode::CapacityExceeded);
     CHECK(failure.code == AssetDiagnosticCode::InvalidPath);
-    CHECK(longSet.At(0).unsaved);
+    CHECK(longSet.Count() == 0);
 
     // 색인의 같은 경로 키 둘(AlreadyExists)은 만들기·첫 저장 모두 DuplicatePath, 색인의 같은 id
     // 둘은 DuplicateAssetId, 대상 Stat 실패는 진단 None과 그 오류, 열린 것 사이에 없는 id는
@@ -435,7 +446,7 @@ TEST(EditorPackageSave_Refusals) {
     MemoryFileSystem& files = scene.project.files;
     AssetDiagnostic failure;
     {
-        EditorPackageSet idle(env.allocator, Config(env, scene.project));
+        EditorPackageSet idle(env.allocator, scene.Config(env));
         CHECK(idle.Save(FixedId(HeroId), scene.lock, EditorSaveOptions{}, nullptr, &failure)
                   .Error() == ErrorCode::InvalidArgument);
     }
@@ -450,6 +461,25 @@ TEST(EditorPackageSave_Refusals) {
     CHECK(failure.code == AssetDiagnosticCode::None);
     CHECK(set.Save(FixedId(9999), scene.lock, EditorSaveOptions{}).Error() == ErrorCode::NotFound);
 
+    // hook 표 없는 집합·다른 프로젝트의 잠금은 InvalidArgument다(아무것도 쓰지 않는다).
+    {
+        EditorPackageSet noHooks(env.allocator, Config(env, scene.project));
+        REQUIRE(noHooks.Initialize());
+        REQUIRE(noHooks.Open(FixedId(LeafId)));
+        CHECK(noHooks.Save(FixedId(LeafId), scene.lock, EditorSaveOptions{}, nullptr, &failure)
+                  .Error() == ErrorCode::InvalidArgument);
+        TempProject elsewhere("save-elsewhere");
+        REQUIRE(elsewhere.made);
+        ProjectLayout elsewhereLayout(env.allocator);
+        REQUIRE(elsewhereLayout.Initialize(elsewhere.Root()));
+        AssetDatabaseLock foreign;
+        REQUIRE(foreign.Acquire(elsewhereLayout, 0));
+        CHECK(set.Save(FixedId(LeafId), foreign, EditorSaveOptions{}, nullptr, &failure).Error() ==
+              ErrorCode::InvalidArgument);
+        CHECK(failure.code == AssetDiagnosticCode::None);
+        CHECK(files.replaces == 0);
+    }
+
     // 편집이 대표 에셋을 Discard한 패키지: hook이 있으면 그 찾기 오류(NotFound), 없으면 writer가
     // 거부한다. 아무것도 쓰지 않는다.
     {
@@ -459,7 +489,7 @@ TEST(EditorPackageSave_Refusals) {
         EditorPackageSetConfig config = Config(env, scene.project);
         config.hooks = &hooks;
         for (const bool withHooks : OwnedCases) {
-            EditorPackageSet hollow(env.allocator, withHooks ? config : Config(env, scene.project));
+            EditorPackageSet hollow(env.allocator, withHooks ? config : scene.Config(env));
             REQUIRE(hollow.Initialize());
             auto villain = hollow.Open(FixedId(VillainId));
             REQUIRE(villain);
@@ -487,7 +517,7 @@ TEST(EditorPackageSave_Refusals) {
     files.Remove("Leaf.rasset");
     REQUIRE(files.AddFile("Leaf.rasset", readOnly.View()));
     REQUIRE(scene.project.Rebuild());
-    EditorPackageSet other(env.allocator, Config(env, scene.project));
+    EditorPackageSet other(env.allocator, scene.Config(env));
     REQUIRE(other.Initialize());
     REQUIRE(other.Open(FixedId(LeafId)));
     CHECK(other.Save(FixedId(LeafId), scene.lock, EditorSaveOptions{}, nullptr, &failure).Error() ==
@@ -497,7 +527,7 @@ TEST(EditorPackageSave_Refusals) {
     // 미해결 import: Base가 없는 프로젝트의 Hero.
     files.Remove("Base.rasset");
     REQUIRE(scene.project.Rebuild());
-    EditorPackageSet missing(env.allocator, Config(env, scene.project));
+    EditorPackageSet missing(env.allocator, scene.Config(env));
     REQUIRE(missing.Initialize());
     REQUIRE(missing.Open(FixedId(HeroId)));
     CHECK(missing.Find(FixedId(HeroId))->unresolved.Size() == 1);
@@ -875,13 +905,34 @@ TEST(EditorPackageSave_DirtyAndHooks) {
 
     CHECK(build);
 
-    // hook이 없으면 Tags가 빈다(옛 태그는 옮기지 않는다).
-    EditorPackageSet plain(env.allocator, Config(env, scene.project));
+    // 빈 hook 표면 Tags가 빈다(옛 태그는 옮기지 않는다).
+    EditorPackageSet plain(env.allocator, scene.Config(env));
     REQUIRE(plain.Initialize());
     REQUIRE(plain.Open(FixedId(HeroId)));
     REQUIRE(plain.Save(FixedId(HeroId), scene.lock, EditorSaveOptions{}));
     CHECK(scene.project.index.FindById(FixedId(HeroId)).Value()->tags.IsEmpty());
     hookState = HookState{};
+}
+
+// TypeRegistry 종료(7.1절 15 — 리뷰 필수): 호출자의 TypeRegistry가 닫힌 뒤 hook 있는 저장은 대표
+// 에셋 타입 조회가 ShuttingDown이라 진단 None과 그 오류이고 아무것도 쓰지 않는다(단언하지 않는다
+// — 로드의 같은 조회와 같다, 5.7절 19).
+TEST(EditorPackageSave_TypeRegistryClosed) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Sources sources(env.allocator);
+    REQUIRE(MakeSources(env, sources));
+    SaveScene scene(env, sources);
+    REQUIRE(scene.ready);
+    REQUIRE(scene.set.Open(FixedId(HeroId)));
+    REQUIRE(scene.set.MarkDirty(FixedId(HeroId)));
+    (void)env.types.Shutdown();
+    AssetDiagnostic failure;
+    CHECK(scene.set.Save(FixedId(HeroId), scene.lock, EditorSaveOptions{}, nullptr, &failure)
+              .Error() == ErrorCode::ShuttingDown);
+    CHECK(failure.code == AssetDiagnosticCode::None && failure.asset == FixedId(HeroId));
+    CHECK(scene.project.files.replaces == 0 && !HasTemporary(scene.project.files));
+    CHECK(scene.set.Find(FixedId(HeroId))->dirty);
 }
 
 // ImportRecord 보존(7.1절 15): 소유 기록을 가진 Base와 참조 기록 + ImportOwner를 가진 Base를
@@ -965,10 +1016,11 @@ TEST(EditorPackageSave_AllocationFailures) {
         REQUIRE(registration);
         hookState = HookState{};
         uint32 failures = 0;
-        uint32 afterReplace = 0;
         uint32 orphanKept = 0;
         for (uint64 attempt = 1;; ++attempt) {
-            Project project(env.allocator);
+            TempProject root("save-alloc");
+            REQUIRE(root.made);
+            Project project(env.allocator, root.Root());
             REQUIRE(project.ready && project.files.Ready());
             REQUIRE(project.files.AddFile("Base.rasset", sources.base.View()));
             REQUIRE(project.files.AddFile("Derived.rasset", sources.derived.View()));
@@ -977,11 +1029,8 @@ TEST(EditorPackageSave_AllocationFailures) {
             REQUIRE(project.files.AddFile(OrphanName, sources.leaf.View()));
             REQUIRE(project.files.AddFile(
                 "Fresh/Made.rasset.0123abcd-4567-89ab-cdef-0123456789ab.tmp", sources.leaf.View()));
-            TempProject lockProject("save-alloc");
-            ProjectLayout lockLayout(env.allocator);
             AssetDatabaseLock lock;
-            REQUIRE(lockProject.made && lockLayout.Initialize(lockProject.Root()) &&
-                    lock.Acquire(lockLayout, 0));
+            REQUIRE(lock.Acquire(project.layout, 0));
             TaggedFailAllocator failing(env.allocator);
             AssetIndex index(failing, project.layout);
             REQUIRE(index.Rebuild(project.files, PackageReadOptions{}));
@@ -1031,22 +1080,18 @@ TEST(EditorPackageSave_AllocationFailures) {
             CHECK(saved.Error() == ErrorCode::OutOfMemory);
             CHECK(failure.code == AssetDiagnosticCode::None &&
                   failure.error == ErrorCode::OutOfMemory);
-            CHECK(!HasTemporary(project.files) || project.files.Has(orphan));
-            if (project.files.replaces == 1) {
-                ++afterReplace;
-                CHECK(!set.Find(id)->dirty && !set.Find(id)->unsaved);
-                CHECK(!(set.Find(id)->fingerprint == before));
-                CHECK(project.files.Has(name));
-            } else {
-                CHECK(set.Find(id)->dirty && set.Find(id)->fingerprint == before);
-                CHECK(fresh ? !project.files.Has(name)
-                            : SameBytes(project.files.Bytes(name), sources.hero.View()));
-            }
-
+            // 교체 뒤의 일은 교체 전에 준비하므로 실패는 언제나 교체 전이다: 대상·정보·색인 그대로,
+            // 임시 파일 없음(고아는 정리 전이라 남는다).
+            CHECK(project.files.replaces == 0 && project.files.Has(orphan));
+            CHECK(set.Find(id)->dirty && set.Find(id)->fingerprint == before);
+            CHECK(fresh ? !project.files.Has(name)
+                        : SameBytes(project.files.Bytes(name), sources.hero.View()));
+            auto entry = index.FindById(FixedId(HeroId));
+            CHECK(entry && (fresh || entry.Value()->fingerprint == before));
             ++failures;
         }
 
-        CHECK(failures > 0 && afterReplace > 0 && orphanKept > 0);
+        CHECK(failures > 0 && orphanKept > 0);
         hookState = HookState{};
     }
 }
@@ -1159,7 +1204,8 @@ TEST(EditorPackageSave_OrphanShapes) {
 // id 진단·표시는 전체에서 다시 정한다(둘이 되면 둘 다, 하나가 없어지면 풀린다). 이름 규칙 위반은
 // InvalidPath 진단, 링크·디렉터리는 색인하지 않고, Stat 실패는 진단 None과 그 오류다. 같은 경로
 // 키 진단(DuplicatePath)도 다시 정한다. `.rasset`이 아닌 이름은 InvalidArgument(색인 그대로), 할당
-// 실패(긴 Content 경로·Stat 진단 포함)는 색인을 비운다.
+// 실패(긴 Content 경로·Stat 진단 포함)는 색인을 그대로 둔다(준비·확정 — 준비는 색인을 바꾸지
+// 않는다).
 TEST(AssetIndex_Refresh) {
     AssetEnv env;
     REQUIRE(env.Ready());
@@ -1226,7 +1272,7 @@ TEST(AssetIndex_Refresh) {
     CHECK(index.Refresh(files, ".rasset", read).Error() == ErrorCode::InvalidArgument);
     CHECK(index.Count() == 2);
 
-    // 할당 실패: 색인을 비운다.
+    // 할당 실패: 색인 그대로.
     test::NFailAllocator failing(env.allocator);
     uint32 failures = 0;
     for (uint64 attempt = 1;; ++attempt) {
@@ -1243,7 +1289,7 @@ TEST(AssetIndex_Refresh) {
         }
 
         CHECK(!result && result.Error() == ErrorCode::OutOfMemory);
-        CHECK(fresh.Count() == 0 && fresh.Diagnostics().IsEmpty());
+        CHECK(fresh.Count() == 2 && fresh.FindById(FixedId(VillainId)));
         ++failures;
     }
 
@@ -1299,7 +1345,7 @@ TEST(AssetIndex_Refresh) {
             }
 
             CHECK(!result && result.Error() == ErrorCode::OutOfMemory);
-            CHECK(fresh.Count() == 0 && fresh.Diagnostics().IsEmpty());
+            CHECK(fresh.Count() == 2 && fresh.Diagnostics().IsEmpty());
             ++longFailures;
         }
 
@@ -1334,6 +1380,8 @@ TEST(EditorPackageSave_Disk) {
     config.registryContext = ContextId{0x4550534554ull, 3};
     config.registryOptions.names = &env.names;
     config.writeEngineVersion = TestEngineVersion;
+    AssetTypeHookTable hooks(env.allocator, env.types);
+    config.hooks = &hooks;
     {
         EditorPackageSet set(env.allocator, config);
         REQUIRE(set.Initialize());

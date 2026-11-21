@@ -4,6 +4,7 @@
 #include <AssetDatabase/ImportRecord.h>
 #include <AssetRuntime/PackageRangeReader.h>
 #include <Core/Algorithms.h>
+#include <Core/Assert.h>
 #include <Core/FileError.h>
 #include <Core/Text/StringBuilder.h>
 #include <Object/AssetId.h>
@@ -190,9 +191,13 @@ Result<void> IndexImportRecord(Allocator& allocator, Span<const uint8> bytes,
 // 정렬 순서 order에서 같은 값(same)이 이웃한 항목을 모두 flag로 표시하고 code 진단을 남긴다. 겹친
 // 상대(related)는 앞 이웃이 같으면 그것, 아니면 뒤 이웃이다(같은 값이 셋 이상이어도 각자 이웃
 // 하나).
+// 정렬 순서 order(확정 위치)에서 같은 값(same)이 이웃한 항목을 모두 flags에 flag로 표시하고 code
+// 진단을 남긴다. 겹친 상대(related)는 앞 이웃이 같으면 그것, 아니면 뒤 이웃이다(같은 값이 셋
+// 이상이어도 각자 이웃 하나).
 template <class TSame>
-Result<void> DiagnoseNeighbors(Array<AssetIndexEntry>& entries, Span<const usize> order, TSame same,
-                               bool AssetIndexEntry::* flag, AssetDiagnosticCode code,
+Result<void> DiagnoseNeighbors(Span<AssetIndexEntry* const> entries, Span<const usize> order,
+                               TSame same, Array<uint8>& flags, uint8 flag,
+                               AssetDiagnosticCode code,
                                Array<AssetIndexDiagnostic>& diagnostics) noexcept {
     for (usize position = 0; position < order.Size(); ++position) {
         const bool before = position > 0 && same(order[position - 1], order[position]);
@@ -202,8 +207,8 @@ Result<void> DiagnoseNeighbors(Array<AssetIndexEntry>& entries, Span<const usize
             continue;
         }
 
-        AssetIndexEntry& entry = entries[order[position]];
-        entry.*flag = true;
+        const AssetIndexEntry& entry = *entries[order[position]];
+        flags[order[position]] = static_cast<uint8>(flags[order[position]] | flag);
         if (auto added =
                 AddDiagnostic(diagnostics, code, ErrorCode::AlreadyExists, entry.fileName.View());
             !added) {
@@ -213,7 +218,8 @@ Result<void> DiagnoseNeighbors(Array<AssetIndexEntry>& entries, Span<const usize
         AssetIndexDiagnostic& diagnostic = diagnostics[diagnostics.Size() - 1];
         diagnostic.asset = entry.id;
         const usize partner = order[before ? position - 1 : position + 1];
-        if (auto assigned = AssignDisplayName(diagnostic.related, entries[partner].fileName.View());
+        if (auto assigned =
+                AssignDisplayName(diagnostic.related, entries[partner]->fileName.View());
             !assigned) {
             return assigned;
         }
@@ -273,9 +279,9 @@ AssetIndex::AssetIndex(Allocator& allocator, const ProjectLayout& layout) noexce
 // 파일의 진단을 더한다(Rebuild·Refresh 공용). 이름 규칙 위반·패키지 판정·IO 실패는 진단이고 항목을
 // 더하지 않는다. 오류: 할당 실패.
 Result<void> AssetIndex::IndexFile(platform::FileSystem& files, const PackageReadOptions& editor,
-                                   String&& relative, int64 modifiedTicks,
+                                   String&& relative, StringView readPath, int64 modifiedTicks,
                                    Array<AssetIndexEntry>& found,
-                                   Array<AssetIndexDiagnostic>& diagnostics) noexcept {
+                                   Array<AssetIndexDiagnostic>& diagnostics) const noexcept {
     const StringView content = layout_->ContentDirectory();
     LogicalPathFailure pathFailure;
     auto path = layout_->TryMakeLogicalPath(relative.View(), &pathFailure);
@@ -299,15 +305,18 @@ Result<void> AssetIndex::IndexFile(platform::FileSystem& files, const PackageRea
         return Result<void>::Success();
     }
 
+    // 읽을 경로는 Content/relative, 또는 준 readPath(같은 내용의 다른 이름 — 저장의 임시 파일)다.
     StringBuilder<IndexPathBytes> full(*allocator_);
     const StringView fullPieces[] = {content, "/", relative.View()};
-    if (auto built = AppendAll(full, fullPieces); !built) {
-        return built;
+    if (readPath.IsEmpty()) {
+        if (auto built = AppendAll(full, fullPieces); !built) {
+            return built;
+        }
     }
 
     FilePackageRangeReader reader;
     AssetDiagnostic failure;
-    auto opened = reader.Open(files, full.View());
+    auto opened = reader.Open(files, readPath.IsEmpty() ? full.View() : readPath);
     Result<PackageIndexView> view = opened ? ReadPackageIndex(*allocator_, reader, editor, &failure)
                                            : Result<PackageIndexView>::Failure(opened.Error());
 
@@ -383,42 +392,49 @@ Result<void> AssetIndex::IndexFile(platform::FileSystem& files, const PackageRea
     return Result<void>::Success();
 }
 
-// found(순서 없음)와 diagnostics(이름 진단·파일 진단)를 정렬하고 같은 id·경로 진단을 더해 게시한다
-// (Rebuild·Refresh 공용 — 같은 id·경로 표시는 여기서 처음부터 다시 정한다).
-Result<void> AssetIndex::Publish(Array<AssetIndexEntry>& found,
-                                 Array<AssetIndexDiagnostic>& diagnostics) noexcept {
-    for (AssetIndexEntry& entry : found) {
-        entry.duplicateId = false;
-        entry.duplicatePath = false;
-    }
+// 같은 경로 표시(flags bit)와 같은 id 표시다.
+constexpr uint8 DuplicatePathFlag = 1;
+constexpr uint8 DuplicateIdFlag = 2;
 
+Result<void> AssetIndex::PlanPublish(Span<AssetIndexEntry* const> entries,
+                                     Span<AssetIndexDiagnostic* const> diagnostics,
+                                     AssetIndexRefresh& plan) const noexcept {
     // 경로 키 → 파일 이름 순으로 정렬한다(완료 순서와 무관 — 7.1절 9). Core 정렬은 안정 정렬이
     // 아니지만 Content 상대 이름은 파일마다 달라 이 비교가 전순서다.
     Array<usize> order(*allocator_);
-    if (auto made = MakeOrder(order, found.Size()); !made) {
+    if (auto made = MakeOrder(order, entries.Size()); !made) {
         return made;
     }
 
     algo::Sort(order.View(), [&](usize left, usize right) noexcept {
-        int compared = StringView::CompareBytes(found[left].key.View(), found[right].key.View());
+        int compared =
+            StringView::CompareBytes(entries[left]->key.View(), entries[right]->key.View());
         if (compared == 0) {
-            compared =
-                StringView::CompareBytes(found[left].fileName.View(), found[right].fileName.View());
+            compared = StringView::CompareBytes(entries[left]->fileName.View(),
+                                                entries[right]->fileName.View());
         }
 
         return compared < 0;
     });
-    Array<AssetIndexEntry> sorted(*allocator_);
-    if (auto reserved = sorted.TryReserve(found.Size()); !reserved) {
+    if (auto reserved = plan.entryOrder_.TryReserve(entries.Size()); !reserved) {
         return reserved;
     }
 
     for (usize index : order) {
-        (void)sorted.TryPushBack(Move(found[index]));
+        (void)plan.entryOrder_.TryPushBack(entries[index]);
+    }
+
+    if (auto sized = plan.flags_.TryResize(entries.Size()); !sized) {
+        return sized;
+    }
+
+    for (uint8& flag : plan.flags_) {
+        flag = 0;
     }
 
     // 같은 경로 키(DuplicatePath — 경로 키 순에서 이웃)와 같은 id(DuplicateAssetId — id 순에서
-    // 이웃)를 모두 진단한다.
+    // 이웃)를 모두 진단한다. 위치는 확정 순서다.
+    const Span<AssetIndexEntry* const> sorted = plan.entryOrder_.View();
     Array<usize> byId(*allocator_);
     if (auto made = MakeOrder(byId, sorted.Size()); !made) {
         return made;
@@ -427,64 +443,90 @@ Result<void> AssetIndex::Publish(Array<AssetIndexEntry>& found,
     if (auto diagnosed = DiagnoseNeighbors(
             sorted, byId.View(),
             [&](usize left, usize right) noexcept {
-                return sorted[left].key.View() == sorted[right].key.View();
+                return sorted[left]->key.View() == sorted[right]->key.View();
             },
-            &AssetIndexEntry::duplicatePath, AssetDiagnosticCode::DuplicatePath, diagnostics);
+            plan.flags_, DuplicatePathFlag, AssetDiagnosticCode::DuplicatePath, plan.neighbors_);
         !diagnosed) {
         return diagnosed;
     }
 
     // id → 경로 순 위치(같은 id는 경로 순).
     algo::Sort(byId.View(), [&](usize left, usize right) noexcept {
-        const int compared = CompareId(sorted[left].id, sorted[right].id);
+        const int compared = CompareId(sorted[left]->id, sorted[right]->id);
         return compared != 0 ? compared < 0 : left < right;
     });
     if (auto diagnosed = DiagnoseNeighbors(
             sorted, byId.View(),
             [&](usize left, usize right) noexcept {
-                return CompareId(sorted[left].id, sorted[right].id) == 0;
+                return CompareId(sorted[left]->id, sorted[right]->id) == 0;
             },
-            &AssetIndexEntry::duplicateId, AssetDiagnosticCode::DuplicateAssetId, diagnostics);
+            plan.flags_, DuplicateIdFlag, AssetDiagnosticCode::DuplicateAssetId, plan.neighbors_);
         !diagnosed) {
         return diagnosed;
     }
 
     // 진단은 파일 이름 → 코드 → 칸 순이다. 한 이름(파일·디렉터리)의 진단은 (코드, 칸)마다
     // 하나뿐이라(경로·패키지 판정 진단은 서로 배타이고 그 밖의 항목 진단과도 배타, 항목 진단은
-    // Tags· ImportRecord·Dependencies 칸마다 하나, 같은 id·경로 진단은 각각 하나 — 칸 0) 이 비교가
+    // Tags·ImportRecord·Dependencies 칸마다 하나, 같은 id·경로 진단은 각각 하나 — 칸 0) 이 비교가
     // 전순서다.
-    Array<usize> diagnosticOrder(*allocator_);
-    if (auto made = MakeOrder(diagnosticOrder, diagnostics.Size()); !made) {
-        return made;
+    const usize diagnosticCount = diagnostics.Size() + plan.neighbors_.Size();
+    if (auto reserved = plan.diagnosticOrder_.TryReserve(diagnosticCount); !reserved) {
+        return reserved;
     }
 
-    algo::Sort(diagnosticOrder.View(), [&](usize left, usize right) noexcept {
-        const int name = StringView::CompareBytes(diagnostics[left].fileName.View(),
-                                                  diagnostics[right].fileName.View());
+    for (AssetIndexDiagnostic* diagnostic : diagnostics) {
+        (void)plan.diagnosticOrder_.TryPushBack(diagnostic);
+    }
+
+    for (AssetIndexDiagnostic& diagnostic : plan.neighbors_) {
+        (void)plan.diagnosticOrder_.TryPushBack(&diagnostic);
+    }
+
+    algo::Sort(plan.diagnosticOrder_.View(), [](const AssetIndexDiagnostic* left,
+                                                const AssetIndexDiagnostic* right) noexcept {
+        const int name = StringView::CompareBytes(left->fileName.View(), right->fileName.View());
         if (name != 0) {
             return name < 0;
         }
 
-        if (diagnostics[left].code != diagnostics[right].code) {
-            return static_cast<uint32>(diagnostics[left].code) <
-                   static_cast<uint32>(diagnostics[right].code);
+        if (left->code != right->code) {
+            return static_cast<uint32>(left->code) < static_cast<uint32>(right->code);
         }
 
-        return diagnostics[left].section < diagnostics[right].section;
+        return left->section < right->section;
     });
-    Array<AssetIndexDiagnostic> sortedDiagnostics(*allocator_);
-    if (auto reserved = sortedDiagnostics.TryReserve(diagnostics.Size()); !reserved) {
+    if (auto reserved = plan.entries_.TryReserve(sorted.Size()); !reserved) {
         return reserved;
     }
 
-    for (usize index : diagnosticOrder) {
-        (void)sortedDiagnostics.TryPushBack(Move(diagnostics[index]));
+    if (auto reserved = plan.diagnostics_.TryReserve(diagnosticCount); !reserved) {
+        return reserved;
     }
 
-    entries_ = Move(sorted);
-    byId_ = Move(byId);
-    diagnostics_ = Move(sortedDiagnostics);
+    plan.byId_ = Move(byId);
+    plan.revision_ = revision_;
+    plan.ready_ = true;
     return Result<void>::Success();
+}
+
+void AssetIndex::CommitPublish(AssetIndexRefresh& plan) noexcept {
+    ROCKS_ASSERT(plan.ready_ && plan.revision_ == revision_);
+    for (usize position = 0; position < plan.entryOrder_.Size(); ++position) {
+        AssetIndexEntry& entry = *plan.entryOrder_[position];
+        entry.duplicatePath = (plan.flags_[position] & DuplicatePathFlag) != 0;
+        entry.duplicateId = (plan.flags_[position] & DuplicateIdFlag) != 0;
+        (void)plan.entries_.TryPushBack(Move(entry));
+    }
+
+    for (AssetIndexDiagnostic* diagnostic : plan.diagnosticOrder_) {
+        (void)plan.diagnostics_.TryPushBack(Move(*diagnostic));
+    }
+
+    entries_ = Move(plan.entries_);
+    byId_ = Move(plan.byId_);
+    diagnostics_ = Move(plan.diagnostics_);
+    ++revision_;
+    plan.ready_ = false;
 }
 
 Result<void> AssetIndex::Rebuild(platform::FileSystem& files,
@@ -609,71 +651,90 @@ Result<void> AssetIndex::Rebuild(platform::FileSystem& files,
                 continue;
             }
 
-            if (auto indexed = IndexFile(files, editor, Move(relative), child.info.modifiedTicks,
-                                         found, diagnostics);
+            if (auto indexed = IndexFile(files, editor, Move(relative), StringView(),
+                                         child.info.modifiedTicks, found, diagnostics);
                 !indexed) {
                 return indexed;
             }
         }
     }
 
-    return Publish(found, diagnostics);
+    // 게시(같은 id·경로 진단 — 실패하면 비운 색인 그대로).
+    Array<AssetIndexEntry*> entryPlaces(*allocator_);
+    Array<AssetIndexDiagnostic*> diagnosticPlaces(*allocator_);
+    if (auto reserved = entryPlaces.TryReserve(found.Size()); !reserved) {
+        return reserved;
+    }
+
+    if (auto reserved = diagnosticPlaces.TryReserve(diagnostics.Size()); !reserved) {
+        return reserved;
+    }
+
+    for (AssetIndexEntry& entry : found) {
+        (void)entryPlaces.TryPushBack(&entry);
+    }
+
+    for (AssetIndexDiagnostic& diagnostic : diagnostics) {
+        (void)diagnosticPlaces.TryPushBack(&diagnostic);
+    }
+
+    AssetIndexRefresh plan(*allocator_);
+    if (auto planned = PlanPublish(entryPlaces.View(), diagnosticPlaces.View(), plan); !planned) {
+        return planned;
+    }
+
+    CommitPublish(plan);
+    return Result<void>::Success();
 }
 
 Result<void> AssetIndex::Refresh(platform::FileSystem& files, StringView fileName,
                                  const PackageReadOptions& options) noexcept {
+    AssetIndexRefresh plan(*allocator_);
+    if (auto prepared = PrepareRefresh(files, fileName, StringView(), options, plan); !prepared) {
+        return prepared;
+    }
+
+    CommitRefresh(plan);
+    return Result<void>::Success();
+}
+
+Result<void> AssetIndex::PrepareRefresh(platform::FileSystem& files, StringView fileName,
+                                        StringView readPath, const PackageReadOptions& options,
+                                        AssetIndexRefresh& plan) noexcept {
+    plan.ready_ = false;
+    plan.added_.Clear();
+    plan.fileDiagnostics_.Clear();
+    plan.neighbors_.Clear();
+    plan.entryOrder_.Clear();
+    plan.diagnosticOrder_.Clear();
+    plan.entries_.Clear();
+    plan.diagnostics_.Clear();
     if (fileName.ByteCount() <= EditorPackageExtension.ByteCount() ||
         !fileName.EndsWith(EditorPackageExtension)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    // 다른 파일의 항목과 진단(같은 id·경로 진단 제외 — Publish가 다시 만든다)을 옮긴다. 이 뒤의
-    // 실패는 색인을 비운다(Rebuild와 같은 계약).
-    Array<AssetIndexEntry> entries = Move(entries_);
-    Array<AssetIndexDiagnostic> previous = Move(diagnostics_);
-    byId_.Clear();
     String display(*allocator_);
     if (auto assigned = AssignDisplayName(display, fileName); !assigned) {
         return assigned;
     }
 
-    Array<AssetIndexEntry> found(*allocator_);
-    Array<AssetIndexDiagnostic> diagnostics(*allocator_);
-    if (auto reserved = found.TryReserve(entries.Size() + 1); !reserved) {
-        return reserved;
-    }
-
-    if (auto reserved = diagnostics.TryReserve(previous.Size()); !reserved) {
-        return reserved;
-    }
-
-    for (AssetIndexEntry& entry : entries) {
-        if (!(entry.fileName.View() == fileName)) {
-            (void)found.TryPushBack(Move(entry));
-        }
-    }
-
-    for (AssetIndexDiagnostic& diagnostic : previous) {
-        if (!(diagnostic.fileName.View() == display.View()) &&
-            diagnostic.code != AssetDiagnosticCode::DuplicateAssetId &&
-            diagnostic.code != AssetDiagnosticCode::DuplicatePath) {
-            (void)diagnostics.TryPushBack(Move(diagnostic));
-        }
-    }
-
     StringBuilder<IndexPathBytes> full(*allocator_);
     const StringView pieces[] = {layout_->ContentDirectory(), "/", fileName};
-    if (auto built = AppendAll(full, pieces); !built) {
-        return built;
+    if (readPath.IsEmpty()) {
+        if (auto built = AppendAll(full, pieces); !built) {
+            return built;
+        }
     }
 
     // 없어진 파일은 빠지고, 링크·일반 파일이 아닌 것은 색인하지 않는다(Rebuild와 같다). 그 밖의
     // Stat 실패는 IO 진단이다.
+    const StringView statPath = readPath.IsEmpty() ? full.View() : readPath;
     platform::FileInfo info;
-    const platform::FileStatus stat = files.Stat(full.View().Data(), full.View().ByteCount(), info);
+    const platform::FileStatus stat = files.Stat(statPath.Data(), statPath.ByteCount(), info);
     if (!stat && stat.code != platform::FileCode::NotFound) {
-        if (auto added = AddDiagnostic(diagnostics, AssetDiagnosticCode::None, FileErrorCode(stat),
-                                       fileName);
+        if (auto added = AddDiagnostic(plan.fileDiagnostics_, AssetDiagnosticCode::None,
+                                       FileErrorCode(stat), fileName);
             !added) {
             return added;
         }
@@ -685,14 +746,55 @@ Result<void> AssetIndex::Refresh(platform::FileSystem& files, StringView fileNam
 
         PackageReadOptions editor = options;
         editor.expectedKind = PackageKind::Editor;
-        if (auto indexed =
-                IndexFile(files, editor, Move(relative), info.modifiedTicks, found, diagnostics);
+        if (auto indexed = IndexFile(files, editor, Move(relative), readPath, info.modifiedTicks,
+                                     plan.added_, plan.fileDiagnostics_);
             !indexed) {
             return indexed;
         }
     }
 
-    return Publish(found, diagnostics);
+    // 지금 색인의 다른 파일 항목·진단(같은 id·경로 진단 제외 — 게시가 다시 만든다)과 새 것을
+    // 자리로 모은다.
+    Array<AssetIndexEntry*> entryPlaces(*allocator_);
+    Array<AssetIndexDiagnostic*> diagnosticPlaces(*allocator_);
+    if (auto reserved = entryPlaces.TryReserve(entries_.Size() + plan.added_.Size()); !reserved) {
+        return reserved;
+    }
+
+    if (auto reserved =
+            diagnosticPlaces.TryReserve(diagnostics_.Size() + plan.fileDiagnostics_.Size());
+        !reserved) {
+        return reserved;
+    }
+
+    // 자리 포인터는 확정이 옮길 대상이다(준비는 색인을 바꾸지 않고 가리키기만 한다).
+    for (AssetIndexEntry& entry : entries_) {
+        if (!(entry.fileName.View() == fileName)) {
+            (void)entryPlaces.TryPushBack(&entry);
+        }
+    }
+
+    for (AssetIndexEntry& entry : plan.added_) {
+        (void)entryPlaces.TryPushBack(&entry);
+    }
+
+    for (AssetIndexDiagnostic& diagnostic : diagnostics_) {
+        if (!(diagnostic.fileName.View() == display.View()) &&
+            diagnostic.code != AssetDiagnosticCode::DuplicateAssetId &&
+            diagnostic.code != AssetDiagnosticCode::DuplicatePath) {
+            (void)diagnosticPlaces.TryPushBack(&diagnostic);
+        }
+    }
+
+    for (AssetIndexDiagnostic& diagnostic : plan.fileDiagnostics_) {
+        (void)diagnosticPlaces.TryPushBack(&diagnostic);
+    }
+
+    return PlanPublish(entryPlaces.View(), diagnosticPlaces.View(), plan);
+}
+
+void AssetIndex::CommitRefresh(AssetIndexRefresh& plan) noexcept {
+    CommitPublish(plan);
 }
 
 Result<const AssetIndexEntry*> AssetIndex::FindById(AssetId id) const noexcept {

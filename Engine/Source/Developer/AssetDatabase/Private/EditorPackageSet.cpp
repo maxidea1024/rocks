@@ -659,6 +659,17 @@ Result<ObjectHandle> EditorPackageSet::Create(const LogicalPath& path, TypeId ty
         }
     }
 
+    // 파일 절대 경로(임시 접미사 포함)가 OS 상한 안이어야 한다(배치는 바뀌지 않으므로 여기서 판정).
+    {
+        String file(*allocator_);
+        if (auto made = config_.layout->TryMakeFilePath(path, file); !made) {
+            return fail(made.Error() == ErrorCode::CapacityExceeded
+                            ? AssetDiagnosticCode::InvalidPath
+                            : AssetDiagnosticCode::None,
+                        made.Error());
+        }
+    }
+
     // id: 새로 발급하거나 준 id가 열려 있지도 색인에 있지도 않아야 한다.
     if (id.IsNull()) {
         auto made = AssetId::TryNew();
@@ -749,7 +760,10 @@ Result<void> EditorPackageSet::Save(AssetId id, const AssetDatabaseLock& lock,
     auto fail = [&](AssetDiagnosticCode code, ErrorCode error) noexcept {
         return EditorFail<void>(failure, EditorDiagnostic(code, error, id));
     };
-    if (registry_.Get() == nullptr || !lock.IsHeld()) {
+    // hook 표는 필수다(Tags를 저장마다 다시 만든다 — 모르는 host가 태그를 지우지 않게). 잠금은 이
+    // 프로젝트의 것이어야 한다.
+    if (registry_.Get() == nullptr || config_.hooks == nullptr ||
+        !lock.IsHeldFor(*config_.layout)) {
         return fail(AssetDiagnosticCode::None, ErrorCode::InvalidArgument);
     }
 
@@ -802,11 +816,9 @@ Result<void> EditorPackageSet::PlanSave(EditorPackageInfo& info, const EditorSav
             return fail(AssetDiagnosticCode::None, path.Error());
         }
 
+        // 경로 상한은 Create가 판정했다(배치는 바뀌지 않는다) — 여기 실패는 할당뿐이다.
         if (auto made = config_.layout->TryMakeFilePath(path.Value(), plan.target); !made) {
-            return fail(made.Error() == ErrorCode::CapacityExceeded
-                            ? AssetDiagnosticCode::InvalidPath
-                            : AssetDiagnosticCode::None,
-                        made.Error());
+            return fail(AssetDiagnosticCode::None, made.Error());
         }
 
         platform::FileInfo existing;
@@ -873,16 +885,20 @@ Result<void> EditorPackageSet::PlanSave(EditorPackageInfo& info, const EditorSav
     // Tags·Build 의존은 대표 에셋 타입의 hook으로 만든다(Tags는 저장마다 다시 — 7.1절 15). 대표
     // 에셋이 없으면(편집이 Discard했다) 그 오류다(hook 없이 쓰면 writer가 같은 패키지를 거부한다).
     AssetDependencySink dependencies(allocator);
-    if (config_.hooks != nullptr) {
+    {
         const ObjectAccessContext access = Access();
         auto representative = registry_->FindChild(access, info.package, StringView());
         if (!representative) {
             return fail(AssetDiagnosticCode::None, representative.Error());
         }
 
-        // 찾은 생존 객체의 타입 조회는 실패하지 않는다(소유 스레드 — 종료·회수 전).
+        // 타입 조회는 TypeRegistry가 닫혔으면(ShuttingDown) 실패할 수 있다 — 진단 None과 그
+        // 오류다(로드의 같은 조회와 같다, 5.7절 19).
         auto type = registry_->AcquireType(access, representative.Value());
-        ROCKS_ASSERT(type.IsOk());
+        if (!type) {
+            return fail(AssetDiagnosticCode::None, type.Error());
+        }
+
         const TypeId typeId = type.Value().Id();
         AssetTagSink tags(allocator);
         Result<void> step =
@@ -1046,6 +1062,33 @@ Result<void> EditorPackageSet::WriteAndReplace(EditorPackageInfo& info, SavePlan
         reread = Move(read.Value());
     }
 
+    // 교체 뒤의 일을 모두 준비한다(실패하면 교체 전이라 아무것도 바뀌지 않는다): 저장소를 새 파일에
+    // 다시 잇는 표, 임시 파일을 대상 이름으로 읽은 새 색인.
+    const PackageContents& contents = reread.contents;
+    uint64 bulkOffset = 0;
+    for (const PackageSectionEntry& section : contents.sections) {
+        if (section.kind == PackageSectionKind::Bulk) {
+            bulkOffset = section.offset;
+        }
+    }
+
+    BulkRebindPlan rebind(allocator);
+    if (auto prepared =
+            info.store->PrepareRebind(rebind, target, result.fingerprint, bulkOffset,
+                                      contents.bulkEntries.View(), result.bulkRemap.View());
+        !prepared) {
+        discard();
+        return fail(AssetDiagnosticCode::None, prepared.Error());
+    }
+
+    AssetIndexRefresh refresh(allocator);
+    if (auto prepared = config_.index->PrepareRefresh(files, plan.fileName.View(), temp.View(),
+                                                      config_.read, refresh);
+        !prepared) {
+        discard();
+        return fail(AssetDiagnosticCode::None, prepared.Error());
+    }
+
     // 교체(5.5절 6): 캐시가 쥔 대상 핸들을 먼저 닫는다.
     cache_->Close(target);
     const platform::FileStatus replaced = files.Replace(temp.View().Data(), temp.View().ByteCount(),
@@ -1056,15 +1099,7 @@ Result<void> EditorPackageSet::WriteAndReplace(EditorPackageInfo& info, SavePlan
         return fail(AssetDiagnosticCode::None, FileErrorCode(replaced));
     }
 
-    // 교체 뒤(5.5절 7): 정보를 새 파일로 바꾸고 저장소를 다시 잇는다.
-    const PackageContents& contents = reread.contents;
-    uint64 bulkOffset = 0;
-    for (const PackageSectionEntry& section : contents.sections) {
-        if (section.kind == PackageSectionKind::Bulk) {
-            bulkOffset = section.offset;
-        }
-    }
-
+    // 교체 뒤(5.5절 7 — 실패하지 않는다): 정보를 새 파일로 바꾸고 준비한 것을 확정한다.
     info.fingerprint = result.fingerprint;
     info.fileName = Move(plan.fileName);
     info.unsaved = false;
@@ -1091,22 +1126,12 @@ Result<void> EditorPackageSet::WriteAndReplace(EditorPackageInfo& info, SavePlan
 
     info.unresolved.Clear();
     // 파일이 메모리와 같아졌으므로 dirty를 지운다(시작한 세대 그대로일 때 — 저장 중 편집은 남긴다).
-    // 뒤의 Rebind·Refresh가 실패해도 파일은 이미 새 것이다.
     if (info.generation == plan.startGeneration) {
         info.dirty = false;
     }
 
-    if (auto rebound = info.store->Rebind(target, result.fingerprint, bulkOffset,
-                                          contents.bulkEntries.View(), result.bulkRemap.View());
-        !rebound) {
-        return fail(AssetDiagnosticCode::None, rebound.Error());
-    }
-
-    if (auto refreshed = config_.index->Refresh(files, info.fileName.View(), config_.read);
-        !refreshed) {
-        return fail(AssetDiagnosticCode::None, refreshed.Error());
-    }
-
+    info.store->CommitRebind(rebind);
+    config_.index->CommitRefresh(refresh);
     DeleteOrphans(info, target, warnings);
     return Result<void>::Success();
 }

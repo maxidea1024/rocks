@@ -1,5 +1,6 @@
 #include <AssetRuntime/FilePackageBulkStore.h>
 #include <AssetRuntime/PackageRangeReader.h>
+#include <Core/Assert.h>
 #include <Core/Encoding/Crc32.h>
 #include <Core/FileError.h>
 
@@ -200,6 +201,7 @@ Result<void> FilePackageBulkStore::Attach(StringView path, const PackageFingerpr
 
     fingerprint_ = fingerprint;
     asset_ = asset;
+    ++revision_;
     return Result<void>::Success();
 }
 
@@ -316,6 +318,7 @@ Result<BulkDataRef> FilePackageBulkStore::AddUnsaved(Array<uint8>&& raw) noexcep
     slot.Value()->raw = Move(bytes);
     (void)slots_.TryPushBack(Move(slot.Value()));
     ++nextUnsaved_;
+    ++revision_;
     return Result<BulkDataRef>::Success(ref);
 }
 
@@ -338,13 +341,35 @@ Result<void> FilePackageBulkStore::Rebind(StringView path, const PackageFingerpr
                                           uint64 bulkSectionOffset,
                                           Span<const PackageBulkEntry> entries,
                                           Span<const BulkRemapEntry> remap) noexcept {
+    BulkRebindPlan plan(*allocator_);
+    if (auto prepared = PrepareRebind(plan, path, fingerprint, bulkSectionOffset, entries, remap);
+        !prepared) {
+        return prepared;
+    }
+
+    CommitRebind(plan);
+    return Result<void>::Success();
+}
+
+Result<void> FilePackageBulkStore::PrepareRebind(BulkRebindPlan& plan, StringView path,
+                                                 const PackageFingerprint& fingerprint,
+                                                 uint64 bulkSectionOffset,
+                                                 Span<const PackageBulkEntry> entries,
+                                                 Span<const BulkRemapEntry> remap) const noexcept {
+    plan.ready_ = false;
+    plan.table_.Clear();
+    plan.updates_.Clear();
+    plan.kept_.Clear();
     if (path.IsEmpty()) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    // 먼저 모두 검사하고 새 표를 만든 뒤 한꺼번에 바꾼다(실패하면 그대로).
-    HashMap<uint32, usize> table(*allocator_);
-    if (auto reserved = table.Reserve(remap.Size()); !reserved) {
+    // 먼저 모두 검사하고 새 표·갱신 목록을 만든다(저장소는 바꾸지 않는다).
+    if (auto reserved = plan.table_.Reserve(remap.Size()); !reserved) {
+        return reserved;
+    }
+
+    if (auto reserved = plan.updates_.TryReserve(remap.Size()); !reserved) {
         return reserved;
     }
 
@@ -363,30 +388,43 @@ Result<void> FilePackageBulkStore::Rebind(StringView path, const PackageFingerpr
 
         // 자리를 미리 잡았다(Reserve) — 같은 옛 id 두 번은 앞 항목이 남는다(writer는 유일하게
         // 준다).
-        (void)table.Insert(row.oldId, *index);
+        (void)plan.table_.Insert(row.oldId, *index);
+        (void)plan.updates_.TryPushBack(
+            BulkRebindPlan::Update{*index, entry, row.newId, bulkSectionOffset + entry.offset});
     }
 
-    String newPath(*allocator_);
-    if (auto assigned = newPath.TryAssign(path); !assigned) {
+    if (auto assigned = plan.path_.TryAssign(path); !assigned) {
         return assigned;
     }
 
-    Array<bool> kept(*allocator_);
-    if (auto sized = kept.TryResize(slots_.Size()); !sized) {
+    if (auto sized = plan.kept_.TryResize(slots_.Size()); !sized) {
         return sized;
     }
 
-    for (const BulkRemapEntry& row : remap) {
-        Slot& slot = *slots_[*table.Find(row.oldId)];
-        slot.entry = entries[row.newId - 1];
-        slot.fileId = row.newId;
-        slot.fileOffset = bulkSectionOffset + slot.entry.offset;
+    for (usize index = 0; index < plan.kept_.Size(); ++index) {
+        plan.kept_[index] = false;
+    }
+
+    plan.table_.ForEach(
+        [&](const uint32&, const usize& index) noexcept { plan.kept_[index] = true; });
+    plan.fingerprint_ = fingerprint;
+    plan.revision_ = revision_;
+    plan.ready_ = true;
+    return Result<void>::Success();
+}
+
+void FilePackageBulkStore::CommitRebind(BulkRebindPlan& plan) noexcept {
+    ROCKS_ASSERT(plan.ready_ && plan.revision_ == revision_);
+    for (const BulkRebindPlan::Update& update : plan.updates_) {
+        Slot& slot = *slots_[update.slot];
+        slot.entry = update.entry;
+        slot.fileId = update.fileId;
+        slot.fileOffset = update.fileOffset;
     }
 
     // 표에서 빠진 id의 slot은 파일 연결만 끊는다(이미 푼 raw는 남는다).
-    table.ForEach([&](const uint32&, const usize& index) noexcept { kept[index] = true; });
-    for (usize index = 0; index < slots_.Size(); ++index) {
-        if (!kept[index]) {
+    for (usize index = 0; index < plan.kept_.Size(); ++index) {
+        if (!plan.kept_[index]) {
             slots_[index]->fileId = 0;
         }
     }
@@ -395,10 +433,11 @@ Result<void> FilePackageBulkStore::Rebind(StringView path, const PackageFingerpr
         cache_->Close(path_.View());
     }
 
-    table_ = Move(table);
-    path_ = Move(newPath);
-    fingerprint_ = fingerprint;
-    return Result<void>::Success();
+    table_ = Move(plan.table_);
+    path_ = Move(plan.path_);
+    fingerprint_ = plan.fingerprint_;
+    ++revision_;
+    plan.ready_ = false;
 }
 
 Result<void> FilePackageBulkStore::Detach(AssetDiagnostic* failure) noexcept {
@@ -415,6 +454,7 @@ Result<void> FilePackageBulkStore::Detach(AssetDiagnostic* failure) noexcept {
     }
 
     path_.Clear();
+    ++revision_;
     return Result<void>::Success();
 }
 

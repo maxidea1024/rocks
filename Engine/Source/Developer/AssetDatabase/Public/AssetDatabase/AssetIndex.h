@@ -108,6 +108,47 @@ struct AssetIndexDiagnostic {
     AssetId relatedAsset{};
 };
 
+class AssetIndex;
+
+// 색인 게시 준비다(AssetIndex::PrepareRefresh가 채우고 CommitRefresh가 쓴다 — 7.1절 15 A2c2b). 새
+// 항목·진단, 정렬 순서, 같은 id·경로 진단과 결과 배열 자리를 모두 할당해 두고 지금 색인의 항목·
+// 진단은 자리 포인터로 가리킨다(옮기지 않는다). 그래서 준비와 확정 사이에 그 색인을 바꾸면 안
+// 된다(확정이 색인 변경 세대로 단언한다). 복사·이동하지 않는다(가리키는 자리를 지킨다).
+class AssetIndexRefresh {
+public:
+    explicit AssetIndexRefresh(Allocator& allocator) noexcept
+        : added_(allocator), fileDiagnostics_(allocator), neighbors_(allocator),
+          entryOrder_(allocator), flags_(allocator), byId_(allocator), diagnosticOrder_(allocator),
+          entries_(allocator), diagnostics_(allocator) {
+    }
+
+    AssetIndexRefresh(const AssetIndexRefresh&) = delete;
+    AssetIndexRefresh& operator=(const AssetIndexRefresh&) = delete;
+
+    // 준비를 마쳐 확정할 수 있는지다.
+    bool IsReady() const noexcept {
+        return ready_;
+    }
+
+private:
+    friend class AssetIndex;
+
+    // 다시 읽은 파일의 항목(0·1개)과 그 파일 진단, 같은 id·경로 진단이다.
+    Array<AssetIndexEntry> added_;
+    Array<AssetIndexDiagnostic> fileDiagnostics_;
+    Array<AssetIndexDiagnostic> neighbors_;
+    // 확정 순서의 항목·진단 자리와 항목별 같은 경로(1)·같은 id(2) 표시다.
+    Array<AssetIndexEntry*> entryOrder_;
+    Array<uint8> flags_;
+    Array<usize> byId_;
+    Array<AssetIndexDiagnostic*> diagnosticOrder_;
+    // 자리를 잡아 둔 결과 배열이다(확정은 할당 없이 옮긴다).
+    Array<AssetIndexEntry> entries_;
+    Array<AssetIndexDiagnostic> diagnostics_;
+    uint64 revision_ = 0;
+    bool ready_ = false;
+};
+
 class AssetIndex {
 public:
     AssetIndex(Allocator& allocator, const ProjectLayout& layout) noexcept;
@@ -128,10 +169,21 @@ public:
     // 한 파일만 다시 읽는다(저장 뒤 — 7.1절 15 A2c2b). 그 파일의 항목·진단을 바꾸고(없어졌으면
     // 빼고, 새 파일이면 더한다) 같은 id·경로 진단과 표시는 전체에서 다시 정한다. 파일 IO·판정
     // 실패는 Rebuild처럼 진단이다(링크·일반 파일이 아닌 것은 색인하지 않는다). 오류: fileName이
-    // `.rasset`이 아니거나 비었으면 InvalidArgument(색인 그대로), 할당 실패(색인을 비운다 — 다시
-    // Rebuild한다).
+    // `.rasset`이 아니거나 비었으면 InvalidArgument, 할당 실패 — 둘 다 색인
+    // 그대로다(PrepareRefresh + CommitRefresh).
     Result<void> Refresh(platform::FileSystem& files, StringView fileName,
                          const PackageReadOptions& options) noexcept;
+
+    // Refresh를 두 단계로 한다: PrepareRefresh는 fileName 한 파일을 다시 읽어(readPath가 비지
+    // 않으면 그 경로의 내용을 fileName 이름으로 — 저장이 교체 전에 임시 파일을 대상 이름으로
+    // 색인한다) 새 색인을 모두 준비하고 지금 색인을 바꾸지 않는다. 오류는 Refresh와 같고(할당
+    // 실패도 색인 그대로), 실패한 plan은 준비되지 않는다. CommitRefresh는 할당 없이
+    // 확정한다(실패하지 않는다). 준비와 확정 사이에 이 색인을 바꾸면(Rebuild·다른 확정) 안 되고,
+    // 준비되지 않은 plan의 확정은 계약 위반이다(단언).
+    Result<void> PrepareRefresh(platform::FileSystem& files, StringView fileName,
+                                StringView readPath, const PackageReadOptions& options,
+                                AssetIndexRefresh& plan) noexcept;
+    void CommitRefresh(AssetIndexRefresh& plan) noexcept;
 
     // 항목 수와 index번째 항목(경로 키 → 파일 이름 순)이다.
     usize Count() const noexcept {
@@ -186,10 +238,15 @@ public:
 
 private:
     Result<void> IndexFile(platform::FileSystem& files, const PackageReadOptions& editor,
-                           String&& relative, int64 modifiedTicks, Array<AssetIndexEntry>& found,
-                           Array<AssetIndexDiagnostic>& diagnostics) noexcept;
-    Result<void> Publish(Array<AssetIndexEntry>& found,
-                         Array<AssetIndexDiagnostic>& diagnostics) noexcept;
+                           String&& relative, StringView readPath, int64 modifiedTicks,
+                           Array<AssetIndexEntry>& found,
+                           Array<AssetIndexDiagnostic>& diagnostics) const noexcept;
+    // 항목·진단 자리로 게시를 준비한다(정렬·같은 id·경로 진단·결과 자리 — 할당은 모두 여기서).
+    Result<void> PlanPublish(Span<AssetIndexEntry* const> entries,
+                             Span<AssetIndexDiagnostic* const> diagnostics,
+                             AssetIndexRefresh& plan) const noexcept;
+    // 준비한 게시를 할당 없이 확정한다.
+    void CommitPublish(AssetIndexRefresh& plan) noexcept;
 
     Allocator* allocator_;
     const ProjectLayout* layout_;
@@ -197,6 +254,8 @@ private:
     // 항목 index를 id 순으로 둔 표다(FindById 이진 검색).
     Array<usize> byId_;
     Array<AssetIndexDiagnostic> diagnostics_;
+    // 게시마다 오르는 세대다(AssetIndexRefresh 대조).
+    uint64 revision_ = 0;
 };
 
 // 진단 한 줄 `<진단 코드>: Content/<파일>: <설명>\n`을 line에 붙인다(13절 명령 출력 —

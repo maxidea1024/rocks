@@ -736,4 +736,100 @@ TEST(FilePackageBulkStore_HugeRawBytesRejectedBeforeAllocation) {
     CHECK(failure.code == AssetDiagnosticCode::CorruptPackage);
 }
 
+// 2단계 다시 잇기(7.1절 15 A2c2b): PrepareRebind는 Rebind와 같은 검사(잘못된 표·빈 경로
+// InvalidArgument)를 하고 저장소를 바꾸지 않으며(실패한 plan은 준비되지 않음), 모든 할당 실패도
+// 저장소를 바꾸지 않는다. CommitRebind 뒤 옛 ref는 새 파일 entry를 읽고 재매핑에 없는 id(빠진 파일
+// entry·저장하지 않은 bulk)는 NotFound이며(이미 준 span은 유효) plan은 준비되지 않은 상태다. 실패한
+// 준비 뒤 같은 plan을 다시 준비할 수 있다.
+TEST(FilePackageBulkStore_TwoPhaseRebind) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    StoreScene scene(env.allocator);
+    REQUIRE(MakeStoreScene(env, scene, 2506));
+    AttachedStore attached(env, scene.zstd.View());
+    REQUIRE(attached.ready);
+    FilePackageBulkStore& store = attached.store;
+    ObjectRegistry& registry = *env.source;
+    TestAsset* asset = Pointer<TestAsset>(registry, scene.asset);
+    REQUIRE(asset != nullptr);
+    asset->pixels = RefOf(attached.bulk.entries[0]);
+    asset->source = RefOf(attached.bulk.entries[1]);
+    auto part = registry.FindChild(registry.OwnerAccess(), scene.asset, "Part");
+    REQUIRE(part);
+    Pointer<TestPart>(registry, part.Value())->data = BulkDataRef{};
+    PackageWriteOptions options = EditorOptions();
+    options.bulkSource = &store;
+    MemoryPackageSink sink(env.allocator);
+    auto written = WritePackage(env.allocator, registry, registry.OwnerAccess(),
+                                scene.package.Handle(), options, sink);
+    REQUIRE(written);
+    const Array<uint8> saved = sink.Take();
+    REQUIRE(attached.files.Set("Content/Saved.rasset", saved.View()));
+    FileBulk newBulk(env.allocator);
+    REQUIRE(ReadFileBulk(env.allocator, saved.View(), newBulk));
+    const Span<const BulkRemapEntry> remap = written.Value().bulkRemap.View();
+
+    // 잘못된 준비는 저장소를 바꾸지 않고 plan은 준비되지 않는다.
+    BulkRebindPlan plan(env.allocator);
+    const BulkRemapEntry missing[] = {{12345, 1}};
+    CHECK(store
+              .PrepareRebind(plan, "Content/Saved.rasset", newBulk.fingerprint, newBulk.bulkOffset,
+                             newBulk.entries.View(), missing)
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(!plan.IsReady());
+    CHECK(store
+              .PrepareRebind(plan, "", newBulk.fingerprint, newBulk.bulkOffset,
+                             newBulk.entries.View(), remap)
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(!plan.IsReady());
+    auto before = store.FileBulkId(RefOf(attached.bulk.entries[2]));
+    CHECK(before && before.Value() == 3);
+
+    // 준비의 모든 할당 실패도 바꾸지 않는다.
+    test::NFailAllocator failing(env.allocator);
+    uint32 failures = 0;
+    for (uint64 attempt = 1;; ++attempt) {
+        BulkRebindPlan probe(failing);
+        failing.FailOnAttempt(attempt);
+        auto prepared = store.PrepareRebind(probe, "Content/Saved.rasset", newBulk.fingerprint,
+                                            newBulk.bulkOffset, newBulk.entries.View(), remap);
+        const bool failed = failing.Attempts() >= attempt;
+        failing.DisableFailure();
+        if (!failed) {
+            CHECK(prepared && probe.IsReady());
+            break;
+        }
+
+        CHECK(prepared.Error() == ErrorCode::OutOfMemory && !probe.IsReady());
+        CHECK(store.Count() == 3);
+        ++failures;
+    }
+
+    CHECK(failures > 0);
+
+    // 준비 → 확정(그 사이 저장소를 바꾸지 않는다 — 계약). 준비 전에 더한 저장하지 않은 bulk는
+    // 재매핑에 없으니 표에서 빠진다(저장 결과에 없는 id와 같다 — 이미 준 span은 유효).
+    Array<uint8> extra(env.allocator);
+    FillIncompressible(extra, 40, 9);
+    auto added = store.AddUnsaved(Copy(env.allocator, extra.View()));
+    REQUIRE(added);
+    auto addedBytes = store.Read(added.Value());
+    REQUIRE(addedBytes);
+    REQUIRE(store.PrepareRebind(plan, "Content/Saved.rasset", newBulk.fingerprint,
+                                newBulk.bulkOffset, newBulk.entries.View(), remap));
+    CHECK(plan.IsReady() && store.Count() == 4);
+    store.CommitRebind(plan);
+    CHECK(!plan.IsReady());
+    CHECK(store.Count() == 2);
+    auto pixels = store.Read(asset->pixels);
+    REQUIRE(pixels);
+    CHECK(pixels.Value().Size() == scene.pixels.Size() &&
+          memcmp(pixels.Value().Data(), scene.pixels.Data(), scene.pixels.Size()) == 0);
+    CHECK(store.Read(RefOf(attached.bulk.entries[2])).Error() == ErrorCode::NotFound);
+    CHECK(store.Read(added.Value()).Error() == ErrorCode::NotFound);
+    CHECK(addedBytes.Value().Size() == extra.Size());
+    auto fileId = store.FileBulkId(asset->source);
+    CHECK(fileId && fileId.Value() >= 1);
+}
+
 } // namespace bulk_store_tests_file

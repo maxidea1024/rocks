@@ -202,8 +202,10 @@ inline bool MakeSources(AssetEnv& env, Sources& out) noexcept {
 
 // 메모리 프로젝트다(Content 파일 + 색인).
 struct Project {
-    explicit Project(Allocator& allocator) noexcept
-        : layout(allocator), ready(static_cast<bool>(layout.Initialize(MemoryRoot))),
+    // root는 프로젝트 루트다(기본은 디스크에 없는 메모리 루트 — 저장 시험은 잠금 파일을 둘 디스크
+    // 임시 디렉터리를 준다, Content 파일은 언제나 메모리다).
+    explicit Project(Allocator& allocator, StringView root = MemoryRoot) noexcept
+        : layout(allocator), ready(static_cast<bool>(layout.Initialize(root))),
           files(allocator, layout.ContentDirectory()), index(allocator, layout) {
     }
 

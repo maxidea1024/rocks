@@ -1,6 +1,7 @@
 #pragma once
 
 #include <AssetDatabase/ProjectLayout.h>
+#include <Core/Encoding/Sha256.h>
 #include <Platform/File.h>
 
 // 프로젝트 쓰기 잠금이다(Docs/Design/AssetSystem.ko.md 8절, 7.1절 4 — A2a). 이 잠금을 쥔 프로세스만
@@ -45,8 +46,14 @@ public:
         return lock_.IsHeld();
     }
 
+    // layout(같은 루트 철자)의 잠금을 잡고 있는지다(저장 같은 쓰기 API가 다른 프로젝트의 잠금을
+    // 받지 않게 — 7.1절 15 A2c2b). 잡을 때의 루트를 SHA-256으로 기억한다(할당 없이).
+    bool IsHeldFor(const ProjectLayout& layout) const noexcept;
+
 private:
     platform::FileLock lock_;
+    // 잡은 프로젝트 루트의 SHA-256이다.
+    Sha256Digest root_{};
 };
 
 } // namespace rocks

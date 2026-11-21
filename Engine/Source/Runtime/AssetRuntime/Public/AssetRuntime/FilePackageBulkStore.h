@@ -62,6 +62,48 @@ private:
     Array<UniquePtr<Entry>> entries_;
 };
 
+// 저장소를 새 파일에 다시 잇는 준비다(FilePackageBulkStore::PrepareRebind가 채우고 CommitRebind가
+// 쓴다 — 저장이 교체 전에 준비해 교체 뒤에는 실패하지 않게, 7.1절 15 A2c2b). 이동만 된다. 준비와
+// 확정 사이에 그 저장소를 바꾸면(Attach·AddUnsaved·CopyFrom·Rebind·Detach) 안 된다 — 확정은 할당
+// 없이 준비한 표로 바꾸므로 그 사이 더한 id를 담을 수 없다(확정이 저장소 변경 세대로 단언한다).
+class BulkRebindPlan {
+public:
+    explicit BulkRebindPlan(Allocator& allocator) noexcept
+        : table_(allocator), path_(allocator), updates_(allocator), kept_(allocator) {
+    }
+
+    BulkRebindPlan(BulkRebindPlan&&) noexcept = default;
+    BulkRebindPlan& operator=(BulkRebindPlan&&) noexcept = default;
+    BulkRebindPlan(const BulkRebindPlan&) = delete;
+    BulkRebindPlan& operator=(const BulkRebindPlan&) = delete;
+
+    // 준비를 마쳐 확정할 수 있는지다.
+    bool IsReady() const noexcept {
+        return ready_;
+    }
+
+private:
+    friend class FilePackageBulkStore;
+
+    // slot 하나의 새 파일 entry다.
+    struct Update {
+        usize slot = 0;
+        PackageBulkEntry entry{};
+        uint32 fileId = 0;
+        uint64 fileOffset = 0;
+    };
+
+    HashMap<uint32, usize> table_;
+    String path_;
+    PackageFingerprint fingerprint_{};
+    Array<Update> updates_;
+    // 새 표에 남는 slot인지다(준비 때의 slot 수).
+    Array<bool> kept_;
+    // 준비 때 저장소의 변경 세대다.
+    uint64 revision_ = 0;
+    bool ready_ = false;
+};
+
 // 에디터 패키지의 파일 bulk 저장소다(7.1절 15). 파일 핸들을 쥐지 않고 경로·로드 지문·entry 표를
 // 쥐며, entry를 처음 읽을 때 캐시로 파일을 열어(지문 대조) 저장 byte를 읽고 crc32·압축 해제·
 // SHA-256을 확인한 raw byte를 보관한다. 저장하지 않은 bulk(AddUnsaved)는 메모리에만 있다.
@@ -105,6 +147,16 @@ public:
                         uint64 bulkSectionOffset, Span<const PackageBulkEntry> entries,
                         Span<const BulkRemapEntry> remap) noexcept;
 
+    // Rebind를 두 단계로 한다: PrepareRebind는 같은 검사와 새 표·경로 할당을 모두 plan에 하고
+    // 저장소를 바꾸지 않는다(오류는 Rebind와 같다 — plan은 준비되지 않은 채 남는다). CommitRebind는
+    // 준비한 plan을 할당 없이 적용하고(실패하지 않는다) plan을 비운다. 준비되지 않은 plan, 준비 뒤
+    // 바뀐 저장소의 확정은 계약 위반이다(단언).
+    Result<void> PrepareRebind(BulkRebindPlan& plan, StringView path,
+                               const PackageFingerprint& fingerprint, uint64 bulkSectionOffset,
+                               Span<const PackageBulkEntry> entries,
+                               Span<const BulkRemapEntry> remap) const noexcept;
+    void CommitRebind(BulkRebindPlan& plan) noexcept;
+
     // 아직 읽지 않은 entry를 모두 읽어 메모리로 두고 파일과의 연결(경로·캐시 핸들)을 끊는다(이동·
     // 삭제 전 — 7.1절 6, UE ResetLoaders). 오류: Read의 오류(그때까지 읽은 것은 남고 연결은
     // 그대로).
@@ -138,6 +190,8 @@ private:
     // 메모리 id → slots_ index.
     HashMap<uint32, usize> table_;
     uint32 nextUnsaved_ = 1;
+    // 표·연결을 바꿀 때마다 오르는 세대다(BulkRebindPlan 대조).
+    uint64 revision_ = 0;
 };
 
 } // namespace rocks

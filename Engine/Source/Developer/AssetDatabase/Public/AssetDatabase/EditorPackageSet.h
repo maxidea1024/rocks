@@ -53,7 +53,8 @@ struct EditorPackageSetConfig {
     const ProjectLayout* layout = nullptr;
     // 저장이 그 파일 하나를 다시 읽어 갱신한다(Refresh).
     AssetIndex* index = nullptr;
-    // 저장의 Tags·Build 의존을 만드는 타입 hook 표다(null이면 둘 다 없다 — 빌림).
+    // 저장의 Tags·Build 의존을 만드는 타입 hook 표다(빌림 — 저장에는 필수: null이면 Save가
+    // InvalidArgument. 태그가 필요 없는 host도 빈 표를 넘긴다).
     const AssetTypeHookTable* hooks = nullptr;
     // 저장 Summary의 savedBy다(빈 값이면 build::CurrentEngineVersion() — 시험은 고정 값).
     EngineVersion writeEngineVersion{};
@@ -167,9 +168,10 @@ public:
     // 발급한다. 새 패키지는 dirty다. 반환은 Package handle이다.
     //
     // 오류(failure 진단): Initialize 전·type 0 InvalidArgument, 같은 경로 키가 색인에 있거나 집합의
-    // 저장하지 않은 새 패키지와 겹치면 DuplicatePath / AlreadyExists, 같은 id가 열려 있거나 색인에
-    // 있으면 DuplicateAssetId / AlreadyExists, id 발급 실패(진단 None과 그 오류), type이 에셋
-    // 클래스가 아니면 Registry의 오류(진단 None), 할당 실패.
+    // 저장하지 않은 새 패키지와 겹치면 DuplicatePath / AlreadyExists, 파일 절대 경로(임시 접미사
+    // 포함)가 OS 상한을 넘으면 InvalidPath / CapacityExceeded, 같은 id가 열려 있거나 색인에 있으면
+    // DuplicateAssetId / AlreadyExists, id 발급 실패(진단 None과 그 오류), type이 에셋 클래스가
+    // 아니면 Registry의 오류(진단 None), 할당 실패.
     Result<ObjectHandle> Create(const LogicalPath& path, TypeId type, AssetId id = {},
                                 AssetDiagnostic* failure = nullptr) noexcept;
 
@@ -179,15 +181,15 @@ public:
     // 열린 패키지를 저장한다(5.5절 1–8, 7.1절 15 A2c2b). lock은 이 프로젝트의 잡은 쓰기 잠금이다.
     // warnings가 있으면 경고를 붙인다(DroppedUnresolvedImport·NotDurable·OrphanNotDeleted).
     //
-    // 오류(failure 진단 — 앞에서 걸리면 아무것도 쓰지 않는다): Initialize 전·잠금을 잡지 않음
-    // InvalidArgument, 열리지 않음 NotFound, 읽기 전용 NewerVersion / Unsupported, 미해결 import가
-    // 있는데 dropUnresolved가 아님 MissingDependency / InvalidArgument(related = 첫 대상), 새
-    // 패키지의 경로 상한 InvalidPath / CapacityExceeded·대상이 이미 있거나 색인에 같은 경로 키
+    // 오류(failure 진단 — 앞에서 걸리면 아무것도 쓰지 않는다): Initialize 전·hook 표 없음·이
+    // 프로젝트의 잡은 잠금이 아님 InvalidArgument, 열리지 않음 NotFound, 읽기 전용 NewerVersion /
+    // Unsupported, 미해결 import가 있는데 dropUnresolved가 아님 MissingDependency /
+    // InvalidArgument(related = 첫 대상), 새 패키지의 대상이 이미 있거나 색인에 같은 경로 키
     // DuplicatePath / AlreadyExists, 외부 변경(대상의 지문이 열 때와 다름·대상 없음·대상 헤더 손상)
-    // ExternalModification / StaleHandle, hook 오류(진단 None), WritePackage의 진단, 파일 만들기·
-    // 쓰기·Flush·Close·Replace·디렉터리 만들기의 IO(진단 None과 그 오류 — 임시 파일을 지운다),
-    // 재검증 실패(그 진단 — writer·sink 결함), 할당 실패. 교체 뒤의 실패(저장소 Rebind·색인
-    // Refresh의 할당 실패)는 파일이 이미 바뀐 뒤라 정보는 새 파일을 가리키고 dirty는 지워진다(7.1절
+    // ExternalModification / StaleHandle, 대표 에셋 찾기·타입 조회·hook 오류(진단 None),
+    // WritePackage의 진단, 파일 만들기·쓰기·Flush·Close·Replace·디렉터리 만들기의 IO(진단 None과 그
+    // 오류 — 임시 파일을 지운다), 재검증 실패(그 진단 — writer·sink 결함), 할당 실패. 교체 뒤의
+    // 일(저장소 다시 잇기·색인 갱신)은 교체 전에 준비하므로 교체가 끝나면 실패하지 않는다(7.1절
     // 15).
     Result<void> Save(AssetId id, const AssetDatabaseLock& lock, const EditorSaveOptions& options,
                       Array<EditorWarning>* warnings = nullptr,

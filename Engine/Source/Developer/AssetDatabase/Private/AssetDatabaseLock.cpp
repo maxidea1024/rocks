@@ -12,6 +12,11 @@ namespace {
 // 잠금 파일 경로의 인라인 byte 수다(넘으면 allocator로 자란다).
 constexpr usize LockPathBytes = 512;
 
+Sha256Digest RootDigest(StringView root) noexcept {
+    return Sha256::Hash(
+        Span<const uint8>(reinterpret_cast<const uint8*>(root.Data()), root.ByteCount()));
+}
+
 } // namespace
 
 Result<void> AssetDatabaseLock::Acquire(const ProjectLayout& layout,
@@ -48,7 +53,12 @@ Result<void> AssetDatabaseLock::Acquire(const ProjectLayout& layout,
         return Result<void>::Failure(FileErrorCode(acquired));
     }
 
+    root_ = RootDigest(layout.Root());
     return Result<void>::Success();
+}
+
+bool AssetDatabaseLock::IsHeldFor(const ProjectLayout& layout) const noexcept {
+    return lock_.IsHeld() && !layout.Root().IsEmpty() && root_ == RootDigest(layout.Root());
 }
 
 } // namespace rocks

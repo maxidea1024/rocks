@@ -116,7 +116,8 @@ int ExitCode(platform::Process& child) noexcept {
 } // namespace
 
 // 같은 프로세스(8절): 잠금은 Intermediate를 만들고 그 아래 잠금 파일을 잡는다. 같은 객체로 다시
-// 잡으면 AlreadyExists, 다른 객체는 Busy(대기 0)이고, 놓으면 다른 객체가 잡는다.
+// 잡으면 AlreadyExists, 다른 객체는 Busy(대기 0)이고, 놓으면 다른 객체가 잡는다. IsHeldFor는 잡은
+// 루트와 같은 배치에만 참이다(놓은 뒤·다른 루트·Initialize 전 거짓 — 7.1절 15 A2c2b).
 TEST(AssetDatabaseLock_SameProcess) {
     TempProject project("lock-local");
     REQUIRE(project.made);
@@ -131,11 +132,22 @@ TEST(AssetDatabaseLock_SameProcess) {
                                               layout.IntermediateDirectory().ByteCount(), info) &&
           info.type == platform::FileType::Directory);
     CHECK(first.Acquire(layout, 0).Error() == ErrorCode::AlreadyExists);
+    // 잡은 프로젝트 대조: 같은 루트의 다른 배치 객체는 참, 다른 루트·Initialize 전 배치는 거짓.
+    ProjectLayout same(allocator);
+    REQUIRE(same.Initialize(project.Root()));
+    TempProject otherProject("lock-other");
+    REQUIRE(otherProject.made);
+    ProjectLayout other(allocator);
+    REQUIRE(other.Initialize(otherProject.Root()));
+    ProjectLayout uninitialized(allocator);
+    CHECK(first.IsHeldFor(layout) && first.IsHeldFor(same));
+    CHECK(!first.IsHeldFor(other) && !first.IsHeldFor(uninitialized));
     AssetDatabaseLock second;
+    CHECK(!second.IsHeldFor(layout));
     CHECK(second.Acquire(layout, 0).Error() == ErrorCode::Busy);
     CHECK(!second.IsHeld());
     first.Release();
-    CHECK(!first.IsHeld());
+    CHECK(!first.IsHeld() && !first.IsHeldFor(layout));
     REQUIRE(second.Acquire(layout, 0));
     second.Release();
     // 놓은 뒤 다시 놓아도 아무것도 하지 않는다.
