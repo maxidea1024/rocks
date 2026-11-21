@@ -95,7 +95,7 @@ internal static class GameProjectFilesTests
         Require(File.Exists(values.Output), "game NMake rebuild did not build " + values.Output);
 
         // 파일 하나 컴파일(Ctrl+F7, 7.4절): 게임 소스 하나를 SDK의 IdeBuild로 논리 명령 그대로 컴파일한다.
-        await IdeScriptsTests.CompileSelectedAsync(gameProject, "Debug", output, Path.Combine(game, "Source", "Main.cpp"),
+        await IdeScriptsTests.CompileSelectedAsync(gameProject, "Debug", output, [Path.Combine(game, "Source", "Main.cpp")],
             Path.Combine(game, "Source", "GameObject.h"), game, environment);
 
         // associate: 생성 상태가 있으면 다시 만든다.

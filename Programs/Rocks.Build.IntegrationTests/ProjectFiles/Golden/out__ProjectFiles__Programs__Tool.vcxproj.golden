@@ -38,7 +38,6 @@
     <NMakeBuildCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Build -Target Tool -Configuration Debug -Platform Windows -Compiler &quot;$(RocksCompiler)&quot;</NMakeBuildCommandLine>
     <NMakeReBuildCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Rebuild -Target Tool -Configuration Debug -Platform Windows -Compiler &quot;$(RocksCompiler)&quot;</NMakeReBuildCommandLine>
     <NMakeCleanCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Clean -Target Tool -Configuration Debug -Platform Windows -Compiler &quot;$(RocksCompiler)&quot;</NMakeCleanCommandLine>
-    <NMakeCompileFileCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Compile -WorkingDir &quot;$(MSBuildProjectDirectory)&quot; -Files &quot;$(SelectedFiles)&quot; -Target Tool -Configuration Debug -Platform Windows -Compiler &quot;$(RocksCompiler)&quot;</NMakeCompileFileCommandLine>
     <NMakeOutput>$(RocksRoot)out\dotnet-windows-tool-debug\bin\Tool.exe</NMakeOutput>
     <IntDir>$(RocksRoot)out\ProjectFiles\Intermediate\Tool\Debug_x64\</IntDir>
     <OutDir>$(RocksRoot)out\ProjectFiles\Intermediate\Tool\Debug_x64\</OutDir>
@@ -48,6 +47,11 @@
     <RocksForcedIncludes_0>$(RocksRoot)out\ProjectFiles\Definitions\0123456789abcdef.h;$(RocksRoot)Engine\Lib\Pch.h</RocksForcedIncludes_0>
     <RocksOptions_0>/utf-8 /std:c++23preview /MDd /Yu&quot;$(RocksRoot)Engine\Lib\Pch.h&quot;</RocksOptions_0>
   </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <NMakeCompile>
+      <NMakeCompileFileCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Compile -WorkingDir &quot;$(MSBuildProjectDirectory)&quot; -Files &quot;$(SelectedFiles)&quot; -Target Tool -Configuration Debug -Platform Windows -Compiler &quot;$(RocksCompiler)&quot;</NMakeCompileFileCommandLine>
+    </NMakeCompile>
+  </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <AdditionalIncludeDirectories>$(RocksIncludes_0)</AdditionalIncludeDirectories>
@@ -60,7 +64,6 @@
     <NMakeBuildCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Build -Target Tool -Configuration Release -Platform Windows -Compiler &quot;$(RocksCompiler)&quot;</NMakeBuildCommandLine>
     <NMakeReBuildCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Rebuild -Target Tool -Configuration Release -Platform Windows -Compiler &quot;$(RocksCompiler)&quot;</NMakeReBuildCommandLine>
     <NMakeCleanCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Clean -Target Tool -Configuration Release -Platform Windows -Compiler &quot;$(RocksCompiler)&quot;</NMakeCleanCommandLine>
-    <NMakeCompileFileCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Compile -WorkingDir &quot;$(MSBuildProjectDirectory)&quot; -Files &quot;$(SelectedFiles)&quot; -Target Tool -Configuration Release -Platform Windows -Compiler &quot;$(RocksCompiler)&quot;</NMakeCompileFileCommandLine>
     <NMakeOutput>$(RocksRoot)out\dotnet-windows-tool-release\bin\Tool.exe</NMakeOutput>
     <IntDir>$(RocksRoot)out\ProjectFiles\Intermediate\Tool\Release_x64\</IntDir>
     <OutDir>$(RocksRoot)out\ProjectFiles\Intermediate\Tool\Release_x64\</OutDir>
@@ -70,6 +73,11 @@
     <RocksForcedIncludes_0>$(RocksRoot)out\ProjectFiles\Definitions\0123456789abcdef.h;$(RocksRoot)Engine\Lib\Pch.h</RocksForcedIncludes_0>
     <RocksOptions_0>/utf-8 /std:c++23preview /MD /Yu&quot;$(RocksRoot)Engine\Lib\Pch.h&quot;</RocksOptions_0>
   </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <NMakeCompile>
+      <NMakeCompileFileCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Compile -WorkingDir &quot;$(MSBuildProjectDirectory)&quot; -Files &quot;$(SelectedFiles)&quot; -Target Tool -Configuration Release -Platform Windows -Compiler &quot;$(RocksCompiler)&quot;</NMakeCompileFileCommandLine>
+    </NMakeCompile>
+  </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
       <AdditionalIncludeDirectories>$(RocksIncludes_0)</AdditionalIncludeDirectories>
