@@ -24,6 +24,8 @@ constexpr uint32 AliasEntryNodes = 9;
 constexpr uint32 AliasRootNodes = 8;
 // 하루의 tick 수다.
 constexpr int64 TicksPerDay = TimeSpan::TicksPerDay;
+// 별칭이 될 수 있는 경로 텍스트의 최대 byte다(논리 경로 상한 — 4.2절).
+constexpr usize MaxAliasPathBytes = 256;
 // id(36자)·ISO 8601 시각(최대 28자)을 쓰는 고정 버퍼 크기다.
 constexpr usize AliasFieldBytes = 64;
 
@@ -138,9 +140,27 @@ uint8 AsciiLower(uint8 value) noexcept {
     return value >= 'A' && value <= 'Z' ? static_cast<uint8>(value - 'A' + 'a') : value;
 }
 
-// bytes에서 needle(ASCII 대소문자 무시, 뒤 경계)이 나오는 줄 번호들을 lines에 붙인다.
-Result<void> FindLines(Span<const uint8> bytes, StringView needle, Array<uint64>& lines) noexcept {
-    const usize length = needle.ByteCount();
+// 만료 항목의 대조 키(경로의 ASCII 소문자)와 그 항목 위치다(키 순 정렬 — 이진 검색).
+struct ExpiredKey {
+    explicit ExpiredKey(Allocator& allocator) noexcept : lower(allocator) {
+    }
+
+    ExpiredKey(ExpiredKey&&) noexcept = default;
+    ExpiredKey& operator=(ExpiredKey&&) noexcept = default;
+
+    String lower;
+    usize slot = 0;
+};
+
+// 경로 텍스트로 보는 마운트 앞부분이다(ASCII 소문자 — 논리 경로는 마운트로 시작한다).
+constexpr StringView MountLower = "/game";
+
+// bytes를 한 번 훑어 마운트로 시작하는 경로 후보(뒤 경계 또는 파일 끝까지, 논리 경로 상한 안)를
+// 소문자로 만들어 keys에서 찾고, 맞으면 (항목 위치, 줄)을 hits에 붙인다. 논리 경로에는 경계 문자가
+// 없으므로 이것은 "그 경로 텍스트가 나오고 뒤가 경계"와 같은 판정이다 — 비용은 byte × log(항목
+// 수)다. 오류: 할당 실패.
+Result<void> FindUses(Span<const uint8> bytes, Span<const ExpiredKey> keys, String& scratch,
+                      Array<usize>& slots, Array<uint64>& lines) noexcept {
     uint64 line = 1;
     for (usize at = 0; at < bytes.Size(); ++at) {
         if (bytes[at] == '\n') {
@@ -148,18 +168,48 @@ Result<void> FindLines(Span<const uint8> bytes, StringView needle, Array<uint64>
             continue;
         }
 
-        if (bytes.Size() - at < length) {
+        if (bytes[at] != '/' || bytes.Size() - at < MountLower.ByteCount()) {
             continue;
         }
 
-        bool same = true;
-        for (usize offset = 0; offset < length && same; ++offset) {
-            same = AsciiLower(bytes[at + offset]) ==
-                   AsciiLower(static_cast<uint8>(needle.Data()[offset]));
+        bool mount = true;
+        for (usize offset = 1; offset < MountLower.ByteCount() && mount; ++offset) {
+            mount = AsciiLower(bytes[at + offset]) == static_cast<uint8>(MountLower.Data()[offset]);
         }
 
-        if (!same || (at + length < bytes.Size() && !IsBoundary(bytes[at + length]))) {
+        if (!mount) {
             continue;
+        }
+
+        // 후보: 경계(또는 파일 끝)까지 — 논리 경로 상한을 넘으면 별칭일 수 없다.
+        scratch.Clear();
+        usize end = at;
+        while (end < bytes.Size() && !IsBoundary(bytes[end]) && end - at <= MaxAliasPathBytes) {
+            ++end;
+        }
+
+        if (end - at > MaxAliasPathBytes) {
+            continue;
+        }
+
+        for (usize index = at; index < end; ++index) {
+            const char lower = static_cast<char>(AsciiLower(bytes[index]));
+            if (auto appended = scratch.TryAppend(StringView(&lower, 1)); !appended) {
+                return appended;
+            }
+        }
+
+        const StringView candidate = scratch.View();
+        const usize found =
+            algo::LowerBound(keys, candidate, [](const ExpiredKey& key, StringView probe) noexcept {
+                return StringView::CompareBytes(key.lower.View(), probe) < 0;
+            });
+        if (found == keys.Size() || keys[found].lower.View() != candidate) {
+            continue;
+        }
+
+        if (auto pushed = slots.TryPushBack(keys[found].slot); !pushed) {
+            return pushed;
         }
 
         if (auto pushed = lines.TryPushBack(line); !pushed) {
@@ -397,51 +447,74 @@ Result<void> AssetAliasTable::Load(platform::FileSystem& files, AssetDiagnostic*
 
 Result<void> AssetAliasTable::EncodeTo(const Array<AssetAlias>& entries,
                                        Array<uint8>& out) const noexcept {
-    // writer는 한 번 실패하면 이후 호출이 모두 실패한다(Finish는 InvalidArgument) — 첫 오류만
-    // 남긴다(할당 실패를 OutOfMemory로 돌려준다). id·시각 텍스트는 고정 용량 버퍼에 쓴다(36자·최대
-    // 28자 — 할당·실패가 없다).
+    // writer는 한 번 실패하면 이후 호출과 Finish가 그 첫 오류로 실패한다(Core JsonWriter) — 중간
+    // 결과는 보지 않는다. id·시각 텍스트는 고정 용량 버퍼에 쓴다(36자·최대 28자 — 할당·실패가
+    // 없다).
     StringBuilder<1024> text(*allocator_);
     JsonWriter writer(text);
-    Result<void> first = Result<void>::Success();
-    auto put = [&](Result<void> step) noexcept {
-        if (first && !step) {
-            first = Move(step);
-        }
-    };
-    put(writer.BeginObject());
-    put(writer.Key(VersionKey));
+    (void)writer.BeginObject();
+    (void)writer.Key(VersionKey);
     (void)writer.UInt64(AssetAliasFormatVersion);
-    put(writer.Key(AliasesKey));
-    put(writer.BeginArray());
+    (void)writer.Key(AliasesKey);
+    (void)writer.BeginArray();
     char fieldBytes[AliasFieldBytes];
     FixedStringBuilder field(Span<char>(fieldBytes, AliasFieldBytes));
     for (const AssetAlias& alias : entries) {
-        put(writer.BeginObject());
-        put(writer.Key(PathKey));
-        put(writer.String(alias.path.View()));
-        put(writer.Key(AssetKey));
+        (void)writer.BeginObject();
+        (void)writer.Key(PathKey);
+        (void)writer.String(alias.path.View());
+        (void)writer.Key(AssetKey);
         field.Clear();
         (void)field.TryAppendFormat("{}", alias.asset);
-        put(writer.String(field.View()));
-        put(writer.Key(CreatedKey));
+        (void)writer.String(field.View());
+        (void)writer.Key(CreatedKey);
         field.Clear();
         (void)field.TryAppendFormat("{}", alias.created);
-        put(writer.String(field.View()));
-        put(writer.Key(DaysKey));
+        (void)writer.String(field.View());
+        (void)writer.Key(DaysKey);
         (void)writer.UInt64(alias.days);
-        put(writer.EndObject());
+        (void)writer.EndObject();
     }
 
-    put(writer.EndArray());
-    put(writer.EndObject());
-    put(writer.Finish());
-    if (!first) {
-        return first;
+    (void)writer.EndArray();
+    (void)writer.EndObject();
+    if (auto finished = writer.Finish(); !finished) {
+        return finished;
     }
 
     out.Clear();
     return out.TryAppend(Span<const uint8>(reinterpret_cast<const uint8*>(text.View().Data()),
                                            text.View().ByteCount()));
+}
+
+Result<bool> AssetAliasTable::Unchanged(platform::FileSystem& files) const noexcept {
+    String path(*allocator_);
+    const StringView pieces[] = {layout_->ConfigDirectory(), "/", AssetAliasFileName};
+    for (StringView piece : pieces) {
+        if (auto appended = path.TryAppend(piece); !appended) {
+            return Result<bool>::Failure(appended.Error());
+        }
+    }
+
+    Array<uint8> bytes(*allocator_);
+    bool existed = false;
+    bool tooLarge = false;
+    if (auto read = ReadWhole(files, path.View(), MaxAssetAliasFileBytes, bytes, existed, tooLarge);
+        !read) {
+        return Result<bool>::Failure(read.Error());
+    }
+
+    if (tooLarge || existed != currentExisted_ || bytes.Size() != currentBytes_.Size()) {
+        return Result<bool>::Success(false);
+    }
+
+    for (usize at = 0; at < bytes.Size(); ++at) {
+        if (bytes[at] != currentBytes_[at]) {
+            return Result<bool>::Success(false);
+        }
+    }
+
+    return Result<bool>::Success(true);
 }
 
 Result<void> AssetAliasTable::Write(platform::FileSystem& files, const AssetDatabaseLock& lock,
@@ -554,6 +627,25 @@ Result<void> AssetAliasTable::Write(platform::FileSystem& files, const AssetData
     if (next.Size() > maxEntries_) {
         return FailIo<void>(failure, ErrorCode::CapacityExceeded);
     }
+
+    // 읽은 뒤 파일이 바뀌었으면(병합·손 편집) 덮어쓰지 않는다 — 다시 읽고 다시 한다(5.5절 1과 같은
+    // 원칙).
+    auto unchanged = Unchanged(files);
+    if (!unchanged) {
+        return unchanged.Error() == ErrorCode::OutOfMemory
+                   ? Result<void>::Failure(unchanged.Error())
+                   : FailIo<void>(failure, unchanged.Error());
+    }
+
+    if (!unchanged.Value()) {
+        if (failure != nullptr) {
+            *failure = AssetDiagnostic{};
+            failure->code = AssetDiagnosticCode::ExternalModification;
+            failure->error = ErrorCode::StaleHandle;
+        }
+
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
     Array<uint8> bytes(*allocator_);
     if (auto encoded = EncodeTo(next, bytes); !encoded) {
         return encoded;
@@ -587,6 +679,16 @@ Result<void> AssetAliasTable::Restore(platform::FileSystem& files,
         return Result<void>::Success();
     }
 
+    // 마지막 Write 뒤 파일이 바뀌었으면 되돌리지 않는다(그 변경을 잃는다).
+    auto unchanged = Unchanged(files);
+    if (!unchanged) {
+        return Result<void>::Failure(unchanged.Error());
+    }
+
+    if (!unchanged.Value()) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+
     if (previousExisted_) {
         auto written = WriteFileAtomically(files, *allocator_, layout_->ConfigDirectory(),
                                            AssetAliasFileName, previousBytes_.View());
@@ -602,8 +704,8 @@ Result<void> AssetAliasTable::Restore(platform::FileSystem& files,
             }
         }
 
-        if (auto deleted = files.Delete(path.View().Data(), path.View().ByteCount());
-            !deleted && deleted.code != platform::FileCode::NotFound) {
+        // 파일은 있다(바로 앞 판정 — 그 사이 지워지면 지우기 오류다).
+        if (auto deleted = files.Delete(path.View().Data(), path.View().ByteCount()); !deleted) {
             return Result<void>::Failure(FileErrorCode(deleted));
         }
     }
@@ -659,8 +761,34 @@ Result<void> AssetAliasTable::Prune(platform::FileSystem& files, const AssetData
         flag = false;
     }
 
+    // 만료 항목의 대조 키 표(경로 ASCII 소문자, 정렬)다.
+    Array<ExpiredKey> keys(*allocator_);
+    if (auto reserved = keys.TryReserve(expired.Size()); !reserved) {
+        return reserved;
+    }
+
+    for (usize slot = 0; slot < expired.Size(); ++slot) {
+        ExpiredKey key(*allocator_);
+        key.slot = slot;
+        const StringView path = entries_[expired[slot]].path.View();
+        for (usize index = 0; index < path.ByteCount(); ++index) {
+            const char lower =
+                static_cast<char>(AsciiLower(static_cast<uint8>(path.Data()[index])));
+            if (auto appended = key.lower.TryAppend(StringView(&lower, 1)); !appended) {
+                return appended;
+            }
+        }
+
+        (void)keys.TryPushBack(Move(key));
+    }
+
+    algo::Sort(keys.View(), [](const ExpiredKey& left, const ExpiredKey& right) noexcept {
+        return StringView::CompareBytes(left.lower.View(), right.lower.View()) < 0;
+    });
     usize filesSeen = 0;
     uint64 bytesSeen = 0;
+    String scratch(*allocator_);
+    Array<usize> hitSlots(*allocator_);
     Array<uint64> lines(*allocator_);
     while (!pending.IsEmpty()) {
         Array<char> relative = Move(pending[pending.Size() - 1]);
@@ -759,46 +887,45 @@ Result<void> AssetAliasTable::Prune(platform::FileSystem& files, const AssetData
                 break;
             }
 
-            for (usize slot = 0; slot < expired.Size(); ++slot) {
-                lines.Clear();
-                if (auto found =
-                        FindLines(bytes.View(), entries_[expired[slot]].path.View(), lines);
-                    !found) {
-                    return found;
+            hitSlots.Clear();
+            lines.Clear();
+            if (auto found = FindUses(bytes.View(), keys.View(), scratch, hitSlots, lines);
+                !found) {
+                return found;
+            }
+
+            for (usize hit = 0; hit < hitSlots.Size(); ++hit) {
+                const usize slot = hitSlots[hit];
+                AssetAliasUse use(*allocator_);
+                use.line = lines[hit];
+                Result<void> step = use.alias.TryAssign(entries_[expired[slot]].path.View());
+                if (step) {
+                    step = AssignDisplayName(
+                        use.file, StringView(childRelative.Data(), childRelative.Size()));
                 }
 
-                for (uint64 line : lines) {
-                    AssetAliasUse use(*allocator_);
-                    use.line = line;
-                    Result<void> step = use.alias.TryAssign(entries_[expired[slot]].path.View());
+                if (step) {
+                    // 프로젝트 루트 상대 경로로 보고한다.
+                    String prefixed(*allocator_);
+                    step = prefixed.TryAppend("Config/");
                     if (step) {
-                        step = AssignDisplayName(
-                            use.file, StringView(childRelative.Data(), childRelative.Size()));
-                    }
-
-                    if (step) {
-                        // 프로젝트 루트 상대 경로로 보고한다.
-                        String prefixed(*allocator_);
-                        step = prefixed.TryAppend("Config/");
-                        if (step) {
-                            step = prefixed.TryAppend(use.file.View());
-                        }
-
-                        if (step) {
-                            use.file = Move(prefixed);
-                        }
+                        step = prefixed.TryAppend(use.file.View());
                     }
 
                     if (step) {
-                        step = report.uses.TryPushBack(Move(use));
+                        use.file = Move(prefixed);
                     }
-
-                    if (!step) {
-                        return step;
-                    }
-
-                    used[slot] = true;
                 }
+
+                if (step) {
+                    step = report.uses.TryPushBack(Move(use));
+                }
+
+                if (!step) {
+                    return step;
+                }
+
+                used[slot] = true;
             }
         }
 

@@ -84,14 +84,26 @@ enum class EditorWarningKind : uint8 {
     NotDurable,
     // 저장: 그 디렉터리의 고아 임시 파일을 지우지 못했다(진단 None과 그 오류 — 저장은 성공).
     OrphanNotDeleted,
-    // 해석: 색인에 없는 논리 경로를 별칭으로 풀었다(진단 AliasResolved, asset = 대상, detail = 별칭
-    // 표의 항목 번호 — 7.1절 17 A2e1).
-    AliasResolved
+    // 해석: 색인에 없는 논리 경로를 별칭으로 풀었다(진단 AliasResolved, asset = 대상, text = 옛
+    // 경로 — 7.1절 17 A2e1).
+    AliasResolved,
+    // 해석: 별칭 표를 읽지 못해 색인에 없는 경로를 풀지 못했다(진단 = 별칭 표 진단 — 대입은 따로
+    // Unresolved로 실패한다).
+    AliasTableUnreadable
 };
+
+// 경고의 경로 텍스트 칸 크기다(논리 경로 상한 + NUL — 할당 없이 복사되는 경고).
+inline constexpr usize EditorWarningTextBytes = 257;
 
 struct EditorWarning {
     EditorWarningKind kind = EditorWarningKind::ExcludedDependency;
     AssetDiagnostic diagnostic;
+    // 경고 종류가 정한 경로 텍스트다(AliasResolved — 옛 경로, NUL로 끝남).
+    char text[EditorWarningTextBytes] = {};
+
+    StringView Text() const noexcept {
+        return StringView(text);
+    }
 };
 
 // 저장 옵션이다.

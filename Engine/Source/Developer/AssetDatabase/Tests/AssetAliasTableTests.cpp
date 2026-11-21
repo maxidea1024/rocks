@@ -437,6 +437,52 @@ TEST(AssetAliasTable_WriteFailures) {
     scene.files.Remove("Config");
     REQUIRE(scene.files.AddDirectory("Config"));
 
+    // 외부 변경: 읽은 뒤 파일이 바뀌거나(내용·크기) 생기거나 지워지면 쓰지 않는다
+    // (ExternalModification / StaleHandle — 파일 그대로), 다시 읽기 실패는 IO 오류.
+    {
+        Array<char> bytes(env.allocator);
+        REQUIRE(bytes.TryAppend(Span<const char>(before.View().Data(), before.View().ByteCount())));
+        bytes[bytes.Size() - 2] = ' ';
+        const StringView variants[] = {StringView(bytes.Data(), bytes.Size()),
+                                       "{\"version\": 1, \"aliases\": []}\n"};
+        for (StringView variant : variants) {
+            REQUIRE(scene.Put(variant));
+            failure = AssetDiagnostic{};
+            auto stale = table.Write(scene.files, scene.lock, {}, one, notDurable, &failure);
+            CHECK(!stale && stale.Error() == ErrorCode::StaleHandle &&
+                  failure.code == AssetDiagnosticCode::ExternalModification &&
+                  scene.Text() == variant && table.Count() == 1);
+        }
+
+        scene.files.Remove(AliasFile);
+        auto removed = table.Write(scene.files, scene.lock, {}, one, notDurable, &failure);
+        CHECK(!removed && removed.Error() == ErrorCode::StaleHandle && !scene.files.Has(AliasFile));
+        REQUIRE(scene.files.AddFile(
+            AliasFile,
+            Span<const uint8>(reinterpret_cast<const uint8*>(before.View().Data()),
+                              before.View().ByteCount()),
+            MemoryFault::Read));
+        failure = AssetDiagnostic{};
+        auto unreadable = table.Write(scene.files, scene.lock, {}, one, notDurable, &failure);
+        CHECK(!unreadable && failure.code == AssetDiagnosticCode::None);
+        scene.files.Remove(AliasFile);
+        REQUIRE(scene.Put(before.View()));
+        // 파일이 없던 표에 파일이 생겨도 바뀐 것이다.
+        AssetAliasTable absent(env.allocator, scene.layout);
+        scene.files.Remove(AliasFile);
+        REQUIRE(absent.Load(scene.files));
+        REQUIRE(scene.Put(before.View()));
+        CHECK(!absent.Write(scene.files, scene.lock, {}, one, notDurable));
+        // 너무 커진 파일도 바뀐 것이다.
+        Array<uint8> huge(env.allocator);
+        REQUIRE(huge.TryResize(static_cast<usize>(MaxAssetAliasFileBytes) + 1));
+        scene.files.Remove(AliasFile);
+        REQUIRE(scene.files.AddFile(AliasFile, huge.View()));
+        CHECK(!table.Write(scene.files, scene.lock, {}, one, notDurable));
+        scene.files.Remove(AliasFile);
+        REQUIRE(scene.Put(before.View()));
+    }
+
     // NotDurable은 성공 표시.
     scene.files.faults.replace = MemoryNotDurable;
     REQUIRE(table.Write(scene.files, scene.lock, {}, one, notDurable));
@@ -514,11 +560,19 @@ TEST(AssetAliasTable_Restores) {
     scene.files.faults.remove = {};
     REQUIRE(fresh.Restore(scene.files, scene.lock));
     CHECK(!scene.files.Has(AliasFile));
-    // 되돌릴 때 파일이 이미 없으면(누가 지웠다) 지우기 NotFound는 성공이다.
+    // 마지막 Write 뒤 파일이 바뀌었으면(밖에서 지움·고침) 되돌리지 않는다(그 변경을 잃는다).
     REQUIRE(fresh.Write(scene.files, scene.lock, {}, first, notDurable));
     scene.files.Remove(AliasFile);
-    REQUIRE(fresh.Restore(scene.files, scene.lock));
-    CHECK(fresh.Count() == 0);
+    auto gone = fresh.Restore(scene.files, scene.lock);
+    CHECK(!gone && gone.Error() == ErrorCode::StaleHandle && fresh.Count() == 1);
+    REQUIRE(scene.Put("{\"version\": 1, \"aliases\": []}\n"));
+    auto edited = fresh.Restore(scene.files, scene.lock);
+    CHECK(!edited && edited.Error() == ErrorCode::StaleHandle && fresh.Count() == 1);
+    // 다시 읽기 실패.
+    scene.files.Remove(AliasFile);
+    REQUIRE(scene.files.AddFile(AliasFile, Span<const uint8>(), MemoryFault::Read));
+    CHECK(!fresh.Restore(scene.files, scene.lock));
+    scene.files.Remove(AliasFile);
 
     // 할당 실패: 파일이 있던 상태(다시 쓰기)와 없던 상태(지우기) 둘 다.
     test::NFailAllocator failing(env.allocator);
@@ -612,6 +666,16 @@ TEST(AssetAliasTable_Prunes) {
         return Span<const uint8>(reinterpret_cast<const uint8*>(view.Data()), view.ByteCount());
     };
     REQUIRE(scene.files.AddFile("Config/Game.ini", bytesOf(text.View())));
+    // 쓰임이 아닌 것: 논리 경로 상한(256 byte)을 넘는 후보, 마운트가 아닌 앞부분, 파일 끝에서 잘린
+    // 마운트.
+    String noise(env.allocator);
+    REQUIRE(noise.TryAppend("/Game/"));
+    for (usize at = 0; at < 300; ++at) {
+        REQUIRE(noise.TryAppend("a"));
+    }
+
+    REQUIRE(noise.TryAppend("\n/Gxme/Free\n/Game/Zzz\n/Ga"));
+    REQUIRE(scene.files.AddFile("Config/Noise.txt", bytesOf(noise.View())));
     REQUIRE(scene.files.AddDirectory("Config/Sub"));
     REQUIRE(scene.files.AddFile(StringView("Config/Sub/\x01weird.txt"),
                                 bytesOf("first\n/Game/UsedDeep\n")));
@@ -764,10 +828,40 @@ TEST(AssetAliasTable_ServiceResolves) {
     auto broken = service.Info("/Game/Old/Hero", AssetInfoOptions{}, out, &warnings, &failure);
     CHECK(!broken && broken.Error() == ErrorCode::InvalidArgument &&
           failure.code == AssetDiagnosticCode::CorruptAliasTable);
+    // 경고 목록 없이도 같은 진단이다.
+    failure = AssetDiagnostic{};
+    CHECK(!service.Info("/Game/Old/Hero", AssetInfoOptions{}, out, nullptr, &failure) &&
+          failure.code == AssetDiagnosticCode::CorruptAliasTable);
     TextDiagnostics diagnostics(env.allocator);
     auto blocked =
         service.New(scene.lock, "TestAsset", "/Game/Fresh", {}, diagnostics, &warnings, &failure);
     CHECK(!blocked && failure.code == AssetDiagnosticCode::CorruptAliasTable);
+    // 참조 값 해석(asset-set)은 대입 진단 Unresolved로 실패하고 원인을 경고로 남긴다.
+    {
+        Array<TextAssignment> broken(env.allocator);
+        TextAssignment assignment;
+        REQUIRE(reflection_text::MakeTextAssignment("hard=/Game/Old/Hero", 0, assignment));
+        REQUIRE(broken.TryPushBack(assignment));
+        warnings.Clear();
+        TextDiagnostics brokenDiagnostics(env.allocator);
+        CHECK(!service.Set(scene.lock, "/Game/Villain", broken.View(), false, brokenDiagnostics,
+                           &warnings));
+        bool unreadable = false;
+        for (const EditorWarning& warning : warnings) {
+            unreadable =
+                unreadable || (warning.kind == EditorWarningKind::AliasTableUnreadable &&
+                               warning.diagnostic.code == AssetDiagnosticCode::CorruptAliasTable);
+        }
+
+        CHECK(unreadable);
+        // 그 경고를 붙이지 못하면(할당 실패) 열기가 OutOfMemory다.
+        test::NFailAllocator brokenWarnings(env.allocator);
+        Array<EditorWarning> failingList(brokenWarnings);
+        brokenWarnings.FailOnAttempt(1);
+        auto lostWarning = service.Info("/Game/Old/Hero", AssetInfoOptions{}, out, &failingList);
+        brokenWarnings.DisableFailure();
+        CHECK(!lostWarning && lostWarning.Error() == ErrorCode::OutOfMemory);
+    }
     bool notDurable = false;
     AssetAliasPruneReport brokenReport(env.allocator);
     failure = AssetDiagnostic{};
@@ -794,7 +888,7 @@ TEST(AssetAliasTable_ServiceResolves) {
     CHECK(warnings[0].kind == EditorWarningKind::AliasResolved &&
           warnings[0].diagnostic.asset == FixedId(HeroId) &&
           aliases.Value()->At(warnings[0].diagnostic.detail).path.View() == "/Game/Old/Hero" &&
-          service.AliasPath(warnings[0].diagnostic.detail) == "/Game/Old/Hero");
+          warnings[0].Text() == "/Game/Old/Hero");
     // 경고 목록이 없어도 푼다.
     REQUIRE(service.Info("/Game/Old/Hero", AssetInfoOptions{}, out));
     // 색인에 같은 경로가 있으면 색인이 이긴다(경고 없음).
@@ -879,7 +973,9 @@ TEST(AssetAliasTable_ServiceResolves) {
         REQUIRE(attempted.Initialize());
         String text(env.allocator);
         failing.FailOnAttempt(attempt);
-        Result<void> step = attempted.Info("/Game/Old/Base", AssetInfoOptions{}, text);
+        Array<EditorWarning> loopWarnings(env.allocator);
+        Result<void> step =
+            attempted.Info("/Game/Old/Base", AssetInfoOptions{}, text, &loopWarnings);
         bool removedOne = false;
         if (step) {
             step = attempted.AliasRemove(scene.lock, "/Game/Old/Leaf", removedOne);

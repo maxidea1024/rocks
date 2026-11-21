@@ -157,18 +157,22 @@ public:
     usize Find(StringView key) const noexcept;
 
     // 표에서 removeKeys를 빼고 add를 더하거나 바꾼(같은 키) 새 표를 원자 교체로 쓰고(빈 표도 쓴다),
-    // 성공하면 메모리 표를 바꾼다. 쓰기 전 파일 상태를 기억해 Restore가 되돌린다. 읽지 않은
-    // 표(Load 전)는 InvalidArgument. 오류(failure 진단): 잠금이 아니면 InvalidArgument, add의 경로
-    // 규칙 위반 InvalidPath / InvalidArgument, add의 null id·days 범위 밖 InvalidArgument, 항목 수
-    // 상한 CapacityExceeded, 쓰기 IO(진단 None과 그 오류 — 파일·메모리 표 그대로), 할당 실패.
-    // notDurable은 교체 뒤 동기화를 확인하지 못했는지다.
+    // 성공하면 메모리 표를 바꾼다. 쓰기 전 파일 상태를 기억해 Restore가 되돌린다. 쓰기 직전에
+    // 파일을 다시 읽어 마지막 Load·Write 때와 다르면(병합·손 편집 — 있음·없음 포함) 쓰지 않는다
+    // (ExternalModification / StaleHandle — 다시 Load한 뒤 다시 한다, 패키지 저장 5.5절 1과 같은
+    // 원칙). 읽지 않은 표(Load 전)는 InvalidArgument. 오류(failure 진단): 잠금이 아니면
+    // InvalidArgument, 외부 변경 ExternalModification / StaleHandle, 다시 읽기 IO(진단 None), add의
+    // 경로 규칙 위반 InvalidPath / InvalidArgument, add의 null id·days 범위 밖 InvalidArgument,
+    // 항목 수 상한 CapacityExceeded, 쓰기 IO(진단 None과 그 오류 — 파일·메모리 표 그대로), 할당
+    // 실패. notDurable은 교체 뒤 동기화를 확인하지 못했는지다.
     Result<void> Write(platform::FileSystem& files, const AssetDatabaseLock& lock,
                        Span<const StringView> removeKeys, Span<const AssetAliasInput> add,
                        bool& notDurable, AssetDiagnostic* failure = nullptr) noexcept;
 
     // 마지막 Write 전 상태(파일 byte·없음, 메모리 표)로 되돌린다 — 이동·삭제의 OS 단계가 실패했을
-    // 때 쓴다. 되돌릴 것이 없으면 아무것도 하지 않는다. 오류: 잠금이 아니면 InvalidArgument, 쓰기·
-    // 지우기 IO(그때 파일은 마지막 Write의 것이다), 할당 실패.
+    // 때 쓴다. 되돌릴 것이 없으면 아무것도 하지 않는다. 마지막 Write 뒤 파일이 바뀌었으면 되돌리지
+    // 않는다(StaleHandle). 오류: 잠금이 아니면 InvalidArgument, 외부 변경 StaleHandle, 다시 읽기·
+    // 쓰기·지우기 IO(그때 파일은 마지막 Write의 것이다), 할당 실패.
     Result<void> Restore(platform::FileSystem& files, const AssetDatabaseLock& lock) noexcept;
 
     // 만료 항목(created + days ≤ nowTicks)을 고르고 텍스트 참조 검색(Config 아래 일반 파일 —
@@ -182,6 +186,8 @@ public:
                        AssetDiagnostic* failure = nullptr) noexcept;
 
 private:
+    // 파일이 마지막 Load·Write 때(currentBytes_·currentExisted_)와 같은지다.
+    Result<bool> Unchanged(platform::FileSystem& files) const noexcept;
     Result<void> EncodeTo(const Array<AssetAlias>& entries, Array<uint8>& out) const noexcept;
 
     Allocator* allocator_;

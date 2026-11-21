@@ -123,11 +123,6 @@ Result<AssetAliasTable*> AssetService::Aliases(AssetDiagnostic* failure) noexcep
     return Result<AssetAliasTable*>::Success(&aliases_);
 }
 
-StringView AssetService::AliasPath(uint64 detail) const noexcept {
-    ROCKS_ASSERT(detail < aliases_.Count());
-    return aliases_.At(static_cast<usize>(detail)).path.View();
-}
-
 Result<AssetId> AssetService::AliasLookup::ResolveAlias(const LogicalPath& path,
                                                         Array<EditorWarning>* warnings) noexcept {
     return service_->ResolveAliasPath(path, warnings, nullptr);
@@ -136,8 +131,24 @@ Result<AssetId> AssetService::AliasLookup::ResolveAlias(const LogicalPath& path,
 Result<AssetId> AssetService::ResolveAliasPath(const LogicalPath& path,
                                                Array<EditorWarning>* warnings,
                                                AssetDiagnostic* failure) noexcept {
-    auto aliases = Aliases(failure);
+    AssetDiagnostic unreadable;
+    auto aliases = Aliases(&unreadable);
     if (!aliases) {
+        if (failure != nullptr) {
+            *failure = unreadable;
+        }
+
+        // 원인을 경고로도 남긴다(참조 값 해석은 진단 칸 없이 부른다 — 대입 진단 Unresolved만으로는
+        // 원인을 알 수 없다).
+        if (warnings != nullptr && aliases.Error() != ErrorCode::OutOfMemory) {
+            EditorWarning warning;
+            warning.kind = EditorWarningKind::AliasTableUnreadable;
+            warning.diagnostic = unreadable;
+            if (auto pushed = warnings->TryPushBack(warning); !pushed) {
+                return Result<AssetId>::Failure(pushed.Error());
+            }
+        }
+
         return Result<AssetId>::Failure(aliases.Error());
     }
 
@@ -153,6 +164,11 @@ Result<AssetId> AssetService::ResolveAliasPath(const LogicalPath& path,
         warning.diagnostic.code = AssetDiagnosticCode::AliasResolved;
         warning.diagnostic.asset = target;
         warning.diagnostic.detail = at;
+        // 옛 경로 텍스트를 경고에 담는다(뒤에 별칭 표가 바뀌어도 그대로다 — 논리 경로 상한 안).
+        const StringView old = aliases.Value()->At(at).path.View();
+        for (usize index = 0; index < old.ByteCount(); ++index) {
+            warning.text[index] = old.Data()[index];
+        }
         if (auto pushed = warnings->TryPushBack(warning); !pushed) {
             return Result<AssetId>::Failure(pushed.Error());
         }

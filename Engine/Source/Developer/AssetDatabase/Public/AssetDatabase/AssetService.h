@@ -145,10 +145,6 @@ public:
     // 읽는다). 오류(failure 진단): Initialize 전 InvalidArgument, AssetAliasTable::Load의 오류.
     Result<AssetAliasTable*> Aliases(AssetDiagnostic* failure = nullptr) noexcept;
 
-    // 이 서비스가 낸 경고 AliasResolved의 옛 경로다(detail = 별칭 표 항목 번호 — 그 경고 뒤 별칭
-    // 표를 바꾸지 않았어야 한다, 계약 위반은 단언).
-    StringView AliasPath(uint64 detail) const noexcept;
-
     // asset-alias-remove <옛 path>: 그 경로 키의 별칭을 지워 쓴다. notDurable은 교체 뒤 동기화를
     // 확인하지 못했는지다. 오류(failure 진단): Aliases의 오류, 경로 규칙 위반 InvalidPath /
     // InvalidArgument, 별칭이 없으면 NotFound(진단 None), AssetAliasTable::Write의 오류.
