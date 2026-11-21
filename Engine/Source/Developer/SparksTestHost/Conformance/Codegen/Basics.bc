@@ -1,3 +1,8 @@
+module "Main"
+compiler "sparks 0.4.0"
+profile full
+content 8a30765ddb6f1a4f2bb09c6fdd4a27aebe98fb6e69dbf0cd2026f68b1e62ab99
+interface 0000000000000000000000000000000000000000000000000000000000000000
 k0 = 0x0000000000000000
 k1 = 0x3ff0000000000000
 t0 = "Add"
@@ -7,6 +12,8 @@ t3 = "Pick"
 t4 = "Greet"
 t5 = "Hello "
 t6 = " x"
+t7 = "sparks 0.4.0"
+t8 = "Main"
 
 function Add  scalar=3/3 ref=0/0 buf=0/0 params=2/0/0
   0000  LOADI  s2, 2    ; 2:20

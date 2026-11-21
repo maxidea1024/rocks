@@ -22,6 +22,22 @@ public:
     }
 
     void Write() noexcept {
+        out_.Append("module ");
+        if (module_.path != NoBytecodeIndex && module_.path < module_.stringOffsets.Size()) {
+            Quoted(module_.String(module_.path));
+        }
+
+        out_.Append("\ncompiler ");
+        if (module_.compiler != NoBytecodeIndex &&
+            module_.compiler < module_.stringOffsets.Size()) {
+            Quoted(module_.String(module_.compiler));
+        }
+
+        out_.AppendFormat("\nprofile {}\ncontent ", module_.profile == 0 ? "core" : "full");
+        Hash(module_.contentHash);
+        out_.Append("\ninterface ");
+        Hash(module_.interfaceHash);
+        out_.Append("\n");
         for (usize index = 0; index < module_.scalars.Size(); ++index) {
             out_.AppendFormat("k{} = {:#018x}\n", index, module_.scalars[index]);
         }
@@ -70,6 +86,12 @@ private:
         }
 
         out_.Append("\"");
+    }
+
+    void Hash(const uint8 (&bytes)[BytecodeHashBytes]) noexcept {
+        for (const uint8 byte : bytes) {
+            out_.AppendFormat("{:02x}", static_cast<uint32>(byte));
+        }
     }
 
     void Register(OperandBank bank, uint32 number) noexcept {

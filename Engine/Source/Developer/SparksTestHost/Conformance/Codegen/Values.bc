@@ -1,3 +1,8 @@
+module "Main"
+compiler "sparks 0.4.0"
+profile full
+content 0db8dbca9cf8590e9320ba43c6ae8562a8b97b28248d1d4b22af17ec654d9678
+interface 0000000000000000000000000000000000000000000000000000000000000000
 k0 = 0x0000000000000000
 k1 = 0x4056800000000000
 k2 = 0x3ff0000000000000
@@ -21,6 +26,8 @@ t13 = "Tag"
 t14 = "hi"
 t15 = "Optional"
 t16 = "Actor.Location"
+t17 = "sparks 0.4.0"
+t18 = "Main"
 ref0 = type Array<int>
 ref1 = type Map<string, int>
 ref2 = type Pair

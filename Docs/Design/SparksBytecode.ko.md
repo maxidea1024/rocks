@@ -160,10 +160,11 @@ bytecode 형식(opcode 번호·명령 모양·함수 표·상수 표)은 새 모
 
 ## 5. `.sparkc`와 verifier(LC4c)
 
-- **형식:** little-endian. 머리 `"SPKC"`·형식 버전(u32)·compiler version 문자열·모듈 import 경로·content hash(SHA-256 32바이트)·interface hash(SHA-256)·profile. 이어 길이 접두 구역(section): `IMPT`(import 모듈과 그 interface hash, native FunctionId·시그니처 hash, Tag·Action·Row 이름), `TYPE`(class·struct·enum·이벤트·필드 — TypeId·FieldId·초기값), `FUNC`(함수: 시그니처, bank 크기, 문맥, 명령, await 지점 표, 예외 없는 원문 위치 표), `KCON`(상수), `DBUG`(분리 디버그 — 원문 위치·지역 이름). 쓰기는 Core `ByteWriter`, 읽기는 `ByteReader`다.
-- **결정성:** 같은 입력 → 같은 바이트. 표의 순서는 선언 순서(모듈 안), 해시 표 순회를 쓰지 않는다.
-- **verifier(로드 시 선형 1회, SL §11):** 구조(구역 길이·명령 수·분기 대상이 함수 안·피연산자가 bank 크기 안·상수·필드·함수 번호 범위), 타입(각 명령의 피연산자 bank·Scalar 표현 종류, 대기 지점 레지스터 형태와 재개 블록의 일치, 초기화 전 읽기 없음 — 블록 단위 dataflow), 바인딩(native FunctionId·시그니처 hash가 실행 중 schema와 같음, 자원 정책), 문맥(함수 문맥이 금지하는 명령 — `AWAIT`가 대기 금지 문맥에 없음 등). 거부는 모듈 단위다(SL §12 표 "로드").
-- 변조 시험: 명령 1바이트·구역 길이·상수 번호를 바꾼 파일이 정해진 사유로 거부된다.
+- **형식(LC4c 확정, 형식 버전 1):** little-endian. 머리: magic `"SPKC"`, 형식 버전(u32 — `BytecodeFormatVersion`), compiler version 문자열(u32 길이 + UTF-8), 모듈 import 경로 문자열, content hash(원문 UTF-8의 SHA-256 32바이트), interface hash(SHA-256 32바이트 — LC4d가 채우고 그 전에는 0), profile(u8 — manifest `profile`: 0 core, 1 full). 이어 길이 접두 구역(4바이트 tag + u32 길이 + 내용)이 정해진 순서로 하나씩 온다: `KCON`(Scalar 상수 u64들, 문자열 — 길이 + byte), `REFS`(참조 — 종류 u8, 이름 문자열 번호 u32, 보조 번호 u32), `FUNC`(함수 표 — 이름·명령 구간·bank별 할당 수·frame 크기·매개변수 수·switch·await 구간, 명령 단어, switch 표와 case, await 지점과 생존 구간), `DBUG`(분리 디버그 — 명령 단어마다 줄·열). 모르는 tag, 순서 어긋남, 구역 길이와 내용의 불일치, 파일 끝 뒤의 byte는 거부다. `TYPE`(class·struct·enum·이벤트·필드의 TypeId·FieldId·초기값)·`IMPT`(import 모듈의 interface hash, native FunctionId·시그니처 hash, Tag·Action·Row 이름)는 안정 ID(LC4d)·필드 초기값과 함께 형식 버전 2에서 더한다. 쓰기는 Core `ByteWriter`, 읽기는 `ByteReader`다.
+- **결정성:** 같은 입력 → 같은 바이트. 표의 순서는 처음 나온 순서·선언 순서이고 해시 표 순회를 쓰지 않는다. 읽어 다시 쓴 파일과 그 bytecode 덤프는 원본과 byte 단위로 같다(시험: corpus의 `.bc` 사례마다 쓰기 → 읽기 → 덤프 비교).
+- **verifier(로드 시 선형 1회, SL §11 — `VerifyBytecode`):** 구조를 본다 — 표 번호(함수 이름·참조 이름·리터럴 글자·같은 모듈 함수 번호), 함수 명령 구간이 명령 배열 안, 원문 위치 표의 길이, bank별 할당 수 ≤ frame 크기 ≤ 256, 매개변수 수 ≤ 할당 수. 명령마다: 알려진 opcode, EXTRA가 필요한 명령 뒤에 EXTRA가 있고 그 밖에는 EXTRA가 홀로 오지 않음, 레지스터 피연산자가 그 bank frame 안(묶음 수를 아는 명령 — `RET`·`RETERR`·`CONCAT`·`EQN` — 은 구간 전체), 상수·문자열·참조 번호가 표 안이고 참조 종류가 명령과 맞음(`CALL` → 함수, `CALLN` → native, `EMIT`·`AWAITEV` → 이벤트, 필드 명령 → 필드, 생성·`CAST` → 타입, `GETCTX` → 문맥, `NEWLIT` → 리터럴), 분기·`TRY` 실패 거리·switch case·await 주소가 함수 안의 명령 시작(EXTRA 단어가 아님), `CONV` 종류 번호·컨테이너 표지·표시 종류가 범위 안, 함수의 마지막 명령이 끝 명령(`JMP`·`RET`·`RETERR`·`FAULT`). 생존 구간은 할당 수 안. 거부는 모듈 단위이며 사유(`BytecodeLoadError`)와 함수·주소를 돌려준다(SL §12 표 "로드"). 타입(Scalar 표현 종류·초기화 전 읽기 — 블록 단위 dataflow)·바인딩(native 시그니처 hash)·문맥(대기 금지 문맥의 `AWAIT`) 검사는 TYPE·IMPT 구역과 함수 문맥 표가 생기는 형식 버전 2(LC4d·LC6)에서 더한다.
+- **컴파일 직후 검사:** 컴파일러는 내린 모듈마다 verifier를 돌린다(거부는 컴파일러 결함 — Fatal). 그래서 corpus 전체가 verifier를 거친다.
+- 변조 시험: magic·버전·구역 tag·구역 길이·명령 1바이트(opcode·레지스터)·상수·참조 번호·분기 거리를 바꾼 파일이 정해진 사유로 거부된다.
 
 ## 6. 안정 ID·hash(LC4d)
 

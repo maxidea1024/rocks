@@ -1,3 +1,8 @@
+module "Main"
+compiler "sparks 0.4.0"
+profile full
+content f4175ff9c5ebf2e60049a5f5346a134e72835518ad771efb3168c69869f9995f
+interface 0000000000000000000000000000000000000000000000000000000000000000
 k0 = 0x0000000000000000
 k1 = 0x3ff0000000000000
 k2 = 0x4000000000000000
@@ -24,6 +29,8 @@ t18 = "Actor.Destroyed"
 t19 = "LoopHandle.Pause"
 t20 = "Beacon.Ping"
 t21 = "Actor.Pinged"
+t22 = "sparks 0.4.0"
+t23 = "Main"
 ref0 = context World
 ref1 = field World.Audio
 ref2 = field Beacon.Cue

@@ -1,3 +1,8 @@
+module "Main"
+compiler "sparks 0.4.0"
+profile full
+content 017e7c2e272fa941d4956f99da19fa46f5773a7ea7d2fb9fb11c8085b1564e9b
+interface 0000000000000000000000000000000000000000000000000000000000000000
 k0 = 0x3ff0000000000000
 k1 = 0x3fb99999a0000000
 k2 = 0x0000000000000000
@@ -32,6 +37,8 @@ t25 = "Hp.on Owner.Damaged"
 t26 = "Component.Owner"
 t27 = "Actor.Find"
 t28 = "Hp.Opened"
+t29 = "sparks 0.4.0"
+t30 = "Main"
 ref0 = field Hp.Cursor
 ref1 = language NextTick
 ref2 = context World

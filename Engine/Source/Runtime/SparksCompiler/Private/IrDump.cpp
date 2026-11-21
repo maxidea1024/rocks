@@ -2,6 +2,9 @@
 #include <Platform/Fatal.h>
 
 #include "CompilationChecker.h"
+#include <Core/Encoding/Sha256.h>
+#include <SparksVm/BytecodeFile.h>
+
 #include "BcEncoder.h"
 #include "IrBuilder.h"
 
@@ -637,6 +640,31 @@ void TypeChecker::LowerModule(uint32 module) noexcept {
 
     if (!binder_.Succeeded(out)) {
         return;
+    }
+
+    // 모듈 머리(5절): compiler version, import 경로, 원문 content hash, profile. 그리고 verifier —
+    // 컴파일러가 낸 모듈의 거부는 내림의 결함이다.
+    BytecodeModule& bytecode = c.bytecode_[module];
+    bytecode.compiler = encoder.String(SparksCompilerVersion);
+    bytecode.path = encoder.String(c.Text(c.modules_[module].importPath));
+    const SourceFile& source = c.sources_->Get(c.modules_[module].source);
+    const Sha256Digest digest = Sha256::Hash(Span<const uint8>(
+        reinterpret_cast<const uint8*>(source.Text().Data()), source.Text().ByteCount()));
+    for (usize index = 0; index < BytecodeHashBytes; ++index) {
+        bytecode.contentHash[index] = digest.bytes[index];
+    }
+
+    const uint32 package = c.modules_[module].package;
+    bytecode.profile = package != NoPackage && package < c.packages_.Size() &&
+                               c.packages_[package].manifest.GetProfile() == Profile::Full
+                           ? 1
+                           : 0;
+    if (binder_.error_ != ErrorCode::None) {
+        return;
+    }
+
+    if (VerifyBytecode(bytecode).error != BytecodeLoadError::None) {
+        platform::Fatal("Sparks bytecode rejected by the verifier"); // 인코딩의 결함
     }
 
     const StringView text = out.View();

@@ -1,3 +1,8 @@
+module "Main"
+compiler "sparks 0.4.0"
+profile full
+content 952fed61677bb6cec0ed21413bf3aaa036a47b49596564be633cd0e1f15ccc73
+interface 0000000000000000000000000000000000000000000000000000000000000000
 k0 = 0x3ff8000000000000
 k1 = 0x4024000000000000
 t0 = "Door.on Enable"
@@ -29,6 +34,8 @@ t25 = "NextTick"
 t26 = "Door.Find"
 t27 = "Component.Owner"
 t28 = "Pawn"
+t29 = "sparks 0.4.0"
+t30 = "Main"
 ref0 = context World
 ref1 = field World.Audio
 ref2 = field Door.Cue

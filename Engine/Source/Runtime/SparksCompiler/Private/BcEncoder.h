@@ -12,6 +12,9 @@
 
 namespace rocks::sparks::detail {
 
+// bytecode 모듈 머리의 compiler version이다(형식·코드 생성이 바뀌면 올린다).
+inline constexpr StringView SparksCompilerVersion = "sparks 0.4.0";
+
 class BytecodeEncoder final {
 public:
     BytecodeEncoder(TypeChecker& checker, uint32 module, BytecodeModule& out) noexcept;
@@ -24,6 +27,11 @@ public:
     // binder에).
     bool Encode(const IrFunction& function, uint32 index, StringView name,
                 uint32 nameNode) noexcept;
+
+    // 문자열 표에 넣고 번호를 돌려준다(모듈 머리의 이름).
+    uint32 String(StringView text) noexcept {
+        return AddString(text);
+    }
 
 private:
     // ---- 모듈 표 ----

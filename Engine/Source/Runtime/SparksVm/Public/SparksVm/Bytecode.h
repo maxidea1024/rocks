@@ -25,6 +25,9 @@ enum class BytecodeBank : uint8 {
 
 inline constexpr uint32 BytecodeBankCount = 3;
 
+// content·interface hash의 byte 수다(SHA-256).
+inline constexpr usize BytecodeHashBytes = 32;
+
 // 표 번호가 없음을 나타낸다.
 inline constexpr uint32 NoBytecodeIndex = NumericLimits<uint32>::Max();
 
@@ -112,6 +115,14 @@ public:
     StringView String(uint32 index) const noexcept {
         return StringView(stringBytes.Data() + stringOffsets[index], stringLengths[index]);
     }
+
+    // 머리(`.sparkc` 5절): compiler version·모듈 import 경로(문자열 번호), 원문 content hash, 공개
+    // 선언의 interface hash(LC4d 전에는 0), manifest profile(0 core, 1 full).
+    uint32 compiler = NoBytecodeIndex;
+    uint32 path = NoBytecodeIndex;
+    uint8 contentHash[BytecodeHashBytes] = {};
+    uint8 interfaceHash[BytecodeHashBytes] = {};
+    uint8 profile = 0;
 
     Array<uint64> scalars;   // Scalar 상수(정수·double 비트·이름 id)
     Array<char> stringBytes; // 문자열 표(escape를 푼 UTF-8)

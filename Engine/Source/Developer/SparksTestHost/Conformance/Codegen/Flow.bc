@@ -1,3 +1,8 @@
+module "Main"
+compiler "sparks 0.4.0"
+profile full
+content d07e45231b7e254c54c25ae4de7aa9ff15c032e4d3da0d19c60d196d7995e898
+interface 0000000000000000000000000000000000000000000000000000000000000000
 k0 = 0x0000000000000000
 k1 = 0x3ff0000000000000
 k2 = 0x4000000000000000
@@ -22,6 +27,8 @@ t13 = "AudioSystem.StartLoop"
 t14 = "Component.Owner"
 t15 = "Actor.Pushed"
 t16 = "LoopHandle.Pause"
+t17 = "sparks 0.4.0"
+t18 = "Main"
 ref0 = field Mover.Speed
 ref1 = language NextTick
 ref2 = function Mover.Fetch #2
