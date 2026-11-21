@@ -500,12 +500,12 @@ A2는 에디터 쪽 에셋 데이터베이스다(4·5.4·5.5·7·8·13·16절). 
         - `PrepareRefresh`도 `options.types`를 비운다(Rebuild·캐시와 같은 형식 판정만 — A2d1의 결정을 저장 갱신에도 맞춤).
     - **A2d2 병렬 범위 읽기**: Rebuild를 걷기(파일 목록)와 읽기로 나누고 읽기를 `WorkerScheduler`(주입 — 없으면 직렬)로 파일마다 지문·부분 읽기를 해 파일별 결과 칸에 둔다. 결과는 목록 순서로 모아 지금과 같은 정렬·게시를 한다(직렬과 byte 같은 결과를 단언). 계약: 색인 allocator와 `FileSystem` 모두 동시 호출이 안전해야 한다(`PhysicalFileSystem`은 그렇다 — 시험 `MemoryFileSystem`은 잠금을 더하거나 직렬 시험만). 할당 실패는 어느 작업이든 전체 실패(색인 그대로). 완료 조건에 큰 합성 프로젝트(예: 5만 패키지)의 직렬 대 병렬 측정 수치를 넣는다.
       - 구현 세부(2026-11-21, 권장안으로 확정):
-        - 주입: `AssetIndex(allocator, layout, WorkerScheduler* scheduler = nullptr)` — 색인 하나가 쓰는 모든 검색(Rebuild·RefreshPaths의 하위 트리)에 같은 scheduler. `AssetServiceConfig::scheduler`가 서비스의 색인에 넘긴다. scheduler가 있으면 색인 allocator·`FileSystem`이 동시 호출을 받아야 한다(헤더 계약 — `SystemAllocator`·`PhysicalFileSystem`은 받는다).
+        - 주입: `AssetIndex(allocator, layout, WorkerScheduler* scheduler = nullptr)` — 색인 하나가 쓰는 모든 검색(Rebuild·RefreshPaths의 하위 트리)에 같은 scheduler. `AssetServiceConfig::scheduler`가 서비스의 색인에 넘긴다. scheduler가 있으면 색인 allocator·`FileSystem`·배치(`ProjectLayout`)의 allocator(논리 경로 만들기가 쓴다)가 동시 호출을 받아야 한다(헤더 계약 — `SystemAllocator`·`PhysicalFileSystem`은 받는다).
         - 나눔: `ScanTree`가 (1) 걷기 — 디렉터리 열거·잘못된 이름·열거 실패 진단은 호출 스레드가 지금처럼(깊이 우선), 패키지 후보는 (Content 상대 이름, 수정 시각) 목록으로 모은다, (2) 읽기 — 후보마다 결과 칸(항목 0·1개 + 그 파일 진단)에 캐시 재사용 또는 부분 읽기를 한다. 읽기는 `ParallelFor(scheduler, allocator, 후보 수, minBatchSize = 8)`(UE `FAssetDataGatherer`가 파일 묶음을 작업 스레드로 읽는 것과 같은 자리 — 우선순위·취소는 두지 않는다), scheduler가 없거나 후보가 batch 하나 이하면 같은 본문을 호출 스레드가 차례로 돈다. (3) 모으기 — 칸을 후보 순서대로 found·diagnostics에 옮긴다. 게시가 정렬하므로 결과는 직렬과 같다(시험이 항목·진단 모든 칸으로 단언).
         - 실패: 칸 하나의 할당 실패는 그 batch 본문이 OutOfMemory를 돌려 ParallelFor가 가장 앞 실패를 돌려주고(남은 batch는 시작하지 않는다) 검색 전체가 실패한다(Rebuild는 비운 색인, RefreshPaths는 색인 그대로 — 지금 계약과 같다). 할당 실패 시험은 스레드 안전한 실패 allocator(원자 시도 수)로 병렬 경로를 돈다.
         - `RefreshPaths`의 파일 목록 다시 읽기는 직렬로 둔다(이벤트 파일 수가 작고 미루기 판정이 파일마다 있다 — 측정에서 필요가 보이면 같은 나눔을 쓴다).
         - 측정 도구 `Programs/AssetIndexBench`(제품 밖 — fixture 타입으로 합성 프로젝트를 만들고 Rebuild를 직렬·병렬(worker 수별)·캐시로 잰다).
-        - 측정(2026-11-21, Windows 11, 논리 프로세서 20개, NVMe, Release, 패키지 5만 개·태그 둘·디렉터리 25개, OS 파일 캐시가 따뜻한 5회 중앙값): 직렬 2.37 s · 캐시 1.74 s, worker 1 + 호출 스레드 1.45 s · 1.05 s, **worker 3 + 1 1.13 s · 0.77 s**, worker 7 + 1 1.45 s · 0.90 s, worker 19 + 1 1.58 s · 1.11 s. worker 3개에서 직렬의 약 2.1–2.3배이고 더 늘리면 느려진다(파일 열기·범위 읽기가 OS 쪽에서 겹쳐 막힌다고 본다 — 원인 분석은 후속, 차가운 디스크 수치도 후속).
+        - 측정(2026-11-21, Windows 11, 논리 프로세서 20개, NVMe, Release, 패키지 5만 개·태그 둘·디렉터리 25개, OS 파일 캐시가 따뜻한 5회 중앙값): 중앙값(최소–최대) — 직렬 2.37 s(2.30–2.39) · 캐시 1.74 s(1.71–1.78), worker 1 + 호출 스레드 1.45 s(1.44–1.51) · 1.05 s(1.01–1.06), **worker 3 + 1 1.13 s(1.10–1.15) · 0.77 s(0.70–1.09)**, worker 7 + 1 1.45 s(1.19–1.52) · 0.90 s(0.73–1.24), worker 19 + 1 1.58 s(1.47–1.73) · 1.11 s(1.07–1.24). 캐시 없는 worker 3과 7은 범위가 겹치지 않는다(캐시 사용 쪽은 첫 round가 OS 캐시를 데워 최댓값이 퍼진다). worker 3개에서 직렬의 약 2.1–2.3배이고 더 늘리면 느려진다(파일 열기·범위 읽기가 OS 쪽에서 겹쳐 막힌다고 본다 — 원인 분석은 후속, 차가운 디스크 수치도 후속).
         - 결정(측정 근거): 명령(Commandlet)은 색인을 만드는 모든 명령(asset-list·asset-index-verify·asset-index-rebuild·편집 세션)에서 worker `CommandletScanWorkers` = 3개(논리 프로세서 − 1이 더 작으면 그 수, 0이면 직렬)의 scheduler를 띄워 넘긴다. 띄우지 못하면 직렬로 계속한다(결과가 같으므로 경고도 없다). 에디터 서비스는 엔진 scheduler를 넘기는 쪽에서 같은 상한을 쓴다(에디터 연결 때). 상태: **구현** — 대조표 14.1.31절, coverage 14.1.32절.
 
 ## 8. 동시성
@@ -2080,7 +2080,7 @@ A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항�
 |---|---|---|
 | 병렬 = 직렬(7.1-16 A2d2) | 패키지 300개(중첩 디렉터리 15개·같은 id·Tags 손상·잘린 파일·빈 중첩 디렉터리) Rebuild가 worker 1·2·4·7에서 직렬과 항목·진단 모든 칸이 같음, 캐시 재사용도 같음, 하위 트리 RefreshPaths도 같음 | `AssetIndexParallel_MatchesSerial` |
 | 호출 스레드 혼자(7.1-16 A2d2, ParallelFor 계약) | 시작하지 않은 scheduler, 그 scheduler의 worker 안에서 부른 검색 — 결과 같음 | `AssetIndexParallel_MatchesSerial` |
-| 할당 실패(7.1-16 A2d2) | 병렬 검색의 모든 할당 시도(스레드 안전 실패 allocator): 검색 실패면 OutOfMemory·비운 색인, 검색이 삼킨 실패(helper 제출)면 직렬과 같음, 실패가 없어지면 직렬과 같음 | `AssetIndexParallel_AllocationFailures` |
+| 할당 실패(7.1-16 A2d2) | 병렬 검색의 모든 할당 시도(스레드 안전 실패 allocator): 검색 실패면 OutOfMemory·비운 색인, 검색이 삼킨 실패(helper 제출)면 직렬과 같음, 실패가 없어지면 직렬과 같음. 병렬이라 n번째 시도가 떨어지는 지점은 실행마다 다를 수 있다 — 단언은 결과 분류(실패·삼킴·성공)로 결정적이고 반복은 시도 수가 유한해 끝난다. 배치 allocator 실패는 시험 밖(14.1.30 `IndexCached`와 같은 사유) | `AssetIndexParallel_AllocationFailures` |
 | 직렬 경로(7.1-16 A2d2) | scheduler 없음 = 같은 본문을 호출 스레드가 차례로 — 기존 시험 전부(색인 32·캐시 9·감시 12·서비스 9·패키지 집합 22) | 기존 시험 |
 | 명령 연결(7.1-16 A2d2 결정) | asset-list·asset-index-verify·asset-index-rebuild·편집 세션(asset-new·asset-set·asset-info)이 worker 3개로 검색해도 출력이 같음 | C# 시험 253개 |
 | 서비스 주입(7.1-16 A2d2) | `AssetServiceConfig::scheduler` → 색인 | C# 편집 명령(편집 세션이 넘긴다) |
