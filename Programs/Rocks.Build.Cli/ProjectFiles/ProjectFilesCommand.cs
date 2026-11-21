@@ -154,10 +154,9 @@ internal static class ProjectFilesCommand
             Console.WriteLine("note: " + note);
         }
 
-        if (!await ClangToolsetInstalledAsync(toolchain, cancellationToken))
+        if (await ClangToolsetWarningAsync(toolchain, cancellationToken) is string warning)
         {
-            Console.WriteLine($"warning: Visual Studio component {ClangToolsetComponent} (C++ Clang tools for Windows) is not installed; " +
-                "IntelliSense needs the ClangCL platform toolset (NMake builds work without it).");
+            Console.WriteLine(warning);
         }
 
         return 0;
@@ -259,6 +258,12 @@ internal static class ProjectFilesCommand
         return [.. solution.SolutionProjects.Select(project => Path.GetRelativePath(root, Path.GetFullPath(project.FilePath, Path.GetDirectoryName(format)!))
             .Replace('\\', '/')).Order(StringComparer.Ordinal)];
     }
+
+    /// <summary>ClangCL 도구 모음 구성 요소가 없으면 그 경고 문구, 있으면 null이다(8.5절, 엔진·게임 모드 공통).</summary>
+    internal static async Task<string?> ClangToolsetWarningAsync(NativeToolchain toolchain, CancellationToken cancellationToken) =>
+        await ClangToolsetInstalledAsync(toolchain, cancellationToken) ? null
+            : $"warning: Visual Studio component {ClangToolsetComponent} (C++ Clang tools for Windows) is not installed; " +
+                "IntelliSense needs the ClangCL platform toolset (NMake builds work without it).";
 
     // vswhere로 ClangCL 도구 모음 구성 요소가 설치된 Visual Studio가 있는지 본다(8.5절).
     private static async Task<bool> ClangToolsetInstalledAsync(NativeToolchain toolchain, CancellationToken cancellationToken)

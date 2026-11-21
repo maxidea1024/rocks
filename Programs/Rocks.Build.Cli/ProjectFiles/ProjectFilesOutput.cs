@@ -34,10 +34,12 @@ internal static class ProjectFilesOutput
     private static readonly StringComparer PathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
     public static async Task<ProjectFilesWriteResult> WriteAsync(string root, string projectFilesDirectory, string solutionPath,
-        IReadOnlyDictionary<string, byte[]> files, IReadOnlyDictionary<string, string> fingerprints, string compiler, CancellationToken cancellationToken)
+        IReadOnlyDictionary<string, byte[]> files, IReadOnlyDictionary<string, string> fingerprints, string compiler, CancellationToken cancellationToken,
+        bool lockHeld = false)
     {
+        // lockHeld면 호출자가 이미 이 디렉터리의 호출 잠금을 쥐었다(게임 생성은 규칙 컴파일부터 잠금 안이다).
         Directory.CreateDirectory(projectFilesDirectory);
-        await using var invocationLock = await OutputInvocationLock.AcquireAsync(projectFilesDirectory, cancellationToken);
+        await using var invocationLock = lockHeld ? null : await OutputInvocationLock.AcquireAsync(projectFilesDirectory, cancellationToken);
         string statePath = Path.Combine(projectFilesDirectory, StateFileName);
         ProjectFilesState? previous = Read(statePath);
         int written = 0;

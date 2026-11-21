@@ -209,6 +209,43 @@ public static class InstalledSdk
     }
 
     /// <summary>
+    /// Visual Studio 빌드(<c>ROCKS_IDE_BUILD=1</c>)에서, 프로젝트에 <c>engineAssociation</c>이 있으면 그것이 해석하는 SDK가 프로젝트 파일의
+    /// <c>--sdk</c>와 같은지 본다(Docs/Design/ProjectFiles.ko.md 10.4절). 다르면 연결을 바꾼 뒤 다시 만들지 못한 낡은 프로젝트 파일이다 — 옛 SDK로
+    /// 조용히 빌드하지 않고 다시 만들라고 알린다. 연결이 없으면(등록부 선택) 보지 않는다.
+    /// </summary>
+    private static void RequireCurrentProjectFiles(Dictionary<string, string> options)
+    {
+        if (Environment.GetEnvironmentVariable("ROCKS_IDE_BUILD") != "1")
+        {
+            return;
+        }
+
+        string project = Path.GetFullPath(options["project"]);
+        string[] descriptors = Directory.GetFiles(project, "*" + DescriptorReader.ProjectExtension, SearchOption.TopDirectoryOnly);
+        if (descriptors.Length != 1 || DescriptorReader.ReadProject(descriptors[0]) is not { EngineAssociation: not null } descriptor)
+        {
+            return;
+        }
+
+        string associated;
+        try
+        {
+            associated = SdkAssociation.Resolve(descriptor, SdkRegistries.Default(), _ => null);
+        }
+        catch (ArgumentException error)
+        {
+            throw new ArgumentException($"The Visual Studio project files are stale: {error.Message} Next: run Build/GenerateProjectFiles.ps1 -Project " +
+                $"\"{project}\".", error);
+        }
+
+        if (!SdkRegistries.SamePath(associated, options["sdk"]))
+        {
+            throw new ArgumentException($"The Visual Studio project files are stale: {descriptor.FilePath} associates {associated}, but the project " +
+                $"files build with {options["sdk"]}. Next: run Build/GenerateProjectFiles.ps1 -Project \"{project}\".");
+        }
+    }
+
+    /// <summary>
     /// 이 SDK를 이 컴퓨터의 도구 모음으로 요청 구성을 빌드하는 데 쓸 수 없는 이유다(쓸 수 있으면 null). Verify의 호환 조건(manifest 판·구성·
     /// 플랫폼·아키텍처·ABI)이고, 파일 목록·내용 검사는 고른 SDK에만 Verify가 한다.
     /// </summary>
@@ -239,7 +276,7 @@ public static class InstalledSdk
         string architecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString();
         return manifest.Configurations is null || manifest.Configurations.Count == 0 ||
             (configuration is not null && !manifest.Configurations.ContainsKey(configuration.Value.ToString()))
-            ? $"no {configuration} configuration (has {Names(manifest)})"
+            ? (configuration is null ? "no configurations" : $"no {configuration} configuration (has {Names(manifest)})")
             : manifest.Platform != toolchain.Platform.ToString() ? $"platform {manifest.Platform}, this computer builds {toolchain.Platform}"
             : manifest.Architecture != architecture ? $"architecture {manifest.Architecture}, this computer is {architecture}"
             : manifest.CompilerIdentity != toolchain.AbiIdentity || manifest.SdkIdentity != toolchain.AbiIdentity
@@ -260,6 +297,7 @@ public static class InstalledSdk
 
         // --sdk가 없으면 .rocksproject의 SDK 연결로 등록 SDK를 고른다(Docs/Design/ProjectFiles.ko.md 10.1절).
         await ResolveSdkOptionAsync(options, cancellationToken);
+        RequireCurrentProjectFiles(options);
         var sdk = PathSpelling.OnDisk(Path.GetFullPath(options["sdk"]));
         var project = PathSpelling.OnDisk(Path.GetFullPath(options["project"]));
         var output = PathSpelling.OnDisk(Path.GetFullPath(options.GetValueOrDefault("output",
@@ -474,7 +512,8 @@ public static class InstalledSdk
         }
     }
 
-    public static VerifiedSdk VerifyStamped(string sdk, NativeConfiguration configuration, NativeToolchain toolchain)
+    // hashContents가 false면 구조(판·구성·파일 목록·모듈 선언)만 보고 내용 해시를 건너뛴다(게임 프로젝트 파일 생성이 둘째 구성부터 쓴다).
+    public static VerifiedSdk VerifyStamped(string sdk, NativeConfiguration configuration, NativeToolchain toolchain, bool hashContents = true)
     {
         string manifestText = File.ReadAllText(Path.Combine(sdk, "rocks-sdk.json"));
         // 버전을 먼저 본다. 다른 버전의 manifest는 칸이 달라(예: 7의 ReflectionOnlyLibrary) 엄격한 역직렬화가 버전 불일치 안내
@@ -559,7 +598,7 @@ public static class InstalledSdk
             }
 
             stamp[pair.Key] = (file.Length, file.LastWriteTimeUtc);
-            if (Hashing.Sha256File(file.FullName) != pair.Value)
+            if (hashContents && Hashing.Sha256File(file.FullName) != pair.Value)
             {
                 throw new InvalidDataException($"SDK file changed or missing: {pair.Key}");
             }

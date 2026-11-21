@@ -324,6 +324,23 @@ internal static class IdePlanTests
             gameModel.Projects.All(project => project.Name != IntelliSenseModel.EngineProjectName), "game layout target projects");
         Check(IntelliSenseModel.Verify(gameModel, gamePlans, projectFiles).Count == 0, "game layout model verification");
 
+        // UE 배치: <루트>/Source에 정의한 타깃도 주 프로젝트다(같은 이름의 하위 프로젝트를 따로 만들지 않는다).
+        string source = Path.Combine(fixture, "Source");
+        List<IdeTargetPlan> sourcePlans = [.. named.Select(plan => plan.Target == "Alpha" ? plan with { DefinitionDirectory = source, DefinitionName = "Alpha" } : plan)];
+        IntelliSenseModel sourceModel = IntelliSenseModel.Create(sourcePlans, fixture, projectFiles, [], "Development", new IdeModelLayout("Alpha", "RocksSdk", engine));
+        Check(sourceModel.Projects.Count(project => project.Name == "Alpha") == 1 && Project(sourceModel, "Alpha").Engine &&
+            Project(sourceModel, "Alpha").Configurations.Select(configuration => configuration.Key).SequenceEqual(["Alpha|Debug", "Alpha|Development"]),
+            "a target defined in <root>/Source is the main project");
+        // 주 타깃이 없으면 RocksSdk는 첫 타깃(Game 종류가 없으므로 ordinal 첫째)의 구성이다.
+        IntelliSenseModel rootless = IntelliSenseModel.Create(named, fixture, projectFiles, [], "Development", new IdeModelLayout("Game", "RocksSdk", engine));
+        Check(Project(rootless, "RocksSdk").Configurations.Select(configuration => configuration.Key).SequenceEqual(["Alpha|Debug", "Alpha|Development"]),
+            "without a main target the SDK header project takes the first target's configurations");
+        // 주 프로젝트 밖 타깃이 주·헤더 프로젝트 이름을 가지면 경로가 겹치므로 오류다.
+        Throws<ArgumentException>(() => IntelliSenseModel.Create(named, fixture, projectFiles, [], "Development", new IdeModelLayout("Gamma", "RocksSdk", engine)),
+            "has the name of the game project", "subdirectory target named like the game");
+        Throws<ArgumentException>(() => IntelliSenseModel.Create(named, fixture, projectFiles, [], "Development", new IdeModelLayout("Game", "beta", engine)),
+            "has the name of the SDK header project", "subdirectory target named like the SDK header project");
+
         // 엔진 루트에 같은 종류 타깃 둘이면 구성 이름이 겹친다.
         Throws<ArgumentException>(() => IntelliSenseModel.Create([named[0] with { DefinitionDirectory = engine }, named[1] with { DefinitionDirectory = engine }],
             fixture, projectFiles, engineRoots, "Development"), "share the configuration names", "engine project configuration collision");
