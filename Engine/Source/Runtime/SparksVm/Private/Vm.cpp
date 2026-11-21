@@ -49,7 +49,8 @@ const char* VmFaultKindName(VmFaultKind kind) noexcept {
 
 VmExecution::VmExecution(Allocator& allocator) noexcept
     : allocator_(&allocator), scalars_(allocator), refs_(allocator), buffers_(allocator),
-      frames_(allocator), returned_(allocator), returnedBuffers_(allocator) {
+      frames_(allocator), returned_(allocator), returnedBuffers_(allocator), bindings_(allocator),
+      logs_(allocator), logText_(allocator) {
 }
 
 VmExecution::~VmExecution() noexcept {
@@ -74,15 +75,26 @@ Result<VmCallResult> VmExecution::Call(const BytecodeModule& module, uint32 func
         return Result<VmCallResult>::Failure(ErrorCode::InvalidArgument);
     }
 
-    ReleaseReturned();
+    // 인자는 이전 호출의 반환(ReturnedSlots·ReturnedBuffers)을 가리킬 수 있다: 버퍼 인자를 먼저
+    // 붙잡고 값을 stack에 복사한 뒤에 이전 반환을 놓는다.
+    for (VmBuffer* buffer : buffers) {
+        Retain(buffer);
+    }
+
     Unwind();
-    returned_.Clear();
+    logs_.Clear();
+    logText_.Clear();
+    random_.Seed(limits.randomSeed);
     module_ = &module;
     scalars_.Clear();
     refs_.Clear();
     buffers_.Clear();
     const uint32 base[BytecodeBankCount] = {};
     if (auto pushed = PushFrame(function, base); !pushed) {
+        for (VmBuffer* buffer : buffers) {
+            Release(buffer);
+        }
+
         Unwind();
         return Result<VmCallResult>::Failure(pushed.Error());
     }
@@ -96,9 +108,11 @@ Result<VmCallResult> VmExecution::Call(const BytecodeModule& module, uint32 func
     }
 
     for (usize index = 0; index < buffers.Size(); ++index) {
-        Retain(buffers[index]);
-        buffers_[index] = buffers[index];
+        buffers_[index] = buffers[index]; // 위에서 붙잡은 참조
     }
+
+    ReleaseReturned();
+    returned_.Clear();
 
     // 실수 연산은 기대 환경(nearest-even, FTZ·DAZ 끔)에서 한다 — 드라이버·미들웨어가 스레드 환경을
     // 바꿔 놓아도 서버·클라이언트·재시뮬레이션이 같은 결과다(SL 12.5절).
@@ -249,13 +263,16 @@ VmExecution::Allocation VmExecution::AllocateBytes(VmBufferKind kind, uint64 pay
 
     const uint64 aligned =
         (payload + VmPayloadAlignment - 1) / VmPayloadAlignment * VmPayloadAlignment;
-    const uint64 bytes = sizeof(VmBuffer) + aligned;
+    // 예산·ledger는 정해진 머리 크기(VmBufferHeaderBytes)로 센다(플랫폼마다 같은 계수 — AOT도 같은
+    // 규칙, SparksVm 4절). 실제 할당은 머리 + 내용이다.
+    const uint64 bytes = VmBufferHeaderBytes + aligned;
     if (budget != 0 && liveBytes_ + bytes > budget) {
         result.fault = VmFaultKind::BudgetExceeded;
         return result;
     }
 
-    auto memory = allocator_->Allocate(static_cast<usize>(bytes), alignof(VmBuffer));
+    auto memory =
+        allocator_->Allocate(static_cast<usize>(sizeof(VmBuffer) + aligned), alignof(VmBuffer));
     if (!memory) {
         result.error = memory.Error();
         return result;

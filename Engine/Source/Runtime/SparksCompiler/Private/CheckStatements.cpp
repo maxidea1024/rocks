@@ -134,6 +134,10 @@ void TypeChecker::Run() noexcept {
         AnalyzeStructs(true);
     }
 
+    if (binder_.error_ == ErrorCode::None) {
+        CheckDefaultCycles();
+    }
+
     if (flow_ && binder_.error_ == ErrorCode::None) {
         CheckConstCycles(); // 3.11절 S0511
     }

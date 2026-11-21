@@ -188,9 +188,16 @@ TEST(SparksVmStruct_VerifierChecksTypeTable) {
         return VerifyBytecode(assembler.module).error;
     };
     CHECK(rejection([](Assembler&, uint32) noexcept {}) == BytecodeLoadError::None);
-    // NEWS의 Type 참조에 TYPE이 없다.
+    // NEWS의 Type 참조에 TYPE이 없으면(엔진 struct·TagSet — host 배치, LC5d) verifier는 받고 VM이
+    // ContractViolation이다(아래 시험).
     CHECK(rejection([](Assembler& assembler, uint32 type) noexcept {
               assembler.module.refs[type].detail = NoBytecodeIndex;
+          }) == BytecodeLoadError::None);
+    // TYPE이 enum인 참조로 NEWS하면 거부다.
+    CHECK(rejection([](Assembler& assembler, uint32 type) noexcept {
+              const StringView cases[] = {"A"};
+              const uint32 other = assembler.EnumRef("E", Span<const StringView>(cases, 1));
+              assembler.module.refs[type].detail = assembler.module.refs[other].detail;
           }) == BytecodeLoadError::BadReference);
     // TYPE 번호가 표 밖이다.
     CHECK(rejection([](Assembler& assembler, uint32 type) noexcept {
@@ -225,6 +232,40 @@ TEST(SparksVmStruct_VerifierChecksTypeTable) {
               assembler.Emit(EncodeABC(Opcode::Ret, 0, 0, 0));
               assembler.End();
           }) == BytecodeLoadError::BadReference);
+}
+
+TEST(SparksVmStruct_MismatchedFieldsAndPlaceholders) {
+    // 다른 struct의 필드 참조는 버퍼의 bank 구역 밖이면 ContractViolation이다(실행 중 대조). TYPE이
+    // 없는 NEWS(엔진 struct·TagSet)는 자리표시다.
+    SystemAllocator allocator;
+    Assembler assembler(allocator);
+    const uint32 pair = PairType(assembler);
+    const StringView names[] = {"N"};
+    const uint8 banks[] = {0};
+    const uint8 slots[] = {1};
+    const uint32 small =
+        assembler.StructRef("Small", Span<const StringView>(names, 1), Span<const uint8>(banks, 1),
+                            Span<const uint8>(slots, 1));
+    Shape shape;
+    shape.registers[2] = 2;
+    shape.frame[2] = 2;
+    assembler.Begin("Mismatch", shape);
+    assembler.Emit(EncodeABx(Opcode::NewS, 0, small));
+    assembler.Emit(EncodeABC(Opcode::GetSFB, 1, 0, 1)); // Pair.B(Buf, offset 4) — Small 밖
+    assembler.Emit(EncodeAx(Opcode::Extra, assembler.FieldRef(pair, 1)));
+    assembler.Emit(EncodeABC(Opcode::Ret, 0, 0, 0));
+    assembler.End();
+    assembler.Begin("Engine", shape);
+    assembler.Emit(EncodeABx(Opcode::NewS, 0, assembler.Ref(BytecodeRefKind::Type, "SpawnParams")));
+    assembler.Emit(EncodeABC(Opcode::Ret, 0, 0, 0));
+    assembler.End();
+    REQUIRE(Verify(assembler));
+    VmExecution execution(allocator);
+    CHECK(Faults(Run(execution, assembler.module, 0, Span<const uint64>()),
+                 VmFaultKind::ContractViolation));
+    CHECK(Faults(Run(execution, assembler.module, 1, Span<const uint64>()),
+                 VmFaultKind::ContractViolation));
+    CHECK(execution.LiveBuffers() == 0);
 }
 
 TEST(SparksVmStruct_AllocationFailureEverywhere) {

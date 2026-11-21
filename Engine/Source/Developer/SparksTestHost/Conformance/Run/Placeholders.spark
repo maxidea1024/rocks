@@ -1,0 +1,17 @@
+fn ClockName(clock: Clock): string {
+    return "${clock}";
+}
+
+fn ChannelName(channel: CollisionChannel): string {
+    return "${channel}";
+}
+
+fn Tags(): int {
+    _ = TagSet();
+    return 1;
+}
+
+fn Params(): int {
+    _ = SpawnParams(Count: 2, Category: Tag("a.b"));
+    return 1;
+}

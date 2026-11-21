@@ -231,7 +231,8 @@ IrLayout IrBuilder::Layout(TypeChecker& checker, uint32 type) noexcept {
 IrBuilder::IrBuilder(TypeChecker& checker, IrFunction& function) noexcept
     : checker_(checker), c_(checker.compilation_), function_(function),
       tree_(&checker.compilation_.trees_[function.module]), module_(function.module),
-      locals_(checker.allocator_), held_(checker.allocator_), loops_(checker.allocator_) {
+      locals_(checker.allocator_), held_(checker.allocator_), loops_(checker.allocator_),
+      defaulting_(checker.allocator_) {
 }
 
 bool IrBuilder::Failed() const noexcept {

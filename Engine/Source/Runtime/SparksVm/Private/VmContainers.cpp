@@ -211,19 +211,25 @@ VmFaultKind VmExecution::Reserve(VmBuffer*& slot, uint64 needed, uint32 marker, 
         }
     }
 
-    uint64 capacity = current->capacity;
-    if (capacity < needed) {
-        capacity = capacity == 0 ? VmContainerFirstCapacity : capacity * VmContainerGrowth;
-        capacity = capacity < needed ? needed : capacity;
-    }
-
-    if (needed > MaxBufferElements) {
+    // 용량: 2배(처음 4)로 늘리되 단일 버퍼 상한(원소 수·byte — 색인 포함)에 들어가는 만큼으로
+    // 자른다. 필요한 원소 수가 상한을 넘을 때만 BudgetExceeded다(SparksVm 2.2절).
+    const uint64 stride = uint64(layout.keySlots) + layout.valueSlots;
+    const bool hashed = VmHashed(current);
+    const uint64 elementBytes =
+        stride * sizeof(uint64) + (hashed ? VmIndexLoad * 2 * sizeof(uint32) : 0);
+    uint64 limit = elementBytes == 0 ? MaxBufferElements : MaxBufferBytes / elementBytes;
+    limit = limit > MaxBufferElements ? MaxBufferElements : limit;
+    if (needed > limit) {
         return VmFaultKind::BudgetExceeded;
     }
 
-    capacity = capacity > MaxBufferElements ? MaxBufferElements : capacity;
-    const uint64 stride = uint64(layout.keySlots) + layout.valueSlots;
-    const bool hashed = VmHashed(current);
+    uint64 capacity = current->capacity;
+    if (capacity < needed) {
+        capacity = capacity == 0 ? VmContainerFirstCapacity : capacity * VmContainerGrowth;
+        capacity = capacity > limit ? limit : capacity;
+        capacity = capacity < needed ? needed : capacity;
+    }
+
     const uint64 indexCapacity = hashed ? VmIndexCapacity(capacity) : 0;
     const uint64 payload = capacity * stride * sizeof(uint64) + indexCapacity * sizeof(uint32);
     const Allocation allocation = AllocateBytes(current->kind, payload, budget);
@@ -287,6 +293,20 @@ VmFaultKind VmExecution::Container(Opcode op, uint32 word, uint32 marker, const 
     const uint32 bb = DecodeB(word);
     const uint32 c = DecodeC(word);
     const VmLayout layout = VmDecodeMarker(marker);
+    // 표지의 묶음이 버퍼의 배치(key 자리면 useKey)와 같은지다. 배치가 아직 없는(빈) 버퍼는 맞는
+    // 것으로 본다 — 다른 배치의 명령이 버퍼 밖을 읽거나 쓰지 않게 한다(SparksVm 2.2절).
+    auto matches = [](const VmBuffer* buffer, uint32 bank, uint32 slots, bool useKey) noexcept {
+        if (buffer->capacity == 0) {
+            return true;
+        }
+
+        return useKey ? buffer->keyBank == bank && buffer->keySlots == slots
+                      : buffer->valueBank == bank && buffer->valueSlots == slots;
+    };
+    // GETE 결과 묶음(`T?`)에서 원소 값 묶음의 slot 수다(Scalar는 앞 표지 slot을 뺀다).
+    const uint32 elementSlots = layout.valueBank == VmScalarBank && layout.valueSlots > 0
+                                    ? layout.valueSlots - 1
+                                    : layout.valueSlots;
     // Buf 레지스터 at에 value를 둔다(참조는 넘겨받는다 — 이전 값을 놓는다).
     auto put = [&](uint32 at, VmBuffer* value) noexcept {
         VmBuffer* previous = banks.b[at];
@@ -380,6 +400,11 @@ VmFaultKind VmExecution::Container(Opcode op, uint32 word, uint32 marker, const 
     }
     case Opcode::Append: {
         VmBuffer*& slot = banks.b[a];
+        if (slot != nullptr &&
+            !matches(slot, layout.valueBank, layout.valueSlots, slot->kind == VmBufferKind::Set)) {
+            return VmFaultKind::ContractViolation;
+        }
+
         if (slot != nullptr && slot->kind == VmBufferKind::Set) {
             // Set: 이미 있으면 넣지 않는다(원소는 key 자리).
             uint64 key[VmMarkerSlotLimit] = {};
@@ -416,7 +441,9 @@ VmFaultKind VmExecution::Container(Opcode op, uint32 word, uint32 marker, const 
         return VmFaultKind::None;
     }
     case Opcode::Put:
-        if (banks.b[a] == nullptr || banks.b[a]->kind != VmBufferKind::Map) {
+        if (banks.b[a] == nullptr || banks.b[a]->kind != VmBufferKind::Map ||
+            !matches(banks.b[a], layout.valueBank, layout.valueSlots, false) ||
+            !matches(banks.b[a], layout.keyBank, layout.keySlots, true)) {
             return VmFaultKind::ContractViolation;
         }
 
@@ -428,11 +455,18 @@ VmFaultKind VmExecution::Container(Opcode op, uint32 word, uint32 marker, const 
             return VmFaultKind::ContractViolation;
         }
 
-        if (slot->kind == VmBufferKind::Map) {
-            return assign(a, bb, c);
+        if (!matches(slot, layout.valueBank, layout.valueSlots, false)) {
+            return VmFaultKind::ContractViolation;
         }
 
-        if (slot->kind != VmBufferKind::Array) {
+        if (slot->kind == VmBufferKind::Map) {
+            return matches(slot, layout.keyBank, layout.keySlots, true)
+                       ? assign(a, bb, c)
+                       : VmFaultKind::ContractViolation;
+        }
+
+        if (slot->kind != VmBufferKind::Array || layout.keyBank != VmScalarBank ||
+            layout.keySlots != 1) {
             return VmFaultKind::ContractViolation;
         }
 
@@ -453,12 +487,24 @@ VmFaultKind VmExecution::Container(Opcode op, uint32 word, uint32 marker, const 
         // GETE A B C: A ← 컨테이너 B[key C]의 `T?`(표지의 값 묶음은 결과 A의 모양).
         VmBuffer* container = banks.b[bb];
         uint32 element = VmNoElement;
+        if (container != nullptr && !matches(container, layout.valueBank, elementSlots, false)) {
+            return VmFaultKind::ContractViolation;
+        }
+
         if (container != nullptr && container->kind == VmBufferKind::Array) {
+            if (layout.keyBank != VmScalarBank || layout.keySlots != 1) {
+                return VmFaultKind::ContractViolation;
+            }
+
             const int64 index = static_cast<int64>(banks.s[c]);
             element = index >= 0 && static_cast<uint64>(index) < container->count
                           ? static_cast<uint32>(index)
                           : VmNoElement;
         } else if (container != nullptr && container->kind == VmBufferKind::Map) {
+            if (!matches(container, layout.keyBank, layout.keySlots, true)) {
+                return VmFaultKind::ContractViolation;
+            }
+
             uint64 key[VmMarkerSlotLimit] = {};
             VmLoadKey(key, banks, layout.keyBank, c, layout.keySlots);
             element = VmFind(container, key);
@@ -494,8 +540,11 @@ VmFaultKind VmExecution::Container(Opcode op, uint32 word, uint32 marker, const 
             return VmFaultKind::IndexOutOfRange;
         }
 
+        // GETKEY는 Map·Set의 key 자리, GETVAL은 Map·Array의 값 자리다.
         const bool key = op == Opcode::GetKey;
-        if (key && container->kind == VmBufferKind::Array) {
+        if ((key && container->kind == VmBufferKind::Array) ||
+            (!key && container->kind == VmBufferKind::Set) ||
+            !matches(container, layout.valueBank, layout.valueSlots, key)) {
             return VmFaultKind::ContractViolation;
         }
 

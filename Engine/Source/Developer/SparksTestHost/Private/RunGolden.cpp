@@ -94,7 +94,10 @@ public:
         }
 
         const Symbol& symbol = c_.Symbols()[entry.symbol];
-        if (symbol.kind == SymbolKind::Enum) {
+        // Sparks enum, 언어 enum `Clock`, 엔진 enum(case는 EnumCase 심볼 — 선언 순).
+        if (symbol.kind == SymbolKind::Enum ||
+            (symbol.kind == SymbolKind::PreludeType && symbol.name == "Clock") ||
+            (symbol.kind == SymbolKind::EngineType && HasCases(entry.symbol))) {
             result.shape = RunShape::Enum;
             return result;
         }
@@ -139,6 +142,17 @@ public:
         }
 
         return result;
+    }
+
+    // symbol을 주인으로 하는 enum case가 있는지다(엔진 enum 판정).
+    bool HasCases(uint32 symbol) const noexcept {
+        for (const Symbol& item : c_.Symbols()) {
+            if (item.kind == SymbolKind::EnumCase && item.owner == symbol) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // Result<T>의 T다.

@@ -230,6 +230,95 @@ TEST(SparksVmContainer_EntriesAndMismatchedKinds) {
     CHECK(execution.LiveBuffers() == 0);
 }
 
+TEST(SparksVmContainer_LayoutMismatchAndValueReplacement) {
+    SystemAllocator allocator;
+    Assembler assembler(allocator);
+    Shape shape;
+    shape.registers[0] = 4;
+    shape.frame[0] = 4;
+    shape.registers[2] = 3;
+    shape.frame[2] = 3;
+    // 0: Array를 (S,1)로 채운 뒤 (S,3) 표지로 APPEND — 배치 어긋남은 ContractViolation.
+    assembler.Begin("Mismatch", shape);
+    assembler.Emit(EncodeABx(Opcode::NewA, 0, assembler.Ref(BytecodeRefKind::Type, "Array<int>")));
+    assembler.Emit(EncodeABC(Opcode::Append, 0, 0, 0));
+    assembler.Emit(EncodeAx(Opcode::Extra, Marker(ScalarBank, 1)));
+    assembler.Emit(EncodeABC(Opcode::Append, 0, 0, 0));
+    assembler.Emit(EncodeAx(Opcode::Extra, Marker(ScalarBank, 3)));
+    assembler.Emit(EncodeABC(Opcode::Ret, 0, 0, 0));
+    assembler.End();
+    // 1: Map<int, string>의 같은 key에 PUT 두 번 — 이전 값 버퍼는 놓인다. 반환은 Map.
+    Shape map = shape;
+    map.returnBank = 2;
+    map.returnSlots = 1;
+    assembler.Begin("Replace", map);
+    const uint32 entry = Marker(BufBank, 1, ScalarBank, 1);
+    assembler.Emit(EncodeABx(Opcode::NewM, 0, assembler.Ref(BytecodeRefKind::Type, "Map")));
+    assembler.Emit(EncodeAsBx(Opcode::LoadI, 0, 7));
+    assembler.Emit(EncodeABx(Opcode::LoadStr, 1, assembler.String("first")));
+    assembler.Emit(EncodeABC(Opcode::Put, 0, 0, 1));
+    assembler.Emit(EncodeAx(Opcode::Extra, entry));
+    assembler.Emit(EncodeABx(Opcode::LoadStr, 1, assembler.String("second")));
+    assembler.Emit(EncodeABC(Opcode::Put, 0, 0, 1));
+    assembler.Emit(EncodeAx(Opcode::Extra, entry));
+    assembler.Emit(EncodeABC(Opcode::LoadNullB, 1, 0, 0));
+    assembler.Emit(EncodeABC(Opcode::Ret, 0, 1, 2));
+    assembler.End();
+    REQUIRE(Verify(assembler));
+    VmExecution execution(allocator);
+    CHECK(Faults(Run(execution, assembler.module, 0, Span<const uint64>()),
+                 VmFaultKind::ContractViolation));
+    REQUIRE(Run(execution, assembler.module, 1, Span<const uint64>()).outcome ==
+            VmOutcome::Returned);
+    const VmBuffer* result = execution.ReturnedBuffers()[0];
+    REQUIRE(result != nullptr && result->count == 1);
+    CHECK(VmStringOf(reinterpret_cast<const VmBuffer*>(static_cast<usize>(Element(result, 1)))) ==
+          "second");
+    CHECK(execution.LiveBuffers() == 2); // map과 "second"("first"는 놓였다)
+    execution.ReleaseReturned();
+    CHECK(execution.LiveBuffers() == 0);
+
+    // verifier: Ref·Buf 묶음은 slot 하나다(표지·TRY.B·OK).
+    Assembler bad(allocator);
+    bad.Begin("Wide", shape);
+    bad.Emit(EncodeABx(Opcode::NewA, 0, bad.Ref(BytecodeRefKind::Type, "Array<string>")));
+    bad.Emit(EncodeABC(Opcode::Append, 0, 1, 0));
+    bad.Emit(EncodeAx(Opcode::Extra, Marker(BufBank, 2)));
+    bad.Emit(EncodeABC(Opcode::Ret, 0, 0, 0));
+    bad.End();
+    CHECK(VerifyBytecode(bad.module).error == BytecodeLoadError::BadOperand);
+}
+
+TEST(SparksVmContainer_CallTakesPreviousReturn) {
+    // 이전 Call의 반환 버퍼를 다음 Call의 인자로 넘겨도 된다(인자를 먼저 붙잡는다).
+    SystemAllocator allocator;
+    Assembler assembler(allocator);
+    Shape shape;
+    shape.registers[2] = 1;
+    shape.frame[2] = 1;
+    shape.parameters[2] = 1;
+    shape.returnBank = 2;
+    shape.returnSlots = 1;
+    assembler.Begin("Echo", shape);
+    assembler.Emit(EncodeABC(Opcode::Ret, 0, 1, 2));
+    assembler.End();
+    REQUIRE(Verify(assembler));
+    VmExecution execution(allocator);
+    auto text = execution.NewString("kept");
+    REQUIRE(text);
+    VmBuffer* const first[] = {text.Value()};
+    REQUIRE(execution.Call(assembler.module, 0, {}, {}, Span<VmBuffer* const>(first, 1)));
+    execution.Release(text.Value()); // 이제 반환만 참조를 가진다
+    for (uint32 round = 0; round < 3; ++round) {
+        auto again = execution.Call(assembler.module, 0, {}, {}, execution.ReturnedBuffers());
+        REQUIRE(again);
+        CHECK(VmStringOf(execution.ReturnedBuffers()[0]) == "kept");
+    }
+
+    execution.ReleaseReturned();
+    CHECK(execution.LiveBuffers() == 0);
+}
+
 TEST(SparksVmContainer_AllocationFailureEverywhere) {
     SystemAllocator backing;
     Assembler assembler(backing);

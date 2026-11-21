@@ -11,49 +11,52 @@ k4 = 0x4008000000000000
 t0 = "Hp.Next"
 t1 = "Hp.Cursor"
 t2 = "Hp.Fetch"
-t3 = "NextTick"
-t4 = "Hp.Compute"
-t5 = "Hp.Hold"
-t6 = "World"
-t7 = "World.Audio"
-t8 = "Hp.Cue"
-t9 = "AudioSystem.StartLoop"
-t10 = "Delay"
-t11 = "LoopHandle.Pause"
-t12 = "Hp.Equal"
-t13 = "Hp.Read"
-t14 = "Hp.Shield"
-t15 = "Hp.Chain"
-t16 = "Hp.Paths"
-t17 = "Hp.Names"
-t18 = "y"
-t19 = "x"
-t20 = "Array.Add"
-t21 = "Hp.Hum"
-t22 = "Hp.Consts"
-t23 = "Game.Home"
-t24 = "Tag"
-t25 = "Hp.on Owner.Damaged"
-t26 = "Component.Owner"
-t27 = "Hp"
-t28 = "Actor.Find<Hp>"
-t29 = "Hp.Opened"
-t30 = "sparks 0.4.0"
-t31 = "Main"
+t3 = ">w"
+t4 = "NextTick"
+t5 = "Hp.Compute"
+t6 = "Hp.Hold"
+t7 = "World"
+t8 = "World.Audio"
+t9 = "Hp.Cue"
+t10 = "AudioSystem.StartLoop"
+t11 = "f64,e>w"
+t12 = "Delay"
+t13 = "LoopHandle.Pause"
+t14 = "Hp.Equal"
+t15 = "Hp.Read"
+t16 = "Hp.Shield"
+t17 = "Hp.Chain"
+t18 = "Hp.Paths"
+t19 = "Hp.Names"
+t20 = "y"
+t21 = "x"
+t22 = "A<s>,s>void"
+t23 = "Array.Add"
+t24 = "Hp.Hum"
+t25 = "Hp.Consts"
+t26 = "Game.Home"
+t27 = "Tag"
+t28 = "Hp.on Owner.Damaged"
+t29 = "Component.Owner"
+t30 = "Hp"
+t31 = "Actor.Find<Hp>"
+t32 = "Hp.Opened"
+t33 = "sparks 0.4.0"
+t34 = "Main"
 ref0 = field Hp.Cursor
-ref1 = language NextTick
+ref1 = language NextTick args ">w"
 ref2 = context World
 ref3 = field World.Audio
 ref4 = field Hp.Cue
 ref5 = native AudioSystem.StartLoop
 ref6 = function Hp.Fetch #1
-ref7 = language Delay
+ref7 = language Delay args "f64,e>w"
 ref8 = native LoopHandle.Pause
 ref9 = field Hp.Shield
 ref10 = function Hp.Compute #2
 ref11 = field Hp.Names
 ref12 = function Hp.Next #0
-ref13 = language Array.Add
+ref13 = language Array.Add args "A<s>,s>void"
 ref14 = field Hp.Hum
 ref15 = literal Tag "Game.Home"
 ref16 = field Component.Owner
@@ -197,11 +200,11 @@ function Hp.Paths  scalar=4/5 ref=3/5 buf=2/4 params=0/1/0 returns sx0
   0002  MOV.R  r3, r0    ; 51:15
   0003  CALL  ref12    ; 51:15
   0004  MOV.S  s0, s4    ; 51:15
-  0005  LOADSTR  b1, t18    ; 51:25
+  0005  LOADSTR  b1, t20    ; 51:25
   0006  SETE  b0, s0, b1 [bx1 key sx1]    ; 51:9
   0008  SETF.B  r0, b0, ref11    ; 51:9
   0010  GETF.B  b0, r0, ref11    ; 52:9
-  0012  LOADSTR  b1, t19    ; 52:19
+  0012  LOADSTR  b1, t21    ; 52:19
   0013  MOV.B  b2, b0    ; 52:9
   0014  MOV.B  b3, b1    ; 52:9
   0015  CALLL  ref13    ; 52:9
@@ -233,7 +236,7 @@ function Hp.Paths  scalar=4/5 ref=3/5 buf=2/4 params=0/1/0 returns sx0
 
 function Hp.Consts  scalar=4/4 ref=1/1 buf=1/1 params=0/1/0 returns sx1
   body b389a6ee1e4a54ab1cf9d9ac418cd7ac58d9b5f0ca961742f6e5331b8b091c76
-  0000  LOADSTR  b0, t23    ; 65:20
+  0000  LOADSTR  b0, t26    ; 65:20
   0001  NEWLIT  s0, ref15 args 0    ; 65:20
   0003  LOADK  s0, k2    ; 67:16
   0004  LOADK  s1, k2    ; 67:16

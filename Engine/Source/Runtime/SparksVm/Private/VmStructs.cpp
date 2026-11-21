@@ -24,6 +24,15 @@ uint64 VmStructBits(VmBuffer* buffer) noexcept {
     return static_cast<uint64>(reinterpret_cast<usize>(buffer));
 }
 
+// 필드가 struct 버퍼의 자기 bank 구역 안인지다(Buf 필드는 끝의 capacity slot, 그 밖은 앞쪽) —
+// 다른 struct의 필드 참조가 버퍼 밖이나 다른 bank를 읽지 않게 한다(SparksVm 2.2절).
+bool FieldFits(const VmBuffer* buffer, const BytecodeTypeField& field) noexcept {
+    const uint64 split = uint64(buffer->count) - buffer->capacity;
+    const uint64 end = uint64(field.offset) + field.slots;
+    return field.bank == VmStructBufBank ? field.offset >= split && end <= buffer->count
+                                         : end <= split;
+}
+
 // 필드 명령의 값 bank다(GETSF·SETSF의 S·R·B 순).
 uint32 VmFieldBank(Opcode op) noexcept {
     return op >= Opcode::SetSFS ? uint32(op) - uint32(Opcode::SetSFS)
@@ -82,7 +91,12 @@ VmFaultKind VmExecution::Structured(Opcode op, uint32 word, uint32 extra, const 
     switch (op) {
     case Opcode::NewS: {
         // TYPE의 struct 배치로 모든 slot이 0·null인 버퍼(기본값은 컴파일러의 SETSF).
-        const BytecodeType& type = module.types[module.refs[DecodeBx(word)].detail];
+        const uint32 typeIndex = module.refs[DecodeBx(word)].detail;
+        if (typeIndex == NoBytecodeIndex) {
+            return VmFaultKind::ContractViolation; // 엔진 struct·TagSet(host 배치 — LC5d)
+        }
+
+        const BytecodeType& type = module.types[typeIndex];
         const uint64 slots = uint64(type.slots[0]) + type.slots[1] + type.slots[2];
         const Allocation allocation =
             AllocateBytes(VmBufferKind::Struct, slots * sizeof(uint64), budget);
@@ -107,8 +121,9 @@ VmFaultKind VmExecution::Structured(Opcode op, uint32 word, uint32 extra, const 
         // A ← struct B의 필드(C slot).
         const uint32 field = module.refs[DecodeAx(extra)].detail;
         VmBuffer* value = banks.b[bb];
-        if (field == NoBytecodeIndex || value == nullptr || value->kind != VmBufferKind::Struct) {
-            return VmFaultKind::ContractViolation; // 엔진 struct(LC5d)·null struct
+        if (field == NoBytecodeIndex || value == nullptr || value->kind != VmBufferKind::Struct ||
+            !FieldFits(value, module.typeFields[field])) {
+            return VmFaultKind::ContractViolation; // 엔진 struct(LC5d)·null struct·다른 struct
         }
 
         load(VmStructSlots(value) + module.typeFields[field].offset, VmFieldBank(op), a, c);
@@ -120,7 +135,8 @@ VmFaultKind VmExecution::Structured(Opcode op, uint32 word, uint32 extra, const 
         // struct A의 필드 ← B(C slot). 공유된 struct는 먼저 복제한다(COW).
         const uint32 field = module.refs[DecodeAx(extra)].detail;
         VmBuffer*& slot = banks.b[a];
-        if (field == NoBytecodeIndex || slot == nullptr || slot->kind != VmBufferKind::Struct) {
+        if (field == NoBytecodeIndex || slot == nullptr || slot->kind != VmBufferKind::Struct ||
+            !FieldFits(slot, module.typeFields[field])) {
             return VmFaultKind::ContractViolation;
         }
 
