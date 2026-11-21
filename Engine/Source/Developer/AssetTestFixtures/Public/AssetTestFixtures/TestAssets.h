@@ -62,7 +62,7 @@ struct TestRequiredAsset final : Asset {
 };
 
 // TestHookAsset의 생성자·소멸자가 부르는 시험 hook이다(null이면 부르지 않는다). 시험이 걸고 끝나기
-// 전에 푼다 — 모듈이 EngineTests 하나에 정적으로 링크되므로 testHookAssetHooks는 하나다.
+// 전에 푼다 — 모듈이 EngineTests 하나에 정적으로 링크되므로 ActiveTestHookAssetHooks()의 저장소는 하나다.
 struct TestHookAssetHooks {
     void (*constructed)(void* context) noexcept = nullptr;
     void (*destroyed)(void* context) noexcept = nullptr;
