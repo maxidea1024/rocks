@@ -17,6 +17,7 @@ using reflection_text::TextDiagnostics;
 constexpr StringView NewName = "asset-new";
 constexpr StringView SetName = "asset-set";
 constexpr StringView InfoName = "asset-info";
+constexpr StringView MoveName = "asset-move";
 
 constexpr StringView NewUsage =
     "usage: asset-new <Type> <path> [<property>=<value>...] [--unset=<paths>] [--erase=<paths>]\n"
@@ -40,6 +41,15 @@ constexpr StringView InfoUsage =
     "  Print the representative asset as '<path>=<value>' lines that asset-set accepts as\n"
     "  they are, or as JSON with --json. --all also prints the fields that editing skips.\n"
     "  Takes no lock.\n";
+
+constexpr StringView MoveUsage =
+    "usage: asset-move <path|directory> <new path> [--project=<dir>] [--wait=<seconds>]\n"
+    "  Move or rename an editor package, a package not saved yet, or a logical directory with\n"
+    "  everything under it (one file system move). Asset ids and references stay the same; each\n"
+    "  moved package leaves an alias from its old path in Config/AssetAliases.json (not for a\n"
+    "  rename that only changes case). The new path must be free: no package, file, directory\n"
+    "  or alias of another asset. Prints '<count> packages moved, <count> aliases added'. Takes\n"
+    "  the project write lock.\n";
 
 // 목록 옵션 값 분리자다(경로 key `[...]`·따옴표 안은 나누지 않는다).
 constexpr char ListSeparator = ',';
@@ -209,9 +219,9 @@ bool ParseEdit(Span<const StringView> args, const EditGrammar& grammar, EditArgs
 const char* WarningName(EditorWarningKind kind) noexcept {
     constexpr const char* Names[] = {
         "ExcludedDependency", "UnresolvedImport", "DroppedUnresolvedImport", "NotDurable",
-        "OrphanNotDeleted",   "AliasResolved",    "AliasTableUnreadable"};
+        "OrphanNotDeleted",   "AliasResolved",    "AliasTableUnreadable",    "AliasNotRestored"};
     static_assert(sizeof(Names) / sizeof(Names[0]) ==
-                      static_cast<usize>(EditorWarningKind::AliasTableUnreadable) + 1,
+                      static_cast<usize>(EditorWarningKind::AliasNotRestored) + 1,
                   "every editor warning needs a name");
     return Names[static_cast<usize>(kind)];
 }
@@ -430,6 +440,53 @@ Result<int32> RunAssetSetCommand(void* context, Span<const StringView> args,
     }
 
     return FlushCache(output, allocator, SetName, session);
+}
+
+Result<int32> RunAssetMoveCommand(void* context, Span<const StringView> args,
+                                  CommandletOutput& output) noexcept {
+    const AssetCommandContext& command = *static_cast<const AssetCommandContext*>(context);
+    Allocator& allocator = *command.allocator;
+    EditArgs parsed(allocator);
+    EditGrammar grammar;
+    grammar.positionalCount = 2;
+    bool done = false;
+    auto usage = CheckUsage(output, ParseEdit(args, grammar, parsed), parsed, MoveUsage, done);
+    if (done) {
+        return usage;
+    }
+
+    EditSession session(allocator, *command.modules);
+    Result<int32> failure = Result<int32>::Success(1);
+    if (!OpenSession(output, allocator, MoveName, parsed.project, parsed.wait, true, session,
+                     failure)) {
+        return failure;
+    }
+
+    AssetDiagnostic diagnostic;
+    AssetMoveResult result;
+    auto moved = session.service->Move(session.lock, parsed.positional[0], parsed.positional[1],
+                                       result, &session.warnings, &diagnostic);
+    if (auto warned = WriteWarnings(output, allocator, MoveName, session.warnings); !warned) {
+        return warned;
+    }
+
+    if (!moved) {
+        return WriteFailure(output, allocator, MoveName, parsed.positional[0], session.diagnostics,
+                            diagnostic, moved.Error());
+    }
+
+    StringBuilder<LineBytes> line(allocator);
+    if (auto formatted = line.TryAppendFormat("{}: {} packages moved, {} aliases added\n", MoveName,
+                                              result.packages, result.aliases);
+        !formatted) {
+        return Result<int32>::Failure(formatted.Error());
+    }
+
+    if (auto written = Write(output, CommandletStream::Output, line.View(), 0); !written) {
+        return written;
+    }
+
+    return FlushCache(output, allocator, MoveName, session);
 }
 
 Result<int32> RunAssetInfoCommand(void* context, Span<const StringView> args,

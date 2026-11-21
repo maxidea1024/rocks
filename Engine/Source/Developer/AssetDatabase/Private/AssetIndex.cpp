@@ -663,9 +663,42 @@ Result<bool> AssetIndex::IndexCached(platform::FileSystem& files, const AssetInd
 
 Result<void> AssetIndex::ScanTree(platform::FileSystem& files, const PackageReadOptions& editor,
                                   const AssetIndexCache* cache, StringView start,
-                                  Array<AssetIndexEntry>& found,
+                                  StringView renameTo, Array<AssetIndexEntry>& found,
                                   Array<AssetIndexDiagnostic>& diagnostics) const noexcept {
     const StringView content = layout_->ContentDirectory();
+    // 이름 바꾸기(renameTo — 7.1절 17 A2e2): start 아래 이름을 renameTo 아래 이름으로 색인하고
+    // 내용은 지금 이름(start 아래)에서 읽는다(이동 전에 준비한다). 이름 앞부분을 바꾼다.
+    auto named = [&](StringView relative, Array<char>& out) noexcept -> Result<void> {
+        out.Clear();
+        const StringView head = renameTo.IsEmpty() ? relative : renameTo;
+        const StringView tail = renameTo.IsEmpty()
+                                    ? StringView()
+                                    : StringView(relative.Data() + start.ByteCount(),
+                                                 relative.ByteCount() - start.ByteCount());
+        if (auto appended = out.TryAppend(Span<const char>(head.Data(), head.ByteCount()));
+            !appended) {
+            return appended;
+        }
+
+        return out.TryAppend(Span<const char>(tail.Data(), tail.ByteCount()));
+    };
+    // 이름 바꾸기면 읽을 경로(Content/relative)다.
+    auto readPathOf = [&](StringView relative, String& out) noexcept -> Result<void> {
+        out.Clear();
+        if (renameTo.IsEmpty()) {
+            return Result<void>::Success();
+        }
+
+        const StringView pieces[] = {content, "/", relative};
+        for (StringView piece : pieces) {
+            if (auto appended = out.TryAppend(piece); !appended) {
+                return appended;
+            }
+        }
+
+        return Result<void>::Success();
+    };
+    Array<char> mapped(*allocator_);
     // 깊이 우선으로 디렉터리를 연다(Content 상대 경로 표 — 빈 문자열은 Content 자신). 패키지
     // 후보는 모아 두고 걷기가 끝난 뒤 읽는다(ReadCandidates — scheduler가 있으면 병렬).
     Array<String> pending(*allocator_);
@@ -691,10 +724,16 @@ Result<void> AssetIndex::ScanTree(platform::FileSystem& files, const PackageRead
         const platform::FileStatus stat =
             files.Stat(full.View().Data(), full.View().ByteCount(), info);
         if (!stat) {
-            return stat.code == platform::FileCode::NotFound
-                       ? Result<void>::Success()
-                       : AddDiagnostic(diagnostics, AssetDiagnosticCode::None, FileErrorCode(stat),
-                                       start);
+            if (stat.code == platform::FileCode::NotFound) {
+                return Result<void>::Success();
+            }
+
+            if (auto renamed = named(start, mapped); !renamed) {
+                return renamed;
+            }
+
+            return AddDiagnostic(diagnostics, AssetDiagnosticCode::None, FileErrorCode(stat),
+                                 StringView(mapped.Data(), mapped.Size()));
         }
 
         if (info.isLink) {
@@ -702,8 +741,19 @@ Result<void> AssetIndex::ScanTree(platform::FileSystem& files, const PackageRead
         }
 
         if (info.type == platform::FileType::File && start.EndsWith(EditorPackageExtension)) {
-            return IndexFile(files, editor, Move(first), StringView(), info.modifiedTicks, found,
-                             diagnostics);
+            String name(*allocator_);
+            if (auto renamed = named(start, mapped); !renamed) {
+                return renamed;
+            }
+
+            if (auto assigned = name.TryAssign(StringView(mapped.Data(), mapped.Size()));
+                !assigned) {
+                return assigned;
+            }
+
+            return IndexFile(files, editor, Move(name),
+                             renameTo.IsEmpty() ? StringView() : full.View(), info.modifiedTicks,
+                             found, diagnostics);
         }
 
         if (info.type != platform::FileType::Directory) {
@@ -743,8 +793,13 @@ Result<void> AssetIndex::ScanTree(platform::FileSystem& files, const PackageRead
                 return Result<void>::Failure(FileErrorCode(listed));
             }
 
-            if (auto added = AddDiagnostic(diagnostics, AssetDiagnosticCode::None,
-                                           FileErrorCode(listed), relativeDirectory.View());
+            if (auto renamed = named(relativeDirectory.View(), mapped); !renamed) {
+                return renamed;
+            }
+
+            if (auto added =
+                    AddDiagnostic(diagnostics, AssetDiagnosticCode::None, FileErrorCode(listed),
+                                  StringView(mapped.Data(), mapped.Size()));
                 !added) {
                 return added;
             }
@@ -792,10 +847,15 @@ Result<void> AssetIndex::ScanTree(platform::FileSystem& files, const PackageRead
                         }
                     }
 
-                    if (auto added =
-                            AddDiagnostic(diagnostics, AssetDiagnosticCode::InvalidPath,
-                                          ErrorCode::InvalidArgument,
-                                          StringView(rawRelative.Data(), rawRelative.Size()));
+                    if (auto renamed =
+                            named(StringView(rawRelative.Data(), rawRelative.Size()), mapped);
+                        !renamed) {
+                        return renamed;
+                    }
+
+                    if (auto added = AddDiagnostic(diagnostics, AssetDiagnosticCode::InvalidPath,
+                                                   ErrorCode::InvalidArgument,
+                                                   StringView(mapped.Data(), mapped.Size()));
                         !added) {
                         return added;
                     }
@@ -822,7 +882,20 @@ Result<void> AssetIndex::ScanTree(platform::FileSystem& files, const PackageRead
             }
 
             ScanCandidate candidate(*allocator_);
-            candidate.relative = Move(relative);
+            if (auto read = readPathOf(relative.View(), candidate.readPath); !read) {
+                return read;
+            }
+
+            if (auto renamed = named(relative.View(), mapped); !renamed) {
+                return renamed;
+            }
+
+            if (auto assigned =
+                    candidate.relative.TryAssign(StringView(mapped.Data(), mapped.Size()));
+                !assigned) {
+                return assigned;
+            }
+
             candidate.modifiedTicks = child.info.modifiedTicks;
             if (auto pushed = candidates.TryPushBack(Move(candidate)); !pushed) {
                 return pushed;
@@ -865,8 +938,9 @@ Result<void> AssetIndex::ReadCandidates(platform::FileSystem& files,
                 }
             }
 
-            if (auto indexed = IndexFile(files, editor, Move(candidate.relative), StringView(),
-                                         candidate.modifiedTicks, slot.found, slot.diagnostics);
+            if (auto indexed =
+                    IndexFile(files, editor, Move(candidate.relative), candidate.readPath.View(),
+                              candidate.modifiedTicks, slot.found, slot.diagnostics);
                 !indexed) {
                 return indexed.Error();
             }
@@ -925,7 +999,9 @@ Result<void> AssetIndex::Rebuild(platform::FileSystem& files, const PackageReadO
     editor.expectedKind = PackageKind::Editor;
     // 색인은 형식 판정만 한다(타입 축은 열기가 — 캐시 키에 타입 버전이 없다, 7.1절 16).
     editor.types = nullptr;
-    if (auto scanned = ScanTree(files, editor, cache, StringView(), found, diagnostics); !scanned) {
+    if (auto scanned =
+            ScanTree(files, editor, cache, StringView(), StringView(), found, diagnostics);
+        !scanned) {
         return scanned;
     }
 
@@ -1104,6 +1180,12 @@ Result<void> AssetIndex::PrepareRefreshPaths(platform::FileSystem& files,
         }
     }
 
+    for (const AssetIndexMove& move : paths.moves) {
+        if (!IsContentRelativeName(move.from) || !IsContentRelativeName(move.to)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
     const bool normalizes = paths.normalizesNames;
     // 정규화 키의 임시 저장소다(정규화하지 않으면 이름을 그대로 쓴다 — 항목마다 복사하지 않는다).
     String scratch(*allocator_);
@@ -1167,6 +1249,78 @@ Result<void> AssetIndex::PrepareRefreshPaths(platform::FileSystem& files,
         }
     }
 
+    // 이름 바꾸기의 두 이름(빼기 — 그 이름과 그 아래)과 표시 이름이다. 같은 키가 아니면 서로의
+    // 아래일 수 없다(디렉터리를 자기 안으로·자기 위로 옮기기).
+    NameSet moved(*allocator_);
+    for (const AssetIndexMove& move : paths.moves) {
+        String fromKey(*allocator_);
+        auto from = CompareKey(move.from, normalizes, scratch);
+        if (!from) {
+            return Result<void>::Failure(from.Error());
+        }
+
+        if (auto assigned = fromKey.TryAssign(from.Value()); !assigned) {
+            return assigned;
+        }
+
+        auto to = CompareKey(move.to, normalizes, scratch);
+        if (!to) {
+            return Result<void>::Failure(to.Error());
+        }
+
+        NameSet one(*allocator_);
+        if (auto added = one.Add(fromKey.View()); !added) {
+            return added;
+        }
+
+        one.Finish();
+        if (fromKey.View() != to.Value() && one.Covers(to.Value())) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        NameSet other(*allocator_);
+        if (auto added = other.Add(to.Value()); !added) {
+            return added;
+        }
+
+        other.Finish();
+        if (fromKey.View() != to.Value() && other.Covers(fromKey.View())) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        const StringView names[] = {move.from, move.to};
+        for (StringView name : names) {
+            auto key = CompareKey(name, normalizes, scratch);
+            if (!key) {
+                return Result<void>::Failure(key.Error());
+            }
+
+            if (auto added = moved.Add(key.Value()); !added) {
+                return added;
+            }
+
+            String display(*allocator_);
+            String escaped(*allocator_);
+            if (auto assigned = AssignDisplayNameAs(display, name, false); !assigned) {
+                return assigned;
+            }
+
+            if (auto assigned = AssignDisplayNameAs(escaped, name, true); !assigned) {
+                return assigned;
+            }
+
+            const String* shownNames[] = {&display, &escaped};
+            for (const String* shown : shownNames) {
+                if (auto shownKey = CompareKey(shown->View(), normalizes, scratch); !shownKey) {
+                    return Result<void>::Failure(shownKey.Error());
+                } else if (auto added = treeDisplays.Add(shownKey.Value()); !added) {
+                    return added;
+                }
+            }
+        }
+    }
+
+    moved.Finish();
     treeDisplays.Finish();
 
     // 파일을 키 순으로 묶는다(같은 키는 한 번 — 처음 철자로 읽는다). 하위 트리가 덮는 파일은 읽지
@@ -1250,8 +1404,17 @@ Result<void> AssetIndex::PrepareRefreshPaths(platform::FileSystem& files,
     refreshed.Finish();
     refreshedDisplays.Finish();
     for (StringView root : roots) {
-        if (auto scanned =
-                ScanTree(files, editor, nullptr, root, plan.added_, plan.fileDiagnostics_);
+        if (auto scanned = ScanTree(files, editor, nullptr, root, StringView(), plan.added_,
+                                    plan.fileDiagnostics_);
+            !scanned) {
+            return scanned;
+        }
+    }
+
+    // 이름 바꾸기: 지금 from의 내용을 to 이름으로 읽는다(이동 전 준비).
+    for (const AssetIndexMove& move : paths.moves) {
+        if (auto scanned = ScanTree(files, editor, nullptr, move.from, move.to, plan.added_,
+                                    plan.fileDiagnostics_);
             !scanned) {
             return scanned;
         }
@@ -1277,7 +1440,8 @@ Result<void> AssetIndex::PrepareRefreshPaths(platform::FileSystem& files,
             return Result<void>::Failure(key.Error());
         }
 
-        if (!refreshed.Contains(key.Value()) && !trees.Covers(key.Value())) {
+        if (!refreshed.Contains(key.Value()) && !trees.Covers(key.Value()) &&
+            !moved.Covers(key.Value())) {
             (void)entryPlaces.TryPushBack(&entry);
         }
     }

@@ -59,6 +59,13 @@ struct AssetInfoOptions {
     bool all = false;
 };
 
+// asset-move 결과다(7.1절 17 A2e2).
+struct AssetMoveResult {
+    // 옮긴 패키지 수(파일이 있는 것과 저장하지 않은 새 패키지)와 더한 별칭 수다.
+    usize packages = 0;
+    usize aliases = 0;
+};
+
 class AssetService {
 public:
     // layout은 초기화한 프로젝트 배치다(빌림 — 서비스보다 오래 산다).
@@ -141,6 +148,23 @@ public:
     // 보고 한다). 오류: Initialize 전 InvalidArgument, WriteAssetIndexCache의 오류.
     Result<void> FlushCache(const AssetDatabaseLock& lock) noexcept;
 
+    // asset-move <path|디렉터리> <새 path>: 패키지 하나·저장하지 않은 새 패키지·논리 디렉터리를 새
+    // 경로로 옮긴다(7.1절 17 A2e2 — ID·참조는 그대로, 옮긴 패키지마다 옛 경로 별칭,
+    // 대소문자·정규화만 바꾸는 이름 변경은 별칭 없음). 순서: 검사 → 집합 경로 표·색인 갱신 준비 →
+    // 열린 패키지 Detach → 별칭 쓰기 → 대상 부모 디렉터리 → OS 이동 한 번(디렉터리도 — 디스크에
+    // 없으면 건너뜀) → 확정. OS 이동이 실패하면 별칭 표를 되돌린다(되돌리지 못하면 경고
+    // AliasNotRestored). 별칭 쓰기의 NotDurable은 경고 NotDurable이다.
+    //
+    // 오류(failure 진단): Initialize 전·잠금 아님 InvalidArgument, 경로 규칙 InvalidPath /
+    // InvalidArgument, 원본이 없음 NotFound(진단 None), 원본 경로 키 둘 DuplicatePath /
+    // AlreadyExists, 대상이 원본 아래 InvalidArgument, 대상이 차 있음(색인·파일·디렉터리·새 패키지·
+    // 다른 에셋의 별칭) DuplicatePath / AlreadyExists, 새 경로 규칙 위반(길이) InvalidPath, 별칭
+    // 표의 오류(Aliases·Write), Detach·디렉터리 만들기·OS 이동의 IO(진단 None과 그 오류), 할당 실패
+    // — 모두 패키지 파일·색인·집합 그대로(Detach는 되돌리지 않는다 — 메모리 bulk는 동작이 같다).
+    Result<void> Move(const AssetDatabaseLock& lock, StringView source, StringView target,
+                      AssetMoveResult& result, Array<EditorWarning>* warnings = nullptr,
+                      AssetDiagnostic* failure = nullptr) noexcept;
+
     // 별칭 표다(처음 부를 때 packages.files에서 읽는다 — 7.1절 17 A2e1, 실패하면 다음 호출이 다시
     // 읽는다). 오류(failure 진단): Initialize 전 InvalidArgument, AssetAliasTable::Load의 오류.
     Result<AssetAliasTable*> Aliases(AssetDiagnostic* failure = nullptr) noexcept;
@@ -196,6 +220,7 @@ private:
     AliasLookup aliasLookup_;
     SystemAssetClock systemClock_;
     AssetClock* clock_;
+    uint32 aliasDays_;
     AssetAliasSearchLimits aliasSearch_;
     bool initialized_ = false;
 };

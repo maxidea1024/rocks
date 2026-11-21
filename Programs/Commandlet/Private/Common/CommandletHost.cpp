@@ -214,6 +214,12 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
     if (!registered) {
         return 1;
     }
+    registered =
+        registry.Register({"asset-move", "Move or rename an editor package or a directory of them.",
+                           &RunAssetMoveCommand, &assetContext});
+    if (!registered) {
+        return 1;
+    }
     registered = registry.Register(
         {"asset-index-rebuild",
          "Rescan the project without the index cache, clean temporary files and rewrite the cache.",

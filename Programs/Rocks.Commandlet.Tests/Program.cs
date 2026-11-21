@@ -1316,6 +1316,120 @@ finally
     Directory.Delete(aliasDirectory, true);
 }
 
+// asset-move(AssetSystem.ko.md 4.4절, 7.1절 17 — A2e2): 파일·디렉터리 이동(요약 줄·디스크·옛 경로의 별칭 해석), 대소문자만
+// 바꾸기(별칭 없음), 거부(대상 점유 — 색인 항목·다른 에셋 별칭, 없는 원본, 대상이 원본 아래), 사용법·도움말·프로젝트 없음·잠금 Busy.
+string moveDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-move-{Environment.ProcessId}");
+try
+{
+    string project = Path.Combine(moveDirectory, "Moving");
+    Directory.CreateDirectory(project);
+    File.WriteAllText(Path.Combine(project, "Moving.rocksproject"), "{}\n");
+    string projectOption = $"--project={project}";
+    string content = Path.Combine(project, "Content");
+
+    async Task<ProcessResult> RunMove(params string[] arguments) =>
+        await ProcessRunner.RunAsync(new(executable, arguments, workingDirectory, Timeout: TimeSpan.FromSeconds(30)));
+
+    void ReportMove(string label, bool passed, ProcessResult result)
+    {
+        Console.WriteLine($"{label}: {(passed ? "PASS" : "FAIL")}");
+        if (!passed)
+        {
+            ++failures;
+            Console.Error.WriteLine($"  exit={result.ExitCode}; stdout={result.StdOut}; stderr={result.StdErr}");
+        }
+    }
+
+    ProcessResult hero = await RunMove("asset-new", "Skeleton", "/Game/Mv/Hero", projectOption);
+    ProcessResult leaf = await RunMove("asset-new", "Skeleton", "/Game/Mv/Sub/Leaf", projectOption);
+    ProcessResult single = await RunMove("asset-new", "Skeleton", "/Game/Single", projectOption);
+    ReportMove("move: asset-new", hero.ExitCode == 0 && leaf.ExitCode == 0 && single.ExitCode == 0, hero);
+    string heroId = hero.StdOut.Trim().Split(' ').Last();
+
+    // 파일 하나(대상 부모 디렉터리를 만든다).
+    ProcessResult file = await RunMove("asset-move", "/Game/Single", "/Game/Elsewhere/Single2", projectOption);
+    ReportMove("asset-move file", file.ExitCode == 0 &&
+        file.StdOut == "asset-move: 1 packages moved, 1 aliases added\n" && file.StdErr.Length == 0 &&
+        File.Exists(Path.Combine(content, "Elsewhere", "Single2.rasset")) &&
+        !File.Exists(Path.Combine(content, "Single.rasset")), file);
+
+    // 디렉터리(하위 디렉터리째 한 번의 OS 이동).
+    ProcessResult directory = await RunMove("asset-move", "/Game/Mv", "/Game/Moved", projectOption);
+    ReportMove("asset-move directory", directory.ExitCode == 0 &&
+        directory.StdOut == "asset-move: 2 packages moved, 2 aliases added\n" && directory.StdErr.Length == 0 &&
+        File.Exists(Path.Combine(content, "Moved", "Hero.rasset")) &&
+        File.Exists(Path.Combine(content, "Moved", "Sub", "Leaf.rasset")) &&
+        !Directory.Exists(Path.Combine(content, "Mv")), directory);
+
+    // 옛 경로는 별칭으로 열린다(경고), 새 경로는 그대로 열린다.
+    ProcessResult oldPath = await RunMove("asset-info", "/Game/Mv/Hero", projectOption);
+    ReportMove("asset-info through a move alias", oldPath.ExitCode == 0 &&
+        oldPath.StdErr.Contains($"asset-info: AliasResolved: /Game/Mv/Hero: warning resolved through an alias to {heroId}",
+            StringComparison.Ordinal), oldPath);
+    ProcessResult newPath = await RunMove("asset-info", "/Game/Moved/Hero", projectOption);
+    ReportMove("asset-info at the new path", newPath.ExitCode == 0 && newPath.StdErr.Length == 0, newPath);
+
+    // 대소문자만 바꾸기(별칭 없음).
+    ProcessResult caseOnly = await RunMove("asset-move", "/Game/Moved", "/Game/moved", projectOption);
+    ReportMove("asset-move case only", caseOnly.ExitCode == 0 &&
+        caseOnly.StdOut == "asset-move: 2 packages moved, 0 aliases added\n" &&
+        new DirectoryInfo(content).GetDirectories().Any(entry => entry.Name == "moved"), caseOnly);
+
+    // 거부: 대상 점유(색인 항목·다른 에셋의 별칭), 없는 원본, 대상이 원본 아래.
+    ProcessResult occupied = await RunMove("asset-move", "/Game/Elsewhere/Single2", "/Game/moved/Hero", projectOption);
+    ReportMove("asset-move onto a package", occupied.ExitCode == 1 &&
+        occupied.StdErr.Contains($"asset-move: DuplicatePath: /Game/Elsewhere/Single2: AlreadyExists (related {heroId})",
+            StringComparison.Ordinal) && File.Exists(Path.Combine(content, "Elsewhere", "Single2.rasset")), occupied);
+    ProcessResult onAlias = await RunMove("asset-move", "/Game/Elsewhere/Single2", "/Game/Mv/Hero", projectOption);
+    ReportMove("asset-move onto another asset's alias", onAlias.ExitCode == 1 &&
+        onAlias.StdErr.Contains($"asset-move: DuplicatePath: /Game/Elsewhere/Single2: AlreadyExists (related {heroId})",
+            StringComparison.Ordinal), onAlias);
+    ProcessResult missing = await RunMove("asset-move", "/Game/Nowhere", "/Game/X", projectOption);
+    ReportMove("asset-move missing source", missing.ExitCode == 1 &&
+        missing.StdErr.Contains("asset-move: NotFound: /Game/Nowhere: failed", StringComparison.Ordinal), missing);
+    ProcessResult inside = await RunMove("asset-move", "/Game/moved", "/Game/moved/Inner", projectOption);
+    ReportMove("asset-move into itself", inside.ExitCode == 1 &&
+        inside.StdErr.Contains("asset-move: InvalidArgument: /Game/moved: failed", StringComparison.Ordinal), inside);
+
+    // 잠금 Busy(Windows), 사용법, 도움말, 프로젝트 없음.
+    if (OperatingSystem.IsWindows())
+    {
+        string lockPath = Path.Combine(project, "Intermediate", "AssetDatabase.lock");
+        using FileStream locked = new(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
+        locked.Lock(0, 1);
+        ProcessResult busy = await RunMove("asset-move", "/Game/moved", "/Game/Other", projectOption);
+        ReportMove("asset-move locked", busy.ExitCode == 1 &&
+            busy.StdErr.Contains("asset-move: Busy: ", StringComparison.Ordinal), busy);
+        locked.Unlock(0, 1);
+    }
+
+    string[][] moveUsage =
+    [
+        ["asset-move", projectOption],
+        ["asset-move", "/Game/A", projectOption],
+        ["asset-move", "/Game/A", "/Game/B", "/Game/C", projectOption],
+        ["asset-move", "/Game/A", "/Game/B", "--wait=", projectOption],
+        ["asset-move", "/Game/A", "/Game/B", "--json", projectOption],
+    ];
+    foreach (string[] arguments in moveUsage)
+    {
+        ProcessResult usage = await RunMove(arguments);
+        ReportMove($"asset-move usage: {string.Join(' ', arguments.Skip(1).Where(argument => argument != projectOption))}",
+            usage.ExitCode == 2 && usage.StdErr.StartsWith("usage: asset-move", StringComparison.Ordinal), usage);
+    }
+
+    ProcessResult moveHelp = await RunMove("asset-move", "--help");
+    ReportMove("asset-move help", moveHelp.ExitCode == 0 &&
+        moveHelp.StdOut.StartsWith("usage: asset-move", StringComparison.Ordinal), moveHelp);
+    ProcessResult moveNoProject = await RunMove("asset-move", "/Game/A", "/Game/B");
+    ReportMove("asset-move without a project", moveNoProject.ExitCode == 1 &&
+        moveNoProject.StdErr.Contains("no project found", StringComparison.Ordinal), moveNoProject);
+}
+finally
+{
+    Directory.Delete(moveDirectory, true);
+}
+
 if (OperatingSystem.IsWindows())
 {
     // 무효 stderr 핸들을 child의 표준 오류로 직접 설정해 출력 실패를 재현한다.
