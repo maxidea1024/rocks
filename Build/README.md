@@ -28,6 +28,7 @@ Visual Studio 솔루션·프로젝트 파일(UE GenerateProjectFiles 대응, [�
 - 시작 프로젝트는 처음 한 번 고른다("Set as Startup Project" — 솔루션 직렬화기가 항목을 이름순으로 써서 생성기가 정할 수 없다).
 - `Rocks.proj`의 `BootstrapTools`도 같은 잠금과 도구 지문(`Build/Tools.ps1`, `out/dotnet/.rocks-tools.json`)을 쓴다. 그 뒤의 빌드 단계는 잠금 밖이라 터미널 빌드 도중 Visual Studio가 도구 원본 변경으로 도구를 다시 빌드하면 겹칠 수 있다.
 - 루트에 `Rocks.proj`와 `Rocks.slnx`가 함께 있으므로 `dotnet msbuild`·`dotnet build`에는 늘 `Rocks.proj`를 적는다(적지 않으면 MSB1011).
+- 게임 프로젝트: `pwsh <SDK>/Build/GenerateProjectFiles.ps1 -Project <게임> [-Sdk <SDK>]`(엔진 작업 사본의 같은 스크립트도 된다, CLI `projectfiles --project`)가 `<게임>/<이름>.slnx`와 `<게임>/out/ProjectFiles/`를 쓴다. SDK는 게임 빌드처럼 `engineAssociation`·등록부로 고르고, 솔루션 구성은 SDK가 가진 구성이다. 게임 프로젝트 하나(루트에 정의된 타깃), 하위 디렉터리 타깃 프로젝트, SDK 공개 헤더만 담는 `RocksSdk`(빌드 안 함)가 든다. Visual Studio 빌드는 SDK의 `Build/IdeBuild.bat`로 SDK CLI의 `game`·`clean --project`를 부른다. `associate`로 연결을 바꾸면 이미 만든 게임 프로젝트 파일을 다시 만든다.
 - VS Code·clangd는 생성하지 않는다. 빌드 출력의 `compile_commands.json`을 `--compile-commands-dir=out/<출력>`으로 주면 된다.
 
 ### 빌드 구성

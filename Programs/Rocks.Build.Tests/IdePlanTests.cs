@@ -309,6 +309,21 @@ internal static class IdePlanTests
         IdeCompile stray = raw with { Arguments = [.. raw.Arguments, @"/FIC:\stray.h"] };
         Throws<ArgumentException>(() => IntelliSenseModel.Values(stray, named[0].Plan, (_, _) => "x"), "neither a definitions header", "stray forced include");
 
+        // 게임 배치(Docs/Design/ProjectFiles.ko.md 10.4절): 루트에 정의된 타깃(Alpha)이 주 프로젝트 Game의 구성이고, 파일은 가장 가까운 정의
+        // 디렉터리로 간다(루트면 Game). 헤더 루트(여기서는 Engine) 아래 헤더는 헤더 전용 프로젝트로 간다. 엔진 루트는 쓰지 않는다.
+        List<IdeTargetPlan> gamePlans = [.. named.Select(plan => plan.Target == "Alpha" ? plan with { DefinitionDirectory = fixture, DefinitionName = "Game" } : plan)];
+        IntelliSenseModel gameModel = IntelliSenseModel.Create(gamePlans, fixture, projectFiles, [], "Development", new IdeModelLayout("Game", "RocksSdk", engine));
+        IdeProject main = Project(gameModel, "Game");
+        IdeProject headerOnly = Project(gameModel, "RocksSdk");
+        Check(main.Engine && main.Configurations.Select(configuration => configuration.Key).SequenceEqual(["Alpha|Debug", "Alpha|Development"]) &&
+            Names(main).SequenceEqual(["Lib.cpp", "Raw.c", "Helper.cpp"]) && main.Headers.Select(Path.GetFileName).SequenceEqual(["Helper.h"]),
+            "game layout main project: " + string.Join(",", Names(main)) + " / " + string.Join(",", main.Headers.Select(Path.GetFileName)));
+        Check(!headerOnly.Engine && headerOnly.Sources.Count == 0 && headerOnly.Headers.Select(Path.GetFileName).SequenceEqual(["Lib.h"]) &&
+            headerOnly.Configurations.SequenceEqual(main.Configurations), "game layout header project");
+        Check(Names(Project(gameModel, "Gamma")).SequenceEqual(["Both.cpp", "Main.cpp"]) && !gameModel.Projects.Any(project => project.Name == "Alpha") &&
+            gameModel.Projects.All(project => project.Name != IntelliSenseModel.EngineProjectName), "game layout target projects");
+        Check(IntelliSenseModel.Verify(gameModel, gamePlans, projectFiles).Count == 0, "game layout model verification");
+
         // 엔진 루트에 같은 종류 타깃 둘이면 구성 이름이 겹친다.
         Throws<ArgumentException>(() => IntelliSenseModel.Create([named[0] with { DefinitionDirectory = engine }, named[1] with { DefinitionDirectory = engine }],
             fixture, projectFiles, engineRoots, "Development"), "share the configuration names", "engine project configuration collision");

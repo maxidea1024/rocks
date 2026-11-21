@@ -9,7 +9,7 @@ namespace Rocks.Build.Cli;
 /// <summary>
 /// <c>projectfiles</c> 명령이다(Docs/Design/ProjectFiles.ko.md). 엔진 저장소의 모든 타깃 × 구성을 IDE 계획 모드로 계획해 Visual Studio
 /// 프로젝트 파일 모델을 만들고 검사한 뒤, 루트 <c>Rocks.slnx</c>와 <c>out/ProjectFiles/</c>에 쓴다(바뀐 파일만).
-/// 사용 예: <c>Rocks.Build.Cli projectfiles --root .</c>.
+/// 사용 예: <c>Rocks.Build.Cli projectfiles --root .</c>. 게임은 <c>projectfiles --project &lt;게임&gt;</c>이다(<see cref="GameProjectFiles"/>).
 /// <list type="bullet">
 /// <item><c>--root</c>: 저장소 루트(기본 현재 디렉터리). <c>--compiler</c>·<c>--rules</c>: build와 같다.</item>
 /// <item><c>--model-only on</c>: 모델을 만들고 검사만 하며 아무 파일도 쓰지 않는다.</item>
@@ -55,6 +55,12 @@ internal static class ProjectFilesCommand
     public static async Task<int> RunAsync(string[] args, CancellationToken cancellationToken)
     {
         Dictionary<string, string> options = BuildCommand.Parse(args);
+        // 게임 모드(Docs/Design/ProjectFiles.ko.md 10.4절): 설치 SDK에 연결한 게임 프로젝트의 솔루션을 만든다.
+        if (options.ContainsKey("project"))
+        {
+            return await GameProjectFiles.RunAsync(options, cancellationToken);
+        }
+
         var allowed = new HashSet<string>(["root", "compiler", "rules", "model-only", "compare-compile-db", "target", "configuration"], StringComparer.Ordinal);
         foreach (string name in options.Keys.Where(name => !allowed.Contains(name)))
         {
