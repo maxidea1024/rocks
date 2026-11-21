@@ -508,6 +508,35 @@ A2는 에디터 쪽 에셋 데이터베이스다(4·5.4·5.5·7·8·13·16절). 
         - 측정(2026-11-21, Windows 11, 논리 프로세서 20개, NVMe, Release, 패키지 5만 개·태그 둘·디렉터리 25개, OS 파일 캐시가 따뜻한 5회 중앙값): 중앙값(최소–최대) — 직렬 2.37 s(2.30–2.39) · 캐시 1.74 s(1.71–1.78), worker 1 + 호출 스레드 1.45 s(1.44–1.51) · 1.05 s(1.01–1.06), **worker 3 + 1 1.13 s(1.10–1.15) · 0.77 s(0.70–1.09)**, worker 7 + 1 1.45 s(1.19–1.52) · 0.90 s(0.73–1.24), worker 19 + 1 1.58 s(1.47–1.73) · 1.11 s(1.07–1.24). 캐시 없는 worker 3과 7은 범위가 겹치지 않는다(캐시 사용 쪽은 첫 round가 OS 캐시를 데워 최댓값이 퍼진다). worker 3개에서 직렬의 약 2.1–2.3배이고 더 늘리면 느려진다(파일 열기·범위 읽기가 OS 쪽에서 겹쳐 막힌다고 본다 — 원인 분석은 후속, 차가운 디스크 수치도 후속).
         - 결정(측정 근거): 명령(Commandlet)은 색인을 만드는 모든 명령(asset-list·asset-index-verify·asset-index-rebuild·편집 세션)에서 worker `CommandletScanWorkers` = 3개(논리 프로세서 − 1이 더 작으면 그 수, 0이면 직렬)의 scheduler를 띄워 넘긴다. 띄우지 못하면 직렬로 계속한다(결과가 같으므로 경고도 없다). 에디터 서비스는 엔진 scheduler를 넘기는 쪽에서 같은 상한을 쓴다(에디터 연결 때). 상태: **구현** — 대조표 14.1.31절, coverage 14.1.32절.
 
+17. **A2e 세부**(2026-11-22, 설계 — 교차 검증 1회 반영: 필수 6·권장 9): 넷으로 나눠 A2e1(별칭 표) → A2e2(Detach·이동 — 이름을 바꿔 색인하는 갱신 준비 포함) → A2e3(메모리 참조 간선 표·삭제·복제) → A2e4(ID 수정·고아 출력) 순으로 하고 부분마다 완료 조건 넷을 지킨다(뒤 단계가 앞 단계의 별칭·Detach를 쓴다). UE 5.8 대조는 조사 결과(AssetRenameManager·ObjectTools·AssetDeleteModel·AssetViewUtils)다 — Rocks는 참조가 AssetId라 UE의 참조자 고치기(fix-up)가 필요 없고, 별칭은 텍스트 경로(설정·스크립트·명령 입력)만을 위한 것이라는 차이에서 갈리는 곳만 적는다. 원칙(A2c2b와 같다): 되돌릴 수 없는 단계(OS Move·Delete) 뒤에는 실패가 없게, 그 앞에서 할당·검사·별칭 쓰기·색인 준비를 끝낸다.
+
+    - **A2e1 별칭 표**(`AssetAliasTable`, AssetDatabase):
+      - 파일 `Config/AssetAliases.json` — 도구가 다시 쓰는 파일이라 엄격 JSON(JSON5 정책 — 손으로 고치는 파일만 JSON5). 모양: `{"version": 1, "aliases": [{"path": "/Game/Old", "asset": "<36자 소문자 AssetId>", "created": "2026-11-22T00:00:00Z", "days": 90}, …]}`. 항목은 경로 키(NFC·caseless) byte 순, 같은 키는 하나. 결정적 출력(`JsonWriter` 기본 옵션 — 들여쓰기 2칸·LF)으로 항목 순서가 고정이라 병합 충돌이 항목 단위로 생긴다(한 줄 한 항목은 JsonWriter가 지원하지 않는다 — 항목마다 6줄). 빈 표도 `{"version": 1, "aliases": []}`로 쓴다(버전 관리 대상 파일이 생겼다 사라지지 않게).
+      - 읽기: 파일이 없으면 빈 표. 읽기 검증(신뢰하지 않는 입력): version 1, 항목 칸 넷이 모두 있고 다른 키 없음, path는 논리 경로 규칙(마운트 `/Game`), asset은 36자 소문자 non-null, created는 ISO 8601 UTC(`TryParseIso8601`), days는 1–36500, 경로 키 중복 없음, 항목 수 상한 `MaxAssetAliases` = 2²⁰, 파일 상한 `MaxAssetAliasFileBytes` = 64 MiB. 위반은 `InvalidArgument` + 진단(파일·항목 번호·칸). 정렬이 어긋난 파일(손으로 병합)은 받고 다음 쓰기가 정렬한다.
+      - 쓰기: 잠금 보유자만(`IsHeldFor`), 임시 파일 `Config/AssetAliases.json.<guid>.tmp` → Flush·Close → Replace(원자 — 저장·캐시와 같은 길), NotDurable은 경고. 쓰기 직전에 파일을 다시 읽어 마지막 적재·쓰기 때 byte(있음·없음 포함)와 다르면(git 병합·손 편집 — 서비스는 표를 오래 쥔다) 쓰지 않고 `ExternalModification` / `StaleHandle`(다시 적재한 뒤 다시 한다 — 패키지 저장 5.5절 1과 같은 원칙, A2e1 리뷰 필수). 메모리 표는 쓰기가 성공해야 바뀐다(준비·확정). 이전 파일 byte를 기억해 두어 호출자가 되돌릴 수 있다(`Restore` — 이동·삭제가 OS 단계 실패 때 쓴다, 되돌리기 실패는 경고 `AliasNotRestored` — 되돌리기도 마지막 쓰기 뒤 파일이 바뀌었으면 하지 않는다).
+      - 해석: `AssetTextResolver::ResolveId`와 `AssetService::OpenTarget`이 논리 경로를 색인에서 못 찾을 때만(NotFound — 같은 키 둘·형식 위반은 그대로 오류) 별칭 표를 읽어 그 AssetId로 계속하고 경고 `AliasResolved`(옛 경로 텍스트를 경고에 직접 담는다 — 뒤에 별칭 표가 바뀌어도 그대로, 대상 id)를 warnings에 붙인다. 별칭 표를 읽지 못하면 그 진단으로 실패하고 경고 `AliasTableUnreadable`도 붙인다(참조 값 해석은 진단 칸 없이 불려 대입 진단 Unresolved만 남으므로 원인을 보이게 — A2e1 리뷰 권장). 색인에서 찾은 경로는 별칭 파일이 깨져 있어도 오류가 아니다(별칭 표는 지연 적재 — 처음 필요할 때 읽고 그 오류는 그 호출의 오류다). 별칭 사슬은 없다(이동마다 옛 경로 → id를 직접 둔다 — A → B → C 이동이면 A·B 둘 다 id). 별칭 키와 실제 패키지가 같은 경로면(손으로 파일을 둔 경우) 색인이 이기고 list는 그 항목에 `shadowed`를 붙인다.
+      - 점유: 검사는 `AssetService`(New·Move·Duplicate)가 한다 — `EditorPackageSet`(라이브러리 API)은 별칭을 모르므로 에디터도 경로를 만들거나 옮길 때 서비스를 거친다. 대상 경로가 별칭 키면 `DuplicatePath` / `AlreadyExists`(related = 별칭 대상 id) — 7.1절 12. 예외: 이동하는 에셋 자신을 가리키는 별칭 자리로 되돌아가기는 허용하고 그 별칭을 지운다(UE `TryMoveRedirector`와 같다). UE는 다른 대상의 같은 클래스 리다이렉터를 조용히 지우고 덮지만 Rocks는 거부한다(텍스트 참조가 다른 에셋으로 바뀌지 않게).
+      - 만료: 항목은 만든 UTC와 만료 일수(기본 `AssetAliasDefaultDays` = 90, `AssetServiceConfig::aliasDays`)를 가진다. 시각은 `AssetServiceConfig::clock`(`AssetClock` — 없으면 시스템 시계, 시험은 수동 시계)이다. `asset-alias-prune`은 `created + days ≤ 지금`인 항목을 고른 뒤 텍스트 참조 검색으로 쓰인 곳을 찾는다 — 검색 대상은 `Config/` 아래 일반 파일(링크는 따라가지 않음, `AssetAliases.json`·임시 파일 제외, 파일 하나 64 MiB·파일 수 `MaxAliasSearchFiles` = 65536·총 byte `MaxAliasSearchBytes` = 1 GiB 상한 — 넘으면 검색을 멈추고 경고 `AliasSearchTruncated`, 그때는 아무것도 지우지 않는다)과 스크립트 루트(Sparks 소스 위치가 정해지면 더한다 — 지금은 `Config/`뿐). 대조는 경로 텍스트의 대소문자 무시 byte 일치(ASCII만 — 비 ASCII 대소문자·NFD 철자 차이는 놓친다, 한계)이고 뒤가 구성 요소 경계(`.`·`"`·`'`·공백·줄끝·`,`·`)`·`]`·파일 끝)다. 앞 경계는 보지 않는다(쓰임으로 잘못 보면 지우지 않는 쪽이라 안전하다). 검색은 파일을 한 번 훑어 마운트(`/Game`)로 시작하는 후보를 뒤 경계까지(논리 경로 상한 256 byte — 넘으면 별칭일 수 없다) 소문자로 잘라 만료 키 정렬 표에서 이진 검색한다 — 논리 경로에는 경계 문자가 없으므로 위 판정과 같고 비용은 byte × log(만료 항목 수)다(A2e1 리뷰 권장 — 처음 구현은 만료 항목마다 파일 전체를 훑었다). 쓰인 항목은 지우지 않고 경고 `AliasInUse`(`<파일>:<줄>` — 파일 이름은 제어 문자 escape)로 남긴다(지우면 그 텍스트가 깨진다 — 강제 삭제는 `asset-alias-remove`). 쓰이지 않은 만료 항목만 지운다.
+      - 명령: `asset-alias-list`(잠금 없음 — `<옛 경로> <AssetId> <created> <만료 날짜>[ expired][ shadowed] -> <지금 경로|missing>` 경로 키 순), `asset-alias-remove <옛 path>`(잠금 — 없으면 NotFound 1), `asset-alias-prune`(잠금 — 요약 `asset-alias-prune: N removed, M in use, K kept`).
+      - 서비스: `AssetService`가 별칭 표를 소유한다(지연 적재 — Initialize는 읽지 않는다, 실패하면 다음 호출이 다시 읽는다). `Aliases`·`AliasRemove`·`AliasPrune`와 이동·삭제가 쓰는 준비·쓰기·되돌리기(`AssetAliasTable::Write`·`Restore`). 목록은 명령이 표와 색인으로 만든다(타입 등록 없이). 별칭 쓰기 임시 파일은 `asset-index-rebuild`의 고아 정리가 지운다(Config 바로 아래). 색인 캐시와 별칭 표는 원자 쓰기 함수 하나를 함께 쓴다(`AtomicFileWrite`). 상태: **구현** — 대조표 14.1.33절, coverage 14.1.34절.
+    - **A2e2 Detach·이동**(`AssetService::Move`, `EditorPackageSet::Detach`·`Relocate`):
+      - 대상: `<path|디렉터리>` → `<새 path>`(새 경로 전체 — "기존 디렉터리 안으로 넣기"(UE 폴더 드래그)는 지원하지 않는다). 원본이 색인의 패키지 경로면 파일 이동, 집합의 저장하지 않은 새 패키지 경로면 경로 표만 바꾸기(파일·텍스트 참조가 없었으므로 별칭 없음), 아니고 논리 디렉터리(그 아래 색인 항목·저장하지 않은 새 패키지·Content 디렉터리가 있는 경로)면 디렉터리 이동. 셋 다 아니면 NotFound. 같은 경로 키 둘(DuplicatePath)인 원본은 AlreadyExists.
+      - 검사(아무것도 바꾸기 전): 잠금, 대상 마운트 `/Game`, 대상이 원본 자신 아래(디렉터리를 자기 안으로)면 InvalidArgument, 대상 경로 키가 원본과 같으면 대소문자·정규화만 바꾸는 이름 변경(허용 — 별칭을 만들지 않는다, UE와 같다), 아니면 대상이 비어 있어야 한다 — 색인 항목·Content 파일·디렉터리(Stat)·저장하지 않은 새 패키지 경로·별칭(자기 별칭 예외) 어느 것도 없어야 한다(`DuplicatePath` / `AlreadyExists`). 디렉터리면 옮길 패키지마다 새 논리 경로·OS 이름을 만들어(길이·규칙 — InvalidPath) 모두 통과해야 한다. 원본 아래 열린 dirty 패키지·저장하지 않은 새 패키지도 대상이다(내용은 메모리 — 다음 저장이 새 경로에 쓴다, 7.1절 6).
+      - 실행(되돌릴 수 없는 OS Move 앞에서 실패할 수 있는 것을 모두 끝낸다): (1) 집합 경로 표 고치기 준비(`Relocate` — 할당), (2) 색인 갱신 준비 — `PrepareRefreshPaths`에 이름 바꾸기 입력(`AssetIndexRefreshPaths::moves` — 원본 이름의 파일·하위 트리를 읽어 대상 이름으로 색인하고 원본 이름 항목·진단을 뺀다, 저장의 readPath와 같은 생각), (3) 원본 아래 열린 패키지마다 `Detach`(저장소의 남은 bulk를 메모리로 읽고 파일 핸들을 닫는다 — 실패하면 그때까지 Detach한 것은 그대로 두고 오류, 아무것도 옮기지 않았다), (4) 별칭 표 준비·쓰기(옮긴 패키지마다 옛 경로 → id, 대소문자만 바꾼 이름이면 없음, 자기 별칭 자리면 그 항목 지움), (5) 대상 부모 디렉터리 만들기(MakeDirectoryTree), (6) OS `Move(replaceExisting = false)` 한 번(디렉터리도 한 번 — UE는 에셋마다 옮기지만 Rocks는 참조가 AssetId라 파일 묶음을 한 번에 옮겨 중간 상태가 없다, 디스크에 원본 디렉터리가 없으면(저장하지 않은 패키지뿐) 건너뛴다) — 실패하면 별칭 파일을 이전 byte로 되돌리고(실패는 경고 `AliasNotRestored`) 그 오류, (7) 확정: 집합 경로 표·색인(실패 없음). Detach는 되돌리지 않는다(메모리로 옮긴 bulk는 동작이 같다).
+      - 원본 디렉터리 안의 패키지 아닌 파일·하위 디렉터리도 같이 옮겨진다(OS 이동 그대로). 원본 디렉터리 자체가 옮겨지므로 빈 디렉터리가 남지 않는다. 색인 준비와 OS Move 사이에 다른 프로세스가 원본을 바꾸면 그 변경은 다음 검색이 고친다(잠금은 같은 프로젝트 도구끼리의 약속이다 — 8절).
+      - 명령 `asset-move <path|디렉터리> <새 path>`(잠금, 요약 `asset-move: N packages moved, M aliases added`, 캐시 쓰기).
+    - **A2e3 메모리 참조 간선 표·삭제·복제**:
+      - 메모리 간선 표: `EditorPackageSet`이 자기 `ReferenceObserver`의 변화(`TakeChanges`)로 패키지 쌍별 강한 간선 다중도 표를 유지한다(AssetManager 상주 단위 표와 같은 방식 — 저장하지 않은 편집 포함). `IncomingReferences(package)`가 대상 패키지로 들어오는 다른 패키지의 간선 수다.
+      - 삭제 `AssetService::Delete(lock, target, force)`: 대상은 패키지 하나(`<path|AssetId>`). 디스크 참조자 = 색인 `Referencers(id, 모든 종류)`에서 자기 자신 제외(UE `GetReferencers(Package)` — 하드·소프트 모두), ImportOwner 참조자(대상이 임포트 소유자)도 포함한다(지우면 출력이 고아가 된다). 있으면 거부(`InvalidArgument`, 참조자마다 진단 줄 `ReferencedBy`), `--force`면 지우고 참조자는 다음 점검에서 `MissingDependency`(UE 강제 삭제는 로드된 참조만 null로 바꾸고 디스크의 참조자는 건드리지 않는다 — 디스크를 건드리지 않는 것은 같다). 메모리 참조: 대상이 열려 있고 다른 열린 패키지가 대상 객체를 참조하면(`IncomingReferences` ≠ 0) `--force`여도 `Busy`(객체를 버리면 그 참조가 끊긴 채 저장된다 — UE처럼 null로 바꾸고 dirty로 표시하는 것은 하지 않는다, 그 패키지들을 닫거나 참조를 고친 뒤 지운다). 실행: 검사 → 대상을 가리키는 별칭 지우기 준비·쓰기(UE는 리다이렉터를 남기고 그것이 참조자로 일반 삭제를 막지만, Rocks 별칭은 텍스트용이라 갈 곳이 없어진 항목을 지운다 — 경고 `AliasRemoved`) → 색인 갱신 준비 → Detach → 파일 Delete(실패하면 별칭 되돌리기 후 그 오류) → 확정(색인, 집합에서 닫기 — Discard). 저장하지 않은 새 패키지는 집합에서만 닫는다. 읽기 전용 패키지도 지울 수 있다(내용을 잃는 쓰기가 아니다).
+      - 복제 `AssetService::Duplicate(lock, source, target)` → 새 AssetId: 원본을 열고(Hard 닫힘째) 그 메모리 상태(저장하지 않은 편집 포함 — UE `DuplicateSingleObject`와 같다)를 새 id로 대상 경로에 새 파일로 쓴다. writer 옵션 `PackageWriteOptions::duplicate`(AssetRuntime): 헤더 id를 바꾸고(`assetId`), `DuplicateTransient`·`NonTryoutDuplicateTransient` 필드는 클래스 기본값으로 쓴다(UE `DuplicateObject`가 복사하지 않는 필드 — 리플렉션 B9 1절 표), 자기 패키지(원본 id)를 가리키는 Soft 참조는 새 id로 바꾼다(UE `DuplicateAsset`이 패키지 안을 가리키는 soft path를 고치는 것과 같다 — 바꾸지 않으면 사본이 원본을 가리킨다). 패키지 안 Hard·Weak 참조는 export 번호라 그대로 새 사본을 가리키고 밖 참조는 그대로다(UE와 같다). ImportRecord: 소유 기록(owner = 원본)이면 owner와 outputs의 원본 id를 새 id로 바꿔 쓴다(원본 경로를 유지하는 것은 UE AssetImportData와 같다), 참조 기록(다른 임포트의 출력)이면 기록과 ImportOwner 의존을 버리고 경고 `ImportRecordDropped`(그대로 두면 소유자의 outputs에 없어 곧바로 고아다). 읽기 전용 원본은 `NewerVersion`(4.4절), 미해결 import가 있으면 저장과 같이 거부. 대상 점유 검사는 이동과 같다. 새 파일은 저장과 같은 길(임시 → Replace)로 쓰고 색인 Refresh, 집합에는 열지 않는다.
+      - 명령 `asset-delete <path> [--force]`, `asset-duplicate <path> <새 path>`(출력: 새 경로와 AssetId 한 줄).
+    - **A2e4 ID 수정·고아 출력**:
+      - `asset-fix-duplicate-id <path>`: 그 경로 항목이 색인에서 `duplicateId`여야 한다(아니면 InvalidArgument). 같은 id 패키지는 집합에 동시에 둘 수 없으므로(Registry가 id로 찾는다) 그 파일을 색인 대조 없이 여는 길(`EditorPackageSet::OpenForIdFix(fileName)` — 같은 id의 다른 파일이 집합에 열려 있으면 Busy, 그 파일이 dirty면 진단 줄이 먼저 저장하라고 알린다)로 열어 새 id로 같은 경로에 다시 쓰고(복제와 같은 writer 옵션, 소유 ImportRecord의 owner·outputs도 바꾼다) 닫는다. 다른 패키지의 그 id 참조는 남은 쪽을 가리킨다(출력에 적는다). 대상이 다른 임포트의 출력이면 소유자의 outputs가 옛 id를 가리키므로 고아가 된다(경고 `OrphanedOutput`).
+      - 고아 출력: 색인 ImportRecord 요약에 outputs의 AssetId 목록을 더한다(캐시 형식 버전·판정 의미 버전을 올린다). 고아 = 참조 기록(owner ≠ 자신)인 항목 가운데 owner가 색인에 없거나, owner 항목의 기록이 없거나, owner 기록의 outputs에 자신이 없는 것. `AssetIndex::Orphans(out)`, `Verify`가 고아마다 `OrphanedOutput` 진단(경고)을 더한다 — `asset-index-verify`는 진단 줄을 쓰되 경고만이면 종료 0(13절 "경고만 있으면 0").
+      - 명령 `asset-orphans-list`(잠금 없음 — `<path> <AssetId> owner <owner path|AssetId|missing>`), `asset-orphans-delete <path>`(잠금 — 고아가 아니면 InvalidArgument, 그 밖은 삭제와 같은 규칙, 참조자가 있으면 거부 — 강제는 asset-delete --force).
+    - 시험 기반: 메모리 파일 시스템에 Move(파일·디렉터리, `replaceExisting` 거짓, 대소문자만 바꾸는 이름 변경 = 같은 노드, 하위 노드 경로 바꾸기)와 n번째 Move·Delete 실패·오류 종류 주입(Busy·AccessDenied·AlreadyExists)을 더한다. 실제 디스크 시험 하나: 읽지 않은 bulk가 있는 열린 패키지를 가진 디렉터리를 이동(Windows는 안에 열린 핸들이 있는 디렉터리 이름을 바꾸지 못한다 — Detach가 캐시 핸들을 모두 닫는지 본다).
+    - 버린 대안: UE처럼 필요할 때만 별칭(Rocks는 텍스트 참조를 고칠 수 없으므로 늘 만든다), 이동 뒤 별칭 쓰기(실패하면 별칭을 더할 명령이 없어 텍스트 참조가 조용히 깨진다 — 교차 검증 필수), 에셋마다 디렉터리 이동(중간 상태가 남는다), 강제 삭제가 디스크 참조자를 null로 고쳐 쓰기(사용자가 모르는 많은 파일을 바꾼다 — UE도 디스크는 건드리지 않는다), 강제 삭제가 열린 참조자를 null·dirty로(UE 방식 — 사용자가 저장하면 조용히 참조를 잃는다, Busy로 먼저 알린다), 복제를 파일 byte 복사 + id 바꾸기로(저장하지 않은 편집을 잃는다), 별칭 점유를 `EditorPackageSet`에(라이브러리가 사용자 데이터 파일을 알게 된다), 별칭 파일 JSON5(도구가 다시 쓰는 파일은 엄격 JSON).
+
 ## 8. 동시성
 
 - 쓰기 잠금: `Intermediate/AssetDatabase.lock`을 `FileLock`(Windows `LockFileEx` + 삭제 공유 없는 열기, POSIX `flock` + 잠근 뒤 dev/ino 재확인)으로 잡은 프로세스만 에셋·별칭 표·인덱스 캐시·쿠킹 출력을 바꾼다. 잠금을 잡는 명령은 13절 목록이며 서비스 API도 같은 규칙이다. 쿠킹도 이 잠금을 쥐므로(에디터 패키지가 쿠킹 중 바뀌지 않게) 같은 프로젝트의 쿠킹은 프로파일과 무관하게 직렬화되고 쿠킹 출력에 따로 잠금을 두지 않는다. 못 잡으면 `Busy`(`--wait=<초>`).
@@ -2107,6 +2136,51 @@ A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항�
 | 명령 파일의 그 밖 줄 | 14.1.26·14.1.28과 같다 | 프로세스 시험이 명령 allocator 실패·현재 디렉터리 실패를 만들 수 없다(바뀐 줄은 위 셋뿐) |
 
 시험이 찾은 것: 기대 항목 수를 셀 때 잘린 파일(색인 안 됨)과 Tags 손상 파일(항목 있음)을 헷갈렸다(시험 수정). 측정이 찾은 것: worker를 3개보다 늘리면 느려진다 — 명령의 기본값을 그 측정으로 정했다.
+
+#### 14.1.33 요구 대조표(A2e1 — 경로 별칭 표)
+
+시험은 EngineTests `Engine/Source/Developer/AssetDatabase/Tests/AssetAliasTableTests.cpp`(6개)와 C# `Programs/Rocks.Commandlet.Tests/Program.cs`의 "asset-alias-*·별칭 해석" 항목 39개(Windows 전용 7개)다. C++ 장면은 루트를 디스크 임시 디렉터리(잠금)로 두고 그 루트에 놓인 메모리 파일 시스템에 Content·Config를 둔다. 왕복 결과는 golden 텍스트(결정적 byte)로, 시각은 수동 시계로 단언한다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 왕복(4.3, 7.1-17 A2e1) | 파일 없음 = 빈 표(읽은 상태), 더하기 정렬·같은 키는 뒤가 이김(caseless), golden byte(JsonWriter 기본 — 항목마다 6줄, 시각 서식 100 ns까지), 다시 읽으면 같음, caseless Find·없음, 지우기·바꾸기, 빈 표도 파일, 만료 시각(넘침 포화) | `AssetAliasTable_RoundTrips` |
+| 신뢰하지 않는 입력(7.1-17 A2e1) | JSON 문법(줄·열)·중복 키, 최상위(배열·빠진 키·남는 키·이름이 다른 같은 수 키), version(2·문자열·1.5), aliases(객체), 항목(객체 아님·빠진 키·남는 키·이름이 다른 키), path(문자열 아님·모르는 마운트·이름 규칙), asset(문자열 아님·대문자·null), created(문자열 아님·없는 날짜), days(0·36501·문자열·1.5·음수), 같은 경로 키(정렬 뒤 뒤쪽 번호), 항목 수 상한(CapacityExceeded), 파일 크기 상한, 경계 값(days 1·36500·시간대 표기)은 받음, 정렬이 어긋난 파일은 받아 정렬, 읽기 IO(Busy·읽기 실패 — 진단 None), 진단 칸 없는 실패 | `AssetAliasTable_RejectsInvalidFile` |
+| 쓰기(7.1-17 A2e1) | 외부 변경(내용 1 byte·다른 표·지워짐·없던 파일이 생김·너무 커짐 — ExternalModification / StaleHandle, 파일·표 그대로)·다시 읽기 실패(진단 None), 읽지 않은 표·잠금 아님·경로 규칙(InvalidPath)·null id·days 범위 밖·항목 수 상한 — 파일·표 그대로, IO 고장(만들기·쓰기·Flush·Close·교체·Config가 파일) — 임시 파일 없음·그대로, NotDurable 성공 표시, 지우기와 더하기를 함께 한 쓰기의 모든 할당 실패 | `AssetAliasTable_WriteFailures` |
+| 되돌리기(7.1-17 A2e1) | 쓰기 전 파일 byte·표로, 없던 파일은 지움, 마지막 쓰기 뒤 밖에서 지우거나 고쳤으면 StaleHandle(표 그대로)·다시 읽기 실패, 되돌릴 것 없음, 잠금 아님, 쓰기·지우기 IO 실패, 있던·없던 상태의 할당 실패 | `AssetAliasTable_Restores` |
+| prune(4.3, 7.1-17 A2e1) | 만료 경계(created + days = 지금은 만료, 1 tick 전은 아님), 쓰임 아닌 잡음(256 byte를 넘는 후보·마운트 아닌 앞부분·파일 끝에서 잘린 마운트), 경계 문자 열 가지·파일 끝·ASCII 대소문자 무시·하위 디렉터리·줄 번호, 경계가 아닌 뒤 글자는 쓰임 아님, 링크 파일·링크 디렉터리·별칭 표 임시 파일·일반 파일 아님 건너뜀, 제어 문자 파일 이름 escape, 검색 상한 셋(파일 수·총 byte·파일 하나 — 아무것도 지우지 않음, 진단 칸 있고 없음), 하위 디렉터리 열거 실패·읽기 실패 오류, 열거 뒤 사라진 파일·디렉터리 건너뜀, 만료 없음·모두 쓰임은 쓰지 않음, 읽지 않은 표·잠금 아님, 할당 실패(형제 디렉터리 여럿·지울 항목 하나) | `AssetAliasTable_Prunes` |
+| 서비스(7.1-17 A2e1) | Initialize 전 InvalidArgument, 경고가 옛 경로 텍스트를 담음, 깨진 표의 참조 값 해석은 경고 AliasTableUnreadable(진단 CorruptAliasTable), 지연 적재(깨진 표도 색인에 있는 경로는 열림, 별칭이 필요한 호출 — 열기·만들기·remove·prune — 은 CorruptAliasTable, 다음 호출이 다시 읽음), 열기가 옛 경로를 풀고 AliasResolved(detail = 항목 번호, 경고 목록 없이도), 색인이 이김, 없는 경로 NotFound(진단 None), MissingFile은 별칭으로 가지 않음, 경고를 붙이지 못하면 OutOfMemory, 참조 텍스트(asset-set Hard)도 풂, 별칭 경로에 새 패키지 DuplicatePath / AlreadyExists(related, 진단 칸 없이도), remove(경로 규칙·없음·성공), prune(설정 시계), 시스템 시계 서비스의 열기·remove·prune 할당 실패 | `AssetAliasTable_ServiceResolves` |
+| Core JsonWriter 첫 오류(7.1-17 A2e1 리뷰) | 모든 할당 시도에서 실패하면 이후 호출·Finish가 OutOfMemory, 잘못된 사용 뒤 Finish는 InvalidArgument | `Json_WriterKeepsFirstError` |
+| 고아 임시 파일(7.1-12·17) | Config 바로 아래 `AssetAliases.json.<guid>.tmp`는 지우고 하위 디렉터리의 같은 이름은 남김, 재구축 명령이 지움 | `AssetAliasTable_ServiceResolves`, C# `asset-index-rebuild removes alias temporary files` |
+| 명령(13, 7.1-17 A2e1) | asset-alias-list(만료·shadowed·missing·지금 경로 줄), asset-info가 별칭으로 풀고 경고 줄, asset-new 별칭 경로 거부, asset-alias-prune(쓰인 곳 경고 줄·요약·검색 상한 경고), asset-alias-remove(성공·없음·경로 규칙), 깨진 표 진단 줄 셋(JSON 줄·열, 칸·항목 번호, 헤더 칸), 깨진 표에도 색인 경로 asset-info 성공, 별칭 표 자리가 디렉터리, 교체 실패·검색 읽기 실패·무효 출력 핸들 셋·잠금 Busy(Windows), Content가 파일·Intermediate가 파일, 사용법 여덟·도움말 셋·프로젝트 없음 셋 | C# 39개 |
+| 조합(14 완료 조건 2) | 표 상태(없음·빈·정상·깨짐 종류마다·정렬 어긋남) × 연산(읽기·쓰기·되돌리기·prune·해석·점유), 항목 상태(만료·아님·경계) × 쓰임(경계 문자·대소문자·하위·링크·제외 대상), 실패 위치(입력 검사·IO 단계마다·할당) | 위 시험 |
+
+#### 14.1.34 Coverage(A2e1)
+
+측정(2026-11-22, Windows, `ROCKS_MSVC_TOOLSET=14.44`): `-Target EngineTests -Filter AssetAliasTable,AssetIndexCache,AssetService_,AssetTextResolver,AssetIndex_ -Sources Engine/Source/Developer/AssetDatabase/Private`, 명령은 C# 시험 구동기.
+
+| 파일 | 줄 | 분기 | 함수 |
+|---|---|---|---|
+| `AssetAliasTable.cpp` | 99.3%(747/752) | 99.5%(380/382) | 100%(26/26) |
+| `AtomicFileWrite.cpp`(캐시·별칭 공용 원자 쓰기) | 97.3%(72/74) | 96.7%(29/30) | 100%(2/2) |
+| `AssetService.cpp`(별칭 해석·점유·remove·prune) | 99.4%(351/353) | 98.4%(179/182) | 100%(18/18) |
+| `TemporaryFiles.cpp`(Config 별칭 임시 파일) | 100%(136/136) | 100%(68/68) | 100%(8/8) |
+| `Programs/Commandlet/Private/Common/AssetAliasCommandlet.cpp` | 89.1%(253/284) | 85.4%(111/130) | 100%(9/9) |
+| `Core/Source/Runtime/Core/Private/Text/JsonWriter.cpp`(첫 오류 — 바뀐 줄 다섯) | 바뀐 줄 모두 닿음 | 같음 | — |
+
+닿지 않은 곳과 근거:
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| `AssetAliasTable` 파일 크기 조회 실패 | 분기 | 연 파일의 크기 조회는 메모리 파일 시스템에서 실패하지 않고 실제 OS에서도 열린 핸들로는 거의 실패하지 않는다(14.1.28 캐시 크기 조회와 같다) |
+| prune 읽기 때 상한 초과(열거 뒤 커진 파일) | 분기 | 열거한 크기와 읽을 때 크기가 다른 경합이다 — 메모리 파일 시스템은 같다. 열거 크기 상한(같은 판정)은 시험한다 |
+| `AtomicFileWrite` 임시 이름 guid 발급 실패 | 실패 | OS 보안 난수 실패(14.1.22와 같다) |
+| `AssetService.cpp` 2줄·분기 3 | 14.1.24와 같다 | List IsA 그 밖 오류(이번 단계가 바꾼 줄이 아니다) |
+| 명령의 할당 실패(표 적재·색인·서식·경로) | 실패 | 프로세스 시험은 명령 allocator에 실패를 주입할 수 없다(14.1.26과 같다 — 같은 경로는 C++ 할당 실패 시험이 돈다) |
+| 명령의 NotDurable 경고(remove·prune) | 분기 | 디렉터리 동기화 실패는 파일 시스템 성질이라 프로세스 시험이 만들 수 없다(C++ 쓰기 시험이 NotDurable 표시를 본다) |
+
+리뷰가 찾은 것(필수 둘): 서비스가 쥔 별칭 표가 그 사이 바뀐 파일을 덮어썼다(외부 변경 판정을 더했다), JSON writer 문제를 인코더에서 우회했다(Core `JsonWriter`가 첫 오류를 기억해 이후 호출·Finish가 그 오류로 실패하게 고치고 `Json_WriterKeepsFirstError` 시험을 더했다 — 인코더 우회는 지웠다). 권장 셋(경고에 옛 경로 텍스트, 별칭 표를 못 읽은 해석의 경고, prune 검색 비용)도 반영했다.
+
+시험이 찾은 것: (1) JSON writer는 한 번 실패하면 Finish가 첫 오류가 아니라 InvalidArgument를 돌려준다 — 별칭 표 쓰기의 할당 실패가 OutOfMemory로 보고되지 않았다(위 리뷰 필수 둘로 Core에서 고쳤다). (2) 시각을 tick으로 들고 다녀 인코딩 때 변환 실패 분기가 닿을 수 없었다 — DateTime으로 바꿔 없앴다. (3) 크기를 잰 뒤 파일이 줄어든 경우의 별도 처리는 닿을 수 없었다 — IO 오류로 보고한다.
 
 ## 15. PNG 디코더 범위
 

@@ -1059,6 +1059,263 @@ finally
     Directory.Delete(cacheDirectory, true);
 }
 
+// asset-alias-*·별칭 해석(AssetSystem.ko.md 4.3절, 7.1절 17 — A2e1): 목록(만료·shadowed·missing·지금 경로), 열기가 옛
+// 경로를 별칭으로 풀고 경고 AliasResolved, 별칭 경로에 새 패키지는 DuplicatePath, prune은 Config 텍스트에 쓰인 만료 항목을
+// 남기고 나머지 만료 항목을 지운다, remove, 깨진 표의 진단 줄, 사용법·환경 오류, 재구축이 별칭 표 임시 파일을 지운다.
+string aliasDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-alias-{Environment.ProcessId}");
+try
+{
+    string project = Path.Combine(aliasDirectory, "Aliased");
+    Directory.CreateDirectory(project);
+    File.WriteAllText(Path.Combine(project, "Aliased.rocksproject"), "{}\n");
+    string projectOption = $"--project={project}";
+    string configDirectory = Path.Combine(project, "Config");
+    string aliasFile = Path.Combine(configDirectory, "AssetAliases.json");
+
+    async Task<ProcessResult> RunAlias(params string[] arguments) =>
+        await ProcessRunner.RunAsync(new(executable, arguments, workingDirectory, Timeout: TimeSpan.FromSeconds(30)));
+
+    void ReportAlias(string label, bool passed, ProcessResult result)
+    {
+        Console.WriteLine($"{label}: {(passed ? "PASS" : "FAIL")}");
+        if (!passed)
+        {
+            ++failures;
+            Console.Error.WriteLine($"  exit={result.ExitCode}; stdout={result.StdOut}; stderr={result.StdErr}");
+        }
+    }
+
+    void ProjectResultCheck(ProcessResult result, string label, Func<ProcessResult, bool> check) =>
+        ReportAlias(label, check(result), result);
+
+    ProcessResult made = await RunAlias("asset-new", "Skeleton", "/Game/Al/Hero", projectOption);
+    ReportAlias("alias: asset-new", made.ExitCode == 0, made);
+    string heroId = made.StdOut.Trim().Split(' ').Last();
+    const string missingId = "5e570000-a55e-7000-0000-00000000dead";
+
+    // 별칭 표: 만료(2000년)·만료 아님(2100년)·지금 경로와 같은 경로(shadowed)·없는 대상.
+    string Alias(string path, string asset, string created, int days) =>
+        $"{{\"path\": \"{path}\", \"asset\": \"{asset}\", \"created\": \"{created}\", \"days\": {days}}}";
+    void WriteAliases(params string[] entries)
+    {
+        Directory.CreateDirectory(configDirectory);
+        File.WriteAllText(aliasFile, "{\"version\": 1, \"aliases\": [" + string.Join(", ", entries) + "]}\n");
+    }
+
+    WriteAliases(
+        Alias("/Game/Al/OldHero", heroId, "2000-01-01T00:00:00Z", 1),
+        Alias("/Game/Al/Hero", heroId, "2100-01-01T00:00:00Z", 90),
+        Alias("/Game/Al/Gone", missingId, "2100-01-01T00:00:00Z", 90),
+        Alias("/Game/Al/Named", heroId, "2000-01-01T00:00:00Z", 1));
+    ProcessResult listed = await RunAlias("asset-alias-list", projectOption);
+    string expectedList =
+        $"/Game/Al/Gone {missingId} 2100-01-01T00:00:00Z 2100-04-01T00:00:00Z -> missing\n" +
+        $"/Game/Al/Hero {heroId} 2100-01-01T00:00:00Z 2100-04-01T00:00:00Z shadowed -> /Game/Al/Hero\n" +
+        $"/Game/Al/Named {heroId} 2000-01-01T00:00:00Z 2000-01-02T00:00:00Z expired -> /Game/Al/Hero\n" +
+        $"/Game/Al/OldHero {heroId} 2000-01-01T00:00:00Z 2000-01-02T00:00:00Z expired -> /Game/Al/Hero\n";
+    ReportAlias("asset-alias-list", listed.ExitCode == 0 && listed.StdOut == expectedList && listed.StdErr.Length == 0, listed);
+
+    // 열기가 옛 경로를 푼다(경고), 별칭 경로에 새 패키지는 점유.
+    ProcessResult info = await RunAlias("asset-info", "/Game/Al/OldHero", projectOption);
+    ReportAlias("asset-info through an alias", info.ExitCode == 0 &&
+        info.StdErr.Contains($"asset-info: AliasResolved: /Game/Al/OldHero: warning resolved through an alias to {heroId}",
+            StringComparison.Ordinal), info);
+    ProcessResult occupied = await RunAlias("asset-new", "Skeleton", "/Game/Al/OldHero", projectOption);
+    ReportAlias("asset-new on an alias path", occupied.ExitCode == 1 &&
+        occupied.StdErr.Contains("DuplicatePath", StringComparison.Ordinal), occupied);
+
+    // prune: Named는 Config 텍스트에 쓰여 남고 OldHero는 지운다(만료 아닌 둘은 남는다).
+    File.WriteAllText(Path.Combine(configDirectory, "Game.ini"), "[Startup]\nMap=\"/Game/Al/Named\"\n");
+    ProcessResult pruned = await RunAlias("asset-alias-prune", projectOption);
+    ReportAlias("asset-alias-prune", pruned.ExitCode == 0 &&
+        pruned.StdOut == "asset-alias-prune: 1 removed, 1 in use, 2 kept\n" &&
+        pruned.StdErr.Contains("asset-alias-prune: AliasInUse: Config/Game.ini:2: warning /Game/Al/Named is still named",
+            StringComparison.Ordinal) &&
+        !File.ReadAllText(aliasFile).Contains("/Game/Al/OldHero", StringComparison.Ordinal), pruned);
+
+    // remove: 있으면 지운다, 없으면 NotFound 1, 경로 규칙 위반 1.
+    ProcessResult removed = await RunAlias("asset-alias-remove", "/Game/Al/Named", projectOption);
+    ReportAlias("asset-alias-remove", removed.ExitCode == 0 &&
+        removed.StdOut == "asset-alias-remove: removed /Game/Al/Named\n" &&
+        !File.ReadAllText(aliasFile).Contains("/Game/Al/Named", StringComparison.Ordinal), removed);
+    ProcessResult notThere = await RunAlias("asset-alias-remove", "/Game/Al/Named", projectOption);
+    ReportAlias("asset-alias-remove missing", notThere.ExitCode == 1 &&
+        notThere.StdErr.Contains("NotFound: /Game/Al/Named: no alias", StringComparison.Ordinal), notThere);
+    ProcessResult badPath = await RunAlias("asset-alias-remove", "Game/Al/Named", projectOption);
+    ReportAlias("asset-alias-remove invalid path", badPath.ExitCode == 1 &&
+        badPath.StdErr.Contains("InvalidPath: Game/Al/Named", StringComparison.Ordinal), badPath);
+
+    // 깨진 표: JSON 문법(줄·열)과 칸 위반(항목 번호) — 별칭 명령은 1, 색인에 있는 경로 열기는 그대로.
+    File.WriteAllText(aliasFile, "{\n  \"version\": 1,\n  \"aliases\": [,]\n}\n");
+    ProcessResult syntax = await RunAlias("asset-alias-list", projectOption);
+    ReportAlias("asset-alias-list corrupt JSON", syntax.ExitCode == 1 &&
+        syntax.StdErr.Contains("CorruptAliasTable: Config/AssetAliases.json: JSON syntax at line 3 column", StringComparison.Ordinal), syntax);
+    WriteAliases(Alias("/Game/Al/X", heroId, "2000-01-01T00:00:00Z", 0));
+    ProcessResult field = await RunAlias("asset-alias-prune", projectOption);
+    ReportAlias("asset-alias-prune corrupt field", field.ExitCode == 1 &&
+        field.StdErr.Contains("CorruptAliasTable: Config/AssetAliases.json: invalid days (entry 0)", StringComparison.Ordinal), field);
+    File.WriteAllText(aliasFile, "{\"version\": 2, \"aliases\": []}");
+    ProcessResult header = await RunAlias("asset-alias-remove", "/Game/Al/X", projectOption);
+    ReportAlias("asset-alias-remove corrupt header", header.ExitCode == 1 &&
+        header.StdErr.Contains("CorruptAliasTable: Config/AssetAliases.json: invalid version", StringComparison.Ordinal), header);
+    ProcessResult infoDirect = await RunAlias("asset-info", "/Game/Al/Hero", projectOption);
+    ReportAlias("asset-info ignores a corrupt alias table", infoDirect.ExitCode == 0, infoDirect);
+    File.Delete(aliasFile);
+
+    // 쓰기 실패: 별칭 표 자리가 디렉터리.
+    WriteAliases(Alias("/Game/Al/Y", heroId, "2000-01-01T00:00:00Z", 1));
+    ProcessResult beforeDirectory = await RunAlias("asset-alias-list", projectOption);
+    File.Delete(aliasFile);
+    Directory.CreateDirectory(aliasFile);
+    ProcessResult unreadable = await RunAlias("asset-alias-list", projectOption);
+    ReportAlias("asset-alias-list alias table is a directory", beforeDirectory.ExitCode == 0 && unreadable.ExitCode == 1 &&
+        unreadable.StdErr.Contains(": Config/AssetAliases.json: cannot read the alias table", StringComparison.Ordinal), unreadable);
+    Directory.Delete(aliasFile);
+
+    // 재구축이 Config의 별칭 표 임시 파일을 지운다.
+    string aliasOrphan = Path.Combine(configDirectory, "AssetAliases.json.0123abcd-0123-4567-89ab-0123456789ab.tmp");
+    File.WriteAllBytes(aliasOrphan, [1]);
+    ProcessResult rebuilt = await RunAlias("asset-index-rebuild", projectOption);
+    ReportAlias("asset-index-rebuild removes alias temporary files", rebuilt.ExitCode == 0 &&
+        rebuilt.StdOut.EndsWith(", 1 orphans removed\n", StringComparison.Ordinal) && !File.Exists(aliasOrphan), rebuilt);
+
+    // 잠금 Busy(Windows), 사용법, 도움말, 프로젝트 없음.
+    if (OperatingSystem.IsWindows())
+    {
+        string lockPath = Path.Combine(project, "Intermediate", "AssetDatabase.lock");
+        using FileStream locked = new(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
+        locked.Lock(0, 1);
+        foreach (string[] arguments in new[] { new[] { "asset-alias-remove", "/Game/Al/Y" }, new[] { "asset-alias-prune" } })
+        {
+            ProcessResult busy = await RunAlias([.. arguments, projectOption]);
+            ReportAlias($"{arguments[0]} locked", busy.ExitCode == 1 &&
+                busy.StdErr.Contains($"{arguments[0]}: Busy: ", StringComparison.Ordinal), busy);
+        }
+
+        locked.Unlock(0, 1);
+    }
+
+    // prune 검색이 상한(파일 하나 64 MiB)에 닿으면 아무것도 지우지 않고 경고한다.
+    WriteAliases(Alias("/Game/Al/Y", heroId, "2000-01-01T00:00:00Z", 1));
+    string hugeFile = Path.Combine(configDirectory, "Huge.bin");
+    using (FileStream huge = new(hugeFile, FileMode.Create, FileAccess.Write))
+    {
+        huge.SetLength((64L << 20) + 1);
+    }
+
+    ProjectResultCheck(await RunAlias("asset-alias-prune", projectOption), "asset-alias-prune truncated", result =>
+        result.ExitCode == 0 && result.StdOut == "asset-alias-prune: 0 removed, 0 in use, 1 kept\n" &&
+        result.StdErr.Contains("AliasSearchTruncated: ", StringComparison.Ordinal) &&
+        File.ReadAllText(aliasFile).Contains("/Game/Al/Y", StringComparison.Ordinal));
+    File.Delete(hugeFile);
+
+    if (OperatingSystem.IsWindows())
+    {
+        // 별칭 표를 삭제 공유 없이 열어 두면 교체가 실패한다(remove — 표 그대로).
+        using (new FileStream(aliasFile, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            ProjectResultCheck(await RunAlias("asset-alias-remove", "/Game/Al/Y", projectOption), "asset-alias-remove cannot write",
+                result => result.ExitCode == 1 &&
+                    result.StdErr.Contains(": Config/AssetAliases.json: cannot write the alias table", StringComparison.Ordinal));
+        }
+
+        // 검색할 파일을 공유 없이 열어 두면 읽기가 실패한다(prune — 표 그대로).
+        string lockedText = Path.Combine(configDirectory, "Locked.ini");
+        File.WriteAllText(lockedText, "x\n");
+        using (new FileStream(lockedText, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            ProjectResultCheck(await RunAlias("asset-alias-prune", projectOption), "asset-alias-prune cannot search",
+                result => result.ExitCode == 1 &&
+                    result.StdErr.Contains(": cannot search or write (AssetAliases.json)", StringComparison.Ordinal) &&
+                    File.ReadAllText(aliasFile).Contains("/Game/Al/Y", StringComparison.Ordinal));
+        }
+
+        File.Delete(lockedText);
+
+        // 무효 출력 핸들: 목록 줄·prune 경고 줄을 쓰지 못하면 1이다.
+        File.WriteAllText(Path.Combine(configDirectory, "Uses.ini"), "/Game/Al/Y\n");
+        foreach (string command in new[] { "asset-alias-list", "asset-alias-prune" })
+        {
+            uint code = WindowsInvalidStandardHandles.Run(executable, $"{command} \"--project={project}\"", workingDirectory);
+            Console.WriteLine($"invalid output handles ({command}): {(code == 1 ? "PASS" : "FAIL")}");
+            if (code != 1)
+            {
+                ++failures;
+                Console.Error.WriteLine($"  exit={code}");
+            }
+        }
+
+        File.Delete(Path.Combine(configDirectory, "Uses.ini"));
+
+        // 검색 상한 경고 줄을 쓰지 못해도 1이다.
+        using (FileStream huge = new(hugeFile, FileMode.Create, FileAccess.Write))
+        {
+            huge.SetLength((64L << 20) + 1);
+        }
+
+        uint truncatedCode = WindowsInvalidStandardHandles.Run(executable, $"asset-alias-prune \"--project={project}\"", workingDirectory);
+        Console.WriteLine($"invalid output handles (asset-alias-prune truncated): {(truncatedCode == 1 ? "PASS" : "FAIL")}");
+        if (truncatedCode != 1)
+        {
+            ++failures;
+            Console.Error.WriteLine($"  exit={truncatedCode}");
+        }
+
+        File.Delete(hugeFile);
+    }
+
+    // 환경: Content가 파일이면 목록의 검색이, Intermediate가 파일이면 잠금이 실패한다.
+    string aliasBrokenContent = Path.Combine(aliasDirectory, "AliasBrokenContent");
+    string aliasBrokenLock = Path.Combine(aliasDirectory, "AliasBrokenLock");
+    foreach (string directory in new[] { aliasBrokenContent, aliasBrokenLock })
+    {
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, $"{Path.GetFileName(directory)}.rocksproject"), "{}\n");
+    }
+
+    File.WriteAllBytes(Path.Combine(aliasBrokenContent, "Content"), [1]);
+    File.WriteAllBytes(Path.Combine(aliasBrokenLock, "Intermediate"), [1]);
+    ProjectResultCheck(await RunAlias("asset-alias-list", $"--project={aliasBrokenContent}"), "asset-alias-list content is a file",
+        result => result.ExitCode == 1 && result.StdErr.Contains(": cannot scan the content directory", StringComparison.Ordinal));
+    foreach (string[] arguments in new[] { new[] { "asset-alias-remove", "/Game/A" }, new[] { "asset-alias-prune" } })
+    {
+        ProjectResultCheck(await RunAlias([.. arguments, $"--project={aliasBrokenLock}"]), $"{arguments[0]} cannot lock",
+            result => result.ExitCode == 1 && result.StdErr.Contains(": cannot lock the project", StringComparison.Ordinal));
+    }
+
+    string[][] aliasUsage =
+    [
+        ["asset-alias-list", "extra", projectOption],
+        ["asset-alias-list", "--under=/Game", projectOption],
+        ["asset-alias-list", "--wait=5s", projectOption],
+        ["asset-alias-remove", projectOption],
+        ["asset-alias-remove", "/Game/A", "/Game/B", projectOption],
+        ["asset-alias-remove", "/Game/A", projectOption, projectOption],
+        ["asset-alias-prune", "extra", projectOption],
+        ["asset-alias-prune", "--wait=", projectOption],
+    ];
+    foreach (string[] arguments in aliasUsage)
+    {
+        ProcessResult usage = await RunAlias(arguments);
+        ReportAlias($"{arguments[0]} usage: {string.Join(' ', arguments.Skip(1).Where(argument => argument != projectOption))}",
+            usage.ExitCode == 2 && usage.StdErr.StartsWith($"usage: {arguments[0]}", StringComparison.Ordinal), usage);
+    }
+
+    foreach (string name in new[] { "asset-alias-list", "asset-alias-remove", "asset-alias-prune" })
+    {
+        ProcessResult help = await RunAlias(name, "--help");
+        ReportAlias($"{name} help", help.ExitCode == 0 && help.StdOut.StartsWith($"usage: {name}", StringComparison.Ordinal), help);
+        string[] noProjectArguments = name == "asset-alias-remove" ? [name, "/Game/A"] : [name];
+        ProcessResult noProject = await RunAlias(noProjectArguments);
+        ReportAlias($"{name} without a project", noProject.ExitCode == 1 &&
+            noProject.StdErr.Contains("no project found", StringComparison.Ordinal), noProject);
+    }
+}
+finally
+{
+    Directory.Delete(aliasDirectory, true);
+}
+
 if (OperatingSystem.IsWindows())
 {
     // 무효 stderr 핸들을 child의 표준 오류로 직접 설정해 출력 실패를 재현한다.

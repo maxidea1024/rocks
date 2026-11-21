@@ -898,6 +898,14 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "MissingUnrealDependency";
     case AssetDiagnosticCode::RootLost:
         return "RootLost";
+    case AssetDiagnosticCode::AliasResolved:
+        return "AliasResolved";
+    case AssetDiagnosticCode::AliasInUse:
+        return "AliasInUse";
+    case AssetDiagnosticCode::AliasSearchTruncated:
+        return "AliasSearchTruncated";
+    case AssetDiagnosticCode::CorruptAliasTable:
+        return "CorruptAliasTable";
     }
 
     return "Unknown";

@@ -1,4 +1,5 @@
 #include "CommandletHost.h"
+#include "AssetAliasCommandlet.h"
 #include "AssetCommandletSupport.h"
 #include "AssetEditCommandlet.h"
 #include "AssetIndexCommandlet.h"
@@ -223,6 +224,22 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
     registered = registry.Register({"asset-index-verify",
                                     "Check the editor packages of the project and report problems.",
                                     &RunAssetIndexVerifyCommand, &allocator});
+    if (!registered) {
+        return 1;
+    }
+    registered = registry.Register({"asset-alias-list", "List the path aliases of the project.",
+                                    &RunAssetAliasListCommand, &allocator});
+    if (!registered) {
+        return 1;
+    }
+    registered = registry.Register({"asset-alias-remove", "Remove a path alias of the project.",
+                                    &RunAssetAliasRemoveCommand, &allocator});
+    if (!registered) {
+        return 1;
+    }
+    registered = registry.Register(
+        {"asset-alias-prune", "Remove the expired path aliases that no config file still names.",
+         &RunAssetAliasPruneCommand, &allocator});
     if (!registered) {
         return 1;
     }

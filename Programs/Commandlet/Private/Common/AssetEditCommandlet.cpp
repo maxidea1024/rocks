@@ -205,21 +205,15 @@ bool ParseEdit(Span<const StringView> args, const EditGrammar& grammar, EditArgs
            ParseWaitMilliseconds(out.wait, milliseconds);
 }
 
+// 편집 경고 이름이다(EditorWarningKind 순서).
 const char* WarningName(EditorWarningKind kind) noexcept {
-    switch (kind) {
-    case EditorWarningKind::ExcludedDependency:
-        return "ExcludedDependency";
-    case EditorWarningKind::UnresolvedImport:
-        return "UnresolvedImport";
-    case EditorWarningKind::DroppedUnresolvedImport:
-        return "DroppedUnresolvedImport";
-    case EditorWarningKind::NotDurable:
-        return "NotDurable";
-    case EditorWarningKind::OrphanNotDeleted:
-        return "OrphanNotDeleted";
-    }
-
-    return "Warning";
+    constexpr const char* Names[] = {
+        "ExcludedDependency", "UnresolvedImport", "DroppedUnresolvedImport", "NotDurable",
+        "OrphanNotDeleted",   "AliasResolved",    "AliasTableUnreadable"};
+    static_assert(sizeof(Names) / sizeof(Names[0]) ==
+                      static_cast<usize>(EditorWarningKind::AliasTableUnreadable) + 1,
+                  "every editor warning needs a name");
+    return Names[static_cast<usize>(kind)];
 }
 
 // 진단 코드 이름이다(None이면 원본 오류 이름).
@@ -232,6 +226,18 @@ Result<int32> WriteWarnings(CommandletOutput& output, Allocator& allocator, Stri
                             const Array<EditorWarning>& warnings) noexcept {
     for (const EditorWarning& warning : warnings) {
         const AssetDiagnostic& diagnostic = warning.diagnostic;
+        // 별칭으로 푼 경로는 옛 경로(경고에 담긴 텍스트)와 대상을 쓴다.
+        if (warning.kind == EditorWarningKind::AliasResolved) {
+            auto written = Fail(output, allocator, command, 0,
+                                "AliasResolved: {}: warning resolved through an alias to {}",
+                                warning.Text(), diagnostic.asset);
+            if (!written) {
+                return written;
+            }
+
+            continue;
+        }
+
         auto written = Fail(output, allocator, command, 0, "{}: {}: warning {} (related {})",
                             DiagnosticName(diagnostic, diagnostic.error), diagnostic.asset,
                             WarningName(warning.kind), diagnostic.related);

@@ -1,5 +1,6 @@
 #include "AssetDatabaseInternal.h"
 
+#include <AssetDatabase/AssetAliasTable.h>
 #include <AssetDatabase/AssetIndexCache.h>
 #include <AssetDatabase/TemporaryFiles.h>
 #include <Core/FileError.h>
@@ -14,6 +15,7 @@ using asset_database_detail::EditorTempStem;
 
 constexpr StringView ContentPrefix = "Content";
 constexpr StringView IntermediatePrefix = "Intermediate";
+constexpr StringView ConfigPrefix = "Config";
 
 // 열거한 항목 하나다(유효한 UTF-8 이름만 — 임시 파일 이름은 ASCII다).
 struct TemporaryChild {
@@ -59,7 +61,7 @@ bool TemporaryCollectChild(const platform::DirectoryEntry& entry, void* raw) noe
 Result<void> AddTemporaryFailure(Array<TemporaryFileFailure>& failures, StringView prefix,
                                  StringView relative, ErrorCode error) noexcept {
     TemporaryFileFailure failure(failures.GetAllocator());
-    // 실패는 늘 Content·Intermediate 아래 항목이다(뿌리 자신의 실패는 호출 오류다).
+    // 실패는 늘 Content·Intermediate·Config 아래 항목이다(뿌리 자신의 실패는 호출 오류다).
     const StringView pieces[] = {prefix, "/", relative};
     for (StringView piece : pieces) {
         if (auto appended = failure.path.TryAppend(piece); !appended) {
@@ -77,6 +79,11 @@ using TemporaryMatch = bool (*)(StringView name) noexcept;
 // Intermediate의 캐시 쓰기 임시 이름(`AssetIndex.cache.<guid>.tmp`)인지다.
 bool IsCacheTemporaryName(StringView name) noexcept {
     return EditorTempStem(name) == AssetIndexCacheFileName;
+}
+
+// Config의 별칭 표 쓰기 임시 이름(`AssetAliases.json.<guid>.tmp` — 7.1절 17 A2e1)인지다.
+bool IsAliasTemporaryName(StringView name) noexcept {
+    return EditorTempStem(name) == AssetAliasFileName;
 }
 
 // root(절대 경로) 아래를 recursive면 하위 디렉터리까지 걸어 matches 이름의 파일을 지운다.
@@ -192,8 +199,14 @@ Result<void> DeleteTemporaryOrphans(platform::FileSystem& files, const ProjectLa
         return content;
     }
 
-    return DeleteTemporaryUnder(files, layout.IntermediateDirectory(), IntermediatePrefix, false,
-                                &IsCacheTemporaryName, removed, failures);
+    if (auto swept = DeleteTemporaryUnder(files, layout.IntermediateDirectory(), IntermediatePrefix,
+                                          false, &IsCacheTemporaryName, removed, failures);
+        !swept) {
+        return swept;
+    }
+
+    return DeleteTemporaryUnder(files, layout.ConfigDirectory(), ConfigPrefix, false,
+                                &IsAliasTemporaryName, removed, failures);
 }
 
 } // namespace rocks
