@@ -42,7 +42,7 @@ namespace Rocks.Build.Cli
         {
             if (args.Length == 0)
             {
-                throw new ArgumentException("Expected build, test, sdk, game, bootstrap, unity-profile, or projectfiles command.");
+                throw new ArgumentException("Expected build, test, sdk, game, bootstrap, clean, unity-profile, or projectfiles command.");
             }
 
             if (args[0] == UnityProfileCommand.Name)
@@ -68,6 +68,8 @@ namespace Rocks.Build.Cli
                 "build" or "test" => new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "platform", "android-abi", "android-api", "android-ndk", "adb", MetadataLayout.VerifySourcesOption, PlanOnlyOption, RequireVerifiedToolchainOption, .. BuildModeOptions], StringComparer.Ordinal),
                 // 미리 빌드한 바이너리를 사용자 저장소에 받는다(build·test는 받지 않는다, Docs/Design/ShaderSystem.ko.md 8절 2항).
                 "bootstrap" => new HashSet<string>(["root", "library", "store", "mirror", "offline", "windows-sdk"], StringComparer.Ordinal),
+                // 출력 디렉터리 하나를 비운다(Docs/Design/ProjectFiles.ko.md 7.3절 — Visual Studio Clean·Rebuild가 부른다).
+                CleanCommand.Name => new HashSet<string>(["root", "target", "configuration", "platform", "android-abi", "output"], StringComparer.Ordinal),
                 _ => throw new ArgumentException($"Unknown command: {args[0]}")
             };
             foreach (var name in options.Keys)
@@ -89,6 +91,11 @@ namespace Rocks.Build.Cli
             if (args[0] == "game")
             {
                 return await InstalledSdk.BuildGameAsync(options, cancellationToken);
+            }
+
+            if (args[0] == CleanCommand.Name)
+            {
+                return await CleanCommand.RunAsync(options, cancellationToken);
             }
 
             if (args[0] == "bootstrap")
@@ -353,6 +360,14 @@ namespace Rocks.Build.Cli
                 }
 
                 Print(result);
+                // Visual Studio 프로젝트 파일 낡음 경고(Docs/Design/ProjectFiles.ko.md 9절). 생성기 모델과 같은 조건(Windows 호스트, PCH 켬)일
+                // 때만 비교한다 — Android·--pch off 빌드의 논리 명령은 IDE 모델과 다르다.
+                if (!android && OperatingSystem.IsWindows() && Switch(options, PchOption) &&
+                    ProjectFilesStaleness.Warning(root, rules.Target, configuration, toolchain, result) is string stale)
+                {
+                    Console.WriteLine(stale);
+                }
+
                 AtomicFile.WriteIfChanged(Path.Combine(output, "action-report.json"), JsonSerializer.Serialize(result, JsonOptions));
                 evidence.RecordStep("native", ["Rocks.Build", targetName, configuration.ToString()], result.Succeeded ? 0 : 1, nativeElapsed);
                 if (!result.Succeeded)

@@ -1,0 +1,30 @@
+# Generates the Visual Studio solution and project files of the engine repository (Docs/Design/ProjectFiles.ko.md section 12): Rocks.slnx
+# at the root and out/ProjectFiles. Prepares the tools and runs `Rocks.Build.Cli projectfiles --root` under the IDE build lock
+# (Build/Tools.ps1), so it never races a Visual Studio build of the same working copy.
+#
+#   pwsh Build/GenerateProjectFiles.ps1 [-Compiler <clang-cl>]
+param([string] $Compiler)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'Tools.ps1')
+
+$root = $script:RocksRoot
+$cli = Join-Path $root 'out/dotnet/bin/Rocks.Build.Cli/Debug/net10.0/Rocks.Build.Cli.dll'
+$arguments = @('projectfiles', '--root', $root)
+if ($Compiler) {
+    $arguments += @('--compiler', $Compiler)
+}
+
+$code = 0
+Enter-RocksIdeLock
+try {
+    Update-RocksTools
+    & dotnet $cli @arguments | Out-Host
+    $code = $LASTEXITCODE
+}
+finally {
+    Exit-RocksIdeLock
+}
+
+exit $code

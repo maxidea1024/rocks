@@ -71,6 +71,7 @@ public sealed class NativeBuildEngine
             // 계획만: 생성 TU·묶음 파일·compile DB는 위에서 썼다. action과 증분 기록은 건드리지 않는다.
             return new NativeBuildResult
             {
+                IdeCompiles = IdePlanner.Select(plan, request.OutputDirectory),
                 Succeeded = true,
                 ExecutedActions = 0,
                 SkippedActions = 0,
@@ -157,6 +158,7 @@ public sealed class NativeBuildEngine
 
         return new NativeBuildResult
         {
+            IdeCompiles = IdePlanner.Select(plan, request.OutputDirectory),
             Succeeded = succeeded,
             ExecutedActions = results.Count(value => value.Executed),
             SkippedActions = results.Count(value => !value.Executed && value.Succeeded),

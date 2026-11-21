@@ -34,6 +34,13 @@ if (args.Length == 1 && args[0] == "--project-files")
     return 0;
 }
 
+// Visual Studio NMake 진입점·도구 준비·정리 시험만 돈다(16절 V6·V7·V13·V14). 현재 디렉터리가 저장소 루트여야 한다.
+if (args.Length == 1 && args[0] == "--ide-scripts")
+{
+    await IdeScriptsTests.RunAsync(Path.GetFullPath("."));
+    return 0;
+}
+
 // unity-profile 명령의 입력 거부만 돈다(현재 디렉터리가 저장소 루트여야 한다).
 if (args.Length == 1 && args[0] == "--unity-profile-command")
 {
@@ -83,6 +90,7 @@ try
     MetadataLayoutTests.Run();
     TargetDefinitionsTests.Run();
     await ProjectFilesWriterTests.RunAsync(root, toolchain);
+    await IdeScriptsTests.RunAsync(root);
     MetadataTemporaryCleanupTests.Run();
     await PlatformPrivateHeaderTests.RunAsync(toolchain, Path.Combine(fixture, "platform-header"));
     await UnityProfileCommandTests.RunAsync(root, Directory.CreateDirectory(Path.Combine(fixture, "unity-profile-command")).FullName,

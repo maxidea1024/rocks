@@ -14,7 +14,7 @@ public static partial class PolicyChecks
     // 마법사 진입 스크립트(Docs/Design/SetupWizard.ko.md)다.
     private static readonly string[] EnglishRootFiles =
     [
-        "Rocks.proj", ".editorconfig", ".gitattributes", ".gitignore", ".clang-format", "global.json", "Directory.Build.rsp", ".vsconfig",
+        "Rocks.proj", ".editorconfig", ".gitattributes", ".gitignore", ".clang-format", "global.json", "Directory.Build.rsp", ".vsconfig", "GenerateProjectFiles.bat",
         "Setup.bat", "Setup.sh"
     ];
 
@@ -115,7 +115,7 @@ public static partial class PolicyChecks
     /// <summary>
     /// 빌드 설정과 생성물은 주석까지 파일 전체를 영어로 쓴다(rule id build-file-english, Docs/CodingStyle.md). 대상은 다음이다.
     /// <list type="bullet">
-    /// <item>저장소 루트의 Rocks.proj·.editorconfig·.gitattributes·.gitignore·.clang-format·global.json·Directory.Build.rsp·.vsconfig·Setup.bat·Setup.sh</item>
+    /// <item>저장소 루트의 Rocks.proj·.editorconfig·.gitattributes·.gitignore·.clang-format·global.json·Directory.Build.rsp·.vsconfig·Setup.bat·Setup.sh·GenerateProjectFiles.bat</item>
     /// <item>.github/workflows/ 아래 파일</item>
     /// <item>모든 <c>*.Build.cs</c>·<c>*.Target.cs</c>·<c>*.csproj</c>·<c>*.props</c>·<c>*.targets</c>·<c>*.slnx</c>·<c>*.proj</c></item>
     /// <item>Build/ 아래 모든 파일(스크립트·설정·규칙 기반 클래스 *.cs, 빌드 출력 디렉터리는 제외)</item>

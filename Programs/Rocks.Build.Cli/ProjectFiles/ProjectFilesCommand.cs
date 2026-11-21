@@ -139,6 +139,11 @@ internal static class ProjectFilesCommand
         Console.WriteLine($"Wrote {Path.Combine(root, "Rocks.slnx")} and {projectFiles}: {written.Written} written, {written.Unchanged} unchanged, " +
             $"{written.Removed} removed{(android ? "" : " (no Android NDK found: Android configurations left out)")}; " +
             $"{System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:F0} ms in total.");
+        foreach (string note in ProjectFilesStaleness.GeneratedHeaderNotes(model, plans))
+        {
+            Console.WriteLine("note: " + note);
+        }
+
         if (!await ClangToolsetInstalledAsync(toolchain, cancellationToken))
         {
             Console.WriteLine($"warning: Visual Studio component {ClangToolsetComponent} (C++ Clang tools for Windows) is not installed; " +

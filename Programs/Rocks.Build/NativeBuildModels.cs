@@ -588,6 +588,11 @@ public sealed record NativeBuildResult
 {
     public required bool Succeeded { get; init; }
 
+    // IDE 대상 논리 명령(IdePlanner.Select — 출력 아래 소스를 뺀 손으로 쓴 소스)이다. 빌드 CLI가 Visual Studio 프로젝트 파일의 낡음
+    // 지문(Docs/Design/ProjectFiles.ko.md 9절)을 계산한다. 보고서(action-report.json)에는 싣지 않는다.
+    [JsonIgnore]
+    public IReadOnlyList<IdeCompile> IdeCompiles { get; init; } = [];
+
     public required int ExecutedActions { get; init; }
 
     public required int SkippedActions { get; init; }
