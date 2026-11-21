@@ -10,15 +10,6 @@ namespace rocks::sparks::detail {
 
 namespace {
 
-// 묶음 하나(참조 번호별)의 배치다: 묶었는지, 구현, 서술자.
-struct VmLanguageBinding {
-    uint64 bound = 0;
-    VmLibraryFunction function = nullptr;
-    VmSignature signature;
-};
-
-constexpr usize VmBindingWords = (sizeof(VmLanguageBinding) + sizeof(uint64) - 1) / sizeof(uint64);
-
 constexpr uint8 VmScalarBankCode = 0;
 constexpr uint8 VmRefBankCode = 1;
 constexpr uint8 VmBufBankCode = 2;
@@ -181,7 +172,8 @@ private:
                 break;
             }
 
-            return true;
+            // 묶음 slot 상한(리뷰 A1 — 구현의 고정 배열과 창 계산이 이 상한에 기댄다).
+            return node.slots <= VmMaxValueSlots;
         }
 
         // z<bank 글자><slot 수>
@@ -204,7 +196,10 @@ private:
                         : bank == 'r' ? VmRefBankCode
                                       : VmBufBankCode;
             node.slots = static_cast<uint8>(slots);
-            return bank == 's' || bank == 'r' || bank == 'b';
+            // Scalar는 1–32 slot, Ref·Buf는 1 slot이다(리뷰 A1).
+            const bool scalar = bank == 's';
+            return (scalar || bank == 'r' || bank == 'b') && slots >= 1 &&
+                   (scalar ? slots <= VmMaxValueSlots : slots == 1);
         }
 
         // 단순 글자(긴 것 먼저 — `st`가 `s`보다, `i16`이 `i8`보다).
@@ -228,15 +223,92 @@ private:
         return true;
     }
 
+public:
+    // text[at]부터 타입 하나의 길이다(틀리면 0).
+    static usize TypeLength(StringView text, usize at) noexcept {
+        VmSignature scratch;
+        VmSignatureReader reader(text, scratch);
+        reader.at_ = at;
+        uint32 node = 0;
+        return reader.Type(node) ? reader.at_ - at : 0;
+    }
+
+private:
     StringView text_;
     VmSignature& out_;
     usize at_ = 0;
 };
 
+// 자리표시 글자가 받는 타입인지다.
+bool VmPlaceholderAccepts(char placeholder, StringView type) noexcept {
+    constexpr StringView Integers[] = {"i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64"};
+    bool integer = false;
+    for (const StringView entry : Integers) {
+        integer = integer || entry == type;
+    }
+
+    const bool real = type == "f32" || type == "f64";
+    switch (placeholder) {
+    case 'I':
+        return integer;
+    case 'F':
+        return real;
+    case 'N':
+        return integer || real;
+    case 'V':
+        return type == "v2" || type == "v3" || type == "v4";
+    case 'O':
+        return integer || real || type == "s" || type == "e";
+    default:
+        return true; // T·U
+    }
+}
+
 } // namespace
 
 bool VmParseSignature(StringView text, VmSignature& out) noexcept {
     return VmSignatureReader(text, out).Read();
+}
+
+bool VmMatchPattern(StringView pattern, StringView descriptor) noexcept {
+    // 자리표시(대문자 I F N V O T U)는 서술자의 타입 하나를 받고, 같은 글자는 같은 글자열이어야
+    // 한다. 그 밖의 글자는 그대로 같아야 한다(`A<`·`M<`·`R<`·`S<`의 대문자는 뒤가 `<`라 자리표시가
+    // 아니다).
+    constexpr StringView Placeholders = "IFNVOTU";
+    StringView bound[sizeof("IFNVOTU") - 1] = {};
+    usize at = 0;
+    for (usize index = 0; index < pattern.ByteCount(); ++index) {
+        const char c = pattern.Data()[index];
+        const bool container = index + 1 < pattern.ByteCount() && pattern.Data()[index + 1] == '<';
+        usize slot = Placeholders.ByteCount();
+        for (usize candidate = 0; !container && candidate < Placeholders.ByteCount(); ++candidate) {
+            slot = Placeholders.Data()[candidate] == c ? candidate : slot;
+        }
+
+        if (slot == Placeholders.ByteCount()) {
+            if (at >= descriptor.ByteCount() || descriptor.Data()[at] != c) {
+                return false;
+            }
+
+            ++at;
+            continue;
+        }
+
+        const usize length = VmSignatureReader::TypeLength(descriptor, at);
+        if (length == 0) {
+            return false;
+        }
+
+        const StringView type(descriptor.Data() + at, length);
+        if (!VmPlaceholderAccepts(c, type) || (!bound[slot].IsEmpty() && bound[slot] != type)) {
+            return false;
+        }
+
+        bound[slot] = type;
+        at += length;
+    }
+
+    return at == descriptor.ByteCount();
 }
 
 bool VmIsSigned(VmTypeCode code) noexcept {
@@ -259,18 +331,53 @@ int64 VmLibraryContext::Integer(uint32 index) const noexcept {
     return static_cast<int64>(Scalars(index)[0]);
 }
 
-VmLibraryFunction VmLibrary::Find(StringView name) noexcept {
+VmLibraryFunction VmLibrary::Find(StringView name, StringView descriptor) noexcept {
     const Span<const VmLibraryEntry> tables[] = {VmMathEntries(), VmTextEntries(),
                                                  VmCollectionEntries()};
     for (const Span<const VmLibraryEntry> table : tables) {
         for (const VmLibraryEntry& entry : table) {
-            if (entry.name == name) {
+            if (entry.name == name && VmMatchPattern(entry.pattern, descriptor)) {
                 return entry.function;
             }
         }
     }
 
     return nullptr;
+}
+
+bool VmLanguageMutates(StringView name) noexcept {
+    constexpr StringView Names[] = {"Array.Add",   "Array.Insert",  "Array.RemoveAt",
+                                    "Array.Clear", "Array.Reverse", "Array.Remove",
+                                    "Array.Sort",  "Map.Remove",    "Map.Clear",
+                                    "Set.Add",     "Set.Remove",    "Set.Clear"};
+    for (const StringView entry : Names) {
+        if (entry == name) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool VmLibrary::Deferred(StringView name) noexcept {
+    // 대기(LC6)와 host가 필요한 부록 B 항목(SparksVm 1절 LC5c 표).
+    constexpr StringView Names[] = {"Delay", "NextTick", "NextFixedTick", "All", "Race"};
+    constexpr StringView Owners[] = {"Time.",  "Assets.",  "Soft.",        "LoadRequest.",
+                                     "Tag.",   "TagSet.",  "InputAction.", "Text.",
+                                     "CVars.", "CVarRef.", "Settings.",    "Class."};
+    for (const StringView entry : Names) {
+        if (entry == name) {
+            return true;
+        }
+    }
+
+    for (const StringView owner : Owners) {
+        if (name.StartsWith(owner)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 VmBuffer* VmLibrary::Allocate(VmLibraryContext& context, VmBufferKind kind, uint64 elements,
@@ -318,12 +425,22 @@ RandomStream& VmLibrary::Random(VmLibraryContext& context) noexcept {
     return context.execution->random_;
 }
 
+bool VmLibrary::Alive(VmLibraryContext& context, uint64 handle) noexcept {
+    return context.execution->Alive(handle);
+}
+
 Allocator& VmLibrary::AllocatorOf(VmLibraryContext& context) noexcept {
     return *context.execution->allocator_;
 }
 
 void VmLibrary::Log(VmLibraryContext& context, VmLogLevel level, StringView message) noexcept {
+    // 로그 글자는 실행 하나에 상한이 있다(리뷰 B4 — 넘는 기록은 빠진 기록으로 센다).
     VmExecution& execution = *context.execution;
+    if (execution.logText_.Size() + message.ByteCount() > VmMaxLogBytes) {
+        ++execution.droppedLogs_;
+        return;
+    }
+
     VmExecution::LogEntry entry;
     entry.level = level;
     entry.offset = static_cast<uint32>(execution.logText_.Size());
@@ -360,37 +477,14 @@ const char* VmLogLevelName(VmLogLevel level) noexcept {
 
 VmFaultKind VmExecution::CallLanguage(uint32 ref, const Banks& window, uint64 budget,
                                       ErrorCode& error) noexcept {
-    // 처음 부르는 참조는 이름·서술자로 묶어 둔다(모듈이 바뀌면 다시 — SparksVm 6a절).
-    using detail::VmLanguageBinding;
-    const BytecodeModule& module = *module_;
-    if (boundModule_ != module_ ||
-        bindings_.Size() != module.refs.Size() * detail::VmBindingWords) {
-        if (auto resized = bindings_.TryResize(module.refs.Size() * detail::VmBindingWords);
-            !resized) {
-            error = resized.Error();
-            return VmFaultKind::None;
-        }
-
-        for (uint64& word : bindings_) {
-            word = 0;
-        }
-
-        boundModule_ = module_;
+    // 묶음은 링크가 만들었다(SparksVm 6.1절 — 언어 함수 참조마다 하나). 묶음이 없는 참조는
+    // 대기·host 언어 함수다(LC6 — V5).
+    if (link_->languageIndex_[ref] == NoBytecodeIndex) {
+        return VmFaultKind::ContractViolation;
     }
 
-    VmLanguageBinding& binding = *reinterpret_cast<VmLanguageBinding*>(
-        bindings_.Data() + usize(ref) * detail::VmBindingWords);
-    if (binding.bound == 0) {
-        const BytecodeRef& entry = module.refs[ref];
-        binding.function = detail::VmLibrary::Find(module.String(entry.name));
-        if (binding.function == nullptr || entry.arguments == NoBytecodeIndex ||
-            !detail::VmParseSignature(module.String(entry.arguments), binding.signature)) {
-            return VmFaultKind::ContractViolation; // 모르는 언어 함수(LC5d·LC6 또는 판 어긋남)
-        }
-
-        binding.bound = 1;
-    }
-
+    const detail::VmLanguageBinding& binding = *reinterpret_cast<const detail::VmLanguageBinding*>(
+        link_->languages_.Data() + usize(link_->languageIndex_[ref]) * detail::VmLanguageWords);
     detail::VmLibraryContext context;
     context.execution = this;
     context.signature = &binding.signature;

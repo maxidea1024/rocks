@@ -7,55 +7,64 @@ k0 = 0x3ff8000000000000
 k1 = 0x4024000000000000
 t0 = "Door.on Enable"
 t1 = "World"
-t2 = "World.Audio"
-t3 = "Door.Cue"
-t4 = "AudioSystem.StartLoop"
-t5 = "Door.Hum"
-t6 = "Door.Info"
-t7 = "Stats"
-t8 = "Level"
-t9 = "Offset"
-t10 = "Stats.Level"
-t11 = "Stats.Offset"
-t12 = "Door.Names"
-t13 = "front"
-t14 = "Door.Scores"
-t15 = "a"
-t16 = "Door.on Disable"
-t17 = "LoopHandle.Pause"
-t18 = "Door.Toggle"
-t19 = "Door.Open"
-t20 = "Door.Opened"
-t21 = "Door.Describe"
-t22 = "Door.State"
-t23 = "idle"
-t24 = "working"
-t25 = "Door.Total"
-t26 = "skip"
-t27 = "Door.on Owner.Damaged"
-t28 = ">w"
-t29 = "NextTick"
-t30 = "Door.Find"
-t31 = "Component.Owner"
-t32 = "Pawn"
-t33 = "sparks 0.4.0"
-t34 = "Main"
+t2 = ">x"
+t3 = "World.Audio"
+t4 = "Door.Cue"
+t5 = "x,x>?<x>"
+t6 = "AudioSystem.StartLoop"
+t7 = ">?<x>"
+t8 = "Door.Hum"
+t9 = ">st"
+t10 = "Door.Info"
+t11 = "Stats"
+t12 = "Level"
+t13 = "Offset"
+t14 = "Stats.Level"
+t15 = "Stats.Offset"
+t16 = ">A<s>"
+t17 = "Door.Names"
+t18 = "front"
+t19 = ">M<s,i64>"
+t20 = "Door.Scores"
+t21 = "a"
+t22 = "Door.on Disable"
+t23 = "x>void"
+t24 = "LoopHandle.Pause"
+t25 = "Door.Toggle"
+t26 = ">b"
+t27 = "Door.Open"
+t28 = "Door.Opened"
+t29 = "Door.Describe"
+t30 = ">e"
+t31 = "Door.State"
+t32 = "idle"
+t33 = "working"
+t34 = "Door.Total"
+t35 = "skip"
+t36 = "Door.on Owner.Damaged"
+t37 = ">w"
+t38 = "NextTick"
+t39 = "Door.Find"
+t40 = "Component.Owner"
+t41 = "Pawn"
+t42 = "sparks 0.4.0"
+t43 = "Main"
 ref0 = context World
-ref1 = field World.Audio
-ref2 = field Door.Cue
-ref3 = native AudioSystem.StartLoop
-ref4 = field Door.Hum
-ref5 = field Door.Info
+ref1 = field World.Audio args ">x"
+ref2 = field Door.Cue args ">x"
+ref3 = native AudioSystem.StartLoop args "x,x>?<x>"
+ref4 = field Door.Hum args ">?<x>"
+ref5 = field Door.Info args ">st"
 ref6 = struct-field Stats.Level field0
 ref7 = struct-field Stats.Offset field1
-ref8 = field Door.Names
-ref9 = field Door.Scores
-ref10 = native LoopHandle.Pause
-ref11 = field Door.Open
+ref8 = field Door.Names args ">A<s>"
+ref9 = field Door.Scores args ">M<s,i64>"
+ref10 = native LoopHandle.Pause args "x>void"
+ref11 = field Door.Open args ">b"
 ref12 = event Door.Opened
-ref13 = field Door.State
+ref13 = field Door.State args ">e"
 ref14 = language NextTick args ">w"
-ref15 = field Component.Owner
+ref15 = field Component.Owner args ">x"
 ref16 = type Pawn
 type0 = struct Stats s4 r0 b0
   field0 Level s0 x1
@@ -83,11 +92,11 @@ function Door.on Enable  scalar=4/4 ref=3/5 buf=2/2 params=0/1/0 returns sx0
   0026  SETF.B  r0, b0, ref5    ; 26:9
   0028  GETF.B  b0, r0, ref8    ; 27:9
   0030  LOADI  s0, 0    ; 27:15
-  0031  LOADSTR  b1, t13    ; 27:20
+  0031  LOADSTR  b1, t18    ; 27:20
   0032  SETE  b0, s0, b1 [bx1 key sx1]    ; 27:9
   0034  SETF.B  r0, b0, ref8    ; 27:9
   0036  GETF.B  b0, r0, ref9    ; 28:9
-  0038  LOADSTR  b1, t15    ; 28:16
+  0038  LOADSTR  b1, t21    ; 28:16
   0039  LOADI  s0, 1    ; 28:23
   0040  SETE  b0, b1, s0 [sx1 key bx1]    ; 28:9
   0042  SETF.B  r0, b0, ref9    ; 28:9
@@ -123,9 +132,9 @@ function Door.Describe  scalar=1/1 ref=1/1 buf=1/1 params=0/1/0 returns bx1
   0000  GETF.S  s0, r0, ref13    ; 44:17
   0002  SWITCH  s0, switch0    ; 44:9
   0003  FAULT  1    ; 52:5
-  0004  LOADSTR  b0, t23    ; 46:24
+  0004  LOADSTR  b0, t32    ; 46:24
   0005  RET  b0 x1    ; 46:17
-  0006  LOADSTR  b0, t24    ; 49:24
+  0006  LOADSTR  b0, t33    ; 49:24
   0007  RET  b0 x1    ; 49:17
 
 function Door.Total  scalar=5/5 ref=1/1 buf=3/3 params=0/1/0 returns sx1
@@ -150,7 +159,7 @@ function Door.Total  scalar=5/5 ref=1/1 buf=3/3 params=0/1/0 returns sx1
   0021  BRF  s3, 0032    ; 61:9
   0022  MOV.S  s3, s1    ; 61:9
   0023  GETVAL  b1, b0, s1 [bx1 key sx0]    ; 61:21
-  0025  LOADSTR  b2, t26    ; 62:25
+  0025  LOADSTR  b2, t35    ; 62:25
   0026  EQ.STR  s4, b1, b2    ; 62:17
   0027  BRT  s4, 0033    ; 62:17
   0028  JMP  0034    ; 62:17

@@ -1,0 +1,56 @@
+class Mover : ScriptableComponent {
+    var Steps = 0;
+    var Label = "start";
+    var Target: Actor?;
+    var Hum: LoopHandle?;
+
+    fn Place(actor: Actor, to: vec3): vec3 {
+        actor.Location = to;
+        Steps += 1;
+        return actor.Location;
+    }
+
+    fn Remember(actor: Actor?, suffix: string): string {
+        Target = actor;
+        Label = "${Label}+${suffix}";
+        return Label;
+    }
+
+    fn Same(other: Actor?): bool {
+        return Target == other;
+    }
+
+    fn Remove(actor: Actor): bool {
+        actor.RequestDestroy();
+        let again: Actor? = actor;
+        return again == null;
+    }
+
+    fn HasTarget(): bool {
+        if (let found = Target) {
+            return found.HasAuthority || true;
+        }
+
+        return false;
+    }
+
+    fn Loop(sound: SoundAsset): bool {
+        Hum = World.Audio.StartLoop(sound);
+        Hum?.Pause();
+        return Hum?.IsPlaying() ?? false;
+    }
+
+    fn Holder(): Actor {
+        return Owner;
+    }
+
+    fn Count(): int {
+        return Actor.CountAll() + Steps;
+    }
+
+    fn Home(): bool {
+        let first = Tag("Game.Home");
+        let second = Tag("Game.Door");
+        return first == second;
+    }
+}

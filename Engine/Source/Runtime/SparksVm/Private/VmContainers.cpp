@@ -294,7 +294,18 @@ Result<VmBuffer*> VmExecution::NewContainer(VmBufferKind kind, uint32 marker,
         return Result<VmBuffer*>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // 표지는 verifier의 표지 규칙과 같다(리뷰 A8): 남는 비트 없음, bank 0–2, Ref·Buf 묶음은 1 slot.
     const VmLayout layout = VmDecodeMarker(marker);
+    auto validGroup = [](uint32 bank, uint32 slots) noexcept {
+        return bank <= VmBufBank && (bank == 0 || slots <= 1);
+    };
+    if (EncodeContainerMarker(layout.valueBank, layout.valueSlots, layout.keyBank,
+                              layout.keySlots) != marker ||
+        !validGroup(layout.valueBank, layout.valueSlots) ||
+        !validGroup(layout.keyBank, layout.keySlots)) {
+        return Result<VmBuffer*>::Failure(ErrorCode::InvalidArgument);
+    }
+
     const bool keyed = kind == VmBufferKind::Map;
     const uint64 stride = uint64(layout.valueSlots) + (keyed ? layout.keySlots : 0);
     if (layout.valueSlots == 0 || (keyed && layout.keySlots == 0) ||
@@ -621,6 +632,12 @@ namespace rocks::sparks::detail {
 
 uint32 VmContainerFind(VmBuffer* buffer, const uint64* key) noexcept {
     return VmFind(buffer, key);
+}
+
+void VmContainerIndexInsert(VmBuffer* buffer, uint32 element) noexcept {
+    if (VmHashed(buffer) && buffer->indexCapacity != 0) {
+        VmIndexInsert(buffer, element);
+    }
 }
 
 void VmContainerReindex(VmBuffer* buffer) noexcept {

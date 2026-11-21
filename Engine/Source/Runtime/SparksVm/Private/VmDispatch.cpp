@@ -295,13 +295,13 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
             break;
         }
         case Opcode::EqR:
-            // handle 원시 비교다. 파괴된 객체를 null로 읽는 비교(SL 3.3절 — generation 검사)는
-            // LC5d의 host IsAlive를 거친다(V5 자리).
-            s[a] = r[bb] == r[c] ? 1 : 0;
+        case Opcode::NeR: {
+            // 죽은 handle은 null로 읽는다(SL 3.3절 — 6.2절 handle 생존).
+            const uint64 left = Alive(r[bb]) ? r[bb] : 0;
+            const uint64 right = Alive(r[c]) ? r[c] : 0;
+            s[a] = (op == Opcode::EqR) == (left == right) ? 1 : 0;
             break;
-        case Opcode::NeR:
-            s[a] = r[bb] != r[c] ? 1 : 0;
-            break;
+        }
         case Opcode::EqN:
         case Opcode::NeN:
         case Opcode::EqNF:
@@ -619,7 +619,7 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
             break;
         }
         case Opcode::IsSomeR:
-            s[a] = r[bb] != 0 ? 1 : 0;
+            s[a] = Alive(r[bb]) ? 1 : 0;
             break;
         case Opcode::IsSomeB:
             s[a] = b[bb] != nullptr ? 1 : 0;
@@ -715,6 +715,33 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
             banks.r = r;
             banks.b = b;
             fault = Container(op, word, marker, banks, limits.memoryBytes, error);
+            if (error != ErrorCode::None) {
+                return failed(error);
+            }
+
+            if (fault != VmFaultKind::None) {
+                return MakeFault(fault, at, steps);
+            }
+
+            break;
+        }
+        case Opcode::GetFS:
+        case Opcode::GetFR:
+        case Opcode::GetFB:
+        case Opcode::SetFS:
+        case Opcode::SetFR:
+        case Opcode::SetFB:
+        case Opcode::GetCtx:
+        case Opcode::CallN:
+        case Opcode::NewLit: {
+            // host 명령(VmHostCalls.cpp — SparksVm 6.2절).
+            const uint32 extra = InfoOf(op).extra ? words[pc++] : 0;
+            ErrorCode error = ErrorCode::None;
+            Banks banks;
+            banks.s = s;
+            banks.r = r;
+            banks.b = b;
+            fault = CallHost(op, word, extra, banks, error);
             if (error != ErrorCode::None) {
                 return failed(error);
             }

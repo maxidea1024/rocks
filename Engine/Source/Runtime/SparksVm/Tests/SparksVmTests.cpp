@@ -81,7 +81,7 @@ TEST(SparksVm_TupleComparisons) {
 
         VmExecution execution(allocator);
         const uint64 arguments[] = {a0, a1, b0, b1};
-        return Run(execution, assembler.module, 0, Span<const uint64>(arguments, 4));
+        return Run(execution, assembler.Linked(), 0, Span<const uint64>(arguments, 4));
     };
     CHECK(Returns(compare(Opcode::EqNF, 1, Bits(-0.0), 1, Bits(0.0)), 1));
     CHECK(Returns(compare(Opcode::EqN, 1, Bits(-0.0), 1, Bits(0.0)), 0));
@@ -111,7 +111,7 @@ TEST(SparksVm_ConversionsOutsideTheLanguage) {
 
         VmExecution execution(allocator);
         const uint64 arguments[] = {value};
-        return Run(execution, assembler.module, 0, Span<const uint64>(arguments, 1));
+        return Run(execution, assembler.Linked(), 0, Span<const uint64>(arguments, 1));
     };
     CHECK(Faults(convert(ScalarKind::F64, ScalarKind::I64, Bits(1.5)), VmFaultKind::Unreachable));
     CHECK(Faults(convert(ScalarKind::F32, ScalarKind::U8, Bits(2.0)), VmFaultKind::Unreachable));
@@ -172,20 +172,20 @@ TEST(SparksVm_FaultsEndsAndResultErrors) {
     VmExecution execution(allocator);
     const uint64 code[] = {3};
     const Span<const uint64> argument(code, 1);
-    CHECK(Faults(Run(execution, assembler.module, 0, argument), VmFaultKind::Unreachable));
-    CHECK(Faults(Run(execution, assembler.module, 1, argument), VmFaultKind::HookTryFailed));
-    CHECK(Faults(Run(execution, assembler.module, 2, argument), VmFaultKind::Unreachable));
-    const Outcome ended = Run(execution, assembler.module, 3, argument);
+    CHECK(Faults(Run(execution, assembler.Linked(), 0, argument), VmFaultKind::Unreachable));
+    CHECK(Faults(Run(execution, assembler.Linked(), 1, argument), VmFaultKind::HookTryFailed));
+    CHECK(Faults(Run(execution, assembler.Linked(), 2, argument), VmFaultKind::Unreachable));
+    const Outcome ended = Run(execution, assembler.Linked(), 3, argument);
     CHECK(ended.outcome == VmOutcome::Ended);
     CHECK(ended.value == 3);
     CHECK(ended.steps == 1);
-    const Outcome forwarded = Run(execution, assembler.module, 4, argument);
+    const Outcome forwarded = Run(execution, assembler.Linked(), 4, argument);
     CHECK(Returns(forwarded, 3));
     REQUIRE(execution.ReturnedSlots().Size() == 2);
     CHECK(execution.ReturnedSlots()[1] == 0); // 값 slot은 0이다(99가 아니다)
 
     // fault의 자리: 함수 번호, 함수 안 주소, 원문 위치.
-    auto called = execution.Call(assembler.module, 1, argument, Span<const uint64>(), {});
+    auto called = execution.Call(assembler.Linked(), 1, argument, Span<const uint64>(), {});
     REQUIRE(called);
     CHECK(called.Value().fault.function == 1);
     CHECK(called.Value().fault.address == 0);
@@ -193,52 +193,22 @@ TEST(SparksVm_FaultsEndsAndResultErrors) {
     CHECK(called.Value().fault.location.column == 1);
 }
 
-TEST(SparksVm_RefsAndPlaceholders) {
+TEST(SparksVm_ComponentPlaceholder) {
+    // NEWC(component 생성)는 LC6 전 자리표시다(V5). handle·native는 SparksVmHostTests.cpp가 본다.
     SystemAllocator allocator;
     Assembler assembler(allocator);
-    // 0: Ref 둘(r0, r1)을 받아 s0 = r0 == r1, s1 = ISSOME r1, r2 = null, s2 = r2 == r0, r0를
-    // 돌려준다.
-    Shape refs;
-    refs.registers[0] = 3;
-    refs.frame[0] = 3;
-    refs.registers[1] = 3;
-    refs.frame[1] = 3;
-    refs.parameters[1] = 2;
-    refs.returnBank = 1;
-    refs.returnSlots = 1;
-    assembler.Begin("Refs", refs);
-    assembler.Emit(EncodeABC(Opcode::EqR, 0, 0, 1));
-    assembler.Emit(EncodeABC(Opcode::IsSomeR, 1, 1, 0));
-    assembler.Emit(EncodeABC(Opcode::LoadNullR, 2, 0, 0));
-    assembler.Emit(EncodeABC(Opcode::NeR, 2, 2, 0));
-    assembler.Emit(EncodeABC(Opcode::MovR, 2, 1, 0));
-    assembler.Emit(EncodeABC(Opcode::Ret, 2, 1, 1));
-    assembler.End();
-    // 1: native 호출(LC5d 전 자리표시), 2: NEWC(component — LC6 전 자리표시).
     Shape empty;
     empty.registers[1] = 1;
     empty.frame[1] = 1;
     empty.registers[2] = 1;
     empty.frame[2] = 1;
-    assembler.Begin("Native", empty);
-    assembler.Emit(EncodeABx(Opcode::CallN, 0,
-                             assembler.Ref(BytecodeRefKind::NativeFunction, "Actor.Destroy")));
-    assembler.Emit(EncodeABC(Opcode::Ret, 0, 0, 0));
-    assembler.End();
-    assembler.Begin("Array", empty);
+    assembler.Begin("Component", empty);
     assembler.Emit(EncodeABx(Opcode::NewC, 0, assembler.Ref(BytecodeRefKind::Type, "Door")));
     assembler.Emit(EncodeABC(Opcode::Ret, 0, 0, 0));
     assembler.End();
-    REQUIRE(assembler.Verified());
-
+    REQUIRE(Verify(assembler));
     VmExecution execution(allocator);
-    const uint64 handles[] = {(uint64(4) << 32) | 1, (uint64(5) << 32) | 1};
-    const Outcome refsOut =
-        Run(execution, assembler.module, 0, Span<const uint64>(), Span<const uint64>(handles, 2));
-    CHECK(Returns(refsOut, handles[1]));
-    CHECK(Faults(Run(execution, assembler.module, 1, Span<const uint64>()),
-                 VmFaultKind::ContractViolation));
-    CHECK(Faults(Run(execution, assembler.module, 2, Span<const uint64>()),
+    CHECK(Faults(Run(execution, assembler.Linked(), 0, Span<const uint64>()),
                  VmFaultKind::ContractViolation));
 }
 
@@ -279,30 +249,31 @@ TEST(SparksVm_BudgetsAndDepth) {
     VmLimits limits;
     limits.instructions = 6;
     const Outcome exact =
-        Run(execution, assembler.module, 0, argument, Span<const uint64>(), limits);
+        Run(execution, assembler.Linked(), 0, argument, Span<const uint64>(), limits);
     CHECK(Returns(exact, 14));
     CHECK(exact.steps == 6);
     limits.instructions = 5;
-    auto limited = execution.Call(assembler.module, 0, argument, Span<const uint64>(), {}, limits);
+    auto limited =
+        execution.Call(assembler.Linked(), 0, argument, Span<const uint64>(), {}, limits);
     REQUIRE(limited);
     CHECK(limited.Value().outcome == VmOutcome::Faulted);
     CHECK(limited.Value().fault.kind == VmFaultKind::BudgetExceeded);
     CHECK(limited.Value().steps == 5);
     CHECK(limited.Value().fault.address == 5); // 막힌 명령(RET)의 자리
     limits.instructions = 0;
-    CHECK(Faults(Run(execution, assembler.module, 0, argument, Span<const uint64>(), limits),
+    CHECK(Faults(Run(execution, assembler.Linked(), 0, argument, Span<const uint64>(), limits),
                  VmFaultKind::BudgetExceeded));
 
     // 호출 깊이: frame 3개까지(MOV·CALL 두 번씩 뒤 세 번째 CALL에서 막힌다).
     limits = VmLimits();
     limits.callDepth = 3;
-    auto deep = execution.Call(assembler.module, 1, argument, Span<const uint64>(), {}, limits);
+    auto deep = execution.Call(assembler.Linked(), 1, argument, Span<const uint64>(), {}, limits);
     REQUIRE(deep);
     CHECK(deep.Value().fault.kind == VmFaultKind::BudgetExceeded);
     CHECK(deep.Value().steps == 6);
     CHECK(deep.Value().fault.address == 1);
     // 기본 깊이(256)는 끝없는 재귀를 막는다(stack은 깊이만큼 자란다).
-    CHECK(Faults(Run(execution, assembler.module, 1, argument), VmFaultKind::BudgetExceeded));
+    CHECK(Faults(Run(execution, assembler.Linked(), 1, argument), VmFaultKind::BudgetExceeded));
 }
 
 TEST(SparksVm_CallerErrors) {
@@ -319,22 +290,22 @@ TEST(SparksVm_CallerErrors) {
     REQUIRE(assembler.Verified());
     VmExecution execution(allocator);
     const uint64 arguments[] = {1, 2, 3};
-    CHECK(execution.Call(assembler.module, 2, Span<const uint64>(arguments, 2), {}, {}).Error() ==
+    CHECK(execution.Call(assembler.Linked(), 2, Span<const uint64>(arguments, 2), {}, {}).Error() ==
           ErrorCode::InvalidArgument);
-    CHECK(execution.Call(assembler.module, 0, Span<const uint64>(arguments, 3), {}, {}).Error() ==
+    CHECK(execution.Call(assembler.Linked(), 0, Span<const uint64>(arguments, 3), {}, {}).Error() ==
           ErrorCode::InvalidArgument);
     CHECK(execution
-              .Call(assembler.module, 0, Span<const uint64>(arguments, 2),
+              .Call(assembler.Linked(), 0, Span<const uint64>(arguments, 2),
                     Span<const uint64>(arguments, 1), {})
               .Error() == ErrorCode::InvalidArgument);
-    CHECK(execution.Call(assembler.module, 1, Span<const uint64>(), {}, {}).Error() ==
+    CHECK(execution.Call(assembler.Linked(), 1, Span<const uint64>(), {}, {}).Error() ==
           ErrorCode::InvalidArgument); // Buf 매개변수 하나에 인자 없음
     VmBuffer* const missing[] = {nullptr, nullptr};
-    CHECK(
-        execution
-            .Call(assembler.module, 1, Span<const uint64>(), {}, Span<VmBuffer* const>(missing, 2))
-            .Error() == ErrorCode::InvalidArgument);
-    CHECK(Returns(Run(execution, assembler.module, 0, Span<const uint64>(arguments, 2)), 3));
+    CHECK(execution
+              .Call(assembler.Linked(), 1, Span<const uint64>(), {},
+                    Span<VmBuffer* const>(missing, 2))
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(Returns(Run(execution, assembler.Linked(), 0, Span<const uint64>(arguments, 2)), 3));
 }
 
 TEST(SparksVm_CompositeProducts) {
@@ -369,7 +340,7 @@ TEST(SparksVm_CompositeProducts) {
         matrices[16 + index] = Bits(static_cast<double>(index) + 0.5);
     }
 
-    CHECK(Returns(Run(execution, assembler.module, 0, Span<const uint64>(matrices, 32)),
+    CHECK(Returns(Run(execution, assembler.Linked(), 0, Span<const uint64>(matrices, 32)),
                   matrices[16]));
     for (uint32 index = 0; index < 16; ++index) {
         CHECK(execution.ReturnedSlots()[index] == matrices[16 + index]);
@@ -377,10 +348,10 @@ TEST(SparksVm_CompositeProducts) {
 
     matrices[16] = Bits(1e300);
     matrices[0] = Bits(1e300);
-    CHECK(Faults(Run(execution, assembler.module, 0, Span<const uint64>(matrices, 32)),
+    CHECK(Faults(Run(execution, assembler.Linked(), 0, Span<const uint64>(matrices, 32)),
                  VmFaultKind::NonFinite));
     const uint64 quats[] = {0, 0, 0, Bits(1.0), Bits(1.0), Bits(2.0), Bits(3.0), Bits(4.0)};
-    CHECK(Returns(Run(execution, assembler.module, 1, Span<const uint64>(quats, 8)), Bits(1.0)));
+    CHECK(Returns(Run(execution, assembler.Linked(), 1, Span<const uint64>(quats, 8)), Bits(1.0)));
     CHECK(execution.ReturnedSlots()[3] == Bits(4.0));
 }
 
@@ -417,7 +388,7 @@ TEST(SparksVm_AllocationFailureEverywhere) {
                 allocator.FailOnAttempt(failAt);
             }
 
-            auto called = execution.Call(assembler.module, 0, Span<const uint64>(start, 1),
+            auto called = execution.Call(assembler.Linked(), 0, Span<const uint64>(start, 1),
                                          Span<const uint64>(), {});
             const uint64 used = allocator.Attempts();
             allocator.DisableFailure();

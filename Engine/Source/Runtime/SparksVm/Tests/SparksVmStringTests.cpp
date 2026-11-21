@@ -59,7 +59,7 @@ StringView Format(VmExecution& execution, Assembler& assembler, uint32 display,
         return StringView();
     }
 
-    outcome = Run(execution, assembler.module, function, slots);
+    outcome = Run(execution, assembler.Linked(), function, slots);
     return Returned(execution);
 }
 
@@ -79,7 +79,7 @@ TEST(SparksVmString_LoadConcatAndLedger) {
     assembler.End();
     REQUIRE(Verify(assembler));
     VmExecution execution(allocator);
-    const Outcome joined = Run(execution, assembler.module, 0, Span<const uint64>());
+    const Outcome joined = Run(execution, assembler.Linked(), 0, Span<const uint64>());
     CHECK(joined.outcome == VmOutcome::Returned);
     CHECK(Returned(execution) == "abcd");
     CHECK(execution.ReturnedSlots().IsEmpty());
@@ -116,7 +116,7 @@ TEST(SparksVmString_ComparisonsAndHostStrings) {
     VmExecution execution(allocator);
     auto compare = [&](VmBuffer* left, VmBuffer* right) noexcept {
         VmBuffer* const arguments[] = {left, right};
-        auto called = execution.Call(assembler.module, 0, Span<const uint64>(), {},
+        auto called = execution.Call(assembler.Linked(), 0, Span<const uint64>(), {},
                                      Span<VmBuffer* const>(arguments, 2));
         CHECK(called);
         return called && !execution.ReturnedSlots().IsEmpty() ? execution.ReturnedSlots()[0]
@@ -165,7 +165,7 @@ TEST(SparksVmString_ReturnedParameterKeepsReferences) {
     auto text = execution.NewString("hello");
     REQUIRE(text);
     VmBuffer* const arguments[] = {text.Value()};
-    auto called = execution.Call(assembler.module, 0, Span<const uint64>(), {},
+    auto called = execution.Call(assembler.Linked(), 0, Span<const uint64>(), {},
                                  Span<VmBuffer* const>(arguments, 1));
     REQUIRE(called);
     CHECK(execution.ReturnedBuffers()[0] == text.Value());
@@ -213,12 +213,12 @@ TEST(SparksVmString_BuffersAreReleasedOnEveryExit) {
     assembler.End();
     REQUIRE(Verify(assembler));
     VmExecution execution(allocator);
-    CHECK(Faults(Run(execution, assembler.module, 0, Span<const uint64>()),
+    CHECK(Faults(Run(execution, assembler.Linked(), 0, Span<const uint64>()),
                  VmFaultKind::Unreachable));
     CHECK(execution.LiveBuffers() == 0);
-    CHECK(Run(execution, assembler.module, 1, Span<const uint64>()).outcome == VmOutcome::Ended);
+    CHECK(Run(execution, assembler.Linked(), 1, Span<const uint64>()).outcome == VmOutcome::Ended);
     CHECK(execution.LiveBuffers() == 0);
-    CHECK(Run(execution, assembler.module, drop, Span<const uint64>()).outcome ==
+    CHECK(Run(execution, assembler.Linked(), drop, Span<const uint64>()).outcome ==
           VmOutcome::Returned);
     CHECK(execution.LiveBuffers() == 0);
     CHECK(execution.LiveBytes() == 0);
@@ -288,17 +288,17 @@ TEST(SparksVmString_MemoryBudgetAndLimits) {
     VmLimits limits;
     const uint64 one = VmBufferHeaderBytes + 104; // 100 byte를 8의 배수로
     limits.memoryBytes = one * 2;                 // 조각 둘까지만
-    auto concat = execution.Call(assembler.module, 0, Span<const uint64>(), {}, {}, limits);
+    auto concat = execution.Call(assembler.Linked(), 0, Span<const uint64>(), {}, {}, limits);
     REQUIRE(concat);
     CHECK(concat.Value().fault.kind == VmFaultKind::BudgetExceeded);
     CHECK(concat.Value().fault.address == 2);
     CHECK(execution.LiveBuffers() == 0);
     limits.memoryBytes = one - 1; // 첫 조각부터
-    auto first = execution.Call(assembler.module, 0, Span<const uint64>(), {}, {}, limits);
+    auto first = execution.Call(assembler.Linked(), 0, Span<const uint64>(), {}, {}, limits);
     REQUIRE(first);
     CHECK(first.Value().fault.address == 0);
     limits.memoryBytes = DefaultMemoryBudget;
-    CHECK(Run(execution, assembler.module, 0, Span<const uint64>(), Span<const uint64>(), limits)
+    CHECK(Run(execution, assembler.Linked(), 0, Span<const uint64>(), Span<const uint64>(), limits)
               .outcome == VmOutcome::Returned);
     CHECK(Returned(execution).ByteCount() == 200);
     execution.ReleaseReturned();
@@ -345,7 +345,7 @@ TEST(SparksVmString_AllocationFailureEverywhere) {
             }
 
             VmBuffer* const arguments[] = {suffix.Value()};
-            auto called = execution.Call(assembler.module, 0, Span<const uint64>(number, 1), {},
+            auto called = execution.Call(assembler.Linked(), 0, Span<const uint64>(number, 1), {},
                                          Span<VmBuffer* const>(arguments, 1));
             const uint64 used = allocator.Attempts();
             allocator.DisableFailure();

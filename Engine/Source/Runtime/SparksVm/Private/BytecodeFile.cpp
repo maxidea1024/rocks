@@ -578,10 +578,12 @@ public:
                                ? ref.detail < module_.types.Size()
                                : ref.detail < module_.refs.Size() &&
                                      module_.refs[ref.detail].kind == BytecodeRefKind::Type);
-            // 리터럴 인자 표·언어 함수 서술자(SparksVm 6a절)는 문자열이다.
+            // 리터럴 인자 표·언어 함수·native·필드 서술자(SparksVm 6a·6.1절)는 문자열이다.
             const bool argumentsOk = ref.arguments == NoBytecodeIndex ||
                                      ((ref.kind == BytecodeRefKind::Literal ||
-                                       ref.kind == BytecodeRefKind::LanguageFunction) &&
+                                       ref.kind == BytecodeRefKind::LanguageFunction ||
+                                       ref.kind == BytecodeRefKind::NativeFunction ||
+                                       ref.kind == BytecodeRefKind::Field) &&
                                       ref.arguments < strings);
             // 같은 모듈 함수 참조는 함수 표 번호가 있어야 한다(CALL이 그 함수로 간다).
             const bool functionOk =

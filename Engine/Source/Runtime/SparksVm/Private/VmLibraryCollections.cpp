@@ -16,6 +16,7 @@ using C = VmLibraryContext;
 
 constexpr uint32 VmBuf = static_cast<uint32>(BytecodeBank::Buf);
 constexpr uint32 VmScalar = static_cast<uint32>(BytecodeBank::Scalar);
+constexpr uint32 VmRef = static_cast<uint32>(BytecodeBank::Ref);
 constexpr uint32 VmNotFound = NumericLimits<uint32>::Max();
 constexpr uint32 VmSlotLimit = 32;
 
@@ -43,6 +44,43 @@ uint32 MarkerOf(const C& call) noexcept {
     return EncodeContainerMarker(first.bank, first.slots, 0, 0);
 }
 
+// 수신자 버퍼가 서술자의 컨테이너 종류이고, 배치가 정해졌으면 그 배치가 서술자와 같은지다(리뷰 A3 —
+// host가 다른 배치의 컨테이너를 넘겨도 버퍼 밖을 읽거나 쓰지 않는다). null은 빈 컨테이너다.
+bool Fits(const C& call) noexcept {
+    const VmBuffer* buffer = call.Buffer(0);
+    if (buffer == nullptr) {
+        return true;
+    }
+
+    const VmTypeCode code = call.Operand(0).code;
+    const VmBufferKind kind = code == VmTypeCode::Array ? VmBufferKind::Array
+                              : code == VmTypeCode::Map ? VmBufferKind::Map
+                                                        : VmBufferKind::Set;
+    if (buffer->kind != kind) {
+        return false;
+    }
+
+    if (buffer->capacity == 0) {
+        return true;
+    }
+
+    const VmTypeNode& receiver = call.Operand(0);
+    const VmTypeNode& first = call.Node(receiver.child[0]);
+    if (code == VmTypeCode::Map) {
+        const VmTypeNode& value = call.Node(receiver.child[1]);
+        return buffer->keyBank == first.bank && buffer->keySlots == first.slots &&
+               buffer->valueBank == value.bank && buffer->valueSlots == value.slots;
+    }
+
+    if (code == VmTypeCode::Set) {
+        return buffer->keyBank == first.bank && buffer->keySlots == first.slots &&
+               buffer->valueSlots == 0;
+    }
+
+    return buffer->keySlots == 0 && buffer->valueBank == first.bank &&
+           buffer->valueSlots == first.slots;
+}
+
 // 피연산자 operand(원소 하나)를 slot 비트로 읽는다(Buf는 포인터 비트).
 uint32 Load(const C& call, uint32 operand, uint64* out) noexcept {
     const VmTypeNode& node = call.Operand(operand);
@@ -56,8 +94,19 @@ uint32 Load(const C& call, uint32 operand, uint64* out) noexcept {
 }
 
 // 원소 slot 묶음 둘이 같은지다(문자열은 byte, 그 밖은 비트 — `==` 가능한 원소만 온다).
-bool Same(const uint64* left, const uint64* right, uint32 slots, uint32 bank) noexcept {
+bool Same(C& call, const uint64* left, const uint64* right, uint32 slots, uint32 bank) noexcept {
     for (uint32 slot = 0; slot < slots; ++slot) {
+        if (bank == VmRef) {
+            // 죽은 객체는 null과 같다(SL 3.3절 — 리뷰 B2).
+            const uint64 a = VmLibrary::Alive(call, left[slot]) ? left[slot] : 0;
+            const uint64 b = VmLibrary::Alive(call, right[slot]) ? right[slot] : 0;
+            if (a != b) {
+                return false;
+            }
+
+            continue;
+        }
+
         if (bank != VmBuf) {
             if (left[slot] != right[slot]) {
                 return false;
@@ -113,13 +162,13 @@ VmFaultKind Own(C& call, uint64 needed) noexcept {
 }
 
 // 선형 찾기(Array — 원소 하나 = 값 묶음).
-uint32 IndexOf(VmBuffer* buffer, const uint64* value, uint32 slots, uint32 bank) noexcept {
+uint32 IndexOf(C& call, VmBuffer* buffer, const uint64* value, uint32 slots, uint32 bank) noexcept {
     if (buffer == nullptr) {
         return VmNotFound;
     }
 
     for (uint32 element = 0; element < buffer->count; ++element) {
-        if (Same(Slots(buffer) + uint64(element) * Stride(buffer), value, slots, bank)) {
+        if (Same(call, Slots(buffer) + uint64(element) * Stride(buffer), value, slots, bank)) {
             return element;
         }
     }
@@ -130,11 +179,19 @@ uint32 IndexOf(VmBuffer* buffer, const uint64* value, uint32 slots, uint32 bank)
 // ---- Array ----
 
 VmFaultKind ArrayCount(C& call) noexcept {
+    if (!Fits(call)) {
+        return VmFaultKind::ContractViolation;
+    }
+
     call.s[0] = call.Buffer(0) == nullptr ? 0 : call.Buffer(0)->count;
     return VmFaultKind::None;
 }
 
 VmFaultKind ArrayInsertAt(C& call, uint32 indexOperand, uint32 valueOperand, bool append) noexcept {
+    if (!Fits(call)) {
+        return VmFaultKind::ContractViolation;
+    }
+
     VmBuffer* current = call.Buffer(0);
     const uint64 count = current == nullptr ? 0 : current->count;
     const int64 index = append ? int64(count) : call.Integer(indexOperand);
@@ -171,6 +228,10 @@ VmFaultKind ArrayInsert(C& call) noexcept {
 }
 
 VmFaultKind ArrayRemoveAt(C& call) noexcept {
+    if (!Fits(call)) {
+        return VmFaultKind::ContractViolation;
+    }
+
     VmBuffer* current = call.Buffer(0);
     const int64 index = call.Integer(1);
     if (current == nullptr || index < 0 || uint64(index) >= current->count) {
@@ -187,6 +248,10 @@ VmFaultKind ArrayRemoveAt(C& call) noexcept {
 }
 
 VmFaultKind ClearAll(C& call) noexcept {
+    if (!Fits(call)) {
+        return VmFaultKind::ContractViolation;
+    }
+
     VmBuffer* current = call.Buffer(0);
     if (current == nullptr || current->count == 0) {
         return VmFaultKind::None;
@@ -197,15 +262,28 @@ VmFaultKind ClearAll(C& call) noexcept {
         return fault;
     }
 
+    // 원소 버퍼를 한꺼번에 놓고 색인을 한 번 비운다(리뷰 A6 — 원소마다 지우면 O(n²)).
     VmBuffer* buffer = call.Buffer(0);
-    while (buffer->count > 0) {
-        Erase(call, buffer, buffer->count - 1);
+    const uint32 stride = Stride(buffer);
+    uint64* slots = Slots(buffer);
+    for (uint64 at = 0; at < uint64(buffer->count) * stride; ++at) {
+        const bool key = at % stride < buffer->keySlots;
+        if ((key ? buffer->keyBank : buffer->valueBank) == VmBuf) {
+            VmLibrary::Release(call, Child(slots[at]));
+            slots[at] = 0;
+        }
     }
 
+    buffer->count = 0;
+    VmContainerReindex(buffer);
     return VmFaultKind::None;
 }
 
 VmFaultKind ArrayReverse(C& call) noexcept {
+    if (!Fits(call)) {
+        return VmFaultKind::ContractViolation;
+    }
+
     VmBuffer* current = call.Buffer(0);
     if (current == nullptr || current->count < 2) {
         return VmFaultKind::None;
@@ -231,25 +309,37 @@ VmFaultKind ArrayReverse(C& call) noexcept {
 }
 
 VmFaultKind ArrayContains(C& call) noexcept {
+    if (!Fits(call)) {
+        return VmFaultKind::ContractViolation;
+    }
+
     uint64 value[VmSlotLimit] = {};
     const uint32 slots = Load(call, 1, value);
-    call.s[0] = IndexOf(call.Buffer(0), value, slots, call.Operand(1).bank) != VmNotFound;
+    call.s[0] = IndexOf(call, call.Buffer(0), value, slots, call.Operand(1).bank) != VmNotFound;
     return VmFaultKind::None;
 }
 
 VmFaultKind ArrayIndexOf(C& call) noexcept {
+    if (!Fits(call)) {
+        return VmFaultKind::ContractViolation;
+    }
+
     uint64 value[VmSlotLimit] = {};
     const uint32 slots = Load(call, 1, value);
-    const uint32 at = IndexOf(call.Buffer(0), value, slots, call.Operand(1).bank);
+    const uint32 at = IndexOf(call, call.Buffer(0), value, slots, call.Operand(1).bank);
     call.s[0] = at != VmNotFound ? 1 : 0;
     call.s[1] = at != VmNotFound ? at : 0;
     return VmFaultKind::None;
 }
 
 VmFaultKind ArrayRemove(C& call) noexcept {
+    if (!Fits(call)) {
+        return VmFaultKind::ContractViolation;
+    }
+
     uint64 value[VmSlotLimit] = {};
     const uint32 slots = Load(call, 1, value);
-    const uint32 at = IndexOf(call.Buffer(0), value, slots, call.Operand(1).bank);
+    const uint32 at = IndexOf(call, call.Buffer(0), value, slots, call.Operand(1).bank);
     if (at == VmNotFound) {
         call.s[0] = 0;
         return VmFaultKind::None;
@@ -267,6 +357,10 @@ VmFaultKind ArrayRemove(C& call) noexcept {
 }
 
 VmFaultKind ArraySort(C& call) noexcept {
+    if (!Fits(call)) {
+        return VmFaultKind::ContractViolation;
+    }
+
     // 오름차순(정수·실수·문자열 byte 순·enum case 번호 — `<` 가능한 원소, slot 하나).
     VmBuffer* current = call.Buffer(0);
     if (current == nullptr || current->count < 2) {
@@ -302,6 +396,10 @@ VmFaultKind ArraySort(C& call) noexcept {
 // ---- Map·Set ----
 
 VmFaultKind MapContainsKey(C& call) noexcept {
+    if (!Fits(call)) {
+        return VmFaultKind::ContractViolation;
+    }
+
     uint64 key[VmSlotLimit] = {};
     Load(call, 1, key);
     call.s[0] = VmContainerFind(call.Buffer(0), key) != VmNotFound ? 1 : 0;
@@ -309,6 +407,10 @@ VmFaultKind MapContainsKey(C& call) noexcept {
 }
 
 VmFaultKind KeyedRemove(C& call) noexcept {
+    if (!Fits(call)) {
+        return VmFaultKind::ContractViolation;
+    }
+
     uint64 key[VmSlotLimit] = {};
     Load(call, 1, key);
     const uint32 at = VmContainerFind(call.Buffer(0), key);
@@ -329,6 +431,10 @@ VmFaultKind KeyedRemove(C& call) noexcept {
 
 // Map의 key(keys면) 또는 값을 새 Array로 돌려준다(삽입 순).
 VmFaultKind MapColumn(C& call, bool keys) noexcept {
+    if (!Fits(call)) {
+        return VmFaultKind::ContractViolation;
+    }
+
     VmBuffer* map = call.Buffer(0);
     const VmTypeNode& receiver = call.Operand(0);
     const VmTypeNode& column = call.Node(receiver.child[keys ? 0 : 1]);
@@ -362,6 +468,10 @@ VmFaultKind MapValues(C& call) noexcept {
 }
 
 VmFaultKind SetAdd(C& call) noexcept {
+    if (!Fits(call)) {
+        return VmFaultKind::ContractViolation;
+    }
+
     uint64 value[VmSlotLimit] = {};
     const uint32 slots = Load(call, 1, value);
     VmBuffer* current = call.Buffer(0);
@@ -379,7 +489,7 @@ VmFaultKind SetAdd(C& call) noexcept {
     VmBuffer* buffer = call.Buffer(0);
     Store(Slots(buffer) + uint64(buffer->count) * slots, value, slots, call.Operand(1).bank);
     ++buffer->count;
-    VmContainerReindex(buffer);
+    VmContainerIndexInsert(buffer, buffer->count - 1); // 새 원소 하나만(리뷰 A6)
     call.s[0] = 1;
     return VmFaultKind::None;
 }
@@ -496,19 +606,32 @@ VmFaultKind RandomChance(C& call) noexcept {
 }
 
 constexpr VmLibraryEntry VmCollectionTable[] = {
-    {"Array.Count", ArrayCount},       {"Array.Add", ArrayAdd},
-    {"Array.Insert", ArrayInsert},     {"Array.RemoveAt", ArrayRemoveAt},
-    {"Array.Clear", ClearAll},         {"Array.Reverse", ArrayReverse},
-    {"Array.Contains", ArrayContains}, {"Array.IndexOf", ArrayIndexOf},
-    {"Array.Remove", ArrayRemove},     {"Array.Sort", ArraySort},
-    {"Map.Count", ArrayCount},         {"Map.ContainsKey", MapContainsKey},
-    {"Map.Remove", KeyedRemove},       {"Map.Keys", MapKeys},
-    {"Map.Values", MapValues},         {"Map.Clear", ClearAll},
-    {"Set.Count", ArrayCount},         {"Set.Add", SetAdd},
-    {"Set.Remove", KeyedRemove},       {"Set.Contains", MapContainsKey},
-    {"Set.Clear", ClearAll},           {"Result.Value", ResultValue},
-    {"Result.Error", ResultError},     {"Random.Int", RandomInt},
-    {"Random.Float", RandomFloat},     {"Random.Chance", RandomChance},
+    {"Array.Count", "A<T>>i64", ArrayCount},
+    {"Array.Add", "A<T>,T>void", ArrayAdd},
+    {"Array.Insert", "A<T>,i64,T>void", ArrayInsert},
+    {"Array.RemoveAt", "A<T>,i64>void", ArrayRemoveAt},
+    {"Array.Clear", "A<T>>void", ClearAll},
+    {"Array.Reverse", "A<T>>void", ArrayReverse},
+    {"Array.Contains", "A<T>,T>b", ArrayContains},
+    {"Array.IndexOf", "A<T>,T>?<i64>", ArrayIndexOf},
+    {"Array.Remove", "A<T>,T>b", ArrayRemove},
+    {"Array.Sort", "A<O>>void", ArraySort},
+    {"Map.Count", "M<T,U>>i64", ArrayCount},
+    {"Map.ContainsKey", "M<T,U>,T>b", MapContainsKey},
+    {"Map.Remove", "M<T,U>,T>b", KeyedRemove},
+    {"Map.Keys", "M<T,U>>A<T>", MapKeys},
+    {"Map.Values", "M<T,U>>A<U>", MapValues},
+    {"Map.Clear", "M<T,U>>void", ClearAll},
+    {"Set.Count", "S<T>>i64", ArrayCount},
+    {"Set.Add", "S<T>,T>b", SetAdd},
+    {"Set.Remove", "S<T>,T>b", KeyedRemove},
+    {"Set.Contains", "S<T>,T>b", MapContainsKey},
+    {"Set.Clear", "S<T>>void", ClearAll},
+    {"Result.Value", "R<T>>?<T>", ResultValue},
+    {"Result.Error", "R<T>>?<e>", ResultError},
+    {"Random.Int", "i64,i64>i64", RandomInt},
+    {"Random.Float", "F,F>F", RandomFloat},
+    {"Random.Chance", "F>b", RandomChance},
 };
 
 } // namespace

@@ -45,6 +45,8 @@ private:
                   uint32 arguments = NoBytecodeIndex) noexcept;
     // 언어 함수 호출의 피연산자 서술자(SparksVm 6a절)를 out에 붙인다.
     void AppendDescriptor(StringBuilderBase& out, uint32 type) noexcept;
+    // native 함수·객체 필드 참조의 서술자 문자열 번호다(SparksVm 6.1절).
+    uint32 HostDescriptor(BytecodeRefKind kind, uint32 symbol) noexcept;
     // 다른 모듈의 Sparks 선언이면 name에 `<import 경로>:`를 붙이고 true.
     bool Qualify(StringBuilderBase& name, uint32 symbol) noexcept;
     // types는 호출의 타입 인자 목록(IrInstruction::types), 없으면 NoIrRegister.

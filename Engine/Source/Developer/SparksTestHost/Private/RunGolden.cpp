@@ -8,6 +8,7 @@
 #include <SparksVm/Vm.h>
 
 #include "ConformanceInternal.h"
+#include "FakeHost.h"
 
 // `.run` 실행 golden이다(Docs/Design/SparksVm.ko.md 7절, LC5a). 줄마다 최상위 함수 호출 하나
 // (`<함수>(<인자>, …) -> <결과> (<명령 수> steps)`)이며, 실행기는 `->` 앞만 읽어 `.sparkc` 왕복을
@@ -24,6 +25,7 @@ enum class RunShape : uint8 {
     String,    // Buf bank — `"..."`(escape `\"` `\\` `\n` `\t` `\xHH`)
     Container, // Buf bank — 반환만: Array `[a, b]`, Set `{a, b}`, Map `{k: v}`(LC5b2)
     Struct,    // Buf bank — 반환만: `Pair(A: 1, B: "x")`(LC5b3)
+    Object, // Ref bank — 가짜 host 객체 `#n`(죽은 handle은 `dead#n`), `T?`의 없음은 `none`(LC5d1)
     Bool,
     Signed,
     Unsigned,
@@ -61,6 +63,8 @@ constexpr uint32 RunBitsPerWord = 64;
 constexpr StringView RunArrow = " -> ";
 // 호출 뒤 `Log.*` 기록 줄의 머리다(`  log <수준> "<메시지>"`).
 constexpr StringView RunLogPrefix = "  log ";
+// 호출 뒤 가짜 host의 native 호출 기록 줄의 머리다(`  host <이름>(<인자>) -> <결과>`).
+constexpr StringView RunHostPrefix = "  host ";
 
 // 타입(옵션 표지를 볼지 정한다)의 모양이다. 정수는 bits·signed, 수학 타입은 slots를 채운다.
 struct RunType {
@@ -72,8 +76,9 @@ struct RunType {
 
 class RunValues final {
 public:
-    RunValues(const Compilation& compilation, StringBuilderBase& problem) noexcept
-        : c_(compilation), problem_(problem) {
+    RunValues(const Compilation& compilation, StringBuilderBase& problem,
+              FakeHost* host = nullptr) noexcept
+        : c_(compilation), problem_(problem), host_(host) {
     }
 
     // type의 모양이다. honorOptional이 false면 옵션 표지를 무시한다(Optional의 안쪽).
@@ -87,7 +92,9 @@ public:
 
         const TypeEntry& entry = c_.Types()[type];
         if (honorOptional && entry.optional) {
-            result.shape = RunShape::Optional;
+            // 객체의 `T?`는 같은 Ref slot이다(0이 없음).
+            result.shape = TypeOf(type, false).shape == RunShape::Object ? RunShape::Object
+                                                                         : RunShape::Optional;
             return result;
         }
 
@@ -106,6 +113,15 @@ public:
 
         if (symbol.kind == SymbolKind::Struct) {
             result.shape = RunShape::Struct;
+            return result;
+        }
+
+        // 객체: Sparks class·interface, 엔진 object·asset·interface(Ref bank).
+        if (symbol.kind == SymbolKind::Class || symbol.kind == SymbolKind::Interface ||
+            (symbol.kind == SymbolKind::EngineType && c_.SchemaIsValid(symbol.index) &&
+             c_.Schema(symbol.index).Types()[symbol.item].kind != SchemaTypeKind::Enum &&
+             c_.Schema(symbol.index).Types()[symbol.item].kind != SchemaTypeKind::Struct)) {
+            result.shape = RunShape::Object;
             return result;
         }
 
@@ -172,6 +188,7 @@ public:
         case RunShape::String:
         case RunShape::Container:
         case RunShape::Struct:
+        case RunShape::Object:
             out = 1;
             return true;
         case RunShape::Bool:
@@ -583,6 +600,8 @@ public:
             } else {
                 if (made.Error() == ErrorCode::InvalidArgument) {
                     problem_.AppendFormat("cannot make '{}' (repeated key?)", text);
+                } else if (made.Error() == ErrorCode::CapacityExceeded) {
+                    problem_.AppendFormat("cannot make '{}' (too large)", text); // 리뷰 B3
                 } else {
                     OutOfMemory();
                 }
@@ -620,6 +639,14 @@ public:
         case RunShape::Container:
         case RunShape::Struct:
             out.Append("?"); // Buf 값은 FormatValue
+            return;
+        case RunShape::Object:
+            if (host_ != nullptr) {
+                host_->FormatHandle(out, slots[0]);
+            } else {
+                out.Append(slots[0] == 0 ? "none" : "#?");
+            }
+
             return;
         case RunShape::Bool:
             out.Append(slots[0] == 0 ? "false" : slots[0] == 1 ? "true" : "bool?");
@@ -836,6 +863,27 @@ public:
 
             break;
         }
+        case RunShape::Object: {
+            if (text == "none") {
+                return push(0);
+            }
+
+            auto number = text.StartsWith("#")
+                              ? TryParseUInt32(StringView(text.Data() + 1, text.ByteCount() - 1))
+                              : Result<uint32>::Failure(ErrorCode::InvalidArgument);
+            if (!number || number.Value() == 0 || host_ == nullptr) {
+                break;
+            }
+
+            const uint32 symbol = c_.Types()[type.type].symbol;
+            const uint64 handle = host_->ObjectArgument(number.Value(), c_.Symbols()[symbol].name);
+            if (handle == 0) {
+                OutOfMemory();
+                return false;
+            }
+
+            return push(handle);
+        }
         case RunShape::Void:
         case RunShape::String:
         case RunShape::Container:
@@ -941,6 +989,7 @@ private:
 
     const Compilation& c_;
     StringBuilderBase& problem_;
+    FakeHost* host_ = nullptr;
     bool outOfMemory_ = false;
 };
 
@@ -980,8 +1029,29 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
         return fail("the .sparkc of the module was rejected");
     }
 
+    // 가짜 host로 링크한다(SparksVm 6.1절 — 못 묶으면 사례 실패).
+    FakeHost host(allocator, compilation);
+    VmLinkedModule linked(allocator);
+    {
+        StringBuilder<MessageInlineBytes> reason(allocator);
+        if (auto link = LinkModule(loaded, &host, linked, reason); !link) {
+            if (link.Error() != ErrorCode::InvalidArgument) {
+                return link;
+            }
+
+            StringBuilder<MessageInlineBytes> message(allocator);
+            message.AppendFormat(".run: the module was not linked: {}", reason.View());
+            if (message.HasFailed()) {
+                return Result<void>::Failure(message.Status().Error());
+            }
+
+            return fail(message.View());
+        }
+    }
+
+    Array<uint64> refArguments(allocator);
     StringBuilder<MessageInlineBytes> problem(allocator);
-    RunValues values(compilation, problem);
+    RunValues values(compilation, problem, &host);
     StringBuilder<MessageInlineBytes> actual(allocator);
     Array<uint64> arguments(allocator);
     VmExecution execution(allocator);
@@ -1007,7 +1077,7 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
         }
 
         // 로그 줄은 앞 호출의 기록이다 — 실행기가 다시 쓴다.
-        if (line.StartsWith(RunLogPrefix)) {
+        if (line.StartsWith(RunLogPrefix) || line.StartsWith(RunHostPrefix)) {
             continue;
         }
 
@@ -1050,20 +1120,35 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
             }
         }
 
+        // `Class.Method(#this, …)`는 클래스 메서드다: 가짜 host 객체 #this가 수신자다(6.3절 —
+        // instance 실행 모델은 LC6, 여기서는 필드를 host가 흉내 낸다).
+        StringView owner;
+        StringView member = name;
+        for (usize index = 0; index < name.ByteCount(); ++index) {
+            if (name.Data()[index] == '.') {
+                owner = StringView(name.Data(), index);
+                member = StringView(name.Data() + index + 1, name.ByteCount() - index - 1);
+            }
+        }
+
         const Symbol* symbol = nullptr;
         for (const Symbol& candidate : compilation.Symbols()) {
-            if (candidate.kind == SymbolKind::Function && candidate.module == mainModule &&
-                candidate.name == name) {
+            const bool method = !owner.IsEmpty() && candidate.kind == SymbolKind::Method &&
+                                candidate.owner != NoSymbol &&
+                                compilation.Symbols()[candidate.owner].name == owner;
+            if ((method || (owner.IsEmpty() && candidate.kind == SymbolKind::Function)) &&
+                candidate.module == mainModule && candidate.name == member) {
                 symbol = &candidate;
             }
         }
 
         if (problem.ByteCount() == 0 && (function == NoBytecodeIndex || symbol == nullptr ||
                                          symbol->signature == NoSignature)) {
-            problem.AppendFormat("no top-level function '{}'", name);
+            problem.AppendFormat("no top-level function or method '{}'", name);
         }
 
         arguments.Clear();
+        refArguments.Clear();
         for (VmBuffer* buffer : buffers) {
             execution.Release(buffer);
         }
@@ -1079,10 +1164,29 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
             }
 
             uint32 parameter = 0;
+            bool receiver = !owner.IsEmpty();
             RunValues::ForEachItem(
                 StringView(call.Data() + open + 1, call.ByteCount() - open - 2),
                 [&](StringView item) noexcept {
                     if (problem.ByteCount() != 0) {
+                        return;
+                    }
+
+                    if (receiver) {
+                        // 수신자(Ref 매개변수 0번 — this)는 그 클래스의 가짜 host 객체다.
+                        receiver = false;
+                        const StringView text = RunValues::Trim(item);
+                        auto number =
+                            text.StartsWith("#")
+                                ? TryParseUInt32(StringView(text.Data() + 1, text.ByteCount() - 1))
+                                : Result<uint32>::Failure(ErrorCode::InvalidArgument);
+                        const uint64 handle = number && number.Value() != 0
+                                                  ? host.ObjectArgument(number.Value(), owner)
+                                                  : 0;
+                        if (handle == 0 || !refArguments.TryPushBack(handle)) {
+                            problem.AppendFormat("cannot read '{}' as the receiver", text);
+                        }
+
                         return;
                     }
 
@@ -1104,7 +1208,8 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
                     if (values.IsBuffer(type)) {
                         values.ParseBuffer(item, type, execution, buffers, allocator);
                     } else {
-                        values.Parse(item, type, arguments);
+                        values.Parse(item, type,
+                                     type.shape == RunShape::Object ? refArguments : arguments);
                     }
                 });
             if (problem.ByteCount() == 0 && parameter != signature.parameterCount) {
@@ -1130,7 +1235,8 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
             return fail(reason.View());
         }
 
-        auto called = execution.Call(loaded, function, arguments.View(), Span<const uint64>(),
+        host.ClearTrace();
+        auto called = execution.Call(linked, function, arguments.View(), refArguments.View(),
                                      Span<VmBuffer* const>(buffers.Data(), buffers.Size()));
         if (!called) {
             if (called.Error() != ErrorCode::InvalidArgument) {
@@ -1173,14 +1279,27 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
             RunValues::AppendQuoted(actual, execution.LogMessage(index));
             actual.Append("\n");
         }
-        // 반환 값과 인자 버퍼를 놓으면 ledger는 0이다(SparksVm 2.2절).
+
+        // 가짜 host의 native 호출 기록(SparksVm 6.3절).
+        for (const String& record : host.Trace()) {
+            actual.Append(RunHostPrefix).Append(record.View()).Append("\n");
+        }
+
+        if (host.RanOutOfMemory()) {
+            return Result<void>::Failure(ErrorCode::OutOfMemory);
+        }
+
+        // 반환 값과 인자 버퍼를 놓으면 ledger는 0이다(SparksVm 2.2절). host가 필드에 보관한 버퍼는
+        // 남는다(V12) — 그때는 보관 수 이상인지만 보고, 사례 끝에 host가 놓은 뒤 0을 본다.
         execution.ReleaseReturned();
         for (VmBuffer* buffer : buffers) {
             execution.Release(buffer);
         }
 
         buffers.Clear();
-        if (execution.LiveBuffers() != 0 || execution.LiveBytes() != 0) {
+        const uint64 held = host.HeldBuffers();
+        if (held == 0 ? execution.LiveBuffers() != 0 || execution.LiveBytes() != 0
+                      : execution.LiveBuffers() < held) {
             StringBuilder<MessageInlineBytes> reason(allocator);
             reason.AppendFormat(
                 ".run line {}: {} buffers ({} bytes) are still alive after the call", lineNumber,
@@ -1191,6 +1310,11 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
 
             return fail(reason.View());
         }
+    }
+
+    host.ReleaseAll(execution);
+    if (execution.LiveBuffers() != 0 || execution.LiveBytes() != 0) {
+        return fail(".run: buffers are still alive after the fake host released its fields");
     }
 
     if (actual.HasFailed()) {

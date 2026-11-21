@@ -685,7 +685,7 @@ fn Size(items: Set<int>): int {
     };
     const Bad bad[] = {
         {"Add\n", "Run/Case.spark: .run line 1: expected '<function>(<arguments>)'"},
-        {"\nNope(1)\n", "Run/Case.spark: .run line 2: no top-level function 'Nope'"},
+        {"\nNope(1)\n", "Run/Case.spark: .run line 2: no top-level function or method 'Nope'"},
         {"Add(1)\n", "Run/Case.spark: .run line 1: too few arguments"},
         {"Add(1, 2, 3)\n", "Run/Case.spark: .run line 1: too many arguments"},
         {"Add(x, 1)\n",

@@ -49,8 +49,8 @@ const char* VmFaultKindName(VmFaultKind kind) noexcept {
 
 VmExecution::VmExecution(Allocator& allocator) noexcept
     : allocator_(&allocator), scalars_(allocator), refs_(allocator), buffers_(allocator),
-      frames_(allocator), returned_(allocator), returnedBuffers_(allocator), bindings_(allocator),
-      logs_(allocator), logText_(allocator) {
+      frames_(allocator), returned_(allocator), returnedBuffers_(allocator), logs_(allocator),
+      logText_(allocator) {
 }
 
 VmExecution::~VmExecution() noexcept {
@@ -58,10 +58,11 @@ VmExecution::~VmExecution() noexcept {
     ReleaseReturned();
 }
 
-Result<VmCallResult> VmExecution::Call(const BytecodeModule& module, uint32 function,
+Result<VmCallResult> VmExecution::Call(const VmLinkedModule& linked, uint32 function,
                                        Span<const uint64> scalars, Span<const uint64> refs,
                                        Span<VmBuffer* const> buffers,
                                        const VmLimits& limits) noexcept {
+    const BytecodeModule& module = linked.Module();
     if (function >= module.functions.Size()) {
         return Result<VmCallResult>::Failure(ErrorCode::InvalidArgument);
     }
@@ -87,6 +88,7 @@ Result<VmCallResult> VmExecution::Call(const BytecodeModule& module, uint32 func
     droppedLogs_ = 0;
     random_.Seed(limits.randomSeed);
     module_ = &module;
+    link_ = &linked;
     scalars_.Clear();
     refs_.Clear();
     buffers_.Clear();

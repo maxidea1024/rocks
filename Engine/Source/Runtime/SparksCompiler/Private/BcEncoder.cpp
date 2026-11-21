@@ -307,7 +307,48 @@ uint32 BytecodeEncoder::SymbolRef(BytecodeRefKind kind, uint32 symbol, uint32 ty
         detail = found == nullptr ? NoBytecodeIndex : *found;
     }
 
+    // native 함수·객체 필드는 host가 링크 때 대조할 서술자를 싣는다(SparksVm 6.1절).
+    if (arguments == NoBytecodeIndex &&
+        (kind == BytecodeRefKind::NativeFunction || kind == BytecodeRefKind::Field)) {
+        arguments = HostDescriptor(kind, symbol);
+    }
+
     return AddRef(kind, AddString(name.View()), detail, arguments);
+}
+
+uint32 BytecodeEncoder::HostDescriptor(BytecodeRefKind kind, uint32 symbol) noexcept {
+    // 필드는 `>타입`, native 함수는 선언 시그니처(수신자 `x` 먼저 — static이면 없음)다. 타입 인자는
+    // 객체 제약이라 `x`다(AppendDescriptor).
+    StringBuilder<128> descriptor(checker_.allocator_);
+    const Symbol& entry = c_.symbols_[symbol];
+    if (kind == BytecodeRefKind::Field) {
+        descriptor.Append(">");
+        // Sparks 필드는 초기값 추론이 있을 수 있고, 엔진 필드는 schema 타입이 심볼에 있다.
+        AppendDescriptor(descriptor,
+                         entry.kind == SymbolKind::Field ? checker_.FieldType(symbol) : entry.type);
+    } else if (entry.signature != NoSignature) {
+        const Signature& signature = c_.signatures_[entry.signature];
+        bool first = (entry.flags & SymbolFlags::Static) != 0;
+        if (!first) {
+            descriptor.Append("x");
+        }
+
+        for (uint32 index = 0; index < signature.parameterCount; ++index) {
+            descriptor.Append(first ? "" : ",");
+            first = false;
+            AppendDescriptor(descriptor, c_.signatureParameters_[signature.firstParameter + index]);
+        }
+
+        descriptor.Append(">");
+        AppendDescriptor(descriptor, signature.returnType);
+    }
+
+    if (descriptor.HasFailed()) {
+        Fail(descriptor.Status().Error());
+        return NoBytecodeIndex;
+    }
+
+    return AddString(descriptor.View());
 }
 
 void BytecodeEncoder::AppendDescriptor(StringBuilderBase& out, uint32 type) noexcept {
@@ -383,6 +424,26 @@ void BytecodeEncoder::AppendDescriptor(StringBuilderBase& out, uint32 type) noex
     if (entry != nullptr && entry->kind == SymbolKind::Struct) {
         out.Append("st");
         return;
+    }
+
+    if (entry != nullptr && entry->kind == SymbolKind::EngineTypeParameter) {
+        out.Append("x"); // schema 타입 매개변수의 제약은 객체 타입이다
+        return;
+    }
+
+    if (entry != nullptr && entry->kind == SymbolKind::EngineType &&
+        entry->index < c_.schemas_.Size()) {
+        const SchemaTypeKind schemaKind =
+            c_.schemas_[entry->index].schema.Types()[entry->item].kind;
+        if (schemaKind == SchemaTypeKind::Enum) {
+            out.Append("e");
+            return;
+        }
+
+        if (schemaKind == SchemaTypeKind::Struct) {
+            out.Append("st");
+            return;
+        }
     }
 
     const IrLayout layout = IrBuilder::Layout(checker_, type);
@@ -1729,9 +1790,17 @@ void BytecodeEncoder::EncodeCall(const IrInstruction& i) noexcept {
     }
 
     ToWindow(Span<const uint32>(f.operands.Data() + i.b, i.c), span);
-    Word(EncodeABx(op, 0, ref), span);
     const bool mutating = i.sub == IrCallMutating && i.c > 0;
     const uint32 receiver = mutating ? f.operands[i.b] : NoIrRegister;
+    // 값을 바꾸는 메서드의 Buf 수신자는 창으로 옮긴다(원래 레지스터를 비운다): 참조가 하나뿐이어야
+    // COW가 복제하지 않는다(SparksBytecode 4.3절 — 비우지 않으면 호출마다 전체 복제).
+    const bool movesReceiver =
+        mutating && BankOf(receiver) == static_cast<uint32>(BytecodeBank::Buf);
+    if (movesReceiver) {
+        Word(EncodeABC(Opcode::LoadNullB, Phys(receiver), 0, 0), span);
+    }
+
+    Word(EncodeABx(op, 0, ref), span);
     uint32 offset = 0;
     if (mutating && i.a != NoIrRegister && BankOf(i.a) == BankOf(receiver)) {
         offset = f.registers[TupleFirst(receiver)].slots;
@@ -1740,6 +1809,11 @@ void BytecodeEncoder::EncodeCall(const IrInstruction& i) noexcept {
     FromWindow(i.a, offset, span);
     if (mutating) {
         FromWindow(receiver, 0, span);
+    }
+
+    if (movesReceiver) {
+        Word(EncodeABC(Opcode::LoadNullB, registers_[static_cast<uint32>(BytecodeBank::Buf)], 0, 0),
+             span);
     }
 }
 

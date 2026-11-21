@@ -180,3 +180,70 @@ fn BufferParts(text: string): string {
     let failed = result.Error == Error.NotFound || result.Error == Error.InvalidArgument;
     return "${value} ${failed}";
 }
+
+fn SortedBytes(items: Array<int8>): Array<int8> {
+    var copy = items;
+    copy.Sort();
+    return copy;
+}
+
+fn SortedWide(items: Array<uint64>): Array<uint64> {
+    var copy = items;
+    copy.Sort();
+    return copy;
+}
+
+fn SortedSingles(items: Array<float32>): Array<float32> {
+    var copy = items;
+    copy.Sort();
+    return copy;
+}
+
+fn SharedMapClear(scores: Map<string, int>): string {
+    var copy = scores;
+    copy.Clear();
+    return "${copy.Count} ${scores.Count}";
+}
+
+fn SharedSetAdd(values: Set<int>): string {
+    var copy = values;
+    let added = copy.Add(99);
+    return "${added} ${copy.Count} ${values.Count}";
+}
+
+fn Many(count: int): int {
+    var items: Array<int> = [];
+    for (i in 0..<count) {
+        items.Add(i);
+    }
+
+    var unique: Set<int> = [];
+    for (item in items) {
+        let added = unique.Add(item % 7);
+        _ = added;
+    }
+
+    return items.Count * 100 + unique.Count;
+}
+
+fn RollWide(): int {
+    return Random.Int(-9223372036854775807 - 1, 9223372036854775807);
+}
+
+fn RollSame(x: float): float {
+    return Random.Float(x, x);
+}
+
+fn RollHuge(): float {
+    return Random.Float(-1.7e308, 1.7e308);
+}
+
+fn Coin(): bool {
+    return Random.Chance(0.5);
+}
+
+fn Wrapped(text: string): string {
+    let result = Named(text);
+    let value = result.Value ?? "none";
+    return value;
+}

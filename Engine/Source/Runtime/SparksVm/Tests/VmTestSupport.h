@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Core/Memory/SystemAllocator.h>
+#include <Core/Text/StringBuilder.h>
 #include <Core/Text/StringView.h>
 #include <Platform/Memory.h>
 #include <SparksVm/BytecodeFile.h>
@@ -25,7 +26,8 @@ struct Shape {
 // 손 조립기다. 명령 단어마다 원문 위치(줄 = 모듈 단어 번호 + 1, 열 1)를 둔다.
 class Assembler final {
 public:
-    explicit Assembler(Allocator& allocator) noexcept : module(allocator) {
+    explicit Assembler(Allocator& allocator) noexcept
+        : module(allocator), linked(allocator), allocator_(&allocator) {
         module.compiler = String("test");
         module.path = String("Main");
     }
@@ -135,7 +137,30 @@ public:
         return VerifyBytecode(module).error == BytecodeLoadError::None;
     }
 
+    // 모듈을 (다시) 링크한 결과다(host 없는 모듈 — host 참조가 있으면 링크가 실패해 CHECK가
+    // 잡는다). 모듈 모양(단어·참조 수)이나 host가 바뀌었을 때만 다시 링크한다(할당 실패 시험이 링크
+    // 배열을 반복 할당으로 세지 않게 — 시험 앞에서 한 번 부른다).
+    const VmLinkedModule& Linked(VmHost* host = nullptr) noexcept {
+        if (!linkedOnce_ || linkedWords_ != module.words.Size() ||
+            linkedRefs_ != module.refs.Size() || linkedHost_ != host) {
+            StringBuilder<256> reason(*allocator_);
+            CHECK(LinkModule(module, host, linked, reason));
+            linkedOnce_ = true;
+            linkedWords_ = module.words.Size();
+            linkedRefs_ = module.refs.Size();
+            linkedHost_ = host;
+        }
+
+        return linked;
+    }
+
     BytecodeModule module;
+    VmLinkedModule linked;
+    Allocator* allocator_;
+    bool linkedOnce_ = false;
+    usize linkedWords_ = 0;
+    usize linkedRefs_ = 0;
+    VmHost* linkedHost_ = nullptr;
 };
 
 // Scalar 둘을 받아 op 한 번의 결과 하나를 돌려주는 함수(s2 = s0 op s1)다.
@@ -157,9 +182,14 @@ inline void Binary(Assembler& assembler, Opcode op) noexcept {
 
 // 조립한 모듈이 verifier를 통과하는지 본다(실패는 시험 실패 — 통과하지 않은 모듈은 실행하지
 // 않는다).
-inline bool Verify(const Assembler& assembler) noexcept {
+// verifier를 통과하면 host 없이 미리 링크해 둔다(할당 실패 시험의 반복에 링크 할당이 섞이지 않게).
+inline bool Verify(Assembler& assembler) noexcept {
     const bool verified = assembler.Verified();
     CHECK(verified);
+    if (verified) {
+        static_cast<void>(assembler.Linked());
+    }
+
     return verified;
 }
 
@@ -179,7 +209,7 @@ struct Outcome {
     uint64 steps = 0;
 };
 
-inline Outcome Run(VmExecution& execution, const BytecodeModule& module, uint32 function,
+inline Outcome Run(VmExecution& execution, const VmLinkedModule& module, uint32 function,
                    Span<const uint64> scalars, Span<const uint64> refs = Span<const uint64>(),
                    const VmLimits& limits = VmLimits()) noexcept {
     Outcome outcome;
@@ -211,7 +241,7 @@ inline Outcome RunBinary(Opcode op, uint64 left, uint64 right) noexcept {
 
     VmExecution execution(allocator);
     const uint64 arguments[] = {left, right};
-    return Run(execution, assembler.module, 0, Span<const uint64>(arguments, 2));
+    return Run(execution, assembler.Linked(), 0, Span<const uint64>(arguments, 2));
 }
 
 inline bool Returns(const Outcome& outcome, uint64 value) noexcept {
