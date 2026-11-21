@@ -448,6 +448,8 @@ void ForEachAccess(const IrFunction& f, const IrInstruction& i, Use&& use, Def&&
         break;
     case IrOp::Return:
     case IrOp::ReturnError:
+    case IrOp::EndExecution:
+    case IrOp::Fault:
         useTuple(i.b);
         break;
     case IrOp::GetField:
@@ -506,7 +508,6 @@ void ForEachAccess(const IrFunction& f, const IrInstruction& i, Use&& use, Def&&
         useOne(i.a);
         break;
     case IrOp::Jump:
-    case IrOp::Fault:
         break;
     }
 }
@@ -1212,7 +1213,8 @@ void BytecodeEncoder::Instruction(const IrInstruction& i, uint32 layoutIndex) no
 
         const bool object = BankOf(i.b) == 1;
         const Opcode op = Offset(object ? Opcode::GetFS : Opcode::GetSFS, BankOf(i.a));
-        Word(EncodeABC(op, Phys(i.a), Phys(i.b), 0), span);
+        // C는 값의 slot 수다(verifier가 frame 범위를 본다 — 형식 버전 2의 TYPE 구역 전까지).
+        Word(EncodeABC(op, Phys(i.a), Phys(i.b), f.registers[TupleFirst(i.a)].slots), span);
         Word(EncodeAx(Opcode::Extra,
                       SymbolRef(object ? BytecodeRefKind::Field : BytecodeRefKind::StructField,
                                 i.extra)),
@@ -1222,7 +1224,7 @@ void BytecodeEncoder::Instruction(const IrInstruction& i, uint32 layoutIndex) no
     case IrOp::SetField: {
         const bool object = BankOf(i.a) == 1;
         const Opcode op = Offset(object ? Opcode::SetFS : Opcode::SetSFS, BankOf(i.b));
-        Word(EncodeABC(op, Phys(i.a), Phys(i.b), 0), span);
+        Word(EncodeABC(op, Phys(i.a), Phys(i.b), f.registers[TupleFirst(i.b)].slots), span);
         Word(EncodeAx(Opcode::Extra,
                       SymbolRef(object ? BytecodeRefKind::Field : BytecodeRefKind::StructField,
                                 i.extra)),
@@ -1321,6 +1323,16 @@ void BytecodeEncoder::Instruction(const IrInstruction& i, uint32 layoutIndex) no
     }
     case IrOp::Release:
         Word(EncodeABC(Opcode::Release, Phys(i.a), 0, 0), span);
+        return;
+    case IrOp::EndExecution:
+        // 현재 실행을 끝내고 Result의 오류를 기록한다(Scalar Result는 묶음, Buf Result는 handle).
+        if (BankOf(i.b) == 0) {
+            Word(EncodeABC(Opcode::EndExecS, Phys(i.b), f.registers[TupleFirst(i.b)].slots, 0),
+                 span);
+        } else {
+            Word(EncodeABC(Opcode::EndExecB, Phys(i.b), 0, 0), span);
+        }
+
         return;
     case IrOp::Fault:
         Word(EncodeAx(Opcode::Fault, i.extra), span);
@@ -1449,8 +1461,9 @@ void BytecodeEncoder::EncodeConvert(const IrInstruction& i) noexcept {
 
         const uint32 enumType =
             f.registers[i.b].scalar == IrScalar::Enum ? TypeRef(checker_.NonOptional(type)) : 0;
-        Word(EncodeABC(Opcode::ToStr, Phys(i.a), Phys(i.b), 0), span);
-        Word(EncodeAx(Opcode::Extra, (display << 16) | (enumType & MaxBx)), span);
+        Word(EncodeABC(Opcode::ToStr, Phys(i.a), Phys(i.b), f.registers[TupleFirst(i.b)].slots),
+             span);
+        Word(EncodeAx(Opcode::Extra, (display << 16) | (Bx(enumType) & MaxBx)), span);
         return;
     }
 
@@ -1506,7 +1519,7 @@ void BytecodeEncoder::EncodeNew(const IrInstruction& i) noexcept {
             }
 
             const Opcode op = Offset(component ? Opcode::SetFS : Opcode::SetSFS, BankOf(value));
-            Word(EncodeABC(op, Phys(i.a), Phys(value), 0), span);
+            Word(EncodeABC(op, Phys(i.a), Phys(value), f.registers[TupleFirst(value)].slots), span);
             Word(EncodeAx(Opcode::Extra, SymbolRef(component ? BytecodeRefKind::Field
                                                              : BytecodeRefKind::StructField,
                                                    field)),

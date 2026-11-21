@@ -17,7 +17,45 @@ namespace sparks_bytecode_file_tests_file {
 
 namespace {
 
+constexpr StringView EngineSchema =
+    R"({ "format": 1, "package": "Rocks", "module": "Engine", "types": [
+{ "name": "Actor", "id": "5a7e0000000000000000000000000001", "kind": "object", "scriptExtensible": true },
+{ "name": "Component", "id": "5a7e0000000000000000000000000002", "kind": "object", "fields": [ { "name": "Owner", "id": "5a7e0000000000000000000000000201", "type": "Actor" } ] },
+{ "name": "ScriptableComponent", "id": "5a7e0000000000000000000000000003", "kind": "object", "base": "Component", "scriptExtensible": true }
+] })";
+
+// 명령 종류를 고루 담은 프로그램이다(변조 시험이 opcode마다 첫 명령을 바꾼다).
 constexpr StringView Program = R"(enum Side { Left, Right }
+
+struct Box {
+    var Spot: vec3 = vec3(1.0, 2.0, 3.0);
+}
+
+fn Fill(names: Array<string>, table: Map<string, int>): int {
+    var copy = names;
+    copy.Add("x");
+    var counts = table;
+    counts["k"] = 1;
+    let box = Box();
+    let y = box.Spot.Y;
+    _ = y;
+    let f = float(counts["k"] ?? 0);
+    _ = f;
+    _ = copy;
+    return counts["k"] ?? 0;
+}
+
+class Door : ScriptableComponent {
+    async fn Fetch(): Result<int> {
+        await NextTick();
+        return 1;
+    }
+
+    async fn Use(): Result<int> {
+        let n = try await Fetch();
+        return n;
+    }
+}
 
 fn Twice(x: int): int {
     return x * 2;
@@ -47,7 +85,8 @@ bool CompileFile(Allocator& allocator, Array<uint8>& out) noexcept {
     Compilation compilation(allocator, sources);
     auto manifest = sources.TryAdd("Game/SparksPackage.json5",
                                    R"({ name: "Game", sparks: 1, profile: "full" })", diagnostics);
-    if (!manifest) {
+    auto schema = sources.TryAdd("Schema/Engine.sparkbind.json", EngineSchema, diagnostics);
+    if (!manifest || !schema || !compilation.AddBindingSchema(schema.Value())) {
         return false;
     }
 
@@ -154,7 +193,37 @@ TEST(SparksBytecodeFile_VerifierRejections) {
     SystemAllocator allocator;
     Array<uint8> file(allocator);
     REQUIRE(CompileFile(allocator, file));
-    // 읽은 모듈을 바꾸고 verifier의 사유를 본다.
+    // 읽은 모듈을 바꾸고 verifier의 사유를 본다(바꿀 명령의 주소는 원본에서 먼저 찾는다).
+    BytecodeModule original(allocator);
+    BytecodeRejection originalRejection;
+    REQUIRE(ReadBytecodeFile(file.View(), original, originalRejection));
+    auto find = [&](Opcode op) noexcept {
+        for (usize index = 0; index < original.words.Size(); ++index) {
+            if (DecodeOpcode(original.words[index]) == op) {
+                return index;
+            }
+        }
+
+        return original.words.Size();
+    };
+    auto functionOf = [&](usize word) noexcept {
+        for (uint32 index = 0; index < original.functions.Size(); ++index) {
+            const BytecodeFunction& function = original.functions[index];
+            if (word >= function.firstWord && word < function.firstWord + function.wordCount) {
+                return index;
+            }
+        }
+
+        return uint32(0);
+    };
+    const Opcode needed[] = {Opcode::LoadK,  Opcode::LoadStr, Opcode::Jmp,  Opcode::ToStr,
+                             Opcode::Switch, Opcode::GetE,    Opcode::SetE, Opcode::GetSFS,
+                             Opcode::TryS,   Opcode::Await,   Opcode::Conv, Opcode::Call,
+                             Opcode::Ret};
+    for (const Opcode op : needed) {
+        REQUIRE(find(op) < original.words.Size());
+    }
+
     auto verify = [&](auto&& change) noexcept {
         BytecodeModule module(allocator);
         BytecodeRejection rejection;
@@ -165,58 +234,112 @@ TEST(SparksBytecodeFile_VerifierRejections) {
         change(module);
         return VerifyBytecode(module).error;
     };
-    auto find = [](const BytecodeModule& module, Opcode op) noexcept {
-        for (usize index = 0; index < module.words.Size(); ++index) {
-            if (DecodeOpcode(module.words[index]) == op) {
-                return index;
-            }
-        }
-
-        return usize(0);
+    auto patch = [&](Opcode op, auto&& make) noexcept {
+        const usize at = find(op);
+        return verify([&](BytecodeModule& m) noexcept { m.words[at] = make(m.words[at]); });
+    };
+    auto patchExtra = [&](Opcode op, uint32 ax) noexcept {
+        const usize at = find(op);
+        return verify(
+            [&](BytecodeModule& m) noexcept { m.words[at + 1] = EncodeAx(Opcode::Extra, ax); });
+    };
+    auto abc = [](uint32 word, uint32 a, uint32 b, uint32 c) noexcept {
+        return EncodeABC(DecodeOpcode(word), a, b, c);
     };
     CHECK(verify([](BytecodeModule&) noexcept {}) == BytecodeLoadError::None);
     CHECK(verify([](BytecodeModule& m) noexcept { m.words[0] = 0xFF; }) ==
           BytecodeLoadError::BadOpcode);
     CHECK(verify([](BytecodeModule& m) noexcept { m.words[0] = EncodeAx(Opcode::Extra, 0); }) ==
           BytecodeLoadError::BadOpcode);
-    CHECK(verify([&](BytecodeModule& m) noexcept {
-              const usize at = find(m, Opcode::LoadK);
-              m.words[at] = EncodeABx(Opcode::LoadK, 255, DecodeBx(m.words[at]));
+    CHECK(patch(Opcode::LoadK, [](uint32 w) noexcept {
+              return EncodeABx(Opcode::LoadK, 255, DecodeBx(w));
           }) == BytecodeLoadError::BadRegister);
-    CHECK(verify([&](BytecodeModule& m) noexcept {
-              const usize at = find(m, Opcode::LoadK);
-              m.words[at] = EncodeABx(Opcode::LoadK, DecodeA(m.words[at]), MaxBx);
+    CHECK(patch(Opcode::LoadK, [](uint32 w) noexcept {
+              return EncodeABx(Opcode::LoadK, DecodeA(w), MaxBx);
           }) == BytecodeLoadError::BadConstant);
-    CHECK(verify([&](BytecodeModule& m) noexcept {
-              const usize at = find(m, Opcode::LoadStr);
-              m.words[at] = EncodeABx(Opcode::LoadStr, DecodeA(m.words[at]), MaxBx);
+    CHECK(patch(Opcode::LoadStr, [](uint32 w) noexcept {
+              return EncodeABx(Opcode::LoadStr, DecodeA(w), MaxBx);
           }) == BytecodeLoadError::BadConstant);
-    CHECK(verify([&](BytecodeModule& m) noexcept {
-              const usize at = find(m, Opcode::Jmp);
-              m.words[at] = EncodeAsBx(Opcode::Jmp, 0, MaxImmediate);
+    CHECK(patch(Opcode::Jmp, [](uint32) noexcept {
+              return EncodeAsBx(Opcode::Jmp, 0, MaxImmediate);
           }) == BytecodeLoadError::BadBranch);
-    CHECK(verify([&](BytecodeModule& m) noexcept {
-              const usize at = find(m, Opcode::ToStr);
-              m.words[at + 1] = EncodeAx(Opcode::Extra, 200u << 16);
+    CHECK(patch(Opcode::Jmp, [](uint32 w) noexcept {
+              return EncodeAsBx(Opcode::Jmp, 1, DecodeSBx(w));
           }) == BytecodeLoadError::BadOperand);
-    CHECK(verify([&](BytecodeModule& m) noexcept {
-              const usize at = find(m, Opcode::Switch);
-              m.words[at] = EncodeABx(Opcode::Switch, DecodeA(m.words[at]), 7);
+    CHECK(patchExtra(Opcode::ToStr, 200u << 16) == BytecodeLoadError::BadOperand);
+    // TOSTR의 원본 slot 수(C)가 표시 종류와 다르다.
+    CHECK(patch(Opcode::ToStr, [&](uint32 w) noexcept {
+              return abc(w, DecodeA(w), DecodeB(w), 2);
+          }) == BytecodeLoadError::BadOperand);
+    CHECK(patch(Opcode::Switch, [](uint32 w) noexcept {
+              return EncodeABx(Opcode::Switch, DecodeA(w), 7);
           }) == BytecodeLoadError::BadBranch);
+    // 컨테이너: 표지가 정한 bank의 값 레지스터가 frame 밖, 쓰지 않는 표지 bit.
+    CHECK(patch(Opcode::GetE, [&](uint32 w) noexcept {
+              return abc(w, 255, DecodeB(w), DecodeC(w));
+          }) == BytecodeLoadError::BadRegister);
+    CHECK(patchExtra(Opcode::SetE, (1u << 7) | 1u) == BytecodeLoadError::BadOperand);
+    // 여러 slot 필드(vec3 — C 3): slot 수 0, frame 밖.
+    CHECK(patch(Opcode::GetSFS, [&](uint32 w) noexcept {
+              return abc(w, DecodeA(w), DecodeB(w), 0);
+          }) == BytecodeLoadError::BadOperand);
+    CHECK(patch(Opcode::GetSFS, [&](uint32 w) noexcept { return abc(w, 254, DecodeB(w), 3); }) ==
+          BytecodeLoadError::BadRegister);
+    // TRY.S: 원본 slot 0, 결과가 frame 밖.
+    CHECK(patch(Opcode::TryS, [&](uint32 w) noexcept {
+              return abc(w, DecodeA(w), DecodeB(w), 0);
+          }) == BytecodeLoadError::BadOperand);
+    CHECK(patch(Opcode::TryS, [&](uint32 w) noexcept {
+              return abc(w, 255, DecodeB(w), DecodeC(w));
+          }) == BytecodeLoadError::BadRegister);
+    // CONV: 숫자 타입이 아닌 종류.
+    CHECK(patch(Opcode::Conv, [&](uint32 w) noexcept {
+              return abc(w, DecodeA(w), DecodeB(w),
+                         (static_cast<uint32>(ScalarKind::Flag) << 4) |
+                             static_cast<uint32>(ScalarKind::F64));
+          }) == BytecodeLoadError::BadOperand);
+    // RET의 모양이 함수 표의 반환 모양과 다르다.
+    CHECK(patch(Opcode::Ret, [&](uint32 w) noexcept {
+              return abc(w, DecodeA(w), DecodeB(w) + 1, DecodeC(w));
+          }) == BytecodeLoadError::BadOperand);
+    // await 표에서 빠진 AWAIT, 같은 주소의 await 항목 둘.
+    const uint32 awaiting = functionOf(find(Opcode::Await));
+    CHECK(verify([&](BytecodeModule& m) noexcept { m.functions[awaiting].awaitCount = 0; }) ==
+          BytecodeLoadError::BadBranch);
+    // 같은 모듈 함수 호출: 부르는 함수의 매개변수가 호출 창보다 크다.
+    const uint32 caller = functionOf(find(Opcode::Call));
+    CHECK(verify([&](BytecodeModule& m) noexcept {
+              for (uint32 index = 0; index < m.functions.Size(); ++index) {
+                  if (index != caller) {
+                      m.functions[index].parameters[0] = 200;
+                      m.functions[index].registers[0] = 200;
+                      m.functions[index].frame[0] = 200;
+                  }
+              }
+          }) == BytecodeLoadError::BadRegister);
     CHECK(verify([](BytecodeModule& m) noexcept {
               m.words[m.functions[0].firstWord + m.functions[0].wordCount - 1] =
                   EncodeABC(Opcode::MovS, 0, 0, 0);
           }) == BytecodeLoadError::BadEnd);
-    CHECK(verify([](BytecodeModule& m) noexcept { m.functions[0].wordCount += 1000; }) ==
+    CHECK(verify([](BytecodeModule& m) noexcept { m.functions[0].wordCount += 100000; }) ==
           BytecodeLoadError::BadFunction);
     CHECK(verify([](BytecodeModule& m) noexcept { m.functions[0].frame[0] = 300; }) ==
+          BytecodeLoadError::BadFunction);
+    CHECK(verify([](BytecodeModule& m) noexcept { m.functions[0].returnSlots = 30; }) ==
           BytecodeLoadError::BadFunction);
     CHECK(verify([](BytecodeModule& m) noexcept { m.functions[0].name = 9999; }) ==
           BytecodeLoadError::BadFunction);
     CHECK(verify([](BytecodeModule& m) noexcept { m.refs[0].name = 9999; }) ==
           BytecodeLoadError::BadTable);
     CHECK(verify([&](BytecodeModule& m) noexcept {
-              const usize at = find(m, Opcode::Call);
+              for (BytecodeRef& ref : m.refs) {
+                  if (ref.kind == BytecodeRefKind::Function) {
+                      ref.detail = NoBytecodeIndex;
+                  }
+              }
+          }) == BytecodeLoadError::BadTable);
+    CHECK(verify([&](BytecodeModule& m) noexcept {
+              const usize at = find(Opcode::Call);
               m.words[at] = EncodeABx(Opcode::CallN, 0, DecodeBx(m.words[at]));
           }) == BytecodeLoadError::BadReference);
     CHECK(verify([](BytecodeModule& m) noexcept { m.cases[0].target = 9999; }) ==
@@ -224,6 +347,13 @@ TEST(SparksBytecodeFile_VerifierRejections) {
     CHECK(verify([](BytecodeModule& m) noexcept {
               static_cast<void>(m.locations.TryResize(m.locations.Size() - 1));
           }) == BytecodeLoadError::BadTable);
+
+    // 머리의 profile은 0·1이다.
+    Array<uint8> copy(allocator);
+    REQUIRE(copy.TryAppend(file.View()));
+    constexpr usize ProfileOffset = 4 + 4 + 4 + 4 + 32 + 32;
+    copy[ProfileOffset] = 7;
+    CHECK(ReadError(allocator, copy.View()) == BytecodeLoadError::BadTable);
 }
 
 TEST(SparksBytecodeFile_AllocationFailureEverywhere) {

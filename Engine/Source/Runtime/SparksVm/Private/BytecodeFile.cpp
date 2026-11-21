@@ -28,6 +28,9 @@ constexpr usize AwaitBytes = 12;
 constexpr usize LiveRangeBytes = 5;
 constexpr usize LocationBytes = 8;
 
+// profile 값의 상한(0 core, 1 full)이다.
+constexpr uint8 MaxProfile = 1;
+
 // 표시 종류의 마지막 값(Mat4)이다.
 constexpr uint32 MaxDisplayKind = static_cast<uint32>(DisplayKind::Mat4);
 // 컨테이너 표지의 slot 수 상한(값 하나의 slot 상한 18)이다.
@@ -49,7 +52,8 @@ void WriteSection(ByteWriter& writer, const uint8 (&tag)[TagBytes], auto&& body)
 
 bool IsTerminatorOpcode(Opcode op) noexcept {
     return op == Opcode::Jmp || op == Opcode::Ret || op == Opcode::RetErrS ||
-           op == Opcode::RetErrB || op == Opcode::Fault;
+           op == Opcode::RetErrB || op == Opcode::EndExecS || op == Opcode::EndExecB ||
+           op == Opcode::Fault;
 }
 
 } // namespace
@@ -231,6 +235,10 @@ public:
             return Reject(BytecodeLoadError::Truncated);
         }
 
+        if (out_.profile > MaxProfile) {
+            return Reject(BytecodeLoadError::BadTable);
+        }
+
         if (auto read = Section(ConstantsTag, &FileReader::Constants); !read) {
             return read;
         }
@@ -333,7 +341,7 @@ private:
             const uint32 length = reader.ReadU32LE();
             const Span<const uint8> bytes = reader.Take(length);
             if (reader.Failed()) {
-                return Reject(BytecodeLoadError::Truncated);
+                return Reject(BytecodeLoadError::BadSection); // 구역 안의 불일치
             }
 
             out_.stringOffsets[index] = static_cast<uint32>(out_.stringBytes.Size());
@@ -503,7 +511,10 @@ public:
             const bool argumentsOk =
                 ref.arguments == NoBytecodeIndex ||
                 (ref.kind == BytecodeRefKind::Literal && ref.arguments < strings);
-            if (ref.name >= strings || !detailOk || !argumentsOk) {
+            // 같은 모듈 함수 참조는 함수 표 번호가 있어야 한다(CALL이 그 함수로 간다).
+            const bool functionOk =
+                ref.kind != BytecodeRefKind::Function || ref.detail != NoBytecodeIndex;
+            if (ref.name >= strings || !detailOk || !argumentsOk || !functionOk) {
                 return Reject(BytecodeLoadError::BadTable);
             }
         }
@@ -585,13 +596,13 @@ private:
             usize(function.firstWord) + function.wordCount > module_.words.Size() ||
             function.wordCount == 0 || function.wordCount > MaxFunctionWords ||
             usize(function.firstSwitch) + function.switchCount > module_.switches.Size() ||
-            usize(function.firstAwait) + function.awaitCount > module_.awaits.Size()) {
+            usize(function.firstAwait) + function.awaitCount > module_.awaits.Size() ||
+            function.returnBank >= BytecodeBankCount || function.returnSlots > MaxMarkerSlots) {
             return Reject(BytecodeLoadError::BadFunction);
         }
 
         for (uint32 bank = 0; bank < BytecodeBankCount; ++bank) {
-            if (function.returnBank >= BytecodeBankCount || function.returnSlots > MaxMarkerSlots ||
-                function.parameters[bank] > function.registers[bank] ||
+            if (function.parameters[bank] > function.registers[bank] ||
                 function.registers[bank] > function.frame[bank] ||
                 function.frame[bank] > MaxBankRegisters) {
                 return Reject(BytecodeLoadError::BadFunction);
@@ -600,9 +611,20 @@ private:
             frame_[bank] = function.frame[bank];
         }
 
+        // 반환 값은 frame 0번부터 돌려준다.
+        if (function.returnSlots > function.frame[function.returnBank]) {
+            return Reject(BytecodeLoadError::BadFunction);
+        }
+
+        current_ = &function;
+
         // 명령 시작 표(EXTRA 단어는 시작이 아니다).
         const uint32* words = module_.words.Data() + function.firstWord;
         for (uint64& bits : starts_) {
+            bits = 0;
+        }
+
+        for (uint64& bits : awaited_) {
             bits = 0;
         }
 
@@ -633,6 +655,29 @@ private:
         auto target = [&](int64 address) noexcept {
             return address >= 0 && address < function.wordCount && IsStart(address);
         };
+
+        // await 표: 주소마다 AWAIT·AWAITEV 시작이고 한 번만 나온다(생존 구간은 할당 수 안).
+        for (uint32 index = function.firstAwait; index < function.firstAwait + function.awaitCount;
+             ++index) {
+            const BytecodeAwaitPoint& point = module_.awaits[index];
+            if (!target(point.address) ||
+                (DecodeOpcode(words[point.address]) != Opcode::Await &&
+                 DecodeOpcode(words[point.address]) != Opcode::AwaitEv) ||
+                IsAwaited(point.address)) {
+                return Reject(BytecodeLoadError::BadBranch, point.address);
+            }
+
+            awaited_[point.address / StartBits] |= uint64(1) << (point.address % StartBits);
+            for (uint32 at = point.firstLive; at < point.firstLive + point.liveCount; ++at) {
+                const BytecodeLiveRange& range = module_.liveRanges[at];
+                if (static_cast<uint32>(range.bank) >= BytecodeBankCount ||
+                    range.first + range.count >
+                        function.registers[static_cast<uint32>(range.bank)]) {
+                    return Reject(BytecodeLoadError::BadRegister, point.address);
+                }
+            }
+        }
+
         for (uint32 address = 0; address < function.wordCount; ++address) {
             const uint32 word = words[address];
             const OpcodeInfo& info = InfoOf(DecodeOpcode(word));
@@ -640,6 +685,11 @@ private:
             if (const BytecodeLoadError error = Instruction(info, word, extra, address, target);
                 error != BytecodeLoadError::None) {
                 return Reject(error, address);
+            }
+
+            // 정지 명령은 모두 await 표에 있어야 한다(정지 중 보존할 레지스터).
+            if ((info.op == Opcode::Await || info.op == Opcode::AwaitEv) && !IsAwaited(address)) {
+                return Reject(BytecodeLoadError::BadBranch, address);
             }
 
             address += info.extra ? 1 : 0;
@@ -659,25 +709,63 @@ private:
             }
         }
 
-        for (uint32 index = function.firstAwait; index < function.firstAwait + function.awaitCount;
-             ++index) {
-            const BytecodeAwaitPoint& point = module_.awaits[index];
-            if (!target(point.address) || (DecodeOpcode(words[point.address]) != Opcode::Await &&
-                                           DecodeOpcode(words[point.address]) != Opcode::AwaitEv)) {
-                return Reject(BytecodeLoadError::BadBranch, point.address);
+        return BytecodeRejection{};
+    }
+
+    // 호출 창(frame의 할당 수 위)에 bank마다 count slot이 들어가는지다.
+    bool Window(uint32 bank, uint32 count) const noexcept {
+        return current_->registers[bank] + count <= current_->frame[bank];
+    }
+
+    // bank 번호(0–2)로 본 레지스터 묶음이 frame 안인지다. 묶음 slot 수가 0이면 거부한다.
+    bool Tuple(uint32 bank, uint32 first, uint32 slots) const noexcept {
+        return bank < BytecodeBankCount && slots >= 1 && slots <= MaxMarkerSlots &&
+               first + slots <= frame_[bank];
+    }
+
+    // NEWLIT 인자 표(`이름=bank 글자;…`)의 항목 수와 bank별 수다. 형식이 틀리면 false.
+    bool LiteralArguments(uint32 arguments, uint32 (&perBank)[BytecodeBankCount],
+                          uint32& count) const noexcept {
+        for (uint32& value : perBank) {
+            value = 0;
+        }
+
+        count = 0;
+        if (arguments == NoBytecodeIndex) {
+            return true;
+        }
+
+        const StringView text = module_.String(arguments);
+        usize at = 0;
+        while (at < text.ByteCount()) {
+            usize equals = at;
+            while (equals < text.ByteCount() && text.Data()[equals] != '=') {
+                ++equals;
             }
 
-            for (uint32 at = point.firstLive; at < point.firstLive + point.liveCount; ++at) {
-                const BytecodeLiveRange& range = module_.liveRanges[at];
-                if (static_cast<uint32>(range.bank) >= BytecodeBankCount ||
-                    range.first + range.count >
-                        function.registers[static_cast<uint32>(range.bank)]) {
-                    return Reject(BytecodeLoadError::BadRegister, point.address);
+            if (equals == at || equals + 1 >= text.ByteCount()) {
+                return false;
+            }
+
+            const char letter = text.Data()[equals + 1];
+            const uint32 bank = letter == 's' ? 0 : letter == 'r' ? 1 : letter == 'b' ? 2 : 3;
+            if (bank >= BytecodeBankCount) {
+                return false;
+            }
+
+            ++perBank[bank];
+            ++count;
+            at = equals + 2;
+            if (at < text.ByteCount()) {
+                if (text.Data()[at] != ';') {
+                    return false;
                 }
+
+                ++at;
             }
         }
 
-        return BytecodeRejection{};
+        return true;
     }
 
     template <typename Target>
@@ -689,50 +777,72 @@ private:
         const uint32 bx = DecodeBx(word);
         const uint32 ax = DecodeAx(extra);
         const int64 next = static_cast<int64>(address) + 1;
+        constexpr uint32 S = 0;
+        constexpr uint32 R = 1;
+        constexpr uint32 B = 2;
+        auto bankOf = [](OperandBank bank) noexcept { return static_cast<uint32>(bank) - 1; };
+        auto ok = [](bool condition, BytecodeLoadError error) noexcept {
+            return condition ? BytecodeLoadError::None : error;
+        };
         switch (info.op) {
         case Opcode::LoadK:
-            return !Register(info.a, a)           ? BytecodeLoadError::BadRegister
+            return !Tuple(S, a, 1)                ? BytecodeLoadError::BadRegister
                    : bx >= module_.scalars.Size() ? BytecodeLoadError::BadConstant
                                                   : BytecodeLoadError::None;
         case Opcode::LoadStr:
-            return !Register(info.a, a)                 ? BytecodeLoadError::BadRegister
+            return !Tuple(B, a, 1)                      ? BytecodeLoadError::BadRegister
                    : bx >= module_.stringOffsets.Size() ? BytecodeLoadError::BadConstant
                                                         : BytecodeLoadError::None;
         case Opcode::Jmp:
-            return target(next + DecodeSBx(word)) ? BytecodeLoadError::None
-                                                  : BytecodeLoadError::BadBranch;
+            return a != 0                           ? BytecodeLoadError::BadOperand
+                   : target(next + DecodeSBx(word)) ? BytecodeLoadError::None
+                                                    : BytecodeLoadError::BadBranch;
         case Opcode::Brt:
         case Opcode::Brf:
-            return !Register(info.a, a)              ? BytecodeLoadError::BadRegister
+            return !Tuple(S, a, 1)                   ? BytecodeLoadError::BadRegister
                    : !target(next + DecodeSBx(word)) ? BytecodeLoadError::BadBranch
                                                      : BytecodeLoadError::None;
         case Opcode::Switch:
-            return !Register(info.a, a) ? BytecodeLoadError::BadRegister
-                   : bx < module_.functions[function_].firstSwitch ||
-                           bx >= module_.functions[function_].firstSwitch +
-                                     module_.functions[function_].switchCount
+            return !Tuple(S, a, 1) ? BytecodeLoadError::BadRegister
+                   : bx < current_->firstSwitch ||
+                           bx >= current_->firstSwitch + current_->switchCount
                        ? BytecodeLoadError::BadBranch
                        : BytecodeLoadError::None;
         case Opcode::Ret:
+            // 반환 모양은 함수 표와 같다(값 없음은 A·B·C 모두 0).
             if (b == 0) {
-                return BytecodeLoadError::None;
+                return ok(a == 0 && c == 0 && current_->returnSlots == 0,
+                          BytecodeLoadError::BadOperand);
             }
 
-            return c >= BytecodeBankCount || !Register(static_cast<OperandBank>(c + 1), a, b)
-                       ? BytecodeLoadError::BadRegister
-                       : BytecodeLoadError::None;
-        case Opcode::RetErrS:
-            return Register(OperandBank::Scalar, a, b == 0 ? 1 : b)
-                       ? BytecodeLoadError::None
-                       : BytecodeLoadError::BadRegister;
-        case Opcode::Conv:
-            return !Register(info.a, a) || !Register(info.b, b) ? BytecodeLoadError::BadRegister
-                   : (c >> 4) > static_cast<uint32>(ScalarKind::AssetHi) ||
-                           (c & 0xF) > static_cast<uint32>(ScalarKind::AssetHi)
+            return b != current_->returnSlots || c != current_->returnBank
                        ? BytecodeLoadError::BadOperand
-                       : BytecodeLoadError::None;
+                       : ok(Tuple(c, a, b), BytecodeLoadError::BadRegister);
+        case Opcode::RetErrS:
+            return current_->returnSlots == 0 || b == 0
+                       ? BytecodeLoadError::BadOperand
+                       : ok(Tuple(S, a, b), BytecodeLoadError::BadRegister);
+        case Opcode::RetErrB:
+            return current_->returnSlots == 0 ? BytecodeLoadError::BadOperand
+                                              : ok(Tuple(B, a, 1), BytecodeLoadError::BadRegister);
+        case Opcode::EndExecS:
+            return b == 0 ? BytecodeLoadError::BadOperand
+                          : ok(Tuple(S, a, b), BytecodeLoadError::BadRegister);
+        case Opcode::EndExecB:
+            return ok(Tuple(B, a, 1), BytecodeLoadError::BadRegister);
+        case Opcode::Conv: {
+            // 숫자 타입 사이의 변환만이다(I8…F64).
+            const uint32 from = c >> 4;
+            const uint32 to = c & 0xF;
+            const bool numeric = from >= static_cast<uint32>(ScalarKind::I8) &&
+                                 from <= static_cast<uint32>(ScalarKind::F64) &&
+                                 to >= static_cast<uint32>(ScalarKind::I8) &&
+                                 to <= static_cast<uint32>(ScalarKind::F64);
+            return !numeric ? BytecodeLoadError::BadOperand
+                            : ok(Tuple(S, a, 1) && Tuple(S, b, 1), BytecodeLoadError::BadRegister);
+        }
         case Opcode::GetCtx:
-            return !Register(info.a, a)                 ? BytecodeLoadError::BadRegister
+            return !Tuple(R, a, 1)                      ? BytecodeLoadError::BadRegister
                    : !Ref(bx, BytecodeRefKind::Context) ? BytecodeLoadError::BadReference
                                                         : BytecodeLoadError::None;
         case Opcode::NewS:
@@ -740,7 +850,7 @@ private:
         case Opcode::NewA:
         case Opcode::NewSet:
         case Opcode::NewM:
-            return !Register(info.a, a)              ? BytecodeLoadError::BadRegister
+            return !Tuple(bankOf(info.a), a, 1)      ? BytecodeLoadError::BadRegister
                    : !Ref(bx, BytecodeRefKind::Type) ? BytecodeLoadError::BadReference
                                                      : BytecodeLoadError::None;
         case Opcode::Call:
@@ -748,74 +858,114 @@ private:
         case Opcode::CallN:
         case Opcode::CallL:
         case Opcode::CallRpc:
-        case Opcode::Emit:
-            return CallRef(info.op, bx) ? BytecodeLoadError::None : BytecodeLoadError::BadReference;
+        case Opcode::Emit: {
+            if (a != 0) {
+                return BytecodeLoadError::BadOperand;
+            }
+
+            if (!CallRef(info.op, bx)) {
+                return BytecodeLoadError::BadReference;
+            }
+
+            // 수신자·대상이 있는 호출은 Ref 창 0번이 있어야 한다. 같은 모듈 함수는 그 매개변수가
+            // 창에 들어가야 한다.
+            if ((info.op == Opcode::Emit || info.op == Opcode::CallV) && !Window(R, 1)) {
+                return BytecodeLoadError::BadRegister;
+            }
+
+            const BytecodeRef& ref = module_.refs[bx];
+            if (ref.kind == BytecodeRefKind::Function) {
+                const BytecodeFunction& callee = module_.functions[ref.detail];
+                for (uint32 bank = 0; bank < BytecodeBankCount; ++bank) {
+                    if (!Window(bank, callee.parameters[bank])) {
+                        return BytecodeLoadError::BadRegister;
+                    }
+                }
+            }
+
+            return BytecodeLoadError::None;
+        }
         case Opcode::Concat:
-            return Register(info.a, a) && Register(OperandBank::Buf, b, c)
-                       ? BytecodeLoadError::None
-                       : BytecodeLoadError::BadRegister;
+            return ok(Tuple(B, a, 1) && (c == 0 || Tuple(B, b, c)), BytecodeLoadError::BadRegister);
         case Opcode::EqN:
         case Opcode::NeN:
         case Opcode::EqNF:
         case Opcode::NeNF:
-            return ax == 0 || ax > MaxMarkerSlots ? BytecodeLoadError::BadOperand
-                   : !Register(info.a, a) || !Register(info.b, b, ax) || !Register(info.c, c, ax)
-                       ? BytecodeLoadError::BadRegister
-                       : BytecodeLoadError::None;
+            return ax == 0 || ax > MaxMarkerSlots
+                       ? BytecodeLoadError::BadOperand
+                       : ok(Tuple(S, a, 1) && Tuple(S, b, ax) && Tuple(S, c, ax),
+                            BytecodeLoadError::BadRegister);
         case Opcode::TryS:
+            // 원본 Result 묶음 c slot(앞이 오류 코드), 결과 값 c - 1 slot.
             return !target(static_cast<int64>(address) + 2 + DecodeSAx(extra))
                        ? BytecodeLoadError::BadBranch
-                   : !Register(OperandBank::Scalar, b, c == 0 ? 1 : c)
-                       ? BytecodeLoadError::BadRegister
-                       : BytecodeLoadError::None;
+                   : c == 0 ? BytecodeLoadError::BadOperand
+                            : ok(Tuple(S, b, c) && (c == 1 || Tuple(S, a, c - 1)),
+                                 BytecodeLoadError::BadRegister);
         case Opcode::TryB:
             return !target(static_cast<int64>(address) + 2 + DecodeSAx(extra))
                        ? BytecodeLoadError::BadBranch
-                   : (c >> 5) >= BytecodeBankCount || (c & 0x1F) > MaxMarkerSlots
+                   : (c >> 5) >= BytecodeBankCount
                        ? BytecodeLoadError::BadOperand
-                   : !Register(info.b, b) ||
-                           ((c & 0x1F) != 0 &&
-                            !Register(static_cast<OperandBank>((c >> 5) + 1), a, c & 0x1F))
-                       ? BytecodeLoadError::BadRegister
-                       : BytecodeLoadError::None;
+                       : ok(Tuple(B, b, 1) && ((c & 0x1F) == 0 || Tuple(c >> 5, a, c & 0x1F)),
+                            BytecodeLoadError::BadRegister);
         case Opcode::MulQ:
         case Opcode::MulM: {
             const uint32 slots = info.op == Opcode::MulQ ? 4 : 16;
-            return Register(OperandBank::Scalar, a, slots) &&
-                           Register(OperandBank::Scalar, b, slots) &&
-                           Register(OperandBank::Scalar, c, slots)
-                       ? BytecodeLoadError::None
-                       : BytecodeLoadError::BadRegister;
+            return ok(Tuple(S, a, slots) && Tuple(S, b, slots) && Tuple(S, c, slots),
+                      BytecodeLoadError::BadRegister);
         }
         case Opcode::GetFS:
         case Opcode::GetFR:
         case Opcode::GetFB:
-        case Opcode::SetFS:
-        case Opcode::SetFR:
-        case Opcode::SetFB:
-            return !Register(info.a, a) || !Register(info.b, b) ? BytecodeLoadError::BadRegister
-                   : !Ref(ax, BytecodeRefKind::Field)           ? BytecodeLoadError::BadReference
-                                                                : BytecodeLoadError::None;
         case Opcode::GetSFS:
         case Opcode::GetSFR:
         case Opcode::GetSFB:
+        case Opcode::SetFS:
+        case Opcode::SetFR:
+        case Opcode::SetFB:
         case Opcode::SetSFS:
         case Opcode::SetSFR:
-        case Opcode::SetSFB:
-            return !Register(info.a, a) || !Register(info.b, b) ? BytecodeLoadError::BadRegister
-                   : !Ref(ax, BytecodeRefKind::StructField)     ? BytecodeLoadError::BadReference
-                                                                : BytecodeLoadError::None;
+        case Opcode::SetSFB: {
+            // C는 필드 값의 slot 수다(Ref·Buf 값은 1).
+            const bool get = info.op <= Opcode::GetFB ||
+                             (info.op >= Opcode::GetSFS && info.op <= Opcode::GetSFB);
+            const bool structField = info.op >= Opcode::GetSFS;
+            const uint32 valueBank = bankOf(get ? info.a : info.b);
+            if (c == 0 || (valueBank != S && c != 1)) {
+                return BytecodeLoadError::BadOperand;
+            }
+
+            const bool registers = get ? Tuple(valueBank, a, c) && Tuple(bankOf(info.b), b, 1)
+                                       : Tuple(bankOf(info.a), a, 1) && Tuple(valueBank, b, c);
+            return !registers ? BytecodeLoadError::BadRegister
+                   : !Ref(ax, structField ? BytecodeRefKind::StructField : BytecodeRefKind::Field)
+                       ? BytecodeLoadError::BadReference
+                       : BytecodeLoadError::None;
+        }
         case Opcode::AwaitEv:
-            return !Register(info.a, a)               ? BytecodeLoadError::BadRegister
+            return !Tuple(R, a, 1)                    ? BytecodeLoadError::BadRegister
                    : !Ref(ax, BytecodeRefKind::Event) ? BytecodeLoadError::BadReference
                                                       : BytecodeLoadError::None;
         case Opcode::Cast:
-            return !Register(info.a, a) || !Register(info.b, b) ? BytecodeLoadError::BadRegister
-                   : !Ref(ax, BytecodeRefKind::Type)            ? BytecodeLoadError::BadReference
-                                                                : BytecodeLoadError::None;
+            return !Tuple(R, a, 1) || !Tuple(R, b, 1) ? BytecodeLoadError::BadRegister
+                   : !Ref(ax, BytecodeRefKind::Type)  ? BytecodeLoadError::BadReference
+                                                      : BytecodeLoadError::None;
         case Opcode::ToStr: {
+            // 원본 묶음 C slot이 표시 종류와 맞아야 한다(스칼라 1, 수학 타입은 성분 수).
+            constexpr uint32 VectorSlots[] = {2, 3, 4, 4, 3, 4, 10, 16};
             const uint32 display = ax >> 16;
-            if (display > MaxDisplayKind) {
+            if (display > MaxDisplayKind || (display > static_cast<uint32>(ScalarKind::AssetHi) &&
+                                             display < static_cast<uint32>(DisplayKind::Vec2))) {
+                return BytecodeLoadError::BadOperand;
+            }
+
+            const uint32 expected =
+                display >= static_cast<uint32>(DisplayKind::Vec2)
+                    ? VectorSlots[display - static_cast<uint32>(DisplayKind::Vec2)]
+                    : 1;
+            if (c != expected ||
+                (display != static_cast<uint32>(ScalarKind::Enum) && (ax & MaxBx) != 0)) {
                 return BytecodeLoadError::BadOperand;
             }
 
@@ -824,50 +974,102 @@ private:
                 return BytecodeLoadError::BadReference;
             }
 
-            return Register(info.a, a) && Register(info.b, b) ? BytecodeLoadError::None
-                                                              : BytecodeLoadError::BadRegister;
+            return ok(Tuple(B, a, 1) && Tuple(S, b, c), BytecodeLoadError::BadRegister);
         }
-        case Opcode::NewLit:
-            return !Ref(ax & MaxBx, BytecodeRefKind::Literal) ? BytecodeLoadError::BadReference
-                   : (ax >> 22) >= BytecodeBankCount          ? BytecodeLoadError::BadOperand
-                   : !Register(static_cast<OperandBank>((ax >> 22) + 1), a)
-                       ? BytecodeLoadError::BadRegister
-                       : BytecodeLoadError::None;
+        case Opcode::NewLit: {
+            const uint32 literal = ax & MaxBx;
+            const uint32 count = (ax >> 16) & 0x3F;
+            const uint32 bank = ax >> 22;
+            if (!Ref(literal, BytecodeRefKind::Literal)) {
+                return BytecodeLoadError::BadReference;
+            }
+
+            uint32 perBank[BytecodeBankCount] = {};
+            uint32 entries = 0;
+            if (bank >= BytecodeBankCount ||
+                !LiteralArguments(module_.refs[literal].arguments, perBank, entries) ||
+                entries != count) {
+                return BytecodeLoadError::BadOperand;
+            }
+
+            for (uint32 at = 0; at < BytecodeBankCount; ++at) {
+                if (!Window(at, perBank[at])) {
+                    return BytecodeLoadError::BadRegister;
+                }
+            }
+
+            return ok(Tuple(bank, a, 1), BytecodeLoadError::BadRegister);
+        }
         case Opcode::GetE:
         case Opcode::SetE:
         case Opcode::GetKey:
         case Opcode::GetVal:
         case Opcode::Append:
-        case Opcode::Put:
-            return !Marker(ax) ? BytecodeLoadError::BadOperand
-                   : !Register(info.a, a) || !Register(info.b, b) || !Register(info.c, c)
-                       ? BytecodeLoadError::BadRegister
-                       : BytecodeLoadError::None;
-        case Opcode::Await:
-            return (ax >> 8) >= BytecodeBankCount || (ax & 0xFF) > MaxMarkerSlots
+        case Opcode::Put: {
+            // 컨테이너 표지: 값(bank·slot)과 key(bank·slot). 쓰지 않는 bit는 0이다.
+            if (!Marker(ax) || ((ax >> 7) & 1) != 0) {
+                return BytecodeLoadError::BadOperand;
+            }
+
+            const uint32 valueBank = (ax >> 5) & 0x3;
+            const uint32 valueSlots = ax & 0x1F;
+            const uint32 keyBank = (ax >> 13) & 0x3;
+            const uint32 keySlots = (ax >> 8) & 0x1F;
+            bool registers = false;
+            switch (info.op) {
+            case Opcode::GetE:
+                registers = Tuple(valueBank, a, valueSlots) && Tuple(B, b, 1) &&
+                            Tuple(keyBank, c, keySlots);
+                break;
+            case Opcode::SetE:
+            case Opcode::Put:
+                registers = Tuple(B, a, 1) && Tuple(keyBank, b, keySlots) &&
+                            Tuple(valueBank, c, valueSlots);
+                break;
+            case Opcode::Append:
+                registers = Tuple(B, a, 1) && Tuple(valueBank, b, valueSlots);
+                break;
+            default: // GetKey·GetVal
+                registers = Tuple(valueBank, a, valueSlots) && Tuple(B, b, 1) && Tuple(S, c, 1);
+                break;
+            }
+
+            return ok(registers, BytecodeLoadError::BadRegister);
+        }
+        case Opcode::Await: {
+            const uint32 resultBank = ax >> 8;
+            const uint32 slots = ax & 0xFF;
+            return resultBank >= BytecodeBankCount || slots > MaxMarkerSlots
                        ? BytecodeLoadError::BadOperand
-                   : !Register(info.b, b) ? BytecodeLoadError::BadRegister
-                   : (ax & 0xFF) != 0 &&
-                           !Register(static_cast<OperandBank>((ax >> 8) + 1), a, ax & 0xFF)
-                       ? BytecodeLoadError::BadRegister
-                       : BytecodeLoadError::None;
-        case Opcode::Ok:
-            return (ax >> 8) >= BytecodeBankCount ? BytecodeLoadError::BadOperand
-                   : !Register(info.a, a)         ? BytecodeLoadError::BadRegister
-                                                  : BytecodeLoadError::None;
+                       : ok(Tuple(R, b, 1) && (slots == 0 || Tuple(resultBank, a, slots)),
+                            BytecodeLoadError::BadRegister);
+        }
+        case Opcode::Ok: {
+            const uint32 valueBank = ax >> 8;
+            const uint32 slots = ax & 0xFF;
+            return valueBank >= BytecodeBankCount || slots > MaxMarkerSlots
+                       ? BytecodeLoadError::BadOperand
+                       : ok(Tuple(B, a, 1) && (slots == 0 || Tuple(valueBank, b, slots)),
+                            BytecodeLoadError::BadRegister);
+        }
         case Opcode::Fault:
             return BytecodeLoadError::None;
         default:
             break;
         }
 
-        // 그 밖: 정해진 bank의 A·B·C 레지스터.
+        // 그 밖: 정해진 bank의 A·B·C 레지스터(slot 하나).
         const bool usesB = info.form == OperandForm::AB || info.form == OperandForm::ABC;
-        const bool ok = (info.form == OperandForm::None || info.form == OperandForm::Ax ||
-                         Register(info.a, a)) &&
-                        (!usesB || Register(info.b, b)) &&
-                        (info.form != OperandForm::ABC || Register(info.c, c));
-        return ok ? BytecodeLoadError::None : BytecodeLoadError::BadRegister;
+        const bool fits = (info.form == OperandForm::None || info.form == OperandForm::Ax ||
+                           info.a == OperandBank::None || Tuple(bankOf(info.a), a, 1)) &&
+                          (!usesB || info.b == OperandBank::None || Tuple(bankOf(info.b), b, 1)) &&
+                          (info.form != OperandForm::ABC || info.c == OperandBank::None ||
+                           Tuple(bankOf(info.c), c, 1));
+        return ok(fits, BytecodeLoadError::BadRegister);
+    }
+
+    bool IsAwaited(int64 address) const noexcept {
+        return (awaited_[address / StartBits] >> (address % StartBits)) & 1;
     }
 
     bool IsStart(int64 address) const noexcept {
@@ -879,8 +1081,10 @@ private:
     const BytecodeModule& module_;
     uint32 function_ = NoBytecodeIndex;
     uint32 frame_[BytecodeBankCount] = {};
-    // 함수 명령 시작 표(비트 — 함수 하나는 MaxFunctionWords 단어까지).
+    // 함수 명령 시작 표와 await 표에 있는 주소(비트 — 함수 하나는 MaxFunctionWords 단어까지).
     uint64 starts_[MaxFunctionWords / StartBits + 1] = {};
+    uint64 awaited_[MaxFunctionWords / StartBits + 1] = {};
+    const BytecodeFunction* current_ = nullptr;
 };
 
 } // namespace

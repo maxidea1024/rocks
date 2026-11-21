@@ -205,6 +205,7 @@ private:
 
             return;
         case Opcode::RetErrS:
+        case Opcode::EndExecS:
             out_.AppendFormat("s{} x{}", a, b);
             return;
         case Opcode::Conv:

@@ -98,6 +98,8 @@ const char* IrOpName(IrOp op) noexcept {
         return "TRY";
     case IrOp::ReturnError:
         return "RETURN.ERROR";
+    case IrOp::EndExecution:
+        return "END.EXECUTION";
     case IrOp::New:
         return "NEW";
     case IrOp::Concat:
@@ -273,7 +275,7 @@ bool IrBuilder::Terminated() const noexcept {
     const IrOp last = function_.instructions[block.first + block.count - 1].op;
     return last == IrOp::Jump || last == IrOp::Branch || last == IrOp::Switch ||
            last == IrOp::Return || last == IrOp::Await || last == IrOp::Fault ||
-           last == IrOp::Try || last == IrOp::ReturnError;
+           last == IrOp::Try || last == IrOp::ReturnError || last == IrOp::EndExecution;
 }
 
 void IrBuilder::Add(const IrInstruction& instruction) noexcept {
@@ -414,7 +416,7 @@ bool IrBuilder::Validate() const noexcept {
         const IrOp last = f.instructions[block.first + block.count - 1].op;
         if (last != IrOp::Jump && last != IrOp::Branch && last != IrOp::Switch &&
             last != IrOp::Return && last != IrOp::Await && last != IrOp::Fault &&
-            last != IrOp::Try && last != IrOp::ReturnError) {
+            last != IrOp::Try && last != IrOp::ReturnError && last != IrOp::EndExecution) {
             return false;
         }
     }
@@ -466,6 +468,7 @@ bool IrBuilder::Validate() const noexcept {
             break;
         case IrOp::Return:
         case IrOp::ReturnError:
+        case IrOp::EndExecution:
             ok = optional(i.b);
             break;
         case IrOp::GetField:

@@ -136,8 +136,11 @@ enum class Opcode : uint8 {
     Brf,
     Switch,
     Ret,
-    RetErrS, // Scalar Result A..A+B의 오류를 이 함수의 Result로 반환
-    RetErrB, // Buf Result A의 오류를 이 함수의 Result로 반환
+    RetErrS,  // Scalar Result A..A+B의 오류를 이 함수의 Result로 반환
+    RetErrB,  // Buf Result A의 오류를 이 함수의 Result로 반환
+    EndExecS, // Result가 아닌 함수·handler의 `try` 실패: 현재 실행을 끝내고 Scalar Result A..A+B의
+              // 오류를 기록
+    EndExecB, // 같은 것의 Buf Result A
     // optional
     IsSomeR,
     IsSomeB,

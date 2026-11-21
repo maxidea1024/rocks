@@ -450,6 +450,10 @@ private:
             out_.Append("    RETURN.ERROR ");
             Register(i.b);
             break;
+        case IrOp::EndExecution:
+            out_.Append("    END.EXECUTION ");
+            Register(i.b);
+            break;
         case IrOp::New:
             Assign(i.a);
             NewInstruction(i);
@@ -465,6 +469,11 @@ private:
             break;
         case IrOp::Fault:
             out_.AppendFormat("    FAULT {}", i.extra);
+            if (i.b != NoIrRegister) {
+                out_.Append(" ");
+                Register(i.b);
+            }
+
             break;
         default:
             out_.AppendFormat("    {}", name);
@@ -670,8 +679,15 @@ void TypeChecker::LowerModule(uint32 module) noexcept {
         return;
     }
 
-    if (VerifyBytecode(bytecode).error != BytecodeLoadError::None) {
-        platform::Fatal("Sparks bytecode rejected by the verifier"); // 인코딩의 결함
+    if (const BytecodeRejection rejection = VerifyBytecode(bytecode);
+        rejection.error != BytecodeLoadError::None) {
+        // 인코딩의 결함: 사유와 자리를 진단 출력에 남기고 멈춘다.
+        StringBuilder<256> reason(allocator_);
+        reason.AppendFormat("Sparks verifier: {} in function {} at {}\n",
+                            BytecodeLoadErrorName(rejection.error), rejection.function,
+                            rejection.address);
+        platform::WriteDiagnostic(reason.View().Data(), reason.ByteCount());
+        platform::Fatal("Sparks bytecode rejected by the verifier");
     }
 
     const StringView text = out.View();

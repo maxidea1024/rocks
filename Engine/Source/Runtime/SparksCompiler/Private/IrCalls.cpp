@@ -660,6 +660,22 @@ uint32 IrBuilder::LowerChainedAwait(uint32 node, uint32 call) noexcept {
     return result;
 }
 
+bool IrBuilder::InStartupHook() const noexcept {
+    // 지금 내리는 본문이 `on Awake`·`on Enable`·`on Start` hook인지다.
+    const SyntaxTree& tree = c_.trees_[function_.module];
+    if (tree.Node(function_.node).kind != SyntaxKind::Handler) {
+        return false;
+    }
+
+    const uint32 path = tree.Child(function_.node, 2);
+    if (path == NoNode || tree.Node(path).childCount != 1) {
+        return false;
+    }
+
+    const StringView name = checker_.TokenText(function_.module, tree.Child(path, 0));
+    return name == "Awake" || name == "Enable" || name == "Start";
+}
+
 uint32 IrBuilder::AwaitResultType(uint32 operandNode) noexcept {
     // 3.10절 "await·try": async 함수 호출은 그 반환 타입, 로드 요청 `LoadRequest<T>`는 `Result<T>`,
     // 그 밖의 대기(Delay·NextTick·All·Race·이벤트)는 void다. `try await`의 Try 노드 타입은 꺼낸 T라
@@ -702,7 +718,18 @@ uint32 IrBuilder::LowerTry(uint32 node) noexcept {
     Add(IrOp::Try, result, value, failure, success, node);
     StartBlock(failure);
     ReleaseHeld(0, node);
-    Add(IrOp::ReturnError, NoIrRegister, value, NoIrRegister, 0, node);
+    // Result 함수는 같은 오류를 반환하고, 그 밖의 함수·handler는 현재 실행을 끝낸다(위치별 1회 기록
+    // — SL §8.4). Awake·Enable·Start 안이면 그 hook의 fault다(SD43).
+    const bool resultFunction = returnType_ != NoType && returnType_ != checker_.voidType_ &&
+                                checker_.IsLanguage(returnType_, "Result");
+    if (resultFunction) {
+        Add(IrOp::ReturnError, NoIrRegister, value, NoIrRegister, 0, node);
+    } else if (InStartupHook()) {
+        Add(IrOp::Fault, NoIrRegister, value, NoIrRegister, IrFaultTryInHook, node);
+    } else {
+        Add(IrOp::EndExecution, NoIrRegister, value, NoIrRegister, 0, node);
+    }
+
     StartBlock(success);
     return result;
 }
