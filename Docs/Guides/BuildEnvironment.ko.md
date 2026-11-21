@@ -60,13 +60,13 @@ Setup is complete. Open a new terminal (or restart your IDE) and run:
 |---|---|---|
 | Git | winget, `core.longpaths=true` | Command Line Tools에 들어 있다 |
 | .NET SDK | `global.json` 버전(10.0.302, 10.0.3xx)을 winget으로 | 같은 버전의 공식 압축 파일을 SHA-512로 확인하고 `~/.dotnet`에 |
-| PowerShell 7 | winget | `--android`일 때만, Homebrew |
+| PowerShell 7 | winget | 늘(Rocks.proj가 `Build/Tools.ps1`로 빌드 도구를 준비한다), `Build/Toolchain.json`에 고정한 공식 tar.gz(SHA-256 확인) |
 | C++ 도구 | Visual Studio 17.8 이상이 없으면 **Build Tools for Visual Studio 2026**(IDE 없음) | **Command Line Tools** |
 | FXC SDK | 셰이더 시험용 Windows SDK 10.0.22621 | (해당 없음) |
 | LLVM | 검증 LLVM 22.1.8을 `%LOCALAPPDATA%\Rocks\toolchains`에 받고 사용자 PATH 맨 앞에 | (Apple clang을 쓴다) |
 | clang-format | 21.1.6을 같은 곳에 받고 `ROCKS_CLANG_FORMAT` 설정 | 같은 파일을 SHA-256으로 확인하고 `~/Library/Application Support/Rocks/toolchains`에, 시작 파일에 설정 |
 
-- 기본은 IDE 없는 Build Tools(Windows)·Command Line Tools(macOS)다. IDE는 옵션이다(3절). macOS는 Homebrew 없이 끝난다.
+- 기본은 IDE 없는 Build Tools(Windows)·Command Line Tools(macOS)다. IDE는 옵션이다(3절). macOS는 Homebrew 없이 끝난다(PowerShell 7도 고정 tar.gz를 `~/Library/Application Support/Rocks/toolchains/powershell-<판>`에 푼다).
 - 받는 파일의 URL과 해시는 `Build/Toolchain.json`이 고정한다.
 - Visual Studio Installer와 winget 설치 프로그램이 UAC 창을 띄울 수 있다. 마법사 자신은 관리자 권한이 필요 없다.
 - 이미 떠 있는 터미널·VS Code·Visual Studio는 바뀐 PATH와 환경 변수를 모른다. 마법사가 끝나면 모두 다시 연다.

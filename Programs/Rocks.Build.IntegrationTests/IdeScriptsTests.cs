@@ -37,7 +37,9 @@ internal static class IdeScriptsTests
         await LockOrderAsync(repository);
         await ToolInputsAsync(repository);
         await NMakeCommandsAsync(repository);
-        Console.WriteLine("PASS IDE scripts: clean boundaries, IDE build lock order, tool input coverage, NMake build/clean/rebuild and terminal no-op");
+        await StalenessAsync(repository);
+        Console.WriteLine("PASS IDE scripts: clean boundaries, IDE build lock order, tool inputs and rebuild decisions, Visual Studio or NMake build/clean/rebuild, " +
+            "terminal no-op, failure exit codes, RPF0001");
     }
 
     private static async Task CleanBoundariesAsync(string repository)
@@ -80,7 +82,7 @@ internal static class IdeScriptsTests
             RedirectStandardError = true,
             ArgumentList = { "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", Path.Combine(repository, "Build", "IdeBuild.ps1"),
                 "-Action", "Build", "-Target", SmallTarget, "-Configuration", "Debug", "-Platform", "Windows" },
-            Environment = { ["ROCKS_IDE_BUILD_PROBE"] = probe }
+            Environment = { ["ROCKS_IDE_BUILD_PROBE"] = probe, ["ROCKS_IDE_BUILD_TEST"] = "1" }
         };
         using var process = Process.Start(start)!;
         process.OutputDataReceived += (_, line) =>
@@ -124,6 +126,40 @@ internal static class IdeScriptsTests
             StringComparer.OrdinalIgnoreCase);
         string[] missing = [.. EvaluatedToolInputs(repository).Where(path => !inputs.Contains(path))];
         Require(missing.Length == 0, "Build/Tools.ps1 does not fingerprint the tool inputs " + string.Join(", ", missing));
+        Require(!inputs.Any(path => path.StartsWith("Programs/Rocks.Build.Tests/", StringComparison.Ordinal) ||
+            path.StartsWith("Programs/Rocks.Build.IntegrationTests/", StringComparison.Ordinal)), "test projects must not be tool inputs");
+
+        // 지문이 같으면 dotnet build를 부르지 않고, 도구 원본(도구 프로젝트 디렉터리의 파일)이 바뀌면 부른다. 시험 프로젝트 파일은 입력이
+        // 아니다. 끝에 원래대로 되돌리면 다시 한 번 빌드한다.
+        async Task<string> Prepare()
+        {
+            var run = await ProcessRunner.RunAsync(new("pwsh", ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                Path.Combine(repository, "Build", "Tools.ps1")], repository));
+            Require(run.ExitCode == 0, "Tools.ps1 failed: " + run.StdOut + run.StdErr);
+            return run.StdOut;
+        }
+
+        const string upToDate = "Rocks tools are up to date.";
+        const string building = "Building the Rocks tools";
+        await Prepare();
+        Require((await Prepare()).Contains(upToDate, StringComparison.Ordinal), "unchanged tool inputs rebuilt the tools");
+        string testProbe = Path.Combine(repository, "Programs", "Rocks.Build.Tests", "rocks-tools-fingerprint-probe.txt");
+        string toolProbe = Path.Combine(repository, "Programs", "Rocks.Build.Cli", "rocks-tools-fingerprint-probe.txt");
+        try
+        {
+            File.WriteAllText(testProbe, "probe\n");
+            Require((await Prepare()).Contains(upToDate, StringComparison.Ordinal), "a test project change rebuilt the tools");
+            File.WriteAllText(toolProbe, "probe\n");
+            Require((await Prepare()).Contains(building, StringComparison.Ordinal), "a tool input change did not rebuild the tools");
+            Require((await Prepare()).Contains(upToDate, StringComparison.Ordinal), "the rebuilt tools are not up to date");
+        }
+        finally
+        {
+            File.Delete(testProbe);
+            File.Delete(toolProbe);
+        }
+
+        Require((await Prepare()).Contains(building, StringComparison.Ordinal), "removing a tool input did not rebuild the tools");
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -174,6 +210,44 @@ internal static class IdeScriptsTests
         return result;
     }
 
+    // V14: RPF0001. 프로젝트 파일을 만든 뒤 기본 빌드와 --unity off·--adaptive off·--pch off 빌드는 경고가 없고, 소스를 더하면 경고가 나며,
+    // 다시 만들면 사라진다(Android·PublicHeaderChecks는 조건 코드와 Rocks.Build.Tests의 지문 시험이 덮는다).
+    private static async Task StalenessAsync(string repository)
+    {
+        string cli = Path.Combine(repository, "out", "dotnet", "bin", "Rocks.Build.Cli", "Debug", "net10.0", "Rocks.Build.Cli.dll");
+        async Task<string> Cli(params string[] arguments)
+        {
+            var result = await ProcessRunner.RunAsync(new("dotnet", [cli, .. arguments], repository));
+            Require(result.ExitCode == 0, "Rocks.Build.Cli " + string.Join(' ', arguments) + " failed: " + result.StdOut + result.StdErr);
+            return result.StdOut;
+        }
+
+        string[] Build(params string[] extra) => ["build", "--root", repository, "--target", SmallTarget, "--configuration", "Debug", .. extra];
+        bool Stale(string output) => output.Contains("warning RPF0001", StringComparison.Ordinal);
+        await Cli("projectfiles", "--root", repository);
+        Require(!Stale(await Cli(Build())), "a fresh build reported stale project files");
+        foreach (string[] mode in new[] { new[] { "--unity", "off" }, ["--adaptive", "off"], ["--pch", "off"] })
+        {
+            Require(!Stale(await Cli(Build(mode))), "a build with " + string.Join(' ', mode) + " reported stale project files");
+        }
+
+        string probe = Path.Combine(repository, "Programs", SmallTarget, "Private", "RocksStalenessProbe.cpp");
+        try
+        {
+            File.WriteAllText(probe, "int RocksStalenessProbe() noexcept;\nint RocksStalenessProbe() noexcept { return 1; }\n");
+            Require(Stale(await Cli(Build())), "adding a source did not report stale project files");
+            await Cli("projectfiles", "--root", repository);
+            Require(!Stale(await Cli(Build())), "regenerating did not clear the stale project files warning");
+        }
+        finally
+        {
+            File.Delete(probe);
+        }
+
+        await Cli("projectfiles", "--root", repository);
+        Require(!Stale(await Cli(Build())), "project files are stale after removing the probe and regenerating");
+    }
+
     // V6: 생성 프로젝트의 NMake 명령을 cmd로 돌린다.
     private static async Task NMakeCommandsAsync(string repository)
     {
@@ -186,12 +260,37 @@ internal static class IdeScriptsTests
 
         (string build, string clean, string rebuild, string output) = NMakeProperties(project);
         string outputDirectory = Path.GetDirectoryName(Path.GetDirectoryName(output)!)!;
-        await Run(build, "NMake build");
+        // Visual Studio 18이 있으면 Visual Studio MSBuild로 빌드한다 — Makefile 프로젝트도 INCLUDE·LIB 등을 넣는 실제 경로다(7.1절 환경
+        // 정리). 없으면 NMake 명령줄을 cmd로 그대로 돌린다.
+        string? msbuild = await ProjectFilesWriterTests.VisualStudioMSBuildAsync();
+        if (msbuild is not null)
+        {
+            var visualStudio = await ProcessRunner.RunAsync(new(msbuild, [project, "-nologo", "-t:Build", "-p:Configuration=Debug", "-p:Platform=x64"],
+                Path.GetDirectoryName(project)!, ProjectFilesWriterTests.VisualStudioEnvironment()));
+            Require(visualStudio.ExitCode == 0, "Visual Studio MSBuild build failed: " + visualStudio.StdOut + visualStudio.StdErr);
+            Require(!visualStudio.StdOut.Contains("RPF0001", StringComparison.Ordinal), "the Visual Studio build reported stale project files: " + visualStudio.StdOut);
+        }
+        else
+        {
+            Console.WriteLine("SKIP IDE scripts V6 Visual Studio MSBuild: no Visual Studio 18 with the ClangCL toolset; running the NMake command line");
+            await Run(build, "NMake build");
+        }
+
         Require(File.Exists(output), "NMakeOutput was not built: " + output);
         var terminal = await ProcessRunner.RunAsync(new("dotnet", ["msbuild", Path.Combine(repository, "Rocks.proj"), "-t:Build", "-nologo",
             "-p:RocksTarget=" + SmallTarget, "-p:Configuration=Debug", "-p:Compiler=" + Compiler(build)], repository));
         Require(terminal.ExitCode == 0 && terminal.StdOut.Contains("executed=0;", StringComparison.Ordinal),
             "the terminal build after the IDE build was not a no-op: " + terminal.StdOut);
+        Require(!terminal.StdOut.Contains("RPF0001", StringComparison.Ordinal), "the terminal build reported stale project files: " + terminal.StdOut);
+
+        // 도구를 다시 빌드한 회차에도 실패는 실패다(도구 빌드 출력이 종료 코드에 섞이지 않는다).
+        File.Delete(Path.Combine(repository, "out", "dotnet", ".rocks-tools.json"));
+        var failing = await ProcessRunner.RunAsync(new("pwsh", ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+            Path.Combine(repository, "Build", "IdeBuild.ps1"), "-Action", "Build", "-Target", "NoSuchTarget", "-Configuration", "Debug", "-Platform", "Windows"],
+            repository));
+        Require(failing.ExitCode != 0 && failing.StdOut.Contains("Building the Rocks tools", StringComparison.Ordinal) &&
+            failing.StdOut.Contains("error RB0001", StringComparison.Ordinal), "a failing IDE build after a tool rebuild must fail with error RB0001: " +
+            failing.ExitCode + " " + failing.StdOut);
         await Run(clean, "NMake clean");
         string[] left = [.. Directory.EnumerateFileSystemEntries(outputDirectory).Select(Path.GetFileName).Order(StringComparer.Ordinal)!];
         Require(left.SequenceEqual([CleanCommand.OutputMarker, ".rocks-invocation.lock"], StringComparer.Ordinal), "NMake clean left " + string.Join(", ", left));
@@ -236,7 +335,8 @@ internal static class IdeScriptsTests
 
     private static string LockName(string repository)
     {
-        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(Path.TrimEndingDirectorySeparator(Path.GetFullPath(repository)).ToLowerInvariant());
+        // Build/Tools.ps1과 같다: 디스크 철자로 맞춘 루트(끝 구분자 없음)의 소문자 UTF-8.
+        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(Path.TrimEndingDirectorySeparator(PathSpelling.OnDisk(Path.GetFullPath(repository))).ToLowerInvariant());
         return @"Local\Rocks.IdeBuild." + Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes))[..16];
     }
 

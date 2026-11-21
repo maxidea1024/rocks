@@ -16,12 +16,16 @@ if ($Compiler) {
     $arguments += @('--compiler', $Compiler)
 }
 
-$code = 0
+[int] $code = 0
 Enter-RocksIdeLock
 try {
     Update-RocksTools
     & dotnet $cli @arguments | Out-Host
     $code = $LASTEXITCODE
+}
+catch {
+    [Console]::Out.WriteLine("error RB0002: $($_.Exception.Message)")
+    $code = 1
 }
 finally {
     Exit-RocksIdeLock
