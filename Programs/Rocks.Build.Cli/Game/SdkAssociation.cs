@@ -37,18 +37,31 @@ internal static class SdkAssociation
             }
 
             SdkRegistration? entry = registry.List().FirstOrDefault(value => SdkRegistries.SameId(value.Id, association));
-            return entry is not null && File.Exists(Path.Combine(entry.Path, ManifestName)) ? entry.Path
-                : throw new ArgumentException($"{project.FilePath}: engineAssociation {association} is not a registered SDK on this computer. " +
+            if (entry is null)
+            {
+                throw new ArgumentException($"{project.FilePath}: engineAssociation {association} is not a registered SDK on this computer. " +
                     Registered(registry));
+            }
+
+            return File.Exists(Path.Combine(entry.Path, ManifestName)) ? entry.Path
+                : throw new ArgumentException($"{project.FilePath}: engineAssociation {association} is registered but missing: {Missing(entry)}.");
         }
 
         var reasons = new List<string>();
         var candidates = new List<(SdkRegistration Entry, EngineVersion Version)>();
-        foreach (SdkRegistration entry in registry.List())
+        var seen = new List<string>();
+        foreach (SdkRegistration entry in registry.List(reasons))
         {
+            // 같은 SDK를 두 ID로 등록했으면 하나로 본다(거짓 동률을 내지 않는다, UE DesktopPlatformWindows도 중복 경로를 지운다).
+            if (seen.Any(path => SdkRegistries.SamePath(path, entry.Path)))
+            {
+                continue;
+            }
+
+            seen.Add(entry.Path);
             if (!File.Exists(Path.Combine(entry.Path, ManifestName)))
             {
-                reasons.Add($"{entry.Path}: missing (unregister it with sdk-unregister)");
+                reasons.Add($"{entry.Path}: registered but missing ({Missing(entry)})");
                 continue;
             }
 
@@ -77,7 +90,7 @@ internal static class SdkAssociation
         if (candidates.Count == 0)
         {
             throw new ArgumentException($"{project.FilePath}: no registered SDK fits engineVersion {project.EngineVersion} on this computer" +
-                (reasons.Count == 0 ? " (no SDK is registered; use sdk-register)." : ": " + string.Join("; ", reasons)) +
+                (reasons.Count == 0 && seen.Count == 0 ? " (no SDK is registered; use sdk-register)." : ": " + string.Join("; ", reasons)) +
                 " Set engineAssociation with associate or pass --sdk.");
         }
 
@@ -102,6 +115,9 @@ internal static class SdkAssociation
             return null;
         }
     }
+
+    private static string Missing(SdkRegistration entry) =>
+        $"{ManifestName} not found in {entry.Path}; remove the entry with sdk-unregister --id {entry.Id}";
 
     private static string Registered(ISdkRegistry registry)
     {

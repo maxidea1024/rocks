@@ -3,12 +3,12 @@
 # (Build/Tools.ps1), so it never races a Visual Studio build of the same working copy.
 #
 #   pwsh Build/GenerateProjectFiles.ps1 [-Compiler <clang-cl>]
-param([string] $Compiler)
+param([string] $Compiler, [string] $Project)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Tools.ps1')
-if ($script:RocksSdk) {
+if ($script:RocksSdk -or $Project) {
     # Game project files and their NMake commands come with the game solution generator; an SDK only ships these scripts for it.
     [Console]::Out.WriteLine("error RB0002: $([System.IO.Path]::GetFileName($PSCommandPath)) does not support game projects yet; use Rocks.Build.Cli game.")
     exit 1
