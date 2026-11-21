@@ -7,3 +7,5 @@ error S0302 Game/Main.spark 5:8
 error S0303 Game/Main.spark 6:8
 error S0304 Game/Main.spark 7:8
 error S0305 Game/Main.spark 8:8
+# Import rules only: unused imports (S0714, LC2d) are checked in the Flow area.
+stage imports

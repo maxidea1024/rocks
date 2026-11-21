@@ -1,0 +1,36 @@
+import Shared.Api;
+
+interface Usable {
+    fn Use();
+}
+
+open class Base : ScriptableComponent {
+    open fn Step() {
+    }
+}
+
+class Derived : Base {
+}
+
+class Door : ScriptableComponent {
+    var Kind: Class<Door>?;
+
+    @rpc(Server) fn Ping() {
+    }
+
+    @test fn Check() {
+    }
+
+    @edit var Speed: float = 1.0;
+
+    on Validate() {
+    }
+
+    on Start() {
+    }
+}
+
+class Impl : Root, Pingable {
+    fn Ping() {
+    }
+}

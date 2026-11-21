@@ -1,0 +1,25 @@
+# Object local names after 'await' (S0412, 3.11): reads before the await and in the awaited statement are fresh;
+# branches (if-let else included), loop back-edges, continue/break paths and switches without default carry the
+# state, 'while (true)' ends only by break; assignment, declarations, 'if (let)' and loop variables refresh it;
+# the left path is read after the right value; '?? return' and 'try await' are covered; value types, containers
+# and assets are unaffected; a stale read has type 'T?' (S0401 when passed as 'T').
+error S0412 52:9
+error S0412 53:9
+error S0412 54:9
+error S0412 72:9
+error S0412 73:9
+error S0412 90:9
+error S0412 103:13
+error S0412 125:13
+error S0412 136:9
+error S0412 146:13
+error S0412 156:9
+error S0412 168:9
+error S0412 183:9
+error S0412 202:9
+error S0401 216:13
+error S0412 233:9
+error S0412 239:38
+error S0412 248:13
+error S0412 291:9
+error S0412 297:9

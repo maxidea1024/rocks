@@ -1,0 +1,117 @@
+enum Mode { A, B }
+
+const Limit: int = 3;
+
+struct Point {
+    var X: int;
+    let Y: int = 0;
+
+    fn Move(): Point {
+        X = 1;
+        return Point(X: X + 1);
+    }
+}
+
+struct Pack {
+    var Items: Array<int> = [];
+}
+
+class Other : ScriptableComponent {
+    var Health = 10;
+}
+
+class Door : ScriptableComponent {
+    var Count = 0;
+    let Fixed = 1;
+    var Spot = vec3(0.0, 0.0, 0.0);
+    var Items: Array<int> = [];
+    let Frozen: Array<int> = [];
+    var Range: SphereCollider? = SphereCollider(Radius: 1.0);
+    let Ring = SphereCollider(Radius: 2.0);
+
+    fn Valid(p: Point, other: Other, a: Actor) {
+        var local = 1;
+        local = 2;
+        var point = p;
+        point.X = 3;
+        Count = local + point.X;
+        Spot.X = 1.0;
+        Items[0] = 1;
+        Items.Add(2);
+        Ring.Radius = 3.0;
+        Ring.RelativeRotation.Yaw = 30.0;
+        Range = Ring;
+        a.Location = vec3(0.0, 0.0, 0.0);
+        _ = other;
+    }
+
+    fn Errors(p: Point, other: Other, a: Actor, values: Array<int>, text: string) {
+        let fixedLocal = 1;
+        fixedLocal = 2;
+        Fixed = 2;
+        Limit = 4;
+        p.X = 1;
+        p = Point(X: 1);
+        values.Add(1);
+        Frozen.Add(1);
+        Frozen[0] = 1;
+        other.Health = 1;
+        a.HasAuthority = true;
+        text.Length = 1;
+        var copy = text;
+        copy.Length = 1;
+        Mode.A = Mode.B;
+        Mode = 1;
+        World = World;
+        Valid = Valid;
+        Limit.X = 1;
+        for (i in values) {
+            i = 2;
+        }
+
+        if (let found = a.Find<ScriptableComponent>()) {
+            found = found;
+        }
+
+        var point = p;
+        point.Y = 2;
+        Make().X = 1;
+        a.Find<ScriptableComponent>()?.Owner = a;
+        Owner = a;
+    }
+
+    fn Make(): Point {
+        return Point(X: 1);
+    }
+
+    fn MakePack(): Pack {
+        return Pack();
+    }
+
+    fn GetActor(): Actor {
+        return Owner;
+    }
+
+    fn SameClass(peer: Door) {
+        peer.Count = 1;
+    }
+
+    fn MoreErrors(m: Map<string, int>, s: Set<int>, t: TagSet) {
+        let v = vec3(0.0, 0.0, 0.0);
+        v.X = 1.0;
+        _ = v;
+        _ = m.Remove("a");
+        m.Clear();
+        _ = s.Add(1);
+        _ = s.Remove(1);
+        s.Clear();
+        t.Add(Tag("Status.Fire"));
+        t.Remove(Tag("Status.Fire"));
+        MakePack().Items.Add(1);
+        GetActor().Location = vec3(0.0, 0.0, 0.0);
+        var local = 1;
+        (local) = 2;
+        _ = local;
+        Make() = Point(X: 1);
+    }
+}

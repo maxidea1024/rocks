@@ -516,6 +516,8 @@ TEST(SparksTypes_InitializerChainLimit) {
         Fixture fixture(allocator);
         const uint32 game = fixture.Package("Game");
         fixture.Module(game, "Game", "Main.spark", source.View());
+        // 타입 단계만 본다(멤버 접근 초기값은 LC2d에서 S0510도 받는다).
+        REQUIRE(fixture.compilation.SetLastStage(CompilationStage::Types));
         REQUIRE(fixture.Check());
         REQUIRE(fixture.diagnostics.Count() == 1);
         CHECK(fixture.diagnostics[0].Code() == C::InitializerTooDeep);
@@ -541,11 +543,12 @@ TEST(SparksTypes_Deterministic) {
         REQUIRE(AppendDiagnostics(out, fixture.sources, fixture.diagnostics));
         out.AppendFormat("{} {}\n", fixture.compilation.Symbols().Size(),
                          fixture.compilation.Types().Size());
-        if (round == 0 && fixture.diagnostics.Count() != 4) {
+        // 타입 진단 넷과 흐름 진단 둘(S0712 soft, await 뒤 `a.Destroyed`의 S0412)이다.
+        if (round == 0 && fixture.diagnostics.Count() != 6) {
             fixture.Print();
         }
 
-        CHECK(fixture.diagnostics.Count() == 4);
+        CHECK(fixture.diagnostics.Count() == 6);
     }
 
     CHECK(first.View() == second.View());

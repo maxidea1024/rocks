@@ -237,6 +237,9 @@ ExpressionValue TypeChecker::MemberOfValue(const CheckContext& context, uint32 n
         }
 
         type = NonOptional(type);
+    } else if (IsOptional(type) && receiver.stale) {
+        ReportStaleRead(context, objectNode);
+        return result;
     } else if (IsOptional(type)) {
         Report(context, DiagnosticCode::MayBeNull, objectNode,
                "The value may be null, so its members cannot be used directly.",
@@ -319,6 +322,30 @@ StringView TypeChecker::SimilarMember(Span<const uint64> spaces, uint32 receiver
     return best;
 }
 
+void TypeChecker::ReportStaleRead(const CheckContext& context, uint32 objectNode) noexcept {
+    uint32 name = objectNode;
+    while (name != NoNode &&
+           compilation_.trees_[context.module].Node(name).kind == SyntaxKind::Parenthesized) {
+        name = compilation_.trees_[context.module].Child(name, 0);
+    }
+
+    StringBuilder<CompilationMessageInlineBytes> message(allocator_);
+    StringBuilder<CompilationMessageInlineBytes> fix(allocator_);
+    const StringView text = TokenText(context.module, name);
+    message.AppendFormat("'{}' may have been destroyed while waiting, so its members cannot be "
+                         "used directly.",
+                         text);
+    fix.Append("Check it again with 'if (let x = ");
+    fix.Append(text);
+    fix.Append(") { ... }', or use '?.'.");
+    if (binder_.Succeeded(message) && binder_.Succeeded(fix)) {
+        Report(context, DiagnosticCode::MayBeNull, objectNode, message.View(),
+               "After 'await', a local name that refers to an object has a type with '?': the "
+               "object can be destroyed while the function waits.",
+               fix.View());
+    }
+}
+
 bool TypeChecker::IsObjectType(uint32 type) const noexcept {
     return type != NoType && IsReference(type) && !IsAssetType(type);
 }
@@ -367,6 +394,12 @@ ExpressionValue TypeChecker::JudgeCall(const CheckContext& context, uint32 node,
 
     switch (callee.kind) {
     case K::Function:
+        // 값 타입 경로를 바꾸는 변경 메서드는 그 경로가 쓸 수 있어야 한다(3.11절).
+        if (callee.instance && IsMutatingMember(callee.symbol) &&
+            tree.Node(calleeNode).kind == SyntaxKind::Member) {
+            CheckWritablePath(context, tree.Child(calleeNode, 0), node);
+        }
+
         return CallFunction(context, node, callee, typeArguments);
     case K::Literal:
         return CheckLiteral(context, node, callee.symbol, expected);

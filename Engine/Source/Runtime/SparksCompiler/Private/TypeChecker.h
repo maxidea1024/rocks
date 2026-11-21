@@ -79,6 +79,7 @@ struct ExpressionValue {
     uint32 receiver = NoType; // Function·Event: 수신자 타입(인스턴스 멤버·제네릭 치환)
     bool instance = false;    // Function: 값으로 불렀다(static·이름 공간 함수가 아니다)
     bool chained = false;     // `?.`로 얻었다(호출 결과도 `?`가 된다)
+    bool stale = false;       // await 뒤에 읽은 객체 지역 이름이라 `T?`가 되었다(3.11절)
     ConstantValue constant;
 };
 
@@ -93,6 +94,8 @@ struct CheckContext {
     uint32 resultValue = NoType; // Result<T>의 T(Result<void>면 void 타입)
 };
 
+class FlowAnalyzer;
+
 class TypeChecker final {
 public:
     explicit TypeChecker(NameBinder& binder) noexcept;
@@ -100,6 +103,8 @@ public:
     void Run() noexcept;
 
 private:
+    friend class FlowAnalyzer;
+
     // 노드 대표 토큰의 글자다(연산자·멤버 이름·리터럴).
     StringView TokenText(uint32 module, uint32 node) const noexcept;
 
@@ -135,6 +140,40 @@ private:
     // 재귀 경로(CheckMember)의 frame을 작게 두려고 문장 만들기를 따로 둔다.
     void ReportStaticInstance(const CheckContext& context, uint32 node, StringView name,
                               uint32 valueType) noexcept;
+
+    // ---- 선언 규칙(CheckDeclarations.cpp, 3.11절) ----
+    // `?` 없는 객체 필드(S0428)·상수식(S0510)·const 타입(S0512)·프로필(S1113)을 검사한다.
+    void CheckDeclarationRules(uint32 module) noexcept;
+    void CheckProfile(uint32 module) noexcept;
+    // const 초기값 순환(S0511, 순환 하나에 하나)을 찾는다(모든 모듈의 검사 뒤).
+    void CheckConstCycles() noexcept;
+    // root가 상수식이 아니면 처음(왼쪽부터) 상수식이 아닌 하위 식, 상수식이면 NoNode다.
+    // allowComponent면 component 생성도 받는다(필드 초기값).
+    uint32 FirstNonConstant(uint32 module, uint32 root, bool allowComponent) noexcept;
+    bool IsConstType(uint32 type) const noexcept;
+    // 선언(class·필드 등)에 그 이름의 attribute가 있는지다(이름만 본다 — 인자는 LC3).
+    bool HasAttribute(uint32 module, uint32 declaration, StringView name) const noexcept;
+    // (패키지 이름, 모듈 import 경로, 원문 위치) byte 순서로 left가 앞인지다(순환 진단 위치).
+    bool DeclaredBefore(uint32 left, uint32 right) const noexcept;
+
+    // ---- 흐름 분석(CheckFlow.cpp, 3.11절) ----
+    // stale이면 await 뒤 객체 지역 이름의 읽기를 staleRead_에 표시하고(본문 검사 전), 아니면
+    // S0710–S0712를 낸다(본문 검사 뒤).
+    void AnalyzeFlow(const CheckContext& context, uint32 function, bool stale) noexcept;
+    // owner class(와 기반 class)가 구현하는 interface에 그 이름의 메서드가 있는지다.
+    bool ImplementsInterfaceMethod(uint32 owner, StringView name) const noexcept;
+    // 쓰지 않는 import(S0714)를 알린다.
+    void CheckUnusedImports(uint32 module) noexcept;
+    // await 뒤에 읽은 객체 지역 이름에 `.`을 쓴 것(S0412)을 알린다.
+    void ReportStaleRead(const CheckContext& context, uint32 objectNode) noexcept;
+
+    // ---- 대입 경로(CheckAssignments.cpp, 3.11절) ----
+    // 대입 대상·변경 메서드 수신자 경로를 검사한다(S0701–S0706·S0731, 위치는 reportNode).
+    void CheckWritablePath(const CheckContext& context, uint32 path, uint32 reportNode) noexcept;
+    // 부록 B의 값 타입 변경 메서드(Array.Add 등)인지다.
+    bool IsMutatingMember(uint32 symbol) const noexcept;
+    // 엔진 필드가 schema `access: readWrite`인지다.
+    bool IsEngineFieldWritable(uint32 symbol) const noexcept;
 
     // 나누는 쪽이 값 0인 정수 상수(타입 없는 상수·`const`)면 S0504를 내고 true다(3.10절).
     bool ReportZeroDivisor(const CheckContext& context, const ExpressionValue& divisor,
@@ -321,6 +360,12 @@ private:
     Array<uint32> nextCase_;
     // 지금 정하고 있는 초기값의 깊이다(S0427).
     uint32 initializerDepth_ = 0;
+    // 흐름·대입·미사용·상수식·필드·프로필 검사(LC2d, 3.11절)를 하는지다(단계가 Flow 이상).
+    bool flow_ = false;
+    // staleModule_ 모듈의 노드마다 await 뒤 상태로 읽는 지역 이름인지다(3.11절 — 1이면 객체 타입의
+    // 읽기를 `T?`로 본다).
+    Array<uint8> staleRead_;
+    uint32 staleModule_ = NoModule;
 };
 
 } // namespace rocks::sparks::detail

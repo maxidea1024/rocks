@@ -146,7 +146,12 @@ uint32 NameBinder::ResolveSimpleName(const BodyContext& context, uint32 node, St
     bool unavailableContext = false;
     const uint32 found = LookupValue(context, name, &unavailableContext);
     if (found != NoSymbol) {
+        NoteUse(context.module, found);
         return found;
+    }
+
+    if (!unavailableContext) {
+        unresolvedNames_[context.module] = 1;
     }
 
     if (unavailableContext) {
@@ -335,6 +340,49 @@ void NameBinder::ReportUnknown(const BodyContext& context, bool type, StringView
 }
 
 uint32 NameBinder::ResolveTypePath(const BodyContext& context, uint32 path) noexcept {
+    const uint32 symbol = LookupTypePath(context, path);
+    if (symbol != NoSymbol) {
+        NoteUse(context.module, symbol);
+    } else {
+        unresolvedNames_[context.module] = 1;
+    }
+
+    return symbol;
+}
+
+void NameBinder::NoteUse(uint32 module, uint32 symbol) noexcept {
+    const Compilation& c = compilation_;
+    const Symbol& entry = c.symbols_[symbol];
+    uint32 target = NoModule;
+    switch (entry.kind) {
+    case SymbolKind::Alias:
+        target = entry.index;
+        break;
+    case SymbolKind::Class:
+    case SymbolKind::Struct:
+    case SymbolKind::Enum:
+    case SymbolKind::Interface:
+    case SymbolKind::Const:
+    case SymbolKind::Function:
+        target = entry.module;
+        break;
+    default:
+        return; // 멤버·지역·엔진·언어 이름은 import로 찾지 않는다
+    }
+
+    if (target == module || target >= c.modules_.Size()) {
+        return;
+    }
+
+    const auto& owner = c.modules_[module];
+    for (uint32 index = 0; index < owner.importCount; ++index) {
+        if (c.imports_[owner.firstImport + index].module == target) {
+            importUsed_[owner.firstImport + index] = 1;
+        }
+    }
+}
+
+uint32 NameBinder::LookupTypePath(const BodyContext& context, uint32 path) noexcept {
     Compilation& c = compilation_;
     const uint32 module = context.module;
     const SyntaxTree& tree = c.trees_[module];

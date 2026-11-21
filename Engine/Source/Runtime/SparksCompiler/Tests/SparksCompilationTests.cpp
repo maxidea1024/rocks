@@ -158,6 +158,8 @@ TEST(SparksCompilation_ResolvesImportsAcrossPackages) {
         const uint32 score = fixture.Module(game, "Game", "Combat/Score.spark", "import Main;\n");
         const uint32 sword = fixture.Module(weapons, "Weapons", "Sword.spark");
         const uint32 bow = fixture.Module(weapons, "Weapons", "Arms/Bow.spark");
+        // import 단계만 본다(쓰지 않는 import S0714는 Flow 단계 — Conformance/Flow).
+        REQUIRE(fixture.compilation.SetLastStage(CompilationStage::Imports));
         REQUIRE(fixture.Check());
         CHECK(fixture.Clean());
         CHECK(fixture.compilation.SchemaCount() == 1);
@@ -625,6 +627,8 @@ TEST(SparksCompilation_ImportResolutionS0301ToS0305) {
                                            "import Rocks.Engine;\n"      // 9 S0305
                                            "import Rocks;\n"             // 10 S0305
                                            "import Weapons.Sword;\n");   // 11 해석
+        // import 단계만 본다(쓰지 않는 import S0714는 Flow 단계 — Conformance/Flow).
+        REQUIRE(fixture.compilation.SetLastStage(CompilationStage::Imports));
         REQUIRE(fixture.Check());
         const Expected expected[] = {
             {C::UnknownModule, "Game/Main.spark", 1, 8},
@@ -674,6 +678,8 @@ TEST(SparksCompilation_ImportsThatAreNotJudged) {
         const uint32 main = fixture.Module(game, "Game", "Main.spark",
                                            "import Broken.X;\nimport Missing.Y;\nimport A.;\n"
                                            "import Other.Thing;\n");
+        // import 단계만 본다(쓰지 않는 import S0714는 Flow 단계 — Conformance/Flow).
+        REQUIRE(fixture.compilation.SetLastStage(CompilationStage::Imports));
         REQUIRE(fixture.Check());
         const Expected expected[] = {
             {C::UnsupportedLanguageVersion, "Broken/SparksPackage.json5", 1, 27},
@@ -739,6 +745,8 @@ TEST(SparksCompilation_ImportOwnPackageNameAndLexicalErrors) {
         fixture.Module(game, "Game", "X.spark");
         fixture.Module(game, "Game", "Main.spark",
                        "import Main;\nimport Main;\nimport X;\nimport X as Y;\nimport X;\n");
+        // import 단계만 본다(쓰지 않는 import S0714는 Flow 단계 — Conformance/Flow).
+        REQUIRE(fixture.compilation.SetLastStage(CompilationStage::Imports));
         REQUIRE(fixture.Check());
         const Expected expected[] = {
             {C::SelfImport, "Game/Main.spark", 1, 8},
@@ -913,7 +921,7 @@ TEST(SparksCompilation_AllocationFailureEverywhere) {
             auto checked = fixture.compilation.Check(fixture.diagnostics);
             if (checked) {
                 succeeded = true;
-                CHECK(fixture.diagnostics.Count() == 5);
+                CHECK(fixture.diagnostics.Count() == 6); // S0714(Weapons.Sword)까지
             } else {
                 ++failures;
                 CHECK(checked.Error() == ErrorCode::OutOfMemory);

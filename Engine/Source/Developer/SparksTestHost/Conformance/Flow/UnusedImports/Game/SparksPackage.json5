@@ -1,0 +1,1 @@
+{ name: "Game", sparks: 1, profile: "full", dependencies: ["Lib"] }

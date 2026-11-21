@@ -1,0 +1,37 @@
+class Mover : ScriptableComponent {
+}
+
+class Holder : ScriptableComponent {
+    let Owned = SphereCollider(Radius: 1.0);
+    @edit var Hinge: SceneComponent;
+    @edit var Peer: Mover;
+    var Target: Actor?;
+    var Bare: Actor;
+    let NotOwned: Actor;
+    var NotLet = SphereCollider(Radius: 2.0);
+    var Usable: Interactable;
+    let Wrapped = (SphereCollider(Radius: 3.0));
+}
+
+struct Marked {
+    @edit var Pinned: Actor;
+}
+
+class Service : WorldService {
+    @edit var Pinned: Actor;
+    var Maybe: Actor?;
+}
+
+class Rules : DataAsset {
+    @edit var Pinned: Actor;
+}
+
+class Level : LevelScript {
+    @edit var Door: Actor;
+}
+
+struct Pair {
+    var Left: Actor;
+    var Right: Actor?;
+    var Sound: SoundAsset?;
+}

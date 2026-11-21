@@ -1,0 +1,3 @@
+struct Point {
+    var X: int = 0;
+}
