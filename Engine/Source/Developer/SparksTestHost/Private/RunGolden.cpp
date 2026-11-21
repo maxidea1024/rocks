@@ -21,7 +21,8 @@ namespace {
 // 값 표기의 모양이다(Scalar bank 값과 문자열 — LC5a·LC5b1).
 enum class RunShape : uint8 {
     Void,
-    String, // Buf bank — `"..."`(escape `\"` `\\` `\n` `\t` `\xHH`)
+    String,    // Buf bank — `"..."`(escape `\"` `\\` `\n` `\t` `\xHH`)
+    Container, // Buf bank — 반환만: Array `[a, b]`, Set `{a, b}`, Map `{k: v}`(LC5b2)
     Bool,
     Signed,
     Unsigned,
@@ -110,6 +111,10 @@ public:
             result.shape = RunShape::Void;
         } else if (name == "Result" && entry.argumentCount == 1) {
             result.shape = RunShape::Result;
+        } else if ((name == "Array" || name == "Set") && entry.argumentCount == 1) {
+            result.shape = RunShape::Container;
+        } else if (name == "Map" && entry.argumentCount == 2) {
+            result.shape = RunShape::Container;
         }
 
         for (const RunIntegerName& integer : RunIntegers) {
@@ -143,6 +148,7 @@ public:
             out = 0;
             return true;
         case RunShape::String:
+        case RunShape::Container:
             out = 1;
             return true;
         case RunShape::Bool:
@@ -192,11 +198,56 @@ public:
         return true;
     }
 
-    // Buf bank 값(문자열·`string?`)인지다. Buf Result는 LC5b3이다.
+    // Buf bank 값(문자열·컨테이너와 그 `T?`)인지다. Buf Result는 LC5b3이다.
     bool IsBuffer(const RunType& type) const noexcept {
-        return type.shape == RunShape::String ||
-               (type.shape == RunShape::Optional &&
-                TypeOf(type.type, false).shape == RunShape::String);
+        const RunShape shape =
+            type.shape == RunShape::Optional ? TypeOf(type.type, false).shape : type.shape;
+        return shape == RunShape::String || shape == RunShape::Container;
+    }
+
+    // Buf 값 하나를 타입대로 쓴다(문자열, 컨테이너는 원소마다 — 원소 버퍼는 다시 이 함수로).
+    void FormatValue(StringBuilderBase& out, const RunType& type,
+                     const VmBuffer* buffer) const noexcept {
+        if (type.shape == RunShape::Optional) {
+            FormatValue(out, TypeOf(type.type, false), buffer);
+            return;
+        }
+
+        if (type.shape != RunShape::Container || buffer == nullptr) {
+            FormatBuffer(out, buffer);
+            return;
+        }
+
+        const TypeEntry& entry = c_.Types()[type.type];
+        const bool map = buffer->kind == VmBufferKind::Map;
+        const RunType key = TypeOf(c_.TypeArguments()[entry.firstArgument], true);
+        const RunType value = map ? TypeOf(c_.TypeArguments()[entry.firstArgument + 1], true) : key;
+        out.Append(buffer->kind == VmBufferKind::Array ? "[" : "{");
+        const uint32 stride = uint32(buffer->keySlots) + buffer->valueSlots;
+        const uint64* slots = reinterpret_cast<const uint64*>(buffer->Bytes());
+        auto part = [&](const RunType& part, const uint64* at, uint32 count) noexcept {
+            if (IsBuffer(part)) {
+                FormatValue(out, part,
+                            reinterpret_cast<const VmBuffer*>(static_cast<usize>(at[0])));
+            } else {
+                Format(out, part, Span<const uint64>(at, count));
+            }
+        };
+        for (uint32 element = 0; element < buffer->count; ++element) {
+            const uint64* at = slots + uint64(element) * stride;
+            out.Append(element == 0 ? "" : ", ");
+            if (buffer->kind == VmBufferKind::Array) {
+                part(value, at, buffer->valueSlots);
+            } else if (buffer->kind == VmBufferKind::Set) {
+                part(key, at, buffer->keySlots);
+            } else {
+                part(key, at, buffer->keySlots);
+                out.Append(": ");
+                part(value, at + buffer->keySlots, buffer->valueSlots);
+            }
+        }
+
+        out.Append(buffer->kind == VmBufferKind::Array ? "]" : "}");
     }
 
     // Buf 값 하나를 쓴다(문자열은 따옴표와 escape, null은 `none`).
@@ -247,6 +298,13 @@ public:
         };
         if (type.shape == RunShape::Optional && text == "none") {
             return push(nullptr);
+        }
+
+        if (!(type.shape == RunShape::String ||
+              (type.shape == RunShape::Optional &&
+               TypeOf(type.type, false).shape == RunShape::String))) {
+            problem_.Append("a parameter type is not supported by .run yet");
+            return false;
         }
 
         Array<char> bytes(allocator);
@@ -310,7 +368,8 @@ public:
             out.Append("void");
             return;
         case RunShape::String:
-            out.Append("?"); // Buf 값은 FormatBuffer
+        case RunShape::Container:
+            out.Append("?"); // Buf 값은 FormatValue
             return;
         case RunShape::Bool:
             out.Append(slots[0] == 0 ? "false" : slots[0] == 1 ? "true" : "bool?");
@@ -529,6 +588,7 @@ public:
         }
         case RunShape::Void:
         case RunShape::String:
+        case RunShape::Container:
         case RunShape::Unsupported:
             break;
         }
@@ -803,7 +863,7 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
         switch (result.outcome) {
         case VmOutcome::Returned:
             if (values.IsBuffer(returned)) {
-                RunValues::FormatBuffer(actual, execution.ReturnedBuffers()[0]);
+                values.FormatValue(actual, returned, execution.ReturnedBuffers()[0]);
             } else {
                 values.Format(actual, returned, execution.ReturnedSlots());
             }

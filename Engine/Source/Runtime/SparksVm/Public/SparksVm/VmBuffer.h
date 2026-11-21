@@ -40,6 +40,7 @@ struct VmBuffer {
     uint8 keySlots = 0;
     uint32 count = 0;         // 원소 수(문자열은 byte 수)
     uint32 capacity = 0;      // 내용 자리의 원소 수
+    uint32 indexCapacity = 0; // Map·Set 해시 색인의 칸 수(2의 거듭제곱, 원소 배열 뒤 — LC5b2)
     uint64 bytes = 0;         // 할당 크기(머리 포함 — ledger·예산)
     VmBuffer* next = nullptr; // 해제 중 대기 목록(실패하지 않는 해제 — 할당 없이 잇는다)
 

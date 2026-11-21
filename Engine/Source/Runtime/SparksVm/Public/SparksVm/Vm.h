@@ -161,6 +161,13 @@ private:
         ErrorCode error = ErrorCode::None;
     };
 
+    // 지금 frame의 bank별 레지스터 시작이다(컨테이너 명령이 쓴다).
+    struct Banks {
+        uint64* s = nullptr;
+        uint64* r = nullptr;
+        VmBuffer** b = nullptr;
+    };
+
     Result<void> PushFrame(uint32 function, const uint32 (&base)[BytecodeBankCount]) noexcept;
     Result<VmCallResult> Run(const VmLimits& limits) noexcept;
     Result<VmCallResult> MakeFault(VmFaultKind kind, uint32 word, uint64 steps) noexcept;
@@ -172,6 +179,19 @@ private:
     // 본다.
     Allocation Allocate(VmBufferKind kind, uint64 elements, uint64 elementBytes,
                         uint64 budget) noexcept;
+    // 내용 payload byte의 버퍼다(원소 수 상한은 호출자가 본다). count·capacity는 0이다.
+    Allocation AllocateBytes(VmBufferKind kind, uint64 payload, uint64 budget) noexcept;
+    // 원소를 놓지 않고 버퍼 자체만 해제한다(원소의 참조를 다른 버퍼로 옮긴 뒤).
+    void FreeShell(VmBuffer* buffer) noexcept;
+
+    // 컨테이너 명령(NEWA·NEWSET·NEWM·APPEND·PUT·GETE·SETE·LEN·GETKEY·GETVAL — VmContainers.cpp)을
+    // 실행한다. 반환: fault 종류(None이면 성공). 할당자 실패는 error.
+    VmFaultKind Container(Opcode op, uint32 word, uint32 marker, const Banks& banks, uint64 budget,
+                          ErrorCode& error) noexcept;
+    // 레지스터 slot의 컨테이너가 이 실행만 쥔 버퍼이고 원소 needed개 자리가 있게 한다(COW 복제·
+    // 증가). 빈 컨테이너는 marker의 배치를 적는다.
+    VmFaultKind Reserve(VmBuffer*& slot, uint64 needed, uint32 marker, uint64 budget,
+                        ErrorCode& error) noexcept;
     void Retain(VmBuffer* buffer) noexcept {
         if (buffer != nullptr) {
             ++buffer->references;

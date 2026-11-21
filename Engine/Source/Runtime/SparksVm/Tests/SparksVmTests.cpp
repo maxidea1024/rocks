@@ -214,7 +214,7 @@ TEST(SparksVm_RefsAndPlaceholders) {
     assembler.Emit(EncodeABC(Opcode::MovR, 2, 1, 0));
     assembler.Emit(EncodeABC(Opcode::Ret, 2, 1, 1));
     assembler.End();
-    // 1: native 호출(LC5d 전 자리표시), 2: NEWA(LC5b2 전 자리표시).
+    // 1: native 호출(LC5d 전 자리표시), 2: NEWS(LC5b3 전 자리표시).
     Shape empty;
     empty.registers[2] = 1;
     empty.frame[2] = 1;
@@ -224,7 +224,7 @@ TEST(SparksVm_RefsAndPlaceholders) {
     assembler.Emit(EncodeABC(Opcode::Ret, 0, 0, 0));
     assembler.End();
     assembler.Begin("Array", empty);
-    assembler.Emit(EncodeABx(Opcode::NewA, 0, assembler.Ref(BytecodeRefKind::Type, "Array<int>")));
+    assembler.Emit(EncodeABx(Opcode::NewS, 0, assembler.Ref(BytecodeRefKind::Type, "Pair")));
     assembler.Emit(EncodeABC(Opcode::Ret, 0, 0, 0));
     assembler.End();
     REQUIRE(assembler.Verified());

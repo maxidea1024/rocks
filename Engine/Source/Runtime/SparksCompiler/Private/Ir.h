@@ -111,6 +111,9 @@ inline constexpr uint8 IrEntryValue = 1;
 // Fault 종류다.
 inline constexpr uint32 IrFaultUnreachable = 1;
 inline constexpr uint32 IrFaultTryInHook = 2; // Awake·Enable·Start 안의 `try` 실패(SD43)
+// 경로 쓰기로 읽은 원소가 없다(IndexOutOfRange — SL §4 "복합 대입과 경로 쓰기는 키가 없으면
+// fault").
+inline constexpr uint32 IrFaultMissingElement = 3;
 
 // 단항·이항 산술 종류다(정수 overflow·실수 유한성 검사는 명령의 scalar 해석으로 정한다).
 enum class IrArith : uint8 {

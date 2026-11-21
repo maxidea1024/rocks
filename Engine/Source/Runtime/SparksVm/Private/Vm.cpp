@@ -221,17 +221,35 @@ Result<VmBuffer*> VmExecution::NewString(StringView text) noexcept {
 
 VmExecution::Allocation VmExecution::Allocate(VmBufferKind kind, uint64 elements,
                                               uint64 elementBytes, uint64 budget) noexcept {
-    // 단일 버퍼 상한(원소 수·byte)과 실행 문맥의 메모리 예산을 먼저 본다(SparksVm 2.2절).
-    Allocation result;
+    // 단일 버퍼 상한(원소 수·byte)을 먼저 본다(SparksVm 2.2절).
     if (elements > MaxBufferElements || elementBytes > MaxBufferBytes ||
         elements * elementBytes > MaxBufferBytes) {
+        Allocation result;
         result.fault = VmFaultKind::BudgetExceeded;
         return result;
     }
 
-    const uint64 payload = (elements * elementBytes + VmPayloadAlignment - 1) / VmPayloadAlignment *
-                           VmPayloadAlignment;
-    const uint64 bytes = sizeof(VmBuffer) + payload;
+    Allocation result = AllocateBytes(kind, elements * elementBytes, budget);
+    if (result.buffer != nullptr) {
+        result.buffer->count = static_cast<uint32>(elements);
+        result.buffer->capacity = static_cast<uint32>(elements);
+    }
+
+    return result;
+}
+
+VmExecution::Allocation VmExecution::AllocateBytes(VmBufferKind kind, uint64 payload,
+                                                   uint64 budget) noexcept {
+    // 단일 버퍼 byte 상한과 실행 문맥의 메모리 예산이다(SparksVm 2.2절).
+    Allocation result;
+    if (payload > MaxBufferBytes) {
+        result.fault = VmFaultKind::BudgetExceeded;
+        return result;
+    }
+
+    const uint64 aligned =
+        (payload + VmPayloadAlignment - 1) / VmPayloadAlignment * VmPayloadAlignment;
+    const uint64 bytes = sizeof(VmBuffer) + aligned;
     if (budget != 0 && liveBytes_ + bytes > budget) {
         result.fault = VmFaultKind::BudgetExceeded;
         return result;
@@ -246,8 +264,6 @@ VmExecution::Allocation VmExecution::Allocate(VmBufferKind kind, uint64 elements
     VmBuffer* buffer = ::new (memory.Value()) VmBuffer();
     buffer->references = 1;
     buffer->kind = kind;
-    buffer->count = static_cast<uint32>(elements);
-    buffer->capacity = static_cast<uint32>(elements);
     buffer->bytes = bytes;
     ++liveBuffers_;
     liveBytes_ += bytes;
@@ -255,9 +271,16 @@ VmExecution::Allocation VmExecution::Allocate(VmBufferKind kind, uint64 elements
     return result;
 }
 
+void VmExecution::FreeShell(VmBuffer* buffer) noexcept {
+    --liveBuffers_;
+    liveBytes_ -= buffer->bytes;
+    buffer->~VmBuffer();
+    static_cast<void>(allocator_->Deallocate(buffer));
+}
+
 void VmExecution::Release(VmBuffer* buffer) noexcept {
     // 0이 된 버퍼를 `next`로 이은 대기 목록에 두고 하나씩 해제한다(할당 없이 — 해제는 실패하지
-    // 않는다, 원소 버퍼의 깊이에 재귀하지 않는다).
+    // 않는다, 원소 버퍼의 깊이에 재귀하지 않는다). 컨테이너는 원소의 Buf slot(key·값)을 놓는다.
     if (buffer == nullptr || --buffer->references != 0) {
         return;
     }
@@ -267,11 +290,26 @@ void VmExecution::Release(VmBuffer* buffer) noexcept {
     while (pending != nullptr) {
         VmBuffer* current = pending;
         pending = current->next;
-        // 원소 버퍼는 LC5b2(컨테이너)·LC5b3(struct·Result)에서 더한다 — 문자열은 원소가 없다.
-        --liveBuffers_;
-        liveBytes_ -= current->bytes;
-        current->~VmBuffer();
-        static_cast<void>(allocator_->Deallocate(current));
+        const bool keys = current->keyBank == static_cast<uint8>(BytecodeBank::Buf);
+        const bool values = current->valueBank == static_cast<uint8>(BytecodeBank::Buf);
+        if (current->kind != VmBufferKind::String && (keys || values)) {
+            const uint32 stride = uint32(current->keySlots) + current->valueSlots;
+            const uint64* slots = reinterpret_cast<const uint64*>(current->Bytes());
+            for (uint32 element = 0; element < current->count; ++element) {
+                for (uint32 slot = 0; slot < stride; ++slot) {
+                    const bool owned = slot < current->keySlots ? keys : values;
+                    VmBuffer* child = owned ? reinterpret_cast<VmBuffer*>(static_cast<usize>(
+                                                  slots[uint64(element) * stride + slot]))
+                                            : nullptr;
+                    if (child != nullptr && --child->references == 0) {
+                        child->next = pending;
+                        pending = child;
+                    }
+                }
+            }
+        }
+
+        FreeShell(current);
     }
 }
 

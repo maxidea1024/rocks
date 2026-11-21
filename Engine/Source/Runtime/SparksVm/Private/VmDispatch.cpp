@@ -18,9 +18,10 @@ namespace {
 using detail::VmBits;
 using detail::VmDouble;
 
-// `FAULT Ax`의 hook `try` 실패 번호다(SparksBytecode 3.1a절 — 1은 도달하지 않는 경로, 그 밖도
-// Unreachable로 본다).
+// `FAULT Ax`의 번호다(SparksBytecode 3.1a절): 2는 hook 안 `try` 실패, 3은 경로 쓰기의 없는 원소.
+// 1(도달하지 않는 경로)과 그 밖은 Unreachable로 본다.
 constexpr uint32 VmFaultHookTryCode = 2;
+constexpr uint32 VmFaultMissingElementCode = 3;
 
 // 합성 곱 묶음의 slot 수다.
 constexpr uint32 VmQuatSlots = 4;
@@ -526,14 +527,44 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
         }
         case Opcode::Fault:
             return MakeFault(DecodeAx(word) == VmFaultHookTryCode ? VmFaultKind::HookTryFailed
-                                                                  : VmFaultKind::Unreachable,
+                             : DecodeAx(word) == VmFaultMissingElementCode
+                                 ? VmFaultKind::IndexOutOfRange
+                                 : VmFaultKind::Unreachable,
                              at, steps);
+        case Opcode::NewA:
+        case Opcode::NewSet:
+        case Opcode::NewM:
+        case Opcode::Append:
+        case Opcode::Put:
+        case Opcode::GetE:
+        case Opcode::SetE:
+        case Opcode::Len:
+        case Opcode::GetKey:
+        case Opcode::GetVal: {
+            // 컨테이너 명령(VmContainers.cpp — SparksVm 2.2절).
+            const uint32 marker = InfoOf(op).extra ? DecodeAx(words[pc++]) : 0;
+            ErrorCode error = ErrorCode::None;
+            Banks banks;
+            banks.s = s;
+            banks.r = r;
+            banks.b = b;
+            fault = Container(op, word, marker, banks, limits.memoryBytes, error);
+            if (error != ErrorCode::None) {
+                return failed(error);
+            }
+
+            if (fault != VmFaultKind::None) {
+                return MakeFault(fault, at, steps);
+            }
+
+            break;
+        }
         case Opcode::Extra:
         case Opcode::Count:
             // verifier를 통과한 모듈에서는 나오지 않는다.
             return MakeFault(VmFaultKind::Unreachable, at, steps);
         default:
-            // 아직 구현하지 않은 명령(V5 — LC5b2·LC5b3·LC5c·LC5d·LC6).
+            // 아직 구현하지 않은 명령(V5 — LC5b3·LC5c·LC5d·LC6).
             return MakeFault(VmFaultKind::ContractViolation, at, steps);
         }
     }
