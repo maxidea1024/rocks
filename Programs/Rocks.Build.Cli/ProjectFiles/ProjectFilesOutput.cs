@@ -7,11 +7,12 @@ namespace Rocks.Build.Cli;
 
 /// <summary>
 /// 생성 상태 파일(<c>ProjectFiles.state.json</c>)의 내용이다(Docs/Design/ProjectFiles.ko.md 6.5·9절). Files는 이번 실행이 만든 파일의
-/// 저장소 기준 경로(정렬), Fingerprints는 <c>타깃|구성</c> → 지문(9절 낡음 경고가 비교한다)이다.
+/// 저장소 기준 경로(정렬), Fingerprints는 <c>타깃|구성</c> → 낡음 지문(<see cref="IdePlanner.Fingerprint"/>)이다.
 /// </summary>
 internal sealed record ProjectFilesState(int FileVersion, IReadOnlyList<string> Files, IReadOnlyDictionary<string, string> Fingerprints)
 {
-    public const int CurrentFileVersion = 1;
+    // 지문 정의를 (타깃, 구성) 계획 단위로 바꾸며 2로 올렸다(개정 6).
+    public const int CurrentFileVersion = 2;
 }
 
 /// <summary>쓰기 결과다. Written은 내용이 바뀌어 쓴 파일 수, Removed는 지운 파일 수다.</summary>
@@ -19,7 +20,8 @@ internal sealed record ProjectFilesWriteResult(int Written, int Unchanged, int R
 
 /// <summary>
 /// 렌더링한 파일을 쓴다(6.5절): 내용이 같으면 쓰지 않고, 직전 상태 파일의 목록에 있었는데 이번에 만들지 않은 파일만 지운다(그 밖의
-/// 파일 — Visual Studio의 <c>.vcxproj.user</c>·<c>Intermediate/</c> — 은 건드리지 않는다). 상태 파일은 마지막에 쓴다.
+/// 파일 — Visual Studio의 <c>.vcxproj.user</c>·<c>Intermediate/</c> — 은 건드리지 않는다). 지울 수 있는 곳은 프로젝트 파일 디렉터리
+/// 아래와 솔루션 파일 하나뿐이다. 상태 파일은 마지막에 쓴다.
 /// </summary>
 internal static class ProjectFilesOutput
 {
@@ -27,8 +29,11 @@ internal static class ProjectFilesOutput
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
-    public static async Task<ProjectFilesWriteResult> WriteAsync(string root, string projectFilesDirectory, IReadOnlyDictionary<string, byte[]> files,
-        IReadOnlyDictionary<string, string> fingerprints, CancellationToken cancellationToken)
+    // 경로 비교 규칙이다(Windows는 대소문자 무시 — 대소문자만 바뀐 개명이 새 파일을 지우지 않게).
+    private static readonly StringComparer PathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
+    public static async Task<ProjectFilesWriteResult> WriteAsync(string root, string projectFilesDirectory, string solutionPath,
+        IReadOnlyDictionary<string, byte[]> files, IReadOnlyDictionary<string, string> fingerprints, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(projectFilesDirectory);
         await using var invocationLock = await OutputInvocationLock.AcquireAsync(projectFilesDirectory, cancellationToken);
@@ -49,12 +54,14 @@ internal static class ProjectFilesOutput
         }
 
         var current = new SortedSet<string>(files.Keys.Select(path => Relative(root, path)), StringComparer.Ordinal);
+        var currentLookup = new HashSet<string>(current, PathComparer);
         int removed = 0;
-        foreach (string stale in previous?.Files.Where(path => !current.Contains(path)) ?? [])
+        foreach (string stale in previous?.Files.Where(path => !currentLookup.Contains(path)) ?? [])
         {
             string path = Path.GetFullPath(Path.Combine(root, stale));
-            // 상태 파일이 손상돼도 생성 영역 밖은 지우지 않는다.
-            if ((DirectoryPath.IsStrictlyUnder(path, projectFilesDirectory) || IsRootSolution(root, path)) && File.Exists(path))
+            // 상태 파일이 손상되거나 조작돼도 생성 영역(프로젝트 파일 디렉터리와 이 솔루션 파일) 밖은 지우지 않는다.
+            bool inside = DirectoryPath.IsStrictlyUnder(path, projectFilesDirectory) || PathComparer.Equals(path, Path.GetFullPath(solutionPath));
+            if (inside && File.Exists(path))
             {
                 File.Delete(path);
                 ++removed;
@@ -67,7 +74,9 @@ internal static class ProjectFilesOutput
         return new(written, unchanged, removed);
     }
 
-    /// <summary>상태 파일을 읽는다. 없거나 형식이 다르면 null이다(정리할 목록이 없다).</summary>
+    /// <summary>
+    /// 상태 파일을 읽는다. 없거나, 판이 다르거나, 형식이 깨졌으면(목록·항목·지문이 null) null이다 — 지울 목록이 없을 뿐 생성은 계속한다.
+    /// </summary>
     public static ProjectFilesState? Read(string statePath)
     {
         if (!File.Exists(statePath))
@@ -78,7 +87,10 @@ internal static class ProjectFilesOutput
         try
         {
             ProjectFilesState? state = JsonSerializer.Deserialize<ProjectFilesState>(File.ReadAllBytes(statePath));
-            return state?.FileVersion == ProjectFilesState.CurrentFileVersion ? state : null;
+            bool valid = state is not null && state.FileVersion == ProjectFilesState.CurrentFileVersion && state.Files is not null &&
+                state.Files.All(path => !string.IsNullOrEmpty(path)) && state.Fingerprints is not null &&
+                state.Fingerprints.All(pair => !string.IsNullOrEmpty(pair.Key) && !string.IsNullOrEmpty(pair.Value));
+            return valid ? state : null;
         }
         catch (JsonException)
         {
@@ -86,37 +98,24 @@ internal static class ProjectFilesOutput
         }
     }
 
-    /// <summary>
-    /// (타깃, 구성)마다 낡음 지문이다(9절): 그 프로젝트 구성의 파일 목록과 묶음 값 정규 텍스트, 실행 파일 경로, 도구 모음 props 내용의
-    /// SHA-256이다.
-    /// </summary>
-    public static SortedDictionary<string, string> Fingerprints(ProjectFilesInput input, IReadOnlyDictionary<string, byte[]> files)
-    {
-        string toolchain = string.Concat(new[] { VisualStudioProjects.ToolchainProps, VisualStudioProjects.ToolchainPathsProps }
-            .Select(name => Convert.ToHexStringLower(SHA256.HashData(files[Path.GetFullPath(Path.Combine(input.ProjectFilesDirectory, name))]))));
-        var result = new SortedDictionary<string, string>(StringComparer.Ordinal);
-        foreach (IdeProject project in input.Model.Projects)
-        {
-            foreach (IdeProjectConfiguration configuration in project.Configurations)
-            {
-                var text = new StringBuilder(toolchain).Append('\n');
-                text.Append(input.Targets[configuration.Target].Executables.GetValueOrDefault(configuration.Configuration)).Append('\n');
-                foreach (IdeSourceFile file in project.Sources)
-                {
-                    IntelliSenseValues? values = file.Bundle is int bundle ? project.Bundles[bundle].Values[configuration.Key] : null;
-                    text.Append(file.Path).Append('\t').Append(values?.Canonical() ?? "-").Append('\n');
-                }
+    /// <summary>두 도구 모음 props 내용 해시다(낡음 지문의 도구 모음 부분, 9절).</summary>
+    public static string ToolchainHash(string projectFilesDirectory, IReadOnlyDictionary<string, byte[]> files) => string.Concat(
+        new[] { VisualStudioProjects.ToolchainProps, VisualStudioProjects.ToolchainPathsProps }
+            .Select(name => Convert.ToHexStringLower(SHA256.HashData(files[Path.GetFullPath(Path.Combine(projectFilesDirectory, name))]))));
 
-                result[configuration.Key] = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text.ToString())));
-            }
+    /// <summary>(타깃, 구성)마다 낡음 지문이다(9절). 빌드가 같은 계획으로 같은 값을 계산한다(<see cref="IdePlanner.Fingerprint"/>).</summary>
+    public static SortedDictionary<string, string> Fingerprints(IReadOnlyList<IdeTargetPlan> plans, IReadOnlyDictionary<string, ProjectFilesTarget> targets,
+        string toolchainHash)
+    {
+        var result = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach (IdeTargetPlan plan in plans)
+        {
+            string? executable = targets[plan.Target].Executables.GetValueOrDefault(plan.Configuration);
+            result[plan.Target + "|" + plan.Configuration] = IdePlanner.Fingerprint(plan.Plan.Compiles, executable, toolchainHash);
         }
 
         return result;
     }
-
-    private static bool IsRootSolution(string root, string path) =>
-        string.Equals(Path.GetDirectoryName(path), Path.TrimEndingDirectorySeparator(Path.GetFullPath(root)), StringComparison.OrdinalIgnoreCase) &&
-        path.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase);
 
     private static string Relative(string root, string path) => Path.GetRelativePath(root, path).Replace('\\', '/');
 }

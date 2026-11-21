@@ -427,8 +427,9 @@ internal static class ActionGraph
             // include한다. 강제 include 순서는 [PCH 앞부분: 정의 헤더] → [PCH 헤더] → [소비 모듈 추가 정의 헤더]이고 PCH 앞부분은
             // 생성과 사용에서 같은 파일이다(clang-cl /Yu는 through header 앞의 /FI를 검증 없이 건너뛴다).
             PchPlan? pch = null;
-            // 모듈 PCH 하한은 번역 단위가 아니라 원본 소스로 센다(8.1절). 번역 단위로 세면 유니티 설정에 따라 PCH 유무가 갈라진다.
-            int pchUsers = units.Where(PchEligible).Sum(unit => unit.Members.Length);
+            // 모듈 PCH 하한은 번역 단위가 아니라 손으로 쓴 원본 소스로 센다(8.1절). 번역 단위로 세면 유니티 설정에 따라, 리플렉션 생성
+            // 소스까지 세면 생성 소스가 없는 IDE 계획(Docs/Design/ProjectFiles.ko.md 8.1절)과 PCH 유무가 갈라진다.
+            int pchUsers = units.Where(PchEligible).Sum(unit => unit.Members.Count(member => !reflectionSet.Contains(member)));
             if (pchWanted && pchUsers != 0)
             {
                 pch = PchBuild.Plan(request, module, dependencies, includes, defines, Common(NativeLanguage.Cpp), definitionsHeader, definitionsContent,

@@ -5,6 +5,7 @@ using Microsoft.Build.Locator;
 using Microsoft.VisualStudio.SolutionPersistence.Model;
 using Microsoft.VisualStudio.SolutionPersistence.Serializer;
 using Rocks.Build.Cli;
+using Rocks.Tooling.Common;
 
 namespace Rocks.Build.IntegrationTests;
 
@@ -19,7 +20,7 @@ internal static class ProjectFilesWriterTests
 {
     private const string GoldenUpdateVariable = "ROCKS_UPDATE_GOLDEN";
 
-    public static async Task RunAsync(string repository)
+    public static async Task RunAsync(string repository, NativeToolchain toolchain)
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -34,10 +35,11 @@ internal static class ProjectFilesWriterTests
 
         string first = Directory.CreateTempSubdirectory("rocks-projectfiles-a-").FullName;
         string second = Directory.CreateTempSubdirectory("rocks-projectfiles-b-").FullName;
+        string third = Directory.CreateTempSubdirectory("rocks-projectfiles-c-").FullName;
         try
         {
-            ProjectFilesInput a = Input(first, "C:/LLVM-A");
-            ProjectFilesInput b = Input(second, "D:/LLVM-B");
+            ProjectFilesInput a = Input(first, Fake("C:/LLVM-A"));
+            ProjectFilesInput b = Input(second, Fake("D:/LLVM-B"));
             SortedDictionary<string, byte[]> rendered = VisualStudioProjects.Render(a);
             Require(rendered.SequenceEqual(VisualStudioProjects.Render(a), new FileComparer()), "rendering is not deterministic");
             Golden(repository, a, rendered);
@@ -45,17 +47,180 @@ internal static class ProjectFilesWriterTests
             await WriteAndCleanAsync(a, rendered);
             Evaluate(a);
             await SolutionRoundTripAsync(a);
-            Console.WriteLine("PASS project files writer: golden, determinism, root independence, write-if-changed and cleanup, MSBuild evaluation, solution round trip");
+            await DesignTimeAsync(repository, toolchain, third);
+            Console.WriteLine("PASS project files writer: golden, determinism, root independence, write-if-changed and cleanup, state validation, MSBuild evaluation, solution round trip, design time when Visual Studio 18 is present");
         }
         finally
         {
             Directory.Delete(first, recursive: true);
             Directory.Delete(second, recursive: true);
+            Directory.Delete(third, recursive: true);
         }
     }
 
+    private static ProjectFilesToolchain Fake(string llvm) =>
+        new(llvm + "/bin/clang-cl.exe", llvm, "22", [llvm + "/msvc/include", llvm + "/sdk/ucrt"], llvm + "/asan", llvm + "/lib/clang/22/include");
+
+    // V2b: Visual Studio 18 이상과 ClangCL 도구 모음이 있으면 Visual Studio MSBuild의 디자인 타임 대상(GetClCommandLines·
+    // GetProjectDirectories)으로 IntelliSense가 받는 명령줄을 확인한다. fixture(이 PC의 도구 모음 값)와, 있으면 저장소의 생성 프로젝트
+    // 하나(Sandbox)를 본다.
+    private static async Task DesignTimeAsync(string repository, NativeToolchain toolchain, string root)
+    {
+        string? msbuild = await VisualStudioMSBuildAsync();
+        if (msbuild is null)
+        {
+            Console.WriteLine("SKIP project files design time (V2b): no Visual Studio 18 with the ClangCL toolset");
+            return;
+        }
+
+        ProjectFilesToolchain local = ProjectFilesCommand.ToolchainOf(toolchain);
+        ProjectFilesInput input = Input(root, local);
+        SortedDictionary<string, byte[]> rendered = VisualStudioProjects.Render(input);
+        await ProjectFilesOutput.WriteAsync(input.Root, input.ProjectFilesDirectory, input.SolutionPath, rendered,
+            new SortedDictionary<string, string>(StringComparer.Ordinal), CancellationToken.None);
+        IdeProject engine = input.Model.Projects.Single(project => project.Engine);
+        string[] system = [.. new[] { local.ResourceIncludeDirectory }.Concat(local.SystemIncludes).Select(Path.GetFullPath)];
+        foreach (IdeProjectConfiguration configuration in engine.Configurations)
+        {
+            (List<(string[] Files, string[] Tokens)> commands, string[] includePath) =
+                await DesignTimeCommandsAsync(msbuild, VisualStudioProjects.ProjectPath(input, engine), configuration.Configuration);
+            Require(includePath.Select(Path.GetFullPath).SequenceEqual(system), $"V2b {configuration.Key}: IncludePath is not [resource include, INCLUDE]");
+            foreach (IdeSourceFile file in engine.Sources.Where(file => file.Bundle is not null))
+            {
+                IntelliSenseValues expected = engine.Bundles[file.Bundle!.Value].Values[configuration.Key]!;
+                string[] tokens = commands.Single(command => command.Files.Contains(file.Path, StringComparer.OrdinalIgnoreCase)).Tokens;
+                string[] Values(string prefix) => [.. tokens.Where(token => token.StartsWith(prefix, StringComparison.Ordinal)).Select(token => token[prefix.Length..])];
+                Require(Values("/I").Select(Path.GetFullPath).SequenceEqual(expected.Includes.Select(Path.GetFullPath)), $"V2b {configuration.Key}: /I order of {file.Path}");
+                Require(Values("/FI").Select(Path.GetFullPath).SequenceEqual(expected.ForcedIncludes.Select(Path.GetFullPath)), $"V2b {configuration.Key}: /FI order of {file.Path}");
+                LastWins(tokens, expected.Options, $"V2b {configuration.Key} {file.Path}");
+            }
+        }
+
+        string sandbox = Path.Combine(repository, "out", "ProjectFiles", "Programs", "Sandbox.vcxproj");
+        if (!File.Exists(sandbox))
+        {
+            Console.WriteLine("SKIP project files design time (V2b) on Sandbox.vcxproj: run projectfiles first");
+            return;
+        }
+
+        (List<(string[] Files, string[] Tokens)> real, string[] realInclude) = await DesignTimeCommandsAsync(msbuild, sandbox, "Debug");
+        Require(realInclude.Length != 0 && Path.GetFileName(Path.GetDirectoryName(Path.GetDirectoryName(realInclude[0]))!) == "clang",
+            "V2b Sandbox: IncludePath does not start with the clang resource include");
+        foreach ((string[] _, string[] tokens) in real)
+        {
+            LastWins(tokens, ["/MDd", "/GR-", "/EHs-c-", "/std:c++23preview"], "V2b Sandbox Debug");
+        }
+    }
+
+    // 마지막 인자가 이기는 매크로 인자(/MD·/MDd, /EH, /GR, /std:)는 디자인 타임 기본 인자(/EHsc /MD …) 뒤에 우리 값으로 온다.
+    private static void LastWins(string[] tokens, IReadOnlyList<string> options, string what)
+    {
+        foreach ((string group, Func<string, bool> member) in new (string, Func<string, bool>)[]
+        {
+            ("/MD", token => token is "/MD" or "/MDd"), ("/EH", token => token.StartsWith("/EH", StringComparison.Ordinal)),
+            ("/GR", token => token.StartsWith("/GR", StringComparison.Ordinal)), ("/std:", token => token.StartsWith("/std:", StringComparison.Ordinal))
+        })
+        {
+            string? wanted = options.LastOrDefault(member);
+            if (wanted is null)
+            {
+                continue;
+            }
+
+            Require(tokens.LastOrDefault(member) == wanted, $"{what}: the last {group} argument is not {wanted}");
+        }
+    }
+
+    private static async Task<string?> VisualStudioMSBuildAsync()
+    {
+        string installer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Microsoft Visual Studio", "Installer", "vswhere.exe");
+        if (!File.Exists(installer))
+        {
+            return null;
+        }
+
+        using var probe = new ProbeDirectory();
+        var result = await ProcessRunner.RunAsync(new(installer, ["-latest", "-products", "*", "-version", "[18.0,)", "-requires",
+            "Microsoft.VisualStudio.Component.VC.Llvm.ClangToolset", "-find", Path.Combine("MSBuild", "**", "Bin", "amd64", "MSBuild.exe")], probe.Path));
+        string path = result.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault() ?? "";
+        return result.ExitCode == 0 && File.Exists(path) ? path : null;
+    }
+
+    // 디자인 타임 명령줄(항목마다 파일 목록과 토큰)과 IncludePath(빈 칸 제외)다. /I"…"·/FI"…"의 따옴표는 뗀다.
+    private static async Task<(List<(string[] Files, string[] Tokens)> Commands, string[] IncludePath)> DesignTimeCommandsAsync(string msbuild,
+        string project, string configuration)
+    {
+        var result = await ProcessRunner.RunAsync(new(msbuild, [project, "-nologo", "-t:GetClCommandLines;GetProjectDirectories",
+            "-p:Configuration=" + configuration, "-p:Platform=x64", "-getTargetResult:GetClCommandLines", "-getTargetResult:GetProjectDirectories"],
+            Path.GetDirectoryName(project)!, VisualStudioEnvironment()));
+        Require(result.ExitCode == 0, "design-time MSBuild failed: " + result.StdOut + result.StdErr);
+        using var document = System.Text.Json.JsonDocument.Parse(result.StdOut);
+        var targets = document.RootElement.GetProperty("TargetResults");
+        var commands = new List<(string[] Files, string[] Tokens)>();
+        foreach (var item in targets.GetProperty("GetClCommandLines").GetProperty("Items").EnumerateArray())
+        {
+            commands.Add(([.. Split(item.GetProperty("Files").GetString()!).Select(Path.GetFullPath)], Tokens(item.GetProperty("Identity").GetString()!)));
+        }
+
+        string includePath = targets.GetProperty("GetProjectDirectories").GetProperty("Items")[0].GetProperty("IncludePath").GetString()!;
+        return (commands, Split(includePath));
+    }
+
+    // Visual Studio MSBuild에 넘기는 환경이다. 이 프로세스의 환경에서 .NET SDK MSBuild 위치 변수(MSBuildLocator·dotnet이 둔
+    // MSBUILD_EXE_PATH·MSBuildExtensionsPath·MSBuildSDKsPath 등)를 빼야 Visual Studio의 VCTargetsPath를 쓴다.
+    private static Dictionary<string, string?> VisualStudioEnvironment()
+    {
+        var environment = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (System.Collections.DictionaryEntry entry in Environment.GetEnvironmentVariables())
+        {
+            string key = (string)entry.Key;
+            if (!key.StartsWith("MSBuild", StringComparison.OrdinalIgnoreCase) && !key.StartsWith("DOTNET_", StringComparison.OrdinalIgnoreCase))
+            {
+                environment[key] = (string?)entry.Value;
+            }
+        }
+
+        return environment;
+    }
+
+    // 공백으로 나누되 따옴표 안은 한 토큰이고, 따옴표 문자는 뗀다(/I"a b" → /Ia b).
+    private static string[] Tokens(string line)
+    {
+        var tokens = new List<string>();
+        var current = new System.Text.StringBuilder();
+        bool quoted = false;
+        foreach (char character in line)
+        {
+            if (character == '"')
+            {
+                quoted = !quoted;
+                continue;
+            }
+
+            if (character == ' ' && !quoted)
+            {
+                if (current.Length != 0)
+                {
+                    tokens.Add(current.ToString());
+                    current.Clear();
+                }
+
+                continue;
+            }
+
+            current.Append(character);
+        }
+
+        if (current.Length != 0)
+        {
+            tokens.Add(current.ToString());
+        }
+
+        return [.. tokens];
+    }
+
     // 손으로 만든 모델이다. 값에 MSBuild 특수 문자(%·$·'·@)와 괄호·따옴표가 든다(;는 Visual Studio도 목록 구분자로 쪼개므로 경로에 둘 수 없다).
-    private static ProjectFilesInput Input(string root, string llvm)
+    private static ProjectFilesInput Input(string root, ProjectFilesToolchain toolchain)
     {
         string Path(string relative) => System.IO.Path.GetFullPath(System.IO.Path.Combine(root, relative));
         foreach (string file in new[] { "Engine/Lib/Lib.cpp", "Engine/Lib/Raw.c", "Engine/Lib/Unused.cpp", "Engine/Lib/Lib.h", "Engine/Lib/Pch.h",
@@ -93,7 +258,6 @@ internal static class ProjectFilesWriterTests
                 ["Release"] = Path("out/dotnet-windows-tool-release/bin/Tool.exe")
             })
         };
-        var toolchain = new ProjectFilesToolchain(llvm + "/bin/clang-cl.exe", llvm, "22", [llvm + "/msvc/include", llvm + "/sdk/ucrt"], llvm + "/asan");
         return new(root, projectFiles, Path("Rocks.slnx"), model, targets, ["Debug", "Release"], true, toolchain,
             ["Build/Rules/Rocks.Engine.Rules.csproj", "Programs/Rocks.Build/Rocks.Build.csproj"]);
     }
@@ -130,11 +294,13 @@ internal static class ProjectFilesWriterTests
 
     private static async Task WriteAndCleanAsync(ProjectFilesInput input, SortedDictionary<string, byte[]> rendered)
     {
-        var fingerprints = ProjectFilesOutput.Fingerprints(input, rendered);
-        ProjectFilesWriteResult once = await ProjectFilesOutput.WriteAsync(input.Root, input.ProjectFilesDirectory, rendered, fingerprints, CancellationToken.None);
+        var fingerprints = new SortedDictionary<string, string>(StringComparer.Ordinal) { ["Tool|Debug"] = "0" };
+        ProjectFilesWriteResult once = await ProjectFilesOutput.WriteAsync(input.Root, input.ProjectFilesDirectory, input.SolutionPath, rendered, fingerprints,
+            CancellationToken.None);
         Require(once.Written == rendered.Count && once.Removed == 0, "first write");
         var times = rendered.Keys.ToDictionary(path => path, File.GetLastWriteTimeUtc);
-        ProjectFilesWriteResult twice = await ProjectFilesOutput.WriteAsync(input.Root, input.ProjectFilesDirectory, rendered, fingerprints, CancellationToken.None);
+        ProjectFilesWriteResult twice = await ProjectFilesOutput.WriteAsync(input.Root, input.ProjectFilesDirectory, input.SolutionPath, rendered, fingerprints,
+            CancellationToken.None);
         Require(twice.Written == 0 && rendered.Keys.All(path => File.GetLastWriteTimeUtc(path) == times[path]), "second write rewrote unchanged files");
 
         // Visual Studio가 만든 파일은 상태 목록에 없으므로 남는다. 없어진 프로젝트의 파일만 지운다.
@@ -149,11 +315,22 @@ internal static class ProjectFilesWriterTests
             Targets = input.Targets.Where(pair => pair.Key != "Tool").ToDictionary(pair => pair.Key, pair => pair.Value)
         };
         SortedDictionary<string, byte[]> smaller = VisualStudioProjects.Render(withoutTool);
-        ProjectFilesWriteResult cleaned = await ProjectFilesOutput.WriteAsync(input.Root, input.ProjectFilesDirectory, smaller,
-            ProjectFilesOutput.Fingerprints(withoutTool, smaller), CancellationToken.None);
+        ProjectFilesWriteResult cleaned = await ProjectFilesOutput.WriteAsync(input.Root, input.ProjectFilesDirectory, input.SolutionPath, smaller,
+            fingerprints, CancellationToken.None);
         Require(cleaned.Removed == 2 && !File.Exists(Path.Combine(input.ProjectFilesDirectory, "Programs", "Tool.vcxproj")) && File.Exists(user) &&
             File.Exists(intermediate), "cleanup must remove only the files the previous run wrote");
-        await ProjectFilesOutput.WriteAsync(input.Root, input.ProjectFilesDirectory, rendered, fingerprints, CancellationToken.None);
+        // 다른 *.slnx는 상태 목록에 있어도 지우지 않는다(솔루션 파일 하나만 지울 수 있다). 깨진 상태 파일은 생성을 막지 않는다.
+        string other = Path.Combine(input.Root, "Other.slnx");
+        File.WriteAllText(other, "<Solution />\n");
+        string statePath = Path.Combine(input.ProjectFilesDirectory, ProjectFilesOutput.StateFileName);
+        File.WriteAllText(statePath, "{\"FileVersion\":2,\"Files\":[\"Other.slnx\"],\"Fingerprints\":{}}\n");
+        await ProjectFilesOutput.WriteAsync(input.Root, input.ProjectFilesDirectory, input.SolutionPath, rendered, fingerprints, CancellationToken.None);
+        Require(File.Exists(other), "cleanup removed a solution file that is not the generated one");
+        File.WriteAllText(statePath, "{\"FileVersion\":2,\"Files\":null,\"Fingerprints\":null}\n");
+        Require(ProjectFilesOutput.Read(statePath) is null, "a broken state file is not ignored");
+        File.WriteAllText(statePath, "{\"FileVersion\":2,\"Files\":[null],\"Fingerprints\":{}}\n");
+        Require(ProjectFilesOutput.Read(statePath) is null, "a state file with a null entry is not ignored");
+        await ProjectFilesOutput.WriteAsync(input.Root, input.ProjectFilesDirectory, input.SolutionPath, rendered, fingerprints, CancellationToken.None);
     }
 
     // V2: 평가한 값이 모델 값과 같다. Microsoft.Build 형식은 이 메서드 안에서만 쓴다(MSBuildLocator 등록 뒤에 올라가야 한다).
@@ -171,7 +348,10 @@ internal static class ProjectFilesWriterTests
                     var evaluated = new Project(path, new Dictionary<string, string> { ["Configuration"] = name, ["Platform"] = "x64" }, null, collection,
                         ProjectLoadSettings.IgnoreMissingImports | ProjectLoadSettings.IgnoreInvalidImports);
                     string[] system = [.. Split(evaluated.GetPropertyValue("IncludePath")).Select(Path.GetFullPath)];
-                    Require(system.SequenceEqual(input.Toolchain.SystemIncludes.Select(Path.GetFullPath)), $"{project.Name} {name}: system include path");
+                    Require(system.SequenceEqual(new[] { input.Toolchain.ResourceIncludeDirectory }.Concat(input.Toolchain.SystemIncludes).Select(Path.GetFullPath)),
+                        $"{project.Name} {name}: system include path is [resource include, INCLUDE]");
+                    Require(Split(evaluated.GetPropertyValue("ExternalIncludePath")).Select(Path.GetFullPath).SequenceEqual(input.Toolchain.SystemIncludes.Select(Path.GetFullPath)),
+                        $"{project.Name} {name}: external include path is INCLUDE");
                     string? executable = input.Targets[configuration.Target].Executables[configuration.Configuration];
                     bool android = name.StartsWith("Android_", StringComparison.Ordinal);
                     Require(evaluated.GetPropertyValue("NMakeOutput") == (android || executable is null ? "" : executable), $"{project.Name} {name}: NMakeOutput");

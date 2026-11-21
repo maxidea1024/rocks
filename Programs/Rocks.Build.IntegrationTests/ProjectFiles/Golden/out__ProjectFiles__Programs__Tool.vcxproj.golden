@@ -77,9 +77,9 @@
     </ClCompile>
   </ItemDefinitionGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Android_arm64_Debug|x64'">
-    <NMakeBuildCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Build -Target Tool -Configuration Debug -Platform Android -Compiler &quot;$(RocksCompiler)&quot;</NMakeBuildCommandLine>
-    <NMakeReBuildCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Rebuild -Target Tool -Configuration Debug -Platform Android -Compiler &quot;$(RocksCompiler)&quot;</NMakeReBuildCommandLine>
-    <NMakeCleanCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Clean -Target Tool -Configuration Debug -Platform Android -Compiler &quot;$(RocksCompiler)&quot;</NMakeCleanCommandLine>
+    <NMakeBuildCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Build -Target Tool -Configuration Debug -Platform Android</NMakeBuildCommandLine>
+    <NMakeReBuildCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Rebuild -Target Tool -Configuration Debug -Platform Android</NMakeReBuildCommandLine>
+    <NMakeCleanCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Clean -Target Tool -Configuration Debug -Platform Android</NMakeCleanCommandLine>
     <NMakeOutput></NMakeOutput>
     <IntDir>$(RocksRoot)out\ProjectFiles\Intermediate\Tool\Android_arm64_Debug_x64\</IntDir>
     <OutDir>$(RocksRoot)out\ProjectFiles\Intermediate\Tool\Android_arm64_Debug_x64\</OutDir>
@@ -98,9 +98,9 @@
     </ClCompile>
   </ItemDefinitionGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Android_arm64_Release|x64'">
-    <NMakeBuildCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Build -Target Tool -Configuration Release -Platform Android -Compiler &quot;$(RocksCompiler)&quot;</NMakeBuildCommandLine>
-    <NMakeReBuildCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Rebuild -Target Tool -Configuration Release -Platform Android -Compiler &quot;$(RocksCompiler)&quot;</NMakeReBuildCommandLine>
-    <NMakeCleanCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Clean -Target Tool -Configuration Release -Platform Android -Compiler &quot;$(RocksCompiler)&quot;</NMakeCleanCommandLine>
+    <NMakeBuildCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Build -Target Tool -Configuration Release -Platform Android</NMakeBuildCommandLine>
+    <NMakeReBuildCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Rebuild -Target Tool -Configuration Release -Platform Android</NMakeReBuildCommandLine>
+    <NMakeCleanCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Clean -Target Tool -Configuration Release -Platform Android</NMakeCleanCommandLine>
     <NMakeOutput></NMakeOutput>
     <IntDir>$(RocksRoot)out\ProjectFiles\Intermediate\Tool\Android_arm64_Release_x64\</IntDir>
     <OutDir>$(RocksRoot)out\ProjectFiles\Intermediate\Tool\Android_arm64_Release_x64\</OutDir>
