@@ -115,7 +115,7 @@ public:
     // 오류(failure 진단): Initialize 전 InvalidArgument, 모르는 타입 이름 NotFound(진단 None),
     // 클래스가 아닌 타입 TypeMismatch / InvalidArgument, under가 논리 디렉터리가 아님 InvalidPath /
     // InvalidArgument, 파생 판정의 그 밖 오류(TypeRegistry 종료 뒤 ShuttingDown 등 — 진단 None),
-    // 할당 실패.
+    // 할당 실패. 실패하면 out은 호출 전과 같다.
     Result<void> List(StringView type, StringView under, Array<const AssetIndexEntry*>& out,
                       AssetDiagnostic* failure = nullptr) noexcept;
 

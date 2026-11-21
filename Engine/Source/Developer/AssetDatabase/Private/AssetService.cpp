@@ -300,6 +300,7 @@ Result<void> AssetService::List(StringView type, StringView under,
                                found.Error());
     }
 
+    const usize before = out.Size();
     if (auto reserved = out.TryReserve(out.Size() + listed.Size()); !reserved) {
         return FailAsset<void>(failure, AssetDiagnosticCode::None, reserved.Error());
     }
@@ -315,6 +316,8 @@ Result<void> AssetService::List(StringView type, StringView under,
                     continue;
                 }
 
+                // 실패하면 out을 호출 전 길이로 되돌린다(줄이기는 실패하지 않는다).
+                (void)out.TryResize(before);
                 return FailAsset<void>(failure, AssetDiagnosticCode::None, derived.Error());
             }
 
