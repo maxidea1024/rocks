@@ -169,6 +169,40 @@ Result<PackageContents> ReadPackage(Allocator& allocator, Span<const uint8> file
                                     const PackageReadOptions& options,
                                     AssetDiagnostic* failure = nullptr) noexcept;
 
+// 부분 읽기 결과다(AS 7.1절 13 — A2b). contents의 view(이름·ImportRecord·Tags 등)는 buffers의 소유
+// byte를 가리키므로 이 값을 옮겨도 유효하다. Objects·Bulk·BulkIndex는 읽지 않아 contents.objects·
+// bulk·bulkEntries는 비어 있다.
+struct PackageIndexView {
+    explicit PackageIndexView(Allocator& allocator) noexcept
+        : buffers(allocator), contents(allocator) {
+    }
+
+    PackageIndexView(PackageIndexView&&) noexcept = default;
+    PackageIndexView& operator=(PackageIndexView&&) noexcept = default;
+    PackageIndexView(const PackageIndexView&) = delete;
+    PackageIndexView& operator=(const PackageIndexView&) = delete;
+
+    Array<Array<uint8>> buffers;
+    PackageContents contents;
+};
+
+// 범위 읽기로 헤더·섹션 표와 Summary·Exports·ObjectImports·Dependencies·ImportRecord·Tags만 읽어
+// ReadPackage와 같은 판정을 한다(AS 7.1절 13). 건너뛰는 것: Objects·Bulk·BulkIndex 섹션의 내용·CRC,
+// 섹션 사이 패딩 byte 0 검사, bulk 대조(표의 위치·정렬·겹침·flags·schemaVersion 판정은 한다).
+// 그래서 헤더·표·읽은 섹션의 손상은 ReadPackage와 같은 진단이고, 건너뛴 구간의 손상은 여기서는
+// 통과하고 열기(ReadPackage)에서 거부된다. 오류: ReadPackage와 같고, 범위 읽기의 IO 오류는 그
+// 오류(진단 None)다.
+//
+// 사용 예(색인 검색):
+//   FilePackageRangeReader reader;
+//   reader.Open(files, path);
+//   auto view = ReadPackageIndex(allocator, reader, options, &diagnostic);
+//   if (view) { /* view.Value().contents.exports[0].type — 대표 타입 */ }
+class PackageRangeReader;
+Result<PackageIndexView> ReadPackageIndex(Allocator& allocator, PackageRangeReader& reader,
+                                          const PackageReadOptions& options,
+                                          AssetDiagnostic* failure = nullptr) noexcept;
+
 // contents의 bulk entry를 모두 풀어 raw byte를 out 끝에 bulkId 순으로 이어 붙이고, entry별 위치를
 // slots에 채운다(rawBytes와 SHA-256 확인). raw 합이 maxRawBytes를 넘으면 CapacityExceeded다.
 //

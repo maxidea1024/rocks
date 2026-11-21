@@ -1,0 +1,1350 @@
+#include "../../../Runtime/AssetRuntime/Tests/AssetFixtureValues.h"
+#include "../../../Runtime/AssetRuntime/Tests/PackageEditing.h"
+#include "AssetDatabaseTestSupport.h"
+
+#include <AssetDatabase/AssetIndex.h>
+#include <AssetDatabase/LogicalPath.h>
+#include <AssetRuntime/PackageRangeReader.h>
+#include <AssetRuntime/PackageTags.h>
+#include <Core/FileError.h>
+#include <Core/Text/StringBuilder.h>
+#include <Serialization/Record.h>
+#include <TestSupport/NFailAllocator.h>
+#include <stdio.h>
+#include <string.h>
+
+// 에디터 패키지 색인 시험이다(Docs/Design/AssetSystem.ko.md 7.1절 11·13 — A2b): 실제 디스크의
+// 검색과 모든 조회(경로·id·디렉터리·타입·태그·정방향 의존의 모든 종류 묶음·역방향 참조자), Verify의
+// MissingDependency·TypeMismatch(상속·미등록·종료한 TypeRegistry), 메모리 파일 시스템으로 만든 진단
+// 장면(InvalidPath·패키지 판정·쿠킹·다른 Tags 스키마·깨진 Tags·사라진 파일·IO 실패·링크·장치·같은
+// 경로 키·같은 id), 열거 실패, 모든 할당 실패.
+using namespace rocks;
+namespace asset_index_tests_file {
+
+using namespace rocks::asset_test;
+using namespace rocks::asset_database_test;
+
+namespace {
+
+constexpr uint64 HeroId = 2100;
+constexpr uint64 BaseId = 2101;
+constexpr uint64 DerivedId = 2102;
+constexpr uint64 BuildId = 2103;
+constexpr uint64 ImportOwnerId = 2104;
+constexpr uint64 VillainId = 2105;
+constexpr uint64 CookedId = 2106;
+constexpr uint64 OtherTagsId = 2107;
+constexpr uint64 BadTagsId = 2108;
+constexpr uint64 MissingSoftId = 2109;
+constexpr uint64 PlainId = 2110;
+// Plain의 id는 high가 다르다(id 순 정렬·조회가 high를 먼저 보는지).
+constexpr uint64 PlainHigh = 1;
+// 할당 실패 장면의 깊은 디렉터리 단계 수다(구성 요소 61 byte씩 — 경로 임시 저장소 512 byte를
+// 넘는다).
+constexpr uint32 DeepLevels = 9;
+// 할당 실패 장면의 긴 프로젝트 루트(구성 요소 65 byte씩 단계 수)와 그 Content 경로가 넘어야 하는
+// 길이(경로 임시 저장소 512 byte)다.
+constexpr uint32 LongRootLevels = 8;
+constexpr usize LongRootMinimumBytes = 512;
+// 진단 줄 시험의 줄 저장소 인라인 byte 수다(작게 두어 줄마다 할당이 생긴다).
+constexpr usize LineInlineBytes = 8;
+// 종류 묶음 bit 수다(PackageDependencyKind 다섯 — 묶음 2^5개를 모두 본다).
+constexpr uint32 DependencyKindCount = 5;
+
+const PackageDependencyEntry HeroExtraDependencies[] = {
+    {FixedId(BuildId), PackageDependencyKind::Build, TypeId{}, false},
+    {FixedId(ImportOwnerId), PackageDependencyKind::ImportOwner, TypeId{}, false}};
+const PackageTagInput HeroTags[] = {{"Kind", "Hero"},
+                                    {"UnrealExchange.FormerPaths", "/Game/Old/B"},
+                                    {"UnrealExchange.FormerPaths", "/Game/Old/A"}};
+
+// 시험 패키지 byte 묶음이다. 기본(source Registry): Hero(TestAsset — Hard → Base, EditorOnly →
+// Derived, Soft → 2109 "Sub", Build 2103, ImportOwner 2104, 태그 셋), Base(BaseGameAsset),
+// Derived(DerivedGameAsset), Villain(TestAsset — Hard → Derived, Soft → Hero), Plain(TestAsset 참조
+// 없음), OtherTags(다른 스키마 Tags), BadTags(Tags 스키마인데 목록 없음). 변형(target Registry):
+// Base id인데 대표가 DerivedGameAsset, Derived id인데 대표가 BaseGameAsset, 쿠킹 패키지.
+struct IndexPackages {
+    explicit IndexPackages(Allocator& allocator) noexcept
+        : hero(allocator), base(allocator), derived(allocator), villain(allocator),
+          plain(allocator), otherTags(allocator), badTags(allocator), baseAsDerived(allocator),
+          derivedAsBase(allocator), cooked(allocator) {
+    }
+
+    Array<uint8> hero;
+    Array<uint8> base;
+    Array<uint8> derived;
+    Array<uint8> villain;
+    Array<uint8> plain;
+    Array<uint8> otherTags;
+    Array<uint8> badTags;
+    Array<uint8> baseAsDerived;
+    Array<uint8> derivedAsBase;
+    Array<uint8> cooked;
+};
+
+// registry에 id 패키지와 대표 에셋 T를 만든다.
+template <class T>
+ObjectHandle MakeRepresentative(ObjectRegistry& registry, AssetId id, PackageKind kind,
+                                RootRef<Package>& package) noexcept {
+    auto made = NewPackage(registry, registry.OwnerAccess(), id, kind);
+    if (!made) {
+        return ObjectHandle{};
+    }
+
+    package = Move(made.Value());
+    return Make<T>(registry, IdOf<T>(), package.Handle(), "");
+}
+
+// fields 하나만 든 Record byte다(schema가 다른 Tags·목록 없는 Tags에 쓴다).
+Array<uint8> OneFieldRecord(Allocator& allocator, Guid schema) noexcept {
+    const uint8 value[4] = {1, 2, 3, 4};
+    RecordBuilder builder(allocator, schema, PackageTagsVersion);
+    if (!builder.AddField(Guid{0, 9}, WireType::U32, value)) {
+        return Array<uint8>(allocator);
+    }
+
+    auto built = builder.Build();
+    return built ? Move(built.Value()) : Array<uint8>(allocator);
+}
+
+bool MakePackages(AssetEnv& env, IndexPackages& out) noexcept {
+    ObjectRegistry& registry = *env.source;
+    const ObjectAccessContext access = registry.OwnerAccess();
+    RootRef<Package> heroPackage;
+    RootRef<Package> basePackage;
+    RootRef<Package> derivedPackage;
+    RootRef<Package> villainPackage;
+    RootRef<Package> plainPackage;
+    RootRef<Package> otherPackage;
+    RootRef<Package> badPackage;
+    const ObjectHandle base = MakeRepresentative<BaseGameAsset>(registry, FixedId(BaseId),
+                                                                PackageKind::Editor, basePackage);
+    const ObjectHandle derived = MakeRepresentative<DerivedGameAsset>(
+        registry, FixedId(DerivedId), PackageKind::Editor, derivedPackage);
+    const ObjectHandle hero =
+        MakeRepresentative<TestAsset>(registry, FixedId(HeroId), PackageKind::Editor, heroPackage);
+    const ObjectHandle villain = MakeRepresentative<TestAsset>(registry, FixedId(VillainId),
+                                                               PackageKind::Editor, villainPackage);
+    const ObjectHandle plain = MakeRepresentative<TestAsset>(
+        registry, AssetId{Guid{PlainHigh, PlainId}}, PackageKind::Editor, plainPackage);
+    const ObjectHandle other = MakeRepresentative<TestAsset>(registry, FixedId(OtherTagsId),
+                                                             PackageKind::Editor, otherPackage);
+    const ObjectHandle bad = MakeRepresentative<TestAsset>(registry, FixedId(BadTagsId),
+                                                           PackageKind::Editor, badPackage);
+    TestAsset* heroValue = Pointer<TestAsset>(registry, hero);
+    TestAsset* villainValue = Pointer<TestAsset>(registry, villain);
+    if (base.IsNull() || derived.IsNull() || heroValue == nullptr || villainValue == nullptr ||
+        plain.IsNull() || other.IsNull() || bad.IsNull()) {
+        return false;
+    }
+
+    if (!registry.SetReference(access, hero, heroValue->hard, base) ||
+        !registry.SetReference(access, hero, heroValue->editorRef, derived) ||
+        !heroValue->soft.TryAssign(FixedId(MissingSoftId), "Sub") ||
+        !registry.SetReference(access, villain, villainValue->hard, derived) ||
+        !villainValue->soft.TryAssign(FixedId(HeroId), "")) {
+        return false;
+    }
+
+    auto tags = WritePackageTags(env.allocator, HeroTags);
+    if (!tags) {
+        return false;
+    }
+
+    const Array<uint8> otherTags = OneFieldRecord(env.allocator, Guid{0x7A, 0x6B});
+    const Array<uint8> badTags = OneFieldRecord(env.allocator, PackageTagsSchema);
+    PackageWriteOptions heroOptions = EditorOptions();
+    heroOptions.tags = tags.Value().View();
+    heroOptions.extraDependencies = HeroExtraDependencies;
+    PackageWriteOptions otherOptions = EditorOptions();
+    otherOptions.tags = otherTags.View();
+    PackageWriteOptions badOptions = EditorOptions();
+    badOptions.tags = badTags.View();
+    out.base = Write(env.allocator, registry, basePackage.Handle(), EditorOptions());
+    out.derived = Write(env.allocator, registry, derivedPackage.Handle(), EditorOptions());
+    out.hero = Write(env.allocator, registry, heroPackage.Handle(), heroOptions);
+    out.villain = Write(env.allocator, registry, villainPackage.Handle(), EditorOptions());
+    out.plain = Write(env.allocator, registry, plainPackage.Handle(), EditorOptions());
+    out.otherTags = Write(env.allocator, registry, otherPackage.Handle(), otherOptions);
+    out.badTags = Write(env.allocator, registry, badPackage.Handle(), badOptions);
+
+    ObjectRegistry& variants = *env.target;
+    RootRef<Package> baseAsDerived;
+    RootRef<Package> derivedAsBase;
+    RootRef<Package> cooked;
+    if (MakeRepresentative<DerivedGameAsset>(variants, FixedId(BaseId), PackageKind::Editor,
+                                             baseAsDerived)
+            .IsNull() ||
+        MakeRepresentative<BaseGameAsset>(variants, FixedId(DerivedId), PackageKind::Editor,
+                                          derivedAsBase)
+            .IsNull() ||
+        MakeRepresentative<TestAsset>(variants, FixedId(CookedId), PackageKind::Cooked, cooked)
+            .IsNull()) {
+        return false;
+    }
+
+    out.baseAsDerived = Write(env.allocator, variants, baseAsDerived.Handle(), EditorOptions());
+    out.derivedAsBase = Write(env.allocator, variants, derivedAsBase.Handle(), EditorOptions());
+    out.cooked = Write(env.allocator, variants, cooked.Handle(), CookedOptions());
+    const Array<uint8>* const all[] = {
+        &out.hero,      &out.base,    &out.derived,       &out.villain,       &out.plain,
+        &out.otherTags, &out.badTags, &out.baseAsDerived, &out.derivedAsBase, &out.cooked};
+    for (const Array<uint8>* bytes : all) {
+        if (bytes->IsEmpty()) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// Content 아래 relative에 bytes를 쓴다(부모 디렉터리를 만든다).
+bool WriteContentFile(Allocator& allocator, const TempProject& project, StringView relative,
+                      Span<const uint8> bytes) noexcept {
+    String path(allocator);
+    const StringView pieces[] = {project.Root(), "/Content/", relative};
+    for (StringView piece : pieces) {
+        if (!path.TryAppend(piece)) {
+            return false;
+        }
+    }
+
+    const StringView view = path.View();
+    usize slash = view.ByteCount();
+    while (slash > 0 && view.Data()[slash - 1] != '/') {
+        --slash;
+    }
+
+    platform::FileSystem& files = platform::PhysicalFileSystem();
+    if (!platform::MakeDirectoryTree(files, view.Data(), slash - 1)) {
+        return false;
+    }
+
+    platform::File file;
+    if (!file.Open(files, view.Data(), view.ByteCount(), platform::FileOpenMode::CreateAlways)) {
+        return false;
+    }
+
+    const bool written = static_cast<bool>(file.WriteAll(bytes.Data(), bytes.Size()).status);
+    return static_cast<bool>(file.Close()) && written;
+}
+
+// Content 아래 빈 디렉터리를 만든다.
+bool MakeContentDirectory(Allocator& allocator, const TempProject& project,
+                          StringView relative) noexcept {
+    String path(allocator);
+    const StringView pieces[] = {project.Root(), "/Content/", relative};
+    for (StringView piece : pieces) {
+        if (!path.TryAppend(piece)) {
+            return false;
+        }
+    }
+
+    return static_cast<bool>(platform::MakeDirectoryTree(
+        platform::PhysicalFileSystem(), path.View().Data(), path.View().ByteCount()));
+}
+
+// 메모리 파일 시스템의 고장 주입이다.
+enum class MemoryFault {
+    None,
+    // 열기에서 없음(열거와 열기 사이에 사라진 파일)·사용 중.
+    OpenMissing,
+    OpenBusy,
+    // 읽기 실패.
+    Read,
+    // 디렉터리 열거 실패·열거에서 없음(검색 중 지워진 디렉터리).
+    Enumerate,
+    EnumerateMissing
+};
+
+constexpr platform::FileStatus MemoryError{platform::FileCode::SystemError, 7};
+constexpr platform::FileStatus MemoryBusy{platform::FileCode::Busy, 32};
+constexpr platform::FileStatus MemoryMissing{platform::FileCode::NotFound, 2};
+constexpr platform::FileStatus MemoryWrongType{platform::FileCode::WrongType, 0};
+
+class MemoryHandle final : public platform::FileHandle {
+public:
+    void Reset(Span<const uint8> bytes, bool failRead) noexcept {
+        bytes_ = bytes;
+        failRead_ = failRead;
+        position_ = 0;
+    }
+
+    platform::FileTransfer Read(void* destination, usize bytes) noexcept override {
+        if (failRead_) {
+            return {MemoryError, 0};
+        }
+
+        const usize left = bytes_.Size() - position_;
+        const usize count = bytes < left ? bytes : left;
+        if (count != 0) {
+            memcpy(destination, bytes_.Data() + position_, count);
+        }
+
+        position_ += count;
+        return {platform::FileStatus{}, count};
+    }
+
+    platform::FileTransfer Write(const void*, usize) noexcept override {
+        return {MemoryError, 0};
+    }
+
+    platform::FileStatus Seek(int64 offset, platform::FileSeekOrigin,
+                              uint64& position) noexcept override {
+        position_ = static_cast<usize>(offset);
+        position = position_;
+        return {};
+    }
+
+    platform::FileStatus Size(uint64& bytes) noexcept override {
+        bytes = bytes_.Size();
+        return {};
+    }
+
+    platform::FileStatus Close() noexcept override {
+        return {};
+    }
+
+    void Destroy() noexcept override {
+    }
+
+private:
+    Span<const uint8> bytes_;
+    bool failRead_ = false;
+    usize position_ = 0;
+};
+
+// 노드 표로 만든 파일 시스템이다(경로는 Content 절대 경로 + "/" + 상대). 열기는 한 번에 하나다
+// (색인은 파일마다 열고 닫는다).
+class MemoryFileSystem final : public platform::FileSystem {
+public:
+    struct Node {
+        explicit Node(Allocator& allocator) noexcept : path(allocator), name(allocator) {
+        }
+
+        Node(Node&&) noexcept = default;
+        Node& operator=(Node&&) noexcept = default;
+
+        String path;
+        String name;
+        platform::FileType type = platform::FileType::File;
+        bool isLink = false;
+        Span<const uint8> bytes{};
+        MemoryFault fault = MemoryFault::None;
+    };
+
+    MemoryFileSystem(Allocator& allocator, StringView content) noexcept
+        : allocator_(&allocator), content_(allocator), nodes_(allocator) {
+        ready_ = static_cast<bool>(content_.TryAssign(content)) &&
+                 AddDirectory("", false, MemoryFault::None);
+    }
+
+    bool Ready() const noexcept {
+        return ready_;
+    }
+
+    bool AddDirectory(StringView relative, bool link = false,
+                      MemoryFault fault = MemoryFault::None) noexcept {
+        return Add(relative, platform::FileType::Directory, link, {}, fault);
+    }
+
+    bool AddFile(StringView relative, Span<const uint8> bytes,
+                 MemoryFault fault = MemoryFault::None,
+                 platform::FileType type = platform::FileType::File, bool link = false) noexcept {
+        return Add(relative, type, link, bytes, fault);
+    }
+
+    // relative 노드(또는 Content 자신 — 빈 문자열)를 지운다.
+    void Remove(StringView relative) noexcept {
+        for (usize index = 0; index < nodes_.Size(); ++index) {
+            if (Relative(nodes_[index]) == relative) {
+                (void)nodes_.TryRemoveAt(index);
+                return;
+            }
+        }
+    }
+
+    platform::FileStatus Open(const char* path, usize pathBytes, platform::FileOpenMode,
+                              platform::FileHandle*& out) noexcept override {
+        const Node* node = Find(StringView(path, pathBytes));
+        if (node == nullptr || node->fault == MemoryFault::OpenMissing) {
+            return MemoryMissing;
+        }
+
+        if (node->fault == MemoryFault::OpenBusy) {
+            return MemoryBusy;
+        }
+
+        handle_.Reset(node->bytes, node->fault == MemoryFault::Read);
+        out = &handle_;
+        return {};
+    }
+
+    platform::FileStatus Exists(const char* path, usize pathBytes, bool& exists) noexcept override {
+        exists = Find(StringView(path, pathBytes)) != nullptr;
+        return {};
+    }
+
+    platform::FileStatus Delete(const char*, usize) noexcept override {
+        return MemoryError;
+    }
+
+    platform::FileStatus EnumerateDirectory(const char* path, usize pathBytes,
+                                            platform::DirectoryVisitor visitor,
+                                            void* context) noexcept override {
+        const StringView directory(path, pathBytes);
+        const Node* node = Find(directory);
+        if (node == nullptr || node->fault == MemoryFault::EnumerateMissing) {
+            return MemoryMissing;
+        }
+
+        if (node->type != platform::FileType::Directory) {
+            return MemoryWrongType;
+        }
+
+        if (node->fault == MemoryFault::Enumerate) {
+            return MemoryError;
+        }
+
+        for (const Node& child : nodes_) {
+            const StringView childPath = child.path.View();
+            if (childPath.ByteCount() <= directory.ByteCount() + 1 ||
+                !childPath.StartsWith(directory, StringComparison::CaseSensitive) ||
+                childPath.Data()[directory.ByteCount()] != '/' ||
+                StringView(childPath.Data() + directory.ByteCount() + 1,
+                           childPath.ByteCount() - directory.ByteCount() - 1)
+                    .Contains("/", StringComparison::CaseSensitive)) {
+                continue;
+            }
+
+            platform::DirectoryEntry entry;
+            entry.name = child.name.CStr();
+            entry.nameBytes = child.name.View().ByteCount();
+            entry.info.type = child.type;
+            entry.info.isLink = child.isLink;
+            entry.info.size = child.bytes.Size();
+            entry.info.modifiedTicks = static_cast<int64>(child.bytes.Size()) + 1;
+            if (!visitor(entry, context)) {
+                break;
+            }
+        }
+
+        return {};
+    }
+
+private:
+    bool Add(StringView relative, platform::FileType type, bool link, Span<const uint8> bytes,
+             MemoryFault fault) noexcept {
+        Node node(*allocator_);
+        const StringView pieces[] = {content_.View(), relative.IsEmpty() ? "" : "/", relative};
+        for (StringView piece : pieces) {
+            if (!node.path.TryAppend(piece)) {
+                return false;
+            }
+        }
+
+        usize slash = relative.ByteCount();
+        while (slash > 0 && relative.Data()[slash - 1] != '/') {
+            --slash;
+        }
+
+        if (!node.name.TryAssign(
+                StringView(relative.Data() + slash, relative.ByteCount() - slash))) {
+            return false;
+        }
+
+        node.type = type;
+        node.isLink = link;
+        node.bytes = bytes;
+        node.fault = fault;
+        return static_cast<bool>(nodes_.TryPushBack(rocks::Move(node)));
+    }
+
+    StringView Relative(const Node& node) const noexcept {
+        const StringView path = node.path.View();
+        const usize skip = path.ByteCount() == content_.View().ByteCount()
+                               ? path.ByteCount()
+                               : content_.View().ByteCount() + 1;
+        return StringView(path.Data() + skip, path.ByteCount() - skip);
+    }
+
+    const Node* Find(StringView path) const noexcept {
+        for (const Node& node : nodes_) {
+            if (node.path.View() == path) {
+                return &node;
+            }
+        }
+
+        return nullptr;
+    }
+
+    Allocator* allocator_;
+    String content_;
+    Array<Node> nodes_;
+    MemoryHandle handle_;
+    bool ready_ = false;
+};
+
+// 메모리 장면의 프로젝트 루트다(디스크는 보지 않는다).
+constexpr const char* MemoryRoot = IsWindows ? "C:/MemoryProject" : "/MemoryProject";
+
+AssetId IdOfEntry(const AssetIndexEntry* entry) noexcept {
+    return entry == nullptr ? AssetId{} : entry->id;
+}
+
+// out의 항목 id가 expected(순서대로)와 같은지 본다.
+bool SameIds(const Array<const AssetIndexEntry*>& out, Span<const uint64> expected) noexcept {
+    if (out.Size() != expected.Size()) {
+        return false;
+    }
+
+    for (usize index = 0; index < out.Size(); ++index) {
+        if (!(IdOfEntry(out[index]) == FixedId(expected[index]))) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// 진단 하나의 기대값이다.
+struct ExpectedDiagnostic {
+    AssetDiagnosticCode code;
+    ErrorCode error;
+    StringView fileName;
+};
+
+bool SameDiagnostics(Span<const AssetIndexDiagnostic> actual,
+                     Span<const ExpectedDiagnostic> expected) noexcept {
+    bool same = actual.Size() == expected.Size();
+    for (usize index = 0; index < actual.Size() || index < expected.Size(); ++index) {
+        const bool both = index < actual.Size() && index < expected.Size();
+        if (both && actual[index].code == expected[index].code &&
+            actual[index].error == expected[index].error &&
+            actual[index].fileName.View() == expected[index].fileName) {
+            continue;
+        }
+
+        same = false;
+        printf("  diagnostic %zu: actual %s %u %s, expected %s %u %.*s\n", index,
+               index < actual.Size() ? AssetDiagnosticName(actual[index].code) : "-",
+               index < actual.Size() ? static_cast<unsigned>(actual[index].error) : 0u,
+               index < actual.Size() ? actual[index].fileName.CStr() : "-",
+               index < expected.Size() ? AssetDiagnosticName(expected[index].code) : "-",
+               index < expected.Size() ? static_cast<unsigned>(expected[index].error) : 0u,
+               index < expected.Size() ? static_cast<int>(expected[index].fileName.ByteCount()) : 1,
+               index < expected.Size() ? expected[index].fileName.Data() : "-");
+    }
+
+    return same;
+}
+
+// 패키지 섹션 안의 Guid byte(little endian high·low — ArchiveWriter::WriteGuid)를 모두 바꾸고 바꾼
+// 수를 돌려준다.
+usize ReplaceGuid(EditablePackage& edit, Guid from, Guid to) noexcept {
+    uint8 fromBytes[sizeof(uint64) * 2];
+    uint8 toBytes[sizeof(uint64) * 2];
+    StoreLittleEndian<uint64>(fromBytes, from.high);
+    StoreLittleEndian<uint64>(fromBytes + sizeof(uint64), from.low);
+    StoreLittleEndian<uint64>(toBytes, to.high);
+    StoreLittleEndian<uint64>(toBytes + sizeof(uint64), to.low);
+    usize replaced = 0;
+    for (EditableSection& section : edit.sections) {
+        for (usize offset = 0; offset + sizeof(fromBytes) <= section.bytes.Size(); ++offset) {
+            if (memcmp(section.bytes.Data() + offset, fromBytes, sizeof(fromBytes)) == 0) {
+                memcpy(section.bytes.Data() + offset, toBytes, sizeof(toBytes));
+                ++replaced;
+            }
+        }
+    }
+
+    return replaced;
+}
+
+// 부분 읽기로 직접 판정한 진단이다(색인 진단의 기대값).
+AssetDiagnostic DirectFailure(Allocator& allocator, Span<const uint8> bytes,
+                              ErrorCode& error) noexcept {
+    MemoryPackageRangeReader reader(bytes);
+    PackageReadOptions options;
+    options.expectedKind = PackageKind::Editor;
+    AssetDiagnostic failure;
+    auto view = ReadPackageIndex(allocator, reader, options, &failure);
+    error = view ? ErrorCode::None : view.Error();
+    return failure;
+}
+
+} // namespace
+
+// 디스크 검색과 조회(7.1절 11·13): Content를 재귀 검색해 `.rasset`(대문자 확장자 포함)만 색인하고
+// 그 밖의 파일·디렉터리 이름의 `.rasset`·빈 디렉터리는 무시한다. 항목은 경로 키 순이고 경로·키·실제
+// 파일 이름·대표 타입·지문(전체 읽기와 같다)·크기·시각·의존·태그를 가진다. 비 NFC 파일 이름은
+// 이름을 정규화하지 않는 파일 시스템에서 InvalidPath(NotNfcOnDisk)다. 조회: id·경로(대소문자 무시
+// 키)·디렉터리(마운트·논리 경로, 바로 아래·재귀, 구성 요소 경계)·잘못된 디렉터리 InvalidArgument·
+// 타입(정확·파생, 0 거부)·태그(목록 값 원소마다)·정방향 의존과 역방향 참조자(모든 종류 묶음 32개를
+// 전수 대조)·Verify(Soft 누락만 — Build·ImportOwner·EditorOnly는 대조하지 않는다).
+TEST(AssetIndex_DiskScanAndQueries) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    IndexPackages packages(env.allocator);
+    REQUIRE(MakePackages(env, packages));
+    TempProject project("index-disk");
+    REQUIRE(project.made);
+    ProjectLayout layout(env.allocator);
+    REQUIRE(layout.Initialize(project.Root()));
+    AssetIndex index(env.allocator, layout);
+    // Content가 없으면 빈 색인이다.
+    REQUIRE(index.Rebuild(platform::PhysicalFileSystem(), PackageReadOptions{}));
+    CHECK(index.Count() == 0 && index.Diagnostics().IsEmpty());
+
+    REQUIRE(
+        WriteContentFile(env.allocator, project, "Characters/Hero.rasset", packages.hero.View()));
+    REQUIRE(WriteContentFile(env.allocator, project, "Characters/Villain.rasset",
+                             packages.villain.View()));
+    REQUIRE(WriteContentFile(env.allocator, project, "Items/Base.rasset", packages.base.View()));
+    REQUIRE(WriteContentFile(env.allocator, project, "Items/Weapons/Derived.RASSET",
+                             packages.derived.View()));
+    REQUIRE(WriteContentFile(env.allocator, project, "Items/Base.rasset.0123.tmp",
+                             packages.base.View()));
+    REQUIRE(WriteContentFile(env.allocator, project, "Notes.txt", packages.plain.View()));
+    REQUIRE(WriteContentFile(env.allocator, project, "Cafe\xcc\x81.rasset", packages.plain.View()));
+    REQUIRE(MakeContentDirectory(env.allocator, project, "Empty"));
+    REQUIRE(MakeContentDirectory(env.allocator, project, "Folder.rasset"));
+    REQUIRE(index.Rebuild(platform::PhysicalFileSystem(), PackageReadOptions{}));
+    if constexpr (FileSystemNormalizesNames) {
+        REQUIRE(index.Count() == 5);
+        CHECK(index.Diagnostics().IsEmpty());
+    } else {
+        REQUIRE(index.Count() == 4);
+        REQUIRE(index.Diagnostics().Size() == 1);
+        const AssetIndexDiagnostic& nfd = index.Diagnostics()[0];
+        CHECK(nfd.code == AssetDiagnosticCode::InvalidPath);
+        CHECK(nfd.error == ErrorCode::InvalidArgument);
+        CHECK(nfd.pathError == LogicalPathError::NotNfcOnDisk);
+        CHECK(nfd.fileName.View() == "Cafe\xcc\x81.rasset");
+    }
+
+    // 경로 키 순(game/caf…는 NFC 이름일 때만 있다).
+    const usize first = FileSystemNormalizesNames ? 1 : 0;
+    const AssetIndexEntry& hero = index.At(first + 0);
+    CHECK(hero.path.View() == "/Game/Characters/Hero");
+    CHECK(hero.key.View() == "game/characters/hero");
+    CHECK(hero.fileName.View() == "Characters/Hero.rasset");
+    CHECK(index.At(first + 1).fileName.View() == "Characters/Villain.rasset");
+    CHECK(index.At(first + 2).fileName.View() == "Items/Base.rasset");
+    const AssetIndexEntry& derived = index.At(first + 3);
+    CHECK(derived.fileName.View() == "Items/Weapons/Derived.RASSET");
+    CHECK(derived.path.View() == "/Game/Items/Weapons/Derived");
+    CHECK(derived.type == IdOf<DerivedGameAsset>());
+    auto full =
+        ReadPackage(env.allocator, packages.hero.View(), PackageReadOptions{PackageKind::Editor});
+    REQUIRE(full);
+    CHECK(hero.id == FixedId(HeroId));
+    CHECK(hero.type == TestAssetType());
+    CHECK(hero.fingerprint.digest == full.Value().fingerprint.digest);
+    CHECK(hero.fileBytes == packages.hero.Size());
+    CHECK(hero.modifiedTicks > 0);
+    CHECK(!hero.readOnly && !hero.duplicateId && !hero.duplicatePath);
+    REQUIRE(hero.dependencies.Size() == full.Value().dependencies.Size());
+    REQUIRE(hero.tags.Size() == 3);
+    CHECK(hero.tags[0].key.View() == "Kind" && hero.tags[2].value.View() == "/Game/Old/B");
+
+    // id·경로 조회.
+    const uint64 ids[] = {HeroId, BaseId, DerivedId, VillainId};
+    for (uint64 id : ids) {
+        auto found = index.FindById(FixedId(id));
+        CHECK(found && found.Value()->id == FixedId(id));
+    }
+
+    CHECK(index.FindById(FixedId(MissingSoftId)).Error() == ErrorCode::NotFound);
+    CHECK(index.FindById(AssetId{}).Error() == ErrorCode::NotFound);
+    auto heroPath = ParseLogicalPath(env.allocator, "/game/CHARACTERS/hero");
+    auto missingPath = ParseLogicalPath(env.allocator, "/Game/Characters/Nobody");
+    auto lastPath = ParseLogicalPath(env.allocator, "/Game/Zzz");
+    REQUIRE(heroPath && missingPath && lastPath);
+    auto byPath = index.FindByPath(heroPath.Value());
+    CHECK(byPath && byPath.Value() == &hero);
+    CHECK(index.FindByPath(missingPath.Value()).Error() == ErrorCode::NotFound);
+    CHECK(index.FindByPath(lastPath.Value()).Error() == ErrorCode::NotFound);
+
+    // 디렉터리 조회.
+    struct Listing {
+        StringView directory;
+        bool recursive;
+        uint32 count;
+    };
+    const uint32 nfcExtra = FileSystemNormalizesNames ? 1 : 0;
+    const Listing listings[] = {
+        {"/Game", true, 4 + nfcExtra}, {"/game", true, 4 + nfcExtra},
+        {"/Game", false, nfcExtra},    {"/Game/Characters", false, 2},
+        {"/Game/characters", true, 2}, {"/Game/Items", false, 1},
+        {"/Game/Items", true, 2},      {"/Game/Items/Weapons", false, 1},
+        {"/Game/Char", true, 0},       {"/Game/Characters/Hero", true, 0},
+    };
+    for (const Listing& listing : listings) {
+        Array<const AssetIndexEntry*> out(env.allocator);
+        REQUIRE(index.ListUnder(listing.directory, listing.recursive, out));
+        if (out.Size() != listing.count) {
+            printf("  ListUnder %.*s %d: %zu\n", static_cast<int>(listing.directory.ByteCount()),
+                   listing.directory.Data(), static_cast<int>(listing.recursive), out.Size());
+        }
+
+        CHECK(out.Size() == listing.count);
+    }
+
+    const StringView badDirectories[] = {"Game", "/Other", "/Gamx", "/Game/", "", "/Game//Items"};
+    for (StringView directory : badDirectories) {
+        Array<const AssetIndexEntry*> out(env.allocator);
+        CHECK(index.ListUnder(directory, true, out).Error() == ErrorCode::InvalidArgument);
+        CHECK(out.IsEmpty());
+    }
+
+    // 타입 조회: 정확 일치, 파생 포함, 미등록 id, 0.
+    {
+        Array<const AssetIndexEntry*> out(env.allocator);
+        REQUIRE(index.ListByType(IdOf<BaseGameAsset>(), nullptr, out));
+        const uint64 exact[] = {BaseId};
+        CHECK(SameIds(out, exact));
+        out.Clear();
+        REQUIRE(index.ListByType(IdOf<BaseGameAsset>(), &env.types, out));
+        const uint64 withDerived[] = {BaseId, DerivedId};
+        CHECK(SameIds(out, withDerived));
+        out.Clear();
+        REQUIRE(index.ListByType(TestAssetType(), &env.types, out));
+        CHECK(out.Size() == 2 + nfcExtra);
+        out.Clear();
+        REQUIRE(index.ListByType(Guid{0x7E57, 0x7E57}, &env.types, out));
+        CHECK(out.IsEmpty());
+        CHECK(index.ListByType(TypeId{}, nullptr, out).Error() == ErrorCode::InvalidArgument);
+    }
+
+    // 태그 조회.
+    {
+        Array<const AssetIndexEntry*> out(env.allocator);
+        const uint64 heroOnly[] = {HeroId};
+        REQUIRE(index.FindByTag("Kind", "Hero", out));
+        CHECK(SameIds(out, heroOnly));
+        out.Clear();
+        REQUIRE(index.FindByTag("UnrealExchange.FormerPaths", "/Game/Old/A", out));
+        CHECK(SameIds(out, heroOnly));
+        out.Clear();
+        REQUIRE(index.FindByTag("UnrealExchange.FormerPaths", "/Game/Old/B", out));
+        CHECK(SameIds(out, heroOnly));
+        out.Clear();
+        REQUIRE(index.FindByTag("Kind", "Villain", out));
+        REQUIRE(index.FindByTag("kind", "Hero", out));
+        REQUIRE(index.FindByTag("Hero", "Kind", out));
+        CHECK(out.IsEmpty());
+    }
+
+    // 정방향 의존과 역방향 참조자: 모든 종류 묶음을 저장 내용에서 직접 고른 것과 대조한다.
+    const uint64 targets[] = {HeroId,  BaseId,        DerivedId,     VillainId,
+                              BuildId, ImportOwnerId, MissingSoftId, PlainId};
+    uint32 mismatches = 0;
+    for (uint32 kinds = 0; kinds < (1u << DependencyKindCount); ++kinds) {
+        for (uint64 id : ids) {
+            auto entry = index.FindById(FixedId(id));
+            REQUIRE(entry);
+            Array<const PackageDependencyEntry*> out(env.allocator);
+            REQUIRE(index.Dependencies(FixedId(id), kinds, out));
+            usize expected = 0;
+            for (const PackageDependencyEntry& dependency : entry.Value()->dependencies) {
+                if ((kinds & DependencyKindBit(dependency.kind)) == 0) {
+                    continue;
+                }
+
+                if (expected >= out.Size() || out[expected] != &dependency) {
+                    ++mismatches;
+                }
+
+                ++expected;
+            }
+
+            if (expected != out.Size()) {
+                ++mismatches;
+            }
+        }
+
+        for (uint64 target : targets) {
+            Array<const AssetIndexEntry*> out(env.allocator);
+            REQUIRE(index.Referencers(FixedId(target), kinds, out));
+            usize expected = 0;
+            for (usize position = 0; position < index.Count(); ++position) {
+                bool refers = false;
+                for (const PackageDependencyEntry& dependency : index.At(position).dependencies) {
+                    refers = refers || (dependency.asset == FixedId(target) &&
+                                        (kinds & DependencyKindBit(dependency.kind)) != 0);
+                }
+
+                if (!refers) {
+                    continue;
+                }
+
+                if (expected >= out.Size() || out[expected] != &index.At(position)) {
+                    ++mismatches;
+                }
+
+                ++expected;
+            }
+
+            if (expected != out.Size()) {
+                ++mismatches;
+            }
+        }
+    }
+
+    CHECK(mismatches == 0);
+    // 대표 장면 값: Hero의 Hard는 Base, Derived는 Hero(EditorOnly)·Villain(Hard)이 참조한다.
+    {
+        Array<const PackageDependencyEntry*> hard(env.allocator);
+        REQUIRE(index.Dependencies(FixedId(HeroId), DependencyKindBit(PackageDependencyKind::Hard),
+                                   hard));
+        REQUIRE(hard.Size() == 1);
+        CHECK(hard[0]->asset == FixedId(BaseId));
+        CHECK(hard[0]->expectedType == IdOf<BaseGameAsset>());
+        Array<const AssetIndexEntry*> referencers(env.allocator);
+        REQUIRE(index.Referencers(FixedId(DerivedId), AllDependencyKinds, referencers));
+        const uint64 both[] = {HeroId, VillainId};
+        CHECK(SameIds(referencers, both));
+        Array<const PackageDependencyEntry*> none(env.allocator);
+        CHECK(index.Dependencies(FixedId(MissingSoftId), AllDependencyKinds, none).Error() ==
+              ErrorCode::NotFound);
+    }
+
+    // Verify: Hero의 Soft → 2109만 누락이다.
+    Array<AssetIndexDiagnostic> verified(env.allocator);
+    REQUIRE(index.Verify(&env.types, verified));
+    REQUIRE(verified.Size() == 1);
+    CHECK(verified[0].code == AssetDiagnosticCode::MissingDependency);
+    CHECK(verified[0].error == ErrorCode::NotFound);
+    CHECK(verified[0].fileName.View() == "Characters/Hero.rasset");
+    CHECK(verified[0].asset == FixedId(HeroId));
+    CHECK(verified[0].relatedAsset == FixedId(MissingSoftId));
+
+    // 다시 검색하면 파일 변화가 반영된다(Villain을 지우면 사라지고 Derived 참조자는 Hero뿐).
+    String villainPath(env.allocator);
+    const StringView villainPieces[] = {project.Root(), "/Content/Characters/Villain.rasset"};
+    for (StringView piece : villainPieces) {
+        REQUIRE(villainPath.TryAppend(piece));
+    }
+
+    REQUIRE(platform::PhysicalFileSystem().Delete(villainPath.View().Data(),
+                                                  villainPath.View().ByteCount()));
+    REQUIRE(index.Rebuild(platform::PhysicalFileSystem(), PackageReadOptions{}));
+    CHECK(index.Count() == 3 + nfcExtra);
+    CHECK(index.FindById(FixedId(VillainId)).Error() == ErrorCode::NotFound);
+}
+
+// Verify의 형식 대조(7.1절 13): Hard 의존의 expectedType과 대상 대표 타입이 다르면 TypeMismatch다.
+// 대상이 기대의 파생이면 TypeRegistry가 있을 때만 통과하고(없거나 대상 타입이 등록되지 않았으면
+// TypeMismatch), 파생이 아니면 언제나 TypeMismatch다. 대상 파일이 없으면 MissingDependency, 대상
+// id가 둘이면(DuplicateAssetId로 이미 진단) 대조하지 않는다. 종료한 TypeRegistry는 그 오류다
+// (ShuttingDown — Verify·ListByType).
+TEST(AssetIndex_VerifyTypes) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    IndexPackages packages(env.allocator);
+    REQUIRE(MakePackages(env, packages));
+    ProjectLayout layout(env.allocator);
+    REQUIRE(layout.Initialize(MemoryRoot));
+    TypeRegistry empty(env.allocator);
+    TypeRegistry closed(env.allocator);
+    REQUIRE(closed.Shutdown());
+
+    struct Scene {
+        Span<const uint8> base;
+        Span<const uint8> derived;
+        bool duplicateBase;
+        // 기대: Hero의 Hard(→ Base), Villain의 Hard(→ Derived)의 진단 코드(TypeRegistry 없음·있음·
+        // 빈 Registry).
+        AssetDiagnosticCode heroCodes[3];
+        AssetDiagnosticCode villainCodes[3];
+    };
+    using C = AssetDiagnosticCode;
+    const Scene scenes[] = {
+        {packages.base.View(),
+         packages.derived.View(),
+         false,
+         {C::None, C::None, C::None},
+         {C::None, C::None, C::None}},
+        {packages.baseAsDerived.View(),
+         packages.derived.View(),
+         false,
+         {C::TypeMismatch, C::None, C::TypeMismatch},
+         {C::None, C::None, C::None}},
+        {packages.base.View(),
+         packages.derivedAsBase.View(),
+         false,
+         {C::None, C::None, C::None},
+         {C::TypeMismatch, C::TypeMismatch, C::TypeMismatch}},
+        {Span<const uint8>(),
+         packages.derived.View(),
+         false,
+         {C::MissingDependency, C::MissingDependency, C::MissingDependency},
+         {C::None, C::None, C::None}},
+        {packages.baseAsDerived.View(),
+         packages.derived.View(),
+         true,
+         {C::None, C::None, C::None},
+         {C::None, C::None, C::None}},
+    };
+    for (const Scene& scene : scenes) {
+        MemoryFileSystem files(env.allocator, layout.ContentDirectory());
+        REQUIRE(files.Ready());
+        REQUIRE(files.AddFile("Hero.rasset", packages.hero.View()));
+        REQUIRE(files.AddFile("Villain.rasset", packages.villain.View()));
+        REQUIRE(files.AddFile("Derived.rasset", scene.derived));
+        if (!scene.base.IsEmpty()) {
+            REQUIRE(files.AddFile("Base.rasset", scene.base));
+        }
+
+        if (scene.duplicateBase) {
+            REQUIRE(files.AddFile("Base2.rasset", packages.base.View()));
+        }
+
+        AssetIndex index(env.allocator, layout);
+        REQUIRE(index.Rebuild(files, PackageReadOptions{}));
+        TypeRegistry* const registries[] = {nullptr, &env.types, &empty};
+        for (usize which = 0; which < 3; ++which) {
+            Array<AssetIndexDiagnostic> out(env.allocator);
+            REQUIRE(index.Verify(registries[which], out));
+            C hero = C::None;
+            C villain = C::None;
+            for (const AssetIndexDiagnostic& diagnostic : out) {
+                if (diagnostic.relatedAsset == FixedId(MissingSoftId)) {
+                    continue; // Hero의 Soft 누락은 모든 장면에 있다.
+                }
+
+                const bool fromHero = diagnostic.asset == FixedId(HeroId);
+                CHECK(diagnostic.relatedAsset == FixedId(fromHero ? BaseId : DerivedId));
+                CHECK(diagnostic.error == (diagnostic.code == C::MissingDependency
+                                               ? ErrorCode::NotFound
+                                               : ErrorCode::TypeMismatch));
+                (fromHero ? hero : villain) = diagnostic.code;
+            }
+
+            CHECK(hero == scene.heroCodes[which]);
+            CHECK(villain == scene.villainCodes[which]);
+        }
+
+        // 종료한 Registry: 파생 판정이 필요한 장면만 ShuttingDown이다.
+        Array<AssetIndexDiagnostic> out(env.allocator);
+        const bool needsRegistry =
+            scene.heroCodes[0] == C::TypeMismatch || scene.villainCodes[0] == C::TypeMismatch;
+        auto verified = index.Verify(&closed, out);
+        CHECK(needsRegistry ? verified.Error() == ErrorCode::ShuttingDown
+                            : static_cast<bool>(verified));
+        Array<const AssetIndexEntry*> listed(env.allocator);
+        CHECK(index.ListByType(IdOf<BaseGameAsset>(), &closed, listed).Error() ==
+              ErrorCode::ShuttingDown);
+        // 빈 Registry(미등록 — 정확 일치만).
+        listed.Clear();
+        REQUIRE(index.ListByType(IdOf<BaseGameAsset>(), &empty, listed));
+        for (const AssetIndexEntry* entry : listed) {
+            CHECK(entry->type == IdOf<BaseGameAsset>());
+        }
+    }
+
+    // 대표 타입 id가 등록된 구조체(클래스 아님)인 패키지(Summary·Exports의 타입 id를 바꿔 만든다 —
+    // 타입 Registry 없이 읽는 색인은 받는다): TypeRegistry 판정의 TypeMismatch(클래스 아님)는 파생
+    // 아님이다. ListByType은 빼고, 그것을 Hard로 기대하는 Hero는 TypeMismatch 진단이다.
+    EditablePackage edit(env.allocator);
+    REQUIRE(edit.Parse(packages.base.View()));
+    REQUIRE(ReplaceGuid(edit, IdOf<BaseGameAsset>(), IdOf<FixturePoint>()) > 0);
+    const Array<uint8> structTyped = edit.Build();
+    MemoryFileSystem files(env.allocator, layout.ContentDirectory());
+    REQUIRE(files.Ready());
+    REQUIRE(files.AddFile("Hero.rasset", packages.hero.View()));
+    REQUIRE(files.AddFile("Derived.rasset", packages.derived.View()));
+    REQUIRE(files.AddFile("Base.rasset", structTyped.View()));
+    AssetIndex index(env.allocator, layout);
+    REQUIRE(index.Rebuild(files, PackageReadOptions{}));
+    CHECK(index.Diagnostics().IsEmpty());
+    auto base = index.FindById(FixedId(BaseId));
+    REQUIRE(base);
+    CHECK(base.Value()->type == IdOf<FixturePoint>());
+    Array<const AssetIndexEntry*> listed(env.allocator);
+    REQUIRE(index.ListByType(IdOf<BaseGameAsset>(), &env.types, listed));
+    const uint64 derivedOnly[] = {DerivedId};
+    CHECK(SameIds(listed, derivedOnly));
+    Array<AssetIndexDiagnostic> verified(env.allocator);
+    REQUIRE(index.Verify(&env.types, verified));
+    uint32 mismatches = 0;
+    for (const AssetIndexDiagnostic& diagnostic : verified) {
+        mismatches += diagnostic.code == AssetDiagnosticCode::TypeMismatch &&
+                              diagnostic.relatedAsset == FixedId(BaseId)
+                          ? 1
+                          : 0;
+    }
+
+    CHECK(mismatches == 1);
+}
+
+// 진단 장면(7.1절 13): 이름 규칙 위반 InvalidPath(사유), 패키지 판정 실패는 부분 읽기와 같은 코드·
+// 오류·칸·위치, 쿠킹 패키지 CorruptPackage, 다른 스키마 Tags UnsupportedVersion(태그 없이 색인),
+// 깨진 Tags CorruptPackage(Tags 칸, 색인), 열거 뒤 사라진 파일 MissingFile, 그 밖의 열기·읽기 실패
+// 진단 None과 그 오류. 링크(파일·디렉터리 — 따라가지 않는다)·장치·`.rasset` 아닌 파일은 무시한다.
+// 같은 경로 키(대소문자만 다름)는 둘 다 DuplicatePath, 같은 id는 둘 다 DuplicateAssetId(상대 파일을
+// related에), 조회는 AlreadyExists다. 진단은 파일 이름 → 코드 순이다.
+TEST(AssetIndex_Diagnostics) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    IndexPackages packages(env.allocator);
+    REQUIRE(MakePackages(env, packages));
+    ProjectLayout layout(env.allocator);
+    REQUIRE(layout.Initialize(MemoryRoot));
+    MemoryFileSystem files(env.allocator, layout.ContentDirectory());
+    REQUIRE(files.Ready());
+    const uint8 junk[] = {'J', 'U', 'N', 'K', 0, 1, 2, 3};
+    REQUIRE(files.AddDirectory("Good"));
+    REQUIRE(files.AddFile("Good/Hero.rasset", packages.hero.View()));
+    REQUIRE(files.AddFile("Good/hero.RASSET", packages.villain.View()));
+    REQUIRE(files.AddDirectory("Copy"));
+    REQUIRE(files.AddFile("Copy/HeroCopy.rasset", packages.hero.View()));
+    REQUIRE(files.AddFile("Bad#Name.rasset", packages.plain.View()));
+    REQUIRE(files.AddFile("Broken.rasset", junk));
+    REQUIRE(files.AddFile("Cooked.rasset", packages.cooked.View()));
+    REQUIRE(files.AddFile("OtherTags.rasset", packages.otherTags.View()));
+    REQUIRE(files.AddFile("BadTags.rasset", packages.badTags.View()));
+    REQUIRE(files.AddFile("Vanished.rasset", packages.base.View(), MemoryFault::OpenMissing));
+    REQUIRE(files.AddFile("Locked.rasset", packages.base.View(), MemoryFault::OpenBusy));
+    REQUIRE(files.AddFile("Unreadable.rasset", packages.base.View(), MemoryFault::Read));
+    REQUIRE(files.AddFile("Device.rasset", packages.base.View(), MemoryFault::None,
+                          platform::FileType::Other));
+    REQUIRE(files.AddFile("Link.rasset", packages.base.View(), MemoryFault::None,
+                          platform::FileType::File, true));
+    REQUIRE(files.AddDirectory("LinkDir", true));
+    REQUIRE(files.AddFile("LinkDir/Inside.rasset", packages.derived.View()));
+    REQUIRE(files.AddFile("Notes.txt", packages.base.View()));
+    REQUIRE(files.AddFile("Upper.RASSET", packages.base.View()));
+    REQUIRE(files.AddFile("Aaa.rasset", packages.plain.View()));
+    AssetIndex index(env.allocator, layout);
+    REQUIRE(index.Rebuild(files, PackageReadOptions{}));
+
+    ErrorCode junkError = ErrorCode::None;
+    ErrorCode cookedError = ErrorCode::None;
+    const AssetDiagnostic junkFailure = DirectFailure(env.allocator, junk, junkError);
+    const AssetDiagnostic cookedFailure =
+        DirectFailure(env.allocator, packages.cooked.View(), cookedError);
+    CHECK(cookedFailure.code == AssetDiagnosticCode::CorruptPackage);
+    const ErrorCode systemError = FileErrorCode(MemoryError);
+    const ErrorCode busyError = FileErrorCode(MemoryBusy);
+    using C = AssetDiagnosticCode;
+    const ExpectedDiagnostic expected[] = {
+        {C::InvalidPath, ErrorCode::InvalidArgument, "Bad#Name.rasset"},
+        {C::CorruptPackage, ErrorCode::InvalidArgument, "BadTags.rasset"},
+        {junkFailure.code, junkError, "Broken.rasset"},
+        {C::CorruptPackage, cookedError, "Cooked.rasset"},
+        {C::DuplicateAssetId, ErrorCode::AlreadyExists, "Copy/HeroCopy.rasset"},
+        {C::DuplicateAssetId, ErrorCode::AlreadyExists, "Good/Hero.rasset"},
+        {C::DuplicatePath, ErrorCode::AlreadyExists, "Good/Hero.rasset"},
+        {C::DuplicatePath, ErrorCode::AlreadyExists, "Good/hero.RASSET"},
+        {C::None, busyError, "Locked.rasset"},
+        {C::UnsupportedVersion, ErrorCode::Unsupported, "OtherTags.rasset"},
+        {C::None, systemError, "Unreadable.rasset"},
+        {C::MissingFile, ErrorCode::NotFound, "Vanished.rasset"},
+    };
+    CHECK(SameDiagnostics(index.Diagnostics(), expected));
+    REQUIRE(index.Diagnostics().Size() == 12);
+    const Span<const AssetIndexDiagnostic> diagnostics = index.Diagnostics();
+    CHECK(diagnostics[0].pathError == LogicalPathError::InvalidComponent);
+    CHECK(diagnostics[1].asset == FixedId(BadTagsId));
+    CHECK(diagnostics[1].section == static_cast<uint32>(PackageSectionKind::Tags));
+    CHECK(diagnostics[2].section == junkFailure.section &&
+          diagnostics[2].detail == junkFailure.detail);
+    CHECK(diagnostics[3].section == cookedFailure.section &&
+          diagnostics[3].detail == cookedFailure.detail &&
+          diagnostics[3].asset == cookedFailure.asset);
+    CHECK(diagnostics[4].related.View() == "Good/Hero.rasset");
+    CHECK(diagnostics[4].asset == FixedId(HeroId));
+    CHECK(diagnostics[5].related.View() == "Copy/HeroCopy.rasset");
+    CHECK(diagnostics[6].related.View() == "Good/hero.RASSET");
+    CHECK(diagnostics[7].related.View() == "Good/Hero.rasset");
+    CHECK(diagnostics[7].asset == FixedId(VillainId));
+    CHECK(diagnostics[9].asset == FixedId(OtherTagsId));
+    CHECK(diagnostics[9].section == static_cast<uint32>(PackageSectionKind::Tags));
+
+    // 색인된 항목: BadTags·Copy/HeroCopy·Good/Hero·Good/hero·OtherTags·Upper(경로 키 순).
+    REQUIRE(index.Count() == 7);
+    const StringView names[] = {"Aaa.rasset",       "BadTags.rasset",   "Copy/HeroCopy.rasset",
+                                "Good/Hero.rasset", "Good/hero.RASSET", "OtherTags.rasset",
+                                "Upper.RASSET"};
+    for (usize position = 0; position < index.Count(); ++position) {
+        CHECK(index.At(position).fileName.View() == names[position]);
+    }
+
+    CHECK(index.At(1).tags.IsEmpty() && index.At(5).tags.IsEmpty());
+    CHECK(index.At(2).duplicateId && !index.At(2).duplicatePath);
+    CHECK(index.At(3).duplicateId && index.At(3).duplicatePath);
+    CHECK(!index.At(4).duplicateId && index.At(4).duplicatePath);
+    CHECK(index.At(6).path.View() == "/Game/Upper");
+    auto plain = index.FindById(AssetId{Guid{PlainHigh, PlainId}});
+    CHECK(plain && plain.Value() == &index.At(0));
+    CHECK(index.FindById(AssetId{Guid{PlainHigh, HeroId}}).Error() == ErrorCode::NotFound);
+    CHECK(index.FindById(FixedId(HeroId)).Error() == ErrorCode::AlreadyExists);
+    auto found = index.FindById(FixedId(VillainId));
+    CHECK(found && found.Value() == &index.At(4));
+    auto goodHero = ParseLogicalPath(env.allocator, "/Game/Good/Hero");
+    auto upper = ParseLogicalPath(env.allocator, "/Game/Upper");
+    REQUIRE(goodHero && upper);
+    CHECK(index.FindByPath(goodHero.Value()).Error() == ErrorCode::AlreadyExists);
+    auto upperEntry = index.FindByPath(upper.Value());
+    CHECK(upperEntry && upperEntry.Value() == &index.At(6));
+    Array<const PackageDependencyEntry*> dependencies(env.allocator);
+    CHECK(index.Dependencies(FixedId(HeroId), AllDependencyKinds, dependencies).Error() ==
+          ErrorCode::AlreadyExists);
+    // Verify: Hero 둘의 Hard 대상 Base는 Upper로 있고 Soft 대상 2109는 둘 다 누락이다. Villain
+    // (Good/hero)의 Hard 대상 Derived는 색인에 없고, Soft 대상 Hero는 id가 둘이라 대조하지 않는다.
+    Array<AssetIndexDiagnostic> verified(env.allocator);
+    REQUIRE(index.Verify(nullptr, verified));
+    uint32 missingDerived = 0;
+    uint32 missingSoft = 0;
+    for (const AssetIndexDiagnostic& diagnostic : verified) {
+        CHECK(diagnostic.code == AssetDiagnosticCode::MissingDependency);
+        missingDerived += diagnostic.relatedAsset == FixedId(DerivedId) ? 1 : 0;
+        missingSoft += diagnostic.relatedAsset == FixedId(MissingSoftId) ? 1 : 0;
+    }
+
+    CHECK(missingDerived == 1 && missingSoft == 2 && verified.Size() == 3);
+}
+
+// 검색 실패(7.1절 13): Content 열거·하위 디렉터리 열거 실패와 Content가 파일인 것(WrongType)은
+// Rebuild의 그 파일 오류이고 색인을 비운다(앞 결과를 남기지 않는다). 없는 디렉터리(Content 없음·
+// 열거에서 사라진 하위 디렉터리)는 빈 디렉터리다.
+TEST(AssetIndex_RebuildFailures) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    IndexPackages packages(env.allocator);
+    REQUIRE(MakePackages(env, packages));
+    ProjectLayout layout(env.allocator);
+    REQUIRE(layout.Initialize(MemoryRoot));
+    const ErrorCode systemError = FileErrorCode(MemoryError);
+    const ErrorCode wrongType = FileErrorCode(MemoryWrongType);
+    enum class Fault {
+        ContentEnumerate,
+        ContentIsFile,
+        SubEnumerate,
+        ContentMissing,
+        SubMissing
+    };
+    const Fault faults[] = {Fault::ContentEnumerate, Fault::ContentIsFile, Fault::SubEnumerate,
+                            Fault::ContentMissing, Fault::SubMissing};
+    for (Fault fault : faults) {
+        MemoryFileSystem files(env.allocator, layout.ContentDirectory());
+        REQUIRE(files.Ready());
+        REQUIRE(files.AddFile("Hero.rasset", packages.hero.View()));
+        REQUIRE(files.AddFile("Broken.rasset", packages.hero.View().Slice(0, 10)));
+        REQUIRE(files.AddDirectory("Sub"));
+        REQUIRE(files.AddFile("Sub/Base.rasset", packages.base.View()));
+        AssetIndex index(env.allocator, layout);
+        REQUIRE(index.Rebuild(files, PackageReadOptions{}));
+        CHECK(index.Count() == 2 && index.Diagnostics().Size() == 1);
+        const bool content = fault == Fault::ContentEnumerate || fault == Fault::ContentIsFile ||
+                             fault == Fault::ContentMissing;
+        files.Remove(content ? "" : "Sub");
+        if (fault == Fault::ContentIsFile) {
+            REQUIRE(files.AddFile("", packages.hero.View()));
+        } else if (fault != Fault::ContentMissing) {
+            const MemoryFault memory =
+                fault == Fault::SubMissing ? MemoryFault::EnumerateMissing : MemoryFault::Enumerate;
+            REQUIRE(files.AddDirectory(content ? "" : "Sub", false, memory));
+        }
+
+        auto rebuilt = index.Rebuild(files, PackageReadOptions{});
+        if (fault == Fault::ContentMissing || fault == Fault::SubMissing) {
+            // Content가 없으면 빈 색인, 사라진 Sub는 건너뛴다(Hero만 남는다).
+            REQUIRE(rebuilt);
+            CHECK(index.Count() == (fault == Fault::SubMissing ? 1u : 0u));
+            continue;
+        }
+
+        CHECK(rebuilt.Error() == (fault == Fault::ContentIsFile ? wrongType : systemError));
+        CHECK(index.Count() == 0 && index.Diagnostics().IsEmpty());
+        CHECK(index.FindById(FixedId(HeroId)).Error() == ErrorCode::NotFound);
+    }
+}
+
+// 진단 줄(13절 명령 출력): 코드마다 `<코드>: Content/<파일>: <설명>` 한 줄이다 — 코드 None은 원본
+// 오류 이름, InvalidPath는 사유 이름, 같은 id·경로는 상대 파일, 의존은 대상 id, 패키지 판정은
+// 칸·위치·원본 오류. 줄 저장소의 모든 할당 실패는 그 오류다.
+TEST(AssetIndex_DiagnosticLines) {
+    SystemAllocator allocator;
+    struct LineCase {
+        AssetDiagnosticCode code;
+        ErrorCode error;
+        StringView expected;
+    };
+    using C = AssetDiagnosticCode;
+    const LineCase cases[] = {
+        {C::None, ErrorCode::Busy, "Busy: Content/Dir/A.rasset: cannot read the package file\n"},
+        {C::InvalidPath, ErrorCode::InvalidArgument,
+         "InvalidPath: Content/Dir/A.rasset: invalid logical path (TooLong)\n"},
+        {C::MissingFile, ErrorCode::NotFound,
+         "MissingFile: Content/Dir/A.rasset: the file disappeared during the scan\n"},
+        {C::DuplicateAssetId, ErrorCode::AlreadyExists,
+         "DuplicateAssetId: Content/Dir/A.rasset: asset id 5e570000-a55e-7000-0000-000000000834 is "
+         "also in 'Content/Other.rasset'\n"},
+        {C::DuplicatePath, ErrorCode::AlreadyExists,
+         "DuplicatePath: Content/Dir/A.rasset: the logical path is also used by "
+         "'Content/Other.rasset'\n"},
+        {C::MissingDependency, ErrorCode::NotFound,
+         "MissingDependency: Content/Dir/A.rasset: dependency 5e570000-a55e-7000-0000-000000000835 "
+         "is "
+         "not in the index\n"},
+        {C::TypeMismatch, ErrorCode::TypeMismatch,
+         "TypeMismatch: Content/Dir/A.rasset: dependency 5e570000-a55e-7000-0000-000000000835 has "
+         "a "
+         "different representative type\n"},
+        {C::CorruptPackage, ErrorCode::InvalidArgument,
+         "CorruptPackage: Content/Dir/A.rasset: package check failed (section 3, detail 40, "
+         "InvalidArgument)\n"},
+    };
+    test::NFailAllocator failing(allocator);
+    for (const LineCase& one : cases) {
+        AssetIndexDiagnostic diagnostic(allocator);
+        diagnostic.code = one.code;
+        diagnostic.error = one.error;
+        diagnostic.pathError = LogicalPathError::TooLong;
+        diagnostic.asset = FixedId(HeroId);
+        diagnostic.relatedAsset = FixedId(HeroId + 1);
+        diagnostic.section = 3;
+        diagnostic.detail = 40;
+        REQUIRE(diagnostic.fileName.TryAssign("Dir/A.rasset"));
+        REQUIRE(diagnostic.related.TryAssign("Other.rasset"));
+        StringBuilder<LineInlineBytes> line(allocator);
+        REQUIRE(AppendAssetIndexDiagnosticLine(line, diagnostic));
+        if (line.View() != one.expected) {
+            printf("  line: %.*s", static_cast<int>(line.View().ByteCount()), line.View().Data());
+        }
+
+        CHECK(line.View() == one.expected);
+        uint32 failures = 0;
+        for (uint64 attempt = 1;; ++attempt) {
+            StringBuilder<LineInlineBytes> small(failing);
+            failing.FailOnAttempt(attempt);
+            auto appended = AppendAssetIndexDiagnosticLine(small, diagnostic);
+            const bool failed = failing.Attempts() >= attempt;
+            failing.DisableFailure();
+            if (!failed) {
+                CHECK(appended && small.View() == one.expected);
+                break;
+            }
+
+            CHECK(!appended && appended.Error() == ErrorCode::OutOfMemory);
+            ++failures;
+        }
+
+        CHECK(failures > 0);
+    }
+}
+
+// 할당 실패(7.1절 13): 진단 장면의 Rebuild와 모든 조회를 이어 부르며 모든 할당 지점에서 실패시키면
+// 그 호출이 OutOfMemory이고(Rebuild면 색인이 빈다), 실패가 없으면 끝까지 같은 결과다.
+TEST(AssetIndex_AllocationFailures) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    IndexPackages packages(env.allocator);
+    REQUIRE(MakePackages(env, packages));
+    test::NFailAllocator failing(env.allocator);
+    // 긴 프로젝트 루트(Content 절대 경로만으로 경로 임시 저장소 512 byte를 넘는다 — 디렉터리·파일
+    // 경로를 만드는 할당이 생긴다).
+    String root(env.allocator);
+    REQUIRE(root.TryAppend(MemoryRoot));
+    for (uint32 level = 0; level < LongRootLevels; ++level) {
+        REQUIRE(root.TryAppend("/Root-abcdefghijklmnopqrstuvwxyz-abcdefghijklmnopqrstuvwxyz-0123"));
+    }
+
+    ProjectLayout layout(failing);
+    REQUIRE(layout.Initialize(root.View()));
+    REQUIRE(layout.ContentDirectory().ByteCount() > LongRootMinimumBytes);
+    MemoryFileSystem files(env.allocator, layout.ContentDirectory());
+    REQUIRE(files.Ready());
+    REQUIRE(files.AddDirectory("Good"));
+    REQUIRE(files.AddFile("Good/Hero.rasset", packages.hero.View()));
+    REQUIRE(files.AddFile("Good/hero.rasset", packages.villain.View()));
+    REQUIRE(files.AddFile("Copy.rasset", packages.hero.View()));
+    REQUIRE(files.AddFile("Bad#Name.rasset", packages.plain.View()));
+    REQUIRE(files.AddFile("Broken.rasset", packages.hero.View().Slice(0, 70)));
+    REQUIRE(files.AddFile("OtherTags.rasset", packages.otherTags.View()));
+    REQUIRE(files.AddFile("BadTags.rasset", packages.badTags.View()));
+    REQUIRE(files.AddFile("Base.rasset", packages.base.View()));
+    REQUIRE(files.AddFile("A-very-long-file-name-that-does-not-fit-inline-storage.rasset",
+                          packages.derived.View()));
+    // 형제 디렉터리 여럿(검색 대기 표가 자란다)과 경로 임시 저장소(512 byte)를 넘는 깊은 디렉터리
+    // (그 안 파일은 논리 경로 256 byte 초과 InvalidPath).
+    const StringView siblings[] = {"D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7"};
+    for (StringView sibling : siblings) {
+        REQUIRE(files.AddDirectory(sibling));
+    }
+
+    String deep(env.allocator);
+    for (uint32 level = 0; level < DeepLevels; ++level) {
+        REQUIRE(deep.TryAppend(level == 0 ? "" : "/"));
+        REQUIRE(deep.TryAppend("Level-abcdefghijklmnopqrstuvwxyz-abcdefghijklmnopqrstuvwxyz-0"));
+        REQUIRE(files.AddDirectory(deep.View()));
+    }
+
+    REQUIRE(deep.TryAppend("/Deep.rasset"));
+    REQUIRE(files.AddFile(deep.View(), packages.plain.View()));
+    // 진단 이름 순 맨 앞으로 옮겨지는 깨진 파일(열거에서는 마지막).
+    REQUIRE(files.AddFile("Aaa-broken.rasset", packages.hero.View().Slice(0, 70)));
+    uint32 failures = 0;
+    for (uint64 attempt = 1;; ++attempt) {
+        AssetIndex index(failing, layout);
+        failing.FailOnAttempt(attempt);
+        // 조회마다 따로 붙일 곳을 둔다(각 조회의 첫 할당이 실패 지점이 되게).
+        Array<const AssetIndexEntry*> under(failing);
+        Array<const AssetIndexEntry*> typed(failing);
+        Array<const AssetIndexEntry*> tagged(failing);
+        Array<const AssetIndexEntry*> referencers(failing);
+        Array<const PackageDependencyEntry*> dependencies(failing);
+        Array<AssetIndexDiagnostic> verified(failing);
+        Result<void> result = index.Rebuild(files, PackageReadOptions{});
+        const bool rebuilt = static_cast<bool>(result);
+        if (result) {
+            result = index.ListUnder("/Game/Good", true, under);
+        }
+
+        if (result) {
+            result = index.ListByType(IdOf<BaseGameAsset>(), &env.types, typed);
+        }
+
+        if (result) {
+            result = index.FindByTag("Kind", "Hero", tagged);
+        }
+
+        if (result) {
+            result = index.Dependencies(FixedId(VillainId), AllDependencyKinds, dependencies);
+        }
+
+        if (result) {
+            result = index.Referencers(FixedId(DerivedId), AllDependencyKinds, referencers);
+        }
+
+        if (result) {
+            result = index.Verify(&env.types, verified);
+        }
+
+        const bool failed = failing.Attempts() >= attempt;
+        failing.DisableFailure();
+        if (!failed) {
+            REQUIRE(result);
+            CHECK(index.Count() == 7 && index.Diagnostics().Size() == 10);
+            CHECK(index.Diagnostics()[0].fileName.View() == "Aaa-broken.rasset");
+            CHECK(under.Size() == 2 && typed.Size() == 2 && tagged.Size() == 2);
+            CHECK(referencers.Size() == 3 && dependencies.Size() == 2);
+            CHECK(verified.Size() == 2);
+            break;
+        }
+
+        CHECK(!result && result.Error() == ErrorCode::OutOfMemory);
+        if (!rebuilt) {
+            CHECK(index.Count() == 0 && index.Diagnostics().IsEmpty());
+        }
+
+        ++failures;
+    }
+
+    CHECK(failures > 0);
+}
+
+} // namespace asset_index_tests_file

@@ -1,5 +1,6 @@
 #include "PackageInternal.h"
 
+#include <AssetRuntime/PackageRangeReader.h>
 #include <AssetRuntime/PackageReader.h>
 #include <Compression/CompressedBlocks.h>
 #include <Compression/Compression.h>
@@ -928,10 +929,98 @@ Result<PackageHeader> ReadPackageHeader(Span<const uint8> headerBytes, uint64 fi
     return Result<PackageHeader>::Success(header);
 }
 
-Result<PackageContents> ReadPackage(Allocator& allocator, Span<const uint8> file,
-                                    const PackageReadOptions& options,
-                                    AssetDiagnostic* failure) noexcept {
-    auto header = ReadPackageHeader(file, file.Size(), failure);
+namespace {
+
+// 패키지 byte의 공급원이다(전체 파일 span 또는 범위 읽기 — AS 7.1절 13). Range의 view는 공급원이
+// 살아 있는 동안 유효하다.
+class PackageByteSource {
+public:
+    virtual uint64 FileBytes() const noexcept = 0;
+    // 전체 읽기면 참이다(패딩·Objects·Bulk·BulkIndex 내용까지 본다).
+    virtual bool Full() const noexcept = 0;
+    virtual Result<Span<const uint8>> Range(uint64 offset, uint64 bytes) noexcept = 0;
+
+protected:
+    ~PackageByteSource() = default;
+};
+
+class SpanByteSource final : public PackageByteSource {
+public:
+    explicit SpanByteSource(Span<const uint8> file) noexcept : file_(file) {
+    }
+
+    uint64 FileBytes() const noexcept override {
+        return file_.Size();
+    }
+
+    bool Full() const noexcept override {
+        return true;
+    }
+
+    Result<Span<const uint8>> Range(uint64 offset, uint64 bytes) noexcept override {
+        return Result<Span<const uint8>>::Success(
+            file_.Slice(static_cast<usize>(offset), static_cast<usize>(bytes)));
+    }
+
+private:
+    Span<const uint8> file_;
+};
+
+// 범위마다 소유 버퍼를 하나 만든다(버퍼 표가 자라도 각 버퍼의 byte는 옮겨지지 않는다).
+class RangeByteSource final : public PackageByteSource {
+public:
+    RangeByteSource(PackageRangeReader& reader, Array<Array<uint8>>& buffers) noexcept
+        : reader_(reader), buffers_(buffers) {
+    }
+
+    uint64 FileBytes() const noexcept override {
+        return reader_.FileBytes();
+    }
+
+    bool Full() const noexcept override {
+        return false;
+    }
+
+    Result<Span<const uint8>> Range(uint64 offset, uint64 bytes) noexcept override {
+        Array<uint8> buffer(buffers_.GetAllocator());
+        if (auto sized = buffer.TryResize(static_cast<usize>(bytes)); !sized) {
+            return Result<Span<const uint8>>::Failure(sized.Error());
+        }
+
+        if (auto read = reader_.ReadAt(offset, Span<uint8>(buffer.Data(), buffer.Size())); !read) {
+            return Result<Span<const uint8>>::Failure(read.Error());
+        }
+
+        if (auto pushed = buffers_.TryPushBack(Move(buffer)); !pushed) {
+            return Result<Span<const uint8>>::Failure(pushed.Error());
+        }
+
+        const Array<uint8>& stored = buffers_[buffers_.Size() - 1];
+        return Result<Span<const uint8>>::Success(Span<const uint8>(stored.Data(), stored.Size()));
+    }
+
+private:
+    PackageRangeReader& reader_;
+    Array<Array<uint8>>& buffers_;
+};
+
+bool SkipsContent(const PackageByteSource& source, PackageSectionKind kind) noexcept {
+    return !source.Full() &&
+           (kind == PackageSectionKind::Objects || kind == PackageSectionKind::Bulk ||
+            kind == PackageSectionKind::BulkIndex);
+}
+
+Result<PackageContents> ReadPackageFrom(Allocator& allocator, PackageByteSource& source,
+                                        const PackageReadOptions& options,
+                                        AssetDiagnostic* failure) noexcept {
+    const uint64 fileBytes = source.FileBytes();
+    auto headerBytes =
+        source.Range(0, fileBytes < PackageHeaderBytes ? fileBytes : PackageHeaderBytes);
+    if (!headerBytes) {
+        return Resource<PackageContents>(failure, headerBytes.Error(), AssetId{}, 0);
+    }
+
+    auto header = ReadPackageHeader(headerBytes.Value(), fileBytes, failure);
     if (!header) {
         return Result<PackageContents>::Failure(header.Error());
     }
@@ -950,8 +1039,13 @@ Result<PackageContents> ReadPackage(Allocator& allocator, Span<const uint8> file
     // 3. 섹션 표.
     const usize tableOffset = static_cast<usize>(contents.header.sectionTableOffset);
     const usize tableBytes = PackageSectionEntryBytes * contents.header.sectionCount;
-    const Span<const uint8> table = file.Slice(tableOffset, tableBytes);
-    if (Crc32(table) != LoadLittleEndian<uint32>(file.Data() + tableOffset + tableBytes)) {
+    auto tableRead = source.Range(tableOffset, tableBytes + sizeof(uint32));
+    if (!tableRead) {
+        return Resource<PackageContents>(failure, tableRead.Error(), asset, 0);
+    }
+
+    const Span<const uint8> table = tableRead.Value().Slice(0, tableBytes);
+    if (Crc32(table) != LoadLittleEndian<uint32>(tableRead.Value().Data() + tableBytes)) {
         return Corrupt<PackageContents>(failure, asset, 0, tableOffset);
     }
 
@@ -989,8 +1083,12 @@ Result<PackageContents> ReadPackage(Allocator& allocator, Span<const uint8> file
             return Corrupt<PackageContents>(failure, asset, kind, index);
         }
 
-        if (!AllZero(file.Slice(static_cast<usize>(end), static_cast<usize>(entry.offset - end)))) {
-            return Corrupt<PackageContents>(failure, asset, kind, end);
+        // 섹션 사이 패딩은 전체 읽기만 본다(부분 읽기는 그 구간을 읽지 않는다 — AS 7.1절 13).
+        if (source.Full()) {
+            auto gap = source.Range(end, entry.offset - end);
+            if (!AllZero(gap.Value())) {
+                return Corrupt<PackageContents>(failure, asset, kind, end);
+            }
         }
 
         if (IsKnownPackageSection(kind)) {
@@ -1002,10 +1100,15 @@ Result<PackageContents> ReadPackage(Allocator& allocator, Span<const uint8> file
         (void)contents.sections.TryPushBack(entry);
     }
 
-    if (contents.header.sectionTableOffset != AlignUp(end, PackageSectionAlignment) ||
-        !AllZero(file.Slice(static_cast<usize>(end),
-                            static_cast<usize>(contents.header.sectionTableOffset - end)))) {
+    if (contents.header.sectionTableOffset != AlignUp(end, PackageSectionAlignment)) {
         return Corrupt<PackageContents>(failure, asset, 0, end);
+    }
+
+    if (source.Full()) {
+        auto tail = source.Range(end, contents.header.sectionTableOffset - end);
+        if (!AllZero(tail.Value())) {
+            return Corrupt<PackageContents>(failure, asset, 0, end);
+        }
     }
 
     // 항상 있어야 하는 섹션, 함께 있어야 하는 Bulk·BulkIndex, 쿠킹에 없어야 하는 섹션.
@@ -1024,8 +1127,6 @@ Result<PackageContents> ReadPackage(Allocator& allocator, Span<const uint8> file
         const uint32 kind = SectionKindValue(entry.kind);
         const bool required =
             (entry.flags & static_cast<uint32>(PackageSectionFlags::Required)) != 0;
-        const Span<const uint8> bytes =
-            file.Slice(static_cast<usize>(entry.offset), static_cast<usize>(entry.bytes));
         if (!IsKnownPackageSection(kind)) {
             if (cooked || required) {
                 return Unsupported<PackageContents>(failure,
@@ -1058,6 +1159,17 @@ Result<PackageContents> ReadPackage(Allocator& allocator, Span<const uint8> file
             continue;
         }
 
+        // 부분 읽기는 Objects·Bulk·BulkIndex 내용을 읽지 않는다(표 판정은 위에서 마쳤다).
+        if (SkipsContent(source, entry.kind)) {
+            continue;
+        }
+
+        auto sectionRead = source.Range(entry.offset, entry.bytes);
+        if (!sectionRead) {
+            return Resource<PackageContents>(failure, sectionRead.Error(), asset, kind);
+        }
+
+        const Span<const uint8> bytes = sectionRead.Value();
         if (entry.kind != PackageSectionKind::Bulk && Crc32(bytes) != entry.crc32) {
             return Corrupt<PackageContents>(failure, asset, kind, 0);
         }
@@ -1122,7 +1234,7 @@ Result<PackageContents> ReadPackage(Allocator& allocator, Span<const uint8> file
                                                PackageSectionKind::Dependencies, 0);
     }
 
-    if (auto valid = ValidateBulk(contents); !valid) {
+    if (auto valid = source.Full() ? ValidateBulk(contents) : Result<uint64>::Success(0); !valid) {
         return SectionFailure<PackageContents>(failure, valid.Error(), asset,
                                                PackageSectionKind::BulkIndex, 0);
     }
@@ -1204,10 +1316,33 @@ Result<PackageContents> ReadPackage(Allocator& allocator, Span<const uint8> file
 
     // 지문: 헤더 + 섹션 표(+ tableCrc).
     Sha256 hash;
-    hash.Update(file.Slice(0, PackageHeaderBytes));
-    hash.Update(file.Slice(tableOffset, tableBytes + 4));
+    hash.Update(headerBytes.Value());
+    hash.Update(tableRead.Value());
     contents.fingerprint.digest = hash.Finish();
     return Result<PackageContents>::Success(Move(contents));
+}
+
+} // namespace
+
+Result<PackageContents> ReadPackage(Allocator& allocator, Span<const uint8> file,
+                                    const PackageReadOptions& options,
+                                    AssetDiagnostic* failure) noexcept {
+    SpanByteSource source(file);
+    return ReadPackageFrom(allocator, source, options, failure);
+}
+
+Result<PackageIndexView> ReadPackageIndex(Allocator& allocator, PackageRangeReader& reader,
+                                          const PackageReadOptions& options,
+                                          AssetDiagnostic* failure) noexcept {
+    PackageIndexView view(allocator);
+    RangeByteSource source(reader, view.buffers);
+    auto contents = ReadPackageFrom(allocator, source, options, failure);
+    if (!contents) {
+        return Result<PackageIndexView>::Failure(contents.Error());
+    }
+
+    view.contents = Move(contents.Value());
+    return Result<PackageIndexView>::Success(Move(view));
 }
 
 Result<void> DecodePackageBulk(const PackageContents& contents, Array<uint8>& out,

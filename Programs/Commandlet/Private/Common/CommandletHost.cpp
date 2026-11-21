@@ -1,4 +1,5 @@
 #include "CommandletHost.h"
+#include "AssetIndexCommandlet.h"
 #include "ContentSignCommandlet.h"
 #include "LogCommandlet.h"
 #include <Config/ConfigDump.h>
@@ -182,6 +183,17 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
         {"content-sign",
          "Cooked content signing: keygen, sign, verify. Never commit or cook the key file.",
          &RunContentSignCommand, &allocator});
+    if (!registered) {
+        return 1;
+    }
+    registered = registry.Register({"asset-list", "List the editor packages of the project.",
+                                    &RunAssetListCommand, &allocator});
+    if (!registered) {
+        return 1;
+    }
+    registered = registry.Register({"asset-index-verify",
+                                    "Check the editor packages of the project and report problems.",
+                                    &RunAssetIndexVerifyCommand, &allocator});
     if (!registered) {
         return 1;
     }

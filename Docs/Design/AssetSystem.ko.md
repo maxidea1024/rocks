@@ -380,11 +380,19 @@ A2는 에디터 쪽 에셋 데이터베이스다(4·5.4·5.5·7·8·13·16절). 
 13. **A2b 세부**(2026-11-21, 구현 착수 전):
     - 부분 읽기는 `ReadPackage`와 판정 코드를 함께 쓴다. AssetRuntime의 읽기 핵심을 바이트 공급원 추상(전체 파일 span 또는 범위 읽기)으로 바꾸고, 전체 읽기는 지금과 같은 판정·같은 진단을, 부분 읽기는 그중 Objects·Bulk·BulkIndex 섹션의 내용·CRC, 섹션 사이 패딩 byte 0 검사, bulk 대조만 건너뛴다(표의 위치·정렬·겹침·종류별 flags·schemaVersion 판정은 그대로). 부분 읽기는 헤더(64 byte)·섹션 표를 먼저 읽고 고른 섹션 크기의 합만큼 소유 버퍼를 한 번 잡은 뒤 섹션마다 범위 읽기를 하므로 결과 view가 그 버퍼를 가리킨다(`PackageIndexView` — 이동해도 유효). 64 byte보다 작은 파일은 있는 만큼으로 헤더 판정을 한다(전체 읽기와 같은 진단). 범위 읽기의 IO 오류는 그 오류(진단 None)다.
     - 범위 읽기 `PackageRangeReader`의 구현은 메모리(`MemoryPackageRangeReader`)와 파일(`FilePackageRangeReader` — `platform::FileSystem&`로 열어 Seek + ReadExact, 고장 주입은 FileSystem)이다.
-    - Tags 값 스키마(2)도 A2b에서 정한다(색인이 읽는다): `ReadPackageTags`·`WritePackageTags`(AssetRuntime)와 writer·reader의 Tags 검증 교체. 태그 값은 UTF-8이고 키는 비지 않은 1–256 byte, 값 하나는 4 KiB 이하(패키지 문자열 상한)다.
-    - `AssetIndex`(AssetDatabase): `Rebuild(FileSystem&, WorkerScheduler*)`가 `Content/`를 재귀 열거해(링크는 따라가지 않는다) `.rasset`(대소문자 무시)만 부분 읽기로 색인하고, `*.tmp`와 그 밖의 파일은 무시한다(UE AssetRegistry가 패키지 확장자만 보는 것과 같다). 병렬 읽기 결과와 진단은 논리 경로 키 → OS 상대 이름 순으로 정렬한다(7.1절 9).
+    - Tags 값 스키마(2)도 A2b에서 정한다(색인이 읽는다): `ReadPackageTags`·`WritePackageTags`(AssetRuntime `PackageTags.h`). 배치는 Record(`PackageTagsSchema`){ RecordList[ Record{ 키 String, 값 String } ] }이고 항목은 (키, 값) UTF-8 byte 순 엄격 오름차순이다(목록 값은 같은 키의 항목 여러 개 — 원소마다 색인). 키는 비지 않은 1–256 byte, 값은 4 KiB 이하(패키지 문자열 상한), 둘 다 UTF-8이다. 패키지 형식 층(writer·reader의 Tags 검증)은 지금처럼 "필드 id 오름차순 Record"만 본다 — 형식 층에 값 스키마를 강제하면 형식 시험·golden byte를 모두 바꿔야 하고 형식 층이 값 의미를 알 필요가 없다(처음 설계의 "검증 교체"를 바꿨다). 다른 스키마 Guid의 Tags는 형식으로 유효하고 색인은 `UnsupportedVersion` 진단을 남기고 태그 없이 색인한다.
+    - `AssetIndex`(AssetDatabase): `Rebuild(FileSystem&, PackageReadOptions)`가 `Content/`를 재귀 열거해(링크는 따라가지 않는다) `.rasset`(대소문자 무시)만 부분 읽기로 색인하고, `*.tmp`와 그 밖의 파일은 무시한다(UE AssetRegistry가 패키지 확장자만 보는 것과 같다). 결과와 진단은 논리 경로 키 → OS 상대 이름 순으로 정렬한다(7.1절 9). A2b는 한 스레드로 차례로 읽는다 — worker 병렬 읽기는 캐시·감시 갱신과 함께 A2d가 더한다(정렬이 완료 순서를 지우므로 결과는 같다).
     - 진단(4.6절 코드): 이름 규칙 위반 `InvalidPath`(LogicalPathError 사유), 패키지 판정 실패는 그 코드(`CorruptPackage`·`UnsupportedVersion`·`NewerVersion`), 쿠킹 패키지는 `CorruptPackage`(에디터 기대), 같은 AssetId 둘 이상 `DuplicateAssetId`(모두 진단, ID 조회는 AlreadyExists), 같은 경로 키 둘 이상 `DuplicatePath`(모두 진단, 경로 조회는 AlreadyExists — 7.1절 10). `Verify`가 더하는 것: 색인에 없는 Hard·Soft 의존 `MissingDependency`(EditorOnly·Build·ImportOwner는 A2c 이후), Hard 의존의 expectedType과 대상 대표 타입이 다르면 `TypeMismatch`(등록된 타입은 상속을 따른다).
     - 조회: ID, 경로(LogicalPath 키), 디렉터리(마운트 또는 논리 경로 아래 — 바로 아래만 또는 재귀), 대표 타입(정확 일치 또는 TypeRegistry로 파생 포함 — 미등록 id는 정확 일치), 태그(키·값 일치, 목록 값은 원소마다), 정방향 의존(종류 묶음), 역방향 참조자(종류 묶음). 결과는 경로 키 순이다.
     - 명령(13절): `asset-list [--under=<path>]`(경로·AssetId·대표 타입 id 한 줄씩), `asset-index-verify`(진단 줄, 있으면 종료 1). 타입 이름 필터(`--type`)와 `asset-info`의 속성 출력은 commandlet이 타입을 등록해야 해서 A2c(`asset-new`·`asset-set`과 함께)로 미룬다.
+14. **A2b 구현에서 정한 것**(2026-11-21, 시험·리뷰 중에 정했다):
+    - 디렉터리 존재: `FileSystem::Exists`는 일반 파일만 참이라(디렉터리는 거짓) Content 존재 확인에 쓰지 않는다 — 실제 디스크 시험이 이것을 잡았다. 열거 결과로 판단한다: 없는 디렉터리(Content가 없거나 검색 중 지워진 하위 디렉터리)는 빈 디렉터리이고, 그 밖의 열거 실패(Content가 파일이면 WrongType 대응 오류 포함)는 `Rebuild`의 그 파일 오류다. 실패한 `Rebuild`는 색인을 비운다(앞 결과를 남기지 않는다).
+    - 파일 하나의 실패는 그 파일만 빼고 계속한다: 열거와 열기 사이에 사라진 파일은 `MissingFile`, 그 밖의 열기·읽기 IO 실패는 진단 None과 원본 오류(쿠킹 로더 10.1절과 같은 규칙), 일반 파일이 아닌 항목(장치 등)은 무시한다. 할당 실패만 `Rebuild` 오류다.
+    - 같은 id·경로의 상대(`related`)는 정렬 순서(경로 키 순·id 순)에서 이웃한 파일이다 — 앞 이웃이 같으면 그것, 아니면 뒤 이웃(같은 값이 셋 이상이어도 각자 하나).
+    - Tags 읽기: Record·항목 버전이 `PackageTagsVersion` 밖이면 `Unsupported`(더 새 Tags — 색인은 `UnsupportedVersion` 진단, 다른 스키마 Guid와 같다), 그 밖의 형식 위반(키·값 필드 누락·wire 종류·빈 키·길이·UTF-8·순서·같은 쌍·목록 필드 모양·항목 스키마)은 `InvalidArgument`(색인은 `CorruptPackage` 진단, 칸 Tags). 둘 다 태그 없이 색인한다.
+    - `ListByType`: 타입 0은 `InvalidArgument`. TypeRegistry 판정의 `NotFound`(미등록)·`TypeMismatch`(클래스가 아닌 id)는 파생 아님이고, 그 밖(종료 뒤 `ShuttingDown`)은 그 오류다. `Verify`도 같다. Hard 의존은 패키지 읽기가 expectedType을 반드시 갖게 검사하므로(5.2절) `Verify`는 그 값을 그대로 쓴다.
+    - 명령 세부: 옵션은 `--<이름>=<값>`만(13절 문법 — 같은 이름 두 번·빈 값·모르는 이름·위치 인수는 사용법 오류 2, `--help` 하나는 사용법을 표준 출력에 0). `--project`가 없으면 현재 디렉터리에서 위로 `*.rocksproject`를 찾고(HostConfig `FindProjectFrom`), 있으면 그 디렉터리에 기술자가 있어야 한다(오타·하위 디렉터리로 빈 색인을 내지 않게 — 위에서 찾은 다른 디렉터리면 실패 1). 읽기 옵션의 엔진 축은 명령 실행 파일의 엔진 버전(`build::CurrentEngineVersion`)이라 더 새 엔진이 저장한 패키지는 `NewerVersion` 진단이다(UE AssetRegistry도 너무 새 패키지를 읽지 않는다). `asset-index-verify`는 타입 Registry 없이 대조한다(명령은 타입을 등록하지 않는다 — 형식 대조는 정확 일치). 진단 줄은 AssetDatabase `AppendAssetIndexDiagnosticLine`이 만든다: `<진단 코드>: Content/<OS 상대 이름>: <설명>` — 코드 None은 원본 오류 이름(`ErrorCodeName`)을 코드 자리에 쓴다. 요약 `asset-index-verify: <항목 수> packages, <진단 수> diagnostics`는 표준 출력이다. `--under`가 논리 디렉터리가 아니면 `asset-list: InvalidPath: …` 실패 1이다.
+    - 명령 시험(C#)은 패키지를 만들 수 없어 C++ 시험이 고정한 fixture 배열(`AssetDatabase/Tests/AssetIndexCommandletFixtures.h` — `AssetIndex_CommandletFixtureBytes`가 writer 출력과 같은지 보고, 다르면 새 내용을 출력한다)을 읽어 프로젝트에 쓴다.
 
 ## 8. 동시성
 
@@ -1535,6 +1543,58 @@ A1f 상태(2026-11-21): **완료**(리뷰 3회 — 미충족 2회 반영 뒤 충
 닿게 한 방법: 할당 실패 시험의 입력을 임시 저장소의 인라인 크기(경로 320 byte·잠금 경로 512 byte)를 넘는 길이로 골라 저장소가 자라는 지점을 지나게 했고, 짧은 조각 여러 개를 한 호출(`AppendAll`)로 묶어 실패 지점을 실제로 자랄 수 있는 곳으로 모았다. 리뷰(1회)가 지적한 것: 경로 상한 경계(NUL·UNC 접두), 상대 루트, 빈 경로 접근자의 범위 밖 읽기(처음 coverage를 맞추려고 뺀 검사가 그것을 막고 있었다 — 생성자를 비공개로 하고 빈 값 처리를 되돌렸다), 확장자 대소문자, 규칙 4 대 5 순서 시험. 구분자 바꾸기 반복은 Core Path가 이미 '/'로 정규화하고 POSIX에서 '\'는 이름 문자라 뺐다.
 
 A2a 상태(2026-11-21): **완료**(리뷰 3회 — 미충족 2회 반영 뒤 충족). 완료 조건: 대조표(14.1.13) 시험 없는 항목 0·정의된 시험 20개 모두 인용, 조합(위 표 마지막 행), coverage(14.1.14 — Windows), 리뷰어 판정 1회 미충족 → 반영, 2회 미충족(옮겨 간 값의 Mount, 강제 종료 뒤 잠금 해제 시점) → 반영, 3회 **충족**.
+
+#### 14.1.15 요구 대조표(A2b — 부분 읽기·Tags·색인·명령)
+
+시험은 EngineTests `Engine/Source/Runtime/AssetRuntime/Tests/PackageIndexTests.cpp`(8개)와 `Engine/Source/Developer/AssetDatabase/Tests/AssetIndexTests.cpp`·`AssetIndexCommandletFixtureTests.cpp`(7개)의 정의된 시험 15개를 모두 인용하고, 명령은 C# `Programs/Rocks.Commandlet.Tests`의 asset 항목 27개(Windows 전용 5개 포함)다. 메모리 파일 시스템(`MemoryFileSystem` — 노드 표, 열기·읽기·열거 고장 주입, 링크·장치 항목, NTFS에서 만들 수 없는 대소문자만 다른 이름)과 실제 디스크(`TempProject`)를 함께 쓴다. 읽기 핵심을 바꾼 뒤 기존 패키지 시험(AssetPackage 74·FixtureAsset·CookedManifest·AssetLoader·AssetManager)이 그대로 통과한다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 부분 읽기(7.1-13) | 풍부한 에디터 패키지(import·Zstd bulk 셋·커스텀 버전·ImportRecord·Tags 값 스키마·Build 의존)에서 헤더·섹션 수·지문·readOnly·Exports·Imports·Dependencies·Summary 표·ImportRecord·Tags가 전체 읽기와 같고 Objects·Bulk·bulk 항목은 비움, 옮긴 view 유효, 읽은 byte가 파일보다 적음 | `PackageIndex_MatchesFullRead` |
+| | 판정 관계: 모든 byte의 모든 bit(8개) 손상에서 읽는 구간(헤더·표·읽는 섹션)은 두 읽기가 같은 오류·같은 진단(코드·칸·위치·에셋), 건너뛰는 구간(Objects·Bulk·BulkIndex 내용과 패딩)은 부분 읽기 통과·전체 읽기 거부 | `PackageIndex_EveryBitFlip` |
+| | 모든 길이(0 … 파일 크기)로 자른 파일과 1 byte 늘린 파일은 두 읽기가 같은 진단으로 거부(64 byte 미만은 있는 만큼으로 헤더 판정) | `PackageIndex_TruncateAndExtend` |
+| | n번째 범위 읽기 실패(모든 n)는 그 오류·진단 None, 할당 실패(모든 지점)는 OutOfMemory·진단 None | `PackageIndex_ReadAndAllocationFailures` |
+| 범위 읽기(7.1-13) | 메모리·파일: 끝 4 byte·빈 범위·끝 위치 빈 범위 성공, 파일 밖 InvalidArgument, 파일 구현의 부분 읽기 = 메모리, 없는 파일 NotFound(크기 0), 다시 열기는 앞 파일을 닫음, 실패한 다시 열기는 크기 0 | `PackageRangeReader_Bounds` |
+| | 열기·크기 실패는 Open의 그 오류(크기 0), 이동·읽기 실패는 ReadAt의 그 오류(빈 범위는 이동만) | `PackageRangeReader_FileFaults` |
+| Tags 값 스키마(7.1-13·14) | (키, 값) 정렬 쓰기·읽기(목록 값), 빈 목록 = 빈 byte. 쓰기 거부: 빈 키·257 byte 키·4 KiB 넘는 값·잘못된 UTF-8(키·값)·같은 쌍. 읽기: 다른 스키마·더 새 Record·더 새 항목 Unsupported, 깨진 byte·순서 뒤집힘·같은 쌍·키 없음·값 없음·키 wire·값 wire·빈 키·긴 키·잘못된 UTF-8 키·값·긴 값·목록 필드 없음·목록 wire·항목 스키마 다름 InvalidArgument(17가지 손으로 만든 Record 표) | `PackageTags_WriteAndRead` |
+| | 쓰기·읽기의 모든 할당 지점 실패, 실패 없으면 같은 byte | `PackageTags_AllocationFailures` |
+| 검색(7.1-13·14) | 실제 디스크: Content 없음 = 빈 색인, 재귀 검색, 대문자 확장자 색인, `.tmp`·다른 확장자·빈 디렉터리·`.rasset` 이름의 디렉터리 무시, 비 NFC 파일 이름 InvalidPath(NotNfcOnDisk — 이름 정규화 파일 시스템은 색인), 항목 값(경로·키·실제 파일 이름·대표 타입·지문 = 전체 읽기·크기·시각·의존·태그), 파일을 지우고 다시 검색하면 반영 | `AssetIndex_DiskScanAndQueries` |
+| | 없는 디렉터리는 빈 디렉터리(Content 없음·열거에서 사라진 하위 디렉터리), Content 열거·하위 열거 실패와 Content가 파일(WrongType)은 Rebuild 오류이고 색인을 비움 | `AssetIndex_RebuildFailures` |
+| 진단(7.1-13·14) | InvalidPath(InvalidComponent), 깨진 패키지·쿠킹 패키지(부분 읽기와 같은 코드·오류·칸·위치·에셋), 다른 스키마 Tags UnsupportedVersion·깨진 Tags CorruptPackage(칸 Tags, 태그 없이 색인), 사라진 파일 MissingFile, 열기 Busy·읽기 실패 진단 None과 원본 오류, 파일·디렉터리 링크·장치·다른 확장자 무시, 같은 경로 키(대소문자·확장자 철자만 다름) 둘 다 DuplicatePath, 같은 id 둘 다 DuplicateAssetId(상대 = 정렬 이웃), 조회 AlreadyExists(id·경로·Dependencies), 진단·항목 정렬(뒤에 열거된 것이 맨 앞으로 — 경로·파일 이름·id 순), high가 다른 id | `AssetIndex_Diagnostics` |
+| | 진단 줄: 코드마다(None·InvalidPath·MissingFile·DuplicateAssetId·DuplicatePath·MissingDependency·TypeMismatch·패키지 판정) 정확한 문구와 모든 할당 실패 | `AssetIndex_DiagnosticLines` |
+| 조회(7.1-13) | id·경로(대소문자 무시 키·없음·끝보다 뒤), 디렉터리(마운트 철자, 바로 아래·재귀, 구성 요소 경계 "/Game/Char", 항목 자신, 잘못된 디렉터리 여섯 가지 — 5 byte 마운트 아닌 "/Gamx" 포함), 타입(정확·파생 포함·미등록 id·0 InvalidArgument), 태그(목록 원소마다·키 대소문자 구분·키와 값 바꿈), 정방향 의존·역방향 참조자를 모든 종류 묶음(32개) × 대상 8개로 저장 내용에서 직접 고른 것과 대조 | `AssetIndex_DiskScanAndQueries` |
+| Verify(7.1-13·14) | Hard·Soft 누락만(EditorOnly·Build·ImportOwner 대조 안 함), 형식 대조: 기대의 파생 대상은 Registry가 있을 때만 통과(없음·빈 Registry TypeMismatch), 파생 아님은 언제나 TypeMismatch, 대상 없음 MissingDependency, 대상 id가 둘이면 대조 안 함, 종료한 Registry ShuttingDown(Verify·ListByType), 대표 타입이 구조체 id인 패키지(Summary·Exports 타입 id를 바꿔 만듦)는 파생 아님·TypeMismatch | `AssetIndex_VerifyTypes`, `AssetIndex_DiskScanAndQueries` |
+| 할당 실패(7.1-13) | 진단 장면 + 형제 디렉터리 여덟(검색 대기 표가 자람) + 512 byte 넘는 프로젝트 루트(경로 저장소가 자람) + 깊은 디렉터리(TooLong) + 맨 앞으로 옮겨지는 깨진 파일에서 Rebuild와 모든 조회(따로 둔 출력 배열)의 모든 할당 지점 — OutOfMemory, Rebuild 실패면 색인이 빔, 실패 없으면 같은 결과 | `AssetIndex_AllocationFailures` |
+| 명령(13, 7.1-14) | asset-list: 줄 모양·순서(정확히 두 줄), --under(있음·없음·논리 디렉터리 아님 1), 위로 프로젝트 찾기·없음 1, --project에 기술자 없음·하위 디렉터리 1, 쓸 수 없는 루트(Windows 드라이브 상대) 1, 빈 프로젝트, Content가 파일 1, --help 0, 위치 인수·같은 옵션 두 번·빈 값·모르는 옵션(--type) 2 | C# `asset-list *` |
+| | asset-index-verify: 누락 의존 줄과 요약 1, 빈 프로젝트 0, Content가 파일·프로젝트 없음 1, --help 0, --under 거부 2, 문제 프로젝트의 아홉 줄(InvalidPath·DuplicateAssetId 둘·CorruptPackage·NewerVersion(엔진 99.0.0 저장)·TypeMismatch 둘·MissingDependency 둘)과 요약, 다른 프로세스가 공유 없이 연 파일(Windows — 원본 오류 이름), 무효 표준 핸들에서 목록 줄·진단 줄·요약 쓰기 실패 1(Windows) | C# `asset-index-verify *`, `invalid output handles *` |
+| | fixture byte(Hero·Base·같은 id의 Derived 대표·Newer, 엔진 0.1.0 저장)가 writer 출력과 같음 | `AssetIndex_CommandletFixtureBytes` |
+| 조합(14 완료 조건 2) | 부분 읽기 대 전체 읽기: 모든 offset × 8 bit × 구간(읽음·건너뜀), 모든 자르기 길이, 모든 IO 실패 위치·할당 지점. 조회: 종류 묶음 32 × 대상 8 × 항목. Verify: 장면 5(정상·파생 대상·파생 아님·대상 없음·대상 중복) × Registry 3(없음·등록·빈 것) + 종료 Registry + 구조체 대표. Tags 읽기: 손으로 만든 Record 17가지. 진단: 코드별 장면 하나씩 + 겹침(같은 파일의 DuplicatePath·DuplicateAssetId) | 위 시험 |
+
+#### 14.1.16 Coverage(A2b)
+
+측정(2026-11-21, Windows): `pwsh -NoProfile -File Build/MeasureCoverage.ps1 -Target EngineTests -Filter AssetPackage,PackageIndex,PackageTags,PackageRangeReader,AssetIndex -Sources Engine/Source/Runtime/AssetRuntime/Private,Engine/Source/Developer/AssetDatabase/Private`와 명령(`-Target Commandlet -Executable RocksCommandlet -Runner dotnet run --project Programs/Rocks.Commandlet.Tests -- --executable {executable} -Sources Programs/Commandlet/Private`).
+
+| 파일 | 줄 | 분기 | 함수 |
+|---|---|---|---|
+| `AssetDatabase/Private/AssetIndex.cpp` | 100%(523/523) | 100%(276/276) | 100%(23/23) |
+| `AssetRuntime/Private/PackageTags.cpp` | 100%(140/140) | 100%(82/82) | 100%(8/8) |
+| `AssetRuntime/Private/PackageRangeReader.cpp` | 100%(46/46) | 100%(20/20) | 100%(4/4) |
+| `AssetRuntime/Private/PackageReader.cpp`(읽기 핵심 변경) | 100%(1061/1061) | 97.7%(720/737) | 100%(44/44) |
+| `Programs/Commandlet/Private/Common/AssetIndexCommandlet.cpp` | 83.5%(152/182) | 85.9%(79/92) | 100%(7/7) |
+
+닿지 않은 곳과 근거:
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| `PackageReader.cpp` | 분기 17개: 불변식 검사 `ROCKS_ASSERT`의 실패 쪽 16개와 섹션 내용 `switch`의 암묵 default | A1 측정(14.1.x)과 같다 — 모르는 섹션 종류는 그 앞에서 건너뛰므로(`IsKnownPackageSection`) switch에 닿는 종류는 모두 case가 있다 |
+| `AssetIndexCommandlet` | 출력 줄 저장소의 할당 실패(`Fail`·목록 줄·진단 줄·요약), `Rebuild`·`ListUnder`·`Verify`의 할당 실패 | 프로세스 시험은 명령의 allocator에 실패를 주입할 수 없다. 같은 결과를 만드는 라이브러리 경로(색인·조회·Verify·진단 줄의 모든 할당 지점)는 `AssetIndex_AllocationFailures`·`AssetIndex_DiagnosticLines`가 덮는다 |
+| `AssetIndexCommandlet` | 현재 디렉터리를 절대 경로로 못 만듦, 프로젝트 찾기의 파일 시스템 오류(NotFound 밖) | OS 조건(작업 디렉터리 조회 실패·상위 디렉터리 열거 권한 거부)이다. 작업 디렉터리를 지우는 시험은 프로세스 전역 상태라 하지 않는다(14.1.14 ProjectLayout과 같다) |
+
+macOS·Linux 쪽(`FileSystemNormalizesNames`가 참인 비 NFC 이름 색인)은 Windows 측정 밖이고 미검증이다. 대소문자만 다른 두 파일은 Windows·macOS 기본 파일 시스템에 만들 수 없어 명령 시험에는 DuplicatePath 줄이 없다(색인은 메모리 파일 시스템, 줄 문구는 `AssetIndex_DiagnosticLines`가 덮는다).
+
+닿게 한 방법과 시험이 찾은 것: 실제 디스크 시험이 `Exists`가 디렉터리에 거짓인 것을 잡아 Content 판정을 열거 결과로 바꿨다. coverage가 보여 준 죽은 코드를 지웠다 — 확장자 검사 뒤의 `.tmp` 검사(임시 파일은 확장자가 달라 이미 걸러진다), Verify의 expectedType 0 검사(읽기가 보장), 같은 id·경로 상대를 찾는 전체 순회(정렬 이웃으로 바꿔 끝에 닿지 않는 반복이 없어졌다), `ListUnder`의 접두 저장소(논리 경로 256 byte라 할당이 생기지 않았다 — 키 비교로 바꿨다), 바이트 비교 함수 둘(Core `StringView::CompareBytes`로 바꿨다). 진단 줄 서식은 명령에서 AssetDatabase로 옮겨 모든 코드·할당 실패를 C++에서 시험한다.
+
+A2b 상태(2026-11-21): 리뷰 대기.
 
 ## 15. PNG 디코더 범위
 

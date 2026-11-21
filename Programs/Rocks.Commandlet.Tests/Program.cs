@@ -10,9 +10,9 @@ string executable = Path.GetFullPath(args[1]);
 string workingDirectory = Path.GetDirectoryName(executable)!;
 int failures = 0;
 
-async Task Check(string label, string[] arguments, int exit, string stdout, string stderr)
+async Task Check(string label, string[] arguments, int exit, string stdout, string stderr, string? directory = null)
 {
-    ProcessResult result = await ProcessRunner.RunAsync(new(executable, arguments, workingDirectory,
+    ProcessResult result = await ProcessRunner.RunAsync(new(executable, arguments, directory ?? workingDirectory,
         Timeout: TimeSpan.FromSeconds(15)));
     bool passed = result.ExitCode == exit && result.StdOut.Contains(stdout, StringComparison.Ordinal) &&
                   result.StdErr.Contains(stderr, StringComparison.Ordinal) &&
@@ -423,6 +423,169 @@ finally
     Directory.Delete(signDirectory, true);
 }
 
+// asset-list·asset-index-verify(AssetSystem.ko.md 13절, 7.1절 13 — A2b): 패키지는 C++ 시험이 고정한 fixture 배열
+// (AssetDatabase/Tests/AssetIndexCommandletFixtures.h — Hero 2300·Base 2301·같은 id의 Derived 대표·엔진 99.0.0 저장 Newer
+// 2310)을 읽어 쓴다. 목록·--under·프로젝트 찾기(위로)·기술자 없는 --project·진단 줄(누락 의존·형식 불일치·같은 id·이름
+// 규칙·깨진 패키지·새 엔진·IO 실패)·빈 프로젝트·Content가 파일·사용법 오류·출력 실패.
+Dictionary<string, byte[]> fixtures = ReadPackageFixtures(executable);
+string indexDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-index-{Environment.ProcessId}");
+try
+{
+    string project = Path.Combine(indexDirectory, "Demo");
+    string problems = Path.Combine(indexDirectory, "Problems");
+    string empty = Path.Combine(indexDirectory, "Empty");
+    string fileContent = Path.Combine(indexDirectory, "FileContent");
+    string noDescriptor = Path.Combine(indexDirectory, "NoDescriptor");
+    string outside = Path.Combine(indexDirectory, "Outside");
+    foreach (string directory in new[] { project, problems, empty, fileContent })
+    {
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, $"{Path.GetFileName(directory)}.rocksproject"), "{}\n");
+    }
+
+    Directory.CreateDirectory(noDescriptor);
+    Directory.CreateDirectory(outside);
+    void WriteContent(string root, string relative, byte[] bytes)
+    {
+        string path = Path.Combine(root, "Content", relative);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllBytes(path, bytes);
+    }
+
+    WriteContent(project, "Characters/Hero.rasset", fixtures["CommandletHeroPackage"]);
+    WriteContent(project, "Items/Base.rasset", fixtures["CommandletBasePackage"]);
+    WriteContent(project, "Items/Notes.txt", [1, 2, 3]);
+    WriteContent(problems, "Hero.rasset", fixtures["CommandletHeroPackage"]);
+    WriteContent(problems, "Copy/Hero2.rasset", fixtures["CommandletHeroPackage"]);
+    WriteContent(problems, "Base.rasset", fixtures["CommandletBaseAsDerivedPackage"]);
+    WriteContent(problems, "Newer.rasset", fixtures["CommandletNewerPackage"]);
+    WriteContent(problems, "Bad#Name.rasset", fixtures["CommandletBasePackage"]);
+    WriteContent(problems, "Junk.rasset", [1, 2, 3, 4]);
+    File.WriteAllBytes(Path.Combine(fileContent, "Content"), [1]);
+    const string heroId = "5e570000-a55e-7000-0000-0000000008fc";
+    const string baseId = "5e570000-a55e-7000-0000-0000000008fd";
+    const string missingId = "5e570000-a55e-7000-0000-000000000905";
+
+    // 목록: 경로 키 순 한 줄씩(논리 경로·AssetId·대표 타입 id), 정확한 줄 수와 순서.
+    ProcessResult listed = await ProcessRunner.RunAsync(new(executable, ["asset-list", $"--project={project}"],
+        workingDirectory, Timeout: TimeSpan.FromSeconds(15)));
+    string[] lines = listed.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+    bool listShape = listed.ExitCode == 0 && listed.StdErr.Length == 0 && lines.Length == 2 &&
+                     lines[0].StartsWith($"/Game/Characters/Hero {heroId} ", StringComparison.Ordinal) &&
+                     lines[1].StartsWith($"/Game/Items/Base {baseId} ", StringComparison.Ordinal) &&
+                     lines.All(line => line.Split(' ').Length == 3 && line.Split(' ')[2].Length == 36);
+    Console.WriteLine($"asset-list lines: {(listShape ? "PASS" : "FAIL")}");
+    if (!listShape)
+    {
+        ++failures;
+        Console.Error.WriteLine($"  exit={listed.ExitCode}; stdout={listed.StdOut}; stderr={listed.StdErr}");
+    }
+
+    await Check("asset-list under", ["asset-list", "--under=/Game/Items", $"--project={project}"], 0,
+        $"/Game/Items/Base {baseId}", "");
+    await Check("asset-list under nothing", ["asset-list", "--under=/game/nothing", $"--project={project}"], 0, "", "");
+    await Check("asset-list invalid under", ["asset-list", "--under=Game", $"--project={project}"], 1, "",
+        "asset-list: InvalidPath: 'Game' is not a logical directory");
+    // 프로젝트 찾기: 하위 디렉터리에서 위로, 기술자가 없으면 실패, --project 디렉터리에 기술자가 없으면 실패.
+    await Check("asset-list finds the project upward", ["asset-list"], 0, $"/Game/Characters/Hero {heroId}", "",
+        Path.Combine(project, "Content", "Items"));
+    await Check("asset-list without a project", ["asset-list"], 1, "", "no project found", outside);
+    await Check("asset-list project without descriptor", ["asset-list", $"--project={noDescriptor}"], 1, "",
+        "no '*.rocksproject' in");
+    // 기술자는 그 디렉터리에 있어야 한다(위에서 찾은 프로젝트의 하위 디렉터리는 프로젝트가 아니다).
+    await Check("asset-list project below a project", ["asset-list", $"--project={Path.Combine(project, "Content")}"], 1,
+        "", "no '*.rocksproject' in");
+    if (OperatingSystem.IsWindows())
+    {
+        // 드라이브 상대 경로는 프로젝트 루트로 쓸 수 없다.
+        await Check("asset-list unusable project", ["asset-list", "--project=C:Projects"], 1, "",
+            "is not a usable project directory (InvalidArgument)");
+    }
+
+    await Check("asset-list empty project", ["asset-list", $"--project={empty}"], 0, "", "");
+    await Check("asset-list content is a file", ["asset-list", $"--project={fileContent}"], 1, "", "cannot scan");
+    await Check("asset-list help", ["asset-list", "--help"], 0, "usage: asset-list", "");
+    await Check("asset-list positional", ["asset-list", "extra"], 2, "", "usage: asset-list");
+    await Check("asset-list twice", ["asset-list", $"--project={project}", $"--project={project}"], 2, "",
+        "usage: asset-list");
+    await Check("asset-list empty value", ["asset-list", "--project="], 2, "", "usage: asset-list");
+    await Check("asset-list unknown option", ["asset-list", "--type=Texture2D"], 2, "", "usage: asset-list");
+
+    // 검증: 진단 줄과 요약, 진단이 있으면 1.
+    await Check("asset-index-verify missing dependency", ["asset-index-verify", $"--project={project}"], 1,
+        "asset-index-verify: 2 packages, 1 diagnostics",
+        $"MissingDependency: Content/Characters/Hero.rasset: dependency {missingId} is not in the index\n");
+    await Check("asset-index-verify empty", ["asset-index-verify", $"--project={empty}"], 0,
+        "asset-index-verify: 0 packages, 0 diagnostics", "");
+    await Check("asset-index-verify content is a file", ["asset-index-verify", $"--project={fileContent}"], 1, "",
+        "asset-index-verify: cannot scan");
+    await Check("asset-index-verify without a project", ["asset-index-verify"], 1, "", "no project found", outside);
+    await Check("asset-index-verify help", ["asset-index-verify", "--help"], 0, "usage: asset-index-verify", "");
+    await Check("asset-index-verify under is not an option", ["asset-index-verify", "--under=/Game"], 2, "",
+        "usage: asset-index-verify");
+    string[] expectedProblems =
+    [
+        "InvalidPath: Content/Bad#Name.rasset: invalid logical path (InvalidComponent)\n",
+        $"DuplicateAssetId: Content/Copy/Hero2.rasset: asset id {heroId} is also in 'Content/Hero.rasset'\n",
+        $"DuplicateAssetId: Content/Hero.rasset: asset id {heroId} is also in 'Content/Copy/Hero2.rasset'\n",
+        "CorruptPackage: Content/Junk.rasset: package check failed (section 0, detail 0, InvalidArgument)\n",
+        "NewerVersion: Content/Newer.rasset: package check failed (section 1, detail ",
+        $"TypeMismatch: Content/Copy/Hero2.rasset: dependency {baseId} has a different representative type\n",
+        $"TypeMismatch: Content/Hero.rasset: dependency {baseId} has a different representative type\n",
+        $"MissingDependency: Content/Hero.rasset: dependency {missingId} is not in the index\n",
+    ];
+    ProcessResult verified = await ProcessRunner.RunAsync(new(executable, ["asset-index-verify", $"--project={problems}"],
+        workingDirectory, Timeout: TimeSpan.FromSeconds(15)));
+    bool problemsShape = verified.ExitCode == 1 &&
+                         verified.StdOut == "asset-index-verify: 3 packages, 9 diagnostics\n" &&
+                         expectedProblems.All(text => verified.StdErr.Contains(text, StringComparison.Ordinal)) &&
+                         verified.StdErr.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length == 9;
+    Console.WriteLine($"asset-index-verify problems: {(problemsShape ? "PASS" : "FAIL")}");
+    if (!problemsShape)
+    {
+        ++failures;
+        Console.Error.WriteLine($"  exit={verified.ExitCode}; stdout={verified.StdOut}; stderr={verified.StdErr}");
+    }
+
+    if (OperatingSystem.IsWindows())
+    {
+        // 다른 프로세스가 공유 없이 연 파일은 열기 실패다: 코드 자리에 원본 오류 이름(진단 None — 이름은 플랫폼 파일
+        // 오류 대응을 따른다)이 온다.
+        string locked = Path.Combine(project, "Content", "Locked.rasset");
+        File.WriteAllBytes(locked, fixtures["CommandletBasePackage"]);
+        using (new FileStream(locked, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            await Check("asset-index-verify unreadable file", ["asset-index-verify", $"--project={project}"], 1,
+                "asset-index-verify: 2 packages, 2 diagnostics",
+                ": Content/Locked.rasset: cannot read the package file\n");
+        }
+
+        File.Delete(locked);
+        // 표준 출력·오류가 무효 핸들이면 목록 줄·진단 줄·요약 쓰기가 실패한다(실행 오류 1).
+        string[] invalidOutputs =
+        [
+            $"asset-list \"--project={project}\"",
+            $"asset-index-verify \"--project={project}\"",
+            $"asset-index-verify \"--project={empty}\"",
+        ];
+        foreach (string arguments in invalidOutputs)
+        {
+            uint code = WindowsInvalidStandardHandles.Run(executable, arguments, workingDirectory);
+            bool failed = code == 1;
+            Console.WriteLine($"invalid output handles ({arguments.Split(' ')[0]}): {(failed ? "PASS" : "FAIL")}");
+            if (!failed)
+            {
+                ++failures;
+                Console.Error.WriteLine($"  exit={code}");
+            }
+        }
+    }
+}
+finally
+{
+    Directory.Delete(indexDirectory, true);
+}
+
 if (OperatingSystem.IsWindows())
 {
     // 무효 stderr 핸들을 child의 표준 오류로 직접 설정해 출력 실패를 재현한다.
@@ -501,6 +664,34 @@ static byte[] EmptyCookedManifest(string profile)
     body.CopyTo(file, 0);
     BitConverter.TryWriteBytes(file.AsSpan(body.Length), Crc32(body));
     return file;
+}
+
+// AssetDatabase/Tests/AssetIndexCommandletFixtures.h의 배열(이름 → byte)을 읽는다. 저장소 루트는 실행 파일 위쪽에서
+// Rocks.proj를 가진 첫 폴더다.
+static Dictionary<string, byte[]> ReadPackageFixtures(string executable)
+{
+    DirectoryInfo? root = new FileInfo(executable).Directory;
+    while (root is not null && !File.Exists(Path.Combine(root.FullName, "Rocks.proj")))
+    {
+        root = root.Parent;
+    }
+
+    if (root is null)
+    {
+        throw new InvalidOperationException("The repository root (Rocks.proj) is not above the executable.");
+    }
+
+    string header = File.ReadAllText(Path.Combine(root.FullName, "Engine", "Source", "Developer", "AssetDatabase", "Tests",
+        "AssetIndexCommandletFixtures.h"));
+    Dictionary<string, byte[]> arrays = [];
+    foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(header,
+                 @"inline constexpr uint8 (\w+)\[\] = \{([^}]*)\};"))
+    {
+        arrays[match.Groups[1].Value] = System.Text.RegularExpressions.Regex.Matches(match.Groups[2].Value, "0x([0-9a-f]{2})")
+            .Select(value => Convert.ToByte(value.Groups[1].Value, 16)).ToArray();
+    }
+
+    return arrays;
 }
 
 // CRC-32(IEEE 802.3, 반사 다항식 0xEDB88320)다.

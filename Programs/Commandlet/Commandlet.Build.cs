@@ -18,7 +18,8 @@ public sealed class CommandletHost : ModuleRules
         // Compression: log decode/view read compressed log files (independent zstd frames per batch).
         // HostConfig: the config-dump command boots the same config context as the engine hosts (engine files, log.*, trace.*).
         // AssetRuntime: the content-sign command (signed cooked manifest envelope, Docs/Design/ContentSigning.ko.md).
+        // AssetDatabase (Developer): the asset-list and asset-index-verify commands (editor package index, Docs/Design/AssetSystem.ko.md section 13).
         // Launch: the common entry point (command line capture, crash reporting and the tool log, Docs/Design/CrashHandlingAndLaunch.ko.md).
-        PublicDependencies = ["Core", "Launch", "TraceAnalysis", "Crypto", "Compression", "HostConfig", "AssetRuntime"]
+        PublicDependencies = ["Core", "Launch", "TraceAnalysis", "Crypto", "Compression", "HostConfig", "AssetRuntime", "AssetDatabase"]
     };
 }
