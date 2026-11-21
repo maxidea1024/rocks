@@ -281,6 +281,24 @@
       "kind": "asset"
     },
     {
+      "name": "LoopHandle",
+      "id": "5a7e00000000000000000000000002e0",
+      "kind": "object",
+      "held": true,
+      "functions": [
+        {
+          "name": "Pause",
+          "id": "5a7e00000000000000000000000002e1"
+        },
+        {
+          "name": "IsPlaying",
+          "id": "5a7e00000000000000000000000002e2",
+          "returns": "bool",
+          "pure": true
+        }
+      ]
+    },
+    {
       "name": "AudioSystem",
       "id": "5a7e000000000000000000000000000f",
       "kind": "object",
@@ -309,7 +327,7 @@
               "type": "SoundAsset"
             }
           ],
-          "returns": "Actor?",
+          "returns": "LoopHandle?",
           "effects": [
             "acquire"
           ]

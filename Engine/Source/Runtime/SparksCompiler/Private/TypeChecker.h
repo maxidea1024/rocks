@@ -238,6 +238,13 @@ private:
     // 있으면 continuesWithoutWait를 켠다.
     uint8 WaitStates(uint32 module, uint32 node, uint8 states, bool& continuesWithoutWait) noexcept;
 
+    // ---- 유지 자원·로드(CheckResources.cpp, 3.14절 — Rules 단계) ----
+    // 유지 자원 타입(schema `held` 엔진 객체, `LoadRequest<T>`, 그 `T?`)인지다.
+    bool IsHeldType(uint32 type) noexcept;
+    void CheckResources(uint32 module) noexcept;
+    // `acquire` 효과의 엔진 함수가 유지 자원 타입을 돌려주는지 본다(S1120).
+    void CheckAcquireReturns() noexcept;
+
     // ---- 흐름 분석(CheckFlow.cpp, 3.11절) ----
     // stale이면 await 뒤 객체 지역 이름의 읽기를 staleRead_에 표시하고(본문 검사 전), 아니면
     // S0710–S0712를 낸다(본문 검사 뒤).

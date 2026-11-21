@@ -41,25 +41,25 @@ class Derived : Base {
 
 class Door : Base {
     @edit var Peer: Helper;
-    @edit var Sound: SoundAsset;
+    @edit var Cue: SoundAsset;
     @edit var Icon: Soft<DataAsset>;
     var Count = 0;
-    var Loop: Actor?;
+    var Loop: LoopHandle?;
 
     on Awake() {
         _ = World.Spawn();
-        Loop = World.Audio.StartLoop(Sound);
+        Loop = World.Audio.StartLoop(Cue);
         _ = Icon.Load();
         Peer.Chain();
     }
 
     on Enable() {
-        Loop = World.Audio.StartLoop(Sound);
+        Loop = World.Audio.StartLoop(Cue);
         Count = 1;
     }
 
     on Disable() {
-        Loop = World.Audio.StartLoop(Sound);
+        Loop = World.Audio.StartLoop(Cue);
         Peer.Raise();
     }
 
@@ -87,7 +87,7 @@ class Door : Base {
         Peer.Touch(Peer);
         Owner.RequestDestroy();
         _ = Owner.GetForwardVector();
-        World.Audio.PlayAt(Sound, Owner.Location);
+        World.Audio.PlayAt(Cue, Owner.Location);
         emit Struck();
     }
 
@@ -99,7 +99,7 @@ class Door : Base {
 
     @pure fn Restless(): int {
         Count = 2;
-        World.Audio.PlayAt(Sound, Owner.Location);
+        World.Audio.PlayAt(Cue, Owner.Location);
         return Peer.Pure2();
     }
 

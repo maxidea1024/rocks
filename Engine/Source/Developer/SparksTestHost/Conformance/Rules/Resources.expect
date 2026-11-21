@@ -1,0 +1,22 @@
+# Held resources and loads (S0901-S0905, 3.14): created only into local declarations, 'var' locals and fields
+# (load requests only locals), await operands and All/Race arguments; held names are used only as receivers,
+# awaited, waited on or compared with null; held types only in local names and 'var' 'T?' fields; a local
+# acquired resource needs an 'await' before its block ends.
+error S0904 5:16
+error S0904 6:22
+error S0904 7:18
+error S0904 8:21
+error S0903 19:20
+error S0903 20:13
+error S0903 21:14
+error S0901 22:9
+error S0901 23:13
+error S0902 24:14
+error S0902 25:19
+error S0903 27:13
+error S0904 30:20
+error S0904 34:16
+error S0905 46:13
+error S0905 70:13
+error S0904 78:17
+error S0904 81:25

@@ -24,8 +24,8 @@ constexpr StringView SchemaFix = "Regenerate the binding schema; do not edit it 
 
 constexpr StringView RootKeys[] = {"format", "package", "module", "types"};
 constexpr StringView TypeKeys[] = {
-    "name",          "id",     "kind",      "base",   "scriptExtensible",
-    "constructible", "fields", "functions", "events", "cases"};
+    "name",      "id",     "kind",  "base", "scriptExtensible", "constructible", "fields",
+    "functions", "events", "cases", "held"};
 constexpr StringView FieldKeys[] = {"name", "id", "type", "access", "computed", "changed"};
 constexpr StringView FunctionKeys[] = {
     "name",       "id",      "static",  "async", "overridable", "typeParameters",
@@ -451,6 +451,7 @@ private:
         bool allowFunctions = true;
         bool allowEvents = true;
         bool allowCases = true;
+        bool allowHeld = true;
         const bool isEnum = knownKind && type.kind == SchemaTypeKind::Enum;
         if (knownKind) {
             const SchemaTypeKind k = type.kind;
@@ -462,6 +463,11 @@ private:
             allowFunctions = !isEnum;
             allowEvents = k == SchemaTypeKind::Object;
             allowCases = isEnum;
+            allowHeld = k == SchemaTypeKind::Object;
+            if (!allowHeld) {
+                RejectKey(object, "held", "object");
+            }
+
             if (!allowBase) {
                 RejectKey(object, "base", "object, asset and interface");
             }
@@ -500,6 +506,7 @@ private:
 
         type.scriptExtensible = allowExtensible && ReadBool(object, "scriptExtensible", false);
         type.constructible = !allowConstructible || ReadBool(object, "constructible", true);
+        type.held = allowHeld && ReadBool(object, "held", false);
 
         memberNames_.Clear();
         type.firstField = static_cast<uint32>(out_.fields_.Size());

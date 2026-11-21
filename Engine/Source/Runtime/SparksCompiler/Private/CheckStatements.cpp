@@ -231,7 +231,8 @@ void TypeChecker::Run() noexcept {
     }
 
     if (rules_ && binder_.error_ == ErrorCode::None) {
-        AnalyzeEffects(); // 3.13절 S0601–S0603
+        AnalyzeEffects();      // 3.13절 S0601–S0603
+        CheckAcquireReturns(); // 3.14절 schema `acquire`
     }
 }
 
@@ -402,6 +403,7 @@ void TypeChecker::CheckModule(uint32 module) noexcept {
         CheckDeclarationRules(module); // 3.11절 필드·상수식·프로필
         if (rules_) {
             CheckAttributes(module); // 3.13절 S0620–S0623(attribute 인자의 const 사용을 표시한다)
+            CheckResources(module);  // 3.14절 S0901–S0905
         }
 
         CheckUnusedImports(module); // 3.11절 S0714
@@ -1068,8 +1070,11 @@ void TypeChecker::CheckSimpleStatement(const CheckContext& context, uint32 node)
         } else if (value.kind == K::TypeName || value.kind == K::Namespace ||
                    value.kind == K::Function || value.kind == K::Literal) {
             RequireValue(context, value, valueNode);
-        } else if (flow_ && (value.kind == K::Typed || value.kind == K::UntypedInt ||
-                             value.kind == K::UntypedFloat || value.kind == K::Null)) {
+        } else if (flow_ &&
+                   (value.kind == K::Typed || value.kind == K::UntypedInt ||
+                    value.kind == K::UntypedFloat || value.kind == K::Null) &&
+                   !(rules_ && value.kind == K::Typed && IsHeldType(value.type))) {
+            // 버린 유지 자원은 S0901이 알린다(3.14절).
             // 버린 결과(3.11절, S0713).
             Report(context, DiagnosticCode::DiscardedResult, valueNode,
                    "The result of this expression is not used.",

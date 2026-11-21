@@ -61,6 +61,7 @@ struct SchemaType {
     SchemaTypeKind kind = SchemaTypeKind::Object;
     bool scriptExtensible = false;
     bool constructible = true;
+    bool held = false; // 값이 유지 자원이다(LC3c)
     uint32 firstField = 0;
     uint32 fieldCount = 0;
     uint32 firstFunction = 0;

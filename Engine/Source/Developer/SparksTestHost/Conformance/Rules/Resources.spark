@@ -1,0 +1,81 @@
+class Player : ScriptableComponent {
+    @edit var Cue: SoundAsset;
+    @edit var Icon: Soft<DataAsset>;
+    var Hum: LoopHandle?;
+    let Fixed: LoopHandle? = null;
+    @save var Saved: LoopHandle?;
+    var Pending: LoadRequest<DataAsset>?;
+    var Many: Array<LoopHandle> = [];
+
+    on Enable() {
+        Hum = World.Audio.StartLoop(Cue);
+        Hum = null;
+    }
+
+    fn Quiet() {
+        Hum?.Pause();
+        _ = Hum == null;
+        _ = null != Hum;
+        let copy = Hum;
+        _ = Hum;
+        Keep(Hum);
+        World.Audio.StartLoop(Cue);
+        _ = World.Audio.StartLoop(Cue);
+        Keep(World.Audio.StartLoop(Cue));
+        Pending = Icon.Load();
+        Hum = (World.Audio.StartLoop(Cue));
+        _ = copy;
+    }
+
+    fn Keep(sound: LoopHandle?) {
+        sound?.Pause();
+    }
+
+    fn Make(): LoopHandle? {
+        return null;
+    }
+
+    @skipWhileBusy
+    on Owner.Damaged(_: float) {
+        let siren = World.Audio.StartLoop(Cue);
+        siren?.Pause();
+        await Delay(5.0, Clock.Game);
+    }
+
+    fn Brief() {
+        let beep = World.Audio.StartLoop(Cue);
+        beep?.Pause();
+    }
+
+    async fn Loads() {
+        let request = Icon.Load();
+        while (!request.IsDone) {
+            await NextTick();
+        }
+
+        let data = try await request;
+        _ = data;
+        let other = Icon.Load();
+        await Race(other, Delay(1.0, Clock.Game));
+        let direct = try await Icon.Load();
+        _ = direct;
+        var held = World.Audio.StartLoop(Cue);
+        held?.Pause();
+        held = World.Audio.StartLoop(Cue);
+        held?.Pause();
+        await NextTick();
+    }
+
+    fn Later() {
+        let late = Icon.Load();
+        if (late.IsDone) {
+            return;
+        }
+    }
+}
+
+struct Bag {
+    var Inside: LoopHandle?;
+}
+
+event Actor.Rang(sound: LoopHandle?);

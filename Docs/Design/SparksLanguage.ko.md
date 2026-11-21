@@ -990,6 +990,25 @@ Class<T> { fn Create(): T }             // full, T는 class 타입
 | `effects` | 문자열 배열: `spawn`·`acquire`·`readiness`·`io`·`wallClock`(중복 불가) |
 | `pure` | bool(기본 false). 관찰 가능한 상태를 바꾸지 않는 함수(getter·계산) |
 | `oneShot` | bool(기본 false). handle 없는 일회성 효과(§7.1, `World.Audio.PlayAt`) |
+### 3.14 유지 자원·로드(LC3c 확정)
+
+이 절은 §7.1·§7.3의 유지 자원 규칙 셋과 로드 요청 handle을 컴파일러가 판정하는 방식으로 확정한다. 진단 코드는 §8.1의 S09xx다. 뒤로 넘기는 것: 실행 중 해제 순서·generation(LC6), `try await req`의 두 번째 결과 꺼내기(실행 중 `ContractViolation` — LC6), 반복 설정 에셋을 일회성 API에 넘기는 쿡 오류(연동 단계).
+
+**유지 자원 타입.** binding schema가 `held: true`로 표시한 엔진 객체 타입(반복 사운드·입력 context 등)과 언어 타입 `LoadRequest<T>`의 값이 유지 자원이다(`T?` 포함). schema `effects`에 `acquire`가 있는 함수는 유지 자원 타입(`T?`)을 돌려준다(아니면 S1120). 유지 자원을 돌려주는 호출이 획득이다(LC3b의 자원 획득 효과).
+
+**담는 자리(규칙 1).** 획득 호출(`X.Load()`·`Assets.LoadAll(...)` 포함)은 다음 자리에만 쓴다. 그 밖은 S0902, 결과를 버리는 자리(식 문장, `_ =`)는 S0901("멈출 방법이 없다" — 식 문장의 S0713은 내지 않는다)이다.
+
+- 지역 변수(`var`·`let`) 선언의 초기값(`?? return` 포함)
+- 대입의 오른쪽: 대상이 자기 필드(이름만 쓴 것) 또는 `var` 지역 변수일 때. 로드 요청은 지역 변수에만 담는다(필드면 S0902)
+- `await`·`try await`의 피연산자, `All`·`Race`의 인자(대기가 끝날 때까지 그 실행이 보관한다)
+
+**옮길 수 없음(규칙 3).** 유지 자원을 담은 이름(지역·필드)은 다음 자리에서만 읽는다: 멤버 접근·호출의 수신자(`.`·`?.` — `Hum?.Pause()`, `req.IsDone`), `await`·`try await`의 피연산자, `All`·`Race`의 인자, `null`과의 `==`·`!=`. 그 밖(다른 이름에 대입·초기값, `if (let)`, `??`, 함수·이벤트 인자, 반환, 컨테이너·struct 원소)은 S0903이다. 대입의 왼쪽(`Hum = ...`)은 읽기가 아니다.
+
+**담는 선언(S0904).** 유지 자원 타입은 지역 이름과 다음 필드에만 쓴다: class의 `var` `T?` 필드(attribute `@save`·`@edit`·`@net` 없음 — 로드 요청은 필드에 둘 수 없다). struct 필드, `let`·`?` 없는·`@save`/`@edit`/`@net` 필드, 컨테이너·`Result`·`Soft`의 타입 인자, 함수·handler·이벤트 매개변수, 반환 타입에 쓰면 S0904이며 위치는 그 타입 표기다.
+
+**기다리지 않는 지역 자원(S0905).** 획득 호출을 초기값으로 둔 유지 자원 타입의 지역 변수 선언 뒤(다른 이름에서 옮긴 것은 S0903만), 같은 블록의 끝까지(뒤 문장과 그 안 — 반복·분기 포함) `await`가 하나도 없으면 S0905다(그 자원은 같은 스크립트 단계에서 멈춘다). 수정 예는 계속 유지하려면 필드에 담기, 정해진 시간만 유지하려면 블록 안의 `await Delay(...)`다.
+
+**schema key(LC3c).** 타입 객체에 `held`(bool, 기본 false, `object`만)를 더한다(§10.2 표).
 
 ## 4. 타입·참조·값
 
@@ -1554,6 +1573,16 @@ Characters/PlayerCharacter.spark:42:5: error S0731: Cannot assign to a function 
 | S0714 | `unused-import` | import한 모듈의 선언을 쓰지 않는다 | import를 지운다 |
 | S0731 | `assign-to-call-result` | 대입·변경 경로에 호출 결과(그 뒤가 참조 타입 값을 지나지 않을 때)나 `?.`가 있다 | 지역 변수에 받아 바꾼 뒤 되돌려 쓴다 |
 
+- **유지 자원·로드(S09xx, LC3c):** 규칙과 위치는 §3.14다.
+
+| 코드 | 이름 | 조건 | 수정 예 |
+|---|---|---|---|
+| S0901 | `discarded-resource` | 유지 자원·로드 요청을 버린다(식 문장·`_ =`) | 지역 변수나 필드에 담는다 |
+| S0902 | `resource-placement` | 담는 자리(§3.14)가 아닌 곳에서 획득한다, 로드 요청을 필드에 담는다 | `let x = ...`로 받는다 |
+| S0903 | `resource-moved` | 유지 자원을 담은 이름을 옮기거나 복사한다 | 담긴 이름의 멤버를 호출한다 |
+| S0904 | `resource-declaration` | 유지 자원 타입을 담을 수 없는 선언·타입 자리 | `var X: T?` 필드나 지역 변수 |
+| S0905 | `resource-without-wait` | 지역 유지 자원 뒤 블록 끝까지 `await`가 없다 | 필드에 담거나 `await Delay(...)` |
+
 - **실행 문맥·효과·attribute(S06xx, LC3b):** 규칙과 위치는 §3.13이다.
 
 | 코드 | 이름 | 조건 | 수정 예 |
@@ -1831,6 +1860,7 @@ Sparks에서는 `var MaxHealth: int32`(편집·저장), 읽기 전용 속성 `Cu
 | 타입 | `fields` | 아니오 | 필드 객체 배열. `object`·`asset`·`struct`만 |
 | 타입 | `functions` | 아니오 | 함수 객체 배열. `enum` 밖 |
 | 타입 | `events` | 아니오 | 이벤트 객체 배열. `object`만 |
+| 타입 | `held` | 아니오 | bool(기본 false). 이 타입의 값이 유지 자원인지(§3.14, LC3c). `object`만 |
 | 타입 | `cases` | `enum`이면 예 | case 이름 문자열 배열(선언 순서, 하나 이상, 중복 불가, 영문 대문자로 시작). `enum`만 |
 | 필드 | `name` | 예 | §10.3 변환을 마친 스크립트 이름(영문 대문자로 시작) |
 | 필드 | `id` | `computed`가 아니면 예 | FieldId |
