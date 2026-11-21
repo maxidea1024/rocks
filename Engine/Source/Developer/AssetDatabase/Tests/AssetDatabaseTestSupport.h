@@ -99,4 +99,37 @@ inline bool MakeContentDirectory(Allocator& allocator, const TempProject& projec
         platform::PhysicalFileSystem(), path.View().Data(), path.View().ByteCount()));
 }
 
+// OS 경로 상한 시험의 깊은 프로젝트 루트를 디스크에 만든다(4.2절 — 7.1절 17 A2e2·A2e3b): project
+// 아래에 200 byte 이하 구성 요소를 이어 절대 경로가 정확히 rootBytes인 디렉터리를 만들고 out에
+// 그 경로를 둔다. 남은 길이가 구분자 하나뿐이 되지 않게 마지막 조각을 줄인다.
+inline bool MakeDeepRoot(const TempProject& project, usize rootBytes, String& out) noexcept {
+    constexpr usize DirectoryBytes = 200;
+    ProjectLayout outer(out.GetAllocator());
+    if (!outer.Initialize(project.Root()) || !out.TryAssign(outer.Root())) {
+        return false;
+    }
+
+    while (out.View().ByteCount() < rootBytes) {
+        usize chunk = rootBytes - out.View().ByteCount() - 1;
+        chunk = chunk > DirectoryBytes ? DirectoryBytes : chunk;
+        if (rootBytes - out.View().ByteCount() - 1 - chunk == 1) {
+            --chunk;
+        }
+
+        if (!out.TryAppend("/")) {
+            return false;
+        }
+
+        for (usize index = 0; index < chunk; ++index) {
+            if (!out.TryAppend("d")) {
+                return false;
+            }
+        }
+    }
+
+    return out.View().ByteCount() == rootBytes &&
+           static_cast<bool>(platform::MakeDirectoryTree(
+               platform::PhysicalFileSystem(), out.View().Data(), out.View().ByteCount()));
+}
+
 } // namespace rocks::asset_database_test

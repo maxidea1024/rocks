@@ -97,7 +97,10 @@ enum class EditorWarningKind : uint8 {
     AliasNotRestored,
     // 삭제: 지운 에셋을 가리키던 별칭을 지웠다(진단 None, asset = 지운 에셋, text = 별칭 경로 —
     // 7.1절 17 A2e3).
-    AliasRemoved
+    AliasRemoved,
+    // 복제: 원본의 ImportRecord가 다른 임포트의 출력을 가리키는 참조 기록이라 사본에서 버렸다(진단
+    // None, asset = 사본 id, related = 그 소유자 — 7.1절 17 A2e3b).
+    ImportRecordDropped
 };
 
 // 경고의 경로 텍스트 칸 크기다(논리 경로 상한 + NUL — 할당 없이 복사되는 경고).
@@ -304,6 +307,26 @@ public:
                       Array<EditorWarning>* warnings = nullptr,
                       AssetDiagnostic* failure = nullptr) noexcept;
 
+    // 열린 패키지 source의 메모리 상태(저장하지 않은 편집 포함 — UE DuplicateAsset)를 newId로
+    // target에 새 파일로 쓴다(7.1절 17 A2e3b). 사본은 집합에 열지 않고 원본 정보(파일·지문·dirty·
+    // 저장소)는 바꾸지 않는다. writer 복제 옵션(PackageWriteOptions::duplicateId —
+    // DuplicateTransient 필드는 기본값, 원본 id를 가리키는 Soft 참조는 newId)으로 쓰고,
+    // ImportRecord는 소유 기록이면 owner와 원본 자신의 출력만 newId로 남겨 쓰고(형제 출력은 원본
+    // 임포트의 것) 참조 기록이면 기록과 ImportOwner 의존을 버린다(경고 ImportRecordDropped).
+    // hook에는 저장할 id로 newId를 준다. 쓰기는 저장과 같은 길(임시 → 재검증 → Replace → 색인
+    // Refresh)이다. 별칭 점유는 보지 않는다(서비스가 본다).
+    //
+    // 오류(failure 진단 — 앞에서 걸리면 아무것도 쓰지 않는다): Initialize 전·hook 표 없음·잠금
+    // 아님·newId null InvalidArgument, Create 초기화 안 Busy, 원본이 열리지 않음 NotFound, newId가
+    // 열려 있거나 색인에 있음 DuplicateAssetId / AlreadyExists, 읽기 전용 NewerVersion /
+    // Unsupported, 미해결 import MissingDependency / InvalidArgument(related = 첫 대상), 대상
+    // 점유(파일·색인 같은 경로 키·저장하지 않은 새 패키지 경로) DuplicatePath / AlreadyExists, OS
+    // 경로 상한 InvalidPath / CapacityExceeded, 대표 에셋·hook·WritePackage·IO·재검증의 오류(저장과
+    // 같다), 할당 실패.
+    Result<void> Duplicate(AssetId source, const LogicalPath& target, AssetId newId,
+                           const AssetDatabaseLock& lock, Array<EditorWarning>* warnings = nullptr,
+                           AssetDiagnostic* failure = nullptr) noexcept;
+
     // 열린 패키지 정보다(없으면 null). 다음 Open까지 유효하다.
     const EditorPackageInfo* Find(AssetId id) const noexcept;
 
@@ -380,13 +403,26 @@ private:
                                    AssetDiagnostic* failure) noexcept;
     // 저장의 판정(교체 전 — 실패하면 아무것도 쓰지 않는다)과 쓰기·교체·뒷정리다.
     struct SavePlan;
+    // 복제 쓰기다(사본 id와 다시 쓴 ImportRecord byte).
+    struct DuplicateWrite {
+        AssetId id{};
+        Span<const uint8> importRecord{};
+    };
     Result<void> PlanSave(EditorPackageInfo& info, const EditorSaveOptions& options, SavePlan& plan,
                           AssetDiagnostic& diagnostic) noexcept;
-    Result<void> WriteAndReplace(EditorPackageInfo& info, SavePlan& plan,
-                                 Array<EditorWarning>* warnings,
+    // 새 파일 대상(논리 경로의 NFC 이름 — 첫 저장·복제)을 plan에 정한다.
+    Result<void> PlanNewTarget(const LogicalPath& path, AssetId id, SavePlan& plan,
+                               AssetDiagnostic& diagnostic) noexcept;
+    // 대표 에셋 타입 hook의 Tags·Build 의존과 importOwner를 plan에 모은다(asset은 저장할 id — hook
+    // 문맥에 준다).
+    Result<void> PlanHookOutputs(const EditorPackageInfo& info, AssetId asset,
+                                 Span<const PackageDependencyEntry> importOwner, SavePlan& plan,
                                  AssetDiagnostic& diagnostic) noexcept;
-    void DeleteOrphans(const EditorPackageInfo& info, StringView target,
-                       Array<EditorWarning>* warnings) noexcept;
+    // duplicate가 있으면 복제 모드다(원본 정보·저장소를 바꾸지 않는다).
+    Result<void> WriteAndReplace(EditorPackageInfo& info, SavePlan& plan,
+                                 Array<EditorWarning>* warnings, AssetDiagnostic& diagnostic,
+                                 const DuplicateWrite* duplicate = nullptr) noexcept;
+    void DeleteOrphans(AssetId id, StringView target, Array<EditorWarning>* warnings) noexcept;
     Result<void> PreparePending(Pending& pending, AssetDiagnostic& diagnostic) noexcept;
     usize LowerBound(AssetId id) const noexcept;
 

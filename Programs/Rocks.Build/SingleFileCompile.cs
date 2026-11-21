@@ -77,7 +77,7 @@ public static class SingleFileCompile
 
             string objectPath = ObjectPath(request, source);
             Directory.CreateDirectory(Path.GetDirectoryName(objectPath)!);
-            string[] arguments = WithObject(compile.Arguments, objectPath);
+            string[] arguments = CompileObjectArguments.With(compile.Arguments, objectPath);
             AtomicFile.WriteIfChanged(Path.ChangeExtension(objectPath, ".json"), JsonSerializer.Serialize(new
             {
                 source,
@@ -100,33 +100,5 @@ public static class SingleFileCompile
         }
 
         return results;
-    }
-
-    // 논리 명령의 object 경로만 바꾼다: clang-cl /Fo<경로>, clang 드라이버 -o <경로>.
-    private static string[] WithObject(IReadOnlyList<string> arguments, string objectPath)
-    {
-        var result = new List<string>(arguments.Count);
-        bool replaced = false;
-        for (int index = 0; index < arguments.Count; ++index)
-        {
-            if (arguments[index].StartsWith("/Fo", StringComparison.Ordinal))
-            {
-                result.Add("/Fo" + objectPath);
-                replaced = true;
-            }
-            else if (arguments[index] == "-o" && index + 1 < arguments.Count)
-            {
-                result.Add("-o");
-                result.Add(objectPath);
-                ++index;
-                replaced = true;
-            }
-            else
-            {
-                result.Add(arguments[index]);
-            }
-        }
-
-        return replaced ? [.. result] : throw new InvalidOperationException("The logical compile command names no object path (/Fo or -o).");
     }
 }

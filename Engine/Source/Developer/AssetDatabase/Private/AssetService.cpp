@@ -822,6 +822,61 @@ Result<void> AssetService::Delete(const AssetDatabaseLock& lock, StringView targ
     return Result<void>::Success();
 }
 
+Result<void> AssetService::Duplicate(const AssetDatabaseLock& lock, StringView source,
+                                     StringView target, AssetDuplicateResult& result,
+                                     Array<EditorWarning>* warnings,
+                                     AssetDiagnostic* failure) noexcept {
+    result.id = AssetId{};
+    result.path.Clear();
+    if (!initialized_ || !lock.IsHeldFor(*layout_)) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, ErrorCode::InvalidArgument);
+    }
+
+    auto to = ParseLogicalPath(*allocator_, target);
+    if (!to) {
+        return FailAsset<void>(failure,
+                               to.Error() == ErrorCode::InvalidArgument
+                                   ? AssetDiagnosticCode::InvalidPath
+                                   : AssetDiagnosticCode::None,
+                               to.Error());
+    }
+
+    // 별칭 점유(어느 에셋의 별칭이든 — 사본은 새 에셋이다).
+    auto aliases = Aliases(failure);
+    if (!aliases) {
+        return Result<void>::Failure(aliases.Error());
+    }
+
+    const usize alias = aliases.Value()->Find(to.Value().Key());
+    if (alias != AssetAliasNone) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::DuplicatePath,
+                               ErrorCode::AlreadyExists, {}, 0, 0,
+                               aliases.Value()->At(alias).asset);
+    }
+
+    AssetId id;
+    if (auto opened = OpenTarget(source, id, warnings, failure); !opened) {
+        return Result<void>::Failure(opened.Error());
+    }
+
+    auto made = AssetId::TryNew();
+    if (!made) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, made.Error(), id);
+    }
+
+    if (auto assigned = result.path.TryAssign(to.Value().Text()); !assigned) {
+        return assigned;
+    }
+
+    if (auto duplicated = set_.Duplicate(id, to.Value(), made.Value(), lock, warnings, failure);
+        !duplicated) {
+        return duplicated;
+    }
+
+    result.id = made.Value();
+    return Result<void>::Success();
+}
+
 Result<AssetAliasTable*> AssetService::Aliases(AssetDiagnostic* failure) noexcept {
     if (!initialized_) {
         return FailAsset<AssetAliasTable*>(failure, AssetDiagnosticCode::None,
@@ -965,6 +1020,25 @@ Result<ObjectHandle> AssetService::OpenTarget(StringView target, AssetId& id,
                                                ? AssetDiagnosticCode::InvalidPath
                                                : AssetDiagnosticCode::None,
                                            path.Error());
+        }
+
+        // 저장하지 않은 새 패키지는 색인에 없다 — 같은 경로 키면 그 패키지다(색인과 겹치지 않는다
+        // — Create가 거부한다).
+        for (usize index = 0; index < set_.Count(); ++index) {
+            const EditorPackageInfo& info = set_.At(index);
+            if (!info.unsaved) {
+                continue;
+            }
+
+            auto other = ParseLogicalPath(*allocator_, info.logicalPath.View());
+            if (!other) {
+                return FailAsset<ObjectHandle>(failure, AssetDiagnosticCode::None, other.Error());
+            }
+
+            if (other.Value().Key() == path.Value().Key()) {
+                id = info.id;
+                return set_.Registry().FindChild(set_.Access(), info.package, "");
+            }
         }
 
         AssetDiagnostic missing;

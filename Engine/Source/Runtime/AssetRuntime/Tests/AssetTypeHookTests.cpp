@@ -17,9 +17,12 @@ namespace {
 // hook이 부른 순서를 적는다(시험 전용 전역 — 한 시험 안에서만 쓴다).
 uint32 calls[4] = {};
 bool failBase = false;
+// BaseTags가 받은 저장할 패키지 id다(CallBase가 넘기는지 본다).
+AssetId baseAsset{};
 
 Result<void> BaseTags(const AssetTypeHookContext& context, AssetTagSink& sink) noexcept {
     ++calls[0];
+    baseAsset = context.asset;
     if (failBase) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
@@ -105,10 +108,10 @@ TEST(AssetTypeHooks_NearestAndCallBase) {
     REQUIRE(baseRegistration);
     {
         AssetTagSink sink(env.allocator);
-        REQUIRE(table.CollectTags(registry, access, ObjectHandle{}, derived, sink));
+        REQUIRE(table.CollectTags(registry, access, ObjectHandle{}, derived, AssetId{}, sink));
         CHECK(calls[0] == 1 && sink.Tags().Size() == 1 && HasTag(sink, "Kind", "Base"));
         AssetDependencySink dependencies(env.allocator);
-        REQUIRE(table.CollectBuildDependencies(registry, access, ObjectHandle{}, derived,
+        REQUIRE(table.CollectBuildDependencies(registry, access, ObjectHandle{}, derived, AssetId{},
                                                dependencies));
         REQUIRE(dependencies.Dependencies().Size() == 1);
         CHECK(dependencies.Dependencies()[0].asset == FixedId(2600));
@@ -119,11 +122,13 @@ TEST(AssetTypeHooks_NearestAndCallBase) {
         auto derivedRegistration = table.Register(derived, {&DerivedTagsWithBase, nullptr});
         REQUIRE(derivedRegistration);
         AssetTagSink sink(env.allocator);
-        REQUIRE(table.CollectTags(registry, access, ObjectHandle{}, derived, sink));
+        // 저장할 패키지 id는 CallBase로 부른 base hook까지 그대로 간다.
+        REQUIRE(table.CollectTags(registry, access, ObjectHandle{}, derived, FixedId(2601), sink));
+        CHECK(baseAsset == FixedId(2601));
         CHECK(sink.Tags().Size() == 2 && HasTag(sink, "Kind", "Base") &&
               HasTag(sink, "Kind", "Derived"));
         AssetDependencySink dependencies(env.allocator);
-        REQUIRE(table.CollectBuildDependencies(registry, access, ObjectHandle{}, derived,
+        REQUIRE(table.CollectBuildDependencies(registry, access, ObjectHandle{}, derived, AssetId{},
                                                dependencies));
         CHECK(dependencies.Dependencies().Size() == 1);
     }
@@ -132,10 +137,10 @@ TEST(AssetTypeHooks_NearestAndCallBase) {
         auto alone = table.Register(derived, {&DerivedTagsAlone, &DerivedDependencies});
         REQUIRE(alone);
         AssetTagSink sink(env.allocator);
-        REQUIRE(table.CollectTags(registry, access, ObjectHandle{}, derived, sink));
+        REQUIRE(table.CollectTags(registry, access, ObjectHandle{}, derived, AssetId{}, sink));
         CHECK(sink.Tags().Size() == 1 && HasTag(sink, "Kind", "Derived"));
         AssetDependencySink dependencies(env.allocator);
-        REQUIRE(table.CollectBuildDependencies(registry, access, ObjectHandle{}, derived,
+        REQUIRE(table.CollectBuildDependencies(registry, access, ObjectHandle{}, derived, AssetId{},
                                                dependencies));
         REQUIRE(dependencies.Dependencies().Size() == 2);
         CHECK(dependencies.Dependencies()[0].asset == FixedId(2600));
@@ -143,10 +148,10 @@ TEST(AssetTypeHooks_NearestAndCallBase) {
     }
 
     AssetTagSink none(env.allocator);
-    REQUIRE(table.CollectTags(registry, access, ObjectHandle{}, TestAssetType(), none));
+    REQUIRE(table.CollectTags(registry, access, ObjectHandle{}, TestAssetType(), AssetId{}, none));
     AssetDependencySink noDependencies(env.allocator);
     REQUIRE(table.CollectBuildDependencies(registry, access, ObjectHandle{}, TestAssetType(),
-                                           noDependencies));
+                                           AssetId{}, noDependencies));
     CHECK(none.Tags().IsEmpty() && noDependencies.Dependencies().IsEmpty());
 }
 
@@ -172,18 +177,22 @@ TEST(AssetTypeHooks_Errors) {
     REQUIRE(derivedRegistration);
     failBase = true;
     AssetTagSink sink(env.allocator);
-    CHECK(table.CollectTags(registry, access, ObjectHandle{}, derived, sink).Error() ==
+    CHECK(table.CollectTags(registry, access, ObjectHandle{}, derived, AssetId{}, sink).Error() ==
           ErrorCode::Busy);
-    CHECK(table.CollectTags(registry, access, ObjectHandle{}, base, sink).Error() ==
+    CHECK(table.CollectTags(registry, access, ObjectHandle{}, base, AssetId{}, sink).Error() ==
           ErrorCode::Busy);
     AssetDependencySink dependencies(env.allocator);
-    CHECK(table.CollectBuildDependencies(registry, access, ObjectHandle{}, derived, dependencies)
+    CHECK(table
+              .CollectBuildDependencies(registry, access, ObjectHandle{}, derived, AssetId{},
+                                        dependencies)
               .Error() == ErrorCode::Busy);
     failBase = false;
     const TypeId unknown = Guid{0x7E57, 0x0001};
-    CHECK(table.CollectTags(registry, access, ObjectHandle{}, unknown, sink).Error() ==
+    CHECK(table.CollectTags(registry, access, ObjectHandle{}, unknown, AssetId{}, sink).Error() ==
           ErrorCode::NotFound);
-    CHECK(table.CollectBuildDependencies(registry, access, ObjectHandle{}, unknown, dependencies)
+    CHECK(table
+              .CollectBuildDependencies(registry, access, ObjectHandle{}, unknown, AssetId{},
+                                        dependencies)
               .Error() == ErrorCode::NotFound);
     // 미등록 타입을 hookType으로 가진 문맥의 CallBase(hook 안에서 타입이 사라진 경우).
     const AssetTypeHookContext orphan{registry, access, ObjectHandle{}, unknown, table, env.types};

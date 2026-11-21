@@ -883,33 +883,14 @@ TEST(AssetMove_NativePathLimit) {
     REQUIRE(MakeSources(env, sources));
     TempProject project("move-limit");
     REQUIRE(project.made);
-    ProjectLayout outer(env.allocator);
-    REQUIRE(outer.Initialize(project.Root()));
     // 루트 길이: "/Content/" + ShortNameRoom byte 안의 이름 + ".rasset" + 임시 접미사는 상한 안,
     // LongComponentBytes 이름은 밖.
     constexpr usize ContentPrefixBytes = 9;
     constexpr usize ShortNameRoom = 30;
-    constexpr usize DirectoryBytes = 200;
     const usize rootBytes = MaxNativePathBytes() - TemporaryFileSuffixBytes -
                             EditorPackageExtension.ByteCount() - ContentPrefixBytes - ShortNameRoom;
     String root(env.allocator);
-    REQUIRE(root.TryAppend(outer.Root()));
-    while (root.View().ByteCount() < rootBytes) {
-        usize chunk = rootBytes - root.View().ByteCount() - 1;
-        chunk = chunk > DirectoryBytes ? DirectoryBytes : chunk;
-        if (rootBytes - root.View().ByteCount() - 1 - chunk == 1) {
-            --chunk;
-        }
-
-        REQUIRE(root.TryAppend("/"));
-        for (usize index = 0; index < chunk; ++index) {
-            REQUIRE(root.TryAppend("d"));
-        }
-    }
-
-    REQUIRE(root.View().ByteCount() == rootBytes);
-    REQUIRE(platform::MakeDirectoryTree(platform::PhysicalFileSystem(), root.View().Data(),
-                                        root.View().ByteCount()));
+    REQUIRE(MakeDeepRoot(project, rootBytes, root));
     ProjectLayout layout(env.allocator);
     REQUIRE(layout.Initialize(root.View()));
     MemoryFileSystem files(env.allocator, layout.Root());

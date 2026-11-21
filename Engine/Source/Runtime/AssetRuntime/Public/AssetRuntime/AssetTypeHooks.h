@@ -74,6 +74,9 @@ struct AssetTypeHookContext {
     TypeId hookType;
     const AssetTypeHookTable& table;
     TypeRegistry& types;
+    // 저장할 패키지 id다(복제면 사본 id — AssetSystem.ko.md 7.1절 17 A2e3b). object는 원본
+    // 객체이므로 태그·Build 의존이 패키지 정체성(id)을 써야 하면 객체의 값 대신 이것을 쓴다.
+    AssetId asset{};
 
     // base 사슬에서 hookType 위의 가장 가까운 태그·Build hook을 부른다(없으면 아무것도 하지 않고
     // 성공). 오류: 그 hook의 오류, 타입 조회 오류.
@@ -130,11 +133,14 @@ public:
     // object(대표 에셋 — 타입 type)의 태그·Build 의존을 sink에 모은다. type에서 base 사슬로 가장
     // 가까운 hook 하나를 부른다(없으면 아무것도 하지 않고 성공). 오류: hook의 오류, 타입 조회
     // 오류(미등록 타입은 그 오류).
+    // asset은 저장할 패키지 id다(문맥의 asset — 복제면 사본 id).
     Result<void> CollectTags(ObjectRegistry& registry, const ObjectAccessContext& access,
-                             ObjectHandle object, TypeId type, AssetTagSink& sink) const noexcept;
+                             ObjectHandle object, TypeId type, AssetId asset,
+                             AssetTagSink& sink) const noexcept;
     Result<void> CollectBuildDependencies(ObjectRegistry& registry,
                                           const ObjectAccessContext& access, ObjectHandle object,
-                                          TypeId type, AssetDependencySink& sink) const noexcept;
+                                          TypeId type, AssetId asset,
+                                          AssetDependencySink& sink) const noexcept;
 
     usize Count() const noexcept {
         return entries_.Size();

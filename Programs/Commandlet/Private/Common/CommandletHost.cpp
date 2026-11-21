@@ -227,6 +227,12 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
         return 1;
     }
     registered = registry.Register(
+        {"asset-duplicate", "Save a copy of an editor package under a new path and AssetId.",
+         &RunAssetDuplicateCommand, &assetContext});
+    if (!registered) {
+        return 1;
+    }
+    registered = registry.Register(
         {"asset-index-rebuild",
          "Rescan the project without the index cache, clean temporary files and rewrite the cache.",
          &RunAssetIndexRebuildCommand, &allocator});

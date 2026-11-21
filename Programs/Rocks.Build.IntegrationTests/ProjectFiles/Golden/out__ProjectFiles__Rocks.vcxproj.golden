@@ -38,7 +38,6 @@
     <NMakeBuildCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Build -Target Engine -Configuration Debug -Platform Windows -Compiler &quot;$(RocksCompiler)&quot;</NMakeBuildCommandLine>
     <NMakeReBuildCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Rebuild -Target Engine -Configuration Debug -Platform Windows -Compiler &quot;$(RocksCompiler)&quot;</NMakeReBuildCommandLine>
     <NMakeCleanCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Clean -Target Engine -Configuration Debug -Platform Windows -Compiler &quot;$(RocksCompiler)&quot;</NMakeCleanCommandLine>
-    <NMakeCompileFileCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Compile -WorkingDir &quot;$(MSBuildProjectDirectory)&quot; -Files &quot;$(SelectedFiles)&quot; -Target Engine -Configuration Debug -Platform Windows -Compiler &quot;$(RocksCompiler)&quot;</NMakeCompileFileCommandLine>
     <NMakeOutput></NMakeOutput>
     <IntDir>$(RocksRoot)out\ProjectFiles\Intermediate\Rocks\Debug_x64\</IntDir>
     <OutDir>$(RocksRoot)out\ProjectFiles\Intermediate\Rocks\Debug_x64\</OutDir>
@@ -53,6 +52,11 @@
     <RocksOptions_1>/std:c17 /MDd</RocksOptions_1>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <NMakeCompile>
+      <NMakeCompileFileCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Compile -WorkingDir &quot;$(MSBuildProjectDirectory)&quot; -Files &quot;$(SelectedFiles)&quot; -Target Engine -Configuration Debug -Platform Windows -Compiler &quot;$(RocksCompiler)&quot;</NMakeCompileFileCommandLine>
+    </NMakeCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <AdditionalIncludeDirectories>$(RocksIncludes_0)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>$(RocksDefines_0)</PreprocessorDefinitions>
@@ -64,7 +68,6 @@
     <NMakeBuildCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Build -Target Engine -Configuration Release -Platform Windows -Compiler &quot;$(RocksCompiler)&quot;</NMakeBuildCommandLine>
     <NMakeReBuildCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Rebuild -Target Engine -Configuration Release -Platform Windows -Compiler &quot;$(RocksCompiler)&quot;</NMakeReBuildCommandLine>
     <NMakeCleanCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Clean -Target Engine -Configuration Release -Platform Windows -Compiler &quot;$(RocksCompiler)&quot;</NMakeCleanCommandLine>
-    <NMakeCompileFileCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Compile -WorkingDir &quot;$(MSBuildProjectDirectory)&quot; -Files &quot;$(SelectedFiles)&quot; -Target Engine -Configuration Release -Platform Windows -Compiler &quot;$(RocksCompiler)&quot;</NMakeCompileFileCommandLine>
     <NMakeOutput></NMakeOutput>
     <IntDir>$(RocksRoot)out\ProjectFiles\Intermediate\Rocks\Release_x64\</IntDir>
     <OutDir>$(RocksRoot)out\ProjectFiles\Intermediate\Rocks\Release_x64\</OutDir>
@@ -78,6 +81,11 @@
     <RocksForcedIncludes_1></RocksForcedIncludes_1>
     <RocksOptions_1>/std:c17 /MD</RocksOptions_1>
   </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <NMakeCompile>
+      <NMakeCompileFileCommandLine>&quot;$(RocksRoot)Build\IdeBuild.bat&quot; -Action Compile -WorkingDir &quot;$(MSBuildProjectDirectory)&quot; -Files &quot;$(SelectedFiles)&quot; -Target Engine -Configuration Release -Platform Windows -Compiler &quot;$(RocksCompiler)&quot;</NMakeCompileFileCommandLine>
+    </NMakeCompile>
+  </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
       <AdditionalIncludeDirectories>$(RocksIncludes_0)</AdditionalIncludeDirectories>

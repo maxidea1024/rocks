@@ -301,7 +301,7 @@ internal static class ProjectFilesCommand
         }
 
         static string WithoutObject(IEnumerable<string> arguments) =>
-            string.Join('\u001f', arguments.Where(argument => !argument.StartsWith("/Fo", StringComparison.Ordinal)));
+            string.Join('\u001f', CompileObjectArguments.Without([.. arguments]));
         int failures = 0;
         var seen = new HashSet<string>(PathComparer);
         foreach (var group in plan.Plan.Compiles.GroupBy(compile => Path.GetFullPath(compile.Source), PathComparer))

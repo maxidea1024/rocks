@@ -82,6 +82,15 @@ struct AssetDeleteResult {
     Array<AssetId> referencerIds;
 };
 
+// asset-duplicate 결과다(7.1절 17 A2e3b): 사본 id와 정규화한 논리 경로.
+struct AssetDuplicateResult {
+    explicit AssetDuplicateResult(Allocator& allocator) noexcept : path(allocator) {
+    }
+
+    AssetId id{};
+    String path;
+};
+
 class AssetService {
 public:
     // layout은 초기화한 프로젝트 배치다(빌림 — 서비스보다 오래 산다).
@@ -199,6 +208,18 @@ public:
     Result<void> Delete(const AssetDatabaseLock& lock, StringView target, bool force,
                         AssetDeleteResult& result, Array<EditorWarning>* warnings = nullptr,
                         AssetDiagnostic* failure = nullptr) noexcept;
+
+    // asset-duplicate <path|AssetId> <새 path>: 원본을 열고(열기와 같다 — 별칭을 따른다) 그 메모리
+    // 상태를 새 id로 새 경로에 쓴다(7.1절 17 A2e3b — EditorPackageSet::Duplicate). 대상 경로가
+    // 어느 에셋의 별칭이든 점유다(새 에셋에는 별칭이 없다). 사본은 열지 않는다.
+    //
+    // 오류(failure 진단): Initialize 전·잠금 아님 InvalidArgument, 대상 경로 규칙 InvalidPath /
+    // InvalidArgument, 별칭 표의 오류, 대상이 별칭 DuplicatePath / AlreadyExists(related = 별칭
+    // 대상), 원본 열기의 오류(OpenTarget), id 발급 실패(진단 None), EditorPackageSet::Duplicate의
+    // 오류, 할당 실패.
+    Result<void> Duplicate(const AssetDatabaseLock& lock, StringView source, StringView target,
+                           AssetDuplicateResult& result, Array<EditorWarning>* warnings = nullptr,
+                           AssetDiagnostic* failure = nullptr) noexcept;
 
     // 별칭 표다(처음 부를 때 packages.files에서 읽는다 — 7.1절 17 A2e1, 실패하면 다음 호출이 다시
     // 읽는다). 오류(failure 진단): Initialize 전 InvalidArgument, AssetAliasTable::Load의 오류.

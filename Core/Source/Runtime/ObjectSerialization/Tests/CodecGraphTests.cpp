@@ -732,6 +732,109 @@ TEST(Codec_SoftReferenceCollectorFailurePropagates) {
     CHECK(types.Shutdown());
 }
 
+// 소프트 참조 치환 hook(AssetSystem.ko.md 7.1절 17 A2e3b — 패키지 복제): null이 아닌 값마다
+// 부르고(경로·기대 타입·플래그·필드 경로를 준다) 바뀐 asset을 쓴다 — 로드한 값은 새 asset·같은
+// 경로이고 저장의 수집도 바뀐 asset을 본다. 바꾸지 않는 값은 그대로다. hook이 null asset을
+// 돌려주면 InvalidArgument, 실패는 그 오류로 저장이 실패한다.
+TEST(Codec_SoftReferencesSubstitutedOnSave) {
+    static constexpr AssetId CopyAsset{Guid{0xc0b1, 0xe5}};
+    struct Substituter final : FieldCodecHooks {
+        Result<void> CollectSoftReference(const SoftReferenceInfo& info) noexcept override {
+            collected[collectedCount++ % 4] = info.asset;
+            return Result<void>::Success();
+        }
+
+        Result<AssetId> SubstituteSoftReference(const SoftReferenceInfo& info) noexcept override {
+            ++calls;
+            if (info.asset == IconAsset) {
+                iconPath = StringView(info.objectPath).ByteCount() == 11;
+                iconField = info.path.Size() == 1;
+                iconType = info.expectedType == TypeIdOf<Node>();
+            }
+
+            if (fail != ErrorCode::None) {
+                return Result<AssetId>::Failure(fail);
+            }
+
+            if (nullResult) {
+                return Result<AssetId>::Success(AssetId{});
+            }
+
+            return Result<AssetId>::Success(info.asset == IconAsset ? CopyAsset : info.asset);
+        }
+
+        uint32 calls = 0;
+        AssetId collected[4];
+        uint32 collectedCount = 0;
+        bool iconPath = false;
+        bool iconField = false;
+        bool iconType = false;
+        bool nullResult = false;
+        ErrorCode fail = ErrorCode::None;
+    };
+
+    SystemAllocator allocator;
+    TypeRegistry types(allocator);
+    REQUIRE(GeneratedType<AssetFields>::Register(types));
+    {
+        ObjectRegistry source(allocator, types, {0x4344, 30});
+        ObjectRegistry target(allocator, types, {0x4344, 31});
+        {
+            auto created =
+                source.NewObject<AssetFields>(source.OwnerAccess(), TypeIdOf<AssetFields>());
+            REQUIRE(created);
+            {
+                auto borrowed =
+                    source.Resolve<AssetFields>(source.OwnerAccess(), created.Value().Handle());
+                REQUIRE(borrowed);
+                REQUIRE(borrowed.Value().Get().Value()->icon.TryAssign(IconAsset, "Body.Socket"));
+                REQUIRE(borrowed.Value().Get().Value()->anyAsset.TryAssign(AnyAsset, ""));
+            }
+
+            Substituter hooks;
+            ObjectGraphSaveOptions options;
+            options.hooks = &hooks;
+            auto saved = SaveObjectGraph(allocator, source, source.OwnerAccess(),
+                                         created.Value().Handle(), options);
+            REQUIRE(saved);
+            CHECK(hooks.calls == 2 && hooks.iconPath && hooks.iconField && hooks.iconType);
+            CHECK(hooks.collectedCount == 2 &&
+                  (hooks.collected[0] == CopyAsset || hooks.collected[1] == CopyAsset) &&
+                  !(hooks.collected[0] == IconAsset) && !(hooks.collected[1] == IconAsset));
+            {
+                auto loaded = LoadObjectGraph(allocator, target, types, target.OwnerAccess(),
+                                              saved.Value().View(), ObjectGraphLoadOptions{});
+                REQUIRE(loaded);
+                auto borrowed =
+                    target.Resolve<AssetFields>(target.OwnerAccess(), loaded.Value().Handle());
+                REQUIRE(borrowed);
+                const AssetFields& value = *borrowed.Value().Get().Value();
+                CHECK(value.icon.asset == CopyAsset &&
+                      value.icon.objectPath.View() == "Body.Socket");
+                CHECK(value.anyAsset.asset == AnyAsset);
+            }
+
+            Substituter nulling;
+            nulling.nullResult = true;
+            options.hooks = &nulling;
+            CHECK(SaveObjectGraph(allocator, source, source.OwnerAccess(), created.Value().Handle(),
+                                  options)
+                      .Error() == ErrorCode::InvalidArgument);
+            Substituter failing;
+            failing.fail = ErrorCode::OutOfMemory;
+            options.hooks = &failing;
+            CHECK(SaveObjectGraph(allocator, source, source.OwnerAccess(), created.Value().Handle(),
+                                  options)
+                      .Error() == ErrorCode::OutOfMemory);
+        }
+
+        REQUIRE(source.Shutdown(source.OwnerAccess()));
+        REQUIRE(target.Shutdown(target.OwnerAccess()));
+    }
+
+    CHECK(types.Shutdown());
+}
+
 // Required 소프트 참조: 패키지 저장은 null을 거부하고, 복원은 실효 값이 null이면(파일 null이든
 // 누락의 기준 값 null이든) 진단한다.
 TEST(Codec_RequiredSoftReferencePolicies) {

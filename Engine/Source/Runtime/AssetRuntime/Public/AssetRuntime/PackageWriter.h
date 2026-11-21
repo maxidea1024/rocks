@@ -124,6 +124,12 @@ struct PackageWriteOptions {
     // bulk raw byte를 얻는 곳이다. 저장 그래프에 빈 값이 아닌 BulkDataRef가 있는데 null이면
     // InvalidArgument다.
     PackageBulkSource* bulkSource = nullptr;
+    // 복제다(AssetSystem.ko.md 7.1절 17 A2e3b — 에디터 패키지만, null이면 복제가 아니다). 주면 헤더
+    // id가 이것이고, DuplicateTransient·NonTryoutDuplicateTransient 필드를 쓰지 않으며(로드가
+    // 클래스 기본값 — UE DuplicateObject), 패키지의 지금 id를 가리키는 Soft 참조 값을 이 id로
+    // 바꾼다(자기 의존 제외도 이 id로 한다). 쿠킹 패키지에서 주거나 지금 id와 같으면
+    // InvalidArgument다.
+    AssetId duplicateId{};
 };
 
 // 쓰기 결과다.
