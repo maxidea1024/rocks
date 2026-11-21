@@ -124,6 +124,15 @@ public:
     // 오류, 할당 실패.
     Result<void> Rebuild(platform::FileSystem& files, const PackageReadOptions& options) noexcept;
 
+    // Content 상대 이름 fileName(구분자 '/', `.rasset` 확장자 — 색인 항목의 fileName과 같은 철자)
+    // 한 파일만 다시 읽는다(저장 뒤 — 7.1절 15 A2c2b). 그 파일의 항목·진단을 바꾸고(없어졌으면
+    // 빼고, 새 파일이면 더한다) 같은 id·경로 진단과 표시는 전체에서 다시 정한다. 파일 IO·판정
+    // 실패는 Rebuild처럼 진단이다(링크·일반 파일이 아닌 것은 색인하지 않는다). 오류: fileName이
+    // `.rasset`이 아니거나 비었으면 InvalidArgument(색인 그대로), 할당 실패(색인을 비운다 — 다시
+    // Rebuild한다).
+    Result<void> Refresh(platform::FileSystem& files, StringView fileName,
+                         const PackageReadOptions& options) noexcept;
+
     // 항목 수와 index번째 항목(경로 키 → 파일 이름 순)이다.
     usize Count() const noexcept {
         return entries_.Size();

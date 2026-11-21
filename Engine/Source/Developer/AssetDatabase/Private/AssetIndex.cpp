@@ -620,6 +620,81 @@ Result<void> AssetIndex::Rebuild(platform::FileSystem& files,
     return Publish(found, diagnostics);
 }
 
+Result<void> AssetIndex::Refresh(platform::FileSystem& files, StringView fileName,
+                                 const PackageReadOptions& options) noexcept {
+    if (fileName.ByteCount() <= EditorPackageExtension.ByteCount() ||
+        !fileName.EndsWith(EditorPackageExtension)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 다른 파일의 항목과 진단(같은 id·경로 진단 제외 — Publish가 다시 만든다)을 옮긴다. 이 뒤의
+    // 실패는 색인을 비운다(Rebuild와 같은 계약).
+    Array<AssetIndexEntry> entries = Move(entries_);
+    Array<AssetIndexDiagnostic> previous = Move(diagnostics_);
+    byId_.Clear();
+    String display(*allocator_);
+    if (auto assigned = AssignDisplayName(display, fileName); !assigned) {
+        return assigned;
+    }
+
+    Array<AssetIndexEntry> found(*allocator_);
+    Array<AssetIndexDiagnostic> diagnostics(*allocator_);
+    if (auto reserved = found.TryReserve(entries.Size() + 1); !reserved) {
+        return reserved;
+    }
+
+    if (auto reserved = diagnostics.TryReserve(previous.Size()); !reserved) {
+        return reserved;
+    }
+
+    for (AssetIndexEntry& entry : entries) {
+        if (!(entry.fileName.View() == fileName)) {
+            (void)found.TryPushBack(Move(entry));
+        }
+    }
+
+    for (AssetIndexDiagnostic& diagnostic : previous) {
+        if (!(diagnostic.fileName.View() == display.View()) &&
+            diagnostic.code != AssetDiagnosticCode::DuplicateAssetId &&
+            diagnostic.code != AssetDiagnosticCode::DuplicatePath) {
+            (void)diagnostics.TryPushBack(Move(diagnostic));
+        }
+    }
+
+    StringBuilder<IndexPathBytes> full(*allocator_);
+    const StringView pieces[] = {layout_->ContentDirectory(), "/", fileName};
+    if (auto built = AppendAll(full, pieces); !built) {
+        return built;
+    }
+
+    // 없어진 파일은 빠지고, 링크·일반 파일이 아닌 것은 색인하지 않는다(Rebuild와 같다). 그 밖의
+    // Stat 실패는 IO 진단이다.
+    platform::FileInfo info;
+    const platform::FileStatus stat = files.Stat(full.View().Data(), full.View().ByteCount(), info);
+    if (!stat && stat.code != platform::FileCode::NotFound) {
+        if (auto added = AddDiagnostic(diagnostics, AssetDiagnosticCode::None, FileErrorCode(stat),
+                                       fileName);
+            !added) {
+            return added;
+        }
+    } else if (stat && !info.isLink && info.type == platform::FileType::File) {
+        String relative(*allocator_);
+        if (auto assigned = relative.TryAssign(fileName); !assigned) {
+            return assigned;
+        }
+
+        PackageReadOptions editor = options;
+        editor.expectedKind = PackageKind::Editor;
+        if (auto indexed =
+                IndexFile(files, editor, Move(relative), info.modifiedTicks, found, diagnostics);
+            !indexed) {
+            return indexed;
+        }
+    }
+
+    return Publish(found, diagnostics);
+}
+
 Result<const AssetIndexEntry*> AssetIndex::FindById(AssetId id) const noexcept {
     using Out = const AssetIndexEntry*;
     const usize low = algo::LowerBound(byId_.View(), id, [&](usize index, AssetId key) noexcept {

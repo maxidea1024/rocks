@@ -1,16 +1,17 @@
 #pragma once
 
 #include <Base/Compiler.h>
+#include <Core/Memory/SharedPtr.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Core/Text/String.h>
 #include <Platform/File.h>
 #include <string.h>
 
-// AssetDatabase 시험의 메모리 파일 시스템이다(Docs/Design/AssetSystem.ko.md 7.1절 — 색인·열기
+// AssetDatabase 시험의 메모리 파일 시스템이다(Docs/Design/AssetSystem.ko.md 7.1절 — 색인·열기·저장
 // 시험의 진단 장면: 링크·장치·같은 경로 키·IO 고장 주입).
 namespace rocks::asset_database_test {
 
-// 메모리 파일 시스템의 고장 주입이다.
+// 노드 하나의 고장 주입이다.
 enum class MemoryFault {
     None,
     // 열기에서 없음(열거와 열기 사이에 사라진 파일)·사용 중.
@@ -27,12 +28,40 @@ constexpr platform::FileStatus MemoryError{platform::FileCode::SystemError, 7};
 constexpr platform::FileStatus MemoryBusy{platform::FileCode::Busy, 32};
 constexpr platform::FileStatus MemoryMissing{platform::FileCode::NotFound, 2};
 constexpr platform::FileStatus MemoryWrongType{platform::FileCode::WrongType, 0};
+constexpr platform::FileStatus MemoryExists{platform::FileCode::AlreadyExists, 80};
+constexpr platform::FileStatus MemoryNotDurable{platform::FileCode::NotDurable, 5};
+
+// 파일 시스템 전체의 고장 주입이다(저장 경로 — 성공 상태면 주입하지 않는다).
+struct MemoryFaults {
+    // 새 파일 만들기(CreateNew·CreateAlways)·디렉터리 만들기의 실패다.
+    platform::FileStatus create{};
+    platform::FileStatus makeDirectory{};
+    // 쓰기 핸들의 n번째 Write 호출(1부터, 0은 끔)이 실패한다.
+    uint32 failWriteCall = 0;
+    // 쓰기 핸들의 n번째 Write 호출(1부터, 0은 끔)이 첫 byte를 뒤집어 쓰고 성공한다(쓰기 손상 —
+    // 저장의 재검증이 잡아야 한다).
+    uint32 corruptWriteCall = 0;
+    // 쓰기 핸들의 Flush·Close 실패다.
+    platform::FileStatus flush{};
+    platform::FileStatus close{};
+    // Replace의 결과다. NotDurable이면 교체한 뒤 그 상태를 돌려주고, 그 밖의 실패는 교체하지
+    // 않는다.
+    platform::FileStatus replace{};
+    // Delete·Stat의 실패다(Stat는 statPath가 비어 있지 않으면 그 Content 상대 경로에만).
+    platform::FileStatus remove{};
+    platform::FileStatus stat{};
+    const char* statPath = nullptr;
+};
 
 class MemoryHandle final : public platform::FileHandle {
 public:
-    void Reset(Span<const uint8> bytes, bool failRead) noexcept {
-        bytes_ = bytes;
+    void Reset(SharedPtr<Array<uint8>> content, bool failRead, bool writable, MemoryFaults* faults,
+               uint32* writeCalls) noexcept {
+        content_ = rocks::Move(content);
         failRead_ = failRead;
+        writable_ = writable;
+        faults_ = faults;
+        writeCalls_ = writeCalls;
         position_ = 0;
         inUse = true;
     }
@@ -42,52 +71,90 @@ public:
             return {MemoryError, 0};
         }
 
-        const usize left = bytes_.Size() - position_;
+        const Array<uint8>& content = *content_.Get();
+        const usize left = position_ < content.Size() ? content.Size() - position_ : 0;
         const usize count = bytes < left ? bytes : left;
         if (count != 0) {
-            memcpy(destination, bytes_.Data() + position_, count);
+            memcpy(destination, content.Data() + position_, count);
         }
 
         position_ += count;
         return {platform::FileStatus{}, count};
     }
 
-    platform::FileTransfer Write(const void*, usize) noexcept override {
-        return {MemoryError, 0};
+    platform::FileTransfer Write(const void* source, usize bytes) noexcept override {
+        if (!writable_) {
+            return {MemoryError, 0};
+        }
+
+        ++*writeCalls_;
+        if (faults_->failWriteCall != 0 && *writeCalls_ == faults_->failWriteCall) {
+            return {MemoryError, 0};
+        }
+
+        Array<uint8>& content = *content_.Get();
+        if (position_ + bytes > content.Size() && !content.TryResize(position_ + bytes)) {
+            return {MemoryError, 0};
+        }
+
+        if (bytes != 0) {
+            memcpy(content.Data() + position_, source, bytes);
+            if (faults_->corruptWriteCall != 0 && *writeCalls_ == faults_->corruptWriteCall) {
+                content[position_] = static_cast<uint8>(content[position_] ^ 0xff);
+            }
+        }
+
+        position_ += bytes;
+        return {platform::FileStatus{}, bytes};
     }
 
-    platform::FileStatus Seek(int64 offset, platform::FileSeekOrigin,
+    platform::FileStatus Seek(int64 offset, platform::FileSeekOrigin origin,
                               uint64& position) noexcept override {
-        position_ = static_cast<usize>(offset);
+        const int64 base = origin == platform::FileSeekOrigin::Begin
+                               ? 0
+                               : (origin == platform::FileSeekOrigin::Current
+                                      ? static_cast<int64>(position_)
+                                      : static_cast<int64>(content_.Get()->Size()));
+        position_ = static_cast<usize>(base + offset);
         position = position_;
         return {};
     }
 
     platform::FileStatus Size(uint64& bytes) noexcept override {
-        bytes = bytes_.Size();
+        bytes = content_.Get()->Size();
         return {};
+    }
+
+    platform::FileStatus Flush() noexcept override {
+        return writable_ ? faults_->flush : platform::FileStatus{};
     }
 
     platform::FileStatus Close() noexcept override {
-        return {};
+        return writable_ ? faults_->close : platform::FileStatus{};
     }
 
-    // File이 닫히면 풀로 돌아간다.
+    // File이 닫히면 풀로 돌아간다(내용 참조를 놓는다).
     void Destroy() noexcept override {
+        content_ = SharedPtr<Array<uint8>>();
         inUse = false;
     }
 
     bool inUse = false;
 
 private:
-    Span<const uint8> bytes_;
+    SharedPtr<Array<uint8>> content_;
     bool failRead_ = false;
+    bool writable_ = false;
+    MemoryFaults* faults_ = nullptr;
+    uint32* writeCalls_ = nullptr;
     usize position_ = 0;
 };
 
 // 노드 표로 만든 파일 시스템이다(경로는 Content 절대 경로 + "/" + 상대). 핸들은 풀에서 빌려 여러
-// 파일을 함께 열 수 있다(bulk 핸들 캐시가 쥔 동안 다른 파일을 연다). 파일 byte는 빌린다(호출자가
-// 시스템보다 오래 살린다). opens는 성공한 열기 수다.
+// 파일을 함께 열 수 있다(bulk 핸들 캐시가 쥔 동안 다른 파일을 연다). 파일 내용은 노드와 열린 핸들이
+// 함께 쥐는 공유 버퍼다: Replace·Delete 뒤에도 이미 연 핸들은 이전 내용을 읽는다(POSIX 의미
+// rename과 같다). AddFile은 byte를 복사한다. opens는 성공한 열기 수다. Content의 조상 디렉터리는
+// 있는 디렉터리로 본다.
 class MemoryFileSystem final : public platform::FileSystem {
 public:
     struct Node {
@@ -103,7 +170,7 @@ public:
         Array<char> name;
         platform::FileType type = platform::FileType::File;
         bool isLink = false;
-        Span<const uint8> bytes{};
+        SharedPtr<Array<uint8>> content;
         MemoryFault fault = MemoryFault::None;
     };
 
@@ -138,15 +205,78 @@ public:
         }
     }
 
-    platform::FileStatus Open(const char* path, usize pathBytes, platform::FileOpenMode,
+    // relative 파일의 내용이다(없으면 빈 span — Has로 구분한다).
+    Span<const uint8> Bytes(StringView relative) const noexcept {
+        for (const Node& node : nodes_) {
+            if (Relative(node) == relative && node.content.Get() != nullptr) {
+                return node.content.Get()->View();
+            }
+        }
+
+        return {};
+    }
+
+    bool Has(StringView relative) const noexcept {
+        for (const Node& node : nodes_) {
+            if (Relative(node) == relative) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // 노드 수(Content 자신 포함)와 i번째 노드의 Content 상대 경로다.
+    usize NodeCount() const noexcept {
+        return nodes_.Size();
+    }
+
+    StringView NodeName(usize index) const noexcept {
+        return Relative(nodes_[index]);
+    }
+
+    platform::FileStatus Open(const char* path, usize pathBytes, platform::FileOpenMode mode,
                               platform::FileHandle*& out) noexcept override {
-        const Node* node = Find(StringView(path, pathBytes));
+        const StringView target(path, pathBytes);
+        Node* node = Find(target);
+        const bool create = mode == platform::FileOpenMode::CreateNew ||
+                            mode == platform::FileOpenMode::CreateAlways;
+        if (create) {
+            if (!faults.create) {
+                return faults.create;
+            }
+
+            if (node != nullptr && mode == platform::FileOpenMode::CreateNew) {
+                return MemoryExists;
+            }
+
+            if (!ParentIsDirectory(target)) {
+                return MemoryMissing;
+            }
+
+            if (node == nullptr) {
+                if (!Add(StringView(path + content_.View().ByteCount() + 1,
+                                    pathBytes - content_.View().ByteCount() - 1),
+                         platform::FileType::File, false, {}, MemoryFault::None)) {
+                    return MemoryError;
+                }
+
+                node = &nodes_[nodes_.Size() - 1];
+            } else {
+                node->content.Get()->Clear();
+            }
+        }
+
         if (node == nullptr || node->fault == MemoryFault::OpenMissing) {
             return MemoryMissing;
         }
 
         if (node->fault == MemoryFault::OpenBusy) {
             return MemoryBusy;
+        }
+
+        if (node->type == platform::FileType::Directory) {
+            return MemoryWrongType;
         }
 
         MemoryHandle* handle = nullptr;
@@ -163,10 +293,17 @@ public:
             handle = handles_[handles_.Size() - 1].Get();
         }
 
-        handle->Reset(node->bytes, node->fault == MemoryFault::Read);
+        const bool writable = mode != platform::FileOpenMode::ReadExisting;
+        handle->Reset(node->content, node->fault == MemoryFault::Read, writable, &faults,
+                      &writeCalls_);
         out = handle;
         ++opens;
         return {};
+    }
+
+    // 지금까지 쓰기 핸들의 Write 호출 수다(n번째 쓰기 고장의 기준).
+    uint32 WriteCalls() const noexcept {
+        return writeCalls_;
     }
 
     // 지금 열린 핸들 수다.
@@ -179,15 +316,114 @@ public:
         return count;
     }
 
-    uint32 opens = 0;
-
     platform::FileStatus Exists(const char* path, usize pathBytes, bool& exists) noexcept override {
         exists = Find(StringView(path, pathBytes)) != nullptr;
         return {};
     }
 
-    platform::FileStatus Delete(const char*, usize) noexcept override {
-        return MemoryError;
+    platform::FileStatus Delete(const char* path, usize pathBytes) noexcept override {
+        if (!faults.remove) {
+            return faults.remove;
+        }
+
+        Node* node = Find(StringView(path, pathBytes));
+        if (node == nullptr) {
+            return MemoryMissing;
+        }
+
+        if (node->type == platform::FileType::Directory) {
+            return MemoryWrongType;
+        }
+
+        ++deletes;
+        Remove(Relative(*node));
+        return {};
+    }
+
+    platform::FileStatus Stat(const char* path, usize pathBytes,
+                              platform::FileInfo& info) noexcept override {
+        const StringView target(path, pathBytes);
+        if (!faults.stat &&
+            (faults.statPath == nullptr || RelativeOf(target) == StringView(faults.statPath))) {
+            return faults.stat;
+        }
+
+        if (IsContentAncestor(target)) {
+            info = platform::FileInfo{};
+            info.type = platform::FileType::Directory;
+            return {};
+        }
+
+        const Node* node = Find(target);
+        if (node == nullptr) {
+            return MemoryMissing;
+        }
+
+        info = platform::FileInfo{};
+        info.type = node->type;
+        info.isLink = node->isLink;
+        info.size = node->content.Get() != nullptr ? node->content.Get()->Size() : 0;
+        info.modifiedTicks = static_cast<int64>(info.size) + 1;
+        return {};
+    }
+
+    platform::FileStatus MakeDirectory(const char* path, usize pathBytes) noexcept override {
+        const StringView target(path, pathBytes);
+        if (IsContentAncestor(target) || Find(target) != nullptr) {
+            return MemoryExists;
+        }
+
+        if (!faults.makeDirectory) {
+            return faults.makeDirectory;
+        }
+
+        if (!ParentIsDirectory(target)) {
+            return MemoryMissing;
+        }
+
+        return AddDirectory(RelativeOf(target)) ? platform::FileStatus{} : MemoryError;
+    }
+
+    platform::FileStatus Replace(const char* from, usize fromBytes, const char* to,
+                                 usize toBytes) noexcept override {
+        if (!faults.replace && faults.replace.code != platform::FileCode::NotDurable) {
+            return faults.replace;
+        }
+
+        Node* source = Find(StringView(from, fromBytes));
+        if (source == nullptr) {
+            return MemoryMissing;
+        }
+
+        // 대상 노드를 빼고(열린 핸들은 내용을 쥐고 있다) 원본의 이름을 바꾼다.
+        const StringView target(to, toBytes);
+        const StringView relative = RelativeOf(target);
+        Node renamed(*allocator_);
+        if (!renamed.path.TryAppend(Span<const char>(to, toBytes))) {
+            return MemoryError;
+        }
+
+        usize slash = relative.ByteCount();
+        while (slash > 0 && relative.Data()[slash - 1] != '/') {
+            --slash;
+        }
+
+        if (!renamed.name.TryAppend(
+                Span<const char>(relative.Data() + slash, relative.ByteCount() - slash)) ||
+            !renamed.name.TryPushBack('\0')) {
+            return MemoryError;
+        }
+
+        renamed.type = source->type;
+        renamed.content = source->content;
+        Remove(RelativeOf(StringView(from, fromBytes)));
+        Remove(relative);
+        if (!nodes_.TryPushBack(rocks::Move(renamed))) {
+            return MemoryError;
+        }
+
+        ++replaces;
+        return faults.replace;
     }
 
     platform::FileStatus EnumerateDirectory(const char* path, usize pathBytes,
@@ -223,8 +459,8 @@ public:
             entry.nameBytes = child.name.Size() - 1;
             entry.info.type = child.type;
             entry.info.isLink = child.isLink;
-            entry.info.size = child.bytes.Size();
-            entry.info.modifiedTicks = static_cast<int64>(child.bytes.Size()) + 1;
+            entry.info.size = child.content.Get() != nullptr ? child.content.Get()->Size() : 0;
+            entry.info.modifiedTicks = static_cast<int64>(entry.info.size) + 1;
             if (!visitor(entry, context)) {
                 break;
             }
@@ -232,6 +468,11 @@ public:
 
         return {};
     }
+
+    MemoryFaults faults;
+    uint32 opens = 0;
+    uint32 deletes = 0;
+    uint32 replaces = 0;
 
 private:
     bool Add(StringView relative, platform::FileType type, bool link, Span<const uint8> bytes,
@@ -255,19 +496,67 @@ private:
             return false;
         }
 
+        if (type != platform::FileType::Directory) {
+            auto content = SharedPtr<Array<uint8>>::TryMake(*allocator_, *allocator_);
+            if (!content || !content.Value().Get()->TryAppend(bytes)) {
+                return false;
+            }
+
+            node.content = rocks::Move(content.Value());
+        }
+
         node.type = type;
         node.isLink = link;
-        node.bytes = bytes;
         node.fault = fault;
         return static_cast<bool>(nodes_.TryPushBack(rocks::Move(node)));
     }
 
     StringView Relative(const Node& node) const noexcept {
-        const StringView path(node.path.Data(), node.path.Size());
-        const usize skip = path.ByteCount() == content_.View().ByteCount()
-                               ? path.ByteCount()
-                               : content_.View().ByteCount() + 1;
+        return RelativeOf(StringView(node.path.Data(), node.path.Size()));
+    }
+
+    // 절대 경로의 Content 상대 부분이다(Content 자신은 빈 문자열).
+    StringView RelativeOf(StringView path) const noexcept {
+        const usize contentBytes = content_.View().ByteCount();
+        const usize skip = path.ByteCount() <= contentBytes ? path.ByteCount() : contentBytes + 1;
         return StringView(path.Data() + skip, path.ByteCount() - skip);
+    }
+
+    // Content의 조상(또는 Content 자신의 앞부분 디렉터리)인지다.
+    bool IsContentAncestor(StringView path) const noexcept {
+        const StringView content = content_.View();
+        return path.ByteCount() < content.ByteCount() &&
+               content.StartsWith(path, StringComparison::CaseSensitive) &&
+               content.Data()[path.ByteCount()] == '/';
+    }
+
+    bool ParentIsDirectory(StringView path) const noexcept {
+        usize slash = path.ByteCount();
+        while (slash > 0 && path.Data()[slash - 1] != '/') {
+            --slash;
+        }
+
+        if (slash == 0) {
+            return false;
+        }
+
+        const StringView parent(path.Data(), slash - 1);
+        if (IsContentAncestor(parent)) {
+            return true;
+        }
+
+        const Node* node = Find(parent);
+        return node != nullptr && node->type == platform::FileType::Directory;
+    }
+
+    Node* Find(StringView path) noexcept {
+        for (Node& node : nodes_) {
+            if (StringView(node.path.Data(), node.path.Size()) == path) {
+                return &node;
+            }
+        }
+
+        return nullptr;
     }
 
     const Node* Find(StringView path) const noexcept {
@@ -284,6 +573,7 @@ private:
     String content_;
     Array<Node> nodes_;
     Array<UniquePtr<MemoryHandle>> handles_;
+    uint32 writeCalls_ = 0;
     bool ready_ = false;
 };
 
