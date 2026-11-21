@@ -156,6 +156,34 @@ private:
     // (패키지 이름, 모듈 import 경로, 원문 위치) byte 순서로 left가 앞인지다(순환 진단 위치).
     bool DeclaredBefore(uint32 left, uint32 right) const noexcept;
 
+    // ---- 이벤트·hook(CheckEvents.cpp, 3.12절 — Rules 단계) ----
+    // class·struct 본문의 hook·handler·이벤트 선언과 함수의 재진입 표시를 검사한다.
+    void CheckHandlers(const CheckContext& context, uint32 typeNode) noexcept;
+    // 구간 하나짜리 `on X()`(seen은 이 class에서 이미 본 hook 이름)다.
+    void CheckHook(const CheckContext& context, uint32 handler, uint32 nameNode,
+                   Array<StringView>& seen) noexcept;
+    void CheckPathHandler(const CheckContext& context, uint32 handler) noexcept;
+    // handler 인자를 expected의 앞부분과 대조한다(S0805·S0810).
+    void CheckHandlerParameters(const CheckContext& context, uint32 handler, StringView eventName,
+                                Span<const uint32> expected, DiagnosticCode code) noexcept;
+    // 재진입 표시(SD11): allowed면 await가 있을 때 표시가 하나 있어야 하고(S0816), 아니면 표시가
+    // 없어야 한다(S0817).
+    void CheckReentrancy(const CheckContext& context, uint32 node, bool allowed, bool awaits,
+                         uint32 reportNode) noexcept;
+    bool SamePath(uint32 leftModule, uint32 left, uint32 rightModule, uint32 right) const noexcept;
+    // `emit` 경로를 해석해 이벤트 시그니처를 돌려준다(진단을 냈거나 모르면 NoSignature).
+    uint32 ResolveEmit(const CheckContext& context, uint32 node) noexcept;
+    void CollectExtensionEvents() noexcept;
+    void CheckExtensionEvents() noexcept;
+    // type(또는 그 원소)의 이벤트다(멤버 이벤트, Actor·World 확장 이벤트). 같은 이름의 확장
+    // 이벤트가 import하지 않은 모듈에만 있으면 hiddenModule에 그 모듈을 둔다.
+    uint32 FindEvent(uint32 module, uint32 type, StringView name, uint32* hiddenModule) noexcept;
+    uint32 FindExtensionEvent(uint32 module, uint32 target, StringView name,
+                              uint32* hiddenModule) const noexcept;
+    bool HasChanged(uint32 field) const noexcept;
+    bool ContainsAwait(uint32 module, uint32 node) noexcept;
+    uint32 EngineSymbol(StringView name) const noexcept;
+
     // ---- 흐름 분석(CheckFlow.cpp, 3.11절) ----
     // stale이면 await 뒤 객체 지역 이름의 읽기를 staleRead_에 표시하고(본문 검사 전), 아니면
     // S0710–S0712를 낸다(본문 검사 뒤).
@@ -366,6 +394,10 @@ private:
     // 읽기를 `T?`로 본다).
     Array<uint8> staleRead_;
     uint32 staleModule_ = NoModule;
+    // 문맥·수명 규칙(LC3, 3.12절)을 검사하는지다(단계가 Rules 이상).
+    bool rules_ = false;
+    // 확장 이벤트 심볼(심볼 번호 순)이다.
+    Array<uint32> extensionEvents_;
 };
 
 } // namespace rocks::sparks::detail

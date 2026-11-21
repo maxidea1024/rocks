@@ -1,0 +1,53 @@
+event Actor.Pushed(by: Actor);
+event World.Paused();
+
+open class Base : ScriptableComponent {
+    event Opened(by: Actor?);
+
+    fn Open() {
+        emit Opened(null);
+    }
+}
+
+class Child : Base {
+    var Count = 0;
+
+    fn Again() {
+        emit Opened(null);
+    }
+
+    fn Native(a: Actor) {
+        emit a.Damaged(1.0);
+    }
+
+    fn Push(a: Actor, maybe: Actor?, c: SceneComponent) {
+        emit a.Pushed(Owner);
+        emit Owner.Pushed(a);
+        emit maybe.Pushed(a);
+        emit c.Pushed(a);
+        emit a.Shoved(a);
+        emit a.Pushed(a, a);
+        emit a.Pushed(1);
+        emit World.Paused();
+        emit Count();
+        emit a.Pushed.Again(a);
+        a.Destroyed();
+    }
+
+    async fn Later(a: Actor) {
+        await NextTick();
+        emit a.Pushed(Owner);
+    }
+}
+
+class Hero : Actor {
+    fn Shout() {
+        emit this.Pushed(this);
+    }
+}
+
+class Side : ScriptableComponent {
+    fn Shout() {
+        emit this.Pushed(Owner);
+    }
+}

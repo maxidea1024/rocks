@@ -85,6 +85,20 @@
               "type": "float"
             }
           ]
+        },
+        {
+          "name": "TriggerEntered",
+          "id": "5a7e0000000000000000000000000209",
+          "parameters": [
+            {
+              "name": "other",
+              "type": "Actor"
+            },
+            {
+              "name": "trigger",
+              "type": "Collider"
+            }
+          ]
         }
       ]
     },
@@ -176,7 +190,8 @@
           "name": "RelativeLocation",
           "type": "vec3",
           "access": "readWrite",
-          "computed": true
+          "computed": true,
+          "changed": true
         },
         {
           "name": "RelativeRotation",
@@ -292,6 +307,12 @@
           "name": "Audio",
           "id": "5a7e0000000000000000000000000161",
           "type": "AudioSystem"
+        }
+      ],
+      "events": [
+        {
+          "name": "GameStarted",
+          "id": "5a7e0000000000000000000000000162"
         }
       ],
       "functions": [

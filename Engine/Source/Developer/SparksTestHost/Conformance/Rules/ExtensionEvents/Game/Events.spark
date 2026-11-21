@@ -1,0 +1,6 @@
+event Actor.Pinged(by: Actor);
+event Actor.Destroyed();
+event Actor.Changed();
+event Pawn.Hopped();
+event Actor.Local(by: Actor);
+event Actor.Local(by: Actor);

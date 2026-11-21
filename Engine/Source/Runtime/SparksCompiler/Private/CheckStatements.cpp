@@ -156,6 +156,7 @@ void TypeChecker::Run() noexcept {
     voidType_ = binder_.voidType_;
     errorEnum_ = binder_.FindName(SpaceKey(NameSpaceKind::Engine, 0), "Error");
     flow_ = c.lastStage_ >= CompilationStage::Flow;
+    rules_ = c.lastStage_ >= CompilationStage::Rules;
     if (auto resized = inference_.TryResize(c.symbols_.Size()); !resized) {
         binder_.error_ = resized.Error();
         return;
@@ -207,6 +208,9 @@ void TypeChecker::Run() noexcept {
 
     AnalyzeStructs(false);
     PrepareInitializers();
+    if (rules_) {
+        CollectExtensionEvents();
+    }
 
     for (uint32 module = 0; module < c.modules_.Size() && binder_.error_ == ErrorCode::None;
          ++module) {
@@ -222,6 +226,10 @@ void TypeChecker::Run() noexcept {
 
     if (flow_ && binder_.error_ == ErrorCode::None) {
         CheckConstCycles(); // 3.11절 S0511
+    }
+
+    if (rules_ && binder_.error_ == ErrorCode::None) {
+        CheckExtensionEvents(); // 3.12절 S0809·S0813·S0814
     }
 }
 
@@ -343,6 +351,10 @@ void TypeChecker::CheckModule(uint32 module) noexcept {
 
             break;
         case SyntaxKind::Function:
+            if (rules_) {
+                CheckReentrancy(moduleContext, node, false, false, NoNode); // 3.12절 S0817
+            }
+
             CheckFunction(moduleContext, node, symbol);
             break;
         case SyntaxKind::Class:
@@ -357,6 +369,10 @@ void TypeChecker::CheckModule(uint32 module) noexcept {
             const uint32 members = tree.Child(node, isClass ? 4 : 3);
             if (members == NoNode || tree.Node(members).kind != SyntaxKind::List) {
                 break;
+            }
+
+            if (rules_) {
+                CheckHandlers(typeContext, node); // 3.12절 hook·handler·이벤트 선언
             }
 
             for (const uint32 member : tree.Children(members)) {
@@ -966,6 +982,10 @@ void TypeChecker::CheckSimpleStatement(const CheckContext& context, uint32 node)
         if (event != NoSymbol && (c.symbols_[event].kind == SymbolKind::Event ||
                                   c.symbols_[event].kind == SymbolKind::EngineEvent)) {
             signature = c.symbols_[event].signature;
+        }
+
+        if (rules_) {
+            signature = ResolveEmit(context, node); // 3.12절: 발행할 수 있는 이벤트만
         }
 
         const Span<const uint32> values =

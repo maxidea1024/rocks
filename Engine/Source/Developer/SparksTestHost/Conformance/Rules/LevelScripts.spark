@@ -1,0 +1,14 @@
+class Stage : LevelScript {
+    @edit var Gate: Actor;
+    @edit var Maybe: Actor?;
+    let Zone = SphereCollider(Radius: 1.0);
+
+    on TriggerEnter(_: Actor) {
+    }
+
+    on Gate.TriggerEntered(_: Actor) {
+    }
+
+    on Start() {
+    }
+}

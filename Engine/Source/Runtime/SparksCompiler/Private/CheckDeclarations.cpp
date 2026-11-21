@@ -304,8 +304,40 @@ void TypeChecker::CheckDeclarationRules(uint32 module) noexcept {
             const bool ownedComponent =
                 isClass && (tree.Node(member).flags & SyntaxFlags::Let) != 0 && value != NoNode &&
                 tree.Node(value).kind == SyntaxKind::Call;
-            if (ownedComponent || (edit && lifecycle) || (edit && inLevelScript)) {
-                continue; // LevelScript의 `@edit` 객체 필드는 LC3(S0413)
+            // LevelScript는 Collider component를 가질 수 없다(3.12절 S0802 — Rules 단계).
+            if (rules_ && inLevelScript && ownedComponent &&
+                binder_.EngineChainHas(SymbolOf(type), EngineSymbol("Collider"))) {
+                Report(context, DiagnosticCode::LevelScriptCollider, value,
+                       "A LevelScript cannot own a collider.",
+                       "A LevelScript has no physics. Place a trigger actor and handle its "
+                       "events.",
+                       "Place a trigger actor and use 'on Trigger.TriggerEntered(...)'.");
+                continue;
+            }
+
+            if (edit && inLevelScript && !ownedComponent) {
+                // LevelScript의 `@edit` 객체 필드는 `T?`만(3.12절 S0413 — Rules 단계).
+                if (rules_) {
+                    const uint32 editType = tree.Child(member, 3);
+                    StringBuilder<CompilationMessageInlineBytes> editFix(allocator_);
+                    editFix.Append("Declare it as '");
+                    AppendDisplayType(editFix, type);
+                    editFix.Append("?'.");
+                    if (binder_.Succeeded(editFix)) {
+                        Report(context, DiagnosticCode::LevelScriptRequiredObject,
+                               editType != NoNode ? editType : tree.Child(member, 2),
+                               "Object fields of a LevelScript must be optional.",
+                               "Level actors can be destroyed during play, so a LevelScript reads "
+                               "them through 'T?'.",
+                               editFix.View());
+                    }
+                }
+
+                continue;
+            }
+
+            if (ownedComponent || (edit && lifecycle)) {
+                continue;
             }
 
             const uint32 typeNode = tree.Child(member, 3);

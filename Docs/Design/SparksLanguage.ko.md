@@ -884,6 +884,45 @@ Class<T> { fn Create(): T }             // full, T는 class 타입
 **객체 필드(S0428).** `?` 없는 객체 타입(엔진 `object`·Sparks class·interface) 필드는 class의 (a) component 생성을 초기값으로 둔 `let` 필드와 (b) Component·Actor 파생 class(LevelScript 파생 제외 — S0413, LC3)의 `@edit` 필드에만 쓴다. 그 밖(struct 필드, WorldService·WidgetController·DataAsset 파생 class의 필드, `@edit`도 component 생성도 없는 필드)은 S0428이며 `T?`를 제시한다. 위치는 필드의 타입 표기(표기가 없으면 필드 이름)다.
 
 **프로필(S1113).** `profile: "core"` 패키지의 모듈에서 full 문법을 쓰면 S1113이며 기능 이름과 core 대안을 제시한다. 이 단계가 보는 full 문법은 `interface` 선언, `open` class·fn, Sparks class·interface를 기반으로 쓰는 것(core의 기반은 엔진 타입뿐 — full 의존 패키지의 것도), `Class<T>` 타입 표기, full 전용 attribute 이름(`@rpc`·`@worker`·`@deterministic`·`@pure`·`@tick`·`@cheat`·`@editorButton`·`@cvar`·`@test`), hook `on Validate()`다. 위치는 그 선언의 이름(`interface`·`open class`·`open fn`), Sparks 기반마다 그 기반 경로, 타입 표기, attribute(`@`부터), handler 이름이며 full 문법 하나에 하나다. 실행 중 component 추가·우선순위 지정 로드처럼 API 단위의 full 기능은 binding schema에 표시해 연동 단계에서 본다.
+### 3.12 이벤트·hook 선언(LC3a 확정)
+
+이 절은 §5.1–§5.3의 hook·`on` 경로·`emit`·확장 이벤트·재진입 표시 규칙을 컴파일러가 판정하는 방식으로 확정한다. 진단 코드는 §8.1의 S0413, S08xx다. 뒤로 넘기는 것: handler·hook 안의 효과(await·emit·생성의 문맥별 금지 — LC3b), widget 경로의 대조(WidgetAsset schema가 컴파일 입력에 들어올 때 — 연동 단계), 입력 action 사전 대조(검증 리터럴 사전 — 연동 단계), 실행 중 연결·전달(LC6).
+
+**수명 클래스.** hook·`on` handler는 기반 체인에 엔진 수명 타입(Component·Actor·WorldService·WidgetController)이 있는 class에만 둔다. 그 밖의 class(DataAsset 파생 등)·struct의 handler는 S0804다.
+
+**hook(`on X(...)`, 경로 구간 하나).** X는 `Awake`·`Enable`·`Start`·`Tick`·`FixedTick`·`LateTick`·`Disable`·`Destroy`·`TriggerEnter`·`TriggerExit`·`CollisionEnter`·`CollisionExit`·`Validate`(full) 중 하나다. 그 밖의 이름은 S0803이며 편집 거리 2 이하의 hook 이름이 있으면 그것을, 그 이름이 자기 class의 이벤트면 이벤트는 `emit`한 class 안에서 받지 않는다는 설명과 함수를 직접 부르라는 수정 예를 제시한다.
+
+- 물리 hook(`Trigger*`·`Collision*`)은 Component·Actor 파생 class에만 있고(WorldService·WidgetController에서는 S0804), LevelScript 파생 class에서는 S0801이다.
+- 인자: Tick 계열은 없거나 `(dt: float)`, `TriggerEnter`·`TriggerExit`는 `(other: Actor, trigger: Collider)`, `CollisionEnter`·`CollisionExit`는 `(other: Actor, hit: Hit)`의 앞에서부터 필요한 만큼, 나머지 hook은 인자가 없다. 넘치는 인자와 타입이 정확히 같지 않은 인자는 S0805이며 위치는 그 인자다(타입이 같지 않으면 타입 표기, 넘치면 그 인자 이름). 인자 이름 `_`는 허용한다.
+- 같은 class에 같은 hook이 둘이면 두 번째부터 S0806이다(기반과 파생의 같은 hook은 누적된다 — §5.1).
+
+**`on` 경로(`on A.E(...)`, `on A.B.Changed()`).** 경로 끝 구간이 이벤트 이름이고 앞 구간이 원천이다. 원천은 다음 중 하나이며 그 밖은 S0807(위치는 해석하지 못한 첫 구간, 편집 거리 2 이하의 필드·이름 제시)이다.
+
+| 원천 | 조건 | 이벤트 |
+|---|---|---|
+| `this` | Actor 파생 class(그 밖은 S0807) | 그 class 기반 체인의 엔진 Actor 이벤트와 Actor 확장 이벤트 |
+| `World` | World 문맥 이름이 있는 class | 엔진 `World` 타입의 이벤트와 World 확장 이벤트 |
+| `Widget` | WidgetController 파생 class, `Widget.이름.이벤트`(구간 셋) | 판정하지 않는다(위 "뒤로 넘기는 것") |
+| 필드 이름 | 자기·상속 필드(Sparks 필드, 엔진 필드 `Owner` 등) | 아래 |
+
+필드 원천의 이벤트: 경로가 `F.Changed`면 필드 F 자신의 Changed, `F.G.Changed`면 F의 타입(객체·`?` 허용)의 필드 G의 Changed다. 그 밖의 `F.E`는 F의 타입 T(객체, `T?`, 또는 원소가 객체인 `Array<T>`)의 이벤트 E다: Sparks class 체인의 `event`, 엔진 타입 체인의 이벤트(schema), 부록 B 언어 이벤트(`InputAction.Triggered` 등), T가 Actor 파생이면 Actor 확장 이벤트. 구간이 넷 이상이거나 `F.G.E`(E가 `Changed`가 아님)는 S0807이다. 이벤트를 찾지 못하면 S0808(위치는 이벤트 이름, 편집 거리 2 이하의 이벤트 제시)이다.
+
+- **Changed:** Sparks `var` 필드와 schema가 `changed: true`로 표시한 엔진 필드에만 있다. `let` 필드·const·읽기 전용 언어 멤버·`changed`가 없는 엔진 필드의 `Changed`는 S0809다. `Changed`는 예약 이벤트 이름이므로 `event Changed`·확장 이벤트 `Changed`도 S0809다.
+- **인자:** handler 인자는 이벤트 인자 목록(배열 원천은 앞에 원소 `T` 하나를 더한 목록, Changed는 빈 목록)의 앞에서부터 필요한 만큼이며 타입이 정확히 같아야 한다(`?` 유무 포함). 넘치거나 다르면 S0810이며 위치 규칙은 S0805와 같다.
+- **중복:** class와 그 기반 class 전체에서 같은 경로(구간 글자가 같은 것)를 둘 선언하면 나중 것(파생 class, 같은 class면 뒤의 것)이 S0806이다.
+
+**확장 이벤트(`event Actor.X(...)`·`event World.X(...)`).** 최상위에만 쓰며(구문) 대상은 `Actor`·`World` 두 이름이다. 그 밖의 대상은 S0813이다. 이름은 대상 타입의 이벤트(엔진 schema 포함)와도, 같은 대상의 다른 확장 이벤트(현재 패키지와 의존 패키지 전체 — 의존 패키지에서 온 것과의 충돌은 이 패키지 쪽에)와도 같을 수 없으며 S0814다(위치는 이벤트 이름, 메시지에 먼저 선언한 곳). 매개변수 타입은 함수 매개변수와 같은 규칙으로 해석한다. `on`·`emit`에서 확장 이벤트는 이 모듈이나 이 모듈이 직접 import한 모듈의 것만 찾는다. 같은 이름의 확장 이벤트가 import하지 않은 모듈에 있으면 S0815이며 그 모듈의 import를 제시한다. 해석한 확장 이벤트는 그 import의 사용이다(S0714 — 3.11절의 이름 판정을 대신한다).
+
+**`emit`.** 인자는 이벤트 매개변수 타입의 자리로 검사한다(수가 다르면 S0402 — §3.10).
+
+- `emit E(...)`: E는 이 class가 선언한 `event`여야 한다. 기반 class의 이벤트·엔진 이벤트는 S0811("선언한 class 안에서만 emit한다"), 찾지 못하면 S0808이다.
+- `emit this.X(...)`: Actor 파생 class에서 Actor 확장 이벤트 X를 자기 Actor에 발행한다(Actor 파생이 아니면 S0807, 찾지 못하면 S0808).
+- `emit t.X(...)`: t는 지역 이름·인자·필드(이름 하나)이고 그 타입이 Actor 파생(`?` 없음)이거나 World이며 X는 그 대상의 확장 이벤트다. t의 타입이 `T?`이면 S0412, await 뒤 상태의 객체 지역 이름이면 3.11절의 S0412다. t가 그 밖의 타입이면 S0811(멤버·엔진 이벤트는 발행할 수 없다).
+- 식 안의 `X.E(...)`(이벤트를 호출 형태로 씀)는 S0812이며 `emit`이나 `await X.E`를 제시한다.
+
+**재진입 표시(SD11).** `on` 경로 handler와 물리 hook 중 본문에 `await`(또는 `try await`)가 있는 것은 `@skipWhileBusy`나 `@restart` 중 정확히 하나를 붙인다. 없으면 S0816이며 두 형태를 수정 예로 제시한다(위치는 handler 이름). 둘 다 붙였거나, `await`가 없는 handler, 물리 hook이 아닌 hook, 함수에 붙이면 S0817이다(위치는 attribute). `Changed` handler의 `await`는 LC3b(Reaction 문맥)가 알리므로 S0816을 내지 않는다.
+
+**LevelScript(LevelScript LD7·LD18).** LevelScript 파생 class의 `@edit` 객체 필드에 `?`가 없으면 S0413(3.11절의 S0428 대신), `let` 필드의 초기값이 Collider 파생 component 생성이면 S0802, 물리 hook은 S0801이다.
 
 ## 4. 타입·참조·값
 
@@ -1269,7 +1308,7 @@ Characters/PlayerCharacter.spark:42:5: error S0731: Cannot assign to a function 
 - **형식(SD37):** `경로:줄:열: error S코드: 메시지` 다음에 원문 줄·표시·설명·`fix:` 수정 예를 둔다. 위치가 앞에 있어 VS Code problem matcher와 clang 형식 도구가 그대로 읽는다. 경고는 없으므로 종류는 항상 `error`다. CLI 종료 코드는 성공 0, 컴파일 오류 1, 사용법 오류 2다(AppInfoCommandLine 14.4절).
 - **언어:** 컴파일러·VM·엔진이 내는 진단과 fault 보고는 영어다(실행 중 메시지 영어 규칙). LSP는 locale 옵션으로 지역화된 설명을 덧붙일 수 있으며 코드·위치·수정 예는 바뀌지 않는다. 사용자가 쓰는 `Log` 메시지와 `Assert` 문구의 언어는 사용자 콘텐츠이므로 프로젝트 정책이다.
 - **코드 대역:** S01xx 어휘, S02xx 구문, S03xx 이름 해석, S04xx null·타입, S05xx 숫자·상수식, S06xx 실행 문맥·효과, S07xx 대입·`let`, S08xx 이벤트·수명 hook·재진입, S09xx 유지 자원·로드, S10xx 저장·ID·호환성, S11xx 패키지·reload·backend. 코드는 한 번 발급하면 의미를 바꾸지 않는다. 엔진 공통 진단 코드 등록부(RMC#### 메타 컴파일러, UI validate 코드와 함께)는 CompilerDiagnostics 문서에 둔다(§17.2).
-- **LevelScript 코드(초안 1.4):** S0413 `LevelScript`의 `@edit` 객체 필드에 `?`가 없다(§3.2), S0801 `LevelScript`가 물리 hook을 선언했다, S0802 `LevelScript`가 `let` Collider component 필드를 선언했다. 메시지와 수정 예는 [LevelScript](LevelScript.ko.md) 4.9절에 있다.
+- **LevelScript 코드(초안 1.4):** S0413 `LevelScript`의 `@edit` 객체 필드에 `?`가 없다(§3.2), S0801 `LevelScript`가 물리 hook을 선언했다, S0802 `LevelScript`가 `let` Collider component 필드를 선언했다. 판정 규칙은 §3.12, 메시지와 수정 예는 [LevelScript](LevelScript.ko.md) 4.9절에 있다.
 - 진단은 원인 하나를 작성한 코드 그대로 보이고 수정 예를 포함한다. 한 원인에서 파생된 연쇄 오류는 표시하지 않는다.[R23] 수정 예는 이름 규칙(§3.1)을 지키도록 생성한다. 지역 이름은 멤버 이름이 아니라 타입 이름에서 도출한다(`Target: Health?` → `health`). 유사 이름 제시는 Core `EditDistance`와 이름 붙은 문턱 상수를 쓴다.
 - **위치:** 줄과 열은 1부터 센다. 열은 그 줄의 처음부터 센 Unicode code point 수이며 tab도 1이다(바이트 수가 아니다 — 주석·문자열에 한글이 있어도 열이 편집기와 맞는다). 언어 서버는 LSP가 요구하는 UTF-16 단위로 바꿔 보낸다. 줄 끝은 LF이고 LF 바로 앞의 CR은 줄 끝의 일부다 — 그래서 CRLF의 CR·LF 위치는 LF만 쓴 파일의 LF 위치와 같은 열(줄 끝)이다. BOM 안의 위치는 1줄 1열이다.
 - **출력 세부:** 첫 줄 `경로:줄:열: error S코드: 메시지`, 둘째 줄은 원문 줄을 공백 4칸 들여 보이고(원문 줄의 들여쓰기도 그대로 보인다), 셋째 줄은 공백 4 + (열 − 1)칸 뒤에 `^`를 둔다. `^`의 수는 범위가 그 줄 안에 있는 code point 수이며 최소 1이고, 범위가 줄 끝을 넘으면 그 줄 끝에서 자른다(여러 줄 범위는 첫 줄만 표시, BOM 안에서 시작하는 범위는 BOM 뒤부터 센다). 그 뒤 설명 줄들과 `fix:` 줄은 공백 2칸 들여 쓴다(설명의 빈 줄은 들여쓰지 않는다). 설명이나 수정 예가 없으면 그 줄을 생략한다. 메시지와 수정 예는 한 줄이며(첫 줄을 problem matcher가 읽는다) 설명만 여러 줄일 수 있다. 원문 위치가 없는 진단(파일 전체 — 크기 초과 등)은 첫 줄이 `경로: error S코드: 메시지`이고 원문 줄·밑줄 없이 설명·수정 예를 쓴다. 원문 줄을 보일 때 tab·CR 같은 C0 제어 문자, DEL, C1 제어 문자(U+0080–U+009F), 표시 순서를 바꾸는 bidi 제어 문자(U+061C, U+200E·U+200F, U+202A–U+202E, U+2066–U+2069)는 공백 한 칸으로, 잘못된 UTF-8 byte는 U+FFFD로 바꾼다(열 계산과 맞고, 터미널을 흐트러뜨리거나 원문을 다르게 보이게 하지 않게). 동아시아 넓은 문자는 터미널에서 두 칸을 차지해 `^`가 어긋날 수 있다(표시 한계, 위치 값은 정확하다).
@@ -1447,6 +1486,29 @@ Characters/PlayerCharacter.spark:42:5: error S0731: Cannot assign to a function 
 | S0713 | `discarded-result` | 식 문장의 값이 `void`가 아니다 | 값을 쓰거나 `_ = ...` |
 | S0714 | `unused-import` | import한 모듈의 선언을 쓰지 않는다 | import를 지운다 |
 | S0731 | `assign-to-call-result` | 대입·변경 경로에 호출 결과(그 뒤가 참조 타입 값을 지나지 않을 때)나 `?.`가 있다 | 지역 변수에 받아 바꾼 뒤 되돌려 쓴다 |
+
+- **이벤트·수명 hook·재진입(S08xx, LC3a):** 규칙과 위치는 §3.12다. S0413(LevelScript의 `?` 없는 `@edit` 객체 필드)도 LC3a가 판정한다.
+
+| 코드 | 이름 | 조건 | 수정 예 |
+|---|---|---|---|
+| S0413 | `level-script-required-object` | LevelScript의 `@edit` 객체 필드에 `?`가 없다 | `T?` |
+| S0801 | `level-script-physics-hook` | LevelScript가 물리 hook을 선언했다 | 트리거 Actor의 `TriggerEntered` 등을 받는다 |
+| S0802 | `level-script-collider` | LevelScript가 `let` Collider component 필드를 선언했다 | 트리거 Actor를 배치한다 |
+| S0803 | `unknown-hook` | 구간 하나짜리 `on X()`의 X가 hook 이름이 아니다 | 비슷한 hook 이름, 자기 이벤트면 함수를 직접 부른다 |
+| S0804 | `hook-unavailable` | 수명 클래스가 아닌 곳의 handler, 물리 hook을 받을 수 없는 class의 물리 hook | 수명 타입에서 파생한다 |
+| S0805 | `hook-signature` | hook 인자가 정해진 목록의 앞부분이 아니다(수·타입) | `on Tick(dt: float)` 등 |
+| S0806 | `duplicate-handler` | 같은 class의 같은 hook, class 계층의 같은 `on` 경로 | 하나로 합친다 |
+| S0807 | `unknown-event-source` | `on`·`emit` 경로의 원천을 해석하지 못한다 | 비슷한 필드 이름 |
+| S0808 | `unknown-event` | 원천에 그 이벤트가 없다 | 비슷한 이벤트 이름 |
+| S0809 | `changed-unavailable` | `Changed`가 없는 필드의 `Changed`, `Changed`라는 이벤트 선언 | `var` 필드, 다른 이벤트 이름 |
+| S0810 | `handler-signature` | handler 인자가 이벤트 인자의 앞부분이 아니다(수·타입) | 이벤트 인자 타입 그대로 |
+| S0811 | `emit-not-allowed` | 이 class가 선언하지 않은 멤버 이벤트·엔진 이벤트의 `emit` | 선언한 class의 함수를 부른다 |
+| S0812 | `event-call` | 식에서 이벤트를 호출 형태로 썼다 | `emit X.E(...)` 또는 `await X.E` |
+| S0813 | `extension-event-target` | 확장 이벤트의 대상이 `Actor`·`World`가 아니다 | `event Actor.X(...)` |
+| S0814 | `duplicate-extension-event` | 확장 이벤트 이름이 대상 타입의 이벤트·다른 확장 이벤트와 같다 | 다른 이름 |
+| S0815 | `extension-event-not-imported` | 확장 이벤트를 선언한 모듈을 직접 import하지 않았다 | 그 모듈의 import |
+| S0816 | `missing-reentrancy-policy` | `await`가 있는 `on` 경로 handler·물리 hook에 재진입 표시가 없다 | `@skipWhileBusy` 또는 `@restart` |
+| S0817 | `misplaced-reentrancy-policy` | 재진입 표시가 둘이거나 `await` 없는 handler·수명 hook·함수에 있다 | 표시를 지운다 |
 
 - **패키지(S11xx, LC2a):** manifest·모듈 경로·패키지 의존·binding schema 파일이다. 위치 규칙은 §3.4와 §10.2 "binding schema 파일 형식"에 있다. 코드 대역의 나머지(reload·backend)는 해당 마일스톤에서 더한다.
 
@@ -1957,7 +2019,7 @@ class DoorLogic : ScriptableComponent {
   - `error S0412 14:14` — 이 위치에 이 코드의 진단이 나야 한다. 여러 줄이면 §8.1의 순서대로 모두 일치해야 하며 빠지거나 더 나온 진단은 실패다.
   - `error S0103` — 위치를 적지 않으면 원문 위치가 없는 진단(파일 전체)이다.
   - `clean` — 진단이 없어야 한다. `error`와 함께 쓸 수 없다.
-  - `stage syntax`·`stage imports`·`stage names`·`stage types`·`stage flow` — 그 단계까지만 컴파일한다(`syntax`는 manifest·schema·모듈 경로·의존·어휘·구문 분석, `imports`는 거기에 import 해석, `names`는 거기에 이름 해석, `types`는 거기에 타입 검사 — LC2c, `flow`는 거기에 흐름·대입·미사용·상수식·필드·프로필 검사 — LC2d §3.11). 한 번만 쓰며 없으면 전체 단계다. 구문 사례(`Lexical`·`Syntax`·`SyntaxErrors` 영역)와 이름 사례(`Names` 영역)가 뒤 단계 규칙(이름·타입·미사용)에 묶이지 않게 한다(LC2b·LC2c). 단계만으로는 기대 지시가 아니다(`error`나 `clean`이 함께 있어야 한다).
+  - `stage syntax`·`stage imports`·`stage names`·`stage types`·`stage flow`·`stage rules` — 그 단계까지만 컴파일한다(`syntax`는 manifest·schema·모듈 경로·의존·어휘·구문 분석, `imports`는 거기에 import 해석, `names`는 거기에 이름 해석, `types`는 거기에 타입 검사 — LC2c, `flow`는 거기에 흐름·대입·미사용·상수식·필드·프로필 검사 — LC2d §3.11, `rules`는 거기에 문맥·수명 규칙 — LC3 §3.12–). 한 번만 쓰며 없으면 전체 단계다. 구문 사례(`Lexical`·`Syntax`·`SyntaxErrors` 영역)와 이름 사례(`Names` 영역)가 뒤 단계 규칙(이름·타입·미사용)에 묶이지 않게 한다(LC2b·LC2c). 단계만으로는 기대 지시가 아니다(`error`나 `clean`이 함께 있어야 한다).
   - 지시가 하나도 없는 `.expect`, 알 수 없는 지시, `.expect`가 없는 `.spark`, `.spark`가 없는 `.expect`는 corpus 오류로 실패한다(빈 기대값이 조용히 통과하지 않게 한다).
   - 실행 결과 지시(`result`·`fault`·`trace`)는 해당 마일스톤(LC5·LC6)에서 더한다.
 - **패키지 사례(LC2a):** 사례는 파일 하나(`<사례>.spark`) 또는 폴더 하나(`<사례>/`)다.
@@ -2159,6 +2221,15 @@ LC2는 범위가 커서 하위 단계로 나눈다(각 단계가 corpus 영역 �
 | LC2b 선언·이름 | prelude와 부록 A·B 선언 표, 선언 수집, 명명 규칙, 예약 이름, 이름 하나에 대상 하나, import한 이름의 충돌, 별칭, 문맥 이름, 상속 멤버·`override` 대상, 기반 목록·interface 구현, 타입 표기 해석(소스·schema), manifest `services` 해석, 이름 해석 덤프(`.names`). 규칙은 §3.9. 진단 S0306–S0325, schema S1120(이름) |
 | LC2c 타입·숫자 | 식의 타입, 숫자(타입 없는 상수·변환·나눗셈·비교·상수 overflow), 문자열 보간, 컨테이너·리터럴과 기대 타입, 멤버 접근(부록 B 시그니처·schema), 호출·인자 형태·생성, 검증 리터럴(형식만), `as?`, `await`·`try`의 타입, switch, `for`, 조건, 반환 경로, 식 타입 덤프(`.types`). 규칙은 §3.10. 진단 S0326, S0401–S0427(S0413 제외), S0501–S0509, S0109 |
 | LC2d 흐름·대입·마무리 | await 이후 `T?`, 대입 경로·`let`, 미사용 이름·값·결과·import, 상수식과 const 순환·타입, `?` 없는 객체 필드, 프로필 검사, §2 예시 통과. 규칙은 §3.11. 진단 S0412(await 뒤), S0428, S0510–S0512, S0701–S0706, S0710–S0714, S0731, S1113 |
+
+LC3도 하위 단계로 나눈다(컴파일 단계 `Rules` — 각 단계가 corpus `Rules` 영역 사례와 리뷰 1회로 끝난다).
+
+| 하위 단계 | 내용 |
+|---|---|
+| LC3a 이벤트·hook | hook 이름·인자·자리, `on` 경로 해석(Changed·객체·배열·`Owner`·`this`·입력·World·Actor 물리 이벤트), handler 인자, 중복, `emit` 대상, 이벤트 호출, 확장 이벤트(대상·유일성·import), 재진입 표시(SD11), LevelScript. 규칙은 §3.12. 진단 S0413, S0801–S0817 |
+| LC3b 실행 문맥·효과 | 효과 추론(await·생성·자원 획득·로드·emit·쓰기)과 호출 그래프 전이 폐포, hook 문맥별 금지(§6.2), async 규칙(`await`를 쓸 수 있는 곳·`while`), `All`·`Race` 인자(SD41), full 문맥(`@pure`·`@worker`·`@deterministic`·`@editorButton`·`on Validate`), attribute 이름·인자·자리. 진단 S06xx |
+| LC3c 유지 자원·로드 | 유지 자원의 담는 자리·해제·`_ =` 버림 금지, 로드 요청 handle(§7). 진단 S09xx |
+| LC3d 권한·저장 | 권한 구역과 `@net` 쓰기(§14, SD45), `@rpc`, 저장 가능 타입과 호환성(§15). 진단 S10xx |
 
 순서는 LC0 → LC7이 한 줄이다. LC8의 CLI는 LC3 뒤부터 단계마다 넓히고(check → build → test), 언어 서버는 LC3 뒤에 시작할 수 있다. LC9는 LC6 뒤다.
 

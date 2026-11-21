@@ -4,7 +4,7 @@
 # signatures; no S0710-S0712 in a function with an unresolved name, no S0712 when the function name has a diagnostic.
 error S0712 13:17
 error S0712 27:21
-error S0712 33:15
+error S0712 33:21
 error S0712 39:14
 error S0712 39:26
 error S0710 51:13

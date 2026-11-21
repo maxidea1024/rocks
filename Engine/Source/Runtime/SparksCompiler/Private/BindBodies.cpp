@@ -366,6 +366,15 @@ void NameBinder::NoteUse(uint32 module, uint32 symbol) noexcept {
     case SymbolKind::Function:
         target = entry.module;
         break;
+    case SymbolKind::Event:
+        // 확장 이벤트(3.12절 — LC3이 해석한다)만 import로 쓴다.
+        if (entry.node == NoNode ||
+            c.trees_[entry.module].Node(entry.node).kind != SyntaxKind::ExtensionEvent) {
+            return;
+        }
+
+        target = entry.module;
+        break;
     default:
         return; // 멤버·지역·엔진·언어 이름은 import로 찾지 않는다
     }

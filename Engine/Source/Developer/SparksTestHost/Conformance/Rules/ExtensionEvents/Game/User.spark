@@ -1,0 +1,9 @@
+class Listener : ScriptableComponent {
+    on Owner.Local(by: Actor) {
+        _ = by;
+    }
+
+    fn Raise(a: Actor) {
+        emit a.Local(a);
+    }
+}

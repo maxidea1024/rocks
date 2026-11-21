@@ -43,7 +43,8 @@ enum class CompilationStage : uint8 {
     Names,   // 위에 더해 이름 해석(LC2b)
     Types,   // 위에 더해 타입 검사(LC2c)
     Flow,    // 위에 더해 흐름·대입·미사용·상수식·필드·프로필 검사(LC2d)
-    All = Flow
+    Rules,   // 위에 더해 문맥·수명 규칙(이벤트·hook·효과·자원·권한·저장 — LC3)
+    All = Rules
 };
 
 // 모듈·패키지 번호가 없음을 나타낸다.

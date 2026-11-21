@@ -1,0 +1,140 @@
+class Health : ScriptableComponent {
+    var Current = 100;
+    let Max = 100;
+
+    event Died(killer: Actor?);
+    event Hurt(amount: int, by: Actor);
+}
+
+class Watcher : ScriptableComponent {
+    @edit var Target: Health?;
+    @edit var Guards: Array<Health>;
+    var Count = 0;
+    let Jump = Action("Gameplay.Jump");
+    @edit var Hinge: SceneComponent;
+    @edit var Gate: Actor;
+
+    on Count.Changed() {
+    }
+
+    on Target.Current.Changed() {
+    }
+
+    on Hinge.RelativeLocation.Changed() {
+    }
+
+    on Target.Died() {
+    }
+
+    on Target.Hurt(amount: int) {
+        _ = amount;
+    }
+
+    on Guards.Died(guard: Health, killer: Actor?) {
+        _ = guard;
+        _ = killer;
+    }
+
+    on Owner.Damaged(amount: float) {
+        _ = amount;
+    }
+
+    on Owner.Destroyed() {
+    }
+
+    on Gate.TriggerEntered(other: Actor) {
+        _ = other;
+    }
+
+    on Jump.Triggered() {
+    }
+
+    on World.GameStarted() {
+    }
+}
+
+class Errors : ScriptableComponent {
+    @edit var Target: Health?;
+    @edit var Guards: Array<Health>;
+    var Count = 0;
+    let Fixed = 1;
+    @edit var Hinge: SceneComponent;
+
+    on Fixed.Changed() {
+    }
+
+    on Hinge.Owner.Changed() {
+    }
+
+    on Target.Max.Changed() {
+    }
+
+    on Target.Dyed() {
+    }
+
+    on Missing.Died() {
+    }
+
+    on Count.Died() {
+    }
+
+    on Target.Current.Value.Changed() {
+    }
+
+    on this.Destroyed() {
+    }
+
+    on Target.Hurt(_: float) {
+    }
+
+    on Guards.Died(_: Actor) {
+    }
+
+    on Target.Died(_: Actor) {
+    }
+
+    on Owner.Destroyed(_: Actor) {
+    }
+
+    on Owner.Damaged() {
+    }
+
+    on Owner.Damaged() {
+    }
+
+    on Count.Changed(_: int) {
+    }
+
+    on Run.Changed() {
+    }
+
+    fn Run() {
+    }
+}
+
+open class Base : ScriptableComponent {
+    on Owner.Destroyed() {
+    }
+}
+
+class Derived : Base {
+    on Owner.Destroyed() {
+    }
+}
+
+class Panel : WidgetController {
+    on Widget.Ok.Clicked() {
+    }
+
+    on Widget.Ok() {
+    }
+}
+
+class Mover : Actor {
+    on this.Destroyed() {
+    }
+
+    on this.Damaged(amount: float) {
+        _ = amount;
+    }
+}

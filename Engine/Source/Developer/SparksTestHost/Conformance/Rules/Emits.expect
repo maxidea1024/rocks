@@ -1,0 +1,15 @@
+# emit (S0811, S0812, S0807, S0808, 3.12): own member events, actor and World extension events on a target or
+# 'this' in an actor class; no base class or engine events; '?' targets and names read after 'await' (S0412);
+# arguments by the event signature; events are never called.
+error S0811 16:14
+error S0811 20:16
+error S0412 26:14
+error S0811 27:16
+error S0808 28:16
+error S0403 29:9
+error S0401 30:23
+error S0808 32:14
+error S0807 33:16
+error S0812 34:9
+error S0412 39:14
+error S0807 51:14

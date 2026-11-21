@@ -423,6 +423,18 @@ ExpressionValue TypeChecker::JudgeCall(const CheckContext& context, uint32 node,
     case K::Error:
         checkArguments();
         return result;
+    case K::Event:
+        if (rules_) {
+            // 이벤트는 호출하지 않는다(3.12절 S0812).
+            Report(context, DiagnosticCode::EventCall, calleeNode,
+                   "An event is raised with 'emit', not called.",
+                   "Writing an event as a call would neither raise it nor wait for it.",
+                   "Write 'emit Source.Event(...)', or 'await Source.Event' to wait for it.");
+            checkArguments();
+            return result;
+        }
+
+        [[fallthrough]];
     default:
         if (RequireValue(context, callee, calleeNode) && callee.kind != K::Function) {
             Report(context, DiagnosticCode::NotCallable, calleeNode,

@@ -1,0 +1,10 @@
+# Extension events (S0809, S0813-S0815, 3.12): targets are Actor and World; names are unique against the
+# target's engine events and other extension events of the package (later one) and its dependencies; 'Changed' is
+# reserved; 'on' and 'emit' find extension events only through direct imports.
+error S0814 Game/Events.spark 1:13
+error S0814 Game/Events.spark 2:13
+error S0809 Game/Events.spark 3:13
+error S0813 Game/Events.spark 4:7
+error S0814 Game/Events.spark 6:13
+error S0815 Game/User.spark 2:14
+error S0815 Game/User.spark 7:16

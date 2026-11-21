@@ -117,7 +117,7 @@ TEST(SparksConformance_RejectsMalformedExpectations) {
             allocator));
         CHECK(ParseFails("stage values\nclean\n",
                          "line 1: unknown stage (expected 'syntax', 'imports', 'names', "
-                         "'types' or 'flow')",
+                         "'types', 'flow' or 'rules')",
                          allocator));
         CHECK(ParseFails("stage syntax\nstage names\nclean\n", "line 2: 'stage' appears twice",
                          allocator));

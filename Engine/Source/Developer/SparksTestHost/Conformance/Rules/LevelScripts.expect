@@ -1,0 +1,5 @@
+# LevelScript (S0413, S0801, S0802, 3.12): '@edit' object fields need '?', no owned colliders, no physics hooks;
+# events of placed trigger actors are handled through fields.
+error S0413 2:21
+error S0802 4:16
+error S0801 6:5
