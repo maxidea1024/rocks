@@ -17,6 +17,11 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Tools.ps1')
+if ($script:RocksSdk) {
+    # Game project files and their NMake commands come with the game solution generator; an SDK only ships these scripts for it.
+    [Console]::Out.WriteLine("error RB0002: $([System.IO.Path]::GetFileName($PSCommandPath)) does not support game projects yet; use Rocks.Build.Cli game.")
+    exit 1
+}
 
 # Visual Studio sets INCLUDE, EXTERNAL_INCLUDE, LIB and LIBPATH for Makefile projects too (SetBuildDefaultEnvironmentVariables), but not
 # VCToolsInstallDir, so the build runs VsDevCmd again and VsDevCmd prepends to them. The doubled values would change the toolchain key
@@ -29,7 +34,7 @@ foreach ($name in @('INCLUDE', 'EXTERNAL_INCLUDE', 'LIB', 'LIBPATH')) {
 # The CLI adds an "error RB0001: ..." line to a top-level failure so that Visual Studio lists it in the Error List.
 $env:ROCKS_IDE_BUILD = '1'
 $root = $script:RocksRoot
-$cli = Join-Path $root 'out/dotnet/bin/Rocks.Build.Cli/Debug/net10.0/Rocks.Build.Cli.dll'
+$cli = $script:RocksCli
 $common = @('--root', $root, '--target', $Target, '--configuration', $Configuration)
 # The compiler choice only matters to the build; clean computes the same output path without it. (PowerShell names are case-insensitive,
 # so this must not be called $compiler.)

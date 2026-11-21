@@ -8,9 +8,14 @@ param([string] $Compiler)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Tools.ps1')
+if ($script:RocksSdk) {
+    # Game project files and their NMake commands come with the game solution generator; an SDK only ships these scripts for it.
+    [Console]::Out.WriteLine("error RB0002: $([System.IO.Path]::GetFileName($PSCommandPath)) does not support game projects yet; use Rocks.Build.Cli game.")
+    exit 1
+}
 
 $root = $script:RocksRoot
-$cli = Join-Path $root 'out/dotnet/bin/Rocks.Build.Cli/Debug/net10.0/Rocks.Build.Cli.dll'
+$cli = $script:RocksCli
 $arguments = @('projectfiles', '--root', $root)
 if ($Compiler) {
     $arguments += @('--compiler', $Compiler)

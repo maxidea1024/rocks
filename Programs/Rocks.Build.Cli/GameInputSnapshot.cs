@@ -5,7 +5,7 @@ using Rocks.Tooling.Common;
 
 namespace Rocks.Build.Cli;
 
-/// <summary>규칙 평가와 메타 생성부터 링크 종료까지 게임 입력과 디렉터리 구성을 확인한다.</summary>
+/// <summary>규칙 평가와 메타 생성부터 링크 종료까지 게임 입력과 디렉터리 구성을 확인한다. 제외 규칙은 <see cref="GameProjectLayout"/>이다.</summary>
 public static class GameInputSnapshot
 {
     public static string Capture(string project, string output, string sdk, IEnumerable<string> explicitInputs)
@@ -48,7 +48,10 @@ public static class GameInputSnapshot
             inputs.Add(DirectoryPath.WithTrailingSeparator(path));
             foreach (var child in Directory.EnumerateFileSystemEntries(path))
             {
-                if (Directory.Exists(child) && Path.GetFileName(child) == ".git")
+                // IDE·빌드·실행 산출물(점 디렉터리, 최상위 out/·Saved/, 최상위 *.slnx)은 입력이 아니다(Docs/Design/ProjectFiles.ko.md
+                // 10.6절). Visual Studio가 쓰기 권한으로 열어 두는 .vs/ 파일을 읽지 않고, 빌드 중 바뀌어도 실패하지 않는다. 명시 입력은
+                // 이 규칙과 무관하게 본다.
+                if (GameProjectLayout.IsExcluded(project, child))
                 {
                     continue;
                 }

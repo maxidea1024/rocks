@@ -118,6 +118,10 @@ dotnet msbuild Rocks.proj /t:InstalledSdk /p:SdkDestination=C:/work/rocks-sdk/de
 dotnet msbuild Rocks.proj /t:Game /p:SdkDirectory=C:/work/rocks-sdk/debug /p:GameDirectory=C:/work/my-game /p:Configuration=Debug
 ```
 
+게임 출력은 `<게임>/out/<platform>-<target>-<configuration>`(소문자, 예: `out/windows-game-debug`)이다. 게임 입력 snapshot과 게임 규칙 파일 탐색은 이름이 `.`으로 시작하는 디렉터리(`.vs`·`.git` 등), 게임 루트 바로 아래의 `out/`·`Saved/`, 루트의 `*.slnx`를 보지 않는다. 그 안의 파일을 규칙이 읽으면 명시 입력으로 적는다. 게임 출력 하나를 비우려면 `Rocks.Build.Cli clean --project <게임> --target <T> --configuration <C>`를 쓴다(잠금 파일 둘만 남긴다).
+
+`/p:SdkDirectory`(CLI `game --sdk`)는 선택이다. 없으면 게임 `.rocksproject`의 `engineAssociation`(SDK 경로 또는 등록 ID)으로, 그것도 없으면 이 컴퓨터에 등록한 SDK 중 `engineVersion`의 주·부가 같고 이 도구 모음과 호환되는 최고 패치로 고른다(최고 패치가 둘이면 오류). 등록은 명시적으로만 한다: `Rocks.Build.Cli sdk-register --sdk <SDK>`(또는 내보내기 때 `sdk --register on`), `sdk-unregister --sdk <SDK>|--id <ID>`. 등록부는 Windows `HKCU\Software\Rocks\Sdks`, macOS `~/.config/Rocks/Sdks.json`이고, 환경 변수 `ROCKS_SDK_REGISTRY`에 JSON 파일을 주면 그 파일을 쓴다(시험·CI). 연결은 `Rocks.Build.Cli associate --project <게임> (--sdk <SDK> | --id <ID> | --version on)`이 쓰거나 지운다. 경로·ID는 컴퓨터마다 다르므로 공유 프로젝트는 보통 연결 없이 둔다([Visual Studio 프로젝트 파일](../Docs/Design/ProjectFiles.ko.md) 10절).
+
 SDK 대상 디렉터리는 새 경로여야 한다. SDK의 파일 목록과 내용, 플랫폼·아키텍처·컴파일러 및 SDK ABI·구성이 일치하지 않거나, 게임 `.rocksproject`의 `engineVersion`이 SDK 엔진 버전의 주·부와 다르면 게임 빌드를 중단한다. 게임 소스와 출력은 SDK 밖에 둔다. `Templates/Game/Foundation`은 C# 모듈·타깃 규칙과 생성된 CLASS/PROPERTY를 사용하는 예제다. 현재 SDK 내보내기는 외부 라이브러리와 임의 컴파일·링크 옵션이 있는 모듈을 지원하지 않으며 해당 선언을 오류로 거부한다.
 
 SDK는 타깃에서 도달하는 모듈만 내보낸다. 고정 버전 외부 라이브러리(`Core/Source/ThirdParty`) 모듈은 정적 라이브러리로 들어가며 manifest `licenses`의 모든 라이선스 원문을 `Licenses/<모듈>/<원본 디렉터리 기준 경로>`에 함께 복사한다(예: `Licenses/Zstd/LICENSE`와 사전 생성기의 MIT 고지 `Licenses/Zstd/lib/dictBuilder/divsufsort.h`). 원본 안 경로를 유지하므로 이름이 같은 원문도 겹치지 않는다. BSD 계열(LZ4·zstd)과 MIT(zstd divsufsort)는 바이너리 배포 시 고지 의무가 있으므로 게임 배포 패키지에도 이 고지를 포함한다.

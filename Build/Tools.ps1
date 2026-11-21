@@ -10,6 +10,9 @@
 #
 #   pwsh Build/Tools.ps1 [-ListInputs]
 #
+# In an installed SDK (rocks-sdk.json next to Build/) the tools ship prebuilt under Tools/: Update-RocksTools builds nothing and $RocksCli
+# points at the shipped CLI.
+#
 # -ListInputs prints the repository-relative input files of the fingerprint, one per line, and exits (tests compare it with what MSBuild
 # evaluates).
 param([switch] $ListInputs)
@@ -33,6 +36,13 @@ function Get-RocksOnDiskPath([string] $path) {
 
 $script:RocksRoot = Get-RocksOnDiskPath (Join-Path $PSScriptRoot '..')
 $script:RocksToolsStamp = Join-Path $script:RocksRoot 'out/dotnet/.rocks-tools.json'
+$script:RocksSdk = Test-Path -LiteralPath (Join-Path $script:RocksRoot 'rocks-sdk.json') -PathType Leaf
+$script:RocksCli = if ($script:RocksSdk) {
+    Join-Path $script:RocksRoot 'Tools/Rocks.Build.Cli/Rocks.Build.Cli.dll'
+}
+else {
+    Join-Path $script:RocksRoot 'out/dotnet/bin/Rocks.Build.Cli/Debug/net10.0/Rocks.Build.Cli.dll'
+}
 $script:RocksIdeMutex = $null
 
 # Tool output directories. Every DLL in them is checked (the tools and the dependencies they load).
@@ -183,6 +193,15 @@ function Get-RocksToolState($memo) {
 # Builds the tools when the inputs or outputs changed since the last successful build. Call it while holding the IDE build lock. Prints
 # "Rocks tools are up to date." or the build output; throws when the build fails.
 function Update-RocksTools {
+    if ($script:RocksSdk) {
+        if (-not (Test-Path -LiteralPath $script:RocksCli -PathType Leaf)) {
+            throw "The installed SDK has no build CLI at $($script:RocksCli)."
+        }
+
+        [Console]::Out.WriteLine('Rocks tools ship with the installed SDK.')
+        return
+    }
+
     $stamp = $null
     if (Test-Path -LiteralPath $script:RocksToolsStamp) {
         try {

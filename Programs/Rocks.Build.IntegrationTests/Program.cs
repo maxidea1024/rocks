@@ -41,6 +41,13 @@ if (args.Length == 1 && args[0] == "--ide-scripts")
     return 0;
 }
 
+// 게임 프로젝트 선행 작업(SDK 연결·등록부, snapshot·규칙 탐색 제외, 게임 clean) 시험만 돈다(16절 V8·V9).
+if (args.Length == 1 && args[0] == "--game-project")
+{
+    await GameProjectTests.RunAsync();
+    return 0;
+}
+
 // unity-profile 명령의 입력 거부만 돈다(현재 디렉터리가 저장소 루트여야 한다).
 if (args.Length == 1 && args[0] == "--unity-profile-command")
 {
@@ -76,8 +83,15 @@ var cli = Path.Combine(root, "out/dotnet/bin/Rocks.Build.Cli/Debug/net10.0/Rocks
 var fixture = Path.Combine(Path.GetTempPath(), "Rocks SDK 게임 " + Guid.NewGuid().ToString("N"));
 var sdk = Path.Combine(fixture, "installed");
 var game = Path.Combine(fixture, "game");
-var output = Path.Combine(game, "out/Debug");
+// 게임 기본 출력은 <project>/out/<platform>-<target>-<configuration>이다(템플릿 타깃 이름은 Game).
+var output = GameProjectLayout.DefaultOutput(game, "Game", NativeConfiguration.Debug);
 var reports = Path.Combine(root, "out/sdk-integration");
+// CLI 하위 프로세스의 SDK 등록부다(사용자 등록부를 건드리지 않는다). 내보내기는 기본으로 등록하지 않으므로 명시 등록 전까지 파일이 없어야 한다.
+var registryFile = Path.Combine(fixture, "registry", "Sdks.json");
+var cliEnvironment = new Dictionary<string, string?>(toolchain.Environment, OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
+{
+    [SdkRegistries.OverrideVariable] = registryFile
+};
 Directory.CreateDirectory(reports);
 var cases = new List<object>();
 bool success = false;
@@ -91,6 +105,7 @@ try
     TargetDefinitionsTests.Run();
     await ProjectFilesWriterTests.RunAsync(root, toolchain);
     await IdeScriptsTests.RunAsync(root);
+    await GameProjectTests.RunAsync();
     MetadataTemporaryCleanupTests.Run();
     await PlatformPrivateHeaderTests.RunAsync(toolchain, Path.Combine(fixture, "platform-header"));
     await UnityProfileCommandTests.RunAsync(root, Directory.CreateDirectory(Path.Combine(fixture, "unity-profile-command")).FullName,
@@ -193,7 +208,15 @@ try
     }
 
     timer.Restart();
-    var built = await Game();
+    // Visual Studio는 .vs 안 IntelliSense DB를 쓰기 권한·공유 없음으로 열어 둔다. 게임 입력 snapshot은 .vs를 읽지 않으므로 빌드가 성공한다(V9).
+    var visualStudioDatabase = Path.Combine(game, ".vs", "Game", "v18", "Browse.VC.db");
+    Directory.CreateDirectory(Path.GetDirectoryName(visualStudioDatabase)!);
+    ProcessResult built;
+    using (var locked = new FileStream(visualStudioDatabase, FileMode.Create, FileAccess.ReadWrite, FileShare.None))
+    {
+        built = await Game();
+    }
+
     Require(built.ExitCode == 0, "External game build failed: " + built.StdOut + built.StdErr);
     var initial = ReadActionReport();
     // 게임 빌드는 게임 모듈의 소스만 컴파일한다. SDK가 나른 공유 PCH 헤더(SharedPchHeader — 게임이 닿는 제공 모듈 ObjectRuntime)는 게임
@@ -235,6 +258,22 @@ try
 
     Require(!Directory.Exists(Path.Combine(output, "Generated/CoreTypeBindings")), "Game build generated sources for an imported SDK module");
     Pass("read-only-sdk-external-game-reflection", timer.Elapsed);
+
+    // SDK 연결(Docs/Design/ProjectFiles.ko.md 10.1·10.2절): 내보내기는 기본으로 등록하지 않는다. 명시 등록 뒤 --sdk 없는 게임 빌드는
+    // engineVersion으로 같은 SDK를 골라 0 action이다. 등록을 지우면 고를 SDK가 없다는 오류다.
+    timer.Restart();
+    Require(!File.Exists(registryFile), "SDK export registered the SDK without --register on");
+    var registered = await Tool("sdk-register", "--sdk", sdk);
+    Require(registered.ExitCode == 0 && File.Exists(registryFile), "sdk-register failed: " + registered.StdOut + registered.StdErr);
+    var associated = await Cli("game", "--project", game, "--configuration", "Debug");
+    Require(associated.ExitCode == 0 && associated.StdOut.Contains("Installed SDK: ", StringComparison.Ordinal) && ReadActionReport().ExecutedActions == 0,
+        "Game build without --sdk did not pick the registered SDK or rebuilt: " + associated.StdOut + associated.StdErr);
+    var unregistered = await Tool("sdk-unregister", "--sdk", sdk);
+    Require(unregistered.ExitCode == 0, "sdk-unregister failed: " + unregistered.StdOut + unregistered.StdErr);
+    var unassociated = await Cli("game", "--project", game, "--configuration", "Debug");
+    Require(unassociated.ExitCode != 0 && (unassociated.StdOut + unassociated.StdErr).Contains("no SDK is registered", StringComparison.Ordinal),
+        "Game build without --sdk and without a registered SDK must fail: " + unassociated.StdOut + unassociated.StdErr);
+    Pass("sdk-registry-game-without-sdk", timer.Elapsed);
 
     // 빌드 주입 상수(B7): SDK의 Core(ProvidesBuildInfo)에 닿는 게임 실행 파일에 BuildInfo TU가 들어가고, manifest는 SDK 경로를
     // sdk: 키로 쓰며 SDK·프로젝트 절대 경로를 담지 않는다.
@@ -356,7 +395,7 @@ try
     // (FixtureChild : GameCore의 CoreThing, SDK Node 참조). 한 빌드 안에서 stage descriptor import와 stage 생성 루트
     // 치환, 상위 모듈 실패 시 미게시, Metadata에서 뺀 헤더의 생성물 삭제를 확인한다.
     var reflectionGame = Path.Combine(fixture, "game-reflection");
-    var reflectionOutput = Path.Combine(reflectionGame, "out/Debug");
+    var reflectionOutput = GameProjectLayout.DefaultOutput(reflectionGame, "Game", NativeConfiguration.Debug);
     CopyTree(Path.Combine(root, "Templates/Game/Foundation"), reflectionGame);
     var reflectionRules = Path.Combine(reflectionGame, "Game.Build.cs");
     var reflectionRulesText = File.ReadAllText(reflectionRules);
@@ -1249,7 +1288,7 @@ try
                 Timeout: TimeSpan.FromMinutes(10)));
             File.AppendAllText(Path.Combine(reports, "sdk-integration.log"), "msbuild drive-root game\n" + msbuildGame.StdOut + msbuildGame.StdErr + "\n");
             Require(msbuildGame.ExitCode == 0, "MSBuild game build with drive-root paths failed: " + msbuildGame.StdOut + msbuildGame.StdErr);
-            var driveReport = JsonSerializer.Deserialize<NativeBuildResult>(File.ReadAllText(Path.Combine(gameDrive, "out", "Debug", "action-report.json")))!;
+            var driveReport = JsonSerializer.Deserialize<NativeBuildResult>(File.ReadAllText(Path.Combine(GameProjectLayout.DefaultOutput(gameDrive, "Game", NativeConfiguration.Debug), "action-report.json")))!;
             Require(driveReport.Succeeded && driveReport.ExecutedActions == 0,
                 $"The MSBuild drive-root game build after the CLI build executed {driveReport.ExecutedActions} actions");
             var driveRun = await ProcessRunner.RunAsync(new(driveReport.ModuleOutputs["SampleGame"], [], gameDrive, toolchain.Environment));
@@ -1309,7 +1348,7 @@ try
         "Release SDK libraries are not ThinLTO bitcode archives");
     var releaseGame = await Cli("game", "--sdk", releaseSdk, "--project", game, "--configuration", "Release");
     Require(releaseGame.ExitCode == 0, "Release game build against the Release SDK failed: " + releaseGame.StdOut + releaseGame.StdErr);
-    var releaseReport = JsonSerializer.Deserialize<NativeBuildResult>(File.ReadAllText(Path.Combine(game, "out/Release/action-report.json")))!;
+    var releaseReport = JsonSerializer.Deserialize<NativeBuildResult>(File.ReadAllText(Path.Combine(GameProjectLayout.DefaultOutput(game, "Game", NativeConfiguration.Release), "action-report.json")))!;
     var releaseRun = await ProcessRunner.RunAsync(new(releaseReport.ModuleOutputs["SampleGame"], [], game, toolchain.Environment));
     Require(releaseRun.ExitCode == 0, "Release ThinLTO game failed at runtime");
     Pass("release-thinlto-sdk-and-game", timer.Elapsed);
@@ -1338,10 +1377,13 @@ finally
     }
 }
 
-async Task<ProcessResult> Cli(params string[] arguments)
+Task<ProcessResult> Cli(params string[] arguments) => Tool([.. arguments, "--compiler", toolchain.CompilerPath]);
+
+// 컴파일러 옵션을 받지 않는 명령(sdk-register 등)도 부른다.
+async Task<ProcessResult> Tool(params string[] arguments)
 {
-    var command = new[] { cli }.Concat(arguments).Concat(["--compiler", toolchain.CompilerPath]).ToArray();
-    var result = await ProcessRunner.RunAsync(new("dotnet", command, root, toolchain.Environment, Timeout: TimeSpan.FromMinutes(10)));
+    var command = new[] { cli }.Concat(arguments).ToArray();
+    var result = await ProcessRunner.RunAsync(new("dotnet", command, root, cliEnvironment, Timeout: TimeSpan.FromMinutes(10)));
     File.AppendAllText(Path.Combine(reports, "sdk-integration.log"), string.Join(" ", arguments) + "\n" + result.StdOut + result.StdErr + "\n");
     return result;
 }
