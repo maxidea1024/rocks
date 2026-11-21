@@ -2,6 +2,7 @@
 
 #include <AssetDatabase/AssetClock.h>
 #include <AssetDatabase/ProjectLayout.h>
+#include <Core/Text/String.h>
 #include <Platform/File.h>
 #include <Platform/Process.h>
 #include <TestSupport/Test.h>
@@ -51,5 +52,51 @@ public:
 
     int64 now;
 };
+
+// Content 아래 relative에 bytes를 쓴다(부모 디렉터리를 만든다).
+inline bool WriteContentFile(Allocator& allocator, const TempProject& project, StringView relative,
+                             Span<const uint8> bytes) noexcept {
+    String path(allocator);
+    const StringView pieces[] = {project.Root(), "/Content/", relative};
+    for (StringView piece : pieces) {
+        if (!path.TryAppend(piece)) {
+            return false;
+        }
+    }
+
+    const StringView view = path.View();
+    usize slash = view.ByteCount();
+    while (slash > 0 && view.Data()[slash - 1] != '/') {
+        --slash;
+    }
+
+    platform::FileSystem& files = platform::PhysicalFileSystem();
+    if (!platform::MakeDirectoryTree(files, view.Data(), slash - 1)) {
+        return false;
+    }
+
+    platform::File file;
+    if (!file.Open(files, view.Data(), view.ByteCount(), platform::FileOpenMode::CreateAlways)) {
+        return false;
+    }
+
+    const bool written = static_cast<bool>(file.WriteAll(bytes.Data(), bytes.Size()).status);
+    return static_cast<bool>(file.Close()) && written;
+}
+
+// Content 아래 빈 디렉터리를 만든다.
+inline bool MakeContentDirectory(Allocator& allocator, const TempProject& project,
+                                 StringView relative) noexcept {
+    String path(allocator);
+    const StringView pieces[] = {project.Root(), "/Content/", relative};
+    for (StringView piece : pieces) {
+        if (!path.TryAppend(piece)) {
+            return false;
+        }
+    }
+
+    return static_cast<bool>(platform::MakeDirectoryTree(
+        platform::PhysicalFileSystem(), path.View().Data(), path.View().ByteCount()));
+}
 
 } // namespace rocks::asset_database_test

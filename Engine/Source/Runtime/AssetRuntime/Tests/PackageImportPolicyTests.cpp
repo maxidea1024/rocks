@@ -7,7 +7,8 @@
 // import 정책 시험이다(Docs/Design/AssetSystem.ko.md 7.1절 15 — A2c2a, ObjectFoundations 5.4절):
 // NullMissing은 누락·형식이 맞지 않는 import를 null로 잇고 미해결 목록에 적는다 — 대상 패키지
 // 없음, 대표 에셋 형식이 Hard 의존 expectedType의 파생이 아님, 하위 객체 없음(그 아래 import도
-// 미해결), 하위 객체 형식이 선언과 다름. Strict는 지금처럼 실패한다. 인자·할당 실패.
+// 미해결), 하위 객체 형식이 선언과 다름, 대표 에셋 없음. Strict는 지금처럼 실패한다. 인자·할당
+// 실패(첫 기록·outer 연쇄 기록).
 using namespace rocks;
 namespace package_import_policy_tests_file {
 
@@ -22,6 +23,7 @@ constexpr uint64 SourceId = 2701;
 enum class Variant {
     Full,
     Missing,
+    NoRepresentative,
     RepresentativeType,
     NoPart,
     PartType
@@ -76,6 +78,10 @@ bool MakeTarget(AssetEnv& env, Variant variant, RootRef<Package>& package) noexc
     }
 
     package = Move(made.Value());
+    if (variant == Variant::NoRepresentative) {
+        return true;
+    }
+
     const ObjectHandle asset =
         variant == Variant::RepresentativeType
             ? Make<BaseGameAsset>(registry, IdOf<BaseGameAsset>(), package.Handle(), "")
@@ -108,7 +114,7 @@ struct Expected {
 } // namespace
 
 // NullMissing(7.1절 15): B의 모양마다 A를 열어 미해결 기록과 null 참조를 본다 — 온전함(기록 없음·
-// 참조 이어짐), 없음(에셋 첫 import에 MissingDependency 하나·모두 null), 대표 형식
+// 참조 이어짐), 없음·대표 에셋 없음(에셋 첫 import에 MissingDependency 하나·모두 null), 대표 형식
 // 다름(TypeMismatch 하나 — 칸 Dependencies), Part 없음(Part MissingDependency·Inner도 outer
 // 미해결로 MissingDependency — Hard는 이어짐), Part 형식 다름(Part TypeMismatch·Inner outer
 // 미해결). Strict는 없는 대상에서 MissingDependency로 실패한다.
@@ -117,6 +123,7 @@ TEST(PackageImportPolicy_NullMissing) {
     const Expected cases[] = {
         {Variant::Full, 0, {}, {}, false},
         {Variant::Missing, 1, {0}, {C::MissingDependency}, true},
+        {Variant::NoRepresentative, 1, {0}, {C::MissingDependency}, true},
         {Variant::RepresentativeType, 1, {0}, {C::TypeMismatch}, true},
         {Variant::NoPart, 2, {1, 2}, {C::MissingDependency, C::MissingDependency}, false},
         {Variant::PartType, 2, {1, 2}, {C::TypeMismatch, C::MissingDependency}, false},
@@ -188,7 +195,8 @@ TEST(PackageImportPolicy_NullMissing) {
 }
 
 // 인자와 할당 실패(7.1절 15): NullMissing인데 기록 표가 null이면 InvalidArgument(상태는 쓰지 않아
-// 다시 넘길 수 있다), 미해결 기록의 할당 실패는 그 오류다.
+// 다시 넘길 수 있다), 미해결 기록의 할당 실패는 그 오류다 — 에셋 첫 기록(없는 대상)과 outer 연쇄
+// 기록(Part 없음 — 표를 셋 채워 두 번째 기록에서 자라게 한다).
 TEST(PackageImportPolicy_ArgumentsAndAllocation) {
     AssetEnv env;
     REQUIRE(env.Ready());
@@ -218,6 +226,38 @@ TEST(PackageImportPolicy_ArgumentsAndAllocation) {
           ErrorCode::OutOfMemory);
     failing.DisableFailure();
     CHECK(failure.code == AssetDiagnosticCode::None);
+
+    // outer 연쇄 기록의 할당 실패: B에 Part가 없어 Part(찾기 실패)·Inner(outer 미해결) 기록 둘.
+    AssetEnv partEnv;
+    REQUIRE(partEnv.Ready());
+    const Array<uint8> partFile = MakeSourceFile(partEnv);
+    REQUIRE(!partFile.IsEmpty());
+    RootRef<Package> target;
+    REQUIRE(MakeTarget(partEnv, Variant::NoPart, target));
+    TestResolver resolver;
+    resolver.Add(FixedId(TargetId), target.Handle());
+    ObjectRegistry& partRegistry = *partEnv.target;
+    PackageLoadState partState(partEnv.allocator, partRegistry, partEnv.types,
+                               partRegistry.OwnerAccess(), LoadOptions(PackageKind::Editor));
+    REQUIRE(partState.Prepare(Copy(partEnv.allocator, partFile.View())));
+    test::NFailAllocator partFailing(partEnv.allocator);
+    Array<PackageUnresolvedImport> filled(partFailing);
+    for (usize index = 0; index < 3; ++index) {
+        REQUIRE(filled.TryPushBack(PackageUnresolvedImport{}));
+    }
+
+    PackageInstantiateOptions partOptions;
+    partOptions.resolver = &resolver;
+    partOptions.imports = PackageImportPolicy::NullMissing;
+    partOptions.unresolved = &filled;
+    PackageLoadState* partStates[] = {&partState};
+    ObjectHandle partPackages[1];
+    partFailing.FailOnAttempt(1);
+    ConstructionContext partTransaction(partRegistry, partRegistry.OwnerAccess());
+    CHECK(InstantiatePackages(partTransaction, partStates, partOptions, partPackages).Error() ==
+          ErrorCode::OutOfMemory);
+    partFailing.DisableFailure();
+    CHECK(filled.Size() == 4);
 }
 
 } // namespace package_import_policy_tests_file

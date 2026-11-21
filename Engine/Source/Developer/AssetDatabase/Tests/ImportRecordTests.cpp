@@ -376,7 +376,7 @@ TEST(ImportRecord_RoundTripAndLayout) {
 }
 
 // 경계값 양성(7.1절 15): 이름 256 byte, role 64, root 256·빈 값, relativePath 1024·점이 든 성분
-// (".hidden"·"..."·"a.")·한 성분, outputKey 64·빈 값, 원본 256개, 출력 1024개(self가 맨 끝, 쓴
+// (".hidden"·".a"·"..."·"a.")·한 성분, outputKey 64·빈 값, 원본 256개, 출력 1024개(self가 맨 끝, 쓴
 // 순서는 key 역순)가 모두 쓰이고 같은 값으로 읽힌다.
 TEST(ImportRecord_BoundaryValues) {
     SystemAllocator allocator;
@@ -385,7 +385,7 @@ TEST(ImportRecord_BoundaryValues) {
         scene.input.importerName = Repeated(MaxImporterNameBytes);
         scene.sources[0] = {Repeated(MaxImportRoleBytes), Repeated(MaxImportRootBytes),
                             Repeated(MaxImportRelativePathBytes), Digest(3), 0};
-        scene.sources[1] = {"x", "", ".hidden/.../a./b", Digest(4), ~uint64{0}};
+        scene.sources[1] = {"x", "", ".hidden/.a/.../a./b", Digest(4), ~uint64{0}};
         scene.outputs[0] = {Repeated(MaxImportOutputKeyBytes), OutputAsset(9), MaterialType};
         auto written = WriteImportRecord(allocator, Self, scene.input);
         REQUIRE(written);
@@ -396,7 +396,7 @@ TEST(ImportRecord_BoundaryValues) {
         CHECK(read.Value().sources[0].root.ByteCount() == MaxImportRootBytes);
         CHECK(read.Value().sources[0].relativePath.ByteCount() == MaxImportRelativePathBytes);
         CHECK(read.Value().sources[0].bytes == 0);
-        CHECK(SameText(read.Value().sources[1].relativePath, ".hidden/.../a./b"));
+        CHECK(SameText(read.Value().sources[1].relativePath, ".hidden/.a/.../a./b"));
         CHECK(read.Value().sources[1].bytes == ~uint64{0});
         CHECK(read.Value().outputs[1].outputKey.ByteCount() == MaxImportOutputKeyBytes);
     }

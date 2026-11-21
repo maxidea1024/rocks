@@ -430,7 +430,13 @@ A2는 에디터 쪽 에셋 데이터베이스다(4·5.4·5.5·7·8·13·16절). 
       - **null import의 바탕**(A2c2a 착수 때 정함): 그래프 2b의 `ApplyFields`가 null handle import를 "미해결"로 받아 그 참조를 null로 쓴다(ObjectFoundations 5.4절 — 확인을 건너뛴다). `InstantiatePackages`는 `PackageInstantiateOptions{resolver, imports = Strict | NullMissing, unresolved}`를 받는 겹판을 두고, NullMissing은 Strict가 MissingDependency·TypeMismatch로 실패하던 해석(대상 패키지 없음, 대표 에셋 없음, Hard 의존 대표 타입이 expectedType의 파생이 아님, 객체 없음, 객체 타입이 선언 타입의 파생이 아님)을 null import + `PackageUnresolvedImport{package, target, import, code, error}` 기록으로 바꾼다. 에셋 전체가 풀리지 않으면 그 에셋의 첫 import에 한 번 적고 나머지 import도 null이다. outer import가 null이면 그 아래 import도 미해결(MissingDependency)이다. resolver의 다른 오류·잘못된 handle·타입 조회 실패는 Strict와 같다. 버린 대안: 누락 대상 자리에 자리표시 패키지(UE `FLinkerPlaceholder`처럼)를 만들어 id를 보존 — 같은 id의 실제 패키지가 형식만 다를 때(TypeMismatch) 두 패키지가 같은 id를 갖게 되고, 추상 타입은 만들 수 없다. id 보존은 "미해결 import가 있으면 저장 거부"(A2c2a 위)로 한다.
       - **ImportRecord 배치**(5.4절의 논리 필드, 스키마 버전 1): Record(`ImportRecordSchema` = Guid{0x52494d5052454344, 1}){ 1 importerId Guid, 2 importerName String(1–256 byte), 3 importerVersion U32, 4 sources RecordList[ Record(`ImportSourceSchema` = {…, 2}){ 1 role String(1–64), 2 root String(0–256 — 원본 루트 이름, 빈 값은 루트 없음), 3 relativePath String(1–1024), 4 sha256 Bytes(32), 5 bytes U64 } ], 5 options Record(임포터 스키마 — 없을 수 있다), 6 outputs RecordList[ Record(`ImportOutputSchema` = {…, 3}){ 1 outputKey String(0–64 — 빈 값은 주 출력), 2 assetId Guid, 3 typeId Guid } ], 7 ownerAssetId Guid }. 필드 id는 Guid{0, n}이다. 문자열·byte 필드의 payload는 다른 패키지 Record처럼 길이 접두 없는 내용 byte다(TLV 길이가 길이다). 규칙(위반은 InvalidArgument): ownerAssetId는 null이 아니다. 문자열은 유효 UTF-8에 NUL이 없다. 소유 기록(owner = 자기 패키지 id)은 importerId가 null이 아니고 importerName이 있으며 sources가 1–256개(role 유일 — 순서는 쓴 그대로)이고 outputs는 1–1024개로 outputKey byte 순 엄격 오름차순(writer가 정렬한다)·assetId 유일·null 아님·typeId null 아님·자기 id를 포함한다. relativePath는 `/`로 나눈 상대 경로다(앞·뒤 `/`, 빈 성분, `.`·`..` 성분, `\` 금지 — 원본 루트 밖을 가리키지 못한다). root는 `/`·`\`를 갖지 않는다. options는 Record envelope 검사(ReadRecordHeader)를 통과해야 하고 비면 필드를 쓰지 않는다. 참조 기록(owner ≠ 자기)은 importerId null·importerName 빈 값·importerVersion 0이고 sources·options·outputs 필드가 없다. 빈 목록 필드·모르는 필드·wire가 다른 필드는 InvalidArgument다(정규형 하나). 다른 스키마 Guid나 지원 범위 밖 버전은 Unsupported다. writer·parser는 AssetDatabase `ImportRecord.h`에 둔다(`WriteImportRecord`·`ReadImportRecord` — AssetRuntime은 스키마를 모른다, 7.1절 7).
       - **ImportOwner 대조**(7.1절 7): 읽은 ImportRecord가 참조 기록이면 Dependencies에 그 owner의 ImportOwner 항목이 정확히 하나, 소유 기록이거나 ImportRecord가 없으면 ImportOwner 항목이 없어야 한다(`CheckImportOwner`). 다른 스키마·더 새 버전 ImportRecord는 참조 기록인지 알 수 없으므로 대조하지 않는다. 위반은 `CorruptPackage`(칸 Dependencies). 열기는 그 패키지를 열지 않고(대상이 의존이면 null + 경고), 색인은 진단을 남기고 그대로 색인한다(조회는 되게 — 고칠 수 있게).
-      - 색인 항목의 ImportRecord 요약 `AssetIndexImportSummary{present, importerId, importerName, importerVersion, outputCount, owner}`. 색인은 ImportRecord를 Tags처럼 읽는다: 다른 스키마·더 새 버전은 `UnsupportedVersion` 진단(요약 없음), 형식 위반은 `CorruptPackage` 진단(칸 ImportRecord, 요약 없음) — 둘 다 항목은 색인한다.
+      - 색인 항목의 ImportRecord 요약 `AssetIndexImportSummary{present, importerId, importerName, importerVersion, outputCount, owner}`. 색인은 ImportRecord를 Tags처럼 읽는다: 다른 스키마·더 새 버전은 `UnsupportedVersion` 진단(요약 없음), 형식 위반은 `CorruptPackage` 진단(칸 ImportRecord, 요약 없음) — 둘 다 항목은 색인한다. 한 파일에 같은 코드 진단이 둘 이상 생길 수 있으므로(깨진 Tags + 손상 ImportRecord 등) 진단 정렬은 파일 이름 → 코드 → 칸이다.
+      - **`EditorPackageSet` 구현에서 정한 것**:
+        - 생성은 `EditorPackageSet(Allocator&, EditorPackageSetConfig)`(allocator는 생성자 인자 — 표 멤버가 생성 때 필요), 설정 `EditorPackageSetConfig{types, files, layout, index, read(customVersions·engineVersion — expectedKind는 Editor, types는 위 것으로 채운다), registryContext, registryOptions(policy·referenceObserver는 집합이 정한다), observerMaxKeys, fileCacheCapacity}`. `Initialize`가 관찰자·Registry·핸들 캐시를 만든다. 소멸은 열린 패키지 RootRef → Registry → 캐시 → 관찰자 순(저장소가 캐시 핸들을 닫으므로 캐시가 Registry보다 오래 산다). 소유 스레드 전용이다.
+        - 닫힘은 색인이 아니라 **읽은 파일의 Dependencies**로 넓힌다: 색인은 id → 파일 이름에만 쓰고, Prepare한 패키지의 Hard·EditorOnly 항목을 너비 우선으로 더한다(색인이 낡아도 실제 파일의 의존을 따른다). 색인의 파일을 읽었는데 헤더 id가 요청과 다르면(색인 뒤 파일이 바뀜) `ExternalModification` / `StaleHandle`이다.
+        - 실패 분류: 요청한 패키지(루트)의 실패는 `Open` 실패다 — 색인에 없음 `NotFound`(진단 None), 같은 id 둘 `DuplicateAssetId` / `AlreadyExists`, 파일 열기·Prepare 실패는 그 진단, id 불일치, ImportRecord 형식 위반 `CorruptPackage`(칸 ImportRecord), ImportOwner 대조 위반 `CorruptPackage`(칸 Dependencies). 의존 패키지의 같은 실패는 그 패키지를 묶음에서 빼고 경고 `ExcludedDependency`(진단 asset = 뺀 패키지, related = 처음 가리킨 패키지 — 색인에 없음은 `MissingDependency` / `NotFound`)를 남기며, 그것을 가리키는 import는 `InstantiatePackages`의 NullMissing이 null로 잇고 경고 `UnresolvedImport`(asset = 가리킨 패키지, related = 대상, 칸·detail = import 위치)를 남긴다. 묶음 안 대상의 대표 타입이 Hard 의존 expectedType의 파생이 아니면 대상은 그대로 열고 그 import만 null이다(대상 자체는 유효한 패키지다).
+        - 다른 스키마·더 새 버전 ImportRecord는 열되 읽기 전용이다(저장하면 이해하지 못하는 기록을 잃거나 그대로 옮겨 잘못 쓸 수 있다 — 더 새 섹션과 같은 규칙, 5.3절).
+        - 열린 패키지 정보 `EditorPackageInfo{id, package handle, fileName(Content 상대), fingerprint, readOnly, unresolved(그 패키지의 미해결 import)}`는 id 순 표로 두고 `Find(id)`·`Count`·`At`으로 본다. `FindPackage`(resolver)는 이 표를 본다.
     - **A2c2b — 저장**
       - `Save(package, SaveOptions)`(5.5절 1–8): 잠금 → 대상 지문을 로드 지문과 비교(다르면 `ExternalModification`) → 같은 디렉터리에 `<이름>.rasset.<guid>.tmp` CreateNew → `WritePackage`(파일 sink, bulk source = 그 패키지 저장소 — 옮기는 entry의 crc32·SHA-256은 writer가 대조) → Flush·Close → `VerifyPackageFile` → 캐시 핸들 닫기 → `Replace` → 저장소를 새 파일 경로·지문·재매핑 표로 다시 잇기 → 시작 세대 = 끝 세대면 dirty 해제 → 색인 갱신(`AssetIndex::Refresh(fileName)` — 그 파일 하나를 다시 부분 읽기) → 그 디렉터리의 고아 `.tmp`(정확한 모양만) 삭제. 실패 경로는 5.5절 6·7 그대로(임시 파일 삭제, 교체 실패 뒤 이전 경로 지문 확인, `NotDurable`은 성공 + 경고).
       - 새 패키지(파일 없음)의 저장은 `TryMakeFilePath`의 NFC 이름으로 만든다. 대상이 이미 있거나(Stat) 색인에 같은 caseless 키가 있으면(Linux에서 `hero.rasset`과 `Hero.rasset`이 함께 생기지 않게) `DuplicatePath` / `AlreadyExists`. 별칭 점유(7.1절 12)는 A2e가 같은 지점에 더한다.
@@ -1707,6 +1713,52 @@ A2b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.15) 시험 없
 리뷰(1회) **충족**. 권장 다섯도 반영했다: Attach의 할당 실패가 Detach 뒤 남은 slot(이미 준 span)을 지우던 것(→ 호출 전 slot까지만 되돌림), 닫은 패키지의 캐시 핸들이 남던 것(→ 저장소 소멸자가 닫음·`CloseUnder` — A2e 디렉터리 작업용), 저장소 없는 Defer 상태를 조용히 받던 것(→ InvalidArgument), 손상된 표의 큰 지연 할당(→ 컨테이너 rawSize를 먼저 대조하는 `DecodePackageBulkEntry` Array 겹판), 등록이 남은 hook 표 소멸(→ Fatal). 태그 sink는 정렬 삽입(이분 찾기)으로 바꿨다. 복제의 저장소 표 복제(F5 c)는 A2e에서 더한다.
 
 A2c1 상태(2026-11-21): **완료**(리뷰 1회 충족 + 권장 반영). 완료 조건: 대조표(14.1.17) 시험 없는 항목 0·정의된 시험 27개 모두 인용, 조합(대조표 마지막 행), coverage(14.1.18 — Windows), 리뷰어 판정 **충족**.
+
+#### 14.1.19 요구 대조표(A2c2a — null import·ImportRecord·색인 요약·열기)
+
+시험은 FoundationTests `GraphExternalLoadTests.cpp`의 1개, EngineTests `Engine/Source/Runtime/AssetRuntime/Tests/PackageImportPolicyTests.cpp`(2개), `Engine/Source/Developer/AssetDatabase/Tests/`의 `ImportRecordTests.cpp`(6개)·`AssetIndexTests.cpp`의 `AssetIndex_ImportRecords`(1개 — 기존 색인 시험은 Hero에 참조 기록을 더해 그대로 통과)·`EditorPackageSetTests.cpp`(7개) — 정의된 시험 17개를 모두 인용한다. 메모리 파일 시스템(`MemoryFileSystem.h` — 색인 시험에서 옮기고 핸들을 풀로 바꿔 bulk 캐시가 쥔 동안 다른 파일을 연다)과 디스크 쓰기 도우미는 공용 시험 헤더로 옮겼다(동작 불변).
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| null import(ObjectFoundations 5.4, 7.1-15) | imports의 null handle은 확인을 건너뛰고 그 외부 참조를 읽는 단일 참조·배열 원소를 null로(다른 필드 그대로), 기대 형식이 있는 선언도 판정하지 않음 | `GraphExternalLoad_NullImportIsUnresolved` |
+| NullMissing(7.1-15) | B 모양마다(온전·없음·대표 타입 다름·하위 객체 없음·하위 객체 타입 다름) 미해결 기록(위치·코드·오류)과 null 참조(Hard·배열), outer 미해결의 연쇄, Strict는 없는 대상 MissingDependency 실패 | `PackageImportPolicy_NullMissing` |
+| | NullMissing에 기록 표 null InvalidArgument(상태 재사용 가능), 기록 할당 실패 OutOfMemory | `PackageImportPolicy_ArgumentsAndAllocation` |
+| ImportRecord 배치(5.4, 7.1-15) | 소유 기록 쓰기 = 손으로 만든 정규 배치(출력 key 순 정렬), 모든 값 왕복(원본은 쓴 순서), options 없는 소유 기록·참조 기록도 정규 배치와 같고 왕복, 소유 기록을 다른 self로·참조 기록을 owner로 읽으면 InvalidArgument | `ImportRecord_RoundTripAndLayout` |
+| | 경계 양성: 이름 256·role 64·root 256·빈 root·relativePath 1024·점이 든 성분(".hidden"·".a"·"..."·"a.")·outputKey 64·빈 key, 원본 256개·출력 1024개(역순 입력 → key 순), bytes 0·최대 | `ImportRecord_BoundaryValues` |
+| | 쓰기 규칙 위반 43가지(self·owner null, 임포터 id·이름 빈 값·257·UTF-8·NUL, 원본·출력 0개·상한+1, options envelope, role 빈 값·65·NUL·중복, root 257·`/`·`\`·UTF-8, 경로 빈 값·1025·앞·뒤·연속 `/`·`.`·`..`·안쪽 `..`·`\`·UTF-8, key 65·UTF-8, 출력 asset·type null, key·asset 중복, self 없음, 참조 기록의 각 칸) 모두 InvalidArgument | `ImportRecord_WriteRejects` |
+| | 읽기 손상 70가지: 67가지 InvalidArgument(필드 없음 4·wire·크기 6·owner null·모르는 필드·임포터 규칙 4·목록 없음 2·목록·options wire 3·options 빈·envelope, 원본 목록 빈·초과·잘림·항목 schema, 원본 항목 필드 없음 5·추가·wire·크기 7·규칙 3·role 중복, 출력 목록 빈·초과·항목 schema, 출력 항목 필드 없음 3·추가·wire·크기 3·규칙 3·순서·key·asset 중복·self 없음, 참조 기록의 각 칸 6)와 기록·원본·출력 항목 더 새 버전 3가지 Unsupported, 빈 byte·null self·header 아닌 byte InvalidArgument, 더 새 envelope·다른 스키마(Tags) Unsupported | `ImportRecord_ReadRejects` |
+| ImportOwner 대조(7.1-7·15) | 기록 없음·소유 기록은 ImportOwner 없어야, 참조 기록은 owner를 가리키는 항목 정확히 하나(없음·다른 대상·둘 위반), 다른 종류 항목은 세지 않음, self null InvalidArgument | `ImportRecord_CheckImportOwner` |
+| | 소유·참조 기록 쓰기·읽기의 모든 할당 실패 OutOfMemory, options가 값 한도(4 MiB)를 넘으면 CapacityExceeded | `ImportRecord_AllocationAndCapacity` |
+| 색인 요약(7.1-11·15) | 소유 기록 요약(임포터 id·이름·버전·출력 수·owner = 자기), 참조 기록 + 맞는 ImportOwner 요약(owner만)·진단 없음, 다른 스키마·더 새 버전 UnsupportedVersion·형식 위반 CorruptPackage(칸 ImportRecord, 요약 없음, 대조 안 함), 대조 위반 넷 CorruptPackage(칸 Dependencies), 모두 색인, 한 파일의 같은 코드 진단 둘은 칸 순, 모든 할당 실패 | `AssetIndex_ImportRecords` |
+| | Hero의 참조 기록 요약(owner = 2104, 나머지 빈 값)·기록 없는 항목 present 거짓(디스크 색인) | `AssetIndex_DiskScanAndQueries` |
+| 열기 닫힘(7.1-3·15) | Hard·EditorOnly 닫힘 한 번에(Soft 대상 열지 않음), 참조 이어짐(Hard·typed·EditorOnly), 정보 id 순·파일 이름·지문 = 색인·읽기 전용 아님·미해결 없음, resolver는 열린 것만, 지연 bulk 처음만 파일 열기, 이미 연 패키지 같은 handle(다시 읽지 않음)·경로 열기 같은 handle, 경고 표 없이 열기, 순환 한 트랜잭션 | `EditorPackageSet_OpenClosure` |
+| | 이어 열기: 먼저 연 Hero를 Villain이 resolver로 잇고 Villain만 읽음, 먼저 연 Base의 대표 타입이 Hero의 기대와 다르면 resolver로 찾은 대상도 Hero import만 null(UnresolvedImport TypeMismatch) | `EditorPackageSet_IncrementalOpen` |
+| 누락 의존(7.1-15) | Base 모양 16가지(정상·색인에 없음·같은 id 둘·색인 뒤 사라짐·열기 Busy·읽기 실패·손상·다른 id·ImportRecord 손상·ImportOwner 위반·다른 스키마 기록·모르는 커스텀 버전·대표 타입 다름·더 새 엔진·유효 소유 기록·유효 참조 기록 + 맞는 ImportOwner)마다 Hero 열기: 열린 수, Base 열림·읽기 전용, ExcludedDependency(코드·오류·칸 — 손상·버전은 같은 byte를 직접 Prepare한 진단과 같음, asset Base·related Hero), UnresolvedImport(asset Hero·related Base·ObjectImports import 0·MissingDependency 또는 TypeMismatch)와 정보의 미해결 표, EditorOnly 참조 영향 없음 | `EditorPackageSet_DependencyFailures` |
+| 요청 패키지 실패(7.1-15) | 같은 16 모양을 Base로 직접 열면 뺀 경고의 진단이 Open 실패(색인에 없음은 진단 None)·아무것도 안 열림, 읽기 전용·타입 다름·정상·유효 기록 둘은 열림, 색인에 없는 id NotFound, 경로 없음 NotFound, 같은 경로 키 둘 DuplicatePath / AlreadyExists | `EditorPackageSet_RootFailures` |
+| 인자·수명(7.1-15) | 설정 null 넷·캐시 용량 0·관찰자 키 0 InvalidArgument, Initialize 전 Open(id·경로) InvalidArgument(진단 None), 두 번째 Initialize·null id InvalidArgument, 파괴하면 집합 allocator 할당이 모두 돌아오고 bulk 캐시 핸들이 닫힘 | `EditorPackageSet_ArgumentsAndLifetime` |
+| | Initialize·Open(유효 기록이 있는 Hub 닫힘 8개 — 닫힘 표 성장·기록 읽기 포함, 경고 있는 닫힘)의 모든 할당 실패 OutOfMemory·아무것도 안 열림, Registry가 계약으로 삼키는 GC 참조 표 할당 실패(tag GCTY) 하나만 성공 | `EditorPackageSet_AllocationFailures` |
+| | 실제 디스크: 물리 파일 시스템으로 열기·지연 bulk 읽기·참조 | `EditorPackageSet_Disk` |
+| 조합(14 완료 조건 2) | ImportRecord: 기록 종류 둘(소유·참조) × options 유무 × 모든 필드의 경계·위반, 쓰기 위반 43 × 읽기 손상 70 + 입력 5(빈 byte·null self·header 아님·더 새 envelope·다른 스키마). 색인: 기록 모양(없음·소유·참조·다른 스키마·더 새·손상) × ImportOwner 항목(없음·맞음·다름) × 깨진 Tags 유무. 열기: Base 모양 16 × 열림 위치(의존·요청한 패키지)·대표 타입 다름 × 해석 경로(같은 묶음·resolver), 열린 상태(처음·이미 연 의존·이미 연 요청), 경로·id 열기, 경고 표 유무 | 위 시험 |
+
+#### 14.1.20 Coverage(A2c2a)
+
+측정(2026-11-21, Windows, `pwsh -NoProfile -File Build/MeasureCoverage.ps1 -Target EngineTests -Filter ImportRecord_,AssetIndex_,EditorPackageSet_,PackageImportPolicy_,PackageLoad,AssetPackage -Sources Engine/Source/Developer/AssetDatabase/Private,Engine/Source/Runtime/AssetRuntime/Private`). 그래프 쪽 null import(`GraphExternal.cpp`·`GraphApply.cpp`의 몇 줄)는 FoundationTests `GraphExternalLoad_NullImportIsUnresolved`가 지난다.
+
+| 파일 | 줄 | 분기 | 함수 |
+|---|---|---|---|
+| `ImportRecord.cpp`(새) | 100%(497/497) | 100%(366/366) | 100%(32/32) |
+| `EditorPackageSet.cpp`(새) | 99.5%(372/374) | 99.4%(171/172) | 100%(18/18) |
+| `AssetIndex.cpp`(요약·대조·진단 정렬) | 100%(662/662) | 100%(336/336) | 100%(28/28) |
+| `PackageLoad.cpp`(NullMissing) | 100%(568/568) | 98.2%(334/340) | 100%(19/19) |
+
+닿지 않은 곳과 근거:
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| `EditorPackageSet::PreparePending` | `SetBulkStore` 실패 | 그 계약의 실패는 인자 위반뿐이다(Decode 옵션·Prepare 전·인스턴스 뒤·null 저장소). 여기서는 Defer로 Prepare를 마친 새 상태에 방금 만든 저장소를 건다 — 닿을 수 없다. Release에서도 안전하게 오류로 돌려준다 |
+| `PackageLoad.cpp` | 분기 6개 | `ROCKS_ASSERT` 전개 안의 실패 쪽이다(14.1.18과 같다) |
+
+시험이 찾은 것: 처음 측정에서 유효한 ImportRecord를 가진 패키지를 여는 경로·닫힘 표 성장의 할당 실패·NullMissing의 "대표 에셋 없음"·outer 연쇄 기록의 할당 실패·경로 성분 ".a"가 닿지 않아 시험을 더했다(Base 모양 둘·Hub 닫힘·import 정책 변형·경계값). ImportRecord의 정렬 동률 처리(index 순)는 같은 원소를 어차피 중복으로 거부하므로 닿지 않는 분기라 뺐다. 할당 실패 시험이 Registry의 GC 참조 표 할당 실패를 삼키는 계약(실패하면 trace로 대신 — 정확성 같음)을 드러냈다 — 시험은 그 tag(GCTY)의 실패만 성공으로 받는다. 시험용 메모리 파일 시스템은 핸들 하나만 열 수 있어 bulk 캐시가 핸들을 쥔 동안 다른 파일을 열지 못했다 — 핸들 풀로 바꿔 공용 헤더로 옮겼다.
 
 ## 15. PNG 디코더 범위
 

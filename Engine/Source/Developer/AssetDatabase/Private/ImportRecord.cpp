@@ -121,7 +121,8 @@ Guid ImportLoadGuid(const FieldView& field) noexcept {
                 LoadLittleEndian<uint64>(field.payload.Data() + ImportU64Bytes)};
 }
 
-// index 표를 만들어 less 순으로 정렬한다(비교가 같으면 index 순 — 안정).
+// index 표를 만들어 less 순으로 정렬한다. 같은 원소의 순서는 정하지 않는다(쓰는 곳은 모두 같은
+// 이웃을 중복으로 거부한다).
 template <class Less>
 Result<Array<usize>> ImportSortedOrder(Allocator& allocator, usize count, Less less) noexcept {
     Array<usize> order(allocator);
@@ -133,13 +134,7 @@ Result<Array<usize>> ImportSortedOrder(Allocator& allocator, usize count, Less l
         (void)order.TryPushBack(index);
     }
 
-    algo::Sort(order.View(), [&](usize left, usize right) noexcept {
-        if (less(left, right)) {
-            return true;
-        }
-
-        return !less(right, left) && left < right;
-    });
+    algo::Sort(order.View(), less);
     return Result<Array<usize>>::Success(Move(order));
 }
 
