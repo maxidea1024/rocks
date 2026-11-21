@@ -432,9 +432,11 @@ A2는 에디터 쪽 에셋 데이터베이스다(4·5.4·5.5·7·8·13·16절). 
       - **ImportOwner 대조**(7.1절 7): 읽은 ImportRecord가 참조 기록이면 Dependencies에 그 owner의 ImportOwner 항목이 정확히 하나, 소유 기록이거나 ImportRecord가 없으면 ImportOwner 항목이 없어야 한다(`CheckImportOwner`). 다른 스키마·더 새 버전 ImportRecord는 참조 기록인지 알 수 없으므로 대조하지 않는다. 위반은 `CorruptPackage`(칸 Dependencies). 열기는 그 패키지를 열지 않고(대상이 의존이면 null + 경고), 색인은 진단을 남기고 그대로 색인한다(조회는 되게 — 고칠 수 있게).
       - 색인 항목의 ImportRecord 요약 `AssetIndexImportSummary{present, importerId, importerName, importerVersion, outputCount, owner}`. 색인은 ImportRecord를 Tags처럼 읽는다: 다른 스키마·더 새 버전은 `UnsupportedVersion` 진단(요약 없음), 형식 위반은 `CorruptPackage` 진단(칸 ImportRecord, 요약 없음) — 둘 다 항목은 색인한다. 한 파일에 같은 코드 진단이 둘 이상 생길 수 있으므로(깨진 Tags + 손상 ImportRecord 등) 진단 정렬은 파일 이름 → 코드 → 칸이다.
       - **`EditorPackageSet` 구현에서 정한 것**:
-        - 생성은 `EditorPackageSet(Allocator&, EditorPackageSetConfig)`(allocator는 생성자 인자 — 표 멤버가 생성 때 필요), 설정 `EditorPackageSetConfig{types, files, layout, index, read(customVersions·engineVersion — expectedKind는 Editor, types는 위 것으로 채운다), registryContext, registryOptions(policy·referenceObserver는 집합이 정한다), observerMaxKeys, fileCacheCapacity}`. `Initialize`가 관찰자·Registry·핸들 캐시를 만든다. 소멸은 열린 패키지 RootRef → Registry → 캐시 → 관찰자 순(저장소가 캐시 핸들을 닫으므로 캐시가 Registry보다 오래 산다). 소유 스레드 전용이다.
+        - 생성은 `EditorPackageSet(Allocator&, EditorPackageSetConfig)`(allocator는 생성자 인자 — 표 멤버가 생성 때 필요), 설정 `EditorPackageSetConfig{types, files, layout, index, read(customVersions·engineVersion — expectedKind는 Editor, types는 위 것으로 채운다), registryContext, registryOptions(policy·referenceObserver는 집합이 정한다), observerMaxKeys, fileCacheCapacity}`. `Initialize`가 관찰자·Registry·핸들 캐시를 만든다. 소멸은 열린 패키지 Discard(패키지 정책 객체는 Discard로만 죽는다) → RootRef → Registry → 캐시 → 관찰자 순(저장소가 캐시 핸들을 닫으므로 캐시가 Registry보다 오래 산다). 소유 스레드 전용이다.
         - 닫힘은 색인이 아니라 **읽은 파일의 Dependencies**로 넓힌다: 색인은 id → 파일 이름에만 쓰고, Prepare한 패키지의 Hard·EditorOnly 항목을 너비 우선으로 더한다(색인이 낡아도 실제 파일의 의존을 따른다). 색인의 파일을 읽었는데 헤더 id가 요청과 다르면(색인 뒤 파일이 바뀜) `ExternalModification` / `StaleHandle`이다.
         - 실패 분류: 요청한 패키지(루트)의 실패는 `Open` 실패다 — 색인에 없음 `NotFound`(진단 None), 같은 id 둘 `DuplicateAssetId` / `AlreadyExists`, 파일 열기·Prepare 실패는 그 진단, id 불일치, ImportRecord 형식 위반 `CorruptPackage`(칸 ImportRecord), ImportOwner 대조 위반 `CorruptPackage`(칸 Dependencies). 의존 패키지의 같은 실패는 그 패키지를 묶음에서 빼고 경고 `ExcludedDependency`(진단 asset = 뺀 패키지, related = 처음 가리킨 패키지 — 색인에 없음은 `MissingDependency` / `NotFound`)를 남기며, 그것을 가리키는 import는 `InstantiatePackages`의 NullMissing이 null로 잇고 경고 `UnresolvedImport`(asset = 가리킨 패키지, related = 대상, 칸·detail = import 위치)를 남긴다. 묶음 안 대상의 대표 타입이 Hard 의존 expectedType의 파생이 아니면 대상은 그대로 열고 그 import만 null이다(대상 자체는 유효한 패키지다).
+        - 이미 열린 패키지의 미해결 import는 나중에 대상이 생기거나 열려도 다시 잇지 않는다(다시 열어야 한다 — 닫고 다시 여는 경로는 A2e의 디렉터리·이름 작업과 함께 정한다). 저장(A2c2b)은 미해결 표로 거부·`dropUnresolved`를 판정한다.
+        - 경고 진단의 detail은 import 위치(UnresolvedImport)라 색인 진단의 detail(섹션 안 위치)과 뜻이 다르다 — 명령 출력(A2c3)이 둘을 섞을 때 문구로 구분한다.
         - 다른 스키마·더 새 버전 ImportRecord는 열되 읽기 전용이다(저장하면 이해하지 못하는 기록을 잃거나 그대로 옮겨 잘못 쓸 수 있다 — 더 새 섹션과 같은 규칙, 5.3절).
         - 열린 패키지 정보 `EditorPackageInfo{id, package handle, fileName(Content 상대), fingerprint, readOnly, unresolved(그 패키지의 미해결 import)}`는 id 순 표로 두고 `Find(id)`·`Count`·`At`으로 본다. `FindPackage`(resolver)는 이 표를 본다.
     - **A2c2b — 저장**
@@ -1716,7 +1718,7 @@ A2c1 상태(2026-11-21): **완료**(리뷰 1회 충족 + 권장 반영). 완료 
 
 #### 14.1.19 요구 대조표(A2c2a — null import·ImportRecord·색인 요약·열기)
 
-시험은 FoundationTests `GraphExternalLoadTests.cpp`의 1개, EngineTests `Engine/Source/Runtime/AssetRuntime/Tests/PackageImportPolicyTests.cpp`(2개), `Engine/Source/Developer/AssetDatabase/Tests/`의 `ImportRecordTests.cpp`(6개)·`AssetIndexTests.cpp`의 `AssetIndex_ImportRecords`(1개 — 기존 색인 시험은 Hero에 참조 기록을 더해 그대로 통과)·`EditorPackageSetTests.cpp`(7개) — 정의된 시험 17개를 모두 인용한다. 메모리 파일 시스템(`MemoryFileSystem.h` — 색인 시험에서 옮기고 핸들을 풀로 바꿔 bulk 캐시가 쥔 동안 다른 파일을 연다)과 디스크 쓰기 도우미는 공용 시험 헤더로 옮겼다(동작 불변).
+시험은 FoundationTests `GraphExternalLoadTests.cpp`의 1개, EngineTests `Engine/Source/Runtime/AssetRuntime/Tests/PackageImportPolicyTests.cpp`(2개), `Engine/Source/Developer/AssetDatabase/Tests/`의 `ImportRecordTests.cpp`(6개)·`AssetIndexTests.cpp`의 `AssetIndex_ImportRecords`(1개 — 기존 색인 시험은 Hero에 참조 기록을 더해 그대로 통과)·`EditorPackageSetTests.cpp`(8개) — 정의된 시험 18개를 모두 인용한다. 메모리 파일 시스템(`MemoryFileSystem.h` — 색인 시험에서 옮기고 핸들을 풀로 바꿔 bulk 캐시가 쥔 동안 다른 파일을 연다)과 디스크 쓰기 도우미는 공용 시험 헤더로 옮겼다(동작 불변).
 
 | 요구(절) | 항목 | 시험 |
 |---|---|---|
@@ -1736,7 +1738,8 @@ A2c1 상태(2026-11-21): **완료**(리뷰 1회 충족 + 권장 반영). 완료 
 | 누락 의존(7.1-15) | Base 모양 16가지(정상·색인에 없음·같은 id 둘·색인 뒤 사라짐·열기 Busy·읽기 실패·손상·다른 id·ImportRecord 손상·ImportOwner 위반·다른 스키마 기록·모르는 커스텀 버전·대표 타입 다름·더 새 엔진·유효 소유 기록·유효 참조 기록 + 맞는 ImportOwner)마다 Hero 열기: 열린 수, Base 열림·읽기 전용, ExcludedDependency(코드·오류·칸 — 손상·버전은 같은 byte를 직접 Prepare한 진단과 같음, asset Base·related Hero), UnresolvedImport(asset Hero·related Base·ObjectImports import 0·MissingDependency 또는 TypeMismatch)와 정보의 미해결 표, EditorOnly 참조 영향 없음 | `EditorPackageSet_DependencyFailures` |
 | 요청 패키지 실패(7.1-15) | 같은 16 모양을 Base로 직접 열면 뺀 경고의 진단이 Open 실패(색인에 없음은 진단 None)·아무것도 안 열림, 읽기 전용·타입 다름·정상·유효 기록 둘은 열림, 색인에 없는 id NotFound, 경로 없음 NotFound, 같은 경로 키 둘 DuplicatePath / AlreadyExists | `EditorPackageSet_RootFailures` |
 | 인자·수명(7.1-15) | 설정 null 넷·캐시 용량 0·관찰자 키 0 InvalidArgument, Initialize 전 Open(id·경로) InvalidArgument(진단 None), 두 번째 Initialize·null id InvalidArgument, 파괴하면 집합 allocator 할당이 모두 돌아오고 bulk 캐시 핸들이 닫힘 | `EditorPackageSet_ArgumentsAndLifetime` |
-| | Initialize·Open(유효 기록이 있는 Hub 닫힘 8개 — 닫힘 표 성장·기록 읽기 포함, 경고 있는 닫힘)의 모든 할당 실패 OutOfMemory·아무것도 안 열림, Registry가 계약으로 삼키는 GC 참조 표 할당 실패(tag GCTY) 하나만 성공 | `EditorPackageSet_AllocationFailures` |
+| | Initialize·Open(유효 기록이 있는 Hub 닫힘 8개 — 닫힘 표 성장·기록 읽기 포함, 경고 있는 닫힘)의 모든 할당 실패 OutOfMemory·아무것도 안 열림, Registry가 계약으로 삼키는 GC 참조 칸 표 할당 실패 하나만 성공(그 할당에 고유 tag GCRT를 주었다 — 리뷰 권장) | `EditorPackageSet_AllocationFailures` |
+| | EditorOnly로만 가리킨 대상 누락: 그 import(1)만 null·UnresolvedImport(Hard는 이어짐), 깊이 2 제외: 빠진 Base의 related는 중간 Hero·미해결 import는 Hero의 것(Villain 참조 이어짐) | `EditorPackageSet_EditorOnlyAndDeepExclusion` |
 | | 실제 디스크: 물리 파일 시스템으로 열기·지연 bulk 읽기·참조 | `EditorPackageSet_Disk` |
 | 조합(14 완료 조건 2) | ImportRecord: 기록 종류 둘(소유·참조) × options 유무 × 모든 필드의 경계·위반, 쓰기 위반 43 × 읽기 손상 70 + 입력 5(빈 byte·null self·header 아님·더 새 envelope·다른 스키마). 색인: 기록 모양(없음·소유·참조·다른 스키마·더 새·손상) × ImportOwner 항목(없음·맞음·다름) × 깨진 Tags 유무. 열기: Base 모양 16 × 열림 위치(의존·요청한 패키지)·대표 타입 다름 × 해석 경로(같은 묶음·resolver), 열린 상태(처음·이미 연 의존·이미 연 요청), 경로·id 열기, 경고 표 유무 | 위 시험 |
 
@@ -1758,7 +1761,11 @@ A2c1 상태(2026-11-21): **완료**(리뷰 1회 충족 + 권장 반영). 완료 
 | `EditorPackageSet::PreparePending` | `SetBulkStore` 실패 | 그 계약의 실패는 인자 위반뿐이다(Decode 옵션·Prepare 전·인스턴스 뒤·null 저장소). 여기서는 Defer로 Prepare를 마친 새 상태에 방금 만든 저장소를 건다 — 닿을 수 없다. Release에서도 안전하게 오류로 돌려준다 |
 | `PackageLoad.cpp` | 분기 6개 | `ROCKS_ASSERT` 전개 안의 실패 쪽이다(14.1.18과 같다) |
 
-시험이 찾은 것: 처음 측정에서 유효한 ImportRecord를 가진 패키지를 여는 경로·닫힘 표 성장의 할당 실패·NullMissing의 "대표 에셋 없음"·outer 연쇄 기록의 할당 실패·경로 성분 ".a"가 닿지 않아 시험을 더했다(Base 모양 둘·Hub 닫힘·import 정책 변형·경계값). ImportRecord의 정렬 동률 처리(index 순)는 같은 원소를 어차피 중복으로 거부하므로 닿지 않는 분기라 뺐다. 할당 실패 시험이 Registry의 GC 참조 표 할당 실패를 삼키는 계약(실패하면 trace로 대신 — 정확성 같음)을 드러냈다 — 시험은 그 tag(GCTY)의 실패만 성공으로 받는다. 시험용 메모리 파일 시스템은 핸들 하나만 열 수 있어 bulk 캐시가 핸들을 쥔 동안 다른 파일을 열지 못했다 — 핸들 풀로 바꿔 공용 헤더로 옮겼다.
+시험이 찾은 것: 처음 측정에서 유효한 ImportRecord를 가진 패키지를 여는 경로·닫힘 표 성장의 할당 실패·NullMissing의 "대표 에셋 없음"·outer 연쇄 기록의 할당 실패·경로 성분 ".a"가 닿지 않아 시험을 더했다(Base 모양 둘·Hub 닫힘·import 정책 변형·경계값). ImportRecord의 정렬 동률 처리(index 순)는 같은 원소를 어차피 중복으로 거부하므로 닿지 않는 분기라 뺐다. 할당 실패 시험이 Registry의 GC 참조 표 할당 실패를 삼키는 계약(실패하면 trace로 대신 — 정확성 같음)을 드러냈다 — 그 할당은 GC 타입 표와 tag(GCTY)를 같이 써서 구분되지 않았으므로 고유 tag(GCRT)를 주고 시험은 그 tag의 실패만 성공으로 받는다. 시험용 메모리 파일 시스템은 핸들 하나만 열 수 있어 bulk 캐시가 핸들을 쥔 동안 다른 파일을 열지 못했다 — 핸들 풀로 바꿔 공용 헤더로 옮겼다.
+
+리뷰(1회) **충족**. 권장 셋을 반영했다: Registry가 삼키는 GC 참조 칸 표 할당에 고유 tag(GCRT — 같은 tag를 실패를 돌려주는 GC 타입 표가 쓰고 있었다), EditorOnly로만 가리킨 대상 누락·깊이 2 제외 시험(`EditorPackageSet_EditorOnlyAndDeepExclusion`), 스펙 문구(소멸 순서의 Discard, 열린 패키지의 미해결 import는 다시 잇지 않음, 경고 detail의 뜻).
+
+A2c2a 상태(2026-11-21): **완료**(리뷰 1회 충족 + 권장 반영). 완료 조건: 대조표(14.1.19) 시험 없는 항목 0·정의된 시험 18개 모두 인용, 조합(대조표 마지막 행), coverage(14.1.20 — Windows), 리뷰어 판정 **충족**.
 
 ## 15. PNG 디코더 범위
 

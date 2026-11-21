@@ -44,8 +44,9 @@ constexpr usize PixelBytes = 3000;
 constexpr EngineVersion NewerEngine{9, 0, 0};
 const PackageCustomVersion UnknownCustomVersions[] = {{Guid{0x1DE, 0x99}, 1}};
 
-// Registry가 실패를 삼키는 GC 참조 표 할당의 tag('GCTY' — ObjectRegistryGcInternal.h GcTypeTag)다.
-constexpr uint32 GcReferenceTableTag = 0x47435459u;
+// Registry가 실패를 삼키는 유일한 할당(GC 참조 칸 표)의 tag('GCRT' — ObjectRegistryGcInternal.h
+// GcReferenceTableTag)다.
+constexpr uint32 GcReferenceTableTag = 0x47435254u;
 
 // n번째 할당을 실패시키고 그 tag를 기록한다(NFailAllocator에 실패 tag를 더한 것).
 class TaggedFailAllocator final : public Allocator {
@@ -785,6 +786,69 @@ TEST(EditorPackageSet_DependencyFailures) {
     }
 }
 
+// EditorOnly 누락·깊이 2 제외(7.1절 15): EditorOnly로만 가리킨 Derived가 없으면 빠지고(asset
+// Derived, related Hero) Hero의 editorRef import(import 1)만 null이다(UnresolvedImport — Hard
+// 참조는 이어진다). Villain을 열 때 Base가 없으면 빠진 Base의 related는 Base를 가리킨 중간 패키지
+// Hero이고 미해결 import는 Hero의 것이다(Villain 참조는 이어진다).
+TEST(EditorPackageSet_EditorOnlyAndDeepExclusion) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Sources sources(env.allocator);
+    REQUIRE(MakeSources(env, sources));
+    {
+        Project project(env.allocator);
+        REQUIRE(project.ready && project.files.Ready());
+        REQUIRE(project.files.AddFile("Base.rasset", sources.base.View()));
+        REQUIRE(project.files.AddFile("Hero.rasset", sources.hero.View()));
+        REQUIRE(project.Rebuild());
+        EditorPackageSet set(env.allocator, Config(env, project));
+        REQUIRE(set.Initialize());
+        Array<EditorOpenWarning> warnings(env.allocator);
+        auto hero = set.Open(FixedId(HeroId), &warnings);
+        REQUIRE(hero);
+        CHECK(set.Count() == 2 && set.Find(FixedId(DerivedId)) == nullptr);
+        TestAsset* heroAsset = AssetOf(set, hero.Value());
+        REQUIRE(heroAsset != nullptr);
+        CHECK(heroAsset->editorRef.Handle().IsNull());
+        CHECK(heroAsset->hard.Handle() == RepresentativeOf(set, BaseId));
+        REQUIRE(warnings.Size() == 2);
+        CHECK(warnings[0].kind == EditorOpenWarningKind::ExcludedDependency);
+        CHECK(warnings[0].diagnostic.code == AssetDiagnosticCode::MissingDependency);
+        CHECK(warnings[0].diagnostic.asset == FixedId(DerivedId));
+        CHECK(warnings[0].diagnostic.related == FixedId(HeroId));
+        CHECK(warnings[1].kind == EditorOpenWarningKind::UnresolvedImport);
+        CHECK(warnings[1].diagnostic.code == AssetDiagnosticCode::MissingDependency);
+        CHECK(warnings[1].diagnostic.asset == FixedId(HeroId));
+        CHECK(warnings[1].diagnostic.related == FixedId(DerivedId));
+        CHECK(warnings[1].diagnostic.detail == 1);
+    }
+
+    Project project(env.allocator);
+    REQUIRE(project.ready && project.files.Ready());
+    REQUIRE(project.files.AddFile("Derived.rasset", sources.derived.View()));
+    REQUIRE(project.files.AddFile("Hero.rasset", sources.hero.View()));
+    REQUIRE(project.files.AddFile("Villain.rasset", sources.villain.View()));
+    REQUIRE(project.Rebuild());
+    EditorPackageSet set(env.allocator, Config(env, project));
+    REQUIRE(set.Initialize());
+    Array<EditorOpenWarning> warnings(env.allocator);
+    auto villain = set.Open(FixedId(VillainId), &warnings);
+    REQUIRE(villain);
+    CHECK(set.Count() == 3);
+    TestAsset* villainAsset = AssetOf(set, villain.Value());
+    REQUIRE(villainAsset != nullptr);
+    CHECK(villainAsset->hard.Handle() == RepresentativeOf(set, HeroId));
+    REQUIRE(warnings.Size() == 2);
+    CHECK(warnings[0].kind == EditorOpenWarningKind::ExcludedDependency);
+    CHECK(warnings[0].diagnostic.asset == FixedId(BaseId));
+    CHECK(warnings[0].diagnostic.related == FixedId(HeroId));
+    CHECK(warnings[1].kind == EditorOpenWarningKind::UnresolvedImport);
+    CHECK(warnings[1].diagnostic.asset == FixedId(HeroId));
+    CHECK(warnings[1].diagnostic.related == FixedId(BaseId));
+    CHECK(set.Find(FixedId(VillainId))->unresolved.IsEmpty());
+    CHECK(set.Find(FixedId(HeroId))->unresolved.Size() == 1);
+}
+
 // 요청한 패키지의 실패(7.1절 15): 같은 Base 모양을 Base로 직접 열면 뺀 경고 자리의 진단이 Open
 // 실패다(읽기 전용·대표 타입 다름·정상은 열린다). 실패하면 아무것도 열리지 않는다. 색인에 없는 id는
 // NotFound(진단 None), 논리 경로가 색인에 없으면 NotFound, 같은 경로 키 둘은 DuplicatePath /
@@ -905,9 +969,9 @@ TEST(EditorPackageSet_ArgumentsAndLifetime) {
 
 // 할당 실패(7.1절 15): 집합 allocator의 할당을 하나씩 실패시키면 Initialize·Open은 OutOfMemory(진단
 // None)이고 아무것도 열리지 않는다. 예외는 Registry가 계약으로 삼키는 GC 참조 표 할당
-// 하나다(실패하면 trace로 대신 — 정확성 같음, ObjectRegistryGcMark): 그 tag의 실패만 성공을 받는다.
-// 유효 ImportRecord가 있는 Base로 연 Hub 닫힘(8개 — 닫힘 표가 자란다)과 경고가 생기는 닫힘(Base
-// 없이 Villain — 경고 표도 같은 allocator)을 모두 훑는다.
+// 하나다(실패하면 trace로 대신 — 정확성 같음, ObjectRegistryGcMark — 그 할당만 tag GCRT를 쓴다): 그
+// tag의 실패만 성공을 받는다. 유효 ImportRecord가 있는 Base로 연 Hub 닫힘(8개 — 닫힘 표가 자란다)과
+// 경고가 생기는 닫힘(Base 없이 Villain — 경고 표도 같은 allocator)을 모두 훑는다.
 TEST(EditorPackageSet_AllocationFailures) {
     const BaseShape shapes[] = {BaseShape::OwnedRecord, BaseShape::Absent};
     for (BaseShape shape : shapes) {

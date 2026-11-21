@@ -37,8 +37,11 @@ constexpr uint64 ParallelTailBudgetDivisor = 4;
 constexpr uint32 GcPageTag = 0x47435047u;      // 'GCPG'
 constexpr uint32 GcPageTableTag = 0x47435054u; // 'GCPT'
 constexpr uint32 GcTypeTag = 0x47435459u;      // 'GCTY'
-constexpr uint32 RootListTag = 0x4743524cu;    // 'GCRL'
-constexpr uint32 GcBlockTag = 0x4743424bu;     // 'GCBK'
+// 타입별 참조 칸 표다. 할당 실패를 삼키고 trace로 대신하는 유일한 GC 할당이라 tag를 따로 둔다(할당
+// 실패 시험이 이 tag만 성공으로 받는다).
+constexpr uint32 GcReferenceTableTag = 0x47435254u; // 'GCRT'
+constexpr uint32 RootListTag = 0x4743524cu;         // 'GCRL'
+constexpr uint32 GcBlockTag = 0x4743424bu;          // 'GCBK'
 
 // 회수 묶음 크기다(ReclaimEligible — 한 번의 잠금으로 떼어 내는 객체 수, GC 설계 17.1절).
 inline constexpr uint32 ReclaimBatchSize = 64;

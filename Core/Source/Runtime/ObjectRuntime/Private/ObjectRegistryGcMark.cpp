@@ -252,7 +252,7 @@ void ObjectRegistry::PrepareReferenceLayout(uint16 index, const Object& object) 
     // 칸이 없는 타입은 빈 표다(표식이 trace를 부르지 않는다).
     if (builder.Count() != 0) {
         auto memory = allocator_.Allocate(sizeof(detail::ReferenceSlot) * builder.Count(),
-                                          alignof(detail::ReferenceSlot), GcTypeTag);
+                                          alignof(detail::ReferenceSlot), GcReferenceTableTag);
         if (!memory) {
             // 표 할당 실패는 trace로 남는다(정확성은 같다).
             return;
