@@ -3,6 +3,7 @@
   "name": "libsodium",
   "version": "1.0.22-stable (db1238f0a509de16b4bc323def5e68fdee78adda, 2026-11-12)",
   "upstreamDirectory": "libsodium-1.0.22-stable",
+  "globalState": true,
   "source": {
     "url": "https://github.com/jedisct1/libsodium/archive/db1238f0a509de16b4bc323def5e68fdee78adda.tar.gz",
     "sha256": "af68d0dffc60422101437d9f2cefd40a0ca904965b954268fa0222a735e2e679",

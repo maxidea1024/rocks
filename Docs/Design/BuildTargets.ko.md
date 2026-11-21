@@ -1,6 +1,6 @@
 # 빌드 타깃·모듈 의존·플러그인 조건 설계
 
-기준일: 2026-11-21, 개정 12. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
+기준일: 2026-11-21, 개정 13. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
 - **타깃 종류 확장**: Editor·Client·Server 타깃과, 타깃 종류에 따라 코드·데이터를 컴파일에서 빼는 매크로.
 - **모듈 의존 공개 범위**: 의존마다 Public(소비자에게 include·정의를 넘김)과 Private(이 모듈 안에서만 씀)을 나눈다.
 - **플러그인 활성 조건**: 프로젝트가 플러그인을 특정 타깃·플랫폼·구성에서만 켠다.
@@ -308,6 +308,15 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 - 버린 안: 리플렉션 헤더가 자기 생성 헤더를 include(UE 구조 — GSD6을 뒤집어 리플렉션 생성 소스 설계와 겹친다), 타입 이름 해시 키(생성 코드가 필요 없지만 익명 namespace의 같은 이름 타입이 충돌한다).
 - 한계: 리플렉션 struct는 inline 키를 유지한다. 헤더 템플릿의 상수 연산표(`StructElementOpsOf<S>::Value` — `StructRefArray<S>` 생성자가 손으로 쓴 헤더 안에서 인스턴스화한다)가 키를 상수 주소로 담는데, 생성 키를 쓰면 `StructRefArray` 필드를 가진 클래스를 만드는 모든 번역 단위에 원소 struct의 생성 헤더가 필요해진다(GSD6과 충돌). Modular에서 모듈 경계를 넘는 struct 키 통합은 BS8d에서 TypeId 기반 조회 등으로 다룬다. 리플렉션 enum은 본문 매크로를 둘 수 없어 지금 키(inline 변수)를 유지한다. Binds 미러의 실제 타입(`Vec3`·`Transform`·`Color`·`InterpCurve` 등 Core 값 타입)도 표지가 없어 inline 키다 — Modular에서 모듈 경계를 가장 많이 넘는 struct 키다. 리플렉션하지 않는 native 등록 타입도 inline 키라 Modular에서 모듈 경계를 넘는 그런 타입의 키는 모듈마다 다르다. 둘 다 BS8d의 진단 대상이다. 모듈 키는 이미 모듈 생성 소스의 정적 지역 객체(소유 모듈 하나)이고, `Schema()`는 리플렉션 생성 소스(GS2) 뒤 생성 `.cpp`의 비inline 함수라 export(BS8d)만 남는다. 완전한 타입 검사는 `NativeTypeKey` 안에서만 한다: 같은 번역 단위의 다른 곳이 불완전한 T로 `ReflectedDeclarationV<T>`를 먼저 평가하면 그 값이 고정된다([리플렉션 생성 소스](ReflectionGeneratedSources.ko.md) 8.1절 한계와 같다).
 
+**BS8c 구현 세부(개정 13).**
+- 판정 1(컴파일): Windows 대상의 공개 헤더 검사 모듈(`PublicHeaderChecks`) 컴파일에 `-Wunique-object-duplication`을 더한다. LLVM Clang 21부터 있는 진단으로, 공유 라이브러리마다 복제되는 가변 객체를 경고한다(빌드는 경고를 오류로 다룬다). 잡는 것: const가 아닌 `inline` 변수, inline 함수 안의 const가 아닌 `static` 지역 변수, `static inline` 데이터 멤버, `inline thread_local`. 메시지는 "no import/export annotation"이다. 진단은 헤더의 선언에만 걸린다(주 소스 파일·시스템 헤더는 보지 않는다). 공개 헤더는 서드파티 헤더를 include하지 않는다(서드파티 규칙 계약).
+- 판정 2(어휘): 정책 `public-header-static-storage`가 엔진 소유 모듈의 `Public/` 헤더(엔진 플러그인 모듈 포함, 서드파티 제외)에서 주석·리터럴을 뺀 `thread_local` 토큰을 거부한다. 진단 1이 보지 못하는 `extern thread_local` 선언과 `static thread_local` 데이터 멤버 선언까지 잡는다(DLL 경계로 import할 수 없으므로 선언도 공개 헤더에 두지 않는다).
+- 대상: 판정 1은 Windows 대상만 켠다(`ToolchainCheck.SupportsUniqueObjectDuplication` — 대상과 `CompilerVersion`의 제조사·주 버전으로 정한다). ELF·Mach-O에서는 진단이 숨김 가시성 객체만 알리는데 공개 헤더 검사는 Monolithic 기본 가시성으로 컴파일하므로 걸릴 것이 없고, Apple clang에는 진단이 없으며, Android NDK clang 20에는 진단이 없다(Windows 판은 Clang 21부터). Windows 최소가 Clang 21이고 Windows CI가 판정 1을 늘 돌리므로 공통 헤더는 빠짐없이 검사된다. 다른 대상에서는 판정 2만 돈다.
+- 고친 위반: 할당기(`DebugAllocator`·`ExternalAllocator`·`PoolAllocator`)의 `static thread_local activeEntry_` → `.cpp`가 정의한 private 접근 함수(함수 안 `thread_local`). `Correlation.h`의 `extern thread_local correlationDepth`·`TraceLogSink.h`의 `inTraceLogWrite`·`ConfigSnapshot.h`의 `inline thread_local CurrentBinding`·`ConfigContext.h`의 `inline ActiveDefaultWriteProbe` → `.cpp`가 정의한 접근 함수(inline으로 쓰던 곳은 그 함수를 부른다 — 호출 하나가 는다). 시험 fixture의 쓰기 가능한 `static inline` 멤버 → 선언만 두고 fixture 모듈 `.cpp`가 정의한다.
+- 서드파티 전역 상태: `ThirdParty.json`(서드파티의 단일 원천)의 code 라이브러리에 `globalState`(true·false) 키를 필수로 둔다(다른 종류는 거부). 규칙이 `NativeModuleInput.HasGlobalState`로 옮기고(서드파티 모듈만 가질 수 있다 — 아니면 입력 오류), 설치 SDK 매니페스트 13이 함께 나르며, 공개 헤더 검사 모듈(`PublicHeaderChecks`)은 서드파티를 의존하지 않으며(공개 include가 없다 — 소비 모듈로 세지 않게), 빌드 입력 검사가 그 모듈을 직접 의존(두 의존 목록)하는 Rocks 모듈이 둘 이상이면 오류다(소비 모듈 이름을 모두 알린다). 지금 표시: Sodium만 true(`sodium_init` 상태·난수 구현 교체·misuse handler — Crypto 하나가 소비), Zstd·Zlib·Lz4·Brotli·MikkTSpace·SpirvReflect는 false(정적 const 표뿐).
+- 버린 안: 헤더마다 Clang JSON AST를 내 걸러 보기(World.h 하나에 92 MB — 헤더 수백 개면 검사 시간이 빌드를 넘는다), 어휘만으로 정적 지역 변수·inline 변수 판정(매크로가 펼치는 정적 지역·템플릿 문맥을 놓치고 오탐이 많다), `globalState`를 규칙 클래스 속성으로(서드파티 사실은 매니페스트가 단일 원천이다).
+- 한계: Clang 진단은 템플릿 문맥(변수 템플릿·템플릿 함수 안 정적 지역·템플릿 클래스 정적 멤버)을 보지 않고 어휘 검사도 잡지 않는다. 쓰기 가능한 것은 `NativeTypeIdentity<T>`(struct·enum·native 등록 타입 키, BS8b 한계)이고, 그 밖에 템플릿 안 동적 초기화 const 정적 지역(`GeneratedBitfieldAccess.h`·`GeneratedStagedReferenceAccess.h`의 연산표, `ValueCopy.h`)이 있다 — 주소를 비교하지 않아 복제돼도 동작은 같다. 주소를 식별자로 쓰는 const 정적 객체도 판정 밖이다(리뷰로 막는다). `ROCKS_GRAPH_SHARED_DATA`(`GraphSharedData.h`)는 inline 함수 안 정적 색인이라 공개 헤더에서 쓰면 판정 1이 잡지만, 모듈 사이에 공유할 타입을 등록할 길이 없다 — 호스트 서비스 키처럼 선언·정의로 나누는 것을 BS8d에서 다룬다. 게임 모듈(`Templates/<게임>/Source/<모듈>/Public/`)은 판정 2의 경로와 엔진 타깃의 공개 헤더 검사 범위 밖이다(게임 빌드의 공개 헤더 검사가 생길 때 다룬다).
+
 **모듈 API 매크로(BD27).**
 - 빌드가 C++ 모듈마다 `ROCKS_<MODULE>_API`(모듈 이름 대문자)를 정의한다. UE `<MODULE>_API`(`UEBuildModule.cs:223, 239`)에 해당하고, 이름은 Rocks 매크로 접두 규칙을 따른다.
 - 값은 UE와 같다(`UEBuildModule.cs:750-770`). `Monolithic`이면 빈 값이다. `Modular`이면 그 모듈 자신의 컴파일에서는 export, 다른 모듈의 컴파일에서는 import다.
@@ -338,8 +347,8 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
   - `thread_local` 변수(선언 포함). DLL 경계로 import할 수 없다.
   - 주소를 식별자로 쓰는 정적 객체. const여도 공유 라이브러리마다 주소가 다르다(BD28의 타입 키·모듈 키).
   - 대신 소유 모듈의 cpp에 두고 export한 접근 함수로 노출한다. `constexpr`·const 상수는 괜찮다.
-- 판정은 공개 헤더 검사(BD9)가 헤더마다 하는 컴파일에서 Clang AST로 한다(정책 이름 `public-header-static-storage`). Monolithic·Modular와 무관하게 늘 검사해, Editor 빌드에서만 드러나는 상태 분열을 막는다.
-- 지금 위반의 예(BS8에서 고친다, 전체 목록은 BS8의 정책 검사가 찾는다):
+- 판정은 공개 헤더 검사(BD9)가 헤더마다 하는 컴파일에 Clang 진단 `-Wunique-object-duplication`을 켜서 한다(개정 13 — 처음에는 Clang AST로 정했으나 비용 때문에 바꿨다, BS8c 구현 세부). 그 진단이 보지 못하는 `thread_local` 선언은 정책 `public-header-static-storage`가 어휘로 본다. Monolithic·Modular와 무관하게 늘 검사해, Editor 빌드에서만 드러나는 상태 분열을 막는다.
+- 설계 당시 위반의 예(개정 2 기준 줄 번호 — `thread_local`·fixture는 BS8c에서 모두 고쳤고, `NativeTypeIdentity`는 클래스만 BS8b에서 바꿨다):
   - `thread_local`: `Config/ConfigSnapshot.h:215`(`inline thread_local`), `Core/Diagnostics/Correlation.h:139`(`extern thread_local`), `Core/Memory/BinnedAllocator.h:60`·`DebugAllocator.h:84`·`ExternalAllocator.h:71`·`PoolAllocator.h:68`(`static thread_local` 멤버), `TraceLogSink.h:46`.
   - 주소 식별: `Object/Object.h:78-92` `NativeTypeIdentity`(BD28로 바꾼다).
   - 매크로가 펼치는 정적 지역 변수: `TraceMark.h:177`(inline 함수 안에서 쓰면 위반이다).
@@ -599,3 +608,4 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 | 10 | 2026-11-21 | BS9b 구현 세부(3.9절): `PluginModuleRules`(봉인 Configure, 기술자 값), `SourceModuleRules.ModuleType`과 정책 `module-type-group`, `Apply`의 위치·계층 검사(`EngineRoot`), Release 배제의 플러그인 해석과 `release-plugin-resolution`, `plugin-module-rules-base` 범위. [모듈 로더](ModuleLoader.ko.md) 개정 7 |
 | 11 | 2026-11-21 | BS9c 구현 세부(3.9절): `PluginModules`와 `LinkIntoPrimary`, `LinkClosure` 순서(링크 폐포 → 플러그인 모듈 → 동적 모듈), CLI 엔진 해석과 빌드 근, SDK export·`Modular` 거부 |
 | 12 | 2026-11-21 | BS9d 구현 세부(3.9절): UnrealExchange 플러그인 골격, Commandlet·EngineTests의 `Plugins`, `PluginTestModules`, 엔진 주인 `Apply`의 도달 범위 축소 |
+| 13 | 2026-11-21 | BS8c 구현 세부: BD29 판정을 Clang AST 대신 공개 헤더 검사의 `-Wunique-object-duplication`(LLVM Clang 20+, Apple clang 제외)과 `thread_local` 어휘 정책 `public-header-static-storage`로, 지금 위반 정리(할당기·Correlation·TraceLogSink·CVar 바인딩·기본값 쓰기 탐침·fixture), 서드파티 `ThirdParty.json` `globalState` 필수 키와 단일 직접 소비 검사(Sodium만 true). 한계: 템플릿 문맥 저장소 |

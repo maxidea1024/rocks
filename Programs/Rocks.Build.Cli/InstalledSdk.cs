@@ -17,12 +17,13 @@ namespace Rocks.Build.Cli;
 // 목록이다(3.8절 — 게임 실행 파일이 SDK 모듈을 링크하면 그 동적 모듈도 링크하고 모듈 표에 싣는다). LoadingPhase(단계 이름 —
 // Descriptors.LoadingPhase)·ProvidesLaunch는 NativeModuleInput과 같은 칸이다(3.11절 — 게임 실행 파일의 모듈 표가 SDK 모듈의 단계로 단계
 // 순서·부트 모듈 검사를 소스 빌드와 같게 한다). PublicDependencies·PrivateDependencies는 NativeModuleInput과 같은 두 의존 목록이다
-// (Docs/Design/BuildTargets.ko.md 3.5절 — 게임 빌드가 같은 공개 환경 규칙으로 컴파일 환경을 만든다).
+// (Docs/Design/BuildTargets.ko.md 3.5절 — 게임 빌드가 같은 공개 환경 규칙으로 컴파일 환경을 만든다). HasGlobalState는 NativeModuleInput과
+// 같은 서드파티 표지다(3.8절 BD29 — 게임 모듈이 SDK의 전역 상태 서드파티를 직접 의존하면 소비 모듈이 둘이 되어 거부된다).
 public sealed record SdkModule(string Name, string[] Includes, string[] Defines, string[] PublicDependencies, string[] PrivateDependencies,
     string[] Libraries,
     string[] SystemLibraries, string[] Frameworks, string? Descriptor, string? IdentityManifest, bool ProvidesBuildInfo,
     bool ProvidesModuleTable, bool ThirdParty, string? SharedPchHeader, string[] DynamicModules, string? LoadingPhase,
-    bool ProvidesLaunch);
+    bool ProvidesLaunch, bool HasGlobalState);
 
 // SDK를 만든 엔진 버전이다(Build/Build.version 값 — 그 파일은 SDK에 복사하지 않는다, Docs/Design/ReflectionFoundations.ko.md 8.2절).
 // 게임 빌드는 저장소 파일을 읽지 않고 이 값만 쓴다(BuildInfo 생성 TU·.rocksproject engineVersion 대조). 위치 record는 JSON에서 빠진
@@ -55,7 +56,9 @@ public static class InstalledSdk
     // Launch는 단계가 없어 게임 실행 파일의 부트 모듈이 EarliestPossible에 시작하지 않으므로 버전 불일치로 거부한다).
     // 12: SdkModule의 Dependencies를 PublicDependencies·PrivateDependencies로 나눴다(Docs/Design/BuildTargets.ko.md 3.5절 BS0 — 이전 SDK는
     // 두 목록이 없어 게임 빌드가 공개 환경을 계산할 수 없으므로 버전 불일치로 거부한다).
-    internal const int ManifestVersion = 12;
+    // 13: SdkModule에 HasGlobalState 추가(Docs/Design/BuildTargets.ko.md 3.8절 BS8c — 이전 SDK는 전역 상태 서드파티를 표시하지 않아 게임
+    // 빌드가 단일 소비 검사를 할 수 없으므로 버전 불일치로 거부한다).
+    internal const int ManifestVersion = 13;
 
     /// <summary>
     /// SDK 타깃에서 도달하는 모듈만 고른다. 규칙 로더는 모든 모듈 규칙을 읽으므로 타깃이 쓰지 않는(빌드되지 않은)
@@ -160,7 +163,7 @@ public static class InstalledSdk
                     module.SystemLibraries.ToArray(),
                     module.Frameworks.ToArray(), descriptor, identityManifest, module.ProvidesBuildInfo, module.ProvidesModuleTable,
                     module.ThirdParty, module.SharedPchHeader, module.DynamicModules.ToArray(), module.LoadingPhase.ToString(),
-                    module.ProvidesLaunch));
+                    module.ProvidesLaunch, module.HasGlobalState));
             }
             // 고정 버전 외부 라이브러리의 라이선스 원문을 모두 함께 배포한다(BSD 계열은 바이너리 배포 시 고지 의무가 있다).
             // code 라이브러리는 모듈을 담을 때, 데이터 전용 라이브러리(예: Unicode UCD)는 파생물이 들어간 모듈(embeddedIn)을
@@ -401,7 +404,8 @@ public static class InstalledSdk
             DynamicModules = module.DynamicModules,
             // Verify가 이름을 확인했다.
             LoadingPhase = Enum.Parse<Descriptors.LoadingPhase>(module.LoadingPhase!),
-            ProvidesLaunch = module.ProvidesLaunch
+            ProvidesLaunch = module.ProvidesLaunch,
+            HasGlobalState = module.HasGlobalState
         }).Concat(projectModules).ToArray();
         // 켠 플러그인의 모듈은 타깃이 직접 참조하지 않아도 빌드하고 주 실행 파일에 링크한다(Docs/Design/BuildTargets.ko.md 3.9절 BD36, UE와
         // 같다). 메타데이터 생성도 같은 root 집합이다.

@@ -838,13 +838,13 @@ void TransactionDestroyed(void* context) noexcept {
 // 시험이 건 TestHookAsset hook을 범위 끝에서 푼다(뒤 GC·Registry 소멸이 부르지 않게).
 struct TransactionHookScope {
     explicit TransactionHookScope(TransactionHooks& hooks) noexcept {
-        asset_fixture::testHookAssetHooks.constructed = TransactionConstructed;
-        asset_fixture::testHookAssetHooks.destroyed = TransactionDestroyed;
-        asset_fixture::testHookAssetHooks.context = &hooks;
+        asset_fixture::ActiveTestHookAssetHooks().constructed = TransactionConstructed;
+        asset_fixture::ActiveTestHookAssetHooks().destroyed = TransactionDestroyed;
+        asset_fixture::ActiveTestHookAssetHooks().context = &hooks;
     }
 
     ~TransactionHookScope() {
-        asset_fixture::testHookAssetHooks = asset_fixture::TestHookAssetHooks{};
+        asset_fixture::ActiveTestHookAssetHooks() = asset_fixture::TestHookAssetHooks{};
     }
 
     TransactionHookScope(const TransactionHookScope&) = delete;

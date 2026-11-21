@@ -45,7 +45,9 @@ struct StructLeaf {
         return builder.Build();
     }
 
-    static inline uint32 migrations = 0;
+    // 정의는 Private/FixtureState.cpp다(공개 헤더에 쓰기 가능한 정적 저장소를 두지 않는다 —
+    // BuildTargets BD29).
+    static uint32 migrations;
     ROCKS_PROPERTY() uint32 count = 0;
     ROCKS_PROPERTY() String label;
     ROCKS_PROPERTY() TextureGroup group = TextureGroup::World;
@@ -86,7 +88,9 @@ struct StructOwner final : Object {
         ++constructed;
     }
 
-    static inline uint32 constructed = 0;
+    // 정의는 Private/FixtureState.cpp다(공개 헤더에 쓰기 가능한 정적 저장소를 두지 않는다 —
+    // BuildTargets BD29).
+    static uint32 constructed;
     ROCKS_PROPERTY() StructHolder holder;
     ROCKS_PROPERTY() uint32 plain = 0;
     ROCKS_PROPERTY(EditorOnly) StructLeaf extra;

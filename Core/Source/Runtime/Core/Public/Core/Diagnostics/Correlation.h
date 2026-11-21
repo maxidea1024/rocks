@@ -133,18 +133,10 @@ CorrelationToken CaptureCorrelation() noexcept;
 // 이 스레드 스택 맨 위의 id를 out에 쓴다. 비어 있으면 false이고 out은 바뀌지 않는다.
 bool CurrentCorrelation(CorrelationIds& out) noexcept;
 
-namespace detail {
-
-// 이 스레드 스택의 깊이다(CorrelationDepth가 인라인으로 읽는다).
-extern thread_local constinit uint32 correlationDepth;
-
-} // namespace detail
-
-// 이 스레드 스택의 깊이다(넘쳐 세기만 한 쌓기는 빼고). 인라인 TLS 읽기 하나라 비어 있는지를 분기
-// 하나로 볼 수 있다.
-inline usize CorrelationDepth() noexcept {
-    return detail::correlationDepth;
-}
+// 이 스레드 스택의 깊이다(넘쳐 세기만 한 쌓기는 빼고). 비어 있는지를 분기 하나로 볼 수 있다.
+// 깊이는 Core .cpp의 thread_local이라 호출 하나를 거친다(공개 헤더에 thread_local을 두지 않는다 —
+// Docs/Design/BuildTargets.ko.md 3.8절 BD29).
+usize CorrelationDepth() noexcept;
 
 // 쌓기·내리기 관찰자를 정한다(원자 포인터 하나). 같은 관찰자를 다시 주면 아무것도 바꾸지 않고
 // 성공하고(trace는 세션 Start마다 다시 건다), 다른 관찰자가 이미 있으면 AlreadyExists다. nullptr은

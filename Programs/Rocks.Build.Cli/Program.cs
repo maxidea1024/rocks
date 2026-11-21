@@ -302,10 +302,17 @@ namespace Rocks.Build.Cli
                         // 공유 PCH를 쓰면 PCH에 든 헤더가 빠진 include를 메워 검사가 무력해진다.
                         Unity = UnityMode.Off,
                         PchUsage = PchUsage.Off,
+                        // 공개 헤더의 쓰기 가능한 정적 저장소(공유 라이브러리마다 복제된다)를 Clang 진단으로 거부한다(Docs/Design/BuildTargets.ko.md
+                        // 3.8절 BD29·BS8c). Windows 대상만 켠다(다른 대상에서는 숨김 가시성 객체만 알린다 — thread_local은 정책 검사가 따로 본다).
+                        AdditionalCompileArguments = ToolchainCheck.SupportsUniqueObjectDuplication(toolchain.Platform, toolchain.CompilerVersion)
+                            ? [ToolchainCheck.UniqueObjectDuplicationWarning] : [],
                         // 저장소 루트를 include하지 않는다: 검사 TU는 의존 모듈의 public include만으로 헤더를 연다. 도달한 라이브러리를
                         // 모두 공개 의존으로 두므로 모듈마다 자기 공개 환경만으로 컴파일하는 검사(BD9)가 아니다 — 그 검사는 BS1이다.
                         // BS1 전에는 의존을 비공개로 내리지 않는다(Docs/Design/BuildTargets.ko.md 3.5절, BS0 → BS1 → BS3).
-                        PublicDependencies = reached.Where(name => modules.Single(module => module.Name == name).Kind == NativeModuleKind.StaticLibrary).Order(StringComparer.Ordinal).ToArray()
+                        // 서드파티 모듈은 뺀다: 공개 include가 없고(서드파티 규칙 계약) 전역 상태 서드파티의 직접 소비 모듈이 하나여야 한다(BD29·BS8c).
+                        PublicDependencies = reached.Select(name => modules.Single(module => module.Name == name))
+                            .Where(module => module.Kind == NativeModuleKind.StaticLibrary && !module.ThirdParty)
+                            .Select(module => module.Name).Order(StringComparer.Ordinal).ToArray()
                     });
                     targets.Add("PublicHeaderChecks");
                 }

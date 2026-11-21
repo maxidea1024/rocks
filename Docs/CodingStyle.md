@@ -31,6 +31,8 @@
 
 엔진 소유 Runtime과 공개 API에는 STL 컨테이너·문자열·알고리즘을 사용하지 않는다. 문자열은 자체 `String`/`StringView`, 번역 가능한 표시 문구는 별도 `Text` 계층으로 구분한다. 각 타입의 실제 구현 여부는 구현 상태 문서를 따른다. 외부 SDK와 호스트 도구는 설계에 명시한 경계에서 격리한다.
 
+공개 헤더(`Public/`)에는 쓰기 가능한 정적 저장소(const가 아닌 `inline` 변수, inline·템플릿 함수 안의 const가 아닌 `static` 지역 변수, `static inline` 데이터 멤버)와 `thread_local`(선언 포함)을 두지 않는다. 공유 라이브러리(`Modular`)마다 따로 생겨 상태가 갈라진다. 저장소는 소유 모듈의 `.cpp`에 두고 접근 함수로 노출한다. `constexpr`·const 상수는 괜찮다. 공개 헤더 검사의 Clang 진단 `-Wunique-object-duplication`과 정책 `public-header-static-storage`가 막는다([빌드 타깃](Design/BuildTargets.ko.md) 3.8절 BD29).
+
 ## 형식 한계와 "없음" 표지
 
 형식의 한계를 `0xffffffffu`·`UINT32_MAX`·`SIZE_MAX`·`INT_MAX`·`FLT_MAX`·`static_cast<usize>(-1)`·`~0u`·`2147483647` 같은 날 숫자나 C 매크로로 쓰지 않는다. 값이 무엇을 뜻하는지(상한인지, 비어 있다는 표지인지)를 이름으로 드러낸다.

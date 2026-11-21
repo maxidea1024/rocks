@@ -117,6 +117,13 @@ public sealed partial record ThirdPartyManifest(
     /// </summary>
     public bool SanitizerInstrumentation { get; init; } = true;
 
+    /// <summary>
+    /// 프로세스 전역 상태(초기화 상태·전역 훅·바꿔 끼운 구현 등)가 있는 code 라이브러리인지다(manifest <c>globalState</c>, code 라이브러리는
+    /// 필수 — Docs/Design/BuildTargets.ko.md 3.8절 BD29·BS8c). 참이면 그 모듈을 직접 의존하는 Rocks 모듈이 하나여야 한다(Modular에서 소비
+    /// 모듈의 공유 라이브러리마다 링크되어 상태가 두 벌이 되지 않게). 다른 종류(data·headers·binary)에는 둘 수 없다.
+    /// </summary>
+    public bool GlobalState { get; init; }
+
     /// <summary>원본 디렉터리에 적용한 추적 가능한 수정 목록이다(manifest <c>modifications</c>). 비어 있으면 원본 그대로다.</summary>
     public IReadOnlyList<ThirdPartyModification> Modifications { get; init; } = [];
 
@@ -261,7 +268,7 @@ public sealed partial record ThirdPartyManifest(
 
     // 생략할 수 있는 최상위 필드다(기존 code manifest는 쓰지 않는다).
     private static readonly string[] OptionalTopLevel =
-        ["kind", "embeddedIn", "compileArguments", "linkTimeOptimization", "sanitizerInstrumentation", "modifications", "patch"];
+        ["kind", "embeddedIn", "compileArguments", "linkTimeOptimization", "sanitizerInstrumentation", "modifications", "patch", "globalState"];
 
     // licenses 항목의 필수·선택 필드다.
     private static readonly string[] LicenseFields = ["spdx", "upstreamExpression", "file", "binaryNoticeRequired"];
@@ -575,6 +582,27 @@ public sealed partial record ThirdPartyManifest(
 
         bool linkTimeOptimization = OptionalFalse(fields, "linkTimeOptimization");
         bool sanitizerInstrumentation = OptionalFalse(fields, "sanitizerInstrumentation");
+        // code 라이브러리는 전역 상태 여부를 반드시 밝힌다(BuildTargets BD29 — 기본값으로 넘어가지 않게).
+        bool globalState = false;
+        if (fields.TryGetValue("globalState", out JsonElement globalStateElement))
+        {
+            if (kind != ThirdPartyKind.Code)
+            {
+                throw new FormatException("globalState: only a code library declares it (data, headers and binary libraries are not compiled into consuming modules)");
+            }
+
+            if (globalStateElement.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            {
+                throw new FormatException("globalState: must be true or false");
+            }
+
+            globalState = globalStateElement.ValueKind == JsonValueKind.True;
+        }
+        else if (kind == ThirdPartyKind.Code)
+        {
+            throw new FormatException("globalState: required for a code library (true when it keeps process-wide state such as an initialization " +
+                "flag, global hooks or a replaced implementation)");
+        }
 
         var modifications = new List<ThirdPartyModification>();
         if (fields.TryGetValue("modifications", out JsonElement modificationsElement))
@@ -675,6 +703,7 @@ public sealed partial record ThirdPartyManifest(
             CompileArguments = compileArguments,
             LinkTimeOptimization = linkTimeOptimization,
             SanitizerInstrumentation = sanitizerInstrumentation,
+            GlobalState = globalState,
             Modifications = modifications,
             Patch = patch
         };

@@ -343,6 +343,11 @@ public sealed record NativeModuleInput
     // 않는다(Docs/Design/ModuleLoader.ko.md 3.1절 면제). 설치 SDK가 함께 나른다.
     public bool ThirdParty { get; init; }
 
+    // 프로세스 전역 상태가 있는 서드파티 모듈 표지다(ThirdPartyModuleRules가 ThirdParty.json globalState로 켠다 — Docs/Design/BuildTargets.ko.md
+    // 3.8절 BD29·BS8c). 켜진 모듈을 직접 의존(두 의존 목록)하는 모듈이 둘 이상이면 입력 오류다(InputValidation): Modular에서 서드파티는
+    // 소비 모듈의 공유 라이브러리마다 링크되므로 상태가 두 벌이 된다. 다른 모듈은 그 소비 모듈의 Rocks API를 거친다.
+    public bool HasGlobalState { get; init; }
+
     // 모듈 표 행에 싣는 로딩 단계다(Docs/Design/ModuleLoader.ko.md 3.3·3.11절). 기술자 모듈(게임·플러그인)은 기술자의 loadingPhase를
     // DescriptorModuleSet.Apply가 넣고, 엔진 모듈은 규칙의 LoadingPhase(기본 Default)다. 모듈 표를 만들 때 행의 의존이 이 단계보다 늦으면
     // 오류다(MD6 — None 의존은 허용).

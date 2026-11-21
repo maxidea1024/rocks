@@ -99,7 +99,7 @@ GetResult<T> ReadBound(const VarDefinition& definition) noexcept {
         }
     }
 
-    const config::detail::ThreadBinding& binding = config::detail::CurrentBinding;
+    const config::detail::ThreadBinding& binding = config::detail::CurrentBinding();
     if (binding.snapshot == nullptr) {
         FatalUnbound(definition);
     }
@@ -159,7 +159,7 @@ GetResult<T> ReadBoundScoped(const VarDefinition& definition, CVarScopeId scope)
         }
     }
 
-    const config::ConfigSnapshot* snapshot = config::detail::CurrentBinding.snapshot;
+    const config::ConfigSnapshot* snapshot = config::detail::CurrentBinding().snapshot;
     const uint32 index = platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&definition.index);
     if (snapshot != nullptr && index != Index::None) {
         const config::CVarText* text = nullptr;

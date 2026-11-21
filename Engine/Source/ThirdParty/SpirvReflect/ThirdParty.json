@@ -3,6 +3,7 @@
   "name": "SPIRV-Reflect",
   "version": "1.4.363.0",
   "upstreamDirectory": "spirv-reflect-1.4.363.0",
+  "globalState": false,
   "source": {
     "url": "https://github.com/KhronosGroup/SPIRV-Reflect/archive/refs/tags/vulkan-sdk-1.4.363.0.tar.gz",
     "sha256": "e0b2914648ab2eac1c83851911199e73f868d966e183531e4c227a258ea07bc6",

@@ -251,6 +251,7 @@ internal static class ThirdPartyPolicyTests
                          ("linkTimeOptimization in data library", "\"kind\": \"data\"", "\"kind\": \"data\", \"linkTimeOptimization\": false"),
                          ("sanitizerInstrumentation in data library", "\"kind\": \"data\"",
                           "\"kind\": \"data\", \"sanitizerInstrumentation\": false"),
+                         ("globalState in data library", "\"kind\": \"data\"", "\"kind\": \"data\", \"globalState\": false"),
                          ("unknown kind", "\"kind\": \"data\"", "\"kind\": \"archive\""),
                          ("invalid embedding module", "\"Core\"", "\"Core Module\""),
                          ("licenseSource without https", "https://example.invalid/license.txt", "http://example.invalid/license.txt"),
@@ -546,6 +547,20 @@ internal static class ThirdPartyPolicyTests
                 WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":", "\"linkTimeOptimization\": true, \"notes\":")));
             ExpectFailure("linkTimeOptimization string", fixture =>
                 WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":", "\"linkTimeOptimization\": \"false\", \"notes\":")));
+            // code 라이브러리는 전역 상태 여부(globalState)를 반드시 밝히고 값은 true·false다(BuildTargets 3.8절 BD29·BS8c).
+            using (TemporaryDirectory fixture = new())
+            {
+                WriteFixture(fixture);
+                Verify.That(!ThirdPartyManifest.Read(fixture.FilePath(Library)).GlobalState, "globalState false parsed");
+                WriteManifest(fixture, manifest => Replace(manifest, "\"globalState\": false", "\"globalState\": true"));
+                NoFailures(PolicyChecks.ThirdParty(fixture.Root));
+                Verify.That(ThirdPartyManifest.Read(fixture.FilePath(Library)).GlobalState, "globalState true parsed");
+            }
+
+            ExpectFailure("globalState missing in a code library", fixture =>
+                WriteManifest(fixture, manifest => Replace(manifest, "\"globalState\": false,", "")));
+            ExpectFailure("globalState string", fixture =>
+                WriteManifest(fixture, manifest => Replace(manifest, "\"globalState\": false", "\"globalState\": \"false\"")));
             ExpectFailure("sanitizerInstrumentation true", fixture =>
                 WriteManifest(fixture, manifest => Replace(manifest, "\"notes\":", "\"sanitizerInstrumentation\": true, \"notes\":")));
             ExpectFailure("unknown architecture key", fixture =>
@@ -619,6 +634,7 @@ internal static class ThirdPartyPolicyTests
             ["name"] = "Fake",
             ["version"] = "1.0",
             ["upstreamDirectory"] = "fake-1.0",
+            ["globalState"] = false,
             ["source"] = new { url = "https://example.invalid/fake-1.0.tar.gz", sha256 = new string('0', 64), verification = "fixture" },
             ["licenses"] = licenses ?? new[] { DefaultLicense },
             ["translationUnits"] = new[] { "Glue.c", "fake-1.0/fake.c" },

@@ -44,6 +44,25 @@ public static class ToolchainCheck
         return ToolchainTable.VerifiedCompilers(name).Contains(compilerVersion.Trim(), StringComparer.Ordinal);
     }
 
+    /// <summary>공유 라이브러리마다 복제되는 가변 객체를 알리는 Clang 진단이다(Docs/Design/BuildTargets.ko.md 3.8절 BD29·BS8c).</summary>
+    public const string UniqueObjectDuplicationWarning = "-Wunique-object-duplication";
+
+    /// <summary>
+    /// 공개 헤더 검사가 <see cref="UniqueObjectDuplicationWarning"/>을 켤 대상인지다(Docs/Design/BuildTargets.ko.md 3.8절 BS8c). Windows
+    /// 대상만 참이다: Windows에서는 import·export 표시 없는 가변 객체를 모두 알리지만, ELF·Mach-O에서는 숨김 가시성 객체만 알리고 공개 헤더
+    /// 검사는 Monolithic 기본 가시성으로 컴파일하므로 걸릴 것이 없다. 진단(Windows 판 포함)은 LLVM Clang 21부터라 그보다 낮거나 읽지 못하는
+    /// 버전(수동으로 만든 시험 도구 모음의 빈 값)은 거짓이다. compilerVersion은 정규화한 <c>--version</c> 첫 줄
+    /// (<see cref="NativeToolchain.CompilerVersion"/>)이다. 사용 예:
+    /// <c>ToolchainCheck.SupportsUniqueObjectDuplication(NativePlatform.Windows, "clang version 22.1.8")</c>는 참이다.
+    /// </summary>
+    public static bool SupportsUniqueObjectDuplication(NativePlatform platform, string compilerVersion) =>
+        platform == NativePlatform.Windows &&
+        ToolchainTable.ParseClangVersion(compilerVersion) is (string, int major, bool appleClang) && !appleClang &&
+        major >= UniqueObjectDuplicationMinimumClang;
+
+    // -Wunique-object-duplication(Windows 판 포함)이 처음 실린 LLVM Clang 주 버전이다.
+    private const int UniqueObjectDuplicationMinimumClang = 21;
+
     /// <summary>
     /// build-evidence <c>stlClangCheck</c>에 남길 STL 최소 Clang 확인 결과다. stlHeader가 있으면 요구한 최소(<c>requires Clang 22</c>)나
     /// 조건을 찾지 못한 사실을, 없으면 readProblem(읽지 못한 이유)을 돌려준다.

@@ -3,6 +3,7 @@
   "name": "zlib",
   "version": "1.4",
   "upstreamDirectory": "zlib-1.4",
+  "globalState": false,
   "source": {
     "url": "https://github.com/madler/zlib/releases/download/v1.4/zlib-1.4.tar.gz",
     "sha256": "02dd159783677a749c04adbdd02b55b8a2bcc7e054f51b76b549199a916ad584",

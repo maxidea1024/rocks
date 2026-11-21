@@ -1021,7 +1021,7 @@ nugget-gc --max-bytes=<n> --unused-days=<n>
 | `BaseGameAsset`·`DerivedGameAsset` | 상속 | 기반 필드·파생 필드 | `FixtureAsset_InheritanceRoundTrip` |
 | `ValidatedAsset`(+`FixtureRange` Validate hook) | 검증 hook | 필드 struct·struct 배열 원소의 hook | `FixtureAsset_ValidateHook`(유효 왕복, 거부 값은 로드가 CorruptPackage) |
 | `TestAsset`·`TestPart`·`TestScratch`·`TestRequiredAsset` | 참조·구조 | 다른 패키지 Hard(단일·`ObjectRefArray<Object>`)·Soft·EditorOnly Hard·EditorOnly 값·bulk, 하위 객체 사슬(`Body.Socket`)·같은 패키지 안 참조, 저장 불가(Transient) 하위 객체, Required Hard | `AssetPackage_*`(PackageFormatTests·PackageFuzzTests) |
-| `TestHookAsset` | 사용자 코드 hook | 생성자·소멸자가 시험이 건 hook(`testHookAssetHooks`)을 부른다, 기대 타입이 TestAsset인 Hard 참조 하나(오래된 의존 쿠킹 결과로 공개를 실패시켜 롤백 소멸자에 닿는다) | `AssetLoader_TransactionCodeCannotReenter` |
+| `TestHookAsset` | 사용자 코드 hook | 생성자·소멸자가 시험이 건 hook(`ActiveTestHookAssetHooks()`)을 부른다, 기대 타입이 TestAsset인 Hard 참조 하나(오래된 의존 쿠킹 결과로 공개를 실패시켜 롤백 소멸자에 닿는다) | `AssetLoader_TransactionCodeCannotReenter` |
 | `GameDataAsset`·`GameComponent`·`FixtureEntry` | 복합 | 하위 객체 여러 개(순환 사슬)·다른 에셋 Hard 배열과 하위 객체의 다른 패키지 참조·Soft·weak·커브·bulk·struct 배열·Map·hook struct | `AssetPackage_CompositeGameDataRoundTrip` |
 | `ComboAsset`·`ComboEditorAsset`·`ComboRequiredAsset`·`ComboPart`·`ComboPartDerived`(+종류별 `Combo*` struct) | 모든 조합 | 아래 "지원하는 모든 조합" | `FixtureAsset_CombinationsCoverPropertyTable`·`FixtureAsset_CombinationRoundTrip`·`FixtureAsset_CombinationRequired` |
 
@@ -1339,7 +1339,7 @@ A1c 상태(2026-11-20): **구현**. 완료 조건 넷을 모두 갖췄다. 빠�
 - 요구 대조표(14.1.5): 시험 없는 항목 0, 정의된 시험 47개를 모두 인용
 - 조합: 단계 조합 3496개·결함 단계와 종료 조합 110개, 금지 조합은 명시하고 일대일·실행 수로 빠짐 검사
 - coverage(14.1.6): 닿지 않은 곳은 소멸자 Fatal 둘뿐(자식 probe가 문구 대조), Release 구성에서 빠지는 결과 주입은 따로 적음
-- 리뷰어 참고(병합을 막지 않음): `testHookAssetHooks`는 전역 하나라 시험 병렬 실행 때 다시 볼 것, 결함 단계와 종료 조합에는 취소·합류 축이 없다(`ShutdownDrainsAndReleases`가 덮음)
+- 리뷰어 참고(병합을 막지 않음): `ActiveTestHookAssetHooks()`는 전역 하나라 시험 병렬 실행 때 다시 볼 것, 결함 단계와 종료 조합에는 취소·합류 축이 없다(`ShutdownDrainsAndReleases`가 덮음)
 
 #### 14.1.7 요구 대조표(A1d — AssetManager)
 
