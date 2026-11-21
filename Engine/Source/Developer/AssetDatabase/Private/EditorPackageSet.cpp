@@ -1,3 +1,5 @@
+#include "AssetDatabaseInternal.h"
+
 #include <AssetDatabase/EditorPackageSet.h>
 #include <AssetDatabase/ImportRecord.h>
 #include <AssetRuntime/Package.generated.h>
@@ -13,6 +15,10 @@
 namespace rocks {
 
 namespace {
+
+using asset_database_detail::EditorAppendGuidText;
+using asset_database_detail::EditorIsOrphanTempName;
+using asset_database_detail::EditorTempSuffix;
 
 // 진단 하나를 채운다(Open 실패·경고 공통).
 AssetDiagnostic EditorDiagnostic(AssetDiagnosticCode code, ErrorCode error, AssetId asset,
@@ -53,71 +59,6 @@ Result<T> EditorFail(AssetDiagnostic* out, const AssetDiagnostic& diagnostic) no
 // object import를 만드는 의존 종류인지다(5.7절 5 — 닫힘을 넓히는 종류).
 bool OpensWith(PackageDependencyKind kind) noexcept {
     return kind == PackageDependencyKind::Hard || kind == PackageDependencyKind::EditorOnly;
-}
-
-// guid 문자열(36자 소문자 하이픈 형식)의 길이와 하이픈 위치다.
-constexpr usize EditorGuidTextBytes = 36;
-constexpr usize EditorGuidHyphens[] = {8, 13, 18, 23};
-constexpr StringView EditorTempSuffix = ".tmp";
-static_assert(1 + EditorGuidTextBytes + 4 == TemporaryFileSuffixBytes,
-              "Save temporary suffix must match the layout path limit");
-
-bool EditorIsGuidHyphen(usize index) noexcept {
-    for (usize hyphen : EditorGuidHyphens) {
-        if (index == hyphen) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-// value를 36자 소문자 하이픈 형식으로 붙인다(high 16자리 다음 low 16자리).
-Result<void> EditorAppendGuidText(String& out, Guid value) noexcept {
-    constexpr char Digits[] = "0123456789abcdef";
-    constexpr usize NibbleBits = 4;
-    constexpr usize WordNibbles = 16;
-    char text[EditorGuidTextBytes];
-    usize nibble = 0;
-    for (usize at = 0; at < EditorGuidTextBytes; ++at) {
-        if (EditorIsGuidHyphen(at)) {
-            text[at] = '-';
-            continue;
-        }
-
-        const uint64 word = nibble < WordNibbles ? value.high : value.low;
-        const usize shift = (WordNibbles - 1 - nibble % WordNibbles) * NibbleBits;
-        text[at] = Digits[(word >> shift) & 0xf];
-        ++nibble;
-    }
-
-    return out.TryAppend(StringView(text, EditorGuidTextBytes));
-}
-
-// 저장 임시 파일 이름(정확히 "<이름>.rasset.<36자 소문자 guid>.tmp", 이름은 비지 않음)인지다.
-bool EditorIsOrphanTempName(StringView name) noexcept {
-    const usize tail = 1 + EditorGuidTextBytes + EditorTempSuffix.ByteCount();
-    const usize minimum = 1 + EditorPackageExtension.ByteCount() + tail;
-    if (name.ByteCount() < minimum ||
-        !name.EndsWith(EditorTempSuffix, StringComparison::CaseSensitive)) {
-        return false;
-    }
-
-    const usize guidStart = name.ByteCount() - EditorTempSuffix.ByteCount() - EditorGuidTextBytes;
-    if (name.Data()[guidStart - 1] != '.') {
-        return false;
-    }
-
-    for (usize at = 0; at < EditorGuidTextBytes; ++at) {
-        const char c = name.Data()[guidStart + at];
-        const bool valid =
-            EditorIsGuidHyphen(at) ? c == '-' : ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
-        if (!valid) {
-            return false;
-        }
-    }
-
-    return StringView(name.Data(), guidStart - 1).EndsWith(EditorPackageExtension);
 }
 
 // 디렉터리 열거에서 고아 임시 파일 이름을 모은다.
