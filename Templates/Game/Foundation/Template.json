@@ -1,0 +1,7 @@
+{
+  "fileVersion": 1,
+  "templateName": "FoundationTemplate",
+  "description": "Minimal C++ game that uses Object and Reflection",
+  "ignore": ["Template.json", "README.ko.md"],
+  "replaceInExtensions": [".cpp", ".h", ".cs", ".json", ".rocksproject"]
+}

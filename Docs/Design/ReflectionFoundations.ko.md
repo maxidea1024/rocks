@@ -95,7 +95,7 @@
 
 - `InstalledSdk`: 생성 public 루트가 모듈의 public include 디렉터리에 들어가므로 기존 export가 `Headers/<M>/…`로 복사한다(별도 복사를 두지 않는다). descriptor·명세는 `Metadata/<M>/`로 내보내고 `rocks-sdk.json` 모듈 항목에 `descriptor`·`identityManifest`를 더한다(manifest 버전 3, 모르는 속성 거부 유지). SDK 모듈을 `NativeModuleInput`으로 되살릴 때(InstalledSdk의 모듈 복원 지점) 이 둘을 `ImportedMetadata`로 넘긴다 — SDK 모듈은 다시 생성하지 않고, 게임 빌드는 SDK descriptor를 import하고 SDK 명세를 명세 집합 검증에 넣는다. ThirdParty manifest 형식을 바꾸는 다른 세션의 InstalledSdk 변경과 겹치므로 착수 전에 조율한다.
 - `GameInputSnapshot`: 선언 입력에 모듈의 Metadata 헤더와 명세를 넣는다.
-- `Templates/Game`: SampleGame 모듈은 `Source`를 public include 디렉터리로 두고(`GameObject.h` 철자) `Metadata`와 `ModuleDirectory = "."`를 선언한다. 명세는 `ids move`로 `SampleGame.rocksids.json`이 된다. `Main.cpp`는 생성 철자를 쓰고 README를 고친다.
+- `Templates/Game`: FoundationTemplate 모듈(템플릿 `Templates/Game/Foundation`)은 `Source`를 public include 디렉터리로 두고(`GameObject.h` 철자) `Metadata`와 `ModuleDirectory = "."`를 선언한다. 명세는 `ids move`로 `SampleGame.rocksids.json`이 된다. `Main.cpp`는 생성 철자를 쓰고 README를 고친다.
 - `Program.cs`: ToolTests `meta` 실행 조건은 "타깃에 Metadata 모듈이 있음"이다.
 
 ### 1.9 fixture 이전과 시험

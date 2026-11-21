@@ -531,6 +531,44 @@ internal static class GameProjectTests
         {
         }
 
+        // new-project(Docs/Design/ProjectFiles.ko.md 11절): 이름 검사, 두 단계 치환, 템플릿 철자 검사.
+        NewProjectCommand.ValidateName("MyGame", ["Core", "Launch"]);
+        foreach (string bad in new[] { "Ab", "lowercase", "Bad-Name", "Rocks", "ROCKS", "RocksSdk", "Std", "Posix", "Core", "LAUNCH", "Class", "Namespace",
+            "A23456789012345678901234567890123" })
+        {
+            Error(() => NewProjectCommand.ValidateName(bad, ["Core", "Launch"]));
+        }
+
+        Require(NewProjectCommand.Replace("FoundationTemplate FOUNDATIONTEMPLATE foundationtemplate Foundationtemplate", "FoundationTemplate", "Zed") ==
+            "Zed ZED zed Foundationtemplate", "three spellings, case sensitive");
+        Require(NewProjectCommand.Replace("FoundationTemplate_foundationtemplate", "FoundationTemplate", "FoundationTemplateX") ==
+            "FoundationTemplateX_foundationtemplatex", "two-stage replacement does not replace its own result");
+        string templateRoot = Path.Combine(root, "template");
+        Write(templateRoot, NewProjectCommand.TemplateFile, "{ \"fileVersion\": 1, \"templateName\": \"FixtureTemplate\", \"description\": \"x\", " +
+            "\"ignore\": [\"Template.json\"], \"replaceInExtensions\": [\".h\"] }");
+        Write(templateRoot, "Source/FixtureTemplate.h", "namespace fixturetemplate {}");
+        NewProjectCommand.CheckTemplate(NewProjectCommand.ReadTemplate(templateRoot));
+        Write(templateRoot, "Source/Mixed.h", "struct Fixturetemplate;");
+        try
+        {
+            NewProjectCommand.CheckTemplate(NewProjectCommand.ReadTemplate(templateRoot));
+            throw new InvalidOperationException("a mixed template spelling must be rejected");
+        }
+        catch (InvalidDataException error) when (error.Message.Contains("'Fixturetemplate'", StringComparison.Ordinal))
+        {
+        }
+
+        Write(templateRoot, NewProjectCommand.TemplateFile, "{ \"fileVersion\": 1, \"templateName\": \"FixtureTemplate\", \"description\": \"x\", " +
+            "\"ignore\": [], \"replaceInExtensions\": [], \"extra\": 1 }");
+        try
+        {
+            NewProjectCommand.ReadTemplate(templateRoot);
+            throw new InvalidOperationException("an unknown Template.json field must be rejected");
+        }
+        catch (InvalidDataException error) when (error.Message.Contains("unknown field 'extra'", StringComparison.Ordinal))
+        {
+        }
+
         // 게임 프로젝트 파일의 구성은 SDK 구성 ∩ IDE 구성이다(구성 순서, Coverage는 빠진다).
         Require(GameProjectFiles.Configurations(["Release", "Coverage", "Asan", "Development"])
             .SequenceEqual([NativeConfiguration.Development, NativeConfiguration.Release, NativeConfiguration.Asan]) &&

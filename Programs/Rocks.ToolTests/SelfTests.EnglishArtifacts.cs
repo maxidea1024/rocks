@@ -100,7 +100,7 @@ internal static partial class SelfTests
             "Build/Probe.ps1", "Build/ThirdPartyTools/probe.sh", "Build/Probe.cmake", "Build/Build.version", "Build/Rules/ProbeRules.cs",
             ThirdPartyPolicyTests.Library + "/Glue.c", ThirdPartyPolicyTests.Library + "/Fake.patch",
             "Engine/Source/ThirdParty/Probe/ThirdParty.json", "Engine/Source/ThirdParty/Probe/Build/Build.ps1",
-            "Templates/Game/Foundation/Game.rocksproject", "Templates/Game/Foundation/Source/Main.cpp",
+            "Templates/Game/Foundation/FoundationTemplate.rocksproject", "Templates/Game/Foundation/Source/Main.cpp",
             "Programs/Scaffold/Templates/module/Module.h.in", "Engine/Config/ShaderFormats/Probe.json",
             "Core/Source/Runtime/Core/Private/Text/Probe.generated.h", "Core/Source/Runtime/Probe/Tests/Probe.generated.h" })
         {

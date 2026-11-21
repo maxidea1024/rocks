@@ -117,9 +117,10 @@ var engineVersion = EngineVersion.Read(EngineVersion.PathIn(root));
 var cli = Path.Combine(root, "out/dotnet/bin/Rocks.Build.Cli/Debug/net10.0/Rocks.Build.Cli.dll");
 var fixture = Path.Combine(Path.GetTempPath(), "Rocks SDK 게임 " + Guid.NewGuid().ToString("N"));
 var sdk = Path.Combine(fixture, "installed");
-var game = Path.Combine(fixture, "game");
+// 게임 fixture는 템플릿에서 new-project로 만든다(이름 SampleGame — 모듈·타깃·기술자 이름이 같다, Docs/Design/ProjectFiles.ko.md 11절).
+var game = Path.Combine(fixture, "SampleGame");
 // 게임 기본 출력은 <project>/out/<platform>-<target>-<configuration>이다(템플릿 타깃 이름은 Game).
-var output = GameProjectLayout.DefaultOutput(game, "Game", NativeConfiguration.Debug);
+var output = GameProjectLayout.DefaultOutput(game, "SampleGame", NativeConfiguration.Debug);
 var reports = Path.Combine(root, "out/sdk-integration");
 // CLI 하위 프로세스의 SDK 등록부다(사용자 등록부를 건드리지 않는다). 내보내기는 기본으로 등록하지 않으므로 명시 등록 전까지 파일이 없어야 한다.
 var registryFile = Path.Combine(fixture, "registry", "Sdks.json");
@@ -210,7 +211,11 @@ try
     Require(bindingsModuleHeaderText.Contains("RegisterModuleTypes(", StringComparison.Ordinal) &&
         !bindingsModuleHeaderText.Contains("GeneratedType<", StringComparison.Ordinal) && !bindingsModuleHeaderText.Contains("inline", StringComparison.Ordinal),
         "Engine SDK module generated header is not declaration-only:\n" + bindingsModuleHeaderText);
-    Require(!Directory.GetFiles(sdk, "*.cpp", SearchOption.AllDirectories).Concat(Directory.GetFiles(sdk, "*.c", SearchOption.AllDirectories)).Any(), "Installed SDK contains engine or third-party sources");
+    // 프로젝트 템플릿(Templates/)의 게임 소스는 new-project가 복사하는 원본이라 뺀다(Docs/Design/ProjectFiles.ko.md 11.6절).
+    string sdkTemplates = Path.Combine(sdk, "Templates");
+    Require(!Directory.GetFiles(sdk, "*.cpp", SearchOption.AllDirectories).Concat(Directory.GetFiles(sdk, "*.c", SearchOption.AllDirectories))
+        .Any(file => !DirectoryPath.IsAtOrUnder(file, sdkTemplates)), "Installed SDK contains engine or third-party sources");
+    Require(File.Exists(Path.Combine(sdkTemplates, "Game", "Foundation", "Template.json")), "Installed SDK does not carry the project templates");
     Pass("engine-export", timer.Elapsed);
 
     // MSBuild 경유 빌드를 연속 두 번 하면 두 번째는 0 액션이다. dotnet msbuild는 실행마다 다른 세션 변수
@@ -234,7 +239,32 @@ try
         $"The second consecutive MSBuild Engine build executed {engineSecond.ExecutedActions} actions");
     Pass("msbuild-consecutive-build-no-op", timer.Elapsed);
 
-    CopyTree(Path.Combine(root, "Templates/Game/Foundation"), game);
+    await NewGame(game);
+    // V12(Docs/Design/ProjectFiles.ko.md 16절): 경로·내용에 템플릿 이름 세 철자가 없고, 정의 파일과 README는 복사되지 않으며, ID는 템플릿과 다르다.
+    // 비어 있지 않은 대상에는 아무것도 쓰지 않는다.
+    timer.Restart();
+    foreach (string file in Directory.GetFiles(game, "*", SearchOption.AllDirectories))
+    {
+        string relative = Path.GetRelativePath(game, file);
+        string text = relative + "\n" + File.ReadAllText(file);
+        Require(!new[] { "FoundationTemplate", "FOUNDATIONTEMPLATE", "foundationtemplate" }.Any(spelling => text.Contains(spelling, StringComparison.Ordinal)),
+            "new-project left the template name in " + relative);
+    }
+
+    Require(!File.Exists(Path.Combine(game, "Template.json")) && !File.Exists(Path.Combine(game, "README.ko.md")) &&
+        File.Exists(Path.Combine(game, "SampleGame.Target.cs")) && File.Exists(Path.Combine(game, "Source", "SampleGameModule.cpp")),
+        "new-project copied the wrong files");
+    string[] IdsOf(string manifest) => [.. JsonDocument.Parse(File.ReadAllText(manifest)).RootElement.GetProperty("entries").EnumerateArray()
+        .Select(entry => entry.GetProperty("id").GetString()!)];
+    string[] templateIds = IdsOf(Path.Combine(root, "Templates", "Game", "Foundation", "FoundationTemplate.rocksids.json"));
+    string[] gameIds = IdsOf(Path.Combine(game, "SampleGame.rocksids.json"));
+    Require(gameIds.Length == templateIds.Length && gameIds.Distinct().Count() == gameIds.Length && !gameIds.Intersect(templateIds).Any(),
+        "new-project must reissue every identity: " + string.Join(", ", gameIds));
+    var occupied = await Cli("new-project", "--template", Path.Combine(root, "Templates", "Game", "Foundation"), "--name", "SampleGame",
+        "--destination", fixture, "--sdk", sdk, "--projectfiles", "off");
+    Require(occupied.ExitCode != 0 && occupied.StdErr.Contains("already exists and is not empty", StringComparison.Ordinal) &&
+        IdsOf(Path.Combine(game, "SampleGame.rocksids.json")).SequenceEqual(gameIds), "new-project wrote into a non-empty destination: " + occupied.StdErr);
+    Pass("new-project-from-template", timer.Elapsed);
     var originalFiles = Directory.GetFiles(sdk, "*", SearchOption.AllDirectories)
         .ToDictionary(path => path, Hashing.Sha256File, StringComparer.Ordinal);
     foreach (var file in originalFiles.Keys)
@@ -351,7 +381,7 @@ try
     try
     {
         File.WriteAllText(gameHeader, identityOriginalHeader.Replace("health", "armor", StringComparison.Ordinal));
-        var added = await Ids("add", "--manifest", gameIdentity, "--field", "sample::GameObject::armor");
+        var added = await Ids("add", "--manifest", gameIdentity, "--field", "samplegame::GameObject::armor");
         Require(added.ExitCode == 0, "Could not prepare accidental replacement fixture: " + added.StdErr);
         var rejected = await Game();
         Require(rejected.ExitCode != 0 && rejected.StdErr.Contains("missing from target sources", StringComparison.Ordinal),
@@ -362,8 +392,11 @@ try
         File.WriteAllText(gameHeader, identityOriginalHeader);
         Require((await Game()).ExitCode == 0, "Game did not recover after rejected identity change");
 
+        // new-project가 다시 발급한 ID다(템플릿 ID와 다르다). 이름을 바꿔도 이 값이 남아야 한다.
+        string healthId = JsonDocument.Parse(File.ReadAllBytes(gameIdentity)).RootElement.GetProperty("entries").EnumerateArray()
+            .Single(value => value.GetProperty("name").GetString() == "samplegame::GameObject::health").GetProperty("id").GetString()!;
         var renamed = await Ids("rename", "--manifest", gameIdentity, "--kind", "field", "--old",
-            "sample::GameObject::health", "--new", "sample::GameObject::hitPoints");
+            "samplegame::GameObject::health", "--new", "samplegame::GameObject::hitPoints");
         Require(renamed.ExitCode == 0, "Could not rename identity: " + renamed.StdErr);
         File.WriteAllText(gameHeader, identityOriginalHeader.Replace("health", "hitPoints", StringComparison.Ordinal));
         File.WriteAllText(gameMain, originalMain.Replace("health", "hitPoints", StringComparison.Ordinal));
@@ -374,8 +407,8 @@ try
         Require(renamedRun.ExitCode == 0, "Renamed game failed at runtime");
         using var identityJson = JsonDocument.Parse(File.ReadAllBytes(gameIdentity));
         var entry = identityJson.RootElement.GetProperty("entries").EnumerateArray()
-            .Single(value => value.GetProperty("name").GetString() == "sample::GameObject::hitPoints");
-        Require(entry.GetProperty("id").GetString() == "da100000000000000000000000000002",
+            .Single(value => value.GetProperty("name").GetString() == "samplegame::GameObject::hitPoints");
+        Require(entry.GetProperty("id").GetString() == healthId,
             "Explicit field rename changed its stable ID");
     }
     finally
@@ -429,10 +462,15 @@ try
     // 게임에는 메타데이터 모듈이 둘이다: 라이브러리 GameCore(CoreThing : SDK Base)와 실행 파일 SampleGame
     // (FixtureChild : GameCore의 CoreThing, SDK Node 참조). 한 빌드 안에서 stage descriptor import와 stage 생성 루트
     // 치환, 상위 모듈 실패 시 미게시, Metadata에서 뺀 헤더의 생성물 삭제를 확인한다.
-    var reflectionGame = Path.Combine(fixture, "game-reflection");
-    var reflectionOutput = GameProjectLayout.DefaultOutput(reflectionGame, "Game", NativeConfiguration.Debug);
-    CopyTree(Path.Combine(root, "Templates/Game/Foundation"), reflectionGame);
-    var reflectionRules = Path.Combine(reflectionGame, "Game.Build.cs");
+    var reflectionGame = Path.Combine(fixture, "reflection", "SampleGame");
+    var reflectionOutput = GameProjectLayout.DefaultOutput(reflectionGame, "SampleGame", NativeConfiguration.Debug);
+    await NewGame(reflectionGame);
+    // 같은 템플릿에서 만든 두 프로젝트도 ID가 다르다(V12).
+    Require(!JsonDocument.Parse(File.ReadAllText(Path.Combine(reflectionGame, "SampleGame.rocksids.json"))).RootElement.GetProperty("entries").EnumerateArray()
+        .Select(entry => entry.GetProperty("id").GetString()).Intersect(JsonDocument.Parse(File.ReadAllText(Path.Combine(game, "SampleGame.rocksids.json")))
+        .RootElement.GetProperty("entries").EnumerateArray().Select(entry => entry.GetProperty("id").GetString())).Any(),
+        "two projects from the same template share identities");
+    var reflectionRules = Path.Combine(reflectionGame, "SampleGame.Build.cs");
     var reflectionRulesText = File.ReadAllText(reflectionRules);
     Require(reflectionRulesText.Contains("PublicDependencies = [\"ObjectRuntime\", \"Launch\"]", StringComparison.Ordinal) &&
         reflectionRulesText.Contains("Metadata = [\"GameObject.h\"]", StringComparison.Ordinal), "Game template rules changed; update the SDK descriptor fixture");
@@ -440,7 +478,7 @@ try
     File.WriteAllText(reflectionRules, reflectionRulesText
         .Replace("PublicDependencies = [\"ObjectRuntime\", \"Launch\"]", "PublicDependencies = [\"ObjectRuntime\", \"Launch\", \"GameCore\", \"ObjectSerialization\"]", StringComparison.Ordinal)
         .Replace("Metadata = [\"GameObject.h\"]", "Metadata = [\"GameObject.h\", \"FixtureChild.h\"]", StringComparison.Ordinal));
-    var reflectionProject = Path.Combine(reflectionGame, "Game.rocksproject");
+    var reflectionProject = Path.Combine(reflectionGame, "SampleGame.rocksproject");
     var reflectionProjectText = File.ReadAllText(reflectionProject);
     const string sampleModuleEntry = "{ \"name\": \"SampleGame\", \"type\": \"Runtime\", \"loadingPhase\": \"Default\" }";
     Require(reflectionProjectText.Contains(sampleModuleEntry, StringComparison.Ordinal), "Game template descriptor changed; update the SDK descriptor fixture");
@@ -1004,7 +1042,7 @@ try
 
     timer.Restart();
     // 모듈 소유 메타데이터: 잘못된 선언은 메타 생성 전에 명확한 진단으로 거부하고 기존 생성물을 바꾸지 않는다.
-    var moduleRulesPath = Path.Combine(game, "Game.Build.cs");
+    var moduleRulesPath = Path.Combine(game, "SampleGame.Build.cs");
     var validModuleRules = File.ReadAllText(moduleRulesPath);
     var generatedHeader = Path.Combine(output, "Generated/SampleGame/Public/GameObject.generated.h");
     var validGeneratedHash = Hashing.Sha256File(generatedHeader);
@@ -1202,7 +1240,7 @@ try
 
     // 프로젝트 기술자(.rocksproject)가 없거나, 규칙 모듈을 선언하지 않거나, 대상 플랫폼·SDK 엔진 버전과 맞지 않으면 빌드를 시작하지 않는다.
     timer.Restart();
-    var descriptor = Path.Combine(game, "Game.rocksproject");
+    var descriptor = Path.Combine(game, "SampleGame.rocksproject");
     var descriptorText = File.ReadAllText(descriptor);
     try
     {
@@ -1228,7 +1266,7 @@ try
         {
             File.WriteAllText(descriptor, descriptorText.Replace(templateEngine, $"\"engineVersion\": \"{other}\"", StringComparison.Ordinal));
             var mismatched = await Game();
-            string expected = $"Game.rocksproject: engineVersion {other} does not match the installed SDK engine {engineVersion}; " +
+            string expected = $"SampleGame.rocksproject: engineVersion {other} does not match the installed SDK engine {engineVersion}; " +
                 $"set engineVersion to {engineVersion.Major}.{engineVersion.Minor} to upgrade the project.";
             Require(mismatched.ExitCode != 0 && (mismatched.StdOut + mismatched.StdErr).Contains(expected, StringComparison.Ordinal),
                 $"Game with engineVersion {other} was not rejected against the SDK engine {engineVersion}: " + mismatched.StdErr);
@@ -1306,8 +1344,8 @@ try
     if (OperatingSystem.IsWindows())
     {
         timer.Restart();
-        var driveGame = Path.Combine(fixture, "drive-root-game");
-        CopyTree(Path.Combine(root, "Templates/Game/Foundation"), driveGame);
+        var driveGame = Path.Combine(fixture, "drive", "SampleGame");
+        await NewGame(driveGame);
         var used = DriveInfo.GetDrives().Select(drive => char.ToUpperInvariant(drive.Name[0])).ToHashSet();
         var letters = Enumerable.Range('K', 'Z' - 'K' + 1).Select(value => (char)value).Where(value => !used.Contains(value)).Take(2).ToArray();
         Require(letters.Length == 2, "No free drive letters for the drive-root test");
@@ -1330,7 +1368,7 @@ try
                 Timeout: TimeSpan.FromMinutes(10)));
             File.AppendAllText(Path.Combine(reports, "sdk-integration.log"), "msbuild drive-root game\n" + msbuildGame.StdOut + msbuildGame.StdErr + "\n");
             Require(msbuildGame.ExitCode == 0, "MSBuild game build with drive-root paths failed: " + msbuildGame.StdOut + msbuildGame.StdErr);
-            var driveReport = JsonSerializer.Deserialize<NativeBuildResult>(File.ReadAllText(Path.Combine(GameProjectLayout.DefaultOutput(gameDrive, "Game", NativeConfiguration.Debug), "action-report.json")))!;
+            var driveReport = JsonSerializer.Deserialize<NativeBuildResult>(File.ReadAllText(Path.Combine(GameProjectLayout.DefaultOutput(gameDrive, "SampleGame", NativeConfiguration.Debug), "action-report.json")))!;
             Require(driveReport.Succeeded && driveReport.ExecutedActions == 0,
                 $"The MSBuild drive-root game build after the CLI build executed {driveReport.ExecutedActions} actions");
             var driveRun = await ProcessRunner.RunAsync(new(driveReport.ModuleOutputs["SampleGame"], [], gameDrive, toolchain.Environment));
@@ -1431,7 +1469,7 @@ try
         "Release SDK libraries are not ThinLTO bitcode archives");
     var releaseGame = await Cli("game", "--sdk", releaseSdk, "--project", game, "--configuration", "Release");
     Require(releaseGame.ExitCode == 0, "Release game build against the Release SDK failed: " + releaseGame.StdOut + releaseGame.StdErr);
-    var releaseReport = JsonSerializer.Deserialize<NativeBuildResult>(File.ReadAllText(Path.Combine(GameProjectLayout.DefaultOutput(game, "Game", NativeConfiguration.Release), "action-report.json")))!;
+    var releaseReport = JsonSerializer.Deserialize<NativeBuildResult>(File.ReadAllText(Path.Combine(GameProjectLayout.DefaultOutput(game, "SampleGame", NativeConfiguration.Release), "action-report.json")))!;
     var releaseRun = await ProcessRunner.RunAsync(new(releaseReport.ModuleOutputs["SampleGame"], [], game, toolchain.Environment));
     Require(releaseRun.ExitCode == 0, "Release ThinLTO game failed at runtime");
     var twoConfigurationDebug = await Cli("game", "--sdk", releaseSdk, "--project", game, "--configuration", "Debug");
@@ -1448,7 +1486,7 @@ try
     Require((await Tool("sdk-register", "--sdk", sdk)).ExitCode == 0 && (await Tool("sdk-register", "--sdk", releaseSdk)).ExitCode == 0,
         "sdk-register failed");
     var chosen = await Cli("game", "--project", game, "--configuration", "Release");
-    var chosenReport = JsonSerializer.Deserialize<NativeBuildResult>(File.ReadAllText(Path.Combine(GameProjectLayout.DefaultOutput(game, "Game",
+    var chosenReport = JsonSerializer.Deserialize<NativeBuildResult>(File.ReadAllText(Path.Combine(GameProjectLayout.DefaultOutput(game, "SampleGame",
         NativeConfiguration.Release), "action-report.json")))!;
     Require(chosen.ExitCode == 0 && chosen.StdOut.Contains("Installed SDK: " + releaseSdk, StringComparison.OrdinalIgnoreCase) && chosenReport.Succeeded &&
         chosenReport.ExecutedActions == 0, "The Release game build without --sdk did not pick the SDK with Release: " + chosen.StdOut + chosen.StdErr);
@@ -1501,6 +1539,14 @@ async Task<ProcessResult> Tool(params string[] arguments)
 }
 
 Task<ProcessResult> Game() => Cli("game", "--sdk", sdk, "--project", game, "--configuration", "Debug");
+
+// 템플릿에서 게임 fixture를 만든다(new-project, 디렉터리 이름이 프로젝트 이름). 프로젝트 파일은 만들지 않는다.
+async Task NewGame(string directory)
+{
+    var created = await Cli("new-project", "--template", Path.Combine(root, "Templates", "Game", "Foundation"), "--name", Path.GetFileName(directory),
+        "--destination", Path.GetDirectoryName(directory)!, "--sdk", sdk, "--projectfiles", "off");
+    Require(created.ExitCode == 0, "new-project failed: " + created.StdOut + created.StdErr);
+}
 
 NativeBuildResult ReadActionReport() => JsonSerializer.Deserialize<NativeBuildResult>(File.ReadAllText(Path.Combine(output, "action-report.json")))!;
 

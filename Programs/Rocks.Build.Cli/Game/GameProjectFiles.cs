@@ -242,7 +242,7 @@ internal static class GameProjectFiles
         IReadOnlyList<string> ruleFiles, ProjectDescriptor descriptor, SdkManifest manifest, NativeConfiguration[] configurations,
         NativeConfiguration baseConfiguration, NativeToolchain toolchain, EngineVersion engineVersion)
     {
-        var listing = new BuildContext(project, GameProjectLayout.DefaultOutput(project, InstalledSdk.DefaultGameTarget, baseConfiguration),
+        var listing = new BuildContext(project, GameProjectLayout.DefaultOutput(project, GameProjectLayout.DefaultTarget(project), baseConfiguration),
             toolchain.Platform, toolchain.Architecture, baseConfiguration, sdk);
         TargetRules[] targets = [.. RuleLoader.LoadAll(rulesPath, listing).Targets.OrderBy(target => target.Name, StringComparer.Ordinal)];
         IReadOnlyDictionary<string, (string Directory, string Name)> definitions = TargetDefinitions.FromFiles(ruleFiles, targets);
