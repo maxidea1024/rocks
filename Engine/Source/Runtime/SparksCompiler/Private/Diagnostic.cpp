@@ -156,6 +156,8 @@ constexpr DiagnosticCodeInfo CodeTable[] = {
     {DiagnosticCode::NotReplicable, "not-replicable"},
     {DiagnosticCode::NetWriteOutsideAuthority, "net-write-outside-authority"},
     {DiagnosticCode::RpcCall, "rpc-call"},
+    {DiagnosticCode::DataIdLost, "data-id-lost"},
+    {DiagnosticCode::InvalidIdManifest, "invalid-id-manifest"},
     {DiagnosticCode::ManifestSyntax, "manifest-syntax"},
     {DiagnosticCode::UnknownManifestKey, "unknown-manifest-key"},
     {DiagnosticCode::MissingManifestKey, "missing-manifest-key"},

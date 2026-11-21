@@ -12,6 +12,9 @@
 
 namespace rocks::sparks::detail {
 
+// bytecode 모듈 머리의 compiler version이다(형식·코드 생성이 바뀌면 올린다).
+inline constexpr StringView SparksCompilerVersion = "sparks 0.4.0";
+
 class BytecodeEncoder final {
 public:
     BytecodeEncoder(TypeChecker& checker, uint32 module, BytecodeModule& out) noexcept;
@@ -25,6 +28,11 @@ public:
     bool Encode(const IrFunction& function, uint32 index, StringView name,
                 uint32 nameNode) noexcept;
 
+    // 문자열 표에 넣고 번호를 돌려준다(모듈 머리의 이름).
+    uint32 String(StringView text) noexcept {
+        return AddString(text);
+    }
+
 private:
     // ---- 모듈 표 ----
     uint32 AddScalar(uint64 bits) noexcept;
@@ -32,9 +40,14 @@ private:
     // 리터럴 원문(따옴표 포함) 또는 보간 조각(piece)의 escape를 풀어 문자열 표에 넣는다.
     uint32 AddDecodedString(StringView text, bool piece) noexcept;
     uint32 AddRef(BytecodeRefKind kind, uint32 name, uint32 detail) noexcept;
-    uint32 SymbolRef(BytecodeRefKind kind, uint32 symbol) noexcept;
+    // 다른 모듈의 Sparks 선언이면 name에 `<import 경로>:`를 붙이고 true.
+    bool Qualify(StringBuilderBase& name, uint32 symbol) noexcept;
+    // types는 호출의 타입 인자 목록(IrInstruction::types), 없으면 NoIrRegister.
+    uint32 SymbolRef(BytecodeRefKind kind, uint32 symbol, uint32 types = NoIrRegister) noexcept;
     uint32 TypeRef(uint32 type) noexcept;
-    uint32 CallRef(uint32 callee, uint8 sub, Opcode& op) noexcept;
+    uint32 CallRef(uint32 callee, uint8 sub, uint32 types, Opcode& op) noexcept;
+    // 16비트 표 번호를 검사한다(넘으면 S1150).
+    uint32 Bx(uint32 index) noexcept;
 
     // ---- 할당 ----
     bool Allocate() noexcept;

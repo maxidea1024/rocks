@@ -28,6 +28,7 @@ Visual Studio 솔루션·프로젝트 파일(UE GenerateProjectFiles 대응, [�
 - 시작 프로젝트는 처음 한 번 고른다("Set as Startup Project" — 솔루션 직렬화기가 항목을 이름순으로 써서 생성기가 정할 수 없다).
 - `Rocks.proj`의 `BootstrapTools`도 같은 잠금과 도구 지문(`Build/Tools.ps1`, `out/dotnet/.rocks-tools.json`)을 쓴다. 그 뒤의 빌드 단계는 잠금 밖이라 터미널 빌드 도중 Visual Studio가 도구 원본 변경으로 도구를 다시 빌드하면 겹칠 수 있다.
 - 루트에 `Rocks.proj`와 `Rocks.slnx`가 함께 있으므로 `dotnet msbuild`·`dotnet build`에는 늘 `Rocks.proj`를 적는다(적지 않으면 MSB1011).
+- 게임 프로젝트: `pwsh <SDK>/Build/GenerateProjectFiles.ps1 -Project <게임> [-Sdk <SDK>]`(엔진 작업 사본의 같은 스크립트도 된다, CLI `projectfiles --project`)가 `<게임>/<이름>.slnx`와 `<게임>/out/ProjectFiles/`를 쓴다. SDK는 게임 빌드처럼 `engineAssociation`·등록부로 고르고, 솔루션 구성은 SDK가 가진 구성이다. 게임 프로젝트 하나(루트에 정의된 타깃), 하위 디렉터리 타깃 프로젝트, SDK 공개 헤더만 담는 `RocksSdk`(빌드 안 함)가 든다. Visual Studio 빌드는 SDK의 `Build/IdeBuild.bat`로 SDK CLI의 `game`·`clean --project`를 부른다. `associate`로 연결을 바꾸면 이미 만든 게임 프로젝트 파일을 다시 만든다.
 - VS Code·clangd는 생성하지 않는다. 빌드 출력의 `compile_commands.json`을 `--compile-commands-dir=out/<출력>`으로 주면 된다.
 
 ### 빌드 구성
@@ -118,7 +119,7 @@ dotnet msbuild Rocks.proj /t:InstalledSdk /p:SdkDestination=C:/work/rocks-sdk/0.
 dotnet msbuild Rocks.proj /t:Game /p:SdkDirectory=C:/work/rocks-sdk/0.1.0 /p:GameDirectory=C:/work/my-game /p:Configuration=Debug
 ```
 
-설치 SDK 하나가 여러 구성을 담는다. 기본은 Debug·Development·Release이고 `/p:SdkConfigurations="Debug;Release"`(CLI `sdk --configurations Debug,Release`)로 고른다. Asan·Coverage는 적을 때만 들어간다. 구성마다 엔진을 기본 출력(`out/dotnet-<platform>-<target>-<구성>`)에 빌드한 뒤 한 SDK로 조립한다. 구성과 무관한 부분(`Headers/`·`Tools/`·`Licenses/`·`Build/` 스크립트 등)은 한 벌이고, 라이브러리와 리플렉션 descriptor·명세는 `Configurations/<구성>/Libraries/`·`Configurations/<구성>/Metadata/<모듈>/`에 있다. 한 벌 파일이 구성마다 다르면 내보내기 오류다. 게임 빌드는 요청 구성이 SDK에 없으면 가진 구성 목록과 함께 멈춘다([Visual Studio 프로젝트 파일](../Docs/Design/ProjectFiles.ko.md) 10.3절).
+설치 SDK 하나가 여러 구성을 담는다. 기본은 Debug·Development·Release이고 `/p:SdkConfigurations=Debug+Release`(CLI `sdk --configurations Debug+Release`, 쉼표도 된다)로 고른다 — MSBuild `-p:`는 쉼표·세미콜론을 속성 구분자로 읽으므로 `+`로 잇는다. Asan·Coverage는 적을 때만 들어간다. `/t:InstalledSdk`는 `/p:Configuration`을 쓰지 않는다(Debug가 아니면 경고). 구성마다 엔진을 기본 출력(`out/dotnet-<platform>-<target>-<구성>`)에 빌드한 뒤 한 SDK로 조립한다. 구성과 무관한 부분(`Headers/`·`Tools/`·`Licenses/`·`Build/` 스크립트 등)은 한 벌이고, 라이브러리와 리플렉션 descriptor·명세는 `Configurations/<구성>/Libraries/`·`Configurations/<구성>/Metadata/<모듈>/`에 있다. 한 벌 파일이 구성마다 다르면 내보내기 오류다. 게임 빌드는 요청 구성이 SDK에 없으면 가진 구성 목록과 함께 멈춘다([Visual Studio 프로젝트 파일](../Docs/Design/ProjectFiles.ko.md) 10.3절).
 
 게임 출력은 `<게임>/out/<platform>-<target>-<configuration>`(소문자, 예: `out/windows-game-debug`)이다. 게임 입력 snapshot과 게임 규칙 파일 탐색은 이름이 `.`으로 시작하는 디렉터리(`.vs`·`.git` 등), 게임 루트 바로 아래의 `out/`·`Saved/`, 루트의 `*.slnx`를 보지 않는다. 그 안의 파일을 규칙이 읽으면 명시 입력으로 적는다. 게임 출력 하나를 비우려면 `Rocks.Build.Cli clean --project <게임> --target <T> --configuration <C>`를 쓴다(잠금 파일 둘만 남긴다).
 

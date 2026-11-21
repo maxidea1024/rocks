@@ -32,7 +32,7 @@ public static class GameInputSnapshot
                 throw new FileNotFoundException("Game build input does not exist.", path);
             }
 
-            if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+            if (FileLinks.IsLink(path))
             {
                 throw new IOException("Game input snapshot cannot follow links: " + path);
             }

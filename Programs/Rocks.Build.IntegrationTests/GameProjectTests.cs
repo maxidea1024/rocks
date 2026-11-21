@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using Rocks.Build.Cli;
 using Rocks.Build.Descriptors;
+using Rocks.Tooling.Common;
 
 namespace Rocks.Build.IntegrationTests;
 
@@ -18,7 +19,7 @@ internal static class GameProjectTests
         try
         {
             Association(Path.Combine(root, "association"));
-            Registries(Path.Combine(root, "registry"));
+            await Registries(Path.Combine(root, "registry"));
             Snapshot(Path.Combine(root, "snapshot"));
             await CleanAsync(Path.Combine(root, "clean"));
             Assembly(Path.Combine(root, "assembly"));
@@ -116,7 +117,7 @@ internal static class GameProjectTests
         Require(Error(() => Resolve(registry)).Contains("is not an installed SDK", StringComparison.Ordinal), "a path association without a manifest");
     }
 
-    private static void Registries(string root)
+    private static async Task Registries(string root)
     {
         string first = Sdk(root, "First", 0, 1, 0);
         string second = Sdk(root, "Second", 0, 1, 1);
@@ -126,6 +127,7 @@ internal static class GameProjectTests
         Require(saved["fileVersion"]!.GetValue<int>() == 1 && saved["sdks"]!.AsArray().Count == 1, "JSON registry file format");
         JsonFileRobustness(Path.Combine(root, "robust"), first, second);
         Concurrency(Path.Combine(root, "concurrent", "Sdks.json"));
+        await CrossProcessAsync(Path.Combine(root, "processes", "Sdks.json"));
 
         if (OperatingSystem.IsWindows())
         {
@@ -210,7 +212,8 @@ internal static class GameProjectTests
         Require(registry.Unregister("{00000000-0000-0000-0000-000000000004}") && JsonNode.Parse(File.ReadAllText(file))!["sdks"]!.AsArray().Count == 3,
             "JSON: unregistering removes only that entry");
 
-        foreach (string text in new[] { "{ broken", "{ \"fileVersion\": 2, \"sdks\": [] }", "{ \"fileVersion\": 1, \"sdks\": {} }" })
+        foreach (string text in new[] { "{ broken", "{ \"fileVersion\": 2, \"sdks\": [] }", "{ \"fileVersion\": 1, \"sdks\": {} }",
+            "{ \"fileVersion\": 1, \"fileVersion\": 1, \"sdks\": [] }", "{ \"fileVersion\": 1, \"sdks\": [ { \"id\": \"a\", \"id\": \"b\", \"path\": \"x\" } ] }" })
         {
             File.WriteAllText(file, text);
             var unreadable = new List<string>();
@@ -225,6 +228,48 @@ internal static class GameProjectTests
             }
 
             Require(File.ReadAllText(file) == text, "JSON: an unreadable registry file must stay unchanged: " + text);
+        }
+    }
+
+    // 교차 프로세스 잠금: 자식 프로세스 둘이 같은 등록부에 동시에 등록해도 항목을 잃지 않는다(JSON은 잠금 파일, Windows 레지스트리는 사용자 SID
+    // 전역 mutex). 같은 프로세스 안 시험(Concurrency)과 달리 운영체제 잠금이 프로세스 사이에서 배제하는지 본다.
+    private static async Task CrossProcessAsync(string file)
+    {
+        const int perWriter = 12;
+        string writer = typeof(GameProjectTests).Assembly.Location;
+        async Task Run(string kind, string target)
+        {
+            ProcessResult[] results = await Task.WhenAll(new[] { "A", "B" }.Select(prefix => ProcessRunner.RunAsync(new("dotnet",
+                [writer, "--registry-writer", kind, target, prefix, perWriter.ToString(System.Globalization.CultureInfo.InvariantCulture)],
+                Path.GetDirectoryName(writer)!, Timeout: TimeSpan.FromMinutes(5)))));
+            Require(results.All(result => result.ExitCode == 0), kind + " registry writers failed: " + string.Join("\n", results.Select(result => result.StdOut + result.StdErr)));
+            ISdkRegistry registry = kind == "json" ? new JsonSdkRegistry(target) : OperatingSystem.IsWindows() ? new WindowsSdkRegistry(target) : throw new PlatformNotSupportedException();
+            Require(registry.List().Count == 2 * perWriter, $"{kind}: concurrent registrations from two processes lost entries: {registry.List().Count}");
+        }
+
+        await Run("json", file);
+        if (OperatingSystem.IsWindows())
+        {
+            string subKey = @"Software\Rocks\Tests\" + Guid.NewGuid().ToString("B");
+            try
+            {
+                await Run("windows", subKey);
+            }
+            finally
+            {
+                Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(subKey, throwOnMissingSubKey: false);
+            }
+        }
+    }
+
+    /// <summary>교차 프로세스 시험의 자식 본문이다: 접두가 붙은 SDK 경로 count개를 등록한다.</summary>
+    internal static void WriteRegistry(string kind, string target, string prefix, int count)
+    {
+        ISdkRegistry registry = kind == "json" ? new JsonSdkRegistry(target)
+            : OperatingSystem.IsWindows() ? new WindowsSdkRegistry(target) : throw new PlatformNotSupportedException(kind);
+        for (int index = 0; index < count; ++index)
+        {
+            registry.Register(Path.Combine(Path.GetTempPath(), "rocks-registry-writer", prefix + index.ToString(System.Globalization.CultureInfo.InvariantCulture)));
         }
     }
 
@@ -388,6 +433,14 @@ internal static class GameProjectTests
         Require(Directory.EnumerateFileSystemEntries(output).Select(Path.GetFileName).Order(StringComparer.Ordinal)
             .SequenceEqual([CleanCommand.OutputMarker, ".rocks-invocation.lock"], StringComparer.Ordinal), "game clean must keep only the lock files");
         Require(File.Exists(Path.Combine(other, "bin/Game.exe")), "game clean must not touch another configuration");
+
+        // 네이티브 빌드 전에 실패한 출력(호출 잠금만 있다)도 Rocks 출력이라 비운다 — 실패한 빌드 뒤 Rebuild가 막히지 않는다.
+        string failed = GameProjectLayout.DefaultOutput(project, "Game", NativeConfiguration.Development);
+        Write(failed, ".rocks-invocation.lock", "");
+        Write(failed, "game-build-evidence.json", "{}");
+        Require(await CleanCommand.RunAsync(Options(("configuration", "Development")), CancellationToken.None) == 0 &&
+            Directory.EnumerateFileSystemEntries(failed).Select(Path.GetFileName).SequenceEqual([".rocks-invocation.lock"]),
+            "an output with only the invocation lock is a Rocks output");
 
         await Expect(() => CleanCommand.RunAsync(Options(("output", Path.Combine(project, "out"))), CancellationToken.None), "only build outputs under");
         await Expect(() => CleanCommand.RunAsync(Options(("output", Path.Combine(project, "Source"))), CancellationToken.None), "only build outputs under");

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Core/Text/Json.h>
+
 #include "NameBinder.h"
 
 // 타입 검사(LC2c)다(Docs/Design/SparksLanguage.ko.md 3.10절, S0326·S04xx·S05xx·S0109). 이름 해석
@@ -43,6 +45,13 @@ struct ConstantValue {
     bool boolean = false;
     uint32 symbol = NoSymbol; // Enum: case 심볼
     StringView text;          // String: 리터럴 원문(따옴표·`@` 포함 — 값은 DecodeStringLiteral)
+};
+
+// ID manifest 항목의 이름(또는 alias) 하나다(CheckStableIds.cpp — kind는 manifest kind 번호).
+struct ManifestIdName {
+    uint8 kind = 0;
+    StringView name;
+    uint32 entry = 0;
 };
 
 // 기대 타입이 앞선 오류로 정해지지 않은 자리의 표지다(Check·Coerce의 expected·type 인자로만 쓴다).
@@ -290,8 +299,21 @@ private:
     void CheckAcquireReturns() noexcept;
     void CheckHeldEvents() noexcept;
 
+    // ---- 안정 ID(CheckStableIds.cpp, SparksBytecode 6.1절 — Rules 단계) ----
+    void CheckStableIds() noexcept;
+    void CheckPackageIds(uint32 package, Span<const uint8> unstable) noexcept;
+    // 이름 키의 모듈을 이 컴파일에서 판정했는지다(진단이 난 모듈의 항목은 S1005로 보지 않는다).
+    bool JudgedModule(uint32 package, StringView name, Span<const uint8> unstable) const noexcept;
+    // manifest를 읽어 활성 항목의 이름·alias를 names에 둔다. 형식 오류면 S1006을 내고 false.
+    bool ReadIdManifest(uint32 package, JsonDocument& document,
+                        Array<ManifestIdName>& names) noexcept;
+    bool AddPendingId(uint8 kind, StringView name, StringView former) noexcept;
+
     // ---- typed IR 내림(IrDump.cpp, LC4 — Codegen 단계, 진단 없는 컴파일에서만) ----
     void LowerProgram() noexcept;
+    // 모듈 interface의 정규 텍스트(SparksBytecode 6.2절 — interface hash의 입력)다.
+    void AppendInterfaceText(StringBuilderBase& out, uint32 module) noexcept;
+    void AppendInterfaceType(StringBuilderBase& out, uint32 module, uint32 type) noexcept;
     void LowerModule(uint32 module) noexcept;
     // 획득한 지역 자원 뒤의 정지하는 await(S0905 — 효과 분석 뒤).
     void CheckResourceWaits() noexcept;

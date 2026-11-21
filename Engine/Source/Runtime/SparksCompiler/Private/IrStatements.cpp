@@ -499,13 +499,13 @@ void IrBuilder::LowerFor(uint32 node) noexcept {
                 Add(IrOp::GetEntry, b, source, index, 0, second, IrEntryValue);
             }
         } else if (second != NoNode) {
-            // Array 이름 둘: (번호, 원소).
+            // Array 이름 둘: (번호, 원소). 번호 자리의 원소는 있으므로 `T?`가 아닌 GETVAL이다.
             MoveValue(a, index, node);
             if (b != NoIrRegister) {
-                Add(IrOp::GetElement, b, source, index, 0, second);
+                Add(IrOp::GetEntry, b, source, index, 0, second, IrEntryValue);
             }
         } else if (a != NoIrRegister) {
-            Add(IrOp::GetElement, a, source, index, 0, first);
+            Add(IrOp::GetEntry, a, source, index, 0, first, IrEntryValue);
         }
     }
 

@@ -112,6 +112,8 @@ private:
     uint32 LowerChainedAwait(uint32 node, uint32 call) noexcept;
     // 대기 피연산자가 재개 때 돌려주는 값의 타입이다.
     uint32 AwaitResultType(uint32 operandNode) noexcept;
+    // 본문이 `on Awake`·`on Enable`·`on Start` hook인지다(`try` 실패가 fault인 자리).
+    bool InStartupHook() const noexcept;
     uint32 LowerTry(uint32 node) noexcept;
 
     // ---- 문장(IrStatements.cpp) ----

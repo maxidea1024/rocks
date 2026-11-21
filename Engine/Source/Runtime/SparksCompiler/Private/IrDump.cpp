@@ -2,6 +2,9 @@
 #include <Platform/Fatal.h>
 
 #include "CompilationChecker.h"
+#include <Core/Encoding/Sha256.h>
+#include <SparksVm/BytecodeFile.h>
+
 #include "BcEncoder.h"
 #include "IrBuilder.h"
 
@@ -74,6 +77,8 @@ const char* ArithName(uint8 sub) noexcept {
         return "NEG";
     case IrArith::Not:
         return "NOT";
+    case IrArith::Compose:
+        return "COMPOSE";
     }
 
     return "?";
@@ -445,6 +450,10 @@ private:
             out_.Append("    RETURN.ERROR ");
             Register(i.b);
             break;
+        case IrOp::EndExecution:
+            out_.Append("    END.EXECUTION ");
+            Register(i.b);
+            break;
         case IrOp::New:
             Assign(i.a);
             NewInstruction(i);
@@ -460,6 +469,11 @@ private:
             break;
         case IrOp::Fault:
             out_.AppendFormat("    FAULT {}", i.extra);
+            if (i.b != NoIrRegister) {
+                out_.Append(" ");
+                Register(i.b);
+            }
+
             break;
         default:
             out_.AppendFormat("    {}", name);
@@ -513,6 +527,11 @@ private:
 void TypeChecker::LowerProgram() noexcept {
     Compilation& c = compilation_;
     if (auto resized = c.irDumps_.TryResize(c.modules_.Size()); !resized) {
+        binder_.error_ = resized.Error();
+        return;
+    }
+
+    if (auto resized = c.lowered_.TryResize(c.modules_.Size()); !resized) {
         binder_.error_ = resized.Error();
         return;
     }
@@ -633,10 +652,87 @@ void TypeChecker::LowerModule(uint32 module) noexcept {
         if (!encoder.Encode(function, static_cast<uint32>(index), owned.View(), nameNode)) {
             return;
         }
+
+        // body hash: 이 함수 IR 덤프에서 위치 주석(`    ; 줄:열`)을 뺀 글자의 SHA-256(6.2절 — 줄만
+        // 옮긴 본문은 같은 hash).
+        Sha256 hasher;
+        const StringView functionText(out.View().Data() + headerStart,
+                                      out.View().ByteCount() - headerStart);
+        usize lineStart = 0;
+        constexpr StringView LocationMark = "    ; ";
+        for (usize at = 0; at <= functionText.ByteCount(); ++at) {
+            if (at < functionText.ByteCount() && functionText.Data()[at] != '\n') {
+                continue;
+            }
+
+            StringView line(functionText.Data() + lineStart, at - lineStart);
+            for (usize mark = 0; mark + LocationMark.ByteCount() <= line.ByteCount(); ++mark) {
+                if (StringView(line.Data() + mark, LocationMark.ByteCount()) == LocationMark) {
+                    line = StringView(line.Data(), mark);
+                    break;
+                }
+            }
+
+            hasher.Update(
+                Span<const uint8>(reinterpret_cast<const uint8*>(line.Data()), line.ByteCount()));
+            hasher.Update(Span<const uint8>(reinterpret_cast<const uint8*>("\n"), 1));
+            lineStart = at + 1;
+        }
+
+        const Sha256Digest body = hasher.Finish();
+        BytecodeFunction& encoded = c.bytecode_[module].functions[index];
+        for (usize at = 0; at < BytecodeHashBytes; ++at) {
+            encoded.bodyHash[at] = body.bytes[at];
+        }
     }
 
     if (!binder_.Succeeded(out)) {
         return;
+    }
+
+    // 모듈 머리(5절): compiler version, import 경로, 원문 content hash, profile. 그리고 verifier —
+    // 컴파일러가 낸 모듈의 거부는 내림의 결함이다.
+    BytecodeModule& bytecode = c.bytecode_[module];
+    bytecode.compiler = encoder.String(SparksCompilerVersion);
+    bytecode.path = encoder.String(c.Text(c.modules_[module].importPath));
+    const SourceFile& source = c.sources_->Get(c.modules_[module].source);
+    const Sha256Digest digest = Sha256::Hash(Span<const uint8>(
+        reinterpret_cast<const uint8*>(source.Text().Data()), source.Text().ByteCount()));
+    for (usize index = 0; index < BytecodeHashBytes; ++index) {
+        bytecode.contentHash[index] = digest.bytes[index];
+    }
+
+    // interface hash(6.2절): 공개 표면의 정규 텍스트.
+    StringBuilder<CompilationMessageInlineBytes> surface(allocator_);
+    AppendInterfaceText(surface, module);
+    if (!binder_.Succeeded(surface)) {
+        return;
+    }
+
+    const Sha256Digest interfaceDigest = Sha256::Hash(Span<const uint8>(
+        reinterpret_cast<const uint8*>(surface.View().Data()), surface.View().ByteCount()));
+    for (usize index = 0; index < BytecodeHashBytes; ++index) {
+        bytecode.interfaceHash[index] = interfaceDigest.bytes[index];
+    }
+
+    const uint32 package = c.modules_[module].package;
+    bytecode.profile = package != NoPackage && package < c.packages_.Size() &&
+                               c.packages_[package].manifest.GetProfile() == Profile::Full
+                           ? 1
+                           : 0;
+    if (binder_.error_ != ErrorCode::None) {
+        return;
+    }
+
+    if (const BytecodeRejection rejection = VerifyBytecode(bytecode);
+        rejection.error != BytecodeLoadError::None) {
+        // 인코딩의 결함: 사유와 자리를 진단 출력에 남기고 멈춘다.
+        StringBuilder<256> reason(allocator_);
+        reason.AppendFormat("Sparks verifier: {} in function {} at {}\n",
+                            BytecodeLoadErrorName(rejection.error), rejection.function,
+                            rejection.address);
+        platform::WriteDiagnostic(reason.View().Data(), reason.ByteCount());
+        platform::Fatal("Sparks bytecode rejected by the verifier");
     }
 
     const StringView text = out.View();
@@ -649,6 +745,7 @@ void TypeChecker::LowerModule(uint32 module) noexcept {
 
     c.irDumps_[module] =
         Compilation::TextRef{static_cast<uint32>(offset), static_cast<uint32>(text.ByteCount())};
+    c.lowered_[module] = 1;
 }
 
 } // namespace rocks::sparks::detail
@@ -656,8 +753,8 @@ void TypeChecker::LowerModule(uint32 module) noexcept {
 namespace rocks::sparks {
 
 const BytecodeModule* Compilation::ModuleBytecode(uint32 module) const noexcept {
-    return module < bytecode_.Size() && lastStage_ >= CompilationStage::Codegen &&
-                   module < irDumps_.Size()
+    return module < bytecode_.Size() && module < lowered_.Size() && lowered_[module] != 0 &&
+                   lastStage_ >= CompilationStage::Codegen
                ? &bytecode_[module]
                : nullptr;
 }
@@ -672,7 +769,8 @@ Result<void> Compilation::AppendBytecodeDump(StringBuilderBase& out, uint32 modu
 }
 
 Result<void> Compilation::AppendIrDump(StringBuilderBase& out, uint32 module) const noexcept {
-    if (module >= irDumps_.Size() || lastStage_ < CompilationStage::Codegen) {
+    if (module >= irDumps_.Size() || module >= lowered_.Size() || lowered_[module] == 0 ||
+        lastStage_ < CompilationStage::Codegen) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 

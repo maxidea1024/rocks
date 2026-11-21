@@ -25,6 +25,9 @@ enum class BytecodeBank : uint8 {
 
 inline constexpr uint32 BytecodeBankCount = 3;
 
+// content·interface hash의 byte 수다(SHA-256).
+inline constexpr usize BytecodeHashBytes = 32;
+
 // 표 번호가 없음을 나타낸다.
 inline constexpr uint32 NoBytecodeIndex = NumericLimits<uint32>::Max();
 
@@ -46,10 +49,16 @@ enum class BytecodeRefKind : uint8 {
 
 const char* BytecodeRefKindName(BytecodeRefKind kind) noexcept;
 
+// 참조 표 항목이다. 이름은 표시 이름이며 다른 모듈의 Sparks 선언은 `<import 경로>:` 접두를 붙인다
+// (같은 이름의 두 모듈 선언을 구별한다 — LC4d가 안정 ID를 더한다).
 struct BytecodeRef {
     BytecodeRefKind kind = BytecodeRefKind::Function;
-    uint32 name = NoBytecodeIndex;   // 표시 이름(`Owner.Name`)의 문자열 번호
-    uint32 detail = NoBytecodeIndex; // 종류별 보조 번호(위 설명)
+    uint32 name = NoBytecodeIndex; // 표시 이름(`Owner.Name`)의 문자열 번호
+    // 종류별 보조 번호: Function은 함수 표 번호, Literal은 리터럴 글자의 문자열 번호, 타입 인자를
+    // 단 호출(`Find<Hp>`)은 첫 타입 인자의 Type 참조 번호.
+    uint32 detail = NoBytecodeIndex;
+    // Literal: 이름 지정 인자 표(문자열 번호 — `이름=bank글자;…`, 창에 놓는 순서), 없으면 NoIndex.
+    uint32 arguments = NoBytecodeIndex;
 };
 
 // 명령 단어 하나의 원문 위치다(분리 디버그 정보 — 1부터 센 줄·열).
@@ -89,8 +98,13 @@ struct BytecodeFunction {
     // bank마다 할당한 레지스터 수(= 호출 창 base)와 frame 크기(할당 수 + 가장 큰 창, 256 이하).
     uint16 registers[BytecodeBankCount] = {};
     uint16 frame[BytecodeBankCount] = {};
-    // bank마다 매개변수 slot 수(this 포함 — 0번부터).
+    // bank마다 매개변수 slot 수(this 포함 — 0번부터). struct 메서드의 this는 Buf 0번이다.
     uint16 parameters[BytecodeBankCount] = {};
+    // 반환 값의 bank와 slot 수(값 없음은 slot 0). RETERR가 이 모양의 Result를 만든다.
+    uint8 returnBank = 0;
+    uint8 returnSlots = 0;
+    // 본문 hash(위치 주석을 뺀 IR 덤프의 SHA-256 — 재컴파일 범위, SparksBytecode 6.2절).
+    uint8 bodyHash[BytecodeHashBytes] = {};
     uint32 firstSwitch = 0;
     uint32 switchCount = 0;
     uint32 firstAwait = 0;
@@ -112,6 +126,14 @@ public:
     StringView String(uint32 index) const noexcept {
         return StringView(stringBytes.Data() + stringOffsets[index], stringLengths[index]);
     }
+
+    // 머리(`.sparkc` 5절): compiler version·모듈 import 경로(문자열 번호), 원문 content hash, 공개
+    // 선언의 interface hash(LC4d 전에는 0), manifest profile(0 core, 1 full).
+    uint32 compiler = NoBytecodeIndex;
+    uint32 path = NoBytecodeIndex;
+    uint8 contentHash[BytecodeHashBytes] = {};
+    uint8 interfaceHash[BytecodeHashBytes] = {};
+    uint8 profile = 0;
 
     Array<uint64> scalars;   // Scalar 상수(정수·double 비트·이름 id)
     Array<char> stringBytes; // 문자열 표(escape를 푼 UTF-8)

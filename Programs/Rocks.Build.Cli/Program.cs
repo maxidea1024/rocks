@@ -109,7 +109,11 @@ namespace Rocks.Build.Cli
 
             if (args[0] is SdkCommands.Register or SdkCommands.Unregister or SdkCommands.Associate)
             {
-                return SdkCommands.Run(args[0], options, SdkRegistries.Default());
+                int registered = SdkCommands.Run(args[0], options, SdkRegistries.Default());
+                // 연결을 바꾸면 이미 만든 게임 프로젝트 파일을 다시 만든다(Docs/Design/ProjectFiles.ko.md 10.4절, Windows 호스트).
+                return registered != 0 || args[0] != SdkCommands.Associate || !OperatingSystem.IsWindows()
+                    ? registered
+                    : await GameProjectFiles.RegenerateAsync(options["project"], cancellationToken);
             }
 
             if (args[0] == CleanCommand.Name)
@@ -415,7 +419,7 @@ namespace Rocks.Build.Cli
 
                 if (args[0] == "sdk")
                 {
-                    await sdkAssembly!.AddConfigurationAsync(root, configuration, toolchain, engineVersion,
+                    await sdkAssembly!.AddConfigurationAsync(root, configuration, toolchain, engineVersion, evidence.SourceBefore,
                         InstalledSdk.Reachable(plan.Modules, targets), plan.Generated, result, cancellationToken);
                 }
 

@@ -249,8 +249,8 @@ internal static class IdeScriptsTests
         Require(!Stale(await Cli(Build())), "project files are stale after removing the probe and regenerating");
     }
 
-    // 설치 SDK에 실린 스크립트: Tools.ps1은 도구를 빌드하지 않고(-ListInputs는 해당 없음), IdeBuild.ps1·GenerateProjectFiles.ps1은 게임 호출
-    // 형태(-Project·-Sdk)에서도 매개변수를 묶은 뒤 error RB0002로 멈춘다(게임 모드는 PJ5).
+    // 설치 SDK에 실린 스크립트: Tools.ps1은 도구를 빌드하지 않고(-ListInputs는 해당 없음), IdeBuild.ps1·GenerateProjectFiles.ps1은 게임 형태만
+    // 받는다. 엔진 작업 사본의 IdeBuild.ps1은 게임 형태를 거부한다.
     private static async Task SdkScriptsAsync(string repository)
     {
         string sdk = Directory.CreateTempSubdirectory("rocks-sdk-scripts-").FullName;
@@ -271,12 +271,22 @@ internal static class IdeScriptsTests
             Require(tools.ExitCode == 0 && tools.StdOut.Contains("ship with the installed SDK", StringComparison.Ordinal), "SDK Tools.ps1: " + tools.StdOut + tools.StdErr);
             var inputs = await Script("Tools.ps1", "-ListInputs");
             Require(inputs.ExitCode == 0 && inputs.StdOut.Contains("not applicable", StringComparison.Ordinal), "SDK Tools.ps1 -ListInputs: " + inputs.StdOut + inputs.StdErr);
-            var game = await Script("IdeBuild.ps1", "-Action", "Build", "-Project", Path.Combine(sdk, "Game.rocksproject"), "-Sdk", sdk, "-Target", "Game",
-                "-Configuration", "Debug", "-Compiler", "clang-cl.exe");
-            Require(game.ExitCode == 1 && game.StdOut.Contains("error RB0002", StringComparison.Ordinal), "SDK IdeBuild.ps1 game form: " + game.StdOut + game.StdErr);
-            var generate = await Script("GenerateProjectFiles.ps1", "-Project", Path.Combine(sdk, "Game.rocksproject"));
-            Require(generate.ExitCode == 1 && generate.StdOut.Contains("error RB0002", StringComparison.Ordinal),
-                "SDK GenerateProjectFiles.ps1 game form: " + generate.StdOut + generate.StdErr);
+            // 설치 SDK는 게임 형태(-Project·-Sdk)만, 엔진 작업 사본은 엔진 형태만 받는다(10.4절). 실제 게임 형태 실행은 본 흐름이 시험한다.
+            var engineForm = await Script("IdeBuild.ps1", "-Action", "Build", "-Target", "Game", "-Configuration", "Debug", "-Platform", "Windows");
+            Require(engineForm.ExitCode == 1 && engineForm.StdOut.Contains("error RB0002: an installed SDK builds game projects only", StringComparison.Ordinal),
+                "SDK IdeBuild.ps1 engine form: " + engineForm.StdOut + engineForm.StdErr);
+            var halfGame = await Script("IdeBuild.ps1", "-Action", "Build", "-Project", Path.Combine(sdk, "Game.rocksproject"), "-Target", "Game",
+                "-Configuration", "Debug");
+            Require(halfGame.ExitCode == 1 && halfGame.StdOut.Contains("error RB0002", StringComparison.Ordinal), "SDK IdeBuild.ps1 without -Sdk: " +
+                halfGame.StdOut + halfGame.StdErr);
+            var engineGame = await ProcessRunner.RunAsync(new("pwsh", ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                Path.Combine(repository, "Build", "IdeBuild.ps1"), "-Action", "Build", "-Project", Path.Combine(sdk, "Game.rocksproject"), "-Sdk", sdk,
+                "-Target", "Game", "-Configuration", "Debug"], repository));
+            Require(engineGame.ExitCode == 1 && engineGame.StdOut.Contains("error RB0002: game projects build with the IdeBuild.ps1 of their installed SDK",
+                StringComparison.Ordinal), "engine IdeBuild.ps1 game form: " + engineGame.StdOut + engineGame.StdErr);
+            var generate = await Script("GenerateProjectFiles.ps1");
+            Require(generate.ExitCode == 1 && generate.StdOut.Contains("error RB0002: an installed SDK generates game project files only", StringComparison.Ordinal),
+                "SDK GenerateProjectFiles.ps1 without -Project: " + generate.StdOut + generate.StdErr);
         }
         finally
         {

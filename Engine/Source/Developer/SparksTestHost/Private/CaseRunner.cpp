@@ -1,4 +1,5 @@
 #include <SparksCompiler/Compilation.h>
+#include <SparksVm/BytecodeFile.h>
 #include <SparksCompiler/Diagnostic.h>
 #include <SparksCompiler/PackageManifest.h>
 #include <SparksCompiler/SyntaxTree.h>
@@ -210,6 +211,78 @@ Result<void> CompareDump(Allocator& allocator, const CaseInput& input, const Sou
     }
 
     return report.TryAddFailure(message.View());
+}
+
+// `.bc` 사례의 `.sparkc` 왕복이다(Docs/Design/SparksBytecode.ko.md 5절): 모듈마다 쓰고 읽은 모듈의
+// 덤프가 컴파일 직후 덤프와 byte 단위로 같아야 하고, 다시 쓴 파일도 같아야 한다.
+Result<void> CheckBytecodeRoundTrip(Allocator& allocator, const CaseInput& input,
+                                    const Compilation& compilation, Report& report) noexcept {
+    for (uint32 module = 0; module < compilation.ModuleCount(); ++module) {
+        const BytecodeModule* bytecode = compilation.ModuleBytecode(module);
+        if (bytecode == nullptr) {
+            continue;
+        }
+
+        Array<uint8> file(allocator);
+        if (auto written = WriteBytecodeFile(*bytecode, file); !written) {
+            return written;
+        }
+
+        BytecodeModule loaded(allocator);
+        BytecodeRejection rejection;
+        StringBuilder<detail::MessageInlineBytes> message(allocator);
+        if (auto read = ReadBytecodeFile(file.View(), loaded, rejection); !read) {
+            if (read.Error() != ErrorCode::InvalidArgument) {
+                return read;
+            }
+
+            if (auto formatted = message.TryAppendFormat(
+                    "{}: .sparkc of module {} was rejected ({}, function {}, address {})",
+                    input.name, module, BytecodeLoadErrorName(rejection.error), rejection.function,
+                    rejection.address);
+                !formatted) {
+                return formatted;
+            }
+
+            return report.TryAddFailure(message.View());
+        }
+
+        StringBuilder<detail::MessageInlineBytes> before(allocator);
+        StringBuilder<detail::MessageInlineBytes> after(allocator);
+        Array<uint8> again(allocator);
+        if (auto dumped = AppendBytecodeDump(before, *bytecode); !dumped) {
+            return dumped;
+        }
+
+        if (auto dumped = AppendBytecodeDump(after, loaded); !dumped) {
+            return dumped;
+        }
+
+        if (auto written = WriteBytecodeFile(loaded, again); !written) {
+            return written;
+        }
+
+        const bool sameFile =
+            again.Size() == file.Size() &&
+            StringView::CompareBytes(
+                StringView(reinterpret_cast<const char*>(file.Data()), file.Size()),
+                StringView(reinterpret_cast<const char*>(again.Data()), again.Size())) == 0;
+        if (before.View() == after.View() && sameFile) {
+            continue;
+        }
+
+        if (auto formatted = message.TryAppendFormat(
+                "{}: .sparkc round trip of module {} differs (dump {}, file {})", input.name,
+                module, before.View() == after.View() ? "same" : "differs",
+                sameFile ? "same" : "differs");
+            !formatted) {
+            return formatted;
+        }
+
+        return report.TryAddFailure(message.View());
+    }
+
+    return Result<void>::Success();
 }
 
 Result<void> AddCaseFailure(Allocator& allocator, Report& report, StringView caseName,
@@ -440,6 +513,11 @@ Result<void> RunCase(Allocator& allocator, const CaseInput& input, Report& repor
                                         expectation.Stage(), DumpKind::Bytecode, report);
             !compared) {
             return compared;
+        }
+
+        if (auto checked = CheckBytecodeRoundTrip(allocator, input, compilation, report);
+            !checked) {
+            return checked;
         }
     }
 

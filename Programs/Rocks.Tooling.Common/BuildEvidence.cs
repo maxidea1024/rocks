@@ -217,6 +217,9 @@ public sealed class BuildEvidence
 
     public string OutputDirectory { get; }
 
+    /// <summary>실행을 시작할 때 찍은 저장소 소스 snapshot이다(여러 빌드가 같은 입력으로 돌았는지 비교한다 — 다중 구성 SDK 내보내기).</summary>
+    public SourceSnapshot SourceBefore => document.SourceBefore;
+
     public string EvidencePath => Path.Combine(OutputDirectory, "build-evidence.json");
 
     public static async Task<BuildEvidence> StartAsync(string root, string preset,

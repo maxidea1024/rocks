@@ -227,8 +227,20 @@ function Update-RocksTools {
 
     # The input fingerprint and its memo are the ones taken before the build: an input changed while the build ran then differs next time
     # and builds again. Only the output hashes come from after the build.
+    # The memo keeps the input entries from before the build and the output DLL entries from after it.
     $after = Get-RocksToolState $state.Files
-    $record = [ordered]@{ fingerprint = $state.Fingerprint; outputs = $after.Outputs; files = $state.Files }
+    $files = [ordered]@{}
+    foreach ($entry in $after.Files.GetEnumerator()) {
+        $files[$entry.Key] = $entry.Value
+    }
+
+    foreach ($entry in $state.Files.GetEnumerator()) {
+        if (-not ($script:RocksToolOutputs | Where-Object { $entry.Key.StartsWith("$_/", [System.StringComparison]::Ordinal) })) {
+            $files[$entry.Key] = $entry.Value
+        }
+    }
+
+    $record = [ordered]@{ fingerprint = $state.Fingerprint; outputs = $after.Outputs; files = $files }
     New-Item -ItemType Directory -Force -Path (Split-Path $script:RocksToolsStamp) | Out-Null
     ($record | ConvertTo-Json -Depth 4) | Set-Content -LiteralPath $script:RocksToolsStamp -Encoding utf8NoBOM
 }

@@ -39,6 +39,13 @@ public:
 
         const char c = text_.Data()[at_];
         if (verbatim_) {
+            // CRLF는 LF다(SD55 — checkout의 줄 끝 설정과 무관한 값).
+            if (c == '\r' && at_ + 1 < end_ && text_.Data()[at_ + 1] == '\n') {
+                at_ += 2;
+                out = static_cast<uint8>('\n');
+                return true;
+            }
+
             at_ += c == '"' ? 2 : 1; // `""`는 `"`
             out = static_cast<uint8>(c);
             return true;

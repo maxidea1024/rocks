@@ -317,6 +317,84 @@ TEST(SparksCodegen_FunctionTooLargeS1150) {
     CHECK(bytecode->functions[0].registers[0] < 8);
 }
 
+namespace {
+
+// 두 모듈(Util과 그것을 import하는 Main) 패키지를 컴파일한다.
+bool CompilePair(Fixture& fixture, StringView util, StringView main) noexcept {
+    const uint32 game = fixture.Package("Game");
+    fixture.Module(game, "Game", "Util.spark", util);
+    fixture.Module(game, "Game", "Main.spark", main);
+    return fixture.Check() && fixture.diagnostics.Count() == 0;
+}
+
+constexpr StringView Util = "fn Helper(): int {\n    return 1;\n}\n";
+constexpr StringView Main = "import Util;\n\nfn Use(): int {\n    return Helper() + 1;\n}\n";
+
+} // namespace
+
+TEST(SparksCodegen_RecompileScope) {
+    SystemAllocator allocator;
+    Fixture before(allocator);
+    REQUIRE(CompilePair(before, Util, Main));
+    auto scope = [&](StringView util, StringView main, Array<uint32>& modules,
+                     Array<uint64>& functions) noexcept {
+        Fixture after(allocator);
+        return CompilePair(after, util, main) &&
+               static_cast<bool>(
+                   FindRecompileScope(before.compilation, after.compilation, modules, functions));
+    };
+    {
+        // 같은 입력: 아무것도 다시 하지 않는다(hash가 결정적이다).
+        Array<uint32> modules(allocator);
+        Array<uint64> functions(allocator);
+        REQUIRE(scope(Util, Main, modules, functions));
+        CHECK(modules.IsEmpty());
+        CHECK(functions.IsEmpty());
+    }
+    {
+        // 줄만 옮긴 본문: body hash는 위치를 넣지 않으므로 같다.
+        Array<uint32> modules(allocator);
+        Array<uint64> functions(allocator);
+        REQUIRE(scope("\n\nfn Helper(): int {\n    return 1;\n}\n", Main, modules, functions));
+        CHECK(modules.IsEmpty());
+        CHECK(functions.IsEmpty());
+    }
+    {
+        // 본문만 바뀜: interface는 같고 Util.Helper만 다시 내린다(모듈 0 — 더한 순서).
+        Array<uint32> modules(allocator);
+        Array<uint64> functions(allocator);
+        REQUIRE(scope("fn Helper(): int {\n    return 2;\n}\n", Main, modules, functions));
+        CHECK(modules.IsEmpty());
+        REQUIRE(functions.Size() == 1);
+        CHECK(functions[0] == ((uint64(0) << 32) | 0));
+    }
+    {
+        // interface가 바뀜(공개 함수 추가): Util과 그것을 import하는 Main을 다시 검사한다.
+        Array<uint32> modules(allocator);
+        Array<uint64> functions(allocator);
+        REQUIRE(
+            scope("fn Helper(): int {\n    return 1;\n}\n\nfn Extra(): int {\n    return 3;\n}\n",
+                  Main, modules, functions));
+        REQUIRE(modules.Size() == 2);
+        CHECK(modules[0] == 0);
+        CHECK(modules[1] == 1);
+        CHECK(functions.IsEmpty());
+    }
+    {
+        // 진단이 있는 컴파일은 범위를 정할 수 없다.
+        Fixture after(allocator);
+        const uint32 game = after.Package("Game");
+        after.Module(game, "Game", "Util.spark", "fn Helper(): int {\n    return true;\n}\n");
+        after.Module(game, "Game", "Main.spark", Main);
+        REQUIRE(after.compilation.Check(after.diagnostics));
+        Array<uint32> modules(allocator);
+        Array<uint64> functions(allocator);
+        CHECK(
+            FindRecompileScope(before.compilation, after.compilation, modules, functions).Error() ==
+            ErrorCode::InvalidArgument);
+    }
+}
+
 TEST(SparksCodegen_AllocationFailureEverywhere) {
     SystemAllocator backing;
     uint64 checkAttempts = 0;

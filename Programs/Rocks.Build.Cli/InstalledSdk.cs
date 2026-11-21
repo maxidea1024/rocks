@@ -184,7 +184,8 @@ public static class InstalledSdk
     /// <c>--sdk</c>가 없으면 게임 프로젝트의 <c>.rocksproject</c> 연결로 등록 SDK를 골라 넣는다(Docs/Design/ProjectFiles.ko.md 10.1절).
     /// 호환 후보는 manifest 판·플랫폼·아키텍처·컴파일러 ABI가 이 컴퓨터의 도구 모음과 맞는 SDK다(구성은 빌드가 따로 본다).
     /// </summary>
-    internal static async Task ResolveSdkOptionAsync(Dictionary<string, string> options, CancellationToken cancellationToken)
+    internal static async Task ResolveSdkOptionAsync(Dictionary<string, string> options, CancellationToken cancellationToken,
+        bool anyConfiguration = false)
     {
         if (options.ContainsKey("sdk"))
         {
@@ -200,7 +201,8 @@ public static class InstalledSdk
 
         ProjectDescriptor descriptor = DescriptorReader.ReadProject(descriptors[0]);
         NativeToolchain toolchain = await NativeToolchains.DiscoverAsync(options.GetValueOrDefault("compiler"), cancellationToken);
-        NativeConfiguration configuration = BuildCommand.Configuration(options);
+        // 프로젝트 파일 생성은 구성 하나를 빌드하지 않으므로 구성 조건 없이 고른다(Docs/Design/ProjectFiles.ko.md 10.4절).
+        NativeConfiguration? configuration = anyConfiguration ? null : BuildCommand.Configuration(options);
         string sdk = SdkAssociation.Resolve(descriptor, SdkRegistries.Default(), path => Incompatibility(path, toolchain, configuration));
         Console.WriteLine($"Installed SDK: {sdk} ({(descriptor.EngineAssociation is null ? "engineVersion " + descriptor.EngineVersion : "engineAssociation")}).");
         options["sdk"] = sdk;
@@ -210,7 +212,7 @@ public static class InstalledSdk
     /// 이 SDK를 이 컴퓨터의 도구 모음으로 요청 구성을 빌드하는 데 쓸 수 없는 이유다(쓸 수 있으면 null). Verify의 호환 조건(manifest 판·구성·
     /// 플랫폼·아키텍처·ABI)이고, 파일 목록·내용 검사는 고른 SDK에만 Verify가 한다.
     /// </summary>
-    internal static string? Incompatibility(string sdk, NativeToolchain toolchain, NativeConfiguration configuration)
+    internal static string? Incompatibility(string sdk, NativeToolchain toolchain, NativeConfiguration? configuration)
     {
         string manifestText = File.ReadAllText(Path.Combine(sdk, "rocks-sdk.json"));
         int? version = ManifestVersionOf(manifestText);
@@ -235,7 +237,8 @@ public static class InstalledSdk
         }
 
         string architecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString();
-        return manifest.Configurations is null || !manifest.Configurations.ContainsKey(configuration.ToString())
+        return manifest.Configurations is null || manifest.Configurations.Count == 0 ||
+            (configuration is not null && !manifest.Configurations.ContainsKey(configuration.Value.ToString()))
             ? $"no {configuration} configuration (has {Names(manifest)})"
             : manifest.Platform != toolchain.Platform.ToString() ? $"platform {manifest.Platform}, this computer builds {toolchain.Platform}"
             : manifest.Architecture != architecture ? $"architecture {manifest.Architecture}, this computer is {architecture}"
@@ -358,106 +361,35 @@ public static class InstalledSdk
             Console.WriteLine(unverified);
         }
 
-        var manifest = Verify(sdk, configuration, toolchain);
+        // SDK 내용은 빌드마다 한 번만 해시한다. 끝 검사는 그때 기록한 (크기, 수정 시각)과 파일 목록을 다시 본다(Docs/Design/ProjectFiles.ko.md 10.3절).
+        var verified = VerifyStamped(sdk, configuration, toolchain);
+        var manifest = verified.Manifest;
         SdkModule[] sdkModules = manifest.Configurations[configuration.ToString()].Modules;
         Directory.CreateDirectory(output);
         Directory.CreateDirectory(Path.Combine(output, "Generated"));
         var initialProject = GameInputSnapshot.Capture(project, output, sdk, []);
         // 프로젝트 기술자(UE .uproject 대응)가 빌드할 모듈·플러그인·플랫폼을 정한다. 입력 snapshot 뒤에 읽어
-        // 빌드 중 기술자 변경을 최종 검사가 잡게 하고, 규칙을 컴파일하기 전에 기술자 오류를 먼저 알린다.
-        var projectFiles = Directory.GetFiles(project, "*" + DescriptorReader.ProjectExtension, SearchOption.TopDirectoryOnly);
-        if (projectFiles.Length != 1)
-        {
-            throw new ArgumentException($"The game project root must contain exactly one {DescriptorReader.ProjectExtension} file (found {projectFiles.Length}).");
-        }
-
-        var projectDescriptor = DescriptorReader.ReadProject(projectFiles[0]);
-        // 게임은 SDK manifest의 엔진 버전만 쓴다(저장소 Build/Build.version을 읽지 않는다). 프로젝트 연결은 주·부가 같아야 한다.
+        // 빌드 중 기술자 변경을 최종 검사가 잡게 하고, 규칙을 컴파일하기 전에 기술자 오류를 먼저 알린다. 기술자·규칙·SDK 모듈 해석은 게임
+        // 프로젝트 파일 생성과 같은 함수다(GamePlanning, Docs/Design/ProjectFiles.ko.md 10.4절).
         var engineVersion = EngineVersionOf(manifest);
-        ProjectEngineVersion projectEngine = projectDescriptor.EngineVersion;
-        if (!engineVersion.CanLinkProject(projectEngine.Major, projectEngine.Minor))
-        {
-            throw new DescriptorException(projectDescriptor.FilePath,
-                $"engineVersion {projectEngine} does not match the installed SDK engine {engineVersion}; " +
-                $"set engineVersion to {engineVersion.Major}.{engineVersion.Minor} to upgrade the project.");
-        }
-
+        var projectDescriptor = GamePlanning.Descriptor(project, engineVersion);
         // 플러그인 기술자 검증은 규칙을 읽기 전에 한다. 켤 플러그인과 모듈 해석은 타깃 종류·타깃 플러그인 참조가 필요하므로 규칙 로드 뒤다
         // (Docs/Design/BuildTargets.ko.md BD24, 3.9절).
         var availablePlugins = PluginCatalog.Discover([Path.Combine(project, "Plugins")]);
         // 입력 snapshot과 같은 제외 규칙으로 찾는다(점 디렉터리·out/·Saved/ 아래 사본을 규칙으로 컴파일하지 않는다, 10.6절).
-        var rulesFiles = GameProjectLayout.RuleFiles(project, output, sdk);
-        if (rulesFiles.Length == 0)
-        {
-            throw new ArgumentException("No *.Build.cs or *.Target.cs rules found in the game project.");
-        }
-
-        var rulesDirectory = Path.Combine(output, "Rules");
-        var projectFile = Path.Combine(rulesDirectory, "Rocks.Game.Rules.csproj");
-        string Escape(string value) => SecurityElement.Escape(value)!;
-        var references = new[] { "Rocks.Build.Abstractions", "Rocks.Build", "Rocks.Tooling.Common" }.Select(name =>
-            $"<Reference Include=\"{name}\"><HintPath>{Escape(Path.Combine(sdk, "Tools/Rocks.Build.Cli", name + ".dll"))}</HintPath></Reference>");
-        // 사용자 게임 디렉터리의 Directory.Build.props가 호스트 bootstrap을 바꾸지 못하게 입력을 고정한다.
-        var projectXml = "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup>" +
-            "<TargetFramework>net10.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings>" +
-            "<TreatWarningsAsErrors>true</TreatWarningsAsErrors><EnableDefaultCompileItems>false</EnableDefaultCompileItems>" +
-            "<AssemblyName>Rocks.Game.Rules</AssemblyName><Deterministic>true</Deterministic>" +
-            "</PropertyGroup><ItemGroup>" + string.Join("", rulesFiles.Select(file => $"<Compile Include=\"{Escape(file)}\" />")) +
-            string.Join("", references) + "</ItemGroup></Project>\n";
-        AtomicFile.WriteIfChanged(projectFile, projectXml);
-        var compiled = await ProcessRunner.RunAsync(new("dotnet", ["build", projectFile, "--nologo", "-warnaserror",
-            "-p:ImportDirectoryBuildProps=false", "-p:ImportDirectoryBuildTargets=false"], sdk, toolchain.Environment), cancellationToken);
-        Console.Write(compiled.StdOut);
-        Console.Error.Write(compiled.StdErr);
-        if (compiled.ExitCode != 0)
+        string? rulesPath = await GamePlanning.CompileRulesAsync(Path.Combine(output, "Rules"), GameProjectLayout.RuleFiles(project, output, sdk), sdk,
+            toolchain, cancellationToken);
+        if (rulesPath is null)
         {
             return 1;
         }
 
-        var rulesPath = Path.Combine(rulesDirectory, "bin/Debug/net10.0/Rocks.Game.Rules.dll");
         var context = new BuildContext(project, output, toolchain.Platform, toolchain.Architecture, configuration, sdk);
         var rules = RuleLoader.Load(rulesPath, options.GetValueOrDefault("target", DefaultGameTarget), context);
-        // SDK 엔진 라이브러리는 구성 기본 로그 하한으로 미리 빌드됐다. 게임 타깃만 다른 값을 쓰면 Log.h inline 본문이 갈려 ODR 위반이다.
-        if (rules.Target.LogCompiledMinimum is not null)
-        {
-            throw new ArgumentException($"Target {rules.Target.Name}: LogCompiledMinimum cannot be overridden in an installed SDK game build " +
-                "(the prebuilt engine libraries use the configuration default).");
-        }
-        // 규칙 모듈을 기술자와 대조하고, 켜지지 않은 플러그인·Editor·플랫폼 미지원 모듈 등을 뺀다.
-        var moduleSet = DescriptorModuleSet.Resolve(DescriptorOwner.ForProject(projectDescriptor, rules.Target.Name, rules.Target.Plugins),
-            availablePlugins, toolchain.Platform, configuration, rules.Target.Type);
-        var projectModules = moduleSet.Apply(rules.Modules, rules.Target.Modules);
-        // SDK 모듈은 다시 생성하지 않는다. 리플렉션 모듈이면 descriptor·명세를 ImportedMetadata로 넘긴다. 타입별 본문·등록 함수 등 생성
-        // 소스의 object는 SDK 라이브러리(PrebuiltLibraries)에 들어 있으므로 ReflectionSources는 비어 있다 — 게임 소유 모듈만 자기 생성
-        // 소스를 낸다.
-        var modules = sdkModules.Select(module => new NativeModuleInput
-        {
-            Name = module.Name,
-            PublicIncludeDirectories = module.Includes.Select(path => SafePath(sdk, path)).ToArray(),
-            PublicDefines = module.Defines,
-            PublicDependencies = module.PublicDependencies,
-            PrivateDependencies = module.PrivateDependencies,
-            PrebuiltLibraries = module.Libraries.Select(path => SafePath(sdk, path)).ToArray(),
-            SystemLibraries = module.SystemLibraries,
-            Frameworks = module.Frameworks,
-            ImportedMetadata = module.Descriptor is null
-                ? null
-                : new ImportedMetadata(SafePath(sdk, module.Descriptor), SafePath(sdk, module.IdentityManifest!)),
-            ProvidesBuildInfo = module.ProvidesBuildInfo,
-            ProvidesModuleTable = module.ProvidesModuleTable,
-            ThirdParty = module.ThirdParty,
-            SharedPchHeader = module.SharedPchHeader,
-            DynamicModules = module.DynamicModules,
-            // Verify가 이름을 확인했다.
-            LoadingPhase = Enum.Parse<Descriptors.LoadingPhase>(module.LoadingPhase!),
-            ProvidesLaunch = module.ProvidesLaunch,
-            HasGlobalState = module.HasGlobalState
-        }).Concat(projectModules).ToArray();
-        // 켠 플러그인의 모듈은 타깃이 직접 참조하지 않아도 빌드하고 주 실행 파일에 링크한다(Docs/Design/BuildTargets.ko.md 3.9절 BD36, UE와
-        // 같다). 메타데이터 생성도 같은 root 집합이다.
-        modules = [.. moduleSet.LinkIntoPrimary(modules, rules.Target.Modules)];
-        string[] targets = rules.Target.Modules.Concat(moduleSet.IncludedPluginModules).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        var plan = MetadataLayout.Apply(context, modules, targets);
+        GameLayout layout = GamePlanning.Layout(rules, projectDescriptor, availablePlugins, context, toolchain, configuration, sdk, sdkModules,
+            createDirectories: true);
+        string[] targets = layout.Targets;
+        var plan = layout.Metadata;
         var declaredInputs = GameInputSnapshot.DeclaredInputs(context, plan);
         var initialDeclared = GameInputSnapshot.Capture(project, output, sdk, declaredInputs);
         var metadata = await MetadataRunner.GenerateAsync(context, toolchain, plan, rules.Target,
@@ -468,38 +400,36 @@ public static class InstalledSdk
             return 1;
         }
 
-        var result = await new NativeBuildEngine().BuildAsync(new()
+        var result = await new NativeBuildEngine().BuildAsync(GamePlanning.Request(toolchain, configuration, project, output, plan.Modules, targets, sdk,
+            engineVersion, BuildCommand.Jobs(options)) with
         {
-            Toolchain = toolchain,
-            Configuration = configuration,
-            OutputDirectory = output,
-            // 정적 링크이므로 실행 파일에는 참조한 모듈만 들어간다.
-            RootDirectory = project,
-            Modules = plan.Modules,
-            Targets = targets,
-            ContextFingerprint = "rocks-installed-sdk-v1",
-            MaxParallelism = BuildCommand.Jobs(options),
             Unity = BuildCommand.Switch(options, BuildCommand.UnityOption),
             Pch = BuildCommand.Switch(options, BuildCommand.PchOption),
             Adaptive = BuildCommand.Switch(options, BuildCommand.AdaptiveOption),
             Timing = BuildCommand.Timing(options),
-            TimingLabel = rules.Target.Name,
-            // 도구 빌드 ID의 sdk: 경로 키 기준이다(SDK 헤더·라이브러리가 설치 위치와 무관한 키를 갖는다).
-            SdkDirectory = sdk,
-            EngineVersion = engineVersion
+            TimingLabel = rules.Target.Name
         }, cancellationToken);
         BuildCommand.Print(result);
         // 최종 검사 전 성공 보고서를 게시하면 SDK/입력 변경에 따른 실패가 PASS로 보일 수 있다.
         PublishVerifiedGameResult(sdk, configuration, toolchain, project, output, initialProject,
-            initialDeclared, declaredInputs, result);
+            initialDeclared, declaredInputs, result, verified);
         return result.Succeeded ? 0 : 1;
     }
 
     public static void PublishVerifiedGameResult(string sdk, NativeConfiguration configuration, NativeToolchain toolchain,
         string project, string output, string initialProject, string initialDeclared,
-        IReadOnlyList<string> declaredInputs, NativeBuildResult result)
+        IReadOnlyList<string> declaredInputs, NativeBuildResult result, VerifiedSdk? verified = null)
     {
-        Verify(sdk, configuration, toolchain);
+        // 빌드 시작에 검증한 SDK면 그 뒤 바뀌지 않았는지만 본다(파일 목록 + 크기·수정 시각). 없으면 전체를 검증한다.
+        if (verified is null)
+        {
+            Verify(sdk, configuration, toolchain);
+        }
+        else
+        {
+            RequireUnchanged(sdk, verified);
+        }
+
         if (GameInputSnapshot.Capture(project, output, sdk, []) != initialProject ||
             GameInputSnapshot.Capture(project, output, sdk, declaredInputs) != initialDeclared)
         {
@@ -520,7 +450,31 @@ public static class InstalledSdk
             : null;
     }
 
-    public static SdkManifest Verify(string sdk, NativeConfiguration configuration, NativeToolchain toolchain)
+    /// <summary>검증한 SDK와 그때 본 파일의 (크기, 수정 시각)이다. 빌드 끝 검사가 다시 해시하지 않고 변경을 잡는 데 쓴다.</summary>
+    public sealed record VerifiedSdk(SdkManifest Manifest, IReadOnlyDictionary<string, (long Length, DateTime Written)> Stamp);
+
+    public static SdkManifest Verify(string sdk, NativeConfiguration configuration, NativeToolchain toolchain) =>
+        VerifyStamped(sdk, configuration, toolchain).Manifest;
+
+    // 빌드 시작 뒤 SDK가 바뀌었으면 거부한다. 파일 목록은 전체를, 크기·수정 시각은 시작 때 해시한 파일(한 벌 + 선택 구성)을 본다.
+    private static void RequireUnchanged(string sdk, VerifiedSdk verified)
+    {
+        if (!Inventory(sdk).SetEquals(verified.Manifest.Files.Keys))
+        {
+            throw new InvalidDataException("SDK file inventory changed. Re-export instead of adding/removing installed headers or tools.");
+        }
+
+        foreach ((string relative, (long length, DateTime written)) in verified.Stamp)
+        {
+            var file = new FileInfo(SafePath(sdk, relative));
+            if (!file.Exists || file.Length != length || file.LastWriteTimeUtc != written)
+            {
+                throw new InvalidDataException($"SDK file changed or missing: {relative}");
+            }
+        }
+    }
+
+    public static VerifiedSdk VerifyStamped(string sdk, NativeConfiguration configuration, NativeToolchain toolchain)
     {
         string manifestText = File.ReadAllText(Path.Combine(sdk, "rocks-sdk.json"));
         // 버전을 먼저 본다. 다른 버전의 manifest는 칸이 달라(예: 7의 ReflectionOnlyLibrary) 엄격한 역직렬화가 버전 불일치 안내
@@ -582,29 +536,7 @@ public static class InstalledSdk
         var configurationFiles = selected.Files.ToHashSet(StringComparer.Ordinal);
         SdkModule[] modules = selected.Modules;
 
-        var actual = new HashSet<string>(StringComparer.Ordinal);
-        void Inventory(string directory)
-        {
-            foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
-            {
-                if ((File.GetAttributes(entry) & FileAttributes.ReparsePoint) != 0)
-                {
-                    throw new InvalidDataException("SDK inventory must not contain linked files/directories.");
-                }
-
-                if (Directory.Exists(entry))
-                {
-                    Inventory(entry);
-                }
-                else if (Path.GetRelativePath(sdk, entry) != "rocks-sdk.json")
-                {
-                    actual.Add(Path.GetRelativePath(sdk, entry).Replace('\\', '/'));
-                }
-            }
-        }
-
-        Inventory(sdk);
-        if (!actual.SetEquals(manifest.Files.Keys))
+        if (!Inventory(sdk).SetEquals(manifest.Files.Keys))
         {
             throw new InvalidDataException("SDK file inventory changed. Re-export instead of adding/removing installed headers or tools.");
         }
@@ -614,9 +546,20 @@ public static class InstalledSdk
             throw new InvalidDataException("SDK contains duplicate module names.");
         }
 
-        foreach (var pair in manifest.Files)
+        // 내용 해시는 한 벌 파일과 요청 구성의 파일만 본다(다른 구성의 라이브러리는 이 빌드가 읽지 않는다). 파일 목록은 위에서 전체를 봤다.
+        // 크기·수정 시각을 해시 전에 기록해, 해시 뒤의 변경도 빌드 끝 검사가 잡는다.
+        var stamp = new Dictionary<string, (long Length, DateTime Written)>(StringComparer.Ordinal);
+        foreach (var pair in manifest.Files.Where(pair => !pair.Key.StartsWith(SdkAssembly.ConfigurationsDirectory + "/", StringComparison.Ordinal) ||
+            configurationFiles.Contains(pair.Key)))
         {
-            if (!File.Exists(SafePath(sdk, pair.Key)) || Hashing.Sha256File(SafePath(sdk, pair.Key)) != pair.Value)
+            var file = new FileInfo(SafePath(sdk, pair.Key));
+            if (!file.Exists)
+            {
+                throw new InvalidDataException($"SDK file changed or missing: {pair.Key}");
+            }
+
+            stamp[pair.Key] = (file.Length, file.LastWriteTimeUtc);
+            if (Hashing.Sha256File(file.FullName) != pair.Value)
             {
                 throw new InvalidDataException($"SDK file changed or missing: {pair.Key}");
             }
@@ -669,7 +612,57 @@ public static class InstalledSdk
             }
         }
 
-        return manifest;
+        return new VerifiedSdk(manifest, stamp);
+    }
+
+    // manifest를 뺀 SDK 파일의 상대 경로 전체다. 링크(symlink·junction)는 거부한다. OneDrive 자리 표시자·중복 제거 파일처럼 링크가 아닌 reparse
+    // point는 보통 파일이다(Docs/Design/ProjectFiles.ko.md 10.6절).
+    private static HashSet<string> Inventory(string sdk)
+    {
+        var actual = new HashSet<string>(StringComparer.Ordinal);
+        void Visit(string directory)
+        {
+            foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
+            {
+                if (FileLinks.IsLink(entry))
+                {
+                    throw new InvalidDataException("SDK inventory must not contain linked files/directories.");
+                }
+
+                if (Directory.Exists(entry))
+                {
+                    Visit(entry);
+                }
+                else if (Path.GetRelativePath(sdk, entry) != "rocks-sdk.json")
+                {
+                    actual.Add(Path.GetRelativePath(sdk, entry).Replace('\\', '/'));
+                }
+            }
+        }
+
+        Visit(sdk);
+        return actual;
+    }
+
+    /// <summary>
+    /// SDK manifest가 가진 구성 이름이다(검증 없이 읽는다 — 게임 프로젝트 파일 생성이 구성을 고른 뒤 <see cref="Verify"/>한다). manifest 판이
+    /// 다르거나 읽을 수 없으면 Verify와 같은 판 불일치 오류다.
+    /// </summary>
+    internal static HashSet<string> ManifestConfigurations(string sdk)
+    {
+        string manifestText = File.ReadAllText(Path.Combine(sdk, "rocks-sdk.json"));
+        int? version = ManifestVersionOf(manifestText);
+        if (version != ManifestVersion)
+        {
+            throw new InvalidDataException($"SDK manifest version mismatch: {(version is int value ? value.ToString(System.Globalization.CultureInfo.InvariantCulture) : "missing")} " +
+                $"(this build tool requires {ManifestVersion}). Re-export the SDK with the current tools.");
+        }
+
+        using JsonDocument document = JsonDocument.Parse(manifestText);
+        return document.RootElement.TryGetProperty(nameof(SdkManifest.Configurations), out JsonElement configurations) &&
+            configurations.ValueKind == JsonValueKind.Object
+            ? configurations.EnumerateObject().Select(entry => entry.Name).ToHashSet(StringComparer.Ordinal)
+            : [];
     }
 
     // manifest가 가진 구성 이름 목록이다(오류 안내용).
@@ -694,7 +687,7 @@ public static class InstalledSdk
         return new EngineVersion(major, minor, patch);
     }
 
-    private static string SafePath(string root, string relative)
+    internal static string SafePath(string root, string relative)
     {
         var full = Path.GetFullPath(relative, root);
         if (Path.IsPathRooted(relative) || !Inside(root, full) || relative.Split('/', '\\').Any(part => part == ".."))
@@ -712,9 +705,9 @@ public static class InstalledSdk
         Directory.CreateDirectory(destination);
         foreach (var entry in Directory.EnumerateFileSystemEntries(source))
         {
-            if ((File.GetAttributes(entry) & FileAttributes.ReparsePoint) != 0)
+            if (FileLinks.IsLink(entry))
             {
-                throw new IOException("SDK packaging does not accept symbolic links/reparse points.");
+                throw new IOException("SDK packaging does not accept symbolic links or junctions.");
             }
 
             var target = Path.Combine(destination, Path.GetFileName(entry));

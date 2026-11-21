@@ -5,6 +5,7 @@
 #include <Platform/Fatal.h>
 
 #include "CompilationChecker.h"
+#include "IrBuilder.h"
 #include "StringLiteralReader.h"
 
 // typed IR → bytecode(Docs/Design/SparksBytecode.ko.md 4절, LC4b): 모듈 표, 생존 분석과 선형 스캔
@@ -183,20 +184,20 @@ uint32 BytecodeEncoder::AddString(StringView text) noexcept {
 }
 
 uint32 BytecodeEncoder::AddDecodedString(StringView text, bool piece) noexcept {
-    StringBuilder<256> decoded(checker_.allocator_);
+    // 푼 byte를 모은다(UTF-8 code point를 byte 단위로 내므로 서식 함수가 아니라 byte 배열에
+    // 쌓는다).
+    Array<char> decoded(checker_.allocator_);
     StringLiteralReader reader =
         piece ? StringLiteralReader::ForPiece(text) : StringLiteralReader(text);
     uint8 byte = 0;
     while (reader.Next(byte)) {
-        decoded.AppendFormat("{}", static_cast<char>(byte));
+        if (auto pushed = decoded.TryPushBack(static_cast<char>(byte)); !pushed) {
+            Fail(pushed.Error());
+            return 0;
+        }
     }
 
-    if (decoded.HasFailed()) {
-        Fail(decoded.Status().Error());
-        return 0;
-    }
-
-    return AddString(decoded.View());
+    return AddString(StringView(decoded.Data(), decoded.Size()));
 }
 
 uint32 BytecodeEncoder::AddRef(BytecodeRefKind kind, uint32 name, uint32 detail) noexcept {
@@ -223,21 +224,73 @@ uint32 BytecodeEncoder::AddRef(BytecodeRefKind kind, uint32 name, uint32 detail)
     return index;
 }
 
-uint32 BytecodeEncoder::SymbolRef(BytecodeRefKind kind, uint32 symbol) noexcept {
-    // 표시 이름은 `Owner.Name`이다(LC4d가 안정 ID를 더한다).
+bool BytecodeEncoder::Qualify(StringBuilderBase& name, uint32 symbol) noexcept {
+    // 다른 모듈의 Sparks 선언은 `<import 경로>:` 접두로 구별한다(같은 이름의 두 모듈 선언).
+    if (symbol == NoSymbol || symbol >= c_.symbols_.Size()) {
+        return false;
+    }
+
+    const Symbol& entry = c_.symbols_[symbol];
+    switch (entry.kind) {
+    case SymbolKind::Class:
+    case SymbolKind::Struct:
+    case SymbolKind::Enum:
+    case SymbolKind::Interface:
+    case SymbolKind::Const:
+    case SymbolKind::Function:
+    case SymbolKind::Field:
+    case SymbolKind::Method:
+    case SymbolKind::Event:
+    case SymbolKind::EnumCase:
+    case SymbolKind::InterfaceMethod:
+        break;
+    default:
+        return false;
+    }
+
+    if (entry.module >= c_.modules_.Size() || entry.module == module_) {
+        return false;
+    }
+
+    name.Append(c_.Text(c_.modules_[entry.module].importPath)).Append(":");
+    return true;
+}
+
+uint32 BytecodeEncoder::SymbolRef(BytecodeRefKind kind, uint32 symbol, uint32 types) noexcept {
+    // 표시 이름은 `[모듈:]Owner.Name[<타입 인자>]`이다(LC4d가 안정 ID를 더한다).
     StringBuilder<128> name(checker_.allocator_);
     const Symbol& entry = c_.symbols_[symbol];
+    if (!Qualify(name, symbol) && entry.owner != NoSymbol) {
+        Qualify(name, entry.owner);
+    }
+
     if (entry.owner != NoSymbol && entry.owner < c_.symbols_.Size()) {
         name.Append(c_.symbols_[entry.owner].name).Append(".");
     }
 
     name.Append(entry.name);
+    uint32 detail = NoBytecodeIndex;
+    if (types != NoIrRegister) {
+        // 명시한 타입 인자: 이름에 적고 첫 타입 인자의 Type 참조를 보조 번호로 둔다.
+        const uint32 count = f_->operands[types];
+        name.Append("<");
+        for (uint32 index = 0; index < count; ++index) {
+            if (index != 0) {
+                name.Append(", ");
+            }
+
+            checker_.AppendDisplayType(name, f_->operands[types + 1 + index]);
+        }
+
+        name.Append(">");
+        detail = count > 0 ? TypeRef(f_->operands[types + 1]) : NoBytecodeIndex;
+    }
+
     if (name.HasFailed()) {
         Fail(name.Status().Error());
         return 0;
     }
 
-    uint32 detail = NoBytecodeIndex;
     if (kind == BytecodeRefKind::Function) {
         const uint32* found = functionIndex_.Find(uint64(symbol));
         detail = found == nullptr ? NoBytecodeIndex : *found;
@@ -248,6 +301,7 @@ uint32 BytecodeEncoder::SymbolRef(BytecodeRefKind kind, uint32 symbol) noexcept 
 
 uint32 BytecodeEncoder::TypeRef(uint32 type) noexcept {
     StringBuilder<128> name(checker_.allocator_);
+    Qualify(name, checker_.SymbolOf(checker_.NonOptional(type)));
     checker_.AppendDisplayType(name, type);
     if (name.HasFailed()) {
         Fail(name.Status().Error());
@@ -257,28 +311,28 @@ uint32 BytecodeEncoder::TypeRef(uint32 type) noexcept {
     return AddRef(BytecodeRefKind::Type, AddString(name.View()), NoBytecodeIndex);
 }
 
-uint32 BytecodeEncoder::CallRef(uint32 callee, uint8 sub, Opcode& op) noexcept {
+uint32 BytecodeEncoder::CallRef(uint32 callee, uint8 sub, uint32 types, Opcode& op) noexcept {
     const Symbol& entry = c_.symbols_[callee];
     if (sub == IrCallRpc) {
         op = Opcode::CallRpc;
-        return SymbolRef(BytecodeRefKind::RpcFunction, callee);
+        return SymbolRef(BytecodeRefKind::RpcFunction, callee, types);
     }
 
     switch (entry.kind) {
     case SymbolKind::EngineFunction:
         op = Opcode::CallN;
-        return SymbolRef(BytecodeRefKind::NativeFunction, callee);
+        return SymbolRef(BytecodeRefKind::NativeFunction, callee, types);
     case SymbolKind::LanguageFunction:
     case SymbolKind::PreludeValue:
         op = Opcode::CallL;
-        return SymbolRef(BytecodeRefKind::LanguageFunction, callee);
+        return SymbolRef(BytecodeRefKind::LanguageFunction, callee, types);
     case SymbolKind::InterfaceMethod:
         op = Opcode::CallV;
-        return SymbolRef(BytecodeRefKind::VirtualFunction, callee);
+        return SymbolRef(BytecodeRefKind::VirtualFunction, callee, types);
     case SymbolKind::Method:
         if ((entry.flags & (SymbolFlags::Open | SymbolFlags::Override)) != 0) {
             op = Opcode::CallV;
-            return SymbolRef(BytecodeRefKind::VirtualFunction, callee);
+            return SymbolRef(BytecodeRefKind::VirtualFunction, callee, types);
         }
 
         [[fallthrough]];
@@ -286,8 +340,18 @@ uint32 BytecodeEncoder::CallRef(uint32 callee, uint8 sub, Opcode& op) noexcept {
         op = Opcode::Call;
         return SymbolRef(entry.module == module_ ? BytecodeRefKind::Function
                                                  : BytecodeRefKind::ImportedFunction,
-                         callee);
+                         callee, types);
     }
+}
+
+uint32 BytecodeEncoder::Bx(uint32 index) noexcept {
+    // 16비트 표 번호(LOADK·LOADSTR·참조)의 한도다. 모듈 표가 65,536개를 넘으면 S1150이다.
+    if (index > MaxBx) {
+        TooLarge();
+        return 0;
+    }
+
+    return index;
 }
 
 // ---- 할당 ----
@@ -347,6 +411,13 @@ void ForEachAccess(const IrFunction& f, const IrInstruction& i, Use&& use, Def&&
         defOne(i.a);
         break;
     case IrOp::Binary:
+        if (static_cast<IrArith>(i.sub) == IrArith::Compose) {
+            useTuple(i.b); // quat·mat4 합성은 묶음 전체를 읽고 쓴다
+            useTuple(i.c);
+            defTuple(i.a);
+            break;
+        }
+
         useOne(i.b);
         useOne(i.c);
         defOne(i.a);
@@ -377,6 +448,8 @@ void ForEachAccess(const IrFunction& f, const IrInstruction& i, Use&& use, Def&&
         break;
     case IrOp::Return:
     case IrOp::ReturnError:
+    case IrOp::EndExecution:
+    case IrOp::Fault:
         useTuple(i.b);
         break;
     case IrOp::GetField:
@@ -412,7 +485,7 @@ void ForEachAccess(const IrFunction& f, const IrInstruction& i, Use&& use, Def&&
         defTuple(i.a);
         break;
     case IrOp::Emit:
-        useOne(i.a);
+        useOne(i.a == NoIrRegister ? f.self : i.a); // 대상이 없으면 자기 객체(this)
         operands(i.b, i.c, 1);
         break;
     case IrOp::Concat:
@@ -435,7 +508,6 @@ void ForEachAccess(const IrFunction& f, const IrInstruction& i, Use&& use, Def&&
         useOne(i.a);
         break;
     case IrOp::Jump:
-    case IrOp::Fault:
         break;
     }
 }
@@ -617,10 +689,17 @@ bool BytecodeEncoder::Allocate() noexcept {
 
         for (uint32 index = 0; index < entry.count; ++index) {
             const uint32 at2 = 2 * (firstPos_[block] + index);
+            // 생성(NEWS 뒤 필드마다 SETSF)과 합성 곱은 결과를 먼저 쓰고 피연산자를 읽으므로
+            // 결과를 읽기 위치부터 살려 둔다(early clobber — 피연산자와 같은 레지스터를 받지
+            // 않는다).
+            const IrInstruction& current = f.instructions[entry.first + index];
+            const bool early =
+                current.op == IrOp::New || (current.op == IrOp::Binary &&
+                                            static_cast<IrArith>(current.sub) == IrArith::Compose);
             ForEachAccess(
                 f, f.instructions[entry.first + index],
                 [&](uint32 vreg) noexcept { extend(vreg, at2); },
-                [&](uint32 vreg) noexcept { extend(vreg, at2 + 1); });
+                [&](uint32 vreg) noexcept { extend(vreg, early ? at2 : at2 + 1); });
         }
     }
 
@@ -966,6 +1045,13 @@ bool BytecodeEncoder::Encode(const IrFunction& function, uint32 index, StringVie
     }
 
     BytecodeFunction& result = out_.functions[index];
+    // 반환 모양: 함수 반환 타입의 bank와 slot 수(handler·void는 slot 0).
+    const uint32 signature =
+        function.symbol == NoSymbol ? NoSignature : c_.symbols_[function.symbol].signature;
+    const uint32 returns = signature == NoSignature ? NoType : c_.signatures_[signature].returnType;
+    const IrLayout layout = IrBuilder::Layout(checker_, returns);
+    result.returnBank = static_cast<uint8>(BankIndex(layout.bank));
+    result.returnSlots = static_cast<uint8>(layout.slots);
     result.firstWord = firstWord_;
     result.wordCount = wordCount;
     result.firstSwitch = firstSwitch;
@@ -996,18 +1082,20 @@ void BytecodeEncoder::Instruction(const IrInstruction& i, uint32 layoutIndex) no
         if (value >= MinImmediate && value <= MaxImmediate) {
             Word(EncodeAsBx(Opcode::LoadI, Phys(i.a), static_cast<int32>(value)), span);
         } else {
-            Word(EncodeABx(Opcode::LoadK, Phys(i.a), AddScalar(static_cast<uint64>(value))), span);
+            Word(EncodeABx(Opcode::LoadK, Phys(i.a), Bx(AddScalar(static_cast<uint64>(value)))),
+                 span);
         }
 
         return;
     }
     case IrOp::LoadFloat:
-        Word(EncodeABx(Opcode::LoadK, Phys(i.a), AddScalar((uint64(i.extra) << 32) | i.b)), span);
+        Word(EncodeABx(Opcode::LoadK, Phys(i.a), Bx(AddScalar((uint64(i.extra) << 32) | i.b))),
+             span);
         return;
     case IrOp::LoadString: {
         const uint32 text = AddDecodedString(f.strings[i.b], i.sub == IrStringPiece);
         stringOf_[i.a] = text;
-        Word(EncodeABx(Opcode::LoadStr, Phys(i.a), text), span);
+        Word(EncodeABx(Opcode::LoadStr, Phys(i.a), Bx(text)), span);
         return;
     }
     case IrOp::LoadNull:
@@ -1026,6 +1114,13 @@ void BytecodeEncoder::Instruction(const IrInstruction& i, uint32 layoutIndex) no
         return;
     }
     case IrOp::Binary: {
+        if (static_cast<IrArith>(i.sub) == IrArith::Compose) {
+            const bool quat = f.registers[TupleFirst(i.a)].slots == 4;
+            Word(EncodeABC(quat ? Opcode::MulQ : Opcode::MulM, Phys(i.a), Phys(i.b), Phys(i.c)),
+                 span);
+            return;
+        }
+
         const IrScalar scalar = f.registers[i.a].scalar;
         const uint32 arith = i.sub; // Add·Sub·Mul·Div·Mod = 0…4
         Opcode op = Opcode::AddI64;
@@ -1077,7 +1172,7 @@ void BytecodeEncoder::Instruction(const IrInstruction& i, uint32 layoutIndex) no
             return;
         }
 
-        Word(EncodeABx(Opcode::Switch, Phys(i.b), table), span);
+        Word(EncodeABx(Opcode::Switch, Phys(i.b), Bx(table)), span);
         return;
     }
     case IrOp::Return:
@@ -1110,14 +1205,16 @@ void BytecodeEncoder::Instruction(const IrInstruction& i, uint32 layoutIndex) no
         return;
     case IrOp::GetField: {
         if (i.b == NoIrRegister) {
-            Word(EncodeABx(Opcode::GetCtx, Phys(i.a), SymbolRef(BytecodeRefKind::Context, i.extra)),
+            Word(EncodeABx(Opcode::GetCtx, Phys(i.a),
+                           Bx(SymbolRef(BytecodeRefKind::Context, i.extra))),
                  span);
             return;
         }
 
         const bool object = BankOf(i.b) == 1;
         const Opcode op = Offset(object ? Opcode::GetFS : Opcode::GetSFS, BankOf(i.a));
-        Word(EncodeABC(op, Phys(i.a), Phys(i.b), 0), span);
+        // C는 값의 slot 수다(verifier가 frame 범위를 본다 — 형식 버전 2의 TYPE 구역 전까지).
+        Word(EncodeABC(op, Phys(i.a), Phys(i.b), f.registers[TupleFirst(i.a)].slots), span);
         Word(EncodeAx(Opcode::Extra,
                       SymbolRef(object ? BytecodeRefKind::Field : BytecodeRefKind::StructField,
                                 i.extra)),
@@ -1127,7 +1224,7 @@ void BytecodeEncoder::Instruction(const IrInstruction& i, uint32 layoutIndex) no
     case IrOp::SetField: {
         const bool object = BankOf(i.a) == 1;
         const Opcode op = Offset(object ? Opcode::SetFS : Opcode::SetSFS, BankOf(i.b));
-        Word(EncodeABC(op, Phys(i.a), Phys(i.b), 0), span);
+        Word(EncodeABC(op, Phys(i.a), Phys(i.b), f.registers[TupleFirst(i.b)].slots), span);
         Word(EncodeAx(Opcode::Extra,
                       SymbolRef(object ? BytecodeRefKind::Field : BytecodeRefKind::StructField,
                                 i.extra)),
@@ -1171,7 +1268,7 @@ void BytecodeEncoder::Instruction(const IrInstruction& i, uint32 layoutIndex) no
         }
 
         ToWindow(values.View(), span);
-        Word(EncodeABx(Opcode::Emit, 0, SymbolRef(BytecodeRefKind::Event, i.extra)), span);
+        Word(EncodeABx(Opcode::Emit, 0, Bx(SymbolRef(BytecodeRefKind::Event, i.extra))), span);
         return;
     }
     case IrOp::Await: {
@@ -1200,7 +1297,10 @@ void BytecodeEncoder::Instruction(const IrInstruction& i, uint32 layoutIndex) no
         if (BankOf(i.b) == 0) {
             Word(EncodeABC(Opcode::TryS, Phys(i.a), Phys(i.b), sourceSlots), span);
         } else {
-            Word(EncodeABC(Opcode::TryB, Phys(i.a), Phys(i.b), 0), span);
+            const uint32 valueSlots = i.a == NoIrRegister ? 0 : f.registers[TupleFirst(i.a)].slots;
+            const uint32 valueBank = i.a == NoIrRegister ? 0 : BankOf(i.a);
+            Word(EncodeABC(Opcode::TryB, Phys(i.a), Phys(i.b), (valueBank << 5) | valueSlots),
+                 span);
         }
 
         const uint32 address = static_cast<uint32>(out_.words.Size()) - firstWord_;
@@ -1223,6 +1323,16 @@ void BytecodeEncoder::Instruction(const IrInstruction& i, uint32 layoutIndex) no
     }
     case IrOp::Release:
         Word(EncodeABC(Opcode::Release, Phys(i.a), 0, 0), span);
+        return;
+    case IrOp::EndExecution:
+        // 현재 실행을 끝내고 Result의 오류를 기록한다(Scalar Result는 묶음, Buf Result는 handle).
+        if (BankOf(i.b) == 0) {
+            Word(EncodeABC(Opcode::EndExecS, Phys(i.b), f.registers[TupleFirst(i.b)].slots, 0),
+                 span);
+        } else {
+            Word(EncodeABC(Opcode::EndExecB, Phys(i.b), 0, 0), span);
+        }
+
         return;
     case IrOp::Fault:
         Word(EncodeAx(Opcode::Fault, i.extra), span);
@@ -1251,7 +1361,18 @@ void BytecodeEncoder::EncodeCompare(const IrInstruction& i) noexcept {
             platform::Fatal("Sparks bytecode: ordering on a value tuple");
         }
 
-        Word(EncodeABC(equal ? Opcode::EqN : Opcode::NeN, Phys(i.a), left, right), span);
+        // 성분이 모두 실수(와 있음 표지)인 묶음은 실수 비교(-0.0 == 0.0), 그 밖(Soft의 AssetId
+        // 등)은 비트 비교다.
+        bool floats = true;
+        const uint32 first = TupleFirst(i.b);
+        for (uint32 slot = 0; slot < i.extra && floats; ++slot) {
+            const IrScalar scalar = f.registers[first + slot].scalar;
+            floats = IsFloat(scalar) || scalar == IrScalar::Flag;
+        }
+
+        const Opcode op =
+            floats ? (equal ? Opcode::EqNF : Opcode::NeNF) : (equal ? Opcode::EqN : Opcode::NeN);
+        Word(EncodeABC(op, Phys(i.a), left, right), span);
         Word(EncodeAx(Opcode::Extra, i.extra), span);
         return;
     }
@@ -1265,12 +1386,18 @@ void BytecodeEncoder::EncodeCompare(const IrInstruction& i) noexcept {
 
         op = equal ? Opcode::EqR : Opcode::NeR;
     } else if (bank == 2) {
-        if (!equality) {
+        // 문자열(`string?` 포함)은 UTF-8 byte 순 비교, 그 밖의 Buf는 값 비교(같음만)다.
+        const uint32 type = f.registers[i.b].type;
+        const bool text = type != NoType && checker_.NonOptional(type) == checker_.stringType_;
+        if (!equality && !text) {
             platform::Fatal("Sparks bytecode: ordering on buffers");
         }
 
-        const bool text = f.registers[i.b].type == checker_.stringType_;
-        op = text ? (equal ? Opcode::EqStr : Opcode::NeStr) : (equal ? Opcode::EqB : Opcode::NeB);
+        op = text ? (kind == IrCompare::Equal      ? Opcode::EqStr
+                     : kind == IrCompare::NotEqual ? Opcode::NeStr
+                     : kind == IrCompare::Less     ? Opcode::LtStr
+                                                   : Opcode::LeStr)
+                  : (equal ? Opcode::EqB : Opcode::NeB);
     } else {
         const IrScalar scalar = f.registers[i.b].scalar;
         if (IsFloat(scalar)) {
@@ -1334,8 +1461,9 @@ void BytecodeEncoder::EncodeConvert(const IrInstruction& i) noexcept {
 
         const uint32 enumType =
             f.registers[i.b].scalar == IrScalar::Enum ? TypeRef(checker_.NonOptional(type)) : 0;
-        Word(EncodeABC(Opcode::ToStr, Phys(i.a), Phys(i.b), 0), span);
-        Word(EncodeAx(Opcode::Extra, (display << 16) | (enumType & MaxBx)), span);
+        Word(EncodeABC(Opcode::ToStr, Phys(i.a), Phys(i.b), f.registers[TupleFirst(i.b)].slots),
+             span);
+        Word(EncodeAx(Opcode::Extra, (display << 16) | (Bx(enumType) & MaxBx)), span);
         return;
     }
 
@@ -1357,7 +1485,7 @@ void BytecodeEncoder::EncodeCall(const IrInstruction& i) noexcept {
     const IrFunction& f = *f_;
     const SourceSpan span = i.span;
     Opcode op = Opcode::Call;
-    const uint32 ref = CallRef(i.extra, i.sub, op);
+    const uint32 ref = Bx(CallRef(i.extra, i.sub, i.types, op));
     ToWindow(Span<const uint32>(f.operands.Data() + i.b, i.c), span);
     Word(EncodeABx(op, 0, ref), span);
     const bool mutating = i.sub == IrCallMutating && i.c > 0;
@@ -1381,7 +1509,8 @@ void BytecodeEncoder::EncodeNew(const IrInstruction& i) noexcept {
     case IrNewStruct: {
         const Symbol& entry = c_.symbols_[i.extra];
         const bool component = entry.kind == SymbolKind::Class;
-        Word(EncodeABx(component ? Opcode::NewC : Opcode::NewS, Phys(i.a), TypeRef(type)), span);
+        Word(EncodeABx(component ? Opcode::NewC : Opcode::NewS, Phys(i.a), Bx(TypeRef(type))),
+             span);
         for (uint32 pair = 0; pair < i.c; ++pair) {
             const uint32 field = f.operands[i.b + pair * 2];
             const uint32 value = f.operands[i.b + pair * 2 + 1];
@@ -1390,7 +1519,7 @@ void BytecodeEncoder::EncodeNew(const IrInstruction& i) noexcept {
             }
 
             const Opcode op = Offset(component ? Opcode::SetFS : Opcode::SetSFS, BankOf(value));
-            Word(EncodeABC(op, Phys(i.a), Phys(value), 0), span);
+            Word(EncodeABC(op, Phys(i.a), Phys(value), f.registers[TupleFirst(value)].slots), span);
             Word(EncodeAx(Opcode::Extra, SymbolRef(component ? BytecodeRefKind::Field
                                                              : BytecodeRefKind::StructField,
                                                    field)),
@@ -1400,22 +1529,47 @@ void BytecodeEncoder::EncodeNew(const IrInstruction& i) noexcept {
         return;
     }
     case IrNewLiteral: {
-        // 첫 인자(이름 글자)는 리터럴 표에, 나머지 인자(Loc의 이름 지정 인자)는 창에 둔다.
+        // 첫 인자(이름 글자)는 리터럴 표의 글자로, 나머지(Loc의 이름 지정 인자)는 창에 둔다. 리터럴
+        // 참조의 이름은 결과 타입(`Tag`·`Soft<DataAsset>`·하드 참조 `DataAsset` 등)이고, 인자 표는
+        // `이름=bank 글자;…`(창에 놓는 순서)다.
         const uint32 first = i.c > 0 ? f.operands[i.b + 1] : NoIrRegister;
         const uint32 text = first == NoIrRegister ? NoBytecodeIndex : stringOf_[first];
-        const uint32 literal =
-            AddRef(BytecodeRefKind::Literal, AddString(c_.symbols_[i.extra].name), text);
+        StringBuilder<128> name(checker_.allocator_);
+        Qualify(name, checker_.SymbolOf(checker_.NonOptional(type)));
+        checker_.AppendDisplayType(name, type);
+        StringBuilder<128> arguments(checker_.allocator_);
         Array<uint32> rest(checker_.allocator_);
         for (uint32 pair = 1; pair < i.c; ++pair) {
-            if (!rest.TryPushBack(f.operands[i.b + pair * 2 + 1])) {
+            const uint32 label = f.operands[i.b + pair * 2];
+            const uint32 value = f.operands[i.b + pair * 2 + 1];
+            if (value == NoIrRegister) {
+                continue;
+            }
+
+            if (!rest.TryPushBack(value)) {
                 Fail(ErrorCode::OutOfMemory);
                 return;
             }
+
+            const char letter = BankOf(value) == 0 ? 's' : BankOf(value) == 1 ? 'r' : 'b';
+            arguments.AppendFormat("{}{}={}", rest.Size() == 1 ? "" : ";",
+                                   label == NoSymbol ? StringView() : f.strings[label], letter);
+        }
+
+        if (name.HasFailed() || arguments.HasFailed()) {
+            Fail(ErrorCode::OutOfMemory);
+            return;
+        }
+
+        const uint32 literal = Bx(AddRef(BytecodeRefKind::Literal, AddString(name.View()), text));
+        if (!rest.IsEmpty() && literal < out_.refs.Size()) {
+            out_.refs[literal].arguments = AddString(arguments.View());
         }
 
         ToWindow(rest.View(), span);
         Word(EncodeABC(Opcode::NewLit, Phys(i.a), 0, 0), span);
-        Word(EncodeAx(Opcode::Extra, (literal & MaxBx) | (static_cast<uint32>(rest.Size()) << 16)),
+        Word(EncodeAx(Opcode::Extra, (literal & MaxBx) | (static_cast<uint32>(rest.Size()) << 16) |
+                                         (BankOf(i.a) << 22)),
              span);
         return;
     }
@@ -1423,7 +1577,7 @@ void BytecodeEncoder::EncodeNew(const IrInstruction& i) noexcept {
         const bool map = checker_.IsLanguage(checker_.NonOptional(type), "Map");
         const bool set = checker_.IsLanguage(checker_.NonOptional(type), "Set");
         const Opcode op = map ? Opcode::NewM : set ? Opcode::NewSet : Opcode::NewA;
-        Word(EncodeABx(op, Phys(i.a), TypeRef(type)), span);
+        Word(EncodeABx(op, Phys(i.a), Bx(TypeRef(type))), span);
         if (map) {
             for (uint32 pair = 0; pair + 1 < i.c; pair += 2) {
                 const uint32 key = f.operands[i.b + pair];

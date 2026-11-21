@@ -22,6 +22,22 @@ public:
     }
 
     void Write() noexcept {
+        out_.Append("module ");
+        if (module_.path != NoBytecodeIndex && module_.path < module_.stringOffsets.Size()) {
+            Quoted(module_.String(module_.path));
+        }
+
+        out_.Append("\ncompiler ");
+        if (module_.compiler != NoBytecodeIndex &&
+            module_.compiler < module_.stringOffsets.Size()) {
+            Quoted(module_.String(module_.compiler));
+        }
+
+        out_.AppendFormat("\nprofile {}\ncontent ", module_.profile == 0 ? "core" : "full");
+        Hash(module_.contentHash);
+        out_.Append("\ninterface ");
+        Hash(module_.interfaceHash);
+        out_.Append("\n");
         for (usize index = 0; index < module_.scalars.Size(); ++index) {
             out_.AppendFormat("k{} = {:#018x}\n", index, module_.scalars[index]);
         }
@@ -41,6 +57,13 @@ public:
                 Quoted(module_.String(ref.detail));
             } else if (ref.kind == BytecodeRefKind::Function && ref.detail != NoBytecodeIndex) {
                 out_.AppendFormat(" #{}", ref.detail);
+            } else if (ref.detail != NoBytecodeIndex) {
+                out_.AppendFormat(" type ref{}", ref.detail);
+            }
+
+            if (ref.arguments != NoBytecodeIndex) {
+                out_.Append(" args ");
+                Quoted(module_.String(ref.arguments));
             }
 
             out_.Append("\n");
@@ -62,7 +85,9 @@ private:
                 out_.Append("\\n");
             } else if (c == '\t') {
                 out_.Append("\\t");
-            } else if (static_cast<uint8>(c) < 0x20) {
+            } else if (static_cast<uint8>(c) < 0x20 || static_cast<uint8>(c) >= 0x7F) {
+                // 제어 문자와 ASCII 밖 byte는 `\xHH`다(덤프는 ASCII — 읽은 파일의 글자가 올바른
+                // UTF-8이 아니어도 덤프한다).
                 out_.AppendFormat("\\x{:02x}", static_cast<uint32>(static_cast<uint8>(c)));
             } else {
                 out_.AppendFormat("{}", c);
@@ -72,6 +97,12 @@ private:
         out_.Append("\"");
     }
 
+    void Hash(const uint8 (&bytes)[BytecodeHashBytes]) noexcept {
+        for (const uint8 byte : bytes) {
+            out_.AppendFormat("{:02x}", static_cast<uint32>(byte));
+        }
+    }
+
     void Register(OperandBank bank, uint32 number) noexcept {
         out_.AppendFormat("{}{}", BankLetter(bank), number);
     }
@@ -79,10 +110,15 @@ private:
     void Function(const BytecodeFunction& function) noexcept {
         out_.Append("\nfunction ");
         out_.Append(module_.String(function.name));
-        out_.AppendFormat("  scalar={}/{} ref={}/{} buf={}/{} params={}/{}/{}\n",
+        out_.AppendFormat("  scalar={}/{} ref={}/{} buf={}/{} params={}/{}/{} returns {}x{}\n",
                           function.registers[0], function.frame[0], function.registers[1],
                           function.frame[1], function.registers[2], function.frame[2],
-                          function.parameters[0], function.parameters[1], function.parameters[2]);
+                          function.parameters[0], function.parameters[1], function.parameters[2],
+                          BankLetter(static_cast<uint32>(function.returnBank)),
+                          function.returnSlots);
+        out_.Append("  body ");
+        Hash(function.bodyHash);
+        out_.Append("\n");
         for (uint32 index = function.firstAwait; index < function.firstAwait + function.awaitCount;
              ++index) {
             const BytecodeAwaitPoint& point = module_.awaits[index];
@@ -172,6 +208,7 @@ private:
 
             return;
         case Opcode::RetErrS:
+        case Opcode::EndExecS:
             out_.AppendFormat("s{} x{}", a, b);
             return;
         case Opcode::Conv:
@@ -272,7 +309,14 @@ private:
         }
         case Opcode::TryS:
         case Opcode::TryB:
-            out_.AppendFormat("{}{}, ", info.op == Opcode::TryS ? 's' : '?', a);
+            if (info.op == Opcode::TryS) {
+                out_.AppendFormat("s{}, ", a);
+            } else if ((c & 0x1F) == 0) {
+                out_.Append("-, ");
+            } else {
+                out_.AppendFormat("{}{} x{}, ", BankLetter(c >> 5), a, c & 0x1F);
+            }
+
             Register(info.b, b);
             if (info.op == Opcode::TryS) {
                 out_.AppendFormat(" x{}", c);
@@ -287,9 +331,9 @@ private:
             out_.AppendFormat(" x{}", marker & 0xFF);
             return;
         case Opcode::NewLit:
-            out_.AppendFormat("#{}, ", a);
+            out_.AppendFormat("{}{}, ", BankLetter(marker >> 22), a);
             Ref(marker & MaxBx);
-            out_.AppendFormat(" args {}", marker >> 16);
+            out_.AppendFormat(" args {}", (marker >> 16) & 0x3F);
             return;
         case Opcode::ToStr:
             Register(info.a, a);
@@ -304,6 +348,8 @@ private:
             return;
         case Opcode::EqN:
         case Opcode::NeN:
+        case Opcode::EqNF:
+        case Opcode::NeNF:
             Register(info.a, a);
             out_.Append(", ");
             Register(info.b, b);
