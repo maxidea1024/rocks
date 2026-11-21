@@ -157,6 +157,11 @@ internal static class GameProjectFiles
         {
             return false;
         }
+        catch (Exception error) when (error is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            // 다른 사용자·보호 프로세스라 상태를 알 수 없다. 지우지 않도록 실행 중으로 본다.
+            return true;
+        }
     }
 
     private static void TryDelete(string directory)

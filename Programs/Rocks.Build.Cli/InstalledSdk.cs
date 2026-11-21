@@ -324,7 +324,8 @@ public static class InstalledSdk
         try
         {
             var result = await BuildGameCoreAsync(options, requireVerified, toolchainRecord, cancellationToken);
-            status = result == 0 ? "PASS" : "FAIL";
+            // 파일 하나 컴파일은 빌드가 아니므로 PASS가 아니다(Docs/Design/ProjectFiles.ko.md 7.4절).
+            status = options.ContainsKey(SingleFileCommand.Option) ? (result == 0 ? "SINGLE-FILE" : "FAIL") : result == 0 ? "PASS" : "FAIL";
             return result;
         }
         catch (Exception error)

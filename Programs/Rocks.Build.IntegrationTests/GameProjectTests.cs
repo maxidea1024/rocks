@@ -128,6 +128,7 @@ internal static class GameProjectTests
         JsonFileRobustness(Path.Combine(root, "robust"), first, second);
         Concurrency(Path.Combine(root, "concurrent", "Sdks.json"));
         await CrossProcessAsync(Path.Combine(root, "processes", "Sdks.json"));
+        await ContentionAsync(Path.Combine(root, "contention", "Sdks.json"));
 
         if (OperatingSystem.IsWindows())
         {
@@ -259,6 +260,38 @@ internal static class GameProjectTests
             {
                 Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(subKey, throwOnMissingSubKey: false);
             }
+        }
+    }
+
+    // 잠금 경합: 자식이 잠금을 쥐고 HELD를 쓰면, 부모의 등록은 경합을 관찰하고(hook) 끝나지 않은 채 기다리다가, gate(표준 입력 한 줄)로 자식이 놓은 뒤
+    // 성공한다. 순서는 신호와 gate가 정하고 시간 대기는 쓰지 않는다(hook 대기의 상한은 멈춤 방지일 뿐이다).
+    private static async Task ContentionAsync(string file)
+    {
+        string writer = typeof(GameProjectTests).Assembly.Location;
+        var start = new System.Diagnostics.ProcessStartInfo("dotnet", [writer, "--registry-lock-holder", file])
+        {
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true
+        };
+        using var holder = System.Diagnostics.Process.Start(start)!;
+        Require(holder.StandardOutput.ReadLine() == "HELD", "the lock holder did not take the lock");
+        using var contended = new ManualResetEventSlim();
+        SdkRegistries.ContentionObserved = _ => contended.Set();
+        try
+        {
+            Task<string> register = Task.Run(() => new JsonSdkRegistry(file).Register(Path.Combine(Path.GetDirectoryName(file)!, "Contended")));
+            Require(contended.Wait(TimeSpan.FromMinutes(2)), "registration did not observe the held lock");
+            Require(!register.IsCompleted, "registration must wait while another process holds the lock");
+            holder.StandardInput.WriteLine();
+            holder.StandardInput.Flush();
+            await holder.WaitForExitAsync();
+            string id = await register;
+            Require(holder.ExitCode == 0 && new JsonSdkRegistry(file).List().Any(entry => entry.Id == id), "registration after the lock was released");
+        }
+        finally
+        {
+            SdkRegistries.ContentionObserved = null;
         }
     }
 
@@ -534,7 +567,8 @@ internal static class GameProjectTests
         // new-project(Docs/Design/ProjectFiles.ko.md 11절): 이름 검사, 두 단계 치환, 템플릿 철자 검사.
         NewProjectCommand.ValidateName("MyGame", ["Core", "Launch"]);
         foreach (string bad in new[] { "Ab", "lowercase", "Bad-Name", "Rocks", "ROCKS", "RocksSdk", "Std", "Posix", "Core", "LAUNCH", "Class", "Namespace",
-            "A23456789012345678901234567890123", "CON", "Nul", "COM1", "Lpt9", "Errno", "Stdin", "Stderr", "Near", "Far", "Interface", "Linux", "Unix" })
+            "A23456789012345678901234567890123", "CON", "Nul", "COM1", "Lpt9", "Errno", "Stdin", "Stderr", "Near", "Far", "Interface", "Linux", "Unix", "Small",
+            "Hyper", "Pascal", "Cdecl" })
         {
             Error(() => NewProjectCommand.ValidateName(bad, ["Core", "Launch"]));
         }

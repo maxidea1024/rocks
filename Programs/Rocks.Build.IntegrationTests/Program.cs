@@ -41,6 +41,19 @@ if (args.Length == 1 && args[0] == "--ide-scripts")
     return 0;
 }
 
+// 등록부 잠금 경합 시험의 자식이다: 잠금을 쥔 채 HELD를 쓰고, 표준 입력에서 한 줄을 받으면(부모의 gate) 놓는다.
+if (args.Length == 2 && args[0] == "--registry-lock-holder")
+{
+    SdkRegistries.ExclusiveFile(args[1], () =>
+    {
+        Console.WriteLine("HELD");
+        Console.Out.Flush();
+        Console.In.ReadLine();
+        return 0;
+    });
+    return 0;
+}
+
 // 등록부 교차 프로세스 시험의 자식이다: --registry-writer json|windows <파일 또는 하위 키> <접두> <개수>.
 if (args.Length == 5 && args[0] == "--registry-writer")
 {

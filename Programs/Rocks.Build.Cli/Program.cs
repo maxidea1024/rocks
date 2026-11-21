@@ -299,7 +299,8 @@ namespace Rocks.Build.Cli
                 if (options.TryGetValue(SingleFileCommand.Option, out string? files))
                 {
                     int compiled = await SingleFileCommand.RunAsync(EnginePlanning.Request(toolchain, configuration, rules.Target, root, output,
-                        plan.Modules, buildRoots, engineVersion, Jobs(options)), files, root, cancellationToken);
+                        plan.Modules, buildRoots, engineVersion, Jobs(options)), files, root, cancellationToken,
+                        SingleFileCommand.EngineTargets(root, rulesPath, targetName, toolchain, configuration, engineVersion));
                     await evidence.FinishAsync("Single-file compile: no build was run.");
                     return compiled;
                 }
