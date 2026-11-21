@@ -1947,6 +1947,8 @@ A2c3a 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.23) 시험 �
 
 리뷰(1회 미충족)가 찾은 것: 쓰기 명령이 색인을 만든 뒤에 잠갔다(잠금 아래에서 다시 보지 않은 색인으로 쓰기 판정), asset-new의 "NotFound + 진단 None = 모르는 타입" 판정이 저장 단계의 NotFound(임시 파일·교체)와 섞였다(타입을 먼저 찾게 고침), 경고 줄이 스펙 형식과 달랐다(형식을 맞추고 환경 실패·일반 실패 줄도 같은 형식·관련 대상 포함으로 다듬음). 권장으로 path 대상 asset-set 성공을 따로 단언했다. 읽기 전용(더 새 엔진) 대상 장면은 명령 시험이 Animation 패키지를 더 새 엔진 버전으로 만들 수 없어(헤더 버전을 바꾸면 무결성 검사에 걸린다) 서비스·집합 시험(`EditorPackageSave_Refusals` NewerVersion)으로 둔다.
 
+A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항목 95개 모두 인용, 조합(대조표 마지막 행), coverage(14.1.26 — Windows), 리뷰어 판정 **충족**(1회 미충족 — 필수 3 반영). 이로써 A2c3(명령) 완료 — 다음은 A2d.
+
 ## 15. PNG 디코더 범위
 
 색 형식 0/2/3/4/6, 비트 깊이 1–16, Adam7, PLTE·tRNS, chunk CRC, zlib(Core `Compression`)·Adler-32, 한 변 16384·해제 크기 = IHDR 계산값. gAMA·cHRM·sRGB·iCCP는 변환하지 않고 sRGB로 보며 sRGB가 아닌 표시가 있으면 `NonSrgbSource` 경고. APNG는 기본 이미지. 시험은 PngSuite(자유 사용 라이선스, `TextureTools/Tests/Fixtures/PngSuite`).

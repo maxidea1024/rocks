@@ -327,6 +327,11 @@ Result<int32> RunAssetNewCommand(void* context, Span<const StringView> args,
     if (auto known = session.types.Types().AcquireByToolName(
             Span<const char>(typeName.Data(), typeName.ByteCount()));
         !known) {
+        // 할당 실패는 다른 경로처럼 실행 오류로 전파한다.
+        if (known.Error() == ErrorCode::OutOfMemory) {
+            return Result<int32>::Failure(known.Error());
+        }
+
         return Fail(output, allocator, NewName, 1, "{}: {}: unknown type",
                     ErrorCodeName(known.Error()), typeName);
     }
