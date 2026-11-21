@@ -9,11 +9,11 @@
 13:9-13:28 CastTest Rocks.Pressable?
 13:9-13:14 Identifier Rocks.Interactable
 14:9-14:28 CastTest Test:Main.Mover?
-14:9-14:18 Identifier Rocks.ScriptComponent
+14:9-14:18 Identifier Rocks.ScriptableComponent
 18:9-18:10 Identifier Rocks.Actor
 19:9-19:10 Identifier Rocks.Pawn
 20:9-20:10 Identifier int
 21:9-21:14 Identifier Test:Main.Point
 22:9-22:10 Identifier Rocks.Actor
 23:9-23:10 Identifier Rocks.Actor
-24:9-24:18 Identifier Rocks.ScriptComponent
+24:9-24:18 Identifier Rocks.ScriptableComponent

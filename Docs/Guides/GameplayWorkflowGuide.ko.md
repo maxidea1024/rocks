@@ -36,7 +36,7 @@
 
 | 대상 | Sparks | C++ | 같은 클래스에서 값만 다른 변형 |
 |---|---|---|---|
-| 컴포넌트 | `class X : ScriptComponent` (스펙) | `class X : public rocks::Component` (있음) | 배치·prefab의 override |
+| 컴포넌트 | `class X : ScriptableComponent` (스펙) | `class X : public rocks::Component` (있음) | 배치·prefab의 override |
 | 액터 | `class X : Actor` 또는 Pawn·Character 파생 (스펙) | `class X : public rocks::Actor` (있음) | prefab, prefab variant |
 | 레벨 | `class X : LevelScript` (스펙) | `class X : public rocks::LevelScript` (스펙) | 해당 없음(레벨마다 하나, 값은 레벨마다 `@edit`) |
 | 게임 전체 | `class X : WorldService` (스펙) | `WorldSubsystem` 파생 (있음) | 해당 없음 |
@@ -87,7 +87,7 @@ C++는 다음 경우에 쓴다.
 
 ```sparks
 // Combat/Health.spark
-class Health : ScriptComponent {
+class Health : ScriptableComponent {
     @edit @save var MaxHealth: int = 100;
     @net var Current: int = 100;
 
@@ -107,7 +107,7 @@ class Health : ScriptComponent {
 
 작업 순서:
 
-1. 콘텐츠 브라우저에서 **새 Sparks 스크립트**를 고르고 기반 타입으로 `ScriptComponent`를 골라 `Combat/Health.spark`를 만든다.
+1. 콘텐츠 브라우저에서 **새 Sparks 스크립트**를 고르고 기반 타입으로 `ScriptableComponent`를 골라 `Combat/Health.spark`를 만든다.
 2. VS Code에서 위 코드를 쓰고 저장한다.
 3. Actor를 고르고 Details의 **컴포넌트 추가**에서 `Health`를 고른다. 붙일 수 있는 곳은 3.3절에 있다.
 4. Details에 `MaxHealth`가 나타나며, 배치마다 값을 바꿀 수 있다.

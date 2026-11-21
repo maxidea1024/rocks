@@ -1,4 +1,4 @@
-class Array : ScriptComponent {
+class Array : ScriptableComponent {
     var World: int;
     fn Delay() { }
     var Changed: int;

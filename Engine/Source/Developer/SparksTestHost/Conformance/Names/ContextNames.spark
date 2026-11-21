@@ -17,7 +17,7 @@ class Keeper : WorldService {
     }
 }
 
-class Door : ScriptComponent {
+class Door : ScriptableComponent {
     var Speed = Time;
     @rpc(Server, Reliable) fn Fire() {
         _ = Caller;

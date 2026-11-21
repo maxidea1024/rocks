@@ -4,7 +4,7 @@
 
 **설계 기준일 2026.11.20 · 초안 1.5 · 상태: 설계 제안 / 미구현 · 성능 미측정**
 
-이 문서는 [전체 계획](EngineImplementationPlan.ko.md) §23이 요구하는 Rocks 게임플레이 언어 Sparks를 정의한다. 프로그래머가 아닌 사용자도 쓸 수 있도록 Go처럼 단순하게, 실수할 여지가 적게, 메모리·리소스 누수가 생길 수 없는 구조로 설계한다. 기준은 엔진 구현 상태가 아니라 전체 계획 §23과 이 언어가 연결되는 전체 계획 §5·§6·§8·§9·§10·§16·§17·§20·§21·§24·§29의 계약이다. 이 문서의 문법·이름·API는 설계 제안이며 구현·측정 결과가 아니다. 예시의 엔진 API 이름(`AddMovement`, `World.Spawn` 등)은 바인딩 규칙을 보이기 위한 예시이며 실제 이름은 각 모듈의 C++ 선언에서 생성된다. 아직 엔진에 없는 게임 타입(`Character`, `Collider`·`SphereCollider`, `SoundAsset`, `Sequence`, `DataAsset`, `ScriptComponent`, `WidgetController`, `PlaySession`)은 자리표시 이름이며 해당 모듈이 들어올 때 확정한다(§17.2).
+이 문서는 [전체 계획](EngineImplementationPlan.ko.md) §23이 요구하는 Rocks 게임플레이 언어 Sparks를 정의한다. 프로그래머가 아닌 사용자도 쓸 수 있도록 Go처럼 단순하게, 실수할 여지가 적게, 메모리·리소스 누수가 생길 수 없는 구조로 설계한다. 기준은 엔진 구현 상태가 아니라 전체 계획 §23과 이 언어가 연결되는 전체 계획 §5·§6·§8·§9·§10·§16·§17·§20·§21·§24·§29의 계약이다. 이 문서의 문법·이름·API는 설계 제안이며 구현·측정 결과가 아니다. 예시의 엔진 API 이름(`AddMovement`, `World.Spawn` 등)은 바인딩 규칙을 보이기 위한 예시이며 실제 이름은 각 모듈의 C++ 선언에서 생성된다. 아직 엔진에 없는 게임 타입(`Character`, `Collider`·`SphereCollider`, `SoundAsset`, `Sequence`, `DataAsset`, `ScriptableComponent`, `WidgetController`, `PlaySession`)은 자리표시 이름이며 해당 모듈이 들어올 때 확정한다(§17.2).
 
 초안 1.3은 구현 착수 전 스펙 완비를 위한 개정이다. 엔진 런타임(Actor·World 코드)·Prefab 개정 3·리플렉션 B9·주변 시스템 스펙(로깅·CVar·입력·UI·콘텐츠 서명)과 이름·시점을 맞추고, 사용자 핵심 요구 3가지 — **핫 리로드 필수(§12.4), 오류 방어(§8.4), 선택형 native AOT(§12.5, Unity IL2CPP와 같은 backend 선택)** — 를 규격으로 확정하였다. 미정 값(전달 수 상한·예산·interface·CU9)을 정하고 표준 API(부록 B)를 추가하였다. 구현 순서는 초안 1.5의 §18을 따른다.
 
@@ -148,7 +148,7 @@ import Items.Inventory;
 
 enum DoorState { Closed, Opening, Open }
 
-class DoorLogic : ScriptComponent {
+class DoorLogic : ScriptableComponent {
     @edit @save var OpenAngle: float = 90.0;           // Rotator 각도: 도
     @edit var Hinge: SceneComponent;               // ? 없음: 같은 prefab 안에서 반드시 지정
     @edit @save var RequiredKey = Tag("Item.Key.Iron");
@@ -232,7 +232,7 @@ class DoorLogic : ScriptComponent {
 
 | Unity (C#) | Sparks | 차이 |
 |---|---|---|
-| `class X : MonoBehaviour` | `class X : ScriptComponent` | — |
+| `class X : MonoBehaviour` | `class X : ScriptableComponent` | — |
 | `[SerializeField]`, public 필드 | `@edit`, `@save` | 편집기 노출과 저장을 구분 |
 | `Awake` · `OnEnable` · `Start` | `on Awake()` · `on Enable()` · `on Start()` | Start는 준비 대기(로드 등)만 기다릴 수 있고 끝날 때까지 Tick은 시작되지 않는다(SD12). 현재 상태 반영은 활성화마다 실행되는 Enable에서 한다 |
 | `Update` · `FixedUpdate` · `LateUpdate` | `on Tick()` · `on FixedTick()` · `on LateTick()` | Tick 계열에서는 기다리기·생성·자원 획득 불가 |
@@ -279,7 +279,7 @@ class DoorLogic : ScriptComponent {
 
 | 선언 | 의미 | 예 |
 |---|---|---|
-| `class` | 엔진 수명 타입(`ScriptComponent`, Actor·Pawn 파생 `Character`, Actor 파생 `LevelScript`, `WorldService`, `WidgetController`) 또는 `DataAsset`을 상속. 기반 타입이 수명과 문맥 이름을 정한다(§3.4). core에서 기반은 엔진 C++ 타입뿐이고 Sparks 클래스는 상속할 수 없다. full에서는 `open class`로 선언한 Sparks 클래스도 기반이 될 수 있다(SD27) | `class DoorLogic : ScriptComponent { }` |
+| `class` | 엔진 수명 타입(`ScriptableComponent`, Actor·Pawn 파생 `Character`, Actor 파생 `LevelScript`, `WorldService`, `WidgetController`) 또는 `DataAsset`을 상속. 기반 타입이 수명과 문맥 이름을 정한다(§3.4). core에서 기반은 엔진 C++ 타입뿐이고 Sparks 클래스는 상속할 수 없다. full에서는 `open class`로 선언한 Sparks 클래스도 기반이 될 수 있다(SD27) | `class DoorLogic : ScriptableComponent { }` |
 | `struct` | 값 타입. 상속 없음. 스크립트 데이터는 struct로 표현한다 | `struct HitInfo { var Point: vec3; var Damage: int = 1; }` |
 | `enum` | 열거. 플래그 조합은 `Set<E>` | `enum DamageKind { Physical, Fire, Poison }` |
 | `event` | 클래스 안의 멤버 이벤트, 최상위의 Actor 확장 이벤트·World 이벤트 | `event Died(killer: Actor?);` · `event Actor.Interacted(actor: Actor);` · `event World.GameStarted();` |
@@ -377,7 +377,7 @@ _ = bag.Add(item);                                      // 결과를 버릴 때�
 
 | 기반 타입 | 문맥 이름 |
 |---|---|
-| `ScriptComponent`, `WidgetController`, Actor 파생(`Pawn`·`Character`·`LevelScript` 등) | `World`·`Session`·`Input`·`Time` |
+| `ScriptableComponent`, `WidgetController`, Actor 파생(`Pawn`·`Character`·`LevelScript` 등) | `World`·`Session`·`Input`·`Time` |
 | `WorldService` | `World`·`Session`·`Time` |
 | `DataAsset`, struct `fn`, 최상위 `fn` | 없음 |
 | 서버 RPC 함수 본문(full) | 위에 더해 `Caller: Connection`(호출한 connection) |
@@ -498,7 +498,7 @@ VerbatimLit  = '@"' { VerbatimChar | '""' } '"' ;                 (* escape·보
 | 내장 타입 | `bool` `int` `float` `int8` `int16` `int32` `int64` `uint8` `uint16` `uint32` `uint64` `float32` `float64` `string` `vec2` `vec3` `vec4` `quat` `mat4`, `void`(`Result<void>`의 타입 인자 전용) | 식별자로 쓸 수 없다. 타입과 생성·변환 호출로만 쓴다 |
 | prelude | `Log` `Assert` `Math` `Random` `Format` `Parse` `Delay` `NextTick` `NextFixedTick` `All` `Race` `Assets` `CVars` `Settings` `Clock` `Error` | 사용자 선언 이름으로 쓸 수 없다 |
 | prelude 타입 | `Array` `Map` `Set` `Result` `Soft` `Row` `Text` `TagSet` `InputAction` `LoadRequest` `Connection` `PlaySession` `Class` `CVarRef` `Rotator` `Transform` `WorldPosition` `Color` `Hit` | 사용자 선언 이름으로 쓸 수 없다 |
-| 핵심 엔진 타입(언어 버전 1에 고정) | `Actor` `Pawn` `Component` `SceneComponent` `ScriptComponent` `LevelScript` `WorldService` `WidgetController` `Widget` `DataAsset` `Collider` `World` | 사용자 선언 이름으로 쓸 수 없다. 그 밖의 `Rocks` 패키지 타입은 이름 하나에 대상 하나 규칙(§3.1)으로만 충돌을 판정한다 |
+| 핵심 엔진 타입(언어 버전 1에 고정) | `Actor` `Pawn` `Component` `SceneComponent` `ScriptableComponent` `LevelScript` `WorldService` `WidgetController` `Widget` `DataAsset` `Collider` `World` | 사용자 선언 이름으로 쓸 수 없다. 그 밖의 `Rocks` 패키지 타입은 이름 하나에 대상 하나 규칙(§3.1)으로만 충돌을 판정한다 |
 | 검증 리터럴 | `Tag` `Action` `Asset` `Row` `Loc` `CVar` | 사용자 선언 이름으로 쓸 수 없다 |
 | 문맥 이름 | `World` `Session` `Input` `Time` `Caller` | 사용자 선언 이름으로 쓸 수 없다 |
 | RPC 접두 | `Server` `AllClients` `OwnerClient` | 사용자 선언 이름으로 쓸 수 없다 |
@@ -925,7 +925,7 @@ other.Current = 0;                        // 오류(other: Health): 다른 객�
 ### 4.5 생성과 기본값 순서
 
 - struct와 component는 필드 이름으로 생성한다(`HitInfo(Point: p)`). 지정하지 않은 필드는 기본값을 사용하며 기본값이 없는 필드(§3.2)는 반드시 지정한다.
-- component는 `let` 필드의 초기값으로만 생성한다(실행 중 추가는 full). 편집기에서 배치한 Actor에 ScriptComponent를 붙이는 것은 스크립트의 생성이 아니라 레벨·배치 데이터 편집이며 core에서도 된다: 직접 배치 Actor는 그 `components`에 추가해 레벨에 저장하고, prefab 배치는 instance override의 노드 추가로 저장한다(Prefab PF4 선행, [LevelScript](LevelScript.ko.md) LD15). 필드 초기값은 상수식과 component 생성만 허용하고 클래스 기본값 레코드에 반영한다 — 레코드는 가장 가까운 C++ base의 생성자 결과 위에 컴파일된 초기값을 덮어 합성한다(RCM '클래스 기본값 결정'). component 생성 초기값은 클래스 원형의 default subobject(Prefab PF1)가 선행 조건이며 그때까지 미지원이다. 상수식은 리터럴, 검증 리터럴, enum 값, const 이름, 이들의 산술·비교, 수학 타입·struct 생성, 배열·Map 리터럴, `Math.Radians`·`Math.Degrees`이며 그 밖의 함수 호출과 필드 참조는 포함하지 않는다. 컴파일 시 overflow는 오류다. C++ 생성자 안에서 스크립트 코드를 실행하지 않는다.
+- component는 `let` 필드의 초기값으로만 생성한다(실행 중 추가는 full). 편집기에서 배치한 Actor에 ScriptableComponent를 붙이는 것은 스크립트의 생성이 아니라 레벨·배치 데이터 편집이며 core에서도 된다: 직접 배치 Actor는 그 `components`에 추가해 레벨에 저장하고, prefab 배치는 instance override의 노드 추가로 저장한다(Prefab PF4 선행, [LevelScript](LevelScript.ko.md) LD15). 필드 초기값은 상수식과 component 생성만 허용하고 클래스 기본값 레코드에 반영한다 — 레코드는 가장 가까운 C++ base의 생성자 결과 위에 컴파일된 초기값을 덮어 합성한다(RCM '클래스 기본값 결정'). component 생성 초기값은 클래스 원형의 default subobject(Prefab PF1)가 선행 조건이며 그때까지 미지원이다. 상수식은 리터럴, 검증 리터럴, enum 값, const 이름, 이들의 산술·비교, 수학 타입·struct 생성, 배열·Map 리터럴, `Math.Radians`·`Math.Degrees`이며 그 밖의 함수 호출과 필드 참조는 포함하지 않는다. 컴파일 시 overflow는 오류다. C++ 생성자 안에서 스크립트 코드를 실행하지 않는다.
 - 기본값 순서는 전체 계획 §5.3과 Prefab 3.1절을 따른다: native → Sparks 필드 초기값(이 둘의 결과가 클래스 기본값 레코드다) → subobject 기본값 레코드 → prefab·variant → instance override → spawn parameter. 코드의 기본값 변경은 override하지 않은 instance에 반영하고 override한 instance를 편집기에 표시한다.
 - 소유 component 필드에도 안정 ID(SubobjectGuid)를 부여하므로 이름을 바꿔도 prefab override가 유지된다(전체 계획 §5.3).
 
@@ -973,7 +973,7 @@ Unity의 hook 체계(종류·의미)를 따르고 이름은 Rocks 어휘를 사�
 이벤트(클래스 일부):
 
 ~~~text
-class Health : ScriptComponent {
+class Health : ScriptableComponent {
     @edit @save var MaxHealth: int = 100;
     @net var Current: int = 100;
     event Died(killer: Actor?);
@@ -1070,7 +1070,7 @@ Sparks 코드는 엔진의 정해진 지점에서 실행되며 이 실행 묶음
 handler 안에서 기다리기(싱글플레이 예):
 
 ~~~text
-class CutsceneTrigger : ScriptComponent {
+class CutsceneTrigger : ScriptableComponent {
     @edit var Cutscene: Soft<Sequence>;
     let Skip = Action("UI.Skip");
 
@@ -1876,7 +1876,7 @@ LSP 서버 `sparks-lsp`를 VS Code 확장과 Rocks Studio Script Editor가 공�
 자동완성 위치(`|` = 커서):
 
 ~~~text
-class DoorLogic : ScriptComponent {
+class DoorLogic : ScriptableComponent {
     @edit var RequiredKey = Tag("Item.|");        // 태그 사전
     on |                                           // Awake, Start, Tick, TriggerEnter, Owner.Interacted, State.Changed …
     on Target.|                                    // Target 타입의 이벤트와 필드 Changed
@@ -1920,7 +1920,7 @@ class DoorLogic : ScriptComponent {
 replication · RPC:
 
 ~~~text
-class Weapon : ScriptComponent {
+class Weapon : ScriptableComponent {
     @net var Ammo: int = 30;
     @net(OwnerOnly) var Reserve: int = 90;
     let ReloadKey = Action("Gameplay.Reload");
@@ -1954,7 +1954,7 @@ struct LootRow {
     var Weight: float;
 }
 
-class Chest : ScriptComponent {
+class Chest : ScriptableComponent {
     @edit var Lid: SceneComponent;                 // 같은 prefab 안의 필수 참조
     @edit var Loot: Row<LootRow> = Row("Chest.Common");
     @edit(Min: 0, Max: 10) var Uses: int = 3;
@@ -2042,7 +2042,7 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 | CompilerDiagnostics | 엔진 공통 진단 코드 등록부(Sparks S0100–S1199, 메타 컴파일러 RMC####, UI validate 코드) | LC0와 함께 |
 | ContentSigning 1절 | `ExternalModules=Signed` 예외와 모듈 서명 봉투(§12.7) | EI9 전 |
 | CVarSystem 14.5절 | Sparks 노출 문법(§10.4) 반영 | 다음 CVar 문서 개정 |
-| 게임 타입 자리표시 | `Character`·`Collider`·`SphereCollider`·`SoundAsset`·`Sequence`·`DataAsset`·`ScriptComponent`·`WidgetController`·`PlaySession`의 Rocks 이름 확정(Rocks 고유 이름 원칙) | 해당 모듈 진입 시 |
+| 게임 타입 자리표시 | `Character`·`Collider`·`SphereCollider`·`SoundAsset`·`Sequence`·`DataAsset`·`ScriptableComponent`·`WidgetController`·`PlaySession`의 Rocks 이름 확정(Rocks 고유 이름 원칙) | 해당 모듈 진입 시 |
 | ID 개념 이름 | `SoftEntityId`·영속 Entity Guid·파생 Entity ID를 Actor 계열 이름으로 바꿀지 Prefab과 함께 결정 | Prefab PF 단계 |
 | (초안 1.4) 편집기 | Outliner "레벨 스크립트" 항목, 레벨 스크립트 명령·템플릿(전체 계획 §22.3), `sparks-lsp` 명령 `sparks.levelScript.*`(§13) | 편집기 단계 |
 
@@ -2056,7 +2056,7 @@ Verse의 기호가 많은 문법과 failure·동시성 개념에는 학습 비�
 
 언어 코어가 엔진 없이 완결되도록 경계를 둘로 정한다(SD52).
 
-- **binding schema는 파일이다.** 컴파일러는 엔진 API를 C++ 리플렉션에서 직접 읽지 않고 binding schema 파일(`<모듈>.sparkbind.json`)과 사전 파일(Tag·Action·CVar·에셋·`Loc` catalog)에서만 읽는다. 내용은 §10.2의 표(타입·필드·계산 속성·함수·자원 정책·파괴 지연·이벤트)다. 언어 코어는 손으로 쓴 시험용 schema(가짜 엔진: `Actor`·`Component`·`ScriptComponent`·`SceneComponent`와 §2 예시가 쓰는 타입, `Engine/Source/Developer/SparksTestHost/Schema/*.sparkbind.json`)로 개발하고, 실제 엔진 선언에서 이 파일을 생성하는 것은 연동 단계 EI1이다. 언어 서버가 엔진 없이 동작하는 것(§13)도 같은 파일 덕분이다. 파일 형식은 §10.2 "binding schema 파일 형식"(LC2a 확정)이다.
+- **binding schema는 파일이다.** 컴파일러는 엔진 API를 C++ 리플렉션에서 직접 읽지 않고 binding schema 파일(`<모듈>.sparkbind.json`)과 사전 파일(Tag·Action·CVar·에셋·`Loc` catalog)에서만 읽는다. 내용은 §10.2의 표(타입·필드·계산 속성·함수·자원 정책·파괴 지연·이벤트)다. 언어 코어는 손으로 쓴 시험용 schema(가짜 엔진: `Actor`·`Component`·`ScriptableComponent`·`SceneComponent`와 §2 예시가 쓰는 타입, `Engine/Source/Developer/SparksTestHost/Schema/*.sparkbind.json`)로 개발하고, 실제 엔진 선언에서 이 파일을 생성하는 것은 연동 단계 EI1이다. 언어 서버가 엔진 없이 동작하는 것(§13)도 같은 파일 덕분이다. 파일 형식은 §10.2 "binding schema 파일 형식"(LC2a 확정)이다.
 - **VM은 엔진을 host interface로만 부른다.** VM이 밖으로 부르는 것은 객체 handle의 생존·타입 판정, native 필드 읽기·쓰기, native 함수 호출(FunctionId와 bank 창), native 이벤트 연결·해제, 파괴·활성 전환 적용 요청(§4.3), 유지 자원 해제, 로드 요청과 lease 반환, 시계(§6.1), 로그·fault 보고다. host가 VM에 들어오는 것은 instance 생성·Detach, 수명 hook 실행, 스크립트 단계 열기·닫기, 이벤트 항목 넣기, 재개, revision 게시, CloseSession이다. 엔진의 `ScriptRuntime` 모듈(EI2)이 이 interface를 ObjectRuntime·World 위에 구현한다. 세부 API는 LC5(1차)·LC6(2차) 착수 때 이 절에 확정한다.
 - **Sparks 필드의 저장소는 VM이 가진다.** Sparks 클래스의 필드는 VM의 instance 저장소에 있고, 엔진에는 연동 단계에서 런타임 타입 등록으로 보인다(연동 요구 SE-O3). 그래서 필드 migration(R2)까지 언어 코어 안에서 완결된다.
 - **가짜 host로 시험한다.** `SparksTestHost`는 가짜 객체표(handle + generation), 결정적 시험 시계, 수명 hook·tick phase driver, 가짜 native 함수·이벤트·유지 자원·로드를 가진 headless host다. conformance corpus(§13.1)와 `@test`가 이 host에서 돈다. 실제 시간에 기대지 않는다.
@@ -2114,7 +2114,7 @@ LC2는 범위가 커서 하위 단계로 나눈다(각 단계가 corpus 영역 �
 |---|---|---|
 | EI1 binding 생성 | 실제 엔진 선언에서 binding schema 생성(함수 리플렉션 CU2·이벤트 필드 CU3·스크립트 지정자) | LC2 |
 | EI2 ScriptRuntime | ObjectRuntime 위의 host 구현, native call, Sparks 클래스의 타입 등록 | LC5 |
-| EI3 World bridge | `ScriptComponent`, 수명 hook, 스크립트 단계, 이벤트 연결, 파괴·활성 지연 | LC6 |
+| EI3 World bridge | `ScriptableComponent`, 수명 hook, 스크립트 단계, 이벤트 연결, 파괴·활성 지연 | LC6 |
 | EI4 에셋·생성 | `Load`·`LoadAll`, `World.Spawn(prefab, at)` | LC6 |
 | EI5 게임 시스템 | 입력·Tag·`Loc`·CVar·물리·UI·오디오(시스템마다 따로) | LC6 |
 | EI6 편집기 핫 리로드 | 저장 → compile action → 실행 중 World 적용, R3 instance 재생성 | LC7 |
@@ -2187,7 +2187,7 @@ LC2는 범위가 커서 하위 단계로 나눈다(각 단계가 corpus 영역 �
 - **SD47. LevelScript의 참조:** `@edit` 객체 필드는 `T?`만 허용하고(S0413), 대상은 같은 Level의 배치 Actor와 그 component다. 다른 Level은 저장 거부, 셀 사이는 영속 Entity 참조 전까지 거부(§4.3), prefab 배치가 펼친 Actor는 배치 정체와 노드 경로로 저장한다(Prefab D22). 레벨 사이 연락은 World 이벤트로 하며 이름 문자열 호출은 없다(LevelScript LD6·LD7·LD10·LD17).
 - **SD48. LevelScript의 수명:** 레벨 편입에서 그 Level의 모든 배치 Actor 뒤에 Awake·Enable하고, Start는 같은 프레임에 준비된 활성 배치 Actor 뒤에 시작하되 기다리지 않는다. Level을 내릴 때는 먼저 Disable·Destroy한다. `RequestDestroy`로 파괴할 수 없고 Level 파괴만 파괴한다(§5.1, LevelScript LD8·LD11·LD16).
 - **SD49. Actor 물리 이벤트와 LevelScript의 물리 금지:** 엔진 `Actor`가 `TriggerEntered`·`TriggerExited`·`CollisionEntered`·`CollisionExited` 이벤트를 노출해 다른 객체가 `on X.TriggerEntered(...)`로 받는다. 같은 물리 batch에서 hook 다음에 발행하고 지연 slot 표로 구독이 있을 때만 비용이 든다. 이름은 hook과 겹치지 않게 과거형이다. LevelScript는 물리 hook(S0801)과 Collider component(S0802)를 가질 수 없다(§5.2·§5.5, LevelScript LD9·LD18).
-- **SD50. 편집기 진입:** "레벨 스크립트 열기"·"참조 추가"·"이벤트 추가" 명령과 언어 서버 명령 채널(§13), 생성 경로 `<패키지>/Levels/<레벨 경로 이름>.spark`를 둔다. 배치한 Actor(직접 배치·prefab 배치)에 편집기에서 ScriptComponent를 붙이는 것은 core에서도 되며 실행 중 추가(full)와 다르다(§4.5, LevelScript LD14·LD15).
+- **SD50. 편집기 진입:** "레벨 스크립트 열기"·"참조 추가"·"이벤트 추가" 명령과 언어 서버 명령 채널(§13), 생성 경로 `<패키지>/Levels/<레벨 경로 이름>.spark`를 둔다. 배치한 Actor(직접 배치·prefab 배치)에 편집기에서 ScriptableComponent를 붙이는 것은 core에서도 되며 실행 중 추가(full)와 다르다(§4.5, LevelScript LD14·LD15).
 - **SD51. 언어 코어 우선:** 엔진 요소와 무관한 언어 코어(LC0–LC9)를 먼저 구현하고 엔진 연동(EI1–EI9)은 엔진이 준비되는 대로 하나씩 더한다(사용자 결정 2026-11-20). 엔진·도구 쪽 요구는 [연동 요구 목록](SparksEngineIntegration.ko.md)에 따로 모으고, 구현 중 새로 드러난 요구도 코어 안에서 우회하지 않고 그 목록에 더한다(§18).
 - **SD52. host 경계:** 컴파일러는 엔진 API를 binding schema 파일로만 알고, VM은 엔진을 host interface로만 부른다. Sparks 필드의 저장소는 VM이 가진다. 언어 코어는 Core 층에만 의존하고 가짜 host(`SparksTestHost`)로 시험한다(§18.1).
 - **SD53. 모듈 배치:** `SparksVm`·`SparksCompiler`는 `Engine/Source/Runtime`, `SparksTestHost`는 `Engine/Source/Developer`, CLI와 언어 서버는 `Programs`에 둔다. 엔진 쪽 host 구현은 `ScriptRuntime` 모듈이다(§18.1).

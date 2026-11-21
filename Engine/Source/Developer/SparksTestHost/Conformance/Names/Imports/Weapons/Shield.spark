@@ -1,1 +1,1 @@
-class Shield : ScriptComponent { }
+class Shield : ScriptableComponent { }

@@ -1,4 +1,4 @@
-class Door : ScriptComponent {
+class Door : ScriptableComponent {
     var Speed: int;
     var Copy: Speed;
 

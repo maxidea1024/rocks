@@ -37,7 +37,7 @@ fn Sum(items: Array<int>): int {
     return total;
 }
 
-class DoorLogic : ScriptComponent {
+class DoorLogic : ScriptableComponent {
     var OpenAngle: float = 90.0;
     var State = DoorState.Closed;
     var Swing = 0.0;
@@ -60,7 +60,7 @@ class DoorLogic : ScriptComponent {
         let spot = Target?.Location ?? vec3(0.0, 0.0, 0.0);
         _ = spot.Length();
         if (let actor = Target) {
-            _ = actor.Find<ScriptComponent>();
+            _ = actor.Find<ScriptableComponent>();
         }
 
         let first = Hits[0];

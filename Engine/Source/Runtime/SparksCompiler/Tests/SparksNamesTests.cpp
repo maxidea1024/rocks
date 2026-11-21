@@ -174,7 +174,7 @@ constexpr StringView EngineSchema =
     R"({ "format": 1, "package": "Rocks", "module": "Engine", "types": [
 { "name": "Actor", "id": "5a7e0000000000000000000000000001", "kind": "object", "scriptExtensible": true, "fields": [ { "name": "Location", "id": "5a7e0000000000000000000000000101", "type": "vec3", "access": "readWrite" } ], "functions": [ { "name": "Find", "id": "5a7e0000000000000000000000000102", "typeParameters": [ { "name": "T", "constraint": "Component" } ], "returns": "T?" }, { "name": "Jump", "id": "5a7e0000000000000000000000000103" } ] },
 { "name": "Component", "id": "5a7e0000000000000000000000000002", "kind": "object", "fields": [ { "name": "Owner", "id": "5a7e0000000000000000000000000201", "type": "Actor" } ] },
-{ "name": "ScriptComponent", "id": "5a7e0000000000000000000000000003", "kind": "object", "base": "Component", "scriptExtensible": true, "functions": [ { "name": "DescribeState", "id": "5a7e0000000000000000000000000301", "overridable": true, "parameters": [ { "name": "detailed", "type": "bool" } ], "returns": "string" } ] },
+{ "name": "ScriptableComponent", "id": "5a7e0000000000000000000000000003", "kind": "object", "base": "Component", "scriptExtensible": true, "functions": [ { "name": "DescribeState", "id": "5a7e0000000000000000000000000301", "overridable": true, "parameters": [ { "name": "detailed", "type": "bool" } ], "returns": "string" } ] },
 { "name": "WorldService", "id": "5a7e0000000000000000000000000004", "kind": "object", "scriptExtensible": true },
 { "name": "DataAsset", "id": "5a7e0000000000000000000000000005", "kind": "asset", "scriptExtensible": true },
 { "name": "World", "id": "5a7e0000000000000000000000000006", "kind": "object" },
@@ -192,7 +192,7 @@ TEST(SparksNames_SymbolsAndNodes) {
         REQUIRE(fixture.Schema("Schema/Engine.sparkbind.json", EngineSchema));
         const uint32 game = fixture.SimplePackage("Game");
         const uint32 main = fixture.Module(game, "Game", "Main.spark",
-                                           "class Door : ScriptComponent, Usable {\n"
+                                           "class Door : ScriptableComponent, Usable {\n"
                                            "    var Speed: int = 1;\n"
                                            "    fn Use() { }\n"
                                            "    override fn DescribeState(_: bool): string {\n"
@@ -211,7 +211,7 @@ TEST(SparksNames_SymbolsAndNodes) {
         const uint32 next = fixture.Find("next", SymbolKind::Local);
         const uint32 describe = fixture.Find("DescribeState", SymbolKind::Method);
         const uint32 engineDescribe = fixture.Find("DescribeState", SymbolKind::EngineFunction);
-        const uint32 script = fixture.Find("ScriptComponent", SymbolKind::EngineType);
+        const uint32 script = fixture.Find("ScriptableComponent", SymbolKind::EngineType);
         const uint32 usable = fixture.Find("Usable", SymbolKind::EngineType);
         const uint32 settings = fixture.Find("Settings2", SymbolKind::Class);
         REQUIRE(door != NoSymbol && speed != NoSymbol && next != NoSymbol);
@@ -308,7 +308,7 @@ TEST(SparksNames_EngineSchemaSymbols) {
         const uint32 find = fixture.Find("Find", SymbolKind::EngineFunction);
         const uint32 parameter = fixture.Find("T", SymbolKind::EngineTypeParameter);
         const uint32 component = fixture.Find("Component", SymbolKind::EngineType);
-        const uint32 script = fixture.Find("ScriptComponent", SymbolKind::EngineType);
+        const uint32 script = fixture.Find("ScriptableComponent", SymbolKind::EngineType);
         const uint32 location = fixture.Find("Location", SymbolKind::EngineField);
         const uint32 notFound = fixture.Find("NotFound", SymbolKind::EnumCase);
         REQUIRE(find != NoSymbol && parameter != NoSymbol && location != NoSymbol);
@@ -390,12 +390,12 @@ TEST(SparksNames_DeclarationMessages) {
         REQUIRE(fixture.Schema("Schema/Engine.sparkbind.json", EngineSchema));
         const uint32 game = fixture.SimplePackage("Game");
         fixture.Module(game, "Game", "Main.spark",
-                       "class door : ScriptComponent {\n"  // 1 S0306
-                       "    fn Update() { }\n"             // 2 S0308
-                       "    fn Run(If: int) { _ = If; }\n" // 3 S0306 (키워드 철자)
-                       "    var World: int;\n"             // 4 S0307
-                       "    var Location2: int;\n"         // 5
-                       "    var LOCATION2: int;\n"         // 6 S0309
+                       "class door : ScriptableComponent {\n" // 1 S0306
+                       "    fn Update() { }\n"                // 2 S0308
+                       "    fn Run(If: int) { _ = If; }\n"    // 3 S0306 (키워드 철자)
+                       "    var World: int;\n"                // 4 S0307
+                       "    var Location2: int;\n"            // 5
+                       "    var LOCATION2: int;\n"            // 6 S0309
                        "    fn DescribeState(detailed: bool): string { return \"\"; }\n" // 7 S0313
                        "    override fn Jump() { }\n" // 8 S0314 대상 없음
                        "}\n"
@@ -428,7 +428,7 @@ TEST(SparksNames_DeclarationMessages) {
                            "are compared ignoring letter case."));
         CHECK(fixture.Says(5,
                            "'DescribeState' hides the member 'DescribeState' of the base type "
-                           "'ScriptComponent'.",
+                           "'ScriptableComponent'.",
                            "Write 'override fn DescribeState(...)' to override it."));
         CHECK(fixture.Says(6, "'Jump' overrides nothing: no base type has a function 'Jump'.",
                            "Remove 'override' or fix the name."));
@@ -453,16 +453,16 @@ TEST(SparksNames_UnknownNameSuggestions) {
         fixture.Module(weapons, "Weapons", "Bow.spark", "struct Bow { }\n");
         fixture.Module(
             game, "Game", "Main.spark",
-            "import Weapons.Bow as Bows;\n"    // 1
-            "class Door : ScriptComponent {\n" // 2
-            "    var Speed: int;\n"            // 3
-            "    fn Run() {\n"                 // 4
-            "        _ = Sped;\n"              // 5 비슷한 멤버
-            "        _ = Hammer;\n"            // 6 같은 패키지 import
-            "        _ = Sword;\n"             // 7 의존 패키지 import
-            "        _ = Bow;\n"               // 8 별칭
-            "        _ = Twice;\n"             // 9 두 모듈 — 제안 없음
-            "        _ = Wrld;\n"              // 10 문맥 이름 제안
+            "import Weapons.Bow as Bows;\n"        // 1
+            "class Door : ScriptableComponent {\n" // 2
+            "    var Speed: int;\n"                // 3
+            "    fn Run() {\n"                     // 4
+            "        _ = Sped;\n"                  // 5 비슷한 멤버
+            "        _ = Hammer;\n"                // 6 같은 패키지 import
+            "        _ = Sword;\n"                 // 7 의존 패키지 import
+            "        _ = Bow;\n"                   // 8 별칭
+            "        _ = Twice;\n"                 // 9 두 모듈 — 제안 없음
+            "        _ = Wrld;\n"                  // 10 문맥 이름 제안
             "    }\n"
             "}\n"
             "struct Holder { var Item: Hamer; }\n"); // 13 import하지 않은 이름은 후보가 아니다
@@ -500,7 +500,7 @@ TEST(SparksNames_OtherMessages) {
         fixture.Module(game, "Game", "Main.spark",
                        "struct Data { fn Get() { _ = World; _ = Caller; } }\n" // 1 S0321 ×2
                        "class A : DataAsset, Data { }\n"                       // 2 S0322
-                       "class B : ScriptComponent, Usable { }\n"               // 3 S0324
+                       "class B : ScriptableComponent, Usable { }\n"           // 3 S0324
                        "const C: Array<int, int> = 1;\n"                       // 4 S0320
                        "const D: Map<int> = 1;\n"                              // 5 S0320
                        "const E: Session = 1;\n");                             // 6 S0319
@@ -526,7 +526,7 @@ TEST(SparksNames_OtherMessages) {
                            "'Caller' exists only in the body of a server RPC function of a "
                            "class that has context names."));
         CHECK(fixture.Says(2, "'Data' is not an interface; only the first base is a class.",
-                           "Fix the base list, as in 'class Door : ScriptComponent'."));
+                           "Fix the base list, as in 'class Door : ScriptableComponent'."));
         CHECK(fixture.Says(3, "Class 'B' does not implement 'Usable.Use'.", "Add the function."));
         CHECK(
             fixture.Says(4, "Type 'Array' takes 1 type argument.", "Write it as in 'Array<int>'."));
@@ -614,7 +614,7 @@ TEST(SparksNames_TooDeepModuleIsNotBound) {
 TEST(SparksNames_Deterministic) {
     SystemAllocator allocator;
     constexpr StringView Source = "import Tools;\n"
-                                  "class Door : ScriptComponent {\n"
+                                  "class Door : ScriptableComponent {\n"
                                   "    var Items: Map<string, Array<Hammer?>>;\n"
                                   "    fn Run(count: int) {\n"
                                   "        for (key, list in Items) { _ = key; _ = list; }\n"
@@ -662,27 +662,28 @@ TEST(SparksNames_AllocationFailureEverywhere) {
             const uint32 weapons = fixture.SimplePackage("Weapons");
             fixture.Module(weapons, "Weapons", "Sword.spark", "struct Sword { }\n");
             fixture.Module(game, "Game", "Tools.spark", "struct Hammer { }\nfn Helper() { }\n");
-            fixture.Module(game, "Game", "Main.spark",
-                           "import Tools;\n"
-                           "import Weapons.Sword as Blades;\n"
-                           "enum Mode { On, Off, OFF }\n"
-                           "interface Usable2 { fn Use(); }\n"
-                           "open class Base : ScriptComponent { open fn Step(count: int) { } }\n"
-                           "class Door : Base, Usable2 {\n"
-                           "    var Items: Map<string, Array<Hammer?>>;\n"
-                           "    var Blade: Blades.Sword?;\n"
-                           "    var Helper: int;\n"
-                           "    override fn Step(amount: int) { }\n"
-                           "    fn Update() { }\n"
-                           "    fn Run(world: int) {\n"
-                           "        for (key, list in Items) { _ = key; _ = list; }\n"
-                           "        if (let found = Blade) { _ = found as? Actor; }\n"
-                           "        _ = Nope;\n"
-                           "        _ = Sword;\n"
-                           "        _ = World;\n"
-                           "    }\n"
-                           "}\n"
-                           "class Keep : WorldService { fn Run() { _ = Input; } }\n");
+            fixture.Module(
+                game, "Game", "Main.spark",
+                "import Tools;\n"
+                "import Weapons.Sword as Blades;\n"
+                "enum Mode { On, Off, OFF }\n"
+                "interface Usable2 { fn Use(); }\n"
+                "open class Base : ScriptableComponent { open fn Step(count: int) { } }\n"
+                "class Door : Base, Usable2 {\n"
+                "    var Items: Map<string, Array<Hammer?>>;\n"
+                "    var Blade: Blades.Sword?;\n"
+                "    var Helper: int;\n"
+                "    override fn Step(amount: int) { }\n"
+                "    fn Update() { }\n"
+                "    fn Run(world: int) {\n"
+                "        for (key, list in Items) { _ = key; _ = list; }\n"
+                "        if (let found = Blade) { _ = found as? Actor; }\n"
+                "        _ = Nope;\n"
+                "        _ = Sword;\n"
+                "        _ = World;\n"
+                "    }\n"
+                "}\n"
+                "class Keep : WorldService { fn Run() { _ = Input; } }\n");
             // 이름 해석만 본다(타입 검사의 할당 실패는 SparksTypes 시험이 본다).
             REQUIRE(fixture.compilation.SetLastStage(CompilationStage::Names));
             if (failAt == 0) {

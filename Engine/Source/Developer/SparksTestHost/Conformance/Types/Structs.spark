@@ -1,6 +1,6 @@
 enum Mode { A, B }
 
-class Keeper : ScriptComponent {
+class Keeper : ScriptableComponent {
 }
 
 struct Leaf {

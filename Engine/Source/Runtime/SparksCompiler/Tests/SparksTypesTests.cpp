@@ -139,7 +139,7 @@ constexpr StringView EngineSchema =
 { "name": "Actor", "id": "5a7e0000000000000000000000000001", "kind": "object", "scriptExtensible": true, "fields": [ { "name": "Location", "id": "5a7e0000000000000000000000000101", "type": "vec3", "access": "readWrite" } ], "functions": [ { "name": "Find", "id": "5a7e0000000000000000000000000102", "typeParameters": [ { "name": "T", "constraint": "Component" } ], "returns": "T?" }, { "name": "MoveTo", "id": "5a7e0000000000000000000000000103", "async": true, "parameters": [ { "name": "target", "type": "vec3" } ], "returns": "bool" } ], "events": [ { "name": "Destroyed", "id": "5a7e0000000000000000000000000104" } ] },
 { "name": "Pawn", "id": "5a7e0000000000000000000000000009", "kind": "object", "base": "Actor", "scriptExtensible": true },
 { "name": "Component", "id": "5a7e0000000000000000000000000002", "kind": "object", "fields": [ { "name": "Owner", "id": "5a7e0000000000000000000000000201", "type": "Actor" } ] },
-{ "name": "ScriptComponent", "id": "5a7e0000000000000000000000000003", "kind": "object", "base": "Component", "scriptExtensible": true },
+{ "name": "ScriptableComponent", "id": "5a7e0000000000000000000000000003", "kind": "object", "base": "Component", "scriptExtensible": true },
 { "name": "WorldService", "id": "5a7e0000000000000000000000000004", "kind": "object", "scriptExtensible": true },
 { "name": "DataAsset", "id": "5a7e0000000000000000000000000005", "kind": "asset", "scriptExtensible": true },
 { "name": "World", "id": "5a7e0000000000000000000000000006", "kind": "object" },
@@ -152,7 +152,7 @@ constexpr StringView BusyProgram =
     "struct Point { var X: int; var Y: int = 2; fn Sum(): int { return X + Y; } }\n"
     "struct Req { var First: Tag; }\n"
     "const Limit: int = 10;\n"
-    "open class Base : ScriptComponent { var Health = 10; event Struck(amount: int); }\n"
+    "open class Base : ScriptableComponent { var Health = 10; event Struck(amount: int); }\n"
     "class Door : Base {\n"
     "    var Items: Map<string, Array<int>> = [\"a\": [1, 2]];\n"
     "    var Target: Actor?;\n"
@@ -160,7 +160,7 @@ constexpr StringView BusyProgram =
     "    fn Run(count: int, mode: Mode, soft: Soft<DataAsset>): Result<int> {\n"
     "        for (key, list in Items) { _ = \"${key} ${list.Count}\"; }\n"
     "        for (i in 0..<count) { Health += i % 3; }\n"
-    "        if (let found = Target) { _ = found.Find<ScriptComponent>()?.Owner; }\n"
+    "        if (let found = Target) { _ = found.Find<ScriptableComponent>()?.Owner; }\n"
     "        let p = Point(X: Math.Max(count, 1));\n"
     "        let s: string = count;\n"
     "        _ = count + Range;\n"
@@ -182,7 +182,7 @@ constexpr StringView BusyProgram =
 constexpr StringView LiteralProgram =
     "enum Kind { Small, Large }\n"
     "struct Row2 { var Name: string = \"\"; }\n"
-    "class Mover : ScriptComponent {\n"
+    "class Mover : ScriptableComponent {\n"
     "    var Scores: Map<Kind, float> = [];\n"
     "    async fn Load(soft: Soft<DataAsset>): Result<void> {\n"
     "        let asset = try await soft.Load();\n"

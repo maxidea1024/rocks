@@ -1,4 +1,4 @@
-class Mover : ScriptComponent {
+class Mover : ScriptableComponent {
 }
 
 class Rules : DataAsset {
@@ -30,7 +30,7 @@ fn OptionalVoid(p: void?): void? {
     _ = x;
 }
 
-class Signals : ScriptComponent {
+class Signals : ScriptableComponent {
     event Sent(value: void);
 }
 

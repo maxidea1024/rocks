@@ -3,16 +3,16 @@ interface Usable {
     async fn Wait(): int;
 }
 
-class Door : ScriptComponent, Usable {
+class Door : ScriptableComponent, Usable {
     fn Use(by: Actor) { }
 }
 
-class Gate : ScriptComponent, Usable {
+class Gate : ScriptableComponent, Usable {
     fn Use(by: Pawn) { }
     async fn Wait(): int { return 1; }
 }
 
-open class Base : ScriptComponent {
+open class Base : ScriptableComponent {
     fn Use(by: Actor) { }
     async fn Wait(): int { return 0; }
 }

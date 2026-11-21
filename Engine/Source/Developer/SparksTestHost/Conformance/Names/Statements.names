@@ -50,7 +50,7 @@
 31:41 sum -> local sum@15:13
 32:13 decl local found@32:13
 32:21 Find -> engine-fn Rocks.Actor.Find
-32:26 type Rocks.ScriptComponent
+32:26 type Rocks.ScriptableComponent
 33:13 decl local other@33:13
 33:21 Owner2 -> method Test:Main.Walker.Owner2
 33:33 type Rocks.SphereCollider

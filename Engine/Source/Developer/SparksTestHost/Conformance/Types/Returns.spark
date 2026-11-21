@@ -93,7 +93,7 @@ fn SwitchWithoutReturn(mode: Mode): int {
     }
 }
 
-class Door : ScriptComponent {
+class Door : ScriptableComponent {
     on Tick(dt: float) {
         return dt;
     }
