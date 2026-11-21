@@ -1,8 +1,10 @@
 #pragma once
 
 #include <AssetRuntime/BulkData.h>
+#include <AssetRuntime/BulkStore.h>
 #include <AssetRuntime/PackageFormat.h>
 #include <Core/Containers/Array.h>
+#include <Core/Memory/UniquePtr.h>
 #include <Meta/Annotations.h>
 #include <Object/AssetId.h>
 #include <Object/ModuleRegistration.h>
@@ -58,12 +60,20 @@ public:
         return static_cast<uint32>(bulkSlots_.Size());
     }
 
-    // ref가 가리키는 entry의 raw byte다.
+    // ref가 가리키는 entry의 raw byte다. bulk 저장소가 있으면(에디터 패키지 — AS 7.1절 15)
+    // 저장소에 묻는다(지연 읽기).
     //
     // 오류: 빈 ref(bulkId 0)는 InvalidArgument, 이 패키지에 없는 bulkId는 NotFound,
-    // rawBytes·sha256이 entry와 다르면 TypeMismatch(다른 패키지의 값이거나 저장 뒤 재매핑되지 않은
-    // 값)다.
-    Result<Span<const uint8>> BulkBytes(const BulkDataRef& ref) const noexcept;
+    // rawBytes·sha256이 entry와 다르면 TypeMismatch(다른 패키지의 값)다. 저장소가 있으면 그
+    // 지연 읽기의 오류(PackageBulkStore::Read — 손상 CorruptPackage, 외부 변경
+    // ExternalModification, IO 오류)도 failure에 진단과 함께 온다.
+    Result<Span<const uint8>> BulkBytes(const BulkDataRef& ref,
+                                        AssetDiagnostic* failure = nullptr) const noexcept;
+
+    // bulk 저장소다(에디터 패키지 — 없으면 null).
+    PackageBulkStore* BulkStore() const noexcept {
+        return bulkStore_.Get();
+    }
 
 private:
     friend struct detail::PackageAccess;
@@ -72,6 +82,7 @@ private:
     ROCKS_NATIVE() PackageKind kind_ = PackageKind::Cooked;
     ROCKS_NATIVE() Array<uint8> bulkBytes_;
     ROCKS_NATIVE() Array<PackageBulkSlot> bulkSlots_;
+    ROCKS_NATIVE() UniquePtr<PackageBulkStore> bulkStore_;
 };
 
 // 에셋 클래스의 기반이다(UE UObject 중 에셋인 것 — Texture·Material 등이 상속한다). 패키지당 대표
@@ -108,6 +119,11 @@ private:
 //   "");
 Result<RootRef<Package>> NewPackage(ObjectRegistry& registry, const ObjectAccessContext& access,
                                     AssetId id, PackageKind kind = PackageKind::Editor) noexcept;
+
+// package에 bulk 저장소를 잇는다(에디터가 새로 만든 패키지 — 로드한 패키지는
+// PackageLoadState::SetBulkStore). 오류: null 저장소, 이미 저장소나 로드한 bulk가 있는 패키지는
+// InvalidArgument(저장소는 호출자에게 남는다).
+Result<void> AttachBulkStore(Package& package, UniquePtr<PackageBulkStore>& store) noexcept;
 
 // AssetRuntime 리플렉션 타입(Package·Asset·BulkDataRef)을 등록한다(생성 집계 함수
 // generated::AssetRuntime::RegisterModuleTypes를 부른다). 엔진은 EngineAssets가, 도구·시험은 직접

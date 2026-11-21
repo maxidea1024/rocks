@@ -203,6 +203,43 @@ Result<PackageIndexView> ReadPackageIndex(Allocator& allocator, PackageRangeRead
                                           const PackageReadOptions& options,
                                           AssetDiagnostic* failure = nullptr) noexcept;
 
+// 에디터 지연 열기의 읽기다(AS 7.1절 15 — A2c1): Bulk 섹션 내용만 빼고 전체 읽기와 같은 판정을
+// 한다(BulkIndex는 읽어 배치를 Bulk 섹션 크기와 대조한다 — entry 사이 패딩·저장 CRC는 지연 읽기가
+// entry마다 본다). 섹션 사이 패딩은 읽지 않는다. 결과는 ReadPackageIndex처럼 소유 버퍼를 가리킨다
+// (contents.bulk는 비고 bulkEntries는 채운다). 오류는 ReadPackageIndex와 같다.
+Result<PackageIndexView> ReadPackageForEdit(Allocator& allocator, PackageRangeReader& reader,
+                                            const PackageReadOptions& options,
+                                            AssetDiagnostic* failure = nullptr) noexcept;
+
+// 패키지 파일의 지문(헤더 + 섹션 표 + tableCrc의 SHA-256 — PackageContents::fingerprint와 같다)을
+// 범위 읽기로 얻는다(AS 5.5절 1, 7.1절 15 — 저장의 외부 변경 검출·지연 읽기의 지문 대조). 헤더
+// 판정과 섹션 표 CRC만 본다. 오류: ReadPackageHeader의 진단, 표 CRC 위반 CorruptPackage /
+// InvalidArgument, 범위 읽기 오류는 진단 None과 그 오류, 할당 실패.
+Result<PackageFingerprint> ReadPackageFingerprint(Allocator& allocator, PackageRangeReader& reader,
+                                                  AssetDiagnostic* failure = nullptr) noexcept;
+
+// 저장한 패키지 파일의 재검증이다(AS 5.5절 5, 7.1절 15 — A2c1). 에디터 패키지로 헤더·섹션 표·
+// 모든 섹션 CRC·섹션 사이 패딩 0·BulkIndex 배치·entry 사이 패딩 0·entry 저장 CRC를 scratch 크기
+// 조각으로 훑는다(버전 축은 보지 않는다, 압축 해제·SHA-256·그래프 해석은 하지 않는다). 같은
+// 손상이면 전체 읽기(ReadPackage)와 같은 진단이다. 목적은 짧은 쓰기·배치 오류·sink 버그다 — CRC는
+// writer가 자기 출력으로 계산하므로 writer가 잘못된 내용을 올바른 CRC로 쓴 경우는 잡지 못한다.
+//
+// 오류: 빈 scratch InvalidArgument(진단 없음), 판정 위반은 ReadPackage와 같은 진단, 범위 읽기
+// 오류는 그 오류(진단 None), 할당 실패(작은 섹션과 BulkIndex만 할당한다).
+Result<void> VerifyPackageFile(Allocator& allocator, PackageRangeReader& reader,
+                               Span<uint8> scratch, AssetDiagnostic* failure = nullptr) noexcept;
+
+// bulk entry 하나의 저장 byte(stored — entry.storedBytes)를 raw(entry.rawBytes)에 풀고 SHA-256을
+// 확인한다(DecodePackageBulk와 에디터 지연 읽기가 같이 쓴다). 오류: 크기 불일치·컨테이너 형식·
+// rawSize 불일치·해제 실패·SHA-256 불일치는 InvalidArgument, 할당 실패.
+Result<void> DecodePackageBulkEntry(const PackageBulkEntry& entry, Span<const uint8> stored,
+                                    Span<uint8> raw, Allocator& allocator) noexcept;
+
+// 위와 같되 out을 entry.rawBytes로 키워 쓴다. Zstd entry는 out을 키우기 전에 컨테이너 헤더의
+// rawSize를 entry와 대조한다(손상된 표로 큰 할당을 하지 않는다). 오류는 위와 같다.
+Result<void> DecodePackageBulkEntry(const PackageBulkEntry& entry, Span<const uint8> stored,
+                                    Array<uint8>& out, Allocator& allocator) noexcept;
+
 // contents의 bulk entry를 모두 풀어 raw byte를 out 끝에 bulkId 순으로 이어 붙이고, entry별 위치를
 // slots에 채운다(rawBytes와 SHA-256 확인). raw 합이 maxRawBytes를 넘으면 CapacityExceeded다.
 //

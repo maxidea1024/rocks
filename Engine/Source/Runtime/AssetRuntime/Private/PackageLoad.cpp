@@ -139,8 +139,8 @@ PackageLoadState::PackageLoadState(Allocator& allocator, ObjectRegistry& registr
     : allocator_(allocator), registry_(registry), types_(types), options_(options),
       hooks_(allocator, options.read.expectedKind == PackageKind::Cooked),
       stage_(allocator, registry, types, access, StageOptions(options, hooks_)), file_(allocator),
-      contents_(allocator), nodes_(allocator), importTypes_(allocator), hardTypes_(allocator),
-      bulkBytes_(allocator), bulkSlots_(allocator) {
+      buffers_(allocator), contents_(allocator), nodes_(allocator), importTypes_(allocator),
+      hardTypes_(allocator), bulkBytes_(allocator), bulkSlots_(allocator) {
     options_.read.types = &types;
 }
 
@@ -159,6 +159,37 @@ Result<void> PackageLoadState::Prepare(Array<uint8>&& file, AssetDiagnostic* fai
     }
 
     contents_ = Move(read.Value());
+    return PrepareContents(failure);
+}
+
+Result<void> PackageLoadState::Prepare(PackageRangeReader& reader,
+                                       AssetDiagnostic* failure) noexcept {
+    if (attempted_ || options_.bulk != PackageBulkMode::Defer) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    attempted_ = true;
+    auto read = ReadPackageForEdit(allocator_, reader, options_.read, failure);
+    if (!read) {
+        return Result<void>::Failure(read.Error());
+    }
+
+    buffers_ = Move(read.Value().buffers);
+    contents_ = Move(read.Value().contents);
+    return PrepareContents(failure);
+}
+
+Result<void> PackageLoadState::SetBulkStore(UniquePtr<PackageBulkStore>& store) noexcept {
+    if (options_.bulk != PackageBulkMode::Defer || !prepared_ || instantiated_ ||
+        store.Get() == nullptr) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    bulkStore_ = Move(store);
+    return Result<void>::Success();
+}
+
+Result<void> PackageLoadState::PrepareContents(AssetDiagnostic* failure) noexcept {
     const AssetId asset = contents_.header.assetId;
     readOnly_ = contents_.readOnly;
     // 현재 클래스가 없는 export 타입(미등록·클래스가 아닌 타입 id)은 reader 판정으로 거부한다 —
@@ -198,11 +229,13 @@ Result<void> PackageLoadState::Prepare(Array<uint8>&& file, AssetDiagnostic* fai
                                asset, static_cast<uint32>(PackageSectionKind::Exports), 1);
     }
 
-    // bulk 압축 해제·SHA-256 확인.
-    if (auto decoded =
-            DecodePackageBulk(contents_, bulkBytes_, bulkSlots_, options_.maxBulkRawBytes, failure);
-        !decoded) {
-        return decoded;
+    // bulk 압축 해제·SHA-256 확인(Defer는 저장소의 지연 읽기가 한다).
+    if (options_.bulk == PackageBulkMode::Decode) {
+        if (auto decoded = DecodePackageBulk(contents_, bulkBytes_, bulkSlots_,
+                                             options_.maxBulkRawBytes, failure);
+            !decoded) {
+            return decoded;
+        }
     }
 
     // 그래프 1단계(Registry에 닿지 않는다 — worker에서 해도 된다).
@@ -275,7 +308,8 @@ Result<void> PackageLoadState::CrossCheck(AssetDiagnostic* failure,
     }
 
     for (const detail::PackageLoadHooks::BulkUse& use : hooks_.bulkUses) {
-        if (use.bulkId > contents_.bulkEntries.Size()) {
+        // 저장하지 않은 bulk id(최상위 bit)는 파일에 있을 수 없다(AS 7.1절 15).
+        if ((use.bulkId & UnsavedBulkIdBit) != 0 || use.bulkId > contents_.bulkEntries.Size()) {
             return corrupt(PackageSectionKind::BulkIndex, use.bulkId);
         }
 
@@ -448,6 +482,13 @@ Result<void> InstantiatePackages(ConstructionContext& transaction,
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
+        // Defer 상태의 bulk는 저장소만 읽을 수 있다 — 저장소 없이 만들면 bulk 없는 패키지가 된다.
+        const PackageLoadState& state = *packages[index];
+        if (state.options_.bulk == PackageBulkMode::Defer &&
+            !state.contents_.bulkEntries.IsEmpty() && state.bulkStore_.Get() == nullptr) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
         for (usize other = 0; other < index; ++other) {
             if (packages[other]->Id() == packages[index]->Id()) {
                 return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -609,6 +650,9 @@ Result<void> InstantiatePackages(ConstructionContext& transaction,
 
         detail::PackageAccess::SetPackage(*package.Value(), state.Id(), state.contents_.header.kind,
                                           Move(state.bulkBytes_), Move(state.bulkSlots_));
+        if (state.bulkStore_.Get() != nullptr) {
+            detail::PackageAccess::SetBulkStore(*package.Value(), Move(state.bulkStore_));
+        }
         auto representative = transaction.GetForWrite<Asset>(state.stage_.Nodes()[0]);
         ROCKS_ASSERT(representative.IsOk());
 

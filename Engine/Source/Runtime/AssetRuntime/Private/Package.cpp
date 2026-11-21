@@ -8,7 +8,12 @@
 
 namespace rocks {
 
-Result<Span<const uint8>> Package::BulkBytes(const BulkDataRef& ref) const noexcept {
+Result<Span<const uint8>> Package::BulkBytes(const BulkDataRef& ref,
+                                             AssetDiagnostic* failure) const noexcept {
+    if (bulkStore_.Get() != nullptr) {
+        return bulkStore_->Read(ref, failure);
+    }
+
     if (ref.IsEmpty()) {
         return Result<Span<const uint8>>::Failure(ErrorCode::InvalidArgument);
     }
@@ -24,6 +29,15 @@ Result<Span<const uint8>> Package::BulkBytes(const BulkDataRef& ref) const noexc
 
     return Result<Span<const uint8>>::Success(
         Span<const uint8>(bulkBytes_.Data() + slot.offset, static_cast<usize>(slot.rawBytes)));
+}
+
+Result<void> AttachBulkStore(Package& package, UniquePtr<PackageBulkStore>& store) noexcept {
+    if (store.Get() == nullptr || package.BulkStore() != nullptr || package.BulkCount() != 0) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    detail::PackageAccess::SetBulkStore(package, Move(store));
+    return Result<void>::Success();
 }
 
 Result<RootRef<Package>> NewPackage(ObjectRegistry& registry, const ObjectAccessContext& access,

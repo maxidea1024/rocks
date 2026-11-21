@@ -1,6 +1,8 @@
 #pragma once
 
+#include <AssetRuntime/BulkStore.h>
 #include <AssetRuntime/PackageReader.h>
+#include <Core/Memory/UniquePtr.h>
 #include <Object/TypeLease.h>
 #include <ObjectSerialization/ObjectGraph.h>
 
@@ -50,8 +52,17 @@ private:
 
 } // namespace detail
 
+// 로드한 패키지의 bulk 처리다(AS 7.1절 15): Decode는 Prepare가 모두 풀어 Package가 갖는다(런타임),
+// Defer는 풀지 않고 호출자가 SetBulkStore로 건 저장소가 지연 읽기를 한다(에디터 — Bulk 섹션 내용은
+// 읽지 않으므로 그 손상은 지연 읽기가 entry마다 발견한다).
+enum class PackageBulkMode : uint8 {
+    Decode,
+    Defer
+};
+
 // 패키지 로드 옵션이다.
 struct PackageLoadOptions {
+    PackageBulkMode bulk = PackageBulkMode::Decode;
     // 기대 종류·커스텀 버전·엔진 버전이다(types는 PackageLoadState의 TypeRegistry로 채운다).
     PackageReadOptions read;
     // 압축을 푼 bulk raw byte 합의 상한이다(넘으면 CapacityExceeded — 자원 한도라 손상이 아니다).
@@ -116,6 +127,16 @@ public:
     // 위반은 CorruptPackage다.
     Result<void> Prepare(Array<uint8>&& file, AssetDiagnostic* failure = nullptr) noexcept;
 
+    // 범위 읽기로 Prepare한다(Defer 전용 — Bulk 섹션 내용을 읽지 않는다, ReadPackageForEdit). 읽은
+    // 섹션 byte는 이 상태가 소유한다. 오류: Decode 옵션 InvalidArgument, 그 밖은 Prepare(file)와
+    // 같다(범위 읽기 IO 오류는 진단 None과 그 오류).
+    Result<void> Prepare(PackageRangeReader& reader, AssetDiagnostic* failure = nullptr) noexcept;
+
+    // Defer로 Prepare한 상태에 bulk 저장소를 건다(InstantiatePackages가 Package로 옮긴다). 오류:
+    // Decode 옵션·Prepare 전·InstantiatePackages에 넘긴 뒤·null 저장소 InvalidArgument(저장소는
+    // 호출자에게 남는다).
+    Result<void> SetBulkStore(UniquePtr<PackageBulkStore>& store) noexcept;
+
     bool IsPrepared() const noexcept {
         return prepared_;
     }
@@ -146,6 +167,8 @@ private:
                                             AssetDiagnostic*) noexcept;
 
     Result<void> CrossCheck(AssetDiagnostic* failure, const TypeLease& representativeType) noexcept;
+    // contents_를 채운 뒤의 Prepare 공통 단계다.
+    Result<void> PrepareContents(AssetDiagnostic* failure) noexcept;
 
     Allocator& allocator_;
     ObjectRegistry& registry_;
@@ -154,6 +177,8 @@ private:
     detail::PackageLoadHooks hooks_;
     ObjectGraphStage stage_;
     Array<uint8> file_;
+    // 범위 읽기 Prepare가 읽은 섹션 byte다(contents_가 가리킨다).
+    Array<Array<uint8>> buffers_;
     PackageContents contents_;
     Array<GraphNodeDesc> nodes_;
     Array<TypeId> importTypes_;
@@ -163,6 +188,7 @@ private:
     // 압축을 푼 bulk(상태 allocator로 할당 — Package가 복사 없이 이어받는다).
     Array<uint8> bulkBytes_;
     Array<PackageBulkSlot> bulkSlots_;
+    UniquePtr<PackageBulkStore> bulkStore_;
     bool prepared_ = false;
     bool attempted_ = false;
     bool readOnly_ = false;
@@ -187,7 +213,8 @@ protected:
 // ApplyFields → 모든 CheckRequired → id·bulk 설정. 공개(Commit)는 호출자가 한다 — 관찰자 Commit
 // 기록의 transaction id를 Commit 전에 읽어 둘 수 있게.
 //
-// 인자: packages(Prepare 완료, 아직 InstantiatePackages에 넘긴 적 없음, 서로 다른 AssetId),
+// 인자: packages(Prepare 완료, 아직 InstantiatePackages에 넘긴 적 없음, 서로 다른 AssetId, Defer
+// 상태에 bulk entry가 있으면 SetBulkStore를 마침),
 // resolver(null이면 묶음 밖 import는 MissingDependency), outPackages(크기 = packages, i번째
 // Package handle — 공개 전 객체).
 //

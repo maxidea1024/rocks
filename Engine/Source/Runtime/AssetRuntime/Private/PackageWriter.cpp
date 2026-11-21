@@ -9,6 +9,7 @@
 #include <Core/Algorithms.h>
 #include <Core/Assert.h>
 #include <Core/Containers/HashMap.h>
+#include <Core/FileError.h>
 #include <Core/Encoding/Crc32.h>
 #include <ObjectSerialization/ObjectGraph.h>
 #include <Serialization/RecordList.h>
@@ -798,6 +799,46 @@ Result<void> ValidateOptions(Allocator& scratch, const PackageWriteOptions& opti
 }
 
 } // namespace
+
+Result<void> FilePackageSink::Append(Span<const uint8> bytes) noexcept {
+    if (bytes.IsEmpty()) {
+        return Result<void>::Success();
+    }
+
+    if (auto written = file_.WriteAll(bytes.Data(), bytes.Size()); !written.status) {
+        return Result<void>::Failure(FileErrorCode(written.status));
+    }
+
+    written_ += bytes.Size();
+    return Result<void>::Success();
+}
+
+Result<void> FilePackageSink::WriteAt(uint64 offset, Span<const uint8> bytes) noexcept {
+    if (offset > written_ || bytes.Size() > written_ - offset) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    uint64 position = 0;
+    if (auto sought =
+            file_.Seek(static_cast<int64>(offset), platform::FileSeekOrigin::Begin, position);
+        !sought) {
+        return Result<void>::Failure(FileErrorCode(sought));
+    }
+
+    if (!bytes.IsEmpty()) {
+        if (auto written = file_.WriteAll(bytes.Data(), bytes.Size()); !written.status) {
+            return Result<void>::Failure(FileErrorCode(written.status));
+        }
+    }
+
+    if (auto sought =
+            file_.Seek(static_cast<int64>(written_), platform::FileSeekOrigin::Begin, position);
+        !sought) {
+        return Result<void>::Failure(FileErrorCode(sought));
+    }
+
+    return Result<void>::Success();
+}
 
 Result<void> MemoryPackageSink::Append(Span<const uint8> bytes) noexcept {
     return bytes_.TryAppend(bytes);
