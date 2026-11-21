@@ -49,15 +49,22 @@ jobs:
       - name: Install pinned LLVM (Windows)
         if: runner.os == 'Windows'
         run: ./Build/InstallLlvm.ps1
-      # Setup wizard (Docs/Design/SetupWizard.ko.md): unit checks under both Windows shells (Setup.bat falls back to Windows PowerShell 5.1).
-      # macOS also runs the real check because the image already carries every prerequisite; Windows does not, because the pinned LLVM is
-      # on this job's PATH only, not in the user environment that the check reads.
-      - name: Setup wizard self test
+      # Setup wizard (Docs/Design/SetupWizard.ko.md): unit checks under both Windows shells (Setup.bat falls back to Windows PowerShell 5.1),
+      # then the real check. The check reads the environment a new terminal gets, so Windows first writes the pinned LLVM (first on this job's
+      # PATH) to the front of the system PATH and ROCKS_CLANG_FORMAT to the user environment; the runner is discarded after the job. The image
+      # has no Windows SDK 10.0.22621, so the FXC SDK item (shader tests only) is skipped.
+      - name: Setup wizard self test and check
         run: |
           if ($IsWindows) {
             ./Build/Setup.ps1 -SelfTest
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             powershell -NoProfile -ExecutionPolicy Bypass -File Build/Setup.ps1 -SelfTest
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $bin = Split-Path -Parent (Get-Command clang-cl).Source
+            [Environment]::SetEnvironmentVariable('Path', "$bin;" + [Environment]::GetEnvironmentVariable('Path', 'Machine'), 'Machine')
+            [Environment]::SetEnvironmentVariable('ROCKS_CLANG_FORMAT', $env:ROCKS_CLANG_FORMAT, 'User')
+            git config --global core.longpaths true
+            ./Build/Setup.ps1 -Check -Skip 'FXC SDK'
             exit $LASTEXITCODE
           }
           sh ./Setup.sh --self-test

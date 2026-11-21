@@ -2,21 +2,24 @@
 # Rocks setup wizard for macOS hosts (Docs/Design/SetupWizard.ko.md). ./Setup.sh at the repository root runs this file.
 # It checks every prerequisite, asks once, installs only what is missing or wrong, and checks again. Values that a new terminal needs
 # (PATH for the .NET SDK, ROCKS_CLANG_FORMAT, ANDROID_*) go into one marked block of the shell startup file, so running it again
-# changes nothing. Linux is not a build host yet: there the script only checks what works today (C# tools, policy and format checks).
+# changes nothing. Downloads are the pinned files of Build/Toolchain.json (URL and SHA-256 or SHA-512), the same entries that
+# Build/InstallFormatter.ps1 reads. Linux is not a C++ build host yet: there the script installs only what works today (the .NET SDK and
+# clang-format for the C# tools and the policy and format checks).
 #
 # Usage: ./Setup.sh [--check] [--yes] [--android]
 #   --check      Check only. Exit code 0 when everything passes, 1 otherwise.
 #   --yes        Install without asking.
-#   --android    Also check and install the pinned Android NDK.
+#   --android    Also check and install the pinned Android NDK (needs PowerShell 7 for Build/SelectAndroidNdk.ps1).
 #   --self-test  Run the unit checks of this script and exit.
 set -u
 
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(dirname "$here")
 build_command='dotnet msbuild Rocks.proj -t:Test -p:Configuration=Debug -p:RocksTarget=Foundation'
-toolchain_root="${ROCKS_TOOLCHAIN_ROOT:-$HOME/Library/Application Support/Rocks/toolchains}"
 block_begin='# >>> Rocks setup >>>'
 block_end='# <<< Rocks setup <<<'
+network_hint='check the network or proxy (HTTPS_PROXY) and run ./Setup.sh again'
+manual_guide='follow appendix B of Docs/Guides/BuildEnvironment.ko.md (manual install)'
 
 check_only=0
 assume_yes=0
@@ -50,6 +53,11 @@ json_verified_line() {
     sed -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*\[[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$1" | head -n 1
 }
 
+# "url hash" of a one-line download entry: "<key>": { "url": "...", "<hash field>": "..." }.
+json_download() {
+    sed -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*{[[:space:]]*\"url\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\"[[:space:]]*,[[:space:]]*\"$3\"[[:space:]]*:[[:space:]]*\"\([0-9a-f]*\)\".*/\1 \2/p" "$1" | head -n 1
+}
+
 # 0 when the SDK version is in the band global.json asks for (same major.minor and feature band, patch at least the pinned one).
 sdk_in_band() {
     candidate=$1
@@ -64,6 +72,27 @@ sdk_in_band() {
 # Major version from a Clang --version first line, or empty.
 clang_major() {
     printf '%s\n' "$1" | sed -n 's/.*clang version \([0-9][0-9]*\)\.[0-9][0-9]*\.[0-9][0-9]*.*/\1/p' | head -n 1
+}
+
+# Hex digest of a file: file_digest 256|512 <file> (shasum on macOS, sha256sum/sha512sum on Linux).
+file_digest() {
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a "$1" "$2" | cut -d ' ' -f 1
+    else
+        "sha$1sum" "$2" | cut -d ' ' -f 1
+    fi
+}
+
+# Downloads a URL to a file and checks its digest. Prints the next step and returns 1 on failure.
+download_verified() {
+    url=$1; bits=$2; expected=$3; target=$4
+    if ! curl -fsSL "$url" -o "$target"; then echo "Could not download $url. Next: $network_hint."; return 1; fi
+    actual=$(file_digest "$bits" "$target")
+    if [ "$actual" != "$expected" ]; then
+        rm -f "$target"
+        echo "SHA-$bits mismatch for $url (got $actual). Next: $network_hint; if it repeats, the pinned entry in Build/Toolchain.json is wrong."
+        return 1
+    fi
 }
 
 # Writes "export NAME=value" (key NAME) into the marked block of the file, replacing an earlier line with the same key. Prints "changed"
@@ -105,6 +134,7 @@ if [ "$self_test" -eq 1 ]; then
         fi
     }
 
+    table="$here/Toolchain.json"
     expect 'sdk band: exact' 'sdk_in_band 10.0.302 10.0.302'
     expect 'sdk band: later patch' 'sdk_in_band 10.0.399 10.0.302'
     expect 'sdk band: older patch' '! sdk_in_band 10.0.301 10.0.302'
@@ -115,12 +145,22 @@ if [ "$self_test" -eq 1 ]; then
     expect 'clang major: LLVM' '[ "$(clang_major "clang version 22.1.8 (https://github.com/llvm/llvm-project ca7933e)")" = 22 ]'
     expect 'clang major: not clang' '[ -z "$(clang_major "gcc version 14")" ]'
     expect 'json: global.json sdk version' 'printf "%s" "$(json_version_after "$root/global.json" sdk)" | grep -Eq "^[0-9]+\.[0-9]+\.[0-9]+$"'
-    expect 'json: clang-format version' 'printf "%s" "$(json_version_after "$here/Toolchain.json" clangFormat)" | grep -Eq "^[0-9]+\.[0-9]+\.[0-9]+$"'
-    expect 'json: NDK version' 'printf "%s" "$(json_version_after "$here/Toolchain.json" ndk)" | grep -Eq "^[0-9]+\.[0-9]+\.[0-9]+$"'
-    expect 'json: Apple clang minimum' 'printf "%s" "$(json_integer "$here/Toolchain.json" appleClang)" | grep -Eq "^[0-9]+$"'
-    expect 'json: verified macOS line' 'json_verified_line "$here/Toolchain.json" MacOS | grep -q "^Apple clang version "'
+    expect 'json: pinned .NET SDK equals global.json' '[ "$(json_version_after "$table" dotnet)" = "$(json_version_after "$root/global.json" sdk)" ]'
+    expect 'json: clang-format version' 'printf "%s" "$(json_version_after "$table" clangFormat)" | grep -Eq "^[0-9]+\.[0-9]+\.[0-9]+$"'
+    expect 'json: NDK version' 'printf "%s" "$(json_version_after "$table" ndk)" | grep -Eq "^[0-9]+\.[0-9]+\.[0-9]+$"'
+    expect 'json: Apple clang minimum' 'printf "%s" "$(json_integer "$table" appleClang)" | grep -Eq "^[0-9]+$"'
+    expect 'json: verified macOS line' 'json_verified_line "$table" MacOS | grep -q "^Apple clang version "'
+    for key in macos-Arm64 macos-X64 linux-X64; do
+        expect "json: clang-format wheel $key" 'json_download "$table" '"$key"' sha256 | grep -Eq "^https://[^ ]*/clang_format-$(json_version_after "$table" clangFormat)-[^ ]*\.whl [0-9a-f]{64}$"'
+    done
+    for key in osx-arm64 osx-x64 linux-x64; do
+        expect "json: .NET SDK archive $key" 'json_download "$table" '"$key"' sha512 | grep -Eq "^https://[^ ]*/dotnet-sdk-$(json_version_after "$table" dotnet)-'"$key"'\.tar\.gz [0-9a-f]{128}$"'
+    done
 
     scratch=$(mktemp -d)
+    printf 'abc' > "$scratch/file"
+    expect 'digest: SHA-256' '[ "$(file_digest 256 "$scratch/file")" = ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad ]'
+    expect 'download: bad URL fails with a next step' 'download_verified "file:///nonexistent/rocks" 256 00 "$scratch/x" 2>/dev/null | grep -q "Next:"'
     rc="$scratch/rc"
     printf 'export EXISTING=1\n' > "$rc"
     expect 'block: first write changes the file' '[ "$(block_set "$rc" ROCKS_CLANG_FORMAT "export ROCKS_CLANG_FORMAT=\"/a b/clang-format\"")" = changed ]'
@@ -140,10 +180,23 @@ fi
 # --- Host and environment -----------------------------------------------------------------------------------------------------------------
 
 host=$(uname -s)
-case "${SHELL:-}" in
-    */zsh) startup="$HOME/.zshrc" ;;
-    */bash) startup="$HOME/.bash_profile" ;;
-    *) startup="$HOME/.profile" ;;
+machine=$(uname -m)
+case "$host" in
+    Darwin)
+        toolchain_root="${ROCKS_TOOLCHAIN_ROOT:-$HOME/Library/Application Support/Rocks/toolchains}"
+        case "$machine" in arm64) format_key=macos-Arm64; dotnet_key=osx-arm64 ;; *) format_key=macos-X64; dotnet_key=osx-x64 ;; esac
+        case "${SHELL:-}" in */zsh) startup="$HOME/.zshrc" ;; */bash) startup="$HOME/.bash_profile" ;; *) startup="$HOME/.profile" ;; esac
+        ;;
+    Linux)
+        toolchain_root="${ROCKS_TOOLCHAIN_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/rocks/toolchains}"
+        format_key=linux-X64; dotnet_key=linux-x64
+        [ "$machine" = x86_64 ] || { format_key=''; dotnet_key=''; }
+        case "${SHELL:-}" in */zsh) startup="$HOME/.zshrc" ;; */bash) startup="$HOME/.bashrc" ;; *) startup="$HOME/.profile" ;; esac
+        ;;
+    *)
+        echo "Unsupported host: $host. Use Setup.bat on Windows." >&2
+        exit 2
+        ;;
 esac
 
 # A new terminal sees the current environment plus the marked block of the startup file.
@@ -158,17 +211,18 @@ find_dotnet() {
     command -v dotnet 2>/dev/null || true
 }
 
+table="$here/Toolchain.json"
 required_sdk=$(json_version_after "$root/global.json" sdk)
-format_version=$(json_version_after "$here/Toolchain.json" clangFormat)
-ndk_version=$(json_version_after "$here/Toolchain.json" ndk)
-apple_minimum=$(json_integer "$here/Toolchain.json" appleClang)
-verified_line=$(json_verified_line "$here/Toolchain.json" MacOS)
+format_version=$(json_version_after "$table" clangFormat)
+ndk_version=$(json_version_after "$table" ndk)
+apple_minimum=$(json_integer "$table" appleClang)
+verified_line=$(json_verified_line "$table" MacOS)
 
-# Each check sets status (OK or MISSING), detail, and action (name of an install function, empty when there is none) and hint.
+# Each check sets status (OK or MISSING), detail, action (name of an install function, empty when there is none) and hint.
 check_xcode() {
     action=install_xcode; hint=''
     if ! xcode-select -p >/dev/null 2>&1 || ! xcrun --find clang++ >/dev/null 2>&1; then
-        status=MISSING; detail='Xcode command line tools not found'; return
+        status=MISSING; detail='Command Line Tools not found'; return
     fi
     compiler=$(command -v clang++ 2>/dev/null || true)
     line=$("${compiler:-clang++}" --version 2>/dev/null | head -n 1)
@@ -176,32 +230,35 @@ check_xcode() {
     case "$line" in
         "Apple clang version"*) ;;
         *) status=MISSING; action=''; detail="first clang++ on PATH is '$line' ($compiler)"
-           hint='Remove other LLVM directories from PATH so /usr/bin/clang++ (Xcode) comes first.'; return ;;
+           hint='Remove other LLVM directories from PATH so /usr/bin/clang++ comes first.'; return ;;
     esac
     if [ -z "$major" ] || [ "$major" -lt "$apple_minimum" ]; then
-        status=MISSING; action=''; detail="$line, needs Apple clang $apple_minimum or newer"; hint='Update Xcode from the App Store.'; return
+        status=MISSING; action=''; detail="$line, needs Apple clang $apple_minimum or newer"
+        hint='Update the Command Line Tools (softwareupdate --list) or Xcode from the App Store.'; return
     fi
     status=OK; action=''
     detail="$line, SDK $(xcrun --show-sdk-version 2>/dev/null)"
-    [ "$line" = "$verified_line" ] || detail="$detail (CI verifies '$verified_line')"
+    [ "$line" = "$verified_line" ] || detail="$detail (CI verifies '$verified_line'; builds print an unverified-toolchain notice)"
 }
 
 install_xcode() {
     xcode-select --install >/dev/null 2>&1 || true
-    echo 'Finish the Command Line Tools installer window (or install Xcode from the App Store), then run ./Setup.sh again.'
+    echo 'Next: finish the Command Line Tools installer window, then run ./Setup.sh again.'
     return 1
 }
 
 check_git() {
-    action=''; hint='Git comes with the Xcode command line tools.'
+    action=''
+    if [ "$host" = Darwin ]; then hint='Git comes with the Command Line Tools.'; else hint='Install Git with the package manager (for example sudo apt install git).'; fi
     if ! command -v git >/dev/null 2>&1; then status=MISSING; detail='git not found'; return; fi
-    status=OK; detail=$(git --version | sed 's/^git version //')
+    status=OK; hint=''; detail=$(git --version | sed 's/^git version //')
 }
 
 check_dotnet() {
     action=install_dotnet; hint=''
+    [ -n "$dotnet_key" ] || { action=''; hint="Install .NET SDK $required_sdk from https://dotnet.microsoft.com/download (no pinned archive for $machine)."; }
     dotnet=$(find_dotnet)
-    if [ -z "$dotnet" ]; then status=MISSING; detail="not found (needs $required_sdk band)"; return; fi
+    if [ -z "$dotnet" ]; then status=MISSING; detail="not found (needs the $required_sdk band)"; return; fi
     best=''
     for sdk in $("$dotnet" --list-sdks 2>/dev/null | cut -d ' ' -f 1); do
         if sdk_in_band "$sdk" "$required_sdk"; then best=$sdk; fi
@@ -211,31 +268,36 @@ check_dotnet() {
 }
 
 install_dotnet() {
-    script=$(mktemp)
-    curl -fsSL https://dot.net/v1/dotnet-install.sh -o "$script" || { echo 'Could not download dotnet-install.sh. Next: check the network and run ./Setup.sh again.'; return 1; }
-    bash "$script" --version "$required_sdk" --install-dir "$HOME/.dotnet" || { rm -f "$script"; echo "dotnet-install.sh failed. Next: install .NET SDK $required_sdk from https://dotnet.microsoft.com/download."; return 1; }
-    rm -f "$script"
+    pinned=$(json_version_after "$table" dotnet)
+    if [ "$pinned" != "$required_sdk" ]; then echo "Build/Toolchain.json dotnet.sdk.version ($pinned) differs from global.json ($required_sdk). Next: fix Build/Toolchain.json."; return 1; fi
+    entry=$(json_download "$table" "$dotnet_key" sha512)
+    [ -n "$entry" ] || { echo "No pinned .NET SDK archive for $dotnet_key in Build/Toolchain.json. Next: $manual_guide."; return 1; }
+    archive=$(mktemp)
+    download_verified "${entry% *}" 512 "${entry#* }" "$archive" || return 1
+    mkdir -p "$HOME/.dotnet" && tar -xzf "$archive" -C "$HOME/.dotnet" || { rm -f "$archive"; echo "Could not unpack the .NET SDK into ~/.dotnet. Next: check free disk space and run ./Setup.sh again."; return 1; }
+    rm -f "$archive"
     block_set "$startup" DOTNET_PATH 'export PATH="$HOME/.dotnet:$PATH"' >/dev/null
 }
 
 check_pwsh() {
     action=install_pwsh; hint=''
-    if ! command -v pwsh >/dev/null 2>&1; then status=MISSING; detail='not found (Build/*.ps1 install scripts need it)'; return; fi
+    if ! command -v pwsh >/dev/null 2>&1; then status=MISSING; detail='not found (Build/SelectAndroidNdk.ps1 needs it)'; return; fi
     status=OK; detail=$(pwsh -NoProfile -NonInteractive -Command '$PSVersionTable.PSVersion.ToString()' 2>/dev/null)
 }
 
 install_pwsh() {
     if command -v brew >/dev/null 2>&1; then
         brew install --cask powershell && return 0
-        echo 'brew install --cask powershell failed (see its message above).'
+        echo "brew install --cask powershell failed. Next: read the message above; for download errors $network_hint."
         return 1
     fi
-    echo 'Homebrew not found. Next: install Homebrew from https://brew.sh (or PowerShell 7 from Microsoft), then run ./Setup.sh again.'
+    echo 'Next: install PowerShell 7 (https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-macos), then run ./Setup.sh --android again.'
     return 1
 }
 
 check_format() {
     action=install_format; hint=''
+    [ -n "$format_key" ] || { action=''; hint="No pinned clang-format for $machine; set ROCKS_CLANG_FORMAT to a clang-format $format_version binary."; }
     configured=$(setting ROCKS_CLANG_FORMAT)
     if [ -z "$configured" ]; then status=MISSING; detail="ROCKS_CLANG_FORMAT is not set (needs clang-format $format_version)"; return; fi
     if [ ! -x "$configured" ]; then status=MISSING; detail="ROCKS_CLANG_FORMAT points to a missing file: $configured"; return; fi
@@ -246,10 +308,20 @@ check_format() {
     esac
 }
 
+# Extracts only the native binary from the pinned wheel (the same file Build/InstallFormatter.ps1 installs); no package code runs.
 install_format() {
-    command -v pwsh >/dev/null 2>&1 || { echo 'PowerShell 7 is required for this step. Next: let Setup install PowerShell 7, then run ./Setup.sh again.'; return 1; }
-    pwsh -NoProfile -File "$here/InstallFormatter.ps1" -ToolchainRoot "$toolchain_root" || return 1
-    block_set "$startup" ROCKS_CLANG_FORMAT "export ROCKS_CLANG_FORMAT=\"$toolchain_root/clang-format-$format_version/clang-format\"" >/dev/null
+    command -v unzip >/dev/null 2>&1 || { echo 'unzip not found. Next: install unzip (for example sudo apt install unzip) and run ./Setup.sh again.'; return 1; }
+    entry=$(json_download "$table" "$format_key" sha256)
+    [ -n "$entry" ] || { echo "No pinned clang-format wheel for $format_key in Build/Toolchain.json. Next: $manual_guide."; return 1; }
+    wheel=$(mktemp)
+    download_verified "${entry% *}" 256 "${entry#* }" "$wheel" || return 1
+    directory="$toolchain_root/clang-format-$format_version"
+    mkdir -p "$directory" && unzip -p "$wheel" clang_format/data/bin/clang-format > "$directory/clang-format" && chmod +x "$directory/clang-format"
+    result=$?
+    rm -f "$wheel"
+    [ "$result" -eq 0 ] || { echo "Could not unpack clang-format into $directory. Next: check that the directory is writable and run ./Setup.sh again."; return 1; }
+    "$directory/clang-format" --version | grep -q "clang-format version $format_version" || { echo "The unpacked clang-format is not $format_version. Next: $manual_guide."; return 1; }
+    block_set "$startup" ROCKS_CLANG_FORMAT "export ROCKS_CLANG_FORMAT=\"$directory/clang-format\"" >/dev/null
 }
 
 android_sdk() {
@@ -274,9 +346,9 @@ check_android() {
 }
 
 install_android() {
-    command -v pwsh >/dev/null 2>&1 || { echo 'PowerShell 7 is required for this step. Next: let Setup install PowerShell 7, then run ./Setup.sh again.'; return 1; }
+    command -v pwsh >/dev/null 2>&1 || { echo 'Next: install PowerShell 7 first (the step above), then run ./Setup.sh --android again.'; return 1; }
     sdk=$(android_sdk)
-    ANDROID_HOME="$sdk" pwsh -NoProfile -File "$here/SelectAndroidNdk.ps1" || return 1
+    ANDROID_HOME="$sdk" pwsh -NoProfile -File "$here/SelectAndroidNdk.ps1" || { echo "Build/SelectAndroidNdk.ps1 failed. Next: read its message above; for download errors $network_hint."; return 1; }
     [ -n "${ANDROID_HOME:-}" ] || block_set "$startup" ANDROID_HOME "export ANDROID_HOME=\"$sdk\"" >/dev/null
     block_set "$startup" ANDROID_NDK_HOME "export ANDROID_NDK_HOME=\"$sdk/ndk/$ndk_version\"" >/dev/null
 }
@@ -286,15 +358,12 @@ install_android() {
 if [ "$host" = Linux ]; then
     steps='git dotnet format'
     echo "Rocks setup for Linux ($root)"
-    echo 'Linux is not a build host yet: C++ builds need Windows or macOS (planned: Docs/Design/BuildTargets.ko.md section 3.7).'
-    echo 'Checking what works today: the C# tools and the policy and format checks.'
-elif [ "$host" = Darwin ]; then
-    steps='xcode git dotnet pwsh format'
-    [ "$android" -eq 1 ] && steps="$steps android"
-    echo "Rocks setup for macOS ($root)"
+    echo 'Linux is not a C++ build host yet (planned: Docs/Design/BuildTargets.ko.md section 3.7). Setup prepares the C# tools and the'
+    echo 'policy and format checks (Docs/Guides/BuildEnvironment.ko.md section 5).'
 else
-    echo "Unsupported host: $host. Use Setup.bat on Windows." >&2
-    exit 2
+    steps='xcode git dotnet format'
+    [ "$android" -eq 1 ] && steps="$steps pwsh android"
+    echo "Rocks setup for macOS ($root)"
 fi
 
 count=$(echo $steps | wc -w | tr -d ' ')
@@ -339,13 +408,9 @@ next_step() {
 run_checks
 if [ -z "$pending" ]; then next_step; exit 0; fi
 
-if [ "$check_only" -eq 1 ] || [ "$host" = Linux ]; then
+if [ "$check_only" -eq 1 ]; then
     echo
-    if [ "$host" = Linux ]; then
-        echo 'Install the missing items yourself (Docs/Guides/BuildEnvironment.ko.md section 4); Setup does not install on Linux.'
-    else
-        echo 'Some items are missing. Run ./Setup.sh without --check to install them.'
-    fi
+    echo 'Some items are missing. Run ./Setup.sh without --check to install them.'
     exit 1
 fi
 
@@ -362,19 +427,26 @@ index=0
 for step in $steps; do
     index=$((index + 1))
     case " $pending " in *" $step "*) ;; *) continue ;; esac
+    # Check again: an earlier install may already have provided this item.
     "check_$step"
+    if [ "$status" = OK ]; then line_out "$index" "$step" OK "$detail"; continue; fi
     if [ -z "$action" ]; then
-        line_out "$index" "$step" FAILED "$detail. Next: $hint"
+        line_out "$index" "$step" FAILED "$detail. Next: ${hint:-$manual_guide}"
         continue
     fi
     line_out "$index" "$step" installing ''
-    if "$action"; then line_out "$index" "$step" installed ''; else line_out "$index" "$step" FAILED 'see the message above'; fi
+    # Install output streams as it comes (sdkmanager, Homebrew); every failure path of an install function prints its own Next: line.
+    if "$action"; then
+        line_out "$index" "$step" installed ''
+    else
+        line_out "$index" "$step" FAILED "see the Next: line above (or $manual_guide)"
+    fi
 done
 
 echo
 echo 'Checking again:'
-# The new values are in the startup file; load the block so this check sees what a new terminal will see.
-[ -f "$HOME/.dotnet/dotnet" ] && PATH="$HOME/.dotnet:$PATH"
+# The new values are in the startup file; this check reads that block too (setting), and the new SDK directory goes on PATH here.
+[ -x "$HOME/.dotnet/dotnet" ] && PATH="$HOME/.dotnet:$PATH"
 run_checks
 if [ -z "$pending" ]; then next_step; exit 0; fi
 echo

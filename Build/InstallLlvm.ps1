@@ -27,7 +27,8 @@ if (-not (Test-Path -LiteralPath $compiler)) {
     if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
     [IO.Directory]::CreateDirectory($staging) | Out-Null
     $archive = Join-Path $staging 'installer.exe'
-    Invoke-WebRequest -Uri $url -OutFile $archive
+    try { Invoke-WebRequest -Uri $url -OutFile $archive }
+    catch { throw "Could not download LLVM $version ($($_.Exception.Message)). Next: check the network or proxy (HTTPS_PROXY) and run the setup again." }
     if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $sha256) { throw 'LLVM installer SHA256 mismatch.' }
     $sevenZip = (Get-Command 7z -ErrorAction SilentlyContinue)?.Source
     if (-not $sevenZip) {

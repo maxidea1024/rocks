@@ -5,15 +5,17 @@ present and with Windows PowerShell 5.1 otherwise, so this file stays ASCII and 
 It checks every prerequisite the way a new terminal will see it (machine and user environment read from the registry, not this
 process), asks once, installs only what is missing or wrong, and checks again. Once everything passes, running it again changes nothing.
 
-Building needs no Visual Studio IDE: when no Visual Studio is installed, Setup installs Build Tools for Visual Studio 2026 (MSVC and the
-Windows SDK, which clang-cl uses). -WithIde adds Visual Studio Community with the Clang IntelliSense components for editing in the IDE.
+Building needs no Visual Studio IDE: when no Visual Studio 17.8 or newer is installed, Setup installs Build Tools for Visual Studio 2026
+(MSVC and the Windows SDK, which clang-cl uses). -WithIde installs Visual Studio Community with the Clang IntelliSense components first and
+reuses it for the build.
 
-Usage: Setup.bat [-Check] [-Yes] [-WithIde] [-Android] [-ToolchainRoot <directory>]
+Usage: Setup.bat [-Check] [-Yes] [-WithIde] [-Android] [-ToolchainRoot <directory>] [-Skip <step name>,...]
   -Check          Check only. Exit code 0 when everything passes, 1 otherwise.
   -Yes            Install without asking.
   -WithIde        Also check and install the Visual Studio IDE with the components in .vsconfig.
   -Android        Also check and install the pinned Android NDK.
   -ToolchainRoot  Where LLVM and clang-format are unpacked (default %LOCALAPPDATA%\Rocks\toolchains).
+  -Skip           Leave out the named steps (for example 'FXC SDK' on machines that never run shader tests; CI uses it).
   -SelfTest       Run the unit checks of this script and exit.
 #>
 [CmdletBinding()]
@@ -23,6 +25,7 @@ param(
     [switch] $WithIde,
     [switch] $Android,
     [string] $ToolchainRoot = '',
+    [string[]] $Skip = @(),
     [switch] $SelfTest)
 
 Set-StrictMode -Version 2
@@ -33,11 +36,21 @@ $BuildCommand = 'dotnet msbuild Rocks.proj -t:Test -p:Configuration=Debug -p:Roc
 # Registry location of the user environment (HKCU). Self tests pass a scratch subkey instead.
 $UserEnvironmentKey = 'Environment'
 
-# Components the build needs, installed as Build Tools for Visual Studio when no Visual Studio exists. The IDE components (Clang
+# Components the build needs, installed as Build Tools for Visual Studio when no Visual Studio exists. SDK 10.0.22621 carries the pinned
+# FXC (d3dcompiler_47.dll, Engine/Source/ThirdParty/D3DCompiler/ThirdParty.json) that shader tests bootstrap. The IDE components (Clang
 # IntelliSense) are in .vsconfig, which -WithIde installs and Visual Studio reads when it opens the repository.
 $VsToolsComponent = 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64'
 $WindowsSdkComponent = 'Microsoft.VisualStudio.Component.Windows11SDK.26100'
-$BuildToolsComponents = @('Microsoft.VisualStudio.Workload.VCTools', $VsToolsComponent, $WindowsSdkComponent)
+$FxcSdkComponent = 'Microsoft.VisualStudio.Component.Windows11SDK.22621'
+$VcComponents = @($VsToolsComponent, $WindowsSdkComponent, $FxcSdkComponent)
+$BuildToolsComponents = @('Microsoft.VisualStudio.Workload.VCTools') + $VcComponents
+
+# Shown when an automatic install cannot run or fails without a more specific next step.
+$ManualGuide = 'follow appendix A of Docs/Guides/BuildEnvironment.ko.md (manual install)'
+$NetworkHint = 'check the network or proxy (HTTPS_PROXY) and run Setup again'
+
+# Self tests set this to keep the fake runs of the main flow quiet.
+$script:RocksQuiet = $false
 
 # Install is a script block run as `& $Install $Data` from the script scope (so it sees the functions below); Data carries the values it
 # needs. Hint is the next action when the item cannot be installed automatically.
@@ -81,9 +94,10 @@ function Test-RocksVerifiedClang([string] $Line, [string[]] $Verified) {
     return $false
 }
 
-# Minimum Clang major that an MSVC STL accepts (STL1000), read from yvals_core.h like Rocks.Build (ToolchainTable.ParseStlClangMinimum).
+# Minimum Clang major that an MSVC STL accepts (STL1000), read from yvals_core.h with the same pattern as Rocks.Build
+# (ToolchainTable.ParseStlClangMinimum): 14.29 writes "#error STL1000", 14.44 and 14.52 write "_EMIT_STL_ERROR(STL1000, ...)".
 function Get-RocksStlClangMinimum([string] $Text) {
-    $match = [regex]::Match($Text, '#if __clang_major__ < (?<major>\d+)[ \t]*\r?\n[ \t]*#error STL1000')
+    $match = [regex]::Match($Text, '#if __clang_major__ < (?<major>\d+)[ \t]*\r?\n[ \t]*(?:#error[ \t]+|_EMIT_STL_ERROR\([ \t]*)STL1000\b')
     if ($match.Success) { return [int] $match.Groups['major'].Value }
     return $null
 }
@@ -207,14 +221,14 @@ function Set-RocksUserVariable([string] $Name, [string] $Value, [string] $SubKey
 
 function Install-RocksWinget([string] $Id, [string] $Version = '', [string] $Override = '') {
     $winget = Find-RocksExecutable 'winget' ($env:Path + ';' + (Get-RocksNewShellPath))
-    if (-not $winget) { throw "winget not found. Next: install 'App Installer' from the Microsoft Store, then run Setup again." }
+    if (-not $winget) { throw "winget not found (Windows Server and LTSC lack it). Next: install 'App Installer' from the Microsoft Store, or $ManualGuide." }
     $arguments = @('install', '--id', $Id, '--exact', '--source', 'winget', '--accept-package-agreements', '--accept-source-agreements')
     if ($Version) { $arguments += @('--version', $Version) }
     if ($Override) { $arguments += @('--override', $Override) } else { $arguments += '--silent' }
     # Start-Process with an explicitly quoted command line: Windows PowerShell 5.1 drops quotes inside native arguments (the --override text).
     $process = Start-Process -FilePath $winget -ArgumentList ((@($arguments) | ForEach-Object { ConvertTo-RocksArgument $_ }) -join ' ') -NoNewWindow -Wait -PassThru
     if ($process.ExitCode -ne 0) {
-        throw "winget install $Id failed with exit code $($process.ExitCode). Next: run 'winget install --id $Id' yourself and read its message."
+        throw "winget install $Id failed with exit code $($process.ExitCode). Next: read the winget message above; for download errors $NetworkHint."
     }
 }
 
@@ -232,7 +246,7 @@ function Invoke-RocksBuildScript([string] $Script, [string[]] $Arguments) {
     $pwsh = Get-RocksPwsh
     if (-not $pwsh) { throw 'PowerShell 7 is required for this step. Next: let Setup install PowerShell 7, then run Setup again.' }
     & $pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot $Script) @Arguments
-    if ($LASTEXITCODE -ne 0) { throw "Build/$Script failed with exit code $LASTEXITCODE (see its message above)." }
+    if ($LASTEXITCODE -ne 0) { throw "Build/$Script failed with exit code $LASTEXITCODE. Next: read its message above; for download errors $NetworkHint." }
 }
 
 # --- Checks -----------------------------------------------------------------------------------------------------------------------------
@@ -257,7 +271,7 @@ function Get-RocksGitStatus {
     if (-not $git) { return New-RocksStatus $false 'not found' $install '' @{ InstallGit = $true } }
 
     $version = (Get-RocksFirstLine (Invoke-RocksNative $git @('--version')).StdOut) -replace '^git version ', ''
-    $longPaths = (Invoke-RocksNative $git @('config', '--global', '--get', 'core.longpaths')).StdOut.Trim()
+    $longPaths = (Invoke-RocksNative $git @('config', '--get', 'core.longpaths')).StdOut.Trim()
     if ($longPaths -ne 'true') { return New-RocksStatus $false "$version, core.longpaths is not true" $install '' @{ InstallGit = $false } }
     return New-RocksStatus $true "$version, core.longpaths=true"
 }
@@ -292,21 +306,37 @@ function Get-RocksVsConfigComponents {
 
 function Get-RocksVsWhere { return Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe' }
 
-# Newest installation that vswhere reports for the arguments, with its package list, or $null.
+# vswhere version range of the accepted installations (Build/Toolchain.json visualStudio.minimumVersion, the same lower bound as
+# Rocks.Tooling.Common NativeEnvironment and UE 5.8).
+function Get-RocksVsRange { return '[' + (Get-RocksToolchainTable).visualStudio.minimumVersion + ',)' }
+
+# Installations vswhere reports for the arguments (newest first), with their package lists. Empty when vswhere is missing.
 function Get-RocksVsQuery([string[]] $Arguments) {
     $vswhere = Get-RocksVsWhere
-    if (-not (Test-Path -LiteralPath $vswhere)) { return $null }
-    $json = (Invoke-RocksNative $vswhere (@('-latest', '-include', 'packages', '-format', 'json') + $Arguments)).StdOut
-    $instances = @(ConvertFrom-RocksJson $json)
-    if ($instances.Count -eq 0) { return $null }
-    return $instances[0]
+    if (-not (Test-Path -LiteralPath $vswhere)) { return @() }
+    $json = (Invoke-RocksNative $vswhere (@('-include', 'packages', '-format', 'json', '-version', (Get-RocksVsRange)) + $Arguments)).StdOut
+    return @(ConvertFrom-RocksJson $json)
 }
 
-# The installation the build picks (Rocks.Tooling.Common NativeEnvironment: -products * includes Build Tools), or $null.
-function Get-RocksVsInstance { return Get-RocksVsQuery @('-products', '*', '-requires', $VsToolsComponent) }
+function Select-RocksFirst($Items) {
+    $all = @($Items)
+    if ($all.Count -eq 0) { return $null }
+    return $all[0]
+}
+
+# The installation the build picks (NativeEnvironment: -products * includes Build Tools), or $null.
+function Get-RocksVsInstance { return Select-RocksFirst (Get-RocksVsQuery @('-latest', '-products', '*', '-requires', $VsToolsComponent)) }
+
+# The newest accepted installation of any product, with or without the C++ tools (complete installations only), or $null.
+function Get-RocksVsAnyInstance { return Select-RocksFirst (Get-RocksVsQuery @('-latest', '-products', '*')) }
 
 # The newest Visual Studio IDE (vswhere without -products reports Community, Professional and Enterprise only), or $null.
-function Get-RocksVsIdeInstance { return Get-RocksVsQuery @() }
+function Get-RocksVsIdeInstance { return Select-RocksFirst (Get-RocksVsQuery @('-latest')) }
+
+# An accepted installation that is not complete (an interrupted install or update), or $null.
+function Get-RocksVsIncompleteInstance {
+    return Select-RocksFirst (@(Get-RocksVsQuery @('-all', '-products', '*')) | Where-Object { -not $_.isComplete })
+}
 
 # Path of the MSVC toolset the build would use: ROCKS_MSVC_TOOLSET when set, otherwise the installation's default toolset.
 function Get-RocksMsvcToolsDirectory($Instance) {
@@ -325,17 +355,22 @@ function Get-RocksMsvcToolsDirectory($Instance) {
 # Adds components to an existing installation (Build Tools or IDE) with the Visual Studio Installer.
 function Install-RocksVsModify([string] $InstallationPath, [string[]] $Selection) {
     $setup = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\setup.exe'
-    if (-not (Test-Path -LiteralPath $setup)) { throw 'Visual Studio Installer not found. Next: run Setup again; it installs Build Tools for Visual Studio 2026.' }
+    if (-not (Test-Path -LiteralPath $setup)) { throw "Visual Studio Installer not found. Next: run Setup again, or $ManualGuide." }
     $arguments = @('modify', '--installPath', $InstallationPath) + $Selection + @('--passive', '--norestart') | ForEach-Object { ConvertTo-RocksArgument $_ }
     # The Visual Studio installer needs administrator rights and shows the UAC prompt itself.
     $process = Start-Process -FilePath $setup -ArgumentList ($arguments -join ' ') -Verb RunAs -Wait -PassThru
     # 3010 means success with a restart required.
     if ($process.ExitCode -ne 0 -and $process.ExitCode -ne 3010) {
-        throw "Visual Studio Installer exited with code $($process.ExitCode). Next: open Visual Studio Installer, choose Modify, and add the missing components."
+        throw "Visual Studio Installer exited with code $($process.ExitCode). Next: open Visual Studio Installer, choose Modify or Repair, and add the missing components."
     }
 }
 
 function ConvertTo-RocksVsAdd([string[]] $Components) { return @($Components | ForEach-Object { '--add'; $_ }) }
+
+function Install-RocksBuildTools {
+    $override = '--wait --passive --norestart ' + ((ConvertTo-RocksVsAdd $BuildToolsComponents) -join ' ')
+    Install-RocksWinget 'Microsoft.VisualStudio.BuildTools' '' $override
+}
 
 function Get-RocksWindowsSdks {
     $kits = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\Include'
@@ -343,45 +378,91 @@ function Get-RocksWindowsSdks {
         Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'um\Windows.h') } | Sort-Object Name -Descending)
 }
 
+# True when a Windows SDK component (Microsoft.VisualStudio.Component.Windows11SDK.<build>) is already on disk, for example from the
+# standalone SDK installer or another Visual Studio; the IDE then needs nothing more for it.
+function Test-RocksSdkComponentOnDisk([string] $Component) {
+    if ($Component -notmatch '\.Windows1[01]SDK\.(\d+)$') { return $false }
+    return Test-Path -LiteralPath (Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\Include\10.0.$($Matches[1]).0\um\Windows.h")
+}
+
+# Directory name of an MSVC toolset path as a version, or $null.
+function Get-RocksToolsetVersion([string] $Directory) {
+    $parsed = $null
+    if ($Directory -and [version]::TryParse((Split-Path -Leaf $Directory), [ref] $parsed)) { return $parsed }
+    return $null
+}
+
 # C++ build tools: MSVC (STL and C runtime) and a Windows SDK, which clang-cl uses. Build Tools for Visual Studio (no IDE) is enough.
 function Get-RocksBuildToolsStatus {
     $install = {
         param($d)
         if ($d.Path) { Install-RocksVsModify $d.Path (ConvertTo-RocksVsAdd $d.Add); return }
-        $override = '--wait --passive --norestart ' + ((ConvertTo-RocksVsAdd $BuildToolsComponents) -join ' ')
-        Install-RocksWinget 'Microsoft.VisualStudio.BuildTools' '' $override
+        Install-RocksBuildTools
     }
+    $minimum = (Get-RocksToolchainTable).visualStudio.minimumVersion
     $instance = Get-RocksVsInstance
     if (-not $instance) {
-        $vswhere = Get-RocksVsWhere
-        if (Test-Path -LiteralPath $vswhere) {
-            $all = @(ConvertFrom-RocksJson (Invoke-RocksNative $vswhere @('-all', '-products', '*', '-format', 'json')).StdOut)
-            $broken = @($all | Where-Object { -not $_.isComplete })
-            if ($broken.Count -gt 0) {
-                $path = $broken[0].installationPath
-                $hint = 'Open Visual Studio Installer and choose Repair for that installation.'
-                return New-RocksStatus $false "installation at $path is incomplete" $install $hint @{ Path = $path; Add = @($VsToolsComponent, $WindowsSdkComponent) }
-            }
+        $broken = Get-RocksVsIncompleteInstance
+        if ($broken) {
+            $hint = 'Open Visual Studio Installer and choose Repair for that installation.'
+            return New-RocksStatus $false "installation at $($broken.installationPath) is incomplete" $install $hint @{ Path = $broken.installationPath; Add = $VcComponents }
         }
 
-        return New-RocksStatus $false 'MSVC build tools not found (installs Build Tools for Visual Studio 2026, no IDE)' $install '' @{ Path = '' }
+        # An accepted installation without the C++ tools (for example an IDE installed for C#) gets them instead of a second installation.
+        $other = Get-RocksVsAnyInstance
+        if ($other) {
+            $data = @{ Path = $other.installationPath; Add = $VcComponents }
+            return New-RocksStatus $false "$($other.displayName) $($other.installationVersion) has no C++ build tools" $install '' $data
+        }
+
+        return New-RocksStatus $false "no Visual Studio $minimum or newer with C++ tools (installs Build Tools for Visual Studio 2026, no IDE)" $install '' @{ Path = '' }
     }
 
     $name = "$($instance.displayName) $($instance.installationVersion)"
-    $data = @{ Path = $instance.installationPath; Add = @($WindowsSdkComponent) }
+    $data = @{ Path = $instance.installationPath; Add = $VcComponents }
     $sdk = Get-RocksWindowsSdks
     if ($sdk.Count -eq 0) { return New-RocksStatus $false "$name, no Windows SDK" $install '' $data }
     $tools = Get-RocksMsvcToolsDirectory $instance
+    $pinned = Get-RocksEnvironmentValue 'ROCKS_MSVC_TOOLSET'
     if (-not $tools -or -not (Test-Path -LiteralPath $tools)) {
-        $pinned = Get-RocksEnvironmentValue 'ROCKS_MSVC_TOOLSET'
         $hint = 'Install that MSVC toolset in Visual Studio Installer or clear ROCKS_MSVC_TOOLSET.'
         return New-RocksStatus $false "$name, MSVC toolset $pinned (ROCKS_MSVC_TOOLSET) is not installed" $null $hint
+    }
+
+    $minimumMsvc = (Get-RocksToolchainTable).visualStudio.minimumMsvc
+    $toolset = Get-RocksToolsetVersion $tools
+    if (-not $toolset -or $toolset -lt [version] $minimumMsvc) {
+        $hint = if ($pinned) { "ROCKS_MSVC_TOOLSET=$pinned selects it; clear it or pick $minimumMsvc or newer." } else { '' }
+        return New-RocksStatus $false "$name, MSVC $(Split-Path -Leaf $tools) is older than $minimumMsvc" $install $hint $data
     }
 
     return New-RocksStatus $true "$name, MSVC $(Split-Path -Leaf $tools), Windows SDK $($sdk[0].Name)"
 }
 
-# Visual Studio IDE for editing (-WithIde): Community or a higher edition with the components in .vsconfig (Clang IntelliSense).
+# The pinned FXC source file (Engine/Source/ThirdParty/D3DCompiler/ThirdParty.json), as a full path in the Windows SDK.
+function Get-RocksFxcSource {
+    $manifest = Get-Content -LiteralPath (Join-Path $RocksRoot 'Engine/Source/ThirdParty/D3DCompiler/ThirdParty.json') -Raw | ConvertFrom-Json
+    $file = @($manifest.hosts.'windows-x64'.files)[0]
+    $kits = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10'
+    return [pscustomobject]@{ Path = (Join-Path $kits ($file.sdkPath -replace '/', '\')); Sdk = $manifest.sdk.version }
+}
+
+# Windows SDK 10.0.22621 for the pinned FXC. Only shader tests need it (bootstrap copies the file); the build itself does not.
+function Get-RocksFxcSdkStatus {
+    $install = {
+        param($d)
+        $target = Get-RocksVsInstance
+        if (-not $target) { $target = Get-RocksVsAnyInstance }
+        if ($target) { Install-RocksVsModify $target.installationPath (ConvertTo-RocksVsAdd @($FxcSdkComponent)); return }
+        Install-RocksBuildTools
+    }
+    $fxc = Get-RocksFxcSource
+    if (-not (Test-Path -LiteralPath $fxc.Path -PathType Leaf)) { return New-RocksStatus $false "Windows SDK $($fxc.Sdk) not found ($($fxc.Path))" $install }
+    return New-RocksStatus $true "Windows SDK $($fxc.Sdk) ($(Split-Path -Leaf $fxc.Path))"
+}
+
+# Visual Studio IDE for editing (-WithIde): Community or a higher edition with the components in .vsconfig (Clang IntelliSense and the C++
+# tools). The step runs before the build tools step so a new IDE also provides the build tools.
 function Get-RocksVsIdeStatus {
     $config = Join-Path $RocksRoot '.vsconfig'
     $install = {
@@ -392,7 +473,7 @@ function Get-RocksVsIdeStatus {
     $instance = Get-RocksVsIdeInstance
     if (-not $instance) { return New-RocksStatus $false 'Visual Studio IDE not found (installs Visual Studio Community 2026)' $install '' @{ Path = ''; Config = $config } }
     $installed = @($instance.packages | ForEach-Object { $_.id })
-    $missing = @(Get-RocksVsConfigComponents | Where-Object { $installed -notcontains $_ })
+    $missing = @(Get-RocksVsConfigComponents | Where-Object { $installed -notcontains $_ -and -not (Test-RocksSdkComponentOnDisk $_) })
     $name = "$($instance.displayName) $($instance.installationVersion)"
     if ($missing.Count -gt 0) {
         return New-RocksStatus $false "$name, missing: $($missing -join ', ')" $install '' @{ Path = $instance.installationPath; Config = $config }
@@ -502,7 +583,131 @@ function Get-RocksAndroidStatus {
     return New-RocksStatus $true "NDK $version at $ndk"
 }
 
+# --- Main flow -------------------------------------------------------------------------------------------------------------------------
+
+function Write-RocksLine([int] $Index, [int] $Count, [string] $Name, [string] $State, [string] $Detail) {
+    if ($script:RocksQuiet) { return }
+    $color = switch ($State) { 'OK' { 'Green' } 'installed' { 'Green' } 'installing' { 'Cyan' } default { 'Yellow' } }
+    Write-Host ('[{0}/{1}] {2,-16} ' -f $Index, $Count, $Name) -NoNewline
+    Write-Host ('{0,-10}' -f $State) -ForegroundColor $color -NoNewline
+    Write-Host " $Detail"
+}
+
+function Write-RocksText([string] $Text, [string] $Color = '') {
+    if ($script:RocksQuiet) { return }
+    if ($Color) { Write-Host $Text -ForegroundColor $Color } else { Write-Host $Text }
+}
+
+function Invoke-RocksStepCheck($Step) {
+    try { return & $Step.Check }
+    catch { return New-RocksStatus $false "check failed: $($_.Exception.Message)" }
+}
+
+function Invoke-RocksChecks($Steps) {
+    $results = @()
+    for ($index = 0; $index -lt $Steps.Count; ++$index) {
+        $status = Invoke-RocksStepCheck $Steps[$index]
+        $state = if ($status.Ok) { 'OK' } else { 'MISSING' }
+        Write-RocksLine ($index + 1) $Steps.Count $Steps[$index].Name $state $status.Detail
+        if (-not $status.Ok -and $status.Hint) { Write-RocksText "        Next: $($status.Hint)" }
+        $results += $status
+    }
+
+    return , $results
+}
+
+function Write-RocksNextStep {
+    Write-RocksText ''
+    Write-RocksText 'Setup is complete. Open a new terminal (or restart your IDE) and run:' 'Green'
+    Write-RocksText "  cd `"$RocksRoot`""
+    Write-RocksText "  $BuildCommand"
+}
+
+# Checks every step, asks once (Ask returns the answer), installs only the missing items in order, and checks again. Each step is checked
+# once more right before its install, because an earlier install (the IDE, PowerShell 7) may already have provided it. Returns the exit code.
+function Invoke-RocksSetup($Steps, [bool] $CheckOnly, [bool] $AssumeYes, [scriptblock] $Ask) {
+    $results = Invoke-RocksChecks $Steps
+    $pending = @(for ($index = 0; $index -lt $Steps.Count; ++$index) { if (-not $results[$index].Ok) { $index } })
+    if ($pending.Count -eq 0) {
+        Write-RocksNextStep
+        return 0
+    }
+
+    if ($CheckOnly) {
+        Write-RocksText ''
+        Write-RocksText 'Some items are missing. Run Setup.bat without -Check to install them.' 'Yellow'
+        return 1
+    }
+
+    if (-not $AssumeYes) {
+        Write-RocksText ''
+        $answer = $null
+        try { $answer = & $Ask }
+        catch { $answer = $null }
+        if ($null -eq $answer) { Write-RocksText 'Cannot ask in this session. Run Setup.bat -Yes to install without asking.'; return 1 }
+        if ($answer -match '^\s*n') { Write-RocksText 'Nothing was installed.'; return 1 }
+    }
+
+    Write-RocksText ''
+    foreach ($index in $pending) {
+        $step = $Steps[$index]
+        $status = Invoke-RocksStepCheck $step
+        if ($status.Ok) {
+            Write-RocksLine ($index + 1) $Steps.Count $step.Name 'OK' $status.Detail
+            continue
+        }
+
+        if (-not $status.Install) {
+            $next = if ($status.Hint) { $status.Hint } else { $ManualGuide }
+            Write-RocksLine ($index + 1) $Steps.Count $step.Name 'FAILED' "$($status.Detail). Next: $next"
+            continue
+        }
+
+        Write-RocksLine ($index + 1) $Steps.Count $step.Name 'installing' ''
+        try {
+            & $status.Install $status.Data
+            Write-RocksLine ($index + 1) $Steps.Count $step.Name 'installed' ''
+        }
+        catch {
+            $message = $_.Exception.Message
+            if ($message -notmatch 'Next:') { $message += " Next: $(if ($status.Hint) { $status.Hint } else { $ManualGuide })." }
+            Write-RocksLine ($index + 1) $Steps.Count $step.Name 'FAILED' $message
+        }
+    }
+
+    Write-RocksText ''
+    Write-RocksText 'Checking again:'
+    $results = Invoke-RocksChecks $Steps
+    if (@($results | Where-Object { -not $_.Ok }).Count -eq 0) {
+        Write-RocksNextStep
+        return 0
+    }
+
+    Write-RocksText ''
+    Write-RocksText 'Some items still need attention (see the lines above). Fix them and run Setup.bat again.' 'Yellow'
+    return 1
+}
+
 # --- Self test -------------------------------------------------------------------------------------------------------------------------
+
+# A fake step for the main flow tests: State.<Name> says whether it passes, its install sets it (or throws) and counts the call.
+function New-RocksFakeStep([string] $Name, [hashtable] $State, [bool] $Installable = $true, [bool] $Fails = $false) {
+    $check = {
+        if ($State[$Name]) { return New-RocksStatus $true 'fake' }
+        $install = $null
+        if ($Installable) {
+            $install = {
+                param($d)
+                $d.State['installs'] += @($d.Name)
+                if ($d.Fails) { throw 'fake failure' }
+                $d.State[$d.Name] = $true
+            }
+        }
+
+        return New-RocksStatus $false 'fake missing' $install '' @{ State = $State; Name = $Name; Fails = $Fails }
+    }.GetNewClosure()
+    return @{ Name = $Name; Check = $check }
+}
 
 function Invoke-RocksSelfTest {
     $failures = New-Object Collections.Generic.List[string]
@@ -525,13 +730,29 @@ function Invoke-RocksSelfTest {
     Assert-Rocks ((Get-RocksClangMajor 'Apple clang version 17.0.0 (clang-1700.0.13.5)') -eq 17) 'clang major: Apple'
     Assert-Rocks ($null -eq (Get-RocksClangMajor 'gcc version 14')) 'clang major: not clang'
 
-    $stl = "#ifdef __clang__`n#if __clang_major__ < 22`n#error STL1000: Unexpected compiler version, expected Clang 22.0.0 or newer.`n#endif"
-    Assert-Rocks ((Get-RocksStlClangMinimum $stl) -eq 22) 'stl: STL1000 condition'
+    # The real yvals_core.h lines: 14.52 and 14.44 use _EMIT_STL_ERROR, 14.29 uses #error (Docs/Design/ClangVersionSupport.ko.md 6.2).
+    $stl1452 = "#elif defined(__clang__)`n#if __clang_major__ < 22`n_EMIT_STL_ERROR(STL1000, `"Unexpected compiler version, expected Clang 22 or newer.`");`n#endif"
+    $stl1429 = "#elif defined(__clang__)`r`n#if __clang_major__ < 11`r`n#error STL1000: Unexpected compiler version, expected Clang 11.0.0 or newer.`r`n#endif"
+    Assert-Rocks ((Get-RocksStlClangMinimum $stl1452) -eq 22) 'stl: _EMIT_STL_ERROR form'
+    Assert-Rocks ((Get-RocksStlClangMinimum $stl1429) -eq 11) 'stl: #error form'
     Assert-Rocks ($null -eq (Get-RocksStlClangMinimum "#if __clang_major__ < 22`n#define X")) 'stl: other comparison'
+    Assert-Rocks ($null -eq (Get-RocksStlClangMinimum "#if __clang_major__ < 22`n_EMIT_STL_ERROR(STL1001, `"x`");")) 'stl: other error'
+    # The selected toolset's real header must carry the condition; a format change would otherwise make the check silently pass.
+    $instance = Get-RocksVsInstance
+    if ($instance) {
+        $tools = Get-RocksMsvcToolsDirectory $instance
+        $header = if ($tools) { Join-Path $tools 'include\yvals_core.h' } else { '' }
+        Assert-Rocks ($header -and (Test-Path -LiteralPath $header) -and $null -ne (Get-RocksStlClangMinimum (Get-Content -LiteralPath $header -Raw))) "stl: condition found in $header"
+    }
+
     Assert-Rocks (((ConvertTo-RocksVsAdd @('A', 'B')) -join ' ') -eq '--add A --add B') 'vs: --add list'
-    Assert-Rocks ((@($BuildToolsComponents) -join ' ') -eq 'Microsoft.VisualStudio.Workload.VCTools Microsoft.VisualStudio.Component.VC.Tools.x86.x64 Microsoft.VisualStudio.Component.Windows11SDK.26100') 'vs: Build Tools components'
     $ide = @(Get-RocksVsConfigComponents)
+    Assert-Rocks (@($VcComponents | Where-Object { $ide -notcontains $_ }).Count -eq 0) 'vs: .vsconfig has every build component (an IDE install also builds)'
     Assert-Rocks ($ide -contains 'Microsoft.VisualStudio.Component.VC.Llvm.Clang' -and $ide -contains 'Microsoft.VisualStudio.Component.VC.Llvm.ClangToolset') 'vs: .vsconfig has the Clang IDE components'
+    Assert-Rocks ((Get-RocksVsRange) -match '^\[\d+\.\d+,\)$') 'vs: version range from Build/Toolchain.json'
+    $fxc = Get-RocksFxcSource
+    Assert-Rocks ($fxc.Path -like "*\bin\$($fxc.Sdk)\x64\d3dcompiler_47.dll" -and $FxcSdkComponent -like "*SDK.$((($fxc.Sdk) -split '\.')[2])") 'fxc: pinned file is the versioned copy of the SDK the wizard installs'
+    Assert-Rocks ((Get-RocksToolsetVersion 'C:\x\14.52.37025') -eq [version] '14.52.37025' -and $null -eq (Get-RocksToolsetVersion 'C:\x\latest')) 'vs: toolset directory version'
 
     Assert-Rocks ((Join-RocksPathFront 'C:\a;C:\b' 'C:\llvm\bin') -eq 'C:\llvm\bin;C:\a;C:\b') 'path: prepend'
     Assert-Rocks ((Join-RocksPathFront 'C:\a;c:\LLVM\bin\;C:\b' 'C:\llvm\bin') -eq 'C:\llvm\bin;C:\a;C:\b') 'path: other spelling moves first'
@@ -566,40 +787,61 @@ function Invoke-RocksSelfTest {
     Assert-Rocks ((ConvertTo-RocksArgument 'a"b') -eq '"a\"b"') 'argument: quote'
     Assert-Rocks ((ConvertTo-RocksArgument '') -eq '""') 'argument: empty'
 
+    # Main flow with fake steps: asks once, installs only what is missing, checks each step again before installing it, and returns the
+    # exit code of the final check.
+    $script:RocksQuiet = $true
+    try {
+        $state = @{ installs = @(); asks = 0 }
+        $ask = { $state['asks'] += 1; return 'y' }.GetNewClosure()
+        $state['A'] = $true
+        $state['B'] = $true
+        $steps = @((New-RocksFakeStep 'A' $state), (New-RocksFakeStep 'B' $state))
+        Assert-Rocks ((Invoke-RocksSetup $steps $false $false $ask) -eq 0 -and $state['asks'] -eq 0 -and $state['installs'].Count -eq 0) 'flow: all present, no question, exit 0'
+
+        $state = @{ installs = @(); asks = 0; A = $true }
+        $ask = { $state['asks'] += 1; return '' }.GetNewClosure()
+        $steps = @((New-RocksFakeStep 'A' $state), (New-RocksFakeStep 'B' $state), (New-RocksFakeStep 'C' $state))
+        $code = Invoke-RocksSetup $steps $false $false $ask
+        Assert-Rocks ($code -eq 0 -and $state['asks'] -eq 1 -and ($state['installs'] -join ',') -eq 'B,C') "flow: Enter installs only the missing items ($code, $($state['installs'] -join ','))"
+
+        $state = @{ installs = @(); asks = 0 }
+        $ask = { $state['asks'] += 1; return 'y' }.GetNewClosure()
+        $steps = @((New-RocksFakeStep 'A' $state))
+        Assert-Rocks ((Invoke-RocksSetup $steps $true $false $ask) -eq 1 -and $state['asks'] -eq 0 -and $state['installs'].Count -eq 0) 'flow: -Check installs nothing, exit 1'
+
+        $state = @{ installs = @(); asks = 0 }
+        $ask = { $state['asks'] += 1; return 'n' }.GetNewClosure()
+        $steps = @((New-RocksFakeStep 'A' $state))
+        Assert-Rocks ((Invoke-RocksSetup $steps $false $false $ask) -eq 1 -and $state['installs'].Count -eq 0) 'flow: answer n installs nothing, exit 1'
+
+        $state = @{ installs = @(); asks = 0 }
+        $ask = { throw 'no console' }
+        $steps = @((New-RocksFakeStep 'A' $state))
+        Assert-Rocks ((Invoke-RocksSetup $steps $false $false $ask) -eq 1 -and $state['installs'].Count -eq 0) 'flow: no console installs nothing, exit 1'
+
+        $state = @{ installs = @(); asks = 0 }
+        $steps = @((New-RocksFakeStep 'A' $state $true $true), (New-RocksFakeStep 'B' $state), (New-RocksFakeStep 'C' $state $false))
+        $code = Invoke-RocksSetup $steps $false $true $null
+        Assert-Rocks ($code -eq 1 -and ($state['installs'] -join ',') -eq 'A,B' -and $state['B']) 'flow: a failure or a manual item does not stop the others, exit 1'
+
+        # A step that an earlier install provides (the IDE provides the build tools) is checked again and not installed twice.
+        $state = @{ installs = @(); asks = 0 }
+        $ide = New-RocksFakeStep 'Ide' $state
+        $tools = @{ Name = 'Tools'; Check = {
+            if ($state['Ide']) { return New-RocksStatus $true 'from the IDE' }
+            return New-RocksStatus $false 'missing' { param($d) $d.State['installs'] += @('Tools') } '' @{ State = $state }
+        }.GetNewClosure() }
+        $code = Invoke-RocksSetup @($ide, $tools) $false $true $null
+        Assert-Rocks ($code -eq 0 -and ($state['installs'] -join ',') -eq 'Ide') "flow: a step provided by an earlier install is not installed ($($state['installs'] -join ','))"
+    }
+    finally { $script:RocksQuiet = $false }
+
     foreach ($failure in $failures) { Write-Host "FAIL $failure" }
     Write-Host "Setup self test: $(if ($failures.Count -eq 0) { 'PASS' } else { 'FAIL' }) ($($failures.Count) failure(s), PowerShell $($PSVersionTable.PSVersion))"
     return $failures.Count
 }
 
-# --- Main ------------------------------------------------------------------------------------------------------------------------------
-
-function Write-RocksLine([int] $Index, [int] $Count, [string] $Name, [string] $State, [string] $Detail) {
-    $color = switch ($State) { 'OK' { 'Green' } 'installed' { 'Green' } 'installing' { 'Cyan' } default { 'Yellow' } }
-    Write-Host ('[{0}/{1}] {2,-16} ' -f $Index, $Count, $Name) -NoNewline
-    Write-Host ('{0,-10}' -f $State) -ForegroundColor $color -NoNewline
-    Write-Host " $Detail"
-}
-
-function Invoke-RocksChecks($Steps) {
-    $results = @()
-    for ($index = 0; $index -lt $Steps.Count; ++$index) {
-        try { $status = & $Steps[$index].Check }
-        catch { $status = New-RocksStatus $false "check failed: $($_.Exception.Message)" }
-        $state = if ($status.Ok) { 'OK' } else { 'MISSING' }
-        Write-RocksLine ($index + 1) $Steps.Count $Steps[$index].Name $state $status.Detail
-        if (-not $status.Ok -and $status.Hint) { Write-Host "        Next: $($status.Hint)" }
-        $results += $status
-    }
-
-    return , $results
-}
-
-function Write-RocksNextStep {
-    Write-Host ''
-    Write-Host 'Setup is complete. Open a new terminal (or restart your IDE) and run:' -ForegroundColor Green
-    Write-Host "  cd `"$RocksRoot`""
-    Write-Host "  $BuildCommand"
-}
+# --- Entry -----------------------------------------------------------------------------------------------------------------------------
 
 # Explorer runs Setup.bat as Explorer -> cmd.exe -> PowerShell. Then the console window closes on exit, so wait for Enter first.
 function Exit-Rocks([int] $Code) {
@@ -615,66 +857,22 @@ function Exit-Rocks([int] $Code) {
 
 if ($SelfTest) { exit [int] ((Invoke-RocksSelfTest) -ne 0) }
 
+# With -WithIde the IDE comes first, so a new or modified IDE also provides the build tools and Build Tools is not installed next to it.
 $steps = @(
     @{ Name = 'Git'; Check = { Get-RocksGitStatus } },
     @{ Name = '.NET SDK'; Check = { Get-RocksDotnetStatus } },
-    @{ Name = 'PowerShell 7'; Check = { Get-RocksPwshStatus } },
+    @{ Name = 'PowerShell 7'; Check = { Get-RocksPwshStatus } })
+if ($WithIde) { $steps += @{ Name = 'VS IDE'; Check = { Get-RocksVsIdeStatus } } }
+$steps += @(
     @{ Name = 'C++ build tools'; Check = { Get-RocksBuildToolsStatus } },
+    @{ Name = 'FXC SDK'; Check = { Get-RocksFxcSdkStatus } },
     @{ Name = 'LLVM'; Check = { Get-RocksLlvmStatus } },
     @{ Name = 'clang-format'; Check = { Get-RocksClangFormatStatus } })
-if ($WithIde) { $steps += @{ Name = 'VS IDE'; Check = { Get-RocksVsIdeStatus } } }
 if ($Android) { $steps += @{ Name = 'Android NDK'; Check = { Get-RocksAndroidStatus } } }
+$unknown = @($Skip | Where-Object { $name = $_; -not @($steps | Where-Object { $_.Name -eq $name }) })
+if ($unknown.Count -gt 0) { Write-Host "Unknown step in -Skip: $($unknown -join ', ')"; exit 2 }
+$steps = @($steps | Where-Object { $Skip -notcontains $_.Name })
 
 Write-Host "Rocks setup for Windows ($RocksRoot)"
-$results = Invoke-RocksChecks $steps
-$pending = @(for ($index = 0; $index -lt $steps.Count; ++$index) { if (-not $results[$index].Ok) { $index } })
-if ($pending.Count -eq 0) {
-    Write-RocksNextStep
-    Exit-Rocks 0
-}
-
-if ($Check) {
-    Write-Host ''
-    Write-Host 'Some items are missing. Run Setup.bat without -Check to install them.' -ForegroundColor Yellow
-    Exit-Rocks 1
-}
-
-if (-not $Yes) {
-    Write-Host ''
-    $answer = ''
-    try { $answer = Read-Host 'Install the missing items? [Y/n]' }
-    catch { Write-Host 'Cannot ask in this session. Run Setup.bat -Yes to install without asking.'; Exit-Rocks 1 }
-    if ($answer -match '^\s*n') { Write-Host 'Nothing was installed.'; Exit-Rocks 1 }
-}
-
-Write-Host ''
-foreach ($index in $pending) {
-    $step = $steps[$index]
-    $status = $results[$index]
-    if (-not $status.Install) {
-        Write-RocksLine ($index + 1) $steps.Count $step.Name 'FAILED' "$($status.Detail). Next: $($status.Hint)"
-        continue
-    }
-
-    Write-RocksLine ($index + 1) $steps.Count $step.Name 'installing' ''
-    try {
-        & $status.Install $status.Data
-        Write-RocksLine ($index + 1) $steps.Count $step.Name 'installed' ''
-    }
-    catch {
-        $next = if ($status.Hint) { " Next: $($status.Hint)" } else { '' }
-        Write-RocksLine ($index + 1) $steps.Count $step.Name 'FAILED' ($_.Exception.Message + $next)
-    }
-}
-
-Write-Host ''
-Write-Host 'Checking again:'
-$results = Invoke-RocksChecks $steps
-if (@($results | Where-Object { -not $_.Ok }).Count -eq 0) {
-    Write-RocksNextStep
-    Exit-Rocks 0
-}
-
-Write-Host ''
-Write-Host 'Some items still need attention (see the lines above). Fix them and run Setup.bat again.' -ForegroundColor Yellow
-Exit-Rocks 1
+$ask = { return Read-Host 'Install the missing items? [Y/n]' }
+Exit-Rocks (Invoke-RocksSetup $steps ([bool] $Check) ([bool] $Yes) $ask)
