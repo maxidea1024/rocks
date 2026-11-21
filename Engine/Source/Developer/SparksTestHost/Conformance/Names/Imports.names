@@ -30,13 +30,13 @@
 2:8 decl struct Game:Tools.Tool
 == Weapons/Arrow.spark
 1:7 decl class Weapons:Arrow.Arrow
-1:15 type Rocks.ScriptComponent
+1:15 type Rocks.ScriptableComponent
 == Weapons/Bow.spark
 1:7 decl class Weapons:Bow.Bow
-1:13 type Rocks.ScriptComponent
+1:13 type Rocks.ScriptableComponent
 == Weapons/Shield.spark
 1:7 decl class Weapons:Shield.Shield
-1:16 type Rocks.ScriptComponent
+1:16 type Rocks.ScriptableComponent
 == Weapons/Sword.spark
 1:7 decl class Weapons:Sword.Sword
-1:15 type Rocks.ScriptComponent
+1:15 type Rocks.ScriptableComponent

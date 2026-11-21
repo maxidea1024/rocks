@@ -42,7 +42,8 @@ enum class CompilationStage : uint8 {
     Imports, // 위에 더해 import 해석(LC2a)
     Names,   // 위에 더해 이름 해석(LC2b)
     Types,   // 위에 더해 타입 검사(LC2c)
-    All = Types
+    Flow,    // 위에 더해 흐름·대입·미사용·상수식·필드·프로필 검사(LC2d)
+    All = Flow
 };
 
 // 모듈·패키지 번호가 없음을 나타낸다.
@@ -61,6 +62,7 @@ struct ImportResolution {
 
 namespace detail {
 class CompilationChecker;
+class FlowAnalyzer;
 class NameBinder;
 class TypeChecker;
 } // namespace detail
@@ -206,6 +208,7 @@ public:
 
 private:
     friend class detail::CompilationChecker;
+    friend class detail::FlowAnalyzer;
     friend class detail::NameBinder;
     friend class detail::TypeChecker;
 

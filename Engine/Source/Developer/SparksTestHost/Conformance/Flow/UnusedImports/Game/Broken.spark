@@ -1,0 +1,5 @@
+import Idle;
+
+fn Lost() {
+    _ = Nowhere;
+}

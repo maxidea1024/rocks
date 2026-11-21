@@ -1,0 +1,27 @@
+# Unused names and values (S0710-S0712, 3.11): unread locals, binders and loop variables; values written and never
+# read on any path (overwritten initial values, compound and partial writes, reads in the next iteration are fine;
+# unreachable writes are not reported); unread parameters, '_' only for override, open, interface and handler
+# signatures; no S0710-S0712 in a function with an unresolved name, no S0712 when the function name has a diagnostic.
+error S0712 13:17
+error S0712 27:21
+error S0712 33:15
+error S0712 39:14
+error S0712 39:26
+error S0710 51:13
+error S0710 52:13
+error S0710 53:13
+error S0710 55:13
+error S0710 61:14
+error S0710 68:14
+error S0710 76:14
+error S0710 79:17
+error S0710 82:13
+error S0711 93:9
+error S0711 103:9
+error S0711 116:13
+error S0711 172:9
+error S0711 181:9
+error S0711 190:9
+error S0317 195:13
+error S0313 198:8
+error S0712 211:8

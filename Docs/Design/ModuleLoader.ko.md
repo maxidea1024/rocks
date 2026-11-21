@@ -1,6 +1,6 @@
 # 모듈 로더 설계
 
-기준일: 2026-11-21, 개정 8. 모듈의 수명(시작·종료)과 적재를 맡는 모듈 로더를 정한다. UE 5.8 `IModuleInterface`·`FModuleManager`·로딩 단계(`ELoadingPhase`)에 해당한다.
+기준일: 2026-11-21, 개정 9. 모듈의 수명(시작·종료)과 적재를 맡는 모듈 로더를 정한다. UE 5.8 `IModuleInterface`·`FModuleManager`·로딩 단계(`ELoadingPhase`)에 해당한다.
 
 [빌드 타깃 설계](BuildTargets.ko.md) 3.8절은 Editor 타깃을 UE와 같이 모듈식(`Modular`)으로 링크하기로 정했다(BD17). 그리고 모듈 로더를 별도 스펙으로 넘기며 네 가지 계약을 요구했다(BD30).
 1. 같은 소스가 `Monolithic`·`Modular`에서 같은 순서·결과로 동작한다.
@@ -229,7 +229,7 @@ public:
 
 - **manifest 파일**: 빌드가 Modular 타깃마다 `<Target>[-<Platform>-<Configuration>].modules.json`을 공유 라이브러리와 같은 폴더에 쓴다(UE `<App>.modules` — `Programs/UnrealBuildTool/System/ModuleManifest.cs:77-89`). 키는 영어다.
   - `buildId`: `ModuleBuildId` 문자열.
-  - `modules`: 행 배열 `{ name, file, size, dependencies[], loadingPhase, onRequest }`. 의존 순서로 나열한다(JSON 객체의 키 순서는 의미가 없어 배열이다 — [빌드 타깃](BuildTargets.ko.md) BS8d1). `size`는 링크가 끝난 파일의 바이트 수다. `schema`·`engineVersion`·`toolchainFingerprint`도 싣는다(`buildId` 재사용 판정).
+  - `modules`: 행 배열 `{ name, file, size, dependencies[], loadingPhase, onRequest, executable }`. 의존 순서로 나열한다(JSON 객체의 키 순서는 의미가 없어 배열이다 — [빌드 타깃](BuildTargets.ko.md) BS8d1). `size`는 링크가 끝난 파일의 바이트 수다. `schema`·`engineVersion`·`toolchainFingerprint`도 싣는다(`buildId` 재사용 판정).
   - 모르는 키는 오류다(UE 파서도 거부한다 — `Runtime/Core/Private/Modules/ModuleManifest.cpp:101-229`).
   - manifest는 링크가 모두 성공한 뒤 원자적으로 쓴다(임시 파일 → 이름 바꾸기).
 - **manifest 위치**: 엔진 `Binaries/<Platform>/`, 게임 프로젝트 `Binaries/<Platform>/`, 켠 플러그인마다 `<Plugin>/Binaries/<Platform>/`(UE와 같다 — `LaunchEngineLoop.cpp:2541-2543`, `PluginManager.cpp:1856`). 로더는 이 폴더들의 manifest만 읽는다. 폴더를 훑어 파일을 찾지 않는다.
@@ -447,6 +447,24 @@ ML1(3.11절)으로 `PostConfigInit`·엔진 단계 모듈이 설정·로그·tra
 - trace 콘솔 명령(`TraceController::RegisterConsoleCommands`): `TraceController`가 호스트 객체(세션·설정 문맥을 함께 쥔다)라 호스트가 등록한다.
 - 핸들 단위 CVar lease: 실행 중 해제(ML6)에서 핸들 해제와 함께 정한다(3.10절 끝).
 
+### 3.13 ML4a 구현 세부 — manifest 적재(개정 9)
+
+- **API**: `ModuleLoader::TryCreateFromManifest(allocator, manifestPath, executableEntry, report)`. `manifestPath`는 절대 경로(UTF-8 — Windows 드라이브·UNC, POSIX `/`; 상대 경로는 작업 폴더에 기대므로 `Incompatible`)이고 `executableEntry`는 실행 파일 행의 진입 함수(그 실행 파일의 `RocksModuleEntry_<Name>` — 실행 파일은 export 진입점을 두지 않는다, [빌드 타깃](BuildTargets.ko.md) BS8d1)다. 실패하면 `Result` 실패(`ErrorCode`)와 함께 `report`에 코드·실패 모듈·단계·문구를 채운다(3.4절 형식). 성공하면 지금 로더와 같다(`TryCreate(allocator, table)`과 같은 표 검사·단계·묶음·동적 모듈). `report`를 쓰는 까닭: 적재 실패는 이 함수에서만 나고 호출자(Launch·시험 runner — ML4b)가 한 번 기록한다.
+- **manifest 읽기**: 파일 전체를 읽어 Core JSON(엄격)으로 해석한다. 최상위 키는 정확히 `schema`·`buildId`·`engineVersion`·`toolchainFingerprint`·`modules`이고, 행 키는 정확히 `name`·`file`·`size`·`dependencies`·`loadingPhase`·`onRequest`·`executable`이다(빠진 키·모르는 키·형식이 다른 값은 오류 — UE 파서도 모르는 키를 거부한다). `schema`는 2(행 키 `executable`을 더하며 올렸다), `buildId`는 32자 소문자 16진, 행 이름은 C 식별자, `file`은 경로 구분자·`..`·드라이브가 없는 파일 이름, `size`는 0 이상의 정수, `loadingPhase`는 단계 이름, 의존은 앞 행 이름(같은 이름 중복 없음)이다. 실행 파일 행은 하나 이하다. 위반은 `Incompatible`, 단계 `"Manifest"`, 문구에 키 경로·JSON 오류 위치다. 파일이 없으면 `NotFound`다.
+- **행 키 `executable`(빌드 타깃 BS8d1에 더함)**: 실행 파일 행을 표시한다. 그 행은 OS로 싣지 않고 `executableEntry`를 진입 함수로 쓴다. 파일 크기는 똑같이 대조한다(실행 파일과 manifest가 같은 빌드인지). `executableEntry`가 없는데 실행 파일 행이 있으면 `InvalidArgument`다.
+- **`Prepare`(MD22, 3.5절)**: 실행 파일이 아닌 행을 의존 순서로 처리한다.
+  1. 경로는 manifest 폴더 + `file`이다. 파일이 없으면 `NotFound`(단계 `"Lookup"`).
+  2. 크기가 `size`와 다르면 `Incompatible`(단계 `"Lookup"`, 두 크기를 문구에).
+  3. `platform::DynamicLibrary::Open`(절대 경로 — 의존 DLL은 같은 폴더에서만 찾는다. 절대 경로 `Open`은 정책 `shader-tool-binary-load`가 셰이더 도구 쪽에만 허용하므로 이 파일 `ModuleManifest.cpp`를 예외에 더했다). 실패하면 `OsLoadFailed`, `nativeError`·OS 문구(POSIX `dlerror`)를 담는다(단계 `"OsLoad"`).
+  4. `RocksModuleEntry`를 그 라이브러리에서 찾는다(핸들로 — 전역 조회는 모호하다). 없으면 `EntryMissing`(단계 `"Entry"`).
+  5. 불러 얻은 진입 기술의 `entryVersion`·이름이 행과 다르면 `Incompatible`(단계 `"Entry"`).
+  - 중간에 실패하면 이미 연 라이브러리를 역순으로 닫고 아무것도 만들지 않는다.
+- **`buildId`**: 모양만 검사한다. manifest 사이의 `buildId` 대조(엔진·게임·플러그인)는 manifest가 여럿이 되는 ML5에서 한다.
+- **표 저장소**: 로더가 manifest에서 만든 행 배열·이름·의존 배열·라이브러리·lease를 소유한다(정적 수명이 아니므로 로더와 같이 산다). 행의 `entry` 함수 칸은 비우고 `Prepare`가 얻은 진입 기술을 따로 넘겨 기록에 둔다(공개 `ModuleTableRow` 형식은 바꾸지 않는다). 그래서 표를 읽는 쪽은 진입 기술을 `ModuleLoader::EntryAt(index)`로 읽는다(설정 등록 `HostSettings`가 그렇게 바뀌었다 — manifest 로더의 `Table()` 행 `entry`는 null이다).
+- **report**: `requested`는 manifest 파일 이름이다(경로 전체는 문구에 — 이름 칸이 짧다). `error`는 `Incompatible`에서 할당 실패(`OutOfMemory`)·표 검사 실패(`InvalidArgument`)를 담는다.
+- **라이브러리 수명**: 로더 소멸이 모든 모듈을 내리고 수명 객체를 파괴하고 `Changed` 구독을 비운 뒤(바인딩 함수표가 모듈 라이브러리 안에 있을 수 있다) 라이브러리를 적재 역순으로 닫는다(3.7절). 실행 중 해제(ML6) 전에는 그 전에 닫지 않는다.
+- **시험**: manifest 해석·검사의 양성·음성(키 하나씩 빼기·더하기, 형식, 의존 순서, 파일 이름, 실행 파일 행, schema·buildId 모양)과 `Prepare`의 실패 경로(파일 없음, 크기 다름, 의존 DLL 없음, 진입점 없음 — Windows 시험 라이브러리 fixture는 코드가 없는 데이터 DLL이라 진입점을 부르는 성공 경로와, 앞 행을 연 뒤 뒤 행에서 실패해 여러 라이브러리를 역순으로 닫는 경로는 BS8d5의 Modular FoundationTests가 본다). 실패한 `Prepare`가 연 라이브러리를 닫는지(진입점 없음), 음성 사례마다 문구가 그 이유를 말하는지, 상대 경로 거부도 본다.
+
 ## 4. 결정 요약
 
 1. 모든 C++ 모듈은 수명 객체(`ModuleImplementation`)와 진입점 매크로를 가진다. `Startup`은 `Result<void>`를 돌려준다.
@@ -555,6 +573,7 @@ ML1(3.11절)으로 `PostConfigInit`·엔진 단계 모듈이 설정·로그·tra
 
 | 개정 | 날짜 | 내용 |
 |---|---|---|
+| 9 | 2026-11-21 | ML4a 구현 세부(3.13절): `TryCreateFromManifest`(manifest 엄격 해석·`Prepare`·report), 행 키 `executable`과 실행 파일 진입 함수, 표 저장소·라이브러리 수명, 시험 범위(성공 경로는 BS8d5) |
 | 8 | 2026-11-21 | ML4를 [빌드 타깃](BuildTargets.ko.md) BS8d와 한 묶음으로 진행한다(빌드 타깃 개정 14): ML4a(manifest 읽기·`Prepare`·report) → ML4b(실행 파일 연결 — `GeneratedModuleTable()`은 Monolithic에만, 부트 모듈 import, 시험 등록 머리). manifest 쓰기·export 진입점·강제 참조는 BS8d1이 한다. ML4 완료 기준(`Modular` FoundationTests를 로더로 실행)은 BS8d5와 같이 채운다 |
 | 7 | 2026-11-21 | [빌드 타깃](BuildTargets.ko.md) 3.9절(BD36·BD39)에 맞춰 3.8절 순환 항목의 "Engine이 `DynamicModules`로 둔 플러그인 모듈"을 지웠다. 엔진 계층 모듈은 플러그인 모듈을 동적 적재로도 참조하지 않고, 켠 플러그인 모듈은 주 실행 파일에 링크된다 |
 | 6 | 2026-11-20 | ML1 후속(3.12절): 호스트 서비스 키·매크로를 Core `Core/Module/HostServiceKey.h`로 옮김(MD18 보강), `LogSystem`·`ConfigContext`·`TraceSession`을 서비스로 선언, Sandbox가 `PostConfigInit` 전에 등록·호스트 묶음 종료 뒤 뗌, RenderBase 모듈 `Startup`이 GPU trace 채널·형을 등록하고 `Shutdown`이 풂(첫 서비스 사용처). `Engine` 서비스·핸들 단위 CVar lease는 그대로 후속 |

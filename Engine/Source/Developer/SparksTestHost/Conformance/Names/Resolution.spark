@@ -15,7 +15,7 @@ fn Twice(value: int): int {
     return value * MaxStack;
 }
 
-class DoorLogic : ScriptComponent {
+class DoorLogic : ScriptableComponent {
     var OpenAngle: float = 90.0;
     var State = DoorState.Closed;
     var Hits: Map<string, Array<HitInfo>> = [];

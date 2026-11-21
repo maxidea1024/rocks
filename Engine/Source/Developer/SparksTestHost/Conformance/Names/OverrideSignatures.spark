@@ -1,11 +1,11 @@
-class A : ScriptComponent {
+class A : ScriptableComponent {
     override fn DescribeState(detailed: bool): int { return 0; }
 }
 
-class B : ScriptComponent {
+class B : ScriptableComponent {
     override fn DescribeState(): string { return ""; }
 }
 
-class C : ScriptComponent {
+class C : ScriptableComponent {
     override fn DescribeState(detailed: Nope, more: int): string { return ""; }
 }

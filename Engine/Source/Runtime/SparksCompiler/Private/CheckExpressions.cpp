@@ -483,7 +483,15 @@ ExpressionValue TypeChecker::CheckIdentifier(const CheckContext& context, uint32
         return ExpressionValue{};
     }
 
-    const ExpressionValue value = ValueOfSymbol(context, symbol, context.thisType, true);
+    ExpressionValue value = ValueOfSymbol(context, symbol, context.thisType, true);
+    // await 뒤 상태로 읽는 객체 지역 이름은 `T?`다(3.11절).
+    if (value.kind == ExpressionValue::Kind::Typed && context.module == staleModule_ &&
+        node < staleRead_.Size() && staleRead_[node] != 0 && IsObjectType(value.type) &&
+        !IsOptional(value.type)) {
+        value.type = MakeOptional(value.type);
+        value.stale = true;
+    }
+
     if (value.kind != ExpressionValue::Kind::Function &&
         value.kind != ExpressionValue::Kind::Error &&
         RejectTypeArguments(context, compilation_.trees_[context.module].Child(node, 0),

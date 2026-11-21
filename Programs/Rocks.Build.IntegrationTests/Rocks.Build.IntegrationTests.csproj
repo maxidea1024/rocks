@@ -1,7 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- A new NuGet advisory warns but does not break the build (Docs/Design/ProjectFiles.ko.md revision 6). -->
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Rocks.Build.Cli/Rocks.Build.Cli.csproj" />
     <ProjectReference Include="../../Build/Rules/Rocks.Engine.Rules.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Evaluates generated .vcxproj files without Visual Studio (Docs/Design/ProjectFiles.ko.md section 16 V2). The MSBuild assemblies
+         come from the installed .NET SDK through the locator, so the package assemblies are not copied. -->
+    <PackageReference Include="Microsoft.Build" Version="17.14.28" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.Build.Locator" Version="1.7.8" />
   </ItemGroup>
 </Project>

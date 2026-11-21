@@ -101,6 +101,7 @@ struct BodyContext {
     bool reportContext = true; // S0321을 내는지(기반을 모르는 class는 아니다)
 };
 
+class FlowAnalyzer;
 class TypeChecker;
 
 class NameBinder final {
@@ -110,6 +111,7 @@ public:
     Result<void> Run() noexcept;
 
 private:
+    friend class FlowAnalyzer;
     friend class TypeChecker;
 
     // ---- 공통(BindSetup.cpp) ----
@@ -208,6 +210,11 @@ private:
     // Path 노드를 타입 심볼로 해석한다(못 하면 진단을 내고 NoSymbol). recordNode면 그 Path의
     // 타입도 기록한다(기반 목록·`as?`).
     uint32 ResolveTypePath(const BodyContext& context, uint32 path) noexcept;
+    // 경로를 찾기만 한다(ResolveTypePath가 그 결과로 import 사용·찾지 못함을 기록한다).
+    uint32 LookupTypePath(const BodyContext& context, uint32 path) noexcept;
+    // module에서 이름으로 찾은 심볼이 import한 모듈의 최상위 선언·별칭이면 그 import를 쓴 것으로
+    // 표시한다(3.11절 S0714).
+    void NoteUse(uint32 module, uint32 symbol) noexcept;
     bool IsTypeSymbol(uint32 symbol) const noexcept;
     void ReportUnknown(const BodyContext& context, bool type, StringView name,
                        SourceSpan span) noexcept;
@@ -246,6 +253,10 @@ private:
     Array<LocalEntry> locals_;
     Array<uint32> scopeMarks_;
     HashMap<StringView, uint32, FoldedNameHash, FoldedNameEqual> localIndex_;
+    // import마다(Compilation::imports_ 번호) 그 import의 선언을 이름으로 썼는지, 모듈마다
+    // 이름·타입을 찾지 못했는지다(3.11절 S0714와 그 연쇄 방지).
+    Array<uint8> importUsed_;
+    Array<uint8> unresolvedNames_;
     // 핵심 엔진 타입 심볼(없으면 NoSymbol)이다.
     uint32 actor_ = NoSymbol;
     uint32 component_ = NoSymbol;

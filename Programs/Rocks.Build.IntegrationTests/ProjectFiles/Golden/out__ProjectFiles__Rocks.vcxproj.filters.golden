@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Engine">
+      <UniqueIdentifier>{F2B82FAB-FB98-5471-A989-A76EDF2E83BE}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Lib">
+      <UniqueIdentifier>{0C96B27B-C0DC-5695-9165-00B52773EE30}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="$(RocksRoot)Engine\Lib\Lib.cpp">
+      <Filter>Engine\Lib</Filter>
+    </ClCompile>
+    <ClCompile Include="$(RocksRoot)Engine\Lib\Raw.c">
+      <Filter>Engine\Lib</Filter>
+    </ClCompile>
+    <None Include="$(RocksRoot)Engine\Lib\Unused.cpp">
+      <Filter>Engine\Lib</Filter>
+    </None>
+    <ClInclude Include="$(RocksRoot)Engine\Lib\Lib.h">
+      <Filter>Engine\Lib</Filter>
+    </ClInclude>
+    <ClInclude Include="$(RocksRoot)Engine\Lib\Pch.h">
+      <Filter>Engine\Lib</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>

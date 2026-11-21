@@ -7,7 +7,7 @@ struct Holder {
     var Value: Nope2 = null;
 }
 
-class Door : ScriptComponent {
+class Door : ScriptableComponent {
     event Opened(count: int);
 
     fn Fire() {

@@ -10,4 +10,10 @@
     <BaseOutputPath>$(MSBuildThisFileDirectory)../out/dotnet/bin/$(MSBuildProjectName)/</BaseOutputPath>
     <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)../out/dotnet/obj/$(MSBuildProjectName)/</BaseIntermediateOutputPath>
   </PropertyGroup>
+  <!-- Visual Studio design-time builds and restores of these projects use their own output so they never race the build tools that
+       Build/IdeBuild.ps1 prepares in out/dotnet (Docs/Design/ProjectFiles.ko.md section 6.4). -->
+  <PropertyGroup Condition="'$(BuildingInsideVisualStudio)' == 'true'">
+    <BaseOutputPath>$(MSBuildThisFileDirectory)../out/dotnet-vs/bin/$(MSBuildProjectName)/</BaseOutputPath>
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)../out/dotnet-vs/obj/$(MSBuildProjectName)/</BaseIntermediateOutputPath>
+  </PropertyGroup>
 </Project>

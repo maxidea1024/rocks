@@ -1,10 +1,14 @@
 #include <ModuleLoader/ModuleLoader.h>
 #include <ModuleLoader/ModuleStartContext.h>
 
+#include "ModuleLoaderInternal.h"
+#include "ModuleManifest.h"
+
 #include <Base/NumericLimits.h>
 #include <Core/Text/StringBuilder.h>
 #include <Platform/Atomics.h>
 #include <Platform/Clock.h>
+#include <Platform/File.h>
 #include <Platform/Fatal.h>
 
 namespace rocks {
@@ -16,24 +20,6 @@ using platform::AtomicFetchSub;
 using platform::AtomicLoad;
 using platform::AtomicStore;
 using platform::MemoryOrder;
-
-// 진입점 기호 이름을 만들 수 있는 C 식별자인지다(영문자·숫자·'_', 숫자로 시작하지 않음).
-bool IsIdentifier(StringView name) noexcept {
-    if (name.IsEmpty()) {
-        return false;
-    }
-
-    for (usize index = 0; index < name.ByteCount(); ++index) {
-        const char value = name.Data()[index];
-        const bool letter = (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z');
-        const bool digit = value >= '0' && value <= '9';
-        if (!letter && value != '_' && !(digit && index != 0)) {
-            return false;
-        }
-    }
-
-    return true;
-}
 
 // lease 계수 콜백이다. 문맥은 Record::leases의 주소다. 해제는 어느 스레드에서든 일어난다.
 void RetainModuleLease(void* context) noexcept {
@@ -47,26 +33,23 @@ void ReleaseModuleLease(void* context) noexcept {
     }
 }
 
-// report 문자열 칸 하나에 쓴다. 넘치면 잘리고 report.truncated를 켠다.
-template <usize Capacity, typename... Args>
-void WriteReportText(ModuleLoadReport& report, char (&field)[Capacity], StringView format,
-                     const Args&... args) noexcept {
-    FixedStringBuilder text{Span<char>(field)};
-    text.Clear();
-    (void)text.TryAppendFormat(format, args...);
-    if (text.Truncated()) {
-        report.truncated = true;
-    }
-}
+using detail::WriteReportName;
+using detail::WriteReportText;
 
-void WriteReportName(ModuleLoadReport& report, char (&field)[ModuleLoadReport::ModuleNameBytes],
-                     StringView name) noexcept {
-    FixedStringBuilder text{Span<char>(field)};
-    text.Clear();
-    (void)text.TryAppend(name);
-    if (text.Truncated()) {
-        report.truncated = true;
-    }
+// manifest 단계 이름이다(report.stage).
+constexpr StringView ManifestStage = "Manifest";
+
+// Windows 절대 경로(드라이브 "X:\\"·"X:/", UNC "\\\\server")나 POSIX 절대 경로("/…")인지다
+// (DynamicLibrary::Open과 같은 규칙).
+bool IsAbsolutePath(StringView path) noexcept {
+    const char* text = path.Data();
+    const usize bytes = path.ByteCount();
+    const bool drive = bytes >= 3 &&
+                       ((text[0] >= 'A' && text[0] <= 'Z') || (text[0] >= 'a' && text[0] <= 'z')) &&
+                       text[1] == ':' && (text[2] == '\\' || text[2] == '/');
+    const bool unc = bytes >= 2 && text[0] == '\\' && text[1] == '\\';
+    const bool posix = bytes >= 1 && text[0] == '/';
+    return drive || unc || posix;
 }
 
 // 단계 값의 순서 번호다(LoadingPhase 값 순서가 단계 순서다).
@@ -152,13 +135,146 @@ Result<UniquePtr<ModuleLoader>> ModuleLoader::TryCreate(Allocator& allocator,
     return Created::Success(Move(loader));
 }
 
+Result<UniquePtr<ModuleLoader>>
+ModuleLoader::TryCreateFromManifest(Allocator& allocator, StringView manifestPath,
+                                    ModuleEntryFunction executableEntry,
+                                    ModuleLoadReport& report) noexcept {
+    using Created = Result<UniquePtr<ModuleLoader>>;
+    report = ModuleLoadReport{};
+    auto failed = [&report]() noexcept {
+        ErrorCode code = ErrorCode::InvalidArgument;
+        if (report.error == ErrorCode::OutOfMemory) {
+            code = ErrorCode::OutOfMemory;
+        } else if (report.code == ModuleLoadCode::NotFound ||
+                   report.code == ModuleLoadCode::EntryMissing) {
+            code = ErrorCode::NotFound;
+        } else if (report.code == ModuleLoadCode::OsLoadFailed) {
+            code = ErrorCode::DependencyFailed;
+        }
+
+        return Created::Failure(code);
+    };
+    auto reject = [&](ModuleLoadCode code, uint32 nativeError, StringView message) noexcept {
+        report.code = code;
+        report.nativeError = nativeError;
+        WriteReportText(report, report.stage, ManifestStage);
+        WriteReportText(report, report.message, message, manifestPath);
+        return failed();
+    };
+
+    // requested는 manifest 파일 이름이다(경로 전체는 문구에 담는다 — 이름 칸이 짧다). manifest
+    // 폴더는 마지막 경로 구분자 앞이다.
+    usize separator = IndexNone;
+    for (usize index = 0; index < manifestPath.ByteCount(); ++index) {
+        if (manifestPath.Data()[index] == '/' || manifestPath.Data()[index] == '\\') {
+            separator = index;
+        }
+    }
+
+    WriteReportName(report, report.requested,
+                    separator == IndexNone ? manifestPath
+                                           : StringView(manifestPath.Data() + separator + 1,
+                                                        manifestPath.ByteCount() - separator - 1));
+    if (!IsAbsolutePath(manifestPath) || separator == IndexNone) {
+        return reject(ModuleLoadCode::Incompatible, 0,
+                      "Module manifest path {} is not an absolute file path");
+    }
+
+    // POSIX 루트 바로 아래 파일("/x.modules.json")은 폴더가 "/"다.
+    const StringView directory(manifestPath.Data(), separator == 0 ? 1 : separator);
+    StringBuilder<> path(allocator);
+    if (!path.TryAppend(manifestPath)) {
+        report.error = ErrorCode::OutOfMemory;
+        return reject(ModuleLoadCode::Incompatible, 0,
+                      "Out of memory while reading the module manifest {}");
+    }
+
+    platform::File file;
+    const platform::FileStatus opened =
+        file.Open(path.CString(), platform::FileOpenMode::ReadExisting);
+    if (!opened) {
+        return reject(opened.code == platform::FileCode::NotFound ? ModuleLoadCode::NotFound
+                                                                  : ModuleLoadCode::Incompatible,
+                      opened.nativeError, "Module manifest {} cannot be opened");
+    }
+
+    uint64 bytes = 0;
+    const platform::FileStatus sized = file.Size(bytes);
+    if (!sized || bytes > NumericLimits<usize>::Max()) {
+        return reject(ModuleLoadCode::Incompatible, sized.nativeError,
+                      "Module manifest {} size cannot be read");
+    }
+
+    Array<char> text(allocator);
+    if (!text.TryResize(static_cast<usize>(bytes))) {
+        report.error = ErrorCode::OutOfMemory;
+        return reject(ModuleLoadCode::Incompatible, 0,
+                      "Out of memory while reading the module manifest {}");
+    }
+
+    const platform::FileTransfer read = file.ReadExact(text.Data(), text.Size());
+    if (!read.status) {
+        return reject(ModuleLoadCode::Incompatible, read.status.nativeError,
+                      "Module manifest {} cannot be read");
+    }
+
+    auto data = UniquePtr<detail::ModuleManifestData>::TryMake(allocator, allocator);
+    if (!data) {
+        report.error = ErrorCode::OutOfMemory;
+        return reject(ModuleLoadCode::Incompatible, 0,
+                      "Out of memory while reading the module manifest {}");
+    }
+
+    if (!detail::ParseModuleManifest(StringView(text.Data(), text.Size()), *data.Value(), report) ||
+        !detail::PrepareModuleBinaries(directory, *data.Value(), executableEntry, report)) {
+        return failed();
+    }
+
+    auto created = UniquePtr<ModuleLoader>::TryMake(
+        allocator, CreateTag{}, allocator,
+        ModuleTable(data.Value()->rows.Data(), data.Value()->rows.Size()));
+    if (!created) {
+        report.error = created.Error();
+        return reject(ModuleLoadCode::Incompatible, 0,
+                      "Out of memory while creating the module loader for {}");
+    }
+
+    UniquePtr<ModuleLoader> loader = Move(created.Value());
+    loader->manifest_ = Move(data.Value());
+    const detail::ModuleManifestData& stored = *loader->manifest_;
+    auto initialized = loader->Initialize(
+        ModuleTable(stored.rows.Data(), stored.rows.Size()),
+        Span<const ModuleEntry* const>(stored.entries.Data(), stored.entries.Size()));
+    if (!initialized) {
+        report.error = initialized.Error();
+        (void)reject(ModuleLoadCode::Incompatible, 0,
+                     "Module manifest {} does not form a valid module table");
+        return Created::Failure(initialized.Error());
+    }
+
+    return Created::Success(Move(loader));
+}
+
+const ModuleEntry& ModuleLoader::EntryAt(usize index) const noexcept {
+    if (index >= records_.Size()) {
+        platform::Fatal("ModuleLoader::EntryAt index out of range");
+    }
+
+    return *records_[index].entry;
+}
+
 ModuleLoader::ModuleLoader(CreateTag, Allocator& allocator, ModuleTable table) noexcept
     : Changed(allocator), allocator_(&allocator), services_(allocator), records_(allocator),
       dependencies_(allocator), loaderThread_(platform::CurrentThreadId()) {
     (void)table;
 }
 
-Result<void> ModuleLoader::Initialize(ModuleTable table) noexcept {
+Result<void> ModuleLoader::Initialize(ModuleTable table,
+                                      Span<const ModuleEntry* const> resolved) noexcept {
+    if (!resolved.IsEmpty() && resolved.Size() != table.Size()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
     if (table.Size() == 0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -184,7 +300,9 @@ Result<void> ModuleLoader::Initialize(ModuleTable table) noexcept {
 
     for (usize index = 0; index < table.Size(); ++index) {
         const ModuleTableRow& row = table[index];
-        if (row.name == nullptr || row.entry == nullptr || !IsIdentifier(row.name) ||
+        const bool hasEntry =
+            resolved.IsEmpty() ? row.entry != nullptr : resolved[index] != nullptr;
+        if (row.name == nullptr || !hasEntry || !detail::IsModuleIdentifier(row.name) ||
             (row.dependencyCount != 0 && row.dependencies == nullptr)) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
@@ -194,7 +312,7 @@ Result<void> ModuleLoader::Initialize(ModuleTable table) noexcept {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
-        const ModuleEntry& entry = row.entry();
+        const ModuleEntry& entry = resolved.IsEmpty() ? row.entry() : *resolved[index];
         if (entry.entryVersion != ModuleEntryVersion || entry.name == nullptr ||
             entry.create == nullptr || StringView(entry.name) != StringView(row.name)) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -277,6 +395,11 @@ ModuleLoader::~ModuleLoader() noexcept {
             platform::Fatal("ModuleLoader destroyed while module leases are outstanding");
         }
     }
+
+    // manifest 로더는 모든 수명 객체를 파괴한 뒤에 공유 라이브러리를 적재 역순으로 닫는다(3.7절).
+    // 구독이 남아 있으면 바인딩 함수표가 닫을 라이브러리 안에 있을 수 있으므로 먼저 비운다.
+    Changed.Clear();
+    manifest_.Reset();
 }
 
 bool ModuleLoader::OnLoaderThread() const noexcept {

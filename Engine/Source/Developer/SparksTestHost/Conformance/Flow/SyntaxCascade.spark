@@ -1,0 +1,8 @@
+fn Broken() {
+    var x = 1;
+    Use(x
+}
+
+fn Use(value: int) {
+    _ = value;
+}

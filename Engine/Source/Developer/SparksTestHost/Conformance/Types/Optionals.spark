@@ -9,7 +9,7 @@ fn Valid(opt: int?, actorOpt: Actor?, flagOpt: bool?) {
         _ = actorOpt == null;
     }
 
-    let component = actorOpt?.Find<ScriptComponent>()?.Owner;
+    let component = actorOpt?.Find<ScriptableComponent>()?.Owner;
     _ = component;
     _ = flagOpt ?? false;
     _ = flagOpt != null;

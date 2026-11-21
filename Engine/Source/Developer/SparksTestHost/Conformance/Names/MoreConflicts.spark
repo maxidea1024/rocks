@@ -1,6 +1,6 @@
 const Limit: int = 1;
 
-class Door : ScriptComponent {
+class Door : ScriptableComponent {
     var Limit: int;
     fn Run(count: int) {
         if (count > 0) {
@@ -10,7 +10,7 @@ class Door : ScriptComponent {
     }
 }
 
-open class Base : ScriptComponent {
+open class Base : ScriptableComponent {
     var Speed: int;
 }
 

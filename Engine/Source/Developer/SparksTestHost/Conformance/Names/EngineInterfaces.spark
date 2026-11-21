@@ -1,11 +1,11 @@
-class Button : ScriptComponent, Pressable {
+class Button : ScriptableComponent, Pressable {
     fn Press() { }
     fn Interact(by: Actor) { }
 }
 
-class Bad : ScriptComponent, Pressable { }
+class Bad : ScriptableComponent, Pressable { }
 
-class Twice : ScriptComponent, Pressable, Interactable {
+class Twice : ScriptableComponent, Pressable, Interactable {
     fn Press() { }
     fn Interact(by: Pawn) { }
 }

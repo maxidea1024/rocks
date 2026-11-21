@@ -78,7 +78,7 @@
 61:13-61:26 Call float
 61:13-61:17 Identifier vec3
 62:25-62:31 Identifier Rocks.Actor?
-63:17-63:46 Call Rocks.ScriptComponent?
+63:17-63:50 Call Rocks.ScriptableComponent?
 63:17-63:22 Identifier Rocks.Actor
 66:21-66:28 Index Test:Main.HitInfo?
 66:21-66:25 Identifier Array<Test:Main.HitInfo>

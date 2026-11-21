@@ -1,4 +1,4 @@
-open class Base : ScriptComponent { }
+open class Base : ScriptableComponent { }
 
 class Sub : Base { fn Start() { } }
 

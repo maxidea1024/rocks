@@ -1,0 +1,8 @@
+# Unused imports (S0714, 3.11): a declaration of the module used by name in a type, a base, a call, an alias
+# member, 'as?', an enum case, a const, a type argument, or an extension event named by 'on'/'emit' uses the
+# import; unused plain and alias imports and an unused module of a dependency are reported; a module with an
+# unresolved name (Broken.spark) is not judged.
+error S0317 Game/Broken.spark 4:9
+error S0714 Game/Main.spark 3:8
+error S0714 Game/Main.spark 5:8
+error S0714 Game/Main.spark 14:8

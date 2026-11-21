@@ -379,13 +379,14 @@ public sealed record NativeModuleInput
 
     // 모듈 PCH 헤더의 경로다(Docs/Design/UnityBuildPch.ko.md 8.1절 — 루트 기준 또는 절대 경로). 있으면 이 모듈의 C++ 번역 단위가 이 헤더를
     // 미리 컴파일한 PCH를 쓴다. 소스는 이 헤더를 include하지 않는다 — 빌드가 강제 include하고, PCH 없이도(--pch off) 컴파일되어야 한다.
-    // PCH를 쓸 번역 단위가 PrivatePchMinTus보다 적으면 만들지 않는다.
+    // PCH를 쓸 수 있는 손으로 쓴 소스가 PrivatePchMinTus보다 적으면 만들지 않는다.
     public string? PrivatePchHeader { get; init; }
 
     // PCH 사용 방식이다(8.1절). 외부 라이브러리 모듈은 설정과 무관하게 쓰지 않는다.
     public PchUsage PchUsage { get; init; } = PchUsage.Auto;
 
-    // 모듈 PCH를 만드는 번역 단위 수의 하한이다(묶음 + 단독, PCH를 쓰지 않는 번역 단위 제외). 이보다 적으면 PCH를 만드는 비용이
+    // 모듈 PCH를 만드는 손으로 쓴 소스 수의 하한이다(묶음 구성원을 하나씩 센다. PCH를 쓰지 않는 소스와 리플렉션 생성 소스 제외 —
+    // 유니티 설정·IDE 계획과 무관하게 같은 결정이 나온다, Docs/Design/UnityBuildPch.ko.md 8.1절). 이보다 적으면 PCH를 만드는 비용이
     // 절약분보다 크다.
     public int PrivatePchMinTus { get; init; } = PchBuild.DefaultMinimumTranslationUnits;
 

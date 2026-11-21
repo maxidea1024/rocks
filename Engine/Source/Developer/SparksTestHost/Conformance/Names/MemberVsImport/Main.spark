@@ -1,7 +1,7 @@
 import Tools;
 import Kits as Kit;
 
-class Door : ScriptComponent {
+class Door : ScriptableComponent {
     var Helper: int;
     var Kit: int;
     var Thing: int;

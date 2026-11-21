@@ -61,11 +61,7 @@ public static class IdePlanner
         request = ModuleTables.Add(request);
         NativePlan plan = ActionGraph.Create(request);
         string output = request.OutputDirectory;
-        var compiles = plan.LogicalCompiles
-            .Where(compile => !Fingerprints.IsUnder(compile.Source, output))
-            .Select(compile => new IdeCompile(compile.Module, compile.Source, NativeAction.Resolve(compile.Arguments, [compile.Object]),
-                compile.ForcedIncludes, compile.PchHeader))
-            .ToArray();
+        IdeCompile[] compiles = Select(plan, output);
         var generated = new Dictionary<string, string>(NativeToolchains.PathComparer);
         foreach (PlannedFile file in plan.GeneratedFiles)
         {
@@ -80,5 +76,36 @@ public static class IdePlanner
                     .Select(source => Path.GetDirectoryName(source)!).Distinct(NativeToolchains.PathComparer).ToArray()))
             .ToArray();
         return new(request.Toolchain.CompilerPath, output, compiles, plan.ModuleOutputs, generated, modules);
+    }
+
+    /// <summary>
+    /// 계획에서 IDE 대상 논리 명령을 고른다: 출력 아래 소스(리플렉션 생성 소스·생성 TU·공개 헤더 검사 TU)를 뺀 손으로 쓴 소스의 명령이다.
+    /// IDE 계획과 빌드 계획(낡음 경고, Docs/Design/ProjectFiles.ko.md 9절)이 같은 필터를 쓴다.
+    /// </summary>
+    internal static IdeCompile[] Select(NativePlan plan, string output) => [.. plan.LogicalCompiles
+        .Where(compile => !Fingerprints.IsUnder(compile.Source, output))
+        .Select(compile => new IdeCompile(compile.Module, compile.Source, NativeAction.Resolve(compile.Arguments, [compile.Object]),
+            compile.ForcedIncludes, compile.PchHeader))];
+
+    // 지문 정규 텍스트의 구분자다(줄, 칸, 목록 항목).
+    private const char Line = '\n';
+
+    private const char Field = '\t';
+
+    private const char Item = '\u001f';
+
+    /// <summary>
+    /// (타깃, 구성) 하나의 낡음 지문이다(9절): 논리 명령(모듈·소스·object 경로를 뺀 인자·강제 include·PCH 헤더, 정렬)과 실행 파일 경로,
+    /// 두 도구 모음 props 내용 해시(<paramref name="toolchain"/>)의 SHA-256 16진이다. 생성기와 빌드가 같은 함수로 계산한다.
+    /// </summary>
+    public static string Fingerprint(IReadOnlyList<IdeCompile> compiles, string? executable, string toolchain)
+    {
+        // object 경로는 유니티·PCH 변형 디렉터리에 따라 달라 지문에서 뺀다.
+        string[] lines = [.. compiles.Select(compile => string.Join(Field, compile.Module, compile.Source,
+                string.Join(Item, compile.Arguments.Where(argument => !argument.StartsWith("/Fo", StringComparison.Ordinal))),
+                string.Join(Item, compile.ForcedIncludes), compile.PchHeader ?? ""))
+            .Order(StringComparer.Ordinal)];
+        string text = string.Join(Line, [toolchain, executable ?? "", .. lines]);
+        return Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text)));
     }
 }

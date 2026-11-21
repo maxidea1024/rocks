@@ -1,8 +1,8 @@
-class SoundAsset : ScriptComponent { }
+class SoundAsset : ScriptableComponent { }
 
 fn Helper(): int { return 1; }
 
-class Door : ScriptComponent {
+class Door : ScriptableComponent {
     var Health: int;
     var Helper: int;
     var WORLD: int;

@@ -5,7 +5,7 @@ class Mover : Character {
     fn Hover() { }
 }
 
-open class Base : ScriptComponent {
+open class Base : ScriptableComponent {
     var Speed: int;
     open fn Step() { }
 }

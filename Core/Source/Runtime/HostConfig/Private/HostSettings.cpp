@@ -356,8 +356,10 @@ Result<void> HostSettings::Initialize(const HostSettingsOptions& options) noexce
 
 Result<void> HostSettings::RegisterModuleSettings(ModuleLoader* modules) noexcept {
     const ModuleTable table = modules != nullptr ? modules->Table() : GeneratedModuleTable();
-    for (const ModuleTableRow& row : table) {
-        const ModuleEntry& entry = row.entry();
+    for (usize index = 0; index < table.Size(); ++index) {
+        const ModuleTableRow& row = table[index];
+        // manifest 로더(Modular)의 행은 entry 칸이 비어 있으므로 로더가 준비한 진입 기술을 쓴다.
+        const ModuleEntry& entry = modules != nullptr ? modules->EntryAt(index) : row.entry();
         if (entry.registerSettings == nullptr) {
             continue;
         }

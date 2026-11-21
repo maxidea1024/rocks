@@ -1,0 +1,13 @@
+# Core profile (S1113, 3.11): interfaces, open classes and functions, Sparks base classes and interfaces (also from a
+# full dependency), Class<T>, full-only attributes and 'on Validate()' are reported at the declaration name, base
+# path, type, '@' and handler name; plain fields and lifecycle handlers are allowed.
+error S1113 Content/Main.spark 3:11
+error S1113 Content/Main.spark 7:12
+error S1113 Content/Main.spark 8:13
+error S1113 Content/Main.spark 12:17
+error S1113 Content/Main.spark 16:15
+error S1113 Content/Main.spark 18:5
+error S1113 Content/Main.spark 21:5
+error S1113 Content/Main.spark 26:8
+error S1113 Content/Main.spark 33:14
+error S1113 Content/Main.spark 33:20

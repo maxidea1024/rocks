@@ -4,7 +4,7 @@
 3:9 type Rocks.SphereCollider
 3:31 c -> param c@3:6
 5:7 decl class Test:Main.D
-5:11 type Rocks.ScriptComponent
+5:11 type Rocks.ScriptableComponent
 6:9 decl field Test:Main.D.Owner
 6:16 type int
 7:8 decl method Test:Main.D.F

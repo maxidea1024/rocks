@@ -1,0 +1,32 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Android" />
+    <Platform Name="Windows" />
+  </Configurations>
+  <Folder Name="/Engine/">
+    <Project Path="out/ProjectFiles/Rocks.vcxproj" Id="86d8d091-0df6-5856-8369-0709e484576f">
+      <BuildType Solution="Debug|Android" Project="Android_arm64_Debug" />
+      <BuildType Solution="Release|Android" Project="Android_arm64_Release" />
+      <Platform Project="x64" />
+    </Project>
+  </Folder>
+  <Folder Name="/Programs/">
+    <Project Path="out/ProjectFiles/Programs/Tool.vcxproj" Id="6f442e56-38b1-552a-bd44-99e7b67e266a">
+      <BuildType Solution="Debug|Android" Project="Android_arm64_Debug" />
+      <BuildType Solution="Release|Android" Project="Android_arm64_Release" />
+      <Platform Project="x64" />
+    </Project>
+  </Folder>
+  <Folder Name="/Programs/Rules/">
+    <Project Path="Build/Rules/Rocks.Engine.Rules.csproj" Id="bd40a00b-474d-55ab-89f1-33500a37ec1a">
+      <BuildType Project="Debug" />
+      <Build Project="false" />
+    </Project>
+  </Folder>
+  <Folder Name="/Programs/Tools/">
+    <Project Path="Programs/Rocks.Build/Rocks.Build.csproj" Id="75c0712c-8b05-509c-9694-37dfcaf5e37a">
+      <BuildType Project="Debug" />
+      <Build Project="false" />
+    </Project>
+  </Folder>
+</Solution>

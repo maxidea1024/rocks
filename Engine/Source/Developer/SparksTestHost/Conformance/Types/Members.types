@@ -120,7 +120,7 @@
 79:9-79:27 Member vec3?
 79:9-79:17 Identifier Rocks.Actor?
 80:5-80:13 Identifier Rocks.Actor?
-81:9-81:42 Call Rocks.ScriptComponent?
+81:9-81:46 Call Rocks.ScriptableComponent?
 81:9-81:17 Identifier Rocks.Actor?
 82:9-82:24 Member int?
 82:9-82:16 Identifier string?

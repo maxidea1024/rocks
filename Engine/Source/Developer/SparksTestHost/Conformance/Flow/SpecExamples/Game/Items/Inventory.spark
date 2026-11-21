@@ -1,0 +1,7 @@
+class Inventory : ScriptableComponent {
+    var Held: TagSet;
+
+    fn Contains(tag: Tag): bool {
+        return Held.Has(tag);
+    }
+}

@@ -762,7 +762,7 @@ void NameBinder::ResolveBases(uint32 module, uint32 classSymbol, uint32 list) no
                        message.View(),
                        "The first base is an engine type that scripts may extend (or an open "
                        "class), and the others are interfaces.",
-                       "Fix the base list, as in 'class Door : ScriptComponent'.");
+                       "Fix the base list, as in 'class Door : ScriptableComponent'.");
             }
 
             continue;

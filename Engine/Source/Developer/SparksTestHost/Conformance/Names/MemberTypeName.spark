@@ -1,6 +1,6 @@
-class Health : ScriptComponent { }
+class Health : ScriptableComponent { }
 
-class Fighter : ScriptComponent {
+class Fighter : ScriptableComponent {
     var Health: Health?;
     var SoundAsset: int;
     var HealthComp: Health?;

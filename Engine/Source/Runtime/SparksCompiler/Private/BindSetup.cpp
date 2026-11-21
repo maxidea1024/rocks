@@ -27,7 +27,7 @@ NameBinder::NameBinder(Compilation& compilation, DiagnosticList& diagnostics) no
     : compilation_(compilation), diagnostics_(diagnostics), allocator_(*compilation.allocator_),
       names_(allocator_), foldedNames_(allocator_), moduleStates_(allocator_),
       packageNames_(allocator_), locals_(allocator_), scopeMarks_(allocator_),
-      localIndex_(allocator_) {
+      localIndex_(allocator_), importUsed_(allocator_), unresolvedNames_(allocator_) {
 }
 
 Result<void> NameBinder::Run() noexcept {
@@ -80,6 +80,22 @@ Result<void> NameBinder::Run() noexcept {
         if (bound) {
             total += c.trees_[module].NodeCount();
         }
+    }
+
+    if (auto resized = importUsed_.TryResize(c.imports_.Size()); !resized) {
+        return resized;
+    }
+
+    if (auto resized = unresolvedNames_.TryResize(moduleCount); !resized) {
+        return resized;
+    }
+
+    for (uint8& used : importUsed_) {
+        used = 0;
+    }
+
+    for (uint8& unresolved : unresolvedNames_) {
+        unresolved = 0;
     }
 
     DeclareLanguageNames();

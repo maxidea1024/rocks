@@ -7,7 +7,7 @@ fn Valid(softs: Array<Soft<DataAsset>>, a: Actor) {
     let found = Assets.Find<DataAsset>("/Game/Data/Rules");
     let all = Assets.LoadAll<DataAsset>(softs);
     let cvar = CVars.Find<float>("r.Scale");
-    let component = a.Find<ScriptComponent>();
+    let component = a.Find<ScriptableComponent>();
     _ = rules.Speed; _ = found; _ = all; _ = cvar; _ = component;
 }
 

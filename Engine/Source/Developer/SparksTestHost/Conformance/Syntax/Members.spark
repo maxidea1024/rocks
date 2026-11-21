@@ -1,4 +1,4 @@
-class Door : ScriptComponent {
+class Door : ScriptableComponent {
     @save var hp: int = 100;
     let id = 1;
     var timer: Timer?;

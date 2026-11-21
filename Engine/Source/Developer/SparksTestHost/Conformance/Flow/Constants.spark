@@ -1,0 +1,59 @@
+enum Mode { A, B }
+
+struct Pair {
+    var Left: int = 0;
+}
+
+const Base: int = 2;
+const Scaled: int = Base * 3 + -1;
+const Ratio: float = Math.Radians(90.0);
+const Name: string = @"door";
+const Text2: string = "plain";
+const Kind: Mode = Mode.B;
+const Spot: vec3 = vec3(1.0, 2.0, 3.0);
+const Turn: Rotator = Rotator(Yaw: 90.0);
+const Flag: bool = Base > 1 && !false;
+const Label: Tag = Tag("Status.Fire");
+const Narrow: int8 = int8(Base);
+const Angle2: float = Math.Degrees(1.0);
+const Spin: quat = quat(0.0, 0.0, 0.0, 1.0);
+const Tint: Color = Color(R: 1.0, G: 0.5, B: 0.0, A: 1.0);
+const Place: Transform = Transform(Location: vec3(1.0, 0.0, 0.0));
+const Timing: Clock = Clock.Game;
+const Failure: Error = Error.Busy;
+const Channel: CollisionChannel = CollisionChannel.Camera;
+
+const Loop1: int = Loop2 + 1;
+const Loop2: int = Loop1 + 1;
+const Self: int = Self;
+const Twice: int = Double(2);
+const Interpolated: string = "${Base}";
+const Grouped: Pair = Pair(Left: 1);
+const Maybe: int? = null;
+const Numbers: Array<int> = [1, 2];
+const UsesLoop: int = Loop1 + 1;
+
+fn Double(value: int): int {
+    return value * 2;
+}
+
+class Door : ScriptableComponent {
+    var Count = 0;
+    var Angle: float = Math.Radians(45.0) * 2.0;
+    var Items: Array<int> = [1, Base];
+    let Range = SphereCollider(Radius: 1.0);
+    var Stamp = Double(1);
+    var Copy = Count;
+    var Where = Owner.Location;
+    var Table: Map<string, int> = ["a": 1, "b": Base];
+    var Pairs: Array<SphereCollider> = [SphereCollider(Radius: 1.0)];
+    let Wrapped = (SphereCollider(Radius: 1.0));
+
+    fn Use(i: int) {
+        switch (i) {
+            case UsesLoop: { }
+            case Twice: { }
+            default: { }
+        }
+    }
+}

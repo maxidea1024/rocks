@@ -5,11 +5,11 @@ interface Usable {
     fn USE();
 }
 
-class Door : ScriptComponent, Usable {
+class Door : ScriptableComponent, Usable {
     fn Use() { }
 }
 
-open class Base : ScriptComponent {
+open class Base : ScriptableComponent {
     open fn Run(x: int) { }
 }
 

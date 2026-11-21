@@ -51,7 +51,7 @@ UE의 BP 클래스는 코드(이벤트 그래프), 컴포넌트 구성(SCS), 기
 | UE에서 BP로 하는 일 | Rocks 대응 | 근거 |
 |---|---|---|
 | BP Actor 클래스를 레벨에 끌어다 배치 | prefab 에셋 배치(`PrefabPlacement`) 또는 C++·Sparks Actor 클래스 배치(클래스 원형 = default subobject) | PF D1·D3 |
-| Actor BP의 BeginPlay·Overlap 등 이벤트 그래프 | Sparks `ScriptComponent` 또는 Actor 파생 클래스의 `on Start()`·`on TriggerEnter(...)` | SL 5절 |
+| Actor BP의 BeginPlay·Overlap 등 이벤트 그래프 | Sparks `ScriptableComponent` 또는 Actor 파생 클래스의 `on Start()`·`on TriggerEnter(...)` | SL 5절 |
 | BP 변수의 Details 편집, 다른 Actor 지정 | `@edit` 필드, `@edit var Target: Door?` | SL 4.3절 |
 | GameMode·GameInstance BP의 게임 전체 처리 | `WorldService`(manifest `services`), 엔진 GameDirector·GameState 등 | SL 3.4절, ER 2절 |
 | Widget Blueprint 그래프 | WidgetAsset + C++·Sparks `WidgetController` | UT |
@@ -107,7 +107,7 @@ UE는 LSA를 순서에서 특별 취급하지 않는다.
 
 | 기반 타입 | 어디에 붙나 | 몇 개 | 쓰는 곳 | UE 대응 |
 |---|---|---|---|---|
-| `ScriptComponent` | Actor 하나 — 직접 배치한 Actor, prefab, Sparks Actor 클래스의 `let` 필드 | Actor마다 여러 개 | 재사용하는 동작: 문 여닫기, 체력, 줍기 | ActorComponent BP |
+| `ScriptableComponent` | Actor 하나 — 직접 배치한 Actor, prefab, Sparks Actor 클래스의 `let` 필드 | Actor마다 여러 개 | 재사용하는 동작: 문 여닫기, 체력, 줍기 | ActorComponent BP |
 | Actor 파생(`class Door : Actor`) | 클래스 자체가 Actor. 콘텐츠에서 끌어다 배치, `World.Spawn` | 배치·생성한 만큼 | 그 자체로 의미 있는 물체: 캐릭터, 문, 엘리베이터 | Actor BP 클래스 |
 | `WorldService` | World. 패키지 manifest `services`에 등록 | World마다 1 | 게임 전체 상태: 점수, 퀘스트 진행 | GameMode·GameInstance BP 일부 |
 | `LevelScript` | Level. 레벨마다 숨은 Actor 하나 | Level마다 0 또는 1 | 그 레벨에만 있는 연출: 시작 컷씬, 특정 문과 트리거 연결 | Level Blueprint |
@@ -115,7 +115,7 @@ UE는 LSA를 순서에서 특별 취급하지 않는다.
 
 ### 3.2 편집기에서 연결하는 순서
 
-1. **스크립트 만들기.** 콘텐츠 브라우저의 "새 Sparks 스크립트"에서 기반 타입(`ScriptComponent`, Actor 등)을 고르면 패키지 안에 `.spark` 파일이 생긴다. 파일 경로가 곧 import 경로다. 편집은 VS Code와 Sparks 언어 서버(자동 완성·진단)로 하고, 저장하면 증분 컴파일된다(SL 12·13절). LevelScript는 "레벨 스크립트 열기" 명령이 만든다(4.8절).
+1. **스크립트 만들기.** 콘텐츠 브라우저의 "새 Sparks 스크립트"에서 기반 타입(`ScriptableComponent`, Actor 등)을 고르면 패키지 안에 `.spark` 파일이 생긴다. 파일 경로가 곧 import 경로다. 편집은 VS Code와 Sparks 언어 서버(자동 완성·진단)로 하고, 저장하면 증분 컴파일된다(SL 12·13절). LevelScript는 "레벨 스크립트 열기" 명령이 만든다(4.8절).
 2. **Actor에 붙이기 — 세 가지 경로.**
    - (A) 레벨에 직접 배치한 Actor: Actor를 고르고 Details의 "컴포넌트 추가"에서 Sparks 클래스를 고른다. 그 Actor의 `components`에 들어가 레벨과 함께 저장된다(LD15).
    - (B) prefab: prefab 편집기에서 추가하면 그 prefab의 모든 배치가 받는다. 배치 하나에만 추가하면 instance override의 "노드 추가" 항목이 된다(PF 3.5절, PF4 선행, LD15).
@@ -171,14 +171,14 @@ class Door : Actor {
 }
 ~~~
 
-(가) 트리거 Actor에 붙인 component — 재사용하는 동작에 맞다. 트리거 Actor를 고르고 "컴포넌트 추가"로 붙인 뒤 `Target`에 문을 지정한다. 물리 hook은 `ScriptComponent`에도 전달된다(SL 2.4·5.1절).
+(가) 트리거 Actor에 붙인 component — 재사용하는 동작에 맞다. 트리거 Actor를 고르고 "컴포넌트 추가"로 붙인 뒤 `Target`에 문을 지정한다. 물리 hook은 `ScriptableComponent`에도 전달된다(SL 2.4·5.1절).
 
 ~~~text
 // Props/OpenDoorOnEnter.spark
 import Props.Door;
 import Characters.PlayerCharacter;
 
-class OpenDoorOnEnter : ScriptComponent {
+class OpenDoorOnEnter : ScriptableComponent {
     @edit var Target: Door?;   // Details에서 지정
 
     on TriggerEnter(other: Actor) {             // 인자는 앞에서부터 필요한 만큼(SL 5.2절)
@@ -250,7 +250,7 @@ Result<ObjectHandle> World::SetLevelScript(ObjectHandle level, ClassRef<LevelScr
 
 - **`levelScript`는 ReadOnly PROPERTY다**(ER 4.6절 — World 필드는 모두 ReadOnly, 로드의 staged 쓰기만 허용). 값은 World API `World::SetLevelScript`로만 바꾼다. 이름은 ER 4.6절의 `SetRootComponent`·`SetRelativeTransform`과 같은 꼴이다. UE는 `ULevel::RegenerateLevelScriptActor`가 `SpawnActor`로 새 LSA를 만들고 옛 것을 지운다(`ENG/Private/Level.cpp:5095-5141`). Rocks도 "클래스를 주면 World가 만들고 가리킨다"는 같은 모양이다. 게임 World에서 부르면 `Unsupported`다(LevelScript는 레벨 데이터다).
 - `World::SpawnActor`·`SpawnPrefab`은 LevelScript 파생 클래스를 `InvalidArgument`(진단 `LevelScriptSpawnRejected`)로 거부한다. `NotPlaceable` 자체는 편집기 배치 목록 표지일 뿐 실행 중 spawn을 막지 않으므로(UE와 같다) LevelScript의 "레벨당 0 또는 1"(LD5)을 지키려고 World가 따로 막는다.
-- **Sparks에서는** `class Stage1 : LevelScript`로 쓴다. Actor 파생이므로 문맥 이름은 `World`·`Session`·`Input`·`Time`이고 자기 자신은 `this`다. `Owner`는 없다(SL 3.4절). hook·`@edit`·`@save`·`@net`·`let` component를 일반 Actor와 똑같이 쓴다. 로직이 커지면 `let`으로 `ScriptComponent` 여러 개에 나눈다(LD5).
+- **Sparks에서는** `class Stage1 : LevelScript`로 쓴다. Actor 파생이므로 문맥 이름은 `World`·`Session`·`Input`·`Time`이고 자기 자신은 `this`다. `Owner`는 없다(SL 3.4절). hook·`@edit`·`@save`·`@net`·`let` component를 일반 Actor와 똑같이 쓴다. 로직이 커지면 `let`으로 `ScriptableComponent` 여러 개에 나눈다(LD5).
 - **core 프로필에 포함한다**(LD13). `LevelScript`는 SL 3.7절의 핵심 엔진 타입(언어 버전 1에 고정)이다.
 - **한 클래스를 여러 레벨이 쓸 수 있다**(LD19). 레벨마다 다른 값은 `@edit` 필드로 준다.
 - **Outliner·Details**: LevelScript 타입은 Outliner의 일반 Actor 줄에 보이지 않고 Level마다 "레벨 스크립트" 항목 하나로만 노출된다. 그 항목을 고르면 Details에서 `@edit` 값을 편집한다. 이름표 편집·복사·붙여넣기·복제·삭제·이동 명령은 받지 않는다(제거는 "레벨 스크립트 제거" = `SetLevelScript(level, null)`). 새 CLASS 지정자를 만들지 않고 편집기 규칙으로 둔다(UE는 `bEditable = false`·`bActorLabelEditable = false` — 2.2절). 콘텐츠 배치 목록에서 빠지는 것은 UT 7.3절 (e) `NotPlaceable`이 맡는다(LD3).
@@ -411,7 +411,7 @@ Levels/Stage1.spark:12:5: error S0801: A LevelScript cannot declare physics hook
 |---|---|
 | **(가) 레벨마다 숨은 Actor 하나 — 확정** | tick·`@net`·RPC·`let` component·hook·저장·핫 리로드 R3를 Actor 경로 그대로 쓴다. 배치 불가는 UT 7.3절 (e) CLASS 지정자 `NotPlaceable`을 재사용하고(UD15 중 이 지정자만 이 결정으로 확정), Outliner 숨김은 새 지정자 없이 편집기 규칙으로 둔다(4.1절). 레벨마다 Actor가 하나 늘지만 무시할 수준이다 |
 | (나) Level이 소유하는 Actor 아닌 Object(WorldService식) | tick 등록·복제·저장·hook 호스트를 새로 만들어야 한다. Transform이 없는 점은 깔끔하지만 component를 붙일 수 없어 로직을 나눌 방법이 줄어든다 |
-| (다) 새 타입 없이 관례만(빈 Actor + ScriptComponent, Unity식) | 엔진·언어 변경이 없다. 대신 레벨 로직이 어디 있는지 정해진 곳이 없고, 여러 개로 흩어지며, 다른 Actor보다 늦게 활성화된다는 순서 보장도 없다 |
+| (다) 새 타입 없이 관례만(빈 Actor + ScriptableComponent, Unity식) | 엔진·언어 변경이 없다. 대신 레벨 로직이 어디 있는지 정해진 곳이 없고, 여러 개로 흩어지며, 다른 Actor보다 늦게 활성화된다는 순서 보장도 없다 |
 
 **LD4. Level과 어떻게 이어 저장할까**
 
@@ -425,7 +425,7 @@ Levels/Stage1.spark:12:5: error S0801: A LevelScript cannot declare physics hook
 
 | 선택지 | 부수 효과 |
 |---|---|
-| **(가) 0 또는 1 — 확정** | 찾기 쉽고 순서가 결정적이다. 로직이 커지면 LevelScript의 `let` ScriptComponent로 나눈다. 저장과 cooked 로드 모두 검증한다(SL SD7, 4.2절). UE는 감지·오류 로그·편집기 복구뿐이고 저장을 막지 않으므로(2.2절) Rocks가 더 엄격하다. 실행 중 spawn으로 둘째가 생기지 않게 World가 LevelScript 파생 클래스의 spawn을 거부한다 |
+| **(가) 0 또는 1 — 확정** | 찾기 쉽고 순서가 결정적이다. 로직이 커지면 LevelScript의 `let` ScriptableComponent로 나눈다. 저장과 cooked 로드 모두 검증한다(SL SD7, 4.2절). UE는 감지·오류 로그·편집기 복구뿐이고 저장을 막지 않으므로(2.2절) Rocks가 더 엄격하다. 실행 중 spawn으로 둘째가 생기지 않게 World가 LevelScript 파생 클래스의 spawn을 거부한다 |
 | (나) 여러 개 목록 | 스크립트끼리의 시작 순서와 서로 참조하는 규칙을 따로 정해야 한다. 협업 때 파일이 나뉘는 장점은 (가)의 component 분할로도 얻는다 |
 
 **LD6. 무엇을 참조할 수 있나**
@@ -492,7 +492,7 @@ Levels/Stage1.spark:12:5: error S0801: A LevelScript cannot declare physics hook
 | **(가) "레벨 스크립트 열기"·"참조 추가"·"이벤트 추가" 명령(4.8절) — 확정** | UE의 레벨 BP 사용 흐름에 가장 가깝다. 생성 경로 `<패키지>/Levels/<레벨 경로 이름>.spark`와 이름 변환·충돌 규칙을 4.8절에 정했다. 편집기와 언어 서버 사이의 workspace edit 명령 채널을 SL 13절에 더하고, 템플릿을 EIP 22.3절 기본 카탈로그에 등록한다 |
 | (나) 수동 작성·지정만 | 추가 작업이 없다. 대신 비프로그래머에게 파일 만들기·클래스 이름·필드 선언이 진입 장벽이 된다 |
 
-**LD15. 배치된 Actor에 편집기에서 ScriptComponent를 바로 붙일 수 있나**
+**LD15. 배치된 Actor에 편집기에서 ScriptableComponent를 바로 붙일 수 있나**
 
 | 선택지 | 부수 효과 |
 |---|---|
@@ -603,6 +603,6 @@ Levels/Stage1.spark:12:5: error S0801: A LevelScript cannot declare physics hook
 - 개정 1(2026-11-20): 리뷰어 1명의 원문·UE 소스 대조와 사용자 결정(모든 항목 권장안)을 반영해 정본으로 만들었다.
   - 사실 정정: Prefab 기준 판은 개정 4(이번에 5). 진단 등록처는 AS 4.6절(이름 코드)과 SL 8.1절 S 대역이며 CompilerDiagnostics는 고치지 않는다. 배치 불가 표지는 RCM이 아니라 UT 7.3절 (e) `NotPlaceable` 재사용. 2.1절 표의 "엔진 MatchRules" → GameDirector(ER 2절). 레벨 로드 순서는 spawn 묶음 규칙이 아니라 Actor마다 `FinishSpawning`(ER 7.3절·4.6절 편입 6항)으로 3.4·4.3절을 고쳤다. 같은 Actor component 찾기는 `Find<T>()`(Actor 파생에는 `Owner`가 없다).
   - UE 인용 정정(2.2·2.3절): 같은 레벨 제한의 근거는 `OnGraphEditorDropActor`(BlueprintEditor.cpp:4081-4092), `FixLevelScriptActorBindings`는 8491-8545행이며 "편집기 원본 LSA에서만 다시 묶는다", Level.cpp:5064-5071은 `RepairLevelScript`의 감지·오류 로그이고 복구는 5078행·편집기 World에서만, 생성자 감지(LevelScriptActor.cpp:35-46), UE는 저장을 거부하지 않는다, `RemoteEvent`는 64-89행, Level Instance는 LSA를 허용하고 break만 막는다, `bAlwaysRelevant`(:33), `LevelScriptActorClass`(Engine.h:875). UE BeginPlay 순서는 LSA를 특별 취급하지 않는다(2.3절).
-  - Sparks 이름 확인: `Class<T>`(full)·C++ `ClassRef<Base>`, `HasAuthority`·`Owner.HasAuthority`·`@authorityOnly`, 물리 hook 인자, ScriptComponent도 물리 hook을 받는다, hook 이름은 멤버 이름 금지라 이벤트는 과거형.
+  - Sparks 이름 확인: `Class<T>`(full)·C++ `ClassRef<Base>`, `HasAuthority`·`Owner.HasAuthority`·`@authorityOnly`, 물리 hook 인자, ScriptableComponent도 물리 hook을 받는다, hook 이름은 멤버 이름 금지라 이벤트는 과거형.
   - 새 결정: LD16(파괴와 간선), LD17(펼친 노드 참조 — PF D22), LD18(물리 금지), LD19(클래스 공유), LD20(공통 기반·설정). LD8은 `FinishSpawning`·시작 큐 기준으로 다시 썼다.
   - 이 문서가 정한 세부: World API 이름 `World::SetLevelScript`(ER 4.6절 `Set…` 꼴, UE `RegenerateLevelScriptActor`처럼 클래스를 받아 World가 만든다), LevelScript 파생 클래스의 spawn 거부, 생성 경로의 이름 변환·충돌 규칙(4.8절), 언어 서버 명령 이름, S 코드 S0413·S0801·S0802, 진단 이름 `LevelScriptCollider`·`LevelScriptSpawnRejected`·`LevelScriptDestroyRejected`·`PrefabPlacementReferenceOrphaned`, 프로젝트 설정 이름 `DefaultLevelScriptClass`.

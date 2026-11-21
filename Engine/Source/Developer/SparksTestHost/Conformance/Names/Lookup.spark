@@ -2,7 +2,7 @@ struct SphereCollider { }
 
 fn G(c: SphereCollider) { _ = c; }
 
-class D : ScriptComponent {
+class D : ScriptableComponent {
     var Owner: int;
     fn F() {
         _ = Owner;
