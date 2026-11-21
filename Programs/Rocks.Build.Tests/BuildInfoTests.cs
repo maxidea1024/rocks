@@ -243,6 +243,14 @@ internal static class BuildInfoTests
         Check(!ToolchainCheck.Verify(NativePlatform.Windows, "clang version 22.1.8 (0123456789abcdef0123456789abcdef01234567)", Stl1452),
             "a fork or distribution build with the same number is unverified");
         Check(!ToolchainCheck.Verify(NativePlatform.Windows, "clang version 23.1.0", Stl1452), "a newer major is unverified, not rejected");
+        // 공개 헤더 검사의 -Wunique-object-duplication은 Windows 대상의 LLVM Clang 21부터다(Docs/Design/BuildTargets.ko.md 3.8절 BS8c). ELF·Mach-O
+        // 대상과 Apple clang에서는 켜지 않는다.
+        Check(ToolchainCheck.SupportsUniqueObjectDuplication(NativePlatform.Windows, "clang version 22.1.8 (ca7933e47d3a3451d81e72ac174dcb5aa28b59d1)") &&
+            ToolchainCheck.SupportsUniqueObjectDuplication(NativePlatform.Windows, "clang version 21.1.6") &&
+            !ToolchainCheck.SupportsUniqueObjectDuplication(NativePlatform.Windows, "clang version 20.1.8") &&
+            !ToolchainCheck.SupportsUniqueObjectDuplication(NativePlatform.Android, "clang version 21.0.0") &&
+            !ToolchainCheck.SupportsUniqueObjectDuplication(NativePlatform.MacOS, "Apple clang version 17.0.0 (clang-1700.0.13.5)") &&
+            !ToolchainCheck.SupportsUniqueObjectDuplication(NativePlatform.Windows, ""), "unique object duplication diagnostic by target and compiler");
         Check(!ToolchainCheck.Verify(NativePlatform.MacOS, "Homebrew clang version 22.1.8", null), "Homebrew LLVM above the upstream minimum is unverified, not rejected");
         Check(!ToolchainCheck.Verify(NativePlatform.Android, "Android (13065274, based on r547379) clang version 20.0.0 (b718bcaf8c198c82f3021447d943401e3ab5bd54)", null),
             "Android has a minimum only (no CI), so NDK clang is unverified");

@@ -324,6 +324,30 @@ internal static class InputValidation
 
         ValidateDynamicModules(modules, byFolded);
         ValidatePluginModules(modules, byFolded);
+        ValidateGlobalStateConsumers(modules);
+    }
+
+    // 프로세스 전역 상태가 있는 서드파티(NativeModuleInput.HasGlobalState — Docs/Design/BuildTargets.ko.md 3.8절 BD29·BS8c)는 직접 의존하는
+    // 모듈이 하나여야 한다. Modular에서 서드파티는 직접 소비 모듈의 공유 라이브러리마다 링크되므로 둘이면 상태가 두 벌이 된다(Monolithic에서도
+    // 같은 규칙으로 막아 Editor 빌드에서만 드러나지 않게 한다). 소비 모듈 이름을 모두 알린다. 표지는 서드파티 모듈만 가질 수 있다(Rocks 모듈의
+    // 상태는 소유 모듈 .cpp에 두고 API로 노출한다).
+    private static void ValidateGlobalStateConsumers(IReadOnlyList<NativeModuleInput> modules)
+    {
+        foreach (NativeModuleInput library in modules.Where(module => module.HasGlobalState))
+        {
+            if (!library.ThirdParty)
+            {
+                throw new ArgumentException($"Module {library.Name}: HasGlobalState is only for a third-party module (ThirdParty.json globalState).");
+            }
+
+            string[] consumers = modules.Where(module => module.AllDependencies.Contains(library.Name, StringComparer.OrdinalIgnoreCase))
+                .Select(module => module.Name).Order(StringComparer.Ordinal).ToArray();
+            if (consumers.Length > 1)
+            {
+                throw new ArgumentException($"Module {library.Name} has process-wide state (ThirdParty.json globalState), so only one module may " +
+                    $"depend on it directly; found {string.Join(", ", consumers)}. Route the others through the owning module's API.");
+            }
+        }
     }
 
     // 실행 파일에 링크할 켠 플러그인 모듈 목록(NativeModuleInput.PluginModules — Docs/Design/BuildTargets.ko.md 3.9절 BD36)이다. 빌드가

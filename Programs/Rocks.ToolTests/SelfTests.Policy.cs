@@ -935,6 +935,38 @@ internal static partial class SelfTests
                 temporary.Write(lookalike, "#pragma once\n");
             }
         });
+        // 공개 헤더 정적 저장소(Docs/Design/BuildTargets.ko.md 3.8절 BD29·BS8c): 엔진 소유 모듈의 Public/ 헤더(엔진 플러그인 모듈 포함)에는
+        // thread_local을 두지 않는다 — 정의뿐 아니라 extern 선언·static 데이터 멤버 선언도 거부한다.
+        suite.Add("Policy.PublicHeaderRejectsThreadLocal", () =>
+        {
+            using TemporaryDirectory temporary = new();
+            HashSet<(string Path, int Line)> Check()
+            {
+                var failures = PolicyChecks.PublicHeaderStaticStorage(temporary.Root);
+                Verify.That(failures.All(failure => failure.Rule == "public-header-static-storage"), "rule name");
+                return failures.Select(failure => (failure.Path, failure.Line)).ToHashSet();
+            }
+
+            // 통과: Private 헤더·소스, 모듈 시험, 서드파티 그룹, 공개 헤더의 주석·문자열 속 언급, 이름이 비슷한 식별자.
+            temporary.Write("Core/Source/Runtime/Probe/Private/ProbeState.h", "#pragma once\ninline thread_local int depth = 0;\n");
+            temporary.Write("Core/Source/Runtime/Probe/Private/Probe.cpp", "thread_local int depth = 0;\n");
+            temporary.Write("Core/Source/Runtime/Probe/Tests/ProbeTests.cpp", "thread_local int depth = 0;\n");
+            temporary.Write("Core/Source/ThirdParty/Fake/Public/Fake.h", "#pragma once\nextern thread_local int fakeDepth;\n");
+            temporary.Write("Core/Source/Runtime/Probe/Public/Probe/Clean.h",
+                "#pragma once\n// thread_local is not allowed here\n/* thread_local */\nconst char* text = \"thread_local\";\nint thread_locality = 0;\n");
+            Verify.That(Check().Count == 0, "allowed uses were rejected");
+            // 위반: inline 정의, extern 선언, static 데이터 멤버 선언, 엔진 플러그인 모듈의 공개 헤더.
+            temporary.Write("Core/Source/Runtime/Probe/Public/Probe/Bad.h",
+                "#pragma once\ninline thread_local int depth = 0;\nextern thread_local int count;\nstruct S {\n    static thread_local int* active;\n};\n");
+            temporary.Write("Engine/Plugins/Importers/Fake/Source/FakeImporter/Public/FakeImporter/Bad.h", "#pragma once\nextern thread_local bool busy;\n");
+            HashSet<(string, int)> expected =
+            [
+                ("Core/Source/Runtime/Probe/Public/Probe/Bad.h", 2), ("Core/Source/Runtime/Probe/Public/Probe/Bad.h", 3),
+                ("Core/Source/Runtime/Probe/Public/Probe/Bad.h", 5),
+                ("Engine/Plugins/Importers/Fake/Source/FakeImporter/Public/FakeImporter/Bad.h", 2)
+            ];
+            Verify.That(Check().SetEquals(expected), "thread_local in public headers: " + string.Join(", ", Check()));
+        });
         // placement new 헤더(Docs/Design/UnityBuildPch.ko.md 8.4절): 시험 소스 밖에서는 <new> 대신 <Base/PlacementNew.h>를 쓴다. MSVC
         // 런타임 헤더 <vcruntime_new.h>는 Base/PlacementNew.h만 include한다.
         suite.Add("Policy.PlacementNewHeaderReplacesNew", () =>

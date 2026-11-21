@@ -69,7 +69,9 @@ struct TestHookAssetHooks {
     void* context = nullptr;
 };
 
-inline TestHookAssetHooks testHookAssetHooks;
+// 지금 hook이다. 저장소는 Private/FixtureState.cpp다(공개 헤더에 쓰기 가능한 정적 저장소를 두지
+// 않는다 — BuildTargets BD29).
+TestHookAssetHooks& ActiveTestHookAssetHooks() noexcept;
 
 // 생성자·소멸자가 시험 hook을 부르는 에셋이다(로더 공개 트랜잭션 안의 사용자 코드가 로더에
 // 재진입하는 시험 — Docs/Design/AssetSystem.ko.md 11.6절 18). typed는 기대 타입이 TestAsset인 Hard
@@ -79,14 +81,14 @@ struct TestHookAsset final : Asset {
     ROCKS_GENERATED_BODY()
 
     TestHookAsset() noexcept {
-        if (testHookAssetHooks.constructed != nullptr) {
-            testHookAssetHooks.constructed(testHookAssetHooks.context);
+        if (ActiveTestHookAssetHooks().constructed != nullptr) {
+            ActiveTestHookAssetHooks().constructed(ActiveTestHookAssetHooks().context);
         }
     }
 
     ~TestHookAsset() {
-        if (testHookAssetHooks.destroyed != nullptr) {
-            testHookAssetHooks.destroyed(testHookAssetHooks.context);
+        if (ActiveTestHookAssetHooks().destroyed != nullptr) {
+            ActiveTestHookAssetHooks().destroyed(ActiveTestHookAssetHooks().context);
         }
     }
 

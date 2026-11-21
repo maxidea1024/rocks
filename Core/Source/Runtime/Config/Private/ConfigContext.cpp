@@ -540,8 +540,8 @@ ConfigContext::~ConfigContext() {
             "snapshots");
     }
 
-    if (detail::CurrentBinding.gameLane == &channel) {
-        detail::CurrentBinding = detail::ThreadBinding{};
+    if (detail::CurrentBinding().gameLane == &channel) {
+        detail::CurrentBinding() = detail::ThreadBinding{};
     }
 
     {

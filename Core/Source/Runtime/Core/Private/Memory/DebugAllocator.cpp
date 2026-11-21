@@ -76,22 +76,22 @@ struct DebugAllocator::Record {
 // A -> B -> A를 포함해 backing callback의 같은 인스턴스 재진입을 잡는다.
 struct DebugAllocator::EntryScope {
     explicit EntryScope(const DebugAllocator* owner) noexcept : owner(owner) {
-        for (EntryScope* current = activeEntry_; current; current = current->previous) {
+        for (EntryScope* current = ActiveEntry(); current; current = current->previous) {
             if (current->owner == owner) {
                 return;
             }
         }
-        previous = activeEntry_;
-        activeEntry_ = this;
+        previous = ActiveEntry();
+        ActiveEntry() = this;
         entered = true;
     }
 
     ~EntryScope() noexcept {
         if (entered) {
-            if (activeEntry_ != this) {
+            if (ActiveEntry() != this) {
                 platform::Fatal("DebugAllocator entry stack corrupted");
             }
-            activeEntry_ = previous;
+            ActiveEntry() = previous;
         }
     }
 
@@ -103,7 +103,10 @@ struct DebugAllocator::EntryScope {
     bool entered = false;
 };
 
-thread_local DebugAllocator::EntryScope* DebugAllocator::activeEntry_ = nullptr;
+DebugAllocator::EntryScope*& DebugAllocator::ActiveEntry() noexcept {
+    static thread_local constinit EntryScope* active = nullptr;
+    return active;
+}
 
 DebugAllocator::DebugAllocator(Allocator& backing, usize quarantineBytes) noexcept
     : backing_(backing), quarantineLimit_(quarantineBytes) {

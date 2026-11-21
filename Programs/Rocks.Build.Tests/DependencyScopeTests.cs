@@ -86,6 +86,42 @@ internal static class DependencyScopeTests
 
         pass("dependency scope: a module in both lists is rejected");
 
+        // 프로세스 전역 상태가 있는 서드파티(HasGlobalState — BuildTargets 3.8절 BD29·BS8c)는 직접 의존 모듈이 하나여야 한다. Root를 그런
+        // 모듈로 표시하면 Base 하나만 직접 의존하므로 통과하고, Mid가 비공개로 더 의존하면 둘이라 두 이름을 알리며 거부한다. 간접 소비(Pub →
+        // Base → Root)는 세지 않는다.
+        NativeModuleInput[] stateful = modules.Select(module => module.Name == "Root" ? module with { HasGlobalState = true, ThirdParty = true } : module).ToArray();
+        InputValidation.Validate(build with { Modules = stateful });
+        try
+        {
+            InputValidation.Validate(build with
+            {
+                Modules = stateful.Select(module => module.Name == "Mid" ? module with { PrivateDependencies = ["Base", "Root"] } : module).ToArray()
+            });
+            Check(false, "a global-state module with two direct consumers must be rejected");
+        }
+        catch (ArgumentException error)
+        {
+            Check(error.Message.Contains("Module Root has process-wide state", StringComparison.Ordinal) &&
+                error.Message.Contains("found Base, Mid", StringComparison.Ordinal),
+                "unexpected message for two direct consumers of a global-state module: " + error.Message);
+        }
+
+        try
+        {
+            InputValidation.Validate(build with
+            {
+                Modules = modules.Select(module => module.Name == "Root" ? module with { HasGlobalState = true } : module).ToArray()
+            });
+            Check(false, "HasGlobalState on a non-third-party module must be rejected");
+        }
+        catch (ArgumentException error)
+        {
+            Check(error.Message.Contains("HasGlobalState is only for a third-party module", StringComparison.Ordinal),
+                "unexpected message for HasGlobalState on an engine module: " + error.Message);
+        }
+
+        pass("dependency scope: a global-state module accepts one direct consumer and rejects two");
+
         // 공유 PCH 제공 모듈(Mid)의 closure는 공개 환경이다(비공개 의존 Base는 넣지 않는다). 도달 closure를 쓰면 소비자 OnlyMid의 include에
         // Base가 없어 "cannot use the shared PCH"로 계획이 실패한다.
         Write("mid/include/mid_pch.h", "#pragma once\n");

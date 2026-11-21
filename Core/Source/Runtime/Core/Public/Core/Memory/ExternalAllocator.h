@@ -68,7 +68,9 @@ private:
     struct EntryScope;
     struct FlightScope;
 
-    static thread_local EntryScope* activeEntry_;
+    // 이 스레드에서 진입 중인 가장 안쪽 EntryScope다. 저장소는 .cpp의 함수 안 thread_local이다(공개
+    // 헤더에 thread_local을 두지 않는다 — Docs/Design/BuildTargets.ko.md 3.8절 BD29).
+    static EntryScope*& ActiveEntry() noexcept;
     Result<void> BeginFlight() noexcept;
     void EndFlight() noexcept;
     Result<void*> AllocateRecord() noexcept;

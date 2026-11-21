@@ -23,24 +23,24 @@ struct PoolAllocator::Slot {
 // backing 콜백이 A -> B -> A 순서로 돌아와도 A의 mutex에 다시 진입하지 않는다.
 struct PoolAllocator::EntryScope {
     explicit EntryScope(const PoolAllocator* owner) noexcept : owner(owner) {
-        for (EntryScope* entry = activeEntry_; entry != nullptr; entry = entry->previous) {
+        for (EntryScope* entry = ActiveEntry(); entry != nullptr; entry = entry->previous) {
             if (entry->owner == owner) {
                 return;
             }
         }
 
-        previous = activeEntry_;
-        activeEntry_ = this;
+        previous = ActiveEntry();
+        ActiveEntry() = this;
         entered = true;
     }
 
     ~EntryScope() noexcept {
         if (entered) {
-            if (activeEntry_ != this) {
+            if (ActiveEntry() != this) {
                 platform::Fatal("PoolAllocator entry stack corrupted");
             }
 
-            activeEntry_ = previous;
+            ActiveEntry() = previous;
         }
     }
 
@@ -52,7 +52,10 @@ struct PoolAllocator::EntryScope {
     bool entered = false;
 };
 
-thread_local PoolAllocator::EntryScope* PoolAllocator::activeEntry_ = nullptr;
+PoolAllocator::EntryScope*& PoolAllocator::ActiveEntry() noexcept {
+    static thread_local constinit EntryScope* active = nullptr;
+    return active;
+}
 
 namespace {
 

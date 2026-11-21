@@ -630,7 +630,7 @@ TEST(CVar_UnboundSetOverlapsContextDestruction) {
         ConfigFixture fixture;
         REQUIRE(fixture.Context().Register(Written));
         REQUIRE(fixture.Context().MakeProcessDefault());
-        config::detail::ActiveDefaultWriteProbe = &probe;
+        config::detail::ActiveDefaultWriteProbe() = &probe;
         REQUIRE(thread.Start(&RunUnboundWriter, &writer) == platform::ThreadStatus::Success);
         REQUIRE(gates.acquired.Wait() == platform::WaitResult::Signaled);
         // 범위가 끝나며 문맥을 없앤다: 통로를 닫고 기본 문맥을 풀고(released gate) 그 쓰기가
@@ -638,7 +638,7 @@ TEST(CVar_UnboundSetOverlapsContextDestruction) {
     }
 
     REQUIRE(thread.Join() == platform::ThreadStatus::Success);
-    config::detail::ActiveDefaultWriteProbe = nullptr;
+    config::detail::ActiveDefaultWriteProbe() = nullptr;
     CHECK(writer.result == ErrorCode::ShuttingDown);
     CHECK(RunUnbound(UnboundAction::Set, 6) == ErrorCode::NotFound);
 }

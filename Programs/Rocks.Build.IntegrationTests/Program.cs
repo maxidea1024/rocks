@@ -118,10 +118,10 @@ try
             !sdkModules.Single(module => module.GetProperty("Name").GetString() == "Core").GetProperty("ProvidesLaunch").GetBoolean(),
             "Engine SDK manifest does not carry the loading phases and the boot marker");
         var sdkEngine = engineManifest.RootElement.GetProperty("EngineVersion");
-        Require(engineManifest.RootElement.GetProperty("Version").GetInt32() == 12 &&
+        Require(engineManifest.RootElement.GetProperty("Version").GetInt32() == 13 &&
             sdkEngine.GetProperty("Major").GetInt32() == engineVersion.Major && sdkEngine.GetProperty("Minor").GetInt32() == engineVersion.Minor &&
             sdkEngine.GetProperty("Patch").GetInt32() == engineVersion.Patch && sdkEngine.EnumerateObject().Count() == 3,
-            "Engine SDK manifest version 12 does not carry the Build/Build.version engine version: " + sdkEngine.GetRawText());
+            "Engine SDK manifest version 13 does not carry the Build/Build.version engine version: " + sdkEngine.GetRawText());
     }
 
     Require(!Directory.GetFiles(sdk, "Build.version", SearchOption.AllDirectories).Any(), "Installed SDK copied Build/Build.version");
@@ -970,7 +970,7 @@ try
     var sdkManifestPath = Path.Combine(sdk, "rocks-sdk.json");
     var sdkManifestBytes = File.ReadAllBytes(sdkManifestPath);
     var sdkManifestText = File.ReadAllText(sdkManifestPath);
-    Require(sdkManifestText.Contains("\"Version\": 12,", StringComparison.Ordinal), "SDK manifest is not version 12:\n" + sdkManifestText);
+    Require(sdkManifestText.Contains("\"Version\": 13,", StringComparison.Ordinal), "SDK manifest is not version 13:\n" + sdkManifestText);
     SetReadOnly(sdkManifestPath, false);
     try
     {

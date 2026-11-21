@@ -25,23 +25,23 @@ struct ExternalAllocator::Record {
 // backend가 A -> B -> A 순서로 돌아와도 같은 인스턴스의 재진입을 진단한다.
 struct ExternalAllocator::EntryScope {
     explicit EntryScope(const ExternalAllocator* owner) noexcept : owner(owner) {
-        for (EntryScope* item = activeEntry_; item != nullptr; item = item->previous) {
+        for (EntryScope* item = ActiveEntry(); item != nullptr; item = item->previous) {
             if (item->owner == owner) {
                 return;
             }
         }
 
-        previous = activeEntry_;
-        activeEntry_ = this;
+        previous = ActiveEntry();
+        ActiveEntry() = this;
         entered = true;
     }
 
     ~EntryScope() noexcept {
         if (entered) {
-            if (activeEntry_ != this) {
+            if (ActiveEntry() != this) {
                 platform::Fatal("ExternalAllocator entry stack corrupted");
             }
-            activeEntry_ = previous;
+            ActiveEntry() = previous;
         }
     }
 
@@ -67,7 +67,10 @@ struct ExternalAllocator::FlightScope {
     ExternalAllocator& owner;
 };
 
-thread_local ExternalAllocator::EntryScope* ExternalAllocator::activeEntry_ = nullptr;
+ExternalAllocator::EntryScope*& ExternalAllocator::ActiveEntry() noexcept {
+    static thread_local constinit EntryScope* active = nullptr;
+    return active;
+}
 
 ExternalAllocator::ExternalAllocator(ExternalAllocatorBackend backend,
                                      Allocator* metadataAllocator) noexcept

@@ -14,6 +14,16 @@ namespace rocks::config {
 
 namespace detail {
 
+ThreadBinding& CurrentBinding() noexcept {
+    static thread_local constinit ThreadBinding binding{};
+    return binding;
+}
+
+DefaultWriteProbe*& ActiveDefaultWriteProbe() noexcept {
+    static constinit DefaultWriteProbe* probe = nullptr;
+    return probe;
+}
+
 Result<void> Enqueue(WriteChannel& channel, Span<SharedPtr<QueuedChange>> changes,
                      bool limited) noexcept {
     platform::LockGuard lock(channel.mutex);
@@ -195,7 +205,7 @@ Result<void> DrainQueue(ConfigState& state) noexcept {
 }
 
 void RebindGameLane(ConfigState& state) noexcept {
-    ThreadBinding& binding = CurrentBinding;
+    ThreadBinding& binding = CurrentBinding();
     if (binding.depth == 0) {
         binding.snapshot = state.snapshot.Get();
         binding.gameLane = state.channel.Get();
@@ -298,7 +308,7 @@ WriteRoute::~WriteRoute() noexcept {
 }
 
 void WriteTarget(WriteRoute& route) noexcept {
-    const ConfigSnapshot* snapshot = CurrentBinding.snapshot;
+    const ConfigSnapshot* snapshot = CurrentBinding().snapshot;
     if (snapshot != nullptr) {
         route.channel = SnapshotAccess::Channel(*snapshot);
         return;
@@ -316,7 +326,7 @@ void WriteTarget(WriteRoute& route) noexcept {
         ++route.channel->defaultWriters;
     }
 
-    if (DefaultWriteProbe* probe = ActiveDefaultWriteProbe;
+    if (DefaultWriteProbe* probe = ActiveDefaultWriteProbe();
         probe != nullptr && probe->acquired != nullptr) {
         probe->acquired(probe->context);
     }
@@ -504,7 +514,7 @@ void ReleaseProcessDefault(WriteChannel& channel) noexcept {
         DefaultChannel = nullptr;
     }
 
-    if (DefaultWriteProbe* probe = ActiveDefaultWriteProbe;
+    if (DefaultWriteProbe* probe = ActiveDefaultWriteProbe();
         probe != nullptr && probe->released != nullptr) {
         probe->released(probe->context);
     }
@@ -594,7 +604,7 @@ using config::detail::ThreadBinding;
 using config::detail::WriteChannel;
 
 SnapshotBinding::SnapshotBinding(SharedPtr<const config::ConfigSnapshot> snapshot) noexcept
-    : snapshot_(Move(snapshot)), previous_(config::detail::CurrentBinding),
+    : snapshot_(Move(snapshot)), previous_(config::detail::CurrentBinding()),
       thread_(platform::CurrentThreadId()) {
     if (snapshot_.Get() == nullptr) {
         platform::Fatal("cvar::SnapshotBinding needs a snapshot (ConfigContext::Acquire)");
@@ -607,25 +617,26 @@ SnapshotBinding::SnapshotBinding(SharedPtr<const config::ConfigSnapshot> snapsho
     depth_ = previous_.depth + 1;
     platform::AtomicFetchAdd<platform::MemoryOrder::AcquireRelease>(
         &SnapshotAccess::Channel(*snapshot_)->bindings, uint64{1});
-    config::detail::CurrentBinding = ThreadBinding{snapshot_.Get(), nullptr, depth_};
+    config::detail::CurrentBinding() = ThreadBinding{snapshot_.Get(), nullptr, depth_};
 }
 
 SnapshotBinding::~SnapshotBinding() {
     // 깊이가 같아야 이 묶음이 가장 안쪽이다(같은 snapshot을 두 번 묶고 바깥 것부터 풀어도 잡는다).
-    if (platform::CurrentThreadId() != thread_ || config::detail::CurrentBinding.depth != depth_ ||
-        config::detail::CurrentBinding.snapshot != snapshot_.Get()) {
+    if (platform::CurrentThreadId() != thread_ ||
+        config::detail::CurrentBinding().depth != depth_ ||
+        config::detail::CurrentBinding().snapshot != snapshot_.Get()) {
         platform::Fatal("cvar::SnapshotBinding released on another thread or out of order");
     }
 
     if (previousGameLane_.Get() != nullptr) {
         // 그 사이 Sync가 새 snapshot을 게시했을 수 있으므로 그 문맥의 최신 snapshot에 다시 묶는다.
         platform::LockGuard lock(previousGameLane_->mutex);
-        config::detail::CurrentBinding =
+        config::detail::CurrentBinding() =
             previousGameLane_->open
                 ? ThreadBinding{previousGameLane_->current.Get(), previousGameLane_.Get(), 0}
                 : ThreadBinding{};
     } else {
-        config::detail::CurrentBinding = previous_;
+        config::detail::CurrentBinding() = previous_;
     }
 
     platform::AtomicFetchSub<platform::MemoryOrder::AcquireRelease>(
