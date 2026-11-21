@@ -12,8 +12,6 @@ namespace {
 using asset_database_detail::EditorIsOrphanTempName;
 using asset_database_detail::EditorTempStem;
 
-// 프로젝트 루트 상대 경로의 inline byte 수다.
-constexpr usize TemporaryPathBytes = 512;
 constexpr StringView ContentPrefix = "Content";
 constexpr StringView IntermediatePrefix = "Intermediate";
 
@@ -61,7 +59,8 @@ bool TemporaryCollectChild(const platform::DirectoryEntry& entry, void* raw) noe
 Result<void> AddTemporaryFailure(Array<TemporaryFileFailure>& failures, StringView prefix,
                                  StringView relative, ErrorCode error) noexcept {
     TemporaryFileFailure failure(failures.GetAllocator());
-    const StringView pieces[] = {prefix, relative.IsEmpty() ? "" : "/", relative};
+    // 실패는 늘 Content·Intermediate 아래 항목이다(뿌리 자신의 실패는 호출 오류다).
+    const StringView pieces[] = {prefix, "/", relative};
     for (StringView piece : pieces) {
         if (auto appended = failure.path.TryAppend(piece); !appended) {
             return appended;
@@ -72,10 +71,17 @@ Result<void> AddTemporaryFailure(Array<TemporaryFileFailure>& failures, StringVi
     return failures.TryPushBack(Move(failure));
 }
 
+// 이름 판정이다.
+using TemporaryMatch = bool (*)(StringView name) noexcept;
+
+// Intermediate의 캐시 쓰기 임시 이름(`AssetIndex.cache.<guid>.tmp`)인지다.
+bool IsCacheTemporaryName(StringView name) noexcept {
+    return EditorTempStem(name) == AssetIndexCacheFileName;
+}
+
 // root(절대 경로) 아래를 recursive면 하위 디렉터리까지 걸어 matches 이름의 파일을 지운다.
-template <class Matches>
 Result<void> DeleteTemporaryUnder(platform::FileSystem& files, StringView root, StringView prefix,
-                                  bool recursive, Matches&& matches, usize& removed,
+                                  bool recursive, TemporaryMatch matches, usize& removed,
                                   Array<TemporaryFileFailure>& failures) noexcept {
     Allocator& allocator = failures.GetAllocator();
     Array<String> pending(allocator);
@@ -86,10 +92,12 @@ Result<void> DeleteTemporaryUnder(platform::FileSystem& files, StringView root, 
     while (!pending.IsEmpty()) {
         String relative = Move(pending[pending.Size() - 1]);
         (void)pending.TryPopBack();
-        StringBuilder<TemporaryPathBytes> directory(allocator);
+        String directory(allocator);
         const StringView pieces[] = {root, relative.IsEmpty() ? "" : "/", relative.View()};
-        if (auto built = asset_database_detail::AppendAll(directory, pieces); !built) {
-            return built;
+        for (StringView piece : pieces) {
+            if (auto appended = directory.TryAppend(piece); !appended) {
+                return appended;
+            }
         }
 
         Array<TemporaryChild> children(allocator);
@@ -143,10 +151,12 @@ Result<void> DeleteTemporaryUnder(platform::FileSystem& files, StringView root, 
                 continue;
             }
 
-            StringBuilder<TemporaryPathBytes> path(allocator);
+            String path(allocator);
             const StringView pathPieces[] = {root, "/", childRelative.View()};
-            if (auto built = asset_database_detail::AppendAll(path, pathPieces); !built) {
-                return built;
+            for (StringView piece : pathPieces) {
+                if (auto appended = path.TryAppend(piece); !appended) {
+                    return appended;
+                }
             }
 
             if (auto deleted = files.Delete(path.View().Data(), path.View().ByteCount());
@@ -182,10 +192,8 @@ Result<void> DeleteTemporaryOrphans(platform::FileSystem& files, const ProjectLa
         return content;
     }
 
-    return DeleteTemporaryUnder(
-        files, layout.IntermediateDirectory(), IntermediatePrefix, false,
-        [](StringView name) noexcept { return EditorTempStem(name) == AssetIndexCacheFileName; },
-        removed, failures);
+    return DeleteTemporaryUnder(files, layout.IntermediateDirectory(), IntermediatePrefix, false,
+                                &IsCacheTemporaryName, removed, failures);
 }
 
 } // namespace rocks

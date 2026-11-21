@@ -14,7 +14,6 @@ namespace rocks {
 
 namespace {
 
-using asset_database_detail::AppendAll;
 using asset_database_detail::EditorAppendGuidText;
 using asset_database_detail::EditorTempSuffix;
 
@@ -32,8 +31,6 @@ constexpr usize MinEntryBytes = 4 + DigestBytes + GuidBytes * 2 + 1 + 4 + 4 + 1;
 // 의존 하나·태그 하나의 최소 byte다.
 constexpr usize DependencyBytes = GuidBytes + 4 + GuidBytes + 1;
 constexpr usize MinTagBytes = 4 + 4;
-// 경로 문자열 버퍼의 inline byte 수다.
-constexpr usize CachePathBytes = 512;
 
 void WriteGuid(ByteWriter& writer, Guid value) noexcept {
     writer.WriteU64LE(value.high);
@@ -126,7 +123,8 @@ Result<bool> ReadEntry(ByteReader& reader, AssetIndexCacheEntry& entry) noexcept
         const uint32 kind = reader.ReadU32LE();
         dependency.expectedType = ReadGuid(reader);
         const uint8 required = reader.ReadU8();
-        if (reader.Failed() || !IsKnownDependencyKind(kind) || required > 1) {
+        // 개수는 위에서 남은 byte로 묶었으므로 읽기는 실패하지 않는다.
+        if (!IsKnownDependencyKind(kind) || required > 1) {
             return Result<bool>::Success(false);
         }
 
@@ -262,9 +260,9 @@ Result<bool> AssetIndexCache::Parse(Span<const uint8> bytes,
     const uint64 bodyBytes = reader.ReadU64LE();
     Sha256Digest bodyDigest;
     (void)ReadDigest(reader, bodyDigest);
-    if (reader.Failed() || magic != CacheMagic || normalizes > 1 || !reservedZero ||
-        !(stored == key) || bodyBytes != bytes.Size() - HeaderBytes ||
-        count > bodyBytes / MinEntryBytes) {
+    // 헤더 칸은 위 크기 검사로 모두 읽힌다(reader가 실패하지 않는다).
+    if (magic != CacheMagic || normalizes > 1 || !reservedZero || !(stored == key) ||
+        bodyBytes != bytes.Size() - HeaderBytes || count > bodyBytes / MinEntryBytes) {
         return empty();
     }
 
@@ -308,10 +306,12 @@ Result<bool> AssetIndexCache::Parse(Span<const uint8> bytes,
 Result<bool> AssetIndexCache::Load(platform::FileSystem& files, const ProjectLayout& layout,
                                    const PackageReadOptions& options) noexcept {
     entries_.Clear();
-    StringBuilder<CachePathBytes> path(*allocator_);
+    String path(*allocator_);
     const StringView pieces[] = {layout.IntermediateDirectory(), "/", AssetIndexCacheFileName};
-    if (auto built = AppendAll(path, pieces); !built) {
-        return Result<bool>::Failure(built.Error());
+    for (StringView piece : pieces) {
+        if (auto appended = path.TryAppend(piece); !appended) {
+            return Result<bool>::Failure(appended.Error());
+        }
     }
 
     platform::File file;

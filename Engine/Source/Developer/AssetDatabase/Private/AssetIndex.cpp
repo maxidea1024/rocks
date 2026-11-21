@@ -538,10 +538,12 @@ Result<bool> AssetIndex::IndexCached(platform::FileSystem& files, const AssetInd
         return Result<bool>::Success(false);
     }
 
-    StringBuilder<IndexPathBytes> full(*allocator_);
+    String full(*allocator_);
     const StringView pieces[] = {layout_->ContentDirectory(), "/", relative.View()};
-    if (auto built = AppendAll(full, pieces); !built) {
-        return Result<bool>::Failure(built.Error());
+    for (StringView piece : pieces) {
+        if (auto appended = full.TryAppend(piece); !appended) {
+            return Result<bool>::Failure(appended.Error());
+        }
     }
 
     FilePackageRangeReader reader;
