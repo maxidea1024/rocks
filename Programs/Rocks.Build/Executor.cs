@@ -41,6 +41,8 @@ internal static class Executor
         ResponseFileQuoting? quoting = NativeCommandLine.QuotingOf(request.Toolchain, action);
         ResponseFileQuoting? syntax = NativeCommandLine.ResponseFileSyntax(request.ResponseFiles, quoting, action.Tool, arguments);
         NativeActionResult? result = null;
+        // 실행한 프로세스의 자원 사용량이다(request.MeasureProcesses일 때만 청한다).
+        ProcessUsage? usage = null;
         Exception? pending = null;
         bool unsafeToDelete = false;
         try
@@ -69,7 +71,8 @@ internal static class Executor
                 }
 
                 process = await (runProcess ?? ProcessRunner.RunAsync)(new ProcessSpec(action.Tool,
-                    processArguments, request.RootDirectory, request.Toolchain.Environment), cancellationToken);
+                    processArguments, request.RootDirectory, request.Toolchain.Environment, MeasureUsage: request.MeasureProcesses), cancellationToken);
+                usage = process.Usage;
             }
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -174,7 +177,14 @@ internal static class Executor
             System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(pending).Throw();
         }
 
-        return result! with { DurationMilliseconds = (long)time.GetElapsedTime(started).TotalMilliseconds };
+        return result! with
+        {
+            DurationMilliseconds = (long)time.GetElapsedTime(started).TotalMilliseconds,
+            CpuMilliseconds = usage is null ? 0 : (long)usage.CpuTime.TotalMilliseconds,
+            PeakMemoryBytes = usage?.PeakWorkingSetBytes ?? 0,
+            PeakCommitBytes = usage?.PeakCommitBytes ?? 0,
+            ProcessMeasured = usage is not null
+        };
     }
 
     // action 임시 디렉터리 안의 depfile 이름이다(response file 이름과 같은 이유로 '+'를 쓴다).

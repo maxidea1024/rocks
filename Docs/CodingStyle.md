@@ -31,6 +31,8 @@
 
 엔진 소유 Runtime과 공개 API에는 STL 컨테이너·문자열·알고리즘을 사용하지 않는다. 문자열은 자체 `String`/`StringView`, 번역 가능한 표시 문구는 별도 `Text` 계층으로 구분한다. 각 타입의 실제 구현 여부는 구현 상태 문서를 따른다. 외부 SDK와 호스트 도구는 설계에 명시한 경계에서 격리한다.
 
+공개 헤더(`Public/`)에는 쓰기 가능한 정적 저장소(const가 아닌 `inline` 변수, inline·템플릿 함수 안의 const가 아닌 `static` 지역 변수, `static inline` 데이터 멤버)와 `thread_local`(선언 포함)을 두지 않는다. 공유 라이브러리(`Modular`)마다 따로 생겨 상태가 갈라진다. 저장소는 소유 모듈의 `.cpp`에 두고 접근 함수로 노출한다. `constexpr`·const 상수는 괜찮다. 공개 헤더 검사의 Clang 진단 `-Wunique-object-duplication`과 정책 `public-header-static-storage`가 막는다([빌드 타깃](Design/BuildTargets.ko.md) 3.8절 BD29).
+
 ## 형식 한계와 "없음" 표지
 
 형식의 한계를 `0xffffffffu`·`UINT32_MAX`·`SIZE_MAX`·`INT_MAX`·`FLT_MAX`·`static_cast<usize>(-1)`·`~0u`·`2147483647` 같은 날 숫자나 C 매크로로 쓰지 않는다. 값이 무엇을 뜻하는지(상한인지, 비어 있다는 표지인지)를 이름으로 드러낸다.
@@ -73,7 +75,7 @@
 
 - `source-literal-english`(`PolicyChecks.EnglishSourceLiterals`): `Core/Source/Runtime`·`Core/Source/Developer`·`Engine/Source/Runtime`·`Engine/Source/Developer`·`Engine/Plugins`·`Programs`·`Build`의 C++(.h·.c·.cpp·.mm)·C#(.cs) 소스에서 주석 밖의 한글(문자열·문자 리터럴 등)을 거부한다. 주석(`//`·`/* */`·`///`)은 보지 않는다.
 - `build-file-english`(`PolicyChecks.EnglishBuildFiles`): 다음 파일은 주석을 포함해 파일 전체에서 한글을 거부한다.
-  - 저장소 루트의 `Rocks.proj`·`.editorconfig`·`.gitattributes`·`.gitignore`·`.clang-format`·`global.json`·`Directory.Build.rsp`
+  - 저장소 루트의 `Rocks.proj`·`.editorconfig`·`.gitattributes`·`.gitignore`·`.clang-format`·`global.json`·`Directory.Build.rsp`·`.vsconfig`와 설치 마법사 진입 스크립트 `Setup.bat`·`Setup.sh`
   - `.github/workflows/` 아래 파일
   - 모든 `*.Build.cs`·`*.Target.cs`·`*.csproj`·`*.props`·`*.targets`·`*.slnx`·`*.proj`(시험 실행 파일·시험 fixture 모듈의 규칙 포함)
   - `Build/` 아래 모든 파일: 스크립트·설정(`*.ps1`·`*.sh`·`*.cmake`·`Build.version` 등)과 모듈·타깃 규칙 기반 클래스(`Build/Rules/*.cs`). 빌드 출력 디렉터리는 제외한다.

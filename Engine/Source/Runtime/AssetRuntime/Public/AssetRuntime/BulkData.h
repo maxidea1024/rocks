@@ -33,6 +33,12 @@ struct BulkDataRef {
         return bulkId == 0;
     }
 
+    // 내용이 같은지다(rawBytes·sha256 — bulkId는 패키지 저장소의 지역 핸들이라 보지 않는다, AS
+    // 7.1절 15). 저장 뒤·다른 패키지·다시 연 값을 비교할 때 쓴다.
+    bool SameContent(const BulkDataRef& other) const noexcept {
+        return rawBytes == other.rawBytes && sha256 == other.sha256;
+    }
+
     friend bool operator==(const BulkDataRef&, const BulkDataRef&) noexcept = default;
 };
 

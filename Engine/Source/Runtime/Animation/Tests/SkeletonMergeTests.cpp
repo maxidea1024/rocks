@@ -94,10 +94,16 @@ TEST(Skeleton_MergeIntoEmptySkeleton) {
         CHECK(merged.meshToMerged[static_cast<usize>(bone)] == bone);
     }
 
-    // 빈 메시는 스켈레톤 그대로다.
+    // 본 없는 메시는 UE처럼 거부한다(스켈레톤이 비어도, 아니어도). 결과는 그대로다.
     BoneMergeResult same(fixture.allocator);
-    REQUIRE(MergeBoneHierarchy(mesh, empty, same));
-    CHECK(SameHierarchy(same.bones, mesh) && same.addedBones == 0 && same.meshToMerged.IsEmpty());
+    SkeletonDiagnostic failure;
+    auto refused = MergeBoneHierarchy(mesh, empty, same, &failure);
+    CHECK(!refused && refused.Error() == ErrorCode::InvalidArgument);
+    CHECK(failure.code == AssetDiagnosticCode::SkeletonMismatch &&
+          failure.issue == SkeletonIssue::EmptyMeshHierarchy &&
+          failure.role == BoneHierarchyRole::Mesh && failure.index == SkeletonNoIndex);
+    CHECK(same.bones.bones.IsEmpty() && same.meshToMerged.IsEmpty());
+    CHECK(!MergeBoneHierarchy(empty, empty, same));
 }
 
 // 없는 본 더하기: 메시가 순서가 다르고 스켈레톤 일부(arm_r 쪽 없음)와 새 본(finger_l, jaw)을 가지면

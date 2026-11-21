@@ -59,10 +59,9 @@ struct ValidateLog {
     }
 };
 
-inline ValidateLog& CurrentValidateLog() noexcept {
-    thread_local ValidateLog log;
-    return log;
-}
+// 이 스레드의 기록이다. 저장소는 Private/FixtureState.cpp의 thread_local이다(공개 헤더에
+// thread_local을 두지 않는다 — BuildTargets BD29).
+ValidateLog& CurrentValidateLog() noexcept;
 
 ROCKS_STRUCT()
 struct ValidRange {

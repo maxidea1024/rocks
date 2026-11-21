@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Base/Compiler.h>
 #include <Base/TypeTraits.h>
 #include <Base/Types.h>
 #include <Core/Containers/Span.h>
@@ -267,6 +268,29 @@ constexpr bool ModuleNamesEqual(const char* left, const char* right) noexcept {
 #define ROCKS_MODULE_TYPES_FUNCTION_0(Name) nullptr
 #define ROCKS_MODULE_TYPES_FUNCTION_1(Name) &::rocks::generated::Name::RegisterModuleOwnTypes
 
+// 빌드가 진입점 모듈의 소스마다 정의하는 값이다(ROCKS_MODULE_SHARED_LIBRARY=1이면 Modular에서 공유
+// 라이브러리로 컴파일한다 — Docs/Design/BuildTargets.ko.md 3.8절 BS8d1). 빌드 밖 컴파일은 0이다.
+#ifndef ROCKS_MODULE_SHARED_LIBRARY
+#define ROCKS_MODULE_SHARED_LIBRARY 0
+#endif
+
+// 공유 라이브러리마다 하나뿐인 export 진입점(ROCKS_MODULE_SHARED_LIBRARY=1)이나 아무것도
+// 아님(0)으로 펼쳐진다. 모듈 로더가 OS로 적재한 라이브러리에서 이 이름으로 진입 기술을 찾는다
+// (Docs/Design/ModuleLoader.ko.md 3.2절, UE GetDllExport("InitializeModule")와 같은 역할). 같은
+// 자리에서 export하지 않는 모듈별 C 기호 RocksModuleEntryOf_<Name>도 정의하고 빌드가 링크에 그
+// 기호를 강제 참조로 넣는다 — 매크로가 빠진 모듈은 링크 오류다(의존 모듈의 import 라이브러리도
+// RocksModuleEntry를 export하므로 그 이름으로는 빠짐을 잡지 못한다).
+#define ROCKS_MODULE_EXPORTED_ENTRY_0(Name)
+#define ROCKS_MODULE_EXPORTED_ENTRY_1(Name)                                                        \
+    extern "C" const ::rocks::ModuleEntry* RocksModuleEntryOf_##Name() noexcept;                   \
+    extern "C" const ::rocks::ModuleEntry* RocksModuleEntryOf_##Name() noexcept {                  \
+        return &RocksModuleEntry_##Name();                                                         \
+    }                                                                                              \
+    extern "C" ROCKS_DLLEXPORT const ::rocks::ModuleEntry* RocksModuleEntry() noexcept;            \
+    extern "C" ROCKS_DLLEXPORT const ::rocks::ModuleEntry* RocksModuleEntry() noexcept {           \
+        return RocksModuleEntryOf_##Name();                                                        \
+    }
+
 // 모듈 진입점을 정의한다(UE IMPLEMENT_MODULE 대응). 모듈의 cpp 하나에 전역 namespace에서 한 번
 // 쓴다. Class는 ModuleImplementation 파생 클래스(noexcept 기본 생성자), Name은 빌드의 모듈
 // 이름이다.
@@ -284,7 +308,8 @@ constexpr bool ModuleNamesEqual(const char* left, const char* right) noexcept {
 // - 리플렉션 메타데이터가 있는 모듈(빌드가 ROCKS_MODULE_TYPES=1로 알린다)은 모듈 생성 소스의
 //   RegisterModuleOwnTypes를 진입 기술 registerTypes에 싣는다. 손으로 쓴 소스가 없는 메타데이터
 //   모듈은 빌드 생성 TU <Name>.ModuleEntry.cpp가 이 매크로를 쓴다.
-// - Modular의 export 진입점 RocksModuleEntry()는 ML4에서 이 매크로에 더한다.
+// - Modular에서 공유 라이브러리로 컴파일하면(빌드가 ROCKS_MODULE_SHARED_LIBRARY=1로 알린다)
+//   export 진입점 extern "C" RocksModuleEntry()도 정의한다(공유 라이브러리마다 하나).
 #define ROCKS_IMPLEMENT_MODULE(Class, Name) ROCKS_IMPLEMENT_MODULE_EXPANDED(Class, Name)
 
 #define ROCKS_IMPLEMENT_MODULE_EXPANDED(Class, Name)                                               \
@@ -301,4 +326,5 @@ constexpr bool ModuleNamesEqual(const char* left, const char* right) noexcept {
         static constexpr ::rocks::ModuleEntry entry = ::rocks::detail::MakeModuleEntry<Class>(     \
             #Name, ROCKS_MODULE_SELECT(ROCKS_MODULE_TYPES_FUNCTION_, ROCKS_MODULE_TYPES)(Name));   \
         return entry;                                                                              \
-    }
+    }                                                                                              \
+    ROCKS_MODULE_SELECT(ROCKS_MODULE_EXPORTED_ENTRY_, ROCKS_MODULE_SHARED_LIBRARY)(Name)

@@ -450,10 +450,15 @@ TEST(ContentSignature_ScopeNames) {
     CHECK(MakeContentScope("Game", "be ta").Error() == ErrorCode::InvalidArgument);
     CHECK(MakeContentScope("G\xc3\xa9", "live").Error() == ErrorCode::InvalidArgument);
     CHECK(MakeContentScope("Game", "a/b").Error() == ErrorCode::InvalidArgument);
-    // 'z'·'Z'·'9' 바로 뒤 문자도 받지 않는다(범위 경계).
-    CHECK(MakeContentScope("a~b", "live").Error() == ErrorCode::InvalidArgument);
-    CHECK(MakeContentScope("A[B", "live").Error() == ErrorCode::InvalidArgument);
-    CHECK(MakeContentScope("0:1", "live").Error() == ErrorCode::InvalidArgument);
+    // 범위 바로 바깥 문자도 받지 않는다: 'a'·'A'·'0' 바로 앞('`'·'@'·'/'), 'z'·'Z'·'9' 바로
+    // 뒤('{'·'['·':'), 그리고 ASCII 끝 쪽('~').
+    const char* const outside[] = {"a`b", "A@B", "0/1", "a{b", "A[B", "0:1", "a~b"};
+    for (const char* name : outside) {
+        CHECK(MakeContentScope(name, "live").Error() == ErrorCode::InvalidArgument);
+        CHECK(MakeContentScope("live", name).Error() == ErrorCode::InvalidArgument);
+    }
+
+    CHECK(MakeContentScope("az_AZ.09-", "AZaz09._-"));
     auto left = MakeContentScope("ab", "c");
     auto right = MakeContentScope("a", "bc");
     REQUIRE(left && right);

@@ -930,10 +930,10 @@ TEST(TraceLogSinkBlocksReentrantDirectWrite) {
             detail::TraceLogWriteScope nested;
         }
 
-        CHECK(detail::inTraceLogWrite);
+        CHECK(detail::InTraceLogWrite());
     }
 
-    CHECK(!detail::inTraceLogWrite);
+    CHECK(!detail::InTraceLogWrite());
     LogEvent own = DirectEvent("trace own", 12, 51);
     own.category = "Trace.Writer";
     REQUIRE(sink.Write(own));

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Rocks.Build;
 using Rocks.Build.Cli;
+using Rocks.Build.Descriptors;
 using Rocks.Build.Rules;
 using Rocks.Tooling.Common;
 
@@ -32,11 +33,31 @@ namespace Rocks.Build.Cli
 {
     public static class BuildCommand
     {
-        public static async Task<int> RunAsync(string[] args, CancellationToken cancellationToken)
+        public static Task<int> RunAsync(string[] args, CancellationToken cancellationToken) => RunAsync(args, cancellationToken, null);
+
+        // profile이 있으면 묶음 크기 실측의 실행 하나를 도는 build다(UnityProfileCommand가 부른다 — Docs/Design/UnityBuildPch.ko.md 12절).
+        // 조합이 있으면 그 모듈에만 조합을 재정의로 얹고, 빌드 대상을 그 모듈로 줄이고, 그 모듈의 object를 지워 처음부터 컴파일한 뒤 결과
+        // 행을 채운다. 조합이 없으면(준비 실행) 그 모듈이 의존하는 모듈만 빌드한다. 출력은 이 명령의 것이어야 한다(평소 빌드 출력 거부).
+        internal static async Task<int> RunAsync(string[] args, CancellationToken cancellationToken, UnityProfileRun? profile)
         {
             if (args.Length == 0)
             {
-                throw new ArgumentException("Expected build, test, sdk, game, or bootstrap command.");
+                throw new ArgumentException("Expected build, test, sdk, game, bootstrap, unity-profile, or projectfiles command.");
+            }
+
+            if (args[0] == UnityProfileCommand.Name)
+            {
+                return await UnityProfileCommand.RunAsync(args.Skip(1).ToArray(), cancellationToken);
+            }
+
+            if (args[0] == ProjectFilesCommand.Name)
+            {
+                return await ProjectFilesCommand.RunAsync(args.Skip(1).ToArray(), cancellationToken);
+            }
+
+            if (profile is not null && args[0] != "build")
+            {
+                throw new ArgumentException("A unity profile run is a build.");
             }
 
             var options = Parse(args.Skip(1).ToArray());
@@ -122,11 +143,17 @@ namespace Rocks.Build.Cli
             string platformName = android ? "android-" + androidAbi : OperatingSystem.IsWindows() ? "windows" : "macos";
             // 끝 구분자를 뗀다(out\custom\이면 아래 증거 preset이 빈 조각을 가져 거부됐다).
             var output = PathSpelling.OnDisk(Path.TrimEndingDirectorySeparator(Path.GetFullPath(options.GetValueOrDefault("output",
-                Path.Combine(root, "out", $"dotnet-{platformName}-{targetName.ToLowerInvariant()}-{configuration.ToString().ToLowerInvariant()}")))));
+                EnginePlanning.DefaultOutput(root, platformName, targetName, configuration)))));
             // build·test·sdk의 증거는 <root>/out/<preset>에 쓰므로 출력은 그 아래여야 한다. 출력·잠금을 만들기 전에 알린다.
             if (!DirectoryPath.IsStrictlyUnder(output, Path.Combine(root, "out")))
             {
                 throw new ArgumentException($"--output must be under {Path.Combine(root, "out")} (build evidence location): {output}");
+            }
+
+            // 실측 실행은 그 모듈의 object를 지우고 보고서·증분 기록을 덮어쓴다. 출력을 만지기 전에 이 명령의 출력인지 다시 확인한다.
+            if (profile is not null)
+            {
+                UnityProfile.RequireClaimedOutput(output);
             }
 
             // 엔진 버전의 단일 출처(Build/Build.version)를 이 실행에서 한 번만 읽는다(Docs/Design/ReflectionFoundations.ko.md 8.2절).
@@ -152,6 +179,12 @@ namespace Rocks.Build.Cli
             var context = new BuildContext(root, output, toolchain.Platform, toolchain.Architecture, configuration);
             var rulesPath = options.GetValueOrDefault("rules", HostTool(root, "Rocks.Engine.Rules"));
             var rules = RuleLoader.Load(rulesPath, targetName, context);
+            // 모르는 모듈 이름은 출력과 잠금을 만들기 전에 알린다(메타 생성까지 가지 않는다).
+            if (profile is not null && !rules.Modules.Any(module => string.Equals(module.Name, profile.Module, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new ArgumentException($"Unknown module {profile.Module}: no module rule has that name.");
+            }
+
             // 설치 SDK의 엔진 라이브러리는 구성 기본 로그 하한으로 빌드되어야 한다. 게임은 같은 기본값으로 컴파일되므로 다르면 ODR 위반이다.
             if (args[0] == "sdk" && rules.Target.LinkType != NativeLinkType.Monolithic)
             {
@@ -184,10 +217,22 @@ namespace Rocks.Build.Cli
             {
                 // 모듈 소유 메타데이터의 배치(생성 include 디렉터리·명세 경로·검증)를 타깃에서 도달하는 모듈에 대해 정한다.
                 // 아래 모든 단계가 이 결과를 쓰고, 검증 실패도 build-evidence에 기록된다.
-                var plan = MetadataLayout.Apply(context, rules.Modules, rules.Target.Modules);
+                // 엔진 플러그인(Docs/Design/BuildTargets.ko.md 3.9절): 타깃이 켠 플러그인의 모듈만 기술자 종류대로 남기고(끈 플러그인 모듈과
+                // 그 사용은 오류), 주 실행 파일에 링크하도록 표시한다. 켠 플러그인 모듈은 타깃이 참조하지 않아도 빌드 대상이다.
+                // 규칙 해석·플러그인 적용·메타 배치는 projectfiles와 같은 함수다(Docs/Design/ProjectFiles.ko.md 8.1절).
+                EngineLayout layout = EnginePlanning.Layout(rules, context, root, toolchain, configuration, createDirectories: true);
+                var pluginSet = layout.PluginSet;
+                if (args[0] == "sdk" && pluginSet.EnabledPlugins.Count != 0)
+                {
+                    throw new ArgumentException($"Target {targetName}: an installed SDK does not carry engine plugins; the export target enables " +
+                        string.Join(", ", pluginSet.EnabledPlugins.Select(plugin => plugin.Name)) + ".");
+                }
+
+                string[] buildRoots = layout.BuildRoots;
+                var plan = layout.Metadata;
                 var metaStart = System.Diagnostics.Stopwatch.GetTimestamp();
                 var metadata = await MetadataRunner.GenerateAsync(context, toolchain, plan, rules.Target,
-                    HostTool(root, "Rocks.MetaCompiler"), cancellationToken, jobs: Jobs(options), verifySources: VerifyMetadataSources(options));
+                    HostTool(root, "Rocks.MetaCompiler"), cancellationToken, buildRoots, jobs: Jobs(options), verifySources: VerifyMetadataSources(options));
                 evidence.RecordStep("metadata", ["Rocks.MetaCompiler", targetName], metadata,
                     System.Diagnostics.Stopwatch.GetElapsedTime(metaStart));
                 if (metadata != 0)
@@ -197,8 +242,45 @@ namespace Rocks.Build.Cli
                 }
 
                 var modules = plan.Modules.ToList();
-                var targets = rules.Target.Modules.ToList();
-                if (rules.Target.CheckPublicHeaders)
+                var targets = buildRoots.ToList();
+                if (profile is not null)
+                {
+                    int index = modules.FindIndex(module => string.Equals(module.Name, profile.Module, StringComparison.OrdinalIgnoreCase));
+                    if (index < 0)
+                    {
+                        throw new ArgumentException($"Module {profile.Module} is not built by target {targetName}.");
+                    }
+
+                    // 규칙의 정식 이름이다(명령줄 철자의 대소문자와 다를 수 있다). 보고서 이름과 행 계산이 이 이름을 쓴다.
+                    string profiled = modules[index].Name;
+                    profile.ResolvedModule = profiled;
+                    // 평소 빌드의 증거와 구별되게 실측 실행임을 남긴다.
+                    evidence.RecordStep(UnityProfileCommand.Name, [UnityProfileCommand.Name, profiled, profile.Case?.Name ?? "prepare"], 0, TimeSpan.Zero);
+                    if (profile.Case is null)
+                    {
+                        // 준비 실행: 그 모듈이 의존하는 모듈만 빌드한다(그 모듈 자신은 조합마다 한 번씩만 컴파일한다).
+                        targets = modules[index].AllDependencies.Concat(modules[index].DynamicModules).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                        if (targets.Count == 0)
+                        {
+                            var prepared = await evidence.FinishAsync();
+                            return prepared.Status == "PASS" ? 0 : 1;
+                        }
+                    }
+                    else
+                    {
+                        modules[index] = UnityProfile.Apply(modules[index], profile.Case);
+                        targets = [profiled];
+                        // 조합마다 처음부터 컴파일하게 그 모듈의 object·묶음 파일과 PCH를 지운다(의존 모듈의 object는 cache hit으로 남는다).
+                        foreach (string directory in UnityProfile.ModuleOutputDirectories(output, profiled))
+                        {
+                            if (Directory.Exists(directory))
+                            {
+                                Directory.Delete(directory, recursive: true);
+                            }
+                        }
+                    }
+                }
+                else if (rules.Target.CheckPublicHeaders)
                 {
                     var sources = new List<string>();
                     // 실행 중 적재 모듈도 빌드하므로 공개 헤더 검사 대상이다(Docs/Design/ModuleLoader.ko.md 3.8절).
@@ -225,10 +307,17 @@ namespace Rocks.Build.Cli
                         // 공유 PCH를 쓰면 PCH에 든 헤더가 빠진 include를 메워 검사가 무력해진다.
                         Unity = UnityMode.Off,
                         PchUsage = PchUsage.Off,
+                        // 공개 헤더의 쓰기 가능한 정적 저장소(공유 라이브러리마다 복제된다)를 Clang 진단으로 거부한다(Docs/Design/BuildTargets.ko.md
+                        // 3.8절 BD29·BS8c). Windows 대상만 켠다(다른 대상에서는 숨김 가시성 객체만 알린다 — thread_local은 정책 검사가 따로 본다).
+                        AdditionalCompileArguments = ToolchainCheck.SupportsUniqueObjectDuplication(toolchain.Platform, toolchain.CompilerVersion)
+                            ? [ToolchainCheck.UniqueObjectDuplicationWarning] : [],
                         // 저장소 루트를 include하지 않는다: 검사 TU는 의존 모듈의 public include만으로 헤더를 연다. 도달한 라이브러리를
                         // 모두 공개 의존으로 두므로 모듈마다 자기 공개 환경만으로 컴파일하는 검사(BD9)가 아니다 — 그 검사는 BS1이다.
                         // BS1 전에는 의존을 비공개로 내리지 않는다(Docs/Design/BuildTargets.ko.md 3.5절, BS0 → BS1 → BS3).
-                        PublicDependencies = reached.Where(name => modules.Single(module => module.Name == name).Kind == NativeModuleKind.StaticLibrary).Order(StringComparer.Ordinal).ToArray()
+                        // 서드파티 모듈은 뺀다: 공개 include가 없고(서드파티 규칙 계약) 전역 상태 서드파티의 직접 소비 모듈이 하나여야 한다(BD29·BS8c).
+                        PublicDependencies = reached.Select(name => modules.Single(module => module.Name == name))
+                            .Where(module => module.Kind == NativeModuleKind.StaticLibrary && !module.ThirdParty)
+                            .Select(module => module.Name).Order(StringComparer.Ordinal).ToArray()
                     });
                     targets.Add("PublicHeaderChecks");
                 }
@@ -243,27 +332,19 @@ namespace Rocks.Build.Cli
                     _ => throw new ArgumentException($"{PlanOnlyOption} must be on or off.")
                 };
                 var nativeStart = System.Diagnostics.Stopwatch.GetTimestamp();
-                var result = await new NativeBuildEngine().BuildAsync(new()
+                var result = await new NativeBuildEngine().BuildAsync(EnginePlanning.Request(toolchain, configuration, rules.Target, root, output,
+                    modules, targets, engineVersion, Jobs(options)) with
                 {
-                    Toolchain = toolchain,
-                    Configuration = configuration,
-                    LogCompiledMinimum = rules.Target.LogCompiledMinimum,
-                    LinkType = rules.Target.LinkType,
-                    TargetName = rules.Target.Name,
-                    RootDirectory = root,
-                    OutputDirectory = output,
-                    Modules = modules,
-                    Targets = targets,
-                    MaxParallelism = Jobs(options),
-                    ContextFingerprint = "rocks-build-rules-v1",
-                    EngineVersion = engineVersion,
                     Unity = Switch(options, UnityOption),
                     Pch = Switch(options, PchOption),
                     Adaptive = Switch(options, AdaptiveOption),
                     Timing = Timing(options),
                     TimingLabel = targetName,
-                    PlanOnly = planOnly
+                    PlanOnly = planOnly,
+                    MeasureProcesses = profile?.Case is not null
                 }, cancellationToken);
+                // 벽시계는 native 단계가 끝난 바로 이 자리에서 잡는다(뒤의 출력·보고서 쓰기를 넣지 않는다).
+                TimeSpan nativeElapsed = System.Diagnostics.Stopwatch.GetElapsedTime(nativeStart);
                 if (result.PlanOnly)
                 {
                     Console.WriteLine($"Plan only: wrote {result.CompilationDatabasePath} and {result.UnityBatches} unity batch file(s); no action was run.");
@@ -273,11 +354,22 @@ namespace Rocks.Build.Cli
 
                 Print(result);
                 AtomicFile.WriteIfChanged(Path.Combine(output, "action-report.json"), JsonSerializer.Serialize(result, JsonOptions));
-                evidence.RecordStep("native", ["Rocks.Build", targetName, configuration.ToString()], result.Succeeded ? 0 : 1, System.Diagnostics.Stopwatch.GetElapsedTime(nativeStart));
+                evidence.RecordStep("native", ["Rocks.Build", targetName, configuration.ToString()], result.Succeeded ? 0 : 1, nativeElapsed);
                 if (!result.Succeeded)
                 {
+                    if (profile is not null)
+                    {
+                        NativeActionResult? failed = result.Actions.FirstOrDefault(action => action.Executed && !action.Succeeded);
+                        profile.Failure = UnityProfile.FirstErrorLine(failed is null ? result.Failure : failed.StdErr + "\n" + failed.StdOut + "\n" + result.Failure);
+                    }
+
                     await evidence.FinishAsync(result.Failure);
                     return 1;
+                }
+
+                if (profile?.Case is not null)
+                {
+                    profile.Row = UnityProfile.Row(profile.Case, result, targets[0], nativeElapsed);
                 }
 
                 if (args[0] == "sdk")
@@ -475,7 +567,7 @@ namespace Rocks.Build.Cli
 
         internal static Dictionary<string, string> Parse(string[] args)
         {
-            var allowed = new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination", "sdk", "project", "platform", "android-abi", "android-api", "android-ndk", "adb", "library", "store", "mirror", "offline", MetadataLayout.VerifySourcesOption, PlanOnlyOption, .. BuildModeOptions, "windows-sdk", RequireVerifiedToolchainOption], StringComparer.Ordinal);
+            var allowed = new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination", "sdk", "project", "platform", "android-abi", "android-api", "android-ndk", "adb", "library", "store", "mirror", "offline", MetadataLayout.VerifySourcesOption, PlanOnlyOption, .. BuildModeOptions, "windows-sdk", RequireVerifiedToolchainOption, .. UnityProfileCommand.Options, .. ProjectFilesCommand.Options], StringComparer.Ordinal);
             var values = new Dictionary<string, string>(StringComparer.Ordinal);
             for (var index = 0; index < args.Length; index += 2)
             {

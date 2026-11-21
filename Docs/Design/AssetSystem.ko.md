@@ -16,11 +16,11 @@
 | Curve | Core 수학·리플렉션(설계는 착수 때 — 2026-11-15 사용자 결정 "B9 직후, A0-G 앞"): UE 5.8 `FInterpCurve<T>`·`FInterpCurvePoint`(Core/Public/Math — 키별 보간 모드·접선 자동 계산·값·미분 평가·루프·최근접 탐색, 스플라인 기반) 대응 Core 수학 층(**구현됨** 2026-11-16 — `InterpCurve<T>`, [키 커브](../Implementation/InterpCurve.ko.md))과 `FRichCurve`·`FSimpleCurve`·`FRealCurve`·`FIndexedCurve`·`FKeyHandle`·`FIntegralCurve`·`FNameCurve`·`FStringCurve`·`FCompressedRichCurve`(Engine/Classes/Curves — 가중 접선·외삽·압축) 대응 값 타입과 리플렉션 미러 — **Curve 단계 CV1–CV10 완료**(2026-11-18, [커브 데이터](CurveData.ko.md) 17절): Core `KeyCurveMath`·`FrameRate`, `Curves` 모듈(`TangentCurve`·`PlainCurve`·계단 커브 셋·`CurveKeyHandleTable`·`PackedTangentCurve`), 리플렉션 struct 검증 hook·`Array<uint8>` Bytes wire·Core enum Binds, CoreTypeBindings `InterpCurve` 미러 다섯 형식·`TryCalcBounds`. 에셋 층(`UCurveFloat`·`UCurveVector`·`UCurveLinearColor`·`UCurveTable`·`FRuntimeFloatCurve`·`FCurveTableRowHandle`)은 A1 에셋 시스템 뒤 A 단계 에셋 타입이고 경계는 커브 데이터 14절이다 | 수학 층: `MathInterpCurveTests`·`MathInterpCurveGoldenTests`·`MathInterpCurveBoundsTests`·`MathKeyCurve*Tests`·`FrameRateTests`. 값 타입: `Curves/Tests`(UE 5.8 식 참조 golden·독립 고정 벡터·편집·핸들 표·압축 byte 대조·리플렉션 왕복·hook 거부 — 커브 데이터 16절) |
 | A0-G | GraphicsTypes·Graphics: 차원(2D·Cube·3D·2DArray·CubeArray)·형식(R8·RG8·RGBA8·R16·RG16·RGBA16·R16F·RG16F·RGBA16F·R32F·RG32F·RGBA32F·BGRA8, sRGB 변형)·view swizzle(D3D12 `Shader4ComponentMapping`, OpenGL 채널별 `TEXTURE_SWIZZLE_R/G/B/A` — `TEXTURE_SWIZZLE_RGBA`는 OpenGL ES에 없다)·샘플러 W축 주소·필터 5종(Point·Bilinear·Trilinear·AnisotropicPoint·AnisotropicLinear — 기존 `Nearest`·`Anisotropic`의 이름 변경 포함)·**깊이 비교 샘플러**(비교 함수, 그림자용 — [렌더 기반](RenderBase.ko.md) SX13), 쿠킹 데이터 샘플러 D3D12·OpenGL. 착수 전 반영할 셰이더·렌더 요구: [셰이더 시스템](ShaderSystem.ko.md) 5.2절 G1(backend 중립 정의, Vulkan·Metal·GLES로 옮길 수 있을 것, 지원 표와 `UnsupportedCapability`)·G2(OpenGL 구현은 OpenGL ES 3.2 공통 API, 데스크톱 전용 DSA를 늘리지 않음, ES 확장 의존 형식·필터 조건)·G3(VulkanGraphics가 A0-G 범위를 받음, SH2), 텍스처 desc의 샘플러는 기본값이고 바인딩 때 다른 샘플러를 지정할 수 있게 둔다(렌더 기반 결정 R12, 바인딩 쪽은 GX2). **구현**(2026-11-18, 렌더 세션과 범위 확정 — 형식 목록은 [픽셀 형식](PixelFormat.ko.md) PF1–PF3에서 이미 끝났고, MSAA 텍스처·resolve, mip·slice 개별 view와 attachment, 바인딩 샘플러(GX6·SH2)는 렌더 세션 몫): GraphicsTypes `TextureDimension`(UE `ETextureDimension` 순서)·`CubeFace`(+X·−X·+Y·−Y·+Z·−Z, UE `ECubeFace`·D3D 면 순서와 방향)·`SwizzleSource`·`ChannelSwizzle`(`ComposeSwizzle`)·`CompareFunction`(Graphics `PipelineState.h`에서 옮겨 깊이 상태와 샘플러가 함께 쓴다)·`SamplerDesc`(`Filter` 5종 UE `ESamplerFilter` 순서, `addressW`, `comparison`·`compare`). Graphics `TextureDesc{dimension, depth, arraySize, swizzle}`·`TextureViewDesc::swizzle`·`ValidateTextureDesc`·`CheckTextureLimits`·`TextureSliceCount`·`TextureMipBytes`·`TextureDataBytes`, subresource = mip × slice(`SubresourceRange` slice 범위, `SubresourceStates`, 분리 전이 목록 지문은 slice 범위를 포함하고, begin·end 사이 접근 검사는 기록 장치(RenderBase 시험용 `RecordingDevice`)만 slice까지 본다 — 실제 backend는 이 검사를 하지 않고 D3D12 end·Vulkan begin 때 before 상태를 대조한다), 네 backend(D3D12·D3D11·Vulkan·OpenGL ES)의 차원별 생성·업로드·SRV·`ReadTexture`·전이, RenderGraph 풀 키(차원·깊이·층·swizzle)와 slice 단위 전이 기록. 지원 표는 [렌더 기반](RenderBase.ko.md) 4.4절 GX2 "구현(A0-G)"이다. 스펙과 다르게 정한 것: (1) 지원하지 않는 조합의 오류는 `UnsupportedCapability`가 아니라 Graphics의 기존 장치 능력 오류 `Unsupported`다(`UnsupportedCapability`는 A1에서 Core에 더하며, 그때 Graphics 계약을 함께 바꿀지 정한다). (2) 초기 픽셀·`UpdateTexture`·`ReadTexture`의 배치는 mip 우선(mip 하나 = 그 mip의 모든 slice·깊이 면)이다(mip별 스트리밍과 같은 단위). (3) view swizzle은 원 텍스처의 `TextureDesc::swizzle`을 이어받지 않는 view 형식 기준 대응이다. (4) D3D11은 view swizzle이 없어 항등이 아니면 `Unsupported`(셰이더 대체 없음). `AnisotropicPoint`는 하드웨어 대응이 없는 backend(D3D11, OPTIONS19 `AnisoFilterWithPointMipSupported`가 없는 D3D12)에서 UE처럼 `AnisotropicLinear`로 만든다(2026-11-18 사용자 결정 — 바꾼 사실은 `DeviceFeatures::anisotropicPointFilter` 거짓과 처음 한 번의 Debug 로그로 드러나고, 쿠킹 프로필은 UE 기본값(World 그룹 aniso + point)을 그대로 쓴다). 비교 샘플러는 깊이 형식(Depth·DepthStencil)에만 붙고(아니면 `InvalidArgument`), 그 텍스처의 view는 깊이 plane만 읽는다. (5) 비교 샘플러는 UE의 `SCF_Never`·`SCF_Less`가 아니라 `comparison` 표시 + `CompareFunction` 전체다. (6) 2D가 아닌 RenderTarget·DepthStencil과 다중 plane 형식(D24S8·D32S8·비디오)의 2D 아닌 차원은 `Unsupported`, OpenGL ES의 2D 아닌 깊이 텍스처 `ReadTexture`는 `Unsupported`다. (7) "쿠킹 데이터 샘플러 D3D12·OpenGL"은 AssetRuntime(A1)이 아직 없어 장치 계약 쪽만 했다: `TextureDesc::sampler`의 모든 값(필터·이방성·U·V·W 주소·border 색·비교)을 네 backend가 그대로 쓴다. `TexturePlatformData` → `TextureDesc` 연결은 A1·A5다 | self-test 확장(Sandbox `--self-test` RunTextureChecks: 차원별 왕복·셰이더 읽기·cube 면 방향·slice 전이, staging 업로드(배열·cube·3D, offset 0·512), BC1 배열·cube·3D 왕복, swizzle·A8 합성·view 독립, swizzle은 attachment·ReadTexture에 적용되지 않음, W축 주소, 비교 샘플러(점·선형 PCF), 필터 5종) |
 | A1 | AssetRuntime: 패키지 포맷 v1, `Package`·`Asset`, 에셋 객체 Registry, 쿠킹 매니페스트(`CookedManifest.rman`), 로더(worker IO·압축 해제, Game 스레드 객체 생성, SCC), `AssetManager`(scope·PrimaryAsset·bundle), `CancelToken`·`TaskLane`·`LoadPriority`, Core ErrorCode 추가(`UnsupportedCapability`·`AlreadyRegistered`·`ScopeClosed`), EngineAssets 모듈 | 포맷·SCC·수명·scope 시험 |
-| A2 | AssetDatabase: `ProjectLayout`, 경로 정책, 인덱스(검색·의존·별칭·진단·캐시·감시), 저장·dirty, 이동·복제·삭제, 임포트 프레임워크 | 인덱스·이동·동시 쓰기 시험 |
+| A2 | AssetDatabase(7.1절, 하위 단계 A2a–A2f): `ProjectLayout`, 경로 정책, 인덱스(검색·의존·별칭·진단·캐시·감시), 저장·dirty, 이동·복제·삭제, 임포트 프레임워크, 각 단계의 13절 명령 | 인덱스·이동·동시 쓰기 시험(하위 단계마다 A1과 같은 완료 조건 넷) |
 | A3 | AssetNugget | 적중·무효화·손상·동시 기록·GC 시험 |
 | A4 | AssetCooker | 원본 없이 쿠킹·재현성·부분 쿠킹 시험 |
 | A5 | 텍스처: `Texture` 계열, `TextureSource`, ImageCore(BMP·TGA·PNG·PSD·DDS·TIFF·Radiance HDR·무손실 OpenEXR — 12.2절), TextureTools(임포터·빌드·쿠킹 처리기), 클래스 기본값 레코드·차이 쓰기·override 집합·지문(cookKey·Summary 지문 열 — A1 Summary·A4 cookKey 산출물을 이때 고친다, RuntimeClassMetadata '클래스 기본값 결정') | 14절 텍스처 시나리오 |
-| A6 | 명령행·문서·검증 보고 | 14절 결과 기록 |
+| A6 | 남은 명령행(쿠킹·너겟 — A2 명령은 각 하위 단계에서 더한다)·문서·검증 보고 | 14절 결과 기록 |
 
 ## 2. 사전 조사(2026-11-12)
 
@@ -53,7 +53,7 @@
 | Runtime Asset Loader | AssetRuntime `AssetLoader` | 구현(CPU ready), `Render` ready 계약 |
 | Asset Manager | AssetRuntime `AssetManager` | 구현(scope·PrimaryAsset·bundle·즉시 해제), 예산 LRU 해제 후속 |
 | 메시·스켈레톤·애니메이션 에셋 | `MeshSource`·`Mesh`·`Animation`(Runtime), `MeshTools`·`AnimationTools`(Developer) | `MeshSource` 구현(MA1 — 원본 메시 저장·검증·위상 조회, bulk 쓰기는 `MemoryBulkSource`), `Mesh`(빌드 설정 값 타입 `MeshBuildSettings`·`SkinnedMeshBuildSettings`와 단순 충돌 값 타입 `SimpleCollision`·검증 — MA3a)·`MeshTools`(정적 메시 LOD 빌드 순수 함수 `BuildStaticMeshLod`, ThirdParty MikkTSpace 패치) 구현(MA2a — 지금 의존은 Mesh → ObjectRuntime·CoreTypeBindings·AssetRuntime, MeshTools → MeshSource·Mesh·Animation·DeterministicMath·MikkTSpace, 아래 그래프의 나머지는 MA2b 이후), 스킨 메시 LOD 빌드 순수 함수 `BuildSkinnedMeshLod`(영향 줄이기·bone map·inverse-bind·morph 변화량) 구현(MA5a), `Animation`(본 계층 `BoneHierarchy`·`Skeleton` 에셋 클래스·검증·병합 판정 `MergeBoneHierarchy`) 구현(MA4a), 클립 `AnimationAsset`·`AnimationClip`·원본·쿠킹 데이터 v1·쿠킹 변환 `BuildClipPlayback` 구현(MA6a — 지금 의존은 Animation → AssetRuntime·CoreTypeBindings·Curves), 나머지 설계([MeshAnimationAssets](MeshAnimationAssets.ko.md) 8절·3.7·4.8·5.4·6.4·6.5·7.5절, MA2b·MA4b·MA5b·MA6b·MA7) |
-| 외부 엔진 교환 임포터 | 엔진 플러그인 `UnrealExchange`(Developer) | 설계([Unreal 교환 형식](UnrealExchange.ko.md) 10절, UX1–UX8) |
+| 외부 엔진 교환 임포터 | 엔진 플러그인 `UnrealExchange`(Developer) | UX1a 리더·경로 대응·임포트 순서 구현, 나머지 설계([Unreal 교환 형식](UnrealExchange.ko.md) 10절, UX1–UX8) |
 
 이름 구분: 에셋 객체가 사는 `ObjectRegistry`는 **에셋 객체 Registry**, 에디터 패키지 인덱스는 **AssetIndex**(UE AssetRegistry 대응), 쿠킹 결과의 런타임 목록은 **쿠킹 매니페스트**(`CookedManifest.rman`, 10절)라 부른다.
 
@@ -61,7 +61,7 @@
 
 ```
 Programs/Commandlet → TextureTools → { AssetCooker, AssetDatabase, AssetNugget, ImageCore, Texture }
-AssetCooker → { AssetDatabase, AssetNugget }        AssetDatabase → AssetRuntime
+AssetCooker → { AssetDatabase, AssetNugget }        AssetDatabase(Developer) → { AssetRuntime, HostConfig }
 Texture(Runtime) → { AssetRuntime, GraphicsTypes }       ImageCore(Developer) → { Core, Compression }
 AssetRuntime → { ObjectSerialization, ObjectRuntime, Serialization, Task, Compression }
 EngineAssets(Runtime, 신규) → { Engine, AssetRuntime }   — AssetManager를 EngineSubsystem으로 붙이는 연결 모듈
@@ -124,7 +124,7 @@ AssetRuntime은 Engine을 모른다. 도구는 Engine을 링크하지 않고 `As
 | `AliasResolved`, `RootLost`(감시 루트 소실) | 그 밖 |
 | `InvalidMeshData`, `NonFiniteAttribute`, `UvOutOfRange`, `NonNormalizedWeights`, `TooManyInfluences`, `InfluencesTrimmed`, `MissingInfluences`(경고), `MaterialSlotFallback`, `NegativeBuildScale`, `UnsupportedCollisionShape`, `InvalidCollisionData`, `InvalidSkeletonData`, `SkeletonMismatch`, `UnknownBoneTrack`, `InvalidClipData`, `EventPropertiesDropped` | 메시·애니메이션([MeshAnimationAssets](MeshAnimationAssets.ko.md) 11절 — 앞 다섯 코드는 MA1이, `MaterialSlotFallback`·`NegativeBuildScale`은 MA2a가, `InvalidSkeletonData`·`SkeletonMismatch`는 MA4a가, `InfluencesTrimmed`(정보)·`MissingInfluences`는 MA5a가, `InvalidCollisionData`·`UnsupportedCollisionShape`(임포터 경고)는 MA3a가, `InvalidClipData`·`UnknownBoneTrack`·`EventPropertiesDropped`는 MA6a가 `AssetDiagnosticCode`에 등록, 나머지는 설계) |
 | `DuplicateLevelScript`(`levelScript` 말고 또 있는 LevelScript 파생 Actor), `LevelScriptNotInLevel`(`levelScript`가 `actors` 원소가 아님), `CrossLevelReference`(레벨에 저장하는 참조가 다른 Level, 또는 영속 Entity 참조 전 다른 셀의 객체를 가리킴), `NotPlaceableClass`(편집기 배치 명령이 `NotPlaceable` 클래스를 받음), `LevelScriptCollider`(LevelScript의 Collider component) | 레벨(설계 — [레벨 스크립트](LevelScript.ko.md) 4.9절. 저장·쿡은 InvalidArgument, cooked 로드는 CorruptPackage) |
-| `CorruptBundle`, `UnsupportedBundleVersion`, `UnknownField`, `UnsupportedAsset`, `LossyOriginAccepted`, `UnsupportedSourceLayout`, `GammaMismatch`, `GeneratedLodBaked`, `BakedColorQuantized`, `UnrealPathRenamed`, `UnrealPathTooLong`, `UnrealPathCollision`, `MissingUnrealDependency`, `UntranslatedMaterialNode`, `MaterialBakedFallback`, `ParameterDefaultConflict`, `ParameterResolveMismatch` | Unreal 교환 임포트(설계 — [Unreal 교환 형식](UnrealExchange.ko.md) 10.3절) |
+| `CorruptBundle`, `UnsupportedBundleVersion`, `UnknownField`, `UnsupportedAsset`, `LossyOriginAccepted`, `UnsupportedSourceLayout`, `GammaMismatch`, `GeneratedLodBaked`, `BakedColorQuantized`, `UnrealPathRenamed`, `UnrealPathTooLong`, `UnrealPathCollision`, `MissingUnrealDependency`, `UntranslatedMaterialNode`, `MaterialBakedFallback`, `ParameterDefaultConflict`, `ParameterResolveMismatch` | Unreal 교환 임포트([Unreal 교환 형식](UnrealExchange.ko.md) 10.3절). `CorruptBundle`·`UnsupportedBundleVersion`·`UnknownField`·`UnsupportedAsset`·`UnrealPathRenamed`·`UnrealPathTooLong`·`UnrealPathCollision`·`MissingUnrealDependency`는 UX1a 리더가 내며 `AssetDiagnosticCode`에 등록(2026-11-21, 10.4절), 나머지는 설계 |
 
 ## 5. 패키지 포맷 v1
 
@@ -214,12 +214,12 @@ ImportRecord (스키마 Guid, 버전 1)
 
 1. 잠금(8절). 대상이 있으면 로드 때 기록한 지문(헤더 + 섹션 표 SHA-256)과 비교, 다르면 `ExternalModification`.
 2. 같은 디렉터리에 `<name>.rasset.<guid 36자>.tmp`를 `CreateNew`.
-3. Objects를 먼저 메모리에 직렬화한다(그 결과의 외부 참조 목록이 있어야 ObjectImports·Dependencies를 만든다). 그다음 섹션을 물리 순서대로 스트리밍 기록하며 CRC를 증분 계산한다. bulk는 블록 단위로 압축·CRC·SHA-256을 계산하며, 원본은 객체가 메모리에 가진 raw 데이터이거나 아직 읽지 않은 entry면 이전 패키지 파일의 열린 핸들(6.1절)이다. 이전 파일에서 옮기는 entry는 저장 crc32와 raw SHA-256을 검증하며 다르면 저장을 `CorruptPackage`로 실패시킨다(손상이 새 CRC로 세탁되지 않게). bulkId는 저장마다 객체·필드 순서로 1부터 다시 매기고 writer가 (옛 id → 새 id) 재매핑 표를 만든다. BulkIndex·섹션 표를 쓰고 offset 0으로 돌아가 헤더를 쓴다. 메모리 피크(객체와 이미 상주한 raw 데이터 제외)는 Objects 바이트 + 다른 비-Bulk 섹션 하나 + bulk 블록 하나다(비-Bulk 섹션은 각각 64 MiB 상한).
+3. Objects를 먼저 메모리에 직렬화한다(그 결과의 외부 참조 목록이 있어야 ObjectImports·Dependencies를 만든다). 그다음 섹션을 물리 순서대로 스트리밍 기록하며 CRC를 증분 계산한다. bulk는 블록 단위로 압축·CRC·SHA-256을 계산하며, 원본은 패키지 bulk 저장소(6.1절 — 메모리 raw 데이터이거나 아직 읽지 않은 entry면 이전 패키지 파일을 경로로 다시 열어 읽는다)다. 이전 파일에서 옮기는 entry는 저장 crc32와 raw SHA-256을 검증하며 다르면 저장을 `CorruptPackage`로 실패시킨다(손상이 새 CRC로 세탁되지 않게). bulkId는 저장마다 객체·필드 순서로 1부터 다시 매기고 writer가 (옛 id → 새 id) 재매핑 표를 만든다. BulkIndex·섹션 표를 쓰고 offset 0으로 돌아가 헤더를 쓴다. 메모리 피크(객체와 이미 상주한 raw 데이터 제외)는 Objects 바이트 + 다른 비-Bulk 섹션 하나 + bulk 블록 하나다(비-Bulk 섹션은 각각 64 MiB 상한).
 4. `File::Flush` → Close.
 5. 고정 크기 버퍼로 다시 읽어 헤더·표·섹션·entry CRC를 검증한다(writer 버그·짧은 쓰기 검출. 페이지 캐시를 읽으므로 매체 손상 검출이 목적은 아니다).
 6. `FileSystem::Replace(temp, target)`(구현, `Platform/File.h` 계약). Windows: `SetFileInformationByHandle(FileRenameInfoEx, REPLACE_IF_EXISTS | POSIX_SEMANTICS)`(다른 쪽이 `FILE_SHARE_DELETE`로 연 대상도 교체 — 이전 파일의 열린 핸들도 계속 유효하다). 이 정보 클래스가 없는 볼륨(FAT·일부 네트워크 FS)은 `MoveFileExW(REPLACE_EXISTING)`로 대신하며, 그 볼륨에서 열린 대상은 `Busy`·`AccessDenied`로 끝나고 대상은 바뀌지 않는다. `ReplaceFileW`는 쓰지 않는다(이전 대상의 속성·스트림을 합치고, `ERROR_UNABLE_TO_MOVE_REPLACEMENT`에서 대상을 지운 채 남긴다). Windows의 이름 변경 매체 기록은 NTFS 메타데이터 로그에 맡긴다(반환 직후 전원 차단 시 이전 상태일 수 있다). POSIX: 부모 디렉터리를 먼저 열고 `rename` 후 그 디렉터리를 `fsync`(macOS `F_FULLFSYNC`). 오류: 원본이 일반 파일이 아니거나 대상이 디렉터리·link면 `WrongType`, 대상이 읽기 전용이거나 권한이 없으면 `AccessDenied`, 공유 위반이면 `Busy`.
-   교체 직전에 임시 파일의 읽기 핸들을 열고 패키지가 쥔 이전 파일 핸들을 닫는다(POSIX 의미 rename이 없는 볼륨의 `MoveFileExW`는 자기 핸들이 열려 있으면 실패하므로 모든 경로에서 같은 순서로 한다). 교체가 실패하면 이전 경로를 다시 열고 지문이 로드 때와 같은지 확인한다(다르면 이후 저장은 `ExternalModification`).
-7. 실패하면 임시 파일을 지우고 보고(기존 보존). `NotDurable`(POSIX 디렉터리 동기화만 실패)은 교체가 이미 보이는 상태이므로 임시 파일 정리 없이 저장 성공으로 처리하고 `NotDurable` 경고를 남긴다. 성공(경고 포함) 후: 저장 세대와 무관하게 메모리의 모든 `BulkDataRef`를 재매핑 표(옛 id·SHA-256 → 새 id)로 바꾸고 패키지의 bulk 핸들·BulkIndex를 새 파일(6번에서 연 핸들)로 다시 잇는다(아직 읽지 않은 entry도 새 파일에 있다). 직렬화를 시작한 세대 = 현재 세대일 때만 dirty를 지운다(저장 중 편집이 있었으면 dirty 유지 — 편집으로 새로 생긴 raw 데이터는 메모리에 있으므로 다음 저장이 쓴다). 마지막으로 인덱스를 갱신. 재매핑은 저장 직렬화의 값 치환 hook(B4가 구현한 `SubstituteStruct` — graph v2가 쓴다)이 직렬화 바이트에 새 id를 쓰고, 같은 옛 id를 가리키는 여러 참조는 같은 새 id로 바꾼다.
+   교체 직전에 bulk 저장소가 캐시한 이전 파일 핸들이 있으면 닫는다(POSIX 의미 rename이 없는 볼륨의 `MoveFileExW`는 자기 핸들이 열려 있으면 실패하므로 모든 경로에서 같은 순서로 한다). 교체가 실패하면 이후 저장은 1단계의 지문 비교로 대상이 로드 때의 것인지 다시 본다(다르면 `ExternalModification` — 교체 직후 따로 확인하지 않는다, 7.1절 15 A2c2b).
+7. 실패하면 임시 파일을 지우고 보고(기존 보존). `NotDurable`(POSIX 디렉터리 동기화만 실패)은 교체가 이미 보이는 상태이므로 임시 파일 정리 없이 저장 성공으로 처리하고 `NotDurable` 경고를 남긴다. 성공(경고 포함) 후: 저장 세대와 무관하게 패키지 bulk 저장소의 "메모리 id → entry" 표를 재매핑 표(옛 id → 새 id)로 새 파일 entry에 다시 잇는다(아직 읽지 않은 entry도 새 파일에 있다 — 객체의 `BulkDataRef` 필드는 바꾸지 않는다, 7.1절 15). 직렬화를 시작한 세대 = 현재 세대일 때만 dirty를 지운다(저장 중 편집이 있었으면 dirty 유지 — 편집으로 새로 생긴 raw 데이터는 메모리에 있으므로 다음 저장이 쓴다). 마지막으로 인덱스를 갱신. 파일에 쓰는 새 id는 저장 직렬화의 값 치환 hook(B4가 구현한 `SubstituteStruct` — graph v2가 쓴다)이 직렬화 바이트에 쓰고, 같은 옛 id를 가리키는 여러 참조는 같은 새 id가 된다.
 8. 잠금 아래에서 발견한 `<name>.rasset.<guid 36자>.tmp` 형태의 파일만 고아로 지운다. 재검색·감시는 `.tmp`를 무시. 교체는 이름만 바꾸므로 새 파일은 이전 대상의 ACL·속성·대체 스트림을 승계하지 않는다(두 플랫폼, 두 경로 모두).
 
 ### 5.6 리플렉션·빌드 보강(A0-B 상세)
@@ -270,7 +270,7 @@ A1a 구현(`Engine/Source/Runtime/AssetRuntime` — `PackageFormat.h`·`PackageW
 16. **resolver 결과와 Prepare의 allocator**:
     - `PackageImportResolver`가 준 handle은 그 에셋의 공개된 `Package`여야 한다. null·회수된 handle·Package가 아닌 객체·다른 AssetId는 진단 None + `InvalidArgument`다(`AssetPackage_ResolverResultIsValidated` — 처음 구현은 조용히 잘못 이었다).
     - `Prepare`(아무 스레드)는 상태 allocator만 쓰고 Registry allocator(소유 스레드 전용 — ObjectRegistry `ObjectAllocator`)는 `InstantiatePackages`(소유 스레드)만 쓴다. 압축을 푼 bulk 저장소는 상태 allocator로 잡고 Package가 복사 없이 이어받는다(bulk가 GB일 수 있어 소유 스레드에서 다시 복사하는 비용을 피한다). 그래서 상태 allocator는 그 상태로 만든 Package(Registry)보다 오래 살아야 한다 — 런타임 로더(A1c)는 엔진 수명의 로더 allocator를 쓴다. 시험은 할당 스레드를 기록하는 allocator로 Registry를 만들어 worker Prepare 동안 Registry allocator가 불리지 않음을 단언한다(`AssetPackage_PrepareUsesOnlyStateAllocator`).
-17. **ImportOwner·Tags**: ImportRecord의 내용 스키마(ownerAssetId 포함)는 A2(AssetDatabase)가 정하므로 ImportOwner 의존과 ImportRecord의 로드 대조는 A2로 미룬다(지금은 ImportOwner·Build 의존을 쓰고 읽되 대조하지 않는다 — `AssetPackage_ImportOwnerCrossCheckDeferredToA2`). 여러 ImportOwner 항목과 required의 뜻도 A2가 ImportRecord 스키마와 함께 정한다. Tags는 Record envelope·TLV 구조와 키(필드 ID) 엄격 오름차순을 reader와 writer 옵션 검증이 같이 본다(값 스키마는 A2 — `AssetPackage_TagsKeysAreSorted`).
+17. **ImportOwner·Tags**: ImportRecord의 내용 스키마(ownerAssetId 포함)는 A2(AssetDatabase)가 정하므로 ImportOwner 의존과 ImportRecord의 로드 대조는 A2로 미룬다(지금은 ImportOwner·Build 의존을 쓰고 읽되 대조하지 않는다 — `AssetPackage_ImportOwnerCrossCheckDeferredToA2`). 여러 ImportOwner 항목과 required의 뜻도 A2가 ImportRecord 스키마와 함께 정한다. Tags는 Record envelope·TLV 구조와 키(필드 ID) 엄격 오름차순을 reader와 writer 옵션 검증이 같이 본다(값 스키마는 A2 — `AssetPackage_TagsKeysAreSorted`). A2는 값 스키마를 문자열 키 → 문자열 목록으로 정하고 이 검증을 바꾸며, ImportOwner 대조는 AssetDatabase가 한다(7.1절 2·7).
 18. **에디터 읽기 전용 열기의 기대 결과**: 더 새 데이터(모르는 필드·더 새 타입·커스텀 버전·Required가 아닌 모르는 섹션)를 담은 에디터 파일은 `Prepare`가 읽기 전용으로 받고 `InstantiatePackages`·Commit까지 간다. 모르는 필드는 건너뛰므로 그 안의 Hard·Soft·bulk 참조는 기본값(null·빈 값)으로 남고, Dependencies는 부분집합만, 쓰이지 않는 import·bulk entry는 검사하지 않으며, Package는 bulk entry를 그대로 가진다(`AssetPackage_EditorReadOnlyLoadsEndToEnd`). 현재 클래스가 없는 export 타입(미등록, 또는 등록됐지만 클래스가 아닌 타입 id)은 reader가 읽기 전용으로 표시하고(헤더·인덱스 도구) `PackageContents::unavailableExportType`에 남긴다. 객체를 만들 클래스가 없으므로 `Prepare`는 그래프 1단계 전에 이 reader 판정으로 Summary `UnsupportedVersion`(`Unsupported`)을 낸다. 그래프 1단계의 TypeMismatch로 분류하지 않는 것은 그 오류가 노드 Record 손상에서도 나기 때문이다(처음 구현은 미등록은 그래프 NotFound → `UnsupportedVersion`, 클래스가 아닌 타입은 그래프 TypeMismatch → `CorruptPackage`로 갈렸다 — `AssetPackage_NonClassTypeHasNoCurrentVersion`). 미등록 클래스의 자리표시 객체(UE의 누락 클래스 처리)는 그래프 복원에 노드 생략·참조 null화를 더해야 하는 설계 변경이라 이 단계에서 하지 않는다(5.7절 9의 "에디터는 읽기 전용"은 reader 판정의 뜻이다).
 19. **로드의 타입·객체 조회 실패**(판정 리뷰 반영): 로드가 찾은 객체·등록 저장소에 다시 묻는 조회의 실패는 단언하지 않고 진단 None + 원래 오류로 돌려준다.
     - import 대상(대표 에셋·하위 객체)의 `AcquireType`: 단언하지 않고 진단 None으로 그 오류를 돌려준다. 파생 판정은 그 lease(`TypeLease::IsA`)로 해 등록 저장소를 다시 묻지 않는다. 닿는 경로는 `InstantiatePackages` 도중 닫히는 TypeRegistry다: `FindObject`·`FindChild`·`Resolve`는 ObjectRegistry의 종료만 보지만 `AcquireType`은 객체의 타입 lease를 복제하고(`AcquireTypeChecked` → `TypeLease::Clone`), 그 복제는 TypeRegistry가 닫혔으면 `ShuttingDown`이다. `TypeRegistry::Shutdown`은 lease가 남아 `Busy`를 돌려줄 때도 닫힘 표시를 먼저 세운다. 시험 `AssetPackage_TypeRegistryClosesDuringInstantiate`는 상태 allocator가 Prepare 뒤 n번째 할당(첫 할당은 import 해석 전의 대상 표 예약)에서 Shutdown을 부르게 해(모든 n) 결과가 성공이거나 진단 None + `ShuttingDown`임을 보고, resolver 장면(Hard 의존의 대표 에셋 대조)과 묶음 장면(EditorOnly 참조만 — 대조 없이 import 대상 조회) 양쪽에서 ObjectImports 지점에 닿음을 센다. 처음 이 항목은 "지금 엔진에서 닿는 로드 경로가 없다"고 적었는데 이 경로를 놓쳤다. 판정 리뷰가 처음 든 경로(정책 없는 Registry의 `RequestDestroy`만 받은 대상)는 그런 Registry에 패키지를 로드할 수 없어 닿지 않는다 — 패키지는 `packageNativeType = Package`인 Registry에만 로드한다(`InstantiatePackages` 인자 `InvalidArgument` — 정책 없음·다른 타입 모두, `AssetPackage_LoadRequiresPackagePolicyRegistry`; 처음 구현은 그런 Registry로 연 트랜잭션도 받아 그래프 생성 단계가 Objects `CorruptPackage`로 거부했다).
@@ -281,8 +281,8 @@ A1a 구현(`Engine/Source/Runtime/AssetRuntime` — `PackageFormat.h`·`PackageW
 
 ### 6.1 객체 통합
 
-- 로드된 패키지·에셋은 `AssetManager`가 소유하는 **에셋 객체 Registry**(고유 ContextId, 엔진 TypeRegistry 공유)에 있다. World Registry와 분리한다(여러 World·Tryout 공유, 에셋끼리 ObjectRef 가능). 접근은 `AssetManager::With`(에셋 문맥 ObjectAccessScope를 중첩해 연다).
-- `Package : Object`(Outer·이름 없음 — 정체성은 AssetId): `ROCKS_PROPERTY(Transient, ReadOnly) AssetId id`, 플래그, 하드 의존 패키지 목록(`ROCKS_PROPERTY(Transient) ObjectRefArray<Package>` — AssetManager 조회용 사본이며 GC 보존 역할은 없다, 존치 여부는 A1이 정한다), bulk 접근자(`ROCKS_NATIVE`: 에디터 패키지 파일의 열린 핸들 + BulkIndex. 지연 읽기를 하며 저장 성공 후 새 파일로 다시 잇는다, 5.5절). 소속 객체(export)는 목록이 아니라 Registry 자식 고리가 붙잡고(패키지 정책 Registry의 outer → inner 강한 간선 — [ObjectFoundations](ObjectFoundations.ko.md) 1.7절) export 순서는 `CollectInners(DepthFirst)`다. `Asset : Object`(`ROCKS_CLASS(Abstract)`)의 Outer는 Package. inner → outer 강한 간선(계획 §5.2)과 패키지 정책의 outer → inner 강한 간선이 함께 있다.
+- 로드된 쿠킹 패키지·에셋은 `AssetManager`가 소유하는 **에셋 객체 Registry**(고유 ContextId, 엔진 TypeRegistry 공유)에 있다. 에디터 패키지는 AssetDatabase `EditorPackageSet`이 소유하는 **에디터 객체 Registry**(같은 패키지 정책 Registry·`ReferenceObserver`)에 있다(7.1절 3 — AssetManager·AssetLoader는 쿠킹 매니페스트 전용이다). World Registry와 분리한다(여러 World·Tryout 공유, 에셋끼리 ObjectRef 가능). 접근은 `AssetManager::With`(에셋 문맥 ObjectAccessScope를 중첩해 연다).
+- `Package : Object`(Outer·이름 없음 — 정체성은 AssetId): `ROCKS_PROPERTY(Transient, ReadOnly) AssetId id`, 플래그, 하드 의존 패키지 목록(`ROCKS_PROPERTY(Transient) ObjectRefArray<Package>` — AssetManager 조회용 사본이며 GC 보존 역할은 없다, 존치 여부는 A1이 정한다), bulk 접근자(`ROCKS_NATIVE`: 에디터 패키지는 bulk 저장소 — 파일 경로 + 로드 지문 + BulkIndex로 지연 읽기를 하고 필요할 때 파일을 다시 연다(UE `FEditorBulkData`의 PackagePath + offset), 저장 성공 후 새 파일로 다시 잇는다, 5.5절·7.1절 15). 소속 객체(export)는 목록이 아니라 Registry 자식 고리가 붙잡고(패키지 정책 Registry의 outer → inner 강한 간선 — [ObjectFoundations](ObjectFoundations.ko.md) 1.7절) export 순서는 `CollectInners(DepthFirst)`다. `Asset : Object`(`ROCKS_CLASS(Abstract)`)의 Outer는 Package. inner → outer 강한 간선(계획 §5.2)과 패키지 정책의 outer → inner 강한 간선이 함께 있다.
 - 저장 속성은 `ROCKS_PROPERTY`. 대용량 데이터는 `ROCKS_STRUCT BulkDataRef`(bulkId 1부터·rawBytes·`Sha256Digest`) 필드이고 내용은 Bulk 섹션. 쿠킹 플랫폼 데이터의 mip별 entry도 bulkId로 가리킨다(파일 offset은 BulkIndex만 안다).
 - 대표 에셋의 AssetId는 `ROCKS_PROPERTY(Transient, ReadOnly) AssetId`이며 로드 때 `prepare` hook이 Commit 전에 설정한다.
 - 에셋 객체 Registry의 모든 객체는 Package이거나 Outer 체인이 Package에 닿는다(Registry 정책 — 패키지 없는 객체 생성은 거부한다). 그래서 모든 하드 간선에는 소유 패키지가 있다. 패키지는 이름이 없고(정체성은 AssetId), 이 Registry의 `RequestDestroy`는 Unsupported라 소속 객체는 Discard로만 죽는다(ObjectFoundations 1.3·1.7절).
@@ -317,9 +317,188 @@ World 객체는 에셋 객체 Registry 밖에 있어 `ObjectRef<에셋>`을 걸 
 - 임포터 태그(Unreal 교환 UXR2, 2026-11-20): Tags 섹션의 키는 타입이 정하는 것 외에 임포터가 정하는 키도 둘 수 있다. 임포터 키는 `<임포터 이름>.` 접두로 타입 키와 겹치지 않게 한다(예: Unreal 교환의 `UnrealExchange.ObjectPath`·`UnrealExchange.FormerPaths` — [Unreal 교환 형식](UnrealExchange.ko.md) 9.2절). AssetIndex는 임포터 키도 같은 방식으로 색인하고 값 일치 조회를 제공한다. 값이 목록인 키(옛 경로 목록)는 원소마다 색인한다.
 - 일관성: 프로세스 로컬 최종 일관 인덱스. 쓰기 결정은 잠금 아래에서 디스크를 다시 확인.
 - 갱신: 자기 명령은 즉시. 외부 변경은 `DirectoryWatcher`(계약은 `Platform/DirectoryWatch.h`): 감시 시작 → 검색 → 쌓인 이벤트 적용. 이벤트 종류를 믿지 않고 경로를 다시 Stat·범위 읽기(레벨 트리거). `Overflow(path)`는 그 하위 트리 재검색, `RootRemoved`는 감시를 닫고 `RootLost` 진단·1초 간격으로 루트 재출현을 확인해 다시 연다. 쓰는 중이라 `CorruptPackage`인 파일은 크기·시각이 두 번 연속 같아질 때까지 최대 10초 기다린 뒤 다시 읽고, 그래도 손상이면 진단으로 남긴다.
-- 캐시: `Intermediate/AssetIndex.cache`(형식·Unicode·스키마 버전 키 — 도구 빌드 ID는 header에 진단용으로만 기록해 엔진을 다시 빌드할 때마다 캐시가 무효화되지 않게, 원자적 기록, 잠금 보유 프로세스만 기록 — 읽기 명령은 캐시를 읽기만). 파일별 헤더+섹션 표 SHA-256과 요약. 시작 시 범위(약 1 KiB)만 읽어 비교, 다르면 그 파일만 다시 읽음. 범위 읽기는 WorkerScheduler 병렬.
+- 캐시: `Intermediate/AssetIndex.cache`(키: 형식·항목 스키마·판정 의미·Unicode·호환 엔진 버전(주·부)·customVersions 다이제스트·이름 정규화 플래그 — 7.1절 16 A2d1. 도구 빌드 ID는 header에 진단용으로만 기록해 엔진을 다시 빌드할 때마다 캐시가 무효화되지 않게, 원자적 기록, 잠금 보유 프로세스만 기록 — 읽기 명령은 캐시를 읽기만, 점검·재구축 명령은 캐시를 쓰지 않는다). 파일별 헤더+섹션 표 SHA-256과 요약. 시작 시 범위(약 1 KiB)만 읽어 비교, 다르면 그 파일만 다시 읽음. 범위 읽기는 WorkerScheduler 병렬.
 - `Verify()`: 4.6절 진단 보고만.
 - 원본 감시: 원본 SHA-256이 ImportRecord와 다르면 `SourceChanged`. 자동 재임포트는 기본 꺼짐, 켜면 debounce(500 ms) 후 재임포트, 실패 시 기존 보존·진단(계획 §9.4).
+
+### 7.1 구현에서 정한 점(A2 — AssetDatabase, 설계 2026-11-21)
+
+A2는 에디터 쪽 에셋 데이터베이스다(4·5.4·5.5·7·8·13·16절). 출발점은 AssetRuntime의 패키지 writer(메모리 sink)·reader(전체 파일·헤더만)·동기 로드(`PackageLoadState`)·`NewPackage`, PlatformBase의 `FileLock`·`DirectoryWatcher`·`Replace`·`Move`·`SyncDirectory`, Core의 `ValidateNameComponent`·`TryMakeNameComponentKey`·`TryMakeCaselessKey`·JSON, HostConfig의 `FindProjectFrom`이다. 애매한 곳은 UE 5.8을 따른다(`FPackageName` 마운트, `SavePackage`의 임시 파일 → 이동, `FAssetData`·`DiskCachedAssetData`, `MarkPackageDirty`, `GetAssetRegistryTags`, 누락 import는 경고 + null — `LinkerLoad.cpp` ImportFailure, 이동·삭제 전 `ResetLoaders`). 설계 초안은 리뷰 1회로 고쳤다(아래 결정의 "리뷰" 표시).
+
+1. **모듈과 이름**: `Engine/Source/Developer/AssetDatabase`(Developer — 에디터·도구만 링크, 게임은 쿠킹 결과만 읽는다), 의존 `AssetRuntime`·`HostConfig`(프로젝트 탐색 재사용 — 리뷰). 13절 서비스 API의 이름은 `AssetService`이고(명령과 1:1), 그 아래 부품이 `ProjectLayout`·`AssetIndex`·`EditorPackageSet`이다. 시험은 EngineTests(`Engine/Source/Developer/AssetDatabase/Tests`), 시험 에셋 타입은 `AssetTestFixtures`.
+
+2. **AssetRuntime에 더하는 것**(리뷰 — 처음 적은 "부분 읽기와 파일 sink만"은 틀렸다):
+   - 범위 읽기 인터페이스 `PackageRangeReader { virtual Result<void> ReadAt(uint64 offset, Span<uint8> out) noexcept = 0; virtual uint64 FileBytes() const noexcept = 0; }`와 메모리·파일 구현.
+   - 부분 읽기 `ReadPackageIndex(Allocator&, PackageRangeReader&, const PackageReadOptions&, PackageIndexView& out, AssetDiagnostic*)`: 헤더·섹션 표와 Summary·Exports·ObjectImports·Dependencies·ImportRecord·Tags를 범위 읽기로 가져와 5.1절 1–4의 같은 판정과 그 섹션 CRC를 본다. Objects·Bulk·BulkIndex의 내용은 읽지 않는다(표의 위치·겹침·패딩 판정은 표만으로 하고, 패딩 byte 0 검사는 읽지 않는 구간이라 하지 않는다). 결과는 소유 버퍼다(`PackageContents`처럼 파일 byte를 빌리지 않는다).
+   - 고정 버퍼 재검증 `VerifyPackageFile(PackageRangeReader&, scratch)`(5.5절 5 — 헤더·표·모든 섹션 CRC·bulk entry CRC를 일정 크기 버퍼로 훑는다).
+   - 파일 sink `FilePackageSink`(`platform::File` 위 `Append`·`WriteAt`).
+   - bulk 저장소 `PackageBulkStore`(Package의 bulk 접근 추상 — 6.1절): 런타임은 지금처럼 메모리, 에디터는 AssetRuntime `FilePackageBulkStore`(지연 읽기·`Detach`·저장 뒤 새 파일로 다시 잇기 — 7.1절 15). `PackageLoadState`에 bulk를 풀지 않고 저장소만 잇는 선택지를 더한다. 저장 뒤 재매핑은 객체 필드가 아니라 저장소의 id 표로 한다(7.1절 15 — 처음 적은 `RemapBulkReferences`는 버렸다).
+   - 메모리 bulk id 이름 공간(리뷰): 저장하지 않은 새 bulk는 `BulkDataRef::bulkId`의 최상위 bit(`UnsavedBulkIdBit = 0x80000000`)가 선 id를 쓰고, 파일 bulk는 1–0x7FFFFFFF다. writer는 저장마다 모두 1부터 다시 매기고 재매핑 표의 키는 옛 id 하나로 유일하다. 패키지 reader는 최상위 bit가 선 id를 `CorruptPackage`로 거부한다.
+   - Tags 값 스키마(리뷰 — 5.7절 17이 미룬 것): Tags 섹션은 Record 하나이고 필드 1 = `RecordList[{ key: string, values: string list }]`, key는 byte 순 엄격 오름차순·유일, 값은 문자열 목록(한 값이면 원소 하나 — UE `FAssetData` 태그는 이름 → 문자열이고 목록 키(7절 `UnrealExchange.FormerPaths`)는 원소마다 색인). writer 검증(`ValidateTagsRecord`)을 이 스키마로 바꾼다(하위 호환 없음).
+   - Build 의존 선언(16.2절 `DependencyDeclarer`)과 타입별 태그(UE `UObject::GetAssetRegistryTags` 대응)는 AssetRuntime `AssetTypeHookTable`의 hook으로 둔다(구현은 타입 모듈 — 7.1절 15).
+
+3. **에디터 Registry**(리뷰 — 6.1절을 고친다): 에디터·도구의 패키지는 `EditorPackageSet`이 소유한 **에디터 객체 Registry**(패키지 정책 Registry, 고유 ContextId, `ReferenceObserver` 포함)에 있다. 쿠킹 매니페스트를 읽는 `AssetManager`·`AssetLoader`는 에디터 패키지를 읽지 않으므로 쓰지 않는다. A4 쿠커도 이 Registry에서 에디터 패키지를 읽는다. 6.1절의 "도구도 AssetManager를 소유"는 쿠킹 결과를 읽는 도구(`asset-load-cooked`)에만 해당한다.
+
+4. **하위 단계와 순서**(리뷰 — 저장이 색인의 부분 읽기·검색에 기대므로 순서를 바꿨다. 각 단계는 A1과 같은 완료 조건 넷이고, 그 단계의 서비스 API가 생기면 13절 명령도 함께 더한다 — 1절 표의 A6은 문서·검증 보고만):
+
+| 단계 | 내용 | 13절 명령 |
+|---|---|---|
+| A2a | `ProjectLayout`(프로젝트 루트·`Content`·`Config`·`Intermediate`·`Saved`, 마운트 표 `/Game`), 논리 경로(파싱·NFC·caseless 키·OS 이름 대응), 쓰기 잠금 `AssetDatabaseLock`, 시계·감시 변경 공급 인터페이스(9) | — |
+| A2b | AssetRuntime 범위 읽기·부분 읽기, `AssetIndex` 검색·조회·진단(캐시·감시 없이 — 전체 검색) | `asset-list`·`asset-info`·`asset-index-verify` |
+| A2c1 | AssetRuntime 저장 기반: 파일 sink·재검증·bulk 저장소(지연 읽기·저장하지 않은 bulk·id 표 다시 잇기·`Detach`)·Defer 열기·`AssetTypeHookTable`(7.1절 15) | — |
+| A2c2a | `EditorPackageSet` 열기: Defer·Hard·EditorOnly 닫힘·누락 import null 규칙·ImportRecord 파서·ImportOwner 대조·색인 ImportRecord 요약(7.1절 15) | — |
+| A2c2b | 저장(5.5절 1–8)·dirty(5)·Tags·Build 생성(hook)·`AssetIndex::Refresh`·고아 `.tmp`(7.1절 15) | — |
+| A2c3 | 명령과 Commandlet 타입 등록(7.1절 15) | `asset-new`·`asset-set`·`asset-info`·`asset-list --type` |
+| A2d | 색인 캐시(`Intermediate/AssetIndex.cache`)·감시 갱신(7절) | `asset-index-rebuild` |
+| A2e | 작업: 별칭 표, 이동·이름 변경(파일·디렉터리), 복제, 삭제, 중복 ID 해결, 고아 출력(16.1절), `Detach`(6) | `asset-move`·`asset-duplicate`·`asset-delete`·`asset-fix-duplicate-id`·`asset-alias-*`·`asset-orphans-*` |
+| A2f | 임포트 프레임워크: `Importer`(입력 원본 byte·옵션 → 출력 그래프·bulk), 원본 루트(`Config/AssetSources.json`), 임포트·재임포트(제자리 갱신 — 8), `SourceChanged`, ImportOwner 대조(7) | `asset-import`·`asset-reimport`(시험 임포터로 확인, 텍스처 임포터는 A5) |
+
+5. **dirty**(리뷰, A2c 교차 검증으로 고침): 명시 `EditorPackageSet::MarkDirty(package)`(UE `MarkPackageDirty`·`UPackage::SetDirtyFlag`)만 세대를 올린다. `EditorPackageSet`의 편집 진입점(서비스 API 대입·하위 객체 생성·Discard·bulk `AddUnsaved`)이 대상 패키지에 `MarkDirty`를 부른다. `ReferenceObserver`는 계수·진단용이고 dirty에 쓰지 않는다(그것은 다른 패키지 사이 강한 간선의 순 합산만 보아 같은 대상 패키지 안 다른 객체로의 변경·스칼라·Soft·bulk·하위 객체 추가를 놓친다). 저장은 직렬화 시작 때의 세대를 기억하고 끝에 같을 때만 dirty를 지운다(5.5절 7).
+
+6. **열린 패키지와 파일 작업**(리뷰): 이동·삭제·덮어쓰기 전에 그 파일(디렉터리면 아래 모든 파일)의 패키지를 `Detach`한다 — 아직 읽지 않은 bulk를 메모리로 읽어 저장소를 메모리로 바꾸고 캐시된 파일 핸들이 있으면 닫는다(UE `ResetLoaders`). 이동 뒤 `EditorPackageSet`의 경로 표를 고친다. dirty 패키지의 이동은 허용하고(내용은 메모리에 있다) 다음 저장은 새 경로에 쓴다.
+
+7. **ImportRecord**: 스키마는 5.4절 그대로이고 파서·writer는 AssetDatabase에 둔다(AssetRuntime은 스키마를 모른다). ImportOwner 대조(5.7절 17)는 AssetDatabase의 열기·색인이 한다: 자기 자신이 아닌 `ownerAssetId`면 Dependencies에 그 id의 ImportOwner 항목이 정확히 하나(required)여야 하고, 자기 자신이면 ImportOwner 항목이 없어야 한다. 위반은 `CorruptPackage`. 여러 ImportOwner는 허용하지 않는다.
+
+8. **재임포트**: 기존 객체를 제자리에서 갱신한다(UE 재임포트와 같이 출력 객체의 정체성·참조자의 ObjectRef 유지). 임포터가 같은 출력 키에 같은 타입을 내면 필드를 덮어쓰고, 사라진 출력은 `OrphanedOutput`, 타입이 바뀐 출력은 새 객체로 바꾸고 진단한다.
+
+9. **결정적 시험을 위한 주입점**(리뷰):
+   - 시계 `AssetClock { virtual int64 NowTicks() noexcept = 0; }` — RootLost 재확인(1초), 쓰는 중 파일 대기(최대 10초, 두 번 연속 같음), 원본 debounce(500 ms), 별칭 생성 UTC·만료 계산이 모두 이 시계를 쓴다. 갱신은 `AssetIndex::Pump(now)`처럼 시각을 받는 호출이라 시험이 고정 시각을 단언한다.
+   - 감시 변경 공급 `DirectoryChangeSource`(`DirectoryWatcher`는 `final`이라 감싼다) — 시험은 이벤트를 주입하고, 실제 OS 감시는 `Wait` 루프와 실패 상한으로 한 번만 확인한다(sleep 없음).
+   - 파일 시스템은 `platform::FileSystem&`로 받는다(고장 주입 — A1e `ReadManifestFile`과 같은 방식). "저장 중 편집"은 고장 FileSystem의 Flush·Replace hook이 소유 스레드에서 편집을 넣는다.
+   - 두 프로세스 잠금·동시 쓰기는 `Platform/Process` 자식과 파이프 gate로 순서를 정한다(Busy는 대기 0으로, "대기 후 성공"은 해제 gate 뒤 획득으로 단언).
+   - 병렬 부분 읽기의 결과·진단은 키 순으로 정렬해 완료 순서와 무관하게 한다.
+
+10. **경로**(A2a, 리뷰):
+    - 논리 경로 파싱은 4.2절 규칙을 순서대로 판정하고(앞 `/` → 구분자·빈 구성 요소 → 마운트 → 구성 요소마다 NFC 정규화 뒤 `ValidateNameComponent` → 전체 256 byte) 실패하면 `InvalidPath`와 이유(구성 요소 index·`NameComponentError`).
+    - OS 이름 대응: 색인 항목은 실제 OS 상대 이름(열거한 byte 그대로)을 보관하고, 있는 파일의 OS 경로는 색인에서 얻는다. 새로 만드는 파일은 NFC 이름으로 만든다. 열거한 이름이 NFC가 아니면 NFC로 바꿔 논리 경로를 만들되, 바이트로 비교하는 파일 시스템(Linux·NTFS)에서는 그 NFC 이름이 실제 파일을 가리키지 않으므로 `InvalidPath`로 남기고 색인하지 않는다(macOS는 NFD 저장이 정상이라 받는다). caseless 키가 같은 두 파일은 `DuplicatePath`(둘 다 진단, 경로 조회에서 뺀다 — ID 조회는 된다).
+    - 경로 상한: 논리 경로 256 byte(4.2절)가 프로젝트 기준 이식 가능한 상한이고, 절대 OS 경로(임시 접미사 `.<guid 36>.tmp` 41 byte 포함)는 플랫폼 상한으로 검사한다(넘으면 `InvalidPath`). 상한은 끝 NUL을 뺀 UTF-8 byte다: Windows는 긴 경로 32767 UTF-16 단위에서 NUL과 PlatformBase의 UNC 긴 경로 접두 실질 증가(6)를 뺀 32760, macOS는 PATH_MAX 1024 − 1, 그 밖은 4096 − 1(PATH_MAX는 NUL을 포함한다 — A2a 리뷰). 시험이 그 길이의 파일을 실제로 만든다.
+    - 프로젝트 루트는 절대 경로로 바꾼다(UE `FPaths::ConvertRelativePathToFull` — 상대 경로는 작업 디렉터리 기준, Windows 현재 드라이브 루트·드라이브 상대는 거부). 루트뿐인 경로("C:/"·"/")는 그대로 둔다.
+    - 패키지 확장자는 ASCII 대소문자를 무시한다(UE `FPackageName::IsAssetPackageExtension` — `Hero.RASSET`도 같은 패키지 자리이고 실제 이름은 색인이 가진다. byte 일치로 두면 대소문자를 무시하는 파일 시스템에서 색인하지 않은 그 파일을 같은 경로의 저장이 덮어쓴다 — A2a 리뷰). 그래서 byte로 비교하는 파일 시스템(Linux)에서는 `Hero.rasset`과 `Hero.RASSET`이 같은 논리 경로가 되며 색인(A2b)이 `DuplicatePath`로 보고한다.
+    - 프로젝트 탐색은 HostConfig `FindProjectFrom`을 쓴다(13절 `--project` 기본값).
+
+11. **색인**(A2b·A2d): 항목은 `{assetId, 논리 경로, key, OS 상대 이름, 대표 타입, 지문, 크기, 수정 시각, dependencies, tags, ImportRecord 요약, readOnly}`. 조회는 7절 목록이고 타입 상속 조회는 등록된 타입만 상속을 따르며 등록되지 않은 타입 id는 정확 일치만 한다(리뷰). 캐시는 7절 그대로 범위 읽기로 지문을 비교한다(리뷰 — 크기·수정 시각만 보는 UE `DiskCachedAssetData` 방식은 FAT 2초 해상도와 같은 크기 편집을 놓친다). 부분 읽기와 전체 읽기의 판정 관계는 시험 표로 둔다: 헤더·섹션 표·읽은 섹션의 손상은 같은 진단, Objects·Bulk 내용과 그 패딩의 손상은 부분 읽기 통과·열기 실패.
+
+12. **그 밖**(리뷰 권장): 다중 출력 임포트의 출력 경로는 `<주 출력 경로>_<출력 키>`(UE 다중 임포트의 접미 규칙)이고 충돌하면 임포트를 거부한다. 임포트 옵션의 텍스트 표기는 `ReflectionText`를 쓴다. 별칭이 있는 경로에 새 에셋을 만들거나 이동해 오면 그 경로가 점유된 것으로 보고 거부한다(UE redirector가 경로를 점유하는 것과 같다 — 별칭을 지운 뒤 쓴다). 고아 임시 파일(`*.rasset.<guid>.tmp`)은 잠금을 쥔 저장이 그 디렉터리에서, 잠금을 쥔 전체 검색(`asset-index-rebuild`)이 전체에서 지운다.
+13. **A2b 세부**(2026-11-21, 구현 착수 전):
+    - 부분 읽기는 `ReadPackage`와 판정 코드를 함께 쓴다. AssetRuntime의 읽기 핵심을 바이트 공급원 추상(전체 파일 span 또는 범위 읽기)으로 바꾸고, 전체 읽기는 지금과 같은 판정·같은 진단을, 부분 읽기는 그중 Objects·Bulk·BulkIndex 섹션의 내용·CRC, 섹션 사이 패딩 byte 0 검사, bulk 대조만 건너뛴다(표의 위치·정렬·겹침·종류별 flags·schemaVersion 판정은 그대로). 부분 읽기는 헤더(64 byte)·섹션 표를 먼저 읽고 고른 섹션마다 범위 읽기를 한다. 범위마다 소유 버퍼를 잡아 `PackageIndexView::buffers`에 두므로 결과 view가 그 버퍼를 가리킨다(이동해도 유효 — 처음 설계의 "합만큼 한 번"은 섹션 크기 검사 전에 합을 믿어야 해서 범위마다로 바꿨다). 64 byte보다 작은 파일은 있는 만큼으로 헤더 판정을 한다(전체 읽기와 같은 진단). 범위 읽기의 IO 오류는 그 오류(진단 None)다.
+    - 범위 읽기 `PackageRangeReader`의 구현은 메모리(`MemoryPackageRangeReader`)와 파일(`FilePackageRangeReader` — `platform::FileSystem&`로 열어 Seek + ReadExact, 고장 주입은 FileSystem)이다.
+    - Tags 값 스키마(2)도 A2b에서 정한다(색인이 읽는다): `ReadPackageTags`·`WritePackageTags`(AssetRuntime `PackageTags.h`). 배치는 Record(`PackageTagsSchema`){ RecordList[ Record{ 키 String, 값 String } ] }이고 항목은 (키, 값) UTF-8 byte 순 엄격 오름차순이다(목록 값은 같은 키의 항목 여러 개 — 원소마다 색인). 키는 비지 않은 1–256 byte, 값은 4 KiB 이하(패키지 문자열 상한), 둘 다 UTF-8이다. 패키지 형식 층(writer·reader의 Tags 검증)은 지금처럼 "필드 id 오름차순 Record"만 본다 — 형식 층에 값 스키마를 강제하면 형식 시험·golden byte를 모두 바꿔야 하고 형식 층이 값 의미를 알 필요가 없다(처음 설계의 "검증 교체"를 바꿨다). 다른 스키마 Guid의 Tags는 형식으로 유효하고 색인은 `UnsupportedVersion` 진단을 남기고 태그 없이 색인한다.
+    - `AssetIndex`(AssetDatabase): `Rebuild(FileSystem&, PackageReadOptions)`가 `Content/`를 재귀 열거해(링크는 따라가지 않는다) `.rasset`(대소문자 무시)만 부분 읽기로 색인하고, `*.tmp`와 그 밖의 파일은 무시한다(UE AssetRegistry가 패키지 확장자만 보는 것과 같다). 항목은 논리 경로 키 → OS 상대 이름 순, 진단은 OS 상대 이름 → 코드 순으로 정렬한다(7.1절 9 — InvalidPath 파일은 논리 경로 키가 없어 진단은 이름으로 정렬한다). A2b는 한 스레드로 차례로 읽는다 — worker 병렬 읽기는 캐시·감시 갱신과 함께 A2d가 더한다(정렬이 완료 순서를 지우므로 결과는 같다).
+    - 진단(4.6절 코드): 이름 규칙 위반 `InvalidPath`(LogicalPathError 사유), 패키지 판정 실패는 그 코드(`CorruptPackage`·`UnsupportedVersion`·`NewerVersion`), 쿠킹 패키지는 `CorruptPackage`(에디터 기대), 같은 AssetId 둘 이상 `DuplicateAssetId`(모두 진단, ID 조회는 AlreadyExists), 같은 경로 키 둘 이상 `DuplicatePath`(모두 진단, 경로 조회는 AlreadyExists — 7.1절 10). `Verify`가 더하는 것: 색인에 없는 Hard·Soft 의존 `MissingDependency`(EditorOnly·Build·ImportOwner는 A2c 이후), TypeRegistry가 있을 때 Hard 대상의 대표 타입이 expectedType도 그 파생도 아니면 `TypeMismatch`(로드와 같은 판정 — 5.7절 14). Registry가 없으면 파생 여부를 알 수 없어 형식은 대조하지 않는다(정확 일치로 대조하면 로드되는 참조를 오류로 보고한다 — 리뷰 지적).
+    - 조회: ID, 경로(LogicalPath 키), 디렉터리(마운트 또는 논리 경로 아래 — 바로 아래만 또는 재귀), 대표 타입(정확 일치 또는 TypeRegistry로 파생 포함 — 미등록 id는 정확 일치), 태그(키·값 일치, 목록 값은 원소마다), 정방향 의존(종류 묶음), 역방향 참조자(종류 묶음). 결과는 경로 키 순이다.
+    - 명령(13절): `asset-list [--under=<path>]`(경로·AssetId·대표 타입 id 한 줄씩), `asset-index-verify`(진단 줄, 있으면 종료 1). 타입 이름 필터(`--type`)와 `asset-info`의 속성 출력은 commandlet이 타입을 등록해야 해서 A2c(`asset-new`·`asset-set`과 함께)로 미룬다.
+14. **A2b 구현에서 정한 것**(2026-11-21, 시험·리뷰 중에 정했다):
+    - 디렉터리 존재: `FileSystem::Exists`는 일반 파일만 참이라(디렉터리는 거짓) Content 존재 확인에 쓰지 않는다 — 실제 디스크 시험이 이것을 잡았다. 열거 결과로 판단한다: 없는 디렉터리(Content가 없거나 검색 중 지워진 하위 디렉터리)는 빈 디렉터리다. Content 자신의 열거 실패(Content가 파일이면 WrongType 대응 오류 포함)는 `Rebuild`의 그 파일 오류이고, 하위 디렉터리의 열거 실패(권한 거부·검색 중 파일로 바뀜)는 그 디렉터리 이름으로 진단 None과 원본 오류를 남기고 그 디렉터리만 뺀다(파일 IO 실패와 같은 규칙). 실패한 `Rebuild`는 색인을 비운다(앞 결과를 남기지 않는다).
+    - 파일 하나의 실패는 그 파일만 빼고 계속한다: 열거와 열기 사이에 사라진 파일은 `MissingFile`, 그 밖의 열기·읽기 IO 실패는 진단 None과 원본 오류(쿠킹 로더 10.1절과 같은 규칙), 일반 파일이 아닌 항목(장치 등)은 무시한다. 확장자뿐인 이름(`.rasset` — 배치는 "패키지 파일 아님"으로 보지만 확장자 검사는 통과한다)은 하위 디렉터리의 같은 이름(`Dir/.rasset` → 끝 '/')과 같게 `InvalidPath`(EmptyComponent)다. 유효한 UTF-8이 아닌 OS 이름(POSIX 열거는 byte 그대로 준다)은 논리 경로도, 그 이름으로 다시 열 경로(String은 UTF-8만)도 만들 수 없어 디렉터리·패키지 파일이면 `InvalidPath`(InvalidComponent — 이름 규칙의 잘못된 UTF-8과 같은 사유)로 진단하고 내려가지 않는다(그 밖의 파일은 무시). 할당 실패만 `Rebuild` 오류다.
+    - 진단의 이름(`fileName`·`related`)은 표시 이름이다: 한 줄·유효한 UTF-8이고 서로 다른 OS 이름이 같은 표시 이름이 되지 않게 역슬래시·제어 문자(0x00–0x1f·0x7f)와, 이름이 유효한 UTF-8이 아니면 0x80 이상 byte를 16진(역슬래시 x 두 자리)으로 적는다(역슬래시를 그대로 두면 글자 그대로 "\xff"인 이름과 0xFF byte 이름이 같아진다 — 재리뷰 지적). 항목의 `fileName`은 OS 이름 그대로다(색인되는 이름은 논리 경로 규칙상 역슬래시·제어 문자가 없다). 진단 줄은 표시 이름을 그대로 쓴다.
+    - 정렬·조회: Core `algo::Sort`(O(n log n), 안정 정렬 아님)와 `algo::LowerBound`를 쓴다(처음 구현의 삽입 정렬은 색인 10만 항목에서 비교 수십억 번이라 리뷰가 바꾸게 했다). 비교는 전순서다: 항목은 OS 상대 이름이 파일마다 다르고, 진단은 한 이름에 코드마다 하나뿐이며(경로·패키지·Tags 진단은 서로 배타, 같은 id·경로 진단은 각각 하나), id 순은 같은 id를 경로 순 위치로 가른다. Tags 쓰기도 같은 정렬 뒤 이웃 비교로 같은 쌍을 거부한다.
+    - ImportRecord 요약(7.1절 11 항목 목록)은 ImportRecord 스키마를 정하는 A2c로 미룬다 — A2b 항목은 ImportRecord byte를 읽기만 하고 담지 않는다.
+    - 같은 id·경로의 상대(`related`)는 정렬 순서(경로 키 순·id 순)에서 이웃한 파일이다 — 앞 이웃이 같으면 그것, 아니면 뒤 이웃(같은 값이 셋 이상이어도 각자 하나).
+    - Tags 읽기: Record·항목 버전이 `PackageTagsVersion` 밖이면 `Unsupported`(더 새 Tags — 색인은 `UnsupportedVersion` 진단, 다른 스키마 Guid와 같다), 그 밖의 형식 위반(키·값 필드 누락·wire 종류·빈 키·길이·UTF-8·순서·같은 쌍·목록 필드 모양·항목 스키마)은 `InvalidArgument`(색인은 `CorruptPackage` 진단, 칸 Tags). 둘 다 태그 없이 색인한다. 쓰기는 목록 전체가 Record 기본 한도를 넘으면 `CapacityExceeded`이고(측정: 값 4 KiB 태그 996개, 값 1 byte 태그 36157개까지), 읽기가 같은 기본 한도·예산으로 읽으므로 쓴 것은 모두 읽힌다.
+    - `ListByType`: 타입 0은 `InvalidArgument`. TypeRegistry 판정의 `NotFound`(미등록)·`TypeMismatch`(클래스가 아닌 id)는 파생 아님이고, 그 밖(종료 뒤 `ShuttingDown`)은 그 오류다. `Verify`도 같고, Registry가 없으면 형식 대조를 하지 않는다(7.1절 13). Hard 의존은 패키지 읽기가 expectedType을 반드시 갖게 검사하므로(5.2절) `Verify`는 그 값을 그대로 쓴다.
+    - 명령 세부: 옵션은 `--<이름>=<값>`만(13절 문법 — 같은 이름 두 번·빈 값·모르는 이름·위치 인수는 사용법 오류 2, `--help` 하나는 사용법을 표준 출력에 0). 13절 공통 옵션 `--wait=<초>`는 받되(10진 숫자가 아니면 2) 읽기 명령은 잠금을 잡지 않아 쓰지 않는다. 값의 범위(넘침) 검사는 그 값을 실제로 쓰는 A2c 쓰기 명령과 함께 넣는다. `--project`가 없으면 현재 디렉터리에서 위로 `*.rocksproject`를 찾고(HostConfig `FindProjectFrom`), 있으면 그 디렉터리에 기술자가 있어야 한다(오타·하위 디렉터리로 빈 색인을 내지 않게 — 위에서 찾은 다른 디렉터리면 실패 1). 읽기 옵션의 엔진 축은 명령 실행 파일의 엔진 버전(`build::CurrentEngineVersion`)이라 더 새 엔진이 저장한 패키지는 `NewerVersion` 진단이다(UE AssetRegistry도 너무 새 패키지를 읽지 않는다). `asset-index-verify`는 타입 Registry 없이 대조한다(명령은 타입을 등록하지 않는다 — 형식 대조는 타입을 등록하는 A2c 명령부터). 진단 줄은 AssetDatabase `AppendAssetIndexDiagnosticLine`이 만든다: `<진단 코드>: Content/<OS 상대 이름>: <설명>` — 코드 None(파일·하위 디렉터리 IO 실패)은 원본 오류 이름(`ErrorCodeName`)을 코드 자리에 쓰고 설명은 "cannot read the file or directory"다. 요약 `asset-index-verify: <항목 수> packages, <진단 수> diagnostics`는 표준 출력이다. `--under`가 논리 디렉터리가 아니면 `asset-list: InvalidPath: …` 실패 1이다.
+    - 명령 시험(C#)은 패키지를 만들 수 없어 C++ 시험이 고정한 fixture 배열(`AssetDatabase/Tests/AssetIndexCommandletFixtures.h` — `AssetIndex_CommandletFixtureBytes`가 writer 출력과 같은지 보고, 다르면 새 내용을 출력한다)을 읽어 프로젝트에 쓴다.
+
+15. **A2c 세부**(2026-11-21, 설계 — 교차 검증 1회 반영: 필수 6·권장 8): 저장·열기는 한 번에 크므로 넷으로 나눠(A2c1 → A2c2a → A2c2b → A2c3, 7.1절 4 표 — 저장 시험이 열기에 기대므로 이 순서) 부분마다 완료 조건 넷(14절)을 지킨다. 출발점 사실(조사): bulk는 로드 때 모두 메모리로 풀고(`DecodePackageBulk` → `PackageAccess::SetPackage`) 지연 읽기·저장소 추상이 없다. 객체의 `BulkDataRef`를 바꿔 쓰는 범용 리플렉션 walker가 없다(`SubstituteStruct`는 직렬화 byte만 바꾼다). `ReflectionText`(Prepare·Publish 대입, JSON 출력)가 있다. 타입별 객체 hook 장치는 없다(구조체 `Validate`만). Commandlet은 타입을 등록하지 않는다.
+    - **A2c1 — AssetRuntime 저장 기반**
+      - `FilePackageSink`(`platform::File&` 위 — Append는 이어 쓰기, WriteAt은 Seek 후 쓰고 끝으로 돌아간다, 오류는 FileErrorCode 대응).
+      - `VerifyPackageFile(PackageRangeReader&, Span<uint8> scratch, AssetDiagnostic*)`(5.5절 5): 읽기 옵션은 `expectedKind = Editor`, `types` null(버전 축으로 거부하지 않는다), 엔진 버전 비움. 부분 읽기 판정(헤더·표·읽는 섹션)에 더해 건너뛰던 Objects·Bulk·BulkIndex의 CRC와 섹션 사이 패딩 0을 scratch 크기 조각으로 훑고, BulkIndex의 entry 배치(`ValidateBulk`)와 entry마다 저장 byte의 crc32, Zstd entry의 블록 컨테이너 헤더 rawSize = rawBytes(해제 없이 — `DecodePackageBulk`가 해제 전에 하는 검사)를 본다. 압축 해제·SHA-256·그래프 해석은 하지 않는다. 같은 손상에 전체 읽기와 같은 진단을 낸다(시험 표로 대조). 한계: CRC는 writer가 자기 출력으로 계산하므로 writer의 논리 오류(잘못된 내용을 올바른 CRC로 씀)는 잡지 못한다 — 짧은 쓰기·배치 오류·sink 버그가 목적이다.
+      - bulk 저장소 `PackageBulkStore`(6.1절): Package에 선택적 저장소를 둔다. 런타임은 지금처럼 메모리(저장소 없음), 에디터는 `FilePackageBulkStore`다. 이 저장소는 **파일 핸들을 쥐지 않는다**(열린 패키지가 수백이면 macOS 기본 soft limit 256에서 EMFILE): 파일 경로와 로드 지문, entry 표를 쥐고, entry를 처음 읽을 때 `FileSystem`으로 파일을 열어 헤더 + 섹션 표 지문을 대조한 뒤(다르면 `ExternalModification`) 저장 byte를 읽어 crc32·압축 해제·SHA-256을 확인하고 raw byte를 보관한다. 열린 핸들은 상한 있는 캐시(기본 64, 가장 오래 쓰지 않은 것부터 닫는다)에만 둔다(UE `FEditorBulkData`가 PackagePath + offset으로 필요할 때 여는 것과 같다). 지연 읽기에서 발견한 손상은 그 entry만 `CorruptPackage`이고 `BulkBytes`의 호출부가 받는다(계약에 적는다). 저장은 5.5절 3대로 같은 오류로 실패한다(세탁 금지). `Package::BulkBytes`는 저장소가 있으면 저장소에 묻는다. entry 하나를 푸는 `DecodePackageBulkEntry`를 `DecodePackageBulk`에서 떼어 둘이 같이 쓴다.
+      - 지연 열기: `PackageLoadOptions::bulk = Decode(기본, 런타임) | Defer(에디터)`. Defer의 Prepare는 Bulk 섹션 내용을 읽지 않는다 — 읽기 핵심에 "Bulk 내용만 건너뜀" 모드(부분 읽기의 Objects 포함판)를 더해 `PackageRangeReader`로 받고, CrossCheck는 BulkIndex 항목으로 하던 그대로다. `InstantiatePackages` 전에 상태에 저장소를 건다(`SetBulkStore`).
+      - **재매핑은 객체 필드를 고치지 않는다**(5.5절 7을 바꿨다): 저장소가 "메모리 id → entry" 표를 갖는다(로드 직후는 항등). 저장의 재매핑 표(옛 id → 새 id)로 이 표를 새 파일 entry로 다시 잇는다. 객체의 `BulkDataRef`는 옛 id를 그대로 갖고, 다음 저장의 writer는 그 옛 id로 저장소에 물어 다시 1부터 매긴다. 근거: 범용 변경 walker가 없고(만들면 struct·배열·map·InstancedStruct·Optional 전부를 쓰기로 다루는 큰 표면), 저장 중 편집과 경합하지 않으며(필드 변경 없음), 관찰되는 동작(`BulkBytes`·다음 저장 byte)이 같다. 버린 대안: 리플렉션 walker로 필드 교체(UE `FBulkData`의 offset 갱신 대응). 이 결정의 전제(교차 검증):
+        - (a) bulkId는 패키지 저장소의 지역 핸들이다. 내용 비교는 (rawBytes, sha256)으로 하고 `BulkDataRef::SameContent`를 둔다. 패키지·세션 사이에서 bulkId를 비교하지 않는다(재임포트의 "바뀌지 않음", ReflectionText의 같은 값 생략, 시험의 다시 열어 비교가 모두 `SameContent`).
+        - (b) 다른 패키지의 bulk는 `PackageBulkStore::CopyFrom(sourceStore, ref) → 새 저장하지 않은 ref`로만 옮긴다(그대로 넣은 ref는 다른 entry를 가리켜 저장이 `CorruptPackage`가 된다 — 사용자 오류가 손상으로 보고되지 않게 서비스 API가 막는다).
+        - (c) 복제(A2e)는 새 저장소에 원본 저장소의 id 표를 복제하고, 원본 파일 entry는 `Detach`처럼 메모리로 읽어 원본과 수명을 분리한다.
+        - (d) 다시 잇기·`Detach`는 이미 푼 raw byte를 옮기거나 놓지 않는다(`BulkBytes`가 준 span은 패키지 수명 동안 유효). 저장 결과에 없는(참조하지 않는) entry는 표에서만 지우고 그 raw는 패키지 수명까지 둔다(undo는 범위 밖).
+        - 쿠킹(A4)은 저장소를 bulk source로 쓰고 결과 ref는 쿠킹 writer가 새로 매기므로 영향이 없다. 한계: 메모리의 id가 파일 id와 다를 수 있어 진단은 둘을 구분한다(`Package::FileBulkId(ref)`).
+      - 저장하지 않은 bulk: 최상위 bit가 선 id(`UnsavedBulkIdBit = 0x80000000`, 저장소가 패키지마다 증가시켜 발급 — `PackageBulkStore::AddUnsaved(Array<uint8>&&) → BulkDataRef`, SHA-256을 그때 계산)이고 메모리에만 있다. writer는 저장소로 읽어 다른 entry와 같이 1부터 매긴다. reader는 최상위 bit가 선 BulkDataRef·entry id를 명시적으로 `CorruptPackage`로 거부한다(지금은 2^31 entry가 없어 암묵적으로만 거부 — 시험으로 고정).
+      - `Detach`(7.1절 6)의 저장소 쪽: 아직 읽지 않은 entry를 모두 읽어 raw byte로 두고 캐시 핸들을 닫고 파일 경로를 놓는다(A2e가 쓴다, A2c1에서 시험).
+      - 타입 hook 표 `AssetTypeHookTable`(UE `UObject::GetAssetRegistryTags`·16.2절 `DependencyDeclarer` 대응): TypeId → `{ tags, buildDependencies }`. 저장은 대표 에셋 타입에서 상속 사슬을 따라 **가장 가까운 등록 hook 하나**를 부르고 hook은 `CallBase`로 부모 hook을 부를 수 있다(UE `Super::GetAssetRegistryTags`). hook은 `ObjectRegistry&`·`ObjectAccessContext`·객체를 받아 `Result`를 돌려준다(실패하면 저장 실패 — 진단 None과 원본 오류). sink는 같은 (키, 값)을 하나로 합치고 Build 의존은 (assetId, kind)로 정렬·중복 제거한다. 표 항목은 모듈 등록 수명에 묶는다(모듈 해제 때 제거). 런타임은 쓰지 않는다(쿠커 A4가 Build hook을 쓴다).
+    - **A2c1 구현에서 정한 것**(2026-11-21):
+      - 외부 변경의 오류 코드는 `ExternalModification` / `StaleHandle`이다(파일이 로드 때의 것이 아니다 — 핸들이 낡았다는 뜻과 같다). 지문 읽기 `ReadPackageFingerprint(Allocator&, PackageRangeReader&)`를 AssetRuntime에 두고 캐시·저장(5.5절 1)이 같이 쓴다(헤더 판정 + 섹션 표 CRC만 본다).
+      - `VerifyPackageFile`은 Zstd 컨테이너 헤더의 rawSize 대조(교차 검증 권장)를 하지 않는다: 재검증의 계약을 "전체 읽기와 같은 판정"으로 두었고(모든 bit 손상 시험이 그 일치를 고정한다), 컨테이너 헤더는 지연 읽기의 해제(`DecodePackageBulkEntry`)가 해제 전에 본다.
+      - 읽기 핵심의 범위는 셋이다(`Full`·`Edit`·`Index`). Objects·BulkIndex는 Required 섹션이라 다른 schemaVersion은 앞 단계가 거부하므로 재검증은 그 내용 CRC를 늘 본다(처음 넣은 schemaVersion 조건은 닿지 않아 뺐다 — 손으로 만든 더 새 BulkIndex는 세 읽기 모두 `NewerVersion`).
+      - 핸들 캐시(`PackageFileCache`)는 열 때 지문을 읽어 두고, 같은 경로를 다른 지문으로 찾으면 그 핸들을 닫고 `ExternalModification`이다. 이미 연 핸들은 교체 뒤에도 이전 내용을 읽는다(POSIX 의미 rename — 그 핸들의 지문이 그 내용과 맞다).
+      - 저장소에 저장하지 않은 bulk가 있으면 `Attach`를 거부한다(새 패키지는 저장 뒤 `Rebind`로 처음 잇는다 — 파일에 이은 적 없는 저장소의 `Rebind`를 받는다). 새로 만든 패키지에는 `AttachBulkStore(Package&, UniquePtr<PackageBulkStore>&)`로 저장소를 잇는다(로드한 패키지는 `PackageLoadState::SetBulkStore`).
+      - 타입 hook의 찾기와 `CallBase`는 한 함수(`Find(start, kind, skipStart)`)다 — `CallBase`는 지금 hook 타입의 base부터 찾는다.
+    - **A2c2a — `EditorPackageSet` 열기**
+      - 소유(7.1절 3): 패키지 정책 Registry(`packageNativeType = Package`, `rejectWorldOnly`)와 `ReferenceObserver`를 AssetManager와 같은 방식으로 만들어 소유한다(TypeRegistry·NamePool은 호출자 것을 공유). 열린 패키지 표(AssetId → Package handle·파일 이름·로드 지문·세대·읽기 전용·미해결 import).
+      - `Open(AssetId | LogicalPath)`: 색인에서 파일을 찾는다(같은 id·경로 둘이면 그 `AlreadyExists`). 이미 열린 패키지는 같은 handle이다. **Hard·EditorOnly 의존 닫힘**(object import를 만드는 두 종류 — 5.7절 5, 색인 Dependencies로 재귀)을 한 트랜잭션으로 열고, 이미 열린 것은 resolver(`PackageImportResolver` — `EditorPackageSet`이 구현)로 잇는다. SCC를 따로 계산하지 않는다(에디터는 상주 단위가 필요 없다). 각 파일은 Defer 열기 + 파일 저장소.
+      - 누락 import: Prepare 단계에서 실패한 대상(색인에 없음·파일 없음·손상·새 버전)과 대표 타입이 기대의 파생이 아닌 대상은 묶음에서 빼고 null로 잇고 경고(`MissingDependency`·`TypeMismatch`)를 남긴다(UE `LinkerLoad` ImportFailure — `InstantiatePackages`에 "누락 import는 null" 선택지를 더한다). `InstantiatePackages` 안의 실패는 지금처럼 트랜잭션 전체 실패다(객체를 만든 뒤의 실패는 고정된다). null로 이은 패키지는 미해결 import 표시를 갖고 **저장은 `MissingDependency` / `InvalidArgument`로 거부한다** — 명시 선택(`SaveOptions::dropUnresolved`, 명령 `--force`)일 때만 null로 저장하고 경고를 남긴다(브랜치 전환 등으로 잠시 없던 대상의 id를 잃는 결정을 사용자가 하게 — UE는 경고만 하고 잃는다).
+      - ImportRecord 스키마 writer·parser(5.4절)는 AssetDatabase(`ImportRecord.h`)에 두고 열기·색인이 ImportOwner 대조(7.1절 7 — 위반은 열기 `CorruptPackage`)에 쓴다. 색인 항목에 ImportRecord 요약(importer id·이름·버전, 출력 수, 소유자 id)을 더한다(7.1절 11, A2b가 미룬 것).
+      - 읽기 전용(더 새 버전) 패키지는 열리지만 저장·복제·ID 수정은 `NewerVersion` / `Unsupported`(4.4절).
+      - **null import의 바탕**(A2c2a 착수 때 정함): 그래프 2b의 `ApplyFields`가 null handle import를 "미해결"로 받아 그 참조를 null로 쓴다(ObjectFoundations 5.4절 — 확인을 건너뛴다). `InstantiatePackages`는 `PackageInstantiateOptions{resolver, imports = Strict | NullMissing, unresolved}`를 받는 겹판을 두고, NullMissing은 Strict가 MissingDependency·TypeMismatch로 실패하던 해석(대상 패키지 없음, 대표 에셋 없음, Hard 의존 대표 타입이 expectedType의 파생이 아님, 객체 없음, 객체 타입이 선언 타입의 파생이 아님)을 null import + `PackageUnresolvedImport{package, target, import, code, error}` 기록으로 바꾼다. 에셋 전체가 풀리지 않으면 그 에셋의 첫 import에 한 번 적고 나머지 import도 null이다. outer import가 null이면 그 아래 import도 미해결(MissingDependency)이다. resolver의 다른 오류·잘못된 handle·타입 조회 실패는 Strict와 같다. 버린 대안: 누락 대상 자리에 자리표시 패키지(UE `FLinkerPlaceholder`처럼)를 만들어 id를 보존 — 같은 id의 실제 패키지가 형식만 다를 때(TypeMismatch) 두 패키지가 같은 id를 갖게 되고, 추상 타입은 만들 수 없다. id 보존은 "미해결 import가 있으면 저장 거부"(A2c2a 위)로 한다.
+      - **ImportRecord 배치**(5.4절의 논리 필드, 스키마 버전 1): Record(`ImportRecordSchema` = Guid{0x52494d5052454344, 1}){ 1 importerId Guid, 2 importerName String(1–256 byte), 3 importerVersion U32, 4 sources RecordList[ Record(`ImportSourceSchema` = {…, 2}){ 1 role String(1–64), 2 root String(0–256 — 원본 루트 이름, 빈 값은 루트 없음), 3 relativePath String(1–1024), 4 sha256 Bytes(32), 5 bytes U64 } ], 5 options Record(임포터 스키마 — 없을 수 있다), 6 outputs RecordList[ Record(`ImportOutputSchema` = {…, 3}){ 1 outputKey String(0–64 — 빈 값은 주 출력), 2 assetId Guid, 3 typeId Guid } ], 7 ownerAssetId Guid }. 필드 id는 Guid{0, n}이다. 문자열·byte 필드의 payload는 다른 패키지 Record처럼 길이 접두 없는 내용 byte다(TLV 길이가 길이다). 규칙(위반은 InvalidArgument): ownerAssetId는 null이 아니다. 문자열은 유효 UTF-8에 NUL이 없다. 소유 기록(owner = 자기 패키지 id)은 importerId가 null이 아니고 importerName이 있으며 sources가 1–256개(role 유일 — 순서는 쓴 그대로)이고 outputs는 1–1024개로 outputKey byte 순 엄격 오름차순(writer가 정렬한다)·assetId 유일·null 아님·typeId null 아님·자기 id를 포함한다. relativePath는 `/`로 나눈 상대 경로다(앞·뒤 `/`, 빈 성분, `.`·`..` 성분, `\` 금지 — 원본 루트 밖을 가리키지 못한다). root는 `/`·`\`를 갖지 않는다. options는 Record envelope 검사(ReadRecordHeader)를 통과해야 하고 비면 필드를 쓰지 않는다. 참조 기록(owner ≠ 자기)은 importerId null·importerName 빈 값·importerVersion 0이고 sources·options·outputs 필드가 없다. 빈 목록 필드·모르는 필드·wire가 다른 필드는 InvalidArgument다(정규형 하나). 다른 스키마 Guid나 지원 범위 밖 버전은 Unsupported다. writer·parser는 AssetDatabase `ImportRecord.h`에 둔다(`WriteImportRecord`·`ReadImportRecord` — AssetRuntime은 스키마를 모른다, 7.1절 7).
+      - **ImportOwner 대조**(7.1절 7): 읽은 ImportRecord가 참조 기록이면 Dependencies에 그 owner의 ImportOwner 항목이 정확히 하나, 소유 기록이거나 ImportRecord가 없으면 ImportOwner 항목이 없어야 한다(`CheckImportOwner`). 다른 스키마·더 새 버전 ImportRecord는 참조 기록인지 알 수 없으므로 대조하지 않는다. 위반은 `CorruptPackage`(칸 Dependencies). 열기는 그 패키지를 열지 않고(대상이 의존이면 null + 경고), 색인은 진단을 남기고 그대로 색인한다(조회는 되게 — 고칠 수 있게).
+      - 색인 항목의 ImportRecord 요약 `AssetIndexImportSummary{present, importerId, importerName, importerVersion, outputCount, owner}`. 색인은 ImportRecord를 Tags처럼 읽는다: 다른 스키마·더 새 버전은 `UnsupportedVersion` 진단(요약 없음), 형식 위반은 `CorruptPackage` 진단(칸 ImportRecord, 요약 없음) — 둘 다 항목은 색인한다. 한 파일에 같은 코드 진단이 둘 이상 생길 수 있으므로(깨진 Tags + 손상 ImportRecord 등) 진단 정렬은 파일 이름 → 코드 → 칸이다.
+      - **`EditorPackageSet` 구현에서 정한 것**:
+        - 생성은 `EditorPackageSet(Allocator&, EditorPackageSetConfig)`(allocator는 생성자 인자 — 표 멤버가 생성 때 필요), 설정 `EditorPackageSetConfig{types, files, layout, index, read(customVersions·engineVersion — expectedKind는 Editor, types는 위 것으로 채운다), registryContext, registryOptions(policy·referenceObserver는 집합이 정한다), observerMaxKeys, fileCacheCapacity}`. `Initialize`가 관찰자·Registry·핸들 캐시를 만든다. 소멸은 열린 패키지 Discard(패키지 정책 객체는 Discard로만 죽는다) → RootRef → Registry → 캐시 → 관찰자 순(저장소가 캐시 핸들을 닫으므로 캐시가 Registry보다 오래 산다). 소유 스레드 전용이다.
+        - 닫힘은 색인이 아니라 **읽은 파일의 Dependencies**로 넓힌다: 색인은 id → 파일 이름에만 쓰고, Prepare한 패키지의 Hard·EditorOnly 항목을 너비 우선으로 더한다(색인이 낡아도 실제 파일의 의존을 따른다). 색인의 파일을 읽었는데 헤더 id가 요청과 다르면(색인 뒤 파일이 바뀜) `ExternalModification` / `StaleHandle`이다.
+        - 실패 분류: 요청한 패키지(루트)의 실패는 `Open` 실패다 — 색인에 없음 `NotFound`(진단 None), 같은 id 둘 `DuplicateAssetId` / `AlreadyExists`, 파일 열기·Prepare 실패는 그 진단, id 불일치, ImportRecord 형식 위반 `CorruptPackage`(칸 ImportRecord), ImportOwner 대조 위반 `CorruptPackage`(칸 Dependencies). 의존 패키지의 같은 실패는 그 패키지를 묶음에서 빼고 경고 `ExcludedDependency`(진단 asset = 뺀 패키지, related = 처음 가리킨 패키지 — 색인에 없음은 `MissingDependency` / `NotFound`)를 남기며, 그것을 가리키는 import는 `InstantiatePackages`의 NullMissing이 null로 잇고 경고 `UnresolvedImport`(asset = 가리킨 패키지, related = 대상, 칸·detail = import 위치)를 남긴다. 묶음 안 대상의 대표 타입이 Hard 의존 expectedType의 파생이 아니면 대상은 그대로 열고 그 import만 null이다(대상 자체는 유효한 패키지다).
+        - 이미 열린 패키지의 미해결 import는 나중에 대상이 생기거나 열려도 다시 잇지 않는다(다시 열어야 한다 — 닫고 다시 여는 경로는 A2e의 디렉터리·이름 작업과 함께 정한다). 저장(A2c2b)은 미해결 표로 거부·`dropUnresolved`를 판정한다.
+        - 경고 진단의 detail은 import 위치(UnresolvedImport)라 색인 진단의 detail(섹션 안 위치)과 뜻이 다르다 — 명령 출력(A2c3)이 둘을 섞을 때 문구로 구분한다.
+        - 다른 스키마·더 새 버전 ImportRecord는 열되 읽기 전용이다(저장하면 이해하지 못하는 기록을 잃거나 그대로 옮겨 잘못 쓸 수 있다 — 더 새 섹션과 같은 규칙, 5.3절).
+        - 열린 패키지 정보 `EditorPackageInfo{id, package handle, fileName(Content 상대), fingerprint, readOnly, unresolved(그 패키지의 미해결 import)}`는 id 순 표로 두고 `Find(id)`·`Count`·`At`으로 본다. `FindPackage`(resolver)는 이 표를 본다.
+    - **A2c2b — 저장**
+      - `Save(package, SaveOptions)`(5.5절 1–8): 잠금 → 대상 지문을 로드 지문과 비교(다르면 `ExternalModification`) → 같은 디렉터리에 `<이름>.rasset.<guid>.tmp` CreateNew → `WritePackage`(파일 sink, bulk source = 그 패키지 저장소 — 옮기는 entry의 crc32·SHA-256은 writer가 대조) → Flush·Close → `VerifyPackageFile` → 캐시 핸들 닫기 → `Replace` → 저장소를 새 파일 경로·지문·재매핑 표로 다시 잇기 → 시작 세대 = 끝 세대면 dirty 해제 → 색인 갱신(`AssetIndex::Refresh(fileName)` — 그 파일 하나를 다시 부분 읽기) → 그 디렉터리의 고아 `.tmp`(정확한 모양만) 삭제. 실패 경로는 5.5절 6·7 그대로(임시 파일 삭제, 교체 실패 뒤 이전 경로 지문 확인, `NotDurable`은 성공 + 경고).
+      - 새 패키지(파일 없음)의 저장은 `TryMakeFilePath`의 NFC 이름으로 만든다. 대상이 이미 있거나(Stat) 색인에 같은 caseless 키가 있으면(Linux에서 `hero.rasset`과 `Hero.rasset`이 함께 생기지 않게) `DuplicatePath` / `AlreadyExists`. 별칭 점유(7.1절 12)는 A2e가 같은 지점에 더한다.
+      - 쓰기 옵션: 엔진 버전 `build::CurrentEngineVersion()`, 커스텀 버전 표(A2c는 빈 표 — 모르는 커스텀 버전이 든 패키지는 열 때 읽기 전용이라 저장되지 않으므로 안전하다, 타입 모듈의 커스텀 버전 등록은 후속), Tags·Build 의존(hook), ImportOwner 의존과 ImportRecord(열 때 읽은 byte 그대로 — 임포트 A2f가 새로 만든다).
+      - dirty(7.1절 5): 세대는 `MarkDirty` 호출에서 바로 오르므로 저장 중 편집과의 순서 문제가 없다. 새 패키지는 만들 때 명시 dirty다.
+      - **A2c2b 구현에서 정한 것**(착수 때):
+        - API: `Create(LogicalPath, TypeId type, AssetId id = null(새로 발급))`은 새 패키지와 대표 에셋(type)을 만들어 집합에 넣는다(파일 없음, dirty, 세대 1, 빈 파일 저장소를 `AttachBulkStore`로 잇는다 — 첫 저장의 `Rebind`가 처음 잇는다). 같은 경로 키가 색인에 있거나 집합의 저장하지 않은 새 패키지와 겹치면 `DuplicatePath` / `AlreadyExists`, 파일 절대 경로가 OS 상한을 넘으면 `InvalidPath` / `CapacityExceeded`(만들 때 판정한다 — 배치는 바뀌지 않으므로 저장까지 미루지 않는다), 같은 id가 열려 있거나 색인에 있으면 `DuplicateAssetId` / `AlreadyExists`, type이 에셋 클래스가 아니면 Registry의 오류. `MarkDirty(id)`(열리지 않았으면 `NotFound`)는 세대를 올리고 dirty를 켠다. `Save(id, const AssetDatabaseLock&, EditorSaveOptions{dropUnresolved}, warnings, failure)`.
+        - 경고 구조를 열기·저장이 같이 쓴다: `EditorWarning{kind, diagnostic}`, 종류 `ExcludedDependency`·`UnresolvedImport`(열기), `DroppedUnresolvedImport`·`NotDurable`·`OrphanNotDeleted`(저장).
+        - 설정 추가: `hooks`(`AssetTypeHookTable*` — **저장에는 필수**다: null이면 `Save`가 `InvalidArgument`. 저장이 Tags를 hook으로 다시 만들므로 hook 표를 모르는 host가 모든 태그를 지우지 않게, 태그가 필요 없는 host도 빈 표를 명시해 넘긴다. 명령(A2c3)은 엔진과 같은 타입 모듈의 hook을 등록한 표를 넘겨야 한다 — UX1b의 옛 경로 태그 보존 조건), `writeEngineVersion`(빈 값이면 `build::CurrentEngineVersion()` — 시험은 고정 값), `index`는 갱신하므로 `AssetIndex*`다.
+        - 잠금: `Save`는 이 프로젝트의 잡은 `AssetDatabaseLock`을 받는다(잡지 않았거나 다른 프로젝트의 잠금이면 `InvalidArgument` — 잠금은 잡을 때 프로젝트 루트의 SHA-256을 기억하고 `IsHeldFor(layout)`로 대조한다, 할당 없이). 명령은 명령 전체 동안 잠금을 쥐므로(8절) 저장마다 잡지 않는다. 고아 `.tmp` 삭제는 이 잠금 아래에서만 한다.
+        - 판정 순서(앞에서 걸리면 아무것도 쓰지 않는다): Initialize 전·hook 표 없음·잠금(위) `InvalidArgument` → 열리지 않음 `NotFound` → 읽기 전용 `NewerVersion` / `Unsupported` → 미해결 import가 있고 `dropUnresolved`가 아니면 `MissingDependency` / `InvalidArgument`(related = 첫 대상) → 대상 경로(새 패키지는 `TryMakeFilePath` — 경로 상한은 Create가 이미 판정했다, 대상이 이미 있으면(Stat) 또는 색인에 같은 경로 키가 있으면 `DuplicatePath` / `AlreadyExists`, Stat의 IO 실패는 진단 None) → 외부 변경(기존 패키지: 대상의 지문을 `ReadPackageFingerprint`로 읽어 열 때 것과 비교 — 다르거나 대상이 없거나 헤더가 깨졌으면 `ExternalModification` / `StaleHandle`, IO 실패는 진단 None과 그 오류).
+        - 쓰기: 옵션은 에디터 종류·`writeEngineVersion`·빈 커스텀 버전 표·bulk source = 그 패키지의 파일 저장소, Tags = hook(대표 에셋 타입에서 가장 가까운 것), extraDependencies = hook의 Build 의존 + 열 때 읽은 ImportOwner 항목, importRecord = 열 때 읽은 byte. **Tags는 저장마다 hook으로 다시 만든다**(UE `GetAssetRegistryTags`처럼): 남겨야 하는 메타데이터(Unreal 교환의 옛 경로 등)는 객체 필드로 두고 그 타입 hook이 태그로 낸다 — 파일의 Tags를 옮겨 두지 않는다(hook이 더 내지 않는 키가 남는 낡은 태그를 만들지 않게). UX1b가 이 규칙을 따른다.
+        - 새 패키지는 쓰기 전에 대상의 부모 디렉터리를 만든다(`MakeDirectoryTree` — 실패는 진단 None과 그 오류).
+        - 진단을 받는 호출(`Prepare`·`WritePackage`·`VerifyPackageFile`·`ReadPackageForEdit`)이 진단을 채우지 않고 실패하면(sink·할당·IO) 진단에 그 오류를 채워 돌려준다(시험이 찾은 것 — 처음 구현은 비어 있는 진단의 오류(None)를 돌려줘 `InvalidArgument`로 보였다).
+        - 임시 파일 `<대상>.<36자 소문자 guid>.tmp`(`CreateNew`, guid는 OS 난수) → `FilePackageSink`로 쓰기 → `Flush`·`Close` → 다시 열어 `VerifyPackageFile`(scratch 64 KiB) + `ReadPackageForEdit`(새 파일의 bulk entry·섹션 offset) → 그 핸들 닫기 → **교체 뒤의 일을 모두 준비**: 저장소 `PrepareRebind`(새 경로·지문·entry·재매핑의 검사와 새 표 할당)와 색인 `PrepareRefresh`(임시 파일을 대상 이름으로 부분 읽기해 새 색인 배열·정렬·같은 id·경로 진단을 모두 만들고 자리를 잡는다) → 캐시의 대상 핸들 닫기 → `Replace`. 여기까지의 실패는 임시 파일을 지우고(지우기 실패는 무시 — 다음 저장의 고아 정리가 지운다) 그 진단으로 실패한다: 쓰기는 `WritePackage`의 진단, 만들기·쓰기·Flush·Close·Replace의 IO는 진단 None과 그 오류, 재검증 실패는 그 진단(writer·sink 결함). `NotDurable`은 교체가 이미 보이므로 성공 + 경고다.
+        - 교체 뒤(**실패하지 않는다** — 리뷰 권장으로 2단계화): 정보 갱신(지문·파일 이름·새 패키지 표시 해제·미해결 표 비움) → 시작 세대 = 지금 세대면 dirty 해제 → `CommitRebind`·`CommitRefresh`(할당 없는 교환) → 그 디렉터리의 고아 `.tmp`(정확히 `*.rasset.<36자 guid>.tmp` 모양의 일반 파일) 삭제(정리는 저장의 일부가 아니라 실패는 `OrphanNotDeleted` 경고 하나 — 자리는 교체 전에 잡는다). 준비가 실패하면 교체 전이라 임시 파일을 지우고 아무것도 바꾸지 않는다. 교체가 실패하면 준비한 것을 버린다. 교체 실패 뒤의 "이전 경로 지문 확인"(5.5절 6)은 따로 하지 않는다 — 다음 저장이 1단계에서 같은 비교를 하고 지연 bulk 읽기도 캐시에서 지문을 대조하므로 결과가 같다.
+        - `dropUnresolved`: 미해결 import마다 `DroppedUnresolvedImport` 경고(asset = 패키지, related = 대상)를 남기고 null로 저장한다. 저장 뒤 미해결 표는 빈다(파일에 그 import가 없다).
+        - `AssetIndex::Refresh(files, fileName, options)` = `PrepareRefresh` + `CommitRefresh`: 그 파일 하나를 다시 부분 읽기해 항목을 바꾸거나(없어졌으면 빼고, 새 파일이면 더한다) 그 파일의 진단을 다시 만들고, 같은 id·경로 진단과 표시는 전체에서 다시 계산한다(정렬·이웃 진단은 Rebuild와 같은 코드). 준비는 지금 색인을 바꾸지 않고(항목은 자리 포인터로 가리킨다) 모든 할당을 끝내며, 확정은 할당 없이 옮긴다 — 그래서 실패하면 색인이 그대로다. 준비는 읽을 경로를 따로 받을 수 있다(저장이 교체 전에 임시 파일을 대상 이름으로 색인한다 — 이름 변경은 수정 시각을 바꾸지 않는다). 준비와 확정 사이에 색인을 바꾸면 안 된다(같은 스레드의 저장 안에서만 쓴다). 파일 이름이 `.rasset`이 아니면 `InvalidArgument`, 파일 IO는 Rebuild처럼 진단이다.
+    - **A2c3 — 명령**: `asset-new <Type> <path> [<속성>=<값>…]`·`asset-set <path> <속성>=<값>…`(쓰기 잠금, `--wait=<초>` 범위 검사, `--force`는 미해결 import를 null로 저장), `asset-info <path|AssetId>`(기본 `<경로>=<값>` 줄 — ReflectionText에 줄 출력이 없으므로 JSON 출력과 같은 경로 순회로 줄 출력을 ReflectionText에 더한다, `--json`), `asset-list --type=<Type>`. 대입은 `ReflectionText` Prepare → 모두 성공하면 Publish → `MarkDirty` → 저장. 참조 값(논리 경로·AssetId)은 ReflectionText의 참조 해석 hook을 `EditorPackageSet::Open`으로 구현한다(대상 닫힘을 열어 잇는다). 타입 등록: Commandlet이 엔진과 같은 방식으로 모듈 타입을 붙인다(`ModuleTypeRegistrations`·`ModuleLoader::AttachTypeRegistrar`). 명령 시험(C#)의 시험 타입은 엔진 안의 실제 에셋 타입이나 시험 전용 플러그인 모듈로 둔다 — A2c3 착수 때 정한다.
+      - **A2c3 착수 때 정한 것**(2026-11-21, 권장안 확정 — 조사 1회):
+        - 나눔: **A2c3a**(ReflectionText 줄 출력, 참조 resolver, 서비스 API `AssetService` — C++ 전수 시험)와 **A2c3b**(Commandlet 명령·타입 등록·C# 시험). 부분마다 완료 조건 넷.
+        - 명령 시험(C#)의 타입: 엔진의 실제 에셋 타입 `Skeleton`·`AnimationClip`(Animation 모듈 — float·bool·enum·Name·struct·struct 원소 배열·Map·Hard 참조(`skeleton`·`basePoseClip`)·Soft 참조 배열(`compatibleSkeletons`)을 가진다). 버린 대안: 시험 전용 플러그인 — 켠 플러그인 모듈은 주 실행 파일에 링크되므로(BuildTargets BD36) 출하 Commandlet에 시험 코드가 들어간다. 서비스 API의 전수 시험(C++)은 지금처럼 `AssetTestFixtures` 타입을 쓴다.
+        - Commandlet 타입 등록: 엔진·WorldBench와 같은 방식(`TypeRegistry` + `ModuleTypeRegistrations` → `ModuleLoader::AttachTypeRegistrar`, 에셋 타입 모듈을 링크해 시작 단계로 시작 — 지금은 Animation, A5 뒤 텍스처 모듈)과 NamePool(Name 필드). hook 표는 모듈이 등록한 것을 넘긴다 — 지금 hook을 등록하는 타입 모듈이 없어 빈 표이고, 모듈의 hook 등록 길은 첫 hook(A5 텍스처)과 함께 더한다(그때까지 저장은 Tags를 비운다 — 지금 Tags를 내는 타입이 없다).
+        - 참조 텍스트(4.1·4.2절): `<논리 경로>`(대표 에셋) 또는 `<논리 경로>.<객체 경로>`(하위 객체 — 구성 요소에 `.`가 없으므로 첫 `.`에서 나눈다), AssetId 36자도 같은 꼴(`<AssetId>[.<객체 경로>]`), null은 `none`. resolver `AssetTextResolver`(AssetDatabase): Hard는 `EditorPackageSet::Open`으로 대상 닫힘을 열고 객체를 찾아(대상 타입이 기대 타입의 파생이 아니면 실패 → 진단 Unresolved), Weak은 대입 대상의 패키지 안만 푼다(5.1절 — 저장이 밖의 Weak 대상을 null로 쓰므로 받지 않는다, 열지 않는다 — A2c3a 리뷰 필수: 처음 구현은 Hard처럼 열어 `asset-set`이 성공한 뒤 파일에 null이 남았다). 서비스는 `asset-set`의 대상 패키지를 Weak 범위로 주고(`SetWeakScope`) `asset-new`는 범위가 없다 — 새 패키지의 객체는 공개 전이라 집합·색인에 없으므로 `asset-new`의 Weak·자기 참조(새 패키지 자신과 그 하위 객체를 가리키는 Hard)는 Unresolved이고 만든 뒤 `asset-set`으로 넣는다(한계 — 리뷰 권장), Soft는 색인으로 AssetId만 얻고 열지 않는다(색인에 없는 논리 경로는 실패, AssetId 텍스트는 그대로). 출력은 handle의 패키지 id → 색인 경로(없으면 AssetId) + 객체 경로. 구현 세부(A2c3a): 저장하지 않은 새 패키지는 색인에 없으므로 경로 해석·출력이 집합의 그 경로를 먼저 본다. null AssetId 텍스트는 거부한다(null은 `none`). 객체 경로 형식은 Hard·Weak도 열기 전에 검사한다(형식 거부는 아무것도 열지 않는다). 대소문자는 경로 키·이름 비교 규칙대로 무시한다(Soft의 객체 경로는 받은 그대로 둔다). Package 객체 자신은 텍스트로 나타낼 수 없어 출력이 Unsupported다(빈 객체 경로는 대표 에셋). 같은 id가 색인에 둘이면 출력은 AssetId다. Hard·Weak 해석이 연 패키지의 경고는 resolver에 준 경고 목록에 붙는다(asset-set이 보고한다).
+        - `asset-new`의 대입은 공개 전 객체(AssignmentTarget::Staged — ReadOnly 초기값 허용, 10.2절)에 한다: `EditorPackageSet::Create`가 패키지·대표 에셋을 한 트랜잭션으로 만들고 공개 전에 호출자 초기화(대입 묶음 Prepare·Publish)를 부른다 — 실패하면 트랜잭션 rollback으로 아무것도 남지 않는다. 이를 위해 AssetRuntime에 트랜잭션 안 패키지 만들기(`NewPackage(ConstructionContext&, AssetId, PackageKind)`)와 대표 에셋 만들기(`NewRepresentativeAsset(ConstructionContext&, package, type)` — `Asset::Id()`를 패키지 id로 둔다)를 더한다. 그전에는 새 패키지의 대표 에셋을 `NewObject`로 공개 뒤에 만들어 `Id()`가 로드 전까지 null이었다(로더만 채웠다) — Create가 이것을 쓰면서 고친다. 초기화는 `EditorAssetInitializer::Initialize(transaction, asset)`이고 트랜잭션을 끝내지 않는다(Commit·Rollback은 Create가 한다). Commit이 돌려주는 Package root를 그대로 집합의 root로 쥔다(공개 뒤 실패 지점이 줄어든다).
+        - 줄 출력(`ExportLines`, ReflectionText — 10.4절 표): 줄바꿈이 든 값·경로는 줄로 쓸 수 없어 `Unsupported`(`--json`을 쓴다).
+        - 서비스 API(`AssetService`, AssetDatabase — 13절 명령과 1:1): 설정(타입 Registry·Name pool·Content 파일 시스템·hook 표·읽기 옵션·Registry 문맥)과 초기화한 `ProjectLayout`을 받아 색인(`AssetIndex`)과 에디터 집합(`EditorPackageSet`)을 소유한다. `Initialize`가 색인을 만들고 집합을 연다. 함수: `New(lock, <Type>, <path>, 대입들)`(타입 도구 이름은 `TypeRegistry::AcquireByToolName` — 없으면 NotFound, 에셋 클래스가 아니거나 추상이면 TypeMismatch / InvalidArgument; 대입은 공개 전 객체에 Prepare·Publish한 뒤 함께 공개하고 저장), `Set(lock, <path|AssetId>, 대입들, force)`(열기 → Prepare 모두 검증 → Publish → MarkDirty → 저장, force = dropUnresolved), `Info(<path|AssetId>, json·all, out)`(기본 Edit 용도 줄, `all`은 Report 용도, `json`은 ExportJson), `List(<Type>?, <under>?, out)`(색인 `ListUnder` — `--type`은 그 클래스와 파생(`TypeRegistry::IsA`, UE 콘텐츠 브라우저의 클래스 필터와 같이 파생 포함), 등록되지 않은 타입의 항목은 같은 id일 때만 맞는다). 쓰기 잠금은 호출자가 잡아 넘긴다(명령이 `--wait`로 잡는다). `--type`의 파생 판정 오류는 `AssetIndex::ListByType`과 같은 규칙이다(등록되지 않은 타입 NotFound·파생 아님 TypeMismatch만 "맞지 않음", 그 밖은 오류 — 리뷰 필수: 처음 구현은 모든 오류를 맞지 않음으로 삼켰다; 디렉터리 걸러내기와 합치므로 ListUnder 순회에 같은 판정을 둔다). `EditorPackageSet::Create`의 초기화 안의 Create·Save는 Busy다(재진입 거부 — 경로·id 판정과 표 자리가 바깥 만들기와 엇갈리지 않게, 리뷰 권장). 대입 오류는 호출자의 `TextDiagnostics`에 모두 모이고 함수는 InvalidArgument다(아무것도 저장하지 않는다). 참조 값은 `AssetTextResolver`로 풀고 쓴다(열기 경고는 warnings에).
+      - **A2c3b 착수 때 정한 것**(2026-11-21, 권장안 확정):
+        - 명령(13절 문법): `asset-new <Type> <path> [<대입>…]`, `asset-set <path|AssetId> <대입>…`(대입 하나 이상 — 없으면 사용법 오류 2), `asset-info <path|AssetId> [--json] [--all]`, `asset-list [--type=<Type>] [--under=<path>]`. 대입은 `<경로>=<값>`(`[...]`·따옴표 밖 첫 `=`) 위치 인자와 목록 옵션 `--unset=<경로 목록>`·`--erase=<경로 목록>`(쉼표로 나누되 `[...]`·따옴표 안의 쉼표는 나누지 않는다, 같은 옵션 여러 번 허용 — 목록 옵션), `--force`(asset-set — 미해결 import를 null로 저장). 공통 `--project=<dir>`·`--wait=<초>`(10진, 0–86400 범위 — 밖이면 사용법 오류; 쓰기 명령은 그 시간까지 잠금을 기다리고 읽기 명령은 형식만 본다). 대입의 진단 위치(sourceIndex)는 대입 인자 순서다.
+        - 출력: asset-new는 표준 출력에 `<논리 경로> <AssetId>` 한 줄, asset-set은 출력 없음, asset-info는 서비스 출력 그대로(줄 또는 JSON + 줄 끝), asset-list는 기존 줄(`<논리 경로> <AssetId> <대표 타입 id>` — A2b와 같은 형식, 타입 등록과 무관하게 같은 줄). 진단은 표준 오류에 `<명령>: <코드>: <대상>: <설명>` 한 줄씩이다 — 대입 진단은 코드가 `TextDiagnosticCodeName`, 대상이 대입 텍스트의 경로, 에셋 진단은 코드가 `AssetDiagnosticName`(None이면 원본 `ErrorCodeName`). 설명은 진단 코드가 있으면 원본 `ErrorCodeName`, 없으면(코드 자리가 이미 원본 오류) `failed`이고 관련 대상이 있으면 ` (related <AssetId>)`를 붙인다. 경고(열기·저장)는 `<명령>: <코드>: <AssetId>: warning <종류> (related <AssetId>)`로 표준 오류에 쓰고 종료 코드는 0이다. 환경 실패도 같은 형식이다(`Busy: <프로젝트>: the project is locked by another process…`, `<오류>: <프로젝트>: cannot lock the project`, `<오류>: <Content>: cannot scan the content directory`, `<오류>: Animation: cannot register the asset types`). asset-new는 타입 이름을 서비스 전에 TypeRegistry에서 찾는다(`<오류>: <Type>: unknown type` — 저장 단계의 NotFound와 섞지 않게, A2c3b 리뷰 필수), 에셋 클래스 판정은 `TypeMismatch: <Type>: not a concrete asset class`. 종료 코드 0 성공·1 실행 실패(잠금 Busy 포함)·2 사용법 오류. 쓰기 명령(asset-new·asset-set)은 프로젝트를 연 바로 뒤, 색인을 만들기 전에 잠근다(7·8절 — 쓰기 판정은 잠금 아래에서 본 디스크로, A2c3b 리뷰 필수: 처음 구현은 색인 검색 뒤에 잠가 `--wait` 동안 바뀐 디스크를 놓칠 수 있었다).
+        - 타입 등록: Commandlet이 Launch의 프로세스 모듈 로더에서 에셋 타입 모듈(지금 `Animation` — AssetRuntime은 그 의존)을 시작하고 명령마다 `TypeRegistry` + `ModuleTypeRegistrations`를 붙였다 뗀다(WorldBench와 같은 방식, ModuleLoader 3.11절). Name pool은 명령마다 하나. hook 표는 빈 표(타입 모듈의 hook 등록 길은 A5와 함께). asset-list는 `--type`이 있을 때만 타입을 등록한다(없으면 A2b와 같이 색인만).
+
+16. **A2d 세부**(2026-11-21, 설계 — 교차 검증 1회 반영: 필수 5·권장 4): 셋으로 나눠 A2d1(캐시·`asset-index-rebuild`) → A2d3(감시 갱신 — 정확성 기능) → A2d2(병렬 범위 읽기 — 성능, 측정) 순으로 하고 부분마다 완료 조건 넷을 지킨다.
+    - **A2d1 캐시**:
+      - 형식: little endian 이진 단일 파일. 헤더 = magic `RKAI`, 형식 버전, 항목 스키마 버전(칸 배치), 판정 의미 버전 `AssetIndexCacheSemanticVersion`(색인 판정 규칙 — `ReadPackageIndex`·ImportRecord·Tags 파서·ImportOwner 대조·논리 경로 규칙 — 을 바꾸면 올린다: 초기 단계라 규칙이 자주 바뀌고 도구 빌드 ID는 키가 아니므로), Unicode 버전(NFC·caseless 표), 호환 엔진 버전(주·부 — NewerVersion 판정이 그것만 본다, 패치가 올라도 무효가 아니다. 엔진 축을 끈 실행(빈 엔진 버전)은 정의상 주·부 0이라 켠 실행과 키가 갈린다 — A2d1 리뷰가 권한 따로 된 엔진 축 칸은 같은 정보라 두지 않았다), 읽기 옵션 customVersions 목록의 SHA-256, 이름 정규화 플래그(`FileSystemNormalizesNames`), 도구 빌드 ID(진단용 문자열 — 키 아님), 항목 수, 본문 byte, 본문 SHA-256. 키 하나라도 다르면 캐시 없음과 같다(오류 아님).
+      - 색인 읽기는 TypeRegistry를 쓰지 않는다(`Rebuild`가 `options.types`를 비운다 — 색인은 형식 판정만 하고 타입 축은 열기가 판정한다, 그래서 타입 버전이 키가 아니다).
+      - 본문(항목마다, 파일 이름 byte 순 — 엄격 증가): Content 상대 OS 이름, 지문, id·대표 타입·readOnly·dependencies·tags·ImportRecord 요약. 파일 크기·수정 시각은 저장하지 않는다(재사용 때 지금 Stat·범위 읽기 값을 쓴다 — 구현에서 정함). 논리 경로·key는 저장하지 않고 파일 이름에서 다시 만든다(`TryMakeLogicalPath`). **진단이 하나라도 있는 파일은 넣지 않는다**(항목과 진단을 함께 가진 파일 — Tags·ImportRecord·ImportOwner 진단 — 의 진단이 캐시 실행에서 사라지지 않게, 다음 시작에 다시 읽는다).
+      - 신뢰하지 않는 입력: 본문 SHA-256, 개수·길이는 파일 크기와 상한으로 묶고, 문자열 UTF-8, 의존 종류·태그는 Tags 스키마 규칙(빈 키 없음·키 256 byte·값 패키지 문자열 상한·(키, 값) 엄격 증가), null AssetId·0 대표 타입 거부, 파일 이름은 `.rasset`·이름 규칙으로 검사한다. 판정 의미 버전 정책은 리뷰 검토 항목이다 — `PackageReader`·`ImportRecord`·`PackageTags`·`LogicalPath`의 색인 판정을 바꾸는 변경은 `AssetIndexCacheSemanticVersion`을 함께 올렸는지 본다(A2d1 리뷰 권장 — 자동 검사는 두지 않았다). 하나라도 어긋나면 캐시 전체를 없는 것으로 본다(부분 사용 없음).
+      - 재사용: `Rebuild(files, options, cache)`가 `.rasset`마다 `ReadPackageFingerprint`(범위 읽기 — 헤더 + 섹션 표(섹션별 CRC32) + tableCrc의 SHA-256)로 지문을 얻어 캐시의 같은 이름·같은 지문이면 캐시 항목을 쓰고(크기·시각은 지금 Stat 값), 아니면 지금처럼 부분 읽기. 지문 읽기 실패면 부분 읽기(그것이 진단을 만든다). 같은 id·경로 진단은 게시 때 다시 정한다. **한계**: 재사용의 민감도는 섹션 CRC32 수준이다 — 표가 그대로인 섹션 내용 변경(같은 크기·같은 CRC의 우연, bit rot)은 놓친다. 그래서 점검 명령(`asset-index-verify`)과 `asset-index-rebuild`는 캐시를 쓰지 않는다(목록·열기·편집 명령은 쓴다). 크기·수정 시각만 보는 UE `FDiskCachedAssetData` 방식은 7.1절 11 리뷰대로 버린다(파일마다 열기 + 범위 읽기 비용 — A2d2 측정이 본다).
+      - 쓰기: 잠금 보유 프로세스만(`IsHeldFor` 아니면 InvalidArgument), 임시 파일 `Intermediate/AssetIndex.cache.<guid>.tmp` → 쓰기·Flush·Close → Replace(원자 교체 — 읽는 쪽은 옛 것 또는 새 것만 본다, 지문 대조 덕에 낡은 항목도 안전). NotDurable은 성공으로 본다(캐시). 쓰는 시점: `AssetService::FlushCache(lock)`를 명령이 끝날 때 부른다(저장마다 O(N) 전체를 쓰지 않는다 — UE `FAssetDataGatherer`도 검색 끝·간격으로만 쓴다), 실패는 경고 `CacheNotWritten`(캐시는 정확성에 필요 없다). 에디터는 종료·간격으로 쓴다(그때 정한다).
+      - `asset-index-rebuild [--project] [--wait]`: 쓰기 잠금, 캐시를 쓰지 않는 전체 검색, Content 전체의 고아 임시 파일(`*.rasset.<guid>.tmp` — 저장의 모양 판정을 공용으로 옮긴다)과 캐시 임시 파일 고아(`Intermediate/AssetIndex.cache.<guid>.tmp`) 지우기(지울 수 없으면 경고), 캐시 쓰기. 출력: 진단은 표준 오류(`asset-index-verify`와 같은 줄), 요약 `asset-index-rebuild: <n> packages, <m> diagnostics, <k> orphans removed`. 종료 0(진단이 있어도 — 13절 "경고만 있으면 0", 점검은 verify), 잠금·IO·캐시 쓰기 실패 1.
+      - 버린 대안: Record 직렬화(스키마 진화가 필요 없고 고정 이진이 손상 판정이 단순하다), 실패한 파일의 진단 캐시(드물고 일시적 원인이 많다), UE식 shard·ref 분할 캐시(이 규모에는 단일 파일 + 원자 교체가 단순하다), 캐시 쓰기에 잠금 없음(UE — Rocks는 8절대로 잠금 보유자만 바꾼다).
+    - **A2d3 감시 갱신**:
+      - `AssetIndexWatch`(AssetDatabase): `AssetIndex&`·`FileSystem&`·읽기 옵션·`AssetChangeSource&`(Open(root)·Poll(visitor)·Close — `PlatformAssetChangeSource`가 `platform::DirectoryWatcher`를 감싼다, 시험은 가짜)·`AssetClock&`. 감시가 바꾸는 것은 색인뿐이다 — 이미 열린 패키지의 외부 변경은 저장 1단계(지문)와 지연 읽기가 잡는다.
+      - `Start()`: 원천을 Content에 연다 → Rebuild(캐시 사용) → 그 사이 쌓인 이벤트는 다음 `Pump`가 적용(7절 순서 — 검색 중 바뀐 파일은 이벤트로 다시 Stat되고 지문이 같으면 무동작, 자기 저장의 이벤트도 같다).
+      - `Pump()`: 이벤트 종류를 믿지 않는다(레벨 트리거). 경로마다 "다시 볼 곳": `.rasset`이면 파일, 디렉터리이거나 모르면 하위 트리, Renamed는 `oldPath`와 `path` 둘 다, `Overflow(path)`는 그 하위 트리(빈 path면 전체), `RootRemoved`는 원천을 닫고 진단 `RootLost`(새 코드)·색인을 비우고(파일이 진실 — UE도 콘텐츠 경로가 사라지면 그 에셋을 뺀다, 열린 패키지는 그대로) 이후 `Pump`가 1초(AssetClock) 간격으로 다시 열어 보고 열리면 전체 다시 검색한다.
+      - 경로 대조: 이벤트 경로는 OS byte 그대로 오므로 색인 항목의 `fileName`(OS byte)과 byte로 대조한다(NFC·caseless 키로 대조하면 Linux에서 대소문자만 다른 두 파일이 합쳐진다). 이름 정규화 FS(macOS — `FileSystemNormalizesNames`)에서만 NFC 대조를 더한다.
+      - 새 API `AssetIndex::RefreshPaths(files, fileNames, subtrees, options)`: PrepareRefresh·CommitRefresh의 일반화(여러 파일·하위 트리를 한 번에 준비·확정 — 하위 트리는 다시 열거해 없어진 항목을 뺀다). 교체 뒤 실패 없음 계약을 잇는다(할당 실패면 색인 그대로). 기존 Refresh는 그 특수한 경우다.
+      - 쓰는 중인 파일: 다시 읽기가 CorruptPackage·Busy면 대기 목록에 넣고, 크기·시각이 같은 관찰이 `AssetClock`으로 500 ms(7절 debounce와 같은 값) 이상 떨어져 두 번 나오면 다시 읽는다(Pump 횟수가 아니라 시간 — 에디터 tick마다 Pump해도 쓰는 도중을 안정으로 보지 않게). 처음 본 뒤 10초를 넘기면 다시 읽어 그 진단을 남기고 뺀다. sleep 없음 — 호출자가 Pump를 돈다.
+      - 시험: 가짜 원천으로 이벤트 종류 × 순서 × Overflow·RootRemoved·재열기·쓰는 중 대기(수동 시계), 실제 감시 한 번(Wait는 이벤트 gate, 상한은 실패 판정용으로만). 상태: **구현** — 대조표 14.1.29절, coverage 14.1.30절.
+      - 구현 세부(2026-11-21, 권장안으로 확정):
+        - `RefreshPaths` 입력 `AssetIndexRefreshPaths{files, subtrees, mayDefer, deferred, normalizesNames}`. 이름은 Content 상대 규칙(유효한 UTF-8, 앞뒤 `/`·빈 구성 요소·`.`·`..` 없음 — 하위 트리만 빈 문자열 = Content 전체 허용), 어기면 InvalidArgument. 같은 이름 여럿·트리 안 트리·트리 안 파일은 정렬 대조로 한 번만 읽는다(이벤트 수천 개에도 O(n log n) — 쌍마다 대조하지 않는다). 하위 트리의 시작 이름은 먼저 Stat: 없음 → 비어 있음, 링크·그 밖의 종류 → 그 아래 없음, `.rasset` 파일 → 그 파일, 디렉터리 → 걷기, 그 밖의 Stat 실패 → 진단 None. Content 전체(빈 이름)의 열거 실패만 오류다(Rebuild와 같다). 캐시는 쓰지 않는다 — 같은 지문 파일도 다시 읽는다(결과가 같으므로 정확성 문제는 없고 비용은 A2d2가 본다).
+        - 빼는 것의 대조: 항목은 OS 이름, 진단은 표시 이름(`AssetIndexDiagnostic::fileName`)으로 한다. 하위 트리 아래 진단은 유효한 UTF-8 이름의 표시와 잘못된 UTF-8 이름(0x80 이상 byte까지 escape)의 표시 둘 다로 접두를 본다 — 표시 escape는 `/`를 바꾸지 않고, 유효한 이름의 표시에는 0x80 이상 byte의 escape가 없고 역슬래시는 `\x5c`로 바뀌므로 다른 이름과 겹치지 않는다. `normalizesNames`(기본 `FileSystemNormalizesNames`)면 두 쪽을 NFC로 대조한다(`/`는 결합하지 않아 구성 요소 경계가 유지된다). 새 항목의 이름은 이벤트 철자다(한계).
+        - 쓰는 중 대기: `mayDefer`가 참인 파일의 다시 읽기가 패키지를 읽지 못해(항목 없이 진단 하나) CorruptPackage이거나 진단 None·Busy면(읽혀서 항목이 있는 파일의 Tags·ImportRecord 손상 진단은 다 쓴 파일이라 미루지 않는다) 그 파일의 지금 항목·진단을 바꾸지 않고(기다리는 동안 옛 항목이 남는다 — 저장 도중 에셋이 사라졌다 나타나지 않게) `deferred`에 위치를 붙인다. 같은 이름 중 하나라도 거짓이면 미루지 않는다.
+        - `AssetIndex::MarkRootLost()`: 항목을 비우고 진단을 `RootLost`(이름 빈 문자열, 원본 오류 NotFound) 하나로 둔다. 할당 실패면 색인 그대로이고 감시가 다음 Pump에 다시 한다. 진단 줄은 `RootLost: Content/: the content directory disappeared`.
+        - 감시: `Start(cache)`는 원천 열기 → Rebuild(실패하면 원천을 닫는다). `Pump()`는 시작 전 InvalidArgument. 원천 Poll 오류와 이벤트 기록의 할당 실패는 전체 다시 검색으로 접는다(`DirectoryWatcher`가 메모리 부족을 루트 Overflow로 접는 것과 같다 — 이벤트는 늘 소비한다). 유효한 UTF-8이 아닌 경로는 첫 잘못된 구성 요소 앞 디렉터리(없으면 전체), 규칙에 안 맞는 경로는 전체다. 다시 읽기 실패면 색인 그대로·모은 일 유지(다음 Pump가 다시). 새 대기 목록은 확정 전에 모두 만든다(확정 뒤 실패 없음). 대기 관찰은 복사본에서 하고 성공할 때만 바꾼다(실패하면 대기 그대로 — 다시 읽을 것이 없는 Pump도 관찰은 남긴다, 버리면 안정 판정이 끝나지 않는다). 다시 읽은 이름·덮은 트리·이미 있는 대기의 대조는 정렬 표의 이진 검색이다(A2d3 리뷰 필수 — 이벤트·대기가 수만 개여도 쌍마다 대조하지 않는다).
+        - 대기 파일은 Pump마다 관찰한다: 처음 본 뒤 10초 → 다시 읽기(미루지 않음), Stat 실패·일반 파일 아님 → 다시 읽기, 크기·시각이 지난 관찰과 다르면 관찰 갱신, 같고 500 ms 이상 지났으면 다시 읽기. 다시 읽은 결과(손상이어도)를 남기고 대기에서 뺀다. 새 이벤트는 다시 미룰 수 있다(처음 본 시각은 유지 — 10초 상한은 그대로). 다시 검색한 하위 트리가 덮는 대기 파일은 뺀다(검색이 결과를 남겼다 — 대조는 byte, 정규화 철자 차이면 상한까지 남을 뿐이다).
+        - 루트 소실 뒤: 1초 간격으로 다시 열기(NotFound는 조용히 다음 간격, 그 밖의 원천 오류는 Pump 오류), 열리면 `RefreshPaths(전체)` — 실패하면 RootLost 색인 그대로이고 다음 간격에 검색만 다시 한다. 시계가 뒤로 가면 기준 시각을 지금으로 당긴다(기다림이 길어질 뿐).
+        - `PrepareRefresh`도 `options.types`를 비운다(Rebuild·캐시와 같은 형식 판정만 — A2d1의 결정을 저장 갱신에도 맞춤).
+    - **A2d2 병렬 범위 읽기**: Rebuild를 걷기(파일 목록)와 읽기로 나누고 읽기를 `WorkerScheduler`(주입 — 없으면 직렬)로 파일마다 지문·부분 읽기를 해 파일별 결과 칸에 둔다. 결과는 목록 순서로 모아 지금과 같은 정렬·게시를 한다(직렬과 byte 같은 결과를 단언). 계약: 색인 allocator와 `FileSystem` 모두 동시 호출이 안전해야 한다(`PhysicalFileSystem`은 그렇다 — 시험 `MemoryFileSystem`은 잠금을 더하거나 직렬 시험만). 할당 실패는 어느 작업이든 전체 실패(색인 그대로). 완료 조건에 큰 합성 프로젝트(예: 5만 패키지)의 직렬 대 병렬 측정 수치를 넣는다.
 
 ## 8. 동시성
 
@@ -860,7 +1039,7 @@ nugget-gc --max-bytes=<n> --unused-days=<n>
 - 종료 코드: 0 성공(경고만 있어도 0), 1 실행 실패(진단은 표준 오류에 `<진단 코드>: <path>: <설명>` 한 줄씩 — 임포터가 거부한 옵션 값은 `InvalidImportOption`), 2 사용법 오류(모르는 명령·옵션, 같은 옵션 두 번, 값이 필요한 옵션에 값 없음, 위치 인자 수·조합 오류).
 - 쓰기 잠금(8절)을 잡는 명령: `asset-import`·`asset-reimport`·`asset-new`·`asset-set`·`asset-move`·`asset-duplicate`·`asset-delete`·`asset-fix-duplicate-id`·`asset-alias-remove`·`asset-alias-prune`·`asset-orphans-delete`·`asset-index-rebuild`(캐시 기록)·`asset-cook`(쿠킹 동안 에디터 패키지가 바뀌지 않게, 쿠킹 출력 보호). 나머지는 잠금 없이 읽는다(캐시는 읽기만).
 
-서비스 API(`AssetService`, AssetDatabase)는 명령과 1:1 함수이며 에디터가 나중에 같은 함수를 쓴다.
+서비스 API(`AssetService`, AssetDatabase)는 명령과 1:1 함수이며 에디터가 나중에 같은 함수를 쓴다. A2 명령은 그 서비스 API가 생기는 하위 단계에서 함께 더한다(7.1절 4 표).
 
 ## 14. 검증 시나리오
 
@@ -892,7 +1071,7 @@ nugget-gc --max-bytes=<n> --unused-days=<n>
 26. 원본 규칙: BMP 32비트 BI_RGB 알파 무시·V5 알파 마스크, TGA 알파 비트·확장 영역(premultiplied), PSD 색 모드·hasRealMergedData·추가 채널, PNG 회색 16비트 + tRNS
 27. 매니페스트 대조: 프로파일 불일치 `IncompatibleCook`, 크기·SHA·의존 불일치 `CorruptPackage`, 손상된 게시 파일의 재게시
 28. 순환 키: 하드 순환 A↔B·3-node 순환의 cookKey와 Build 순환의 너겟 키가 정의되고, 구성원 하나를 바꾸면 SCC 전체의 키가 바뀐다. 동적 간선으로 생긴 순환의 단위 병합과 해제, 간선 다중도(필드 둘 중 하나 제거)
-29. 저장: 이전 파일의 손상 bulk entry 복사 거부, bulkId 재매핑 후 지연 읽기, 저장 중 편집 시 재연결 생략, 대체 경로(FAT 등)에서 자기 핸들 때문에 실패하지 않음
+29. 저장: 이전 파일의 손상 bulk entry 복사 거부, 저장소 id 표 다시 잇기 후 지연 읽기, 저장 중 편집 시 재연결 생략, 대체 경로(FAT 등)에서 자기 핸들 때문에 실패하지 않음
 
 ### 14.1 시험 fixture 에셋(A1부터)
 
@@ -908,7 +1087,7 @@ nugget-gc --max-bytes=<n> --unused-days=<n>
 | `BaseGameAsset`·`DerivedGameAsset` | 상속 | 기반 필드·파생 필드 | `FixtureAsset_InheritanceRoundTrip` |
 | `ValidatedAsset`(+`FixtureRange` Validate hook) | 검증 hook | 필드 struct·struct 배열 원소의 hook | `FixtureAsset_ValidateHook`(유효 왕복, 거부 값은 로드가 CorruptPackage) |
 | `TestAsset`·`TestPart`·`TestScratch`·`TestRequiredAsset` | 참조·구조 | 다른 패키지 Hard(단일·`ObjectRefArray<Object>`)·Soft·EditorOnly Hard·EditorOnly 값·bulk, 하위 객체 사슬(`Body.Socket`)·같은 패키지 안 참조, 저장 불가(Transient) 하위 객체, Required Hard | `AssetPackage_*`(PackageFormatTests·PackageFuzzTests) |
-| `TestHookAsset` | 사용자 코드 hook | 생성자·소멸자가 시험이 건 hook(`testHookAssetHooks`)을 부른다, 기대 타입이 TestAsset인 Hard 참조 하나(오래된 의존 쿠킹 결과로 공개를 실패시켜 롤백 소멸자에 닿는다) | `AssetLoader_TransactionCodeCannotReenter` |
+| `TestHookAsset` | 사용자 코드 hook | 생성자·소멸자가 시험이 건 hook(`ActiveTestHookAssetHooks()`)을 부른다, 기대 타입이 TestAsset인 Hard 참조 하나(오래된 의존 쿠킹 결과로 공개를 실패시켜 롤백 소멸자에 닿는다) | `AssetLoader_TransactionCodeCannotReenter` |
 | `GameDataAsset`·`GameComponent`·`FixtureEntry` | 복합 | 하위 객체 여러 개(순환 사슬)·다른 에셋 Hard 배열과 하위 객체의 다른 패키지 참조·Soft·weak·커브·bulk·struct 배열·Map·hook struct | `AssetPackage_CompositeGameDataRoundTrip` |
 | `ComboAsset`·`ComboEditorAsset`·`ComboRequiredAsset`·`ComboPart`·`ComboPartDerived`(+종류별 `Combo*` struct) | 모든 조합 | 아래 "지원하는 모든 조합" | `FixtureAsset_CombinationsCoverPropertyTable`·`FixtureAsset_CombinationRoundTrip`·`FixtureAsset_CombinationRequired` |
 
@@ -1226,7 +1405,7 @@ A1c 상태(2026-11-20): **구현**. 완료 조건 넷을 모두 갖췄다. 빠�
 - 요구 대조표(14.1.5): 시험 없는 항목 0, 정의된 시험 47개를 모두 인용
 - 조합: 단계 조합 3496개·결함 단계와 종료 조합 110개, 금지 조합은 명시하고 일대일·실행 수로 빠짐 검사
 - coverage(14.1.6): 닿지 않은 곳은 소멸자 Fatal 둘뿐(자식 probe가 문구 대조), Release 구성에서 빠지는 결과 주입은 따로 적음
-- 리뷰어 참고(병합을 막지 않음): `testHookAssetHooks`는 전역 하나라 시험 병렬 실행 때 다시 볼 것, 결함 단계와 종료 조합에는 취소·합류 축이 없다(`ShutdownDrainsAndReleases`가 덮음)
+- 리뷰어 참고(병합을 막지 않음): `ActiveTestHookAssetHooks()`는 전역 하나라 시험 병렬 실행 때 다시 볼 것, 결함 단계와 종료 조합에는 취소·합류 축이 없다(`ShutdownDrainsAndReleases`가 덮음)
 
 #### 14.1.7 요구 대조표(A1d — AssetManager)
 
@@ -1377,7 +1556,7 @@ A1e 상태(2026-11-21): **완료**(리뷰 3회 — 미충족 2회 반영 뒤 충
 
 #### 14.1.11 요구 대조표(A1f — 콘텐츠 서명)
 
-설계는 [ContentSigning](ContentSigning.ko.md) 3·4·7절이다. 시험은 셋이다: AssetRuntime `Tests/ContentSignatureTests.cpp`(EngineTests, 11개 — 봉투 형식·검증·키 줄), EngineAssets `Tests/EngineAssetsSigningTests.cpp`(2개 — 엔진 정책)와 시험 장면(`DiskScene`이 시험 키로 서명한 봉투를 쓰고 신뢰 정보를 등록 — EngineAssets 시험 30개 전부가 서명 봉투 경로로 시작하므로 Release 구성에서도 돈다), `Programs/Rocks.Commandlet.Tests`(C#, content-sign 23항목). golden은 독립 구현(세션 scratchpad `ed25519ph_ref.py` — RFC 8032 5.1 순수 Python, RFC 7.3 벡터로 확인)이 만든 byte다.
+설계는 [ContentSigning](ContentSigning.ko.md) 3·4·7절이다. 시험은 셋이다: AssetRuntime `Tests/ContentSignatureTests.cpp`(EngineTests, 11개 — 봉투 형식·검증·키 줄), EngineAssets `Tests/EngineAssetsSigningTests.cpp`(3개 — 엔진 정책)와 시험 장면(`DiskScene`이 시험 키로 서명한 봉투를 쓰고 신뢰 정보를 등록 — EngineAssets 시험 31개 전부가 서명 봉투 경로로 시작하므로 Release 구성에서도 돈다), `Programs/Rocks.Commandlet.Tests`(C#, content-sign 53항목). golden은 독립 구현이 만든 byte다: 처음에는 RFC 8032 5.1 순수 Python 구현(RFC 7.3 벡터로 확인)으로 만들었고, 재현할 수 있게 같은 알고리즘의 C# 구현 `Programs/Rocks.Commandlet.Tests/Ed25519phReference.cs`(BigInteger, 엔진·libsodium 코드 없음 — 리뷰 권장)를 저장소에 두었다. C# 시험이 참조 구현을 RFC 8032 7.3 Ed25519ph 벡터("abc")로 먼저 확인하고, 그것으로 golden 봉투를 다시 만들어 hex를 대조하며, `content-sign sign`이 쓴 봉투의 서명과 헤더 칸도 엔진과 무관하게 확인한다. 신뢰 키로 서명한 깨진 매니페스트 봉투도 참조 구현으로 만들어 `content-sign verify`의 매니페스트 판정을 확인한다.
 
 | 요구(절) | 항목 | 시험 |
 |---|---|---|
@@ -1391,9 +1570,10 @@ A1e 상태(2026-11-21): **완료**(리뷰 3회 — 미충족 2회 반영 뒤 충
 | 쓰기(7-1) | null keyId InvalidArgument, 상한 초과 CapacityExceeded(읽기 전), 빈 키 StaleHandle, 실패하면 out 그대로, 빈 매니페스트 봉투, 서명·검증 상태의 모든 할당 실패(그 오류, out 그대로, 진단 None) | `ContentSignature_WriteErrors`, `ContentSignature_AllocationFailures` |
 | 키 줄(7-5) | 형식(keyId hex 32 ‖ 공백 ‖ 공개키 hex 64, 소문자), 왕복, 끝 `\n`·`\r\n` 하나, 대문자 hex, 길이·구분자·hex 아님·줄바꿈만·줄바꿈 둘·null keyId 거부 | `ContentSignature_TrustedKeyText` |
 | 엔진 정책(7-3·4) | 봉투 3(없음·서명·변조) × 신뢰 등록 2 × rman 2 = 12 조합(아래) — 결과·단계 이름·진단 이름의 Error 한 줄, 서명 안 됨 Warning 수, `contentSigned`·`contentVersion`, 봉투가 있으면 rman(깨진 byte)을 읽지 않음, Release는 봉투만 | `EngineAssets_SigningPolicyCombinations` |
+| | 봉투 자리가 디렉터리면 봉투 없음과 같다(Release NotFound, 그 밖 Warning 한 번 뒤 rman), 봉투 읽기·검증 상태의 할당 실패가 단계 이름(`content signature read`·`content signature (None)`)으로 기록됨 | `EngineAssets_EnvelopeDirectoryIsAbsent`, `EngineAssets_InitializationAllocationFailures` |
 | | 시험 키 서명이라도 낮은 contentVersion(ContentVersion)·다른 scope(Scope) 거부, 최소와 같은 버전 통과, 등록한 신뢰 정보가 잘못됐으면 InvalidArgument(칸 None), 봉투 안 매니페스트가 깨지면 봉투 통과 뒤 manifest parse(CorruptPackage) | `EngineAssets_SignedContentRejections` |
 | | 신뢰 정보 등록(`SetContentTrust`)·해제, 서명 봉투로 시작하는 기존 엔진 경로 전부(초기화 조합·할당 실패·프레임·종료) | `EngineAssets_*`(30개 — `DiskScene`) |
-| commandlet(5, 7-5) | keygen(공개 줄 98 byte 형식, 덮어쓰기 거부, 비밀번호 파일 없음 사용법 2·빈 비밀번호 1), sign(성공·다시 서명은 원자적 교체·임시 파일 없음, 틀린 비밀번호, 매니페스트 아님, 버전·product 형식·같은 선택지 두 번·모르는 선택지 사용법 2), verify(성공, 다른 channel Scope, 높은 최소 버전 ContentVersion, 변조 Signature, 키 줄 아님), 하위 명령 없음·모름 사용법 2, 도움말 | `Rocks.Commandlet.Tests`(content-sign 23항목) |
+| commandlet(5, 7-5) | keygen(공개 줄 98 byte 형식, 덮어쓰기 거부, 공개 자리만 있으면 만든 키 파일을 지움, 비밀번호 선택지 없음 사용법 2·파일 없음 1·빈 비밀번호 1), sign(성공·다시 서명은 원자적 교체·임시 파일 없음, 출력 디렉터리 없음·출력 자리가 디렉터리면 실패하고 임시 파일을 지움, 틀린 비밀번호, 다른 종류 키 파일, 매니페스트 아님·없음, 키·비밀번호 파일 없음, 위치 인자 부족·필수 선택지 없음·빈 값·버전·product 형식·같은 선택지 두 번·다른 하위 명령 선택지·모르는 이름 사용법 2), verify(성공, 다른 channel Scope, 높은 최소 버전 ContentVersion, 변조 Signature, 봉투 아님 File, 신뢰 키로 서명된 깨진 매니페스트(참조 구현이 만든 봉투), 키 줄 아님, 봉투·공개 파일 없음, 위치 인자·trust·product 없음·최소 버전 형식 사용법 2), 하위 명령 없음·모름·도움말 뒤 인자 사용법 2, 도움말, 참조 구현의 RFC 8032 벡터 확인·golden 재생성·sign 출력 서명 확인 | `Rocks.Commandlet.Tests`(content-sign 53항목) |
 | 조합(14 완료 조건 2) | 신뢰: 최소 버전 3(봉투보다 낮음·같음·높음) × 키 위치 3(하나·여럿 가운데 마지막·없음) × scope 2 = 18 — 겹치면 Key → ContentVersion → Scope | `ContentSignature_TrustCombinations` |
 | | 엔진 정책: 봉투 3 × 신뢰 등록 2 × rman 2 = 12, 기대값은 구성(IsReleaseBuild)으로 고르고 Debug·Release 실행이 양쪽을 덮는다 | `EngineAssets_SigningPolicyCombinations` |
 | | 패처 (keyId → 받은 최고 버전) 기록, 빌드 규칙의 신뢰 정보 생성, 부분 읽기 조각 해시 | 범위 밖(ContentSigning 7-6 — 후속) |
@@ -1406,6 +1586,10 @@ A1e 상태(2026-11-21): **완료**(리뷰 3회 — 미충족 2회 반영 뒤 충
 |---|---|---|---|
 | `AssetRuntime/Private/ContentSignature.cpp` | 98.1%(257/262) | 97.9%(137/140) | 100%(14/14) |
 | `EngineAssets/Private/EngineAssetsSubsystem.cpp` | 95.4%(329/345) | 94.7%(108/114) | 100%(17/17) |
+| `Programs/Commandlet/Private/Common/ContentSignCommandlet.cpp` | 93.0%(319/343) | 84.8%(139/164) | 100%(14/14) |
+| `Programs/Commandlet/Private/Common/CommandletFiles.cpp` | 75.0%(51/68) | 59.1%(13/22) | 100%(6/6) |
+
+commandlet은 리뷰 지적으로 측정했다(처음 측정은 EngineTests만이었다): `pwsh -NoProfile -File Build/MeasureCoverage.ps1 -Target Commandlet -Executable RocksCommandlet -Runner 'dotnet,run,--project,Programs/Rocks.Commandlet.Tests,--,--executable,{executable}' -Sources Programs/Commandlet/Private/Common` — 스크립트에 외부 구동기(`-Runner`)와 실행 파일 이름(`-Executable`) 인자를 더했다. 함께 잰 기존 파일(`LogCommandlet.cpp` 82.9%·`CommandletHost.cpp` 76.6%)은 A1f 범위 밖이다(파일 도우미를 `CommandletFiles`로 옮긴 것 말고 바꾸지 않았다).
 
 닿지 않은 곳과 근거:
 
@@ -1415,12 +1599,470 @@ A1e 상태(2026-11-21): **완료**(리뷰 3회 — 미충족 2회 반영 뒤 충
 | `VerifyContentEnvelope` | 검증 상태에 조각 넣기 실패, 서명 확인의 AuthenticationFailed 밖 오류 | 같은 이유(방금 만든 상태 — 끝남·옮겨 감·이전 실패가 없다). 할당 실패는 상태 만들기에서 나고 시험이 닿는다 |
 | `EngineAssetsSubsystem::Initialize` | 봉투가 없을 때 rman 경로 다시 만들기 실패 | 두 파일 이름이 같은 길이(`CookedManifest.rsig`·`.rman`)라 앞에서 만든 문자열 용량으로 다시 쓴다(할당 없음) |
 | `EngineAssetsSubsystem` | A1e 근거 넷(14.1.10) | 그대로다 |
+| `ContentSignCommandlet` keygen | OS 난수·키 저장소 실패로 키·KeyId 만들기 실패, Argon2id 작업 메모리(256 MiB) 부족으로 감싸기 실패 | OS·메모리 조건이고 실행 파일에는 주입 지점이 없다(Crypto 시험이 같은 오류 경로를 덮는다) |
+| `ContentSignCommandlet` keygen | 두 파일을 만든 뒤 쓰기·닫기 실패와 두 파일 정리 | 새로 만든 파일의 쓰기·닫기 실패(디스크 가득 참·장치 오류)다. 정리 순서는 log keygen과 같고 공개 자리만 있는 경우의 정리는 시험이 닿는다 |
+| `ContentSignCommandlet` 임시 파일 | OS 난수 실패로 이름 만들기 실패, 임시 파일 쓰기·flush·닫기 실패와 그 정리 | OS 조건(디스크 가득 참·장치 오류). 만들기 실패·교체 실패와 그 정리는 시험이 닿는다 |
+| `ContentSignCommandlet` sign | 봉투 쓰기 실패 | 입력이 이미 검증한 매니페스트(상한 안)·연 키·non-null keyId라 남은 실패는 할당 실패다 |
+| `ContentSignCommandlet`·`CommandletFiles` | 출력 채널 쓰기 실패 분기(`Write`), 파일 크기·읽기·쓰기·닫기 실패, 읽기 버퍼 할당 실패 | 표준 출력·오류 실패와 OS 파일 오류·할당 실패다. 출력 실패는 Windows 무효 핸들 시험이 사용법 경로에서 닿는다(같은 `Write` 패턴) |
 
-A1f 상태(2026-11-21): **구현**(리뷰어 판정 전). 완료 조건:
+A1f 상태(2026-11-21): **완료**(리뷰 3회 — 미충족 2회 반영 뒤 충족). 완료 조건:
 - 요구 대조표(14.1.11): 시험 없는 항목 0
 - 조합: 신뢰 18·엔진 정책 12·bit 변조 1336·자르기 전 길이
 - coverage(14.1.12): 닿지 않은 곳은 모두 근거
-- 빠진 시험 관점 리뷰어 판정: 대기
+- 빠진 시험 관점 리뷰어 판정: 1회 미충족(commandlet coverage 측정 밖) → 측정·시험·근거 반영, 2회 미충족(verify 깨진 매니페스트 근거가 사실 아님 — 참조 구현으로 만들 수 있음) → 시험으로 닿게 함, 3회 **충족**
+
+#### 14.1.13 요구 대조표(A2a — 경로·배치·잠금·주입점)
+
+시험은 EngineTests `Engine/Source/Developer/AssetDatabase/Tests/`(`LogicalPathTests.cpp`·`ProjectLayoutTests.cpp`·`AssetDatabaseLockTests.cpp`, 공용 `AssetDatabaseTestSupport.h` — 정의된 시험 20개를 모두 인용한다). 다른 프로세스의 잠금은 자식 프로세스(`--process-probe asset-database-lock`)와 표준 입출력 pipe gate로 순서를 정한다(시간에 기대지 않는다 — Android는 자식 프로세스가 없어 그 시험을 건너뛴다). OS 감시 확인만 Wait 반복 상한(200 ms × 50)으로 끝난다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 논리 경로(4.2, 7.1-10) | 양성: 마운트 철자 정규화(대소문자 무시), ASCII·비ASCII 숫자(N*) 첫 문자, '_'·'-', 비ASCII(L*), NFD 입력의 NFC 정규화, 접근자(Text·Key·Name·Directory·Relative·Mount) | `LogicalPath_ValidPaths` |
+| | 음성(판정 순서): 빈 값, 앞 '/' 없음, '\', 빈 구성 요소('/'·'//'·끝 '/'), 마운트뿐, 모르는 마운트(잘못된 UTF-8 포함), 구성 요소 규칙 위반 전부(`.`·`..`·'_'·결합 문자(M*) 첫 문자 InvalidFirst, 공백·'.' InvalidCharacter, CON·com1·LPT¹ 예약 이름, U+200B Default_Ignorable, 잘못된 UTF-8, NUL, 65 byte TooLong), 전체 256 초과. 위반 위치는 NFC로 정규화한 구성 요소 안의 byte offset(공백·'.'·NFD 입력으로 위치가 당겨지는 경우). 이웃 규칙의 겹친 위반 일곱 쌍(규칙 1·2·3·4·5 — 앞 '/' 대 '\', '\' 대 빈 구성 요소, 빈 구성 요소 대 마운트, 마운트뿐 대 마운트, 마운트 대 구성 요소, 구성 요소 둘, 구성 요소 대 전체 길이(268 byte에 마지막 구성 요소 위반)) | `LogicalPath_InvalidPaths` |
+| | 경계: 구성 요소 64 byte·전체 256 byte 받음, 257 거부, 정규화 뒤 길이로 셈 — NFD가 NFC로 줄어 받음, 조합 제외 문자(U+0958)가 NFC로 늘어 구성 요소 TooLong·전체 TooLong(넷은 받고 다섯은 거부) | `LogicalPath_LengthBoundaries` |
+| | 비교 키: 대소문자·정규화 형태만 다르면 같은 키, simple case folding('ß' ≠ "ss"), 다른 경로는 다른 키 | `LogicalPath_CaselessKeys` |
+| | 복사, 옮겨 간 값의 접근자(Mount 포함)는 빈 view이고 그 복사도 빈 값(범위 밖을 읽지 않음 — 공개 생성자는 없다), 사유 이름(고유·범위 밖 "Unknown"), 모든 할당 지점 실패(비ASCII 긴 경로·TooLong 전에 자라는 경로·NFC 뒤에도 애매한 결합 문자 q + U+0301, 복사) — OutOfMemory·사유 None, 실패 없으면 같은 결과 | `LogicalPath_CloneAndNames`, `LogicalPath_AllocationFailures` |
+| 배치(4.2, 7.1-10) | 디렉터리 이름(Content·Config·Intermediate·Saved), 절대 루트 정규화('\'·반복·끝 구분자), 루트뿐인 경로("C:/"·"/"), 상대 루트는 작업 디렉터리 기준 절대 경로, 빈 루트·현재 드라이브 루트·드라이브 상대 InvalidArgument, 해석할 수 없는 루트(NUL InvalidArgument·장치 이름 공간 Unsupported) — 이전 값 유지 | `ProjectLayout_Directories` |
+| | Initialize 전 배치는 파일 경로를 만들지 않음(InvalidArgument) | `ProjectLayout_Uninitialized` |
+| | 논리 경로 → 새 파일 경로 → 논리 경로 왕복, 확장자 ASCII 대소문자 무시(".RASSET"·".RaSsEt" 받음), 패키지가 아닌 이름(임시 파일·확장자뿐·확장자 없음·다른 확장자·빈 값 — 사유 None), 규칙 위반 이름의 사유 | `ProjectLayout_PathRoundTrip`, `ProjectLayout_NonPackageNames` |
+| | 비 NFC 파일 이름: byte 비교 파일 시스템 NotNfcOnDisk, 이름 정규화 파일 시스템(macOS)은 NFC 경로로 받음, NFC 이름은 어느 쪽이든 받음, 사유 자리 없이도 같은 판정. 겹친 위반(확장자 → 파싱 → NotNfc 순서): 비 NFC + 규칙 위반 InvalidComponent, 비 NFC + 너무 김 TooLong, 디렉터리 구성 요소만 비 NFC | `ProjectLayout_NonNfcFileNames` |
+| | OS 경로 상한(임시 접미사 41 byte 포함): 같으면 받음, 넘으면 CapacityExceeded(out 그대로). 상한 길이의 절대 경로 파일을 실제로 만들 수 있음(OS가 받는 범위 안 — 드라이브 경로로 확인, UNC 경로의 실제 경계는 환경이 필요해 미검증) | `ProjectLayout_NativePathLimit`, `ProjectLayout_NativePathLimitOnDisk` |
+| | 모든 할당 지점 실패(600 byte 넘는 루트·상대 루트의 작업 디렉터리 버퍼·640 byte 넘는 상대 이름 — 인라인 저장소를 넘겨 자람, 긴 이름은 TooLong): 그 오류, 실패한 Initialize는 바로 앞 값 유지 | `ProjectLayout_AllocationFailures` |
+| 쓰기 잠금(8, 7.1-4) | Intermediate를 만들고 잠금, 같은 객체 다시 잡기 AlreadyExists, 같은 프로세스 다른 객체 Busy(대기 0), 놓으면 다른 객체가 잡음, 두 번 놓기 무동작, 놓인 잠금은 대기가 있어도 바로 잡음, Initialize 전 배치 InvalidArgument | `AssetDatabaseLock_SameProcess` |
+| | 다른 프로세스: 자식이 쥐면 부모 Busy, gate 뒤 자식이 놓으면 부모가 잡음, 부모가 쥐면 자식 Busy, 쥔 자식을 강제 종료하면 OS가 풀어 부모가 잡음(OS가 푸는 시점은 정해지지 않아 — LockFileEx — 대기는 실패 상한으로만 쓴다). Android는 자식 프로세스가 없어 건너뛰고 그 사실을 출력한다 | `AssetDatabaseLock_OtherProcess` |
+| | Intermediate 자리가 파일이면 WrongType(→ InvalidArgument, 잡지 않음), 잠금 경로가 OS 상한을 넘으면 CapacityExceeded, 긴 경로의 모든 할당 지점 실패 | `AssetDatabaseLock_Failures`, `AssetDatabaseLock_AllocationFailures` |
+| 주입점(7.1-9) | 시스템 시계(UtcTicks 표현), 시험 시계(고정·Advance), 단위 상수 | `AssetClock_Sources` |
+| | OS 감시 공급(`WatcherChangeSource`)이 만든 파일의 Added를 Wait·Poll로 전달 | `WatcherChangeSource_ReportsAddedFile` |
+| 조합(14 완료 조건 2) | 논리 경로 규칙은 판정 순서가 있는 단일 축이라 조합 대신 규칙별 양성·음성과 이웃한 규칙의 겹친 위반(모든 이웃 쌍)으로 덮는다. 파일 이름 대응은 확장자 → 파싱 → NotNfc 순서의 겹친 위반을 따로 본다. 잠금은 보유자(없음·같은 객체·같은 프로세스 다른 객체·다른 프로세스·비정상 종료한 프로세스) × 요청자 대기(0·있음) 축을 위 시험이 지난다 | 위 시험 |
+
+#### 14.1.14 Coverage(A2a)
+
+측정(2026-11-21, Windows, `pwsh -NoProfile -File Build/MeasureCoverage.ps1 -Target EngineTests -Filter LogicalPath,ProjectLayout,AssetDatabaseLock,AssetClock,WatcherChangeSource -Sources Engine/Source/Developer/AssetDatabase/Private,Engine/Source/Developer/AssetDatabase/Public`): 줄 99.0%(398/402)·분기 97.6%(160/164)·함수 100%(38/38). `if constexpr`로 갈리는 macOS·Linux 쪽(`FileSystemNormalizesNames` 참, `MaxNativePathBytes`의 POSIX 값)은 Windows 측정 밖이고 미검증이다(macOS 실행은 후속).
+
+닿지 않은 곳과 근거:
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| `ParseLogicalPath` | 정규화가 거부한 구성 요소를 이름 규칙이 받아들이는 경우(사유 None) | Core 계약상 `TryNormalize`의 InvalidArgument는 잘못된 UTF-8뿐이고, `ValidateNameComponent`는 잘못된 UTF-8을 할당 없이 InvalidCharacter로 거부한다. 둘이 어긋나면 사유 없는 거부 대신 그 결과를 그대로 돌려주는 방어다 |
+| `ProjectLayout::Initialize` | 작업 디렉터리 조회 실패 | Windows에서는 OS 조회 실패뿐이다(버퍼는 상한 + 1). POSIX에서는 작업 디렉터리가 지워졌거나(`getcwd` ENOENT) 상한보다 깊으면(ERANGE) 닿지만, 프로세스 전역 작업 디렉터리를 바꾸는 시험이라 다른 시험과 함께 돌릴 수 없어 하지 않는다(macOS 실행 때 따로 확인) |
+
+닿게 한 방법: 할당 실패 시험의 입력을 임시 저장소의 인라인 크기(경로 320 byte·잠금 경로 512 byte)를 넘는 길이로 골라 저장소가 자라는 지점을 지나게 했고, 짧은 조각 여러 개를 한 호출(`AppendAll`)로 묶어 실패 지점을 실제로 자랄 수 있는 곳으로 모았다. 리뷰(1회)가 지적한 것: 경로 상한 경계(NUL·UNC 접두), 상대 루트, 빈 경로 접근자의 범위 밖 읽기(처음 coverage를 맞추려고 뺀 검사가 그것을 막고 있었다 — 생성자를 비공개로 하고 빈 값 처리를 되돌렸다), 확장자 대소문자, 규칙 4 대 5 순서 시험. 구분자 바꾸기 반복은 Core Path가 이미 '/'로 정규화하고 POSIX에서 '\'는 이름 문자라 뺐다.
+
+A2a 상태(2026-11-21): **완료**(리뷰 3회 — 미충족 2회 반영 뒤 충족). 완료 조건: 대조표(14.1.13) 시험 없는 항목 0·정의된 시험 20개 모두 인용, 조합(위 표 마지막 행), coverage(14.1.14 — Windows), 리뷰어 판정 1회 미충족 → 반영, 2회 미충족(옮겨 간 값의 Mount, 강제 종료 뒤 잠금 해제 시점) → 반영, 3회 **충족**.
+
+#### 14.1.15 요구 대조표(A2b — 부분 읽기·Tags·색인·명령)
+
+시험은 EngineTests `Engine/Source/Runtime/AssetRuntime/Tests/PackageIndexTests.cpp`(9개)와 `Engine/Source/Developer/AssetDatabase/Tests/AssetIndexTests.cpp`·`AssetIndexCommandletFixtureTests.cpp`(7개)의 정의된 시험 16개를 모두 인용하고, 명령은 C# `Programs/Rocks.Commandlet.Tests`의 asset 항목 30개(Windows 전용 5개 포함)다. 메모리 파일 시스템(`MemoryFileSystem` — byte 그대로의 노드 표, 열기·읽기·열거 고장 주입, 링크·장치 항목, NTFS에서 만들 수 없는 대소문자만 다른 이름, 잘못된 UTF-8 이름)과 실제 디스크(`TempProject`)를 함께 쓴다. 읽기 핵심을 바꾼 뒤 기존 패키지 시험(AssetPackage 74·FixtureAsset·CookedManifest·AssetLoader·AssetManager)이 그대로 통과한다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 부분 읽기(7.1-13) | 풍부한 에디터 패키지(import·Zstd bulk 셋·커스텀 버전·ImportRecord·Tags 값 스키마·Build 의존)에서 헤더·섹션 수·지문·readOnly·Exports·Imports·Dependencies·Summary 표·ImportRecord·Tags가 전체 읽기와 같고 Objects·Bulk·bulk 항목은 비움, 옮긴 view 유효, 읽은 byte가 파일보다 적음 | `PackageIndex_MatchesFullRead` |
+| | 판정 관계: 패키지 모양 셋(풍부한 장면·최소 패키지(선택 섹션 없음)·모르는 비 Required 섹션(readOnly))마다 모든 byte의 모든 bit(8개) 손상에서 읽는 구간(헤더·표·읽는 섹션)은 두 읽기가 같은 오류·같은 진단(코드·칸·위치·에셋), 건너뛰는 구간(Objects·Bulk·BulkIndex 내용과 패딩)은 부분 읽기 통과·전체 읽기 거부, 모르는 섹션 내용은 둘 다 통과(readOnly) | `PackageIndex_EveryBitFlip` |
+| | 모양 셋마다 모든 길이(0 … 파일 크기)로 자른 파일과 1 byte 늘린 파일은 두 읽기가 같은 진단으로 거부(64 byte 미만은 있는 만큼으로 헤더 판정) | `PackageIndex_TruncateAndExtend` |
+| | n번째 범위 읽기 실패(모든 n)는 그 오류·진단 None, 할당 실패(모든 지점)는 OutOfMemory·진단 None | `PackageIndex_ReadAndAllocationFailures` |
+| 범위 읽기(7.1-13) | 메모리·파일: 끝 4 byte·빈 범위·끝 위치 빈 범위 성공, 파일 밖 InvalidArgument, 파일 구현의 부분 읽기 = 메모리, 없는 파일 NotFound(크기 0), 다시 열기는 앞 파일을 닫음, 실패한 다시 열기는 크기 0 | `PackageRangeReader_Bounds` |
+| | 열기·크기 실패는 Open의 그 오류(크기 0), 이동·읽기 실패는 ReadAt의 그 오류(빈 범위는 이동만) | `PackageRangeReader_FileFaults` |
+| Tags 값 스키마(7.1-13·14) | (키, 값) 정렬 쓰기·읽기(목록 값), 빈 목록 = 빈 byte. 쓰기 거부: 빈 키·257 byte 키·4 KiB 넘는 값·잘못된 UTF-8(키·값)·같은 쌍. 읽기: 다른 스키마·더 새 Record·더 새 항목 Unsupported, 깨진 byte·순서 뒤집힘·같은 쌍·키 없음·값 없음·키 wire·값 wire·빈 키·긴 키·잘못된 UTF-8 키·값·긴 값·목록 필드 없음·목록 wire·항목 스키마 다름 InvalidArgument(17가지 손으로 만든 Record 표) | `PackageTags_WriteAndRead` |
+| | 쓰기·읽기의 모든 할당 지점 실패, 실패 없으면 같은 byte | `PackageTags_AllocationFailures` |
+| | 한도: 값 4 KiB·1 byte 태그마다 쓰기가 받는 가장 큰 수를 이분으로 찾아(받음·CapacityExceeded 경계) 그 수로 쓴 것은 그대로 읽히고(읽기 예산 포함) 하나 더하면 CapacityExceeded | `PackageTags_Limits` |
+| 검색(7.1-13·14) | 실제 디스크: Content 없음 = 빈 색인, 재귀 검색, 대문자 확장자 색인, `.tmp`·다른 확장자·빈 디렉터리·`.rasset` 이름의 디렉터리 무시, 비 NFC 파일 이름 InvalidPath(NotNfcOnDisk — 이름 정규화 파일 시스템은 색인), 항목 값(경로·키·실제 파일 이름·대표 타입·지문 = 전체 읽기·크기·시각·의존·태그), 파일을 지우고 다시 검색하면 반영 | `AssetIndex_DiskScanAndQueries` |
+| | 없는 디렉터리는 빈 디렉터리(Content 없음·열거에서 사라진 하위 디렉터리), Content 열거 실패와 Content가 파일(WrongType)은 Rebuild 오류이고 색인을 비움, 하위 디렉터리 열거 실패는 진단 None·원본 오류로 그 디렉터리만 뺌. 확장자뿐인 이름(Content 바로 아래 `.rasset`·`.RASSET`, `Dir/.rasset`)은 InvalidPath(EmptyComponent), 잘못된 UTF-8 이름(Content 바로 아래·하위 디렉터리의 패키지 파일과 디렉터리 InvalidPath(InvalidComponent), 그 디렉터리 안으로 내려가지 않음, 다른 확장자 무시), 표시 이름이 겹치지 않음(글자 그대로 "\xff"인 이름은 역슬래시 16진·Backslash, 개행·0x7f 이름은 16진·InvalidComponent) | `AssetIndex_RebuildFailures` |
+| 진단(7.1-13·14) | InvalidPath(InvalidComponent), 깨진 패키지·쿠킹 패키지(부분 읽기와 같은 코드·오류·칸·위치·에셋), 다른 스키마 Tags UnsupportedVersion·깨진 Tags CorruptPackage(칸 Tags, 태그 없이 색인), 사라진 파일 MissingFile, 열기 Busy·읽기 실패 진단 None과 원본 오류, 파일·디렉터리 링크·장치·다른 확장자 무시, 같은 경로 키(대소문자·확장자 철자만 다름) 둘 다 DuplicatePath, 같은 id 둘 다 DuplicateAssetId(상대 = 정렬 이웃), 조회 AlreadyExists(id·경로·Dependencies), 진단·항목 정렬(뒤에 열거된 것이 맨 앞으로 — 경로·파일 이름·id 순), high가 다른 id, 모르는 커스텀 버전으로 저장한 항목만 readOnly | `AssetIndex_Diagnostics` |
+| | 진단 줄: 코드마다(None·InvalidPath·MissingFile·DuplicateAssetId·DuplicatePath·MissingDependency·TypeMismatch·패키지 판정) 정확한 문구, 줄 앞을 0–160 byte 채워 저장소가 자라는 지점을 모든 조각 위로 옮기며 모든 할당 실패 | `AssetIndex_DiagnosticLines` |
+| 조회(7.1-13) | id·경로(대소문자 무시 키·없음·끝보다 뒤), 디렉터리(마운트 철자, 바로 아래·재귀, 구성 요소 경계 "/Game/Char", 항목 자신, 잘못된 디렉터리 여섯 가지 — 5 byte 마운트 아닌 "/Gamx" 포함), 타입(정확·파생 포함·미등록 id·0 InvalidArgument), 태그(목록 원소마다·키 대소문자 구분·키와 값 바꿈), 정방향 의존·역방향 참조자를 모든 종류 묶음(32개) × 대상 8개로 저장 내용에서 직접 고른 것과 대조 | `AssetIndex_DiskScanAndQueries` |
+| Verify(7.1-13·14) | Hard·Soft 누락만(EditorOnly·Build·ImportOwner 대조 안 함), 형식 대조: Registry가 없으면 하지 않음(파생 대상·파생 아님 모두 진단 없음), 등록 Registry는 파생 통과·파생 아님 TypeMismatch, 빈 Registry(미등록)는 TypeMismatch, 대상 없음 MissingDependency, 대상 id가 둘이면 대조 안 함, 종료한 Registry ShuttingDown(Verify·ListByType), 대표 타입이 구조체 id인 패키지(Summary·Exports 타입 id를 바꿔 만듦)는 파생 아님·TypeMismatch | `AssetIndex_VerifyTypes`, `AssetIndex_DiskScanAndQueries` |
+| 할당 실패(7.1-13) | 진단 장면 + 형제 디렉터리 여덟(검색 대기 표가 자람) + 512 byte 넘는 프로젝트 루트(경로 저장소가 자람) + 깊은 디렉터리(TooLong) + 잘못된 UTF-8 긴 이름(표시 이름) + 열거할 수 없는 하위 디렉터리 + 맨 앞으로 옮겨지는 깨진 파일에서 Rebuild와 모든 조회(따로 둔 출력 배열)의 모든 할당 지점 — OutOfMemory, Rebuild 실패면 색인이 빔, 실패 없으면 같은 결과 | `AssetIndex_AllocationFailures` |
+| 명령(13, 7.1-14) | asset-list: 줄 모양·순서(정확히 두 줄), --under(있음·없음·논리 디렉터리 아님 1), 위로 프로젝트 찾기·없음 1, --project에 기술자 없음·하위 디렉터리 1, 쓸 수 없는 루트(Windows 드라이브 상대) 1, 빈 프로젝트, Content가 파일 1, --help 0, --wait=5 받음·--wait=5s 2, 위치 인수·같은 옵션 두 번·빈 값·모르는 옵션(--type) 2 | C# `asset-list *` |
+| | asset-index-verify: 누락 의존 줄과 요약 1, 빈 프로젝트 0(--wait=0 포함), Content가 파일·프로젝트 없음 1, --help 0, --under 거부 2, 문제 프로젝트의 일곱 줄을 순서까지(InvalidPath·DuplicateAssetId 둘·CorruptPackage·NewerVersion(엔진 99.0.0 저장)·MissingDependency 둘 — 같은 id에 파생 대표를 둔 Base는 Registry 없는 대조라 줄이 없다)와 요약, 다른 프로세스가 공유 없이 연 파일(Windows — 원본 오류 이름), 무효 표준 핸들에서 목록 줄·진단 줄·요약 쓰기 실패 1(Windows) | C# `asset-index-verify *`, `invalid output handles *` |
+| | fixture byte(Hero·Base·같은 id의 Derived 대표·Newer, 엔진 0.1.0 저장)가 writer 출력과 같음 | `AssetIndex_CommandletFixtureBytes` |
+| 조합(14 완료 조건 2) | 부분 읽기 대 전체 읽기: 모든 offset × 8 bit × 구간(읽음·건너뜀), 모든 자르기 길이, 모든 IO 실패 위치·할당 지점. 조회: 종류 묶음 32 × 대상 8 × 항목. 부분 읽기 손상·자르기는 모양 3. Verify: 장면 5(정상·파생 대상·파생 아님·대상 없음·대상 중복) × Registry 3(없음·등록·빈 것) + 종료 Registry + 구조체 대표. Tags 읽기: 손으로 만든 Record 17가지. 진단: 코드별 장면 하나씩 + 겹침(같은 파일의 DuplicatePath·DuplicateAssetId) | 위 시험 |
+
+#### 14.1.16 Coverage(A2b)
+
+측정(2026-11-21, Windows): `pwsh -NoProfile -File Build/MeasureCoverage.ps1 -Target EngineTests -Filter AssetPackage,PackageIndex,PackageTags,PackageRangeReader,AssetIndex -Sources Engine/Source/Runtime/AssetRuntime/Private,Engine/Source/Developer/AssetDatabase/Private`와 명령(`-Target Commandlet -Executable RocksCommandlet -Runner dotnet run --project Programs/Rocks.Commandlet.Tests -- --executable {executable} -Sources Programs/Commandlet/Private`).
+
+| 파일 | 줄 | 분기 | 함수 |
+|---|---|---|---|
+| `AssetDatabase/Private/AssetIndex.cpp` | 100%(608/608) | 100%(318/318) | 100%(27/27) |
+| `AssetRuntime/Private/PackageTags.cpp` | 100%(144/144) | 100%(84/84) | 100%(9/9) |
+| `AssetRuntime/Private/PackageRangeReader.cpp` | 100%(46/46) | 100%(20/20) | 100%(4/4) |
+| `AssetRuntime/Private/PackageReader.cpp`(읽기 핵심 변경) | 100%(1077/1077) | 97.7%(736/753) | 100%(44/44) |
+| `Programs/Commandlet/Private/Common/AssetIndexCommandlet.cpp` | 84.0%(158/188) | 85.4%(82/96) | 100%(7/7) |
+
+닿지 않은 곳과 근거:
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| `PackageReader.cpp` | 분기 17개: 불변식 검사 `ROCKS_ASSERT`의 실패 쪽 16개와 섹션 내용 `switch`의 암묵 default | A1 측정(14.1.x)과 같다 — 모르는 섹션 종류는 그 앞에서 건너뛰므로(`IsKnownPackageSection`) switch에 닿는 종류는 모두 case가 있다 |
+| `AssetIndexCommandlet` | 출력 줄 저장소의 할당 실패(`Fail`·목록 줄·진단 줄·요약), `Rebuild`·`ListUnder`·`Verify`의 할당 실패 | 프로세스 시험은 명령의 allocator에 실패를 주입할 수 없다. 같은 결과를 만드는 라이브러리 경로(색인·조회·Verify·진단 줄의 모든 할당 지점)는 `AssetIndex_AllocationFailures`·`AssetIndex_DiagnosticLines`가 덮는다 |
+| `AssetIndexCommandlet` | 현재 디렉터리를 절대 경로로 못 만듦, 프로젝트 찾기의 파일 시스템 오류(NotFound 밖) | OS 조건(작업 디렉터리 조회 실패·상위 디렉터리 열거 권한 거부)이다. 작업 디렉터리를 지우는 시험은 프로세스 전역 상태라 하지 않는다(14.1.14 ProjectLayout과 같다) |
+
+macOS·Linux 쪽(`FileSystemNormalizesNames`가 참인 비 NFC 이름 색인)은 Windows 측정 밖이고 미검증이다. 대소문자만 다른 두 파일은 Windows·macOS 기본 파일 시스템에 만들 수 없어 명령 시험에는 DuplicatePath 줄이 없다(색인은 메모리 파일 시스템, 줄 문구는 `AssetIndex_DiagnosticLines`가 덮는다). 잘못된 UTF-8 OS 이름도 Windows(UTF-16)에서는 만들 수 없어 메모리 파일 시스템으로만 시험한다.
+
+닿게 한 방법과 시험이 찾은 것: 실제 디스크 시험이 `Exists`가 디렉터리에 거짓인 것을 잡아 Content 판정을 열거 결과로 바꿨다. coverage가 보여 준 죽은 코드를 지웠다 — 확장자 검사 뒤의 `.tmp` 검사(임시 파일은 확장자가 달라 이미 걸러진다), Verify의 expectedType 0 검사(읽기가 보장), 같은 id·경로 상대를 찾는 전체 순회(정렬 이웃으로 바꿔 끝에 닿지 않는 반복이 없어졌다), `ListUnder`의 접두 저장소(논리 경로 256 byte라 할당이 생기지 않았다 — 키 비교로 바꿨다), 바이트 비교 함수 둘(Core `StringView::CompareBytes`로 바꿨다). 진단 줄 서식은 명령에서 AssetDatabase로 옮겨 모든 코드·할당 실패를 C++에서 시험한다.
+
+리뷰 1회(미충족) 반영: 필수 셋 — Content 바로 아래 `.rasset` 파일 하나가 색인 전체를 멈추던 것(사유 None을 할당 실패로 보던 판정 → InvalidPath(EmptyComponent)), Registry 없는 형식 대조가 로드되는 파생 참조를 TypeMismatch로 보고하던 것(→ 대조 안 함), 삽입 정렬(O(n²) → Core `algo::Sort`·`LowerBound`). 권장 반영 — 하위 디렉터리 열거 실패를 진단으로, 패키지 모양 셋의 손상·자르기, readOnly 항목, Tags 쓰기 한도와 대칭 시험, `--wait`, 명령 진단 줄 순서 단언, 스펙의 버퍼·진단 정렬 문구, ImportRecord 요약의 A2c 이월. 반영 중에 찾은 것: POSIX 열거는 잘못된 UTF-8 이름을 그대로 주는데 `String`이 그것을 거부해 이름 하나가 색인 전체를 멈추었다 → 표시 이름 + InvalidPath, 진단 줄 서식이 잘못된 UTF-8 인자를 거부하던 것도 이것으로 없어졌다(줄에는 제어 문자 escape만 남김).
+
+재리뷰(2회) **충족**. 그 권장 둘도 반영했다: 표시 이름이 역슬래시를 그대로 두어 다른 이름과 겹치던 것(→ 역슬래시도 16진, 표시 이름을 진단 하나에서 만들고 진단 줄은 그대로 씀), 하위 디렉터리 실패에도 "package file" 문구가 나가던 것(→ "cannot read the file or directory"). `--wait` 범위 검사는 A2c로 넘긴다(7.1절 14).
+
+A2b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.15) 시험 없는 항목 0·정의된 시험 16개 모두 인용, 조합(대조표 마지막 행), coverage(14.1.16 — Windows), 리뷰어 판정 1회 미충족 → 반영, 2회 **충족**.
+
+#### 14.1.17 요구 대조표(A2c1 — AssetRuntime 저장 기반)
+
+시험은 EngineTests `Engine/Source/Runtime/AssetRuntime/Tests/`의 `PackageStoreTests.cpp`(11개)·`BulkStoreTests.cpp`(11개)·`AssetTypeHookTests.cpp`(5개) — 정의된 시험 27개를 모두 인용한다. 공용 `StoreTestSupport.h`는 bulk 셋을 가진 장면(Zstd·None·모르는 섹션), 경로마다 byte를 가진 메모리 파일 시스템(열기·크기·이동·읽기·쓰기 고장, n번째 이동·읽기 실패, 내용 바꾸기 — 외부 변경), n번째 범위 읽기 실패를 준다. 읽기 핵심을 세 범위로 바꾼 뒤 EngineTests 전체(3702개)가 통과한다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 재검증(5.5-5, 7.1-15) | 모양 셋의 모든 byte 모든 bit 손상에서 `VerifyPackageFile` = `ReadPackage`(성패·오류·진단 칸·위치·에셋), 손상 없는 파일은 조각 1·13·65536 byte 모두 통과 | `PackageVerify_EveryBitFlipMatchesFullRead` |
+| | 모든 길이 자르기·1 byte 늘리기 = 전체 읽기 진단, n번째 범위 읽기 실패(모든 n) 그 오류·진단 None, 모든 할당 지점 실패, 빈 scratch InvalidArgument | `PackageVerify_TruncationIoAndAllocation` |
+| | 손으로 만든 섹션(CRC 맞음): BulkIndex 배치 위반 CorruptPackage(BulkIndex), 더 새 BulkIndex NewerVersion, bulk 없는 패키지 통과 — 전체·편집 읽기·재검증 같은 진단 | `PackageVerify_CraftedSections` |
+| 편집 읽기(7.1-15) | 내용 = 전체 읽기(bulk span만 비고 bulkEntries·Objects·지문·readOnly 같음), 모양 셋 모든 bit: 읽는 구간 같은 진단·Bulk 내용과 섹션 사이 패딩 편집 통과·전체 거부·모르는 섹션 둘 다 통과, 모든 자르기 같은 진단 | `PackageEditRead_RelationToFullRead` |
+| 지문(5.5-1, 7.1-15) | = ReadPackage 지문, 헤더·표 CRC 손상·짧은 파일은 전체 읽기와 같은 진단, 범위 읽기 실패(헤더·표) 진단 None, 할당 실패 | `PackageFingerprint_Read` |
+| entry 해제(7.1-15) | None·Zstd entry 풀기와 SHA-256, 저장·raw 크기 불일치·SHA 불일치·깨진 컨테이너 InvalidArgument, Zstd 해제의 모든 할당 실패 | `PackageBulkEntry_Decode` |
+| | Array 겹판: out을 rawBytes로 키워 같은 byte, 키우기 전에 컨테이너 rawSize 대조(2^44 rawBytes는 키우지 않고 InvalidArgument), 저장 크기·깨진 컨테이너 InvalidArgument, 모든 할당 실패 | `PackageBulkEntry_DecodeIntoArray` |
+| 파일 sink(7.1-15) | 파일 sink byte = 메모리 sink byte(WritePackage), 쓴 수, 빈 Append, 범위 밖 WriteAt InvalidArgument, 쓰기·이동·끝으로 돌아가는 이동 실패는 파일 오류 | `FilePackageSink_WritesSameBytes` |
+| 지연 로드(7.1-15) | Defer + 범위 읽기 Prepare + SetBulkStore → InstantiatePackages가 Package에 저장소를 옮김, 처음 BulkBytes에서만 파일을 열고 같은 span, Decode의 범위 읽기 Prepare·두 번째 Prepare·Prepare 전·null·인스턴스 뒤 SetBulkStore InvalidArgument, `SameContent`(id 무시·크기 비교) | `PackageLoad_DeferredBulk` |
+| | 범위 읽기 Prepare의 판정 실패 진단, Decode 상태 SetBulkStore InvalidArgument(저장소는 호출자에게), BulkDataRef의 저장하지 않은 id 표지 CorruptPackage(BulkIndex, detail = id) | `PackageLoad_DeferredFailures` |
+| | bulk entry가 있는 Defer 상태를 저장소 없이 InstantiatePackages에 넘기면 InvalidArgument, bulk 없는 패키지는 저장소 없이 열림 | `PackageLoad_DeferRequiresStore` |
+| 저장소(6.1, 7.1-15) | 지연 읽기(Zstd·None 내용 일치, 처음만 열기, 같은 span, ReadBulk), FileBulkId, ref 판정(빈 InvalidArgument·없는 id NotFound·크기·SHA TypeMismatch), 다시 Attach·빈 경로 InvalidArgument | `FilePackageBulkStore_LazyRead` |
+| | 손상(CRC·풀기·SHA) 그 entry만 CorruptPackage(Bulk, detail = 파일 id, 에셋)·다른 entry 읽힘, 진단 없는 ReadBulk도 그 오류, 외부 변경 ExternalModification / StaleHandle(캐시 비움), 연 핸들은 교체 뒤 이전 내용, 파일 없음 NotFound, 열기·크기·읽기·저장 byte 읽기 실패 진단 None | `FilePackageBulkStore_LazyFailures` |
+| | 지연 읽기의 모든 할당 실패 뒤 다시 읽으면 같은 byte, Attach의 모든 할당 실패 뒤 빈 저장소·다시 Attach | `FilePackageBulkStore_ReadAllocationFailures` |
+| | 저장하지 않은 bulk(최상위 bit id 차례, SHA-256, 읽기, 파일 id 0), 저장하지 않은 bulk가 있으면 Attach 거부, CopyFrom(새 ref·원본 오류 전달), 모든 할당 실패 | `FilePackageBulkStore_UnsavedAndCopy` |
+| | 저장(저장소를 bulk source로) 뒤 Rebind: 옛 ref(파일·저장하지 않은 id)가 새 파일 entry, 빠진 id NotFound·이미 준 span 유효, 잘못된 표(없는 옛 id·0·범위 밖·내용 다름)와 손으로 만든 entry 표(id·크기·SHA 다름)·빈 경로 InvalidArgument로 그대로, 모든 할당 실패도 그대로, 읽지 않은 채 빠진 entry는 Detach가 건너뜀, 이은 적 없는 저장소의 Rebind | `FilePackageBulkStore_RebindAfterSave` |
+| | Detach: 남은 entry를 다 읽고 연결 끊기(파일을 지워도 읽힘·캐시 닫힘), 손상 entry면 그 오류·연결 유지, 두 번째 무동작 | `FilePackageBulkStore_Detach` |
+| | 빈 재매핑 Rebind → Detach → 다시 Attach: Attach의 모든 할당 실패에서도 이미 준 span 유효·저장소 빔, 성공 뒤 다시 읽힘 | `FilePackageBulkStore_ReattachKeepsSpans` |
+| | 손상된 표(Zstd entry rawBytes 2^44): raw를 잡기 전에 CorruptPackage(할당 실패가 아님) | `FilePackageBulkStore_HugeRawBytesRejectedBeforeAllocation` |
+| | 새 패키지에 AttachBulkStore → BulkBytes가 저장소에(진단 포함), null·이미 저장소·로드한 bulk가 있는 패키지 InvalidArgument(저장소는 호출자에게) | `Package_AttachBulkStore` |
+| 핸들 캐시(7.1-15) | 상한 2 LRU(뒤 항목이 오래된 경우·앞 항목이 오래된 경우), 다른 지문 ExternalModification·핸들 닫음, 없는 경로 Close 무동작, 상한 0 InvalidArgument, 헤더 손상 진단 | `PackageFileCache_LeastRecentlyUsed` |
+| | 저장소 소멸이 자기 핸들을 닫음, CloseUnder(구성 요소 경계 — "Content/A"는 "Content/AB"를 닫지 않음·파일 경로는 디렉터리가 아님·다른 접두 무동작) | `PackageFileCache_CloseOnStoreDestructionAndUnder` |
+| 타입 hook(7.1-15) | 가장 가까운 hook(Base만 등록 → Derived에 Base hook), CallBase(둘 다)·안 부름(부모 끔), 종류마다 따로 찾기(Derived에 Build hook 없으면 Base의 것), hook 없는 타입 무동작, 최상위 CallBase 무동작 | `AssetTypeHooks_NearestAndCallBase` |
+| | 0 타입·hook 둘 다 null InvalidArgument, 같은 타입 AlreadyExists, hook 오류 전달(직접·CallBase 거쳐·Build), 미등록 타입 NotFound(Collect·CallBase) | `AssetTypeHooks_Errors` |
+| | 등록 handle 소멸·Release·이동·이동 대입·자기 대입, 두 번째 Release 무동작 | `AssetTypeHooks_RegistrationLifetime` |
+| | 태그 sink(PackageTags 규칙 검사·합치기·(키, 값) 정렬 삽입 — 같은 키 목록 값·정렬된 Write·빈 Write), 의존 sink(null 거부·정렬·유일·종류 Build), 모든 할당 실패 | `AssetTypeHooks_Sinks` |
+| | 등록의 모든 할당 실패 뒤 표 그대로 | `AssetTypeHooks_RegisterAllocationFailures` |
+| 조합(14 완료 조건 2) | 읽기 셋(전체·편집·재검증) × 패키지 모양 셋(Zstd·None·모르는 섹션) × 모든 offset·bit·자르기 길이, 손으로 만든 섹션 셋. 저장소: 파일 entry·저장하지 않은 bulk·복사 bulk × (읽기·저장·다시 잇기·Detach), 고장(열기·크기·읽기·외부 변경·손상 셋) × 첫 접근·캐시된 핸들. hook: 등록 위치(없음·Base·Derived·둘 다) × CallBase(함·안 함) × 종류 둘 | 위 시험 |
+
+#### 14.1.18 Coverage(A2c1)
+
+측정(2026-11-21, Windows, `pwsh -NoProfile -File Build/MeasureCoverage.ps1 -Target EngineTests -Filter AssetPackage,PackageIndex,PackageVerify,PackageEditRead,PackageFingerprint,PackageBulkEntry,FilePackageSink,PackageLoad_Deferred,FilePackageBulkStore,PackageFileCache,Package_AttachBulkStore,AssetTypeHooks,AssetLoader -Sources Engine/Source/Runtime/AssetRuntime/Private`):
+
+| 파일 | 줄 | 분기 | 함수 |
+|---|---|---|---|
+| `FilePackageBulkStore.cpp`(새) | 99.3%(303/305) | 99.3%(139/140) | 100%(21/21) |
+| `AssetTypeHooks.cpp`(새) | 98.8%(171/173) | 97.6%(80/82) | 100%(17/17) |
+| `PackageReader.cpp`(범위 셋·재검증·지문·entry 해제) | 100%(1281/1281) | 98.0%(842/859) | 100%(51/51) |
+| `PackageLoad.cpp`(Defer·저장소·저장하지 않은 id) | 100%(487/487) | 98.0%(296/302) | 100%(17/17) |
+| `Package.cpp`(저장소 연결) | 100%(47/47) | 93.8%(30/32) | 100%(4/4) |
+
+닿지 않은 곳과 근거:
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| `FilePackageBulkStore::AddUnsaved` | 저장하지 않은 id 소진(CapacityExceeded) | 2^31 − 1개를 더해야 닿는다(그만큼의 slot 메모리). 넘침을 Fatal로 두지 않고 오류로 돌려준다 |
+| `AssetTypeHookTable::Remove` | 찾는 타입이 표에 없을 때의 반복 끝 | 등록 handle이 있는 타입만 지운다(handle은 Release·소멸에서 한 번만 부른다) — 항목이 없을 수 없다 |
+| `~AssetTypeHookTable` | 등록이 남은 채 소멸하면 Fatal | 수명 계약 위반(남은 handle의 Release가 해제된 표를 쓴다)이라 프로세스를 끝낸다 — 시험 프로세스 안에서 부를 수 없다(`ReferenceObserver` 소멸 검사와 같다) |
+| `PackageReader.cpp` | 분기 17개(ROCKS_ASSERT 16·섹션 내용 switch의 암묵 default) | A2b(14.1.16)와 같다. 새 범위 판정은 if 사슬로 써서 암묵 default가 없다 |
+| `PackageLoad.cpp`·`Package.cpp` | 분기 6·2개 | `ROCKS_ASSERT` 전개 안의 실패 쪽이다(`uncovered.txt`에 보이지 않고 합계에만 든다 — 14.1.x A1과 같다) |
+
+시험이 찾은 것: 재검증이 더 새 schemaVersion의 BulkIndex를 어떻게 다룰지 넣은 조건이 닿지 않았다 — BulkIndex는 Required라 부분 읽기가 먼저 `NewerVersion`으로 거부한다(조건을 빼고 손으로 만든 섹션 시험으로 고정했다). hook의 `CallBase`를 base 사슬 찾기와 한 함수로 합쳐 닿지 않던 오류 분기를 없앴다. 시험 지원 헤더 하나가 편집기 프로세스에 잠겨 쓸 수 없어 새 이름(`StoreTestSupport.h`)으로 옮겼다.
+
+리뷰(1회) **충족**. 권장 다섯도 반영했다: Attach의 할당 실패가 Detach 뒤 남은 slot(이미 준 span)을 지우던 것(→ 호출 전 slot까지만 되돌림), 닫은 패키지의 캐시 핸들이 남던 것(→ 저장소 소멸자가 닫음·`CloseUnder` — A2e 디렉터리 작업용), 저장소 없는 Defer 상태를 조용히 받던 것(→ InvalidArgument), 손상된 표의 큰 지연 할당(→ 컨테이너 rawSize를 먼저 대조하는 `DecodePackageBulkEntry` Array 겹판), 등록이 남은 hook 표 소멸(→ Fatal). 태그 sink는 정렬 삽입(이분 찾기)으로 바꿨다. 복제의 저장소 표 복제(F5 c)는 A2e에서 더한다.
+
+A2c1 상태(2026-11-21): **완료**(리뷰 1회 충족 + 권장 반영). 완료 조건: 대조표(14.1.17) 시험 없는 항목 0·정의된 시험 27개 모두 인용, 조합(대조표 마지막 행), coverage(14.1.18 — Windows), 리뷰어 판정 **충족**.
+
+#### 14.1.19 요구 대조표(A2c2a — null import·ImportRecord·색인 요약·열기)
+
+시험은 FoundationTests `GraphExternalLoadTests.cpp`의 1개, EngineTests `Engine/Source/Runtime/AssetRuntime/Tests/PackageImportPolicyTests.cpp`(2개), `Engine/Source/Developer/AssetDatabase/Tests/`의 `ImportRecordTests.cpp`(6개)·`AssetIndexTests.cpp`의 `AssetIndex_ImportRecords`(1개 — 기존 색인 시험은 Hero에 참조 기록을 더해 그대로 통과)·`EditorPackageSetTests.cpp`(8개) — 정의된 시험 18개를 모두 인용한다. 메모리 파일 시스템(`MemoryFileSystem.h` — 색인 시험에서 옮기고 핸들을 풀로 바꿔 bulk 캐시가 쥔 동안 다른 파일을 연다)과 디스크 쓰기 도우미는 공용 시험 헤더로 옮겼다(동작 불변).
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| null import(ObjectFoundations 5.4, 7.1-15) | imports의 null handle은 확인을 건너뛰고 그 외부 참조를 읽는 단일 참조·배열 원소를 null로(다른 필드 그대로), 기대 형식이 있는 선언도 판정하지 않음 | `GraphExternalLoad_NullImportIsUnresolved` |
+| NullMissing(7.1-15) | B 모양마다(온전·없음·대표 타입 다름·하위 객체 없음·하위 객체 타입 다름) 미해결 기록(위치·코드·오류)과 null 참조(Hard·배열), outer 미해결의 연쇄, Strict는 없는 대상 MissingDependency 실패 | `PackageImportPolicy_NullMissing` |
+| | NullMissing에 기록 표 null InvalidArgument(상태 재사용 가능), 기록 할당 실패 OutOfMemory | `PackageImportPolicy_ArgumentsAndAllocation` |
+| ImportRecord 배치(5.4, 7.1-15) | 소유 기록 쓰기 = 손으로 만든 정규 배치(출력 key 순 정렬), 모든 값 왕복(원본은 쓴 순서), options 없는 소유 기록·참조 기록도 정규 배치와 같고 왕복, 소유 기록을 다른 self로·참조 기록을 owner로 읽으면 InvalidArgument | `ImportRecord_RoundTripAndLayout` |
+| | 경계 양성: 이름 256·role 64·root 256·빈 root·relativePath 1024·점이 든 성분(".hidden"·".a"·"..."·"a.")·outputKey 64·빈 key, 원본 256개·출력 1024개(역순 입력 → key 순), bytes 0·최대 | `ImportRecord_BoundaryValues` |
+| | 쓰기 규칙 위반 43가지(self·owner null, 임포터 id·이름 빈 값·257·UTF-8·NUL, 원본·출력 0개·상한+1, options envelope, role 빈 값·65·NUL·중복, root 257·`/`·`\`·UTF-8, 경로 빈 값·1025·앞·뒤·연속 `/`·`.`·`..`·안쪽 `..`·`\`·UTF-8, key 65·UTF-8, 출력 asset·type null, key·asset 중복, self 없음, 참조 기록의 각 칸) 모두 InvalidArgument | `ImportRecord_WriteRejects` |
+| | 읽기 손상 70가지: 67가지 InvalidArgument(필드 없음 4·wire·크기 6·owner null·모르는 필드·임포터 규칙 4·목록 없음 2·목록·options wire 3·options 빈·envelope, 원본 목록 빈·초과·잘림·항목 schema, 원본 항목 필드 없음 5·추가·wire·크기 7·규칙 3·role 중복, 출력 목록 빈·초과·항목 schema, 출력 항목 필드 없음 3·추가·wire·크기 3·규칙 3·순서·key·asset 중복·self 없음, 참조 기록의 각 칸 6)와 기록·원본·출력 항목 더 새 버전 3가지 Unsupported, 빈 byte·null self·header 아닌 byte InvalidArgument, 더 새 envelope·다른 스키마(Tags) Unsupported | `ImportRecord_ReadRejects` |
+| ImportOwner 대조(7.1-7·15) | 기록 없음·소유 기록은 ImportOwner 없어야, 참조 기록은 owner를 가리키는 항목 정확히 하나(없음·다른 대상·둘 위반), 다른 종류 항목은 세지 않음, self null InvalidArgument | `ImportRecord_CheckImportOwner` |
+| | 소유·참조 기록 쓰기·읽기의 모든 할당 실패 OutOfMemory, options가 값 한도(4 MiB)를 넘으면 CapacityExceeded | `ImportRecord_AllocationAndCapacity` |
+| 색인 요약(7.1-11·15) | 소유 기록 요약(임포터 id·이름·버전·출력 수·owner = 자기), 참조 기록 + 맞는 ImportOwner 요약(owner만)·진단 없음, 다른 스키마·더 새 버전 UnsupportedVersion·형식 위반 CorruptPackage(칸 ImportRecord, 요약 없음, 대조 안 함), 대조 위반 넷 CorruptPackage(칸 Dependencies), 모두 색인, 한 파일의 같은 코드 진단 둘은 칸 순, 모든 할당 실패 | `AssetIndex_ImportRecords` |
+| | Hero의 참조 기록 요약(owner = 2104, 나머지 빈 값)·기록 없는 항목 present 거짓(디스크 색인) | `AssetIndex_DiskScanAndQueries` |
+| 열기 닫힘(7.1-3·15) | Hard·EditorOnly 닫힘 한 번에(Soft 대상 열지 않음), 참조 이어짐(Hard·typed·EditorOnly), 정보 id 순·파일 이름·지문 = 색인·읽기 전용 아님·미해결 없음, resolver는 열린 것만, 지연 bulk 처음만 파일 열기, 이미 연 패키지 같은 handle(다시 읽지 않음)·경로 열기 같은 handle, 경고 표 없이 열기, 순환 한 트랜잭션 | `EditorPackageSet_OpenClosure` |
+| | 이어 열기: 먼저 연 Hero를 Villain이 resolver로 잇고 Villain만 읽음, 먼저 연 Base의 대표 타입이 Hero의 기대와 다르면 resolver로 찾은 대상도 Hero import만 null(UnresolvedImport TypeMismatch) | `EditorPackageSet_IncrementalOpen` |
+| 누락 의존(7.1-15) | Base 모양 16가지(정상·색인에 없음·같은 id 둘·색인 뒤 사라짐·열기 Busy·읽기 실패·손상·다른 id·ImportRecord 손상·ImportOwner 위반·다른 스키마 기록·모르는 커스텀 버전·대표 타입 다름·더 새 엔진·유효 소유 기록·유효 참조 기록 + 맞는 ImportOwner)마다 Hero 열기: 열린 수, Base 열림·읽기 전용, ExcludedDependency(코드·오류·칸 — 손상·버전은 같은 byte를 직접 Prepare한 진단과 같음, asset Base·related Hero), UnresolvedImport(asset Hero·related Base·ObjectImports import 0·MissingDependency 또는 TypeMismatch)와 정보의 미해결 표, EditorOnly 참조 영향 없음 | `EditorPackageSet_DependencyFailures` |
+| 요청 패키지 실패(7.1-15) | 같은 16 모양을 Base로 직접 열면 뺀 경고의 진단이 Open 실패(색인에 없음은 진단 None)·아무것도 안 열림, 읽기 전용·타입 다름·정상·유효 기록 둘은 열림, 색인에 없는 id NotFound, 경로 없음 NotFound, 같은 경로 키 둘 DuplicatePath / AlreadyExists | `EditorPackageSet_RootFailures` |
+| 인자·수명(7.1-15) | 설정 null 넷·캐시 용량 0·관찰자 키 0 InvalidArgument, Initialize 전 Open(id·경로) InvalidArgument(진단 None), 두 번째 Initialize·null id InvalidArgument, 파괴하면 집합 allocator 할당이 모두 돌아오고 bulk 캐시 핸들이 닫힘 | `EditorPackageSet_ArgumentsAndLifetime` |
+| | Initialize·Open(유효 기록이 있는 Hub 닫힘 8개 — 닫힘 표 성장·기록 읽기 포함, 경고 있는 닫힘)의 모든 할당 실패 OutOfMemory·아무것도 안 열림, Registry가 계약으로 삼키는 GC 참조 칸 표 할당 실패 하나만 성공(그 할당에 고유 tag GCRT를 주었다 — 리뷰 권장) | `EditorPackageSet_AllocationFailures` |
+| | EditorOnly로만 가리킨 대상 누락: 그 import(1)만 null·UnresolvedImport(Hard는 이어짐), 깊이 2 제외: 빠진 Base의 related는 중간 Hero·미해결 import는 Hero의 것(Villain 참조 이어짐) | `EditorPackageSet_EditorOnlyAndDeepExclusion` |
+| | 실제 디스크: 물리 파일 시스템으로 열기·지연 bulk 읽기·참조 | `EditorPackageSet_Disk` |
+| 조합(14 완료 조건 2) | ImportRecord: 기록 종류 둘(소유·참조) × options 유무 × 모든 필드의 경계·위반, 쓰기 위반 43 × 읽기 손상 70 + 입력 5(빈 byte·null self·header 아님·더 새 envelope·다른 스키마). 색인: 기록 모양(없음·소유·참조·다른 스키마·더 새·손상) × ImportOwner 항목(없음·맞음·다름) × 깨진 Tags 유무. 열기: Base 모양 16 × 열림 위치(의존·요청한 패키지)·대표 타입 다름 × 해석 경로(같은 묶음·resolver), 열린 상태(처음·이미 연 의존·이미 연 요청), 경로·id 열기, 경고 표 유무 | 위 시험 |
+
+#### 14.1.20 Coverage(A2c2a)
+
+측정(2026-11-21, Windows, `pwsh -NoProfile -File Build/MeasureCoverage.ps1 -Target EngineTests -Filter ImportRecord_,AssetIndex_,EditorPackageSet_,PackageImportPolicy_,PackageLoad,AssetPackage -Sources Engine/Source/Developer/AssetDatabase/Private,Engine/Source/Runtime/AssetRuntime/Private`). 그래프 쪽 null import(`GraphExternal.cpp`·`GraphApply.cpp`의 몇 줄)는 FoundationTests `GraphExternalLoad_NullImportIsUnresolved`가 지난다.
+
+| 파일 | 줄 | 분기 | 함수 |
+|---|---|---|---|
+| `ImportRecord.cpp`(새) | 100%(497/497) | 100%(366/366) | 100%(32/32) |
+| `EditorPackageSet.cpp`(새) | 99.5%(372/374) | 99.4%(171/172) | 100%(18/18) |
+| `AssetIndex.cpp`(요약·대조·진단 정렬) | 100%(662/662) | 100%(336/336) | 100%(28/28) |
+| `PackageLoad.cpp`(NullMissing) | 100%(568/568) | 98.2%(334/340) | 100%(19/19) |
+
+닿지 않은 곳과 근거:
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| `EditorPackageSet::PreparePending` | `SetBulkStore` 실패 | 그 계약의 실패는 인자 위반뿐이다(Decode 옵션·Prepare 전·인스턴스 뒤·null 저장소). 여기서는 Defer로 Prepare를 마친 새 상태에 방금 만든 저장소를 건다 — 닿을 수 없다. Release에서도 안전하게 오류로 돌려준다 |
+| `PackageLoad.cpp` | 분기 6개 | `ROCKS_ASSERT` 전개 안의 실패 쪽이다(14.1.18과 같다) |
+
+시험이 찾은 것: 처음 측정에서 유효한 ImportRecord를 가진 패키지를 여는 경로·닫힘 표 성장의 할당 실패·NullMissing의 "대표 에셋 없음"·outer 연쇄 기록의 할당 실패·경로 성분 ".a"가 닿지 않아 시험을 더했다(Base 모양 둘·Hub 닫힘·import 정책 변형·경계값). ImportRecord의 정렬 동률 처리(index 순)는 같은 원소를 어차피 중복으로 거부하므로 닿지 않는 분기라 뺐다. 할당 실패 시험이 Registry의 GC 참조 표 할당 실패를 삼키는 계약(실패하면 trace로 대신 — 정확성 같음)을 드러냈다 — 그 할당은 GC 타입 표와 tag(GCTY)를 같이 써서 구분되지 않았으므로 고유 tag(GCRT)를 주고 시험은 그 tag의 실패만 성공으로 받는다. 시험용 메모리 파일 시스템은 핸들 하나만 열 수 있어 bulk 캐시가 핸들을 쥔 동안 다른 파일을 열지 못했다 — 핸들 풀로 바꿔 공용 헤더로 옮겼다.
+
+리뷰(1회) **충족**. 권장 셋을 반영했다: Registry가 삼키는 GC 참조 칸 표 할당에 고유 tag(GCRT — 같은 tag를 실패를 돌려주는 GC 타입 표가 쓰고 있었다), EditorOnly로만 가리킨 대상 누락·깊이 2 제외 시험(`EditorPackageSet_EditorOnlyAndDeepExclusion`), 스펙 문구(소멸 순서의 Discard, 열린 패키지의 미해결 import는 다시 잇지 않음, 경고 detail의 뜻).
+
+A2c2a 상태(2026-11-21): **완료**(리뷰 1회 충족 + 권장 반영). 완료 조건: 대조표(14.1.19) 시험 없는 항목 0·정의된 시험 18개 모두 인용, 조합(대조표 마지막 행), coverage(14.1.20 — Windows), 리뷰어 판정 **충족**.
+
+#### 14.1.21 요구 대조표(A2c2b — 저장·새 패키지·색인 Refresh)
+
+시험은 EngineTests `Engine/Source/Developer/AssetDatabase/Tests/EditorPackageSaveTests.cpp`(14개)와 리뷰 반영으로 더한 `Engine/Source/Runtime/AssetRuntime/Tests/BulkStoreTests.cpp`의 `FilePackageBulkStore_TwoPhaseRebind`, `AssetDatabaseLockTests.cpp`의 `AssetDatabaseLock_SameProcess`(잠금 대조 단언 추가) — 정의된 시험 16개를 모두 인용한다(열기 시험의 할당 실패도 참조 기록 모양을 더해 다시 돈다). 저장 장면은 루트를 디스크 임시 디렉터리로 두어 이 프로젝트의 잠금을 잡고(Content 파일은 메모리), 빈 hook 표를 넘긴다. 열기 시험의 장면 도구(원본 패키지 묶음·메모리 프로젝트·설정·tag 기록 allocator)는 `EditorPackageSetTestSupport.h`로 옮겼고(동작 불변), 메모리 파일 시스템은 쓰기(만들기·n번째 쓰기 실패·n번째 쓰기 손상·Flush·Close·Replace·NotDurable·Delete·Stat·디렉터리 만들기 고장)를 더했다 — 내용은 노드와 열린 핸들이 함께 쥐는 공유 버퍼라 교체 뒤에도 연 핸들은 이전 내용을 읽는다. 잠금은 디스크 임시 프로젝트에서 잡는다(메모리 루트는 디스크에 없다).
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 저장(5.5-1–8, 7.1-15) | 고친 Hero 저장: 교체 한 번·임시 파일 없음·경고 없음, dirty 해제(세대 그대로), 지문 = 새 파일 = 색인 항목, 저장 전에 읽지 않은 bulk가 새 파일에서 읽힘(Rebind), 바뀌지 않은 패키지 다시 저장 = 같은 byte(결정적)·이미 준 span 유효, 다른 집합으로 다시 열면 값·bulk(`SameContent`)·Hard 참조 그대로 | `EditorPackageSave_RoundTrip` |
+| 새 패키지(7.1-15) | Create(dirty·세대 1·파일 없음·논리 경로), 저장하지 않은 bulk와 열린 패키지 참조를 담아 첫 저장: 부모 디렉터리 만들기·NFC 이름·색인 등록, 다시 열면 값·bulk·참조 그대로. 만들기 거부: type 0·Initialize 전 InvalidArgument, 색인의 같은 경로·저장하지 않은 새 패키지의 같은 경로 DuplicatePath, 열린 id·색인 id DuplicateAssetId, 에셋 클래스가 아닌 type은 Registry 오류(남는 것 없음) | `EditorPackageSave_NewPackage` |
+| | 첫 저장 거부: 대상 파일이 생김·색인에 대소문자만 다른 같은 경로 키(하나·둘) DuplicatePath / AlreadyExists, 절대 경로가 OS 상한 초과면 만들기가 InvalidPath / CapacityExceeded(아무것도 안 만듦), 대상 Stat 실패 진단 None, 만들기의 색인 같은 경로 키 둘·같은 id 둘 거부, MarkDirty·Save의 없는 id NotFound, 디렉터리 만들기 실패 진단 None(아무것도 안 씀 — 고장을 걷으면 저장됨) | `EditorPackageSave_NewPackageRefusals` |
+| 판정 순서(7.1-15) | Initialize 전·잠금 안 잡음·hook 표 없음·다른 프로젝트의 잠금 InvalidArgument, 열리지 않음 NotFound(열린 것보다 작은·큰 id), 편집이 대표 에셋을 Discard한 패키지(등록 hook·빈 hook 표 모두 NotFound — 아무것도 안 씀), 읽기 전용 NewerVersion / Unsupported, 미해결 import MissingDependency / InvalidArgument(related), dropUnresolved: DroppedUnresolvedImport(related·import 위치)·미해결 표 비움·다시 열면 null·경고 없음·Base 의존 없음, 거부는 아무것도 안 씀 | `EditorPackageSave_Refusals` |
+| 외부 변경(5.5-1) | 연 뒤 대상이 다른 패키지·지워짐·헤더 손상 ExternalModification / StaleHandle, 대상 열기 Busy·읽기 실패 진단 None과 그 오류, 아무것도 안 씀·정보 그대로 | `EditorPackageSave_ExternalModification` |
+| IO 고장(5.5-2–8) | 만들기·n번째 쓰기(모든 n)·Flush·Close·검증용 다시 열기·교체 실패 진단 None과 그 오류, n번째 쓰기 손상(모든 n) 재검증 CorruptPackage(나중에 덮어쓰는 헤더 자리 하나만 저장되고 결과 = 깨끗한 저장), 대상 byte·지문·dirty 그대로·임시 파일 지워짐, 교체와 지우기가 둘 다 실패하면 임시 파일이 남고 다음 저장이 고아로 지움(지울 수 없으면 OrphanNotDeleted 경고 — 경고 표 없이도 같고, 지우기 실패가 둘이어도 첫 오류 하나, 고장을 걷으면 지워짐), NotDurable 교체는 성공 + NotDurable 경고, 디렉터리 열거 실패는 OrphanNotDeleted 경고 | `EditorPackageSave_IoFailures` |
+| dirty·hook(7.1-5·15) | MarkDirty: 열리지 않음 NotFound·세대 오름, hook 오류(태그·Build)·태그가 Record 한도 초과(CapacityExceeded) 진단 None과 그 오류·아무것도 안 씀, 저장 중(hook 안) MarkDirty면 dirty 남음, Tags는 hook으로 다시 만듦(파일의 옛 태그 사라짐, hook 없으면 빈 Tags), Build 의존 기록 | `EditorPackageSave_DirtyAndHooks` |
+| ImportRecord 보존(7.1-15) | 소유 기록·참조 기록 + ImportOwner를 가진 Base 저장: 기록 byte 그대로·ImportOwner 의존 그대로·색인 요약 같음 | `EditorPackageSave_ImportRecordPreserved` |
+| 할당 실패(7.1-15) | 기존 패키지(bulk)·새 패키지 저장(hook·경고 표·고아·색인 allocator까지)의 모든 할당 실패 OutOfMemory이고 언제나 교체 전이다(교체 뒤의 다시 잇기·색인 갱신은 교체 전에 준비 — 리뷰 권장): 대상·정보·색인 그대로·교체 없음, 고아 정리의 할당 실패는 저장 성공·고아 남음·OrphanNotDeleted / OutOfMemory 경고(잡아 둔 자리) | `EditorPackageSave_AllocationFailures` |
+| | 호출자의 TypeRegistry가 닫힌 뒤 hook 있는 저장: 대표 에셋 타입 조회 ShuttingDown(진단 None·아무것도 안 씀 — 리뷰 필수) | `EditorPackageSave_TypeRegistryClosed` |
+| 2단계 다시 잇기(7.1-15) | PrepareRebind: 잘못된 표·빈 경로 InvalidArgument·모든 할당 실패에서 저장소 그대로·plan 준비 안 됨, CommitRebind 뒤 옛 ref가 새 파일 entry·재매핑에 없는 id NotFound(준 span 유효)·plan 비움 | `FilePackageBulkStore_TwoPhaseRebind` |
+| 잠금 대조(7.1-15) | IsHeldFor: 잡은 루트와 같은 배치(다른 객체 포함)만 참, 다른 루트·Initialize 전·놓은 뒤·잡지 않은 객체 거짓 | `AssetDatabaseLock_SameProcess` |
+| | Create의 모든 할당 실패 OutOfMemory(진단 None)·집합에 남는 것 없음·다시 만들 수 있음 | `EditorPackageSave_CreateAllocationFailures` |
+| 고아 모양(5.5-8) | 정확한 모양만 지움(".rasset" 대소문자 무시): 다른 디렉터리·대문자 guid·".TMP"·guid 앞 '.' 없음·".rasset" 아님·빈 이름·짧은 이름·하이픈 자리·16진 아님·디렉터리·링크·UTF-8 아님은 남김 | `EditorPackageSave_OrphanShapes` |
+| 색인 Refresh(7.1-15) | 바뀐 파일 항목 교체, 새 파일 더함(같은 id 둘 → 둘 다 DuplicateAssetId), 없어진 파일 뺌(풀림), 같은 경로 키 진단 다시 정함, 이름 규칙 위반 InvalidPath, 링크·디렉터리 색인 안 함, Stat 실패 진단 None(이름 순), `.rasset` 아님·확장자뿐 InvalidArgument, 모든 할당 실패(긴 Content 경로·Stat 진단 포함)에서 색인 그대로(준비·확정) | `AssetIndex_Refresh` |
+| 실제 디스크 | 물리 파일 시스템에서 기존 패키지 저장·새 디렉터리의 새 패키지 저장, 다시 색인·열기(임시 파일 없음·진단 없음) | `EditorPackageSave_Disk` |
+| 조합(14 완료 조건 2) | 저장 대상(기존·새) × 판정 거부 다섯 × 외부 변경 다섯, IO 고장 종류 × 쓰기 위치 전부(쓰기 실패·쓰기 손상), 교체 결과(성공·실패·NotDurable) × 임시 파일 지우기(성공·실패) × 다음 저장의 고아 정리(성공·실패), hook(없음·태그·Build·오류 둘·안에서 MarkDirty), ImportRecord(소유·참조), 할당 실패 위치 전부 × (교체 전·뒤) | 위 시험 |
+
+#### 14.1.22 Coverage(A2c2b)
+
+측정(2026-11-21, Windows — 리뷰 반영 뒤 다시): `pwsh -NoProfile -File Build/MeasureCoverage.ps1 -Target EngineTests -Filter EditorPackageSave_,AssetIndex_,EditorPackageSet_,ImportRecord_,PackageImportPolicy_,FilePackageBulkStore,AssetDatabaseLock -Sources Engine/Source/Developer/AssetDatabase/Private`, 저장소는 `-Filter FilePackageBulkStore,PackageFileCache,Package_AttachBulkStore,PackageLoad_Deferred,EditorPackageSave_ -Sources Engine/Source/Runtime/AssetRuntime/Private`.
+
+| 파일 | 줄 | 분기 | 함수 |
+|---|---|---|---|
+| `EditorPackageSet.cpp`(열기 + 만들기·저장) | 99.1%(933/941) | 98.4%(424/431) | 100%(37/37) |
+| `AssetIndex.cpp`(Refresh 준비·확정, 게시 준비·확정) | 100%(804/804) | 99.5%(417/419) | 100%(34/34) |
+| `AssetDatabaseLock.cpp`(잠금 대조) | 100%(36/36) | 100%(18/18) | 100%(3/3) |
+| `ImportRecord.cpp` | 100%(497/497) | 100%(366/366) | 100%(32/32) |
+| `FilePackageBulkStore.cpp`(2단계 다시 잇기) | 99.4%(333/335) | 98.0%(148/151) | 100%(23/23) |
+
+닿지 않은 곳과 근거:
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| `PreparePending` | `SetBulkStore` 실패 | 14.1.20과 같다(계약의 실패가 인자 위반뿐) |
+| `Create`의 id 발급, `WriteAndReplace`의 임시 이름 guid | `AssetId::TryNew`·`TryNewGuid` 실패 | OS 보안 난수 실패(Unsupported)다 — 시험이 OS 난수를 실패시킬 길이 없다. 오류로 돌려준다 |
+| `PlanSave`·`WriteAndReplace`의 줄 둘(`TryReserve` 여러 줄 문의 첫 줄, `reread.contents` 참조) | 줄 실행 수 0 | 앞뒤 줄이 모두 실행되는 직선 코드다 — llvm-cov의 여러 줄 문·참조 선언 줄 귀속 오차로 본다(분기 없음) |
+| `EditorPackageSet.cpp` 분기 4개·`AssetIndex.cpp` 2개·`FilePackageBulkStore.cpp` 2개 | `ROCKS_ASSERT` 전개 | Create의 방금 공개한 Package 고정·접근·저장소 잇기, 확정의 준비 상태·변경 세대 대조 — 소유 스레드·준비 계약상 실패할 수 없다(TypeRegistry가 닫힐 수 있는 타입 조회는 리뷰 필수로 오류로 바꿨다) |
+| `FilePackageBulkStore::AddUnsaved` | 저장하지 않은 id 소진 | 14.1.18과 같다(2^31 − 1개) |
+
+시험이 찾은 것: (1) 진단을 받는 호출이 진단을 채우지 않고 실패하면(sink 쓰기·할당) `Save`가 빈 진단의 오류(None)를 돌려줘 `InvalidArgument`로 보였다 — 실제 오류를 진단에 채우게 고쳤다(`EditorComplete`). (2) 고아 정리 경고가 할당 실패로 사라질 수 있었다 — 자리를 교체 전에 잡고 실패를 경고 하나로 모은다. (3) Create의 할당 실패 시험이 실패한 Create가 늘린 표 용량 때문에 저장소 할당을 건너뛰었다 — 시도마다 같은 상태의 새 집합에서 만든다(같은 함정을 다른 할당 실패 시험에서도 확인했다 — 모두 시도마다 새 상태다). (4) extra 의존 모으기는 자리를 한 번에 잡아 닿지 않던 두 번째 할당 실패 분기를 없앴다. 리뷰(1회 미충족)가 찾은 것: 대표 에셋 타입 조회를 단언했는데 호출자의 TypeRegistry가 닫히면 실패한다 — 오류로 바꾸고 시험을 더했다. 리뷰 권장으로 교체 뒤의 실패를 없앴다(저장소 다시 잇기·색인 갱신을 준비·확정으로 나눠 준비를 교체 전에 — 처음 구현은 교체 뒤 할당 실패에서 정보를 새 파일로 두고 dirty를 지우는 계약이었다), 잠금을 프로젝트와 대조하고, 저장에 hook 표를 필수로 받는다(경로 상한 판정은 그래서 Create로 옮겼다 — 긴 루트는 디스크 잠금을 잡을 수 없다).
+
+리뷰 2회(1회 미충족 — 필수: 단언한 타입 조회가 TypeRegistry 종료로 실패함) 끝에 **충족**. 권장 넷(교체 뒤 실패 제거, 잠금 대조, hook 표 필수, 문구)도 반영했다.
+
+A2c2b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.21) 시험 없는 항목 0·정의된 시험 16개 모두 인용, 조합(대조표 마지막 행), coverage(14.1.22 — Windows), 리뷰어 판정 **충족**.
+
+#### 14.1.23 요구 대조표(A2c3a — 줄 출력·트랜잭션 만들기·참조 resolver·서비스 API)
+
+시험은 FoundationTests `Core/Source/Runtime/ReflectionText/Tests/TextLinesTests.cpp`(7개)와 EngineTests `Engine/Source/Runtime/AssetRuntime/Tests/PackageGapTests.cpp`의 트랜잭션 판 2개, `Engine/Source/Developer/AssetDatabase/Tests/EditorPackageSaveTests.cpp`의 `EditorPackageSave_CreateInitializer`, `AssetTextResolverTests.cpp`(8개), `AssetServiceTests.cpp`(9개) — 정의된 시험 27개를 모두 인용한다(리뷰 반영으로 넷을 더했다). 줄 출력 시험의 대상 타입은 ReflectionTestFixtures(TextHolder·InstancedHolder·FixedOwner·BytesHolder·TextFieldHolder — 모든 ValueKind·컨테이너·Optional·InstancedStruct·Text)이고, 에셋 쪽은 AssetTestFixtures(TestAsset·TestPart·BaseGameAsset·DerivedGameAsset)와 A2c2 장면(Base·Derived·Hero·Villain·Leaf·Hub)이다. 서비스 장면은 저장 장면처럼 루트를 디스크 임시 디렉터리로 두어 잠금을 잡고 Content는 메모리다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 줄 출력(RE 10.4) | 모든 단일 값 종류(bool·정수 경계·실수 nan·Guid·AssetId·Digest·String escape·Name·enum·Flags·Soft·ClassRef)·목록·Set·Map(String·enum·Name→struct·ClassRef·Soft 키)·struct 멤버·struct 원소 배열·struct 값 Map·Optional set(단일·struct)·unset(`--unset=`)·null 참조 `none`의 줄, Edit의 Transient 제외·ReadOnly 출력, 줄을 같은 live 객체(ReadOnly 같은 값 무동작)·새 staged 객체에 넣어 다시 쓰면 같은 줄(값 보존 왕복), 기본 객체 왕복 | `TextLines_RoundTripsEveryKind` |
+| | InstancedStruct(필드·배열 원소·정적 배열 원소·Map 값·struct 멤버·struct 원소 멤버·비어 있음 `none`), struct 원소 정적 배열(원소마다 멤버 줄, 비우기 줄 없음), 강한 참조 정적 배열(원소마다 `f[i]=` — 통째는 준비 단위가 없다), 바이트 배열(Base64, 빈 배열, struct 안·struct 원소·Optional·struct 값 Map)·바이트 정적 배열(목록), Invariant Text·빈 Text의 왕복 | `TextLines_InstancedStaticBytesAndText` |
+| | 줄로 쓸 수 없는 값 Unsupported: 줄바꿈 든 String 값(`\n`·`\r`)·단일 값 Map의 String 키, Localized Text, resolver 없는 non-null Hard, resolver가 쓰지 못한 참조, 이름 없는 enum 값. 숨김 열거자는 이름으로 쓰고 재입력은 HiddenEnumerator. resolver가 쓰는 참조는 그 텍스트로 왕복 | `TextLines_UnsupportedValuesAndReferences` |
+| | 용도(Edit — Transient·NonTryoutDuplicateTransient 제외, Report — Transient만 제외, TextExportTransient·DuplicateTransient는 둘 다 출력), struct 값 대상·staged 대상, 같은 Name pool 명시 = 기본, 잘못된 값 대상(저장소 없음·빈 lease·클래스 lease)·옵션 검사 실패·다른 Name pool InvalidArgument, 사라진 대상 오류 | `TextLines_UsesTargetsAndOptions` |
+| | Opaque 필드(손으로 등록한 클래스)·도구 이름 없는 struct(손으로 등록 — RegisterStruct)를 담은 InstancedStruct·경로 단계 상한 초과(C++ Emplace로 struct 멤버에 깊이 16 사슬 — 깊이 15는 쓴다) Unsupported | `TextLines_OpaqueAndTooDeepAreUnsupported` |
+| | FormatTextPath의 InstancedStruct 뒤 멤버 단계: 문맥 resolver 없음 InvalidArgument, 있음 `value.x`·`hosts[0].value.x`, 비어 있는 값 NotFound | `TextLines_FormatTextPathUsesContextInstancedTypes` |
+| | 모든 줄 모양(기본 객체의 unset 줄 포함, 장면 넷)마다 값 allocator·출력 문자열의 모든 할당 실패 OutOfMemory, 끝나면 같은 출력 | `TextLines_AllocationFailures` |
+| 트랜잭션 만들기(7.1-15 A2c3) | NewPackage(transaction): null id·모르는 종류 InvalidArgument(트랜잭션 고정 안 함), 대표 에셋 Id() = 패키지 id(공개 전·후), Commit root = Package, 공개된 Package·Package 아닌 staged 객체·두 번째 대표 자식·에셋 아닌 타입 거부, Rollback·소멸이 남기는 것 없음 | `AssetPackage_NewPackageInTransaction` |
+| | NewPackage·NewRepresentativeAsset·Commit의 모든 할당 실패 OutOfMemory·남는 것 없음 | `AssetPackage_NewPackageInTransactionAllocationFailures` |
+| 공개 전 초기화(7.1-15 A2c3) | 초기화는 공개 전 대표 에셋(Id 채움)에 한 번, 값·하위 객체가 공개됨, 초기화 중 다른 패키지 열기(참조 해석)에도 새 패키지가 집합에 들어감, 초기화 안의 Create·Save Busy(재진입 거부), 초기화 실패(값 쓴 뒤·하위 객체 만든 뒤 — NotFound·OutOfMemory) 진단 None·남는 것 없음(Registry 객체 수·집합 그대로), 오류를 삼킨 초기화는 Commit이 그 오류로 실패, 초기화 없는 Create도 Id = 패키지 id | `EditorPackageSave_CreateInitializer` |
+| 참조 resolver(4.1·4.2·7.1-15) | Hard: 논리 경로(대소문자 무시)·AssetId가 대표 에셋을 열어(닫힘째) handle, 이미 연 패키지 그대로, 하위 객체·중첩 하위 객체(경로·AssetId), 기대 타입(0·자신·조상 받음, 아님 TypeMismatch), 없는 객체 NotFound, 저장하지 않은 새 패키지(경로·AssetId), 열기 경고(Hub)가 warnings에 | `AssetTextResolver_ResolvesHard` |
+| | Weak(5.1절 — 대입 대상 패키지 안만): 범위 없음 InvalidArgument, 범위 패키지의 대표·하위·중첩(경로·AssetId)·기대 타입, 다른 패키지 InvalidArgument(열지 않음), 범위 패키지가 열려 있지 않음 NotFound | `AssetTextResolver_WeakStaysInPackage` |
+| | TypeRegistry가 닫힌 뒤 기대 타입 있는 Hard ShuttingDown | `AssetTextResolver_TypeRegistryClosed` |
+| | 형식 거부 InvalidArgument(Hard·Weak·Soft 셋 모두): `/` 없는 이름·대문자·35·37자·null AssetId·논리 경로 규칙(빈 구성 요소·끝 `/`·`\`)·빈 객체 경로·객체 경로 구성 요소 규칙(빈·공백) — 아무것도 열지 않음, 색인에 없는 경로 NotFound, 같은 경로 키 둘 AlreadyExists, 없는 id 열기 NotFound, 같은 id 둘 열기 AlreadyExists | `AssetTextResolver_RejectsText` |
+| | Soft는 열지 않음: 경로 → id·객체 경로, AssetId(색인에 없어도) 그대로, 저장하지 않은 새 패키지 경로 | `AssetTextResolver_ResolvesSoftWithoutOpening` |
+| | 출력: 대표 에셋·하위 객체·중첩 경로(Hard·Weak), 저장하지 않은 새 패키지 경로, Soft(색인 경로·객체 경로·새 패키지·색인에 없음·같은 id 둘 → AssetId), Package 객체 자신 Unsupported, 사라진 handle 오류 | `AssetTextResolver_Formats` |
+| | 대입 묶음·줄 출력 왕복: Hard·typed·ObjectRefArray·Soft 하위 객체 대입 → 대상 패키지 열림 → 줄 출력이 같은 텍스트 → 재입력 받음, 기대 타입 위반 진단 Unresolved | `AssetTextResolver_RoundTripsThroughAssignments` |
+| | resolver allocator·값 문자열·출력 버퍼의 모든 할당 실패 OutOfMemory(해석 셋·출력 셋 — 긴 이름 하위 객체 포함) | `AssetTextResolver_AllocationFailures` |
+| 서비스 API(13, 7.1-15 A2c3) | asset-new: 대입(값·문자열·Hard·Soft)과 저장(파일·색인 항목·dirty 해제), 새 서비스가 같은 값, 파생 에셋 클래스 | `AssetService_NewCreatesAndSaves` |
+| | asset-new 거부: 모르는 타입 NotFound·빈 이름 InvalidArgument(진단 None), 에셋 아닌 클래스·추상 에셋 클래스·struct TypeMismatch, 경로 규칙 InvalidPath, 있는 경로 DuplicatePath, 대입 오류 셋을 모두 모음(UnknownProperty·InvalidValue·Unresolved — 아무것도 안 만듦), 저장 실패(만든 패키지는 저장하지 않은 채 남음), 잡지 않은 잠금 | `AssetService_NewRefusals` |
+| | asset-set: 경로·AssetId 대상, 빈 대입도 저장, force 없는 미해결 import MissingDependency·force면 저장 + DroppedUnresolvedImport, 대입 오류 모두 모음(파일 그대로), 대상 형식 InvalidPath(넷), 없는 경로·id NotFound, 잡지 않은 잠금 | `AssetService_SetAssignsAndSaves` |
+| | asset-info: Edit 줄(참조는 논리 경로·색인에 없는 Soft는 AssetId)·Report 줄·JSON·AssetId 대상, 줄로 쓸 수 없는 값 Unsupported(JSON은 씀), 대상 거부, 호출자 문자열 할당 실패 | `AssetService_InfoFormats` |
+| | asset-list: 경로 키 순 전체, --type 파생 포함(TestAsset·BaseGameAsset·DerivedGameAsset·추상 Asset·에셋 아닌 클래스), 모르는 이름·struct 거부, --under(새 디렉터리·없는 디렉터리·논리 디렉터리 아님), 타입을 등록하지 않은 Registry의 서비스, 호출자 목록 할당 실패 | `AssetService_ListFilters` |
+| | Weak 대입: asset-set의 같은 패키지 대상은 저장·다시 읽기 그대로, 다른 패키지 Unresolved, asset-new의 Weak Unresolved(한계) | `AssetService_WeakReferences` |
+| | 대표 에셋을 Discard한 열린 패키지의 asset-info·asset-set NotFound(진단 None·패키지 id), TypeRegistry가 닫힌 뒤 asset-list --type ShuttingDown | `AssetService_DiscardedRepresentativeAndClosedTypes` |
+| | 수명: Initialize 전 모든 함수 InvalidArgument, 두 번째 Initialize, 타입·파일 시스템 없는 설정, 파일 캐시 용량 0, Content가 파일(색인 Rebuild 실패) | `AssetService_Lifecycle` |
+| | New(대입·참조·ObjectRefArray — 초기화가 참조 대상을 연다)·Set·Info(줄·JSON)·List의 서비스 allocator 할당을 하나씩 실패: OutOfMemory 또는 대체 경로로 성공 — 이 시험이 Create의 표 자리를 초기화 앞에 잡던 결함을 찾았다 | `AssetService_AllocationFailures` |
+| 조합(14 완료 조건 2) | 줄 출력: ValueKind 전부 × 자리(필드·struct 멤버·배열 원소·정적 배열 원소·Map 값·Optional) × 값 모양(기본·set·unset·null·비어 있음), 대상 종류(Live·Staged·Value) × 용도(Edit·Report). 참조: 텍스트 모양(경로·AssetId × 대표·하위·중첩) × 종류(Hard·Weak·Soft) × 패키지 상태(색인만·열림·저장하지 않음·없음·같은 경로 둘·같은 id 둘) × Weak 범위(없음·같은 패키지·다른 패키지·열리지 않음). 서비스: 명령 넷 × 대상 모양(경로·AssetId) × 거부 종류 × 할당 실패 위치 전부 | 위 시험 |
+
+#### 14.1.24 Coverage(A2c3a)
+
+측정(2026-11-21, Windows): 줄 출력은 `pwsh -NoProfile -File Build/MeasureCoverage.ps1 -Target Foundation -Executable FoundationTests -Filter TextLines -Sources Core/Source/Runtime/ReflectionText/Private`, 에셋 쪽은 `-Target EngineTests -Filter AssetService_,EditorPackageSave_,EditorPackageSet_,AssetTextResolver -Sources Engine/Source/Developer/AssetDatabase/Private`와 `-Filter AssetPackage_,Package_AttachBulkStore,EditorPackageSave_ -Sources Engine/Source/Runtime/AssetRuntime/Private`.
+
+| 파일 | 줄 | 분기 | 함수 |
+|---|---|---|---|
+| `TextLineExport.cpp`(줄 출력) | 97.7%(302/309) | 96.5%(164/170) | 100%(10/10) |
+| `AssetTextResolver.cpp` | 97.8%(174/178) | 97.8%(90/92) | 100%(8/8) |
+| `AssetService.cpp` | 99.5%(221/222) | 97.4%(111/114) | 100%(12/12) |
+| `EditorPackageSet.cpp`(만들기 초기화·재진입 거부 포함) | 99.2%(950/958) | 98.6%(433/439) | 100%(37/37) |
+| `Package.cpp`(트랜잭션 판) | 100%(69/69) | 92.7%(38/41) | 100%(6/6) |
+
+닿지 않은 곳과 근거:
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| `TextLineExport.cpp` 경로 연산 넷(`PathReadInstancedType` 두 곳·`PathIsOptionalSet`·`PathCount`) | 실패 | 경로는 방금 스키마와 그 자리의 값에서 만든 소유 스레드의 유효 경로이고(대상 lease를 쥐고 있다) 이 연산들은 할당하지 않는다 — 할당 실패 시험이 닿지 않음을 확인했다. JSON 출력도 같은 판정이다 |
+| `TextLineExport.cpp` 대상 종류 switch의 암묵 default, 값 대상의 null lease 포인터 | 분기 | AssignmentTarget 종류는 셋뿐이고 Value 대상은 늘 lease 참조로 만든다 |
+| `AssetTextResolver::Format`의 outermost Package 해석·포인터 실패 | 실패 | 방금 GetOutermost가 준(살아 있는) outermost다. 집합 Registry는 패키지 정책이라 outermost는 늘 Package다(ObjectIdentity.h RegistryPolicy). (처음 근거에 넣었던 Resolve의 타입 조회 실패와 OpenTarget의 대표 에셋 없음은 리뷰가 도달 가능함을 짚어 시험을 더했다 — TypeRegistry 닫힘 ShuttingDown, 호출자의 대표 에셋 Discard) |
+| `AssetService::List`의 IsA 그 밖 오류(NotFound·TypeMismatch가 아닌 것) | 실패 | `--type` 이름을 같은 호출에서 방금 TypeRegistry로 찾았고(닫혔으면 그 조회가 ShuttingDown — 시험) 색인 항목 타입은 클래스 레코드나 미등록(NotFound)이다. 소유 스레드 호출이라 그 사이 닫히지 않는다 |
+| `EditorPackageSet.cpp` | 14.1.22와 같은 지점(SetBulkStore 계약·OS 난수·llvm-cov 줄 귀속) | 14.1.22와 같다 — 만들기의 표 자리 잡기는 초기화 뒤로 옮겼고 그 실패는 서비스 할당 실패 시험이 닿는다 |
+| `Package.cpp` 분기 셋 | `ROCKS_ASSERT` 전개 | 방금 만든 이 트랜잭션 객체의 GetForWrite(Required 검사 중이면 앞 Create가 먼저 Busy)·쥔 root가 있는 공개 Package의 typed root |
+
+리뷰(1회 미충족)가 찾은 것: Weak 참조를 Hard처럼 다른 패키지에서 풀어 저장 뒤 null이 되던 것(같은 패키지 안만 받게 고침), asset-list --type이 파생 판정 오류를 삼키던 것, 미도달 근거 둘이 사실과 다르던 것(시험 추가), Create 초기화 안의 재진입(거부), asset-new 자기 참조의 한계 기록. 시험이 찾은 것: (1) 줄 출력의 경로 표기가 InstancedStruct 뒤 멤버를 풀지 못했다(`FormatTextPath`가 문맥의 InstancedStruct resolver를 넘기지 않았다) — 넘기게 고치고 줄 출력이 대상 값 resolver를 건다. (2) 강한 참조 정적 배열 통째 줄은 대입 묶음이 받지 않는다(준비 단위 없음) — 원소 줄로 바꿨다(10.4절). (3) 줄·`.` 한 글자 붙이기가 앞 붙이기가 늘린 용량 때문에 할당 실패에 닿지 않았다 — 자리를 한 번에 잡게 고쳤다. (4) **만들기가 표 자리를 초기화 앞에 잡았는데 초기화(참조 해석)가 다른 패키지를 열며 그 자리를 써, 할당 실패 때 공개 뒤 삽입이 조용히 실패해 새 패키지가 집합에서 빠졌다**(뒤 Save가 NotFound) — 자리를 초기화 뒤·Commit 앞에 잡는다. (5) 새 패키지의 대표 에셋 `Id()`가 로드 전까지 null이었다 — 트랜잭션 판 대표 에셋 만들기가 채운다.
+
+A2c3a 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.23) 시험 없는 항목 0·정의된 시험 27개 모두 인용, 조합(대조표 마지막 행), coverage(14.1.24 — Windows), 리뷰어 판정 **충족**(1회 미충족 — 필수 3 반영). 다음은 A2c3b(Commandlet 명령·타입 등록·C# 시험).
+
+#### 14.1.25 요구 대조표(A2c3b — Commandlet 명령)
+
+시험은 C# `Programs/Rocks.Commandlet.Tests/Program.cs`의 A2c3b 항목 95개(Windows 전용 16개 포함 — 잠금·고아·무효 출력 핸들과 그 장면)와 바꾼 A2b 항목 하나(`asset-list unknown type` — `--type`이 사용법 오류에서 옵션이 됐다)다. 명령은 실제 에셋 타입 Skeleton·AnimationClip(Animation 모듈 — Commandlet이 시작해 등록한다)으로 디스크 임시 프로젝트에서 돈다. 서비스 수준의 전수 시험(조합·할당 실패)은 14.1.23의 C++ 시험이다 — 명령 시험은 인수·출력·종료 코드·타입 등록·잠금·실제 파일을 본다.
+
+| 요구(절) | 항목 | 시험(C# 라벨) |
+|---|---|---|
+| asset-new(13) | Skeleton 만들기(출력 `<경로> <AssetId>` 한 줄·파일 생김), Clip 대입(Hard·float·bool·enum·struct 멤버·struct 원소 배열·Name), 거부(모르는 타입 NotFound·추상 TypeMismatch·에셋 아닌 클래스·struct·있는 경로 대소문자 무시 DuplicatePath·경로 규칙 InvalidPath·대입 오류 모두 보고와 아무것도 안 만듦·Hero 없는 참조 Unresolved), 열기 경고와 성공(ExcludedDependency) | `asset-new skeleton`·`asset-new output shape`·`asset-new clip with assignments`·`asset-new unknown type`·`asset-new abstract type`·`asset-new not an asset`·`asset-new struct type`·`asset-new existing path`·`asset-new invalid path`·`asset-new assignment errors`·`asset-new assignment errors create nothing`·`asset-new clip without skeleton`·`asset-new with open warnings`·`asset-new skeleton again`·`asset-new clip again` |
+| asset-info(13) | Edit 줄(참조는 논리 경로)·AssetId 대상 같은 출력·JSON(줄 끝)·--all·--json --all, 거부(없는 경로·없는 id NotFound·대상 형식 InvalidPath), 잠금 없이 읽기, 프로젝트 찾기(위로)·없음, 열기 경고 + 성공 | `asset-info lines`·`asset-info by AssetId`·`asset-info json`·`asset-info all`·`asset-info json all`·`asset-info missing`·`asset-info missing id`·`asset-info invalid target`·`asset-info without lock`·`asset-info finds the project upward`·`asset-info without a project`·`asset-info excluded dependency` |
+| 왕복(RE 10.4) | asset-info 줄 전체를 asset-set에 그대로 넣으면 받고 출력이 같다 | `asset-info lines round trip through asset-set` |
+| asset-set(13) | AssetId 대상, Soft 참조 배열·bool, --erase(원소·따옴표 key의 쉼표·escape가 든 목록), 대입 오류 넷 모두 보고(UnknownProperty·InvalidValue·Unresolved·--unset 비 Optional)·파일 byte 그대로, Soft 미해결, 미해결 import MissingDependency·--force + DroppedUnresolvedImport·null 저장 | `asset-set by AssetId`·`asset-set result`·`asset-set by path`·`asset-set by path result`·`asset-set soft array`·`asset-set soft array result`·`asset-set erase`·`asset-set erase result`·`asset-set quoted keys`·`asset-set quoted keys result`·`asset-set erase quoted list`·`asset-set erase quoted list result`·`asset-set errors`·`asset-set errors leave the file`·`asset-set soft unresolved`·`asset-set missing dependency`·`asset-set force`·`asset-set force result` |
+| asset-list --type(13, 7.1-14) | 그 클래스만(한 줄)·파생(AnimationAsset → Clip)·추상 Asset 전체(경로 순)·--under와 함께·빈 결과·논리 디렉터리 아님·클래스 아님·같은 옵션 두 번 사용법 오류·모르는 타입(A2b 프로젝트)·프로젝트 없음 | `asset-list type`·`asset-list type lines`·`asset-list derived type`·`asset-list base type`·`asset-list base type order`·`asset-list type under`·`asset-list type under nothing`·`asset-list type invalid under`·`asset-list not a class`·`asset-list type twice`·`asset-list unknown type`·`asset-list type without a project` |
+| 사용법(13) | 위치 인수 수·대입 아닌 위치 인수·명령에 없는 옵션(--force·--json·--unset)·빈 목록·빈 목록 항목·같은 옵션 두 번(--project·--force·--json)·--wait 범위 초과·형식·빈 값·빈 타입 이름·asset-set 대입 없음·--help에 다른 인수, 명령마다 --help(0) | `usage error: …`(20개)·`asset-new help`·`asset-set help`·`asset-info help` |
+| 잠금·환경(8, 13) | 다른 쪽이 잡은 잠금: asset-set 바로 실패·asset-new --wait=1 뒤 실패(Busy), Intermediate가 파일이면 잠금 오류, Content가 파일이면 cannot scan(asset-info·asset-list --type), 지울 수 없는 고아 임시 파일 OrphanNotDeleted(저장 성공)·다음 저장이 지움 | `asset-set locked`·`asset-new locked with wait`·`asset-new cannot lock`·`asset-info content is a file`·`asset-list type content is a file`·`asset-set orphan not deleted`·`asset-set orphan deleted`·`orphan removed` |
+| 출력 실패(13) | 무효 출력 핸들: asset-info(경고 있음 둘)·asset-list --type·asset-new(출력 줄·경고)·asset-set(대입 진단·경고) 모두 1 | `invalid output handles (… edit)`(7개) |
+| 조합(14 완료 조건 2) | 명령 넷 × 대상 모양(경로·AssetId) × 결과(성공·대입 오류·대상 거부·열기 경고·저장 거부) × 출력(줄·JSON·all), 목록 옵션 × 경로 모양(원소·따옴표 key) | 위 시험 |
+
+#### 14.1.26 Coverage(A2c3b)
+
+측정(2026-11-21, Windows): `pwsh -NoProfile -File Build/MeasureCoverage.ps1 -Target Commandlet -Executable RocksCommandlet -Runner 'dotnet','out/dotnet/bin/Rocks.Commandlet.Tests/Debug/net10.0/Rocks.Commandlet.Tests.dll','--executable','{executable}' -Sources Programs/Commandlet/Private/Common`. 명령 시험은 실행 한 번마다 원시 프로파일을 남겨 수백 개가 되므로 측정 스크립트가 `llvm-profdata merge`에 목록 파일(`--input-files`)을 넘기게 고쳤다(명령줄 길이 초과).
+
+| 파일 | 줄 | 분기 | 함수 |
+|---|---|---|---|
+| `AssetEditCommandlet.cpp` | 96.1%(292/304) | 91.4%(159/174) | 100%(12/12) |
+| `AssetIndexCommandlet.cpp`(--type 포함) | 90.2%(148/164) | 88.0%(81/92) | 100%(5/5) |
+| `AssetCommandletSupport.cpp`(옮긴 프로젝트 찾기·타입 등록·실행 상태) | 79.7%(110/138) | 72.4%(42/58) | 100%(7/7) |
+| `AssetCommandletSupport.h`(`Fail` 템플릿) | 76.9%(20/26) | 62.5%(5/8) | 100%(5/5) |
+
+닿지 않은 곳과 근거:
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| 세 파일·헤더 | 할당 실패(출력 줄·`Fail`·JSON 줄 끝·서비스 만들기·`Initialize`의 OutOfMemory 분기·목록·Verify) | 프로세스 시험은 명령의 allocator에 실패를 주입할 수 없다(14.1.16과 같다). 같은 결과를 만드는 라이브러리 경로는 14.1.23의 할당 실패 시험(`AssetService_AllocationFailures` 등)이 모든 지점을 돈다 |
+| `AssetCommandletSupport.cpp` `OpenProject` | 현재 디렉터리를 절대 경로로 못 만듦·프로젝트 찾기의 NotFound 밖 오류 | 14.1.16과 같다(OS 조건 — 이 커밋에서 동작 그대로 옮겼다) |
+| `AssetCommandTypes::Start` | 모듈 시작 실패·등록기 붙이기 실패·Name pool 시작 실패와 그 출력(`cannot register the asset types`) | Animation은 실행 파일에 정적으로 링크된 모듈이라 표에 늘 있고 시작 콜백이 실패하지 않는다. 등록기 붙이기의 실패는 등록 할당 실패(위와 같다)와 Fatal 조건(같은 등록기 두 번·Load 중 — 명령 구조상 없다)이고, pool 시작 실패는 할당 실패다 |
+| `AssetEditCommandlet.cpp` 경고 이름 NotDurable·switch 밖 반환 | 분기 | NotDurable은 교체 뒤 디렉터리 동기화 실패(OS 조건 — 서비스 시험이 메모리 파일 시스템으로 단언한다), 반환은 열거형 밖 값이 없다 |
+| `AssetEditCommandlet.cpp` asset-info의 Unsupported 줄 | 줄로 쓸 수 없는 값 | Animation 타입에는 줄바꿈을 담을 수 있는 값(String)이 없다 — 서비스 시험 `AssetService_InfoFormats`가 Unsupported를 단언하고 출력 문구는 이 한 줄이다 |
+| `AssetIndexCommandlet.cpp` --type 실패 설명 `failed` | 분기 | `AssetService::List`의 실패는 이름 찾기 NotFound·클래스 아님 TypeMismatch·디렉터리 InvalidPath·할당 실패이고, 그 밖(파생 판정의 ShuttingDown 등)은 14.1.24의 근거대로 이 호출에서 생기지 않는다 |
+
+리뷰(1회 미충족)가 찾은 것: 쓰기 명령이 색인을 만든 뒤에 잠갔다(잠금 아래에서 다시 보지 않은 색인으로 쓰기 판정), asset-new의 "NotFound + 진단 None = 모르는 타입" 판정이 저장 단계의 NotFound(임시 파일·교체)와 섞였다(타입을 먼저 찾게 고침), 경고 줄이 스펙 형식과 달랐다(형식을 맞추고 환경 실패·일반 실패 줄도 같은 형식·관련 대상 포함으로 다듬음). 권장으로 path 대상 asset-set 성공을 따로 단언했다. 읽기 전용(더 새 엔진) 대상 장면은 명령 시험이 Animation 패키지를 더 새 엔진 버전으로 만들 수 없어(헤더 버전을 바꾸면 무결성 검사에 걸린다) 서비스·집합 시험(`EditorPackageSave_Refusals` NewerVersion)으로 둔다.
+
+A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항목 95개 모두 인용, 조합(대조표 마지막 행), coverage(14.1.26 — Windows), 리뷰어 판정 **충족**(1회 미충족 — 필수 3 반영). 이로써 A2c3(명령) 완료 — 다음은 A2d.
+
+#### 14.1.27 요구 대조표(A2d1 — 색인 캐시·asset-index-rebuild)
+
+시험은 EngineTests `Engine/Source/Developer/AssetDatabase/Tests/AssetIndexCacheTests.cpp`(9개)와 C# `Programs/Rocks.Commandlet.Tests/Program.cs`의 "asset-index-rebuild·색인 캐시" 항목 23개(Windows 전용 3개)다. C++ 장면은 루트를 디스크 임시 디렉터리(잠금)로 두고 그 루트에 놓인 메모리 파일 시스템에 Content(Base·Derived·Hero·Villain·Sub/Leaf·Copy(같은 id)·derived.RASSET(같은 경로 키)·Tagged(태그·ImportRecord)·BadTags(Tags 진단)·Junk(읽기 실패))와 Intermediate를 둔다. 손상 입력은 시험 쪽에서 형식을 따로 써서 만든다(구현과 독립).
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 왕복·재사용(7, 7.1-16) | 캐시 없는 검색 → 캐시 쓰기(임시 파일 없음) → 읽기: 파일 자신의 진단이 있는 BadTags·Junk는 없고 같은 id·같은 경로 진단의 파일은 있다, 항목 칸이 색인과 같고 이름·지문이 다르면 찾지 못함, 캐시를 쓴 검색 = 캐시 없는 검색(진단 포함), 도구 빌드 ID 기록, 지문이 같으면 다시 읽지 않음(캐시의 태그 값을 바꾸면 그 값), 지문이 다르면 다시 읽음 | `AssetIndexCache_RoundTripsAndReuses` |
+| 키(7, 7.1-16) | 패치만 다르면 같은 키, 주·부·customVersions(값·개수) 다르면 다른 키, Unicode 텍스트 SHA-256, 빈 엔진 버전(엔진 축 끔)은 켠 실행과 다른 키·패치와 상관없이 같은 키, 키 칸 여덟(형식·스키마·의미·Unicode·주·부·customVersions·정규화) 각각 다르면 캐시 없음(양방향) | `AssetIndexCache_KeyAxes` |
+| 신뢰하지 않는 입력(7.1-16) | 헤더 위반(짧음·magic·예약·정규화 2·본문 byte·SHA-256·항목 수 상한·적은 항목 수·크기 상한), 항목 위반 19종(이름 UTF-8·빈 이름·.rasset 아님·이름 길이 경계·readOnly 2·의존 수 경계·종류 0·6·required 2·태그 수 경계·빈 키·태그 순서·같은 태그·요약 표지 2·요약 이름 UTF-8·null id·0 타입·태그 키 257 byte·태그 값 4097 byte), 같은 이름·역순·남은 byte·모든 길이의 잘림·항목 수 초과 — 모두 비운 채 캐시 없음, 경계 값의 올바른 항목(태그 키 256 byte 포함)은 받음 | `AssetIndexCache_RejectsUntrustedInput` |
+| 재사용 가장자리(7.1-16) | 빈 캐시, 열 때 사라진 파일·지문을 읽을 수 없는 파일(부분 읽기가 같은 진단), 규칙을 어긴 캐시 이름(InvalidPath — 쓰지 않음), 조작한 값(readOnly·required 의존)이 색인과 다시 쓴 캐시에 남음, 캐시를 쓰는 검색의 모든 할당 실패 | `AssetIndexCache_ReuseEdges` |
+| 읽기(7.1-16) | 없음·디렉터리·크기 0·열기 없음·사용 중·읽기 실패는 캐시 없음, 모든 할당 실패 OutOfMemory | `AssetIndexCache_LoadFailures` |
+| 쓰기(7, 8, 7.1-16) | 잠금 아님 InvalidArgument(아무것도 안 씀), 디렉터리 만들기·만들기·쓰기·Flush·Close·교체 실패는 오류·이전 캐시 그대로·임시 파일 없음, NotDurable 성공, 모든 할당 실패(임시 파일 없음) | `AssetIndexCache_WriteFailures` |
+| TypeRegistry 무시(7.1-16) | options.types가 있어도 같은 색인 | `AssetIndexCache_IndexIgnoresTypes` |
+| 고아 정리(7.1-12·16) | Content(하위 포함)의 `.rasset.<guid>.tmp`·Intermediate 바로 아래 캐시 임시만 지움, 남김 9종(대문자 guid·다른 확장자·빈 이름·Content의 캐시 임시·대문자 .TMP·다른 캐시 이름·Intermediate 하위·잠금 파일·잘못된 UTF-8 이름)과 링크·디렉터리·기타 종류, 이미 사라진 파일은 지운 것으로 셈, 지울 수 없음·열거할 수 없는 디렉터리는 실패 목록(계속), 잠금 아님·Content가 파일·없는 디렉터리, 모든 할당 실패(실패 기록·하위 디렉터리 여럿 장면) | `AssetIndexCache_DeletesTemporaryOrphans` |
+| 서비스(7.1-16) | 캐시를 읽음(바꾼 값), useCache 끔, 캐시 파일 시스템 따로, FlushCache(Initialize 전·잠금 아님 InvalidArgument·성공 뒤 다시 읽힘), 캐시를 읽는 Initialize의 모든 할당 실패 | `AssetIndexCache_ServiceUsesCache` |
+| 명령(13, 7.1-16) | asset-new가 캐시를 씀, asset-list가 캐시로 같은 목록, asset-index-rebuild(요약·고아 둘 지움·다른 이름 남김·캐시 씀), 진단이 있어도 0, 손상 캐시를 목록·점검·출력이 무시하고 asset-set이 다시 씀, 캐시를 쓰지 못하면 asset-set·asset-new 경고 CacheNotWritten(0)·rebuild 실패 1, 지울 수 없는 고아 경고·잠금 Busy·무효 출력 핸들(Windows), 사용법 다섯·도움말·프로젝트 없음·Content가 파일·잠금 실패 | C# `asset-new writes the index cache` … `asset-index-rebuild cannot lock`(23개) |
+| 조합(14 완료 조건 2) | 캐시 상태(없음·맞음·키 다름·손상·빈 것·조작) × 파일 상태(같은 지문·다른 지문·사라짐·손상·이름 위반) × 진단 종류(파일 자신·같은 id·같은 경로), 쓰기 고장 위치 전부, 명령 × 캐시 사용(읽기·쓰기·무시) | 위 시험 |
+
+#### 14.1.28 Coverage(A2d1)
+
+측정(2026-11-21, Windows): `-Target EngineTests -Filter AssetIndexCache,AssetIndex_,AssetService_ -Sources Engine/Source/Developer/AssetDatabase/Private`, 명령은 `ROCKS_MSVC_TOOLSET=14.44`로 `-Target Commandlet -Executable RocksCommandlet -Runner …C# 시험… -Sources Programs/Commandlet/Private/Common`(VS 2026 설치로 기본 MSVC가 14.52가 되어 Clang 21로는 STL1000 — 측정만 14.44로 고정했다).
+
+| 파일 | 줄 | 분기 | 함수 |
+|---|---|---|---|
+| `AssetIndexCache.cpp` | 98.9%(466/471) | 98.1%(204/208) | 100%(21/21) |
+| `TemporaryFiles.cpp` | 100%(128/128) | 100%(66/66) | 100%(7/7) |
+| `AssetIndex.cpp`(캐시 재사용 포함) | 100%(890/890) | 99.4%(462/465) | 100%(35/35) |
+| `AssetService.cpp`(캐시 적재·FlushCache) | 99.2%(239/241) | 97.6%(121/124) | 100%(13/13) |
+| `Programs/Commandlet/Private/Common/AssetIndexCommandlet.cpp`(rebuild·목록 캐시) | 85.4%(211/247) | 84.1%(111/132) | 100%(6/6) |
+| `Programs/Commandlet/Private/Common/AssetEditCommandlet.cpp`(캐시 쓰기 경고) | 94.4%(303/321) | 90.1%(164/182) | 100%(13/13) |
+
+닿지 않은 곳과 근거:
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| `AssetIndexCache::Load` 크기 조회 실패·1 GiB 초과 | 분기 | 파일 크기 조회는 연 파일에서 실패하지 않고(메모리·물리 모두), 1 GiB 넘는 캐시는 시험이 만들 수 없다. 같은 상한은 `Parse`가 단언한다(크기 상한 시험) |
+| `EncodeAssetIndexCache` 정규화 플래그 참 쪽 | 분기 | `FileSystemNormalizesNames`는 플랫폼 상수(macOS만 참) — Windows 측정 밖이다. 읽기 쪽은 키 칸 시험이 두 값을 모두 본다 |
+| `WriteAssetIndexCache` 임시 이름 guid 발급 실패 | 실패 | OS 보안 난수 실패(14.1.22와 같다) |
+| `AssetIndex::IndexCached` 논리 경로 만들기의 할당 실패 | 분기 | 배치(ProjectLayout)의 allocator로 만든다 — 색인 allocator 할당 실패 시험 밖이다(IndexFile의 같은 호출과 같다) |
+| `AssetService::List` IsA 그 밖 오류 | 실패 | 14.1.24와 같다 |
+| 명령 파일들 | 할당 실패(출력 줄·목록·검색·Verify·정리), rebuild의 정리 오류(할당 밖) | 프로세스 시험은 명령 allocator에 실패를 주입할 수 없다(14.1.26과 같다 — 같은 경로는 C++ 할당 실패 시험이 돈다). 정리 오류는 Content·Intermediate 뿌리의 열거 실패뿐인데 그 둘은 앞 단계(검색 — cannot scan, 잠금 — cannot lock)가 먼저 실패시킨다(C# 시험) |
+
+시험이 찾은 것: (1) 잘린 항목의 몇 단계(의존 읽기)는 앞의 개수 상한 검사 때문에 닿을 수 없었다 — 그 `reader.Failed()` 검사를 지우고 근거를 적었다. 헤더 읽기의 실패 검사도 크기 검사 뒤라 지웠다. (2) 고아 정리가 템플릿이라 두 인스턴스의 분기가 따로 셌다 — 판정 함수 포인터로 바꿨다. (3) 경로 버퍼(inline StringBuilder)는 짧은 경로에서 할당하지 않아 할당 실패에 닿지 않았다 — 할당하는 String으로 바꿨다. (4) Windows는 대소문자를 구분하지 않아 대문자 guid 파일과 소문자 고아가 같은 파일이었다(C# 시험 이름을 바꿨다).
+
+#### 14.1.29 요구 대조표(A2d3 — 부분 갱신·감시)
+
+시험은 EngineTests `Engine/Source/Developer/AssetDatabase/Tests/AssetIndexWatchTests.cpp`(12개)다. 장면은 루트를 디스크 임시 디렉터리로 두고 그 루트에 놓인 메모리 파일 시스템에 Content(Base·Hero·Sub/Leaf)를 둔다. 결과는 늘 지금 파일 상태의 새 검색(`Rebuild`)과 항목·진단의 모든 칸이 같은지(`AssetIndexCompare.h`의 `SameIndex` — 캐시 시험과 공용)로 단언한다. 감시 시험은 가짜 원천(`FakeChangeSource` — 이벤트·열기·Poll 오류·호출 수)과 수동 시계로 결정적이다. 실제 감시기는 한 번 돈다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 파일 갱신(7.1-16 A2d3) | 내용 바뀜·새 파일·없어짐·디렉터리가 됨·같은 이름 여러 번(한 번 읽음 — 열기 수)·바뀌지 않은 이름, 같은 id 진단이 생기고 사라짐, 빈 입력, 읽기·Stat IO 진단, Refresh도 TypeRegistry를 쓰지 않음 | `AssetIndexRefreshPaths_FilesMatchRebuild` |
+| 하위 트리(7.1-16 A2d3) | 새 중첩 디렉터리·없어진 디렉터리·디렉터리가 파일이 됨·이름이 패키지 파일·링크·없는 이름·열거 실패·Stat 실패(진단, 다시 읽으면 빠짐)·트리 안 트리·트리 안 파일(한 번), 잘못된 UTF-8 이름 아래 진단(유효한 비ASCII 디렉터리 아래 — escape가 다른 표시)과 유효한 디렉터리 아래 둘 다 빠짐, Content 전체(빈 이름 — 다른 트리·파일을 덮음), Content 열거 실패는 오류·색인 그대로 | `AssetIndexRefreshPaths_Subtrees` |
+| 입력 검사(7.1-16 A2d3) | 파일 11종(빈 이름·앞뒤 `/`·빈 구성 요소·`.`·`..`·중간 `.`·`..`·확장자 아님·확장자뿐·잘못된 UTF-8)·트리 7종, mayDefer 길이 불일치·deferred 없음 — InvalidArgument·색인 그대로 | `AssetIndexRefreshPaths_RejectsInvalidInput` |
+| 쓰는 중 미루기(7.1-16 A2d3) | 손상·Busy·새 파일 손상 미룸(같은 이름 위치 모두, 색인 그대로), 같은 이름 중 거짓 하나면 안 미룸, 트리가 덮으면 안 미룸, 읽기 IO 실패·Tags 손상(항목 있음)·InvalidPath·없는 파일은 안 미룸, 완성되면 바꿈 | `AssetIndexRefreshPaths_Defers` |
+| 정규화 대조(7.1-16 A2d3) | 끄면 NFD 이름이 다른 이름, 켜면 NFD 파일·트리가 NFC 항목·진단을 가리킴, 같은 키(NFC·NFD)는 한 번 읽음 | `AssetIndexRefreshPaths_NormalizesNames` |
+| 할당 실패(7.1-16 A2d3) | 파일·트리·미루기·정규화를 섞은 갱신의 모든 할당 실패 OutOfMemory·색인 그대로, 끝 상태는 실패 없는 기준과 같음, MarkRootLost 할당 실패 | `AssetIndexRefreshPaths_AllocationFailures` |
+| RootLost(4.6, 7.1-16 A2d3) | 항목 비움·진단 하나(빈 이름·NotFound)·조회 NotFound·진단 줄·코드 이름·Layout | `AssetIndex_MarkRootLost` |
+| 시작·정지(7.1-16 A2d3) | Start 전 Pump·두 번 Start InvalidArgument, 원천 열기 실패(시작 안 함), Rebuild 실패(원천 닫음), 캐시 사용, Content 경로로 열기, 이벤트 없는 Pump, Stop 두 번, 소멸자가 닫음 | `AssetIndexWatch_StartsAndStops` |
+| 이벤트 대응(7.1-16 A2d3) | Added·Removed·Modified × (`.rasset` 파일·모름 → 파일, `.rasset` 디렉터리 → 트리만, 그 밖 디렉터리·모름 → 트리, 그 밖 파일 → 무시), Renamed 파일·디렉터리 옛·새 이름 | `AssetIndexWatch_MapsEvents` |
+| 다시 검색 범위(7.1-16 A2d3) | Overflow(경로)는 그 트리만, 전체로 접힘 다섯(Overflow 빈 경로·원천 Poll 오류·앞 `/`·빈 구성 요소·첫 구성 요소 잘못된 UTF-8), 전체가 잡힌 뒤 경로는 더하지 않음, 중간 잘못된 UTF-8은 그 앞 디렉터리 | `AssetIndexWatch_RescansOnOverflow` |
+| 루트 소실(7.1-16 A2d3) | RootRemoved·같은 Poll 뒤 이벤트 버림, MarkRootLost 할당 실패는 다음 Pump가 Poll 없이, 1초 전 안 엶, NotFound 조용히, 그 밖 원천 오류는 Pump 오류, 시계 역행은 다시 1초, 다시 검색 실패는 RootLost 그대로·원천 열린 채·다음 간격에 검색만, 성공하면 새 검색과 같음, 다시 감시 | `AssetIndexWatch_RecoversLostRoot` |
+| 쓰는 중 대기(7.1-16 A2d3) | 같은 파일 이벤트 둘은 대기 하나, 499 ms 아직·500 ms 다시 읽어 손상 남김, 크기 바뀜은 관찰 재시작·완성 이벤트는 대기 뺌, 계속 바뀌어도 10초 상한(새 이벤트가 처음 본 시각을 바꾸지 않음), Busy, 사라짐·디렉터리가 됨·링크가 됨은 바로 다시 읽음, 시각만 바뀜도 관찰 재시작, 트리 덮음(같은 이름·그 아래는 빼고 접두만 같은 이름·트리보다 짧은 이름은 남김), 시계 역행, 전체 다시 검색이 덮음, 정지가 대기·모은 일을 버림 | `AssetIndexWatch_WaitsForWritingFiles` |
+| 감시 할당 실패(7.1-16 A2d3) | 대기 관찰(복사본)·이벤트·트리·Renamed·새 대기·정렬 대조 표를 섞은 Pump의 모든 할당 실패: 실패면 색인·대기 그대로·다음 Pump가 기준과 같게, 이벤트 기록 실패는 전체로 접혀 성공(새 검색과 같음), 전체 다시 검색의 할당 실패(전체 대기 유지 → 다음 Pump) | `AssetIndexWatch_AllocationFailures` |
+| 실제 감시기(7.1-16 A2d3) | 디스크에 쓰기·고쳐 쓰기·지우기가 이벤트로 색인에 반영(Wait는 이벤트 gate, 횟수 상한은 실패 판정용), 없는 디렉터리 열기 NotFound | `AssetIndexWatch_RealWatcher` |
+| 조합(14 완료 조건 2) | 이벤트 종류 × 항목 종류 × 이름 종류, 다시 볼 곳(파일·트리·전체) × 겹침(중복·덮음·트리 안 트리), 파일 상태(새·바뀜·없어짐·디렉터리·링크·손상·Busy·IO 실패·이름 위반) × 미루기(참·거짓·섞임), 대기 상태(새·관찰·안정·바뀜·상한·사라짐·덮임) × 시계(앞·역행), 루트(있음·소실·재열기 실패 종류·검색 실패) | 위 시험 |
+
+#### 14.1.30 Coverage(A2d3)
+
+측정(2026-11-21, Windows, `ROCKS_MSVC_TOOLSET=14.44`): `-Target EngineTests -Filter AssetIndexRefreshPaths,AssetIndex_,AssetIndexWatch,AssetIndexCache,AssetService_,EditorPackage -Sources Engine/Source/Developer/AssetDatabase/Private`.
+
+| 파일 | 줄 | 분기 | 함수 |
+|---|---|---|---|
+| `AssetIndexWatch.cpp`(리뷰 반영 — 정렬 대조·복사본 관찰) | 100%(406/406) | 99.5%(191/192) | 100%(24/24) |
+| `AssetIndex.cpp`(부분 갱신·RootLost 포함) | 100%(1186/1186) | 99.5%(628/631) | 100%(46/46) |
+| `AssetDatabaseInternal.h`(이름 규칙·`NameSet` — 색인·감시 공용) | 100%(133/133) | 100%(84/84) | 100%(14/14) |
+
+닿지 않은 곳과 근거:
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| `PlatformAssetChangeSource::Poll` 실패 | 분기 | OS 감시 오류(`ReadDirectoryChangesExW` 실패 등)라 시험이 만들 수 없다. 감시의 Poll 오류 처리(전체 다시 검색)는 가짜 원천으로 시험한다 |
+| `AssetIndex.cpp` 분기 3개 | 14.1.22·14.1.28과 같다 | `ROCKS_ASSERT` 전개 2개(확정의 준비 상태·세대 대조), `IndexCached` 논리 경로의 배치 allocator 할당 실패 |
+
+리뷰가 찾은 것: 감시의 대조(다시 읽은 이름·대기·덮은 트리)가 이중 반복이었다(이벤트·대기가 수만 개면 Pump 한 번에 수십억 비교) — 정렬 표의 이진 검색으로 바꿨다. 관찰을 대기 그 자리에서 바꿔 실패해도 대기가 바뀌었다 — 복사본에서 하고 성공할 때만(관찰만 있는 Pump도) 바꾼다.
+
+시험이 찾은 것: (1) 다시 검색한 하위 트리가 덮은 대기 파일이 그 Pump에 다시 읽을 차례가 아니면 대기에 남았다 — 덮인 대기를 빼게 고쳤다. (2) 쓰는 중 판정이 "진단 코드가 CorruptPackage"여서 다 쓴 파일의 Tags 손상(항목이 있음)도 미뤘다 — "항목 없이 진단 하나"로 좁혔다. (3) 정규화 키의 비할당 실패 대체·`ValidPrefix`의 마지막 반환·누적 `||`는 입력 계약상 닿을 수 없었다 — 구조를 바꿔 없앴다(단언으로 바꾸지 않았다). (4) 메모리 파일 시스템은 크기와 시각이 함께 바뀌어 "시각만 바뀜"에 닿지 않았다 — 시각 이동 값(`modifiedShift`)을 더했다.
 
 ## 15. PNG 디코더 범위
 

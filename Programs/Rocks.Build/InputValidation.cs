@@ -188,7 +188,7 @@ internal static class InputValidation
                 }
                 // 모듈 이름·자기 타입 표지 매크로는 빌드가 진입점 모듈마다 정의한다(ModuleTables). 규칙이 정의하면 진입점 매크로의 이름
                 // 대조가 무의미해지거나 진입 기술이 없는 타입 등록 함수를 가리킨다.
-                if (name == ModuleTables.ModuleNameMacro || name == ModuleTables.ModuleTypesMacro)
+                if (name == ModuleTables.ModuleNameMacro || name == ModuleTables.ModuleTypesMacro || name == ModuleTables.SharedLibraryMacro)
                 {
                     throw new ArgumentException($"Module {module.Name}: define '{define}' is reserved; the build defines " +
                         $"{name} for every module that implements a module entry point.");
@@ -245,12 +245,47 @@ internal static class InputValidation
             throw new ArgumentException("Modular linking needs a target name for shared library file names (NativeBuildRequest.TargetName).");
         }
 
-        // 모듈 표·빌드 정보가 Modular에서 정의될 자리(export 진입점·Core 공유 라이브러리의 빌드 정보)는 BS8d·ML4다. 그 전에는 늦고 알기
-        // 어려운 링크 오류 대신 여기서 거부한다.
-        if (request.Modules.Any(module => module.ProvidesModuleTable || module.ProvidesBuildInfo))
+        // Modular에서 모듈 표는 manifest이고 빌드 정보는 Core 공유 라이브러리에 든다(BuildTargets BS8d1). Launch는 아직 Monolithic 모듈
+        // 표(GeneratedModuleTable)를 부르므로 실행 파일 연결(ModuleLoader ML4b) 전에는 늦고 알기 어려운 링크 오류 대신 여기서 거부한다.
+        // HostConfig(HostSettings)도 그 표를 부르지만 그 소비 타깃은 모두 Launch에 닿는다 — ML4b가 둘 다 로더 표로 바꾼다.
+        if (request.Modules.Any(module => module.ProvidesLaunch))
         {
-            throw new ArgumentException("Modular linking of a target that reaches the module table or build information provider (Core) " +
-                "needs the Modular module entry points and build information placement (BuildTargets BS8d, ModuleLoader ML4); use Monolithic.");
+            throw new ArgumentException("Modular linking of a target that reaches the launch module needs the Modular executable connection " +
+                "(the module loader reading the module manifest, ModuleLoader ML4b); use Monolithic.");
+        }
+
+        // 빌드 정보 TU와 manifest는 타깃 하나 몫이다: 모듈 표·빌드 정보 제공 모듈에 닿는 대상 실행 파일은 하나 이하이고, 있으면 엔진 버전이
+        // 있어야 한다(manifest·빌드 정보가 싣는다 — 링크가 모두 끝난 뒤 실패하지 않게).
+        var byName = new Dictionary<string, NativeModuleInput>(StringComparer.OrdinalIgnoreCase);
+        foreach (NativeModuleInput module in request.Modules)
+        {
+            byName.TryAdd(module.Name, module);
+        }
+
+        if (byName.Values.Any(module => module.ProvidesModuleTable || module.ProvidesBuildInfo))
+        {
+            IEnumerable<string> roots = request.Targets.Count == 0 ? byName.Keys : request.Targets;
+            HashSet<string> reachable = LinkClosure.Reachable(roots, byName);
+            string[] executables = byName.Values.Where(module => module.Kind == NativeModuleKind.Executable && reachable.Contains(module.Name) &&
+                    LinkClosure.Reachable([module.Name], byName).Any(name => byName[name].ProvidesModuleTable || byName[name].ProvidesBuildInfo))
+                .Select(module => module.Name).Order(StringComparer.Ordinal).ToArray();
+            if (executables.Length > 1)
+            {
+                throw new ArgumentException("Modular linking builds the module manifest and build information for one executable, but the " +
+                    $"targets reach {string.Join(", ", executables)}; build one target at a time.");
+            }
+
+            if (executables.Length == 1 && request.EngineVersion is not { IsEmpty: false })
+            {
+                throw new ArgumentException($"Modular linking of {executables[0]} needs NativeBuildRequest.EngineVersion for its module manifest.");
+            }
+        }
+
+        // 켠 플러그인 모듈의 공유 라이브러리 위치(플러그인 Binaries manifest)는 ML4다(Docs/Design/BuildTargets.ko.md 3.9절 BD41).
+        if (request.Modules.FirstOrDefault(module => module.PluginModules.Count != 0) is { } host)
+        {
+            throw new ArgumentException($"Module {host.Name}: Modular linking of a target that enables plugins is not supported until the plugin " +
+                "binary manifest (ModuleLoader ML4); use Monolithic.");
         }
 
         // 미리 빌드한 라이브러리만 있는 모듈(설치 SDK 모듈)은 아직 공유 라이브러리로 나르지 않는다.
@@ -316,6 +351,64 @@ internal static class InputValidation
         }
 
         ValidateDynamicModules(modules, byFolded);
+        ValidatePluginModules(modules, byFolded);
+        ValidateGlobalStateConsumers(modules);
+    }
+
+    // 프로세스 전역 상태가 있는 서드파티(NativeModuleInput.HasGlobalState — Docs/Design/BuildTargets.ko.md 3.8절 BD29·BS8c)는 직접 의존하는
+    // 모듈이 하나여야 한다. Modular에서 서드파티는 직접 소비 모듈의 공유 라이브러리마다 링크되므로 둘이면 상태가 두 벌이 된다(Monolithic에서도
+    // 같은 규칙으로 막아 Editor 빌드에서만 드러나지 않게 한다). 소비 모듈 이름을 모두 알린다. 표지는 서드파티 모듈만 가질 수 있다(Rocks 모듈의
+    // 상태는 소유 모듈 .cpp에 두고 API로 노출한다).
+    private static void ValidateGlobalStateConsumers(IReadOnlyList<NativeModuleInput> modules)
+    {
+        foreach (NativeModuleInput library in modules.Where(module => module.HasGlobalState))
+        {
+            if (!library.ThirdParty)
+            {
+                throw new ArgumentException($"Module {library.Name}: HasGlobalState is only for a third-party module (ThirdParty.json globalState).");
+            }
+
+            string[] consumers = modules.Where(module => module.AllDependencies.Contains(library.Name, StringComparer.OrdinalIgnoreCase))
+                .Select(module => module.Name).Order(StringComparer.Ordinal).ToArray();
+            if (consumers.Length > 1)
+            {
+                throw new ArgumentException($"Module {library.Name} has process-wide state (ThirdParty.json globalState), so only one module may " +
+                    $"depend on it directly; found {string.Join(", ", consumers)}. Route the others through the owning module's API.");
+            }
+        }
+    }
+
+    // 실행 파일에 링크할 켠 플러그인 모듈 목록(NativeModuleInput.PluginModules — Docs/Design/BuildTargets.ko.md 3.9절 BD36)이다. 빌드가
+    // 주 실행 파일에만 채운다. 표에 있는 라이브러리 모듈을 정확한 철자로 한 번씩 가리켜야 한다.
+    private static void ValidatePluginModules(IReadOnlyList<NativeModuleInput> modules, Dictionary<string, string> byFolded)
+    {
+        var kinds = new Dictionary<string, NativeModuleKind>(StringComparer.OrdinalIgnoreCase);
+        foreach (NativeModuleInput module in modules)
+        {
+            kinds.TryAdd(module.Name, module.Kind);
+        }
+
+        foreach (NativeModuleInput module in modules.Where(module => module.PluginModules.Count != 0))
+        {
+            if (module.Kind != NativeModuleKind.Executable)
+            {
+                throw new ArgumentException($"Module {module.Name}, PluginModules: only an executable links plugin modules.");
+            }
+
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string plugin in module.PluginModules)
+            {
+                if (!byFolded.TryGetValue(plugin, out string? actual) || !string.Equals(actual, plugin, StringComparison.Ordinal))
+                {
+                    throw new ArgumentException($"Module {module.Name}, PluginModules: unknown module {plugin}.");
+                }
+
+                if (!seen.Add(plugin) || kinds[plugin] == NativeModuleKind.Executable)
+                {
+                    throw new ArgumentException($"Module {module.Name}, PluginModules: {plugin} is listed twice or is an executable.");
+                }
+            }
+        }
     }
 
     // 실행 중 적재 모듈 목록(NativeModuleInput.DynamicModules — Docs/Design/ModuleLoader.ko.md 3.8절 MD11)이다. 표에 있는 라이브러리 모듈을

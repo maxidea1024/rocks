@@ -224,10 +224,17 @@ internal static class BuildInfoTests
     {
         Check(toolchain.ToolchainVerified == ToolchainCheck.Verify(toolchain.Platform, toolchain.CompilerVersion, null),
             $"discovered toolchain '{toolchain.CompilerVersion}' verification does not match Build/Toolchain.json");
-        const string Stl1452 = "#elif defined(__clang__)\n#if __clang_major__ < 22\n#error STL1000: Unexpected compiler version, expected Clang 22.0.0 or newer.\n";
+        // 고른 도구 모음의 실제 yvals_core.h에서 조건을 찾아야 한다(형식이 바뀌면 "not checked"로 조용히 넘어가므로 여기서 잡는다).
+        Check(toolchain.Platform != NativePlatform.Windows || toolchain.StlClangCheck?.StartsWith("requires Clang ", StringComparison.Ordinal) == true,
+            $"STL1000 condition is read from the selected yvals_core.h ({toolchain.StlClangCheck})");
+        // 실제 yvals_core.h의 줄이다: 14.52(921–923행)와 14.44(906–908행)는 _EMIT_STL_ERROR, 14.29(569–571행)는 #error 형식이다.
+        const string Stl1452 = "#elif defined(__clang__)\n#if __clang_major__ < 22\n_EMIT_STL_ERROR(STL1000, \"Unexpected compiler version, expected Clang 22 or newer.\");\n";
+        const string Stl1444 = "#elif defined(__clang__)\r\n#if __clang_major__ < 19\r\n_EMIT_STL_ERROR(STL1000, \"Unexpected compiler version, expected Clang 19.0.0 or newer.\");\r\n";
         const string Stl1429 = "#elif defined(__clang__)\r\n#if __clang_major__ < 11\r\n#error STL1000: Unexpected compiler version, expected Clang 11.0.0 or newer.\r\n";
         const string OtherCondition = "#if defined(__clang__)\n#if __clang_major__ < 19\n#define _STL_OLD_CLANG 1\n#endif\n#endif\n";
-        Check(ToolchainTable.ParseStlClangMinimum(Stl1452) == 22 && ToolchainTable.ParseStlClangMinimum(Stl1429) == 11 &&
+        const string OtherError = "#if __clang_major__ < 19\n_EMIT_STL_ERROR(STL1001, \"Unexpected compiler version.\");\n";
+        Check(ToolchainTable.ParseStlClangMinimum(Stl1452) == 22 && ToolchainTable.ParseStlClangMinimum(Stl1444) == 19 &&
+            ToolchainTable.ParseStlClangMinimum(Stl1429) == 11 && ToolchainTable.ParseStlClangMinimum(OtherError) is null &&
             ToolchainTable.ParseStlClangMinimum("#define _MSVC_STL_VERSION 143\n") is null && ToolchainTable.ParseStlClangMinimum(OtherCondition) is null,
             "STL minimum Clang is read only from the STL1000 condition of yvals_core.h");
         Check(ToolchainCheck.StlStatus(Stl1452, null) == "requires Clang 22" &&
@@ -243,6 +250,14 @@ internal static class BuildInfoTests
         Check(!ToolchainCheck.Verify(NativePlatform.Windows, "clang version 22.1.8 (0123456789abcdef0123456789abcdef01234567)", Stl1452),
             "a fork or distribution build with the same number is unverified");
         Check(!ToolchainCheck.Verify(NativePlatform.Windows, "clang version 23.1.0", Stl1452), "a newer major is unverified, not rejected");
+        // 공개 헤더 검사의 -Wunique-object-duplication은 Windows 대상의 LLVM Clang 21부터다(Docs/Design/BuildTargets.ko.md 3.8절 BS8c). ELF·Mach-O
+        // 대상과 Apple clang에서는 켜지 않는다.
+        Check(ToolchainCheck.SupportsUniqueObjectDuplication(NativePlatform.Windows, "clang version 22.1.8 (ca7933e47d3a3451d81e72ac174dcb5aa28b59d1)") &&
+            ToolchainCheck.SupportsUniqueObjectDuplication(NativePlatform.Windows, "clang version 21.1.6") &&
+            !ToolchainCheck.SupportsUniqueObjectDuplication(NativePlatform.Windows, "clang version 20.1.8") &&
+            !ToolchainCheck.SupportsUniqueObjectDuplication(NativePlatform.Android, "clang version 21.0.0") &&
+            !ToolchainCheck.SupportsUniqueObjectDuplication(NativePlatform.MacOS, "Apple clang version 17.0.0 (clang-1700.0.13.5)") &&
+            !ToolchainCheck.SupportsUniqueObjectDuplication(NativePlatform.Windows, ""), "unique object duplication diagnostic by target and compiler");
         Check(!ToolchainCheck.Verify(NativePlatform.MacOS, "Homebrew clang version 22.1.8", null), "Homebrew LLVM above the upstream minimum is unverified, not rejected");
         Check(!ToolchainCheck.Verify(NativePlatform.Android, "Android (13065274, based on r547379) clang version 20.0.0 (b718bcaf8c198c82f3021447d943401e3ab5bd54)", null),
             "Android has a minimum only (no CI), so NDK clang is unverified");
@@ -306,6 +321,23 @@ internal static class BuildInfoTests
                 throw new InvalidOperationException("ROCKS_MSVC_TOOLSET check accepted an invalid or inactive toolset");
             }
             catch (InvalidOperationException error) when (error.Message.Contains(NativeEnvironment.MsvcToolsetVariable, StringComparison.Ordinal))
+            {
+            }
+        }
+
+        // Visual Studio·MSVC 하한(UE 5.8과 같은 값, ClangVersionSupport 6.2절): 하한 이상만 받고, 옛 도구 모음과 값 없음은 거부한다.
+        Check(ToolchainTable.MinimumVisualStudioVersion == "17.8" && ToolchainTable.MinimumMsvcToolset == "14.38.33130",
+            "Visual Studio and MSVC minimums come from Build/Toolchain.json");
+        NativeEnvironment.CheckMinimumMsvcToolset("14.38.33130");
+        NativeEnvironment.CheckMinimumMsvcToolset("14.52.37025 ");
+        foreach (string? old in new[] { "14.29.30133", "14.38.33129", null, "v143" })
+        {
+            try
+            {
+                NativeEnvironment.CheckMinimumMsvcToolset(old);
+                throw new InvalidOperationException($"MSVC minimum accepted '{old}'");
+            }
+            catch (InvalidOperationException error) when (error.Message.Contains("visualStudio.minimumMsvc", StringComparison.Ordinal))
             {
             }
         }
@@ -1037,7 +1069,7 @@ internal static class BuildInfoTests
     }
 
     // 가짜 Core(header-only, 표지·BuildInfo.h·최소 Sha256Digest·EngineVersion) ← Engine(정적 라이브러리) ← Game(실행 파일, TU 2개).
-    private static void WriteFixture(string fixture)
+    internal static void WriteFixture(string fixture)
     {
         void Write(string relative, string text)
         {
@@ -1210,7 +1242,7 @@ internal static class BuildInfoTests
         Check((await Succeeded(builder, mixed, "build with only the root respelled")).ExecutedActions == 0, "a respelled root alone must not run actions");
     }
 
-    private static NativeBuildRequest FixtureRequest(NativeBuildRequest template, string fixture, string output) => template with
+    internal static NativeBuildRequest FixtureRequest(NativeBuildRequest template, string fixture, string output) => template with
     {
         RootDirectory = fixture,
         OutputDirectory = output,

@@ -1,5 +1,6 @@
 #include "PackageInternal.h"
 
+#include <AssetRuntime/PackageRangeReader.h>
 #include <AssetRuntime/PackageReader.h>
 #include <Compression/CompressedBlocks.h>
 #include <Compression/Compression.h>
@@ -633,10 +634,14 @@ Result<void> ReadBulkIndex(Span<const uint8> bytes, PackageContents& contents) n
     return Result<void>::Success();
 }
 
-// BulkIndex를 Bulk 섹션과 대조한다: bulkId 1부터 연속, offset = 앞 entry 끝을 정렬한 값(첫 entry
-// 0), 마지막 끝 = 섹션 크기, 사이 패딩 0, codec None이면 stored = raw, 정의된 flags만(쿠킹은 0),
-// 저장 CRC.
-Result<uint64> ValidateBulk(const PackageContents& contents) noexcept {
+} // namespace
+
+namespace package_detail {
+
+// BulkIndex 배치를 Bulk 섹션 크기와 대조한다: bulkId 1부터 연속, offset = 앞 entry 끝을 정렬한
+// 값(첫 entry 0), 마지막 끝 = 섹션 크기, codec None이면 stored = raw, 정의된 flags만(쿠킹은 0).
+// 내용(entry 사이 패딩 0·저장 CRC)은 보지 않는다(ValidateBulk·VerifyPackageFile이 본다).
+Result<void> ValidateBulkLayout(const PackageContents& contents, uint64 bulkBytes) noexcept {
     const uint64 alignment = contents.header.bulkAlignment;
     uint64 end = 0;
     for (usize index = 0; index < contents.bulkEntries.Size(); ++index) {
@@ -646,11 +651,32 @@ Result<uint64> ValidateBulk(const PackageContents& contents) noexcept {
             (entry.flags & ~static_cast<uint32>(BulkEntryFlags::EditorOnly)) != 0 ||
             (contents.header.kind == PackageKind::Cooked && entry.flags != 0) ||
             (entry.codec == BulkCodec::None && entry.storedBytes != entry.rawBytes) ||
-            entry.offset > contents.bulk.Size() ||
-            entry.storedBytes > contents.bulk.Size() - entry.offset) {
-            return Result<uint64>::Failure(ErrorCode::InvalidArgument);
+            entry.offset > bulkBytes || entry.storedBytes > bulkBytes - entry.offset) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
+        end = entry.offset + entry.storedBytes;
+    }
+
+    if (end != bulkBytes) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return Result<void>::Success();
+}
+
+} // namespace package_detail
+
+namespace {
+
+// BulkIndex를 Bulk 섹션 내용과 대조한다: 배치(ValidateBulkLayout), entry 사이 패딩 0, 저장 CRC.
+Result<uint64> ValidateBulk(const PackageContents& contents) noexcept {
+    if (auto layout = package_detail::ValidateBulkLayout(contents, contents.bulk.Size()); !layout) {
+        return Result<uint64>::Failure(layout.Error());
+    }
+
+    uint64 end = 0;
+    for (const PackageBulkEntry& entry : contents.bulkEntries) {
         if (!AllZero(contents.bulk.Slice(static_cast<usize>(end),
                                          static_cast<usize>(entry.offset - end)))) {
             return Result<uint64>::Failure(ErrorCode::InvalidArgument);
@@ -663,10 +689,6 @@ Result<uint64> ValidateBulk(const PackageContents& contents) noexcept {
         }
 
         end = entry.offset + entry.storedBytes;
-    }
-
-    if (end != contents.bulk.Size()) {
-        return Result<uint64>::Failure(ErrorCode::InvalidArgument);
     }
 
     return Result<uint64>::Success(0);
@@ -858,6 +880,24 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "UnknownBoneTrack";
     case AssetDiagnosticCode::EventPropertiesDropped:
         return "EventPropertiesDropped";
+    case AssetDiagnosticCode::CorruptBundle:
+        return "CorruptBundle";
+    case AssetDiagnosticCode::UnsupportedBundleVersion:
+        return "UnsupportedBundleVersion";
+    case AssetDiagnosticCode::UnknownField:
+        return "UnknownField";
+    case AssetDiagnosticCode::UnsupportedAsset:
+        return "UnsupportedAsset";
+    case AssetDiagnosticCode::UnrealPathRenamed:
+        return "UnrealPathRenamed";
+    case AssetDiagnosticCode::UnrealPathTooLong:
+        return "UnrealPathTooLong";
+    case AssetDiagnosticCode::UnrealPathCollision:
+        return "UnrealPathCollision";
+    case AssetDiagnosticCode::MissingUnrealDependency:
+        return "MissingUnrealDependency";
+    case AssetDiagnosticCode::RootLost:
+        return "RootLost";
     }
 
     return "Unknown";
@@ -928,10 +968,115 @@ Result<PackageHeader> ReadPackageHeader(Span<const uint8> headerBytes, uint64 fi
     return Result<PackageHeader>::Success(header);
 }
 
-Result<PackageContents> ReadPackage(Allocator& allocator, Span<const uint8> file,
-                                    const PackageReadOptions& options,
-                                    AssetDiagnostic* failure) noexcept {
-    auto header = ReadPackageHeader(file, file.Size(), failure);
+namespace {
+
+// 읽는 범위다(AS 7.1절 13·15): Full은 모든 byte(패딩·모든 섹션 내용), Edit는 Bulk 섹션 내용만
+// 빼고(에디터 지연 열기 — BulkIndex 배치는 섹션 크기로 본다), Index는 Objects·Bulk·BulkIndex
+// 내용을 뺀다(색인). Full이 아니면 섹션 사이 패딩도 읽지 않는다.
+enum class ReadScope {
+    Full,
+    Edit,
+    Index
+};
+
+// 패키지 byte의 공급원이다(전체 파일 span 또는 범위 읽기 — AS 7.1절 13). Range의 view는 공급원이
+// 살아 있는 동안 유효하다.
+class PackageByteSource {
+public:
+    virtual uint64 FileBytes() const noexcept = 0;
+    virtual ReadScope Scope() const noexcept = 0;
+    virtual Result<Span<const uint8>> Range(uint64 offset, uint64 bytes) noexcept = 0;
+
+protected:
+    ~PackageByteSource() = default;
+};
+
+class SpanByteSource final : public PackageByteSource {
+public:
+    explicit SpanByteSource(Span<const uint8> file) noexcept : file_(file) {
+    }
+
+    uint64 FileBytes() const noexcept override {
+        return file_.Size();
+    }
+
+    ReadScope Scope() const noexcept override {
+        return ReadScope::Full;
+    }
+
+    Result<Span<const uint8>> Range(uint64 offset, uint64 bytes) noexcept override {
+        return Result<Span<const uint8>>::Success(
+            file_.Slice(static_cast<usize>(offset), static_cast<usize>(bytes)));
+    }
+
+private:
+    Span<const uint8> file_;
+};
+
+// 범위마다 소유 버퍼를 하나 만든다(버퍼 표가 자라도 각 버퍼의 byte는 옮겨지지 않는다).
+class RangeByteSource final : public PackageByteSource {
+public:
+    RangeByteSource(PackageRangeReader& reader, Array<Array<uint8>>& buffers,
+                    ReadScope scope) noexcept
+        : reader_(reader), buffers_(buffers), scope_(scope) {
+    }
+
+    uint64 FileBytes() const noexcept override {
+        return reader_.FileBytes();
+    }
+
+    ReadScope Scope() const noexcept override {
+        return scope_;
+    }
+
+    Result<Span<const uint8>> Range(uint64 offset, uint64 bytes) noexcept override {
+        Array<uint8> buffer(buffers_.GetAllocator());
+        if (auto sized = buffer.TryResize(static_cast<usize>(bytes)); !sized) {
+            return Result<Span<const uint8>>::Failure(sized.Error());
+        }
+
+        if (auto read = reader_.ReadAt(offset, Span<uint8>(buffer.Data(), buffer.Size())); !read) {
+            return Result<Span<const uint8>>::Failure(read.Error());
+        }
+
+        if (auto pushed = buffers_.TryPushBack(Move(buffer)); !pushed) {
+            return Result<Span<const uint8>>::Failure(pushed.Error());
+        }
+
+        const Array<uint8>& stored = buffers_[buffers_.Size() - 1];
+        return Result<Span<const uint8>>::Success(Span<const uint8>(stored.Data(), stored.Size()));
+    }
+
+private:
+    PackageRangeReader& reader_;
+    Array<Array<uint8>>& buffers_;
+    ReadScope scope_;
+};
+
+bool SkipsContent(const PackageByteSource& source, PackageSectionKind kind) noexcept {
+    if (source.Scope() == ReadScope::Full) {
+        return false;
+    }
+
+    if (source.Scope() == ReadScope::Edit) {
+        return kind == PackageSectionKind::Bulk;
+    }
+
+    return kind == PackageSectionKind::Objects || kind == PackageSectionKind::Bulk ||
+           kind == PackageSectionKind::BulkIndex;
+}
+
+Result<PackageContents> ReadPackageFrom(Allocator& allocator, PackageByteSource& source,
+                                        const PackageReadOptions& options,
+                                        AssetDiagnostic* failure) noexcept {
+    const uint64 fileBytes = source.FileBytes();
+    auto headerBytes =
+        source.Range(0, fileBytes < PackageHeaderBytes ? fileBytes : PackageHeaderBytes);
+    if (!headerBytes) {
+        return Resource<PackageContents>(failure, headerBytes.Error(), AssetId{}, 0);
+    }
+
+    auto header = ReadPackageHeader(headerBytes.Value(), fileBytes, failure);
     if (!header) {
         return Result<PackageContents>::Failure(header.Error());
     }
@@ -950,8 +1095,13 @@ Result<PackageContents> ReadPackage(Allocator& allocator, Span<const uint8> file
     // 3. 섹션 표.
     const usize tableOffset = static_cast<usize>(contents.header.sectionTableOffset);
     const usize tableBytes = PackageSectionEntryBytes * contents.header.sectionCount;
-    const Span<const uint8> table = file.Slice(tableOffset, tableBytes);
-    if (Crc32(table) != LoadLittleEndian<uint32>(file.Data() + tableOffset + tableBytes)) {
+    auto tableRead = source.Range(tableOffset, tableBytes + sizeof(uint32));
+    if (!tableRead) {
+        return Resource<PackageContents>(failure, tableRead.Error(), asset, 0);
+    }
+
+    const Span<const uint8> table = tableRead.Value().Slice(0, tableBytes);
+    if (Crc32(table) != LoadLittleEndian<uint32>(tableRead.Value().Data() + tableBytes)) {
         return Corrupt<PackageContents>(failure, asset, 0, tableOffset);
     }
 
@@ -989,8 +1139,12 @@ Result<PackageContents> ReadPackage(Allocator& allocator, Span<const uint8> file
             return Corrupt<PackageContents>(failure, asset, kind, index);
         }
 
-        if (!AllZero(file.Slice(static_cast<usize>(end), static_cast<usize>(entry.offset - end)))) {
-            return Corrupt<PackageContents>(failure, asset, kind, end);
+        // 섹션 사이 패딩은 전체 읽기만 본다(부분 읽기는 그 구간을 읽지 않는다 — AS 7.1절 13).
+        if (source.Scope() == ReadScope::Full) {
+            auto gap = source.Range(end, entry.offset - end);
+            if (!AllZero(gap.Value())) {
+                return Corrupt<PackageContents>(failure, asset, kind, end);
+            }
         }
 
         if (IsKnownPackageSection(kind)) {
@@ -1002,10 +1156,15 @@ Result<PackageContents> ReadPackage(Allocator& allocator, Span<const uint8> file
         (void)contents.sections.TryPushBack(entry);
     }
 
-    if (contents.header.sectionTableOffset != AlignUp(end, PackageSectionAlignment) ||
-        !AllZero(file.Slice(static_cast<usize>(end),
-                            static_cast<usize>(contents.header.sectionTableOffset - end)))) {
+    if (contents.header.sectionTableOffset != AlignUp(end, PackageSectionAlignment)) {
         return Corrupt<PackageContents>(failure, asset, 0, end);
+    }
+
+    if (source.Scope() == ReadScope::Full) {
+        auto tail = source.Range(end, contents.header.sectionTableOffset - end);
+        if (!AllZero(tail.Value())) {
+            return Corrupt<PackageContents>(failure, asset, 0, end);
+        }
     }
 
     // 항상 있어야 하는 섹션, 함께 있어야 하는 Bulk·BulkIndex, 쿠킹에 없어야 하는 섹션.
@@ -1024,8 +1183,6 @@ Result<PackageContents> ReadPackage(Allocator& allocator, Span<const uint8> file
         const uint32 kind = SectionKindValue(entry.kind);
         const bool required =
             (entry.flags & static_cast<uint32>(PackageSectionFlags::Required)) != 0;
-        const Span<const uint8> bytes =
-            file.Slice(static_cast<usize>(entry.offset), static_cast<usize>(entry.bytes));
         if (!IsKnownPackageSection(kind)) {
             if (cooked || required) {
                 return Unsupported<PackageContents>(failure,
@@ -1058,6 +1215,17 @@ Result<PackageContents> ReadPackage(Allocator& allocator, Span<const uint8> file
             continue;
         }
 
+        // 부분 읽기는 Objects·Bulk·BulkIndex 내용을 읽지 않는다(표 판정은 위에서 마쳤다).
+        if (SkipsContent(source, entry.kind)) {
+            continue;
+        }
+
+        auto sectionRead = source.Range(entry.offset, entry.bytes);
+        if (!sectionRead) {
+            return Resource<PackageContents>(failure, sectionRead.Error(), asset, kind);
+        }
+
+        const Span<const uint8> bytes = sectionRead.Value();
         if (entry.kind != PackageSectionKind::Bulk && Crc32(bytes) != entry.crc32) {
             return Corrupt<PackageContents>(failure, asset, kind, 0);
         }
@@ -1122,8 +1290,24 @@ Result<PackageContents> ReadPackage(Allocator& allocator, Span<const uint8> file
                                                PackageSectionKind::Dependencies, 0);
     }
 
-    if (auto valid = ValidateBulk(contents); !valid) {
-        return SectionFailure<PackageContents>(failure, valid.Error(), asset,
+    // Bulk 판정: 전체 읽기는 내용까지, 편집 읽기는 섹션 크기로 배치만(내용은 지연 읽기가 entry마다
+    // 본다), 색인은 BulkIndex를 읽지 않았다.
+    Result<uint64> bulkValid = Result<uint64>::Success(0);
+    if (source.Scope() == ReadScope::Full) {
+        bulkValid = ValidateBulk(contents);
+    } else if (source.Scope() == ReadScope::Edit) {
+        uint64 bulkBytes = 0;
+        for (const PackageSectionEntry& entry : contents.sections) {
+            bulkBytes = entry.kind == PackageSectionKind::Bulk ? entry.bytes : bulkBytes;
+        }
+
+        if (auto layout = package_detail::ValidateBulkLayout(contents, bulkBytes); !layout) {
+            bulkValid = Result<uint64>::Failure(layout.Error());
+        }
+    }
+
+    if (!bulkValid) {
+        return SectionFailure<PackageContents>(failure, bulkValid.Error(), asset,
                                                PackageSectionKind::BulkIndex, 0);
     }
 
@@ -1204,10 +1388,93 @@ Result<PackageContents> ReadPackage(Allocator& allocator, Span<const uint8> file
 
     // 지문: 헤더 + 섹션 표(+ tableCrc).
     Sha256 hash;
-    hash.Update(file.Slice(0, PackageHeaderBytes));
-    hash.Update(file.Slice(tableOffset, tableBytes + 4));
+    hash.Update(headerBytes.Value());
+    hash.Update(tableRead.Value());
     contents.fingerprint.digest = hash.Finish();
     return Result<PackageContents>::Success(Move(contents));
+}
+
+} // namespace
+
+Result<PackageContents> ReadPackage(Allocator& allocator, Span<const uint8> file,
+                                    const PackageReadOptions& options,
+                                    AssetDiagnostic* failure) noexcept {
+    SpanByteSource source(file);
+    return ReadPackageFrom(allocator, source, options, failure);
+}
+
+Result<PackageIndexView> ReadPackageIndex(Allocator& allocator, PackageRangeReader& reader,
+                                          const PackageReadOptions& options,
+                                          AssetDiagnostic* failure) noexcept {
+    PackageIndexView view(allocator);
+    RangeByteSource source(reader, view.buffers, ReadScope::Index);
+    auto contents = ReadPackageFrom(allocator, source, options, failure);
+    if (!contents) {
+        return Result<PackageIndexView>::Failure(contents.Error());
+    }
+
+    view.contents = Move(contents.Value());
+    return Result<PackageIndexView>::Success(Move(view));
+}
+
+Result<PackageIndexView> ReadPackageForEdit(Allocator& allocator, PackageRangeReader& reader,
+                                            const PackageReadOptions& options,
+                                            AssetDiagnostic* failure) noexcept {
+    PackageIndexView view(allocator);
+    RangeByteSource source(reader, view.buffers, ReadScope::Edit);
+    auto contents = ReadPackageFrom(allocator, source, options, failure);
+    if (!contents) {
+        return Result<PackageIndexView>::Failure(contents.Error());
+    }
+
+    view.contents = Move(contents.Value());
+    return Result<PackageIndexView>::Success(Move(view));
+}
+
+Result<void> DecodePackageBulkEntry(const PackageBulkEntry& entry, Span<const uint8> stored,
+                                    Span<uint8> raw, Allocator& allocator) noexcept {
+    if (stored.Size() != entry.storedBytes || raw.Size() != entry.rawBytes) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (entry.codec == BulkCodec::None) {
+        for (usize index = 0; index < raw.Size(); ++index) {
+            raw[index] = stored[index];
+        }
+    } else if (auto decoded = DecodeBulkContainer(stored, raw, allocator); !decoded) {
+        return decoded;
+    }
+
+    if (!(Sha256::Hash(Span<const uint8>(raw.Data(), raw.Size())) == entry.sha256)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> DecodePackageBulkEntry(const PackageBulkEntry& entry, Span<const uint8> stored,
+                                    Array<uint8>& out, Allocator& allocator) noexcept {
+    if (stored.Size() != entry.storedBytes) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (entry.codec == BulkCodec::Zstd) {
+        auto reader = CompressedBlocksReader::TryOpen(stored, allocator);
+        if (!reader) {
+            return ContainerFailure(reader.Error());
+        }
+
+        // 형식은 해제(DecodeBulkContainer)가 본다 — 여기서는 할당 크기만 먼저 확인한다.
+        if (reader.Value().RawSize() != entry.rawBytes) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
+    if (auto sized = out.TryResize(static_cast<usize>(entry.rawBytes)); !sized) {
+        return sized;
+    }
+
+    return DecodePackageBulkEntry(entry, stored, out.View(), allocator);
 }
 
 Result<void> DecodePackageBulk(const PackageContents& contents, Array<uint8>& out,
@@ -1246,11 +1513,8 @@ Result<void> DecodePackageBulk(const PackageContents& contents, Array<uint8>& ou
         const Span<const uint8> stored = contents.bulk.Slice(static_cast<usize>(entry.offset),
                                                              static_cast<usize>(entry.storedBytes));
         const Span<uint8> raw(out.Data() + cursor, static_cast<usize>(entry.rawBytes));
-        if (entry.codec == BulkCodec::None) {
-            for (usize index = 0; index < raw.Size(); ++index) {
-                raw[index] = stored[index];
-            }
-        } else if (auto decoded = DecodeBulkContainer(stored, raw, out.GetAllocator()); !decoded) {
+        if (auto decoded = DecodePackageBulkEntry(entry, stored, raw, out.GetAllocator());
+            !decoded) {
             restore();
             if (decoded.Error() == ErrorCode::OutOfMemory) {
                 return Resource<void>(failure, decoded.Error(), asset, section);
@@ -1259,13 +1523,192 @@ Result<void> DecodePackageBulk(const PackageContents& contents, Array<uint8>& ou
             return Corrupt<void>(failure, asset, section, entry.bulkId);
         }
 
-        if (!(Sha256::Hash(Span<const uint8>(raw.Data(), raw.Size())) == entry.sha256)) {
-            restore();
-            return Corrupt<void>(failure, asset, section, entry.bulkId);
-        }
-
         (void)slots.TryPushBack(PackageBulkSlot{cursor - baseBytes, entry.rawBytes, entry.sha256});
         cursor += raw.Size();
+    }
+
+    return Result<void>::Success();
+}
+
+namespace {
+
+// 범위 [offset, offset + bytes)를 scratch 조각으로 읽어 CRC32를 계산하거나(zero = false) 모두 0인지
+// 본다(zero = true — 결과 0이면 모두 0). 읽기 오류는 그 오류다.
+Result<uint32> StreamRange(PackageRangeReader& reader, uint64 offset, uint64 bytes,
+                           Span<uint8> scratch, bool zero) noexcept {
+    uint32 crc = 0;
+    while (bytes != 0) {
+        const usize piece = bytes < scratch.Size() ? static_cast<usize>(bytes) : scratch.Size();
+        const Span<uint8> chunk(scratch.Data(), piece);
+        if (auto read = reader.ReadAt(offset, chunk); !read) {
+            return Result<uint32>::Failure(read.Error());
+        }
+
+        const Span<const uint8> view(chunk.Data(), chunk.Size());
+        if (zero) {
+            if (!AllZero(view)) {
+                return Result<uint32>::Success(1);
+            }
+        } else {
+            crc = Crc32(view, crc);
+        }
+
+        offset += piece;
+        bytes -= piece;
+    }
+
+    return Result<uint32>::Success(crc);
+}
+
+} // namespace
+
+Result<PackageFingerprint> ReadPackageFingerprint(Allocator& allocator, PackageRangeReader& reader,
+                                                  AssetDiagnostic* failure) noexcept {
+    using Out = PackageFingerprint;
+    const uint64 fileBytes = reader.FileBytes();
+    uint8 header[PackageHeaderBytes] = {};
+    const usize headerBytes =
+        fileBytes < PackageHeaderBytes ? static_cast<usize>(fileBytes) : PackageHeaderBytes;
+    if (auto read = reader.ReadAt(0, Span<uint8>(header, headerBytes)); !read) {
+        (void)Resource<void>(failure, read.Error(), AssetId{}, 0);
+        return Result<Out>::Failure(read.Error());
+    }
+
+    auto parsed = ReadPackageHeader(Span<const uint8>(header, headerBytes), fileBytes, failure);
+    if (!parsed) {
+        return Result<Out>::Failure(parsed.Error());
+    }
+
+    const AssetId asset = parsed.Value().assetId;
+    const usize tableBytes = PackageSectionEntryBytes * parsed.Value().sectionCount;
+    Array<uint8> table(allocator);
+    if (auto sized = table.TryResize(tableBytes + sizeof(uint32)); !sized) {
+        (void)Resource<void>(failure, sized.Error(), asset, 0);
+        return Result<Out>::Failure(sized.Error());
+    }
+
+    if (auto read = reader.ReadAt(parsed.Value().sectionTableOffset, table.View()); !read) {
+        (void)Resource<void>(failure, read.Error(), asset, 0);
+        return Result<Out>::Failure(read.Error());
+    }
+
+    if (Crc32(table.View().Slice(0, tableBytes)) !=
+        LoadLittleEndian<uint32>(table.Data() + tableBytes)) {
+        (void)Corrupt<void>(failure, asset, 0, parsed.Value().sectionTableOffset);
+        return Result<Out>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    Sha256 hash;
+    hash.Update(Span<const uint8>(header, headerBytes));
+    hash.Update(table.View());
+    PackageFingerprint fingerprint;
+    fingerprint.digest = hash.Finish();
+    return Result<Out>::Success(fingerprint);
+}
+
+Result<void> VerifyPackageFile(Allocator& allocator, PackageRangeReader& reader,
+                               Span<uint8> scratch, AssetDiagnostic* failure) noexcept {
+    if (scratch.IsEmpty()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 헤더·표·읽는 섹션은 부분 읽기와 같은 판정이다(버전 축은 보지 않는다 — AS 7.1절 15).
+    PackageReadOptions options;
+    options.expectedKind = PackageKind::Editor;
+    auto view = ReadPackageIndex(allocator, reader, options, failure);
+    if (!view) {
+        return Result<void>::Failure(view.Error());
+    }
+
+    PackageContents& contents = view.Value().contents;
+    const AssetId asset = contents.header.assetId;
+    // 섹션 사이 패딩과 건너뛴 섹션(Objects·Bulk·BulkIndex)의 CRC — 전체 읽기와 같은 진단이다.
+    uint64 end = PackageHeaderBytes;
+    const PackageSectionEntry* bulkIndex = nullptr;
+    const PackageSectionEntry* bulk = nullptr;
+    for (const PackageSectionEntry& entry : contents.sections) {
+        const uint32 kind = SectionKindValue(entry.kind);
+        auto gap = StreamRange(reader, end, entry.offset - end, scratch, true);
+        if (!gap) {
+            return Resource<void>(failure, gap.Error(), asset, kind);
+        }
+
+        if (gap.Value() != 0) {
+            return Corrupt<void>(failure, asset, kind, end);
+        }
+
+        // Objects·BulkIndex는 Required 섹션이라 schemaVersion이 현재 값이다(다르면 부분 읽기가 이미
+        // 거부했다 — 5.3절).
+        const bool skipped = entry.kind == PackageSectionKind::Objects ||
+                             entry.kind == PackageSectionKind::BulkIndex;
+        if (skipped) {
+            auto crc = StreamRange(reader, entry.offset, entry.bytes, scratch, false);
+            if (!crc) {
+                return Resource<void>(failure, crc.Error(), asset, kind);
+            }
+
+            if (crc.Value() != entry.crc32) {
+                return Corrupt<void>(failure, asset, kind, 0);
+            }
+        }
+
+        bulkIndex = entry.kind == PackageSectionKind::BulkIndex ? &entry : bulkIndex;
+        bulk = entry.kind == PackageSectionKind::Bulk ? &entry : bulk;
+        end = entry.offset + entry.bytes;
+    }
+
+    auto tail = StreamRange(reader, end, contents.header.sectionTableOffset - end, scratch, true);
+    if (!tail) {
+        return Resource<void>(failure, tail.Error(), asset, 0);
+    }
+
+    if (tail.Value() != 0) {
+        return Corrupt<void>(failure, asset, 0, end);
+    }
+
+    if (bulkIndex == nullptr) {
+        return Result<void>::Success();
+    }
+
+    // BulkIndex 해석·배치, entry 사이 패딩·저장 CRC(압축 해제·SHA-256은 하지 않는다).
+    Array<uint8> indexBytes(allocator);
+    if (auto sized = indexBytes.TryResize(static_cast<usize>(bulkIndex->bytes)); !sized) {
+        return Resource<void>(failure, sized.Error(), asset, SectionKindValue(bulkIndex->kind));
+    }
+
+    if (auto read = reader.ReadAt(bulkIndex->offset, indexBytes.View()); !read) {
+        return Resource<void>(failure, read.Error(), asset, SectionKindValue(bulkIndex->kind));
+    }
+
+    // BulkIndex는 Required 섹션이라 다른 schemaVersion은 부분 읽기가 이미 거부했다(5.3절).
+    if (auto parsed = ReadBulkIndex(indexBytes.View(), contents); !parsed) {
+        return SectionFailure<void>(failure, parsed.Error(), asset, PackageSectionKind::BulkIndex,
+                                    0);
+    }
+
+    if (auto layout = package_detail::ValidateBulkLayout(contents, bulk->bytes); !layout) {
+        return SectionFailure<void>(failure, layout.Error(), asset, PackageSectionKind::BulkIndex,
+                                    0);
+    }
+
+    uint64 entryEnd = 0;
+    for (const PackageBulkEntry& entry : contents.bulkEntries) {
+        auto gap =
+            StreamRange(reader, bulk->offset + entryEnd, entry.offset - entryEnd, scratch, true);
+        auto crc = gap && gap.Value() == 0 ? StreamRange(reader, bulk->offset + entry.offset,
+                                                         entry.storedBytes, scratch, false)
+                                           : Result<uint32>::Success(entry.crc32 ^ 1u);
+        const ErrorCode error = !gap ? gap.Error() : (!crc ? crc.Error() : ErrorCode::None);
+        if (error != ErrorCode::None) {
+            return Resource<void>(failure, error, asset, SectionKindValue(bulk->kind));
+        }
+
+        if (crc.Value() != entry.crc32) {
+            return SectionFailure<void>(failure, ErrorCode::InvalidArgument, asset,
+                                        PackageSectionKind::BulkIndex, 0);
+        }
+
+        entryEnd = entry.offset + entry.storedBytes;
     }
 
     return Result<void>::Success();

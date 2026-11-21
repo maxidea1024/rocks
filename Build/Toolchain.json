@@ -10,7 +10,27 @@
     }
   },
   "clangFormat": {
-    "version": "21.1.6"
+    "version": "21.1.6",
+    "packages": {
+      "windows-X64": { "url": "https://files.pythonhosted.org/packages/3e/44/274e4b20ffab7707cdca5ddbf109c70789e8eb0bd49233318b9adb1da0c3/clang_format-21.1.6-py2.py3-none-win_amd64.whl", "sha256": "072e0d611dfc7431d744dc90389aaaa626c26507581e692df60f2000695a92f6" },
+      "macos-Arm64": { "url": "https://files.pythonhosted.org/packages/f8/94/46762b38563b4aea840c706149f7d5b3eeed450c0ba874bb77b0de635674/clang_format-21.1.6-py2.py3-none-macosx_11_0_arm64.whl", "sha256": "74880cb25886c1bb4a95307efeb40f19eba3f1fd86ddee88166814b9ed2600ef" },
+      "macos-X64": { "url": "https://files.pythonhosted.org/packages/dd/5b/2c5ae61dd72dc3d0a85af09e4ca007140d804b57a9fe2c9da44b88b62a13/clang_format-21.1.6-py2.py3-none-macosx_10_9_x86_64.whl", "sha256": "a0cea6afea00448396eaff4e10a569631a4b06582553e3c44c5c040ec83c6b01" },
+      "linux-X64": { "url": "https://files.pythonhosted.org/packages/01/75/e7d82087df0922054f08351ce5e3528d0b0ce64dcc140c00ec1df016a0c6/clang_format-21.1.6-py2.py3-none-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", "sha256": "8a9d82d1d67ffdc491a0a1ce04d7740b6e7ccb1d9b6d2ab90b009040614030e9" }
+    }
+  },
+  "dotnet": {
+    "sdk": {
+      "version": "10.0.302",
+      "archives": {
+        "osx-arm64": { "url": "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.302/dotnet-sdk-10.0.302-osx-arm64.tar.gz", "sha512": "b2286dec9177e8b5543ff2fe95c84db358b87ec2a36a0d34a29033d70279940fd1134af56c4299648f8950db2d6ce35237698cf2818d9abc670c2c1664c92ac0" },
+        "osx-x64": { "url": "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.302/dotnet-sdk-10.0.302-osx-x64.tar.gz", "sha512": "48d5861dc0d6c9c782c6d163d6b334ecac2ebd65a1ae59e9ce5b93dd080a31d7ecfc4e4d47e0e35b201ce63661218d641e154022266294a3a8b84593a019cfbc" },
+        "linux-x64": { "url": "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.302/dotnet-sdk-10.0.302-linux-x64.tar.gz", "sha512": "10069bec8783596484a610332f090d562802a41b9b40e3327a5a5688b572e10c296ae300f940d40461f23c157ed1b0843c2f8e6b3f20d8d8d9d83432d8143bac" }
+      }
+    }
+  },
+  "visualStudio": {
+    "minimumVersion": "17.8",
+    "minimumMsvc": "14.38.33130"
   },
   "android": {
     "ndk": {

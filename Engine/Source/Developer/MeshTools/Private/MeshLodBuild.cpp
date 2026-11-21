@@ -402,8 +402,10 @@ Result<void> BuildRenderVertices(const MeshSource& work, const CornerBasis& basi
             ScaleVertex(pending, scale);
             if (hasColors) {
                 const Span<const float> color = work.FloatValues(attributes.work[ColorSlot], 0);
-                pending.linearColor = Vec4(color[4 * corner], color[4 * corner + 1],
-                                           color[4 * corner + 2], color[4 * corner + 3]);
+                pending.linearColor = Vec4(color[4 * static_cast<usize>(corner)],
+                                           color[4 * static_cast<usize>(corner) + 1],
+                                           color[4 * static_cast<usize>(corner) + 2],
+                                           color[4 * static_cast<usize>(corner) + 3]);
                 pending.color = LinearColor(pending.linearColor.x, pending.linearColor.y,
                                             pending.linearColor.z, pending.linearColor.w)
                                     .ToSRGB();
@@ -412,7 +414,8 @@ Result<void> BuildRenderVertices(const MeshSource& work, const CornerBasis& basi
             for (uint32 channel = 0; channel < channels; ++channel) {
                 const Span<const float> uv =
                     work.FloatValues(attributes.work[TexCoordSlot], channel);
-                pending.uvs[channel] = Vec2(uv[2 * corner], uv[2 * corner + 1]);
+                pending.uvs[channel] = Vec2(uv[2 * static_cast<usize>(corner)],
+                                            uv[2 * static_cast<usize>(corner) + 1]);
             }
 
             // 겹치는 앞 wedge의 렌더 정점 가운데 같은 것을 찾는다(UE와 같이 wedge 번호 순 첫 일치).

@@ -10,9 +10,9 @@ string executable = Path.GetFullPath(args[1]);
 string workingDirectory = Path.GetDirectoryName(executable)!;
 int failures = 0;
 
-async Task Check(string label, string[] arguments, int exit, string stdout, string stderr)
+async Task Check(string label, string[] arguments, int exit, string stdout, string stderr, string? directory = null)
 {
-    ProcessResult result = await ProcessRunner.RunAsync(new(executable, arguments, workingDirectory,
+    ProcessResult result = await ProcessRunner.RunAsync(new(executable, arguments, directory ?? workingDirectory,
         Timeout: TimeSpan.FromSeconds(15)));
     bool passed = result.ExitCode == exit && result.StdOut.Contains(stdout, StringComparison.Ordinal) &&
                   result.StdErr.Contains(stderr, StringComparison.Ordinal) &&
@@ -232,6 +232,45 @@ try
     File.WriteAllBytes(manifest, EmptyCookedManifest("Windows"));
     File.WriteAllBytes(notManifest, [1, 2, 3, 4]);
     string[] scope = ["--product", "rocks.game", "--channel", "live"];
+    // 독립 참조 구현(Ed25519phReference)이 golden 봉투를 다시 만든다 — C++ ContentSignature_GoldenEnvelope의 기대 byte와 같다.
+    byte[] goldenSeed = Enumerable.Range(1, 32).Select(value => (byte)value).ToArray();
+    byte[] goldenKeyId = Enumerable.Range(0x40, 16).Select(value => (byte)value).ToArray();
+    byte[] goldenScope = System.Security.Cryptography.SHA256.HashData("rocks.test\0main"u8.ToArray());
+    byte[] goldenEnvelope = Ed25519phReference.Envelope(goldenSeed, goldenKeyId, 7, goldenScope,
+        "cooked-manifest-golden-bytes-v1"u8.ToArray());
+    bool goldenSame = Convert.ToHexStringLower(Ed25519phReference.PublicKey(goldenSeed)) ==
+                      "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664" &&
+                      Convert.ToHexStringLower(goldenEnvelope) == GoldenEnvelopeHex &&
+                      Ed25519phReference.VerifyEnvelope(Ed25519phReference.PublicKey(goldenSeed), goldenEnvelope);
+    Console.WriteLine($"content-sign golden envelope (independent Ed25519ph): {(goldenSame ? "PASS" : "FAIL")}");
+    if (!goldenSame)
+    {
+        ++failures;
+    }
+
+    // 참조 구현 자체를 RFC 8032 7.3 Ed25519ph 벡터("abc")로 확인한다.
+    byte[] rfcSeed = Convert.FromHexString("833fe62409237b9d62ec77587520911e9a759cec1d19755b7da901b96dca3d42");
+    bool rfcSame = Convert.ToHexStringLower(Ed25519phReference.PublicKey(rfcSeed)) ==
+                   "ec172b93ad5e563bf4932c70e1245034c35467ef2efd4d64ebf819683467e2bf" &&
+                   Convert.ToHexStringLower(Ed25519phReference.Sign(rfcSeed, "abc"u8.ToArray())) ==
+                   "98a70222f0b8121aa9d30f813d683f809e462b469c7ff87639499bb94e6dae41" +
+                   "31f85042463c2a355a2003d062adf5aaa10b8c61e636062aaad11c2a26083406";
+    Console.WriteLine($"content-sign reference RFC 8032 Ed25519ph vector: {(rfcSame ? "PASS" : "FAIL")}");
+    if (!rfcSame)
+    {
+        ++failures;
+    }
+
+    // 신뢰 키로 서명했지만 안의 매니페스트가 깨진 봉투는 verify가 매니페스트 판정에서 거부한다(봉투는 통과).
+    string badManifestEnvelope = Path.Combine(signDirectory, "bad-manifest.rsig");
+    string goldenTrust = Path.Combine(signDirectory, "golden.pub");
+    File.WriteAllBytes(badManifestEnvelope,
+        Ed25519phReference.Envelope(goldenSeed, goldenKeyId, 7, goldenScope, [1, 2, 3, 4]));
+    File.WriteAllText(goldenTrust, Convert.ToHexStringLower(goldenKeyId) + " " +
+                                   Convert.ToHexStringLower(Ed25519phReference.PublicKey(goldenSeed)) + "\n");
+    await Check("content-sign verify signed bad manifest", ["content-sign", "verify", badManifestEnvelope, "--trust",
+        goldenTrust, "--product", "rocks.test", "--channel", "main"], 1, "", "holds a bad cooked manifest");
+
     await Check("content-sign usage", ["content-sign"], 2, "", "content-sign keygen");
     await Check("content-sign help", ["content-sign", "--help"], 0, "content-sign verify", "");
     await Check("content-sign keygen without password", ["content-sign", "keygen", keyBlob, publicLine], 2, "",
@@ -255,6 +294,22 @@ try
         "--password-file", password, "--version", "9", .. scope], 0, "content version 9", "");
     await Check("content-sign verify", ["content-sign", "verify", envelope, "--trust", publicLine, .. scope,
         "--minimum-version", "9"], 0, "content-sign verify: OK", "");
+    // content-sign이 쓴 서명을 독립 참조 구현으로 확인하고, 헤더의 keyId·버전·scope·길이 칸을 대조한다.
+    byte[] signedBytes = File.ReadAllBytes(envelope);
+    byte[] publicKeyBytes = Convert.FromHexString(line[33..97]);
+    byte[] expectedScope = System.Security.Cryptography.SHA256.HashData("rocks.game\0live"u8.ToArray());
+    bool independent = Ed25519phReference.VerifyEnvelope(publicKeyBytes, signedBytes) &&
+                       Convert.ToHexStringLower(signedBytes.AsSpan(8, 16)) == line[..32] &&
+                       BitConverter.ToUInt64(signedBytes, 24) == 9 &&
+                       signedBytes.AsSpan(32, 32).SequenceEqual(expectedScope) &&
+                       BitConverter.ToUInt64(signedBytes, 64) == (ulong)(signedBytes.Length - 136) &&
+                       signedBytes.AsSpan(136).SequenceEqual(File.ReadAllBytes(manifest));
+    Console.WriteLine($"content-sign envelope verifies independently: {(independent ? "PASS" : "FAIL")}");
+    if (!independent)
+    {
+        ++failures;
+    }
+
     await Check("content-sign verify other channel", ["content-sign", "verify", envelope, "--trust", publicLine,
         "--product", "rocks.game", "--channel", "beta"], 1, "", "rejected at Scope");
     await Check("content-sign verify higher minimum", ["content-sign", "verify", envelope, "--trust", publicLine,
@@ -268,7 +323,7 @@ try
         "--password-file", password, "--version", "10", .. scope], 0, "content version 10", "");
     await Check("content-sign verify replaced", ["content-sign", "verify", envelope, "--trust", publicLine, .. scope,
         "--minimum-version", "10"], 0, "content version 10", "");
-    bool noTemporary = !File.Exists(envelope + ".tmp");
+    bool noTemporary = Directory.GetFiles(signDirectory, "*.tmp").Length == 0;
     Console.WriteLine($"content-sign leaves no temporary file: {(noTemporary ? "PASS" : "FAIL")}");
     if (!noTemporary)
     {
@@ -291,10 +346,717 @@ try
     await Check("content-sign verify not a key line", ["content-sign", "verify", envelope, "--trust", keyBlob,
         .. scope], 1, "", "is not a content public key line");
     await Check("content-sign unknown subcommand", ["content-sign", "seal"], 2, "", "usage:");
+    await Check("content-sign keygen missing positional", ["content-sign", "keygen", keyBlob, "--password-file", password],
+        2, "", "usage:");
+    await Check("content-sign keygen missing password file",
+        ["content-sign", "keygen", Path.Combine(signDirectory, "k2.key"), Path.Combine(signDirectory, "k2.pub"),
+         "--password-file", Path.Combine(signDirectory, "missing.txt")], 1, "", "cannot open");
+    // 공개 파일 자리만 이미 있으면 방금 만든 키 파일을 지우고 실패한다(짝이 맞지 않는 파일을 남기지 않는다).
+    string loneKey = Path.Combine(signDirectory, "lone.key");
+    await Check("content-sign keygen with an existing public path",
+        ["content-sign", "keygen", loneKey, publicLine, "--password-file", password], 1, "", "cannot create");
+    bool loneClean = !File.Exists(loneKey);
+    Console.WriteLine($"content-sign keygen leaves no half pair: {(loneClean ? "PASS" : "FAIL")}");
+    if (!loneClean)
+    {
+        ++failures;
+    }
+
+    await Check("content-sign sign missing key option", ["content-sign", "sign", manifest, envelope,
+        "--password-file", password, "--version", "9", .. scope], 2, "", "usage:");
+    await Check("content-sign sign missing manifest", ["content-sign", "sign", Path.Combine(signDirectory, "none.rman"),
+        envelope, "--key", keyBlob, "--password-file", password, "--version", "9", .. scope], 1, "", "cannot open");
+    // 다른 종류의 키 파일(log 개인키 — KeyBlob이 아니다)은 열지 않는다.
+    string logPublic = Path.Combine(signDirectory, "log.pub");
+    string logPrivate = Path.Combine(signDirectory, "log.key");
+    await Check("content-sign log keygen", ["log", "keygen", logPublic, logPrivate], 0, "log.file.recipient_key", "");
+    await Check("content-sign sign other key kind", ["content-sign", "sign", manifest, envelope, "--key", logPrivate,
+        "--password-file", password, "--version", "9", .. scope], 1, "", "not a content signing key");
+    // 출력 디렉터리가 없으면 임시 파일을 만들 수 없고, 출력 자리가 디렉터리면 교체가 실패한다(임시 파일은 지운다).
+    await Check("content-sign sign into a missing directory", ["content-sign", "sign", manifest,
+        Path.Combine(signDirectory, "missing", "out.rsig"), "--key", keyBlob, "--password-file", password,
+        "--version", "9", .. scope], 1, "", "cannot create");
+    string directoryTarget = Path.Combine(signDirectory, "target.rsig");
+    Directory.CreateDirectory(directoryTarget);
+    await Check("content-sign sign onto a directory", ["content-sign", "sign", manifest, directoryTarget, "--key",
+        keyBlob, "--password-file", password, "--version", "9", .. scope], 1, "", "cannot replace");
+    bool cleaned = Directory.GetFiles(signDirectory, "*.tmp").Length == 0;
+    Console.WriteLine($"content-sign failed replace removes the temporary file: {(cleaned ? "PASS" : "FAIL")}");
+    if (!cleaned)
+    {
+        ++failures;
+    }
+
+    await Check("content-sign verify missing product", ["content-sign", "verify", envelope, "--trust", publicLine,
+        "--channel", "live"], 2, "", "usage:");
+    await Check("content-sign verify bad minimum", ["content-sign", "verify", envelope, "--trust", publicLine, .. scope,
+        "--minimum-version", "-1"], 2, "", "usage:");
+    await Check("content-sign verify missing envelope", ["content-sign", "verify",
+        Path.Combine(signDirectory, "none.rsig"), "--trust", publicLine, .. scope], 1, "", "cannot open");
+    await Check("content-sign verify missing trust file", ["content-sign", "verify", envelope, "--trust",
+        Path.Combine(signDirectory, "none.pub"), .. scope], 1, "", "cannot open");
+    // 사용법 오류: 위치 인자 부족, 필수 선택지 없음, 빈 값, 모르는 이름, 도움말 뒤 인자.
+    await Check("content-sign keygen no positional", ["content-sign", "keygen"], 2, "", "usage:");
+    await Check("content-sign sign one positional", ["content-sign", "sign", manifest], 2, "", "usage:");
+    await Check("content-sign sign missing password option", ["content-sign", "sign", manifest, envelope, "--key",
+        keyBlob, "--version", "9", .. scope], 2, "", "usage:");
+    await Check("content-sign sign missing version", ["content-sign", "sign", manifest, envelope, "--key", keyBlob,
+        "--password-file", password, .. scope], 2, "", "usage:");
+    await Check("content-sign sign empty value", ["content-sign", "sign", manifest, envelope, "--key", keyBlob,
+        "--password-file", password, "--version", "", .. scope], 2, "", "usage:");
+    await Check("content-sign sign bogus option", ["content-sign", "sign", manifest, envelope, "--bogus", "1",
+        "--key", keyBlob, "--password-file", password, "--version", "9", .. scope], 2, "", "usage:");
+    await Check("content-sign verify no positional", ["content-sign", "verify"], 2, "", "usage:");
+    await Check("content-sign verify missing trust", ["content-sign", "verify", envelope, .. scope], 2, "", "usage:");
+    await Check("content-sign help with extra", ["content-sign", "--help", "extra"], 2, "", "usage:");
+    await Check("content-sign sign missing key file", ["content-sign", "sign", manifest, envelope, "--key",
+        Path.Combine(signDirectory, "none.key"), "--password-file", password, "--version", "9", .. scope], 1, "",
+        "cannot open");
+    await Check("content-sign sign missing password file", ["content-sign", "sign", manifest, envelope, "--key",
+        keyBlob, "--password-file", Path.Combine(signDirectory, "none.txt"), "--version", "9", .. scope], 1, "",
+        "cannot open");
+    await Check("content-sign verify not an envelope", ["content-sign", "verify", manifest, "--trust", publicLine,
+        .. scope], 1, "", "rejected at File");
 }
 finally
 {
     Directory.Delete(signDirectory, true);
+}
+
+// asset-list·asset-index-verify(AssetSystem.ko.md 13절, 7.1절 13 — A2b): 패키지는 C++ 시험이 고정한 fixture 배열
+// (AssetDatabase/Tests/AssetIndexCommandletFixtures.h — Hero 2300·Base 2301·같은 id의 Derived 대표·엔진 99.0.0 저장 Newer
+// 2310)을 읽어 쓴다. 목록·--under·프로젝트 찾기(위로)·기술자 없는 --project·진단 줄(누락 의존·형식 불일치·같은 id·이름
+// 규칙·깨진 패키지·새 엔진·IO 실패)·빈 프로젝트·Content가 파일·사용법 오류·출력 실패.
+Dictionary<string, byte[]> fixtures = ReadPackageFixtures(executable);
+string indexDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-index-{Environment.ProcessId}");
+try
+{
+    string project = Path.Combine(indexDirectory, "Demo");
+    string problems = Path.Combine(indexDirectory, "Problems");
+    string empty = Path.Combine(indexDirectory, "Empty");
+    string fileContent = Path.Combine(indexDirectory, "FileContent");
+    string noDescriptor = Path.Combine(indexDirectory, "NoDescriptor");
+    string outside = Path.Combine(indexDirectory, "Outside");
+    foreach (string directory in new[] { project, problems, empty, fileContent })
+    {
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, $"{Path.GetFileName(directory)}.rocksproject"), "{}\n");
+    }
+
+    Directory.CreateDirectory(noDescriptor);
+    Directory.CreateDirectory(outside);
+    void WriteContent(string root, string relative, byte[] bytes)
+    {
+        string path = Path.Combine(root, "Content", relative);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllBytes(path, bytes);
+    }
+
+    WriteContent(project, "Characters/Hero.rasset", fixtures["CommandletHeroPackage"]);
+    WriteContent(project, "Items/Base.rasset", fixtures["CommandletBasePackage"]);
+    WriteContent(project, "Items/Notes.txt", [1, 2, 3]);
+    WriteContent(problems, "Hero.rasset", fixtures["CommandletHeroPackage"]);
+    WriteContent(problems, "Copy/Hero2.rasset", fixtures["CommandletHeroPackage"]);
+    WriteContent(problems, "Base.rasset", fixtures["CommandletBaseAsDerivedPackage"]);
+    WriteContent(problems, "Newer.rasset", fixtures["CommandletNewerPackage"]);
+    WriteContent(problems, "Bad#Name.rasset", fixtures["CommandletBasePackage"]);
+    WriteContent(problems, "Junk.rasset", [1, 2, 3, 4]);
+    File.WriteAllBytes(Path.Combine(fileContent, "Content"), [1]);
+    const string heroId = "5e570000-a55e-7000-0000-0000000008fc";
+    const string baseId = "5e570000-a55e-7000-0000-0000000008fd";
+    const string missingId = "5e570000-a55e-7000-0000-000000000905";
+
+    // 목록: 경로 키 순 한 줄씩(논리 경로·AssetId·대표 타입 id), 정확한 줄 수와 순서.
+    ProcessResult listed = await ProcessRunner.RunAsync(new(executable, ["asset-list", $"--project={project}"],
+        workingDirectory, Timeout: TimeSpan.FromSeconds(15)));
+    string[] lines = listed.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+    bool listShape = listed.ExitCode == 0 && listed.StdErr.Length == 0 && lines.Length == 2 &&
+                     lines[0].StartsWith($"/Game/Characters/Hero {heroId} ", StringComparison.Ordinal) &&
+                     lines[1].StartsWith($"/Game/Items/Base {baseId} ", StringComparison.Ordinal) &&
+                     lines.All(line => line.Split(' ').Length == 3 && line.Split(' ')[2].Length == 36);
+    Console.WriteLine($"asset-list lines: {(listShape ? "PASS" : "FAIL")}");
+    if (!listShape)
+    {
+        ++failures;
+        Console.Error.WriteLine($"  exit={listed.ExitCode}; stdout={listed.StdOut}; stderr={listed.StdErr}");
+    }
+
+    await Check("asset-list under", ["asset-list", "--under=/Game/Items", $"--project={project}"], 0,
+        $"/Game/Items/Base {baseId}", "");
+    await Check("asset-list under nothing", ["asset-list", "--under=/game/nothing", $"--project={project}"], 0, "", "");
+    await Check("asset-list invalid under", ["asset-list", "--under=Game", $"--project={project}"], 1, "",
+        "asset-list: InvalidPath: 'Game' is not a logical directory");
+    // 프로젝트 찾기: 하위 디렉터리에서 위로, 기술자가 없으면 실패, --project 디렉터리에 기술자가 없으면 실패.
+    await Check("asset-list finds the project upward", ["asset-list"], 0, $"/Game/Characters/Hero {heroId}", "",
+        Path.Combine(project, "Content", "Items"));
+    await Check("asset-list without a project", ["asset-list"], 1, "", "no project found", outside);
+    await Check("asset-list project without descriptor", ["asset-list", $"--project={noDescriptor}"], 1, "",
+        "no '*.rocksproject' in");
+    // 기술자는 그 디렉터리에 있어야 한다(위에서 찾은 프로젝트의 하위 디렉터리는 프로젝트가 아니다).
+    await Check("asset-list project below a project", ["asset-list", $"--project={Path.Combine(project, "Content")}"], 1,
+        "", "no '*.rocksproject' in");
+    if (OperatingSystem.IsWindows())
+    {
+        // 드라이브 상대 경로는 프로젝트 루트로 쓸 수 없다.
+        await Check("asset-list unusable project", ["asset-list", "--project=C:Projects"], 1, "",
+            "is not a usable project directory (InvalidArgument)");
+    }
+
+    await Check("asset-list empty project", ["asset-list", $"--project={empty}"], 0, "", "");
+    await Check("asset-list content is a file", ["asset-list", $"--project={fileContent}"], 1, "", "cannot scan");
+    await Check("asset-list help", ["asset-list", "--help"], 0, "usage: asset-list", "");
+    await Check("asset-list positional", ["asset-list", "extra"], 2, "", "usage: asset-list");
+    await Check("asset-list twice", ["asset-list", $"--project={project}", $"--project={project}"], 2, "",
+        "usage: asset-list");
+    await Check("asset-list empty value", ["asset-list", "--project="], 2, "", "usage: asset-list");
+    // A2c3b부터 --type은 옵션이다: 등록하지 않은 타입 이름은 실행 실패다.
+    await Check("asset-list unknown type", ["asset-list", "--type=Texture2D", $"--project={project}"], 1, "",
+        "asset-list: NotFound: Texture2D: unknown type");
+    // 13절 공통 옵션 --wait=<초>는 받고(읽기 명령은 잠금이 없다) 10진 숫자가 아니면 사용법 오류다.
+    await Check("asset-list wait", ["asset-list", "--wait=5", $"--project={project}"], 0, "/Game/Items/Base", "");
+    await Check("asset-list invalid wait", ["asset-list", "--wait=5s", $"--project={project}"], 2, "",
+        "usage: asset-list");
+
+    // 검증: 진단 줄과 요약, 진단이 있으면 1.
+    await Check("asset-index-verify missing dependency", ["asset-index-verify", $"--project={project}"], 1,
+        "asset-index-verify: 2 packages, 1 diagnostics",
+        $"MissingDependency: Content/Characters/Hero.rasset: dependency {missingId} is not in the index\n");
+    await Check("asset-index-verify wait", ["asset-index-verify", "--wait=0", $"--project={empty}"], 0,
+        "asset-index-verify: 0 packages, 0 diagnostics", "");
+    await Check("asset-index-verify empty", ["asset-index-verify", $"--project={empty}"], 0,
+        "asset-index-verify: 0 packages, 0 diagnostics", "");
+    await Check("asset-index-verify content is a file", ["asset-index-verify", $"--project={fileContent}"], 1, "",
+        "asset-index-verify: cannot scan");
+    await Check("asset-index-verify without a project", ["asset-index-verify"], 1, "", "no project found", outside);
+    await Check("asset-index-verify help", ["asset-index-verify", "--help"], 0, "usage: asset-index-verify", "");
+    await Check("asset-index-verify under is not an option", ["asset-index-verify", "--under=/Game"], 2, "",
+        "usage: asset-index-verify");
+    // 줄 순서까지 본다: 검색 진단(파일 이름 → 코드 순) 다음에 의존 대조 진단(경로 키 순). 명령은 타입을 등록하지
+    // 않아 형식 대조를 하지 않으므로, 같은 id에 파생 대표(DerivedGameAsset)를 둔 Base는 진단이 없다(로드는 파생을
+    // 받는다 — 5.7절 14). NewerVersion 줄은 위치(detail) 앞까지만 본다.
+    string[] expectedProblems =
+    [
+        "InvalidPath: Content/Bad#Name.rasset: invalid logical path (InvalidComponent)",
+        $"DuplicateAssetId: Content/Copy/Hero2.rasset: asset id {heroId} is also in 'Content/Hero.rasset'",
+        $"DuplicateAssetId: Content/Hero.rasset: asset id {heroId} is also in 'Content/Copy/Hero2.rasset'",
+        "CorruptPackage: Content/Junk.rasset: package check failed (section 0, detail 0, InvalidArgument)",
+        "NewerVersion: Content/Newer.rasset: package check failed (section 1, detail ",
+        $"MissingDependency: Content/Copy/Hero2.rasset: dependency {missingId} is not in the index",
+        $"MissingDependency: Content/Hero.rasset: dependency {missingId} is not in the index",
+    ];
+    ProcessResult verified = await ProcessRunner.RunAsync(new(executable, ["asset-index-verify", $"--project={problems}"],
+        workingDirectory, Timeout: TimeSpan.FromSeconds(15)));
+    string[] problemLines = verified.StdErr.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+    bool problemsShape = verified.ExitCode == 1 &&
+                         verified.StdOut == "asset-index-verify: 3 packages, 7 diagnostics\n" &&
+                         verified.StdErr.EndsWith('\n') && problemLines.Length == expectedProblems.Length &&
+                         problemLines.Zip(expectedProblems).All(pair => pair.Second.EndsWith(' ')
+                             ? pair.First.StartsWith(pair.Second, StringComparison.Ordinal)
+                             : pair.First == pair.Second);
+    Console.WriteLine($"asset-index-verify problems: {(problemsShape ? "PASS" : "FAIL")}");
+    if (!problemsShape)
+    {
+        ++failures;
+        Console.Error.WriteLine($"  exit={verified.ExitCode}; stdout={verified.StdOut}; stderr={verified.StdErr}");
+    }
+
+    if (OperatingSystem.IsWindows())
+    {
+        // 다른 프로세스가 공유 없이 연 파일은 열기 실패다: 코드 자리에 원본 오류 이름(진단 None — 이름은 플랫폼 파일
+        // 오류 대응을 따른다)이 온다.
+        string locked = Path.Combine(project, "Content", "Locked.rasset");
+        File.WriteAllBytes(locked, fixtures["CommandletBasePackage"]);
+        using (new FileStream(locked, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            await Check("asset-index-verify unreadable file", ["asset-index-verify", $"--project={project}"], 1,
+                "asset-index-verify: 2 packages, 2 diagnostics",
+                ": Content/Locked.rasset: cannot read the file or directory\n");
+        }
+
+        File.Delete(locked);
+        // 표준 출력·오류가 무효 핸들이면 목록 줄·진단 줄·요약 쓰기가 실패한다(실행 오류 1).
+        string[] invalidOutputs =
+        [
+            $"asset-list \"--project={project}\"",
+            $"asset-index-verify \"--project={project}\"",
+            $"asset-index-verify \"--project={empty}\"",
+        ];
+        foreach (string arguments in invalidOutputs)
+        {
+            uint code = WindowsInvalidStandardHandles.Run(executable, arguments, workingDirectory);
+            bool failed = code == 1;
+            Console.WriteLine($"invalid output handles ({arguments.Split(' ')[0]}): {(failed ? "PASS" : "FAIL")}");
+            if (!failed)
+            {
+                ++failures;
+                Console.Error.WriteLine($"  exit={code}");
+            }
+        }
+    }
+}
+finally
+{
+    Directory.Delete(indexDirectory, true);
+}
+
+// asset-new·asset-set·asset-info·asset-list --type(AssetSystem.ko.md 13절, 7.1절 15 — A2c3b): 실제 에셋 타입 Skeleton·
+// AnimationClip(Animation 모듈 — Commandlet이 시작해 타입을 등록한다)으로 만들기·대입(Hard·Soft 참조·float·bool·enum·
+// struct 멤버·struct 원소 배열·Name)·출력(줄·JSON·--all·AssetId 대상)·줄 출력 → asset-set 왕복·목록 옵션(--erase·
+// --unset)·대입 오류 모아 보고·타입·경로·대상 거부·--type(파생 포함)·사용법 오류·잠금 Busy·열기 경고와 --force·
+// 프로젝트 찾기·출력 실패.
+string editDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-edit-{Environment.ProcessId}");
+try
+{
+    string project = Path.Combine(editDirectory, "Edit");
+    Directory.CreateDirectory(project);
+    File.WriteAllText(Path.Combine(project, "Edit.rocksproject"), "{}\n");
+    string projectOption = $"--project={project}";
+
+    async Task<ProcessResult> RunEdit(string directory, params string[] arguments) =>
+        await ProcessRunner.RunAsync(new(executable, arguments, directory, Timeout: TimeSpan.FromSeconds(30)));
+
+    void Report(string label, bool passed, ProcessResult result)
+    {
+        Console.WriteLine($"{label}: {(passed ? "PASS" : "FAIL")}");
+        if (!passed)
+        {
+            ++failures;
+            Console.Error.WriteLine($"  exit={result.ExitCode}; stdout={result.StdOut}; stderr={result.StdErr}");
+        }
+    }
+
+    // exit·표준 출력 조각 모두·표준 오류 조각 모두를 본다(조각이 없으면 그 출력은 비어야 한다).
+    async Task<ProcessResult> CheckAll(string label, string[] arguments, int exit, string[] stdout, string[] stderr)
+    {
+        ProcessResult result = await RunEdit(workingDirectory, arguments);
+        bool passed = result.ExitCode == exit &&
+                      stdout.All(part => result.StdOut.Contains(part, StringComparison.Ordinal)) &&
+                      stderr.All(part => result.StdErr.Contains(part, StringComparison.Ordinal)) &&
+                      (stdout.Length != 0 || result.StdOut.Length == 0) &&
+                      (stderr.Length != 0 || result.StdErr.Length == 0);
+        Report(label, passed, result);
+        return result;
+    }
+
+    // 만들기: Skeleton(대입 없음)과 AnimationClip(대입 여럿). 표준 출력은 '<논리 경로> <AssetId>' 한 줄이다.
+    ProcessResult hero = await CheckAll("asset-new skeleton", ["asset-new", "Skeleton", "/Game/Characters/Hero", projectOption],
+        0, ["/Game/Characters/Hero "], []);
+    string heroId = hero.StdOut.Trim().Split(' ').Last();
+    Report("asset-new output shape", hero.StdOut.Length == "/Game/Characters/Hero ".Length + 36 + 1 &&
+        hero.StdOut.EndsWith('\n') && File.Exists(Path.Combine(project, "Content", "Characters", "Hero.rasset")), hero);
+    ProcessResult run = await CheckAll("asset-new clip with assignments",
+        ["asset-new", "AnimationClip", "/Game/Anims/Run", "skeleton=/Game/Characters/Hero", "rateScale=1.5", "loop=on",
+         "interpolation=Step", "rootMotion.enable=true", "events[0]={}", "events[0].name=Foot", projectOption],
+        0, ["/Game/Anims/Run "], []);
+    string runId = run.StdOut.Trim().Split(' ').Last();
+
+    // 출력: Edit 줄(참조는 논리 경로), AssetId 대상은 같은 출력, JSON, --all.
+    string[] runLines = ["skeleton=/Game/Characters/Hero\n", "rateScale=1.5\n", "loop=true\n", "interpolation=Step\n",
+        "rootMotion.enable=true\n", "events=\n", "events[0]={}\n", "events[0].name=Foot\n"];
+    ProcessResult info = await CheckAll("asset-info lines", ["asset-info", "/Game/Anims/Run", projectOption], 0, runLines, []);
+    ProcessResult byId = await RunEdit(workingDirectory, "asset-info", runId, projectOption);
+    Report("asset-info by AssetId", byId.ExitCode == 0 && byId.StdOut == info.StdOut, byId);
+    await CheckAll("asset-info json", ["asset-info", "/Game/Anims/Run", "--json", projectOption], 0,
+        ["{\n", "\"rateScale\": 1.5", "\"skeleton\": \"/Game/Characters/Hero\"", "}\n"], []);
+    await CheckAll("asset-info all", ["asset-info", "/Game/Anims/Run", "--all", projectOption], 0, runLines, []);
+    await CheckAll("asset-info json all", ["asset-info", "--json", "--all", "/Game/Anims/Run", projectOption], 0,
+        ["\"loop\": true"], []);
+
+    // 왕복: asset-info 줄을 그대로 asset-set에 넣으면 받고 출력이 같다.
+    string[] lines = info.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+    ProcessResult roundTrip = await RunEdit(workingDirectory, [.. new[] { "asset-set", "/Game/Anims/Run" }, .. lines, projectOption]);
+    ProcessResult again = await RunEdit(workingDirectory, "asset-info", "/Game/Anims/Run", projectOption);
+    Report("asset-info lines round trip through asset-set", roundTrip.ExitCode == 0 && roundTrip.StdOut.Length == 0 &&
+        again.StdOut == info.StdOut, roundTrip);
+
+    // asset-set: AssetId 대상, Soft 참조 배열, --erase 목록 옵션.
+    await CheckAll("asset-set by AssetId", ["asset-set", runId, "rateScale=2", projectOption], 0, [], []);
+    await CheckAll("asset-set result", ["asset-info", "/Game/Anims/Run", projectOption], 0, ["rateScale=2\n"], []);
+    await CheckAll("asset-set by path", ["asset-set", "/Game/Anims/Run", "rateScale=2.5", projectOption], 0, [], []);
+    await CheckAll("asset-set by path result", ["asset-info", runId, projectOption], 0, ["rateScale=2.5\n"], []);
+    await CheckAll("asset-set soft array", ["asset-set", "/Game/Characters/Hero",
+        "compatibleSkeletons=/Game/Characters/Hero", "useRetargetModesFromCompatibleSkeleton=on", projectOption], 0, [], []);
+    await CheckAll("asset-set soft array result", ["asset-info", heroId, projectOption], 0,
+        ["compatibleSkeletons=/Game/Characters/Hero\n", "useRetargetModesFromCompatibleSkeleton=true\n"], []);
+    await CheckAll("asset-set erase", ["asset-set", "/Game/Anims/Run", "--erase=events[0]", projectOption], 0, [], []);
+    ProcessResult erased = await RunEdit(workingDirectory, "asset-info", "/Game/Anims/Run", projectOption);
+    Report("asset-set erase result", erased.StdOut.Contains("events=\n", StringComparison.Ordinal) &&
+        !erased.StdOut.Contains("events[0]", StringComparison.Ordinal), erased);
+
+    // 경로 key 따옴표 안의 쉼표·escape는 목록 옵션을 나누지 않는다(Name 키 Map 값 struct).
+    await CheckAll("asset-set quoted keys", ["asset-set", "/Game/Anims/Run", "targetFrameRate.overrides[\"Hi,There\"]={}",
+        "targetFrameRate.overrides[\"a\\\"b\"]={}", projectOption], 0, [], []);
+    await CheckAll("asset-set quoted keys result", ["asset-info", "/Game/Anims/Run", projectOption], 0,
+        ["targetFrameRate.overrides[\"Hi,There\"]={}\n", "targetFrameRate.overrides[\"a\\\"b\"]={}\n"], []);
+    await CheckAll("asset-set erase quoted list", ["asset-set", "/Game/Anims/Run",
+        "--erase=targetFrameRate.overrides[\"Hi,There\"],targetFrameRate.overrides[\"a\\\"b\"]", projectOption], 0, [], []);
+    ProcessResult quotedErased = await RunEdit(workingDirectory, "asset-info", "/Game/Anims/Run", projectOption);
+    Report("asset-set erase quoted list result", quotedErased.ExitCode == 0 &&
+        quotedErased.StdOut.Contains("targetFrameRate.overrides=\n", StringComparison.Ordinal) &&
+        !quotedErased.StdOut.Contains("targetFrameRate.overrides[", StringComparison.Ordinal), quotedErased);
+
+    // 대입 오류는 모두 모아 보고하고 아무것도 바꾸지 않는다(파일 byte 그대로).
+    string runFile = Path.Combine(project, "Content", "Anims", "Run.rasset");
+    byte[] before = File.ReadAllBytes(runFile);
+    await CheckAll("asset-set errors", ["asset-set", "/Game/Anims/Run", "nope=1", "rateScale=abc",
+        "skeleton=/Game/Nope", "--unset=loop", projectOption], 1, [],
+        ["asset-set: UnknownProperty: nope: ", "asset-set: InvalidValue: rateScale: ", "asset-set: Unresolved: skeleton: ",
+         "asset-set: InvalidValue: loop: "]);
+    Report("asset-set errors leave the file", File.ReadAllBytes(runFile).SequenceEqual(before), new(0, "", ""));
+    await CheckAll("asset-set soft unresolved", ["asset-set", "/Game/Characters/Hero", "compatibleSkeletons=/Game/Nope",
+        projectOption], 1, [], ["asset-set: Unresolved: compatibleSkeletons: "]);
+
+    // asset-new 거부: 타입(모름·추상·에셋 아님·struct)·경로(있음·규칙)·대입 오류(만들지 않음).
+    await CheckAll("asset-new unknown type", ["asset-new", "NoSuchType", "/Game/X", projectOption], 1, [],
+        ["asset-new: NotFound: NoSuchType: unknown type"]);
+    await CheckAll("asset-new abstract type", ["asset-new", "AnimationAsset", "/Game/X", projectOption], 1, [],
+        ["asset-new: TypeMismatch: AnimationAsset: not a concrete asset class"]);
+    await CheckAll("asset-new not an asset", ["asset-new", "Package", "/Game/X", projectOption], 1, [],
+        ["asset-new: TypeMismatch: Package: not a concrete asset class"]);
+    await CheckAll("asset-new struct type", ["asset-new", "BoneSocket", "/Game/X", projectOption], 1, [],
+        ["asset-new: TypeMismatch: BoneSocket: not a concrete asset class"]);
+    await CheckAll("asset-new existing path", ["asset-new", "Skeleton", "/game/characters/HERO", projectOption], 1, [],
+        ["asset-new: DuplicatePath: /game/characters/HERO: AlreadyExists"]);
+    await CheckAll("asset-new invalid path", ["asset-new", "Skeleton", "/Game//X", projectOption], 1, [],
+        ["asset-new: InvalidPath: /Game//X: InvalidArgument"]);
+    await CheckAll("asset-new assignment errors", ["asset-new", "AnimationClip", "/Game/Anims/Bad", "nope=1",
+        "skeleton=/Game/Anims/Bad", projectOption], 1, [],
+        ["asset-new: UnknownProperty: nope: ", "asset-new: Unresolved: skeleton: "]);
+    Report("asset-new assignment errors create nothing",
+        !File.Exists(Path.Combine(project, "Content", "Anims", "Bad.rasset")), new(0, "", ""));
+
+    // asset-info 거부.
+    await CheckAll("asset-info missing", ["asset-info", "/Game/Nope", projectOption], 1, [],
+        ["asset-info: NotFound: /Game/Nope: failed\n"]);
+    await CheckAll("asset-info missing id", ["asset-info", "5e570000-a55e-7000-0000-000000000000", projectOption], 1, [],
+        ["asset-info: NotFound: 5e570000-a55e-7000-0000-000000000000: failed\n"]);
+    await CheckAll("asset-info invalid target", ["asset-info", "Hero", projectOption], 1, [],
+        ["asset-info: InvalidPath: Hero: InvalidArgument"]);
+
+    // asset-list --type: 그 클래스와 파생(추상 기반 포함), --under와 함께, 거부.
+    ProcessResult skeletons = await CheckAll("asset-list type", ["asset-list", "--type=Skeleton", projectOption], 0,
+        [$"/Game/Characters/Hero {heroId} "], []);
+    Report("asset-list type lines", skeletons.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length == 1, skeletons);
+    await CheckAll("asset-list derived type", ["asset-list", "--type=AnimationAsset", projectOption], 0,
+        [$"/Game/Anims/Run {runId} "], []);
+    ProcessResult assets = await CheckAll("asset-list base type", ["asset-list", "--type=Asset", projectOption], 0,
+        ["/Game/Anims/Run ", "/Game/Characters/Hero "], []);
+    Report("asset-list base type order", assets.StdOut.IndexOf("/Game/Anims/Run", StringComparison.Ordinal) <
+        assets.StdOut.IndexOf("/Game/Characters/Hero", StringComparison.Ordinal), assets);
+    await CheckAll("asset-list type under", ["asset-list", "--type=Asset", "--under=/Game/Anims", projectOption], 0,
+        ["/Game/Anims/Run "], []);
+    await CheckAll("asset-list type under nothing", ["asset-list", "--type=Skeleton", "--under=/Game/Anims", projectOption],
+        0, [], []);
+    await CheckAll("asset-list type invalid under", ["asset-list", "--type=Skeleton", "--under=Game", projectOption], 1, [],
+        ["asset-list: InvalidPath: 'Game' is not a logical directory"]);
+    await CheckAll("asset-list not a class", ["asset-list", "--type=BoneSocket", projectOption], 1, [],
+        ["asset-list: TypeMismatch: BoneSocket: not a class"]);
+    await CheckAll("asset-list type twice", ["asset-list", "--type=Skeleton", "--type=Asset", projectOption], 2, [],
+        ["usage: asset-list"]);
+
+    // 사용법 오류(2)와 도움말(0).
+    string[][] usageErrors =
+    [
+        ["asset-new", "Skeleton", projectOption],
+        ["asset-new", "Skeleton", "/Game/Y", "positional", projectOption],
+        ["asset-new", "Skeleton", "/Game/Y", "--force", projectOption],
+        ["asset-new", "Skeleton", "/Game/Y", "--unset=", projectOption],
+        ["asset-new", "Skeleton", "/Game/Y", "--unset=a,,b", projectOption],
+        ["asset-new", "Skeleton", "/Game/Y", "--erase=a,", projectOption],
+        ["asset-new", "", "/Game/Y", projectOption],
+        ["asset-set", "/Game/Anims/Run", projectOption],
+        ["asset-set", "/Game/Anims/Run", "loop=on", "--json", projectOption],
+        ["asset-set", "/Game/Anims/Run", "loop=on", "--force", "--force", projectOption],
+        ["asset-set", "/Game/Anims/Run", "loop=on", projectOption, projectOption],
+        ["asset-set", "/Game/Anims/Run", "loop=on", "--wait=86401", projectOption],
+        ["asset-set", "/Game/Anims/Run", "loop=on", "--wait=5s", projectOption],
+        ["asset-set", "/Game/Anims/Run", "loop=on", "--wait=", projectOption],
+        ["asset-info", projectOption],
+        ["asset-info", "/Game/Anims/Run", "extra", projectOption],
+        ["asset-info", "/Game/Anims/Run", "--force", projectOption],
+        ["asset-info", "/Game/Anims/Run", "--json", "--json", projectOption],
+        ["asset-info", "/Game/Anims/Run", "--unset=loop", projectOption],
+        ["asset-info", "/Game/Anims/Run", "--help"],
+    ];
+    foreach (string[] arguments in usageErrors)
+    {
+        await CheckAll($"usage error: {string.Join(' ', arguments.Where(argument => argument != projectOption))}", arguments,
+            2, [], [$"usage: {arguments[0]}"]);
+    }
+
+    foreach (string command in new[] { "asset-new", "asset-set", "asset-info" })
+    {
+        await CheckAll($"{command} help", [command, "--help"], 0, [$"usage: {command}"], []);
+    }
+
+    // 잠금: 다른 쪽이 잡고 있으면 쓰기 명령은 기다린 뒤 실패하고 읽기 명령은 잠금 없이 된다(Windows — LockFileEx 0..1).
+    if (OperatingSystem.IsWindows())
+    {
+        string lockPath = Path.Combine(project, "Intermediate", "AssetDatabase.lock");
+        Directory.CreateDirectory(Path.GetDirectoryName(lockPath)!);
+        using (FileStream held = new(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite))
+        {
+            held.Lock(0, 1);
+            await CheckAll("asset-set locked", ["asset-set", "/Game/Anims/Run", "loop=off", projectOption], 1, [],
+                ["asset-set: Busy: ", ": the project is locked by another process"]);
+            await CheckAll("asset-new locked with wait", ["asset-new", "Skeleton", "/Game/Locked", "--wait=1", projectOption],
+                1, [], ["asset-new: Busy: ", ": the project is locked by another process"]);
+            await CheckAll("asset-info without lock", ["asset-info", "/Game/Anims/Run", projectOption], 0, ["loop=true\n"], []);
+            held.Unlock(0, 1);
+        }
+
+        // 지울 수 없는 고아 임시 파일(삭제 공유 없이 열림)은 저장을 막지 않고 경고 OrphanNotDeleted다.
+        string orphan = Path.Combine(project, "Content", "Anims", "Run.rasset.0123abcd-0123-4567-89ab-0123456789ab.tmp");
+        File.WriteAllBytes(orphan, [1, 2, 3]);
+        using (new FileStream(orphan, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        {
+            await CheckAll("asset-set orphan not deleted", ["asset-set", "/Game/Anims/Run", "loop=on", projectOption], 0, [],
+                [": warning OrphanNotDeleted (related "]);
+        }
+
+        await CheckAll("asset-set orphan deleted", ["asset-set", "/Game/Anims/Run", "loop=on", projectOption], 0, [], []);
+        Report("orphan removed", !File.Exists(orphan), new(0, "", ""));
+    }
+
+    // 프로젝트 찾기: --project 없이 프로젝트 안에서 위로 찾는다.
+    ProcessResult found = await RunEdit(Path.Combine(project, "Content"), "asset-info", "/Game/Anims/Run");
+    Report("asset-info finds the project upward", found.ExitCode == 0 &&
+        found.StdOut.Contains("rateScale=2.5\n", StringComparison.Ordinal) && found.StdErr.Length == 0, found);
+    await CheckAll("asset-info without a project", ["asset-info", "/Game/Anims/Run"], 1, [], ["no project found"]);
+    await CheckAll("asset-list type without a project", ["asset-list", "--type=Skeleton"], 1, [], ["no project found"]);
+
+    // Content가 파일이면 색인을 만들 수 없고(cannot scan), Intermediate가 파일이면 잠금을 잡을 수 없다.
+    string brokenContent = Path.Combine(editDirectory, "BrokenContent");
+    string brokenLock = Path.Combine(editDirectory, "BrokenLock");
+    foreach (string directory in new[] { brokenContent, brokenLock })
+    {
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, $"{Path.GetFileName(directory)}.rocksproject"), "{}\n");
+    }
+
+    File.WriteAllBytes(Path.Combine(brokenContent, "Content"), [1]);
+    File.WriteAllBytes(Path.Combine(brokenLock, "Intermediate"), [1]);
+    await CheckAll("asset-info content is a file", ["asset-info", "/Game/X", $"--project={brokenContent}"], 1, [],
+        ["asset-info: ", ": cannot scan the content directory"]);
+    await CheckAll("asset-list type content is a file", ["asset-list", "--type=Asset", $"--project={brokenContent}"], 1, [],
+        ["asset-list: ", ": cannot scan the content directory"]);
+    await CheckAll("asset-new cannot lock", ["asset-new", "Skeleton", "/Game/X", $"--project={brokenLock}"], 1, [],
+        ["asset-new: ", ": cannot lock the project"]);
+
+    // 열기 경고: 의존 패키지(Hero)가 없으면 열기는 경고와 함께 되고, 저장은 --force 없이 MissingDependency, --force면
+    // null로 저장하고 경고다.
+    File.Delete(Path.Combine(project, "Content", "Characters", "Hero.rasset"));
+    await CheckAll("asset-info excluded dependency", ["asset-info", "/Game/Anims/Run", projectOption], 0,
+        ["skeleton=none\n"], [$": {heroId}: warning ExcludedDependency (related "]);
+    await CheckAll("asset-set missing dependency", ["asset-set", "/Game/Anims/Run", "loop=off", projectOption], 1, [],
+        [$"asset-set: MissingDependency: /Game/Anims/Run: InvalidArgument (related {heroId})\n"]);
+    await CheckAll("asset-set force", ["asset-set", "/Game/Anims/Run", "loop=off", "--force", projectOption], 0, [],
+        [": warning DroppedUnresolvedImport (related "]);
+    await CheckAll("asset-set force result", ["asset-info", "/Game/Anims/Run", projectOption], 0,
+        ["loop=false\n", "skeleton=none\n"], []);
+    // 만들기의 참조 해석이 연 패키지(Hero가 없는 Run을 다시 가리킴 — Run은 이제 Hero 의존이 없다)와 경고.
+    File.Delete(Path.Combine(project, "Content", "Anims", "Run.rasset"));
+    await CheckAll("asset-new clip without skeleton", ["asset-new", "AnimationClip", "/Game/Anims/Base",
+        "skeleton=/Game/Characters/Hero", projectOption], 1, [], ["asset-new: Unresolved: skeleton: "]);
+
+    if (OperatingSystem.IsWindows())
+    {
+        // 표준 출력이 무효 핸들이면 출력 쓰기가 실패한다(실행 오류 1).
+        // 그 전에 경고가 나는 장면을 다시 만든다: Hero(대상) 없이 Hero를 가리키는 Clip.
+        await CheckAll("asset-new skeleton again", ["asset-new", "Skeleton", "/Game/Characters/Hero", projectOption], 0,
+            ["/Game/Characters/Hero "], []);
+        await CheckAll("asset-new clip again", ["asset-new", "AnimationClip", "/Game/Anims/Run",
+            "skeleton=/Game/Characters/Hero", projectOption], 0, ["/Game/Anims/Run "], []);
+        File.Delete(Path.Combine(project, "Content", "Characters", "Hero.rasset"));
+        await CheckAll("asset-new with open warnings", ["asset-new", "AnimationClip", "/Game/Anims/Walk",
+            "additive.basePoseClip=/Game/Anims/Run", projectOption], 0, ["/Game/Anims/Walk "],
+            [": warning ExcludedDependency (related "]);
+        string[] invalidOutputs =
+        [
+            $"asset-info /Game/Anims/Run \"--project={project}\"",
+            $"asset-info /Game/Anims/Walk \"--project={project}\"",
+            $"asset-list --type=Asset \"--project={project}\"",
+            $"asset-new Skeleton /Game/Invalid/Output \"--project={project}\"",
+            $"asset-new AnimationClip /Game/Invalid/Warned additive.basePoseClip=/Game/Anims/Run \"--project={project}\"",
+            $"asset-set /Game/Invalid/Output nope=1 \"--project={project}\"",
+            $"asset-set /Game/Anims/Run loop=on --force \"--project={project}\"",
+        ];
+        foreach (string arguments in invalidOutputs)
+        {
+            uint code = WindowsInvalidStandardHandles.Run(executable, arguments, workingDirectory);
+            bool failed = code == 1;
+            Console.WriteLine($"invalid output handles ({arguments.Split(' ')[0]} edit): {(failed ? "PASS" : "FAIL")}");
+            if (!failed)
+            {
+                ++failures;
+                Console.Error.WriteLine($"  exit={code}");
+            }
+        }
+    }
+}
+finally
+{
+    Directory.Delete(editDirectory, true);
+}
+
+// asset-index-rebuild·색인 캐시(AssetSystem.ko.md 7.1절 16 — A2d1): 재구축은 잠금을 잡고 캐시 없이 검색해 고아 임시
+// 파일(Content 저장 임시·Intermediate 캐시 임시)을 지우고 캐시를 쓴다(진단이 있어도 0). 쓰기 명령은 끝에 캐시를 쓰고 쓰지
+// 못하면 경고 CacheNotWritten(성공 0)이다. 손상된 캐시는 없는 것과 같다(목록·점검 결과 그대로).
+string cacheDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-cache-{Environment.ProcessId}");
+try
+{
+    string project = Path.Combine(cacheDirectory, "Cached");
+    Directory.CreateDirectory(project);
+    File.WriteAllText(Path.Combine(project, "Cached.rocksproject"), "{}\n");
+    string projectOption = $"--project={project}";
+    string cacheFile = Path.Combine(project, "Intermediate", "AssetIndex.cache");
+
+    async Task<ProcessResult> RunCache(params string[] arguments) =>
+        await ProcessRunner.RunAsync(new(executable, arguments, workingDirectory, Timeout: TimeSpan.FromSeconds(30)));
+
+    void ReportCache(string label, bool passed, ProcessResult result)
+    {
+        Console.WriteLine($"{label}: {(passed ? "PASS" : "FAIL")}");
+        if (!passed)
+        {
+            ++failures;
+            Console.Error.WriteLine($"  exit={result.ExitCode}; stdout={result.StdOut}; stderr={result.StdErr}");
+        }
+    }
+
+    ProcessResult made = await RunCache("asset-new", "Skeleton", "/Game/Cached/Hero", projectOption);
+    ReportCache("asset-new writes the index cache", made.ExitCode == 0 && made.StdErr.Length == 0 && File.Exists(cacheFile), made);
+    string heroId = made.StdOut.Trim().Split(' ').Last();
+    ProcessResult listed = await RunCache("asset-list", projectOption);
+    ReportCache("asset-list with the cache", listed.ExitCode == 0 &&
+        listed.StdOut.StartsWith($"/Game/Cached/Hero {heroId} ", StringComparison.Ordinal), listed);
+
+    // 고아 임시 파일과 재구축.
+    string contentOrphan = Path.Combine(project, "Content", "Cached", "Hero.rasset.0123abcd-0123-4567-89ab-0123456789ab.tmp");
+    string cacheOrphan = Path.Combine(project, "Intermediate", "AssetIndex.cache.0123abcd-0123-4567-89ab-0123456789ab.tmp");
+    string keptName = Path.Combine(project, "Content", "Cached", "Hero.txt.0123abcd-0123-4567-89ab-0123456789ab.tmp");
+    File.WriteAllBytes(contentOrphan, [1]);
+    File.WriteAllBytes(cacheOrphan, [1]);
+    File.WriteAllBytes(keptName, [1]);
+    File.Delete(cacheFile);
+    ProcessResult rebuilt = await RunCache("asset-index-rebuild", projectOption);
+    ReportCache("asset-index-rebuild", rebuilt.ExitCode == 0 && rebuilt.StdErr.Length == 0 &&
+        rebuilt.StdOut == "asset-index-rebuild: 1 packages, 0 diagnostics, 2 orphans removed\n" &&
+        File.Exists(cacheFile) && !File.Exists(contentOrphan) && !File.Exists(cacheOrphan) && File.Exists(keptName), rebuilt);
+    File.Delete(keptName);
+
+    // 진단이 있어도 0(점검은 verify).
+    File.WriteAllBytes(Path.Combine(project, "Content", "Junk.rasset"), [1, 2, 3]);
+    ProcessResult withDiagnostics = await RunCache("asset-index-rebuild", "--wait=0", projectOption);
+    ReportCache("asset-index-rebuild with diagnostics", withDiagnostics.ExitCode == 0 &&
+        withDiagnostics.StdOut == "asset-index-rebuild: 1 packages, 1 diagnostics, 0 orphans removed\n" &&
+        withDiagnostics.StdErr.Contains(": Content/Junk.rasset: ", StringComparison.Ordinal), withDiagnostics);
+    File.Delete(Path.Combine(project, "Content", "Junk.rasset"));
+
+    // 손상된 캐시는 없는 것과 같다(목록·점검·편집 그대로, 편집이 다시 쓴다).
+    File.WriteAllBytes(cacheFile, [0x52, 0x4b, 0x41, 0x49, 1, 2, 3]);
+    ProcessResult corruptList = await RunCache("asset-list", projectOption);
+    ReportCache("asset-list ignores a corrupt cache", corruptList.ExitCode == 0 &&
+        corruptList.StdOut.StartsWith($"/Game/Cached/Hero {heroId} ", StringComparison.Ordinal) &&
+        corruptList.StdErr.Length == 0, corruptList);
+    ProcessResult corruptVerify = await RunCache("asset-index-verify", projectOption);
+    ReportCache("asset-index-verify ignores the cache", corruptVerify.ExitCode == 0 &&
+        corruptVerify.StdOut == "asset-index-verify: 1 packages, 0 diagnostics\n", corruptVerify);
+    ProcessResult corruptInfo = await RunCache("asset-info", "/Game/Cached/Hero", projectOption);
+    ReportCache("asset-info ignores a corrupt cache", corruptInfo.ExitCode == 0 && corruptInfo.StdErr.Length == 0, corruptInfo);
+    ProcessResult rewritten = await RunCache("asset-set", "/Game/Cached/Hero", "useRetargetModesFromCompatibleSkeleton=on", projectOption);
+    ReportCache("asset-set rewrites the cache", rewritten.ExitCode == 0 && rewritten.StdErr.Length == 0 &&
+        new FileInfo(cacheFile).Length > 7, rewritten);
+
+    // 캐시를 쓰지 못하면(캐시 자리가 디렉터리) 쓰기 명령은 경고와 함께 성공한다. 재구축은 실패한다.
+    File.Delete(cacheFile);
+    Directory.CreateDirectory(cacheFile);
+    File.WriteAllBytes(Path.Combine(cacheFile, "keep"), [1]);
+    ProcessResult notWritten = await RunCache("asset-set", "/Game/Cached/Hero", "useRetargetModesFromCompatibleSkeleton=off", projectOption);
+    ReportCache("asset-set cache not written", notWritten.ExitCode == 0 &&
+        notWritten.StdErr.Contains(": warning CacheNotWritten", StringComparison.Ordinal), notWritten);
+    ProcessResult newNotWritten = await RunCache("asset-new", "Skeleton", "/Game/Cached/Other", projectOption);
+    ReportCache("asset-new cache not written", newNotWritten.ExitCode == 0 &&
+        newNotWritten.StdOut.StartsWith("/Game/Cached/Other ", StringComparison.Ordinal) &&
+        newNotWritten.StdErr.Contains(": warning CacheNotWritten", StringComparison.Ordinal), newNotWritten);
+    ProcessResult rebuildFails = await RunCache("asset-index-rebuild", projectOption);
+    ReportCache("asset-index-rebuild cache not written", rebuildFails.ExitCode == 1 &&
+        rebuildFails.StdErr.Contains(": cannot write the index cache", StringComparison.Ordinal), rebuildFails);
+    Directory.Delete(cacheFile, true);
+
+    // 지울 수 없는 고아(Windows — 삭제 공유 없이 연 파일)는 경고이고 재구축은 성공한다. 잠금 Busy는 실패다.
+    if (OperatingSystem.IsWindows())
+    {
+        File.WriteAllBytes(contentOrphan, [1]);
+        using (new FileStream(contentOrphan, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        {
+            ProcessResult held = await RunCache("asset-index-rebuild", projectOption);
+            ReportCache("asset-index-rebuild orphan not deleted", held.ExitCode == 0 &&
+                held.StdErr.Contains(": Content/Cached/Hero.rasset.0123abcd-0123-4567-89ab-0123456789ab.tmp: warning OrphanNotDeleted",
+                    StringComparison.Ordinal) && held.StdOut.EndsWith(", 0 orphans removed\n", StringComparison.Ordinal), held);
+        }
+
+        File.Delete(contentOrphan);
+        string lockPath = Path.Combine(project, "Intermediate", "AssetDatabase.lock");
+        using (FileStream locked = new(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite))
+        {
+            locked.Lock(0, 1);
+            ProcessResult busy = await RunCache("asset-index-rebuild", projectOption);
+            ReportCache("asset-index-rebuild locked", busy.ExitCode == 1 &&
+                busy.StdErr.Contains("asset-index-rebuild: Busy: ", StringComparison.Ordinal), busy);
+            locked.Unlock(0, 1);
+        }
+
+        uint code = WindowsInvalidStandardHandles.Run(executable, $"asset-index-rebuild \"--project={project}\"", workingDirectory);
+        Console.WriteLine($"invalid output handles (asset-index-rebuild): {(code == 1 ? "PASS" : "FAIL")}");
+        if (code != 1)
+        {
+            ++failures;
+            Console.Error.WriteLine($"  exit={code}");
+        }
+    }
+
+    // 사용법·환경.
+    string[][] rebuildUsage =
+    [
+        ["asset-index-rebuild", "extra", projectOption],
+        ["asset-index-rebuild", "--under=/Game", projectOption],
+        ["asset-index-rebuild", "--wait=86401", projectOption],
+        ["asset-index-rebuild", "--wait=5s", projectOption],
+        ["asset-index-rebuild", projectOption, projectOption],
+    ];
+    foreach (string[] arguments in rebuildUsage)
+    {
+        ProcessResult usage = await RunCache(arguments);
+        ReportCache($"asset-index-rebuild usage: {string.Join(' ', arguments.Where(argument => argument != projectOption))}",
+            usage.ExitCode == 2 && usage.StdErr.StartsWith("usage: asset-index-rebuild", StringComparison.Ordinal), usage);
+    }
+
+    ProcessResult help = await RunCache("asset-index-rebuild", "--help");
+    ReportCache("asset-index-rebuild help", help.ExitCode == 0 && help.StdOut.StartsWith("usage: asset-index-rebuild", StringComparison.Ordinal), help);
+    ProcessResult noProject = await RunCache("asset-index-rebuild");
+    ReportCache("asset-index-rebuild without a project", noProject.ExitCode == 1 &&
+        noProject.StdErr.Contains("no project found", StringComparison.Ordinal), noProject);
+    string brokenContent = Path.Combine(cacheDirectory, "BrokenContent");
+    string brokenLock = Path.Combine(cacheDirectory, "BrokenLock");
+    foreach (string directory in new[] { brokenContent, brokenLock })
+    {
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, $"{Path.GetFileName(directory)}.rocksproject"), "{}\n");
+    }
+
+    File.WriteAllBytes(Path.Combine(brokenContent, "Content"), [1]);
+    File.WriteAllBytes(Path.Combine(brokenLock, "Intermediate"), [1]);
+    ProcessResult scanFails = await RunCache("asset-index-rebuild", $"--project={brokenContent}");
+    ReportCache("asset-index-rebuild content is a file", scanFails.ExitCode == 1 &&
+        scanFails.StdErr.Contains(": cannot scan the content directory", StringComparison.Ordinal), scanFails);
+    ProcessResult lockFails = await RunCache("asset-index-rebuild", $"--project={brokenLock}");
+    ReportCache("asset-index-rebuild cannot lock", lockFails.ExitCode == 1 &&
+        lockFails.StdErr.Contains(": cannot lock the project", StringComparison.Ordinal), lockFails);
+}
+finally
+{
+    Directory.Delete(cacheDirectory, true);
 }
 
 if (OperatingSystem.IsWindows())
@@ -377,6 +1139,34 @@ static byte[] EmptyCookedManifest(string profile)
     return file;
 }
 
+// AssetDatabase/Tests/AssetIndexCommandletFixtures.h의 배열(이름 → byte)을 읽는다. 저장소 루트는 실행 파일 위쪽에서
+// Rocks.proj를 가진 첫 폴더다.
+static Dictionary<string, byte[]> ReadPackageFixtures(string executable)
+{
+    DirectoryInfo? root = new FileInfo(executable).Directory;
+    while (root is not null && !File.Exists(Path.Combine(root.FullName, "Rocks.proj")))
+    {
+        root = root.Parent;
+    }
+
+    if (root is null)
+    {
+        throw new InvalidOperationException("The repository root (Rocks.proj) is not above the executable.");
+    }
+
+    string header = File.ReadAllText(Path.Combine(root.FullName, "Engine", "Source", "Developer", "AssetDatabase", "Tests",
+        "AssetIndexCommandletFixtures.h"));
+    Dictionary<string, byte[]> arrays = [];
+    foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(header,
+                 @"inline constexpr uint8 (\w+)\[\] = \{([^}]*)\};"))
+    {
+        arrays[match.Groups[1].Value] = System.Text.RegularExpressions.Regex.Matches(match.Groups[2].Value, "0x([0-9a-f]{2})")
+            .Select(value => Convert.ToByte(value.Groups[1].Value, 16)).ToArray();
+    }
+
+    return arrays;
+}
+
 // CRC-32(IEEE 802.3, 반사 다항식 0xEDB88320)다.
 static uint Crc32(byte[] bytes)
 {
@@ -391,4 +1181,17 @@ static uint Crc32(byte[] bytes)
     }
 
     return ~crc;
+}
+
+// golden 봉투 hex다(seed 1..32, keyId 0x40..0x4f, 버전 7, scope("rocks.test", "main"), 매니페스트 "cooked-manifest-golden-
+// bytes-v1" — C++ ContentSignatureTests.cpp의 GoldenEnvelopeHex와 같다).
+partial class Program
+{
+    private const string GoldenEnvelopeHex =
+        "5253494701020000404142434445464748494a4b4c4d4e4f0700000000000000" +
+        "90247830ed4611caa2c6bbd614ba47aadb1a18adf4272a86df95503548e1116a" +
+        "1f000000000000009ac8d7fc0045177e58f04bd19bcb4eeddef81c7481abdba6" +
+        "c98b2884f1f8b4f5c6906590e651aaf9fa8c0db558cfaaa938279f4c3365b6a9" +
+        "3e59b49b4f5d130f636f6f6b65642d6d616e69666573742d676f6c64656e2d62" +
+        "797465732d7631";
 }

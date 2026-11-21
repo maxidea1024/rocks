@@ -8,6 +8,13 @@
 #   pwsh Build/MeasureCoverage.ps1 -Target EngineTests -Filter AssetPackage,FixtureAsset `
 #     -Sources Engine/Source/Runtime/AssetRuntime/Private
 #
+# A program measured through an external driver (for example the C# commandlet tests) passes -Executable (the binary name
+# when it differs from the target) and -Runner (the driver command line; {executable} is replaced by the coverage binary's
+# full path). The runner replaces the filter loop:
+#   pwsh Build/MeasureCoverage.ps1 -Target Commandlet -Executable RocksCommandlet `
+#     -Runner 'dotnet','run','--project','Programs/Rocks.Commandlet.Tests','--','--executable','{executable}' `
+#     -Sources Programs/Commandlet/Private,Engine/Source/Runtime/AssetRuntime/Private
+#
 # Outputs (under out/coverage/<target>/): merged.profdata, report.txt (per-file summary), uncovered.txt (lines and branches
 # that never ran, llvm-cov show), summary.json (llvm-cov export -summary-only).
 [CmdletBinding()]
@@ -15,6 +22,8 @@ param(
     [Parameter(Mandatory = $true)][string]$Target,
     [string[]]$Filter = @(),
     [Parameter(Mandatory = $true)][string[]]$Sources,
+    [string]$Executable = '',
+    [string[]]$Runner = @(),
     [string]$Toolchain = "$env:LOCALAPPDATA/Programs/Swift/Toolchains/6.3.3+Asserts/usr/bin",
     [switch]$SkipBuild
 )
@@ -43,7 +52,8 @@ if (-not $SkipBuild) {
     }
 }
 
-$executable = Join-Path $build "bin/$Target.exe"
+$binaryName = if ($Executable -ne '') { $Executable } else { $Target }
+$executable = Join-Path $build "bin/$binaryName.exe"
 if (-not (Test-Path $executable)) {
     throw "Missing test executable: $executable"
 }
@@ -59,6 +69,24 @@ $filters = @($Filter | ForEach-Object { $_ -split ',' } | Where-Object { $_ -ne 
 if ($filters.Count -eq 0) {
     $filters = @('')
 }
+$runnerArguments = @($Runner | ForEach-Object { $_ -split ',' } | Where-Object { $_ -ne '' } | ForEach-Object { $_ -replace '\{executable\}', $executable })
+if ($runnerArguments.Count -ne 0) {
+    $runnerTool = $runnerArguments[0]
+    $runnerRest = @($runnerArguments | Select-Object -Skip 1)
+    Push-Location $root
+    try {
+        & $runnerTool @runnerRest | Tee-Object -FilePath (Join-Path $output 'run-runner.log') | Select-Object -Last 3 | Write-Host
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning 'Runner failed (see run-runner.log)'
+        }
+    }
+    finally {
+        Pop-Location
+    }
+
+    $filters = @()
+}
+
 foreach ($name in $filters) {
     $arguments = @()
     if ($name -ne '') {
@@ -75,7 +103,11 @@ foreach ($name in $filters) {
 Remove-Item Env:LLVM_PROFILE_FILE
 $raw = @(Get-ChildItem -Path $output -Filter '*.profraw' | ForEach-Object { $_.FullName })
 $merged = Join-Path $output 'merged.profdata'
-& $profdata merge -sparse @raw -o $merged
+# An external runner starts the program once per case (hundreds of raw profiles), which overflows the Windows command
+# line, so the raw profile list goes through an input file.
+$inputs = Join-Path $output 'profraw-inputs.txt'
+Set-Content -Path $inputs -Value $raw -Encoding utf8NoBOM
+& $profdata merge -sparse "--input-files=$inputs" -o $merged
 if ($LASTEXITCODE -ne 0) {
     throw 'llvm-profdata merge failed.'
 }

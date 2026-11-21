@@ -14,7 +14,8 @@ namespace rocks {
 // IncompatibleCook·UnpackagedReference·UnsupportedCycle)이고, 나머지는 A2–A5가 같은 이름표를 쓴다.
 // 메시 코드는 MeshSource 모듈(MA1)과 MeshTools 빌드(MA2a·MA5a)가 MeshDiagnostic::code로, 스켈레톤
 // 코드는 Animation 모듈(MA4a)이 SkeletonDiagnostic::code로, 클립 코드는 Animation 모듈(MA6a)이
-// ClipDiagnostic::code로 낸다.
+// ClipDiagnostic::code로 낸다. Unreal 교환 코드는 엔진 플러그인 UnrealExchange(UX1a)가
+// ExchangeDiagnostic::code로 낸다.
 enum class AssetDiagnosticCode : uint16 {
     None,
     // 식별·경로
@@ -68,7 +69,21 @@ enum class AssetDiagnosticCode : uint16 {
     // 임포터 경고 EventPropertiesDropped.
     InvalidClipData,
     UnknownBoneTrack,
-    EventPropertiesDropped
+    EventPropertiesDropped,
+    // Unreal 교환 묶음(UnrealExchange.ko.md 10.3·10.4절 — UX1a 리더·경로 대응·순서): 오류
+    // CorruptBundle·UnsupportedBundleVersion·UnrealPathTooLong·UnrealPathCollision, 경고
+    // UnknownField·UnsupportedAsset·MissingUnrealDependency, 정보 UnrealPathRenamed.
+    CorruptBundle,
+    UnsupportedBundleVersion,
+    UnknownField,
+    UnsupportedAsset,
+    UnrealPathRenamed,
+    UnrealPathTooLong,
+    UnrealPathCollision,
+    MissingUnrealDependency,
+    // 감시 갱신(AssetSystem.ko.md 7.1절 16 — A2d3): 감시 루트(Content)가 사라졌다(색인을 비우고
+    // 다시 나타나면 전체 검색).
+    RootLost
 };
 
 // 진단 이름이다(예: CorruptPackage → "CorruptPackage"). 모르는 값은 "Unknown"이다. 반환 문자열은

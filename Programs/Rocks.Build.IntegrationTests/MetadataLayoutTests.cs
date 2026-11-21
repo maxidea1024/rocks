@@ -20,7 +20,20 @@ internal static class MetadataLayoutTests
         InvalidDeclarationsAreRejected();
         OrphanManifestRules();
         OnlyTargetReachableModulesAreChecked();
-        Console.WriteLine("PASS metadata layout: 7 groups");
+        IdePlanLayoutCreatesNoDirectories();
+        Console.WriteLine("PASS metadata layout: 8 groups");
+    }
+
+    // IDE 계획(Docs/Design/ProjectFiles.ko.md 8.1절)은 같은 배치를 얻되 생성 include 디렉터리를 만들지 않는다.
+    private static void IdePlanLayoutCreatesNoDirectories()
+    {
+        using var fixture = new Fixture();
+        fixture.Header("A/Public/Shared/Thing.h");
+        fixture.Manifest("A", ActiveManifest);
+        MetadataPlan plan = MetadataLayout.Apply(fixture.Context, [fixture.Module("A", ["Shared/Thing.h"])], ["A"], createDirectories: false);
+        MetadataModule a = plan.Generated.Single();
+        Require(!Directory.Exists(a.GeneratedPublic) && !Directory.Exists(fixture.Path("out")), "IDE layout created output directories");
+        Require(plan.Modules.Single().PublicIncludeDirectories.Contains(a.GeneratedPublic), "IDE layout keeps the generated include directory");
     }
 
     private static void ValidModulesGetGeneratedIncludeDirectories()

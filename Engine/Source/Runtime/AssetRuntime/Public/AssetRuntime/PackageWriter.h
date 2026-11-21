@@ -5,6 +5,7 @@
 #include <AssetRuntime/PackageReader.h>
 #include <Core/Build/EngineVersion.h>
 #include <Object/ObjectRegistry.h>
+#include <Platform/File.h>
 
 namespace rocks {
 
@@ -46,6 +47,35 @@ public:
 
 private:
     Array<uint8> bytes_;
+};
+
+// 파일 출력이다(에디터 저장의 임시 파일 — AS 5.5절 2–4, 7.1절 15). Append는 이어 쓰고, WriteAt은
+// 그 offset으로 옮겨 쓴 뒤 끝으로 돌아간다. 파일은 쓰기로 연 빈 파일이어야 한다(CreateNew). Flush·
+// Close는 호출자가 한다.
+//
+// 오류: 파일 쓰기·이동 오류는 FileErrorCode 대응, 쓴 끝보다 먼 WriteAt은 InvalidArgument.
+//
+// 사용 예:
+//   platform::File file;
+//   if (!file.Open(files, temp, tempBytes, platform::FileOpenMode::CreateNew)) { ... }
+//   FilePackageSink sink(file);
+//   auto written = WritePackage(allocator, registry, access, package, options, sink);
+class FilePackageSink final : public PackageSink {
+public:
+    explicit FilePackageSink(platform::File& file) noexcept : file_(file) {
+    }
+
+    Result<void> Append(Span<const uint8> bytes) noexcept override;
+    Result<void> WriteAt(uint64 offset, Span<const uint8> bytes) noexcept override;
+
+    // 지금까지 쓴 byte 수다.
+    uint64 Written() const noexcept {
+        return written_;
+    }
+
+private:
+    platform::File& file_;
+    uint64 written_ = 0;
 };
 
 // writer가 bulk entry의 raw byte를 얻는 곳이다(AS 5.5절 — 객체가 메모리에 가진 raw 데이터이거나

@@ -207,7 +207,7 @@ Result<uint32> MeshSource::AddEdge(uint32 vertexA, uint32 vertexB) noexcept {
 }
 
 Result<uint32> MeshSource::AddPolygonGroup() noexcept {
-    if (polygonGroupCount_ >= MeshMaxElements) {
+    if (polygonGroupCount_ >= MeshMaxPolygonGroups) {
         return Result<uint32>::Failure(ErrorCode::CapacityExceeded);
     }
 

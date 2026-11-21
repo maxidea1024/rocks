@@ -5,7 +5,7 @@ using Rocks.Build.Rules;
 // Asset (hard, soft and EditorOnly references, bulk data references, subobjects, an unsaveable class, and value-kind assets from simple scalars to
 // game-data-like composites — Docs/Design/AssetSystem.ko.md section 14.1, and a source mesh asset for the MeshSource tests and a simple collision
 // asset for the Mesh collision tests — Docs/Design/MeshAnimationAssets.ko.md section 12) and the identity spec
-// (AssetTestFixtures.rocksids.json). Only the EngineTests executable depends on it. Header only.
+// (AssetTestFixtures.rocksids.json). Only the EngineTests executable depends on it.
 public sealed class AssetTestFixtures : EngineModuleRules
 {
     protected override string Group => "Developer";
@@ -19,8 +19,6 @@ public sealed class AssetTestFixtures : EngineModuleRules
     // CoreTypeBindings: Transform, vector, rotator and InterpCurve mirrors. Localization: Text fields. Curves: TangentCurve fields.
     // MeshSource: MeshSourceData fields. Mesh: SimpleCollision fields.
     protected override string[] PublicDependencies => ["AssetRuntime", "CoreTypeBindings", "Localization", "Curves", "MeshSource", "Mesh"];
-
-    protected override bool HasSources => false;
 
     protected override IReadOnlyList<string> Metadata => ["AssetTestFixtures/TestAssets.h", "AssetTestFixtures/ValueAssets.h", "AssetTestFixtures/CombinationAssets.h", "AssetTestFixtures/MeshAssets.h"];
 }

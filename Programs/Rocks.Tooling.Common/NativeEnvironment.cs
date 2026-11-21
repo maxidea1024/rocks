@@ -67,6 +67,22 @@ public static class NativeEnvironment
         }
     }
 
+    /// <summary>
+    /// 만든 환경의 <c>VCToolsVersion</c>(actual — 없으면 null)이 <see cref="ToolchainTable.MinimumMsvcToolset"/> 이상인지 본다. 아니면
+    /// InvalidOperationException이다. vswhere는 최소 Visual Studio 버전으로 거르지만, 이미 초기화된 Developer 셸이나
+    /// <see cref="MsvcToolsetVariable"/>로 고른 옛 도구 모음은 이 확인만 잡는다(Docs/Design/ClangVersionSupport.ko.md 6.2절).
+    /// 사용 예: <c>CheckMinimumMsvcToolset("14.52.37025")</c>는 통과하고 <c>"14.29.30133"</c>은 거부한다.
+    /// </summary>
+    public static void CheckMinimumMsvcToolset(string? actual)
+    {
+        string minimum = ToolchainTable.MinimumMsvcToolset;
+        if (actual is null || !Version.TryParse(actual.Trim(), out Version? version) || version < Version.Parse(minimum))
+        {
+            throw new InvalidOperationException($"MSVC toolset {actual?.Trim() ?? "(none)"} is older than the minimum {minimum} " +
+                "(Build/Toolchain.json visualStudio.minimumMsvc); install Visual Studio 2022 17.8 or newer, or run Setup.bat.");
+        }
+    }
+
     /// <summary>Windows 대상의 Keyed 변수다(Visual Studio·Windows SDK 환경과 SOURCE_DATE_EPOCH).</summary>
     public static readonly IReadOnlyList<string> WindowsKeyedVariables =
     [
@@ -132,15 +148,20 @@ public static class NativeEnvironment
 
         if (OperatingSystem.IsWindows() && !source.ContainsKey("VCToolsInstallDir"))
         {
+            // VsDevCmd의 확장 스크립트(vcpkg-init.cmd의 `> $null`)가 작업 디렉터리에 파일을 만들었다 지운다. 사용자 디렉터리의 같은 이름
+            // 파일을 지우거나 동시 실행끼리 경합하지 않게 이 프로세스 전용 임시 디렉터리에서 돌린다(Docs/Design/ProjectFiles.ko.md 개정 4).
+            using var probe = new ProbeDirectory();
             var installer = Path.Combine(System.Environment.GetFolderPath(
                 System.Environment.SpecialFolder.ProgramFilesX86), "Microsoft Visual Studio", "Installer", "vswhere.exe");
             var result = await ProcessRunner.RunAsync(new(installer,
                 ["-latest", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
-                 "-property", "installationPath"], Directory.GetCurrentDirectory(), source), cancellationToken);
+                 "-version", $"[{ToolchainTable.MinimumVisualStudioVersion},)", "-property", "installationPath"],
+                probe.Path, source), cancellationToken);
             var installation = result.StdOut.Trim();
             if (result.ExitCode != 0 || installation.Length == 0)
             {
-                throw new InvalidOperationException("Visual Studio C++ toolchain not found.");
+                throw new InvalidOperationException($"Visual Studio C++ toolchain {ToolchainTable.MinimumVisualStudioVersion} or newer not found " +
+                    "(Visual Studio or Build Tools with the C++ tools); run Setup.bat.");
             }
 
             var script = Path.Combine(installation, "Common7", "Tools", "VsDevCmd.bat");
@@ -163,7 +184,7 @@ public static class NativeEnvironment
             developerArguments.AddRange([">nul", "&&", "set"]);
             // cmd는 MS 제공 환경 진입점에만 사용한다. 사용자 compiler/source 인자는 shell을 통과하지 않는다.
             result = await ProcessRunner.RunAsync(new("cmd.exe", developerArguments,
-                Directory.GetCurrentDirectory(), source, StandardOutputEncoding: Encoding.Unicode, StandardErrorEncoding: Encoding.Unicode), cancellationToken);
+                probe.Path, source, StandardOutputEncoding: Encoding.Unicode, StandardErrorEncoding: Encoding.Unicode), cancellationToken);
             if (result.ExitCode != 0)
             {
                 throw new InvalidOperationException("Visual Studio environment initialization failed: " + result.StdErr);
@@ -183,6 +204,11 @@ public static class NativeEnvironment
         {
             // 이미 초기화된 환경(VCToolsInstallDir가 있는 셸)이나 VsDevCmd가 다른 도구 모음을 골랐으면 고정이 지켜지지 않은 것이다.
             CheckActiveMsvcToolset(wanted, source.GetValueOrDefault("VCToolsVersion"));
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            CheckMinimumMsvcToolset(source.GetValueOrDefault("VCToolsVersion"));
         }
 
         // Visual Studio 환경 스크립트의 출력까지 합친 뒤 고른다. 아래 probe도 고른 환경으로 실행한다.

@@ -381,6 +381,25 @@ internal static class BuildInfoGenerator
         }
 
         AtomicFile.WriteIfChanged(Path.Combine(directory, "ToolchainFingerprint.txt"), Encoding.UTF8.GetBytes(canonical));
+        // Monolithic은 정의 TU를 실행 파일 소스에 넣는다. Modular는 그 타깃이 닿는 빌드 정보 제공 모듈(Core)의 공유 라이브러리 소스에 넣는다
+        // (Docs/Design/BuildTargets.ko.md 3.8절 BS8d1 — 실행 파일이 정의하면 Core 공유 라이브러리에 미해결 기호가 남는다). Modular 요청은
+        // 타깃이 하나라 제공 모듈의 정의 TU도 하나다.
+        if (request.LinkType == NativeLinkType.Modular)
+        {
+            var hosted = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach ((string target, string source) in sources)
+            {
+                string provider = plan.Closures[target].Single(name => modules[name].ProvidesBuildInfo);
+                // 입력 검사가 그런 실행 파일을 하나 이하로 막는다(InputValidation.ValidateLinkType).
+                if (!hosted.TryAdd(provider, source))
+                {
+                    throw new InvalidOperationException($"Internal error: more than one Modular executable reaches the build information provider {provider}.");
+                }
+            }
+
+            sources = hosted;
+        }
+
         var injected = request with
         {
             Modules = request.Modules.Select(module => sources.TryGetValue(module.Name, out string? source)

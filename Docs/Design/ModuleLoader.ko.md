@@ -1,6 +1,6 @@
 # 모듈 로더 설계
 
-기준일: 2026-11-21, 개정 7. 모듈의 수명(시작·종료)과 적재를 맡는 모듈 로더를 정한다. UE 5.8 `IModuleInterface`·`FModuleManager`·로딩 단계(`ELoadingPhase`)에 해당한다.
+기준일: 2026-11-21, 개정 8. 모듈의 수명(시작·종료)과 적재를 맡는 모듈 로더를 정한다. UE 5.8 `IModuleInterface`·`FModuleManager`·로딩 단계(`ELoadingPhase`)에 해당한다.
 
 [빌드 타깃 설계](BuildTargets.ko.md) 3.8절은 Editor 타깃을 UE와 같이 모듈식(`Modular`)으로 링크하기로 정했다(BD17). 그리고 모듈 로더를 별도 스펙으로 넘기며 네 가지 계약을 요구했다(BD30).
 1. 같은 소스가 `Monolithic`·`Modular`에서 같은 순서·결과로 동작한다.
@@ -109,7 +109,7 @@ ROCKS_IMPLEMENT_MODULE(CurvesModule, Curves)
   - `ModuleEntry`: `entryVersion`(구조체 ABI 버전), `name`, `create`(수명 객체를 만드는 함수), `registerTypes`(이 모듈 자신의 타입만 등록하는 생성 함수, 리플렉션이 없으면 null — 3.6절. 해제는 모듈별 `ModuleRegistration`이 기록으로 되돌리므로 함수를 따로 두지 않는다 — 개정 3), `registerSettings`(3.1절, 없으면 null).
   - 기술은 상수 초기화다(전역 생성자 없음). 수명 객체는 로더가 시작할 때 `create`로 만든다(UE도 첫 적재 때 만든다).
 - **Monolithic**: 빌드가 실행 파일마다 모듈 표 TU를 만든다. 타깃에 들어간 모든 C++ 모듈의 `RocksModuleEntry_<Name>()`을 의존 순서로 나열하고, 모듈별 의존 이름·로딩 단계(3.3절)를 함께 싣는다. 이 표가 Monolithic의 manifest다. 표가 모든 진입 함수를 직접 참조하므로 정적 라이브러리에서 진입점 object가 빠지지 않고, `ROCKS_IMPLEMENT_MODULE`이 빠진 모듈은 링크 오류가 난다(UE `IMPLEMENT_MODULE_<Name>` 강제 참조와 같은 역할 — `ModuleManager.h:950, 968`).
-- **Modular**: 매크로는 위에 더해 공유 라이브러리마다 하나뿐인 export 진입점 `extern "C" ROCKS_DLLEXPORT const ModuleEntry* RocksModuleEntry()`를 정의한다. UE의 주 경로는 정적 목록 `FModuleInitializerEntry::FindModule`이고 `GetDllExport("InitializeModule")`는 fallback이다(`ModuleManager.cpp:1222-1229`). Rocks는 그 fallback과 같은 방식만 쓴다. 빌드는 모듈 링크에 이 기호를 강제 참조로 넣어(Windows `/INCLUDE`, ELF·Mach-O `-u`) 매크로 누락을 링크 오류로 만든다.
+- **Modular**: 매크로는 위에 더해 공유 라이브러리마다 하나뿐인 export 진입점 `extern "C" ROCKS_DLLEXPORT const ModuleEntry* RocksModuleEntry()`를 정의한다. UE의 주 경로는 정적 목록 `FModuleInitializerEntry::FindModule`이고 `GetDllExport("InitializeModule")`는 fallback이다(`ModuleManager.cpp:1222-1229`). Rocks는 그 fallback과 같은 방식만 쓴다. 빌드는 매크로가 같은 자리에 정의하는 export하지 않는 모듈별 C 기호 `RocksModuleEntryOf_<Name>`을 모듈 링크에 강제 참조로 넣어(Windows `/INCLUDE`, ELF·Mach-O `-u`) 매크로 누락을 링크 오류로 만든다(export 이름은 의존 모듈의 import 라이브러리도 내므로 그 이름으로는 잡지 못한다 — [빌드 타깃](BuildTargets.ko.md) BS8d1).
 - 매크로 이름 인자가 빌드가 넣는 모듈 이름 정의(`ROCKS_MODULE_NAME`)와 다르면 `static_assert` 오류다(UE는 경고 — `ModuleManager.h:950`).
 - 한 모듈에 매크로가 둘이면 링크 오류(같은 기호 중복)다.
 - 시험 실행 파일·도구도 모듈 표를 가진다. 그래서 시험이 모듈 로더를 거쳐 모듈을 시작한다(ML0).
@@ -229,7 +229,7 @@ public:
 
 - **manifest 파일**: 빌드가 Modular 타깃마다 `<Target>[-<Platform>-<Configuration>].modules.json`을 공유 라이브러리와 같은 폴더에 쓴다(UE `<App>.modules` — `Programs/UnrealBuildTool/System/ModuleManifest.cs:77-89`). 키는 영어다.
   - `buildId`: `ModuleBuildId` 문자열.
-  - `modules`: 모듈 이름 → `{ file, size, dependencies[], loadingPhase }`. 의존 순서로 나열한다. `size`는 링크가 끝난 공유 라이브러리의 바이트 수다.
+  - `modules`: 행 배열 `{ name, file, size, dependencies[], loadingPhase, onRequest }`. 의존 순서로 나열한다(JSON 객체의 키 순서는 의미가 없어 배열이다 — [빌드 타깃](BuildTargets.ko.md) BS8d1). `size`는 링크가 끝난 파일의 바이트 수다. `schema`·`engineVersion`·`toolchainFingerprint`도 싣는다(`buildId` 재사용 판정).
   - 모르는 키는 오류다(UE 파서도 거부한다 — `Runtime/Core/Private/Modules/ModuleManifest.cpp:101-229`).
   - manifest는 링크가 모두 성공한 뒤 원자적으로 쓴다(임시 파일 → 이름 바꾸기).
 - **manifest 위치**: 엔진 `Binaries/<Platform>/`, 게임 프로젝트 `Binaries/<Platform>/`, 켠 플러그인마다 `<Plugin>/Binaries/<Platform>/`(UE와 같다 — `LaunchEngineLoop.cpp:2541-2543`, `PluginManager.cpp:1856`). 로더는 이 폴더들의 manifest만 읽는다. 폴더를 훑어 파일을 찾지 않는다.
@@ -555,6 +555,7 @@ ML1(3.11절)으로 `PostConfigInit`·엔진 단계 모듈이 설정·로그·tra
 
 | 개정 | 날짜 | 내용 |
 |---|---|---|
+| 8 | 2026-11-21 | ML4를 [빌드 타깃](BuildTargets.ko.md) BS8d와 한 묶음으로 진행한다(빌드 타깃 개정 14): ML4a(manifest 읽기·`Prepare`·report) → ML4b(실행 파일 연결 — `GeneratedModuleTable()`은 Monolithic에만, 부트 모듈 import, 시험 등록 머리). manifest 쓰기·export 진입점·강제 참조는 BS8d1이 한다. ML4 완료 기준(`Modular` FoundationTests를 로더로 실행)은 BS8d5와 같이 채운다 |
 | 7 | 2026-11-21 | [빌드 타깃](BuildTargets.ko.md) 3.9절(BD36·BD39)에 맞춰 3.8절 순환 항목의 "Engine이 `DynamicModules`로 둔 플러그인 모듈"을 지웠다. 엔진 계층 모듈은 플러그인 모듈을 동적 적재로도 참조하지 않고, 켠 플러그인 모듈은 주 실행 파일에 링크된다 |
 | 6 | 2026-11-20 | ML1 후속(3.12절): 호스트 서비스 키·매크로를 Core `Core/Module/HostServiceKey.h`로 옮김(MD18 보강), `LogSystem`·`ConfigContext`·`TraceSession`을 서비스로 선언, Sandbox가 `PostConfigInit` 전에 등록·호스트 묶음 종료 뒤 뗌, RenderBase 모듈 `Startup`이 GPU trace 채널·형을 등록하고 `Shutdown`이 풂(첫 서비스 사용처). `Engine` 서비스·핸들 단위 CVar lease는 그대로 후속 |
 | 5 | 2026-11-20 | ML1 착수. 3.11절에 구현 세부를 정했다: `LoadingPhase`에 `PostEngineInit`·`None`, 엔진 모듈 규칙 `LoadingPhase`, 모듈 표 행 `onRequest`(요청 시 적재 — 단계 실행이 건너뜀), 실행 파일 행은 `None`(UE Program 주 모듈)·시험 fixture 모듈 `None`, 빌드의 단계 순서 검사(MD6, 모듈 표 행 기준)와 부트 모듈 검사(새 표지 `ProvidesLaunch`의 링크 폐포는 `EarliestPossible`이어야 함), SDK manifest 11(`LoadingPhase`·`ProvidesLaunch`), `StartPhase`(앞 단계 차례 실행, 이미 돈 단계는 성공, 앞 묶음 단계·`None`은 Fatal, 실패는 그 단계를 멈춤)와 `ShutdownGroup`의 단계 되돌림, 엔진 묶음 참조 수(`StartEngineGroup`·`ShutdownEngineGroup`), 타입 등록기 여럿(Engine마다, 최대 4 — MD15 개정), Launch가 로더를 소유(`Launch.Modules` 단계, `ApplicationContext::Modules()`, 정리에서 프로세스 묶음 종료·lease 진단), Sandbox `PostConfigInit`·호스트 묶음 종료, Engine 대체 로더 제거(`EngineConfig::modules` 필수), 시험 runner의 `test::ProcessModules()`. 후속: 호스트 서비스 등록·서비스를 쓰는 `Startup` 등록·핸들 단위 CVar lease. 다른 문서(8절)를 함께 고쳤다 |

@@ -1,8 +1,10 @@
 #pragma once
 
 #include <AssetRuntime/BulkData.h>
+#include <AssetRuntime/BulkStore.h>
 #include <AssetRuntime/PackageFormat.h>
 #include <Core/Containers/Array.h>
+#include <Core/Memory/UniquePtr.h>
 #include <Meta/Annotations.h>
 #include <Object/AssetId.h>
 #include <Object/ModuleRegistration.h>
@@ -10,6 +12,8 @@
 #include <Object/ObjectRegistry.h>
 
 namespace rocks {
+
+class ConstructionContext;
 
 namespace detail {
 // 로더·writer가 Package의 비영속 상태(id·종류·bulk 저장소)를 채우는 통로다(정의는 Private).
@@ -58,12 +62,20 @@ public:
         return static_cast<uint32>(bulkSlots_.Size());
     }
 
-    // ref가 가리키는 entry의 raw byte다.
+    // ref가 가리키는 entry의 raw byte다. bulk 저장소가 있으면(에디터 패키지 — AS 7.1절 15)
+    // 저장소에 묻는다(지연 읽기).
     //
     // 오류: 빈 ref(bulkId 0)는 InvalidArgument, 이 패키지에 없는 bulkId는 NotFound,
-    // rawBytes·sha256이 entry와 다르면 TypeMismatch(다른 패키지의 값이거나 저장 뒤 재매핑되지 않은
-    // 값)다.
-    Result<Span<const uint8>> BulkBytes(const BulkDataRef& ref) const noexcept;
+    // rawBytes·sha256이 entry와 다르면 TypeMismatch(다른 패키지의 값)다. 저장소가 있으면 그
+    // 지연 읽기의 오류(PackageBulkStore::Read — 손상 CorruptPackage, 외부 변경
+    // ExternalModification, IO 오류)도 failure에 진단과 함께 온다.
+    Result<Span<const uint8>> BulkBytes(const BulkDataRef& ref,
+                                        AssetDiagnostic* failure = nullptr) const noexcept;
+
+    // bulk 저장소다(에디터 패키지 — 없으면 null).
+    PackageBulkStore* BulkStore() const noexcept {
+        return bulkStore_.Get();
+    }
 
 private:
     friend struct detail::PackageAccess;
@@ -72,6 +84,7 @@ private:
     ROCKS_NATIVE() PackageKind kind_ = PackageKind::Cooked;
     ROCKS_NATIVE() Array<uint8> bulkBytes_;
     ROCKS_NATIVE() Array<PackageBulkSlot> bulkSlots_;
+    ROCKS_NATIVE() UniquePtr<PackageBulkStore> bulkStore_;
 };
 
 // 에셋 클래스의 기반이다(UE UObject 중 에셋인 것 — Texture·Material 등이 상속한다). 패키지당 대표
@@ -108,6 +121,37 @@ private:
 //   "");
 Result<RootRef<Package>> NewPackage(ObjectRegistry& registry, const ObjectAccessContext& access,
                                     AssetId id, PackageKind kind = PackageKind::Editor) noexcept;
+
+// transaction 안에 새 빈 패키지를 만든다(공개 전 — Docs/Design/AssetSystem.ko.md 7.1절 15 A2c3).
+// 같은 트랜잭션에서 대표 에셋을 만들고(NewRepresentativeAsset) 값을 채운 뒤 Commit으로 함께
+// 공개한다. Commit 전에 실패하거나 Rollback하면 아무것도 남지 않는다. 반환은 공개 전 Package
+// handle이다.
+//
+// 오류: null id·모르는 kind InvalidArgument(트랜잭션은 그대로), 그 밖은 transaction.Create의
+// 오류(트랜잭션이 오류 상태로 고정된다).
+//
+// 사용 예:
+//   ConstructionContext transaction(registry, access);
+//   auto package = NewPackage(transaction, id, PackageKind::Editor);
+//   auto asset = NewRepresentativeAsset(transaction, package.Value(), meshType);
+//   ... transaction.GetForWrite<Mesh>(asset.Value()) 로 값을 채운다 ...
+//   auto root = transaction.Commit();   // 첫 객체(Package)의 root
+Result<ObjectHandle> NewPackage(ConstructionContext& transaction, AssetId id,
+                                PackageKind kind = PackageKind::Editor) noexcept;
+
+// transaction의 공개 전 Package(NewPackage(transaction, ...))에 대표 에셋(type — Asset 파생
+// 클래스)을 만들고 Id()를 그 패키지 id로 둔다. 반환은 공개 전 에셋 handle이다.
+//
+// 오류: package가 이 트랜잭션의 Package가 아니면 transaction.Get의 오류(StaleHandle·TypeMismatch
+// 등), type이 Asset 파생이 아니거나 대표 자식이 이미 있으면 transaction.Create의 오류(트랜잭션이
+// 오류 상태로 고정된다).
+Result<ObjectHandle> NewRepresentativeAsset(ConstructionContext& transaction, ObjectHandle package,
+                                            TypeId type) noexcept;
+
+// package에 bulk 저장소를 잇는다(에디터가 새로 만든 패키지 — 로드한 패키지는
+// PackageLoadState::SetBulkStore). 오류: null 저장소, 이미 저장소나 로드한 bulk가 있는 패키지는
+// InvalidArgument(저장소는 호출자에게 남는다).
+Result<void> AttachBulkStore(Package& package, UniquePtr<PackageBulkStore>& store) noexcept;
 
 // AssetRuntime 리플렉션 타입(Package·Asset·BulkDataRef)을 등록한다(생성 집계 함수
 // generated::AssetRuntime::RegisterModuleTypes를 부른다). 엔진은 EngineAssets가, 도구·시험은 직접

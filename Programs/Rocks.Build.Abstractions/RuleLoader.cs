@@ -73,6 +73,14 @@ public static class RuleLoader
             Descriptors.TargetPluginReferences.Validate(target.Name, target.Plugins);
         }
 
+        // 실행 파일의 플러그인 모듈은 빌드가 켠 플러그인에서 채운다(Docs/Design/BuildTargets.ko.md 3.9절 BD36). 규칙이 적으면 끈 플러그인도
+        // 링크되므로 거부한다.
+        if (modules.FirstOrDefault(module => module.PluginModules.Count != 0) is { } listed)
+        {
+            throw new ArgumentException($"Module rule '{listed.Name}' sets PluginModules; the build fills it from the target's enabled plugins " +
+                "(TargetRules.Plugins).");
+        }
+
         return new(modules, targets) { Plugins = context.Plugins };
     }
 

@@ -45,8 +45,9 @@ struct BoneMergeResult {
 //       Report(AssetDiagnosticName(failure.code), SkeletonIssueName(failure.issue), failure.index);
 //   }
 //
-// 오류: 두 계층 검증 실패는 ValidateBoneHierarchy 진단(role이 어느 계층인지)이다. 사슬 불일치는
-// failure->code SkeletonMismatch, ErrorCode InvalidArgument, issue ParentChainMismatch·
+// 오류: 두 계층 검증 실패는 ValidateBoneHierarchy 진단(role이 어느 계층인지)이다. 메시 본이 없으면
+// SkeletonMismatch·InvalidArgument·EmptyMeshHierarchy(UE IsCompatibleMesh와 같이 거부)다. 사슬
+// 불일치는 failure->code SkeletonMismatch, ErrorCode InvalidArgument, issue ParentChainMismatch·
 // MissingAncestor, index = 메시 본, related = 대조한 스켈레톤 본(MissingAncestor면 없음)이다. 결과
 // 본 수가 MeshMaxBones를 넘으면 InvalidSkeletonData·TooManyBones·CapacityExceeded다. 할당 실패는
 // 진단 코드 없이 그 오류다. 실패하면 out은 그대로다.

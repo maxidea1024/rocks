@@ -68,7 +68,24 @@ uint64 SpecIdOf(const LogEvent& event) noexcept {
 
 namespace detail {
 
+namespace {
+
+// 이 스레드가 TraceLogSink::Write 안에 있는지다(InTraceLogWrite·TraceLogWriteScope).
 thread_local constinit bool inTraceLogWrite = false;
+
+} // namespace
+
+bool InTraceLogWrite() noexcept {
+    return inTraceLogWrite;
+}
+
+TraceLogWriteScope::TraceLogWriteScope() noexcept : previous_(inTraceLogWrite) {
+    inTraceLogWrite = true;
+}
+
+TraceLogWriteScope::~TraceLogWriteScope() noexcept {
+    inTraceLogWrite = previous_;
+}
 
 } // namespace detail
 
@@ -108,7 +125,7 @@ void TraceLogSink::RememberSpec(uint64 specId) noexcept {
 
 Result<void> TraceLogSink::Write(const LogEvent& event) noexcept {
     // 채널이 꺼져 있으면 분기 하나다.
-    if (!TraceLogChannel.IsEnabled() || detail::inTraceLogWrite ||
+    if (!TraceLogChannel.IsEnabled() || detail::InTraceLogWrite() ||
         IsTraceCategory(event.category)) {
         return Result<void>::Success();
     }

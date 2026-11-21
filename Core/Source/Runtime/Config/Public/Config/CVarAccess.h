@@ -88,7 +88,7 @@ public:
 
     // 이 스레드에 묶인 snapshot에서 세대가 바뀌었는지다(묶음이 없으면 Fatal).
     bool Changed() noexcept {
-        const config::ConfigSnapshot* snapshot = config::detail::CurrentBinding.snapshot;
+        const config::ConfigSnapshot* snapshot = config::detail::CurrentBinding().snapshot;
         if (snapshot == nullptr) {
             detail::FatalUnbound(*definition_);
         }

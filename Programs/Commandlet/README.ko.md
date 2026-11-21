@@ -1,10 +1,12 @@
 # Rocks headless commandlet
 
-`Commandlet` 타깃은 창, 렌더러, GPU, 오디오 장치 없이 실행되는 Core 기반 콘솔 프로그램이다. 현재 엔진 부트와 에셋 시스템은 연결되지 않았으며 cook 등의 명령은 제공하지 않는다. `core-check`는 Core 할당과 해제만 검사한다. `trace-report <입력.rtrace> [<출력.json>]`은 trace 파일의 결정적 JSON report(스레드별 구간 이름의 횟수·합계·p50/p95/p99, task 임계 경로, 손실·잘림·정의 누락 요약, [trace 설계](../../Docs/Design/TraceSystem.ko.md) 10절 TR4)를 쓴다. 출력 경로가 없으면 표준 출력이다. 파일·분석 오류는 원본 파일 오류 코드와 함께 알리고 1을 반환한다.
+`Commandlet` 타깃은 창, 렌더러, GPU, 오디오 장치 없이 실행되는 Core 기반 콘솔 프로그램이다. 엔진 부트는 연결되지 않았고 cook 등의 명령은 아직 없다. `core-check`는 Core 할당과 해제만 검사한다. `trace-report <입력.rtrace> [<출력.json>]`은 trace 파일의 결정적 JSON report(스레드별 구간 이름의 횟수·합계·p50/p95/p99, task 임계 경로, 손실·잘림·정의 누락 요약, [trace 설계](../../Docs/Design/TraceSystem.ko.md) 10절 TR4)를 쓴다. 출력 경로가 없으면 표준 출력이다. 파일·분석 오류는 원본 파일 오류 코드와 함께 알리고 1을 반환한다.
 
 `log`는 암호화한 로그 파일 도구다([로깅 설계](../../Docs/Design/LoggingSystem.ko.md) 9.1절, LG10). `log keygen <공개키 파일> <개인키 파일>`은 X-Wing 키 쌍을 만들고(기존 파일을 덮어쓰지 않는다), `log decode <파일> --key <개인키 파일> [--json]`은 평문을 표준 출력으로 낸다. 끝 표시가 없으면 마지막 완전한 묶음까지 낸 뒤 "no end marker (abnormal termination)"를 알리고, 변조는 오류 1이다. `--json`은 상태를 표준 오류에 JSON 객체 한 줄로 쓴다. `log seal <평문> <출력> --public <공개키 파일>`은 같은 형식으로 봉인한다(진단·시험용). **개인키는 저장소와 쿠킹 결과에 넣지 않는다.**
 
 `content-sign`은 쿠킹 매니페스트 서명 도구다([콘텐츠 서명 설계](../../Docs/Design/ContentSigning.ko.md) 5·7절, A1f). `content-sign keygen <키 파일> <공개 파일> --password-file <경로>`은 Ed25519 키를 비밀번호(Argon2id)로 감싼 키 파일과 신뢰 목록에 넣을 공개 줄(`<keyId hex> <공개키 hex>`)을 만든다(기존 파일을 덮어쓰지 않는다). `content-sign sign <in.rman> <out.rsig> --key <키 파일> --password-file <경로> --version <u64> --product <id> --channel <이름>`은 매니페스트를 확인한 뒤 서명 봉투를 임시 파일에 쓰고 원자적으로 바꾼다. `content-sign verify <in.rsig> --trust <공개 파일> --product <id> --channel <이름> [--minimum-version <u64>]`은 엔진과 같은 순서로 검증한다. 비밀번호는 파일로만 받는다(끝의 줄바꿈 하나는 뺀다). **키 파일은 저장소와 쿠킹 결과에 넣지 않는다.**
+
+에셋 명령([에셋 시스템 설계](../../Docs/Design/AssetSystem.ko.md) 13절)은 프로젝트(`--project=<dir>`, 없으면 현재 디렉터리에서 위로 `*.rocksproject`)의 에디터 패키지를 다룬다. `asset-list [--type=<Type>] [--under=<path>]`은 색인 항목을 경로 순으로 쓰고(`--type`은 그 클래스와 파생), `asset-index-verify`는 진단을 낸다. `asset-new <Type> <path> [<경로>=<값>…]`·`asset-set <path|AssetId> <대입>… [--force]`는 쓰기 잠금(`--wait=<초>`)을 잡고 대입을 모두 검증한 뒤 저장하며, `asset-info <path|AssetId> [--json] [--all]`은 `asset-set`에 그대로 넣을 수 있는 `<경로>=<값>` 줄(또는 JSON)을 쓴다. 값 표기는 ReflectionText(리플렉션 확장 10절)이고 참조는 논리 경로나 AssetId다. 대입 목록 옵션 `--unset=<경로 목록>`·`--erase=<경로 목록>`을 받는다. 에셋 명령은 실행 때 에셋 타입 모듈(지금 Animation — Skeleton·AnimationClip)을 시작해 타입을 등록한다. 진단은 표준 오류에 `<명령>: <코드>: <대상>: <설명>` 한 줄씩이다.
 
 ```text
 dotnet msbuild Rocks.proj /t:Build /p:RocksTarget=Commandlet
@@ -12,6 +14,9 @@ RocksCommandlet --help
 RocksCommandlet --list
 RocksCommandlet core-check
 RocksCommandlet trace-report capture.rtrace report.json
+RocksCommandlet asset-new Skeleton /Game/Characters/Hero
+RocksCommandlet asset-set /Game/Characters/Hero useRetargetModesFromCompatibleSkeleton=on
+RocksCommandlet asset-info /Game/Characters/Hero --json
 dotnet run --project Programs/Rocks.Commandlet.Tests -- --executable <빌드된 실행 파일의 절대 경로>
 ```
 

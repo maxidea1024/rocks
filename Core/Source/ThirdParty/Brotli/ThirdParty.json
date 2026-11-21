@@ -3,6 +3,7 @@
   "name": "Brotli",
   "version": "1.1.1",
   "upstreamDirectory": "brotli-1.1.1",
+  "globalState": false,
   "source": {
     "url": "https://github.com/google/brotli/archive/refs/tags/v1.1.1.tar.gz",
     "sha256": "1a84dfaa740994d19254bf78aa7d74a4a8040d1638f3d5f2cdecb188fd520da8",

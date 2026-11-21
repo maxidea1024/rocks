@@ -380,9 +380,16 @@ Result<void> DecodePlaybackTrack(animation_detail::ClipByteReader& reader, uint3
 
 Result<void> LoadClipPlayback(const ClipPlaybackData& data, const Package& package,
                               ClipPlayback& out, ClipDiagnostic* failure) noexcept {
-    if (data.sampleCount == 0 || data.sampleCount - 1 > ClipMaxFrames ||
-        data.sampleRate.AsDecimal() > ClipMaxFrameRate) {
-        return CorruptPlayback(failure, ClipIssue::TrackBoneLength);
+    if (data.sampleCount == 0) {
+        return CorruptPlayback(failure, ClipIssue::NoSamples);
+    }
+
+    if (data.sampleCount - 1 > ClipMaxFrames) {
+        return CorruptPlayback(failure, ClipIssue::TooManyFrames);
+    }
+
+    if (data.sampleRate.AsDecimal() > ClipMaxFrameRate) {
+        return CorruptPlayback(failure, ClipIssue::FrameRateTooHigh);
     }
 
     auto bytes = package.BulkBytes(data.tracks);

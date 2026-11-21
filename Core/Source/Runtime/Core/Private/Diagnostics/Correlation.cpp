@@ -7,10 +7,18 @@ namespace rocks {
 
 namespace detail {
 
-// 이 스레드 스택의 깊이다(CorrelationDepth가 인라인으로 읽는다).
+namespace {
+
+// 이 스레드 스택의 깊이다(CorrelationDepth가 읽는다).
 thread_local constinit uint32 correlationDepth = 0;
 
+} // namespace
+
 } // namespace detail
+
+usize CorrelationDepth() noexcept {
+    return detail::correlationDepth;
+}
 
 namespace {
 

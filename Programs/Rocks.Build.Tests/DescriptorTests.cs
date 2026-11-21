@@ -378,6 +378,10 @@ internal static class DescriptorTests
             "engine module loading a plugin module at run time", "engine module 'Core' must not depend on plugin module 'Water'");
         Check(Names(engine.Apply([.. engineRules, Rule("Tool", "Water")], ["Tool"])).Contains("Tool"),
             "a program module may use an enabled plugin module");
+        // 엔진 저장소 규칙 어셈블리는 모든 타깃의 모듈을 담는다. 이 타깃에서 닿지 않는 모듈은 결과에서 빠지고, 끈 플러그인을 쓰더라도
+        // 이 타깃을 막지 않는다(다른 타깃이 그 플러그인을 켠다).
+        Check(Names(engine.Apply([.. engineRules, Rule("Other", "Weather")], ["Engine"])).SequenceEqual(["Core", "Engine", "Water"]),
+            "an engine target ignores modules it does not reach");
         ExpectFailure(() => engine.Apply(Replace(EngineRule("Water", "Plugins/Water/Source/Water", "Weather")), ["Engine"]),
             "plugin module used another plugin without declaring it", "add { \"name\": \"Weather\", \"enabled\": true } to \"plugins\" of Water.rocksplugin");
         Write(plugins, "Storm/Storm.rocksplugin", """

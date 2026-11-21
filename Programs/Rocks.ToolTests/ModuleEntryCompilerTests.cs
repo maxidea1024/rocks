@@ -79,7 +79,7 @@ internal static class ModuleEntryCompilerTests
             string[] includeDirectories = Directory.GetDirectories(Path.Combine(options.Root, "Core", "Source", "Runtime"))
                 .Select(module => Path.Combine(module, "Public")).Where(Directory.Exists).Order(StringComparer.Ordinal).ToArray();
 
-            async Task<ProcessResult> Compile(string name, string? moduleName, string body, bool moduleTypes = false)
+            async Task<ProcessResult> Compile(string name, string? moduleName, string body, bool moduleTypes = false, bool sharedLibrary = false)
             {
                 temporary.Write(name + ".cpp", Prelude + body + "\n");
                 string source = temporary.FilePath(name + ".cpp");
@@ -99,6 +99,11 @@ internal static class ModuleEntryCompilerTests
                 if (moduleTypes)
                 {
                     arguments.Add((clangCl ? "/D" : "-D") + "ROCKS_MODULE_TYPES=1");
+                }
+
+                if (sharedLibrary)
+                {
+                    arguments.Add((clangCl ? "/D" : "-D") + "ROCKS_MODULE_SHARED_LIBRARY=1");
                 }
 
                 arguments.AddRange(options.ClangArguments);
@@ -152,6 +157,13 @@ internal static class ModuleEntryCompilerTests
                 "static_assert(rocks::detail::MakeModuleEntry<rocks::DefaultModuleImplementation>(\"Curves\", &rocks::generated::Curves::RegisterModuleOwnTypes)" +
                 ".registerTypes != nullptr);", moduleTypes: true);
 
+            // 공유 라이브러리 표지(ROCKS_MODULE_SHARED_LIBRARY=1, Docs/Design/BuildTargets.ko.md 3.8절 BS8d1): 매크로가 export 진입점
+            // RocksModuleEntry와 강제 참조용 모듈별 기호 RocksModuleEntryOf_<Name>을 더 정의한다. 헤더가 export 철자(Base/Compiler.h)를 스스로
+            // include해야 PCH 없이도 컴파일된다.
+            Task<ProcessResult> sharedLibrary = Compile("shared_library", "Curves",
+                "ROCKS_IMPLEMENT_MODULE(rocks::DefaultModuleImplementation, Curves)\n" +
+                "static_assert(sizeof(&RocksModuleEntry) != 0 && sizeof(&RocksModuleEntryOf_Curves) != 0);", sharedLibrary: true);
+
             // 서로 독립인 컴파일이라 함께 돌린다.
             Task<ProcessResult>[] controls = accepted.Select(item => Compile(item.Name, item.Module, item.Source)).ToArray();
             Task<ProcessResult>[] failures = rejected.Select(item => Compile(item.Name, item.Module, item.Source)).ToArray();
@@ -163,6 +175,8 @@ internal static class ModuleEntryCompilerTests
 
             ProcessResult typesResult = await moduleTypes;
             Verify.Equal(0, typesResult.ExitCode, "module_types must compile: " + typesResult.StdOut + typesResult.StdErr);
+            ProcessResult sharedResult = await sharedLibrary;
+            Verify.Equal(0, sharedResult.ExitCode, "shared_library must compile: " + sharedResult.StdOut + sharedResult.StdErr);
 
             for (int index = 0; index < rejected.Length; ++index)
             {

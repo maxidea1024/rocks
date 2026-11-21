@@ -1,4 +1,7 @@
 #include "CommandletHost.h"
+#include "AssetCommandletSupport.h"
+#include "AssetEditCommandlet.h"
+#include "AssetIndexCommandlet.h"
 #include "ContentSignCommandlet.h"
 #include "LogCommandlet.h"
 #include <Config/ConfigDump.h>
@@ -157,8 +160,10 @@ bool BootSettings(HostSettings& settings) noexcept {
 // 명령을 등록하고 실행한다. 명령의 Log 호출은 Launch가 설치한 도구 로그로 간다(명령이 로그를
 // 남기지 않으면 출력은 그대로다). 설정 문맥과 명령의 작업 메모리는 allocator(실행 진입점의 범용
 // 할당자)에서 나온다 — core-check만 자기 SystemAllocator를 만든다(그 명령이 점검하는 대상이다).
-int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocator) noexcept {
+int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocator,
+        ModuleLoader& modules) noexcept {
     HostSettings settings(allocator);
+    AssetCommandContext assetContext{&allocator, &modules};
     const bool settingsReady = BootSettings(settings);
     CommandletRegistry registry;
     auto registered = registry.Register(
@@ -182,6 +187,40 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
         {"content-sign",
          "Cooked content signing: keygen, sign, verify. Never commit or cook the key file.",
          &RunContentSignCommand, &allocator});
+    if (!registered) {
+        return 1;
+    }
+    registered = registry.Register({"asset-list", "List the editor packages of the project.",
+                                    &RunAssetListCommand, &assetContext});
+    if (!registered) {
+        return 1;
+    }
+    registered = registry.Register(
+        {"asset-new", "Create an editor package and save it.", &RunAssetNewCommand, &assetContext});
+    if (!registered) {
+        return 1;
+    }
+    registered =
+        registry.Register({"asset-set", "Assign properties of an editor package and save it.",
+                           &RunAssetSetCommand, &assetContext});
+    if (!registered) {
+        return 1;
+    }
+    registered = registry.Register({"asset-info", "Print the properties of an editor package.",
+                                    &RunAssetInfoCommand, &assetContext});
+    if (!registered) {
+        return 1;
+    }
+    registered = registry.Register(
+        {"asset-index-rebuild",
+         "Rescan the project without the index cache, clean temporary files and rewrite the cache.",
+         &RunAssetIndexRebuildCommand, &allocator});
+    if (!registered) {
+        return 1;
+    }
+    registered = registry.Register({"asset-index-verify",
+                                    "Check the editor packages of the project and report problems.",
+                                    &RunAssetIndexVerifyCommand, &allocator});
     if (!registered) {
         return 1;
     }

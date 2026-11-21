@@ -6,6 +6,8 @@
 *.hpp text eol=lf
 *.h text eol=lf
 *.c text eol=lf
+# cmd.exe mislabels goto targets and labels in LF-only batch files.
+*.bat text eol=crlf
 # External library sources (<root>/<Lib>/<lib>-<version>/, where the roots are Core/Source/ThirdParty and Engine/Source/ThirdParty) are kept
 # byte for byte (no line ending conversion). Each library's ThirdParty.json verifies them with per-file SHA-256. Rocks glue lives directly under <Lib>/
 # and is outside this rule.
@@ -19,3 +21,7 @@ Engine/Source/ThirdParty/*/Build/** text eol=lf
 *.pdf binary
 *.png binary
 *.zip binary
+# Unreal exchange bundle blobs are named by the SHA-256 of their bytes (Docs/Design/UnrealExchange.ko.md section 3.1), so they are kept byte for byte.
+**/*.rxbundle/blobs/** binary
+# Golden Visual Studio files (Docs/Design/ProjectFiles.ko.md section 16 V5) are compared byte for byte, CRLF included.
+Programs/Rocks.Build.IntegrationTests/ProjectFiles/Golden/** -text

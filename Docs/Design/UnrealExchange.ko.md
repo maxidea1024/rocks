@@ -1,6 +1,6 @@
 # Unreal 교환 형식과 추출 플러그인 설계
 
-기준일: 2026-11-21, 개정 5(UX1을 UX1a·UX1b로 나눔). 개정 4(UXR5 경계 정책 검사 구현 — 11.1절). 개정 3(13절 요구를 다른 문서에 반영하고 상태 열을 더함, 태그 키 이름). 개정 2(교차 검증 반영 — 18절). UE 에디터에서 텍스처·정적 메시·스켈레톤·스킨 메시·애니메이션 클립·머티리얼을 꺼내 Rocks 에셋으로 가져오는 경로를 정한다. 경로는 세 부분이다. UE 쪽 추출 플러그인 `RocksExport`, 둘 사이의 교환 형식 **Unreal 교환 묶음**, Rocks 쪽 임포터 플러그인 `UnrealExchange`다.
+기준일: 2026-11-21, 개정 7(UX1a coverage 100% — 10.4절 끝 시험과 coverage 문단). 개정 6(UX1a 리더·경로 대응·임포트 순서 구현 — 10.4절, 3.4·3.5절 정렬·의존 `class`). 개정 5(UX1을 UX1a·UX1b로 나눔). 개정 4(UXR5 경계 정책 검사 구현 — 11.1절). 개정 3(13절 요구를 다른 문서에 반영하고 상태 열을 더함, 태그 키 이름). 개정 2(교차 검증 반영 — 18절). UE 에디터에서 텍스처·정적 메시·스켈레톤·스킨 메시·애니메이션 클립·머티리얼을 꺼내 Rocks 에셋으로 가져오는 경로를 정한다. 경로는 세 부분이다. UE 쪽 추출 플러그인 `RocksExport`, 둘 사이의 교환 형식 **Unreal 교환 묶음**, Rocks 쪽 임포터 플러그인 `UnrealExchange`다.
 
 - 배경: 사용자 지시(2026-11-19). 엔진 시험을 위해 UE에서 쓰던 콘텐츠를 Rocks로 가져온다. `.uasset`을 직접 해석하는 방식은 어려움이 많으므로 UE 플러그인이 Rocks가 읽을 수 있는 형태로 추출한다.
 - 받는 쪽 자료구조: 텍스처는 [에셋 시스템](AssetSystem.ko.md) 12절, 머티리얼은 [머티리얼 시스템](MaterialSystem.ko.md) 4절, 메시·스켈레톤·애니메이션은 [메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets.ko.md)이 정한다. 이 문서는 추출과 대응만 다룬다.
@@ -75,8 +75,8 @@
 | `projectSettings` | 결과를 바꾸는 UE 프로젝트 설정: `substrate`(bool, 8.3절), `retainJpegFormat`(bool) |
 | `environment` | 정보용: 굽기에 쓴 RHI·GPU·드라이버 이름(굽기를 했을 때만) |
 | `createdUtc` | 정보용 |
-| `assets` | `[{ "objectPath": "/Game/Props/SM_Rock.SM_Rock", "class": "StaticMesh", "file": "assets/Game/Props/SM_Rock.json" }]`, objectPath 순 정렬 |
-| `redirects` | `[{ "from": 옛 objectPath, "to": 새 objectPath }]` — 닫힘 수집 중 만난 UE redirector를 풀어 기록(9.2절) |
+| `assets` | `[{ "objectPath": "/Game/Props/SM_Rock.SM_Rock", "class": "StaticMesh", "file": "assets/Game/Props/SM_Rock.json" }]`, objectPath의 UTF-8 byte 순 엄격 증가(10.4절 6번), `file`은 `assets` + 패키지 경로 + `.json` |
+| `redirects` | `[{ "from": 옛 objectPath, "to": 새 objectPath }]` — 닫힘 수집 중 만난 UE redirector를 끝까지 풀어 기록(9.2절). `from` 순 엄격 증가, `from`은 에셋 경로와 겹치지 않고 `to`는 다른 `from`이 아니다(10.4절 10번) |
 
 ### 3.5 에셋 JSON 공통
 
@@ -85,7 +85,7 @@
 | `objectPath` | UE 객체 경로 |
 | `class` | 교환 클래스 이름(`Texture2D`·`StaticMesh`·…, UE 클래스 이름에서 `U` 접두사를 뺀 것) |
 | `ueClass` | 실제 UE 클래스 경로(파생 클래스 구분용, 예 `/Script/Engine.Texture2D`) |
-| `dependencies` | `[{ "objectPath": …, "kind": "hard" | "soft" }]` — 이 에셋 JSON 안에서 참조한 객체 전부 |
+| `dependencies` | `[{ "objectPath": …, "class": 교환 클래스 이름, "kind": "hard" | "soft" }]` — 이 에셋 JSON 안에서 참조한 객체 전부. objectPath 순 엄격 증가(한 객체 한 번, 둘 다면 hard). `class`는 묶음에 없는 대상의 9.3절 분류에 쓴다(10.4절 9번) |
 | `diagnostics` | 추출 중 플러그인이 낸 진단 `[{ "code", "severity", "message" }]` |
 | `settings` | 에셋 설정(종류별, 4–8절). 키는 UE 프로퍼티 이름 그대로다(대소문자 변환 없음 — 11.5절) |
 | `data` | 원본 데이터(종류별) |
@@ -295,7 +295,7 @@ UE 객체 경로 `/<Mount>/<경로>/<이름>.<이름>` → Rocks 논리 경로 `
 | 위치 | `Engine/Plugins/Importers/UnrealExchange/` — Rocks 엔진 플러그인(빌드 규칙 glob `Engine/Plugins/**`, PluginCatalog). 엔진 핵심 계층(`Engine/Source/Runtime`)에 두지 않는다 |
 | 모듈 | `UnrealExchange`(Developer 종류) |
 | 책임 | 묶음 읽기·검증(3절), 종류별 대응(4–8절), 머티리얼 번역 표, 경로·ID·순서(9절), 임포트 서비스 호출 |
-| 의존 | AssetDatabase·TextureTools·MeshTools·AnimationTools·MaterialCompiler(그래프 검증)·Material·Core(JSON·SHA-256) |
+| 의존 | AssetDatabase·TextureTools·MeshTools·AnimationTools·MaterialCompiler(그래프 검증)·Material·Core(JSON·SHA-256). UX1a 시점은 Core·AssetRuntime·MeshSource이고 나머지는 쓰는 단계에서 더한다(10.4절 1번) |
 
 UE 쪽 지식(클래스 이름·프로퍼티 이름·enum 값)은 이 모듈에만 둔다. 에셋 모듈과 도구 모듈은 UE를 모른다. 플러그인을 켜지 않은 프로젝트·Shipping 빌드에는 들어가지 않는다.
 
@@ -331,6 +331,34 @@ AssetSystem 4.6절 진단 표에 등록한다(요구 UXR3).
 | `ParameterDefaultConflict` / `ParameterResolveMismatch` | 경고 | 8.5절 |
 
 메시·애니메이션 데이터 검증 진단은 MeshAnimationAssets 11절, 텍스처는 AssetSystem 4.6절 코드를 그대로 쓴다.
+
+### 10.4 구현에서 정한 점(UX1a)
+
+UX1a 구현(플러그인 모듈 `UnrealExchange`의 묶음 리더·검증, 경로 대응, 임포트 순서) 중 3·9·10.3절이 정하지 않았거나 다르게 정한 점이다. 모두 권장안으로 확정했다. 에셋 DB에 쓰는 부분(임포트 서비스 연결, 기존 에셋 찾기, `--only` 닫힘, 명령 등록)은 UX1b다.
+
+1. **파일과 의존.** 공개 헤더는 `UnrealExchange/UnrealExchangeFormat.h`(상수), `ExchangeDiagnostic.h`(진단), `ExchangeBundle.h`(리더·메모리 형태·blob 읽기), `ExchangePaths.h`(경로 대응), `ExchangeImportOrder.h`(임포트 순서)다. 모듈 공개 의존은 Core·AssetRuntime(`AssetDiagnosticCode`)·MeshSource(가변 배치 상한 `MeshMaxSourceInfluences`, Name 길이 상한 `MaxNameFieldBytes`)다. 10.1절 표의 나머지 의존은 그것을 쓰는 단계(UX1b–UX8)에서 더한다. 파일 접근은 `platform::FileSystem`을 인자로 받는다(시험은 메모리 파일 시스템을 쓴다).
+2. **실패 범위.** 묶음 수준 오류(`bundle.json`을 읽지 못함·구문 오류·필수 키 누락·`formatVersion` 불일치·목록 정렬 위반)는 읽기 전체를 실패시킨다. 에셋 수준 오류(에셋 JSON 손상, blob 크기·SHA-256·배치 불일치, 목록과 다른 `objectPath`·`class`)는 그 에셋만 `Failed` 상태로 두고 나머지를 계속 읽는다(9.3절 "부분 결과" 원칙). 실패한 에셋을 Hard로 참조하는 에셋은 순서 계산(15번)에서 `MissingDependency`로 실패한다. 파일을 열거나 읽지 못하면(없음 포함) `CorruptBundle`(세부 규칙 `ReadFailed`)이고 원래 파일 오류를 `error`에 그대로 남긴다. 할당 실패는 진단 없이 그 오류 그대로 전체 실패다.
+3. **진단 형태.** `ExchangeDiagnostic`은 AssetSystem 4.6절 코드, 수준(오류·경고·정보 — 코드마다 고정, 10.3절 표), 원본 `ErrorCode`, 세부 규칙 `ExchangeIssue`, 에셋 번호, 관련 번호(의존 대상 에셋·의존 순번), 파일 종류(`bundle.json`·에셋 JSON·blob), JSON 위치(줄·열·byte), 짧은 텍스트(키 이름·objectPath·blob hex)를 담는다. 묶음 하나의 진단은 `UnrealExchangeMaxDiagnostics`(= 4096)개까지 담고 넘는 것은 개수만 센다(조작된 묶음이 모르는 키 수백만 개로 메모리를 쓰지 못하게). 이 단계에서 등록하는 코드는 리더·경로·순서가 내는 8개(`CorruptBundle`·`UnsupportedBundleVersion`·`UnknownField`·`UnsupportedAsset`·`UnrealPathRenamed`·`UnrealPathTooLong`·`UnrealPathCollision`·`MissingUnrealDependency`)다. `UnsupportedCycle`·`MissingDependency`·`InvalidPath`는 기존 코드를 쓴다. 나머지 10.3절 코드는 그것을 내는 단계에서 등록한다. 원본 `ErrorCode`는 손상 `InvalidArgument`(상한 초과는 `CapacityExceeded`), 버전 `Unsupported`, `UnrealPathTooLong` `CapacityExceeded`, `UnrealPathCollision` `AlreadyExists`, `UnsupportedCycle` `CycleDetected`, `MissingDependency` `NotFound`, `InvalidPath` `InvalidArgument`이고 경고·정보는 `None`이다.
+4. **JSON 읽기.** Core JSON Strict 읽기에 상한 `UnrealExchangeMaxJsonBytes`(= 64 MiB, 파일 하나)를 준다. 깊이·문자열·노드 상한은 Core 기본값이다. BOM은 Core가 경고로 건너뛰지만 3.2절이 BOM 없음을 정하므로 `CorruptBundle`이다. 중복 키는 Core가 구문 오류로 거부한다. 정수 키(`formatVersion`·`bytes`·`components`·`count`)는 JSON 정수여야 한다(`1.0`·지수 표기는 타입 오류). 실수 값은 숫자 또는 문자열 `"nan"`·`"inf"`·`"-inf"`만 받는 공용 함수(`ReadExchangeNumber`)로 읽는다. 종류별 단계가 `settings`·`data`를 읽을 때 쓴다.
+5. **필수 키와 모르는 키.** 필수: `bundle.json`의 `formatVersion`·`exporter`(문자열 4개)·`projectSettings`(bool 2개)·`assets`·`redirects`, 에셋 JSON의 7개 키 전부, 목록·의존·진단·blob 참조 항목의 모든 키. 선택: `environment`(정보, 객체, 내용은 보지 않는다)·`createdUtc`(정보, 문자열). `formatVersion`을 가장 먼저 보므로 다른 버전의 묶음은 스키마 차이와 무관하게 `UnsupportedBundleVersion`이다. 모르는 키 검사(`UnknownField` 경고)는 이 절의 고정 스키마 객체에만 한다. `settings`·`data`·`environment`는 종류별 단계가 본다.
+6. **정렬과 유일성.** `assets`는 `objectPath`의 UTF-8 byte 순으로 엄격 증가(같은 경로 둘은 손상), `redirects`는 `from` 순 엄격 증가, 에셋의 `dependencies`는 `objectPath` 순 엄격 증가다(같은 객체를 두 번 적지 않는다 — Hard·Soft로 모두 참조하면 Hard 하나). 내보내는 쪽이 결정적으로 쓰는 규칙(3.2절)을 리더가 확인해 같은 묶음의 해석이 하나로 정해지게 한다. 3.4·3.5절 표에 반영했다.
+7. **objectPath 문법.** `/<Mount>/<경로…>/<패키지>.<객체>`: 앞 `/`, 패키지 경로 구성 요소 2개 이상(마운트 + 패키지), 빈 구성 요소 없음, `.`은 객체 이름 앞 하나뿐, `:`(하위 객체)·`\`·제어 문자(U+0000–U+001F, U+007F) 없음, 전체 ≤ `UnrealObjectPathMaxBytes`(= 1024, UE `NAME_SIZE`). 어기면 `CorruptBundle`이다. 객체 이름과 패키지 이름이 같을 필요는 없다(경로 대응은 패키지 경로를 쓴다 — 파일 위치가 진실의 원천, AssetSystem 4.2절).
+8. **파일 이름.** 에셋 목록의 `file`은 `assets` + 패키지 경로 + `.json`과 정확히 같아야 한다. blob 파일은 `blobs/<앞 2자>/<64자>.bin`으로 리더가 만든다. 그래서 묶음 밖을 가리키는 경로(`..`·절대 경로)가 생기지 않는다. 목록의 `objectPath`·`class`와 에셋 JSON의 값이 다르면 그 에셋은 `CorruptBundle`이다.
+9. **클래스.** 교환 클래스 이름 14개(2절 UE 클래스에서 `U`를 뺀 것)를 열거로 둔다. 목록에 그 밖의 클래스가 있으면 `UnsupportedAsset` 경고를 내고 그 에셋 JSON은 읽지 않는다(`Unsupported` 상태, 순서 계산에서 빠짐). 의존 항목에는 대상 클래스 `class`를 둔다(3.5절에 더함). 묶음에 없는 대상을 9.3절대로 머티리얼·텍스처와 그 밖으로 가르려면 대상 클래스가 필요하기 때문이다. 범위 밖 클래스를 가리키는 의존은 순서와 누락 판정에서 뺀다(그 참조를 받는 필드는 종류별 단계가 처리한다).
+10. **redirect.** `from`은 묶음의 에셋 경로와 겹칠 수 없고 `to`는 다른 항목의 `from`일 수 없다(사슬 없음 — 플러그인이 끝까지 푼다). 어기면 묶음 수준 `CorruptBundle`이다. 의존의 `objectPath`가 `from`과 같으면 `to`로 바꿔 찾는다.
+11. **blob 참조 인식.** `settings`·`data` 안에서 `blob` 키를 가진 객체를 blob 참조로 본다(종류별 스키마 없이 리더가 모든 blob을 검증할 수 있게). 키는 정확히 3.3절 5개이고(빠지면 손상, 더 있으면 `UnknownField`), `blob`은 소문자 64자 hex, `bytes` ≤ `UnrealExchangeMaxBlobBytes`(= 4 GiB), `components` 1 이상(`boneInfluences`·`sparseVec3`는 1), 고정 배치는 `bytes` = 원소 크기 × components × count(곱이 넘치면 손상)다. 같은 blob hex를 다른 `bytes`로 적으면 손상이다(내용 주소).
+12. **blob 검증.** 읽기 옵션 `verifyBlobs`(기본 켬)이면 서로 다른 (hex, 배치, components, count) 참조마다 파일을 한 번 열어 크기를 먼저 보고(`bytes`와 다르면 큰 할당 없이 손상), `UnrealExchangeBlobChunkBytes`(= 64 KiB) 조각으로 읽으며 SHA-256과 가변 배치 파싱을 함께 한다(파일 전체를 메모리에 올리지 않는다). 가변 배치 규칙(MeshAnimationAssets 3.4.1절): `names`는 count × components개의 (`uint32` 길이 ≤ `MaxNameFieldBytes` + byte)를 끝까지 정확히 소비, `boneInfluences`는 시작 표 첫 값 0·단조 증가·연속 차 ≤ `MeshMaxSourceInfluences`·크기 = 4 × (count + 1) + 4 × 마지막 값, `sparseVec3`는 K ≤ count·번호 엄격 증가·번호 < count·크기 = 4 + 16 × K다. 이름의 UTF-8·NFC, 0 항목, 가중치 같은 내용 규칙은 MeshSource 검증(UX3)이 본다. `LoadExchangeBlob`은 임포트 때 blob 하나를 메모리로 읽고 같은 검사를 다시 한다(읽기와 임포트 사이에 파일이 바뀌어도 잡는다).
+13. **경로 대응 세부(9.1절).** 구성 요소마다 먼저 NFC로 정규화한다(정규화만의 차이는 바꿈으로 치지 않는다). 그다음 허용 문자(L*·N*·M*·`_`·`-`, Default_Ignorable 제외)가 아닌 code point를 하나씩 `_`로 바꾸고, 바꾼 뒤의 첫 문자가 L*·N*가 아니거나(L*이어도 Default_Ignorable인 U+115F 같은 글자는 `_`가 되므로 접두가 붙는다 — 퍼징이 찾은 경우) Windows 예약 이름이면(판정은 Core `ValidateNameComponent`) 앞에 `U`를 붙이고 다시 NFC로 정규화한다(첫 문자가 결합 문자면 `U`와 합성될 수 있다). 바뀌었거나 64 byte를 넘으면 code point 경계에서 55 byte 이하로 자르고 `-` + 해시 8자를 붙인다. 해시 입력은 원래 UE 패키지 경로에서 그 구성 요소까지의 접두다(예: `/Game/My Dir`). 결과는 언제나 `ValidateNameComponent`를 통과한다(퍼징 시험). `--root`도 같은 규칙으로 검사하고 어기면 `InvalidPath` 오류다. 겹침 판정 키는 대응 경로 전체의 `TryMakeCaselessKey`이고 겹치는 에셋 모두를 `UnrealPathCollision`으로 실패시킨다(어느 쪽을 살릴지 집합에 따라 달라지지 않게).
+14. **임포트 순서(9.3절).** 묶음 안 대상을 가리키는 Hard 의존이 간선이다(Soft는 순서에 쓰지 않는다). 간선이 Build인지는 클래스 쌍으로 정한다. 머티리얼 계열(`Material`·`MaterialInstanceConstant`·`MaterialFunction`·`MaterialFunctionInstance`)에서 머티리얼 계열·`MaterialParameterCollection`으로 가는 Hard 의존이 Build다(MaterialSystem 4.4절 — 부모·함수 호출·레이어·컬렉션). Build 관계는 Rocks 개념이라 UE 플러그인이 쓰지 않는다(UX-D2와 같은 이유). SCC는 재귀 없는 Tarjan으로 objectPath 순 시작점에서 구하고, 단위 깊이 = 단위 밖 의존 단위 깊이의 최댓값 + 1(의존 없으면 0)이다. 순서는 (깊이, 단위의 가장 작은 objectPath)다. Build 간선이 단위 안에 있으면(자기 자신 Build 참조 포함) `UnsupportedCycle`, 깊이가 `UnrealImportMaxDepth`를 넘는 단위도 `UnsupportedCycle`(세부 규칙 `DepthLimit`)이다. Hard만의 자기 참조는 무시한다.
+15. **실패 전파와 누락 의존.** 단위의 구성원 하나가 실패(읽기 실패·경로 오류·순환)하면 단위 전체가 실패하고, 실패한 단위를 Hard로 참조하는 단위는 `MissingDependency`(관련 = 처음 걸린 의존 대상)로 실패한다. 묶음에 없는 대상은 선택 인자 `ExchangeExistingAssets`(UX1b가 AssetIndex 태그 조회로 구현)가 있다고 하면 잇고, 없으면 대상 클래스가 텍스처 5종·`Material`·`MaterialInstanceConstant`일 때 `MissingUnrealDependency` 경고, 그 밖은 `MissingDependency` 오류(단위 실패)다.
+16. **상한 상수.** `UnrealExchangeMaxAssets`(= 1,048,576), `UnrealExchangeMaxRedirects`(= 1,048,576), `UnrealExchangeMaxDependencies`(= 65,536, 에셋 하나), 위 4·7·11·12번 상수. 넘으면 그 수준의 `CorruptBundle`이다(세부 규칙 `LimitExceeded`).
+17. **스레드와 수명.** 읽기·순서 계산은 호출한 스레드에서 끝난다. 읽은 `ExchangeBundle`은 바뀌지 않으므로 여러 스레드가 const로 함께 읽어도 된다(`LoadExchangeBlob` 포함 — 넘긴 FileSystem이 스레드 안전할 때). 에셋의 문자열·`settings`·`data`는 그 에셋이 가진 JSON 문서를 가리키므로 묶음보다 오래 쓸 수 없다.
+
+**시험과 coverage(UX1a, 개정 7).** 에셋 시험 기준(AssetSystem — 분기 100% 목표, 입력 변조·실패 주입으로 닿는 오류 분기는 시험으로 닿게)을 적용해 플러그인 Private 소스(`ExchangeBlob`·`ExchangeBundle`·`ExchangeDiagnostic`·`ExchangeImportOrder`·`ExchangePaths`, `ExchangeInternal.h`)는 줄·분기·함수 모두 100%다. 닿지 않던 분기는 두 갈래로 정리했다.
+
+- 시험으로 닿게 한 것: 진단 목록 할당 실패(진단을 내는 자리마다 n번째 할당 실패를 되풀이), 긴 묶음 디렉터리의 경로 조립 할당 실패, 넓은 `settings`·`data`의 탐색 stack 할당 실패, 결합 문자가 든 `--root`(이름 검사에 할당이 든다), 64 KiB 조각 뒤의 읽기 실패(시험 파일 시스템의 늦은 읽기 실패), 목록 상한(에셋·redirect 1,048,577개), 정수 키의 `uint64` 큰 값, 빠진 필수 키 전부, blob 사용 조합(같은 blob의 다른 components·중복·count만 다름, 충돌로 이미 실패한 에셋의 뒤 blob 실패), 순서 경계(읽기 실패 에셋의 경로 초과·겹침, 실패한 의존 둘, Tarjan의 늦은 역간선, SCC 구성원의 누락 의존).
+- 구조를 바꿔 없앤 것(실패할 수 없는 연산의 결과 검사): blob 원천의 읽기는 할당이 없으므로 `Result` 대신 `bool`을 돌려준다. 미리 잡은 용량 안의 경로 붙이기는 연쇄 붙이기(`Append`) 뒤 `Status` 한 번으로 본다. 비어 있지 않은 배열 꺼내기(`TryPopBack`), JSON 숫자의 double 읽기, NFC 결과의 code point 순회는 실패할 수 없어 `.Value()`로 받는다. 예약해 둔 배열에 넣기는 예약을 없애 넣기 자체가 할당 실패 지점이 되게 했다(할당 실패 시험이 닿는다). blob 사용 정렬은 에셋 번호까지 같은 두 사용이 없으므로 마지막 비교를 에셋 번호로 끝낸다.
+- 사유를 남기고 닿지 않는 분기: 없음.
 
 ## 11. UE 플러그인 `RocksExport`
 
@@ -426,7 +454,7 @@ ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으�
 
 | 단계 | 쪽 | 내용 | 선행 |
 |---|---|---|---|
-| UX1a | Rocks | 묶음 형식 v1 리더·검증(JSON 스키마·blob SHA-256·크기), 경로 대응·이름 보정, 위상 정렬(SCC), 손으로 만든 묶음 fixture와 변조 시험 — 에셋 DB에 쓰지 않는 부분 | MA1(원본 메시 형태 확인용), 엔진 플러그인 빌드 지원(BuildTargets 3.6절) |
+| UX1a | Rocks | 묶음 형식 v1 리더·검증(JSON 스키마·blob SHA-256·크기), 경로 대응·이름 보정, 위상 정렬(SCC), 손으로 만든 묶음 fixture와 변조 시험 — 에셋 DB에 쓰지 않는 부분. **구현**(2026-11-21, 10.4절) | MA1(원본 메시 형태 확인용), 엔진 플러그인 빌드 지원(BuildTargets 3.6절) |
 | UX1b | 둘 다 | 플러그인 골격(메뉴·commandlet·writer·SHA-256·숫자 서식·덤프·닫힘·redirector), Rocks 임포트 프레임워크 연결 | UX1a, A2(AssetDatabase 임포트 프레임워크), UE 5.8 Launcher 설치판(C:) |
 | UX2 | 둘 다 | 텍스처 추출·임포트(4절) | UX1b, A5 |
 | UX3 | 둘 다 | 정적 메시 추출(`source`·`prepared`·생성 LOD·충돌)·임포트 | UX1b, MeshAnimationAssets MA2b–MA3 |
@@ -467,6 +495,8 @@ ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으�
 - 개정 3(2026-11-20): 13절 요구 UXR1–UXR4·UXR6·UXR7을 대상 문서에 반영했다(AssetSystem 10, MaterialSystem 6, BuildTargets 3). AssetSystem 7절의 임포터 태그 접두 규칙에 맞춰 태그 키를 `UnrealExchange.ObjectPath`·`UnrealExchange.FormerPaths`로 바꿨다. UXR5(정책 검사)는 코드라 UX1에서 한다. 13절에 상태 열을 더했다.
 - 개정 4(2026-11-20): UXR5를 구현했다. 11.1절에 정책 검사 `foreign-engine-boundary`의 규칙(양방향: `Extras/`의 Rocks 서술자·Rocks 규칙 참조, Rocks 규칙 경로의 UE 서술자·UE 규칙 참조)을 적었다.
 - 개정 5(2026-11-21): UX1을 UX1a(Rocks 리더·검증·경로 대응·위상 정렬)와 UX1b(UE 플러그인 골격·임포트 연결)로 나눴다(사용자 지시 "진행 가능한거부터"). UE 플러그인 실행 환경(Launcher 설치판, C:)을 적었다.
+- 개정 6(2026-11-21): UX1a를 구현했다(엔진 플러그인 빌드 BS9a–BS9d 뒤). 구현에서 정한 점을 10.4절에 적었다. 형식 v1을 좁혔다: `assets`·`redirects`·`dependencies` 정렬과 유일성, 의존 항목의 대상 `class`, redirect 사슬 금지, `file` 이름 규칙(3.4·3.5절). 리더가 내는 진단 8개를 `AssetDiagnosticCode`에 등록했다(AssetSystem 4.6절).
+- 개정 7(2026-11-21): UX1a 플러그인 Private coverage를 줄 93.96%·분기 91.36%에서 100%·100%로 올렸다. 닿을 수 있는 오류 분기는 실패 주입 시험을 더했고 실패할 수 없는 결과 검사는 구조를 바꿔 없앴다(10.4절 끝 문단).
 
 ## 18. 교차 검증 기록(개정 2)
 

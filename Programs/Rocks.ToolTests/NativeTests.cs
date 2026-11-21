@@ -555,6 +555,7 @@ internal static class NativeTests
                         ["name"] = "Fake",
                         ["version"] = "1.0",
                         ["upstreamDirectory"] = "fake-1.0",
+                        ["globalState"] = false,
                         ["source"] = new { url = "https://example.invalid/fake.tar.gz", sha256 = new string('0', 64), verification = "fixture" },
                         ["licenses"] = new[] { new { spdx = "BSD-2-Clause", upstreamExpression = "BSD-2-Clause", file = "fake-1.0/fake.c", binaryNoticeRequired = true } },
                         ["translationUnits"] = new[] { "fake-1.0/fake.c" },

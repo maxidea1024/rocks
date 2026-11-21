@@ -2,7 +2,7 @@ using Rocks.Build.Descriptors;
 using Rocks.Build.Rules;
 
 // Reflection test fixture module (Docs/Design/ReflectionFoundations.ko.md section 1.9). The Foundation and Engine test executables
-// depend on it, and this module owns the reflection headers and the identity spec (ReflectionTestFixtures.rocksids.json). Header only.
+// depend on it, and this module owns the reflection headers and the identity spec (ReflectionTestFixtures.rocksids.json).
 public sealed class ReflectionTestFixtures : CoreModuleRules
 {
     protected override string Group => "Developer";
@@ -16,8 +16,6 @@ public sealed class ReflectionTestFixtures : CoreModuleRules
     // CoreTypeBindings: the Core value type field fixture (CoreValueFixture.h) imports that module's Binds mirrors.
     // Localization: rocks::Text fields (TextFieldFixture.h).
     protected override string[] PublicDependencies => ["ObjectRuntime", "CoreTypeBindings", "Localization"];
-
-    protected override bool HasSources => false;
 
     protected override IReadOnlyList<string> Metadata =>
         ["ReflectionTestFixtures/ReflectionFixture.h", "ReflectionTestFixtures/AutoIdentityFixture.h", "ReflectionTestFixtures/StructFixture.h",

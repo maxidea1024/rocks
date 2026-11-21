@@ -68,7 +68,7 @@ public static class MetadataRunner
         // (Docs/Design/ModuleLoader.ko.md 3.8절). 그 모듈의 descriptor import는 링크 의존만 따르므로 후위 순서가 그대로 생성 순서다.
         for (int index = 0; index < order.Count; ++index)
         {
-            foreach (string dynamic in byName[order[index]].DynamicModules)
+            foreach (string dynamic in byName[order[index]].PluginModules.Concat(byName[order[index]].DynamicModules))
             {
                 Reach(dynamic);
             }

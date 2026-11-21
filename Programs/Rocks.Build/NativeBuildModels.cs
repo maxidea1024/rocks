@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Rocks.Build;
 
 // Android는 Windows·macOS host에서 NDK로 교차 빌드한다(그 밖의 host/target 조합은 거부).
@@ -299,6 +301,11 @@ public sealed record NativeModuleInput
     // (PluginModuleRules)가 정한다. Release 배제 정책이 Developer 모듈을 이 칸으로 찾는다. 실행 파일·서드파티는 Runtime이다.
     public Descriptors.ModuleType Type { get; init; } = Descriptors.ModuleType.Runtime;
 
+    // 이 실행 파일에 링크할 켠 플러그인 모듈이다(Docs/Design/BuildTargets.ko.md 3.9절 BD36, UE AddModuleToBinary). 빌드가 타깃의 주 실행
+    // 파일(TargetRules.Modules[0])에 채우고 규칙은 채우지 않는다(RuleLoader가 거부). 의존이 아니므로 include·정의를 받지 않고, 링크 폐포 뒤에
+    // 그 모듈과 링크 폐포를 링크하며 모듈 표에 보통 행(기술자 단계로 시작)으로 싣는다. 실행 파일만 가질 수 있다.
+    public IReadOnlyList<string> PluginModules { get; init; } = [];
+
     // 설치 SDK 모듈 전용: 미리 생성된 descriptor와 identity 명세다. 다시 생성하지 않고 import만 한다.
     // Metadata와 함께 쓸 수 없다.
     public ImportedMetadata? ImportedMetadata { get; init; }
@@ -335,6 +342,11 @@ public sealed record NativeModuleInput
     // 서드파티 라이브러리 모듈 표지다(ThirdPartyModuleRules가 켠다). C++ 모듈 코드가 없으므로 모듈 표에 들지 않고 ROCKS_MODULE_NAME을 받지
     // 않는다(Docs/Design/ModuleLoader.ko.md 3.1절 면제). 설치 SDK가 함께 나른다.
     public bool ThirdParty { get; init; }
+
+    // 프로세스 전역 상태가 있는 서드파티 모듈 표지다(ThirdPartyModuleRules가 ThirdParty.json globalState로 켠다 — Docs/Design/BuildTargets.ko.md
+    // 3.8절 BD29·BS8c). 켜진 모듈을 직접 의존(두 의존 목록)하는 모듈이 둘 이상이면 입력 오류다(InputValidation): Modular에서 서드파티는
+    // 소비 모듈의 공유 라이브러리마다 링크되므로 상태가 두 벌이 된다. 다른 모듈은 그 소비 모듈의 Rocks API를 거친다.
+    public bool HasGlobalState { get; init; }
 
     // 모듈 표 행에 싣는 로딩 단계다(Docs/Design/ModuleLoader.ko.md 3.3·3.11절). 기술자 모듈(게임·플러그인)은 기술자의 loadingPhase를
     // DescriptorModuleSet.Apply가 넣고, 엔진 모듈은 규칙의 LoadingPhase(기본 Default)다. 모듈 표를 만들 때 행의 의존이 이 단계보다 늦으면
@@ -452,6 +464,18 @@ public static class LinkTypes
         string stem = target + "-" + module + (configuration == NativeConfiguration.Development ? "" : "-" + platform + "-" + configuration);
         return platform == NativePlatform.Windows ? stem : "lib" + stem;
     }
+
+    /// <summary>공유 라이브러리 확장자다(Windows <c>.dll</c>, macOS <c>.dylib</c>, 그 밖 <c>.so</c>).</summary>
+    public static string SharedLibraryExtension(NativePlatform platform) =>
+        platform == NativePlatform.Windows ? ".dll" : platform == NativePlatform.MacOS ? ".dylib" : ".so";
+
+    /// <summary>
+    /// 공유 라이브러리 파일 이름이다(<see cref="SharedLibraryStem"/>과 확장자). 사용 예:
+    /// <c>LinkTypes.SharedLibraryFileName("Editor", "Core", NativePlatform.Windows, NativeConfiguration.Debug)</c>는
+    /// <c>"Editor-Core-Windows-Debug.dll"</c>이다.
+    /// </summary>
+    public static string SharedLibraryFileName(string target, string module, NativePlatform platform, NativeConfiguration configuration) =>
+        SharedLibraryStem(target, module, platform, configuration) + SharedLibraryExtension(platform);
 }
 
 public sealed record NativeBuildRequest
@@ -518,9 +542,18 @@ public sealed record NativeBuildRequest
     // 집계 파일 이름에 쓰는 이름이다(보통 타깃 이름). null이면 "Build"다.
     public string? TimingLabel { get; init; }
 
+    // 실행한 action의 프로세스마다 CPU 시간과 최대 메모리를 재는가(Docs/Design/UnityBuildPch.ko.md 12절 "묶음 크기 실측" — 명령
+    // unity-profile이 켠다). 값은 NativeActionResult의 CpuMilliseconds·PeakMemoryBytes·PeakCommitBytes·ProcessMeasured에 실린다. 측정값이라 action
+    // key·도구 빌드 ID·compile_commands.json에는 들어가지 않는다(켜고 꺼도 cache가 그대로 맞는다).
+    public bool MeasureProcesses { get; init; }
+
     // 계획만 세우는가(명령 옵션 --plan-only on). true면 생성 TU·묶음 파일·compile_commands.json까지 쓰고 action은 하나도 실행하지 않는다
     // (증분 기록도 건드리지 않는다). clangd 입력이나 묶음 구성을 빌드 없이 얻을 때 쓴다. 결과의 Actions는 비어 있고 PlanOnly가 참이다.
     public bool PlanOnly { get; init; }
+
+    // 계획 방식이다(Docs/Design/ProjectFiles.ko.md 8.1절). Ide는 IDE 프로젝트 파일 생성용 계획으로, 출력에 아무것도 쓰지 않고 생성물의
+    // 존재를 요구하지 않는다. BuildAsync는 받지 않는다(IdePlanner.Plan만 쓴다).
+    public NativePlanMode PlanMode { get; init; } = NativePlanMode.Build;
 
     // response file 사용 방식이다(NativeCommandLine). 기본 Auto이며 시험만 Always·Never로 경로를 강제한다. key에 들어가지 않는다.
     internal ResponseFileMode ResponseFiles { get; init; } = ResponseFileMode.Auto;
@@ -533,6 +566,21 @@ public sealed record NativeActionResult(string Id, string Module, string Kind, b
     // 임시 디렉터리 정리까지를 잰다(실행 슬롯을 기다린 시간은 빼고, 병렬 action끼리는 겹친다). 실행하지 않은 action(cache hit, 선행 action
     // 실패)은 0이다. 측정값이라 action key·도구 빌드 ID·compile_commands.json에는 들어가지 않고 action-report.json에만 실린다.
     public long DurationMilliseconds { get; init; }
+
+    // 이 action이 실행한 프로세스의 CPU 시간(ms, 사용자 + 커널)과 최대 working set·최대 commit(byte)이다.
+    // NativeBuildRequest.MeasureProcesses를 켜고 실행했고 호스트가 값을 줄 때만 ProcessMeasured가 참이고, 그 밖에는(cache hit 포함) 모두
+    // 기본값이다. 기본값이면 action-report.json에 쓰지 않는다(평소 빌드의 보고서는 이 필드가 없다).
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public long CpuMilliseconds { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public long PeakMemoryBytes { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public long PeakCommitBytes { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool ProcessMeasured { get; init; }
 }
 
 public sealed record NativeBuildResult
@@ -575,4 +623,8 @@ public sealed record NativeBuildResult
 
     // 실행 파일 모듈 이름 → 도구 빌드 ID(SHA-256 소문자 hex)다. link가 성공한 BuildInfo 대상 실행 파일만 담는다.
     public IReadOnlyDictionary<string, string> ToolBuildIds { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
+
+    // Modular 타깃의 모듈 manifest 경로다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d1 — ModuleManifests). Monolithic·모듈 표 제공 모듈에 닿지
+    // 않는 빌드·실패한 빌드는 null이다.
+    public string? ModuleManifestPath { get; init; }
 }

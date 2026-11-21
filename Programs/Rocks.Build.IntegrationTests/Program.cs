@@ -27,6 +27,30 @@ if (args.Length == 1 && args[0] == "--platform-path-header")
     }
 }
 
+// Visual Studio 프로젝트 파일 쓰기 시험만 돈다(Docs/Design/ProjectFiles.ko.md 16절 V2–V5). 현재 디렉터리가 저장소 루트여야 한다.
+if (args.Length == 1 && args[0] == "--project-files")
+{
+    await ProjectFilesWriterTests.RunAsync(Path.GetFullPath("."));
+    return 0;
+}
+
+// unity-profile 명령의 입력 거부만 돈다(현재 디렉터리가 저장소 루트여야 한다).
+if (args.Length == 1 && args[0] == "--unity-profile-command")
+{
+    var temporary = Path.Combine(Path.GetTempPath(), "Rocks unity profile " + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(temporary);
+    try
+    {
+        await UnityProfileCommandTests.RunAsync(Path.GetFullPath("."), temporary);
+        Console.WriteLine("[PASS] unity-profile-command-rejections");
+        return 0;
+    }
+    finally
+    {
+        Directory.Delete(temporary, recursive: true);
+    }
+}
+
 var options = new Dictionary<string, string>(StringComparer.Ordinal);
 
 for (var index = 0; index < args.Length; index += 2)
@@ -57,8 +81,12 @@ try
     await OutputInvocationLockTests.RunAsync();
     MetadataOutputTransactionTests.Run();
     MetadataLayoutTests.Run();
+    TargetDefinitionsTests.Run();
+    await ProjectFilesWriterTests.RunAsync(root);
     MetadataTemporaryCleanupTests.Run();
     await PlatformPrivateHeaderTests.RunAsync(toolchain, Path.Combine(fixture, "platform-header"));
+    await UnityProfileCommandTests.RunAsync(root, Directory.CreateDirectory(Path.Combine(fixture, "unity-profile-command")).FullName,
+        options.GetValueOrDefault("--compiler"));
     Pass("output-invocation-lock-and-platform-header-incremental", timer.Elapsed);
     timer.Restart();
     var exported = await Cli("sdk", "--root", root, "--target", "Engine", "--configuration", "Debug", "--destination", sdk);
@@ -99,10 +127,10 @@ try
             !sdkModules.Single(module => module.GetProperty("Name").GetString() == "Core").GetProperty("ProvidesLaunch").GetBoolean(),
             "Engine SDK manifest does not carry the loading phases and the boot marker");
         var sdkEngine = engineManifest.RootElement.GetProperty("EngineVersion");
-        Require(engineManifest.RootElement.GetProperty("Version").GetInt32() == 12 &&
+        Require(engineManifest.RootElement.GetProperty("Version").GetInt32() == 13 &&
             sdkEngine.GetProperty("Major").GetInt32() == engineVersion.Major && sdkEngine.GetProperty("Minor").GetInt32() == engineVersion.Minor &&
             sdkEngine.GetProperty("Patch").GetInt32() == engineVersion.Patch && sdkEngine.EnumerateObject().Count() == 3,
-            "Engine SDK manifest version 12 does not carry the Build/Build.version engine version: " + sdkEngine.GetRawText());
+            "Engine SDK manifest version 13 does not carry the Build/Build.version engine version: " + sdkEngine.GetRawText());
     }
 
     Require(!Directory.GetFiles(sdk, "Build.version", SearchOption.AllDirectories).Any(), "Installed SDK copied Build/Build.version");
@@ -951,7 +979,7 @@ try
     var sdkManifestPath = Path.Combine(sdk, "rocks-sdk.json");
     var sdkManifestBytes = File.ReadAllBytes(sdkManifestPath);
     var sdkManifestText = File.ReadAllText(sdkManifestPath);
-    Require(sdkManifestText.Contains("\"Version\": 12,", StringComparison.Ordinal), "SDK manifest is not version 12:\n" + sdkManifestText);
+    Require(sdkManifestText.Contains("\"Version\": 13,", StringComparison.Ordinal), "SDK manifest is not version 13:\n" + sdkManifestText);
     SetReadOnly(sdkManifestPath, false);
     try
     {

@@ -91,7 +91,8 @@ public:
     // Color는 (1, 1, 1, 1), Name은 빈 문자열, 영향은 없음)으로 한 칸 늘어난다. 번호의 범위·관계는
     // 보지 않는다(ValidateMeshSource가 본다).
     //
-    // 오류: 그 요소 수가 이미 MeshMaxElements이면 CapacityExceeded, 할당 실패는 allocator 오류다.
+    // 오류: 그 요소 수가 이미 MeshMaxElements(다각형 묶음은 MeshMaxPolygonGroups)이면
+    // CapacityExceeded, 할당 실패는 allocator 오류다.
     Result<uint32> AddVertex(const Vec3& position) noexcept;
     Result<uint32> AddCorner(uint32 vertex) noexcept;
     // 두 정점을 작은 번호 먼저로 담는다(같은 정점이면 그대로 — 검증이 거부한다).

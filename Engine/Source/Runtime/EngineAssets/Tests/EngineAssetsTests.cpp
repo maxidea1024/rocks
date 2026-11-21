@@ -698,8 +698,13 @@ TEST(EngineAssets_PumpFailureAndBootValues) {
 // 초기화 할당 실패(11.8절 4): 엔진 allocator의 모든 할당 지점에서 한 번 실패해도 엔진 초기화가
 // 실패하거나(그 오류) 성공하고, 실패면 Failed 상태로 정리되며, 성공이면 프레임과 종료가 정상이다.
 TEST(EngineAssets_InitializationAllocationFailures) {
+    ManualEngineAssetsLogs logs;
+    LogInstallScope installed(logs.logs);
     DiskScene disk("alloc");
     REQUIRE(disk.Write());
+    // 봉투 읽기·검증 상태의 할당 실패가 그 단계 이름으로 기록되는지 본다(ContentSigning 7절 4).
+    uint32 envelopeReadFailures = 0;
+    uint32 envelopeVerifyFailures = 0;
     SystemAllocator system;
     test::NFailAllocator failing(system);
     const EngineSubsystemType subsystems[] = {EngineAssetsSubsystemType()};
@@ -708,6 +713,8 @@ TEST(EngineAssets_InitializationAllocationFailures) {
         ConfigFixture fixture(DevelopmentRules());
         REQUIRE(PrepareSettings(fixture.Context(), disk.Root()));
         bool failed = false;
+        logs.Pump();
+        CapturedLogs.Reset();
         {
             Engine engine(failing);
             failing.FailOnAttempt(attempt);
@@ -724,6 +731,20 @@ TEST(EngineAssets_InitializationAllocationFailures) {
             }
         }
 
+        logs.Pump();
+        const char* message = CapturedLogs.Message(LogLevel::Error, InitFailedLog);
+        auto startsWith = [message](const char* prefix) noexcept {
+            return strncmp(message, prefix, strlen(prefix)) == 0;
+        };
+        envelopeReadFailures +=
+            startsWith("EngineAssets initialization failed at content signature read: "
+                       "OutOfMemory")
+                ? 1
+                : 0;
+        envelopeVerifyFailures += startsWith("EngineAssets initialization failed at content "
+                                             "signature (None): OutOfMemory")
+                                      ? 1
+                                      : 0;
         if (!failed) {
             break;
         }
@@ -732,6 +753,8 @@ TEST(EngineAssets_InitializationAllocationFailures) {
     }
 
     CHECK(failures > 0);
+    CHECK(envelopeReadFailures > 0);
+    CHECK(envelopeVerifyFailures > 0);
 }
 
 // 프레임 할당 실패(11.8절 5): Discard가 일어나는 프레임과 그다음 프레임의 모든 할당 지점에서 한 번

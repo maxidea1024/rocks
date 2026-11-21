@@ -574,19 +574,21 @@ public:
 
     // 2b: 1단계가 보관한 필드를 staged 객체에 쓴다(노드 참조는 2a의 handle로, 외부 참조 i는
     // imports[i − 1]로 바꾼다). imports는 생존 객체 또는 이 트랜잭션의 객체(같은 트랜잭션에 올린
-    // SCC 형제 — transaction.FindObject로 찾는다)이고 배열은 호출 동안 유효해야 한다. 쓰기 전에
-    // imports를 모두 확인하므로 확인 실패는 아무 필드도 쓰지 않는다. 작업량은 1단계가 청구했다.
+    // SCC 형제 — transaction.FindObject로 찾는다)이거나 null handle(미해결 import — 확인을 건너뛰고
+    // 그 외부 참조를 쓰는 필드·원소는 null이 된다, 에디터의 누락 import: AS 7.1절 15)이고 배열은
+    // 호출 동안 유효해야 한다. 쓰기 전에 imports를 모두 확인하므로 확인 실패는 아무 필드도 쓰지
+    // 않는다. 작업량은 1단계가 청구했다.
     //
     // 순서와 오류: 호출 검사(상태 불변 — 생성자가 기억한 오류 → 진행 중 Busy → CreateObjects 뒤가
     // 아니면 InvalidArgument → 접근 WrongThread·WrongContext → transaction의 Registry·접근 문맥
     // WrongContext → CreateObjects와 다른 트랜잭션이거나 끝난 트랜잭션 InvalidArgument → 다른
     // 단계의 실패로 고정된 트랜잭션은 그 오류) → imports 확인(imports 수가 importTypes 수와 다름
-    // InvalidArgument → import마다 생존·이 트랜잭션 객체가 아님 StaleHandle(종료·재진입은
-    // ShuttingDown·Busy) → 실제 타입이 선언 타입의 native 파생이 아님 InvalidArgument(호출자 계약)
-    // → 기록한 (import, 기대 형식) 쌍마다 실제 대상이 기대를 만족하지 않음 TypeMismatch, 확인 표
-    // 할당 OutOfMemory) → 쓰기(staged 쓰기·codec의 오류 — 할당 OutOfMemory 등). imports 확인과
-    // 쓰기의 실패는 객체를 만든 뒤의 실패라 Stage를 실패 상태로 두고 트랜잭션을 그 오류로
-    // 고정한다(imports 수 불일치도 — 인자의 내용은 호출 검사가 아니다).
+    // InvalidArgument → null이 아닌 import마다 생존·이 트랜잭션 객체가 아님
+    // StaleHandle(종료·재진입은 ShuttingDown·Busy) → 실제 타입이 선언 타입의 native 파생이 아님
+    // InvalidArgument(호출자 계약) → 기록한 (import, 기대 형식) 쌍마다 실제 대상이 기대를 만족하지
+    // 않음 TypeMismatch, 확인 표 할당 OutOfMemory) → 쓰기(staged 쓰기·codec의 오류 — 할당
+    // OutOfMemory 등). imports 확인과 쓰기의 실패는 객체를 만든 뒤의 실패라 Stage를 실패 상태로
+    // 두고 트랜잭션을 그 오류로 고정한다(imports 수 불일치도 — 인자의 내용은 호출 검사가 아니다).
     Result<void> ApplyFields(ConstructionContext& transaction,
                              Span<const ObjectHandle> imports = {}) noexcept;
 

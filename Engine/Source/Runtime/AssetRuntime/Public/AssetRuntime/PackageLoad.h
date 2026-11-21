@@ -1,12 +1,15 @@
 #pragma once
 
+#include <AssetRuntime/BulkStore.h>
 #include <AssetRuntime/PackageReader.h>
+#include <Core/Memory/UniquePtr.h>
 #include <Object/TypeLease.h>
 #include <ObjectSerialization/ObjectGraph.h>
 
 namespace rocks {
 
 class PackageImportResolver;
+struct PackageInstantiateOptions;
 
 namespace detail {
 
@@ -50,8 +53,17 @@ private:
 
 } // namespace detail
 
+// 로드한 패키지의 bulk 처리다(AS 7.1절 15): Decode는 Prepare가 모두 풀어 Package가 갖는다(런타임),
+// Defer는 풀지 않고 호출자가 SetBulkStore로 건 저장소가 지연 읽기를 한다(에디터 — Bulk 섹션 내용은
+// 읽지 않으므로 그 손상은 지연 읽기가 entry마다 발견한다).
+enum class PackageBulkMode : uint8 {
+    Decode,
+    Defer
+};
+
 // 패키지 로드 옵션이다.
 struct PackageLoadOptions {
+    PackageBulkMode bulk = PackageBulkMode::Decode;
     // 기대 종류·커스텀 버전·엔진 버전이다(types는 PackageLoadState의 TypeRegistry로 채운다).
     PackageReadOptions read;
     // 압축을 푼 bulk raw byte 합의 상한이다(넘으면 CapacityExceeded — 자원 한도라 손상이 아니다).
@@ -116,6 +128,16 @@ public:
     // 위반은 CorruptPackage다.
     Result<void> Prepare(Array<uint8>&& file, AssetDiagnostic* failure = nullptr) noexcept;
 
+    // 범위 읽기로 Prepare한다(Defer 전용 — Bulk 섹션 내용을 읽지 않는다, ReadPackageForEdit). 읽은
+    // 섹션 byte는 이 상태가 소유한다. 오류: Decode 옵션 InvalidArgument, 그 밖은 Prepare(file)와
+    // 같다(범위 읽기 IO 오류는 진단 None과 그 오류).
+    Result<void> Prepare(PackageRangeReader& reader, AssetDiagnostic* failure = nullptr) noexcept;
+
+    // Defer로 Prepare한 상태에 bulk 저장소를 건다(InstantiatePackages가 Package로 옮긴다). 오류:
+    // Decode 옵션·Prepare 전·InstantiatePackages에 넘긴 뒤·null 저장소 InvalidArgument(저장소는
+    // 호출자에게 남는다).
+    Result<void> SetBulkStore(UniquePtr<PackageBulkStore>& store) noexcept;
+
     bool IsPrepared() const noexcept {
         return prepared_;
     }
@@ -144,8 +166,13 @@ private:
     friend Result<void> InstantiatePackages(ConstructionContext&, Span<PackageLoadState* const>,
                                             PackageImportResolver*, Span<ObjectHandle>,
                                             AssetDiagnostic*) noexcept;
+    friend Result<void> InstantiatePackages(ConstructionContext&, Span<PackageLoadState* const>,
+                                            const PackageInstantiateOptions&, Span<ObjectHandle>,
+                                            AssetDiagnostic*) noexcept;
 
     Result<void> CrossCheck(AssetDiagnostic* failure, const TypeLease& representativeType) noexcept;
+    // contents_를 채운 뒤의 Prepare 공통 단계다.
+    Result<void> PrepareContents(AssetDiagnostic* failure) noexcept;
 
     Allocator& allocator_;
     ObjectRegistry& registry_;
@@ -154,6 +181,8 @@ private:
     detail::PackageLoadHooks hooks_;
     ObjectGraphStage stage_;
     Array<uint8> file_;
+    // 범위 읽기 Prepare가 읽은 섹션 byte다(contents_가 가리킨다).
+    Array<Array<uint8>> buffers_;
     PackageContents contents_;
     Array<GraphNodeDesc> nodes_;
     Array<TypeId> importTypes_;
@@ -163,11 +192,33 @@ private:
     // 압축을 푼 bulk(상태 allocator로 할당 — Package가 복사 없이 이어받는다).
     Array<uint8> bulkBytes_;
     Array<PackageBulkSlot> bulkSlots_;
+    UniquePtr<PackageBulkStore> bulkStore_;
     bool prepared_ = false;
     bool attempted_ = false;
     bool readOnly_ = false;
     // InstantiatePackages에 한 번 넘겼는지다(성공·실패 모두 — 다시 넘기면 InvalidArgument).
     bool instantiated_ = false;
+};
+
+// import 해석 정책이다(AS 7.1절 15): Strict는 누락·형식이 맞지 않는 import를 실패로 끝낸다(로더·
+// 쿠킹), NullMissing은 그 import를 null로 잇고 미해결 목록에 적는다(에디터 — UE LinkerLoad
+// ImportFailure 대응, 미해결 import가 있는 패키지의 저장은 에디터가 막는다).
+enum class PackageImportPolicy : uint8 {
+    Strict,
+    NullMissing
+};
+
+// 미해결 import 하나다(NullMissing). import는 패키지 ObjectImports의 0부터 위치다. 에셋 전체가
+// 풀리지 않으면 그 에셋의 첫 import에 한 번 적는다(그 에셋의 다른 import도 null이다).
+struct PackageUnresolvedImport {
+    AssetId package{};
+    AssetId target{};
+    uint32 import = 0;
+    // MissingDependency(대상 패키지·대표 에셋·객체 없음, outer import 미해결) 또는
+    // TypeMismatch(대표 에셋이 Hard 의존 expectedType의 파생이 아님·객체가 import 선언 타입의
+    // 파생이 아님).
+    AssetDiagnosticCode code = AssetDiagnosticCode::None;
+    ErrorCode error = ErrorCode::None;
 };
 
 // 이미 공개된 패키지를 AssetId로 찾는다(로더·AssetManager가 구현한다). InstantiatePackages가 같은
@@ -187,7 +238,8 @@ protected:
 // ApplyFields → 모든 CheckRequired → id·bulk 설정. 공개(Commit)는 호출자가 한다 — 관찰자 Commit
 // 기록의 transaction id를 Commit 전에 읽어 둘 수 있게.
 //
-// 인자: packages(Prepare 완료, 아직 InstantiatePackages에 넘긴 적 없음, 서로 다른 AssetId),
+// 인자: packages(Prepare 완료, 아직 InstantiatePackages에 넘긴 적 없음, 서로 다른 AssetId, Defer
+// 상태에 bulk entry가 있으면 SetBulkStore를 마침),
 // resolver(null이면 묶음 밖 import는 MissingDependency), outPackages(크기 = packages, i번째
 // Package handle — 공개 전 객체).
 //
@@ -204,6 +256,26 @@ protected:
 Result<void> InstantiatePackages(ConstructionContext& transaction,
                                  Span<PackageLoadState* const> packages,
                                  PackageImportResolver* resolver, Span<ObjectHandle> outPackages,
+                                 AssetDiagnostic* failure = nullptr) noexcept;
+
+// InstantiatePackages의 선택이다.
+struct PackageInstantiateOptions {
+    PackageImportResolver* resolver = nullptr;
+    PackageImportPolicy imports = PackageImportPolicy::Strict;
+    // NullMissing이면 미해결 import를 붙인다(null이면 InvalidArgument).
+    Array<PackageUnresolvedImport>* unresolved = nullptr;
+};
+
+// 위와 같되 import 정책을 고른다. NullMissing에서는 Strict가 MissingDependency·TypeMismatch로
+// 실패하던 import 해석(대상 패키지 없음 — resolver NotFound, 대표 에셋 없음, Hard 의존 대표 타입이
+// expectedType의 파생이 아님, 객체 없음, 객체 타입이 선언 타입의 파생이 아님)이 실패 대신 null
+// import와 미해결 기록이 된다. 그 밖의 오류(resolver의 다른 오류·잘못된 handle·타입 조회)는
+// Strict와 같다. 오류: NullMissing인데 unresolved가 null이면 InvalidArgument, 미해결 기록의 할당
+// 실패.
+Result<void> InstantiatePackages(ConstructionContext& transaction,
+                                 Span<PackageLoadState* const> packages,
+                                 const PackageInstantiateOptions& options,
+                                 Span<ObjectHandle> outPackages,
                                  AssetDiagnostic* failure = nullptr) noexcept;
 
 } // namespace rocks

@@ -48,6 +48,26 @@ internal static partial class SelfTests
             Verify.Equal(1, PolicyChecks.OptimizationOverrides(temporary.Root).Count, "committed Never optimization rule escaped audit");
             temporary.Write("Engine/Source/Runtime/Probe/Probe.Build.cs", "// rules\n");
 
+            // 최적화 인자의 미리 정의 매크로는 시험 소스를 포함해 거부한다(IDE IntelliSense가 보지 못한다).
+            foreach (string source in new[] { "#if __OPTIMIZE__\n#endif", "#ifdef __OPTIMIZE_SIZE__\n#endif", "#if defined(__NO_INLINE__)\n#endif" })
+            {
+                temporary.Write("Engine/Source/Runtime/Probe/Private/Probe.cpp", source + "\n");
+                var failures = PolicyChecks.OptimizationOverrides(temporary.Root);
+                Verify.That(failures.Count == 1 && failures[0].ToString().Contains("ide-invisible-macro", StringComparison.Ordinal),
+                    "optimization predefined macro escaped audit: " + source);
+                temporary.Write("Engine/Source/Runtime/Probe/Private/Probe.cpp", "void F();\n");
+                temporary.Write("Core/Source/Runtime/Core/Tests/ProbeTests.cpp", source + "\n");
+                failures = PolicyChecks.OptimizationOverrides(temporary.Root);
+                Verify.That(failures.Count == 1 && failures[0].ToString().Contains("ide-invisible-macro", StringComparison.Ordinal),
+                    "optimization predefined macro escaped audit in a test source: " + source);
+                temporary.Write("Core/Source/Runtime/Core/Tests/ProbeTests.cpp", "void G();\n");
+            }
+
+            // 주석과 문자열 리터럴 안의 이름은 허용한다.
+            temporary.Write("Engine/Source/Runtime/Probe/Private/Probe.cpp", "// __OPTIMIZE__ is not used\nconst char* Name = \"__NO_INLINE__\";\n");
+            NoFailures(PolicyChecks.OptimizationOverrides(temporary.Root));
+            temporary.Write("Engine/Source/Runtime/Probe/Private/Probe.cpp", "void F();\n");
+
             // 강제 인라인은 테스트 소스에서도 거부한다. 단어만 언급한 주석은 허용한다.
             temporary.Write("Engine/Source/Runtime/Probe/Private/Probe.cpp", "// UE FORCEINLINE과 always_inline은 쓰지 않는다\nvoid F();\n");
             NoFailures(PolicyChecks.OptimizationOverrides(temporary.Root));
@@ -934,6 +954,38 @@ internal static partial class SelfTests
                 Verify.Equal(1, PolicyChecks.PlatformBoundary(temporary.Root).Count, "public Windows header allowance too wide: " + lookalike);
                 temporary.Write(lookalike, "#pragma once\n");
             }
+        });
+        // 공개 헤더 정적 저장소(Docs/Design/BuildTargets.ko.md 3.8절 BD29·BS8c): 엔진 소유 모듈의 Public/ 헤더(엔진 플러그인 모듈 포함)에는
+        // thread_local을 두지 않는다 — 정의뿐 아니라 extern 선언·static 데이터 멤버 선언도 거부한다.
+        suite.Add("Policy.PublicHeaderRejectsThreadLocal", () =>
+        {
+            using TemporaryDirectory temporary = new();
+            HashSet<(string Path, int Line)> Check()
+            {
+                var failures = PolicyChecks.PublicHeaderStaticStorage(temporary.Root);
+                Verify.That(failures.All(failure => failure.Rule == "public-header-static-storage"), "rule name");
+                return failures.Select(failure => (failure.Path, failure.Line)).ToHashSet();
+            }
+
+            // 통과: Private 헤더·소스, 모듈 시험, 서드파티 그룹, 공개 헤더의 주석·문자열 속 언급, 이름이 비슷한 식별자.
+            temporary.Write("Core/Source/Runtime/Probe/Private/ProbeState.h", "#pragma once\ninline thread_local int depth = 0;\n");
+            temporary.Write("Core/Source/Runtime/Probe/Private/Probe.cpp", "thread_local int depth = 0;\n");
+            temporary.Write("Core/Source/Runtime/Probe/Tests/ProbeTests.cpp", "thread_local int depth = 0;\n");
+            temporary.Write("Core/Source/ThirdParty/Fake/Public/Fake.h", "#pragma once\nextern thread_local int fakeDepth;\n");
+            temporary.Write("Core/Source/Runtime/Probe/Public/Probe/Clean.h",
+                "#pragma once\n// thread_local is not allowed here\n/* thread_local */\nconst char* text = \"thread_local\";\nint thread_locality = 0;\n");
+            Verify.That(Check().Count == 0, "allowed uses were rejected");
+            // 위반: inline 정의, extern 선언, static 데이터 멤버 선언, 엔진 플러그인 모듈의 공개 헤더.
+            temporary.Write("Core/Source/Runtime/Probe/Public/Probe/Bad.h",
+                "#pragma once\ninline thread_local int depth = 0;\nextern thread_local int count;\nstruct S {\n    static thread_local int* active;\n};\n");
+            temporary.Write("Engine/Plugins/Importers/Fake/Source/FakeImporter/Public/FakeImporter/Bad.h", "#pragma once\nextern thread_local bool busy;\n");
+            HashSet<(string, int)> expected =
+            [
+                ("Core/Source/Runtime/Probe/Public/Probe/Bad.h", 2), ("Core/Source/Runtime/Probe/Public/Probe/Bad.h", 3),
+                ("Core/Source/Runtime/Probe/Public/Probe/Bad.h", 5),
+                ("Engine/Plugins/Importers/Fake/Source/FakeImporter/Public/FakeImporter/Bad.h", 2)
+            ];
+            Verify.That(Check().SetEquals(expected), "thread_local in public headers: " + string.Join(", ", Check()));
         });
         // placement new 헤더(Docs/Design/UnityBuildPch.ko.md 8.4절): 시험 소스 밖에서는 <new> 대신 <Base/PlacementNew.h>를 쓴다. MSVC
         // 런타임 헤더 <vcruntime_new.h>는 Base/PlacementNew.h만 include한다.

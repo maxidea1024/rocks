@@ -258,7 +258,9 @@ Result<bool> ResolveTextPath(TextCodecContext& context, const TypeLease& type, S
                              TextSource source, TextPath& out) noexcept;
 
 // path를 텍스트로 out 뒤에 붙인다(FormatPropertyPath + KeyHook). 용도의 출력 제외 플래그가 경로의
-// 어느 단계에 있으면 아무것도 쓰지 않고 false다. 오류: FormatPropertyPath·DescribeTextPath의 오류.
+// 어느 단계에 있으면 아무것도 쓰지 않고 false다. InstancedStruct 뒤 멤버 단계는 문맥의
+// InstancedTypes()로 푼다(없으면 그 경로는 InvalidArgument). 오류: FormatPropertyPath·
+// DescribeTextPath의 오류.
 Result<bool> FormatTextPath(TextCodecContext& context, const TypeLease& type, PropertyPath path,
                             String& out) noexcept;
 

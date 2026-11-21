@@ -132,20 +132,30 @@ try
                 break;
             case "modular":
                 await ModularLinkTests.RunAsync(request, root, Pass);
+                await ModularManifestTests.RunAsync(request, root, Pass);
                 break;
             case "buildinfo":
                 await BuildInfoTests.RunAsync(request, root, Pass);
+                break;
+            case "plugins":
+                await PluginModuleLinkTests.RunAsync(request, root, Pass);
                 break;
             case "descriptors":
                 DescriptorTests.Run(root, repository);
                 Pass("project and plugin descriptors parse strictly and resolve plugins");
                 break;
+            case "unity-profile":
+                await UnityProfileTests.RunAsync(request, root, Pass);
+                break;
             case "windows-headers":
                 await WindowsHeaderPairTests.RunAsync(request, root, repository, Pass);
                 break;
+            case "ide-plan":
+                await IdePlanTests.RunAsync(request, root, Pass);
+                break;
             default:
                 throw new ArgumentException(
-                    $"Unknown test group '{group}'. Groups: dependency, unity, pch, dynamic, module-table, modular, buildinfo, descriptors, windows-headers.");
+                    $"Unknown test group '{group}'. Groups: dependency, unity, pch, dynamic, module-table, modular, buildinfo, descriptors, plugins, unity-profile, windows-headers, ide-plan.");
         }
 
         Console.WriteLine($"Native build regression groups ({group} only): {passed}, failed: 0");
@@ -342,10 +352,13 @@ try
     await DynamicModuleTests.RunAsync(request, root);
     Pass("dynamic modules: monolithic link and module table rows, no include path, back edge allowed, incremental, validation");
 
+    await PluginModuleLinkTests.RunAsync(request, root, Pass);
+
     // 정밀 헤더 의존(UB0): depfile 파서, 2단 key, 의존 기록, compile identity, 출력 검증 memo. 하위 묶음마다 PASS를 센다.
     await DependencyTests.RunAsync(request, root, Pass);
     DependencyScopeTests.Run(request, root, Pass);
     await ModularLinkTests.RunAsync(request, root, Pass);
+    await ModularManifestTests.RunAsync(request, root, Pass);
 
     // 유니티 묶기(UB1): 구성 결정성, include 앞 #define 판정, 실제 빌드(__FILE__·제외·논리 명령·변형 디렉터리·정리), 리플렉션 생성 소스 묶기.
     await UnityTests.RunAsync(request, root, Pass);
@@ -353,7 +366,13 @@ try
     // 정의 헤더·모듈 PCH·작업 파일 분리(UB4). 하위 묶음마다 PASS를 센다.
     await PchTests.RunAsync(request, root, Pass);
 
+    // IDE 계획 모드와 IntelliSense 모델(Docs/Design/ProjectFiles.ko.md PJ0). 하위 묶음마다 PASS를 센다.
+    await IdePlanTests.RunAsync(request, root, Pass);
+
     await WindowsHeaderPairTests.RunAsync(request, root, repository, Pass);
+
+    // 묶음 크기 실측(unity-profile)의 조합·프로세스 계측·행 계산.
+    await UnityProfileTests.RunAsync(request, root, Pass);
 
     await ReflectionSourceTests.RunAsync(request, root);
     Pass("reflection generated sources: source-less module archive, registration through the declaration, entry module and module types marker, incremental, validation");

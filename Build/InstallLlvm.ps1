@@ -1,10 +1,12 @@
-param([string]$Version = '')
+param([string]$Version = '', [string]$ToolchainRoot = '')
 $ErrorActionPreference = 'Stop'
 # Installs a pinned LLVM on Windows hosts (CI runner images ship whatever LLVM they carry, e.g. 20.1.8). The default version and the
 # installer SHA-256 of every pinned version come from Build/Toolchain.json (Docs/Design/ClangVersionSupport.ko.md section 6.1);
 # -Version picks another pinned release. Pair the LLVM with an MSVC toolset whose STL accepts it (STL 14.52 requires Clang 22).
 # The official installer is unpacked with 7-Zip after the SHA-256 check; its install code is never run. The bin directory goes
 # first on PATH so Rocks.Build and the MetaCompiler discover this clang-cl, lld-link and llvm-lib together.
+# -ToolchainRoot puts llvm-<version> under another directory (default <repo>/out/toolchains). A fixed location outside out/ (for example
+# %LOCALAPPDATA%/Rocks/toolchains) keeps a PATH entry valid when out/ is deleted (Docs/Guides/BuildEnvironment.ko.md).
 if (-not $IsWindows) { throw 'Windows hosts only (macOS uses the Xcode toolchain).' }
 $architecture = [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString()
 if ($architecture -ne 'X64') { throw "Unsupported LLVM host architecture: $architecture" }
@@ -14,7 +16,10 @@ $sha256 = $table.llvm.windows.installers.$Version
 if (-not $sha256) { throw "LLVM $Version is not pinned in Build/Toolchain.json." }
 $version = $Version
 $url = "https://github.com/llvm/llvm-project/releases/download/llvmorg-$version/LLVM-$version-win64.exe"
-$destination = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "../out/toolchains/llvm-$version"))
+if (-not $ToolchainRoot) { $ToolchainRoot = Join-Path $PSScriptRoot '../out/toolchains' }
+# Resolve against the PowerShell location (not the process directory) so a relative -ToolchainRoot means what the caller typed.
+$ToolchainRoot = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ToolchainRoot)
+$destination = [IO.Path]::GetFullPath((Join-Path $ToolchainRoot "llvm-$version"))
 $bin = Join-Path $destination 'bin'
 $compiler = Join-Path $bin 'clang-cl.exe'
 if (-not (Test-Path -LiteralPath $compiler)) {
@@ -22,7 +27,8 @@ if (-not (Test-Path -LiteralPath $compiler)) {
     if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
     [IO.Directory]::CreateDirectory($staging) | Out-Null
     $archive = Join-Path $staging 'installer.exe'
-    Invoke-WebRequest -Uri $url -OutFile $archive
+    try { Invoke-WebRequest -Uri $url -OutFile $archive }
+    catch { throw "Could not download LLVM $version ($($_.Exception.Message)). Next: check the network or proxy (HTTPS_PROXY) and run the setup again." }
     if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $sha256) { throw 'LLVM installer SHA256 mismatch.' }
     $sevenZip = (Get-Command 7z -ErrorAction SilentlyContinue)?.Source
     if (-not $sevenZip) {

@@ -25,8 +25,10 @@ struct Node final : Base {
     }
 
     // logical destroy 이후 필드를 다시 역참조하지 않고 destructor에서 commit 결과를 관찰한다.
-    static inline bool destroyedWithOldLabel = false;
-    static inline bool destroyedWithNewLabel = false;
+    // 정의는 Private/FixtureState.cpp다(공개 헤더에 쓰기 가능한 정적 저장소를 두지 않는다 —
+    // BuildTargets BD29).
+    static bool destroyedWithOldLabel;
+    static bool destroyedWithNewLabel;
 
     ~Node() noexcept {
         destroyedWithOldLabel = label.View() == StringView("old");
@@ -51,7 +53,9 @@ class AbstractBase : public Object {
     ROCKS_GENERATED_BODY()
 
 public:
-    static inline uint32 constructions = 0;
+    // 정의는 Private/FixtureState.cpp다(공개 헤더에 쓰기 가능한 정적 저장소를 두지 않는다 —
+    // BuildTargets BD29).
+    static uint32 constructions;
 
     AbstractBase() noexcept {
         ++constructions;
@@ -92,7 +96,9 @@ ROCKS_CLASS(Abstract)
 struct AbstractByPolicy : Object {
     ROCKS_GENERATED_BODY()
 
-    static inline uint32 constructions = 0;
+    // 정의는 Private/FixtureState.cpp다(공개 헤더에 쓰기 가능한 정적 저장소를 두지 않는다 —
+    // BuildTargets BD29).
+    static uint32 constructions;
 
     AbstractByPolicy() noexcept {
         ++constructions;
@@ -138,10 +144,15 @@ struct AssetFields final : Object {
     explicit AssetFields(Allocator& allocator) noexcept : icon(allocator), anyAsset(allocator) {
     }
 
-    // 시험이 파괴 시점의 icon 값을 확인한다(쓰기 도중 논리 파괴되어도 값이 바뀌지 않았는지).
-    static inline AssetId destroyedIcon{};
-    static inline char destroyedIconPath[32] = {};
-    static inline usize destroyedIconPathBytes = 0;
+    // 경로 사본의 용량(바이트)이다.
+    static constexpr usize DestroyedIconPathCapacity = 32;
+
+    // 시험이 파괴 시점의 icon 값을 확인한다(쓰기 도중 논리 파괴되어도 값이 바뀌지 않았는지). 정의는
+    // Private/FixtureState.cpp다(공개 헤더에 쓰기 가능한 정적 저장소를 두지 않는다 — BuildTargets
+    // BD29).
+    static AssetId destroyedIcon;
+    static char destroyedIconPath[DestroyedIconPathCapacity];
+    static usize destroyedIconPathBytes;
 
     ~AssetFields() noexcept {
         destroyedIcon = icon.asset;

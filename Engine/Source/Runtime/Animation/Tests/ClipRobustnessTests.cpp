@@ -368,8 +368,8 @@ TEST(Clip_LoadRejectsPlaybackBytes) {
         {read->source.boneTracks[1].scale, 3, 1, ClipIssue::NonFiniteKey},
         {read->source.boneTracks[2].translation, 3, 1, ClipIssue::TooManyTracks},
         {goodRef, 3, 2, ClipIssue::TrackBoneLength},
-        {goodRef, 0, 1, ClipIssue::TrackBoneLength},
-        {goodRef, ClipMaxFrames + 2, 1, ClipIssue::TrackBoneLength},
+        {goodRef, 0, 1, ClipIssue::NoSamples},
+        {goodRef, ClipMaxFrames + 2, 1, ClipIssue::TooManyFrames},
         {BulkDataRef{}, 3, 1, ClipIssue::BulkUnreadable},
     };
     for (const Case& item : cases) {
@@ -390,7 +390,8 @@ TEST(Clip_LoadRejectsPlaybackBytes) {
     rate.sampleCount = 1;
     ClipDiagnostic failure;
     CHECK(!LoadClipPlayback(rate, *raw, out, &failure));
-    CHECK(failure.issue == ClipIssue::TrackBoneLength);
+    CHECK(failure.code == AssetDiagnosticCode::CorruptPackage &&
+          failure.issue == ClipIssue::FrameRateTooHigh);
     // 저장 쪽 인자 오류.
     ClipPlayback bad(env.allocator);
     ClipPlaybackData target(env.allocator);

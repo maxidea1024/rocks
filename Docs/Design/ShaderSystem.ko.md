@@ -1,6 +1,6 @@
 # 셰이더 시스템 설계
 
-기준일: 2026-11-20, 개정 21(초안). 셰이더 원문을 HLSL 하나로 쓰고 오프라인에서 D3D12·D3D11·Vulkan·Metal·OpenGL ES용 코드로 바꾸는 구조와, 그 구현에 앞서 갖춰야 할 **선행 작업**을 정한다. 개정 7은 현재 코드베이스(HEAD `0be1e64`, 2026-11-14)와 다른 설계 문서의 상태를 다시 조사해 선행 작업과 순서를 새로 세웠다(4–6절).
+기준일: 2026-11-21, 개정 22(초안). 셰이더 원문을 HLSL 하나로 쓰고 오프라인에서 D3D12·D3D11·Vulkan·Metal·OpenGL ES용 코드로 바꾸는 구조와, 그 구현에 앞서 갖춰야 할 **선행 작업**을 정한다. 개정 7은 현재 코드베이스(HEAD `0be1e64`, 2026-11-14)와 다른 설계 문서의 상태를 다시 조사해 선행 작업과 순서를 새로 세웠다(4–6절).
 
 UE 근거는 UE 5.8.4(EpicGames/UnrealEngine `release` 브랜치 commit `f45729c0b6f097038e72b52d366a62baeca3275b`)의 원본이다. 2026-11-14 사용자 지시로 기준을 5.6에서 5.8로 올렸고, 개정 6까지의 5.6 근거를 모두 5.8.4로 다시 확인했다(17절). 경로는 `Engine/Source/` 기준이며 `Engine/Shaders`·`Engine/Config`·`Engine/Build`는 그대로 적는다. UE 밖 도구(DXC·SPIRV-Cross·SPIRV-Tools·Vulkan)에 관한 사실은 그 출처를 따로 적는다. 개정 6까지의 조사 문서(UE 5.6 기준)는 [Rocks 셰이더 시스템](https://claude.ai/artifact/U5uNh2EWGvXKQiNYXnuc1Q)이다.
 
@@ -481,13 +481,16 @@ Rocks도 같은 구조로 한다. 그래서 Rocks.Build에 공유 라이브러�
    - 받은 파일은 임시 경로에 쓰고 archive·파일 SHA-256을 검사한 뒤 옮긴다. 검사에 실패하면 오류다. macOS에서는 SHA 검사 뒤 quarantine 확장 속성(`com.apple.quarantine`)을 확인해 지운다(브라우저로 받은 미러 파일을 `dlopen`하면 Gatekeeper가 막는다). 저장소의 파일은 그 밖에는 고치지 않는다(install name 수정과 서명은 도구 빌드에서 끝낸다).
    - **로드 규칙.** binary 항목의 파일을 여는 것은 `Programs/ShaderCompileWorker`와 그 안의 `Developer/ShaderFormat*`뿐이다(9절).
    - **FXC.** System32의 `d3dcompiler_47.dll`은 OS 빌드마다 다르므로 쓰지 않는다.
-     - 버전을 고정한 Windows SDK를 설치하고, bootstrap이 그 SDK의 `Redist/D3D/x64/d3dcompiler_47.dll`을 SHA-256 검사 뒤 저장소로 복사한다.
+     - 버전을 고정한 Windows SDK를 설치하고, bootstrap이 그 SDK의 버전별 사본 `bin/10.0.22621.0/x64/d3dcompiler_47.dll`을 SHA-256 검사 뒤 저장소로 복사한다(개정 22).
+       - 버전 구분 없는 `Redist/D3D/x64/d3dcompiler_47.dll`은 쓰지 않는다. 나중에 설치한 SDK가 같은 경로를 덮어쓴다(2026-11-21 실측: SDK 10.0.26100을 설치한 기계에서 그 파일이 10.0.26100.9457, `1da540a0…`가 되어 bootstrap이 SHA 불일치로 실패했다).
+       - 버전별 사본은 같은 파일 버전 10.0.22621.2428·크기 4,916,728 B이지만 SHA-256이 `Redist` 본과 다르다(`289767b4…` 대 `af7b99be…`). 고정은 버전별 사본 쪽으로 한다.
+       - 버전별 사본은 REDIST.TXT 목록에 없다(목록은 `Redist\D3D\x64\` 경로로 적는다). bootstrap의 저장소 복사는 설치한 사람 자신의 기계에서 쓰는 것이라 재배포가 아니다. 개발 도구 묶음에 넣어 다른 사람에게 줄 때는 아래 재배포 조건대로 `Redist\D3D\x64` 본을 써야 하고, 그 묶음을 만들 때 그 본을 따로 고정한다.
      - Windows SDK는 archive가 아니라 설치기라서 다시 게시하지 않는다.
      - **재배포 조건(측정 S10, 2026-11-20, 개정 21).** SDK 사용 조건의 Distributable Code가 가리키는 REDIST.TXT 목록(`learn.microsoft.com/legal/windows-sdk/redist`)에 `Redist\D3D\x64\d3dcompiler_47.dll`이 있고, 고치지 않은 파일을 Classic Windows 응용과 함께만 재배포할 수 있다(UWP 앱 금지, 배포 요건은 5.4절 S10).
        - Runtime 실행 파일에는 넣지 않는다(Release 배제, 9절).
        - 개발 도구(편집기·쿠커·워커) 배포 묶음에는 응용 옆 복사본으로 넣을 수 있고, 그때 사용 조건의 배포 요건을 따른다. UE도 `Engine/Binaries/ThirdParty/Windows/DirectX/x64`에 동봉한다(10.0.19041.1).
        - DLL만 따로(저장소·GitHub Releases) 올리지 않는 지금 규칙은 그대로다. 목록은 프로그램의 일부로 배포하는 것을 허락하므로 DLL만 게시하는 것은 그 허락 밖이다.
-       - 고정 버전은 SDK 10.0.22621.0의 10.0.22621.2428(SHA-256 `af7b99be1b8770c0e4d18e43b04e81d11bdeb667fa6b07ade7a88f4c5676bf9a`)로 둔다. 더 새 SDK로 올리면 도구 지문이 바뀌어 FXC job이 모두 다시 컴파일되므로 manifest 재고정과 함께 따로 한다.
+       - 고정 버전은 SDK 10.0.22621.0의 10.0.22621.2428이다. bootstrap 원본(버전별 사본)의 SHA-256은 `289767b49dc8525bce262ea06fee4ef9fced2e131a55b25654ce871c1f0498b2`, S10 때 잰 `Redist` 본은 `af7b99be1b8770c0e4d18e43b04e81d11bdeb667fa6b07ade7a88f4c5676bf9a`다. 더 새 SDK로 올리면 도구 지문이 바뀌어 FXC job이 모두 다시 컴파일되므로 manifest 재고정과 함께 따로 한다.
      - UE도 동봉본(`Engine/Binaries/ThirdParty/Windows/DirectX/x64/d3dcompiler_47.dll`)을 전체 경로로 연다(`D3DShaderCompiler.cpp:399–408`).
    - **Apple `metal`·`metallib`.** 저장소로 받지 않는 시스템 도구다(Xcode Metal 도구 또는 Windows용 Metal Developer Tools).
      - manifest에 `kind: binary`, `status: system`으로 적고 최소 버전만 고정한다. 실행 파일 SHA는 고정하지 않는다: Xcode 26부터 Metal 도구는 별도 구성요소(`xcodebuild -downloadComponent metalToolchain`)라 갱신될 때마다 바뀌기 때문이다. 대신 워커가 실제 도구의 지문(`metal -v` 문자열과 `metal`·`metallib` SHA-256)을 재서 메인 프로세스에 알리고(11절 도구 조회), 그 값이 job 키에 들어간다(10절 3항). CI는 Xcode 버전을 고정하고 Metal 도구 설치 단계를 둔다.
@@ -869,3 +872,4 @@ SH0 진척(2026-11-17, `feature/shader-tools`, Windows 부분 구현):
   - S10 → 8절 2항: `d3dcompiler_47.dll`은 SDK REDIST 목록에 있어 고치지 않은 파일을 데스크톱 응용과 함께만 재배포할 수 있다. Runtime에는 넣지 않고, 개발 도구 묶음에는 넣을 수 있으며, DLL만 따로 게시하지 않는다. 고정 버전 10.0.22621.2428은 그대로다.
   - S13 → 7.2절 4항: GLES typed buffer 모양이 예상대로이고 typed buffer SRV는 결합 sampler 목록에 없으므로 워커가 따로 유닛을 매긴다. 읽고 쓰는 ES image는 `r32f`·`r32i`·`r32ui`만이라는 워커 검사를 더했다. Metal typed buffer는 `texture_buffer_native`로 낸다.
   - S14 → 7.2절 7항: 모든 형식의 변환을 확인했고 FXC `vs_5_0`이 받으므로 `D3D11_SM5`에 `vertexViewportLayerOutput`을 넣었다(형식 정의·시험, 12.1절). SPIR-V 확장은 그 기능을 요구한 셰이더에만 허용한다.
+- 개정 22(2026-11-21): 8절 2항 FXC의 bootstrap 원본을 버전 구분 없는 `Redist/D3D/x64`에서 버전별 `bin/10.0.22621.0/x64` 사본으로 바꿨다(SDK 10.0.26100 설치가 `Redist` 본을 덮어써 SHA 불일치). 버전별 사본은 REDIST 목록 밖이라 재배포 묶음은 `Redist` 본을 따로 고정한다. 설치 마법사·`.vsconfig`가 SDK 10.0.22621도 설치한다([설치 마법사](SetupWizard.ko.md)).

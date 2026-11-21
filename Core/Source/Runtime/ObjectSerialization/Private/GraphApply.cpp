@@ -208,7 +208,9 @@ public:
                 return Result<DecodedReference>::Failure(ErrorCode::InvalidArgument);
             }
 
+            // null handle import는 미해결이라 그 참조는 null이다(ObjectFoundations 5.4절).
             decoded.handle = imports_[external - 1];
+            decoded.isNull = decoded.handle.IsNull();
             return Result<DecodedReference>::Success(decoded);
         }
 

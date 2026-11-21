@@ -277,7 +277,7 @@ UB1 동안 모든 모듈의 기본은 `Off`다. UB2·UB3에서 충돌을 정리�
   - 자신이 작업 파일인 `.cpp`
   - 짝 헤더(첫 include, 10절)가 작업 파일이고, 그 **헤더 이름**이 모듈 안에서 유일한 `.cpp`. UE와 같다(`System/Unity.cs:374–406`).
 - 경계(6.2절)는 분리 전 전체 목록으로 정해져 있으므로, 분리는 그 파일이 속한 묶음 하나만 바꾼다.
-- 분리된 파일은 모듈의 PCH를 그대로 쓴다(기본). 규칙 `AdaptivePch = Off`면 PCH 없이 컴파일한다.
+- 분리된 파일은 모듈의 PCH를 그대로 쓴다(기본). 규칙 `AdaptivePch = Off`면 PCH 없이 컴파일한다. 이때도 논리 명령은 PCH를 쓰는 명령(PCH 헤더 강제 include)으로 남는다 — 논리 명령은 작업 파일 집합과 무관하다(8.6절).
 - 파일을 처음 편집하면 그 파일이 빠진 묶음이 한 번 다시 컴파일되고, 이후 편집은 그 파일만 컴파일한다. 커밋해서 작업 파일에서 빠지면 묶음으로 돌아가며 그 묶음이 한 번 다시 컴파일된다(UE와 같다).
 - 작업 파일 헤더마다 단독 헤더 컴파일 검사를 붙이는 기능(UE `bAdaptiveUnityCompilesHeaderFiles`)은 두지 않는다. 기존 공개 헤더 검사(`CheckPublicHeaders`)가 맡는다.
 
@@ -293,7 +293,7 @@ UB1 동안 모든 모듈의 기본은 `Off`다. UB2·UB3에서 충돌을 정리�
 
 - 소스는 PCH 헤더를 `#include`하지 않는다. 빌드가 강제 include(`/FI`·`-include`)한다. 소스는 PCH가 없어도 컴파일되어야 하고, 검증 빌드(11절)가 이를 확인한다.
 - PCH는 C++ TU에만 쓴다.
-- 모듈 PCH는 PCH를 쓸 TU(묶음 + 단독, 6.1의 제외 파일 제외)가 `PrivatePchMinTus`(기본 3)개 이상일 때만 만든다. 그보다 적으면 PCH를 만드는 비용이 절약분보다 크다. UE `MinFilesUsingPrecompiledHeader`(`UEBuildModuleCPP.cs:672`)는 계산만 하고 쓰지 않는 값이라 대응 규칙을 새로 둔다. 공유 PCH는 한 번 만들어 여러 모듈이 쓰므로 이 하한을 적용하지 않는다.
+- 모듈 PCH는 PCH를 쓸 수 있는 **원본 소스**(6.1의 제외 파일 제외, 묶음 구성원을 하나씩 센다)가 `PrivatePchMinTus`(기본 3)개 이상일 때만 만든다. 번역 단위 수로 세면 유니티를 켰을 때와 껐을 때 PCH 유무가 달라져 논리 명령(8.6절)이 유니티 설정에 따라 갈라진다([프로젝트 파일](ProjectFiles.ko.md) PJ0 리뷰, 개정 이력 참고). 그보다 적으면 PCH를 만드는 비용이 절약분보다 크다. UE `MinFilesUsingPrecompiledHeader`(`UEBuildModuleCPP.cs:672`)는 계산만 하고 쓰지 않는 값이라 대응 규칙을 새로 둔다. 공유 PCH는 한 번 만들어 여러 모듈이 쓰므로 이 하한을 적용하지 않는다.
 
 ### 8.2 정의 헤더
 
@@ -359,7 +359,7 @@ UB1 동안 모든 모듈의 기본은 `Off`다. UB2·UB3에서 충돌을 정리�
 - 기준: 제공 모듈 의존 closure의 public 헤더 가운데 다음을 모두 만족하는 것만 넣는다.
   - 그 PCH를 쓰게 될 번역 단위의 30% 이상이 닿는다. 대상은 그 제공 모듈이 선택되는 런타임 모듈의 소스이고, ObjectRuntime은 시험 소스(시험 실행 파일이 이 PCH를 쓴다)를 더한다.
   - 자신과 include closure의 어느 헤더도 최근 4주 동안 12회 넘게 바뀌지 않았다. PCH에 든 헤더가 바뀌면 그 PCH를 쓰는 번역 단위가 모두 다시 컴파일되기 때문이다.
-  - 소비 모듈마다 다른 정의(`ROCKS_MODULE_NAME`·`ROCKS_MODULE_TYPES`·모듈 private define)를 전처리 조건에 쓰지 않는다(추가 정의 검사).
+  - 소비 모듈마다 다른 정의(`ROCKS_MODULE_NAME`·`ROCKS_MODULE_TYPES`·`ROCKS_MODULE_SHARED_LIBRARY`·모듈 private define)를 전처리 조건에 쓰지 않는다(추가 정의 검사).
   - Private 헤더와 생성 헤더는 넣지 않는다.
 
 Core — `Core/CoreSharedPch.h`(소비 번역 단위 257개 기준, 괄호는 닿는 비율 %)
@@ -521,13 +521,35 @@ README의 "action key·`compile_commands.json`·BuildInfo manifest는 모두 `Na
 - 공유 PCH 헤더 구성(8.4절)은 이 목록으로 정한다.
 
 **묶음 크기 실측**
-- `Rocks.Build.Cli unity-profile --module <M>`은 다음 조합으로 clean compile을 실측한다.
-  - 유니티 끔
-  - `UnityAnchorFiles` 4단계(8·16·24·32)
-  - 상한 3단계(256·384·512 KiB)
-- 결과는 모듈별 CPU 시간, 벽시계 시간, 최대 메모리 표로 낸다.
-- 모듈 재정의 값은 이 결과로만 정한다. UE `-Mode=ProfileUnitySizes`에 대응한다.
-- **아직 구현하지 않았다**(UB6, 2026-11-20). 조합 13개를 모듈마다 clean compile하면서 프로세스별 CPU 시간과 최대 메모리를 재려면 실행기의 프로세스 계측과 모듈 단독 실행이 필요한데, 측정용 빌드를 돌리지 않기로 한 이번 작업에서는 결과를 쓸 곳이 없다. 그때까지 `UnityAnchorFiles` 16과 상한 384 KiB를 그대로 쓰고, 모듈 재정의는 두지 않는다.
+- `Rocks.Build.Cli unity-profile --root <루트> --module <M>`은 모듈 하나를 다음 조합마다 처음부터 컴파일해 잰다(UE `-Mode=ProfileUnitySizes` 대응).
+  - 유니티 끔(그 모듈만 — 손으로 쓴 소스와 리플렉션 생성 소스를 모두 단독 번역 단위로 둔다)
+  - `UnityAnchorFiles` 4단계(8·16·24·32) × 상한 3단계(256·384·512 KiB). 두 값은 그 모듈의 손으로 쓴 소스 묶음과 리플렉션 생성 소스 묶음에 함께 듣는다(묶음 구성이 같은 값을 쓴다).
+- 결과는 조합별 표다: 번역 단위 수, CPU 시간, 벽시계 시간, 최대 working set, 최대 commit. 표준 출력과 `<출력>/UnityProfile/<M>.unity-profile.json`에 쓴다(파일 이름과 `module` 값은 규칙의 정식 모듈 이름이다). 모듈 재정의 값(`UnityAnchorFiles`·`UnityBatchBytes`)은 이 결과로만 정한다.
+- 옵션: `--target`(기본 Foundation — 그 모듈을 빌드하는 타깃), `--configuration`, `--compiler`, `--rules`, `--jobs`, `--output`, `--anchor-files`·`--batch-kib`(쉼표로 나눈 값 목록 — 기본은 위 단계).
+- 출력 디렉터리: 기본은 `out/unity-profile-<타깃>-<구성>`이다. 이 명령은 그 모듈의 object를 지우고 빌드 대상을 모듈 하나로 줄여 `compile_commands.json`·`action-report.json`·`build-evidence.json`·증분 기록을 덮어쓰므로, 평소 빌드 출력에 대고 돌면 안 된다. 그래서 둘을 확인한다.
+  - 폴더 이름이 `unity-profile-`로 시작해야 한다(`--output`으로 주는 경로도 같다).
+  - 이 명령이 만든 출력에는 표지 파일 `.unity-profile`이 있다. 표지 없이 증분 기록(`native-cache.json`)이 있는 디렉터리는 다른 빌드의 출력이므로 거부한다. 표지는 명령이 처음 그 디렉터리를 쓸 때 만든다.
+  - build 흐름도 조합을 얹기 전에 같은 것을 다시 확인한다(이름 접두와 표지).
+- 동작:
+  - 조합마다 build 명령과 같은 흐름(규칙 평가, 메타 생성, 계획, 실행)을 그대로 탄다. 다른 것은 셋이다: 대상 모듈에만 조합을 재정의로 얹는다(`Unity`·`ReflectionUnity`·`UnityAnchorFiles`·`UnityBatchBytes`), 빌드 대상을 그 모듈 하나로 줄인다(공개 헤더 단독 컴파일 검사와 하위 실행 파일 링크가 빠진다), 작업 파일 분리를 끈다.
+  - 처음부터 컴파일하게 하려고, 조합마다 빌드 전에 그 모듈의 object 디렉터리(`obj/<M>`)와 묶음 디렉터리(`Unity/<M>`), PCH 디렉터리(`Pch`)를 지운다. 의존 모듈의 object는 그대로 cache hit이다. 그 모듈의 compile action 가운데 실행되지 않은 것이 있으면 측정으로 받지 않고 그 조합은 실패다.
+  - PCH는 조합마다 다시 만든다. 조합과 무관한 값이지만, 한 번만 만들면 처음 재는 조합의 벽시계에만 들어가기 때문이다. 다시 만든 PCH는 내용이 같아 의존 모듈의 object는 다시 컴파일되지 않는다.
+  - 측정 전에 준비 실행을 한 번 한다. 그 모듈이 직접 의존하는 모듈(과 그 의존)만 빌드한다. 재정의·삭제·측정은 하지 않는다. 그 모듈 자신은 조합 수만큼만 컴파일된다(기본 13번).
+  - 지우는 경로는 지우기 전에 확인한다: 모듈 이름이 경로 조각 하나여야 하고(`..`·구분자 불가), 지울 디렉터리가 출력 디렉터리 바로 아래여야 한다.
+  - 조합 하나가 실패해도(빌드 실패, 처음부터 컴파일되지 않음) 멈추지 않는다. 그 행에 실패 상태와 종료 코드, 첫 오류 한 줄을 남기고 다음 조합으로 간다. 끝에 표와 JSON을 쓰고, 실패가 하나라도 있으면 0이 아닌 값으로 끝난다. 준비 실행이 실패하면 잰 것이 없으므로 바로 끝난다.
+  - 조합을 도는 실행의 `build-evidence.json`에는 `unity-profile` 단계가 남는다(모듈과 조합 이름). 평소 빌드의 증거와 구별된다.
+- 재는 값:
+  - CPU 시간: 그 모듈 compile action의 컴파일러 프로세스 CPU 시간(사용자 + 커널)의 합.
+  - 최대 working set·최대 commit: 그 컴파일러 프로세스들의 값 가운데 가장 큰 것(프로세스 하나의 값이다 — 동시에 도는 프로세스의 합이 아니다). working set은 실제로 쥔 물리 메모리라 기기가 메모리 압박을 받으면 작게 나온다. commit(pagefile 사용량)은 압박과 무관하게 요구한 양을 보여 준다.
+  - 벽시계 시간: native 빌드 단계 전체(`BuildAsync` 하나). 의존 모듈의 cache 검사, PCH 생성, 그 모듈의 archive·link가 들어간다(조합 사이에 같은 몫이다).
+  - 번역 단위 수: 그 모듈의 compile action 수(묶음, 단독 소스, 생성 TU).
+- 프로세스 계측: 실행기가 `NativeBuildRequest.MeasureProcesses`일 때만 프로세스마다 CPU 시간과 최대 working set·commit을 읽어 `NativeActionResult`(`CpuMilliseconds`·`PeakMemoryBytes`·`PeakCommitBytes`·`ProcessMeasured`)에 싣는다. 측정값이라 action key·compile DB·도구 빌드 ID에 들어가지 않는다. 평소 빌드는 읽지 않고, `action-report.json`에도 이 필드를 쓰지 않는다(기본값이면 생략한다).
+- 한계:
+  - CPU 시간과 메모리는 Windows 호스트에서만 잰다(종료한 프로세스의 handle로 읽는다). 다른 호스트에서는 벽시계 시간과 번역 단위 수만 나오고 나머지 칸은 `n/a`다.
+  - 재는 것은 실행기가 띄운 프로세스 하나다. 그 프로세스가 띄운 자식 프로세스는 빠진다. clang이 cc1을 같은 프로세스에서 돌린다는 전제에 기댄다(clang-cl의 기본 동작이다).
+  - 조합마다 한 번만 잰다. 반복과 통계는 없다. 기기 부하에 따라 값이 흔들리므로, 재정의 값을 정할 때는 조용한 기기에서 돌리고 차이가 작으면 기본값을 둔다.
+  - 명령 전체를 도는 시험은 CI에 없다(모듈 하나를 여러 번 컴파일하는 비용). 조합·재정의·행 계산·프로세스 계측·출력 확인은 `Rocks.Build.Tests`의 `unity-profile` 묶음이, 명령줄 옵션과 출력 거부는 `Rocks.Build.IntegrationTests`가 확인한다.
+- 지금 기본값: 측정으로 바꾼 것이 없어 `UnityAnchorFiles` 16과 상한 384 KiB를 그대로 쓰고, 모듈 재정의는 두지 않는다.
 
 **기준 시나리오**(계획 27.8)
 - 같은 장비, 같은 commit에서 기존 방식(UB0 전), UB0, UB2(유니티), UB5(PCH)를 각각 측정한다.
@@ -639,3 +661,6 @@ UB6에서 묶음 TU와 PCH action의 최대 메모리를 실측해, 동시 실�
 | 1(매크로 누출 리뷰 반영) | 2026-11-21 | 6.1절 "매크로를 남기는 헤더"를 고쳤다. (1) 규칙과 정책 검사의 범위를 유니티를 켠 모듈에서 Windows 플랫폼의 모든 모듈로 넓혔다(숨긴 뒤 쌍 밖에서 SDK 헤더를 여는 `ShaderToolSpike` 빌드가 깨졌다). 정책 이름은 `windows-macro-leak`이다. (2) 쌍이 `push_macro`/`pop_macro` 대신 정의를 직접 다시 쓴다(clang PCH가 push 스택을 저장하지 않는다). (3) 정책이 이름 목록 대신 깨끗한 시스템 헤더 목록으로 판정하고, 외부 라이브러리 헤더를 따라가며, 줄 이음과 리터럴이 아닌 include를 다룬다. Windows 플랫폼만 평가하고 파일 해석을 캐시한다. (4) 숨기는 이름에 `pascal`·`cdecl`·`hyper`·`RegisterClass`·`FindFirstFile`을 더했다. (5) UE 대응 서술을 바로잡았다(A/W 이름만 같다) |
 | 1(placement new 헤더) | 2026-11-21 | 8.4절에 "placement new 헤더"를 더했다: `Base/PlacementNew.h`가 MSVC 런타임에서는 `<vcruntime_new.h>`를, 그 밖에서는 `<new>`를 include하고, 엔진 소스는 `<new>` 대신 이 헤더를 쓴다(정책 `placement-new-header`, 9.2절). 공개 헤더 단독 컴파일 검사와 PCH를 쓰지 않는 번역 단위에서 `<new>` 사슬(번역 단위당 0.126 s)이 빠진다 |
 | 1(placement new 헤더 리뷰 반영) | 2026-11-21 | 8.4절 "placement new 헤더": 정책의 허용 목록(`PlacementNewAllowances`)과 `<vcruntime_new.h>` 직접 include 거부를 적고, 보장 집합(MSVC 기준)과 그 밖의 이름 목록을 명시했다. `Base/Compiler.h`가 CRT 선택(`RuntimeLibrary`)을 직접 기록한다. 수치 문장의 방향을 바로잡았다. 16절 표에 placement new와 Windows 헤더 매크로 행을 더했다 |
+| 1(unity-profile) | 2026-11-21 | 12절 "묶음 크기 실측"을 구현에 맞게 고쳤다: `Rocks.Build.Cli unity-profile`이 모듈 하나를 조합 13개로 처음부터 컴파일해 번역 단위 수·CPU 시간·벽시계 시간·최대 메모리 표를 낸다. 실행기에 프로세스 계측(`MeasureProcesses`)을 더했다. CPU·메모리는 Windows 호스트에서만 잰다 |
+| 1(unity-profile 리뷰 반영) | 2026-11-21 | 12절 "묶음 크기 실측": 출력 디렉터리 확인(이름 접두 `unity-profile-`와 표지 파일)을 더했다. "유니티 끔" 조합이 리플렉션 생성 소스도 묶지 않는다. 조합 하나가 실패해도 나머지를 재고 실패 행을 남긴다. 준비 실행은 의존 모듈만 빌드하고(그 모듈은 13번 컴파일), PCH는 조합마다 다시 만든다. 최대 commit을 함께 낸다 |
+| 1(논리 명령 불변 — ProjectFiles PJ0 리뷰) | 2026-11-21 | 논리 명령(compile DB·IDE IntelliSense의 원천)이 유니티·작업 파일 분리 설정과 무관하도록 두 가지를 고쳤다. (1) 모듈 PCH 하한 `PrivatePchMinTus`는 번역 단위 수가 아니라 PCH를 쓸 수 있는 원본 소스 수로 센다(8.1절). 유니티를 켜면 묶음 때문에 번역 단위가 하한 아래로 내려가 PCH가 없고, 끄면 PCH가 생겨 compile DB와 IDE 계획이 달랐다. 이 수정으로 유니티를 켠 모듈에서 PCH가 새로 생길 수 있다(빌드 동작 변화). (2) 작업 파일 분리로 빠진 번역 단위가 `AdaptivePch = Off`로 PCH 없이 컴파일돼도 논리 명령은 PCH 헤더를 강제 include하는 명령이다(7.2절). 물리 action은 그대로다 |

@@ -287,7 +287,7 @@ cvar::Index Index() const noexcept;
 
 - 다른 snapshot을 읽어야 하면 `cvar::SnapshotBinding`으로 묶은 뒤 `Get()`을 부른다(overload를 늘리지 않는다).
 - `Get(scope)`(CVR3)은 묶인 snapshot의 범위 표에서 범위 사슬(자식 → 부모)을 따라 처음 만난 범위 값을 돌려주고, 없으면 `Get()`(Global 유효값)이다. Global 범위(`CVarScopeId{}`)면 `Get()`과 같다. 그 snapshot에 없는 범위(아직 게시되지 않았거나 파괴된 범위, 다른 문맥의 범위)도 Global 값이다(assert 없음 — 렌더 lane이 이전 프레임을 처리하는 것은 정상이다). 어느 스레드에서나 부른다(묶음 규칙은 `Get()`과 같다). `BootCVar`에는 없다.
-- 읽기 경로: thread_local 묶음 → snapshot의 조각 표 → 조각 → 칸(의존 load 4개). 번호는 핸들에 있으므로 이름 탐색이 없다. 잠금·할당·문자열 연산이 없다. 분기는 "묶음 없음(Fatal)", "번호 없음 또는 이 snapshot에 칸 없음(5절)" 둘이고 모두 거의 늘 같은 쪽으로 간다.
+- 읽기 경로: thread_local 묶음(Config `.cpp`의 접근 함수 호출 하나 — 공개 헤더에 thread_local을 두지 않는다, [빌드 타깃](BuildTargets.ko.md) 3.8절 BS8c) → snapshot의 조각 표 → 조각 → 칸(의존 load 4개). 번호는 핸들에 있으므로 이름 탐색이 없다. 잠금·할당·문자열 연산이 없다. 분기는 "묶음 없음(Fatal)", "번호 없음 또는 이 snapshot에 칸 없음(5절)" 둘이고 모두 거의 늘 같은 쪽으로 간다.
 - **스레드 묶음.** 게임 lane은 Sync가 새 snapshot을 게시할 때 스스로 다시 묶는다. 렌더 lane은 프레임 packet을 처리하기 시작할 때 packet의 snapshot을 묶는다(RenderBase 5.3·12절). worker 작업은 Task 시스템의 범용 작업 문맥 슬롯(Task는 Config에 의존하지 않는다 — 슬롯은 참조 계수 있는 불투명 객체 하나)으로, 만든 lane의 snapshot **참조를 하나 쥐고** 넘겨받는다. 작업이 프레임보다 오래 살아도 snapshot이 먼저 사라지지 않는다(작업 생성마다 원자 증감 한 쌍 — 작업은 그 정도로 굵다). 그 밖의 스레드는 `cvar::SnapshotBinding bind{config.Acquire()};`로 직접 묶는다. 묶음 없이 `Get()`을 부르면 Fatal이다(조용히 최신 값을 읽지 않는다 — 프레임 일관성이 깨지기 때문이다).
 - 번호는 프로세스 전체이므로 다른 문맥에만 등록된 핸들은 게임 lane에서도 Fatal이 아니라 기본값이다(이 문맥 snapshot에 칸이 없다). Fatal은 어느 문맥에도 등록된 적 없는 핸들(번호 없음)이다.
 - 한 프레임 동안 같은 스레드는 같은 snapshot을 본다. 그래서 같은 Sync에서 바뀐 변수 둘을 일부만 새 값으로 읽는 일이 없다.

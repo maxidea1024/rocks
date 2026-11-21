@@ -1,0 +1,24 @@
+{
+  "objectPath": "/Game/My Props/_Shared._Shared",
+  "class": "Texture2D",
+  "ueClass": "/Script/Engine.Texture2D",
+  "dependencies": [],
+  "diagnostics": [],
+  "settings": {
+    "SRGB": true
+  },
+  "data": {
+    "source": {
+      "width": 2,
+      "height": 2,
+      "format": "BGRA8",
+      "pixels": {
+        "blob": "0334fbb141542de36bbfbced8364565fcdbdb4cbf754b7ac48badeebd9eebba8",
+        "bytes": 16,
+        "layout": "u8",
+        "components": 4,
+        "count": 4
+      }
+    }
+  }
+}
