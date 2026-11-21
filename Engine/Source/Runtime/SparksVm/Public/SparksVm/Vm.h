@@ -192,6 +192,11 @@ private:
     // 증가). 빈 컨테이너는 marker의 배치를 적는다.
     VmFaultKind Reserve(VmBuffer*& slot, uint64 needed, uint32 marker, uint64 budget,
                         ErrorCode& error) noexcept;
+    // struct·Buf Result 명령(NEWS·GETSF·SETSF·OK·ERR — VmStructs.cpp)을 실행한다.
+    VmFaultKind Structured(Opcode op, uint32 word, uint32 extra, const Banks& banks, uint64 budget,
+                           ErrorCode& error) noexcept;
+    // 오류 코드 code의 Buf Result(값 없음)를 만든다.
+    Allocation MakeErrorResult(uint64 code, uint64 budget) noexcept;
     void Retain(VmBuffer* buffer) noexcept {
         if (buffer != nullptr) {
             ++buffer->references;

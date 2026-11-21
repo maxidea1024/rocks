@@ -16,7 +16,7 @@
 namespace rocks::sparks {
 
 // `.sparkc`·bytecode 형식 버전이다(opcode 번호·명령 모양·표 배치가 바뀌면 올린다).
-inline constexpr uint32 BytecodeFormatVersion = 1;
+inline constexpr uint32 BytecodeFormatVersion = 2; // 2: TYPE 구역(LC5b3)
 
 // bank 하나의 레지스터 수 상한이다(8비트 피연산자 — D3).
 inline constexpr uint32 MaxBankRegisters = 256;

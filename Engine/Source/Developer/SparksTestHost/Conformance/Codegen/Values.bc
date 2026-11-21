@@ -18,23 +18,28 @@ t5 = "y"
 t6 = "Map<string, int>"
 t7 = "Structs"
 t8 = "Pair"
-t9 = "Pair.First"
-t10 = "Pair.Second"
-t11 = "Words"
-t12 = "Game.Door"
-t13 = "Tag"
-t14 = "hi"
-t15 = "Optional"
-t16 = "Actor.Location"
-t17 = "sparks 0.4.0"
-t18 = "Main"
+t9 = "First"
+t10 = "Second"
+t11 = "Pair.First"
+t12 = "Pair.Second"
+t13 = "Words"
+t14 = "Game.Door"
+t15 = "Tag"
+t16 = "hi"
+t17 = "Optional"
+t18 = "Actor.Location"
+t19 = "sparks 0.4.0"
+t20 = "Main"
 ref0 = type Array<int>
 ref1 = type Map<string, int>
-ref2 = type Pair
-ref3 = struct-field Pair.First
-ref4 = struct-field Pair.Second
+ref2 = type Pair type0
+ref3 = struct-field Pair.First field0
+ref4 = struct-field Pair.Second field1
 ref5 = literal Tag "Game.Door"
 ref6 = field Actor.Location
+type0 = struct Pair s2 r0 b0
+  field0 First s0 x1
+  field1 Second s1 x1
 
 function Shapes  scalar=33/33 ref=0/0 buf=0/0 params=2/0/0 returns sx1
   body 656d4df5f1a72b1b21c7227ff33b59290c1682a9d46ba8fd7d79a3be03273dd9
@@ -209,9 +214,9 @@ function Structs  scalar=2/2 ref=0/0 buf=1/1 params=0/0/0 returns sx1
 
 function Words  scalar=1/1 ref=0/0 buf=1/1 params=0/0/0 returns bx1
   body 44d8fbb120ccbab9363761f14c77595299cb39df30c9acfe6b555a73e9b0b769
-  0000  LOADSTR  b0, t12    ; 45:19
+  0000  LOADSTR  b0, t14    ; 45:19
   0001  NEWLIT  s0, ref5 args 0    ; 45:15
-  0003  LOADSTR  b0, t14    ; 47:12
+  0003  LOADSTR  b0, t16    ; 47:12
   0004  RET  b0 x1    ; 47:5
 
 function Optional  scalar=15/15 ref=2/2 buf=0/0 params=4/1/0 returns sx1

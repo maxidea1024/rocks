@@ -35,6 +35,8 @@
 - **COW:** 쓰는 명령(`SETE`·`SETSF`·`APPEND`·`PUT`·`CALL.MUT`)은 참조계수가 1보다 크면 먼저 복제하고 그 레지스터를 새 버퍼로 바꾼다(이전 버퍼는 감소). 순환은 생기지 않는다(closure·참조형 값이 없다 — SL §4.1).
 - **컨테이너(LC5b2):** 원소 배열은 삽입 순서이고 원소 하나는 key slot 묶음 뒤 값 slot 묶음이다(Array는 값만, Set은 원소를 key 자리에, Map은 둘 다). Buf slot은 원소 버퍼의 참조 하나를 가진다. 배치(bank·slot 수)는 명령의 컨테이너 표지에서 정하며 처음 원소를 넣는 명령(`APPEND`·`PUT`·`SETE`)이 버퍼에 적는다 — 빈 컨테이너는 배치가 없어도 된다(읽기는 없음·0을 돌려준다). Map·Set은 원소 배열 뒤에 열린 주소 해시 색인(원소 번호 + 1, 크기는 용량 2배 이상의 2의 거듭제곱)을 두고 key는 Core `HashStringBytes`(문자열 byte)·`MixHash`(slot 비트)로 흩는다 — 순회 순서는 색인과 무관하게 삽입 순이다(SL §6.3 결정적 순회). 용량은 2배로 늘리고(처음 4) 늘릴 때 원소는 옮기고(참조계수 그대로) 색인은 다시 만든다.
 - **컨테이너 명령:** `NEWA`·`NEWSET`·`NEWM`은 빈 버퍼. `APPEND A B`는 Array 끝에 넣고 Set은 이미 있으면 넣지 않는다. `PUT A B C`·Map의 `SETE A B C`는 key B의 값을 C로 바꾸거나 끝에 넣는다(SL §4 "Map의 `m[k] = v`는 삽입 또는 교체"). Array의 `SETE`는 번호가 범위 밖(음수 포함)이면 `IndexOutOfRange`. `GETE A B C`는 `T?`다: Array 번호가 범위 밖이거나 Map에 key가 없으면 없음(Scalar는 표지 0과 0 slot, Ref 0, Buf null). `LEN A B`는 원소 수(null은 0). `GETKEY`·`GETVAL A B C`는 삽입 순 C번 원소의 key·값(Array는 값)이고 범위 밖이면 `IndexOutOfRange`다(컴파일러는 `LEN` 아래 번호만 낸다). 쓰는 명령은 COW다(공유된 버퍼는 먼저 복제 — 원소 버퍼는 참조 +1).
+- **struct(LC5b3):** `NEWS A Bx`는 TYPE의 struct 배치(bank별 slot 수)로 모든 slot이 0·null인 버퍼를 만든다(기본값은 컴파일러가 `SETSF`로 채운다 — SparksBytecode 5절 TYPE 구역). `GETSF A B C`는 struct B의 필드를 A로(Buf는 참조 +1), `SETSF A B C`는 struct A의 필드를 B로 바꾼다(COW — 공유된 struct는 먼저 복제). null struct(`T?`의 없음)에 대한 필드 명령은 `ContractViolation`이다(컴파일러는 꺼낸 뒤에만 낸다).
+- **Buf `Result`(LC5b3):** `Result<T>`의 T가 Scalar 밖(Buf·Ref)이면 버퍼 하나다: slot 0이 오류 코드(0 성공, 아니면 `Error` case + 1), 그 뒤가 값(값 bank·slot은 버퍼 머리 — Buf 값은 원소 버퍼). `OK A B`는 값 B로 성공, `ERR A B`는 Scalar B의 `Error` case로 실패(값 없음), `TRY.B`는 성공이면 값을 A로 아니면 실패 블록, `RETERR.B`·`RETERR.S`는 받은 오류를 이 함수의 반환 모양(Scalar Result 묶음이나 Buf Result)으로 돌려주고, `ENDEXEC.B`는 오류 코드로 실행을 끝낸다.
 - **경로 쓰기의 원소(컴파일러):** 원소 읽기는 `T?`라 검사기가 원소를 거친 경로 쓰기(`m[k].X = 1`·`grid[i][j] = v`)를 S0412로, 원소의 복합 대입을 S0406으로 막는다 — 코드는 `if (let row = grid[i]) { … grid[i] = changed; }`로 쓴다. IR은 그래도 쓰기 경로로 원소를 읽으면 있음 검사와 실패 블록의 `FAULT 3`(`IndexOutOfRange` — SL §4 "복합 대입과 경로 쓰기는 키가 없으면 fault")을 낸다(규칙이 넓어져도 0 값이 끼어들지 않는 안전장치, SparksBytecode 3.1a절).
 - 컨테이너·struct의 `==`는 언어에 없다(SL §3.3 — 오류). `EQ.B`·`NE.B`는 문자열만 만나며 그 밖의 종류는 `ContractViolation`이다.
 
@@ -98,6 +100,7 @@ class IVmHost {
 - **V3 fault 범위:** fault는 실행 문맥 전체를 끝낸다(LC5). instance 격리·Tick 중지 등 위치별 처리는 LC6.
 - **V4 실행 corpus:** 최상위 함수만 호출. instance·hook이 필요한 시험은 LC6의 시나리오 golden.
 - **V6 문자열 버퍼:** `LOADSTR`마다 새 버퍼. 대안(모듈 상수 문자열을 불변 공유 버퍼로 미리 만듦)은 할당이 줄지만 ledger·수명이 모듈 수명과 섞인다 — 측정 뒤 바꾼다.
+- **V10 struct 기본값:** 생성 자리에서 컴파일러가 내린다. 대안(TYPE 구역에 상수 원형을 두고 `NEWS`가 복사)은 상수 struct·컨테이너 직렬화 형식이 더 필요하고, 대안(struct마다 기본값 함수를 두고 부름)은 다른 모듈 함수 호출(LC5d)에 묶인다.
 - **V9 컨테이너 배치:** 첫 쓰기 명령의 표지에서 정한다. 대안(`NEWA`의 Type 참조에 배치를 실음)은 참조 표의 뜻이 늘어나고 형식 버전 2의 TYPE 구역과 겹친다 — 원소가 없는 컨테이너는 배치가 필요 없다.
 - **V7 host의 Buf 값:** host는 `VmExecution::NewString`으로 만든 버퍼를 인자로 빌려 주고(호출이 참조를 더한다) 자기 참조는 `Release`로 놓는다. 반환된 Buf 값은 `ReturnedBuffers`로 읽고 다음 `Call`이나 `ReleaseReturned`가 놓는다.
 - **V8 Scalar 인자 정규형:** `Call`의 Scalar 인자는 정규형(정수 확장, bool 0·1, float32 값, 유한 실수)을 전제로 한다. 검사는 LC5d host 경계가 함수 표의 매개변수 종류로 한다(`.run` 실행기는 표기를 읽을 때 범위·유한성을 본다).

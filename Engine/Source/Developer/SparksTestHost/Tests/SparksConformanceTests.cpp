@@ -620,6 +620,10 @@ fn First(pair: Pair): int {
 fn Make(): Pair {
     return Pair(A: 1);
 }
+
+fn Label(): Tag? {
+    return null;
+}
 )";
     auto run = [&](StringView golden, Report& report) noexcept {
         CaseInput input;
@@ -636,7 +640,8 @@ fn Make(): Pair {
         REQUIRE(run("# comment\n\nAdd(1, 2) -> 3 (2 steps)\nFlip(Left) -> Right (5 steps)\n"
                     "Same(\"x, y -> z\") -> true (2 steps)\n"
                     "Word() -> \"a, \\\"b\\\" -> c\" (2 steps)\n"
-                    "Half(3.0) -> 1.5 (3 steps)\nPass(error(3)) -> error(3) (2 steps)\n",
+                    "Half(3.0) -> 1.5 (3 steps)\nPass(error(3)) -> error(3) (2 steps)\n"
+                    "Make() -> Pair(A: 1) (4 steps)\n",
                     report));
         PrintFailures(report);
         CHECK(report.Failures().IsEmpty());
@@ -672,7 +677,7 @@ fn Make(): Pair {
          "Run/Case.spark: .run line 1: cannot read 'Up' as a value of this parameter"},
         {"First(1)\n",
          "Run/Case.spark: .run line 1: a parameter type is not supported by .run yet"},
-        {"Make()\n", "Run/Case.spark: .run line 1: the return type is not supported by .run yet"},
+        {"Label()\n", "Run/Case.spark: .run line 1: the return type is not supported by .run yet"},
         {"Same(abc)\n",
          "Run/Case.spark: .run line 1: cannot read 'abc' as a value of this parameter"},
         {"Same(\"a\\q\")\n",

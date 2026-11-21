@@ -23,6 +23,7 @@ enum class RunShape : uint8 {
     Void,
     String,    // Buf bank — `"..."`(escape `\"` `\\` `\n` `\t` `\xHH`)
     Container, // Buf bank — 반환만: Array `[a, b]`, Set `{a, b}`, Map `{k: v}`(LC5b2)
+    Struct,    // Buf bank — 반환만: `Pair(A: 1, B: "x")`(LC5b3)
     Bool,
     Signed,
     Unsigned,
@@ -98,6 +99,11 @@ public:
             return result;
         }
 
+        if (symbol.kind == SymbolKind::Struct) {
+            result.shape = RunShape::Struct;
+            return result;
+        }
+
         const StringView name = symbol.name;
         if (name == "bool") {
             result.shape = RunShape::Bool;
@@ -149,6 +155,7 @@ public:
             return true;
         case RunShape::String:
         case RunShape::Container:
+        case RunShape::Struct:
             out = 1;
             return true;
         case RunShape::Bool:
@@ -200,9 +207,85 @@ public:
 
     // Buf bank 값(문자열·컨테이너와 그 `T?`)인지다. Buf Result는 LC5b3이다.
     bool IsBuffer(const RunType& type) const noexcept {
-        const RunShape shape =
-            type.shape == RunShape::Optional ? TypeOf(type.type, false).shape : type.shape;
-        return shape == RunShape::String || shape == RunShape::Container;
+        const RunType inner = type.shape == RunShape::Optional ? TypeOf(type.type, false) : type;
+        if (inner.shape == RunShape::Result) {
+            // Buf Result: 값 타입이 Scalar 밖(Buf)이다(SparksBytecode 2절).
+            const RunType value = TypeOf(ResultValue(inner.type), true);
+            return value.shape != RunShape::Void && IsBuffer(value);
+        }
+
+        return inner.shape == RunShape::String || inner.shape == RunShape::Container ||
+               inner.shape == RunShape::Struct;
+    }
+
+    // struct 필드의 타입이다(표기가 없으면 초기값의 타입).
+    uint32 FieldTypeOf(const Symbol& field) const noexcept {
+        if (field.type != NoType) {
+            return field.type;
+        }
+
+        const SyntaxTree* tree = c_.ModuleTree(field.module);
+        return tree == nullptr ? NoType
+                               : c_.ExpressionType(field.module, tree->Child(field.node, 4));
+    }
+
+    // struct 값을 `Name(필드: 값, …)`로 쓴다. 필드 slot 위치는 TYPE 구역 규칙(bank 묶음 Scalar·
+    // Ref·Buf, 선언 순)으로 다시 계산한다 — VM 배치가 어긋나면 golden이 드러낸다.
+    void FormatStruct(StringBuilderBase& out, const RunType& type,
+                      const VmBuffer* value) const noexcept {
+        const uint32 symbol = c_.Types()[type.type].symbol;
+        const Symbol& owner = c_.Symbols()[symbol];
+        const SyntaxTree* tree = c_.ModuleTree(owner.module);
+        const uint32 members = tree == nullptr ? NoNode : tree->Child(owner.node, 3);
+        const uint64* payload = reinterpret_cast<const uint64*>(value->Bytes());
+        uint32 groups[3] = {};
+        // 첫 바퀴: bank별 slot 수, 둘째 바퀴: 쓰기.
+        for (uint32 pass = 0; pass < 2; ++pass) {
+            uint32 cursor[3] = {0, groups[0], groups[0] + groups[1]};
+            bool first = true;
+            if (pass == 1) {
+                out.Append(owner.name).Append("(");
+            }
+
+            for (const uint32 member :
+                 members == NoNode ? Span<const uint32>() : tree->Children(members)) {
+                if (tree->Node(member).kind != SyntaxKind::Field) {
+                    continue;
+                }
+
+                const uint32 field = c_.NodeSymbol(owner.module, tree->Child(member, 2));
+                if (field == NoSymbol) {
+                    continue;
+                }
+
+                const RunType fieldType = TypeOf(FieldTypeOf(c_.Symbols()[field]), true);
+                uint32 slots = 0;
+                const bool bufferField = IsBuffer(fieldType);
+                const bool known = Slots(fieldType, slots);
+                const uint32 bank = bufferField ? 2 : known ? 0 : 1; // 모르는 타입은 Ref로 본다
+                slots = known ? slots : 1;
+                if (pass == 0) {
+                    groups[bank] += slots;
+                    continue;
+                }
+
+                out.Append(first ? "" : ", ").Append(c_.Symbols()[field].name).Append(": ");
+                first = false;
+                if (bufferField) {
+                    FormatValue(out, fieldType,
+                                reinterpret_cast<const VmBuffer*>(
+                                    static_cast<usize>(payload[cursor[bank]])));
+                } else if (known) {
+                    Format(out, fieldType, Span<const uint64>(payload + cursor[bank], slots));
+                } else {
+                    out.Append("?");
+                }
+
+                cursor[bank] += slots;
+            }
+        }
+
+        out.Append(")");
     }
 
     // Buf 값 하나를 타입대로 쓴다(문자열, 컨테이너는 원소마다 — 원소 버퍼는 다시 이 함수로).
@@ -210,6 +293,29 @@ public:
                      const VmBuffer* buffer) const noexcept {
         if (type.shape == RunShape::Optional) {
             FormatValue(out, TypeOf(type.type, false), buffer);
+            return;
+        }
+
+        if (buffer != nullptr && type.shape == RunShape::Struct &&
+            buffer->kind == VmBufferKind::Struct) {
+            FormatStruct(out, type, buffer);
+            return;
+        }
+
+        if (buffer != nullptr && type.shape == RunShape::Result &&
+            buffer->kind == VmBufferKind::Result) {
+            const uint64* payload = reinterpret_cast<const uint64*>(buffer->Bytes());
+            if (payload[0] != 0) {
+                out.AppendFormat("error({})", payload[0] - 1);
+                return;
+            }
+
+            out.Append("ok(");
+            FormatValue(out, TypeOf(ResultValue(type.type), true),
+                        buffer->count > 1
+                            ? reinterpret_cast<const VmBuffer*>(static_cast<usize>(payload[1]))
+                            : nullptr);
+            out.Append(")");
             return;
         }
 
@@ -369,6 +475,7 @@ public:
             return;
         case RunShape::String:
         case RunShape::Container:
+        case RunShape::Struct:
             out.Append("?"); // Buf 값은 FormatValue
             return;
         case RunShape::Bool:
@@ -589,6 +696,7 @@ public:
         case RunShape::Void:
         case RunShape::String:
         case RunShape::Container:
+        case RunShape::Struct:
         case RunShape::Unsupported:
             break;
         }

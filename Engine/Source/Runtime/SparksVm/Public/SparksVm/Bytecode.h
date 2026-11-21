@@ -91,6 +91,30 @@ struct BytecodeAwaitPoint {
     uint32 liveCount = 0;
 };
 
+// TYPE 구역(형식 버전 2 — SparksBytecode 5절)의 타입 종류다.
+enum class BytecodeTypeKind : uint8 {
+    Struct,
+    Enum
+};
+
+// 이 모듈이 참조하는 Sparks struct·enum의 배치다. struct 값 버퍼는 bank 묶음
+// 순(Scalar·Ref·Buf)이다.
+struct BytecodeType {
+    uint32 name = NoBytecodeIndex; // Type 참조와 같은 표시 이름의 문자열 번호
+    BytecodeTypeKind kind = BytecodeTypeKind::Struct;
+    uint32 firstField = 0;
+    uint32 fieldCount = 0;
+    uint16 slots[BytecodeBankCount] = {}; // struct의 bank별 slot 수
+};
+
+// struct 필드(enum은 case) 하나다. offset은 struct 내용의 절대 slot 위치다(enum은 0).
+struct BytecodeTypeField {
+    uint32 name = NoBytecodeIndex;
+    uint8 bank = 0;
+    uint8 slots = 0;
+    uint32 offset = 0;
+};
+
 struct BytecodeFunction {
     uint32 name = NoBytecodeIndex; // 표시 이름의 문자열 번호
     uint32 firstWord = 0;
@@ -115,9 +139,9 @@ class BytecodeModule final {
 public:
     explicit BytecodeModule(Allocator& allocator) noexcept
         : scalars(allocator), stringBytes(allocator), stringOffsets(allocator),
-          stringLengths(allocator), refs(allocator), functions(allocator), words(allocator),
-          locations(allocator), switches(allocator), cases(allocator), awaits(allocator),
-          liveRanges(allocator) {
+          stringLengths(allocator), refs(allocator), types(allocator), typeFields(allocator),
+          functions(allocator), words(allocator), locations(allocator), switches(allocator),
+          cases(allocator), awaits(allocator), liveRanges(allocator) {
     }
 
     BytecodeModule(BytecodeModule&&) noexcept = default;
@@ -140,6 +164,10 @@ public:
     Array<uint32> stringOffsets;
     Array<uint32> stringLengths;
     Array<BytecodeRef> refs;
+    // TYPE 구역(형식 버전 2): Type 참조의 보조 번호가 types 번호, StructField 참조의 보조 번호가
+    // typeFields 번호다.
+    Array<BytecodeType> types;
+    Array<BytecodeTypeField> typeFields;
     Array<BytecodeFunction> functions;
     Array<uint32> words;               // 모든 함수의 명령 단어(함수는 구간)
     Array<BytecodeLocation> locations; // words와 같은 번호

@@ -48,8 +48,9 @@ StringView Format(VmExecution& execution, Assembler& assembler, uint32 display,
     const uint32 function = assembler.Begin("Format", shape);
     assembler.Emit(EncodeABC(Opcode::ToStr, 0, 0, count));
     // enum 표시는 EXTRA 아래 16비트에 enum 타입 참조를 둔다(verifier가 본다).
+    const StringView cases[] = {"Left", "Right"};
     const uint32 enumType = display == static_cast<uint32>(ScalarKind::Enum)
-                                ? assembler.Ref(BytecodeRefKind::Type, "Side")
+                                ? assembler.EnumRef("Side", Span<const StringView>(cases, 2))
                                 : 0;
     assembler.Emit(EncodeAx(Opcode::Extra, (display << 16) | enumType));
     assembler.Emit(EncodeABC(Opcode::Ret, 0, 1, 2));
@@ -255,11 +256,10 @@ TEST(SparksVmString_ToStrNotation) {
     CHECK(Format(execution, assembler, static_cast<uint32>(DisplayKind::Transform),
                  Span<const uint64>(transform, 10),
                  outcome) == "((1.0, 2.0, 3.0), (0.0, 0.0, 0.0, 1.0), (1.0, 1.0, 1.0))");
-    // enum(LC5b3)·이름(LC5d)은 아직 자리표시다.
+    // enum은 TYPE 구역의 case 이름이다(LC5b3). 이름·Tag(LC5d)는 아직 자리표시다.
     const uint64 slot[] = {1};
-    Format(execution, assembler, static_cast<uint32>(ScalarKind::Enum), Span<const uint64>(slot, 1),
-           outcome);
-    CHECK(Faults(outcome, VmFaultKind::ContractViolation));
+    CHECK(Format(execution, assembler, static_cast<uint32>(ScalarKind::Enum),
+                 Span<const uint64>(slot, 1), outcome) == "Right");
     Format(execution, assembler, static_cast<uint32>(ScalarKind::Name), Span<const uint64>(slot, 1),
            outcome);
     CHECK(Faults(outcome, VmFaultKind::ContractViolation));

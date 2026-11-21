@@ -329,7 +329,19 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
             // Scalar 묶음 B..B+C의 보간 표기(SparksVm 2.2절)를 새 문자열로 A에 둔다.
             const uint32 extra = DecodeAx(words[pc++]);
             StringBuilder<VmFormatInlineBytes> text(*allocator_);
-            fault = detail::VmFormatScalars(text, extra >> 16, s + bb, c);
+            if ((extra >> 16) == static_cast<uint32>(ScalarKind::Enum)) {
+                // enum은 TYPE 구역의 case 이름이다(SparksVm 2.2절).
+                const BytecodeType& type = module.types[module.refs[extra & MaxBx].detail];
+                if (s[bb] >= type.fieldCount) {
+                    return MakeFault(VmFaultKind::Unreachable, at, steps);
+                }
+
+                text.Append(module.String(
+                    module.typeFields[type.firstField + static_cast<uint32>(s[bb])].name));
+            } else {
+                fault = detail::VmFormatScalars(text, extra >> 16, s + bb, c);
+            }
+
             if (fault != VmFaultKind::None) {
                 return MakeFault(fault, at, steps);
             }
@@ -441,11 +453,32 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
             // Scalar Result A..A+B의 오류 코드를 이 함수의 Result 모양(함수 표)으로 돌려준다.
             const BytecodeFunction& current =
                 module.functions[frames_[frames_.Size() - 1].function];
-            if (current.returnBank != static_cast<uint8>(BytecodeBank::Scalar)) {
-                return MakeFault(VmFaultKind::ContractViolation, at, steps); // Buf Result — LC5b3
+            const uint64 code = s[a];
+            if (current.returnBank == static_cast<uint8>(BytecodeBank::Buf)) {
+                // 이 함수는 Buf Result를 돌려준다: 같은 오류 코드의 Result를 만든다.
+                const Allocation allocation = MakeErrorResult(code, limits.memoryBytes);
+                if (allocation.error != ErrorCode::None) {
+                    return failed(allocation.error);
+                }
+
+                if (allocation.fault != VmFaultKind::None) {
+                    return MakeFault(allocation.fault, at, steps);
+                }
+
+                put(0, allocation.buffer);
+                VmCallResult result;
+                auto left = leave(2, 1, result);
+                if (!left) {
+                    return failed(left.Error());
+                }
+
+                if (left.Value()) {
+                    return Result<VmCallResult>::Success(result);
+                }
+
+                break;
             }
 
-            const uint64 code = s[a];
             s[0] = code;
             for (uint32 slot = 1; slot < current.returnSlots && slot < VmMaxReturnSlots; ++slot) {
                 s[slot] = 0;
@@ -463,14 +496,122 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
 
             break;
         }
-        case Opcode::EndExecS: {
+        case Opcode::RetErrB: {
+            // Buf Result A의 오류를 이 함수의 반환 모양(Scalar Result 묶음 또는 Buf Result)으로.
+            if (b[a] == nullptr || b[a]->kind != VmBufferKind::Result) {
+                return MakeFault(VmFaultKind::ContractViolation, at, steps);
+            }
+
+            const uint64 code = reinterpret_cast<const uint64*>(b[a]->Bytes())[0];
+            const BytecodeFunction& current =
+                module.functions[frames_[frames_.Size() - 1].function];
+            VmCallResult result;
+            Result<bool> left = Result<bool>::Success(false);
+            if (current.returnBank == static_cast<uint8>(BytecodeBank::Buf)) {
+                const Allocation allocation = MakeErrorResult(code, limits.memoryBytes);
+                if (allocation.error != ErrorCode::None) {
+                    return failed(allocation.error);
+                }
+
+                if (allocation.fault != VmFaultKind::None) {
+                    return MakeFault(allocation.fault, at, steps);
+                }
+
+                put(0, allocation.buffer);
+                left = leave(2, 1, result);
+            } else {
+                s[0] = code;
+                for (uint32 slot = 1; slot < current.returnSlots && slot < VmMaxReturnSlots;
+                     ++slot) {
+                    s[slot] = 0;
+                }
+
+                left = leave(0, current.returnSlots, result);
+            }
+
+            if (!left) {
+                return failed(left.Error());
+            }
+
+            if (left.Value()) {
+                return Result<VmCallResult>::Success(result);
+            }
+
+            break;
+        }
+        case Opcode::EndExecS:
+        case Opcode::EndExecB: {
             // Result가 아닌 함수·handler의 `try` 실패: 실행 전체를 끝낸다(fault가 아니다).
+            if (op == Opcode::EndExecB && (b[a] == nullptr || b[a]->kind != VmBufferKind::Result)) {
+                return MakeFault(VmFaultKind::ContractViolation, at, steps);
+            }
+
             VmCallResult result;
             result.outcome = VmOutcome::Ended;
-            result.errorCode = s[a];
+            result.errorCode =
+                op == Opcode::EndExecS ? s[a] : reinterpret_cast<const uint64*>(b[a]->Bytes())[0];
             result.steps = steps;
             Unwind();
             return Result<VmCallResult>::Success(result);
+        }
+        case Opcode::TryB: {
+            // Buf Result B: 성공이면 값(C = 값 bank << 5 | slot 수)을 A로, 실패면 EXTRA 거리로
+            // 간다.
+            const int32 distance = DecodeSAx(words[pc++]);
+            VmBuffer* value = b[bb];
+            if (value == nullptr || value->kind != VmBufferKind::Result) {
+                return MakeFault(VmFaultKind::ContractViolation, at, steps);
+            }
+
+            const uint64* payload = reinterpret_cast<const uint64*>(value->Bytes());
+            if (payload[0] != 0) {
+                pc = static_cast<uint32>(static_cast<int32>(pc) + distance);
+                break;
+            }
+
+            const uint32 bank = c >> 5;
+            const uint32 slots = c & 0x1F;
+            for (uint32 slot = 0; slot < slots; ++slot) {
+                if (bank == static_cast<uint32>(BytecodeBank::Buf)) {
+                    VmBuffer* child =
+                        reinterpret_cast<VmBuffer*>(static_cast<usize>(payload[1 + slot]));
+                    Retain(child);
+                    put(a + slot, child);
+                } else if (bank == static_cast<uint32>(BytecodeBank::Scalar)) {
+                    s[a + slot] = payload[1 + slot];
+                } else {
+                    r[a + slot] = payload[1 + slot];
+                }
+            }
+
+            break;
+        }
+        case Opcode::NewS:
+        case Opcode::GetSFS:
+        case Opcode::GetSFR:
+        case Opcode::GetSFB:
+        case Opcode::SetSFS:
+        case Opcode::SetSFR:
+        case Opcode::SetSFB:
+        case Opcode::Ok:
+        case Opcode::Err: {
+            // struct·Buf Result 명령(VmStructs.cpp — SparksVm 2.2절).
+            const uint32 extra = InfoOf(op).extra ? words[pc++] : 0;
+            ErrorCode error = ErrorCode::None;
+            Banks banks;
+            banks.s = s;
+            banks.r = r;
+            banks.b = b;
+            fault = Structured(op, word, extra, banks, limits.memoryBytes, error);
+            if (error != ErrorCode::None) {
+                return failed(error);
+            }
+
+            if (fault != VmFaultKind::None) {
+                return MakeFault(fault, at, steps);
+            }
+
+            break;
         }
         case Opcode::IsSomeR:
             s[a] = r[bb] != 0 ? 1 : 0;
@@ -564,7 +705,7 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
             // verifier를 통과한 모듈에서는 나오지 않는다.
             return MakeFault(VmFaultKind::Unreachable, at, steps);
         default:
-            // 아직 구현하지 않은 명령(V5 — LC5b3·LC5c·LC5d·LC6).
+            // 아직 구현하지 않은 명령(V5 — LC5c·LC5d·LC6).
             return MakeFault(VmFaultKind::ContractViolation, at, steps);
         }
     }

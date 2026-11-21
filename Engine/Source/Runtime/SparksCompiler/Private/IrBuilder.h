@@ -55,6 +55,12 @@ private:
     void MoveValue(uint32 to, uint32 from, uint32 node) noexcept;
     // 묶음을 없음(Scalar는 모두 0, Ref·Buf는 null)으로 둔다.
     void LoadNone(uint32 value, uint32 node) noexcept;
+    // struct 생성에서 빠진 필드의 값이다(SparksBytecode 5절 TYPE 구역): 초기값(그 필드의 모듈 구문
+    // 트리로 내리고 원문 위치는 생성 자리 node)이나 0 값. 0 slot·null로 충분하면 NoIrRegister.
+    uint32 LowerFieldDefault(uint32 field, uint32 node) noexcept;
+    // 타입의 0 값(SL §3.2)이다: 문자열 `""`, 빈 컨테이너, struct 기본값, quat·mat4·Transform
+    // 단위값. 0 slot·null로 충분한 타입(숫자·bool·enum·`T?`·그 밖의 수학 타입)은 NoIrRegister.
+    uint32 LowerZero(uint32 type, uint32 node) noexcept;
     // 지역 이름(인자·지역·binding)의 첫 레지스터다.
     uint32 LocalRegister(uint32 symbol) const noexcept;
     void BindLocal(uint32 symbol, uint32 first) noexcept;

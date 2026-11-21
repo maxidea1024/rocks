@@ -16,28 +16,33 @@ t9 = "line \"one\""
 t10 = "Probe.Names"
 t11 = "Set.Add"
 t12 = "Label"
-t13 = "Label.Words"
-t14 = "Label.Count"
-t15 = "Probe.Later"
-t16 = "NextTick"
-t17 = "Probe.Ready"
-t18 = "Probe.Look"
-t19 = "Component.Owner"
-t20 = "Probe"
-t21 = "Actor.Find<Probe>"
-t22 = "sparks 0.4.0"
-t23 = "Main"
+t13 = "Words"
+t14 = "Count"
+t15 = "Label.Words"
+t16 = "Label.Count"
+t17 = "Probe.Later"
+t18 = "NextTick"
+t19 = "Probe.Ready"
+t20 = "Probe.Look"
+t21 = "Component.Owner"
+t22 = "Probe"
+t23 = "Actor.Find<Probe>"
+t24 = "sparks 0.4.0"
+t25 = "Main"
 ref0 = literal Soft<DataAsset> "/Game/Data/Rules"
 ref1 = field Probe.Names
 ref2 = language Set.Add
-ref3 = type Label
-ref4 = struct-field Label.Words
-ref5 = struct-field Label.Count
+ref3 = type Label type0
+ref4 = struct-field Label.Words field0
+ref5 = struct-field Label.Count field1
 ref6 = language NextTick
 ref7 = event Probe.Ready
 ref8 = field Component.Owner
 ref9 = type Probe
 ref10 = native Actor.Find<Probe> type ref9
+type0 = struct Label s1 r0 b1
+  field0 Words b1 x1
+  field1 Count s0 x1
 
 function Probe.Order  scalar=2/2 ref=1/1 buf=4/4 params=0/1/2 returns sx1
   body 469c72ae2abf2adaa4db3c8702146865ec531d7388c1bd305d03f60778b67128

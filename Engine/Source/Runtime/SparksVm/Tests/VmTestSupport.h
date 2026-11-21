@@ -74,6 +74,58 @@ public:
         return static_cast<uint32>(module.refs.Size() - 1);
     }
 
+    // TYPE 구역의 enum(case 이름들)과 그 Type 참조다.
+    uint32 EnumRef(StringView name, Span<const StringView> cases) noexcept {
+        BytecodeType type;
+        type.name = String(name);
+        type.kind = BytecodeTypeKind::Enum;
+        type.firstField = static_cast<uint32>(module.typeFields.Size());
+        type.fieldCount = static_cast<uint32>(cases.Size());
+        for (const StringView item : cases) {
+            BytecodeTypeField field;
+            field.name = String(item);
+            CHECK(module.typeFields.TryPushBack(field));
+        }
+
+        CHECK(module.types.TryPushBack(type));
+        return Ref(BytecodeRefKind::Type, name, static_cast<uint32>(module.types.Size() - 1));
+    }
+
+    // TYPE 구역의 struct(필드는 bank·slot 수 — 선언 순으로 bank 묶음 안 절대 위치를 매긴다)와 그
+    // Type 참조다. 필드 참조는 FieldRef로 만든다.
+    uint32 StructRef(StringView name, Span<const StringView> names, Span<const uint8> banks,
+                     Span<const uint8> slots) noexcept {
+        BytecodeType type;
+        type.name = String(name);
+        type.kind = BytecodeTypeKind::Struct;
+        type.firstField = static_cast<uint32>(module.typeFields.Size());
+        type.fieldCount = static_cast<uint32>(names.Size());
+        for (usize index = 0; index < names.Size(); ++index) {
+            type.slots[banks[index]] = static_cast<uint16>(type.slots[banks[index]] + slots[index]);
+        }
+
+        uint32 cursor[BytecodeBankCount] = {0, type.slots[0],
+                                            uint32(type.slots[0]) + type.slots[1]};
+        for (usize index = 0; index < names.Size(); ++index) {
+            BytecodeTypeField field;
+            field.name = String(names[index]);
+            field.bank = banks[index];
+            field.slots = slots[index];
+            field.offset = cursor[banks[index]];
+            cursor[banks[index]] += slots[index];
+            CHECK(module.typeFields.TryPushBack(field));
+        }
+
+        CHECK(module.types.TryPushBack(type));
+        return Ref(BytecodeRefKind::Type, name, static_cast<uint32>(module.types.Size() - 1));
+    }
+
+    // struct 타입 참조 typeRef의 index번 필드의 StructField 참조다.
+    uint32 FieldRef(uint32 typeRef, uint32 index) noexcept {
+        const BytecodeType& type = module.types[module.refs[typeRef].detail];
+        return Ref(BytecodeRefKind::StructField, "field", type.firstField + index);
+    }
+
     uint32 Constant(uint64 value) noexcept {
         CHECK(module.scalars.TryPushBack(value));
         return static_cast<uint32>(module.scalars.Size() - 1);

@@ -292,7 +292,30 @@ void VmExecution::Release(VmBuffer* buffer) noexcept {
         pending = current->next;
         const bool keys = current->keyBank == static_cast<uint8>(BytecodeBank::Buf);
         const bool values = current->valueBank == static_cast<uint8>(BytecodeBank::Buf);
-        if (current->kind != VmBufferKind::String && (keys || values)) {
+        const uint64* payload = reinterpret_cast<const uint64*>(current->Bytes());
+        // struct는 끝의 capacity slot이, Buf Result는 값 slot(1번부터)이 원소 버퍼다.
+        uint32 childFirst = 0;
+        uint32 childCount = 0;
+        if (current->kind == VmBufferKind::Struct) {
+            childFirst = current->count - current->capacity;
+            childCount = current->capacity;
+        } else if (current->kind == VmBufferKind::Result && values) {
+            childFirst = 1;
+            childCount = current->count - 1;
+        }
+
+        for (uint32 slot = childFirst; slot < childFirst + childCount; ++slot) {
+            VmBuffer* child = reinterpret_cast<VmBuffer*>(static_cast<usize>(payload[slot]));
+            if (child != nullptr && --child->references == 0) {
+                child->next = pending;
+                pending = child;
+            }
+        }
+
+        const bool container = current->kind == VmBufferKind::Array ||
+                               current->kind == VmBufferKind::Map ||
+                               current->kind == VmBufferKind::Set;
+        if (container && (keys || values)) {
             const uint32 stride = uint32(current->keySlots) + current->valueSlots;
             const uint64* slots = reinterpret_cast<const uint64*>(current->Bytes());
             for (uint32 element = 0; element < current->count; ++element) {
