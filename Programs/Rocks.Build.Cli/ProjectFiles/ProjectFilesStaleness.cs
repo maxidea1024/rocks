@@ -25,6 +25,13 @@ internal static class ProjectFilesStaleness
             return null;
         }
 
+        // 다른 컴파일러로 빌드하면 도구 모음 지문이 늘 다르다. 거짓 경고 대신 비교하지 않았다고 알린다.
+        if (!string.Equals(Path.GetFullPath(state.Compiler), Path.GetFullPath(toolchain.CompilerPath), StringComparison.OrdinalIgnoreCase))
+        {
+            return $"note: Visual Studio project files were generated with {state.Compiler}; this build uses {toolchain.CompilerPath}, so their " +
+                "staleness is not checked.";
+        }
+
         ProjectFilesToolchain local;
         try
         {

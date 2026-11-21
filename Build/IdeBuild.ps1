@@ -18,6 +18,16 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Tools.ps1')
 
+# Visual Studio sets INCLUDE, EXTERNAL_INCLUDE, LIB and LIBPATH for Makefile projects too (SetBuildDefaultEnvironmentVariables), but not
+# VCToolsInstallDir, so the build runs VsDevCmd again and VsDevCmd prepends to them. The doubled values would change the toolchain key
+# (a terminal build after an IDE build would compile everything again) and the IntelliSense include path the staleness check renders.
+# UE clears INCLUDE for the same reason (VCToolChain.cs).
+foreach ($name in @('INCLUDE', 'EXTERNAL_INCLUDE', 'LIB', 'LIBPATH')) {
+    Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+}
+
+# The CLI adds an "error RB0001: ..." line to a top-level failure so that Visual Studio lists it in the Error List.
+$env:ROCKS_IDE_BUILD = '1'
 $root = $script:RocksRoot
 $cli = Join-Path $root 'out/dotnet/bin/Rocks.Build.Cli/Debug/net10.0/Rocks.Build.Cli.dll'
 $common = @('--root', $root, '--target', $Target, '--configuration', $Configuration)
@@ -35,9 +45,17 @@ elseif ($Compiler) {
     $compilerArguments = @('--compiler', $Compiler)
 }
 
-# Runs the requested action with the Rocks build CLI and returns its exit code. Call it while holding the IDE build lock.
+# Runs the requested action with the Rocks build CLI and returns its exit code. Call it while holding the IDE build lock. Command output
+# goes to the host, never into the return value.
 function Invoke-RocksIdeAction {
-    Update-RocksTools
+    try {
+        Update-RocksTools
+    }
+    catch {
+        [Console]::Out.WriteLine("error RB0002: $($_.Exception.Message)")
+        return 1
+    }
+
     $result = 0
     if ($Action -eq 'Clean' -or $Action -eq 'Rebuild') {
         & dotnet $cli clean @common | Out-Host
@@ -49,18 +67,22 @@ function Invoke-RocksIdeAction {
         $result = $LASTEXITCODE
     }
 
-    return $result
+    return [int] $result
 }
 
-$code = 0
+[int] $code = 0
 Enter-RocksIdeLock
 try {
-    # Test hook (Rocks.Build.IntegrationTests, section 16 V7): with ROCKS_IDE_BUILD_PROBE set, the script writes that file once it holds the
-    # lock and stops before preparing the tools or building.
-    if ($env:ROCKS_IDE_BUILD_PROBE) {
+    # Test hook (Rocks.Build.IntegrationTests, section 16 V7): with ROCKS_IDE_BUILD_PROBE and ROCKS_IDE_BUILD_TEST=1, the script writes that
+    # file once it holds the lock and stops before preparing the tools or building. Without ROCKS_IDE_BUILD_TEST it is ignored.
+    if ($env:ROCKS_IDE_BUILD_PROBE -and $env:ROCKS_IDE_BUILD_TEST -eq '1') {
         Set-Content -LiteralPath $env:ROCKS_IDE_BUILD_PROBE -Value "$Action $Target $Configuration $Platform" -Encoding utf8NoBOM
     }
     else {
+        if ($env:ROCKS_IDE_BUILD_PROBE) {
+            [Console]::Out.WriteLine('warning: ROCKS_IDE_BUILD_PROBE is set outside the tests (ROCKS_IDE_BUILD_TEST is not 1); it is ignored.')
+        }
+
         $code = Invoke-RocksIdeAction
     }
 }

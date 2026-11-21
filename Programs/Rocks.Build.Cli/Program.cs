@@ -26,6 +26,12 @@ catch (OperationCanceledException)
 catch (Exception error)
 {
     Console.Error.WriteLine($"ROCKS-BUILD-ERROR: {error.Message}");
+    // Visual Studio NMake 빌드(Build/IdeBuild.ps1)에서는 오류 목록에 잡히는 정규 형식 한 줄을 더 낸다(Docs/Design/ProjectFiles.ko.md 7.1절).
+    if (Environment.GetEnvironmentVariable("ROCKS_IDE_BUILD") == "1")
+    {
+        Console.WriteLine($"error RB0001: {error.Message}");
+    }
+
     return 2;
 }
 
@@ -360,9 +366,11 @@ namespace Rocks.Build.Cli
                 }
 
                 Print(result);
-                // Visual Studio 프로젝트 파일 낡음 경고(Docs/Design/ProjectFiles.ko.md 9절). 생성기 모델과 같은 조건(Windows 호스트, PCH 켬)일
-                // 때만 비교한다 — Android·--pch off 빌드의 논리 명령은 IDE 모델과 다르다.
-                if (!android && OperatingSystem.IsWindows() && Switch(options, PchOption) &&
+                // Visual Studio 프로젝트 파일 낡음 경고(Docs/Design/ProjectFiles.ko.md 9절). 생성기 모델과 같은 조건(Windows 호스트, PCH 켬,
+                // 기본 출력, IDE 구성)일 때만 비교한다 — Android·--pch off 빌드의 논리 명령은 IDE 모델과 다르고, --output·Coverage 빌드는
+                // 프로젝트 파일이 가리키는 출력이 아니다.
+                if (!android && OperatingSystem.IsWindows() && Switch(options, PchOption) && !options.ContainsKey("output") &&
+                    ProjectFilesCommand.IsIdeConfiguration(configuration) &&
                     ProjectFilesStaleness.Warning(root, rules.Target, configuration, toolchain, result) is string stale)
                 {
                     Console.WriteLine(stale);

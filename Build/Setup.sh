@@ -1,7 +1,7 @@
 #!/bin/sh
 # Rocks setup wizard for macOS hosts (Docs/Design/SetupWizard.ko.md). ./Setup.sh at the repository root runs this file.
 # It checks every prerequisite, asks once, installs only what is missing or wrong, and checks again. Values that a new terminal needs
-# (PATH for the .NET SDK, ROCKS_CLANG_FORMAT, ANDROID_*) go into one marked block of the shell startup file, so running it again
+# (PATH for the .NET SDK and PowerShell 7, ROCKS_CLANG_FORMAT, ANDROID_*) go into one marked block of the shell startup file, so running it again
 # changes nothing. Downloads are the pinned files of Build/Toolchain.json (URL and SHA-256 or SHA-512), the same entries that
 # Build/InstallFormatter.ps1 reads. Linux is not a C++ build host yet: there the script installs only what works today (the .NET SDK and
 # clang-format for the C# tools and the policy and format checks).
@@ -9,7 +9,7 @@
 # Usage: ./Setup.sh [--check] [--yes] [--android]
 #   --check      Check only. Exit code 0 when everything passes, 1 otherwise.
 #   --yes        Install without asking.
-#   --android    Also check and install the pinned Android NDK (needs PowerShell 7 for Build/SelectAndroidNdk.ps1).
+#   --android    Also check and install the pinned Android NDK (Build/SelectAndroidNdk.ps1 runs with the PowerShell 7 of the default steps).
 #   --self-test  Run the unit checks of this script and exit.
 set -u
 
@@ -153,6 +153,9 @@ if [ "$self_test" -eq 1 ]; then
     for key in macos-Arm64 macos-X64 linux-X64; do
         expect "json: clang-format wheel $key" 'json_download "$table" '"$key"' sha256 | grep -Eq "^https://[^ ]*/clang_format-$(json_version_after "$table" clangFormat)-[^ ]*\.whl [0-9a-f]{64}$"'
     done
+    for key in powershell-osx-arm64 powershell-osx-x64; do
+        expect "json: PowerShell archive $key" 'json_download "$table" '"$key"' sha256 | grep -Eq "^https://[^ ]*/powershell-$(json_version_after "$table" powershell)-'"${key#powershell-}"'\.tar\.gz [0-9a-f]{64}$"'
+    done
     for key in osx-arm64 osx-x64 linux-x64; do
         expect "json: .NET SDK archive $key" 'json_download "$table" '"$key"' sha512 | grep -Eq "^https://[^ ]*/dotnet-sdk-$(json_version_after "$table" dotnet)-'"$key"'\.tar\.gz [0-9a-f]{128}$"'
     done
@@ -185,6 +188,7 @@ case "$host" in
     Darwin)
         toolchain_root="${ROCKS_TOOLCHAIN_ROOT:-$HOME/Library/Application Support/Rocks/toolchains}"
         case "$machine" in arm64) format_key=macos-Arm64; dotnet_key=osx-arm64 ;; *) format_key=macos-X64; dotnet_key=osx-x64 ;; esac
+        pwsh_key=powershell-$dotnet_key
         case "${SHELL:-}" in */zsh) startup="$HOME/.zshrc" ;; */bash) startup="$HOME/.bash_profile" ;; *) startup="$HOME/.profile" ;; esac
         ;;
     Linux)
@@ -279,20 +283,37 @@ install_dotnet() {
     block_set "$startup" DOTNET_PATH 'export PATH="$HOME/.dotnet:$PATH"' >/dev/null
 }
 
-check_pwsh() {
-    action=install_pwsh; hint=''
-    if ! command -v pwsh >/dev/null 2>&1; then status=MISSING; detail='not found (Build/SelectAndroidNdk.ps1 needs it)'; return; fi
-    status=OK; detail=$(pwsh -NoProfile -NonInteractive -Command '$PSVersionTable.PSVersion.ToString()' 2>/dev/null)
+# PowerShell 7 runs Build/Tools.ps1 (Rocks.proj BootstrapTools prepares the build tools with it, Docs/Design/ProjectFiles.ko.md section 7.2)
+# and Build/SelectAndroidNdk.ps1, so every macOS build needs it.
+pwsh_directory() {
+    printf '%s' "$toolchain_root/powershell-$(json_version_after "$table" powershell)"
 }
 
+check_pwsh() {
+    action=install_pwsh; hint=''
+    candidate=$(command -v pwsh 2>/dev/null || true)
+    [ -n "$candidate" ] || { [ -x "$(pwsh_directory)/pwsh" ] && candidate="$(pwsh_directory)/pwsh"; }
+    if [ -z "$candidate" ]; then status=MISSING; detail='not found (Rocks.proj prepares the build tools with Build/Tools.ps1)'; return; fi
+    version=$("$candidate" -NoProfile -NonInteractive -Command '$PSVersionTable.PSVersion.Major' 2>/dev/null)
+    case "$version" in
+        7|[89]|[1-9][0-9]) status=OK; detail=$("$candidate" -NoProfile -NonInteractive -Command '$PSVersionTable.PSVersion.ToString()' 2>/dev/null) ;;
+        *) status=MISSING; detail="$candidate is not PowerShell 7 or later" ;;
+    esac
+}
+
+# Unpacks the pinned PowerShell archive (Build/Toolchain.json, SHA-256 checked) and puts it on PATH through the startup block.
 install_pwsh() {
-    if command -v brew >/dev/null 2>&1; then
-        brew install --cask powershell && return 0
-        echo "brew install --cask powershell failed. Next: read the message above; for download errors $network_hint."
-        return 1
-    fi
-    echo 'Next: install PowerShell 7 (https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-macos), then run ./Setup.sh --android again.'
-    return 1
+    entry=$(json_download "$table" "$pwsh_key" sha256)
+    [ -n "$entry" ] || { echo "No pinned PowerShell archive for $pwsh_key in Build/Toolchain.json. Next: $manual_guide."; return 1; }
+    archive=$(mktemp)
+    download_verified "${entry% *}" 256 "${entry#* }" "$archive" || return 1
+    directory=$(pwsh_directory)
+    mkdir -p "$directory" && tar -xzf "$archive" -C "$directory" && chmod +x "$directory/pwsh"
+    result=$?
+    rm -f "$archive"
+    [ "$result" -eq 0 ] || { echo "Could not unpack PowerShell into $directory. Next: check that the directory is writable and run ./Setup.sh again."; return 1; }
+    block_set "$startup" PWSH_PATH "export PATH=\"$directory:\$PATH\"" >/dev/null
+    PATH="$directory:$PATH"
 }
 
 check_format() {
@@ -361,8 +382,8 @@ if [ "$host" = Linux ]; then
     echo 'Linux is not a C++ build host yet (planned: Docs/Design/BuildTargets.ko.md section 3.7). Setup prepares the C# tools and the'
     echo 'policy and format checks (Docs/Guides/BuildEnvironment.ko.md section 5).'
 else
-    steps='xcode git dotnet format'
-    [ "$android" -eq 1 ] && steps="$steps pwsh android"
+    steps='xcode git dotnet pwsh format'
+    [ "$android" -eq 1 ] && steps="$steps android"
     echo "Rocks setup for macOS ($root)"
 fi
 

@@ -77,7 +77,7 @@ internal static class ProjectFilesWriterTests
         ProjectFilesInput input = Input(root, local);
         SortedDictionary<string, byte[]> rendered = VisualStudioProjects.Render(input);
         await ProjectFilesOutput.WriteAsync(input.Root, input.ProjectFilesDirectory, input.SolutionPath, rendered,
-            new SortedDictionary<string, string>(StringComparer.Ordinal), CancellationToken.None);
+            new SortedDictionary<string, string>(StringComparer.Ordinal), "clang-cl.exe", CancellationToken.None);
         IdeProject engine = input.Model.Projects.Single(project => project.Engine);
         string[] system = [.. new[] { local.ResourceIncludeDirectory }.Concat(local.SystemIncludes).Select(Path.GetFullPath)];
         foreach (IdeProjectConfiguration configuration in engine.Configurations)
@@ -131,7 +131,7 @@ internal static class ProjectFilesWriterTests
         }
     }
 
-    private static async Task<string?> VisualStudioMSBuildAsync()
+    internal static async Task<string?> VisualStudioMSBuildAsync()
     {
         string installer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Microsoft Visual Studio", "Installer", "vswhere.exe");
         if (!File.Exists(installer))
@@ -168,7 +168,7 @@ internal static class ProjectFilesWriterTests
 
     // Visual Studio MSBuild에 넘기는 환경이다. 이 프로세스의 환경에서 .NET SDK MSBuild 위치 변수(MSBuildLocator·dotnet이 둔
     // MSBUILD_EXE_PATH·MSBuildExtensionsPath·MSBuildSDKsPath 등)를 빼야 Visual Studio의 VCTargetsPath를 쓴다.
-    private static Dictionary<string, string?> VisualStudioEnvironment()
+    internal static Dictionary<string, string?> VisualStudioEnvironment()
     {
         var environment = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         foreach (System.Collections.DictionaryEntry entry in Environment.GetEnvironmentVariables())
@@ -295,11 +295,11 @@ internal static class ProjectFilesWriterTests
     private static async Task WriteAndCleanAsync(ProjectFilesInput input, SortedDictionary<string, byte[]> rendered)
     {
         var fingerprints = new SortedDictionary<string, string>(StringComparer.Ordinal) { ["Tool|Debug"] = "0" };
-        ProjectFilesWriteResult once = await ProjectFilesOutput.WriteAsync(input.Root, input.ProjectFilesDirectory, input.SolutionPath, rendered, fingerprints,
+        ProjectFilesWriteResult once = await ProjectFilesOutput.WriteAsync(input.Root, input.ProjectFilesDirectory, input.SolutionPath, rendered, fingerprints, "clang-cl.exe",
             CancellationToken.None);
         Require(once.Written == rendered.Count && once.Removed == 0, "first write");
         var times = rendered.Keys.ToDictionary(path => path, File.GetLastWriteTimeUtc);
-        ProjectFilesWriteResult twice = await ProjectFilesOutput.WriteAsync(input.Root, input.ProjectFilesDirectory, input.SolutionPath, rendered, fingerprints,
+        ProjectFilesWriteResult twice = await ProjectFilesOutput.WriteAsync(input.Root, input.ProjectFilesDirectory, input.SolutionPath, rendered, fingerprints, "clang-cl.exe",
             CancellationToken.None);
         Require(twice.Written == 0 && rendered.Keys.All(path => File.GetLastWriteTimeUtc(path) == times[path]), "second write rewrote unchanged files");
 
@@ -316,21 +316,21 @@ internal static class ProjectFilesWriterTests
         };
         SortedDictionary<string, byte[]> smaller = VisualStudioProjects.Render(withoutTool);
         ProjectFilesWriteResult cleaned = await ProjectFilesOutput.WriteAsync(input.Root, input.ProjectFilesDirectory, input.SolutionPath, smaller,
-            fingerprints, CancellationToken.None);
+            fingerprints, "clang-cl.exe", CancellationToken.None);
         Require(cleaned.Removed == 2 && !File.Exists(Path.Combine(input.ProjectFilesDirectory, "Programs", "Tool.vcxproj")) && File.Exists(user) &&
             File.Exists(intermediate), "cleanup must remove only the files the previous run wrote");
         // 다른 *.slnx는 상태 목록에 있어도 지우지 않는다(솔루션 파일 하나만 지울 수 있다). 깨진 상태 파일은 생성을 막지 않는다.
         string other = Path.Combine(input.Root, "Other.slnx");
         File.WriteAllText(other, "<Solution />\n");
         string statePath = Path.Combine(input.ProjectFilesDirectory, ProjectFilesOutput.StateFileName);
-        File.WriteAllText(statePath, "{\"FileVersion\":2,\"Files\":[\"Other.slnx\"],\"Fingerprints\":{}}\n");
-        await ProjectFilesOutput.WriteAsync(input.Root, input.ProjectFilesDirectory, input.SolutionPath, rendered, fingerprints, CancellationToken.None);
+        File.WriteAllText(statePath, "{\"FileVersion\":3,\"Files\":[\"Other.slnx\"],\"Fingerprints\":{},\"Compiler\":\"clang-cl.exe\"}\n");
+        await ProjectFilesOutput.WriteAsync(input.Root, input.ProjectFilesDirectory, input.SolutionPath, rendered, fingerprints, "clang-cl.exe", CancellationToken.None);
         Require(File.Exists(other), "cleanup removed a solution file that is not the generated one");
-        File.WriteAllText(statePath, "{\"FileVersion\":2,\"Files\":null,\"Fingerprints\":null}\n");
+        File.WriteAllText(statePath, "{\"FileVersion\":3,\"Files\":null,\"Fingerprints\":null,\"Compiler\":\"clang-cl.exe\"}\n");
         Require(ProjectFilesOutput.Read(statePath) is null, "a broken state file is not ignored");
-        File.WriteAllText(statePath, "{\"FileVersion\":2,\"Files\":[null],\"Fingerprints\":{}}\n");
+        File.WriteAllText(statePath, "{\"FileVersion\":3,\"Files\":[null],\"Fingerprints\":{},\"Compiler\":\"clang-cl.exe\"}\n");
         Require(ProjectFilesOutput.Read(statePath) is null, "a state file with a null entry is not ignored");
-        await ProjectFilesOutput.WriteAsync(input.Root, input.ProjectFilesDirectory, input.SolutionPath, rendered, fingerprints, CancellationToken.None);
+        await ProjectFilesOutput.WriteAsync(input.Root, input.ProjectFilesDirectory, input.SolutionPath, rendered, fingerprints, "clang-cl.exe", CancellationToken.None);
     }
 
     // V2: 평가한 값이 모델 값과 같다. Microsoft.Build 형식은 이 메서드 안에서만 쓴다(MSBuildLocator 등록 뒤에 올라가야 한다).
