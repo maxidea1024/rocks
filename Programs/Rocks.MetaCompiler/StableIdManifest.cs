@@ -222,6 +222,18 @@ internal sealed class StableIdManifest
 
     public string Register(string kind, string name) => Adopt(kind, name, Guid.NewGuid().ToString("N"));
 
+    // 새 프로젝트용으로 ID를 다시 발급한다(Docs/Design/ProjectFiles.ko.md 11.4절): 활성 항목은 Register와 같은 생성기로 새 ID를 받고 aliases를
+    // 비우며, 은퇴 항목은 지운다(새 프로젝트에는 이력이 없다). 템플릿에서 만든 프로젝트끼리 같은 타입 ID를 갖지 않게 한다. 다시 발급한 수다.
+    public int Reissue()
+    {
+        var next = entries.Where(value => !value.Retired)
+            .Select(value => new StableIdEntry(value.Kind, value.Name, Guid.NewGuid().ToString("N"), [], false)).ToList();
+        Validate(next);
+        entries.Clear();
+        entries.AddRange(next);
+        return next.Count;
+    }
+
     // 발급된 ID를 등록하기 전에 이름, 범위와 기존 예약 ID를 모두 검증한다.
     private string Adopt(string kind, string name, string id)
     {

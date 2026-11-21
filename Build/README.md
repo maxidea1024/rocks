@@ -107,7 +107,7 @@ public sealed class Physics : EngineModuleRules
 - **Patch**: 데이터 축(패키지 formatVersion·섹션 schemaVersion·타입 스키마·커스텀 버전·클래스 기본값 지문·쿠커 버전)과 공개 API를 바꾸지 않는 수정만 담은 릴리스. 같은 주·부의 모든 패치는 서로의 에디터 패키지를 읽는다(호환 판정은 패치를 보지 않는다).
 - **Minor**: 릴리스 경계 — 데이터 축이나 공개 API가 바뀐 뒤의 첫 릴리스에 올린다(개발 중 변경마다 올리지 않는다). 더 새 부 버전이 저장한 에디터 패키지는 이전 엔진이 `NewerVersion`으로 거부하고, 게임 프로젝트는 `engineVersion`을 새 주·부로 바꿔야 연결된다.
 - **Major**: 1.0 이후에 쓴다.
-- 올릴 때 `Build/Build.version`과 게임 템플릿 `Templates/Game/Foundation/Game.rocksproject`의 `engineVersion`(주·부)을 같은 변경에서 함께 바꾼다(`Rocks.Build.Tests`가 둘의 일치와 파일의 한 줄 정규형을 확인한다).
+- 올릴 때 `Build/Build.version`과 게임 템플릿 `Templates/Game/Foundation/FoundationTemplate.rocksproject`의 `engineVersion`(주·부)을 같은 변경에서 함께 바꾼다(`Rocks.Build.Tests`가 둘의 일치와 파일의 한 줄 정규형을 확인한다).
 - 엔진 버전은 쿠킹 패키지·cookKey·에셋 너겟 키에 들어가지 않는다. 쿠커 출력의 의미가 바뀌면 엔진 버전이 아니라 쿠커 버전을 올린다.
 
 MSBuild는 .NET 도구와 C# 규칙을 빌드하고 단계를 조직한다. `Rocks.Build`가 네이티브 작업 그래프, 입력·출력 해시, 증분 여부, 실패 복구를 담당한다. `Build/Rules/*.Build.cs`는 모듈을, `*.Target.cs`는 실행 대상을 정의한다. 규칙은 신뢰된 프로젝트 코드이며 동적으로 읽는 외부 입력은 명시해야 한다.
@@ -120,6 +120,8 @@ dotnet msbuild Rocks.proj /t:Game /p:SdkDirectory=C:/work/rocks-sdk/0.1.0 /p:Gam
 ```
 
 설치 SDK 하나가 여러 구성을 담는다. 기본은 Debug·Development·Release이고 `/p:SdkConfigurations=Debug+Release`(CLI `sdk --configurations Debug+Release`, 쉼표도 된다)로 고른다 — MSBuild `-p:`는 쉼표·세미콜론을 속성 구분자로 읽으므로 `+`로 잇는다. Asan·Coverage는 적을 때만 들어간다. `/t:InstalledSdk`는 `/p:Configuration`을 쓰지 않는다(Debug가 아니면 경고). 구성마다 엔진을 기본 출력(`out/dotnet-<platform>-<target>-<구성>`)에 빌드한 뒤 한 SDK로 조립한다. 구성과 무관한 부분(`Headers/`·`Tools/`·`Licenses/`·`Build/` 스크립트 등)은 한 벌이고, 라이브러리와 리플렉션 descriptor·명세는 `Configurations/<구성>/Libraries/`·`Configurations/<구성>/Metadata/<모듈>/`에 있다. 한 벌 파일이 구성마다 다르면 내보내기 오류다. 게임 빌드는 요청 구성이 SDK에 없으면 가진 구성 목록과 함께 멈춘다([Visual Studio 프로젝트 파일](../Docs/Design/ProjectFiles.ko.md) 10.3절).
+
+새 게임은 템플릿에서 만든다: `Rocks.Build.Cli new-project --template Foundation --name <이름> --destination <부모> [--sdk <SDK>] [--projectfiles on|off]`(SDK가 싣는 `Templates/Game/<이름>`, 경로도 된다). 템플릿 이름(`FoundationTemplate`)의 세 철자를 새 이름으로 바꿔 복사하고, `engineVersion`을 SDK에 맞추고, identity 명세를 `ids reissue`로 새 ID로 바꾸며, Windows에서는 Visual Studio 솔루션도 만든다. 게임 빌드는 `--target`(`/p:GameTarget`)이 없으면 `.rocksproject` 이름의 타깃을 빌드한다.
 
 게임 출력은 `<게임>/out/<platform>-<target>-<configuration>`(소문자, 예: `out/windows-game-debug`)이다. 게임 입력 snapshot과 게임 규칙 파일 탐색은 이름이 `.`으로 시작하는 디렉터리(`.vs`·`.git` 등), 게임 루트 바로 아래의 `out/`·`Saved/`, 루트의 `*.slnx`를 보지 않는다. 그 안의 파일을 규칙이 읽으면 명시 입력으로 적는다. 게임 출력 하나를 비우려면 `Rocks.Build.Cli clean --project <게임> --target <T> --configuration <C>`를 쓴다(잠금 파일 둘만 남긴다).
 

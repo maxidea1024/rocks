@@ -1,6 +1,6 @@
 # Visual Studio 프로젝트 파일 생성 설계
 
-기준일: 2026-11-22, 개정 14. Rocks 저장소와 게임 프로젝트에서 Visual Studio 솔루션·프로젝트 파일을 만드는 방법을 정한다(UE 5.8 GenerateProjectFiles 대응).
+기준일: 2026-11-22, 개정 15. Rocks 저장소와 게임 프로젝트에서 Visual Studio 솔루션·프로젝트 파일을 만드는 방법을 정한다(UE 5.8 GenerateProjectFiles 대응).
 - **엔진 모드**: 저장소 루트에서 `projectfiles --root`로 엔진·Programs·C# 도구 솔루션을 만든다. 엔진에는 `.rocksproject`가 없다.
 - **IntelliSense**: 부작용 없는 IDE 계획 모드로 빌드 계획의 논리 compile 명령(`compile_commands.json`과 같은 원천)을 만들고, 파일별 설정으로 옮긴다.
 - **NMake 빌드**: 프로젝트의 빌드·다시 빌드·정리는 Rocks.Build를 부른다. Visual Studio가 직접 컴파일하지 않는다.
@@ -386,7 +386,7 @@ UE는 `EngineAssociation`이 비면 상위 디렉터리에서 엔진을 찾고, 
 게임 솔루션은 Debug·Development·Release를 함께 가져야 한다. 구성마다 CRT(`/MDd`·`/MD`)와 구성 매크로가 달라 엔진 라이브러리를 섞을 수 없다. 그래서 SDK 하나가 여러 구성을 담는다.
 
 - `sdk --configurations Debug,Development,Release`(기본은 이 셋, `Asan`은 지정할 때만)가 구성마다 엔진을 빌드한 뒤 SDK 하나로 조립한다.
-- 배치: 구성과 무관한 부분(공개 헤더, `Tools/`, `Licenses/`, `Build/` 스크립트, `global.json`·`.clang-format`)은 한 벌이고, 구성마다 다른 부분(라이브러리, 메타데이터 descriptor·identity 명세 사본, 모듈 칸)은 `Configurations/<구성>/` 아래에 둔다. 한 벌로 둔 파일이 구성마다 다르면 내보내기 오류다(조립 때 내용 해시로 확인한다).
+- 배치: 구성과 무관한 부분(공개 헤더, `Tools/`, `Licenses/`, `Templates/`(PJ6), `Build/` 스크립트, `global.json`·`.clang-format`)은 한 벌이고, 구성마다 다른 부분(라이브러리, 메타데이터 descriptor·identity 명세 사본, 모듈 칸)은 `Configurations/<구성>/` 아래에 둔다. 한 벌로 둔 파일이 구성마다 다르면 내보내기 오류다(조립 때 내용 해시로 확인한다).
 - manifest: `Configuration`(문자열)을 `Configurations`(구성 이름 → 파일 목록·모듈 목록)로 바꾸고 `ManifestVersion`을 13에서 14로 올린다(`InstalledSdk.cs:61`). `Verify`는 요청 구성이 목록에 있는지 본다.
 - BuildTargets BD5의 SDK 변형(매크로 조합 × 링크 방식)과는 직교한다. 변형 축이 생기면 `Configurations/<구성>/<변형>/`으로 넓힌다.
 - 게임 솔루션의 구성은 연결한 SDK가 가진 구성뿐이다. 게임 생성기(PJ5)는 manifest 14의 `Configurations`를 읽으므로 이 절(PJ4)이 먼저다.
@@ -514,6 +514,17 @@ UE 설치 빌드도 여러 구성의 엔진 바이너리를 함께 싣는다. �
 5. Windows에서 `--projectfiles on`(기본)이면 게임 모드 생성을 돈다.
 
 UE는 에디터 대화 상자에서 만든다. Rocks는 에디터 전에도 쓸 수 있도록 CLI 명령으로 두고, 나중의 에디터 UI도 같은 명령을 부른다.
+
+### 11.6 구현(PJ6, 개정 15)
+
+- **템플릿.** `Templates/Game/Foundation`의 이름은 `FoundationTemplate`이다(파일 `FoundationTemplate.rocksproject`·`.Build.cs`·`.Target.cs`·`.rocksids.json`·`Source/FoundationTemplateModule.cpp`, 모듈·타깃 `FoundationTemplate`, namespace `foundationtemplate`). `Template.json`은 11.2절 그대로다.
+- **기본 타깃.** 게임 빌드·`clean --project`·생성기는 `--target`이 없으면 `.rocksproject` 이름의 타깃을 쓴다(`GameProjectLayout.DefaultTarget`, UE도 `<프로젝트>.Target.cs`가 기본 게임 타깃). `Rocks.proj`의 `GameTarget` 기본값(`Game`)을 없애고 값이 있을 때만 `--target`을 넘긴다. 템플릿에서 만든 프로젝트는 타깃 이름이 프로젝트 이름이라 따로 적지 않아도 된다.
+- **SDK.** `new-project`는 `--sdk`가 없으면 자기 CLI가 든 SDK(`<SDK>/Tools/Rocks.Build.Cli/`)를 쓰고, 엔진 작업 사본의 CLI면 `--sdk`를 요구한다. SDK 내보내기는 `Templates/`를 한 벌 부분으로 싣는다.
+- **이름 검사.** 11.3절에 더해 예약 이름은 `Rocks`·`RocksSdk`(게임 솔루션의 SDK 헤더 프로젝트, 10.4절)·`Engine`·`Core`·`Std`·`Posix`와 SDK의 모든 구성의 모듈 이름이다(대소문자 무시). 대문자 형 `ROCKS`는 소문자 형 `rocks`와 같은 이름이라 함께 막힌다.
+- **실패.** 복사·기술자·재발급·남은 철자 검사 중 실패하면 만든 디렉터리를 지운다(있던 빈 디렉터리는 비우고 남긴다). 비어 있지 않은 대상은 아무것도 쓰기 전에 거부한다.
+- **재발급.** 결과의 모든 `*.rocksids.json`에 SDK MetaCompiler `ids reissue --manifest`를 돈다(`StableIdManifest.Reissue` — `Register`와 같은 생성기, aliases 비움, 은퇴 항목 삭제).
+- **프로젝트 파일.** Windows에서 `--projectfiles on`(기본)이면 끝에 게임 모드 생성(10.4절)을 같은 SDK로 돈다(`--compiler`를 넘긴다).
+- **시험(V12).** IntegrationTests의 게임 fixture 셋(기본·리플렉션·드라이브 루트)을 `new-project --name SampleGame`으로 만든다 — 모듈·타깃·기술자 이름이 모두 `SampleGame`이 되고 namespace는 `samplegame`이다. 본 흐름이 남은 철자 0, `Template.json`·README 미복사, ID 전부 재발급(템플릿과 다름, 두 프로젝트끼리도 다름), 비어 있지 않은 대상 거부를 단언하고, 그 fixture로 빌드·실행·리플렉션 시험이 그대로 돈다. `GameProjectTests`가 이름 검사 거부 사례, 두 단계·대소문자 구분 치환, 섞인 철자·모르는 필드 거부를 시험한다.
 
 ## 12. 진입 스크립트와 셸 통합
 
@@ -742,3 +753,4 @@ Visual Studio 없이 결정적으로 검사한다. 시험은 `Rocks.Build.Tests`
 | 12 | 2026-11-22 | PJ3 반영·PJ4 리뷰 반영. (1) 구성 목록에 `+`를 받고 `Rocks.proj`·문서를 `-p:SdkConfigurations=Debug+Release`로 바꿨다(쉼표·세미콜론은 `-p:` 구분자라 MSB1006). IntegrationTests의 두 구성 내보내기를 pwsh에서 그 명령으로 `/t:InstalledSdk`를 부르게 바꿨다. (2) 등록부 잠금: JSON은 잠금 파일(`FileShare.None`), 레지스트리는 `Global\Rocks.SdkRegistry.<SID>`. 자식 프로세스 둘이 같은 등록부에 동시에 등록하는 시험(JSON·레지스트리). (3) 중복 JSON 키를 `JsonException`으로. (4) 링크 판정을 `LinkTarget`으로 좁혔다(10.6절). (5) Verify 해시 범위를 한 벌 + 요청 구성으로 줄이고, 게임 빌드는 한 번만 해시한다(끝은 크기·수정 시각). (6) 구성 사이 소스 snapshot 일관성. (7) 시험: `sdk --configuration` 거부, 여러 구성 `--output` 거부, 첫 구성 뒤 실패의 원자성(시험 hook), `/t:InstalledSdk` 경로, `--register on`은 trailing 내보내기로 옮김. Development 조립은 돌리지 않는다(L19). (8) 10.3절 배치 목록에서 `Templates/`를 뺐고(싣지 않는다) Coverage도 받음을 적었다. `/t:InstalledSdk`의 `Configuration` 경고. (9) `Tools.ps1` memo는 입력 항목을 빌드 전, 출력 DLL 항목을 빌드 뒤 값으로 합친다. (10) `--register on` 등록 실패는 게시 사실과 `sdk-register` 안내로 알린다 |
 | 13 | 2026-11-22 | PJ5 구현에서 정한 점(10.4절 구현 단락). (1) `projectfiles --project`, SDK 해석은 구성 조건 없이, 구성은 SDK 구성 ∩ IDE 구성, Android 없음. (2) `GamePlanning`을 빌드와 생성기가 함께 쓰고, 생성기는 규칙을 `out/ProjectFiles/Rules`에 컴파일한다. (3) `IdeModelLayout`으로 주 게임 프로젝트·하위 타깃 프로젝트·`RocksSdk` 헤더 프로젝트. (4) 공통 props `RocksSdkRoot`·`RocksProjectFile`, 게임 프로젝트는 솔루션 폴더 밖(첫 항목은 정할 수 없어 시작 프로젝트는 사용자가 고른다). (5) SDK `IdeBuild.ps1` 게임 모드, `GenerateProjectFiles.ps1 -Project`. (6) `associate`가 생성 상태가 있으면 다시 만든다. (7) 게임 빌드 `RPF0001`은 넣지 않았다(L20). (8) 시험: IntegrationTests 본 흐름에서 템플릿 게임으로 생성(V4 두 번째 실행 0 쓰기), 솔루션 왕복(V3, 게임은 폴더 밖, `RocksSdk` 빌드 제외), MSBuild 평가(V2: NMake 속성·`ClCompile`이 모델과 같은 파일, 모든 항목 파일 존재), NMake Build·Clean·Rebuild를 cmd로 실행(V6). 게임 golden(V5)은 실제 SDK 내용에 묶여 두지 않았다 — 렌더링은 엔진 모드 golden이 덮는다 |
 | 14 | 2026-11-22 | PJ4 반영·PJ5 리뷰 반영(10.2·10.4·7.3절). (1) 게임 주 프로젝트 타깃은 정의 디렉터리가 루트 또는 `<루트>/Source`(UE 배치), 이름 충돌은 생성 오류, `RocksSdk` 구성 대체 규칙. (2) `clean`은 `out/ProjectFiles`와 그 아래를 거부하고, 호출 잠금만 있는 출력은 실행 기록이 있을 때만 받는다. (3) `associate` 재생성 실패는 연결 유지·종료 코드 2로 하나, IDE 빌드의 낡은 연결 검사. (4) 게임 생성은 고른 SDK의 CLI로 위임한다. (5) 생성은 시작부터 `out/ProjectFiles` 잠금을 쥐고, model-only는 임시 디렉터리에 규칙을 컴파일한다. (6) IDE 구성마다 구조 검증, 해시는 한 번. (7) 독립 시험 모드도 `ROCKS_SDK_REGISTRY`로 격리하고 기대값을 하나로. (8) 등록부 잠금을 잠금 파일로 통일(레지스트리는 `%LOCALAPPDATA%\Rocks\SdkRegistry.lock`), 공유 위반만 다시 시도. (9) 문서: `-Sdk "$(RocksSdkRoot)."`, `IdeProject` 주석, 게임 모드 ClangCL 경고·생성 헤더 안내, 구성이 없는 SDK의 안내 문구. (10) 시험: 두 배치·이름 충돌(`IdePlanTests`), `clean`의 `out/ProjectFiles`·실행 기록 없는 출력 거부, `associate` 실패 종료 코드, 낡은 연결 검사, 구성 교집합, 동시 생성 |
+| 15 | 2026-11-22 | PJ6 구현(11.6절). 템플릿을 `FoundationTemplate`으로 바꾸고 `Template.json`을 더했다. 게임 기본 타깃은 `.rocksproject` 이름이다(`Rocks.proj` `GameTarget` 기본값 삭제). `new-project`(SDK 기본은 CLI가 든 SDK, 예약 이름에 `RocksSdk` 등, 실패 시 정리, 끝에 게임 프로젝트 파일), MetaCompiler `ids reissue`, SDK가 `Templates/`를 싣는다. IntegrationTests의 게임 fixture를 `new-project`로 만들고 V12를 단언한다 |

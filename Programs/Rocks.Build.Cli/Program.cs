@@ -50,8 +50,8 @@ namespace Rocks.Build.Cli
         {
             if (args.Length == 0)
             {
-                throw new ArgumentException("Expected build, test, sdk, game, bootstrap, clean, sdk-register, sdk-unregister, associate, unity-profile, or " +
-                    "projectfiles command.");
+                throw new ArgumentException("Expected build, test, sdk, game, bootstrap, clean, sdk-register, sdk-unregister, associate, new-project, " +
+                    "unity-profile, or projectfiles command.");
             }
 
             if (args[0] == UnityProfileCommand.Name)
@@ -83,6 +83,8 @@ namespace Rocks.Build.Cli
                 SdkCommands.Register => new HashSet<string>(["sdk"], StringComparer.Ordinal),
                 SdkCommands.Unregister => new HashSet<string>(["sdk", "id"], StringComparer.Ordinal),
                 SdkCommands.Associate => new HashSet<string>(["project", "sdk", "id", "version"], StringComparer.Ordinal),
+                // 템플릿에서 새 게임 프로젝트를 만든다(Docs/Design/ProjectFiles.ko.md 11.5절).
+                NewProjectCommand.Name => new HashSet<string>(["template", "name", "destination", "sdk", "projectfiles", "compiler"], StringComparer.Ordinal),
                 _ => throw new ArgumentException($"Unknown command: {args[0]}")
             };
             foreach (var name in options.Keys)
@@ -114,6 +116,11 @@ namespace Rocks.Build.Cli
                 return registered != 0 || args[0] != SdkCommands.Associate || !OperatingSystem.IsWindows()
                     ? registered
                     : await GameProjectFiles.RegenerateAsync(options["project"], cancellationToken);
+            }
+
+            if (args[0] == NewProjectCommand.Name)
+            {
+                return await NewProjectCommand.RunAsync(options, cancellationToken);
             }
 
             if (args[0] == CleanCommand.Name)
@@ -612,7 +619,7 @@ namespace Rocks.Build.Cli
 
         internal static Dictionary<string, string> Parse(string[] args)
         {
-            var allowed = new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination", "sdk", "project", "platform", "android-abi", "android-api", "android-ndk", "adb", "library", "store", "mirror", "offline", MetadataLayout.VerifySourcesOption, PlanOnlyOption, .. BuildModeOptions, "windows-sdk", RequireVerifiedToolchainOption, .. UnityProfileCommand.Options, .. ProjectFilesCommand.Options, .. SdkCommands.Options, .. SdkExportCommand.Options], StringComparer.Ordinal);
+            var allowed = new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination", "sdk", "project", "platform", "android-abi", "android-api", "android-ndk", "adb", "library", "store", "mirror", "offline", MetadataLayout.VerifySourcesOption, PlanOnlyOption, .. BuildModeOptions, "windows-sdk", RequireVerifiedToolchainOption, .. UnityProfileCommand.Options, .. ProjectFilesCommand.Options, .. SdkCommands.Options, .. SdkExportCommand.Options, .. NewProjectCommand.Options], StringComparer.Ordinal);
             var values = new Dictionary<string, string>(StringComparer.Ordinal);
             for (var index = 0; index < args.Length; index += 2)
             {

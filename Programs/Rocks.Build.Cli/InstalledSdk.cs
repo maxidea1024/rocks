@@ -171,11 +171,10 @@ public static class InstalledSdk
         }
 
         File.Copy(Path.Combine(root, ".clang-format"), Path.Combine(stage, ".clang-format"));
+        // 프로젝트 템플릿을 싣는다(new-project가 SDK의 Templates/Game/<이름>에서 찾는다, Docs/Design/ProjectFiles.ko.md 11.5절).
+        CopyTree(Path.Combine(root, "Templates"), Path.Combine(stage, "Templates"));
         return [.. packaged];
     }
-
-    /// <summary>게임 타깃 기본 이름이다(<c>--target</c>가 없을 때).</summary>
-    internal const string DefaultGameTarget = "Game";
 
     // SDK가 싣는 Visual Studio 진입 스크립트다(Build/ 아래 같은 이름).
     private static readonly string[] SdkScripts = ["IdeBuild.bat", "IdeBuild.ps1", "Tools.ps1", "GenerateProjectFiles.ps1"];
@@ -300,8 +299,9 @@ public static class InstalledSdk
         RequireCurrentProjectFiles(options);
         var sdk = PathSpelling.OnDisk(Path.GetFullPath(options["sdk"]));
         var project = PathSpelling.OnDisk(Path.GetFullPath(options["project"]));
-        var output = PathSpelling.OnDisk(Path.GetFullPath(options.GetValueOrDefault("output",
-            GameProjectLayout.DefaultOutput(project, options.GetValueOrDefault("target", DefaultGameTarget), BuildCommand.Configuration(options)))));
+        // 기본 출력은 --output이 없을 때만 계산한다(기본 타깃은 .rocksproject를 읽는다).
+        var output = PathSpelling.OnDisk(Path.GetFullPath(options.TryGetValue("output", out string? given) ? given
+            : GameProjectLayout.DefaultOutput(project, options.GetValueOrDefault("target") ?? GameProjectLayout.DefaultTarget(project), BuildCommand.Configuration(options))));
         if (Inside(sdk, output) || Inside(sdk, project) || Inside(output, project) || Inside(output, sdk))
         {
             throw new ArgumentException("Game output cannot overlap or contain the project or installed SDK.");
@@ -373,8 +373,8 @@ public static class InstalledSdk
         var sdk = PathSpelling.OnDisk(Path.GetFullPath(options["sdk"]));
         var project = PathSpelling.OnDisk(Path.GetFullPath(options["project"]));
         var configuration = BuildCommand.Configuration(options);
-        var output = PathSpelling.OnDisk(Path.GetFullPath(options.GetValueOrDefault("output",
-            GameProjectLayout.DefaultOutput(project, options.GetValueOrDefault("target", DefaultGameTarget), configuration))));
+        var output = PathSpelling.OnDisk(Path.GetFullPath(options.TryGetValue("output", out string? given) ? given
+            : GameProjectLayout.DefaultOutput(project, options.GetValueOrDefault("target") ?? GameProjectLayout.DefaultTarget(project), configuration)));
         if (Inside(sdk, output) || Inside(sdk, project) || Inside(output, project) || Inside(output, sdk))
         {
             throw new ArgumentException("Game output cannot overlap or contain the project or installed SDK.");
@@ -423,7 +423,7 @@ public static class InstalledSdk
         }
 
         var context = new BuildContext(project, output, toolchain.Platform, toolchain.Architecture, configuration, sdk);
-        var rules = RuleLoader.Load(rulesPath, options.GetValueOrDefault("target", DefaultGameTarget), context);
+        var rules = RuleLoader.Load(rulesPath, (options.GetValueOrDefault("target") ?? GameProjectLayout.DefaultTarget(project)), context);
         GameLayout layout = GamePlanning.Layout(rules, projectDescriptor, availablePlugins, context, toolchain, configuration, sdk, sdkModules,
             createDirectories: true);
         string[] targets = layout.Targets;
@@ -702,6 +702,27 @@ public static class InstalledSdk
             configurations.ValueKind == JsonValueKind.Object
             ? configurations.EnumerateObject().Select(entry => entry.Name).ToHashSet(StringComparer.Ordinal)
             : [];
+    }
+
+    /// <summary>SDK manifest의 모든 구성에 든 모듈 이름이다(new-project 이름 검사, 검증 없이 읽는다).</summary>
+    internal static HashSet<string> ManifestModuleNames(string sdk)
+    {
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(Path.Combine(sdk, "rocks-sdk.json")));
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (document.RootElement.TryGetProperty(nameof(SdkManifest.Configurations), out JsonElement configurations) &&
+            configurations.ValueKind == JsonValueKind.Object)
+        {
+            foreach (JsonProperty configuration in configurations.EnumerateObject())
+            {
+                if (configuration.Value.TryGetProperty(nameof(SdkConfiguration.Modules), out JsonElement modules) && modules.ValueKind == JsonValueKind.Array)
+                {
+                    names.UnionWith(modules.EnumerateArray().Where(module => module.TryGetProperty(nameof(SdkModule.Name), out _))
+                        .Select(module => module.GetProperty(nameof(SdkModule.Name)).GetString() ?? ""));
+                }
+            }
+        }
+
+        return names;
     }
 
     // manifest가 가진 구성 이름 목록이다(오류 안내용).

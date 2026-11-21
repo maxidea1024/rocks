@@ -23,6 +23,18 @@ internal static class GameProjectLayout
     /// <summary>호스트의 게임 출력 플랫폼 이름이다(엔진 출력 이름과 같은 철자).</summary>
     public static string HostPlatformName => OperatingSystem.IsWindows() ? "windows" : "macos";
 
+    /// <summary>
+    /// <c>--target</c>가 없을 때의 게임 타깃 이름이다: 게임 루트의 <c>.rocksproject</c>(정확히 하나) 이름이다. UE도 <c>&lt;프로젝트&gt;.Target.cs</c>가 기본
+    /// 게임 타깃이고, 템플릿에서 만든 프로젝트의 타깃 이름이 프로젝트 이름이다(Docs/Design/ProjectFiles.ko.md 11.1절).
+    /// </summary>
+    public static string DefaultTarget(string project)
+    {
+        string[] files = Directory.GetFiles(project, "*" + Rocks.Build.Descriptors.DescriptorReader.ProjectExtension, SearchOption.TopDirectoryOnly);
+        return files.Length == 1 ? Path.GetFileNameWithoutExtension(files[0])
+            : throw new ArgumentException($"The game project root must contain exactly one {Rocks.Build.Descriptors.DescriptorReader.ProjectExtension} file " +
+                $"(found {files.Length}); pass --target <name>.");
+    }
+
     /// <summary>게임 타깃·구성의 기본 출력 디렉터리다.</summary>
     public static string DefaultOutput(string project, string target, NativeConfiguration configuration) =>
         Path.Combine(project, "out", $"{HostPlatformName}-{target.ToLowerInvariant()}-{configuration.ToString().ToLowerInvariant()}");

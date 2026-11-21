@@ -36,6 +36,8 @@ auto runtimeName = type.Name();
 
 리플렉션 헤더를 가진 모듈은 모듈 폴더에 identity 명세 `<ModuleName>.rocksids.json`을 둔다. 명세는 그 모듈 타입과 필드의 무작위 안정 ID, 이전 이름과 폐기 이력을 보관한다. 새로운 선언의 ID 발급과 이름 변경·폐기는 `ids add`, `ids rename`, `ids retire`를 사용하는 명시적인 저작 작업이다. 타입을 다른 모듈로 옮길 때는 `ids move --from <명세> --to <명세> --type <이름>`이 타입과 그 필드 항목을 ID 그대로 옮긴다. 대상에 먼저 붙이고 원본에서 떼므로 중간에 멈추면 같은 명령을 다시 실행한다. 일반 빌드는 명세를 읽기만 하고 누락 또는 중복을 거부한다. 모듈마다 생성 결과의 inventory로 활성 명세의 누락과 중복을 검사하고(`ids verify`), 타깃에서 도달하는 모듈의 모든 명세(은퇴 항목만 남은 예약 명세와 SDK가 동봉한 명세 포함) 사이에 같은 ID나 같은 종류의 같은 이름·별칭이 있으면 거부한다(`ids verify-set`, RMC2101 — 한 ID·한 이름은 한 명세에만 있다). 이 검사가 모두 끝나야 생성물을 게시한다. 리플렉션 헤더는 정확히 한 모듈이 소유한다. 미등록 헤더의 자동 탐색은 아직 없다 — 대신 엔진 저장소(템플릿 포함) 소스에서는 Policy가 어느 모듈 `Metadata`에도 없는 파일의 `ROCKS_PROPERTY`·`ROCKS_NATIVE`를 거부한다(아래 "native 클래스" — 저장소 밖 게임 프로젝트에는 아직 이 검사가 없다).
 
+템플릿에서 새 프로젝트를 만들 때(`new-project`)는 `ids reissue --manifest <명세>`가 활성 항목에 새 무작위 ID를 주고 aliases와 은퇴 항목을 지운다. 같은 템플릿에서 만든 프로젝트끼리 타입 ID가 겹쳐 `ids verify-set`에 걸리지 않게 한다([Visual Studio 프로젝트 파일](../Design/ProjectFiles.ko.md) 11.4절).
+
 이력 검사(`ids merge-check`, `Build/CheckIdentityMerges.ps1`)는 리비전마다 저장소의 모든 명세를 ID 기준으로 합쳐 비교한다. 따라서 명세를 옮기거나 타입을 다른 명세로 옮겨도 ID가 사라진 것으로 보지 않으며, ID 삭제·재사용과 예약 이름 재사용은 계속 거부한다. 합치기 전에 한 리비전 안의 두 명세에 같은 ID나 이름이 있는지 보고, 있으면 측면과 파일 경로를 함께 보고하고 실패한다(빌드의 `ids verify-set`과 같은 규칙).
 
 저장 레코드에는 그 타입의 스키마 버전이 기록된다. 버전은 `ROCKS_CLASS(Version=N)`(없으면 1)이며 영속 필드의 의미·형식이 바뀌면 올리고 마이그레이션을 등록한다. base의 버전은 파생 Record에 기록되지 않으므로 base의 영속 배치를 바꾸면 파생 타입들도 버전을 올린다(MetaCompiler는 강제하지 않는다). 사용자 정의 스키마 변경의 자동 판정과 마이그레이션 생성은 아직 구현되지 않았다. 이름 변경 시 명세의 `ids rename`으로 ID를 유지하며, 다른 ID를 새로 발급해 이전 필드를 대체하면 활성 이전 선언이 누락되어 빌드가 실패한다.
@@ -385,7 +387,7 @@ detail::StructFieldOps<&::S::m>(MemberId, &detail::PathStructMember<&::S::m, Val
 
 ```text
 dotnet build Programs/Rocks.Tools.csproj
-dotnet out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll --module SampleGame --input Templates/Game/Foundation/Source/GameObject.h --include GameObject.h --output-root out/Generated/SampleGame --descriptor out/Metadata/SampleGame.rocksmeta.json --identity-manifest Templates/Game/Foundation/SampleGame.rocksids.json --compiler clang-cl
+dotnet out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll --module FoundationTemplate --input Templates/Game/Foundation/Source/GameObject.h --include GameObject.h --output-root out/Generated/FoundationTemplate --descriptor out/Metadata/FoundationTemplate.rocksmeta.json --identity-manifest Templates/Game/Foundation/FoundationTemplate.rocksids.json --compiler clang-cl
 dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll meta --root . --compiler clang-cl --metacompiler out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll --clang-arg=-DROCKS_BUILD_DEBUG=1 --clang-arg=-DROCKS_PLATFORM_WINDOWS=1 --clang-arg=-DROCKS_MONOLITHIC=1
 ```
 

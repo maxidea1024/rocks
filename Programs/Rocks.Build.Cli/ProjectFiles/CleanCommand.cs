@@ -38,8 +38,10 @@ internal static class CleanCommand
 
     public static async Task<int> RunAsync(Dictionary<string, string> options, CancellationToken cancellationToken)
     {
-        string target = options.TryGetValue("target", out string? name) && name.Length != 0
-            ? name : throw new ArgumentException($"Command '{Name}' requires --target <name>.");
+        // 게임은 --target이 없으면 .rocksproject 이름의 타깃이다(게임 빌드와 같다).
+        string target = options.TryGetValue("target", out string? name) && name.Length != 0 ? name
+            : options.TryGetValue("project", out string? game) ? GameProjectLayout.DefaultTarget(Path.GetFullPath(game))
+            : throw new ArgumentException($"Command '{Name}' requires --target <name>.");
         NativeConfiguration configuration = BuildCommand.Configuration(options);
         // 게임 프로젝트(--project): 게임 출력 규칙(GameProjectLayout)이고 경계 루트는 프로젝트 디렉터리다(Docs/Design/ProjectFiles.ko.md 7.3절).
         if (options.TryGetValue("project", out string? project))
