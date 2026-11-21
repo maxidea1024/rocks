@@ -48,7 +48,7 @@ internal static partial class SelfTests
             Verify.Equal(1, PolicyChecks.OptimizationOverrides(temporary.Root).Count, "committed Never optimization rule escaped audit");
             temporary.Write("Engine/Source/Runtime/Probe/Probe.Build.cs", "// rules\n");
 
-            // 최적화 인자의 미리 정의 매크로는 제품 소스에서 거부하고(IDE IntelliSense가 보지 못한다), 시험 소스는 허용한다.
+            // 최적화 인자의 미리 정의 매크로는 시험 소스를 포함해 거부한다(IDE IntelliSense가 보지 못한다).
             foreach (string source in new[] { "#if __OPTIMIZE__\n#endif", "#ifdef __OPTIMIZE_SIZE__\n#endif", "#if defined(__NO_INLINE__)\n#endif" })
             {
                 temporary.Write("Engine/Source/Runtime/Probe/Private/Probe.cpp", source + "\n");
@@ -57,9 +57,16 @@ internal static partial class SelfTests
                     "optimization predefined macro escaped audit: " + source);
                 temporary.Write("Engine/Source/Runtime/Probe/Private/Probe.cpp", "void F();\n");
                 temporary.Write("Core/Source/Runtime/Core/Tests/ProbeTests.cpp", source + "\n");
-                NoFailures(PolicyChecks.OptimizationOverrides(temporary.Root));
+                failures = PolicyChecks.OptimizationOverrides(temporary.Root);
+                Verify.That(failures.Count == 1 && failures[0].ToString().Contains("ide-invisible-macro", StringComparison.Ordinal),
+                    "optimization predefined macro escaped audit in a test source: " + source);
                 temporary.Write("Core/Source/Runtime/Core/Tests/ProbeTests.cpp", "void G();\n");
             }
+
+            // 주석과 문자열 리터럴 안의 이름은 허용한다.
+            temporary.Write("Engine/Source/Runtime/Probe/Private/Probe.cpp", "// __OPTIMIZE__ is not used\nconst char* Name = \"__NO_INLINE__\";\n");
+            NoFailures(PolicyChecks.OptimizationOverrides(temporary.Root));
+            temporary.Write("Engine/Source/Runtime/Probe/Private/Probe.cpp", "void F();\n");
 
             // 강제 인라인은 테스트 소스에서도 거부한다. 단어만 언급한 주석은 허용한다.
             temporary.Write("Engine/Source/Runtime/Probe/Private/Probe.cpp", "// UE FORCEINLINE과 always_inline은 쓰지 않는다\nvoid F();\n");

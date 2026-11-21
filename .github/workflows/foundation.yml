@@ -73,6 +73,12 @@ jobs:
           exit $LASTEXITCODE
       - name: Build and test Foundation through MSBuild
         run: dotnet msbuild Rocks.proj /t:Test /p:Adaptive=off /p:Configuration=Debug /p:RocksTarget=Foundation /v:minimal
+      # IDE project files model (Docs/Design/ProjectFiles.ko.md section 16 V1): every engine target and configuration is planned in IDE mode,
+      # every folded IntelliSense value round-trips to its command, and the Foundation Debug commands equal the compile database the step
+      # above wrote. Runs before the verification variant below, which rewrites that compile database without PCH.
+      - name: Check the Visual Studio project files model
+        if: matrix.leg == 'windows'
+        run: dotnet out/dotnet/bin/Rocks.Build.Cli/Debug/net10.0/Rocks.Build.Cli.dll projectfiles --root . --model-only on --compare-compile-db out/dotnet-windows-foundation-debug/compile_commands.json --target Foundation --configuration Debug
       # Verification variant (Docs/Design/UnityBuildPch.ko.md section 11): every source is its own translation unit and no PCH is used, so a
       # missing include that unity batches or the PCH would hide fails here. Compiles and links only; the tests ran in the step above.
       - name: Build Foundation without unity batches and PCH

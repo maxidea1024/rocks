@@ -1,6 +1,6 @@
 # Visual Studio 프로젝트 파일 생성 설계
 
-기준일: 2026-11-21, 개정 3. Rocks 저장소와 게임 프로젝트에서 Visual Studio 솔루션·프로젝트 파일을 만드는 방법을 정한다(UE 5.8 GenerateProjectFiles 대응).
+기준일: 2026-11-21, 개정 4. Rocks 저장소와 게임 프로젝트에서 Visual Studio 솔루션·프로젝트 파일을 만드는 방법을 정한다(UE 5.8 GenerateProjectFiles 대응).
 - **엔진 모드**: 저장소 루트에서 `projectfiles --root`로 엔진·Programs·C# 도구 솔루션을 만든다. 엔진에는 `.rocksproject`가 없다.
 - **IntelliSense**: 부작용 없는 IDE 계획 모드로 빌드 계획의 논리 compile 명령(`compile_commands.json`과 같은 원천)을 만들고, 파일별 설정으로 옮긴다.
 - **NMake 빌드**: 프로젝트의 빌드·다시 빌드·정리는 Rocks.Build를 부른다. Visual Studio가 직접 컴파일하지 않는다.
@@ -161,11 +161,12 @@ Foundation Debug에서 모듈 31개는 모든 파일이 같은 인자다. 나머
 UE와 같이 엔진 소스는 프로젝트 하나에 담고(`ProjectFileGenerator.cs:1314`의 `Engine` 폴더), Program은 프로젝트를 따로 둔다(`ProjectFileGenerator.cs:1450`의 `Programs` 폴더). 모듈마다 프로젝트를 두지 않는다(18절). `Rocks` 프로젝트 안에서 두 타깃의 프로젝트 구성 이름이 같아지면(같은 종류의 엔진 타깃 둘) 생성 오류다. UE도 같은 경우 `BuildException`이다(`VCProject.cs:758-760`).
 
 **파일 소유(경로 기준).** 파일 하나는 프로젝트 하나에만 나온다.
-- 대상 파일: 어떤 타깃이든 기준 구성(Development·Windows) 계획에서 컴파일하는 손으로 쓴 소스, 그 소스를 컴파일하는 모듈의 public·private include 디렉터리와 소스 디렉터리의 헤더(`.h/.hh/.hpp/.hxx/.inl/.inc/.ipp/.tpp`)다. 출력 아래 생성 파일(리플렉션 생성 소스, BuildInfo·모듈 표 TU, 정의 헤더, `PublicHeaderChecks` 생성 TU)은 넣지 않는다. UE도 `.gen.cpp`를 넣지 않는다.
+- 대상 파일: 어떤 타깃이든 **어느 구성**(Debug·Development·Release·Asan, Windows)의 계획에서 컴파일하는 손으로 쓴 소스의 합집합, 그 소스를 컴파일하는 모듈의 public·private include 디렉터리와 소스 디렉터리의 헤더(`.h/.hh/.hpp/.hxx/.inl/.inc/.ipp/.tpp`)다. 출력 아래 생성 파일(리플렉션 생성 소스, BuildInfo·모듈 표 TU, 정의 헤더, `PublicHeaderChecks` 생성 TU)은 넣지 않는다. UE도 `.gen.cpp`를 넣지 않는다.
 - 경로가 `Core/`·`Engine/` 아래면 `Rocks`다.
-- 아니면 정의 디렉터리가 그 파일의 가장 가까운 조상인 타깃들 중 하나다. 그런 타깃이 여럿이면(예: `Programs/FoundationTests`의 `Foundation`·`EngineTests`·`ReflectionFixtures`·`Core`) 기준 구성에서 그 파일을 컴파일하는 타깃 중 이름 ordinal 첫 번째, 아무도 컴파일하지 않으면 그 디렉터리 타깃 중 ordinal 첫 번째다.
-- 어느 정의 디렉터리 아래에도 없으면 `Rocks`에 넣고 한 줄 알린다.
+- 아니면 정의 디렉터리가 그 파일의 가장 가까운 조상인 타깃들 중 하나다. 그런 타깃이 여럿이면(예: `Programs/FoundationTests`의 `Foundation`·`EngineTests`·`ReflectionFixtures`·`Core`) 다음 순서로 고른다: (1) 정의 파일 이름(`<이름>.Target.cs`)과 이름이 같은 타깃(`Foundation.Target.cs` → `Foundation`), (2) 기준 구성(Development)에서 그 파일을 컴파일하는 타깃, (3) 이름 ordinal.
+- 어느 정의 디렉터리 아래에도 없으면(예: `.Target.cs`가 없는 `Programs/LaunchTests`) 기준 구성에서 그 파일을 컴파일하는 Program 타깃 중 이름 ordinal 첫 번째의 프로젝트에 넣는다. 그런 타깃도 없을 때만 `Rocks`에 넣는다. 알림은 디렉터리마다 한 줄이다.
 - `.filters`는 저장소 기준 디렉터리 구조를 그대로 옮긴다.
+- 모델은 (파일, 프로젝트 구성)마다 고른 논리 명령을 함께 싣고, 검사(16절 V1)는 묶음에 접힌 값을 그 명령과 대조한다.
 
 **IntelliSense 원천((파일, 구성) 단위).** 프로젝트 P의 구성 C(타깃 T)에서 소스 f의 설정은 다음 순서로 고른 논리 명령 하나에서 온다. 407개 소스가 여러 모듈로 컴파일되므로 모듈이 아니라 명령을 고른다.
 1. T의 C 계획이 f를 컴파일하면 그 명령이다. 같은 계획에서 f를 컴파일하는 모듈이 여럿이면 모듈 이름 ordinal 첫 번째다.
@@ -197,7 +198,7 @@ C# 프로젝트 목록의 단일 출처는 `Build/Format/Rocks.Format.slnx`다. 
 ### 6.5 결정성과 갱신
 
 - 프로젝트 GUID는 이름 기반 UUID v5(SHA-1)다. 이름 공간은 생성기 상수 GUID, 이름은 루트 기준 프로젝트 파일 경로(`/` 구분, 대소문자 그대로)다. UE는 같은 목적으로 MD5 이름 기반 GUID를 만들되 기존 파일의 GUID를 먼저 다시 읽는다(`VCProject.cs:113-129`, `VCProjectFileGenerator.cs:544-575`). Rocks는 다시 읽지 않는다. 같은 경로면 언제나 같은 GUID다.
-- 순서: 프로젝트·파일·속성 묶음·구성은 모두 ordinal 정렬이다. 시각·사용자 이름·임시 경로를 쓰지 않는다.
+- 순서: 프로젝트·파일은 ordinal 정렬, 프로젝트 구성은 타깃 이름 ordinal 다음 구성 순서(Debug·Development·Release·Asan)다. 묶음 번호는 묶음 key(구성별 네 값의 정규 텍스트)의 ordinal 정렬 순서로 매긴다 — 소스를 하나 더해도 새 묶음이 생기지 않는 한 번호가 바뀌지 않아 프로젝트 파일이 불필요하게 다시 써지지 않는다. 시각·사용자 이름·임시 경로를 쓰지 않는다.
 - 경로: 저장소 안 경로는 `$(RocksRoot)` 기준 상대 경로로 쓴다. 이 컴퓨터에만 맞는 값(LLVM·컴파일러·MSVC·Windows SDK·NDK·SDK 위치)은 두 도구 모음 props에만 둔다. 그래서 그 두 파일을 뺀 생성물은 작업 사본 위치와 무관하게 같다(16절 V4).
 - 인코딩: UTF-8(BOM 없음), CRLF. 정의 헤더 사본은 빌드가 쓰는 것과 같은 바이트다(LF).
 - 갱신: 내용이 같으면 쓰지 않는다(UE `WriteFileIfChanged`, `ProjectFileGenerator.cs:4038`). Visual Studio가 바뀌지 않은 프로젝트를 다시 읽지 않게 하기 위해서다.
@@ -265,10 +266,11 @@ Visual Studio의 파일 컴파일(Ctrl+F7)은 `NMakeCompileFileCommandLine`으�
 IntelliSense는 빌드 계획에서 만든다. `compile_commands.json` 파일을 다시 읽지 않는다. 지금 계획은 생성물이 있어야 하고 출력에 먼저 쓰므로(1절) 다음을 PJ0에서 만든다.
 
 - **부작용 없는 계획 함수.** `Program.cs`의 `build` 경로와 `InstalledSdk.BuildGameCoreAsync`(`InstalledSdk.cs:283-450`)에서 규칙 평가·기술자 해석·`MetadataLayout.Apply`·`NativeBuildRequest` 구성을 순수 함수로 떼어 낸다. 이 함수는 디렉터리를 만들거나 잠금을 잡거나 보고서를 쓰지 않는다(지금 `Program.cs:196-201, 288-291`에서 하는 일은 호출자에 남는다). `build`·`game`·`projectfiles`가 같은 함수를 쓴다.
-- **IDE 계획 모드.** `NativeBuildRequest.Mode = Ide`이면 `ActionGraph`가 compile 논리 명령과 실행 파일 출력 경로만 만든다.
+- **IDE 계획 모드.** `NativeBuildRequest.PlanMode = Ide`이면 `ActionGraph`가 compile 논리 명령과 실행 파일 출력 경로만 만든다. 공개 진입점은 `IdePlanner.Plan`이고, `NativeBuildEngine.BuildAsync`는 이 모드를 거부한다. 엔진 쪽 계획 함수는 `EnginePlanning`이고 게임 쪽은 PJ5에서 나눈다.
   - 리플렉션 생성 소스(`ReflectionSources`)와 BuildInfo·모듈 표·`PublicHeaderChecks` 생성 TU는 논리 명령을 만들지 않는다(IntelliSense 대상 파일이 아니다).
   - 소스 존재 검사(`ActionGraph.cs:250-255`)는 손으로 쓴 소스에만 하고, include 디렉터리 존재 검사(`:258-263`)는 하지 않는다. 출력 아래 include 디렉터리(`<out>/Generated/<M>`)는 경로만 적는다.
-  - archive·link·prebuilt 확인(`:540-543`)·ASan thunk 확인(`:573-574`)·PCH action은 만들지 않는다. 정의 헤더 내용(`PlannedFile`)은 만든다. 쓰지는 않는다.
+  - archive·link·prebuilt 확인(`:540-543`)·ASan thunk 확인(`:573-574`)은 만들지 않는다. PCH 계획은 논리 명령의 PCH 강제 include를 정하려고 그대로 세운다(만들어진 PCH action은 쓰지 않고 버린다). 정의 헤더 내용(`PlannedFile`)은 만든다. 쓰지는 않는다.
+  - 논리 명령은 PCH 헤더를 따로 싣는다(`IdeCompile.PchHeader`). 정의 헤더도 PCH 헤더도 아닌 강제 include는 분류 오류다.
   - 유니티와 작업 파일 분리는 끈다(git을 부르지 않는다). 논리 명령은 유니티와 무관하다(`Programs/Rocks.Build/README.ko.md` 유니티 빌드 절). PCH는 켠다. 그래야 PCH 헤더가 강제 include 목록에 나온다.
 - **쓰는 것:** `NativePlan.LogicalCompiles`(모듈·소스·인자·강제 include, `ActionGraph.cs:88-89`), 정의 헤더 경로와 내용, 실행 파일 출력 경로, 도구 모음.
 - **같음의 보장:** 같은 요청을 일반 모드로 계획했을 때의 손으로 쓴 소스 논리 명령과 IDE 모드의 논리 명령이 같다(16절 V1). 다른 점은 검사와 생성 action뿐이다.
@@ -300,7 +302,7 @@ UE처럼 늘 파일별이다(`bUsePerFileIntellisense = true`가 기본, `VCProj
 이에 따라:
 - 파일 f의 IntelliSense 묶음은 (include 전체 목록, 정의 전체 목록, 강제 include 전체 목록, 옮긴 옵션)이다. 차이분이 아니라 언제나 전체 목록이다(UE도 전체 목록을 쓴다, `VCProject.cs:1416-1420, 1582`).
 - 생성기는 `Microsoft.Cpp.props` import 뒤에 `ItemDefinitionGroup`(구성 조건)의 `<ClCompile>` 기본값으로 프로젝트에서 가장 많은 파일이 쓰는 묶음의 네 값을 직접 쓴다. 그 묶음의 파일에는 항목 메타데이터를 달지 않는다.
-- 다른 묶음의 파일은 항목에 네 메타데이터를 모두 단다. 값은 조건 없는 `$(RocksIncludes_<n>)`·`$(RocksDefines_<n>)`·`$(RocksForcedIncludes_<n>)`·`$(RocksOptions_<n>)`이고, 속성 값은 구성 조건(`'$(Configuration)|$(Platform)'=='…'`)이 붙은 `PropertyGroup`에 적는다. 묶음 번호는 (소유 모듈, 강제 include 모양)으로 정하고 구성과 무관하다. 구성마다 파일 목록을 되풀이하지 않는다. UE도 공통 값을 접는다(`VCProject.cs:1366-1425, 1520-1625`).
+- 다른 묶음의 파일은 항목에 네 메타데이터를 모두 단다. 값은 조건 없는 `$(RocksIncludes_<n>)`·`$(RocksDefines_<n>)`·`$(RocksForcedIncludes_<n>)`·`$(RocksOptions_<n>)`이고, 속성 값은 구성 조건(`'$(Configuration)|$(Platform)'=='…'`)이 붙은 `PropertyGroup`에 적는다. 묶음 key는 그 파일의 프로젝트 구성별 네 값 전체(정규 텍스트)이고, 번호는 key의 ordinal 정렬 순서다. 구성과 무관한 번호다. 구성마다 파일 목록을 되풀이하지 않는다. UE도 공통 값을 접는다(`VCProject.cs:1366-1425, 1520-1625`).
 - `NMakeIncludeSearchPath`·`NMakeForcedIncludes`·`NMakePreprocessorDefinitions`는 비운다. `IncludePath`에는 시스템 include만 둔다(8.5절).
 - Android 구성의 속성 값은 같은 `<C>` Windows 값과 같다(6.3절).
 - 헤더(`ClInclude`)에는 설정을 달지 않는다. Visual Studio가 헤더를 include하는 번역 단위의 설정을 빌려 쓴다.
@@ -581,7 +583,7 @@ Visual Studio 없이 결정적으로 검사한다. 시험은 `Rocks.Build.Tests`
 
 | 번호 | 검사 | 방법 |
 |---|---|---|
-| V1 | IDE 계획·분류·왕복 | **빌드한 적 없는 깨끗한 사본**에서 엔진 모든 타깃 × 구성의 IDE 계획(실제 도구 모음, CI Windows)을 만든다. 모든 논리 명령 인자가 분류된다. 모델에서 파일마다 (include, 정의, 강제 include, 옵션)을 다시 펼친 것이 논리 명령의 해당 부분과 순서까지 같다. 같은 요청의 일반 모드 계획(빌드한 사본)과 손으로 쓴 소스의 논리 명령이 같다. 생성 전후 파일 목록을 비교해 `out/ProjectFiles`와 `Rocks.slnx` 밖에 생긴 파일이 0개다 |
+| V1 | IDE 계획·분류·왕복 | **빌드한 적 없는 깨끗한 사본**에서 엔진 모든 타깃 × 구성의 IDE 계획(실제 도구 모음)을 만든다. 모든 논리 명령 인자가 분류된다. 모델 검사(`IntelliSenseModel.Verify`): 모든 (파일, 프로젝트 구성)에서 묶음에 접힌 값을 그 구성에서 고른 명령과 분류표 없이 철자로 대조한다(`/I`·`/D`·`/FI` 순서, 옵션, `/TP`·`/TC`, `/Yu`). 값이 없으면 그 구성에서 정말 아무 계획도 컴파일하지 않는지 본다. 같은 요청의 일반 모드 계획과 손으로 쓴 소스의 논리 명령이 같다: 단위 시험은 생성 소스·생성 include를 실제로 두고 유니티·모듈 PCH·공유 PCH를 켠 plan-only compile DB와 비교하고, CI Windows는 Foundation Debug 빌드 뒤 `projectfiles --model-only on --compare-compile-db`를 돈다. 생성 전후 작업 사본의 파일 목록과 수정 시각(루트 디렉터리 포함)을 비교해 `out/ProjectFiles`와 `Rocks.slnx` 밖에서 바뀐 것이 0이다 |
 | V2 | MSBuild 평가 | `Microsoft.Build`(+ `Microsoft.Build.Locator`로 .NET SDK의 MSBuild)로 생성 `.vcxproj`를 구성 × 플랫폼마다 평가한다(`ProjectLoadSettings.IgnoreMissingImports`라 Visual Studio의 `Microsoft.Cpp.*.props`가 없어도 된다). 평가한 `ClCompile` 항목과 `ItemDefinitionGroup` 기본값에 8.3절 합성 규칙(항목 값이 기본값을 바꿈, `IncludePath`는 더함)을 적용해 얻은 파일별 (include, 정의, 강제 include, 옵션)이 모델과 같다. NMake 속성을 비교한다. 모든 항목 파일이 존재한다. Android 구성의 값이 Windows와 같다 |
 | V2b | 디자인 타임(Visual Studio가 있을 때만) | Visual Studio MSBuild로 `GetClCommandLines` 디자인 타임 대상을 돌려, 파일마다 Visual Studio가 IntelliSense에 넘기는 명령줄이 V2의 합성 결과와 같음을 확인한다. CI 필수 검사가 아니다 |
 | V3 | 솔루션 왕복 | `.slnx`를 같은 패키지로 다시 읽어, 모든 프로젝트 경로가 있고 모든 솔루션 구성 × 플랫폼이 각 프로젝트의 존재하는 구성에 대응되며 C# 프로젝트의 빌드 표시가 꺼져 있고 첫 프로젝트가 실행 파일 프로젝트임을 확인한다 |
@@ -693,3 +695,4 @@ Visual Studio 없이 결정적으로 검사한다. 시험은 `Rocks.Build.Tests`
 | 1 | 2026-11-21 | 첫 판. 2026-11-14 검토(엔진 `--root` 먼저, 계획 기반 파일별 IntelliSense, NMake, 게임 쪽 결정 넷, UE식 템플릿)를 스펙으로 옮겼다. `compile_commands.json` 다섯 출력의 인자를 분류해 Visual Studio 속성 대응을 측정했다(4절). UE 근거는 5.8.4 UBT `ProjectFiles/VisualStudio`·`ProjectFileGenerator`·`GenerateProjectFilesMode`·`CleanMode`, 배치 파일, UnrealVersionSelector·DesktopPlatform, GameProjectGeneration·TemplateDefs. 결정 PJD1–PJD31은 권장안으로 확정했다(같은 날 사용자 승인) |
 | 2 | 2026-11-21 | 리뷰 반영. 심각: 계획이 생성물 존재를 요구하고 출력에 쓰므로 부작용 없는 계획 함수와 IDE 계획 모드를 PJ0 선행으로 두고, 생성 헤더는 빌드할 타깃·구성을 알리는 안으로 정했다(8.1·8.6절, PJD32·PJD36). `ModuleDirectory`가 선택 칸이고 소스 407개가 여러 모듈로 컴파일되므로 프로젝트는 `.Target.cs` 위치, 파일 소유는 경로, IntelliSense 원천은 (파일, 구성) 단위로 바꿨다(6.2절, PJD4·PJD33). `Sandbox`가 Game 종류라 타깃 수(15: Game 2·Program 13)와 계획 횟수를 고쳤다. 높음: Android는 빌드 전용(PJD34), Makefile 합성 규칙에 맞춘 `ItemDefinitionGroup` 기본값·전체 목록(8.3절, PJD35, V2·V2b), 도구 준비·실행을 한 잠금으로 묶고 지문으로 건너뜀(7.2절, PJD15·PJD37, V13). 중간: 컴파일러 절대 경로(PJD39), 상태 목록 기준 정리와 `IntDir`·`OutDir`(6.5절), 명시 등록·호환 후보·선택기 최고 판(10.1·10.2·12절), 단계 순서(다중 구성 SDK를 게임 생성 앞으로, 게임 `clean`은 PJ3, PJ7 전 `NMakeCompileFileCommandLine` 없음), `RPF0001` 필터, Asan 디버거 환경·시작 프로젝트·natvis 자리, 파일 하나 컴파일은 논리 명령·별도 object(7.4절), C# 디자인 타임 출력 분리(PJD38). 낮음: 규칙 탐색 제외, 템플릿 개명 범위, 이름 검증, `--template` 의미. 언어 표준은 `/std:c++23preview`로 바꾸고 V11에 미검증 항목을 모았다 |
 | 3 | 2026-11-21 | PJ0 구현에서 정한 점. (1) 게임 쪽 계획 함수 분리는 그것을 처음 쓰는 PJ5로 옮겼다. 엔진 쪽은 `EnginePlanning`(`Programs/Rocks.Build.Cli/EnginePlanning.cs`)이 규칙 해석·플러그인 적용·메타 배치·`NativeBuildRequest` 구성을 맡고 `build`와 `projectfiles`가 같이 쓴다. (2) IDE 계획 모드는 `NativeBuildRequest.PlanMode = Ide`와 공개 진입점 `IdePlanner.Plan`이다. 모듈 표 TU 경로는 더하지만 규칙 생성 TU 쓰기(`GeneratedSources.Write`)·BuildInfo 준비·git 조회를 하지 않는다. `ActionGraph`는 출력 아래 소스를 빼고, include 디렉터리 존재를 보지 않고, archive·link 대신 출력 경로만 적는다. `MetadataLayout.Apply`는 `createDirectories: false`를 받는다. (3) 묶음 번호의 key는 "(소유 모듈, 강제 include 모양)" 대신 그 파일의 구성별 네 값 전체(구성 순서대로)로 정했다. 같은 key면 모든 구성에서 값이 같으므로 접기가 정확하고, 구성과 무관한 번호라는 성질은 그대로다. (4) PJ0의 CLI는 `projectfiles --root <root> --model-only on`이다. 모델을 만들고 요약만 출력하며 아무 파일도 쓰지 않는다(쓰기는 PJ1). `--compare-compile-db <compile_commands.json> --target <T> --configuration <C>`는 V1의 "일반 모드와 논리 명령 같음"을 빌드한 출력과 대조한다(`/Fo`는 object 변형 디렉터리가 달라 뺀다). (5) 헤더 목록은 `IdePlan`이 싣는 모듈의 public·private include 디렉터리(하위 포함)와 소스 디렉터리(그 디렉터리만)에서 모은다. 저장소 루트를 include하는 모듈은 루트를 훑지 않고 알린다. (6) 대상 소스는 기준 구성만이 아니라 **모든 구성**의 계획에서 컴파일하는 손으로 쓴 소스의 합집합이다. 기준 구성(Development)은 같은 정의 디렉터리 타깃 사이의 동률을 가를 때만 쓴다. 한 구성에서만 컴파일하는 파일도 목록에서 빠지지 않게 하기 위해서다. (7) 측정(2026-11-21, 이 PC, LLVM 22.1.8): 엔진 모드 15 타깃 × 4 구성 = 60 계획을 순차로 만들고 논리 명령 23,950개를 왕복 검사하는 데 8.8–12.0초(세 번 잰 범위). 목표 10초를 넘을 때가 있어 PJ1에서 계획을 병렬로 돌린다. `--compare-compile-db`로 Foundation Debug 빌드 출력과 대조한 결과 소스 892개 불일치 0(한 소스를 여러 모듈이 컴파일하면 명령 목록끼리 비교한다). 정의 헤더 사본 77개, `Rocks` 프로젝트 소스 1,260개·헤더 951개·묶음 69개. `Programs/LaunchTests`에는 `.Target.cs`가 없어 그 파일 7개가 "정의 디렉터리 밖"으로 `Rocks`에 들어간다(알림). (8) `projectfiles --model-only on`을 돌린 앞뒤로 작업 사본 파일 목록이 같다(V1의 "밖에 쓴 파일 0개") |
+| 4 | 2026-11-21 | PJ0 리뷰 반영. (1) 모델은 (파일, 프로젝트 구성)마다 고른 명령(`IdeChoice`)을 싣고, `IntelliSenseModel.Verify`가 묶음 값을 그 명령과 분류표 없이 철자로 대조한다(16절 V1). (2) 논리 명령이 유니티·작업 파일 분리 설정과 무관하도록 모듈 PCH 하한을 원본 소스 수로 세고, 분리된 번역 단위도 논리 명령은 PCH를 쓴다([유니티 빌드·PCH](UnityBuildPch.ko.md) 8.1·7.2절 같은 날 개정). (3) 같음 시험에 생성 소스·생성 include·유니티·모듈 PCH·공유 PCH를 넣고, CI Windows에 V1 단계(`projectfiles --model-only on --compare-compile-db`)를 더했다. (4) 저장소 루트 수정 시각이 바뀌던 원인은 VsDevCmd 확장 `vcpkg.bat` → `vcpkg-init.cmd` 1행의 `> $null`(작업 디렉터리에 `$null` 파일을 만들고 지운다)이었다. VsDevCmd와 vswhere를 `ProbeDirectory`(`Directory.CreateTempSubdirectory`, 끝나면 지움)에서 돌린다. `-no_ext`는 vcvars도 꺼서 쓰지 않는다. 고친 뒤 `projectfiles` 앞뒤로 루트 수정 시각이 같다. (5) 같은 정의 디렉터리의 동률은 정의 파일 이름과 같은 타깃 → 기준 구성 컴파일 → ordinal 순(6.2절). (6) 정의 디렉터리 밖 소스는 기준 구성에서 그 소스를 컴파일하는 Program 타깃으로, 헤더는 같은 디렉터리 소스를 따르고, 알림은 디렉터리마다다. (7) `IdeCompile.PchHeader`를 명시하고(`LogicalCompile.PchHeader`), 정의 헤더도 PCH 헤더도 아닌 강제 include는 오류다. (8) `BuildAsync`는 `PlanMode = Ide`를 거부한다. (9) 본문 6.2·6.5·8.1·8.3절에 개정 3 결정을 반영했다. (10) 묶음 번호는 key의 ordinal 정렬 순서다. `ide-invisible-macro`는 시험 소스에도 적용하고 주석·리터럴을 지운 뒤 본다(구성 매크로 검증 시험 `Base/Tests/BaseTests.cpp`만 예외). 실측: 60 계획, (파일, 구성) 값 5,332개 대조, 9.6초. `Foundation` 프로젝트 소스 9개, `Programs/LaunchTests` 소스 6개는 `Core` 타깃(그 소스를 기준 구성에서 컴파일하는 Program 타깃 중 ordinal 첫째) 프로젝트로 간다 |

@@ -148,12 +148,15 @@ public static class NativeEnvironment
 
         if (OperatingSystem.IsWindows() && !source.ContainsKey("VCToolsInstallDir"))
         {
+            // VsDevCmd의 확장 스크립트(vcpkg-init.cmd의 `> $null`)가 작업 디렉터리에 파일을 만들었다 지운다. 사용자 디렉터리의 같은 이름
+            // 파일을 지우거나 동시 실행끼리 경합하지 않게 이 프로세스 전용 임시 디렉터리에서 돌린다(Docs/Design/ProjectFiles.ko.md 개정 4).
+            using var probe = new ProbeDirectory();
             var installer = Path.Combine(System.Environment.GetFolderPath(
                 System.Environment.SpecialFolder.ProgramFilesX86), "Microsoft Visual Studio", "Installer", "vswhere.exe");
             var result = await ProcessRunner.RunAsync(new(installer,
                 ["-latest", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
                  "-version", $"[{ToolchainTable.MinimumVisualStudioVersion},)", "-property", "installationPath"],
-                Directory.GetCurrentDirectory(), source), cancellationToken);
+                probe.Path, source), cancellationToken);
             var installation = result.StdOut.Trim();
             if (result.ExitCode != 0 || installation.Length == 0)
             {
@@ -181,7 +184,7 @@ public static class NativeEnvironment
             developerArguments.AddRange([">nul", "&&", "set"]);
             // cmd는 MS 제공 환경 진입점에만 사용한다. 사용자 compiler/source 인자는 shell을 통과하지 않는다.
             result = await ProcessRunner.RunAsync(new("cmd.exe", developerArguments,
-                Directory.GetCurrentDirectory(), source, StandardOutputEncoding: Encoding.Unicode, StandardErrorEncoding: Encoding.Unicode), cancellationToken);
+                probe.Path, source, StandardOutputEncoding: Encoding.Unicode, StandardErrorEncoding: Encoding.Unicode), cancellationToken);
             if (result.ExitCode != 0)
             {
                 throw new InvalidOperationException("Visual Studio environment initialization failed: " + result.StdErr);

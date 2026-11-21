@@ -73,7 +73,7 @@ internal static class ProjectFilesCommand
         var listing = new BuildContext(root, EnginePlanning.DefaultOutput(root, platformName, "projectfiles", BaseConfiguration),
             toolchain.Platform, toolchain.Architecture, BaseConfiguration);
         TargetRules[] targets = [.. RuleLoader.LoadAll(rulesPath, listing).Targets.OrderBy(target => target.Name, StringComparer.Ordinal)];
-        IReadOnlyDictionary<string, string> definitions = TargetDefinitions.Find(root, targets);
+        IReadOnlyDictionary<string, (string Directory, string Name)> definitions = TargetDefinitions.Find(root, targets);
         var plans = new List<IdeTargetPlan>();
         foreach (TargetRules target in targets)
         {
@@ -87,30 +87,23 @@ internal static class ProjectFilesCommand
                 NativeBuildRequest request = EnginePlanning.Request(toolchain, configuration, rules.Target, root, output, layout.Metadata.Modules,
                     layout.BuildRoots, engineVersion, 1);
                 IdePlan plan = IdePlanner.Plan(request);
-                plans.Add(new(target.Name, definitions[target.Name], target.Type.ToString(), configuration.ToString(), plan));
+                (string directory, string definitionName) = definitions[target.Name];
+                plans.Add(new(target.Name, directory, target.Type.ToString(), configuration.ToString(), plan, definitionName));
             }
         }
 
         string projectFiles = Path.Combine(root, "out", "ProjectFiles");
         IntelliSenseModel model = IntelliSenseModel.Create(plans, root, projectFiles, [.. EngineRoots.Select(name => Path.Combine(root, name))],
             BaseConfiguration.ToString());
-        int failures = 0;
-        int checkedCompiles = 0;
-        foreach (IdeTargetPlan plan in plans)
+        // 모델 검사(16절 V1): 묶음에 접힌 값을 (파일, 구성)마다 고른 명령과 대조한다.
+        IReadOnlyList<string> mismatches = IntelliSenseModel.Verify(model, plans, projectFiles);
+        foreach (string mismatch in mismatches)
         {
-            foreach (IdeCompile compile in plan.Plan.Compiles)
-            {
-                IntelliSenseValues values = IntelliSenseModel.Values(compile, plan.Plan,
-                    (_, content) => Path.Combine(projectFiles, IntelliSenseModel.DefinitionsDirectoryName, IntelliSenseModel.CopyName(content)));
-                if (IntelliSenseModel.RoundTrip(compile, plan.Plan, values, projectFiles) is string mismatch)
-                {
-                    Console.Error.WriteLine($"Round trip ({plan.Target} {plan.Configuration}): {mismatch}");
-                    ++failures;
-                }
-
-                ++checkedCompiles;
-            }
+            Console.Error.WriteLine("Model check: " + mismatch);
         }
+
+        int failures = mismatches.Count;
+        int checkedCompiles = model.Projects.Sum(project => project.Sources.Sum(file => file.Choices.Values.Count(choice => choice is not null)));
 
         if (compare is not null)
         {
@@ -119,7 +112,7 @@ internal static class ProjectFilesCommand
         }
 
         Console.WriteLine($"Project files model: {targets.Length} targets x {Configurations.Length} configurations = {plans.Count} IDE plans, " +
-            $"{checkedCompiles} compile commands round-tripped, {model.DefinitionCopies.Count} definitions header copies, " +
+            $"{checkedCompiles} (file, configuration) values checked against their commands, {model.DefinitionCopies.Count} definitions header copies, " +
             $"{System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:F0} ms.");
         foreach (IdeProject project in model.Projects)
         {
@@ -203,14 +196,19 @@ internal static class TargetDefinitions
     // 규칙 어셈블리(Build/Rules/Rocks.Engine.Rules.csproj)가 *.Target.cs를 모으는 루트다. Programs/Rocks.*(C# 도구)는 제외한다.
     private static readonly string[] Roots = ["Core/Source", "Engine/Source", "Engine/Plugins", "Programs"];
 
-    public static IReadOnlyDictionary<string, string> Find(string root, IReadOnlyList<TargetRules> targets)
+    // 타깃 규칙 파일 이름의 끝이다.
+    private const string TargetSuffix = ".Target.cs";
+
+    /// <summary>타깃 이름 → (정의 디렉터리, 정의 파일 이름에서 <c>.Target.cs</c>를 뗀 것)이다.</summary>
+    /// <exception cref="ArgumentException">규칙 타입의 선언이 정확히 한 파일에 있지 않다.</exception>
+    public static IReadOnlyDictionary<string, (string Directory, string Name)> Find(string root, IReadOnlyList<TargetRules> targets)
     {
         string[] files = [.. Roots.Select(relative => Path.Combine(root, relative)).Where(Directory.Exists)
             .SelectMany(directory => Directory.EnumerateFiles(directory, "*.Target.cs", SearchOption.AllDirectories))
             .Where(file => !Path.GetRelativePath(root, file).Replace('\\', '/').StartsWith("Programs/Rocks.", StringComparison.Ordinal))
             .Order(StringComparer.Ordinal)];
         var texts = files.ToDictionary(file => file, File.ReadAllText, StringComparer.Ordinal);
-        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        var result = new Dictionary<string, (string Directory, string Name)>(StringComparer.Ordinal);
         foreach (TargetRules target in targets)
         {
             var declaration = new Regex(@"\bclass\s+" + Regex.Escape(target.GetType().Name) + @"\b", RegexOptions.CultureInvariant);
@@ -221,7 +219,7 @@ internal static class TargetDefinitions
                     $"(found {declaring.Length}).");
             }
 
-            result[target.Name] = Path.GetDirectoryName(declaring[0])!;
+            result[target.Name] = (Path.GetDirectoryName(declaring[0])!, Path.GetFileName(declaring[0])[..^TargetSuffix.Length]);
         }
 
         return result;

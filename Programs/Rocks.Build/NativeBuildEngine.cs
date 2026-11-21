@@ -13,6 +13,12 @@ public sealed class NativeBuildEngine
     {
         // 루트는 절대 경로만 받는다(상대 경로를 어느 기준으로 풀지 — 작업 디렉터리·소스 루트 — 가 단계마다 달라지지 않게).
         InputValidation.RequireAbsoluteRoots(request);
+        // IDE 계획 모드는 action을 세우지 않는다(IdePlanner.Plan만 쓴다, Docs/Design/ProjectFiles.ko.md 8.1절).
+        if (request.PlanMode != NativePlanMode.Build)
+        {
+            throw new ArgumentException("BuildAsync accepts PlanMode Build only; IDE plans go through IdePlanner.Plan.");
+        }
+
         string root = Path.GetFullPath(request.RootDirectory);
         request = request with
         {

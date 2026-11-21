@@ -15,9 +15,11 @@ public enum NativePlanMode
 
 /// <summary>
 /// 손으로 쓴 소스 하나의 논리 compile 명령이다(compile_commands.json 항목과 같은 인자). Arguments는 펼친 인자이고 첫 칸은 컴파일러가
-/// 아니다(<see cref="IdePlan.Compiler"/>). ForcedIncludes는 강제 include하는 파일(정의 헤더·PCH 헤더)이다.
+/// 아니다(<see cref="IdePlan.Compiler"/>). ForcedIncludes는 강제 include하는 파일(정의 헤더·PCH 헤더)이고, PchHeader는 그중 PCH 헤더다
+/// (PCH를 쓰지 않으면 null).
 /// </summary>
-public sealed record IdeCompile(string Module, string Source, IReadOnlyList<string> Arguments, IReadOnlyList<string> ForcedIncludes);
+public sealed record IdeCompile(string Module, string Source, IReadOnlyList<string> Arguments, IReadOnlyList<string> ForcedIncludes,
+    string? PchHeader = null);
 
 /// <summary>IDE 계획에 든 모듈 하나의 헤더 위치다(프로젝트 파일 목록에 헤더를 모을 때 쓴다).</summary>
 public sealed record IdeModule(string Name, IReadOnlyList<string> IncludeDirectories, IReadOnlyList<string> SourceDirectories);
@@ -62,7 +64,7 @@ public static class IdePlanner
         var compiles = plan.LogicalCompiles
             .Where(compile => !Fingerprints.IsUnder(compile.Source, output))
             .Select(compile => new IdeCompile(compile.Module, compile.Source, NativeAction.Resolve(compile.Arguments, [compile.Object]),
-                compile.ForcedIncludes))
+                compile.ForcedIncludes, compile.PchHeader))
             .ToArray();
         var generated = new Dictionary<string, string>(NativeToolchains.PathComparer);
         foreach (PlannedFile file in plan.GeneratedFiles)

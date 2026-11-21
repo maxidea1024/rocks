@@ -277,7 +277,7 @@ UB1 동안 모든 모듈의 기본은 `Off`다. UB2·UB3에서 충돌을 정리�
   - 자신이 작업 파일인 `.cpp`
   - 짝 헤더(첫 include, 10절)가 작업 파일이고, 그 **헤더 이름**이 모듈 안에서 유일한 `.cpp`. UE와 같다(`System/Unity.cs:374–406`).
 - 경계(6.2절)는 분리 전 전체 목록으로 정해져 있으므로, 분리는 그 파일이 속한 묶음 하나만 바꾼다.
-- 분리된 파일은 모듈의 PCH를 그대로 쓴다(기본). 규칙 `AdaptivePch = Off`면 PCH 없이 컴파일한다.
+- 분리된 파일은 모듈의 PCH를 그대로 쓴다(기본). 규칙 `AdaptivePch = Off`면 PCH 없이 컴파일한다. 이때도 논리 명령은 PCH를 쓰는 명령(PCH 헤더 강제 include)으로 남는다 — 논리 명령은 작업 파일 집합과 무관하다(8.6절).
 - 파일을 처음 편집하면 그 파일이 빠진 묶음이 한 번 다시 컴파일되고, 이후 편집은 그 파일만 컴파일한다. 커밋해서 작업 파일에서 빠지면 묶음으로 돌아가며 그 묶음이 한 번 다시 컴파일된다(UE와 같다).
 - 작업 파일 헤더마다 단독 헤더 컴파일 검사를 붙이는 기능(UE `bAdaptiveUnityCompilesHeaderFiles`)은 두지 않는다. 기존 공개 헤더 검사(`CheckPublicHeaders`)가 맡는다.
 
@@ -293,7 +293,7 @@ UB1 동안 모든 모듈의 기본은 `Off`다. UB2·UB3에서 충돌을 정리�
 
 - 소스는 PCH 헤더를 `#include`하지 않는다. 빌드가 강제 include(`/FI`·`-include`)한다. 소스는 PCH가 없어도 컴파일되어야 하고, 검증 빌드(11절)가 이를 확인한다.
 - PCH는 C++ TU에만 쓴다.
-- 모듈 PCH는 PCH를 쓸 TU(묶음 + 단독, 6.1의 제외 파일 제외)가 `PrivatePchMinTus`(기본 3)개 이상일 때만 만든다. 그보다 적으면 PCH를 만드는 비용이 절약분보다 크다. UE `MinFilesUsingPrecompiledHeader`(`UEBuildModuleCPP.cs:672`)는 계산만 하고 쓰지 않는 값이라 대응 규칙을 새로 둔다. 공유 PCH는 한 번 만들어 여러 모듈이 쓰므로 이 하한을 적용하지 않는다.
+- 모듈 PCH는 PCH를 쓸 수 있는 **원본 소스**(6.1의 제외 파일 제외, 묶음 구성원을 하나씩 센다)가 `PrivatePchMinTus`(기본 3)개 이상일 때만 만든다. 번역 단위 수로 세면 유니티를 켰을 때와 껐을 때 PCH 유무가 달라져 논리 명령(8.6절)이 유니티 설정에 따라 갈라진다([프로젝트 파일](ProjectFiles.ko.md) PJ0 리뷰, 개정 이력 참고). 그보다 적으면 PCH를 만드는 비용이 절약분보다 크다. UE `MinFilesUsingPrecompiledHeader`(`UEBuildModuleCPP.cs:672`)는 계산만 하고 쓰지 않는 값이라 대응 규칙을 새로 둔다. 공유 PCH는 한 번 만들어 여러 모듈이 쓰므로 이 하한을 적용하지 않는다.
 
 ### 8.2 정의 헤더
 
@@ -663,3 +663,4 @@ UB6에서 묶음 TU와 PCH action의 최대 메모리를 실측해, 동시 실�
 | 1(placement new 헤더 리뷰 반영) | 2026-11-21 | 8.4절 "placement new 헤더": 정책의 허용 목록(`PlacementNewAllowances`)과 `<vcruntime_new.h>` 직접 include 거부를 적고, 보장 집합(MSVC 기준)과 그 밖의 이름 목록을 명시했다. `Base/Compiler.h`가 CRT 선택(`RuntimeLibrary`)을 직접 기록한다. 수치 문장의 방향을 바로잡았다. 16절 표에 placement new와 Windows 헤더 매크로 행을 더했다 |
 | 1(unity-profile) | 2026-11-21 | 12절 "묶음 크기 실측"을 구현에 맞게 고쳤다: `Rocks.Build.Cli unity-profile`이 모듈 하나를 조합 13개로 처음부터 컴파일해 번역 단위 수·CPU 시간·벽시계 시간·최대 메모리 표를 낸다. 실행기에 프로세스 계측(`MeasureProcesses`)을 더했다. CPU·메모리는 Windows 호스트에서만 잰다 |
 | 1(unity-profile 리뷰 반영) | 2026-11-21 | 12절 "묶음 크기 실측": 출력 디렉터리 확인(이름 접두 `unity-profile-`와 표지 파일)을 더했다. "유니티 끔" 조합이 리플렉션 생성 소스도 묶지 않는다. 조합 하나가 실패해도 나머지를 재고 실패 행을 남긴다. 준비 실행은 의존 모듈만 빌드하고(그 모듈은 13번 컴파일), PCH는 조합마다 다시 만든다. 최대 commit을 함께 낸다 |
+| 1(논리 명령 불변 — ProjectFiles PJ0 리뷰) | 2026-11-21 | 논리 명령(compile DB·IDE IntelliSense의 원천)이 유니티·작업 파일 분리 설정과 무관하도록 두 가지를 고쳤다. (1) 모듈 PCH 하한 `PrivatePchMinTus`는 번역 단위 수가 아니라 PCH를 쓸 수 있는 원본 소스 수로 센다(8.1절). 유니티를 켜면 묶음 때문에 번역 단위가 하한 아래로 내려가 PCH가 없고, 끄면 PCH가 생겨 compile DB와 IDE 계획이 달랐다. 이 수정으로 유니티를 켠 모듈에서 PCH가 새로 생길 수 있다(빌드 동작 변화). (2) 작업 파일 분리로 빠진 번역 단위가 `AdaptivePch = Off`로 PCH 없이 컴파일돼도 논리 명령은 PCH 헤더를 강제 include하는 명령이다(7.2절). 물리 action은 그대로다 |

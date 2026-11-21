@@ -151,7 +151,7 @@ try
                 await WindowsHeaderPairTests.RunAsync(request, root, repository, Pass);
                 break;
             case "ide-plan":
-                IdePlanTests.Run(request, root, Pass);
+                await IdePlanTests.RunAsync(request, root, Pass);
                 break;
             default:
                 throw new ArgumentException(
@@ -367,7 +367,7 @@ try
     await PchTests.RunAsync(request, root, Pass);
 
     // IDE 계획 모드와 IntelliSense 모델(Docs/Design/ProjectFiles.ko.md PJ0). 하위 묶음마다 PASS를 센다.
-    IdePlanTests.Run(request, root, Pass);
+    await IdePlanTests.RunAsync(request, root, Pass);
 
     await WindowsHeaderPairTests.RunAsync(request, root, repository, Pass);
 
