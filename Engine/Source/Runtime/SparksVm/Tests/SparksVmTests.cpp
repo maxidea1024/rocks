@@ -7,6 +7,8 @@
 #include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
+#include "VmTestSupport.h"
+
 // VM 실행 시험이다(Docs/Design/SparksVm.ko.md, LC5a). 언어가 내지 않거나 corpus로 닿기 어려운 명령
 // (정수 DIV, 실수·묶음 비교, 정의하지 않은 CONV, FAULT·ENDEXEC·RETERR, Ref 명령, 미구현 명령의
 // 자리표시)과 예산 경계·호출자 오류·할당 실패를 손으로 조립한 bytecode로 본다. 조립한 모듈은 모두
@@ -15,171 +17,16 @@ using namespace rocks;
 using namespace rocks::sparks;
 namespace sparks_vm_tests_file {
 
-namespace {
-
-// 함수 하나의 frame 모양이다(bank별 Scalar·Ref·Buf).
-struct Shape {
-    uint16 registers[BytecodeBankCount] = {};
-    uint16 frame[BytecodeBankCount] = {};
-    uint16 parameters[BytecodeBankCount] = {};
-    uint8 returnBank = 0;
-    uint8 returnSlots = 0;
-};
-
-// 손 조립기다. 명령 단어마다 원문 위치(줄 = 모듈 단어 번호 + 1, 열 1)를 둔다.
-class Assembler final {
-public:
-    explicit Assembler(Allocator& allocator) noexcept : module(allocator) {
-        module.compiler = String("test");
-        module.path = String("Main");
-    }
-
-    uint32 String(StringView text) noexcept {
-        const uint32 index = static_cast<uint32>(module.stringOffsets.Size());
-        CHECK(module.stringOffsets.TryPushBack(static_cast<uint32>(module.stringBytes.Size())));
-        CHECK(module.stringLengths.TryPushBack(static_cast<uint32>(text.ByteCount())));
-        CHECK(module.stringBytes.TryAppend(Span<const char>(text.Data(), text.ByteCount())));
-        return index;
-    }
-
-    uint32 Begin(StringView name, const Shape& shape) noexcept {
-        BytecodeFunction function;
-        function.name = String(name);
-        function.firstWord = static_cast<uint32>(module.words.Size());
-        for (uint32 bank = 0; bank < BytecodeBankCount; ++bank) {
-            function.registers[bank] = shape.registers[bank];
-            function.frame[bank] = shape.frame[bank];
-            function.parameters[bank] = shape.parameters[bank];
-        }
-
-        function.returnBank = shape.returnBank;
-        function.returnSlots = shape.returnSlots;
-        CHECK(module.functions.TryPushBack(function));
-        return static_cast<uint32>(module.functions.Size() - 1);
-    }
-
-    void Emit(uint32 word) noexcept {
-        CHECK(module.words.TryPushBack(word));
-        CHECK(module.locations.TryPushBack(
-            BytecodeLocation{static_cast<uint32>(module.words.Size()), 1}));
-    }
-
-    void End() noexcept {
-        BytecodeFunction& function = module.functions[module.functions.Size() - 1];
-        function.wordCount = static_cast<uint32>(module.words.Size()) - function.firstWord;
-    }
-
-    uint32 Ref(BytecodeRefKind kind, StringView name, uint32 detail = NoBytecodeIndex) noexcept {
-        BytecodeRef ref;
-        ref.kind = kind;
-        ref.name = String(name);
-        ref.detail = detail;
-        CHECK(module.refs.TryPushBack(ref));
-        return static_cast<uint32>(module.refs.Size() - 1);
-    }
-
-    uint32 Constant(uint64 value) noexcept {
-        CHECK(module.scalars.TryPushBack(value));
-        return static_cast<uint32>(module.scalars.Size() - 1);
-    }
-
-    bool Verified() const noexcept {
-        return VerifyBytecode(module).error == BytecodeLoadError::None;
-    }
-
-    BytecodeModule module;
-};
-
-// Scalar 둘을 받아 op 한 번의 결과 하나를 돌려주는 함수(s2 = s0 op s1)다.
-Shape BinaryShape() noexcept {
-    Shape shape;
-    shape.registers[0] = 3;
-    shape.frame[0] = 3;
-    shape.parameters[0] = 2;
-    shape.returnSlots = 1;
-    return shape;
-}
-
-void Binary(Assembler& assembler, Opcode op) noexcept {
-    assembler.Begin("Binary", BinaryShape());
-    assembler.Emit(EncodeABC(op, 2, 0, 1));
-    assembler.Emit(EncodeABC(Opcode::Ret, 2, 1, 0));
-    assembler.End();
-}
-
-// 조립한 모듈이 verifier를 통과하는지 본다(실패는 시험 실패 — 통과하지 않은 모듈은 실행하지
-// 않는다).
-bool Verify(const Assembler& assembler) noexcept {
-    const bool verified = assembler.Verified();
-    CHECK(verified);
-    return verified;
-}
-
-uint64 Bits(double value) noexcept {
-    return platform::BitCast<uint64>(value);
-}
-
-uint64 Signed(int64 value) noexcept {
-    return static_cast<uint64>(value);
-}
-
-// 결과: 반환이면 값 slot 0, fault면 종류를 돌려준다.
-struct Outcome {
-    VmOutcome outcome = VmOutcome::Returned;
-    VmFaultKind fault = VmFaultKind::None;
-    uint64 value = 0;
-    uint64 steps = 0;
-};
-
-Outcome Run(VmExecution& execution, const BytecodeModule& module, uint32 function,
-            Span<const uint64> scalars, Span<const uint64> refs = Span<const uint64>(),
-            const VmLimits& limits = VmLimits()) noexcept {
-    Outcome outcome;
-    auto called = execution.Call(module, function, scalars, refs, limits);
-    CHECK(called);
-    if (!called) {
-        return outcome;
-    }
-
-    outcome.outcome = called.Value().outcome;
-    outcome.fault = called.Value().fault.kind;
-    outcome.steps = called.Value().steps;
-    if (outcome.outcome == VmOutcome::Returned && !execution.ReturnedSlots().IsEmpty()) {
-        outcome.value = execution.ReturnedSlots()[0];
-    } else if (outcome.outcome == VmOutcome::Ended) {
-        outcome.value = called.Value().errorCode;
-    }
-
-    return outcome;
-}
-
-Outcome RunBinary(Opcode op, uint64 left, uint64 right) noexcept {
-    SystemAllocator allocator;
-    Assembler assembler(allocator);
-    Binary(assembler, op);
-    if (!Verify(assembler)) {
-        return Outcome{};
-    }
-
-    VmExecution execution(allocator);
-    const uint64 arguments[] = {left, right};
-    return Run(execution, assembler.module, 0, Span<const uint64>(arguments, 2));
-}
-
-bool Returns(const Outcome& outcome, uint64 value) noexcept {
-    return outcome.outcome == VmOutcome::Returned && outcome.value == value;
-}
-
-bool Faults(const Outcome& outcome, VmFaultKind kind) noexcept {
-    return outcome.outcome == VmOutcome::Faulted && outcome.fault == kind;
-}
-
-} // namespace
+using namespace rocks::sparks::vm_test_support;
 
 TEST(SparksVm_IntegerDivision) {
-    // 정수 DIV는 언어에 연산자가 없다(Math.Div — LC5c). 0 쪽 자름, 최솟값 / -1은 overflow.
-    CHECK(Returns(RunBinary(Opcode::DivI64, 7, Signed(-2)), Signed(-3)));
-    CHECK(Returns(RunBinary(Opcode::DivI64, Signed(-7), 2), Signed(-3)));
+    // 정수 DIV는 언어에 연산자가 없다(Math.Div — LC5c). 내림 방식(SL 3.3절), 최솟값 / -1은
+    // overflow.
+    CHECK(Returns(RunBinary(Opcode::DivI64, 7, Signed(-2)), Signed(-4)));
+    CHECK(Returns(RunBinary(Opcode::DivI64, Signed(-7), 2), Signed(-4)));
+    CHECK(Returns(RunBinary(Opcode::DivI64, Signed(-8), 2), Signed(-4)));
+    CHECK(Returns(RunBinary(Opcode::DivI64, Signed(-7), Signed(-2)), 3));
+    CHECK(Returns(RunBinary(Opcode::DivI8, Signed(-128), 3), Signed(-43)));
     CHECK(Faults(RunBinary(Opcode::DivI64, 1, 0), VmFaultKind::DivideByZero));
     CHECK(Faults(RunBinary(Opcode::DivI64, Signed(NumericLimits<int64>::Min()), Signed(-1)),
                  VmFaultKind::IntegerOverflow));
@@ -188,7 +35,10 @@ TEST(SparksVm_IntegerDivision) {
     CHECK(Returns(RunBinary(Opcode::DivU32, 0xFFFFFFFFu, 2), 0x7FFFFFFFu));
     CHECK(Faults(RunBinary(Opcode::DivU8, 1, 0), VmFaultKind::DivideByZero));
     CHECK(Returns(RunBinary(Opcode::ModI32, Signed(NumericLimits<int32>::Min()), Signed(-1)), 0));
-    CHECK(Returns(RunBinary(Opcode::ModI16, Signed(-7), 3), Signed(-1)));
+    CHECK(Returns(RunBinary(Opcode::ModI16, Signed(-7), 3), 2));
+    CHECK(Returns(RunBinary(Opcode::ModI16, 7, Signed(-3)), Signed(-2)));
+    CHECK(Returns(RunBinary(Opcode::ModI64, Signed(-6), 3), 0));
+    CHECK(Returns(RunBinary(Opcode::ModU8, 250, 7), 5));
     CHECK(Faults(RunBinary(Opcode::ModU64, 1, 0), VmFaultKind::DivideByZero));
     // 결과가 범위 밖이면 대상 레지스터를 바꾸지 않는다(fault로 끝나므로 관찰은 steps로만).
     CHECK(RunBinary(Opcode::AddU32, 0xFFFFFFFFu, 1).steps == 1);
@@ -335,7 +185,7 @@ TEST(SparksVm_FaultsEndsAndResultErrors) {
     CHECK(execution.ReturnedSlots()[1] == 0); // 값 slot은 0이다(99가 아니다)
 
     // fault의 자리: 함수 번호, 함수 안 주소, 원문 위치.
-    auto called = execution.Call(assembler.module, 1, argument, Span<const uint64>());
+    auto called = execution.Call(assembler.module, 1, argument, Span<const uint64>(), {});
     REQUIRE(called);
     CHECK(called.Value().fault.function == 1);
     CHECK(called.Value().fault.address == 0);
@@ -364,7 +214,7 @@ TEST(SparksVm_RefsAndPlaceholders) {
     assembler.Emit(EncodeABC(Opcode::MovR, 2, 1, 0));
     assembler.Emit(EncodeABC(Opcode::Ret, 2, 1, 1));
     assembler.End();
-    // 1: native 호출(LC5d 전 자리표시), 2: LOADSTR(LC5b 전 자리표시).
+    // 1: native 호출(LC5d 전 자리표시), 2: NEWA(LC5b2 전 자리표시).
     Shape empty;
     empty.registers[2] = 1;
     empty.frame[2] = 1;
@@ -373,8 +223,8 @@ TEST(SparksVm_RefsAndPlaceholders) {
                              assembler.Ref(BytecodeRefKind::NativeFunction, "Actor.Destroy")));
     assembler.Emit(EncodeABC(Opcode::Ret, 0, 0, 0));
     assembler.End();
-    assembler.Begin("Text", empty);
-    assembler.Emit(EncodeABx(Opcode::LoadStr, 0, assembler.String("hello")));
+    assembler.Begin("Array", empty);
+    assembler.Emit(EncodeABx(Opcode::NewA, 0, assembler.Ref(BytecodeRefKind::Type, "Array<int>")));
     assembler.Emit(EncodeABC(Opcode::Ret, 0, 0, 0));
     assembler.End();
     REQUIRE(assembler.Verified());
@@ -431,7 +281,7 @@ TEST(SparksVm_BudgetsAndDepth) {
     CHECK(Returns(exact, 14));
     CHECK(exact.steps == 6);
     limits.instructions = 5;
-    auto limited = execution.Call(assembler.module, 0, argument, Span<const uint64>(), limits);
+    auto limited = execution.Call(assembler.module, 0, argument, Span<const uint64>(), {}, limits);
     REQUIRE(limited);
     CHECK(limited.Value().outcome == VmOutcome::Faulted);
     CHECK(limited.Value().fault.kind == VmFaultKind::BudgetExceeded);
@@ -444,7 +294,7 @@ TEST(SparksVm_BudgetsAndDepth) {
     // 호출 깊이: frame 3개까지(MOV·CALL 두 번씩 뒤 세 번째 CALL에서 막힌다).
     limits = VmLimits();
     limits.callDepth = 3;
-    auto deep = execution.Call(assembler.module, 1, argument, Span<const uint64>(), limits);
+    auto deep = execution.Call(assembler.module, 1, argument, Span<const uint64>(), {}, limits);
     REQUIRE(deep);
     CHECK(deep.Value().fault.kind == VmFaultKind::BudgetExceeded);
     CHECK(deep.Value().steps == 6);
@@ -467,16 +317,21 @@ TEST(SparksVm_CallerErrors) {
     REQUIRE(assembler.Verified());
     VmExecution execution(allocator);
     const uint64 arguments[] = {1, 2, 3};
-    CHECK(execution.Call(assembler.module, 2, Span<const uint64>(arguments, 2), {}).Error() ==
+    CHECK(execution.Call(assembler.module, 2, Span<const uint64>(arguments, 2), {}, {}).Error() ==
           ErrorCode::InvalidArgument);
-    CHECK(execution.Call(assembler.module, 0, Span<const uint64>(arguments, 3), {}).Error() ==
+    CHECK(execution.Call(assembler.module, 0, Span<const uint64>(arguments, 3), {}, {}).Error() ==
           ErrorCode::InvalidArgument);
     CHECK(execution
               .Call(assembler.module, 0, Span<const uint64>(arguments, 2),
-                    Span<const uint64>(arguments, 1))
+                    Span<const uint64>(arguments, 1), {})
               .Error() == ErrorCode::InvalidArgument);
-    CHECK(execution.Call(assembler.module, 1, Span<const uint64>(), {}).Error() ==
-          ErrorCode::InvalidArgument); // Buf 매개변수는 LC5b 전
+    CHECK(execution.Call(assembler.module, 1, Span<const uint64>(), {}, {}).Error() ==
+          ErrorCode::InvalidArgument); // Buf 매개변수 하나에 인자 없음
+    VmBuffer* const missing[] = {nullptr, nullptr};
+    CHECK(
+        execution
+            .Call(assembler.module, 1, Span<const uint64>(), {}, Span<VmBuffer* const>(missing, 2))
+            .Error() == ErrorCode::InvalidArgument);
     CHECK(Returns(Run(execution, assembler.module, 0, Span<const uint64>(arguments, 2)), 3));
 }
 
@@ -561,7 +416,7 @@ TEST(SparksVm_AllocationFailureEverywhere) {
             }
 
             auto called = execution.Call(assembler.module, 0, Span<const uint64>(start, 1),
-                                         Span<const uint64>());
+                                         Span<const uint64>(), {});
             const uint64 used = allocator.Attempts();
             allocator.DisableFailure();
             if (failAt == 0) {

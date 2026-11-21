@@ -18,6 +18,18 @@ inline constexpr uint32 IntegerWidthCount = 8;
 // 실수 산술 opcode 한 타입의 연산 수다(ADD·SUB·MUL·DIV·NEG — Opcode.h 순서).
 inline constexpr uint32 FloatOperationCount = 5;
 
+// 실수 slot 비교(EQN.F)다: 비트가 같고 NaN이 아니거나, 둘 다 ±0이다. IEEE 같음과 같지만 FTZ·DAZ
+// 환경과 무관하다(있음 표지 1은 비정규 수 비트다).
+inline bool VmFloatSlotsEqual(uint64 left, uint64 right) noexcept {
+    constexpr uint64 Exponent = 0x7FF0000000000000ull;
+    constexpr uint64 Mantissa = 0x000FFFFFFFFFFFFFull;
+    if (left == right) {
+        return (left & Exponent) != Exponent || (left & Mantissa) == 0;
+    }
+
+    return ((left | right) << 1) == 0;
+}
+
 // 정수 → 실수 변환의 정확성 검사 경계(2^63·2^64)다.
 inline constexpr double TwoPower63 = 9223372036854775808.0;
 inline constexpr double TwoPower64 = 18446744073709551616.0;
@@ -92,8 +104,22 @@ VmFaultKind VmIntegerArith(VmArith arith, uint64 leftBits, uint64 rightBits, uin
             }
         }
 
-        // C++ 정수 나눗셈은 0 쪽 자름이고 나머지는 왼쪽 부호를 따른다(SL 3.2절과 같다).
-        value = static_cast<T>(arith == VmArith::Divide ? left / right : left % right);
+        // 내림 방식이다(SL 3.3절 — `a == Math.Div(a, b) * b + a % b`, 나머지는 오른쪽 부호). C++은
+        // 0 쪽 자름이므로 나머지가 0이 아니고 부호가 오른쪽과 다르면 고친다(몫 − 1은 넘치지 않는다
+        // — 몫이 최솟값이면 나머지가 0이다).
+        {
+            T quotient = static_cast<T>(left / right);
+            T remainder = static_cast<T>(left % right);
+            if constexpr (IsSignedV<T>) {
+                if (remainder != 0 && ((remainder < 0) != (right < 0))) {
+                    quotient = static_cast<T>(quotient - 1);
+                    remainder = static_cast<T>(remainder + right);
+                }
+            }
+
+            value = arith == VmArith::Divide ? quotient : remainder;
+        }
+
         break;
     case VmArith::Negate:
         return VmFaultKind::Unreachable;

@@ -50,7 +50,7 @@ VM 레지스터는 bank 셋이다(SL §11): **Scalar**(태그 없는 64비트), 
 | 군 | 명령(대표) | 비고 |
 |---|---|---|
 | 이동·상수 | `MOV.S/R/B`, `LOADK.I64/F64`, `LOADNULL.R/B`, `LOADBOOL` | 묶음은 slot마다 한 명령 |
-| 정수 | `ADD/SUB/MUL/DIV/MOD/NEG.<w>` (`w` = I8…I64·U8…U64) | 그 타입 범위 밖이면 `IntegerOverflow` fault, 0 나눗셈 `DivisionByZero` |
+| 정수 | `ADD/SUB/MUL/DIV/MOD/NEG.<w>` (`w` = I8…I64·U8…U64) | 그 타입 범위 밖이면 `IntegerOverflow` fault, 0 나눗셈 `DivideByZero`(`DIV`·`MOD`는 내림 방식 — SL §3.3) |
 | 실수 | `ADD/SUB/MUL/DIV/NEG.F32/F64`, `MIN/MAX/ABS…`(부록 B Math) | 결과가 유한하지 않으면 `NonFinite` fault. FMA 축약 금지 |
 | 비교·논리 | `EQ/NE/LT/LE.<w>/F64/STR/REF`, `NOT` | `&&`·`||`·`??`는 분기로 내린다 |
 | 변환 | `CONV.<from>.<to>` | 범위 검사·반올림 규칙은 SL §3.10 변환 |
@@ -119,13 +119,13 @@ bytecode 형식(opcode 번호·명령 모양·함수 표·상수 표)은 새 모
 | | `LOADK` | A ← Scalar 상수 표[Bx](64비트 — 정수·double 비트·이름 id) |
 | | `LOADSTR` | Buf A ← 문자열 표[Bx] |
 | | `LOADNULL.R` `LOADNULL.B` | A ← null |
-| 정수 | `ADD` `SUB` `MUL` `DIV` `MOD` `.I8`–`.I64`·`.U8`–`.U64`, `NEG.I8`–`.I64` | A ← B op C(그 타입 범위 밖이면 `IntegerOverflow`, 0 나눗셈 `DivisionByZero`) |
+| 정수 | `ADD` `SUB` `MUL` `DIV` `MOD` `.I8`–`.I64`·`.U8`–`.U64`, `NEG.I8`–`.I64` | A ← B op C(그 타입 범위 밖이면 `IntegerOverflow`, 0 나눗셈 `DivideByZero`, `DIV`·`MOD`는 내림 방식) |
 | 실수 | `ADD` `SUB` `MUL` `DIV` `NEG` `.F32`·`.F64` | 결과가 유한하지 않으면 `NonFinite`. F32는 결과를 float로 반올림 |
 | 합성 | `MUL.QUAT` `MUL.MAT4` A B C | quat·mat4 곱(UE `FQuat`·`FMatrix`의 `operator*`와 같은 순서, A·B·C는 묶음 첫 레지스터). 성분별 곱이 아니다 |
 | 논리 | `NOT` | A ← !B |
 | 비교 | `EQ` `NE` `LT` `LE` `.I`(부호 있는 정수·bool·enum·이름 — 64비트 확장값), `LT.U` `LE.U`, `EQ` `NE` `LT` `LE` `.F`, `EQ.STR` `NE.STR` `LT.STR` `LE.STR`(UTF-8 byte 순 — `string?` 포함), `EQ.R` `NE.R`(handle), `EQ.B` `NE.B`(Buf 값 비교 — 같음만) | A ← B cmp C. `>`·`>=`는 B·C를 바꾼 `LT`·`LE`다 |
 | | `EQN` `NEN` + EXTRA(slot 수), `EQN.F` `NEN.F` | Scalar 묶음 비교. 성분이 모두 실수(와 있음 표지)면 `.F`(실수 비교 — -0.0 == 0.0), 그 밖(`int?`·`Soft<T>`의 AssetId)은 비트 비교 |
-| 변환 | `CONV` | A ← B, C = (원래 Scalar 종류 << 4) \| 목적 종류(범위 밖은 `ConversionOutOfRange`) |
+| 변환 | `CONV` | A ← B, C = (원래 Scalar 종류 << 4) \| 목적 종류(정확히 들어가지 않으면 `IntegerOverflow`, float32 범위 밖은 `NonFinite` — SL §3.3) |
 | | `TOSTR` + EXTRA(표시 종류·enum 타입 번호) | Buf A ← Scalar 묶음 B의 문자열(보간 규칙 SL §3.2) |
 | | `CAST` + EXTRA(타입 번호) | Ref A ← B가 그 타입이면 B, 아니면 null |
 | 제어 | `JMP` sBx, `BRT` A sBx, `BRF` A sBx | 분기 거리는 다음 명령 기준 |

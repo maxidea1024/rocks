@@ -42,7 +42,7 @@ enum class Opcode : uint8 {
     LoadStr,
     LoadNullR,
     LoadNullB,
-    // 정수 산술(타입별 — 범위 밖은 IntegerOverflow, 0 나눗셈은 DivisionByZero)
+    // 정수 산술(타입별 — 범위 밖은 IntegerOverflow, 0 나눗셈은 DivideByZero, DIV·MOD는 내림 방식)
     AddI8,
     AddI16,
     AddI32,

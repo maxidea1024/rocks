@@ -574,8 +574,6 @@ TEST(SparksConformance_ComparesNamesGoldenAndStages) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
-// 폴더 사례(13.1절 "패키지 사례"): 배치 오류는 사례마다 실패 하나이고, 폴더 사례의 지시는 파일
-// 경로를 쓰며 파일 사례는 쓰지 않는다. schema 폴더에는 *.sparkbind.json만 둔다.
 TEST(SparksConformance_RunGolden) {
     // `.run` 실행 golden(Docs/Design/SparksVm.ko.md 7절): `->` 앞의 호출만 읽어 실행하고 줄 전체를
     // 실제 결과로 다시 써서 비교한다. 주석·빈 줄은 그대로 둔다.
@@ -599,7 +597,28 @@ fn Same(text: string): bool {
 }
 
 fn Word(): string {
-    return "a";
+    return "a, \"b\" -> c";
+}
+
+fn Half(x: float32): float32 {
+    return x * 0.5;
+}
+
+fn Pass(r: Result<int>): Result<int> {
+    let value = try r;
+    return value;
+}
+
+struct Pair {
+    var A: int = 0;
+}
+
+fn First(pair: Pair): int {
+    return pair.A;
+}
+
+fn Make(): Pair {
+    return Pair(A: 1);
 }
 )";
     auto run = [&](StringView golden, Report& report) noexcept {
@@ -613,8 +632,12 @@ fn Word(): string {
     };
     {
         Report report(allocator);
-        REQUIRE(
-            run("# comment\n\nAdd(1, 2) -> 3 (2 steps)\nFlip(Left) -> Right (5 steps)\n", report));
+        // 문자열 인자 안의 `,`·`->`·escape는 나누지 않는다.
+        REQUIRE(run("# comment\n\nAdd(1, 2) -> 3 (2 steps)\nFlip(Left) -> Right (5 steps)\n"
+                    "Same(\"x, y -> z\") -> true (2 steps)\n"
+                    "Word() -> \"a, \\\"b\\\" -> c\" (2 steps)\n"
+                    "Half(3.0) -> 1.5 (3 steps)\nPass(error(3)) -> error(3) (2 steps)\n",
+                    report));
         PrintFailures(report);
         CHECK(report.Failures().IsEmpty());
     }
@@ -647,9 +670,20 @@ fn Word(): string {
          "parameter"},
         {"Flip(Up)\n",
          "Run/Case.spark: .run line 1: cannot read 'Up' as a value of this parameter"},
-        {"Same(\"a\")\n",
+        {"First(1)\n",
          "Run/Case.spark: .run line 1: a parameter type is not supported by .run yet"},
-        {"Word()\n", "Run/Case.spark: .run line 1: the return type is not supported by .run yet"},
+        {"Make()\n", "Run/Case.spark: .run line 1: the return type is not supported by .run yet"},
+        {"Same(abc)\n",
+         "Run/Case.spark: .run line 1: cannot read 'abc' as a value of this parameter"},
+        {"Same(\"a\\q\")\n",
+         "Run/Case.spark: .run line 1: cannot read '\"a\\q\"' as a value of this parameter"},
+        {"Half(1e39)\n",
+         "Run/Case.spark: .run line 1: cannot read '1e39' as a value of this parameter"},
+        {"Half(inf)\n",
+         "Run/Case.spark: .run line 1: cannot read 'inf' as a value of this parameter"},
+        {"Pass(error(18446744073709551615))\n",
+         "Run/Case.spark: .run line 1: cannot read 'error(18446744073709551615)' as a value of "
+         "this parameter"},
     };
     for (const Bad& entry : bad) {
         Report report(allocator);
@@ -684,6 +718,8 @@ fn Word(): string {
     }
 }
 
+// 폴더 사례(13.1절 "패키지 사례"): 배치 오류는 사례마다 실패 하나이고, 폴더 사례의 지시는 파일
+// 경로를 쓰며 파일 사례는 쓰지 않는다. schema 폴더에는 *.sparkbind.json만 둔다.
 TEST(SparksConformance_FolderCasesAndSchemas) {
     SystemAllocator allocator;
     {
