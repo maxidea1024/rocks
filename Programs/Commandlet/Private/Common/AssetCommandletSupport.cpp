@@ -129,11 +129,28 @@ bool OpenSession(CommandletOutput& output, Allocator& allocator, StringView comm
         return false;
     }
 
+    // 쓰기 명령은 색인을 만들기 전에 잠근다(7·8절 — 쓰기 판정은 잠금 아래에서 본 디스크로 한다).
+    if (write) {
+        uint32 milliseconds = 0;
+        (void)ParseWaitMilliseconds(wait, milliseconds);
+        if (auto held = session.lock.Acquire(session.layout, milliseconds); !held) {
+            failure = held.Error() == ErrorCode::Busy
+                          ? Fail(output, allocator, command, 1,
+                                 "Busy: {}: the project is locked by another process; use "
+                                 "--wait=<seconds>",
+                                 session.layout.Root())
+                          : Fail(output, allocator, command, 1, "{}: {}: cannot lock the project",
+                                 ErrorCodeName(held.Error()), session.layout.Root());
+            return false;
+        }
+    }
+
     if (auto started = session.types.Start(); !started) {
-        failure = started.Error() == ErrorCode::OutOfMemory
-                      ? Result<int32>::Failure(started.Error())
-                      : Fail(output, allocator, command, 1, "cannot register the asset types ({})",
-                             ErrorCodeName(started.Error()));
+        failure =
+            started.Error() == ErrorCode::OutOfMemory
+                ? Result<int32>::Failure(started.Error())
+                : Fail(output, allocator, command, 1, "{}: {}: cannot register the asset types",
+                       ErrorCodeName(started.Error()), AssetTypeModule);
         return false;
     }
 
@@ -152,25 +169,11 @@ bool OpenSession(CommandletOutput& output, Allocator& allocator, StringView comm
 
     session.service = Move(made.Value());
     if (auto initialized = session.service->Initialize(); !initialized) {
-        failure = initialized.Error() == ErrorCode::OutOfMemory
-                      ? Result<int32>::Failure(initialized.Error())
-                      : Fail(output, allocator, command, 1, "cannot scan '{}' ({})",
-                             session.layout.ContentDirectory(), ErrorCodeName(initialized.Error()));
-        return false;
-    }
-
-    if (!write) {
-        return true;
-    }
-
-    uint32 milliseconds = 0;
-    (void)ParseWaitMilliseconds(wait, milliseconds);
-    if (auto held = session.lock.Acquire(session.layout, milliseconds); !held) {
-        failure = held.Error() == ErrorCode::Busy
-                      ? Fail(output, allocator, command, 1,
-                             "the project is locked by another process; use --wait=<seconds>")
-                      : Fail(output, allocator, command, 1, "cannot lock the project ({})",
-                             ErrorCodeName(held.Error()));
+        failure =
+            initialized.Error() == ErrorCode::OutOfMemory
+                ? Result<int32>::Failure(initialized.Error())
+                : Fail(output, allocator, command, 1, "{}: {}: cannot scan the content directory",
+                       ErrorCodeName(initialized.Error()), session.layout.ContentDirectory());
         return false;
     }
 

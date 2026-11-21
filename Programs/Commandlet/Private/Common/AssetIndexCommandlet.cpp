@@ -129,11 +129,18 @@ Result<int32> ListByType(CommandletOutput& output, const AssetCommandContext& co
                         "InvalidPath: '{}' is not a logical directory", options.under);
         }
 
-        return Fail(
-            output, allocator, ListName, 1, "{}: {}: {}",
-            diagnostic.code == AssetDiagnosticCode::None ? ErrorCodeName(listed.Error())
-                                                         : AssetDiagnosticName(diagnostic.code),
-            options.type, listed.Error() == ErrorCode::NotFound ? "unknown type" : "not a class");
+        // List의 NotFound(진단 None)는 --type 이름 찾기뿐이다(없는 디렉터리는 빈 목록이다).
+        const bool unknownType =
+            diagnostic.code == AssetDiagnosticCode::None && listed.Error() == ErrorCode::NotFound;
+        const char* description = unknownType ? "unknown type"
+                                  : diagnostic.code == AssetDiagnosticCode::TypeMismatch
+                                      ? "not a class"
+                                      : "failed";
+        return Fail(output, allocator, ListName, 1, "{}: {}: {}",
+                    diagnostic.code == AssetDiagnosticCode::None
+                        ? ErrorCodeName(listed.Error())
+                        : AssetDiagnosticName(diagnostic.code),
+                    options.type, description);
     }
 
     return WriteEntries(output, allocator, entries);

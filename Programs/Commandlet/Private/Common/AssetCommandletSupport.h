@@ -128,8 +128,8 @@ struct EditSession {
     reflection_text::TextDiagnostics diagnostics;
 };
 
-// 프로젝트를 열고 타입을 등록하고 서비스를 만든다(write면 잠금도 잡는다). 실패하면 출력하고
-// failure에 종료 코드를 둔다.
+// 프로젝트를 열고(write면 바로 잠그고 — 색인은 잠금 아래에서 만든다) 타입을 등록하고 서비스를
+// 만든다. 실패하면 `<명령>: <코드>: <대상>: <설명>` 줄을 쓰고 failure에 종료 코드를 둔다.
 bool OpenSession(CommandletOutput& output, Allocator& allocator, StringView command,
                  StringView project, StringView wait, bool write, EditSession& session,
                  Result<int32>& failure) noexcept;

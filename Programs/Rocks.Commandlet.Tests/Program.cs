@@ -672,6 +672,8 @@ try
     // asset-set: AssetId 대상, Soft 참조 배열, --erase 목록 옵션.
     await CheckAll("asset-set by AssetId", ["asset-set", runId, "rateScale=2", projectOption], 0, [], []);
     await CheckAll("asset-set result", ["asset-info", "/Game/Anims/Run", projectOption], 0, ["rateScale=2\n"], []);
+    await CheckAll("asset-set by path", ["asset-set", "/Game/Anims/Run", "rateScale=2.5", projectOption], 0, [], []);
+    await CheckAll("asset-set by path result", ["asset-info", runId, projectOption], 0, ["rateScale=2.5\n"], []);
     await CheckAll("asset-set soft array", ["asset-set", "/Game/Characters/Hero",
         "compatibleSkeletons=/Game/Characters/Hero", "useRetargetModesFromCompatibleSkeleton=on", projectOption], 0, [], []);
     await CheckAll("asset-set soft array result", ["asset-info", heroId, projectOption], 0,
@@ -725,9 +727,9 @@ try
 
     // asset-info 거부.
     await CheckAll("asset-info missing", ["asset-info", "/Game/Nope", projectOption], 1, [],
-        ["asset-info: NotFound: /Game/Nope: NotFound"]);
+        ["asset-info: NotFound: /Game/Nope: failed\n"]);
     await CheckAll("asset-info missing id", ["asset-info", "5e570000-a55e-7000-0000-000000000000", projectOption], 1, [],
-        ["asset-info: NotFound: 5e570000-a55e-7000-0000-000000000000: NotFound"]);
+        ["asset-info: NotFound: 5e570000-a55e-7000-0000-000000000000: failed\n"]);
     await CheckAll("asset-info invalid target", ["asset-info", "Hero", projectOption], 1, [],
         ["asset-info: InvalidPath: Hero: InvalidArgument"]);
 
@@ -796,9 +798,9 @@ try
         {
             held.Lock(0, 1);
             await CheckAll("asset-set locked", ["asset-set", "/Game/Anims/Run", "loop=off", projectOption], 1, [],
-                ["asset-set: the project is locked by another process"]);
+                ["asset-set: Busy: ", ": the project is locked by another process"]);
             await CheckAll("asset-new locked with wait", ["asset-new", "Skeleton", "/Game/Locked", "--wait=1", projectOption],
-                1, [], ["asset-new: the project is locked by another process"]);
+                1, [], ["asset-new: Busy: ", ": the project is locked by another process"]);
             await CheckAll("asset-info without lock", ["asset-info", "/Game/Anims/Run", projectOption], 0, ["loop=true\n"], []);
             held.Unlock(0, 1);
         }
@@ -809,7 +811,7 @@ try
         using (new FileStream(orphan, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
         {
             await CheckAll("asset-set orphan not deleted", ["asset-set", "/Game/Anims/Run", "loop=on", projectOption], 0, [],
-                ["asset-set: warning: OrphanNotDeleted: "]);
+                [": warning OrphanNotDeleted (related "]);
         }
 
         await CheckAll("asset-set orphan deleted", ["asset-set", "/Game/Anims/Run", "loop=on", projectOption], 0, [], []);
@@ -819,7 +821,7 @@ try
     // 프로젝트 찾기: --project 없이 프로젝트 안에서 위로 찾는다.
     ProcessResult found = await RunEdit(Path.Combine(project, "Content"), "asset-info", "/Game/Anims/Run");
     Report("asset-info finds the project upward", found.ExitCode == 0 &&
-        found.StdOut.Contains("rateScale=2\n", StringComparison.Ordinal) && found.StdErr.Length == 0, found);
+        found.StdOut.Contains("rateScale=2.5\n", StringComparison.Ordinal) && found.StdErr.Length == 0, found);
     await CheckAll("asset-info without a project", ["asset-info", "/Game/Anims/Run"], 1, [], ["no project found"]);
     await CheckAll("asset-list type without a project", ["asset-list", "--type=Skeleton"], 1, [], ["no project found"]);
 
@@ -835,21 +837,21 @@ try
     File.WriteAllBytes(Path.Combine(brokenContent, "Content"), [1]);
     File.WriteAllBytes(Path.Combine(brokenLock, "Intermediate"), [1]);
     await CheckAll("asset-info content is a file", ["asset-info", "/Game/X", $"--project={brokenContent}"], 1, [],
-        ["asset-info: cannot scan "]);
+        ["asset-info: ", ": cannot scan the content directory"]);
     await CheckAll("asset-list type content is a file", ["asset-list", "--type=Asset", $"--project={brokenContent}"], 1, [],
-        ["asset-list: cannot scan "]);
+        ["asset-list: ", ": cannot scan the content directory"]);
     await CheckAll("asset-new cannot lock", ["asset-new", "Skeleton", "/Game/X", $"--project={brokenLock}"], 1, [],
-        ["asset-new: cannot lock the project ("]);
+        ["asset-new: ", ": cannot lock the project"]);
 
     // 열기 경고: 의존 패키지(Hero)가 없으면 열기는 경고와 함께 되고, 저장은 --force 없이 MissingDependency, --force면
     // null로 저장하고 경고다.
     File.Delete(Path.Combine(project, "Content", "Characters", "Hero.rasset"));
     await CheckAll("asset-info excluded dependency", ["asset-info", "/Game/Anims/Run", projectOption], 0,
-        ["skeleton=none\n"], [$"asset-info: warning: ExcludedDependency: {heroId}: "]);
+        ["skeleton=none\n"], [$": {heroId}: warning ExcludedDependency (related "]);
     await CheckAll("asset-set missing dependency", ["asset-set", "/Game/Anims/Run", "loop=off", projectOption], 1, [],
-        ["asset-set: MissingDependency: /Game/Anims/Run: InvalidArgument"]);
+        [$"asset-set: MissingDependency: /Game/Anims/Run: InvalidArgument (related {heroId})\n"]);
     await CheckAll("asset-set force", ["asset-set", "/Game/Anims/Run", "loop=off", "--force", projectOption], 0, [],
-        ["asset-set: warning: DroppedUnresolvedImport: "]);
+        [": warning DroppedUnresolvedImport (related "]);
     await CheckAll("asset-set force result", ["asset-info", "/Game/Anims/Run", projectOption], 0,
         ["loop=false\n", "skeleton=none\n"], []);
     // 만들기의 참조 해석이 연 패키지(Hero가 없는 Run을 다시 가리킴 — Run은 이제 Hero 의존이 없다)와 경고.
@@ -868,7 +870,7 @@ try
         File.Delete(Path.Combine(project, "Content", "Characters", "Hero.rasset"));
         await CheckAll("asset-new with open warnings", ["asset-new", "AnimationClip", "/Game/Anims/Walk",
             "additive.basePoseClip=/Game/Anims/Run", projectOption], 0, ["/Game/Anims/Walk "],
-            ["asset-new: warning: ExcludedDependency: "]);
+            [": warning ExcludedDependency (related "]);
         string[] invalidOutputs =
         [
             $"asset-info /Game/Anims/Run \"--project={project}\"",

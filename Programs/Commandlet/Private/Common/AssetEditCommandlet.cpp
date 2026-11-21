@@ -232,9 +232,9 @@ Result<int32> WriteWarnings(CommandletOutput& output, Allocator& allocator, Stri
                             const Array<EditorWarning>& warnings) noexcept {
     for (const EditorWarning& warning : warnings) {
         const AssetDiagnostic& diagnostic = warning.diagnostic;
-        auto written = Fail(output, allocator, command, 0, "warning: {}: {}: {} (related {})",
-                            WarningName(warning.kind), diagnostic.asset,
-                            DiagnosticName(diagnostic, diagnostic.error), diagnostic.related);
+        auto written = Fail(output, allocator, command, 0, "{}: {}: warning {} (related {})",
+                            DiagnosticName(diagnostic, diagnostic.error), diagnostic.asset,
+                            WarningName(warning.kind), diagnostic.related);
         if (!written) {
             return written;
         }
@@ -270,8 +270,17 @@ Result<int32> WriteFailure(CommandletOutput& output, Allocator& allocator, Strin
                     "Unsupported: {}: a value cannot be written as lines; use --json", target);
     }
 
+    // 설명: 진단 코드가 있으면 원본 오류 이름, 없으면(코드 자리에 이미 원본 오류) "failed". 관련
+    // 대상이 있으면 붙인다(MissingDependency의 대상 등).
+    const char* description =
+        failure.code != AssetDiagnosticCode::None ? ErrorCodeName(error) : "failed";
+    if (!failure.related.IsNull()) {
+        return Fail(output, allocator, command, 1, "{}: {}: {} (related {})",
+                    DiagnosticName(failure, error), target, description, failure.related);
+    }
+
     return Fail(output, allocator, command, 1, "{}: {}: {}", DiagnosticName(failure, error), target,
-                ErrorCodeName(error));
+                description);
 }
 
 // 사용법을 검사한다: 도움말이면 0, 형식 오류면 2로 끝낸다(done).
@@ -313,6 +322,15 @@ Result<int32> RunAssetNewCommand(void* context, Span<const StringView> args,
         return failure;
     }
 
+    // 타입 이름을 먼저 본다(모르는 이름의 NotFound를 저장 단계의 NotFound와 섞지 않게).
+    const StringView typeName = parsed.positional[0];
+    if (auto known = session.types.Types().AcquireByToolName(
+            Span<const char>(typeName.Data(), typeName.ByteCount()));
+        !known) {
+        return Fail(output, allocator, NewName, 1, "{}: {}: unknown type",
+                    ErrorCodeName(known.Error()), typeName);
+    }
+
     AssetDiagnostic diagnostic;
     auto made = session.service->New(session.lock, parsed.positional[0], parsed.positional[1],
                                      parsed.assignments.View(), session.diagnostics,
@@ -322,14 +340,10 @@ Result<int32> RunAssetNewCommand(void* context, Span<const StringView> args,
     }
 
     if (!made) {
-        // 타입 이름의 오류(New에서 NotFound·진단 None은 모르는 타입 이름뿐이고 TypeMismatch는 타입
-        // 판정뿐이다)는 대상 자리에 타입 이름을 쓴다.
-        const bool unknownType =
-            diagnostic.code == AssetDiagnosticCode::None && made.Error() == ErrorCode::NotFound;
-        if (unknownType || diagnostic.code == AssetDiagnosticCode::TypeMismatch) {
-            return Fail(output, allocator, NewName, 1, "{}: {}: {}",
-                        DiagnosticName(diagnostic, made.Error()), parsed.positional[0],
-                        unknownType ? "unknown type" : "not a concrete asset class");
+        // 에셋 클래스 판정(TypeMismatch)은 타입 이름의 오류다(모르는 이름은 위에서 먼저 본다).
+        if (diagnostic.code == AssetDiagnosticCode::TypeMismatch) {
+            return Fail(output, allocator, NewName, 1,
+                        "TypeMismatch: {}: not a concrete asset class", parsed.positional[0]);
         }
 
         return WriteFailure(output, allocator, NewName, parsed.positional[1], session.diagnostics,
