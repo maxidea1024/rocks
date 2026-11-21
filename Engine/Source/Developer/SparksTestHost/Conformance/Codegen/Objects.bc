@@ -54,7 +54,7 @@ ref14 = language NextTick
 ref15 = field Component.Owner
 ref16 = type Pawn
 
-function Door.on Enable  scalar=4/4 ref=3/5 buf=2/2 params=0/1/0
+function Door.on Enable  scalar=4/4 ref=3/5 buf=2/2 params=0/1/0 returns sx0
   0000  GETCTX  r1, ref0    ; 24:15
   0001  GETF.R  r1, r1, ref1    ; 24:15
   0003  GETF.R  r2, r0, ref2    ; 24:37
@@ -85,7 +85,7 @@ function Door.on Enable  scalar=4/4 ref=3/5 buf=2/2 params=0/1/0
   0042  SETF.B  r0, b0, ref9    ; 28:9
   0044  RET  -    ; 29:5
 
-function Door.on Disable  scalar=1/1 ref=2/3 buf=0/0 params=0/1/0
+function Door.on Disable  scalar=1/1 ref=2/3 buf=0/0 params=0/1/0 returns sx0
   0000  GETF.R  r1, r0, ref4    ; 32:9
   0002  ISSOME.R  s0, r1    ; 32:9
   0003  BRF  s0, 0007    ; 32:9
@@ -96,7 +96,7 @@ function Door.on Disable  scalar=1/1 ref=2/3 buf=0/0 params=0/1/0
   0008  SETF.R  r0, r1, ref4    ; 33:9
   0010  RET  -    ; 34:5
 
-function Door.Toggle  scalar=1/1 ref=2/4 buf=0/0 params=0/2/0
+function Door.Toggle  scalar=1/1 ref=2/4 buf=0/0 params=0/2/0 returns sx0
   0000  GETF.S  s0, r0, ref11    ; 37:17
   0002  NOT  s0, s0    ; 37:16
   0003  SETF.S  r0, s0, ref11    ; 37:9
@@ -107,7 +107,7 @@ function Door.Toggle  scalar=1/1 ref=2/4 buf=0/0 params=0/2/0
   0010  EMIT  ref12    ; 39:13
   0011  RET  -    ; 41:5
 
-function Door.Describe  scalar=1/1 ref=1/1 buf=1/1 params=0/1/0
+function Door.Describe  scalar=1/1 ref=1/1 buf=1/1 params=0/1/0 returns bx1
   switch0 [0: 0004, 1: 0006, 2: 0006] else 0003
   0000  GETF.S  s0, r0, ref13    ; 44:17
   0002  SWITCH  s0, switch0    ; 44:9
@@ -117,7 +117,7 @@ function Door.Describe  scalar=1/1 ref=1/1 buf=1/1 params=0/1/0
   0006  LOADSTR  b0, t21    ; 49:24
   0007  RET  b0 x1    ; 49:17
 
-function Door.Total  scalar=5/5 ref=1/1 buf=3/3 params=0/1/0
+function Door.Total  scalar=5/5 ref=1/1 buf=3/3 params=0/1/0 returns sx1
   0000  LOADI  s0, 0    ; 55:19
   0001  GETF.B  b0, r0, ref9    ; 56:29
   0003  LOADI  s1, 0    ; 56:9
@@ -137,7 +137,7 @@ function Door.Total  scalar=5/5 ref=1/1 buf=3/3 params=0/1/0
   0020  LT.I  s3, s1, s2    ; 61:9
   0021  BRF  s3, 0032    ; 61:9
   0022  MOV.S  s3, s1    ; 61:9
-  0023  GETE  b1, b0, s1 [bx1 key sx1]    ; 61:21
+  0023  GETVAL  b1, b0, s1 [bx1 key sx0]    ; 61:21
   0025  LOADSTR  b2, t23    ; 62:25
   0026  EQ.STR  s4, b1, b2    ; 62:17
   0027  BRT  s4, 0033    ; 62:17
@@ -151,7 +151,7 @@ function Door.Total  scalar=5/5 ref=1/1 buf=3/3 params=0/1/0
   0035  MOV.S  s0, s3    ; 66:13
   0036  JMP  0029    ; 61:9
 
-function Door.on Owner.Damaged  scalar=2/2 ref=3/5 buf=0/0 params=1/1/0
+function Door.on Owner.Damaged  scalar=2/2 ref=3/5 buf=0/0 params=1/1/0 returns sx0
   await 0016  live r1
   0000  GETCTX  r1, ref0    ; 74:21
   0001  GETF.R  r1, r1, ref1    ; 74:21
@@ -177,7 +177,7 @@ function Door.on Owner.Damaged  scalar=2/2 ref=3/5 buf=0/0 params=1/1/0
   0024  RELEASE  r1    ; 73:37
   0025  RET  -    ; 81:5
 
-function Door.Find  scalar=1/1 ref=2/2 buf=0/0 params=0/1/0
+function Door.Find  scalar=1/1 ref=2/2 buf=0/0 params=0/1/0 returns rx1
   0000  GETF.R  r1, r0, ref15    ; 84:20
   0002  CAST  r1, r1, ref16    ; 84:20
   0004  ISSOME.R  s0, r1    ; 85:9

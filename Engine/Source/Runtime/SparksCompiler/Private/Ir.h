@@ -117,7 +117,8 @@ enum class IrArith : uint8 {
     Div,
     Mod,
     Neg,
-    Not
+    Not,
+    Compose // quat·mat4 곱(묶음 전체 — 성분별이 아니다)
 };
 
 enum class IrCompare : uint8 {

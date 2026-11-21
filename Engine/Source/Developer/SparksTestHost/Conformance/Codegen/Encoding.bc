@@ -1,0 +1,107 @@
+module "Main"
+compiler "sparks 0.4.0"
+profile full
+content 344dd5d096faa381d5eed78528048670110234c31866e387aeb8973658acb044
+interface 0000000000000000000000000000000000000000000000000000000000000000
+t0 = "Probe.Order"
+t1 = "m"
+t2 = ""
+t3 = "x"
+t4 = "Probe.Same"
+t5 = "Probe.Make"
+t6 = "/Game/Data/Rules"
+t7 = "Soft<DataAsset>"
+t8 = "tab\tquote\" $sign \xf0\x9f\x98\x80"
+t9 = "line \"one\""
+t10 = "Probe.Names"
+t11 = "Set.Add"
+t12 = "Label"
+t13 = "Label.Words"
+t14 = "Label.Count"
+t15 = "Probe.Later"
+t16 = "NextTick"
+t17 = "Probe.Ready"
+t18 = "Probe.Look"
+t19 = "Component.Owner"
+t20 = "Probe"
+t21 = "Actor.Find<Probe>"
+t22 = "sparks 0.4.0"
+t23 = "Main"
+ref0 = literal Soft<DataAsset> "/Game/Data/Rules"
+ref1 = field Probe.Names
+ref2 = language Set.Add
+ref3 = type Label
+ref4 = struct-field Label.Words
+ref5 = struct-field Label.Count
+ref6 = language NextTick
+ref7 = event Probe.Ready
+ref8 = field Component.Owner
+ref9 = type Probe
+ref10 = native Actor.Find<Probe> type ref9
+
+function Probe.Order  scalar=2/2 ref=1/1 buf=4/4 params=0/1/2 returns sx1
+  0000  ISSOME.B  s0, b1    ; 13:20
+  0001  BRT  s0, 0009    ; 13:20
+  0002  JMP  0011    ; 13:20
+  0003  LOADI  s0, 1    ; 13:16
+  0004  RET  s0 x1    ; 13:9
+  0005  LOADSTR  b2, t1    ; 13:36
+  0006  LE.STR  s1, b2, b0    ; 13:31
+  0007  BRT  s1, 0003    ; 13:31
+  0008  JMP  0016    ; 13:31
+  0009  MOV.B  b2, b1    ; 13:20
+  0010  JMP  0013    ; 13:20
+  0011  LOADSTR  b3, t2    ; 13:25
+  0012  MOV.B  b2, b3    ; 13:20
+  0013  LT.STR  s1, b0, b2    ; 13:16
+  0014  BRT  s1, 0003    ; 13:16
+  0015  JMP  0005    ; 13:16
+  0016  LOADSTR  b2, t3    ; 13:48
+  0017  EQ.STR  s1, b1, b2    ; 13:43
+  0018  MOV.S  s0, s1    ; 13:16
+  0019  JMP  0004    ; 13:16
+
+function Probe.Same  scalar=20/20 ref=1/1 buf=0/0 params=12/1/0 returns sx1
+  0000  MUL.QUAT  s12, s4, s8    ; 17:22
+  0001  MOV.S  s16, s12    ; 17:9
+  0002  MOV.S  s17, s13    ; 17:9
+  0003  MOV.S  s18, s14    ; 17:9
+  0004  MOV.S  s19, s15    ; 17:9
+  0005  EQN  s12, s0, s2 x2    ; 19:16
+  0007  RET  s12 x1    ; 19:9
+
+function Probe.Make  scalar=4/5 ref=1/1 buf=2/4 params=0/1/0 returns bx1
+  0000  LOADSTR  b0, t6    ; 23:43
+  0001  NEWLIT  s0, ref0 args 0    ; 23:37
+  0003  MOV.S  s2, s0    ; 23:9
+  0004  MOV.S  s3, s1    ; 23:9
+  0005  LOADSTR  b0, t8    ; 25:20
+  0006  LOADSTR  b1, t9    ; 26:19
+  0007  GETF.B  b1, r0, ref1    ; 28:21
+  0009  MOV.B  b2, b1    ; 28:21
+  0010  MOV.B  b3, b0    ; 28:21
+  0011  CALLL  ref2    ; 28:21
+  0012  MOV.S  s0, s4    ; 28:21
+  0013  MOV.B  b1, b2    ; 28:21
+  0014  SETF.B  r0, b1, ref1    ; 28:21
+  0016  LOADI  s0, 2    ; 30:42
+  0017  NEWS  b1, ref3    ; 30:16
+  0018  SETSF.B  b1, b0, ref4    ; 30:16
+  0020  SETSF.S  b1, s0, ref5    ; 30:16
+  0022  RET  b1 x1    ; 30:9
+
+function Probe.Later  scalar=0/0 ref=2/3 buf=0/0 params=0/1/0 returns sx0
+  await 0002  live r0
+  0000  CALLL  ref6    ; 34:15
+  0001  MOV.R  r1, r2    ; 34:15
+  0002  AWAIT  -, r1    ; 34:9
+  0004  MOV.R  r2, r0    ; 35:9
+  0005  EMIT  ref7    ; 35:9
+  0006  RET  -    ; 36:5
+
+function Probe.Look  scalar=0/0 ref=2/3 buf=0/0 params=0/1/0 returns rx1
+  0000  GETF.R  r1, r0, ref8    ; 39:16
+  0002  MOV.R  r2, r1    ; 39:16
+  0003  CALLN  ref10    ; 39:16
+  0004  MOV.R  r1, r2    ; 39:16
+  0005  RET  r1 x1    ; 39:9

@@ -41,7 +41,7 @@ ref6 = event Actor.Destroyed
 ref7 = native LoopHandle.Pause
 ref8 = event Actor.Pinged
 
-function Widths  scalar=8/8 ref=0/0 buf=0/0 params=7/0/0
+function Widths  scalar=8/8 ref=0/0 buf=0/0 params=7/0/0 returns sx1
   0000  ADD.I16  s7, s0, s0    ; 6:15
   0001  MUL.I32  s7, s1, s1    ; 7:16
   0002  SUB.U8  s7, s2, s2    ; 8:16
@@ -51,7 +51,7 @@ function Widths  scalar=8/8 ref=0/0 buf=0/0 params=7/0/0
   0006  MUL.F32  s7, s6, s6    ; 18:12
   0007  RET  s7 x1    ; 18:5
 
-function Compare  scalar=10/10 ref=0/0 buf=0/0 params=8/0/0
+function Compare  scalar=10/10 ref=0/0 buf=0/0 params=8/0/0 returns sx1
   0000  LE.I  s8, s0, s1    ; 22:11
   0001  BRT  s8, 0010    ; 22:11
   0002  MOV.S  s8, s2    ; 23:16
@@ -66,7 +66,7 @@ function Compare  scalar=10/10 ref=0/0 buf=0/0 params=8/0/0
   0011  BRT  s8, 0002    ; 22:22
   0012  JMP  0006    ; 22:22
 
-function Label  scalar=2/2 ref=0/0 buf=2/3 params=1/0/1
+function Label  scalar=2/2 ref=0/0 buf=2/3 params=1/0/1 returns bx1
   switch0 [-1: 0006, 7: 0008] else 0005
   0000  SWITCH  s0, switch0    ; 30:5
   0001  LOADSTR  b1, t3    ; 42:14
@@ -89,7 +89,7 @@ function Label  scalar=2/2 ref=0/0 buf=2/3 params=1/0/1
   0019  BRT  s1, 0015    ; 42:19
   0020  JMP  0010    ; 41:5
 
-function Validate  scalar=1/1 ref=0/0 buf=2/2 params=0/0/1
+function Validate  scalar=1/1 ref=0/0 buf=2/2 params=0/0/1 returns bx1
   0000  LOADSTR  b1, t9    ; 52:17
   0001  EQ.STR  s0, b0, b1    ; 52:9
   0002  BRF  s0, 0006    ; 52:9
@@ -99,14 +99,14 @@ function Validate  scalar=1/1 ref=0/0 buf=2/2 params=0/0/1
   0006  OK  b1, b0 x1    ; 56:5
   0008  RET  b1 x1    ; 56:5
 
-function Sum  scalar=10/10 ref=0/0 buf=3/3 params=0/0/2
+function Sum  scalar=10/10 ref=0/0 buf=3/3 params=0/0/2 returns sx1
   0000  LOADI  s0, 0    ; 60:17
   0001  MOV.B  b2, b0    ; 61:5
   0002  LOADI  s1, 0    ; 61:5
   0003  LEN  s2, b2    ; 61:5
   0004  LT.I  s3, s1, s2    ; 61:5
   0005  BRF  s3, 0013    ; 61:5
-  0006  GETE  s3, b2, s1 [sx1 key sx1]    ; 61:10
+  0006  GETVAL  s3, b2, s1 [sx1 key sx0]    ; 61:10
   0008  ADD.I64  s3, s0, s3    ; 62:9
   0009  MOV.S  s0, s3    ; 62:9
   0010  LOADI  s3, 1    ; 61:5
@@ -152,7 +152,7 @@ function Sum  scalar=10/10 ref=0/0 buf=3/3 params=0/0/2
   0051  MOV.S  s6, s9    ; 72:5
   0052  RET  s0 x1    ; 74:5
 
-function Beacon.on this.Pinged  scalar=2/2 ref=4/6 buf=0/0 params=1/1/0
+function Beacon.on this.Pinged  scalar=2/2 ref=4/6 buf=0/0 params=1/1/0 returns sx0
   await 0022  live r0..r1
   await 0028  live r1
   0000  GETCTX  r1, ref0    ; 83:19
@@ -190,7 +190,7 @@ function Beacon.on this.Pinged  scalar=2/2 ref=4/6 buf=0/0 params=1/1/0
   0039  RELEASE  r1    ; 82:32
   0040  RET  -    ; 92:5
 
-function Beacon.Ping  scalar=1/2 ref=2/3 buf=0/0 params=0/2/0
+function Beacon.Ping  scalar=1/2 ref=2/3 buf=0/0 params=0/2/0 returns sx0
   0000  LOADI  s0, 1    ; 95:26
   0001  MOV.R  r2, r0    ; 95:9
   0002  MOV.S  s1, s0    ; 95:9

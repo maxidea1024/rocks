@@ -17,7 +17,8 @@ Compilation::Compilation(Allocator& allocator, const SourceSet& sources) noexcep
       typeIndex_(allocator, TypeHash{this}, TypeEqual{this}), signatures_(allocator),
       signatureParameters_(allocator), symbolBases_(allocator), nodeSymbols_(allocator),
       nodeTypes_(allocator), exprTypes_(allocator), nodeBase_(allocator), sortedModules_(allocator),
-      sortedFirst_(allocator), sortedCount_(allocator), irDumps_(allocator), bytecode_(allocator) {
+      sortedFirst_(allocator), sortedCount_(allocator), irDumps_(allocator), bytecode_(allocator),
+      lowered_(allocator) {
 }
 
 Compilation::TypeProbe Compilation::ProbeOf(uint32 type) const noexcept {

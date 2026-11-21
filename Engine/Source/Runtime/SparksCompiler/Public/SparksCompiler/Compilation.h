@@ -345,6 +345,9 @@ private:
     Array<TextRef> irDumps_;
     // 모듈마다 bytecode(Codegen 단계에서 내린 컴파일만 — 모듈 번호와 같은 순서).
     Array<BytecodeModule> bytecode_;
+    // 모듈마다 내림·인코딩·verifier를 모두 마쳤는지다(S1150 등으로 멈춘 모듈은 0 — 덤프·bytecode
+    // 없음).
+    Array<uint8> lowered_;
     CompilationStage lastStage_ = CompilationStage::All;
     bool checked_ = false;
 };

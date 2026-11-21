@@ -593,6 +593,13 @@ uint32 IrBuilder::LowerBinaryStep(uint32 node, uint32 left, uint32 expected) noe
         return result;
     }
 
+    // quat·mat4의 `*`는 성분별이 아니라 합성이다(UE FQuat·FMatrix 곱) — 묶음 명령 하나.
+    if (op == "*" &&
+        (checker_.IsLanguage(resultType, "quat") || checker_.IsLanguage(resultType, "mat4"))) {
+        Add(IrOp::Binary, result, left, right, 0, node, static_cast<uint8>(IrArith::Compose));
+        return result;
+    }
+
     // 산술은 Scalar 값뿐이다(문자열 `+`는 없다 — 보간을 쓴다, SL §3.2).
     const IrArith kind = op == "+"   ? IrArith::Add
                          : op == "-" ? IrArith::Sub

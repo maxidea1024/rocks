@@ -77,6 +77,8 @@ const char* ArithName(uint8 sub) noexcept {
         return "NEG";
     case IrArith::Not:
         return "NOT";
+    case IrArith::Compose:
+        return "COMPOSE";
     }
 
     return "?";
@@ -520,6 +522,11 @@ void TypeChecker::LowerProgram() noexcept {
         return;
     }
 
+    if (auto resized = c.lowered_.TryResize(c.modules_.Size()); !resized) {
+        binder_.error_ = resized.Error();
+        return;
+    }
+
     for (uint32 module = 0; module < c.modules_.Size() && binder_.error_ == ErrorCode::None;
          ++module) {
         if (auto pushed = c.bytecode_.TryPushBack(BytecodeModule(*c.allocator_)); !pushed) {
@@ -677,6 +684,7 @@ void TypeChecker::LowerModule(uint32 module) noexcept {
 
     c.irDumps_[module] =
         Compilation::TextRef{static_cast<uint32>(offset), static_cast<uint32>(text.ByteCount())};
+    c.lowered_[module] = 1;
 }
 
 } // namespace rocks::sparks::detail
@@ -684,8 +692,8 @@ void TypeChecker::LowerModule(uint32 module) noexcept {
 namespace rocks::sparks {
 
 const BytecodeModule* Compilation::ModuleBytecode(uint32 module) const noexcept {
-    return module < bytecode_.Size() && lastStage_ >= CompilationStage::Codegen &&
-                   module < irDumps_.Size()
+    return module < bytecode_.Size() && module < lowered_.Size() && lowered_[module] != 0 &&
+                   lastStage_ >= CompilationStage::Codegen
                ? &bytecode_[module]
                : nullptr;
 }
@@ -700,7 +708,8 @@ Result<void> Compilation::AppendBytecodeDump(StringBuilderBase& out, uint32 modu
 }
 
 Result<void> Compilation::AppendIrDump(StringBuilderBase& out, uint32 module) const noexcept {
-    if (module >= irDumps_.Size() || lastStage_ < CompilationStage::Codegen) {
+    if (module >= irDumps_.Size() || module >= lowered_.Size() || lowered_[module] == 0 ||
+        lastStage_ < CompilationStage::Codegen) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 

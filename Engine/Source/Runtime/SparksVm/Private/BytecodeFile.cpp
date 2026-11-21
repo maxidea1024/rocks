@@ -19,8 +19,8 @@ constexpr uint8 DebugTag[TagBytes] = {'D', 'B', 'U', 'G'};
 // 표 원소의 최소 byte 수다(개수를 믿기 전에 남은 byte와 비교한다 — 큰 할당 막기).
 constexpr usize ScalarBytes = 8;
 constexpr usize StringHeaderBytes = 4;
-constexpr usize RefBytes = 9;
-constexpr usize FunctionBytes = 4 * 3 + 2 * 3 * BytecodeBankCount + 4 * 4;
+constexpr usize RefBytes = 13;
+constexpr usize FunctionBytes = 4 * 3 + 2 * 3 * BytecodeBankCount + 2 + 4 * 4;
 constexpr usize WordBytes = 4;
 constexpr usize SwitchBytes = 12;
 constexpr usize CaseBytes = 12;
@@ -125,6 +125,7 @@ Result<void> WriteBytecodeFile(const BytecodeModule& module, Array<uint8>& out) 
             writer.WriteU8(static_cast<uint8>(ref.kind));
             writer.WriteU32LE(ref.name);
             writer.WriteU32LE(ref.detail);
+            writer.WriteU32LE(ref.arguments);
         }
     });
     WriteSection(writer, FunctionsTag, [&]() noexcept {
@@ -138,6 +139,9 @@ Result<void> WriteBytecodeFile(const BytecodeModule& module, Array<uint8>& out) 
                 writer.WriteU16LE(function.frame[bank]);
                 writer.WriteU16LE(function.parameters[bank]);
             }
+
+            writer.WriteU8(function.returnBank);
+            writer.WriteU8(function.returnSlots);
 
             writer.WriteU32LE(function.firstSwitch);
             writer.WriteU32LE(function.switchCount);
@@ -359,6 +363,7 @@ private:
             ref.kind = static_cast<BytecodeRefKind>(kind);
             ref.name = reader.ReadU32LE();
             ref.detail = reader.ReadU32LE();
+            ref.arguments = reader.ReadU32LE();
         }
 
         return Result<void>::Success();
@@ -379,6 +384,9 @@ private:
                 function.frame[bank] = reader.ReadU16LE();
                 function.parameters[bank] = reader.ReadU16LE();
             }
+
+            function.returnBank = reader.ReadU8();
+            function.returnSlots = reader.ReadU8();
 
             function.firstSwitch = reader.ReadU32LE();
             function.switchCount = reader.ReadU32LE();
@@ -486,12 +494,16 @@ public:
 
         for (const BytecodeRef& ref : module_.refs) {
             const bool detailOk =
-                ref.kind == BytecodeRefKind::Literal
-                    ? ref.detail == NoBytecodeIndex || ref.detail < strings
-                : ref.kind == BytecodeRefKind::Function
-                    ? ref.detail == NoBytecodeIndex || ref.detail < module_.functions.Size()
-                    : true;
-            if (ref.name >= strings || !detailOk) {
+                ref.detail == NoBytecodeIndex ||
+                (ref.kind == BytecodeRefKind::Literal ? ref.detail < strings
+                 : ref.kind == BytecodeRefKind::Function
+                     ? ref.detail < module_.functions.Size()
+                     : ref.detail < module_.refs.Size() &&
+                           module_.refs[ref.detail].kind == BytecodeRefKind::Type);
+            const bool argumentsOk =
+                ref.arguments == NoBytecodeIndex ||
+                (ref.kind == BytecodeRefKind::Literal && ref.arguments < strings);
+            if (ref.name >= strings || !detailOk || !argumentsOk) {
                 return Reject(BytecodeLoadError::BadTable);
             }
         }
@@ -578,7 +590,8 @@ private:
         }
 
         for (uint32 bank = 0; bank < BytecodeBankCount; ++bank) {
-            if (function.parameters[bank] > function.registers[bank] ||
+            if (function.returnBank >= BytecodeBankCount || function.returnSlots > MaxMarkerSlots ||
+                function.parameters[bank] > function.registers[bank] ||
                 function.registers[bank] > function.frame[bank] ||
                 function.frame[bank] > MaxBankRegisters) {
                 return Reject(BytecodeLoadError::BadFunction);
@@ -743,6 +756,8 @@ private:
                        : BytecodeLoadError::BadRegister;
         case Opcode::EqN:
         case Opcode::NeN:
+        case Opcode::EqNF:
+        case Opcode::NeNF:
             return ax == 0 || ax > MaxMarkerSlots ? BytecodeLoadError::BadOperand
                    : !Register(info.a, a) || !Register(info.b, b, ax) || !Register(info.c, c, ax)
                        ? BytecodeLoadError::BadRegister
@@ -756,8 +771,22 @@ private:
         case Opcode::TryB:
             return !target(static_cast<int64>(address) + 2 + DecodeSAx(extra))
                        ? BytecodeLoadError::BadBranch
-                   : !Register(info.b, b) ? BytecodeLoadError::BadRegister
-                                          : BytecodeLoadError::None;
+                   : (c >> 5) >= BytecodeBankCount || (c & 0x1F) > MaxMarkerSlots
+                       ? BytecodeLoadError::BadOperand
+                   : !Register(info.b, b) ||
+                           ((c & 0x1F) != 0 &&
+                            !Register(static_cast<OperandBank>((c >> 5) + 1), a, c & 0x1F))
+                       ? BytecodeLoadError::BadRegister
+                       : BytecodeLoadError::None;
+        case Opcode::MulQ:
+        case Opcode::MulM: {
+            const uint32 slots = info.op == Opcode::MulQ ? 4 : 16;
+            return Register(OperandBank::Scalar, a, slots) &&
+                           Register(OperandBank::Scalar, b, slots) &&
+                           Register(OperandBank::Scalar, c, slots)
+                       ? BytecodeLoadError::None
+                       : BytecodeLoadError::BadRegister;
+        }
         case Opcode::GetFS:
         case Opcode::GetFR:
         case Opcode::GetFB:
@@ -799,8 +828,11 @@ private:
                                                               : BytecodeLoadError::BadRegister;
         }
         case Opcode::NewLit:
-            return Ref(ax & MaxBx, BytecodeRefKind::Literal) ? BytecodeLoadError::None
-                                                             : BytecodeLoadError::BadReference;
+            return !Ref(ax & MaxBx, BytecodeRefKind::Literal) ? BytecodeLoadError::BadReference
+                   : (ax >> 22) >= BytecodeBankCount          ? BytecodeLoadError::BadOperand
+                   : !Register(static_cast<OperandBank>((ax >> 22) + 1), a)
+                       ? BytecodeLoadError::BadRegister
+                       : BytecodeLoadError::None;
         case Opcode::GetE:
         case Opcode::SetE:
         case Opcode::GetKey:

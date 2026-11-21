@@ -98,6 +98,10 @@ enum class Opcode : uint8 {
     MulF64,
     DivF64,
     NegF64,
+    // 수학 타입 합성(UE와 같은 순서 — quat은 FQuat::operator*, mat4는 FMatrix::operator*). A·B·C는
+    // 묶음의 첫 레지스터(quat 4·mat4 16 slot)
+    MulQ,
+    MulM,
     // 논리·비교
     Not,
     EqI,
@@ -112,12 +116,16 @@ enum class Opcode : uint8 {
     LeF,
     EqStr,
     NeStr,
+    LtStr, // UTF-8 byte 순
+    LeStr,
     EqR,
     NeR,
     EqB,
     NeB,
-    EqN, // + EXTRA(slot 수)
-    NeN, // + EXTRA(slot 수)
+    EqN,  // + EXTRA(slot 수)
+    NeN,  // + EXTRA(slot 수)
+    EqNF, // 실수 묶음(성분 F32·F64와 있음 표지) — 성분은 실수 비교(-0.0 == 0.0, NaN != NaN)
+    NeNF,
     // 변환
     Conv,  // C = (원래 종류 << 4) | 목적 종류(ScalarKind)
     ToStr, // + EXTRA(표시 종류 << 16 | enum 타입 참조)
@@ -164,7 +172,7 @@ enum class Opcode : uint8 {
     Await,   // + EXTRA(결과 bank << 8 | slot 수)
     AwaitEv, // + EXTRA(이벤트 참조)
     TryS,    // A ← Result B..B+C의 값, 오류면 EXTRA(부호 있는 거리)로 분기
-    TryB,    // A ← Buf Result B의 값, 오류면 EXTRA(부호 있는 거리)로 분기
+    TryB,    // A ← Buf Result B의 값(C = 값 bank << 5 | slot 수), 오류면 EXTRA 거리로 분기
     // 생성
     NewS,
     NewC,

@@ -97,12 +97,13 @@ bytecode 형식(opcode 번호·명령 모양·함수 표·상수 표)은 새 모
 
 ### 4.1 frame과 호출 창(LC4b 확정)
 
-- **frame:** 함수 하나의 frame은 bank마다 레지스터 배열이다(Scalar·Ref·Buf 각각 0–255). 매개변수는 선언 순서로 bank마다 0번부터(값 묶음은 연속), class 본문의 `this`는 Ref 0번이고 나머지 Ref 매개변수가 1번부터다. 반환값은 bank의 0번부터 돌려준다.
+- **frame:** 함수 하나의 frame은 bank마다 레지스터 배열이다(Scalar·Ref·Buf 각각 0–255). 매개변수는 선언 순서로 bank마다 0번부터(값 묶음은 연속), class 본문의 `this`는 Ref 0번(struct 메서드의 `this`는 Buf 0번)이고 나머지 같은 bank 매개변수가 그 뒤다. 반환값은 bank의 0번부터 돌려준다. 함수 표는 반환 값의 bank·slot 수를 둔다(`RETERR`가 그 모양의 Result를 만든다).
 - **호출 창(Lua 방식 register window):** 호출은 부르는 쪽 frame의 bank마다 맨 위 구간(창 base — 할당된 레지스터 수)에 인자를 놓고 `CALL`한다. 부르는 함수의 frame은 창 base에서 시작한다(창이 곧 부르는 쪽의 0번). 반환값은 창 base로 돌아오고, 부르는 쪽이 결과 레지스터로 옮긴다. 창은 할당에 참여하지 않으며 frame 크기는 `할당한 수 + 가장 큰 창`이다(bank마다 256 이하, 넘으면 S1150).
 - **창 쓰는 명령:** `CALL`·`EMIT`·`NEWLIT`(이름 지정 인자)·`CONCAT`은 인자 묶음을 창에 둔다(IR의 피연산자 목록 → 창으로 이동, bank마다 차례로). 수신자는 그 bank 창의 첫 칸이다. 구조체·컬렉션 생성은 창 없이 `NEWS`·`NEWA` 뒤 필드·원소마다 `SETSF`·`APPEND`·`PUT`이다.
 
 ### 4.2 할당
 
+- 생성(`NEWS` 뒤 `SETSF`…)과 합성 곱처럼 결과를 먼저 쓰고 피연산자를 읽는 명령은 결과 묶음을 읽기 위치부터 살려(early clobber) 피연산자와 다른 레지스터에 둔다. await 지점 생존 표는 `emit`의 암묵 대상 `this`도 읽기로 센다.
 - 가상 레지스터 묶음 하나(값 하나)가 실제 레지스터 연속 구간 하나다. 생존은 가상 레지스터 slot마다 블록 단위로 구하고(역방향 고정점), 묶음의 구간은 블록 배치 순서의 명령 번호(읽기 2k·쓰기 2k + 1)로 slot 구간들을 합친 것이다(블록 입구·출구에서 살아 있으면 그 경계까지). 도달하지 않는 블록은 내지 않는다. 구간은 배치 순서의 연속 구간이라 실제 생존의 상위 집합이다(await 지점 표도 같다 — 보수적).
 - bank마다 구간 시작 순으로 선형 스캔해 끝난 구간의 레지스터를 다시 쓴다(묶음 크기만큼 연속으로 빈 곳 중 가장 낮은 번호). 매개변수·`this`는 고정 번호다. 결정적이다(같은 IR → 같은 번호).
 - bank 레지스터 256개를 넘거나 함수 명령이 32,767개를 넘으면(분기 거리 16비트) S1150 "function is too large"다(위치는 함수 이름).
@@ -120,9 +121,10 @@ bytecode 형식(opcode 번호·명령 모양·함수 표·상수 표)은 새 모
 | | `LOADNULL.R` `LOADNULL.B` | A ← null |
 | 정수 | `ADD` `SUB` `MUL` `DIV` `MOD` `.I8`–`.I64`·`.U8`–`.U64`, `NEG.I8`–`.I64` | A ← B op C(그 타입 범위 밖이면 `IntegerOverflow`, 0 나눗셈 `DivisionByZero`) |
 | 실수 | `ADD` `SUB` `MUL` `DIV` `NEG` `.F32`·`.F64` | 결과가 유한하지 않으면 `NonFinite`. F32는 결과를 float로 반올림 |
+| 합성 | `MUL.QUAT` `MUL.MAT4` A B C | quat·mat4 곱(UE `FQuat`·`FMatrix`의 `operator*`와 같은 순서, A·B·C는 묶음 첫 레지스터). 성분별 곱이 아니다 |
 | 논리 | `NOT` | A ← !B |
-| 비교 | `EQ` `NE` `LT` `LE` `.I`(부호 있는 정수·bool·enum·이름 — 64비트 확장값), `LT.U` `LE.U`, `EQ` `NE` `LT` `LE` `.F`, `EQ.STR` `NE.STR`, `EQ.R` `NE.R`(handle), `EQ.B` `NE.B`(Buf 값 비교) | A ← B cmp C. `>`·`>=`는 B·C를 바꾼 `LT`·`LE`다 |
-| | `EQN` `NEN` + EXTRA(slot 수) | Scalar 묶음 비교(`T?`·`Soft<T>`) |
+| 비교 | `EQ` `NE` `LT` `LE` `.I`(부호 있는 정수·bool·enum·이름 — 64비트 확장값), `LT.U` `LE.U`, `EQ` `NE` `LT` `LE` `.F`, `EQ.STR` `NE.STR` `LT.STR` `LE.STR`(UTF-8 byte 순 — `string?` 포함), `EQ.R` `NE.R`(handle), `EQ.B` `NE.B`(Buf 값 비교 — 같음만) | A ← B cmp C. `>`·`>=`는 B·C를 바꾼 `LT`·`LE`다 |
+| | `EQN` `NEN` + EXTRA(slot 수), `EQN.F` `NEN.F` | Scalar 묶음 비교. 성분이 모두 실수(와 있음 표지)면 `.F`(실수 비교 — -0.0 == 0.0), 그 밖(`int?`·`Soft<T>`의 AssetId)은 비트 비교 |
 | 변환 | `CONV` | A ← B, C = (원래 Scalar 종류 << 4) \| 목적 종류(범위 밖은 `ConversionOutOfRange`) |
 | | `TOSTR` + EXTRA(표시 종류·enum 타입 번호) | Buf A ← Scalar 묶음 B의 문자열(보간 규칙 SL §3.2) |
 | | `CAST` + EXTRA(타입 번호) | Ref A ← B가 그 타입이면 B, 아니면 null |
@@ -139,12 +141,16 @@ bytecode 형식(opcode 번호·명령 모양·함수 표·상수 표)은 새 모
 | 이벤트 | `EMIT` Bx(이벤트 표) | 대상은 Ref 창 0번(자기 객체면 this), 인자는 그 뒤 |
 | 대기 | `AWAIT` A B + EXTRA(결과 bank·slot 수) | 대기 handle B로 정지, 재개하면 결과를 A에. 블록 끝 명령이며 재개는 다음 명령 |
 | | `AWAITEV` B + EXTRA(이벤트 번호) | 발행자 B의 이벤트를 기다린다 |
-| Result | `TRY.S` A B C(slot 수) `TRY.B` A B + EXTRA(부호 있는 24비트 거리) | 성공이면 값을 A에 두고 다음 명령, 오류면 EXTRA 거리(EXTRA 다음 단어 기준)의 실패 블록으로 |
+| Result | `TRY.S` A B C(slot 수) `TRY.B` A B C(값 bank << 5 \| slot 수) + EXTRA(부호 있는 24비트 거리) | 성공이면 값을 A에 두고 다음 명령, 오류면 EXTRA 거리(EXTRA 다음 단어 기준)의 실패 블록으로 |
 | | `RETERR.S` A B(slot 수) `RETERR.B` A | Result의 오류를 이 함수의 Result로 반환 |
-| 생성 | `NEWS` A Bx(struct 타입 — 기본값), `NEWC` A Bx(component), `NEWA`·`NEWSET` A Bx(원소 타입), `NEWM` A Bx(Map 타입), `APPEND` A B, `PUT` A B C, `NEWLIT` A Bx(리터럴 표 — 쿡 GUID·이름), `OK` `ERR` | 구조체 생성은 `NEWS` 뒤에 필드마다 `SETSF` |
+| 생성 | `NEWS` A Bx(struct 타입 — 기본값), `NEWC` A Bx(component), `NEWA`·`NEWSET` A Bx(원소 타입), `NEWM` A Bx(Map 타입), `APPEND` A B, `PUT` A B C, `NEWLIT` A + EXTRA(리터럴 참조 16비트 \| 인자 수 6비트 << 16 \| 결과 bank << 22), `OK` A B + EXTRA(값 bank·slot), `ERR` A B(`Error` case 번호 — Scalar Result의 코드 case + 1은 VM이 만든다) | 구조체 생성은 `NEWS` 뒤에 필드마다 `SETSF`. 생성 결과 레지스터는 피연산자 값과 겹치지 않는다(할당이 결과를 읽기 위치부터 살린다 — early clobber). 리터럴 참조의 이름은 결과 타입(`Tag`·`Soft<DataAsset>`·하드 참조 `DataAsset`…), 글자는 보조 번호, 이름 지정 인자(`Loc`)는 인자 표 `이름=bank 글자;…`(창에 놓는 순서) |
 | 문자열 | `CONCAT` A B C | Buf A ← 창의 B부터 C개 조각 |
 | 자원 | `RELEASE` A | Ref A의 유지 자원을 해제(null이면 아무것도 안 함) |
 | fault | `FAULT` Ax | fault 종류 Ax |
+
+- **참조 이름:** 다른 모듈의 Sparks 선언(함수·필드·타입·이벤트)은 `<import 경로>:` 접두로 같은 이름의 다른 모듈 선언과 구별한다(LC4d가 안정 ID를 더한다). 명시한 타입 인자가 있는 호출은 참조 이름이 `Owner.Name<T>`이고 보조 번호가 첫 타입 인자의 Type 참조다.
+- **별칭:** 한 명령의 결과 레지스터가 읽는 레지스터와 같을 수 있다(`AWAIT`·`TRY.S`·`GETE`·산술). VM은 피연산자를 모두 읽은 뒤 쓰고, 묶음 복사는 앞에서부터 한다. `CONCAT`의 조각은 모두 Buf(문자열)다.
+- **표 번호 한도:** Bx 16비트 자리(상수·문자열·참조·switch 표)는 65,536개까지다. 넘으면 S1150이다.
 
 ### 4.4 블록 배치와 분기
 
@@ -156,7 +162,7 @@ bytecode 형식(opcode 번호·명령 모양·함수 표·상수 표)은 새 모
 
 ### 4.6 bytecode 덤프(`.bc`)
 
-결정적 영어 텍스트(`Compilation::AppendBytecodeDump`). 모듈 상수 표(`k<번호> = 값`, 문자열은 따옴표 안 escape 표기)·참조 표(함수·필드·타입·이벤트, 이름), 함수마다 머리 줄 `function Owner.Name  scalar=<n> ref=<n> buf=<n>`, await 지점(`await @주소: live s0..s3 r0`), 명령마다 `  0004  ADD.I64  s4, s0, s3    ; 2:12` — 주소(4자리 10진), opcode 이름, 피연산자(레지스터 `s`·`r`·`b` + 번호, 상수 `k3(1.5)`, 분기 대상 주소, 표 번호와 이름), 원문 위치. EXTRA 단어는 앞 명령 줄에 합쳐 쓴다(주소는 2 늘어난다). corpus `.bc` golden은 `Codegen` 영역 사례가 쓴다. 헤더(format·hash)는 LC4c·LC4d에서 더한다.
+결정적 ASCII 영어 텍스트(`AppendBytecodeDump` — 모듈만 읽으므로 `.sparkc`에서 읽은 모듈도 같은 글자를 낸다). 머리(`module "경로"`, `compiler "버전"`, `profile core|full`, `content`·`interface` hash 16진), 상수 표(`k<번호> = 0x<16진 64비트>`), 문자열 표(`t<번호> = "…"` — 제어 문자와 ASCII 밖 byte는 `\xHH`), 참조 표(`ref<번호> = 종류 이름 [보조]`), 함수마다 머리 줄 `function 이름  scalar=할당/frame ref=… buf=… params=s/r/b returns <bank>x<slot>`, await 지점(`await 0003  live s0..s2 r0`), switch 표(`switch<번호> [값: 주소, …] else 주소`), 명령마다 `  0004  ADD.I64  s4, s0, s3    ; 2:12` — 주소(4자리 10진), opcode 이름, 피연산자(레지스터 `s`·`r`·`b` + 번호, 상수 `k<번호>`·문자열 `t<번호>`, 분기 대상 주소, 참조 `ref<번호>`, 컨테이너 표지 `[값 bank·slot key bank·slot]`), 원문 위치. EXTRA 단어는 앞 명령 줄에 합쳐 쓴다(주소는 2 늘어난다). corpus `.bc` golden은 `Codegen` 영역 사례가 쓴다.
 
 ## 5. `.sparkc`와 verifier(LC4c)
 

@@ -166,7 +166,7 @@ L1:
     s7 = LT s5, s6    ; 61:5
     BRANCH s7, L2, L4    ; 61:5
 L2:
-    s8 = GETE b4[s5]    ; 61:10
+    s8 = GETVALUE b4[s5]    ; 61:10
     s9 = ADD.I64 s3, s8    ; 62:9
     s3 = MOVE s9    ; 62:9
     JUMP L3    ; 61:5
