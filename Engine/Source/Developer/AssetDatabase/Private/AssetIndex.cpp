@@ -8,6 +8,7 @@
 #include <Core/Assert.h>
 #include <Core/FileError.h>
 #include <Core/Text/StringBuilder.h>
+#include <Core/Text/Unicode.h>
 #include <Object/AssetId.h>
 #include <Object/TypeRegistry.h>
 
@@ -17,6 +18,7 @@ namespace rocks {
 namespace {
 
 using asset_database_detail::AppendAll;
+using asset_database_detail::IsContentRelativeName;
 
 // 경로 임시 저장소의 인라인 byte 수다(넘으면 allocator로 자란다).
 constexpr usize IndexPathBytes = 512;
@@ -58,7 +60,7 @@ struct EnumerateContext {
 // OS 이름이 같은 표시 이름이 되지 않게 역슬래시·제어 문자(0x00–0x1f·0x7f)와, 이름이 유효한
 // UTF-8이 아니면 0x80 이상 byte를 16진(역슬래시 x 두 자리)으로 적는다. 나머지는 그대로다(유효한
 // UTF-8 이름의 비ASCII 문자 포함). 길이를 먼저 세어 버퍼를 한 번 잡고 채운다.
-Result<void> AssignDisplayName(String& out, StringView raw) noexcept {
+Result<void> AssignDisplayNameAs(String& out, StringView raw, bool escapeHigh) noexcept {
     constexpr uint8 FirstPrintable = 0x20;
     constexpr uint8 Delete = 0x7f;
     constexpr uint8 FirstNonAscii = 0x80;
@@ -66,10 +68,9 @@ Result<void> AssignDisplayName(String& out, StringView raw) noexcept {
     constexpr char Digits[] = "0123456789abcdef";
     constexpr uint32 NibbleBits = 4;
     constexpr uint8 NibbleMask = 0x0f;
-    const bool validUtf8 = raw.IsValidUtf8();
     auto escaped = [&](uint8 value) noexcept {
         return value < FirstPrintable || value == Delete || value == '\\' ||
-               (!validUtf8 && value >= FirstNonAscii);
+               (escapeHigh && value >= FirstNonAscii);
     };
     usize bytes = 0;
     for (usize index = 0; index < raw.ByteCount(); ++index) {
@@ -96,6 +97,10 @@ Result<void> AssignDisplayName(String& out, StringView raw) noexcept {
     }
 
     return out.TryAssign(StringView(text.Data(), text.Size()));
+}
+
+Result<void> AssignDisplayName(String& out, StringView raw) noexcept {
+    return AssignDisplayNameAs(out, raw, !raw.IsValidUtf8());
 }
 
 bool CollectChild(const platform::DirectoryEntry& entry, void* raw) noexcept {
@@ -269,7 +274,150 @@ Result<void> MakeOrder(Array<usize>& order, usize count) noexcept {
     return Result<void>::Success();
 }
 
+// 같은 id·경로 진단인지다(게시가 전체에서 다시 만든다).
+bool IsNeighborDiagnostic(const AssetIndexDiagnostic& diagnostic) noexcept {
+    return diagnostic.code == AssetDiagnosticCode::DuplicateAssetId ||
+           diagnostic.code == AssetDiagnosticCode::DuplicatePath;
+}
+
+// name(유효한 UTF-8 — 입력 이름은 검사했고 항목·진단 이름은 늘 유효하다)의 비교 키다: 정규화 파일
+// 시스템이면 NFC를 scratch에 만들어 그 view, 아니면 name 그대로다(복사하지 않는다). 다음 호출
+// 전까지 유효하다. 오류: 할당 실패(유효한 UTF-8의 정규화가 실패하는 유일한 경우).
+Result<StringView> CompareKey(StringView name, bool normalizes, String& scratch) noexcept {
+    if (!normalizes) {
+        return Result<StringView>::Success(name);
+    }
+
+    StringBuilder<IndexPathBytes> normalized(scratch.GetAllocator());
+    if (auto made = TryNormalize(NormalizationForm::NFC, name, normalized); !made) {
+        return Result<StringView>::Failure(made.Error());
+    }
+
+    if (auto assigned = scratch.TryAssign(normalized.View()); !assigned) {
+        return Result<StringView>::Failure(assigned.Error());
+    }
+
+    return Result<StringView>::Success(scratch.View());
+}
+
+// names의 비교 키(keys — names와 같은 첨자)와 키 → 첨자 순 위치(order)를 만든다.
+Result<void> SortByKey(Span<const StringView> names, bool normalizes, Array<String>& keys,
+                       Array<usize>& order) noexcept {
+    String scratch(keys.GetAllocator());
+    if (auto reserved = keys.TryReserve(names.Size()); !reserved) {
+        return reserved;
+    }
+
+    for (StringView name : names) {
+        auto key = CompareKey(name, normalizes, scratch);
+        if (!key) {
+            return Result<void>::Failure(key.Error());
+        }
+
+        String copy(keys.GetAllocator());
+        if (auto assigned = copy.TryAssign(key.Value()); !assigned) {
+            return assigned;
+        }
+
+        (void)keys.TryPushBack(Move(copy));
+    }
+
+    if (auto made = MakeOrder(order, names.Size()); !made) {
+        return made;
+    }
+
+    algo::Sort(order.View(), [&](usize left, usize right) noexcept {
+        const int compared = StringView::CompareBytes(keys[left].View(), keys[right].View());
+        return compared != 0 ? compared < 0 : left < right;
+    });
+    return Result<void>::Success();
+}
+
+// 비교 키 집합이다(Add로 모으고 Finish가 정렬·중복 제거한 뒤 찾는다 — RefreshPaths의 이름 대조).
+class NameSet {
+public:
+    explicit NameSet(Allocator& allocator) noexcept : keys_(allocator) {
+    }
+
+    Result<void> Add(StringView key) noexcept {
+        String copy(keys_.GetAllocator());
+        if (auto assigned = copy.TryAssign(key); !assigned) {
+            return assigned;
+        }
+
+        return keys_.TryPushBack(Move(copy));
+    }
+
+    void Finish() noexcept {
+        algo::Sort(keys_.View(), [](const String& left, const String& right) noexcept {
+            return StringView::CompareBytes(left.View(), right.View()) < 0;
+        });
+        usize kept = 0;
+        for (usize at = 0; at < keys_.Size(); ++at) {
+            if (kept != 0 && keys_[kept - 1].View() == keys_[at].View()) {
+                continue;
+            }
+
+            if (kept != at) {
+                keys_[kept] = Move(keys_[at]);
+            }
+
+            ++kept;
+        }
+
+        while (keys_.Size() > kept) {
+            (void)keys_.TryPopBack();
+        }
+    }
+
+    bool Contains(StringView key) const noexcept {
+        const usize at =
+            algo::LowerBound(keys_.View(), key, [](const String& value, StringView probe) noexcept {
+                return StringView::CompareBytes(value.View(), probe) < 0;
+            });
+        return at != keys_.Size() && keys_[at].View() == key;
+    }
+
+    // key의 조상(빈 문자열 = Content 포함, key 자신 제외)이 집합에 있는지다.
+    bool Above(StringView key) const noexcept {
+        if (key.IsEmpty()) {
+            return false;
+        }
+
+        if (Contains(StringView())) {
+            return true;
+        }
+
+        for (usize at = 0; at < key.ByteCount(); ++at) {
+            if (key.Data()[at] == '/' && Contains(StringView(key.Data(), at))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // key 자신이나 그 조상이 집합에 있는지다.
+    bool Covers(StringView key) const noexcept {
+        return Contains(key) || Above(key);
+    }
+
+private:
+    Array<String> keys_;
+};
+
 } // namespace
+
+void AssetIndexRefresh::Reset() noexcept {
+    ready_ = false;
+    added_.Clear();
+    fileDiagnostics_.Clear();
+    neighbors_.Clear();
+    entryOrder_.Clear();
+    diagnosticOrder_.Clear();
+    entries_.Clear();
+    diagnostics_.Clear();
+}
 
 AssetIndex::AssetIndex(Allocator& allocator, const ProjectLayout& layout) noexcept
     : allocator_(&allocator), layout_(&layout), entries_(allocator), byId_(allocator),
@@ -626,24 +774,58 @@ Result<bool> AssetIndex::IndexCached(platform::FileSystem& files, const AssetInd
     return Result<bool>::Success(true);
 }
 
-Result<void> AssetIndex::Rebuild(platform::FileSystem& files, const PackageReadOptions& options,
-                                 const AssetIndexCache* cache) noexcept {
-    entries_.Clear();
-    byId_.Clear();
-    diagnostics_.Clear();
-    Array<AssetIndexEntry> found(*allocator_);
-    Array<AssetIndexDiagnostic> diagnostics(*allocator_);
+Result<void> AssetIndex::ScanTree(platform::FileSystem& files, const PackageReadOptions& editor,
+                                  const AssetIndexCache* cache, StringView start,
+                                  Array<AssetIndexEntry>& found,
+                                  Array<AssetIndexDiagnostic>& diagnostics) const noexcept {
     const StringView content = layout_->ContentDirectory();
     // 깊이 우선으로 디렉터리를 연다(Content 상대 경로 표 — 빈 문자열은 Content 자신).
     Array<String> pending(*allocator_);
-    if (auto pushed = pending.TryPushBack(String(*allocator_)); !pushed) {
+    String first(*allocator_);
+    if (auto assigned = first.TryAssign(start); !assigned) {
+        return assigned;
+    }
+
+    // 하위 트리의 시작 이름은 먼저 Stat한다: 없으면 비어 있고, 링크·그 밖의 종류면 그 아래가 없고,
+    // 패키지 파일이면 그 파일을 읽는다. 그 밖의 Stat 실패는 하위 디렉터리 열거 실패와 같은
+    // 진단이다.
+    if (!start.IsEmpty()) {
+        String full(*allocator_);
+        const StringView pieces[] = {content, "/", start};
+        for (StringView piece : pieces) {
+            if (auto appended = full.TryAppend(piece); !appended) {
+                return appended;
+            }
+        }
+
+        platform::FileInfo info;
+        const platform::FileStatus stat =
+            files.Stat(full.View().Data(), full.View().ByteCount(), info);
+        if (!stat) {
+            return stat.code == platform::FileCode::NotFound
+                       ? Result<void>::Success()
+                       : AddDiagnostic(diagnostics, AssetDiagnosticCode::None, FileErrorCode(stat),
+                                       start);
+        }
+
+        if (info.isLink) {
+            return Result<void>::Success();
+        }
+
+        if (info.type == platform::FileType::File && start.EndsWith(EditorPackageExtension)) {
+            return IndexFile(files, editor, Move(first), StringView(), info.modifiedTicks, found,
+                             diagnostics);
+        }
+
+        if (info.type != platform::FileType::Directory) {
+            return Result<void>::Success();
+        }
+    }
+
+    if (auto pushed = pending.TryPushBack(Move(first)); !pushed) {
         return pushed;
     }
 
-    PackageReadOptions editor = options;
-    editor.expectedKind = PackageKind::Editor;
-    // 색인은 형식 판정만 한다(타입 축은 열기가 — 캐시 키에 타입 버전이 없다, 7.1절 16).
-    editor.types = nullptr;
     while (!pending.IsEmpty()) {
         String relativeDirectory = Move(pending[pending.Size() - 1]);
         (void)pending.TryPopBack();
@@ -769,6 +951,24 @@ Result<void> AssetIndex::Rebuild(platform::FileSystem& files, const PackageReadO
         }
     }
 
+    return Result<void>::Success();
+}
+
+Result<void> AssetIndex::Rebuild(platform::FileSystem& files, const PackageReadOptions& options,
+                                 const AssetIndexCache* cache) noexcept {
+    entries_.Clear();
+    byId_.Clear();
+    diagnostics_.Clear();
+    Array<AssetIndexEntry> found(*allocator_);
+    Array<AssetIndexDiagnostic> diagnostics(*allocator_);
+    PackageReadOptions editor = options;
+    editor.expectedKind = PackageKind::Editor;
+    // 색인은 형식 판정만 한다(타입 축은 열기가 — 캐시 키에 타입 버전이 없다, 7.1절 16).
+    editor.types = nullptr;
+    if (auto scanned = ScanTree(files, editor, cache, StringView(), found, diagnostics); !scanned) {
+        return scanned;
+    }
+
     // 게시(같은 id·경로 진단 — 실패하면 비운 색인 그대로).
     Array<AssetIndexEntry*> entryPlaces(*allocator_);
     Array<AssetIndexDiagnostic*> diagnosticPlaces(*allocator_);
@@ -808,17 +1008,49 @@ Result<void> AssetIndex::Refresh(platform::FileSystem& files, StringView fileNam
     return Result<void>::Success();
 }
 
+Result<void> AssetIndex::RereadFile(platform::FileSystem& files, const PackageReadOptions& editor,
+                                    StringView fileName, StringView readPath,
+                                    Array<AssetIndexEntry>& found,
+                                    Array<AssetIndexDiagnostic>& diagnostics) const noexcept {
+    String full(*allocator_);
+    const StringView pieces[] = {layout_->ContentDirectory(), "/", fileName};
+    if (readPath.IsEmpty()) {
+        for (StringView piece : pieces) {
+            if (auto appended = full.TryAppend(piece); !appended) {
+                return appended;
+            }
+        }
+    }
+
+    // 없어진 파일은 빠지고, 링크·일반 파일이 아닌 것은 색인하지 않는다(Rebuild와 같다). 그 밖의
+    // Stat 실패는 IO 진단이다.
+    const StringView statPath = readPath.IsEmpty() ? full.View() : readPath;
+    platform::FileInfo info;
+    const platform::FileStatus stat = files.Stat(statPath.Data(), statPath.ByteCount(), info);
+    if (!stat) {
+        return stat.code == platform::FileCode::NotFound
+                   ? Result<void>::Success()
+                   : AddDiagnostic(diagnostics, AssetDiagnosticCode::None, FileErrorCode(stat),
+                                   fileName);
+    }
+
+    if (info.isLink || info.type != platform::FileType::File) {
+        return Result<void>::Success();
+    }
+
+    String relative(*allocator_);
+    if (auto assigned = relative.TryAssign(fileName); !assigned) {
+        return assigned;
+    }
+
+    return IndexFile(files, editor, Move(relative), readPath, info.modifiedTicks, found,
+                     diagnostics);
+}
+
 Result<void> AssetIndex::PrepareRefresh(platform::FileSystem& files, StringView fileName,
                                         StringView readPath, const PackageReadOptions& options,
                                         AssetIndexRefresh& plan) noexcept {
-    plan.ready_ = false;
-    plan.added_.Clear();
-    plan.fileDiagnostics_.Clear();
-    plan.neighbors_.Clear();
-    plan.entryOrder_.Clear();
-    plan.diagnosticOrder_.Clear();
-    plan.entries_.Clear();
-    plan.diagnostics_.Clear();
+    plan.Reset();
     if (fileName.ByteCount() <= EditorPackageExtension.ByteCount() ||
         !fileName.EndsWith(EditorPackageExtension)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
@@ -829,38 +1061,13 @@ Result<void> AssetIndex::PrepareRefresh(platform::FileSystem& files, StringView 
         return assigned;
     }
 
-    StringBuilder<IndexPathBytes> full(*allocator_);
-    const StringView pieces[] = {layout_->ContentDirectory(), "/", fileName};
-    if (readPath.IsEmpty()) {
-        if (auto built = AppendAll(full, pieces); !built) {
-            return built;
-        }
-    }
-
-    // 없어진 파일은 빠지고, 링크·일반 파일이 아닌 것은 색인하지 않는다(Rebuild와 같다). 그 밖의
-    // Stat 실패는 IO 진단이다.
-    const StringView statPath = readPath.IsEmpty() ? full.View() : readPath;
-    platform::FileInfo info;
-    const platform::FileStatus stat = files.Stat(statPath.Data(), statPath.ByteCount(), info);
-    if (!stat && stat.code != platform::FileCode::NotFound) {
-        if (auto added = AddDiagnostic(plan.fileDiagnostics_, AssetDiagnosticCode::None,
-                                       FileErrorCode(stat), fileName);
-            !added) {
-            return added;
-        }
-    } else if (stat && !info.isLink && info.type == platform::FileType::File) {
-        String relative(*allocator_);
-        if (auto assigned = relative.TryAssign(fileName); !assigned) {
-            return assigned;
-        }
-
-        PackageReadOptions editor = options;
-        editor.expectedKind = PackageKind::Editor;
-        if (auto indexed = IndexFile(files, editor, Move(relative), readPath, info.modifiedTicks,
-                                     plan.added_, plan.fileDiagnostics_);
-            !indexed) {
-            return indexed;
-        }
+    PackageReadOptions editor = options;
+    editor.expectedKind = PackageKind::Editor;
+    editor.types = nullptr;
+    if (auto reread =
+            RereadFile(files, editor, fileName, readPath, plan.added_, plan.fileDiagnostics_);
+        !reread) {
+        return reread;
     }
 
     // 지금 색인의 다른 파일 항목·진단(같은 id·경로 진단 제외 — 게시가 다시 만든다)과 새 것을
@@ -889,9 +1096,7 @@ Result<void> AssetIndex::PrepareRefresh(platform::FileSystem& files, StringView 
     }
 
     for (AssetIndexDiagnostic& diagnostic : diagnostics_) {
-        if (!(diagnostic.fileName.View() == display.View()) &&
-            diagnostic.code != AssetDiagnosticCode::DuplicateAssetId &&
-            diagnostic.code != AssetDiagnosticCode::DuplicatePath) {
+        if (!(diagnostic.fileName.View() == display.View()) && !IsNeighborDiagnostic(diagnostic)) {
             (void)diagnosticPlaces.TryPushBack(&diagnostic);
         }
     }
@@ -901,6 +1106,261 @@ Result<void> AssetIndex::PrepareRefresh(platform::FileSystem& files, StringView 
     }
 
     return PlanPublish(entryPlaces.View(), diagnosticPlaces.View(), plan);
+}
+
+Result<void> AssetIndex::RefreshPaths(platform::FileSystem& files,
+                                      const AssetIndexRefreshPaths& paths,
+                                      const PackageReadOptions& options) noexcept {
+    AssetIndexRefresh plan(*allocator_);
+    if (auto prepared = PrepareRefreshPaths(files, paths, options, plan); !prepared) {
+        return prepared;
+    }
+
+    CommitRefresh(plan);
+    return Result<void>::Success();
+}
+
+Result<void> AssetIndex::PrepareRefreshPaths(platform::FileSystem& files,
+                                             const AssetIndexRefreshPaths& paths,
+                                             const PackageReadOptions& options,
+                                             AssetIndexRefresh& plan) noexcept {
+    plan.Reset();
+    if (!paths.mayDefer.IsEmpty() &&
+        (paths.mayDefer.Size() != paths.files.Size() || paths.deferred == nullptr)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    for (StringView file : paths.files) {
+        if (!IsContentRelativeName(file) ||
+            file.ByteCount() <= EditorPackageExtension.ByteCount() ||
+            !file.EndsWith(EditorPackageExtension)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
+    for (StringView subtree : paths.subtrees) {
+        if (!subtree.IsEmpty() && !IsContentRelativeName(subtree)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
+    const bool normalizes = paths.normalizesNames;
+    // 정규화 키의 임시 저장소다(정규화하지 않으면 이름을 그대로 쓴다 — 항목마다 복사하지 않는다).
+    String scratch(*allocator_);
+    PackageReadOptions editor = options;
+    editor.expectedKind = PackageKind::Editor;
+    editor.types = nullptr;
+
+    // 하위 트리 집합과 다시 검색할 뿌리(같은 키는 하나, 다른 트리 아래의 트리는 뺀다 — 원래
+    // 철자로 연다), 그 표시 이름 집합(진단 대조 — 유효한 UTF-8 이름 아래 진단의 표시와 잘못된
+    // UTF-8 이름 아래 진단의 표시 둘 다).
+    Array<String> treeKeys(*allocator_);
+    Array<usize> treeOrder(*allocator_);
+    if (auto sorted = SortByKey(paths.subtrees, normalizes, treeKeys, treeOrder); !sorted) {
+        return sorted;
+    }
+
+    NameSet trees(*allocator_);
+    for (const String& key : treeKeys) {
+        if (auto added = trees.Add(key.View()); !added) {
+            return added;
+        }
+    }
+
+    trees.Finish();
+    Array<StringView> roots(*allocator_);
+    for (usize first = 0; first < treeOrder.Size();) {
+        usize last = first + 1;
+        while (last < treeOrder.Size() &&
+               treeKeys[treeOrder[last]].View() == treeKeys[treeOrder[first]].View()) {
+            ++last;
+        }
+
+        if (!trees.Above(treeKeys[treeOrder[first]].View())) {
+            if (auto pushed = roots.TryPushBack(paths.subtrees[treeOrder[first]]); !pushed) {
+                return pushed;
+            }
+        }
+
+        first = last;
+    }
+
+    NameSet treeDisplays(*allocator_);
+    for (StringView root : roots) {
+        String display(*allocator_);
+        String escaped(*allocator_);
+        if (auto assigned = AssignDisplayNameAs(display, root, false); !assigned) {
+            return assigned;
+        }
+
+        if (auto assigned = AssignDisplayNameAs(escaped, root, true); !assigned) {
+            return assigned;
+        }
+
+        const String* shownNames[] = {&display, &escaped};
+        for (const String* shown : shownNames) {
+            if (auto key = CompareKey(shown->View(), normalizes, scratch); !key) {
+                return Result<void>::Failure(key.Error());
+            } else if (auto added = treeDisplays.Add(key.Value()); !added) {
+                return added;
+            }
+        }
+    }
+
+    treeDisplays.Finish();
+
+    // 파일을 키 순으로 묶는다(같은 키는 한 번 — 처음 철자로 읽는다). 하위 트리가 덮는 파일은 읽지
+    // 않는다.
+    Array<String> fileKeys(*allocator_);
+    Array<usize> order(*allocator_);
+    if (auto sorted = SortByKey(paths.files, normalizes, fileKeys, order); !sorted) {
+        return sorted;
+    }
+
+    NameSet refreshed(*allocator_);
+    NameSet refreshedDisplays(*allocator_);
+    for (usize first = 0; first < order.Size();) {
+        const StringView name = paths.files[order[first]];
+        const StringView key = fileKeys[order[first]].View();
+        usize last = first + 1;
+        bool defer = !paths.mayDefer.IsEmpty();
+        while (last < order.Size() && fileKeys[order[last]].View() == key) {
+            ++last;
+        }
+
+        for (usize at = first; defer && at < last; ++at) {
+            defer = paths.mayDefer[order[at]];
+        }
+
+        if (trees.Covers(key)) {
+            first = last;
+            continue;
+        }
+
+        const usize entriesBefore = plan.added_.Size();
+        const usize diagnosticsBefore = plan.fileDiagnostics_.Size();
+        if (auto reread =
+                RereadFile(files, editor, name, StringView(), plan.added_, plan.fileDiagnostics_);
+            !reread) {
+            return reread;
+        }
+
+        // 쓰는 중: 패키지를 읽지 못해(항목 없음) 진단이 하나 — 손상이거나 열기·읽기가 Busy다.
+        // 읽혀서 항목이 있는 파일의 진단(Tags·ImportRecord 손상 등)은 다 쓴 파일이라 미루지 않는다.
+        bool inProgress = false;
+        if (plan.added_.Size() == entriesBefore &&
+            plan.fileDiagnostics_.Size() == diagnosticsBefore + 1) {
+            const AssetIndexDiagnostic& diagnostic = plan.fileDiagnostics_[diagnosticsBefore];
+            inProgress = diagnostic.code == AssetDiagnosticCode::CorruptPackage ||
+                         (diagnostic.code == AssetDiagnosticCode::None &&
+                          diagnostic.error == ErrorCode::Busy);
+        }
+
+        if (defer && inProgress) {
+            // 다시 읽은 진단을 버리고 지금 항목·진단을 그대로 둔다.
+            (void)plan.fileDiagnostics_.TryPopBack();
+            for (usize at = first; at < last; ++at) {
+                if (auto pushed = paths.deferred->TryPushBack(order[at]); !pushed) {
+                    return pushed;
+                }
+            }
+
+            first = last;
+            continue;
+        }
+
+        String display(*allocator_);
+        if (auto assigned = AssignDisplayName(display, name); !assigned) {
+            return assigned;
+        }
+
+        if (auto added = refreshed.Add(key); !added) {
+            return added;
+        }
+
+        if (auto shown = CompareKey(display.View(), normalizes, scratch); !shown) {
+            return Result<void>::Failure(shown.Error());
+        } else if (auto added = refreshedDisplays.Add(shown.Value()); !added) {
+            return added;
+        }
+
+        first = last;
+    }
+
+    refreshed.Finish();
+    refreshedDisplays.Finish();
+    for (StringView root : roots) {
+        if (auto scanned =
+                ScanTree(files, editor, nullptr, root, plan.added_, plan.fileDiagnostics_);
+            !scanned) {
+            return scanned;
+        }
+    }
+
+    // 지금 색인에서 다시 읽은 이름(파일과 하위 트리 아래)의 항목·진단과 같은 id·경로 진단을 빼고
+    // 나머지와 새 것을 자리로 모은다(자리 포인터는 확정이 옮길 대상이다).
+    Array<AssetIndexEntry*> entryPlaces(*allocator_);
+    Array<AssetIndexDiagnostic*> diagnosticPlaces(*allocator_);
+    if (auto reserved = entryPlaces.TryReserve(entries_.Size() + plan.added_.Size()); !reserved) {
+        return reserved;
+    }
+
+    if (auto reserved =
+            diagnosticPlaces.TryReserve(diagnostics_.Size() + plan.fileDiagnostics_.Size());
+        !reserved) {
+        return reserved;
+    }
+
+    for (AssetIndexEntry& entry : entries_) {
+        auto key = CompareKey(entry.fileName.View(), normalizes, scratch);
+        if (!key) {
+            return Result<void>::Failure(key.Error());
+        }
+
+        if (!refreshed.Contains(key.Value()) && !trees.Covers(key.Value())) {
+            (void)entryPlaces.TryPushBack(&entry);
+        }
+    }
+
+    for (AssetIndexEntry& entry : plan.added_) {
+        (void)entryPlaces.TryPushBack(&entry);
+    }
+
+    for (AssetIndexDiagnostic& diagnostic : diagnostics_) {
+        if (IsNeighborDiagnostic(diagnostic)) {
+            continue;
+        }
+
+        auto key = CompareKey(diagnostic.fileName.View(), normalizes, scratch);
+        if (!key) {
+            return Result<void>::Failure(key.Error());
+        }
+
+        if (!refreshedDisplays.Contains(key.Value()) && !treeDisplays.Covers(key.Value())) {
+            (void)diagnosticPlaces.TryPushBack(&diagnostic);
+        }
+    }
+
+    for (AssetIndexDiagnostic& diagnostic : plan.fileDiagnostics_) {
+        (void)diagnosticPlaces.TryPushBack(&diagnostic);
+    }
+
+    return PlanPublish(entryPlaces.View(), diagnosticPlaces.View(), plan);
+}
+
+Result<void> AssetIndex::MarkRootLost() noexcept {
+    Array<AssetIndexDiagnostic> lost(*allocator_);
+    if (auto added =
+            AddDiagnostic(lost, AssetDiagnosticCode::RootLost, ErrorCode::NotFound, StringView());
+        !added) {
+        return added;
+    }
+
+    entries_.Clear();
+    byId_.Clear();
+    diagnostics_ = Move(lost);
+    ++revision_;
+    return Result<void>::Success();
 }
 
 void AssetIndex::CommitRefresh(AssetIndexRefresh& plan) noexcept {
@@ -1117,6 +1577,8 @@ Result<void> AppendAssetIndexDiagnosticLine(StringBuilderBase& line,
                                     LogicalPathErrorName(diagnostic.pathError));
     case AssetDiagnosticCode::MissingFile:
         return line.TryAppend("the file disappeared during the scan\n");
+    case AssetDiagnosticCode::RootLost:
+        return line.TryAppend("the content directory disappeared\n");
     case AssetDiagnosticCode::DuplicateAssetId:
     case AssetDiagnosticCode::DuplicatePath: {
         auto formatted =

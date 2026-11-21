@@ -896,6 +896,8 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "UnrealPathCollision";
     case AssetDiagnosticCode::MissingUnrealDependency:
         return "MissingUnrealDependency";
+    case AssetDiagnosticCode::RootLost:
+        return "RootLost";
     }
 
     return "Unknown";
