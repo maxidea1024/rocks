@@ -129,7 +129,7 @@ internal static class PchBuild
     {
         if (module.PrivatePchHeader is string spelling)
         {
-            // 번역 단위가 적으면 PCH를 만드는 비용이 절약분보다 크다.
+            // PCH를 쓸 손으로 쓴 소스가 적으면 PCH를 만드는 비용이 절약분보다 크다(users는 소스 수다, 8.1절).
             if (users < module.PrivatePchMinTus)
             {
                 return null;

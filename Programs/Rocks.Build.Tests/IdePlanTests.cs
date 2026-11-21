@@ -23,7 +23,7 @@ internal static class IdePlanTests
         pass("IDE plan mode: no generated inputs required, nothing written, BuildAsync rejects it");
 
         await EqualsBuildPlanAsync(request, root);
-        pass("IDE plan equals the plan-only compile database with generated sources, unity, module PCH and shared PCH");
+        pass("IDE plan equals the plan-only compile database with generated sources, unity, module PCH and shared PCH; staleness fingerprints match the build plan");
 
         if (request.Toolchain.Platform == NativePlatform.Windows)
         {
@@ -135,6 +135,11 @@ internal static class IdePlanTests
         string generatedInclude = Path.GetDirectoryName(Path.Combine(output, "Generated", "Lib", "Public", "Lib.generated.h"))!;
         Write(Path.Combine(output, "Generated", "Lib", "Public", "Lib.generated.h"), "#pragma once\n");
         string generatedSource = Write(Path.Combine(output, "Generated", "Lib", "Source", "Lib.module.generated.cpp"), "int LibGenerated() noexcept { return 1; }\n");
+        // 손으로 쓴 소스 2개 + 리플렉션 생성 소스 2개, 하한 3: 생성 소스를 세지 않으므로 빌드·IDE 모두 PCH가 없다.
+        string reflDirectory = Path.GetDirectoryName(Write("refl/ReflPch.h", "#pragma once\n"))!;
+        string[] reflSources = [.. new[] { "r1", "r2" }.Select(name => Write($"refl/{name}.cpp", $"int Refl_{name}() noexcept {{ return 1; }}\n"))];
+        string[] reflGenerated = [.. new[] { "g1", "g2" }.Select(name => Write(Path.Combine(output, "Generated", "Refl", "Source", name + ".generated.cpp"),
+            $"int Refl_{name}() noexcept {{ return 2; }}\n"))];
         string user = Write("user/user.cpp", "#include <shared/Base.h>\nint User() noexcept { return BaseValue(); }\n");
         string main = Write("app/main.cpp", "int BaseSum() noexcept;\nint User() noexcept;\nint main() { return BaseSum() + User(); }\n");
         NativeModuleInput[] modules =
@@ -146,7 +151,12 @@ internal static class IdePlanTests
                 Unity = UnityMode.On, UnityAnchorFiles = int.MaxValue, PrivatePchHeader = Path.Combine(libDirectory, "LibPch.h"), PrivatePchMinTus = 3
             },
             new() { Name = "User", Sources = [user], PublicDependencies = ["Base"] },
-            new() { Name = "App", Kind = NativeModuleKind.Executable, Sources = [main], PublicDependencies = ["Lib", "User"] }
+            new()
+            {
+                Name = "Refl", Sources = reflSources, ReflectionSources = reflGenerated, PrivatePchHeader = Path.Combine(reflDirectory, "ReflPch.h"),
+                PrivatePchMinTus = 3
+            },
+            new() { Name = "App", Kind = NativeModuleKind.Executable, Sources = [main], PublicDependencies = ["Lib", "User", "Refl"] }
         ];
         NativeBuildRequest planned = request with { RootDirectory = fixture, OutputDirectory = output, Modules = modules, Targets = ["App"] };
         NativeBuildResult result = await new NativeBuildEngine().BuildAsync(planned with { PlanOnly = true, Unity = true, Pch = true, Adaptive = false });
@@ -162,11 +172,23 @@ internal static class IdePlanTests
                 WithoutObject(entry.GetProperty("arguments").EnumerateArray().Skip(1).Select(value => value.GetString()!)))
             .Order(StringComparer.Ordinal)];
         string[] planned2 = [.. ide.Compiles.Select(compile => Path.GetFullPath(compile.Source) + "|" + WithoutObject(compile.Arguments)).Order(StringComparer.Ordinal)];
-        Check(built.Length == 7 && built.SequenceEqual(planned2, StringComparer.Ordinal), "IDE logical commands differ from the plan-only compile database");
+        Check(built.Length == 9 && built.SequenceEqual(planned2, StringComparer.Ordinal), "IDE logical commands differ from the plan-only compile database");
+        Check(ide.Compiles.Where(compile => compile.Module == "Refl").All(compile => compile.PchHeader is null),
+            "reflection generated sources are not counted toward the module PCH minimum");
         string pch = Path.Combine(libDirectory, "LibPch.h");
         Check(ide.Compiles.Where(compile => compile.Module == "Lib").All(compile => compile.PchHeader == pch), "module PCH survives one unity batch");
         Check(ide.Compiles.Single(compile => compile.Module == "User").PchHeader == Path.Combine(baseInclude, "shared", "BasePch.h"), "shared PCH header");
         Check(ide.Compiles.All(compile => !compile.Source.StartsWith(output, StringComparison.OrdinalIgnoreCase)), "generated source excluded");
+
+        // 낡음 지문(9절): 빌드 계획(유니티·시간 측정 켬)에서 고른 명령과 IDE 계획의 지문이 같다. PCH를 끈 빌드는 다르므로 CLI가 비교하지
+        // 않고, 소스가 하나 빠지면 다르다.
+        string Print(IReadOnlyList<IdeCompile> compiles) => IdePlanner.Fingerprint(compiles, "App.exe", "toolchain");
+        string idePrint = Print(ide.Compiles);
+        Check(Print(IdePlanner.Select(ActionGraph.Create(planned with { Unity = true, Adaptive = false, Timing = true }), output)) == idePrint,
+            "the build plan fingerprint differs from the IDE plan fingerprint");
+        Check(Print(IdePlanner.Select(ActionGraph.Create(planned with { Pch = false }), output)) != idePrint, "--pch off must change the fingerprint");
+        Check(Print([.. ide.Compiles.Skip(1)]) != idePrint && IdePlanner.Fingerprint(ide.Compiles, null, "toolchain") != idePrint &&
+            IdePlanner.Fingerprint(ide.Compiles, "App.exe", "other") != idePrint, "fingerprint ignores sources, executable or toolchain");
     }
 
     private static void Model(NativeBuildRequest request, string root)

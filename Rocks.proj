@@ -39,8 +39,10 @@
     <CommonArguments>--root &quot;$(RocksRoot).&quot; --configuration $(Configuration) --jobs $(Jobs) $(CompilerArgument) $(OutputArgument) $(PlatformArgument) $(BuildModeArguments)</CommonArguments>
   </PropertyGroup>
   <!-- MSBuild orchestrates the host tools, rules and stages. Rocks.Build decides C++ up-to-dateness on every invocation. -->
+  <!-- Builds the tools only when their inputs changed, under the same lock as Visual Studio builds (Build/Tools.ps1,
+       Docs/Design/ProjectFiles.ko.md section 7.2). The build steps below run outside that lock. -->
   <Target Name="BootstrapTools">
-    <Exec Command="dotnet build &quot;$(RocksRoot)Programs/Rocks.Tools.csproj&quot; --nologo" />
+    <Exec Command="pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File &quot;$(RocksRoot)Build/Tools.ps1&quot;" />
   </Target>
   <Target Name="Build" DependsOnTargets="BootstrapTools">
     <Exec Command="$(Tool) build $(CommonArguments) --target $(RocksTarget)" />

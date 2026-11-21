@@ -1,5 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- A new NuGet advisory warns but does not break the build (Docs/Design/ProjectFiles.ko.md revision 6). -->
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Rocks.Build.Cli/Rocks.Build.Cli.csproj" />
     <ProjectReference Include="../../Build/Rules/Rocks.Engine.Rules.csproj" />

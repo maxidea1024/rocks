@@ -19,7 +19,16 @@ dotnet msbuild Rocks.proj /t:Test /p:Configuration=Asan /p:RocksTarget=Foundatio
 dotnet msbuild Rocks.proj /t:Build /p:Configuration=Release /p:RocksTarget=Engine
 ```
 
-Visual Studio 솔루션·프로젝트 파일(UE GenerateProjectFiles 대응, [설계](../Docs/Design/ProjectFiles.ko.md))은 도구를 빌드한 뒤 `dotnet out/dotnet/bin/Rocks.Build.Cli/Debug/net10.0/Rocks.Build.Cli.dll projectfiles --root .`로 만든다. 루트에 `Rocks.slnx`, `out/ProjectFiles/`에 프로젝트가 생기고 바뀐 파일만 다시 쓴다. Visual Studio 2026과 구성 요소 "C++ Clang tools for Windows"(`Microsoft.VisualStudio.Component.VC.Llvm.ClangToolset`, IntelliSense가 ClangCL 모드로 돈다)가 필요하다. 지금은 탐색과 IntelliSense까지이고, Visual Studio 안 빌드(`Build/IdeBuild.bat`)와 `GenerateProjectFiles.bat`은 다음 단계(PJ2)다. 시작 프로젝트는 처음 한 번 고른다("Set as Startup Project" — 솔루션 직렬화기가 항목을 이름순으로 써서 생성기가 정할 수 없다). 루트에 `Rocks.proj`와 `Rocks.slnx`가 함께 있으므로 `dotnet msbuild`·`dotnet build`에는 늘 `Rocks.proj`를 적는다(적지 않으면 MSB1011).
+Visual Studio 솔루션·프로젝트 파일(UE GenerateProjectFiles 대응, [설계](../Docs/Design/ProjectFiles.ko.md)):
+
+- 만들기: 루트의 `GenerateProjectFiles.bat`(탐색기에서 실행해도 된다, 실패하면 멈춘다)이나 `pwsh Build/GenerateProjectFiles.ps1`. 도구를 필요할 때만 빌드한 뒤 루트 `Rocks.slnx`와 `out/ProjectFiles/`를 쓰고 바뀐 파일만 다시 쓴다. 저장소 쪽 리플렉션 생성 헤더가 아직 없으면 어느 타깃을 한 번 빌드하라고 알린다.
+- 요구: Visual Studio 2026, 구성 요소 "C++ Clang tools for Windows"(`Microsoft.VisualStudio.Component.VC.Llvm.ClangToolset` — IntelliSense가 ClangCL 모드로 돈다), PowerShell 7(`pwsh`).
+- Visual Studio의 빌드·다시 빌드·정리는 `Build/IdeBuild.bat`를 거쳐 `Rocks.Build.Cli build`·`clean`을 부른다. 생성할 때의 clang-cl을 그대로 쓰므로 IDE 빌드 뒤 같은 구성의 `Rocks.proj` 빌드는 0 action이다. 솔루션 빌드는 저장소마다 잠금 하나로 프로젝트를 하나씩 빌드한다.
+- 소스·모듈 규칙·도구 모음이 바뀌면 빌드가 `warning RPF0001`(Visual Studio 오류 목록에 나온다)로 재생성을 알린다. 자동으로 다시 만들지 않는다.
+- 시작 프로젝트는 처음 한 번 고른다("Set as Startup Project" — 솔루션 직렬화기가 항목을 이름순으로 써서 생성기가 정할 수 없다).
+- `Rocks.proj`의 `BootstrapTools`도 같은 잠금과 도구 지문(`Build/Tools.ps1`, `out/dotnet/.rocks-tools.json`)을 쓴다. 그 뒤의 빌드 단계는 잠금 밖이라 터미널 빌드 도중 Visual Studio가 도구 원본 변경으로 도구를 다시 빌드하면 겹칠 수 있다.
+- 루트에 `Rocks.proj`와 `Rocks.slnx`가 함께 있으므로 `dotnet msbuild`·`dotnet build`에는 늘 `Rocks.proj`를 적는다(적지 않으면 MSB1011).
+- VS Code·clangd는 생성하지 않는다. 빌드 출력의 `compile_commands.json`을 `--compile-commands-dir=out/<출력>`으로 주면 된다.
 
 ### 빌드 구성
 

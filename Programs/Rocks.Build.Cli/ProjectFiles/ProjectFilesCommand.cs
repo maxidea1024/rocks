@@ -46,6 +46,9 @@ internal static class ProjectFilesCommand
     // ClangCL 도구 모음을 주는 Visual Studio 구성 요소다(8.5절).
     private const string ClangToolsetComponent = "Microsoft.VisualStudio.Component.VC.Llvm.ClangToolset";
 
+    // 생성 프로젝트가 요구하는 Visual Studio 판이다(vswhere 범위, PJD1 — Visual Studio 2026).
+    private const string MinimumVisualStudioVersion = "[18.0,)";
+
     public static async Task<int> RunAsync(string[] args, CancellationToken cancellationToken)
     {
         Dictionary<string, string> options = BuildCommand.Parse(args);
@@ -131,11 +134,16 @@ internal static class ProjectFilesCommand
             [.. Configurations.Select(configuration => configuration.ToString())], android, ToolchainOf(toolchain),
             await CSharpProjectsAsync(root, cancellationToken));
         SortedDictionary<string, byte[]> files = VisualStudioProjects.Render(input);
-        ProjectFilesWriteResult written = await ProjectFilesOutput.WriteAsync(root, projectFiles, files, ProjectFilesOutput.Fingerprints(input, files),
-            cancellationToken);
+        var fingerprints = ProjectFilesOutput.Fingerprints(plans, targets, ProjectFilesOutput.ToolchainHash(projectFiles, files));
+        ProjectFilesWriteResult written = await ProjectFilesOutput.WriteAsync(root, projectFiles, input.SolutionPath, files, fingerprints, cancellationToken);
         Console.WriteLine($"Wrote {Path.Combine(root, "Rocks.slnx")} and {projectFiles}: {written.Written} written, {written.Unchanged} unchanged, " +
             $"{written.Removed} removed{(android ? "" : " (no Android NDK found: Android configurations left out)")}; " +
             $"{System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:F0} ms in total.");
+        foreach (string note in ProjectFilesStaleness.GeneratedHeaderNotes(model, plans))
+        {
+            Console.WriteLine("note: " + note);
+        }
+
         if (!await ClangToolsetInstalledAsync(toolchain, cancellationToken))
         {
             Console.WriteLine($"warning: Visual Studio component {ClangToolsetComponent} (C++ Clang tools for Windows) is not installed; " +
@@ -216,7 +224,7 @@ internal static class ProjectFilesCommand
 
         string[] includes = [.. (toolchain.Environment.GetValueOrDefault("INCLUDE") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)];
         string? asan = toolchain.RuntimeFiles.Count == 1 ? Path.GetDirectoryName(toolchain.RuntimeFiles[0]) : null;
-        return new(toolchain.CompilerPath, Path.GetDirectoryName(lib)!, version, includes, asan);
+        return new(toolchain.CompilerPath, Path.GetDirectoryName(lib)!, version, includes, asan, Path.Combine(resource, "include"));
     }
 
     // Android NDK가 있으면 Android 구성을 넣는다(6.3절).
@@ -252,7 +260,8 @@ internal static class ProjectFilesCommand
         }
 
         using var probe = new ProbeDirectory();
-        var result = await ProcessRunner.RunAsync(new(installer, ["-latest", "-products", "*", "-requires", ClangToolsetComponent, "-property", "installationPath"],
+        var result = await ProcessRunner.RunAsync(new(installer, ["-latest", "-products", "*", "-version", MinimumVisualStudioVersion, "-requires",
+                ClangToolsetComponent, "-property", "installationPath"],
             probe.Path, toolchain.Environment), cancellationToken);
         return result.ExitCode == 0 && result.StdOut.Trim().Length != 0;
     }

@@ -37,6 +37,9 @@ struct AssetServiceConfig {
     // packages.files). useCache가 거짓이면 캐시를 읽지 않는다(점검·재구축 명령).
     platform::FileSystem* cacheFiles = nullptr;
     bool useCache = true;
+    // 색인 검색의 파일 읽기를 나눌 scheduler다(7.1절 16 A2d2 — null이면 직렬). 있으면
+    // packages.files와 서비스 allocator가 동시 호출을 받아야 한다(AssetIndex 생성자 계약).
+    WorkerScheduler* scheduler = nullptr;
 };
 
 // asset-info 출력 선택이다(13절).

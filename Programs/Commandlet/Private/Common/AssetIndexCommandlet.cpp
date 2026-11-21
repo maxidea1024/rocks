@@ -189,7 +189,8 @@ Result<int32> RunAssetListCommand(void* context, Span<const StringView> args,
         return Result<int32>::Failure(loaded.Error());
     }
 
-    AssetIndex index(allocator, layout);
+    ScanScheduler scan(allocator);
+    AssetIndex index(allocator, layout, scan.Get());
     if (auto rebuilt = index.Rebuild(platform::PhysicalFileSystem(), IndexReadOptions(),
                                      loaded.Value() ? &cache : nullptr);
         !rebuilt) {
@@ -234,7 +235,8 @@ Result<int32> RunAssetIndexVerifyCommand(void* context, Span<const StringView> a
         return failure;
     }
 
-    AssetIndex index(allocator, layout);
+    ScanScheduler scan(allocator);
+    AssetIndex index(allocator, layout, scan.Get());
     if (auto rebuilt = index.Rebuild(platform::PhysicalFileSystem(), IndexReadOptions());
         !rebuilt) {
         if (rebuilt.Error() == ErrorCode::OutOfMemory) {
@@ -307,7 +309,8 @@ Result<int32> RunAssetIndexRebuildCommand(void* context, Span<const StringView> 
     }
 
     platform::FileSystem& files = platform::PhysicalFileSystem();
-    AssetIndex index(allocator, layout);
+    ScanScheduler scan(allocator);
+    AssetIndex index(allocator, layout, scan.Get());
     if (auto rebuilt = index.Rebuild(files, IndexReadOptions()); !rebuilt) {
         if (rebuilt.Error() == ErrorCode::OutOfMemory) {
             return Result<int32>::Failure(rebuilt.Error());

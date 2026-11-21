@@ -1,10 +1,20 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- A new NuGet advisory warns but does not break the build (Docs/Design/ProjectFiles.ko.md revision 6). -->
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Rocks.Build.Abstractions/Rocks.Build.Abstractions.csproj" />
   </ItemGroup>
   <ItemGroup>
     <!-- Writes Rocks.slnx (Docs/Design/ProjectFiles.ko.md section 6.1; the same package UnrealBuildTool uses). -->
     <PackageReference Include="Microsoft.VisualStudio.SolutionPersistence" Version="1.0.52" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The installed SDK copies this output folder (Tools/Rocks.Build.Cli), so the package license and notices ship with it. -->
+    <None Include="Licenses/Microsoft.VisualStudio.SolutionPersistence/LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(NuGetPackageRoot)microsoft.visualstudio.solutionpersistence/1.0.52/NOTICE" Link="Licenses/Microsoft.VisualStudio.SolutionPersistence/NOTICE"
+          CopyToOutputDirectory="PreserveNewest" Condition="'$(NuGetPackageRoot)' != ''" />
   </ItemGroup>
 </Project>

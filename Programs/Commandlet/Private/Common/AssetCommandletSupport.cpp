@@ -5,6 +5,7 @@
 #include <HostConfig/HostSettings.h>
 #include <ModuleLoader/ModuleLoader.h>
 #include <Platform/File.h>
+#include <Platform/Thread.h>
 
 // 에셋 명령의 공용 도구 구현이다(Docs/Design/AssetSystem.ko.md 13절).
 namespace rocks::commandlet_host {
@@ -67,6 +68,20 @@ PackageReadOptions IndexReadOptions() noexcept {
     // 이 엔진보다 새 엔진이 저장한 패키지는 NewerVersion이다(UE AssetRegistry도 읽지 않는다).
     options.engineVersion = build::CurrentEngineVersion();
     return options;
+}
+
+ScanScheduler::ScanScheduler(Allocator& allocator) noexcept : scheduler_(allocator) {
+    const uint32 processors = platform::LogicalProcessorCount();
+    const uint32 helpers = processors > 1 ? processors - 1 : 0;
+    WorkerSchedulerConfig config;
+    config.workerCount = helpers < CommandletScanWorkers ? helpers : CommandletScanWorkers;
+    started_ = config.workerCount != 0 && static_cast<bool>(scheduler_.Start(config));
+}
+
+ScanScheduler::~ScanScheduler() noexcept {
+    if (started_) {
+        (void)scheduler_.Shutdown();
+    }
 }
 
 AssetCommandTypes::AssetCommandTypes(Allocator& allocator, ModuleLoader& modules) noexcept
@@ -162,6 +177,7 @@ bool OpenSession(CommandletOutput& output, Allocator& allocator, StringView comm
     config.packages.registryContext = CommandletAssetContext;
     config.packages.registryOptions.names = &session.types.Names();
     config.cacheFiles = &platform::PhysicalFileSystem();
+    config.scheduler = session.scan.Get();
     auto made = UniquePtr<AssetService>::TryMake(allocator, allocator, session.layout, config);
     if (!made) {
         failure = Result<int32>::Failure(made.Error());

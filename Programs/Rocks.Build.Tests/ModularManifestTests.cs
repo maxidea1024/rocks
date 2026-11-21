@@ -219,7 +219,8 @@ internal static class ModularManifestTests
                 string name = row.GetProperty("name").GetString()!;
                 string file = Path.Combine(bin, row.GetProperty("file").GetString()!);
                 Check(row.EnumerateObject().Select(property => property.Name)
-                        .SequenceEqual(["name", "file", "size", "dependencies", "loadingPhase", "onRequest"]), "row keys of " + name);
+                        .SequenceEqual(["name", "file", "size", "dependencies", "loadingPhase", "onRequest", "executable"]), "row keys of " + name);
+                Check(row.GetProperty("executable").GetBoolean() == (name == "App"), "row executable flag of " + name);
                 Check(File.Exists(file) && new FileInfo(file).Length == row.GetProperty("size").GetInt64(), "row file and size of " + name);
                 Check(!row.GetProperty("onRequest").GetBoolean(), "row on-request flag of " + name);
             }

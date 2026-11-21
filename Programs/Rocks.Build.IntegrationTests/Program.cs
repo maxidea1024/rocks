@@ -30,7 +30,14 @@ if (args.Length == 1 && args[0] == "--platform-path-header")
 // Visual Studio 프로젝트 파일 쓰기 시험만 돈다(Docs/Design/ProjectFiles.ko.md 16절 V2–V5). 현재 디렉터리가 저장소 루트여야 한다.
 if (args.Length == 1 && args[0] == "--project-files")
 {
-    await ProjectFilesWriterTests.RunAsync(Path.GetFullPath("."));
+    await ProjectFilesWriterTests.RunAsync(Path.GetFullPath("."), await NativeToolchains.DiscoverAsync());
+    return 0;
+}
+
+// Visual Studio NMake 진입점·도구 준비·정리 시험만 돈다(16절 V6·V7·V13·V14). 현재 디렉터리가 저장소 루트여야 한다.
+if (args.Length == 1 && args[0] == "--ide-scripts")
+{
+    await IdeScriptsTests.RunAsync(Path.GetFullPath("."));
     return 0;
 }
 
@@ -82,7 +89,8 @@ try
     MetadataOutputTransactionTests.Run();
     MetadataLayoutTests.Run();
     TargetDefinitionsTests.Run();
-    await ProjectFilesWriterTests.RunAsync(root);
+    await ProjectFilesWriterTests.RunAsync(root, toolchain);
+    await IdeScriptsTests.RunAsync(root);
     MetadataTemporaryCleanupTests.Run();
     await PlatformPrivateHeaderTests.RunAsync(toolchain, Path.Combine(fixture, "platform-header"));
     await UnityProfileCommandTests.RunAsync(root, Directory.CreateDirectory(Path.Combine(fixture, "unity-profile-command")).FullName,

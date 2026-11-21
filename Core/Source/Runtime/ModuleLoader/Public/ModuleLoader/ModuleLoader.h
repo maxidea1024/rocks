@@ -108,6 +108,12 @@ constexpr ModuleGroup LoadingPhaseGroup(LoadingPhase phase) noexcept {
 // 재진입: 모듈 Startup 안에서 다른 모듈을 Load할 수 있다. Load가 진행 중일 때(모듈 Startup, 중첩
 // Load, Changed 구독자 안)나 묶음 종료 콜백(PreUnload·Shutdown) 안에서 ShutdownGroup을 부르면
 // Fatal이다(시작 중인 의존 사슬 아래에서 모듈을 내리지 않게).
+namespace detail {
+
+struct ModuleManifestData;
+
+} // namespace detail
+
 class ModuleLoader final {
     struct CreateTag {
         explicit CreateTag() = default;
@@ -124,6 +130,32 @@ public:
     // - 할당 실패는 allocator의 오류다.
     static Result<UniquePtr<ModuleLoader>> TryCreate(Allocator& allocator,
                                                      ModuleTable table) noexcept;
+
+    // Modular 실행 파일의 로더를 모듈 manifest로 만든다(Docs/Design/ModuleLoader.ko.md 3.5·3.13절).
+    // manifestPath(절대 경로, UTF-8)의 manifest를 엄격하게 해석하고, 실행 파일이 아닌 행의 공유
+    // 라이브러리를 의존 순서로 적재해 export 진입점 RocksModuleEntry로 진입 기술을 얻은 뒤(Prepare)
+    // TryCreate와 같은 로더를 만든다. 실행 파일 행은 OS로 싣지 않고 executableEntry(그 실행 파일의
+    // RocksModuleEntry_<Name>)를 쓴다. 로더가 manifest 표와 라이브러리를 소유하며, 로더 소멸이 모든
+    // 모듈을 내린 뒤 라이브러리를 적재 역순으로 닫는다.
+    // 실패하면 report에 코드·실패 모듈·단계·문구를 채우고(호출자가 한 번 기록한다) 이미 연
+    // 라이브러리를 닫는다:
+    // - NotFound(manifest·모듈 파일이 없다) → ErrorCode::NotFound.
+    // - Incompatible(manifest 경로가 절대 경로가 아님·읽기 실패·형식·키, 파일 크기, 진입 기술 대조,
+    //   실행 파일 행에 executableEntry가 없음) → InvalidArgument(할당 실패는 OutOfMemory).
+    // - OsLoadFailed(OS 적재 실패 — nativeError·OS 문구) → DependencyFailed.
+    // - EntryMissing(RocksModuleEntry가 없다) → NotFound.
+    //
+    // 사용 예(Modular 실행 파일 — ML4b가 Launch에 연결한다):
+    //   ModuleLoadReport report;
+    //   auto created = ModuleLoader::TryCreateFromManifest(allocator, manifestPath,
+    //                                                      &RocksModuleEntry_Sandbox, report);
+    //   if (!created) {
+    //       Log::Error(LogLaunch, "Module {Module} failed at {Stage}: {Message}", report.failed,
+    //                  report.stage, report.message);
+    //   }
+    static Result<UniquePtr<ModuleLoader>>
+    TryCreateFromManifest(Allocator& allocator, StringView manifestPath,
+                          ModuleEntryFunction executableEntry, ModuleLoadReport& report) noexcept;
 
     // TryCreate 전용이다(UniquePtr::TryMake가 부른다). 직접 부를 수 없다.
     ModuleLoader(CreateTag, Allocator& allocator, ModuleTable table) noexcept;
@@ -227,8 +259,13 @@ public:
     // 표의 모듈 수다.
     usize ModuleCount() const noexcept;
 
+    // 표 index번째 행의 진입 기술이다(정적 표는 행의 entry가 돌려준 것, manifest 로더는 Prepare가
+    // 얻은 것). index가 ModuleCount() 이상이면 Fatal이다.
+    const ModuleEntry& EntryAt(usize index) const noexcept;
+
     // 생성 때 받은 모듈 표다(의존 순서). 설정 등록(HostSettings, 3.10절)이 모든 모듈의
-    // registerSettings를 이 순서로 부른다.
+    // registerSettings를 이 순서로 부른다. manifest로 만든 로더(TryCreateFromManifest)의 행은 entry
+    // 칸이 null이다 — 진입 기술은 EntryAt으로 읽는다.
     ModuleTable Table() const noexcept {
         return table_;
     }
@@ -303,7 +340,9 @@ private:
 
     bool OnLoaderThread() const noexcept;
     usize IndexOf(StringView name) const noexcept;
-    Result<void> Initialize(ModuleTable table) noexcept;
+    // resolved가 비어 있지 않으면 행의 entry 칸 대신 그 진입 기술을 쓴다(manifest 표 — 같은 색인).
+    Result<void> Initialize(ModuleTable table,
+                            Span<const ModuleEntry* const> resolved = {}) noexcept;
     bool StartRecord(usize index, ModuleLoadReport& report) noexcept;
     void ShutdownRecords(ModuleGroup group) noexcept;
     bool RunPhase(LoadingPhase phase, ModuleLoadReport& report) noexcept;
@@ -318,6 +357,9 @@ private:
     void CheckRegistrarCall() const noexcept;
 
     Allocator* allocator_;
+    // manifest로 만든 로더의 표·라이브러리 저장소다(TryCreateFromManifest). 정적 표 로더는
+    // null이다. 소멸자가 모듈을 모두 내린 뒤에 놓는다.
+    UniquePtr<detail::ModuleManifestData> manifest_;
     HostServices services_;
     ModuleTable table_;
     // 붙은 타입 등록기다. 빈 자리는 null이다.
