@@ -342,6 +342,12 @@ public:
             }
         }
 
+        if (nested != nullptr) {
+            // 초기화 안의 만들기·저장은 Busy다(재진입 거부 — 리뷰 권장).
+            nestedCreate = nested->Create(*nestedPath, TestAssetType()).Error();
+            nestedSave = nested->Save(FixedId(BaseId), *nestedLock, EditorSaveOptions{}).Error();
+        }
+
         if (openDuring != nullptr) {
             // 초기화 중 같은 집합의 다른 패키지를 연다(참조 해석과 같다).
             if (auto opened = openDuring->Open(openId); !opened) {
@@ -367,6 +373,11 @@ public:
     bool swallow = false;
     EditorPackageSet* openDuring = nullptr;
     AssetId openId{};
+    EditorPackageSet* nested = nullptr;
+    const LogicalPath* nestedPath = nullptr;
+    const AssetDatabaseLock* nestedLock = nullptr;
+    ErrorCode nestedCreate = ErrorCode::None;
+    ErrorCode nestedSave = ErrorCode::None;
     uint32 calls = 0;
     ObjectHandle seen{};
     AssetId stagedId{};
@@ -379,7 +390,8 @@ public:
 // None과 그 오류이고 아무것도 남지 않는다(집합·Registry 객체 수 그대로, 같은 경로·id로 다시 만들 수
 // 있다). 초기화가 실패한 트랜잭션 연산의 오류를 삼키고 성공을 돌려주면 공개가 그 오류로 실패하고
 // 역시 아무것도 남지 않는다. 초기화가 같은 집합의 다른 패키지를 열어도(참조 해석) 새 패키지가
-// 집합에 들어간다. 초기화 없는 만들기도 대표 에셋 Id()가 패키지 id다.
+// 집합에 들어간다. 초기화 안의 Create·Save는 Busy다(재진입 거부). 초기화 없는 만들기도 대표 에셋
+// Id()가 패키지 id다.
 TEST(EditorPackageSave_CreateInitializer) {
     AssetEnv env;
     REQUIRE(env.Ready());
@@ -427,9 +439,16 @@ TEST(EditorPackageSave_CreateInitializer) {
     initializer.makePart = true;
     initializer.openDuring = &set;
     initializer.openId = FixedId(LeafId);
+    auto nestedPath = ParseLogicalPath(env.allocator, "/Game/Fresh/Nested");
+    REQUIRE(nestedPath);
+    REQUIRE(set.Open(FixedId(BaseId)));
+    initializer.nested = &set;
+    initializer.nestedPath = &nestedPath.Value();
+    initializer.nestedLock = &scene.lock;
     auto made = set.Create(path.Value(), TestAssetType(), FixedId(FreshId), nullptr, &initializer);
     REQUIRE(made);
     CHECK(initializer.calls == 1);
+    CHECK(initializer.nestedCreate == ErrorCode::Busy && initializer.nestedSave == ErrorCode::Busy);
     TestAsset* asset = AssetOf(set, made.Value());
     REQUIRE(asset != nullptr);
     CHECK(asset->value == EditedValue && asset->Id() == FixedId(FreshId));

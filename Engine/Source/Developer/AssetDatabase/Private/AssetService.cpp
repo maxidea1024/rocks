@@ -216,6 +216,7 @@ Result<void> AssetService::Set(const AssetDatabaseLock& lock, StringView target,
     }
 
     AssetTextResolver resolver(*allocator_, set_, index_, warnings);
+    resolver.SetWeakScope(id);
     const TextCodecOptions options = CodecOptions(set_, resolver);
     auto prepared = reflection_text::PrepareAssignments(
         AssignmentTarget::Live(set_.Registry(), set_.Access(), asset.Value()), assignments, options,
@@ -304,10 +305,20 @@ Result<void> AssetService::List(StringView type, StringView under,
     }
 
     for (const AssetIndexEntry* entry : listed) {
-        if (filter != TypeId{}) {
-            // 등록되지 않은 타입은 같은 id일 때만 맞는다.
+        if (filter != TypeId{} && !(entry->type == filter)) {
+            // 파생 판정은 AssetIndex::ListByType과 같은 규칙이다(7.1절 11·14): 등록되지 않은
+            // 타입(NotFound)·파생 아님(TypeMismatch)은 맞지 않고 그 밖의 오류는 돌려준다.
             auto derived = types_->IsA(entry->type, filter);
-            if (!(entry->type == filter) && !(derived && derived.Value())) {
+            if (!derived) {
+                if (derived.Error() == ErrorCode::NotFound ||
+                    derived.Error() == ErrorCode::TypeMismatch) {
+                    continue;
+                }
+
+                return FailAsset<void>(failure, AssetDiagnosticCode::None, derived.Error());
+            }
+
+            if (!derived.Value()) {
                 continue;
             }
         }

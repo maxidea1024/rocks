@@ -101,9 +101,9 @@ struct EditorSaveOptions {
 // A2c3). Create가 패키지·대표 에셋을 만든 트랜잭션에서 공개 전에 한 번 부른다.
 //
 // 계약: transaction을 끝내지 않는다(Commit·Rollback은 Create가 한다). 같은 트랜잭션에 하위 객체를
-// 만들 수 있고 같은 집합의 다른 패키지를 열 수 있다(Open — 참조 해석; Create·Save는 부르지
-// 않는다). 실패를 돌려주면 Create가 트랜잭션을 되돌리고 그 오류로 실패한다(자세한 진단은
-// 구현이 따로 남긴다).
+// 만들 수 있고 같은 집합의 다른 패키지를 열 수 있다(Open — 참조 해석). 그 안의 Create·Save는
+// Busy다(경로·id 판정과 표 자리가 바깥 만들기와 엇갈린다). 실패를 돌려주면 Create가 트랜잭션을
+// 되돌리고 그 오류로 실패한다(자세한 진단은 구현이 따로 남긴다).
 //
 // 사용 예:
 //   class AssignNew final : public EditorAssetInitializer {
@@ -204,7 +204,7 @@ public:
     // 포함)가 OS 상한을 넘으면 InvalidPath / CapacityExceeded, 같은 id가 열려 있거나 색인에 있으면
     // DuplicateAssetId / AlreadyExists, id 발급 실패(진단 None과 그 오류), type이 에셋 클래스가
     // 아니면 Registry의 오류(진단 None), initializer의 오류(진단 None — 자세한 내용은 initializer가
-    // 남긴다), 할당 실패.
+    // 남긴다), initializer 안에서 부르면 Busy, 할당 실패.
     Result<ObjectHandle> Create(const LogicalPath& path, TypeId type, AssetId id = {},
                                 AssetDiagnostic* failure = nullptr,
                                 EditorAssetInitializer* initializer = nullptr) noexcept;
@@ -221,10 +221,10 @@ public:
     // InvalidArgument(related = 첫 대상), 새 패키지의 대상이 이미 있거나 색인에 같은 경로 키
     // DuplicatePath / AlreadyExists, 외부 변경(대상의 지문이 열 때와 다름·대상 없음·대상 헤더 손상)
     // ExternalModification / StaleHandle, 대표 에셋 찾기·타입 조회·hook 오류(진단 None),
-    // WritePackage의 진단, 파일 만들기·쓰기·Flush·Close·Replace·디렉터리 만들기의 IO(진단 None과 그
-    // 오류 — 임시 파일을 지운다), 재검증 실패(그 진단 — writer·sink 결함), 할당 실패. 교체 뒤의
-    // 일(저장소 다시 잇기·색인 갱신)은 교체 전에 준비하므로 교체가 끝나면 실패하지 않는다(7.1절
-    // 15).
+    // Create의 초기화 안에서 부르면 Busy, WritePackage의 진단, 파일
+    // 만들기·쓰기·Flush·Close·Replace·디렉터리 만들기의 IO(진단 None과 그 오류 — 임시 파일을
+    // 지운다), 재검증 실패(그 진단 — writer·sink 결함), 할당 실패. 교체 뒤의 일(저장소 다시
+    // 잇기·색인 갱신)은 교체 전에 준비하므로 교체가 끝나면 실패하지 않는다(7.1절 15).
     Result<void> Save(AssetId id, const AssetDatabaseLock& lock, const EditorSaveOptions& options,
                       Array<EditorWarning>* warnings = nullptr,
                       AssetDiagnostic* failure = nullptr) noexcept;
@@ -278,6 +278,8 @@ private:
     // 열린 패키지 정보(id 순)와 그 RootRef(같은 순서)다.
     Array<EditorPackageInfo> open_;
     Array<RootRef<Object>> roots_;
+    // Create가 초기화를 부르는 동안이다(그 안의 Create·Save는 Busy).
+    bool creating_ = false;
 };
 
 } // namespace rocks

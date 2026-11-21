@@ -68,7 +68,8 @@ public:
 
     // asset-new <Type> <path> [<속성>=<값>…]: path에 type(타입 도구 이름 — 에셋 클래스)의 새
     // 패키지를 만들고, 대입을 공개 전 대표 에셋에 모두 검증·게시한 뒤 함께 공개해 저장한다. 반환은
-    // 새 AssetId다. lock은 이 프로젝트의 잡은 쓰기 잠금이다.
+    // 새 AssetId다. lock은 이 프로젝트의 잡은 쓰기 잠금이다. 새 패키지의 객체는 공개 전이라 Weak
+    // 참조와 새 패키지 자신을 가리키는 참조는 풀 수 없다(진단 Unresolved — 만든 뒤 Set으로 넣는다).
     //
     // 오류(failure 진단): Initialize 전 InvalidArgument, path 규칙 위반 InvalidPath /
     // InvalidArgument, 모르는 타입 이름 NotFound(진단 None), 에셋 클래스가 아니거나 추상 클래스
@@ -82,7 +83,8 @@ public:
                         AssetDiagnostic* failure = nullptr) noexcept;
 
     // asset-set <path|AssetId> <속성>=<값>…: 대상을 열고(Hard·EditorOnly 닫힘째) 대입을 모두
-    // 검증한 뒤 한꺼번에 게시하고 저장한다. force는 미해결 import를 null로 저장한다(--force —
+    // 검증한 뒤 한꺼번에 게시하고 저장한다. Weak 참조는 대상 패키지 안의 객체만 받는다(5.1절 —
+    // 밖은 진단 Unresolved). force는 미해결 import를 null로 저장한다(--force —
     // 경고 DroppedUnresolvedImport). 빈 대입 목록도 저장한다.
     //
     // 오류(failure 진단): Initialize 전 InvalidArgument, 대상 텍스트 형식(논리 경로 규칙·36자
@@ -112,7 +114,8 @@ public:
     //
     // 오류(failure 진단): Initialize 전 InvalidArgument, 모르는 타입 이름 NotFound(진단 None),
     // 클래스가 아닌 타입 TypeMismatch / InvalidArgument, under가 논리 디렉터리가 아님 InvalidPath /
-    // InvalidArgument, 할당 실패.
+    // InvalidArgument, 파생 판정의 그 밖 오류(TypeRegistry 종료 뒤 ShuttingDown 등 — 진단 None),
+    // 할당 실패.
     Result<void> List(StringView type, StringView under, Array<const AssetIndexEntry*>& out,
                       AssetDiagnostic* failure = nullptr) noexcept;
 

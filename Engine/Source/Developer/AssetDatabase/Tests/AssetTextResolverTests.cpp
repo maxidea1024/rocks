@@ -116,11 +116,11 @@ bool Formats(AssetTextResolver& resolver, Allocator& allocator, TextReferenceKin
 
 } // namespace
 
-// Hard·Weak 해석: 논리 경로·AssetId 텍스트가 대표 에셋을 열어(닫힘째 — Hero는 Base·Derived도) 그
+// Hard 해석: 논리 경로·AssetId 텍스트가 대표 에셋을 열어(닫힘째 — Hero는 Base·Derived도) 그
 // handle을 주고, 이미 열린 패키지는 그대로 잇는다. 하위 객체·중첩 하위 객체 경로를 찾는다. 기대
 // 타입이 0(Object)·대상 자신·조상이면 받고 아니면 TypeMismatch다. 저장하지 않은 새 패키지는 경로·
 // AssetId 둘 다로 찾는다. Hub를 열면 없는 의존(CycleA)의 경고가 warnings에 붙는다.
-TEST(AssetTextResolver_ResolvesHardAndWeak) {
+TEST(AssetTextResolver_ResolvesHard) {
     AssetEnv env;
     REQUIRE(env.Ready());
     Sources sources(env.allocator);
@@ -131,7 +131,8 @@ TEST(AssetTextResolver_ResolvesHardAndWeak) {
     AssetTextResolver resolver(env.allocator, scene.set, scene.project.index, &warnings);
     EditorPackageSet& set = scene.set;
     const String leafId = IdText(env.allocator, LeafId);
-    for (TextReferenceKind kind : OpenKinds) {
+    {
+        const TextReferenceKind kind = TextReferenceKind::Hard;
         auto villain = ResolveHandle(resolver, env.allocator, "/Game/Villain", {}, kind);
         REQUIRE(villain);
         CHECK(villain.Value() == RepresentativeOf(set, VillainId));
@@ -186,6 +187,59 @@ TEST(AssetTextResolver_ResolvesHardAndWeak) {
     auto hub = ResolveHandle(resolver, env.allocator, "/Game/Hub");
     REQUIRE(hub);
     CHECK(!warnings.IsEmpty());
+}
+
+// Weak 해석은 대입 대상의 패키지 안만이다(5.1절 — 저장이 밖 대상을 null로 쓰므로 받지 않는다):
+// 범위가 없으면 모든 Weak 텍스트 InvalidArgument, 범위 패키지(Hero)의 대표 에셋·하위 객체·중첩 하위
+// 객체(경로·AssetId)는 받고 기대 타입을 본다, 다른 패키지는 InvalidArgument이고 열지 않는다, 범위
+// 패키지가 열려 있지 않으면 NotFound다. 출력은 Hard와 같다(시험 Formats).
+TEST(AssetTextResolver_WeakStaysInPackage) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Sources sources(env.allocator);
+    REQUIRE(MakeSources(env, sources));
+    ResolverScene scene(env, sources);
+    REQUIRE(scene.ready);
+    REQUIRE(scene.AddParts());
+    AssetTextResolver resolver(env.allocator, scene.set, scene.project.index);
+    const TextReferenceKind weak = TextReferenceKind::Weak;
+    CHECK(ResolveHandle(resolver, env.allocator, "/Game/Hero.Body", {}, weak).Error() ==
+          ErrorCode::InvalidArgument);
+    resolver.SetWeakScope(FixedId(HeroId));
+    auto hero = ResolveHandle(resolver, env.allocator, "/Game/Hero", {}, weak);
+    CHECK(hero && hero.Value() == scene.hero);
+    auto body = ResolveHandle(resolver, env.allocator, "/Game/Hero.Body", TestPartType(), weak);
+    CHECK(body && body.Value() == scene.body);
+    const String heroId = IdText(env.allocator, HeroId);
+    String heroSocket(env.allocator);
+    REQUIRE(heroSocket.TryAssign(heroId.View()) && heroSocket.TryAppend(".Body.Socket"));
+    auto socket = ResolveHandle(resolver, env.allocator, heroSocket.View(), {}, weak);
+    CHECK(socket && socket.Value() == scene.socket);
+    CHECK(ResolveHandle(resolver, env.allocator, "/Game/Hero.Body", IdOf<TestAsset>(), weak)
+              .Error() == ErrorCode::TypeMismatch);
+    CHECK(ResolveHandle(resolver, env.allocator, "/Game/Leaf", {}, weak).Error() ==
+          ErrorCode::InvalidArgument);
+    CHECK(scene.set.Find(FixedId(LeafId)) == nullptr);
+    resolver.SetWeakScope(FixedId(LeafId));
+    CHECK(ResolveHandle(resolver, env.allocator, "/Game/Leaf", {}, weak).Error() ==
+          ErrorCode::NotFound);
+    CHECK(scene.set.Find(FixedId(LeafId)) == nullptr);
+}
+
+// 호출자의 TypeRegistry가 닫힌 뒤 기대 타입이 있는 Hard 해석은 대상 타입 조회의 ShuttingDown이다
+// (리뷰 필수 — A2c2b 저장의 같은 경로와 같다).
+TEST(AssetTextResolver_TypeRegistryClosed) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Sources sources(env.allocator);
+    REQUIRE(MakeSources(env, sources));
+    ResolverScene scene(env, sources);
+    REQUIRE(scene.ready);
+    AssetTextResolver resolver(env.allocator, scene.set, scene.project.index);
+    REQUIRE(ResolveHandle(resolver, env.allocator, "/Game/Leaf"));
+    (void)env.types.Shutdown();
+    CHECK(ResolveHandle(resolver, env.allocator, "/Game/Leaf", IdOf<TestAsset>()).Error() ==
+          ErrorCode::ShuttingDown);
 }
 
 // 형식 거부(InvalidArgument): 앞 `/` 없는 이름, 대문자·35자·37자·null AssetId, 논리 경로 규칙

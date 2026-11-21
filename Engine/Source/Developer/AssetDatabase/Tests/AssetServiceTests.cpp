@@ -319,6 +319,76 @@ TEST(AssetService_SetAssignsAndSaves) {
           ErrorCode::InvalidArgument);
 }
 
+// Weak 참조 대입(5.1절 — 같은 패키지 안만 보존): asset-set의 Weak은 대상 패키지 안의 객체만
+// 받고(저장·다시 읽기에서 그대로), 다른 패키지는 진단 Unresolved로 거부한다. asset-new의 Weak은 새
+// 패키지의 객체가 아직 공개 전이라 거부한다(한계 — 만든 뒤 asset-set으로 넣는다).
+TEST(AssetService_WeakReferences) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Sources sources(env.allocator);
+    REQUIRE(MakeSources(env, sources));
+    TempProject root("service-weak");
+    ServiceScene scene(env, sources, env.allocator, root);
+    REQUIRE(scene.ready);
+    AssetDatabaseLock lock;
+    REQUIRE(lock.Acquire(scene.project.layout, 0));
+    AssetService& service = scene.service;
+    TextDiagnostics diagnostics(env.allocator);
+    REQUIRE(service.New(lock, "ComboAsset", "/Game/Fresh/Combo", {}, diagnostics));
+    Array<TextAssignment> inside(env.allocator);
+    const StringView insideTexts[] = {"values.cWeak.value=/Game/Fresh/Combo"};
+    REQUIRE(MakeAssignments(insideTexts, inside));
+    REQUIRE(service.Set(lock, "/Game/Fresh/Combo", inside.View(), false, diagnostics));
+    String lines(env.allocator);
+    REQUIRE(ReadBack(env, scene.project, scene.hooks, "/Game/Fresh/Combo", lines));
+    CHECK(Has(lines, "values.cWeak.value=/Game/Fresh/Combo\n"));
+
+    Array<TextAssignment> outside(env.allocator);
+    const StringView outsideTexts[] = {"values.cWeak.value=/Game/Hero"};
+    REQUIRE(MakeAssignments(outsideTexts, outside));
+    diagnostics.Clear();
+    CHECK(service.Set(lock, "/Game/Fresh/Combo", outside.View(), false, diagnostics).Error() ==
+          ErrorCode::InvalidArgument);
+    CHECK(diagnostics.Count() == 1 && diagnostics.Get(0).code == TextDiagnosticCode::Unresolved);
+    diagnostics.Clear();
+    CHECK(
+        service.New(lock, "ComboAsset", "/Game/Fresh/Other", outside.View(), diagnostics).Error() ==
+        ErrorCode::InvalidArgument);
+    CHECK(diagnostics.Count() == 1 && diagnostics.Get(0).code == TextDiagnosticCode::Unresolved);
+}
+
+// 대표 에셋이 없어진 대상(리뷰 필수 — 서비스가 집합을 공개하므로 호출자가 열린 패키지의 대표 에셋을
+// Discard할 수 있다): asset-info·asset-set은 NotFound(진단 None·그 패키지 id)다. 호출자의
+// TypeRegistry가 닫히면 asset-list --type은 타입 조회의 ShuttingDown이다.
+TEST(AssetService_DiscardedRepresentativeAndClosedTypes) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Sources sources(env.allocator);
+    REQUIRE(MakeSources(env, sources));
+    TempProject root("service-discarded");
+    ServiceScene scene(env, sources, env.allocator, root);
+    REQUIRE(scene.ready);
+    AssetDatabaseLock lock;
+    REQUIRE(lock.Acquire(scene.project.layout, 0));
+    AssetService& service = scene.service;
+    String out(env.allocator);
+    REQUIRE(service.Info("/Game/Leaf", AssetInfoOptions{}, out));
+    EditorPackageSet& packages = service.Packages();
+    REQUIRE(packages.Registry().Discard(packages.Access(), RepresentativeOf(packages, LeafId)));
+    REQUIRE(packages.Registry().Collect(packages.Access()));
+    AssetDiagnostic failure;
+    CHECK(service.Info("/Game/Leaf", AssetInfoOptions{}, out, nullptr, &failure).Error() ==
+          ErrorCode::NotFound);
+    CHECK(failure.code == AssetDiagnosticCode::None && failure.asset == FixedId(LeafId));
+    TextDiagnostics diagnostics(env.allocator);
+    CHECK(service.Set(lock, "/Game/Leaf", {}, false, diagnostics).Error() == ErrorCode::NotFound);
+
+    (void)env.types.Shutdown();
+    Array<const AssetIndexEntry*> listed(env.allocator);
+    CHECK(service.List("TestAsset", "", listed, &failure).Error() == ErrorCode::ShuttingDown);
+    CHECK(failure.code == AssetDiagnosticCode::None);
+}
+
 // asset-info: Edit 줄(참조는 논리 경로, 색인에 없는 Soft는 AssetId), Report 줄(TestAsset은 Edit와
 // 같다 — 출력 제외 플래그가 Transient뿐), JSON, AssetId 대상. 줄바꿈이 든 값은 줄로 쓸 수 없어
 // Unsupported(진단 None)이고 JSON은 쓴다. 대상 거부는 asset-set과 같다.

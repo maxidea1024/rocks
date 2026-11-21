@@ -136,7 +136,20 @@ Result<void> AssetTextResolver::Resolve(StringView text, TypeId expected, TextRe
         return Result<void>::Success();
     }
 
-    auto package = OpenPackage(id.Value());
+    Result<ObjectHandle> package = Result<ObjectHandle>::Failure(ErrorCode::NotFound);
+    if (kind == TextReferenceKind::Weak) {
+        // Weak은 대입 대상의 패키지 안만 보존된다(5.1절) — 밖이면 거부하고 열지 않는다.
+        if (weakScope_.IsNull() || !(id.Value() == weakScope_)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (const EditorPackageInfo* info = set_->Find(weakScope_); info != nullptr) {
+            package = Result<ObjectHandle>::Success(info->package);
+        }
+    } else {
+        package = OpenPackage(id.Value());
+    }
+
     if (!package) {
         return Result<void>::Failure(package.Error());
     }

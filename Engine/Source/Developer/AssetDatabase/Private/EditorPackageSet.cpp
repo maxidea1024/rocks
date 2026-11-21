@@ -640,6 +640,11 @@ Result<ObjectHandle> EditorPackageSet::Create(const LogicalPath& path, TypeId ty
         return fail(AssetDiagnosticCode::None, ErrorCode::InvalidArgument);
     }
 
+    // 만들기 초기화 안의 만들기·저장은 거부한다(경로·id 판정과 표 자리가 바깥 만들기와 엇갈린다).
+    if (creating_) {
+        return fail(AssetDiagnosticCode::None, ErrorCode::Busy);
+    }
+
     // 경로: 색인에 같은 경로 키가 있거나(둘 이상이면 AlreadyExists) 저장하지 않은 새 패키지와
     // 겹친다.
     auto indexed = config_.index->FindByPath(path);
@@ -718,8 +723,10 @@ Result<ObjectHandle> EditorPackageSet::Create(const LogicalPath& path, TypeId ty
     }
 
     if (initializer != nullptr) {
-        if (auto initialized = initializer->Initialize(transaction, representative.Value());
-            !initialized) {
+        creating_ = true;
+        auto initialized = initializer->Initialize(transaction, representative.Value());
+        creating_ = false;
+        if (!initialized) {
             return fail(AssetDiagnosticCode::None, initialized.Error());
         }
     }
@@ -780,6 +787,10 @@ Result<void> EditorPackageSet::Save(AssetId id, const AssetDatabaseLock& lock,
     if (registry_.Get() == nullptr || config_.hooks == nullptr ||
         !lock.IsHeldFor(*config_.layout)) {
         return fail(AssetDiagnosticCode::None, ErrorCode::InvalidArgument);
+    }
+
+    if (creating_) {
+        return fail(AssetDiagnosticCode::None, ErrorCode::Busy);
     }
 
     const usize at = LowerBound(id);
