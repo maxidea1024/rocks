@@ -23,6 +23,10 @@ internal static class GameProjectTests
             Snapshot(Path.Combine(root, "snapshot"));
             await CleanAsync(Path.Combine(root, "clean"));
             Assembly(Path.Combine(root, "assembly"));
+            if (OperatingSystem.IsWindows())
+            {
+                Shell(Path.Combine(root, "shell"));
+            }
         }
         finally
         {
@@ -30,7 +34,7 @@ internal static class GameProjectTests
         }
 
         Console.WriteLine("PASS game project: SDK association and registries, input snapshot and rule exclusions, game clean boundaries, " +
-            "multi-configuration SDK assembly");
+            "multi-configuration SDK assembly, shell menu registration");
     }
 
     private static void Association(string root)
@@ -653,6 +657,95 @@ internal static class GameProjectTests
         foreach (string bad in new[] { "debug", "Debug,Debug", "", "Debug,", "Fast" })
         {
             Error(() => SdkExportCommand.Parse(bad));
+        }
+    }
+
+    // 셸 메뉴 등록(Docs/Design/ProjectFiles.ko.md 12절, PJ8): 임시 하위 키를 Classes·선택기 키로 주어 실제 HKCU Classes에는 쓰지 않는다.
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static void Shell(string root)
+    {
+        string FakeSdk(string name, int manifest, string engine, bool cli)
+        {
+            string sdk = Path.Combine(root, name);
+            string[] parts = engine.Split('.');
+            Write(sdk, SdkAssociation.ManifestName, $"{{ \"Version\": {manifest}, \"EngineVersion\": {{ \"Major\": {parts[0]}, \"Minor\": {parts[1]}, \"Patch\": {parts[2]} }} }}");
+            if (cli)
+            {
+                Write(sdk, "Tools/Rocks.Build.Cli/Rocks.Build.Cli.dll", "");
+            }
+
+            return sdk;
+        }
+
+        int current = InstalledSdk.ManifestVersion;
+        string low = FakeSdk("Low", current, "0.1.5", true);
+        string high = FakeSdk("High", current, "0.2.0", true);
+        string oldManifest = FakeSdk("OldManifest", current - 1, "0.3.0", true);
+        string noCli = FakeSdk("NoCli", current, "0.4.0", false);
+        var registry = new MemoryRegistry();
+        foreach (string sdk in new[] { low, high, oldManifest, noCli, Path.Combine(root, "Removed") })
+        {
+            registry.Register(sdk);
+        }
+
+        const string testsKey = @"Software\Rocks\Tests";
+        string scope = testsKey + @"\" + Guid.NewGuid().ToString("B");
+        string classes = scope + @"\Classes";
+        string selector = scope + @"\ProjectSelector";
+        try
+        {
+            ShellSelection selection = ShellRegistration.Write(registry, classes, selector);
+            string cli = Path.Combine(high, "Tools", "Rocks.Build.Cli", "Rocks.Build.Cli.dll");
+            Require(Same(selection.Sdk, high) && Same(selection.Cli, cli), "the selector is the highest valid SDK: " + selection.Sdk);
+            string? Value(string key, string name = "")
+            {
+                using var opened = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(key);
+                return opened?.GetValue(name) as string;
+            }
+
+            string command = Value(classes + @"\" + ShellRegistration.ProgId + @"\shell\rocksgenproj\command")!;
+            Require(Value(classes + @"\.rocksproject") == ShellRegistration.ProgId && Value(classes + @"\" + ShellRegistration.ProgId + @"\shell\rocksgenproj") ==
+                "Generate Visual Studio project files" && command == ShellRegistration.MenuCommand(selection.Cli) &&
+                command.Contains("projectfiles --project \"%1\"", StringComparison.Ordinal) && command.Contains("shell-register again", StringComparison.Ordinal),
+                "shell menu values: " + command);
+            Require(Same(Value(selector, "Sdk")!, high) && Same(Value(selector, "Cli")!, cli), "selector values");
+
+            // 같은 엔진 버전이면 등록 ID ordinal 첫째다.
+            string twin = FakeSdk("Twin", current, "0.2.0", true);
+            registry.Register(twin);
+            string expected = registry.List().Where(entry => Same(entry.Path, high) || Same(entry.Path, twin)).OrderBy(entry => entry.Id, StringComparer.Ordinal).First().Path;
+            Require(Same(ShellRegistration.Write(registry, classes, selector).Sdk, expected), "equal engine versions pick the first ID");
+
+            // 지우기는 다른 프로그램이 가져간 .rocksproject 연결을 남긴다.
+            using (var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(classes + @"\.rocksproject"))
+            {
+                key.SetValue("", "Other.Application");
+            }
+
+            ShellRegistration.Remove(classes, selector);
+            Require(Value(classes + @"\.rocksproject") == "Other.Application" && Microsoft.Win32.Registry.CurrentUser.OpenSubKey(classes + @"\" + ShellRegistration.ProgId) is null &&
+                Microsoft.Win32.Registry.CurrentUser.OpenSubKey(selector) is null, "shell-unregister keeps another program's association");
+
+            // 유효한 SDK가 없으면 이유를 적은 오류다.
+            var invalid = new MemoryRegistry();
+            invalid.Register(oldManifest);
+            invalid.Register(noCli);
+            string error = Error(() => ShellRegistration.Write(invalid, classes, selector));
+            Require(error.Contains("manifest version", StringComparison.Ordinal) && error.Contains("no build CLI", StringComparison.Ordinal), "no valid selector SDK: " + error);
+        }
+        finally
+        {
+            Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(scope, throwOnMissingSubKey: false);
+            bool empty;
+            using (var tests = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(testsKey))
+            {
+                empty = tests is not null && tests.SubKeyCount == 0 && tests.ValueCount == 0;
+            }
+
+            if (empty)
+            {
+                Microsoft.Win32.Registry.CurrentUser.DeleteSubKey(testsKey, throwOnMissingSubKey: false);
+            }
         }
     }
 
