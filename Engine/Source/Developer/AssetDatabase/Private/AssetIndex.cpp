@@ -11,6 +11,7 @@
 #include <Core/Text/Unicode.h>
 #include <Object/AssetId.h>
 #include <Object/TypeRegistry.h>
+#include <Task/ParallelFor.h>
 
 // 에디터 패키지 색인이다(Docs/Design/AssetSystem.ko.md 7절, 7.1절 11·13 — A2b).
 namespace rocks {
@@ -23,6 +24,8 @@ using asset_database_detail::NameSet;
 
 // 경로 임시 저장소의 인라인 byte 수다(넘으면 allocator로 자란다).
 constexpr usize IndexPathBytes = 512;
+// 병렬 읽기 batch 하나의 최소 파일 수다(파일 하나는 열기 + 범위 읽기 몇 번 — 분배 비용을 나눈다).
+constexpr usize ScanBatchFiles = 8;
 
 // 마운트 "/Game"의 경로 키다(논리 경로 키의 첫 구성 요소 — 7.1절 1).
 constexpr StringView GameMountKey = "game";
@@ -347,9 +350,10 @@ void AssetIndexRefresh::Reset() noexcept {
     diagnostics_.Clear();
 }
 
-AssetIndex::AssetIndex(Allocator& allocator, const ProjectLayout& layout) noexcept
-    : allocator_(&allocator), layout_(&layout), entries_(allocator), byId_(allocator),
-      diagnostics_(allocator) {
+AssetIndex::AssetIndex(Allocator& allocator, const ProjectLayout& layout,
+                       WorkerScheduler* scheduler) noexcept
+    : allocator_(&allocator), layout_(&layout), scheduler_(scheduler), entries_(allocator),
+      byId_(allocator), diagnostics_(allocator) {
 }
 
 // 패키지 파일 하나(Content 상대 이름 relative)를 부분 읽기해 found에 항목을, diagnostics에 그
@@ -707,8 +711,10 @@ Result<void> AssetIndex::ScanTree(platform::FileSystem& files, const PackageRead
                                   Array<AssetIndexEntry>& found,
                                   Array<AssetIndexDiagnostic>& diagnostics) const noexcept {
     const StringView content = layout_->ContentDirectory();
-    // 깊이 우선으로 디렉터리를 연다(Content 상대 경로 표 — 빈 문자열은 Content 자신).
+    // 깊이 우선으로 디렉터리를 연다(Content 상대 경로 표 — 빈 문자열은 Content 자신). 패키지
+    // 후보는 모아 두고 걷기가 끝난 뒤 읽는다(ReadCandidates — scheduler가 있으면 병렬).
     Array<String> pending(*allocator_);
+    Array<ScanCandidate> candidates(*allocator_);
     String first(*allocator_);
     if (auto assigned = first.TryAssign(start); !assigned) {
         return assigned;
@@ -860,10 +866,43 @@ Result<void> AssetIndex::ScanTree(platform::FileSystem& files, const PackageRead
                 continue;
             }
 
+            ScanCandidate candidate(*allocator_);
+            candidate.relative = Move(relative);
+            candidate.modifiedTicks = child.info.modifiedTicks;
+            if (auto pushed = candidates.TryPushBack(Move(candidate)); !pushed) {
+                return pushed;
+            }
+        }
+    }
+
+    return ReadCandidates(files, editor, cache, candidates, found, diagnostics);
+}
+
+Result<void> AssetIndex::ReadCandidates(platform::FileSystem& files,
+                                        const PackageReadOptions& editor,
+                                        const AssetIndexCache* cache,
+                                        Array<ScanCandidate>& candidates,
+                                        Array<AssetIndexEntry>& found,
+                                        Array<AssetIndexDiagnostic>& diagnostics) const noexcept {
+    // 후보마다 결과 칸(항목 0·1개 + 그 파일 진단)을 둔다 — 작업마다 겹치지 않는 칸에 쓴다.
+    Array<ScanSlot> slots(*allocator_);
+    if (auto reserved = slots.TryReserve(candidates.Size()); !reserved) {
+        return reserved;
+    }
+
+    for (usize at = 0; at < candidates.Size(); ++at) {
+        (void)slots.TryPushBack(ScanSlot(*allocator_));
+    }
+
+    auto read = [&](usize begin, usize end) noexcept {
+        for (usize at = begin; at < end; ++at) {
+            ScanCandidate& candidate = candidates[at];
+            ScanSlot& slot = slots[at];
             if (cache != nullptr) {
-                auto reused = IndexCached(files, *cache, relative, child.info.modifiedTicks, found);
+                auto reused = IndexCached(files, *cache, candidate.relative,
+                                          candidate.modifiedTicks, slot.found);
                 if (!reused) {
-                    return Result<void>::Failure(reused.Error());
+                    return reused.Error();
                 }
 
                 if (reused.Value()) {
@@ -871,11 +910,49 @@ Result<void> AssetIndex::ScanTree(platform::FileSystem& files, const PackageRead
                 }
             }
 
-            if (auto indexed = IndexFile(files, editor, Move(relative), StringView(),
-                                         child.info.modifiedTicks, found, diagnostics);
+            if (auto indexed = IndexFile(files, editor, Move(candidate.relative), StringView(),
+                                         candidate.modifiedTicks, slot.found, slot.diagnostics);
                 !indexed) {
-                return indexed;
+                return indexed.Error();
             }
+        }
+
+        return ErrorCode::None;
+    };
+    if (scheduler_ != nullptr) {
+        ParallelForOptions options;
+        options.minBatchSize = ScanBatchFiles;
+        if (auto done = ParallelFor(*scheduler_, *allocator_, candidates.Size(), read, options);
+            !done) {
+            return done;
+        }
+    } else if (const ErrorCode failed = read(0, candidates.Size()); failed != ErrorCode::None) {
+        return Result<void>::Failure(failed);
+    }
+
+    // 후보 순서대로 모은다(게시가 정렬하므로 결과는 직렬과 같다).
+    usize entries = 0;
+    usize problems = 0;
+    for (const ScanSlot& slot : slots) {
+        entries += slot.found.Size();
+        problems += slot.diagnostics.Size();
+    }
+
+    if (auto reserved = found.TryReserve(found.Size() + entries); !reserved) {
+        return reserved;
+    }
+
+    if (auto reserved = diagnostics.TryReserve(diagnostics.Size() + problems); !reserved) {
+        return reserved;
+    }
+
+    for (ScanSlot& slot : slots) {
+        for (AssetIndexEntry& entry : slot.found) {
+            (void)found.TryPushBack(Move(entry));
+        }
+
+        for (AssetIndexDiagnostic& diagnostic : slot.diagnostics) {
+            (void)diagnostics.TryPushBack(Move(diagnostic));
         }
     }
 

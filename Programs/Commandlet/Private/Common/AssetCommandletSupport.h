@@ -11,6 +11,7 @@
 #include <Core/Text/StringBuilder.h>
 #include <Object/ModuleTypeRegistrations.h>
 #include <Object/TypeRegistry.h>
+#include <Task/WorkerScheduler.h>
 
 namespace rocks {
 
@@ -113,13 +114,38 @@ bool ParseWaitMilliseconds(StringView text, uint32& out) noexcept;
 inline constexpr ContextId CommandletAssetContext{0x524f434b41535345ull, 1};
 
 // 명령 하나의 실행 상태다: 프로젝트·타입·서비스.
+// 색인 검색의 파일 읽기를 나눌 worker 수다(Docs/Design/AssetSystem.ko.md 7.1절 16 A2d2 — 패키지
+// 5만 개 측정에서 3개가 가장 빨랐고 더 늘리면 느려졌다).
+inline constexpr uint32 CommandletScanWorkers = 3;
+
+// 명령 하나 동안의 검색 scheduler다. 시작하지 못하거나(스레드 생성 실패) 논리 프로세서가 하나면
+// Get이 null이고 검색은 직렬이다(결과가 같다). allocator는 여러 스레드의 동시 호출을 받는다
+// (프로세스 기본 allocator).
+class ScanScheduler {
+public:
+    explicit ScanScheduler(Allocator& allocator) noexcept;
+    ~ScanScheduler() noexcept;
+    ScanScheduler(const ScanScheduler&) = delete;
+    ScanScheduler& operator=(const ScanScheduler&) = delete;
+
+    WorkerScheduler* Get() noexcept {
+        return started_ ? &scheduler_ : nullptr;
+    }
+
+private:
+    WorkerScheduler scheduler_;
+    bool started_ = false;
+};
+
 struct EditSession {
     EditSession(Allocator& allocator, ModuleLoader& modules) noexcept
-        : layout(allocator), types(allocator, modules), hooks(allocator, types.Types()),
-          warnings(allocator), diagnostics(allocator) {
+        : layout(allocator), scan(allocator), types(allocator, modules),
+          hooks(allocator, types.Types()), warnings(allocator), diagnostics(allocator) {
     }
 
     ProjectLayout layout;
+    // 서비스(색인)보다 먼저 만들고 나중에 없앤다(서비스가 빌린다).
+    ScanScheduler scan;
     AssetCommandTypes types;
     AssetTypeHookTable hooks;
     UniquePtr<AssetService> service;

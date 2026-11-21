@@ -70,7 +70,7 @@ private:
 
 AssetService::AssetService(Allocator& allocator, const ProjectLayout& layout,
                            const AssetServiceConfig& config) noexcept
-    : allocator_(&allocator), layout_(&layout), index_(allocator, layout),
+    : allocator_(&allocator), layout_(&layout), index_(allocator, layout, config.scheduler),
       set_(allocator, MakeSetConfig(config, layout, index_)), read_(config.packages.read),
       types_(config.packages.types), files_(config.packages.files),
       cacheFiles_(config.cacheFiles != nullptr ? config.cacheFiles : config.packages.files),

@@ -23,6 +23,7 @@ namespace rocks {
 
 class StringBuilderBase;
 class TypeRegistry;
+class WorkerScheduler;
 
 // 의존 종류 묶음이다(PackageDependencyKind 값 v의 bit 1 << v).
 inline constexpr uint32 DependencyKindBit(PackageDependencyKind kind) noexcept {
@@ -184,7 +185,13 @@ private:
 
 class AssetIndex {
 public:
-    AssetIndex(Allocator& allocator, const ProjectLayout& layout) noexcept;
+    // scheduler가 있으면 검색(Rebuild·RefreshPaths의 하위 트리)의 파일 읽기를 그 worker와 나눠
+    // 한다(7.1절 16 A2d2 — 결과는 직렬과 같다). 그때 allocator·검색에 넘기는 FileSystem·layout의
+    // allocator는 여러 스레드의 동시 호출을 받아야 한다(SystemAllocator·PhysicalFileSystem은
+    // 받는다). scheduler는 색인보다 오래 살고, 색인을 그 scheduler의 worker 안에서 갱신하면 읽기는
+    // 호출 스레드 혼자 한다(ParallelFor 규칙).
+    AssetIndex(Allocator& allocator, const ProjectLayout& layout,
+               WorkerScheduler* scheduler = nullptr) noexcept;
 
     AssetIndex(const AssetIndex&) = delete;
     AssetIndex& operator=(const AssetIndex&) = delete;
@@ -310,12 +317,36 @@ private:
     Result<bool> IndexCached(platform::FileSystem& files, const AssetIndexCache& cache,
                              const String& relative, int64 modifiedTicks,
                              Array<AssetIndexEntry>& found) const noexcept;
+    // 걷기가 모은 패키지 후보다(Content 상대 이름과 열거한 수정 시각).
+    struct ScanCandidate {
+        explicit ScanCandidate(Allocator& allocator) noexcept : relative(allocator) {
+        }
+
+        String relative;
+        int64 modifiedTicks = 0;
+    };
+
+    // 후보 하나의 읽기 결과 칸이다(항목 0·1개와 그 파일 진단).
+    struct ScanSlot {
+        explicit ScanSlot(Allocator& allocator) noexcept
+            : found(allocator), diagnostics(allocator) {
+        }
+
+        Array<AssetIndexEntry> found;
+        Array<AssetIndexDiagnostic> diagnostics;
+    };
+
     // start(Content 상대 — 빈 문자열은 Content)부터 깊이 우선으로 걸어 found·diagnostics에 더한다
     // (Rebuild·RefreshPaths 공용). Content 자신의 열거 실패만 오류다.
     Result<void> ScanTree(platform::FileSystem& files, const PackageReadOptions& editor,
                           const AssetIndexCache* cache, StringView start,
                           Array<AssetIndexEntry>& found,
                           Array<AssetIndexDiagnostic>& diagnostics) const noexcept;
+    // 후보를 읽어(캐시 재사용 또는 부분 읽기 — scheduler가 있으면 병렬) 후보 순서대로 더한다.
+    Result<void> ReadCandidates(platform::FileSystem& files, const PackageReadOptions& editor,
+                                const AssetIndexCache* cache, Array<ScanCandidate>& candidates,
+                                Array<AssetIndexEntry>& found,
+                                Array<AssetIndexDiagnostic>& diagnostics) const noexcept;
     // fileName 한 파일을 Stat해 다시 읽는다(Refresh·RefreshPaths 공용 — 없어졌으면 아무것도 더하지
     // 않는다).
     Result<void> RereadFile(platform::FileSystem& files, const PackageReadOptions& editor,
@@ -330,6 +361,7 @@ private:
 
     Allocator* allocator_;
     const ProjectLayout* layout_;
+    WorkerScheduler* scheduler_;
     Array<AssetIndexEntry> entries_;
     // 항목 index를 id 순으로 둔 표다(FindById 이진 검색).
     Array<usize> byId_;
