@@ -41,19 +41,19 @@ const ModuleEntry& RunnerEntry() noexcept {
 // 본문을 만든다.
 void Manifest(char* out, usize capacity, const char* rows) noexcept {
     snprintf(out, capacity,
-             "{\"schema\": 2, \"buildId\": \"%s\", \"engineVersion\": \"0.1.0\", "
+             "{\"schema\": 3, \"buildId\": \"%s\", \"engineVersion\": \"0.1.0\", "
              "\"toolchainFingerprint\": \"%s\", \"modules\": [%s]}",
              ValidBuildId, ValidFingerprint, rows);
 }
 
 // 행 하나의 JSON이다.
 void Row(char* out, usize capacity, const char* name, const char* file, uint64 size,
-         const char* dependencies, const char* phase, bool executable) noexcept {
+         const char* dependencies, const char* phase, bool host) noexcept {
     snprintf(out, capacity,
              "{\"name\": \"%s\", \"file\": \"%s\", \"size\": %llu, \"dependencies\": [%s], "
-             "\"loadingPhase\": \"%s\", \"onRequest\": false, \"executable\": %s}",
+             "\"loadingPhase\": \"%s\", \"onRequest\": false, \"host\": %s}",
              name, file, static_cast<unsigned long long>(size), dependencies, phase,
-             executable ? "true" : "false");
+             host ? "true" : "false");
 }
 
 bool Parse(const char* text, rocks::detail::ModuleManifestData& data,
@@ -121,26 +121,24 @@ uint64 FileSize(const char* path) noexcept {
     return PhysicalFileSystem().Stat(path, strlen(path), info) ? info.size : 0;
 }
 
-// 작업 디렉터리에 실행 파일 행 파일(Runner.exe — 내용은 아무 byte)과 manifest를 쓴다.
+// 작업 디렉터리에 호스트 행 파일(Fixture-Runner.dll — 내용은 아무 byte)과 manifest를 쓴다.
 struct ManifestFolder {
     Scratch scratch;
     char manifest[1100]{};
     char runner[1100]{};
 
-    bool Make(const char* extraRows) noexcept {
-        if (!scratch.Make() || !scratch.Child("Runner.exe", runner, sizeof(runner)) ||
+    bool Make(uint64 runnerSize) noexcept {
+        if (!scratch.Make() || !scratch.Child("Fixture-Runner.dll", runner, sizeof(runner)) ||
             !WriteBytes(runner, "runner", 6) ||
             !scratch.Child("Fixture.modules.json", manifest, sizeof(manifest))) {
             return false;
         }
 
         char runnerRow[512];
-        Row(runnerRow, sizeof(runnerRow), "Runner", "Runner.exe", 6, "", "None", true);
-        char rows[2048];
-        snprintf(rows, sizeof(rows), "%s%s%s", extraRows, extraRows[0] != '\0' ? ", " : "",
-                 runnerRow);
+        Row(runnerRow, sizeof(runnerRow), "Runner", "Fixture-Runner.dll", runnerSize, "", "None",
+            true);
         char text[4096];
-        Manifest(text, sizeof(text), rows);
+        Manifest(text, sizeof(text), runnerRow);
         return WriteBytes(manifest, text, strlen(text));
     }
 };
@@ -175,7 +173,7 @@ TEST(ModuleManifest_ParsesRowsInOrder) {
               data.rows[2].phase == LoadingPhase::None);
         CHECK(strcmp(data.files[1], "Fixture-Render.dll") == 0 && data.sizes[1] == 20 &&
               data.sizes[2] == 30);
-        CHECK(!data.executable[0] && !data.executable[1] && data.executable[2]);
+        CHECK(!data.host[0] && !data.host[1] && data.host[2]);
         CHECK(data.rows[0].entry == nullptr && data.entries[0] == nullptr);
     }
 
@@ -184,12 +182,12 @@ TEST(ModuleManifest_ParsesRowsInOrder) {
 
 // 형식 위반은 모두 Incompatible(단계 "Manifest")이고 문구가 그 이유를 말한다: JSON 아님, 최상위 키
 // 빠짐·더함, schema·buildId·지문·엔진 버전 모양, 빈 modules, 행 키 빠짐·더함, 이름·파일 이름·크기·
-// 단계·표지 형식, 뒤 행이나 없는 행을 가리키는 의존, 중복 의존, 같은 이름 두 행, 실행 파일 행 둘.
+// 단계·표지 형식, 뒤 행이나 없는 행을 가리키는 의존, 중복 의존, 같은 이름 두 행, 호스트 행 둘.
 TEST(ModuleManifest_RejectsMalformedManifests) {
     SystemAllocator allocator;
     char good[512];
     Row(good, sizeof(good), "Core", "Core.dll", 1, "", "Default", false);
-    const char* header = "\"schema\": 2, \"buildId\": \"0123456789abcdef0123456789abcdef\", "
+    const char* header = "\"schema\": 3, \"buildId\": \"0123456789abcdef0123456789abcdef\", "
                          "\"engineVersion\": \"0.1.0\", \"toolchainFingerprint\": "
                          "\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"";
     // 행 하나의 키·값만 바꾼 행이다(나머지는 바른 값).
@@ -228,10 +226,10 @@ TEST(ModuleManifest_RejectsMalformedManifests) {
              "{\"buildId\": \"x\", \"modules\": [%s]}", good);
     snprintf(add("exactly the keys schema"), sizeof(cases[0].text),
              "{%s, \"modules\": [%s], \"extra\": 1}", header, good);
-    withHeader("schema must be", "1", id, "0.1.0", print);
-    withHeader("buildId must be", "2", "0123456789ABCDEF0123456789abcdef", "0.1.0", print);
-    withHeader("engineVersion must be", "2", id, "", print);
-    withHeader("toolchainFingerprint must be", "2", id, "0.1.0", "0123");
+    withHeader("schema must be", "2", id, "0.1.0", print);
+    withHeader("buildId must be", "3", "0123456789ABCDEF0123456789abcdef", "0.1.0", print);
+    withHeader("engineVersion must be", "3", id, "", print);
+    withHeader("toolchainFingerprint must be", "3", id, "0.1.0", "0123");
     withRows("modules must be a non-empty array", "");
     char text[1024];
     snprintf(text, sizeof(text),
@@ -239,43 +237,39 @@ TEST(ModuleManifest_RejectsMalformedManifests) {
              "\"loadingPhase\": \"Default\", \"onRequest\": false}");
     withRows("must have exactly the keys name", text);
     row(text, sizeof(text), "Core", "Core.dll", "1", "", "Default", "false",
-        ", \"executable\": false, \"extra\": 0");
+        ", \"host\": false, \"extra\": 0");
     withRows("must have exactly the keys name", text);
-    row(text, sizeof(text), "1Core", "Core.dll", "1", "", "Default", "false",
-        ", \"executable\": false");
+    row(text, sizeof(text), "1Core", "Core.dll", "1", "", "Default", "false", ", \"host\": false");
     withRows("is not a C identifier", text);
     row(text, sizeof(text), "Core", "sub/Core.dll", "1", "", "Default", "false",
-        ", \"executable\": false");
+        ", \"host\": false");
     withRows("must be a plain file name", text);
-    row(text, sizeof(text), "Core", "..", "1", "", "Default", "false", ", \"executable\": false");
+    row(text, sizeof(text), "Core", "..", "1", "", "Default", "false", ", \"host\": false");
     withRows("must be a plain file name", text);
-    row(text, sizeof(text), "Core", "Core.dll", "-1", "", "Default", "false",
-        ", \"executable\": false");
+    row(text, sizeof(text), "Core", "Core.dll", "-1", "", "Default", "false", ", \"host\": false");
     withRows("size must be a non-negative integer", text);
-    row(text, sizeof(text), "Core", "Core.dll", "1.5", "", "Default", "false",
-        ", \"executable\": false");
+    row(text, sizeof(text), "Core", "Core.dll", "1.5", "", "Default", "false", ", \"host\": false");
     withRows("size must be a non-negative integer", text);
-    row(text, sizeof(text), "Core", "Core.dll", "1", "", "Later", "false",
-        ", \"executable\": false");
+    row(text, sizeof(text), "Core", "Core.dll", "1", "", "Later", "false", ", \"host\": false");
     withRows("loadingPhase must be", text);
-    row(text, sizeof(text), "Core", "Core.dll", "1", "", "Default", "0", ", \"executable\": false");
-    withRows("onRequest and executable must be", text);
+    row(text, sizeof(text), "Core", "Core.dll", "1", "", "Default", "0", ", \"host\": false");
+    withRows("onRequest and host must be", text);
     row(text, sizeof(text), "Core", "Core.dll", "1", "\"Later\"", "Default", "false",
-        ", \"executable\": false");
+        ", \"host\": false");
     withRows("must name an earlier module", text);
     char rows[2048];
     row(text, sizeof(text), "Render", "Render.dll", "1", "\"Core\", \"Core\"", "Default", "false",
-        ", \"executable\": false");
+        ", \"host\": false");
     snprintf(rows, sizeof(rows), "%s, %s", good, text);
     withRows("lists dependency Core twice", rows);
     snprintf(rows, sizeof(rows), "%s, %s", good, good);
     withRows("lists module Core twice", rows);
     char runner[512];
-    Row(runner, sizeof(runner), "Runner", "Runner.exe", 1, "", "None", true);
+    Row(runner, sizeof(runner), "Runner", "Fixture-Runner.dll", 1, "", "None", true);
     char second[512];
-    Row(second, sizeof(second), "Tool", "Tool.exe", 1, "", "None", true);
+    Row(second, sizeof(second), "Tool", "Fixture-Tool.dll", 1, "", "None", true);
     snprintf(rows, sizeof(rows), "%s, %s", runner, second);
-    withRows("more than one executable row", rows);
+    withRows("more than one host row", rows);
     for (usize index = 0; index < count; ++index) {
         rocks::detail::ModuleManifestData data(allocator);
         ModuleLoadReport report;
@@ -295,54 +289,30 @@ TEST(ModuleManifest_RejectsMalformedManifests) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
-// 실행 파일 행만 있는 manifest로 로더를 만든다(OS 적재 없음): 실행 파일 진입 함수를 쓰고, 크기가
-// 같으면 성공해 그 모듈을 시작할 수 있다. 크기가 다르면 Incompatible, 진입 함수가 없으면
-// Incompatible(Manifest), manifest가 없으면 NotFound다.
-TEST(ModuleManifest_CreatesLoaderFromExecutableRow) {
+// OS 적재 전에 끝나는 실패: 호스트 행 파일 크기가 다르면 Incompatible(Lookup), manifest가 없으면
+// NotFound(requested는 파일 이름), 상대 경로는 Incompatible이다. 호스트 행도 OS로 싣으므로(3.14절)
+// 로더 생성 성공 경로는 실제 모듈 라이브러리가 있는 BS8d5의 Modular FoundationTests가 본다.
+TEST(ModuleManifest_CreateFailsBeforeLoading) {
     SystemAllocator allocator;
     {
         ManifestFolder folder;
-        REQUIRE(folder.Make(""));
+        REQUIRE(folder.Make(7));
         ModuleLoadReport report;
-        auto created = ModuleLoader::TryCreateFromManifest(allocator, StringView(folder.manifest),
-                                                           &RunnerEntry, report);
-        REQUIRE(created);
-        CHECK(report.IsOk());
-        CHECK(created.Value()->ModuleCount() == 1);
-        CHECK(created.Value()->Load("Runner").IsOk());
-        CHECK(created.Value()->IsStarted("Runner"));
-    }
-
-    {
-        ManifestFolder folder;
-        REQUIRE(folder.Make(""));
-        REQUIRE(WriteBytes(folder.runner, "runner!", 7));
-        ModuleLoadReport report;
-        auto created = ModuleLoader::TryCreateFromManifest(allocator, StringView(folder.manifest),
-                                                           &RunnerEntry, report);
+        auto created =
+            ModuleLoader::TryCreateFromManifest(allocator, StringView(folder.manifest), report);
         CHECK(!created && created.Error() == ErrorCode::InvalidArgument);
         CHECK(report.code == ModuleLoadCode::Incompatible && strcmp(report.stage, "Lookup") == 0 &&
               strcmp(report.failed, "Runner") == 0);
+        CHECK(strstr(report.message, "is 6 bytes but the manifest expects 7") != nullptr);
     }
 
     {
         ManifestFolder folder;
-        REQUIRE(folder.Make(""));
-        ModuleLoadReport report;
-        auto created = ModuleLoader::TryCreateFromManifest(allocator, StringView(folder.manifest),
-                                                           nullptr, report);
-        CHECK(!created && report.code == ModuleLoadCode::Incompatible &&
-              strcmp(report.stage, "Manifest") == 0);
-    }
-
-    {
-        ManifestFolder folder;
-        REQUIRE(folder.Make(""));
+        REQUIRE(folder.Make(6));
         char missing[1100];
         REQUIRE(folder.scratch.Child("Absent.modules.json", missing, sizeof(missing)));
         ModuleLoadReport report;
-        auto created = ModuleLoader::TryCreateFromManifest(allocator, StringView(missing),
-                                                           &RunnerEntry, report);
+        auto created = ModuleLoader::TryCreateFromManifest(allocator, StringView(missing), report);
         CHECK(!created && created.Error() == ErrorCode::NotFound &&
               report.code == ModuleLoadCode::NotFound);
         CHECK(strcmp(report.requested, "Absent.modules.json") == 0);
@@ -351,11 +321,30 @@ TEST(ModuleManifest_CreatesLoaderFromExecutableRow) {
     {
         // 상대 경로는 작업 폴더에 기대므로 받지 않는다(Incompatible, InvalidArgument).
         ModuleLoadReport report;
-        auto created = ModuleLoader::TryCreateFromManifest(allocator, "bin/Fixture.modules.json",
-                                                           &RunnerEntry, report);
+        auto created =
+            ModuleLoader::TryCreateFromManifest(allocator, "bin/Fixture.modules.json", report);
         CHECK(!created && created.Error() == ErrorCode::InvalidArgument &&
               report.code == ModuleLoadCode::Incompatible &&
               strstr(report.message, "not an absolute file path") != nullptr);
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+// 정적 표 로더(TryCreate — Monolithic)에는 호스트 라이브러리가 없으므로 FindHostSymbol은 false와
+// null 주소다.
+TEST(ModuleManifest_FindHostSymbolNeedsManifestLoader) {
+    SystemAllocator allocator;
+    {
+        static constexpr ModuleTableRow rows[] = {
+            {"Runner", &RunnerEntry, nullptr, 0, LoadingPhase::None, false},
+        };
+        auto created = ModuleLoader::TryCreate(allocator, ModuleTable(rows, 1));
+        REQUIRE(created);
+        void* address = reinterpret_cast<void*>(&allocator);
+        DynamicLibraryLease lease;
+        CHECK(!created.Value()->FindHostSymbol("RocksApplicationDescription", address, lease));
+        CHECK(address == nullptr);
     }
 
     CHECK(allocator.Stats().liveAllocations == 0);
@@ -427,8 +416,8 @@ TEST(ModuleManifest_PrepareReportsLoadFailures) {
         REQUIRE(WriteBytes(manifest, text, strlen(text)));
         ModuleLoadReport report;
         {
-            auto created = ModuleLoader::TryCreateFromManifest(allocator, StringView(manifest),
-                                                               &RunnerEntry, report);
+            auto created =
+                ModuleLoader::TryCreateFromManifest(allocator, StringView(manifest), report);
             CHECK(!created);
         }
 

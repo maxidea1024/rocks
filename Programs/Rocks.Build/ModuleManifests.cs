@@ -18,7 +18,7 @@ public static class ModuleManifests
     public const string FileSuffix = ".modules.json";
 
     /// <summary>manifest 형식 판이다. 키를 바꾸면 올리고 모듈 로더의 읽기도 함께 바꾼다.</summary>
-    public const int Schema = 2;
+    public const int Schema = 3;
 
     // buildId 길이(GUID 32자 소문자 16진)다.
     private const int BuildIdLength = 32;
@@ -38,7 +38,7 @@ public static class ModuleManifests
     /// 같은 엔진 버전·툴체인 지문이면 다시 쓰고(MD13 — UE <c>CanRecycleBuildId</c>), 아니면 새 GUID다. 엔진 버전이 없으면
     /// <see cref="ArgumentException"/>이다(빌드 정보와 같은 규칙).
     /// </summary>
-    internal static string? Write(NativeBuildRequest request, NativePlan plan)
+    internal static string? Write(NativeBuildRequest request)
     {
         if (request.LinkType != NativeLinkType.Modular)
         {
@@ -84,8 +84,8 @@ public static class ModuleManifests
             writer.WriteStartArray("modules");
             foreach (ModuleRow row in ModuleTables.Rows(executable, modules, entries))
             {
-                string file = row.Executable ? Path.GetFileName(plan.ModuleOutputs[row.Name])
-                    : LinkTypes.SharedLibraryFileName(target, row.Name, platform, request.Configuration);
+                // 실행 파일 행도 호스트 공유 라이브러리다(Docs/Design/ModuleLoader.ko.md 3.14절 — 입력 검사가 Launch에 닿게 한다).
+                string file = LinkTypes.SharedLibraryFileName(target, row.Name, platform, request.Configuration);
                 writer.WriteStartObject();
                 writer.WriteString("name", row.Name);
                 writer.WriteString("file", file);
@@ -99,8 +99,8 @@ public static class ModuleManifests
                 writer.WriteEndArray();
                 writer.WriteString("loadingPhase", row.Phase.ToString());
                 writer.WriteBoolean("onRequest", row.OnRequest);
-                // 실행 파일 행은 OS로 싣지 않고 실행 파일이 자기 진입 함수를 넘긴다(Docs/Design/ModuleLoader.ko.md 3.13절).
-                writer.WriteBoolean("executable", row.Executable);
+                // 호스트 모듈 행이다. Launch가 그 라이브러리에서 앱 기술을 찾는다(Docs/Design/ModuleLoader.ko.md 3.14절).
+                writer.WriteBoolean("host", row.Executable);
                 writer.WriteEndObject();
             }
 

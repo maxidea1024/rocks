@@ -267,6 +267,14 @@ config::ConfigContext& HostSettings::Context() noexcept {
 }
 
 Result<void> HostSettings::Initialize(const HostSettingsOptions& options) noexcept {
+    // 모듈 설정 등록은 프로세스 로더의 표를 쓴다(Modular에는 정적 모듈 표가 없다 —
+    // Docs/Design/ModuleLoader.ko.md 3.14절).
+    if (options.modules == nullptr) {
+        Log::Error(LogHostConfig, "Config setup needs the process module loader "
+                                  "(HostSettingsOptions::modules)");
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
     Result<void> step = names_.Initialize();
     namesReady_ = step.IsOk();
     const char* stage = "name pool";
@@ -315,7 +323,7 @@ Result<void> HostSettings::Initialize(const HostSettingsOptions& options) noexce
     // 시작하는 모듈의 이름도 파일·CompleteStartup 전에 등록되어 오타 경고가 나지 않는다.
     if (step) {
         stage = "settings registration";
-        step = RegisterModuleSettings(options.modules);
+        step = RegisterModuleSettings(*options.modules);
     }
 
     if (step && options.registerSettings != nullptr) {
@@ -354,27 +362,24 @@ Result<void> HostSettings::Initialize(const HostSettingsOptions& options) noexce
     return step;
 }
 
-Result<void> HostSettings::RegisterModuleSettings(ModuleLoader* modules) noexcept {
-    const ModuleTable table = modules != nullptr ? modules->Table() : GeneratedModuleTable();
+Result<void> HostSettings::RegisterModuleSettings(ModuleLoader& modules) noexcept {
+    const ModuleTable table = modules.Table();
     for (usize index = 0; index < table.Size(); ++index) {
         const ModuleTableRow& row = table[index];
         // manifest 로더(Modular)의 행은 entry 칸이 비어 있으므로 로더가 준비한 진입 기술을 쓴다.
-        const ModuleEntry& entry = modules != nullptr ? modules->EntryAt(index) : row.entry();
+        const ModuleEntry& entry = modules.EntryAt(index);
         if (entry.registerSettings == nullptr) {
             continue;
         }
 
-        // 등록한 CVar 핸들·설정 struct가 모듈 코드를 가리키는 동안 그 모듈 코드를 붙잡는다(로더가
-        // 없으면 정적 링크 코드라 lease가 없다).
-        if (modules != nullptr) {
-            auto lease = modules->AcquireLease(row.name);
-            if (!lease) {
-                return Result<void>::Failure(lease.Error());
-            }
+        // 등록한 CVar 핸들·설정 struct가 모듈 코드를 가리키는 동안 그 모듈 코드를 붙잡는다.
+        auto lease = modules.AcquireLease(row.name);
+        if (!lease) {
+            return Result<void>::Failure(lease.Error());
+        }
 
-            if (auto retained = context_->RetainModule(Move(lease.Value())); !retained) {
-                return retained;
-            }
+        if (auto retained = context_->RetainModule(Move(lease.Value())); !retained) {
+            return retained;
         }
 
         if (auto registered = entry.registerSettings(*context_); !registered) {

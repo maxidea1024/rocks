@@ -12,16 +12,16 @@
 - `Source/SampleGameModule.cpp`는 모듈 진입점 `ROCKS_IMPLEMENT_MODULE(rocks::DefaultModuleImplementation, SampleGame)`을 정의한다. 모든 C++ 모듈은 진입점이 하나 있어야 하며, 빌드가 실행 파일마다 만드는 모듈 표가 이를 참조하므로 빠지면 링크 오류다([모듈 로더](../../../Docs/Design/ModuleLoader.ko.md) 3.2절). 시작·종료 때 할 일이 생기면 `rocks::ModuleImplementation` 파생 클래스로 바꾼다. 모듈 진입점은 프로세스 진입점이 아니다.
 - `Source/Main.cpp`는 공통 실행 계층 `Launch`의 진입점 매크로(`ROCKS_IMPLEMENT_APPLICATION`)로 프로세스 진입점을 만든다. Launch가 크래시 수집(덤프 도우미, `Saved/Crashes/SampleGame-<시작 UTC>-<pid>/`)과 명령줄 캡처를 맡고 본문 `Run`의 반환값을 종료 코드로 쓴다. 새 실행 프로그램도 이 모양을 따른다(`main`을 직접 정의하지 않는다, [실행 진입점 설계](../../../Docs/Design/CrashHandlingAndLaunch.ko.md) 16절).
 - 본문은 모듈 생성 헤더 `<SampleGame/SampleGame.module.generated.h>`에 선언된 `rocks::generated::SampleGame::RegisterModuleTypes`로 이 모듈(과 리플렉션 타입을 가진 SDK 의존 모듈)의 타입을 등록하고, 객체를 만든 뒤 핸들로 조회하여 기본 체력 값이 100인지 검사한다. 성공 시 종료 코드는 0이다. 등록 함수의 정의는 빌드가 만드는 모듈 생성 소스(`<출력>/Generated/SampleGame/Source/SampleGame.module.generated.cpp`)에 있고 실행 파일에 함께 컴파일된다. 모듈 생성 헤더는 선언만 담으므로 `rocks::GeneratedType<sample::GameObject>`를 쓰는 코드는 그 타입의 생성 헤더 `<GameObject.generated.h>`를 include한다.
-- SDK 모듈의 리플렉션 타입(예: SDK가 담은 모듈의 `ROCKS_CLASS`)을 상속·참조하려면 그 모듈에 의존하고 헤더를 include한다. 게임 빌드는 SDK의 descriptor(`Metadata/<모듈>/<모듈>.rocksmeta.json`)를 import하므로 SDK 모듈을 다시 생성하지 않는다.
+- SDK 모듈의 리플렉션 타입(예: SDK가 담은 모듈의 `ROCKS_CLASS`)을 상속·참조하려면 그 모듈에 의존하고 헤더를 include한다. 게임 빌드는 SDK의 descriptor(`Configurations/<구성>/Metadata/<모듈>/<모듈>.rocksmeta.json`)를 import하므로 SDK 모듈을 다시 생성하지 않는다.
 
 템플릿 디렉터리를 SDK 외부의 새 게임 디렉터리로 복사한 뒤, 엔진 저장소에서 다음 명령을 실행한다. SDK는 게임 빌드에 사용할 플랫폼과 구성에 맞춰 미리 생성해야 한다. `SDK_경로`와 `게임_경로`는 실제 절대 경로로 바꾼다.
 
 ```text
-dotnet msbuild Rocks.proj /t:InstalledSdk /p:Configuration=Debug /p:SdkDestination="SDK_경로"
+dotnet msbuild Rocks.proj /t:InstalledSdk /p:SdkDestination="SDK_경로"
 dotnet msbuild Rocks.proj /t:Game /p:Configuration=Debug /p:SdkDirectory="SDK_경로" /p:GameDirectory="게임_경로"
 ```
 
-SDK 생성 경로는 존재하지 않는 새 디렉터리여야 한다. 게임 실행 파일은 게임 디렉터리의 `out/<platform>-game-<구성>/bin`(예: Windows Debug는 `out/windows-game-debug/bin`, macOS는 `out/macos-game-debug/bin`) 아래 생성된다. SDK를 `sdk-register`로 등록했으면 `/p:SdkDirectory`를 생략해도 `engineVersion`으로 고른다(엔진 `Build/README.md`). Windows 파일 이름은 `SampleGame.exe`, macOS 파일 이름은 `SampleGame`이다. 상세 도구 요구 사항과 구성 호환성은 엔진의 `Build/README.md`를 따른다.
+SDK 생성 경로는 존재하지 않는 새 디렉터리여야 한다. SDK 하나에 Debug·Development·Release 구성이 함께 들어가므로(`/p:SdkConfigurations="Debug"`처럼 줄일 수 있다) 게임은 그중 어느 구성으로도 빌드할 수 있다. 게임 실행 파일은 게임 디렉터리의 `out/<platform>-game-<구성>/bin`(예: Windows Debug는 `out/windows-game-debug/bin`, macOS는 `out/macos-game-debug/bin`) 아래 생성된다. SDK를 `sdk-register`로 등록했으면 `/p:SdkDirectory`를 생략해도 `engineVersion`으로 고른다(엔진 `Build/README.md`). Windows 파일 이름은 `SampleGame.exe`, macOS 파일 이름은 `SampleGame`이다. 상세 도구 요구 사항과 구성 호환성은 엔진의 `Build/README.md`를 따른다.
 
 ## Component 템플릿 추가 조건
 

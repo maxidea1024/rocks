@@ -18,9 +18,13 @@
 #include <Platform/Atomics.h>
 #include <Platform/CrashReporting.h>
 #include <Platform/Fatal.h>
+#include <Platform/DynamicLibrary.h>
 #include <Platform/Memory.h>
+#include <Platform/Process.h>
 #include <Platform/ProcessEntry.h>
 
+#include <stdio.h>
+#include <string.h>
 #include <stdlib.h>
 
 namespace rocks::launch {
@@ -37,6 +41,16 @@ constexpr usize DiagnosticLineBytes = 256;
 
 // 정리 뒤 lease가 남은 모듈을 이름까지 기록하는 상한이다(넘는 모듈은 수만 기록한다).
 constexpr usize MaxLeaseReportNames = 16;
+
+#if !ROCKS_MONOLITHIC
+// Modular 진입의 manifest 경로 칸과 실패 줄 칸이다(실행 파일 경로 + manifest 이름, report 문구를
+// 담는다).
+constexpr usize ModularPathBytes = 4096;
+constexpr usize ModularDiagnosticBytes = 1024;
+// Modular 시동 크래시 수집의 프로그램 이름 칸과, 실행 파일 이름을 쓸 수 없을 때의 이름이다.
+constexpr usize BootstrapProgramBytes = 64;
+constexpr char BootstrapProgramName[] = "ModularLaunch";
+#endif
 
 constinit uint32 terminationRequested = 0;
 
@@ -98,9 +112,9 @@ uint32 OrDefault(uint32 value, uint32 fallback) noexcept {
 class ApplicationRunner {
 public:
     ApplicationRunner(const ApplicationDescription& description, int argc, wchar_t** wide,
-                      char** narrow, bool embedded) noexcept
+                      char** narrow, bool embedded, ModuleLoader* preloaded) noexcept
         : description_(description), argc_(argc), wide_(wide), narrow_(narrow), embedded_(embedded),
-          settings_(description.settings) {
+          settings_(description.settings), preloaded_(preloaded) {
     }
 
     int Run() noexcept;
@@ -126,6 +140,11 @@ private:
     static void StopToolLog(ApplicationRunner& runner) noexcept;
     static bool StartModules(ApplicationRunner& runner) noexcept;
     static void StopModules(ApplicationRunner& runner) noexcept;
+
+    // 프로세스 모듈 로더다(Modular 진입이 만든 것 또는 Monolithic에서 만든 것, 없으면 nullptr).
+    ModuleLoader* Loader() noexcept {
+        return preloaded_ != nullptr ? preloaded_ : modules_.Get();
+    }
 
     // 범용 할당자다(Binned가 아니면 SystemAllocator).
     Allocator& DefaultAllocatorObject() noexcept {
@@ -163,7 +182,11 @@ private:
     LogSystem* toolLog_ = nullptr;
     StderrLogSink* toolSink_ = nullptr;
     LogInstallScope* toolScope_ = nullptr;
-    // 프로세스 모듈 로더다(범용 할당자로 만든다). 범용 할당자보다 먼저 파괴한다(단계 역순).
+    // Modular 진입이 manifest로 만든 로더다(빌린다 — 실행 흐름 뒤 그 진입이 파괴한다). 있으면
+    // "Launch.Modules"는 로더를 만들지 않고 부트 모듈만 시작한다.
+    ModuleLoader* preloaded_ = nullptr;
+    // 프로세스 모듈 로더다(Monolithic — 범용 할당자로 만든다). 범용 할당자보다 먼저 파괴한다(단계
+    // 역순).
     UniquePtr<ModuleLoader> modules_;
 };
 
@@ -411,23 +434,36 @@ void ApplicationRunner::StopToolLog(ApplicationRunner& runner) noexcept {
 }
 
 bool ApplicationRunner::StartModules(ApplicationRunner& runner) noexcept {
-    // 이 실행 파일의 모듈 표로 로더를 만들고 부트 모듈(EarliestPossible)을 시작한다
-    // (Docs/Design/ModuleLoader.ko.md 3.11절). 실패는 여기서 한 번 기록한다(로더는 기록하지
-    // 않는다).
-    auto created = ModuleLoader::TryCreate(runner.DefaultAllocatorObject(), GeneratedModuleTable());
-    if (!created) {
-        Log::Error(LogLaunch, "The module loader could not be created: {Error}",
-                   StringView(ErrorCodeName(created.Error())));
+    // 로더를 정하고 부트 모듈(EarliestPossible)을 시작한다(Docs/Design/ModuleLoader.ko.md 3.11·
+    // 3.14절). Monolithic은 이 실행 파일의 모듈 표로 로더를 만들고, Modular는 Modular 진입이
+    // manifest로 만든 로더를 쓴다. 실패는 여기서 한 번 기록한다(로더는 기록하지 않는다).
+    if (runner.preloaded_ == nullptr) {
+#if ROCKS_MONOLITHIC
+        auto created =
+            ModuleLoader::TryCreate(runner.DefaultAllocatorObject(), GeneratedModuleTable());
+        if (!created) {
+            Log::Error(LogLaunch, "The module loader could not be created: {Error}",
+                       StringView(ErrorCodeName(created.Error())));
+            return false;
+        }
+
+        runner.modules_ = Move(created.Value());
+#else
+        // Modular에는 정적 모듈 표가 없다. 내장 진입처럼 Modular 진입을 거치지 않은 실행은 모듈을
+        // 시작할 수 없다.
+        Log::Error(LogLaunch, "Modular builds start their modules from the module manifest; this "
+                              "entry has no module loader (use the Modular executable entry)");
         return false;
+#endif
     }
 
-    runner.modules_ = Move(created.Value());
-    const ModuleLoadReport started = runner.modules_->StartPhase(LoadingPhase::EarliestPossible);
+    ModuleLoader& loader = *runner.Loader();
+    const ModuleLoadReport started = loader.StartPhase(LoadingPhase::EarliestPossible);
     if (!started.IsOk()) {
         Log::Error(LogLaunch, "Boot module {Module} failed to start ({Code}) at {Stage}: {Message}",
                    StringView(started.failed), StringView(ModuleLoadCodeName(started.code)),
                    StringView(started.stage), StringView(started.message));
-        runner.modules_->ShutdownGroup(ModuleGroup::Process);
+        loader.ShutdownGroup(ModuleGroup::Process);
         runner.modules_.Reset();
         return false;
     }
@@ -436,25 +472,29 @@ bool ApplicationRunner::StartModules(ApplicationRunner& runner) noexcept {
 }
 
 void ApplicationRunner::StopModules(ApplicationRunner& runner) noexcept {
-    if (!runner.modules_) {
+    ModuleLoader* loader = runner.Loader();
+    if (loader == nullptr) {
         return;
     }
 
     // 정적 소멸 없이 끝내는 경로는 로더를 내리지도 파괴하지도 않는다: 멈춘 출력 스레드를 포기한
     // 본문이 남긴 설정 문맥이 모듈 lease를 쥐고 있다(범용 할당자와 같은 규칙). 내장 진입은 그
-    // 요청을 무시하므로 내린다.
+    // 요청을 무시하므로 내린다. Modular 진입의 로더는 Run이 _Exit로 끝나므로 그대로 남는다.
     if (runner.context_.exitWithoutStaticTeardown_ && !runner.embedded_) {
-        alignas(UniquePtr<ModuleLoader>) static unsigned char
-            abandoned[sizeof(UniquePtr<ModuleLoader>)];
-        ::new (abandoned) UniquePtr<ModuleLoader>(Move(runner.modules_));
+        if (runner.modules_) {
+            alignas(UniquePtr<ModuleLoader>) static unsigned char
+                abandoned[sizeof(UniquePtr<ModuleLoader>)];
+            ::new (abandoned) UniquePtr<ModuleLoader>(Move(runner.modules_));
+        }
+
         return;
     }
 
-    runner.modules_->ShutdownGroup(ModuleGroup::Process);
+    loader->ShutdownGroup(ModuleGroup::Process);
     // 남은 lease는 모듈 코드를 가리키는 등록이 남은 것이다. 파괴의 Fatal(마지막 안전장치) 전에
-    // 원인을 남긴다.
+    // 원인을 남긴다. Modular 진입의 로더는 그 진입이 실행 흐름 뒤에 파괴한다.
     StringView holders[MaxLeaseReportNames];
-    const usize leftover = runner.modules_->ModulesWithLeases(Span<StringView>(holders));
+    const usize leftover = loader->ModulesWithLeases(Span<StringView>(holders));
     for (usize index = 0; index < leftover && index < MaxLeaseReportNames; ++index) {
         Log::Error(LogLaunch,
                    "Module {Module} still has code leases after shutdown; a registration that "
@@ -475,7 +515,7 @@ int ApplicationRunner::RunBody(ApplicationRunner& runner) noexcept {
     ApplicationContext& context = runner.context_;
     context.allocator_ = &runner.allocator_;
     context.defaultAllocator_ = &runner.DefaultAllocatorObject();
-    context.modules_ = runner.modules_.Get();
+    context.modules_ = runner.Loader();
 
     context.toolLog_ = runner.toolLog_;
     context.settings_ = &runner.settings_;
@@ -537,6 +577,26 @@ int ApplicationRunner::Run() noexcept {
 
 namespace {
 
+// 실행 상태를 만들어 단계와 본문을 돈다. preloaded는 Modular 진입이 만든 로더다(없으면 nullptr).
+template <typename Character>
+int RunRunner(const ApplicationDescription& description, int argc, Character** argv, bool embedded,
+              ModuleLoader* preloaded) noexcept {
+    // 상태는 크고(도구 로그 저장소) 프로세스에 하나이므로 정적 저장소에 둔다.
+    alignas(ApplicationRunner) static unsigned char storage[sizeof(ApplicationRunner)];
+    ApplicationRunner* runner = nullptr;
+    if constexpr (IsSameV<Character, wchar_t>) {
+        runner = ::new (storage)
+            ApplicationRunner(description, argc, argv, nullptr, embedded, preloaded);
+    } else {
+        runner = ::new (storage)
+            ApplicationRunner(description, argc, nullptr, argv, embedded, preloaded);
+    }
+
+    const int exitCode = runner->Run();
+    runner->~ApplicationRunner();
+    return exitCode;
+}
+
 // 독립 실행 진입은 도우미 모드 분기가 다른 무엇보다 먼저다(Launch 상태·할당기·로그를 만들지
 // 않는다). 내장 진입은 호스트의 인자를 도우미 표지로 해석하지 않는다.
 template <typename Character>
@@ -547,19 +607,153 @@ int RunEntry(const ApplicationDescription& description, int argc, Character** ar
         return helperExit;
     }
 
-    // 상태는 크고(도구 로그 저장소) 프로세스에 하나이므로 정적 저장소에 둔다.
-    alignas(ApplicationRunner) static unsigned char storage[sizeof(ApplicationRunner)];
-    ApplicationRunner* runner = nullptr;
-    if constexpr (IsSameV<Character, wchar_t>) {
-        runner = ::new (storage) ApplicationRunner(description, argc, argv, nullptr, embedded);
-    } else {
-        runner = ::new (storage) ApplicationRunner(description, argc, nullptr, argv, embedded);
+    return RunRunner(description, argc, argv, embedded, nullptr);
+}
+
+#if !ROCKS_MONOLITHIC
+using ApplicationDescriptionFunction = const ApplicationDescription* (*)() noexcept;
+
+// Modular 진입 실패 한 줄을 stderr에 쓴다(크래시 수집·도구 로그가 아직 없다).
+void WriteModularFailure(StringView manifest, const ModuleLoadReport& report) noexcept {
+    char line[ModularDiagnosticBytes];
+    (void)snprintf(line, sizeof(line),
+                   "Rocks launch: the modules could not be loaded from %.*s (%s, module '%s', "
+                   "stage '%s'): %s",
+                   static_cast<int>(manifest.ByteCount()), manifest.Data(),
+                   ModuleLoadCodeName(report.code), report.failed, report.stage, report.message);
+    WriteLine(line);
+}
+
+// 시동 크래시 수집의 프로그램 이름이다: 실행 파일 이름(확장자 앞)이 크래시 폴더 이름 규칙(ASCII
+// 글자·숫자·'.'·'_'·'-')에 맞으면 그것, 아니면 BootstrapProgramName이다.
+void BootstrapProgram(const char* path, usize bytes, char (&out)[BootstrapProgramBytes]) noexcept {
+    usize start = bytes;
+    while (start != 0 && path[start - 1] != '/' && path[start - 1] != '\\') {
+        --start;
     }
 
-    const int exitCode = runner->Run();
-    runner->~ApplicationRunner();
+    usize end = bytes;
+    for (usize index = start; index < bytes; ++index) {
+        if (path[index] == '.') {
+            end = index;
+        }
+    }
+
+    bool valid = end > start && end - start < BootstrapProgramBytes;
+    for (usize index = start; valid && index < end; ++index) {
+        const char c = path[index];
+        valid = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+                c == '_' || c == '-';
+    }
+
+    const char* name = valid ? path + start : BootstrapProgramName;
+    const usize length = valid ? end - start : sizeof(BootstrapProgramName) - 1;
+    memcpy(out, name, length);
+    out[length] = '\0';
+}
+
+// Modular 진입 본문이다(Docs/Design/ModuleLoader.ko.md 3.14절). 도우미 분기 → manifest 경로(실행
+// 파일 폴더 + 이름) → 시동 크래시 수집(프로세스 안 덤프) → 시동 할당자로 manifest 로더 → 호스트
+// 모듈의 앱 기술 → 시동 수집 해제 → RunApplication과 같은 흐름 → lease·로더·시동 할당자 정리
+// 순서다.
+template <typename Character>
+int RunModularEntry(int argc, Character** argv, const char* manifestName,
+                    const char* descriptionSymbol) noexcept {
+    int helperExit = 0;
+    if (platform::RunCrashHelperIfRequested(argc, argv, helperExit)) {
+        return helperExit;
+    }
+
+    char path[ModularPathBytes];
+    usize bytes = 0;
+    if (manifestName == nullptr || !platform::GetExecutablePath(path, sizeof(path), bytes)) {
+        WriteLine("Rocks launch: the executable path is unavailable, so the module manifest "
+                  "cannot be found");
+        return ModuleStartupFailureExitCode;
+    }
+
+    // 실행 파일 폴더(마지막 경로 구분자까지)에 manifest 이름을 붙인다.
+    usize folder = bytes;
+    while (folder != 0 && path[folder - 1] != '/' && path[folder - 1] != '\\') {
+        --folder;
+    }
+
+    const usize nameBytes = strlen(manifestName);
+    if (folder == 0 || folder + nameBytes >= sizeof(path)) {
+        WriteLine("Rocks launch: the module manifest path does not fit or has no folder");
+        return ModuleStartupFailureExitCode;
+    }
+
+    // 모듈 라이브러리를 싣고(정적 초기화·진입 기술 호출) 앱 기술을 읽는 동안의 크래시도 남긴다. 앱
+    // 기술의 크래시 설정은 아직 모르므로 프로세스 안 덤프·기본 폴더로 걸고, 실행 흐름이 기술
+    // 설정으로 다시 걸기 직전에 뗀다(그 사이 아주 짧게 보호가 없다 — configure 재설치와 같다).
+    char program[BootstrapProgramBytes];
+    BootstrapProgram(path, bytes, program);
+    char identity[detail::BuildIdentityBytes] = {};
+    (void)detail::FormatBuildIdentity(identity, sizeof(identity));
+    platform::CrashReportingOptions crash;
+    crash.programName = program;
+    crash.outputDirectory = DefaultCrashDirectory;
+    crash.identity = identity;
+    crash.helper = platform::CrashHelperPolicy::InProcess;
+    crash.argumentCount = argc > 0 ? static_cast<uint32>(argc - 1) : 0u;
+    bool bootstrapCrash =
+        platform::InstallCrashReporting(crash) == platform::CrashReportingStatus::Installed;
+
+    memcpy(path + folder, manifestName, nameBytes + 1);
+    const StringView manifest(path, folder + nameBytes);
+
+    // 시동 할당자와 로더다. 범용 할당자의 종류는 호스트 모듈 안의 앱 기술이 정하므로 로더는 시동
+    // 할당자에서 만든다. 상태는 프로세스에 하나이므로 정적 저장소에 둔다.
+    alignas(SystemAllocator) static unsigned char allocatorStorage[sizeof(SystemAllocator)];
+    SystemAllocator* allocator = ::new (allocatorStorage) SystemAllocator();
+    int exitCode = ModuleStartupFailureExitCode;
+    {
+        ModuleLoadReport report;
+        auto created = ModuleLoader::TryCreateFromManifest(*allocator, manifest, report);
+        if (!created) {
+            WriteModularFailure(manifest, report);
+        } else {
+            UniquePtr<ModuleLoader> loader = Move(created.Value());
+            void* address = nullptr;
+            platform::DynamicLibraryLease lease;
+            if (!loader->FindHostSymbol(descriptionSymbol, address, lease)) {
+                char line[ModularDiagnosticBytes];
+                (void)snprintf(line, sizeof(line),
+                               "Rocks launch: the host module in %s does not export %s (does the "
+                               "application entry macro match the executable subsystem?)",
+                               path, descriptionSymbol);
+                WriteLine(line);
+            } else {
+                const ApplicationDescription* description =
+                    reinterpret_cast<ApplicationDescriptionFunction>(address)();
+                if (description == nullptr) {
+                    platform::Fatal("Rocks launch: the host module returned no application "
+                                    "description");
+                }
+
+                if (bootstrapCrash) {
+                    platform::RemoveCrashReporting();
+                    bootstrapCrash = false;
+                }
+
+                exitCode = RunRunner(*description, argc, argv, false, loader.Get());
+            }
+
+            // 앱 기술의 lease를 놓은 뒤 로더를 파괴한다(모든 모듈을 내리고 라이브러리를 역순으로
+            // 닫는다).
+            lease.Reset();
+        }
+    }
+
+    if (bootstrapCrash) {
+        platform::RemoveCrashReporting();
+    }
+
+    allocator->~SystemAllocator();
     return exitCode;
 }
+#endif
 
 } // namespace
 
@@ -645,3 +839,28 @@ void ApplicationContext::RequestExitWithoutStaticTeardown() noexcept {
 }
 
 } // namespace rocks::launch
+
+#if !ROCKS_MONOLITHIC
+extern "C" int RocksLaunchModularApplication(int argc, char** argv, const char* manifest) noexcept {
+    return rocks::launch::RunModularEntry(argc, argv, manifest,
+                                          rocks::launch::ApplicationDescriptionSymbol);
+}
+
+extern "C" int RocksLaunchModularWideApplication(int argc, wchar_t** argv,
+                                                 const char* manifest) noexcept {
+    return rocks::launch::RunModularEntry(argc, argv, manifest,
+                                          rocks::launch::ApplicationDescriptionSymbol);
+}
+
+extern "C" int RocksLaunchModularWindowedApplication(const char* manifest) noexcept {
+    int argc = 0;
+    wchar_t** argv = nullptr;
+    if (!rocks::platform::GetWindowedEntryArguments(argc, argv)) {
+        rocks::launch::WriteLine("Rocks launch: the windowed entry arguments are unavailable");
+        return rocks::launch::CommandLineFailureExitCode;
+    }
+
+    return rocks::launch::RunModularEntry(argc, argv, manifest,
+                                          rocks::launch::WindowedApplicationDescriptionSymbol);
+}
+#endif

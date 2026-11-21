@@ -1,6 +1,6 @@
 # 모듈 로더 설계
 
-기준일: 2026-11-21, 개정 9. 모듈의 수명(시작·종료)과 적재를 맡는 모듈 로더를 정한다. UE 5.8 `IModuleInterface`·`FModuleManager`·로딩 단계(`ELoadingPhase`)에 해당한다.
+기준일: 2026-11-22, 개정 10. 모듈의 수명(시작·종료)과 적재를 맡는 모듈 로더를 정한다. UE 5.8 `IModuleInterface`·`FModuleManager`·로딩 단계(`ELoadingPhase`)에 해당한다.
 
 [빌드 타깃 설계](BuildTargets.ko.md) 3.8절은 Editor 타깃을 UE와 같이 모듈식(`Modular`)으로 링크하기로 정했다(BD17). 그리고 모듈 로더를 별도 스펙으로 넘기며 네 가지 계약을 요구했다(BD30).
 1. 같은 소스가 `Monolithic`·`Modular`에서 같은 순서·결과로 동작한다.
@@ -229,7 +229,7 @@ public:
 
 - **manifest 파일**: 빌드가 Modular 타깃마다 `<Target>[-<Platform>-<Configuration>].modules.json`을 공유 라이브러리와 같은 폴더에 쓴다(UE `<App>.modules` — `Programs/UnrealBuildTool/System/ModuleManifest.cs:77-89`). 키는 영어다.
   - `buildId`: `ModuleBuildId` 문자열.
-  - `modules`: 행 배열 `{ name, file, size, dependencies[], loadingPhase, onRequest, executable }`. 의존 순서로 나열한다(JSON 객체의 키 순서는 의미가 없어 배열이다 — [빌드 타깃](BuildTargets.ko.md) BS8d1). `size`는 링크가 끝난 파일의 바이트 수다. `schema`·`engineVersion`·`toolchainFingerprint`도 싣는다(`buildId` 재사용 판정).
+  - `modules`: 행 배열 `{ name, file, size, dependencies[], loadingPhase, onRequest, host }`. 의존 순서로 나열한다(JSON 객체의 키 순서는 의미가 없어 배열이다 — [빌드 타깃](BuildTargets.ko.md) BS8d1). `size`는 링크가 끝난 파일의 바이트 수다. `schema`·`engineVersion`·`toolchainFingerprint`도 싣는다(`buildId` 재사용 판정).
   - 모르는 키는 오류다(UE 파서도 거부한다 — `Runtime/Core/Private/Modules/ModuleManifest.cpp:101-229`).
   - manifest는 링크가 모두 성공한 뒤 원자적으로 쓴다(임시 파일 → 이름 바꾸기).
 - **manifest 위치**: 엔진 `Binaries/<Platform>/`, 게임 프로젝트 `Binaries/<Platform>/`, 켠 플러그인마다 `<Plugin>/Binaries/<Platform>/`(UE와 같다 — `LaunchEngineLoop.cpp:2541-2543`, `PluginManager.cpp:1856`). 로더는 이 폴더들의 manifest만 읽는다. 폴더를 훑어 파일을 찾지 않는다.
@@ -318,7 +318,7 @@ public:
 - **소유(MD4)**: 프로세스에 하나이고 Launch의 `ApplicationContext`가 소유한다. 전역 접근자(UE `FModuleManager::Get()`)는 두지 않는다. 필요한 곳은 `ApplicationContext`·`ModuleStartContext`·`Engine` 설정으로 참조를 받는다. Launch 모듈은 `ModuleLoader`에 의존한다.
 - **부트 모듈**: Launch 모듈의 의존 폐포(Launch·ModuleLoader·Core와 그 의존)다. 로더가 생기기 전에 이미 실행 중이다. 로더는 만들어질 때 이 모듈들을 의존 순서대로 바로 시작한다(`Startup` 호출). 폐포 안의 면제 모듈(PlatformBase·DeterministicMath·Base — 3.1절)은 수명 객체가 없으므로 시작 대상이 아니다(개정 2). 부트 모듈의 단계는 `EarliestPossible`로 강제한다(빌드 검사, MD6과 맞물림). 부트 모듈은 실행 중 해제할 수 없다.
 - **Launch 단계와 맞물림**: crash-launch 설계(8.1절)의 단계에 다음을 더한다(그 문서 개정은 병합 뒤 — 8절).
-  - 도구 로그 시작(7단계) 뒤, 본문(8단계) 전에 로더를 만들고 `Prepare`, 부트 모듈과 `EarliestPossible`을 시작한다. 대화상자 억제·도우미 시작(5단계)보다 뒤다.
+  - 도구 로그 시작(7단계) 뒤, 본문(8단계) 전에 로더를 만들고 `Prepare`, 부트 모듈과 `EarliestPossible`을 시작한다. 대화상자 억제·도우미 시작(5단계)보다 뒤다. Modular는 다르다: 앱 기술이 호스트 모듈 안에 있으므로 Launch의 Modular 진입이 실행 흐름 전에 시동 크래시 수집 아래에서 로더를 만들고 `Prepare`하며, 이 단계는 부트 모듈만 시작한다(3.14절).
   - 엔진 호스트 본문: HostSettings(설정 등록 때 모든 모듈의 `registerSettings`) → LogHost 시작 → `HostServices`에 등록 → `StartPhase(PostConfigInit)` → `Engine::Initialize`(등록기 설정, `PreDefault`·`Default`·`PostDefault`, 끝에 `PostEngineInit`) → 엔진 루프 → `Engine::Shutdown`(엔진 묶음 종료) → 호스트 묶음 종료 → LogHost·HostSettings 정리.
   - 도구 본문: 설정을 쓰는 도구는 `PostConfigInit`을 직접 부른다. 엔진을 만들지 않는 도구는 엔진 단계 모듈을 시작하지 않는다.
   - 종료: 본문 반환 → 프로세스 묶음 종료(도구 로그 정리 전) → 7·6단계 역순 정리 → 크래시 처리 제거.
@@ -328,7 +328,7 @@ public:
   3. 단계마다 엔진·게임·플러그인 모듈을 함께 의존 순서로 시작한다.
   4. 게임 모듈 적재 실패는 report와 함께 시작을 중단한다. 다시 빌드를 권하는 편집기 UI는 Rocks Studio 설계에서 정한다.
   - 빌드 시점에 이미 플러그인 조건을 해석해 게임 Editor 타깃을 만들었으므로, 실행 중 해석 결과와 빌드 결과가 다르면 `Incompatible`이다(게임 manifest에 빌드한 플러그인 목록을 싣고 대조한다).
-- **시험(MD20)**: 시험·도구 실행 파일도 모듈 표를 가지고 로더로 모듈을 시작한다. 시험 `TEST` 정적 등록은 지금 예외를 유지한다. Modular 시험([빌드 타깃](BuildTargets.ko.md) BD31)에서 `TEST` 등록 목록의 머리는 TestSupport 공유 라이브러리에 한 벌만 두고(BD29), 시험 묶음이 들어간 공유 라이브러리는 실행 중 해제하지 않는다.
+- **시험(MD20)**: 시험·도구 실행 파일도 모듈 표를 가지고 로더로 모듈을 시작한다. 시험 `TEST` 정적 등록은 지금 예외를 유지한다. Modular 시험([빌드 타깃](BuildTargets.ko.md) BD31)에서 `TEST` 등록 목록의 머리는 공유 라이브러리 하나에 한 벌만 두고(BD29 — ML4b까지는 모든 시험이 든 호스트 모듈, 모듈 `Private/` 시험을 모듈 공유 라이브러리에 링크하는 BS8d5에서 Core로 옮긴다 — 3.14절), 시험 묶음이 들어간 공유 라이브러리는 실행 중 해제하지 않는다.
 
 ### 3.10 ML2 연결 — ML1 전(개정 3)
 
@@ -449,10 +449,10 @@ ML1(3.11절)으로 `PostConfigInit`·엔진 단계 모듈이 설정·로그·tra
 
 ### 3.13 ML4a 구현 세부 — manifest 적재(개정 9)
 
-- **API**: `ModuleLoader::TryCreateFromManifest(allocator, manifestPath, executableEntry, report)`. `manifestPath`는 절대 경로(UTF-8 — Windows 드라이브·UNC, POSIX `/`; 상대 경로는 작업 폴더에 기대므로 `Incompatible`)이고 `executableEntry`는 실행 파일 행의 진입 함수(그 실행 파일의 `RocksModuleEntry_<Name>` — 실행 파일은 export 진입점을 두지 않는다, [빌드 타깃](BuildTargets.ko.md) BS8d1)다. 실패하면 `Result` 실패(`ErrorCode`)와 함께 `report`에 코드·실패 모듈·단계·문구를 채운다(3.4절 형식). 성공하면 지금 로더와 같다(`TryCreate(allocator, table)`과 같은 표 검사·단계·묶음·동적 모듈). `report`를 쓰는 까닭: 적재 실패는 이 함수에서만 나고 호출자(Launch·시험 runner — ML4b)가 한 번 기록한다.
-- **manifest 읽기**: 파일 전체를 읽어 Core JSON(엄격)으로 해석한다. 최상위 키는 정확히 `schema`·`buildId`·`engineVersion`·`toolchainFingerprint`·`modules`이고, 행 키는 정확히 `name`·`file`·`size`·`dependencies`·`loadingPhase`·`onRequest`·`executable`이다(빠진 키·모르는 키·형식이 다른 값은 오류 — UE 파서도 모르는 키를 거부한다). `schema`는 2(행 키 `executable`을 더하며 올렸다), `buildId`는 32자 소문자 16진, 행 이름은 C 식별자, `file`은 경로 구분자·`..`·드라이브가 없는 파일 이름, `size`는 0 이상의 정수, `loadingPhase`는 단계 이름, 의존은 앞 행 이름(같은 이름 중복 없음)이다. 실행 파일 행은 하나 이하다. 위반은 `Incompatible`, 단계 `"Manifest"`, 문구에 키 경로·JSON 오류 위치다. 파일이 없으면 `NotFound`다.
-- **행 키 `executable`(빌드 타깃 BS8d1에 더함)**: 실행 파일 행을 표시한다. 그 행은 OS로 싣지 않고 `executableEntry`를 진입 함수로 쓴다. 파일 크기는 똑같이 대조한다(실행 파일과 manifest가 같은 빌드인지). `executableEntry`가 없는데 실행 파일 행이 있으면 `InvalidArgument`다.
-- **`Prepare`(MD22, 3.5절)**: 실행 파일이 아닌 행을 의존 순서로 처리한다.
+- **API**: `ModuleLoader::TryCreateFromManifest(allocator, manifestPath, report)`. `manifestPath`는 절대 경로(UTF-8 — Windows 드라이브·UNC, POSIX `/`; 상대 경로는 작업 폴더에 기대므로 `Incompatible`)다. 개정 9의 `executableEntry` 인자(OS로 싣지 않는 실행 파일 행의 진입 함수)는 ML4b가 호스트 모듈을 공유 라이브러리로 바꾸며 없앴다(3.14절). 실패하면 `Result` 실패(`ErrorCode`)와 함께 `report`에 코드·실패 모듈·단계·문구를 채운다(3.4절 형식). 성공하면 지금 로더와 같다(`TryCreate(allocator, table)`과 같은 표 검사·단계·묶음·동적 모듈). `report`를 쓰는 까닭: 적재 실패는 이 함수에서만 나고 호출자(Launch·시험 runner — ML4b)가 한 번 기록한다.
+- **manifest 읽기**: 파일 전체를 읽어 Core JSON(엄격)으로 해석한다. 최상위 키는 정확히 `schema`·`buildId`·`engineVersion`·`toolchainFingerprint`·`modules`이고, 행 키는 정확히 `name`·`file`·`size`·`dependencies`·`loadingPhase`·`onRequest`·`host`이다(빠진 키·모르는 키·형식이 다른 값은 오류 — UE 파서도 모르는 키를 거부한다). `schema`는 3(개정 9가 행 키 `executable`을 더하며 2로, 개정 10이 그 키를 뜻이 다른 `host`로 바꾸며 3으로 올렸다), `buildId`는 32자 소문자 16진, 행 이름은 C 식별자, `file`은 경로 구분자·`..`·드라이브가 없는 파일 이름, `size`는 0 이상의 정수, `loadingPhase`는 단계 이름, 의존은 앞 행 이름(같은 이름 중복 없음)이다. 호스트 행은 하나 이하다. 위반은 `Incompatible`, 단계 `"Manifest"`, 문구에 키 경로·JSON 오류 위치다. 파일이 없으면 `NotFound`다.
+- **행 키 `host`**: 호스트 모듈 행을 표시한다(3.14절). 다른 행과 똑같이 크기를 대조하고 OS로 싣는다. Launch는 그 라이브러리에서 앱 기술을 찾는다(`FindHostSymbol`).
+- **`Prepare`(MD22, 3.5절)**: 모든 행을 의존 순서로 처리한다.
   1. 경로는 manifest 폴더 + `file`이다. 파일이 없으면 `NotFound`(단계 `"Lookup"`).
   2. 크기가 `size`와 다르면 `Incompatible`(단계 `"Lookup"`, 두 크기를 문구에).
   3. `platform::DynamicLibrary::Open`(절대 경로 — 의존 DLL은 같은 폴더에서만 찾는다. 절대 경로 `Open`은 정책 `shader-tool-binary-load`가 셰이더 도구 쪽에만 허용하므로 이 파일 `ModuleManifest.cpp`를 예외에 더했다). 실패하면 `OsLoadFailed`, `nativeError`·OS 문구(POSIX `dlerror`)를 담는다(단계 `"OsLoad"`).
@@ -463,7 +463,51 @@ ML1(3.11절)으로 `PostConfigInit`·엔진 단계 모듈이 설정·로그·tra
 - **표 저장소**: 로더가 manifest에서 만든 행 배열·이름·의존 배열·라이브러리·lease를 소유한다(정적 수명이 아니므로 로더와 같이 산다). 행의 `entry` 함수 칸은 비우고 `Prepare`가 얻은 진입 기술을 따로 넘겨 기록에 둔다(공개 `ModuleTableRow` 형식은 바꾸지 않는다). 그래서 표를 읽는 쪽은 진입 기술을 `ModuleLoader::EntryAt(index)`로 읽는다(설정 등록 `HostSettings`가 그렇게 바뀌었다 — manifest 로더의 `Table()` 행 `entry`는 null이다).
 - **report**: `requested`는 manifest 파일 이름이다(경로 전체는 문구에 — 이름 칸이 짧다). `error`는 `Incompatible`에서 할당 실패(`OutOfMemory`)·표 검사 실패(`InvalidArgument`)를 담는다.
 - **라이브러리 수명**: 로더 소멸이 모든 모듈을 내리고 수명 객체를 파괴하고 `Changed` 구독을 비운 뒤(바인딩 함수표가 모듈 라이브러리 안에 있을 수 있다) 라이브러리를 적재 역순으로 닫는다(3.7절). 실행 중 해제(ML6) 전에는 그 전에 닫지 않는다.
-- **시험**: manifest 해석·검사의 양성·음성(키 하나씩 빼기·더하기, 형식, 의존 순서, 파일 이름, 실행 파일 행, schema·buildId 모양)과 `Prepare`의 실패 경로(파일 없음, 크기 다름, 의존 DLL 없음, 진입점 없음 — Windows 시험 라이브러리 fixture는 코드가 없는 데이터 DLL이라 진입점을 부르는 성공 경로와, 앞 행을 연 뒤 뒤 행에서 실패해 여러 라이브러리를 역순으로 닫는 경로는 BS8d5의 Modular FoundationTests가 본다). 실패한 `Prepare`가 연 라이브러리를 닫는지(진입점 없음), 음성 사례마다 문구가 그 이유를 말하는지, 상대 경로 거부도 본다.
+- **시험**: manifest 해석·검사의 양성·음성(키 하나씩 빼기·더하기, 형식, 의존 순서, 파일 이름, 호스트 행, schema·buildId 모양)과 `Prepare`의 실패 경로(파일 없음, 크기 다름, 의존 DLL 없음, 진입점 없음 — Windows 시험 라이브러리 fixture는 코드가 없는 데이터 DLL이라 진입점을 부르는 성공 경로와, 앞 행을 연 뒤 뒤 행에서 실패해 여러 라이브러리를 역순으로 닫는 경로는 BS8d5의 Modular FoundationTests가 본다). 실패한 `Prepare`가 연 라이브러리를 닫는지(진입점 없음), 음성 사례마다 문구가 그 이유를 말하는지, 상대 경로 거부도 본다.
+
+### 3.14 ML4b 구현 세부 — 실행 파일 연결(개정 10)
+
+MD21(3.5절)을 구현한다. Modular 실행 파일은 부트 모듈만 import하고, 실행 파일 모듈의 코드(본문·시험)는 로더가 적재하는 **호스트 모듈** 공유 라이브러리에 둔다.
+
+- **UE와 비교**: UE의 Modular 실행 파일은 Launch 모듈을 정적으로 담고 Launch가 링크하는 엔진 모듈 DLL을 직접 import한다. 게임 모듈은 모듈 관리자가 DLL로 적재한다(`Programs/UnrealBuildTool/Configuration/UEBuildTarget.cs:6096-6105` `SetupBinaries` — 실행 파일 바이너리는 `LaunchModuleName`에서 시작한다). Rocks는 MD21(적재 실패도 report로 끝낸다)을 지키려고 import를 Launch 하나로 줄이고, UE 게임 모듈 자리에 실행 파일 모듈을 둔다.
+- **대상**: 모듈 표 제공 모듈(Core)에 닿는 Modular 실행 파일이다(진입점 모듈). 그런 실행 파일은 Launch에 닿아야 한다(입력 검사 — 아니면 모듈을 시작할 진입이 없다). 타깃마다 그런 실행 파일은 하나다(BS8d1의 규칙 그대로 — 빌드 정보·manifest가 타깃 하나 몫이다. UE도 타깃 하나가 실행 파일 하나다). 그래서 manifest의 호스트 행은 하나이고, Launch 시험 프로그램(`LaunchProbe` 등)을 함께 빌드하는 시험 타깃은 Modular로 빌드하지 않는다 — Modular FoundationTests 타깃(BD31)은 BS8d5가 시험 실행 파일 하나로 따로 둔다.
+- **호스트 모듈**: 그 실행 파일 모듈은 다른 라이브러리 모듈처럼 공유 라이브러리 `<Target>-<모듈>[-<Platform>-<Configuration>]`로 링크한다. 진입점 모듈 규칙도 같다: `ROCKS_MODULE_SHARED_LIBRARY=1`, export 진입점 `RocksModuleEntry`, 강제 참조. 링크 폐포에 동적 모듈(`DynamicModules`)은 넣지 않는다 — 동적 모듈은 로더가 manifest로 싣는다(호스트가 import하면 OS가 붙잡아 실행 중 해제할 수 없다). 3.5절의 "타깃의 호스트 모듈(예: `StudioHost`)"은 이 실행 파일 모듈이다. 따로 이름 지은 모듈을 두지 않는다. 호스트 행의 단계는 Monolithic 실행 파일 행처럼 `None`이다(3.11절 — 단계 실행이 시작하지 않고, 본문은 Launch가 부른다).
+- **진입 스텁**: 실행 파일(`bin/<모듈>[.exe]`)은 빌드가 만든 진입 TU 하나만 컴파일해 링크한다(`<out>/GeneratedSources/<모듈>.Launcher.cpp`). 링크 입력은 그 object와 Launch 공유 라이브러리(Windows는 import 라이브러리)뿐이다. 그래서 실행 파일이 import하는 Rocks 공유 라이브러리는 Launch 하나이고, OS가 `main` 전에 싣는 Rocks 라이브러리는 Launch와 그 링크 폐포(Core·ModuleLoader — 부트 모듈)다(CRT·OS 라이브러리는 그대로).
+  - 진입 TU는 헤더를 include하지 않는다. Launch의 C 함수를 선언하고(Windows는 `__declspec(dllimport)`) 플랫폼 진입 함수에서 부른다. Windows 콘솔은 `wmain`이 `RocksLaunchModularWideApplication(argc, argv, "<manifest 파일 이름>")`을, Windows 창 실행 파일(`WindowsSubsystem.Windows`)은 `wWinMain`이 `RocksLaunchModularWindowedApplication("<manifest 파일 이름>")`을, POSIX는 `main`이 `RocksLaunchModularApplication`을 부른다(창도 콘솔과 같다 — `EntryPoint.h`와 같은 규칙).
+  - 진입 TU는 그 모듈의 공통 compile 인자(구성 프로필·모듈 compile 인자·include)로 컴파일하되 PCH·유니티·정의 헤더를 쓰지 않는 독립 action이다(헤더를 쓰지 않으므로 정의가 필요 없다). 출력 아래 생성 소스라 compile DB·IDE 파일 목록에 넣지 않는다(리플렉션 생성 소스와 같다). IDE 계획에서 그 모듈의 출력은 실행 파일이다.
+  - manifest 파일 이름은 빌드가 진입 TU에 넣는다(`<Target>[-<Platform>-<Configuration>].modules.json` — 실행 파일 이름과 타깃 이름이 다르다). 내용은 호스트 경로를 담지 않고 같은 입력이면 같은 byte다.
+- **Launch C 함수**(Launch 공유 라이브러리가 export — `ROCKS_LAUNCH_API`, Monolithic에는 없다). 셋 다 모든 플랫폼에 있고 진입 TU가 플랫폼에 맞는 것을 고른다(OS 분기는 native backend와 `EntryPoint.h`만 허용하는 정책 `platform-boundary`를 지키려고 Launch는 분기하지 않는다 — `RunApplication`의 두 겹침과 같다):
+  - `extern "C" int RocksLaunchModularApplication(int argc, char** argv, const char* manifest) noexcept`(POSIX `main`).
+  - `extern "C" int RocksLaunchModularWideApplication(int argc, wchar_t** argv, const char* manifest) noexcept`(Windows `wmain`).
+  - `extern "C" int RocksLaunchModularWindowedApplication(const char* manifest) noexcept`(Windows `wWinMain` — CRT가 나눈 넓은 문자 인자를 쓴다, `RunWindowedApplication`과 같다).
+  - 반환값은 프로세스 종료 코드다. `manifest`는 실행 파일 폴더 기준 파일 이름이다. Rocks Studio(ML5)처럼 manifest를 여럿 읽는 호스트는 이 진입을 넓히지 않고 본문이 로더에 manifest를 더하는 길로 간다(ML5에서 정한다).
+- **앱 기술 export**: 호스트 모듈(`ROCKS_MODULE_SHARED_LIBRARY` 1)에서 `ROCKS_IMPLEMENT_APPLICATION(Describe)`는 `main`을 만들지 않고 `extern "C"` export 함수 `RocksApplicationDescription()`(기술 포인터를 돌려준다)을 정의한다. Windows의 `ROCKS_IMPLEMENT_WINDOWED_APPLICATION`은 `RocksWindowedApplicationDescription()`을 정의한다. 이름이 다르므로 진입 스텁(빌드의 subsystem)과 소스 매크로가 어긋나면 Launch가 기호를 찾지 못해 알린다(Monolithic은 링크 오류로 같은 어긋남을 잡는다).
+- **Launch의 Modular 진입 순서**:
+  1. 크래시 도우미 분기(`RunCrashHelperIfRequested`)가 먼저다(지금 독립 실행 진입과 같다). 뒤의 실행 흐름은 이 분기를 다시 하지 않는다.
+  2. manifest 경로는 실행 파일 폴더(`platform::GetExecutablePath`) + 넘겨받은 파일 이름이다.
+  3. **시동 크래시 수집**: 앱 기술의 크래시 설정을 아직 모르므로 프로세스 안 덤프(도우미 없음)·기본 폴더 `Saved/Crashes`·프로그램 이름은 실행 파일 이름(규칙에 맞지 않으면 `ModularLaunch`)으로 건다. 모듈 라이브러리 적재(정적 초기화 — 시험 `TEST` 등록 포함)·진입 기술 호출·앱 기술 호출 중의 크래시를 남기기 위해서다.
+  4. 시동 할당자(`SystemAllocator`, 정적 저장소에 placement new — 전역 생성자 없음)로 `ModuleLoader::TryCreateFromManifest`를 부른다. 모든 행(호스트 모듈 포함)을 OS로 싣고 진입 기술을 읽는다(3.13절). OS의 적재 오류 대화상자는 `DynamicLibrary`가 이미 끈다.
+  5. `FindHostSymbol`로 호스트 모듈 라이브러리에서 앱 기술 함수를 찾아 부른다. lease는 진입이 쥐고 로더 파괴 직전에 놓는다.
+  6. 시동 크래시 수집을 뗀 뒤 그 기술과 로더로 독립 실행 흐름([크래시 처리와 실행](CrashHandlingAndLaunch.ko.md) 8.1절)을 그대로 돈다. 1단계가 기술 설정으로 수집을 다시 건다(떼고 다시 거는 사이 아주 짧게 보호가 없다 — configure 재설치와 같다). "Launch.Modules"는 로더를 새로 만들지 않고 받은 로더로 `StartPhase(EarliestPossible)`만 하고, 정리는 프로세스 묶음 종료와 lease 진단까지다.
+  7. 실행 흐름이 끝나면(크래시 수집 해제 뒤) lease를 놓고 로더를 파괴하고(모든 모듈을 내리고 라이브러리를 역순으로 닫는다) 시동 할당자를 파괴한다. 정적 소멸 없는 종료(`RequestExitWithoutStaticTeardown`)는 실행 흐름 안에서 `_Exit`로 끝나므로 로더를 내리지 않는다(지금과 같다).
+  - 3–5단계 실패는 stderr에 한 줄(manifest 경로·report의 코드·모듈·단계·문구, 영어)을 쓰고 `ModuleStartupFailureExitCode`(1)로 끝낸다. 도구 로그는 아직 없다(앱 기술이 정한다). 창 실행 파일은 stderr가 보이지 않는다 — 한계로 둔다(OS의 import 실패 대화상자에 해당하는 표시는 나중에 정한다).
+- **호스트 코드의 수명(불변식)**: 앱 기술·그 함수(`run`·`configure`)·문자열(단계 이름 `SetStage` 리터럴, 크래시 폴더 등)은 호스트 모듈 안에 있다. 그래서 로더(호스트 라이브러리)는 실행 흐름이 크래시 수집을 뗀 뒤에야 파괴한다. 실행 흐름은 그 전에 기술·호스트 리터럴을 모두 쓴다. 단계 표시는 포인터를 보관하지만(`platform::SetRunPhase` — 정적 문자열) 수집을 뗀 뒤에는 읽지 않는다.
+- **로더의 할당자**: Modular 로더는 시동 할당자에서 만든다. 범용 할당자의 종류는 앱 기술(`ApplicationSettings::defaultAllocator`)이 정하는데 그 기술이 로더가 실은 호스트 모듈 안에 있기 때문이다. 그래서 로더 내부와 모듈 수명 객체의 할당이 Monolithic(범용 할당자 — 보통 Binned)과 Modular(`SystemAllocator`)에서 다르다. 모듈 수명 객체는 작고 수가 적어 성능 차이는 무시하고, 본문은 어느 할당자인지 알 필요가 없다(`ApplicationContext::Modules()` 계약 문구가 링크 방식별로 적는다).
+- **내장 진입**: `RunEmbeddedApplication`은 호스트가 자기 진입점을 가진다는 정의라 MD21(실행 파일은 진입 스텁)과 맞지 않는다. Modular에서는 지원하지 않는다: 그런 실행 파일은 `RocksApplicationDescription`을 export하지 않아 Modular 진입이 알리고, Modular 빌드의 "Launch.Modules"는 Modular 진입이 만든 로더가 없으면 Error 한 번과 `ModuleStartupFailureExitCode`로 끝난다. 내장 시험 프로그램(`LaunchEmbeddedHost`)은 Monolithic 시험 타깃에만 있다.
+- **manifest 행 키 `host`(schema 3)**: 3.13절의 `executable`을 `host`로 바꾼다. 그 행은 호스트 모듈이고 다른 행처럼 OS로 싣는다(`file`은 호스트 공유 라이브러리). 호스트 행은 하나 이하다. 그래서 `TryCreateFromManifest`의 `executableEntry` 인자를 없앤다. 뜻이 바뀌었으므로 schema를 3으로 올린다(옛 manifest는 `Incompatible`).
+- **`FindHostSymbol(symbol, address, lease)`**: 호스트 행 라이브러리에서 C 기호를 찾는다. 찾으면 true와 주소이고 주소는 lease가 살아 있는 동안 유효하다(호출자는 로더 파괴 전에 lease를 놓는다). 정적 표 로더이거나 호스트 행이 없거나 기호가 없으면 false다. Launch만 쓴다.
+- **모듈 표 함수는 Monolithic에만**: `GeneratedModuleTable()` 선언(`Core/Module/ModuleEntry.h`)을 `ROCKS_MONOLITHIC`일 때만 둔다. Modular에서 부르면 링크 오류 대신 컴파일 오류다. Launch는 Monolithic에서만 그 표로 로더를 만든다. 정적 표를 직접 시험하는 곳(DynamicModuleTests·ModuleLoaderTests·EngineAssetsTests·GpuTraceTests)은 Modular 시험 실행 파일을 처음 빌드하는 BS8d5에서 `test::ProcessModules()`로 옮기거나 `ROCKS_MONOLITHIC`으로 감싼다.
+- **`HostSettingsOptions::modules`는 필수**: 지금은 없으면 `GeneratedModuleTable()`을 쓴다. Modular에는 그 표가 없고, 로더가 없는 설정 등록은 Modular에서 늦게 실린 모듈을 빠뜨린다. 그래서 없으면 `Initialize`가 `InvalidArgument`로 실패한다(Error 한 번). Commandlet `BootSettings`는 Launch 로더를 넘기고, 시험은 `test::ProcessModules()`를 넘긴다.
+- **시험 등록 머리(MD20)**: ML4b는 시험 배치를 바꾸지 않는다. 지금 `TEST` 등록 목록의 머리(`first`)와 `Registration`은 시험 runner(실행 파일 모듈 `Private/Main.cpp`)에 있고 모든 시험 소스가 그 모듈에 컴파일되므로, 호스트 공유 라이브러리 하나에 한 벌이다. 모듈 `Private/` 시험을 그 모듈 공유 라이브러리에 링크하고 머리를 Core 한 벌로 옮기는 일(BD31·MD20)은 비공개 기호를 쓰는 시험이 Modular에서 링크되게 하는 일과 함께 BS8d5가 한다. 같은 때 정할 것: 전역 `operator new` 대체로 할당을 세는 시험(`OperatorNewCounter.cpp`)은 Modular에서 호스트 이미지 안의 할당만 센다(Windows는 이미지마다, POSIX는 `RTLD_LOCAL`).
+- **빌드 입력 검사**: Core에 닿는 타깃의 Modular 거부(BS8d1의 "Launch에 닿으면 거부")를 푼다. 대신 모듈 표 제공 모듈에 닿는 Modular 실행 파일이 Launch에 닿지 않으면 거부한다. 실행 파일이 둘 이상이면 거부하는 규칙(BS8d1)은 그대로다.
+- **한계**:
+  - 크래시 메타데이터의 주 모듈 정보(Windows CodeView — `GetModuleHandleW(nullptr)`)는 진입 스텁을 가리킨다. 덤프의 모듈 목록에는 모든 모듈이 있으므로 기호 대조는 된다. 메타데이터에 호스트 모듈을 적는 일은 크래시 파이프라인 후속으로 둔다.
+  - 부트 모듈은 실행 파일 import(OS가 같은 폴더에서 찾는다)와 로더의 절대 경로 적재로 두 번 열린다. Windows는 같은 경로면 같은 모듈(참조 수만 는다)이지만, 실행 파일 경로를 다른 철자(subst·junction)로 얻으면 두 번 실릴 수 있다. BS8d5의 Modular 시험이 부트 모듈이 한 번만 실렸는지 확인한다.
+- **시험**:
+  - 빌드 시험 Modular fixture: 가짜 Launch(`ProvidesLaunch`, Modular 진입 C 함수를 export — 받은 manifest 이름과 호스트 기술을 찍는다)로 실행 파일이 import하는 Rocks 공유 라이브러리가 Launch뿐인지(Windows는 import 표, macOS는 `otool -L`), 호스트 공유 라이브러리와 export, manifest의 `host` 행, 창 subsystem 진입 함수, 호스트의 동적 모듈 미링크, 입력 거부(Launch 없음)를 본다. Linux(`readelf -d`)는 Linux 빌드 단계(BS6)에서 더한다.
+  - 로더 시험: `host` 키(schema 3) 해석과 호스트 행 둘 거부, 정적 표 로더의 `FindHostSymbol`은 false.
+  - 실제 Launch·로더로 호스트 모듈을 적재해 본문을 도는 성공 경로(manifest 로더 생성 성공·`FindHostSymbol` 양성·시동 크래시 수집·정리 순서)는 BS8d2(export 매크로) 없이는 Core가 Modular로 링크되지 않으므로 BS8d5의 Modular FoundationTests가 본다. 3.13절의 실행 파일 행 성공 시험(OS 적재 없이 로더 만들기)은 행이 OS 적재 대상이 되어 없어진다. Launch 실행 흐름은 프로세스 전역 상태(크래시 수집·정적 실행 상태)를 쓰므로 시험 runner 안에서 돌리지 않는다.
+- **버린 안**: 실행 파일 모듈을 실행 파일에 두고 의존 모듈을 직접 import(UE 방식 — MD21 계약 4를 깬다), Windows 지연 적재 import(`/DELAYLOAD` — macOS·Linux에 같은 장치가 없다), 따로 이름 지은 호스트 모듈 규칙(실행 파일 모듈과 내용이 같다), 앱 기술을 `ModuleEntry`에 싣기(Core가 Launch 형식을 모른다), 시동 전에 범용 할당자를 정하기(앱 기술이 호스트 모듈 안이라 순서가 거꾸로다), 실행 파일마다 manifest(빌드 정보가 Core 공유 라이브러리에 타깃 하나 몫이라 실행 파일마다 다른 도구 빌드 ID를 담을 수 없다), 한 manifest에 호스트 행 여럿(다른 실행 파일의 호스트까지 싣는다), Modular 내장 진입 API(내장 호스트의 진입점과 MD21이 맞지 않는다), 시동 단계에서 오류 대화상자 끄기(앱 종류를 모른 채 프로세스 설정을 바꾼다 — OS 적재 대화상자는 이미 꺼져 있다).
 
 ## 4. 결정 요약
 
@@ -541,7 +585,7 @@ ML1(3.11절)으로 `PostConfigInit`·엔진 단계 모듈이 설정·로그·tra
 - [빌드 타깃](BuildTargets.ko.md): 3.8절 BD30과 9.2절의 "별도 스펙 모듈 로더"를 이 문서로 링크했다. BD30에 단계 관계(ML0–ML4는 BS5 전, ML5는 BS5와 함께)와 실행 파일 import 범위(MD21)를 적었다. 3.8절 Linux 링크 옵션에 `-soname`을, BS8에 빌드 정보 생성 TU의 Modular 정의 위치를 더했다.
 
 구현 때 고칠 문서:
-- [크래시 처리·실행](CrashHandlingAndLaunch.ko.md): 8.1절에 모듈 단계(로더 생성·`EarliestPossible`, 도구 로그 뒤), 8.2절에 프로세스 묶음 종료(도구 로그 정리 전)를 더했다(개정 5, ML1).
+- [크래시 처리·실행](CrashHandlingAndLaunch.ko.md): 8.1절에 모듈 단계(로더 생성·`EarliestPossible`, 도구 로그 뒤), 8.2절에 프로세스 묶음 종료(도구 로그 정리 전)를 더했다(개정 5, ML1). 개정 10(ML4b)에서 그 문서 개정 12로 8.1절 7a에 Modular 진입(시동 크래시 수집·manifest 로더·호스트 앱 기술)을 적었다.
 - [CVar](CVarSystem.ko.md) "모듈 언로드 때 핸들 해제(결정 필요)": MD16·MD22로 답했다(등록은 `RegisterSettings`, 핸들이 모듈 lease를 잡고, 모듈 `Shutdown`이 해제한다 — 개정 5).
 - [저장소 구성](../Guides/RepositoryLayout.ko.md) 게임 빌드 연동: `loadingPhase` 실행 중 반영을 이 문서로 링크했다(개정 5).
 - [AppInfo·CommandLine](AppInfoCommandLine.ko.md) 11절: `BuildDescription`에 `ModuleBuildId`를 더한다(ML4).
@@ -573,6 +617,7 @@ ML1(3.11절)으로 `PostConfigInit`·엔진 단계 모듈이 설정·로그·tra
 
 | 개정 | 날짜 | 내용 |
 |---|---|---|
+| 10 | 2026-11-22 | ML4b 구현 세부(3.14절): Modular 실행 파일은 빌드 생성 진입 스텁(Launch만 import), 실행 파일 모듈은 호스트 공유 라이브러리(MD21), 앱 기술 export(`RocksApplicationDescription`·창 변형), Launch Modular 진입(`RocksLaunchModularApplication` — 시동 할당자로 manifest 로더를 먼저 만듦), manifest 행 키 `executable`→`host`(schema 3, `executableEntry` 인자 제거, 호스트 행도 OS 적재), `FindHostSymbol`, `GeneratedModuleTable()`은 Monolithic에만, `HostSettingsOptions::modules` 필수, 시험 등록 머리, 입력 검사(Launch 거부 해제·Launch 없는 Modular 실행 파일 거부) |
 | 9 | 2026-11-21 | ML4a 구현 세부(3.13절): `TryCreateFromManifest`(manifest 엄격 해석·`Prepare`·report), 행 키 `executable`과 실행 파일 진입 함수, 표 저장소·라이브러리 수명, 시험 범위(성공 경로는 BS8d5) |
 | 8 | 2026-11-21 | ML4를 [빌드 타깃](BuildTargets.ko.md) BS8d와 한 묶음으로 진행한다(빌드 타깃 개정 14): ML4a(manifest 읽기·`Prepare`·report) → ML4b(실행 파일 연결 — `GeneratedModuleTable()`은 Monolithic에만, 부트 모듈 import, 시험 등록 머리). manifest 쓰기·export 진입점·강제 참조는 BS8d1이 한다. ML4 완료 기준(`Modular` FoundationTests를 로더로 실행)은 BS8d5와 같이 채운다 |
 | 7 | 2026-11-21 | [빌드 타깃](BuildTargets.ko.md) 3.9절(BD36·BD39)에 맞춰 3.8절 순환 항목의 "Engine이 `DynamicModules`로 둔 플러그인 모듈"을 지웠다. 엔진 계층 모듈은 플러그인 모듈을 동적 적재로도 참조하지 않고, 켠 플러그인 모듈은 주 실행 파일에 링크된다 |

@@ -13,7 +13,7 @@ namespace rocks::detail {
 namespace {
 
 // manifest 형식 판이다(Rocks.Build ModuleManifests.Schema와 같다).
-constexpr int64 ManifestSchema = 2;
+constexpr int64 ManifestSchema = 3;
 // buildId(GUID 32자 소문자 16진)와 툴체인 지문(SHA-256 64자 소문자 16진)의 길이다.
 constexpr usize BuildIdLength = 32;
 constexpr usize FingerprintLength = 64;
@@ -124,9 +124,8 @@ const char* Store(Array<char>& text, StringView value) noexcept {
 } // namespace
 
 ModuleManifestData::ModuleManifestData(Allocator& allocator) noexcept
-    : rows(allocator), entries(allocator), files(allocator), sizes(allocator),
-      executable(allocator), text(allocator), dependencyNames(allocator), libraries(allocator),
-      leases(allocator) {
+    : rows(allocator), entries(allocator), files(allocator), sizes(allocator), host(allocator),
+      text(allocator), dependencyNames(allocator), libraries(allocator), leases(allocator) {
 }
 
 ModuleManifestData::~ModuleManifestData() noexcept {
@@ -201,8 +200,8 @@ bool ParseModuleManifest(StringView text, ModuleManifestData& data,
     }
 
     // 문자열 저장소와 의존 배열은 정확한 크기로 한 번 잡는다(주소가 고정되어 행이 가리킬 수 있다).
-    constexpr StringView rowKeys[] = {"name",         "file",      "size",      "dependencies",
-                                      "loadingPhase", "onRequest", "executable"};
+    constexpr StringView rowKeys[] = {"name",         "file",      "size", "dependencies",
+                                      "loadingPhase", "onRequest", "host"};
     usize textBytes = 0;
     usize dependencyTotal = 0;
     for (usize index = 0; index < modules.Size(); ++index) {
@@ -211,7 +210,7 @@ bool ParseModuleManifest(StringView text, ModuleManifestData& data,
             return Reject(
                 report,
                 "Module manifest modules[{}] must have exactly the keys name, file, size, "
-                "dependencies, loadingPhase, onRequest and executable",
+                "dependencies, loadingPhase, onRequest and host",
                 index);
         }
 
@@ -232,13 +231,13 @@ bool ParseModuleManifest(StringView text, ModuleManifestData& data,
     const usize count = modules.Size();
     if (!data.rows.TryReserve(count) || !data.entries.TryReserve(count) ||
         !data.files.TryReserve(count) || !data.sizes.TryReserve(count) ||
-        !data.executable.TryReserve(count) || !data.text.TryReserve(textBytes) ||
+        !data.host.TryReserve(count) || !data.text.TryReserve(textBytes) ||
         !data.dependencyNames.TryReserve(dependencyTotal) || !data.libraries.TryReserve(count) ||
         !data.leases.TryReserve(count)) {
         return RejectOutOfMemory(report);
     }
 
-    usize executableRows = 0;
+    usize hostRows = 0;
     for (usize index = 0; index < count; ++index) {
         const JsonValue row = modules.At(index);
         const StringView name = row.Find("name").GetString();
@@ -276,16 +275,14 @@ bool ParseModuleManifest(StringView text, ModuleManifestData& data,
         }
 
         const JsonValue onRequest = row.Find("onRequest");
-        const JsonValue executable = row.Find("executable");
-        if (!onRequest.IsBool() || !executable.IsBool()) {
+        const JsonValue host = row.Find("host");
+        if (!onRequest.IsBool() || !host.IsBool()) {
             return Reject(
-                report, "Module manifest module {} onRequest and executable must be true or false",
-                name);
+                report, "Module manifest module {} onRequest and host must be true or false", name);
         }
 
-        if (executable.GetBool() && ++executableRows > 1) {
-            return Reject(report,
-                          "Module manifest has more than one executable row ({} is the second)",
+        if (host.GetBool() && ++hostRows > 1) {
+            return Reject(report, "Module manifest has more than one host row ({} is the second)",
                           name);
         }
 
@@ -336,8 +333,7 @@ bool ParseModuleManifest(StringView text, ModuleManifestData& data,
         tableRow.phase = phase;
         tableRow.onRequest = onRequest.GetBool();
         if (!data.rows.TryPushBack(tableRow) || !data.files.TryPushBack(storedFile) ||
-            !data.sizes.TryPushBack(sizeValue.Value()) ||
-            !data.executable.TryPushBack(executable.GetBool()) ||
+            !data.sizes.TryPushBack(sizeValue.Value()) || !data.host.TryPushBack(host.GetBool()) ||
             !data.entries.TryPushBack(nullptr)) {
             platform::Fatal("ModuleManifest reserved row push failed");
         }
@@ -347,7 +343,7 @@ bool ParseModuleManifest(StringView text, ModuleManifestData& data,
 }
 
 bool PrepareModuleBinaries(StringView directory, ModuleManifestData& data,
-                           ModuleEntryFunction executableEntry, ModuleLoadReport& report) noexcept {
+                           ModuleLoadReport& report) noexcept {
     Allocator& allocator = data.rows.GetAllocator();
     auto fail = [&](ModuleLoadCode code, StringView module, StringView stage) noexcept {
         report.code = code;
@@ -359,13 +355,6 @@ bool PrepareModuleBinaries(StringView directory, ModuleManifestData& data,
 
     for (usize index = 0; index < data.rows.Size(); ++index) {
         const StringView name = data.rows[index].name;
-        if (data.executable[index] && executableEntry == nullptr) {
-            report.error = ErrorCode::InvalidArgument;
-            WriteReportText(
-                report, report.message,
-                "Module manifest has executable row {} but no executable entry was given", name);
-            return fail(ModuleLoadCode::Incompatible, name, ManifestStage);
-        }
 
         StringBuilder<> path(allocator);
         if (!path.TryAppend(directory) || !path.TryAppend("/") ||
@@ -397,36 +386,30 @@ bool PrepareModuleBinaries(StringView directory, ModuleManifestData& data,
             return fail(ModuleLoadCode::Incompatible, name, "Lookup");
         }
 
-        const ModuleEntry* entry = nullptr;
-        if (data.executable[index]) {
-            entry = &executableEntry();
-        } else {
-            platform::DynamicLibrary library;
-            platform::DynamicLibraryError error;
-            const platform::FileStatus opened =
-                library.Open(path.CString(), path.View().ByteCount(), &error);
-            if (!opened) {
-                report.nativeError = opened.nativeError;
-                WriteReportText(report, report.message,
-                                "Module {} library {} cannot be loaded (native error {}): {}", name,
-                                path.View(), opened.nativeError, StringView(error.text));
-                return fail(ModuleLoadCode::OsLoadFailed, name, "OsLoad");
-            }
+        platform::DynamicLibrary library;
+        platform::DynamicLibraryError error;
+        const platform::FileStatus opened =
+            library.Open(path.CString(), path.View().ByteCount(), &error);
+        if (!opened) {
+            report.nativeError = opened.nativeError;
+            WriteReportText(report, report.message,
+                            "Module {} library {} cannot be loaded (native error {}): {}", name,
+                            path.View(), opened.nativeError, StringView(error.text));
+            return fail(ModuleLoadCode::OsLoadFailed, name, "OsLoad");
+        }
 
-            void* address = nullptr;
-            platform::DynamicLibraryLease lease;
-            if (!library.Find(ExportedEntrySymbol, address, lease)) {
-                WriteReportText(report, report.message, "Module {} library {} does not export {}",
-                                name, path.View(), StringView(ExportedEntrySymbol));
-                (void)library.Close();
-                return fail(ModuleLoadCode::EntryMissing, name, "Entry");
-            }
+        void* address = nullptr;
+        platform::DynamicLibraryLease lease;
+        if (!library.Find(ExportedEntrySymbol, address, lease)) {
+            WriteReportText(report, report.message, "Module {} library {} does not export {}", name,
+                            path.View(), StringView(ExportedEntrySymbol));
+            (void)library.Close();
+            return fail(ModuleLoadCode::EntryMissing, name, "Entry");
+        }
 
-            entry = reinterpret_cast<ExportedEntryFunction>(address)();
-            if (!data.libraries.TryPushBack(Move(library)) ||
-                !data.leases.TryPushBack(Move(lease))) {
-                platform::Fatal("ModuleManifest reserved library push failed");
-            }
+        const ModuleEntry* entry = reinterpret_cast<ExportedEntryFunction>(address)();
+        if (!data.libraries.TryPushBack(Move(library)) || !data.leases.TryPushBack(Move(lease))) {
+            platform::Fatal("ModuleManifest reserved library push failed");
         }
 
         if (entry == nullptr || entry->entryVersion != ModuleEntryVersion ||

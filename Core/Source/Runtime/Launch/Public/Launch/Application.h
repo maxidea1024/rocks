@@ -129,13 +129,15 @@ public:
     //
     // 사용 예:
     //   Allocator& memory = context.DefaultAllocator();
-    //   auto loader = ModuleLoader::TryCreate(memory, GeneratedModuleTable());
+    //   Array<int32> values(memory);
     Allocator& DefaultAllocator() noexcept;
 
     // Launch가 소유한 프로세스 모듈 로더다(Docs/Design/ModuleLoader.ko.md 3.9·3.11절, UE
-    // FModuleManager의 자리 — 전역 접근자는 없다). 본문 수명 동안 유효하다. 범용 할당자로 이 실행
-    // 파일의 모듈 표(GeneratedModuleTable)에서 만들었고 부트 모듈(EarliestPossible 단계 — Core·
-    // ModuleLoader·Launch)이 시작해 있다. 본문은 단계를 이어 돈다: 엔진 호스트는 설정·로그 뒤
+    // FModuleManager의 자리 — 전역 접근자는 없다). 본문 수명 동안 유효하다. Monolithic은 범용
+    // 할당자로 이 실행 파일의 모듈 표(GeneratedModuleTable)에서, Modular는 Launch의 Modular 진입이
+    // 시동 할당자(SystemAllocator)로 모듈 manifest에서 만들었다(3.14절 — 범용 할당자의 종류를
+    // 정하는 앱 기술이 그 로더가 실은 호스트 모듈 안에 있다). 부트 모듈(EarliestPossible 단계 —
+    // Core· ModuleLoader·Launch)이 시작해 있다. 본문은 단계를 이어 돈다: 엔진 호스트는 설정·로그 뒤
     // StartPhase(PostConfigInit)와 끝에 ShutdownGroup(Host)를, Engine(EngineConfig::modules)은 엔진
     // 단계를 돈다. 프로세스 묶음은 본문이 돌아간 뒤 Launch가 내린다(도구 로그 정리 전). 본문은 이
     // 로더의 lease를 잡은 등록(설정 문맥 등)을 돌아가기 전에 놓는다. 남으면 Launch가 Error로
@@ -239,9 +241,38 @@ int RunEmbeddedApplication(const ApplicationDescription& description, int argc,
 // 부른다. 인자를 얻지 못하면 stderr에 한 줄을 남기고 description.commandLineFailureExitCode다.
 int RunWindowedApplication(const ApplicationDescription& description) noexcept;
 
+// Modular 호스트 모듈이 export하는 앱 기술 함수의 이름이다(Launch/EntryPoint.h — 창 실행 파일은
+// Windows에서 따로).
+inline constexpr const char* ApplicationDescriptionSymbol = "RocksApplicationDescription";
+inline constexpr const char* WindowedApplicationDescriptionSymbol =
+    "RocksWindowedApplicationDescription";
+
 // 프로세스 종료 요청을 원자 표시로 남긴다. 아무 스레드·신호 처리기에서 부를 수 있다. 엔진 호스트는
 // 게임 스레드에서 IsTerminationRequested()를 보고 Engine::RequestExit()로 옮긴다(설계 20절).
 void RequestTermination() noexcept;
 bool IsTerminationRequested() noexcept;
 
 } // namespace rocks::launch
+
+#if !ROCKS_MONOLITHIC
+// Modular 실행 파일의 진입이다(Docs/Design/ModuleLoader.ko.md 3.14절). 빌드가 만든 실행 파일 진입
+// TU(<모듈>.Launcher.cpp)만 부른다. 실행 파일 폴더의 manifest(manifest — 파일 이름)로 모든 모듈
+// 공유 라이브러리를 싣는 로더를 시동 할당자에서 만들고, 호스트 모듈이 export한 앱 기술로
+// RunApplication과 같은 흐름을 돈다("Launch.Modules"는 이 로더로 부트 모듈만 시작한다). 로더는 실행
+// 흐름이 끝난 뒤(크래시 수집 해제 뒤) 파괴한다 — 앱 기술과 그 문자열이 호스트 모듈 안에 있다.
+// manifest·적재·앱 기술 조회가 실패하면 stderr에 한 줄(경로·report)을 쓰고
+// ModuleStartupFailureExitCode다(크래시 수집·도구 로그는 앱 기술이 정하므로 아직 없다).
+// 크래시 도우미 분기가 맨 먼저다. 세 진입은 모든 플랫폼에 있고 진입 TU가 플랫폼에 맞는 것을 고른다
+// (Windows 콘솔 wmain → 넓은 문자, Windows 창 wWinMain → 창, POSIX main → 좁은 문자).
+extern "C" {
+// 좁은 문자 진입(POSIX main)이다.
+ROCKS_LAUNCH_API int RocksLaunchModularApplication(int argc, char** argv,
+                                                   const char* manifest) noexcept;
+// 넓은 문자 진입(Windows wmain)이다.
+ROCKS_LAUNCH_API int RocksLaunchModularWideApplication(int argc, wchar_t** argv,
+                                                       const char* manifest) noexcept;
+// 창 실행 파일 진입(Windows wWinMain)이다. CRT가 나눈 넓은 문자 인자를 쓰고(없으면 stderr 한 줄과
+// CommandLineFailureExitCode) 앱 기술은 RocksWindowedApplicationDescription이다.
+ROCKS_LAUNCH_API int RocksLaunchModularWindowedApplication(const char* manifest) noexcept;
+}
+#endif
