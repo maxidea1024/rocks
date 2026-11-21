@@ -42,21 +42,12 @@ Result<void> AttachBulkStore(Package& package, UniquePtr<PackageBulkStore>& stor
 
 Result<RootRef<Package>> NewPackage(ObjectRegistry& registry, const ObjectAccessContext& access,
                                     AssetId id, PackageKind kind) noexcept {
-    if (id.IsNull() || (kind != PackageKind::Editor && kind != PackageKind::Cooked)) {
-        return Result<RootRef<Package>>::Failure(ErrorCode::InvalidArgument);
-    }
-
     ConstructionContext transaction(registry, access);
-    auto created = transaction.Create<Package>(GeneratedType<Package>::Id());
+    auto created = NewPackage(transaction, id, kind);
     if (!created) {
         return Result<RootRef<Package>>::Failure(created.Error());
     }
 
-    // 방금 만든 이 트랜잭션의 객체다.
-    auto package = transaction.GetForWrite<Package>(created.Value());
-    ROCKS_ASSERT(package.IsOk());
-
-    detail::PackageAccess::SetIdentity(*package.Value(), id, kind);
     // Commit의 root를 typed root를 얻을 때까지 쥔다(그 사이 GC가 패키지 정책 객체를 Discard 없이
     // 거두지 않게). 쥔 root가 있는 공개된 Package의 typed root는 실패하지 않는다.
     auto committed = transaction.Commit();
@@ -67,6 +58,44 @@ Result<RootRef<Package>> NewPackage(ObjectRegistry& registry, const ObjectAccess
     auto typed = registry.TryPin<Package>(access, created.Value());
     ROCKS_ASSERT(typed.IsOk());
     return typed;
+}
+
+Result<ObjectHandle> NewPackage(ConstructionContext& transaction, AssetId id,
+                                PackageKind kind) noexcept {
+    if (id.IsNull() || (kind != PackageKind::Editor && kind != PackageKind::Cooked)) {
+        return Result<ObjectHandle>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto created = transaction.Create<Package>(GeneratedType<Package>::Id());
+    if (!created) {
+        return created;
+    }
+
+    // 방금 만든 이 트랜잭션의 객체다(Required 검사 중 표시가 있었다면 Create가 먼저 Busy였다).
+    auto package = transaction.GetForWrite<Package>(created.Value());
+    ROCKS_ASSERT(package.IsOk());
+    detail::PackageAccess::SetIdentity(*package.Value(), id, kind);
+    return created;
+}
+
+Result<ObjectHandle> NewRepresentativeAsset(ConstructionContext& transaction, ObjectHandle package,
+                                            TypeId type) noexcept {
+    auto owner = transaction.Get<Package>(package);
+    if (!owner) {
+        return Result<ObjectHandle>::Failure(owner.Error());
+    }
+
+    const AssetId id = owner.Value()->Id();
+    auto created = transaction.Create<Asset>(type, package);
+    if (!created) {
+        return created;
+    }
+
+    // 방금 만든 이 트랜잭션의 객체다.
+    auto asset = transaction.GetForWrite<Asset>(created.Value());
+    ROCKS_ASSERT(asset.IsOk());
+    detail::PackageAccess::SetAssetId(*asset.Value(), id);
+    return created;
 }
 
 Result<void> RegisterAssetRuntimeTypes(ModuleRegistration& registration) noexcept {

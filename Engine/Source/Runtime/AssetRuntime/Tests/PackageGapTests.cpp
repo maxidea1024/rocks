@@ -1,12 +1,14 @@
 #include "PackageEditing.h"
 
 #include <AssetRuntime/Package.generated.h>
+#include <Object/ConstructionContext.h>
 #include <Platform/Thread.h>
 #include <TestSupport/NFailAllocator.h>
 
 // 빈틈 리뷰가 찾은 경로의 시험이다(Docs/Design/AssetSystem.ko.md 5.3절, 5.7절 13·14, 14.1.2절):
 // 헤더 크기 상한의 두 칸, 엔진·컨테이너 버전 경계, writer의 섹션 크기·null id 패키지·Package 객체
-// 참조, NewPackage의 스레드·할당 실패(typed root 실패 시 Discard), InstantiatePackages의 트랜잭션
+// 참조, NewPackage의 스레드·할당 실패(typed root 실패 시 Discard)·트랜잭션 판(대표 에셋 Id·할당
+// 실패), InstantiatePackages의 트랜잭션
 // 오류 분류·재호출, Required 참조 누락(쿠킹 손상·에디터 계속), bulk 값 규칙(빈 ref·쓰이지 않는
 // entry·EditorOnly 위치만의 공유·원본 크기 불일치), 커스텀 버전 여럿.
 using namespace rocks;
@@ -15,6 +17,9 @@ namespace package_gap_tests_file {
 using namespace rocks::asset_test;
 
 namespace {
+
+// PackageKind에 없는 값이다.
+constexpr uint32 InvalidPackageKind = 77;
 
 // 대표 에셋(TestAsset)만 있는 패키지다.
 struct Lone {
@@ -325,6 +330,135 @@ TEST(AssetPackage_NewPackageFailures) {
         CHECK(target.Stats().liveObjects == 0);
         if (!triggered) {
             REQUIRE(package);
+            break;
+        }
+    }
+
+    CHECK(failures > 0);
+}
+
+// 트랜잭션 안 패키지·대표 에셋(AS 7.1절 15 A2c3): NewPackage(transaction)는 null id·모르는 종류를
+// InvalidArgument로 거부하고 트랜잭션을 고정하지 않는다(뒤 만들기가 된다). NewRepresentativeAsset은
+// 대표 에셋의 Id()를 패키지 id로 두고, Commit은 Package root를 주며 공개된 패키지·대표 에셋이
+// 그대로다. 공개된(다른 트랜잭션의) Package·Package가 아닌 staged 객체는 그 handle 오류, 에셋이
+// 아닌 타입·두 번째 대표 자식은 Create 오류다. Rollback하면 아무것도 남지 않는다.
+TEST(AssetPackage_NewPackageInTransaction) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    ObjectRegistry& registry = *env.source;
+    const ObjectAccessContext access = registry.OwnerAccess();
+    const uint64 before = registry.Stats().liveObjects;
+    ObjectHandle published{};
+    {
+        ConstructionContext transaction(registry, access);
+        CHECK(NewPackage(transaction, AssetId{}).Error() == ErrorCode::InvalidArgument);
+        CHECK(NewPackage(transaction, FixedId(1340), static_cast<PackageKind>(InvalidPackageKind))
+                  .Error() == ErrorCode::InvalidArgument);
+        auto package = NewPackage(transaction, FixedId(1340), PackageKind::Cooked);
+        REQUIRE(package);
+        auto asset = NewRepresentativeAsset(transaction, package.Value(), TestAssetType());
+        REQUIRE(asset);
+        auto staged = transaction.Get<Asset>(asset.Value());
+        REQUIRE(staged);
+        CHECK(staged.Value()->Id() == FixedId(1340));
+        auto root = transaction.Commit();
+        REQUIRE(root);
+        CHECK(root.Value().Handle() == package.Value());
+        published = package.Value();
+        auto live = registry.Resolve<Package>(access, published);
+        REQUIRE(live);
+        auto pointer = live.Value().Get();
+        REQUIRE(pointer);
+        CHECK(pointer.Value()->Id() == FixedId(1340) &&
+              pointer.Value()->Kind() == PackageKind::Cooked);
+        auto child = registry.FindChild(access, published, "");
+        REQUIRE(child && child.Value() == asset.Value());
+        auto representative = registry.Resolve<Asset>(access, child.Value());
+        REQUIRE(representative);
+        auto value = representative.Value().Get();
+        REQUIRE(value);
+        CHECK(value.Value()->Id() == FixedId(1340));
+        CHECK(registry.Discard(access, published));
+    }
+
+    // handle·타입 오류.
+    {
+        ConstructionContext transaction(registry, access);
+        CHECK(!NewRepresentativeAsset(transaction, published, TestAssetType()));
+    }
+
+    {
+        ConstructionContext transaction(registry, access);
+        auto package = NewPackage(transaction, FixedId(1341));
+        REQUIRE(package);
+        auto asset = NewRepresentativeAsset(transaction, package.Value(), TestAssetType());
+        REQUIRE(asset);
+        CHECK(!NewRepresentativeAsset(transaction, asset.Value(), TestAssetType()));
+        CHECK(!NewRepresentativeAsset(transaction, package.Value(), TestAssetType()));
+    }
+
+    {
+        ConstructionContext transaction(registry, access);
+        auto package = NewPackage(transaction, FixedId(1342));
+        REQUIRE(package);
+        CHECK(!NewRepresentativeAsset(transaction, package.Value(), TestPartType()));
+        transaction.Rollback();
+    }
+
+    CHECK(registry.Collect(access));
+    CHECK(registry.Stats().liveObjects == before);
+}
+
+// 트랜잭션 판의 할당 실패: NewPackage·NewRepresentativeAsset·Commit의 Registry 할당을 하나씩
+// 실패시키면 OutOfMemory이고 트랜잭션 소멸이 되돌려 아무것도 남지 않는다.
+TEST(AssetPackage_NewPackageInTransactionAllocationFailures) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    test::NFailAllocator failing(env.allocator);
+    RegistryOptions options;
+    options.names = &env.names;
+    options.policy.packageNativeType = NativeTypeKey<Package>();
+    options.policy.rejectWorldOnly = true;
+    auto made = UniquePtr<ObjectRegistry>::TryMake(env.allocator, failing, env.types,
+                                                   ContextId{0x4153534554ull, 12}, options);
+    REQUIRE(made);
+    ObjectRegistry& target = *made.Value();
+    const ObjectAccessContext access = target.OwnerAccess();
+    uint32 failures = 0;
+    for (uint64 attempt = 1;; ++attempt) {
+        failing.FailOnAttempt(attempt);
+        ErrorCode error = ErrorCode::None;
+        ObjectHandle package{};
+        {
+            ConstructionContext transaction(target, access);
+            auto created = NewPackage(transaction, FixedId(1343));
+            if (!created) {
+                error = created.Error();
+            } else {
+                auto asset = NewRepresentativeAsset(transaction, created.Value(), TestAssetType());
+                if (!asset) {
+                    error = asset.Error();
+                } else if (auto root = transaction.Commit(); !root) {
+                    error = root.Error();
+                } else {
+                    package = created.Value();
+                }
+            }
+        }
+
+        const bool triggered = failing.Attempts() >= attempt;
+        failing.DisableFailure();
+        if (error != ErrorCode::None) {
+            CHECK(error == ErrorCode::OutOfMemory);
+            ++failures;
+        } else {
+            CHECK(target.Discard(access, package));
+        }
+
+        CHECK(target.Collect(access));
+        CHECK(target.Stats().liveObjects == 0);
+        if (!triggered) {
+            REQUIRE(error == ErrorCode::None);
             break;
         }
     }

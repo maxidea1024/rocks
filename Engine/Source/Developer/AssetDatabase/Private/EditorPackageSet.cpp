@@ -630,7 +630,8 @@ Result<ObjectHandle> EditorPackageSet::OpenEntry(AssetId id, Array<EditorWarning
 }
 
 Result<ObjectHandle> EditorPackageSet::Create(const LogicalPath& path, TypeId type, AssetId id,
-                                              AssetDiagnostic* failure) noexcept {
+                                              AssetDiagnostic* failure,
+                                              EditorAssetInitializer* initializer) noexcept {
     using Out = Result<ObjectHandle>;
     auto fail = [&](AssetDiagnosticCode code, ErrorCode error) noexcept {
         return EditorFail<ObjectHandle>(failure, EditorDiagnostic(code, error, id));
@@ -709,25 +710,37 @@ Result<ObjectHandle> EditorPackageSet::Create(const LogicalPath& path, TypeId ty
         return fail(AssetDiagnosticCode::None, store.Error());
     }
 
+    // 패키지·대표 에셋을 한 트랜잭션으로 만들고 초기화한 뒤 함께 공개한다(실패하면 소멸자가 되돌려
+    // 아무것도 남지 않는다).
     const ObjectAccessContext access = Access();
-    auto package = NewPackage(*registry_, access, id, PackageKind::Editor);
+    ConstructionContext transaction(*registry_, access);
+    auto package = NewPackage(transaction, id, PackageKind::Editor);
     if (!package) {
         return fail(AssetDiagnosticCode::None, package.Error());
     }
 
-    const ObjectHandle handle = package.Value().Handle();
-    // 대표 에셋을 만들지 못하면 패키지를 Discard한다(패키지 정책 객체는 Discard로만 죽는다).
-    auto representative = registry_->NewObject<Asset>(access, type, handle, StringView());
+    const ObjectHandle handle = package.Value();
+    auto representative = NewRepresentativeAsset(transaction, handle, type);
     if (!representative) {
-        (void)registry_->Discard(access, handle);
         return fail(AssetDiagnosticCode::None, representative.Error());
     }
 
-    // 방금 공개한 Package다: 고정·접근은 실패하지 않고(소유 스레드 — GC·종료 중이 아니다), 새
-    // Package에는 저장소가 없다.
-    auto root = registry_->TryPin<Object>(access, handle);
+    if (initializer != nullptr) {
+        if (auto initialized = initializer->Initialize(transaction, representative.Value());
+            !initialized) {
+            return fail(AssetDiagnosticCode::None, initialized.Error());
+        }
+    }
+
+    auto root = transaction.Commit();
+    if (!root) {
+        return fail(AssetDiagnosticCode::None, root.Error());
+    }
+
+    // 방금 공개한 Package다(Commit의 root가 쥔다): 접근은 실패하지 않고(소유 스레드 — GC·종료 중이
+    // 아니다), 새 Package에는 저장소가 없다.
     auto borrow = registry_->Resolve<Package>(access, handle);
-    ROCKS_ASSERT(root.IsOk() && borrow.IsOk());
+    ROCKS_ASSERT(borrow.IsOk());
     auto pointer = borrow.Value().Get();
     ROCKS_ASSERT(pointer.IsOk());
     info.package = handle;

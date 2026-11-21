@@ -36,6 +36,10 @@ constexpr uint64 FreshId = 2850;
 // 기록 종류(소유·참조)와 저장 대상(기존·새 패키지)의 반복 값이다.
 constexpr bool OwnedCases[] = {true, false};
 constexpr bool FreshCases[] = {false, true};
+// 초기화가 하위 객체를 만드는지의 반복 값이다.
+constexpr bool PartCases[] = {false, true};
+// 이름 규칙(ValidateNameComponent)에 어긋나는 하위 객체 이름이다.
+constexpr StringView InvalidPartName = "bad/name";
 
 // 저장 집합 설정이다(hook 표를 넘긴다 — 저장에 필수).
 EditorPackageSetConfig SaveConfig(AssetEnv& env, Project& project,
@@ -315,6 +319,123 @@ TEST(EditorPackageSave_NewPackage) {
 // CapacityExceeded, 디렉터리를 만들 수 없으면 진단 None과 그 오류다. 거부는 아무것도 쓰지 않고
 // 패키지는 저장하지 않은 채 남는다(고장을 걷으면 저장된다). 색인에 같은 경로 키·id가 둘이어도
 // (AlreadyExists) 같은 거부이고, 대상 Stat 실패는 진단 None, 열린 것 사이에 없는 id는 NotFound다.
+namespace {
+
+// 대표 에셋 값을 쓰고(선택) 하위 객체를 만들거나 지정한 오류로 실패하는 초기화다.
+class ValueInitializer final : public EditorAssetInitializer {
+public:
+    Result<void> Initialize(ConstructionContext& transaction,
+                            ObjectHandle asset) noexcept override {
+        ++calls;
+        seen = asset;
+        auto owner = transaction.GetForWrite<TestAsset>(asset);
+        if (!owner) {
+            return Result<void>::Failure(owner.Error());
+        }
+
+        owner.Value()->value = EditedValue;
+        stagedId = owner.Value()->Id();
+        if (makePart) {
+            auto part = transaction.Create<TestPart>(TestPartType(), asset, "Part");
+            if (!part) {
+                return Result<void>::Failure(part.Error());
+            }
+        }
+
+        if (swallow) {
+            // 실패한 Create의 오류를 삼킨다(계약 위반 — 트랜잭션이 오류로 고정되어 Commit이
+            // 실패한다).
+            (void)transaction.Create<TestPart>(TestPartType(), asset, InvalidPartName);
+        }
+
+        if (error != ErrorCode::None) {
+            return Result<void>::Failure(error);
+        }
+
+        return Result<void>::Success();
+    }
+
+    ErrorCode error = ErrorCode::None;
+    bool makePart = false;
+    bool swallow = false;
+    uint32 calls = 0;
+    ObjectHandle seen{};
+    AssetId stagedId{};
+};
+
+} // namespace
+
+// 만들기의 공개 전 초기화(7.1절 15 A2c3): 초기화는 공개 전 대표 에셋(Id()가 이미 패키지 id)에 한 번
+// 불리고 그 값·하위 객체가 공개된다. 초기화가 실패하면(값을 쓴 뒤·하위 객체를 만든 뒤라도) 진단
+// None과 그 오류이고 아무것도 남지 않는다(집합·Registry 객체 수 그대로, 같은 경로·id로 다시 만들 수
+// 있다). 초기화가 실패한 트랜잭션 연산의 오류를 삼키고 성공을 돌려주면 공개가 그 오류로 실패하고
+// 역시 아무것도 남지 않는다. 초기화 없는 만들기도 대표 에셋 Id()가 패키지 id다.
+TEST(EditorPackageSave_CreateInitializer) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Sources sources(env.allocator);
+    REQUIRE(MakeSources(env, sources));
+    SaveScene scene(env, sources);
+    REQUIRE(scene.ready);
+    EditorPackageSet& set = scene.set;
+    auto path = ParseLogicalPath(env.allocator, "/Game/Fresh/Inited");
+    auto plain = ParseLogicalPath(env.allocator, "/Game/Fresh/Plain");
+    REQUIRE(path && plain);
+    const usize count = set.Count();
+    const uint64 live = set.Registry().Stats().liveObjects;
+    const ErrorCode errors[] = {ErrorCode::NotFound, ErrorCode::OutOfMemory};
+    for (ErrorCode error : errors) {
+        for (bool makePart : PartCases) {
+            ValueInitializer failing;
+            failing.error = error;
+            failing.makePart = makePart;
+            AssetDiagnostic failure;
+            auto made =
+                set.Create(path.Value(), TestAssetType(), FixedId(FreshId), &failure, &failing);
+            CHECK(!made && made.Error() == error);
+            CHECK(failure.code == AssetDiagnosticCode::None && failure.error == error);
+            CHECK(failing.calls == 1 && failing.stagedId == FixedId(FreshId));
+            CHECK(set.Count() == count && set.Find(FixedId(FreshId)) == nullptr);
+            CHECK(set.Registry().Stats().liveObjects == live);
+        }
+    }
+
+    // 초기화가 트랜잭션 오류를 삼키면 공개(Commit)가 그 오류로 실패하고 아무것도 남지 않는다.
+    {
+        ValueInitializer swallowing;
+        swallowing.swallow = true;
+        AssetDiagnostic failure;
+        auto made =
+            set.Create(path.Value(), TestAssetType(), FixedId(FreshId), &failure, &swallowing);
+        CHECK(!made && made.Error() == ErrorCode::InvalidArgument);
+        CHECK(failure.code == AssetDiagnosticCode::None &&
+              failure.error == ErrorCode::InvalidArgument);
+        CHECK(set.Count() == count && set.Registry().Stats().liveObjects == live);
+    }
+
+    ValueInitializer initializer;
+    initializer.makePart = true;
+    auto made = set.Create(path.Value(), TestAssetType(), FixedId(FreshId), nullptr, &initializer);
+    REQUIRE(made);
+    CHECK(initializer.calls == 1);
+    TestAsset* asset = AssetOf(set, made.Value());
+    REQUIRE(asset != nullptr);
+    CHECK(asset->value == EditedValue && asset->Id() == FixedId(FreshId));
+    auto representative = set.Registry().FindChild(set.Access(), made.Value(), "");
+    REQUIRE(representative && representative.Value() == initializer.seen);
+    CHECK(set.Registry().FindChild(set.Access(), initializer.seen, "Part"));
+    const EditorPackageInfo* info = set.Find(FixedId(FreshId));
+    REQUIRE(info != nullptr);
+    CHECK(info->unsaved && info->dirty && info->package == made.Value() && info->store != nullptr);
+    REQUIRE(set.Save(FixedId(FreshId), scene.lock, EditorSaveOptions{}));
+
+    auto other = set.Create(plain.Value(), TestAssetType());
+    REQUIRE(other);
+    TestAsset* plainAsset = AssetOf(set, other.Value());
+    REQUIRE(plainAsset != nullptr);
+    CHECK(!plainAsset->Id().IsNull() && set.Find(plainAsset->Id()) != nullptr);
+}
+
 TEST(EditorPackageSave_NewPackageRefusals) {
     AssetEnv env;
     REQUIRE(env.Ready());

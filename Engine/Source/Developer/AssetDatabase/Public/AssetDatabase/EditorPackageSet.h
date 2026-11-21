@@ -9,6 +9,7 @@
 #include <AssetRuntime/PackageLoad.h>
 #include <Core/Containers/Array.h>
 #include <Core/Memory/UniquePtr.h>
+#include <Object/ConstructionContext.h>
 #include <Object/ObjectRegistry.h>
 #include <Object/ReferenceObserver.h>
 #include <Platform/File.h>
@@ -96,6 +97,33 @@ struct EditorSaveOptions {
     bool dropUnresolved = false;
 };
 
+// 새 대표 에셋의 공개 전 초기화다(EditorPackageSet::Create — asset-new의 대입 묶음, 7.1절 15
+// A2c3). Create가 패키지·대표 에셋을 만든 트랜잭션에서 공개 전에 한 번 부른다.
+//
+// 계약: transaction을 끝내지 않는다(Commit·Rollback은 Create가 한다). 같은 트랜잭션에 하위 객체를
+// 만들 수 있다. 실패를 돌려주면 Create가 트랜잭션을 되돌리고 그 오류로 실패한다(자세한 진단은
+// 구현이 따로 남긴다).
+//
+// 사용 예:
+//   class AssignNew final : public EditorAssetInitializer {
+//   public:
+//       Result<void> Initialize(ConstructionContext& transaction, ObjectHandle asset) noexcept
+//           override {
+//           auto prepared = reflection_text::PrepareAssignments(
+//               reflection_text::AssignmentTarget::Staged(transaction, asset), inputs, options,
+//               diagnostics);
+//           ...
+//       }
+//   };
+class EditorAssetInitializer {
+public:
+    virtual Result<void> Initialize(ConstructionContext& transaction,
+                                    ObjectHandle asset) noexcept = 0;
+
+protected:
+    ~EditorAssetInitializer() = default;
+};
+
 // 저장 검증 scratch 크기다(VerifyPackageFile이 건너뛴 섹션을 이 크기 조각으로 훑는다).
 inline constexpr usize EditorSaveVerifyScratchBytes = 64 * 1024;
 
@@ -165,15 +193,20 @@ public:
                               AssetDiagnostic* failure = nullptr) noexcept;
 
     // path에 새 패키지와 대표 에셋(type)을 만든다(파일은 첫 Save가 만든다). id가 null이면 새로
-    // 발급한다. 새 패키지는 dirty다. 반환은 Package handle이다.
+    // 발급한다. 패키지·대표 에셋(Id()는 패키지 id)을 한 트랜잭션으로 만들고, initializer가 있으면
+    // 공개 전에 Initialize(transaction, 대표 에셋)를 부른 뒤 함께 공개한다(asset-new의 대입 —
+    // 7.1절 15 A2c3). initializer나 공개가 실패하면 트랜잭션을 되돌려 아무것도 남지 않는다. 새
+    // 패키지는 dirty다. 반환은 Package handle이다.
     //
     // 오류(failure 진단): Initialize 전·type 0 InvalidArgument, 같은 경로 키가 색인에 있거나 집합의
     // 저장하지 않은 새 패키지와 겹치면 DuplicatePath / AlreadyExists, 파일 절대 경로(임시 접미사
     // 포함)가 OS 상한을 넘으면 InvalidPath / CapacityExceeded, 같은 id가 열려 있거나 색인에 있으면
     // DuplicateAssetId / AlreadyExists, id 발급 실패(진단 None과 그 오류), type이 에셋 클래스가
-    // 아니면 Registry의 오류(진단 None), 할당 실패.
+    // 아니면 Registry의 오류(진단 None), initializer의 오류(진단 None — 자세한 내용은 initializer가
+    // 남긴다), 할당 실패.
     Result<ObjectHandle> Create(const LogicalPath& path, TypeId type, AssetId id = {},
-                                AssetDiagnostic* failure = nullptr) noexcept;
+                                AssetDiagnostic* failure = nullptr,
+                                EditorAssetInitializer* initializer = nullptr) noexcept;
 
     // 열린 패키지가 바뀌었음을 알린다(세대를 올리고 dirty를 켠다). 오류: 열리지 않음 NotFound.
     Result<void> MarkDirty(AssetId id) noexcept;

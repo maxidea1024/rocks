@@ -13,6 +13,8 @@
 
 namespace rocks {
 
+class ConstructionContext;
+
 namespace detail {
 // 로더·writer가 Package의 비영속 상태(id·종류·bulk 저장소)를 채우는 통로다(정의는 Private).
 struct PackageAccess;
@@ -119,6 +121,32 @@ private:
 //   "");
 Result<RootRef<Package>> NewPackage(ObjectRegistry& registry, const ObjectAccessContext& access,
                                     AssetId id, PackageKind kind = PackageKind::Editor) noexcept;
+
+// transaction 안에 새 빈 패키지를 만든다(공개 전 — Docs/Design/AssetSystem.ko.md 7.1절 15 A2c3).
+// 같은 트랜잭션에서 대표 에셋을 만들고(NewRepresentativeAsset) 값을 채운 뒤 Commit으로 함께
+// 공개한다. Commit 전에 실패하거나 Rollback하면 아무것도 남지 않는다. 반환은 공개 전 Package
+// handle이다.
+//
+// 오류: null id·모르는 kind InvalidArgument(트랜잭션은 그대로), 그 밖은 transaction.Create의
+// 오류(트랜잭션이 오류 상태로 고정된다).
+//
+// 사용 예:
+//   ConstructionContext transaction(registry, access);
+//   auto package = NewPackage(transaction, id, PackageKind::Editor);
+//   auto asset = NewRepresentativeAsset(transaction, package.Value(), meshType);
+//   ... transaction.GetForWrite<Mesh>(asset.Value()) 로 값을 채운다 ...
+//   auto root = transaction.Commit();   // 첫 객체(Package)의 root
+Result<ObjectHandle> NewPackage(ConstructionContext& transaction, AssetId id,
+                                PackageKind kind = PackageKind::Editor) noexcept;
+
+// transaction의 공개 전 Package(NewPackage(transaction, ...))에 대표 에셋(type — Asset 파생
+// 클래스)을 만들고 Id()를 그 패키지 id로 둔다. 반환은 공개 전 에셋 handle이다.
+//
+// 오류: package가 이 트랜잭션의 Package가 아니면 transaction.Get의 오류(StaleHandle·TypeMismatch
+// 등), type이 Asset 파생이 아니거나 대표 자식이 이미 있으면 transaction.Create의 오류(트랜잭션이
+// 오류 상태로 고정된다).
+Result<ObjectHandle> NewRepresentativeAsset(ConstructionContext& transaction, ObjectHandle package,
+                                            TypeId type) noexcept;
 
 // package에 bulk 저장소를 잇는다(에디터가 새로 만든 패키지 — 로드한 패키지는
 // PackageLoadState::SetBulkStore). 오류: null 저장소, 이미 저장소나 로드한 bulk가 있는 패키지는
