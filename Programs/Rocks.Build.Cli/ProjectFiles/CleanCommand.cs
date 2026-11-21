@@ -8,7 +8,8 @@ namespace Rocks.Build.Cli;
 /// 사용 예: <c>Rocks.Build.Cli clean --root . --target Sandbox --configuration Debug</c>.
 /// <list type="bullet">
 /// <item><c>--platform host|android</c>(기본 host), <c>--android-abi</c>(기본 arm64), <c>--output</c>: build와 같은 출력 경로 규칙이다.</item>
-/// <item>지울 디렉터리는 <c>&lt;root&gt;/out</c>의 엄격한 하위이고 Rocks 출력 표지 <c>.native-build.lock</c>이 있어야 한다. 아니면 거부한다.
+/// <item>지울 디렉터리는 <c>&lt;root&gt;/out</c>의 엄격한 하위이고 Rocks 출력 표지(<c>.native-build.lock</c> 또는 <c>.rocks-invocation.lock</c>)가 있어야
+/// 한다. 아니면 거부한다. 호출 잠금만 있는 출력은 네이티브 빌드 전에 실패한 빌드(규칙·메타 단계)의 것이다.
 /// 출력이 없으면 할 일이 없는 성공이다.</item>
 /// <item>그 출력의 호출 잠금을 잡은 뒤 잠금 파일 둘(<c>.rocks-invocation.lock</c>·<c>.native-build.lock</c>)을 뺀 모든 항목을 지운다.</item>
 /// </list>
@@ -23,7 +24,10 @@ internal static class CleanCommand
     public const string OutputMarker = ".native-build.lock";
 
     // 지우지 않는 잠금 파일이다(호출 잠금은 이 명령이 쥐고 있고, 빌드 잠금은 출력 표지다).
-    private static readonly string[] KeptFiles = [".rocks-invocation.lock", OutputMarker];
+    // 출력 호출 잠금 파일이다(OutputInvocationLock — 네이티브 빌드 전에 실패한 출력에도 있다).
+    private const string InvocationMarker = ".rocks-invocation.lock";
+
+    private static readonly string[] KeptFiles = [InvocationMarker, OutputMarker];
 
     public static async Task<int> RunAsync(Dictionary<string, string> options, CancellationToken cancellationToken)
     {
@@ -78,9 +82,9 @@ internal static class CleanCommand
             return -1;
         }
 
-        if (!File.Exists(Path.Combine(output, OutputMarker)))
+        if (!File.Exists(Path.Combine(output, OutputMarker)) && !File.Exists(Path.Combine(output, InvocationMarker)))
         {
-            throw new ArgumentException($"Clean refuses {output}: it has no {OutputMarker}, so it is not a Rocks build output.");
+            throw new ArgumentException($"Clean refuses {output}: it has no {OutputMarker} or {InvocationMarker}, so it is not a Rocks build output.");
         }
 
         await using var invocationLock = await OutputInvocationLock.AcquireAsync(output, cancellationToken);

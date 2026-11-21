@@ -48,6 +48,20 @@ if (args.Length == 5 && args[0] == "--registry-writer")
     return 0;
 }
 
+// 게임 모드 프로젝트 파일 시험만 돈다(10.4절): --game-project-files <설치 SDK> <빌드할 수 있는 게임 디렉터리>. 현재 디렉터리가 저장소 루트여야 한다.
+if (args.Length == 3 && args[0] == "--game-project-files")
+{
+    if (!Microsoft.Build.Locator.MSBuildLocator.IsRegistered)
+    {
+        Microsoft.Build.Locator.MSBuildLocator.RegisterDefaults();
+    }
+
+    var gameToolchain = await NativeToolchains.DiscoverAsync();
+    await GameProjectFilesTests.RunAsync(Path.GetFullPath("out/dotnet/bin/Rocks.Build.Cli/Debug/net10.0/Rocks.Build.Cli.dll"), Path.GetFullPath(args[1]),
+        Path.GetFullPath(args[2]), gameToolchain.CompilerPath, gameToolchain.Environment);
+    return 0;
+}
+
 // 게임 프로젝트 선행 작업(SDK 연결·등록부, snapshot·규칙 탐색 제외, 게임 clean) 시험만 돈다(16절 V8·V9).
 if (args.Length == 1 && args[0] == "--game-project")
 {
@@ -1431,6 +1445,11 @@ try
     Require((await Tool("sdk-unregister", "--sdk", sdk)).ExitCode == 0 && (await Tool("sdk-unregister", "--sdk", releaseSdk)).ExitCode == 0 &&
         (await Tool("sdk-unregister", "--sdk", trailingSdk)).ExitCode == 0, "sdk-unregister failed");
     Pass("sdk-registry-picks-by-configuration", timer.Elapsed);
+
+    // 게임 모드 프로젝트 파일(Docs/Design/ProjectFiles.ko.md 10.4절): 생성·왕복·평가·NMake 실행·associate 재생성(Windows).
+    timer.Restart();
+    await GameProjectFilesTests.RunAsync(cli, sdk, game, toolchain.CompilerPath, cliEnvironment);
+    Pass("game-project-files", timer.Elapsed);
     success = true;
     return 0;
 }

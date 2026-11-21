@@ -434,6 +434,14 @@ internal static class GameProjectTests
             .SequenceEqual([CleanCommand.OutputMarker, ".rocks-invocation.lock"], StringComparer.Ordinal), "game clean must keep only the lock files");
         Require(File.Exists(Path.Combine(other, "bin/Game.exe")), "game clean must not touch another configuration");
 
+        // 네이티브 빌드 전에 실패한 출력(호출 잠금만 있다)도 Rocks 출력이라 비운다 — 실패한 빌드 뒤 Rebuild가 막히지 않는다.
+        string failed = GameProjectLayout.DefaultOutput(project, "Game", NativeConfiguration.Development);
+        Write(failed, ".rocks-invocation.lock", "");
+        Write(failed, "game-build-evidence.json", "{}");
+        Require(await CleanCommand.RunAsync(Options(("configuration", "Development")), CancellationToken.None) == 0 &&
+            Directory.EnumerateFileSystemEntries(failed).Select(Path.GetFileName).SequenceEqual([".rocks-invocation.lock"]),
+            "an output with only the invocation lock is a Rocks output");
+
         await Expect(() => CleanCommand.RunAsync(Options(("output", Path.Combine(project, "out"))), CancellationToken.None), "only build outputs under");
         await Expect(() => CleanCommand.RunAsync(Options(("output", Path.Combine(project, "Source"))), CancellationToken.None), "only build outputs under");
         await Expect(() => CleanCommand.RunAsync(Options(("output", Path.Combine(root, "out", "x"))), CancellationToken.None), "only build outputs under");
