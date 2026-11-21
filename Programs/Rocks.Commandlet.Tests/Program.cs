@@ -509,7 +509,9 @@ try
     await Check("asset-list twice", ["asset-list", $"--project={project}", $"--project={project}"], 2, "",
         "usage: asset-list");
     await Check("asset-list empty value", ["asset-list", "--project="], 2, "", "usage: asset-list");
-    await Check("asset-list unknown option", ["asset-list", "--type=Texture2D"], 2, "", "usage: asset-list");
+    // A2c3b부터 --type은 옵션이다: 등록하지 않은 타입 이름은 실행 실패다.
+    await Check("asset-list unknown type", ["asset-list", "--type=Texture2D", $"--project={project}"], 1, "",
+        "asset-list: NotFound: Texture2D: unknown type");
     // 13절 공통 옵션 --wait=<초>는 받고(읽기 명령은 잠금이 없다) 10진 숫자가 아니면 사용법 오류다.
     await Check("asset-list wait", ["asset-list", "--wait=5", $"--project={project}"], 0, "/Game/Items/Base", "");
     await Check("asset-list invalid wait", ["asset-list", "--wait=5s", $"--project={project}"], 2, "",
@@ -595,6 +597,243 @@ try
 finally
 {
     Directory.Delete(indexDirectory, true);
+}
+
+// asset-new·asset-set·asset-info·asset-list --type(AssetSystem.ko.md 13절, 7.1절 15 — A2c3b): 실제 에셋 타입 Skeleton·
+// AnimationClip(Animation 모듈 — Commandlet이 시작해 타입을 등록한다)으로 만들기·대입(Hard·Soft 참조·float·bool·enum·
+// struct 멤버·struct 원소 배열·Name)·출력(줄·JSON·--all·AssetId 대상)·줄 출력 → asset-set 왕복·목록 옵션(--erase·
+// --unset)·대입 오류 모아 보고·타입·경로·대상 거부·--type(파생 포함)·사용법 오류·잠금 Busy·열기 경고와 --force·
+// 프로젝트 찾기·출력 실패.
+string editDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-edit-{Environment.ProcessId}");
+try
+{
+    string project = Path.Combine(editDirectory, "Edit");
+    Directory.CreateDirectory(project);
+    File.WriteAllText(Path.Combine(project, "Edit.rocksproject"), "{}\n");
+    string projectOption = $"--project={project}";
+
+    async Task<ProcessResult> RunEdit(string directory, params string[] arguments) =>
+        await ProcessRunner.RunAsync(new(executable, arguments, directory, Timeout: TimeSpan.FromSeconds(30)));
+
+    void Report(string label, bool passed, ProcessResult result)
+    {
+        Console.WriteLine($"{label}: {(passed ? "PASS" : "FAIL")}");
+        if (!passed)
+        {
+            ++failures;
+            Console.Error.WriteLine($"  exit={result.ExitCode}; stdout={result.StdOut}; stderr={result.StdErr}");
+        }
+    }
+
+    // exit·표준 출력 조각 모두·표준 오류 조각 모두를 본다(조각이 없으면 그 출력은 비어야 한다).
+    async Task<ProcessResult> CheckAll(string label, string[] arguments, int exit, string[] stdout, string[] stderr)
+    {
+        ProcessResult result = await RunEdit(workingDirectory, arguments);
+        bool passed = result.ExitCode == exit &&
+                      stdout.All(part => result.StdOut.Contains(part, StringComparison.Ordinal)) &&
+                      stderr.All(part => result.StdErr.Contains(part, StringComparison.Ordinal)) &&
+                      (stdout.Length != 0 || result.StdOut.Length == 0) &&
+                      (stderr.Length != 0 || result.StdErr.Length == 0);
+        Report(label, passed, result);
+        return result;
+    }
+
+    // 만들기: Skeleton(대입 없음)과 AnimationClip(대입 여럿). 표준 출력은 '<논리 경로> <AssetId>' 한 줄이다.
+    ProcessResult hero = await CheckAll("asset-new skeleton", ["asset-new", "Skeleton", "/Game/Characters/Hero", projectOption],
+        0, ["/Game/Characters/Hero "], []);
+    string heroId = hero.StdOut.Trim().Split(' ').Last();
+    Report("asset-new output shape", hero.StdOut.Length == "/Game/Characters/Hero ".Length + 36 + 1 &&
+        hero.StdOut.EndsWith('\n') && File.Exists(Path.Combine(project, "Content", "Characters", "Hero.rasset")), hero);
+    ProcessResult run = await CheckAll("asset-new clip with assignments",
+        ["asset-new", "AnimationClip", "/Game/Anims/Run", "skeleton=/Game/Characters/Hero", "rateScale=1.5", "loop=on",
+         "interpolation=Step", "rootMotion.enable=true", "events[0]={}", "events[0].name=Foot", projectOption],
+        0, ["/Game/Anims/Run "], []);
+    string runId = run.StdOut.Trim().Split(' ').Last();
+
+    // 출력: Edit 줄(참조는 논리 경로), AssetId 대상은 같은 출력, JSON, --all.
+    string[] runLines = ["skeleton=/Game/Characters/Hero\n", "rateScale=1.5\n", "loop=true\n", "interpolation=Step\n",
+        "rootMotion.enable=true\n", "events=\n", "events[0]={}\n", "events[0].name=Foot\n"];
+    ProcessResult info = await CheckAll("asset-info lines", ["asset-info", "/Game/Anims/Run", projectOption], 0, runLines, []);
+    ProcessResult byId = await RunEdit(workingDirectory, "asset-info", runId, projectOption);
+    Report("asset-info by AssetId", byId.ExitCode == 0 && byId.StdOut == info.StdOut, byId);
+    await CheckAll("asset-info json", ["asset-info", "/Game/Anims/Run", "--json", projectOption], 0,
+        ["{\n", "\"rateScale\": 1.5", "\"skeleton\": \"/Game/Characters/Hero\"", "}\n"], []);
+    await CheckAll("asset-info all", ["asset-info", "/Game/Anims/Run", "--all", projectOption], 0, runLines, []);
+    await CheckAll("asset-info json all", ["asset-info", "--json", "--all", "/Game/Anims/Run", projectOption], 0,
+        ["\"loop\": true"], []);
+
+    // 왕복: asset-info 줄을 그대로 asset-set에 넣으면 받고 출력이 같다.
+    string[] lines = info.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+    ProcessResult roundTrip = await RunEdit(workingDirectory, [.. new[] { "asset-set", "/Game/Anims/Run" }, .. lines, projectOption]);
+    ProcessResult again = await RunEdit(workingDirectory, "asset-info", "/Game/Anims/Run", projectOption);
+    Report("asset-info lines round trip through asset-set", roundTrip.ExitCode == 0 && roundTrip.StdOut.Length == 0 &&
+        again.StdOut == info.StdOut, roundTrip);
+
+    // asset-set: AssetId 대상, Soft 참조 배열, --erase 목록 옵션.
+    await CheckAll("asset-set by AssetId", ["asset-set", runId, "rateScale=2", projectOption], 0, [], []);
+    await CheckAll("asset-set result", ["asset-info", "/Game/Anims/Run", projectOption], 0, ["rateScale=2\n"], []);
+    await CheckAll("asset-set soft array", ["asset-set", "/Game/Characters/Hero",
+        "compatibleSkeletons=/Game/Characters/Hero", "useRetargetModesFromCompatibleSkeleton=on", projectOption], 0, [], []);
+    await CheckAll("asset-set soft array result", ["asset-info", heroId, projectOption], 0,
+        ["compatibleSkeletons=/Game/Characters/Hero\n", "useRetargetModesFromCompatibleSkeleton=true\n"], []);
+    await CheckAll("asset-set erase", ["asset-set", "/Game/Anims/Run", "--erase=events[0]", projectOption], 0, [], []);
+    ProcessResult erased = await RunEdit(workingDirectory, "asset-info", "/Game/Anims/Run", projectOption);
+    Report("asset-set erase result", erased.StdOut.Contains("events=\n", StringComparison.Ordinal) &&
+        !erased.StdOut.Contains("events[0]", StringComparison.Ordinal), erased);
+
+    // 대입 오류는 모두 모아 보고하고 아무것도 바꾸지 않는다(파일 byte 그대로).
+    string runFile = Path.Combine(project, "Content", "Anims", "Run.rasset");
+    byte[] before = File.ReadAllBytes(runFile);
+    await CheckAll("asset-set errors", ["asset-set", "/Game/Anims/Run", "nope=1", "rateScale=abc",
+        "skeleton=/Game/Nope", "--unset=loop", projectOption], 1, [],
+        ["asset-set: UnknownProperty: nope: ", "asset-set: InvalidValue: rateScale: ", "asset-set: Unresolved: skeleton: ",
+         "asset-set: InvalidValue: loop: "]);
+    Report("asset-set errors leave the file", File.ReadAllBytes(runFile).SequenceEqual(before), new(0, "", ""));
+    await CheckAll("asset-set soft unresolved", ["asset-set", "/Game/Characters/Hero", "compatibleSkeletons=/Game/Nope",
+        projectOption], 1, [], ["asset-set: Unresolved: compatibleSkeletons: "]);
+
+    // asset-new 거부: 타입(모름·추상·에셋 아님·struct)·경로(있음·규칙)·대입 오류(만들지 않음).
+    await CheckAll("asset-new unknown type", ["asset-new", "NoSuchType", "/Game/X", projectOption], 1, [],
+        ["asset-new: NotFound: NoSuchType: unknown type"]);
+    await CheckAll("asset-new abstract type", ["asset-new", "AnimationAsset", "/Game/X", projectOption], 1, [],
+        ["asset-new: TypeMismatch: AnimationAsset: not a concrete asset class"]);
+    await CheckAll("asset-new not an asset", ["asset-new", "Package", "/Game/X", projectOption], 1, [],
+        ["asset-new: TypeMismatch: Package: not a concrete asset class"]);
+    await CheckAll("asset-new struct type", ["asset-new", "BoneSocket", "/Game/X", projectOption], 1, [],
+        ["asset-new: TypeMismatch: BoneSocket: not a concrete asset class"]);
+    await CheckAll("asset-new existing path", ["asset-new", "Skeleton", "/game/characters/HERO", projectOption], 1, [],
+        ["asset-new: DuplicatePath: /game/characters/HERO: AlreadyExists"]);
+    await CheckAll("asset-new invalid path", ["asset-new", "Skeleton", "/Game//X", projectOption], 1, [],
+        ["asset-new: InvalidPath: /Game//X: InvalidArgument"]);
+    await CheckAll("asset-new assignment errors", ["asset-new", "AnimationClip", "/Game/Anims/Bad", "nope=1",
+        "skeleton=/Game/Anims/Bad", projectOption], 1, [],
+        ["asset-new: UnknownProperty: nope: ", "asset-new: Unresolved: skeleton: "]);
+    Report("asset-new assignment errors create nothing",
+        !File.Exists(Path.Combine(project, "Content", "Anims", "Bad.rasset")), new(0, "", ""));
+
+    // asset-info 거부.
+    await CheckAll("asset-info missing", ["asset-info", "/Game/Nope", projectOption], 1, [],
+        ["asset-info: NotFound: /Game/Nope: NotFound"]);
+    await CheckAll("asset-info missing id", ["asset-info", "5e570000-a55e-7000-0000-000000000000", projectOption], 1, [],
+        ["asset-info: NotFound: 5e570000-a55e-7000-0000-000000000000: NotFound"]);
+    await CheckAll("asset-info invalid target", ["asset-info", "Hero", projectOption], 1, [],
+        ["asset-info: InvalidPath: Hero: InvalidArgument"]);
+
+    // asset-list --type: 그 클래스와 파생(추상 기반 포함), --under와 함께, 거부.
+    ProcessResult skeletons = await CheckAll("asset-list type", ["asset-list", "--type=Skeleton", projectOption], 0,
+        [$"/Game/Characters/Hero {heroId} "], []);
+    Report("asset-list type lines", skeletons.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length == 1, skeletons);
+    await CheckAll("asset-list derived type", ["asset-list", "--type=AnimationAsset", projectOption], 0,
+        [$"/Game/Anims/Run {runId} "], []);
+    ProcessResult assets = await CheckAll("asset-list base type", ["asset-list", "--type=Asset", projectOption], 0,
+        ["/Game/Anims/Run ", "/Game/Characters/Hero "], []);
+    Report("asset-list base type order", assets.StdOut.IndexOf("/Game/Anims/Run", StringComparison.Ordinal) <
+        assets.StdOut.IndexOf("/Game/Characters/Hero", StringComparison.Ordinal), assets);
+    await CheckAll("asset-list type under", ["asset-list", "--type=Asset", "--under=/Game/Anims", projectOption], 0,
+        ["/Game/Anims/Run "], []);
+    await CheckAll("asset-list type under nothing", ["asset-list", "--type=Skeleton", "--under=/Game/Anims", projectOption],
+        0, [], []);
+    await CheckAll("asset-list type invalid under", ["asset-list", "--type=Skeleton", "--under=Game", projectOption], 1, [],
+        ["asset-list: InvalidPath: 'Game' is not a logical directory"]);
+    await CheckAll("asset-list not a class", ["asset-list", "--type=BoneSocket", projectOption], 1, [],
+        ["asset-list: TypeMismatch: BoneSocket: not a class"]);
+    await CheckAll("asset-list type twice", ["asset-list", "--type=Skeleton", "--type=Asset", projectOption], 2, [],
+        ["usage: asset-list"]);
+
+    // 사용법 오류(2)와 도움말(0).
+    string[][] usageErrors =
+    [
+        ["asset-new", "Skeleton", projectOption],
+        ["asset-new", "Skeleton", "/Game/Y", "positional", projectOption],
+        ["asset-new", "Skeleton", "/Game/Y", "--force", projectOption],
+        ["asset-new", "Skeleton", "/Game/Y", "--unset=", projectOption],
+        ["asset-new", "Skeleton", "/Game/Y", "--unset=a,,b", projectOption],
+        ["asset-new", "Skeleton", "/Game/Y", "--erase=a,", projectOption],
+        ["asset-new", "", "/Game/Y", projectOption],
+        ["asset-set", "/Game/Anims/Run", projectOption],
+        ["asset-set", "/Game/Anims/Run", "loop=on", "--json", projectOption],
+        ["asset-set", "/Game/Anims/Run", "loop=on", "--force", "--force", projectOption],
+        ["asset-set", "/Game/Anims/Run", "loop=on", projectOption, projectOption],
+        ["asset-set", "/Game/Anims/Run", "loop=on", "--wait=86401", projectOption],
+        ["asset-set", "/Game/Anims/Run", "loop=on", "--wait=5s", projectOption],
+        ["asset-set", "/Game/Anims/Run", "loop=on", "--wait=", projectOption],
+        ["asset-info", projectOption],
+        ["asset-info", "/Game/Anims/Run", "extra", projectOption],
+        ["asset-info", "/Game/Anims/Run", "--force", projectOption],
+        ["asset-info", "/Game/Anims/Run", "--json", "--json", projectOption],
+        ["asset-info", "/Game/Anims/Run", "--unset=loop", projectOption],
+        ["asset-info", "/Game/Anims/Run", "--help"],
+    ];
+    foreach (string[] arguments in usageErrors)
+    {
+        await CheckAll($"usage error: {string.Join(' ', arguments.Where(argument => argument != projectOption))}", arguments,
+            2, [], [$"usage: {arguments[0]}"]);
+    }
+
+    foreach (string command in new[] { "asset-new", "asset-set", "asset-info" })
+    {
+        await CheckAll($"{command} help", [command, "--help"], 0, [$"usage: {command}"], []);
+    }
+
+    // 잠금: 다른 쪽이 잡고 있으면 쓰기 명령은 기다린 뒤 실패하고 읽기 명령은 잠금 없이 된다(Windows — LockFileEx 0..1).
+    if (OperatingSystem.IsWindows())
+    {
+        string lockPath = Path.Combine(project, "Intermediate", "AssetDatabase.lock");
+        Directory.CreateDirectory(Path.GetDirectoryName(lockPath)!);
+        using (FileStream held = new(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite))
+        {
+            held.Lock(0, 1);
+            await CheckAll("asset-set locked", ["asset-set", "/Game/Anims/Run", "loop=off", projectOption], 1, [],
+                ["asset-set: the project is locked by another process"]);
+            await CheckAll("asset-new locked with wait", ["asset-new", "Skeleton", "/Game/Locked", "--wait=1", projectOption],
+                1, [], ["asset-new: the project is locked by another process"]);
+            await CheckAll("asset-info without lock", ["asset-info", "/Game/Anims/Run", projectOption], 0, ["loop=true\n"], []);
+            held.Unlock(0, 1);
+        }
+    }
+
+    // 프로젝트 찾기: --project 없이 프로젝트 안에서 위로 찾는다.
+    ProcessResult found = await RunEdit(Path.Combine(project, "Content"), "asset-info", "/Game/Anims/Run");
+    Report("asset-info finds the project upward", found.ExitCode == 0 &&
+        found.StdOut.Contains("rateScale=2\n", StringComparison.Ordinal) && found.StdErr.Length == 0, found);
+    await CheckAll("asset-info without a project", ["asset-info", "/Game/Anims/Run"], 1, [], ["no project found"]);
+
+    // 열기 경고: 의존 패키지(Hero)가 없으면 열기는 경고와 함께 되고, 저장은 --force 없이 MissingDependency, --force면
+    // null로 저장하고 경고다.
+    File.Delete(Path.Combine(project, "Content", "Characters", "Hero.rasset"));
+    await CheckAll("asset-info excluded dependency", ["asset-info", "/Game/Anims/Run", projectOption], 0,
+        ["skeleton=none\n"], [$"asset-info: warning: ExcludedDependency: {heroId}: "]);
+    await CheckAll("asset-set missing dependency", ["asset-set", "/Game/Anims/Run", "loop=off", projectOption], 1, [],
+        ["asset-set: MissingDependency: /Game/Anims/Run: InvalidArgument"]);
+    await CheckAll("asset-set force", ["asset-set", "/Game/Anims/Run", "loop=off", "--force", projectOption], 0, [],
+        ["asset-set: warning: DroppedUnresolvedImport: "]);
+    await CheckAll("asset-set force result", ["asset-info", "/Game/Anims/Run", projectOption], 0,
+        ["loop=false\n", "skeleton=none\n"], []);
+
+    if (OperatingSystem.IsWindows())
+    {
+        // 표준 출력이 무효 핸들이면 출력 쓰기가 실패한다(실행 오류 1).
+        string[] invalidOutputs =
+        [
+            $"asset-info /Game/Anims/Run \"--project={project}\"",
+            $"asset-list --type=Asset \"--project={project}\"",
+        ];
+        foreach (string arguments in invalidOutputs)
+        {
+            uint code = WindowsInvalidStandardHandles.Run(executable, arguments, workingDirectory);
+            bool failed = code == 1;
+            Console.WriteLine($"invalid output handles ({arguments.Split(' ')[0]} edit): {(failed ? "PASS" : "FAIL")}");
+            if (!failed)
+            {
+                ++failures;
+                Console.Error.WriteLine($"  exit={code}");
+            }
+        }
+    }
+}
+finally
+{
+    Directory.Delete(editDirectory, true);
 }
 
 if (OperatingSystem.IsWindows())

@@ -3,6 +3,8 @@
 #include <Core/Build/BuildInfo.h>
 #include <Core/FileError.h>
 #include <HostConfig/HostSettings.h>
+#include <ModuleLoader/ModuleLoader.h>
+#include <Platform/File.h>
 
 // 에셋 명령의 공용 도구 구현이다(Docs/Design/AssetSystem.ko.md 13절).
 namespace rocks::commandlet_host {
@@ -65,6 +67,114 @@ PackageReadOptions IndexReadOptions() noexcept {
     // 이 엔진보다 새 엔진이 저장한 패키지는 NewerVersion이다(UE AssetRegistry도 읽지 않는다).
     options.engineVersion = build::CurrentEngineVersion();
     return options;
+}
+
+AssetCommandTypes::AssetCommandTypes(Allocator& allocator, ModuleLoader& modules) noexcept
+    : modules_(&modules), types_(allocator), registrations_(types_, allocator), names_(allocator) {
+}
+
+AssetCommandTypes::~AssetCommandTypes() noexcept {
+    if (attached_) {
+        modules_->DetachTypeRegistrar(registrations_);
+    }
+
+    if (namesReady_) {
+        (void)names_.Shutdown();
+    }
+
+    (void)types_.Shutdown();
+}
+
+Result<void> AssetCommandTypes::Start() noexcept {
+    if (auto loaded = modules_->Load(AssetTypeModule); !loaded.IsOk()) {
+        return Result<void>::Failure(loaded.error != ErrorCode::None ? loaded.error
+                                                                     : ErrorCode::Unsupported);
+    }
+
+    if (auto attached = modules_->AttachTypeRegistrar(registrations_); !attached.IsOk()) {
+        return Result<void>::Failure(attached.error != ErrorCode::None ? attached.error
+                                                                       : ErrorCode::Unsupported);
+    }
+
+    attached_ = true;
+    if (auto ready = names_.Initialize(); !ready) {
+        return ready;
+    }
+
+    namesReady_ = true;
+    return Result<void>::Success();
+}
+
+bool ParseWaitMilliseconds(StringView text, uint32& out) noexcept {
+    uint32 seconds = 0;
+    for (char digit : text) {
+        if (digit < '0' || digit > '9') {
+            return false;
+        }
+
+        seconds = seconds * 10 + static_cast<uint32>(digit - '0');
+        if (seconds > MaxWaitSeconds) {
+            return false;
+        }
+    }
+
+    out = seconds * MillisecondsPerSecond;
+    return true;
+}
+
+bool OpenSession(CommandletOutput& output, Allocator& allocator, StringView command,
+                 StringView project, StringView wait, bool write, EditSession& session,
+                 Result<int32>& failure) noexcept {
+    if (!OpenProject(output, allocator, command, project, session.layout, failure)) {
+        return false;
+    }
+
+    if (auto started = session.types.Start(); !started) {
+        failure = started.Error() == ErrorCode::OutOfMemory
+                      ? Result<int32>::Failure(started.Error())
+                      : Fail(output, allocator, command, 1, "cannot register the asset types ({})",
+                             ErrorCodeName(started.Error()));
+        return false;
+    }
+
+    AssetServiceConfig config;
+    config.packages.types = &session.types.Types();
+    config.packages.files = &platform::PhysicalFileSystem();
+    config.packages.hooks = &session.hooks;
+    config.packages.read = IndexReadOptions();
+    config.packages.registryContext = CommandletAssetContext;
+    config.packages.registryOptions.names = &session.types.Names();
+    auto made = UniquePtr<AssetService>::TryMake(allocator, allocator, session.layout, config);
+    if (!made) {
+        failure = Result<int32>::Failure(made.Error());
+        return false;
+    }
+
+    session.service = Move(made.Value());
+    if (auto initialized = session.service->Initialize(); !initialized) {
+        failure = initialized.Error() == ErrorCode::OutOfMemory
+                      ? Result<int32>::Failure(initialized.Error())
+                      : Fail(output, allocator, command, 1, "cannot scan '{}' ({})",
+                             session.layout.ContentDirectory(), ErrorCodeName(initialized.Error()));
+        return false;
+    }
+
+    if (!write) {
+        return true;
+    }
+
+    uint32 milliseconds = 0;
+    (void)ParseWaitMilliseconds(wait, milliseconds);
+    if (auto held = session.lock.Acquire(session.layout, milliseconds); !held) {
+        failure = held.Error() == ErrorCode::Busy
+                      ? Fail(output, allocator, command, 1,
+                             "the project is locked by another process; use --wait=<seconds>")
+                      : Fail(output, allocator, command, 1, "cannot lock the project ({})",
+                             ErrorCodeName(held.Error()));
+        return false;
+    }
+
+    return true;
 }
 
 } // namespace rocks::commandlet_host

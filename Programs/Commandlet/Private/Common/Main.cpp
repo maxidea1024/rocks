@@ -35,7 +35,7 @@ int Run(rocks::launch::ApplicationContext& context) noexcept {
         }
     }
 
-    return commandlet_host::Run(arguments, output, context.DefaultAllocator());
+    return commandlet_host::Run(arguments, output, context.DefaultAllocator(), context.Modules());
 }
 
 const rocks::launch::ApplicationDescription& Describe() noexcept {
