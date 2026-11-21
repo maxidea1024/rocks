@@ -1450,6 +1450,31 @@ Result<void> DecodePackageBulkEntry(const PackageBulkEntry& entry, Span<const ui
     return Result<void>::Success();
 }
 
+Result<void> DecodePackageBulkEntry(const PackageBulkEntry& entry, Span<const uint8> stored,
+                                    Array<uint8>& out, Allocator& allocator) noexcept {
+    if (stored.Size() != entry.storedBytes) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (entry.codec == BulkCodec::Zstd) {
+        auto reader = CompressedBlocksReader::TryOpen(stored, allocator);
+        if (!reader) {
+            return ContainerFailure(reader.Error());
+        }
+
+        // 형식은 해제(DecodeBulkContainer)가 본다 — 여기서는 할당 크기만 먼저 확인한다.
+        if (reader.Value().RawSize() != entry.rawBytes) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
+    if (auto sized = out.TryResize(static_cast<usize>(entry.rawBytes)); !sized) {
+        return sized;
+    }
+
+    return DecodePackageBulkEntry(entry, stored, out.View(), allocator);
+}
+
 Result<void> DecodePackageBulk(const PackageContents& contents, Array<uint8>& out,
                                Array<PackageBulkSlot>& slots, uint64 maxRawBytes,
                                AssetDiagnostic* failure) noexcept {

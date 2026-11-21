@@ -20,6 +20,8 @@ inline constexpr usize DefaultPackageFileCacheCapacity = 64;
 // 오래 쓰지 않은 것부터 닫는다 — macOS 기본 soft limit 256에서 EMFILE을 내지 않게). 파일을 열 때
 // 헤더 + 섹션 표 지문을 읽어 둔다.
 //
+// 수명: 이 캐시를 쓰는 모든 저장소보다 오래 살아야 한다(저장소 소멸자가 자기 핸들을 닫는다).
+//
 // 스레드: 한 스레드(에디터 Registry 소유 스레드)에서 쓴다.
 class PackageFileCache {
 public:
@@ -38,6 +40,9 @@ public:
 
     // path의 핸들이 있으면 닫는다(저장 교체·Detach 전).
     void Close(StringView path) noexcept;
+
+    // directory(구분자 '/', 끝 '/' 없음) 아래 모든 핸들을 닫는다(디렉터리 이동·삭제 전 — A2e).
+    void CloseUnder(StringView directory) noexcept;
 
     usize OpenCount() const noexcept {
         return entries_.Size();
@@ -67,6 +72,7 @@ private:
 // 스레드: 한 스레드에서 쓴다.
 class FilePackageBulkStore final : public PackageBulkStore, public PackageBulkSource {
 public:
+    // cache는 이 저장소보다 오래 살아야 한다(소멸할 때 자기 경로의 캐시 핸들을 닫는다).
     FilePackageBulkStore(Allocator& allocator, PackageFileCache& cache) noexcept;
     ~FilePackageBulkStore() override;
     FilePackageBulkStore(const FilePackageBulkStore&) = delete;

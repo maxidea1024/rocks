@@ -1643,7 +1643,7 @@ A2b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.15) 시험 없
 
 #### 14.1.17 요구 대조표(A2c1 — AssetRuntime 저장 기반)
 
-시험은 EngineTests `Engine/Source/Runtime/AssetRuntime/Tests/`의 `PackageStoreTests.cpp`(9개)·`BulkStoreTests.cpp`(8개)·`AssetTypeHookTests.cpp`(5개) — 정의된 시험 22개를 모두 인용한다. 공용 `StoreTestSupport.h`는 bulk 셋을 가진 장면(Zstd·None·모르는 섹션), 경로마다 byte를 가진 메모리 파일 시스템(열기·크기·이동·읽기·쓰기 고장, n번째 이동·읽기 실패, 내용 바꾸기 — 외부 변경), n번째 범위 읽기 실패를 준다. 읽기 핵심을 세 범위로 바꾼 뒤 EngineTests 전체(3702개)가 통과한다.
+시험은 EngineTests `Engine/Source/Runtime/AssetRuntime/Tests/`의 `PackageStoreTests.cpp`(11개)·`BulkStoreTests.cpp`(11개)·`AssetTypeHookTests.cpp`(5개) — 정의된 시험 27개를 모두 인용한다. 공용 `StoreTestSupport.h`는 bulk 셋을 가진 장면(Zstd·None·모르는 섹션), 경로마다 byte를 가진 메모리 파일 시스템(열기·크기·이동·읽기·쓰기 고장, n번째 이동·읽기 실패, 내용 바꾸기 — 외부 변경), n번째 범위 읽기 실패를 준다. 읽기 핵심을 세 범위로 바꾼 뒤 EngineTests 전체(3702개)가 통과한다.
 
 | 요구(절) | 항목 | 시험 |
 |---|---|---|
@@ -1653,21 +1653,26 @@ A2b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.15) 시험 없
 | 편집 읽기(7.1-15) | 내용 = 전체 읽기(bulk span만 비고 bulkEntries·Objects·지문·readOnly 같음), 모양 셋 모든 bit: 읽는 구간 같은 진단·Bulk 내용과 섹션 사이 패딩 편집 통과·전체 거부·모르는 섹션 둘 다 통과, 모든 자르기 같은 진단 | `PackageEditRead_RelationToFullRead` |
 | 지문(5.5-1, 7.1-15) | = ReadPackage 지문, 헤더·표 CRC 손상·짧은 파일은 전체 읽기와 같은 진단, 범위 읽기 실패(헤더·표) 진단 None, 할당 실패 | `PackageFingerprint_Read` |
 | entry 해제(7.1-15) | None·Zstd entry 풀기와 SHA-256, 저장·raw 크기 불일치·SHA 불일치·깨진 컨테이너 InvalidArgument, Zstd 해제의 모든 할당 실패 | `PackageBulkEntry_Decode` |
+| | Array 겹판: out을 rawBytes로 키워 같은 byte, 키우기 전에 컨테이너 rawSize 대조(2^44 rawBytes는 키우지 않고 InvalidArgument), 저장 크기·깨진 컨테이너 InvalidArgument, 모든 할당 실패 | `PackageBulkEntry_DecodeIntoArray` |
 | 파일 sink(7.1-15) | 파일 sink byte = 메모리 sink byte(WritePackage), 쓴 수, 빈 Append, 범위 밖 WriteAt InvalidArgument, 쓰기·이동·끝으로 돌아가는 이동 실패는 파일 오류 | `FilePackageSink_WritesSameBytes` |
 | 지연 로드(7.1-15) | Defer + 범위 읽기 Prepare + SetBulkStore → InstantiatePackages가 Package에 저장소를 옮김, 처음 BulkBytes에서만 파일을 열고 같은 span, Decode의 범위 읽기 Prepare·두 번째 Prepare·Prepare 전·null·인스턴스 뒤 SetBulkStore InvalidArgument, `SameContent`(id 무시·크기 비교) | `PackageLoad_DeferredBulk` |
 | | 범위 읽기 Prepare의 판정 실패 진단, Decode 상태 SetBulkStore InvalidArgument(저장소는 호출자에게), BulkDataRef의 저장하지 않은 id 표지 CorruptPackage(BulkIndex, detail = id) | `PackageLoad_DeferredFailures` |
+| | bulk entry가 있는 Defer 상태를 저장소 없이 InstantiatePackages에 넘기면 InvalidArgument, bulk 없는 패키지는 저장소 없이 열림 | `PackageLoad_DeferRequiresStore` |
 | 저장소(6.1, 7.1-15) | 지연 읽기(Zstd·None 내용 일치, 처음만 열기, 같은 span, ReadBulk), FileBulkId, ref 판정(빈 InvalidArgument·없는 id NotFound·크기·SHA TypeMismatch), 다시 Attach·빈 경로 InvalidArgument | `FilePackageBulkStore_LazyRead` |
 | | 손상(CRC·풀기·SHA) 그 entry만 CorruptPackage(Bulk, detail = 파일 id, 에셋)·다른 entry 읽힘, 진단 없는 ReadBulk도 그 오류, 외부 변경 ExternalModification / StaleHandle(캐시 비움), 연 핸들은 교체 뒤 이전 내용, 파일 없음 NotFound, 열기·크기·읽기·저장 byte 읽기 실패 진단 None | `FilePackageBulkStore_LazyFailures` |
 | | 지연 읽기의 모든 할당 실패 뒤 다시 읽으면 같은 byte, Attach의 모든 할당 실패 뒤 빈 저장소·다시 Attach | `FilePackageBulkStore_ReadAllocationFailures` |
 | | 저장하지 않은 bulk(최상위 bit id 차례, SHA-256, 읽기, 파일 id 0), 저장하지 않은 bulk가 있으면 Attach 거부, CopyFrom(새 ref·원본 오류 전달), 모든 할당 실패 | `FilePackageBulkStore_UnsavedAndCopy` |
 | | 저장(저장소를 bulk source로) 뒤 Rebind: 옛 ref(파일·저장하지 않은 id)가 새 파일 entry, 빠진 id NotFound·이미 준 span 유효, 잘못된 표(없는 옛 id·0·범위 밖·내용 다름)와 손으로 만든 entry 표(id·크기·SHA 다름)·빈 경로 InvalidArgument로 그대로, 모든 할당 실패도 그대로, 읽지 않은 채 빠진 entry는 Detach가 건너뜀, 이은 적 없는 저장소의 Rebind | `FilePackageBulkStore_RebindAfterSave` |
 | | Detach: 남은 entry를 다 읽고 연결 끊기(파일을 지워도 읽힘·캐시 닫힘), 손상 entry면 그 오류·연결 유지, 두 번째 무동작 | `FilePackageBulkStore_Detach` |
+| | 빈 재매핑 Rebind → Detach → 다시 Attach: Attach의 모든 할당 실패에서도 이미 준 span 유효·저장소 빔, 성공 뒤 다시 읽힘 | `FilePackageBulkStore_ReattachKeepsSpans` |
+| | 손상된 표(Zstd entry rawBytes 2^44): raw를 잡기 전에 CorruptPackage(할당 실패가 아님) | `FilePackageBulkStore_HugeRawBytesRejectedBeforeAllocation` |
 | | 새 패키지에 AttachBulkStore → BulkBytes가 저장소에(진단 포함), null·이미 저장소·로드한 bulk가 있는 패키지 InvalidArgument(저장소는 호출자에게) | `Package_AttachBulkStore` |
 | 핸들 캐시(7.1-15) | 상한 2 LRU(뒤 항목이 오래된 경우·앞 항목이 오래된 경우), 다른 지문 ExternalModification·핸들 닫음, 없는 경로 Close 무동작, 상한 0 InvalidArgument, 헤더 손상 진단 | `PackageFileCache_LeastRecentlyUsed` |
+| | 저장소 소멸이 자기 핸들을 닫음, CloseUnder(구성 요소 경계 — "Content/A"는 "Content/AB"를 닫지 않음·파일 경로는 디렉터리가 아님·다른 접두 무동작) | `PackageFileCache_CloseOnStoreDestructionAndUnder` |
 | 타입 hook(7.1-15) | 가장 가까운 hook(Base만 등록 → Derived에 Base hook), CallBase(둘 다)·안 부름(부모 끔), 종류마다 따로 찾기(Derived에 Build hook 없으면 Base의 것), hook 없는 타입 무동작, 최상위 CallBase 무동작 | `AssetTypeHooks_NearestAndCallBase` |
 | | 0 타입·hook 둘 다 null InvalidArgument, 같은 타입 AlreadyExists, hook 오류 전달(직접·CallBase 거쳐·Build), 미등록 타입 NotFound(Collect·CallBase) | `AssetTypeHooks_Errors` |
 | | 등록 handle 소멸·Release·이동·이동 대입·자기 대입, 두 번째 Release 무동작 | `AssetTypeHooks_RegistrationLifetime` |
-| | 태그 sink(PackageTags 규칙 검사·합치기·정렬된 Write·빈 Write), 의존 sink(null 거부·정렬·유일·종류 Build), 모든 할당 실패 | `AssetTypeHooks_Sinks` |
+| | 태그 sink(PackageTags 규칙 검사·합치기·(키, 값) 정렬 삽입 — 같은 키 목록 값·정렬된 Write·빈 Write), 의존 sink(null 거부·정렬·유일·종류 Build), 모든 할당 실패 | `AssetTypeHooks_Sinks` |
 | | 등록의 모든 할당 실패 뒤 표 그대로 | `AssetTypeHooks_RegisterAllocationFailures` |
 | 조합(14 완료 조건 2) | 읽기 셋(전체·편집·재검증) × 패키지 모양 셋(Zstd·None·모르는 섹션) × 모든 offset·bit·자르기 길이, 손으로 만든 섹션 셋. 저장소: 파일 entry·저장하지 않은 bulk·복사 bulk × (읽기·저장·다시 잇기·Detach), 고장(열기·크기·읽기·외부 변경·손상 셋) × 첫 접근·캐시된 핸들. hook: 등록 위치(없음·Base·Derived·둘 다) × CallBase(함·안 함) × 종류 둘 | 위 시험 |
 
@@ -1677,10 +1682,10 @@ A2b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.15) 시험 없
 
 | 파일 | 줄 | 분기 | 함수 |
 |---|---|---|---|
-| `FilePackageBulkStore.cpp`(새) | 99.3%(292/294) | 99.2%(131/132) | 100%(20/20) |
-| `AssetTypeHooks.cpp`(새) | 100%(161/161) | 98.7%(77/78) | 100%(16/16) |
-| `PackageReader.cpp`(범위 셋·재검증·지문·entry 해제) | 100%(1264/1264) | 98.0%(832/849) | 100%(50/50) |
-| `PackageLoad.cpp`(Defer·저장소·저장하지 않은 id) | 100%(482/482) | 98.0%(290/296) | 100%(17/17) |
+| `FilePackageBulkStore.cpp`(새) | 99.3%(303/305) | 99.3%(139/140) | 100%(21/21) |
+| `AssetTypeHooks.cpp`(새) | 98.8%(171/173) | 97.6%(80/82) | 100%(17/17) |
+| `PackageReader.cpp`(범위 셋·재검증·지문·entry 해제) | 100%(1281/1281) | 98.0%(842/859) | 100%(51/51) |
+| `PackageLoad.cpp`(Defer·저장소·저장하지 않은 id) | 100%(487/487) | 98.0%(296/302) | 100%(17/17) |
 | `Package.cpp`(저장소 연결) | 100%(47/47) | 93.8%(30/32) | 100%(4/4) |
 
 닿지 않은 곳과 근거:
@@ -1689,12 +1694,15 @@ A2b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.15) 시험 없
 |---|---|---|
 | `FilePackageBulkStore::AddUnsaved` | 저장하지 않은 id 소진(CapacityExceeded) | 2^31 − 1개를 더해야 닿는다(그만큼의 slot 메모리). 넘침을 Fatal로 두지 않고 오류로 돌려준다 |
 | `AssetTypeHookTable::Remove` | 찾는 타입이 표에 없을 때의 반복 끝 | 등록 handle이 있는 타입만 지운다(handle은 Release·소멸에서 한 번만 부른다) — 항목이 없을 수 없다 |
+| `~AssetTypeHookTable` | 등록이 남은 채 소멸하면 Fatal | 수명 계약 위반(남은 handle의 Release가 해제된 표를 쓴다)이라 프로세스를 끝낸다 — 시험 프로세스 안에서 부를 수 없다(`ReferenceObserver` 소멸 검사와 같다) |
 | `PackageReader.cpp` | 분기 17개(ROCKS_ASSERT 16·섹션 내용 switch의 암묵 default) | A2b(14.1.16)와 같다. 새 범위 판정은 if 사슬로 써서 암묵 default가 없다 |
 | `PackageLoad.cpp`·`Package.cpp` | 분기 6·2개 | `ROCKS_ASSERT` 전개 안의 실패 쪽이다(`uncovered.txt`에 보이지 않고 합계에만 든다 — 14.1.x A1과 같다) |
 
 시험이 찾은 것: 재검증이 더 새 schemaVersion의 BulkIndex를 어떻게 다룰지 넣은 조건이 닿지 않았다 — BulkIndex는 Required라 부분 읽기가 먼저 `NewerVersion`으로 거부한다(조건을 빼고 손으로 만든 섹션 시험으로 고정했다). hook의 `CallBase`를 base 사슬 찾기와 한 함수로 합쳐 닿지 않던 오류 분기를 없앴다. 시험 지원 헤더 하나가 편집기 프로세스에 잠겨 쓸 수 없어 새 이름(`StoreTestSupport.h`)으로 옮겼다.
 
-A2c1 상태(2026-11-21): 리뷰 대기.
+리뷰(1회) **충족**. 권장 다섯도 반영했다: Attach의 할당 실패가 Detach 뒤 남은 slot(이미 준 span)을 지우던 것(→ 호출 전 slot까지만 되돌림), 닫은 패키지의 캐시 핸들이 남던 것(→ 저장소 소멸자가 닫음·`CloseUnder` — A2e 디렉터리 작업용), 저장소 없는 Defer 상태를 조용히 받던 것(→ InvalidArgument), 손상된 표의 큰 지연 할당(→ 컨테이너 rawSize를 먼저 대조하는 `DecodePackageBulkEntry` Array 겹판), 등록이 남은 hook 표 소멸(→ Fatal). 태그 sink는 정렬 삽입(이분 찾기)으로 바꿨다. 복제의 저장소 표 복제(F5 c)는 A2e에서 더한다.
+
+A2c1 상태(2026-11-21): **완료**(리뷰 1회 충족 + 권장 반영). 완료 조건: 대조표(14.1.17) 시험 없는 항목 0·정의된 시험 27개 모두 인용, 조합(대조표 마지막 행), coverage(14.1.18 — Windows), 리뷰어 판정 **충족**.
 
 ## 15. PNG 디코더 범위
 

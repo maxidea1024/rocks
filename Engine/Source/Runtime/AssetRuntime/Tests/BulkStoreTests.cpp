@@ -631,4 +631,109 @@ TEST(Package_AttachBulkStore) {
     CHECK(AttachBulkStore(*loaded, another).Error() == ErrorCode::InvalidArgument);
 }
 
+// 다시 Attach(A2c1 리뷰 권장): 모든 bulk를 뺀 저장(빈 재매핑) → Detach 뒤 다시 Attach하면 이미 준
+// span의 raw는 남는다 — Attach의 모든 할당 실패에서도 그 span이 유효하고 저장소는 비어 있다.
+TEST(FilePackageBulkStore_ReattachKeepsSpans) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    StoreScene scene(env.allocator);
+    REQUIRE(MakeStoreScene(env, scene, 2509));
+    MemoryPackageFiles files(env.allocator);
+    REQUIRE(files.Set(ScenePath, scene.zstd.View()));
+    FileBulk bulk(env.allocator);
+    REQUIRE(ReadFileBulk(env.allocator, scene.zstd.View(), bulk));
+    test::NFailAllocator failing(env.allocator);
+    PackageFileCache cache(env.allocator, files);
+    FilePackageBulkStore store(failing, cache);
+    REQUIRE(store.Attach(ScenePath, bulk.fingerprint, bulk.asset, bulk.bulkOffset,
+                         bulk.entries.View()));
+    auto held = store.Read(RefOf(bulk.entries[0]));
+    REQUIRE(held);
+    REQUIRE(store.Rebind(ScenePath, bulk.fingerprint, bulk.bulkOffset, bulk.entries.View(), {}));
+    CHECK(store.Count() == 0);
+    REQUIRE(store.Detach());
+    uint32 failures = 0;
+    for (uint64 attempt = 1;; ++attempt) {
+        failing.FailOnAttempt(attempt);
+        auto attached = store.Attach(ScenePath, bulk.fingerprint, bulk.asset, bulk.bulkOffset,
+                                     bulk.entries.View());
+        const bool failed = failing.Attempts() >= attempt;
+        failing.DisableFailure();
+        CHECK(memcmp(held.Value().Data(), scene.pixels.Data(), scene.pixels.Size()) == 0);
+        if (!failed) {
+            REQUIRE(attached);
+            break;
+        }
+
+        CHECK(attached.Error() == ErrorCode::OutOfMemory);
+        CHECK(!store.IsAttached() && store.Count() == 0);
+        ++failures;
+    }
+
+    CHECK(failures > 0);
+    auto again = store.Read(RefOf(bulk.entries[0]));
+    CHECK(again && again.Value().Size() == scene.pixels.Size());
+}
+
+// 핸들 정리(A2c1 리뷰 권장): 저장소가 소멸하면 자기 경로의 캐시 핸들을 닫는다. CloseUnder는 그
+// 디렉터리 아래(구성 요소 경계) 핸들만 닫는다.
+TEST(PackageFileCache_CloseOnStoreDestructionAndUnder) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    StoreScene scene(env.allocator);
+    REQUIRE(MakeStoreScene(env, scene, 2510));
+    MemoryPackageFiles files(env.allocator);
+    const StringView paths[] = {"Content/A/One.rasset", "Content/A/Sub/Two.rasset",
+                                "Content/AB/Three.rasset"};
+    for (StringView path : paths) {
+        REQUIRE(files.Set(path, scene.zstd.View()));
+    }
+
+    FileBulk bulk(env.allocator);
+    REQUIRE(ReadFileBulk(env.allocator, scene.zstd.View(), bulk));
+    PackageFileCache cache(env.allocator, files);
+    {
+        FilePackageBulkStore store(env.allocator, cache);
+        REQUIRE(store.Attach(paths[0], bulk.fingerprint, bulk.asset, bulk.bulkOffset,
+                             bulk.entries.View()));
+        REQUIRE(store.Read(RefOf(bulk.entries[0])));
+        CHECK(cache.OpenCount() == 1);
+    }
+
+    CHECK(cache.OpenCount() == 0);
+    for (StringView path : paths) {
+        REQUIRE(cache.Acquire(path, bulk.fingerprint));
+    }
+
+    cache.CloseUnder("Content/A");
+    CHECK(cache.OpenCount() == 1);
+    cache.CloseUnder("Content/AB/Three.rasset");
+    CHECK(cache.OpenCount() == 1);
+    cache.CloseUnder("Other");
+    CHECK(cache.OpenCount() == 1);
+    cache.CloseUnder("Content");
+    CHECK(cache.OpenCount() == 0);
+}
+
+// 손상된 표의 큰 할당(A2c1 리뷰 권장): Zstd entry의 rawBytes가 컨테이너와 다르면(아주 큼) raw를
+// 잡기 전에 CorruptPackage다(할당 실패가 아니다).
+TEST(FilePackageBulkStore_HugeRawBytesRejectedBeforeAllocation) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    StoreScene scene(env.allocator);
+    REQUIRE(MakeStoreScene(env, scene, 2511));
+    AttachedStore attached(env, scene.zstd.View());
+    REQUIRE(attached.ready);
+    Array<PackageBulkEntry> entries(env.allocator);
+    REQUIRE(entries.TryAppend(attached.bulk.entries.View()));
+    REQUIRE(entries[0].codec == BulkCodec::Zstd);
+    entries[0].rawBytes = uint64{1} << 44;
+    FilePackageBulkStore store(env.allocator, attached.cache);
+    REQUIRE(store.Attach(ScenePath, attached.bulk.fingerprint, attached.bulk.asset,
+                         attached.bulk.bulkOffset, entries.View()));
+    AssetDiagnostic failure;
+    CHECK(store.Read(RefOf(entries[0]), &failure).Error() == ErrorCode::InvalidArgument);
+    CHECK(failure.code == AssetDiagnosticCode::CorruptPackage);
+}
+
 } // namespace bulk_store_tests_file

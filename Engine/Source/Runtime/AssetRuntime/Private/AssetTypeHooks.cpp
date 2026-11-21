@@ -1,5 +1,7 @@
 #include <AssetRuntime/AssetTypeHooks.h>
+#include <Core/Algorithms.h>
 #include <Object/TypeRegistry.h>
+#include <Platform/Fatal.h>
 
 // 에셋 타입 hook 표 구현이다(Docs/Design/AssetSystem.ko.md 7.1절 15 — A2c1).
 namespace rocks {
@@ -11,10 +13,16 @@ Result<void> AssetTagSink::Add(StringView key, StringView value) noexcept {
         return Result<void>::Failure(written.Error());
     }
 
-    for (const PackageTag& tag : tags_) {
-        if (tag.key.View() == key && tag.value.View() == value) {
-            return Result<void>::Success();
-        }
+    // (키, 값) 순으로 둔다 — 같은 쌍 찾기·삽입 자리가 이분 찾기다.
+    auto before = [](const PackageTag& tag, const PackageTagInput& input) noexcept {
+        const int compared = StringView::CompareBytes(tag.key.View(), input.key);
+        return compared != 0 ? compared < 0
+                             : StringView::CompareBytes(tag.value.View(), input.value) < 0;
+    };
+    const PackageTagInput input{key, value};
+    const usize at = algo::LowerBound(tags_.View(), input, before);
+    if (at < tags_.Size() && tags_[at].key.View() == key && tags_[at].value.View() == value) {
+        return Result<void>::Success();
     }
 
     PackageTag tag(tags_.GetAllocator());
@@ -26,7 +34,7 @@ Result<void> AssetTagSink::Add(StringView key, StringView value) noexcept {
         return assigned;
     }
 
-    return tags_.TryPushBack(Move(tag));
+    return tags_.TryInsert(Move(tag), at);
 }
 
 Result<Array<uint8>> AssetTagSink::Write(Allocator& allocator) const noexcept {
@@ -123,7 +131,12 @@ AssetTypeHookTable::AssetTypeHookTable(Allocator& allocator, TypeRegistry& types
     : types_(&types), entries_(allocator) {
 }
 
-AssetTypeHookTable::~AssetTypeHookTable() = default;
+AssetTypeHookTable::~AssetTypeHookTable() {
+    // 남은 등록 handle의 Release가 해제된 표를 쓰게 된다(수명 계약 위반).
+    if (!entries_.IsEmpty()) {
+        platform::Fatal("AssetTypeHookTable destroyed with live registrations");
+    }
+}
 
 Result<AssetTypeHookRegistration> AssetTypeHookTable::Register(TypeId type,
                                                                AssetTypeHooks hooks) noexcept {

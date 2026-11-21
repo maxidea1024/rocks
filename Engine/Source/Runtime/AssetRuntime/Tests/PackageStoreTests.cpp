@@ -612,4 +612,95 @@ TEST(PackageLoad_DeferredFailures) {
     CHECK(failure.detail == unsavedId);
 }
 
+// entry 해제의 Array 겹판(A2c1 리뷰 권장): out을 rawBytes로 키워 같은 byte를 준다. Zstd는 키우기
+// 전에 컨테이너 형식·rawSize를 대조한다(다르면 InvalidArgument — 키우지 않는다), 저장 크기 불일치와
+// 깨진 컨테이너도 InvalidArgument, 모든 할당 실패는 그 오류다.
+TEST(PackageBulkEntry_DecodeIntoArray) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    StoreScene scene(env.allocator);
+    REQUIRE(MakeStoreScene(env, scene, 2413));
+    auto contents = ReadPackage(env.allocator, scene.zstd.View(), EditorReadOptions());
+    REQUIRE(contents);
+    const PackageBulkEntry& entry = contents.Value().bulkEntries[0];
+    REQUIRE(entry.codec == BulkCodec::Zstd);
+    const Span<const uint8> stored = contents.Value().bulk.Slice(
+        static_cast<usize>(entry.offset), static_cast<usize>(entry.storedBytes));
+    Array<uint8> out(env.allocator);
+    REQUIRE(DecodePackageBulkEntry(entry, stored, out, env.allocator));
+    CHECK(out.Size() == scene.pixels.Size() &&
+          memcmp(out.Data(), scene.pixels.Data(), out.Size()) == 0);
+    Array<uint8> none(env.allocator);
+    CHECK(DecodePackageBulkEntry(entry, stored.Slice(0, stored.Size() - 1), none, env.allocator)
+              .Error() == ErrorCode::InvalidArgument);
+    PackageBulkEntry huge = entry;
+    huge.rawBytes = uint64{1} << 44;
+    CHECK(DecodePackageBulkEntry(huge, stored, none, env.allocator).Error() ==
+          ErrorCode::InvalidArgument);
+    CHECK(none.IsEmpty());
+    Array<uint8> corrupt = Copy(env.allocator, stored);
+    corrupt[0] = static_cast<uint8>(corrupt[0] ^ 1);
+    CHECK(DecodePackageBulkEntry(entry, corrupt.View(), none, env.allocator).Error() ==
+          ErrorCode::InvalidArgument);
+    test::NFailAllocator failing(env.allocator);
+    uint32 failures = 0;
+    for (uint64 attempt = 1;; ++attempt) {
+        Array<uint8> target(failing);
+        failing.FailOnAttempt(attempt);
+        auto decoded = DecodePackageBulkEntry(entry, stored, target, failing);
+        const bool failed = failing.Attempts() >= attempt;
+        failing.DisableFailure();
+        if (!failed) {
+            CHECK(decoded);
+            break;
+        }
+
+        CHECK(decoded.Error() == ErrorCode::OutOfMemory);
+        ++failures;
+    }
+
+    CHECK(failures > 0);
+}
+
+// 저장소 없는 Defer(A2c1 리뷰 권장): bulk entry가 있는 Defer 상태를 저장소 없이
+// InstantiatePackages에 넘기면 InvalidArgument다(bulk 없는 패키지를 조용히 만들지 않는다). bulk
+// 없는 패키지는 저장소 없이 열린다.
+TEST(PackageLoad_DeferRequiresStore) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    StoreScene scene(env.allocator);
+    REQUIRE(MakeStoreScene(env, scene, 2414));
+    PackageLoadOptions defer = LoadOptions(PackageKind::Editor);
+    defer.bulk = PackageBulkMode::Defer;
+    ObjectRegistry& registry = *env.target;
+    const ObjectAccessContext access = registry.OwnerAccess();
+    {
+        PackageLoadState state(env.allocator, registry, env.types, access, defer);
+        MemoryPackageRangeReader reader(scene.zstd.View());
+        REQUIRE(state.Prepare(reader));
+        ConstructionContext transaction(registry, access);
+        PackageLoadState* states[] = {&state};
+        ObjectHandle packages[1];
+        CHECK(InstantiatePackages(transaction, states, nullptr, packages).Error() ==
+              ErrorCode::InvalidArgument);
+    }
+
+    auto plain =
+        NewPackage(*env.source, env.source->OwnerAccess(), FixedId(2415), PackageKind::Editor);
+    REQUIRE(plain);
+    REQUIRE(!Make<TestAsset>(*env.source, TestAssetType(), plain.Value().Handle(), "").IsNull());
+    const Array<uint8> noBulk =
+        Write(env.allocator, *env.source, plain.Value().Handle(), EditorOptions());
+    REQUIRE(!noBulk.IsEmpty());
+    PackageLoadState state(env.allocator, registry, env.types, access, defer);
+    MemoryPackageRangeReader reader(noBulk.View());
+    REQUIRE(state.Prepare(reader));
+    ConstructionContext transaction(registry, access);
+    PackageLoadState* states[] = {&state};
+    ObjectHandle packages[1];
+    REQUIRE(InstantiatePackages(transaction, states, nullptr, packages));
+    RootRef<Object> roots[1];
+    CHECK(transaction.Commit(packages, roots));
+}
+
 } // namespace package_store_tests_file

@@ -237,10 +237,17 @@ TEST(AssetTypeHooks_Sinks) {
     REQUIRE(sink.Add("A", "1"));
     REQUIRE(sink.Add("B", "2"));
     CHECK(sink.Tags().Size() == 2);
+    // 목록 값(같은 키 여러 값)은 값 순이다.
+    REQUIRE(sink.Add("B", "3"));
+    REQUIRE(sink.Add("B", "1"));
+    REQUIRE(sink.Tags().Size() == 4);
+    CHECK(sink.Tags()[1].value.View() == "1" && sink.Tags()[3].value.View() == "3");
+    REQUIRE(sink.Add("B", "1"));
+    CHECK(sink.Tags().Size() == 4);
     auto written = sink.Write(allocator);
     REQUIRE(written);
     auto read = ReadPackageTags(allocator, written.Value().View());
-    REQUIRE(read && read.Value().Size() == 2);
+    REQUIRE(read && read.Value().Size() == 4);
     CHECK(read.Value()[0].key.View() == "A");
     AssetDependencySink dependencies(allocator);
     CHECK(dependencies.Add(AssetId{}).Error() == ErrorCode::InvalidArgument);

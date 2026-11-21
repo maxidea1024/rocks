@@ -235,6 +235,11 @@ Result<void> VerifyPackageFile(Allocator& allocator, PackageRangeReader& reader,
 Result<void> DecodePackageBulkEntry(const PackageBulkEntry& entry, Span<const uint8> stored,
                                     Span<uint8> raw, Allocator& allocator) noexcept;
 
+// 위와 같되 out을 entry.rawBytes로 키워 쓴다. Zstd entry는 out을 키우기 전에 컨테이너 헤더의
+// rawSize를 entry와 대조한다(손상된 표로 큰 할당을 하지 않는다). 오류는 위와 같다.
+Result<void> DecodePackageBulkEntry(const PackageBulkEntry& entry, Span<const uint8> stored,
+                                    Array<uint8>& out, Allocator& allocator) noexcept;
+
 // contents의 bulk entry를 모두 풀어 raw byte를 out 끝에 bulkId 순으로 이어 붙이고, entry별 위치를
 // slots에 채운다(rawBytes와 SHA-256 확인). raw 합이 maxRawBytes를 넘으면 CapacityExceeded다.
 //

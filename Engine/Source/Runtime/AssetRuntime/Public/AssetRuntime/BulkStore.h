@@ -27,8 +27,10 @@ public:
     // ref의 raw byte다. span은 이 저장소가 살아 있는 동안 유효하다(다시 잇기·Detach도 옮기지
     // 않는다). 오류: 빈 ref InvalidArgument, 없는 id NotFound, rawBytes·sha256이 entry와 다르면
     // TypeMismatch, 지연 읽기에서 발견한 손상은 CorruptPackage / InvalidArgument(detail = 파일
-    // bulkId), 파일이 로드 뒤 바뀌었으면 ExternalModification / StaleHandle, 파일 IO 오류는 진단
-    // None과 그 오류, 할당 실패.
+    // bulkId), 파일이 로드 뒤 바뀌었으면(헤더·섹션 표 지문이 다름) ExternalModification /
+    // StaleHandle, 파일 IO 오류는 진단 None과 그 오류, 할당 실패. 지문을 바꾸지 않는 제자리
+    // 덮어쓰기(Bulk 내용만)는 entry CRC가 CorruptPackage로 잡는다. 캐시된 핸들이 남아 있는 동안
+    // 이름 교체로 바뀐 파일은 이전 내용을 계속 읽는다(그 내용은 로드 지문과 맞다).
     virtual Result<Span<const uint8>> Read(const BulkDataRef& ref,
                                            AssetDiagnostic* failure = nullptr) noexcept = 0;
 };

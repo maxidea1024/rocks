@@ -482,6 +482,13 @@ Result<void> InstantiatePackages(ConstructionContext& transaction,
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
 
+        // Defer 상태의 bulk는 저장소만 읽을 수 있다 — 저장소 없이 만들면 bulk 없는 패키지가 된다.
+        const PackageLoadState& state = *packages[index];
+        if (state.options_.bulk == PackageBulkMode::Defer &&
+            !state.contents_.bulkEntries.IsEmpty() && state.bulkStore_.Get() == nullptr) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
         for (usize other = 0; other < index; ++other) {
             if (packages[other]->Id() == packages[index]->Id()) {
                 return Result<void>::Failure(ErrorCode::InvalidArgument);

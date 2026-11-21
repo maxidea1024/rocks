@@ -111,6 +111,17 @@ Result<PackageRangeReader*> PackageFileCache::Acquire(StringView path,
     return Result<Out>::Success(&entries_[entries_.Size() - 1]->reader);
 }
 
+void PackageFileCache::CloseUnder(StringView directory) noexcept {
+    for (usize index = entries_.Size(); index > 0; --index) {
+        const StringView path = entries_[index - 1]->path.View();
+        if (path.ByteCount() > directory.ByteCount() &&
+            path.StartsWith(directory, StringComparison::CaseSensitive) &&
+            path.Data()[directory.ByteCount()] == '/') {
+            (void)entries_.TryRemoveAt(index - 1);
+        }
+    }
+}
+
 void PackageFileCache::Close(StringView path) noexcept {
     for (usize index = 0; index < entries_.Size(); ++index) {
         if (entries_[index]->path.View() == path) {
@@ -140,7 +151,12 @@ FilePackageBulkStore::FilePackageBulkStore(Allocator& allocator, PackageFileCach
       table_(allocator) {
 }
 
-FilePackageBulkStore::~FilePackageBulkStore() = default;
+FilePackageBulkStore::~FilePackageBulkStore() {
+    // 닫은 패키지의 핸들이 캐시에 남아 디렉터리 이동·삭제를 막지 않게 닫는다.
+    if (!path_.IsEmpty()) {
+        cache_->Close(path_.View());
+    }
+}
 
 Result<void> FilePackageBulkStore::Attach(StringView path, const PackageFingerprint& fingerprint,
                                           AssetId asset, uint64 bulkSectionOffset,
@@ -149,7 +165,10 @@ Result<void> FilePackageBulkStore::Attach(StringView path, const PackageFingerpr
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    if (auto reserved = slots_.TryReserve(entries.Size()); !reserved) {
+    // 실패하면 호출 전 slot까지만 남긴다(Detach 뒤의 slot은 이미 준 span의 raw를 갖는다 — 지우지
+    // 않는다).
+    const usize base = slots_.Size();
+    if (auto reserved = slots_.TryReserve(base + entries.Size()); !reserved) {
         return reserved;
     }
 
@@ -164,7 +183,7 @@ Result<void> FilePackageBulkStore::Attach(StringView path, const PackageFingerpr
     for (const PackageBulkEntry& entry : entries) {
         auto slot = UniquePtr<Slot>::TryMake(*allocator_, *allocator_);
         if (!slot) {
-            slots_.Clear();
+            (void)slots_.TryResize(base);
             table_.Clear();
             path_.Clear();
             return Result<void>::Failure(slot.Error());
@@ -231,13 +250,9 @@ Result<void> FilePackageBulkStore::Load(Slot& slot, AssetDiagnostic* failure) no
                     asset_, BulkSection, slot.fileId);
     }
 
+    // raw를 잡기 전에 Zstd 컨테이너 헤더의 rawSize를 대조한다(손상된 표로 큰 할당을 하지 않게).
     Array<uint8> raw(*allocator_);
-    if (auto sized = raw.TryResize(static_cast<usize>(slot.rawBytes)); !sized) {
-        return Fail(failure, AssetDiagnosticCode::None, sized.Error(), asset_, BulkSection,
-                    slot.fileId);
-    }
-
-    if (auto decoded = DecodePackageBulkEntry(slot.entry, stored.View(), raw.View(), *allocator_);
+    if (auto decoded = DecodePackageBulkEntry(slot.entry, stored.View(), raw, *allocator_);
         !decoded) {
         return decoded.Error() == ErrorCode::OutOfMemory
                    ? Fail(failure, AssetDiagnosticCode::None, decoded.Error(), asset_, BulkSection,

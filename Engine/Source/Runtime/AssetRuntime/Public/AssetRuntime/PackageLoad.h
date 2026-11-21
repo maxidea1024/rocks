@@ -213,7 +213,8 @@ protected:
 // ApplyFields → 모든 CheckRequired → id·bulk 설정. 공개(Commit)는 호출자가 한다 — 관찰자 Commit
 // 기록의 transaction id를 Commit 전에 읽어 둘 수 있게.
 //
-// 인자: packages(Prepare 완료, 아직 InstantiatePackages에 넘긴 적 없음, 서로 다른 AssetId),
+// 인자: packages(Prepare 완료, 아직 InstantiatePackages에 넘긴 적 없음, 서로 다른 AssetId, Defer
+// 상태에 bulk entry가 있으면 SetBulkStore를 마침),
 // resolver(null이면 묶음 밖 import는 MissingDependency), outPackages(크기 = packages, i번째
 // Package handle — 공개 전 객체).
 //

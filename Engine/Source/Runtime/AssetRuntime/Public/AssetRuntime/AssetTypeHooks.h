@@ -26,8 +26,8 @@ namespace rocks {
 class AssetTypeHookTable;
 class TypeRegistry;
 
-// 태그를 모은다. 같은 (키, 값)은 하나로 합친다. Write가 Tags Record byte(PackageTags 값 스키마)를
-// 만든다.
+// 태그를 모은다. (키, 값) UTF-8 byte 순으로 두고 같은 쌍은 하나로 합친다. Write가 Tags Record
+// byte(PackageTags 값 스키마)를 만든다.
 class AssetTagSink {
 public:
     explicit AssetTagSink(Allocator& allocator) noexcept : tags_(allocator) {
@@ -118,6 +118,7 @@ private:
 class AssetTypeHookTable {
 public:
     AssetTypeHookTable(Allocator& allocator, TypeRegistry& types) noexcept;
+    // 모든 등록 handle을 놓은 뒤에 소멸해야 한다(남아 있으면 Fatal — 수명 계약 위반).
     ~AssetTypeHookTable();
     AssetTypeHookTable(const AssetTypeHookTable&) = delete;
     AssetTypeHookTable& operator=(const AssetTypeHookTable&) = delete;
