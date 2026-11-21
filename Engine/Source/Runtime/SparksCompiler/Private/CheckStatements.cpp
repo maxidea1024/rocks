@@ -236,6 +236,12 @@ void TypeChecker::Run() noexcept {
         CheckAcquireReturns(); // 3.14절 schema `acquire`
         CheckHeldEvents();     // 3.14절 schema 이벤트 인자
     }
+
+    // typed IR(LC4a): 진단이 없는 컴파일만 내린다(타입·심볼이 모두 정해져 있다).
+    if (c.lastStage_ >= CompilationStage::Codegen && binder_.error_ == ErrorCode::None &&
+        binder_.diagnostics_.IsEmpty()) {
+        LowerProgram();
+    }
 }
 
 uint32 TypeChecker::FieldType(uint32 field) noexcept {

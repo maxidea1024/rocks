@@ -6,7 +6,7 @@ namespace Rocks.Build.Cli;
 /// <item>기본 출력: <c>&lt;project&gt;/out/&lt;platform&gt;-&lt;target&gt;-&lt;configuration&gt;</c>(소문자) — 타깃이 둘 이상이어도 겹치지 않고 clean이 지울
 /// 곳이 하나로 정해진다.</item>
 /// <item>입력에서 빼는 곳: 깊이와 무관한 점 디렉터리(<c>.git</c>·<c>.vs</c>·<c>.vscode</c>·<c>.idea</c>), 최상위 <c>out/</c>·<c>Saved/</c>,
-/// 최상위 <c>*.slnx</c>. 게임 입력 snapshot과 규칙 파일 탐색이 같은 규칙을 쓴다.</item>
+/// 최상위 <c>*.slnx</c>(세 이름은 대소문자 무관). 게임 입력 snapshot과 규칙 파일 탐색이 같은 규칙을 쓴다.</item>
 /// </list>
 /// </summary>
 internal static class GameProjectLayout
@@ -17,7 +17,8 @@ internal static class GameProjectLayout
     // 프로젝트 루트 바로 아래에서 입력이 아닌 파일의 확장자다(생성 솔루션).
     private const string SolutionExtension = ".slnx";
 
-    private static readonly StringComparison NameComparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+    // out·Saved·.slnx는 호스트와 무관하게 대소문자를 가리지 않는다(macOS APFS 기본 볼륨도 가리지 않아 saved/·OUT/가 같은 디렉터리다).
+    private const StringComparison NameComparison = StringComparison.OrdinalIgnoreCase;
 
     /// <summary>호스트의 게임 출력 플랫폼 이름이다(엔진 출력 이름과 같은 철자).</summary>
     public static string HostPlatformName => OperatingSystem.IsWindows() ? "windows" : "macos";
@@ -59,9 +60,10 @@ internal static class GameProjectLayout
     }
 
     /// <summary>
-    /// 게임 규칙 파일(<c>*.Build.cs</c>·<c>*.Target.cs</c>)이다. 빼는 곳 아래는 내려가지 않고 출력 아래도 보지 않는다. 정렬해 돌려준다.
+    /// 게임 규칙 파일(<c>*.Build.cs</c>·<c>*.Target.cs</c>)이다. 빼는 곳, 출력, 프로젝트 안에 둔 SDK 아래로는 내려가지 않는다. 링크(reparse
+    /// point)는 따라가지 않고 거부한다(입력 snapshot과 같다). 정렬해 돌려준다.
     /// </summary>
-    public static string[] RuleFiles(string project, string output)
+    public static string[] RuleFiles(string project, string output, string sdk)
     {
         var files = new List<string>();
         var pending = new Stack<string>([Path.GetFullPath(project)]);
@@ -70,6 +72,7 @@ internal static class GameProjectLayout
             string directory = pending.Pop();
             foreach (string file in Directory.EnumerateFiles(directory, "*.cs"))
             {
+                RejectLink(file);
                 if ((file.EndsWith(".Build.cs", StringComparison.Ordinal) || file.EndsWith(".Target.cs", StringComparison.Ordinal)) && !IsExcluded(project, file))
                 {
                     files.Add(file);
@@ -78,13 +81,23 @@ internal static class GameProjectLayout
 
             foreach (string child in Directory.EnumerateDirectories(directory))
             {
-                if (!IsExcluded(project, child) && !Tooling.Common.DirectoryPath.IsAtOrUnder(child, output))
+                if (!IsExcluded(project, child) && !Tooling.Common.DirectoryPath.IsAtOrUnder(child, output) &&
+                    !Tooling.Common.DirectoryPath.IsAtOrUnder(child, sdk))
                 {
+                    RejectLink(child);
                     pending.Push(child);
                 }
             }
         }
 
         return [.. files.Order(StringComparer.Ordinal)];
+    }
+
+    private static void RejectLink(string path)
+    {
+        if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+        {
+            throw new IOException("Game rule discovery cannot follow links: " + path);
+        }
     }
 }

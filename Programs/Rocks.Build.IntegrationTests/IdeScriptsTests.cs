@@ -34,11 +34,12 @@ internal static class IdeScriptsTests
         }
 
         await CleanBoundariesAsync(repository);
+        await SdkScriptsAsync(repository);
         await LockOrderAsync(repository);
         await ToolInputsAsync(repository);
         await NMakeCommandsAsync(repository);
         await StalenessAsync(repository);
-        Console.WriteLine("PASS IDE scripts: clean boundaries, IDE build lock order, tool inputs and rebuild decisions, Visual Studio or NMake build/clean/rebuild, " +
+        Console.WriteLine("PASS IDE scripts: clean boundaries, SDK scripts, IDE build lock order, tool inputs and rebuild decisions, Visual Studio or NMake build/clean/rebuild, " +
             "terminal no-op, failure exit codes, RPF0001");
     }
 
@@ -248,15 +249,50 @@ internal static class IdeScriptsTests
         Require(!Stale(await Cli(Build())), "project files are stale after removing the probe and regenerating");
     }
 
+    // 설치 SDK에 실린 스크립트: Tools.ps1은 도구를 빌드하지 않고(-ListInputs는 해당 없음), IdeBuild.ps1·GenerateProjectFiles.ps1은 게임 호출
+    // 형태(-Project·-Sdk)에서도 매개변수를 묶은 뒤 error RB0002로 멈춘다(게임 모드는 PJ5).
+    private static async Task SdkScriptsAsync(string repository)
+    {
+        string sdk = Directory.CreateTempSubdirectory("rocks-sdk-scripts-").FullName;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(sdk, "Build"));
+            foreach (string script in new[] { "Tools.ps1", "IdeBuild.ps1", "GenerateProjectFiles.ps1" })
+            {
+                File.Copy(Path.Combine(repository, "Build", script), Path.Combine(sdk, "Build", script));
+            }
+
+            File.WriteAllText(Path.Combine(sdk, "rocks-sdk.json"), "{}");
+            Directory.CreateDirectory(Path.Combine(sdk, "Tools", "Rocks.Build.Cli"));
+            File.WriteAllText(Path.Combine(sdk, "Tools", "Rocks.Build.Cli", "Rocks.Build.Cli.dll"), "");
+            Task<ProcessResult> Script(string name, params string[] arguments) => ProcessRunner.RunAsync(new("pwsh",
+                ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", Path.Combine(sdk, "Build", name), .. arguments], sdk));
+            var tools = await Script("Tools.ps1");
+            Require(tools.ExitCode == 0 && tools.StdOut.Contains("ship with the installed SDK", StringComparison.Ordinal), "SDK Tools.ps1: " + tools.StdOut + tools.StdErr);
+            var inputs = await Script("Tools.ps1", "-ListInputs");
+            Require(inputs.ExitCode == 0 && inputs.StdOut.Contains("not applicable", StringComparison.Ordinal), "SDK Tools.ps1 -ListInputs: " + inputs.StdOut + inputs.StdErr);
+            var game = await Script("IdeBuild.ps1", "-Action", "Build", "-Project", Path.Combine(sdk, "Game.rocksproject"), "-Sdk", sdk, "-Target", "Game",
+                "-Configuration", "Debug", "-Compiler", "clang-cl.exe");
+            Require(game.ExitCode == 1 && game.StdOut.Contains("error RB0002", StringComparison.Ordinal), "SDK IdeBuild.ps1 game form: " + game.StdOut + game.StdErr);
+            var generate = await Script("GenerateProjectFiles.ps1", "-Project", Path.Combine(sdk, "Game.rocksproject"));
+            Require(generate.ExitCode == 1 && generate.StdOut.Contains("error RB0002", StringComparison.Ordinal),
+                "SDK GenerateProjectFiles.ps1 game form: " + generate.StdOut + generate.StdErr);
+        }
+        finally
+        {
+            Directory.Delete(sdk, recursive: true);
+        }
+    }
+
     // V6: 생성 프로젝트의 NMake 명령을 cmd로 돌린다.
     private static async Task NMakeCommandsAsync(string repository)
     {
+        // 깨끗한 트리에서도 돌게 프로젝트 파일을 먼저 만든다(V14보다 먼저 돈다).
+        string cli = Path.Combine(repository, "out", "dotnet", "bin", "Rocks.Build.Cli", "Debug", "net10.0", "Rocks.Build.Cli.dll");
+        var generated = await ProcessRunner.RunAsync(new("dotnet", [cli, "projectfiles", "--root", repository], repository));
+        Require(generated.ExitCode == 0, "projectfiles --root failed: " + generated.StdOut + generated.StdErr);
         string project = Path.Combine(repository, "out", "ProjectFiles", "Programs", SmallTarget + ".vcxproj");
-        if (!File.Exists(project))
-        {
-            Console.WriteLine($"SKIP IDE scripts V6: {project} does not exist; run projectfiles first");
-            return;
-        }
+        Require(File.Exists(project), "projectfiles did not write " + project);
 
         (string build, string clean, string rebuild, string output) = NMakeProperties(project);
         string outputDirectory = Path.GetDirectoryName(Path.GetDirectoryName(output)!)!;
@@ -307,6 +343,13 @@ internal static class IdeScriptsTests
                 RedirectStandardError = true,
                 WorkingDirectory = repository
             };
+            // Visual Studio가 Makefile 프로젝트에 넣는 변수를 일부러 다른 값으로 둔다. IdeBuild.ps1이 지우지 않으면 도구 모음 key가 달라져
+            // 뒤의 터미널 빌드가 0 action이 아니다(7.1절 환경 정리).
+            foreach (string name in new[] { "INCLUDE", "EXTERNAL_INCLUDE", "LIB", "LIBPATH" })
+            {
+                start.Environment[name] = Path.Combine(repository, "out", "rocks-ide-environment-probe", name);
+            }
+
             using var process = Process.Start(start)!;
             Task<string> output = process.StandardOutput.ReadToEndAsync();
             Task<string> errors = process.StandardError.ReadToEndAsync();

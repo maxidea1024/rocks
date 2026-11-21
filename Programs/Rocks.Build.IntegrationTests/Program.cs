@@ -1328,8 +1328,11 @@ try
     // Release SDK: 엔진 라이브러리는 ThinLTO bitcode이고, 게임 Release가 같은 LLVM으로 link해 실행된다.
     timer.Restart();
     var releaseSdk = Path.Combine(fixture, "installed-release");
-    var releaseExport = await Cli("sdk", "--root", root, "--target", "Engine", "--configuration", "Release", "--destination", releaseSdk);
+    // --register on은 내보낸 뒤 등록부에 넣는다(Docs/Design/ProjectFiles.ko.md 10.2절).
+    var releaseExport = await Cli("sdk", "--root", root, "--target", "Engine", "--configuration", "Release", "--destination", releaseSdk, "--register", "on");
     Require(releaseExport.ExitCode == 0, "Release SDK export failed: " + releaseExport.StdErr);
+    Require(new JsonSdkRegistry(registryFile).List().Any(entry => string.Equals(Path.GetFullPath(entry.Path), Path.GetFullPath(releaseSdk),
+        StringComparison.OrdinalIgnoreCase)), "sdk --register on did not register the SDK");
     static bool ContainsBitcode(string path)
     {
         byte[] bytes = File.ReadAllBytes(path);
@@ -1352,6 +1355,24 @@ try
     var releaseRun = await ProcessRunner.RunAsync(new(releaseReport.ModuleOutputs["SampleGame"], [], game, toolchain.Environment));
     Require(releaseRun.ExitCode == 0, "Release ThinLTO game failed at runtime");
     Pass("release-thinlto-sdk-and-game", timer.Elapsed);
+
+    // 등록부로 고를 때 구성도 본다(10.1절): 같은 엔진 패치의 Debug SDK와 Release SDK를 함께 등록해도 Release 빌드는 Release SDK를,
+    // Debug 빌드는 Debug SDK를 모호함 없이 고른다(Release는 바로 앞에서 같은 SDK로 빌드했으므로 0 action이다).
+    timer.Restart();
+    Require((await Tool("sdk-register", "--sdk", sdk)).ExitCode == 0, "sdk-register of the Debug SDK failed");
+    foreach ((NativeConfiguration configuration, string expected) in new[] { (NativeConfiguration.Release, releaseSdk), (NativeConfiguration.Debug, sdk) })
+    {
+        var chosen = await Cli("game", "--project", game, "--configuration", configuration.ToString());
+        var chosenReport = JsonSerializer.Deserialize<NativeBuildResult>(File.ReadAllText(Path.Combine(GameProjectLayout.DefaultOutput(game, "Game", configuration),
+            "action-report.json")))!;
+        Require(chosen.ExitCode == 0 && chosen.StdOut.Contains("Installed SDK: " + expected, StringComparison.OrdinalIgnoreCase) && chosenReport.Succeeded &&
+            (configuration != NativeConfiguration.Release || chosenReport.ExecutedActions == 0),
+            $"The {configuration} game build without --sdk did not pick {expected}: " + chosen.StdOut + chosen.StdErr);
+    }
+
+    Require((await Tool("sdk-unregister", "--sdk", sdk)).ExitCode == 0 && (await Tool("sdk-unregister", "--sdk", releaseSdk)).ExitCode == 0,
+        "sdk-unregister failed");
+    Pass("sdk-registry-picks-by-configuration", timer.Elapsed);
     success = true;
     return 0;
 }

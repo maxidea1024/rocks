@@ -235,15 +235,17 @@ public static class InstalledSdk
 
         ProjectDescriptor descriptor = DescriptorReader.ReadProject(descriptors[0]);
         NativeToolchain toolchain = await NativeToolchains.DiscoverAsync(options.GetValueOrDefault("compiler"), cancellationToken);
-        string sdk = SdkAssociation.Resolve(descriptor, SdkRegistries.Default(), path => Incompatibility(path, toolchain));
+        NativeConfiguration configuration = BuildCommand.Configuration(options);
+        string sdk = SdkAssociation.Resolve(descriptor, SdkRegistries.Default(), path => Incompatibility(path, toolchain, configuration));
         Console.WriteLine($"Installed SDK: {sdk} ({(descriptor.EngineAssociation is null ? "engineVersion " + descriptor.EngineVersion : "engineAssociation")}).");
         options["sdk"] = sdk;
     }
 
     /// <summary>
-    /// 이 SDK를 이 컴퓨터의 도구 모음으로 쓸 수 없는 이유다(쓸 수 있으면 null). Verify에서 구성 검사만 뺀 조건이다.
+    /// 이 SDK를 이 컴퓨터의 도구 모음으로 요청 구성을 빌드하는 데 쓸 수 없는 이유다(쓸 수 있으면 null). Verify의 호환 조건(manifest 판·구성·
+    /// 플랫폼·아키텍처·ABI)이고, 파일 목록·내용 검사는 고른 SDK에만 Verify가 한다.
     /// </summary>
-    internal static string? Incompatibility(string sdk, NativeToolchain toolchain)
+    internal static string? Incompatibility(string sdk, NativeToolchain toolchain, NativeConfiguration configuration)
     {
         string manifestText = File.ReadAllText(Path.Combine(sdk, "rocks-sdk.json"));
         int? version = ManifestVersionOf(manifestText);
@@ -268,7 +270,8 @@ public static class InstalledSdk
         }
 
         string architecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString();
-        return manifest.Platform != toolchain.Platform.ToString() ? $"platform {manifest.Platform}, this computer builds {toolchain.Platform}"
+        return manifest.Configuration != configuration.ToString() ? $"configuration {manifest.Configuration}, the build needs {configuration}"
+            : manifest.Platform != toolchain.Platform.ToString() ? $"platform {manifest.Platform}, this computer builds {toolchain.Platform}"
             : manifest.Architecture != architecture ? $"architecture {manifest.Architecture}, this computer is {architecture}"
             : manifest.CompilerIdentity != toolchain.AbiIdentity || manifest.SdkIdentity != toolchain.AbiIdentity
                 ? "exported with another compiler or native SDK ABI than this computer's toolchain"
@@ -416,7 +419,7 @@ public static class InstalledSdk
         // (Docs/Design/BuildTargets.ko.md BD24, 3.9절).
         var availablePlugins = PluginCatalog.Discover([Path.Combine(project, "Plugins")]);
         // 입력 snapshot과 같은 제외 규칙으로 찾는다(점 디렉터리·out/·Saved/ 아래 사본을 규칙으로 컴파일하지 않는다, 10.6절).
-        var rulesFiles = GameProjectLayout.RuleFiles(project, output);
+        var rulesFiles = GameProjectLayout.RuleFiles(project, output, sdk);
         if (rulesFiles.Length == 0)
         {
             throw new ArgumentException("No *.Build.cs or *.Target.cs rules found in the game project.");

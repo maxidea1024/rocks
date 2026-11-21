@@ -225,14 +225,21 @@ function Update-RocksTools {
         throw "Building the Rocks tools failed (exit code $LASTEXITCODE)."
     }
 
+    # The input fingerprint and its memo are the ones taken before the build: an input changed while the build ran then differs next time
+    # and builds again. Only the output hashes come from after the build.
     $after = Get-RocksToolState $state.Files
-    $record = [ordered]@{ fingerprint = $after.Fingerprint; outputs = $after.Outputs; files = $after.Files }
+    $record = [ordered]@{ fingerprint = $state.Fingerprint; outputs = $after.Outputs; files = $state.Files }
     New-Item -ItemType Directory -Force -Path (Split-Path $script:RocksToolsStamp) | Out-Null
     ($record | ConvertTo-Json -Depth 4) | Set-Content -LiteralPath $script:RocksToolsStamp -Encoding utf8NoBOM
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
     if ($ListInputs) {
+        if ($script:RocksSdk) {
+            [Console]::Out.WriteLine('Tool inputs are not applicable in an installed SDK: the tools ship prebuilt.')
+            exit 0
+        }
+
         Get-RocksToolInputs | ForEach-Object { $_ }
         exit 0
     }

@@ -1,0 +1,394 @@
+function Shapes(s0, s1)
+  s0 n: int8 [I8]
+  s1 x: float [F64]
+  s2: int8 [I8]
+  s3: int8 [I8]
+  s4 small: int8 [I8]
+  s5: float [F64]
+  s6: float [F64]
+  s7 wide: float [F64]
+  s8..s10: Rotator [F64 F64 F64]
+  s11: float [F64]
+  s12..s14 r: Rotator [F64 F64 F64]
+  s15..s24: Transform [F64 F64 F64 F64 F64 F64 F64 F64 F64 F64]
+  s25..s27: vec3 [F64 F64 F64]
+  s28: float [F64]
+  s29: float [F64]
+  s30: float [F64]
+  s31..s40 t: Transform [F64 F64 F64 F64 F64 F64 F64 F64 F64 F64]
+  s41..s44: Color [F64 F64 F64 F64]
+  s45: float [F64]
+  s46: float [F64]
+  s47..s50 c: Color [F64 F64 F64 F64]
+  s51..s54: quat [F64 F64 F64 F64]
+  s55: float [F64]
+  s56: float [F64]
+  s57: float [F64]
+  s58: float [F64]
+  s59..s62 q: quat [F64 F64 F64 F64]
+  s63..s65: vec3 [F64 F64 F64]
+  s66..s68: vec3 [F64 F64 F64]
+  s69..s71 v: vec3 [F64 F64 F64]
+  s72: float [F64]
+  s73: float [F64]
+  s74: float [F64]
+  s75: float [F64]
+  s76: float [F64]
+  s77: float [F64]
+  s78: float [F64]
+  s79: float [F64]
+L0:
+    s2 = LOADINT 2    ; 15:21
+    s3 = MUL.I8 s0, s2    ; 15:17
+    s4 = MOVE s3    ; 15:5
+    s5 = CONVERT s4    ; 16:16
+    s6 = ADD.F64 s5, s1    ; 16:16
+    s7 = MOVE s6    ; 16:5
+    s8 = LOADFLOAT 0    ; 17:13
+    s9 = LOADFLOAT 0    ; 17:13
+    s10 = LOADFLOAT 0    ; 17:13
+    s11 = LOADFLOAT 90    ; 17:26
+    s9 = MOVE s11    ; 17:26
+    s12 = MOVE s8    ; 17:5
+    s13 = MOVE s9    ; 17:5
+    s14 = MOVE s10    ; 17:5
+    s15 = LOADFLOAT 0    ; 18:13
+    s16 = LOADFLOAT 0    ; 18:13
+    s17 = LOADFLOAT 0    ; 18:13
+    s18 = LOADFLOAT 0    ; 18:13
+    s19 = LOADFLOAT 0    ; 18:13
+    s20 = LOADFLOAT 0    ; 18:13
+    s21 = LOADFLOAT 1    ; 18:13
+    s22 = LOADFLOAT 1    ; 18:13
+    s23 = LOADFLOAT 1    ; 18:13
+    s24 = LOADFLOAT 1    ; 18:13
+    s25 = LOADFLOAT 0    ; 18:33
+    s26 = LOADFLOAT 0    ; 18:33
+    s27 = LOADFLOAT 0    ; 18:33
+    s28 = LOADFLOAT 1    ; 18:38
+    s25 = MOVE s28    ; 18:38
+    s29 = LOADFLOAT 2    ; 18:43
+    s26 = MOVE s29    ; 18:43
+    s30 = LOADFLOAT 3    ; 18:48
+    s27 = MOVE s30    ; 18:48
+    s15 = MOVE s25    ; 18:33
+    s16 = MOVE s26    ; 18:33
+    s17 = MOVE s27    ; 18:33
+    s31 = MOVE s15    ; 18:5
+    s32 = MOVE s16    ; 18:5
+    s33 = MOVE s17    ; 18:5
+    s34 = MOVE s18    ; 18:5
+    s35 = MOVE s19    ; 18:5
+    s36 = MOVE s20    ; 18:5
+    s37 = MOVE s21    ; 18:5
+    s38 = MOVE s22    ; 18:5
+    s39 = MOVE s23    ; 18:5
+    s40 = MOVE s24    ; 18:5
+    s41 = LOADFLOAT 0    ; 19:13
+    s42 = LOADFLOAT 0    ; 19:13
+    s43 = LOADFLOAT 0    ; 19:13
+    s44 = LOADFLOAT 0    ; 19:13
+    s45 = LOADFLOAT 1    ; 19:22
+    s41 = MOVE s45    ; 19:22
+    s46 = LOADFLOAT 0.5    ; 19:30
+    s44 = MOVE s46    ; 19:30
+    s47 = MOVE s41    ; 19:5
+    s48 = MOVE s42    ; 19:5
+    s49 = MOVE s43    ; 19:5
+    s50 = MOVE s44    ; 19:5
+    s51 = LOADFLOAT 0    ; 20:13
+    s52 = LOADFLOAT 0    ; 20:13
+    s53 = LOADFLOAT 0    ; 20:13
+    s54 = LOADFLOAT 1    ; 20:13
+    s55 = LOADFLOAT 0    ; 20:18
+    s51 = MOVE s55    ; 20:18
+    s56 = LOADFLOAT 0    ; 20:23
+    s52 = MOVE s56    ; 20:23
+    s57 = LOADFLOAT 0    ; 20:28
+    s53 = MOVE s57    ; 20:28
+    s58 = LOADFLOAT 1    ; 20:33
+    s54 = MOVE s58    ; 20:33
+    s59 = MOVE s51    ; 20:5
+    s60 = MOVE s52    ; 20:5
+    s61 = MOVE s53    ; 20:5
+    s62 = MOVE s54    ; 20:5
+    s63 = MOVE s31    ; 21:14
+    s64 = MOVE s32    ; 21:14
+    s65 = MOVE s33    ; 21:14
+    s66 = NEG.F64 s63    ; 21:13
+    s67 = NEG.F64 s64    ; 21:13
+    s68 = NEG.F64 s65    ; 21:13
+    s69 = MOVE s66    ; 21:5
+    s70 = MOVE s67    ; 21:5
+    s71 = MOVE s68    ; 21:5
+    s72 = MOVE s13    ; 22:19
+    s73 = ADD.F64 s7, s72    ; 22:12
+    s74 = MOVE s50    ; 22:27
+    s75 = ADD.F64 s73, s74    ; 22:12
+    s76 = MOVE s62    ; 22:33
+    s77 = ADD.F64 s75, s76    ; 22:12
+    s78 = MOVE s69    ; 22:39
+    s79 = ADD.F64 s77, s78    ; 22:12
+    RETURN s79    ; 22:5
+
+function Containers(b0, b1)
+  b0 items: Array<int>
+  b1 table: Map<string, int>
+  s2: int [I64]
+  s3: int [I64]
+  s4: int [I64]
+  b5: Array<int>
+  b6 list: Array<int>
+  s7: int [I64]
+  s8..s9: int? [Flag I64]
+  s10: int [I64]
+  s11: bool [Bool]
+  s12: int [I64]
+  s13: int [I64]
+  s14: int [I64]
+  s15..s16: int? [Flag I64]
+  s17: int [I64]
+  s18: bool [Bool]
+  s19: int [I64]
+  s20: int [I64]
+  s21: int [I64]
+  s22 first: int [I64]
+  b23: string
+  s24..s25: int? [Flag I64]
+  s26: int [I64]
+  s27: bool [Bool]
+  s28: int [I64]
+  s29: int [I64]
+  s30 found: int [I64]
+  b31: string
+  s32: int [I64]
+  b33: string
+  s34: int [I64]
+  b35: Map<string, int>
+  b36 named: Map<string, int>
+  s37: int [I64]
+  b38: string
+  s39..s40: int? [Flag I64]
+  s41: int [I64]
+  s42: bool [Bool]
+  s43: int [I64]
+  s44: int [I64]
+  s45: int [I64]
+L0:
+    s2 = LOADINT 1    ; 26:17
+    s3 = LOADINT 2    ; 26:20
+    s4 = LOADINT 10    ; 26:23
+    b5 = NEW.COLLECTION Array(s2, s3, s4)    ; 26:16
+    b6 = MOVE b5    ; 26:5
+    s7 = LOADINT 0    ; 27:24
+    s8 = GETE b0[s7]    ; 27:18
+    s11 = ISSOME s8    ; 27:18
+    BRANCH s11, L1, L2    ; 27:18
+L1:
+    s12 = MOVE s9    ; 27:18
+    s10 = MOVE s12    ; 27:18
+    JUMP L3    ; 27:18
+L2:
+    s13 = LOADINT 0    ; 27:30
+    s10 = MOVE s13    ; 27:18
+    JUMP L3    ; 27:18
+L3:
+    s14 = LOADINT 1    ; 27:41
+    s15 = GETE b6[s14]    ; 27:36
+    s18 = ISSOME s15    ; 27:36
+    BRANCH s18, L4, L5    ; 27:36
+L4:
+    s19 = MOVE s16    ; 27:36
+    s17 = MOVE s19    ; 27:36
+    JUMP L6    ; 27:36
+L5:
+    s20 = LOADINT 0    ; 27:47
+    s17 = MOVE s20    ; 27:36
+    JUMP L6    ; 27:36
+L6:
+    s21 = ADD.I64 s10, s17    ; 27:17
+    s22 = MOVE s21    ; 27:5
+    b23 = LOADSTR.PIECE "a"    ; 28:23
+    s24 = GETE b1[b23]    ; 28:17
+    s27 = ISSOME s24    ; 28:17
+    BRANCH s27, L7, L8    ; 28:17
+L7:
+    s28 = MOVE s25    ; 28:17
+    s26 = MOVE s28    ; 28:17
+    JUMP L9    ; 28:17
+L8:
+    s29 = LOADINT 0    ; 28:31
+    s26 = MOVE s29    ; 28:17
+    JUMP L9    ; 28:17
+L9:
+    s30 = MOVE s26    ; 28:5
+    b31 = LOADSTR.PIECE "x"    ; 29:36
+    s32 = LOADINT 1    ; 29:41
+    b33 = LOADSTR.PIECE "y"    ; 29:44
+    s34 = LOADINT 2    ; 29:49
+    b35 = NEW.COLLECTION Map(b31, s32, b33, s34)    ; 29:35
+    b36 = MOVE b35    ; 29:5
+    s37 = ADD.I64 s22, s30    ; 30:12
+    b38 = LOADSTR.PIECE "x"    ; 30:35
+    s39 = GETE b36[b38]    ; 30:29
+    s42 = ISSOME s39    ; 30:29
+    BRANCH s42, L10, L11    ; 30:29
+L10:
+    s43 = MOVE s40    ; 30:29
+    s41 = MOVE s43    ; 30:29
+    JUMP L12    ; 30:29
+L11:
+    s44 = LOADINT -1    ; 30:43
+    s41 = MOVE s44    ; 30:29
+    JUMP L12    ; 30:29
+L12:
+    s45 = ADD.I64 s37, s41    ; 30:12
+    RETURN s45    ; 30:5
+
+function Structs()
+  s0: int [I64]
+  b1: Pair
+  b2 pair: Pair
+  s3: int [I64]
+  s4: int [I64]
+  s5: int [I64]
+  s6: Side [Enum]
+  s7: Side [Enum]
+  s8: Side [Enum]
+  s9: bool [Bool]
+  s10: int [I64]
+  s11: int [I64]
+  s12: bool [Bool]
+  s13: Side [Enum]
+  s14: Side [Enum]
+L0:
+    s0 = LOADINT 1    ; 34:28
+    b1 = NEW Pair(First: s0)    ; 34:16
+    b2 = MOVE b1    ; 34:5
+    s3 = GETF b2.Pair.First    ; 35:5
+    s4 = LOADINT 2    ; 35:19
+    s5 = ADD.I64 s3, s4    ; 35:5
+    SETF b2.Pair.First, s5    ; 35:5
+    s6 = LOADINT 1    ; 36:19
+    SETF b2.Pair.Second, s6    ; 36:5
+    s7 = GETF b2.Pair.Second    ; 37:9
+    s8 = LOADINT 0    ; 37:24
+    s9 = EQ s7, s8    ; 37:9
+    BRANCH s9, L1, L3    ; 37:9
+L1:
+    s13 = LOADINT 0    ; 38:16
+    RETURN s13    ; 38:9
+L2:
+    s14 = GETF b2.Pair.Second    ; 41:12
+    RETURN s14    ; 41:5
+L3:
+    s10 = GETF b2.Pair.First    ; 37:37
+    s11 = LOADINT 10    ; 37:50
+    s12 = GT s10, s11    ; 37:37
+    BRANCH s12, L1, L2    ; 37:37
+
+function Words()
+  b0: string
+  s1: Tag [Name]
+  s2 tag: Tag [Name]
+  b3: string
+L0:
+    b0 = LOADSTR.PIECE "Game.Door"    ; 45:19
+    s1 = NEW.LITERAL Tag(b0)    ; 45:15
+    s2 = MOVE s1    ; 45:5
+    b3 = LOADSTR "hi"    ; 47:12
+    RETURN b3    ; 47:5
+
+function Optional(r0, s1)
+  r0 a: Actor?
+  s1..s4 v: vec3? [Flag F64 F64 F64]
+  s5..s8: vec3? [Flag F64 F64 F64]
+  s9: bool [Bool]
+  r10: Actor
+  s11..s13: vec3 [F64 F64 F64]
+  s14..s17: vec3? [Flag F64 F64 F64]
+  s18..s21 location: vec3? [Flag F64 F64 F64]
+  s22..s24: vec3 [F64 F64 F64]
+  s25: bool [Bool]
+  s26..s28: vec3 [F64 F64 F64]
+  s29..s31: vec3 [F64 F64 F64]
+  s32: float [F64]
+  s33: float [F64]
+  s34: float [F64]
+  s35..s37 z: vec3 [F64 F64 F64]
+  s38..s40: vec3 [F64 F64 F64]
+  s41: bool [Bool]
+  s42..s44: vec3 [F64 F64 F64]
+  s45: float [F64]
+L0:
+    s9 = ISSOME r0    ; 51:20
+    BRANCH s9, L1, L2    ; 51:20
+L1:
+    r10 = MOVE r0    ; 51:20
+    s11 = GETF r10.Actor.Location    ; 51:20
+    s14 = LOADINT 1    ; 51:20
+    s15 = MOVE s11    ; 51:20
+    s16 = MOVE s12    ; 51:20
+    s17 = MOVE s13    ; 51:20
+    s5 = MOVE s14    ; 51:20
+    s6 = MOVE s15    ; 51:20
+    s7 = MOVE s16    ; 51:20
+    s8 = MOVE s17    ; 51:20
+    JUMP L3    ; 51:20
+L2:
+    s5 = LOADINT 0    ; 51:20
+    s6 = LOADINT 0    ; 51:20
+    s7 = LOADINT 0    ; 51:20
+    s8 = LOADINT 0    ; 51:20
+    JUMP L3    ; 51:20
+L3:
+    s18 = MOVE s5    ; 51:5
+    s19 = MOVE s6    ; 51:5
+    s20 = MOVE s7    ; 51:5
+    s21 = MOVE s8    ; 51:5
+    s25 = ISSOME s1    ; 52:13
+    BRANCH s25, L4, L5    ; 52:13
+L4:
+    s26 = MOVE s2    ; 52:13
+    s27 = MOVE s3    ; 52:13
+    s28 = MOVE s4    ; 52:13
+    s22 = MOVE s26    ; 52:13
+    s23 = MOVE s27    ; 52:13
+    s24 = MOVE s28    ; 52:13
+    JUMP L6    ; 52:13
+L5:
+    s29 = LOADFLOAT 0    ; 52:18
+    s30 = LOADFLOAT 0    ; 52:18
+    s31 = LOADFLOAT 0    ; 52:18
+    s32 = LOADFLOAT 0    ; 52:23
+    s29 = MOVE s32    ; 52:23
+    s33 = LOADFLOAT 0    ; 52:28
+    s30 = MOVE s33    ; 52:28
+    s34 = LOADFLOAT 1    ; 52:33
+    s31 = MOVE s34    ; 52:33
+    s22 = MOVE s29    ; 52:13
+    s23 = MOVE s30    ; 52:13
+    s24 = MOVE s31    ; 52:13
+    JUMP L6    ; 52:13
+L6:
+    s35 = MOVE s22    ; 52:5
+    s36 = MOVE s23    ; 52:5
+    s37 = MOVE s24    ; 52:5
+    s41 = ISSOME s18    ; 53:13
+    BRANCH s41, L7, L8    ; 53:13
+L7:
+    s42 = MOVE s19    ; 53:13
+    s43 = MOVE s20    ; 53:13
+    s44 = MOVE s21    ; 53:13
+    s38 = MOVE s42    ; 53:13
+    s39 = MOVE s43    ; 53:13
+    s40 = MOVE s44    ; 53:13
+    JUMP L9    ; 53:13
+L8:
+    s38 = MOVE s35    ; 53:13
+    s39 = MOVE s36    ; 53:13
+    s40 = MOVE s37    ; 53:13
+    JUMP L9    ; 53:13
+L9:
+    s45 = MOVE s40    ; 53:12
+    RETURN s45    ; 53:5

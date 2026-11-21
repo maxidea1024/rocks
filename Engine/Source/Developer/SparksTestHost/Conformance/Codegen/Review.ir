@@ -1,0 +1,349 @@
+function Hp.Next()
+  r0 this: Hp
+  s1: int [I64]
+  s2: int [I64]
+  s3: int [I64]
+  s4: int [I64]
+L0:
+    s1 = GETF r0.Hp.Cursor    ; 15:9
+    s2 = LOADINT 1    ; 15:19
+    s3 = ADD.I64 s1, s2    ; 15:9
+    SETF r0.Hp.Cursor, s3    ; 15:9
+    s4 = GETF r0.Hp.Cursor    ; 16:16
+    RETURN s4    ; 16:9
+
+function Hp.Fetch()
+  r0 this: Hp
+  r1: wait
+  s2: int [I64]
+  s3..s4: Result<int> [Flag I64]
+L0:
+    r1 = CALL NextTick()    ; 20:15
+    AWAIT r1 -> L1    ; 20:9
+L1:
+    s2 = LOADINT 1    ; 21:16
+    s3 = LOADINT 0    ; 21:9
+    s4 = MOVE s2    ; 21:9
+    RETURN s3    ; 21:9
+
+function Hp.Compute()
+  r0 this: Hp
+  r1: wait
+  s2: int [I64]
+L0:
+    r1 = CALL NextTick()    ; 25:15
+    AWAIT r1 -> L1    ; 25:9
+L1:
+    s2 = LOADINT 2    ; 26:16
+    RETURN s2    ; 26:9
+
+function Hp.Hold()
+  r0 this: Hp
+  r1: World
+  r2: AudioSystem
+  r3: SoundAsset
+  r4: LoopHandle?
+  r5 siren: LoopHandle?
+  r6: wait
+  s7..s8: Result<int> [Flag I64]
+  s9: int [I64]
+  s10 n: int [I64]
+  s11: float [F64]
+  s12: Clock [Enum]
+  r13: wait
+  s14: bool [Bool]
+  r15: LoopHandle
+  s16..s17: Result<int> [Flag I64]
+L0:
+    r1 = GETF World    ; 30:21
+    r2 = GETF r1.World.Audio    ; 30:21
+    r3 = GETF r0.Hp.Cue    ; 30:43
+    r4 = CALL AudioSystem.StartLoop(r2, r3)    ; 30:21
+    r5 = MOVE r4    ; 30:9
+    r6 = CALL Hp.Fetch(r0)    ; 31:27
+    s7 = AWAIT r6 -> L1    ; 31:17
+L1:
+    s9 = TRY s7 -> L2 else L3    ; 31:17
+L2:
+    s10 = MOVE s9    ; 31:9
+    s11 = LOADFLOAT 1    ; 32:21
+    s12 = LOADINT 0    ; 32:26
+    r13 = CALL Delay(s11, s12)    ; 32:15
+    AWAIT r13 -> L4    ; 32:9
+L3:
+    RELEASE r5    ; 31:17
+    RETURN.ERROR s7    ; 31:17
+L4:
+    s14 = ISSOME r5    ; 33:9
+    BRANCH s14, L5, L6    ; 33:9
+L5:
+    r15 = MOVE r5    ; 33:9
+    CALL LoopHandle.Pause(r15)    ; 33:9
+    JUMP L7    ; 33:9
+L6:
+    JUMP L7    ; 33:9
+L7:
+    s16 = LOADINT 0    ; 34:9
+    s17 = MOVE s10    ; 34:9
+    RELEASE r5    ; 34:9
+    RETURN s16    ; 34:9
+
+function Hp.Equal(s1)
+  r0 this: Hp
+  s1..s2 x: int? [Flag I64]
+  s3: bool [Bool]
+  s4: int [I64]
+  s5..s6: int? [Flag I64]
+  s7: bool [Bool]
+  s8: int [I64]
+  s9..s10: int? [Flag I64]
+  s11: bool [Bool]
+L0:
+    s4 = LOADINT 5    ; 38:21
+    s5 = LOADINT 1    ; 38:21
+    s6 = MOVE s4    ; 38:21
+    s7 = EQx2 s1, s5    ; 38:16
+    BRANCH s7, L1, L3    ; 38:16
+L1:
+    s3 = LOADINT 1    ; 38:16
+    JUMP L2    ; 38:16
+L2:
+    RETURN s3    ; 38:9
+L3:
+    s8 = LOADINT 5    ; 38:26
+    s9 = LOADINT 1    ; 38:26
+    s10 = MOVE s8    ; 38:26
+    s11 = EQx2 s9, s1    ; 38:26
+    s3 = MOVE s11    ; 38:16
+    JUMP L2    ; 38:16
+
+function Hp.Read(r1)
+  r0 this: Hp
+  r1 h: Hp?
+  s2..s3: int? [Flag I64]
+  s4: bool [Bool]
+  r5: Hp
+  s6..s7: int? [Flag I64]
+  s8: int [I64]
+  s9: bool [Bool]
+  s10: int [I64]
+  s11: int [I64]
+L0:
+    s4 = ISSOME r1    ; 42:16
+    BRANCH s4, L1, L2    ; 42:16
+L1:
+    r5 = MOVE r1    ; 42:16
+    s6 = GETF r5.Hp.Shield    ; 42:16
+    s2 = MOVE s6    ; 42:16
+    s3 = MOVE s7    ; 42:16
+    JUMP L3    ; 42:16
+L2:
+    s2 = LOADINT 0    ; 42:16
+    s3 = LOADINT 0    ; 42:16
+    JUMP L3    ; 42:16
+L3:
+    s9 = ISSOME s2    ; 42:16
+    BRANCH s9, L4, L5    ; 42:16
+L4:
+    s10 = MOVE s3    ; 42:16
+    s8 = MOVE s10    ; 42:16
+    JUMP L6    ; 42:16
+L5:
+    s11 = LOADINT -1    ; 42:29
+    s8 = MOVE s11    ; 42:16
+    JUMP L6    ; 42:16
+L6:
+    RETURN s8    ; 42:9
+
+function Hp.Chain(r1)
+  r0 this: Hp
+  r1 target: Hp?
+  s2..s3: int? [Flag I64]
+  s4: bool [Bool]
+  r5: Hp
+  r6: wait
+  s7: int [I64]
+  s8..s9: int? [Flag I64]
+  s10..s11 n: int? [Flag I64]
+  s12: int [I64]
+  s13: bool [Bool]
+  s14: int [I64]
+  s15: int [I64]
+L0:
+    s4 = ISSOME r1    ; 46:17
+    BRANCH s4, L1, L2    ; 46:17
+L1:
+    r5 = MOVE r1    ; 46:17
+    r6 = CALL Hp.Compute(r5)    ; 46:23
+    s7 = AWAIT r6 -> L4    ; 46:17
+L2:
+    s2 = LOADINT 0    ; 46:17
+    s3 = LOADINT 0    ; 46:17
+    JUMP L3    ; 46:17
+L3:
+    s10 = MOVE s2    ; 46:9
+    s11 = MOVE s3    ; 46:9
+    s13 = ISSOME s10    ; 47:16
+    BRANCH s13, L5, L6    ; 47:16
+L4:
+    s8 = LOADINT 1    ; 46:17
+    s9 = MOVE s7    ; 46:17
+    s2 = MOVE s8    ; 46:17
+    s3 = MOVE s9    ; 46:17
+    JUMP L3    ; 46:17
+L5:
+    s14 = MOVE s11    ; 47:16
+    s12 = MOVE s14    ; 47:16
+    JUMP L7    ; 47:16
+L6:
+    s15 = LOADINT 0    ; 47:21
+    s12 = MOVE s15    ; 47:16
+    JUMP L7    ; 47:16
+L7:
+    RETURN s12    ; 47:9
+
+function Hp.Paths()
+  r0 this: Hp
+  b1: Array<string>
+  s2: int [I64]
+  b3: string
+  b4: Array<string>
+  b5: string
+  r6: World
+  r7: AudioSystem
+  r8: SoundAsset
+  r9: LoopHandle?
+  r10: LoopHandle?
+  s11: uint8 [U8]
+  s12 small: uint8 [U8]
+  s13: float32 [F32]
+  s14 tiny: float32 [F32]
+  s15: uint8 [U8]
+  s16: uint8 [U8]
+  s17: uint8 [U8]
+  s18: bool [Bool]
+  s19: int [I64]
+  s20: int [I64]
+  s21: int [I64]
+  s22: uint8 [U8]
+L0:
+    b1 = GETF r0.Hp.Names    ; 51:9
+    s2 = CALL Hp.Next(r0)    ; 51:15
+    b3 = LOADSTR.PIECE "y"    ; 51:25
+    SETE b1[s2], b3    ; 51:9
+    SETF r0.Hp.Names, b1    ; 51:9
+    b4 = GETF r0.Hp.Names    ; 52:9
+    b5 = LOADSTR.PIECE "x"    ; 52:19
+    CALL.MUT Array.Add(b4, b5)    ; 52:9
+    SETF r0.Hp.Names, b4    ; 52:9
+    r6 = GETF World    ; 53:15
+    r7 = GETF r6.World.Audio    ; 53:15
+    r8 = GETF r0.Hp.Cue    ; 53:37
+    r9 = CALL AudioSystem.StartLoop(r7, r8)    ; 53:15
+    SETF r0.Hp.Hum, r9    ; 53:9
+    r10 = LOADNULL    ; 54:15
+    SETF r0.Hp.Hum, r10    ; 54:9
+    s11 = LOADINT 200    ; 55:28
+    s12 = MOVE s11    ; 55:9
+    s13 = LOADFLOAT 0.10000000149011612    ; 56:29
+    s14 = MOVE s13    ; 56:9
+    s16 = LOADINT 0    ; 59:19
+    s15 = MOVE s16    ; 59:9
+    s17 = MOVE s12    ; 59:9
+    JUMP L1    ; 59:9
+L1:
+    s18 = LT s15, s17    ; 59:9
+    BRANCH s18, L2, L4    ; 59:9
+L2:
+    s19 = GETF r0.Hp.Cursor    ; 60:13
+    s20 = LOADINT 1    ; 60:23
+    s21 = ADD.I64 s19, s20    ; 60:13
+    SETF r0.Hp.Cursor, s21    ; 60:13
+    JUMP L3    ; 59:9
+L3:
+    s22 = LOADINT 1    ; 59:9
+    s15 = ADD.U8 s15, s22    ; 59:9
+    JUMP L1    ; 59:9
+L4:
+    RETURN    ; 62:5
+
+function Hp.Consts()
+  r0 this: Hp
+  b1: string
+  s2: Tag [Name]
+  s3 home: Tag [Name]
+  s4..s6: vec3 [F64 F64 F64]
+  s7: float [F64]
+  s8: float [F64]
+  s9: float [F64]
+  s10: float [F64]
+L0:
+    b1 = LOADSTR.PIECE "Game.Home"    ; 65:20
+    s2 = NEW.LITERAL Tag(b1)    ; 65:20
+    s3 = MOVE s2    ; 65:9
+    s4 = LOADFLOAT 0    ; 67:16
+    s5 = LOADFLOAT 0    ; 67:16
+    s6 = LOADFLOAT 0    ; 67:16
+    s7 = LOADFLOAT 1    ; 67:16
+    s4 = MOVE s7    ; 67:16
+    s8 = LOADFLOAT 2    ; 67:16
+    s5 = MOVE s8    ; 67:16
+    s9 = LOADFLOAT 3    ; 67:16
+    s6 = MOVE s9    ; 67:16
+    s10 = MOVE s5    ; 67:16
+    RETURN s10    ; 67:9
+
+handler Hp.on Owner.Damaged(s1)
+  r0 this: Hp
+  s1 amount: float [F64]
+  r2: World
+  r3: AudioSystem
+  r4: SoundAsset
+  r5: LoopHandle?
+  s6: bool [Bool]
+  r7 loop: LoopHandle
+  r8: LoopHandle
+  s9: float [F64]
+  s10: bool [Bool]
+  r11: LoopHandle?
+  s12: bool [Bool]
+  r13: LoopHandle
+  r14: Actor
+  r15: Hp?
+  r16 first: Hp?
+L0:
+    r2 = GETF World    ; 72:24
+    r3 = GETF r2.World.Audio    ; 72:24
+    r4 = GETF r0.Hp.Cue    ; 72:46
+    r5 = CALL AudioSystem.StartLoop(r3, r4)    ; 72:24
+    s6 = ISSOME r5    ; 72:13
+    BRANCH s6, L1, L2    ; 72:13
+L1:
+    r8 = MOVE r5    ; 72:13
+    r7 = MOVE r8    ; 72:13
+    s9 = LOADFLOAT 1    ; 73:26
+    s10 = GT s1, s9    ; 73:17
+    BRANCH s10, L3, L4    ; 73:17
+L2:
+    r14 = GETF r0.Component.Owner    ; 81:21
+    r15 = CALL Actor.Find<Hp>(r14)    ; 81:21
+    r16 = MOVE r15    ; 81:9
+    RETURN    ; 83:5
+L3:
+    RELEASE r7    ; 74:17
+    RETURN    ; 74:17
+L4:
+    AWAIT r0.Hp.Opened -> L5    ; 77:13
+L5:
+    r11 = MOVE r7    ; 78:13
+    s12 = ISSOME r11    ; 78:13
+    BRANCH s12, L6, L7    ; 78:13
+L6:
+    r13 = MOVE r11    ; 78:13
+    CALL LoopHandle.Pause(r13)    ; 78:13
+    JUMP L8    ; 78:13
+L7:
+    JUMP L8    ; 78:13
+L8:
+    RELEASE r7    ; 72:52
+    JUMP L2    ; 72:9

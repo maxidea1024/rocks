@@ -15,8 +15,11 @@ public static class GameInputSnapshot
         sdk = Path.GetFullPath(sdk);
         var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
         var inputs = new SortedSet<string>(comparer);
-        var directories = new HashSet<string>(comparer);
-        void Visit(string path)
+        // 제외 규칙을 적용하며 본 디렉터리와, 명시 입력 아래라 적용하지 않고 본 디렉터리다. 명시 입력 디렉터리는 이미 걸러서 본 곳이어도
+        // 다시 전부 본다.
+        var filtered = new HashSet<string>(comparer);
+        var complete = new HashSet<string>(comparer);
+        void Visit(string path, bool exclusions)
         {
             path = Path.GetFullPath(path, project);
             if (Inside(output, path) || Inside(sdk, path))
@@ -40,30 +43,31 @@ public static class GameInputSnapshot
                 return;
             }
 
-            if (!directories.Add(path))
+            if (complete.Contains(path) || !(exclusions ? filtered : complete).Add(path))
             {
                 return;
             }
+
             // 빈 디렉터리와 파일 목록의 변화도 규칙 평가 결과를 바꿀 수 있다.
             inputs.Add(DirectoryPath.WithTrailingSeparator(path));
             foreach (var child in Directory.EnumerateFileSystemEntries(path))
             {
                 // IDE·빌드·실행 산출물(점 디렉터리, 최상위 out/·Saved/, 최상위 *.slnx)은 입력이 아니다(Docs/Design/ProjectFiles.ko.md
-                // 10.6절). Visual Studio가 쓰기 권한으로 열어 두는 .vs/ 파일을 읽지 않고, 빌드 중 바뀌어도 실패하지 않는다. 명시 입력은
-                // 이 규칙과 무관하게 본다.
-                if (GameProjectLayout.IsExcluded(project, child))
+                // 10.6절). Visual Studio가 쓰기 권한으로 열어 두는 .vs/ 파일을 읽지 않고, 빌드 중 바뀌어도 실패하지 않는다. 명시 입력과 그
+                // 아래는 이 규칙과 무관하게 본다.
+                if (exclusions && GameProjectLayout.IsExcluded(project, child))
                 {
                     continue;
                 }
 
-                Visit(child);
+                Visit(child, exclusions);
             }
         }
 
-        Visit(project);
+        Visit(project, exclusions: true);
         foreach (var input in explicitInputs)
         {
-            Visit(input);
+            Visit(input, exclusions: false);
         }
 
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);

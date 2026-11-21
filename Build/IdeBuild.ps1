@@ -1,7 +1,10 @@
 # Visual Studio NMake entry point (Docs/Design/ProjectFiles.ko.md section 7). The generated .vcxproj files call Build/IdeBuild.bat, which
 # runs this script.
 #
-#   IdeBuild.ps1 -Action Build|Rebuild|Clean -Target <target> -Configuration <configuration> -Platform Windows|Android [-Compiler <clang-cl>]
+#   IdeBuild.ps1 -Action Build|Rebuild|Clean -Target <target> -Configuration <configuration> [-Platform Windows|Android] [-Compiler <clang-cl>]
+#
+# -Project and -Sdk are the game project form of the generated game solution; they are declared so that the call binds and reports that
+# game projects are not supported by this version of the script.
 #
 # The whole call runs under the IDE build lock (Build/Tools.ps1): a solution build runs its projects one at a time, like UE -WaitMutex, and
 # the tools are prepared (built only when their inputs changed) inside the same lock, so no build overwrites a tool another build runs.
@@ -10,14 +13,16 @@ param(
     [Parameter(Mandatory)][ValidateSet('Build', 'Rebuild', 'Clean')][string] $Action,
     [Parameter(Mandatory)][string] $Target,
     [Parameter(Mandatory)][string] $Configuration,
-    [Parameter(Mandatory)][ValidateSet('Windows', 'Android')][string] $Platform,
-    [string] $Compiler
+    [ValidateSet('Windows', 'Android')][string] $Platform = 'Windows',
+    [string] $Compiler,
+    [string] $Project,
+    [string] $Sdk
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Tools.ps1')
-if ($script:RocksSdk) {
+if ($script:RocksSdk -or $Project -or $Sdk) {
     # Game project files and their NMake commands come with the game solution generator; an SDK only ships these scripts for it.
     [Console]::Out.WriteLine("error RB0002: $([System.IO.Path]::GetFileName($PSCommandPath)) does not support game projects yet; use Rocks.Build.Cli game.")
     exit 1
