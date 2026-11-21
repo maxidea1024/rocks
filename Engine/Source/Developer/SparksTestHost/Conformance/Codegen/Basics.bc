@@ -1,0 +1,92 @@
+k0 = 0x0000000000000000
+k1 = 0x3ff0000000000000
+t0 = "Add"
+t1 = "Scale"
+t2 = "Count"
+t3 = "Pick"
+t4 = "Greet"
+t5 = "Hello "
+t6 = " x"
+
+function Add  scalar=3/3 ref=0/0 buf=0/0 params=2/0/0
+  0000  LOADI  s2, 2    ; 2:20
+  0001  MUL.I64  s2, s1, s2    ; 2:16
+  0002  ADD.I64  s2, s0, s2    ; 2:12
+  0003  RET  s2 x1    ; 2:5
+
+function Scale  scalar=13/13 ref=0/0 buf=0/0 params=4/0/0
+  0000  MUL.F64  s4, s0, s3    ; 6:13
+  0001  MUL.F64  s5, s1, s3    ; 6:13
+  0002  MUL.F64  s6, s2, s3    ; 6:13
+  0003  MOV.S  s7, s4    ; 6:5
+  0004  MOV.S  s8, s5    ; 6:5
+  0005  MOV.S  s9, s6    ; 6:5
+  0006  LOADK  s4, k0    ; 7:16
+  0007  LOADK  s5, k0    ; 7:16
+  0008  LOADK  s6, k0    ; 7:16
+  0009  LOADK  s10, k1    ; 7:21
+  0010  MOV.S  s4, s10    ; 7:21
+  0011  LOADK  s10, k0    ; 7:26
+  0012  MOV.S  s5, s10    ; 7:26
+  0013  LOADK  s10, k0    ; 7:31
+  0014  MOV.S  s6, s10    ; 7:31
+  0015  ADD.F64  s10, s7, s4    ; 7:12
+  0016  ADD.F64  s11, s8, s5    ; 7:12
+  0017  ADD.F64  s12, s9, s6    ; 7:12
+  0018  RET  s10 x3    ; 7:5
+
+function Count  scalar=7/7 ref=0/0 buf=0/0 params=1/0/0
+  0000  LOADI  s1, 0    ; 11:17
+  0001  LOADI  s2, 0    ; 12:15
+  0002  MOV.S  s3, s0    ; 12:5
+  0003  LT.I  s4, s2, s3    ; 12:5
+  0004  BRF  s4, 0015    ; 12:5
+  0005  MOV.S  s4, s2    ; 12:5
+  0006  LOADI  s5, 2    ; 13:17
+  0007  MOD.I64  s5, s4, s5    ; 13:13
+  0008  LOADI  s6, 0    ; 13:22
+  0009  EQ.I  s5, s5, s6    ; 13:13
+  0010  BRT  s5, 0016    ; 13:13
+  0011  JMP  0017    ; 13:13
+  0012  LOADI  s5, 1    ; 12:5
+  0013  ADD.I64  s2, s2, s5    ; 12:5
+  0014  JMP  0003    ; 12:5
+  0015  RET  s1 x1    ; 20:5
+  0016  JMP  0012    ; 14:13
+  0017  ADD.I64  s4, s1, s4    ; 17:9
+  0018  MOV.S  s1, s4    ; 17:9
+  0019  JMP  0012    ; 12:5
+
+function Pick  scalar=5/5 ref=0/0 buf=0/0 params=4/0/0
+  0000  BRT  s0, 0008    ; 24:9
+  0001  JMP  0005    ; 24:9
+  0002  MOV.S  s4, s1    ; 25:16
+  0003  BRT  s4, 0012    ; 25:16
+  0004  JMP  0014    ; 25:16
+  0005  MOV.S  s4, s1    ; 28:9
+  0006  BRT  s4, 0016    ; 28:9
+  0007  JMP  0018    ; 28:9
+  0008  LOADI  s4, 0    ; 24:21
+  0009  LT.I  s4, s4, s3    ; 24:17
+  0010  BRT  s4, 0002    ; 24:17
+  0011  JMP  0005    ; 24:17
+  0012  MOV.S  s4, s2    ; 25:16
+  0013  JMP  0015    ; 25:16
+  0014  MOV.S  s4, s3    ; 25:16
+  0015  RET  s4 x1    ; 25:9
+  0016  MOV.S  s4, s2    ; 28:9
+  0017  RET  s4 x1    ; 29:9
+  0018  NEG.I64  s4, s3    ; 32:12
+  0019  RET  s4 x1    ; 32:5
+
+function Greet  scalar=1/1 ref=0/0 buf=5/9 params=1/0/1
+  0000  LOADSTR  b1, t5    ; 36:13
+  0001  MOV.B  b2, b0    ; 36:19
+  0002  LOADSTR  b3, t6    ; 36:26
+  0003  TOSTR  b4, s0, display 4    ; 36:28
+  0005  MOV.B  b5, b1    ; 36:12
+  0006  MOV.B  b6, b2    ; 36:12
+  0007  MOV.B  b7, b3    ; 36:12
+  0008  MOV.B  b8, b4    ; 36:12
+  0009  CONCAT  b1, b5 x4    ; 36:12
+  0010  RET  b1 x1    ; 36:5

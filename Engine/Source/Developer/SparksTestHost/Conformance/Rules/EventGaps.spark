@@ -1,0 +1,103 @@
+event Actor.Pinged(by: Actor);
+event World.Paused();
+
+const Limit: int = 3;
+
+class Health : ScriptableComponent {
+    var Current = 100;
+
+    event Died();
+
+    on Died() {
+    }
+
+    fn Kill() {
+        emit Died();
+        Died();
+    }
+}
+
+class Watcher : ScriptableComponent {
+    @edit var Actors: Array<Actor>;
+    @edit var Healths: Array<Health>;
+    let Jump = Action("Gameplay.Jump");
+
+    on World.Paused() {
+    }
+
+    on World.Nope() {
+    }
+
+    on Actors.Pinged(actor: Actor, by: Actor) {
+        _ = actor;
+        _ = by;
+    }
+
+    on Actors.Missing() {
+    }
+
+    on Limit.Changed() {
+    }
+
+    on Jump.Value.Changed() {
+    }
+
+    on Healths.Current.Changed() {
+    }
+
+    on Missing.Died() {
+    }
+
+    on Missing.Died() {
+    }
+
+    on this() {
+    }
+
+    @skipWhileBusy
+    on Owner.Pinged(by: Actor) {
+        _ = by;
+        await Race(Owner.Pinged, Owner.Destroyed);
+    }
+
+    fn Ring(a: Actor) {
+        a.Pinged(a);
+        Jump.Triggered();
+    }
+}
+
+class Mover : Actor {
+    event Bump();
+
+    on this.Pinged(by: Actor) {
+        _ = by;
+    }
+
+    on this.Bump() {
+    }
+
+    fn Shout() {
+        emit this.Missing();
+        emit this();
+    }
+}
+
+class Panel : WidgetController {
+    on Widget.Ok.Clicked() {
+        await NextTick();
+    }
+
+    @restart
+    on Widget.Cancel.Clicked() {
+    }
+}
+
+class Stage : LevelScript {
+    let Zone: SceneComponent = SphereCollider(Radius: 1.0);
+    let Paren = (SphereCollider(Radius: 2.0));
+}
+
+class Broken : Missng {
+    on Start() {
+    }
+}

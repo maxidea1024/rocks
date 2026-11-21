@@ -129,6 +129,12 @@ public sealed record ProjectDescriptor(
 {
     /// <summary>프로젝트 폴더(기술자가 있는 폴더)다. 프로젝트 플러그인은 그 아래 Plugins/에 둔다.</summary>
     public string RootDirectory => Path.GetDirectoryName(FilePath)!;
+
+    /// <summary>
+    /// 설치 SDK 연결(선택 필드 engineAssociation — SDK 경로 또는 등록 ID <c>{GUID}</c>)이다. 없으면 null이고, 게임 도구가 engineVersion으로
+    /// 등록 SDK를 고른다(Docs/Design/ProjectFiles.ko.md 10.1절).
+    /// </summary>
+    public string? EngineAssociation { get; init; }
 }
 
 /// <summary>.rocksplugin을 읽은 결과다. Name은 파일 이름이며 플러그인 폴더 이름과 같아야 한다.</summary>
@@ -177,7 +183,7 @@ public static class DescriptorReader
 
     /// <summary>
     /// 프로젝트 기술자를 읽는다.
-    /// 필수: fileVersion(=1), engineVersion("주.부", 예: "0.1" — 앞자리 0 없는 10진, 각 0–65535). 선택: description, modules,
+    /// 필수: fileVersion(=1), engineVersion("주.부", 예: "0.1" — 앞자리 0 없는 10진, 각 0–65535). 선택: engineAssociation(설치 SDK 경로 또는 등록 ID), description, modules,
     /// plugins, targetPlatforms(생략하면 모든 플랫폼). 오류는 DescriptorException이다. engineVersion이 엔진과 맞는지는 게임 빌드가
     /// 설치 SDK의 엔진 버전과 대조한다(여기서는 형식만 본다).
     /// </summary>
@@ -186,7 +192,7 @@ public static class DescriptorReader
         string name = DescriptorName(path, ProjectExtension);
         using JsonDocument document = Parse(path);
         JsonElement root = document.RootElement;
-        RequireKeys(path, root, "project", ["fileVersion", "engineVersion", "description", "modules", "plugins",
+        RequireKeys(path, root, "project", ["fileVersion", "engineVersion", "engineAssociation", "description", "modules", "plugins",
             "targetPlatforms"]);
         int fileVersion = ReadFileVersion(path, root);
 
@@ -204,11 +210,20 @@ public static class DescriptorReader
         IReadOnlyList<NativePlatform> platforms = root.TryGetProperty("targetPlatforms", out JsonElement value)
             ? ReadPlatforms(path, value, "targetPlatforms")
             : Enum.GetValues<NativePlatform>();
+        string? association = OptionalString(path, root, "engineAssociation");
+        if (association is not null && association.Trim().Length == 0)
+        {
+            throw new DescriptorException(path, "engineAssociation must be an SDK path or a registered SDK id; remove the field to pick an SDK by engineVersion.");
+        }
+
         return new(name, Path.GetFullPath(path), fileVersion, engineVersion,
             OptionalString(path, root, "description") ?? "",
             ReadModules(path, root),
             ReadReferences(path, root, requireEnabled: false),
-            platforms);
+            platforms)
+        {
+            EngineAssociation = association
+        };
     }
 
     /// <summary>

@@ -1,0 +1,195 @@
+k0 = 0x0000000000000000
+k1 = 0x3ff0000000000000
+k2 = 0x4000000000000000
+k3 = 0x4010000000000000
+t0 = "Widths"
+t1 = "Compare"
+t2 = "Label"
+t3 = "a"
+t4 = "none"
+t5 = "special"
+t6 = "early"
+t7 = "b"
+t8 = "Validate"
+t9 = ""
+t10 = "Sum"
+t11 = "Beacon.on this.Pinged"
+t12 = "World"
+t13 = "World.Audio"
+t14 = "Beacon.Cue"
+t15 = "AudioSystem.StartLoop"
+t16 = "NextTick"
+t17 = "Beacon.Target"
+t18 = "Actor.Destroyed"
+t19 = "LoopHandle.Pause"
+t20 = "Beacon.Ping"
+t21 = "Actor.Pinged"
+ref0 = context World
+ref1 = field World.Audio
+ref2 = field Beacon.Cue
+ref3 = native AudioSystem.StartLoop
+ref4 = language NextTick
+ref5 = field Beacon.Target
+ref6 = event Actor.Destroyed
+ref7 = native LoopHandle.Pause
+ref8 = event Actor.Pinged
+
+function Widths  scalar=8/8 ref=0/0 buf=0/0 params=7/0/0
+  0000  ADD.I16  s7, s0, s0    ; 6:15
+  0001  MUL.I32  s7, s1, s1    ; 7:16
+  0002  SUB.U8  s7, s2, s2    ; 8:16
+  0003  ADD.U16  s7, s3, s3    ; 9:15
+  0004  MOD.U32  s7, s4, s4    ; 10:15
+  0005  ADD.U64  s7, s5, s5    ; 11:16
+  0006  MUL.F32  s7, s6, s6    ; 18:12
+  0007  RET  s7 x1    ; 18:5
+
+function Compare  scalar=10/10 ref=0/0 buf=0/0 params=8/0/0
+  0000  LE.I  s8, s0, s1    ; 22:11
+  0001  BRT  s8, 0010    ; 22:11
+  0002  MOV.S  s8, s2    ; 23:16
+  0003  MOV.S  s9, s5    ; 23:22
+  0004  LT.F  s8, s8, s9    ; 23:16
+  0005  RET  s8 x1    ; 23:9
+  0006  MOV.S  s8, s3    ; 26:12
+  0007  MOV.S  s9, s6    ; 26:19
+  0008  LE.F  s8, s9, s8    ; 26:12
+  0009  RET  s8 x1    ; 26:5
+  0010  LE.I  s8, s1, s0    ; 22:22
+  0011  BRT  s8, 0002    ; 22:22
+  0012  JMP  0006    ; 22:22
+
+function Label  scalar=2/2 ref=0/0 buf=2/3 params=1/0/1
+  switch0 [-1: 0006, 7: 0008] else 0005
+  0000  SWITCH  s0, switch0    ; 30:5
+  0001  LOADSTR  b1, t3    ; 42:14
+  0002  EQ.STR  s1, b0, b1    ; 42:14
+  0003  BRT  s1, 0015    ; 42:14
+  0004  JMP  0017    ; 42:14
+  0005  JMP  0001    ; 37:9
+  0006  LOADSTR  b1, t4    ; 32:20
+  0007  RET  b1 x1    ; 32:13
+  0008  LOADSTR  b1, t5    ; 35:20
+  0009  RET  b1 x1    ; 35:13
+  0010  TOSTR  b1, s0, display 4    ; 46:21
+  0012  MOV.B  b2, b1    ; 46:20
+  0013  CONCAT  b1, b2 x1    ; 46:20
+  0014  RET  b1 x1    ; 46:13
+  0015  LOADSTR  b1, t6    ; 43:20
+  0016  RET  b1 x1    ; 43:13
+  0017  LOADSTR  b1, t7    ; 42:19
+  0018  EQ.STR  s1, b0, b1    ; 42:19
+  0019  BRT  s1, 0015    ; 42:19
+  0020  JMP  0010    ; 41:5
+
+function Validate  scalar=1/1 ref=0/0 buf=2/2 params=0/0/1
+  0000  LOADSTR  b1, t9    ; 52:17
+  0001  EQ.STR  s0, b0, b1    ; 52:9
+  0002  BRF  s0, 0006    ; 52:9
+  0003  LOADI  s0, 2    ; 53:16
+  0004  ERR  b1, s0    ; 53:9
+  0005  RET  b1 x1    ; 53:9
+  0006  OK  b1, b0 x1    ; 56:5
+  0008  RET  b1 x1    ; 56:5
+
+function Sum  scalar=10/10 ref=0/0 buf=3/3 params=0/0/2
+  0000  LOADI  s0, 0    ; 60:17
+  0001  MOV.B  b2, b0    ; 61:5
+  0002  LOADI  s1, 0    ; 61:5
+  0003  LEN  s2, b2    ; 61:5
+  0004  LT.I  s3, s1, s2    ; 61:5
+  0005  BRF  s3, 0013    ; 61:5
+  0006  GETE  s3, b2, s1 [sx1 key sx1]    ; 61:10
+  0008  ADD.I64  s3, s0, s3    ; 62:9
+  0009  MOV.S  s0, s3    ; 62:9
+  0010  LOADI  s3, 1    ; 61:5
+  0011  ADD.I64  s1, s1, s3    ; 61:5
+  0012  JMP  0004    ; 61:5
+  0013  MOV.B  b2, b1    ; 65:5
+  0014  LOADI  s1, 0    ; 65:5
+  0015  LEN  s2, b2    ; 65:5
+  0016  LT.I  s3, s1, s2    ; 65:5
+  0017  BRF  s3, 0026    ; 65:5
+  0018  GETKEY  s3, b2, s1 [sx1 key sx0]    ; 65:10
+  0020  LOADI  s3, 2    ; 67:18
+  0021  MUL.I64  s3, s0, s3    ; 67:9
+  0022  MOV.S  s0, s3    ; 67:9
+  0023  LOADI  s3, 1    ; 65:5
+  0024  ADD.I64  s1, s1, s3    ; 65:5
+  0025  JMP  0016    ; 65:5
+  0026  LOADK  s1, k0    ; 70:17
+  0027  LOADK  s2, k0    ; 70:17
+  0028  LOADK  s3, k0    ; 70:17
+  0029  LOADK  s4, k1    ; 70:22
+  0030  MOV.S  s1, s4    ; 70:22
+  0031  LOADK  s4, k1    ; 70:27
+  0032  MOV.S  s2, s4    ; 70:27
+  0033  LOADK  s4, k1    ; 70:32
+  0034  MOV.S  s3, s4    ; 70:32
+  0035  MOV.S  s4, s1    ; 70:5
+  0036  MOV.S  s5, s2    ; 70:5
+  0037  MOV.S  s6, s3    ; 70:5
+  0038  LOADK  s1, k2    ; 71:14
+  0039  MUL.F64  s7, s4, s1    ; 71:5
+  0040  MUL.F64  s8, s5, s1    ; 71:5
+  0041  MUL.F64  s9, s6, s1    ; 71:5
+  0042  MOV.S  s4, s7    ; 71:5
+  0043  MOV.S  s5, s8    ; 71:5
+  0044  MOV.S  s6, s9    ; 71:5
+  0045  LOADK  s1, k3    ; 72:14
+  0046  DIV.F64  s7, s4, s1    ; 72:5
+  0047  DIV.F64  s8, s5, s1    ; 72:5
+  0048  DIV.F64  s9, s6, s1    ; 72:5
+  0049  MOV.S  s4, s7    ; 72:5
+  0050  MOV.S  s5, s8    ; 72:5
+  0051  MOV.S  s6, s9    ; 72:5
+  0052  RET  s0 x1    ; 74:5
+
+function Beacon.on this.Pinged  scalar=2/2 ref=4/6 buf=0/0 params=1/1/0
+  await 0022  live r0..r1
+  await 0028  live r1
+  0000  GETCTX  r1, ref0    ; 83:19
+  0001  GETF.R  r1, r1, ref1    ; 83:19
+  0003  GETF.R  r2, r0, ref2    ; 83:41
+  0005  MOV.R  r4, r1    ; 83:19
+  0006  MOV.R  r5, r2    ; 83:19
+  0007  CALLN  ref3    ; 83:19
+  0008  MOV.R  r1, r4    ; 83:19
+  0009  GETCTX  r2, ref0    ; 84:15
+  0010  GETF.R  r2, r2, ref1    ; 84:15
+  0012  GETF.R  r3, r0, ref2    ; 84:37
+  0014  MOV.R  r4, r2    ; 84:15
+  0015  MOV.R  r5, r3    ; 84:15
+  0016  CALLN  ref3    ; 84:15
+  0017  MOV.R  r2, r4    ; 84:15
+  0018  RELEASE  r1    ; 84:9
+  0019  MOV.R  r1, r2    ; 84:9
+  0020  CALLL  ref4    ; 85:16
+  0021  MOV.R  r2, r4    ; 85:16
+  0022  AWAIT  -, r2    ; 85:9
+  0024  GETF.R  r2, r0, ref5    ; 86:27
+  0026  ISSOME.R  s1, r2    ; 86:13
+  0027  BRF  s1, 0031    ; 86:13
+  0028  AWAITEV  r2, ref6    ; 87:13
+  0030  JMP  0034    ; 87:13
+  0031  ISSOME.R  s1, r1    ; 90:9
+  0032  BRT  s1, 0035    ; 90:9
+  0033  JMP  0039    ; 90:9
+  0034  JMP  0031    ; 86:9
+  0035  MOV.R  r2, r1    ; 90:9
+  0036  MOV.R  r4, r2    ; 90:9
+  0037  CALLN  ref7    ; 90:9
+  0038  JMP  0039    ; 90:9
+  0039  RELEASE  r1    ; 82:32
+  0040  RET  -    ; 92:5
+
+function Beacon.Ping  scalar=1/2 ref=2/3 buf=0/0 params=0/2/0
+  0000  LOADI  s0, 1    ; 95:26
+  0001  MOV.R  r2, r0    ; 95:9
+  0002  MOV.S  s1, s0    ; 95:9
+  0003  EMIT  ref8    ; 95:9
+  0004  LOADI  s0, 2    ; 96:27
+  0005  MOV.R  r2, r1    ; 96:9
+  0006  MOV.S  s1, s0    ; 96:9
+  0007  EMIT  ref8    ; 96:9
+  0008  RET  -    ; 97:5

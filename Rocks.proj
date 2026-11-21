@@ -5,6 +5,8 @@
     <RocksTarget Condition="'$(RocksTarget)' == ''">Foundation</RocksTarget>
     <SdkTarget Condition="'$(SdkTarget)' == ''">Engine</SdkTarget>
     <GameTarget Condition="'$(GameTarget)' == ''">Game</GameTarget>
+    <!-- Configurations of the installed SDK (Docs/Design/ProjectFiles.ko.md 10.3), separated by semicolons: -p:SdkConfigurations="Debug;Release". -->
+    <SdkConfigurations Condition="'$(SdkConfigurations)' == ''">Debug;Development;Release</SdkConfigurations>
     <Jobs Condition="'$(Jobs)' == ''">8</Jobs>
     <!-- Directory values passed in quotes get a doubled trailing backslash. Passing a drive root (Z:\) as "Z:\" makes \" read as a quote escape
          (CommandLineToArgvW rules), and all following arguments join into one argument. "Z:\\" reads as a single Z:\. -->
@@ -18,6 +20,8 @@
     <SdkDirectoryText Condition="$(SdkDirectory.EndsWith('\'))">$(SdkDirectory.TrimEnd('\'))\\</SdkDirectoryText>
     <GameDirectoryText>$(GameDirectory)</GameDirectoryText>
     <GameDirectoryText Condition="$(GameDirectory.EndsWith('\'))">$(GameDirectory.TrimEnd('\'))\\</GameDirectoryText>
+    <!-- Without SdkDirectory the game build picks the SDK from engineAssociation or the SDK registry (Docs/Design/ProjectFiles.ko.md 10.1). -->
+    <SdkArgument Condition="'$(SdkDirectory)' != ''">--sdk &quot;$(SdkDirectoryText)&quot;</SdkArgument>
     <CompilerArgument Condition="'$(Compiler)' != ''">--compiler &quot;$(Compiler)&quot;</CompilerArgument>
     <OutputArgument Condition="'$(NativeOutput)' != ''">--output &quot;$(NativeOutputText)&quot;</OutputArgument>
     <Tool>dotnet &quot;$(RocksRoot)out/dotnet/bin/Rocks.Build.Cli/Debug/net10.0/Rocks.Build.Cli.dll&quot;</Tool>
@@ -39,8 +43,10 @@
     <CommonArguments>--root &quot;$(RocksRoot).&quot; --configuration $(Configuration) --jobs $(Jobs) $(CompilerArgument) $(OutputArgument) $(PlatformArgument) $(BuildModeArguments)</CommonArguments>
   </PropertyGroup>
   <!-- MSBuild orchestrates the host tools, rules and stages. Rocks.Build decides C++ up-to-dateness on every invocation. -->
+  <!-- Builds the tools only when their inputs changed, under the same lock as Visual Studio builds (Build/Tools.ps1,
+       Docs/Design/ProjectFiles.ko.md section 7.2). The build steps below run outside that lock. -->
   <Target Name="BootstrapTools">
-    <Exec Command="dotnet build &quot;$(RocksRoot)Programs/Rocks.Tools.csproj&quot; --nologo" />
+    <Exec Command="pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File &quot;$(RocksRoot)Build/Tools.ps1&quot;" />
   </Target>
   <Target Name="Build" DependsOnTargets="BootstrapTools">
     <Exec Command="$(Tool) build $(CommonArguments) --target $(RocksTarget)" />
@@ -54,10 +60,10 @@
   </Target>
   <Target Name="InstalledSdk" DependsOnTargets="BootstrapTools">
     <Error Condition="'$(SdkDestination)' == ''" Text="SdkDestination is required; use a new versioned directory." />
-    <Exec Command="$(Tool) sdk $(CommonArguments) --target $(SdkTarget) --destination &quot;$(SdkDestinationText)&quot;" />
+    <Exec Command="$(Tool) sdk --root &quot;$(RocksRoot).&quot; --configurations &quot;$(SdkConfigurations)&quot; --jobs $(Jobs) $(CompilerArgument) $(OutputArgument) $(PlatformArgument) $(BuildModeArguments) --target $(SdkTarget) --destination &quot;$(SdkDestinationText)&quot;" />
   </Target>
   <Target Name="Game" DependsOnTargets="BootstrapTools">
-    <Error Condition="'$(SdkDirectory)' == '' Or '$(GameDirectory)' == ''" Text="SdkDirectory and GameDirectory are required." />
-    <Exec Command="$(Tool) game --target $(GameTarget) --sdk &quot;$(SdkDirectoryText)&quot; --project &quot;$(GameDirectoryText)&quot; --configuration $(Configuration) --jobs $(Jobs) $(CompilerArgument) $(OutputArgument) $(BuildModeArguments)" />
+    <Error Condition="'$(GameDirectory)' == ''" Text="GameDirectory is required." />
+    <Exec Command="$(Tool) game --target $(GameTarget) $(SdkArgument) --project &quot;$(GameDirectoryText)&quot; --configuration $(Configuration) --jobs $(Jobs) $(CompilerArgument) $(OutputArgument) $(BuildModeArguments)" />
   </Target>
 </Project>

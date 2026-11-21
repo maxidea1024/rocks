@@ -34,6 +34,20 @@ if (args.Length == 1 && args[0] == "--project-files")
     return 0;
 }
 
+// Visual Studio NMake 진입점·도구 준비·정리 시험만 돈다(16절 V6·V7·V13·V14). 현재 디렉터리가 저장소 루트여야 한다.
+if (args.Length == 1 && args[0] == "--ide-scripts")
+{
+    await IdeScriptsTests.RunAsync(Path.GetFullPath("."));
+    return 0;
+}
+
+// 게임 프로젝트 선행 작업(SDK 연결·등록부, snapshot·규칙 탐색 제외, 게임 clean) 시험만 돈다(16절 V8·V9).
+if (args.Length == 1 && args[0] == "--game-project")
+{
+    await GameProjectTests.RunAsync();
+    return 0;
+}
+
 // unity-profile 명령의 입력 거부만 돈다(현재 디렉터리가 저장소 루트여야 한다).
 if (args.Length == 1 && args[0] == "--unity-profile-command")
 {
@@ -69,8 +83,15 @@ var cli = Path.Combine(root, "out/dotnet/bin/Rocks.Build.Cli/Debug/net10.0/Rocks
 var fixture = Path.Combine(Path.GetTempPath(), "Rocks SDK 게임 " + Guid.NewGuid().ToString("N"));
 var sdk = Path.Combine(fixture, "installed");
 var game = Path.Combine(fixture, "game");
-var output = Path.Combine(game, "out/Debug");
+// 게임 기본 출력은 <project>/out/<platform>-<target>-<configuration>이다(템플릿 타깃 이름은 Game).
+var output = GameProjectLayout.DefaultOutput(game, "Game", NativeConfiguration.Debug);
 var reports = Path.Combine(root, "out/sdk-integration");
+// CLI 하위 프로세스의 SDK 등록부다(사용자 등록부를 건드리지 않는다). 내보내기는 기본으로 등록하지 않으므로 명시 등록 전까지 파일이 없어야 한다.
+var registryFile = Path.Combine(fixture, "registry", "Sdks.json");
+var cliEnvironment = new Dictionary<string, string?>(toolchain.Environment, OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
+{
+    [SdkRegistries.OverrideVariable] = registryFile
+};
 Directory.CreateDirectory(reports);
 var cases = new List<object>();
 bool success = false;
@@ -83,22 +104,24 @@ try
     MetadataLayoutTests.Run();
     TargetDefinitionsTests.Run();
     await ProjectFilesWriterTests.RunAsync(root, toolchain);
+    await IdeScriptsTests.RunAsync(root);
+    await GameProjectTests.RunAsync();
     MetadataTemporaryCleanupTests.Run();
     await PlatformPrivateHeaderTests.RunAsync(toolchain, Path.Combine(fixture, "platform-header"));
     await UnityProfileCommandTests.RunAsync(root, Directory.CreateDirectory(Path.Combine(fixture, "unity-profile-command")).FullName,
         options.GetValueOrDefault("--compiler"));
     Pass("output-invocation-lock-and-platform-header-incremental", timer.Elapsed);
     timer.Restart();
-    var exported = await Cli("sdk", "--root", root, "--target", "Engine", "--configuration", "Debug", "--destination", sdk);
+    var exported = await Cli("sdk", "--root", root, "--target", "Engine", "--configurations", "Debug", "--destination", sdk);
     Require(exported.ExitCode == 0, "SDK export failed: " + exported.StdErr);
     Require(File.Exists(Path.Combine(sdk, "rocks-sdk.json")), "SDK manifest missing");
     // Engine SDK는 Core 값 타입 결합 모듈(CoreTypeBindings — Metadata 모듈)을 descriptor·identity 명세·생성 헤더와 함께 담는다.
     using (var engineManifest = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(sdk, "rocks-sdk.json"))))
     {
-        var bindingsEntry = engineManifest.RootElement.GetProperty("Modules").EnumerateArray()
+        var bindingsEntry = engineManifest.RootElement.GetProperty("Configurations").GetProperty("Debug").GetProperty("Modules").EnumerateArray()
             .Single(module => module.GetProperty("Name").GetString() == "CoreTypeBindings");
-        Require(bindingsEntry.GetProperty("Descriptor").GetString() == "Metadata/CoreTypeBindings/CoreTypeBindings.rocksmeta.json" &&
-            bindingsEntry.GetProperty("IdentityManifest").GetString() == "Metadata/CoreTypeBindings/CoreTypeBindings.rocksids.json",
+        Require(bindingsEntry.GetProperty("Descriptor").GetString() == "Configurations/Debug/Metadata/CoreTypeBindings/CoreTypeBindings.rocksmeta.json" &&
+            bindingsEntry.GetProperty("IdentityManifest").GetString() == "Configurations/Debug/Metadata/CoreTypeBindings/CoreTypeBindings.rocksids.json",
             "Engine SDK manifest does not name the CoreTypeBindings descriptor and identity manifest");
         // manifest 버전 10: 5는 Build/Build.version 값을 EngineVersion {Major, Minor, Patch}로 담고(그 파일 자체는 SDK에 없다), 6은 모듈 표
         // 표지를 담고(Core가 ProvidesModuleTable, 서드파티 모듈이 ThirdParty — Docs/Design/ModuleLoader.ko.md 3.9절), 8은 리플렉션 전용
@@ -107,11 +130,11 @@ try
         // 10은 모듈마다 실행 중 적재 모듈 목록 DynamicModules를 싣는다(Docs/Design/ModuleLoader.ko.md 3.8절 — 엔진 모듈은 아직 쓰지 않아 비어 있다).
         // 11은 모듈마다 로딩 단계 LoadingPhase(이름)와 부트 표지 ProvidesLaunch를 싣는다(3.11절 — 부트 모듈 Core·ModuleLoader·Launch는
         // EarliestPossible, 다른 Core 층 모듈은 PostConfigInit — 층별 기본 단계).
-        var sdkModules = engineManifest.RootElement.GetProperty("Modules").EnumerateArray().ToArray();
+        var sdkModules = engineManifest.RootElement.GetProperty("Configurations").GetProperty("Debug").GetProperty("Modules").EnumerateArray().ToArray();
         // 손으로 쓴 소스가 없던 리플렉션 모듈(CoreTypeBindings)이 모듈 생성 소스(등록 함수 정의)와 진입점 TU를 담은 라이브러리를 갖는다.
         // 표지 칸은 없다.
         string bindingsLibrary = bindingsEntry.GetProperty("Libraries").EnumerateArray().Select(item => item.GetString()!).Single();
-        Require(bindingsLibrary.StartsWith("Libraries/CoreTypeBindings.", StringComparison.Ordinal) && File.Exists(Path.Combine(sdk, bindingsLibrary)) &&
+        Require(bindingsLibrary.StartsWith("Configurations/Debug/Libraries/CoreTypeBindings.", StringComparison.Ordinal) && File.Exists(Path.Combine(sdk, bindingsLibrary)) &&
             !bindingsEntry.TryGetProperty("ReflectionOnlyLibrary", out _),
             "Engine SDK does not ship the CoreTypeBindings library as an ordinary module library: " + bindingsEntry.GetRawText());
         Require(sdkModules.Single(module => module.GetProperty("Name").GetString() == "Core").GetProperty("ProvidesModuleTable").GetBoolean() &&
@@ -127,10 +150,10 @@ try
             !sdkModules.Single(module => module.GetProperty("Name").GetString() == "Core").GetProperty("ProvidesLaunch").GetBoolean(),
             "Engine SDK manifest does not carry the loading phases and the boot marker");
         var sdkEngine = engineManifest.RootElement.GetProperty("EngineVersion");
-        Require(engineManifest.RootElement.GetProperty("Version").GetInt32() == 13 &&
+        Require(engineManifest.RootElement.GetProperty("Version").GetInt32() == 14 &&
             sdkEngine.GetProperty("Major").GetInt32() == engineVersion.Major && sdkEngine.GetProperty("Minor").GetInt32() == engineVersion.Minor &&
             sdkEngine.GetProperty("Patch").GetInt32() == engineVersion.Patch && sdkEngine.EnumerateObject().Count() == 3,
-            "Engine SDK manifest version 13 does not carry the Build/Build.version engine version: " + sdkEngine.GetRawText());
+            "Engine SDK manifest version 14 does not carry the Build/Build.version engine version: " + sdkEngine.GetRawText());
     }
 
     Require(!Directory.GetFiles(sdk, "Build.version", SearchOption.AllDirectories).Any(), "Installed SDK copied Build/Build.version");
@@ -139,8 +162,8 @@ try
     Require(File.Exists(sdkToolingCommon) && ManifestResources(sdkToolingCommon).Contains("Rocks.Toolchain.json"),
         "Installed SDK tools do not carry the Rocks.Toolchain.json resource: " + sdkToolingCommon);
 
-    Require(File.Exists(Path.Combine(sdk, "Metadata/CoreTypeBindings/CoreTypeBindings.rocksmeta.json")) &&
-        File.Exists(Path.Combine(sdk, "Metadata/CoreTypeBindings/CoreTypeBindings.rocksids.json")),
+    Require(File.Exists(Path.Combine(sdk, "Configurations/Debug/Metadata/CoreTypeBindings/CoreTypeBindings.rocksmeta.json")) &&
+        File.Exists(Path.Combine(sdk, "Configurations/Debug/Metadata/CoreTypeBindings/CoreTypeBindings.rocksids.json")),
         "Engine SDK is missing the CoreTypeBindings descriptor or identity manifest");
     Require(Directory.Exists(Path.Combine(sdk, "Headers/CoreTypeBindings")) &&
         Directory.GetFiles(Path.Combine(sdk, "Headers/CoreTypeBindings"), "CoreValueTypes.generated.h", SearchOption.AllDirectories).Length == 1,
@@ -185,7 +208,15 @@ try
     }
 
     timer.Restart();
-    var built = await Game();
+    // Visual Studio는 .vs 안 IntelliSense DB를 쓰기 권한·공유 없음으로 열어 둔다. 게임 입력 snapshot은 .vs를 읽지 않으므로 빌드가 성공한다(V9).
+    var visualStudioDatabase = Path.Combine(game, ".vs", "Game", "v18", "Browse.VC.db");
+    Directory.CreateDirectory(Path.GetDirectoryName(visualStudioDatabase)!);
+    ProcessResult built;
+    using (var locked = new FileStream(visualStudioDatabase, FileMode.Create, FileAccess.ReadWrite, FileShare.None))
+    {
+        built = await Game();
+    }
+
     Require(built.ExitCode == 0, "External game build failed: " + built.StdOut + built.StdErr);
     var initial = ReadActionReport();
     // 게임 빌드는 게임 모듈의 소스만 컴파일한다. SDK가 나른 공유 PCH 헤더(SharedPchHeader — 게임이 닿는 제공 모듈 ObjectRuntime)는 게임
@@ -228,6 +259,22 @@ try
     Require(!Directory.Exists(Path.Combine(output, "Generated/CoreTypeBindings")), "Game build generated sources for an imported SDK module");
     Pass("read-only-sdk-external-game-reflection", timer.Elapsed);
 
+    // SDK 연결(Docs/Design/ProjectFiles.ko.md 10.1·10.2절): 내보내기는 기본으로 등록하지 않는다. 명시 등록 뒤 --sdk 없는 게임 빌드는
+    // engineVersion으로 같은 SDK를 골라 0 action이다. 등록을 지우면 고를 SDK가 없다는 오류다.
+    timer.Restart();
+    Require(!File.Exists(registryFile), "SDK export registered the SDK without --register on");
+    var registered = await Tool("sdk-register", "--sdk", sdk);
+    Require(registered.ExitCode == 0 && File.Exists(registryFile), "sdk-register failed: " + registered.StdOut + registered.StdErr);
+    var associated = await Cli("game", "--project", game, "--configuration", "Debug");
+    Require(associated.ExitCode == 0 && associated.StdOut.Contains("Installed SDK: ", StringComparison.Ordinal) && ReadActionReport().ExecutedActions == 0,
+        "Game build without --sdk did not pick the registered SDK or rebuilt: " + associated.StdOut + associated.StdErr);
+    var unregistered = await Tool("sdk-unregister", "--sdk", sdk);
+    Require(unregistered.ExitCode == 0, "sdk-unregister failed: " + unregistered.StdOut + unregistered.StdErr);
+    var unassociated = await Cli("game", "--project", game, "--configuration", "Debug");
+    Require(unassociated.ExitCode != 0 && (unassociated.StdOut + unassociated.StdErr).Contains("no SDK is registered", StringComparison.Ordinal),
+        "Game build without --sdk and without a registered SDK must fail: " + unassociated.StdOut + unassociated.StdErr);
+    Pass("sdk-registry-game-without-sdk", timer.Elapsed);
+
     // 빌드 주입 상수(B7): SDK의 Core(ProvidesBuildInfo)에 닿는 게임 실행 파일에 BuildInfo TU가 들어가고, manifest는 SDK 경로를
     // sdk: 키로 쓰며 SDK·프로젝트 절대 경로를 담지 않는다.
     timer.Restart();
@@ -235,7 +282,7 @@ try
     Require(File.Exists(gameBuildInfo) && File.Exists(Path.Combine(output, "BuildInfo/SampleGame.BuildInfo.cpp")),
         "Game build did not generate the SampleGame BuildInfo files");
     var gameManifest = File.ReadAllText(gameBuildInfo);
-    Require(gameManifest.Contains("\ninput: sdk:Headers/", StringComparison.Ordinal) && gameManifest.Contains("\narg: sdk:Libraries/", StringComparison.Ordinal) &&
+    Require(gameManifest.Contains("\ninput: sdk:Headers/", StringComparison.Ordinal) && gameManifest.Contains("\narg: sdk:Configurations/Debug/Libraries/", StringComparison.Ordinal) &&
         gameManifest.Contains("\nhost-dependent: no\n", StringComparison.Ordinal), "Game BuildInfo manifest lacks sdk: keys:\n" + gameManifest);
     foreach (var absolute in new[] { sdk, game, fixture })
     {
@@ -311,19 +358,19 @@ try
     timer.Restart();
     var reflectionSdk = Path.Combine(fixture, "installed-reflection");
     var engineOutput = Path.Combine(root, "out", $"dotnet-{(OperatingSystem.IsWindows() ? "windows" : "macos")}-engine-debug");
-    var reflectionExport = await Cli("sdk", "--root", root, "--target", "ReflectionFixtures", "--configuration", "Debug",
+    var reflectionExport = await Cli("sdk", "--root", root, "--target", "ReflectionFixtures", "--configurations", "Debug",
         "--destination", reflectionSdk, "--output", engineOutput);
     Require(reflectionExport.ExitCode == 0, "Reflection fixture SDK export failed: " + reflectionExport.StdOut + reflectionExport.StdErr);
     using (var sdkManifest = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(reflectionSdk, "rocks-sdk.json"))))
     {
-        var sdkModules = sdkManifest.RootElement.GetProperty("Modules").EnumerateArray().ToArray();
+        var sdkModules = sdkManifest.RootElement.GetProperty("Configurations").GetProperty("Debug").GetProperty("Modules").EnumerateArray().ToArray();
         var fixtureModule = sdkModules.Single(module => module.GetProperty("Name").GetString() == "ReflectionTestFixtures");
-        Require(fixtureModule.GetProperty("Descriptor").GetString() == "Metadata/ReflectionTestFixtures/ReflectionTestFixtures.rocksmeta.json" &&
-            fixtureModule.GetProperty("IdentityManifest").GetString() == "Metadata/ReflectionTestFixtures/ReflectionTestFixtures.rocksids.json",
+        Require(fixtureModule.GetProperty("Descriptor").GetString() == "Configurations/Debug/Metadata/ReflectionTestFixtures/ReflectionTestFixtures.rocksmeta.json" &&
+            fixtureModule.GetProperty("IdentityManifest").GetString() == "Configurations/Debug/Metadata/ReflectionTestFixtures/ReflectionTestFixtures.rocksids.json",
             "SDK manifest does not name the fixture module's descriptor and identity manifest");
         // fixture 모듈은 Core 값 타입 결합 모듈(CoreTypeBindings — 역시 Metadata 모듈)에 의존한다.
         var bindingsModule = sdkModules.Single(module => module.GetProperty("Name").GetString() == "CoreTypeBindings");
-        Require(bindingsModule.GetProperty("Descriptor").GetString() == "Metadata/CoreTypeBindings/CoreTypeBindings.rocksmeta.json",
+        Require(bindingsModule.GetProperty("Descriptor").GetString() == "Configurations/Debug/Metadata/CoreTypeBindings/CoreTypeBindings.rocksmeta.json",
             "SDK manifest does not name the CoreTypeBindings descriptor");
         Require(sdkModules.Where(module => module.GetProperty("Name").GetString() is not ("ReflectionTestFixtures" or "CoreTypeBindings"))
             .All(module => module.GetProperty("Descriptor").ValueKind == JsonValueKind.Null && module.GetProperty("IdentityManifest").ValueKind == JsonValueKind.Null),
@@ -336,7 +383,7 @@ try
         {
             string name = reflected.GetProperty("Name").GetString()!;
             string[] libraries = reflected.GetProperty("Libraries").EnumerateArray().Select(item => item.GetString()!).ToArray();
-            Require(libraries.Length == 1 && libraries[0].StartsWith("Libraries/" + name + ".", StringComparison.Ordinal) &&
+            Require(libraries.Length == 1 && libraries[0].StartsWith("Configurations/Debug/Libraries/" + name + ".", StringComparison.Ordinal) &&
                 File.Exists(Path.Combine(reflectionSdk, libraries[0])) && !reflected.TryGetProperty("ReflectionOnlyLibrary", out _),
                 $"SDK does not ship the {name} library: " + reflected.GetRawText());
         }
@@ -348,7 +395,7 @@ try
     // (FixtureChild : GameCore의 CoreThing, SDK Node 참조). 한 빌드 안에서 stage descriptor import와 stage 생성 루트
     // 치환, 상위 모듈 실패 시 미게시, Metadata에서 뺀 헤더의 생성물 삭제를 확인한다.
     var reflectionGame = Path.Combine(fixture, "game-reflection");
-    var reflectionOutput = Path.Combine(reflectionGame, "out/Debug");
+    var reflectionOutput = GameProjectLayout.DefaultOutput(reflectionGame, "Game", NativeConfiguration.Debug);
     CopyTree(Path.Combine(root, "Templates/Game/Foundation"), reflectionGame);
     var reflectionRules = Path.Combine(reflectionGame, "Game.Build.cs");
     var reflectionRulesText = File.ReadAllText(reflectionRules);
@@ -968,8 +1015,8 @@ try
     Pass("metadata-module-ownership", timer.Elapsed);
     timer.Restart();
     var incompatible = await Cli("game", "--sdk", sdk, "--project", game, "--configuration", "Release");
-    Require(incompatible.ExitCode != 0 && incompatible.StdErr.Contains("mismatch", StringComparison.OrdinalIgnoreCase),
-        "Incompatible SDK configuration was silently accepted");
+    Require(incompatible.ExitCode != 0 && incompatible.StdErr.Contains("The SDK has no Release configuration (it has Debug)", StringComparison.Ordinal),
+        "A configuration the SDK does not carry was silently accepted: " + incompatible.StdErr);
     Pass("sdk-configuration-mismatch", timer.Elapsed);
 
     // 이전 SDK(manifest 버전 7 — 메타데이터 모듈 라이브러리에 진입점이 없고 모듈마다 ReflectionOnlyLibrary 칸이 있다)는 지금 없는 칸이
@@ -979,13 +1026,13 @@ try
     var sdkManifestPath = Path.Combine(sdk, "rocks-sdk.json");
     var sdkManifestBytes = File.ReadAllBytes(sdkManifestPath);
     var sdkManifestText = File.ReadAllText(sdkManifestPath);
-    Require(sdkManifestText.Contains("\"Version\": 13,", StringComparison.Ordinal), "SDK manifest is not version 13:\n" + sdkManifestText);
+    Require(sdkManifestText.Contains("\"Version\": 14,", StringComparison.Ordinal), "SDK manifest is not version 14:\n" + sdkManifestText);
     SetReadOnly(sdkManifestPath, false);
     try
     {
         var previousManifest = System.Text.Json.Nodes.JsonNode.Parse(sdkManifestText)!.AsObject();
         previousManifest["Version"] = 7;
-        foreach (System.Text.Json.Nodes.JsonNode? module in previousManifest["Modules"]!.AsArray())
+        foreach (System.Text.Json.Nodes.JsonNode? module in previousManifest["Configurations"]!["Debug"]!["Modules"]!.AsArray())
         {
             module!["ReflectionOnlyLibrary"] = false;
         }
@@ -1018,17 +1065,24 @@ try
         foreach ((string name, Action<System.Text.Json.Nodes.JsonObject> edit, string expected) in
                  new (string, Action<System.Text.Json.Nodes.JsonObject>, string)[]
                  {
-                     ("an unknown DynamicModules name", manifestJson => manifestJson["Modules"]![0]!["DynamicModules"] =
+                     ("an unknown DynamicModules name", manifestJson => manifestJson["Configurations"]!["Debug"]!["Modules"]![0]!["DynamicModules"] =
                          new System.Text.Json.Nodes.JsonArray("MissingDynamicModule"), "unknown dependency 'MissingDynamicModule'"),
-                     ("no DynamicModules list", manifestJson => manifestJson["Modules"]![0]!.AsObject().Remove("DynamicModules"),
+                     ("no DynamicModules list", manifestJson => manifestJson["Configurations"]!["Debug"]!["Modules"]![0]!.AsObject().Remove("DynamicModules"),
                          "has incomplete declarations"),
                      // 로딩 단계(3.11절)는 이름이어야 하고 칸이 있어야 한다.
-                     ("an unknown LoadingPhase name", manifestJson => manifestJson["Modules"]![0]!["LoadingPhase"] = "Sometime",
+                     ("an unknown LoadingPhase name", manifestJson => manifestJson["Configurations"]!["Debug"]!["Modules"]![0]!["LoadingPhase"] = "Sometime",
                          "unknown loading phase 'Sometime'"),
-                     ("a numeric LoadingPhase", manifestJson => manifestJson["Modules"]![0]!["LoadingPhase"] = "3",
+                     ("a numeric LoadingPhase", manifestJson => manifestJson["Configurations"]!["Debug"]!["Modules"]![0]!["LoadingPhase"] = "3",
                          "unknown loading phase '3'"),
-                     ("no LoadingPhase", manifestJson => manifestJson["Modules"]![0]!.AsObject().Remove("LoadingPhase"),
-                         "has incomplete declarations")
+                     ("no LoadingPhase", manifestJson => manifestJson["Configurations"]!["Debug"]!["Modules"]![0]!.AsObject().Remove("LoadingPhase"),
+                         "has incomplete declarations"),
+                     // 구성별 파일 목록(Docs/Design/ProjectFiles.ko.md 10.3절)은 Configurations/<구성>/ 아래 실제 파일과 같아야 한다.
+                     ("a configuration file list without one of its files", manifestJson =>
+                         manifestJson["Configurations"]!["Debug"]!["Files"]!.AsArray().RemoveAt(0), "file list does not match Configurations/Debug/"),
+                     ("an unknown configuration", manifestJson => manifestJson["Configurations"]!["Fast"] =
+                         manifestJson["Configurations"]!["Debug"]!.DeepClone(), "SDK configuration 'Fast' is unknown"),
+                     ("a module library outside its configuration", manifestJson => manifestJson["Configurations"]!["Debug"]!["Modules"]![0]!["Libraries"] =
+                         new System.Text.Json.Nodes.JsonArray("Tools/Rocks.Build.Cli/Rocks.Build.Cli.dll"), "Unverified SDK library")
                  })
         {
             var manifestNode = System.Text.Json.Nodes.JsonNode.Parse(sdkManifestText)!.AsObject();
@@ -1048,7 +1102,7 @@ try
     Pass("sdk-manifest-version-and-engine-version-required", timer.Elapsed);
 
     timer.Restart();
-    var library = Directory.GetFiles(Path.Combine(sdk, "Libraries"))[0];
+    var library = Directory.GetFiles(Path.Combine(sdk, "Configurations", "Debug", "Libraries"))[0];
     SetReadOnly(library, false);
     var original = File.ReadAllBytes(library);
     try
@@ -1241,7 +1295,7 @@ try
                 Timeout: TimeSpan.FromMinutes(10)));
             File.AppendAllText(Path.Combine(reports, "sdk-integration.log"), "msbuild drive-root game\n" + msbuildGame.StdOut + msbuildGame.StdErr + "\n");
             Require(msbuildGame.ExitCode == 0, "MSBuild game build with drive-root paths failed: " + msbuildGame.StdOut + msbuildGame.StdErr);
-            var driveReport = JsonSerializer.Deserialize<NativeBuildResult>(File.ReadAllText(Path.Combine(gameDrive, "out", "Debug", "action-report.json")))!;
+            var driveReport = JsonSerializer.Deserialize<NativeBuildResult>(File.ReadAllText(Path.Combine(GameProjectLayout.DefaultOutput(gameDrive, "Game", NativeConfiguration.Debug), "action-report.json")))!;
             Require(driveReport.Succeeded && driveReport.ExecutedActions == 0,
                 $"The MSBuild drive-root game build after the CLI build executed {driveReport.ExecutedActions} actions");
             var driveRun = await ProcessRunner.RunAsync(new(driveReport.ModuleOutputs["SampleGame"], [], gameDrive, toolchain.Environment));
@@ -1271,7 +1325,7 @@ try
     Require(trailingReport.Succeeded && trailingReport.ExecutedActions == 0,
         $"A trailing-separator NativeOutput did not reuse the same output ({trailingReport.ExecutedActions} actions)");
     var trailingSdk = Path.Combine(fixture, "installed-trailing");
-    var trailingExport = await Cli("sdk", "--root", root, "--target", "Engine", "--configuration", "Debug",
+    var trailingExport = await Cli("sdk", "--root", root, "--target", "Engine", "--configurations", "Debug",
         "--destination", trailingSdk + Path.DirectorySeparatorChar);
     Require(trailingExport.ExitCode == 0 && File.Exists(Path.Combine(trailingSdk, "rocks-sdk.json")) &&
         !Directory.EnumerateDirectories(trailingSdk, "*.staging-*").Any(),
@@ -1281,8 +1335,13 @@ try
     // Release SDK: 엔진 라이브러리는 ThinLTO bitcode이고, 게임 Release가 같은 LLVM으로 link해 실행된다.
     timer.Restart();
     var releaseSdk = Path.Combine(fixture, "installed-release");
-    var releaseExport = await Cli("sdk", "--root", root, "--target", "Engine", "--configuration", "Release", "--destination", releaseSdk);
+    // --register on은 내보낸 뒤 등록부에 넣는다(Docs/Design/ProjectFiles.ko.md 10.2절).
+    // 두 구성 SDK(Docs/Design/ProjectFiles.ko.md 10.3절, V10): Debug와 Release를 한 SDK로 조립한다(Debug 엔진은 앞에서 빌드해 0 action이다).
+    var releaseExport = await Cli("sdk", "--root", root, "--target", "Engine", "--configurations", "Debug,Release", "--destination", releaseSdk,
+        "--register", "on");
     Require(releaseExport.ExitCode == 0, "Release SDK export failed: " + releaseExport.StdErr);
+    Require(new JsonSdkRegistry(registryFile).List().Any(entry => string.Equals(Path.GetFullPath(entry.Path), Path.GetFullPath(releaseSdk),
+        StringComparison.OrdinalIgnoreCase)), "sdk --register on did not register the SDK");
     static bool ContainsBitcode(string path)
     {
         byte[] bytes = File.ReadAllBytes(path);
@@ -1297,14 +1356,44 @@ try
         return false;
     }
 
-    Require(Directory.GetFiles(Path.Combine(releaseSdk, "Libraries")).All(ContainsBitcode),
+    using (var releaseManifest = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(releaseSdk, "rocks-sdk.json"))))
+    {
+        Require(releaseManifest.RootElement.GetProperty("Configurations").EnumerateObject().Select(entry => entry.Name).SequenceEqual(["Debug", "Release"]) &&
+            !Directory.Exists(Path.Combine(releaseSdk, "Libraries")) && Directory.Exists(Path.Combine(releaseSdk, "Configurations", "Debug", "Libraries")),
+            "The two-configuration SDK does not carry Debug and Release under Configurations/");
+    }
+
+    Require(Directory.GetFiles(Path.Combine(releaseSdk, "Configurations", "Release", "Libraries")).All(ContainsBitcode),
         "Release SDK libraries are not ThinLTO bitcode archives");
     var releaseGame = await Cli("game", "--sdk", releaseSdk, "--project", game, "--configuration", "Release");
     Require(releaseGame.ExitCode == 0, "Release game build against the Release SDK failed: " + releaseGame.StdOut + releaseGame.StdErr);
-    var releaseReport = JsonSerializer.Deserialize<NativeBuildResult>(File.ReadAllText(Path.Combine(game, "out/Release/action-report.json")))!;
+    var releaseReport = JsonSerializer.Deserialize<NativeBuildResult>(File.ReadAllText(Path.Combine(GameProjectLayout.DefaultOutput(game, "Game", NativeConfiguration.Release), "action-report.json")))!;
     var releaseRun = await ProcessRunner.RunAsync(new(releaseReport.ModuleOutputs["SampleGame"], [], game, toolchain.Environment));
     Require(releaseRun.ExitCode == 0, "Release ThinLTO game failed at runtime");
+    var twoConfigurationDebug = await Cli("game", "--sdk", releaseSdk, "--project", game, "--configuration", "Debug");
+    Require(twoConfigurationDebug.ExitCode == 0, "Debug game build against the two-configuration SDK failed: " + twoConfigurationDebug.StdOut +
+        twoConfigurationDebug.StdErr);
+    var missingConfiguration = await Cli("game", "--sdk", releaseSdk, "--project", game, "--configuration", "Development");
+    Require(missingConfiguration.ExitCode != 0 && missingConfiguration.StdErr.Contains("has no Development configuration (it has Debug, Release)", StringComparison.Ordinal),
+        "A configuration missing from the two-configuration SDK was not rejected: " + missingConfiguration.StdErr);
     Pass("release-thinlto-sdk-and-game", timer.Elapsed);
+
+    // 등록부로 고를 때 구성도 본다(10.1절): 같은 엔진 패치의 Debug SDK와 Debug·Release SDK를 함께 등록하면 Release 빌드는 Release를 가진 SDK를
+    // 모호함 없이 고르고(바로 앞에서 같은 SDK로 빌드했으므로 0 action이다), 둘 다 가진 Debug는 동률 오류다.
+    timer.Restart();
+    Require((await Tool("sdk-register", "--sdk", sdk)).ExitCode == 0, "sdk-register of the Debug SDK failed");
+    var chosen = await Cli("game", "--project", game, "--configuration", "Release");
+    var chosenReport = JsonSerializer.Deserialize<NativeBuildResult>(File.ReadAllText(Path.Combine(GameProjectLayout.DefaultOutput(game, "Game",
+        NativeConfiguration.Release), "action-report.json")))!;
+    Require(chosen.ExitCode == 0 && chosen.StdOut.Contains("Installed SDK: " + releaseSdk, StringComparison.OrdinalIgnoreCase) && chosenReport.Succeeded &&
+        chosenReport.ExecutedActions == 0, "The Release game build without --sdk did not pick the SDK with Release: " + chosen.StdOut + chosen.StdErr);
+    var tied = await Cli("game", "--project", game, "--configuration", "Debug");
+    Require(tied.ExitCode != 0 && (tied.StdOut + tied.StdErr).Contains("all fit engineVersion", StringComparison.Ordinal),
+        "Two registered SDKs with Debug at the same patch must be ambiguous: " + tied.StdOut + tied.StdErr);
+
+    Require((await Tool("sdk-unregister", "--sdk", sdk)).ExitCode == 0 && (await Tool("sdk-unregister", "--sdk", releaseSdk)).ExitCode == 0,
+        "sdk-unregister failed");
+    Pass("sdk-registry-picks-by-configuration", timer.Elapsed);
     success = true;
     return 0;
 }
@@ -1330,10 +1419,13 @@ finally
     }
 }
 
-async Task<ProcessResult> Cli(params string[] arguments)
+Task<ProcessResult> Cli(params string[] arguments) => Tool([.. arguments, "--compiler", toolchain.CompilerPath]);
+
+// 컴파일러 옵션을 받지 않는 명령(sdk-register 등)도 부른다.
+async Task<ProcessResult> Tool(params string[] arguments)
 {
-    var command = new[] { cli }.Concat(arguments).Concat(["--compiler", toolchain.CompilerPath]).ToArray();
-    var result = await ProcessRunner.RunAsync(new("dotnet", command, root, toolchain.Environment, Timeout: TimeSpan.FromMinutes(10)));
+    var command = new[] { cli }.Concat(arguments).ToArray();
+    var result = await ProcessRunner.RunAsync(new("dotnet", command, root, cliEnvironment, Timeout: TimeSpan.FromMinutes(10)));
     File.AppendAllText(Path.Combine(reports, "sdk-integration.log"), string.Join(" ", arguments) + "\n" + result.StdOut + result.StdErr + "\n");
     return result;
 }

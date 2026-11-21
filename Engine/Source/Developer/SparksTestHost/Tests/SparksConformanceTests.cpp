@@ -117,7 +117,7 @@ TEST(SparksConformance_RejectsMalformedExpectations) {
             allocator));
         CHECK(ParseFails("stage values\nclean\n",
                          "line 1: unknown stage (expected 'syntax', 'imports', 'names', "
-                         "'types' or 'flow')",
+                         "'types', 'flow', 'rules' or 'codegen')",
                          allocator));
         CHECK(ParseFails("stage syntax\nstage names\nclean\n", "line 2: 'stage' appears twice",
                          allocator));
@@ -233,8 +233,10 @@ TEST(SparksConformance_ReportsCorpusLayoutProblems) {
         REQUIRE(write(area.Value().View(), "NoSource.ast", ""));
         REQUIRE(write(area.Value().View(), "NoSource.names", ""));
         REQUIRE(write(area.Value().View(), "NoSource.types", ""));
+        REQUIRE(write(area.Value().View(), "NoSource.ir", ""));
         REQUIRE(write(area.Value().View(), "Good.names", ""));
         REQUIRE(write(area.Value().View(), "Good.types", ""));
+        REQUIRE(write(area.Value().View(), "Good.ir", ""));
         REQUIRE(write(area.Value().View(), "OnlyTree.ast", ""));
         REQUIRE(write(area.Value().View(), "Notes.txt", "x"));
         REQUIRE(write(rootPath, "Stray.spark", "x"));
@@ -243,12 +245,12 @@ TEST(SparksConformance_ReportsCorpusLayoutProblems) {
         REQUIRE(RunCorpus(allocator, files, rootPath, "", report));
         PrintFailures(report);
         CHECK(report.CasesRun() == 1);
-        REQUIRE(report.Failures().Size() == 8);
+        REQUIRE(report.Failures().Size() == 9);
         // 낯선 파일은 목록을 훑을 때, 짝 없는 파일은 stem 순으로 맞춰 볼 때 기록한다. 같은 stem의
-        // 짝 없는 파일은 .expect, .ast, .names, .types 순이다.
+        // 짝 없는 파일은 .expect, .ast, .names, .types, .ir 순이다.
         CHECK(report.Failures()[0].View() ==
               StringView("Area/Notes.txt: unexpected file (only .spark, .expect, .ast, .names, "
-                         ".types and case folders)"));
+                         ".types, .ir, .bc and case folders)"));
         CHECK(report.Failures()[1].View() ==
               StringView("Area/NoExpect.spark: missing the .expect file"));
         CHECK(report.Failures()[2].View() ==
@@ -260,8 +262,10 @@ TEST(SparksConformance_ReportsCorpusLayoutProblems) {
         CHECK(report.Failures()[5].View() ==
               StringView("Area/NoSource.types: missing the .spark file or case folder"));
         CHECK(report.Failures()[6].View() ==
-              StringView("Area/OnlyTree.ast: missing the .spark file or case folder"));
+              StringView("Area/NoSource.ir: missing the .spark file or case folder"));
         CHECK(report.Failures()[7].View() ==
+              StringView("Area/OnlyTree.ast: missing the .spark file or case folder"));
+        CHECK(report.Failures()[8].View() ==
               StringView(
                   "Stray.spark: unexpected file at the corpus root (cases live in area folders)"));
 

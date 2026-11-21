@@ -228,7 +228,11 @@ internal static class ActionGraph
             var dependencies = ModuleVisibility.Of(module, modules).ToArray();
             // 링크 모듈은 두 목록의 도달 폐포다(실행 파일은 동적 모듈 쪽을 더한다 — LinkClosure). 도달 집합(closures — BuildInfo가 실행
             // 파일의 액션을 고른다)도 링크하는 모듈 전부다.
-            NativeModuleInput[] linked = LinkClosure.Of(module.Name, modules, module.Kind == NativeModuleKind.Executable)
+            // Modular 호스트 모듈(ModuleLoader 3.14절)은 동적 모듈을 링크하지 않는다 — 그 모듈은 로더가 manifest로 싣는다(호스트가 import하면
+            // OS가 붙잡아 실행 중 해제할 수 없다).
+            bool withDynamic = module.Kind == NativeModuleKind.Executable &&
+                !LinkTypes.IsHostModule(module, request.LinkType, entryModules.Contains(module.Name));
+            NativeModuleInput[] linked = LinkClosure.Of(module.Name, modules, withDynamic)
                 .Select(name => modules[name]).ToArray();
             closures[module.Name] = [module.Name, .. linked.Select(value => value.Name)];
             string[] includes = module.PublicIncludeDirectories.Concat(module.PrivateIncludeDirectories)
@@ -503,180 +507,219 @@ internal static class ActionGraph
 
             // Modular(Docs/Design/BuildTargets.ko.md 3.8절 BS8a): 서드파티가 아닌 라이브러리 모듈은 공유 라이브러리가 된다. 서드파티는
             // 정적 라이브러리로 남아 소비 모듈에 들어간다. 공유 라이브러리는 실행 파일과 같은 bin 폴더에 둔다(Windows import 라이브러리는
-            // lib 폴더).
-            bool sharedLibrary = request.LinkType == NativeLinkType.Modular && module.Kind == NativeModuleKind.StaticLibrary && !module.ThirdParty;
+            // lib 폴더). 모듈 표 제공 모듈에 닿는 Modular 실행 파일의 모듈은 호스트 모듈이다 — 공유 라이브러리로 링크하고, 실행 파일은
+            // 생성 진입 TU와 Launch만 링크한다(Docs/Design/ModuleLoader.ko.md 3.14절 ML4b).
+            bool entryModule = entryModules.Contains(module.Name);
+            bool host = LinkTypes.IsHostModule(module, request.LinkType, entryModule);
+            bool sharedLibrary = LinkTypes.CompilesAsSharedLibrary(module, request.LinkType, entryModule);
             bool archive = module.Kind == NativeModuleKind.StaticLibrary && !sharedLibrary;
             bool mac = request.Toolchain.Platform == NativePlatform.MacOS;
             string sharedStem = sharedLibrary
                 ? LinkTypes.SharedLibraryStem(request.TargetName ?? request.Targets[0], module.Name, request.Toolchain.Platform, request.Configuration)
                 : "";
             string sharedFile = sharedStem + LinkTypes.SharedLibraryExtension(request.Toolchain.Platform);
+            string executablePath = Path.Combine(output, "bin", module.Name + (windows ? ".exe" : ""));
             string finalPath = archive ? Path.Combine(output, "lib", module.Name + (windows ? ".lib" : ".a"))
                 : sharedLibrary ? Path.Combine(output, "bin", sharedFile)
-                : Path.Combine(output, "bin", module.Name + (windows ? ".exe" : ""));
+                : executablePath;
             string? importLibrary = sharedLibrary && windows ? Path.Combine(output, "lib", sharedStem + ".lib") : null;
             if (ide)
             {
                 // IDE 계획은 archive·link를 세우지 않고 출력 경로만 적는다(prebuilt·ASan 런타임 존재 확인도 하지 않는다).
-                outputs[module.Name] = importLibrary ?? finalPath;
+                outputs[module.Name] = host ? executablePath : importLibrary ?? finalPath;
                 continue;
             }
 
-            string terminalId = module.Name + (archive ? ":archive" : ":link");
-            var finalArguments = new List<string>();
-            var finalOutputs = new List<string> { finalPath };
-            var finalInputs = new List<string>(objectPaths);
-            var predecessors = new List<string>(compileIds);
-            string tool;
-            if (archive)
+            PlanFinal(module.Name + (archive ? ":archive" : ":link"), archive, sharedLibrary, finalPath, importLibrary, objectPaths, compileIds,
+                linked.Reverse().ToArray(), new[] { module }.Concat(linked.Reverse()).ToArray(), sharedLibrary && entryModule ? module.Name : null);
+            // 소비 모듈이 링크하는 파일이다(Windows 공유 라이브러리는 import 라이브러리).
+            outputs[module.Name] = importLibrary ?? finalPath;
+            terminalActions[module.Name] = module.Name + (archive ? ":archive" : ":link");
+            if (host)
             {
-                tool = request.Toolchain.ArchiverPath;
-                finalArguments.AddRange(windows ? ["/nologo", "/out:{OUTPUT0}"] : ["rcs", "{OUTPUT0}"]);
-                finalArguments.AddRange(objectPaths);
+                // 진입 TU를 그 모듈의 compile 인자로 컴파일하고(include·정의 헤더 없이 — 헤더를 쓰지 않는다) object와 Launch 공유
+                // 라이브러리만 실행 파일로 링크한다. 실행 파일 링크 인자(subsystem·PDB·sanitizer·coverage 런타임)는 같다. 그래서 실행 파일이
+                // import하는 것은 Launch와 그 링크 폐포(부트 모듈)뿐이다.
+                NativeModuleInput launch = linked.SingleOrDefault(value => value.ProvidesLaunch)
+                    ?? throw new InvalidOperationException($"Internal error: Modular host module {module.Name} does not reach Launch.");
+                string launcherSource = Path.Combine(generatedSources, module.Name + ModuleTables.LauncherSuffix);
+                generatedFiles.Add(new(launcherSource, ModuleTables.LauncherSource(module.Name,
+                    ModuleManifests.FileName(request.TargetName ?? request.Targets[0], request.Toolchain.Platform, request.Configuration),
+                    request.Toolchain.Platform, module.WindowsSubsystem)));
+                string launcherObject = Path.Combine(objectDirectory, "Launcher" + (windows ? ".obj" : ".o"));
+                string launcherId = module.Name + ":compile:" + variant + ":Launcher";
+                string launcherRecord = launcherObject + DependencyRecord.Extension;
+                actions.Add(new(launcherId, module.Name, "Compile", request.Toolchain.CompilerPath,
+                    [.. Common(NativeLanguage.Cpp), .. depfile, .. TranslationUnit(launcherSource, NativeLanguage.Cpp)],
+                    [launcherObject, launcherRecord], [launcherSource], [], extraInputs, [],
+                    [request.ContextFingerprint, request.Configuration.ToString(), module.Optimization.ToString(), launcherSource], launcherSource,
+                    DependencyRecord: launcherRecord));
+                string launcherLink = module.Name + ":launcher";
+                PlanFinal(launcherLink, false, false, executablePath, null, [launcherObject], [launcherId], [launch], [], null);
+                // 실행 파일 경로다(시험 실행·BuildInfo가 찾는다). 호스트 공유 라이브러리는 manifest가 싣는다.
+                outputs[module.Name] = executablePath;
+                terminalActions[module.Name] = launcherLink;
             }
-            else
+
+            // archive·공유 라이브러리·실행 파일 링크 action을 하나 더한다. objects·objectIds는 링크할 object와 그 compile action,
+            // linkModules는 링크 입력 모듈(의존하는 쪽 먼저), settingModules는 prebuilt·시스템 라이브러리·framework·추가 링크 인자를 모을
+            // 모듈, anchor는 강제 참조할 진입점 모듈 이름(공유 라이브러리 진입점 모듈만)이다.
+            void PlanFinal(string terminalId, bool archive, bool sharedLibrary, string finalPath, string? importLibrary,
+                IReadOnlyList<string> objects, IReadOnlyList<string> objectIds, IReadOnlyList<NativeModuleInput> linkModules,
+                IReadOnlyList<NativeModuleInput> settingModules, string? anchor)
             {
-                tool = request.Toolchain.CompilerPath;
-                finalArguments.AddRange(request.Toolchain.LinkArguments);
-                finalArguments.AddRange(LinkDriverFlags(request));
-                finalArguments.AddRange(objectPaths);
-                // 정적 라이브러리는 의존하는 쪽을 먼저 둔다. diamond에서도 각 archive는 한 번만 쓴다.
-                foreach (var dependency in linked.Reverse())
+                var finalArguments = new List<string>();
+                var finalOutputs = new List<string> { finalPath };
+                var finalInputs = new List<string>(objects);
+                var predecessors = new List<string>(objectIds);
+                string tool;
+                if (archive)
                 {
-                    if (outputs.TryGetValue(dependency.Name, out string? library))
-                    {
-                        finalArguments.Add(library);
-                        finalInputs.Add(library);
-                        predecessors.Add(terminalActions[dependency.Name]);
-                    }
-                    else if (dependency.Sources.Count != 0 || dependency.GeneratedSources.Count != 0 || dependency.ReflectionSources.Count != 0)
-                    {
-                        // 코드가 있는 모듈은 이 실행 파일보다 먼저 계획되어 archive가 있어야 한다(계획 순서가 깨지면 조용히 빠진 링크가 된다).
-                        throw new InvalidOperationException($"Internal error: module {dependency.Name} linked by {module.Name} has no planned archive.");
-                    }
-                }
-
-                foreach (string library in new[] { module }.Concat(linked.Reverse())
-                    .SelectMany(value => value.PrebuiltLibraries).Select(Absolute).Distinct(NativeToolchains.PathComparer))
-                {
-                    if (!File.Exists(library))
-                    {
-                        throw new FileNotFoundException("Prebuilt library does not exist.", library);
-                    }
-
-                    finalArguments.Add(library);
-                    finalInputs.Add(library);
-                }
-
-                finalArguments.AddRange(new[] { module }.Concat(linked.Reverse())
-                    .SelectMany(value => value.AdditionalLinkArguments));
-                // 시스템 라이브러리·framework는 이 모듈과 모든 의존 모듈의 선언을 모아 한 번씩 넣는다.
-                finalArguments.AddRange(new[] { module }.Concat(linked.Reverse())
-                    .SelectMany(value => value.SystemLibraries).Distinct(StringComparer.Ordinal)
-                    .Select(name => windows ? name + ".lib" : "-l" + name));
-                foreach (string framework in new[] { module }.Concat(linked.Reverse())
-                    .SelectMany(value => value.Frameworks).Distinct(StringComparer.Ordinal))
-                {
-                    finalArguments.AddRange(["-framework", framework]);
-                }
-
-                if (windows)
-                {
-                    string? asanThunk = null;
-                    if (request.Configuration == NativeConfiguration.Asan)
-                    {
-                        if (request.Toolchain.RuntimeFiles.Count != 1)
-                        {
-                            throw new ArgumentException($"Module {module.Name}: Windows ASan requires exactly one x64 runtime DLL.");
-                        }
-
-                        string directory = Path.GetDirectoryName(request.Toolchain.RuntimeFiles[0])!;
-                        string asanLibrary = Path.ChangeExtension(request.Toolchain.RuntimeFiles[0], ".lib");
-                        asanThunk = Directory.EnumerateFiles(directory, "clang_rt.asan_dynamic_runtime_thunk*.lib").SingleOrDefault();
-                        if (!File.Exists(asanLibrary) || asanThunk == null)
-                        {
-                            throw new FileNotFoundException($"Module {module.Name}: matching ASan import/thunk libraries are missing in {directory}.");
-                        }
-
-                        finalArguments.Add(asanLibrary);
-                        finalInputs.AddRange([asanLibrary, asanThunk]);
-                    }
-
-                    if (request.Configuration == NativeConfiguration.Coverage)
-                    {
-                        // driver가 고르는 triple 디렉터리(x86_64-pc-windows-msvc)와 배포판의 디렉터리 이름(Swift 툴체인은
-                        // x86_64-unknown-windows-msvc)이 달라 driver의 자동 링크를 믿지 않고 compiler의 resource 디렉터리에서
-                        // profile 런타임을 찾아 넘긴다(Asan import·thunk와 같은 방식).
-                        string profileLibrary = CoverageRuntimeLibrary(request.Toolchain.CompilerPath, module.Name);
-                        finalArguments.Add(profileLibrary);
-                        finalInputs.Add(profileLibrary);
-                    }
-
-                    if (sharedLibrary)
-                    {
-                        finalArguments.AddRange(["/Fe{OUTPUT0}", "/link", "/DLL", "/INCREMENTAL:NO"]);
-                        // 진입점 모듈은 export 진입점을 강제 참조한다(매크로가 빠지면 링크 오류 — BuildTargets BS8d1).
-                        if (entryModules.Contains(module.Name))
-                        {
-                            finalArguments.Add("/INCLUDE:" + ModuleTables.EntryAnchorPrefix + module.Name);
-                        }
-                    }
-                    else
-                    {
-                        string subsystem = module.WindowsSubsystem == WindowsSubsystem.Windows ? "/SUBSYSTEM:WINDOWS" : "/SUBSYSTEM:CONSOLE";
-                        finalArguments.AddRange(["/Fe{OUTPUT0}", "/link", "/INCREMENTAL:NO", subsystem, "/MANIFEST:EMBED"]);
-                    }
-
-                    if (asanThunk != null)
-                    {
-                        finalArguments.AddRange(["/INCLUDE:__asan_seh_interceptor", "/WHOLEARCHIVE:" + asanThunk]);
-                    }
-                    // 모든 구성이 PDB를 남긴다. Release PDB는 배포 파일과 분리해 크래시 분석용으로 보관한다.
-                    finalOutputs.Add(Path.ChangeExtension(finalPath, ".pdb"));
-                    // CodeView 레코드에는 PDB 파일 이름만 남긴다(/PDBALTPATH:%_PDB%, lld-link가 %_PDB%를 PDB 파일 이름으로 바꾼다).
-                    // 링크 임시 폴더 경로가 배포 실행 파일에 새지 않고, 디버거는 기호 경로에서 이름·GUID·age로 찾는다
-                    // (Docs/Design/CrashHandlingAndLaunch.ko.md 14.4절 D16).
-                    finalArguments.AddRange(["/DEBUG:FULL", "/PDB:{OUTPUT1}", "/PDBALTPATH:%_PDB%"]);
-                    if (importLibrary is not null)
-                    {
-                        // 소비 모듈·실행 파일이 링크하는 import 라이브러리다.
-                        finalOutputs.Add(importLibrary);
-                        finalArguments.Add("/IMPLIB:{OUTPUT2}");
-                    }
-
-                    finalArguments.AddRange(new[] { "kernel32", "user32", "gdi32", "winspool", "shell32", "ole32", "oleaut32", "uuid", "comdlg32", "advapi32" }
-                        .Select(value => "/DEFAULTLIB:" + value + ".lib"));
+                    tool = request.Toolchain.ArchiverPath;
+                    finalArguments.AddRange(windows ? ["/nologo", "/out:{OUTPUT0}"] : ["rcs", "{OUTPUT0}"]);
+                    finalArguments.AddRange(objects);
                 }
                 else
                 {
-                    if (sharedLibrary)
+                    tool = request.Toolchain.CompilerPath;
+                    finalArguments.AddRange(request.Toolchain.LinkArguments);
+                    finalArguments.AddRange(LinkDriverFlags(request));
+                    finalArguments.AddRange(objects);
+                    // 정적 라이브러리는 의존하는 쪽을 먼저 둔다. diamond에서도 각 archive는 한 번만 쓴다.
+                    foreach (var dependency in linkModules)
                     {
-                        // install name·soname은 파일 이름만 담는다(실행 중 탐색은 rpath — 같은 폴더).
-                        finalArguments.AddRange(mac ? ["-dynamiclib", "-install_name", "@rpath/" + sharedFile] : ["-shared", "-Wl,-soname," + sharedFile]);
-                        // 진입점 모듈은 export 진입점을 강제 참조한다(Mach-O 기호는 앞에 밑줄이 붙는다 — BuildTargets BS8d1). ELF -shared 링크는
-                        // 미해결 기호를 허용하므로 Linux(BS6)는 -Wl,-z,defs를 함께 넣어야 이 참조가 링크 오류가 된다.
-                        if (entryModules.Contains(module.Name))
+                        if (outputs.TryGetValue(dependency.Name, out string? library))
                         {
-                            finalArguments.Add("-Wl,-u," + (mac ? "_" : "") + ModuleTables.EntryAnchorPrefix + module.Name);
+                            finalArguments.Add(library);
+                            finalInputs.Add(library);
+                            predecessors.Add(terminalActions[dependency.Name]);
+                        }
+                        else if (dependency.Sources.Count != 0 || dependency.GeneratedSources.Count != 0 || dependency.ReflectionSources.Count != 0)
+                        {
+                            // 코드가 있는 모듈은 이 실행 파일보다 먼저 계획되어 archive가 있어야 한다(계획 순서가 깨지면 조용히 빠진 링크가 된다).
+                            throw new InvalidOperationException($"Internal error: module {dependency.Name} linked by {module.Name} has no planned archive.");
                         }
                     }
 
-                    if (request.LinkType == NativeLinkType.Modular)
+                    foreach (string library in settingModules
+                        .SelectMany(value => value.PrebuiltLibraries).Select(Absolute).Distinct(NativeToolchains.PathComparer))
                     {
-                        // 같은 폴더의 공유 라이브러리를 찾는다(UE MacToolChain.cs:578-584 — @loader_path·@executable_path 둘 다).
-                        finalArguments.AddRange(mac ? ["-Wl,-rpath,@loader_path/", "-Wl,-rpath,@executable_path/"] : ["-Wl,-rpath,$ORIGIN"]);
+                        if (!File.Exists(library))
+                        {
+                            throw new FileNotFoundException("Prebuilt library does not exist.", library);
+                        }
+
+                        finalArguments.Add(library);
+                        finalInputs.Add(library);
                     }
 
-                    finalArguments.AddRange(["-o", "{OUTPUT0}"]);
-                }
-            }
+                    finalArguments.AddRange(settingModules
+                        .SelectMany(value => value.AdditionalLinkArguments));
+                    // 시스템 라이브러리·framework는 이 모듈과 모든 의존 모듈의 선언을 모아 한 번씩 넣는다.
+                    finalArguments.AddRange(settingModules
+                        .SelectMany(value => value.SystemLibraries).Distinct(StringComparer.Ordinal)
+                        .Select(name => windows ? name + ".lib" : "-l" + name));
+                    foreach (string framework in settingModules
+                        .SelectMany(value => value.Frameworks).Distinct(StringComparer.Ordinal))
+                    {
+                        finalArguments.AddRange(["-framework", framework]);
+                    }
 
-            actions.Add(new(terminalId, module.Name, archive ? "Archive" : "Link",
-                tool, finalArguments, finalOutputs, finalInputs, [], extraInputs, predecessors,
-                [request.ContextFingerprint, request.Configuration.ToString()]));
-            // 소비 모듈이 링크하는 파일이다(Windows 공유 라이브러리는 import 라이브러리).
-            outputs[module.Name] = importLibrary ?? finalPath;
-            terminalActions[module.Name] = terminalId;
+                    if (windows)
+                    {
+                        string? asanThunk = null;
+                        if (request.Configuration == NativeConfiguration.Asan)
+                        {
+                            if (request.Toolchain.RuntimeFiles.Count != 1)
+                            {
+                                throw new ArgumentException($"Module {module.Name}: Windows ASan requires exactly one x64 runtime DLL.");
+                            }
+
+                            string directory = Path.GetDirectoryName(request.Toolchain.RuntimeFiles[0])!;
+                            string asanLibrary = Path.ChangeExtension(request.Toolchain.RuntimeFiles[0], ".lib");
+                            asanThunk = Directory.EnumerateFiles(directory, "clang_rt.asan_dynamic_runtime_thunk*.lib").SingleOrDefault();
+                            if (!File.Exists(asanLibrary) || asanThunk == null)
+                            {
+                                throw new FileNotFoundException($"Module {module.Name}: matching ASan import/thunk libraries are missing in {directory}.");
+                            }
+
+                            finalArguments.Add(asanLibrary);
+                            finalInputs.AddRange([asanLibrary, asanThunk]);
+                        }
+
+                        if (request.Configuration == NativeConfiguration.Coverage)
+                        {
+                            // driver가 고르는 triple 디렉터리(x86_64-pc-windows-msvc)와 배포판의 디렉터리 이름(Swift 툴체인은
+                            // x86_64-unknown-windows-msvc)이 달라 driver의 자동 링크를 믿지 않고 compiler의 resource 디렉터리에서
+                            // profile 런타임을 찾아 넘긴다(Asan import·thunk와 같은 방식).
+                            string profileLibrary = CoverageRuntimeLibrary(request.Toolchain.CompilerPath, module.Name);
+                            finalArguments.Add(profileLibrary);
+                            finalInputs.Add(profileLibrary);
+                        }
+
+                        if (sharedLibrary)
+                        {
+                            finalArguments.AddRange(["/Fe{OUTPUT0}", "/link", "/DLL", "/INCREMENTAL:NO"]);
+                            // 진입점 모듈은 export 진입점을 강제 참조한다(매크로가 빠지면 링크 오류 — BuildTargets BS8d1).
+                            if (anchor is not null)
+                            {
+                                finalArguments.Add("/INCLUDE:" + ModuleTables.EntryAnchorPrefix + anchor);
+                            }
+                        }
+                        else
+                        {
+                            string subsystem = module.WindowsSubsystem == WindowsSubsystem.Windows ? "/SUBSYSTEM:WINDOWS" : "/SUBSYSTEM:CONSOLE";
+                            finalArguments.AddRange(["/Fe{OUTPUT0}", "/link", "/INCREMENTAL:NO", subsystem, "/MANIFEST:EMBED"]);
+                        }
+
+                        if (asanThunk != null)
+                        {
+                            finalArguments.AddRange(["/INCLUDE:__asan_seh_interceptor", "/WHOLEARCHIVE:" + asanThunk]);
+                        }
+                        // 모든 구성이 PDB를 남긴다. Release PDB는 배포 파일과 분리해 크래시 분석용으로 보관한다.
+                        finalOutputs.Add(Path.ChangeExtension(finalPath, ".pdb"));
+                        // CodeView 레코드에는 PDB 파일 이름만 남긴다(/PDBALTPATH:%_PDB%, lld-link가 %_PDB%를 PDB 파일 이름으로 바꾼다).
+                        // 링크 임시 폴더 경로가 배포 실행 파일에 새지 않고, 디버거는 기호 경로에서 이름·GUID·age로 찾는다
+                        // (Docs/Design/CrashHandlingAndLaunch.ko.md 14.4절 D16).
+                        finalArguments.AddRange(["/DEBUG:FULL", "/PDB:{OUTPUT1}", "/PDBALTPATH:%_PDB%"]);
+                        if (importLibrary is not null)
+                        {
+                            // 소비 모듈·실행 파일이 링크하는 import 라이브러리다.
+                            finalOutputs.Add(importLibrary);
+                            finalArguments.Add("/IMPLIB:{OUTPUT2}");
+                        }
+
+                        finalArguments.AddRange(new[] { "kernel32", "user32", "gdi32", "winspool", "shell32", "ole32", "oleaut32", "uuid", "comdlg32", "advapi32" }
+                            .Select(value => "/DEFAULTLIB:" + value + ".lib"));
+                    }
+                    else
+                    {
+                        if (sharedLibrary)
+                        {
+                            // install name·soname은 파일 이름만 담는다(실행 중 탐색은 rpath — 같은 폴더).
+                            finalArguments.AddRange(mac ? ["-dynamiclib", "-install_name", "@rpath/" + Path.GetFileName(finalPath)] : ["-shared", "-Wl,-soname," + Path.GetFileName(finalPath)]);
+                            // 진입점 모듈은 export 진입점을 강제 참조한다(Mach-O 기호는 앞에 밑줄이 붙는다 — BuildTargets BS8d1). ELF -shared 링크는
+                            // 미해결 기호를 허용하므로 Linux(BS6)는 -Wl,-z,defs를 함께 넣어야 이 참조가 링크 오류가 된다.
+                            if (anchor is not null)
+                            {
+                                finalArguments.Add("-Wl,-u," + (mac ? "_" : "") + ModuleTables.EntryAnchorPrefix + anchor);
+                            }
+                        }
+
+                        if (request.LinkType == NativeLinkType.Modular)
+                        {
+                            // 같은 폴더의 공유 라이브러리를 찾는다(UE MacToolChain.cs:578-584 — @loader_path·@executable_path 둘 다).
+                            finalArguments.AddRange(mac ? ["-Wl,-rpath,@loader_path/", "-Wl,-rpath,@executable_path/"] : ["-Wl,-rpath,$ORIGIN"]);
+                        }
+
+                        finalArguments.AddRange(["-o", "{OUTPUT0}"]);
+                    }
+                }
+
+                actions.Add(new(terminalId, module.Name, archive ? "Archive" : "Link",
+                    tool, finalArguments, finalOutputs, finalInputs, [], extraInputs, predecessors,
+                    [request.ContextFingerprint, request.Configuration.ToString()]));
+            }
         }
 
         if (request.Configuration == NativeConfiguration.Asan && actions.Any(value => value.Kind == "Link"))

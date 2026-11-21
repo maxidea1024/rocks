@@ -29,6 +29,9 @@ internal static class ProjectFilesCommand
     private static readonly NativeConfiguration[] Configurations =
         [NativeConfiguration.Debug, NativeConfiguration.Development, NativeConfiguration.Release, NativeConfiguration.Asan];
 
+    /// <summary>프로젝트 파일에 드는 구성인가(Coverage는 아니다, 6.3절).</summary>
+    public static bool IsIdeConfiguration(NativeConfiguration configuration) => Configurations.Contains(configuration);
+
     // 경로 비교 규칙이다(Windows는 대소문자 무시).
     private static readonly StringComparer PathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
@@ -135,10 +138,16 @@ internal static class ProjectFilesCommand
             await CSharpProjectsAsync(root, cancellationToken));
         SortedDictionary<string, byte[]> files = VisualStudioProjects.Render(input);
         var fingerprints = ProjectFilesOutput.Fingerprints(plans, targets, ProjectFilesOutput.ToolchainHash(projectFiles, files));
-        ProjectFilesWriteResult written = await ProjectFilesOutput.WriteAsync(root, projectFiles, input.SolutionPath, files, fingerprints, cancellationToken);
+        ProjectFilesWriteResult written = await ProjectFilesOutput.WriteAsync(root, projectFiles, input.SolutionPath, files, fingerprints,
+            toolchain.CompilerPath, cancellationToken);
         Console.WriteLine($"Wrote {Path.Combine(root, "Rocks.slnx")} and {projectFiles}: {written.Written} written, {written.Unchanged} unchanged, " +
             $"{written.Removed} removed{(android ? "" : " (no Android NDK found: Android configurations left out)")}; " +
             $"{System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds:F0} ms in total.");
+        foreach (string note in ProjectFilesStaleness.GeneratedHeaderNotes(model, plans))
+        {
+            Console.WriteLine("note: " + note);
+        }
+
         if (!await ClangToolsetInstalledAsync(toolchain, cancellationToken))
         {
             Console.WriteLine($"warning: Visual Studio component {ClangToolsetComponent} (C++ Clang tools for Windows) is not installed; " +

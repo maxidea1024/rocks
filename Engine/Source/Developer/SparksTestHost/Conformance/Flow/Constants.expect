@@ -11,3 +11,5 @@ error S0510 45:17
 error S0510 46:16
 error S0510 47:17
 error S0510 49:41
+# Flow rules only: context and lifecycle rules (LC3) are checked in the Rules area.
+stage flow

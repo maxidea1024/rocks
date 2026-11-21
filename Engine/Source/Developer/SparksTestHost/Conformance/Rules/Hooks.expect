@@ -1,0 +1,12 @@
+# Lifecycle hooks (S0803-S0806, 3.12): hook names with a suggestion, argument lists taken from the front
+# (Tick: dt, Trigger*: other and trigger, Collision*: other and hit), duplicates in a class, physics hooks only
+# in components and actors, handlers only in lifecycle classes.
+error S0803 45:8
+error S0803 48:8
+error S0805 51:23
+error S0806 54:8
+error S0805 57:21
+error S0805 60:24
+error S0805 63:14
+error S0804 71:8
+error S0804 76:8

@@ -24,11 +24,12 @@ constexpr StringView SchemaFix = "Regenerate the binding schema; do not edit it 
 
 constexpr StringView RootKeys[] = {"format", "package", "module", "types"};
 constexpr StringView TypeKeys[] = {
-    "name",          "id",     "kind",      "base",   "scriptExtensible",
-    "constructible", "fields", "functions", "events", "cases"};
+    "name",      "id",     "kind",  "base", "scriptExtensible", "constructible", "fields",
+    "functions", "events", "cases", "held"};
 constexpr StringView FieldKeys[] = {"name", "id", "type", "access", "computed", "changed"};
 constexpr StringView FunctionKeys[] = {
-    "name", "id", "static", "async", "overridable", "typeParameters", "parameters", "returns"};
+    "name",       "id",      "static",  "async", "overridable", "typeParameters",
+    "parameters", "returns", "effects", "pure",  "oneShot"};
 constexpr StringView FunctionParameterKeys[] = {"name", "type", "perSecond"};
 constexpr StringView EventParameterKeys[] = {"name", "type"};
 constexpr StringView TypeParameterKeys[] = {"name", "constraint"};
@@ -450,6 +451,7 @@ private:
         bool allowFunctions = true;
         bool allowEvents = true;
         bool allowCases = true;
+        bool allowHeld = true;
         const bool isEnum = knownKind && type.kind == SchemaTypeKind::Enum;
         if (knownKind) {
             const SchemaTypeKind k = type.kind;
@@ -461,6 +463,11 @@ private:
             allowFunctions = !isEnum;
             allowEvents = k == SchemaTypeKind::Object;
             allowCases = isEnum;
+            allowHeld = k == SchemaTypeKind::Object;
+            if (!allowHeld) {
+                RejectKey(object, "held", "object");
+            }
+
             if (!allowBase) {
                 RejectKey(object, "base", "object, asset and interface");
             }
@@ -499,6 +506,10 @@ private:
 
         type.scriptExtensible = allowExtensible && ReadBool(object, "scriptExtensible", false);
         type.constructible = !allowConstructible || ReadBool(object, "constructible", true);
+        type.held = allowHeld && ReadBool(object, "held", false);
+        if (type.held && type.scriptExtensible) {
+            ReportAt(object.Find("held"), "A held resource type is not script extensible.");
+        }
 
         memberNames_.Clear();
         type.firstField = static_cast<uint32>(out_.fields_.Size());
@@ -689,6 +700,42 @@ private:
                      "'overridable' is only for functions of object and asset types.");
         } else if (function.overridable && function.isStatic) {
             ReportAt(object.Find("overridable"), "A static function cannot be overridable.");
+        }
+
+        function.pure = ReadBool(object, "pure", false);
+        function.oneShot = ReadBool(object, "oneShot", false);
+        if (function.pure && function.oneShot) {
+            ReportAt(object.Find("oneShot"), "A pure function has no one-shot effect.");
+        }
+        const JsonValue effects = ArrayOf(object, "effects");
+        for (usize index = 0; index < effects.Size() && error_ == ErrorCode::None; ++index) {
+            const JsonValue element = effects.At(index);
+            struct EffectName {
+                StringView name;
+                uint8 bit;
+            };
+            constexpr EffectName Names[] = {{"spawn", SchemaEffects::Spawn},
+                                            {"acquire", SchemaEffects::Acquire},
+                                            {"readiness", SchemaEffects::Readiness},
+                                            {"io", SchemaEffects::Io},
+                                            {"wallClock", SchemaEffects::WallClock}};
+            uint8 bit = 0;
+            for (const EffectName& name : Names) {
+                if (element.IsString() && element.GetString() == name.name) {
+                    bit = name.bit;
+                }
+            }
+
+            if (bit == 0) {
+                ReportAt(element, "An effect is one of 'spawn', 'acquire', 'readiness', 'io' and "
+                                  "'wallClock'.");
+            } else if ((function.effects & bit) != 0) {
+                ReportAt(element, "An effect is listed twice.");
+            } else if (function.pure) {
+                ReportAt(element, "A pure function has no effects.");
+            } else {
+                function.effects = static_cast<uint8>(function.effects | bit);
+            }
         }
         function.firstTypeParameter = static_cast<uint32>(out_.typeParameters_.Size());
         const JsonValue typeParameters = ArrayOf(object, "typeParameters");

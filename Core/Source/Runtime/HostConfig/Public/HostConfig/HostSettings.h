@@ -58,13 +58,13 @@ struct HostSettingsOptions {
     StringView platform{};
     // 호스트·게임 모듈의 리플렉션 타입 등록(선택)이다. TraceControl 다음에 부른다.
     Result<void> (*registerModuleTypes)(ModuleRegistration&) noexcept = nullptr;
-    // 프로세스 모듈 로더다(선택, Docs/Design/ModuleLoader.ko.md 3.10절 MD22). Initialize는 설정
-    // 파일을 읽기 전에 모듈 표의 순서(의존 순서)로 모든 모듈의 registerSettings(모듈 수명 객체의
-    // static RegisterSettings — log.*·trace.*·기기 프로필 등)를 부른다. 로더가 있으면 그 표를 쓰고
-    // 각 모듈의 lease를 설정 문맥에 맡긴다(ConfigContext::RetainModule — 로더는 HostSettings보다
-    // 오래 살아야 한다). 없으면 이 실행 파일의 모듈 표(GeneratedModuleTable)를 빈 lease(정적 링크
-    // 코드)로 쓴다. 그래서 늦게 시작하는 모듈의 CVar도 CompleteStartup·ReportUnresolved 전에
-    // 등록된다.
+    // 프로세스 모듈 로더다(필수, Docs/Design/ModuleLoader.ko.md 3.10절 MD22·3.14절 — 없으면
+    // Initialize가 InvalidArgument). Initialize는 설정 파일을 읽기 전에 로더 표의 순서(의존 순서)로
+    // 모든 모듈의 registerSettings(모듈 수명 객체의 static RegisterSettings — log.*·trace.*·기기
+    // 프로필 등)를 부르고 각 모듈의 lease를 설정 문맥에 맡긴다(ConfigContext::RetainModule — 로더는
+    // HostSettings보다 오래 살아야 한다). 그래서 늦게 시작하는 모듈의 CVar도
+    // CompleteStartup·ReportUnresolved 전에 등록된다. 호스트는
+    // launch::ApplicationContext::Modules(), 시험은 test::ProcessModules()를 넘긴다.
     ModuleLoader* modules = nullptr;
     // 호스트 고유의 설정 등록(선택)이다. 모듈 설정 등록 다음, 파일보다 먼저 부른다.
     Result<void> (*registerSettings)(config::ConfigContext&) noexcept = nullptr;
@@ -158,7 +158,7 @@ public:
 private:
     static RegistryOptions MakeOptions(NamePool& names) noexcept;
     // 모든 모듈의 registerSettings를 모듈 표 순서로 부른다(HostSettingsOptions::modules).
-    Result<void> RegisterModuleSettings(ModuleLoader* modules) noexcept;
+    Result<void> RegisterModuleSettings(ModuleLoader& modules) noexcept;
     // 거부를 진단과 함께 기록한다(진단은 비운다).
     void ReportRejected(StringView what, ErrorCode error) noexcept;
     // 남은 Warning 진단(오래된 사용자 파일의 버린 키 등)을 Warning 로그로 남기고 진단을 비운다.

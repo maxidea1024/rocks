@@ -591,11 +591,37 @@ void NameBinder::ResolveDeclarationTypes(uint32 module) noexcept {
 
             break;
         }
-        case SyntaxKind::ExtensionEvent:
-            static_cast<void>(
-                ResolveSignature(moduleContext, NoSymbol, tree.Child(node, 4), NoNode, false));
-            DeclareParameters(moduleContext, NoSymbol, tree.Child(node, 4));
+        case SyntaxKind::ExtensionEvent: {
+            // 확장 이벤트 심볼(owner = 대상 엔진 타입 Actor·World, 그 밖이면 NoSymbol — S0813)이다.
+            // 이름 공간에 넣지 않으며 `on`·`emit`이 import로 찾는다(3.12절).
+            const uint32 targetNode = tree.Child(node, 2);
+            const uint32 nameNode = tree.Child(node, 3);
+            uint32 event = NoSymbol;
+            if (nameNode != NoNode && tree.Node(nameNode).kind == SyntaxKind::Name) {
+                const uint32 target = targetNode == NoNode
+                                          ? NoSymbol
+                                          : LookupType(module, NodeText(module, targetNode));
+                const uint32 world = FindName(SpaceKey(NameSpaceKind::Engine, 0), "World");
+                Symbol entry;
+                entry.kind = SymbolKind::Event;
+                entry.name = NodeText(module, nameNode);
+                entry.module = module;
+                entry.node = node;
+                entry.nameNode = nameNode;
+                entry.owner =
+                    target != NoSymbol && (target == actor_ || target == world) ? target : NoSymbol;
+                event = AddSymbol(entry);
+            }
+
+            const uint32 signature =
+                ResolveSignature(moduleContext, event, tree.Child(node, 4), NoNode, false);
+            if (event != NoSymbol) {
+                c.symbols_[event].signature = signature;
+            }
+
+            DeclareParameters(moduleContext, event, tree.Child(node, 4));
             break;
+        }
         case SyntaxKind::Class:
         case SyntaxKind::Struct:
         case SyntaxKind::Interface: {

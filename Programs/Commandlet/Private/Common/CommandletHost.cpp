@@ -145,9 +145,11 @@ Result<int32> TraceReport(void* context, Span<const StringView> args,
 // config-dump가 보는 설정 문맥이다. 엔진 호스트와 같은 부트(HostSettings — log.*·trace.*·
 // TracePresets 등록 → 엔진 층 파일 → CompleteStartup)를 거친다. 실행 파일 위에 Engine/Config가
 // 없으면 엔진 층 파일 없이 코드 기본값이다. 실패는 HostSettings가 기록했다(config-dump만 빠진다).
-bool BootSettings(HostSettings& settings) noexcept {
+// 모듈 설정 등록은 프로세스 로더(modules — Launch 소유)의 표를 쓴다.
+bool BootSettings(HostSettings& settings, ModuleLoader& modules) noexcept {
     char engineDir[4096] = {};
     HostSettingsOptions options;
+    options.modules = &modules;
     if (auto found = FindEngineDirectory(Span<char>(engineDir)); found) {
         options.engineDir = StringView(engineDir, found.Value());
     }
@@ -165,7 +167,7 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
         ModuleLoader& modules) noexcept {
     HostSettings settings(allocator);
     AssetCommandContext assetContext{&allocator, &modules};
-    const bool settingsReady = BootSettings(settings);
+    const bool settingsReady = BootSettings(settings, modules);
     CommandletRegistry registry;
     auto registered = registry.Register(
         {"core-check", "Check the Core allocator lifecycle.", &CoreCheck, nullptr});

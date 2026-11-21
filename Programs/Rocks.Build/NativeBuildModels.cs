@@ -457,6 +457,21 @@ public static class LinkTypes
     }
 
     /// <summary>
+    /// Modular 호스트 모듈인가(Docs/Design/ModuleLoader.ko.md 3.14절 ML4b): Modular에서 모듈 표 제공 모듈에 닿는(진입점 모듈인) 실행 파일
+    /// 모듈이다. 공유 라이브러리로 링크하고 실행 파일은 빌드 생성 진입 TU와 Launch만 링크한다. 입력 검사가 그런 실행 파일이 Launch에 닿게 한다.
+    /// </summary>
+    public static bool IsHostModule(NativeModuleInput module, NativeLinkType linkType, bool entryModule) =>
+        linkType == NativeLinkType.Modular && module.Kind == NativeModuleKind.Executable && entryModule;
+
+    /// <summary>
+    /// 모듈 코드가 공유 라이브러리로 링크되는가: Modular에서 서드파티가 아닌 라이브러리 모듈과 호스트 모듈(<see cref="IsHostModule"/>)이다.
+    /// 그 진입점 모듈의 소스가 <c>ROCKS_MODULE_SHARED_LIBRARY=1</c>을 받는다.
+    /// </summary>
+    public static bool CompilesAsSharedLibrary(NativeModuleInput module, NativeLinkType linkType, bool entryModule) =>
+        linkType == NativeLinkType.Modular && !module.ThirdParty &&
+        (module.Kind == NativeModuleKind.StaticLibrary || IsHostModule(module, linkType, entryModule));
+
+    /// <summary>
     /// Modular 공유 라이브러리 파일 이름(확장자 앞까지)이다: <c>&lt;타깃&gt;-&lt;모듈&gt;</c>, Development가 아니면
     /// <c>-&lt;플랫폼&gt;-&lt;구성&gt;</c>을 붙이고 macOS·Linux는 <c>lib</c> 접두를 붙인다(UE UEBuildTarget.cs:5400, 5473-5508).
     /// </summary>
@@ -587,6 +602,11 @@ public sealed record NativeActionResult(string Id, string Module, string Kind, b
 public sealed record NativeBuildResult
 {
     public required bool Succeeded { get; init; }
+
+    // IDE 대상 논리 명령(IdePlanner.Select — 출력 아래 소스를 뺀 손으로 쓴 소스)이다. 빌드 CLI가 Visual Studio 프로젝트 파일의 낡음
+    // 지문(Docs/Design/ProjectFiles.ko.md 9절)을 계산한다. 보고서(action-report.json)에는 싣지 않는다.
+    [JsonIgnore]
+    public IReadOnlyList<IdeCompile> IdeCompiles { get; init; } = [];
 
     public required int ExecutedActions { get; init; }
 

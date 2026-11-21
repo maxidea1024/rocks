@@ -1,1 +1,1 @@
-event Actor.Interacted(actor: Actor);
+@authorityOnly event Actor.Interacted(actor: Actor);

@@ -95,6 +95,9 @@ struct CheckContext {
 };
 
 class FlowAnalyzer;
+class IrBuilder;
+class IrWriter;
+class BytecodeEncoder;
 
 class TypeChecker final {
 public:
@@ -104,6 +107,9 @@ public:
 
 private:
     friend class FlowAnalyzer;
+    friend class IrBuilder;
+    friend class IrWriter;
+    friend class BytecodeEncoder;
 
     // 노드 대표 토큰의 글자다(연산자·멤버 이름·리터럴).
     StringView TokenText(uint32 module, uint32 node) const noexcept;
@@ -155,6 +161,140 @@ private:
     bool HasAttribute(uint32 module, uint32 declaration, StringView name) const noexcept;
     // (패키지 이름, 모듈 import 경로, 원문 위치) byte 순서로 left가 앞인지다(순환 진단 위치).
     bool DeclaredBefore(uint32 left, uint32 right) const noexcept;
+
+    // ---- 이벤트·hook(CheckEvents.cpp, 3.12절 — Rules 단계) ----
+    // class·struct 본문의 hook·handler·이벤트 선언과 함수의 재진입 표시를 검사한다.
+    void CheckHandlers(const CheckContext& context, uint32 typeNode) noexcept;
+    // 구간 하나짜리 `on X()`(seen은 이 class에서 이미 본 hook 이름)다.
+    void CheckHook(const CheckContext& context, uint32 handler, uint32 nameNode,
+                   Array<StringView>& seen) noexcept;
+    void CheckPathHandler(const CheckContext& context, uint32 handler) noexcept;
+    // handler 인자를 expected의 앞부분과 대조한다(S0805·S0810).
+    void CheckHandlerParameters(const CheckContext& context, uint32 handler, StringView eventName,
+                                Span<const uint32> expected, DiagnosticCode code) noexcept;
+    // 재진입 표시(SD11): allowed면 await가 있을 때 표시가 하나 있어야 하고(S0816), 아니면 표시가
+    // 없어야 한다(S0817).
+    void CheckReentrancy(const CheckContext& context, uint32 node, bool allowed, bool awaits,
+                         uint32 reportNode) noexcept;
+    bool SamePath(uint32 leftModule, uint32 left, uint32 rightModule, uint32 right) const noexcept;
+    // `emit` 경로를 해석해 이벤트 시그니처를 돌려준다(진단을 냈거나 모르면 NoSignature).
+    uint32 ResolveEmit(const CheckContext& context, uint32 node) noexcept;
+    void CollectExtensionEvents() noexcept;
+    void CheckExtensionEvents() noexcept;
+    // type(또는 그 원소)의 이벤트다(멤버 이벤트, Actor·World 확장 이벤트). 같은 이름의 확장
+    // 이벤트가 import하지 않은 모듈에만 있으면 hiddenModule에 그 모듈을 둔다.
+    // engineOnly면 Sparks 멤버 이벤트·언어 이벤트를 받지 않는다(`this` 원천). 보이는 확장 이벤트가
+    // 다른 모듈에도 있으면 otherModule에 그 모듈을 둔다(모호성 — S0814).
+    uint32 FindEvent(uint32 module, uint32 type, StringView name, uint32* hiddenModule,
+                     uint32* otherModule, bool engineOnly) noexcept;
+    uint32 FindExtensionEvent(uint32 module, uint32 target, StringView name, uint32* hiddenModule,
+                              uint32* otherModule = nullptr) const noexcept;
+    void ReportAmbiguousExtension(const CheckContext& context, uint32 node, uint32 event,
+                                  uint32 otherModule) noexcept;
+    // from 모듈에서 module을 import하는 경로(다른 패키지면 패키지 이름 포함)를 out에 붙인다.
+    void AppendModuleDisplay(StringBuilderBase& out, uint32 from, uint32 module) const noexcept;
+    // 식의 `X.E`에서 X 타입의 확장 이벤트다(없으면 NoSymbol, 모호하면 진단을 내고
+    // AmbiguousExtension).
+    uint32 MemberExtensionEvent(const CheckContext& context, uint32 node, uint32 type,
+                                StringView name) noexcept;
+    static constexpr uint32 AmbiguousExtension = NumericLimits<uint32>::Max() - 3;
+    // package가 dependency에 (전이로) 의존하는지다.
+    bool DependsOn(uint32 package, uint32 dependency) noexcept;
+    bool HasChanged(uint32 field) const noexcept;
+    bool ContainsAwait(uint32 module, uint32 node) noexcept;
+    uint32 EngineSymbol(StringView name) const noexcept;
+
+    // ---- 실행 문맥·효과·attribute(CheckContexts.cpp, 3.13절 — Rules 단계) ----
+    // 함수·hook·handler 본문 하나의 효과다(direct는 본문이 직접, total은 부른 함수까지).
+    struct EffectBody {
+        uint32 module = NoModule;
+        uint32 node = NoNode;
+        uint32 symbol = NoSymbol; // 함수 심볼(handler는 NoSymbol)
+        uint32 owner = NoSymbol;  // class·struct 심볼(최상위 함수는 NoSymbol)
+        uint32 direct = 0;
+        uint32 total = 0;
+        uint32 firstSite = 0; // effectSites_ 구간
+        uint32 siteCount = 0;
+    };
+
+    // 효과가 생기는 자리(await·emit·대입·호출)다. 호출이면 callee에 부른 함수가 있다.
+    struct EffectSite {
+        uint32 body;
+        uint32 node;
+        uint32 bits;
+        uint32 callee;
+    };
+
+    // `while` 경로 판정의 상태(대기했는지)다.
+    static constexpr uint8 WaitStateWaited = 1;
+    static constexpr uint8 WaitStateNotWaited = 2;
+
+    void CheckAttributes(uint32 module) noexcept;
+    void CheckAttributeList(const CheckContext& context, uint32 declaration, uint32 place,
+                            bool isVar, bool noParameters, bool worldServiceVar) noexcept;
+    void CheckAttributeArguments(const CheckContext& context, uint32 declaration, uint32 attribute,
+                                 StringView name, uint8 shape) noexcept;
+    // attribute 인자가 숫자(리터럴, 앞의 `-`, 숫자 const 이름)인지다.
+    bool IsAttributeNumber(uint32 module, uint32 expression, bool integer,
+                           bool nonNegative) noexcept;
+    void AnalyzeEffects() noexcept;
+    void CollectBodyEffects(uint32 bodyIndex) noexcept;
+    void CheckBodyContext(uint32 bodyIndex) noexcept;
+    // 이 본문(class 메서드)이 대신하는 기반·interface 함수를 dispatchPairs_에 더한다.
+    void AddDispatch(uint32 body) noexcept;
+    void AddInheritedImplementations() noexcept;
+    // 호출 대상 심볼이 부를 수 있는 본문(자기 본문, 재정의, interface 구현)마다 visit(본문)이다.
+    template <typename Visit>
+    void ForEachCallTarget(uint32 callee, Visit&& visit) const noexcept;
+    uint32 SiteEffects(const EffectSite& site) const noexcept;
+    // 문맥 attribute(자기 것, 없으면 재정의한 기반 함수 사슬의 것)다.
+    StringView ContextAttribute(uint32 body) const noexcept;
+    // 문장 안에 정지하는 `await`가 있는지다(효과 분석 뒤).
+    bool StatementWaits(uint32 module, uint32 node) noexcept;
+    uint32 AwaitEffect(uint32 module, uint32 operand) noexcept;
+    uint32 WriteEffect(uint32 module, uint32 target) noexcept;
+    // states(WaitState* 비트)로 node에 들어갔을 때 나가는 상태다. 대기하지 않은 `continue`가
+    // 있으면 continuesWithoutWait를 켠다.
+    uint8 WaitStates(uint32 module, uint32 node, uint8 states, bool& continuesWithoutWait) noexcept;
+
+    // ---- 권한·RPC·저장 타입(CheckNetwork.cpp, 3.15절 — Rules 단계) ----
+    // 저장 가능 타입(objects면 객체 참조를 더한 복제 타입)인지다.
+    // 타입별 판정을 storable_에 기억한다(계산 중인 타입은 가능 — 컨테이너를 거친 재귀 struct).
+    bool IsStorableType(uint32 type, bool objects) noexcept;
+    bool ComputeStorable(uint32 value, bool objects) noexcept;
+    // 타입이나 그 타입 인자가 유지 자원인지다(S0904가 알리므로 저장·복제 판정은 건너뛴다).
+    bool ContainsHeldType(uint32 type) noexcept;
+    // 재정의(override) 함수가 대신하는 기반 사슬의 멤버다(재정의가 아니면 NoSymbol).
+    uint32 OverriddenMember(uint32 function) const noexcept;
+    // 재정의 사슬이 엔진 overridable 함수에 닿는지다(엔진이 직접 부르는 진입 본문).
+    bool OverridesEngineFunction(uint32 function) const noexcept;
+    // `@rpc` 함수의 대상 접두 이름(`Server` 등)이다. 재정의는 기반의 것을 잇는다. RPC가 아니면
+    // 빈 글자, 대상을 모르면 "?".
+    StringView RpcTarget(uint32 function) const noexcept;
+    // `Server.F` 등 RPC 접두 뒤의 멤버다(S1004).
+    ExpressionValue RpcMember(const CheckContext& context, uint32 node, uint32 prefix,
+                              StringView name) noexcept;
+    void CheckNetwork(uint32 module) noexcept;
+    // 권한 시험(`Owner.HasAuthority`, Actor의 `HasAuthority`, 그것을 한 항으로 둔 `&&`)인지다.
+    bool IsAuthorityTest(uint32 module, uint32 expression) const noexcept;
+    // 부정 권한 시험(`!HasAuthority`, 그것을 한 항으로 둔 `||`)인지다: 거짓이면 권한이 있다.
+    bool IsNegatedAuthorityTest(uint32 module, uint32 expression) const noexcept;
+    // 문장이 반드시 `return`으로 끝나는지다(`return` 또는 마지막 문장이 그런 블록).
+    bool AlwaysReturns(uint32 module, uint32 statement) const noexcept;
+
+    // ---- 유지 자원·로드(CheckResources.cpp, 3.14절 — Rules 단계) ----
+    // 유지 자원 타입(schema `held` 엔진 객체, `LoadRequest<T>`, 그 `T?`)인지다.
+    bool IsHeldType(uint32 type) noexcept;
+    void CheckResources(uint32 module) noexcept;
+    // `acquire` 효과의 엔진 함수가 유지 자원 타입을 돌려주는지 본다(S1120).
+    void CheckAcquireReturns() noexcept;
+    void CheckHeldEvents() noexcept;
+
+    // ---- typed IR 내림(IrDump.cpp, LC4 — Codegen 단계, 진단 없는 컴파일에서만) ----
+    void LowerProgram() noexcept;
+    void LowerModule(uint32 module) noexcept;
+    // 획득한 지역 자원 뒤의 정지하는 await(S0905 — 효과 분석 뒤).
+    void CheckResourceWaits() noexcept;
 
     // ---- 흐름 분석(CheckFlow.cpp, 3.11절) ----
     // stale이면 await 뒤 객체 지역 이름의 읽기를 staleRead_에 표시하고(본문 검사 전), 아니면
@@ -366,6 +506,24 @@ private:
     // 읽기를 `T?`로 본다).
     Array<uint8> staleRead_;
     uint32 staleModule_ = NoModule;
+    // 문맥·수명 규칙(LC3, 3.12절)을 검사하는지다(단계가 Rules 이상).
+    bool rules_ = false;
+    // 확장 이벤트 심볼(심볼 번호 순)이다.
+    Array<uint32> extensionEvents_;
+    // 효과 분석(3.13절)의 본문·자리와 함수 심볼 → 본문 번호(NoLocalIndex 없음)다.
+    Array<EffectBody> effectBodies_;
+    Array<EffectSite> effectSites_;
+    Array<uint32> effectOfSymbol_;
+    // 디스패치 표: (기반·interface 함수 심볼 << 32 | 본문) 쌍과, 심볼 → dispatchBodies_ 구간.
+    Array<uint64> dispatchPairs_;
+    // S0905를 볼 지역 자원 선언·`if (let)`((모듈 << 32) | 노드)이다.
+    Array<uint64> resourceWaits_;
+    // 권한 이벤트(`@authorityOnly`·server 발행) handler((모듈 << 32) | 노드)다(3.15절).
+    Array<uint64> authorityHandlers_;
+    // IsStorableType 기억 표(타입 × 객체 허용 여부 → StorableState).
+    Array<uint8> storable_;
+    Array<uint32> dispatchFirst_;
+    Array<uint32> dispatchBodies_;
 };
 
 } // namespace rocks::sparks::detail

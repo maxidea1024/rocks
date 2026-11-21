@@ -1,0 +1,56 @@
+event Actor.Interacted(by: Actor);
+
+class Door : ScriptableComponent {
+    var Count = 0;
+
+    @skipWhileBusy
+    on Owner.Interacted(by: Actor) {
+        _ = by;
+        await NextTick();
+    }
+
+    @restart
+    on Owner.Damaged(_: float) {
+        await NextTick();
+    }
+
+    on Owner.Destroyed() {
+        await NextTick();
+    }
+
+    @skipWhileBusy
+    on TriggerEnter(other: Actor) {
+        _ = other;
+        await NextTick();
+    }
+
+    on CollisionEnter() {
+        await NextTick();
+    }
+
+    @skipWhileBusy
+    on Start() {
+    }
+
+    @restart
+    on Count.Changed() {
+    }
+
+    @skipWhileBusy
+    @restart
+    on TriggerExit() {
+        await NextTick();
+    }
+
+    @skipWhileBusy
+    on CollisionExit() {
+    }
+
+    @restart
+    fn Run() {
+    }
+}
+
+@restart
+fn Top() {
+}

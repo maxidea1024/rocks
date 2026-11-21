@@ -1,0 +1,54 @@
+const Limit: int = 10;
+const Greeting: string = "hi";
+
+enum Side {
+    Left,
+    Right
+}
+
+struct Pair {
+    var First: int = 0;
+    var Second: Side;
+}
+
+fn Shapes(n: int8, x: float): float {
+    let small = n * 2;
+    let wide = float(small) + x;
+    let r = Rotator(Yaw: 90.0);
+    let t = Transform(Location: vec3(1.0, 2.0, 3.0));
+    let c = Color(R: 1.0, A: 0.5);
+    let q = quat(0.0, 0.0, 0.0, 1.0);
+    let v = -t.Location;
+    return wide + r.Yaw + c.A + q.W + v.X;
+}
+
+fn Containers(items: Array<int>, table: Map<string, int>): int {
+    let list = [1, 2, Limit];
+    let first = (items[0] ?? 0) + (list[1] ?? 0);
+    let found = table["a"] ?? 0;
+    let named: Map<string, int> = ["x": 1, "y": 2];
+    return first + found + (named["x"] ?? -1);
+}
+
+fn Structs(): Side {
+    var pair = Pair(First: 1);
+    pair.First += 2;
+    pair.Second = Side.Right;
+    if (pair.Second == Side.Left || pair.First > Limit) {
+        return Side.Left;
+    }
+
+    return pair.Second;
+}
+
+fn Words(): string {
+    let tag = Tag("Game.Door");
+    _ = tag;
+    return Greeting;
+}
+
+fn Optional(a: Actor?, v: vec3?): float {
+    let location = a?.Location;
+    let z = v ?? vec3(0.0, 0.0, 1.0);
+    return (location ?? z).Z;
+}

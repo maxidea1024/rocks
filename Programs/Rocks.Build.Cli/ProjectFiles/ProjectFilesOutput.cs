@@ -9,10 +9,11 @@ namespace Rocks.Build.Cli;
 /// 생성 상태 파일(<c>ProjectFiles.state.json</c>)의 내용이다(Docs/Design/ProjectFiles.ko.md 6.5·9절). Files는 이번 실행이 만든 파일의
 /// 저장소 기준 경로(정렬), Fingerprints는 <c>타깃|구성</c> → 낡음 지문(<see cref="IdePlanner.Fingerprint"/>)이다.
 /// </summary>
-internal sealed record ProjectFilesState(int FileVersion, IReadOnlyList<string> Files, IReadOnlyDictionary<string, string> Fingerprints)
+/// Compiler는 생성 때 쓴 clang-cl 경로다(빌드 컴파일러가 다르면 낡음을 비교하지 않는다, 개정 8).
+internal sealed record ProjectFilesState(int FileVersion, IReadOnlyList<string> Files, IReadOnlyDictionary<string, string> Fingerprints, string Compiler)
 {
-    // 지문 정의를 (타깃, 구성) 계획 단위로 바꾸며 2로 올렸다(개정 6).
-    public const int CurrentFileVersion = 2;
+    // 지문 정의를 (타깃, 구성) 계획 단위로 바꾸며 2, 생성 컴파일러를 더하며 3으로 올렸다(개정 6·8).
+    public const int CurrentFileVersion = 3;
 }
 
 /// <summary>쓰기 결과다. Written은 내용이 바뀌어 쓴 파일 수, Removed는 지운 파일 수다.</summary>
@@ -33,7 +34,7 @@ internal static class ProjectFilesOutput
     private static readonly StringComparer PathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
     public static async Task<ProjectFilesWriteResult> WriteAsync(string root, string projectFilesDirectory, string solutionPath,
-        IReadOnlyDictionary<string, byte[]> files, IReadOnlyDictionary<string, string> fingerprints, CancellationToken cancellationToken)
+        IReadOnlyDictionary<string, byte[]> files, IReadOnlyDictionary<string, string> fingerprints, string compiler, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(projectFilesDirectory);
         await using var invocationLock = await OutputInvocationLock.AcquireAsync(projectFilesDirectory, cancellationToken);
@@ -69,7 +70,7 @@ internal static class ProjectFilesOutput
         }
 
         var state = new ProjectFilesState(ProjectFilesState.CurrentFileVersion, [.. current],
-            new SortedDictionary<string, string>(fingerprints.ToDictionary(pair => pair.Key, pair => pair.Value), StringComparer.Ordinal));
+            new SortedDictionary<string, string>(fingerprints.ToDictionary(pair => pair.Key, pair => pair.Value), StringComparer.Ordinal), compiler);
         AtomicFile.WriteIfChanged(statePath, new UTF8Encoding(false).GetBytes(JsonSerializer.Serialize(state, JsonOptions) + "\n"));
         return new(written, unchanged, removed);
     }
@@ -89,7 +90,7 @@ internal static class ProjectFilesOutput
             ProjectFilesState? state = JsonSerializer.Deserialize<ProjectFilesState>(File.ReadAllBytes(statePath));
             bool valid = state is not null && state.FileVersion == ProjectFilesState.CurrentFileVersion && state.Files is not null &&
                 state.Files.All(path => !string.IsNullOrEmpty(path)) && state.Fingerprints is not null &&
-                state.Fingerprints.All(pair => !string.IsNullOrEmpty(pair.Key) && !string.IsNullOrEmpty(pair.Value));
+                state.Fingerprints.All(pair => !string.IsNullOrEmpty(pair.Key) && !string.IsNullOrEmpty(pair.Value)) && !string.IsNullOrEmpty(state.Compiler);
             return valid ? state : null;
         }
         catch (JsonException)

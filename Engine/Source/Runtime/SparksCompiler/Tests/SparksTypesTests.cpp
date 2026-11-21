@@ -543,12 +543,13 @@ TEST(SparksTypes_Deterministic) {
         REQUIRE(AppendDiagnostics(out, fixture.sources, fixture.diagnostics));
         out.AppendFormat("{} {}\n", fixture.compilation.Symbols().Size(),
                          fixture.compilation.Types().Size());
-        // 타입 진단 넷과 흐름 진단 둘(S0712 soft, await 뒤 `a.Destroyed`의 S0412)이다.
-        if (round == 0 && fixture.diagnostics.Count() != 6) {
+        // 타입 진단 넷, 흐름 진단 둘(S0712 soft, await 뒤 `a.Destroyed`의 S0412), 기반 class
+        // 이벤트의 emit(S0811)이다.
+        if (round == 0 && fixture.diagnostics.Count() != 7) {
             fixture.Print();
         }
 
-        CHECK(fixture.diagnostics.Count() == 6);
+        CHECK(fixture.diagnostics.Count() == 7);
     }
 
     CHECK(first.View() == second.View());

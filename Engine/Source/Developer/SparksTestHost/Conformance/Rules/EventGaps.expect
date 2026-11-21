@@ -1,0 +1,24 @@
+# Event rule gaps (3.12): own events as hooks and calls, World and array sources with extension events,
+# Changed of constants, language members and array sources, unresolved sources (no S0806), 'this' alone,
+# extension events in expressions (await, Race, calls), 'this' with Sparks events, widget reentrancy,
+# colliders by the created type, and no handler rules in a class whose base is unresolved.
+error S0803 11:8
+error S0812 16:9
+error S0808 28:14
+error S0808 36:15
+error S0809 39:14
+error S0809 42:19
+error S0807 45:16
+error S0317 48:8
+error S0317 51:8
+error S0807 54:8
+error S0812 64:9
+error S0812 65:9
+error S0808 76:13
+error S0808 80:19
+error S0807 81:14
+error S0816 86:8
+error S0817 90:5
+error S0802 96:32
+error S0802 97:18
+error S0318 100:16

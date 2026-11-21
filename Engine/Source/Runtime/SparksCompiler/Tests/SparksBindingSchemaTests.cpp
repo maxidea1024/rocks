@@ -571,6 +571,43 @@ TEST(SparksBindingSchema_TypeNotation) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
+// 효과·유지 자원 key(LC3b·LC3c — SL 3.13·3.14절): `effects`·`pure`·`oneShot`(함수), `held`(object
+// 타입).
+TEST(SparksBindingSchema_EffectKeysS1120) {
+    SystemAllocator allocator;
+    {
+        constexpr StringView Id = "\"id\": \"5a7e0000000000000000000000000003\"";
+        auto function = [&](StringView extra) noexcept {
+            return MemberSchema(allocator, "functions",
+                                Join(allocator, "\"name\": \"F\",\n", Id, extra).View());
+        };
+        CHECK(Accepts(function(",\n\"effects\": [\"spawn\", \"io\", \"wallClock\"]").View()));
+        CHECK(Accepts(function(",\n\"pure\": true").View()));
+        CHECK(Accepts(function(",\n\"oneShot\": true").View()));
+        CHECK(Rejects(function(",\n\"effects\": [\"fly\"]").View(), 14, 13));
+        CHECK(Rejects(function(",\n\"effects\": [\"io\", \"io\"]").View(), 14, 19));
+        CHECK(Rejects(function(",\n\"effects\": \"io\"").View(), 14, 12));
+        CHECK(Rejects(function(",\n\"pure\": true,\n\"oneShot\": true").View(), 15, 12));
+        CHECK(Rejects(function(",\n\"pure\": true,\n\"effects\": [\"spawn\"]").View(), 15, 13));
+        constexpr StringView Head =
+            "\"name\": \"Loop\",\n\"id\": \"5a7e0000000000000000000000000002\",\n\"kind\": ";
+        CHECK(Accepts(
+            TypeSchema(allocator, Join(allocator, Head, "\"object\",\n\"held\": true").View())
+                .View()));
+        CHECK(Rejects(
+            TypeSchema(allocator, Join(allocator, Head, "\"struct\",\n\"held\": true").View())
+                .View(),
+            10, 9));
+        CHECK(Rejects(
+            TypeSchema(allocator, Join(allocator, Head,
+                                       "\"object\",\n\"scriptExtensible\": true,\n\"held\": true")
+                                      .View())
+                .View(),
+            11, 9));
+    }
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
 TEST(SparksBindingSchema_FunctionS1120) {
     SystemAllocator allocator;
     {

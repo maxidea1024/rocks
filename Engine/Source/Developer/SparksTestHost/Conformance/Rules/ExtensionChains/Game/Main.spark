@@ -1,0 +1,14 @@
+import Left.Waves;
+import Right.Waves as RightWaves;
+
+class Fan : ScriptableComponent {
+    on Owner.Wave() {
+    }
+
+    on Owner.Nod() {
+    }
+
+    fn Raise(a: Actor) {
+        emit a.Wave();
+    }
+}

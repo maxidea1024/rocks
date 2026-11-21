@@ -1,0 +1,20 @@
+# 'await' and 'while' (S0601, S0602, S0603, 3.13): 'await' only in async functions and handlers; top-level functions
+# never wait or change engine state; 'while' only where the code can wait, with a real wait on every path to the
+# next pass ('break' and 'return' leave; awaiting an async function that never waits does not count; exhaustive
+# enum switches have no fall-through path; 'continue' of an inner loop belongs to it).
+error S0601 2:5
+error S0601 3:13
+error S0602 3:23
+error S0601 7:10
+error S0602 8:5
+error S0603 43:9
+error S0603 51:9
+error S0603 57:9
+error S0603 88:9
+error S0601 107:10
+error S0602 108:5
+error S0602 112:5
+error S0603 117:5
+error S0603 125:9
+error S0603 130:9
+error S0602 131:13

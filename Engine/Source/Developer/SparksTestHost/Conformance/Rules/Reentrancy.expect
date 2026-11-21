@@ -1,0 +1,10 @@
+# Reentrancy policy (S0816-S0817, SD11): event handlers and physics hooks that await need exactly one of
+# '@skipWhileBusy' and '@restart'; none on handlers without await, lifecycle hooks, Changed handlers or functions.
+error S0816 17:8
+error S0816 27:8
+error S0817 31:5
+error S0817 35:5
+error S0817 40:5
+error S0817 45:5
+error S0817 49:5
+error S0817 54:1

@@ -24,16 +24,16 @@ struct ModuleManifestData {
     Array<ModuleTableRow> rows;
     // 행마다 Prepare가 얻은 진입 기술이다.
     Array<const ModuleEntry*> entries;
-    // 행마다 manifest 폴더 기준 파일 이름·기대 크기·실행 파일 행인지다.
+    // 행마다 manifest 폴더 기준 파일 이름·기대 크기·호스트 모듈 행인지다.
     Array<const char*> files;
     Array<uint64> sizes;
-    Array<bool> executable;
+    Array<bool> host;
     // 이름·파일 이름 문자열(NUL 종료)을 이어 둔 저장소다. 한 번에 정확한 크기로 잡아 주소가
     // 고정된다.
     Array<char> text;
     // 모든 행의 의존 이름 포인터를 이어 둔 배열이다(text 안의 앞 행 이름을 가리킨다).
     Array<const char*> dependencyNames;
-    // Prepare가 연 라이브러리와 그 진입점 lease다(적재 순서).
+    // Prepare가 연 라이브러리와 그 진입점 lease다(적재 순서 — 모든 행을 싣으므로 행 색인과 같다).
     Array<platform::DynamicLibrary> libraries;
     Array<platform::DynamicLibraryLease> leases;
 };
@@ -45,12 +45,11 @@ bool ParseModuleManifest(StringView text, ModuleManifestData& data,
                          ModuleLoadReport& report) noexcept;
 
 // 해석한 행의 바이너리를 의존 순서로 준비한다(MD22 Prepare): 파일 크기 대조, OS 적재, export
-// 진입점 RocksModuleEntry 조회와 호출, 진입 기술 대조. 실행 파일 행은 executableEntry를 쓴다
-// (크기만 대조). directory는 manifest가 있는 폴더의 절대 경로다. 실패하면 false이고 report에
+// 진입점 RocksModuleEntry 조회와 호출, 진입 기술 대조. 호스트 행도 다른 행과 같이 싣는다.
+// directory는 manifest가 있는 폴더의 절대 경로다. 실패하면 false이고 report에
 // NotFound·Incompatible·OsLoadFailed·EntryMissing을 담으며 이미 연 라이브러리를 역순으로 닫는다.
-// 실행 파일 행이 있는데 executableEntry가 null이면 Incompatible(단계 "Manifest")이다.
 bool PrepareModuleBinaries(StringView directory, ModuleManifestData& data,
-                           ModuleEntryFunction executableEntry, ModuleLoadReport& report) noexcept;
+                           ModuleLoadReport& report) noexcept;
 
 // 연 라이브러리를 적재 역순으로 닫는다(lease를 먼저 놓는다).
 void CloseModuleBinaries(ModuleManifestData& data) noexcept;

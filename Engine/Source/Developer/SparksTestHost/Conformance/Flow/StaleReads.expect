@@ -23,3 +23,5 @@ error S0412 239:38
 error S0412 248:13
 error S0412 291:9
 error S0412 297:9
+# Flow rules only: context and lifecycle rules (LC3) are checked in the Rules area.
+stage flow

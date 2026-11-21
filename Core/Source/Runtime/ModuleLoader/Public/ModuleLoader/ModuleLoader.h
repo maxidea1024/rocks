@@ -79,7 +79,8 @@ constexpr ModuleGroup LoadingPhaseGroup(LoadingPhase phase) noexcept {
     return ModuleGroup::Process;
 }
 
-// 모듈 로더다(UE FModuleManager 대응, 3.4절). 빌드가 만든 모듈 표(GeneratedModuleTable)로 모듈을
+// 모듈 로더다(UE FModuleManager 대응, 3.4절). 빌드가 만든 모듈 표(Monolithic GeneratedModuleTable,
+// Modular 모듈 manifest — TryCreateFromManifest)로 모듈을
 // 단계(StartPhase)나 이름(Load)으로 의존 순서대로 시작하고, 묶음마다 시작 역순으로 내린다.
 // 프로세스에 하나이고 Launch가 소유한다(MD4 — launch::ApplicationContext::Modules()). 전역 접근자는
 // 없다. 필요한 곳은 참조를 받는다.
@@ -114,6 +115,12 @@ struct ModuleManifestData;
 
 } // namespace detail
 
+namespace platform {
+
+class DynamicLibraryLease;
+
+} // namespace platform
+
 class ModuleLoader final {
     struct CreateTag {
         explicit CreateTag() = default;
@@ -131,31 +138,29 @@ public:
     static Result<UniquePtr<ModuleLoader>> TryCreate(Allocator& allocator,
                                                      ModuleTable table) noexcept;
 
-    // Modular 실행 파일의 로더를 모듈 manifest로 만든다(Docs/Design/ModuleLoader.ko.md 3.5·3.13절).
-    // manifestPath(절대 경로, UTF-8)의 manifest를 엄격하게 해석하고, 실행 파일이 아닌 행의 공유
-    // 라이브러리를 의존 순서로 적재해 export 진입점 RocksModuleEntry로 진입 기술을 얻은 뒤(Prepare)
-    // TryCreate와 같은 로더를 만든다. 실행 파일 행은 OS로 싣지 않고 executableEntry(그 실행 파일의
-    // RocksModuleEntry_<Name>)를 쓴다. 로더가 manifest 표와 라이브러리를 소유하며, 로더 소멸이 모든
-    // 모듈을 내린 뒤 라이브러리를 적재 역순으로 닫는다.
-    // 실패하면 report에 코드·실패 모듈·단계·문구를 채우고(호출자가 한 번 기록한다) 이미 연
+    // Modular 실행 파일의 로더를 모듈 manifest로 만든다(Docs/Design/ModuleLoader.ko.md 3.5·3.13·
+    // 3.14절). manifestPath(절대 경로, UTF-8)의 manifest를 엄격하게 해석하고, 모든 행(호스트 모듈
+    // 포함)의 공유 라이브러리를 의존 순서로 적재해 export 진입점 RocksModuleEntry로 진입 기술을
+    // 얻은 뒤(Prepare) TryCreate와 같은 로더를 만든다. 로더가 manifest 표와 라이브러리를 소유하며,
+    // 로더 소멸이 모든 모듈을 내린 뒤 라이브러리를 적재 역순으로 닫는다. Launch의 Modular 진입이
+    // 부른다. 실패하면 report에 코드·실패 모듈·단계·문구를 채우고(호출자가 한 번 기록한다) 이미 연
     // 라이브러리를 닫는다:
     // - NotFound(manifest·모듈 파일이 없다) → ErrorCode::NotFound.
-    // - Incompatible(manifest 경로가 절대 경로가 아님·읽기 실패·형식·키, 파일 크기, 진입 기술 대조,
-    //   실행 파일 행에 executableEntry가 없음) → InvalidArgument(할당 실패는 OutOfMemory).
+    // - Incompatible(manifest 경로가 절대 경로가 아님·읽기 실패·형식·키, 파일 크기, 진입 기술 대조)
+    //   → InvalidArgument(할당 실패는 OutOfMemory).
     // - OsLoadFailed(OS 적재 실패 — nativeError·OS 문구) → DependencyFailed.
     // - EntryMissing(RocksModuleEntry가 없다) → NotFound.
     //
-    // 사용 예(Modular 실행 파일 — ML4b가 Launch에 연결한다):
+    // 사용 예(Launch의 Modular 진입):
     //   ModuleLoadReport report;
-    //   auto created = ModuleLoader::TryCreateFromManifest(allocator, manifestPath,
-    //                                                      &RocksModuleEntry_Sandbox, report);
+    //   auto created = ModuleLoader::TryCreateFromManifest(allocator, manifestPath, report);
     //   if (!created) {
     //       Log::Error(LogLaunch, "Module {Module} failed at {Stage}: {Message}", report.failed,
     //                  report.stage, report.message);
     //   }
-    static Result<UniquePtr<ModuleLoader>>
-    TryCreateFromManifest(Allocator& allocator, StringView manifestPath,
-                          ModuleEntryFunction executableEntry, ModuleLoadReport& report) noexcept;
+    static Result<UniquePtr<ModuleLoader>> TryCreateFromManifest(Allocator& allocator,
+                                                                 StringView manifestPath,
+                                                                 ModuleLoadReport& report) noexcept;
 
     // TryCreate 전용이다(UniquePtr::TryMake가 부른다). 직접 부를 수 없다.
     ModuleLoader(CreateTag, Allocator& allocator, ModuleTable table) noexcept;
@@ -258,6 +263,14 @@ public:
 
     // 표의 모듈 수다.
     usize ModuleCount() const noexcept;
+
+    // manifest 로더의 호스트 모듈(manifest 행 host — 실행 파일 모듈) 공유 라이브러리에서 C 기호
+    // symbol을 찾는다(3.14절 — Launch가 앱 기술 RocksApplicationDescription을 찾는다). 찾으면
+    // true와 주소를 돌려주고, 주소는 lease가 살아 있는 동안 유효하다. 호출자는 로더를 파괴하기 전에
+    // lease를 놓는다(남으면 라이브러리를 닫지 못한다). 정적 표 로더이거나 호스트 행이 없거나 기호가
+    // 없으면 false다.
+    bool FindHostSymbol(const char* symbol, void*& address,
+                        platform::DynamicLibraryLease& lease) const noexcept;
 
     // 표 index번째 행의 진입 기술이다(정적 표는 행의 entry가 돌려준 것, manifest 로더는 Prepare가
     // 얻은 것). index가 ModuleCount() 이상이면 Fatal이다.

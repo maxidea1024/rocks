@@ -178,6 +178,10 @@ ExpressionValue TypeChecker::MemberOfValue(const CheckContext& context, uint32 n
     uint32 member = NoSymbol;
     if (receiver.kind == K::Namespace) {
         const Symbol& entry = compilation_.symbols_[receiver.symbol];
+        if (entry.kind == SymbolKind::RpcPrefix) {
+            return RpcMember(context, node, receiver.symbol, name);
+        }
+
         if (entry.kind == SymbolKind::Alias) {
             member = binder_.FindName(SpaceKey(NameSpaceKind::ModuleTop, entry.index), name);
         } else {
@@ -250,6 +254,14 @@ ExpressionValue TypeChecker::MemberOfValue(const CheckContext& context, uint32 n
     }
 
     member = FindMember(type, name);
+    if (member == NoSymbol) {
+        // Actor·World 확장 이벤트(3.12절 — 이 모듈이나 직접 import한 모듈의 것)다.
+        member = MemberExtensionEvent(context, node, type, name);
+        if (member == AmbiguousExtension) {
+            return result;
+        }
+    }
+
     if (member == NoSymbol || !MemberAvailable(member, type)) {
         typeOwner(type);
         return result;
@@ -394,6 +406,30 @@ ExpressionValue TypeChecker::JudgeCall(const CheckContext& context, uint32 node,
 
     switch (callee.kind) {
     case K::Function:
+        // RPC는 대상 접두로만 부른다(3.15절 S1004).
+        if (rules_ && !RpcTarget(callee.symbol).IsEmpty()) {
+            uint32 object = tree.Node(calleeNode).kind == SyntaxKind::Member
+                                ? tree.Child(calleeNode, 0)
+                                : NoNode;
+            while (object != NoNode && tree.Node(object).kind == SyntaxKind::Parenthesized) {
+                object = tree.Child(object, 0);
+            }
+
+            const uint32 prefix =
+                object == NoNode ? NoSymbol : compilation_.NodeSymbol(context.module, object);
+            if (prefix == NoSymbol || compilation_.symbols_[prefix].kind != SymbolKind::RpcPrefix) {
+                StringBuilder<CompilationMessageInlineBytes> fix(allocator_);
+                fix.AppendFormat("Write '{}.{}(...)'.", RpcTarget(callee.symbol),
+                                 compilation_.symbols_[callee.symbol].name);
+                if (binder_.Succeeded(fix)) {
+                    Report(context, DiagnosticCode::RpcCall, calleeNode,
+                           "An RPC is called with its target prefix.",
+                           "The prefix shows at the call that the function runs elsewhere.",
+                           fix.View());
+                }
+            }
+        }
+
         // 값 타입 경로를 바꾸는 변경 메서드는 그 경로가 쓸 수 있어야 한다(3.11절).
         if (callee.instance && IsMutatingMember(callee.symbol) &&
             tree.Node(calleeNode).kind == SyntaxKind::Member) {
@@ -423,6 +459,18 @@ ExpressionValue TypeChecker::JudgeCall(const CheckContext& context, uint32 node,
     case K::Error:
         checkArguments();
         return result;
+    case K::Event:
+        if (rules_) {
+            // 이벤트는 호출하지 않는다(3.12절 S0812).
+            Report(context, DiagnosticCode::EventCall, calleeNode,
+                   "An event is raised with 'emit', not called.",
+                   "Writing an event as a call would neither raise it nor wait for it.",
+                   "Write 'emit Source.Event(...)', or 'await Source.Event' to wait for it.");
+            checkArguments();
+            return result;
+        }
+
+        [[fallthrough]];
     default:
         if (RequireValue(context, callee, calleeNode) && callee.kind != K::Function) {
             Report(context, DiagnosticCode::NotCallable, calleeNode,

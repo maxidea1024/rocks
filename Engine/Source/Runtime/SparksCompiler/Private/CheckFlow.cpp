@@ -1160,11 +1160,12 @@ void TypeChecker::CheckUnusedImports(uint32 module) noexcept {
         }
 
         // 확장 이벤트(§5.2)는 이벤트 해석(LC3) 전까지 이름으로 본다: 이 모듈의 `on`·`emit` 경로 끝
-        // 이름이 대상 모듈이 선언한 확장 이벤트 이름과 같으면 쓴 것이다.
+        // 이름이 대상 모듈이 선언한 확장 이벤트 이름과 같으면 쓴 것이다. Rules 단계는 해석한
+        // 이벤트로 이미 표시했다(3.12절).
         const SyntaxTree& targetTree = c.trees_[import.module];
         const uint32 declarations = targetTree.Child(targetTree.Root(), 1);
         for (const uint32 declaration : targetTree.Children(declarations)) {
-            if (used || targetTree.Node(declaration).kind != SyntaxKind::ExtensionEvent) {
+            if (used || rules_ || targetTree.Node(declaration).kind != SyntaxKind::ExtensionEvent) {
                 continue;
             }
 

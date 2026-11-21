@@ -624,8 +624,15 @@ ExpressionValue TypeChecker::ValueOfSymbol(const CheckContext& context, uint32 s
         result.kind = K::Namespace;
         result.symbol = symbol;
         return result;
+    case SymbolKind::RpcPrefix:
+        if (rules_) {
+            result.kind = K::Namespace; // `Server.F(...)`(3.15절 — 멤버는 RpcMember)
+            result.symbol = symbol;
+        }
+
+        return result;
     default:
-        return result; // RPC 접두(LC3) 등
+        return result;
     }
 }
 

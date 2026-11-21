@@ -29,7 +29,9 @@
 //     아래 폴더 하나하나가 패키지(각자 SparksPackage.json5 필수)다. 패키지 안에는 .spark와 루트의
 //     SparksPackage.json5만 둔다. 진단 경로는 사례 폴더 기준 경로다.
 // 사례는 선택으로 <사례>.names(이름 해석 golden, AppendNameDump — 폴더 사례는 모듈마다
-// "== <경로>" 줄과 덤프를 경로 순으로 이은 것)도 둔다. 짝이 맞지 않거나(`.spark`·폴더 없는
+// "== <경로>" 줄과 덤프를 경로 순으로 이은 것)·<사례>.types(식 타입,
+// AppendTypeDump)·<사례>.ir(typed IR, AppendIrDump — 진단 없는 사례만)도 같은 모양으로 둔다. 짝이
+// 맞지 않거나(`.spark`·폴더 없는
 // `.expect`·`.ast`·`.names`, `.expect` 없는 사례, 폴더 사례 옆의 `.ast`)
 // 낯선 파일이 있으면 그 자리의 실패로 기록한다(빈 기대값이 조용히 통과하지 않게).
 //
@@ -150,6 +152,10 @@ struct CaseInput {
     StringView syntaxTree;        // `.ast` 내용(hasSyntaxTree일 때만)
     bool hasTypes = false;        // `.types`가 있는지(식 타입 golden, AppendTypeDump)
     StringView types;             // `.types` 내용(hasTypes일 때만)
+    bool hasIr = false;           // `.ir`가 있는지(typed IR golden, AppendIrDump)
+    StringView ir;                // `.ir` 내용(hasIr일 때만)
+    bool hasBytecode = false;     // `.bc`가 있는지(bytecode golden, AppendBytecodeDump)
+    StringView bytecode;          // `.bc` 내용(hasBytecode일 때만)
     bool hasNames = false;        // `.names`가 있는지
     StringView names;             // `.names` 내용(hasNames일 때만)
 };

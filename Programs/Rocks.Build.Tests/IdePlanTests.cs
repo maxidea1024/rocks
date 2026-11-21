@@ -23,7 +23,7 @@ internal static class IdePlanTests
         pass("IDE plan mode: no generated inputs required, nothing written, BuildAsync rejects it");
 
         await EqualsBuildPlanAsync(request, root);
-        pass("IDE plan equals the plan-only compile database with generated sources, unity, module PCH and shared PCH");
+        pass("IDE plan equals the plan-only compile database with generated sources, unity, module PCH and shared PCH; staleness fingerprints match the build plan");
 
         if (request.Toolchain.Platform == NativePlatform.Windows)
         {
@@ -179,6 +179,16 @@ internal static class IdePlanTests
         Check(ide.Compiles.Where(compile => compile.Module == "Lib").All(compile => compile.PchHeader == pch), "module PCH survives one unity batch");
         Check(ide.Compiles.Single(compile => compile.Module == "User").PchHeader == Path.Combine(baseInclude, "shared", "BasePch.h"), "shared PCH header");
         Check(ide.Compiles.All(compile => !compile.Source.StartsWith(output, StringComparison.OrdinalIgnoreCase)), "generated source excluded");
+
+        // 낡음 지문(9절): 빌드 계획(유니티·시간 측정 켬)에서 고른 명령과 IDE 계획의 지문이 같다. PCH를 끈 빌드는 다르므로 CLI가 비교하지
+        // 않고, 소스가 하나 빠지면 다르다.
+        string Print(IReadOnlyList<IdeCompile> compiles) => IdePlanner.Fingerprint(compiles, "App.exe", "toolchain");
+        string idePrint = Print(ide.Compiles);
+        Check(Print(IdePlanner.Select(ActionGraph.Create(planned with { Unity = true, Adaptive = false, Timing = true }), output)) == idePrint,
+            "the build plan fingerprint differs from the IDE plan fingerprint");
+        Check(Print(IdePlanner.Select(ActionGraph.Create(planned with { Pch = false }), output)) != idePrint, "--pch off must change the fingerprint");
+        Check(Print([.. ide.Compiles.Skip(1)]) != idePrint && IdePlanner.Fingerprint(ide.Compiles, null, "toolchain") != idePrint &&
+            IdePlanner.Fingerprint(ide.Compiles, "App.exe", "other") != idePrint, "fingerprint ignores sources, executable or toolchain");
     }
 
     private static void Model(NativeBuildRequest request, string root)

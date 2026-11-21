@@ -1,0 +1,78 @@
+class Door : ScriptableComponent {
+    on Awake() {
+    }
+
+    on Enable() {
+    }
+
+    on Start() {
+    }
+
+    on Tick(dt: float) {
+        _ = dt;
+    }
+
+    on FixedTick() {
+    }
+
+    on LateTick(dt: float) {
+        _ = dt;
+    }
+
+    on Disable() {
+    }
+
+    on Destroy() {
+    }
+
+    on TriggerEnter(other: Actor, trigger: Collider) {
+        _ = other;
+        _ = trigger;
+    }
+
+    on TriggerExit(_: Actor) {
+    }
+
+    on CollisionEnter(_: Actor, hit: Hit) {
+        _ = hit;
+    }
+
+    on CollisionExit() {
+    }
+}
+
+class Errors : ScriptableComponent {
+    on Strat() {
+    }
+
+    on Begin() {
+    }
+
+    on Tick(_: float, _: int) {
+    }
+
+    on Tick() {
+    }
+
+    on FixedTick(_: int) {
+    }
+
+    on TriggerEnter(_: Pawn) {
+    }
+
+    on Awake(_: int) {
+    }
+}
+
+class Keeper : WorldService {
+    on Start() {
+    }
+
+    on TriggerEnter() {
+    }
+}
+
+class Rules2 : DataAsset {
+    on Start() {
+    }
+}

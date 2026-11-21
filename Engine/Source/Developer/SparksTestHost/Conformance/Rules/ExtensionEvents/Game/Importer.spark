@@ -1,0 +1,7 @@
+import Events;
+
+class Fine : ScriptableComponent {
+    on Owner.Local(by: Actor) {
+        _ = by;
+    }
+}

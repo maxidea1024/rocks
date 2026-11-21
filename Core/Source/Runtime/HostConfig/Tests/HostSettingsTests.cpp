@@ -109,6 +109,7 @@ TEST(HostSettings_BootOrderMergesLayers) {
     SystemAllocator allocator;
     HostSettings settings(allocator);
     HostSettingsOptions options;
+    options.modules = &test::ProcessModules();
     options.engineDir = tree.EngineDir();
     REQUIRE(settings.Initialize(options));
     REQUIRE(settings.LoadFiles());
@@ -166,6 +167,7 @@ TEST(HostSettings_ProcessDefaultContext) {
     {
         HostSettings settings(allocator);
         HostSettingsOptions options;
+        options.modules = &test::ProcessModules();
         options.engineDir = tree.EngineDir();
         REQUIRE(settings.Initialize(options));
         REQUIRE(settings.CompleteStartup());
@@ -191,6 +193,7 @@ TEST(HostSettings_RejectedEngineFileReportsFailure) {
     SystemAllocator allocator;
     HostSettings settings(allocator);
     HostSettingsOptions options;
+    options.modules = &test::ProcessModules();
     options.engineDir = tree.EngineDir();
     REQUIRE(settings.Initialize(options));
     CHECK(settings.LoadFiles().Error() == ErrorCode::InvalidArgument);
@@ -214,6 +217,7 @@ TEST(HostSettings_DeviceProfileAppliedAtStartup) {
         SystemAllocator allocator;
         HostSettings settings(allocator);
         HostSettingsOptions options;
+        options.modules = &test::ProcessModules();
         options.engineDir = tree.EngineDir();
         options.platform = "TestPlatform";
         REQUIRE(settings.Initialize(options));
@@ -256,6 +260,7 @@ TEST(HostSettings_QualityRulesFollowDeviceTraits) {
     const config::QualityGroupRule rules[] = {{"quality.host.shadow", 0, shadowRules}};
     HostSettings settings(allocator);
     HostSettingsOptions options;
+    options.modules = &test::ProcessModules();
     options.engineDir = tree.EngineDir();
     options.registerSettings = &RegisterHostVars;
     options.qualityRules = rules;

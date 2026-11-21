@@ -40,7 +40,7 @@
 |---|---|---|
 | Git | `git` 존재, 실제로 적용되는 `core.longpaths=true`(Windows, 모든 설정 범위) | winget `Git.Git`, `git config --global core.longpaths true` |
 | .NET SDK | `dotnet --list-sdks`에 `global.json` 버전대(같은 feature band, 패치는 고정값 이상) | Windows: winget `Microsoft.DotNet.SDK.<주>`를 `global.json` 버전으로. macOS·Linux: `Build/Toolchain.json` `dotnet.sdk.archives`의 공식 압축 파일을 SHA-512로 확인하고 `~/.dotnet`에 푼다 |
-| PowerShell 7 | `pwsh` 7 이상(Windows는 늘, macOS는 `--android`일 때만 — `SelectAndroidNdk.ps1`이 쓴다) | winget `Microsoft.PowerShell`, macOS는 Homebrew `--cask powershell` |
+| PowerShell 7 | `pwsh` 7 이상(Windows·macOS 늘 — `Rocks.proj` `BootstrapTools`가 `Build/Tools.ps1`을, `--android`가 `SelectAndroidNdk.ps1`을 쓴다) | winget `Microsoft.PowerShell`, macOS는 `Build/Toolchain.json` `powershell`에 고정한 공식 tar.gz(SHA-256 확인)를 도구 모음 루트에 풀고 시작 파일 블록으로 PATH에 둔다 |
 | VS IDE(Windows, `-WithIde`) | 최신 IDE 설치(vswhere 기본 제품: Community·Professional·Enterprise, 하한 이상)에 `.vsconfig` 구성 요소 전부 | 있으면 `setup.exe modify --config .vsconfig`, 없으면 winget `Microsoft.VisualStudio.Community`(`--config .vsconfig`) |
 | C++ 빌드 도구(Windows) | 위 vswhere 조건의 설치, 디스크의 Windows SDK, 고른 MSVC 도구 모음이 하한 이상(`ROCKS_MSVC_TOOLSET` 포함) | 위 규칙대로 `modify --add` 또는 winget `Microsoft.VisualStudio.BuildTools` |
 | FXC SDK(Windows) | 고정 FXC 원본 파일(`Engine/Source/ThirdParty/D3DCompiler/ThirdParty.json`의 `sdkPath`, 지금 `bin/10.0.22621.0/x64/d3dcompiler_47.dll`)이 있는지 | `modify --add Windows11SDK.22621`. 셰이더 시험의 bootstrap만 쓰고 빌드에는 필요 없다([셰이더 시스템](ShaderSystem.ko.md) 8절 2항) |
@@ -120,3 +120,4 @@
 |---|---|---|
 | 1 | 2026-11-21 | 첫 판. `Setup.bat`·`Build/Setup.ps1`·`Setup.sh`·`Build/Setup.sh`·`.vsconfig`, CI 자체 시험. 기본은 Build Tools(Windows)·Command Line Tools(macOS)이고 IDE는 `-WithIde` |
 | 2 | 2026-11-21 | 리뷰 10건 반영. FXC SDK 항목과 SDK 22621(셰이더 시스템 개정 22), VS 17.8·MSVC 14.38.33130 하한, STL1000 두 형식, `-WithIde`가 IDE를 먼저 깔고 재사용·C++ 없는 설치는 modify, 설치 직전 재점검, macOS·Linux 내려받기 고정(.NET SDK SHA-512, clang-format wheel)과 Homebrew 없는 기본 흐름, Linux의 .NET·clang-format 설치, `Next:` 보강, 가짜 항목 주 흐름 시험과 CI Windows 실제 `-Check`(`-Skip`) |
+| 3 | 2026-11-22 | macOS 기본 단계에 PowerShell 7을 넣었다([프로젝트 파일](ProjectFiles.ko.md) PJ2 리뷰: `Rocks.proj` `BootstrapTools`가 `Build/Tools.ps1`을 부르므로 Android를 쓰지 않는 macOS도 `pwsh`가 필요하다). Homebrew 대신 `Build/Toolchain.json`의 공식 tar.gz(7.6.9, SHA-256)를 푼다. 자체 시험에 그 항목 모양 검사를 더했다 |

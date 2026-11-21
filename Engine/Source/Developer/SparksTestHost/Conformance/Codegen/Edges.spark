@@ -1,0 +1,98 @@
+event Actor.Pinged(level: int);
+
+const Special: int = 7;
+
+fn Widths(a: int16, b: int32, c: uint8, d: uint16, e: uint32, f: uint64, g: float32): float32 {
+    let sum = a + a;
+    let more = b * b;
+    let tiny = c - c;
+    let mid = d + d;
+    let big = e % e;
+    let huge = f + f;
+    _ = sum;
+    _ = more;
+    _ = tiny;
+    _ = mid;
+    _ = big;
+    _ = huge;
+    return g * g;
+}
+
+fn Compare(a: int, b: int, v: vec3, w: vec3): bool {
+    if (!(a <= b) || a >= b) {
+        return v.X < w.X;
+    }
+
+    return v.Y >= w.Y;
+}
+
+fn Label(code: int, name: string): string {
+    switch (code) {
+        case -1: {
+            return @"none";
+        }
+        case Special: {
+            return "special";
+        }
+        default: {
+        }
+    }
+
+    switch (name) {
+        case "a", "b": {
+            return "early";
+        }
+        default: {
+            return "${code}";
+        }
+    }
+}
+
+fn Validate(text: string): Result<string> {
+    if (text == "") {
+        return Error.NotFound;
+    }
+
+    return text;
+}
+
+fn Sum(items: Array<int>, tags: Set<Tag>): int {
+    var total = 0;
+    for (item in items) {
+        total += item;
+    }
+
+    for (tag in tags) {
+        _ = tag;
+        total *= 2;
+    }
+
+    var scale = vec3(1.0, 1.0, 1.0);
+    scale *= 2.0;
+    scale /= 4.0;
+    _ = scale;
+    return total;
+}
+
+class Beacon : Actor {
+    @edit var Cue: SoundAsset;
+    var Target: Actor?;
+
+    @skipWhileBusy
+    on this.Pinged(level: int) {
+        var hum = World.Audio.StartLoop(Cue);
+        hum = World.Audio.StartLoop(Cue);
+        await (NextTick());
+        if (let watched = Target) {
+            await watched.Destroyed;
+        }
+
+        hum?.Pause();
+        _ = level;
+    }
+
+    fn Ping(other: Actor) {
+        emit this.Pinged(1);
+        emit other.Pinged(2);
+    }
+}

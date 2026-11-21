@@ -245,21 +245,26 @@ internal static class InputValidation
             throw new ArgumentException("Modular linking needs a target name for shared library file names (NativeBuildRequest.TargetName).");
         }
 
-        // Modular에서 모듈 표는 manifest이고 빌드 정보는 Core 공유 라이브러리에 든다(BuildTargets BS8d1). Launch는 아직 Monolithic 모듈
-        // 표(GeneratedModuleTable)를 부르므로 실행 파일 연결(ModuleLoader ML4b) 전에는 늦고 알기 어려운 링크 오류 대신 여기서 거부한다.
-        // HostConfig(HostSettings)도 그 표를 부르지만 그 소비 타깃은 모두 Launch에 닿는다 — ML4b가 둘 다 로더 표로 바꾼다.
-        if (request.Modules.Any(module => module.ProvidesLaunch))
-        {
-            throw new ArgumentException("Modular linking of a target that reaches the launch module needs the Modular executable connection " +
-                "(the module loader reading the module manifest, ModuleLoader ML4b); use Monolithic.");
-        }
-
         // 빌드 정보 TU와 manifest는 타깃 하나 몫이다: 모듈 표·빌드 정보 제공 모듈에 닿는 대상 실행 파일은 하나 이하이고, 있으면 엔진 버전이
         // 있어야 한다(manifest·빌드 정보가 싣는다 — 링크가 모두 끝난 뒤 실패하지 않게).
         var byName = new Dictionary<string, NativeModuleInput>(StringComparer.OrdinalIgnoreCase);
         foreach (NativeModuleInput module in request.Modules)
         {
             byName.TryAdd(module.Name, module);
+        }
+
+        // 모듈 표 제공 모듈에 닿는 Modular 실행 파일은 호스트 모듈이 되고 실행 파일은 Launch의 Modular 진입만 부른다(Docs/Design/ModuleLoader.ko.md
+        // 3.14절 ML4b). Launch에 닿지 않으면 모듈을 시작할 진입이 없으므로 거부한다.
+        foreach (NativeModuleInput executable in byName.Values.Where(module => module.Kind == NativeModuleKind.Executable)
+            .OrderBy(module => module.Name, StringComparer.Ordinal))
+        {
+            HashSet<string> closure = LinkClosure.Reachable([executable.Name], byName);
+            if (closure.Any(name => byName.TryGetValue(name, out NativeModuleInput? value) && value.ProvidesModuleTable) &&
+                !closure.Any(name => byName.TryGetValue(name, out NativeModuleInput? value) && value.ProvidesLaunch))
+            {
+                throw new ArgumentException($"Module {executable.Name}: a Modular executable that reaches the module table provider must reach " +
+                    "the launch module, whose Modular entry loads the module manifest (Docs/Design/ModuleLoader.ko.md section 3.14).");
+            }
         }
 
         if (byName.Values.Any(module => module.ProvidesModuleTable || module.ProvidesBuildInfo))

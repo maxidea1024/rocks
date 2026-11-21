@@ -1,0 +1,175 @@
+event Actor.Pinged();
+@authorityOnly event Actor.Commanded();
+
+struct Tree {
+    var Value: int = 0;
+    var Kids: Array<Tree> = [];
+}
+
+struct Labels {
+    var ByName: Map<string, Text> = [];
+}
+
+class Lamp : ScriptableComponent {
+    @save var Root = Tree();
+    @net var Shared = Tree();
+    @save var Kind: Class<Actor>?;
+    @net var Spawned: Class<Actor>?;
+    @save var Matrix: mat4;
+    @save var Started: Clock?;
+    @save var Counts: Map<string, int> = [];
+    @save var Seen: Set<Tag>;
+    @save var Words = Labels();
+    @save var Impact: Hit?;
+    @save var Params: SpawnParams?;
+    @save var Channel = CollisionChannel.Camera;
+    @net var User: Interactable?;
+    @save var Stored: Interactable?;
+    @net var Loops: Array<LoopHandle> = [];
+    @net var Lit = false;
+    var Local = 0;
+
+    @rpc(Server) fn Toggle(): void {
+        Lit = !Lit;
+    }
+
+    @rpc(AllClients) fn Show(spawnable: Class<Actor>?) {
+        _ = spawnable;
+    }
+
+    fn SetLit() {
+        Lit = true;
+    }
+
+    on Enable() {
+        if (Owner.HasAuthority) {
+            if (Local > 0) {
+                Lit = true;
+            }
+        }
+
+        if (Local > 1) {
+            Local = 0;
+        } else if (Owner.HasAuthority) {
+            Lit = true;
+        }
+
+        if (Owner.HasAuthority || Local > 0) {
+            Lit = true;
+        }
+
+        if (!Owner.HasAuthority) {
+            Lit = true;
+        } else {
+            Lit = false;
+        }
+    }
+
+    on Start() {
+        if (!Owner.HasAuthority) {
+            return;
+        }
+
+        Lit = true;
+        SetLit();
+    }
+
+    on Disable() {
+        if (!Owner.HasAuthority || Local > 0) {
+            Local = 1;
+            return;
+        }
+
+        Lit = false;
+        if (!Owner.HasAuthority) {
+            Local = 2;
+        }
+
+        Lit = true;
+    }
+
+    on Lit.Changed() {
+        Lit = true;
+    }
+
+    on Owner.Respawned() {
+        Lit = true;
+    }
+
+    on Owner.Pinged() {
+        let other = Owner.Find<Lamp>();
+        if (let lamp = other) {
+            lamp.SetLit();
+        }
+    }
+
+    on Tick() {
+        Server.Lit();
+        (Server).Toggle();
+    }
+
+    @cheat fn ForceLit() {
+        Lit = true;
+    }
+
+    @editorButton fn PreviewLit() {
+        Lit = true;
+    }
+
+    override fn DescribeState(detailed: bool): string {
+        _ = detailed;
+        Lit = true;
+        return "lamp";
+    }
+
+    fn Join(other: Lamp) {
+        _ = other;
+    }
+
+    @worker fn Pair(first: Lamp, second: Lamp) {
+        first.Join(second);
+    }
+
+    on Validate() {
+        Lit = true;
+    }
+
+    @pure fn Quiet(): int {
+        Server.Toggle();
+        return 1;
+    }
+}
+
+open class Switch : Actor {
+    @net var Up = false;
+
+    @rpc(Server) open fn Flip() {
+        Up = true;
+    }
+
+    on this.Commanded() {
+        Up = true;
+    }
+}
+
+class StickySwitch : Switch {
+    override fn Flip() {
+        Up = false;
+    }
+
+    on Tick() {
+        Server.Flip();
+    }
+}
+
+struct Panel {
+    var Value = 0;
+
+    fn Press() {
+        Server.Toggle();
+    }
+}
+
+fn Remote() {
+    Server.Toggle();
+}

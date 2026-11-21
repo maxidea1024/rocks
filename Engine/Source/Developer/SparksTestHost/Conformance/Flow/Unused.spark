@@ -30,7 +30,7 @@ class Unused : Base, Usable {
     fn Use(_: Actor) {
     }
 
-    on Struck(amount: int) {
+    on TriggerEnter(other: Actor) {
     }
 
     on Owner.Damaged(_: float) {

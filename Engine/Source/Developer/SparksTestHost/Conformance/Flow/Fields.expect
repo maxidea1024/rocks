@@ -8,3 +8,5 @@ error S0428 17:23
 error S0428 21:23
 error S0428 26:23
 error S0428 34:15
+# Flow rules only: context and lifecycle rules (LC3) are checked in the Rules area.
+stage flow

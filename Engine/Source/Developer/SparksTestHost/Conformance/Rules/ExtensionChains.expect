@@ -1,0 +1,7 @@
+# Extension events across packages (S0814, S0815, 3.12): a name taken by a transitive dependency, the same name from
+# two unrelated dependencies at the use (both imports count as used), and a dependency module that is not imported
+# (the fix names the package).
+error S0814 Game/Main.spark 5:14
+error S0815 Game/Main.spark 8:14
+error S0814 Game/Main.spark 12:16
+error S0814 Game/Signals.spark 1:13

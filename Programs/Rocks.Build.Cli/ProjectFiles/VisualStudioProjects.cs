@@ -65,8 +65,9 @@ internal static class VisualStudioProjects
             files[Path.GetFullPath(path)] = new UTF8Encoding(false).GetBytes(crlf ? text.ReplaceLineEndings("\r\n") : text);
 
         Add(Path.Combine(directory, CommonProps), CommonPropsText(input));
-        Add(Path.Combine(directory, ToolchainProps), ToolchainPropsText(input.Toolchain));
-        Add(Path.Combine(directory, ToolchainPathsProps), ToolchainPathsPropsText(input.Toolchain));
+        (byte[] toolchain, byte[] paths) = ToolchainFiles(input.Toolchain);
+        files[Path.GetFullPath(Path.Combine(directory, ToolchainProps))] = toolchain;
+        files[Path.GetFullPath(Path.Combine(directory, ToolchainPathsProps))] = paths;
         foreach ((string name, string content) in input.Model.DefinitionCopies)
         {
             // 정의 헤더 사본은 빌드가 쓰는 파일과 같은 byte(LF)다.
@@ -127,6 +128,16 @@ internal static class VisualStudioProjects
             </Project>
 
             """;
+    }
+
+    /// <summary>
+    /// 두 도구 모음 props의 내용(UTF-8, CRLF)이다. 생성과 빌드의 낡음 검사(9절)가 같은 렌더링을 쓴다 — 도구 모음이 바뀌면 지문이 바뀐다.
+    /// </summary>
+    public static (byte[] Toolchain, byte[] Paths) ToolchainFiles(ProjectFilesToolchain toolchain)
+    {
+        var encoding = new UTF8Encoding(false);
+        return (encoding.GetBytes(ToolchainPropsText(toolchain).ReplaceLineEndings("\r\n")),
+            encoding.GetBytes(ToolchainPathsPropsText(toolchain).ReplaceLineEndings("\r\n")));
     }
 
     private static string ToolchainPropsText(ProjectFilesToolchain toolchain) => $"""
