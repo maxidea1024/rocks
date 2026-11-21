@@ -24,6 +24,8 @@ public:
     explicit Fixture(Allocator& allocator) noexcept
         : allocator_(allocator), sources(allocator), diagnostics(allocator),
           compilation(allocator, sources) {
+        // 흐름 단계까지 본다(문맥·수명 규칙 — 최상위 함수의 대기 등 — 은 SparksRulesTests).
+        static_cast<void>(compilation.SetLastStage(CompilationStage::Flow));
     }
 
     // dependencies는 manifest의 dependencies 배열 안쪽 글자다(`"Lib"`).

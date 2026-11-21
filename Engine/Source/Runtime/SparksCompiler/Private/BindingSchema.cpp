@@ -701,6 +701,9 @@ private:
 
         function.pure = ReadBool(object, "pure", false);
         function.oneShot = ReadBool(object, "oneShot", false);
+        if (function.pure && function.oneShot) {
+            ReportAt(object.Find("oneShot"), "A pure function has no one-shot effect.");
+        }
         const JsonValue effects = ArrayOf(object, "effects");
         for (usize index = 0; index < effects.Size() && error_ == ErrorCode::None; ++index) {
             const JsonValue element = effects.At(index);
@@ -725,6 +728,8 @@ private:
                                   "'wallClock'.");
             } else if ((function.effects & bit) != 0) {
                 ReportAt(element, "An effect is listed twice.");
+            } else if (function.pure) {
+                ReportAt(element, "A pure function has no effects.");
             } else {
                 function.effects = static_cast<uint8>(function.effects | bit);
             }

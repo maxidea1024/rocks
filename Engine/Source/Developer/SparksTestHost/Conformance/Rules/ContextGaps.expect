@@ -1,0 +1,15 @@
+# Context gaps (3.13): multi-level overrides and interface calls bring their implementations' effects, mutual
+# recursion, FixedTick and LateTick, a load request in 'on Enable' cannot wait, 'All' of load requests in
+# 'on Start', '@worker' effects, a struct '@worker' using its value fields, 'on Validate' spawning and I/O, and
+# an override inheriting '@pure'.
+error S0602 27:9
+error S0602 74:9
+error S0602 78:9
+error S0602 82:9
+error S0905 86:13
+error S0602 99:13
+error S0602 99:13
+error S0901 99:13
+error S0602 104:9
+error S0602 110:13
+error S0602 111:13

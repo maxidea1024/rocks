@@ -1,3 +1,4 @@
+#include <Core/Algorithms.h>
 #include <Core/Text/EditDistance.h>
 
 #include "CompilationChecker.h"
@@ -46,7 +47,7 @@ constexpr EffectText EffectTexts[] = {
     {EffectBits::Acquire, "acquire held resources"},
     {EffectBits::Load, "load assets"},
     {EffectBits::Emit, "raise events"},
-    {EffectBits::EditWrite, "change '@edit' or '@save' fields"},
+    {EffectBits::EditWrite, "change serialized fields ('@edit', '@save', '@net')"},
     {EffectBits::ObjectWrite, "change other objects"},
     {EffectBits::Write, "change fields"},
     {EffectBits::EngineCall, "call engine functions that change state"},
@@ -127,7 +128,8 @@ constexpr usize MaxAttributeSuggestionDistance = 2;
 
 // ---- attribute ----
 
-bool TypeChecker::IsAttributeNumber(uint32 module, uint32 expression, bool integer) noexcept {
+bool TypeChecker::IsAttributeNumber(uint32 module, uint32 expression, bool integer,
+                                    bool nonNegative) noexcept {
     const Compilation& c = compilation_;
     const SyntaxTree& tree = c.trees_[module];
     if (expression == NoNode) {
@@ -136,6 +138,10 @@ bool TypeChecker::IsAttributeNumber(uint32 module, uint32 expression, bool integ
 
     SyntaxKind kind = tree.Node(expression).kind;
     if (kind == SyntaxKind::Unary && TokenText(module, expression) == "-") {
+        if (nonNegative) {
+            return false;
+        }
+
         expression = tree.Child(expression, 0);
         kind = expression == NoNode ? SyntaxKind::Error : tree.Node(expression).kind;
     }
@@ -176,7 +182,15 @@ bool TypeChecker::IsAttributeNumber(uint32 module, uint32 expression, bool integ
 
     binder_.NoteUse(module, symbol);
     const NumericInfo numeric = Numeric(c.symbols_[symbol].type);
-    return numeric.kind != NumericKind::None && (!integer || numeric.kind != NumericKind::Float);
+    if (numeric.kind == NumericKind::None || (integer && numeric.kind == NumericKind::Float)) {
+        return false;
+    }
+
+    const ConstantValue value = ConstOf(symbol);
+    const bool negative =
+        (value.kind == ConstantValue::Kind::Integer && value.negative && value.magnitude != 0) ||
+        (value.kind == ConstantValue::Kind::Float && value.real < 0.0);
+    return !nonNegative || !negative;
 }
 
 void TypeChecker::CheckAttributeArguments(const CheckContext& context, uint32 declaration,
@@ -266,7 +280,7 @@ void TypeChecker::CheckAttributeArguments(const CheckContext& context, uint32 de
                 return;
             }
 
-            if (!IsAttributeNumber(context.module, tree.Child(argument, 1), false)) {
+            if (!IsAttributeNumber(context.module, tree.Child(argument, 1), false, false)) {
                 bad(tree.Child(argument, 1), "A range bound is a number or a number constant.",
                     "Write a number, as in 'Min: 0'.");
                 return;
@@ -278,7 +292,9 @@ void TypeChecker::CheckAttributeArguments(const CheckContext& context, uint32 de
     case AttributeArguments::NetMode: {
         constexpr StringView Modes[] = {"OwnerOnly"};
         if (arguments.Size() > 1 || (arguments.Size() == 1 && !shortName(arguments[0], Modes))) {
-            bad(arguments[0], "'@net' takes nothing or 'OwnerOnly'.", "Write '@net(OwnerOnly)'.");
+            bad(arguments.Size() > 1 && shortName(arguments[0], Modes) ? arguments[1]
+                                                                       : arguments[0],
+                "'@net' takes nothing or 'OwnerOnly'.", "Write '@net(OwnerOnly)'.");
         }
 
         break;
@@ -290,7 +306,10 @@ void TypeChecker::CheckAttributeArguments(const CheckContext& context, uint32 de
             StringBuilder<CompilationMessageInlineBytes> fix(allocator_);
             fix.AppendFormat("Write '@{}(\"Name\")'.", name);
             if (binder_.Succeeded(message) && binder_.Succeeded(fix)) {
-                bad(arguments.IsEmpty() ? attribute : arguments[0], message.View(), fix.View());
+                bad(arguments.IsEmpty()                               ? attribute
+                    : arguments.Size() > 1 && oneString(arguments[0]) ? arguments[1]
+                                                                      : arguments[0],
+                    message.View(), fix.View());
             }
         }
 
@@ -310,18 +329,29 @@ void TypeChecker::CheckAttributeArguments(const CheckContext& context, uint32 de
 
         break;
     }
-    case AttributeArguments::Rpc:
-        if (arguments.IsEmpty() || arguments.Size() > 2 ||
-            !shortName(arguments[0], Span<const StringView>(RpcTargets)) ||
-            (arguments.Size() == 2 &&
-             !shortName(arguments[1], Span<const StringView>(RpcReliability)))) {
-            bad(arguments.IsEmpty() ? attribute : arguments[0],
+    case AttributeArguments::Rpc: {
+        // 틀린 그 인자를 가리킨다(빠졌으면 attribute).
+        uint32 at = NoNode;
+        if (arguments.IsEmpty()) {
+            at = attribute;
+        } else if (!shortName(arguments[0], Span<const StringView>(RpcTargets))) {
+            at = arguments[0];
+        } else if (arguments.Size() >= 2 &&
+                   !shortName(arguments[1], Span<const StringView>(RpcReliability))) {
+            at = arguments[1];
+        } else if (arguments.Size() > 2) {
+            at = arguments[2];
+        }
+
+        if (at != NoNode) {
+            bad(at,
                 "'@rpc' takes 'Server', 'AllClients' or 'OwnerClient', then optionally "
                 "'Reliable' or 'Unreliable'.",
                 "Write '@rpc(Server, Reliable)'.");
         }
 
         break;
+    }
     case AttributeArguments::Tick: {
         bool seen[3] = {false, false, false};
         if (arguments.IsEmpty()) {
@@ -355,10 +385,9 @@ void TypeChecker::CheckAttributeArguments(const CheckContext& context, uint32 de
                     }
                 }
             } else if (slot == 1) {
-                valid = value != NoNode && tree.Node(value).kind != SyntaxKind::Unary &&
-                        IsAttributeNumber(context.module, value, false);
+                valid = IsAttributeNumber(context.module, value, false, true);
             } else {
-                valid = IsAttributeNumber(context.module, value, true);
+                valid = IsAttributeNumber(context.module, value, true, false);
             }
 
             if (!valid) {
@@ -600,8 +629,23 @@ uint32 TypeChecker::AwaitEffect(uint32 module, uint32 operand) noexcept {
         const uint32 symbol = callee == NoNode ? NoSymbol : c.NodeSymbol(module, callee);
         if (symbol != NoSymbol) {
             const Symbol& entry = c.symbols_[symbol];
-            if (entry.kind == SymbolKind::Function || entry.kind == SymbolKind::Method) {
+            if (entry.kind == SymbolKind::Function || entry.kind == SymbolKind::Method ||
+                entry.kind == SymbolKind::InterfaceMethod) {
                 return 0; // async fn 호출의 await는 정지 지점이 아니다(그 함수의 대기가 효과다)
+            }
+
+            // 인자가 모두 로드 요청인 `All`·`Race`는 준비 대기다(on Start에서 쓸 수 있다).
+            if ((entry.flags & SymbolFlags::Variadic) != 0) {
+                const uint32 list = tree.Child(operand, 1);
+                bool ready = list != NoNode && tree.Node(list).childCount != 0;
+                for (const uint32 argument :
+                     list == NoNode ? Span<const uint32>() : tree.Children(list)) {
+                    const uint32 value = tree.Child(argument, 1);
+                    const uint32 type = value == NoNode ? NoType : c.ExpressionType(module, value);
+                    ready = ready && type != NoType && IsLanguage(NonOptional(type), "LoadRequest");
+                }
+
+                return ready ? EffectBits::AwaitReady : EffectBits::AwaitOther;
             }
 
             if ((entry.kind == SymbolKind::LanguageFunction ||
@@ -662,7 +706,8 @@ uint32 TypeChecker::WriteEffect(uint32 module, uint32 target) noexcept {
         if (kind == SymbolKind::Field && !crosses) {
             const Symbol& field = c.symbols_[symbol];
             if (HasAttribute(field.module, field.node, "edit") ||
-                HasAttribute(field.module, field.node, "save")) {
+                HasAttribute(field.module, field.node, "save") ||
+                HasAttribute(field.module, field.node, "net")) {
                 bits |= EffectBits::EditWrite;
             }
         }
@@ -673,25 +718,25 @@ uint32 TypeChecker::WriteEffect(uint32 module, uint32 target) noexcept {
 
 void TypeChecker::CollectBodyEffects(uint32 bodyIndex) noexcept {
     const Compilation& c = compilation_;
-    EffectBody& body = effectBodies_[bodyIndex];
-    const SyntaxTree& tree = c.trees_[body.module];
-    const bool handler = tree.Node(body.node).kind == SyntaxKind::Handler;
-    const uint32 block = tree.Child(body.node, handler ? 4 : 5);
-    const bool async = handler || (tree.Node(body.node).flags & SyntaxFlags::Async) != 0;
+    const SyntaxTree& tree = c.trees_[effectBodies_[bodyIndex].module];
+    const uint32 module = effectBodies_[bodyIndex].module;
+    const uint32 function = effectBodies_[bodyIndex].node;
+    const bool handler = tree.Node(function).kind == SyntaxKind::Handler;
+    const uint32 block = tree.Child(function, handler ? 4 : 5);
+    const bool async = handler || (tree.Node(function).flags & SyntaxFlags::Async) != 0;
     CheckContext context;
-    context.module = body.module;
+    context.module = module;
+    effectBodies_[bodyIndex].firstSite = static_cast<uint32>(effectSites_.Size());
     Array<uint32> pending(allocator_);
-    if (block == NoNode) {
-        return;
-    }
-
-    if (auto pushed = pending.TryPushBack(block); !pushed) {
-        binder_.error_ = pushed.Error();
-        return;
+    if (block != NoNode) {
+        if (auto pushed = pending.TryPushBack(block); !pushed) {
+            binder_.error_ = pushed.Error();
+            return;
+        }
     }
 
     auto site = [&](uint32 bits, uint32 node, uint32 callee) noexcept {
-        body.direct |= bits & ~EffectBits::ForeignReceiver;
+        effectBodies_[bodyIndex].direct |= bits & ~EffectBits::ForeignReceiver;
         if (auto pushed = effectSites_.TryPushBack(EffectSite{bodyIndex, node, bits, callee});
             !pushed) {
             binder_.error_ = pushed.Error();
@@ -705,14 +750,15 @@ void TypeChecker::CollectBodyEffects(uint32 bodyIndex) noexcept {
         case SyntaxKind::Try:
             if (entry.kind == SyntaxKind::Await || (entry.flags & SyntaxFlags::Await) != 0) {
                 if (!async) {
+                    // S0601: 그 await는 효과로 전하지 않는다(부르는 쪽의 S0602 연쇄 방지).
                     Report(context, DiagnosticCode::AwaitOutsideAsync, node,
                            "'await' is only in an 'async fn' or a handler.",
                            "A function that waits is declared 'async' so that its callers wait "
                            "for it too.",
                            "Declare the function as 'async fn'.");
+                } else {
+                    site(AwaitEffect(module, tree.Child(node, 0)), node, NoSymbol);
                 }
-
-                site(AwaitEffect(body.module, tree.Child(node, 0)), node, NoSymbol);
             }
 
             break;
@@ -720,7 +766,7 @@ void TypeChecker::CollectBodyEffects(uint32 bodyIndex) noexcept {
             site(EffectBits::Emit, node, NoSymbol);
             break;
         case SyntaxKind::Assignment: {
-            const uint32 bits = WriteEffect(body.module, tree.Child(node, 0));
+            const uint32 bits = WriteEffect(module, tree.Child(node, 0));
             if (bits != 0) {
                 site(bits, node, NoSymbol);
             }
@@ -729,34 +775,35 @@ void TypeChecker::CollectBodyEffects(uint32 bodyIndex) noexcept {
         }
         case SyntaxKind::Call: {
             const uint32 callee = tree.Child(node, 0);
-            const uint32 symbol = callee == NoNode ? NoSymbol : c.NodeSymbol(body.module, callee);
+            const uint32 symbol = callee == NoNode ? NoSymbol : c.NodeSymbol(module, callee);
             if (symbol == NoSymbol) {
                 break;
             }
 
             const Symbol& target = c.symbols_[symbol];
-            if (target.kind == SymbolKind::Function || target.kind == SymbolKind::Method) {
-                uint32 object =
-                    tree.Node(callee).kind == SyntaxKind::Member ? tree.Child(callee, 0) : NoNode;
-                while (object != NoNode && tree.Node(object).kind == SyntaxKind::Parenthesized) {
-                    object = tree.Child(object, 0);
-                }
+            uint32 object =
+                tree.Node(callee).kind == SyntaxKind::Member ? tree.Child(callee, 0) : NoNode;
+            while (object != NoNode && tree.Node(object).kind == SyntaxKind::Parenthesized) {
+                object = tree.Child(object, 0);
+            }
 
-                const bool foreign = object != NoNode && tree.Node(object).kind != SyntaxKind::This;
+            const bool foreign = object != NoNode && tree.Node(object).kind != SyntaxKind::This;
+            if (target.kind == SymbolKind::Function || target.kind == SymbolKind::Method ||
+                target.kind == SymbolKind::InterfaceMethod) {
                 site(foreign ? EffectBits::ForeignReceiver : 0, node, symbol);
             } else if (target.kind == SymbolKind::EngineFunction) {
-                const SchemaFunction& function =
+                const SchemaFunction& schema =
                     c.schemas_[target.index].schema.Functions()[target.item];
-                uint32 bits = 0;
-                bits |= (function.effects & SchemaEffects::Spawn) != 0 ? EffectBits::Spawn : 0;
-                bits |= (function.effects & SchemaEffects::Acquire) != 0 ? EffectBits::Acquire : 0;
-                bits |= (function.effects & (SchemaEffects::Io | SchemaEffects::WallClock)) != 0
+                uint32 bits = foreign ? EffectBits::ForeignReceiver : 0;
+                bits |= (schema.effects & SchemaEffects::Spawn) != 0 ? EffectBits::Spawn : 0;
+                bits |= (schema.effects & SchemaEffects::Acquire) != 0 ? EffectBits::Acquire : 0;
+                bits |= (schema.effects & (SchemaEffects::Io | SchemaEffects::WallClock)) != 0
                             ? EffectBits::Io
                             : 0;
-                bits |= function.oneShot ? EffectBits::OneShotCall
-                        : function.pure  ? 0
-                                         : EffectBits::EngineCall;
-                site(bits, node, symbol);
+                bits |= schema.oneShot ? EffectBits::OneShotCall
+                        : schema.pure  ? 0
+                                       : EffectBits::EngineCall;
+                site(bits, node, symbol); // 엔진 overridable 함수는 재정의의 효과도 온다
             } else if (target.kind == SymbolKind::LanguageFunction) {
                 if (target.name == "Load" || target.name == "LoadAll") {
                     site(EffectBits::Load, node, NoSymbol);
@@ -764,7 +811,7 @@ void TypeChecker::CollectBodyEffects(uint32 bodyIndex) noexcept {
 
                 // 값 타입 경로를 바꾸는 변경 메서드는 그 경로의 쓰기다.
                 if (IsMutatingMember(symbol) && tree.Node(callee).kind == SyntaxKind::Member) {
-                    const uint32 bits = WriteEffect(body.module, tree.Child(callee, 0));
+                    const uint32 bits = WriteEffect(module, tree.Child(callee, 0));
                     if (bits != 0) {
                         site(bits, node, NoSymbol);
                     }
@@ -777,12 +824,15 @@ void TypeChecker::CollectBodyEffects(uint32 bodyIndex) noexcept {
             site(EffectBits::ObjectRef, node, NoSymbol);
             break;
         case SyntaxKind::Identifier: {
-            const uint32 symbol = c.NodeSymbol(body.module, node);
+            const uint32 symbol = c.NodeSymbol(module, node);
             const SymbolKind kind =
                 symbol == NoSymbol ? SymbolKind::BuiltinType : c.symbols_[symbol].kind;
-            const uint32 type = c.ExpressionType(body.module, node);
-            if (kind == SymbolKind::Field || kind == SymbolKind::EngineField ||
-                kind == SymbolKind::ContextName ||
+            const uint32 type = c.ExpressionType(module, node);
+            // class 필드(자기 객체)·엔진 필드·문맥 이름·객체 값(struct 필드는 값이다).
+            const bool classField = kind == SymbolKind::Field &&
+                                    c.symbols_[symbol].owner != NoSymbol &&
+                                    c.symbols_[c.symbols_[symbol].owner].kind == SymbolKind::Class;
+            if (classField || kind == SymbolKind::EngineField || kind == SymbolKind::ContextName ||
                 (type != NoType && IsObjectType(NonOptional(type)))) {
                 site(EffectBits::ObjectRef, node, NoSymbol);
             }
@@ -804,12 +854,112 @@ void TypeChecker::CollectBodyEffects(uint32 bodyIndex) noexcept {
             }
         }
     }
+
+    effectBodies_[bodyIndex].siteCount =
+        static_cast<uint32>(effectSites_.Size()) - effectBodies_[bodyIndex].firstSite;
+}
+
+void TypeChecker::AddDispatch(uint32 body) noexcept {
+    // 이 본문(class 메서드)이 대신하는 기반 함수(여러 단계의 재정의)와 interface 메서드다.
+    const Compilation& c = compilation_;
+    const EffectBody& entry = effectBodies_[body];
+    if (entry.symbol == NoSymbol || entry.owner == NoSymbol ||
+        c.symbols_[entry.owner].kind != SymbolKind::Class) {
+        return;
+    }
+
+    const StringView name = c.symbols_[entry.symbol].name;
+    auto add = [&](uint32 base) noexcept {
+        const uint64 pair = (uint64(base) << 32) | body;
+        if (auto pushed = dispatchPairs_.TryPushBack(pair); !pushed) {
+            binder_.error_ = pushed.Error();
+        }
+    };
+    if ((c.symbols_[entry.symbol].flags & SymbolFlags::Override) != 0) {
+        uint32 owner = entry.owner;
+        for (uint32 step = 0; owner != NoSymbol && step < c.symbols_.Size(); ++step) {
+            const uint32 base = c.symbols_[owner].base;
+            const uint32 member =
+                base == NoSymbol ? NoSymbol : binder_.FindMemberInChain(base, name);
+            if (member == NoSymbol) {
+                break;
+            }
+
+            const SymbolKind kind = c.symbols_[member].kind;
+            if (kind != SymbolKind::Method && kind != SymbolKind::EngineFunction) {
+                break;
+            }
+
+            add(member);
+            if (kind != SymbolKind::Method) {
+                break; // 엔진 함수 위로는 Sparks 재정의가 없다
+            }
+
+            owner = c.symbols_[member].owner;
+        }
+    }
+
+    // 구현한 interface(자기·기반 class의 기반 목록)의 같은 이름 메서드.
+    uint32 step = 0;
+    for (uint32 type = entry.owner; type != NoSymbol && step < c.symbols_.Size();
+         type = c.symbols_[type].base, ++step) {
+        const Symbol& classEntry = c.symbols_[type];
+        if (classEntry.kind != SymbolKind::Class) {
+            break;
+        }
+
+        for (uint32 index = 0; index < classEntry.baseCount; ++index) {
+            const uint32 base = c.symbolBases_[classEntry.firstBase + index];
+            const Symbol& baseEntry = c.symbols_[base];
+            const bool engineInterface =
+                baseEntry.kind == SymbolKind::EngineType &&
+                c.schemas_[baseEntry.index].schema.Types()[baseEntry.item].kind ==
+                    SchemaTypeKind::Interface;
+            if (baseEntry.kind != SymbolKind::Interface && !engineInterface) {
+                continue;
+            }
+
+            const uint32 member = binder_.FindMemberInChain(base, name);
+            if (member != NoSymbol && (c.symbols_[member].kind == SymbolKind::InterfaceMethod ||
+                                       c.symbols_[member].kind == SymbolKind::EngineFunction)) {
+                add(member);
+            }
+        }
+    }
+}
+
+template <typename Visit>
+void TypeChecker::ForEachCallTarget(uint32 callee, Visit&& visit) const noexcept {
+    if (callee == NoSymbol) {
+        return;
+    }
+
+    const uint32 own = effectOfSymbol_[callee];
+    if (own != NoLocalIndex) {
+        visit(own);
+    }
+
+    for (uint32 index = dispatchFirst_[callee]; index < dispatchFirst_[callee + 1]; ++index) {
+        visit(dispatchBodies_[index]);
+    }
+}
+
+uint32 TypeChecker::SiteEffects(const EffectSite& site) const noexcept {
+    uint32 bits = site.bits & ~EffectBits::ForeignReceiver;
+    ForEachCallTarget(site.callee,
+                      [&](uint32 body) noexcept { bits |= effectBodies_[body].total; });
+    // 다른 객체의 함수가 바꾸는 필드는 이 본문에서 보면 객체 쓰기다.
+    if ((site.bits & EffectBits::ForeignReceiver) != 0 && (bits & EffectBits::Write) != 0) {
+        bits |= EffectBits::ObjectWrite;
+    }
+
+    return bits;
 }
 
 void TypeChecker::AnalyzeEffects() noexcept {
     const Compilation& c = compilation_;
-    // 본문을 모은다(최상위·class·struct 함수, handler).
-    if (auto resized = effectOfSymbol_.TryResize(c.symbols_.Size()); !resized) {
+    const uint32 symbolCount = static_cast<uint32>(c.symbols_.Size());
+    if (auto resized = effectOfSymbol_.TryResize(symbolCount); !resized) {
         binder_.error_ = resized.Error();
         return;
     }
@@ -818,14 +968,16 @@ void TypeChecker::AnalyzeEffects() noexcept {
         index = NoLocalIndex;
     }
 
+    // 본문을 모은다(최상위·class·struct 함수, handler).
     auto addBody = [&](uint32 module, uint32 node, uint32 symbol, uint32 owner) noexcept {
-        if (symbol != NoSymbol) {
-            effectOfSymbol_[symbol] = static_cast<uint32>(effectBodies_.Size());
-        }
-
-        if (auto pushed = effectBodies_.TryPushBack(EffectBody{module, node, symbol, owner, 0, 0});
+        if (auto pushed = effectBodies_.TryPushBack(EffectBody{module, node, symbol, owner});
             !pushed) {
             binder_.error_ = pushed.Error();
+            return;
+        }
+
+        if (symbol != NoSymbol) {
+            effectOfSymbol_[symbol] = static_cast<uint32>(effectBodies_.Size() - 1);
         }
     };
     for (uint32 module = 0; module < c.modules_.Size(); ++module) {
@@ -862,89 +1014,212 @@ void TypeChecker::AnalyzeEffects() noexcept {
         }
     }
 
-    for (uint32 index = 0; index < effectBodies_.Size() && binder_.error_ == ErrorCode::None;
-         ++index) {
+    const uint32 bodyCount = static_cast<uint32>(effectBodies_.Size());
+    for (uint32 index = 0; index < bodyCount && binder_.error_ == ErrorCode::None; ++index) {
         CollectBodyEffects(index);
+        AddDispatch(index);
     }
 
-    // 재정의: 기반 함수(사용자·엔진)를 부르면 재정의의 효과도 더한다.
-    Array<uint32> overrideBase(allocator_);
-    if (auto resized = overrideBase.TryResize(effectBodies_.Size()); !resized) {
+    // 디스패치 표(기반·interface 함수 심볼 → 그것을 대신하는 본문들)다.
+    algo::Sort(dispatchPairs_.View());
+    if (auto resized = dispatchFirst_.TryResize(usize(symbolCount) + 1); !resized) {
         binder_.error_ = resized.Error();
         return;
     }
 
-    for (uint32 index = 0; index < effectBodies_.Size(); ++index) {
-        overrideBase[index] = NoSymbol;
-        const EffectBody& body = effectBodies_[index];
-        if (body.symbol == NoSymbol || body.owner == NoSymbol ||
-            (c.symbols_[body.symbol].flags & SymbolFlags::Override) == 0) {
+    if (auto resized = dispatchBodies_.TryResize(dispatchPairs_.Size()); !resized) {
+        binder_.error_ = resized.Error();
+        return;
+    }
+
+    for (uint32& first : dispatchFirst_) {
+        first = 0;
+    }
+
+    for (usize index = 0; index < dispatchPairs_.Size(); ++index) {
+        ++dispatchFirst_[(dispatchPairs_[index] >> 32) + 1];
+        dispatchBodies_[index] = static_cast<uint32>(dispatchPairs_[index]);
+    }
+
+    for (uint32 symbol = 0; symbol < symbolCount; ++symbol) {
+        dispatchFirst_[symbol + 1] += dispatchFirst_[symbol];
+    }
+
+    // 역호출(부른 본문 → 부른 쪽 본문) 표다.
+    Array<uint64> reversePairs(allocator_);
+    for (const EffectSite& site : effectSites_) {
+        ForEachCallTarget(site.callee, [&](uint32 target) noexcept {
+            if (auto pushed = reversePairs.TryPushBack((uint64(target) << 32) | site.body);
+                !pushed) {
+                binder_.error_ = pushed.Error();
+            }
+        });
+    }
+
+    if (binder_.error_ != ErrorCode::None) {
+        return;
+    }
+
+    algo::Sort(reversePairs.View());
+    Array<uint32> callerFirst(allocator_);
+    if (auto resized = callerFirst.TryResize(usize(bodyCount) + 1); !resized) {
+        binder_.error_ = resized.Error();
+        return;
+    }
+
+    for (uint32& first : callerFirst) {
+        first = 0;
+    }
+
+    for (const uint64 pair : reversePairs) {
+        ++callerFirst[(pair >> 32) + 1];
+    }
+
+    for (uint32 body = 0; body < bodyCount; ++body) {
+        callerFirst[body + 1] += callerFirst[body];
+    }
+
+    // worklist 고정점: 본문 효과 = 직접 효과 ∪ 부른 본문(재정의·interface 구현 포함)의 효과.
+    Array<uint32> work(allocator_);
+    Array<uint8> queued(allocator_);
+    if (auto resized = queued.TryResize(bodyCount); !resized) {
+        binder_.error_ = resized.Error();
+        return;
+    }
+
+    for (uint32 body = 0; body < bodyCount; ++body) {
+        effectBodies_[body].total = effectBodies_[body].direct;
+        queued[body] = 1;
+        if (auto pushed = work.TryPushBack(body); !pushed) {
+            binder_.error_ = pushed.Error();
+            return;
+        }
+    }
+
+    while (!work.IsEmpty()) {
+        const uint32 body = work.TryPopBack().Value(); // 비어 있지 않다
+        queued[body] = 0;
+        EffectBody& entry = effectBodies_[body];
+        uint32 total = entry.direct;
+        for (uint32 index = entry.firstSite; index < entry.firstSite + entry.siteCount; ++index) {
+            total |= SiteEffects(effectSites_[index]);
+        }
+
+        if (total == entry.total) {
             continue;
         }
 
-        const uint32 base = c.symbols_[body.owner].base;
-        overrideBase[index] = base == NoSymbol
-                                  ? NoSymbol
-                                  : binder_.FindMemberInChain(base, c.symbols_[body.symbol].name);
+        entry.total = total;
+        for (uint32 index = callerFirst[body]; index < callerFirst[body + 1]; ++index) {
+            const uint32 caller = static_cast<uint32>(reversePairs[index]);
+            if (queued[caller] == 0) {
+                queued[caller] = 1;
+                if (auto pushed = work.TryPushBack(caller); !pushed) {
+                    binder_.error_ = pushed.Error();
+                    return;
+                }
+            }
+        }
     }
 
-    // 고정점: 본문 효과 = 직접 효과 ∪ 부른 함수의 효과 ∪ (부른 함수가 기반이면) 재정의의 효과.
-    for (EffectBody& body : effectBodies_) {
-        body.total = body.direct;
+    for (uint32 index = 0; index < bodyCount && binder_.error_ == ErrorCode::None; ++index) {
+        CheckBodyContext(index);
+    }
+}
+
+StringView TypeChecker::ContextAttribute(uint32 body) const noexcept {
+    // 자기 attribute, 없으면 재정의한 기반 함수 사슬의 것(재정의는 기반 문맥을 따른다).
+    const Compilation& c = compilation_;
+    uint32 module = effectBodies_[body].module;
+    uint32 node = effectBodies_[body].node;
+    uint32 symbol = effectBodies_[body].symbol;
+    for (uint32 step = 0; step < c.symbols_.Size(); ++step) {
+        const SyntaxTree& tree = c.trees_[module];
+        const uint32 attributes = tree.Child(node, 1);
+        if (attributes != NoNode && tree.Node(attributes).kind == SyntaxKind::List) {
+            for (const uint32 attribute : tree.Children(attributes)) {
+                const StringView text = tree.Node(attribute).kind == SyntaxKind::Attribute
+                                            ? TokenText(module, attribute)
+                                            : StringView();
+                if (text == "pure" || text == "worker" || text == "deterministic") {
+                    return text;
+                }
+            }
+        }
+
+        if (symbol == NoSymbol || (c.symbols_[symbol].flags & SymbolFlags::Override) == 0) {
+            return StringView();
+        }
+
+        const uint32 owner = c.symbols_[symbol].owner;
+        const uint32 base = owner == NoSymbol ? NoSymbol : c.symbols_[owner].base;
+        const uint32 member =
+            base == NoSymbol ? NoSymbol : binder_.FindMemberInChain(base, c.symbols_[symbol].name);
+        if (member == NoSymbol || c.symbols_[member].kind != SymbolKind::Method) {
+            return StringView();
+        }
+
+        symbol = member;
+        module = c.symbols_[member].module;
+        node = c.symbols_[member].node;
     }
 
-    bool changed = true;
-    while (changed && binder_.error_ == ErrorCode::None) {
-        changed = false;
-        for (const EffectSite& site : effectSites_) {
-            if (site.callee == NoSymbol) {
+    return StringView();
+}
+
+bool TypeChecker::StatementWaits(uint32 module, uint32 node) noexcept {
+    // 정지하는 `await`가 있는지다(async fn 호출의 await는 그 함수가 대기할 때만).
+    const Compilation& c = compilation_;
+    const SyntaxTree& tree = c.trees_[module];
+    Array<uint32> pending(allocator_);
+    if (auto pushed = pending.TryPushBack(node); !pushed) {
+        binder_.error_ = pushed.Error();
+        return false;
+    }
+
+    while (!pending.IsEmpty()) {
+        const uint32 current = pending.TryPopBack().Value(); // 비어 있지 않다
+        const SyntaxNode& entry = tree.Node(current);
+        if (entry.kind == SyntaxKind::Await ||
+            (entry.kind == SyntaxKind::Try && (entry.flags & SyntaxFlags::Await) != 0)) {
+            const uint32 operand = tree.Child(current, 0);
+            if (AwaitEffect(module, operand) != 0) {
+                return true;
+            }
+
+            uint32 call = operand;
+            while (call != NoNode && tree.Node(call).kind == SyntaxKind::Parenthesized) {
+                call = tree.Child(call, 0);
+            }
+
+            const uint32 callee = call != NoNode && tree.Node(call).kind == SyntaxKind::Call
+                                      ? c.NodeSymbol(module, tree.Child(call, 0))
+                                      : NoSymbol;
+            bool waits = false;
+            ForEachCallTarget(callee, [&](uint32 body) noexcept {
+                waits = waits || (effectBodies_[body].total & EffectBits::AnyAwait) != 0;
+            });
+            if (waits) {
+                return true;
+            }
+        }
+
+        for (const uint32 child : tree.Children(current)) {
+            if (child == NoNode) {
                 continue;
             }
 
-            const uint32 bits =
-                SiteEffects(site, overrideBase.View()) & ~EffectBits::ForeignReceiver;
-            EffectBody& caller = effectBodies_[site.body];
-            const uint32 merged = caller.total | bits;
-            if (merged != caller.total) {
-                caller.total = merged;
-                changed = true;
+            if (auto pushed = pending.TryPushBack(child); !pushed) {
+                binder_.error_ = pushed.Error();
+                return false;
             }
         }
     }
 
-    for (uint32 index = 0; index < effectBodies_.Size() && binder_.error_ == ErrorCode::None;
-         ++index) {
-        CheckBodyContext(index, overrideBase.View());
-    }
+    return false;
 }
 
-uint32 TypeChecker::SiteEffects(const EffectSite& site,
-                                Span<const uint32> overrideBase) const noexcept {
-    uint32 bits = site.bits;
-    if (site.callee == NoSymbol) {
-        return bits;
-    }
-
-    const uint32 callee = effectOfSymbol_[site.callee];
-    if (callee != NoLocalIndex) {
-        bits |= effectBodies_[callee].total;
-    }
-
-    for (uint32 index = 0; index < effectBodies_.Size(); ++index) {
-        if (overrideBase[index] == site.callee) {
-            bits |= effectBodies_[index].total;
-        }
-    }
-
-    // 다른 객체의 함수가 바꾸는 필드는 이 본문에서 보면 객체 쓰기다.
-    if ((site.bits & EffectBits::ForeignReceiver) != 0 && (bits & EffectBits::Write) != 0) {
-        bits |= EffectBits::ObjectWrite;
-    }
-
-    return bits;
-}
-
-void TypeChecker::CheckBodyContext(uint32 bodyIndex, Span<const uint32> overrideBase) noexcept {
+void TypeChecker::CheckBodyContext(uint32 bodyIndex) noexcept {
     const Compilation& c = compilation_;
     const EffectBody& body = effectBodies_[bodyIndex];
     const SyntaxTree& tree = c.trees_[body.module];
@@ -984,20 +1259,7 @@ void TypeChecker::CheckBodyContext(uint32 bodyIndex, Span<const uint32> override
             where.Append("A 'Changed' handler");
         }
     } else {
-        const uint32 attributes = tree.Child(body.node, 1);
-        StringView context;
-        if (attributes != NoNode && tree.Node(attributes).kind == SyntaxKind::List) {
-            for (const uint32 attribute : tree.Children(attributes)) {
-                const StringView text = tree.Node(attribute).kind == SyntaxKind::Attribute
-                                            ? TokenText(body.module, attribute)
-                                            : StringView();
-                if (text == "pure" || text == "worker" || text == "deterministic") {
-                    context = text;
-                    break;
-                }
-            }
-        }
-
+        const StringView context = ContextAttribute(bodyIndex);
         if (context == "pure") {
             forbidden = EffectBits::Write | EffectBits::ObjectWrite | EffectBits::EditWrite |
                         EffectBits::Emit | Await | EffectBits::Spawn | EffectBits::Acquire |
@@ -1009,20 +1271,27 @@ void TypeChecker::CheckBodyContext(uint32 bodyIndex, Span<const uint32> override
             forbidden = EffectBits::Io | EffectBits::AwaitOther | EffectBits::AwaitReady;
         }
 
+        // 최상위 fn은 순수 계산 함수다(3.1절): 대기·발행·엔진 변경 API·객체 쓰기를 쓸 수 없다.
+        const bool topLevel = body.owner == NoSymbol;
+        if (topLevel) {
+            forbidden |= Await | EffectBits::Emit | EffectBits::Spawn | EffectBits::Acquire |
+                         EffectBits::Load | EffectBits::EngineCall | EffectBits::OneShotCall |
+                         EffectBits::ObjectWrite;
+        }
+
         if (!context.IsEmpty()) {
             where.AppendFormat("An '@{}' function", context);
+        } else if (topLevel) {
+            where.Append("A top-level function");
         }
     }
 
+    CheckContext context;
+    context.module = body.module;
     if (forbidden != 0 && binder_.Succeeded(where)) {
-        CheckContext context;
-        context.module = body.module;
-        for (const EffectSite& site : effectSites_) {
-            if (site.body != bodyIndex) {
-                continue;
-            }
-
-            const uint32 bits = SiteEffects(site, overrideBase) & forbidden;
+        for (uint32 index = body.firstSite; index < body.firstSite + body.siteCount; ++index) {
+            const EffectSite& site = effectSites_[index];
+            const uint32 bits = SiteEffects(site) & forbidden;
             if (bits == 0) {
                 continue;
             }
@@ -1053,11 +1322,8 @@ void TypeChecker::CheckBodyContext(uint32 bodyIndex, Span<const uint32> override
     }
 
     // `while`: 대기할 수 있는 본문에서만, 회차마다 `await`(3.13절 S0603).
-    const bool canWait = (handler && (forbidden & EffectBits::AwaitOther) == 0) ||
-                         (!handler && (entry.flags & SyntaxFlags::Async) != 0 &&
-                          (forbidden & EffectBits::AwaitOther) == 0);
-    CheckContext context;
-    context.module = body.module;
+    const bool canWait = (handler || (entry.flags & SyntaxFlags::Async) != 0) &&
+                         (forbidden & EffectBits::AwaitOther) == 0;
     Array<uint32> pending(allocator_);
     const uint32 block = tree.Child(body.node, handler ? 4 : 5);
     if (block == NoNode) {
@@ -1165,7 +1431,7 @@ uint8 TypeChecker::WaitStates(uint32 module, uint32 node, uint8 states,
         continuesWithoutWait = continuesWithoutWait || (states & WaitStateNotWaited) != 0;
         return 0;
     default:
-        return ContainsAwait(module, node) ? WaitStateWaited : states;
+        return StatementWaits(module, node) ? WaitStateWaited : states;
     }
 }
 

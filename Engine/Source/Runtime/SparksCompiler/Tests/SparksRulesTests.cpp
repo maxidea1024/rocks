@@ -207,10 +207,11 @@ TEST(SparksRules_ExtensionEventImportMessage) {
         const uint32 game = fixture.Package("Game");
         fixture.Module(game, "Game", "Combat/Signals.spark", "event Actor.Pushed(by: Actor);\n");
         fixture.Module(game, "Game", "Main.spark",
-                       "fn Ring(a: Actor) {\n    emit a.Pushed(a);\n}\n");
+                       "class Bell : ScriptableComponent {\n    fn Ring(a: Actor) {\n        emit "
+                       "a.Pushed(a);\n    }\n}\n");
         REQUIRE(fixture.Check());
         REQUIRE(fixture.diagnostics.Count() == 1);
-        CHECK(fixture.Says(0, C::ExtensionEventNotImported, 2, 12,
+        CHECK(fixture.Says(0, C::ExtensionEventNotImported, 3, 16,
                            "Extension event 'Pushed' is declared in module 'Combat.Signals', which "
                            "is not imported here.",
                            "Add 'import Combat.Signals;'."));

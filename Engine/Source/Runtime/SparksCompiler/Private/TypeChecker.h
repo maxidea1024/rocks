@@ -201,12 +201,14 @@ private:
     // ---- 실행 문맥·효과·attribute(CheckContexts.cpp, 3.13절 — Rules 단계) ----
     // 함수·hook·handler 본문 하나의 효과다(direct는 본문이 직접, total은 부른 함수까지).
     struct EffectBody {
-        uint32 module;
-        uint32 node;
-        uint32 symbol; // 함수 심볼(handler는 NoSymbol)
-        uint32 owner;  // class·struct 심볼(최상위 함수는 NoSymbol)
-        uint32 direct;
-        uint32 total;
+        uint32 module = NoModule;
+        uint32 node = NoNode;
+        uint32 symbol = NoSymbol; // 함수 심볼(handler는 NoSymbol)
+        uint32 owner = NoSymbol;  // class·struct 심볼(최상위 함수는 NoSymbol)
+        uint32 direct = 0;
+        uint32 total = 0;
+        uint32 firstSite = 0; // effectSites_ 구간
+        uint32 siteCount = 0;
     };
 
     // 효과가 생기는 자리(await·emit·대입·호출)다. 호출이면 callee에 부른 함수가 있다.
@@ -227,11 +229,21 @@ private:
     void CheckAttributeArguments(const CheckContext& context, uint32 declaration, uint32 attribute,
                                  StringView name, uint8 shape) noexcept;
     // attribute 인자가 숫자(리터럴, 앞의 `-`, 숫자 const 이름)인지다.
-    bool IsAttributeNumber(uint32 module, uint32 expression, bool integer) noexcept;
+    bool IsAttributeNumber(uint32 module, uint32 expression, bool integer,
+                           bool nonNegative) noexcept;
     void AnalyzeEffects() noexcept;
     void CollectBodyEffects(uint32 bodyIndex) noexcept;
-    void CheckBodyContext(uint32 bodyIndex, Span<const uint32> overrideBase) noexcept;
-    uint32 SiteEffects(const EffectSite& site, Span<const uint32> overrideBase) const noexcept;
+    void CheckBodyContext(uint32 bodyIndex) noexcept;
+    // 이 본문(class 메서드)이 대신하는 기반·interface 함수를 dispatchPairs_에 더한다.
+    void AddDispatch(uint32 body) noexcept;
+    // 호출 대상 심볼이 부를 수 있는 본문(자기 본문, 재정의, interface 구현)마다 visit(본문)이다.
+    template <typename Visit>
+    void ForEachCallTarget(uint32 callee, Visit&& visit) const noexcept;
+    uint32 SiteEffects(const EffectSite& site) const noexcept;
+    // 문맥 attribute(자기 것, 없으면 재정의한 기반 함수 사슬의 것)다.
+    StringView ContextAttribute(uint32 body) const noexcept;
+    // 문장 안에 정지하는 `await`가 있는지다(효과 분석 뒤).
+    bool StatementWaits(uint32 module, uint32 node) noexcept;
     uint32 AwaitEffect(uint32 module, uint32 operand) noexcept;
     uint32 WriteEffect(uint32 module, uint32 target) noexcept;
     // states(WaitState* 비트)로 node에 들어갔을 때 나가는 상태다. 대기하지 않은 `continue`가
@@ -463,6 +475,10 @@ private:
     Array<EffectBody> effectBodies_;
     Array<EffectSite> effectSites_;
     Array<uint32> effectOfSymbol_;
+    // 디스패치 표: (기반·interface 함수 심볼 << 32 | 본문) 쌍과, 심볼 → dispatchBodies_ 구간.
+    Array<uint64> dispatchPairs_;
+    Array<uint32> dispatchFirst_;
+    Array<uint32> dispatchBodies_;
 };
 
 } // namespace rocks::sparks::detail

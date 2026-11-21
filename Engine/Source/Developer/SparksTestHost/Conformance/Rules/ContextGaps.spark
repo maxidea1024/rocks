@@ -1,0 +1,113 @@
+interface Damageable {
+    fn ApplyDamage(amount: int);
+}
+
+open class A : ScriptableComponent {
+    open fn F() {
+    }
+
+    @pure open fn Value(): int {
+        return 1;
+    }
+}
+
+open class B : A {
+    override fn F() {
+    }
+}
+
+class C : B {
+    var Count = 0;
+
+    override fn F() {
+        _ = World.Spawn();
+    }
+
+    override fn Value(): int {
+        Count = 2;
+        return Count;
+    }
+}
+
+class Target : ScriptableComponent, Damageable {
+    var Health = 10;
+
+    fn ApplyDamage(amount: int) {
+        Health -= amount;
+    }
+}
+
+class Ping : ScriptableComponent {
+    @edit var Peer: Pong;
+
+    fn Bounce() {
+        Peer.Bounce();
+    }
+}
+
+class Pong : ScriptableComponent {
+    @edit var Peer: Ping;
+    @edit var Icon: Soft<DataAsset>;
+
+    fn Bounce() {
+        _ = World.Spawn();
+        Peer.Bounce();
+    }
+}
+
+struct Point {
+    var X: int = 0;
+
+    @worker fn Twice(): int {
+        return X * 2;
+    }
+}
+
+class User : ScriptableComponent {
+    @edit var Left: A;
+    @edit var Thing: Damageable;
+    @edit var Loop: Ping;
+    @edit var Icon: Soft<DataAsset>;
+    @edit var Other: Soft<DataAsset>;
+
+    on FixedTick() {
+        Left.F();
+    }
+
+    on LateTick() {
+        Loop.Bounce();
+    }
+
+    on Destroy() {
+        Thing.ApplyDamage(1);
+    }
+
+    on Enable() {
+        let request = Icon.Load();
+        _ = request.IsDone;
+    }
+
+    on Start() {
+        let first = Icon.Load();
+        let second = Other.Load();
+        await All(first, second);
+        let data = try await first;
+        _ = data;
+    }
+
+    @worker fn Busy(): int {
+        _ = Icon.Load();
+        return 0;
+    }
+
+    @worker fn Raises() {
+        emit Rang();
+    }
+
+    event Rang();
+
+    on Validate() {
+        _ = World.Spawn();
+        _ = World.Now();
+    }
+}

@@ -927,11 +927,11 @@ Class<T> { fn Create(): T }             // full, T는 class 타입
 
 이 절은 §6.1·§6.2의 실행 문맥, `await`·`while` 규칙과 attribute의 이름·자리·인자를 컴파일러가 판정하는 방식으로 확정한다. 진단 코드는 §8.1의 S06xx다. 뒤로 넘기는 것: 유지 자원의 담는 자리(LC3c), `@net`·`@rpc`·`@save`의 타입·권한(LC3d), attribute의 실행 의미(연동 단계), Teardown의 읽기 접근 제한(`Owner`의 읽기 전용 속성만 — 연동 단계에서 schema 표시와 함께).
 
-**attribute.** 이름이 아래 표에 없으면 S0620(편집 거리 2 이하의 이름 제시), 표의 자리가 아닌 곳이면 S0621, 한 선언에 같은 attribute가 둘이면 두 번째가 S0622, 인자 모양이 틀리면 S0623이다(위치는 그 attribute, 인자 오류는 그 인자). 프로필(full 전용)은 S1113이 보고 재진입 표시는 §3.12가 본다. 실행 문맥 attribute(`@pure`·`@worker`·`@deterministic`·`@editorButton`·`@cheat`·`@test`)는 한 함수에 하나뿐이다(둘째부터 S0621).
+**attribute.** 이름이 아래 표에 없으면 S0620(편집 거리 2 이하의 이름 제시), 표의 자리가 아닌 곳이면 S0621, 한 선언에 같은 attribute가 둘이면 두 번째가 S0622, 인자 모양이 틀리면 S0623이다(위치는 그 attribute, 인자 오류는 틀린 그 인자 — 남는 인자면 첫 남는 인자). schema 함수의 `pure`는 `oneShot`·`effects`와 함께 쓸 수 없다(S1120). 프로필(full 전용)은 S1113이 보고 재진입 표시는 §3.12가 본다. 실행 문맥 attribute(`@pure`·`@worker`·`@deterministic`·`@editorButton`·`@cheat`·`@test`)는 한 함수에 하나뿐이다(둘째부터 S0621).
 
 | attribute | 자리 | 인자 |
 |---|---|---|
-| `@edit` | class·struct 필드 | 없음, 또는 이름 지정 `Min:`·`Max:`(숫자 상수식 — 필드 타입이 숫자일 때만) |
+| `@edit` | class·struct 필드 | 없음, 또는 이름 지정 `Min:`·`Max:`(숫자 리터럴(앞의 `-` 포함)이나 숫자 const 이름·별칭 멤버 — 필드 타입이 숫자일 때만. attribute 인자는 식을 계산하지 않는다) |
 | `@save` | class의 `var` 필드 | 없음 |
 | `@net` | class의 `var` 필드 | 없음, 또는 짧은 이름 `OwnerOnly` |
 | `@authorityOnly` | `event` 선언(멤버·확장) | 없음 |
@@ -942,7 +942,7 @@ Class<T> { fn Create(): T }             // full, T는 class 타입
 | `@pure`·`@worker`·`@deterministic` (full) | 함수 | 없음 |
 | `@editorButton`·`@cheat` (full) | class의 인자 없는 함수 | 없음 |
 | `@test` (full) | 인자 없는 최상위 함수 | 없음 |
-| `@tick` (full) | `on Tick`·`on FixedTick`·`on LateTick` | 이름 지정 `Phase:`(`PrePhysics`·`PostPhysics`·`LateUpdate`), `Interval:`(0 이상 숫자 상수식), `Priority:`(정수 상수식) 중 하나 이상, 각각 한 번 |
+| `@tick` (full) | `on Tick`·`on FixedTick`·`on LateTick` | 이름 지정 `Phase:`(`PrePhysics`·`PostPhysics`·`LateUpdate`), `Interval:`(0 이상의 숫자 리터럴·const), `Priority:`(정수 리터럴·const) 중 하나 이상, 각각 한 번 |
 | `@cvar` (full) | WorldService 파생 class의 `var` 필드(bool·숫자·`string`) | 보간 없는 문자열 리터럴 하나(CVar 이름) |
 
 **효과.** 함수·hook·handler 본문마다 효과 집합을 추론한다. 효과와 근원은 다음이다.
@@ -950,7 +950,7 @@ Class<T> { fn Create(): T }             // full, T는 class 타입
 | 효과 | 근원 |
 |---|---|
 | 대기 | `await`(아래 준비 대기 밖) |
-| 준비 대기 | `await`의 피연산자가 `X.Load()`·`Assets.LoadAll(...)`, `LoadRequest<T>` 값, schema `effects`에 `readiness`가 있는 함수 호출 |
+| 준비 대기 | `await`의 피연산자가 `X.Load()`·`Assets.LoadAll(...)`, `LoadRequest<T>` 값, schema `effects`에 `readiness`가 있는 함수 호출, 인자가 모두 로드 요청인 `All`·`Race` |
 | 생성 | schema `effects`에 `spawn`이 있는 함수(`World.Spawn`) |
 | 자원 획득 | schema `effects`에 `acquire`가 있는 함수(유지 자원을 돌려주는 `Start*` — §7.1, LC3c가 자원 정책으로 넓힌다) |
 | 로드 | `X.Load()`·`Assets.LoadAll(...)` 호출 |
@@ -961,9 +961,9 @@ Class<T> { fn Create(): T }             // full, T는 class 타입
 | 입출력 | schema `effects`에 `io`·`wallClock`이 있는 함수 |
 | 객체 참조 | 엔진 객체·Sparks class·interface 타입의 값(인자·지역·필드·`this`·문맥 이름)을 쓰는 것 |
 
-호출은 부른 함수의 효과를 더한다(호출 그래프의 전이 폐포, 재귀는 고정점). 수신자가 `this`가 아닌 다른 객체인 메서드 호출에서 부른 함수의 쓰기는 객체 쓰기다. `await`의 피연산자가 `async fn` 호출이면 그 `await` 자체는 대기 효과가 아니다. `open`·엔진 `overridable` 함수의 호출은 그 함수와 컴파일 안의 모든 `override`의 효과를 더한다(재정의가 기반 문맥이 금지하는 동작을 숨길 수 없다). 대기를 만드는 호출(`async fn`을 `All`·`Race`의 인자로 넘기는 것 포함)도 부른 것이다.
+호출은 부른 함수의 효과를 더한다(호출 그래프의 전이 폐포, 재귀는 고정점). 수신자가 `this`가 아닌 다른 객체인 메서드 호출에서 부른 함수의 쓰기는 객체 쓰기다. `await`의 피연산자가 `async fn` 호출이면 그 `await` 자체는 대기 효과가 아니다. `open`·엔진 `overridable` 함수의 호출은 그 함수와 컴파일 안의 모든 `override`(여러 단계의 재정의 포함)의 효과를, interface 메서드(Sparks·엔진)의 호출은 그것을 구현한 모든 class 함수의 효과를 더한다(재정의·구현이 기반 문맥이 금지하는 동작을 숨길 수 없다). `override fn`은 자기 문맥 attribute가 없으면 재정의한 기반 함수 사슬의 문맥 attribute(`@pure`·`@worker`·`@deterministic`)를 따른다. 계산은 호출 그래프의 역방향 worklist로 하므로 사슬 길이와 무관하게 간선 수에 비례한다. S0601을 받은 `await`는 효과로 전하지 않는다(부르는 쪽의 연쇄 방지). 대기를 만드는 호출(`async fn`을 `All`·`Race`의 인자로 넘기는 것 포함)도 부른 것이다.
 
-**문맥.** 다음 본문은 표의 효과를 쓸 수 없다. 직접 쓰면 그 자리(`await`·`emit`·대입·호출)에, 호출이 가져오면 그 호출에 S0602를 내며 메시지는 문맥과 효과, 호출이면 부른 함수 이름을 적는다(호출 하나에 진단 하나 — 표 순서로 처음 걸린 효과).
+**문맥.** 다음 본문은 표의 효과를 쓸 수 없다. 직접 쓰면 그 자리(`await`·`emit`·대입·호출)에, 호출이 가져오면 그 호출에 S0602를 내며 메시지는 문맥과 효과, 호출이면 부른 함수 이름을 적는다(호출 하나에 진단 하나 — 걸린 효과 중 더 구체적인 것: 대기, 생성, 자원 획득, 로드, 발행, 직렬화 필드 쓰기, 객체 쓰기, 쓰기, 엔진 호출, 일회성 효과, 입출력, 객체 참조 순).
 
 | 본문 | 금지 효과 |
 |---|---|
@@ -974,10 +974,11 @@ Class<T> { fn Create(): T }             // full, T는 class 타입
 | `on Tick`·`FixedTick`·`LateTick` | 대기·준비 대기·생성·자원 획득·로드 |
 | `on X.Changed` | 대기·준비 대기 |
 | `on Destroy` | 대기·준비 대기·생성·자원 획득·발행·객체 쓰기·엔진 호출(schema `pure`·`oneShot` 함수는 된다) |
-| `on Validate` (full) | 대기·준비 대기·생성·입출력·`@edit`·`@save` 필드 쓰기 |
+| `on Validate` (full) | 대기·준비 대기·생성·입출력·직렬화 필드(`@edit`·`@save`·`@net`) 쓰기. RPC 호출은 LC3d |
+| 최상위 `fn`(`async fn` 포함) | 대기·준비 대기·발행·생성·자원 획득·로드·엔진 호출·일회성 효과·객체 쓰기(§3.1 "순수 계산 함수") |
 | `@pure fn` (full) | 쓰기·발행·대기·준비 대기·생성·자원 획득·로드·엔진 호출 |
 | `@worker fn` (full) | 객체 참조·자원 획득·로드·대기·준비 대기·발행 |
-| `@deterministic fn` (full) | 입출력·대기(`NextFixedTick()`의 대기만 된다)·준비 대기 |
+| `@deterministic fn` (full) | 입출력·대기(`NextFixedTick()`의 대기만 된다)·준비 대기. `Random`은 instance별 결정적 stream이므로 된다(§6.3) |
 
 **`await`를 쓸 수 있는 곳(S0601).** `await`는 `async fn`과 handler·hook 본문에만 쓴다. 그 밖(`async`가 아닌 `fn`)의 `await`는 S0601이며 `async fn`으로 선언하라고 제시한다. hook 문맥이 대기를 금지하는 것은 S0602다.
 

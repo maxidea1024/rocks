@@ -32,7 +32,9 @@ TypeChecker::TypeChecker(NameBinder& binder) noexcept
       exhaustiveSwitches_(binder.allocator_), structDefault_(binder.allocator_),
       firstCase_(binder.allocator_), nextCase_(binder.allocator_), staleRead_(binder.allocator_),
       extensionEvents_(binder.allocator_), effectBodies_(binder.allocator_),
-      effectSites_(binder.allocator_), effectOfSymbol_(binder.allocator_) {
+      effectSites_(binder.allocator_), effectOfSymbol_(binder.allocator_),
+      dispatchPairs_(binder.allocator_), dispatchFirst_(binder.allocator_),
+      dispatchBodies_(binder.allocator_) {
 }
 
 void TypeChecker::AppendDisplayType(StringBuilderBase& out, uint32 type) const noexcept {
