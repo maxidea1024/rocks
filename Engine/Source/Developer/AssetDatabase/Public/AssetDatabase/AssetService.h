@@ -66,6 +66,22 @@ struct AssetMoveResult {
     usize aliases = 0;
 };
 
+// asset-delete 결과다(7.1절 17 A2e3).
+struct AssetDeleteResult {
+    explicit AssetDeleteResult(Allocator& allocator) noexcept
+        : path(allocator), referencerPaths(allocator), referencerIds(allocator) {
+    }
+
+    // 지운(거부면 고른) 패키지 id와 논리 경로, 지운 별칭 수다.
+    AssetId id{};
+    String path;
+    usize aliases = 0;
+    // 디스크 참조자(색인 — 경로 키 순, 자신 제외)의 경로·id 사본이다(거부·force 모두 — 색인이
+    // 바뀌어도 유효).
+    Array<String> referencerPaths;
+    Array<AssetId> referencerIds;
+};
+
 class AssetService {
 public:
     // layout은 초기화한 프로젝트 배치다(빌림 — 서비스보다 오래 산다).
@@ -164,6 +180,25 @@ public:
     Result<void> Move(const AssetDatabaseLock& lock, StringView source, StringView target,
                       AssetMoveResult& result, Array<EditorWarning>* warnings = nullptr,
                       AssetDiagnostic* failure = nullptr) noexcept;
+
+    // asset-delete <path|AssetId> [--force]: 패키지 하나를 지운다(7.1절 17 A2e3). 대상은 지금
+    // 이름이다(별칭으로 풀지 않는다). 색인 항목이면 파일을 지우고, 저장하지 않은 새 패키지면
+    // 집합에서 닫기만 한다. 순서: 검사 → 색인 갱신 준비(removed) → 대상을 가리키는 별칭 지우기
+    // 쓰기 → 집합에서 닫기(Discard — 저장하지 않은 편집을 버린다) → 파일 지우기 → 색인 확정.
+    // 닫기·지우기가 실패하면 별칭 표를 되돌린다(되돌리지 못하면 경고 AliasNotRestored — 지우기
+    // 실패면 패키지는 이미 닫혔고 파일·색인은 그대로다). 지운 별칭마다 경고 AliasRemoved, 별칭
+    // 쓰기의 NotDurable은 경고 NotDurable이다. result는 실패해도 고른 대상과 디스크 참조자를
+    // 담는다.
+    //
+    // 오류(failure 진단): Initialize 전·잠금 아님 InvalidArgument, 대상 텍스트 형식 InvalidPath /
+    // InvalidArgument, 없음 NotFound(진단 None), 같은 경로 키 둘 DuplicatePath / AlreadyExists,
+    // 같은 id 파일 둘 DuplicateAssetId / AlreadyExists, 디스크 참조자가 있고 force가 아님
+    // ReferencedBy / InvalidArgument(related = 첫 참조자), 다른 열린 패키지가 메모리에서 참조함
+    // ReferencedBy / Busy(force여도), 별칭 표의 오류(Aliases·Write), 색인 준비·닫기·파일 지우기의
+    // 오류(진단 None과 그 오류), 할당 실패.
+    Result<void> Delete(const AssetDatabaseLock& lock, StringView target, bool force,
+                        AssetDeleteResult& result, Array<EditorWarning>* warnings = nullptr,
+                        AssetDiagnostic* failure = nullptr) noexcept;
 
     // 별칭 표다(처음 부를 때 packages.files에서 읽는다 — 7.1절 17 A2e1, 실패하면 다음 호출이 다시
     // 읽는다). 오류(failure 진단): Initialize 전 InvalidArgument, AssetAliasTable::Load의 오류.

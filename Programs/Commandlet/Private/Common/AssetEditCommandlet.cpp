@@ -18,6 +18,7 @@ constexpr StringView NewName = "asset-new";
 constexpr StringView SetName = "asset-set";
 constexpr StringView InfoName = "asset-info";
 constexpr StringView MoveName = "asset-move";
+constexpr StringView DeleteName = "asset-delete";
 
 constexpr StringView NewUsage =
     "usage: asset-new <Type> <path> [<property>=<value>...] [--unset=<paths>] [--erase=<paths>]\n"
@@ -50,6 +51,15 @@ constexpr StringView MoveUsage =
     "  rename that only changes case). The new path must be free: no package, file, directory\n"
     "  or alias of another asset. Prints '<count> packages moved, <count> aliases added'. Takes\n"
     "  the project write lock.\n";
+
+constexpr StringView DeleteUsage =
+    "usage: asset-delete <path|AssetId> [--force] [--project=<dir>] [--wait=<seconds>]\n"
+    "  Delete an editor package, or close a package not saved yet. The target is its current\n"
+    "  path or id (aliases are not followed). Packages that reference it on disk are listed and\n"
+    "  block the delete unless --force (they keep a missing dependency). A package open in this\n"
+    "  process that still references it blocks the delete even with --force. Aliases to the\n"
+    "  deleted asset are removed. Prints 'deleted <path> <AssetId>'. Takes the project write\n"
+    "  lock.\n";
 
 // 목록 옵션 값 분리자다(경로 key `[...]`·따옴표 안은 나누지 않는다).
 constexpr char ListSeparator = ',';
@@ -218,10 +228,11 @@ bool ParseEdit(Span<const StringView> args, const EditGrammar& grammar, EditArgs
 // 편집 경고 이름이다(EditorWarningKind 순서).
 const char* WarningName(EditorWarningKind kind) noexcept {
     constexpr const char* Names[] = {
-        "ExcludedDependency", "UnresolvedImport", "DroppedUnresolvedImport", "NotDurable",
-        "OrphanNotDeleted",   "AliasResolved",    "AliasTableUnreadable",    "AliasNotRestored"};
+        "ExcludedDependency",   "UnresolvedImport", "DroppedUnresolvedImport",
+        "NotDurable",           "OrphanNotDeleted", "AliasResolved",
+        "AliasTableUnreadable", "AliasNotRestored", "AliasRemoved"};
     static_assert(sizeof(Names) / sizeof(Names[0]) ==
-                      static_cast<usize>(EditorWarningKind::AliasNotRestored) + 1,
+                      static_cast<usize>(EditorWarningKind::AliasRemoved) + 1,
                   "every editor warning needs a name");
     return Names[static_cast<usize>(kind)];
 }
@@ -241,6 +252,18 @@ Result<int32> WriteWarnings(CommandletOutput& output, Allocator& allocator, Stri
             auto written = Fail(output, allocator, command, 0,
                                 "AliasResolved: {}: warning resolved through an alias to {}",
                                 warning.Text(), diagnostic.asset);
+            if (!written) {
+                return written;
+            }
+
+            continue;
+        }
+
+        // 삭제가 지운 별칭은 그 별칭 경로와 대상을 쓴다.
+        if (warning.kind == EditorWarningKind::AliasRemoved) {
+            auto written = Fail(output, allocator, command, 0,
+                                "AliasRemoved: {}: warning removed the alias to {}", warning.Text(),
+                                diagnostic.asset);
             if (!written) {
                 return written;
             }
@@ -487,6 +510,64 @@ Result<int32> RunAssetMoveCommand(void* context, Span<const StringView> args,
     }
 
     return FlushCache(output, allocator, MoveName, session);
+}
+
+Result<int32> RunAssetDeleteCommand(void* context, Span<const StringView> args,
+                                    CommandletOutput& output) noexcept {
+    const AssetCommandContext& command = *static_cast<const AssetCommandContext*>(context);
+    Allocator& allocator = *command.allocator;
+    EditArgs parsed(allocator);
+    EditGrammar grammar;
+    grammar.force = true;
+    bool done = false;
+    auto usage = CheckUsage(output, ParseEdit(args, grammar, parsed), parsed, DeleteUsage, done);
+    if (done) {
+        return usage;
+    }
+
+    EditSession session(allocator, *command.modules);
+    Result<int32> failure = Result<int32>::Success(1);
+    if (!OpenSession(output, allocator, DeleteName, parsed.project, parsed.wait, true, session,
+                     failure)) {
+        return failure;
+    }
+
+    AssetDiagnostic diagnostic;
+    AssetDeleteResult result(allocator);
+    auto deleted = session.service->Delete(session.lock, parsed.positional[0], parsed.force, result,
+                                           &session.warnings, &diagnostic);
+    // 디스크 참조자 줄(지웠으면 경고 — force, 아니면 실패의 근거).
+    for (usize index = 0; index < result.referencerIds.Size(); ++index) {
+        auto written =
+            Fail(output, allocator, DeleteName, 0, "ReferencedBy: {}: {}{} references {}",
+                 result.referencerPaths[index].View(), deleted ? "warning " : "",
+                 result.referencerIds[index], result.path.View());
+        if (!written) {
+            return written;
+        }
+    }
+
+    if (auto warned = WriteWarnings(output, allocator, DeleteName, session.warnings); !warned) {
+        return warned;
+    }
+
+    if (!deleted) {
+        return WriteFailure(output, allocator, DeleteName, parsed.positional[0],
+                            session.diagnostics, diagnostic, deleted.Error());
+    }
+
+    StringBuilder<LineBytes> line(allocator);
+    if (auto formatted =
+            line.TryAppendFormat("{}: deleted {} {}\n", DeleteName, result.path.View(), result.id);
+        !formatted) {
+        return Result<int32>::Failure(formatted.Error());
+    }
+
+    if (auto written = Write(output, CommandletStream::Output, line.View(), 0); !written) {
+        return written;
+    }
+
+    return FlushCache(output, allocator, DeleteName, session);
 }
 
 Result<int32> RunAssetInfoCommand(void* context, Span<const StringView> args,

@@ -1186,6 +1186,12 @@ Result<void> AssetIndex::PrepareRefreshPaths(platform::FileSystem& files,
         }
     }
 
+    for (StringView name : paths.removed) {
+        if (!IsContentRelativeName(name)) {
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
     const bool normalizes = paths.normalizesNames;
     // 정규화 키의 임시 저장소다(정규화하지 않으면 이름을 그대로 쓴다 — 항목마다 복사하지 않는다).
     String scratch(*allocator_);
@@ -1249,9 +1255,41 @@ Result<void> AssetIndex::PrepareRefreshPaths(platform::FileSystem& files,
         }
     }
 
-    // 이름 바꾸기의 두 이름(빼기 — 그 이름과 그 아래)과 표시 이름이다. 같은 키가 아니면 서로의
-    // 아래일 수 없다(디렉터리를 자기 안으로·자기 위로 옮기기).
+    // 이름 바꾸기의 두 이름과 지우는 이름(빼기 — 그 이름과 그 아래)과 표시 이름이다. 같은 키가
+    // 아니면 이름 바꾸기의 두 이름은 서로의 아래일 수 없다(디렉터리를 자기 안으로·자기 위로
+    // 옮기기).
     NameSet moved(*allocator_);
+    auto dropName = [&](StringView name) noexcept -> Result<void> {
+        auto key = CompareKey(name, normalizes, scratch);
+        if (!key) {
+            return Result<void>::Failure(key.Error());
+        }
+
+        if (auto added = moved.Add(key.Value()); !added) {
+            return added;
+        }
+
+        String display(*allocator_);
+        String escaped(*allocator_);
+        if (auto assigned = AssignDisplayNameAs(display, name, false); !assigned) {
+            return assigned;
+        }
+
+        if (auto assigned = AssignDisplayNameAs(escaped, name, true); !assigned) {
+            return assigned;
+        }
+
+        const String* shownNames[] = {&display, &escaped};
+        for (const String* shown : shownNames) {
+            if (auto shownKey = CompareKey(shown->View(), normalizes, scratch); !shownKey) {
+                return Result<void>::Failure(shownKey.Error());
+            } else if (auto added = treeDisplays.Add(shownKey.Value()); !added) {
+                return added;
+            }
+        }
+
+        return Result<void>::Success();
+    };
     for (const AssetIndexMove& move : paths.moves) {
         String fromKey(*allocator_);
         auto from = CompareKey(move.from, normalizes, scratch);
@@ -1290,33 +1328,15 @@ Result<void> AssetIndex::PrepareRefreshPaths(platform::FileSystem& files,
 
         const StringView names[] = {move.from, move.to};
         for (StringView name : names) {
-            auto key = CompareKey(name, normalizes, scratch);
-            if (!key) {
-                return Result<void>::Failure(key.Error());
+            if (auto dropped = dropName(name); !dropped) {
+                return dropped;
             }
+        }
+    }
 
-            if (auto added = moved.Add(key.Value()); !added) {
-                return added;
-            }
-
-            String display(*allocator_);
-            String escaped(*allocator_);
-            if (auto assigned = AssignDisplayNameAs(display, name, false); !assigned) {
-                return assigned;
-            }
-
-            if (auto assigned = AssignDisplayNameAs(escaped, name, true); !assigned) {
-                return assigned;
-            }
-
-            const String* shownNames[] = {&display, &escaped};
-            for (const String* shown : shownNames) {
-                if (auto shownKey = CompareKey(shown->View(), normalizes, scratch); !shownKey) {
-                    return Result<void>::Failure(shownKey.Error());
-                } else if (auto added = treeDisplays.Add(shownKey.Value()); !added) {
-                    return added;
-                }
-            }
+    for (StringView name : paths.removed) {
+        if (auto dropped = dropName(name); !dropped) {
+            return dropped;
         }
     }
 

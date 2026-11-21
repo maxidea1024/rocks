@@ -906,6 +906,8 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
         return "AliasSearchTruncated";
     case AssetDiagnosticCode::CorruptAliasTable:
         return "CorruptAliasTable";
+    case AssetDiagnosticCode::ReferencedBy:
+        return "ReferencedBy";
     }
 
     return "Unknown";
