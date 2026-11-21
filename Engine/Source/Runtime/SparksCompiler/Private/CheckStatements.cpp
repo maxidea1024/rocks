@@ -149,6 +149,11 @@ void TypeChecker::Run() noexcept {
         CheckHeldEvents();     // 3.14절 schema 이벤트 인자
     }
 
+    // 안정 ID(LC4d): 이름 키를 manifest와 맞추고 사라진 데이터 연결 ID를 알린다(S1005).
+    if (rules_ && binder_.error_ == ErrorCode::None) {
+        CheckStableIds();
+    }
+
     // typed IR(LC4a): 진단이 없는 컴파일만 내린다(타입·심볼이 모두 정해져 있다).
     if (c.lastStage_ >= CompilationStage::Codegen && binder_.error_ == ErrorCode::None &&
         binder_.diagnostics_.IsEmpty()) {

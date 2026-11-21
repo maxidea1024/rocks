@@ -63,6 +63,14 @@ struct ImportResolution {
     uint32 target = NoModule;
 };
 
+// 발급 대기 ID 하나다(SparksBytecode 6.1절): manifest에 없는 선언의 kind·이름 키와, `@formerly`로
+// 이은 옛 이름 키(rename — 없으면 빈 글자). 발급은 이 목록을 받는 도구가 한다.
+struct PendingId {
+    StringView kind;
+    StringView name;
+    StringView formerName;
+};
+
 namespace detail {
 class CompilationChecker;
 class FlowAnalyzer;
@@ -92,6 +100,10 @@ public:
     // 구분, `Combat/Score.spark`)이며 규칙 검사는 Check가 한다(S1108). 실패: 없는 package, 같은
     // 패키지에 같은 path를 두 번, Check 뒤면 InvalidArgument, 할당 실패.
     Result<uint32> AddModule(uint32 package, SourceId source, StringView path) noexcept;
+
+    // package의 안정 ID manifest(`<패키지>.rocksids.json`, SparksBytecode 6.1절)를 더한다. 패키지
+    // 하나에 하나다. 실패: 없는 package, 이미 더함, Check 뒤면 InvalidArgument.
+    Result<void> AddIdManifest(uint32 package, SourceId id) noexcept;
 
     // Check가 검사할 마지막 단계를 정한다(기본 CompilationStage::All). 뒤 단계의 결과 접근은 빈
     // 결과다(예: Syntax면 ModuleImports가 비고 NodeSymbol이 NoSymbol). 실패: Check 뒤면
@@ -218,6 +230,13 @@ public:
     // 않은 컴파일은 InvalidArgument, 할당 실패는 그 오류.
     Result<void> AppendIrDump(StringBuilderBase& out, uint32 module) const noexcept;
 
+    // 발급 대기 ID다(Rules 단계 이상 — 모듈·선언 순). 결과는 컴파일이 살아 있는 동안 유효하다.
+    uint32 PendingIdCount() const noexcept {
+        return static_cast<uint32>(pendingIds_.Size());
+    }
+
+    PendingId PendingIdAt(uint32 index) const noexcept;
+
     // 모듈의 bytecode(Docs/Design/SparksBytecode.ko.md 4절)다. Codegen 단계까지 검사했고 진단이
     // 없는 컴파일에서만 있다(아니면 nullptr). 컴파일이 살아 있는 동안 유효하다.
     const BytecodeModule* ModuleBytecode(uint32 module) const noexcept;
@@ -291,10 +310,22 @@ private:
         bool valid = false;
     };
 
+    struct PackageIdManifest {
+        SourceId source;
+        bool present = false;
+    };
+
     struct PackageEntry {
         PackageManifest manifest;
         SourceId source;
         bool valid = false;
+        PackageIdManifest ids;
+    };
+
+    struct PendingIdRef {
+        uint8 kind = 0;
+        TextRef name;
+        TextRef former;
     };
 
     struct ModuleEntry {
@@ -348,6 +379,7 @@ private:
     // 모듈마다 내림·인코딩·verifier를 모두 마쳤는지다(S1150 등으로 멈춘 모듈은 0 — 덤프·bytecode
     // 없음).
     Array<uint8> lowered_;
+    Array<PendingIdRef> pendingIds_;
     CompilationStage lastStage_ = CompilationStage::All;
     bool checked_ = false;
 };

@@ -18,7 +18,7 @@ Compilation::Compilation(Allocator& allocator, const SourceSet& sources) noexcep
       signatureParameters_(allocator), symbolBases_(allocator), nodeSymbols_(allocator),
       nodeTypes_(allocator), exprTypes_(allocator), nodeBase_(allocator), sortedModules_(allocator),
       sortedFirst_(allocator), sortedCount_(allocator), irDumps_(allocator), bytecode_(allocator),
-      lowered_(allocator) {
+      lowered_(allocator), pendingIds_(allocator) {
 }
 
 Compilation::TypeProbe Compilation::ProbeOf(uint32 type) const noexcept {
@@ -126,7 +126,7 @@ Result<uint32> Compilation::AddPackage(SourceId manifest) noexcept {
     }
 
     if (auto pushed =
-            packages_.TryPushBack(PackageEntry{PackageManifest(*allocator_), manifest, false});
+            packages_.TryPushBack(PackageEntry{PackageManifest(*allocator_), manifest, false, {}});
         !pushed) {
         return Result<uint32>::Failure(pushed.Error());
     }

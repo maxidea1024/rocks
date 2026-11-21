@@ -25,10 +25,10 @@
 | SE-R5 | interface 표(CU9): `TypeInfo`의 interface 목록·slot 표, C++ `ROCKS_INTERFACE` | 없음 | 위 매크로 목록에 없다 | EI2 | SL 10.3절 |
 | SE-R6 | 편집 메타(CU1): 강제 범위(Min·Max), 편집 범위·단위·편집 조건 | 일부 | 필드 지정자 `Category`·`DisplayName`·`ReadOnly`·`MaxElements`는 있다(`Specifiers.cs`). 범위·단위·조건은 없다 | EI5 | UiToolkit CU1, SL 10.1절 |
 | SE-R7 | 변경 통지(CU5): native 필드의 `Changed`, 계산 속성(getter·setter 쌍) | 없음 | ObjectRuntime·MetaSchema 공개 헤더에 통지 API가 없다 | EI3 | UiToolkit CU5, SL 5.3·10.2절 |
-| SE-R8 | 안정 ID 공유: Sparks 컴파일러를 `.rocksids.json`의 두 번째 발급자로 인정(모듈 경로 이름 키, subobject·function·rpc kind) | 없음 | `StableIdManifest.cs`의 kind는 `type`·`field` 둘뿐이고 이름은 `::` 한정 식별자만 받는다. CI가 저장소의 모든 `*.rocksids.json`을 `ids merge-check`에 넣는다(`Build/CheckIdentityMerges.ps1`) | **LC4에서 함께**(파서 확장) · EI2(엔진 타입과 공유) | SL 12.2절 |
+| SE-R8 | 안정 ID 공유: Sparks 컴파일러를 `.rocksids.json`의 두 번째 발급자로 인정(모듈 경로 이름 키, subobject·function·rpc kind) | 파서 확장 완료(LC4d) | `StableIdManifest.cs`가 `subobject`·`function`·`rpc`·`enumCase` kind와 Sparks 이름 키 `<패키지>/<경로>.<선언>[.<멤버>]`(handler `on(<경로>)`)를 받는다(시험 `StableIds.SparksNamesAndKinds`). 컴파일러는 manifest를 읽어 발급 대기 목록·S1005를 내고, 발급(GUID 쓰기)은 CLI `sparks ids`(LC8)가 한다 | EI2(엔진 타입과 공유) | SL 12.2절, SparksBytecode 6.1절 |
 | SE-R9 | 엔진 공통 진단 코드 등록부(S·RMC·UI 코드 대역) | 있음(문서) | CompilerDiagnostics "진단 코드 등록부" 절(LC0에서 추가) | — | SL 8.1절 |
 
-SE-R8의 파서 확장(새 kind와 Sparks 이름 키)은 메타 컴파일러의 작은 변경이므로 LC4에서 Sparks 쪽이 함께 한다. 그 전에는 Sparks 패키지 ID manifest를 저장소에 커밋하지 않는다(CI의 `ids merge-check`가 거부한다).
+SE-R8의 파서 확장(새 kind와 Sparks 이름 키)은 LC4d에서 함께 했다. 이제 Sparks 패키지 ID manifest를 저장소에 둘 수 있다(CI의 `ids merge-check`가 받는다 — 저장소 전체에서 ID·이름이 겹치지 않아야 한다).
 
 ### 2.2 Core·ObjectRuntime
 

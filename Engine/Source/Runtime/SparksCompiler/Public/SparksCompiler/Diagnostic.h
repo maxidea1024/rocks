@@ -180,6 +180,8 @@ enum class DiagnosticCode : uint16 {
     NotReplicable = 1002,
     NetWriteOutsideAuthority = 1003,
     RpcCall = 1004,
+    DataIdLost = 1005,
+    InvalidIdManifest = 1006,
     ManifestSyntax = 1101,
     UnknownManifestKey = 1102,
     MissingManifestKey = 1103,

@@ -249,7 +249,7 @@ internal sealed class StableIdManifest
             return;
         }
 
-        if (kind == "field" && Owner(oldName) != Owner(newName))
+        if (IsMember(kind) && Owner(oldName) != Owner(newName))
         {
             throw new InvalidDataException("Moving fields to another type requires explicit migration");
         }
@@ -265,7 +265,7 @@ internal sealed class StableIdManifest
         {
             for (int i = 0; i < next.Count; ++i)
             {
-                if (next[i].Kind == "field" && Owner(next[i].Name) == oldName)
+                if (IsMember(next[i].Kind) && Owner(next[i].Name) == oldName)
                 {
                     next[i] = RenameEntry(next[i], newName + next[i].Name[oldName.Length..]);
                 }
@@ -292,7 +292,7 @@ internal sealed class StableIdManifest
         {
             for (int i = 0; i < next.Count; ++i)
             {
-                if (next[i].Kind == "field" && Owner(next[i].Name) == name)
+                if (IsMember(next[i].Kind) && Owner(next[i].Name) == name)
                 {
                     next[i] = next[i] with { Retired = true };
                 }
@@ -319,7 +319,7 @@ internal sealed class StableIdManifest
         }
 
         var moved = entries.Where(value => (value.Kind == "type" && value.Name == typeName) ||
-            (value.Kind == "field" && Owner(value.Name) == typeName)).Select(Copy).ToList();
+            (IsMember(value.Kind) && Owner(value.Name) == typeName)).Select(Copy).ToList();
         var next = entries.Where(value => !moved.Any(item => item.Kind == value.Kind && item.Name == value.Name)).Select(Copy).ToList();
         Validate(next);
         entries.Clear();
@@ -433,7 +433,7 @@ internal sealed class StableIdManifest
             }
         }
 
-        foreach (StableIdEntry field in values.Where(value => value.Kind == "field"))
+        foreach (StableIdEntry field in values.Where(value => IsMember(value.Kind)))
         {
             if (!owners.TryGetValue(Owner(field.Name), out StableIdEntry? owner) ||
                 (!field.Retired && (owner.Retired || owner.Name != Owner(field.Name))))
@@ -451,22 +451,82 @@ internal sealed class StableIdManifest
         }
     }
 
+    // 멤버 kind(이름의 주인 type이 같은 명세에 있어야 하는 것)다. C++은 field뿐이고 Sparks는 subobject·function·
+    // rpc·enumCase를 더 쓴다(Docs/Design/SparksBytecode.ko.md 6.1절, SE-R8).
+    private static bool IsMember(string kind) => kind is "field" or "subobject" or "function" or "rpc" or "enumCase";
+
+    private static bool IsIdentifier(string part) => part.Length > 0 && (char.IsAsciiLetter(part[0]) || part[0] == '_') &&
+        part.All(ch => char.IsAsciiLetterOrDigit(ch) || ch == '_');
+
     private static void ValidateKindAndName(string kind, string name)
     {
-        if (kind is not ("type" or "field") || string.IsNullOrEmpty(name) || name.Length > 2048)
+        if (kind is not ("type" or "field" or "subobject" or "function" or "rpc" or "enumCase") || string.IsNullOrEmpty(name) ||
+            name.Length > 2048)
         {
             throw new InvalidDataException("Invalid stable ID kind/name");
         }
 
+        if (name.Contains('/'))
+        {
+            ValidateSparksName(kind, name);
+            return;
+        }
+
+        // C++ 정규 이름(`a::b::Type`, 멤버는 `::member`)은 type·field만 쓴다.
         string[] parts = name.Split("::", StringSplitOptions.None);
-        if ((kind == "field" && parts.Length < 2) || parts.Any(part => part.Length == 0 ||
-            !(char.IsLetter(part[0]) || part[0] == '_') || part.Any(ch => !(char.IsLetterOrDigit(ch) || ch == '_'))))
+        if (kind is not ("type" or "field") || (kind == "field" && parts.Length < 2) || parts.Any(part => !IsIdentifier(part)))
         {
             throw new InvalidDataException("Invalid qualified declaration name: " + name);
         }
     }
 
-    private static string Owner(string name) => name[..name.LastIndexOf("::", StringComparison.Ordinal)];
+    // Sparks 이름 키: `<패키지>/<모듈 경로>.<선언>[.<멤버>]`. 패키지·경로 조각은 식별자(`-` 허용), 선언은 식별자,
+    // 멤버는 식별자 또는 handler의 `on(<경로>)`(경로는 `.`로 이은 식별자·`this`)다. type은 멤버가 없고 멤버
+    // kind는 멤버가 있다.
+    private static void ValidateSparksName(string kind, string name)
+    {
+        int slash = name.LastIndexOf('/');
+        int dot = name.IndexOf('.', slash + 1);
+        string[] path = name[..(dot < 0 ? name.Length : dot)].Split('/');
+        bool valid = dot > slash + 1 && path.Length >= 2 && path.All(part => part.Length > 0 &&
+            (char.IsAsciiLetter(part[0]) || part[0] == '_') && part.All(ch => char.IsAsciiLetterOrDigit(ch) || ch is '_' or '-'));
+        string rest = dot < 0 ? string.Empty : name[(dot + 1)..];
+        int memberDot = rest.IndexOf('.');
+        string declaration = memberDot < 0 ? rest : rest[..memberDot];
+        string member = memberDot < 0 ? string.Empty : rest[(memberDot + 1)..];
+        valid = valid && IsIdentifier(declaration);
+        if (kind == "type")
+        {
+            valid = valid && member.Length == 0;
+        }
+        else if (member.StartsWith("on(", StringComparison.Ordinal) && member.EndsWith(')'))
+        {
+            valid = valid && kind == "function" && member[3..^1].Split('.').All(IsIdentifier);
+        }
+        else
+        {
+            valid = valid && IsIdentifier(member);
+        }
+
+        if (!valid)
+        {
+            throw new InvalidDataException("Invalid Sparks declaration name: " + name);
+        }
+    }
+
+    // 멤버 이름의 주인 type 이름이다(C++은 마지막 `::` 앞, Sparks는 모듈 경로 뒤 첫 `.`의 선언까지).
+    private static string Owner(string name)
+    {
+        if (!name.Contains('/'))
+        {
+            return name[..name.LastIndexOf("::", StringComparison.Ordinal)];
+        }
+
+        int slash = name.LastIndexOf('/');
+        int dot = name.IndexOf('.', slash + 1);
+        int memberDot = name.IndexOf('.', dot + 1);
+        return memberDot < 0 ? name : name[..memberDot];
+    }
 
     private static void ValidateId(string id)
     {

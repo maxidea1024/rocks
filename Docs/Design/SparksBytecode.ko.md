@@ -174,10 +174,20 @@ bytecode 형식(opcode 번호·명령 모양·함수 표·상수 표)은 새 모
 
 ## 6. 안정 ID·hash(LC4d)
 
-- **ID manifest:** 패키지마다 `<패키지>.rocksids.json`. Sparks 컴파일러가 두 번째 발급자이고 이름 키는 `<패키지>/<모듈 경로>.<선언>[.<멤버>]`, kind는 `type`·`field`·`subobject`·`function`·`rpc`·`enumCase`다(SL §12.2). 메타 컴파일러 `StableIdManifest.cs`의 kind·이름 검사를 넓힌다(SE-R8 파서 부분).
-- **발급:** 개발 빌드의 컴파일이 새 선언에 ID를 준다(입력 중 미완성 선언 제외 — 구문 오류가 있는 모듈은 발급하지 않는다). 데이터 연결 ID(`@save`·`@net`·`@edit` 필드, 소유 component, enum case)의 소실은 오류 S1005(새 코드), `@formerly`는 aliases로 기록한다.
-- **interface hash:** 모듈의 공개 선언(이름·시그니처·필드 타입·const 값·이벤트·함수별 효과 집합 — SL §12.3)을 정규 순서로 직렬화한 SHA-256. **body hash:** 함수 본문의 IR 덤프 바이트 SHA-256.
-- **재컴파일 범위:** 본문만 바뀌면 그 함수만, interface hash가 바뀌면 import한 모듈도 다시 검사한다.
+### 6.1 ID manifest(LC4d 확정)
+
+- **파일:** 패키지 폴더의 `<패키지>.rocksids.json`(C++ 모듈과 같은 형식 — `schema: 1`, `entries`의 `kind`·`name`·`id`·`aliases`·`retired`). 메타 컴파일러 `StableIdManifest.cs`가 Sparks kind와 이름 키를 받도록 넓힌다(SE-R8): kind는 기존 `type`·`field`에 `subobject`·`function`·`rpc`·`enumCase`를 더하고, Sparks 이름 키는 `<패키지>/<모듈 경로>.<선언>[.<멤버>]`다(예: `Game/Doors/Door.Door.Open`). 모듈 경로는 `.spark`를 뺀 패키지 안 경로(`/` 구분), 선언·멤버는 Sparks 식별자, handler 멤버는 `on(<경로>)`(예: `Game/Main.Door.on(Owner.Damaged)`). 멤버 ID(`field`·`subobject`·`function`·`rpc`·`enumCase`)의 주인은 이름의 마지막 `.` 앞 선언이며 그 `type` 항목이 같은 파일에 있어야 한다(C++ `::` 이름과 같은 규칙).
+- **ID를 받는 선언:** class·struct·enum(`type`), 그 필드(`field` — 소유 component `let` 필드는 `subobject`), enum case(`enumCase`), handler·`@rpc`·`@cheat`·`@editorButton`·`override fn`·interface를 구현하는 함수(`function` — SL §12.2), `@rpc` 함수의 RpcId(`rpc`). 최상위 함수·지역은 ID가 없다.
+- **컴파일러의 역할:** 컴파일러는 GUID를 만들지 않는다(같은 입력 → 같은 출력). 패키지 manifest를 입력(`Compilation::AddIdManifest`)으로 받아 선언의 이름 키를 ID로 풀고, manifest에 없는 선언은 **발급 대기** 목록(`PendingIds` — kind·이름 키·`@formerly`의 옛 이름)으로 돌려준다. 발급(새 GUID·aliases 기록)은 그 목록을 받는 도구(CLI `sparks ids`·편집기 — LC8)가 manifest에 쓴다. manifest가 없는 패키지는 모든 선언이 발급 대기다.
+- **`@formerly("Old")`:** 선언의 옛 이름(같은 주인 아래 멤버 이름, 또는 타입의 옛 이름)이다. manifest에 옛 이름 키(이름 또는 alias)의 활성 항목이 있으면 그 ID를 그대로 쓴다(새 이름은 발급 대기의 rename — 도구가 alias로 기록). 옛 이름이 manifest에 없으면 진단하지 않는다(이미 옮겼거나 처음부터 없었다).
+- **S1005 `data-id-lost`:** manifest의 활성(retired가 아닌) `type`·`field`·`subobject`·`enumCase` 항목의 이름이 현재 선언의 이름 키에도 `@formerly` 옛 이름에도 없으면 오류다(저장·복제·편집 데이터가 연결을 잃을 수 있다). 위치는 manifest 파일의 그 항목 `name` 값, 수정 예는 새 이름에 `@formerly("<옛 이름>")`을 붙이거나 `rocks ids retire`로 은퇴시키기다. `function`·`rpc` 항목이 사라지는 것은 오류가 아니다(도구가 retire한다). 컴파일하지 않은 모듈(구문 오류 등)의 항목은 판정하지 않는다(입력 중 미완성 — SL §12.2).
+- **결정 D8:** 사라진 필드는 데이터 연결 여부(`@save`·`@net`·`@edit`)와 관계없이 S1005다 — manifest에는 그 attribute가 없고, 이전 컴파일 결과에 기대면 결과가 컴파일 이력에 달린다. 대안(일반 필드는 조용히 retire)은 `@save` 필드를 지운 실수를 놓친다.
+
+### 6.2 hash(LC4d 확정)
+
+- **interface hash:** 모듈의 공개 표면을 정규 텍스트로 쓴 뒤 SHA-256한 것(`BytecodeModule::interfaceHash`, `.sparkc` 머리). 정규 텍스트는 선언 순으로 import 경로 목록, 확장 이벤트, class·struct·interface·enum(이름·attribute·기반·필드 이름·타입·attribute·초기값 식의 원문 토큰), const(이름·타입·값), 함수(이름·attribute·매개변수 타입·반환 타입·async)와 LC3b 효과 집합(함수·handler별 — 본문이 바뀌어 효과가 바뀌면 interface가 바뀐다, SL §12.3)이다. 원문 위치·주석·공백·본문은 넣지 않는다.
+- **body hash:** 함수·handler마다 그 IR 덤프 byte(위치 주석 제외 — 같은 본문이 줄만 옮겨도 같다)의 SHA-256(`BytecodeFunction::bodyHash`, `.sparkc` FUNC 표).
+- **재컴파일 범위(`RecompileScope`):** 이전 컴파일의 모듈별 interface hash·함수별 body hash와 지금 것을 비교한다. 본문만 바뀌면(interface 같음) 바뀐 함수만 다시 내리고(본문 reload R1), interface가 바뀌면 그 모듈을 import하는 모듈(전이 폐포)을 다시 검사한다. 결과는 다시 검사할 모듈 목록과 함수별 바뀜 표다.
 
 ## 7. 결정 항목(권장안 — 2026-11-22 확정)
 
