@@ -29,12 +29,12 @@ constexpr usize MaxAliasPathBytes = 256;
 // id(36자)·ISO 8601 시각(최대 28자)을 쓰는 고정 버퍼 크기다.
 constexpr usize AliasFieldBytes = 64;
 
-constexpr StringView VersionKey = "version";
-constexpr StringView AliasesKey = "aliases";
-constexpr StringView PathKey = "path";
-constexpr StringView AssetKey = "asset";
-constexpr StringView CreatedKey = "created";
-constexpr StringView DaysKey = "days";
+constexpr StringView AliasVersionKey = "version";
+constexpr StringView AliasListKey = "aliases";
+constexpr StringView AliasPathKey = "path";
+constexpr StringView AliasAssetKey = "asset";
+constexpr StringView AliasCreatedKey = "created";
+constexpr StringView AliasDaysKey = "days";
 
 template <class T>
 Result<T> FailAlias(AssetDiagnostic* failure, ErrorCode error, AssetAliasField field,
@@ -321,20 +321,20 @@ Result<void> AssetAliasTable::Load(platform::FileSystem& files, AssetDiagnostic*
         }
 
         const JsonValue root = document.Root();
-        const StringView rootKeys[] = {VersionKey, AliasesKey};
+        const StringView rootKeys[] = {AliasVersionKey, AliasListKey};
         if (!HasExactKeys(root, rootKeys)) {
             return FailAlias<void>(failure, ErrorCode::InvalidArgument, AssetAliasField::Root,
                                    AssetAliasNoEntry);
         }
 
-        auto version = root.Find(VersionKey).TryGetInt64();
-        if (!root.Find(VersionKey).IsNumber() || !version ||
+        auto version = root.Find(AliasVersionKey).TryGetInt64();
+        if (!root.Find(AliasVersionKey).IsNumber() || !version ||
             version.Value() != AssetAliasFormatVersion) {
             return FailAlias<void>(failure, ErrorCode::InvalidArgument, AssetAliasField::Version,
                                    AssetAliasNoEntry);
         }
 
-        const JsonValue list = root.Find(AliasesKey);
+        const JsonValue list = root.Find(AliasListKey);
         if (!list.IsArray()) {
             return FailAlias<void>(failure, ErrorCode::InvalidArgument, AssetAliasField::Aliases,
                                    AssetAliasNoEntry);
@@ -349,7 +349,7 @@ Result<void> AssetAliasTable::Load(platform::FileSystem& files, AssetDiagnostic*
             return reserved;
         }
 
-        const StringView entryKeys[] = {PathKey, AssetKey, CreatedKey, DaysKey};
+        const StringView entryKeys[] = {AliasPathKey, AliasAssetKey, AliasCreatedKey, AliasDaysKey};
         for (usize at = 0; at < list.Size(); ++at) {
             const JsonValue item = list.At(at);
             if (!HasExactKeys(item, entryKeys)) {
@@ -357,7 +357,7 @@ Result<void> AssetAliasTable::Load(platform::FileSystem& files, AssetDiagnostic*
                                        at);
             }
 
-            const JsonValue pathValue = item.Find(PathKey);
+            const JsonValue pathValue = item.Find(AliasPathKey);
             if (!pathValue.IsString()) {
                 return FailAlias<void>(failure, ErrorCode::InvalidArgument, AssetAliasField::Path,
                                        at);
@@ -371,7 +371,7 @@ Result<void> AssetAliasTable::Load(platform::FileSystem& files, AssetDiagnostic*
                                              AssetAliasField::Path, at);
             }
 
-            const JsonValue assetValue = item.Find(AssetKey);
+            const JsonValue assetValue = item.Find(AliasAssetKey);
             auto asset = assetValue.IsString()
                              ? AssetId::TryParse(assetValue.GetString())
                              : Result<AssetId>::Failure(ErrorCode::InvalidArgument);
@@ -380,7 +380,7 @@ Result<void> AssetAliasTable::Load(platform::FileSystem& files, AssetDiagnostic*
                                        at);
             }
 
-            const JsonValue createdValue = item.Find(CreatedKey);
+            const JsonValue createdValue = item.Find(AliasCreatedKey);
             auto created = createdValue.IsString()
                                ? TryParseIso8601(createdValue.GetString())
                                : Result<DateTime>::Failure(ErrorCode::InvalidArgument);
@@ -389,7 +389,7 @@ Result<void> AssetAliasTable::Load(platform::FileSystem& files, AssetDiagnostic*
                                        AssetAliasField::Created, at);
             }
 
-            const JsonValue daysValue = item.Find(DaysKey);
+            const JsonValue daysValue = item.Find(AliasDaysKey);
             auto days = daysValue.IsNumber() ? daysValue.TryGetInt64()
                                              : Result<int64>::Failure(ErrorCode::InvalidArgument);
             if (!days || days.Value() < 1 || days.Value() > AssetAliasMaxDays) {
@@ -453,25 +453,25 @@ Result<void> AssetAliasTable::EncodeTo(const Array<AssetAlias>& entries,
     StringBuilder<1024> text(*allocator_);
     JsonWriter writer(text);
     (void)writer.BeginObject();
-    (void)writer.Key(VersionKey);
+    (void)writer.Key(AliasVersionKey);
     (void)writer.UInt64(AssetAliasFormatVersion);
-    (void)writer.Key(AliasesKey);
+    (void)writer.Key(AliasListKey);
     (void)writer.BeginArray();
     char fieldBytes[AliasFieldBytes];
     FixedStringBuilder field(Span<char>(fieldBytes, AliasFieldBytes));
     for (const AssetAlias& alias : entries) {
         (void)writer.BeginObject();
-        (void)writer.Key(PathKey);
+        (void)writer.Key(AliasPathKey);
         (void)writer.String(alias.path.View());
-        (void)writer.Key(AssetKey);
+        (void)writer.Key(AliasAssetKey);
         field.Clear();
         (void)field.TryAppendFormat("{}", alias.asset);
         (void)writer.String(field.View());
-        (void)writer.Key(CreatedKey);
+        (void)writer.Key(AliasCreatedKey);
         field.Clear();
         (void)field.TryAppendFormat("{}", alias.created);
         (void)writer.String(field.View());
-        (void)writer.Key(DaysKey);
+        (void)writer.Key(AliasDaysKey);
         (void)writer.UInt64(alias.days);
         (void)writer.EndObject();
     }
