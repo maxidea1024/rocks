@@ -1430,6 +1430,118 @@ finally
     Directory.Delete(moveDirectory, true);
 }
 
+// asset-delete(AssetSystem.ko.md 7.1절 17 — A2e3a): 지우기(요약 줄·파일·지운 별칭 경고 줄), 디스크 참조자 거부(참조자 줄·
+// 진단 줄)와 --force(경고 줄 — 참조자는 MissingDependency), id로 고르기, 없음·별칭 경로 따르지 않음·경로 규칙, 잠금 Busy,
+// 사용법·도움말·프로젝트 없음.
+string deleteDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-delete-{Environment.ProcessId}");
+try
+{
+    string project = Path.Combine(deleteDirectory, "Deleting");
+    Directory.CreateDirectory(project);
+    File.WriteAllText(Path.Combine(project, "Deleting.rocksproject"), "{}\n");
+    string projectOption = $"--project={project}";
+    string content = Path.Combine(project, "Content");
+
+    async Task<ProcessResult> RunDelete(params string[] arguments) =>
+        await ProcessRunner.RunAsync(new(executable, arguments, workingDirectory, Timeout: TimeSpan.FromSeconds(30)));
+
+    void ReportDelete(string label, bool passed, ProcessResult result)
+    {
+        Console.WriteLine($"{label}: {(passed ? "PASS" : "FAIL")}");
+        if (!passed)
+        {
+            ++failures;
+            Console.Error.WriteLine($"  exit={result.ExitCode}; stdout={result.StdOut}; stderr={result.StdErr}");
+        }
+    }
+
+    ProcessResult hero = await RunDelete("asset-new", "Skeleton", "/Game/Dl/Hero", projectOption);
+    ProcessResult run = await RunDelete("asset-new", "AnimationClip", "/Game/Dl/Run", "skeleton=/Game/Dl/Hero", projectOption);
+    ProcessResult leaf = await RunDelete("asset-new", "Skeleton", "/Game/Dl/Leaf", projectOption);
+    ProcessResult moved = await RunDelete("asset-move", "/Game/Dl/Leaf", "/Game/Dl/Leaf2", projectOption);
+    ReportDelete("delete: setup", hero.ExitCode == 0 && run.ExitCode == 0 && leaf.ExitCode == 0 && moved.ExitCode == 0, run);
+    string heroId = hero.StdOut.Trim().Split(' ').Last();
+    string runId = run.StdOut.Trim().Split(' ').Last();
+    string leafId = leaf.StdOut.Trim().Split(' ').Last();
+
+    // 지우기와 그 에셋을 가리키던 별칭.
+    ProcessResult deleted = await RunDelete("asset-delete", "/Game/Dl/Leaf2", projectOption);
+    ReportDelete("asset-delete", deleted.ExitCode == 0 &&
+        deleted.StdOut == $"asset-delete: deleted /Game/Dl/Leaf2 {leafId}\n" &&
+        deleted.StdErr.Contains($"asset-delete: AliasRemoved: /Game/Dl/Leaf: warning removed the alias to {leafId}",
+            StringComparison.Ordinal) &&
+        !File.Exists(Path.Combine(content, "Dl", "Leaf2.rasset")), deleted);
+    // 별칭이 지워졌으므로 옛 경로는 없다.
+    ProcessResult oldInfo = await RunDelete("asset-info", "/Game/Dl/Leaf", projectOption);
+    ReportDelete("asset-info after delete", oldInfo.ExitCode == 1 &&
+        oldInfo.StdErr.Contains("asset-info: NotFound: /Game/Dl/Leaf", StringComparison.Ordinal), oldInfo);
+
+    // 디스크 참조자: 거부(참조자 줄·진단 줄), --force는 경고 줄과 함께 지운다.
+    ProcessResult refused = await RunDelete("asset-delete", "/Game/Dl/Hero", projectOption);
+    ReportDelete("asset-delete referenced", refused.ExitCode == 1 &&
+        refused.StdErr.Contains($"asset-delete: ReferencedBy: /Game/Dl/Run: {runId} references /Game/Dl/Hero",
+            StringComparison.Ordinal) &&
+        refused.StdErr.Contains($"asset-delete: ReferencedBy: /Game/Dl/Hero: InvalidArgument (related {runId})",
+            StringComparison.Ordinal) &&
+        refused.StdOut.Length == 0 && File.Exists(Path.Combine(content, "Dl", "Hero.rasset")), refused);
+    ProcessResult forced = await RunDelete("asset-delete", "/Game/Dl/Hero", "--force", projectOption);
+    ReportDelete("asset-delete --force", forced.ExitCode == 0 &&
+        forced.StdErr.Contains($"asset-delete: ReferencedBy: /Game/Dl/Run: warning {runId} references /Game/Dl/Hero",
+            StringComparison.Ordinal) &&
+        forced.StdOut == $"asset-delete: deleted /Game/Dl/Hero {heroId}\n" &&
+        !File.Exists(Path.Combine(content, "Dl", "Hero.rasset")), forced);
+    ProcessResult verified = await RunDelete("asset-index-verify", projectOption);
+    ReportDelete("asset-index-verify after a forced delete", verified.StdErr.Contains("MissingDependency", StringComparison.Ordinal),
+        verified);
+
+    // id로 고르기, 없음·별칭 경로·경로 규칙.
+    ProcessResult byId = await RunDelete("asset-delete", runId, projectOption);
+    ReportDelete("asset-delete by id", byId.ExitCode == 0 &&
+        byId.StdOut == $"asset-delete: deleted /Game/Dl/Run {runId}\n", byId);
+    ProcessResult missing = await RunDelete("asset-delete", "/Game/Nowhere", projectOption);
+    ReportDelete("asset-delete missing", missing.ExitCode == 1 &&
+        missing.StdErr.Contains("asset-delete: NotFound: /Game/Nowhere: failed", StringComparison.Ordinal), missing);
+    ProcessResult invalid = await RunDelete("asset-delete", "Game/Bad", projectOption);
+    ReportDelete("asset-delete invalid path", invalid.ExitCode == 1 &&
+        invalid.StdErr.Contains("asset-delete: InvalidPath: Game/Bad", StringComparison.Ordinal), invalid);
+
+    if (OperatingSystem.IsWindows())
+    {
+        string lockPath = Path.Combine(project, "Intermediate", "AssetDatabase.lock");
+        using FileStream locked = new(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
+        locked.Lock(0, 1);
+        ProcessResult busy = await RunDelete("asset-delete", "/Game/Dl/Run", projectOption);
+        ReportDelete("asset-delete locked", busy.ExitCode == 1 &&
+            busy.StdErr.Contains("asset-delete: Busy: ", StringComparison.Ordinal), busy);
+        locked.Unlock(0, 1);
+    }
+
+    string[][] deleteUsage =
+    [
+        ["asset-delete", projectOption],
+        ["asset-delete", "/Game/A", "/Game/B", projectOption],
+        ["asset-delete", "/Game/A", "--wait=", projectOption],
+        ["asset-delete", "/Game/A", "--json", projectOption],
+    ];
+    foreach (string[] arguments in deleteUsage)
+    {
+        ProcessResult usage = await RunDelete(arguments);
+        ReportDelete($"asset-delete usage: {string.Join(' ', arguments.Skip(1).Where(argument => argument != projectOption))}",
+            usage.ExitCode == 2 && usage.StdErr.StartsWith("usage: asset-delete", StringComparison.Ordinal), usage);
+    }
+
+    ProcessResult deleteHelp = await RunDelete("asset-delete", "--help");
+    ReportDelete("asset-delete help", deleteHelp.ExitCode == 0 &&
+        deleteHelp.StdOut.StartsWith("usage: asset-delete", StringComparison.Ordinal), deleteHelp);
+    ProcessResult deleteNoProject = await RunDelete("asset-delete", "/Game/A");
+    ReportDelete("asset-delete without a project", deleteNoProject.ExitCode == 1 &&
+        deleteNoProject.StdErr.Contains("no project found", StringComparison.Ordinal), deleteNoProject);
+}
+finally
+{
+    Directory.Delete(deleteDirectory, true);
+}
+
 if (OperatingSystem.IsWindows())
 {
     // 무효 stderr 핸들을 child의 표준 오류로 직접 설정해 출력 실패를 재현한다.

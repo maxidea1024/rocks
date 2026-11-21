@@ -12,6 +12,7 @@
 #include <Core/Build/BuildInfo.h>
 #include <Core/FileError.h>
 #include <Object/ConstructionContext.h>
+#include <Platform/Fatal.h>
 
 // 에디터 패키지 집합의 열기·만들기·저장이다(Docs/Design/AssetSystem.ko.md 7.1절 15 — A2c2a·A2c2b).
 namespace rocks {
@@ -140,7 +141,8 @@ struct EditorPackageSet::SavePlan {
 
 EditorPackageSet::EditorPackageSet(Allocator& allocator,
                                    const EditorPackageSetConfig& config) noexcept
-    : allocator_(&allocator), config_(config), open_(allocator), roots_(allocator) {
+    : allocator_(&allocator), config_(config), open_(allocator), roots_(allocator),
+      edges_(allocator), pendingEdges_(allocator) {
 }
 
 EditorPackageSet::~EditorPackageSet() {
@@ -193,6 +195,184 @@ Result<void> EditorPackageSet::Initialize() noexcept {
     observer_ = Move(observer.Value());
     cache_ = Move(cache.Value());
     registry_ = Move(registry.Value());
+    return Result<void>::Success();
+}
+
+namespace {
+
+// 묶음의 handle은 모두 이 집합의 Registry 것이라 칸·세대만 본다(칸이 앞, 세대가 뒤인 정렬 키).
+uint64 EdgeHandleKey(ObjectHandle handle) noexcept {
+    return (uint64(handle.slot) << 32) | handle.generation;
+}
+
+} // namespace
+
+Result<void> EditorPackageSet::SyncReferences() noexcept {
+    if (registry_.Get() == nullptr) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 쥔 묶음이 있으면(앞 적용이 할당에 실패) 그것부터, 그다음 새 묶음이다.
+    for (;;) {
+        if (pendingEdges_.IsEmpty()) {
+            if (auto taken = observer_->TakeChanges(pendingEdges_); !taken) {
+                return taken;
+            }
+
+            if (pendingEdges_.IsEmpty()) {
+                return Result<void>::Success();
+            }
+
+            // 관찰자 키는 원인·트랜잭션까지 나누므로 같은 쌍이 여러 항목으로 온다 — 제자리 정렬 뒤
+            // 이웃을 합친다(할당 없음, 중간 합은 음수일 수 있다).
+            pendingEdges_.Sort(
+                [](const ReferenceEdgeDelta& left, const ReferenceEdgeDelta& right) noexcept {
+                    const uint64 leftOwner = EdgeHandleKey(left.ownerPackage);
+                    const uint64 rightOwner = EdgeHandleKey(right.ownerPackage);
+                    return leftOwner < rightOwner ||
+                           (leftOwner == rightOwner &&
+                            EdgeHandleKey(left.targetPackage) < EdgeHandleKey(right.targetPackage));
+                });
+            usize kept = 0;
+            for (usize index = 0; index < pendingEdges_.Size(); ++index) {
+                if (kept != 0 &&
+                    pendingEdges_[kept - 1].ownerPackage == pendingEdges_[index].ownerPackage &&
+                    pendingEdges_[kept - 1].targetPackage == pendingEdges_[index].targetPackage) {
+                    pendingEdges_[kept - 1].delta += pendingEdges_[index].delta;
+                    continue;
+                }
+
+                pendingEdges_[kept++] = pendingEdges_[index];
+            }
+
+            (void)pendingEdges_.TryResize(kept);
+        }
+
+        usize newKeys = 0;
+        for (const ReferenceEdgeDelta& change : pendingEdges_) {
+            newKeys +=
+                change.delta != 0 && edges_.Find(EditorEdgeKey{change.ownerPackage,
+                                                               change.targetPackage}) == nullptr
+                    ? 1
+                    : 0;
+        }
+
+        if (auto reserved = edges_.Reserve(edges_.Count() + newKeys); !reserved) {
+            return reserved;
+        }
+
+        for (const ReferenceEdgeDelta& change : pendingEdges_) {
+            const EditorEdgeKey key{change.ownerPackage, change.targetPackage};
+            int64* found = edges_.Find(key);
+            const int64 after = (found == nullptr ? 0 : *found) + change.delta;
+            if (after < 0) {
+                platform::Fatal("EditorPackageSet edge multiplicity became negative");
+            }
+
+            if (after == 0) {
+                if (found != nullptr) {
+                    (void)edges_.Erase(key);
+                }
+            } else if (found != nullptr) {
+                *found = after;
+            } else {
+                (void)edges_.Insert(key, after);
+            }
+        }
+
+        pendingEdges_.Clear();
+    }
+}
+
+Result<usize> EditorPackageSet::IncomingReferences(AssetId id, AssetId* referencer) noexcept {
+    if (referencer != nullptr) {
+        *referencer = AssetId{};
+    }
+
+    if (auto synced = SyncReferences(); !synced) {
+        return Result<usize>::Failure(synced.Error());
+    }
+
+    const EditorPackageInfo* target = Find(id);
+    if (target == nullptr) {
+        return Result<usize>::Success(0);
+    }
+
+    // 다중도 합과 첫 참조자(id 순 — 열린 패키지 표 순서)다. 소유자는 모두 열린 패키지다(닫은
+    // 패키지의 나가는 간선은 Discard가 반납했다).
+    usize total = 0;
+    for (const EditorPackageInfo& info : open_) {
+        const int64* count = edges_.Find(EditorEdgeKey{info.package, target->package});
+        if (count == nullptr) {
+            continue;
+        }
+
+        total += static_cast<usize>(*count);
+        if (referencer != nullptr && referencer->IsNull()) {
+            *referencer = info.id;
+        }
+    }
+
+    return Result<usize>::Success(total);
+}
+
+Result<void> EditorPackageSet::Close(AssetId id, AssetDiagnostic* failure) noexcept {
+    auto fail = [failure](AssetDiagnosticCode code, ErrorCode error,
+                          AssetId related = {}) noexcept {
+        if (failure != nullptr) {
+            *failure = AssetDiagnostic{};
+            failure->code = code;
+            failure->error = error;
+            failure->related = related;
+        }
+
+        return Result<void>::Failure(error);
+    };
+    if (registry_.Get() == nullptr) {
+        return fail(AssetDiagnosticCode::None, ErrorCode::InvalidArgument);
+    }
+
+    if (creating_) {
+        return fail(AssetDiagnosticCode::None, ErrorCode::Busy);
+    }
+
+    if (Find(id) == nullptr) {
+        return fail(AssetDiagnosticCode::None, ErrorCode::NotFound);
+    }
+
+    AssetId first;
+    auto incoming = IncomingReferences(id, &first);
+    if (!incoming) {
+        return fail(AssetDiagnosticCode::None, incoming.Error());
+    }
+
+    if (incoming.Value() != 0) {
+        return fail(AssetDiagnosticCode::ReferencedBy, ErrorCode::Busy, first);
+    }
+
+    // 캐시 핸들 경로(저장된 패키지 — 열기·저장과 같은 Content/fileName)는 Discard 전에 만든다.
+    const usize at = LowerBound(id);
+    EditorPackageInfo& info = open_[at];
+    String path(*allocator_);
+    if (!info.unsaved) {
+        const StringView pieces[] = {config_.layout->ContentDirectory(), "/", info.fileName.View()};
+        for (StringView piece : pieces) {
+            if (auto appended = path.TryAppend(piece); !appended) {
+                return fail(AssetDiagnosticCode::None, appended.Error());
+            }
+        }
+    }
+
+    if (auto discarded = registry_->Discard(Access(), info.package); !discarded) {
+        return fail(AssetDiagnosticCode::None, discarded.Error());
+    }
+
+    if (!path.IsEmpty()) {
+        cache_->Close(path.View());
+    }
+
+    (void)open_.TryRemoveAt(at);
+    (void)roots_.TryRemoveAt(at);
     return Result<void>::Success();
 }
 
@@ -504,6 +684,11 @@ Result<ObjectHandle> EditorPackageSet::OpenEntry(AssetId id, Array<EditorWarning
         return EditorFail<ObjectHandle>(failure,
                                         EditorDiagnostic(AssetDiagnosticCode::None, error, id));
     };
+    // 쌓인 간선 변화를 먼저 적용한다(편집이 관찰자 키 상한에 닿지 않게 — 7.1절 17 A2e3a, 실패하면
+    // 아무것도 열지 않는다).
+    if (auto synced = SyncReferences(); !synced) {
+        return oom(synced.Error());
+    }
 
     // 닫힘을 너비 우선으로 넓힌다. seen은 넣은 id(id 순)다.
     Array<Pending> pending(allocator);
@@ -712,6 +897,11 @@ Result<ObjectHandle> EditorPackageSet::Create(const LogicalPath& path, TypeId ty
         return fail(AssetDiagnosticCode::None, ErrorCode::Busy);
     }
 
+    // 쌓인 간선 변화를 먼저 적용한다(열기와 같다).
+    if (auto synced = SyncReferences(); !synced) {
+        return fail(AssetDiagnosticCode::None, synced.Error());
+    }
+
     // 경로: 색인에 같은 경로 키가 있거나(둘 이상이면 AlreadyExists) 저장하지 않은 새 패키지와
     // 겹친다.
     auto indexed = config_.index->FindByPath(path);
@@ -858,6 +1048,11 @@ Result<void> EditorPackageSet::Save(AssetId id, const AssetDatabaseLock& lock,
 
     if (creating_) {
         return fail(AssetDiagnosticCode::None, ErrorCode::Busy);
+    }
+
+    // 쌓인 간선 변화(저장할 편집)를 먼저 적용한다(열기와 같다).
+    if (auto synced = SyncReferences(); !synced) {
+        return fail(AssetDiagnosticCode::None, synced.Error());
     }
 
     const usize at = LowerBound(id);

@@ -96,6 +96,11 @@ internal static class GameProjectFiles
         EngineVersion engineVersion = InstalledSdk.EngineVersionOf(manifest);
         ProjectDescriptor descriptor = GamePlanning.Descriptor(project, engineVersion);
         string name = Path.GetFileNameWithoutExtension(descriptor.FilePath);
+        if (string.Equals(name, HeaderProjectName, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException($"{descriptor.FilePath}: a game cannot be named {name}; the solution uses that name for the SDK header project.");
+        }
+
         string projectFiles = ProjectFilesDirectory(project);
         // 시작부터 생성 영역의 호출 잠금을 쥔다(규칙 컴파일·쓰기, 동시 생성은 차례로). model-only는 게임 디렉터리에 쓰지 않는다.
         if (!modelOnly)
@@ -104,7 +109,7 @@ internal static class GameProjectFiles
         }
 
         await using FileStream? generationLock = modelOnly ? null : await OutputInvocationLock.AcquireAsync(projectFiles, cancellationToken);
-        string rulesDirectory = modelOnly ? System.IO.Directory.CreateTempSubdirectory("rocks-game-rules-").FullName : Path.Combine(projectFiles, "Rules");
+        string rulesDirectory = modelOnly ? ModelOnlyRulesDirectory() : Path.Combine(projectFiles, "Rules");
         try
         {
             return await GenerateAsync(project, sdk, name, projectFiles, rulesDirectory, descriptor, manifest, configurations, toolchain, engineVersion, modelOnly,
@@ -114,8 +119,55 @@ internal static class GameProjectFiles
         {
             if (modelOnly)
             {
-                System.IO.Directory.Delete(rulesDirectory, recursive: true);
+                TryDelete(rulesDirectory);
             }
+        }
+    }
+
+    // model-only 규칙 디렉터리의 접두다(<접두><pid>-<guid>).
+    private const string ModelOnlyRulesPrefix = "rocks-game-rules-";
+
+    // model-only 규칙 어셈블리를 둘 임시 디렉터리다. 규칙 어셈블리는 기본 load context에 올라 이 프로세스가 끝날 때까지 파일이 잠기므로 끝에서는
+    // best-effort로 지우고, 여기서 프로세스가 없는 pid의 남은 디렉터리를 지운다(Docs/Design/ProjectFiles.ko.md 11.6절).
+    private static string ModelOnlyRulesDirectory()
+    {
+        foreach (string stale in System.IO.Directory.EnumerateDirectories(Path.GetTempPath(), ModelOnlyRulesPrefix + "*"))
+        {
+            string[] parts = Path.GetFileName(stale)[ModelOnlyRulesPrefix.Length..].Split('-', 2);
+            if (parts.Length == 2 && int.TryParse(parts[0], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int pid) &&
+                !Running(pid))
+            {
+                TryDelete(stale);
+            }
+        }
+
+        string directory = Path.Combine(Path.GetTempPath(), $"{ModelOnlyRulesPrefix}{Environment.ProcessId}-{Guid.NewGuid():N}");
+        System.IO.Directory.CreateDirectory(directory);
+        return directory;
+    }
+
+    private static bool Running(int pid)
+    {
+        try
+        {
+            using var process = System.Diagnostics.Process.GetProcessById(pid);
+            return !process.HasExited;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    private static void TryDelete(string directory)
+    {
+        try
+        {
+            System.IO.Directory.Delete(directory, recursive: true);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            // 이 프로세스가 올린 규칙 어셈블리가 잠겨 있다. 다음 model-only 생성이 지운다.
         }
     }
 

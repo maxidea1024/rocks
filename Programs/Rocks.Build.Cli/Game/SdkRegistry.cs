@@ -47,6 +47,11 @@ internal static class SdkRegistries
 
     private const int LockViolation = unchecked((int)0x80070021);
 
+    // Unix에서 다른 핸들이 flock을 쥐었을 때 .NET이 IOException.HResult로 주는 errno(EWOULDBLOCK)다: Linux 11, macOS 35.
+    private const int UnixWouldBlockLinux = 11;
+
+    private const int UnixWouldBlockMac = 35;
+
     // JSON 등록부 잠금 파일을 다시 열어 보는 간격이다. 순서는 잠금이 정하고 간격은 응답성만 정한다.
     private static readonly TimeSpan LockRetry = TimeSpan.FromMilliseconds(50);
 
@@ -111,7 +116,7 @@ internal static class SdkRegistries
     // 다른 핸들이 잠금 파일을 쥐고 있어 열지 못했는가. Windows는 공유 위반 HRESULT, 그 밖은 flock 경합(.NET이 IOException으로 낸다)이다.
     private static bool Contended(IOException error) => OperatingSystem.IsWindows()
         ? error.HResult is SharingViolation or LockViolation
-        : error is not (FileNotFoundException or DirectoryNotFoundException or PathTooLongException);
+        : error.HResult is UnixWouldBlockLinux or UnixWouldBlockMac;
 
     /// <summary>레지스트리 등록부 잠금(%LOCALAPPDATA%의 Rocks/SdkRegistry.lock) 안에서 읽기-고치기-쓰기를 한다.</summary>
     internal static T ExclusiveRegistry<T>(Func<T> change) =>

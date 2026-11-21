@@ -23,6 +23,8 @@ Result<int32> RunAssetSetCommand(void* context, Span<const StringView> args,
                                  CommandletOutput& output) noexcept;
 Result<int32> RunAssetMoveCommand(void* context, Span<const StringView> args,
                                   CommandletOutput& output) noexcept;
+Result<int32> RunAssetDeleteCommand(void* context, Span<const StringView> args,
+                                    CommandletOutput& output) noexcept;
 Result<int32> RunAssetInfoCommand(void* context, Span<const StringView> args,
                                   CommandletOutput& output) noexcept;
 

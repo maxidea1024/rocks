@@ -148,6 +148,9 @@ struct AssetIndexRefreshPaths {
     // 이름 규칙은 같고, from과 to가 같은 키가 아니면 서로의 아래일 수 없다(InvalidArgument).
     // 대소문자만 다른 이름(같은 키)도 받는다.
     Span<const AssetIndexMove> moves;
+    // 뺄 이름이다: 그 이름 자신과 그 아래의 항목·진단을 읽지 않고 뺀다(삭제 — 지우기 전에 준비하고
+    // 지운 뒤 확정한다, 7.1절 17 A2e3). 이름 규칙은 moves와 같다.
+    Span<const StringView> removed;
     // 이름 정규화 파일 시스템인지다(참이면 이름 대조를 NFC로 한다 — macOS 이벤트 이름이 열거
     // 이름과 다른 정규형이어도 같은 파일로 본다).
     bool normalizesNames = FileSystemNormalizesNames;

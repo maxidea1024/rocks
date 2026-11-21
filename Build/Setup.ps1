@@ -420,7 +420,8 @@ function Get-RocksBuildToolsStatus {
 
     $name = "$($instance.displayName) $($instance.installationVersion)"
     $data = @{ Path = $instance.installationPath; Add = $VcComponents }
-    $sdk = Get-RocksWindowsSdks
+    # @(...): a function returns one SDK as a single object, and StrictMode rejects .Count on it (CI images have one SDK).
+    $sdk = @(Get-RocksWindowsSdks)
     if ($sdk.Count -eq 0) { return New-RocksStatus $false "$name, no Windows SDK" $install '' $data }
     $tools = Get-RocksMsvcToolsDirectory $instance
     $pinned = Get-RocksEnvironmentValue 'ROCKS_MSVC_TOOLSET'

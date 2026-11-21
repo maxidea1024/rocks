@@ -172,7 +172,8 @@ public static class InstalledSdk
 
         File.Copy(Path.Combine(root, ".clang-format"), Path.Combine(stage, ".clang-format"));
         // 프로젝트 템플릿을 싣는다(new-project가 SDK의 Templates/Game/<이름>에서 찾는다, Docs/Design/ProjectFiles.ko.md 11.5절).
-        CopyTree(Path.Combine(root, "Templates"), Path.Combine(stage, "Templates"));
+        // 템플릿 디렉터리(Template.json이 있는 곳)의 빌드·IDE 산출물(out/·Saved/·점 디렉터리·최상위 *.slnx)은 싣지 않는다(11.6절).
+        CopyTree(Path.Combine(root, "Templates"), Path.Combine(stage, "Templates"), TemplateOutput);
         return [.. packaged];
     }
 
@@ -760,11 +761,30 @@ public static class InstalledSdk
 
     private static bool Inside(string root, string candidate) => DirectoryPath.IsAtOrUnder(candidate, root);
 
-    private static void CopyTree(string source, string destination)
+    // 템플릿 디렉터리 아래의 빌드·IDE 산출물인가(가장 가까운 Template.json 디렉터리 기준 GameProjectLayout 규칙).
+    private static bool TemplateOutput(string entry)
+    {
+        for (string? directory = Path.GetDirectoryName(entry); directory is not null; directory = Path.GetDirectoryName(directory))
+        {
+            if (File.Exists(Path.Combine(directory, NewProjectCommand.TemplateFile)))
+            {
+                return GameProjectLayout.IsExcluded(directory, entry);
+            }
+        }
+
+        return false;
+    }
+
+    private static void CopyTree(string source, string destination, Func<string, bool>? skip = null)
     {
         Directory.CreateDirectory(destination);
         foreach (var entry in Directory.EnumerateFileSystemEntries(source))
         {
+            if (skip?.Invoke(entry) == true)
+            {
+                continue;
+            }
+
             if (FileLinks.IsLink(entry))
             {
                 throw new IOException("SDK packaging does not accept symbolic links or junctions.");
@@ -773,7 +793,7 @@ public static class InstalledSdk
             var target = Path.Combine(destination, Path.GetFileName(entry));
             if (Directory.Exists(entry))
             {
-                CopyTree(entry, target);
+                CopyTree(entry, target, skip);
             }
             else
             {

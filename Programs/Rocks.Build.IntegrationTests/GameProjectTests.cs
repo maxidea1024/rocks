@@ -534,15 +534,17 @@ internal static class GameProjectTests
         // new-project(Docs/Design/ProjectFiles.ko.md 11절): 이름 검사, 두 단계 치환, 템플릿 철자 검사.
         NewProjectCommand.ValidateName("MyGame", ["Core", "Launch"]);
         foreach (string bad in new[] { "Ab", "lowercase", "Bad-Name", "Rocks", "ROCKS", "RocksSdk", "Std", "Posix", "Core", "LAUNCH", "Class", "Namespace",
-            "A23456789012345678901234567890123" })
+            "A23456789012345678901234567890123", "CON", "Nul", "COM1", "Lpt9", "Errno", "Stdin", "Stderr", "Near", "Far", "Interface", "Linux", "Unix" })
         {
             Error(() => NewProjectCommand.ValidateName(bad, ["Core", "Launch"]));
         }
 
         Require(NewProjectCommand.Replace("FoundationTemplate FOUNDATIONTEMPLATE foundationtemplate Foundationtemplate", "FoundationTemplate", "Zed") ==
             "Zed ZED zed Foundationtemplate", "three spellings, case sensitive");
-        Require(NewProjectCommand.Replace("FoundationTemplate_foundationtemplate", "FoundationTemplate", "FoundationTemplateX") ==
-            "FoundationTemplateX_foundationtemplatex", "two-stage replacement does not replace its own result");
+        // 템플릿 이름을 담은 이름은 쓰기 전에 거부한다(대소문자 무시).
+        NewProjectCommand.RequireDistinctFromTemplate("Zed", "FoundationTemplate");
+        Error(() => NewProjectCommand.RequireDistinctFromTemplate("FoundationTemplateX", "FoundationTemplate"));
+        Error(() => NewProjectCommand.RequireDistinctFromTemplate("MyFoundationtemplate", "FoundationTemplate"));
         string templateRoot = Path.Combine(root, "template");
         Write(templateRoot, NewProjectCommand.TemplateFile, "{ \"fileVersion\": 1, \"templateName\": \"FixtureTemplate\", \"description\": \"x\", " +
             "\"ignore\": [\"Template.json\"], \"replaceInExtensions\": [\".h\"] }");
@@ -555,6 +557,43 @@ internal static class GameProjectTests
             throw new InvalidOperationException("a mixed template spelling must be rejected");
         }
         catch (InvalidDataException error) when (error.Message.Contains("'Fixturetemplate'", StringComparison.Ordinal))
+        {
+        }
+
+        // 복사 대상: 빌드·IDE 산출물(out/·Saved/·점 디렉터리·최상위 *.slnx)은 기본으로 빼고, ignore는 파일·디렉터리·glob을 받는다.
+        File.Delete(Path.Combine(templateRoot, "Source/Mixed.h"));
+        Write(templateRoot, NewProjectCommand.TemplateFile, "{ \"fileVersion\": 1, \"templateName\": \"FixtureTemplate\", \"description\": \"x\", " +
+            "\"ignore\": [\"Template.json\", \"Docs/\", \"*.md\", \"Source/Gen?.h\"], \"replaceInExtensions\": [\".h\"] }");
+        foreach (string produced in new[] { "out/windows-x-debug/a.obj", "out/ProjectFiles/X.vcxproj", ".vs/X/db", "Saved/Crashes/x.dmp", "X.slnx",
+            "Docs/Guide.txt", "README.md", "Source/Gen1.h" })
+        {
+            Write(templateRoot, produced, "x");
+        }
+
+        string[] copied = [.. NewProjectCommand.Files(NewProjectCommand.ReadTemplate(templateRoot)).Select(file => file.Relative)];
+        Require(copied.SequenceEqual(["Source/FixtureTemplate.h"]), "template files to copy: " + string.Join(", ", copied));
+
+        // 인코딩: 엄격한 UTF-8, BOM 여부를 돌려주고, NUL 바이트와 잘못된 바이트는 거부한다.
+        string text = Path.Combine(templateRoot, "encoded.h");
+        File.WriteAllBytes(text, [0xEF, 0xBB, 0xBF, (byte)'a']);
+        Require(NewProjectCommand.ReadText(text) == ("a", true), "BOM is reported and stripped from the text");
+        File.WriteAllBytes(text, [(byte)'a', 0, (byte)'b']);
+        try
+        {
+            NewProjectCommand.ReadText(text);
+            throw new InvalidOperationException("a NUL byte must be rejected");
+        }
+        catch (InvalidDataException error) when (error.Message.Contains("NUL", StringComparison.Ordinal))
+        {
+        }
+
+        File.WriteAllBytes(text, [(byte)'a', 0xC3, 0x28]);
+        try
+        {
+            NewProjectCommand.ReadText(text);
+            throw new InvalidOperationException("invalid UTF-8 must be rejected");
+        }
+        catch (InvalidDataException error) when (error.Message.Contains("not valid UTF-8", StringComparison.Ordinal))
         {
         }
 

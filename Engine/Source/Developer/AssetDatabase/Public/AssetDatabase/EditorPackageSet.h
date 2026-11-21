@@ -8,6 +8,7 @@
 #include <AssetRuntime/AssetTypeHooks.h>
 #include <AssetRuntime/PackageLoad.h>
 #include <Core/Containers/Array.h>
+#include <Core/Containers/HashMap.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Object/ConstructionContext.h>
 #include <Object/ObjectRegistry.h>
@@ -93,7 +94,10 @@ enum class EditorWarningKind : uint8 {
     // 이동: OS 이동이 실패해 먼저 쓴 별칭 표를 되돌리려 했지만 되돌리지 못했다(진단 None과 그 오류
     // — 별칭 표에 옮기지 못한 옛 경로가 남는다, 해석은 색인을 먼저 보므로 해롭지 않다 — 7.1절 17
     // A2e2).
-    AliasNotRestored
+    AliasNotRestored,
+    // 삭제: 지운 에셋을 가리키던 별칭을 지웠다(진단 None, asset = 지운 에셋, text = 별칭 경로 —
+    // 7.1절 17 A2e3).
+    AliasRemoved
 };
 
 // 경고의 경로 텍스트 칸 크기다(논리 경로 상한 + NUL — 할당 없이 복사되는 경고).
@@ -218,6 +222,21 @@ private:
     bool ready_ = false;
 };
 
+// 열린 패키지 사이 강한 간선 표의 키다(소유 패키지 → 대상 패키지 — 7.1절 17 A2e3).
+struct EditorEdgeKey {
+    ObjectHandle owner{};
+    ObjectHandle target{};
+
+    bool operator==(const EditorEdgeKey&) const noexcept = default;
+};
+
+template <>
+struct Hash<EditorEdgeKey> {
+    uint64 operator()(const EditorEdgeKey& key) const noexcept {
+        return HashCombine(Hash<ObjectHandle>{}(key.owner), Hash<ObjectHandle>{}(key.target));
+    }
+};
+
 class EditorPackageSet final : public PackageImportResolver {
 public:
     // allocator는 집합보다 오래 산다(Registry·표·bulk raw byte가 쓴다).
@@ -307,6 +326,32 @@ public:
     // Detach의 오류(그때까지 뗀 것은 그대로 — 메모리 bulk는 동작이 같다).
     Result<void> DetachUnder(StringView fromFile, AssetDiagnostic* failure = nullptr) noexcept;
 
+    // 관찰자에 쌓인 패키지 사이 강한 간선 변화를 간선 표에 적용한다(7.1절 17 A2e3). 묶음을 쌍별로
+    // 합친 뒤 표 용량을 먼저 잡고 무할당으로 적용한다. Open(새 패키지)·Create·Save·Close가 시작할
+    // 때 부르므로(실패하면 그 호출이 아무것도 바꾸지 않고 그 오류) 관찰자는 그 호출 사이의 편집만
+    // 쌓는다(키 상한 observerMaxKeys) — 편집만 오래 하는 host는 직접 불러도 된다. 오류: Initialize
+    // 전 InvalidArgument, TakeChanges의 오류, 할당 실패(꺼낸 묶음을 쥔 채 다음 호출이 다시 적용한다
+    // — 잃지 않는다).
+    Result<void> SyncReferences() noexcept;
+
+    // 다른 열린 패키지에서 id 패키지의 객체로 들어오는 강한 참조 다중도 합이다(SyncReferences
+    // 뒤 — 저장하지 않은 편집 포함). referencer가 있으면 첫 참조 패키지(id 순 — 없으면 null id)를
+    // 둔다. 열리지 않은 id는 0이다. 오류: SyncReferences의 오류.
+    //
+    // 사용 예:
+    //   AssetId first;
+    //   auto incoming = set.IncomingReferences(heroId, &first);
+    //   if (incoming && incoming.Value() != 0) { /* first가 Hero를 참조한다 */ }
+    Result<usize> IncomingReferences(AssetId id, AssetId* referencer = nullptr) noexcept;
+
+    // 열린 패키지를 닫는다(7.1절 17 A2e3 — 삭제): 그 패키지를 Discard하고(되돌릴 수 없다 —
+    // 저장하지 않은 편집도 버린다) 파일 캐시 핸들을 닫고 표에서 뺀다. 오류(failure 진단):
+    // Initialize 전 InvalidArgument, Create의 초기화 안 Busy, 열리지 않음 NotFound(진단 None), 다른
+    // 열린 패키지가 참조함 ReferencedBy / Busy(related = 첫 참조자 — 끊긴 참조가 남지 않게, 그
+    // 패키지를 먼저 닫거나 참조를 고친다), SyncReferences·Discard의 오류(진단 None — 아무것도
+    // 바뀌지 않는다), 할당 실패.
+    Result<void> Close(AssetId id, AssetDiagnostic* failure = nullptr) noexcept;
+
     // 열린 패키지 수와 id 순 i번째 정보다.
     usize Count() const noexcept {
         return open_.Size();
@@ -353,6 +398,9 @@ private:
     // 열린 패키지 정보(id 순)와 그 RootRef(같은 순서)다.
     Array<EditorPackageInfo> open_;
     Array<RootRef<Object>> roots_;
+    // 패키지 사이 강한 간선 다중도 표와 꺼냈지만 아직 적용하지 못한 관찰자 묶음이다.
+    HashMap<EditorEdgeKey, int64> edges_;
+    Array<ReferenceEdgeDelta> pendingEdges_;
     // Create가 초기화를 부르는 동안이다(그 안의 Create·Save는 Busy).
     bool creating_ = false;
 };

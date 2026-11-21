@@ -166,8 +166,8 @@ dotnet out/dotnet/bin/Rocks.Build.Cli/Debug/net10.0/Rocks.Build.Cli.dll bootstra
 리플렉션 헤더는 그 헤더를 소유한 모듈의 규칙이 `Metadata`(모듈의 public 또는 private include 디렉터리 기준 철자)로 선언한다. `SourceModuleRules`는 `protected override IReadOnlyList<string> Metadata => ["Module/Type.h"];`로, `ModuleRules`를 직접 상속하는 게임 모듈은 `NativeModuleInput`의 `Metadata`와 명세 위치 `ModuleDirectory`로 적는다. 식별자는 모듈 폴더의 소스 관리되는 `<모듈>.rocksids.json`에 보관하며 일반 빌드는 파일을 수정하거나 누락된 ID를 자동 발급하지 않는다. 새 선언은 메타컴파일러의 명시적인 저작 명령으로 등록하고, 이름을 바꿀 때는 새 ID를 만들지 말고 `ids rename`을 사용한다. 삭제할 선언은 `ids retire`로 폐기하고, 타입을 다른 모듈로 옮길 때는 `ids move`로 ID를 유지한다. 모듈의 활성 명세 항목이 소스에 없거나, 두 명세에 같은 ID나 같은 이름이 있으면 빌드가 실패한다.
 
 ```text
-dotnet out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll ids add --manifest SampleGame.rocksids.json --type sample::Character --field sample::Character::health
-dotnet out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll ids rename --manifest SampleGame.rocksids.json --kind field --old sample::Character::health --new sample::Character::hitPoints
+dotnet out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll ids add --manifest MyGame.rocksids.json --type sample::Character --field sample::Character::health
+dotnet out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll ids rename --manifest MyGame.rocksids.json --kind field --old sample::Character::health --new sample::Character::hitPoints
 dotnet out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll ids move --from Old.rocksids.json --to New.rocksids.json --type sample::Character
 ```
 

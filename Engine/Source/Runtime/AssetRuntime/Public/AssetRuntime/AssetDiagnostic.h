@@ -91,7 +91,10 @@ enum class AssetDiagnosticCode : uint16 {
     AliasResolved,
     AliasInUse,
     AliasSearchTruncated,
-    CorruptAliasTable
+    CorruptAliasTable,
+    // 삭제(AssetSystem.ko.md 7.1절 17 — A2e3): 다른 패키지가 대상을 참조한다(디스크 참조자 —
+    // InvalidArgument, 열린 패키지의 메모리 참조 — Busy, related = 첫 참조자).
+    ReferencedBy
 };
 
 // 진단 이름이다(예: CorruptPackage → "CorruptPackage"). 모르는 값은 "Unknown"이다. 반환 문자열은

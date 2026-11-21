@@ -536,6 +536,18 @@ A2는 에디터 쪽 에셋 데이터베이스다(4·5.4·5.5·7·8·13·16절). 
       - 삭제 `AssetService::Delete(lock, target, force)`: 대상은 패키지 하나(`<path|AssetId>`). 디스크 참조자 = 색인 `Referencers(id, 모든 종류)`에서 자기 자신 제외(UE `GetReferencers(Package)` — 하드·소프트 모두), ImportOwner 참조자(대상이 임포트 소유자)도 포함한다(지우면 출력이 고아가 된다). 있으면 거부(`InvalidArgument`, 참조자마다 진단 줄 `ReferencedBy`), `--force`면 지우고 참조자는 다음 점검에서 `MissingDependency`(UE 강제 삭제는 로드된 참조만 null로 바꾸고 디스크의 참조자는 건드리지 않는다 — 디스크를 건드리지 않는 것은 같다). 메모리 참조: 대상이 열려 있고 다른 열린 패키지가 대상 객체를 참조하면(`IncomingReferences` ≠ 0) `--force`여도 `Busy`(객체를 버리면 그 참조가 끊긴 채 저장된다 — UE처럼 null로 바꾸고 dirty로 표시하는 것은 하지 않는다, 그 패키지들을 닫거나 참조를 고친 뒤 지운다). 실행: 검사 → 대상을 가리키는 별칭 지우기 준비·쓰기(UE는 리다이렉터를 남기고 그것이 참조자로 일반 삭제를 막지만, Rocks 별칭은 텍스트용이라 갈 곳이 없어진 항목을 지운다 — 경고 `AliasRemoved`) → 색인 갱신 준비 → Detach → 파일 Delete(실패하면 별칭 되돌리기 후 그 오류) → 확정(색인, 집합에서 닫기 — Discard). 저장하지 않은 새 패키지는 집합에서만 닫는다. 읽기 전용 패키지도 지울 수 있다(내용을 잃는 쓰기가 아니다).
       - 복제 `AssetService::Duplicate(lock, source, target)` → 새 AssetId: 원본을 열고(Hard 닫힘째) 그 메모리 상태(저장하지 않은 편집 포함 — UE `DuplicateSingleObject`와 같다)를 새 id로 대상 경로에 새 파일로 쓴다. writer 옵션 `PackageWriteOptions::duplicate`(AssetRuntime): 헤더 id를 바꾸고(`assetId`), `DuplicateTransient`·`NonTryoutDuplicateTransient` 필드는 클래스 기본값으로 쓴다(UE `DuplicateObject`가 복사하지 않는 필드 — 리플렉션 B9 1절 표), 자기 패키지(원본 id)를 가리키는 Soft 참조는 새 id로 바꾼다(UE `DuplicateAsset`이 패키지 안을 가리키는 soft path를 고치는 것과 같다 — 바꾸지 않으면 사본이 원본을 가리킨다). 패키지 안 Hard·Weak 참조는 export 번호라 그대로 새 사본을 가리키고 밖 참조는 그대로다(UE와 같다). ImportRecord: 소유 기록(owner = 원본)이면 owner와 outputs의 원본 id를 새 id로 바꿔 쓴다(원본 경로를 유지하는 것은 UE AssetImportData와 같다), 참조 기록(다른 임포트의 출력)이면 기록과 ImportOwner 의존을 버리고 경고 `ImportRecordDropped`(그대로 두면 소유자의 outputs에 없어 곧바로 고아다). 읽기 전용 원본은 `NewerVersion`(4.4절), 미해결 import가 있으면 저장과 같이 거부. 대상 점유 검사는 이동과 같다. 새 파일은 저장과 같은 길(임시 → Replace)로 쓰고 색인 Refresh, 집합에는 열지 않는다.
       - 명령 `asset-delete <path> [--force]`, `asset-duplicate <path> <새 path>`(출력: 새 경로와 AssetId 한 줄).
+      - 단계: A2e3a(간선 표·닫기·삭제)와 A2e3b(writer 복제 옵션·복제)로 나눠 각각 리뷰한다.
+      - A2e3a 구현 세부(2026-11-22, 권장안으로 확정):
+        - 간선 표: `EditorPackageSet`이 `(소유 패키지, 대상 패키지) → 다중도` 표(HashMap)를 갖는다. `SyncReferences()`가 관찰자 묶음을 꺼내(`TakeChanges`) 쌍별로 합친 뒤(원인·트랜잭션으로 나뉜 같은 쌍 — AssetManager `CoalesceChanges`와 같다) 표 용량을 먼저 잡고 무할당으로 적용한다 — 할당이 실패하면 묶음을 쥔 채 다음 호출이 다시 한다(잃지 않는다). 음수 다중도는 Registry 결함이라 Fatal이다. `IncomingReferences(id, referencer)`는 동기화한 뒤 다른 열린 패키지에서 그 패키지로 들어오는 다중도 합과 첫 참조자(id 순)다(열리지 않은 id는 0). 관찰자는 키 상한(`observerMaxKeys`)까지만 쌓으므로 Open(새 패키지)·Create·Save·Close가 시작할 때 동기화한다 — 실패하면 그 호출이 아무것도 바꾸지 않고 그 오류다(A2e3a 리뷰 권장: host의 주기 호출에만 기대지 않는다. 끝에서 부르고 실패를 무시하는 길은 버렸다 — 성공한 호출 뒤에 삼킨 할당 실패가 남는다). 그래서 관찰자는 그 호출 사이의 편집만 쌓는다.
+        - 닫기: `EditorPackageSet::Close(id)` — 들어오는 참조가 있으면 `ReferencedBy` / Busy(related = 첫 참조자), 아니면 그 패키지를 Discard하고(되돌릴 수 없다 — 저장하지 않은 편집도 버린다) 파일 캐시 핸들을 닫고 표에서 뺀다. Discard의 오류(할당·관찰자 키 상한)면 아무것도 바뀌지 않는다.
+        - 색인: `AssetIndexRefreshPaths::removed`(Content 상대 이름 — 그 이름과 그 아래의 항목·진단을 읽지 않고 뺀다). 지우기 전에 준비하고 지운 뒤 확정한다.
+        - 서비스 `AssetService::Delete(lock, target, force, result, warnings, failure)`: 대상 텍스트는 `<path|AssetId>`이고 별칭으로 풀지 않는다(지우는 대상은 지금 이름으로 고른다 — 옛 경로는 NotFound). 원본 판정은 색인 항목(같은 id 둘 `DuplicateAssetId` / AlreadyExists — 먼저 `asset-fix-duplicate-id`, 같은 경로 키 둘 `DuplicatePath` / AlreadyExists) → 저장하지 않은 새 패키지(id·경로 키). 디스크 참조자 = 색인 `Referencers(id, 모든 종류)` − 자신(경로 키 순 — `result.referencers`에 경로·id 사본), 있으면 `ReferencedBy` / InvalidArgument(related = 첫 참조자 — force면 지우고 목록만 준다). 메모리 참조(`IncomingReferences`)는 force여도 `ReferencedBy` / Busy. 저장하지 않은 메모리 편집의 Soft 참조는 디스크 참조자에 없다(한계 — 저장된 상태만 본다, UE도 디스크 참조자는 저장된 패키지에서 찾는다).
+        - 순서: 검사 → 대상을 가리키는 별칭 키 모으기 → 색인 준비(`removed`) → 경고 자리(별칭 수만큼 — 그 뒤 할당 실패 없음) → 별칭 쓰기 → 닫기(Discard — 할당이 있어 파일 지우기 뒤로 미루지 않는다, 실패하면 별칭 되돌리기 뒤 그 오류) → 파일 Delete(이미 없으면 — 낡은 색인·밖에서 지움 — 바라는 상태라 성공으로 보고 색인을 확정한다(A2e3a 리뷰 권장), 그 밖의 실패면 별칭 되돌리기 뒤 그 오류 — 패키지는 이미 닫혔고 파일·색인·별칭 그대로라 다시 열 수 있다, 사용자가 지우라고 한 패키지의 메모리 편집을 버리는 것은 의도와 같다) → 색인 확정. 위 7.1절 17 실행 순서(Delete 뒤 닫기)에서 바꿨다 — Discard가 실패할 수 있어 파일을 지운 뒤에는 둘 수 없다. 되돌리기 실패는 `AliasNotRestored` 경고.
+        - 경고: 지운 별칭마다 `EditorWarningKind::AliasRemoved`(text = 별칭 경로), 별칭 쓰기 NotDurable은 `NotDurable`. 결과 `AssetDeleteResult`: 지운 경로·id, 별칭 수, 디스크 참조자 목록(경로·id 사본 — 색인이 바뀌어도 유효).
+        - 명령 `asset-delete <path|AssetId> [--force]`: 성공 `asset-delete: deleted <path> <AssetId>`, 참조자마다 줄 `ReferencedBy: <참조자 path>: <id> references <대상 path>`(거부면 오류 줄 뒤 종료 1, force면 `warning` 줄), 경고 줄(AliasRemoved 등), 캐시 쓰기. 참조자 줄은 13절 진단 줄 형식 `<명령>: <코드>: <대상>: <설명>`에서 대상 자리가 참조자 경로이고 설명이 `<참조자 id> references <지울 경로>`(force면 앞에 `warning `)다 — 예: `asset-delete: ReferencedBy: /Game/Anims/Run: 5e57…0b02 references /Game/Characters/Hero`, 그 뒤 거부 진단 줄 `asset-delete: ReferencedBy: /Game/Characters/Hero: InvalidArgument (related 5e57…0b02)`.
+        - 저장하지 않은 편집의 Soft 참조(열린 패키지)는 강한 간선이 아니고 디스크 참조자도 아니라 삭제를 막지 않는다(한계 — 위 서비스 항목, 시험으로 고정). ImportOwner 의존만 있는 참조자(다른 임포트의 출력)도 디스크 참조자다.
+        - 자기 참조: 색인 참조자에 자신은 나오지 않는다(writer가 자기 의존을 빼고 reader가 거부한다 — 5.4절) — 삭제는 자기 제외 판정을 두지 않는다(처음 구현의 그 판정은 닿을 수 없었다).
+        - 상태: **구현** — 대조표 14.1.37절, coverage 14.1.38절.
     - **A2e4 ID 수정·고아 출력**:
       - `asset-fix-duplicate-id <path>`: 그 경로 항목이 색인에서 `duplicateId`여야 한다(아니면 InvalidArgument). 같은 id 패키지는 집합에 동시에 둘 수 없으므로(Registry가 id로 찾는다) 그 파일을 색인 대조 없이 여는 길(`EditorPackageSet::OpenForIdFix(fileName)` — 같은 id의 다른 파일이 집합에 열려 있으면 Busy, 그 파일이 dirty면 진단 줄이 먼저 저장하라고 알린다)로 열어 새 id로 같은 경로에 다시 쓰고(복제와 같은 writer 옵션, 소유 ImportRecord의 owner·outputs도 바꾼다) 닫는다. 다른 패키지의 그 id 참조는 남은 쪽을 가리킨다(출력에 적는다). 대상이 다른 임포트의 출력이면 소유자의 outputs가 옛 id를 가리키므로 고아가 된다(경고 `OrphanedOutput`).
       - 고아 출력: 색인 ImportRecord 요약에 outputs의 AssetId 목록을 더한다(캐시 형식 버전·판정 의미 버전을 올린다). 고아 = 참조 기록(owner ≠ 자신)인 항목 가운데 owner가 색인에 없거나, owner 항목의 기록이 없거나, owner 기록의 outputs에 자신이 없는 것. `AssetIndex::Orphans(out)`, `Verify`가 고아마다 `OrphanedOutput` 진단(경고)을 더한다 — `asset-index-verify`는 진단 줄을 쓰되 경고만이면 종료 0(13절 "경고만 있으면 0").
@@ -2225,6 +2237,46 @@ A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항�
 리뷰(판정 충족, 필수 없음) 권장 넷: 패키지·디렉터리 같은 이름의 우선순위, 항목 없는 디렉터리의 철자 한계, 낡은 색인의 새 패키지 이동, 남는 부모 디렉터리 — 모두 위 7.1절 17에 적고 앞의 둘은 한계로, 셋째는 거부로 고쳤다(새 패키지 하나의 원본 이름이 디렉터리 이름이던 결함도 함께), 넷째는 시험에 이름을 붙였다.
 
 시험이 찾은 것: (1) 저장된 열린 패키지는 `logicalPath`가 비어 있는데(색인 항목이 권위) 집합 경로 바꾸기·Detach·대상 점유 검사가 모든 열린 패키지의 `logicalPath`를 해석해 열린 패키지가 하나라도 있으면 이동이 InvalidArgument였다 — 저장된 패키지는 OS 이름(`fileName`)으로 대조하게 고쳤다. (2) 원본 Stat의 없음 밖 오류를 "디스크에 없음"으로 보아 OS 이동 없이 경로 표만 바꿀 수 있었다 — 그 오류로 실패하고, 파일이 있어야 할 색인 항목이 없으면 MissingFile로 고쳤다. (3) 대소문자 구분 FS에서 한 논리 디렉터리가 OS 디렉터리 둘에 걸치면 하나만 옮겨졌다 — 거부한다. (4) OS 경로 문자열을 별칭을 쓴 뒤 만들어 그 할당 실패가 되돌리기를 거쳤고, 확정 뒤 NotDurable 경고 할당 실패가 옮긴 뒤 OutOfMemory를 돌려줄 수 있었다 — 별칭 쓰기 전에 모두 만들고 경고 자리를 잡는다. (5) 대상 부모 찾기의 `slash > 0` 판정은 닿을 수 없었다(toFull은 Content 뒤 '/'를 품는다) — 판정을 없앴다. (6) 긴 대상 시험이 대상 자체의 구성 요소 길이(64 byte)에서 거부되어 의도한 "아래 이름만 상한 밖"을 보지 못했다 — 구성 요소를 나눠 고쳤다.
+
+#### 14.1.37 요구 대조표(A2e3a — 간선 표·닫기·삭제)
+
+시험은 EngineTests `Engine/Source/Developer/AssetDatabase/Tests/AssetDeleteTests.cpp`(8개)와 C# `Programs/Rocks.Commandlet.Tests/Program.cs`의 "asset-delete" 항목 16개(Windows 전용 1개)다. 장면은 A2e2와 같다(디스크 임시 루트·메모리 파일 시스템·잡은 잠금 — 집합 시험은 메모리 프로젝트). 색인 결과는 매번 새 검색과 같은지로 단언한다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 간선 표(7.1-17 A2e3a) | Initialize 전 InvalidArgument(동기화·조회·닫기), 열기의 다중도(Villain → Hero 2·Hero → Base·Derived), 첫 참조자(id 순 — 두 참조자), 열리지 않은 id 0, 편집(끊기·다시 잇기 — 같은 원인 합산), 열기와 편집이 한 묶음(Commit + Edit 합 0 — 표에 없는 쌍, 합 1), 닫기가 나가는 간선 반납, 소유 스레드가 아님 WrongThread(묶음 그대로) | `AssetDelete_EdgeTableAndClose` |
+| 닫기(7.1-17 A2e3a) | 들어오는 참조 ReferencedBy / Busy(related), 닫기·다시 닫기 NotFound(진단 칸 있고 없음), 닫은 패키지 다시 열기, 저장하지 않은 새 패키지 닫기, Create 초기화 안 Busy | `AssetDelete_EdgeTableAndClose` |
+| 간선·닫기 할당 실패(7.1-17 A2e3a) | 동기화의 모든 할당 실패 — 묶음을 쥐고 다음 호출이 같은 다중도, 쌓인 묶음이 있을 때 새 패키지 열기·만들기의 할당 실패(시작의 동기화 포함 — 아무것도 열거나 만들지 않음), 닫기(안의 동기화·경로·Discard) 모든 할당 실패 — 패키지·다중도 그대로(GC 표 실패는 Registry가 삼킨 성공) | `AssetDelete_EdgeTableAllocationFailures` |
+| 색인 빼기(7.1-17 A2e3a) | 파일·디렉터리(그 아래 항목·손상·열거 실패 진단)·없는 이름을 지우기 전 준비 → 지우기 → 확정이 새 검색과 같음, 이름 규칙 위반 셋 InvalidArgument, 할당 실패 | `AssetDelete_IndexRemoved` |
+| 임포트 소유자·Soft 편집(7.1-17 A2e3a) | ImportOwner 의존만 있는 참조자가 소유자 삭제를 막음(ReferencedBy·related)·force는 지움, 열린 패키지의 저장하지 않은 Soft 참조는 삭제를 막지 않음(한계 고정) | `AssetDelete_ImportOwnerAndSoftEdits` |
+| 삭제(7.1-17 A2e3a) | 닫힌 패키지(별칭 하나 지움 — AliasRemoved 경고 text·asset, 다른 에셋 별칭은 남음), id로 고른 열린 패키지(별칭 없음 — 별칭 파일 안 씀, 닫힘), 자기만 참조하는 패키지, 저장하지 않은 새 패키지(경로 — 열린 저장 패키지·다른 새 패키지를 지나서, id — 파일 지우기 없음), 디스크 참조자 거부(InvalidArgument·related·목록 경로·id), 열린 참조자는 force여도 Busy, 참조자를 닫은 뒤 force(목록, 참조자 MissingDependency), NotDurable 경고(경고 목록 있고 없음), 열린 읽기 전용 패키지(모르는 커스텀 버전), 파일이 이미 없는 낡은 색인(성공·색인 확정) | `AssetDelete_DeletesPackages` |
+| 거부·되돌리기(7.1-17 A2e3a) | Initialize 전·잠금 아님, 경로·id 텍스트 형식·null id(InvalidPath), 없음(경로·id·별칭 경로는 따르지 않음), 같은 경로 키 둘(DuplicatePath), 같은 id 파일 둘(id·경로 — DuplicateAssetId), 열렸지만 색인에서 빠진 저장 패키지(NotFound — 색인이 권위), 별칭 표 손상, 별칭 쓰기 실패, 경고 자리 할당 실패, 지우기 실패(별칭 되돌림·패키지는 닫힌 채 다시 열림), 되돌리기 실패(AliasNotRestored — 경고 목록 있고 없음) — 실패는 모두 파일·별칭 byte·색인 그대로 | `AssetDelete_RejectsAndRestores` |
+| 할당 실패(7.1-17 A2e3a) | 네 장면(별칭 있는 열린 패키지, 디스크 참조자가 있는 force, 나가는 간선이 있는 열린 패키지, 저장하지 않은 새 패키지)의 모든 할당 실패(결과 목록 포함) — OutOfMemory, 경고 없음, 파일·별칭·색인 그대로 | `AssetDelete_AllocationFailures` |
+| 실제 디스크(7.1-6·17) | bulk를 읽어 캐시 핸들이 열린 패키지를 Windows에서 지움(닫기가 핸들을 닫지 않으면 실패), 집합에서 빠짐 | `AssetDelete_RealDisk` |
+| 명령(13, 7.1-17 A2e3a) | 지우기 요약 줄·AliasRemoved 경고 줄·옛 경로 NotFound, 참조자 줄과 ReferencedBy 진단 줄(종료 1), --force 경고 줄·검증 MissingDependency, id로 고르기, 없음·경로 규칙 진단 줄, 잠금 Busy(Windows), 사용법 넷·도움말·프로젝트 없음 | C# 16개 |
+| 조합(14 완료 조건 2) | 대상 종류(색인 항목·열린 저장 패키지·저장하지 않은 새 패키지·색인에서 빠진 열린 패키지) × 고르기(경로·id) × 참조 상태(없음·디스크·메모리·자기) × force × 별칭(없음·대상·다른 에셋) × 실패 위치(검사·별칭 쓰기·닫기·지우기·되돌리기·할당) | 위 시험 |
+
+#### 14.1.38 Coverage(A2e3a)
+
+측정(2026-11-22, Windows, `ROCKS_MSVC_TOOLSET=14.44`): `-Target EngineTests -Filter AssetDelete,AssetMove,AssetIndex,EditorPackage -Sources Engine/Source/Developer/AssetDatabase/Private`, 명령은 C# 시험 구동기(`-Target Commandlet`).
+
+| 범위 | 줄 | 분기 |
+|---|---|---|
+| `AssetService::Delete` | 모두 닿음 | 모두 닿음 |
+| `EditorPackageSet::SyncReferences`·`IncomingReferences`·`Close`, Open·Create·Save 시작의 동기화 | 1곳 제외 모두 | 같음 |
+| `AssetIndex.cpp`(`removed` 검사·빼기) | 파일 100%(1423/1423) | 바꾼 줄 모두 닿음(파일 722/725 — 남은 셋은 이번 단계가 바꾼 줄이 아니다) |
+| `RunAssetDeleteCommand`·경고 줄 `AliasRemoved` | 출력 쓰기·서식 실패 제외 모두 | 같음 |
+
+닿지 않은 곳과 근거:
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| `SyncReferences` 음수 다중도 Fatal | 줄 | 관찰자는 실제 간선 변화만 기록하고 묶음을 합친 뒤 적용하므로 음수는 Registry 결함일 때뿐이다(AssetManager 간선 표와 같은 불변식) |
+| `RunAssetDeleteCommand` 참조자·경고·요약 줄 쓰기 실패, 요약 서식 실패 | 실패 | 14.1.36과 같다(무효 출력 핸들 시험이 같은 `Fail`·`Write` 경로를 다른 명령에서 돈다, 서식 실패는 할당 실패) |
+
+리뷰(판정 충족, 필수 없음) 권장 넷: 관찰자 자동 동기화(Open·Create·Save·Close 시작), 빠진 조합 셋(읽기 전용·ImportOwner 참조자·저장하지 않은 Soft 편집), 파일이 이미 없는 삭제의 성공, 참조자 줄 형식 예 — 모두 반영했다.
+
+시험이 찾은 것: (1) 관찰자가 붙어 있는데 아무도 묶음을 꺼내지 않아 편집이 쌓이면 키 상한에서 Registry 쓰기가 CapacityExceeded가 될 수 있었다 — 간선 표가 꺼내고 오래 사는 host는 주기적으로 부른다(7.1절 17). (2) 자기 참조 제외 판정은 닿을 수 없었다(색인에 자기 의존이 없다) — 지웠다. (3) handle 정렬의 세대 비교는 한 묶음에 같은 칸 다른 세대가 오지 않아 닿을 수 없었다 — 칸·세대를 한 64-bit 키로 비교한다. (4) 파일이 이미 없는 삭제가 오류로 끝나 낡은 색인이 다시 검색할 때까지 남았다 — 성공으로 본다(리뷰 권장). (5) 명령의 "메모리 참조 Busy" 구분은 명령 프로세스에서 닿을 수 없다(대상을 열지 않은 새 프로세스) — 참조자 줄은 목록이 있으면 쓰고 지웠을 때만 warning으로 단순화했다.
 
 ## 15. PNG 디코더 범위
 
