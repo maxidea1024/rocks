@@ -32,7 +32,7 @@ Templates/   게임 프로젝트 템플릿
 
 ## 빌드·검증
 
-Windows/macOS의 .NET 10 SDK와 Clang 도구 체인을 사용한다. 명령과 설치 SDK·게임 빌드 옵션은 [빌드 안내](Build/README.md)를 참고한다.
+Windows/macOS의 .NET 10 SDK와 Clang 도구 체인을 사용한다. 처음 설치는 [빌드 환경 설정](Docs/Guides/BuildEnvironment.ko.md)을 따른다. 명령과 설치 SDK·게임 빌드 옵션은 [빌드 안내](Build/README.md)를 참고한다.
 
 ```text
 dotnet msbuild Rocks.proj /t:Test /p:Configuration=Debug /p:RocksTarget=Foundation
@@ -42,6 +42,7 @@ dotnet msbuild Rocks.proj /t:Test /p:Configuration=Debug /p:RocksTarget=Foundati
 
 ## 가이드
 
+- [빌드 환경 설정 — Windows·macOS·Linux 설치 순서·첫 빌드·Android 대상·문제 해결](Docs/Guides/BuildEnvironment.ko.md)
 - [저장소 구성 — 계층 규칙·규칙 파일·새 모듈 추가·프로젝트 기술자](Docs/Guides/RepositoryLayout.ko.md)
 - [엔진 구동과 렌더링 — 프레임 순서·스레드·렌더 그래프·셰이더·텍스처 스트리밍](Docs/Guides/RenderingGuide.ko.md)
 - [가비지 컬렉션 — 도달성·삼색 마킹·쓰기 장벽·해제 시점·대규모 비용](Docs/Guides/GarbageCollectionGuide.ko.md)
