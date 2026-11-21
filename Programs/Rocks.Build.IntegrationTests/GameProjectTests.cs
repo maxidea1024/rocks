@@ -21,13 +21,15 @@ internal static class GameProjectTests
             Registries(Path.Combine(root, "registry"));
             Snapshot(Path.Combine(root, "snapshot"));
             await CleanAsync(Path.Combine(root, "clean"));
+            Assembly(Path.Combine(root, "assembly"));
         }
         finally
         {
             Directory.Delete(root, recursive: true);
         }
 
-        Console.WriteLine("PASS game project: SDK association and registries, input snapshot and rule exclusions, game clean boundaries");
+        Console.WriteLine("PASS game project: SDK association and registries, input snapshot and rule exclusions, game clean boundaries, " +
+            "multi-configuration SDK assembly");
     }
 
     private static void Association(string root)
@@ -392,6 +394,85 @@ internal static class GameProjectTests
         await Expect(() => CleanCommand.RunAsync(Options(("output", Path.Combine(root, "out", "x"))), CancellationToken.None), "only build outputs under");
         await Expect(() => CleanCommand.RunAsync(Options(("root", root)), CancellationToken.None), "belong to engine targets");
         await Expect(() => CleanCommand.RunAsync(Options(("platform", "android")), CancellationToken.None), "belong to engine targets");
+    }
+
+    // 다중 구성 SDK 조립(Docs/Design/ProjectFiles.ko.md 10.3절, V10의 내보내기 오류): Libraries/·Metadata/는 구성 디렉터리로 가고, 한 벌 파일은
+    // 구성마다 같아야 하며 한 구성에만 있어도 오류다. 실패하면 대상이 생기지 않고 stage도 남지 않는다.
+    private static void Assembly(string root)
+    {
+        Directory.CreateDirectory(root);
+        string Stage(string name, params (string Path, string Text)[] files)
+        {
+            string directory = Path.Combine(root, "stage-" + name);
+            foreach ((string path, string text) in files)
+            {
+                Write(directory, path, text);
+            }
+
+            return directory;
+        }
+
+        string destination = Path.Combine(root, "Sdk");
+        using (var assembly = new SdkAssembly(destination))
+        {
+            string[] debug = assembly.Merge(NativeConfiguration.Debug, Stage("debug", ("Headers/M/0/M.h", "header"), ("Libraries/M.lib", "debug"),
+                ("Metadata/M/M.rocksmeta.json", "meta"), ("Tools/Tool.dll", "tool")));
+            Require(debug.SequenceEqual(["Configurations/Debug/Libraries/M.lib", "Configurations/Debug/Metadata/M/M.rocksmeta.json"]),
+                "per-configuration files go under Configurations/Debug: " + string.Join(", ", debug));
+            assembly.Merge(NativeConfiguration.Release, Stage("release", ("Headers/M/0/M.h", "header"), ("Libraries/M.lib", "release"),
+                ("Metadata/M/M.rocksmeta.json", "meta"), ("Tools/Tool.dll", "tool")));
+            assembly.RequireSameSharedFiles();
+            try
+            {
+                assembly.Merge(NativeConfiguration.Development, Stage("development", ("Headers/M/0/M.h", "other header")));
+                throw new InvalidOperationException("a configuration-independent file that differs must fail the export");
+            }
+            catch (InvalidOperationException error) when (error.Message.Contains("SDK file Headers/M/0/M.h differs between the Debug and Development", StringComparison.Ordinal))
+            {
+            }
+        }
+
+        using (var assembly = new SdkAssembly(destination))
+        {
+            assembly.Merge(NativeConfiguration.Debug, Stage("debug-extra", ("Headers/M/0/M.h", "header"), ("Headers/M/0/Extra.h", "extra")));
+            assembly.Merge(NativeConfiguration.Release, Stage("release-extra", ("Headers/M/0/M.h", "header")));
+            try
+            {
+                assembly.RequireSameSharedFiles();
+                throw new InvalidOperationException("a configuration-independent file in one configuration only must fail the export");
+            }
+            catch (InvalidOperationException error) when (error.Message.Contains("Headers/M/0/Extra.h is in the Debug configuration but not in Release", StringComparison.Ordinal))
+            {
+            }
+
+            try
+            {
+                assembly.Publish();
+                throw new InvalidOperationException("publishing an assembly without a built configuration must fail");
+            }
+            catch (InvalidOperationException error) when (error.Message.Contains("no configuration to publish", StringComparison.Ordinal))
+            {
+            }
+        }
+
+        Require(!Directory.Exists(destination) && !Directory.EnumerateDirectories(root, "Sdk.staging-*").Any(), "a failed assembly must leave no SDK or stage");
+        Directory.CreateDirectory(destination);
+        try
+        {
+            using var existing = new SdkAssembly(destination);
+            throw new InvalidOperationException("an existing SDK destination must be rejected");
+        }
+        catch (IOException error) when (error.Message.Contains("already exists", StringComparison.Ordinal))
+        {
+        }
+
+        // 구성 목록: 쉼표·세미콜론, 구성 순서로 정렬, 이름은 정확히, 중복·빈 칸 거부.
+        Require(SdkExportCommand.Parse("Release;Debug").SequenceEqual([NativeConfiguration.Debug, NativeConfiguration.Release]) &&
+            SdkExportCommand.Parse("Debug, Development").SequenceEqual([NativeConfiguration.Debug, NativeConfiguration.Development]), "configuration list parsing");
+        foreach (string bad in new[] { "debug", "Debug,Debug", "", "Debug,", "Fast" })
+        {
+            Error(() => SdkExportCommand.Parse(bad));
+        }
     }
 
     private sealed class MemoryRegistry : ISdkRegistry
