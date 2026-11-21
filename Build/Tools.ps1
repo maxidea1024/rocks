@@ -123,13 +123,13 @@ function Get-RocksToolInputs {
             continue
         }
 
-        foreach ($file in Get-ChildItem -LiteralPath ([System.IO.Path]::GetDirectoryName($project)) -Recurse -File) {
+        foreach ($file in Get-ChildItem -LiteralPath ([System.IO.Path]::GetDirectoryName($project)) -Recurse -File -Force) {
             Add-File $file.FullName
         }
     }
 
     foreach ($tree in @('Core/Source', 'Engine/Source', 'Engine/Plugins', 'Programs')) {
-        foreach ($file in Get-ChildItem -LiteralPath (Join-Path $root $tree) -Recurse -File -Include '*.Build.cs', '*.Target.cs' -ErrorAction SilentlyContinue) {
+        foreach ($file in Get-ChildItem -LiteralPath (Join-Path $root $tree) -Recurse -File -Force -Include '*.Build.cs', '*.Target.cs' -ErrorAction SilentlyContinue) {
             if ([System.IO.Path]::GetRelativePath($root, $file.FullName).Replace('\', '/') -notmatch '^Programs/Rocks\.') {
                 Add-File $file.FullName
             }
@@ -149,7 +149,7 @@ function Get-RocksToolInputs {
 # Content SHA-256 of a file, reusing the recorded hash when the size and both times match the record (the same rule as the incremental
 # store's large output check); otherwise the file is hashed again.
 function Get-RocksFileHash([string] $path, $memo, $next) {
-    $item = Get-Item -LiteralPath $path
+    $item = Get-Item -LiteralPath $path -Force
     $key = "$($item.Length)|$($item.LastWriteTimeUtc.Ticks)|$($item.CreationTimeUtc.Ticks)"
     $relative = [System.IO.Path]::GetRelativePath($script:RocksRoot, $path).Replace('\', '/')
     $recorded = if ($null -ne $memo) { $memo.PSObject.Properties[$relative] } else { $null }
@@ -181,7 +181,7 @@ function Get-RocksToolState($memo) {
             continue
         }
 
-        foreach ($dll in Get-ChildItem -LiteralPath $full -File -Filter '*.dll' | Sort-Object Name) {
+        foreach ($dll in Get-ChildItem -LiteralPath $full -File -Force -Filter '*.dll' | Sort-Object Name) {
             [void] $outputs.Append($directory).Append('/').Append($dll.Name).Append("`t").Append((Get-RocksFileHash $dll.FullName $memo $next)).Append("`n")
         }
     }
