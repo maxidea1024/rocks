@@ -2,6 +2,8 @@
 #include "AssetCommandletSupport.h"
 
 #include <AssetDatabase/AssetIndex.h>
+#include <AssetDatabase/AssetIndexCache.h>
+#include <AssetDatabase/TemporaryFiles.h>
 #include <AssetDatabase/LogicalPath.h>
 #include <AssetDatabase/ProjectLayout.h>
 #include <Core/Build/BuildInfo.h>
@@ -20,6 +22,15 @@ namespace {
 
 constexpr StringView ListName = "asset-list";
 constexpr StringView VerifyName = "asset-index-verify";
+constexpr StringView RebuildName = "asset-index-rebuild";
+
+constexpr StringView RebuildUsage =
+    "usage: asset-index-rebuild [--project=<dir>] [--wait=<seconds>]\n"
+    "  Take the project write lock, scan Content/ without the index cache, delete the\n"
+    "  temporary files that interrupted saves left behind and write a fresh index cache\n"
+    "  (Intermediate/AssetIndex.cache). Diagnostics go to standard error like\n"
+    "  asset-index-verify; the summary line goes to standard output. Exits 0 even when\n"
+    "  there are diagnostics (asset-index-verify checks); lock, IO and cache failures exit 1.\n";
 
 constexpr StringView ListUsage =
     "usage: asset-list [--type=<Type>] [--under=<path>] [--project=<dir>] [--wait=<seconds>]\n"
@@ -171,8 +182,16 @@ Result<int32> RunAssetListCommand(void* context, Span<const StringView> args,
         return failure;
     }
 
+    // 목록은 색인 캐시를 읽는다(쓰지 않는다 — 잠금을 잡지 않는 명령, 7.1절 16).
+    AssetIndexCache cache(allocator);
+    auto loaded = cache.Load(platform::PhysicalFileSystem(), layout, IndexReadOptions());
+    if (!loaded) {
+        return Result<int32>::Failure(loaded.Error());
+    }
+
     AssetIndex index(allocator, layout);
-    if (auto rebuilt = index.Rebuild(platform::PhysicalFileSystem(), IndexReadOptions());
+    if (auto rebuilt = index.Rebuild(platform::PhysicalFileSystem(), IndexReadOptions(),
+                                     loaded.Value() ? &cache : nullptr);
         !rebuilt) {
         if (rebuilt.Error() == ErrorCode::OutOfMemory) {
             return Result<int32>::Failure(rebuilt.Error());
@@ -255,6 +274,99 @@ Result<int32> RunAssetIndexVerifyCommand(void* context, Span<const StringView> a
     }
 
     return Write(output, CommandletStream::Output, summary.View(), problems == 0 ? 0 : 1);
+}
+
+Result<int32> RunAssetIndexRebuildCommand(void* context, Span<const StringView> args,
+                                          CommandletOutput& output) noexcept {
+    Allocator& allocator = *static_cast<Allocator*>(context);
+    Options options;
+    uint32 milliseconds = 0;
+    if (!options.Parse(args, false) || !ParseWaitMilliseconds(options.wait, milliseconds)) {
+        return Write(output, CommandletStream::Error, RebuildUsage, 2);
+    }
+
+    if (options.help) {
+        return Write(output, CommandletStream::Output, RebuildUsage, 0);
+    }
+
+    ProjectLayout layout(allocator);
+    Result<int32> failure = Result<int32>::Success(1);
+    if (!OpenProject(output, allocator, RebuildName, options.project, layout, failure)) {
+        return failure;
+    }
+
+    AssetDatabaseLock lock;
+    if (auto held = lock.Acquire(layout, milliseconds); !held) {
+        return held.Error() == ErrorCode::Busy
+                   ? Fail(output, allocator, RebuildName, 1,
+                          "Busy: {}: the project is locked by another process; use "
+                          "--wait=<seconds>",
+                          layout.Root())
+                   : Fail(output, allocator, RebuildName, 1, "{}: {}: cannot lock the project",
+                          ErrorCodeName(held.Error()), layout.Root());
+    }
+
+    platform::FileSystem& files = platform::PhysicalFileSystem();
+    AssetIndex index(allocator, layout);
+    if (auto rebuilt = index.Rebuild(files, IndexReadOptions()); !rebuilt) {
+        if (rebuilt.Error() == ErrorCode::OutOfMemory) {
+            return Result<int32>::Failure(rebuilt.Error());
+        }
+
+        return Fail(output, allocator, RebuildName, 1, "{}: {}: cannot scan the content directory",
+                    ErrorCodeName(rebuilt.Error()), layout.ContentDirectory());
+    }
+
+    usize removed = 0;
+    Array<TemporaryFileFailure> failures(allocator);
+    if (auto cleaned = DeleteTemporaryOrphans(files, layout, lock, removed, failures); !cleaned) {
+        if (cleaned.Error() == ErrorCode::OutOfMemory) {
+            return Result<int32>::Failure(cleaned.Error());
+        }
+
+        return Fail(output, allocator, RebuildName, 1, "{}: {}: cannot clean temporary files",
+                    ErrorCodeName(cleaned.Error()), layout.Root());
+    }
+
+    for (const AssetIndexDiagnostic& diagnostic : index.Diagnostics()) {
+        StringBuilder<LineBytes> line(allocator);
+        if (auto formatted = AppendAssetIndexDiagnosticLine(line, diagnostic); !formatted) {
+            return Result<int32>::Failure(formatted.Error());
+        }
+
+        if (auto written = Write(output, CommandletStream::Error, line.View(), 0); !written) {
+            return written;
+        }
+    }
+
+    for (const TemporaryFileFailure& orphan : failures) {
+        if (auto written =
+                Fail(output, allocator, RebuildName, 0, "{}: {}: warning OrphanNotDeleted",
+                     ErrorCodeName(orphan.error), orphan.path.View());
+            !written) {
+            return written;
+        }
+    }
+
+    if (auto cached = WriteAssetIndexCache(files, layout, lock, index, IndexReadOptions());
+        !cached) {
+        if (cached.Error() == ErrorCode::OutOfMemory) {
+            return Result<int32>::Failure(cached.Error());
+        }
+
+        return Fail(output, allocator, RebuildName, 1, "{}: {}: cannot write the index cache",
+                    ErrorCodeName(cached.Error()), layout.IntermediateDirectory());
+    }
+
+    StringBuilder<LineBytes> summary(allocator);
+    if (auto formatted = summary.TryAppendFormat(
+            "{}: {} packages, {} diagnostics, {} orphans removed\n", RebuildName, index.Count(),
+            index.Diagnostics().Size(), removed);
+        !formatted) {
+        return Result<int32>::Failure(formatted.Error());
+    }
+
+    return Write(output, CommandletStream::Output, summary.View(), 0);
 }
 
 } // namespace rocks::commandlet_host

@@ -33,6 +33,10 @@ struct AssetServiceConfig {
     // registryOptions.names는 Name 필드 대입·출력의 pool이다(없으면 Name 값 대입은 진단
     // Unsupported). read는 색인 Rebuild에도 쓴다.
     EditorPackageSetConfig packages;
+    // 색인 캐시(Intermediate/AssetIndex.cache — 7.1절 16 A2d1)의 파일 시스템이다(null이면
+    // packages.files). useCache가 거짓이면 캐시를 읽지 않는다(점검·재구축 명령).
+    platform::FileSystem* cacheFiles = nullptr;
+    bool useCache = true;
 };
 
 // asset-info 출력 선택이다(13절).
@@ -52,7 +56,9 @@ public:
     AssetService(const AssetService&) = delete;
     AssetService& operator=(const AssetService&) = delete;
 
-    // Content를 훑어 색인을 만들고 에디터 패키지 집합을 연다. 다시 부르면 InvalidArgument다.
+    // Content를 훑어 색인을 만들고(useCache면 캐시를 읽어 지문이 같은 파일은 다시 읽지 않는다 —
+    // 없거나 맞지 않는 캐시는 없는 것과 같다) 에디터 패키지 집합을 연다. 다시 부르면
+    // InvalidArgument다.
     // 오류: 설정 오류(타입·파일 시스템 없음 등) InvalidArgument, 색인 Rebuild의 오류(디렉터리
     // 열거 실패), 집합 Initialize의 오류, 할당 실패.
     Result<void> Initialize() noexcept;
@@ -119,6 +125,11 @@ public:
     Result<void> List(StringView type, StringView under, Array<const AssetIndexEntry*>& out,
                       AssetDiagnostic* failure = nullptr) noexcept;
 
+    // 지금 색인을 캐시로 쓴다(7.1절 16 — 쓰기 명령이 끝날 때 부른다, 저장마다 쓰지 않는다). lock은
+    // 이 프로젝트의 잡은 쓰기 잠금이다. 실패는 캐시만의 일이다(호출자는 경고 CacheNotWritten으로
+    // 보고 한다). 오류: Initialize 전 InvalidArgument, WriteAssetIndexCache의 오류.
+    Result<void> FlushCache(const AssetDatabaseLock& lock) noexcept;
+
 private:
     // `<path|AssetId>`의 패키지를 열고(열린 패키지면 그대로) 대표 에셋을 준다. id에 패키지 id를
     // 둔다.
@@ -129,11 +140,14 @@ private:
                                 AssetDiagnostic* failure) noexcept;
 
     Allocator* allocator_;
+    const ProjectLayout* layout_;
     AssetIndex index_;
     EditorPackageSet set_;
     PackageReadOptions read_;
     TypeRegistry* types_;
     platform::FileSystem* files_;
+    platform::FileSystem* cacheFiles_;
+    bool useCache_;
     bool initialized_ = false;
 };
 

@@ -1,6 +1,7 @@
 #include "AssetDatabaseInternal.h"
 
 #include <AssetDatabase/AssetIndex.h>
+#include <AssetDatabase/AssetIndexCache.h>
 #include <AssetDatabase/ImportRecord.h>
 #include <AssetRuntime/PackageRangeReader.h>
 #include <Core/Algorithms.h>
@@ -529,8 +530,102 @@ void AssetIndex::CommitPublish(AssetIndexRefresh& plan) noexcept {
     plan.ready_ = false;
 }
 
-Result<void> AssetIndex::Rebuild(platform::FileSystem& files,
-                                 const PackageReadOptions& options) noexcept {
+Result<bool> AssetIndex::IndexCached(platform::FileSystem& files, const AssetIndexCache& cache,
+                                     const String& relative, int64 modifiedTicks,
+                                     Array<AssetIndexEntry>& found) const noexcept {
+    // 이름이 캐시에 없으면 읽지 않는다(지문 읽기 비용 없이 부분 읽기로 간다).
+    if (cache.Count() == 0) {
+        return Result<bool>::Success(false);
+    }
+
+    StringBuilder<IndexPathBytes> full(*allocator_);
+    const StringView pieces[] = {layout_->ContentDirectory(), "/", relative.View()};
+    if (auto built = AppendAll(full, pieces); !built) {
+        return Result<bool>::Failure(built.Error());
+    }
+
+    FilePackageRangeReader reader;
+    if (auto opened = reader.Open(files, full.View()); !opened) {
+        return Result<bool>::Success(false);
+    }
+
+    auto fingerprint = ReadPackageFingerprint(*allocator_, reader);
+    if (!fingerprint) {
+        return fingerprint.Error() == ErrorCode::OutOfMemory
+                   ? Result<bool>::Failure(fingerprint.Error())
+                   : Result<bool>::Success(false);
+    }
+
+    const AssetIndexCacheEntry* cached = cache.Find(relative.View(), fingerprint.Value());
+    if (cached == nullptr) {
+        return Result<bool>::Success(false);
+    }
+
+    // 논리 경로·key는 캐시에 두지 않고 이름에서 다시 만든다(신뢰하지 않는 입력 — 7.1절 16).
+    auto path = layout_->TryMakeLogicalPath(relative.View());
+    if (!path) {
+        return path.Error() == ErrorCode::OutOfMemory ? Result<bool>::Failure(path.Error())
+                                                      : Result<bool>::Success(false);
+    }
+
+    AssetIndexEntry entry(*allocator_);
+    entry.id = cached->id;
+    entry.type = cached->type;
+    entry.fingerprint = cached->fingerprint;
+    entry.fileBytes = reader.FileBytes();
+    entry.modifiedTicks = modifiedTicks;
+    entry.readOnly = cached->readOnly;
+    entry.importRecord.present = cached->importRecord.present;
+    entry.importRecord.owner = cached->importRecord.owner;
+    entry.importRecord.importerId = cached->importRecord.importerId;
+    entry.importRecord.importerVersion = cached->importRecord.importerVersion;
+    entry.importRecord.outputCount = cached->importRecord.outputCount;
+    Result<void> step = entry.path.TryAssign(path.Value().Text());
+    if (step) {
+        step = entry.key.TryAssign(path.Value().Key());
+    }
+
+    if (step) {
+        step = entry.fileName.TryAssign(relative.View());
+    }
+
+    if (step) {
+        step = entry.dependencies.TryAppend(cached->dependencies.View());
+    }
+
+    if (step) {
+        step = entry.importRecord.importerName.TryAssign(cached->importRecord.importerName.View());
+    }
+
+    if (step) {
+        step = entry.tags.TryReserve(cached->tags.Size());
+    }
+
+    for (usize index = 0; step && index < cached->tags.Size(); ++index) {
+        PackageTag tag(*allocator_);
+        step = tag.key.TryAssign(cached->tags[index].key.View());
+        if (step) {
+            step = tag.value.TryAssign(cached->tags[index].value.View());
+        }
+
+        if (step) {
+            (void)entry.tags.TryPushBack(Move(tag));
+        }
+    }
+
+    if (step) {
+        step = found.TryPushBack(Move(entry));
+    }
+
+    if (!step) {
+        return Result<bool>::Failure(step.Error());
+    }
+
+    return Result<bool>::Success(true);
+}
+
+Result<void> AssetIndex::Rebuild(platform::FileSystem& files, const PackageReadOptions& options,
+                                 const AssetIndexCache* cache) noexcept {
     entries_.Clear();
     byId_.Clear();
     diagnostics_.Clear();
@@ -545,6 +640,8 @@ Result<void> AssetIndex::Rebuild(platform::FileSystem& files,
 
     PackageReadOptions editor = options;
     editor.expectedKind = PackageKind::Editor;
+    // 색인은 형식 판정만 한다(타입 축은 열기가 — 캐시 키에 타입 버전이 없다, 7.1절 16).
+    editor.types = nullptr;
     while (!pending.IsEmpty()) {
         String relativeDirectory = Move(pending[pending.Size() - 1]);
         (void)pending.TryPopBack();
@@ -649,6 +746,17 @@ Result<void> AssetIndex::Rebuild(platform::FileSystem& files,
             if (child.info.type != platform::FileType::File ||
                 !child.name.View().EndsWith(EditorPackageExtension)) {
                 continue;
+            }
+
+            if (cache != nullptr) {
+                auto reused = IndexCached(files, *cache, relative, child.info.modifiedTicks, found);
+                if (!reused) {
+                    return Result<void>::Failure(reused.Error());
+                }
+
+                if (reused.Value()) {
+                    continue;
+                }
             }
 
             if (auto indexed = IndexFile(files, editor, Move(relative), StringView(),

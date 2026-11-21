@@ -1,3 +1,4 @@
+#include <AssetDatabase/AssetIndexCache.h>
 #include <AssetDatabase/AssetService.h>
 #include <AssetDatabase/AssetTextResolver.h>
 #include <AssetDatabase/LogicalPath.h>
@@ -69,9 +70,11 @@ private:
 
 AssetService::AssetService(Allocator& allocator, const ProjectLayout& layout,
                            const AssetServiceConfig& config) noexcept
-    : allocator_(&allocator), index_(allocator, layout),
+    : allocator_(&allocator), layout_(&layout), index_(allocator, layout),
       set_(allocator, MakeSetConfig(config, layout, index_)), read_(config.packages.read),
-      types_(config.packages.types), files_(config.packages.files) {
+      types_(config.packages.types), files_(config.packages.files),
+      cacheFiles_(config.cacheFiles != nullptr ? config.cacheFiles : config.packages.files),
+      useCache_(config.useCache) {
     read_.expectedKind = PackageKind::Editor;
 }
 
@@ -80,7 +83,18 @@ Result<void> AssetService::Initialize() noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    if (auto rebuilt = index_.Rebuild(*files_, read_); !rebuilt) {
+    AssetIndexCache cache(*allocator_);
+    bool cached = false;
+    if (useCache_) {
+        auto loaded = cache.Load(*cacheFiles_, *layout_, read_);
+        if (!loaded) {
+            return Result<void>::Failure(loaded.Error());
+        }
+
+        cached = loaded.Value();
+    }
+
+    if (auto rebuilt = index_.Rebuild(*files_, read_, cached ? &cache : nullptr); !rebuilt) {
         return rebuilt;
     }
 
@@ -90,6 +104,14 @@ Result<void> AssetService::Initialize() noexcept {
 
     initialized_ = true;
     return Result<void>::Success();
+}
+
+Result<void> AssetService::FlushCache(const AssetDatabaseLock& lock) noexcept {
+    if (!initialized_) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return WriteAssetIndexCache(*cacheFiles_, *layout_, lock, index_, read_);
 }
 
 Result<TypeLease> AssetService::FindClass(StringView name, bool requireAsset,
