@@ -279,7 +279,8 @@ Result<bool> FormatTextPath(TextCodecContext& context, const TypeLease& type, Pr
     }
 
     TextSlot slot;
-    if (auto described = DescribeTextPath(type, path, slot); !described) {
+    PathInstancedTypeResolver* const instanced = context.InstancedTypes();
+    if (auto described = DescribeTextPath(type, path, slot, instanced); !described) {
         return Result<bool>::Failure(described.Error());
     }
 
@@ -288,7 +289,8 @@ Result<bool> FormatTextPath(TextCodecContext& context, const TypeLease& type, Pr
     }
 
     String text(out.GetAllocator());
-    if (auto formatted = FormatPropertyPath(type, path, text, &context.KeyHook()); !formatted) {
+    if (auto formatted = FormatPropertyPath(type, path, text, &context.KeyHook(), instanced);
+        !formatted) {
         return Result<bool>::Failure(formatted.Error());
     }
 

@@ -1015,6 +1015,7 @@ public:
 
 - A4 TargetProfile의 프로젝트 재정의(AS 301행)가 그룹 단위 덮기를 원하면 `OrderedMap<TextureGroup, LODGroup>` 모델과 `MergeByKey`를 쓴다(UE는 `*TextureLODGroups=Group` 배열 키 병합 — A4가 고른다).
 - **`asset-info` 출력**: 기본은 Edit 용도의 `<경로>=<값>` 줄이다. 그 출력을 그대로 `asset-set`에 넣으면 값이 보존된다(값 보존 왕복 — ReadOnly 줄은 값이 같아 무동작이다, 10.1절). 다만 재입력한 대입은 값이 같아도 override 경로로 기록되므로(10.2절), 출력 재입력이 A5 뒤 기본값 전파를 끊는 문제는 A5가 기준 차이 출력과 함께 정한다(20절 열린 문제). struct 원소 컨테이너는 위 표의 `a=`·`a[i]={}`·`m[k]={}`·멤버 줄로 펼친다. `--json`은 ExportJson, `--all`은 Report 용도다.
+  - 줄 출력 세부(A2c3a `ExportLines` — ReflectionText/TextLines.h): 필드는 등록 스키마의 `fields` 순서(export 순회와 같다 — 선언 순서와 다를 수 있다), Map 항목·Set 원소는 삽입 순서다. struct 원소 StaticArray는 비우기·`{}` 줄 없이 원소마다 멤버 줄이고, InstancedStruct 원소 Array·값 Map은 `a=` 뒤 `a[i]=<타입>`(`m[k]=<타입>`)과 멤버 줄이다. 강한 참조(ObjectRef) 원소의 StaticArray는 원소마다 `a[i]=v` 줄이다 — 대입 묶음에서 그 정적 배열 통째는 준비 단위가 없고 원소 자리가 참조 단위라서다(B9i 준비 단위). 줄바꿈(`\n`·`\r`)이 든 값 텍스트(String 값, 단일 값 Map의 String 키)는 줄로 쓸 수 없어 Unsupported다(`--json`을 쓴다 — 경로 key의 줄바꿈은 경로 표기가 `\n`으로 escape한다). Localized Text·resolver가 쓰지 못한 참조·이름 없는 enum 값·Opaque 필드·도구 이름 없는 struct(수동 등록)를 담은 InstancedStruct·경로 단계 상한(17)을 넘는 자리(C++ `Emplace`는 위치 깊이를 보지 않는다)도 Unsupported다. 숨김 열거자 값은 이름으로 쓰지만 그 줄의 재입력은 `HiddenEnumerator`로 거부된다(값 보존 왕복의 예외 — 입력 거부·출력 그대로는 위 숨김 열거자 규칙이다). InstancedStruct 뒤 멤버 경로는 대상 값의 지금 담긴 타입으로 쓴다(`FormatTextPath`가 문맥의 InstancedStruct resolver를 쓴다).
 - 출력은 용도의 제외 플래그를 뺀 모든 필드다. 기준 차이 출력은 A5 레코드가 생긴 뒤 옵션으로 더한다(그때 Atomic struct는 통째, 아닌 struct는 멤버 단위).
 
 ### 10.5 JSON API
