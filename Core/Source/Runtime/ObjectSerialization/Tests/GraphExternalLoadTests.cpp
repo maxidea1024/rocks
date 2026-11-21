@@ -279,7 +279,6 @@ TEST(GraphExternalLoad_ImportChecksRunBeforeWrites) {
 
             const Case cases[] = {
                 {itemTypes.View(), {}, true, ErrorCode::InvalidArgument},
-                {itemTypes.View(), ObjectHandle{}, false, ErrorCode::StaleHandle},
                 {itemTypes.View(), doomed.Value(), false, ErrorCode::StaleHandle},
                 {itemTypes.View(), other.Value(), false, ErrorCode::InvalidArgument},
                 {markTypes.View(), mark.Value(), false, ErrorCode::TypeMismatch},
@@ -506,4 +505,60 @@ TEST(GraphExternalLoad_ExternalCountBoundary) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+
+// 미해결 import(ObjectFoundations 5.4절, AS 7.1절 15): imports의 null handle은 확인을 건너뛰고 그
+// 외부 참조를 읽는 단일 참조·배열 원소를 null로 쓴다(다른 필드는 그대로). 기대 형식이 있는
+// 선언(Mark)도 null이면 판정하지 않는다.
+TEST(GraphExternalLoad_NullImportIsUnresolved) {
+    SystemAllocator allocator;
+    {
+        TypeRegistry types(allocator);
+        REQUIRE(RegisterTypes(types));
+        ObjectRegistry source(allocator, types, {0x47454c, 8});
+        ObjectRegistry target(allocator, types, {0x47454c, 9});
+        {
+            Array<RootRef<Object>> roots(allocator);
+            auto a = New(source, roots);
+            auto x = New(source, roots);
+            REQUIRE(a && x);
+            REQUIRE(SetNumber(source, a.Value(), 7));
+            REQUIRE(SetLink(source, a.Value(), x.Value()));
+            REQUIRE(AddLink(source, a.Value(), x.Value()));
+            Admitter hooks;
+            const ObjectHandle set[] = {a.Value()};
+            auto saved = SaveObjectGraphSet(allocator, source, source.OwnerAccess(), set,
+                                            AdmitOptions(&hooks));
+            REQUIRE(saved);
+            const Array<TypeId> itemTypes = ImportTypes(allocator, 1);
+            const Array<TypeId> markTypes = ImportTypes(allocator, 1, MarkType);
+            const Span<const TypeId> declared[] = {itemTypes.View(), markTypes.View()};
+            for (Span<const TypeId> importTypes : declared) {
+                ObjectGraphStage stage(allocator, target, types, target.OwnerAccess());
+                ObjectGraphInput input;
+                input.bytes = saved.Value().Bytes();
+                input.importTypes = importTypes;
+                ConstructionContext transaction(target, target.OwnerAccess());
+                REQUIRE(stage.Validate(input));
+                REQUIRE(stage.CreateObjects(transaction));
+                const ObjectHandle imports[] = {ObjectHandle{}};
+                REQUIRE(stage.ApplyFields(transaction, imports));
+                REQUIRE(stage.CheckRequired(transaction));
+                const ObjectHandle rootsToCommit[] = {stage.Nodes()[0]};
+                RootRef<Object> held[1];
+                REQUIRE(transaction.Commit(rootsToCommit, held));
+                const Seen seen = Look(target, held[0].Handle());
+                CHECK(seen.number == 7);
+                CHECK(seen.link.IsNull());
+                CHECK(seen.linkCount == 1 && seen.links[0].IsNull());
+            }
+        }
+
+        REQUIRE(source.Shutdown(source.OwnerAccess()));
+        REQUIRE(target.Shutdown(target.OwnerAccess()));
+        REQUIRE(types.Shutdown());
+    }
+
+    CHECK(allocator.Stats().liveAllocations == 0);
+}
+
 } // namespace graph_external_load_tests_file

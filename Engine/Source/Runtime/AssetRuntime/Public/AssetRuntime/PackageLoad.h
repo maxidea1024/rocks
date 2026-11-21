@@ -9,6 +9,7 @@
 namespace rocks {
 
 class PackageImportResolver;
+struct PackageInstantiateOptions;
 
 namespace detail {
 
@@ -165,6 +166,9 @@ private:
     friend Result<void> InstantiatePackages(ConstructionContext&, Span<PackageLoadState* const>,
                                             PackageImportResolver*, Span<ObjectHandle>,
                                             AssetDiagnostic*) noexcept;
+    friend Result<void> InstantiatePackages(ConstructionContext&, Span<PackageLoadState* const>,
+                                            const PackageInstantiateOptions&, Span<ObjectHandle>,
+                                            AssetDiagnostic*) noexcept;
 
     Result<void> CrossCheck(AssetDiagnostic* failure, const TypeLease& representativeType) noexcept;
     // contents_를 채운 뒤의 Prepare 공통 단계다.
@@ -194,6 +198,27 @@ private:
     bool readOnly_ = false;
     // InstantiatePackages에 한 번 넘겼는지다(성공·실패 모두 — 다시 넘기면 InvalidArgument).
     bool instantiated_ = false;
+};
+
+// import 해석 정책이다(AS 7.1절 15): Strict는 누락·형식이 맞지 않는 import를 실패로 끝낸다(로더·
+// 쿠킹), NullMissing은 그 import를 null로 잇고 미해결 목록에 적는다(에디터 — UE LinkerLoad
+// ImportFailure 대응, 미해결 import가 있는 패키지의 저장은 에디터가 막는다).
+enum class PackageImportPolicy : uint8 {
+    Strict,
+    NullMissing
+};
+
+// 미해결 import 하나다(NullMissing). import는 패키지 ObjectImports의 0부터 위치다. 에셋 전체가
+// 풀리지 않으면 그 에셋의 첫 import에 한 번 적는다(그 에셋의 다른 import도 null이다).
+struct PackageUnresolvedImport {
+    AssetId package{};
+    AssetId target{};
+    uint32 import = 0;
+    // MissingDependency(대상 패키지·대표 에셋·객체 없음, outer import 미해결) 또는
+    // TypeMismatch(대표 에셋이 Hard 의존 expectedType의 파생이 아님·객체가 import 선언 타입의
+    // 파생이 아님).
+    AssetDiagnosticCode code = AssetDiagnosticCode::None;
+    ErrorCode error = ErrorCode::None;
 };
 
 // 이미 공개된 패키지를 AssetId로 찾는다(로더·AssetManager가 구현한다). InstantiatePackages가 같은
@@ -231,6 +256,26 @@ protected:
 Result<void> InstantiatePackages(ConstructionContext& transaction,
                                  Span<PackageLoadState* const> packages,
                                  PackageImportResolver* resolver, Span<ObjectHandle> outPackages,
+                                 AssetDiagnostic* failure = nullptr) noexcept;
+
+// InstantiatePackages의 선택이다.
+struct PackageInstantiateOptions {
+    PackageImportResolver* resolver = nullptr;
+    PackageImportPolicy imports = PackageImportPolicy::Strict;
+    // NullMissing이면 미해결 import를 붙인다(null이면 InvalidArgument).
+    Array<PackageUnresolvedImport>* unresolved = nullptr;
+};
+
+// 위와 같되 import 정책을 고른다. NullMissing에서는 Strict가 MissingDependency·TypeMismatch로
+// 실패하던 import 해석(대상 패키지 없음 — resolver NotFound, 대표 에셋 없음, Hard 의존 대표 타입이
+// expectedType의 파생이 아님, 객체 없음, 객체 타입이 선언 타입의 파생이 아님)이 실패 대신 null
+// import와 미해결 기록이 된다. 그 밖의 오류(resolver의 다른 오류·잘못된 handle·타입 조회)는
+// Strict와 같다. 오류: NullMissing인데 unresolved가 null이면 InvalidArgument, 미해결 기록의 할당
+// 실패.
+Result<void> InstantiatePackages(ConstructionContext& transaction,
+                                 Span<PackageLoadState* const> packages,
+                                 const PackageInstantiateOptions& options,
+                                 Span<ObjectHandle> outPackages,
                                  AssetDiagnostic* failure = nullptr) noexcept;
 
 } // namespace rocks

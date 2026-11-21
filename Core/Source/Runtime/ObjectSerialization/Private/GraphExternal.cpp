@@ -327,9 +327,11 @@ Result<void> CheckImportTargets(const StageData& data, Span<const TypeLease> act
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    // 실제 타입이 선언 타입의 native 파생이 아니면 호출자 계약 위반이다.
+    // 실제 타입이 선언 타입의 native 파생이 아니면 호출자 계약 위반이다. 빈 lease는 미해결
+    // import(null handle)라 판정하지 않는다(그 참조는 null로 쓴다 — ObjectFoundations 5.4절).
     for (usize index = 0; index < actual.Size(); ++index) {
-        if (!actual[index].IsNativeA(data.importLeases[index].Ops().nativeType)) {
+        if (actual[index].IsValid() &&
+            !actual[index].IsNativeA(data.importLeases[index].Ops().nativeType)) {
             return Result<void>::Failure(ErrorCode::InvalidArgument);
         }
     }
@@ -338,6 +340,10 @@ Result<void> CheckImportTargets(const StageData& data, Span<const TypeLease> act
     // 기대 타입을 모두 만족해야 한다(노드 참조와 같은 native 상속 계약).
     for (const ImportExpectation& check : data.importChecks) {
         const TypeLease& target = actual[check.externalIndex - 1];
+        if (!target.IsValid()) {
+            continue;
+        }
+
         const ReferenceExpectation& expectation = check.expectation;
         if (expectation.staticNative && !target.IsNativeA(expectation.staticNative)) {
             return Result<void>::Failure(ErrorCode::TypeMismatch);
@@ -379,6 +385,15 @@ Result<void> CheckImports(Allocator& allocator, ConstructionContext& transaction
     }
 
     for (ObjectHandle target : imports) {
+        // null handle은 미해결 import다(빈 lease — 판정을 건너뛰고 참조를 null로 쓴다).
+        if (target.IsNull()) {
+            if (!actual.TryPushBack(TypeLease{})) {
+                platform::Fatal("Object graph import type reservation failed");
+            }
+
+            continue;
+        }
+
         auto type = transaction.AcquireType(target);
         if (!type) {
             return Result<void>::Failure(type.Error());

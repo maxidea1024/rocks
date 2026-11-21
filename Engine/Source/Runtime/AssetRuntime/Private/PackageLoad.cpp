@@ -468,10 +468,23 @@ Result<void> InstantiatePackages(ConstructionContext& transaction,
                                  Span<PackageLoadState* const> packages,
                                  PackageImportResolver* resolver, Span<ObjectHandle> outPackages,
                                  AssetDiagnostic* failure) noexcept {
+    PackageInstantiateOptions options;
+    options.resolver = resolver;
+    return InstantiatePackages(transaction, packages, options, outPackages, failure);
+}
+
+Result<void> InstantiatePackages(ConstructionContext& transaction,
+                                 Span<PackageLoadState* const> packages,
+                                 const PackageInstantiateOptions& options,
+                                 Span<ObjectHandle> outPackages,
+                                 AssetDiagnostic* failure) noexcept {
+    PackageImportResolver* const resolver = options.resolver;
+    const bool nullMissing = options.imports == PackageImportPolicy::NullMissing;
     // 패키지는 패키지 정책 Registry(packageNativeType = Package)에만 로드한다(AS 5.7절 19) — 정책
     // 없는 Registry는 소속 규칙·강한 Outer 간선이 없어 패키지 객체 그래프를 담지 못한다.
     if (packages.IsEmpty() || outPackages.Size() != packages.Size() ||
-        transaction.Registry().Policy().packageNativeType != NativeTypeKey<Package>()) {
+        transaction.Registry().Policy().packageNativeType != NativeTypeKey<Package>() ||
+        (nullMissing && options.unresolved == nullptr)) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -527,13 +540,39 @@ Result<void> InstantiatePackages(ConstructionContext& transaction,
 
         // import는 에셋 순이고 같은 에셋 안은 outer가 앞에 있다(AS 5.2절): 에셋마다 패키지를 한 번
         // 찾고, outer import 0은 대표 에셋 아래 이름으로, 아니면 앞서 푼 outer 아래 이름 하나로
-        // 푼다(경로 전체를 다시 걷지 않는다 — AS 5.7절 13).
+        // 푼다(경로 전체를 다시 걷지 않는다 — AS 5.7절 13). NullMissing 정책은 누락·형식이 맞지
+        // 않는 import를 null로 두고 미해결 목록에 적는다(그 참조는 ApplyFields가 null로 쓴다 — AS
+        // 7.1절 15). 에셋 전체가 풀리지 않으면 그 에셋의 import를 모두 null로 둔다.
         ObjectHandle package{};
+        bool assetUnresolved = false;
         for (usize position = 0; position < imports.Size(); ++position) {
             const PackageImportEntry& entry = imports[position];
             const uint32 section = static_cast<uint32>(PackageSectionKind::ObjectImports);
+            // 미해결 import를 적는다(정책이 Strict면 그 진단으로 실패한다).
+            auto unresolved = [&](AssetDiagnosticCode code, ErrorCode error,
+                                  uint32 diagnosticSection) noexcept -> Result<void> {
+                if (!nullMissing) {
+                    return FailAsset<void>(failure, code, error, state.Id(), diagnosticSection,
+                                           position, entry.asset);
+                }
+
+                PackageUnresolvedImport record;
+                record.package = state.Id();
+                record.target = entry.asset;
+                record.import = static_cast<uint32>(position);
+                record.code = code;
+                record.error = error;
+                if (auto pushed = options.unresolved->TryPushBack(record); !pushed) {
+                    return FailAsset<void>(failure, AssetDiagnosticCode::None, pushed.Error(),
+                                           state.Id());
+                }
+
+                return Result<void>::Success();
+            };
+
             if (position == 0 || !(imports[position - 1].asset == entry.asset)) {
                 package = ObjectHandle{};
+                assetUnresolved = false;
                 for (usize other = 0; other < packages.Size(); ++other) {
                     if (packages[other]->Id() == entry.asset) {
                         package = outPackages[other];
@@ -544,67 +583,107 @@ Result<void> InstantiatePackages(ConstructionContext& transaction,
                     auto found = resolver != nullptr
                                      ? resolver->FindPackage(entry.asset)
                                      : Result<ObjectHandle>::Failure(ErrorCode::NotFound);
-                    if (!found) {
-                        return FailAsset<void>(failure,
-                                               found.Error() == ErrorCode::NotFound
-                                                   ? AssetDiagnosticCode::MissingDependency
-                                                   : AssetDiagnosticCode::None,
-                                               found.Error(), state.Id(), section, position,
-                                               entry.asset);
-                    }
-
-                    // resolver가 준 handle은 이 에셋의 Package여야 한다(다른 에셋·Package가 아닌
-                    // 객체·회수된 handle을 조용히 잇지 않는다 — AS 5.7절 16).
-                    if (auto checked =
-                            CheckResolvedPackage(transaction, found.Value(), entry.asset);
-                        !checked) {
-                        return FailAsset<void>(failure, AssetDiagnosticCode::None, checked.Error(),
+                    if (!found && found.Error() != ErrorCode::NotFound) {
+                        return FailAsset<void>(failure, AssetDiagnosticCode::None, found.Error(),
                                                state.Id(), section, position, entry.asset);
                     }
 
-                    package = found.Value();
+                    if (!found) {
+                        if (auto noted = unresolved(AssetDiagnosticCode::MissingDependency,
+                                                    found.Error(), section);
+                            !noted) {
+                            return noted;
+                        }
+
+                        assetUnresolved = true;
+                    } else {
+                        // resolver가 준 handle은 이 에셋의 Package여야 한다(다른 에셋·Package가
+                        // 아닌 객체·회수된 handle을 조용히 잇지 않는다 — AS 5.7절 16).
+                        if (auto checked =
+                                CheckResolvedPackage(transaction, found.Value(), entry.asset);
+                            !checked) {
+                            return FailAsset<void>(failure, AssetDiagnosticCode::None,
+                                                   checked.Error(), state.Id(), section, position,
+                                                   entry.asset);
+                        }
+
+                        package = found.Value();
+                    }
                 }
 
                 // Hard 의존이면 대상 대표 에셋의 실제 타입이 저장 때 타입(expectedType)의 파생이다.
                 const TypeId expected = state.hardTypes_[position];
-                if (!(expected == TypeId{})) {
+                if (!assetUnresolved && !(expected == TypeId{})) {
                     // package는 검증한 공개 Package다. 빈 이름 조회는 이름 검사·키 할당이
                     // 없어 실패는 대표 에셋이 없을 때(NotFound)뿐이다.
                     auto representative = transaction.FindObject(package, StringView());
                     if (!representative) {
                         ROCKS_ASSERT(representative.Error() == ErrorCode::NotFound);
-                        return FailAsset<void>(failure, AssetDiagnosticCode::MissingDependency,
-                                               representative.Error(), state.Id(), section,
-                                               position, entry.asset);
-                    }
+                        if (auto noted = unresolved(AssetDiagnosticCode::MissingDependency,
+                                                    representative.Error(), section);
+                            !noted) {
+                            return noted;
+                        }
 
-                    // 타입 조회 실패는 진단 None으로 그대로 돌려주고(조회 계약상 가능한 실패를
-                    // 단언하지 않는다 — AS 5.7절 19), 파생 판정은 그 lease로 한다.
-                    auto type = transaction.AcquireType(representative.Value());
-                    if (!type) {
-                        return FailAsset<void>(failure, AssetDiagnosticCode::None, type.Error(),
-                                               state.Id(), section, position, entry.asset);
-                    }
+                        assetUnresolved = true;
+                    } else {
+                        // 타입 조회 실패는 진단 None으로 그대로 돌려주고(조회 계약상 가능한
+                        // 실패를 단언하지 않는다 — AS 5.7절 19), 파생 판정은 그 lease로 한다.
+                        auto type = transaction.AcquireType(representative.Value());
+                        if (!type) {
+                            return FailAsset<void>(failure, AssetDiagnosticCode::None, type.Error(),
+                                                   state.Id(), section, position, entry.asset);
+                        }
 
-                    if (!type.Value().IsA(expected)) {
-                        return FailAsset<void>(
-                            failure, AssetDiagnosticCode::TypeMismatch, ErrorCode::TypeMismatch,
-                            state.Id(), static_cast<uint32>(PackageSectionKind::Dependencies),
-                            position, entry.asset);
+                        if (!type.Value().IsA(expected)) {
+                            if (auto noted = unresolved(
+                                    AssetDiagnosticCode::TypeMismatch, ErrorCode::TypeMismatch,
+                                    static_cast<uint32>(PackageSectionKind::Dependencies));
+                                !noted) {
+                                return noted;
+                            }
+
+                            assetUnresolved = true;
+                        }
                     }
                 }
+            }
+
+            // 에셋이 풀리지 않았거나 outer import가 미해결이면 이 import도 미해결이다(에셋 단위
+            // 미해결은 그 에셋의 첫 import에 한 번 적었다).
+            const bool outerUnresolved =
+                entry.outerImportIndex != 0 && targets[entry.outerImportIndex - 1].IsNull();
+            if (assetUnresolved || outerUnresolved) {
+                if (!assetUnresolved) {
+                    if (auto noted = unresolved(AssetDiagnosticCode::MissingDependency,
+                                                ErrorCode::NotFound, section);
+                        !noted) {
+                        return noted;
+                    }
+                }
+
+                (void)targets.TryPushBack(ObjectHandle{});
+                continue;
             }
 
             auto target =
                 entry.outerImportIndex == 0
                     ? transaction.FindObject(package, entry.name)
                     : transaction.FindChild(targets[entry.outerImportIndex - 1], entry.name);
+            if (!target && target.Error() != ErrorCode::NotFound) {
+                return FailAsset<void>(failure, AssetDiagnosticCode::None, target.Error(),
+                                       state.Id(), section, position, entry.asset);
+            }
+
             if (!target) {
-                return FailAsset<void>(failure,
-                                       target.Error() == ErrorCode::NotFound
-                                           ? AssetDiagnosticCode::MissingDependency
-                                           : AssetDiagnosticCode::None,
-                                       target.Error(), state.Id(), section, position, entry.asset);
+                if (auto noted =
+                        unresolved(AssetDiagnosticCode::MissingDependency, target.Error(), section);
+                    !noted) {
+                    return noted;
+                }
+
+                (void)targets.TryPushBack(ObjectHandle{});
+                continue;
             }
 
             // 대표 에셋과 같이 타입 조회 실패는 진단 None으로 그대로 돌려준다(AS 5.7절 19).
@@ -615,9 +694,14 @@ Result<void> InstantiatePackages(ConstructionContext& transaction,
             }
 
             if (!type.Value().IsA(entry.type)) {
-                return FailAsset<void>(failure, AssetDiagnosticCode::TypeMismatch,
-                                       ErrorCode::TypeMismatch, state.Id(), section, position,
-                                       entry.asset);
+                if (auto noted = unresolved(AssetDiagnosticCode::TypeMismatch,
+                                            ErrorCode::TypeMismatch, section);
+                    !noted) {
+                    return noted;
+                }
+
+                (void)targets.TryPushBack(ObjectHandle{});
+                continue;
             }
 
             (void)targets.TryPushBack(target.Value());
