@@ -103,6 +103,8 @@ struct BytecodeFunction {
     // 반환 값의 bank와 slot 수(값 없음은 slot 0). RETERR가 이 모양의 Result를 만든다.
     uint8 returnBank = 0;
     uint8 returnSlots = 0;
+    // 본문 hash(위치 주석을 뺀 IR 덤프의 SHA-256 — 재컴파일 범위, SparksBytecode 6.2절).
+    uint8 bodyHash[BytecodeHashBytes] = {};
     uint32 firstSwitch = 0;
     uint32 switchCount = 0;
     uint32 firstAwait = 0;

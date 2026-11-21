@@ -116,6 +116,9 @@ private:
                           function.parameters[0], function.parameters[1], function.parameters[2],
                           BankLetter(static_cast<uint32>(function.returnBank)),
                           function.returnSlots);
+        out_.Append("  body ");
+        Hash(function.bodyHash);
+        out_.Append("\n");
         for (uint32 index = function.firstAwait; index < function.firstAwait + function.awaitCount;
              ++index) {
             const BytecodeAwaitPoint& point = module_.awaits[index];

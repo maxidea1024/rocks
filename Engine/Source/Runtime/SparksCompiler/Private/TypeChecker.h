@@ -311,6 +311,9 @@ private:
 
     // ---- typed IR 내림(IrDump.cpp, LC4 — Codegen 단계, 진단 없는 컴파일에서만) ----
     void LowerProgram() noexcept;
+    // 모듈 interface의 정규 텍스트(SparksBytecode 6.2절 — interface hash의 입력)다.
+    void AppendInterfaceText(StringBuilderBase& out, uint32 module) noexcept;
+    void AppendInterfaceType(StringBuilderBase& out, uint32 module, uint32 type) noexcept;
     void LowerModule(uint32 module) noexcept;
     // 획득한 지역 자원 뒤의 정지하는 await(S0905 — 효과 분석 뒤).
     void CheckResourceWaits() noexcept;

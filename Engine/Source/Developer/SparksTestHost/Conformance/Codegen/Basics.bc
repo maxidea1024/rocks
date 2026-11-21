@@ -2,7 +2,7 @@ module "Main"
 compiler "sparks 0.4.0"
 profile full
 content 8a30765ddb6f1a4f2bb09c6fdd4a27aebe98fb6e69dbf0cd2026f68b1e62ab99
-interface 0000000000000000000000000000000000000000000000000000000000000000
+interface 55c016b4da367fb644a9694818f909dd6c3001be2a5a45f3fa6783d50a40803a
 k0 = 0x0000000000000000
 k1 = 0x3ff0000000000000
 t0 = "Add"
@@ -16,12 +16,14 @@ t7 = "sparks 0.4.0"
 t8 = "Main"
 
 function Add  scalar=3/3 ref=0/0 buf=0/0 params=2/0/0 returns sx1
+  body 50c6059490c0172574b0493dcf5b8ed194bcb3dd1257811d7cf34baa582cd7d9
   0000  LOADI  s2, 2    ; 2:20
   0001  MUL.I64  s2, s1, s2    ; 2:16
   0002  ADD.I64  s2, s0, s2    ; 2:12
   0003  RET  s2 x1    ; 2:5
 
 function Scale  scalar=13/13 ref=0/0 buf=0/0 params=4/0/0 returns sx3
+  body 5f1edc2e5235764b0da08bca1623a135922b03f04182cef870196d25d2fd208e
   0000  MUL.F64  s4, s0, s3    ; 6:13
   0001  MUL.F64  s5, s1, s3    ; 6:13
   0002  MUL.F64  s6, s2, s3    ; 6:13
@@ -43,6 +45,7 @@ function Scale  scalar=13/13 ref=0/0 buf=0/0 params=4/0/0 returns sx3
   0018  RET  s10 x3    ; 7:5
 
 function Count  scalar=7/7 ref=0/0 buf=0/0 params=1/0/0 returns sx1
+  body 0a1a0d5cc678b2421b8c3bee5f8d0d42e0290483521fe3e84ba511f5b8d56db5
   0000  LOADI  s1, 0    ; 11:17
   0001  LOADI  s2, 0    ; 12:15
   0002  MOV.S  s3, s0    ; 12:5
@@ -65,6 +68,7 @@ function Count  scalar=7/7 ref=0/0 buf=0/0 params=1/0/0 returns sx1
   0019  JMP  0012    ; 12:5
 
 function Pick  scalar=5/5 ref=0/0 buf=0/0 params=4/0/0 returns sx1
+  body 43c2cd4882740268438a00088ff50572578022a06cdd24a7cb22925ffc7d77b3
   0000  BRT  s0, 0008    ; 24:9
   0001  JMP  0005    ; 24:9
   0002  MOV.S  s4, s1    ; 25:16
@@ -87,6 +91,7 @@ function Pick  scalar=5/5 ref=0/0 buf=0/0 params=4/0/0 returns sx1
   0019  RET  s4 x1    ; 32:5
 
 function Greet  scalar=1/1 ref=0/0 buf=5/9 params=1/0/1 returns bx1
+  body 610b388f26038e430c44e991c623094c4fcaa094e3db844c577cb25824cbcdb7
   0000  LOADSTR  b1, t5    ; 36:13
   0001  MOV.B  b2, b0    ; 36:19
   0002  LOADSTR  b3, t6    ; 36:26

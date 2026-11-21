@@ -20,7 +20,7 @@ constexpr uint8 DebugTag[TagBytes] = {'D', 'B', 'U', 'G'};
 constexpr usize ScalarBytes = 8;
 constexpr usize StringHeaderBytes = 4;
 constexpr usize RefBytes = 13;
-constexpr usize FunctionBytes = 4 * 3 + 2 * 3 * BytecodeBankCount + 2 + 4 * 4;
+constexpr usize FunctionBytes = 4 * 3 + 2 * 3 * BytecodeBankCount + 2 + BytecodeHashBytes + 4 * 4;
 constexpr usize WordBytes = 4;
 constexpr usize SwitchBytes = 12;
 constexpr usize CaseBytes = 12;
@@ -146,6 +146,7 @@ Result<void> WriteBytecodeFile(const BytecodeModule& module, Array<uint8>& out) 
 
             writer.WriteU8(function.returnBank);
             writer.WriteU8(function.returnSlots);
+            writer.WriteBytes(Span<const uint8>(function.bodyHash, BytecodeHashBytes));
 
             writer.WriteU32LE(function.firstSwitch);
             writer.WriteU32LE(function.switchCount);
@@ -395,6 +396,7 @@ private:
 
             function.returnBank = reader.ReadU8();
             function.returnSlots = reader.ReadU8();
+            static_cast<void>(reader.ReadInto(Span<uint8>(function.bodyHash, BytecodeHashBytes)));
 
             function.firstSwitch = reader.ReadU32LE();
             function.switchCount = reader.ReadU32LE();

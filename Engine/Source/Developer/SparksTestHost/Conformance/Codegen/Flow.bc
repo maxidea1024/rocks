@@ -2,7 +2,7 @@ module "Main"
 compiler "sparks 0.4.0"
 profile full
 content d07e45231b7e254c54c25ae4de7aa9ff15c032e4d3da0d19c60d196d7995e898
-interface 0000000000000000000000000000000000000000000000000000000000000000
+interface d34e631f3b26a9fb5f2c44d40f3d0999509379407224a26bfbe0263ea50b1b0e
 k0 = 0x0000000000000000
 k1 = 0x3ff0000000000000
 k2 = 0x4000000000000000
@@ -45,6 +45,7 @@ ref12 = event Actor.Pushed
 ref13 = native LoopHandle.Pause
 
 function Wrap  scalar=8/8 ref=0/0 buf=0/0 params=1/0/0 returns sx4
+  body db8b8a03718bc7ebb103f347e4037bf0cfb87c92939a0d9794bfb9146885acdd
   0000  LOADI  s1, 0    ; 4:14
   0001  EQ.I  s1, s0, s1    ; 4:9
   0002  BRF  s1, 0009    ; 4:9
@@ -70,10 +71,12 @@ function Wrap  scalar=8/8 ref=0/0 buf=0/0 params=1/0/0 returns sx4
   0022  RET  s4 x4    ; 8:5
 
 function Mover.SetSpeed  scalar=1/1 ref=1/1 buf=0/0 params=1/1/0 returns sx0
+  body f2106c148b9789fd2307ae71b5d09844205ddc16964ffb229e40a448aa28c131
   0000  SETF.S  r0, s0, ref0    ; 16:9
   0002  RET  -    ; 17:5
 
 function Mover.Fetch  scalar=3/3 ref=2/3 buf=0/0 params=0/1/0 returns sx2
+  body 47fef5bc4bbb4af34b506e9c213d1b78fb6e3793a9eb52da7cfab3e746eac022
   await 0002  live
   0000  CALLL  ref1    ; 20:15
   0001  MOV.R  r1, r2    ; 20:15
@@ -84,6 +87,7 @@ function Mover.Fetch  scalar=3/3 ref=2/3 buf=0/0 params=0/1/0 returns sx2
   0007  RET  s1 x2    ; 21:9
 
 function Mover.Check  scalar=2/2 ref=1/1 buf=0/0 params=1/1/0 returns sx1
+  body 7b5e2718c2b6f56021e41fe8c9366bee971d0c211d9bfa920be14ef6f71a3de5
   0000  LOADI  s1, 0    ; 25:17
   0001  LT.I  s1, s0, s1    ; 25:13
   0002  BRF  s1, 0006    ; 25:13
@@ -94,6 +98,7 @@ function Mover.Check  scalar=2/2 ref=1/1 buf=0/0 params=1/1/0 returns sx1
   0007  RET  s1 x1    ; 29:9
 
 function Mover.Run  scalar=4/6 ref=3/5 buf=0/0 params=0/1/0 returns sx2
+  body d38ffee630a1298f6b26a411a6ae804f2830b7ba459d649f7cdbab0e00213248
   await 0003  live r0
   await 0011  live s0..s2
   await 0029  live s2..s3
@@ -132,6 +137,7 @@ function Mover.Run  scalar=4/6 ref=3/5 buf=0/0 params=0/1/0 returns sx2
   0037  RET  s1 x2    ; 36:9
 
 function Mover.on Owner.Damaged  scalar=4/6 ref=4/6 buf=0/0 params=1/1/0 returns sx0
+  body 4ad03533439467d251f5777beb499fd2de7a9cb08a364d118b8b34d488d5ad0c
   await 0040  live s0..s1 r0..r1
   0000  LOADI  s1, 3    ; 41:20
   0001  LOADI  s2, 0    ; 42:23

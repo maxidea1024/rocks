@@ -2,7 +2,7 @@ module "Main"
 compiler "sparks 0.4.0"
 profile full
 content 344dd5d096faa381d5eed78528048670110234c31866e387aeb8973658acb044
-interface 0000000000000000000000000000000000000000000000000000000000000000
+interface cd096996f82cbed9b0a581f1555627e520524d00f07177be1efa1effc6ad70af
 t0 = "Probe.Order"
 t1 = "m"
 t2 = ""
@@ -40,6 +40,7 @@ ref9 = type Probe
 ref10 = native Actor.Find<Probe> type ref9
 
 function Probe.Order  scalar=2/2 ref=1/1 buf=4/4 params=0/1/2 returns sx1
+  body 469c72ae2abf2adaa4db3c8702146865ec531d7388c1bd305d03f60778b67128
   0000  ISSOME.B  s0, b1    ; 13:20
   0001  BRT  s0, 0009    ; 13:20
   0002  JMP  0011    ; 13:20
@@ -62,6 +63,7 @@ function Probe.Order  scalar=2/2 ref=1/1 buf=4/4 params=0/1/2 returns sx1
   0019  JMP  0004    ; 13:16
 
 function Probe.Same  scalar=20/20 ref=1/1 buf=0/0 params=12/1/0 returns sx1
+  body c2e99a20840abf22f109b2149bf088869d53b16b011fdaa2848913d1ba51976a
   0000  MUL.QUAT  s12, s4, s8    ; 17:22
   0001  MOV.S  s16, s12    ; 17:9
   0002  MOV.S  s17, s13    ; 17:9
@@ -71,6 +73,7 @@ function Probe.Same  scalar=20/20 ref=1/1 buf=0/0 params=12/1/0 returns sx1
   0007  RET  s12 x1    ; 19:9
 
 function Probe.Make  scalar=4/5 ref=1/1 buf=2/4 params=0/1/0 returns bx1
+  body a04ab908df035c757bda6d1fbcd051444c085d0cb3f68937d9a872466badccf3
   0000  LOADSTR  b0, t6    ; 23:43
   0001  NEWLIT  s0, ref0 args 0    ; 23:37
   0003  MOV.S  s2, s0    ; 23:9
@@ -91,6 +94,7 @@ function Probe.Make  scalar=4/5 ref=1/1 buf=2/4 params=0/1/0 returns bx1
   0022  RET  b1 x1    ; 30:9
 
 function Probe.Later  scalar=0/0 ref=2/3 buf=0/0 params=0/1/0 returns sx0
+  body f21785c4b2d9eef95f5fd05f1c25356b1f2b0377a9e8372a8c3e9774b417d3d3
   await 0002  live r0
   0000  CALLL  ref6    ; 34:15
   0001  MOV.R  r1, r2    ; 34:15
@@ -100,6 +104,7 @@ function Probe.Later  scalar=0/0 ref=2/3 buf=0/0 params=0/1/0 returns sx0
   0006  RET  -    ; 36:5
 
 function Probe.Look  scalar=0/0 ref=2/3 buf=0/0 params=0/1/0 returns rx1
+  body f3f79b3f36a0ebe2f86203f88a1f2954d70555a23d14cfeb2a3fce9fdd703ed7
   0000  GETF.R  r1, r0, ref8    ; 39:16
   0002  MOV.R  r2, r1    ; 39:16
   0003  CALLN  ref10    ; 39:16

@@ -652,6 +652,38 @@ void TypeChecker::LowerModule(uint32 module) noexcept {
         if (!encoder.Encode(function, static_cast<uint32>(index), owned.View(), nameNode)) {
             return;
         }
+
+        // body hash: 이 함수 IR 덤프에서 위치 주석(`    ; 줄:열`)을 뺀 글자의 SHA-256(6.2절 — 줄만
+        // 옮긴 본문은 같은 hash).
+        Sha256 hasher;
+        const StringView functionText(out.View().Data() + headerStart,
+                                      out.View().ByteCount() - headerStart);
+        usize lineStart = 0;
+        constexpr StringView LocationMark = "    ; ";
+        for (usize at = 0; at <= functionText.ByteCount(); ++at) {
+            if (at < functionText.ByteCount() && functionText.Data()[at] != '\n') {
+                continue;
+            }
+
+            StringView line(functionText.Data() + lineStart, at - lineStart);
+            for (usize mark = 0; mark + LocationMark.ByteCount() <= line.ByteCount(); ++mark) {
+                if (StringView(line.Data() + mark, LocationMark.ByteCount()) == LocationMark) {
+                    line = StringView(line.Data(), mark);
+                    break;
+                }
+            }
+
+            hasher.Update(
+                Span<const uint8>(reinterpret_cast<const uint8*>(line.Data()), line.ByteCount()));
+            hasher.Update(Span<const uint8>(reinterpret_cast<const uint8*>("\n"), 1));
+            lineStart = at + 1;
+        }
+
+        const Sha256Digest body = hasher.Finish();
+        BytecodeFunction& encoded = c.bytecode_[module].functions[index];
+        for (usize at = 0; at < BytecodeHashBytes; ++at) {
+            encoded.bodyHash[at] = body.bytes[at];
+        }
     }
 
     if (!binder_.Succeeded(out)) {
@@ -668,6 +700,19 @@ void TypeChecker::LowerModule(uint32 module) noexcept {
         reinterpret_cast<const uint8*>(source.Text().Data()), source.Text().ByteCount()));
     for (usize index = 0; index < BytecodeHashBytes; ++index) {
         bytecode.contentHash[index] = digest.bytes[index];
+    }
+
+    // interface hash(6.2절): 공개 표면의 정규 텍스트.
+    StringBuilder<CompilationMessageInlineBytes> surface(allocator_);
+    AppendInterfaceText(surface, module);
+    if (!binder_.Succeeded(surface)) {
+        return;
+    }
+
+    const Sha256Digest interfaceDigest = Sha256::Hash(Span<const uint8>(
+        reinterpret_cast<const uint8*>(surface.View().Data()), surface.View().ByteCount()));
+    for (usize index = 0; index < BytecodeHashBytes; ++index) {
+        bytecode.interfaceHash[index] = interfaceDigest.bytes[index];
     }
 
     const uint32 package = c.modules_[module].package;
