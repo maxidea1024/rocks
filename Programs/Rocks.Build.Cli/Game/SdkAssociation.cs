@@ -130,7 +130,7 @@ internal static class SdkAssociation
     /// </summary>
     public static void Write(string projectFile, string? association)
     {
-        JsonObject root = JsonNode.Parse(File.ReadAllText(projectFile))?.AsObject()
+        JsonObject root = JsonNode.Parse(File.ReadAllText(projectFile), documentOptions: new JsonDocumentOptions { AllowDuplicateProperties = false })?.AsObject()
             ?? throw new ArgumentException(projectFile + ": not a JSON object.");
         if (association is null)
         {

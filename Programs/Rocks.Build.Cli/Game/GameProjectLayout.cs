@@ -60,8 +60,8 @@ internal static class GameProjectLayout
     }
 
     /// <summary>
-    /// 게임 규칙 파일(<c>*.Build.cs</c>·<c>*.Target.cs</c>)이다. 빼는 곳, 출력, 프로젝트 안에 둔 SDK 아래로는 내려가지 않는다. 링크(reparse
-    /// point)는 따라가지 않고 거부한다(입력 snapshot과 같다). 정렬해 돌려준다.
+    /// 게임 규칙 파일(<c>*.Build.cs</c>·<c>*.Target.cs</c>)이다. 빼는 곳, 출력, 프로젝트 안에 둔 SDK 아래로는 내려가지 않는다. 링크(symlink·
+    /// junction)는 따라가지 않고 거부한다(입력 snapshot과 같다). 정렬해 돌려준다.
     /// </summary>
     public static string[] RuleFiles(string project, string output, string sdk)
     {
@@ -95,7 +95,7 @@ internal static class GameProjectLayout
 
     private static void RejectLink(string path)
     {
-        if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+        if (FileLinks.IsLink(path))
         {
             throw new IOException("Game rule discovery cannot follow links: " + path);
         }

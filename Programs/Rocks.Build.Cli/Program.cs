@@ -415,7 +415,7 @@ namespace Rocks.Build.Cli
 
                 if (args[0] == "sdk")
                 {
-                    await sdkAssembly!.AddConfigurationAsync(root, configuration, toolchain, engineVersion,
+                    await sdkAssembly!.AddConfigurationAsync(root, configuration, toolchain, engineVersion, evidence.SourceBefore,
                         InstalledSdk.Reachable(plan.Modules, targets), plan.Generated, result, cancellationToken);
                 }
 
