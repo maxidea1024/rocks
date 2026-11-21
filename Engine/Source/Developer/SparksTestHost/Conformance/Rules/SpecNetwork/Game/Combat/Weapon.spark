@@ -1,0 +1,24 @@
+class Weapon : ScriptableComponent {
+    @net var Ammo: int = 30;
+    @net(OwnerOnly) var Reserve: int = 90;
+    let ReloadKey = Action("Gameplay.Reload");
+
+    on Enable() { RefreshAmmo(); }                            // 활성화 전 적용·late join 상태 반영
+    on Ammo.Changed() { RefreshAmmo(); }                      // 모든 기기에서 실행
+
+    @rpc(Server, Reliable) fn RequestReload() {               // full 프로필
+        if (Reserve == 0) { return; }                         // 서버에서 다시 검증
+        Reload(Caller);                                       // Caller: 호출한 connection
+    }
+
+    on ReloadKey.Triggered() { Server.RequestReload(); }        // 호출 위치에 원격 호출이 드러난다
+
+    // 예시가 생략한 함수(§14 본문 밖).
+    fn RefreshAmmo() {
+    }
+
+    fn Reload(by: Connection) {
+        _ = by;
+        Ammo = 30;
+    }
+}

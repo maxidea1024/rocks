@@ -1,0 +1,25 @@
+import Items.ItemData;
+
+@tableRow(Asset("/Game/Data/LootTable"))
+struct LootRow {
+    var Item: Soft<ItemData>;
+    var Weight: float;
+}
+
+class Chest : ScriptableComponent {
+    @edit var Lid: SceneComponent;                 // 같은 prefab 안의 필수 참조
+    @edit var Loot: Row<LootRow> = Row("Chest.Common");
+    @edit(Min: 0, Max: 10) var Uses: int = 3;
+    @save @formerly("Opened") var IsOpened: bool;
+
+    on Enable() { ApplyLid(); }                        // 로드된 상태 반영(활성화마다)
+    on IsOpened.Changed() { ApplyLid(); }
+
+    fn ApplyLid() {
+        if (IsOpened) {
+            Lid.RelativeRotation.Pitch = 110.0;            // 도
+        } else {
+            Lid.RelativeRotation.Pitch = 0.0;
+        }
+    }
+}
