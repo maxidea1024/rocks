@@ -48,7 +48,8 @@ namespace Rocks.Build.Cli
         {
             if (args.Length == 0)
             {
-                throw new ArgumentException("Expected build, test, sdk, game, bootstrap, clean, unity-profile, or projectfiles command.");
+                throw new ArgumentException("Expected build, test, sdk, game, bootstrap, clean, sdk-register, sdk-unregister, associate, unity-profile, or " +
+                    "projectfiles command.");
             }
 
             if (args[0] == UnityProfileCommand.Name)
@@ -70,12 +71,16 @@ namespace Rocks.Build.Cli
             var allowed = args[0] switch
             {
                 "game" => new HashSet<string>(["sdk", "project", "target", "configuration", "output", "compiler", "jobs", MetadataLayout.VerifySourcesOption, RequireVerifiedToolchainOption, .. BuildModeOptions], StringComparer.Ordinal),
-                "sdk" => new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination", MetadataLayout.VerifySourcesOption, RequireVerifiedToolchainOption, .. BuildModeOptions], StringComparer.Ordinal),
+                "sdk" => new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination", "register", MetadataLayout.VerifySourcesOption, RequireVerifiedToolchainOption, .. BuildModeOptions], StringComparer.Ordinal),
                 "build" or "test" => new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "platform", "android-abi", "android-api", "android-ndk", "adb", MetadataLayout.VerifySourcesOption, PlanOnlyOption, RequireVerifiedToolchainOption, .. BuildModeOptions], StringComparer.Ordinal),
                 // 미리 빌드한 바이너리를 사용자 저장소에 받는다(build·test는 받지 않는다, Docs/Design/ShaderSystem.ko.md 8절 2항).
                 "bootstrap" => new HashSet<string>(["root", "library", "store", "mirror", "offline", "windows-sdk"], StringComparer.Ordinal),
                 // 출력 디렉터리 하나를 비운다(Docs/Design/ProjectFiles.ko.md 7.3절 — Visual Studio Clean·Rebuild가 부른다).
-                CleanCommand.Name => new HashSet<string>(["root", "target", "configuration", "platform", "android-abi", "output"], StringComparer.Ordinal),
+                CleanCommand.Name => new HashSet<string>(["root", "project", "target", "configuration", "platform", "android-abi", "output"], StringComparer.Ordinal),
+                // 설치 SDK 등록부와 게임 프로젝트 연결(Docs/Design/ProjectFiles.ko.md 10.1·10.2절).
+                SdkCommands.Register => new HashSet<string>(["sdk"], StringComparer.Ordinal),
+                SdkCommands.Unregister => new HashSet<string>(["sdk", "id"], StringComparer.Ordinal),
+                SdkCommands.Associate => new HashSet<string>(["project", "sdk", "id", "version"], StringComparer.Ordinal),
                 _ => throw new ArgumentException($"Unknown command: {args[0]}")
             };
             foreach (var name in options.Keys)
@@ -86,7 +91,8 @@ namespace Rocks.Build.Cli
                 }
             }
 
-            foreach (var name in args[0] == "game" ? new[] { "sdk", "project" } : args[0] == "sdk" ? new[] { "destination" } : Array.Empty<string>())
+            // game의 --sdk는 선택이다(없으면 .rocksproject의 SDK 연결로 고른다, Docs/Design/ProjectFiles.ko.md 10.1절).
+            foreach (var name in args[0] == "game" ? new[] { "project" } : args[0] == "sdk" ? new[] { "destination" } : Array.Empty<string>())
             {
                 if (!options.TryGetValue(name, out var value) || string.IsNullOrWhiteSpace(value))
                 {
@@ -97,6 +103,11 @@ namespace Rocks.Build.Cli
             if (args[0] == "game")
             {
                 return await InstalledSdk.BuildGameAsync(options, cancellationToken);
+            }
+
+            if (args[0] is SdkCommands.Register or SdkCommands.Unregister or SdkCommands.Associate)
+            {
+                return SdkCommands.Run(args[0], options, SdkRegistries.Default());
             }
 
             if (args[0] == CleanCommand.Name)
@@ -125,6 +136,10 @@ namespace Rocks.Build.Cli
             }
 
             Timing(options);
+            if (options.TryGetValue("register", out string? register) && register is not ("on" or "off"))
+            {
+                throw new ArgumentException("register must be on or off.");
+            }
 
             var targetName = options.GetValueOrDefault("target", args[0] == "sdk" ? "Engine" : "Foundation");
             // --platform android면 NDK로 교차 빌드한다(--android-abi arm64|x86_64, --android-api, --android-ndk).
@@ -399,6 +414,11 @@ namespace Rocks.Build.Cli
                 {
                     await InstalledSdk.ExportAsync(root, options["destination"], configuration, toolchain, engineVersion,
                         InstalledSdk.Reachable(plan.Modules, targets), plan.Generated, result, cancellationToken);
+                    // 등록은 명시적으로만 한다(기본 off — 시험·CI·임시 SDK가 사용자 등록부에 쌓이지 않게, 10.2절).
+                    if (options.GetValueOrDefault("register", "off") == "on")
+                    {
+                        Console.WriteLine($"Registered {options["destination"]} as {SdkRegistries.Default().Register(options["destination"])}.");
+                    }
                 }
 
                 if (args[0] == "test")
@@ -590,7 +610,7 @@ namespace Rocks.Build.Cli
 
         internal static Dictionary<string, string> Parse(string[] args)
         {
-            var allowed = new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination", "sdk", "project", "platform", "android-abi", "android-api", "android-ndk", "adb", "library", "store", "mirror", "offline", MetadataLayout.VerifySourcesOption, PlanOnlyOption, .. BuildModeOptions, "windows-sdk", RequireVerifiedToolchainOption, .. UnityProfileCommand.Options, .. ProjectFilesCommand.Options], StringComparer.Ordinal);
+            var allowed = new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination", "sdk", "project", "platform", "android-abi", "android-api", "android-ndk", "adb", "library", "store", "mirror", "offline", MetadataLayout.VerifySourcesOption, PlanOnlyOption, .. BuildModeOptions, "windows-sdk", RequireVerifiedToolchainOption, .. UnityProfileCommand.Options, .. ProjectFilesCommand.Options, .. SdkCommands.Options], StringComparer.Ordinal);
             var values = new Dictionary<string, string>(StringComparer.Ordinal);
             for (var index = 0; index < args.Length; index += 2)
             {

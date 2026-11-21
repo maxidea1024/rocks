@@ -57,6 +57,12 @@ internal static class DescriptorTests
         string minimal = Write(directory, "Minimal/Minimal.rocksproject", """{ "fileVersion": 1, "engineVersion": "1.2" }""");
         Check(DescriptorReader.ReadProject(minimal).TargetPlatforms.Count == Enum.GetValues<NativePlatform>().Length,
             "omitted target platforms must mean every platform");
+        Check(DescriptorReader.ReadProject(minimal).EngineAssociation is null, "omitted engineAssociation must be null");
+
+        // engineAssociation은 SDK 경로 또는 등록 ID를 그대로 싣는다(해석은 게임 도구가 한다).
+        string associated = Write(directory, "Associated/Associated.rocksproject",
+            """{ "fileVersion": 1, "engineVersion": "0.1", "engineAssociation": "../Sdks/Rocks-0.1" }""");
+        Check(DescriptorReader.ReadProject(associated).EngineAssociation == "../Sdks/Rocks-0.1", "engineAssociation path");
 
         // engineVersion 경계: 0과 65535는 받는다.
         string largest = Write(directory, "Largest/Largest.rocksproject", """{ "fileVersion": 1, "engineVersion": "65535.0" }""");
@@ -98,6 +104,9 @@ internal static class DescriptorTests
             """{ "fileVersion": 1, "engineVersion": "0.1", }""",
             """{ "fileVersion": 1, "engineVersion": "0.1" /* 주석 */ }""",
             """{ "fileVersion": 1, "engineVersion": "0.1", "fileVersion": 1 }""",
+            """{ "fileVersion": 1, "engineVersion": "0.1", "engineAssociation": "" }""",
+            """{ "fileVersion": 1, "engineVersion": "0.1", "engineAssociation": "  " }""",
+            """{ "fileVersion": 1, "engineVersion": "0.1", "engineAssociation": 1 }""",
             """[ ]""",
         ];
         for (int index = 0; index < badProjects.Length; ++index)

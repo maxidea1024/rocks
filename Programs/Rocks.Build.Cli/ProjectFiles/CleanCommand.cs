@@ -12,7 +12,8 @@ namespace Rocks.Build.Cli;
 /// 출력이 없으면 할 일이 없는 성공이다.</item>
 /// <item>그 출력의 호출 잠금을 잡은 뒤 잠금 파일 둘(<c>.rocks-invocation.lock</c>·<c>.native-build.lock</c>)을 뺀 모든 항목을 지운다.</item>
 /// </list>
-/// 게임 프로젝트 정리(<c>--project</c>)는 게임 출력 경로를 바꾸는 단계(PJ3)에서 더한다.
+/// 게임 프로젝트는 <c>clean --project &lt;게임 디렉터리&gt; --target &lt;T&gt; --configuration &lt;C&gt;</c>이다(출력 <c>&lt;project&gt;/out/&lt;platform&gt;-&lt;target&gt;-&lt;configuration&gt;</c>,
+/// 경계 루트는 프로젝트 디렉터리).
 /// </summary>
 internal static class CleanCommand
 {
@@ -26,10 +27,26 @@ internal static class CleanCommand
 
     public static async Task<int> RunAsync(Dictionary<string, string> options, CancellationToken cancellationToken)
     {
-        string root = PathSpelling.OnDisk(Path.GetFullPath(options.GetValueOrDefault("root", Directory.GetCurrentDirectory())));
         string target = options.TryGetValue("target", out string? name) && name.Length != 0
             ? name : throw new ArgumentException($"Command '{Name}' requires --target <name>.");
         NativeConfiguration configuration = BuildCommand.Configuration(options);
+        // 게임 프로젝트(--project): 게임 출력 규칙(GameProjectLayout)이고 경계 루트는 프로젝트 디렉터리다(Docs/Design/ProjectFiles.ko.md 7.3절).
+        if (options.TryGetValue("project", out string? project))
+        {
+            if (options.ContainsKey("root") || options.ContainsKey("platform") || options.ContainsKey("android-abi"))
+            {
+                throw new ArgumentException("--project cleans a game output; --root, --platform and --android-abi belong to engine targets.");
+            }
+
+            project = PathSpelling.OnDisk(Path.GetFullPath(project));
+            string gameOutput = PathSpelling.OnDisk(Path.TrimEndingDirectorySeparator(Path.GetFullPath(options.GetValueOrDefault("output",
+                GameProjectLayout.DefaultOutput(project, target, configuration)))));
+            int cleaned = await CleanAsync(project, gameOutput, cancellationToken);
+            Console.WriteLine(cleaned < 0 ? $"Clean: {gameOutput} does not exist; nothing to clean." : $"Clean: removed {cleaned} entries from {gameOutput}.");
+            return 0;
+        }
+
+        string root = PathSpelling.OnDisk(Path.GetFullPath(options.GetValueOrDefault("root", Directory.GetCurrentDirectory())));
         string platform = options.GetValueOrDefault("platform", "host");
         if (platform is not ("host" or "android"))
         {

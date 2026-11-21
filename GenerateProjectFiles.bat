@@ -1,10 +1,8 @@
 @echo off
 rem Generates the Visual Studio solution (Rocks.slnx) and project files (out/ProjectFiles) of this working copy.
 rem Docs/Design/ProjectFiles.ko.md section 12. Arguments are passed to Build/GenerateProjectFiles.ps1 (for example -Compiler <clang-cl>).
-rem Started from Explorer (the command line of this cmd names this file by its full path), it waits for a key at the end so that the output stays visible.
+rem On failure it waits for a key so that the error stays visible when started from Explorer (like the Unreal Engine script).
 setlocal
-set ROCKS_PAUSE=0
-echo %cmdcmdline% | find /i "%~f0" >nul && set ROCKS_PAUSE=1
 set ROCKS_CODE=0
 where pwsh >nul 2>nul
 if errorlevel 1 (
@@ -15,5 +13,5 @@ if errorlevel 1 (
 pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0Build\GenerateProjectFiles.ps1" %*
 if errorlevel 1 set ROCKS_CODE=1
 :done
-if "%ROCKS_PAUSE%"=="1" pause
+if not "%ROCKS_CODE%"=="0" pause
 exit /b %ROCKS_CODE%

@@ -177,6 +177,14 @@ public static class InstalledSdk
             }
 
             File.Copy(Path.Combine(root, "global.json"), Path.Combine(stage, "global.json"));
+            // Visual Studio 진입 스크립트를 싣는다(Docs/Design/ProjectFiles.ko.md 12절). SDK 안에서는 rocks-sdk.json이 있어 도구를 빌드하지
+            // 않는다(Build/Tools.ps1 SDK 모드).
+            Directory.CreateDirectory(Path.Combine(stage, "Build"));
+            foreach (string script in SdkScripts)
+            {
+                File.Copy(Path.Combine(root, "Build", script), Path.Combine(stage, "Build", script));
+            }
+
             File.Copy(Path.Combine(root, ".clang-format"), Path.Combine(stage, ".clang-format"));
             var hashes = Directory.GetFiles(stage, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal)
                 .ToDictionary(file => Path.GetRelativePath(stage, file).Replace('\\', '/'), Hashing.Sha256File, StringComparer.Ordinal);
@@ -201,6 +209,75 @@ public static class InstalledSdk
         }
     }
 
+    /// <summary>게임 타깃 기본 이름이다(<c>--target</c>가 없을 때).</summary>
+    internal const string DefaultGameTarget = "Game";
+
+    // SDK가 싣는 Visual Studio 진입 스크립트다(Build/ 아래 같은 이름).
+    private static readonly string[] SdkScripts = ["IdeBuild.bat", "IdeBuild.ps1", "Tools.ps1", "GenerateProjectFiles.ps1"];
+
+    /// <summary>
+    /// <c>--sdk</c>가 없으면 게임 프로젝트의 <c>.rocksproject</c> 연결로 등록 SDK를 골라 넣는다(Docs/Design/ProjectFiles.ko.md 10.1절).
+    /// 호환 후보는 manifest 판·플랫폼·아키텍처·컴파일러 ABI가 이 컴퓨터의 도구 모음과 맞는 SDK다(구성은 빌드가 따로 본다).
+    /// </summary>
+    internal static async Task ResolveSdkOptionAsync(Dictionary<string, string> options, CancellationToken cancellationToken)
+    {
+        if (options.ContainsKey("sdk"))
+        {
+            return;
+        }
+
+        string project = Path.GetFullPath(options["project"]);
+        string[] descriptors = Directory.GetFiles(project, "*" + DescriptorReader.ProjectExtension, SearchOption.TopDirectoryOnly);
+        if (descriptors.Length != 1)
+        {
+            throw new ArgumentException($"The game project root must contain exactly one {DescriptorReader.ProjectExtension} file (found {descriptors.Length}).");
+        }
+
+        ProjectDescriptor descriptor = DescriptorReader.ReadProject(descriptors[0]);
+        NativeToolchain toolchain = await NativeToolchains.DiscoverAsync(options.GetValueOrDefault("compiler"), cancellationToken);
+        NativeConfiguration configuration = BuildCommand.Configuration(options);
+        string sdk = SdkAssociation.Resolve(descriptor, SdkRegistries.Default(), path => Incompatibility(path, toolchain, configuration));
+        Console.WriteLine($"Installed SDK: {sdk} ({(descriptor.EngineAssociation is null ? "engineVersion " + descriptor.EngineVersion : "engineAssociation")}).");
+        options["sdk"] = sdk;
+    }
+
+    /// <summary>
+    /// 이 SDK를 이 컴퓨터의 도구 모음으로 요청 구성을 빌드하는 데 쓸 수 없는 이유다(쓸 수 있으면 null). Verify의 호환 조건(manifest 판·구성·
+    /// 플랫폼·아키텍처·ABI)이고, 파일 목록·내용 검사는 고른 SDK에만 Verify가 한다.
+    /// </summary>
+    internal static string? Incompatibility(string sdk, NativeToolchain toolchain, NativeConfiguration configuration)
+    {
+        string manifestText = File.ReadAllText(Path.Combine(sdk, "rocks-sdk.json"));
+        int? version = ManifestVersionOf(manifestText);
+        if (version != ManifestVersion)
+        {
+            return $"SDK manifest version {(version?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "missing")}, these tools need {ManifestVersion}";
+        }
+
+        SdkManifest? manifest;
+        try
+        {
+            manifest = JsonSerializer.Deserialize<SdkManifest>(manifestText);
+        }
+        catch (JsonException error)
+        {
+            return "unreadable manifest: " + error.Message;
+        }
+
+        if (manifest is null)
+        {
+            return "empty manifest";
+        }
+
+        string architecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString();
+        return manifest.Configuration != configuration.ToString() ? $"configuration {manifest.Configuration}, the build needs {configuration}"
+            : manifest.Platform != toolchain.Platform.ToString() ? $"platform {manifest.Platform}, this computer builds {toolchain.Platform}"
+            : manifest.Architecture != architecture ? $"architecture {manifest.Architecture}, this computer is {architecture}"
+            : manifest.CompilerIdentity != toolchain.AbiIdentity || manifest.SdkIdentity != toolchain.AbiIdentity
+                ? "exported with another compiler or native SDK ABI than this computer's toolchain"
+                : null;
+    }
+
     public static async Task<int> BuildGameAsync(Dictionary<string, string> options, CancellationToken cancellationToken)
     {
         // 값이 틀린 빌드 방식 옵션은 출력을 만들기 전에 거부한다.
@@ -212,10 +289,12 @@ public static class InstalledSdk
         BuildCommand.Timing(options);
         bool requireVerified = ToolchainCheck.RequireVerified(options.GetValueOrDefault(ToolchainCheck.RequireVerifiedOption));
 
+        // --sdk가 없으면 .rocksproject의 SDK 연결로 등록 SDK를 고른다(Docs/Design/ProjectFiles.ko.md 10.1절).
+        await ResolveSdkOptionAsync(options, cancellationToken);
         var sdk = PathSpelling.OnDisk(Path.GetFullPath(options["sdk"]));
         var project = PathSpelling.OnDisk(Path.GetFullPath(options["project"]));
-        var output = PathSpelling.OnDisk(
-            Path.GetFullPath(options.GetValueOrDefault("output", Path.Combine(project, "out", BuildCommand.Configuration(options).ToString()))));
+        var output = PathSpelling.OnDisk(Path.GetFullPath(options.GetValueOrDefault("output",
+            GameProjectLayout.DefaultOutput(project, options.GetValueOrDefault("target", DefaultGameTarget), BuildCommand.Configuration(options)))));
         if (Inside(sdk, output) || Inside(sdk, project) || Inside(output, project) || Inside(output, sdk))
         {
             throw new ArgumentException("Game output cannot overlap or contain the project or installed SDK.");
@@ -287,7 +366,8 @@ public static class InstalledSdk
         var sdk = PathSpelling.OnDisk(Path.GetFullPath(options["sdk"]));
         var project = PathSpelling.OnDisk(Path.GetFullPath(options["project"]));
         var configuration = BuildCommand.Configuration(options);
-        var output = PathSpelling.OnDisk(Path.GetFullPath(options.GetValueOrDefault("output", Path.Combine(project, "out", configuration.ToString()))));
+        var output = PathSpelling.OnDisk(Path.GetFullPath(options.GetValueOrDefault("output",
+            GameProjectLayout.DefaultOutput(project, options.GetValueOrDefault("target", DefaultGameTarget), configuration))));
         if (Inside(sdk, output) || Inside(sdk, project) || Inside(output, project) || Inside(output, sdk))
         {
             throw new ArgumentException("Game output cannot overlap or contain the project or installed SDK.");
@@ -338,9 +418,8 @@ public static class InstalledSdk
         // 플러그인 기술자 검증은 규칙을 읽기 전에 한다. 켤 플러그인과 모듈 해석은 타깃 종류·타깃 플러그인 참조가 필요하므로 규칙 로드 뒤다
         // (Docs/Design/BuildTargets.ko.md BD24, 3.9절).
         var availablePlugins = PluginCatalog.Discover([Path.Combine(project, "Plugins")]);
-        var rulesFiles = Directory.GetFiles(project, "*.cs", SearchOption.AllDirectories)
-            .Where(file => !Inside(output, file) && (file.EndsWith(".Build.cs", StringComparison.Ordinal) || file.EndsWith(".Target.cs", StringComparison.Ordinal)))
-            .Order(StringComparer.Ordinal).ToArray();
+        // 입력 snapshot과 같은 제외 규칙으로 찾는다(점 디렉터리·out/·Saved/ 아래 사본을 규칙으로 컴파일하지 않는다, 10.6절).
+        var rulesFiles = GameProjectLayout.RuleFiles(project, output, sdk);
         if (rulesFiles.Length == 0)
         {
             throw new ArgumentException("No *.Build.cs or *.Target.cs rules found in the game project.");
@@ -370,7 +449,7 @@ public static class InstalledSdk
 
         var rulesPath = Path.Combine(rulesDirectory, "bin/Debug/net10.0/Rocks.Game.Rules.dll");
         var context = new BuildContext(project, output, toolchain.Platform, toolchain.Architecture, configuration, sdk);
-        var rules = RuleLoader.Load(rulesPath, options.GetValueOrDefault("target", "Game"), context);
+        var rules = RuleLoader.Load(rulesPath, options.GetValueOrDefault("target", DefaultGameTarget), context);
         // SDK 엔진 라이브러리는 구성 기본 로그 하한으로 미리 빌드됐다. 게임 타깃만 다른 값을 쓰면 Log.h inline 본문이 갈려 ODR 위반이다.
         if (rules.Target.LogCompiledMinimum is not null)
         {

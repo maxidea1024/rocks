@@ -21,7 +21,7 @@ dotnet msbuild Rocks.proj /t:InstalledSdk /p:Configuration=Debug /p:SdkDestinati
 dotnet msbuild Rocks.proj /t:Game /p:Configuration=Debug /p:SdkDirectory="SDK_경로" /p:GameDirectory="게임_경로"
 ```
 
-SDK 생성 경로는 존재하지 않는 새 디렉터리여야 한다. 게임 실행 파일은 게임 디렉터리의 `out/Debug/bin` 아래 생성된다. Windows 파일 이름은 `SampleGame.exe`, macOS 파일 이름은 `SampleGame`이다. 상세 도구 요구 사항과 구성 호환성은 엔진의 `Build/README.md`를 따른다.
+SDK 생성 경로는 존재하지 않는 새 디렉터리여야 한다. 게임 실행 파일은 게임 디렉터리의 `out/<platform>-game-<구성>/bin`(예: Windows Debug는 `out/windows-game-debug/bin`, macOS는 `out/macos-game-debug/bin`) 아래 생성된다. SDK를 `sdk-register`로 등록했으면 `/p:SdkDirectory`를 생략해도 `engineVersion`으로 고른다(엔진 `Build/README.md`). Windows 파일 이름은 `SampleGame.exe`, macOS 파일 이름은 `SampleGame`이다. 상세 도구 요구 사항과 구성 호환성은 엔진의 `Build/README.md`를 따른다.
 
 ## Component 템플릿 추가 조건
 

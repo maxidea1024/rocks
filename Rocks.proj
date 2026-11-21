@@ -18,6 +18,8 @@
     <SdkDirectoryText Condition="$(SdkDirectory.EndsWith('\'))">$(SdkDirectory.TrimEnd('\'))\\</SdkDirectoryText>
     <GameDirectoryText>$(GameDirectory)</GameDirectoryText>
     <GameDirectoryText Condition="$(GameDirectory.EndsWith('\'))">$(GameDirectory.TrimEnd('\'))\\</GameDirectoryText>
+    <!-- Without SdkDirectory the game build picks the SDK from engineAssociation or the SDK registry (Docs/Design/ProjectFiles.ko.md 10.1). -->
+    <SdkArgument Condition="'$(SdkDirectory)' != ''">--sdk &quot;$(SdkDirectoryText)&quot;</SdkArgument>
     <CompilerArgument Condition="'$(Compiler)' != ''">--compiler &quot;$(Compiler)&quot;</CompilerArgument>
     <OutputArgument Condition="'$(NativeOutput)' != ''">--output &quot;$(NativeOutputText)&quot;</OutputArgument>
     <Tool>dotnet &quot;$(RocksRoot)out/dotnet/bin/Rocks.Build.Cli/Debug/net10.0/Rocks.Build.Cli.dll&quot;</Tool>
@@ -59,7 +61,7 @@
     <Exec Command="$(Tool) sdk $(CommonArguments) --target $(SdkTarget) --destination &quot;$(SdkDestinationText)&quot;" />
   </Target>
   <Target Name="Game" DependsOnTargets="BootstrapTools">
-    <Error Condition="'$(SdkDirectory)' == '' Or '$(GameDirectory)' == ''" Text="SdkDirectory and GameDirectory are required." />
-    <Exec Command="$(Tool) game --target $(GameTarget) --sdk &quot;$(SdkDirectoryText)&quot; --project &quot;$(GameDirectoryText)&quot; --configuration $(Configuration) --jobs $(Jobs) $(CompilerArgument) $(OutputArgument) $(BuildModeArguments)" />
+    <Error Condition="'$(GameDirectory)' == ''" Text="GameDirectory is required." />
+    <Exec Command="$(Tool) game --target $(GameTarget) $(SdkArgument) --project &quot;$(GameDirectoryText)&quot; --configuration $(Configuration) --jobs $(Jobs) $(CompilerArgument) $(OutputArgument) $(BuildModeArguments)" />
   </Target>
 </Project>

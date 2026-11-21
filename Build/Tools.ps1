@@ -10,6 +10,9 @@
 #
 #   pwsh Build/Tools.ps1 [-ListInputs]
 #
+# In an installed SDK (rocks-sdk.json next to Build/) the tools ship prebuilt under Tools/: Update-RocksTools builds nothing and $RocksCli
+# points at the shipped CLI.
+#
 # -ListInputs prints the repository-relative input files of the fingerprint, one per line, and exits (tests compare it with what MSBuild
 # evaluates).
 param([switch] $ListInputs)
@@ -33,6 +36,13 @@ function Get-RocksOnDiskPath([string] $path) {
 
 $script:RocksRoot = Get-RocksOnDiskPath (Join-Path $PSScriptRoot '..')
 $script:RocksToolsStamp = Join-Path $script:RocksRoot 'out/dotnet/.rocks-tools.json'
+$script:RocksSdk = Test-Path -LiteralPath (Join-Path $script:RocksRoot 'rocks-sdk.json') -PathType Leaf
+$script:RocksCli = if ($script:RocksSdk) {
+    Join-Path $script:RocksRoot 'Tools/Rocks.Build.Cli/Rocks.Build.Cli.dll'
+}
+else {
+    Join-Path $script:RocksRoot 'out/dotnet/bin/Rocks.Build.Cli/Debug/net10.0/Rocks.Build.Cli.dll'
+}
 $script:RocksIdeMutex = $null
 
 # Tool output directories. Every DLL in them is checked (the tools and the dependencies they load).
@@ -183,6 +193,15 @@ function Get-RocksToolState($memo) {
 # Builds the tools when the inputs or outputs changed since the last successful build. Call it while holding the IDE build lock. Prints
 # "Rocks tools are up to date." or the build output; throws when the build fails.
 function Update-RocksTools {
+    if ($script:RocksSdk) {
+        if (-not (Test-Path -LiteralPath $script:RocksCli -PathType Leaf)) {
+            throw "The installed SDK has no build CLI at $($script:RocksCli)."
+        }
+
+        [Console]::Out.WriteLine('Rocks tools ship with the installed SDK.')
+        return
+    }
+
     $stamp = $null
     if (Test-Path -LiteralPath $script:RocksToolsStamp) {
         try {
@@ -206,14 +225,21 @@ function Update-RocksTools {
         throw "Building the Rocks tools failed (exit code $LASTEXITCODE)."
     }
 
+    # The input fingerprint and its memo are the ones taken before the build: an input changed while the build ran then differs next time
+    # and builds again. Only the output hashes come from after the build.
     $after = Get-RocksToolState $state.Files
-    $record = [ordered]@{ fingerprint = $after.Fingerprint; outputs = $after.Outputs; files = $after.Files }
+    $record = [ordered]@{ fingerprint = $state.Fingerprint; outputs = $after.Outputs; files = $state.Files }
     New-Item -ItemType Directory -Force -Path (Split-Path $script:RocksToolsStamp) | Out-Null
     ($record | ConvertTo-Json -Depth 4) | Set-Content -LiteralPath $script:RocksToolsStamp -Encoding utf8NoBOM
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
     if ($ListInputs) {
+        if ($script:RocksSdk) {
+            [Console]::Out.WriteLine('Tool inputs are not applicable in an installed SDK: the tools ship prebuilt.')
+            exit 0
+        }
+
         Get-RocksToolInputs | ForEach-Object { $_ }
         exit 0
     }

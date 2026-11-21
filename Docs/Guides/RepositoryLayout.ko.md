@@ -109,6 +109,7 @@ public sealed class Core : CoreModuleRules
 |---|---|---|---|
 | fileVersion | 필수 | 필수 | 기술자 형식 버전(지금 1). 다른 값은 오류 |
 | engineVersion | 필수 | — | 대상 엔진 버전 "주.부"(앞자리 0 없는 10진, 각 0–65535). 게임 빌드가 설치 SDK 엔진의 주·부와 같은지 본다 |
+| engineAssociation | 선택 | — | 이 게임이 쓸 설치 SDK: 경로(`/`·`\`를 담으면 `.rocksproject` 디렉터리 기준) 또는 등록 ID `{GUID}`. 없으면 등록 SDK 중 `engineVersion`이 맞는 최고 패치를 고른다. 빈 문자열은 오류([Visual Studio 프로젝트 파일](../Design/ProjectFiles.ko.md) 10.1절) |
 | version·versionName·friendlyName | — | 필수 | 플러그인 버전(정수 1 이상)·표시 버전·표시 이름 |
 | description·category | 선택 | 선택 | 설명·분류 |
 | enabledByDefault | — | 선택(false) | 프로젝트가 따로 적지 않을 때 켤지 |
