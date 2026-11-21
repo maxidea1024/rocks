@@ -19,6 +19,7 @@ namespace {
 
 using asset_database_detail::AppendAll;
 using asset_database_detail::IsContentRelativeName;
+using asset_database_detail::NameSet;
 
 // 경로 임시 저장소의 인라인 byte 수다(넘으면 allocator로 자란다).
 constexpr usize IndexPathBytes = 512;
@@ -332,79 +333,6 @@ Result<void> SortByKey(Span<const StringView> names, bool normalizes, Array<Stri
     });
     return Result<void>::Success();
 }
-
-// 비교 키 집합이다(Add로 모으고 Finish가 정렬·중복 제거한 뒤 찾는다 — RefreshPaths의 이름 대조).
-class NameSet {
-public:
-    explicit NameSet(Allocator& allocator) noexcept : keys_(allocator) {
-    }
-
-    Result<void> Add(StringView key) noexcept {
-        String copy(keys_.GetAllocator());
-        if (auto assigned = copy.TryAssign(key); !assigned) {
-            return assigned;
-        }
-
-        return keys_.TryPushBack(Move(copy));
-    }
-
-    void Finish() noexcept {
-        algo::Sort(keys_.View(), [](const String& left, const String& right) noexcept {
-            return StringView::CompareBytes(left.View(), right.View()) < 0;
-        });
-        usize kept = 0;
-        for (usize at = 0; at < keys_.Size(); ++at) {
-            if (kept != 0 && keys_[kept - 1].View() == keys_[at].View()) {
-                continue;
-            }
-
-            if (kept != at) {
-                keys_[kept] = Move(keys_[at]);
-            }
-
-            ++kept;
-        }
-
-        while (keys_.Size() > kept) {
-            (void)keys_.TryPopBack();
-        }
-    }
-
-    bool Contains(StringView key) const noexcept {
-        const usize at =
-            algo::LowerBound(keys_.View(), key, [](const String& value, StringView probe) noexcept {
-                return StringView::CompareBytes(value.View(), probe) < 0;
-            });
-        return at != keys_.Size() && keys_[at].View() == key;
-    }
-
-    // key의 조상(빈 문자열 = Content 포함, key 자신 제외)이 집합에 있는지다.
-    bool Above(StringView key) const noexcept {
-        if (key.IsEmpty()) {
-            return false;
-        }
-
-        if (Contains(StringView())) {
-            return true;
-        }
-
-        for (usize at = 0; at < key.ByteCount(); ++at) {
-            if (key.Data()[at] == '/' && Contains(StringView(key.Data(), at))) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    // key 자신이나 그 조상이 집합에 있는지다.
-    bool Covers(StringView key) const noexcept {
-        return Contains(key) || Above(key);
-    }
-
-private:
-    Array<String> keys_;
-};
 
 } // namespace
 

@@ -1,6 +1,7 @@
 #include "AssetDatabaseInternal.h"
 
 #include <AssetDatabase/AssetIndexWatch.h>
+#include <Core/Algorithms.h>
 #include <Core/FileError.h>
 
 // 색인 감시 갱신이다(Docs/Design/AssetSystem.ko.md 7.1절 16 — A2d3).
@@ -9,6 +10,7 @@ namespace rocks {
 namespace {
 
 using asset_database_detail::IsContentRelativeName;
+using asset_database_detail::NameSet;
 
 // since부터 now까지 지난 tick이다. 시계가 뒤로 갔으면 since를 now로 당기고 0이다(기다림이 길어질
 // 뿐 앞당기지 않는다).
@@ -289,11 +291,32 @@ Result<bool> AssetIndexWatch::Observe(Waiting& waiting, int64 now) noexcept {
 }
 
 Result<void> AssetIndexWatch::Apply(int64 now) noexcept {
+    // 대기는 복사본에서 관찰한다(실패하면 대기 그대로 — 성공할 때만 바꾼다). 자리는 새로 미룰 수
+    // 있는 이름(이벤트 파일 수)까지 미리 잡는다(뒤의 넣기는 실패하지 않는다).
+    Array<Waiting> next(*allocator_);
+    if (auto reserved = next.TryReserve(waiting_.Size() + files_.Size()); !reserved) {
+        return reserved;
+    }
+
+    for (const Waiting& waiting : waiting_) {
+        Waiting copy(*allocator_);
+        if (auto assigned = copy.name.TryAssign(waiting.name.View()); !assigned) {
+            return assigned;
+        }
+
+        copy.firstSeen = waiting.firstSeen;
+        copy.observedAt = waiting.observedAt;
+        copy.observedBytes = waiting.observedBytes;
+        copy.observedTicks = waiting.observedTicks;
+        copy.observed = waiting.observed;
+        (void)next.TryPushBack(Move(copy));
+    }
+
     // 다시 읽을 파일: 이벤트 파일(쓰는 중이면 미룰 수 있다)과 기다림이 끝난 대기 파일(미루지
     // 않는다).
     Array<StringView> names(*allocator_);
     Array<bool> mayDefer(*allocator_);
-    const usize capacity = files_.Size() + waiting_.Size();
+    const usize capacity = files_.Size() + next.Size();
     if (auto reserved = names.TryReserve(capacity); !reserved) {
         return reserved;
     }
@@ -307,7 +330,7 @@ Result<void> AssetIndexWatch::Apply(int64 now) noexcept {
         (void)mayDefer.TryPushBack(true);
     }
 
-    for (Waiting& waiting : waiting_) {
+    for (Waiting& waiting : next) {
         auto due = Observe(waiting, now);
         if (!due) {
             return Result<void>::Failure(due.Error());
@@ -319,7 +342,10 @@ Result<void> AssetIndexWatch::Apply(int64 now) noexcept {
         }
     }
 
+    // 다시 읽을 것이 없으면 관찰만 남긴다(버리면 바뀐 관찰을 다음 Pump가 다시 "바뀜"으로 보아
+    // 안정이 끝나지 않는다).
     if (names.IsEmpty() && subtrees_.IsEmpty() && !fullRescan_) {
+        waiting_ = Move(next);
         return Result<void>::Success();
     }
 
@@ -350,100 +376,134 @@ Result<void> AssetIndexWatch::Apply(int64 now) noexcept {
         return prepared;
     }
 
-    // 새 대기 목록을 확정 전에 모두 만든다(확정 뒤에는 실패가 없게): 다시 읽은 이름의 대기는
-    // 빼고, 미룬 이름은 남기거나(처음 본 시각 유지) 새로 넣는다(지금 관찰).
+    // 새 대기 목록을 확정 전에 모두 만든다(확정 뒤에는 실패가 없게): 다시 읽은 이름과 다시 검색한
+    // 하위 트리가 덮는 이름의 대기는 빼고, 미룬 이름은 남기거나(처음 본 시각 유지) 새로
+    // 넣는다(지금 관찰). 대조는 모두 정렬 표의 이진 검색이다(이벤트·대기가 수만 개여도 쌍마다
+    // 대조하지 않는다).
     Array<bool> isDeferred(*allocator_);
+    Array<usize> nameOrder(*allocator_);
+    Array<usize> waitingOrder(*allocator_);
+    Array<bool> keep(*allocator_);
     if (auto sized = isDeferred.TryResize(names.Size()); !sized) {
         return sized;
     }
 
-    for (bool& flag : isDeferred) {
-        flag = false;
+    if (auto sized = nameOrder.TryResize(names.Size()); !sized) {
+        return sized;
+    }
+
+    if (auto sized = waitingOrder.TryResize(next.Size()); !sized) {
+        return sized;
+    }
+
+    if (auto sized = keep.TryResize(next.Size()); !sized) {
+        return sized;
+    }
+
+    for (usize at = 0; at < names.Size(); ++at) {
+        isDeferred[at] = false;
+        nameOrder[at] = at;
     }
 
     for (usize at : deferred) {
         isDeferred[at] = true;
     }
 
-    auto stateOf = [&](StringView name, bool& listed, bool& kept) noexcept {
-        listed = false;
-        kept = false;
-        for (usize at = 0; at < names.Size(); ++at) {
-            if (names[at] == name) {
-                listed = true;
-                if (isDeferred[at]) {
-                    kept = true;
-                }
-            }
-        }
-    };
-    // 다시 검색한 하위 트리가 덮는 대기 파일도 뺀다(검색이 그 결과를 남겼다).
-    auto covered = [&](StringView name) noexcept {
-        for (StringView tree : trees) {
-            if (tree.IsEmpty() || name == tree) {
-                return true;
-            }
-
-            if (name.ByteCount() > tree.ByteCount() &&
-                name.StartsWith(tree, StringComparison::CaseSensitive) &&
-                name.Data()[tree.ByteCount()] == '/') {
-                return true;
-            }
-        }
-
-        return false;
-    };
-    // 자리를 먼저 잡는다(남기는 대기 + 미룬 이름 — 넣기는 실패하지 않는다).
-    Array<Waiting> next(*allocator_);
-    if (auto reserved = next.TryReserve(waiting_.Size() + deferred.Size()); !reserved) {
-        return reserved;
+    for (usize at = 0; at < next.Size(); ++at) {
+        waitingOrder[at] = at;
     }
 
-    for (Waiting& waiting : waiting_) {
+    algo::Sort(nameOrder.View(), [&](usize left, usize right) noexcept {
+        const int compared = StringView::CompareBytes(names[left], names[right]);
+        return compared != 0 ? compared < 0 : left < right;
+    });
+    algo::Sort(waitingOrder.View(), [&](usize left, usize right) noexcept {
+        return StringView::CompareBytes(next[left].name.View(), next[right].name.View()) < 0;
+    });
+    NameSet treeSet(*allocator_);
+    for (StringView tree : trees) {
+        if (auto added = treeSet.Add(tree); !added) {
+            return added;
+        }
+    }
+
+    treeSet.Finish();
+    // name의 묶음 첫 위치(nameOrder 안)다.
+    auto firstOf = [&](StringView name) noexcept {
+        return algo::LowerBound(nameOrder.View(), name, [&](usize index, StringView key) noexcept {
+            return StringView::CompareBytes(names[index], key) < 0;
+        });
+    };
+    for (usize at = 0; at < next.Size(); ++at) {
+        const StringView name = next[at].name.View();
         bool listed = false;
         bool kept = false;
-        stateOf(waiting.name.View(), listed, kept);
-        if ((listed && !kept) || (!listed && covered(waiting.name.View()))) {
-            continue;
-        }
-
-        Waiting copy(*allocator_);
-        if (auto assigned = copy.name.TryAssign(waiting.name.View()); !assigned) {
-            return assigned;
-        }
-
-        copy.firstSeen = waiting.firstSeen;
-        copy.observedAt = waiting.observedAt;
-        copy.observedBytes = waiting.observedBytes;
-        copy.observedTicks = waiting.observedTicks;
-        copy.observed = waiting.observed;
-        (void)next.TryPushBack(Move(copy));
-    }
-
-    for (usize at = 0; at < names.Size(); ++at) {
-        bool known = false;
-        for (const Waiting& waiting : next) {
-            if (waiting.name.View() == names[at]) {
-                known = true;
-                break;
+        for (usize position = firstOf(name);
+             position < nameOrder.Size() && names[nameOrder[position]] == name; ++position) {
+            listed = true;
+            if (isDeferred[nameOrder[position]]) {
+                kept = true;
             }
         }
 
-        if (!isDeferred[at] || known) {
+        keep[at] = listed ? kept : !treeSet.Covers(name);
+    }
+
+    // 미룬 이름 중 대기에 없는 것(묶음마다 한 번)을 새로 넣는다.
+    Array<Waiting> fresh(*allocator_);
+    for (usize position = 0; position < nameOrder.Size();) {
+        const StringView name = names[nameOrder[position]];
+        bool kept = false;
+        for (; position < nameOrder.Size() && names[nameOrder[position]] == name; ++position) {
+            if (isDeferred[nameOrder[position]]) {
+                kept = true;
+            }
+        }
+
+        const usize known =
+            algo::LowerBound(waitingOrder.View(), name, [&](usize index, StringView key) noexcept {
+                return StringView::CompareBytes(next[index].name.View(), key) < 0;
+            });
+        if (!kept ||
+            (known < waitingOrder.Size() && next[waitingOrder[known]].name.View() == name)) {
             continue;
         }
 
-        Waiting fresh(*allocator_);
-        if (auto assigned = fresh.name.TryAssign(names[at]); !assigned) {
+        Waiting created(*allocator_);
+        if (auto assigned = created.name.TryAssign(name); !assigned) {
             return assigned;
         }
 
-        fresh.firstSeen = now;
-        if (auto observed = Observe(fresh, now); !observed) {
+        created.firstSeen = now;
+        if (auto observed = Observe(created, now); !observed) {
             return Result<void>::Failure(observed.Error());
         }
 
-        (void)next.TryPushBack(Move(fresh));
+        if (auto pushed = fresh.TryPushBack(Move(created)); !pushed) {
+            return pushed;
+        }
+    }
+
+    // 여기부터 실패가 없다: 남길 대기를 앞으로 모으고 새 대기를 붙인다(자리는 위에서 잡았다).
+    usize kept = 0;
+    for (usize at = 0; at < next.Size(); ++at) {
+        if (!keep[at]) {
+            continue;
+        }
+
+        if (kept != at) {
+            next[kept] = Move(next[at]);
+        }
+
+        ++kept;
+    }
+
+    while (next.Size() > kept) {
+        (void)next.TryPopBack();
+    }
+
+    for (Waiting& created : fresh) {
+        (void)next.TryPushBack(Move(created));
     }
 
     index_->CommitRefresh(plan);

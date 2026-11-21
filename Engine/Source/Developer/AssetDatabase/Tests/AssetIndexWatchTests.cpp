@@ -1376,7 +1376,9 @@ TEST(AssetIndexWatch_AllocationFailures) {
 
 // 실제 감시기(PlatformAssetChangeSource): 디스크 프로젝트에서 패키지를 쓰고 지우면 이벤트로 색인이
 // 바뀐다. Wait는 이벤트를 기다리는 gate이고 횟수 상한은 실패 판정용이다(시간에 기대지 않는다 —
-// 이벤트가 오면 바로 깬다).
+// 이벤트가 오면 바로 깬다). 시계는 시스템 시계다: 쓰기는 Pump 전에 끝나므로 보통 쓰는 중
+// 대기를 거치지 않고, 백신 등이 파일을 잡아 Busy가 나면 실제 500 ms 안정을 기다린 뒤 같은
+// 결과에 닿는다(상한 안 — 판정은 같다).
 TEST(AssetIndexWatch_RealWatcher) {
     AssetEnv env;
     REQUIRE(env.Ready());
