@@ -283,6 +283,23 @@ Result<int32> WriteFailure(CommandletOutput& output, Allocator& allocator, Strin
                 description);
 }
 
+// 쓰기 명령이 끝날 때 색인 캐시를 쓴다(7.1절 16). 실패는 경고 CacheNotWritten이다(캐시는 정확성에
+// 필요 없다 — 할당 실패만 실행 오류).
+Result<int32> FlushCache(CommandletOutput& output, Allocator& allocator, StringView command,
+                         EditSession& session) noexcept {
+    auto flushed = session.service->FlushCache(session.lock);
+    if (flushed) {
+        return Result<int32>::Success(0);
+    }
+
+    if (flushed.Error() == ErrorCode::OutOfMemory) {
+        return Result<int32>::Failure(flushed.Error());
+    }
+
+    return Fail(output, allocator, command, 0, "{}: {}: warning CacheNotWritten",
+                ErrorCodeName(flushed.Error()), session.layout.IntermediateDirectory());
+}
+
 // 사용법을 검사한다: 도움말이면 0, 형식 오류면 2로 끝낸다(done).
 Result<int32> CheckUsage(CommandletOutput& output, bool parsed, const EditArgs& args,
                          StringView usage, bool& done) noexcept {
@@ -355,6 +372,10 @@ Result<int32> RunAssetNewCommand(void* context, Span<const StringView> args,
                             diagnostic, made.Error());
     }
 
+    if (auto flushed = FlushCache(output, allocator, NewName, session); !flushed) {
+        return flushed;
+    }
+
     // 저장이 색인에 넣은 정규화 경로다.
     auto entry = session.service->Index().FindById(made.Value());
     StringBuilder<LineBytes> line(allocator);
@@ -402,7 +423,7 @@ Result<int32> RunAssetSetCommand(void* context, Span<const StringView> args,
                             diagnostic, set.Error());
     }
 
-    return Result<int32>::Success(0);
+    return FlushCache(output, allocator, SetName, session);
 }
 
 Result<int32> RunAssetInfoCommand(void* context, Span<const StringView> args,

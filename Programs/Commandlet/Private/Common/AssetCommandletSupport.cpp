@@ -161,6 +161,7 @@ bool OpenSession(CommandletOutput& output, Allocator& allocator, StringView comm
     config.packages.read = IndexReadOptions();
     config.packages.registryContext = CommandletAssetContext;
     config.packages.registryOptions.names = &session.types.Names();
+    config.cacheFiles = &platform::PhysicalFileSystem();
     auto made = UniquePtr<AssetService>::TryMake(allocator, allocator, session.layout, config);
     if (!made) {
         failure = Result<int32>::Failure(made.Error());

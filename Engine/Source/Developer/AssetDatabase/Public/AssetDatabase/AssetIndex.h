@@ -109,6 +109,7 @@ struct AssetIndexDiagnostic {
 };
 
 class AssetIndex;
+class AssetIndexCache;
 
 // 색인 게시 준비다(AssetIndex::PrepareRefresh가 채우고 CommitRefresh가 쓴다 — 7.1절 15 A2c2b). 새
 // 항목·진단, 정렬 순서, 같은 id·경로 진단과 결과 배열 자리를 모두 할당해 두고 지금 색인의 항목·
@@ -163,7 +164,14 @@ public:
     // 없는 디렉터리(Content가 없거나 검색 중 지워진 하위 디렉터리)는 비어 있는 것으로 본다.
     // 오류(색인은 비운다): 디렉터리 열거 실패(Content가 파일이면 WrongType 대응 오류)는 그 파일
     // 오류, 할당 실패.
-    Result<void> Rebuild(platform::FileSystem& files, const PackageReadOptions& options) noexcept;
+    //
+    // 색인 읽기는 TypeRegistry를 쓰지 않는다(options.types를 비운다 — 색인은 형식 판정만 하고
+    // 타입 축은 열기가 판정한다, 7.1절 16). cache가 있으면 파일마다 범위 읽기 지문
+    // (ReadPackageFingerprint)이 캐시의 같은 이름·같은 지문 항목과 같을 때 그 항목을 쓴다(크기·
+    // 시각은 지금 값). 지문 읽기가 실패하면 부분 읽기가 진단을 만든다. 캐시 재사용의 민감도는 섹션
+    // CRC32 수준이다 — 점검(Verify 명령)은 캐시 없이 부른다.
+    Result<void> Rebuild(platform::FileSystem& files, const PackageReadOptions& options,
+                         const AssetIndexCache* cache = nullptr) noexcept;
 
     // Content 상대 이름 fileName(구분자 '/', `.rasset` 확장자 — 색인 항목의 fileName과 같은 철자)
     // 한 파일만 다시 읽는다(저장 뒤 — 7.1절 15 A2c2b). 그 파일의 항목·진단을 바꾸고(없어졌으면
@@ -241,6 +249,11 @@ private:
                            String&& relative, StringView readPath, int64 modifiedTicks,
                            Array<AssetIndexEntry>& found,
                            Array<AssetIndexDiagnostic>& diagnostics) const noexcept;
+    // cache의 같은 지문 항목으로 relative를 색인한다(found에 더하면 true, 캐시를 쓸 수 없으면
+    // false — 호출자가 IndexFile로 읽는다).
+    Result<bool> IndexCached(platform::FileSystem& files, const AssetIndexCache& cache,
+                             const String& relative, int64 modifiedTicks,
+                             Array<AssetIndexEntry>& found) const noexcept;
     // 항목·진단 자리로 게시를 준비한다(정렬·같은 id·경로 진단·결과 자리 — 할당은 모두 여기서).
     Result<void> PlanPublish(Span<AssetIndexEntry* const> entries,
                              Span<AssetIndexDiagnostic* const> diagnostics,

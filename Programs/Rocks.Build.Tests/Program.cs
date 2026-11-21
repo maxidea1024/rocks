@@ -150,9 +150,12 @@ try
             case "windows-headers":
                 await WindowsHeaderPairTests.RunAsync(request, root, repository, Pass);
                 break;
+            case "ide-plan":
+                IdePlanTests.Run(request, root, Pass);
+                break;
             default:
                 throw new ArgumentException(
-                    $"Unknown test group '{group}'. Groups: dependency, unity, pch, dynamic, module-table, modular, buildinfo, descriptors, plugins, unity-profile, windows-headers.");
+                    $"Unknown test group '{group}'. Groups: dependency, unity, pch, dynamic, module-table, modular, buildinfo, descriptors, plugins, unity-profile, windows-headers, ide-plan.");
         }
 
         Console.WriteLine($"Native build regression groups ({group} only): {passed}, failed: 0");
@@ -362,6 +365,9 @@ try
 
     // 정의 헤더·모듈 PCH·작업 파일 분리(UB4). 하위 묶음마다 PASS를 센다.
     await PchTests.RunAsync(request, root, Pass);
+
+    // IDE 계획 모드와 IntelliSense 모델(Docs/Design/ProjectFiles.ko.md PJ0). 하위 묶음마다 PASS를 센다.
+    IdePlanTests.Run(request, root, Pass);
 
     await WindowsHeaderPairTests.RunAsync(request, root, repository, Pass);
 

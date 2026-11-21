@@ -551,6 +551,10 @@ public sealed record NativeBuildRequest
     // (증분 기록도 건드리지 않는다). clangd 입력이나 묶음 구성을 빌드 없이 얻을 때 쓴다. 결과의 Actions는 비어 있고 PlanOnly가 참이다.
     public bool PlanOnly { get; init; }
 
+    // 계획 방식이다(Docs/Design/ProjectFiles.ko.md 8.1절). Ide는 IDE 프로젝트 파일 생성용 계획으로, 출력에 아무것도 쓰지 않고 생성물의
+    // 존재를 요구하지 않는다. BuildAsync는 받지 않는다(IdePlanner.Plan만 쓴다).
+    public NativePlanMode PlanMode { get; init; } = NativePlanMode.Build;
+
     // response file 사용 방식이다(NativeCommandLine). 기본 Auto이며 시험만 Always·Never로 경로를 강제한다. key에 들어가지 않는다.
     internal ResponseFileMode ResponseFiles { get; init; } = ResponseFileMode.Auto;
 }

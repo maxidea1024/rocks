@@ -899,6 +899,166 @@ finally
     Directory.Delete(editDirectory, true);
 }
 
+// asset-index-rebuild·색인 캐시(AssetSystem.ko.md 7.1절 16 — A2d1): 재구축은 잠금을 잡고 캐시 없이 검색해 고아 임시
+// 파일(Content 저장 임시·Intermediate 캐시 임시)을 지우고 캐시를 쓴다(진단이 있어도 0). 쓰기 명령은 끝에 캐시를 쓰고 쓰지
+// 못하면 경고 CacheNotWritten(성공 0)이다. 손상된 캐시는 없는 것과 같다(목록·점검 결과 그대로).
+string cacheDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-cache-{Environment.ProcessId}");
+try
+{
+    string project = Path.Combine(cacheDirectory, "Cached");
+    Directory.CreateDirectory(project);
+    File.WriteAllText(Path.Combine(project, "Cached.rocksproject"), "{}\n");
+    string projectOption = $"--project={project}";
+    string cacheFile = Path.Combine(project, "Intermediate", "AssetIndex.cache");
+
+    async Task<ProcessResult> RunCache(params string[] arguments) =>
+        await ProcessRunner.RunAsync(new(executable, arguments, workingDirectory, Timeout: TimeSpan.FromSeconds(30)));
+
+    void ReportCache(string label, bool passed, ProcessResult result)
+    {
+        Console.WriteLine($"{label}: {(passed ? "PASS" : "FAIL")}");
+        if (!passed)
+        {
+            ++failures;
+            Console.Error.WriteLine($"  exit={result.ExitCode}; stdout={result.StdOut}; stderr={result.StdErr}");
+        }
+    }
+
+    ProcessResult made = await RunCache("asset-new", "Skeleton", "/Game/Cached/Hero", projectOption);
+    ReportCache("asset-new writes the index cache", made.ExitCode == 0 && made.StdErr.Length == 0 && File.Exists(cacheFile), made);
+    string heroId = made.StdOut.Trim().Split(' ').Last();
+    ProcessResult listed = await RunCache("asset-list", projectOption);
+    ReportCache("asset-list with the cache", listed.ExitCode == 0 &&
+        listed.StdOut.StartsWith($"/Game/Cached/Hero {heroId} ", StringComparison.Ordinal), listed);
+
+    // 고아 임시 파일과 재구축.
+    string contentOrphan = Path.Combine(project, "Content", "Cached", "Hero.rasset.0123abcd-0123-4567-89ab-0123456789ab.tmp");
+    string cacheOrphan = Path.Combine(project, "Intermediate", "AssetIndex.cache.0123abcd-0123-4567-89ab-0123456789ab.tmp");
+    string keptName = Path.Combine(project, "Content", "Cached", "Hero.txt.0123abcd-0123-4567-89ab-0123456789ab.tmp");
+    File.WriteAllBytes(contentOrphan, [1]);
+    File.WriteAllBytes(cacheOrphan, [1]);
+    File.WriteAllBytes(keptName, [1]);
+    File.Delete(cacheFile);
+    ProcessResult rebuilt = await RunCache("asset-index-rebuild", projectOption);
+    ReportCache("asset-index-rebuild", rebuilt.ExitCode == 0 && rebuilt.StdErr.Length == 0 &&
+        rebuilt.StdOut == "asset-index-rebuild: 1 packages, 0 diagnostics, 2 orphans removed\n" &&
+        File.Exists(cacheFile) && !File.Exists(contentOrphan) && !File.Exists(cacheOrphan) && File.Exists(keptName), rebuilt);
+    File.Delete(keptName);
+
+    // 진단이 있어도 0(점검은 verify).
+    File.WriteAllBytes(Path.Combine(project, "Content", "Junk.rasset"), [1, 2, 3]);
+    ProcessResult withDiagnostics = await RunCache("asset-index-rebuild", "--wait=0", projectOption);
+    ReportCache("asset-index-rebuild with diagnostics", withDiagnostics.ExitCode == 0 &&
+        withDiagnostics.StdOut == "asset-index-rebuild: 1 packages, 1 diagnostics, 0 orphans removed\n" &&
+        withDiagnostics.StdErr.Contains(": Content/Junk.rasset: ", StringComparison.Ordinal), withDiagnostics);
+    File.Delete(Path.Combine(project, "Content", "Junk.rasset"));
+
+    // 손상된 캐시는 없는 것과 같다(목록·점검·편집 그대로, 편집이 다시 쓴다).
+    File.WriteAllBytes(cacheFile, [0x52, 0x4b, 0x41, 0x49, 1, 2, 3]);
+    ProcessResult corruptList = await RunCache("asset-list", projectOption);
+    ReportCache("asset-list ignores a corrupt cache", corruptList.ExitCode == 0 &&
+        corruptList.StdOut.StartsWith($"/Game/Cached/Hero {heroId} ", StringComparison.Ordinal) &&
+        corruptList.StdErr.Length == 0, corruptList);
+    ProcessResult corruptVerify = await RunCache("asset-index-verify", projectOption);
+    ReportCache("asset-index-verify ignores the cache", corruptVerify.ExitCode == 0 &&
+        corruptVerify.StdOut == "asset-index-verify: 1 packages, 0 diagnostics\n", corruptVerify);
+    ProcessResult corruptInfo = await RunCache("asset-info", "/Game/Cached/Hero", projectOption);
+    ReportCache("asset-info ignores a corrupt cache", corruptInfo.ExitCode == 0 && corruptInfo.StdErr.Length == 0, corruptInfo);
+    ProcessResult rewritten = await RunCache("asset-set", "/Game/Cached/Hero", "useRetargetModesFromCompatibleSkeleton=on", projectOption);
+    ReportCache("asset-set rewrites the cache", rewritten.ExitCode == 0 && rewritten.StdErr.Length == 0 &&
+        new FileInfo(cacheFile).Length > 7, rewritten);
+
+    // 캐시를 쓰지 못하면(캐시 자리가 디렉터리) 쓰기 명령은 경고와 함께 성공한다. 재구축은 실패한다.
+    File.Delete(cacheFile);
+    Directory.CreateDirectory(cacheFile);
+    File.WriteAllBytes(Path.Combine(cacheFile, "keep"), [1]);
+    ProcessResult notWritten = await RunCache("asset-set", "/Game/Cached/Hero", "useRetargetModesFromCompatibleSkeleton=off", projectOption);
+    ReportCache("asset-set cache not written", notWritten.ExitCode == 0 &&
+        notWritten.StdErr.Contains(": warning CacheNotWritten", StringComparison.Ordinal), notWritten);
+    ProcessResult newNotWritten = await RunCache("asset-new", "Skeleton", "/Game/Cached/Other", projectOption);
+    ReportCache("asset-new cache not written", newNotWritten.ExitCode == 0 &&
+        newNotWritten.StdOut.StartsWith("/Game/Cached/Other ", StringComparison.Ordinal) &&
+        newNotWritten.StdErr.Contains(": warning CacheNotWritten", StringComparison.Ordinal), newNotWritten);
+    ProcessResult rebuildFails = await RunCache("asset-index-rebuild", projectOption);
+    ReportCache("asset-index-rebuild cache not written", rebuildFails.ExitCode == 1 &&
+        rebuildFails.StdErr.Contains(": cannot write the index cache", StringComparison.Ordinal), rebuildFails);
+    Directory.Delete(cacheFile, true);
+
+    // 지울 수 없는 고아(Windows — 삭제 공유 없이 연 파일)는 경고이고 재구축은 성공한다. 잠금 Busy는 실패다.
+    if (OperatingSystem.IsWindows())
+    {
+        File.WriteAllBytes(contentOrphan, [1]);
+        using (new FileStream(contentOrphan, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        {
+            ProcessResult held = await RunCache("asset-index-rebuild", projectOption);
+            ReportCache("asset-index-rebuild orphan not deleted", held.ExitCode == 0 &&
+                held.StdErr.Contains(": Content/Cached/Hero.rasset.0123abcd-0123-4567-89ab-0123456789ab.tmp: warning OrphanNotDeleted",
+                    StringComparison.Ordinal) && held.StdOut.EndsWith(", 0 orphans removed\n", StringComparison.Ordinal), held);
+        }
+
+        File.Delete(contentOrphan);
+        string lockPath = Path.Combine(project, "Intermediate", "AssetDatabase.lock");
+        using (FileStream locked = new(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite))
+        {
+            locked.Lock(0, 1);
+            ProcessResult busy = await RunCache("asset-index-rebuild", projectOption);
+            ReportCache("asset-index-rebuild locked", busy.ExitCode == 1 &&
+                busy.StdErr.Contains("asset-index-rebuild: Busy: ", StringComparison.Ordinal), busy);
+            locked.Unlock(0, 1);
+        }
+
+        uint code = WindowsInvalidStandardHandles.Run(executable, $"asset-index-rebuild \"--project={project}\"", workingDirectory);
+        Console.WriteLine($"invalid output handles (asset-index-rebuild): {(code == 1 ? "PASS" : "FAIL")}");
+        if (code != 1)
+        {
+            ++failures;
+            Console.Error.WriteLine($"  exit={code}");
+        }
+    }
+
+    // 사용법·환경.
+    string[][] rebuildUsage =
+    [
+        ["asset-index-rebuild", "extra", projectOption],
+        ["asset-index-rebuild", "--under=/Game", projectOption],
+        ["asset-index-rebuild", "--wait=86401", projectOption],
+        ["asset-index-rebuild", "--wait=5s", projectOption],
+        ["asset-index-rebuild", projectOption, projectOption],
+    ];
+    foreach (string[] arguments in rebuildUsage)
+    {
+        ProcessResult usage = await RunCache(arguments);
+        ReportCache($"asset-index-rebuild usage: {string.Join(' ', arguments.Where(argument => argument != projectOption))}",
+            usage.ExitCode == 2 && usage.StdErr.StartsWith("usage: asset-index-rebuild", StringComparison.Ordinal), usage);
+    }
+
+    ProcessResult help = await RunCache("asset-index-rebuild", "--help");
+    ReportCache("asset-index-rebuild help", help.ExitCode == 0 && help.StdOut.StartsWith("usage: asset-index-rebuild", StringComparison.Ordinal), help);
+    ProcessResult noProject = await RunCache("asset-index-rebuild");
+    ReportCache("asset-index-rebuild without a project", noProject.ExitCode == 1 &&
+        noProject.StdErr.Contains("no project found", StringComparison.Ordinal), noProject);
+    string brokenContent = Path.Combine(cacheDirectory, "BrokenContent");
+    string brokenLock = Path.Combine(cacheDirectory, "BrokenLock");
+    foreach (string directory in new[] { brokenContent, brokenLock })
+    {
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, $"{Path.GetFileName(directory)}.rocksproject"), "{}\n");
+    }
+
+    File.WriteAllBytes(Path.Combine(brokenContent, "Content"), [1]);
+    File.WriteAllBytes(Path.Combine(brokenLock, "Intermediate"), [1]);
+    ProcessResult scanFails = await RunCache("asset-index-rebuild", $"--project={brokenContent}");
+    ReportCache("asset-index-rebuild content is a file", scanFails.ExitCode == 1 &&
+        scanFails.StdErr.Contains(": cannot scan the content directory", StringComparison.Ordinal), scanFails);
+    ProcessResult lockFails = await RunCache("asset-index-rebuild", $"--project={brokenLock}");
+    ReportCache("asset-index-rebuild cannot lock", lockFails.ExitCode == 1 &&
+        lockFails.StdErr.Contains(": cannot lock the project", StringComparison.Ordinal), lockFails);
+}
+finally
+{
+    Directory.Delete(cacheDirectory, true);
+}
+
 if (OperatingSystem.IsWindows())
 {
     // 무효 stderr 핸들을 child의 표준 오류로 직접 설정해 출력 실패를 재현한다.

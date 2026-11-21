@@ -48,6 +48,19 @@ internal static partial class SelfTests
             Verify.Equal(1, PolicyChecks.OptimizationOverrides(temporary.Root).Count, "committed Never optimization rule escaped audit");
             temporary.Write("Engine/Source/Runtime/Probe/Probe.Build.cs", "// rules\n");
 
+            // 최적화 인자의 미리 정의 매크로는 제품 소스에서 거부하고(IDE IntelliSense가 보지 못한다), 시험 소스는 허용한다.
+            foreach (string source in new[] { "#if __OPTIMIZE__\n#endif", "#ifdef __OPTIMIZE_SIZE__\n#endif", "#if defined(__NO_INLINE__)\n#endif" })
+            {
+                temporary.Write("Engine/Source/Runtime/Probe/Private/Probe.cpp", source + "\n");
+                var failures = PolicyChecks.OptimizationOverrides(temporary.Root);
+                Verify.That(failures.Count == 1 && failures[0].ToString().Contains("ide-invisible-macro", StringComparison.Ordinal),
+                    "optimization predefined macro escaped audit: " + source);
+                temporary.Write("Engine/Source/Runtime/Probe/Private/Probe.cpp", "void F();\n");
+                temporary.Write("Core/Source/Runtime/Core/Tests/ProbeTests.cpp", source + "\n");
+                NoFailures(PolicyChecks.OptimizationOverrides(temporary.Root));
+                temporary.Write("Core/Source/Runtime/Core/Tests/ProbeTests.cpp", "void G();\n");
+            }
+
             // 강제 인라인은 테스트 소스에서도 거부한다. 단어만 언급한 주석은 허용한다.
             temporary.Write("Engine/Source/Runtime/Probe/Private/Probe.cpp", "// UE FORCEINLINE과 always_inline은 쓰지 않는다\nvoid F();\n");
             NoFailures(PolicyChecks.OptimizationOverrides(temporary.Root));

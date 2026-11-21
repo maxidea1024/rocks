@@ -49,6 +49,21 @@ jobs:
       - name: Install pinned LLVM (Windows)
         if: runner.os == 'Windows'
         run: ./Build/InstallLlvm.ps1
+      # Setup wizard (Docs/Design/SetupWizard.ko.md): unit checks under both Windows shells (Setup.bat falls back to Windows PowerShell 5.1).
+      # macOS also runs the real check because the image already carries every prerequisite; Windows does not, because the pinned LLVM is
+      # on this job's PATH only, not in the user environment that the check reads.
+      - name: Setup wizard self test
+        run: |
+          if ($IsWindows) {
+            ./Build/Setup.ps1 -SelfTest
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            powershell -NoProfile -ExecutionPolicy Bypass -File Build/Setup.ps1 -SelfTest
+            exit $LASTEXITCODE
+          }
+          sh ./Setup.sh --self-test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          sh ./Setup.sh --check
+          exit $LASTEXITCODE
       - name: Build and test Foundation through MSBuild
         run: dotnet msbuild Rocks.proj /t:Test /p:Adaptive=off /p:Configuration=Debug /p:RocksTarget=Foundation /v:minimal
       # Verification variant (Docs/Design/UnityBuildPch.ko.md section 11): every source is its own translation unit and no PCH is used, so a

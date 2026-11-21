@@ -1,5 +1,7 @@
+param([string]$ToolchainRoot = '')
 $ErrorActionPreference = 'Stop'
 # Extracts only the native executables from the release archive. Runtime or install code of the package language is never run.
+# -ToolchainRoot puts clang-format-<version> under another directory (default <repo>/out/toolchains), as in Build/InstallLlvm.ps1.
 $platform = if ($IsWindows) { 'windows' } elseif ($IsMacOS) { 'macos' } else { throw 'Windows/macOS hosts only.' }
 $architecture = [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString()
 $packages = @{
@@ -12,7 +14,10 @@ if (-not $package) { throw "Unsupported formatter platform: $platform-$architect
 # The pinned version comes from Build/Toolchain.json (Docs/Design/ClangVersionSupport.ko.md section 6.1); the wheels above must match it.
 $expected = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Toolchain.json') -Raw | ConvertFrom-Json).clangFormat.version
 if ($package[0] -notmatch "/clang_format-$([regex]::Escape($expected))-") { throw "Formatter wheel does not match Build/Toolchain.json clang-format $expected." }
-$destination = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "../out/toolchains/clang-format-$expected"))
+if (-not $ToolchainRoot) { $ToolchainRoot = Join-Path $PSScriptRoot '../out/toolchains' }
+# Resolve against the PowerShell location (not the process directory) so a relative -ToolchainRoot means what the caller typed.
+$ToolchainRoot = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ToolchainRoot)
+$destination = [IO.Path]::GetFullPath((Join-Path $ToolchainRoot "clang-format-$expected"))
 [IO.Directory]::CreateDirectory($destination) | Out-Null
 $archive = Join-Path $destination 'package.zip'
 Invoke-WebRequest -Uri $package[0] -OutFile $archive
