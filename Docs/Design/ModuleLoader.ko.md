@@ -1,6 +1,6 @@
 # 모듈 로더 설계
 
-기준일: 2026-11-21, 개정 7. 모듈의 수명(시작·종료)과 적재를 맡는 모듈 로더를 정한다. UE 5.8 `IModuleInterface`·`FModuleManager`·로딩 단계(`ELoadingPhase`)에 해당한다.
+기준일: 2026-11-21, 개정 8. 모듈의 수명(시작·종료)과 적재를 맡는 모듈 로더를 정한다. UE 5.8 `IModuleInterface`·`FModuleManager`·로딩 단계(`ELoadingPhase`)에 해당한다.
 
 [빌드 타깃 설계](BuildTargets.ko.md) 3.8절은 Editor 타깃을 UE와 같이 모듈식(`Modular`)으로 링크하기로 정했다(BD17). 그리고 모듈 로더를 별도 스펙으로 넘기며 네 가지 계약을 요구했다(BD30).
 1. 같은 소스가 `Monolithic`·`Modular`에서 같은 순서·결과로 동작한다.
@@ -555,6 +555,7 @@ ML1(3.11절)으로 `PostConfigInit`·엔진 단계 모듈이 설정·로그·tra
 
 | 개정 | 날짜 | 내용 |
 |---|---|---|
+| 8 | 2026-11-21 | ML4를 [빌드 타깃](BuildTargets.ko.md) BS8d와 한 묶음으로 진행한다(빌드 타깃 개정 14): ML4a(manifest 읽기·`Prepare`·report) → ML4b(실행 파일 연결 — `GeneratedModuleTable()`은 Monolithic에만, 부트 모듈 import, 시험 등록 머리). manifest 쓰기·export 진입점·강제 참조는 BS8d1이 한다. ML4 완료 기준(`Modular` FoundationTests를 로더로 실행)은 BS8d5와 같이 채운다 |
 | 7 | 2026-11-21 | [빌드 타깃](BuildTargets.ko.md) 3.9절(BD36·BD39)에 맞춰 3.8절 순환 항목의 "Engine이 `DynamicModules`로 둔 플러그인 모듈"을 지웠다. 엔진 계층 모듈은 플러그인 모듈을 동적 적재로도 참조하지 않고, 켠 플러그인 모듈은 주 실행 파일에 링크된다 |
 | 6 | 2026-11-20 | ML1 후속(3.12절): 호스트 서비스 키·매크로를 Core `Core/Module/HostServiceKey.h`로 옮김(MD18 보강), `LogSystem`·`ConfigContext`·`TraceSession`을 서비스로 선언, Sandbox가 `PostConfigInit` 전에 등록·호스트 묶음 종료 뒤 뗌, RenderBase 모듈 `Startup`이 GPU trace 채널·형을 등록하고 `Shutdown`이 풂(첫 서비스 사용처). `Engine` 서비스·핸들 단위 CVar lease는 그대로 후속 |
 | 5 | 2026-11-20 | ML1 착수. 3.11절에 구현 세부를 정했다: `LoadingPhase`에 `PostEngineInit`·`None`, 엔진 모듈 규칙 `LoadingPhase`, 모듈 표 행 `onRequest`(요청 시 적재 — 단계 실행이 건너뜀), 실행 파일 행은 `None`(UE Program 주 모듈)·시험 fixture 모듈 `None`, 빌드의 단계 순서 검사(MD6, 모듈 표 행 기준)와 부트 모듈 검사(새 표지 `ProvidesLaunch`의 링크 폐포는 `EarliestPossible`이어야 함), SDK manifest 11(`LoadingPhase`·`ProvidesLaunch`), `StartPhase`(앞 단계 차례 실행, 이미 돈 단계는 성공, 앞 묶음 단계·`None`은 Fatal, 실패는 그 단계를 멈춤)와 `ShutdownGroup`의 단계 되돌림, 엔진 묶음 참조 수(`StartEngineGroup`·`ShutdownEngineGroup`), 타입 등록기 여럿(Engine마다, 최대 4 — MD15 개정), Launch가 로더를 소유(`Launch.Modules` 단계, `ApplicationContext::Modules()`, 정리에서 프로세스 묶음 종료·lease 진단), Sandbox `PostConfigInit`·호스트 묶음 종료, Engine 대체 로더 제거(`EngineConfig::modules` 필수), 시험 runner의 `test::ProcessModules()`. 후속: 호스트 서비스 등록·서비스를 쓰는 `Startup` 등록·핸들 단위 CVar lease. 다른 문서(8절)를 함께 고쳤다 |
