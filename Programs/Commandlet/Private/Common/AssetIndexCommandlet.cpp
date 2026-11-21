@@ -1,4 +1,5 @@
 #include "AssetIndexCommandlet.h"
+#include "AssetCommandletSupport.h"
 
 #include <AssetDatabase/AssetIndex.h>
 #include <AssetDatabase/LogicalPath.h>
@@ -34,35 +35,6 @@ constexpr StringView VerifyUsage =
     "  ids and paths, missing dependencies and type mismatches. Each problem is one line\n"
     "  '<diagnostic code>: <path>: <description>' on standard error; the exit code is 1 when\n"
     "  there is any. --wait is accepted like the other asset commands; checking takes no lock.\n";
-
-// 출력 한 줄의 인라인 byte 수다(넘으면 allocator로 자란다).
-constexpr usize LineBytes = 512;
-
-Result<int32> Write(CommandletOutput& output, CommandletStream stream, StringView text,
-                    int32 code) noexcept {
-    auto written = output.write(output.context, stream, text);
-    return written ? Result<int32>::Success(code) : Result<int32>::Failure(written.Error());
-}
-
-// "<command>: <서식>\n"을 표준 오류에 쓰고 code로 돌려준다.
-template <class... TArgs>
-Result<int32> Fail(CommandletOutput& output, Allocator& allocator, StringView command, int32 code,
-                   StringView format, const TArgs&... args) noexcept {
-    StringBuilder<LineBytes> text(allocator);
-    if (auto formatted = text.TryAppendFormat("{}: ", command); !formatted) {
-        return Result<int32>::Failure(formatted.Error());
-    }
-
-    if (auto formatted = text.TryAppendFormat(format, args...); !formatted) {
-        return Result<int32>::Failure(formatted.Error());
-    }
-
-    if (auto formatted = text.TryAppend("\n"); !formatted) {
-        return Result<int32>::Failure(formatted.Error());
-    }
-
-    return Write(output, CommandletStream::Error, text.View(), code);
-}
 
 // "--이름=값" 옵션이다. 모르는 이름·같은 이름 두 번·값 없음·위치 인수는 사용법 오류다.
 struct Options {
@@ -109,68 +81,6 @@ struct Options {
         return true;
     }
 };
-
-// 옵션의 프로젝트(없으면 현재 디렉터리에서 위로 찾은 것)로 layout을 연다. 실패하면 오류를 출력하고
-// 그 종료 코드를 failure에 둔다.
-bool OpenProject(CommandletOutput& output, Allocator& allocator, StringView command,
-                 StringView project, ProjectLayout& layout, Result<int32>& failure) noexcept {
-    String directory(allocator);
-    String name(allocator);
-    if (project.IsEmpty()) {
-        // 현재 디렉터리를 절대 경로로 만든 뒤(layout이 작업 디렉터리 기준으로 푼다) 위로 찾는다.
-        ProjectLayout working(allocator);
-        if (auto initialized = working.Initialize("."); !initialized) {
-            failure =
-                Fail(output, allocator, command, 1, "cannot resolve the current directory ({})",
-                     ErrorCodeName(initialized.Error()));
-            return false;
-        }
-
-        if (auto found = FindProjectFrom(working.Root(), directory, name); !found) {
-            failure =
-                found.Error() == ErrorCode::NotFound
-                    ? Fail(output, allocator, command, 1,
-                           "no project found: no '*.rocksproject' in '{}' or above; use "
-                           "--project=<dir>",
-                           working.Root())
-                    : Fail(output, allocator, command, 1, "cannot search for the project ({})",
-                           ErrorCodeName(found.Error()));
-            return false;
-        }
-
-        project = directory.View();
-    }
-
-    if (auto initialized = layout.Initialize(project); !initialized) {
-        failure = Fail(output, allocator, command, 1, "'{}' is not a usable project directory ({})",
-                       project, ErrorCodeName(initialized.Error()));
-        return false;
-    }
-
-    // --project로 준 디렉터리에도 프로젝트 기술자가 있어야 한다(오타로 빈 색인을 내지 않게).
-    String descriptorDirectory(allocator);
-    auto found = FindProjectFrom(layout.Root(), descriptorDirectory, name);
-    if (!found && found.Error() != ErrorCode::NotFound) {
-        failure = Fail(output, allocator, command, 1, "cannot search for the project ({})",
-                       ErrorCodeName(found.Error()));
-        return false;
-    }
-
-    if (!found || descriptorDirectory.View() != layout.Root()) {
-        failure = Fail(output, allocator, command, 1, "no '*.rocksproject' in '{}'", layout.Root());
-        return false;
-    }
-
-    return true;
-}
-
-PackageReadOptions IndexReadOptions() noexcept {
-    PackageReadOptions options;
-    options.expectedKind = PackageKind::Editor;
-    // 이 엔진보다 새 엔진이 저장한 패키지는 NewerVersion이다(UE AssetRegistry도 읽지 않는다).
-    options.engineVersion = build::CurrentEngineVersion();
-    return options;
-}
 
 } // namespace
 
