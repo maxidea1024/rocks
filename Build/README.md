@@ -17,6 +17,8 @@ dotnet msbuild Rocks.proj /t:Test /p:Configuration=Asan /p:RocksTarget=Foundatio
 dotnet msbuild Rocks.proj /t:Build /p:Configuration=Release /p:RocksTarget=Engine
 ```
 
+Visual Studio 솔루션·프로젝트 파일 생성(UE GenerateProjectFiles 대응)은 설계만 있고 아직 구현하지 않았다([설계](../Docs/Design/ProjectFiles.ko.md)).
+
 ### 빌드 구성
 
 UE5.8 Debug·Development·Shipping에 대응한다. 구성마다 `ROCKS_BUILD_DEBUG`·`ROCKS_BUILD_DEVELOPMENT`·`ROCKS_BUILD_RELEASE` 중 정확히 하나를 1로 정의하며(`Base/Compiler.h`가 확인), 모듈은 이 매크로를 직접 정의할 수 없다.

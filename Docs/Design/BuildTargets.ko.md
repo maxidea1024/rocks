@@ -1,6 +1,6 @@
 # 빌드 타깃·모듈 의존·플러그인 조건 설계
 
-기준일: 2026-11-21, 개정 13. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
+기준일: 2026-11-21, 개정 14. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
 - **타깃 종류 확장**: Editor·Client·Server 타깃과, 타깃 종류에 따라 코드·데이터를 컴파일에서 빼는 매크로.
 - **모듈 의존 공개 범위**: 의존마다 Public(소비자에게 include·정의를 넘김)과 Private(이 모듈 안에서만 씀)을 나눈다.
 - **플러그인 활성 조건**: 프로젝트가 플러그인을 특정 타깃·플랫폼·구성에서만 켠다.
@@ -317,6 +317,18 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 - 버린 안: 헤더마다 Clang JSON AST를 내 걸러 보기(World.h 하나에 92 MB — 헤더 수백 개면 검사 시간이 빌드를 넘는다), 어휘만으로 정적 지역 변수·inline 변수 판정(매크로가 펼치는 정적 지역·템플릿 문맥을 놓치고 오탐이 많다), `globalState`를 규칙 클래스 속성으로(서드파티 사실은 매니페스트가 단일 원천이다).
 - 한계: Clang 진단은 템플릿 문맥(변수 템플릿·템플릿 함수 안 정적 지역·템플릿 클래스 정적 멤버)을 보지 않고 어휘 검사도 잡지 않는다. 쓰기 가능한 것은 `NativeTypeIdentity<T>`(struct·enum·native 등록 타입 키, BS8b 한계)이고, 그 밖에 템플릿 안 동적 초기화 const 정적 지역(`GeneratedBitfieldAccess.h`·`GeneratedStagedReferenceAccess.h`의 연산표, `ValueCopy.h`)이 있다 — 주소를 비교하지 않아 복제돼도 동작은 같다. 주소를 식별자로 쓰는 const 정적 객체도 판정 밖이다(리뷰로 막는다). `ROCKS_GRAPH_SHARED_DATA`(`GraphSharedData.h`)는 inline 함수 안 정적 색인이라 공개 헤더에서 쓰면 판정 1이 잡지만, 모듈 사이에 공유할 타입을 등록할 길이 없다 — 호스트 서비스 키처럼 선언·정의로 나누는 것을 BS8d에서 다룬다. 게임 모듈(`Templates/<게임>/Source/<모듈>/Public/`)은 판정 2의 경로와 엔진 타깃의 공개 헤더 검사 범위 밖이다(게임 빌드의 공개 헤더 검사가 생길 때 다룬다).
 
+**BS8d와 ML4 묶음(개정 14 — 사용자 결정 2026-11-21).**
+- 문제: Modular에서는 실행 파일 생성 TU가 정의하던 두 기호를 공유 라이브러리가 풀지 못한다. 모듈 표 `GeneratedModuleTable()`(HostConfig·Launch·시험이 부른다)과 빌드 정보 `ToolchainFingerprint()`·`ToolBuildId()`(Launch·TraceCapture가 부른다)다. 빌드 정보는 Core 공유 라이브러리에 둘 수 있다(공유 라이브러리 이름이 타깃마다 따로다 — `<Target>-Core`). 모듈 표는 모든 모듈의 진입점을 참조하므로 Core에 두면 공유 라이브러리 사이 순환 의존이 된다. UE는 Modular에서 정적 표 없이 바이너리 옆 manifest(`.modules`)로 모듈을 찾는다([모듈 로더](ModuleLoader.ko.md) 3.5절 — ML4).
+- 결정: BS8 완료 기준(`Modular` FoundationTests가 Windows·macOS에서 빌드·통과)은 ML4(manifest 적재)와 함께 채운다. 묶음 순서는 다음과 같다. 단계마다 스펙 세부를 먼저 적고 리뷰·병합한다.
+  1. **BS8d1 Modular 빌드 기반**: Modular에서 빌드 정보 TU를 빌드 정보 제공 모듈(Core)의 공유 라이브러리에 넣는다. 모듈 표 TU를 만들지 않는다. 진입점 매크로가 공유 라이브러리마다 export 진입점 `RocksModuleEntry()`를 정의하고 빌드가 강제 참조를 넣는다. 빌드가 링크 뒤 manifest(`<Target>[-<Platform>-<Configuration>].modules.json`, `buildId` 재사용 MD13·크기·의존·단계)를 원자적으로 쓴다. 검증은 빌드 시험의 Modular fixture다.
+  2. **ML4a 로더의 manifest 적재**: manifest 읽기(모르는 키 거부), `Prepare`(의존 순서 OS 적재·진입 기술 읽기·`buildId`·크기 대조·report), 그 결과로 만든 표로 지금 로더 동작(단계·묶음·동적 모듈)을 그대로 쓴다.
+  3. **ML4b 실행 파일 연결**: `GeneratedModuleTable()`은 Monolithic에만 있다. Launch·HostSettings·시험 runner는 Modular에서 로더가 만든 표를 쓴다. 실행 파일은 부트 모듈만 import한다(MD21). 시험 등록 목록의 머리는 TestSupport가 한 벌 가진다(MD20). 이 단계 끝에 Core에 닿는 타깃의 Modular 거부를 푼다.
+  4. **BS8d2 export 매크로**: Modular FoundationTests 링크 오류를 따라 그 폐포 모듈의 모듈 사이 API에 `ROCKS_<M>_API`를 붙인다(클래스 단위 우선 — BD27). `Monolithic` object 인자는 매크로 값 외에 바뀌지 않는다.
+  5. **BS8d3 진단**: 상속 export 진단(메타 컴파일러)·모듈별 export 수 진단.
+  6. **BS8d4 남은 키**: struct·enum·native 등록 타입 키의 모듈 사이 통합(BS8b 한계), `ROCKS_GRAPH_SHARED_DATA` 선언·정의 나누기(BS8c 한계).
+  7. **BS8d5 검사 체인**: `Modular` FoundationTests를 로더로 실행해 통과(Windows 로컬, macOS CI) — BS8·ML4 완료 기준.
+- 버린 안: 실행 파일이 모듈 표를 export하고 Core가 OS 기호 조회로 찾는 임시 방식(UE에 없고 ML4가 대체하면 버릴 코드다).
+
 **모듈 API 매크로(BD27).**
 - 빌드가 C++ 모듈마다 `ROCKS_<MODULE>_API`(모듈 이름 대문자)를 정의한다. UE `<MODULE>_API`(`UEBuildModule.cs:223, 239`)에 해당하고, 이름은 Rocks 매크로 접두 규칙을 따른다.
 - 값은 UE와 같다(`UEBuildModule.cs:750-770`). `Monolithic`이면 빈 값이다. `Modular`이면 그 모듈 자신의 컴파일에서는 export, 다른 모듈의 컴파일에서는 import다.
@@ -609,3 +621,4 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 | 11 | 2026-11-21 | BS9c 구현 세부(3.9절): `PluginModules`와 `LinkIntoPrimary`, `LinkClosure` 순서(링크 폐포 → 플러그인 모듈 → 동적 모듈), CLI 엔진 해석과 빌드 근, SDK export·`Modular` 거부 |
 | 12 | 2026-11-21 | BS9d 구현 세부(3.9절): UnrealExchange 플러그인 골격, Commandlet·EngineTests의 `Plugins`, `PluginTestModules`, 엔진 주인 `Apply`의 도달 범위 축소 |
 | 13 | 2026-11-21 | BS8c 구현 세부: BD29 판정을 Clang AST 대신 공개 헤더 검사의 `-Wunique-object-duplication`(LLVM Clang 20+, Apple clang 제외)과 `thread_local` 어휘 정책 `public-header-static-storage`로, 지금 위반 정리(할당기·Correlation·TraceLogSink·CVar 바인딩·기본값 쓰기 탐침·fixture), 서드파티 `ThirdParty.json` `globalState` 필수 키와 단일 직접 소비 검사(Sodium만 true). 한계: 템플릿 문맥 저장소 |
+| 14 | 2026-11-21 | BS8d와 ML4를 한 묶음으로(사용자 결정): Modular에서 모듈 표·빌드 정보가 풀리지 않는 문제, 순서 BS8d1(빌드 기반·manifest 쓰기) → ML4a(manifest 적재) → ML4b(실행 파일 연결) → BS8d2(export) → BS8d3(진단) → BS8d4(남은 키) → BS8d5(검사 체인). BS8 완료 기준은 ML4와 함께 채운다. 버린 안: 실행 파일 표 export·OS 기호 조회 |
