@@ -1,6 +1,8 @@
 #include "AssetDatabaseInternal.h"
 
 #include <AssetDatabase/AssetIndexCache.h>
+#include <AssetRuntime/PackageFormat.h>
+#include <AssetRuntime/PackageTags.h>
 #include <Core/Algorithms.h>
 #include <Core/Build/BuildInfo.h>
 #include <Core/Encoding/ByteReader.h>
@@ -106,8 +108,8 @@ Result<bool> ReadEntry(ByteReader& reader, AssetIndexCacheEntry& entry) noexcept
     entry.type = ReadGuid(reader);
     const uint8 readOnly = reader.ReadU8();
     const uint32 dependencies = reader.ReadU32LE();
-    if (reader.Failed() || readOnly > 1 || entry.fileName.IsEmpty() ||
-        !entry.fileName.View().EndsWith(EditorPackageExtension) ||
+    if (reader.Failed() || readOnly > 1 || entry.id.IsNull() || entry.type == TypeId{} ||
+        entry.fileName.IsEmpty() || !entry.fileName.View().EndsWith(EditorPackageExtension) ||
         dependencies > reader.Remaining() / DependencyBytes) {
         return Result<bool>::Success(false);
     }
@@ -154,9 +156,10 @@ Result<bool> ReadEntry(ByteReader& reader, AssetIndexCacheEntry& entry) noexcept
             return value;
         }
 
-        // Tags 규칙: 키는 비지 않고 (키, 값) 순으로 엄격 증가(같은 쌍 없음 — PackageTags가 쓰는
-        // 순서).
-        if (tag.key.IsEmpty()) {
+        // Tags 규칙: 키는 비지 않고 키·값은 길이 상한 안이며 (키, 값) 순으로 엄격 증가(같은 쌍 없음
+        // — PackageTags가 쓰는 순서).
+        if (tag.key.IsEmpty() || tag.key.ByteCount() > MaxPackageTagKeyBytes ||
+            tag.value.ByteCount() > PackageMaxStringBytes) {
             return Result<bool>::Success(false);
         }
 
@@ -344,23 +347,16 @@ Result<bool> AssetIndexCache::Load(platform::FileSystem& files, const ProjectLay
 
 const AssetIndexCacheEntry*
 AssetIndexCache::Find(StringView fileName, const PackageFingerprint& fingerprint) const noexcept {
-    usize low = 0;
-    usize high = entries_.Size();
-    while (low < high) {
-        const usize middle = low + (high - low) / 2;
-        const int compared = StringView::CompareBytes(entries_[middle].fileName.View(), fileName);
-        if (compared == 0) {
-            return entries_[middle].fingerprint == fingerprint ? &entries_[middle] : nullptr;
-        }
-
-        if (compared < 0) {
-            low = middle + 1;
-        } else {
-            high = middle;
-        }
+    const usize at = algo::LowerBound(
+        entries_.View(), fileName, [](const AssetIndexCacheEntry& entry, StringView key) noexcept {
+            return StringView::CompareBytes(entry.fileName.View(), key) < 0;
+        });
+    if (at == entries_.Size() || entries_[at].fileName.View() != fileName ||
+        !(entries_[at].fingerprint == fingerprint)) {
+        return nullptr;
     }
 
-    return nullptr;
+    return &entries_[at];
 }
 
 Result<void> EncodeAssetIndexCache(const AssetIndex& index, const AssetIndexCacheKey& key,
@@ -380,23 +376,11 @@ Result<void> EncodeAssetIndexCache(const AssetIndex& index, const AssetIndexCach
         return StringView::CompareBytes(left, right) < 0;
     });
     auto isExcluded = [&](StringView name) noexcept {
-        usize low = 0;
-        usize high = excluded.Size();
-        while (low < high) {
-            const usize middle = low + (high - low) / 2;
-            const int compared = StringView::CompareBytes(excluded[middle], name);
-            if (compared == 0) {
-                return true;
-            }
-
-            if (compared < 0) {
-                low = middle + 1;
-            } else {
-                high = middle;
-            }
-        }
-
-        return false;
+        const usize at =
+            algo::LowerBound(excluded.View(), name, [](StringView left, StringView key) noexcept {
+                return StringView::CompareBytes(left, key) < 0;
+            });
+        return at != excluded.Size() && excluded[at] == name;
     };
 
     Array<const AssetIndexEntry*> entries(allocator);

@@ -43,7 +43,8 @@ struct AssetIndexCacheKey {
     uint32 semanticVersion = AssetIndexCacheSemanticVersion;
     // NFC·caseless 키 표의 Unicode 버전 텍스트의 SHA-256이다.
     Sha256Digest unicode{};
-    // 호환 엔진 버전(주·부 — NewerVersion 판정이 보는 것)이다.
+    // 호환 엔진 버전(주·부 — NewerVersion 판정이 보는 것)이다. 엔진 축을 끈 실행(빈 엔진 버전)은
+    // 정의상 주·부가 0이라(EngineVersion::IsEmpty) 켠 실행과 키가 다르다 — 따로 칸을 두지 않는다.
     uint16 compatibleMajor = 0;
     uint16 compatibleMinor = 0;
     // 읽기 옵션 customVersions 목록(id·버전)의 SHA-256이다.

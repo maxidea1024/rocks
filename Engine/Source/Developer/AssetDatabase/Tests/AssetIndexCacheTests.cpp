@@ -8,6 +8,7 @@
 #include <AssetDatabase/ImportRecord.h>
 #include <AssetDatabase/TemporaryFiles.h>
 #include <AssetRuntime/AssetTypeHooks.h>
+#include <AssetRuntime/PackageFormat.h>
 #include <AssetRuntime/PackageTags.h>
 #include <Core/Build/BuildInfo.h>
 #include <Core/Encoding/ByteWriter.h>
@@ -224,9 +225,10 @@ struct EntrySpec {
     uint32 nameBytesOverride = 0;
     bool rawName = false;
     uint8 rawNameByte = 0;
-    // 지문·id(색인 재사용 시험이 실제 파일과 맞춘다).
+    // 지문·id·타입(색인 재사용 시험이 실제 파일과 맞춘다 — null id·0 타입은 거부된다).
     Sha256Digest fingerprint{};
-    Guid id{};
+    Guid id{1, 1};
+    Guid type{2, 2};
 };
 
 void WriteSpecText(ByteWriter& writer, StringView text) noexcept {
@@ -250,7 +252,8 @@ void WriteEntry(ByteWriter& writer, const EntrySpec& spec) noexcept {
     writer.WriteBytes(Span<const uint8>(spec.fingerprint.bytes, DigestBytes));
     writer.WriteU64LE(spec.id.high);
     writer.WriteU64LE(spec.id.low);
-    writer.WriteZeros(16);
+    writer.WriteU64LE(spec.type.high);
+    writer.WriteU64LE(spec.type.low);
     writer.WriteU8(spec.readOnly);
     writer.WriteU32LE(spec.dependencyCount);
     for (uint32 index = 0; index < spec.dependencyCount && index < 2; ++index) {
@@ -301,6 +304,16 @@ Array<uint8> MakeCache(Allocator& allocator, const AssetIndexCacheKey& key,
     CHECK(writer.Status());
     Resign(bytes);
     return bytes;
+}
+
+// count byte의 'k' 문자열이다.
+String Filled(Allocator& allocator, usize count) noexcept {
+    String text(allocator);
+    for (usize index = 0; index < count; ++index) {
+        CHECK(text.TryAppend("k"));
+    }
+
+    return text;
 }
 
 bool HasTemporary(MemoryFileSystem& files) noexcept {
@@ -404,6 +417,15 @@ TEST(AssetIndexCache_KeyAxes) {
     PackageReadOptions patch = options;
     patch.engineVersion.patchVersion = static_cast<uint16>(patch.engineVersion.patchVersion + 1);
     CHECK(MakeAssetIndexCacheKey(patch) == base);
+    // 엔진 축을 끈 실행(빈 엔진 버전 — 주·부 0)은 켠 실행과 다른 키다(주·부 칸이 가른다). 빈 값은
+    // 패치와 상관없이 하나다(IsEmpty는 주·부만 본다).
+    PackageReadOptions noEngine = options;
+    noEngine.engineVersion = EngineVersion{};
+    CHECK(!(MakeAssetIndexCacheKey(noEngine) == base));
+    PackageReadOptions emptyPatch = options;
+    emptyPatch.engineVersion = EngineVersion{0, 0, 1};
+    CHECK(emptyPatch.engineVersion.IsEmpty() &&
+          MakeAssetIndexCacheKey(emptyPatch) == MakeAssetIndexCacheKey(noEngine));
     PackageReadOptions minor = options;
     minor.engineVersion.minorVersion = static_cast<uint16>(minor.engineVersion.minorVersion + 1);
     CHECK(!(MakeAssetIndexCacheKey(minor) == base));
@@ -450,7 +472,8 @@ TEST(AssetIndexCache_KeyAxes) {
 
 // 신뢰하지 않는 입력: 헤더(짧음·magic·예약 byte·정규화 칸 2·본문 byte 불일치·SHA-256 불일치·항목 수
 // 상한·크기 상한), 항목(이름 UTF-8·빈 이름·.rasset 아님·이름 길이 경계·같은 이름·순서·readOnly 2·
-// 의존 수 경계·의존 종류 0·6·required 2·태그 수 경계·빈 태그 키·태그 순서·같은 태그·요약 표지 2·
+// 의존 수 경계·의존 종류 0·6·required 2·태그 수 경계·빈 태그 키·태그 키·값 길이 상한·태그 순서·같은
+// 태그·null id·0 타입·요약 표지 2·
 // 요약 이름 UTF-8·남은 byte·잘림)의 위반은 모두 캐시 없음(비운 채 false)이다. 올바른 여러 항목은
 // 받는다(경계 값 — 태그 둘·의존 둘·요약 있음·readOnly 1).
 TEST(AssetIndexCache_RejectsUntrustedInput) {
@@ -527,14 +550,25 @@ TEST(AssetIndexCache_RejectsUntrustedInput) {
         EntrySpec spec;
         const char* label;
     };
-    Case cases[] = {{EntrySpec{}, "raw name"},      {EntrySpec{}, "empty name"},
-                    {EntrySpec{}, "not rasset"},    {EntrySpec{}, "name too long"},
-                    {EntrySpec{}, "readOnly 2"},    {EntrySpec{}, "dependency count"},
-                    {EntrySpec{}, "kind 0"},        {EntrySpec{}, "kind 6"},
-                    {EntrySpec{}, "required 2"},    {EntrySpec{}, "tag count"},
-                    {EntrySpec{}, "empty tag key"}, {EntrySpec{}, "tag order"},
-                    {EntrySpec{}, "same tag"},      {EntrySpec{}, "present 2"},
-                    {EntrySpec{}, "importer name"}};
+    Case cases[] = {{EntrySpec{}, "raw name"},
+                    {EntrySpec{}, "empty name"},
+                    {EntrySpec{}, "not rasset"},
+                    {EntrySpec{}, "name too long"},
+                    {EntrySpec{}, "readOnly 2"},
+                    {EntrySpec{}, "dependency count"},
+                    {EntrySpec{}, "kind 0"},
+                    {EntrySpec{}, "kind 6"},
+                    {EntrySpec{}, "required 2"},
+                    {EntrySpec{}, "tag count"},
+                    {EntrySpec{}, "empty tag key"},
+                    {EntrySpec{}, "tag order"},
+                    {EntrySpec{}, "same tag"},
+                    {EntrySpec{}, "present 2"},
+                    {EntrySpec{}, "importer name"},
+                    {EntrySpec{}, "null id"},
+                    {EntrySpec{}, "zero type"},
+                    {EntrySpec{}, "tag key too long"},
+                    {EntrySpec{}, "tag value too long"}};
     cases[0].spec.rawName = true;
     cases[0].spec.rawNameByte = 0xff;
     cases[1].spec.name = "";
@@ -559,11 +593,28 @@ TEST(AssetIndexCache_RejectsUntrustedInput) {
     cases[13].spec.present = 2;
     cases[14].spec.present = 1;
     cases[14].spec.importerName = "\xff";
+    cases[15].spec.id = Guid{};
+    cases[16].spec.type = Guid{};
+    const String longKey = Filled(env.allocator, MaxPackageTagKeyBytes + 1);
+    const String longValue = Filled(env.allocator, PackageMaxStringBytes + 1);
+    const String maxKey = Filled(env.allocator, MaxPackageTagKeyBytes);
+    cases[17].spec.tagCount = 1;
+    cases[17].spec.tagKeys[0] = longKey.View();
+    cases[18].spec.tagCount = 1;
+    cases[18].spec.tagValues[0] = longValue.View();
     for (const Case& item : cases) {
         const Array<uint8> bytes =
             MakeCache(env.allocator, key, Span<const EntrySpec>(&item.spec, 1));
         CHECK(rejects(bytes));
     }
+
+    // 키 길이 상한 그대로는 받는다.
+    EntrySpec maxTag;
+    maxTag.tagCount = 1;
+    maxTag.tagKeys[0] = maxKey.View();
+    auto acceptedMax =
+        cache.Parse(MakeCache(env.allocator, key, Span<const EntrySpec>(&maxTag, 1)).View(), key);
+    CHECK(acceptedMax && acceptedMax.Value());
 
     // 같은 이름·역순 이름·남은 byte·잘린 항목.
     const EntrySpec same[] = {EntrySpec{}, EntrySpec{}};
@@ -796,10 +847,12 @@ TEST(AssetIndexCache_ReuseEdges) {
     badName.name = "Bad Name.rasset";
     badName.fingerprint = base->fingerprint.digest;
     badName.id = base->id.value;
+    badName.type = base->type;
     EntrySpec forged;
     forged.name = "Base.rasset";
     forged.fingerprint = base->fingerprint.digest;
     forged.id = base->id.value;
+    forged.type = base->type;
     forged.readOnly = 1;
     forged.dependencyCount = 1;
     forged.required = 1;
