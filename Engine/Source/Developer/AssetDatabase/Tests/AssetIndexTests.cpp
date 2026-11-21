@@ -3,6 +3,7 @@
 #include "AssetDatabaseTestSupport.h"
 
 #include <AssetDatabase/AssetIndex.h>
+#include <AssetDatabase/ImportRecord.h>
 #include <AssetDatabase/LogicalPath.h>
 #include <AssetRuntime/PackageRangeReader.h>
 #include <AssetRuntime/PackageTags.h>
@@ -17,7 +18,8 @@
 // 검색과 모든 조회(경로·id·디렉터리·타입·태그·정방향 의존의 모든 종류 묶음·역방향 참조자), Verify의
 // MissingDependency·TypeMismatch(상속·미등록·종료한 TypeRegistry), 메모리 파일 시스템으로 만든 진단
 // 장면(InvalidPath·패키지 판정·쿠킹·다른 Tags 스키마·깨진 Tags·사라진 파일·IO 실패·링크·장치·같은
-// 경로 키·같은 id), 열거 실패, 모든 할당 실패.
+// 경로 키·같은 id), ImportRecord 요약과 ImportOwner 대조(A2c2a — 7.1절 15), 열거 실패, 모든 할당
+// 실패.
 using namespace rocks;
 namespace asset_index_tests_file {
 
@@ -63,7 +65,8 @@ const PackageTagInput HeroTags[] = {{"Kind", "Hero"},
                                     {"UnrealExchange.FormerPaths", "/Game/Old/A"}};
 
 // 시험 패키지 byte 묶음이다. 기본(source Registry): Hero(TestAsset — Hard → Base, EditorOnly →
-// Derived, Soft → 2109 "Sub", Build 2103, ImportOwner 2104, 태그 셋), Base(BaseGameAsset),
+// Derived, Soft → 2109 "Sub", Build 2103, ImportOwner 2104와 그것을 가리키는 참조 ImportRecord,
+// 태그 셋), Base(BaseGameAsset),
 // Derived(DerivedGameAsset), Villain(TestAsset — Hard → Derived, Soft → Hero), Plain(TestAsset 참조
 // 없음), OtherTags(다른 스키마 Tags), BadTags(Tags 스키마인데 목록 없음). 변형(target Registry):
 // Base id인데 대표가 DerivedGameAsset, Derived id인데 대표가 BaseGameAsset, 쿠킹 패키지.
@@ -157,8 +160,16 @@ bool MakePackages(AssetEnv& env, IndexPackages& out) noexcept {
 
     const Array<uint8> otherTags = OneFieldRecord(env.allocator, Guid{0x7A, 0x6B});
     const Array<uint8> badTags = OneFieldRecord(env.allocator, PackageTagsSchema);
+    ImportRecordInput heroImport;
+    heroImport.owner = FixedId(ImportOwnerId);
+    auto heroRecord = WriteImportRecord(env.allocator, FixedId(HeroId), heroImport);
+    if (!heroRecord) {
+        return false;
+    }
+
     PackageWriteOptions heroOptions = EditorOptions();
     heroOptions.tags = tags.Value().View();
+    heroOptions.importRecord = heroRecord.Value().View();
     heroOptions.extraDependencies = HeroExtraDependencies;
     PackageWriteOptions otherOptions = EditorOptions();
     otherOptions.tags = otherTags.View();
@@ -637,6 +648,11 @@ TEST(AssetIndex_DiskScanAndQueries) {
     CHECK(hero.path.View() == "/Game/Characters/Hero");
     CHECK(hero.key.View() == "game/characters/hero");
     CHECK(hero.fileName.View() == "Characters/Hero.rasset");
+    // Hero는 2104를 가리키는 참조 ImportRecord(요약은 owner만), Villain은 ImportRecord 없음이다.
+    CHECK(hero.importRecord.present && hero.importRecord.owner == FixedId(ImportOwnerId));
+    CHECK(hero.importRecord.importerId == Guid{} && hero.importRecord.importerName.IsEmpty() &&
+          hero.importRecord.importerVersion == 0 && hero.importRecord.outputCount == 0);
+    CHECK(!index.At(first + 1).importRecord.present);
     CHECK(index.At(first + 1).fileName.View() == "Characters/Villain.rasset");
     CHECK(index.At(first + 2).fileName.View() == "Items/Base.rasset");
     const AssetIndexEntry& derived = index.At(first + 3);
@@ -1123,6 +1139,225 @@ TEST(AssetIndex_Diagnostics) {
     }
 
     CHECK(missingDerived == 1 && missingSoft == 2 && verified.Size() == 3);
+}
+
+namespace {
+
+constexpr uint64 RecordOwnerId = 2120;
+constexpr uint64 RecordFirstId = 2121;
+constexpr Guid RecordImporter{0x494d50, 7};
+
+// ImportRecord 장면 패키지 하나다: 이름, ImportRecord 모양, ImportOwner 의존 대상(0은 없음),
+// 깨진 Tags 여부.
+enum class RecordShape {
+    None,
+    Owner,
+    Reference,
+    OtherSchema,
+    Newer,
+    Corrupt
+};
+
+struct RecordPackage {
+    StringView name;
+    RecordShape shape;
+    uint64 importOwner;
+    bool badTags;
+};
+
+// 소유 기록 장면은 모두 RecordOwnerId 하나를 owner로 쓴다(참조 기록의 owner도 같다).
+const RecordPackage RecordPackages[] = {
+    {"A-Owner.rasset", RecordShape::Owner, 0, false},
+    {"B-Reference.rasset", RecordShape::Reference, RecordOwnerId, false},
+    {"C-OtherSchema.rasset", RecordShape::OtherSchema, 0, false},
+    {"D-Newer.rasset", RecordShape::Newer, 0, false},
+    {"E-Corrupt.rasset", RecordShape::Corrupt, 0, false},
+    {"F-DependencyOnly.rasset", RecordShape::None, RecordOwnerId, false},
+    {"G-ReferenceNoDependency.rasset", RecordShape::Reference, 0, false},
+    {"H-ReferenceWrongOwner.rasset", RecordShape::Reference, RecordFirstId, false},
+    {"I-OwnedWithDependency.rasset", RecordShape::Owner, RecordFirstId, false},
+    {"J-OtherSchemaWithDependency.rasset", RecordShape::OtherSchema, RecordOwnerId, false},
+    {"K-CorruptAndBadTags.rasset", RecordShape::Corrupt, RecordOwnerId, true},
+    {"L-DependencyAndBadTags.rasset", RecordShape::None, RecordOwnerId, true},
+};
+
+// 장면 index의 패키지 id다(A-Owner만 RecordOwnerId).
+AssetId RecordPackageId(usize index) noexcept {
+    return FixedId(index == 0 ? RecordOwnerId : RecordFirstId + index);
+}
+
+// 장면 패키지 byte를 만든다(TestAsset 대표 하나).
+Array<uint8> MakeRecordPackage(AssetEnv& env, usize index) noexcept {
+    const RecordPackage& scene = RecordPackages[index];
+    const AssetId id = RecordPackageId(index);
+    ObjectRegistry& registry = *env.source;
+    RootRef<Package> package;
+    if (MakeRepresentative<TestAsset>(registry, id, PackageKind::Editor, package).IsNull()) {
+        return Array<uint8>(env.allocator);
+    }
+
+    Array<uint8> record(env.allocator);
+    const ImportSourceInput sources[] = {{"source", "", "Rock.png", Sha256Digest{}, 3}};
+    const ImportOutputInput outputs[] = {{"", id, IdOf<TestAsset>()},
+                                         {"extra", FixedId(RecordFirstId + 90), IdOf<TestAsset>()}};
+    ImportRecordInput input;
+    if (scene.shape == RecordShape::Owner) {
+        input.owner = id;
+        input.importerId = RecordImporter;
+        input.importerName = "RockImporter";
+        input.importerVersion = 4;
+        input.sources = sources;
+        input.outputs = outputs;
+    } else if (scene.shape == RecordShape::Reference) {
+        input.owner = FixedId(RecordOwnerId);
+    }
+
+    if (scene.shape == RecordShape::Owner || scene.shape == RecordShape::Reference) {
+        auto written = WriteImportRecord(env.allocator, id, input);
+        if (!written) {
+            return Array<uint8>(env.allocator);
+        }
+
+        record = Move(written.Value());
+    } else if (scene.shape == RecordShape::OtherSchema) {
+        record = OneFieldRecord(env.allocator, Guid{0x7A, 0x6C});
+    } else if (scene.shape == RecordShape::Newer || scene.shape == RecordShape::Corrupt) {
+        // 더 새 버전(필드는 상관없다)과 버전 1인데 모르는 필드 하나뿐인 기록.
+        const uint8 value[4] = {1, 2, 3, 4};
+        RecordBuilder builder(env.allocator, ImportRecordSchema,
+                              scene.shape == RecordShape::Newer ? ImportRecordVersion + 1
+                                                                : ImportRecordVersion);
+        auto built = builder.AddField(Guid{0, 9}, WireType::U32, value)
+                         ? builder.Build()
+                         : Result<Array<uint8>>::Failure(ErrorCode::OutOfMemory);
+        if (!built) {
+            return Array<uint8>(env.allocator);
+        }
+
+        record = Move(built.Value());
+    }
+
+    const Array<uint8> badTags = OneFieldRecord(env.allocator, PackageTagsSchema);
+    const PackageDependencyEntry owner[] = {
+        {FixedId(scene.importOwner), PackageDependencyKind::ImportOwner, TypeId{}, false}};
+    PackageWriteOptions options = EditorOptions();
+    options.importRecord = record.View();
+    if (scene.importOwner != 0) {
+        options.extraDependencies = owner;
+    }
+
+    if (scene.badTags) {
+        options.tags = badTags.View();
+    }
+
+    return Write(env.allocator, registry, package.Handle(), options);
+}
+
+} // namespace
+
+// ImportRecord 색인(7.1절 15 — A2c2a): 소유 기록은 요약(임포터 id·이름·버전·출력 수, owner = 자기),
+// 참조 기록 + 맞는 ImportOwner는 요약(owner만)이고 진단이 없다. 다른 스키마·더 새 버전은
+// UnsupportedVersion, 형식 위반은 CorruptPackage(둘 다 칸 ImportRecord — 요약 없음, ImportOwner
+// 대조 안 함). 대조 위반(기록 없이 ImportOwner, 참조 기록에 ImportOwner 없음·다른 대상, 소유
+// 기록에 ImportOwner)은 CorruptPackage(칸 Dependencies). 어느 경우에도 항목은 색인된다. 한 파일의
+// 같은 코드 진단 둘(깨진 Tags + 손상 기록, 깨진 Tags + 대조 위반)은 칸 순이다. 모든 할당 실패는
+// OutOfMemory다.
+TEST(AssetIndex_ImportRecords) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    ProjectLayout layout(env.allocator);
+    REQUIRE(layout.Initialize(MemoryRoot));
+    MemoryFileSystem files(env.allocator, layout.ContentDirectory());
+    REQUIRE(files.Ready());
+    // 메모리 파일 시스템은 byte를 빌리므로 시험 동안 살려 둔다.
+    constexpr usize count = sizeof(RecordPackages) / sizeof(RecordPackages[0]);
+    Array<Array<uint8>> bytes(env.allocator);
+    for (usize index = 0; index < count; ++index) {
+        REQUIRE(bytes.TryPushBack(MakeRecordPackage(env, index)));
+        REQUIRE(!bytes[index].IsEmpty());
+        REQUIRE(files.AddFile(RecordPackages[index].name, bytes[index].View()));
+    }
+
+    AssetIndex index(env.allocator, layout);
+    REQUIRE(index.Rebuild(files, PackageReadOptions{}));
+    using C = AssetDiagnosticCode;
+    constexpr ErrorCode Invalid = ErrorCode::InvalidArgument;
+    const ExpectedDiagnostic expected[] = {
+        {C::UnsupportedVersion, ErrorCode::Unsupported, "C-OtherSchema.rasset"},
+        {C::UnsupportedVersion, ErrorCode::Unsupported, "D-Newer.rasset"},
+        {C::CorruptPackage, Invalid, "E-Corrupt.rasset"},
+        {C::CorruptPackage, Invalid, "F-DependencyOnly.rasset"},
+        {C::CorruptPackage, Invalid, "G-ReferenceNoDependency.rasset"},
+        {C::CorruptPackage, Invalid, "H-ReferenceWrongOwner.rasset"},
+        {C::CorruptPackage, Invalid, "I-OwnedWithDependency.rasset"},
+        {C::UnsupportedVersion, ErrorCode::Unsupported, "J-OtherSchemaWithDependency.rasset"},
+        {C::CorruptPackage, Invalid, "K-CorruptAndBadTags.rasset"},
+        {C::CorruptPackage, Invalid, "K-CorruptAndBadTags.rasset"},
+        {C::CorruptPackage, Invalid, "L-DependencyAndBadTags.rasset"},
+        {C::CorruptPackage, Invalid, "L-DependencyAndBadTags.rasset"},
+    };
+    CHECK(SameDiagnostics(index.Diagnostics(), expected));
+    REQUIRE(index.Diagnostics().Size() == 12);
+    constexpr uint32 Record = static_cast<uint32>(PackageSectionKind::ImportRecord);
+    constexpr uint32 Dependencies = static_cast<uint32>(PackageSectionKind::Dependencies);
+    constexpr uint32 Tags = static_cast<uint32>(PackageSectionKind::Tags);
+    const uint32 sections[] = {Record,       Record,       Record,       Dependencies,
+                               Dependencies, Dependencies, Dependencies, Record,
+                               Record,       Tags,         Dependencies, Tags};
+    const usize owners[] = {2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 11, 11};
+    for (usize position = 0; position < index.Diagnostics().Size(); ++position) {
+        const AssetIndexDiagnostic& diagnostic = index.Diagnostics()[position];
+        CHECK(diagnostic.section == sections[position]);
+        CHECK(diagnostic.asset == RecordPackageId(owners[position]));
+    }
+
+    // 모든 파일이 색인된다(경로 키 순 = 장면 순). 요약은 A(소유)·B·G·H(참조)·I(소유)만 있다.
+    REQUIRE(index.Count() == count);
+    for (usize position = 0; position < count; ++position) {
+        const AssetIndexEntry& entry = index.At(position);
+        CHECK(entry.fileName.View() == RecordPackages[position].name);
+        const RecordShape shape = RecordPackages[position].shape;
+        const bool present = shape == RecordShape::Owner || shape == RecordShape::Reference;
+        CHECK(entry.importRecord.present == present);
+        if (!present) {
+            CHECK(entry.importRecord.owner.IsNull() && entry.importRecord.outputCount == 0);
+            continue;
+        }
+
+        if (shape == RecordShape::Owner) {
+            CHECK(entry.importRecord.owner == entry.id);
+            CHECK(entry.importRecord.importerId == RecordImporter);
+            CHECK(entry.importRecord.importerName.View() == "RockImporter");
+            CHECK(entry.importRecord.importerVersion == 4);
+            CHECK(entry.importRecord.outputCount == 2);
+        } else {
+            CHECK(entry.importRecord.owner == FixedId(RecordOwnerId));
+            CHECK(entry.importRecord.importerName.IsEmpty());
+            CHECK(entry.importRecord.outputCount == 0);
+        }
+    }
+
+    // 할당 실패: 시도마다 OutOfMemory이고 색인은 비며, 끝나면 같은 결과다.
+    test::NFailAllocator failing(env.allocator);
+    uint32 failures = 0;
+    for (uint64 attempt = 1;; ++attempt) {
+        AssetIndex failingIndex(failing, layout);
+        failing.FailOnAttempt(attempt);
+        const Result<void> result = failingIndex.Rebuild(files, PackageReadOptions{});
+        const bool failed = failing.Attempts() >= attempt;
+        failing.DisableFailure();
+        if (!failed) {
+            REQUIRE(result);
+            CHECK(failingIndex.Count() == count && failingIndex.Diagnostics().Size() == 12);
+            break;
+        }
+
+        CHECK(!result && result.Error() == ErrorCode::OutOfMemory);
+        CHECK(failingIndex.Count() == 0 && failingIndex.Diagnostics().IsEmpty());
+        ++failures;
+    }
+
+    CHECK(failures > 0);
 }
 
 // 검색 실패(7.1절 13·14): Content 열거 실패와 Content가 파일인 것(WrongType)은 Rebuild의 그 파일

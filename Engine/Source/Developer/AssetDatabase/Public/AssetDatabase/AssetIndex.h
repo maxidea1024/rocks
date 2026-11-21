@@ -35,11 +35,26 @@ inline constexpr uint32 AllDependencyKinds = DependencyKindBit(PackageDependency
                                              DependencyKindBit(PackageDependencyKind::Build) |
                                              DependencyKindBit(PackageDependencyKind::ImportOwner);
 
+// 색인 항목의 ImportRecord 요약이다(7.1절 15 — A2c2a). present는 ImportRecord를 읽었는지다(섹션이
+// 없거나 다른 스키마·더 새 버전·형식 위반이면 거짓 — 뒤 둘은 진단이 남는다). 참조 기록은 owner만
+// 의미가 있다(owner ≠ 항목 id). outputCount는 소유 기록의 출력 수다.
+struct AssetIndexImportSummary {
+    explicit AssetIndexImportSummary(Allocator& allocator) noexcept : importerName(allocator) {
+    }
+
+    bool present = false;
+    AssetId owner{};
+    Guid importerId{};
+    String importerName;
+    uint32 importerVersion = 0;
+    usize outputCount = 0;
+};
+
 // 색인 항목 하나다(패키지 하나).
 struct AssetIndexEntry {
     explicit AssetIndexEntry(Allocator& allocator) noexcept
         : path(allocator), key(allocator), fileName(allocator), dependencies(allocator),
-          tags(allocator) {
+          tags(allocator), importRecord(allocator) {
     }
 
     AssetIndexEntry(AssetIndexEntry&&) noexcept = default;
@@ -58,6 +73,7 @@ struct AssetIndexEntry {
     int64 modifiedTicks = 0;
     Array<PackageDependencyEntry> dependencies;
     Array<PackageTag> tags;
+    AssetIndexImportSummary importRecord;
     bool readOnly = false;
     // 같은 AssetId·같은 경로 키가 다른 파일에도 있다(조회에서 AlreadyExists — 7.1절 13).
     bool duplicateId = false;

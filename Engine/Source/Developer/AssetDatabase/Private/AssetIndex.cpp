@@ -1,6 +1,7 @@
 #include "AssetDatabaseInternal.h"
 
 #include <AssetDatabase/AssetIndex.h>
+#include <AssetDatabase/ImportRecord.h>
 #include <AssetRuntime/PackageRangeReader.h>
 #include <Core/Algorithms.h>
 #include <Core/FileError.h>
@@ -128,6 +129,62 @@ Result<void> AddDiagnostic(Array<AssetIndexDiagnostic>& out, AssetDiagnosticCode
     }
 
     return out.TryPushBack(Move(diagnostic));
+}
+
+// 항목의 ImportRecord를 요약하고 ImportOwner 의존과 대조한다(7.1절 15 — A2c2a). 읽지 못한 기록(다른
+// 스키마·더 새 버전 UnsupportedVersion, 형식 위반 CorruptPackage — 둘 다 칸 ImportRecord)은 요약
+// 없이 진단만 남기고 대조하지 않는다(참조 기록인지 알 수 없다). 대조 위반은 CorruptPackage(칸
+// Dependencies)다. 항목은 어느 경우에도 색인한다(조회되어야 고칠 수 있다). 오류: 할당 실패.
+Result<void> IndexImportRecord(Allocator& allocator, Span<const uint8> bytes,
+                               AssetIndexEntry& entry,
+                               Array<AssetIndexDiagnostic>& diagnostics) noexcept {
+    ImportRecord record(allocator);
+    const ImportRecord* checked = nullptr;
+    if (!bytes.IsEmpty()) {
+        auto read = ReadImportRecord(allocator, entry.id, bytes);
+        if (!read) {
+            if (read.Error() == ErrorCode::OutOfMemory) {
+                return Result<void>::Failure(read.Error());
+            }
+
+            const AssetDiagnosticCode code = read.Error() == ErrorCode::Unsupported
+                                                 ? AssetDiagnosticCode::UnsupportedVersion
+                                                 : AssetDiagnosticCode::CorruptPackage;
+            if (auto added = AddDiagnostic(diagnostics, code, read.Error(), entry.fileName.View());
+                !added) {
+                return added;
+            }
+
+            diagnostics[diagnostics.Size() - 1].asset = entry.id;
+            diagnostics[diagnostics.Size() - 1].section =
+                static_cast<uint32>(PackageSectionKind::ImportRecord);
+            return Result<void>::Success();
+        }
+
+        record = Move(read.Value());
+        checked = &record;
+        AssetIndexImportSummary& summary = entry.importRecord;
+        summary.present = true;
+        summary.owner = record.owner;
+        summary.importerId = record.importerId;
+        summary.importerName = Move(record.importerName);
+        summary.importerVersion = record.importerVersion;
+        summary.outputCount = record.outputs.Size();
+    }
+
+    if (auto owner = CheckImportOwner(entry.id, checked, entry.dependencies.View()); !owner) {
+        if (auto added = AddDiagnostic(diagnostics, AssetDiagnosticCode::CorruptPackage,
+                                       owner.Error(), entry.fileName.View());
+            !added) {
+            return added;
+        }
+
+        diagnostics[diagnostics.Size() - 1].asset = entry.id;
+        diagnostics[diagnostics.Size() - 1].section =
+            static_cast<uint32>(PackageSectionKind::Dependencies);
+    }
+
+    return Result<void>::Success();
 }
 
 // 정렬 순서 order에서 같은 값(same)이 이웃한 항목을 모두 flag로 표시하고 code 진단을 남긴다. 겹친
@@ -434,6 +491,12 @@ Result<void> AssetIndex::Rebuild(platform::FileSystem& files,
                     static_cast<uint32>(PackageSectionKind::Tags);
             }
 
+            if (auto indexed =
+                    IndexImportRecord(*allocator_, contents.importRecord, entry, diagnostics);
+                !indexed) {
+                return indexed;
+            }
+
             if (auto pushed = found.TryPushBack(Move(entry)); !pushed) {
                 return pushed;
             }
@@ -497,8 +560,10 @@ Result<void> AssetIndex::Rebuild(platform::FileSystem& files,
         return diagnosed;
     }
 
-    // 진단은 파일 이름 → 코드 순이다. 한 이름(파일·디렉터리)의 진단은 코드마다 하나뿐이라(경로·
-    // 패키지·Tags 진단은 서로 배타이고 같은 id·경로 진단은 각각 하나) 이 비교가 전순서다.
+    // 진단은 파일 이름 → 코드 → 칸 순이다. 한 이름(파일·디렉터리)의 진단은 (코드, 칸)마다
+    // 하나뿐이라(경로·패키지 판정 진단은 서로 배타이고 그 밖의 항목 진단과도 배타, 항목 진단은
+    // Tags· ImportRecord·Dependencies 칸마다 하나, 같은 id·경로 진단은 각각 하나 — 칸 0) 이 비교가
+    // 전순서다.
     Array<usize> diagnosticOrder(*allocator_);
     if (auto made = MakeOrder(diagnosticOrder, diagnostics.Size()); !made) {
         return made;
@@ -511,8 +576,12 @@ Result<void> AssetIndex::Rebuild(platform::FileSystem& files,
             return name < 0;
         }
 
-        return static_cast<uint32>(diagnostics[left].code) <
-               static_cast<uint32>(diagnostics[right].code);
+        if (diagnostics[left].code != diagnostics[right].code) {
+            return static_cast<uint32>(diagnostics[left].code) <
+                   static_cast<uint32>(diagnostics[right].code);
+        }
+
+        return diagnostics[left].section < diagnostics[right].section;
     });
     Array<AssetIndexDiagnostic> sortedDiagnostics(*allocator_);
     if (auto reserved = sortedDiagnostics.TryReserve(diagnostics.Size()); !reserved) {
