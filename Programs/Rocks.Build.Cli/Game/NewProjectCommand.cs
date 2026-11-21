@@ -41,6 +41,15 @@ internal static class NewProjectCommand
     // 엔진이 쓰는 이름이다(대소문자 무시). RocksSdk는 게임 솔루션의 SDK 헤더 프로젝트 이름이다(10.4절).
     private static readonly string[] ReservedNames = ["Rocks", "RocksSdk", "Engine", "Core", "Std", "Posix"];
 
+    // Windows 예약 장치 이름이다(대소문자 무시) — 파일·디렉터리 이름이 될 수 없다(UE Paths.cpp·FileHelper.cpp와 같다).
+    private static readonly HashSet<string> DeviceNames = new(["CON", "PRN", "AUX", "NUL", .. Enumerable.Range(0, 10).Select(index => "COM" + index),
+        .. Enumerable.Range(0, 10).Select(index => "LPT" + index)], StringComparer.OrdinalIgnoreCase);
+
+    // 소문자 형(namespace)이 될 수 없는 매크로·전역 이름이다: 표준 C(errno·stdin·stdout·stderr), Windows 헤더(near·far·interface),
+    // GNU 사전 정의(linux·unix). 매크로로 바뀌면 생성 코드가 깨진다.
+    private static readonly HashSet<string> MacroNames = new(["errno", "stdin", "stdout", "stderr", "near", "far", "interface", "linux", "unix"],
+        StringComparer.Ordinal);
+
     // 소문자 형이 namespace가 되므로 C++ 키워드와 같으면 안 된다(C++23 키워드와 대체 토큰).
     private static readonly HashSet<string> CppKeywords = new(StringComparer.Ordinal)
     {
@@ -82,6 +91,7 @@ internal static class NewProjectCommand
             ? Path.GetFullPath(templateValue) : Path.Combine(sdk, "Templates", "Game", templateValue));
         CheckTemplate(template);
         ValidateName(name, InstalledSdk.ManifestModuleNames(sdk));
+        RequireDistinctFromTemplate(name, template.TemplateName);
         string destination = Path.Combine(parent, name);
         if (File.Exists(destination) || (Directory.Exists(destination) && Directory.EnumerateFileSystemEntries(destination).Any()))
         {
@@ -204,7 +214,7 @@ internal static class NewProjectCommand
             IEnumerable<string> texts = [relative];
             if (Replaces(template, file))
             {
-                texts = texts.Append(File.ReadAllText(file));
+                texts = texts.Append(ReadText(file).Text);
             }
 
             foreach (string text in texts)
@@ -228,6 +238,11 @@ internal static class NewProjectCommand
             throw new ArgumentException($"Project name '{name}' must be a C++ identifier that starts with an uppercase letter, {MinimumNameLength}-{MaximumNameLength} characters.");
         }
 
+        if (DeviceNames.Contains(name))
+        {
+            throw new ArgumentException($"Project name '{name}' is a reserved Windows device name and cannot name a file or directory.");
+        }
+
         if (ReservedNames.Concat(sdkModules).FirstOrDefault(reserved => string.Equals(reserved, name, StringComparison.OrdinalIgnoreCase)) is string taken)
         {
             throw new ArgumentException($"Project name '{name}' is the name of an engine or SDK module ({taken}); choose another name.");
@@ -235,10 +250,19 @@ internal static class NewProjectCommand
 
         string lower = name.ToLowerInvariant();
         // 대문자 형 ROCKS(엔진 매크로 접두)는 소문자 형 rocks와 같은 이름이라 함께 막힌다.
-        if (CppKeywords.Contains(lower) || lower is "std" or "rocks" or "posix")
+        if (CppKeywords.Contains(lower) || MacroNames.Contains(lower) || lower is "std" or "rocks" or "posix")
         {
             throw new ArgumentException($"Project name '{name}' cannot be used: its lowercase form '{lower}' becomes a namespace and must not be a C++ " +
-                "keyword, std, rocks or posix.");
+                "keyword, a standard or platform macro, std, rocks or posix.");
+        }
+    }
+
+    /// <summary>템플릿 이름을 대소문자 무시로 담은 이름은 거부한다(치환 결과가 다시 템플릿 이름을 담는다, 11.6절).</summary>
+    internal static void RequireDistinctFromTemplate(string name, string templateName)
+    {
+        if (name.Contains(templateName, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException($"Project name '{name}' contains the template name {templateName}; choose a name without it.");
         }
     }
 
@@ -273,7 +297,8 @@ internal static class NewProjectCommand
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             if (Replaces(template, file))
             {
-                File.WriteAllText(target, Replace(File.ReadAllText(file), template.TemplateName, name), new UTF8Encoding(false));
+                (string text, bool bom) = ReadText(file);
+                File.WriteAllText(target, Replace(text, template.TemplateName, name), new UTF8Encoding(bom));
             }
             else
             {
@@ -282,23 +307,65 @@ internal static class NewProjectCommand
         }
     }
 
-    // 템플릿 파일(ignore 제외, 링크 거부)의 (상대 경로 '/' 구분, 절대 경로)다.
-    private static IEnumerable<(string Relative, string File)> Files(ProjectTemplate template)
+    // 치환 대상 파일을 엄격한 UTF-8로 읽는다(잘못된 바이트는 오류, BOM 여부를 돌려준다, NUL 바이트는 텍스트가 아니라 거부).
+    internal static (string Text, bool Bom) ReadText(string file)
     {
-        foreach (string file in Directory.GetFiles(template.Directory, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
+        byte[] bytes = File.ReadAllBytes(file);
+        if (Array.IndexOf(bytes, (byte)0) >= 0)
         {
-            if (FileLinks.IsLink(file))
-            {
-                throw new InvalidDataException($"Template {template.Directory} contains a link: {file}");
-            }
+            throw new InvalidDataException($"{file} has a NUL byte; files in replaceInExtensions must be UTF-8 text.");
+        }
 
-            string relative = Path.GetRelativePath(template.Directory, file).Replace('\\', '/');
-            if (!template.Ignore.Contains(relative, StringComparer.Ordinal))
-            {
-                yield return (relative, file);
-            }
+        bool bom = bytes.AsSpan().StartsWith(Encoding.UTF8.Preamble);
+        try
+        {
+            return (new UTF8Encoding(false, true).GetString(bytes, bom ? 3 : 0, bytes.Length - (bom ? 3 : 0)), bom);
+        }
+        catch (DecoderFallbackException error)
+        {
+            throw new InvalidDataException($"{file} is not valid UTF-8: {error.Message}", error);
         }
     }
+
+    // 템플릿 파일(빌드·IDE 산출물과 ignore 제외, 링크 거부)의 (상대 경로 '/' 구분, 절대 경로)다.
+    internal static IEnumerable<(string Relative, string File)> Files(ProjectTemplate template)
+    {
+        var pending = new Stack<string>([template.Directory]);
+        var files = new List<(string Relative, string File)>();
+        while (pending.Count != 0)
+        {
+            foreach (string entry in Directory.EnumerateFileSystemEntries(pending.Pop()))
+            {
+                if (FileLinks.IsLink(entry))
+                {
+                    throw new InvalidDataException($"Template {template.Directory} contains a link: {entry}");
+                }
+
+                string relative = Path.GetRelativePath(template.Directory, entry).Replace('\\', '/');
+                // 템플릿 디렉터리의 빌드·IDE 산출물(out/·Saved/·점 디렉터리·최상위 *.slnx)은 기본으로 뺀다(GameProjectLayout과 같은 규칙).
+                if (GameProjectLayout.IsExcluded(template.Directory, entry) || Ignored(template, relative))
+                {
+                    continue;
+                }
+
+                if (Directory.Exists(entry))
+                {
+                    pending.Push(entry);
+                }
+                else
+                {
+                    files.Add((relative, entry));
+                }
+            }
+        }
+
+        return files.OrderBy(file => file.Relative, StringComparer.Ordinal);
+    }
+
+    // ignore 항목: 파일이나 디렉터리(그 아래 전부), glob(*·?는 한 경로 성분 안).
+    private static bool Ignored(ProjectTemplate template, string relative) => template.Ignore.Any(pattern =>
+        new Regex("^" + Regex.Escape(pattern.TrimEnd('/')).Replace("\\*", "[^/]*", StringComparison.Ordinal).Replace("\\?", "[^/]", StringComparison.Ordinal) + "(/.*)?$",
+            RegexOptions.CultureInvariant).IsMatch(relative));
 
     private static bool Replaces(ProjectTemplate template, string file) =>
         template.ReplaceInExtensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase);
@@ -314,7 +381,7 @@ internal static class NewProjectCommand
             {
                 yield return relative;
             }
-            else if (Replaces(template, file) && spellings.Any(spelling => File.ReadAllText(file).Contains(spelling, StringComparison.Ordinal)))
+            else if (Replaces(template, file) && spellings.Any(spelling => ReadText(file).Text.Contains(spelling, StringComparison.Ordinal)))
             {
                 yield return relative + " (content)";
             }

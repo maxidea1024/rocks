@@ -264,6 +264,33 @@ try
         "--destination", fixture, "--sdk", sdk, "--projectfiles", "off");
     Require(occupied.ExitCode != 0 && occupied.StdErr.Contains("already exists and is not empty", StringComparison.Ordinal) &&
         IdsOf(Path.Combine(game, "SampleGame.rocksids.json")).SequenceEqual(gameIds), "new-project wrote into a non-empty destination: " + occupied.StdErr);
+    // SDK CLI로 --sdk 없이(자기 SDK), 템플릿을 이름(Foundation)으로 SDK에서 찾는다.
+    string ownParent = Path.Combine(fixture, "own-sdk");
+    Directory.CreateDirectory(ownParent);
+    var own = await ProcessRunner.RunAsync(new("dotnet", [Path.Combine(sdk, "Tools", "Rocks.Build.Cli", "Rocks.Build.Cli.dll"), "new-project", "--template",
+        "Foundation", "--name", "OwnGame", "--destination", ownParent, "--projectfiles", "off"], root, cliEnvironment, Timeout: TimeSpan.FromMinutes(10)));
+    Require(own.ExitCode == 0 && File.Exists(Path.Combine(ownParent, "OwnGame", "OwnGame.rocksproject")) &&
+        !IdsOf(Path.Combine(ownParent, "OwnGame", "OwnGame.rocksids.json")).Intersect(gameIds).Any(),
+        "new-project from the SDK CLI without --sdk: " + own.StdOut + own.StdErr);
+    // 실패 정리: 재발급이 실패하면(깨진 명세) 새로 만든 디렉터리는 지우고, 있던 빈 디렉터리는 비운 채 남긴다.
+    string brokenTemplate = Path.Combine(fixture, "broken-template");
+    CopyTree(Path.Combine(root, "Templates", "Game", "Foundation"), brokenTemplate);
+    File.WriteAllText(Path.Combine(brokenTemplate, "FoundationTemplate.rocksids.json"), "{ \"schema\": 1, \"entries\": [ { \"kind\": \"type\" } ] }");
+    foreach (bool existed in new[] { false, true })
+    {
+        string target = Path.Combine(ownParent, existed ? "KeptGame" : "FreshGame");
+        if (existed)
+        {
+            Directory.CreateDirectory(target);
+        }
+
+        var broken = await Cli("new-project", "--template", brokenTemplate, "--name", Path.GetFileName(target), "--destination", ownParent, "--sdk", sdk,
+            "--projectfiles", "off");
+        Require(broken.ExitCode != 0 && (existed ? Directory.Exists(target) && !Directory.EnumerateFileSystemEntries(target).Any() : !Directory.Exists(target)),
+            $"a failed new-project (existed: {existed}) left " + (Directory.Exists(target) ? string.Join(", ", Directory.EnumerateFileSystemEntries(target)) : "nothing") +
+            ": " + broken.StdErr);
+    }
+
     Pass("new-project-from-template", timer.Elapsed);
     var originalFiles = Directory.GetFiles(sdk, "*", SearchOption.AllDirectories)
         .ToDictionary(path => path, Hashing.Sha256File, StringComparer.Ordinal);

@@ -445,6 +445,6 @@ public sealed class ReflectionTestFixtures : CoreModuleRules
 }
 ```
 
-생성 헤더는 원본 철자의 `.h`를 `.generated.h`로 바꿔 include한다(`#include <ReflectionTestFixtures/ReflectionFixture.generated.h>`). 명세는 모듈 폴더의 `ReflectionTestFixtures.rocksids.json`이다. `ModuleRules`를 직접 상속하는 게임 모듈은 `NativeModuleInput`에 `Metadata`와 함께 명세가 있는 폴더 `ModuleDirectory`(프로젝트 상대 경로)를 적는다(`Templates/Game/Foundation/Game.Build.cs`).
+생성 헤더는 원본 철자의 `.h`를 `.generated.h`로 바꿔 include한다(`#include <ReflectionTestFixtures/ReflectionFixture.generated.h>`). 명세는 모듈 폴더의 `ReflectionTestFixtures.rocksids.json`이다. `ModuleRules`를 직접 상속하는 게임 모듈은 `NativeModuleInput`에 `Metadata`와 함께 명세가 있는 폴더 `ModuleDirectory`(프로젝트 상대 경로)를 적는다(`Templates/Game/Foundation/FoundationTemplate.Build.cs`).
 
 빌드는 다음을 거부한다: `Metadata`가 있는데 명세가 없는 모듈(RMC2100), `Metadata`가 없는데 활성 항목이 있는 명세(RMC2102 — 은퇴 항목만 남은 명세는 ID 예약이므로 허용), 한 헤더를 두 모듈이나 한 모듈에서 두 번 선언, 모듈 include 디렉터리 밖이거나 없는 헤더, 대소문자만 다른 생성 철자(RMC2005). 등록하지 않은 헤더의 `ROCKS_CLASS` 선언은 일반 C++ 컴파일만으로 누락이 탐지된다고 보장하지 않는다. 컴파일 단위와 생성 선언의 coverage를 강제하는 기능은 후속 구현 항목이다.

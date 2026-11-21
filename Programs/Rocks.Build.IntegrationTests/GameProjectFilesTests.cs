@@ -41,6 +41,14 @@ internal static class GameProjectFilesTests
         string sdkProject = Path.Combine(projectFiles, GameProjectFiles.HeaderProjectName + ".vcxproj");
         Require(File.Exists(solution) && File.Exists(gameProject) && File.Exists(sdkProject), "game projectfiles did not write the solution and projects");
 
+        // model-only: 종료 0이고 게임 디렉터리에 아무것도 쓰지 않는다(규칙은 임시 디렉터리에 컴파일한다).
+        var snapshot = Directory.GetFiles(game, "*", SearchOption.AllDirectories).ToDictionary(file => file, File.GetLastWriteTimeUtc, StringComparer.OrdinalIgnoreCase);
+        ProcessResult modelOnly = await ProcessRunner.RunAsync(new("dotnet", [cli, "projectfiles", "--project", game, "--sdk", sdk, "--compiler", compiler,
+            "--model-only", "on"], game, environment, Timeout: TimeSpan.FromMinutes(10)));
+        var after = Directory.GetFiles(game, "*", SearchOption.AllDirectories).ToDictionary(file => file, File.GetLastWriteTimeUtc, StringComparer.OrdinalIgnoreCase);
+        Require(modelOnly.ExitCode == 0 && after.Count == snapshot.Count && after.All(pair => snapshot.TryGetValue(pair.Key, out DateTime written) && written == pair.Value),
+            "model-only must succeed without writing into the game: " + modelOnly.ExitCode + " " + modelOnly.StdOut + modelOnly.StdErr);
+
         // 동시 생성: 생성 영역 잠금으로 차례로 돌아 둘 다 성공한다.
         ProcessResult[] concurrent = await Task.WhenAll(Enumerable.Range(0, 2).Select(_ => ProcessRunner.RunAsync(new("dotnet",
             [cli, "projectfiles", "--project", game, "--sdk", sdk, "--compiler", compiler], game, environment, Timeout: TimeSpan.FromMinutes(10)))));
