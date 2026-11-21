@@ -1841,6 +1841,62 @@ A2c2a 상태(2026-11-21): **완료**(리뷰 1회 충족 + 권장 반영). 완료
 
 A2c2b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.21) 시험 없는 항목 0·정의된 시험 16개 모두 인용, 조합(대조표 마지막 행), coverage(14.1.22 — Windows), 리뷰어 판정 **충족**.
 
+#### 14.1.23 요구 대조표(A2c3a — 줄 출력·트랜잭션 만들기·참조 resolver·서비스 API)
+
+시험은 FoundationTests `Core/Source/Runtime/ReflectionText/Tests/TextLinesTests.cpp`(7개)와 EngineTests `Engine/Source/Runtime/AssetRuntime/Tests/PackageGapTests.cpp`의 트랜잭션 판 2개, `Engine/Source/Developer/AssetDatabase/Tests/EditorPackageSaveTests.cpp`의 `EditorPackageSave_CreateInitializer`, `AssetTextResolverTests.cpp`(6개), `AssetServiceTests.cpp`(7개) — 정의된 시험 23개를 모두 인용한다. 줄 출력 시험의 대상 타입은 ReflectionTestFixtures(TextHolder·InstancedHolder·FixedOwner·BytesHolder·TextFieldHolder — 모든 ValueKind·컨테이너·Optional·InstancedStruct·Text)이고, 에셋 쪽은 AssetTestFixtures(TestAsset·TestPart·BaseGameAsset·DerivedGameAsset)와 A2c2 장면(Base·Derived·Hero·Villain·Leaf·Hub)이다. 서비스 장면은 저장 장면처럼 루트를 디스크 임시 디렉터리로 두어 잠금을 잡고 Content는 메모리다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 줄 출력(RE 10.4) | 모든 단일 값 종류(bool·정수 경계·실수 nan·Guid·AssetId·Digest·String escape·Name·enum·Flags·Soft·ClassRef)·목록·Set·Map(String·enum·Name→struct·ClassRef·Soft 키)·struct 멤버·struct 원소 배열·struct 값 Map·Optional set(단일·struct)·unset(`--unset=`)·null 참조 `none`의 줄, Edit의 Transient 제외·ReadOnly 출력, 줄을 같은 live 객체(ReadOnly 같은 값 무동작)·새 staged 객체에 넣어 다시 쓰면 같은 줄(값 보존 왕복), 기본 객체 왕복 | `TextLines_RoundTripsEveryKind` |
+| | InstancedStruct(필드·배열 원소·정적 배열 원소·Map 값·struct 멤버·struct 원소 멤버·비어 있음 `none`), struct 원소 정적 배열(원소마다 멤버 줄, 비우기 줄 없음), 강한 참조 정적 배열(원소마다 `f[i]=` — 통째는 준비 단위가 없다), 바이트 배열(Base64, 빈 배열, struct 안·struct 원소·Optional·struct 값 Map)·바이트 정적 배열(목록), Invariant Text·빈 Text의 왕복 | `TextLines_InstancedStaticBytesAndText` |
+| | 줄로 쓸 수 없는 값 Unsupported: 줄바꿈 든 String 값(`\n`·`\r`)·단일 값 Map의 String 키, Localized Text, resolver 없는 non-null Hard, resolver가 쓰지 못한 참조, 이름 없는 enum 값. 숨김 열거자는 이름으로 쓰고 재입력은 HiddenEnumerator. resolver가 쓰는 참조는 그 텍스트로 왕복 | `TextLines_UnsupportedValuesAndReferences` |
+| | 용도(Edit — Transient·NonTryoutDuplicateTransient 제외, Report — Transient만 제외, TextExportTransient·DuplicateTransient는 둘 다 출력), struct 값 대상·staged 대상, 같은 Name pool 명시 = 기본, 잘못된 값 대상(저장소 없음·빈 lease·클래스 lease)·옵션 검사 실패·다른 Name pool InvalidArgument, 사라진 대상 오류 | `TextLines_UsesTargetsAndOptions` |
+| | Opaque 필드(손으로 등록한 클래스)·도구 이름 없는 struct(손으로 등록 — RegisterStruct)를 담은 InstancedStruct·경로 단계 상한 초과(C++ Emplace로 struct 멤버에 깊이 16 사슬 — 깊이 15는 쓴다) Unsupported | `TextLines_OpaqueAndTooDeepAreUnsupported` |
+| | FormatTextPath의 InstancedStruct 뒤 멤버 단계: 문맥 resolver 없음 InvalidArgument, 있음 `value.x`·`hosts[0].value.x`, 비어 있는 값 NotFound | `TextLines_FormatTextPathUsesContextInstancedTypes` |
+| | 모든 줄 모양(기본 객체의 unset 줄 포함, 장면 넷)마다 값 allocator·출력 문자열의 모든 할당 실패 OutOfMemory, 끝나면 같은 출력 | `TextLines_AllocationFailures` |
+| 트랜잭션 만들기(7.1-15 A2c3) | NewPackage(transaction): null id·모르는 종류 InvalidArgument(트랜잭션 고정 안 함), 대표 에셋 Id() = 패키지 id(공개 전·후), Commit root = Package, 공개된 Package·Package 아닌 staged 객체·두 번째 대표 자식·에셋 아닌 타입 거부, Rollback·소멸이 남기는 것 없음 | `AssetPackage_NewPackageInTransaction` |
+| | NewPackage·NewRepresentativeAsset·Commit의 모든 할당 실패 OutOfMemory·남는 것 없음 | `AssetPackage_NewPackageInTransactionAllocationFailures` |
+| 공개 전 초기화(7.1-15 A2c3) | 초기화는 공개 전 대표 에셋(Id 채움)에 한 번, 값·하위 객체가 공개됨, 초기화 중 다른 패키지 열기(참조 해석)에도 새 패키지가 집합에 들어감, 초기화 실패(값 쓴 뒤·하위 객체 만든 뒤 — NotFound·OutOfMemory) 진단 None·남는 것 없음(Registry 객체 수·집합 그대로), 오류를 삼킨 초기화는 Commit이 그 오류로 실패, 초기화 없는 Create도 Id = 패키지 id | `EditorPackageSave_CreateInitializer` |
+| 참조 resolver(4.1·4.2·7.1-15) | Hard·Weak: 논리 경로(대소문자 무시)·AssetId가 대표 에셋을 열어(닫힘째) handle, 이미 연 패키지 그대로, 하위 객체·중첩 하위 객체(경로·AssetId), 기대 타입(0·자신·조상 받음, 아님 TypeMismatch), 없는 객체 NotFound, 저장하지 않은 새 패키지(경로·AssetId), 열기 경고(Hub)가 warnings에 | `AssetTextResolver_ResolvesHardAndWeak` |
+| | 형식 거부 InvalidArgument(Hard·Weak·Soft 셋 모두): `/` 없는 이름·대문자·35·37자·null AssetId·논리 경로 규칙(빈 구성 요소·끝 `/`·`\`)·빈 객체 경로·객체 경로 구성 요소 규칙(빈·공백) — 아무것도 열지 않음, 색인에 없는 경로 NotFound, 같은 경로 키 둘 AlreadyExists, 없는 id 열기 NotFound, 같은 id 둘 열기 AlreadyExists | `AssetTextResolver_RejectsText` |
+| | Soft는 열지 않음: 경로 → id·객체 경로, AssetId(색인에 없어도) 그대로, 저장하지 않은 새 패키지 경로 | `AssetTextResolver_ResolvesSoftWithoutOpening` |
+| | 출력: 대표 에셋·하위 객체·중첩 경로(Hard·Weak), 저장하지 않은 새 패키지 경로, Soft(색인 경로·객체 경로·새 패키지·색인에 없음·같은 id 둘 → AssetId), Package 객체 자신 Unsupported, 사라진 handle 오류 | `AssetTextResolver_Formats` |
+| | 대입 묶음·줄 출력 왕복: Hard·typed·ObjectRefArray·Soft 하위 객체 대입 → 대상 패키지 열림 → 줄 출력이 같은 텍스트 → 재입력 받음, 기대 타입 위반 진단 Unresolved | `AssetTextResolver_RoundTripsThroughAssignments` |
+| | resolver allocator·값 문자열·출력 버퍼의 모든 할당 실패 OutOfMemory(해석 셋·출력 셋 — 긴 이름 하위 객체 포함) | `AssetTextResolver_AllocationFailures` |
+| 서비스 API(13, 7.1-15 A2c3) | asset-new: 대입(값·문자열·Hard·Soft)과 저장(파일·색인 항목·dirty 해제), 새 서비스가 같은 값, 파생 에셋 클래스 | `AssetService_NewCreatesAndSaves` |
+| | asset-new 거부: 모르는 타입 NotFound·빈 이름 InvalidArgument(진단 None), 에셋 아닌 클래스·추상 에셋 클래스·struct TypeMismatch, 경로 규칙 InvalidPath, 있는 경로 DuplicatePath, 대입 오류 셋을 모두 모음(UnknownProperty·InvalidValue·Unresolved — 아무것도 안 만듦), 저장 실패(만든 패키지는 저장하지 않은 채 남음), 잡지 않은 잠금 | `AssetService_NewRefusals` |
+| | asset-set: 경로·AssetId 대상, 빈 대입도 저장, force 없는 미해결 import MissingDependency·force면 저장 + DroppedUnresolvedImport, 대입 오류 모두 모음(파일 그대로), 대상 형식 InvalidPath(넷), 없는 경로·id NotFound, 잡지 않은 잠금 | `AssetService_SetAssignsAndSaves` |
+| | asset-info: Edit 줄(참조는 논리 경로·색인에 없는 Soft는 AssetId)·Report 줄·JSON·AssetId 대상, 줄로 쓸 수 없는 값 Unsupported(JSON은 씀), 대상 거부, 호출자 문자열 할당 실패 | `AssetService_InfoFormats` |
+| | asset-list: 경로 키 순 전체, --type 파생 포함(TestAsset·BaseGameAsset·DerivedGameAsset·추상 Asset·에셋 아닌 클래스), 모르는 이름·struct 거부, --under(새 디렉터리·없는 디렉터리·논리 디렉터리 아님), 타입을 등록하지 않은 Registry의 서비스, 호출자 목록 할당 실패 | `AssetService_ListFilters` |
+| | 수명: Initialize 전 모든 함수 InvalidArgument, 두 번째 Initialize, 타입·파일 시스템 없는 설정, 파일 캐시 용량 0, Content가 파일(색인 Rebuild 실패) | `AssetService_Lifecycle` |
+| | New(대입·참조·ObjectRefArray — 초기화가 참조 대상을 연다)·Set·Info(줄·JSON)·List의 서비스 allocator 할당을 하나씩 실패: OutOfMemory 또는 대체 경로로 성공 — 이 시험이 Create의 표 자리를 초기화 앞에 잡던 결함을 찾았다 | `AssetService_AllocationFailures` |
+| 조합(14 완료 조건 2) | 줄 출력: ValueKind 전부 × 자리(필드·struct 멤버·배열 원소·정적 배열 원소·Map 값·Optional) × 값 모양(기본·set·unset·null·비어 있음), 대상 종류(Live·Staged·Value) × 용도(Edit·Report). 참조: 텍스트 모양(경로·AssetId × 대표·하위·중첩) × 종류(Hard·Weak·Soft) × 패키지 상태(색인만·열림·저장하지 않음·없음·같은 경로 둘·같은 id 둘). 서비스: 명령 넷 × 대상 모양(경로·AssetId) × 거부 종류 × 할당 실패 위치 전부 | 위 시험 |
+
+#### 14.1.24 Coverage(A2c3a)
+
+측정(2026-11-21, Windows): 줄 출력은 `pwsh -NoProfile -File Build/MeasureCoverage.ps1 -Target Foundation -Executable FoundationTests -Filter TextLines -Sources Core/Source/Runtime/ReflectionText/Private`, 에셋 쪽은 `-Target EngineTests -Filter AssetService_,EditorPackageSave_,EditorPackageSet_,AssetTextResolver -Sources Engine/Source/Developer/AssetDatabase/Private`와 `-Filter AssetPackage_,Package_AttachBulkStore,EditorPackageSave_ -Sources Engine/Source/Runtime/AssetRuntime/Private`.
+
+| 파일 | 줄 | 분기 | 함수 |
+|---|---|---|---|
+| `TextLineExport.cpp`(줄 출력) | 97.7%(302/309) | 96.5%(164/170) | 100%(10/10) |
+| `AssetTextResolver.cpp` | 96.4%(162/168) | 96.4%(81/84) | 100%(8/8) |
+| `AssetService.cpp` | 98.6%(211/214) | 99.1%(107/108) | 100%(12/12) |
+| `EditorPackageSet.cpp`(만들기 초기화 포함) | 99.2%(942/950) | 98.6%(429/435) | 100%(37/37) |
+| `Package.cpp`(트랜잭션 판) | 100%(69/69) | 92.7%(38/41) | 100%(6/6) |
+
+닿지 않은 곳과 근거:
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| `TextLineExport.cpp` 경로 연산 넷(`PathReadInstancedType` 두 곳·`PathIsOptionalSet`·`PathCount`) | 실패 | 경로는 방금 스키마와 그 자리의 값에서 만든 소유 스레드의 유효 경로이고(대상 lease를 쥐고 있다) 이 연산들은 할당하지 않는다 — 할당 실패 시험이 닿지 않음을 확인했다. JSON 출력도 같은 판정이다 |
+| `TextLineExport.cpp` 대상 종류 switch의 암묵 default, 값 대상의 null lease 포인터 | 분기 | AssignmentTarget 종류는 셋뿐이고 Value 대상은 늘 lease 참조로 만든다 |
+| `AssetTextResolver::Resolve` 찾은 대상의 타입 조회 실패, `Format`의 outermost Package 해석·포인터 실패 | 실패 | 방금 찾은(살아 있는) 객체·그 outermost다. 집합 Registry는 패키지 정책이라 outermost는 늘 Package다(ObjectIdentity.h RegistryPolicy) |
+| `AssetService::OpenTarget` 대표 에셋 찾기 실패 | 실패 | 열린 에디터 패키지에는 대표 에셋이 있다(열기가 대표 에셋을 읽고 타입을 대조한다) |
+| `EditorPackageSet.cpp` | 14.1.22와 같은 지점(SetBulkStore 계약·OS 난수·llvm-cov 줄 귀속) | 14.1.22와 같다 — 만들기의 표 자리 잡기는 초기화 뒤로 옮겼고 그 실패는 서비스 할당 실패 시험이 닿는다 |
+| `Package.cpp` 분기 셋 | `ROCKS_ASSERT` 전개 | 방금 만든 이 트랜잭션 객체의 GetForWrite(Required 검사 중이면 앞 Create가 먼저 Busy)·쥔 root가 있는 공개 Package의 typed root |
+
+시험이 찾은 것: (1) 줄 출력의 경로 표기가 InstancedStruct 뒤 멤버를 풀지 못했다(`FormatTextPath`가 문맥의 InstancedStruct resolver를 넘기지 않았다) — 넘기게 고치고 줄 출력이 대상 값 resolver를 건다. (2) 강한 참조 정적 배열 통째 줄은 대입 묶음이 받지 않는다(준비 단위 없음) — 원소 줄로 바꿨다(10.4절). (3) 줄·`.` 한 글자 붙이기가 앞 붙이기가 늘린 용량 때문에 할당 실패에 닿지 않았다 — 자리를 한 번에 잡게 고쳤다. (4) **만들기가 표 자리를 초기화 앞에 잡았는데 초기화(참조 해석)가 다른 패키지를 열며 그 자리를 써, 할당 실패 때 공개 뒤 삽입이 조용히 실패해 새 패키지가 집합에서 빠졌다**(뒤 Save가 NotFound) — 자리를 초기화 뒤·Commit 앞에 잡는다. (5) 새 패키지의 대표 에셋 `Id()`가 로드 전까지 null이었다 — 트랜잭션 판 대표 에셋 만들기가 채운다.
+
 ## 15. PNG 디코더 범위
 
 색 형식 0/2/3/4/6, 비트 깊이 1–16, Adam7, PLTE·tRNS, chunk CRC, zlib(Core `Compression`)·Adler-32, 한 변 16384·해제 크기 = IHDR 계산값. gAMA·cHRM·sRGB·iCCP는 변환하지 않고 sRGB로 보며 sRGB가 아닌 표시가 있으면 `NonSrgbSource` 경고. APNG는 기본 이미지. 시험은 PngSuite(자유 사용 라이선스, `TextureTools/Tests/Fixtures/PngSuite`).

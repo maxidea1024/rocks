@@ -459,7 +459,8 @@ TEST(TextLines_UnsupportedValuesAndReferences) {
 
 // 용도·대상·옵션(10.1절): Edit은 Transient·NonTryoutDuplicateTransient를 빼고 Report는 Transient만
 // 뺀다(TextExportTransient·DuplicateTransient는 둘 다 쓴다). struct 값 대상은 그 멤버 줄, staged
-// 대상도 쓴다. 잘못된 값 대상(저장소 없음·빈 lease·클래스 lease)·잘못된 옵션·다른 Name pool은
+// 대상도 쓴다. 같은 Name pool을 명시하면 기본과 같다. 잘못된 값 대상(저장소 없음·빈 lease·클래스
+// lease)·잘못된 옵션·다른 Name pool은
 // InvalidArgument, 사라진 대상은 그 handle 오류다.
 TEST(TextLines_UsesTargetsAndOptions) {
     LineObjects fixture;
@@ -518,6 +519,14 @@ TEST(TextLines_UsesTargetsAndOptions) {
         CHECK(Has(lines, "--unset=limit\n"));
         transaction.Rollback();
     }
+
+    // 대상과 같은 Name pool을 명시하면 기본(null)과 같다.
+    String implicitNames(fixture.system);
+    REQUIRE(fixture.Lines(live, implicitNames));
+    fixture.options.names = &fixture.names;
+    REQUIRE(fixture.Lines(live, lines));
+    CHECK(lines.View() == implicitNames.View());
+    fixture.options.names = nullptr;
 
     // 다른 Name pool.
     NamePool otherNames(fixture.system);
