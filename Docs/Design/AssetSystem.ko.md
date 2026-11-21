@@ -548,6 +548,16 @@ A2는 에디터 쪽 에셋 데이터베이스다(4·5.4·5.5·7·8·13·16절). 
         - 저장하지 않은 편집의 Soft 참조(열린 패키지)는 강한 간선이 아니고 디스크 참조자도 아니라 삭제를 막지 않는다(한계 — 위 서비스 항목, 시험으로 고정). ImportOwner 의존만 있는 참조자(다른 임포트의 출력)도 디스크 참조자다.
         - 자기 참조: 색인 참조자에 자신은 나오지 않는다(writer가 자기 의존을 빼고 reader가 거부한다 — 5.4절) — 삭제는 자기 제외 판정을 두지 않는다(처음 구현의 그 판정은 닿을 수 없었다).
         - 상태: **구현** — 대조표 14.1.37절, coverage 14.1.38절.
+      - A2e3b 구현 세부(2026-11-22, 권장안으로 확정):
+        - Core 치환 hook: `FieldCodecHooks::SubstituteSoftReference(info) → AssetId`(기본은 `info.asset` 그대로 — 저장은 객체를 바꾸지 않는다). 저장 문맥 `FieldEncodeContext::SubstituteSoftReference`가 null이 아닌 Soft 값에만, hook이 있고 Required 검사 모드가 아닐 때 부르고(struct 치환 `SubstituteStruct`와 같은 조건) 바뀐 id를 쓴 뒤 수집(`CollectSoftReference`)도 바뀐 id로 한다. hook이 null id를 돌려주면 InvalidArgument(경로만 남은 값은 `SoftObjectRef` 규칙이 거부하는 모양 — 복제의 치환은 id만 바꾼다). Map 키·Set 원소의 Soft 값도 치환한다 — 순서는 삽입 순서라 바뀌지 않고, 새 id는 새로 발급한 것이라 키가 겹치지 않는다. 버린 대안: 쓰기 전에 메모리 객체의 Soft 값을 바꿨다 되돌리기(사용자 객체·undo를 건드린다), Objects 섹션 byte를 고쳐 쓰기(codec 밖에서 wire를 안다).
+        - writer: `PackageWriteOptions::duplicateId`(에디터 패키지만 — 쿠킹이면 InvalidArgument, 패키지의 지금 id와 같으면 InvalidArgument). 주면 헤더 id가 그것이고, 제외 필드 플래그에 `DuplicateTransient`·`NonTryoutDuplicateTransient`를 더하며(쓰지 않으므로 로드가 클래스 기본값 — UE `DuplicateObject`), 지금 id를 가리키는 Soft 값을 그것으로 치환한다(자기 의존 제외도 새 id로 한다 — 사본의 자기 Soft 참조는 의존이 아니다).
+        - 집합: `EditorPackageSet::Duplicate(source, target, newId, lock, warnings, failure)` — 열린 원본의 메모리 상태를 새 파일로 쓴다(사본은 열지 않는다). 검사는 저장과 같다(읽기 전용 `NewerVersion` / Unsupported, 미해결 import `MissingDependency` / InvalidArgument — 복제에는 강제 옵션이 없다), newId는 null이 아니고 열려 있지도 색인에 있지도 않아야 한다(`DuplicateAssetId` / AlreadyExists), 대상은 새 패키지의 첫 저장과 같은 판정(파일 있음·색인 같은 경로 키·저장하지 않은 새 패키지 경로 — `DuplicatePath` / AlreadyExists, OS 경로 상한 InvalidPath / CapacityExceeded). ImportRecord: 소유 기록(owner = 원본)이면 owner를 newId로 하고 outputs에는 원본 자신의 출력 하나만(outputKey 그대로, asset = newId) 남겨 다시 쓴다 — 형제 출력(다중 출력 임포트의 다른 에셋)은 원본 임포트의 것이라 빼고(남기면 사본이 남의 출력의 소유를 주장해 사본 재임포트가 원본의 형제를 덮어쓴다 — A2e3b 리뷰 필수, UE `AssetImportData`가 유지하는 것도 원본 파일 경로이지 형제의 소속이 아니다), 사본을 재임포트할 때 빠진 형제 출력을 새로 만들지는 A2f에서 정한다. 참조 기록이면 기록과 ImportOwner 의존을 버리고 경고 `ImportRecordDropped`(related = 그 소유자). 쓰기는 저장과 같은 길(임시 → 재검증 → Replace → 색인 Refresh → 대상 디렉터리의 고아 임시 파일 정리)이고 원본 정보(파일·지문·dirty·저장소)는 바꾸지 않는다. 타입 hook(Tags·Build 의존)은 원본 객체로 부르되 문맥 `AssetTypeHookContext::asset`에 저장할 id(사본이면 newId, 저장이면 그 패키지 id)를 준다 — 패키지 정체성이 필요한 hook은 객체 값 대신 이것을 쓴다(A2e3b 리뷰 권장) — 저장의 판정·쓰기를 원본/복제 둘 다 쓰게 나눴다(`PlanSave`의 새 파일 대상 판정과 hook 산출물, `WriteAndReplace`의 복제 모드).
+        - 서비스 `AssetService::Duplicate(lock, source, target, newId, warnings, failure)`: 원본은 `<path|AssetId>`(열기와 같다 — 별칭을 따른다, 읽기는 파괴가 아니다), 대상 경로 규칙과 별칭 점유(어느 에셋의 별칭이든 — 새 에셋에는 별칭이 없다, related = 별칭 대상), 새 id 발급(`AssetId::TryNew`) 뒤 집합 `Duplicate`.
+        - 명령 `asset-duplicate <path|AssetId> <new path>`(잠금): 표준 출력 `<새 경로> <AssetId>` 한 줄(asset-new와 같다), 경고 줄(ImportRecordDropped 등), 캐시 쓰기.
+        - 원본 고르기의 저장하지 않은 새 패키지: 서비스의 `<path|AssetId>` 열기(`OpenTarget` — Info·Set·Duplicate 공통)가 같은 경로 키의 저장하지 않은 새 패키지를 그대로 준다(색인에 없다 — 처음 구현은 경로로 고를 수 없었다, 시험이 찾음).
+        - 대상 점유의 새 파일 판정(`PlanNewTarget`)은 첫 저장과 복제가 같이 쓴다: 대상 파일이 있음·색인에 같은 경로 키(파일이 밖에서 지워진 낡은 색인도)는 DuplicatePath, Stat의 없음 밖 오류는 그 오류, 경로 상한은 InvalidPath / CapacityExceeded.
+        - 시험 fixture: `asset_fixture::DuplicableAsset`(DuplicateTransient·NonTryoutDuplicateTransient 필드, 자기·남 Soft 참조, 제외 멤버를 가진 struct `DuplicableSlot` 필드·배열 — AssetTestFixtures, `ids add`로 발급).
+        - 상태: **구현** — 대조표 14.1.39절, coverage 14.1.40절.
     - **A2e4 ID 수정·고아 출력**:
       - `asset-fix-duplicate-id <path>`: 그 경로 항목이 색인에서 `duplicateId`여야 한다(아니면 InvalidArgument). 같은 id 패키지는 집합에 동시에 둘 수 없으므로(Registry가 id로 찾는다) 그 파일을 색인 대조 없이 여는 길(`EditorPackageSet::OpenForIdFix(fileName)` — 같은 id의 다른 파일이 집합에 열려 있으면 Busy, 그 파일이 dirty면 진단 줄이 먼저 저장하라고 알린다)로 열어 새 id로 같은 경로에 다시 쓰고(복제와 같은 writer 옵션, 소유 ImportRecord의 owner·outputs도 바꾼다) 닫는다. 다른 패키지의 그 id 참조는 남은 쪽을 가리킨다(출력에 적는다). 대상이 다른 임포트의 출력이면 소유자의 outputs가 옛 id를 가리키므로 고아가 된다(경고 `OrphanedOutput`).
       - 고아 출력: 색인 ImportRecord 요약에 outputs의 AssetId 목록을 더한다(캐시 형식 버전·판정 의미 버전을 올린다). 고아 = 참조 기록(owner ≠ 자신)인 항목 가운데 owner가 색인에 없거나, owner 항목의 기록이 없거나, owner 기록의 outputs에 자신이 없는 것. `AssetIndex::Orphans(out)`, `Verify`가 고아마다 `OrphanedOutput` 진단(경고)을 더한다 — `asset-index-verify`는 진단 줄을 쓰되 경고만이면 종료 0(13절 "경고만 있으면 0").
@@ -2277,6 +2287,50 @@ A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항�
 리뷰(판정 충족, 필수 없음) 권장 넷: 관찰자 자동 동기화(Open·Create·Save·Close 시작), 빠진 조합 셋(읽기 전용·ImportOwner 참조자·저장하지 않은 Soft 편집), 파일이 이미 없는 삭제의 성공, 참조자 줄 형식 예 — 모두 반영했다.
 
 시험이 찾은 것: (1) 관찰자가 붙어 있는데 아무도 묶음을 꺼내지 않아 편집이 쌓이면 키 상한에서 Registry 쓰기가 CapacityExceeded가 될 수 있었다 — 간선 표가 꺼내고 오래 사는 host는 주기적으로 부른다(7.1절 17). (2) 자기 참조 제외 판정은 닿을 수 없었다(색인에 자기 의존이 없다) — 지웠다. (3) handle 정렬의 세대 비교는 한 묶음에 같은 칸 다른 세대가 오지 않아 닿을 수 없었다 — 칸·세대를 한 64-bit 키로 비교한다. (4) 파일이 이미 없는 삭제가 오류로 끝나 낡은 색인이 다시 검색할 때까지 남았다 — 성공으로 본다(리뷰 권장). (5) 명령의 "메모리 참조 Busy" 구분은 명령 프로세스에서 닿을 수 없다(대상을 열지 않은 새 프로세스) — 참조자 줄은 목록이 있으면 쓰고 지웠을 때만 warning으로 단순화했다.
+
+#### 14.1.39 요구 대조표(A2e3b — 복제)
+
+시험은 Foundation `Core/Source/Runtime/ObjectSerialization/Tests/CodecGraphTests.cpp`·`MapGraphTests.cpp`(각 1개), EngineTests `Engine/Source/Runtime/AssetRuntime/Tests/PackageDuplicateTests.cpp`(1개)·`Engine/Source/Developer/AssetDatabase/Tests/AssetDuplicateTests.cpp`(6개)와 C# `Programs/Rocks.Commandlet.Tests/Program.cs`의 "asset-duplicate" 항목 15개(Windows 전용 1개)다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| Core Soft 치환 hook(7.1-17 A2e3b) | null이 아닌 값마다 부름(경로·기대 타입·Required 플래그·필드 경로), 바뀐 asset을 쓰고 경로는 그대로, 수집도 바뀐 asset, 바꾸지 않는 값 그대로, null asset 반환 InvalidArgument, hook 실패 전파 | `Codec_SoftReferencesSubstitutedOnSave` |
+| Core 치환 — 컨테이너(7.1-17 A2e3b) | Map 키(같은 asset·다른 경로 둘 — 둘 다 남고 삽입 순서 그대로, null 키는 부르지 않음)·Set 원소·Map 값 struct 멤버 | `MapGraph_SoftKeysSubstitutedOnSave` |
+| writer 복제 옵션(7.1-17 A2e3b) | 헤더 id = 사본 id, DuplicateTransient·NonTryoutDuplicateTransient는 로드에서 기본값(struct 필드·원소 배열 안 멤버 포함), 자기 Soft는 사본 id·자기 의존 아님, 남 Soft 그대로, 원본 객체 그대로, 복제가 아닌 쓰기 그대로, 지금 id와 같은 사본 id·쿠킹 복제 InvalidArgument | `AssetPackage_DuplicateWrite` |
+| 메모리 상태 복제(7.1-17 A2e3b) | 저장하지 않은 편집·bulk·의존(Hard·EditorOnly·Soft)이 사본에, 헤더 id, 새 디렉터리, 원본 정보(dirty·파일·저장소) 그대로, 사본은 열지 않음·색인에 새 항목, id로 고른 자기 참조 패키지(사본 Soft = 사본 id·의존 없음), 이동(Detach) 뒤 bulk가 메모리에만 있는 원본(bulk째), 별칭 경로 원본(AliasResolved), 저장하지 않은 새 패키지 원본(저장하지 않은 새 bulk `AddUnsaved`째 — 원본은 저장하지 않은 채), NotDurable 경고(목록 있고 없음) | `AssetDuplicate_CopiesMemoryState` |
+| ImportRecord(7.1-17 A2e3b) | 소유 기록 — owner·원본 자신의 출력만 사본 id로(형제 출력은 빠짐, 원본·임포터 그대로), 참조 기록 — 기록과 ImportOwner 의존을 버리고 ImportRecordDropped(related = 소유자, 경고 목록 없이도 성공) | `AssetDuplicate_ImportRecords` |
+| 거부·실패(7.1-17 A2e3b) | 서비스: Initialize 전·잠금 아님·대상 경로 규칙·다른 에셋 별칭(대소문자 무시·related)·대상 점유(색인 항목·디스크 파일·저장하지 않은 새 패키지 — related)·대상 Stat 실패·색인에만 있는 대상·원본 없음·읽기 전용 원본(NewerVersion)·미해결 import 원본(MissingDependency·related)·별칭 표 손상·hook 실패·경고 자리 할당 실패, hook의 Tags·Build 의존은 사본에 다시 만듦(hook 문맥의 asset = 사본 id, 저장은 그 패키지 id). 집합: null id·잠금 아님·원본이 열리지 않음·새 id가 색인·집합에 있음(DuplicateAssetId)·hook 표 없음(Initialize 전후)·만들기 초기화 안 Busy. IO: 부모 디렉터리·임시 파일 만들기·쓰기·Flush·Close·교체 실패 — 임시·대상 파일 없음·색인 그대로 | `AssetDuplicate_RejectsAndFailures` |
+| OS 경로 상한(4.2, 7.1-10) | 깊은 디스크 루트에서 대상이 상한을 넘으면 InvalidPath / CapacityExceeded(아무것도 쓰지 않음), 짧은 이름은 복제 | `AssetDuplicate_NativePathLimit` |
+| 할당 실패(7.1-17 A2e3b) | 편집한 열린 Hero(bulk·의존)와 소유 기록 Leaf, 저장하지 않은 새 패키지·쌓인 간선 편집이 있는 상태의 모든 할당 실패 — OutOfMemory, 경고 없음, 대상 파일·색인 그대로 | `AssetDuplicate_AllocationFailures` |
+| hook 문맥(7.1-17 A2e3b 리뷰) | `AssetTypeHookContext::asset`이 CallBase로 부른 base hook까지 그대로 감 | `AssetTypeHooks_NearestAndCallBase` |
+| 실제 디스크(7.1-17 A2e3b) | bulk를 읽어 캐시 핸들이 열린 Hero를 복제, 사본을 열어 bulk 읽기, 원본은 원본 파일에 이어진 채 | `AssetDuplicate_RealDisk` |
+| 명령(13, 7.1-17 A2e3b) | 경로·id로 고른 원본의 사본 줄(새 id·새 파일·원본 남음), 사본 asset-info(값·참조), 대상이 패키지·다른 에셋 별칭(related)·없는 원본·대상 경로 규칙 진단 줄, 잠금 Busy(Windows), 사용법 넷·도움말·프로젝트 없음 | C# 15개 |
+| 조합(14 완료 조건 2) | 원본 종류(닫힘·열림·편집·저장하지 않은 새 패키지·읽기 전용·미해결) × 고르기(경로·id·별칭) × 기록(없음·소유·참조) × 대상 상태(빈·점유 넷·별칭·상한) × 실패 위치(검사·hook·쓰기 IO 단계·할당) | 위 시험 |
+
+#### 14.1.40 Coverage(A2e3b)
+
+측정(2026-11-22, Windows, `ROCKS_MSVC_TOOLSET=14.44`): `-Target EngineTests -Filter AssetDuplicate,AssetPackage_Duplicate,EditorPackage,AssetDelete,AssetMove -Sources Engine/Source/Developer/AssetDatabase/Private,Engine/Source/Runtime/AssetRuntime/Private`, `-Target Foundation -Executable FoundationTests -Filter Codec_,MapGraph_,RequiredCheck -Sources Core/Source/Runtime/ObjectRuntime/Public/Object`, 명령은 C# 시험 구동기.
+
+| 범위 | 줄 | 분기 |
+|---|---|---|
+| `FieldEncodeContext::SubstituteSoftReference`, `WriteValueWire`의 Soft 치환 | 모두 닿음(쓰기 실패 두 곳은 아래) | 모두 닿음 |
+| `PackageWriter.cpp`(복제 옵션·치환 hook·검사) | 모두 닿음 | 모두 닿음 |
+| `EditorPackageSet::Duplicate`·`PlanNewTarget`·`PlanHookOutputs`·`WriteAndReplace` 복제 모드 | 1곳 제외 모두 | 같음 |
+| `AssetService::Duplicate`, `OpenTarget`의 새 패키지 고르기 | 1곳 제외 모두 | 같음 |
+| `RunAssetDuplicateCommand` | 출력·서식 실패 제외 모두 | 같음 |
+
+닿지 않은 곳과 근거:
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| `AssetService::Duplicate` 새 id 발급 실패, `WriteAndReplace` 임시 이름 guid 발급 실패 | 실패 | OS 보안 난수 실패(14.1.22와 같다) |
+| `WriteValueWire` Soft 값의 guid·경로 쓰기 실패 | 실패 | 이번 단계 전에도 닿지 않던 줄이다(변수 이름만 바뀜) — 값 쓰기는 Archive 한도·할당 실패뿐이고 그 실패는 같은 함수의 다른 값 종류가 돈다 |
+| `RunAssetDuplicateCommand` 출력 쓰기·서식 실패 | 실패 | 14.1.36과 같다 |
+| 커버리지 표의 `if (auto reserved =`·`const PackageContents& contents` 0 | 표기 | 여러 줄 문장의 첫 줄 region 표기다 — 다음 줄들이 1,000번 넘게 실행된다 |
+
+리뷰: 1차 미충족(필수 하나 — 소유 기록 복제가 형제 출력까지 사본 기록에 남겨 사본이 남의 출력의 소유를 주장했다, 원본 자신의 출력만 남기게 고쳤다). 권장 셋 반영: hook 문맥에 저장할 id(`AssetTypeHookContext::asset`), 빠진 조합(struct·원소 안 DuplicateTransient — fixture `DuplicableSlot`, Detach 뒤 원본, `AddUnsaved` bulk), 복제도 고아 임시 파일 정리.
+
+시험이 찾은 것: (1) 서비스의 `<path|AssetId>` 열기가 저장하지 않은 새 패키지를 경로로 찾지 못했다(Info·Set·Duplicate 공통) — 같은 경로 키의 새 패키지를 준다. (2) 실제 디스크 시험이 다음 Open 뒤의 `EditorPackageInfo` 포인터를 다시 써 크래시했다(시험 결함 — API 계약대로 다시 찾는다).
 
 ## 15. PNG 디코더 범위
 

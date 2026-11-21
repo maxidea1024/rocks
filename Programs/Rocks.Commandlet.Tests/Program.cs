@@ -1542,6 +1542,107 @@ finally
     Directory.Delete(deleteDirectory, true);
 }
 
+// asset-duplicate(AssetSystem.ko.md 7.1절 17 — A2e3b): 경로·id로 고른 원본의 사본(새 id·새 파일·열림), 대상 점유(패키지·다른 에셋 별칭),
+// 없는 원본·대상 경로 규칙, 잠금 Busy, 사용법·도움말·프로젝트 없음.
+string duplicateDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-duplicate-{Environment.ProcessId}");
+try
+{
+    string project = Path.Combine(duplicateDirectory, "Duplicating");
+    Directory.CreateDirectory(project);
+    File.WriteAllText(Path.Combine(project, "Duplicating.rocksproject"), "{}\n");
+    string projectOption = $"--project={project}";
+    string content = Path.Combine(project, "Content");
+
+    async Task<ProcessResult> RunDuplicate(params string[] arguments) =>
+        await ProcessRunner.RunAsync(new(executable, arguments, workingDirectory, Timeout: TimeSpan.FromSeconds(30)));
+
+    void ReportDuplicate(string label, bool passed, ProcessResult result)
+    {
+        Console.WriteLine($"{label}: {(passed ? "PASS" : "FAIL")}");
+        if (!passed)
+        {
+            ++failures;
+            Console.Error.WriteLine($"  exit={result.ExitCode}; stdout={result.StdOut}; stderr={result.StdErr}");
+        }
+    }
+
+    ProcessResult hero = await RunDuplicate("asset-new", "Skeleton", "/Game/Dp/Hero", projectOption);
+    ProcessResult run = await RunDuplicate("asset-new", "AnimationClip", "/Game/Dp/Run", "skeleton=/Game/Dp/Hero", "rateScale=2",
+        projectOption);
+    ReportDuplicate("duplicate: setup", hero.ExitCode == 0 && run.ExitCode == 0, run);
+    string heroId = hero.StdOut.Trim().Split(' ').Last();
+    string runId = run.StdOut.Trim().Split(' ').Last();
+
+    // 경로로 고른 원본: 새 id·새 파일, 사본을 열면 값과 참조가 같다.
+    ProcessResult copied = await RunDuplicate("asset-duplicate", "/Game/Dp/Run", "/Game/Dp/Run2", projectOption);
+    string copyId = copied.StdOut.Trim().Split(' ').Last();
+    ReportDuplicate("asset-duplicate", copied.ExitCode == 0 && copied.StdOut.StartsWith("/Game/Dp/Run2 ", StringComparison.Ordinal) &&
+        copyId != runId && copyId.Length == 36 && copied.StdErr.Length == 0 &&
+        File.Exists(Path.Combine(content, "Dp", "Run2.rasset")) && File.Exists(Path.Combine(content, "Dp", "Run.rasset")), copied);
+    ProcessResult copyInfo = await RunDuplicate("asset-info", "/Game/Dp/Run2", projectOption);
+    ReportDuplicate("asset-info of a copy", copyInfo.ExitCode == 0 &&
+        copyInfo.StdOut.Contains("skeleton=/Game/Dp/Hero\n", StringComparison.Ordinal) &&
+        copyInfo.StdOut.Contains("rateScale=2\n", StringComparison.Ordinal), copyInfo);
+
+    // id로 고른 원본.
+    ProcessResult byId = await RunDuplicate("asset-duplicate", heroId, "/Game/Dp/Hero2", projectOption);
+    ReportDuplicate("asset-duplicate by id", byId.ExitCode == 0 && byId.StdOut.StartsWith("/Game/Dp/Hero2 ", StringComparison.Ordinal) &&
+        !byId.StdOut.Contains(heroId, StringComparison.Ordinal), byId);
+
+    // 거부: 대상이 패키지·다른 에셋의 별칭, 없는 원본, 대상 경로 규칙.
+    ProcessResult occupied = await RunDuplicate("asset-duplicate", "/Game/Dp/Run", "/Game/Dp/Hero", projectOption);
+    ReportDuplicate("asset-duplicate onto a package", occupied.ExitCode == 1 &&
+        occupied.StdErr.Contains("asset-duplicate: DuplicatePath: /Game/Dp/Run: AlreadyExists", StringComparison.Ordinal), occupied);
+    ProcessResult moved = await RunDuplicate("asset-move", "/Game/Dp/Hero2", "/Game/Dp/Hero3", projectOption);
+    string hero2Id = byId.StdOut.Trim().Split(' ').Last();
+    ProcessResult onAlias = await RunDuplicate("asset-duplicate", "/Game/Dp/Run", "/Game/Dp/Hero2", projectOption);
+    ReportDuplicate("asset-duplicate onto an alias", moved.ExitCode == 0 && onAlias.ExitCode == 1 &&
+        onAlias.StdErr.Contains($"asset-duplicate: DuplicatePath: /Game/Dp/Run: AlreadyExists (related {hero2Id})",
+            StringComparison.Ordinal), onAlias);
+    ProcessResult missing = await RunDuplicate("asset-duplicate", "/Game/Nowhere", "/Game/X", projectOption);
+    ReportDuplicate("asset-duplicate missing source", missing.ExitCode == 1 &&
+        missing.StdErr.Contains("asset-duplicate: NotFound: /Game/Nowhere", StringComparison.Ordinal), missing);
+    ProcessResult invalid = await RunDuplicate("asset-duplicate", "/Game/Dp/Run", "Game/X", projectOption);
+    ReportDuplicate("asset-duplicate invalid target", invalid.ExitCode == 1 &&
+        invalid.StdErr.Contains("asset-duplicate: InvalidPath: /Game/Dp/Run", StringComparison.Ordinal), invalid);
+
+    if (OperatingSystem.IsWindows())
+    {
+        string lockPath = Path.Combine(project, "Intermediate", "AssetDatabase.lock");
+        using FileStream locked = new(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
+        locked.Lock(0, 1);
+        ProcessResult busy = await RunDuplicate("asset-duplicate", "/Game/Dp/Run", "/Game/Dp/Run9", projectOption);
+        ReportDuplicate("asset-duplicate locked", busy.ExitCode == 1 &&
+            busy.StdErr.Contains("asset-duplicate: Busy: ", StringComparison.Ordinal), busy);
+        locked.Unlock(0, 1);
+    }
+
+    string[][] duplicateUsage =
+    [
+        ["asset-duplicate", projectOption],
+        ["asset-duplicate", "/Game/A", projectOption],
+        ["asset-duplicate", "/Game/A", "/Game/B", "/Game/C", projectOption],
+        ["asset-duplicate", "/Game/A", "/Game/B", "--force", projectOption],
+    ];
+    foreach (string[] arguments in duplicateUsage)
+    {
+        ProcessResult usage = await RunDuplicate(arguments);
+        ReportDuplicate($"asset-duplicate usage: {string.Join(' ', arguments.Skip(1).Where(argument => argument != projectOption))}",
+            usage.ExitCode == 2 && usage.StdErr.StartsWith("usage: asset-duplicate", StringComparison.Ordinal), usage);
+    }
+
+    ProcessResult duplicateHelp = await RunDuplicate("asset-duplicate", "--help");
+    ReportDuplicate("asset-duplicate help", duplicateHelp.ExitCode == 0 &&
+        duplicateHelp.StdOut.StartsWith("usage: asset-duplicate", StringComparison.Ordinal), duplicateHelp);
+    ProcessResult duplicateNoProject = await RunDuplicate("asset-duplicate", "/Game/A", "/Game/B");
+    ReportDuplicate("asset-duplicate without a project", duplicateNoProject.ExitCode == 1 &&
+        duplicateNoProject.StdErr.Contains("no project found", StringComparison.Ordinal), duplicateNoProject);
+}
+finally
+{
+    Directory.Delete(duplicateDirectory, true);
+}
+
 if (OperatingSystem.IsWindows())
 {
     // 무효 stderr 핸들을 child의 표준 오류로 직접 설정해 출력 실패를 재현한다.

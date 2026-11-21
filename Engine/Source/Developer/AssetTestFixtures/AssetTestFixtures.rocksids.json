@@ -2306,6 +2306,69 @@
     },
     {
       "kind": "field",
+      "name": "rocks::asset_fixture::DuplicableAsset::cache",
+      "id": "eb91b2f0b9984e75baebadce326f9657",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::DuplicableAsset::instance",
+      "id": "fcae5687ff8144718be878afc60639c8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::DuplicableAsset::kept",
+      "id": "a1b517dd8b964c599a159b714923e87a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::DuplicableAsset::other",
+      "id": "6046f633d7944cec9d9c6c1f0bfd288b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::DuplicableAsset::self",
+      "id": "c3d27a2bf5fa40629e55bb03dd0d6c8e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::DuplicableAsset::slot",
+      "id": "ecd95dcb2b6d4460b70a9439a40767d6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::DuplicableAsset::slots",
+      "id": "b6e096fda90244ce803855e055ae88cc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::DuplicableSlot::cache",
+      "id": "6641e6a0de8944409892d0faf531577c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::asset_fixture::DuplicableSlot::kept",
+      "id": "1c04bb0a872442e39fe57e167301af50",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
       "name": "rocks::asset_fixture::FixtureEntry::cost",
       "id": "4837a3a4151d410c8fd00a555bc4ecd0",
       "aliases": [],
@@ -3176,6 +3239,20 @@
       "kind": "type",
       "name": "rocks::asset_fixture::DerivedGameAsset",
       "id": "655b449837544a5fb0473a54bb95a997",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::asset_fixture::DuplicableAsset",
+      "id": "50f5ba51a7f342b282ae7bec181977b8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::asset_fixture::DuplicableSlot",
+      "id": "b2e9b6bbab2b49fd971b542ae7cffd1c",
       "aliases": [],
       "retired": false
     },

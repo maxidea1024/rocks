@@ -439,6 +439,80 @@ TEST(MapGraph_WireErrorsAreRejected) {
     CHECK(types.Shutdown());
 }
 
+// 소프트 참조 치환은 Map 키·Set 원소·Map 값 struct 멤버에도 적용된다(AssetSystem.ko.md 7.1절 17
+// A2e3b): 같은 asset·다른 경로 키 둘은 바뀐 asset으로 둘 다 남고 삽입 순서 그대로다. null 키는
+// 부르지 않는다.
+TEST(MapGraph_SoftKeysSubstitutedOnSave) {
+    static constexpr AssetId Original{Guid{7, 10}};
+    static constexpr AssetId Copy{Guid{7, 11}};
+    struct Substituter final : FieldCodecHooks {
+        Result<AssetId> SubstituteSoftReference(const SoftReferenceInfo& info) noexcept override {
+            ++calls;
+            return Result<AssetId>::Success(info.asset == Original ? Copy : info.asset);
+        }
+
+        uint32 calls = 0;
+    };
+
+    SystemAllocator allocator;
+    TypeRegistry types(allocator);
+    REQUIRE(RegisterFixture(types));
+    {
+        ObjectRegistry objects(allocator, types, {0x4d4150, 30});
+        RootRef<MapHolder> holder = New(objects);
+        Allocator& objectAllocator = objects.ObjectAllocator();
+        With(objects, holder.Handle(), [&](MapHolder& value) noexcept {
+            const StringView paths[] = {"B", "A"};
+            for (StringView path : paths) {
+                SoftObjectRef<> key(objectAllocator);
+                REQUIRE(key.TryAssign(Original, path));
+                Put(value.softKeys, Move(key), uint64{path.ByteCount()});
+            }
+
+            Put(value.softKeys, SoftObjectRef<>(objectAllocator), uint64{9});
+            SoftObjectRef<> element(objectAllocator);
+            REQUIRE(element.TryAssign(Original, ""));
+            REQUIRE(value.assets.Add(Move(element)));
+            MapLink link(objectAllocator);
+            REQUIRE(link.asset.TryAssign(Original, ""));
+            Put(value.links, uint32{1}, Move(link));
+        });
+
+        {
+            Substituter hooks;
+            ObjectGraphSaveOptions options;
+            options.hooks = &hooks;
+            auto saved = SaveObjectGraph(allocator, objects, objects.OwnerAccess(), holder.Handle(),
+                                         options);
+            REQUIRE(saved);
+            CHECK(hooks.calls == 4);
+            auto loaded = LoadObjectGraph(allocator, objects, types, objects.OwnerAccess(),
+                                          saved.Value().View(), ObjectGraphLoadOptions{});
+            REQUIRE(loaded);
+            With(objects, loaded.Value().Handle(), [&](MapHolder& value) noexcept {
+                REQUIRE(value.softKeys.Count() == 3);
+                auto entry = value.softKeys.begin();
+                CHECK((*entry).key.asset == Copy && (*entry).key.objectPath.View() == "B");
+                ++entry;
+                CHECK((*entry).key.asset == Copy && (*entry).key.objectPath.View() == "A");
+                ++entry;
+                CHECK((*entry).key.asset.IsNull());
+                REQUIRE(value.assets.Count() == 1);
+                CHECK((*value.assets.begin()).asset == Copy);
+                const MapLink* link = value.links.Find(uint32{1});
+                REQUIRE(link != nullptr);
+                CHECK(link->asset.asset == Copy);
+            });
+        }
+
+        holder.Reset();
+        REQUIRE(objects.Collect(objects.OwnerAccess()));
+        REQUIRE(objects.Shutdown(objects.OwnerAccess()));
+    }
+
+    CHECK(types.Shutdown());
+}
+
 // 진단·수집 경로는 Map 항목·Set 원소의 삽입 순번이다(1.6절 — 키를 복사하지 않는다): non-null 소프트
 // 키·원소 수집은 [softKeys[i]]·[assets[i]], Map 값 struct 안 멤버 수집은 [links[i], asset]이다.
 // Required Map 값·Set 원소의 null은 rejectMissingRequired 저장이 RequiredMissing 진단 뒤

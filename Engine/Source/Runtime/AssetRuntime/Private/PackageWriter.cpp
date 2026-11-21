@@ -22,6 +22,10 @@ using namespace package_detail;
 
 constexpr uint32 PackageWriterEditorOnlyFlag = static_cast<uint32>(FieldFlags::EditorOnly);
 constexpr uint32 PackageWriterRequiredFlag = static_cast<uint32>(FieldFlags::Required);
+// 복제가 쓰지 않는 필드 플래그다(A2e3b).
+constexpr uint32 PackageWriterDuplicateFlags =
+    static_cast<uint32>(FieldFlags::DuplicateTransient) |
+    static_cast<uint32>(FieldFlags::NonTryoutDuplicateTransient);
 
 ArchiveLimits SectionLimits() noexcept {
     ArchiveLimits limits;
@@ -47,10 +51,16 @@ struct BulkDraft {
 // BulkDataRef 재번호.
 class WriterHooks final : public FieldCodecHooks {
 public:
+    // self는 쓰는 패키지 id(복제면 사본 id), source는 패키지의 지금 id다(복제가 아니면 self와
+    // 같다 — 그 값을 가리키는 Soft 참조를 self로 바꾼다).
     WriterHooks(Allocator& allocator, ObjectRegistry& registry, const ObjectAccessContext& access,
-                ObjectHandle package, AssetId self) noexcept
-        : registry_(registry), access_(access), package_(package), self_(self),
+                ObjectHandle package, AssetId self, AssetId source) noexcept
+        : registry_(registry), access_(access), package_(package), self_(self), source_(source),
           softUses_(allocator), bulk_(allocator), bulkIds_(allocator) {
+    }
+
+    Result<AssetId> SubstituteSoftReference(const SoftReferenceInfo& info) noexcept override {
+        return Result<AssetId>::Success(info.asset == source_ ? self_ : info.asset);
     }
 
     Result<void> CollectSoftReference(const SoftReferenceInfo& info) noexcept override {
@@ -165,6 +175,7 @@ private:
     ObjectAccessContext access_;
     ObjectHandle package_;
     AssetId self_;
+    AssetId source_;
     Array<DependencyUse> softUses_;
     Array<BulkDraft> bulk_;
     // 옛 bulkId → 새 bulkId다(참조 수에 비례하게 — 같은 옛 id를 찾느라 bulk_를 훑지 않는다).
@@ -764,7 +775,8 @@ Result<void> ValidateOptions(Allocator& scratch, const PackageWriteOptions& opti
     } else if (options.profileId.ByteCount() == 0 ||
                options.profileId.ByteCount() > PackageMaxStringBytes ||
                !options.profileId.IsValidUtf8() || !options.importRecord.IsEmpty() ||
-               !options.tags.IsEmpty() || !options.extraDependencies.IsEmpty()) {
+               !options.tags.IsEmpty() || !options.extraDependencies.IsEmpty() ||
+               !options.duplicateId.IsNull()) {
         return InvalidOption<void>();
     }
 
@@ -952,11 +964,13 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
         return Result<Out>::Failure(self.Error());
     }
 
-    if (self.Value().IsNull()) {
+    if (self.Value().IsNull() || options.duplicateId == self.Value()) {
         return InvalidOption<Out>();
     }
 
-    const AssetId selfId = self.Value();
+    // 쓰는 id(복제면 사본 id)와 패키지의 지금 id다.
+    const AssetId sourceId = self.Value();
+    const AssetId selfId = options.duplicateId.IsNull() ? sourceId : options.duplicateId;
 
     // 1. export 집합(깊이 우선, 저장 불가 부분 트리 제외).
     Array<ObjectHandle> inners(allocator);
@@ -1071,12 +1085,13 @@ Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& re
     (void)typeVersions.TryResize(uniqueTypes);
 
     // 2. Objects(graph v2).
-    WriterHooks hooks(allocator, registry, access, package, selfId);
+    WriterHooks hooks(allocator, registry, access, package, selfId, sourceId);
     ObjectGraphSaveOptions save;
     save.unsaveable = UnsaveablePolicy::Exclude;
     save.policy.rejectMissingRequired = true;
     save.policy.excludedFlags =
-        options.kind == PackageKind::Cooked ? PackageWriterEditorOnlyFlag : 0;
+        (options.kind == PackageKind::Cooked ? PackageWriterEditorOnlyFlag : 0) |
+        (options.duplicateId.IsNull() ? 0 : PackageWriterDuplicateFlags);
     save.hooks = &hooks;
     save.externals = GraphExternalPolicy::Admit;
     save.writeNodeTable = false;

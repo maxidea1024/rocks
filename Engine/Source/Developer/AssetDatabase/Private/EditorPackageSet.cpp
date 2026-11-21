@@ -1074,6 +1074,156 @@ Result<void> EditorPackageSet::Save(AssetId id, const AssetDatabaseLock& lock,
     return Result<void>::Success();
 }
 
+Result<void> EditorPackageSet::Duplicate(AssetId source, const LogicalPath& target, AssetId newId,
+                                         const AssetDatabaseLock& lock,
+                                         Array<EditorWarning>* warnings,
+                                         AssetDiagnostic* failure) noexcept {
+    Allocator& allocator = *allocator_;
+    auto fail = [&](AssetDiagnosticCode code, ErrorCode error, AssetId related = {}) noexcept {
+        AssetDiagnostic diagnostic = EditorDiagnostic(code, error, source);
+        diagnostic.related = related;
+        return EditorFail<void>(failure, diagnostic);
+    };
+    if (registry_.Get() == nullptr || config_.hooks == nullptr ||
+        !lock.IsHeldFor(*config_.layout) || newId.IsNull()) {
+        return fail(AssetDiagnosticCode::None, ErrorCode::InvalidArgument);
+    }
+
+    if (creating_) {
+        return fail(AssetDiagnosticCode::None, ErrorCode::Busy);
+    }
+
+    if (auto synced = SyncReferences(); !synced) {
+        return fail(AssetDiagnosticCode::None, synced.Error());
+    }
+
+    const usize at = LowerBound(source);
+    if (at == open_.Size() || !(open_[at].id == source)) {
+        return fail(AssetDiagnosticCode::None, ErrorCode::NotFound);
+    }
+
+    // 새 id는 열려 있지도 색인에 있지도 않아야 한다.
+    auto indexedId = config_.index->FindById(newId);
+    if (Find(newId) != nullptr || indexedId || indexedId.Error() == ErrorCode::AlreadyExists) {
+        return fail(AssetDiagnosticCode::DuplicateAssetId, ErrorCode::AlreadyExists, newId);
+    }
+
+    EditorPackageInfo& info = open_[at];
+    if (info.readOnly) {
+        return fail(AssetDiagnosticCode::NewerVersion, ErrorCode::Unsupported);
+    }
+
+    if (!info.unresolved.IsEmpty()) {
+        return fail(AssetDiagnosticCode::MissingDependency, ErrorCode::InvalidArgument,
+                    info.unresolved[0].target);
+    }
+
+    // 대상: 저장하지 않은 새 패키지 경로(같은 키)도 점유다(첫 저장이 같은 파일을 만든다).
+    for (const EditorPackageInfo& other : open_) {
+        if (!other.unsaved) {
+            continue;
+        }
+
+        auto path = ParseLogicalPath(allocator, other.logicalPath.View());
+        if (!path) {
+            return fail(AssetDiagnosticCode::None, path.Error());
+        }
+
+        if (path.Value().Key() == target.Key()) {
+            return fail(AssetDiagnosticCode::DuplicatePath, ErrorCode::AlreadyExists, other.id);
+        }
+    }
+
+    SavePlan plan(allocator);
+    AssetDiagnostic diagnostic;
+    plan.startGeneration = info.generation;
+    if (auto planned = PlanNewTarget(target, source, plan, diagnostic); !planned) {
+        return EditorFail<void>(failure, diagnostic);
+    }
+
+    // ImportRecord: 소유 기록은 원본 자신의 출력 하나만 새 id로 남겨 다시 쓰고(형제 출력은 원본
+    // 임포트의 것이다 — 남기면 사본이 남의 출력의 소유를 주장해 재임포트가 원본의 형제를 덮어쓴다,
+    // A2e3b 리뷰 필수), 참조 기록은 버린다(그대로 두면 소유자의 outputs에 없어 곧바로 고아다).
+    Array<uint8> record(allocator);
+    AssetId droppedOwner{};
+    if (!info.importRecord.IsEmpty()) {
+        auto read = ReadImportRecord(allocator, source, info.importRecord.View());
+        if (!read) {
+            return fail(AssetDiagnosticCode::None, read.Error());
+        }
+
+        const ImportRecord& old = read.Value();
+        if (old.OwnedBy(source)) {
+            Array<ImportSourceInput> sources(allocator);
+            Array<ImportOutputInput> outputs(allocator);
+            Result<void> step = sources.TryReserve(old.sources.Size());
+            if (step) {
+                step = outputs.TryReserve(old.outputs.Size());
+            }
+
+            if (!step) {
+                return fail(AssetDiagnosticCode::None, step.Error());
+            }
+
+            for (const ImportSource& one : old.sources) {
+                (void)sources.TryPushBack(ImportSourceInput{one.role.View(), one.root.View(),
+                                                            one.relativePath.View(), one.sha256,
+                                                            one.bytes});
+            }
+
+            for (const ImportOutput& one : old.outputs) {
+                if (one.asset == source) {
+                    (void)outputs.TryPushBack(
+                        ImportOutputInput{one.outputKey.View(), newId, one.type});
+                }
+            }
+
+            ImportRecordInput input;
+            input.owner = newId;
+            input.importerId = old.importerId;
+            input.importerName = old.importerName.View();
+            input.importerVersion = old.importerVersion;
+            input.sources = sources.View();
+            input.options = old.options.View();
+            input.outputs = outputs.View();
+            auto written = WriteImportRecord(allocator, newId, input);
+            if (!written) {
+                return fail(AssetDiagnosticCode::None, written.Error());
+            }
+
+            record = rocks::Move(written.Value());
+        } else {
+            droppedOwner = old.owner;
+        }
+    }
+
+    if (auto planned = PlanHookOutputs(info, newId, {}, plan, diagnostic); !planned) {
+        return EditorFail<void>(failure, diagnostic);
+    }
+
+    // 경고 자리(버린 기록 하나 — 쓰기의 경고는 WriteAndReplace가 잡는다).
+    if (warnings != nullptr) {
+        if (auto reserved = warnings->TryReserve(warnings->Size() + 1); !reserved) {
+            return fail(AssetDiagnosticCode::None, reserved.Error());
+        }
+    }
+
+    const DuplicateWrite duplicate{newId, record.View()};
+    if (auto written = WriteAndReplace(info, plan, warnings, diagnostic, &duplicate); !written) {
+        return EditorFail<void>(failure, diagnostic);
+    }
+
+    if (warnings != nullptr && !droppedOwner.IsNull()) {
+        EditorWarning warning;
+        warning.kind = EditorWarningKind::ImportRecordDropped;
+        warning.diagnostic = EditorDiagnostic(AssetDiagnosticCode::None, ErrorCode::None, newId);
+        warning.diagnostic.related = droppedOwner;
+        (void)warnings->TryPushBack(warning);
+    }
+
+    return Result<void>::Success();
+}
+
 Result<void> EditorPackageSet::PlanSave(EditorPackageInfo& info, const EditorSaveOptions& options,
                                         SavePlan& plan, AssetDiagnostic& diagnostic) noexcept {
     Allocator& allocator = *allocator_;
@@ -1097,40 +1247,14 @@ Result<void> EditorPackageSet::PlanSave(EditorPackageInfo& info, const EditorSav
     platform::FileSystem& files = *config_.files;
     const StringView content = config_.layout->ContentDirectory();
     if (info.unsaved) {
-        // 새 패키지: 논리 경로의 NFC 이름. 대상이 이미 있거나 색인에 같은 경로 키가 있으면 거부한다
-        // (Linux에서 대소문자만 다른 두 파일이 생기지 않게).
+        // 새 패키지: 논리 경로의 NFC 이름(경로 상한은 Create가 판정했다).
         auto path = ParseLogicalPath(allocator, info.logicalPath.View());
         if (!path) {
             return fail(AssetDiagnosticCode::None, path.Error());
         }
 
-        // 경로 상한은 Create가 판정했다(배치는 바뀌지 않는다) — 여기 실패는 할당뿐이다.
-        if (auto made = config_.layout->TryMakeFilePath(path.Value(), plan.target); !made) {
-            return fail(AssetDiagnosticCode::None, made.Error());
-        }
-
-        platform::FileInfo existing;
-        const platform::FileStatus stat =
-            files.Stat(plan.target.View().Data(), plan.target.View().ByteCount(), existing);
-        if (stat) {
-            return fail(AssetDiagnosticCode::DuplicatePath, ErrorCode::AlreadyExists);
-        }
-
-        if (stat.code != platform::FileCode::NotFound) {
-            return fail(AssetDiagnosticCode::None, FileErrorCode(stat));
-        }
-
-        auto indexed = config_.index->FindByPath(path.Value());
-        if (indexed || indexed.Error() == ErrorCode::AlreadyExists) {
-            return fail(AssetDiagnosticCode::DuplicatePath, ErrorCode::AlreadyExists);
-        }
-
-        const StringView target = plan.target.View();
-        if (auto assigned =
-                plan.fileName.TryAssign(StringView(target.Data() + content.ByteCount() + 1,
-                                                   target.ByteCount() - content.ByteCount() - 1));
-            !assigned) {
-            return fail(AssetDiagnosticCode::None, assigned.Error());
+        if (auto planned = PlanNewTarget(path.Value(), id, plan, diagnostic); !planned) {
+            return planned;
         }
     } else {
         // 기존 패키지: 대상이 열 때의 파일인지 지문으로 본다(5.5절 1).
@@ -1170,6 +1294,61 @@ Result<void> EditorPackageSet::PlanSave(EditorPackageInfo& info, const EditorSav
         }
     }
 
+    // extra 의존 = hook의 Build 의존 + 열 때 읽은 ImportOwner.
+    return PlanHookOutputs(info, info.id, info.importOwner.View(), plan, diagnostic);
+}
+
+Result<void> EditorPackageSet::PlanNewTarget(const LogicalPath& path, AssetId id, SavePlan& plan,
+                                             AssetDiagnostic& diagnostic) noexcept {
+    auto fail = [&](AssetDiagnosticCode code, ErrorCode error) noexcept {
+        diagnostic = EditorDiagnostic(code, error, id);
+        return Result<void>::Failure(error);
+    };
+    // 대상이 이미 있거나 색인에 같은 경로 키가 있으면 거부한다(Linux에서 대소문자만 다른 두 파일이
+    // 생기지 않게). 경로 상한(임시 접미사 포함)은 InvalidPath다(첫 저장은 Create가 이미 판정했다).
+    if (auto made = config_.layout->TryMakeFilePath(path, plan.target); !made) {
+        return fail(made.Error() == ErrorCode::OutOfMemory ? AssetDiagnosticCode::None
+                                                           : AssetDiagnosticCode::InvalidPath,
+                    made.Error());
+    }
+
+    platform::FileInfo existing;
+    const platform::FileStatus stat =
+        config_.files->Stat(plan.target.View().Data(), plan.target.View().ByteCount(), existing);
+    if (stat) {
+        return fail(AssetDiagnosticCode::DuplicatePath, ErrorCode::AlreadyExists);
+    }
+
+    if (stat.code != platform::FileCode::NotFound) {
+        return fail(AssetDiagnosticCode::None, FileErrorCode(stat));
+    }
+
+    auto indexed = config_.index->FindByPath(path);
+    if (indexed || indexed.Error() == ErrorCode::AlreadyExists) {
+        return fail(AssetDiagnosticCode::DuplicatePath, ErrorCode::AlreadyExists);
+    }
+
+    const StringView content = config_.layout->ContentDirectory();
+    const StringView target = plan.target.View();
+    if (auto assigned = plan.fileName.TryAssign(StringView(
+            target.Data() + content.ByteCount() + 1, target.ByteCount() - content.ByteCount() - 1));
+        !assigned) {
+        return fail(AssetDiagnosticCode::None, assigned.Error());
+    }
+
+    return Result<void>::Success();
+}
+
+Result<void> EditorPackageSet::PlanHookOutputs(const EditorPackageInfo& info, AssetId asset,
+                                               Span<const PackageDependencyEntry> importOwner,
+                                               SavePlan& plan,
+                                               AssetDiagnostic& diagnostic) noexcept {
+    Allocator& allocator = *allocator_;
+    const AssetId id = info.id;
+    auto fail = [&](AssetDiagnosticCode code, ErrorCode error) noexcept {
+        diagnostic = EditorDiagnostic(code, error, id);
+        return Result<void>::Failure(error);
+    };
     // Tags·Build 의존은 대표 에셋 타입의 hook으로 만든다(Tags는 저장마다 다시 — 7.1절 15). 대표
     // 에셋이 없으면(편집이 Discard했다) 그 오류다(hook 없이 쓰면 writer가 같은 패키지를 거부한다).
     AssetDependencySink dependencies(allocator);
@@ -1189,11 +1368,11 @@ Result<void> EditorPackageSet::PlanSave(EditorPackageInfo& info, const EditorSav
 
         const TypeId typeId = type.Value().Id();
         AssetTagSink tags(allocator);
-        Result<void> step =
-            config_.hooks->CollectTags(*registry_, access, representative.Value(), typeId, tags);
+        Result<void> step = config_.hooks->CollectTags(*registry_, access, representative.Value(),
+                                                       typeId, asset, tags);
         if (step) {
             step = config_.hooks->CollectBuildDependencies(
-                *registry_, access, representative.Value(), typeId, dependencies);
+                *registry_, access, representative.Value(), typeId, asset, dependencies);
         }
 
         if (!step) {
@@ -1208,22 +1387,23 @@ Result<void> EditorPackageSet::PlanSave(EditorPackageInfo& info, const EditorSav
         plan.tags = Move(written.Value());
     }
 
-    // extra 의존 = hook의 Build 의존 + 열 때 읽은 ImportOwner(자리를 한 번에 잡는다).
+    // extra 의존 = hook의 Build 의존 + importOwner(자리를 한 번에 잡는다).
     if (auto reserved =
-            plan.extra.TryReserve(dependencies.Dependencies().Size() + info.importOwner.Size());
+            plan.extra.TryReserve(dependencies.Dependencies().Size() + importOwner.Size());
         !reserved) {
         return fail(AssetDiagnosticCode::None, reserved.Error());
     }
 
     (void)plan.extra.TryAppend(dependencies.Dependencies());
-    (void)plan.extra.TryAppend(info.importOwner.View());
+    (void)plan.extra.TryAppend(importOwner);
 
     return Result<void>::Success();
 }
 
 Result<void> EditorPackageSet::WriteAndReplace(EditorPackageInfo& info, SavePlan& plan,
                                                Array<EditorWarning>* warnings,
-                                               AssetDiagnostic& diagnostic) noexcept {
+                                               AssetDiagnostic& diagnostic,
+                                               const DuplicateWrite* duplicate) noexcept {
     Allocator& allocator = *allocator_;
     platform::FileSystem& files = *config_.files;
     const AssetId id = info.id;
@@ -1265,9 +1445,9 @@ Result<void> EditorPackageSet::WriteAndReplace(EditorPackageInfo& info, SavePlan
         return fail(AssetDiagnosticCode::None, step.Error());
     }
 
-    // 새 패키지는 부모 디렉터리를 만든다.
+    // 새 파일(새 패키지·복제)은 부모 디렉터리를 만든다.
     const StringView target = plan.target.View();
-    if (info.unsaved) {
+    if (info.unsaved || duplicate != nullptr) {
         if (auto made =
                 platform::MakeDirectoryTree(files, target.Data(), EditorParentBytes(target));
             !made) {
@@ -1286,7 +1466,8 @@ Result<void> EditorPackageSet::WriteAndReplace(EditorPackageInfo& info, SavePlan
     write.bulkSource = info.store;
     write.tags = plan.tags.View();
     write.extraDependencies = plan.extra.View();
-    write.importRecord = info.importRecord.View();
+    write.importRecord = duplicate != nullptr ? duplicate->importRecord : info.importRecord.View();
+    write.duplicateId = duplicate != nullptr ? duplicate->id : AssetId{};
     PackageWriteResult result(allocator);
     {
         platform::File file;
@@ -1360,13 +1541,16 @@ Result<void> EditorPackageSet::WriteAndReplace(EditorPackageInfo& info, SavePlan
         }
     }
 
+    // 복제는 원본 저장소를 사본에 잇지 않는다(원본은 그대로 원본 파일에 이어져 있다).
     BulkRebindPlan rebind(allocator);
-    if (auto prepared =
-            info.store->PrepareRebind(rebind, target, result.fingerprint, bulkOffset,
-                                      contents.bulkEntries.View(), result.bulkRemap.View());
-        !prepared) {
-        discard();
-        return fail(AssetDiagnosticCode::None, prepared.Error());
+    if (duplicate == nullptr) {
+        if (auto prepared =
+                info.store->PrepareRebind(rebind, target, result.fingerprint, bulkOffset,
+                                          contents.bulkEntries.View(), result.bulkRemap.View());
+            !prepared) {
+            discard();
+            return fail(AssetDiagnosticCode::None, prepared.Error());
+        }
     }
 
     AssetIndexRefresh refresh(allocator);
@@ -1387,7 +1571,23 @@ Result<void> EditorPackageSet::WriteAndReplace(EditorPackageInfo& info, SavePlan
         return fail(AssetDiagnosticCode::None, FileErrorCode(replaced));
     }
 
-    // 교체 뒤(5.5절 7 — 실패하지 않는다): 정보를 새 파일로 바꾸고 준비한 것을 확정한다.
+    // 교체 뒤(5.5절 7 — 실패하지 않는다). 복제는 경고와 색인만이다(원본 정보는 그대로).
+    if (duplicate != nullptr) {
+        if (warnings != nullptr && notDurable) {
+            EditorWarning warning;
+            warning.kind = EditorWarningKind::NotDurable;
+            warning.diagnostic = EditorDiagnostic(AssetDiagnosticCode::NotDurable,
+                                                  FileErrorCode(replaced), duplicate->id);
+            (void)warnings->TryPushBack(warning);
+        }
+
+        config_.index->CommitRefresh(refresh);
+        // 대상 디렉터리의 고아 임시 파일도 저장과 같이 정리한다.
+        DeleteOrphans(duplicate->id, target, warnings);
+        return Result<void>::Success();
+    }
+
+    // 정보를 새 파일로 바꾸고 준비한 것을 확정한다.
     info.fingerprint = result.fingerprint;
     info.fileName = Move(plan.fileName);
     info.unsaved = false;
@@ -1420,18 +1620,18 @@ Result<void> EditorPackageSet::WriteAndReplace(EditorPackageInfo& info, SavePlan
 
     info.store->CommitRebind(rebind);
     config_.index->CommitRefresh(refresh);
-    DeleteOrphans(info, target, warnings);
+    DeleteOrphans(info.id, target, warnings);
     return Result<void>::Success();
 }
 
-void EditorPackageSet::DeleteOrphans(const EditorPackageInfo& info, StringView target,
+void EditorPackageSet::DeleteOrphans(AssetId id, StringView target,
                                      Array<EditorWarning>* warnings) noexcept {
     platform::FileSystem& files = *config_.files;
     auto warn = [&](ErrorCode error) noexcept {
         if (warnings != nullptr) {
             EditorWarning warning;
             warning.kind = EditorWarningKind::OrphanNotDeleted;
-            warning.diagnostic = EditorDiagnostic(AssetDiagnosticCode::None, error, info.id);
+            warning.diagnostic = EditorDiagnostic(AssetDiagnosticCode::None, error, id);
             (void)warnings->TryPushBack(warning);
         }
     };

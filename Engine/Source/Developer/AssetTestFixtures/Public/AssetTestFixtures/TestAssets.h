@@ -35,6 +35,35 @@ struct TestAsset final : Asset {
     ROCKS_PROPERTY() ObjectRef<TestAsset> typed;
 };
 
+// 복제 제외 멤버를 가진 struct다(struct 필드·원소 배열 안의 제외 — DuplicableAsset).
+ROCKS_STRUCT()
+struct DuplicableSlot {
+    ROCKS_GENERATED_BODY()
+
+    ROCKS_PROPERTY() int32 kept = 0;
+    ROCKS_PROPERTY(DuplicateTransient) int32 cache = 0;
+};
+
+// 복제 제외 필드와 Soft 참조를 가진 에셋이다(writer 복제 옵션 시험 — AssetSystem.ko.md 7.1절 17
+// A2e3b): cache·instance는 복제가 쓰지 않고(클래스 기본값), self는 자기 패키지를 가리켜 사본 id로
+// 바뀌고, other는 그대로다.
+ROCKS_CLASS()
+struct DuplicableAsset final : Asset {
+    ROCKS_GENERATED_BODY()
+
+    explicit DuplicableAsset(Allocator& allocator) noexcept
+        : self(allocator), other(allocator), slots(allocator) {
+    }
+
+    ROCKS_PROPERTY() int32 kept = 0;
+    ROCKS_PROPERTY(DuplicateTransient) int32 cache = 0;
+    ROCKS_PROPERTY(NonTryoutDuplicateTransient) int32 instance = 0;
+    ROCKS_PROPERTY() SoftObjectRef<Asset> self;
+    ROCKS_PROPERTY() SoftObjectRef<Asset> other;
+    ROCKS_PROPERTY() DuplicableSlot slot;
+    ROCKS_PROPERTY() Array<DuplicableSlot> slots;
+};
+
 // 하위 객체다(대표 에셋 아래 이름 있는 객체 — import 경로 "Body.Socket" 시험).
 ROCKS_CLASS()
 struct TestPart final : Object {
