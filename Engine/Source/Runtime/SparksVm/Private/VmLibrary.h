@@ -86,6 +86,11 @@ struct VmLibraryEntry {
     VmLibraryFunction function;
 };
 
+// 컨테이너 key 찾기(원소 번호, 없으면 uint32 최댓값)와 해시 색인 재구성이다(VmContainers.cpp —
+// 원소를 지우거나 옮긴 뒤 부른다).
+uint32 VmContainerFind(VmBuffer* buffer, const uint64* key) noexcept;
+void VmContainerReindex(VmBuffer* buffer) noexcept;
+
 // 영역별 구현 표다(이름은 참조 이름 `<주인>.<멤버>` — 벡터 공통 메서드는 `$V.<멤버>`).
 Span<const VmLibraryEntry> VmMathEntries() noexcept;
 Span<const VmLibraryEntry> VmTextEntries() noexcept;
@@ -160,6 +165,8 @@ public:
     static void FreeShell(VmLibraryContext& context, VmBuffer* buffer) noexcept;
 
     static RandomStream& Random(VmLibraryContext& context) noexcept;
+    // 실행 문맥의 할당자다(임시 서식 builder용).
+    static Allocator& AllocatorOf(VmLibraryContext& context) noexcept;
     // 로그 기록을 더한다(할당 실패는 기록을 버린다 — 로그는 결과에 영향을 주지 않는다).
     static void Log(VmLibraryContext& context, VmLogLevel level, StringView message) noexcept;
 };

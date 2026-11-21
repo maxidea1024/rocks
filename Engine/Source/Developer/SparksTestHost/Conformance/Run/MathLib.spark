@@ -1,0 +1,132 @@
+fn MinInt(a: int, b: int): int {
+    return Math.Min(a, b);
+}
+
+fn MaxByte(a: uint8, b: uint8): uint8 {
+    return Math.Max(a, b);
+}
+
+fn AbsInt(a: int32): int32 {
+    return Math.Abs(a);
+}
+
+fn AbsFloat(a: float): float {
+    return Math.Abs(a);
+}
+
+fn SignInt(a: int): int {
+    return Math.Sign(a);
+}
+
+fn SignFloat(a: float): float {
+    return Math.Sign(a);
+}
+
+fn ClampInt(x: int, lo: int, hi: int): int {
+    return Math.Clamp(x, lo, hi);
+}
+
+fn ClampFloat(x: float, lo: float, hi: float): float {
+    return Math.Clamp(x, lo, hi);
+}
+
+fn Div(a: int, b: int): int {
+    return Math.Div(a, b);
+}
+
+fn Div8(a: int8, b: int8): int8 {
+    return Math.Div(a, b);
+}
+
+fn Rounding(x: float): string {
+    return "${Math.Floor(x)} ${Math.Ceil(x)} ${Math.Round(x)} ${Math.Trunc(x)}";
+}
+
+fn ToInts(x: float): string {
+    return "${Math.FloorToInt(x)} ${Math.CeilToInt(x)} ${Math.RoundToInt(x)} ${Math.TruncToInt(x)}";
+}
+
+fn Root(x: float): float {
+    return Math.Sqrt(x);
+}
+
+fn Power(x: float, y: float): float {
+    return Math.Pow(x, y);
+}
+
+fn Logs(x: float): string {
+    return "${Math.Exp(x)} ${Math.Ln(x)}";
+}
+
+fn Trig(x: float): string {
+    return "${Math.Sin(x)} ${Math.Cos(x)} ${Math.Tan(x)} ${Math.Atan(x)}";
+}
+
+fn Inverse(x: float): string {
+    return "${Math.Asin(x)} ${Math.Acos(x)} ${Math.Atan2(x, 1.0)}";
+}
+
+fn Angles(x: float): string {
+    return "${Math.Radians(x)} ${Math.Degrees(x)} ${Math.Pi}";
+}
+
+fn Blend(a: float, b: float, t: float): string {
+    return "${Math.Lerp(a, b, t)} ${Math.InverseLerp(a, b, t)}";
+}
+
+fn Ease(t: float): string {
+    return "${Math.EaseIn(t)} ${Math.EaseOut(t)} ${Math.EaseInOut(t)}";
+}
+
+fn Near(a: float, b: float): bool {
+    return Math.NearlyEqual(a, b, 0.001);
+}
+
+fn NearVector(a: vec3, b: vec3): bool {
+    return Math.NearlyEqual(a, b, 0.001);
+}
+
+fn Scaled(a: vec3, b: vec3): vec3 {
+    return Math.Scale(a, b);
+}
+
+fn Vectors(a: vec3, b: vec3): string {
+    return "${a.Dot(b)} ${a.Length()} ${a.LengthSquared()} ${a.Distance(b)}";
+}
+
+fn Unit(a: vec3): vec3 {
+    return a.Normalize();
+}
+
+fn Crossed(a: vec3, b: vec3): vec3 {
+    return a.Cross(b);
+}
+
+fn Flat(a: vec2): float {
+    return a.Length();
+}
+
+fn Turn(axis: vec3, radians: float, v: vec3): vec3 {
+    let q = quat.FromAxisAngle(axis, radians);
+    return q.Rotate(v);
+}
+
+fn Undo(q: quat): quat {
+    return q.Inverse();
+}
+
+fn Angles3(q: quat): Rotator {
+    return q.ToRotator();
+}
+
+fn Axes(r: Rotator): string {
+    return "${r.ToQuat()} ${r.Forward()} ${r.Right()} ${r.Up()}";
+}
+
+fn Place(t: Transform, v: vec3): string {
+    return "${t.TransformPosition(v)} ${t.InverseTransformPosition(v)} ${t.TransformVector(v)}";
+}
+
+fn Matrix(t: Transform, v: vec3): vec3 {
+    return t.ToMatrix().TransformPosition(v);
+}

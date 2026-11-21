@@ -361,4 +361,112 @@ TEST(SparksVmContainer_AllocationFailureEverywhere) {
     }
 }
 
+TEST(SparksVmContainer_HostContainers) {
+    // host 컨테이너(NewContainer): 배치 검사, Map·Set의 같은 key 거부, Buf 원소는 빌려 준다(참조
+    // +1), 실패해도 ledger는 0이다.
+    SystemAllocator allocator;
+    VmExecution execution(allocator);
+    const uint64 numbers[] = {3, 1, 2};
+    auto array = execution.NewContainer(VmBufferKind::Array, Marker(ScalarBank, 1),
+                                        Span<const uint64>(numbers, 3));
+    REQUIRE(array);
+    CHECK(array.Value()->count == 3);
+    CHECK(array.Value()->references == 1);
+    execution.Release(array.Value());
+
+    auto empty = execution.NewContainer(VmBufferKind::Set, Marker(ScalarBank, 1), {});
+    REQUIRE(empty);
+    CHECK(empty.Value()->count == 0);
+    execution.Release(empty.Value());
+
+    // 같은 key의 Set·Map은 거부한다.
+    const uint64 repeated[] = {7, 7};
+    CHECK(
+        execution
+            .NewContainer(VmBufferKind::Set, Marker(ScalarBank, 1), Span<const uint64>(repeated, 2))
+            .Error() == ErrorCode::InvalidArgument);
+    const uint64 entries[] = {1, 10, 1, 20};
+    CHECK(execution
+              .NewContainer(VmBufferKind::Map, Marker(ScalarBank, 1, ScalarBank, 1),
+                            Span<const uint64>(entries, 4))
+              .Error() == ErrorCode::InvalidArgument);
+
+    // 배치: 컨테이너 아닌 종류, 값 slot 0, Map의 key 없음, Array의 key 있음, slot 수가 배수 아님.
+    CHECK(execution.NewContainer(VmBufferKind::String, Marker(ScalarBank, 1), {}).Error() ==
+          ErrorCode::InvalidArgument);
+    CHECK(execution.NewContainer(VmBufferKind::Array, Marker(ScalarBank, 0), {}).Error() ==
+          ErrorCode::InvalidArgument);
+    CHECK(execution.NewContainer(VmBufferKind::Map, Marker(ScalarBank, 1), {}).Error() ==
+          ErrorCode::InvalidArgument);
+    CHECK(execution.NewContainer(VmBufferKind::Array, Marker(ScalarBank, 1, ScalarBank, 1), {})
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(execution
+              .NewContainer(VmBufferKind::Array, Marker(ScalarBank, 2),
+                            Span<const uint64>(numbers, 3))
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(execution.LiveBuffers() == 0);
+
+    // Buf 원소(문자열 key의 Map): 컨테이너가 참조를 더하고 host는 자기 참조를 놓는다.
+    auto a = execution.NewString("a");
+    auto b = execution.NewString("b");
+    REQUIRE(a);
+    REQUIRE(b);
+    const uint64 named[] = {static_cast<uint64>(reinterpret_cast<usize>(a.Value())), 1,
+                            static_cast<uint64>(reinterpret_cast<usize>(b.Value())), 2};
+    auto map = execution.NewContainer(VmBufferKind::Map, Marker(ScalarBank, 1, BufBank, 1),
+                                      Span<const uint64>(named, 4));
+    REQUIRE(map);
+    CHECK(a.Value()->references == 2);
+    const uint64 same[] = {static_cast<uint64>(reinterpret_cast<usize>(a.Value())),
+                           static_cast<uint64>(reinterpret_cast<usize>(a.Value()))};
+    CHECK(execution.NewContainer(VmBufferKind::Set, Marker(BufBank, 1), Span<const uint64>(same, 2))
+              .Error() == ErrorCode::InvalidArgument);
+    CHECK(a.Value()->references == 2); // 실패한 컨테이너가 더한 참조는 되돌렸다
+    execution.Release(a.Value());
+    execution.Release(b.Value());
+    CHECK(execution.LiveBuffers() == 1 + 2);
+    execution.Release(map.Value());
+    CHECK(execution.LiveBuffers() == 0);
+    CHECK(execution.LiveBytes() == 0);
+}
+
+TEST(SparksVmContainer_HostContainerAllocationFailure) {
+    SystemAllocator backing;
+    const uint64 numbers[] = {1, 2, 3, 4, 5};
+    uint64 attempts = 0;
+    uint64 failures = 0;
+    for (uint64 failAt = 0; failAt == 0 || failAt <= attempts; ++failAt) {
+        test::NFailAllocator allocator(backing);
+        const uint64 before = backing.Stats().liveAllocations;
+        {
+            VmExecution execution(allocator);
+            if (failAt != 0) {
+                allocator.FailOnAttempt(failAt);
+            }
+
+            auto made = execution.NewContainer(VmBufferKind::Set, Marker(ScalarBank, 1),
+                                               Span<const uint64>(numbers, 5));
+            const uint64 used = allocator.Attempts();
+            allocator.DisableFailure();
+            if (failAt == 0) {
+                REQUIRE(made);
+                attempts = used;
+            } else if (!made) {
+                CHECK(made.Error() == ErrorCode::OutOfMemory);
+                ++failures;
+            }
+
+            if (made) {
+                execution.Release(made.Value());
+            }
+
+            CHECK(execution.LiveBuffers() == 0);
+        }
+
+        CHECK(backing.Stats().liveAllocations == before);
+    }
+
+    CHECK(failures > 0);
+}
+
 } // namespace sparks_vm_container_tests_file

@@ -59,6 +59,8 @@ constexpr RunMathName RunMaths[] = {{"vec2", 2},    {"vec3", 3},  {"vec4", 4},  
 
 constexpr uint32 RunBitsPerWord = 64;
 constexpr StringView RunArrow = " -> ";
+// 호출 뒤 `Log.*` 기록 줄의 머리다(`  log <수준> "<메시지>"`).
+constexpr StringView RunLogPrefix = "  log ";
 
 // 타입(옵션 표지를 볼지 정한다)의 모양이다. 정수는 bits·signed, 수학 타입은 slots를 채운다.
 struct RunType {
@@ -370,6 +372,36 @@ public:
         out.Append(buffer->kind == VmBufferKind::Array ? "]" : "}");
     }
 
+    // text를 따옴표와 escape로 쓴다(문자열 값·로그 기록).
+    static void AppendQuoted(StringBuilderBase& out, StringView text) noexcept {
+        // escape 없는 구간은 통째로 붙인다(StringBuilder는 UTF-8을 검사하므로 다중 byte 문자를
+        // byte 하나씩 붙일 수 없다).
+        out.Append("\"");
+        usize plain = 0;
+        for (usize index = 0; index < text.ByteCount(); ++index) {
+            const char c = text.Data()[index];
+            const bool control = static_cast<uint8>(c) < 0x20 || static_cast<uint8>(c) == 0x7F;
+            if (c != '"' && c != '\\' && !control) {
+                continue;
+            }
+
+            out.Append(StringView(text.Data() + plain, index - plain));
+            plain = index + 1;
+            if (c == '"' || c == '\\') {
+                out.AppendFormat("\\{}", c);
+            } else if (c == '\n') {
+                out.Append("\\n");
+            } else if (c == '\t') {
+                out.Append("\\t");
+            } else {
+                out.AppendFormat("\\x{:02x}", static_cast<uint32>(static_cast<uint8>(c)));
+            }
+        }
+
+        out.Append(StringView(text.Data() + plain, text.ByteCount() - plain));
+        out.Append("\"");
+    }
+
     // Buf 값 하나를 쓴다(문자열은 따옴표와 escape, null은 `none`).
     static void FormatBuffer(StringBuilderBase& out, const VmBuffer* buffer) noexcept {
         if (buffer == nullptr) {
@@ -382,24 +414,7 @@ public:
             return;
         }
 
-        out.Append("\"");
-        const StringView text = VmStringOf(buffer);
-        for (usize index = 0; index < text.ByteCount(); ++index) {
-            const char c = text.Data()[index];
-            if (c == '"' || c == '\\') {
-                out.AppendFormat("\\{}", c);
-            } else if (c == '\n') {
-                out.Append("\\n");
-            } else if (c == '\t') {
-                out.Append("\\t");
-            } else if (static_cast<uint8>(c) < 0x20 || static_cast<uint8>(c) == 0x7F) {
-                out.AppendFormat("\\x{:02x}", static_cast<uint32>(static_cast<uint8>(c)));
-            } else {
-                out.Append(StringView(&c, 1));
-            }
-        }
-
-        out.Append("\"");
+        AppendQuoted(out, VmStringOf(buffer));
     }
 
     // text 전체를 Buf 값 하나로 읽어 host 버퍼를 만든다(`none`은 null). 틀리면 problem에 이유를
@@ -410,7 +425,7 @@ public:
         auto push = [&](VmBuffer* value) noexcept {
             if (auto pushed = buffers.TryPushBack(value); !pushed) {
                 execution.Release(value);
-                problem_.Append("out of memory");
+                OutOfMemory();
                 return false;
             }
 
@@ -420,9 +435,13 @@ public:
             return push(nullptr);
         }
 
-        if (!(type.shape == RunShape::String ||
-              (type.shape == RunShape::Optional &&
-               TypeOf(type.type, false).shape == RunShape::String))) {
+        const RunType inner = type.shape == RunShape::Optional ? TypeOf(type.type, false) : type;
+        if (inner.shape == RunShape::Container) {
+            VmBuffer* created = nullptr;
+            return ParseContainer(text, inner, execution, allocator, created) && push(created);
+        }
+
+        if (inner.shape != RunShape::String) {
             problem_.Append("a parameter type is not supported by .run yet");
             return false;
         }
@@ -461,7 +480,7 @@ public:
             }
 
             if (!bytes.TryPushBack(c)) {
-                problem_.Append("out of memory");
+                OutOfMemory();
                 return false;
             }
         }
@@ -473,11 +492,121 @@ public:
 
         auto created = execution.NewString(StringView(bytes.Data(), bytes.Size()));
         if (!created) {
-            problem_.Append("out of memory");
+            OutOfMemory();
             return false;
         }
 
         return push(created.Value());
+    }
+
+    // 컨테이너 표기(Array `[a, b]`, Set `{a, b}`, Map `{k: v}` — 원소는 원소 타입대로, 중첩 가능)를
+    // 읽어 host 컨테이너를 만든다(VmExecution::NewContainer). 틀리면 problem에 이유를 쓰고 false.
+    bool ParseContainer(StringView text, const RunType& type, VmExecution& execution,
+                        Allocator& allocator, VmBuffer*& created) noexcept {
+        const TypeEntry& entry = c_.Types()[type.type];
+        const StringView name = c_.Symbols()[entry.symbol].name;
+        const bool map = name == "Map";
+        const VmBufferKind kind = map             ? VmBufferKind::Map
+                                  : name == "Set" ? VmBufferKind::Set
+                                                  : VmBufferKind::Array;
+        const RunType first = TypeOf(c_.TypeArguments()[entry.firstArgument], true);
+        const RunType second =
+            map ? TypeOf(c_.TypeArguments()[entry.firstArgument + 1], true) : RunType();
+        uint32 firstSlots = 0;
+        uint32 secondSlots = 0;
+        if (!Slots(first, firstSlots) || (map && !Slots(second, secondSlots))) {
+            problem_.Append("a parameter type is not supported by .run yet");
+            return false;
+        }
+
+        const StringView brackets = kind == VmBufferKind::Array ? "[]" : "{}";
+        if (text.ByteCount() < 2 || text.Data()[0] != brackets.Data()[0] ||
+            text.Data()[text.ByteCount() - 1] != brackets.Data()[1]) {
+            problem_.AppendFormat("cannot read '{}' as a value of this parameter", text);
+            return false;
+        }
+
+        Array<uint64> slots(allocator);
+        Array<VmBuffer*> children(allocator); // 원소 버퍼(컨테이너가 참조를 더한 뒤 놓는다)
+        auto part = [&](StringView item, const RunType& partType) noexcept {
+            if (!IsBuffer(partType)) {
+                return Parse(item, partType, slots);
+            }
+
+            const usize before = children.Size();
+            if (!ParseBuffer(item, partType, execution, children, allocator)) {
+                return false;
+            }
+
+            if (!slots.TryPushBack(
+                    static_cast<uint64>(reinterpret_cast<usize>(children[before])))) {
+                OutOfMemory();
+                return false;
+            }
+
+            return true;
+        };
+        bool valid = true;
+        ForEachItem(
+            StringView(text.Data() + 1, text.ByteCount() - 2), [&](StringView item) noexcept {
+                if (!valid) {
+                    return;
+                }
+
+                if (!map) {
+                    valid = part(item, first);
+                    return;
+                }
+
+                const usize colon = FindTopLevel(item, ':');
+                if (colon == item.ByteCount()) {
+                    problem_.AppendFormat("cannot read '{}' as a map entry", Trim(item));
+                    valid = false;
+                    return;
+                }
+
+                valid =
+                    part(StringView(item.Data(), colon), first) &&
+                    part(StringView(item.Data() + colon + 1, item.ByteCount() - colon - 1), second);
+            });
+        const uint32 firstBank =
+            static_cast<uint32>(IsBuffer(first) ? BytecodeBank::Buf : BytecodeBank::Scalar);
+        const uint32 secondBank =
+            static_cast<uint32>(IsBuffer(second) ? BytecodeBank::Buf : BytecodeBank::Scalar);
+        const uint32 marker =
+            map ? EncodeContainerMarker(secondBank, secondSlots, firstBank, firstSlots)
+                : EncodeContainerMarker(firstBank, firstSlots, 0, 0);
+        if (valid) {
+            auto made = execution.NewContainer(kind, marker, slots.View());
+            if (made) {
+                created = made.Value();
+            } else {
+                if (made.Error() == ErrorCode::InvalidArgument) {
+                    problem_.AppendFormat("cannot make '{}' (repeated key?)", text);
+                } else {
+                    OutOfMemory();
+                }
+
+                valid = false;
+            }
+        }
+
+        for (VmBuffer* child : children) {
+            execution.Release(child);
+        }
+
+        return valid;
+    }
+
+    // 괄호·따옴표 밖의 첫 separator 위치다(없으면 text 길이).
+    static usize FindTopLevel(StringView text, char separator) noexcept {
+        usize found = text.ByteCount();
+        ScanTopLevel(text, [&](usize index, char c) noexcept {
+            if (c == separator && found == text.ByteCount()) {
+                found = index;
+            }
+        });
+        return found;
     }
 
     // slots에서 값 하나를 읽어 쓴다(used는 읽은 slot 수).
@@ -572,7 +701,7 @@ public:
         text = Trim(text);
         auto push = [&](uint64 value) noexcept {
             if (auto pushed = slots.TryPushBack(value); !pushed) {
-                problem_.Append("out of memory");
+                OutOfMemory();
                 return false;
             }
 
@@ -722,6 +851,16 @@ public:
         return false;
     }
 
+    // 표기를 읽다가 할당에 실패했는지다(보고 실패가 아니라 실행기의 OutOfMemory다).
+    bool RanOutOfMemory() const noexcept {
+        return outOfMemory_;
+    }
+
+    void OutOfMemory() noexcept {
+        outOfMemory_ = true;
+        problem_.Append("out of memory");
+    }
+
     static StringView Trim(StringView text) noexcept {
         usize begin = 0;
         usize end = text.ByteCount();
@@ -743,11 +882,23 @@ public:
             return;
         }
 
-        usize depth = 0;
         usize begin = 0;
+        ScanTopLevel(text, [&](usize index, char c) noexcept {
+            if (c == ',') {
+                visit(StringView(text.Data() + begin, index - begin));
+                begin = index + 1;
+            }
+        });
+        visit(StringView(text.Data() + begin, text.ByteCount() - begin));
+    }
+
+    // 괄호(`()` `[]` `{}`)·따옴표 밖의 글자마다 visit(위치, 글자)을 부른다.
+    template <typename Visit>
+    static void ScanTopLevel(StringView text, Visit&& visit) noexcept {
+        usize depth = 0;
         bool quoted = false;
-        for (usize index = 0; index <= text.ByteCount(); ++index) {
-            const char c = index < text.ByteCount() ? text.Data()[index] : ',';
+        for (usize index = 0; index < text.ByteCount(); ++index) {
+            const char c = text.Data()[index];
             if (quoted) {
                 if (c == '\\') {
                     ++index; // escape 다음 글자는 건너뛴다
@@ -760,13 +911,12 @@ public:
 
             if (c == '"') {
                 quoted = true;
-            } else if (c == '(') {
+            } else if (c == '(' || c == '[' || c == '{') {
                 ++depth;
-            } else if (c == ')' && depth > 0) {
+            } else if ((c == ')' || c == ']' || c == '}') && depth > 0) {
                 --depth;
-            } else if (c == ',' && depth == 0) {
-                visit(StringView(text.Data() + begin, index - begin));
-                begin = index + 1;
+            } else if (depth == 0) {
+                visit(index, c);
             }
         }
     }
@@ -791,6 +941,7 @@ private:
 
     const Compilation& c_;
     StringBuilderBase& problem_;
+    bool outOfMemory_ = false;
 };
 
 } // namespace
@@ -852,6 +1003,11 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
         ++lineNumber;
         if (line.IsEmpty() || line.StartsWith("#")) {
             actual.Append(line).Append("\n");
+            continue;
+        }
+
+        // 로그 줄은 앞 호출의 기록이다 — 실행기가 다시 쓴다.
+        if (line.StartsWith(RunLogPrefix)) {
             continue;
         }
 
@@ -960,6 +1116,10 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
             return Result<void>::Failure(problem.Status().Error());
         }
 
+        if (values.RanOutOfMemory()) {
+            return Result<void>::Failure(ErrorCode::OutOfMemory);
+        }
+
         if (problem.ByteCount() != 0) {
             StringBuilder<MessageInlineBytes> reason(allocator);
             reason.AppendFormat(".run line {}: {}", lineNumber, problem.View());
@@ -1000,7 +1160,19 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
             break;
         }
 
+        // 빠진 로그 기록은 golden을 거짓으로 다르게 만든다 — 할당 실패로 돌려준다.
+        if (execution.DroppedLogs() != 0) {
+            return Result<void>::Failure(ErrorCode::OutOfMemory);
+        }
+
         actual.AppendFormat(" ({} steps)\n", result.steps);
+        for (uint32 index = 0; index < execution.LogCount(); ++index) {
+            actual.Append(RunLogPrefix)
+                .Append(VmLogLevelName(execution.LogLevel(index)))
+                .Append(" ");
+            RunValues::AppendQuoted(actual, execution.LogMessage(index));
+            actual.Append("\n");
+        }
         // 반환 값과 인자 버퍼를 놓으면 ledger는 0이다(SparksVm 2.2절).
         execution.ReleaseReturned();
         for (VmBuffer* buffer : buffers) {

@@ -318,6 +318,10 @@ RandomStream& VmLibrary::Random(VmLibraryContext& context) noexcept {
     return context.execution->random_;
 }
 
+Allocator& VmLibrary::AllocatorOf(VmLibraryContext& context) noexcept {
+    return *context.execution->allocator_;
+}
+
 void VmLibrary::Log(VmLibraryContext& context, VmLogLevel level, StringView message) noexcept {
     VmExecution& execution = *context.execution;
     VmExecution::LogEntry entry;
@@ -325,11 +329,13 @@ void VmLibrary::Log(VmLibraryContext& context, VmLogLevel level, StringView mess
     entry.offset = static_cast<uint32>(execution.logText_.Size());
     entry.length = static_cast<uint32>(message.ByteCount());
     if (!execution.logText_.TryAppend(Span<const char>(message.Data(), message.ByteCount()))) {
+        ++execution.droppedLogs_;
         return;
     }
 
     if (!execution.logs_.TryPushBack(entry)) {
         static_cast<void>(execution.logText_.TryResize(entry.offset));
+        ++execution.droppedLogs_;
     }
 }
 

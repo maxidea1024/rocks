@@ -1,0 +1,64 @@
+fn Bytes(s: string): int {
+    return s.Length;
+}
+
+fn Chars(s: string): int {
+    return s.CharCount();
+}
+
+fn Has(s: string, part: string): bool {
+    return s.Contains(part);
+}
+
+fn Edges(s: string, part: string): string {
+    return "${s.StartsWith(part)} ${s.EndsWith(part)}";
+}
+
+fn Where(s: string, part: string): int? {
+    return s.Find(part);
+}
+
+fn Cut(s: string, start: int, end: int): string {
+    return s.Slice(start, end);
+}
+
+fn Parts(s: string, separator: string): Array<string> {
+    return s.Split(separator);
+}
+
+fn Trimmed(s: string): string {
+    return s.Trim();
+}
+
+fn Cases(s: string): string {
+    return "${s.ToUpperAscii()}|${s.ToLowerAscii()}";
+}
+
+fn Fixed(x: float, decimals: int): string {
+    return Format.Fixed(x, decimals);
+}
+
+fn Padded(i: int, width: int): string {
+    return Format.Padded(i, width);
+}
+
+fn ReadInt(s: string): int? {
+    return Parse.Int(s);
+}
+
+fn ReadFloat(s: string): float? {
+    return Parse.Float(s);
+}
+
+fn Logged(n: int): int {
+    Log.Info("start ${n}");
+    Log.Warning("half \"way\"");
+    Log.Error("bad");
+    Log.Debug("end");
+    return n;
+}
+
+fn Checked(n: int): int {
+    Assert(n > 0, "n must be positive");
+    return n;
+}

@@ -524,7 +524,7 @@ VerbatimLit  = '@"' { VerbatimChar | '""' } '"' ;                 (* escape·보
 | `Color` | 필드 `R` `G` `B` `A`(선형 float), 이름 지정 생성 | 기본값 (0, 0, 0, 0) |
 | `string` | `Length`(UTF-8 byte 수), `CharCount()`(code point 수), `Contains` `StartsWith` `EndsWith`, `Find(s): int?`(byte 위치), `Slice(start, end)`, `Split(sep): Array<string>`, `Trim()`, `ToUpperAscii()` `ToLowerAscii()` | `Slice`의 범위 밖 또는 code point 경계가 아닌 위치는 `IndexOutOfRange`. 화면 표시는 `Text`(§3.5) |
 | `Format` | `Format.Fixed(x: float, decimals: int): string`, `Format.Padded(i: int, width: int): string` | 보간 `${}`의 최단 표기 외 서식. `decimals`는 0–9, 밖이면 `AssertFailed` |
-| `Parse` | `Parse.Int(s): int?`, `Parse.Float(s): float?` | 10진·`FloatLit` 문법만, 실패는 `null` |
+| `Parse` | `Parse.Int(s): int?`, `Parse.Float(s): float?` | 부호(`+`·`-`) 선택 뒤 10진 숫자(`Int`), `Float`는 `숫자[.숫자]`·`.숫자`와 지수 선택(`FloatLit`에 정수 표기 허용). 자릿수 구분자 `_`·16진·공백·`inf`·`nan`·범위 밖은 `null` |
 | `Array<T>` | `[i]` 읽기 `T?`, `[i] = v`, `Add` `Insert(i, v)` `RemoveAt(i)` `Clear()` `Reverse()`, `==` 가능한 원소: `Contains` `IndexOf: int?` `Remove(v): bool`, `<` 가능한 원소(int·float·string·enum): `Sort()`. 값 원소: `Count`. 객체 원소: `SlotCount`(파괴된 자리 포함) `AliveCount()` `Compact()` | 객체 원소 Array에는 `Count`가 없다(SD40). `Compact()`는 파괴된 자리를 제거한다. 순회는 시작 시점 내용의 사본이다 |
 | `Map<K, V>` | `[k]` 읽기 `V?`, `[k] = v`, `Count` `ContainsKey` `Remove(k): bool` `Keys(): Array<K>` `Values(): Array<V>` `Clear()` | 삽입 순서 |
 | `Set<T>` | `Count` `Add(v): bool` `Remove(v): bool` `Contains` `Clear()` | 삽입 순서 |

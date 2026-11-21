@@ -286,6 +286,64 @@ VmFaultKind VmExecution::Reserve(VmBuffer*& slot, uint64 needed, uint32 marker, 
     return VmFaultKind::None;
 }
 
+Result<VmBuffer*> VmExecution::NewContainer(VmBufferKind kind, uint32 marker,
+                                            Span<const uint64> elements) noexcept {
+    // 원소 배치를 검사하고, 빈 컨테이너에 Reserve로 자리를 만든 뒤 원소를 차례로 넣는다(Map·Set은
+    // 색인도 — 같은 key는 InvalidArgument).
+    if (kind != VmBufferKind::Array && kind != VmBufferKind::Map && kind != VmBufferKind::Set) {
+        return Result<VmBuffer*>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const VmLayout layout = VmDecodeMarker(marker);
+    const bool keyed = kind == VmBufferKind::Map;
+    const uint64 stride = uint64(layout.valueSlots) + (keyed ? layout.keySlots : 0);
+    if (layout.valueSlots == 0 || (keyed && layout.keySlots == 0) ||
+        (!keyed && layout.keySlots != 0) || elements.Size() % stride != 0) {
+        return Result<VmBuffer*>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const uint64 count = elements.Size() / stride;
+    Allocation empty = AllocateBytes(kind, 0, 0);
+    if (empty.error != ErrorCode::None) {
+        return Result<VmBuffer*>::Failure(empty.error);
+    }
+
+    VmBuffer* buffer = empty.buffer;
+    ErrorCode error = ErrorCode::None;
+    const VmFaultKind fault =
+        count == 0 ? VmFaultKind::None : Reserve(buffer, count, marker, 0, error);
+    if (error != ErrorCode::None || fault != VmFaultKind::None) {
+        Release(buffer);
+        return Result<VmBuffer*>::Failure(error != ErrorCode::None ? error
+                                                                   : ErrorCode::CapacityExceeded);
+    }
+
+    const bool hashed = VmHashed(buffer);
+    for (uint64 element = 0; element < count; ++element) {
+        const uint64* source = elements.Data() + element * stride;
+        if (hashed && VmFind(buffer, source) != VmNoElement) {
+            Release(buffer);
+            return Result<VmBuffer*>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        uint64* target = VmSlots(buffer) + element * stride;
+        for (uint64 slot = 0; slot < stride; ++slot) {
+            const bool key = slot < buffer->keySlots;
+            target[slot] = source[slot];
+            if ((key ? buffer->keyBank : buffer->valueBank) == VmBufBank) {
+                Retain(VmChild(source[slot]));
+            }
+        }
+
+        ++buffer->count;
+        if (hashed) {
+            VmIndexInsert(buffer, static_cast<uint32>(element));
+        }
+    }
+
+    return Result<VmBuffer*>::Success(buffer);
+}
+
 VmFaultKind VmExecution::Container(Opcode op, uint32 word, uint32 marker, const Banks& registers,
                                    uint64 budget, ErrorCode& error) noexcept {
     const VmBankView banks{registers.s, registers.r, registers.b};
@@ -558,3 +616,26 @@ VmFaultKind VmExecution::Container(Opcode op, uint32 word, uint32 marker, const 
 }
 
 } // namespace rocks::sparks
+
+namespace rocks::sparks::detail {
+
+uint32 VmContainerFind(VmBuffer* buffer, const uint64* key) noexcept {
+    return VmFind(buffer, key);
+}
+
+void VmContainerReindex(VmBuffer* buffer) noexcept {
+    if (!VmHashed(buffer) || buffer->indexCapacity == 0) {
+        return;
+    }
+
+    uint32* table = VmIndexTable(buffer);
+    for (uint32 at = 0; at < buffer->indexCapacity; ++at) {
+        table[at] = VmIndexEmpty;
+    }
+
+    for (uint32 element = 0; element < buffer->count; ++element) {
+        VmIndexInsert(buffer, element);
+    }
+}
+
+} // namespace rocks::sparks::detail

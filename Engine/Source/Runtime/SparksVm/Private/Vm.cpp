@@ -84,6 +84,7 @@ Result<VmCallResult> VmExecution::Call(const BytecodeModule& module, uint32 func
     Unwind();
     logs_.Clear();
     logText_.Clear();
+    droppedLogs_ = 0;
     random_.Seed(limits.randomSeed);
     module_ = &module;
     scalars_.Clear();

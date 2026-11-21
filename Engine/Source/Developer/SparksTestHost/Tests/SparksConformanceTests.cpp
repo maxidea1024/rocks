@@ -11,6 +11,7 @@
 #include <SparksCompiler/Diagnostic.h>
 #include <SparksCompiler/Source.h>
 #include <SparksTestHost/Conformance.h>
+#include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 
 // Sparks conformance 실행기 시험이다(Docs/Design/SparksLanguage.ko.md 13.1절 "`.expect` 형식"):
@@ -624,6 +625,22 @@ fn Make(): Pair {
 fn Label(): Tag? {
     return null;
 }
+
+fn Total(items: Map<string, Array<int>>): int {
+    var total = 0;
+    for (_, values in items) {
+        for (value in values) {
+            total += value;
+        }
+    }
+
+    Log.Info("total ${total}");
+    return total;
+}
+
+fn Size(items: Set<int>): int {
+    return items.Count;
+}
 )";
     auto run = [&](StringView golden, Report& report) noexcept {
         CaseInput input;
@@ -641,7 +658,10 @@ fn Label(): Tag? {
                     "Same(\"x, y -> z\") -> true (2 steps)\n"
                     "Word() -> \"a, \\\"b\\\" -> c\" (2 steps)\n"
                     "Half(3.0) -> 1.5 (3 steps)\nPass(error(3)) -> error(3) (2 steps)\n"
-                    "Make() -> Pair(A: 1) (4 steps)\n",
+                    "Make() -> Pair(A: 1) (4 steps)\n"
+                    "Total({\"a, b\": [1, 2], \"c\": []}) -> 3 (54 steps)\n"
+                    "  log info \"total 3\"\n"
+                    "Size({}) -> 0 (4 steps)\n",
                     report));
         PrintFailures(report);
         CHECK(report.Failures().IsEmpty());
@@ -686,6 +706,14 @@ fn Label(): Tag? {
          "Run/Case.spark: .run line 1: cannot read '1e39' as a value of this parameter"},
         {"Half(inf)\n",
          "Run/Case.spark: .run line 1: cannot read 'inf' as a value of this parameter"},
+        {"Total([])\n",
+         "Run/Case.spark: .run line 1: cannot read '[]' as a value of this parameter"},
+        {"Total({\"a\"})\n", "Run/Case.spark: .run line 1: cannot read '\"a\"' as a map entry"},
+        {"Total({\"a\": [1], \"a\": [2]})\n",
+         "Run/Case.spark: .run line 1: cannot make '{\"a\": [1], \"a\": [2]}' (repeated key?)"},
+        {"Total({\"a\": [x]})\n",
+         "Run/Case.spark: .run line 1: cannot read 'x' as a value of this parameter"},
+        {"Size({1, 1})\n", "Run/Case.spark: .run line 1: cannot make '{1, 1}' (repeated key?)"},
         {"Pass(error(18446744073709551615))\n",
          "Run/Case.spark: .run line 1: cannot read 'error(18446744073709551615)' as a value of "
          "this parameter"},
@@ -721,6 +749,91 @@ fn Label(): Tag? {
 
         CHECK(found);
     }
+}
+
+TEST(SparksConformance_RunGoldenAllocationFailure) {
+    // 언어 함수(문자열·컨테이너·서식·로그)를 부르는 사례를 모든 할당 실패 자리에서 돌린다: 실패는
+    // OutOfMemory로 돌아오고(보고에 거짓 실패를 남기지 않는다) 새는 할당이 없다.
+    SystemAllocator backing;
+    constexpr StringView Source = R"(fn Mix(text: string): string {
+    var parts = text.Split(",");
+    parts.Add("z");
+    parts.Sort();
+    var counts: Map<string, int> = [];
+    for (part in parts) {
+        counts[part] = (counts[part] ?? 0) + 1;
+    }
+
+    let removed = counts.Remove("a");
+    var seen: Set<string> = [];
+    for (key in counts.Keys()) {
+        let added = seen.Add(key.ToUpperAscii());
+        Assert(added, "keys are unique");
+    }
+
+    Log.Info("mixed ${removed}");
+    return "${Format.Fixed(1.25, 1)}${seen.Count}${parts.Count}";
+}
+)";
+    constexpr StringView Golden = "Mix(\"b,a,b\") -> \"1.224\" (0 steps)\n";
+    uint64 attempts = 0;
+    uint64 failures = 0;
+    SystemAllocator side; // 기대값은 세는 allocator 밖에 둔다
+    String expected(side);
+    for (uint64 failAt = 0; failAt == 0 || failAt <= attempts; ++failAt) {
+        test::NFailAllocator allocator(backing);
+        const uint64 before = backing.Stats().liveAllocations;
+        {
+            CaseInput input;
+            input.name = "Run/Mix.spark";
+            input.source = Source;
+            input.expect = "clean\n";
+            input.hasRun = true;
+            input.run = failAt == 0 ? Golden : expected.View();
+            Report report(allocator);
+            if (failAt != 0) {
+                allocator.FailOnAttempt(failAt);
+            }
+
+            auto ran = RunCase(allocator, input, report);
+            const uint64 used = allocator.Attempts();
+            allocator.DisableFailure();
+            if (failAt == 0) {
+                // 첫 바퀴는 실제 결과(명령 수 포함)를 얻는다 — 이후 바퀴의 기대값이다.
+                REQUIRE(ran);
+                REQUIRE(report.Failures().Size() == 1);
+                const StringView failure = report.Failures()[0].View();
+                const StringView marker = "  actual run:\n";
+                usize at = 0;
+                while (at + marker.ByteCount() <= failure.ByteCount() &&
+                       StringView(failure.Data() + at, marker.ByteCount()) != marker) {
+                    ++at;
+                }
+
+                REQUIRE(at + marker.ByteCount() <= failure.ByteCount());
+                const StringView actual(failure.Data() + at + marker.ByteCount(),
+                                        failure.ByteCount() - at - marker.ByteCount());
+                CHECK(actual.StartsWith("Mix(\"b,a,b\") -> \"1.224\" ("));
+                CHECK(actual.EndsWith("  log info \"mixed true\"\n"));
+                REQUIRE(expected.TryAppend(actual));
+                attempts = used;
+            } else if (!ran) {
+                CHECK(ran.Error() == ErrorCode::OutOfMemory);
+                ++failures;
+            } else {
+                // 실패를 삼킨 경로는 결과가 같아야 한다(거짓 실패 없음).
+                if (!report.Failures().IsEmpty()) {
+                    PrintFailures(report);
+                }
+
+                CHECK(report.Failures().IsEmpty());
+            }
+        }
+
+        CHECK(backing.Stats().liveAllocations == before);
+    }
+
+    CHECK(failures > 0);
 }
 
 // 폴더 사례(13.1절 "패키지 사례"): 배치 오류는 사례마다 실패 하나이고, 폴더 사례의 지시는 파일
