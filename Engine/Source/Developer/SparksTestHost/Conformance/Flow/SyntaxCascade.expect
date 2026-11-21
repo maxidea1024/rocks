@@ -1,3 +1,5 @@
 # Modules with syntax errors (3.11): S0710-S0712 and S0714 are not judged, as recovery may have skipped reads
 # (only the syntax error here).
 error S0201 4:1
+# Flow rules only: context and lifecycle rules (LC3) are checked in the Rules area.
+stage flow

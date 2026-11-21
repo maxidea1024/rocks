@@ -1,0 +1,25 @@
+# Execution contexts (S0602, 3.13): effects forbidden by hooks, Changed handlers and '@pure', '@worker',
+# '@deterministic' functions, directly or through calls (overrides included, a call on another object writes
+# that object); readiness waits in 'on Start()'; pure and one-shot engine calls in 'on Destroy()'.
+error S0602 50:13
+error S0602 51:16
+error S0602 52:13
+error S0602 53:9
+error S0602 62:16
+error S0602 63:9
+error S0602 70:9
+error S0602 71:15
+error S0602 75:13
+error S0602 76:9
+error S0602 86:9
+error S0703 86:9
+error S0602 87:9
+error S0602 88:9
+error S0602 91:9
+error S0602 101:9
+error S0602 102:9
+error S0602 107:16
+error S0602 112:9
+error S0602 121:12
+error S0602 130:9
+error S0602 131:9

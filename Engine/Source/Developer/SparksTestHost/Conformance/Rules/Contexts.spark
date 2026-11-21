@@ -1,0 +1,134 @@
+class Helper : ScriptableComponent {
+    var Count = 0;
+
+    fn Spawner() {
+        _ = World.Spawn();
+    }
+
+    fn Chain() {
+        Spawner();
+    }
+
+    async fn Waits() {
+        await NextTick();
+    }
+
+    fn Raise() {
+        emit Bumped();
+    }
+
+    event Bumped();
+
+    fn Touch(other: Helper) {
+        Count = other.Count;
+    }
+
+    fn Pure2(): int {
+        return Count;
+    }
+}
+
+open class Base : ScriptableComponent {
+    open fn Step() {
+    }
+}
+
+class Derived : Base {
+    override fn Step() {
+        _ = World.Spawn();
+    }
+}
+
+class Door : Base {
+    @edit var Peer: Helper;
+    @edit var Sound: SoundAsset;
+    @edit var Icon: Soft<DataAsset>;
+    var Count = 0;
+    var Loop: Actor?;
+
+    on Awake() {
+        _ = World.Spawn();
+        Loop = World.Audio.StartLoop(Sound);
+        _ = Icon.Load();
+        Peer.Chain();
+    }
+
+    on Enable() {
+        Loop = World.Audio.StartLoop(Sound);
+        Count = 1;
+    }
+
+    on Disable() {
+        Loop = World.Audio.StartLoop(Sound);
+        Peer.Raise();
+    }
+
+    on Start() {
+        let data = try await Icon.Load();
+        _ = data;
+        await World.Prepare();
+        await NextTick();
+        await Peer.Waits();
+    }
+
+    on Tick() {
+        _ = World.Spawn();
+        Step();
+        _ = Owner.GetForwardVector();
+    }
+
+    on Count.Changed() {
+        Peer.Raise();
+    }
+
+    on Destroy() {
+        Count = 0;
+        Peer.Count = 1;
+        Peer.Touch(Peer);
+        Owner.RequestDestroy();
+        _ = Owner.GetForwardVector();
+        World.Audio.PlayAt(Sound, Owner.Location);
+        emit Struck();
+    }
+
+    event Struck();
+
+    @pure fn Calm(): int {
+        return Count;
+    }
+
+    @pure fn Restless(): int {
+        Count = 2;
+        World.Audio.PlayAt(Sound, Owner.Location);
+        return Peer.Pure2();
+    }
+
+    @deterministic fn Exact(): float {
+        return World.Now();
+    }
+
+    @deterministic async fn Fixed() {
+        await NextFixedTick();
+        await NextTick();
+    }
+}
+
+@worker fn Crunch(value: int): int {
+    return value * 2;
+}
+
+@worker fn Leaky(peer: Helper): int {
+    return peer.Count;
+}
+
+class Panel : ScriptableComponent {
+    @edit var Speed: float = 1.0;
+    @save var Best = 0;
+    var Plain = 0;
+
+    on Validate() {
+        Speed = 2.0;
+        Best = 1;
+        Plain = 1;
+    }
+}

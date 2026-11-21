@@ -101,6 +101,15 @@ struct SchemaTypeParameter {
     SourceSpan constraintSpan; // `constraint` 값(없으면 빈 범위)
 };
 
+// 엔진 함수의 효과 표시(schema `effects` — Docs/Design/SparksLanguage.ko.md 3.13절)다.
+struct SchemaEffects {
+    static constexpr uint8 Spawn = 1u << 0;     // Actor 생성(`World.Spawn`)
+    static constexpr uint8 Acquire = 1u << 1;   // 유지 자원 획득(`Start*`)
+    static constexpr uint8 Readiness = 1u << 2; // 준비 대기(`Sequencer.Prepare` 등)
+    static constexpr uint8 Io = 1u << 3;        // 입출력
+    static constexpr uint8 WallClock = 1u << 4; // 실제 시간
+};
+
 struct SchemaFunction {
     SchemaText name;
     SchemaText id;
@@ -108,6 +117,9 @@ struct SchemaFunction {
     bool isStatic = false;
     bool isAsync = false;
     bool overridable = false; // Sparks `override fn`의 대상이 될 수 있는지(LC2b, SD65)
+    bool pure = false;        // 관찰 가능한 상태를 바꾸지 않는다(LC3b)
+    bool oneShot = false;     // handle 없는 일회성 효과(LC3b)
+    uint8 effects = 0;        // SchemaEffects 비트(LC3b)
     uint32 firstTypeParameter = 0;
     uint32 typeParameterCount = 0;
     uint32 firstParameter = 0;

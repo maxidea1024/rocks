@@ -36,7 +36,8 @@
               "constraint": "Component"
             }
           ],
-          "returns": "T?"
+          "returns": "T?",
+          "pure": true
         },
         {
           "name": "RequestDestroy",
@@ -45,12 +46,14 @@
         {
           "name": "GetForwardVector",
           "id": "5a7e0000000000000000000000000203",
-          "returns": "vec3"
+          "returns": "vec3",
+          "pure": true
         },
         {
           "name": "GetRightVector",
           "id": "5a7e0000000000000000000000000204",
-          "returns": "vec3"
+          "returns": "vec3",
+          "pure": true
         },
         {
           "name": "MoveTo",
@@ -294,6 +297,21 @@
               "name": "location",
               "type": "vec3"
             }
+          ],
+          "oneShot": true
+        },
+        {
+          "name": "StartLoop",
+          "id": "5a7e00000000000000000000000002f2",
+          "parameters": [
+            {
+              "name": "sound",
+              "type": "SoundAsset"
+            }
+          ],
+          "returns": "Actor?",
+          "effects": [
+            "acquire"
           ]
         }
       ]
@@ -325,7 +343,32 @@
               "constraint": "WorldService"
             }
           ],
-          "returns": "T"
+          "returns": "T",
+          "pure": true
+        },
+        {
+          "name": "Spawn",
+          "id": "5a7e0000000000000000000000000262",
+          "returns": "Actor",
+          "effects": [
+            "spawn"
+          ]
+        },
+        {
+          "name": "Prepare",
+          "id": "5a7e0000000000000000000000000263",
+          "async": true,
+          "effects": [
+            "readiness"
+          ]
+        },
+        {
+          "name": "Now",
+          "id": "5a7e0000000000000000000000000264",
+          "returns": "float",
+          "effects": [
+            "wallClock"
+          ]
         }
       ]
     },

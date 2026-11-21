@@ -1,0 +1,12 @@
+# 'await' and 'while' (S0601, S0603, 3.13): 'await' only in async functions and handlers; 'while' only where the
+# code can wait, with an 'await' on every path to the next pass ('break' and 'return' leave; exhaustive enum
+# switches have no fall-through path).
+error S0601 7:5
+error S0601 8:13
+error S0603 40:5
+error S0603 48:5
+error S0603 54:5
+error S0603 85:5
+error S0603 93:9
+error S0603 98:9
+error S0602 99:13

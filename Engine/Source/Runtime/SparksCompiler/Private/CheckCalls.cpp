@@ -250,6 +250,14 @@ ExpressionValue TypeChecker::MemberOfValue(const CheckContext& context, uint32 n
     }
 
     member = FindMember(type, name);
+    if (member == NoSymbol) {
+        // Actor·World 확장 이벤트(3.12절 — 이 모듈이나 직접 import한 모듈의 것)다.
+        member = MemberExtensionEvent(context, node, type, name);
+        if (member == AmbiguousExtension) {
+            return result;
+        }
+    }
+
     if (member == NoSymbol || !MemberAvailable(member, type)) {
         typeOwner(type);
         return result;

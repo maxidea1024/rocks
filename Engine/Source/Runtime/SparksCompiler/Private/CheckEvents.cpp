@@ -107,9 +107,10 @@ bool TypeChecker::HasChanged(uint32 field) const noexcept {
 }
 
 uint32 TypeChecker::FindExtensionEvent(uint32 module, uint32 target, StringView name,
-                                       uint32* hiddenModule) const noexcept {
+                                       uint32* hiddenModule, uint32* otherModule) const noexcept {
     const Compilation& c = compilation_;
     const Span<const ImportResolution> imports = c.ModuleImports(module);
+    uint32 found = NoSymbol;
     for (const uint32 event : extensionEvents_) {
         const Symbol& entry = c.symbols_[event];
         if (entry.owner != target || entry.name != name) {
@@ -121,8 +122,18 @@ uint32 TypeChecker::FindExtensionEvent(uint32 module, uint32 target, StringView 
             visible = visible || import.module == entry.module;
         }
 
+        if (visible && found == NoSymbol) {
+            found = event;
+            continue;
+        }
+
         if (visible) {
-            return event;
+            if (otherModule != nullptr && *otherModule == NoModule &&
+                entry.module != c.symbols_[found].module) {
+                *otherModule = entry.module;
+            }
+
+            continue;
         }
 
         if (hiddenModule != nullptr && *hiddenModule == NoModule) {
@@ -130,11 +141,15 @@ uint32 TypeChecker::FindExtensionEvent(uint32 module, uint32 target, StringView 
         }
     }
 
-    return NoSymbol;
+    if (found != NoSymbol && hiddenModule != nullptr) {
+        *hiddenModule = NoModule; // 보이는 것이 있으면 import 누락이 아니다
+    }
+
+    return found;
 }
 
-uint32 TypeChecker::FindEvent(uint32 module, uint32 type, StringView name,
-                              uint32* hiddenModule) noexcept {
+uint32 TypeChecker::FindEvent(uint32 module, uint32 type, StringView name, uint32* hiddenModule,
+                              uint32* otherModule, bool engineOnly) noexcept {
     if (type == NoType) {
         return NoSymbol;
     }
@@ -142,8 +157,8 @@ uint32 TypeChecker::FindEvent(uint32 module, uint32 type, StringView name,
     const uint32 member = FindMember(NonOptional(type), name);
     if (member != NoSymbol) {
         const SymbolKind kind = compilation_.symbols_[member].kind;
-        if (kind == SymbolKind::Event || kind == SymbolKind::EngineEvent ||
-            kind == SymbolKind::LanguageEvent) {
+        if (kind == SymbolKind::EngineEvent ||
+            (!engineOnly && (kind == SymbolKind::Event || kind == SymbolKind::LanguageEvent))) {
             return member;
         }
     }
@@ -160,12 +175,79 @@ uint32 TypeChecker::FindEvent(uint32 module, uint32 type, StringView name,
         return NoSymbol;
     }
 
-    const uint32 extension = FindExtensionEvent(module, target, name, hiddenModule);
+    const uint32 extension = FindExtensionEvent(module, target, name, hiddenModule, otherModule);
     if (extension != NoSymbol) {
         binder_.NoteUse(module, extension);
     }
 
     return extension;
+}
+
+uint32 TypeChecker::MemberExtensionEvent(const CheckContext& context, uint32 node, uint32 type,
+                                         StringView name) noexcept {
+    const uint32 symbol = SymbolOf(NonOptional(type));
+    uint32 target = NoSymbol;
+    if (binder_.EngineChainHas(symbol, binder_.actor_)) {
+        target = binder_.actor_;
+    } else if (symbol != NoSymbol && symbol == EngineSymbol("World")) {
+        target = symbol;
+    }
+
+    if (target == NoSymbol) {
+        return NoSymbol;
+    }
+
+    uint32 other = NoModule;
+    const uint32 event = FindExtensionEvent(context.module, target, name, nullptr, &other);
+    if (event == NoSymbol) {
+        return NoSymbol;
+    }
+
+    binder_.NoteUse(context.module, event);
+    if (other != NoModule) {
+        ReportAmbiguousExtension(context, node, event, other);
+        return AmbiguousExtension;
+    }
+
+    return event;
+}
+
+void TypeChecker::AppendModuleDisplay(StringBuilderBase& out, uint32 from,
+                                      uint32 module) const noexcept {
+    // import에 쓰는 경로다: 다른 패키지의 모듈은 패키지 이름을 앞에 붙인다(3.4절).
+    const Compilation& c = compilation_;
+    const uint32 package = c.modules_[module].package;
+    if (package != c.modules_[from].package) {
+        out.Append(c.packages_[package].manifest.Name()).Append(".");
+    }
+
+    out.Append(c.Text(c.modules_[module].importPath));
+}
+
+void TypeChecker::ReportAmbiguousExtension(const CheckContext& context, uint32 node, uint32 event,
+                                           uint32 otherModule) noexcept {
+    const Compilation& c = compilation_;
+    const Symbol& entry = c.symbols_[event];
+    // 두 import 모두 그 이름을 쓰려던 것이다(S0714 연쇄 방지).
+    for (const uint32 candidate : extensionEvents_) {
+        const Symbol& other = c.symbols_[candidate];
+        if (other.module == otherModule && other.owner == entry.owner && other.name == entry.name) {
+            binder_.NoteUse(context.module, candidate);
+        }
+    }
+
+    StringBuilder<CompilationMessageInlineBytes> message(allocator_);
+    message.AppendFormat("Extension event '{}.{}' is declared in both '",
+                         c.symbols_[entry.owner].name, entry.name);
+    AppendModuleDisplay(message, context.module, entry.module);
+    message.Append("' and '");
+    AppendModuleDisplay(message, context.module, otherModule);
+    message.Append("'.");
+    if (binder_.Succeeded(message)) {
+        Report(context, DiagnosticCode::DuplicateExtensionEvent, node, message.View(),
+               "An extension event name has one meaning in a module.",
+               "Rename one of them, or import only one of the modules.");
+    }
 }
 
 void TypeChecker::CheckHandlerParameters(const CheckContext& context, uint32 handler,
@@ -400,18 +482,27 @@ void TypeChecker::CheckPathHandler(const CheckContext& context, uint32 handler) 
     const Span<const uint32> segments = tree.Children(path);
     const usize count = segments.Size();
     const uint32 last = segments[count - 1];
+
+    const uint32 first = segments[0];
+    if (count == 1) {
+        Report(context, DiagnosticCode::UnknownEventSource, first, "'this' is not an event.",
+               "A handler names a hook, or a source and its event.",
+               "Write 'on this.Event()' in an actor class.");
+        return;
+    }
+
     if (tree.Node(last).kind != SyntaxKind::Name) {
         return; // 구문 오류
     }
 
     const StringView name = TokenText(context.module, last);
-    const uint32 first = segments[0];
     auto unknownSource = [&](uint32 at, StringView message, StringView explanation) noexcept {
         Report(context, DiagnosticCode::UnknownEventSource, at, message, explanation,
                "Use a field, 'Owner', 'World', or 'this' in an actor class.");
     };
     uint32 event = NoSymbol;
     uint32 hidden = NoModule;
+    uint32 other = NoModule;
     uint32 element = NoType; // 배열 원천의 원소 타입
     bool changed = false;
     if (tree.Node(first).kind == SyntaxKind::This) {
@@ -427,7 +518,7 @@ void TypeChecker::CheckPathHandler(const CheckContext& context, uint32 handler) 
             return;
         }
 
-        event = FindEvent(context.module, TypeOfSymbol(context.owner), name, &hidden);
+        event = FindEvent(context.module, TypeOfSymbol(context.owner), name, &hidden, &other, true);
     } else if (tree.Node(first).kind == SyntaxKind::Name) {
         const uint32 symbol = c.NodeSymbol(context.module, first);
         if (symbol == NoSymbol) {
@@ -443,15 +534,20 @@ void TypeChecker::CheckPathHandler(const CheckContext& context, uint32 handler) 
                 return;
             }
 
-            event = FindEvent(context.module, TypeOfSymbol(EngineSymbol("World")), name, &hidden);
+            event = FindEvent(context.module, TypeOfSymbol(EngineSymbol("World")), name, &hidden,
+                              &other, false);
         } else if (entry.kind == SymbolKind::EngineField && entry.name == "Widget" &&
                    binder_.EngineChainHas(entry.owner, widgetController)) {
             if (count != 3) {
                 unknownSource(segments[1], "Write 'on Widget.Name.Event()'.",
                               "A widget event names one child widget of the widget asset.");
+                return;
             }
 
-            return; // widget 이름·이벤트는 WidgetAsset schema와 대조한다(연동 단계)
+            // widget 이름·이벤트는 WidgetAsset schema와 대조한다(연동 단계). 재진입은 판정한다.
+            CheckReentrancy(context, handler, true,
+                            ContainsAwait(context.module, tree.Child(handler, 4)), path);
+            return;
         } else if (entry.kind == SymbolKind::Field || entry.kind == SymbolKind::EngineField) {
             const uint32 fieldType =
                 entry.kind == SymbolKind::Field ? FieldType(symbol) : entry.type;
@@ -481,7 +577,7 @@ void TypeChecker::CheckPathHandler(const CheckContext& context, uint32 handler) 
                     type = element;
                 }
 
-                event = FindEvent(context.module, type, name, &hidden);
+                event = FindEvent(context.module, type, name, &hidden, &other, false);
             } else if (count == 3 && name == ChangedEventName) {
                 const uint32 inner =
                     tree.Node(segments[1]).kind == SyntaxKind::Name
@@ -489,8 +585,10 @@ void TypeChecker::CheckPathHandler(const CheckContext& context, uint32 handler) 
                         : NoSymbol;
                 const SymbolKind innerKind =
                     inner == NoSymbol ? SymbolKind::BuiltinType : c.symbols_[inner].kind;
-                if (!IsObjectType(NonOptional(fieldType)) ||
-                    (innerKind != SymbolKind::Field && innerKind != SymbolKind::EngineField)) {
+                const bool languageField = innerKind == SymbolKind::LanguageField;
+                if (!languageField &&
+                    (!IsObjectType(NonOptional(fieldType)) ||
+                     (innerKind != SymbolKind::Field && innerKind != SymbolKind::EngineField))) {
                     unknownSource(segments[1], "This is not a field of the object.",
                                   "'on A.B.Changed()' names a field B of the object in field A.");
                     return;
@@ -516,6 +614,15 @@ void TypeChecker::CheckPathHandler(const CheckContext& context, uint32 handler) 
                               "Write 'on Field.Event()' or 'on Field.Value.Changed()'.");
                 return;
             }
+        } else if (entry.kind == SymbolKind::Const && count == 2 && name == ChangedEventName) {
+            StringBuilder<CompilationMessageInlineBytes> message(allocator_);
+            message.AppendFormat("Constant '{}' has no 'Changed' event.", entry.name);
+            if (binder_.Succeeded(message)) {
+                Report(context, DiagnosticCode::ChangedUnavailable, last, message.View(),
+                       "A constant never changes.", "Handle a field declared with 'var'.");
+            }
+
+            return;
         } else {
             StringBuilder<CompilationMessageInlineBytes> message(allocator_);
             message.AppendFormat("'{}' is not an event source.", entry.name);
@@ -531,14 +638,21 @@ void TypeChecker::CheckPathHandler(const CheckContext& context, uint32 handler) 
         return; // 구문 오류
     }
 
+    if (event != NoSymbol && other != NoModule) {
+        ReportAmbiguousExtension(context, last, event, other);
+        return;
+    }
+
     if (!changed && event == NoSymbol) {
         if (hidden != NoModule) {
             StringBuilder<CompilationMessageInlineBytes> message(allocator_);
-            message.AppendFormat("Extension event '{}' is declared in module '{}', which is not "
-                                 "imported here.",
-                                 name, c.Text(c.modules_[hidden].importPath));
+            message.AppendFormat("Extension event '{}' is declared in module '", name);
+            AppendModuleDisplay(message, context.module, hidden);
+            message.Append("', which is not imported here.");
             StringBuilder<CompilationMessageInlineBytes> fix(allocator_);
-            fix.AppendFormat("Add 'import {};'.", c.Text(c.modules_[hidden].importPath));
+            fix.Append("Add 'import ");
+            AppendModuleDisplay(fix, context.module, hidden);
+            fix.Append(";'.");
             if (binder_.Succeeded(message) && binder_.Succeeded(fix)) {
                 Report(context, DiagnosticCode::ExtensionEventNotImported, last, message.View(),
                        "Extension events are used only from modules that import their module "
@@ -625,8 +739,13 @@ void TypeChecker::CheckHandlers(const CheckContext& context, uint32 typeNode) no
         return;
     }
 
-    const bool lifecycle = isClass && context.owner != NoSymbol &&
-                           (c.symbols_[context.owner].flags & SymbolFlags::Lifecycle) != 0;
+    if (context.owner == NoSymbol ||
+        (c.symbols_[context.owner].flags & SymbolFlags::Incomplete) != 0) {
+        return; // 기반을 해석하지 못한 class(3.9절 연쇄 방지)
+    }
+
+    const bool lifecycle =
+        isClass && (c.symbols_[context.owner].flags & SymbolFlags::Lifecycle) != 0;
     Array<StringView> hooks(allocator_);
     for (const uint32 member : tree.Children(members)) {
         if (binder_.error_ != ErrorCode::None) {
@@ -729,6 +848,12 @@ void TypeChecker::CheckHandlers(const CheckContext& context, uint32 typeNode) no
             continue;
         }
 
+        const uint32 head = tree.Child(path, 0);
+        if (tree.Node(head).kind == SyntaxKind::Name &&
+            c.NodeSymbol(context.module, head) == NoSymbol) {
+            continue; // 해석하지 못한 원천(이름 해석이 알렸다)
+        }
+
         bool duplicate = false;
         for (const Declared& previous : earlier) {
             duplicate = duplicate || SamePath(previous.module, previous.path, context.module, path);
@@ -761,6 +886,13 @@ uint32 TypeChecker::ResolveEmit(const CheckContext& context, uint32 node) noexce
     const Span<const uint32> segments = tree.Children(path);
     const uint32 first = segments[0];
     if (segments.Size() == 1) {
+        if (tree.Node(first).kind == SyntaxKind::This) {
+            Report(context, DiagnosticCode::UnknownEventSource, first, "'this' is not an event.",
+                   "'emit' names an event, or a target and its event.",
+                   "Write 'emit Event(...)' or 'emit this.Event(...)' in an actor class.");
+            return NoSignature;
+        }
+
         if (tree.Node(first).kind != SyntaxKind::Name) {
             return NoSignature;
         }
@@ -890,10 +1022,17 @@ uint32 TypeChecker::ResolveEmit(const CheckContext& context, uint32 node) noexce
     }
 
     uint32 hidden = NoModule;
+    uint32 other = NoModule;
     const uint32 extension =
-        target == NoSymbol ? NoSymbol : FindExtensionEvent(context.module, target, name, &hidden);
+        target == NoSymbol ? NoSymbol
+                           : FindExtensionEvent(context.module, target, name, &hidden, &other);
     if (extension != NoSymbol) {
         binder_.NoteUse(context.module, extension);
+        if (other != NoModule) {
+            ReportAmbiguousExtension(context, last, extension, other);
+            return NoSignature;
+        }
+
         return c.symbols_[extension].signature;
     }
 
@@ -911,11 +1050,13 @@ uint32 TypeChecker::ResolveEmit(const CheckContext& context, uint32 node) noexce
 
     if (hidden != NoModule) {
         StringBuilder<CompilationMessageInlineBytes> message(allocator_);
-        message.AppendFormat(
-            "Extension event '{}' is declared in module '{}', which is not imported here.", name,
-            c.Text(c.modules_[hidden].importPath));
+        message.AppendFormat("Extension event '{}' is declared in module '", name);
+        AppendModuleDisplay(message, context.module, hidden);
+        message.Append("', which is not imported here.");
         StringBuilder<CompilationMessageInlineBytes> fix(allocator_);
-        fix.AppendFormat("Add 'import {};'.", c.Text(c.modules_[hidden].importPath));
+        fix.Append("Add 'import ");
+        AppendModuleDisplay(fix, context.module, hidden);
+        fix.Append(";'.");
         if (binder_.Succeeded(message) && binder_.Succeeded(fix)) {
             Report(context, DiagnosticCode::ExtensionEventNotImported, last, message.View(),
                    "Extension events are used only from modules that import their module "
@@ -936,6 +1077,49 @@ uint32 TypeChecker::ResolveEmit(const CheckContext& context, uint32 node) noexce
     }
 
     return NoSignature;
+}
+
+bool TypeChecker::DependsOn(uint32 package, uint32 dependency) noexcept {
+    // 의존 패키지 전체(전이)다. 순환은 S1107이 알렸고 방문 표시로 멈춘다.
+    const Compilation& c = compilation_;
+    Array<uint8> visited(allocator_);
+    Array<uint32> pending(allocator_);
+    if (auto resized = visited.TryResize(c.packages_.Size()); !resized) {
+        binder_.error_ = resized.Error();
+        return false;
+    }
+
+    for (uint8& flag : visited) {
+        flag = 0;
+    }
+
+    if (auto pushed = pending.TryPushBack(package); !pushed) {
+        binder_.error_ = pushed.Error();
+        return false;
+    }
+
+    while (!pending.IsEmpty()) {
+        const uint32 current = pending.TryPopBack().Value(); // 비어 있지 않다
+        const PackageManifest& manifest = c.packages_[current].manifest;
+        for (const ManifestName& name : manifest.Dependencies()) {
+            const uint32 next = c.FindPackage(manifest.Text(name));
+            if (next == NoPackage || visited[next] != 0) {
+                continue;
+            }
+
+            if (next == dependency) {
+                return true;
+            }
+
+            visited[next] = 1;
+            if (auto pushed = pending.TryPushBack(next); !pushed) {
+                binder_.error_ = pushed.Error();
+                return false;
+            }
+        }
+    }
+
+    return false;
 }
 
 void TypeChecker::CheckExtensionEvents() noexcept {
@@ -982,7 +1166,6 @@ void TypeChecker::CheckExtensionEvents() noexcept {
 
         // 같은 패키지의 앞선 선언, 또는 의존 패키지의 선언과 겹치면 이쪽이 S0814다.
         const uint32 package = c.modules_[entry.module].package;
-        const PackageManifest& manifest = c.packages_[package].manifest;
         for (const uint32 other : extensionEvents_) {
             const Symbol& previous = c.symbols_[other];
             if (other == event || previous.owner != entry.owner || previous.name != entry.name) {
@@ -990,21 +1173,18 @@ void TypeChecker::CheckExtensionEvents() noexcept {
             }
 
             const uint32 otherPackage = c.modules_[previous.module].package;
-            bool conflict = otherPackage == package && DeclaredBefore(other, event);
-            for (const ManifestName& dependency : manifest.Dependencies()) {
-                conflict = conflict ||
-                           (otherPackage != package &&
-                            c.packages_[otherPackage].manifest.Name() == manifest.Text(dependency));
-            }
+            const bool conflict = (otherPackage == package && DeclaredBefore(other, event)) ||
+                                  (otherPackage != package && DependsOn(package, otherPackage));
 
             if (!conflict) {
                 continue;
             }
 
             StringBuilder<CompilationMessageInlineBytes> message(allocator_);
-            message.AppendFormat("Extension event '{}.{}' is already declared in module '{}'.",
-                                 c.symbols_[entry.owner].name, entry.name,
-                                 c.Text(c.modules_[previous.module].importPath));
+            message.AppendFormat("Extension event '{}.{}' is already declared in module '",
+                                 c.symbols_[entry.owner].name, entry.name);
+            AppendModuleDisplay(message, entry.module, previous.module);
+            message.Append("'.");
             if (binder_.Succeeded(message)) {
                 Report(context, DiagnosticCode::DuplicateExtensionEvent, entry.nameNode,
                        message.View(),

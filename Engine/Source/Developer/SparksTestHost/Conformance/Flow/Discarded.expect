@@ -6,3 +6,5 @@ error S0713 26:5
 error S0713 28:5
 error S0713 30:5
 error S0713 32:5
+# Flow rules only: context and lifecycle rules (LC3) are checked in the Rules area.
+stage flow

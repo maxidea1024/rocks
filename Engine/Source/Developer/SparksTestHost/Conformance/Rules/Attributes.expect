@@ -1,0 +1,29 @@
+# Attributes (S0620-S0623, 3.13): names with a suggestion, places, duplicates, one execution context per
+# function, and arguments of '@edit', '@net', '@formerly', '@tableRow', '@rpc', '@tick', '@cvar'.
+error S0621 64:1
+error S0620 67:5
+error S0620 68:5
+error S0621 69:5
+error S0622 70:10
+error S0623 71:11
+error S0623 72:11
+error S0623 73:19
+error S0623 74:16
+error S0623 75:10
+error S0623 76:5
+error S0623 77:15
+error S0623 78:5
+error S0623 81:10
+error S0623 84:10
+error S0621 87:5
+error S0621 90:11
+error S0621 93:5
+error S0623 97:5
+error S0623 100:18
+error S0623 103:21
+error S0621 106:5
+error S0621 109:5
+error S0621 110:5
+error S0621 111:5
+error S0623 114:1
+error S0621 118:1

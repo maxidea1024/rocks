@@ -177,12 +177,66 @@ private:
     void CheckExtensionEvents() noexcept;
     // type(또는 그 원소)의 이벤트다(멤버 이벤트, Actor·World 확장 이벤트). 같은 이름의 확장
     // 이벤트가 import하지 않은 모듈에만 있으면 hiddenModule에 그 모듈을 둔다.
-    uint32 FindEvent(uint32 module, uint32 type, StringView name, uint32* hiddenModule) noexcept;
-    uint32 FindExtensionEvent(uint32 module, uint32 target, StringView name,
-                              uint32* hiddenModule) const noexcept;
+    // engineOnly면 Sparks 멤버 이벤트·언어 이벤트를 받지 않는다(`this` 원천). 보이는 확장 이벤트가
+    // 다른 모듈에도 있으면 otherModule에 그 모듈을 둔다(모호성 — S0814).
+    uint32 FindEvent(uint32 module, uint32 type, StringView name, uint32* hiddenModule,
+                     uint32* otherModule, bool engineOnly) noexcept;
+    uint32 FindExtensionEvent(uint32 module, uint32 target, StringView name, uint32* hiddenModule,
+                              uint32* otherModule = nullptr) const noexcept;
+    void ReportAmbiguousExtension(const CheckContext& context, uint32 node, uint32 event,
+                                  uint32 otherModule) noexcept;
+    // from 모듈에서 module을 import하는 경로(다른 패키지면 패키지 이름 포함)를 out에 붙인다.
+    void AppendModuleDisplay(StringBuilderBase& out, uint32 from, uint32 module) const noexcept;
+    // 식의 `X.E`에서 X 타입의 확장 이벤트다(없으면 NoSymbol, 모호하면 진단을 내고
+    // AmbiguousExtension).
+    uint32 MemberExtensionEvent(const CheckContext& context, uint32 node, uint32 type,
+                                StringView name) noexcept;
+    static constexpr uint32 AmbiguousExtension = NumericLimits<uint32>::Max() - 3;
+    // package가 dependency에 (전이로) 의존하는지다.
+    bool DependsOn(uint32 package, uint32 dependency) noexcept;
     bool HasChanged(uint32 field) const noexcept;
     bool ContainsAwait(uint32 module, uint32 node) noexcept;
     uint32 EngineSymbol(StringView name) const noexcept;
+
+    // ---- 실행 문맥·효과·attribute(CheckContexts.cpp, 3.13절 — Rules 단계) ----
+    // 함수·hook·handler 본문 하나의 효과다(direct는 본문이 직접, total은 부른 함수까지).
+    struct EffectBody {
+        uint32 module;
+        uint32 node;
+        uint32 symbol; // 함수 심볼(handler는 NoSymbol)
+        uint32 owner;  // class·struct 심볼(최상위 함수는 NoSymbol)
+        uint32 direct;
+        uint32 total;
+    };
+
+    // 효과가 생기는 자리(await·emit·대입·호출)다. 호출이면 callee에 부른 함수가 있다.
+    struct EffectSite {
+        uint32 body;
+        uint32 node;
+        uint32 bits;
+        uint32 callee;
+    };
+
+    // `while` 경로 판정의 상태(대기했는지)다.
+    static constexpr uint8 WaitStateWaited = 1;
+    static constexpr uint8 WaitStateNotWaited = 2;
+
+    void CheckAttributes(uint32 module) noexcept;
+    void CheckAttributeList(const CheckContext& context, uint32 declaration, uint32 place,
+                            bool isVar, bool noParameters, bool worldServiceVar) noexcept;
+    void CheckAttributeArguments(const CheckContext& context, uint32 declaration, uint32 attribute,
+                                 StringView name, uint8 shape) noexcept;
+    // attribute 인자가 숫자(리터럴, 앞의 `-`, 숫자 const 이름)인지다.
+    bool IsAttributeNumber(uint32 module, uint32 expression, bool integer) noexcept;
+    void AnalyzeEffects() noexcept;
+    void CollectBodyEffects(uint32 bodyIndex) noexcept;
+    void CheckBodyContext(uint32 bodyIndex, Span<const uint32> overrideBase) noexcept;
+    uint32 SiteEffects(const EffectSite& site, Span<const uint32> overrideBase) const noexcept;
+    uint32 AwaitEffect(uint32 module, uint32 operand) noexcept;
+    uint32 WriteEffect(uint32 module, uint32 target) noexcept;
+    // states(WaitState* 비트)로 node에 들어갔을 때 나가는 상태다. 대기하지 않은 `continue`가
+    // 있으면 continuesWithoutWait를 켠다.
+    uint8 WaitStates(uint32 module, uint32 node, uint8 states, bool& continuesWithoutWait) noexcept;
 
     // ---- 흐름 분석(CheckFlow.cpp, 3.11절) ----
     // stale이면 await 뒤 객체 지역 이름의 읽기를 staleRead_에 표시하고(본문 검사 전), 아니면
@@ -398,6 +452,10 @@ private:
     bool rules_ = false;
     // 확장 이벤트 심볼(심볼 번호 순)이다.
     Array<uint32> extensionEvents_;
+    // 효과 분석(3.13절)의 본문·자리와 함수 심볼 → 본문 번호(NoLocalIndex 없음)다.
+    Array<EffectBody> effectBodies_;
+    Array<EffectSite> effectSites_;
+    Array<uint32> effectOfSymbol_;
 };
 
 } // namespace rocks::sparks::detail

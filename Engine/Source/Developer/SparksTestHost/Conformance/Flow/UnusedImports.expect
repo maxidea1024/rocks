@@ -6,3 +6,5 @@ error S0317 Game/Broken.spark 4:9
 error S0714 Game/Main.spark 3:8
 error S0714 Game/Main.spark 5:8
 error S0714 Game/Main.spark 14:8
+# Flow rules only: context and lifecycle rules (LC3) are checked in the Rules area.
+stage flow

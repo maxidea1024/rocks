@@ -835,7 +835,7 @@ Class<T> { fn Create(): T }             // full, T는 class 타입
 
 **인덱스(`a[i]`).** `Array<T>`는 `int` 위치, `Map<K, V>`는 `K` key를 받으며(S0401) 읽기 결과는 `T?`·`V?`, 쓰기 `a[i] = v`의 자리 타입은 `T`·`V`다. 수신자가 `T?`면 S0412, 인덱스가 없는 타입이면 S0406이다.
 
-**emit.** `emit` 인자는 이벤트 매개변수 타입을 기대 타입으로 검사한다(인자 수가 다르면 S0403). 경로가 이벤트 이름 하나거나 `this.이벤트`(class 기반 체인의 이벤트)일 때 이벤트를 정하고, 그 밖의 경로(확장 이벤트 대상 — LC3)는 인자의 이름만 검사한다(기대 타입을 모르는 자리 — 아래 연쇄 방지).
+**emit.** `emit` 인자는 이벤트 매개변수 타입을 기대 타입으로 검사한다(인자 수가 다르면 S0403). 경로가 이벤트 이름 하나거나 `this.이벤트`(class 기반 체인의 이벤트 — Rules 단계는 §3.12의 확장 이벤트 규칙)일 때 이벤트를 정하고, 그 밖의 경로(확장 이벤트 대상 — LC3)는 인자의 이름만 검사한다(기대 타입을 모르는 자리 — 아래 연쇄 방지).
 
 **반복(`for`, S0406·S0412).** `for (x in e)`의 `e`가 `Array<T>`·`Set<T>`이면 `x`는 `T`, `Map<K, V>`이면 key `K`다. 이름이 둘인 `for (a, b in e)`는 `Array<T>`면 `a`가 `int` 위치·`b`가 `T`, `Map<K, V>`면 `a`가 key `K`·`b`가 값 `V`이며 `Set`에 이름 둘은 S0406이다. `e`가 `T?`면 S0412, 그 밖의 타입은 S0406이다(`for`는 배열·Map·Set·범위만 돈다). 범위 `a..<b`는 정수 범위다: 시작을 먼저 검사하고 끝은 시작의 타입을 기대 타입으로 검사한다(둘 다 타입 없는 상수면 `int`, 시작만 상수면 끝의 타입). 정수 타입이 아니면 S0406, 끝이 시작의 타입에 대입 가능하지 않으면 S0401, 범위에 이름 둘은 S0406이다. 이름이 받은 타입은 본문에서 그 지역 이름의 타입이다.
 
@@ -888,9 +888,9 @@ Class<T> { fn Create(): T }             // full, T는 class 타입
 
 이 절은 §5.1–§5.3의 hook·`on` 경로·`emit`·확장 이벤트·재진입 표시 규칙을 컴파일러가 판정하는 방식으로 확정한다. 진단 코드는 §8.1의 S0413, S08xx다. 뒤로 넘기는 것: handler·hook 안의 효과(await·emit·생성의 문맥별 금지 — LC3b), widget 경로의 대조(WidgetAsset schema가 컴파일 입력에 들어올 때 — 연동 단계), 입력 action 사전 대조(검증 리터럴 사전 — 연동 단계), 실행 중 연결·전달(LC6).
 
-**수명 클래스.** hook·`on` handler는 기반 체인에 엔진 수명 타입(Component·Actor·WorldService·WidgetController)이 있는 class에만 둔다. 그 밖의 class(DataAsset 파생 등)·struct의 handler는 S0804다.
+**수명 클래스.** hook·`on` handler는 기반 체인에 엔진 수명 타입(Component·Actor·WorldService·WidgetController)이 있는 class에만 둔다. 그 밖의 class(DataAsset 파생 등)의 handler는 S0804다(struct 본문의 `on`은 구문 오류 S0204다). 기반을 해석하지 못한 class(3.9절 연쇄 방지)는 이 절을 판정하지 않고, 원천 이름을 해석하지 못한 handler는 중복 비교에서 뺀다.
 
-**hook(`on X(...)`, 경로 구간 하나).** X는 `Awake`·`Enable`·`Start`·`Tick`·`FixedTick`·`LateTick`·`Disable`·`Destroy`·`TriggerEnter`·`TriggerExit`·`CollisionEnter`·`CollisionExit`·`Validate`(full) 중 하나다. 그 밖의 이름은 S0803이며 편집 거리 2 이하의 hook 이름이 있으면 그것을, 그 이름이 자기 class의 이벤트면 이벤트는 `emit`한 class 안에서 받지 않는다는 설명과 함수를 직접 부르라는 수정 예를 제시한다.
+**hook(`on X(...)`, 경로 구간 하나).** X는 `Awake`·`Enable`·`Start`·`Tick`·`FixedTick`·`LateTick`·`Disable`·`Destroy`·`TriggerEnter`·`TriggerExit`·`CollisionEnter`·`CollisionExit`·`Validate`(full) 중 하나다. 그 밖의 이름은 S0803이며 편집 거리 2 이하의 hook 이름이 있으면 그것을, 그 이름이 자기 class(기반 class 포함)의 이벤트면 이벤트는 `emit`한 class 안에서 받지 않는다는 설명과 함수를 직접 부르라는 수정 예를 제시한다.
 
 - 물리 hook(`Trigger*`·`Collision*`)은 Component·Actor 파생 class에만 있고(WorldService·WidgetController에서는 S0804), LevelScript 파생 class에서는 S0801이다.
 - 인자: Tick 계열은 없거나 `(dt: float)`, `TriggerEnter`·`TriggerExit`는 `(other: Actor, trigger: Collider)`, `CollisionEnter`·`CollisionExit`는 `(other: Actor, hit: Hit)`의 앞에서부터 필요한 만큼, 나머지 hook은 인자가 없다. 넘치는 인자와 타입이 정확히 같지 않은 인자는 S0805이며 위치는 그 인자다(타입이 같지 않으면 타입 표기, 넘치면 그 인자 이름). 인자 이름 `_`는 허용한다.
@@ -900,29 +900,96 @@ Class<T> { fn Create(): T }             // full, T는 class 타입
 
 | 원천 | 조건 | 이벤트 |
 |---|---|---|
-| `this` | Actor 파생 class(그 밖은 S0807) | 그 class 기반 체인의 엔진 Actor 이벤트와 Actor 확장 이벤트 |
+| `this` | Actor 파생 class(그 밖은 S0807, 경로가 `this` 하나면 S0807) | 그 class 기반 체인의 엔진 Actor 이벤트와 Actor 확장 이벤트(Sparks `event`는 받지 않는다 — S0808) |
 | `World` | World 문맥 이름이 있는 class | 엔진 `World` 타입의 이벤트와 World 확장 이벤트 |
 | `Widget` | WidgetController 파생 class, `Widget.이름.이벤트`(구간 셋) | 판정하지 않는다(위 "뒤로 넘기는 것") |
 | 필드 이름 | 자기·상속 필드(Sparks 필드, 엔진 필드 `Owner` 등) | 아래 |
 
 필드 원천의 이벤트: 경로가 `F.Changed`면 필드 F 자신의 Changed, `F.G.Changed`면 F의 타입(객체·`?` 허용)의 필드 G의 Changed다. 그 밖의 `F.E`는 F의 타입 T(객체, `T?`, 또는 원소가 객체인 `Array<T>`)의 이벤트 E다: Sparks class 체인의 `event`, 엔진 타입 체인의 이벤트(schema), 부록 B 언어 이벤트(`InputAction.Triggered` 등), T가 Actor 파생이면 Actor 확장 이벤트. 구간이 넷 이상이거나 `F.G.E`(E가 `Changed`가 아님)는 S0807이다. 이벤트를 찾지 못하면 S0808(위치는 이벤트 이름, 편집 거리 2 이하의 이벤트 제시)이다.
 
-- **Changed:** Sparks `var` 필드와 schema가 `changed: true`로 표시한 엔진 필드에만 있다. `let` 필드·const·읽기 전용 언어 멤버·`changed`가 없는 엔진 필드의 `Changed`는 S0809다. `Changed`는 예약 이벤트 이름이므로 `event Changed`·확장 이벤트 `Changed`도 S0809다.
+- **Changed:** Sparks `var` 필드와 schema가 `changed: true`로 표시한 엔진 필드에만 있다. `let` 필드·const(`on Limit.Changed()`)·언어 멤버(`on Jump.Value.Changed()`)·`changed`가 없는 엔진 필드의 `Changed`는 S0809다. `Changed`는 예약 이벤트 이름이므로 `event Changed`·확장 이벤트 `Changed`도 S0809다.
 - **인자:** handler 인자는 이벤트 인자 목록(배열 원천은 앞에 원소 `T` 하나를 더한 목록, Changed는 빈 목록)의 앞에서부터 필요한 만큼이며 타입이 정확히 같아야 한다(`?` 유무 포함). 넘치거나 다르면 S0810이며 위치 규칙은 S0805와 같다.
 - **중복:** class와 그 기반 class 전체에서 같은 경로(구간 글자가 같은 것)를 둘 선언하면 나중 것(파생 class, 같은 class면 뒤의 것)이 S0806이다.
 
-**확장 이벤트(`event Actor.X(...)`·`event World.X(...)`).** 최상위에만 쓰며(구문) 대상은 `Actor`·`World` 두 이름이다. 그 밖의 대상은 S0813이다. 이름은 대상 타입의 이벤트(엔진 schema 포함)와도, 같은 대상의 다른 확장 이벤트(현재 패키지와 의존 패키지 전체 — 의존 패키지에서 온 것과의 충돌은 이 패키지 쪽에)와도 같을 수 없으며 S0814다(위치는 이벤트 이름, 메시지에 먼저 선언한 곳). 매개변수 타입은 함수 매개변수와 같은 규칙으로 해석한다. `on`·`emit`에서 확장 이벤트는 이 모듈이나 이 모듈이 직접 import한 모듈의 것만 찾는다. 같은 이름의 확장 이벤트가 import하지 않은 모듈에 있으면 S0815이며 그 모듈의 import를 제시한다. 해석한 확장 이벤트는 그 import의 사용이다(S0714 — 3.11절의 이름 판정을 대신한다).
+**확장 이벤트(`event Actor.X(...)`·`event World.X(...)`).** 최상위에만 쓰며(구문) 대상은 `Actor`·`World` 두 이름이다. 그 밖의 대상은 S0813이다. 이름은 대상 타입의 이벤트(엔진 schema 포함)와도, 같은 대상의 다른 확장 이벤트(현재 패키지와 의존 패키지 전체 — 의존 패키지에서 온 것과의 충돌은 이 패키지 쪽에)와도 같을 수 없으며 S0814다(위치는 이벤트 이름, 메시지에 먼저 선언한 곳). 매개변수 타입은 함수 매개변수와 같은 규칙으로 해석한다. `on`·`emit`과 식의 `X.E`(`await Owner.Interacted`, `Race`의 인자 — §6.1)에서 확장 이벤트는 이 모듈이나 이 모듈이 직접 import한 모듈의 것만 찾는다(식에서는 단계와 무관하게 멤버처럼 찾는다). 그렇게 보이는 같은 이름의 확장 이벤트가 둘이면(서로 의존하지 않는 두 패키지) 그 사용 자리에 S0814다. 의존 패키지 전체는 전이 의존이다. 같은 이름의 확장 이벤트가 import하지 않은 모듈에 있으면 S0815이며 그 모듈의 import를 제시한다. 해석한 확장 이벤트는 그 import의 사용이다(S0714 — 3.11절의 이름 판정을 대신한다).
 
-**`emit`.** 인자는 이벤트 매개변수 타입의 자리로 검사한다(수가 다르면 S0402 — §3.10).
+**`emit`.** 인자는 이벤트 매개변수 타입의 자리로 검사한다(수가 다르면 S0403 — §3.10). `emit this(...)`처럼 이벤트가 없는 경로는 S0807이다.
 
 - `emit E(...)`: E는 이 class가 선언한 `event`여야 한다. 기반 class의 이벤트·엔진 이벤트는 S0811("선언한 class 안에서만 emit한다"), 찾지 못하면 S0808이다.
 - `emit this.X(...)`: Actor 파생 class에서 Actor 확장 이벤트 X를 자기 Actor에 발행한다(Actor 파생이 아니면 S0807, 찾지 못하면 S0808).
 - `emit t.X(...)`: t는 지역 이름·인자·필드(이름 하나)이고 그 타입이 Actor 파생(`?` 없음)이거나 World이며 X는 그 대상의 확장 이벤트다. t의 타입이 `T?`이면 S0412, await 뒤 상태의 객체 지역 이름이면 3.11절의 S0412다. t가 그 밖의 타입이면 S0811(멤버·엔진 이벤트는 발행할 수 없다).
 - 식 안의 `X.E(...)`(이벤트를 호출 형태로 씀)는 S0812이며 `emit`이나 `await X.E`를 제시한다.
 
-**재진입 표시(SD11).** `on` 경로 handler와 물리 hook 중 본문에 `await`(또는 `try await`)가 있는 것은 `@skipWhileBusy`나 `@restart` 중 정확히 하나를 붙인다. 없으면 S0816이며 두 형태를 수정 예로 제시한다(위치는 handler 이름). 둘 다 붙였거나, `await`가 없는 handler, 물리 hook이 아닌 hook, 함수에 붙이면 S0817이다(위치는 attribute). `Changed` handler의 `await`는 LC3b(Reaction 문맥)가 알리므로 S0816을 내지 않는다.
+**재진입 표시(SD11).** `on` 경로 handler와 물리 hook 중 본문에 `await`(또는 `try await`)가 있는 것은 `@skipWhileBusy`나 `@restart` 중 정확히 하나를 붙인다. 없으면 S0816이며 두 형태를 수정 예로 제시한다(위치는 handler 이름). 둘 다 붙였거나, `await`가 없는 handler, 물리 hook이 아닌 hook, `Changed` handler, 함수에 붙이면 S0817이다(위치는 attribute). widget 경로 handler도 재진입을 판정한다. 그 밖의 선언(필드·이벤트·class)에 붙이면 attribute 자리 규칙의 S0621이다(§3.13). `Changed` handler의 `await`는 LC3b(Reaction 문맥)가 알리므로 S0816을 내지 않는다.
 
-**LevelScript(LevelScript LD7·LD18).** LevelScript 파생 class의 `@edit` 객체 필드에 `?`가 없으면 S0413(3.11절의 S0428 대신), `let` 필드의 초기값이 Collider 파생 component 생성이면 S0802, 물리 hook은 S0801이다.
+**LevelScript(LevelScript LD7·LD18).** LevelScript 파생 class의 `@edit` 객체 필드에 `?`가 없으면 S0413(3.11절의 S0428 대신), `let` 필드의 초기값(괄호 안 포함)이 Collider 파생 component 생성이면(필드 표기와 무관하게 생성식의 타입으로) S0802, 물리 hook은 S0801이다.
+### 3.13 실행 문맥·효과·attribute(LC3b 확정)
+
+이 절은 §6.1·§6.2의 실행 문맥, `await`·`while` 규칙과 attribute의 이름·자리·인자를 컴파일러가 판정하는 방식으로 확정한다. 진단 코드는 §8.1의 S06xx다. 뒤로 넘기는 것: 유지 자원의 담는 자리(LC3c), `@net`·`@rpc`·`@save`의 타입·권한(LC3d), attribute의 실행 의미(연동 단계), Teardown의 읽기 접근 제한(`Owner`의 읽기 전용 속성만 — 연동 단계에서 schema 표시와 함께).
+
+**attribute.** 이름이 아래 표에 없으면 S0620(편집 거리 2 이하의 이름 제시), 표의 자리가 아닌 곳이면 S0621, 한 선언에 같은 attribute가 둘이면 두 번째가 S0622, 인자 모양이 틀리면 S0623이다(위치는 그 attribute, 인자 오류는 그 인자). 프로필(full 전용)은 S1113이 보고 재진입 표시는 §3.12가 본다. 실행 문맥 attribute(`@pure`·`@worker`·`@deterministic`·`@editorButton`·`@cheat`·`@test`)는 한 함수에 하나뿐이다(둘째부터 S0621).
+
+| attribute | 자리 | 인자 |
+|---|---|---|
+| `@edit` | class·struct 필드 | 없음, 또는 이름 지정 `Min:`·`Max:`(숫자 상수식 — 필드 타입이 숫자일 때만) |
+| `@save` | class의 `var` 필드 | 없음 |
+| `@net` | class의 `var` 필드 | 없음, 또는 짧은 이름 `OwnerOnly` |
+| `@authorityOnly` | `event` 선언(멤버·확장) | 없음 |
+| `@formerly` | 필드·enum case·class·struct·enum | 보간 없는 문자열 리터럴 하나 |
+| `@tableRow` | struct | 검증 리터럴 `Asset("...")` 하나 |
+| `@skipWhileBusy`·`@restart` | handler(§3.12) | 없음 |
+| `@rpc` (full) | class의 `async`가 아닌 함수 | 짧은 이름 `Server`·`AllClients`·`OwnerClient` 하나, 그 뒤 선택 `Reliable`·`Unreliable` 하나 |
+| `@pure`·`@worker`·`@deterministic` (full) | 함수 | 없음 |
+| `@editorButton`·`@cheat` (full) | class의 인자 없는 함수 | 없음 |
+| `@test` (full) | 인자 없는 최상위 함수 | 없음 |
+| `@tick` (full) | `on Tick`·`on FixedTick`·`on LateTick` | 이름 지정 `Phase:`(`PrePhysics`·`PostPhysics`·`LateUpdate`), `Interval:`(0 이상 숫자 상수식), `Priority:`(정수 상수식) 중 하나 이상, 각각 한 번 |
+| `@cvar` (full) | WorldService 파생 class의 `var` 필드(bool·숫자·`string`) | 보간 없는 문자열 리터럴 하나(CVar 이름) |
+
+**효과.** 함수·hook·handler 본문마다 효과 집합을 추론한다. 효과와 근원은 다음이다.
+
+| 효과 | 근원 |
+|---|---|
+| 대기 | `await`(아래 준비 대기 밖) |
+| 준비 대기 | `await`의 피연산자가 `X.Load()`·`Assets.LoadAll(...)`, `LoadRequest<T>` 값, schema `effects`에 `readiness`가 있는 함수 호출 |
+| 생성 | schema `effects`에 `spawn`이 있는 함수(`World.Spawn`) |
+| 자원 획득 | schema `effects`에 `acquire`가 있는 함수(유지 자원을 돌려주는 `Start*` — §7.1, LC3c가 자원 정책으로 넓힌다) |
+| 로드 | `X.Load()`·`Assets.LoadAll(...)` 호출 |
+| 발행 | `emit` |
+| 쓰기 | 필드(자기 필드, 객체를 지난 경로)에 대입·변경 메서드 호출. 지역 이름만 쓰는 것은 쓰기가 아니다 |
+| 객체 쓰기 | 쓰기 중 참조 타입 값을 지나는 경로(다른 객체의 속성) |
+| 엔진 호출 | schema `pure`가 아닌 엔진 함수 호출 |
+| 입출력 | schema `effects`에 `io`·`wallClock`이 있는 함수 |
+| 객체 참조 | 엔진 객체·Sparks class·interface 타입의 값(인자·지역·필드·`this`·문맥 이름)을 쓰는 것 |
+
+호출은 부른 함수의 효과를 더한다(호출 그래프의 전이 폐포, 재귀는 고정점). 수신자가 `this`가 아닌 다른 객체인 메서드 호출에서 부른 함수의 쓰기는 객체 쓰기다. `await`의 피연산자가 `async fn` 호출이면 그 `await` 자체는 대기 효과가 아니다. `open`·엔진 `overridable` 함수의 호출은 그 함수와 컴파일 안의 모든 `override`의 효과를 더한다(재정의가 기반 문맥이 금지하는 동작을 숨길 수 없다). 대기를 만드는 호출(`async fn`을 `All`·`Race`의 인자로 넘기는 것 포함)도 부른 것이다.
+
+**문맥.** 다음 본문은 표의 효과를 쓸 수 없다. 직접 쓰면 그 자리(`await`·`emit`·대입·호출)에, 호출이 가져오면 그 호출에 S0602를 내며 메시지는 문맥과 효과, 호출이면 부른 함수 이름을 적는다(호출 하나에 진단 하나 — 표 순서로 처음 걸린 효과).
+
+| 본문 | 금지 효과 |
+|---|---|
+| `on Awake` | 대기·준비 대기·생성·자원 획득·로드 |
+| `on Enable` | 대기·준비 대기 |
+| `on Disable` | 대기·준비 대기·자원 획득·발행 |
+| `on Start` | 대기(준비 대기는 된다) |
+| `on Tick`·`FixedTick`·`LateTick` | 대기·준비 대기·생성·자원 획득·로드 |
+| `on X.Changed` | 대기·준비 대기 |
+| `on Destroy` | 대기·준비 대기·생성·자원 획득·발행·객체 쓰기·엔진 호출(schema `pure`·`oneShot` 함수는 된다) |
+| `on Validate` (full) | 대기·준비 대기·생성·입출력·`@edit`·`@save` 필드 쓰기 |
+| `@pure fn` (full) | 쓰기·발행·대기·준비 대기·생성·자원 획득·로드·엔진 호출 |
+| `@worker fn` (full) | 객체 참조·자원 획득·로드·대기·준비 대기·발행 |
+| `@deterministic fn` (full) | 입출력·대기(`NextFixedTick()`의 대기만 된다)·준비 대기 |
+
+**`await`를 쓸 수 있는 곳(S0601).** `await`는 `async fn`과 handler·hook 본문에만 쓴다. 그 밖(`async`가 아닌 `fn`)의 `await`는 S0601이며 `async fn`으로 선언하라고 제시한다. hook 문맥이 대기를 금지하는 것은 S0602다.
+
+**`while`(S0603).** `while`은 대기할 수 있는 본문(`async fn`, 대기를 금지하지 않는 hook·handler)에서만 쓰고, 반복 본문의 시작에서 다음 회차(본문 끝·`continue`)로 가는 모든 경로에 `await`가 있어야 한다(`break`·`return`으로 나가는 경로는 된다). 어기면 S0603이며 위치는 `while`이다. 경로는 문장 구조로 판정한다: `if`는 두 갈래, `switch`는 case마다(default가 없고 모든 case를 다룬 enum switch가 아니면 지나가는 갈래 포함 — 타입 검사 뒤의 판정이다), `for`·안쪽 `while`의 본문은 0번 돌 수 있다. `async fn` 호출의 `await`는 그 자체로 대기가 아니다(§6.1 — 그 함수의 대기가 효과로 온다). 무한 반복은 `for`·조건 반복 대신 `while`로만 쓰고 프레임마다 기다리는 게임 반복의 모양만 허용하는 규칙이다.
+
+**schema key(LC3b).** 함수 객체에 다음 key를 더한다(§10.2 표).
+
+| key | 값 |
+|---|---|
+| `effects` | 문자열 배열: `spawn`·`acquire`·`readiness`·`io`·`wallClock`(중복 불가) |
+| `pure` | bool(기본 false). 관찰 가능한 상태를 바꾸지 않는 함수(getter·계산) |
+| `oneShot` | bool(기본 false). handle 없는 일회성 효과(§7.1, `World.Audio.PlayAt`) |
 
 ## 4. 타입·참조·값
 
@@ -1487,6 +1554,18 @@ Characters/PlayerCharacter.spark:42:5: error S0731: Cannot assign to a function 
 | S0714 | `unused-import` | import한 모듈의 선언을 쓰지 않는다 | import를 지운다 |
 | S0731 | `assign-to-call-result` | 대입·변경 경로에 호출 결과(그 뒤가 참조 타입 값을 지나지 않을 때)나 `?.`가 있다 | 지역 변수에 받아 바꾼 뒤 되돌려 쓴다 |
 
+- **실행 문맥·효과·attribute(S06xx, LC3b):** 규칙과 위치는 §3.13이다.
+
+| 코드 | 이름 | 조건 | 수정 예 |
+|---|---|---|---|
+| S0601 | `await-outside-async` | `async`가 아닌 함수의 `await` | `async fn`으로 선언 |
+| S0602 | `context-effect` | 문맥(hook·handler·문맥 attribute 함수)이 금지하는 효과를 직접 또는 호출로 쓴다 | 다른 hook으로 옮긴다 |
+| S0603 | `while-without-wait` | 대기할 수 없는 본문의 `while`, 회차마다 `await`가 없는 경로 | 반복 안에서 `await NextTick();` |
+| S0620 | `unknown-attribute` | 표에 없는 attribute 이름 | 비슷한 이름 |
+| S0621 | `attribute-not-allowed` | attribute를 그 선언에 쓸 수 없다, 문맥 attribute가 둘 | attribute를 옮기거나 지운다 |
+| S0622 | `duplicate-attribute` | 한 선언에 같은 attribute가 둘 | 하나를 지운다 |
+| S0623 | `attribute-argument` | attribute 인자의 수·이름·값이 표와 다르다 | 표의 인자 |
+
 - **이벤트·수명 hook·재진입(S08xx, LC3a):** 규칙과 위치는 §3.12다. S0413(LevelScript의 `?` 없는 `@edit` 객체 필드)도 LC3a가 판정한다.
 
 | 코드 | 이름 | 조건 | 수정 예 |
@@ -1767,6 +1846,9 @@ Sparks에서는 `var MaxHealth: int32`(편집·저장), 읽기 전용 속성 `Cu
 | 함수 | `typeParameters` | 아니오 | `{ "name": 영문 대문자 하나로 시작하는 이름, "constraint": 기반 타입 이름(생략 가능) }` 배열(`Find<T: Component>` 꼴) |
 | 함수 | `parameters` | 아니오 | `{ "name": lowerCamel 이름(키워드 아님), "type": 타입 표기, "perSecond": bool(기본 false) }` 배열. 이름 중복 불가 |
 | 함수 | `returns` | 아니오 | 반환 타입 표기. 없으면 `void` |
+| 함수 | `effects` | 아니오 | 효과 문자열 배열(`spawn`·`acquire`·`readiness`·`io`·`wallClock`, 중복 불가 — §3.13, LC3b) |
+| 함수 | `pure` | 아니오 | bool(기본 false). 관찰 가능한 상태를 바꾸지 않는 함수(§3.13) |
+| 함수 | `oneShot` | 아니오 | bool(기본 false). handle 없는 일회성 효과(§3.13·§7.1) |
 | 이벤트 | `name` | 예 | 이벤트 이름(영문 대문자로 시작) |
 | 이벤트 | `id` | 예 | FieldId(`FieldKind::Event`) |
 | 이벤트 | `parameters` | 아니오 | `{ "name": lowerCamel 이름(키워드 아님), "type": 타입 표기 }` 배열. 이름 중복 불가 |

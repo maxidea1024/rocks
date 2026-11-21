@@ -1,0 +1,102 @@
+async fn Load(): int {
+    await NextTick();
+    return 1;
+}
+
+fn Plain() {
+    await NextTick();
+    let n = try await Fetch();
+    _ = n;
+}
+
+async fn Fetch(): Result<int> {
+    await NextTick();
+    return 1;
+}
+
+enum Mode { A, B }
+
+async fn Loops(flag: bool, mode: Mode) {
+    while (flag) {
+        await NextTick();
+    }
+
+    while (flag) {
+        if (flag) {
+            await NextTick();
+        } else {
+            break;
+        }
+    }
+
+    while (true) {
+        if (flag) {
+            return;
+        }
+
+        await NextTick();
+    }
+
+    while (flag) {
+        if (flag) {
+            continue;
+        }
+
+        await NextTick();
+    }
+
+    while (flag) {
+        if (flag) {
+            await NextTick();
+        }
+    }
+
+    while (flag) {
+        for (i in 0..<3) {
+            _ = i;
+            await NextTick();
+        }
+    }
+
+    while (flag) {
+        switch (1) {
+            case 1: {
+                await NextTick();
+            }
+            default: {
+                await NextTick();
+            }
+        }
+    }
+
+    while (flag) {
+        switch (mode) {
+            case Mode.A: {
+                await NextTick();
+            }
+            case Mode.B: {
+                await NextTick();
+            }
+        }
+    }
+}
+
+fn Counting(flag: bool) {
+    while (flag) {
+    }
+}
+
+class Door : ScriptableComponent {
+    var Flag = false;
+
+    on Tick() {
+        while (Flag) {
+        }
+    }
+
+    on Start() {
+        while (Flag) {
+            await NextTick();
+        }
+    }
+}

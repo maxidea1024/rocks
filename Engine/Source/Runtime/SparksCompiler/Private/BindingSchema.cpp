@@ -28,7 +28,8 @@ constexpr StringView TypeKeys[] = {
     "constructible", "fields", "functions", "events", "cases"};
 constexpr StringView FieldKeys[] = {"name", "id", "type", "access", "computed", "changed"};
 constexpr StringView FunctionKeys[] = {
-    "name", "id", "static", "async", "overridable", "typeParameters", "parameters", "returns"};
+    "name",       "id",      "static",  "async", "overridable", "typeParameters",
+    "parameters", "returns", "effects", "pure",  "oneShot"};
 constexpr StringView FunctionParameterKeys[] = {"name", "type", "perSecond"};
 constexpr StringView EventParameterKeys[] = {"name", "type"};
 constexpr StringView TypeParameterKeys[] = {"name", "constraint"};
@@ -689,6 +690,37 @@ private:
                      "'overridable' is only for functions of object and asset types.");
         } else if (function.overridable && function.isStatic) {
             ReportAt(object.Find("overridable"), "A static function cannot be overridable.");
+        }
+
+        function.pure = ReadBool(object, "pure", false);
+        function.oneShot = ReadBool(object, "oneShot", false);
+        const JsonValue effects = ArrayOf(object, "effects");
+        for (usize index = 0; index < effects.Size() && error_ == ErrorCode::None; ++index) {
+            const JsonValue element = effects.At(index);
+            struct EffectName {
+                StringView name;
+                uint8 bit;
+            };
+            constexpr EffectName Names[] = {{"spawn", SchemaEffects::Spawn},
+                                            {"acquire", SchemaEffects::Acquire},
+                                            {"readiness", SchemaEffects::Readiness},
+                                            {"io", SchemaEffects::Io},
+                                            {"wallClock", SchemaEffects::WallClock}};
+            uint8 bit = 0;
+            for (const EffectName& name : Names) {
+                if (element.IsString() && element.GetString() == name.name) {
+                    bit = name.bit;
+                }
+            }
+
+            if (bit == 0) {
+                ReportAt(element, "An effect is one of 'spawn', 'acquire', 'readiness', 'io' and "
+                                  "'wallClock'.");
+            } else if ((function.effects & bit) != 0) {
+                ReportAt(element, "An effect is listed twice.");
+            } else {
+                function.effects = static_cast<uint8>(function.effects | bit);
+            }
         }
         function.firstTypeParameter = static_cast<uint32>(out_.typeParameters_.Size());
         const JsonValue typeParameters = ArrayOf(object, "typeParameters");

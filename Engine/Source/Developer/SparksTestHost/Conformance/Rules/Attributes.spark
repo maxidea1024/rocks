@@ -1,0 +1,120 @@
+enum Mode {
+    @formerly("Old") A,
+    B
+}
+
+@formerly("OldPair")
+struct Pair {
+    @edit(Min: 0, Max: 10) var Count: int = 0;
+    @edit var Label: string = "";
+}
+
+@tableRow(Asset("/Game/Data/Loot"))
+struct LootRow {
+    var Weight: float = 1.0;
+}
+
+class Door : ScriptableComponent {
+    @edit(Min: -1.5, Max: Limit) var Speed: float = 1.0;
+    @save var Opened = false;
+    @net var Health = 100;
+    @net(OwnerOnly) var Secret = 1;
+    @formerly("Gold") var Coins = 0;
+
+    @authorityOnly event Struck();
+
+    @rpc(Server, Reliable) fn Ping() {
+    }
+
+    @rpc(AllClients) fn Pong() {
+    }
+
+    @pure fn Twice(value: int): int {
+        return value * 2;
+    }
+
+    @editorButton fn Reset() {
+    }
+
+    @cheat fn GiveGold() {
+    }
+
+    @tick(Phase: PostPhysics, Interval: 0.5, Priority: 2)
+    on Tick() {
+    }
+}
+
+class Keeper : WorldService {
+    @cvar("game.keeper.rate") var Rate = 1.0;
+}
+
+const Limit: float = 9.0;
+
+@test fn Smoke() {
+}
+
+@worker fn Crunch(value: int): int {
+    return value + 1;
+}
+
+@deterministic fn Step(value: int): int {
+    return value;
+}
+
+@edit const Wrong: int = 1;
+
+class Errors : ScriptableComponent {
+    @edti var Typo = 0;
+    @shiny var Unknown = 0;
+    @save let Fixed = 0;
+    @net @net var Twice = 0;
+    @edit(Min: 0) var Name: string = "";
+    @edit(Low: 0) var Low = 0;
+    @edit(Min: 0, Min: 1) var Again = 0;
+    @edit(Min: "a") var Words = 0;
+    @net(Everyone) var Wide = 0;
+    @formerly var Bare = 0;
+    @formerly("${Bare}") var Interpolated = 0;
+    @rpc fn NoTarget() {
+    }
+
+    @rpc(Clients) fn BadTarget() {
+    }
+
+    @rpc(Server, Fast) fn BadReliability() {
+    }
+
+    @rpc(Server) async fn Waiting() {
+    }
+
+    @pure @worker fn Both() {
+    }
+
+    @editorButton fn WithArgument(value: int) {
+        _ = value;
+    }
+
+    @tick on Tick() {
+    }
+
+    @tick(Phase: Physics) on LateTick() {
+    }
+
+    @tick(Interval: -1.0) on FixedTick() {
+    }
+
+    @save fn Saved() {
+    }
+
+    @cvar("a.b") var NotService = 0;
+    @authorityOnly var NotEvent = 0;
+    @restart var NotHandler = 0;
+}
+
+@tableRow struct NoTable {
+    var X: int = 0;
+}
+
+@test fn WithInput(value: int) {
+    _ = value;
+}

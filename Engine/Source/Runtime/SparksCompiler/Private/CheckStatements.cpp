@@ -208,9 +208,7 @@ void TypeChecker::Run() noexcept {
 
     AnalyzeStructs(false);
     PrepareInitializers();
-    if (rules_) {
-        CollectExtensionEvents();
-    }
+    CollectExtensionEvents(); // 확장 이벤트(3.12절): 식의 `X.E`가 모든 단계에서 찾는다
 
     for (uint32 module = 0; module < c.modules_.Size() && binder_.error_ == ErrorCode::None;
          ++module) {
@@ -230,6 +228,10 @@ void TypeChecker::Run() noexcept {
 
     if (rules_ && binder_.error_ == ErrorCode::None) {
         CheckExtensionEvents(); // 3.12절 S0809·S0813·S0814
+    }
+
+    if (rules_ && binder_.error_ == ErrorCode::None) {
+        AnalyzeEffects(); // 3.13절 S0601–S0603
     }
 }
 
@@ -398,7 +400,11 @@ void TypeChecker::CheckModule(uint32 module) noexcept {
 
     if (flow_ && binder_.error_ == ErrorCode::None) {
         CheckDeclarationRules(module); // 3.11절 필드·상수식·프로필
-        CheckUnusedImports(module);    // 3.11절 S0714
+        if (rules_) {
+            CheckAttributes(module); // 3.13절 S0620–S0623(attribute 인자의 const 사용을 표시한다)
+        }
+
+        CheckUnusedImports(module); // 3.11절 S0714
     }
 }
 
