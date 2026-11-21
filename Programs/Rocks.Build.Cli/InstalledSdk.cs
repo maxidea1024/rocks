@@ -312,7 +312,12 @@ public static class InstalledSdk
         await using var invocationLock = await OutputInvocationLock.AcquireAsync(output, cancellationToken);
         var started = BeginGameEvidence(output, sdk, project);
         // 앞 실행의 PASS 보고서가 이번 실패를 성공으로 보이게 하지 않는다. 네이티브 출력 자체는 보존한다.
-        BuildCommand.WritePendingReport(output, "Current game build has not completed.");
+        // 파일 하나 컴파일(--files)은 빌드 보고서를 바꾸지 않는다.
+        if (!options.ContainsKey(SingleFileCommand.Option))
+        {
+            BuildCommand.WritePendingReport(output, "Current game build has not completed.");
+        }
+
         var status = "FAIL";
         string? failure = null;
         var toolchainRecord = new GameToolchainRecord();
@@ -437,6 +442,13 @@ public static class InstalledSdk
         if (metadata != 0)
         {
             return 1;
+        }
+
+        // 파일 하나 컴파일(Docs/Design/ProjectFiles.ko.md 7.4절): 상대 경로는 게임 디렉터리 기준이다.
+        if (options.TryGetValue(SingleFileCommand.Option, out string? files))
+        {
+            return await SingleFileCommand.RunAsync(GamePlanning.Request(toolchain, configuration, project, output, plan.Modules, targets, sdk, engineVersion,
+                BuildCommand.Jobs(options)), files, project, cancellationToken);
         }
 
         var result = await new NativeBuildEngine().BuildAsync(GamePlanning.Request(toolchain, configuration, project, output, plan.Modules, targets, sdk,

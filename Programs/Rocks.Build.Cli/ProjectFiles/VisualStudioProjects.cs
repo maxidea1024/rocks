@@ -253,6 +253,17 @@ internal static class VisualStudioProjects
                 text.AppendLine($"    <{property}>{Xml(command)}</{property}>");
             }
 
+            // 파일 하나 컴파일(Ctrl+F7, 7.4절): Windows 행만, SDK 헤더 프로젝트는 빼고. $(SelectedFiles)는 -WorkingDir 기준으로 푼다.
+            if (!headerOnly && row.Platform == WindowsPlatform)
+            {
+                string files = "-WorkingDir \"$(MSBuildProjectDirectory)\" -Files \"$(SelectedFiles)\"";
+                string compile = input.Game is not null
+                    ? $"\"$(RocksSdkRoot)Build\\IdeBuild.bat\" -Action Compile {files} -Project \"$(RocksProjectFile)\" -Sdk \"$(RocksSdkRoot).\" " +
+                        $"-Target {target.Name} -Configuration {row.Configuration.Configuration} -Compiler \"$(RocksCompiler)\""
+                    : $"\"$(RocksRoot)Build\\IdeBuild.bat\" -Action Compile {files} {arguments}";
+                text.AppendLine($"    <NMakeCompileFileCommandLine>{Xml(compile)}</NMakeCompileFileCommandLine>");
+            }
+
             text.AppendLine($"    <NMakeOutput>{(executable is null ? "" : Xml(Msb(input.Root, executable)))}</NMakeOutput>");
             string intermediate = Msb(input.Root, Path.Combine(input.ProjectFilesDirectory, "Intermediate", project.Name, row.Name + "_" + ProjectPlatform)) + "\\";
             text.AppendLine($"    <IntDir>{Xml(intermediate)}</IntDir>");

@@ -72,9 +72,9 @@ namespace Rocks.Build.Cli
             var options = Parse(args.Skip(1).ToArray());
             var allowed = args[0] switch
             {
-                "game" => new HashSet<string>(["sdk", "project", "target", "configuration", "output", "compiler", "jobs", MetadataLayout.VerifySourcesOption, RequireVerifiedToolchainOption, .. BuildModeOptions], StringComparer.Ordinal),
+                "game" => new HashSet<string>(["sdk", "project", "target", "configuration", "output", "compiler", "jobs", SingleFileCommand.Option, MetadataLayout.VerifySourcesOption, RequireVerifiedToolchainOption, .. BuildModeOptions], StringComparer.Ordinal),
                 "sdk" => new HashSet<string>(["root", "target", "configuration", "configurations", "output", "compiler", "rules", "jobs", "destination", "register", MetadataLayout.VerifySourcesOption, RequireVerifiedToolchainOption, .. BuildModeOptions], StringComparer.Ordinal),
-                "build" or "test" => new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "platform", "android-abi", "android-api", "android-ndk", "adb", MetadataLayout.VerifySourcesOption, PlanOnlyOption, RequireVerifiedToolchainOption, .. BuildModeOptions], StringComparer.Ordinal),
+                "build" or "test" => new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "platform", SingleFileCommand.Option, "android-abi", "android-api", "android-ndk", "adb", MetadataLayout.VerifySourcesOption, PlanOnlyOption, RequireVerifiedToolchainOption, .. BuildModeOptions], StringComparer.Ordinal),
                 // 미리 빌드한 바이너리를 사용자 저장소에 받는다(build·test는 받지 않는다, Docs/Design/ShaderSystem.ko.md 8절 2항).
                 "bootstrap" => new HashSet<string>(["root", "library", "store", "mirror", "offline", "windows-sdk"], StringComparer.Ordinal),
                 // 출력 디렉터리 하나를 비운다(Docs/Design/ProjectFiles.ko.md 7.3절 — Visual Studio Clean·Rebuild가 부른다).
@@ -155,6 +155,13 @@ namespace Rocks.Build.Cli
             }
 
             Timing(options);
+            // 파일 하나 컴파일(Docs/Design/ProjectFiles.ko.md 7.4절)은 build 전용이고 계획만·묶음 실측과 함께 쓰지 않는다. 출력을 만지기 전에 알린다.
+            bool singleFile = options.ContainsKey(SingleFileCommand.Option);
+            if (singleFile && (args[0] != "build" || profile is not null || options.GetValueOrDefault(PlanOnlyOption, "off") == "on"))
+            {
+                throw new ArgumentException($"--{SingleFileCommand.Option} compiles single files with 'build' only, without --{PlanOnlyOption} on.");
+            }
+
             var targetName = options.GetValueOrDefault("target", args[0] == "sdk" ? "Engine" : "Foundation");
             // --platform android면 NDK로 교차 빌드한다(--android-abi arm64|x86_64, --android-api, --android-ndk).
             var platform = options.GetValueOrDefault("platform", "host");
@@ -243,7 +250,12 @@ namespace Rocks.Build.Cli
             Directory.CreateDirectory(output);
             await using var invocationLock = await OutputInvocationLock.AcquireAsync(output, cancellationToken);
             // 앞 실행의 PASS 보고서가 이번 실행의 실패(메타 단계·빌드 예외 포함)를 성공으로 보이게 하지 않는다.
-            WritePendingReport(output, "Current build has not completed.");
+            // 파일 하나 컴파일은 빌드 보고서(action-report)를 바꾸지 않는다.
+            if (!singleFile)
+            {
+                WritePendingReport(output, "Current build has not completed.");
+            }
+
             Directory.CreateDirectory(Path.Combine(output, "Generated"));
             var evidence = await BuildEvidence.StartAsync(root, Path.GetRelativePath(Path.Combine(root, "out"), output), toolchain.Environment);
             evidence.SetConfiguration(configuration.ToString(), targetName, configuration == NativeConfiguration.Asan ? "address" : "none", toolchain.CompilerPath, toolchain.Identity);
@@ -281,6 +293,15 @@ namespace Rocks.Build.Cli
                 {
                     await evidence.FinishAsync("Metadata validation failed.");
                     return 1;
+                }
+
+                // 파일 하나 컴파일: 메타 생성까지 평소처럼 한 뒤 고른 소스의 논리 명령만 돈다(증분 기록·보고서·평소 object는 그대로다).
+                if (options.TryGetValue(SingleFileCommand.Option, out string? files))
+                {
+                    int compiled = await SingleFileCommand.RunAsync(EnginePlanning.Request(toolchain, configuration, rules.Target, root, output,
+                        plan.Modules, buildRoots, engineVersion, Jobs(options)), files, root, cancellationToken);
+                    await evidence.FinishAsync("Single-file compile: no build was run.");
+                    return compiled;
                 }
 
                 var modules = plan.Modules.ToList();
@@ -619,7 +640,7 @@ namespace Rocks.Build.Cli
 
         internal static Dictionary<string, string> Parse(string[] args)
         {
-            var allowed = new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination", "sdk", "project", "platform", "android-abi", "android-api", "android-ndk", "adb", "library", "store", "mirror", "offline", MetadataLayout.VerifySourcesOption, PlanOnlyOption, .. BuildModeOptions, "windows-sdk", RequireVerifiedToolchainOption, .. UnityProfileCommand.Options, .. ProjectFilesCommand.Options, .. SdkCommands.Options, .. SdkExportCommand.Options, .. NewProjectCommand.Options], StringComparer.Ordinal);
+            var allowed = new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination", "sdk", "project", "platform", "android-abi", "android-api", "android-ndk", "adb", "library", "store", "mirror", "offline", MetadataLayout.VerifySourcesOption, PlanOnlyOption, .. BuildModeOptions, "windows-sdk", RequireVerifiedToolchainOption, .. UnityProfileCommand.Options, .. ProjectFilesCommand.Options, .. SdkCommands.Options, .. SdkExportCommand.Options, .. NewProjectCommand.Options, SingleFileCommand.Option], StringComparer.Ordinal);
             var values = new Dictionary<string, string>(StringComparer.Ordinal);
             for (var index = 0; index < args.Length; index += 2)
             {

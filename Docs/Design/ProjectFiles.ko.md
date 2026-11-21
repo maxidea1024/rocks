@@ -1,6 +1,6 @@
 # Visual Studio 프로젝트 파일 생성 설계
 
-기준일: 2026-11-22, 개정 16. Rocks 저장소와 게임 프로젝트에서 Visual Studio 솔루션·프로젝트 파일을 만드는 방법을 정한다(UE 5.8 GenerateProjectFiles 대응).
+기준일: 2026-11-22, 개정 17. Rocks 저장소와 게임 프로젝트에서 Visual Studio 솔루션·프로젝트 파일을 만드는 방법을 정한다(UE 5.8 GenerateProjectFiles 대응).
 - **엔진 모드**: 저장소 루트에서 `projectfiles --root`로 엔진·Programs·C# 도구 솔루션을 만든다. 엔진에는 `.rocksproject`가 없다.
 - **IntelliSense**: 부작용 없는 IDE 계획 모드로 빌드 계획의 논리 compile 명령(`compile_commands.json`과 같은 원천)을 만들고, 파일별 설정으로 옮긴다.
 - **NMake 빌드**: 프로젝트의 빌드·다시 빌드·정리는 Rocks.Build를 부른다. Visual Studio가 직접 컴파일하지 않는다.
@@ -258,6 +258,13 @@ Visual Studio의 파일 컴파일(Ctrl+F7)은 `NMakeCompileFileCommandLine`으�
 - 명령: `… -Action Compile -WorkingDir "$(MSBuildProjectDirectory)" -Files "$(SelectedFiles)"`. `$(SelectedFiles)`의 상대 경로는 `-WorkingDir`(프로젝트 파일 디렉터리, `out/ProjectFiles` 또는 `out/ProjectFiles/Programs`) 기준으로 풀고, 그 결과를 저장소 기준 경로로 바꾼다.
 - `build --files <;로 나눈 경로>`는 평소 빌드처럼 메타 생성을 최신으로 맞춘 뒤, 고른 소스의 **논리 명령**을 그대로 돌린다. object는 `<out>/SingleFile/<소스 경로 해시>.obj`로 따로 내고 증분 기록에 넣지 않는다. 그래서 유니티 묶음·PCH 바이너리·작업 파일 분리와 무관하고, 평소 빌드의 object와 기록을 건드리지 않는다. 논리 명령은 PCH 바이너리 대신 PCH 헤더를 강제 include하므로 PCH action이 필요 없다.
 - 헤더를 고르면 오류로 알린다(헤더 단독 컴파일은 `PublicHeaderChecks`가 맡는다).
+
+구현(PJ7, 개정 17):
+- **계획·실행.** `SingleFileCompile.RunAsync(request, sources)`(`Programs/Rocks.Build/SingleFileCompile.cs`)가 그 요청을 IDE 계획 모드(`IdePlanner.Plan`)로 계획해 고른 소스의 논리 명령을 찾는다 — IntelliSense 원천과 같은 함수라 Visual Studio가 보는 명령과 컴파일하는 명령이 같다. 한 소스를 여러 모듈이 컴파일하면 모듈 이름 ordinal 첫째다(8.1절 원천 규칙). 계획에 없는 소스(그 타깃이 컴파일하지 않음)와 헤더(`.h`·`.hh`·`.hpp`·`.hxx`·`.inl`·`.inc`·`.ipp`·`.tpp`)는 아무것도 컴파일하기 전에 오류다.
+- **object와 기록.** object는 `<출력>/SingleFile/<저장소 기준 경로 SHA-256 앞 16자>.obj`(macOS `.o`)이고, 같은 이름의 `.json`에 소스·모듈·실행한 인자를 남긴다(시험이 compile_commands.json과 대조한다). 논리 명령의 `/Fo<경로>`(clang 드라이버는 `-o <경로>`)만 바꾼다. 강제 include하는 정의 헤더는 계획이 만든 내용으로 `WriteIfChanged`한다 — 평소 빌드와 같은 byte라 증분 기록을 건드리지 않는다. 증분 기록(`native-cache.json`), action-report, 평소 object는 바꾸지 않는다. 명령줄이 호스트 한계를 넘으면 빌드와 같은 규칙의 response file(`<해시>.rsp`)로 넘긴다.
+- **CLI.** `build --files <;로 나눈 경로>`(상대 경로는 `--root` 기준)와 게임 `game --files …`(상대 경로는 `--project` 기준)는 메타 생성까지 평소처럼 한 뒤 네이티브 빌드 대신 이것을 돈다. `test`·`sdk`, `--plan-only on`, 묶음 실측과는 함께 쓰지 않는다. build-evidence는 "single-file compile"로 끝난다(PASS가 아니다).
+- **NMake.** 엔진·게임 프로젝트의 Windows 행에 `NMakeCompileFileCommandLine`을 내보낸다: `… IdeBuild.bat -Action Compile -WorkingDir "$(MSBuildProjectDirectory)" -Files "$(SelectedFiles)" …`(나머지 인자는 Build와 같다). `IdeBuild.ps1`은 `-Files`를 `;`로 나눠 각 항목을 `-WorkingDir` 기준 절대 경로로 풀어 `--files`로 넘긴다. Android 행과 SDK 헤더 프로젝트에는 내보내지 않는다.
+- **시험.** IntegrationTests V6(엔진 MathBench)와 게임 프로젝트 파일 시험이 `SelectedFiles`를 프로젝트 디렉터리 상대 경로로 주어 평가한 `NMakeCompileFileCommandLine`을 cmd로 돌린다: object가 생기고, 기록한 인자가 빌드한 compile_commands.json의 그 소스 명령(`/Fo` 제외)과 같고, `native-cache.json`·action-report가 byte 그대로이며, 뒤의 터미널 빌드는 0 action이다. 헤더를 고르면 실패한다.
 
 ## 8. IntelliSense
 
@@ -590,7 +597,7 @@ UE는 HKLM에 ProgID를 쓰고 UnrealVersionSelector가 메뉴를 받는다(`Des
 | PJD26 | `new-project` CLI, 기술자 재작성, MetaCompiler `ids reissue`(새 ID, 별칭 비움, 은퇴 항목 삭제). SDK가 `Templates/`를 싣는다 | 확정 |
 | PJD27 | 루트 `GenerateProjectFiles.bat` + `Build/GenerateProjectFiles.ps1`·`Build/Tools.ps1`·`Build/IdeBuild.*`(pwsh 7). SDK에도 싣는다 | 확정(개정 2: `Tools.ps1`) |
 | PJD28 | 셸 메뉴는 `shell-register`로만 만드는 HKCU ProgID `Rocks.ProjectFile`. 선택기는 유효한 등록 SDK 중 최고 판의 CLI가 맡고 맞는 SDK로 넘긴다 | 확정(개정 2: 명시 등록·최고 판) |
-| PJD29 | 파일 하나 컴파일은 `build --files`(PJ7). 그 전에는 `NMakeCompileFileCommandLine`을 내보내지 않는다 | 확정(개정 2: 내보내기 시점) |
+| PJD29 | 파일 하나 컴파일은 `build --files`(게임은 `game --files`, PJ7). 그 전에는 `NMakeCompileFileCommandLine`을 내보내지 않는다 | 확정(개정 2: 내보내기 시점, 개정 17 구현) |
 | PJD30 | VS Code·Rider·Xcode 생성은 범위 밖. clangd는 `compile_commands.json` 안내만 | 확정 |
 | PJD31 | C# 프로젝트는 `Rocks.Format.slnx` 목록을 그대로 넣고 솔루션 빌드에서 뺀다 | 확정 |
 | PJD32 | 부작용 없는 계획 함수(엔진 `build`·게임 `game` 공통)와 IDE 계획 모드(존재 검사·archive·link·PCH·생성 TU 없음)를 PJ0에 둔다 | 확정(개정 2, 권장안) |
@@ -759,3 +766,4 @@ Visual Studio 없이 결정적으로 검사한다. 시험은 `Rocks.Build.Tests`
 | 14 | 2026-11-22 | PJ4 반영·PJ5 리뷰 반영(10.2·10.4·7.3절). (1) 게임 주 프로젝트 타깃은 정의 디렉터리가 루트 또는 `<루트>/Source`(UE 배치), 이름 충돌은 생성 오류, `RocksSdk` 구성 대체 규칙. (2) `clean`은 `out/ProjectFiles`와 그 아래를 거부하고, 호출 잠금만 있는 출력은 실행 기록이 있을 때만 받는다. (3) `associate` 재생성 실패는 연결 유지·종료 코드 2로 하나, IDE 빌드의 낡은 연결 검사. (4) 게임 생성은 고른 SDK의 CLI로 위임한다. (5) 생성은 시작부터 `out/ProjectFiles` 잠금을 쥐고, model-only는 임시 디렉터리에 규칙을 컴파일한다. (6) IDE 구성마다 구조 검증, 해시는 한 번. (7) 독립 시험 모드도 `ROCKS_SDK_REGISTRY`로 격리하고 기대값을 하나로. (8) 등록부 잠금을 잠금 파일로 통일(레지스트리는 `%LOCALAPPDATA%\Rocks\SdkRegistry.lock`), 공유 위반만 다시 시도. (9) 문서: `-Sdk "$(RocksSdkRoot)."`, `IdeProject` 주석, 게임 모드 ClangCL 경고·생성 헤더 안내, 구성이 없는 SDK의 안내 문구. (10) 시험: 두 배치·이름 충돌(`IdePlanTests`), `clean`의 `out/ProjectFiles`·실행 기록 없는 출력 거부, `associate` 실패 종료 코드, 낡은 연결 검사, 구성 교집합, 동시 생성 |
 | 15 | 2026-11-22 | PJ6 구현(11.6절). 템플릿을 `FoundationTemplate`으로 바꾸고 `Template.json`을 더했다. 게임 기본 타깃은 `.rocksproject` 이름이다(`Rocks.proj` `GameTarget` 기본값 삭제). `new-project`(SDK 기본은 CLI가 든 SDK, 예약 이름에 `RocksSdk` 등, 실패 시 정리, 끝에 게임 프로젝트 파일), MetaCompiler `ids reissue`, SDK가 `Templates/`를 싣는다. IntegrationTests의 게임 fixture를 `new-project`로 만들고 V12를 단언한다 |
 | 16 | 2026-11-22 | CI 복구와 PJ6 리뷰 반영(11.6절). CI: `Tools.ps1`의 `Get-Item`·`Get-ChildItem`에 `-Force`(Unix 점 파일), 설치 마법사 셀프 테스트 클로저(`-Command` 호출에서 스크립트 함수를 못 봄)를 고치고 IntegrationTests가 셀프 테스트를 `-Command`·`-File` × pwsh·5.1로 돈다. 리뷰: model-only 임시 규칙 디렉터리 정리, Windows 예약 장치 이름·매크로 소문자 이름 거부, 템플릿 산출물 제외와 `ignore` 디렉터리·glob, 템플릿 이름을 담은 이름 거부, `RocksSdk` 기술자 거부, 엄격 UTF-8·BOM 보존·NUL 거부, Unix 잠금 경합 판정, 시험(`Reissue` 단위, SDK 조회·`OwnSdk`, 실패 정리), 문서 정리 |
+| 17 | 2026-11-22 | PJ7 구현(7.4절 구현 단락). `SingleFileCompile`(IDE 계획의 논리 명령, `SingleFile/<해시>.obj`·`.json`, 정의 헤더 `WriteIfChanged`, 증분 기록 불변), `build --files`·`game --files`, `NMakeCompileFileCommandLine`(Windows 행, `-WorkingDir`·`$(SelectedFiles)`), `IdeBuild.ps1 -Action Compile`. 시험은 V6·게임 프로젝트 파일 시험에 더했다 |
