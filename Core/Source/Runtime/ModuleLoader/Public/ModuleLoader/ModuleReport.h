@@ -71,7 +71,9 @@ struct ModuleLoadReport {
 
     ModuleLoadCode code = ModuleLoadCode::Success;
     // 처음 실패한 모듈(failed)의 수명 객체 생성·Startup이 돌려준 오류다. StartupFailed와
-    // DependencyFailed(의존 모듈의 오류)에서 채우고, 그 밖의 코드에서는 None이다.
+    // DependencyFailed(의존 모듈의 오류)에서 채운다. manifest 적재(TryCreateFromManifest)의
+    // Incompatible은 할당 실패(OutOfMemory)·표 검사 실패(InvalidArgument)를 담는다. 그 밖은
+    // None이다.
     ErrorCode error = ErrorCode::None;
     // 원래 OS 오류 코드다(FileStatus.nativeError와 같은 뜻, Modular 적재). 없으면 0이다.
     uint32 nativeError = 0;

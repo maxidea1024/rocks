@@ -18,7 +18,7 @@ public static class ModuleManifests
     public const string FileSuffix = ".modules.json";
 
     /// <summary>manifest 형식 판이다. 키를 바꾸면 올리고 모듈 로더의 읽기도 함께 바꾼다.</summary>
-    public const int Schema = 1;
+    public const int Schema = 2;
 
     // buildId 길이(GUID 32자 소문자 16진)다.
     private const int BuildIdLength = 32;
@@ -99,6 +99,8 @@ public static class ModuleManifests
                 writer.WriteEndArray();
                 writer.WriteString("loadingPhase", row.Phase.ToString());
                 writer.WriteBoolean("onRequest", row.OnRequest);
+                // 실행 파일 행은 OS로 싣지 않고 실행 파일이 자기 진입 함수를 넘긴다(Docs/Design/ModuleLoader.ko.md 3.13절).
+                writer.WriteBoolean("executable", row.Executable);
                 writer.WriteEndObject();
             }
 
