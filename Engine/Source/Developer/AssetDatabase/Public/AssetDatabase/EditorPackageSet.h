@@ -187,7 +187,7 @@ public:
     // ExternalModification / StaleHandle, hook 오류(진단 None), WritePackage의 진단, 파일 만들기·
     // 쓰기·Flush·Close·Replace·디렉터리 만들기의 IO(진단 None과 그 오류 — 임시 파일을 지운다),
     // 재검증 실패(그 진단 — writer·sink 결함), 할당 실패. 교체 뒤의 실패(저장소 Rebind·색인
-    // Refresh의 할당 실패)는 파일이 이미 바뀐 뒤라 정보는 새 파일을 가리키고 dirty가 남는다(7.1절
+    // Refresh의 할당 실패)는 파일이 이미 바뀐 뒤라 정보는 새 파일을 가리키고 dirty는 지워진다(7.1절
     // 15).
     Result<void> Save(AssetId id, const AssetDatabaseLock& lock, const EditorSaveOptions& options,
                       Array<EditorWarning>* warnings = nullptr,

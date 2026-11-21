@@ -90,6 +90,59 @@ struct Reopened {
 
 } // namespace
 
+namespace {
+
+// hook 시험의 상태다(hook은 함수 포인터라 전역으로 넘긴다).
+struct HookState {
+    EditorPackageSet* set = nullptr;
+    bool markDirty = false;
+    bool failTags = false;
+    bool failBuild = false;
+    // 4 MiB를 넘는 태그(값 4000 byte × 1100)를 낸다(Tags 쓰기 CapacityExceeded).
+    bool bigTags = false;
+};
+
+constexpr usize BigTagCount = 1100;
+constexpr usize BigTagValueBytes = 4000;
+
+HookState hookState;
+
+Result<void> TestTags(const AssetTypeHookContext&, AssetTagSink& sink) noexcept {
+    if (hookState.failTags) {
+        return Result<void>::Failure(ErrorCode::Busy);
+    }
+
+    if (hookState.markDirty && hookState.set != nullptr) {
+        (void)hookState.set->MarkDirty(FixedId(HeroId));
+    }
+
+    if (hookState.bigTags) {
+        static char value[BigTagValueBytes];
+        memset(value, 'v', sizeof(value));
+        for (usize index = 0; index < BigTagCount; ++index) {
+            char key[8];
+            const int count = snprintf(key, sizeof(key), "K%04u", static_cast<unsigned>(index));
+            if (auto added = sink.Add(StringView(key, static_cast<usize>(count)),
+                                      StringView(value, sizeof(value)));
+                !added) {
+                return added;
+            }
+        }
+    }
+
+    return sink.Add("Kind", "Hero");
+}
+
+Result<void> TestBuild(const AssetTypeHookContext&, AssetDependencySink& sink) noexcept {
+    if (hookState.failBuild) {
+        return Result<void>::Failure(ErrorCode::Unsupported);
+    }
+
+    return sink.Add(FixedId(LeafId));
+}
+
+} // namespace
+
 // 기존 패키지 저장(5.5절, 7.1절 15): 값을 바꾸고 MarkDirty한 Hero를 저장하면 교체 한 번·임시 파일
 // 없음·경고 없음, dirty 해제(세대 그대로), 정보 지문 = 새 파일 = 색인 항목. 저장 전에 읽지 않은
 // bulk는 새 파일에서 읽힌다(Rebind). 바뀌지 않은 패키지를 다시 저장하면 같은 byte다(결정적). 다른
@@ -247,7 +300,8 @@ TEST(EditorPackageSave_NewPackage) {
 // 새 패키지 첫 저장의 거부(7.1절 15): 만든 뒤 대상 파일이 생겼거나 색인에 같은 경로 키(대소문자만
 // 다른 파일)가 생겼으면 DuplicatePath / AlreadyExists, 절대 경로가 OS 상한을 넘으면 InvalidPath /
 // CapacityExceeded, 디렉터리를 만들 수 없으면 진단 None과 그 오류다. 거부는 아무것도 쓰지 않고
-// 패키지는 저장하지 않은 채 남는다(고장을 걷으면 저장된다).
+// 패키지는 저장하지 않은 채 남는다(고장을 걷으면 저장된다). 색인에 같은 경로 키·id가 둘이어도
+// (AlreadyExists) 같은 거부이고, 대상 Stat 실패는 진단 None, 열린 것 사이에 없는 id는 NotFound다.
 TEST(EditorPackageSave_NewPackageRefusals) {
     AssetEnv env;
     REQUIRE(env.Ready());
@@ -328,6 +382,42 @@ TEST(EditorPackageSave_NewPackageRefusals) {
               .Error() == ErrorCode::CapacityExceeded);
     CHECK(failure.code == AssetDiagnosticCode::InvalidPath);
     CHECK(longSet.At(0).unsaved);
+
+    // 색인의 같은 경로 키 둘(AlreadyExists)은 만들기·첫 저장 모두 DuplicatePath, 색인의 같은 id
+    // 둘은 DuplicateAssetId, 대상 Stat 실패는 진단 None과 그 오류, 열린 것 사이에 없는 id는
+    // MarkDirty·Save NotFound(진단 자리 없이도).
+    auto pair = ParseLogicalPath(env.allocator, "/Game/Pair");
+    auto later = ParseLogicalPath(env.allocator, "/Game/Later");
+    auto statted = ParseLogicalPath(env.allocator, "/Game/Statted");
+    auto fourth = ParseLogicalPath(env.allocator, "/Game/Fourth");
+    REQUIRE(pair && later && statted && fourth);
+    auto laterMade = set.Create(later.Value(), TestAssetType());
+    auto stattedMade = set.Create(statted.Value(), TestAssetType());
+    REQUIRE(laterMade && stattedMade);
+    REQUIRE(files.AddFile("Pair.rasset", sources.cycleA.View()));
+    REQUIRE(files.AddFile("pair.RASSET", sources.cycleB.View()));
+    REQUIRE(files.AddFile("later.RASSET", sources.cycleA.View()));
+    REQUIRE(files.AddFile("LATER.rasset", sources.cycleB.View()));
+    REQUIRE(files.AddFile("Copy.rasset", sources.villain.View()));
+    REQUIRE(scene.project.Rebuild());
+    CHECK(set.Create(pair.Value(), TestAssetType(), {}, &failure).Error() ==
+          ErrorCode::AlreadyExists);
+    CHECK(failure.code == AssetDiagnosticCode::DuplicatePath);
+    CHECK(set.Save(idOf(laterMade.Value()), scene.lock, EditorSaveOptions{}, nullptr, &failure)
+              .Error() == ErrorCode::AlreadyExists);
+    CHECK(failure.code == AssetDiagnosticCode::DuplicatePath);
+    CHECK(set.Create(fourth.Value(), TestAssetType(), FixedId(VillainId), &failure).Error() ==
+          ErrorCode::AlreadyExists);
+    CHECK(failure.code == AssetDiagnosticCode::DuplicateAssetId);
+    files.faults.stat = MemoryBusy;
+    files.faults.statPath = "Statted.rasset";
+    CHECK(set.Save(idOf(stattedMade.Value()), scene.lock, EditorSaveOptions{}, nullptr, &failure)
+              .Error() == FileErrorCode(MemoryBusy));
+    CHECK(failure.code == AssetDiagnosticCode::None);
+    files.faults.stat = {};
+    files.faults.statPath = nullptr;
+    CHECK(set.MarkDirty(FixedId(1)).Error() == ErrorCode::NotFound);
+    CHECK(set.Save(FixedId(1), scene.lock, EditorSaveOptions{}).Error() == ErrorCode::NotFound);
 }
 
 // 판정 순서의 거부(7.1절 15): Initialize 전·잠금을 잡지 않음 InvalidArgument, 열리지 않음
@@ -358,6 +448,35 @@ TEST(EditorPackageSave_Refusals) {
     CHECK(set.Save(FixedId(HeroId), scene.lock, EditorSaveOptions{}, nullptr, &failure).Error() ==
           ErrorCode::NotFound);
     CHECK(failure.code == AssetDiagnosticCode::None);
+    CHECK(set.Save(FixedId(9999), scene.lock, EditorSaveOptions{}).Error() == ErrorCode::NotFound);
+
+    // 편집이 대표 에셋을 Discard한 패키지: hook이 있으면 그 찾기 오류(NotFound), 없으면 writer가
+    // 거부한다. 아무것도 쓰지 않는다.
+    {
+        AssetTypeHookTable hooks(env.allocator, env.types);
+        auto registration = hooks.Register(TestAssetType(), AssetTypeHooks{&TestTags, nullptr});
+        REQUIRE(registration);
+        EditorPackageSetConfig config = Config(env, scene.project);
+        config.hooks = &hooks;
+        for (const bool withHooks : OwnedCases) {
+            EditorPackageSet hollow(env.allocator, withHooks ? config : Config(env, scene.project));
+            REQUIRE(hollow.Initialize());
+            auto villain = hollow.Open(FixedId(VillainId));
+            REQUIRE(villain);
+            auto representative = hollow.Registry().FindChild(hollow.Access(), villain.Value(), "");
+            REQUIRE(representative);
+            REQUIRE(hollow.Registry().Discard(hollow.Access(), representative.Value()));
+            auto saved =
+                hollow.Save(FixedId(VillainId), scene.lock, EditorSaveOptions{}, nullptr, &failure);
+            REQUIRE(!saved);
+            if (withHooks) {
+                CHECK(saved.Error() == ErrorCode::NotFound &&
+                      failure.code == AssetDiagnosticCode::None);
+            }
+
+            CHECK(files.replaces == 0 && !HasTemporary(files));
+        }
+    }
 
     // 읽기 전용: 모르는 커스텀 버전으로 쓴 Leaf.
     PackageWriteOptions options = EditorOptions();
@@ -491,7 +610,8 @@ enum class SaveFault {
     Flush,
     Close,
     Replace,
-    ReplaceAndDelete
+    ReplaceAndDelete,
+    ReopenTemp
 };
 
 // 고장 없는 저장의 쓰기 호출 수다(n번째 쓰기 고장을 모두 훑는다).
@@ -513,7 +633,8 @@ uint32 CountSaveWrites(AssetEnv& env, Sources& sources, Array<uint8>& clean) noe
 
 } // namespace
 
-// 저장 IO 고장(5.5절 2–7): 임시 파일 만들기·n번째 쓰기(모든 n)·Flush·Close·교체 실패는 진단 None과
+// 저장 IO 고장(5.5절 2–7): 임시 파일 만들기·n번째 쓰기(모든 n)·Flush·Close·검증용 다시 열기·교체
+// 실패는 진단 None과
 // 그 오류, 쓰기가 byte를 망가뜨리면(모든 n) 재검증이 그 진단(CorruptPackage)으로 거부한다(나중에
 // 덮어쓰는 헤더 자리 하나만 저장되고 결과는 깨끗한 저장과 같다). 어느
 // 경우에도 대상 byte·정보(지문·dirty)는 그대로이고 임시 파일은 지워진다. 교체와 지우기가 모두
@@ -532,8 +653,9 @@ TEST(EditorPackageSave_IoFailures) {
         uint32 call;
     };
     Array<Case> cases(probeEnv.allocator);
-    const SaveFault single[] = {SaveFault::Create, SaveFault::Flush, SaveFault::Close,
-                                SaveFault::Replace, SaveFault::ReplaceAndDelete};
+    const SaveFault single[] = {
+        SaveFault::Create,           SaveFault::Flush,     SaveFault::Close, SaveFault::Replace,
+        SaveFault::ReplaceAndDelete, SaveFault::ReopenTemp};
     for (SaveFault fault : single) {
         REQUIRE(cases.TryPushBack(Case{fault, 0}));
     }
@@ -580,6 +702,10 @@ TEST(EditorPackageSave_IoFailures) {
             files.faults.replace = MemoryBusy;
             files.faults.remove = MemoryError;
             break;
+        case SaveFault::ReopenTemp:
+            files.faults.openRead = MemoryBusy;
+            files.faults.readSuffix = ".tmp";
+            break;
         }
 
         AssetDiagnostic failure;
@@ -600,11 +726,12 @@ TEST(EditorPackageSave_IoFailures) {
             CHECK(failure.code == AssetDiagnosticCode::CorruptPackage);
         } else {
             CHECK(failure.code == AssetDiagnosticCode::None);
-            const platform::FileStatus expected = one.fault == SaveFault::Create ||
-                                                          one.fault == SaveFault::Replace ||
-                                                          one.fault == SaveFault::ReplaceAndDelete
-                                                      ? MemoryBusy
-                                                      : MemoryError;
+            const platform::FileStatus expected =
+                one.fault == SaveFault::Create || one.fault == SaveFault::Replace ||
+                        one.fault == SaveFault::ReplaceAndDelete ||
+                        one.fault == SaveFault::ReopenTemp
+                    ? MemoryBusy
+                    : MemoryError;
             CHECK(saved.Error() == FileErrorCode(expected));
         }
 
@@ -624,6 +751,13 @@ TEST(EditorPackageSave_IoFailures) {
         CHECK(warnings[0].kind == EditorWarningKind::OrphanNotDeleted);
         CHECK(warnings[0].diagnostic.error == FileErrorCode(MemoryError));
         CHECK(HasTemporary(files));
+        // 경고 표 없이도 같고, 지우기 실패가 둘이어도 경고는 첫 오류 하나다.
+        REQUIRE(files.AddFile("Second.rasset.0123abcd-4567-89ab-cdef-0123456789ab.tmp",
+                              sources.leaf.View()));
+        REQUIRE(set.Save(FixedId(HeroId), scene.lock, EditorSaveOptions{}));
+        warnings.Clear();
+        REQUIRE(set.Save(FixedId(HeroId), scene.lock, EditorSaveOptions{}, &warnings));
+        CHECK(warnings.Size() == 1);
         files.faults.remove = {};
         warnings.Clear();
         REQUIRE(set.Save(FixedId(HeroId), scene.lock, EditorSaveOptions{}, &warnings));
@@ -660,44 +794,11 @@ TEST(EditorPackageSave_IoFailures) {
     CHECK(warnings[0].diagnostic.error == FileErrorCode(MemoryError));
 }
 
-namespace {
-
-// hook 시험의 상태다(hook은 함수 포인터라 전역으로 넘긴다).
-struct HookState {
-    EditorPackageSet* set = nullptr;
-    bool markDirty = false;
-    bool failTags = false;
-    bool failBuild = false;
-};
-
-HookState hookState;
-
-Result<void> TestTags(const AssetTypeHookContext&, AssetTagSink& sink) noexcept {
-    if (hookState.failTags) {
-        return Result<void>::Failure(ErrorCode::Busy);
-    }
-
-    if (hookState.markDirty && hookState.set != nullptr) {
-        (void)hookState.set->MarkDirty(FixedId(HeroId));
-    }
-
-    return sink.Add("Kind", "Hero");
-}
-
-Result<void> TestBuild(const AssetTypeHookContext&, AssetDependencySink& sink) noexcept {
-    if (hookState.failBuild) {
-        return Result<void>::Failure(ErrorCode::Unsupported);
-    }
-
-    return sink.Add(FixedId(LeafId));
-}
-
-} // namespace
-
 // dirty와 hook(7.1절 5·15): MarkDirty는 열리지 않은 id에 NotFound, 세대를 올린다. Tags는 저장마다
 // hook으로 다시 만든다 — 파일에 있던 다른 태그는 남지 않고 hook 태그만 남으며, hook이 없으면 Tags가
 // 빈다. Build 의존은 hook이 낸다. 저장 중(hook 안) MarkDirty가 오면 세대가 바뀌어 dirty가 남는다.
-// hook 오류(태그·Build)는 진단 None과 그 오류이고 아무것도 쓰지 않는다.
+// hook 오류(태그·Build)와 태그가 Record 한도를 넘는 것(CapacityExceeded)은 진단 None과 그 오류이고
+// 아무것도 쓰지 않는다.
 TEST(EditorPackageSave_DirtyAndHooks) {
     AssetEnv env;
     REQUIRE(env.Ready());
@@ -747,6 +848,11 @@ TEST(EditorPackageSave_DirtyAndHooks) {
     CHECK(set.Save(FixedId(HeroId), scene.lock, EditorSaveOptions{}, nullptr, &failure).Error() ==
           ErrorCode::Unsupported);
     hookState.failBuild = false;
+    hookState.bigTags = true;
+    CHECK(set.Save(FixedId(HeroId), scene.lock, EditorSaveOptions{}, nullptr, &failure).Error() ==
+          ErrorCode::CapacityExceeded);
+    CHECK(failure.code == AssetDiagnosticCode::None);
+    hookState.bigTags = false;
     CHECK(files.replaces == 0 && set.Find(FixedId(HeroId))->dirty);
 
     // hook 안의 MarkDirty: 세대가 바뀌어 dirty가 남는다.
@@ -839,32 +945,50 @@ TEST(EditorPackageSave_ImportRecordPreserved) {
     }
 }
 
-// 할당 실패(7.1절 15): 집합 allocator의 할당을 저장 중에 하나씩 실패시키면 Save는 OutOfMemory다.
-// 교체 전의 실패는 대상 byte·정보가 그대로이고 임시 파일이 없다. 교체 뒤의 실패(Rebind·Refresh)는
-// 대상이 새 byte이고 정보 지문이 그것을 가리키며 dirty가 남는다. 기존 패키지(bulk)와 새 패키지를
-// 모두 훑는다.
+// 저장 임시 파일 모양의 고아 이름이다(guid 36자 소문자).
+constexpr const char* OrphanName = "Hero.rasset.0123abcd-4567-89ab-cdef-0123456789ab.tmp";
+
+// 할당 실패(7.1절 15): 집합 allocator와 색인 allocator의 할당을 저장 중에 하나씩 실패시키면 Save는
+// OutOfMemory다(hook·경고 표·고아 정리까지 지나는 장면). 교체 전의 실패는 대상 byte·정보가
+// 그대로이고 임시 파일이 없다. 교체 뒤의 실패(Rebind·Refresh)는 대상이 새 byte이고 정보 지문이
+// 그것을 가리키며 dirty는 지워진다(파일이 메모리와 같다). 고아 정리의 할당 실패는 저장 성공이고
+// 고아가 남는다(경고는 잡아 둔 자리에 — OrphanNotDeleted / OutOfMemory). 기존 패키지(bulk)와 새
+// 패키지를 모두 훑는다.
 TEST(EditorPackageSave_AllocationFailures) {
     for (const bool fresh : FreshCases) {
         AssetEnv env;
         REQUIRE(env.Ready());
         Sources sources(env.allocator);
         REQUIRE(MakeSources(env, sources));
+        AssetTypeHookTable hooks(env.allocator, env.types);
+        auto registration = hooks.Register(TestAssetType(), AssetTypeHooks{&TestTags, &TestBuild});
+        REQUIRE(registration);
+        hookState = HookState{};
         uint32 failures = 0;
         uint32 afterReplace = 0;
+        uint32 orphanKept = 0;
         for (uint64 attempt = 1;; ++attempt) {
             Project project(env.allocator);
             REQUIRE(project.ready && project.files.Ready());
             REQUIRE(project.files.AddFile("Base.rasset", sources.base.View()));
             REQUIRE(project.files.AddFile("Derived.rasset", sources.derived.View()));
             REQUIRE(project.files.AddFile("Hero.rasset", sources.hero.View()));
-            REQUIRE(project.Rebuild());
+            REQUIRE(project.files.AddDirectory("Fresh"));
+            REQUIRE(project.files.AddFile(OrphanName, sources.leaf.View()));
+            REQUIRE(project.files.AddFile(
+                "Fresh/Made.rasset.0123abcd-4567-89ab-cdef-0123456789ab.tmp", sources.leaf.View()));
             TempProject lockProject("save-alloc");
             ProjectLayout lockLayout(env.allocator);
             AssetDatabaseLock lock;
             REQUIRE(lockProject.made && lockLayout.Initialize(lockProject.Root()) &&
                     lock.Acquire(lockLayout, 0));
             TaggedFailAllocator failing(env.allocator);
-            EditorPackageSet set(failing, Config(env, project));
+            AssetIndex index(failing, project.layout);
+            REQUIRE(index.Rebuild(project.files, PackageReadOptions{}));
+            EditorPackageSetConfig config = Config(env, project);
+            config.index = &index;
+            config.hooks = &hooks;
+            EditorPackageSet set(failing, config);
             REQUIRE(set.Initialize());
             AssetId id = FixedId(HeroId);
             if (fresh) {
@@ -877,27 +1001,40 @@ TEST(EditorPackageSave_AllocationFailures) {
                 REQUIRE(set.MarkDirty(id));
             }
 
+            const StringView orphan =
+                fresh ? "Fresh/Made.rasset.0123abcd-4567-89ab-cdef-0123456789ab.tmp" : OrphanName;
             const PackageFingerprint before = set.Find(id)->fingerprint;
+            Array<EditorWarning> warnings(failing);
             AssetDiagnostic failure;
             failing.FailOnAttempt(attempt);
-            auto saved = set.Save(id, lock, EditorSaveOptions{}, nullptr, &failure);
+            auto saved = set.Save(id, lock, EditorSaveOptions{}, &warnings, &failure);
             const bool failed = failing.Failed();
             failing.DisableFailure();
             if (!failed) {
                 REQUIRE(saved);
-                CHECK(!set.Find(id)->dirty);
+                CHECK(!set.Find(id)->dirty && warnings.IsEmpty());
+                CHECK(!project.files.Has(orphan));
                 break;
             }
 
-            CHECK(!saved && saved.Error() == ErrorCode::OutOfMemory);
-            CHECK(failure.code == AssetDiagnosticCode::None ||
-                  failure.error == ErrorCode::OutOfMemory);
             const StringView name = fresh ? "Fresh/Made.rasset" : "Hero.rasset";
-            const bool replaced = project.files.replaces == 1;
-            CHECK(!HasTemporary(project.files));
-            if (replaced) {
+            if (saved) {
+                // 고아 정리의 할당 실패: 저장은 끝났고 고아가 남는다.
+                CHECK(project.files.Has(orphan) && !set.Find(id)->dirty);
+                CHECK(warnings.Size() == 1 &&
+                      warnings[0].kind == EditorWarningKind::OrphanNotDeleted &&
+                      warnings[0].diagnostic.error == ErrorCode::OutOfMemory);
+                ++orphanKept;
+                continue;
+            }
+
+            CHECK(saved.Error() == ErrorCode::OutOfMemory);
+            CHECK(failure.code == AssetDiagnosticCode::None &&
+                  failure.error == ErrorCode::OutOfMemory);
+            CHECK(!HasTemporary(project.files) || project.files.Has(orphan));
+            if (project.files.replaces == 1) {
                 ++afterReplace;
-                CHECK(set.Find(id)->dirty && !set.Find(id)->unsaved);
+                CHECK(!set.Find(id)->dirty && !set.Find(id)->unsaved);
                 CHECK(!(set.Find(id)->fingerprint == before));
                 CHECK(project.files.Has(name));
             } else {
@@ -909,14 +1046,120 @@ TEST(EditorPackageSave_AllocationFailures) {
             ++failures;
         }
 
-        CHECK(failures > 0 && afterReplace > 0);
+        CHECK(failures > 0 && afterReplace > 0 && orphanKept > 0);
+        hookState = HookState{};
     }
+}
+
+// 만들기의 할당 실패(7.1절 15): Create의 할당을 하나씩 실패시키면 OutOfMemory(진단 None)이고 집합에
+// 아무것도 남지 않는다. 실패한 Create가 늘려 둔 표 용량이 다음 시도의 할당 순서를 바꾸지 않게
+// 시도마다 같은 상태의 새 집합(Base 열림 + 저장하지 않은 새 패키지 하나)에서 만든다.
+TEST(EditorPackageSave_CreateAllocationFailures) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Sources sources(env.allocator);
+    REQUIRE(MakeSources(env, sources));
+    Project project(env.allocator);
+    REQUIRE(project.ready && project.files.Ready());
+    REQUIRE(project.files.AddFile("Base.rasset", sources.base.View()));
+    REQUIRE(project.Rebuild());
+    auto other = ParseLogicalPath(env.allocator, "/Game/Unsaved/Other");
+    auto path = ParseLogicalPath(env.allocator, "/Game/Made/Thing");
+    REQUIRE(other && path);
+    uint32 failures = 0;
+    for (uint64 attempt = 1;; ++attempt) {
+        TaggedFailAllocator failing(env.allocator);
+        EditorPackageSet set(failing, Config(env, project));
+        REQUIRE(set.Initialize());
+        REQUIRE(set.Open(FixedId(BaseId)));
+        REQUIRE(set.Create(other.Value(), TestAssetType()));
+        AssetDiagnostic failure;
+        failing.FailOnAttempt(attempt);
+        auto made = set.Create(path.Value(), TestAssetType(), FixedId(FreshId), &failure);
+        const bool failed = failing.Failed();
+        failing.DisableFailure();
+        if (!failed) {
+            REQUIRE(made);
+            CHECK(set.Count() == 3 && set.Find(FixedId(FreshId)) != nullptr);
+            break;
+        }
+
+        CHECK(!made && made.Error() == ErrorCode::OutOfMemory);
+        CHECK(failure.code == AssetDiagnosticCode::None);
+        CHECK(set.Count() == 2 && set.Find(FixedId(FreshId)) == nullptr);
+        ++failures;
+    }
+
+    CHECK(failures > 0);
+}
+
+// 고아 임시 파일 모양(5.5절 8): 저장은 대상 디렉터리의 정확히 "<이름>.rasset.<36자 소문자
+// guid>.tmp" 모양인 일반 파일만 지운다(확장자 ".rasset"은 대소문자 무시). 다른 디렉터리, 대문자
+// guid, ".TMP", guid 앞 '.' 없음, ".rasset"이 아닌 이름, 빈 이름, 짧은 이름, 하이픈 자리·16진이
+// 아닌 문자, 디렉터리·링크, UTF-8이 아닌 이름은 남긴다. 경고 표 없이 저장해도 같다.
+TEST(EditorPackageSave_OrphanShapes) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Sources sources(env.allocator);
+    REQUIRE(MakeSources(env, sources));
+    SaveScene scene(env, sources);
+    REQUIRE(scene.ready);
+    MemoryFileSystem& files = scene.project.files;
+    const StringView removed[] = {
+        "Hero.rasset.0123abcd-4567-89ab-cdef-0123456789ab.tmp",
+        "Other.RASSET.89abcdef-0123-4567-89ab-cdef01234567.tmp",
+    };
+    const StringView kept[] = {
+        "Sub/Hero.rasset.0123abcd-4567-89ab-cdef-0123456789ab.tmp",
+        "Hero.rasset.0123ABCD-4567-89ab-cdef-0123456789ab.tmp",
+        "Hero.rasset.0123abcd-4567-89ab-cdef-0123456789ab.TMP",
+        "Hero.rasset-0123abcd-4567-89ab-cdef-0123456789ab.tmp",
+        "Hero.raset.0123abcd-4567-89ab-cdef-0123456789ab.tmp",
+        ".rasset.0123abcd-4567-89ab-cdef-0123456789ab.tmp",
+        "x.tmp",
+        "Hero.rasset.0123abcd4-567-89ab-cdef-0123456789ab.tmp",
+        "Hero.rasset.0123abcg-4567-89ab-cdef-0123456789ab.tmp",
+        "Hero.rasset.0123abcd-4567-89ab-cdef-0123456789a!.tmp",
+        "Link.rasset.0123abcd-4567-89ab-cdef-0123456789ab.tmp",
+        "\xff.rasset.0123abcd-4567-89ab-cdef-0123456789ab.tmp",
+    };
+    REQUIRE(files.AddDirectory("Sub"));
+    REQUIRE(files.AddDirectory("Dir.rasset.0123abcd-4567-89ab-cdef-0123456789ab.tmp"));
+    for (StringView name : removed) {
+        REQUIRE(files.AddFile(name, sources.leaf.View()));
+    }
+
+    for (StringView name : kept) {
+        if (name.Contains("/", StringComparison::CaseSensitive) && !name.StartsWith("Sub/")) {
+            continue;
+        }
+
+        REQUIRE(files.AddFile(name, sources.leaf.View(), MemoryFault::None,
+                              platform::FileType::File, name.StartsWith("Link.")));
+    }
+
+    REQUIRE(scene.set.Open(FixedId(HeroId)));
+    REQUIRE(scene.set.Save(FixedId(HeroId), scene.lock, EditorSaveOptions{}));
+    for (StringView name : removed) {
+        CHECK(!files.Has(name));
+    }
+
+    for (StringView name : kept) {
+        if (name.Contains("/", StringComparison::CaseSensitive) && !name.StartsWith("Sub/")) {
+            continue;
+        }
+
+        CHECK(files.Has(name));
+    }
+
+    CHECK(files.Has("Dir.rasset.0123abcd-4567-89ab-cdef-0123456789ab.tmp"));
 }
 
 // 색인 Refresh(7.1절 15): 바뀐 파일은 항목을 바꾸고, 새 파일은 더하고, 없어진 파일은 빼며, 같은
 // id 진단·표시는 전체에서 다시 정한다(둘이 되면 둘 다, 하나가 없어지면 풀린다). 이름 규칙 위반은
-// InvalidPath 진단, 링크·디렉터리는 색인하지 않고, Stat 실패는 진단 None과 그 오류다. `.rasset`이
-// 아닌 이름은 InvalidArgument(색인 그대로), 할당 실패는 색인을 비운다.
+// InvalidPath 진단, 링크·디렉터리는 색인하지 않고, Stat 실패는 진단 None과 그 오류다. 같은 경로
+// 키 진단(DuplicatePath)도 다시 정한다. `.rasset`이 아닌 이름은 InvalidArgument(색인 그대로), 할당
+// 실패(긴 Content 경로·Stat 진단 포함)는 색인을 비운다.
 TEST(AssetIndex_Refresh) {
     AssetEnv env;
     REQUIRE(env.Ready());
@@ -1005,6 +1248,63 @@ TEST(AssetIndex_Refresh) {
     }
 
     CHECK(failures > 0);
+
+    // 같은 경로 키 진단: 둘이면 둘 다 DuplicatePath, 하나를 지우고 Refresh하면 풀린다.
+    REQUIRE(files.AddFile("leaf.RASSET", sources.cycleA.View()));
+    REQUIRE(project.Rebuild());
+    usize paths = 0;
+    for (const AssetIndexDiagnostic& diagnostic : index.Diagnostics()) {
+        paths += diagnostic.code == AssetDiagnosticCode::DuplicatePath ? 1 : 0;
+    }
+
+    CHECK(paths == 2);
+    files.Remove("leaf.RASSET");
+    REQUIRE(index.Refresh(files, "leaf.RASSET", read));
+    for (const AssetIndexDiagnostic& diagnostic : index.Diagnostics()) {
+        CHECK(diagnostic.code != AssetDiagnosticCode::DuplicatePath);
+    }
+
+    // 긴 Content 경로(경로 임시 저장소 512 byte를 넘는다)와 Stat 진단의 할당 실패.
+    String root(env.allocator);
+    REQUIRE(root.TryAppend(MemoryRoot));
+    for (uint32 level = 0; level < 8; ++level) {
+        REQUIRE(root.TryAppend("/Root-abcdefghijklmnopqrstuvwxyz-abcdefghijklmnopqrstuvwxyz-0123"));
+    }
+
+    ProjectLayout longLayout(env.allocator);
+    REQUIRE(longLayout.Initialize(root.View()));
+    MemoryFileSystem longFiles(env.allocator, longLayout.ContentDirectory());
+    REQUIRE(longFiles.Ready());
+    REQUIRE(longFiles.AddFile("Leaf.rasset", sources.leaf.View()));
+    REQUIRE(longFiles.AddFile("Base.rasset", sources.base.View()));
+    const bool statFaults[] = {false, true};
+    for (bool statFault : statFaults) {
+        uint32 longFailures = 0;
+        for (uint64 attempt = 1;; ++attempt) {
+            AssetIndex fresh(failing, longLayout);
+            REQUIRE(fresh.Rebuild(longFiles, read));
+            longFiles.faults.stat = statFault ? MemoryError : platform::FileStatus{};
+            longFiles.faults.statPath = statFault ? "Base.rasset" : nullptr;
+            failing.FailOnAttempt(attempt);
+            const Result<void> result = fresh.Refresh(longFiles, "Base.rasset", read);
+            const bool failed = failing.Attempts() >= attempt;
+            failing.DisableFailure();
+            longFiles.faults.stat = {};
+            longFiles.faults.statPath = nullptr;
+            if (!failed) {
+                REQUIRE(result);
+                CHECK(fresh.Count() == (statFault ? 1u : 2u));
+                CHECK(fresh.Diagnostics().Size() == (statFault ? 1u : 0u));
+                break;
+            }
+
+            CHECK(!result && result.Error() == ErrorCode::OutOfMemory);
+            CHECK(fresh.Count() == 0 && fresh.Diagnostics().IsEmpty());
+            ++longFailures;
+        }
+
+        CHECK(longFailures > 0);
+    }
 }
 
 // 실제 디스크(5.5절): 물리 파일 시스템에서 기존 패키지를 고쳐 저장하고 새 패키지를 새 디렉터리에

@@ -730,10 +730,12 @@ TEST(EditorPackageSet_ArgumentsAndLifetime) {
 // 할당 실패(7.1절 15): 집합 allocator의 할당을 하나씩 실패시키면 Initialize·Open은 OutOfMemory(진단
 // None)이고 아무것도 열리지 않는다. 예외는 Registry가 계약으로 삼키는 GC 참조 표 할당
 // 하나다(실패하면 trace로 대신 — 정확성 같음, ObjectRegistryGcMark — 그 할당만 tag GCRT를 쓴다): 그
-// tag의 실패만 성공을 받는다. 유효 ImportRecord가 있는 Base로 연 Hub 닫힘(8개 — 닫힘 표가 자란다)과
-// 경고가 생기는 닫힘(Base 없이 Villain — 경고 표도 같은 allocator)을 모두 훑는다.
+// tag의 실패만 성공을 받는다. 유효 ImportRecord(소유·참조 + ImportOwner)가 있는 Base로 연 Hub
+// 닫힘(8개 — 닫힘 표가 자란다)과 경고가 생기는 닫힘(Base 없이 Villain — 경고 표도 같은 allocator)을
+// 모두 훑는다.
 TEST(EditorPackageSet_AllocationFailures) {
-    const BaseShape shapes[] = {BaseShape::OwnedRecord, BaseShape::Absent};
+    const BaseShape shapes[] = {BaseShape::OwnedRecord, BaseShape::ReferenceRecord,
+                                BaseShape::Absent};
     for (BaseShape shape : shapes) {
         AssetEnv env;
         REQUIRE(env.Ready());
@@ -741,7 +743,7 @@ TEST(EditorPackageSet_AllocationFailures) {
         REQUIRE(MakeSources(env, sources));
         ShapeScene scene(env, sources, shape);
         REQUIRE(scene.ready);
-        const bool hub = shape == BaseShape::OwnedRecord;
+        const bool hub = shape != BaseShape::Absent;
         MemoryFileSystem& files = scene.project.files;
         REQUIRE(files.AddFile("Villain.rasset", sources.villain.View()));
         REQUIRE(files.AddFile("Leaf.rasset", sources.leaf.View()));

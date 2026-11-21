@@ -47,6 +47,10 @@ struct MemoryFaults {
     // Replace의 결과다. NotDurable이면 교체한 뒤 그 상태를 돌려주고, 그 밖의 실패는 교체하지
     // 않는다.
     platform::FileStatus replace{};
+    // 읽기 열기(ReadExisting)의 실패다 — 경로가 readSuffix로 끝날 때만(예: 저장 임시 파일 ".tmp"를
+    // 다시 열 때).
+    platform::FileStatus openRead{};
+    const char* readSuffix = nullptr;
     // Delete·Stat의 실패다(Stat는 statPath가 비어 있지 않으면 그 Content 상대 경로에만).
     platform::FileStatus remove{};
     platform::FileStatus stat{};
@@ -269,6 +273,12 @@ public:
 
         if (node == nullptr || node->fault == MemoryFault::OpenMissing) {
             return MemoryMissing;
+        }
+
+        if (mode == platform::FileOpenMode::ReadExisting && !faults.openRead &&
+            faults.readSuffix != nullptr &&
+            target.EndsWith(StringView(faults.readSuffix), StringComparison::CaseSensitive)) {
+            return faults.openRead;
         }
 
         if (node->fault == MemoryFault::OpenBusy) {

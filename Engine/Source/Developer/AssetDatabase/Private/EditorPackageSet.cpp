@@ -148,14 +148,14 @@ bool EditorCollectOrphan(const platform::DirectoryEntry& entry, void* raw) noexc
     return true;
 }
 
-// path의 부모 디렉터리 길이다(마지막 '/' 앞까지 — 없으면 0).
+// 저장 대상 절대 경로(언제나 Content 아래 — '/'가 있다)의 부모 디렉터리 길이다(마지막 '/' 앞까지).
 usize EditorParentBytes(StringView path) noexcept {
     usize slash = path.ByteCount();
-    while (slash > 0 && path.Data()[slash - 1] != '/') {
+    while (path.Data()[slash - 1] != '/') {
         --slash;
     }
 
-    return slash == 0 ? 0 : slash - 1;
+    return slash - 1;
 }
 
 } // namespace
@@ -712,11 +712,13 @@ Result<ObjectHandle> EditorPackageSet::Create(const LogicalPath& path, TypeId ty
         return fail(AssetDiagnosticCode::None, representative.Error());
     }
 
+    // 방금 공개한 Package다: 고정·접근은 실패하지 않고(소유 스레드 — GC·종료 중이 아니다), 새
+    // Package에는 저장소가 없다.
     auto root = registry_->TryPin<Object>(access, handle);
     auto borrow = registry_->Resolve<Package>(access, handle);
-    auto pointer = borrow ? borrow.Value().Get() : Result<Package*>::Failure(borrow.Error());
-    // 방금 공개한 Package다: 고정·접근은 실패하지 않고, 새 Package에는 저장소가 없다.
-    ROCKS_ASSERT(root.IsOk() && pointer.IsOk());
+    ROCKS_ASSERT(root.IsOk() && borrow.IsOk());
+    auto pointer = borrow.Value().Get();
+    ROCKS_ASSERT(pointer.IsOk());
     info.package = handle;
     info.store = store.Value().Get();
     UniquePtr<PackageBulkStore> attached(Move(store.Value()));
@@ -868,7 +870,9 @@ Result<void> EditorPackageSet::PlanSave(EditorPackageInfo& info, const EditorSav
         }
     }
 
-    // Tags·Build 의존은 대표 에셋 타입의 hook으로 만든다(Tags는 저장마다 다시 — 7.1절 15).
+    // Tags·Build 의존은 대표 에셋 타입의 hook으로 만든다(Tags는 저장마다 다시 — 7.1절 15). 대표
+    // 에셋이 없으면(편집이 Discard했다) 그 오류다(hook 없이 쓰면 writer가 같은 패키지를 거부한다).
+    AssetDependencySink dependencies(allocator);
     if (config_.hooks != nullptr) {
         const ObjectAccessContext access = Access();
         auto representative = registry_->FindChild(access, info.package, StringView());
@@ -876,14 +880,11 @@ Result<void> EditorPackageSet::PlanSave(EditorPackageInfo& info, const EditorSav
             return fail(AssetDiagnosticCode::None, representative.Error());
         }
 
+        // 찾은 생존 객체의 타입 조회는 실패하지 않는다(소유 스레드 — 종료·회수 전).
         auto type = registry_->AcquireType(access, representative.Value());
-        if (!type) {
-            return fail(AssetDiagnosticCode::None, type.Error());
-        }
-
+        ROCKS_ASSERT(type.IsOk());
         const TypeId typeId = type.Value().Id();
         AssetTagSink tags(allocator);
-        AssetDependencySink dependencies(allocator);
         Result<void> step =
             config_.hooks->CollectTags(*registry_, access, representative.Value(), typeId, tags);
         if (step) {
@@ -901,14 +902,17 @@ Result<void> EditorPackageSet::PlanSave(EditorPackageInfo& info, const EditorSav
         }
 
         plan.tags = Move(written.Value());
-        if (auto appended = plan.extra.TryAppend(dependencies.Dependencies()); !appended) {
-            return fail(AssetDiagnosticCode::None, appended.Error());
-        }
     }
 
-    if (auto appended = plan.extra.TryAppend(info.importOwner.View()); !appended) {
-        return fail(AssetDiagnosticCode::None, appended.Error());
+    // extra 의존 = hook의 Build 의존 + 열 때 읽은 ImportOwner(자리를 한 번에 잡는다).
+    if (auto reserved =
+            plan.extra.TryReserve(dependencies.Dependencies().Size() + info.importOwner.Size());
+        !reserved) {
+        return fail(AssetDiagnosticCode::None, reserved.Error());
     }
+
+    (void)plan.extra.TryAppend(dependencies.Dependencies());
+    (void)plan.extra.TryAppend(info.importOwner.View());
 
     return Result<void>::Success();
 }
@@ -924,9 +928,10 @@ Result<void> EditorPackageSet::WriteAndReplace(EditorPackageInfo& info, SavePlan
         return Result<void>::Failure(error);
     };
 
-    // 경고 자리(미해결 null 저장 + NotDurable)를 먼저 잡는다(교체 뒤에 실패하지 않게).
+    // 경고 자리(미해결 null 저장 + NotDurable + 고아 정리 하나)를 먼저 잡는다(교체 뒤에 실패하지
+    // 않게 — 고아 정리는 실패를 경고 하나로 모은다).
     if (warnings != nullptr) {
-        if (auto reserved = warnings->TryReserve(warnings->Size() + info.unresolved.Size() + 1);
+        if (auto reserved = warnings->TryReserve(warnings->Size() + info.unresolved.Size() + 2);
             !reserved) {
             return fail(AssetDiagnosticCode::None, reserved.Error());
         }
@@ -1085,14 +1090,16 @@ Result<void> EditorPackageSet::WriteAndReplace(EditorPackageInfo& info, SavePlan
     }
 
     info.unresolved.Clear();
+    // 파일이 메모리와 같아졌으므로 dirty를 지운다(시작한 세대 그대로일 때 — 저장 중 편집은 남긴다).
+    // 뒤의 Rebind·Refresh가 실패해도 파일은 이미 새 것이다.
+    if (info.generation == plan.startGeneration) {
+        info.dirty = false;
+    }
+
     if (auto rebound = info.store->Rebind(target, result.fingerprint, bulkOffset,
                                           contents.bulkEntries.View(), result.bulkRemap.View());
         !rebound) {
         return fail(AssetDiagnosticCode::None, rebound.Error());
-    }
-
-    if (info.generation == plan.startGeneration) {
-        info.dirty = false;
     }
 
     if (auto refreshed = config_.index->Refresh(files, info.fileName.View(), config_.read);
@@ -1117,7 +1124,8 @@ void EditorPackageSet::DeleteOrphans(const EditorPackageInfo& info, StringView t
     };
 
     // 같은 디렉터리의 고아 임시 파일(정확한 모양만 — 5.5절 8)을 지운다. 정리는 저장의 일부가 아니라
-    // 실패는 경고다.
+    // 실패는 경고다(첫 실패 하나 — 자리는 WriteAndReplace가 잡았다). 지우기 실패 뒤에도 나머지를
+    // 지운다.
     const usize parentBytes = EditorParentBytes(target);
     Array<String> names(*allocator_);
     EditorOrphanContext context{&names};
@@ -1133,6 +1141,7 @@ void EditorPackageSet::DeleteOrphans(const EditorPackageInfo& info, StringView t
         return;
     }
 
+    ErrorCode first = ErrorCode::None;
     for (const String& name : names) {
         String path(*allocator_);
         Result<void> step = path.TryAssign(StringView(target.Data(), parentBytes));
@@ -1149,9 +1158,14 @@ void EditorPackageSet::DeleteOrphans(const EditorPackageInfo& info, StringView t
             return;
         }
 
-        if (auto removed = files.Delete(path.View().Data(), path.View().ByteCount()); !removed) {
-            warn(FileErrorCode(removed));
+        if (auto removed = files.Delete(path.View().Data(), path.View().ByteCount());
+            !removed && first == ErrorCode::None) {
+            first = FileErrorCode(removed);
         }
+    }
+
+    if (first != ErrorCode::None) {
+        warn(first);
     }
 }
 

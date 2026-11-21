@@ -451,8 +451,10 @@ A2는 에디터 쪽 에셋 데이터베이스다(4·5.4·5.5·7·8·13·16절). 
         - 잠금: `Save`는 잡은 `AssetDatabaseLock`을 받는다(잡지 않았으면 `InvalidArgument`). 명령은 명령 전체 동안 잠금을 쥐므로(8절) 저장마다 잡지 않는다. 고아 `.tmp` 삭제는 이 잠금 아래에서만 한다.
         - 판정 순서(앞에서 걸리면 아무것도 쓰지 않는다): 열리지 않음 `NotFound` → 잠금 → 읽기 전용 `NewerVersion` / `Unsupported` → 미해결 import가 있고 `dropUnresolved`가 아니면 `MissingDependency` / `InvalidArgument`(related = 첫 대상) → 대상 경로(새 패키지는 `TryMakeFilePath` — 경로 상한은 `InvalidPath` / `CapacityExceeded`, 대상이 이미 있으면(Stat) 또는 색인에 같은 경로 키가 있으면 `DuplicatePath` / `AlreadyExists`) → 외부 변경(기존 패키지: 대상의 지문을 `ReadPackageFingerprint`로 읽어 열 때 것과 비교 — 다르거나 대상이 없거나 헤더가 깨졌으면 `ExternalModification` / `StaleHandle`, IO 실패는 진단 None과 그 오류).
         - 쓰기: 옵션은 에디터 종류·`writeEngineVersion`·빈 커스텀 버전 표·bulk source = 그 패키지의 파일 저장소, Tags = hook(대표 에셋 타입에서 가장 가까운 것), extraDependencies = hook의 Build 의존 + 열 때 읽은 ImportOwner 항목, importRecord = 열 때 읽은 byte. **Tags는 저장마다 hook으로 다시 만든다**(UE `GetAssetRegistryTags`처럼): 남겨야 하는 메타데이터(Unreal 교환의 옛 경로 등)는 객체 필드로 두고 그 타입 hook이 태그로 낸다 — 파일의 Tags를 옮겨 두지 않는다(hook이 더 내지 않는 키가 남는 낡은 태그를 만들지 않게). UX1b가 이 규칙을 따른다.
+        - 새 패키지는 쓰기 전에 대상의 부모 디렉터리를 만든다(`MakeDirectoryTree` — 실패는 진단 None과 그 오류).
+        - 진단을 받는 호출(`Prepare`·`WritePackage`·`VerifyPackageFile`·`ReadPackageForEdit`)이 진단을 채우지 않고 실패하면(sink·할당·IO) 진단에 그 오류를 채워 돌려준다(시험이 찾은 것 — 처음 구현은 비어 있는 진단의 오류(None)를 돌려줘 `InvalidArgument`로 보였다).
         - 임시 파일 `<대상>.<36자 소문자 guid>.tmp`(`CreateNew`, guid는 OS 난수) → `FilePackageSink`로 쓰기 → `Flush`·`Close` → 다시 열어 `VerifyPackageFile`(scratch 64 KiB) + `ReadPackageForEdit`(새 파일의 bulk entry·섹션 offset — `Rebind`에 쓴다) → 그 핸들 닫기 → 캐시의 대상 핸들 닫기 → `Replace`. 여기까지의 실패는 임시 파일을 지우고(지우기 실패는 무시 — 다음 저장의 고아 정리가 지운다) 그 진단으로 실패한다: 쓰기는 `WritePackage`의 진단, 만들기·쓰기·Flush·Close·Replace의 IO는 진단 None과 그 오류, 재검증 실패는 그 진단(writer·sink 결함). `NotDurable`은 교체가 이미 보이므로 성공 + 경고다.
-        - 교체 뒤: 저장소 `Rebind`(새 경로·지문·entry·재매핑) → 정보 갱신(지문·파일 이름·새 패키지 표시 해제·미해결 표 비움) → 시작 세대 = 지금 세대면 dirty 해제 → `AssetIndex::Refresh(파일 이름)` → 그 디렉터리의 고아 `.tmp`(정확히 `*.rasset.<36자 guid>.tmp` 모양의 일반 파일) 삭제(실패는 `OrphanNotDeleted` 경고). `Rebind`·`Refresh`의 할당 실패는 이미 교체된 뒤라 `Save`는 `OutOfMemory`로 실패하되 정보는 새 파일을 가리킨다(dirty 유지): `Rebind` 실패면 저장소가 이전 파일 entry를 가리켜 읽지 않은 bulk는 `ExternalModification`으로 읽히지 않는다(다시 열어야 한다), `Refresh` 실패면 색인이 비므로(아래) `Rebuild`가 필요하다. 교체 실패 뒤의 "이전 경로 지문 확인"(5.5절 6)은 따로 하지 않는다 — 다음 저장이 1단계에서 같은 비교를 하므로 결과가 같다.
+        - 교체 뒤: 정보 갱신(지문·파일 이름·새 패키지 표시 해제·미해결 표 비움) → 시작 세대 = 지금 세대면 dirty 해제(파일이 메모리와 같다) → 저장소 `Rebind`(새 경로·지문·entry·재매핑) → `AssetIndex::Refresh(파일 이름)` → 그 디렉터리의 고아 `.tmp`(정확히 `*.rasset.<36자 guid>.tmp` 모양의 일반 파일) 삭제(실패는 `OrphanNotDeleted` 경고). `Rebind`·`Refresh`의 할당 실패는 이미 교체된 뒤라 `Save`는 `OutOfMemory`로 실패하되 정보는 새 파일을 가리키고 dirty는 지워진다(파일은 이미 메모리와 같다 — 다시 저장할 이유가 없다): `Rebind` 실패면 저장소가 이전 파일 entry를 가리켜 읽지 않은 bulk는 `ExternalModification`으로 읽히지 않는다(다시 열어야 한다), `Refresh` 실패면 색인이 비므로(아래) `Rebuild`가 필요하다. 교체 실패 뒤의 "이전 경로 지문 확인"(5.5절 6)은 따로 하지 않는다 — 다음 저장이 1단계에서 같은 비교를 하므로 결과가 같다.
         - `dropUnresolved`: 미해결 import마다 `DroppedUnresolvedImport` 경고(asset = 패키지, related = 대상)를 남기고 null로 저장한다. 저장 뒤 미해결 표는 빈다(파일에 그 import가 없다).
         - `AssetIndex::Refresh(files, fileName, options)`: 그 파일 하나를 다시 부분 읽기해 항목을 바꾸거나(없어졌으면 빼고, 새 파일이면 더한다) 그 파일의 진단을 다시 만들고, 같은 id·경로 진단과 표시는 전체에서 다시 계산한다(정렬·이웃 진단은 Rebuild와 같은 코드). 파일 이름이 `.rasset`이 아니면 `InvalidArgument`. 실패(할당·Stat 밖의 오류 없음 — 파일 IO는 Rebuild처럼 진단)는 색인을 비운다(Rebuild와 같은 계약 — 다시 Rebuild한다).
     - **A2c3 — 명령**: `asset-new <Type> <path> [<속성>=<값>…]`·`asset-set <path> <속성>=<값>…`(쓰기 잠금, `--wait=<초>` 범위 검사, `--force`는 미해결 import를 null로 저장), `asset-info <path|AssetId>`(기본 `<경로>=<값>` 줄 — ReflectionText에 줄 출력이 없으므로 JSON 출력과 같은 경로 순회로 줄 출력을 ReflectionText에 더한다, `--json`), `asset-list --type=<Type>`. 대입은 `ReflectionText` Prepare → 모두 성공하면 Publish → `MarkDirty` → 저장. 참조 값(논리 경로·AssetId)은 ReflectionText의 참조 해석 hook을 `EditorPackageSet::Open`으로 구현한다(대상 닫힘을 열어 잇는다). 타입 등록: Commandlet이 엔진과 같은 방식으로 모듈 타입을 붙인다(`ModuleTypeRegistrations`·`ModuleLoader::AttachTypeRegistrar`). 명령 시험(C#)의 시험 타입은 엔진 안의 실제 에셋 타입이나 시험 전용 플러그인 모듈로 둔다 — A2c3 착수 때 정한다.
@@ -1777,6 +1779,48 @@ A2c1 상태(2026-11-21): **완료**(리뷰 1회 충족 + 권장 반영). 완료 
 리뷰(1회) **충족**. 권장 셋을 반영했다: Registry가 삼키는 GC 참조 칸 표 할당에 고유 tag(GCRT — 같은 tag를 실패를 돌려주는 GC 타입 표가 쓰고 있었다), EditorOnly로만 가리킨 대상 누락·깊이 2 제외 시험(`EditorPackageSet_EditorOnlyAndDeepExclusion`), 스펙 문구(소멸 순서의 Discard, 열린 패키지의 미해결 import는 다시 잇지 않음, 경고 detail의 뜻).
 
 A2c2a 상태(2026-11-21): **완료**(리뷰 1회 충족 + 권장 반영). 완료 조건: 대조표(14.1.19) 시험 없는 항목 0·정의된 시험 18개 모두 인용, 조합(대조표 마지막 행), coverage(14.1.20 — Windows), 리뷰어 판정 **충족**.
+
+#### 14.1.21 요구 대조표(A2c2b — 저장·새 패키지·색인 Refresh)
+
+시험은 EngineTests `Engine/Source/Developer/AssetDatabase/Tests/EditorPackageSaveTests.cpp`(13개) — 정의된 시험 13개를 모두 인용한다(열기 시험의 할당 실패도 참조 기록 모양을 더해 다시 돈다). 열기 시험의 장면 도구(원본 패키지 묶음·메모리 프로젝트·설정·tag 기록 allocator)는 `EditorPackageSetTestSupport.h`로 옮겼고(동작 불변), 메모리 파일 시스템은 쓰기(만들기·n번째 쓰기 실패·n번째 쓰기 손상·Flush·Close·Replace·NotDurable·Delete·Stat·디렉터리 만들기 고장)를 더했다 — 내용은 노드와 열린 핸들이 함께 쥐는 공유 버퍼라 교체 뒤에도 연 핸들은 이전 내용을 읽는다. 잠금은 디스크 임시 프로젝트에서 잡는다(메모리 루트는 디스크에 없다).
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 저장(5.5-1–8, 7.1-15) | 고친 Hero 저장: 교체 한 번·임시 파일 없음·경고 없음, dirty 해제(세대 그대로), 지문 = 새 파일 = 색인 항목, 저장 전에 읽지 않은 bulk가 새 파일에서 읽힘(Rebind), 바뀌지 않은 패키지 다시 저장 = 같은 byte(결정적)·이미 준 span 유효, 다른 집합으로 다시 열면 값·bulk(`SameContent`)·Hard 참조 그대로 | `EditorPackageSave_RoundTrip` |
+| 새 패키지(7.1-15) | Create(dirty·세대 1·파일 없음·논리 경로), 저장하지 않은 bulk와 열린 패키지 참조를 담아 첫 저장: 부모 디렉터리 만들기·NFC 이름·색인 등록, 다시 열면 값·bulk·참조 그대로. 만들기 거부: type 0·Initialize 전 InvalidArgument, 색인의 같은 경로·저장하지 않은 새 패키지의 같은 경로 DuplicatePath, 열린 id·색인 id DuplicateAssetId, 에셋 클래스가 아닌 type은 Registry 오류(남는 것 없음) | `EditorPackageSave_NewPackage` |
+| | 첫 저장 거부: 대상 파일이 생김·색인에 대소문자만 다른 같은 경로 키(하나·둘) DuplicatePath / AlreadyExists, 대상 Stat 실패 진단 None, 만들기의 색인 같은 경로 키 둘·같은 id 둘 거부, MarkDirty·Save의 없는 id NotFound, 디렉터리 만들기 실패 진단 None(아무것도 안 씀 — 고장을 걷으면 저장됨), 절대 경로가 OS 상한 초과 InvalidPath / CapacityExceeded(저장하지 않은 채 남음) | `EditorPackageSave_NewPackageRefusals` |
+| 판정 순서(7.1-15) | Initialize 전·잠금 안 잡음 InvalidArgument, 열리지 않음 NotFound(열린 것보다 작은·큰 id), 편집이 대표 에셋을 Discard한 패키지(hook이 있으면 NotFound, 없으면 writer 거부 — 아무것도 안 씀), 읽기 전용 NewerVersion / Unsupported, 미해결 import MissingDependency / InvalidArgument(related), dropUnresolved: DroppedUnresolvedImport(related·import 위치)·미해결 표 비움·다시 열면 null·경고 없음·Base 의존 없음, 거부는 아무것도 안 씀 | `EditorPackageSave_Refusals` |
+| 외부 변경(5.5-1) | 연 뒤 대상이 다른 패키지·지워짐·헤더 손상 ExternalModification / StaleHandle, 대상 열기 Busy·읽기 실패 진단 None과 그 오류, 아무것도 안 씀·정보 그대로 | `EditorPackageSave_ExternalModification` |
+| IO 고장(5.5-2–8) | 만들기·n번째 쓰기(모든 n)·Flush·Close·검증용 다시 열기·교체 실패 진단 None과 그 오류, n번째 쓰기 손상(모든 n) 재검증 CorruptPackage(나중에 덮어쓰는 헤더 자리 하나만 저장되고 결과 = 깨끗한 저장), 대상 byte·지문·dirty 그대로·임시 파일 지워짐, 교체와 지우기가 둘 다 실패하면 임시 파일이 남고 다음 저장이 고아로 지움(지울 수 없으면 OrphanNotDeleted 경고 — 경고 표 없이도 같고, 지우기 실패가 둘이어도 첫 오류 하나, 고장을 걷으면 지워짐), NotDurable 교체는 성공 + NotDurable 경고, 디렉터리 열거 실패는 OrphanNotDeleted 경고 | `EditorPackageSave_IoFailures` |
+| dirty·hook(7.1-5·15) | MarkDirty: 열리지 않음 NotFound·세대 오름, hook 오류(태그·Build)·태그가 Record 한도 초과(CapacityExceeded) 진단 None과 그 오류·아무것도 안 씀, 저장 중(hook 안) MarkDirty면 dirty 남음, Tags는 hook으로 다시 만듦(파일의 옛 태그 사라짐, hook 없으면 빈 Tags), Build 의존 기록 | `EditorPackageSave_DirtyAndHooks` |
+| ImportRecord 보존(7.1-15) | 소유 기록·참조 기록 + ImportOwner를 가진 Base 저장: 기록 byte 그대로·ImportOwner 의존 그대로·색인 요약 같음 | `EditorPackageSave_ImportRecordPreserved` |
+| 할당 실패(7.1-15) | 기존 패키지(bulk)·새 패키지 저장(hook·경고 표·고아·색인 allocator까지)의 모든 할당 실패 OutOfMemory: 교체 전이면 대상·정보 그대로·임시 파일 없음, 교체 뒤(Rebind·Refresh)면 대상은 새 byte·정보 지문은 새 파일·dirty 해제(둘 다 나타남), 고아 정리의 할당 실패는 저장 성공·고아 남음·OrphanNotDeleted / OutOfMemory 경고(잡아 둔 자리) | `EditorPackageSave_AllocationFailures` |
+| | Create의 모든 할당 실패 OutOfMemory(진단 None)·집합에 남는 것 없음·다시 만들 수 있음 | `EditorPackageSave_CreateAllocationFailures` |
+| 고아 모양(5.5-8) | 정확한 모양만 지움(".rasset" 대소문자 무시): 다른 디렉터리·대문자 guid·".TMP"·guid 앞 '.' 없음·".rasset" 아님·빈 이름·짧은 이름·하이픈 자리·16진 아님·디렉터리·링크·UTF-8 아님은 남김 | `EditorPackageSave_OrphanShapes` |
+| 색인 Refresh(7.1-15) | 바뀐 파일 항목 교체, 새 파일 더함(같은 id 둘 → 둘 다 DuplicateAssetId), 없어진 파일 뺌(풀림), 이름 규칙 위반 InvalidPath, 링크·디렉터리 색인 안 함, Stat 실패 진단 None(이름 순), `.rasset` 아님·확장자뿐 InvalidArgument(색인 그대로), 모든 할당 실패는 색인을 비움 | `AssetIndex_Refresh` |
+| 실제 디스크 | 물리 파일 시스템에서 기존 패키지 저장·새 디렉터리의 새 패키지 저장, 다시 색인·열기(임시 파일 없음·진단 없음) | `EditorPackageSave_Disk` |
+| 조합(14 완료 조건 2) | 저장 대상(기존·새) × 판정 거부 다섯 × 외부 변경 다섯, IO 고장 종류 × 쓰기 위치 전부(쓰기 실패·쓰기 손상), 교체 결과(성공·실패·NotDurable) × 임시 파일 지우기(성공·실패) × 다음 저장의 고아 정리(성공·실패), hook(없음·태그·Build·오류 둘·안에서 MarkDirty), ImportRecord(소유·참조), 할당 실패 위치 전부 × (교체 전·뒤) | 위 시험 |
+
+#### 14.1.22 Coverage(A2c2b)
+
+측정(2026-11-21, Windows, `pwsh -NoProfile -File Build/MeasureCoverage.ps1 -Target EngineTests -Filter EditorPackageSave_,AssetIndex_,EditorPackageSet_,ImportRecord_,PackageImportPolicy_ -Sources Engine/Source/Developer/AssetDatabase/Private`):
+
+| 파일 | 줄 | 분기 | 함수 |
+|---|---|---|---|
+| `EditorPackageSet.cpp`(열기 + 만들기·저장) | 99.2%(917/924) | 98.1%(422/430) | 100%(37/37) |
+| `AssetIndex.cpp`(Refresh·분리) | 100%(732/732) | 100%(380/380) | 100%(31/31) |
+| `ImportRecord.cpp` | 100%(497/497) | 100%(366/366) | 100%(32/32) |
+
+닿지 않은 곳과 근거:
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| `PreparePending` | `SetBulkStore` 실패 | 14.1.20과 같다(계약의 실패가 인자 위반뿐) |
+| `Create`의 id 발급, `WriteAndReplace`의 임시 이름 guid | `AssetId::TryNew`·`TryNewGuid` 실패 | OS 보안 난수 실패(Unsupported)다 — 시험이 OS 난수를 실패시킬 길이 없다. 오류로 돌려준다 |
+| `WriteAndReplace` | `cache_->Close(target)` 줄의 실행 수 0 | 앞뒤 줄이 모두 실행되는(교체 26회) 직선 코드다 — llvm-cov의 줄 귀속 오차(분기가 없는 줄)로 본다 |
+| 분기 5개 | `ROCKS_ASSERT` 전개 | 방금 공개한 Package의 고정·접근·저장소 잇기, 찾은 생존 대표 에셋의 타입 조회 — 소유 스레드에서 실패할 수 없는 계약이다 |
+
+시험이 찾은 것: (1) 진단을 받는 호출이 진단을 채우지 않고 실패하면(sink 쓰기·할당) `Save`가 빈 진단의 오류(None)를 돌려줘 `InvalidArgument`로 보였다 — 실제 오류를 진단에 채우게 고쳤다(`EditorComplete`). (2) 교체 뒤 실패의 dirty: 처음 설계(남김)는 파일이 이미 메모리와 같아 다시 저장할 이유가 없으므로 해제로 바꿨다(Rebind 전). (3) 고아 정리 경고가 할당 실패로 사라질 수 있었다 — 자리를 교체 전에 잡고 실패를 경고 하나로 모은다. (4) Create의 할당 실패 시험이 실패한 Create가 늘린 표 용량 때문에 저장소 할당을 건너뛰었다 — 시도마다 같은 상태의 새 집합에서 만든다(같은 함정을 다른 할당 실패 시험에서도 확인했다 — 모두 시도마다 새 상태다). (5) Refresh가 할당 실패에서 색인을 비우지 않는 경우(표시 이름 할당이 옮기기보다 먼저)가 계약과 달랐다 — 옮긴 뒤 할당한다. (6) extra 의존 모으기는 자리를 한 번에 잡아 닿지 않던 두 번째 할당 실패 분기를 없앴다.
 
 ## 15. PNG 디코더 범위
 
