@@ -475,7 +475,7 @@ A2는 에디터 쪽 에셋 데이터베이스다(4·5.4·5.5·7·8·13·16절). 
     - **A2d1 캐시**:
       - 형식: little endian 이진 단일 파일. 헤더 = magic `RKAI`, 형식 버전, 항목 스키마 버전(칸 배치), 판정 의미 버전 `AssetIndexCacheSemanticVersion`(색인 판정 규칙 — `ReadPackageIndex`·ImportRecord·Tags 파서·ImportOwner 대조·논리 경로 규칙 — 을 바꾸면 올린다: 초기 단계라 규칙이 자주 바뀌고 도구 빌드 ID는 키가 아니므로), Unicode 버전(NFC·caseless 표), 호환 엔진 버전(주·부 — NewerVersion 판정이 그것만 본다, 패치가 올라도 무효가 아니다), 읽기 옵션 customVersions 목록의 SHA-256, 이름 정규화 플래그(`FileSystemNormalizesNames`), 도구 빌드 ID(진단용 문자열 — 키 아님), 항목 수, 본문 byte, 본문 SHA-256. 키 하나라도 다르면 캐시 없음과 같다(오류 아님).
       - 색인 읽기는 TypeRegistry를 쓰지 않는다(`Rebuild`가 `options.types`를 비운다 — 색인은 형식 판정만 하고 타입 축은 열기가 판정한다, 그래서 타입 버전이 키가 아니다).
-      - 본문(항목마다): Content 상대 OS 이름, 지문, 파일 크기, 수정 시각, id·대표 타입·readOnly·dependencies·tags·ImportRecord 요약. 논리 경로·key는 저장하지 않고 파일 이름에서 다시 만든다(`TryMakeLogicalPath`). **진단이 하나라도 있는 파일은 넣지 않는다**(항목과 진단을 함께 가진 파일 — Tags·ImportRecord·ImportOwner 진단 — 의 진단이 캐시 실행에서 사라지지 않게, 다음 시작에 다시 읽는다).
+      - 본문(항목마다, 파일 이름 byte 순 — 엄격 증가): Content 상대 OS 이름, 지문, id·대표 타입·readOnly·dependencies·tags·ImportRecord 요약. 파일 크기·수정 시각은 저장하지 않는다(재사용 때 지금 Stat·범위 읽기 값을 쓴다 — 구현에서 정함). 논리 경로·key는 저장하지 않고 파일 이름에서 다시 만든다(`TryMakeLogicalPath`). **진단이 하나라도 있는 파일은 넣지 않는다**(항목과 진단을 함께 가진 파일 — Tags·ImportRecord·ImportOwner 진단 — 의 진단이 캐시 실행에서 사라지지 않게, 다음 시작에 다시 읽는다).
       - 신뢰하지 않는 입력: 본문 SHA-256, 개수·길이는 파일 크기와 상한으로 묶고, 문자열 UTF-8, 의존 종류·태그는 Tags 스키마 규칙, 파일 이름은 `.rasset`·이름 규칙으로 검사한다. 하나라도 어긋나면 캐시 전체를 없는 것으로 본다(부분 사용 없음).
       - 재사용: `Rebuild(files, options, cache)`가 `.rasset`마다 `ReadPackageFingerprint`(범위 읽기 — 헤더 + 섹션 표(섹션별 CRC32) + tableCrc의 SHA-256)로 지문을 얻어 캐시의 같은 이름·같은 지문이면 캐시 항목을 쓰고(크기·시각은 지금 Stat 값), 아니면 지금처럼 부분 읽기. 지문 읽기 실패면 부분 읽기(그것이 진단을 만든다). 같은 id·경로 진단은 게시 때 다시 정한다. **한계**: 재사용의 민감도는 섹션 CRC32 수준이다 — 표가 그대로인 섹션 내용 변경(같은 크기·같은 CRC의 우연, bit rot)은 놓친다. 그래서 점검 명령(`asset-index-verify`)과 `asset-index-rebuild`는 캐시를 쓰지 않는다(목록·열기·편집 명령은 쓴다). 크기·수정 시각만 보는 UE `FDiskCachedAssetData` 방식은 7.1절 11 리뷰대로 버린다(파일마다 열기 + 범위 읽기 비용 — A2d2 측정이 본다).
       - 쓰기: 잠금 보유 프로세스만(`IsHeldFor` 아니면 InvalidArgument), 임시 파일 `Intermediate/AssetIndex.cache.<guid>.tmp` → 쓰기·Flush·Close → Replace(원자 교체 — 읽는 쪽은 옛 것 또는 새 것만 본다, 지문 대조 덕에 낡은 항목도 안전). NotDurable은 성공으로 본다(캐시). 쓰는 시점: `AssetService::FlushCache(lock)`를 명령이 끝날 때 부른다(저장마다 O(N) 전체를 쓰지 않는다 — UE `FAssetDataGatherer`도 검색 끝·간격으로만 쓴다), 실패는 경고 `CacheNotWritten`(캐시는 정확성에 필요 없다). 에디터는 종료·간격으로 쓴다(그때 정한다).
@@ -1967,6 +1967,50 @@ A2c3a 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.23) 시험 �
 리뷰(1회 미충족)가 찾은 것: 쓰기 명령이 색인을 만든 뒤에 잠갔다(잠금 아래에서 다시 보지 않은 색인으로 쓰기 판정), asset-new의 "NotFound + 진단 None = 모르는 타입" 판정이 저장 단계의 NotFound(임시 파일·교체)와 섞였다(타입을 먼저 찾게 고침), 경고 줄이 스펙 형식과 달랐다(형식을 맞추고 환경 실패·일반 실패 줄도 같은 형식·관련 대상 포함으로 다듬음). 권장으로 path 대상 asset-set 성공을 따로 단언했다. 읽기 전용(더 새 엔진) 대상 장면은 명령 시험이 Animation 패키지를 더 새 엔진 버전으로 만들 수 없어(헤더 버전을 바꾸면 무결성 검사에 걸린다) 서비스·집합 시험(`EditorPackageSave_Refusals` NewerVersion)으로 둔다.
 
 A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항목 95개 모두 인용, 조합(대조표 마지막 행), coverage(14.1.26 — Windows), 리뷰어 판정 **충족**(1회 미충족 — 필수 3 반영). 이로써 A2c3(명령) 완료 — 다음은 A2d.
+
+#### 14.1.27 요구 대조표(A2d1 — 색인 캐시·asset-index-rebuild)
+
+시험은 EngineTests `Engine/Source/Developer/AssetDatabase/Tests/AssetIndexCacheTests.cpp`(9개)와 C# `Programs/Rocks.Commandlet.Tests/Program.cs`의 "asset-index-rebuild·색인 캐시" 항목 23개(Windows 전용 3개)다. C++ 장면은 루트를 디스크 임시 디렉터리(잠금)로 두고 그 루트에 놓인 메모리 파일 시스템에 Content(Base·Derived·Hero·Villain·Sub/Leaf·Copy(같은 id)·derived.RASSET(같은 경로 키)·Tagged(태그·ImportRecord)·BadTags(Tags 진단)·Junk(읽기 실패))와 Intermediate를 둔다. 손상 입력은 시험 쪽에서 형식을 따로 써서 만든다(구현과 독립).
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 왕복·재사용(7, 7.1-16) | 캐시 없는 검색 → 캐시 쓰기(임시 파일 없음) → 읽기: 파일 자신의 진단이 있는 BadTags·Junk는 없고 같은 id·같은 경로 진단의 파일은 있다, 항목 칸이 색인과 같고 이름·지문이 다르면 찾지 못함, 캐시를 쓴 검색 = 캐시 없는 검색(진단 포함), 도구 빌드 ID 기록, 지문이 같으면 다시 읽지 않음(캐시의 태그 값을 바꾸면 그 값), 지문이 다르면 다시 읽음 | `AssetIndexCache_RoundTripsAndReuses` |
+| 키(7, 7.1-16) | 패치만 다르면 같은 키, 주·부·customVersions(값·개수) 다르면 다른 키, Unicode 텍스트 SHA-256, 키 칸 여덟(형식·스키마·의미·Unicode·주·부·customVersions·정규화) 각각 다르면 캐시 없음(양방향) | `AssetIndexCache_KeyAxes` |
+| 신뢰하지 않는 입력(7.1-16) | 헤더 위반(짧음·magic·예약·정규화 2·본문 byte·SHA-256·항목 수 상한·적은 항목 수·크기 상한), 항목 위반 15종(이름 UTF-8·빈 이름·.rasset 아님·이름 길이 경계·readOnly 2·의존 수 경계·종류 0·6·required 2·태그 수 경계·빈 키·태그 순서·같은 태그·요약 표지 2·요약 이름 UTF-8), 같은 이름·역순·남은 byte·모든 길이의 잘림·항목 수 초과 — 모두 비운 채 캐시 없음, 경계 값의 올바른 항목은 받음 | `AssetIndexCache_RejectsUntrustedInput` |
+| 재사용 가장자리(7.1-16) | 빈 캐시, 열 때 사라진 파일·지문을 읽을 수 없는 파일(부분 읽기가 같은 진단), 규칙을 어긴 캐시 이름(InvalidPath — 쓰지 않음), 조작한 값(readOnly·required 의존)이 색인과 다시 쓴 캐시에 남음, 캐시를 쓰는 검색의 모든 할당 실패 | `AssetIndexCache_ReuseEdges` |
+| 읽기(7.1-16) | 없음·디렉터리·크기 0·열기 없음·사용 중·읽기 실패는 캐시 없음, 모든 할당 실패 OutOfMemory | `AssetIndexCache_LoadFailures` |
+| 쓰기(7, 8, 7.1-16) | 잠금 아님 InvalidArgument(아무것도 안 씀), 디렉터리 만들기·만들기·쓰기·Flush·Close·교체 실패는 오류·이전 캐시 그대로·임시 파일 없음, NotDurable 성공, 모든 할당 실패(임시 파일 없음) | `AssetIndexCache_WriteFailures` |
+| TypeRegistry 무시(7.1-16) | options.types가 있어도 같은 색인 | `AssetIndexCache_IndexIgnoresTypes` |
+| 고아 정리(7.1-12·16) | Content(하위 포함)의 `.rasset.<guid>.tmp`·Intermediate 바로 아래 캐시 임시만 지움, 남김 9종(대문자 guid·다른 확장자·빈 이름·Content의 캐시 임시·대문자 .TMP·다른 캐시 이름·Intermediate 하위·잠금 파일·잘못된 UTF-8 이름)과 링크·디렉터리·기타 종류, 이미 사라진 파일은 지운 것으로 셈, 지울 수 없음·열거할 수 없는 디렉터리는 실패 목록(계속), 잠금 아님·Content가 파일·없는 디렉터리, 모든 할당 실패(실패 기록·하위 디렉터리 여럿 장면) | `AssetIndexCache_DeletesTemporaryOrphans` |
+| 서비스(7.1-16) | 캐시를 읽음(바꾼 값), useCache 끔, 캐시 파일 시스템 따로, FlushCache(Initialize 전·잠금 아님 InvalidArgument·성공 뒤 다시 읽힘), 캐시를 읽는 Initialize의 모든 할당 실패 | `AssetIndexCache_ServiceUsesCache` |
+| 명령(13, 7.1-16) | asset-new가 캐시를 씀, asset-list가 캐시로 같은 목록, asset-index-rebuild(요약·고아 둘 지움·다른 이름 남김·캐시 씀), 진단이 있어도 0, 손상 캐시를 목록·점검·출력이 무시하고 asset-set이 다시 씀, 캐시를 쓰지 못하면 asset-set·asset-new 경고 CacheNotWritten(0)·rebuild 실패 1, 지울 수 없는 고아 경고·잠금 Busy·무효 출력 핸들(Windows), 사용법 다섯·도움말·프로젝트 없음·Content가 파일·잠금 실패 | C# `asset-new writes the index cache` … `asset-index-rebuild cannot lock`(23개) |
+| 조합(14 완료 조건 2) | 캐시 상태(없음·맞음·키 다름·손상·빈 것·조작) × 파일 상태(같은 지문·다른 지문·사라짐·손상·이름 위반) × 진단 종류(파일 자신·같은 id·같은 경로), 쓰기 고장 위치 전부, 명령 × 캐시 사용(읽기·쓰기·무시) | 위 시험 |
+
+#### 14.1.28 Coverage(A2d1)
+
+측정(2026-11-21, Windows): `-Target EngineTests -Filter AssetIndexCache,AssetIndex_,AssetService_ -Sources Engine/Source/Developer/AssetDatabase/Private`, 명령은 `ROCKS_MSVC_TOOLSET=14.44`로 `-Target Commandlet -Executable RocksCommandlet -Runner …C# 시험… -Sources Programs/Commandlet/Private/Common`(VS 2026 설치로 기본 MSVC가 14.52가 되어 Clang 21로는 STL1000 — 측정만 14.44로 고정했다).
+
+| 파일 | 줄 | 분기 | 함수 |
+|---|---|---|---|
+| `AssetIndexCache.cpp` | 98.9%(466/471) | 98.1%(204/208) | 100%(21/21) |
+| `TemporaryFiles.cpp` | 100%(128/128) | 100%(66/66) | 100%(7/7) |
+| `AssetIndex.cpp`(캐시 재사용 포함) | 100%(890/890) | 99.4%(462/465) | 100%(35/35) |
+| `AssetService.cpp`(캐시 적재·FlushCache) | 99.2%(239/241) | 97.6%(121/124) | 100%(13/13) |
+| `Programs/Commandlet/Private/Common/AssetIndexCommandlet.cpp`(rebuild·목록 캐시) | 85.4%(211/247) | 84.1%(111/132) | 100%(6/6) |
+| `Programs/Commandlet/Private/Common/AssetEditCommandlet.cpp`(캐시 쓰기 경고) | 94.4%(303/321) | 90.1%(164/182) | 100%(13/13) |
+
+닿지 않은 곳과 근거:
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| `AssetIndexCache::Load` 크기 조회 실패·1 GiB 초과 | 분기 | 파일 크기 조회는 연 파일에서 실패하지 않고(메모리·물리 모두), 1 GiB 넘는 캐시는 시험이 만들 수 없다. 같은 상한은 `Parse`가 단언한다(크기 상한 시험) |
+| `EncodeAssetIndexCache` 정규화 플래그 참 쪽 | 분기 | `FileSystemNormalizesNames`는 플랫폼 상수(macOS만 참) — Windows 측정 밖이다. 읽기 쪽은 키 칸 시험이 두 값을 모두 본다 |
+| `WriteAssetIndexCache` 임시 이름 guid 발급 실패 | 실패 | OS 보안 난수 실패(14.1.22와 같다) |
+| `AssetIndex::IndexCached` 논리 경로 만들기의 할당 실패 | 분기 | 배치(ProjectLayout)의 allocator로 만든다 — 색인 allocator 할당 실패 시험 밖이다(IndexFile의 같은 호출과 같다) |
+| `AssetService::List` IsA 그 밖 오류 | 실패 | 14.1.24와 같다 |
+| 명령 파일들 | 할당 실패(출력 줄·목록·검색·Verify·정리), rebuild의 정리 오류(할당 밖) | 프로세스 시험은 명령 allocator에 실패를 주입할 수 없다(14.1.26과 같다 — 같은 경로는 C++ 할당 실패 시험이 돈다). 정리 오류는 Content·Intermediate 뿌리의 열거 실패뿐인데 그 둘은 앞 단계(검색 — cannot scan, 잠금 — cannot lock)가 먼저 실패시킨다(C# 시험) |
+
+시험이 찾은 것: (1) 잘린 항목의 몇 단계(의존 읽기)는 앞의 개수 상한 검사 때문에 닿을 수 없었다 — 그 `reader.Failed()` 검사를 지우고 근거를 적었다. 헤더 읽기의 실패 검사도 크기 검사 뒤라 지웠다. (2) 고아 정리가 템플릿이라 두 인스턴스의 분기가 따로 셌다 — 판정 함수 포인터로 바꿨다. (3) 경로 버퍼(inline StringBuilder)는 짧은 경로에서 할당하지 않아 할당 실패에 닿지 않았다 — 할당하는 String으로 바꿨다. (4) Windows는 대소문자를 구분하지 않아 대문자 guid 파일과 소문자 고아가 같은 파일이었다(C# 시험 이름을 바꿨다).
 
 ## 15. PNG 디코더 범위
 
