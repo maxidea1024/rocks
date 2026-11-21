@@ -112,6 +112,7 @@ internal static class ActionGraph
 
         string root = Path.GetFullPath(request.RootDirectory);
         string output = Path.GetFullPath(request.OutputDirectory, root);
+        bool ide = request.PlanMode == NativePlanMode.Ide;
         string[] targetArguments = TargetCompileArguments(request, root).ToArray();
         var modules = new Dictionary<string, NativeModuleInput>(StringComparer.OrdinalIgnoreCase);
         foreach (var module in request.Modules)
@@ -242,6 +243,13 @@ internal static class ActionGraph
             var reflectionSet = new HashSet<string>(reflectionSources, NativeToolchains.PathComparer);
             string? reflectionNote = module.ReflectionSourceFailureNote.Length == 0 ? null : module.ReflectionSourceFailureNote;
             string[] sources = module.Sources.Select(Absolute).Concat(reflectionSources).Order(StringComparer.Ordinal).ToArray();
+            // IDE 계획(Docs/Design/ProjectFiles.ko.md 8.1절)은 손으로 쓴 소스만 본다. 출력 아래 소스(리플렉션 생성 소스, 모듈 표·BuildInfo·
+            // 규칙 생성 TU)는 생성 전에는 없고 IDE 파일 목록의 대상도 아니다.
+            if (ide)
+            {
+                sources = sources.Where(source => !Fingerprints.IsUnder(source, output)).ToArray();
+            }
+
             if (sources.Distinct(NativeToolchains.PathComparer).Count() != sources.Length)
             {
                 throw new ArgumentException($"Duplicate source in {module.Name}");
@@ -255,7 +263,7 @@ internal static class ActionGraph
                 }
             }
 
-            foreach (string include in includes)
+            foreach (string include in ide ? [] : includes)
             {
                 if (!Directory.Exists(include))
                 {
@@ -500,6 +508,13 @@ internal static class ActionGraph
                 : sharedLibrary ? Path.Combine(output, "bin", sharedFile)
                 : Path.Combine(output, "bin", module.Name + (windows ? ".exe" : ""));
             string? importLibrary = sharedLibrary && windows ? Path.Combine(output, "lib", sharedStem + ".lib") : null;
+            if (ide)
+            {
+                // IDE 계획은 archive·link를 세우지 않고 출력 경로만 적는다(prebuilt·ASan 런타임 존재 확인도 하지 않는다).
+                outputs[module.Name] = importLibrary ?? finalPath;
+                continue;
+            }
+
             string terminalId = module.Name + (archive ? ":archive" : ":link");
             var finalArguments = new List<string>();
             var finalOutputs = new List<string> { finalPath };

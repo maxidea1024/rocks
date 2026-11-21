@@ -65,7 +65,8 @@ public static class MetadataLayout
     // ActionGraph와 같이 모듈 이름은 대소문자를 무시해 비교한다.
     private static readonly StringComparer NameComparer = StringComparer.OrdinalIgnoreCase;
 
-    public static MetadataPlan Apply(BuildContext context, IReadOnlyList<NativeModuleInput> modules, IEnumerable<string> roots)
+    public static MetadataPlan Apply(BuildContext context, IReadOnlyList<NativeModuleInput> modules, IEnumerable<string> roots,
+        bool createDirectories = true)
     {
         var byName = new Dictionary<string, NativeModuleInput>(NameComparer);
         foreach (NativeModuleInput module in modules)
@@ -129,8 +130,13 @@ public static class MetadataLayout
             string generatedRoot = Path.Combine(context.OutputDirectory, "Generated", module.Name);
             string generatedPublic = Path.Combine(generatedRoot, "Public");
             string generatedPrivate = Path.Combine(generatedRoot, "Private");
-            Directory.CreateDirectory(generatedPublic);
-            Directory.CreateDirectory(generatedPrivate);
+            // IDE 계획(Docs/Design/ProjectFiles.ko.md 8.1절)은 출력에 쓰지 않는다. 경로만 정한다.
+            if (createDirectories)
+            {
+                Directory.CreateDirectory(generatedPublic);
+                Directory.CreateDirectory(generatedPrivate);
+            }
+
             string descriptor = Path.Combine(context.OutputDirectory, "Metadata", module.Name + ".rocksmeta.json");
             var layout = new MetadataModule(module.Name, manifest, headers, generatedPublic, generatedPrivate,
                 Path.Combine(generatedRoot, MetadataModule.SourceDirectoryName), descriptor);

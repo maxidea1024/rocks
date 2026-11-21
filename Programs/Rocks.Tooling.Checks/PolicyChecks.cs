@@ -154,6 +154,10 @@ public static partial class PolicyChecks
     private static readonly Regex ForcedInline = Pattern(
         "__attribute__\\s*\\(\\(\\s*(?:__)?always_inline|\\[\\[\\s*(?:clang|gnu)\\s*::\\s*always_inline|__forceinline\\b");
 
+    // 최적화 인자가 정의하는 미리 정의 매크로다. Visual Studio IntelliSense는 최적화 인자를 받지 않으므로(Docs/Design/ProjectFiles.ko.md
+    // 8.2절) 제품 소스가 이 매크로로 분기하면 IDE가 빌드와 다른 코드를 본다.
+    private static readonly Regex IdeInvisibleMacro = Pattern("\\b__(?:OPTIMIZE|OPTIMIZE_SIZE|NO_INLINE)__\\b");
+
     private const string OptimizationMacroHeader = "Core/Source/Runtime/Base/Public/Base/Compiler.h";
 
     /// <summary>
@@ -187,6 +191,8 @@ public static partial class PolicyChecks
 
             ScanFile(path, relative, OptimizationOverride, "optimization-override",
                 "temporary optimization override left in product source", failures);
+            ScanFile(path, relative, IdeInvisibleMacro, "ide-invisible-macro",
+                "optimization predefined macros (__OPTIMIZE__, __OPTIMIZE_SIZE__, __NO_INLINE__) are not visible to IDE IntelliSense", failures);
         }
 
         foreach (string path in Files(root, OwnedSourceRoots).Where(path => path.EndsWith(".Build.cs", StringComparison.Ordinal)))
