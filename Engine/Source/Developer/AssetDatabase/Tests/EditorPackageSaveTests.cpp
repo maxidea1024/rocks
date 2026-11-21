@@ -342,6 +342,13 @@ public:
             }
         }
 
+        if (openDuring != nullptr) {
+            // 초기화 중 같은 집합의 다른 패키지를 연다(참조 해석과 같다).
+            if (auto opened = openDuring->Open(openId); !opened) {
+                return Result<void>::Failure(opened.Error());
+            }
+        }
+
         if (swallow) {
             // 실패한 Create의 오류를 삼킨다(계약 위반 — 트랜잭션이 오류로 고정되어 Commit이
             // 실패한다).
@@ -358,6 +365,8 @@ public:
     ErrorCode error = ErrorCode::None;
     bool makePart = false;
     bool swallow = false;
+    EditorPackageSet* openDuring = nullptr;
+    AssetId openId{};
     uint32 calls = 0;
     ObjectHandle seen{};
     AssetId stagedId{};
@@ -369,7 +378,8 @@ public:
 // 불리고 그 값·하위 객체가 공개된다. 초기화가 실패하면(값을 쓴 뒤·하위 객체를 만든 뒤라도) 진단
 // None과 그 오류이고 아무것도 남지 않는다(집합·Registry 객체 수 그대로, 같은 경로·id로 다시 만들 수
 // 있다). 초기화가 실패한 트랜잭션 연산의 오류를 삼키고 성공을 돌려주면 공개가 그 오류로 실패하고
-// 역시 아무것도 남지 않는다. 초기화 없는 만들기도 대표 에셋 Id()가 패키지 id다.
+// 역시 아무것도 남지 않는다. 초기화가 같은 집합의 다른 패키지를 열어도(참조 해석) 새 패키지가
+// 집합에 들어간다. 초기화 없는 만들기도 대표 에셋 Id()가 패키지 id다.
 TEST(EditorPackageSave_CreateInitializer) {
     AssetEnv env;
     REQUIRE(env.Ready());
@@ -415,6 +425,8 @@ TEST(EditorPackageSave_CreateInitializer) {
 
     ValueInitializer initializer;
     initializer.makePart = true;
+    initializer.openDuring = &set;
+    initializer.openId = FixedId(LeafId);
     auto made = set.Create(path.Value(), TestAssetType(), FixedId(FreshId), nullptr, &initializer);
     REQUIRE(made);
     CHECK(initializer.calls == 1);
@@ -427,6 +439,7 @@ TEST(EditorPackageSave_CreateInitializer) {
     const EditorPackageInfo* info = set.Find(FixedId(FreshId));
     REQUIRE(info != nullptr);
     CHECK(info->unsaved && info->dirty && info->package == made.Value() && info->store != nullptr);
+    CHECK(set.Find(FixedId(LeafId)) != nullptr);
     REQUIRE(set.Save(FixedId(FreshId), scene.lock, EditorSaveOptions{}));
 
     auto other = set.Create(plain.Value(), TestAssetType());

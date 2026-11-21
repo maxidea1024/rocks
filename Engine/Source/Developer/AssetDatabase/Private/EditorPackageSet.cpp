@@ -697,14 +697,6 @@ Result<ObjectHandle> EditorPackageSet::Create(const LogicalPath& path, TypeId ty
         return fail(AssetDiagnosticCode::None, assigned.Error());
     }
 
-    if (auto reserved = open_.TryReserve(open_.Size() + 1); !reserved) {
-        return fail(AssetDiagnosticCode::None, reserved.Error());
-    }
-
-    if (auto reserved = roots_.TryReserve(roots_.Size() + 1); !reserved) {
-        return fail(AssetDiagnosticCode::None, reserved.Error());
-    }
-
     auto store = UniquePtr<FilePackageBulkStore>::TryMake(allocator, allocator, *cache_);
     if (!store) {
         return fail(AssetDiagnosticCode::None, store.Error());
@@ -730,6 +722,16 @@ Result<ObjectHandle> EditorPackageSet::Create(const LogicalPath& path, TypeId ty
             !initialized) {
             return fail(AssetDiagnosticCode::None, initialized.Error());
         }
+    }
+
+    // 표 자리는 초기화 뒤에 잡는다 — 초기화가 다른 패키지를 열 수 있다(참조 해석 —
+    // AssetTextResolver가 Open을 부른다). 공개 뒤의 삽입은 실패하지 않는다.
+    if (auto reserved = open_.TryReserve(open_.Size() + 1); !reserved) {
+        return fail(AssetDiagnosticCode::None, reserved.Error());
+    }
+
+    if (auto reserved = roots_.TryReserve(roots_.Size() + 1); !reserved) {
+        return fail(AssetDiagnosticCode::None, reserved.Error());
     }
 
     auto root = transaction.Commit();
