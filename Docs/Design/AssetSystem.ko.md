@@ -1907,6 +1907,43 @@ A2c2b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.21) 시험 �
 
 A2c3a 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.23) 시험 없는 항목 0·정의된 시험 27개 모두 인용, 조합(대조표 마지막 행), coverage(14.1.24 — Windows), 리뷰어 판정 **충족**(1회 미충족 — 필수 3 반영). 다음은 A2c3b(Commandlet 명령·타입 등록·C# 시험).
 
+#### 14.1.25 요구 대조표(A2c3b — Commandlet 명령)
+
+시험은 C# `Programs/Rocks.Commandlet.Tests/Program.cs`의 A2c3b 항목 93개(Windows 전용 16개 포함 — 잠금·고아·무효 출력 핸들과 그 장면)와 바꾼 A2b 항목 하나(`asset-list unknown type` — `--type`이 사용법 오류에서 옵션이 됐다)다. 명령은 실제 에셋 타입 Skeleton·AnimationClip(Animation 모듈 — Commandlet이 시작해 등록한다)으로 디스크 임시 프로젝트에서 돈다. 서비스 수준의 전수 시험(조합·할당 실패)은 14.1.23의 C++ 시험이다 — 명령 시험은 인수·출력·종료 코드·타입 등록·잠금·실제 파일을 본다.
+
+| 요구(절) | 항목 | 시험(C# 라벨) |
+|---|---|---|
+| asset-new(13) | Skeleton 만들기(출력 `<경로> <AssetId>` 한 줄·파일 생김), Clip 대입(Hard·float·bool·enum·struct 멤버·struct 원소 배열·Name), 거부(모르는 타입 NotFound·추상 TypeMismatch·에셋 아닌 클래스·struct·있는 경로 대소문자 무시 DuplicatePath·경로 규칙 InvalidPath·대입 오류 모두 보고와 아무것도 안 만듦·Hero 없는 참조 Unresolved), 열기 경고와 성공(ExcludedDependency) | `asset-new skeleton`·`asset-new output shape`·`asset-new clip with assignments`·`asset-new unknown type`·`asset-new abstract type`·`asset-new not an asset`·`asset-new struct type`·`asset-new existing path`·`asset-new invalid path`·`asset-new assignment errors`·`asset-new assignment errors create nothing`·`asset-new clip without skeleton`·`asset-new with open warnings`·`asset-new skeleton again`·`asset-new clip again` |
+| asset-info(13) | Edit 줄(참조는 논리 경로)·AssetId 대상 같은 출력·JSON(줄 끝)·--all·--json --all, 거부(없는 경로·없는 id NotFound·대상 형식 InvalidPath), 잠금 없이 읽기, 프로젝트 찾기(위로)·없음, 열기 경고 + 성공 | `asset-info lines`·`asset-info by AssetId`·`asset-info json`·`asset-info all`·`asset-info json all`·`asset-info missing`·`asset-info missing id`·`asset-info invalid target`·`asset-info without lock`·`asset-info finds the project upward`·`asset-info without a project`·`asset-info excluded dependency` |
+| 왕복(RE 10.4) | asset-info 줄 전체를 asset-set에 그대로 넣으면 받고 출력이 같다 | `asset-info lines round trip through asset-set` |
+| asset-set(13) | AssetId 대상, Soft 참조 배열·bool, --erase(원소·따옴표 key의 쉼표·escape가 든 목록), 대입 오류 넷 모두 보고(UnknownProperty·InvalidValue·Unresolved·--unset 비 Optional)·파일 byte 그대로, Soft 미해결, 미해결 import MissingDependency·--force + DroppedUnresolvedImport·null 저장 | `asset-set by AssetId`·`asset-set result`·`asset-set soft array`·`asset-set soft array result`·`asset-set erase`·`asset-set erase result`·`asset-set quoted keys`·`asset-set quoted keys result`·`asset-set erase quoted list`·`asset-set erase quoted list result`·`asset-set errors`·`asset-set errors leave the file`·`asset-set soft unresolved`·`asset-set missing dependency`·`asset-set force`·`asset-set force result` |
+| asset-list --type(13, 7.1-14) | 그 클래스만(한 줄)·파생(AnimationAsset → Clip)·추상 Asset 전체(경로 순)·--under와 함께·빈 결과·논리 디렉터리 아님·클래스 아님·같은 옵션 두 번 사용법 오류·모르는 타입(A2b 프로젝트)·프로젝트 없음 | `asset-list type`·`asset-list type lines`·`asset-list derived type`·`asset-list base type`·`asset-list base type order`·`asset-list type under`·`asset-list type under nothing`·`asset-list type invalid under`·`asset-list not a class`·`asset-list type twice`·`asset-list unknown type`·`asset-list type without a project` |
+| 사용법(13) | 위치 인수 수·대입 아닌 위치 인수·명령에 없는 옵션(--force·--json·--unset)·빈 목록·빈 목록 항목·같은 옵션 두 번(--project·--force·--json)·--wait 범위 초과·형식·빈 값·빈 타입 이름·asset-set 대입 없음·--help에 다른 인수, 명령마다 --help(0) | `usage error: …`(20개)·`asset-new help`·`asset-set help`·`asset-info help` |
+| 잠금·환경(8, 13) | 다른 쪽이 잡은 잠금: asset-set 바로 실패·asset-new --wait=1 뒤 실패(Busy), Intermediate가 파일이면 잠금 오류, Content가 파일이면 cannot scan(asset-info·asset-list --type), 지울 수 없는 고아 임시 파일 OrphanNotDeleted(저장 성공)·다음 저장이 지움 | `asset-set locked`·`asset-new locked with wait`·`asset-new cannot lock`·`asset-info content is a file`·`asset-list type content is a file`·`asset-set orphan not deleted`·`asset-set orphan deleted`·`orphan removed` |
+| 출력 실패(13) | 무효 출력 핸들: asset-info(경고 있음 둘)·asset-list --type·asset-new(출력 줄·경고)·asset-set(대입 진단·경고) 모두 1 | `invalid output handles (… edit)`(7개) |
+| 조합(14 완료 조건 2) | 명령 넷 × 대상 모양(경로·AssetId) × 결과(성공·대입 오류·대상 거부·열기 경고·저장 거부) × 출력(줄·JSON·all), 목록 옵션 × 경로 모양(원소·따옴표 key) | 위 시험 |
+
+#### 14.1.26 Coverage(A2c3b)
+
+측정(2026-11-21, Windows): `pwsh -NoProfile -File Build/MeasureCoverage.ps1 -Target Commandlet -Executable RocksCommandlet -Runner 'dotnet','out/dotnet/bin/Rocks.Commandlet.Tests/Debug/net10.0/Rocks.Commandlet.Tests.dll','--executable','{executable}' -Sources Programs/Commandlet/Private/Common`. 명령 시험은 실행 한 번마다 원시 프로파일을 남겨 수백 개가 되므로 측정 스크립트가 `llvm-profdata merge`에 목록 파일(`--input-files`)을 넘기게 고쳤다(명령줄 길이 초과).
+
+| 파일 | 줄 | 분기 | 함수 |
+|---|---|---|---|
+| `AssetEditCommandlet.cpp` | 95.9%(282/294) | 91.5%(161/176) | 100%(12/12) |
+| `AssetIndexCommandlet.cpp`(--type 포함) | 89.9%(142/158) | 89.5%(77/86) | 100%(5/5) |
+| `AssetCommandletSupport.cpp`(옮긴 프로젝트 찾기·타입 등록·실행 상태) | 80.0%(108/135) | 72.4%(42/58) | 100%(7/7) |
+| `AssetCommandletSupport.h`(`Fail` 템플릿) | 76.9%(20/26) | 62.5%(5/8) | 100%(5/5) |
+
+닿지 않은 곳과 근거:
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| 세 파일·헤더 | 할당 실패(출력 줄·`Fail`·JSON 줄 끝·서비스 만들기·`Initialize`의 OutOfMemory 분기·목록·Verify) | 프로세스 시험은 명령의 allocator에 실패를 주입할 수 없다(14.1.16과 같다). 같은 결과를 만드는 라이브러리 경로는 14.1.23의 할당 실패 시험(`AssetService_AllocationFailures` 등)이 모든 지점을 돈다 |
+| `AssetCommandletSupport.cpp` `OpenProject` | 현재 디렉터리를 절대 경로로 못 만듦·프로젝트 찾기의 NotFound 밖 오류 | 14.1.16과 같다(OS 조건 — 이 커밋에서 동작 그대로 옮겼다) |
+| `AssetCommandTypes::Start` | 모듈 시작 실패·등록기 붙이기 실패·Name pool 시작 실패와 그 출력(`cannot register the asset types`) | Animation은 실행 파일에 정적으로 링크된 모듈이라 표에 늘 있고 시작 콜백이 실패하지 않는다. 등록기 붙이기의 실패는 등록 할당 실패(위와 같다)와 Fatal 조건(같은 등록기 두 번·Load 중 — 명령 구조상 없다)이고, pool 시작 실패는 할당 실패다 |
+| `AssetEditCommandlet.cpp` 경고 이름 NotDurable·switch 밖 반환 | 분기 | NotDurable은 교체 뒤 디렉터리 동기화 실패(OS 조건 — 서비스 시험이 메모리 파일 시스템으로 단언한다), 반환은 열거형 밖 값이 없다 |
+| `AssetEditCommandlet.cpp` asset-info의 Unsupported 줄 | 줄로 쓸 수 없는 값 | Animation 타입에는 줄바꿈을 담을 수 있는 값(String)이 없다 — 서비스 시험 `AssetService_InfoFormats`가 Unsupported를 단언하고 출력 문구는 이 한 줄이다 |
+
 ## 15. PNG 디코더 범위
 
 색 형식 0/2/3/4/6, 비트 깊이 1–16, Adam7, PLTE·tRNS, chunk CRC, zlib(Core `Compression`)·Adler-32, 한 변 16384·해제 크기 = IHDR 계산값. gAMA·cHRM·sRGB·iCCP는 변환하지 않고 sRGB로 보며 sRGB가 아닌 표시가 있으면 `NonSrgbSource` 경고. APNG는 기본 이미지. 시험은 PngSuite(자유 사용 라이선스, `TextureTools/Tests/Fixtures/PngSuite`).

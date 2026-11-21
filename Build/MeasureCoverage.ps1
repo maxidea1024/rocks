@@ -103,7 +103,11 @@ foreach ($name in $filters) {
 Remove-Item Env:LLVM_PROFILE_FILE
 $raw = @(Get-ChildItem -Path $output -Filter '*.profraw' | ForEach-Object { $_.FullName })
 $merged = Join-Path $output 'merged.profdata'
-& $profdata merge -sparse @raw -o $merged
+# An external runner starts the program once per case (hundreds of raw profiles), which overflows the Windows command
+# line, so the raw profile list goes through an input file.
+$inputs = Join-Path $output 'profraw-inputs.txt'
+Set-Content -Path $inputs -Value $raw -Encoding utf8NoBOM
+& $profdata merge -sparse "--input-files=$inputs" -o $merged
 if ($LASTEXITCODE -ne 0) {
     throw 'llvm-profdata merge failed.'
 }

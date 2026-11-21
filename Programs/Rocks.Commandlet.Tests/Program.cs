@@ -681,6 +681,18 @@ try
     Report("asset-set erase result", erased.StdOut.Contains("events=\n", StringComparison.Ordinal) &&
         !erased.StdOut.Contains("events[0]", StringComparison.Ordinal), erased);
 
+    // 경로 key 따옴표 안의 쉼표·escape는 목록 옵션을 나누지 않는다(Name 키 Map 값 struct).
+    await CheckAll("asset-set quoted keys", ["asset-set", "/Game/Anims/Run", "targetFrameRate.overrides[\"Hi,There\"]={}",
+        "targetFrameRate.overrides[\"a\\\"b\"]={}", projectOption], 0, [], []);
+    await CheckAll("asset-set quoted keys result", ["asset-info", "/Game/Anims/Run", projectOption], 0,
+        ["targetFrameRate.overrides[\"Hi,There\"]={}\n", "targetFrameRate.overrides[\"a\\\"b\"]={}\n"], []);
+    await CheckAll("asset-set erase quoted list", ["asset-set", "/Game/Anims/Run",
+        "--erase=targetFrameRate.overrides[\"Hi,There\"],targetFrameRate.overrides[\"a\\\"b\"]", projectOption], 0, [], []);
+    ProcessResult quotedErased = await RunEdit(workingDirectory, "asset-info", "/Game/Anims/Run", projectOption);
+    Report("asset-set erase quoted list result", quotedErased.ExitCode == 0 &&
+        quotedErased.StdOut.Contains("targetFrameRate.overrides=\n", StringComparison.Ordinal) &&
+        !quotedErased.StdOut.Contains("targetFrameRate.overrides[", StringComparison.Ordinal), quotedErased);
+
     // 대입 오류는 모두 모아 보고하고 아무것도 바꾸지 않는다(파일 byte 그대로).
     string runFile = Path.Combine(project, "Content", "Anims", "Run.rasset");
     byte[] before = File.ReadAllBytes(runFile);
@@ -790,6 +802,18 @@ try
             await CheckAll("asset-info without lock", ["asset-info", "/Game/Anims/Run", projectOption], 0, ["loop=true\n"], []);
             held.Unlock(0, 1);
         }
+
+        // 지울 수 없는 고아 임시 파일(삭제 공유 없이 열림)은 저장을 막지 않고 경고 OrphanNotDeleted다.
+        string orphan = Path.Combine(project, "Content", "Anims", "Run.rasset.0123abcd-0123-4567-89ab-0123456789ab.tmp");
+        File.WriteAllBytes(orphan, [1, 2, 3]);
+        using (new FileStream(orphan, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        {
+            await CheckAll("asset-set orphan not deleted", ["asset-set", "/Game/Anims/Run", "loop=on", projectOption], 0, [],
+                ["asset-set: warning: OrphanNotDeleted: "]);
+        }
+
+        await CheckAll("asset-set orphan deleted", ["asset-set", "/Game/Anims/Run", "loop=on", projectOption], 0, [], []);
+        Report("orphan removed", !File.Exists(orphan), new(0, "", ""));
     }
 
     // 프로젝트 찾기: --project 없이 프로젝트 안에서 위로 찾는다.
@@ -797,6 +821,25 @@ try
     Report("asset-info finds the project upward", found.ExitCode == 0 &&
         found.StdOut.Contains("rateScale=2\n", StringComparison.Ordinal) && found.StdErr.Length == 0, found);
     await CheckAll("asset-info without a project", ["asset-info", "/Game/Anims/Run"], 1, [], ["no project found"]);
+    await CheckAll("asset-list type without a project", ["asset-list", "--type=Skeleton"], 1, [], ["no project found"]);
+
+    // Content가 파일이면 색인을 만들 수 없고(cannot scan), Intermediate가 파일이면 잠금을 잡을 수 없다.
+    string brokenContent = Path.Combine(editDirectory, "BrokenContent");
+    string brokenLock = Path.Combine(editDirectory, "BrokenLock");
+    foreach (string directory in new[] { brokenContent, brokenLock })
+    {
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, $"{Path.GetFileName(directory)}.rocksproject"), "{}\n");
+    }
+
+    File.WriteAllBytes(Path.Combine(brokenContent, "Content"), [1]);
+    File.WriteAllBytes(Path.Combine(brokenLock, "Intermediate"), [1]);
+    await CheckAll("asset-info content is a file", ["asset-info", "/Game/X", $"--project={brokenContent}"], 1, [],
+        ["asset-info: cannot scan "]);
+    await CheckAll("asset-list type content is a file", ["asset-list", "--type=Asset", $"--project={brokenContent}"], 1, [],
+        ["asset-list: cannot scan "]);
+    await CheckAll("asset-new cannot lock", ["asset-new", "Skeleton", "/Game/X", $"--project={brokenLock}"], 1, [],
+        ["asset-new: cannot lock the project ("]);
 
     // 열기 경고: 의존 패키지(Hero)가 없으면 열기는 경고와 함께 되고, 저장은 --force 없이 MissingDependency, --force면
     // null로 저장하고 경고다.
@@ -809,14 +852,32 @@ try
         ["asset-set: warning: DroppedUnresolvedImport: "]);
     await CheckAll("asset-set force result", ["asset-info", "/Game/Anims/Run", projectOption], 0,
         ["loop=false\n", "skeleton=none\n"], []);
+    // 만들기의 참조 해석이 연 패키지(Hero가 없는 Run을 다시 가리킴 — Run은 이제 Hero 의존이 없다)와 경고.
+    File.Delete(Path.Combine(project, "Content", "Anims", "Run.rasset"));
+    await CheckAll("asset-new clip without skeleton", ["asset-new", "AnimationClip", "/Game/Anims/Base",
+        "skeleton=/Game/Characters/Hero", projectOption], 1, [], ["asset-new: Unresolved: skeleton: "]);
 
     if (OperatingSystem.IsWindows())
     {
         // 표준 출력이 무효 핸들이면 출력 쓰기가 실패한다(실행 오류 1).
+        // 그 전에 경고가 나는 장면을 다시 만든다: Hero(대상) 없이 Hero를 가리키는 Clip.
+        await CheckAll("asset-new skeleton again", ["asset-new", "Skeleton", "/Game/Characters/Hero", projectOption], 0,
+            ["/Game/Characters/Hero "], []);
+        await CheckAll("asset-new clip again", ["asset-new", "AnimationClip", "/Game/Anims/Run",
+            "skeleton=/Game/Characters/Hero", projectOption], 0, ["/Game/Anims/Run "], []);
+        File.Delete(Path.Combine(project, "Content", "Characters", "Hero.rasset"));
+        await CheckAll("asset-new with open warnings", ["asset-new", "AnimationClip", "/Game/Anims/Walk",
+            "additive.basePoseClip=/Game/Anims/Run", projectOption], 0, ["/Game/Anims/Walk "],
+            ["asset-new: warning: ExcludedDependency: "]);
         string[] invalidOutputs =
         [
             $"asset-info /Game/Anims/Run \"--project={project}\"",
+            $"asset-info /Game/Anims/Walk \"--project={project}\"",
             $"asset-list --type=Asset \"--project={project}\"",
+            $"asset-new Skeleton /Game/Invalid/Output \"--project={project}\"",
+            $"asset-new AnimationClip /Game/Invalid/Warned additive.basePoseClip=/Game/Anims/Run \"--project={project}\"",
+            $"asset-set /Game/Invalid/Output nope=1 \"--project={project}\"",
+            $"asset-set /Game/Anims/Run loop=on --force \"--project={project}\"",
         ];
         foreach (string arguments in invalidOutputs)
         {
