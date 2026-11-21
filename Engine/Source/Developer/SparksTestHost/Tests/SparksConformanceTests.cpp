@@ -250,7 +250,7 @@ TEST(SparksConformance_ReportsCorpusLayoutProblems) {
         // 짝 없는 파일은 .expect, .ast, .names, .types, .ir 순이다.
         CHECK(report.Failures()[0].View() ==
               StringView("Area/Notes.txt: unexpected file (only .spark, .expect, .ast, .names, "
-                         ".types, .ir, .bc and case folders)"));
+                         ".types, .ir, .bc, .run and case folders)"));
         CHECK(report.Failures()[1].View() ==
               StringView("Area/NoExpect.spark: missing the .expect file"));
         CHECK(report.Failures()[2].View() ==
@@ -572,6 +572,155 @@ TEST(SparksConformance_ComparesNamesGoldenAndStages) {
         CHECK(expectation.Stage() == CompilationStage::All);
     }
     CHECK(allocator.Stats().liveAllocations == 0);
+}
+
+TEST(SparksConformance_RunGolden) {
+    // `.run` 실행 golden(Docs/Design/SparksVm.ko.md 7절): `->` 앞의 호출만 읽어 실행하고 줄 전체를
+    // 실제 결과로 다시 써서 비교한다. 주석·빈 줄은 그대로 둔다.
+    SystemAllocator allocator;
+    constexpr StringView Source = R"(enum Side { Left, Right }
+
+fn Add(a: int, b: int): int {
+    return a + b;
+}
+
+fn Flip(side: Side): Side {
+    if (side == Side.Left) {
+        return Side.Right;
+    }
+
+    return Side.Left;
+}
+
+fn Same(text: string): bool {
+    return text == text;
+}
+
+fn Word(): string {
+    return "a, \"b\" -> c";
+}
+
+fn Half(x: float32): float32 {
+    return x * 0.5;
+}
+
+fn Pass(r: Result<int>): Result<int> {
+    let value = try r;
+    return value;
+}
+
+struct Pair {
+    var A: int = 0;
+}
+
+fn First(pair: Pair): int {
+    return pair.A;
+}
+
+fn Make(): Pair {
+    return Pair(A: 1);
+}
+
+fn Label(): Tag? {
+    return null;
+}
+)";
+    auto run = [&](StringView golden, Report& report) noexcept {
+        CaseInput input;
+        input.name = "Run/Case.spark";
+        input.source = Source;
+        input.expect = "clean\n";
+        input.hasRun = true;
+        input.run = golden;
+        return RunCase(allocator, input, report);
+    };
+    {
+        Report report(allocator);
+        // 문자열 인자 안의 `,`·`->`·escape는 나누지 않는다.
+        REQUIRE(run("# comment\n\nAdd(1, 2) -> 3 (2 steps)\nFlip(Left) -> Right (5 steps)\n"
+                    "Same(\"x, y -> z\") -> true (2 steps)\n"
+                    "Word() -> \"a, \\\"b\\\" -> c\" (2 steps)\n"
+                    "Half(3.0) -> 1.5 (3 steps)\nPass(error(3)) -> error(3) (2 steps)\n"
+                    "Make() -> Pair(A: 1) (4 steps)\n",
+                    report));
+        PrintFailures(report);
+        CHECK(report.Failures().IsEmpty());
+    }
+    {
+        // 결과가 다르면(또는 아직 결과가 없으면) 실제 줄과 전체 실제 결과를 보인다.
+        Report report(allocator);
+        REQUIRE(run("Add(1, 2) -> 4 (2 steps)\nAdd(2, 2)\n", report));
+        REQUIRE(report.Failures().Size() == 1);
+        CHECK(report.Failures()[0].View() ==
+              StringView("Run/Case.spark: run differ from .run at line 1\n"
+                         "  expected: Add(1, 2) -> 4 (2 steps)\n"
+                         "  actual:   Add(1, 2) -> 3 (2 steps)\n"
+                         "  actual run:\n"
+                         "Add(1, 2) -> 3 (2 steps)\n"
+                         "Add(2, 2) -> 4 (2 steps)\n"));
+    }
+    struct Bad {
+        StringView golden;
+        StringView reason;
+    };
+    const Bad bad[] = {
+        {"Add\n", "Run/Case.spark: .run line 1: expected '<function>(<arguments>)'"},
+        {"\nNope(1)\n", "Run/Case.spark: .run line 2: no top-level function 'Nope'"},
+        {"Add(1)\n", "Run/Case.spark: .run line 1: too few arguments"},
+        {"Add(1, 2, 3)\n", "Run/Case.spark: .run line 1: too many arguments"},
+        {"Add(x, 1)\n",
+         "Run/Case.spark: .run line 1: cannot read 'x' as a value of this parameter"},
+        {"Add(9223372036854775808, 1)\n",
+         "Run/Case.spark: .run line 1: cannot read '9223372036854775808' as a value of this "
+         "parameter"},
+        {"Flip(Up)\n",
+         "Run/Case.spark: .run line 1: cannot read 'Up' as a value of this parameter"},
+        {"First(1)\n",
+         "Run/Case.spark: .run line 1: a parameter type is not supported by .run yet"},
+        {"Label()\n", "Run/Case.spark: .run line 1: the return type is not supported by .run yet"},
+        {"Same(abc)\n",
+         "Run/Case.spark: .run line 1: cannot read 'abc' as a value of this parameter"},
+        {"Same(\"a\\q\")\n",
+         "Run/Case.spark: .run line 1: cannot read '\"a\\q\"' as a value of this parameter"},
+        {"Half(1e39)\n",
+         "Run/Case.spark: .run line 1: cannot read '1e39' as a value of this parameter"},
+        {"Half(inf)\n",
+         "Run/Case.spark: .run line 1: cannot read 'inf' as a value of this parameter"},
+        {"Pass(error(18446744073709551615))\n",
+         "Run/Case.spark: .run line 1: cannot read 'error(18446744073709551615)' as a value of "
+         "this parameter"},
+    };
+    for (const Bad& entry : bad) {
+        Report report(allocator);
+        REQUIRE(run(entry.golden, report));
+        REQUIRE(report.Failures().Size() == 1);
+        if (report.Failures()[0].View() != entry.reason) {
+            PrintFailures(report);
+        }
+
+        CHECK(report.Failures()[0].View() == entry.reason);
+    }
+
+    {
+        // 진단이 있는 사례는 실행할 bytecode가 없다.
+        CaseInput input;
+        input.name = "Run/Broken.spark";
+        input.source = "fn F(): int {\n    return true;\n}\n";
+        input.expect = "clean\n";
+        input.hasRun = true;
+        input.run = "F()\n";
+        Report report(allocator);
+        REQUIRE(RunCase(allocator, input, report));
+        bool found = false;
+        for (const String& failure : report.Failures()) {
+            found = found || failure.View() ==
+                                 StringView("Run/Broken.spark: has a .run file but the module was "
+                                            "not lowered to bytecode (a file case without "
+                                            "diagnostics is needed)");
+        }
+
+        CHECK(found);
+    }
 }
 
 // 폴더 사례(13.1절 "패키지 사례"): 배치 오류는 사례마다 실패 하나이고, 폴더 사례의 지시는 파일

@@ -4,7 +4,8 @@
     <Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
     <RocksTarget Condition="'$(RocksTarget)' == ''">Foundation</RocksTarget>
     <SdkTarget Condition="'$(SdkTarget)' == ''">Engine</SdkTarget>
-    <GameTarget Condition="'$(GameTarget)' == ''">Game</GameTarget>
+    <!-- Without GameTarget the game build uses the target named like the .rocksproject (Docs/Design/ProjectFiles.ko.md 11.1). -->
+    <GameTargetArgument Condition="'$(GameTarget)' != ''">--target $(GameTarget)</GameTargetArgument>
     <!-- Configurations of the installed SDK (Docs/Design/ProjectFiles.ko.md 10.3), joined with '+': -p:SdkConfigurations=Debug+Release.
          MSBuild reads ',' and ';' in -p: as property separators. -->
     <SdkConfigurations Condition="'$(SdkConfigurations)' == ''">Debug+Development+Release</SdkConfigurations>
@@ -66,6 +67,6 @@
   </Target>
   <Target Name="Game" DependsOnTargets="BootstrapTools">
     <Error Condition="'$(GameDirectory)' == ''" Text="GameDirectory is required." />
-    <Exec Command="$(Tool) game --target $(GameTarget) $(SdkArgument) --project &quot;$(GameDirectoryText)&quot; --configuration $(Configuration) --jobs $(Jobs) $(CompilerArgument) $(OutputArgument) $(BuildModeArguments)" />
+    <Exec Command="$(Tool) game $(GameTargetArgument) $(SdkArgument) --project &quot;$(GameDirectoryText)&quot; --configuration $(Configuration) --jobs $(Jobs) $(CompilerArgument) $(OutputArgument) $(BuildModeArguments)" />
   </Target>
 </Project>

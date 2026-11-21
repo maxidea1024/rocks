@@ -6,6 +6,33 @@ internal static class StableIdManifestTests
 {
     public static void Register(TestSuite suite)
     {
+        // ids reissue(Docs/Design/ProjectFiles.ko.md 11.4절): 활성 항목은 새 ID, aliases는 비우고, 은퇴 항목은 지운다. Sparks kind(경로 이름의
+        // 멤버)도 같은 규칙이다.
+        suite.Add("StableIds.ReissueForNewProject", () =>
+        {
+            using TemporaryDirectory temporary = new();
+            string path = temporary.FilePath("identity.json");
+            string[] before = StableIdManifest.Update(path, true, manifest =>
+            {
+                string type = manifest.Register("type", "sample::Character");
+                string field = manifest.Register("field", "sample::Character::health");
+                string retired = manifest.Register("type", "sample::Old");
+                string sparks = manifest.Register("type", "Game/Doors/Door.Door");
+                string handler = manifest.Register("function", "Game/Doors/Door.Door.on(Owner.Damaged)");
+                manifest.Rename("field", "sample::Character::health", "sample::Character::hitpoints");
+                manifest.Retire("type", "sample::Old");
+                return new[] { type, field, retired, sparks, handler };
+            });
+            int reissued = StableIdManifest.Update(path, false, manifest => manifest.Reissue());
+            StableIdManifest read = StableIdManifest.Load(path);
+            Verify.Equal(4, reissued, "active entries reissued");
+            Verify.That(read.Entries.Count == 4 && read.Entries.All(entry => !entry.Retired && entry.Aliases.Count == 0), "aliases and retired entries removed");
+            Verify.That(read.Entries.All(entry => !before.Contains(entry.Id)) && read.Entries.Select(entry => entry.Id).Distinct().Count() == 4,
+                "every ID is new and unique");
+            Verify.That(read.Resolve("field", "sample::Character::hitpoints") is not null && read.Resolve("function", "Game/Doors/Door.Door.on(Owner.Damaged)") is not null,
+                "names are kept, Sparks member kinds included");
+        });
+
         suite.Add("StableIds.RegistrationRenameRetireAndReadOnlyBuild", () =>
         {
             using TemporaryDirectory temporary = new();

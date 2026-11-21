@@ -171,11 +171,11 @@ public static class InstalledSdk
         }
 
         File.Copy(Path.Combine(root, ".clang-format"), Path.Combine(stage, ".clang-format"));
+        // 프로젝트 템플릿을 싣는다(new-project가 SDK의 Templates/Game/<이름>에서 찾는다, Docs/Design/ProjectFiles.ko.md 11.5절).
+        // 템플릿 디렉터리(Template.json이 있는 곳)의 빌드·IDE 산출물(out/·Saved/·점 디렉터리·최상위 *.slnx)은 싣지 않는다(11.6절).
+        CopyTree(Path.Combine(root, "Templates"), Path.Combine(stage, "Templates"), TemplateOutput);
         return [.. packaged];
     }
-
-    /// <summary>게임 타깃 기본 이름이다(<c>--target</c>가 없을 때).</summary>
-    internal const string DefaultGameTarget = "Game";
 
     // SDK가 싣는 Visual Studio 진입 스크립트다(Build/ 아래 같은 이름).
     private static readonly string[] SdkScripts = ["IdeBuild.bat", "IdeBuild.ps1", "Tools.ps1", "GenerateProjectFiles.ps1"];
@@ -209,6 +209,43 @@ public static class InstalledSdk
     }
 
     /// <summary>
+    /// Visual Studio 빌드(<c>ROCKS_IDE_BUILD=1</c>)에서, 프로젝트에 <c>engineAssociation</c>이 있으면 그것이 해석하는 SDK가 프로젝트 파일의
+    /// <c>--sdk</c>와 같은지 본다(Docs/Design/ProjectFiles.ko.md 10.4절). 다르면 연결을 바꾼 뒤 다시 만들지 못한 낡은 프로젝트 파일이다 — 옛 SDK로
+    /// 조용히 빌드하지 않고 다시 만들라고 알린다. 연결이 없으면(등록부 선택) 보지 않는다.
+    /// </summary>
+    private static void RequireCurrentProjectFiles(Dictionary<string, string> options)
+    {
+        if (Environment.GetEnvironmentVariable("ROCKS_IDE_BUILD") != "1")
+        {
+            return;
+        }
+
+        string project = Path.GetFullPath(options["project"]);
+        string[] descriptors = Directory.GetFiles(project, "*" + DescriptorReader.ProjectExtension, SearchOption.TopDirectoryOnly);
+        if (descriptors.Length != 1 || DescriptorReader.ReadProject(descriptors[0]) is not { EngineAssociation: not null } descriptor)
+        {
+            return;
+        }
+
+        string associated;
+        try
+        {
+            associated = SdkAssociation.Resolve(descriptor, SdkRegistries.Default(), _ => null);
+        }
+        catch (ArgumentException error)
+        {
+            throw new ArgumentException($"The Visual Studio project files are stale: {error.Message} Next: run Build/GenerateProjectFiles.ps1 -Project " +
+                $"\"{project}\".", error);
+        }
+
+        if (!SdkRegistries.SamePath(associated, options["sdk"]))
+        {
+            throw new ArgumentException($"The Visual Studio project files are stale: {descriptor.FilePath} associates {associated}, but the project " +
+                $"files build with {options["sdk"]}. Next: run Build/GenerateProjectFiles.ps1 -Project \"{project}\".");
+        }
+    }
+
+    /// <summary>
     /// 이 SDK를 이 컴퓨터의 도구 모음으로 요청 구성을 빌드하는 데 쓸 수 없는 이유다(쓸 수 있으면 null). Verify의 호환 조건(manifest 판·구성·
     /// 플랫폼·아키텍처·ABI)이고, 파일 목록·내용 검사는 고른 SDK에만 Verify가 한다.
     /// </summary>
@@ -239,7 +276,7 @@ public static class InstalledSdk
         string architecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString();
         return manifest.Configurations is null || manifest.Configurations.Count == 0 ||
             (configuration is not null && !manifest.Configurations.ContainsKey(configuration.Value.ToString()))
-            ? $"no {configuration} configuration (has {Names(manifest)})"
+            ? (configuration is null ? "no configurations" : $"no {configuration} configuration (has {Names(manifest)})")
             : manifest.Platform != toolchain.Platform.ToString() ? $"platform {manifest.Platform}, this computer builds {toolchain.Platform}"
             : manifest.Architecture != architecture ? $"architecture {manifest.Architecture}, this computer is {architecture}"
             : manifest.CompilerIdentity != toolchain.AbiIdentity || manifest.SdkIdentity != toolchain.AbiIdentity
@@ -260,10 +297,12 @@ public static class InstalledSdk
 
         // --sdk가 없으면 .rocksproject의 SDK 연결로 등록 SDK를 고른다(Docs/Design/ProjectFiles.ko.md 10.1절).
         await ResolveSdkOptionAsync(options, cancellationToken);
+        RequireCurrentProjectFiles(options);
         var sdk = PathSpelling.OnDisk(Path.GetFullPath(options["sdk"]));
         var project = PathSpelling.OnDisk(Path.GetFullPath(options["project"]));
-        var output = PathSpelling.OnDisk(Path.GetFullPath(options.GetValueOrDefault("output",
-            GameProjectLayout.DefaultOutput(project, options.GetValueOrDefault("target", DefaultGameTarget), BuildCommand.Configuration(options)))));
+        // 기본 출력은 --output이 없을 때만 계산한다(기본 타깃은 .rocksproject를 읽는다).
+        var output = PathSpelling.OnDisk(Path.GetFullPath(options.TryGetValue("output", out string? given) ? given
+            : GameProjectLayout.DefaultOutput(project, options.GetValueOrDefault("target") ?? GameProjectLayout.DefaultTarget(project), BuildCommand.Configuration(options))));
         if (Inside(sdk, output) || Inside(sdk, project) || Inside(output, project) || Inside(output, sdk))
         {
             throw new ArgumentException("Game output cannot overlap or contain the project or installed SDK.");
@@ -335,8 +374,8 @@ public static class InstalledSdk
         var sdk = PathSpelling.OnDisk(Path.GetFullPath(options["sdk"]));
         var project = PathSpelling.OnDisk(Path.GetFullPath(options["project"]));
         var configuration = BuildCommand.Configuration(options);
-        var output = PathSpelling.OnDisk(Path.GetFullPath(options.GetValueOrDefault("output",
-            GameProjectLayout.DefaultOutput(project, options.GetValueOrDefault("target", DefaultGameTarget), configuration))));
+        var output = PathSpelling.OnDisk(Path.GetFullPath(options.TryGetValue("output", out string? given) ? given
+            : GameProjectLayout.DefaultOutput(project, options.GetValueOrDefault("target") ?? GameProjectLayout.DefaultTarget(project), configuration)));
         if (Inside(sdk, output) || Inside(sdk, project) || Inside(output, project) || Inside(output, sdk))
         {
             throw new ArgumentException("Game output cannot overlap or contain the project or installed SDK.");
@@ -385,7 +424,7 @@ public static class InstalledSdk
         }
 
         var context = new BuildContext(project, output, toolchain.Platform, toolchain.Architecture, configuration, sdk);
-        var rules = RuleLoader.Load(rulesPath, options.GetValueOrDefault("target", DefaultGameTarget), context);
+        var rules = RuleLoader.Load(rulesPath, (options.GetValueOrDefault("target") ?? GameProjectLayout.DefaultTarget(project)), context);
         GameLayout layout = GamePlanning.Layout(rules, projectDescriptor, availablePlugins, context, toolchain, configuration, sdk, sdkModules,
             createDirectories: true);
         string[] targets = layout.Targets;
@@ -474,7 +513,8 @@ public static class InstalledSdk
         }
     }
 
-    public static VerifiedSdk VerifyStamped(string sdk, NativeConfiguration configuration, NativeToolchain toolchain)
+    // hashContents가 false면 구조(판·구성·파일 목록·모듈 선언)만 보고 내용 해시를 건너뛴다(게임 프로젝트 파일 생성이 둘째 구성부터 쓴다).
+    public static VerifiedSdk VerifyStamped(string sdk, NativeConfiguration configuration, NativeToolchain toolchain, bool hashContents = true)
     {
         string manifestText = File.ReadAllText(Path.Combine(sdk, "rocks-sdk.json"));
         // 버전을 먼저 본다. 다른 버전의 manifest는 칸이 달라(예: 7의 ReflectionOnlyLibrary) 엄격한 역직렬화가 버전 불일치 안내
@@ -559,7 +599,7 @@ public static class InstalledSdk
             }
 
             stamp[pair.Key] = (file.Length, file.LastWriteTimeUtc);
-            if (Hashing.Sha256File(file.FullName) != pair.Value)
+            if (hashContents && Hashing.Sha256File(file.FullName) != pair.Value)
             {
                 throw new InvalidDataException($"SDK file changed or missing: {pair.Key}");
             }
@@ -665,6 +705,27 @@ public static class InstalledSdk
             : [];
     }
 
+    /// <summary>SDK manifest의 모든 구성에 든 모듈 이름이다(new-project 이름 검사, 검증 없이 읽는다).</summary>
+    internal static HashSet<string> ManifestModuleNames(string sdk)
+    {
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(Path.Combine(sdk, "rocks-sdk.json")));
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (document.RootElement.TryGetProperty(nameof(SdkManifest.Configurations), out JsonElement configurations) &&
+            configurations.ValueKind == JsonValueKind.Object)
+        {
+            foreach (JsonProperty configuration in configurations.EnumerateObject())
+            {
+                if (configuration.Value.TryGetProperty(nameof(SdkConfiguration.Modules), out JsonElement modules) && modules.ValueKind == JsonValueKind.Array)
+                {
+                    names.UnionWith(modules.EnumerateArray().Where(module => module.TryGetProperty(nameof(SdkModule.Name), out _))
+                        .Select(module => module.GetProperty(nameof(SdkModule.Name)).GetString() ?? ""));
+                }
+            }
+        }
+
+        return names;
+    }
+
     // manifest가 가진 구성 이름 목록이다(오류 안내용).
     private static string Names(SdkManifest manifest) =>
         manifest.Configurations is null || manifest.Configurations.Count == 0 ? "none" : string.Join(", ", manifest.Configurations.Keys);
@@ -700,11 +761,30 @@ public static class InstalledSdk
 
     private static bool Inside(string root, string candidate) => DirectoryPath.IsAtOrUnder(candidate, root);
 
-    private static void CopyTree(string source, string destination)
+    // 템플릿 디렉터리 아래의 빌드·IDE 산출물인가(가장 가까운 Template.json 디렉터리 기준 GameProjectLayout 규칙).
+    private static bool TemplateOutput(string entry)
+    {
+        for (string? directory = Path.GetDirectoryName(entry); directory is not null; directory = Path.GetDirectoryName(directory))
+        {
+            if (File.Exists(Path.Combine(directory, NewProjectCommand.TemplateFile)))
+            {
+                return GameProjectLayout.IsExcluded(directory, entry);
+            }
+        }
+
+        return false;
+    }
+
+    private static void CopyTree(string source, string destination, Func<string, bool>? skip = null)
     {
         Directory.CreateDirectory(destination);
         foreach (var entry in Directory.EnumerateFileSystemEntries(source))
         {
+            if (skip?.Invoke(entry) == true)
+            {
+                continue;
+            }
+
             if (FileLinks.IsLink(entry))
             {
                 throw new IOException("SDK packaging does not accept symbolic links or junctions.");
@@ -713,7 +793,7 @@ public static class InstalledSdk
             var target = Path.Combine(destination, Path.GetFileName(entry));
             if (Directory.Exists(entry))
             {
-                CopyTree(entry, target);
+                CopyTree(entry, target, skip);
             }
             else
             {

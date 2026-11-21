@@ -16,7 +16,7 @@
 namespace rocks::sparks {
 
 // `.sparkc`·bytecode 형식 버전이다(opcode 번호·명령 모양·표 배치가 바뀌면 올린다).
-inline constexpr uint32 BytecodeFormatVersion = 1;
+inline constexpr uint32 BytecodeFormatVersion = 2; // 2: TYPE 구역(LC5b3)
 
 // bank 하나의 레지스터 수 상한이다(8비트 피연산자 — D3).
 inline constexpr uint32 MaxBankRegisters = 256;
@@ -42,7 +42,7 @@ enum class Opcode : uint8 {
     LoadStr,
     LoadNullR,
     LoadNullB,
-    // 정수 산술(타입별 — 범위 밖은 IntegerOverflow, 0 나눗셈은 DivisionByZero)
+    // 정수 산술(타입별 — 범위 밖은 IntegerOverflow, 0 나눗셈은 DivideByZero, DIV·MOD는 내림 방식)
     AddI8,
     AddI16,
     AddI32,

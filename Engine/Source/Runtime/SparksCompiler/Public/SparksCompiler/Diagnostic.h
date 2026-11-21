@@ -182,6 +182,8 @@ enum class DiagnosticCode : uint16 {
     RpcCall = 1004,
     DataIdLost = 1005,
     InvalidIdManifest = 1006,
+    IdNameReserved = 1007,
+    IdClaimedTwice = 1008,
     ManifestSyntax = 1101,
     UnknownManifestKey = 1102,
     MissingManifestKey = 1103,

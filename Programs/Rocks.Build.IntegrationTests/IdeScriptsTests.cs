@@ -34,12 +34,13 @@ internal static class IdeScriptsTests
         }
 
         await CleanBoundariesAsync(repository);
+        await SetupSelfTestAsync(repository);
         await SdkScriptsAsync(repository);
         await LockOrderAsync(repository);
         await ToolInputsAsync(repository);
         await NMakeCommandsAsync(repository);
         await StalenessAsync(repository);
-        Console.WriteLine("PASS IDE scripts: clean boundaries, SDK scripts, IDE build lock order, tool inputs and rebuild decisions, Visual Studio or NMake build/clean/rebuild, " +
+        Console.WriteLine("PASS IDE scripts: clean boundaries, setup self test (-Command and -File, pwsh and 5.1), SDK scripts, IDE build lock order, tool inputs and rebuild decisions, Visual Studio or NMake build/clean/rebuild, " +
             "terminal no-op, failure exit codes, RPF0001");
     }
 
@@ -247,6 +248,23 @@ internal static class IdeScriptsTests
 
         await Cli("projectfiles", "--root", repository);
         Require(!Stale(await Cli(Build())), "project files are stale after removing the probe and regenerating");
+    }
+
+    // 설치 마법사 셀프 테스트를 CI와 같은 -Command 호출과 -File 호출로, PowerShell 7과 Windows PowerShell 5.1 모두에서 돌린다. -Command는 스크립트를
+    // 세션 안에서 불러 GetNewClosure 클로저가 스크립트 함수를 보지 못하는 문제가 -File에서는 드러나지 않았다(CI만 실패).
+    private static async Task SetupSelfTestAsync(string repository)
+    {
+        string setup = Path.Combine(repository, "Build", "Setup.ps1");
+        foreach (string shell in new[] { "pwsh", "powershell" })
+        {
+            foreach (string[] form in new[] { new[] { "-Command", "& '" + setup.Replace("'", "''", StringComparison.Ordinal) + "' -SelfTest" }, ["-File", setup, "-SelfTest"] })
+            {
+                var result = await ProcessRunner.RunAsync(new(shell, ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", .. form], repository,
+                    Timeout: TimeSpan.FromMinutes(5)));
+                Require(result.ExitCode == 0 && result.StdOut.Contains("Setup self test: PASS", StringComparison.Ordinal),
+                    $"Setup self test failed with {shell} {form[0]}: " + result.StdOut + result.StdErr);
+            }
+        }
     }
 
     // 설치 SDK에 실린 스크립트: Tools.ps1은 도구를 빌드하지 않고(-ListInputs는 해당 없음), IdeBuild.ps1·GenerateProjectFiles.ps1은 게임 형태만

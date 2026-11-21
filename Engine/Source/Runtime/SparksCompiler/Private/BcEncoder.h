@@ -45,6 +45,9 @@ private:
     // types는 호출의 타입 인자 목록(IrInstruction::types), 없으면 NoIrRegister.
     uint32 SymbolRef(BytecodeRefKind kind, uint32 symbol, uint32 types = NoIrRegister) noexcept;
     uint32 TypeRef(uint32 type) noexcept;
+    // Sparks struct·enum 심볼의 TYPE 표 번호다(처음이면 배치를 더한다 — SparksBytecode 5절). 그
+    // 밖은 NoBytecodeIndex.
+    uint32 TypeTable(uint32 symbol) noexcept;
     uint32 CallRef(uint32 callee, uint8 sub, uint32 types, Opcode& op) noexcept;
     // 16비트 표 번호를 검사한다(넘으면 S1150).
     uint32 Bx(uint32 index) noexcept;
@@ -88,6 +91,9 @@ private:
     Array<uint32> stringNext_;
     HashMap<uint64, uint32> refIndex_;
     HashMap<uint64, uint32> functionIndex_;
+    // TYPE 표(형식 버전 2): Sparks struct·enum 심볼 → TYPE 번호, struct 필드 심볼 → TYPE 필드 번호.
+    HashMap<uint64, uint32> typeIndex_;
+    HashMap<uint64, uint32> fieldIndex_;
     bool tooLarge_ = false;
 
     // 함수 하나의 상태.

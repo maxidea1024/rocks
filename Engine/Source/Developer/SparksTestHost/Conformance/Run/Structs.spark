@@ -1,0 +1,83 @@
+enum Mood { Calm, Angry, Sleepy }
+
+struct Stats {
+    var Level: int = 1;
+    var Name = "anon";
+    var Tags: Array<string>;
+    var Turn: quat;
+    var Feeling = Mood.Sleepy;
+    var Score: float;
+    var Label: string;
+}
+
+struct Player {
+    var Info = Stats(Level: 2);
+    var Hp: int = 100;
+}
+
+fn MakeStats(): Stats {
+    return Stats();
+}
+
+fn Custom(level: int): Stats {
+    return Stats(Level: level, Name: "hero");
+}
+
+fn Fresh(): Player {
+    return Player();
+}
+
+fn LevelUp(amount: int): int {
+    var player = Player();
+    player.Info.Level += amount;
+    player.Hp -= 1;
+    return player.Info.Level * 1000 + player.Hp;
+}
+
+fn Isolated(): string {
+    var first = Stats();
+    var second = first;
+    second.Name = "second";
+    second.Tags = ["x"];
+    return "${first.Name} ${second.Name}";
+}
+
+fn Describe(mood: Mood): string {
+    return "${mood}!";
+}
+
+fn Wrap(text: string): Result<string> {
+    if (text == "") {
+        return Error.InvalidArgument;
+    }
+
+    return text;
+}
+
+fn Chain(text: string): Result<string> {
+    let value = try Wrap(text);
+    return "${value}?";
+}
+
+fn Unwrap(text: string): string {
+    let value = try Wrap(text);
+    return value;
+}
+
+fn MakePlayer(hp: int): Result<Player> {
+    if (hp < 0) {
+        return Error.NotFound;
+    }
+
+    return Player(Hp: hp);
+}
+
+fn Health(hp: int): Result<int> {
+    let player = try MakePlayer(hp);
+    return player.Hp;
+}
+
+fn Identity(): quat {
+    let stats = Stats();
+    return stats.Turn;
+}

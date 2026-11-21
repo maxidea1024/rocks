@@ -1,0 +1,133 @@
+fn Build(): Array<int> {
+    return [3, 1, 2];
+}
+
+fn Pick(index: int): int {
+    let items = [10, 20, 30];
+    return items[index] ?? -1;
+}
+
+fn Write(index: int): Array<int> {
+    var items = [1, 2, 3];
+    items[index] = 9;
+    return items;
+}
+
+fn Sum(): int {
+    var total = 0;
+    for (x in [1, 2, 3, 4]) {
+        total += x;
+    }
+
+    return total;
+}
+
+fn Weighted(): int {
+    var total = 0;
+    for (i, x in [5, 6, 7]) {
+        total += i * x;
+    }
+
+    return total;
+}
+
+fn Scores(): Map<string, int> {
+    var scores: Map<string, int> = ["a": 1, "b": 2];
+    scores["c"] = 3;
+    scores["a"] = 9;
+    return scores;
+}
+
+fn Lookup(key: string): int {
+    let scores: Map<string, int> = ["x": 1, "y": 2];
+    return scores[key] ?? 0;
+}
+
+fn Entries(): string {
+    var text = "";
+    let scores: Map<string, int> = ["b": 2, "a": 1];
+    for (key, value in scores) {
+        text = "${text}${key}=${value};";
+    }
+
+    return text;
+}
+
+fn Unique(): Set<int> {
+    let values: Set<int> = [3, 1, 3, 2, 1];
+    return values;
+}
+
+fn Copies(): string {
+    var first = [1, 2];
+    var second = first;
+    second[0] = 9;
+    let a = first[0] ?? 0;
+    let b = second[0] ?? 0;
+    return "${a} ${b}";
+}
+
+fn Grid(): Array<Array<int>> {
+    var grid = [[1, 2], [3, 4]];
+    if (let row = grid[1]) {
+        var changed = row;
+        changed[0] = 7;
+        grid[1] = changed;
+    }
+
+    return grid;
+}
+
+fn Move(key: string): Map<string, vec3> {
+    var points: Map<string, vec3> = ["p": vec3(1.0, 2.0, 3.0)];
+    if (let point = points[key]) {
+        var moved = point;
+        moved.X = 5.0;
+        points[key] = moved;
+    }
+
+    return points;
+}
+
+fn Words(): Array<string> {
+    var words = ["x", "y"];
+    words[1] = "z";
+    return words;
+}
+
+fn Count(limit: int): int {
+    var squares: Map<int, int> = [0: 0];
+    for (i in 1..<limit) {
+        squares[i] = i * i;
+    }
+
+    var total = 0;
+    for (key, value in squares) {
+        total += value - key;
+    }
+
+    return total;
+}
+
+fn Keys(limit: int): int {
+    var lookup: Map<string, int> = ["": -1];
+    for (i in 0..<limit) {
+        lookup["k${i}"] = i;
+    }
+
+    for (i in 0..<limit) {
+        lookup["k${i}"] = i * 2;
+    }
+
+    var total = 0;
+    for (i in 0..<limit + 2) {
+        total += lookup["k${i}"] ?? 1000000;
+    }
+
+    return total;
+}
+
+fn Distinct(): Set<string> {
+    let names: Set<string> = ["b", "a", "b", "", "a"];
+    return names;
+}

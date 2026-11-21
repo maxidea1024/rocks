@@ -440,7 +440,19 @@ internal static class GameProjectTests
         Write(failed, "game-build-evidence.json", "{}");
         Require(await CleanCommand.RunAsync(Options(("configuration", "Development")), CancellationToken.None) == 0 &&
             Directory.EnumerateFileSystemEntries(failed).Select(Path.GetFileName).SequenceEqual([".rocks-invocation.lock"]),
-            "an output with only the invocation lock is a Rocks output");
+            "an output with the invocation lock and a build record is a Rocks output");
+        // 호출 잠금만 있고 실행 기록이 없으면(예: 생성 영역 밖의 다른 잠금 사용자) 거부한다.
+        Write(failed, "kept.txt", "x");
+        await Expect(() => CleanCommand.RunAsync(Options(("configuration", "Development")), CancellationToken.None), "has no .native-build.lock");
+        // 프로젝트 파일 생성 영역은 호출 잠금과 실행 기록이 있어도 늘 거부한다(게임·엔진 모두).
+        string projectFiles = Path.Combine(project, "out", "ProjectFiles");
+        Write(projectFiles, ".rocks-invocation.lock", "");
+        Write(projectFiles, "action-report.json", "{}");
+        Write(projectFiles, "Game.vcxproj", "<Project />");
+        await Expect(() => CleanCommand.RunAsync(Options(("output", projectFiles)), CancellationToken.None), "generated project files area");
+        await Expect(() => CleanCommand.RunAsync(Options(("output", Path.Combine(projectFiles, "Programs"))), CancellationToken.None), "generated project files area");
+        await Expect(() => CleanCommand.CleanAsync(root, Path.Combine(root, "out", "ProjectFiles"), CancellationToken.None), "generated project files area");
+        Require(File.Exists(Path.Combine(projectFiles, "Game.vcxproj")), "clean touched the project files area");
 
         await Expect(() => CleanCommand.RunAsync(Options(("output", Path.Combine(project, "out"))), CancellationToken.None), "only build outputs under");
         await Expect(() => CleanCommand.RunAsync(Options(("output", Path.Combine(project, "Source"))), CancellationToken.None), "only build outputs under");
@@ -518,6 +530,88 @@ internal static class GameProjectTests
         catch (IOException error) when (error.Message.Contains("already exists", StringComparison.Ordinal))
         {
         }
+
+        // new-project(Docs/Design/ProjectFiles.ko.md 11절): 이름 검사, 두 단계 치환, 템플릿 철자 검사.
+        NewProjectCommand.ValidateName("MyGame", ["Core", "Launch"]);
+        foreach (string bad in new[] { "Ab", "lowercase", "Bad-Name", "Rocks", "ROCKS", "RocksSdk", "Std", "Posix", "Core", "LAUNCH", "Class", "Namespace",
+            "A23456789012345678901234567890123", "CON", "Nul", "COM1", "Lpt9", "Errno", "Stdin", "Stderr", "Near", "Far", "Interface", "Linux", "Unix" })
+        {
+            Error(() => NewProjectCommand.ValidateName(bad, ["Core", "Launch"]));
+        }
+
+        Require(NewProjectCommand.Replace("FoundationTemplate FOUNDATIONTEMPLATE foundationtemplate Foundationtemplate", "FoundationTemplate", "Zed") ==
+            "Zed ZED zed Foundationtemplate", "three spellings, case sensitive");
+        // 템플릿 이름을 담은 이름은 쓰기 전에 거부한다(대소문자 무시).
+        NewProjectCommand.RequireDistinctFromTemplate("Zed", "FoundationTemplate");
+        Error(() => NewProjectCommand.RequireDistinctFromTemplate("FoundationTemplateX", "FoundationTemplate"));
+        Error(() => NewProjectCommand.RequireDistinctFromTemplate("MyFoundationtemplate", "FoundationTemplate"));
+        string templateRoot = Path.Combine(root, "template");
+        Write(templateRoot, NewProjectCommand.TemplateFile, "{ \"fileVersion\": 1, \"templateName\": \"FixtureTemplate\", \"description\": \"x\", " +
+            "\"ignore\": [\"Template.json\"], \"replaceInExtensions\": [\".h\"] }");
+        Write(templateRoot, "Source/FixtureTemplate.h", "namespace fixturetemplate {}");
+        NewProjectCommand.CheckTemplate(NewProjectCommand.ReadTemplate(templateRoot));
+        Write(templateRoot, "Source/Mixed.h", "struct Fixturetemplate;");
+        try
+        {
+            NewProjectCommand.CheckTemplate(NewProjectCommand.ReadTemplate(templateRoot));
+            throw new InvalidOperationException("a mixed template spelling must be rejected");
+        }
+        catch (InvalidDataException error) when (error.Message.Contains("'Fixturetemplate'", StringComparison.Ordinal))
+        {
+        }
+
+        // 복사 대상: 빌드·IDE 산출물(out/·Saved/·점 디렉터리·최상위 *.slnx)은 기본으로 빼고, ignore는 파일·디렉터리·glob을 받는다.
+        File.Delete(Path.Combine(templateRoot, "Source/Mixed.h"));
+        Write(templateRoot, NewProjectCommand.TemplateFile, "{ \"fileVersion\": 1, \"templateName\": \"FixtureTemplate\", \"description\": \"x\", " +
+            "\"ignore\": [\"Template.json\", \"Docs/\", \"*.md\", \"Source/Gen?.h\"], \"replaceInExtensions\": [\".h\"] }");
+        foreach (string produced in new[] { "out/windows-x-debug/a.obj", "out/ProjectFiles/X.vcxproj", ".vs/X/db", "Saved/Crashes/x.dmp", "X.slnx",
+            "Docs/Guide.txt", "README.md", "Source/Gen1.h" })
+        {
+            Write(templateRoot, produced, "x");
+        }
+
+        string[] copied = [.. NewProjectCommand.Files(NewProjectCommand.ReadTemplate(templateRoot)).Select(file => file.Relative)];
+        Require(copied.SequenceEqual(["Source/FixtureTemplate.h"]), "template files to copy: " + string.Join(", ", copied));
+
+        // 인코딩: 엄격한 UTF-8, BOM 여부를 돌려주고, NUL 바이트와 잘못된 바이트는 거부한다.
+        string text = Path.Combine(templateRoot, "encoded.h");
+        File.WriteAllBytes(text, [0xEF, 0xBB, 0xBF, (byte)'a']);
+        Require(NewProjectCommand.ReadText(text) == ("a", true), "BOM is reported and stripped from the text");
+        File.WriteAllBytes(text, [(byte)'a', 0, (byte)'b']);
+        try
+        {
+            NewProjectCommand.ReadText(text);
+            throw new InvalidOperationException("a NUL byte must be rejected");
+        }
+        catch (InvalidDataException error) when (error.Message.Contains("NUL", StringComparison.Ordinal))
+        {
+        }
+
+        File.WriteAllBytes(text, [(byte)'a', 0xC3, 0x28]);
+        try
+        {
+            NewProjectCommand.ReadText(text);
+            throw new InvalidOperationException("invalid UTF-8 must be rejected");
+        }
+        catch (InvalidDataException error) when (error.Message.Contains("not valid UTF-8", StringComparison.Ordinal))
+        {
+        }
+
+        Write(templateRoot, NewProjectCommand.TemplateFile, "{ \"fileVersion\": 1, \"templateName\": \"FixtureTemplate\", \"description\": \"x\", " +
+            "\"ignore\": [], \"replaceInExtensions\": [], \"extra\": 1 }");
+        try
+        {
+            NewProjectCommand.ReadTemplate(templateRoot);
+            throw new InvalidOperationException("an unknown Template.json field must be rejected");
+        }
+        catch (InvalidDataException error) when (error.Message.Contains("unknown field 'extra'", StringComparison.Ordinal))
+        {
+        }
+
+        // 게임 프로젝트 파일의 구성은 SDK 구성 ∩ IDE 구성이다(구성 순서, Coverage는 빠진다).
+        Require(GameProjectFiles.Configurations(["Release", "Coverage", "Asan", "Development"])
+            .SequenceEqual([NativeConfiguration.Development, NativeConfiguration.Release, NativeConfiguration.Asan]) &&
+            GameProjectFiles.Configurations(["Coverage"]).Length == 0, "game project files configuration intersection");
 
         // 구성 목록: 쉼표·세미콜론, 구성 순서로 정렬, 이름은 정확히, 중복·빈 칸 거부.
         Require(SdkExportCommand.Parse("Release;Debug").SequenceEqual([NativeConfiguration.Debug, NativeConfiguration.Release]) &&

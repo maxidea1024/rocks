@@ -5,19 +5,23 @@
 #include "TypeChecker.h"
 
 // 모듈 interface의 정규 텍스트와 재컴파일 범위다(Docs/Design/SparksBytecode.ko.md 6.2절, LC4d).
-// interface hash는 공개 표면(import, 선언의 이름·attribute·기반·필드 타입·초기값 원문·const·함수
-// 시그니처·LC3b 효과 집합·이벤트)을 선언 순으로 쓴 글자의 SHA-256이다. 원문 위치·주석·본문은 넣지
-// 않는다.
+// interface hash는 공개 표면(import, 선언의 이름·attribute·기반·필드 타입·초기값·const·함수
+// 시그니처·LC3b 효과 집합·이벤트)을 선언 순으로 쓴 글자의 SHA-256이다. 원문
+// 조각(attribute·초기값)은 토큰을 공백 하나로 이은 것이라 공백·주석·위치는 들어가지 않는다. 본문은
+// 넣지 않는다.
 
 namespace rocks::sparks::detail {
 
 void TypeChecker::AppendInterfaceType(StringBuilderBase& out, uint32 module, uint32 type) noexcept {
-    // 다른 모듈의 Sparks 타입은 import 경로로 구별한다(같은 이름의 두 모듈 선언).
+    // 다른 모듈의 Sparks 타입은 (패키지, import 경로)로 구별한다(같은 이름의 두 모듈 선언, 같은
+    // 경로의 다른 패키지 모듈).
     const Compilation& c = compilation_;
     const uint32 symbol = type == NoType ? NoSymbol : SymbolOf(NonOptional(type));
     if (symbol != NoSymbol && c.symbols_[symbol].module < c.modules_.Size() &&
         c.symbols_[symbol].module != module) {
-        out.Append(c.Text(c.modules_[c.symbols_[symbol].module].importPath)).Append(":");
+        const Compilation::ModuleEntry& owner = c.modules_[c.symbols_[symbol].module];
+        out.Append(c.packages_[owner.package].manifest.Name()).Append(":");
+        out.Append(c.Text(owner.importPath)).Append(":");
     }
 
     if (type == NoType) {
@@ -32,9 +36,30 @@ void TypeChecker::AppendInterfaceText(StringBuilderBase& out, uint32 module) noe
     const Compilation& c = compilation_;
     const SyntaxTree& tree = c.trees_[module];
     const StringView source = c.sources_->Get(c.modules_[module].source).Text();
+    const Span<const Token> tokens = tree.Tokens();
+    // 노드의 토큰을 공백 하나로 이어 붙인다(원문 공백·주석은 토큰이 아니다).
     auto text = [&](uint32 node) noexcept {
         const SourceSpan span = tree.Node(node).span;
-        return StringView(source.Data() + span.begin, span.end - span.begin);
+        usize low = 0;
+        usize high = tokens.Size();
+        while (low < high) {
+            const usize middle = low + (high - low) / 2;
+            if (tokens[middle].span.begin < span.begin) {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+
+        bool first = true;
+        for (usize index = low; index < tokens.Size() && tokens[index].span.end <= span.end &&
+                                tokens[index].kind != TokenKind::EndOfFile;
+             ++index) {
+            const SourceSpan piece = tokens[index].span;
+            out.Append(first ? "" : " ")
+                .Append(StringView(source.Data() + piece.begin, piece.end - piece.begin));
+            first = false;
+        }
     };
     auto attributes = [&](uint32 declaration) noexcept {
         const uint32 list = tree.Child(declaration, 1);
@@ -43,7 +68,8 @@ void TypeChecker::AppendInterfaceText(StringBuilderBase& out, uint32 module) noe
         }
 
         for (const uint32 attribute : tree.Children(list)) {
-            out.Append(" ").Append(text(attribute));
+            out.Append(" ");
+            text(attribute);
         }
     };
     auto signature = [&](uint32 symbol) noexcept {
@@ -114,14 +140,18 @@ void TypeChecker::AppendInterfaceText(StringBuilderBase& out, uint32 module) noe
 
             out.Append("const ").Append(c.symbols_[symbol].name).Append(": ");
             AppendInterfaceType(out, module, c.symbols_[symbol].type);
-            out.Append(" = ").Append(text(tree.Child(declaration, 4)));
+            out.Append(" = ");
+            text(tree.Child(declaration, 4));
             attributes(declaration);
             out.Append("\n");
             break;
         }
         case SyntaxKind::ExtensionEvent: {
-            out.Append("event ").Append(text(tree.Child(declaration, 2))).Append(".");
-            out.Append(text(tree.Child(declaration, 3))).Append("(");
+            out.Append("event ");
+            text(tree.Child(declaration, 2));
+            out.Append(".");
+            text(tree.Child(declaration, 3));
+            out.Append("(");
             const uint32 parameters = tree.Child(declaration, 4);
             bool first = true;
             for (const uint32 parameter : tree.Children(parameters)) {
@@ -184,7 +214,8 @@ void TypeChecker::AppendInterfaceText(StringBuilderBase& out, uint32 module) noe
                     AppendInterfaceType(out, module, FieldType(memberSymbol));
                     const uint32 initializer = tree.Child(member, 4);
                     if (initializer != NoNode) {
-                        out.Append(" = ").Append(text(initializer));
+                        out.Append(" = ");
+                        text(initializer);
                     }
                 } else if (item.kind == SyntaxKind::Event) {
                     out.Append("  event ").Append(c.symbols_[memberSymbol].name);
@@ -260,6 +291,26 @@ Result<void> FindRecompileScope(const Compilation& before, const Compilation& af
             continue;
         }
 
+        // before에만 있는 함수(지운 함수·handler, 경로를 바꾼 handler)가 있으면 모듈 전체를 다시
+        // 검사한다(reload가 옛 구독·호출 대상을 버리게).
+        bool removed = false;
+        for (const BytecodeFunction& candidate : old->functions) {
+            bool kept = false;
+            for (const BytecodeFunction& function : now->functions) {
+                if (now->String(function.name) == old->String(candidate.name)) {
+                    kept = true;
+                    break;
+                }
+            }
+
+            removed = removed || !kept;
+        }
+
+        if (removed) {
+            changed[module] = 1;
+            continue;
+        }
+
         for (uint32 index = 0; index < now->functions.Size(); ++index) {
             const StringView name = now->String(now->functions[index].name);
             bool found = false;
@@ -304,6 +355,15 @@ Result<void> FindRecompileScope(const Compilation& before, const Compilation& af
         }
     }
 
+    // import 전이로 다시 검사하게 된 모듈의 함수는 따로 내리지 않는다(모듈 전체가 다시 내려간다).
+    usize kept = 0;
+    for (usize index = 0; index < functions.Size(); ++index) {
+        if (changed[static_cast<uint32>(functions[index] >> 32)] == 0) {
+            functions[kept++] = functions[index];
+        }
+    }
+
+    static_cast<void>(functions.TryResize(kept)); // 축소는 실패하지 않는다
     return Result<void>::Success();
 }
 

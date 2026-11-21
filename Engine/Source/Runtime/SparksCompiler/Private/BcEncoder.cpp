@@ -105,7 +105,8 @@ BytecodeEncoder::BytecodeEncoder(TypeChecker& checker, uint32 module, BytecodeMo
     : checker_(checker), c_(checker.compilation_), module_(module), out_(out),
       scalarIndex_(checker.allocator_), stringIndex_(checker.allocator_),
       stringNext_(checker.allocator_), refIndex_(checker.allocator_),
-      functionIndex_(checker.allocator_), order_(checker.allocator_), layoutOf_(checker.allocator_),
+      functionIndex_(checker.allocator_), typeIndex_(checker.allocator_),
+      fieldIndex_(checker.allocator_), order_(checker.allocator_), layoutOf_(checker.allocator_),
       firstPos_(checker.allocator_), start_(checker.allocator_), end_(checker.allocator_),
       physFirst_(checker.allocator_), stringOf_(checker.allocator_),
       blockAddress_(checker.allocator_), fixups_(checker.allocator_),
@@ -296,6 +297,13 @@ uint32 BytecodeEncoder::SymbolRef(BytecodeRefKind kind, uint32 symbol, uint32 ty
         detail = found == nullptr ? NoBytecodeIndex : *found;
     }
 
+    // Sparks struct의 필드는 TYPE 필드 번호를 보조 번호로 둔다(엔진 struct 필드는 없음 — LC5d).
+    if (kind == BytecodeRefKind::StructField && entry.owner != NoSymbol &&
+        TypeTable(entry.owner) != NoBytecodeIndex) {
+        const uint32* found = fieldIndex_.Find(uint64(symbol));
+        detail = found == nullptr ? NoBytecodeIndex : *found;
+    }
+
     return AddRef(kind, AddString(name.View()), detail);
 }
 
@@ -308,7 +316,95 @@ uint32 BytecodeEncoder::TypeRef(uint32 type) noexcept {
         return 0;
     }
 
-    return AddRef(BytecodeRefKind::Type, AddString(name.View()), NoBytecodeIndex);
+    return AddRef(BytecodeRefKind::Type, AddString(name.View()),
+                  TypeTable(checker_.SymbolOf(checker_.NonOptional(type))));
+}
+
+uint32 BytecodeEncoder::TypeTable(uint32 symbol) noexcept {
+    if (symbol == NoSymbol || symbol >= c_.symbols_.Size() ||
+        (c_.symbols_[symbol].kind != SymbolKind::Struct &&
+         c_.symbols_[symbol].kind != SymbolKind::Enum)) {
+        return NoBytecodeIndex;
+    }
+
+    if (const uint32* found = typeIndex_.Find(uint64(symbol))) {
+        return *found;
+    }
+
+    // 이름은 Type 참조와 같은 표시 이름이다.
+    const Symbol entry = c_.symbols_[symbol];
+    StringBuilder<128> name(checker_.allocator_);
+    Qualify(name, symbol);
+    checker_.AppendDisplayType(name, checker_.TypeOfSymbol(symbol));
+    if (name.HasFailed()) {
+        Fail(name.Status().Error());
+        return NoBytecodeIndex;
+    }
+
+    BytecodeType type;
+    type.name = AddString(name.View());
+    type.kind =
+        entry.kind == SymbolKind::Struct ? BytecodeTypeKind::Struct : BytecodeTypeKind::Enum;
+    type.firstField = static_cast<uint32>(out_.typeFields.Size());
+    const uint32 index = static_cast<uint32>(out_.types.Size());
+    if (!out_.types.TryPushBack(type) || !typeIndex_.Insert(uint64(symbol), index)) {
+        Fail(ErrorCode::OutOfMemory);
+        return NoBytecodeIndex;
+    }
+
+    // 필드(case)는 선언 순이다. struct 필드는 bank 묶음(Scalar·Ref·Buf) 안의 절대 slot 위치를
+    // 받는다.
+    const SyntaxTree& tree = c_.trees_[entry.module];
+    const uint32 members = tree.Child(entry.node, 3);
+    Array<uint32> fields(checker_.allocator_);
+    if (members != NoNode && tree.Node(members).kind == SyntaxKind::List) {
+        for (const uint32 member : tree.Children(members)) {
+            const SyntaxKind kind = tree.Node(member).kind;
+            if (kind != SyntaxKind::Field && kind != SyntaxKind::EnumCase) {
+                continue;
+            }
+
+            const uint32 field = c_.NodeSymbol(entry.module, tree.Child(member, 2));
+            if (field != NoSymbol && !fields.TryPushBack(field)) {
+                Fail(ErrorCode::OutOfMemory);
+                return NoBytecodeIndex;
+            }
+        }
+    }
+
+    uint16 slots[BytecodeBankCount] = {};
+    for (const uint32 field : fields) {
+        BytecodeTypeField item;
+        item.name = AddString(c_.symbols_[field].name);
+        if (type.kind == BytecodeTypeKind::Struct) {
+            const IrLayout layout = IrBuilder::Layout(checker_, checker_.FieldType(field));
+            item.bank = static_cast<uint8>(layout.bank);
+            item.slots = static_cast<uint8>(layout.slots);
+            item.offset = slots[item.bank]; // 묶음 안 위치 — 아래에서 절대 위치로 옮긴다
+            slots[item.bank] = static_cast<uint16>(slots[item.bank] + layout.slots);
+        }
+
+        if (!fieldIndex_.Insert(uint64(field), static_cast<uint32>(out_.typeFields.Size())) ||
+            !out_.typeFields.TryPushBack(item)) {
+            Fail(ErrorCode::OutOfMemory);
+            return NoBytecodeIndex;
+        }
+    }
+
+    BytecodeType& stored = out_.types[index];
+    stored.fieldCount = static_cast<uint32>(fields.Size());
+    for (uint32 bank = 0; bank < BytecodeBankCount; ++bank) {
+        stored.slots[bank] = slots[bank];
+    }
+
+    for (uint32 at = stored.firstField; at < stored.firstField + stored.fieldCount; ++at) {
+        BytecodeTypeField& field = out_.typeFields[at];
+        if (stored.kind == BytecodeTypeKind::Struct) {
+            field.offset += field.bank == 0 ? 0 : field.bank == 1 ? slots[0] : slots[0] + slots[1];
+        }
+    }
+
+    return index;
 }
 
 uint32 BytecodeEncoder::CallRef(uint32 callee, uint8 sub, uint32 types, Opcode& op) noexcept {

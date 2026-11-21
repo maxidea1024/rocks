@@ -11,14 +11,7 @@
 
 namespace rocks::sparks::conformance {
 
-namespace {
-
-// 두 텍스트의 첫 다른 줄(1부터)과 그 줄의 내용이다. 같으면 line은 0이다.
-struct LineDifference {
-    usize line = 0;
-    StringView expected;
-    StringView actual;
-};
+namespace detail {
 
 StringView LineAt(StringView text, usize& offset) noexcept {
     const usize begin = offset;
@@ -56,6 +49,13 @@ LineDifference FindLineDifference(StringView expected, StringView actual) noexce
     difference.line = line;
     return difference;
 }
+
+} // namespace detail
+
+namespace {
+
+using detail::FindLineDifference;
+using detail::LineDifference;
 
 // 구문 트리 golden을 비교하고 다르면 실패 항목을 더한다.
 Result<void> CompareSyntaxTree(Allocator& allocator, const CaseInput& input,
@@ -516,6 +516,14 @@ Result<void> RunCase(Allocator& allocator, const CaseInput& input, Report& repor
         }
 
         if (auto checked = CheckBytecodeRoundTrip(allocator, input, compilation, report);
+            !checked) {
+            return checked;
+        }
+    }
+
+    if (input.hasRun) {
+        if (auto checked =
+                detail::CheckRunGolden(allocator, input, compilation, mainModule, report);
             !checked) {
             return checked;
         }

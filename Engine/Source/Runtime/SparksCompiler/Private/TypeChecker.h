@@ -47,11 +47,20 @@ struct ConstantValue {
     StringView text;          // String: 리터럴 원문(따옴표·`@` 포함 — 값은 DecodeStringLiteral)
 };
 
+// ID manifest 이름의 역할이다(활성 항목의 현재 이름·alias, 은퇴 항목의 이름·alias).
+enum class ManifestNameRole : uint8 {
+    Current,
+    Alias,
+    Retired
+};
+
 // ID manifest 항목의 이름(또는 alias) 하나다(CheckStableIds.cpp — kind는 manifest kind 번호).
 struct ManifestIdName {
     uint8 kind = 0;
+    ManifestNameRole role = ManifestNameRole::Current;
     StringView name;
     uint32 entry = 0;
+    JsonPosition position; // manifest 안의 그 글자(S1006 위치)
 };
 
 // 기대 타입이 앞선 오류로 정해지지 않은 자리의 표지다(Check·Coerce의 expected·type 인자로만 쓴다).
@@ -301,10 +310,16 @@ private:
 
     // ---- 안정 ID(CheckStableIds.cpp, SparksBytecode 6.1절 — Rules 단계) ----
     void CheckStableIds() noexcept;
-    void CheckPackageIds(uint32 package, Span<const uint8> unstable) noexcept;
+    // interface 구현 함수(상속한 구현·엔진 interface 포함)를 marks(심볼 번호)에 표시한다.
+    void MarkInterfaceImplementations(Array<uint8>& marks) noexcept;
+    void CheckPackageIds(uint32 package, Span<const uint8> unstable,
+                         Span<const uint8> implementations) noexcept;
     // 이름 키의 모듈을 이 컴파일에서 판정했는지다(진단이 난 모듈의 항목은 S1005로 보지 않는다).
-    bool JudgedModule(uint32 package, StringView name, Span<const uint8> unstable) const noexcept;
-    // manifest를 읽어 활성 항목의 이름·alias를 names에 둔다. 형식 오류면 S1006을 내고 false.
+    // byPath는 그 패키지 모듈 번호를 경로 순으로 둔 것이다.
+    bool JudgedModule(uint32 package, StringView name, Span<const uint8> unstable,
+                      Span<const uint32> byPath) const noexcept;
+    // manifest를 읽어 모든 항목의 이름·alias(역할 표시)를 (kind, 이름) 순으로 names에 둔다. 형식
+    // 오류(중복 이름·ID, 다른 패키지 이름, 주인 없는 멤버 포함)면 S1006을 내고 false.
     bool ReadIdManifest(uint32 package, JsonDocument& document,
                         Array<ManifestIdName>& names) noexcept;
     bool AddPendingId(uint8 kind, StringView name, StringView former) noexcept;

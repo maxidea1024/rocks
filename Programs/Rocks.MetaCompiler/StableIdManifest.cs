@@ -222,6 +222,18 @@ internal sealed class StableIdManifest
 
     public string Register(string kind, string name) => Adopt(kind, name, Guid.NewGuid().ToString("N"));
 
+    // 새 프로젝트용으로 ID를 다시 발급한다(Docs/Design/ProjectFiles.ko.md 11.4절): 활성 항목은 Register와 같은 생성기로 새 ID를 받고 aliases를
+    // 비우며, 은퇴 항목은 지운다(새 프로젝트에는 이력이 없다). 템플릿에서 만든 프로젝트끼리 같은 타입 ID를 갖지 않게 한다. 다시 발급한 수다.
+    public int Reissue()
+    {
+        var next = entries.Where(value => !value.Retired)
+            .Select(value => new StableIdEntry(value.Kind, value.Name, Guid.NewGuid().ToString("N"), [], false)).ToList();
+        Validate(next);
+        entries.Clear();
+        entries.AddRange(next);
+        return next.Count;
+    }
+
     // 발급된 ID를 등록하기 전에 이름, 범위와 기존 예약 ID를 모두 검증한다.
     private string Adopt(string kind, string name, string id)
     {
@@ -453,7 +465,7 @@ internal sealed class StableIdManifest
 
     // 멤버 kind(이름의 주인 type이 같은 명세에 있어야 하는 것)다. C++은 field뿐이고 Sparks는 subobject·function·
     // rpc·enumCase를 더 쓴다(Docs/Design/SparksBytecode.ko.md 6.1절, SE-R8).
-    private static bool IsMember(string kind) => kind is "field" or "subobject" or "function" or "rpc" or "enumCase";
+    internal static bool IsMember(string kind) => kind is "field" or "subobject" or "function" or "rpc" or "enumCase";
 
     private static bool IsIdentifier(string part) => part.Length > 0 && (char.IsAsciiLetter(part[0]) || part[0] == '_') &&
         part.All(ch => char.IsAsciiLetterOrDigit(ch) || ch == '_');
@@ -514,8 +526,9 @@ internal sealed class StableIdManifest
         }
     }
 
-    // 멤버 이름의 주인 type 이름이다(C++은 마지막 `::` 앞, Sparks는 모듈 경로 뒤 첫 `.`의 선언까지).
-    private static string Owner(string name)
+    // 멤버 이름의 주인 type 이름이다(C++은 마지막 `::` 앞, Sparks는 모듈 경로 뒤 첫 `.`의 선언까지). 병합 검사
+    // (StableIdMergeValidator)도 같은 규칙을 쓴다.
+    internal static string Owner(string name)
     {
         if (!name.Contains('/'))
         {

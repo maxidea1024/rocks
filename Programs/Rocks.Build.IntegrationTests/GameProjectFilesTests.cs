@@ -32,14 +32,30 @@ internal static class GameProjectFilesTests
         }
 
         await Cli("projectfiles", "--project", game, "--sdk", sdk, "--compiler", compiler);
+        // 게임 이름은 .rocksproject 이름이고 기본 타깃도 그 이름이다(템플릿에서 만든 프로젝트).
+        string name = GameProjectLayout.DefaultTarget(game);
+        string descriptorFile = Path.Combine(game, name + ".rocksproject");
         string projectFiles = Path.Combine(game, "out", "ProjectFiles");
-        string solution = Path.Combine(game, "Game.slnx");
-        string gameProject = Path.Combine(projectFiles, "Game.vcxproj");
+        string solution = Path.Combine(game, name + ".slnx");
+        string gameProject = Path.Combine(projectFiles, name + ".vcxproj");
         string sdkProject = Path.Combine(projectFiles, GameProjectFiles.HeaderProjectName + ".vcxproj");
         Require(File.Exists(solution) && File.Exists(gameProject) && File.Exists(sdkProject), "game projectfiles did not write the solution and projects");
 
+        // model-only: 종료 0이고 게임 디렉터리에 아무것도 쓰지 않는다(규칙은 임시 디렉터리에 컴파일한다).
+        var snapshot = Directory.GetFiles(game, "*", SearchOption.AllDirectories).ToDictionary(file => file, File.GetLastWriteTimeUtc, StringComparer.OrdinalIgnoreCase);
+        ProcessResult modelOnly = await ProcessRunner.RunAsync(new("dotnet", [cli, "projectfiles", "--project", game, "--sdk", sdk, "--compiler", compiler,
+            "--model-only", "on"], game, environment, Timeout: TimeSpan.FromMinutes(10)));
+        var after = Directory.GetFiles(game, "*", SearchOption.AllDirectories).ToDictionary(file => file, File.GetLastWriteTimeUtc, StringComparer.OrdinalIgnoreCase);
+        Require(modelOnly.ExitCode == 0 && after.Count == snapshot.Count && after.All(pair => snapshot.TryGetValue(pair.Key, out DateTime written) && written == pair.Value),
+            "model-only must succeed without writing into the game: " + modelOnly.ExitCode + " " + modelOnly.StdOut + modelOnly.StdErr);
+
+        // 동시 생성: 생성 영역 잠금으로 차례로 돌아 둘 다 성공한다.
+        ProcessResult[] concurrent = await Task.WhenAll(Enumerable.Range(0, 2).Select(_ => ProcessRunner.RunAsync(new("dotnet",
+            [cli, "projectfiles", "--project", game, "--sdk", sdk, "--compiler", compiler], game, environment, Timeout: TimeSpan.FromMinutes(10)))));
+        Require(concurrent.All(result => result.ExitCode == 0), "concurrent game generations failed: " + string.Join("\n", concurrent.Select(result => result.StdOut + result.StdErr)));
+
         // V4: 같은 입력이면 다시 쓰지 않는다.
-        var again = await Cli("projectfiles", "--project", Path.Combine(game, "Game.rocksproject"), "--sdk", sdk, "--compiler", compiler);
+        var again = await Cli("projectfiles", "--project", descriptorFile, "--sdk", sdk, "--compiler", compiler);
         Require(again.StdOut.Contains(": 0 written,", StringComparison.Ordinal), "a second game generation wrote files: " + again.StdOut);
 
         // V3: 솔루션 왕복.
@@ -47,7 +63,7 @@ internal static class GameProjectFilesTests
         var entries = model.SolutionProjects.ToArray();
         Require(entries.Length == 2 && entries.All(entry => File.Exists(Path.GetFullPath(entry.FilePath, game))), "game solution projects: " +
             string.Join(", ", entries.Select(entry => entry.FilePath)));
-        Require(entries.Single(entry => entry.FilePath.EndsWith("Game.vcxproj", StringComparison.Ordinal)).Parent is null &&
+        Require(entries.Single(entry => Path.GetFileName(entry.FilePath) == name + ".vcxproj").Parent is null &&
             entries.Single(entry => entry.FilePath.EndsWith(GameProjectFiles.HeaderProjectName + ".vcxproj", StringComparison.Ordinal)).Parent?.Path == "/Rocks/",
             "game solution folders");
         string solutionText = File.ReadAllText(solution);
@@ -58,9 +74,9 @@ internal static class GameProjectFilesTests
         // V2: MSBuild 평가.
         GameProjectValues values = Evaluate(gameProject, sdkProject);
         Require(values.Build.Contains(Path.Combine(sdk, "Build", "IdeBuild.bat"), StringComparison.OrdinalIgnoreCase) &&
-            values.Build.Contains("-Project \"" + Path.Combine(game, "Game.rocksproject") + "\"", StringComparison.OrdinalIgnoreCase) &&
-            values.Build.Contains("-Target Game -Configuration Debug", StringComparison.Ordinal), "game NMake build command: " + values.Build);
-        Require(string.Equals(values.Output, Path.Combine(GameProjectLayout.DefaultOutput(game, "Game", NativeConfiguration.Debug), "bin", "SampleGame.exe"),
+            values.Build.Contains("-Project \"" + descriptorFile + "\"", StringComparison.OrdinalIgnoreCase) &&
+            values.Build.Contains($"-Target {name} -Configuration Debug", StringComparison.Ordinal), "game NMake build command: " + values.Build);
+        Require(string.Equals(values.Output, Path.Combine(GameProjectLayout.DefaultOutput(game, name, NativeConfiguration.Debug), "bin", name + ".exe"),
             StringComparison.OrdinalIgnoreCase), "game NMakeOutput: " + values.Output);
         string[] expected = [.. Directory.GetFiles(Path.Combine(game, "Source"), "*.cpp").Select(Path.GetFullPath).Order(StringComparer.OrdinalIgnoreCase)];
         Require(values.Sources.Order(StringComparer.OrdinalIgnoreCase).SequenceEqual(expected, StringComparer.OrdinalIgnoreCase) && values.Sources.All(File.Exists),
@@ -69,7 +85,7 @@ internal static class GameProjectFilesTests
             values.SdkBuild == "@rem Nothing to build.", "RocksSdk must hold only existing SDK headers and build nothing");
 
         // V6: NMake 명령 실행.
-        string output = GameProjectLayout.DefaultOutput(game, "Game", NativeConfiguration.Debug);
+        string output = GameProjectLayout.DefaultOutput(game, name, NativeConfiguration.Debug);
         await Run(values.Build, "game NMake build", game);
         Require(File.Exists(values.Output), "game NMake build did not build " + values.Output);
         await Run(values.Clean, "game NMake clean", game);
@@ -78,14 +94,36 @@ internal static class GameProjectFilesTests
         await Run(values.Rebuild, "game NMake rebuild", game);
         Require(File.Exists(values.Output), "game NMake rebuild did not build " + values.Output);
 
-        // associate: 생성 상태가 있으면 다시 만든다. 연결을 지워 원래대로 둔다 — 등록 SDK가 없으면 다시 만들지 못하지만 연결은 바뀌고 경고만 낸다.
+        // associate: 생성 상태가 있으면 다시 만든다.
         var associated = await Cli("associate", "--project", game, "--sdk", sdk);
         Require(associated.StdOut.Contains("Regenerating the game project files", StringComparison.Ordinal) &&
             associated.StdOut.Contains(": 0 written,", StringComparison.Ordinal), "associate did not regenerate: " + associated.StdOut);
-        var removed = await Cli("associate", "--project", game, "--version", "on");
-        Require(!File.ReadAllText(Path.Combine(game, "Game.rocksproject")).Contains("engineAssociation", StringComparison.Ordinal) &&
-            (removed.StdOut.Contains("were not regenerated", StringComparison.Ordinal) || removed.StdOut.Contains(" written,", StringComparison.Ordinal)),
-            "associate --version on: " + removed.StdOut);
+
+        // 다시 만들기가 실패하면 연결은 바뀐 채 종료 코드 2이고, 옛 프로젝트 파일의 IDE 빌드는 낡았다고 멈춘다(옛 SDK로 조용히 빌드하지 않는다).
+        string other = Path.Combine(Path.GetDirectoryName(game)!, "other-sdk");
+        Directory.CreateDirectory(other);
+        File.WriteAllText(Path.Combine(other, SdkAssociation.ManifestName), "{}");
+        try
+        {
+            ProcessResult moved = await ProcessRunner.RunAsync(new("dotnet", [cli, "associate", "--project", game, "--sdk", other], game, environment,
+                Timeout: TimeSpan.FromMinutes(10)));
+            Require(moved.ExitCode == GameProjectFiles.AssociationKeptExitCode && moved.StdErr.Contains("were not regenerated", StringComparison.Ordinal) &&
+                File.ReadAllText(descriptorFile).Contains("other-sdk", StringComparison.Ordinal),
+                "a failed regeneration after associate: " + moved.ExitCode + " " + moved.StdOut + moved.StdErr);
+            string staleOutput = await RunFailing(values.Build, game);
+            Require(staleOutput.Contains("project files are stale", StringComparison.Ordinal), "a stale game project built with the old SDK: " + staleOutput);
+        }
+        finally
+        {
+            // 연결을 지워 원래대로 둔다. 시험 등록부가 비어 있어 다시 만들기는 실패하고(2) 연결은 지워진다.
+            ProcessResult removed = await ProcessRunner.RunAsync(new("dotnet", [cli, "associate", "--project", game, "--version", "on"], game, environment,
+                Timeout: TimeSpan.FromMinutes(10)));
+            Require(removed.ExitCode == GameProjectFiles.AssociationKeptExitCode &&
+                !File.ReadAllText(descriptorFile).Contains("engineAssociation", StringComparison.Ordinal),
+                "associate --version on without a registered SDK: " + removed.ExitCode + " " + removed.StdOut + removed.StdErr);
+            Directory.Delete(other, recursive: true);
+        }
+
         Console.WriteLine("PASS game project files: generation, no-op regeneration, solution round trip, MSBuild evaluation, NMake build/clean/rebuild, associate");
     }
 
@@ -104,6 +142,25 @@ internal static class GameProjectFilesTests
         return new(game.GetPropertyValue("NMakeBuildCommandLine"), game.GetPropertyValue("NMakeCleanCommandLine"), game.GetPropertyValue("NMakeReBuildCommandLine"),
             game.GetPropertyValue("NMakeOutput"), [.. game.GetItems("ClCompile").Select(item => Full(game, item))], sdk.GetPropertyValue("NMakeBuildCommandLine"),
             [.. sdk.GetItems("ClCompile").Select(item => Full(sdk, item))], [.. sdk.GetItems("ClInclude").Select(item => Full(sdk, item))]);
+    }
+
+    // 실패해야 하는 NMake 명령을 돌리고 출력을 돌려준다.
+    private static async Task<string> RunFailing(string command, string directory)
+    {
+        var start = new ProcessStartInfo("cmd.exe", "/d /s /c \"" + command + "\"")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            WorkingDirectory = directory
+        };
+        using var process = Process.Start(start)!;
+        Task<string> output = process.StandardOutput.ReadToEndAsync();
+        Task<string> errors = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        string text = await output + await errors;
+        Require(process.ExitCode != 0, "the command was expected to fail: " + text);
+        return text;
     }
 
     // NMake처럼 명령줄 문자열을 cmd에 그대로 넘긴다(인자 목록으로 넘기면 따옴표가 이스케이프된다).

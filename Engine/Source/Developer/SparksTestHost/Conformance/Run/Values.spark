@@ -1,0 +1,45 @@
+fn Lift(v: vec3, k: float): vec3 {
+    return v * k + vec3(0.0, 0.0, 1.0);
+}
+
+fn Compose(a: quat, b: quat): quat {
+    return a * b;
+}
+
+fn Maybe(flag: bool, value: int): int? {
+    if (flag) {
+        return value;
+    }
+
+    return null;
+}
+
+fn OrZero(value: int?): int {
+    return value ?? 0;
+}
+
+fn Check(n: int): Result<int> {
+    if (n < 0) {
+        return Error.NotFound;
+    }
+
+    return n * 2;
+}
+
+fn Chain(n: int): Result<int> {
+    let doubled = try Check(n);
+    return doubled + 1;
+}
+
+fn Plain(n: int): int {
+    let doubled = try Check(n);
+    return doubled;
+}
+
+fn Done(n: int): Result<void> {
+    if (n == 0) {
+        return Error.Busy;
+    }
+
+    return;
+}

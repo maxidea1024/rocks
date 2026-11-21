@@ -1,0 +1,31 @@
+fn AddF(a: float, b: float): float {
+    return a + b;
+}
+
+fn DivF(a: float, b: float): float {
+    return a / b;
+}
+
+fn NegF(a: float): float {
+    return -a;
+}
+
+fn MulF32(a: float32, b: float32): float32 {
+    return a * b;
+}
+
+fn AddF32(a: float32, b: float32): float32 {
+    return a + b;
+}
+
+fn Square32(a: float32): float32 {
+    return a * a;
+}
+
+fn Less(a: float, b: float): bool {
+    return a < b;
+}
+
+fn AtMost(a: float, b: float): bool {
+    return a <= b;
+}

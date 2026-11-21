@@ -421,7 +421,9 @@ uint32 IrBuilder::LowerConstruct(uint32 node, uint32 typeSymbol, Span<const uint
         return result;
     }
 
-    // struct·엔진 struct·component·TagSet: NEW(타입, (필드, 값) 쌍). 빠진 필드는 실행 중 기본값.
+    // struct·엔진 struct·component·TagSet: NEW(타입, (필드, 값) 쌍). Sparks struct의 빠진 필드는
+    // 생성 자리에서 초기값·0 값을 내린다(NEWS는 0·null 버퍼 — SparksBytecode 5절). 엔진 struct·
+    // component의 빠진 필드는 실행 중 기본값(host — LC5d·LC6)이다.
     Array<uint32> values(checker_.allocator_);
     for (const uint32 argument : arguments) {
         const uint32 nameNode = tree_->Child(argument, 0);
@@ -441,10 +443,102 @@ uint32 IrBuilder::LowerConstruct(uint32 node, uint32 typeSymbol, Span<const uint
         }
     }
 
+    if (entry.kind == SymbolKind::Struct) {
+        const SyntaxTree& tree = c_.trees_[entry.module];
+        const uint32 members = tree.Child(entry.node, 3);
+        const usize given = values.Size();
+        for (const uint32 member :
+             members == NoNode ? Span<const uint32>() : tree.Children(members)) {
+            if (tree.Node(member).kind != SyntaxKind::Field) {
+                continue;
+            }
+
+            const uint32 field = c_.NodeSymbol(entry.module, tree.Child(member, 2));
+            bool provided = field == NoSymbol;
+            for (usize at = 0; at < given && !provided; at += 2) {
+                provided = values[at] == field;
+            }
+
+            if (provided) {
+                continue;
+            }
+
+            const uint32 value = LowerFieldDefault(field, node);
+            if (value != NoIrRegister &&
+                (!values.TryPushBack(field) || !values.TryPushBack(value))) {
+                Fail(ErrorCode::OutOfMemory);
+                return NoIrRegister;
+            }
+        }
+    }
+
     const uint32 result = NewValue(type);
     Add(IrOp::New, result, AddOperands(values.View()), static_cast<uint32>(values.Size() / 2),
         typeSymbol, node);
     return result;
+}
+
+uint32 IrBuilder::LowerFieldDefault(uint32 field, uint32 node) noexcept {
+    const Symbol entry = c_.symbols_[field];
+    const uint32 fieldType = checker_.FieldType(field);
+    const SyntaxTree& tree = c_.trees_[entry.module];
+    const uint32 initializer = entry.node == NoNode ? NoNode : tree.Child(entry.node, 4);
+    if (initializer == NoNode) {
+        return LowerZero(fieldType, node);
+    }
+
+    // 초기값은 상수식이다(SL §3.11 — 지역·this 없음). 그 모듈의 트리로 내리고 위치는 생성 자리다.
+    const SyntaxTree* savedTree = tree_;
+    const uint32 savedModule = module_;
+    const SourceSpan savedSpan = spanOverride_;
+    const bool savedOverride = overrideSpan_;
+    if (!overrideSpan_) {
+        spanOverride_ = tree_->Node(node).span;
+        overrideSpan_ = true;
+    }
+
+    tree_ = &tree;
+    module_ = entry.module;
+    const uint32 value = Coerce(Lower(initializer, fieldType), fieldType, initializer);
+    tree_ = savedTree;
+    module_ = savedModule;
+    spanOverride_ = savedSpan;
+    overrideSpan_ = savedOverride;
+    return value;
+}
+
+uint32 IrBuilder::LowerZero(uint32 type, uint32 node) noexcept {
+    if (type == NoType || checker_.IsOptional(type)) {
+        return NoIrRegister;
+    }
+
+    const uint32 symbol = checker_.SymbolOf(type);
+    if (symbol == NoSymbol) {
+        return NoIrRegister;
+    }
+
+    const Symbol& entry = c_.symbols_[symbol];
+    if (type == checker_.stringType_) {
+        const uint32 result = NewValue(type);
+        Add(IrOp::LoadString, result, AddString("\"\""), NoIrRegister, 0, node);
+        return result;
+    }
+
+    if (checker_.IsLanguage(type, "Array") || checker_.IsLanguage(type, "Map") ||
+        checker_.IsLanguage(type, "Set")) {
+        const uint32 result = NewValue(type);
+        Add(IrOp::New, result, AddOperands(Span<const uint32>()), 0, symbol, node, IrNewCollection);
+        return result;
+    }
+
+    const bool identity =
+        (entry.kind == SymbolKind::BuiltinType || entry.kind == SymbolKind::PreludeType) &&
+        (entry.name == "quat" || entry.name == "mat4" || entry.name == "Transform");
+    if (entry.kind == SymbolKind::Struct || identity) {
+        return LowerConstruct(node, symbol, Span<const uint32>(), type);
+    }
+
+    return NoIrRegister;
 }
 
 uint32 IrBuilder::LowerLiteralCall(uint32 node, uint32 literal, Span<const uint32> arguments,

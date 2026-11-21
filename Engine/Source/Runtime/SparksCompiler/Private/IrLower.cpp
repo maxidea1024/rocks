@@ -193,7 +193,11 @@ bool IrBuilder::EvaluateBinaryConstant(uint32 node, ConstantValue& value) noexce
         } else if (b == 0 || (a == NumericLimits<int64>::Min() && b == -1)) {
             return false;
         } else if (op == "%") {
+            // 내림 방식(SL 3.3절 — 검사기의 RemainderConstant·VM과 같다).
             result = a % b;
+            if (result != 0 && ((result < 0) != (b < 0))) {
+                result += b;
+            }
         } else if (a % b == 0) {
             result = a / b;
         } else {

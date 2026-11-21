@@ -1604,8 +1604,10 @@ Characters/PlayerCharacter.spark:42:5: error S0731: Cannot assign to a function 
 | S1002 | `not-replicable` | `@net` 필드·RPC 매개변수가 복제 타입이 아니다, RPC 반환 타입이 `void`가 아니다 | `Soft<T>`·객체 참조 |
 | S1003 | `net-write-outside-authority` | 권한 구역 밖의 `@net` 필드 쓰기(직접·호출) | `if (Owner.HasAuthority) { ... }` |
 | S1004 | `rpc-call` | `@rpc` 함수를 접두 없이·다른 대상 접두로 부른다, `@rpc`가 아닌 함수에 접두 | `Server.F(...)` |
-| S1005 | `data-id-lost` | 패키지 ID manifest의 활성 `type`·`field`·`subobject`·`enumCase` 항목이 현재 선언에도 `@formerly`에도 없다(저장·복제·편집 데이터가 연결을 잃는다 — [SparksBytecode](SparksBytecode.ko.md) 6.1절, LC4d). 위치는 manifest의 그 `name` 값 | 새 이름에 `@formerly("<옛 이름>")`을 붙이거나 `rocks ids retire`로 은퇴시킨다 |
-| S1006 | `invalid-id-manifest` | 패키지 ID manifest(`<패키지>.rocksids.json`)가 공유 형식(`schema: 1`, 항목의 kind·name·id·aliases·retired)이 아니거나 다른 패키지의 이름을 담는다 | 도구로 다시 만든다(손으로 고치지 않는다) |
+| S1005 | `data-id-lost` | 패키지 ID manifest의 활성 `type`·`field`·`subobject`·`enumCase` 항목이 현재 선언에도 `@formerly`에도 없다(저장·복제·편집 데이터가 연결을 잃는다 — [SparksBytecode](SparksBytecode.ko.md) 6.1절, LC4d). 위치는 manifest의 그 `name` 값 | 새 이름에 `@formerly("<옛 이름>")`(모듈 이동이면 전체 옛 키)을 붙이거나, `rocks ids rename`으로 옮기거나, `rocks ids retire`로 은퇴시킨다. field와 subobject 사이로 형태만 바뀌었으면 형태를 되돌리거나 은퇴·데이터 이전 |
+| S1006 | `invalid-id-manifest` | 패키지 ID manifest(`<패키지>.rocksids.json`)가 공유 형식(`schema: 1`, 항목의 kind·name·id·aliases·retired)이 아니거나, 다른 패키지의 이름·alias, 같은 이름·ID 둘, 주인 type 없는 활성 멤버를 담는다 | 도구로 다시 만든다(손으로 고치지 않는다) |
+| S1007 | `id-name-reserved` | 선언의 이름 키가 ID manifest의 alias(다른 ID의 옛 이름)이거나 은퇴한 이름이다([SparksBytecode](SparksBytecode.ko.md) 6.1절). 위치는 선언 이름 | 다른 이름을 쓴다 |
+| S1008 | `id-claimed-twice` | `@formerly`가 가리키는 ID를 다른 선언이 이미 쓴다(옛 이름이 아직 선언돼 있거나 두 `@formerly`가 같은 이름). 위치는 `@formerly`를 단 선언 이름 | `@formerly`를 빼거나 다른 선언의 이름을 먼저 바꾼다 |
 
 - **유지 자원·로드(S09xx, LC3c):** 규칙과 위치는 §3.14다.
 
@@ -2176,7 +2178,7 @@ class DoorLogic : ScriptableComponent {
   - `.ast`(구문 트리 golden)는 파일 사례에만 둔다(폴더 사례 옆의 `.ast`는 corpus 오류).
 - **이름 해석 golden(LC2b, SD58):** 사례 옆에 `<사례>.names`가 있으면 이름 해석 덤프(`AppendNameDump`, 형식은 `Compilation.h`)가 파일 내용과 바이트 단위로 같아야 한다. 파일 사례는 그 모듈의 덤프, 폴더 사례는 이름 해석을 한 모듈마다 `== <사례 폴더 기준 경로>` 줄과 그 덤프를 경로 byte 순으로 이은 것이다. 판정·실패 보고는 `.ast`와 같다.
 - **식 타입 golden(LC2c, SD58):** 사례 옆에 `<사례>.types`가 있으면 식 타입 덤프(`AppendTypeDump`, §3.10)가 파일 내용과 바이트 단위로 같아야 한다. 묶는 방식(파일·폴더 사례)과 판정·실패 보고는 `.names`와 같고, 타입 검사를 하지 않은 사례(`stage`가 `types`보다 앞)에 `.types`가 있으면 실패다.
-- **구문 트리 golden(LC1b, SD58):** 사례 옆에 `<사례>.ast`가 있으면 그 사례의 구문 트리 덤프(`AppendSyntaxDump`, 형식은 `SyntaxTree.h`)가 파일 내용과 바이트 단위로 같아야 한다(끝의 LF 포함). `.ast`는 선택이며 `.spark` 없이 있으면 corpus 오류이고, 원문 검사가 막아(S0101·S0103) 트리가 없는 사례에 `.ast`가 있어도 실패다. 진단(`.expect`)과 트리는 따로 판정한다. 다르면 첫 다른 줄과 실제 트리 전체를 보인다(검토 뒤 golden 갱신에 쓴다). 사례 실행은 컴파일(LC2a부터 manifest·schema·모듈 경로·어휘·구문 분석·import 해석, 마일스톤마다 늘어난다)이다. 이후 IR·bytecode 덤프 golden도 같은 방식(`.ir`·`.bytecode`)으로 더한다.
+- **구문 트리 golden(LC1b, SD58):** 사례 옆에 `<사례>.ast`가 있으면 그 사례의 구문 트리 덤프(`AppendSyntaxDump`, 형식은 `SyntaxTree.h`)가 파일 내용과 바이트 단위로 같아야 한다(끝의 LF 포함). `.ast`는 선택이며 `.spark` 없이 있으면 corpus 오류이고, 원문 검사가 막아(S0101·S0103) 트리가 없는 사례에 `.ast`가 있어도 실패다. 진단(`.expect`)과 트리는 따로 판정한다. 다르면 첫 다른 줄과 실제 트리 전체를 보인다(검토 뒤 golden 갱신에 쓴다). 사례 실행은 컴파일(LC2a부터 manifest·schema·모듈 경로·어휘·구문 분석·import 해석, 마일스톤마다 늘어난다)이다. IR·bytecode 덤프 golden도 같은 방식(`.ir`·`.bc` — `.bc`는 `.sparkc` 왕복도 본다)이다. 실행 golden `.run`(LC5 — [SparksVm](SparksVm.ko.md) 7절)은 진단 없는 파일 사례의 최상위 함수 호출을 줄마다 적고, 실행기가 `.sparkc` 왕복을 거친 모듈을 VM으로 실행해 결과(값·fault 종류와 위치·실행 끝)와 명령 수를 다시 써서 비교한다.
 - corpus는 `Engine/Source/Developer/SparksTestHost/Conformance`에 두고 시험이 실행 중 엔진 디렉터리 탐색으로 찾는다. 저장소가 줄 끝을 LF로 정규화하므로 CRLF·잘못된 UTF-8·BOM처럼 바이트가 중요한 사례는 C++ 시험에 직접 넣는다.
 - 제안 목표(미측정): 파일 1,000개 기준 자동완성 p95 100 ms, 편집 후 진단 p95 300 ms. 검증: 후보 golden test, prefix fuzz, CLI와의 진단 동등성, rename 후 저장 데이터 보존.
 

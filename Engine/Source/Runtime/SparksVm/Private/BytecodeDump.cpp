@@ -57,6 +57,10 @@ public:
                 Quoted(module_.String(ref.detail));
             } else if (ref.kind == BytecodeRefKind::Function && ref.detail != NoBytecodeIndex) {
                 out_.AppendFormat(" #{}", ref.detail);
+            } else if (ref.kind == BytecodeRefKind::Type && ref.detail != NoBytecodeIndex) {
+                out_.AppendFormat(" type{}", ref.detail);
+            } else if (ref.kind == BytecodeRefKind::StructField && ref.detail != NoBytecodeIndex) {
+                out_.AppendFormat(" field{}", ref.detail);
             } else if (ref.detail != NoBytecodeIndex) {
                 out_.AppendFormat(" type ref{}", ref.detail);
             }
@@ -67,6 +71,30 @@ public:
             }
 
             out_.Append("\n");
+        }
+
+        // TYPE 표(형식 버전 2): struct는 bank별 slot 수와 필드(bank·slot 수·절대 위치), enum은
+        // case.
+        for (usize index = 0; index < module_.types.Size(); ++index) {
+            const BytecodeType& type = module_.types[index];
+            const bool structType = type.kind == BytecodeTypeKind::Struct;
+            out_.AppendFormat("type{} = {} {}", index, structType ? "struct" : "enum",
+                              module_.String(type.name));
+            if (structType) {
+                out_.AppendFormat(" s{} r{} b{}", type.slots[0], type.slots[1], type.slots[2]);
+            }
+
+            out_.Append("\n");
+            for (uint32 at = type.firstField; at < type.firstField + type.fieldCount; ++at) {
+                const BytecodeTypeField& field = module_.typeFields[at];
+                out_.AppendFormat("  field{} {}", at, module_.String(field.name));
+                if (structType) {
+                    out_.AppendFormat(" {}{} x{}", BankLetter(field.bank), field.offset,
+                                      field.slots);
+                }
+
+                out_.Append("\n");
+            }
         }
 
         for (const BytecodeFunction& function : module_.functions) {

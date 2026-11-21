@@ -9,7 +9,8 @@
 
 // 안정 ID 시험이다(Docs/Design/SparksBytecode.ko.md 6.1절, LC4d): 선언의 이름 키와 발급 대기 목록,
 // manifest와 맞춘 S1005(사라진 데이터 연결 ID)·`@formerly`·은퇴 항목, manifest 형식 오류 S1006,
-// 진단이 난 모듈의 제외, 할당 실패.
+// 진단이 난 모듈의 제외, 맞춤 순서(alias·은퇴 이름 S1007, 이중 사용 S1008), type rename의 멤버
+// 승계, 전체 키 `@formerly`(모듈 이동), interface 구현 함수, subobject 판정, 할당 실패.
 using namespace rocks;
 using namespace rocks::sparks;
 namespace sparks_stable_id_tests_file {
@@ -21,7 +22,8 @@ constexpr StringView EngineSchema =
 { "name": "Actor", "id": "5a7e0000000000000000000000000001", "kind": "object", "scriptExtensible": true, "events": [ { "name": "Destroyed", "id": "5a7e0000000000000000000000000104" } ] },
 { "name": "Component", "id": "5a7e0000000000000000000000000002", "kind": "object", "fields": [ { "name": "Owner", "id": "5a7e0000000000000000000000000201", "type": "Actor" } ] },
 { "name": "ScriptableComponent", "id": "5a7e0000000000000000000000000003", "kind": "object", "base": "Component", "scriptExtensible": true },
-{ "name": "World", "id": "5a7e0000000000000000000000000006", "kind": "object" }
+{ "name": "World", "id": "5a7e0000000000000000000000000006", "kind": "object" },
+{ "name": "Usable", "id": "5a7e0000000000000000000000000007", "kind": "interface", "functions": [ { "name": "Use", "id": "5a7e0000000000000000000000000701" } ] }
 ] })";
 
 // 이름 키를 받는 선언(type·field·enumCase·handler·RPC)과 받지 않는 선언(최상위 fn·일반 메서드).
@@ -276,6 +278,267 @@ TEST(SparksStableIds_UnstableModulesAreNotJudged) {
     CHECK(lost == 1); // 지운 모듈(Gone)의 항목만
 }
 
+namespace {
+
+// 발급 대기 줄 하나가 있는지다.
+bool HasPending(const Fixture& fixture, StringView line) noexcept {
+    SystemAllocator allocator;
+    StringBuilder<2048> pending(allocator);
+    fixture.Pending(pending);
+    const StringView text = pending.View();
+    for (usize at = 0; at + line.ByteCount() <= text.ByteCount(); ++at) {
+        if (StringView(text.Data() + at, line.ByteCount()) == line &&
+            (at == 0 || text.Data()[at - 1] == '\n') &&
+            (at + line.ByteCount() == text.ByteCount() ||
+             text.Data()[at + line.ByteCount()] == '\n')) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// 진단 index의 원문 위치(줄·열)다.
+SourceLocation LocationOf(const Fixture& fixture, usize index) noexcept {
+    const Diagnostic& diagnostic = fixture.diagnostics[index];
+    return fixture.sources.Get(diagnostic.Source()).Locate(diagnostic.Span().begin);
+}
+
+usize CountCode(const Fixture& fixture, DiagnosticCode code) noexcept {
+    usize count = 0;
+    for (usize index = 0; index < fixture.diagnostics.Count(); ++index) {
+        count += fixture.diagnostics[index].Code() == code ? 1 : 0;
+    }
+
+    return count;
+}
+
+// Program의 Door를 Gate로 바꾸고(`@formerly("Door")`) Open을 IsOpen으로 바꾼 원문이다.
+constexpr StringView RenamedType = R"(enum Side { Left, Right }
+
+struct Stats {
+    var Level: int = 1;
+}
+
+@formerly("Door") class Gate : ScriptableComponent {
+    @save @formerly("Open") var IsOpen = false;
+    var Info = Stats();
+
+    on Owner.Destroyed() {
+    }
+
+    @rpc(Server) fn Request() {
+        IsOpen = true;
+    }
+}
+)";
+
+} // namespace
+
+TEST(SparksStableIds_TypeRenameCarriesMembers) {
+    // type이 `@formerly`로 이어지면 멤버는 옛 주인 키 아래 같은 이름을 잇고(발급 대기 없음 — 도구의
+    // type rename이 옮긴다), 이름도 바꾼 멤버는 type rename 뒤의 키에서 rename한다.
+    SystemAllocator allocator;
+    Fixture fixture(allocator);
+    REQUIRE(fixture.Build(RenamedType, FullManifest));
+    if (fixture.diagnostics.Count() != 0) {
+        fixture.Print();
+    }
+
+    CHECK(fixture.diagnostics.Count() == 0);
+    StringBuilder<2048> pending(allocator);
+    fixture.Pending(pending);
+    CHECK(pending.View() ==
+          StringView("type Game/Doors/Door.Gate <- Game/Doors/Door.Door\n"
+                     "field Game/Doors/Door.Gate.IsOpen <- Game/Doors/Door.Gate.Open\n"));
+}
+
+TEST(SparksStableIds_FullKeyFormerlyAfterModuleMove) {
+    // 모듈을 옮긴 type은 전체 옛 키로 잇는다. 옛 모듈이 컴파일에 없어도(지운 모듈) 이은 항목은
+    // S1005가 아니다.
+    SystemAllocator allocator;
+    constexpr StringView Manifest = R"json({ "schema": 1, "entries": [
+{ "kind": "type", "name": "Game/Old/Place.Door", "id": "00000000000000000000000000000006", "aliases": [], "retired": false },
+{ "kind": "field", "name": "Game/Old/Place.Door.Open", "id": "00000000000000000000000000000007", "aliases": [], "retired": false },
+{ "kind": "field", "name": "Game/Old/Place.Door.Gone", "id": "00000000000000000000000000000008", "aliases": [], "retired": false }
+] })json";
+    constexpr StringView Moved =
+        R"(@formerly("Game/Old/Place.Door") class Door : ScriptableComponent {
+    @save var Open = false;
+}
+)";
+    Fixture fixture(allocator);
+    REQUIRE(fixture.Build(Moved, Manifest));
+    REQUIRE(fixture.diagnostics.Count() == 1); // Gone만
+    CHECK(fixture.diagnostics[0].Code() == DiagnosticCode::DataIdLost);
+    StringBuilder<1024> pending(allocator);
+    fixture.Pending(pending);
+    CHECK(pending.View() == StringView("type Game/Doors/Door.Door <- Game/Old/Place.Door\n"));
+}
+
+TEST(SparksStableIds_ReservedNamesS1007) {
+    SystemAllocator allocator;
+    {
+        // 현재 이름 키가 다른 ID의 alias(옛 이름)다. 직접 맞추지 않는다(S1007, 위치는 선언 이름).
+        // 그 ID의 현재 이름(Gate)은 선언이 없으므로 S1005다.
+        constexpr StringView Manifest = R"json({ "schema": 1, "entries": [
+{ "kind": "type", "name": "Game/Doors/Door.Gate", "id": "00000000000000000000000000000006", "aliases": ["Game/Doors/Door.Door"], "retired": false }
+] })json";
+        Fixture fixture(allocator);
+        REQUIRE(fixture.Build(Program, Manifest));
+        CHECK(CountCode(fixture, DiagnosticCode::IdNameReserved) == 1);
+        CHECK(CountCode(fixture, DiagnosticCode::DataIdLost) == 1);
+        CHECK(fixture.diagnostics.Count() == 2);
+        for (usize index = 0; index < fixture.diagnostics.Count(); ++index) {
+            if (fixture.diagnostics[index].Code() == DiagnosticCode::IdNameReserved) {
+                CHECK(LocationOf(fixture, index).line == 7);
+                CHECK(LocationOf(fixture, index).column == 7);
+            }
+        }
+
+        CHECK(!HasPending(fixture, "type Game/Doors/Door.Door"));
+        CHECK(HasPending(fixture, "field Game/Doors/Door.Door.Open"));
+    }
+    {
+        // 은퇴한 이름(이름·alias 모두)을 새 선언에 쓰면 S1007이다.
+        constexpr StringView Manifest = R"json({ "schema": 1, "entries": [
+{ "kind": "type", "name": "Game/Doors/Door.Door", "id": "00000000000000000000000000000006", "aliases": ["Game/Doors/Door.Stats"], "retired": true }
+] })json";
+        Fixture fixture(allocator);
+        REQUIRE(fixture.Build(Program, Manifest));
+        CHECK(CountCode(fixture, DiagnosticCode::IdNameReserved) == 2);
+        CHECK(fixture.diagnostics.Count() == 2);
+    }
+}
+
+TEST(SparksStableIds_ClaimedTwiceS1008) {
+    SystemAllocator allocator;
+    {
+        // 옛 이름이 아직 선언돼 있다(Door와 `@formerly("Door") class Portal`).
+        StringBuilder<2048> program(allocator);
+        program.Append(Program).Append(
+            "\n@formerly(\"Door\") class Portal : ScriptableComponent {\n}\n");
+        Fixture fixture(allocator);
+        REQUIRE(fixture.Build(program.View(), FullManifest));
+        REQUIRE(fixture.diagnostics.Count() == 1);
+        CHECK(fixture.diagnostics[0].Code() == DiagnosticCode::IdClaimedTwice);
+        CHECK(LocationOf(fixture, 0).line == 26);
+        // 진단을 낸 선언은 발급 대기에 넣지 않는다(오류가 있는 컴파일은 도구가 발급하지 않는다).
+        CHECK(!HasPending(fixture, "type Game/Doors/Door.Portal"));
+    }
+    {
+        // 두 `@formerly`가 같은 옛 이름이다(둘째가 S1008 — 선언 순).
+        constexpr StringView Twice = R"(@formerly("Door") class A : ScriptableComponent {
+}
+
+@formerly("Door") class B : ScriptableComponent {
+}
+)";
+        constexpr StringView Manifest = R"json({ "schema": 1, "entries": [
+{ "kind": "type", "name": "Game/Doors/Door.Door", "id": "00000000000000000000000000000006", "aliases": [], "retired": false }
+] })json";
+        Fixture fixture(allocator);
+        REQUIRE(fixture.Build(Twice, Manifest));
+        REQUIRE(fixture.diagnostics.Count() == 1);
+        CHECK(fixture.diagnostics[0].Code() == DiagnosticCode::IdClaimedTwice);
+        CHECK(LocationOf(fixture, 0).line == 4);
+        CHECK(HasPending(fixture, "type Game/Doors/Door.A <- Game/Doors/Door.Door"));
+        CHECK(!HasPending(fixture, "type Game/Doors/Door.B"));
+    }
+}
+
+TEST(SparksStableIds_FormerlyThroughAliasUsesCurrentName) {
+    // `@formerly`가 alias에 맞아도 발급 대기의 옛 이름은 항목의 현재 이름이다(도구의 rename은 현재
+    // 이름으로 찾는다).
+    SystemAllocator allocator;
+    constexpr StringView Manifest = R"json({ "schema": 1, "entries": [
+{ "kind": "type", "name": "Game/Doors/Door.Door", "id": "00000000000000000000000000000006", "aliases": [], "retired": false },
+{ "kind": "field", "name": "Game/Doors/Door.Door.Open2", "id": "00000000000000000000000000000007", "aliases": ["Game/Doors/Door.Door.Open"], "retired": false }
+] })json";
+    constexpr StringView Source = R"(class Door : ScriptableComponent {
+    @save @formerly("Open") var IsOpen = false;
+}
+)";
+    Fixture fixture(allocator);
+    REQUIRE(fixture.Build(Source, Manifest));
+    CHECK(fixture.diagnostics.Count() == 0);
+    StringBuilder<1024> pending(allocator);
+    fixture.Pending(pending);
+    CHECK(pending.View() ==
+          StringView("field Game/Doors/Door.Door.IsOpen <- Game/Doors/Door.Door.Open2\n"));
+}
+
+TEST(SparksStableIds_InterfaceImplementationsAndSubobjects) {
+    // Sparks·엔진 interface를 구현하는 함수(상속한 구현은 그 기반 class 함수)는 FunctionId를
+    // 받는다. class의 `let` 필드가 component 생성식이면 subobject, 객체 참조 필드는 field다.
+    SystemAllocator allocator;
+    constexpr StringView Source = R"(interface Openable {
+    fn Toggle();
+}
+
+open class Base : ScriptableComponent {
+    fn Use() {
+    }
+}
+
+class Lever : Base, Usable, Openable {
+    let Hinge = Part();
+    @edit let Target: Lever;
+    let Cached: Lever? = null;
+
+    fn Toggle() {
+    }
+
+    fn Plain() {
+    }
+}
+
+class Part : ScriptableComponent {
+}
+)";
+    Fixture fixture(allocator);
+    REQUIRE(fixture.Build(Source));
+    if (fixture.diagnostics.Count() != 0) {
+        fixture.Print();
+    }
+
+    CHECK(fixture.diagnostics.Count() == 0);
+    StringBuilder<2048> pending(allocator);
+    fixture.Pending(pending);
+    CHECK(pending.View() == StringView("type Game/Doors/Door.Base\n"
+                                       "function Game/Doors/Door.Base.Use\n"
+                                       "type Game/Doors/Door.Lever\n"
+                                       "subobject Game/Doors/Door.Lever.Hinge\n"
+                                       "field Game/Doors/Door.Lever.Target\n"
+                                       "field Game/Doors/Door.Lever.Cached\n"
+                                       "function Game/Doors/Door.Lever.Toggle\n"
+                                       "type Game/Doors/Door.Part\n"));
+}
+
+TEST(SparksStableIds_FieldSubobjectReshapeS1005) {
+    // field가 subobject로 형태만 바뀌면 S1005이며 메시지가 형태 변경을 알린다.
+    SystemAllocator allocator;
+    constexpr StringView Manifest = R"json({ "schema": 1, "entries": [
+{ "kind": "type", "name": "Game/Doors/Door.Door", "id": "00000000000000000000000000000006", "aliases": [], "retired": false },
+{ "kind": "field", "name": "Game/Doors/Door.Door.Hinge", "id": "00000000000000000000000000000007", "aliases": [], "retired": false },
+{ "kind": "type", "name": "Game/Doors/Door.Part", "id": "00000000000000000000000000000008", "aliases": [], "retired": false }
+] })json";
+    constexpr StringView Source = R"(class Door : ScriptableComponent {
+    let Hinge = Part();
+}
+
+class Part : ScriptableComponent {
+}
+)";
+    Fixture fixture(allocator);
+    REQUIRE(fixture.Build(Source, Manifest));
+    REQUIRE(fixture.diagnostics.Count() == 1);
+    CHECK(fixture.diagnostics[0].Code() == DiagnosticCode::DataIdLost);
+    CHECK(fixture.diagnostics[0].Message() ==
+          StringView("field 'Game/Doors/Door.Door.Hinge' in the ID manifest is now declared as a "
+                     "subobject."));
+}
+
 TEST(SparksStableIds_InvalidManifestsS1006) {
     SystemAllocator allocator;
     const StringView bad[] = {
@@ -288,6 +551,13 @@ TEST(SparksStableIds_InvalidManifestsS1006) {
         R"({ "schema": 1, "entries": [ { "kind": "type", "name": "Game/A.B", "id": "00000000000000000000000000000000", "aliases": [], "retired": false } ] })",
         R"({ "schema": 1, "entries": [ { "kind": "type", "name": "Other/A.B", "id": "00000000000000000000000000000001", "aliases": [], "retired": false } ] })",
         R"({ "schema": 1, "entries": [ { "kind": "type", "name": "Game/A.B", "id": "00000000000000000000000000000001", "aliases": [1], "retired": false } ] })",
+        // 다른 패키지의 alias, 같은 이름 둘(이름·alias·은퇴 이름 사이), 같은 ID 둘, 주인 없는 멤버.
+        R"({ "schema": 1, "entries": [ { "kind": "type", "name": "Game/A.B", "id": "00000000000000000000000000000001", "aliases": ["Other/A.B"], "retired": false } ] })",
+        R"({ "schema": 1, "entries": [ { "kind": "type", "name": "Game/A.B", "id": "00000000000000000000000000000001", "aliases": [], "retired": false }, { "kind": "type", "name": "Game/A.C", "id": "00000000000000000000000000000002", "aliases": ["Game/A.B"], "retired": false } ] })",
+        R"({ "schema": 1, "entries": [ { "kind": "type", "name": "Game/A.B", "id": "00000000000000000000000000000001", "aliases": [], "retired": true }, { "kind": "type", "name": "Game/A.B", "id": "00000000000000000000000000000002", "aliases": [], "retired": false } ] })",
+        R"({ "schema": 1, "entries": [ { "kind": "type", "name": "Game/A.B", "id": "00000000000000000000000000000001", "aliases": [], "retired": false }, { "kind": "type", "name": "Game/A.C", "id": "00000000000000000000000000000001", "aliases": [], "retired": false } ] })",
+        R"({ "schema": 1, "entries": [ { "kind": "field", "name": "Game/A.B.X", "id": "00000000000000000000000000000001", "aliases": [], "retired": false } ] })",
+        R"({ "schema": 1, "entries": [ { "kind": "type", "name": "Game/A.B", "id": "00000000000000000000000000000001", "aliases": [], "retired": true }, { "kind": "field", "name": "Game/A.B.X", "id": "00000000000000000000000000000002", "aliases": [], "retired": false } ] })",
     };
     for (const StringView manifest : bad) {
         Fixture fixture(allocator);

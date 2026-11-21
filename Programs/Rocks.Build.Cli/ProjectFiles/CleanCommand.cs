@@ -8,8 +8,9 @@ namespace Rocks.Build.Cli;
 /// 사용 예: <c>Rocks.Build.Cli clean --root . --target Sandbox --configuration Debug</c>.
 /// <list type="bullet">
 /// <item><c>--platform host|android</c>(기본 host), <c>--android-abi</c>(기본 arm64), <c>--output</c>: build와 같은 출력 경로 규칙이다.</item>
-/// <item>지울 디렉터리는 <c>&lt;root&gt;/out</c>의 엄격한 하위이고 Rocks 출력 표지(<c>.native-build.lock</c> 또는 <c>.rocks-invocation.lock</c>)가 있어야
-/// 한다. 아니면 거부한다. 호출 잠금만 있는 출력은 네이티브 빌드 전에 실패한 빌드(규칙·메타 단계)의 것이다.
+/// <item>지울 디렉터리는 <c>&lt;root&gt;/out</c>의 엄격한 하위이고 Rocks 빌드 출력 표지가 있어야 한다: <c>.native-build.lock</c>, 또는
+/// <c>.rocks-invocation.lock</c>과 실행 기록(<c>action-report.json</c>·<c>game-build-evidence.json</c>·<c>build-evidence.json</c> — 네이티브 빌드 전에
+/// 실패한 빌드의 출력). 프로젝트 파일 디렉터리(<c>&lt;root&gt;/out/ProjectFiles</c>와 그 아래)는 호출 잠금이 있어도 늘 거부한다.
 /// 출력이 없으면 할 일이 없는 성공이다.</item>
 /// <item>그 출력의 호출 잠금을 잡은 뒤 잠금 파일 둘(<c>.rocks-invocation.lock</c>·<c>.native-build.lock</c>)을 뺀 모든 항목을 지운다.</item>
 /// </list>
@@ -29,10 +30,18 @@ internal static class CleanCommand
 
     private static readonly string[] KeptFiles = [InvocationMarker, OutputMarker];
 
+    // 호출 잠금만 있는 출력을 빌드 출력으로 받게 하는 실행 기록이다.
+    private static readonly string[] RunRecords = ["action-report.json", "game-build-evidence.json", "build-evidence.json"];
+
+    // 프로젝트 파일 생성 영역의 디렉터리 이름이다(<root>/out 아래).
+    private const string ProjectFilesDirectoryName = "ProjectFiles";
+
     public static async Task<int> RunAsync(Dictionary<string, string> options, CancellationToken cancellationToken)
     {
-        string target = options.TryGetValue("target", out string? name) && name.Length != 0
-            ? name : throw new ArgumentException($"Command '{Name}' requires --target <name>.");
+        // 게임은 --target이 없으면 .rocksproject 이름의 타깃이다(게임 빌드와 같다).
+        string target = options.TryGetValue("target", out string? name) && name.Length != 0 ? name
+            : options.TryGetValue("project", out string? game) ? GameProjectLayout.DefaultTarget(Path.GetFullPath(game))
+            : throw new ArgumentException($"Command '{Name}' requires --target <name>.");
         NativeConfiguration configuration = BuildCommand.Configuration(options);
         // 게임 프로젝트(--project): 게임 출력 규칙(GameProjectLayout)이고 경계 루트는 프로젝트 디렉터리다(Docs/Design/ProjectFiles.ko.md 7.3절).
         if (options.TryGetValue("project", out string? project))
@@ -77,14 +86,22 @@ internal static class CleanCommand
             throw new ArgumentException($"Clean refuses {output}: only build outputs under {Path.Combine(root, "out")} are cleaned.");
         }
 
+        if (DirectoryPath.IsAtOrUnder(output, Path.Combine(root, "out", ProjectFilesDirectoryName)))
+        {
+            throw new ArgumentException($"Clean refuses {output}: it is the generated project files area, not a build output.");
+        }
+
         if (!Directory.Exists(output))
         {
             return -1;
         }
 
-        if (!File.Exists(Path.Combine(output, OutputMarker)) && !File.Exists(Path.Combine(output, InvocationMarker)))
+        bool built = File.Exists(Path.Combine(output, OutputMarker)) ||
+            (File.Exists(Path.Combine(output, InvocationMarker)) && RunRecords.Any(record => File.Exists(Path.Combine(output, record))));
+        if (!built)
         {
-            throw new ArgumentException($"Clean refuses {output}: it has no {OutputMarker} or {InvocationMarker}, so it is not a Rocks build output.");
+            throw new ArgumentException($"Clean refuses {output}: it has no {OutputMarker} (or {InvocationMarker} with a build record), so it is not a " +
+                "Rocks build output.");
         }
 
         await using var invocationLock = await OutputInvocationLock.AcquireAsync(output, cancellationToken);

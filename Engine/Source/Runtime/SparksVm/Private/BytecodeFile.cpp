@@ -13,6 +13,7 @@ constexpr uint8 Magic[] = {'S', 'P', 'K', 'C'};
 constexpr usize TagBytes = 4;
 constexpr uint8 ConstantsTag[TagBytes] = {'K', 'C', 'O', 'N'};
 constexpr uint8 ReferencesTag[TagBytes] = {'R', 'E', 'F', 'S'};
+constexpr uint8 TypesTag[TagBytes] = {'T', 'Y', 'P', 'E'};
 constexpr uint8 FunctionsTag[TagBytes] = {'F', 'U', 'N', 'C'};
 constexpr uint8 DebugTag[TagBytes] = {'D', 'B', 'U', 'G'};
 
@@ -20,6 +21,8 @@ constexpr uint8 DebugTag[TagBytes] = {'D', 'B', 'U', 'G'};
 constexpr usize ScalarBytes = 8;
 constexpr usize StringHeaderBytes = 4;
 constexpr usize RefBytes = 13;
+constexpr usize TypeBytes = 4 + 1 + 4 + 4 + 2 * BytecodeBankCount;
+constexpr usize TypeFieldBytes = 4 + 1 + 1 + 4;
 constexpr usize FunctionBytes = 4 * 3 + 2 * 3 * BytecodeBankCount + 2 + BytecodeHashBytes + 4 * 4;
 constexpr usize WordBytes = 4;
 constexpr usize SwitchBytes = 12;
@@ -130,6 +133,26 @@ Result<void> WriteBytecodeFile(const BytecodeModule& module, Array<uint8>& out) 
             writer.WriteU32LE(ref.name);
             writer.WriteU32LE(ref.detail);
             writer.WriteU32LE(ref.arguments);
+        }
+    });
+    WriteSection(writer, TypesTag, [&]() noexcept {
+        writer.WriteU32LE(static_cast<uint32>(module.types.Size()));
+        for (const BytecodeType& type : module.types) {
+            writer.WriteU32LE(type.name);
+            writer.WriteU8(static_cast<uint8>(type.kind));
+            writer.WriteU32LE(type.firstField);
+            writer.WriteU32LE(type.fieldCount);
+            for (const uint16 slots : type.slots) {
+                writer.WriteU16LE(slots);
+            }
+        }
+
+        writer.WriteU32LE(static_cast<uint32>(module.typeFields.Size()));
+        for (const BytecodeTypeField& field : module.typeFields) {
+            writer.WriteU32LE(field.name);
+            writer.WriteU8(field.bank);
+            writer.WriteU8(field.slots);
+            writer.WriteU32LE(field.offset);
         }
     });
     WriteSection(writer, FunctionsTag, [&]() noexcept {
@@ -245,6 +268,10 @@ public:
         }
 
         if (auto read = Section(ReferencesTag, &FileReader::References); !read) {
+            return read;
+        }
+
+        if (auto read = Section(TypesTag, &FileReader::Types); !read) {
             return read;
         }
 
@@ -378,6 +405,41 @@ private:
         return Result<void>::Success();
     }
 
+    Result<void> Types(ByteReader& reader) noexcept {
+        uint32 count = 0;
+        if (!Count(reader, TypeBytes, count) || !Resize(out_.types, count)) {
+            return Failure();
+        }
+
+        for (BytecodeType& type : out_.types) {
+            type.name = reader.ReadU32LE();
+            const uint8 kind = reader.ReadU8();
+            if (kind > static_cast<uint8>(BytecodeTypeKind::Enum)) {
+                return Reject(BytecodeLoadError::BadTable);
+            }
+
+            type.kind = static_cast<BytecodeTypeKind>(kind);
+            type.firstField = reader.ReadU32LE();
+            type.fieldCount = reader.ReadU32LE();
+            for (uint16& slots : type.slots) {
+                slots = reader.ReadU16LE();
+            }
+        }
+
+        if (!Count(reader, TypeFieldBytes, count) || !Resize(out_.typeFields, count)) {
+            return Failure();
+        }
+
+        for (BytecodeTypeField& field : out_.typeFields) {
+            field.name = reader.ReadU32LE();
+            field.bank = reader.ReadU8();
+            field.slots = reader.ReadU8();
+            field.offset = reader.ReadU32LE();
+        }
+
+        return Result<void>::Success();
+    }
+
     Result<void> Functions(ByteReader& reader) noexcept {
         uint32 count = 0;
         if (!Count(reader, FunctionBytes, count) || !Resize(out_.functions, count)) {
@@ -503,13 +565,19 @@ public:
         }
 
         for (const BytecodeRef& ref : module_.refs) {
+            // 보조 번호: 리터럴은 글자, 같은 모듈 함수는 함수 표, Type은 TYPE 표, StructField는
+            // TYPE 필드 표(Sparks struct — 형식 버전 2), 그 밖(타입 인자를 단 호출)은 Type 참조다.
             const bool detailOk =
-                ref.detail == NoBytecodeIndex ||
-                (ref.kind == BytecodeRefKind::Literal ? ref.detail < strings
-                 : ref.kind == BytecodeRefKind::Function
-                     ? ref.detail < module_.functions.Size()
-                     : ref.detail < module_.refs.Size() &&
-                           module_.refs[ref.detail].kind == BytecodeRefKind::Type);
+                ref.kind == BytecodeRefKind::StructField
+                    ? ref.detail == NoBytecodeIndex || ref.detail < module_.typeFields.Size()
+                    : ref.detail == NoBytecodeIndex ||
+                          (ref.kind == BytecodeRefKind::Literal ? ref.detail < strings
+                           : ref.kind == BytecodeRefKind::Function
+                               ? ref.detail < module_.functions.Size()
+                           : ref.kind == BytecodeRefKind::Type
+                               ? ref.detail < module_.types.Size()
+                               : ref.detail < module_.refs.Size() &&
+                                     module_.refs[ref.detail].kind == BytecodeRefKind::Type);
             const bool argumentsOk =
                 ref.arguments == NoBytecodeIndex ||
                 (ref.kind == BytecodeRefKind::Literal && ref.arguments < strings);
@@ -518,6 +586,38 @@ public:
                 ref.kind != BytecodeRefKind::Function || ref.detail != NoBytecodeIndex;
             if (ref.name >= strings || !detailOk || !argumentsOk || !functionOk) {
                 return Reject(BytecodeLoadError::BadTable);
+            }
+        }
+
+        // TYPE 표: 필드 구간, struct 필드는 자기 bank 묶음 안(Scalar·Ref·Buf 순 — 절대 slot 위치).
+        for (const BytecodeType& type : module_.types) {
+            if (type.name >= strings ||
+                usize(type.firstField) + type.fieldCount > module_.typeFields.Size()) {
+                return Reject(BytecodeLoadError::BadTable);
+            }
+
+            uint32 groupStart[BytecodeBankCount] = {};
+            for (uint32 bank = 1; bank < BytecodeBankCount; ++bank) {
+                groupStart[bank] = groupStart[bank - 1] + type.slots[bank - 1];
+            }
+
+            for (uint32 at = type.firstField; at < type.firstField + type.fieldCount; ++at) {
+                const BytecodeTypeField& field = module_.typeFields[at];
+                if (field.name >= strings) {
+                    return Reject(BytecodeLoadError::BadTable);
+                }
+
+                if (type.kind == BytecodeTypeKind::Enum) {
+                    continue;
+                }
+
+                if (field.bank >= BytecodeBankCount || field.slots == 0 ||
+                    (field.bank != 0 && field.slots != 1) ||
+                    field.offset < groupStart[field.bank] ||
+                    usize(field.offset) + field.slots >
+                        usize(groupStart[field.bank]) + type.slots[field.bank]) {
+                    return Reject(BytecodeLoadError::BadTable);
+                }
             }
         }
 
@@ -848,6 +948,13 @@ private:
                    : !Ref(bx, BytecodeRefKind::Context) ? BytecodeLoadError::BadReference
                                                         : BytecodeLoadError::None;
         case Opcode::NewS:
+            // TYPE의 struct여야 한다(배치로 0·null 버퍼를 만든다).
+            return !Tuple(B, a, 1)                   ? BytecodeLoadError::BadRegister
+                   : !Ref(bx, BytecodeRefKind::Type) ? BytecodeLoadError::BadReference
+                   : module_.refs[bx].detail == NoBytecodeIndex ||
+                           module_.types[module_.refs[bx].detail].kind != BytecodeTypeKind::Struct
+                       ? BytecodeLoadError::BadReference
+                       : BytecodeLoadError::None;
         case Opcode::NewC:
         case Opcode::NewA:
         case Opcode::NewSet:
@@ -940,10 +1047,24 @@ private:
 
             const bool registers = get ? Tuple(valueBank, a, c) && Tuple(bankOf(info.b), b, 1)
                                        : Tuple(bankOf(info.a), a, 1) && Tuple(valueBank, b, c);
-            return !registers ? BytecodeLoadError::BadRegister
-                   : !Ref(ax, structField ? BytecodeRefKind::StructField : BytecodeRefKind::Field)
-                       ? BytecodeLoadError::BadReference
-                       : BytecodeLoadError::None;
+            if (!registers) {
+                return BytecodeLoadError::BadRegister;
+            }
+
+            if (!Ref(ax, structField ? BytecodeRefKind::StructField : BytecodeRefKind::Field)) {
+                return BytecodeLoadError::BadReference;
+            }
+
+            // Sparks struct 필드는 TYPE 필드의 bank·slot 수와 맞아야 한다(엔진 struct 필드는 TYPE에
+            // 없다 — 바인딩 검사, LC5d).
+            if (structField && module_.refs[ax].detail != NoBytecodeIndex) {
+                const BytecodeTypeField& field = module_.typeFields[module_.refs[ax].detail];
+                if (field.bank != valueBank || field.slots != c) {
+                    return BytecodeLoadError::BadOperand;
+                }
+            }
+
+            return BytecodeLoadError::None;
         }
         case Opcode::AwaitEv:
             return !Tuple(R, a, 1)                    ? BytecodeLoadError::BadRegister
@@ -972,7 +1093,9 @@ private:
             }
 
             if (display == static_cast<uint32>(ScalarKind::Enum) &&
-                !Ref(ax & MaxBx, BytecodeRefKind::Type)) {
+                (!Ref(ax & MaxBx, BytecodeRefKind::Type) ||
+                 module_.refs[ax & MaxBx].detail == NoBytecodeIndex ||
+                 module_.types[module_.refs[ax & MaxBx].detail].kind != BytecodeTypeKind::Enum)) {
                 return BytecodeLoadError::BadReference;
             }
 
