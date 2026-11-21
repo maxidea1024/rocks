@@ -50,7 +50,8 @@ struct PackageTag {
 
 // tags를 (키, 값) 순으로 정렬해 Tags Record byte로 쓴다. 비어 있으면 빈 byte(Tags 섹션 없음)다.
 // 오류: 빈 키·키 256 byte 초과·값이 패키지 문자열 상한 초과·잘못된 UTF-8·같은 (키, 값) 쌍 두 번은
-// InvalidArgument, 할당 실패.
+// InvalidArgument, 목록 전체가 Record 기본 한도(값 하나 RecordLimits::maxValueBytes)를 넘으면
+// CapacityExceeded(ReadPackageTags가 같은 기본 한도로 읽으므로 쓴 것은 모두 읽힌다), 할당 실패.
 Result<Array<uint8>> WritePackageTags(Allocator& allocator,
                                       Span<const PackageTagInput> tags) noexcept;
 

@@ -2,6 +2,7 @@
 
 #include <AssetDatabase/AssetIndex.h>
 #include <AssetRuntime/PackageRangeReader.h>
+#include <Core/Algorithms.h>
 #include <Core/FileError.h>
 #include <Core/Text/StringBuilder.h>
 #include <Object/AssetId.h>
@@ -37,7 +38,10 @@ struct ChildEntry {
     explicit ChildEntry(Allocator& allocator) noexcept : name(allocator) {
     }
 
+    // 표시 이름이다. 유효한 UTF-8이 아닌 OS 이름(POSIX)은 0x80 이상 byte를 16진으로 적은 이름이고
+    // invalidName이 참이다(그 이름으로는 논리 경로도, 다시 열 경로도 만들 수 없다).
     String name;
+    bool invalidName = false;
     platform::FileInfo info;
 };
 
@@ -46,10 +50,40 @@ struct EnumerateContext {
     ErrorCode error = ErrorCode::None;
 };
 
+// 역슬래시 + x + 16진 두 자리를 붙인다.
+template <class TOut>
+Result<void> AppendHexByte(TOut& out, uint8 value) noexcept {
+    constexpr char Digits[] = "0123456789abcdef";
+    constexpr uint32 NibbleBits = 4;
+    constexpr uint8 NibbleMask = 0x0f;
+    const char hex[4] = {'\\', 'x', Digits[value >> NibbleBits], Digits[value & NibbleMask]};
+    return out.TryAppend(StringView(hex, sizeof(hex)));
+}
+
+// 유효한 UTF-8이 아닌 OS 이름의 표시 이름을 out에 쓴다(ASCII는 그대로, 0x80 이상 byte는 16진).
+Result<void> AssignDisplayName(String& out, StringView raw) noexcept {
+    constexpr uint8 FirstNonAscii = 0x80;
+    out.Clear();
+    for (usize index = 0; index < raw.ByteCount(); ++index) {
+        const uint8 value = static_cast<uint8>(raw.Data()[index]);
+        auto appended = value >= FirstNonAscii ? AppendHexByte(out, value)
+                                               : out.TryAppend(StringView(raw.Data() + index, 1));
+        if (!appended) {
+            return appended;
+        }
+    }
+
+    return Result<void>::Success();
+}
+
 bool CollectChild(const platform::DirectoryEntry& entry, void* raw) noexcept {
     auto& context = *static_cast<EnumerateContext*>(raw);
     ChildEntry child(context.children->GetAllocator());
-    if (auto assigned = child.name.TryAssign(StringView(entry.name, entry.nameBytes)); !assigned) {
+    const StringView name(entry.name, entry.nameBytes);
+    child.invalidName = !name.IsValidUtf8();
+    if (auto assigned =
+            child.invalidName ? AssignDisplayName(child.name, name) : child.name.TryAssign(name);
+        !assigned) {
         context.error = assigned.Error();
         return false;
     }
@@ -138,19 +172,44 @@ Result<void> AppendUnder(Span<const AssetIndexEntry> entries, StringView base, b
     return Result<void>::Success();
 }
 
-// index 표를 less로 삽입 정렬한다(안정 정렬 — 같은 순위는 원래 순서).
-template <class TLess>
-void SortIndices(Array<usize>& order, TLess less) noexcept {
-    for (usize index = 1; index < order.Size(); ++index) {
-        const usize value = order[index];
-        usize at = index;
-        while (at > 0 && less(value, order[at - 1])) {
-            order[at] = order[at - 1];
-            --at;
+// 진단 줄에 파일 이름(유효한 UTF-8 — 잘못된 OS 이름은 검색이 표시 이름으로 바꿨다)을 붙인다.
+// 개행 등 제어 문자(0x00–0x1f·0x7f)는 한 줄을 지키게 16진(역슬래시 x 두 자리)으로 쓴다.
+Result<void> AppendEscapedName(StringBuilderBase& line, StringView name) noexcept {
+    constexpr uint8 FirstPrintable = 0x20;
+    constexpr uint8 Delete = 0x7f;
+    usize start = 0;
+    for (usize index = 0; index < name.ByteCount(); ++index) {
+        const uint8 value = static_cast<uint8>(name.Data()[index]);
+        if (value >= FirstPrintable && value != Delete) {
+            continue;
         }
 
-        order[at] = value;
+        if (auto appended = line.TryAppend(StringView(name.Data() + start, index - start));
+            !appended) {
+            return appended;
+        }
+
+        if (auto appended = AppendHexByte(line, value); !appended) {
+            return appended;
+        }
+
+        start = index + 1;
     }
+
+    return line.TryAppend(StringView(name.Data() + start, name.ByteCount() - start));
+}
+
+// 0 … count - 1 index 표를 만든다.
+Result<void> MakeOrder(Array<usize>& order, usize count) noexcept {
+    if (auto reserved = order.TryReserve(count); !reserved) {
+        return reserved;
+    }
+
+    for (usize index = 0; index < count; ++index) {
+        (void)order.TryPushBack(index);
+    }
+
+    return Result<void>::Success();
 }
 
 } // namespace
@@ -197,7 +256,20 @@ Result<void> AssetIndex::Rebuild(platform::FileSystem& files,
                 continue;
             }
 
-            return Result<void>::Failure(FileErrorCode(listed));
+            // Content 자신의 열거 실패는 검색 실패다. 하위 디렉터리의 실패(권한 거부·검색 중
+            // 파일로 바뀜)는 파일 IO 실패처럼 진단 None과 원본 오류를 남기고 그 디렉터리만
+            // 뺀다(7.1절 14).
+            if (relativeDirectory.View().IsEmpty()) {
+                return Result<void>::Failure(FileErrorCode(listed));
+            }
+
+            if (auto added = AddDiagnostic(diagnostics, AssetDiagnosticCode::None,
+                                           FileErrorCode(listed), relativeDirectory.View());
+                !added) {
+                return added;
+            }
+
+            continue;
         }
 
         if (context.error != ErrorCode::None) {
@@ -220,6 +292,26 @@ Result<void> AssetIndex::Rebuild(platform::FileSystem& files,
                 continue;
             }
 
+            // 유효한 UTF-8이 아닌 이름(POSIX)은 논리 경로가 될 수 없고 그 이름으로 다시 열 수도
+            // 없다: 디렉터리·패키지 파일이면 InvalidPath(InvalidComponent — 이름 규칙의
+            // InvalidCharacter와 같은 사유)로 진단하고 내려가지 않는다. 그 밖의 파일은 무시한다.
+            if (child.invalidName) {
+                const bool package = child.info.type == platform::FileType::File &&
+                                     child.name.View().EndsWith(EditorPackageExtension);
+                if (child.info.type == platform::FileType::Directory || package) {
+                    if (auto added = AddDiagnostic(diagnostics, AssetDiagnosticCode::InvalidPath,
+                                                   ErrorCode::InvalidArgument, relative.View());
+                        !added) {
+                        return added;
+                    }
+
+                    diagnostics[diagnostics.Size() - 1].pathError =
+                        LogicalPathError::InvalidComponent;
+                }
+
+                continue;
+            }
+
             if (child.info.type == platform::FileType::Directory) {
                 if (auto pushed = pending.TryPushBack(Move(relative)); !pushed) {
                     return pushed;
@@ -237,7 +329,7 @@ Result<void> AssetIndex::Rebuild(platform::FileSystem& files,
             LogicalPathFailure pathFailure;
             auto path = layout_->TryMakeLogicalPath(relative.View(), &pathFailure);
             if (!path) {
-                if (pathFailure.error == LogicalPathError::None) {
+                if (path.Error() == ErrorCode::OutOfMemory) {
                     return Result<void>::Failure(path.Error());
                 }
 
@@ -247,7 +339,12 @@ Result<void> AssetIndex::Rebuild(platform::FileSystem& files,
                     return added;
                 }
 
-                diagnostics[diagnostics.Size() - 1].pathError = pathFailure.error;
+                // 확장자뿐인 이름(".rasset")은 배치가 "패키지 파일 아님"(사유 None)으로 보지만
+                // 확장자 검사는 통과했다 — 이름이 비었으므로 하위 디렉터리의 같은 이름
+                // ("Dir/.rasset" → 끝 '/')과 같은 EmptyComponent로 진단한다.
+                diagnostics[diagnostics.Size() - 1].pathError =
+                    pathFailure.error == LogicalPathError::None ? LogicalPathError::EmptyComponent
+                                                                : pathFailure.error;
                 continue;
             }
 
@@ -335,21 +432,21 @@ Result<void> AssetIndex::Rebuild(platform::FileSystem& files,
         }
     }
 
-    // 경로 키 → 파일 이름 순으로 정렬한다(완료 순서와 무관 — 7.1절 9).
+    // 경로 키 → 파일 이름 순으로 정렬한다(완료 순서와 무관 — 7.1절 9). Core 정렬은 안정 정렬이
+    // 아니지만 Content 상대 이름은 파일마다 달라 이 비교가 전순서다.
     Array<usize> order(*allocator_);
-    if (auto reserved = order.TryReserve(found.Size()); !reserved) {
-        return reserved;
+    if (auto made = MakeOrder(order, found.Size()); !made) {
+        return made;
     }
 
-    for (usize index = 0; index < found.Size(); ++index) {
-        (void)order.TryPushBack(index);
-    }
+    algo::Sort(order.View(), [&](usize left, usize right) noexcept {
+        int compared = StringView::CompareBytes(found[left].key.View(), found[right].key.View());
+        if (compared == 0) {
+            compared =
+                StringView::CompareBytes(found[left].fileName.View(), found[right].fileName.View());
+        }
 
-    SortIndices(order, [&](usize left, usize right) noexcept {
-        const int key = StringView::CompareBytes(found[left].key.View(), found[right].key.View());
-        return key != 0 ? key < 0
-                        : StringView::CompareBytes(found[left].fileName.View(),
-                                                   found[right].fileName.View()) < 0;
+        return compared < 0;
     });
     Array<AssetIndexEntry> sorted(*allocator_);
     if (auto reserved = sorted.TryReserve(found.Size()); !reserved) {
@@ -363,12 +460,8 @@ Result<void> AssetIndex::Rebuild(platform::FileSystem& files,
     // 같은 경로 키(DuplicatePath — 경로 키 순에서 이웃)와 같은 id(DuplicateAssetId — id 순에서
     // 이웃)를 모두 진단한다.
     Array<usize> byId(*allocator_);
-    if (auto reserved = byId.TryReserve(sorted.Size()); !reserved) {
-        return reserved;
-    }
-
-    for (usize index = 0; index < sorted.Size(); ++index) {
-        (void)byId.TryPushBack(index);
+    if (auto made = MakeOrder(byId, sorted.Size()); !made) {
+        return made;
     }
 
     if (auto diagnosed = DiagnoseNeighbors(
@@ -381,8 +474,10 @@ Result<void> AssetIndex::Rebuild(platform::FileSystem& files,
         return diagnosed;
     }
 
-    SortIndices(byId, [&](usize left, usize right) noexcept {
-        return CompareId(sorted[left].id, sorted[right].id) < 0;
+    // id → 경로 순 위치(같은 id는 경로 순).
+    algo::Sort(byId.View(), [&](usize left, usize right) noexcept {
+        const int compared = CompareId(sorted[left].id, sorted[right].id);
+        return compared != 0 ? compared < 0 : left < right;
     });
     if (auto diagnosed = DiagnoseNeighbors(
             sorted, byId.View(),
@@ -394,22 +489,22 @@ Result<void> AssetIndex::Rebuild(platform::FileSystem& files,
         return diagnosed;
     }
 
-    // 진단은 파일 이름 → 코드 순이다.
+    // 진단은 파일 이름 → 코드 순이다. 한 이름(파일·디렉터리)의 진단은 코드마다 하나뿐이라(경로·
+    // 패키지·Tags 진단은 서로 배타이고 같은 id·경로 진단은 각각 하나) 이 비교가 전순서다.
     Array<usize> diagnosticOrder(*allocator_);
-    if (auto reserved = diagnosticOrder.TryReserve(diagnostics.Size()); !reserved) {
-        return reserved;
+    if (auto made = MakeOrder(diagnosticOrder, diagnostics.Size()); !made) {
+        return made;
     }
 
-    for (usize index = 0; index < diagnostics.Size(); ++index) {
-        (void)diagnosticOrder.TryPushBack(index);
-    }
-
-    SortIndices(diagnosticOrder, [&](usize left, usize right) noexcept {
+    algo::Sort(diagnosticOrder.View(), [&](usize left, usize right) noexcept {
         const int name = StringView::CompareBytes(diagnostics[left].fileName.View(),
                                                   diagnostics[right].fileName.View());
-        return name != 0 ? name < 0
-                         : static_cast<uint32>(diagnostics[left].code) <
-                               static_cast<uint32>(diagnostics[right].code);
+        if (name != 0) {
+            return name < 0;
+        }
+
+        return static_cast<uint32>(diagnostics[left].code) <
+               static_cast<uint32>(diagnostics[right].code);
     });
     Array<AssetIndexDiagnostic> sortedDiagnostics(*allocator_);
     if (auto reserved = sortedDiagnostics.TryReserve(diagnostics.Size()); !reserved) {
@@ -428,17 +523,9 @@ Result<void> AssetIndex::Rebuild(platform::FileSystem& files,
 
 Result<const AssetIndexEntry*> AssetIndex::FindById(AssetId id) const noexcept {
     using Out = const AssetIndexEntry*;
-    usize low = 0;
-    usize high = byId_.Size();
-    while (low < high) {
-        const usize middle = low + (high - low) / 2;
-        if (CompareId(entries_[byId_[middle]].id, id) < 0) {
-            low = middle + 1;
-        } else {
-            high = middle;
-        }
-    }
-
+    const usize low = algo::LowerBound(byId_.View(), id, [&](usize index, AssetId key) noexcept {
+        return CompareId(entries_[index].id, key) < 0;
+    });
     if (low == byId_.Size() || CompareId(entries_[byId_[low]].id, id) != 0) {
         return Result<Out>::Failure(ErrorCode::NotFound);
     }
@@ -453,16 +540,10 @@ Result<const AssetIndexEntry*> AssetIndex::FindById(AssetId id) const noexcept {
 
 Result<const AssetIndexEntry*> AssetIndex::FindByPath(const LogicalPath& path) const noexcept {
     using Out = const AssetIndexEntry*;
-    usize low = 0;
-    usize high = entries_.Size();
-    while (low < high) {
-        const usize middle = low + (high - low) / 2;
-        if (StringView::CompareBytes(entries_[middle].key.View(), path.Key()) < 0) {
-            low = middle + 1;
-        } else {
-            high = middle;
-        }
-    }
+    const usize low = algo::LowerBound(
+        entries_.View(), path.Key(), [](const AssetIndexEntry& entry, StringView key) noexcept {
+            return StringView::CompareBytes(entry.key.View(), key) < 0;
+        });
 
     if (low == entries_.Size() || entries_[low].key.View() != path.Key()) {
         return Result<Out>::Failure(ErrorCode::NotFound);
@@ -587,18 +668,18 @@ Result<void> AssetIndex::Verify(TypeRegistry* types,
                 code = target.Error() == ErrorCode::NotFound
                            ? AssetDiagnosticCode::MissingDependency
                            : AssetDiagnosticCode::None;
-            } else if (dependency.kind == PackageDependencyKind::Hard &&
+            } else if (types != nullptr && dependency.kind == PackageDependencyKind::Hard &&
                        !(target.Value()->type == dependency.expectedType)) {
+                // 형식 대조는 로드와 같은 판정(expectedType의 파생이면 받음 — 5.7절 14)이라
+                // TypeRegistry가 있을 때만 한다. 없으면 파생 여부를 알 수 없어 대조하지 않는다.
                 // Hard는 반드시 expectedType을 가진다(패키지 읽기가 검사한다 — 5.2절).
                 bool derived = false;
-                if (types != nullptr) {
-                    auto isA = types->IsA(target.Value()->type, dependency.expectedType);
-                    if (isA) {
-                        derived = isA.Value();
-                    } else if (isA.Error() != ErrorCode::NotFound &&
-                               isA.Error() != ErrorCode::TypeMismatch) {
-                        return Result<void>::Failure(isA.Error());
-                    }
+                auto isA = types->IsA(target.Value()->type, dependency.expectedType);
+                if (isA) {
+                    derived = isA.Value();
+                } else if (isA.Error() != ErrorCode::NotFound &&
+                           isA.Error() != ErrorCode::TypeMismatch) {
+                    return Result<void>::Failure(isA.Error());
                 }
 
                 code = derived ? AssetDiagnosticCode::None : AssetDiagnosticCode::TypeMismatch;
@@ -630,9 +711,16 @@ Result<void> AppendAssetIndexDiagnosticLine(StringBuilderBase& line,
     const char* code = diagnostic.code == AssetDiagnosticCode::None
                            ? ErrorCodeName(diagnostic.error)
                            : AssetDiagnosticName(diagnostic.code);
-    if (auto formatted = line.TryAppendFormat("{}: Content/{}: ", code, diagnostic.fileName.View());
-        !formatted) {
+    if (auto formatted = line.TryAppendFormat("{}: Content/", code); !formatted) {
         return formatted;
+    }
+
+    if (auto escaped = AppendEscapedName(line, diagnostic.fileName.View()); !escaped) {
+        return escaped;
+    }
+
+    if (auto appended = line.TryAppend(": "); !appended) {
+        return appended;
     }
 
     switch (diagnostic.code) {
@@ -644,11 +732,21 @@ Result<void> AppendAssetIndexDiagnosticLine(StringBuilderBase& line,
     case AssetDiagnosticCode::MissingFile:
         return line.TryAppend("the file disappeared during the scan\n");
     case AssetDiagnosticCode::DuplicateAssetId:
-        return line.TryAppendFormat("asset id {} is also in 'Content/{}'\n", diagnostic.asset,
-                                    diagnostic.related.View());
-    case AssetDiagnosticCode::DuplicatePath:
-        return line.TryAppendFormat("the logical path is also used by 'Content/{}'\n",
-                                    diagnostic.related.View());
+    case AssetDiagnosticCode::DuplicatePath: {
+        auto formatted =
+            diagnostic.code == AssetDiagnosticCode::DuplicateAssetId
+                ? line.TryAppendFormat("asset id {} is also in 'Content/", diagnostic.asset)
+                : line.TryAppend("the logical path is also used by 'Content/");
+        if (!formatted) {
+            return formatted;
+        }
+
+        if (auto escaped = AppendEscapedName(line, diagnostic.related.View()); !escaped) {
+            return escaped;
+        }
+
+        return line.TryAppend("'\n");
+    }
     case AssetDiagnosticCode::MissingDependency:
         return line.TryAppendFormat("dependency {} is not in the index\n", diagnostic.relatedAsset);
     case AssetDiagnosticCode::TypeMismatch:

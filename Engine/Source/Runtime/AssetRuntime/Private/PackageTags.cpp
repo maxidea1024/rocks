@@ -1,5 +1,6 @@
 #include <AssetRuntime/PackageFormat.h>
 #include <AssetRuntime/PackageTags.h>
+#include <Core/Algorithms.h>
 #include <Serialization/Record.h>
 #include <Serialization/RecordList.h>
 
@@ -50,36 +51,33 @@ Result<Array<uint8>> WritePackageTags(Allocator& allocator,
         return Result<Out>::Success(Array<uint8>(allocator));
     }
 
-    // 순서를 정하는 index 표(삽입 정렬 — 태그 수는 작다).
+    for (const PackageTagInput& tag : tags) {
+        if (!ValidKey(tag.key) || !ValidValue(tag.value)) {
+            return Result<Out>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
+    // (키, 값) 순 index 표다(Core 정렬 — 같은 쌍은 정렬 뒤 이웃이라 그때 거부한다).
     Array<usize> order(allocator);
     if (auto reserved = order.TryReserve(tags.Size()); !reserved) {
         return Result<Out>::Failure(reserved.Error());
     }
 
     for (usize index = 0; index < tags.Size(); ++index) {
-        if (!ValidKey(tags[index].key) || !ValidValue(tags[index].value)) {
+        (void)order.TryPushBack(index);
+    }
+
+    algo::Sort(order.View(), [&](usize left, usize right) noexcept {
+        const int compared =
+            ComparePair(tags[left].key, tags[left].value, tags[right].key, tags[right].value);
+        return compared != 0 ? compared < 0 : left < right;
+    });
+    for (usize position = 1; position < order.Size(); ++position) {
+        const PackageTagInput& before = tags[order[position - 1]];
+        const PackageTagInput& current = tags[order[position]];
+        if (ComparePair(before.key, before.value, current.key, current.value) == 0) {
             return Result<Out>::Failure(ErrorCode::InvalidArgument);
         }
-
-        usize at = order.Size();
-        (void)order.TryPushBack(index);
-        while (at > 0) {
-            const PackageTagInput& before = tags[order[at - 1]];
-            const int compared =
-                ComparePair(before.key, before.value, tags[index].key, tags[index].value);
-            if (compared == 0) {
-                return Result<Out>::Failure(ErrorCode::InvalidArgument);
-            }
-
-            if (compared < 0) {
-                break;
-            }
-
-            order[at] = order[at - 1];
-            --at;
-        }
-
-        order[at] = index;
     }
 
     RecordListBuilder list(allocator);

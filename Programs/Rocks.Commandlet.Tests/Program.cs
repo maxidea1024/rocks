@@ -510,11 +510,17 @@ try
         "usage: asset-list");
     await Check("asset-list empty value", ["asset-list", "--project="], 2, "", "usage: asset-list");
     await Check("asset-list unknown option", ["asset-list", "--type=Texture2D"], 2, "", "usage: asset-list");
+    // 13절 공통 옵션 --wait=<초>는 받고(읽기 명령은 잠금이 없다) 10진 숫자가 아니면 사용법 오류다.
+    await Check("asset-list wait", ["asset-list", "--wait=5", $"--project={project}"], 0, "/Game/Items/Base", "");
+    await Check("asset-list invalid wait", ["asset-list", "--wait=5s", $"--project={project}"], 2, "",
+        "usage: asset-list");
 
     // 검증: 진단 줄과 요약, 진단이 있으면 1.
     await Check("asset-index-verify missing dependency", ["asset-index-verify", $"--project={project}"], 1,
         "asset-index-verify: 2 packages, 1 diagnostics",
         $"MissingDependency: Content/Characters/Hero.rasset: dependency {missingId} is not in the index\n");
+    await Check("asset-index-verify wait", ["asset-index-verify", "--wait=0", $"--project={empty}"], 0,
+        "asset-index-verify: 0 packages, 0 diagnostics", "");
     await Check("asset-index-verify empty", ["asset-index-verify", $"--project={empty}"], 0,
         "asset-index-verify: 0 packages, 0 diagnostics", "");
     await Check("asset-index-verify content is a file", ["asset-index-verify", $"--project={fileContent}"], 1, "",
@@ -523,23 +529,28 @@ try
     await Check("asset-index-verify help", ["asset-index-verify", "--help"], 0, "usage: asset-index-verify", "");
     await Check("asset-index-verify under is not an option", ["asset-index-verify", "--under=/Game"], 2, "",
         "usage: asset-index-verify");
+    // 줄 순서까지 본다: 검색 진단(파일 이름 → 코드 순) 다음에 의존 대조 진단(경로 키 순). 명령은 타입을 등록하지
+    // 않아 형식 대조를 하지 않으므로, 같은 id에 파생 대표(DerivedGameAsset)를 둔 Base는 진단이 없다(로드는 파생을
+    // 받는다 — 5.7절 14). NewerVersion 줄은 위치(detail) 앞까지만 본다.
     string[] expectedProblems =
     [
-        "InvalidPath: Content/Bad#Name.rasset: invalid logical path (InvalidComponent)\n",
-        $"DuplicateAssetId: Content/Copy/Hero2.rasset: asset id {heroId} is also in 'Content/Hero.rasset'\n",
-        $"DuplicateAssetId: Content/Hero.rasset: asset id {heroId} is also in 'Content/Copy/Hero2.rasset'\n",
-        "CorruptPackage: Content/Junk.rasset: package check failed (section 0, detail 0, InvalidArgument)\n",
+        "InvalidPath: Content/Bad#Name.rasset: invalid logical path (InvalidComponent)",
+        $"DuplicateAssetId: Content/Copy/Hero2.rasset: asset id {heroId} is also in 'Content/Hero.rasset'",
+        $"DuplicateAssetId: Content/Hero.rasset: asset id {heroId} is also in 'Content/Copy/Hero2.rasset'",
+        "CorruptPackage: Content/Junk.rasset: package check failed (section 0, detail 0, InvalidArgument)",
         "NewerVersion: Content/Newer.rasset: package check failed (section 1, detail ",
-        $"TypeMismatch: Content/Copy/Hero2.rasset: dependency {baseId} has a different representative type\n",
-        $"TypeMismatch: Content/Hero.rasset: dependency {baseId} has a different representative type\n",
-        $"MissingDependency: Content/Hero.rasset: dependency {missingId} is not in the index\n",
+        $"MissingDependency: Content/Copy/Hero2.rasset: dependency {missingId} is not in the index",
+        $"MissingDependency: Content/Hero.rasset: dependency {missingId} is not in the index",
     ];
     ProcessResult verified = await ProcessRunner.RunAsync(new(executable, ["asset-index-verify", $"--project={problems}"],
         workingDirectory, Timeout: TimeSpan.FromSeconds(15)));
+    string[] problemLines = verified.StdErr.Split('\n', StringSplitOptions.RemoveEmptyEntries);
     bool problemsShape = verified.ExitCode == 1 &&
-                         verified.StdOut == "asset-index-verify: 3 packages, 9 diagnostics\n" &&
-                         expectedProblems.All(text => verified.StdErr.Contains(text, StringComparison.Ordinal)) &&
-                         verified.StdErr.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length == 9;
+                         verified.StdOut == "asset-index-verify: 3 packages, 7 diagnostics\n" &&
+                         verified.StdErr.EndsWith('\n') && problemLines.Length == expectedProblems.Length &&
+                         problemLines.Zip(expectedProblems).All(pair => pair.Second.EndsWith(' ')
+                             ? pair.First.StartsWith(pair.Second, StringComparison.Ordinal)
+                             : pair.First == pair.Second);
     Console.WriteLine($"asset-index-verify problems: {(problemsShape ? "PASS" : "FAIL")}");
     if (!problemsShape)
     {

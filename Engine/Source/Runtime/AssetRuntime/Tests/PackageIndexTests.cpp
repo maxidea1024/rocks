@@ -1,4 +1,5 @@
 #include "AssetFixtureValues.h"
+#include "PackageEditing.h"
 
 #include <AssetRuntime/PackageRangeReader.h>
 #include <AssetRuntime/PackageTags.h>
@@ -162,22 +163,88 @@ bool SameIndexContents(const PackageContents& full, const PackageContents& index
     return true;
 }
 
-// 패키지 파일 안 offset이 부분 읽기가 읽는 구간인지다(헤더·섹션 표·읽는 섹션 — 건너뛰는 것은
-// Objects·Bulk·BulkIndex 내용과 섹션 사이 패딩).
-bool IndexReadsOffset(const PackageContents& contents, uint64 offset) noexcept {
+// 패키지 파일 안 offset의 손상이 두 읽기에 주는 결과다: Read(헤더·섹션 표·두 읽기가 다 읽는 섹션 —
+// 같은 진단으로 거부), Skipped(부분 읽기가 건너뛰는 Objects·Bulk·BulkIndex 내용과 섹션 사이 패딩 —
+// 부분 읽기 통과·전체 읽기 거부), Ignored(모르는 비 Required 섹션 내용 — 두 읽기 모두 내용을 보지
+// 않아 통과).
+enum class FlipRegion {
+    Read,
+    Skipped,
+    Ignored
+};
+
+FlipRegion RegionOf(const PackageContents& contents, uint64 offset) noexcept {
     if (offset < PackageHeaderBytes || offset >= contents.header.sectionTableOffset) {
-        return true;
+        return FlipRegion::Read;
     }
 
     for (const PackageSectionEntry& entry : contents.sections) {
         if (offset >= entry.offset && offset < entry.offset + entry.bytes) {
-            return entry.kind != PackageSectionKind::Objects &&
-                   entry.kind != PackageSectionKind::Bulk &&
-                   entry.kind != PackageSectionKind::BulkIndex;
+            if (static_cast<uint32>(entry.kind) >
+                static_cast<uint32>(PackageSectionKind::BulkIndex)) {
+                return FlipRegion::Ignored;
+            }
+
+            const bool skipped = entry.kind == PackageSectionKind::Objects ||
+                                 entry.kind == PackageSectionKind::Bulk ||
+                                 entry.kind == PackageSectionKind::BulkIndex;
+            return skipped ? FlipRegion::Skipped : FlipRegion::Read;
         }
     }
 
-    return false; // 패딩
+    return FlipRegion::Skipped; // 패딩
+}
+
+// 손상 시험의 패키지 모양 셋이다: 풍부한 장면, 최소 패키지(대표 에셋 하나 — 선택 섹션 없음), 최소
+// 패키지에 모르는 비 Required 섹션(kind 200 — 두 읽기 모두 readOnly)을 더한 것.
+constexpr uint32 UnknownSectionKind = 200;
+
+struct FlipShapes {
+    explicit FlipShapes(Allocator& allocator) noexcept
+        : rich(allocator), minimal(allocator), unknown(allocator), scene(allocator) {
+    }
+
+    Array<uint8> rich;
+    Array<uint8> minimal;
+    Array<uint8> unknown;
+    RichScene scene;
+    RootRef<Package> minimalPackage;
+};
+
+bool MakeShapes(AssetEnv& env, FlipShapes& shapes) noexcept {
+    if (!MakeRich(env, shapes.scene)) {
+        return false;
+    }
+
+    shapes.rich = Copy(env.allocator, shapes.scene.file.View());
+    ObjectRegistry& registry = *env.source;
+    auto made = NewPackage(registry, registry.OwnerAccess(), FixedId(1810), PackageKind::Editor);
+    if (!made) {
+        return false;
+    }
+
+    shapes.minimalPackage = Move(made.Value());
+    if (Make<TestAsset>(registry, TestAssetType(), shapes.minimalPackage.Handle(), "").IsNull()) {
+        return false;
+    }
+
+    shapes.minimal =
+        Write(env.allocator, registry, shapes.minimalPackage.Handle(), EditorOptions());
+    EditablePackage edit(env.allocator);
+    if (shapes.minimal.IsEmpty() || !edit.Parse(shapes.minimal.View())) {
+        return false;
+    }
+
+    EditableSection extra(env.allocator);
+    extra.kind = UnknownSectionKind;
+    const uint8 payload[] = {1, 2, 3, 4, 5, 6, 7};
+    if (!extra.bytes.TryAppend(Span<const uint8>(payload)) ||
+        !edit.sections.TryPushBack(Move(extra))) {
+        return false;
+    }
+
+    shapes.unknown = edit.Build();
+    return !shapes.unknown.IsEmpty();
 }
 
 // n번째 ReadAt을 실패시키는 범위 읽기다(IO 오류 주입).
@@ -331,76 +398,87 @@ TEST(PackageIndex_MatchesFullRead) {
     CHECK(tags.Value().Size() == 3);
 }
 
-// 모든 bit 손상(7.1절 13 판정 관계): 부분 읽기가 읽는 구간(헤더·표·읽는 섹션)의 손상은 두 읽기가
-// 같은 진단으로 거부하고, 건너뛰는 구간(Objects·Bulk·BulkIndex 내용과 패딩)의 손상은 부분 읽기가
-// 통과하고 전체 읽기가 거부한다.
+// 모든 bit 손상(7.1절 13 판정 관계): 패키지 모양 셋(풍부한 장면·최소 패키지·모르는 비 Required
+// 섹션)마다 모든 byte의 모든 bit를 뒤집는다. 읽는 구간(헤더·표·읽는 섹션)의 손상은 두 읽기가 같은
+// 진단으로 거부하고, 건너뛰는 구간(Objects·Bulk·BulkIndex 내용과 패딩)의 손상은 부분 읽기가
+// 통과하고 전체 읽기가 거부하며, 모르는 섹션 내용의 손상은 둘 다 통과한다(readOnly).
 TEST(PackageIndex_EveryBitFlip) {
     AssetEnv env;
     REQUIRE(env.Ready());
-    RichScene scene(env.allocator);
-    REQUIRE(MakeRich(env, scene));
-    auto original = ReadPackage(env.allocator, scene.file.View(), EditorRead());
-    REQUIRE(original);
-    Array<uint8> bytes = Copy(env.allocator, scene.file.View());
-    uint32 readMismatches = 0;
-    uint32 skippedMismatches = 0;
-    uint32 skippedFlips = 0;
-    for (usize offset = 0; offset < bytes.Size(); ++offset) {
-        const bool indexed = IndexReadsOffset(original.Value(), offset);
-        for (uint32 bit = 0; bit < BitsPerByte; ++bit) {
-            bytes[offset] = static_cast<uint8>(bytes[offset] ^ (1u << bit));
+    FlipShapes shapes(env.allocator);
+    REQUIRE(MakeShapes(env, shapes));
+    const Array<uint8>* const files[] = {&shapes.rich, &shapes.minimal, &shapes.unknown};
+    uint32 regionFlips[3] = {};
+    uint32 mismatches = 0;
+    for (const Array<uint8>* file : files) {
+        auto original = ReadPackage(env.allocator, file->View(), EditorRead());
+        REQUIRE(original);
+        CHECK(original.Value().readOnly == (file == &shapes.unknown));
+        Array<uint8> bytes = Copy(env.allocator, file->View());
+        for (usize offset = 0; offset < bytes.Size(); ++offset) {
+            const FlipRegion region = RegionOf(original.Value(), offset);
+            for (uint32 bit = 0; bit < BitsPerByte; ++bit) {
+                bytes[offset] = static_cast<uint8>(bytes[offset] ^ (1u << bit));
+                AssetDiagnostic fullFailure;
+                AssetDiagnostic indexFailure;
+                auto full = ReadPackage(env.allocator, bytes.View(), EditorRead(), &fullFailure);
+                MemoryPackageRangeReader reader(bytes.View());
+                auto index = ReadPackageIndex(env.allocator, reader, EditorRead(), &indexFailure);
+                bool expected = false;
+                switch (region) {
+                case FlipRegion::Read:
+                    expected = !full && !index && full.Error() == index.Error() &&
+                               SameDiagnostic(fullFailure, indexFailure);
+                    break;
+                case FlipRegion::Skipped:
+                    expected = !full && index;
+                    break;
+                case FlipRegion::Ignored:
+                    expected = full && index && index.Value().contents.readOnly;
+                    break;
+                }
+
+                ++regionFlips[static_cast<uint32>(region)];
+                if (!expected && mismatches++ < 5) {
+                    printf("  region %u offset %zu bit %u: full %d index %d\n",
+                           static_cast<unsigned>(region), offset, bit,
+                           static_cast<int>(static_cast<bool>(full)),
+                           static_cast<int>(static_cast<bool>(index)));
+                }
+
+                bytes[offset] = static_cast<uint8>(bytes[offset] ^ (1u << bit));
+            }
+        }
+    }
+
+    CHECK(mismatches == 0);
+    CHECK(regionFlips[0] > 0 && regionFlips[1] > 0 && regionFlips[2] > 0);
+}
+
+// 자르기·늘리기(7.1절 13): 모양 셋마다 모든 길이로 자르거나 1 byte 늘린 파일은 두 읽기가 같은
+// 진단으로 거부한다(헤더의 fileBytes와 크기 대조, 64 byte 미만은 있는 만큼으로 헤더 판정).
+TEST(PackageIndex_TruncateAndExtend) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    FlipShapes shapes(env.allocator);
+    REQUIRE(MakeShapes(env, shapes));
+    const Array<uint8>* const files[] = {&shapes.rich, &shapes.minimal, &shapes.unknown};
+    uint32 mismatches = 0;
+    for (const Array<uint8>* file : files) {
+        for (usize size = 0; size <= file->Size(); ++size) {
+            Array<uint8> bytes = Copy(env.allocator, file->View().Slice(0, size));
+            if (size == file->Size()) {
+                REQUIRE(bytes.TryPushBack(uint8{0}));
+            }
+
             AssetDiagnostic fullFailure;
             AssetDiagnostic indexFailure;
             auto full = ReadPackage(env.allocator, bytes.View(), EditorRead(), &fullFailure);
             MemoryPackageRangeReader reader(bytes.View());
             auto index = ReadPackageIndex(env.allocator, reader, EditorRead(), &indexFailure);
-            if (indexed) {
-                const bool same = !full && !index && full.Error() == index.Error() &&
-                                  SameDiagnostic(fullFailure, indexFailure);
-                if (!same && readMismatches++ < 5) {
-                    printf("  read offset %zu bit %u: full %d index %d\n", offset, bit,
-                           static_cast<int>(static_cast<bool>(full)),
-                           static_cast<int>(static_cast<bool>(index)));
-                }
-            } else {
-                ++skippedFlips;
-                if ((full || !index) && skippedMismatches++ < 5) {
-                    printf("  skipped offset %zu bit %u: full %d index %d\n", offset, bit,
-                           static_cast<int>(static_cast<bool>(full)),
-                           static_cast<int>(static_cast<bool>(index)));
-                }
+            if (full || index || !SameDiagnostic(fullFailure, indexFailure)) {
+                ++mismatches;
             }
-
-            bytes[offset] = static_cast<uint8>(bytes[offset] ^ (1u << bit));
-        }
-    }
-
-    CHECK(readMismatches == 0);
-    CHECK(skippedMismatches == 0);
-    CHECK(skippedFlips > 0);
-}
-
-// 자르기·늘리기(7.1절 13): 모든 길이로 자르거나 1 byte 늘린 파일은 두 읽기가 같은 진단으로 거부한다
-// (헤더의 fileBytes와 크기 대조, 64 byte 미만은 있는 만큼으로 헤더 판정).
-TEST(PackageIndex_TruncateAndExtend) {
-    AssetEnv env;
-    REQUIRE(env.Ready());
-    RichScene scene(env.allocator);
-    REQUIRE(MakeRich(env, scene));
-    uint32 mismatches = 0;
-    for (usize size = 0; size <= scene.file.Size(); ++size) {
-        Array<uint8> bytes = Copy(env.allocator, scene.file.View().Slice(0, size));
-        if (size == scene.file.Size()) {
-            REQUIRE(bytes.TryPushBack(uint8{0}));
-        }
-
-        AssetDiagnostic fullFailure;
-        AssetDiagnostic indexFailure;
-        auto full = ReadPackage(env.allocator, bytes.View(), EditorRead(), &fullFailure);
-        MemoryPackageRangeReader reader(bytes.View());
-        auto index = ReadPackageIndex(env.allocator, reader, EditorRead(), &indexFailure);
-        if (full || index || !SameDiagnostic(fullFailure, indexFailure)) {
-            ++mismatches;
         }
     }
 
@@ -701,6 +779,65 @@ TEST(PackageTags_WriteAndRead) {
         }
 
         CHECK(actual == one.expected);
+    }
+}
+
+// Tags 한도(7.1절 14): 태그 수를 늘려 쓰기가 받는 가장 큰 수를 찾는다(값 4 KiB 태그 — Record 값
+// 한도, 값 1 byte 태그 — 목록 한도). 그 수로 쓴 것은 그대로 읽히고(쓴 것은 모두 읽힌다 — 읽기 예산
+// 포함), 하나 더하면 CapacityExceeded다.
+TEST(PackageTags_Limits) {
+    SystemAllocator allocator;
+    constexpr usize KeyTextBytes = 8;
+    const usize maxCount = RecordListLimits{}.maxItems + 1;
+    String large(allocator);
+    while (large.View().ByteCount() < PackageMaxStringBytes) {
+        REQUIRE(large.TryAppend("v"));
+    }
+
+    Array<char> keyText(allocator);
+    REQUIRE(keyText.TryResize(maxCount * KeyTextBytes));
+    for (usize index = 0; index < maxCount; ++index) {
+        (void)snprintf(keyText.Data() + index * KeyTextBytes, KeyTextBytes, "K%06zu", index);
+    }
+
+    Array<PackageTagInput> tags(allocator);
+    REQUIRE(tags.TryReserve(maxCount));
+    const StringView values[] = {large.View(), "v"};
+    for (StringView value : values) {
+        auto writeCount = [&](usize count) noexcept {
+            tags.Clear();
+            for (usize index = 0; index < count; ++index) {
+                (void)tags.TryPushBack(PackageTagInput{
+                    StringView(keyText.Data() + index * KeyTextBytes, KeyTextBytes - 1), value});
+            }
+
+            return WritePackageTags(allocator, tags.View());
+        };
+        // 받는 가장 큰 수(low)와 거부하는 가장 작은 수(high)를 이분으로 찾는다.
+        usize low = 1;
+        usize high = maxCount;
+        REQUIRE(writeCount(low));
+        auto rejected = writeCount(high);
+        REQUIRE(!rejected);
+        CHECK(rejected.Error() == ErrorCode::CapacityExceeded);
+        while (high - low > 1) {
+            const usize middle = low + (high - low) / 2;
+            auto written = writeCount(middle);
+            if (written) {
+                low = middle;
+            } else {
+                CHECK(written.Error() == ErrorCode::CapacityExceeded);
+                high = middle;
+            }
+        }
+
+        auto written = writeCount(low);
+        REQUIRE(written);
+        auto read = ReadPackageTags(allocator, written.Value().View());
+        REQUIRE(read);
+        CHECK(read.Value().Size() == low);
+        CHECK(writeCount(low + 1).Error() == ErrorCode::CapacityExceeded);
+        printf("  tags limit for %zu byte values: %zu\n", value.ByteCount(), low);
     }
 }
 

@@ -46,14 +46,18 @@ constexpr uint32 DeepLevels = 9;
 // 길이(경로 임시 저장소 512 byte)다.
 constexpr uint32 LongRootLevels = 8;
 constexpr usize LongRootMinimumBytes = 512;
-// 진단 줄 시험의 줄 저장소 인라인 byte 수다(작게 두어 줄마다 할당이 생긴다).
+// 진단 줄 시험의 줄 저장소 인라인 byte 수(작게 두어 줄마다 할당이 생긴다)와 미리 채우는 최대 byte
+// 수(가장 긴 줄보다 길게 — 자라는 지점이 줄의 모든 조각 위를 지난다)다.
 constexpr usize LineInlineBytes = 8;
+constexpr usize LinePrefixBytes = 160;
 // 종류 묶음 bit 수다(PackageDependencyKind 다섯 — 묶음 2^5개를 모두 본다).
 constexpr uint32 DependencyKindCount = 5;
 
 const PackageDependencyEntry HeroExtraDependencies[] = {
     {FixedId(BuildId), PackageDependencyKind::Build, TypeId{}, false},
     {FixedId(ImportOwnerId), PackageDependencyKind::ImportOwner, TypeId{}, false}};
+// 색인 읽기가 모르는 커스텀 버전이다(그 패키지는 읽기 전용 — 5.3절).
+const PackageCustomVersion UnknownCustomVersions[] = {{Guid{0x1DE, 0x99}, 1}};
 const PackageTagInput HeroTags[] = {{"Kind", "Hero"},
                                     {"UnrealExchange.FormerPaths", "/Game/Old/B"},
                                     {"UnrealExchange.FormerPaths", "/Game/Old/A"}};
@@ -158,6 +162,7 @@ bool MakePackages(AssetEnv& env, IndexPackages& out) noexcept {
     heroOptions.extraDependencies = HeroExtraDependencies;
     PackageWriteOptions otherOptions = EditorOptions();
     otherOptions.tags = otherTags.View();
+    otherOptions.customVersions = UnknownCustomVersions;
     PackageWriteOptions badOptions = EditorOptions();
     badOptions.tags = badTags.View();
     out.base = Write(env.allocator, registry, basePackage.Handle(), EditorOptions());
@@ -325,8 +330,10 @@ public:
         Node(Node&&) noexcept = default;
         Node& operator=(Node&&) noexcept = default;
 
-        String path;
-        String name;
+        // 경로·이름은 byte 그대로다(POSIX처럼 잘못된 UTF-8도 — String은 UTF-8만 받는다). 이름은
+        // NUL로 끝난다.
+        Array<char> path;
+        Array<char> name;
         platform::FileType type = platform::FileType::File;
         bool isLink = false;
         Span<const uint8> bytes{};
@@ -407,7 +414,7 @@ public:
         }
 
         for (const Node& child : nodes_) {
-            const StringView childPath = child.path.View();
+            const StringView childPath(child.path.Data(), child.path.Size());
             if (childPath.ByteCount() <= directory.ByteCount() + 1 ||
                 !childPath.StartsWith(directory, StringComparison::CaseSensitive) ||
                 childPath.Data()[directory.ByteCount()] != '/' ||
@@ -418,8 +425,8 @@ public:
             }
 
             platform::DirectoryEntry entry;
-            entry.name = child.name.CStr();
-            entry.nameBytes = child.name.View().ByteCount();
+            entry.name = child.name.Data();
+            entry.nameBytes = child.name.Size() - 1;
             entry.info.type = child.type;
             entry.info.isLink = child.isLink;
             entry.info.size = child.bytes.Size();
@@ -438,7 +445,7 @@ private:
         Node node(*allocator_);
         const StringView pieces[] = {content_.View(), relative.IsEmpty() ? "" : "/", relative};
         for (StringView piece : pieces) {
-            if (!node.path.TryAppend(piece)) {
+            if (!node.path.TryAppend(Span<const char>(piece.Data(), piece.ByteCount()))) {
                 return false;
             }
         }
@@ -448,8 +455,9 @@ private:
             --slash;
         }
 
-        if (!node.name.TryAssign(
-                StringView(relative.Data() + slash, relative.ByteCount() - slash))) {
+        if (!node.name.TryAppend(
+                Span<const char>(relative.Data() + slash, relative.ByteCount() - slash)) ||
+            !node.name.TryPushBack('\0')) {
             return false;
         }
 
@@ -461,7 +469,7 @@ private:
     }
 
     StringView Relative(const Node& node) const noexcept {
-        const StringView path = node.path.View();
+        const StringView path(node.path.Data(), node.path.Size());
         const usize skip = path.ByteCount() == content_.View().ByteCount()
                                ? path.ByteCount()
                                : content_.View().ByteCount() + 1;
@@ -470,7 +478,7 @@ private:
 
     const Node* Find(StringView path) const noexcept {
         for (const Node& node : nodes_) {
-            if (node.path.View() == path) {
+            if (StringView(node.path.Data(), node.path.Size()) == path) {
                 return &node;
             }
         }
@@ -854,8 +862,10 @@ TEST(AssetIndex_VerifyTypes) {
         Span<const uint8> base;
         Span<const uint8> derived;
         bool duplicateBase;
-        // 기대: Hero의 Hard(→ Base), Villain의 Hard(→ Derived)의 진단 코드(TypeRegistry 없음·있음·
-        // 빈 Registry).
+        // 대상 대표 타입이 expectedType과 다른 장면이다(파생 판정이 Registry를 부른다).
+        bool typeDiffers;
+        // 기대: Hero의 Hard(→ Base), Villain의 Hard(→ Derived)의 진단 코드(TypeRegistry 없음 —
+        // 형식 대조 안 함·있음·빈 Registry).
         AssetDiagnosticCode heroCodes[3];
         AssetDiagnosticCode villainCodes[3];
     };
@@ -864,26 +874,31 @@ TEST(AssetIndex_VerifyTypes) {
         {packages.base.View(),
          packages.derived.View(),
          false,
+         false,
          {C::None, C::None, C::None},
          {C::None, C::None, C::None}},
         {packages.baseAsDerived.View(),
          packages.derived.View(),
          false,
-         {C::TypeMismatch, C::None, C::TypeMismatch},
+         true,
+         {C::None, C::None, C::TypeMismatch},
          {C::None, C::None, C::None}},
         {packages.base.View(),
          packages.derivedAsBase.View(),
          false,
+         true,
          {C::None, C::None, C::None},
-         {C::TypeMismatch, C::TypeMismatch, C::TypeMismatch}},
+         {C::None, C::TypeMismatch, C::TypeMismatch}},
         {Span<const uint8>(),
          packages.derived.View(),
+         false,
          false,
          {C::MissingDependency, C::MissingDependency, C::MissingDependency},
          {C::None, C::None, C::None}},
         {packages.baseAsDerived.View(),
          packages.derived.View(),
          true,
+         false,
          {C::None, C::None, C::None},
          {C::None, C::None, C::None}},
     };
@@ -928,11 +943,9 @@ TEST(AssetIndex_VerifyTypes) {
 
         // 종료한 Registry: 파생 판정이 필요한 장면만 ShuttingDown이다.
         Array<AssetIndexDiagnostic> out(env.allocator);
-        const bool needsRegistry =
-            scene.heroCodes[0] == C::TypeMismatch || scene.villainCodes[0] == C::TypeMismatch;
         auto verified = index.Verify(&closed, out);
-        CHECK(needsRegistry ? verified.Error() == ErrorCode::ShuttingDown
-                            : static_cast<bool>(verified));
+        CHECK(scene.typeDiffers ? verified.Error() == ErrorCode::ShuttingDown
+                                : static_cast<bool>(verified));
         Array<const AssetIndexEntry*> listed(env.allocator);
         CHECK(index.ListByType(IdOf<BaseGameAsset>(), &closed, listed).Error() ==
               ErrorCode::ShuttingDown);
@@ -1073,6 +1086,11 @@ TEST(AssetIndex_Diagnostics) {
     }
 
     CHECK(index.At(1).tags.IsEmpty() && index.At(5).tags.IsEmpty());
+    // 모르는 커스텀 버전으로 저장한 OtherTags만 읽기 전용이다.
+    for (usize position = 0; position < index.Count(); ++position) {
+        CHECK(index.At(position).readOnly == (position == 5));
+    }
+
     CHECK(index.At(2).duplicateId && !index.At(2).duplicatePath);
     CHECK(index.At(3).duplicateId && index.At(3).duplicatePath);
     CHECK(!index.At(4).duplicateId && index.At(4).duplicatePath);
@@ -1107,9 +1125,11 @@ TEST(AssetIndex_Diagnostics) {
     CHECK(missingDerived == 1 && missingSoft == 2 && verified.Size() == 3);
 }
 
-// 검색 실패(7.1절 13): Content 열거·하위 디렉터리 열거 실패와 Content가 파일인 것(WrongType)은
-// Rebuild의 그 파일 오류이고 색인을 비운다(앞 결과를 남기지 않는다). 없는 디렉터리(Content 없음·
-// 열거에서 사라진 하위 디렉터리)는 빈 디렉터리다.
+// 검색 실패(7.1절 13·14): Content 열거 실패와 Content가 파일인 것(WrongType)은 Rebuild의 그 파일
+// 오류이고 색인을 비운다(앞 결과를 남기지 않는다). 하위 디렉터리 열거 실패는 진단 None과 원본
+// 오류를 남기고 그 디렉터리만 뺀다. 없는 디렉터리(Content 없음·열거에서 사라진 하위 디렉터리)는
+// 빈 디렉터리다. 확장자뿐인 이름(".rasset"·".RASSET" — Content 바로 아래와 하위 디렉터리)은 검색을
+// 멈추지 않고 InvalidPath(EmptyComponent)다.
 TEST(AssetIndex_RebuildFailures) {
     AssetEnv env;
     REQUIRE(env.Ready());
@@ -1157,9 +1177,54 @@ TEST(AssetIndex_RebuildFailures) {
             continue;
         }
 
+        if (fault == Fault::SubEnumerate) {
+            // 하위 디렉터리 실패는 진단 None과 원본 오류를 남기고 그 디렉터리만 뺀다.
+            REQUIRE(rebuilt);
+            CHECK(index.Count() == 1 && index.Diagnostics().Size() == 2);
+            const AssetIndexDiagnostic& sub = index.Diagnostics()[1];
+            CHECK(sub.code == AssetDiagnosticCode::None && sub.error == systemError);
+            CHECK(sub.fileName.View() == "Sub");
+            continue;
+        }
+
         CHECK(rebuilt.Error() == (fault == Fault::ContentIsFile ? wrongType : systemError));
         CHECK(index.Count() == 0 && index.Diagnostics().IsEmpty());
         CHECK(index.FindById(FixedId(HeroId)).Error() == ErrorCode::NotFound);
+    }
+
+    MemoryFileSystem files(env.allocator, layout.ContentDirectory());
+    REQUIRE(files.Ready());
+    REQUIRE(files.AddFile("Hero.rasset", packages.hero.View()));
+    REQUIRE(files.AddFile(".rasset", packages.base.View()));
+    REQUIRE(files.AddFile(".RASSET", packages.base.View()));
+    REQUIRE(files.AddDirectory("Dir"));
+    REQUIRE(files.AddFile("Dir/.rasset", packages.base.View()));
+    // 잘못된 UTF-8 이름(POSIX 열거는 byte 그대로 준다): 패키지 파일·디렉터리는 InvalidPath
+    // (InvalidComponent — 표시 이름은 0x80 이상 byte를 16진으로), 그 밖의 파일은 무시하고 그
+    // 디렉터리 안으로는 내려가지 않는다.
+    REQUIRE(files.AddFile(StringView("Bad\xff.rasset", 11), packages.base.View()));
+    REQUIRE(files.AddFile(StringView("Bad\xff.txt", 8), packages.base.View()));
+    REQUIRE(files.AddDirectory(StringView("Dir\xc3", 4)));
+    REQUIRE(files.AddFile(StringView("Dir\xc3/Inside.rasset", 18), packages.derived.View()));
+    AssetIndex index(env.allocator, layout);
+    REQUIRE(index.Rebuild(files, PackageReadOptions{}));
+    CHECK(index.Count() == 1);
+    struct NameCase {
+        StringView name;
+        LogicalPathError error;
+    };
+    const NameCase names[] = {{".RASSET", LogicalPathError::EmptyComponent},
+                              {".rasset", LogicalPathError::EmptyComponent},
+                              {"Bad\\xff.rasset", LogicalPathError::InvalidComponent},
+                              {"Dir/.rasset", LogicalPathError::EmptyComponent},
+                              {"Dir\\xc3", LogicalPathError::InvalidComponent}};
+    REQUIRE(index.Diagnostics().Size() == 5);
+    for (usize position = 0; position < 5; ++position) {
+        const AssetIndexDiagnostic& diagnostic = index.Diagnostics()[position];
+        CHECK(diagnostic.code == AssetDiagnosticCode::InvalidPath);
+        CHECK(diagnostic.error == ErrorCode::InvalidArgument);
+        CHECK(diagnostic.pathError == names[position].error);
+        CHECK(diagnostic.fileName.View() == names[position].name);
     }
 }
 
@@ -1199,6 +1264,35 @@ TEST(AssetIndex_DiagnosticLines) {
          "InvalidArgument)\n"},
     };
     test::NFailAllocator failing(allocator);
+    // 줄 앞에 0 … LinePrefixBytes byte를 미리 채워 저장소가 자라는 지점을 줄의 모든 조각(코드·
+    // 이름·escape·설명·상대 이름) 위로 옮기며 모든 할당 지점을 실패시킨다.
+    auto sweep = [&](const AssetIndexDiagnostic& diagnostic, usize expectedBytes) noexcept {
+        uint32 failures = 0;
+        for (usize prefix = 0; prefix <= LinePrefixBytes; ++prefix) {
+            for (uint64 attempt = 1;; ++attempt) {
+                StringBuilder<LineInlineBytes> small(failing);
+                for (usize filled = 0; filled < prefix; ++filled) {
+                    (void)small.TryAppend("-");
+                }
+
+                // 채우기의 할당은 세지 않는다(FailOnAttempt가 시도 수를 0으로 되돌린다).
+                failing.FailOnAttempt(attempt);
+                auto appended = AppendAssetIndexDiagnosticLine(small, diagnostic);
+                const bool failed = failing.Attempts() >= attempt;
+                failing.DisableFailure();
+                if (!failed) {
+                    CHECK(appended);
+                    CHECK(small.View().ByteCount() == prefix + expectedBytes);
+                    break;
+                }
+
+                CHECK(!appended && appended.Error() == ErrorCode::OutOfMemory);
+                ++failures;
+            }
+        }
+
+        CHECK(failures > 0);
+    };
     for (const LineCase& one : cases) {
         AssetIndexDiagnostic diagnostic(allocator);
         diagnostic.code = one.code;
@@ -1217,23 +1311,35 @@ TEST(AssetIndex_DiagnosticLines) {
         }
 
         CHECK(line.View() == one.expected);
-        uint32 failures = 0;
-        for (uint64 attempt = 1;; ++attempt) {
-            StringBuilder<LineInlineBytes> small(failing);
-            failing.FailOnAttempt(attempt);
-            auto appended = AppendAssetIndexDiagnosticLine(small, diagnostic);
-            const bool failed = failing.Attempts() >= attempt;
-            failing.DisableFailure();
-            if (!failed) {
-                CHECK(appended && small.View() == one.expected);
-                break;
-            }
+        sweep(diagnostic, one.expected.ByteCount());
+    }
 
-            CHECK(!appended && appended.Error() == ErrorCode::OutOfMemory);
-            ++failures;
+    // 이름 escape: 제어 문자만 16진이다(비ASCII·역슬래시는 그대로 — 잘못된 UTF-8 이름은 검색이
+    // 이미 표시 이름으로 바꿨다). 상대 파일 이름도 같다.
+    struct EscapeCase {
+        StringView name;
+        StringView expected;
+    };
+    const EscapeCase escapes[] = {
+        {StringView("Dir/A\n\x01\x7f\\b\xc3\xa9.rasset", 19),
+         "DuplicatePath: Content/Dir/A\\x0a\\x01\\x7f\\b\xc3\xa9.rasset: the logical path is "
+         "also used by 'Content/Dir/A\\x0a\\x01\\x7f\\b\xc3\xa9.rasset'\n"},
+    };
+    for (const EscapeCase& one : escapes) {
+        AssetIndexDiagnostic diagnostic(allocator);
+        diagnostic.code = AssetDiagnosticCode::DuplicatePath;
+        REQUIRE(diagnostic.fileName.TryAssign(one.name));
+        REQUIRE(diagnostic.related.TryAssign(one.name));
+        StringBuilder<LineInlineBytes> line(allocator);
+        REQUIRE(AppendAssetIndexDiagnosticLine(line, diagnostic));
+        if (line.View() != one.expected) {
+            printf("  escaped: %.*s", static_cast<int>(line.View().ByteCount()),
+                   line.View().Data());
         }
 
-        CHECK(failures > 0);
+        CHECK(line.View() == one.expected);
+        CHECK(line.View().IsValidUtf8());
+        sweep(diagnostic, one.expected.ByteCount());
     }
 }
 
@@ -1285,6 +1391,11 @@ TEST(AssetIndex_AllocationFailures) {
 
     REQUIRE(deep.TryAppend("/Deep.rasset"));
     REQUIRE(files.AddFile(deep.View(), packages.plain.View()));
+    // 잘못된 UTF-8 이름(표시 이름이 인라인 저장소를 넘게 길다).
+    const char invalidName[] = "Invalid-\xff-name-long-enough-to-grow-the-display-string.rasset";
+    REQUIRE(files.AddFile(StringView(invalidName, sizeof(invalidName) - 1), packages.base.View()));
+    // 열거할 수 없는 하위 디렉터리(진단 None).
+    REQUIRE(files.AddDirectory("Unlistable", false, MemoryFault::Enumerate));
     // 진단 이름 순 맨 앞으로 옮겨지는 깨진 파일(열거에서는 마지막).
     REQUIRE(files.AddFile("Aaa-broken.rasset", packages.hero.View().Slice(0, 70)));
     uint32 failures = 0;
@@ -1328,7 +1439,7 @@ TEST(AssetIndex_AllocationFailures) {
         failing.DisableFailure();
         if (!failed) {
             REQUIRE(result);
-            CHECK(index.Count() == 7 && index.Diagnostics().Size() == 10);
+            CHECK(index.Count() == 7 && index.Diagnostics().Size() == 12);
             CHECK(index.Diagnostics()[0].fileName.View() == "Aaa-broken.rasset");
             CHECK(under.Size() == 2 && typed.Size() == 2 && tagged.Size() == 2);
             CHECK(referencers.Size() == 3 && dependencies.Size() == 2);

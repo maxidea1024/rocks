@@ -21,18 +21,19 @@ constexpr StringView ListName = "asset-list";
 constexpr StringView VerifyName = "asset-index-verify";
 
 constexpr StringView ListUsage =
-    "usage: asset-list [--under=<path>] [--project=<dir>]\n"
+    "usage: asset-list [--under=<path>] [--project=<dir>] [--wait=<seconds>]\n"
     "  List the editor packages under Content/ in logical path order, one line each:\n"
     "  '<logical path> <AssetId> <representative type id>'. --under=<path> keeps the\n"
     "  packages below a logical directory (/Game or /Game/...). --project=<dir> picks the\n"
-    "  project; without it the nearest '*.rocksproject' from the current directory up is used.\n";
+    "  project; without it the nearest '*.rocksproject' from the current directory up is used.\n"
+    "  --wait is accepted like the other asset commands; listing takes no lock.\n";
 
 constexpr StringView VerifyUsage =
-    "usage: asset-index-verify [--project=<dir>]\n"
+    "usage: asset-index-verify [--project=<dir>] [--wait=<seconds>]\n"
     "  Scan Content/ and check the packages: invalid names, package checks, duplicate asset\n"
     "  ids and paths, missing dependencies and type mismatches. Each problem is one line\n"
     "  '<diagnostic code>: <path>: <description>' on standard error; the exit code is 1 when\n"
-    "  there is any.\n";
+    "  there is any. --wait is accepted like the other asset commands; checking takes no lock.\n";
 
 // 출력 한 줄의 인라인 byte 수다(넘으면 allocator로 자란다).
 constexpr usize LineBytes = 512;
@@ -67,6 +68,9 @@ Result<int32> Fail(CommandletOutput& output, Allocator& allocator, StringView co
 struct Options {
     StringView project;
     StringView under;
+    // 13절 공통 옵션 --wait=<초>(쓰기 잠금 대기)다. 읽기 명령은 잠금을 잡지 않으므로 형식(10진
+    // 숫자)만 검사하고 쓰지 않는다.
+    StringView wait;
     bool help = false;
 
     // allowUnder는 --under를 받는지다(asset-list).
@@ -79,12 +83,13 @@ struct Options {
         for (StringView argument : args) {
             StringView* slot = nullptr;
             StringView value;
-            const StringView names[] = {"--project=", "--under="};
-            for (StringView name : names) {
-                if (argument.StartsWith(name, StringComparison::CaseSensitive)) {
-                    slot = name == "--project=" ? &project : (allowUnder ? &under : nullptr);
-                    value = StringView(argument.Data() + name.ByteCount(),
-                                       argument.ByteCount() - name.ByteCount());
+            StringView* const slots[] = {&project, allowUnder ? &under : nullptr, &wait};
+            const StringView names[] = {"--project=", "--under=", "--wait="};
+            for (usize index = 0; index < sizeof(names) / sizeof(names[0]); ++index) {
+                if (argument.StartsWith(names[index], StringComparison::CaseSensitive)) {
+                    slot = slots[index];
+                    value = StringView(argument.Data() + names[index].ByteCount(),
+                                       argument.ByteCount() - names[index].ByteCount());
                 }
             }
 
@@ -93,6 +98,12 @@ struct Options {
             }
 
             *slot = value;
+        }
+
+        for (char digit : wait) {
+            if (digit < '0' || digit > '9') {
+                return false;
+            }
         }
 
         return true;
