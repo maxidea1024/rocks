@@ -1203,6 +1203,12 @@ TEST(AssetIndex_RebuildFailures) {
     // (InvalidComponent — 표시 이름은 0x80 이상 byte를 16진으로), 그 밖의 파일은 무시하고 그
     // 디렉터리 안으로는 내려가지 않는다.
     REQUIRE(files.AddFile(StringView("Bad\xff.rasset", 11), packages.base.View()));
+    // 표시 이름은 겹치지 않는다: 글자 그대로 "\\xff"인 이름은 역슬래시를 16진으로(Backslash),
+    // 개행이 든 이름은 개행을 16진으로(InvalidComponent) 적는다.
+    REQUIRE(files.AddFile("Bad\\xff.rasset", packages.base.View()));
+    REQUIRE(files.AddFile("Ctl\n.rasset", packages.base.View()));
+    REQUIRE(files.AddFile("Del\x7f.rasset", packages.base.View()));
+    REQUIRE(files.AddFile(StringView("Dir/Sub\xfe.rasset", 15), packages.base.View()));
     REQUIRE(files.AddFile(StringView("Bad\xff.txt", 8), packages.base.View()));
     REQUIRE(files.AddDirectory(StringView("Dir\xc3", 4)));
     REQUIRE(files.AddFile(StringView("Dir\xc3/Inside.rasset", 18), packages.derived.View()));
@@ -1215,11 +1221,15 @@ TEST(AssetIndex_RebuildFailures) {
     };
     const NameCase names[] = {{".RASSET", LogicalPathError::EmptyComponent},
                               {".rasset", LogicalPathError::EmptyComponent},
+                              {"Bad\\x5cxff.rasset", LogicalPathError::Backslash},
                               {"Bad\\xff.rasset", LogicalPathError::InvalidComponent},
+                              {"Ctl\\x0a.rasset", LogicalPathError::InvalidComponent},
+                              {"Del\\x7f.rasset", LogicalPathError::InvalidComponent},
                               {"Dir/.rasset", LogicalPathError::EmptyComponent},
+                              {"Dir/Sub\\xfe.rasset", LogicalPathError::InvalidComponent},
                               {"Dir\\xc3", LogicalPathError::InvalidComponent}};
-    REQUIRE(index.Diagnostics().Size() == 5);
-    for (usize position = 0; position < 5; ++position) {
+    REQUIRE(index.Diagnostics().Size() == 9);
+    for (usize position = 0; position < 9; ++position) {
         const AssetIndexDiagnostic& diagnostic = index.Diagnostics()[position];
         CHECK(diagnostic.code == AssetDiagnosticCode::InvalidPath);
         CHECK(diagnostic.error == ErrorCode::InvalidArgument);
@@ -1240,7 +1250,8 @@ TEST(AssetIndex_DiagnosticLines) {
     };
     using C = AssetDiagnosticCode;
     const LineCase cases[] = {
-        {C::None, ErrorCode::Busy, "Busy: Content/Dir/A.rasset: cannot read the package file\n"},
+        {C::None, ErrorCode::Busy,
+         "Busy: Content/Dir/A.rasset: cannot read the file or directory\n"},
         {C::InvalidPath, ErrorCode::InvalidArgument,
          "InvalidPath: Content/Dir/A.rasset: invalid logical path (TooLong)\n"},
         {C::MissingFile, ErrorCode::NotFound,
@@ -1311,34 +1322,6 @@ TEST(AssetIndex_DiagnosticLines) {
         }
 
         CHECK(line.View() == one.expected);
-        sweep(diagnostic, one.expected.ByteCount());
-    }
-
-    // 이름 escape: 제어 문자만 16진이다(비ASCII·역슬래시는 그대로 — 잘못된 UTF-8 이름은 검색이
-    // 이미 표시 이름으로 바꿨다). 상대 파일 이름도 같다.
-    struct EscapeCase {
-        StringView name;
-        StringView expected;
-    };
-    const EscapeCase escapes[] = {
-        {StringView("Dir/A\n\x01\x7f\\b\xc3\xa9.rasset", 19),
-         "DuplicatePath: Content/Dir/A\\x0a\\x01\\x7f\\b\xc3\xa9.rasset: the logical path is "
-         "also used by 'Content/Dir/A\\x0a\\x01\\x7f\\b\xc3\xa9.rasset'\n"},
-    };
-    for (const EscapeCase& one : escapes) {
-        AssetIndexDiagnostic diagnostic(allocator);
-        diagnostic.code = AssetDiagnosticCode::DuplicatePath;
-        REQUIRE(diagnostic.fileName.TryAssign(one.name));
-        REQUIRE(diagnostic.related.TryAssign(one.name));
-        StringBuilder<LineInlineBytes> line(allocator);
-        REQUIRE(AppendAssetIndexDiagnosticLine(line, diagnostic));
-        if (line.View() != one.expected) {
-            printf("  escaped: %.*s", static_cast<int>(line.View().ByteCount()),
-                   line.View().Data());
-        }
-
-        CHECK(line.View() == one.expected);
-        CHECK(line.View().IsValidUtf8());
         sweep(diagnostic, one.expected.ByteCount());
     }
 }

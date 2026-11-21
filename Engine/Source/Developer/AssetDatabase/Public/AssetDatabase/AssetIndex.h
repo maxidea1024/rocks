@@ -76,8 +76,9 @@ struct AssetIndexDiagnostic {
     AssetDiagnosticCode code = AssetDiagnosticCode::None;
     // 원본 오류(패키지 판정·IO의 ErrorCode)다.
     ErrorCode error = ErrorCode::None;
-    // Content 상대 OS 이름이다. 유효한 UTF-8이 아닌 OS 이름(POSIX — InvalidPath 진단)은 0x80 이상
-    // byte를 역슬래시 x 16진 두 자리로 적은 표시 이름이다.
+    // Content 상대 OS 이름의 표시 이름이다(related도 같다): 한 줄·유효한 UTF-8이고 서로 다른 OS
+    // 이름이 겹치지 않게 역슬래시·제어 문자(0x00–0x1f·0x7f)와, 이름이 유효한 UTF-8이 아니면(POSIX)
+    // 0x80 이상 byte를 역슬래시 x 16진 두 자리로 적는다. Windows 이름은 대개 그대로다.
     String fileName;
     AssetId asset{};
     // InvalidPath의 사유다.
@@ -170,9 +171,8 @@ private:
 // 진단 한 줄 `<진단 코드>: Content/<파일>: <설명>\n`을 line에 붙인다(13절 명령 출력 —
 // asset-index-verify, 영어). 코드 None(파일 IO 실패)은 코드 자리에 원본 오류 이름(ErrorCodeName)을
 // 쓴다. 설명: InvalidPath는 LogicalPathError 이름, 같은 id·경로는 상대 파일, 의존 진단은 대상
-// AssetId, 패키지 판정은 칸·위치·원본 오류다. 파일 이름의 제어 문자(0x00–0x1f·0x7f)는 한 줄을
-// 지키게 역슬래시 x 16진 두 자리로 쓴다. 오류: line의 할당 실패(그때 line에 붙인 일부가 남을 수
-// 있다).
+// AssetId, 패키지 판정은 칸·위치·원본 오류다. 이름은 진단의 표시 이름 그대로 쓴다. 오류: line의
+// 할당 실패(그때 line에 붙인 일부가 남을 수 있다).
 //   StringBuilder<512> line(allocator);
 //   if (auto appended = AppendAssetIndexDiagnosticLine(line, diagnostic); !appended) { ... }
 Result<void> AppendAssetIndexDiagnosticLine(StringBuilderBase& line,

@@ -568,7 +568,7 @@ try
         {
             await Check("asset-index-verify unreadable file", ["asset-index-verify", $"--project={project}"], 1,
                 "asset-index-verify: 2 packages, 2 diagnostics",
-                ": Content/Locked.rasset: cannot read the package file\n");
+                ": Content/Locked.rasset: cannot read the file or directory\n");
         }
 
         File.Delete(locked);

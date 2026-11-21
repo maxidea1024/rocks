@@ -35,12 +35,13 @@ int CompareId(AssetId a, AssetId b) noexcept {
 
 // 열거한 자식 하나다.
 struct ChildEntry {
-    explicit ChildEntry(Allocator& allocator) noexcept : name(allocator) {
+    explicit ChildEntry(Allocator& allocator) noexcept : name(allocator), raw(allocator) {
     }
 
-    // 표시 이름이다. 유효한 UTF-8이 아닌 OS 이름(POSIX)은 0x80 이상 byte를 16진으로 적은 이름이고
-    // invalidName이 참이다(그 이름으로는 논리 경로도, 다시 열 경로도 만들 수 없다).
+    // OS 이름이다. 유효한 UTF-8이면 name, 아니면(POSIX) byte 그대로 raw에 두고 invalidName이
+    // 참이다(그 이름으로는 논리 경로도, 다시 열 경로도 만들 수 없다 — String은 UTF-8만 받는다).
     String name;
+    Array<char> raw;
     bool invalidName = false;
     platform::FileInfo info;
 };
@@ -50,30 +51,48 @@ struct EnumerateContext {
     ErrorCode error = ErrorCode::None;
 };
 
-// 역슬래시 + x + 16진 두 자리를 붙인다.
-template <class TOut>
-Result<void> AppendHexByte(TOut& out, uint8 value) noexcept {
+// 진단의 표시 이름을 out에 쓴다(AssetIndexDiagnostic::fileName). 한 줄·유효한 UTF-8이고 서로 다른
+// OS 이름이 같은 표시 이름이 되지 않게 역슬래시·제어 문자(0x00–0x1f·0x7f)와, 이름이 유효한
+// UTF-8이 아니면 0x80 이상 byte를 16진(역슬래시 x 두 자리)으로 적는다. 나머지는 그대로다(유효한
+// UTF-8 이름의 비ASCII 문자 포함). 길이를 먼저 세어 버퍼를 한 번 잡고 채운다.
+Result<void> AssignDisplayName(String& out, StringView raw) noexcept {
+    constexpr uint8 FirstPrintable = 0x20;
+    constexpr uint8 Delete = 0x7f;
+    constexpr uint8 FirstNonAscii = 0x80;
+    constexpr usize EscapeBytes = 4;
     constexpr char Digits[] = "0123456789abcdef";
     constexpr uint32 NibbleBits = 4;
     constexpr uint8 NibbleMask = 0x0f;
-    const char hex[4] = {'\\', 'x', Digits[value >> NibbleBits], Digits[value & NibbleMask]};
-    return out.TryAppend(StringView(hex, sizeof(hex)));
-}
-
-// 유효한 UTF-8이 아닌 OS 이름의 표시 이름을 out에 쓴다(ASCII는 그대로, 0x80 이상 byte는 16진).
-Result<void> AssignDisplayName(String& out, StringView raw) noexcept {
-    constexpr uint8 FirstNonAscii = 0x80;
-    out.Clear();
+    const bool validUtf8 = raw.IsValidUtf8();
+    auto escaped = [&](uint8 value) noexcept {
+        return value < FirstPrintable || value == Delete || value == '\\' ||
+               (!validUtf8 && value >= FirstNonAscii);
+    };
+    usize bytes = 0;
     for (usize index = 0; index < raw.ByteCount(); ++index) {
-        const uint8 value = static_cast<uint8>(raw.Data()[index]);
-        auto appended = value >= FirstNonAscii ? AppendHexByte(out, value)
-                                               : out.TryAppend(StringView(raw.Data() + index, 1));
-        if (!appended) {
-            return appended;
-        }
+        bytes += escaped(static_cast<uint8>(raw.Data()[index])) ? EscapeBytes : 1;
     }
 
-    return Result<void>::Success();
+    Array<char> text(out.GetAllocator());
+    if (auto sized = text.TryResize(bytes); !sized) {
+        return sized;
+    }
+
+    usize at = 0;
+    for (usize index = 0; index < raw.ByteCount(); ++index) {
+        const uint8 value = static_cast<uint8>(raw.Data()[index]);
+        if (!escaped(value)) {
+            text[at++] = raw.Data()[index];
+            continue;
+        }
+
+        text[at++] = '\\';
+        text[at++] = 'x';
+        text[at++] = Digits[value >> NibbleBits];
+        text[at++] = Digits[value & NibbleMask];
+    }
+
+    return out.TryAssign(StringView(text.Data(), text.Size()));
 }
 
 bool CollectChild(const platform::DirectoryEntry& entry, void* raw) noexcept {
@@ -81,8 +100,9 @@ bool CollectChild(const platform::DirectoryEntry& entry, void* raw) noexcept {
     ChildEntry child(context.children->GetAllocator());
     const StringView name(entry.name, entry.nameBytes);
     child.invalidName = !name.IsValidUtf8();
-    if (auto assigned =
-            child.invalidName ? AssignDisplayName(child.name, name) : child.name.TryAssign(name);
+    if (auto assigned = child.invalidName
+                            ? child.raw.TryAppend(Span<const char>(entry.name, entry.nameBytes))
+                            : child.name.TryAssign(name);
         !assigned) {
         context.error = assigned.Error();
         return false;
@@ -97,13 +117,13 @@ bool CollectChild(const platform::DirectoryEntry& entry, void* raw) noexcept {
     return true;
 }
 
-// 진단 하나를 만든다.
+// 진단 하나를 만든다(fileName은 OS 상대 이름 byte — 표시 이름으로 바꿔 둔다).
 Result<void> AddDiagnostic(Array<AssetIndexDiagnostic>& out, AssetDiagnosticCode code,
                            ErrorCode error, StringView fileName) noexcept {
     AssetIndexDiagnostic diagnostic(out.GetAllocator());
     diagnostic.code = code;
     diagnostic.error = error;
-    if (auto assigned = diagnostic.fileName.TryAssign(fileName); !assigned) {
+    if (auto assigned = AssignDisplayName(diagnostic.fileName, fileName); !assigned) {
         return assigned;
     }
 
@@ -136,7 +156,7 @@ Result<void> DiagnoseNeighbors(Array<AssetIndexEntry>& entries, Span<const usize
         AssetIndexDiagnostic& diagnostic = diagnostics[diagnostics.Size() - 1];
         diagnostic.asset = entry.id;
         const usize partner = order[before ? position - 1 : position + 1];
-        if (auto assigned = diagnostic.related.TryAssign(entries[partner].fileName.View());
+        if (auto assigned = AssignDisplayName(diagnostic.related, entries[partner].fileName.View());
             !assigned) {
             return assigned;
         }
@@ -170,33 +190,6 @@ Result<void> AppendUnder(Span<const AssetIndexEntry> entries, StringView base, b
     }
 
     return Result<void>::Success();
-}
-
-// 진단 줄에 파일 이름(유효한 UTF-8 — 잘못된 OS 이름은 검색이 표시 이름으로 바꿨다)을 붙인다.
-// 개행 등 제어 문자(0x00–0x1f·0x7f)는 한 줄을 지키게 16진(역슬래시 x 두 자리)으로 쓴다.
-Result<void> AppendEscapedName(StringBuilderBase& line, StringView name) noexcept {
-    constexpr uint8 FirstPrintable = 0x20;
-    constexpr uint8 Delete = 0x7f;
-    usize start = 0;
-    for (usize index = 0; index < name.ByteCount(); ++index) {
-        const uint8 value = static_cast<uint8>(name.Data()[index]);
-        if (value >= FirstPrintable && value != Delete) {
-            continue;
-        }
-
-        if (auto appended = line.TryAppend(StringView(name.Data() + start, index - start));
-            !appended) {
-            return appended;
-        }
-
-        if (auto appended = AppendHexByte(line, value); !appended) {
-            return appended;
-        }
-
-        start = index + 1;
-    }
-
-    return line.TryAppend(StringView(name.Data() + start, name.ByteCount() - start));
 }
 
 // 0 … count - 1 index 표를 만든다.
@@ -296,11 +289,26 @@ Result<void> AssetIndex::Rebuild(platform::FileSystem& files,
             // 없다: 디렉터리·패키지 파일이면 InvalidPath(InvalidComponent — 이름 규칙의
             // InvalidCharacter와 같은 사유)로 진단하고 내려가지 않는다. 그 밖의 파일은 무시한다.
             if (child.invalidName) {
-                const bool package = child.info.type == platform::FileType::File &&
-                                     child.name.View().EndsWith(EditorPackageExtension);
+                const bool package =
+                    child.info.type == platform::FileType::File &&
+                    StringView(child.raw.Data(), child.raw.Size()).EndsWith(EditorPackageExtension);
                 if (child.info.type == platform::FileType::Directory || package) {
-                    if (auto added = AddDiagnostic(diagnostics, AssetDiagnosticCode::InvalidPath,
-                                                   ErrorCode::InvalidArgument, relative.View());
+                    Array<char> rawRelative(*allocator_);
+                    const StringView rawPieces[] = {relativeDirectory.View(),
+                                                    relativeDirectory.View().IsEmpty() ? "" : "/",
+                                                    StringView(child.raw.Data(), child.raw.Size())};
+                    for (StringView piece : rawPieces) {
+                        if (auto appended = rawRelative.TryAppend(
+                                Span<const char>(piece.Data(), piece.ByteCount()));
+                            !appended) {
+                            return appended;
+                        }
+                    }
+
+                    if (auto added =
+                            AddDiagnostic(diagnostics, AssetDiagnosticCode::InvalidPath,
+                                          ErrorCode::InvalidArgument,
+                                          StringView(rawRelative.Data(), rawRelative.Size()));
                         !added) {
                         return added;
                     }
@@ -715,8 +723,8 @@ Result<void> AppendAssetIndexDiagnosticLine(StringBuilderBase& line,
         return formatted;
     }
 
-    if (auto escaped = AppendEscapedName(line, diagnostic.fileName.View()); !escaped) {
-        return escaped;
+    if (auto appended = line.TryAppend(diagnostic.fileName.View()); !appended) {
+        return appended;
     }
 
     if (auto appended = line.TryAppend(": "); !appended) {
@@ -725,7 +733,7 @@ Result<void> AppendAssetIndexDiagnosticLine(StringBuilderBase& line,
 
     switch (diagnostic.code) {
     case AssetDiagnosticCode::None:
-        return line.TryAppend("cannot read the package file\n");
+        return line.TryAppend("cannot read the file or directory\n");
     case AssetDiagnosticCode::InvalidPath:
         return line.TryAppendFormat("invalid logical path ({})\n",
                                     LogicalPathErrorName(diagnostic.pathError));
@@ -741,8 +749,8 @@ Result<void> AppendAssetIndexDiagnosticLine(StringBuilderBase& line,
             return formatted;
         }
 
-        if (auto escaped = AppendEscapedName(line, diagnostic.related.View()); !escaped) {
-            return escaped;
+        if (auto appended = line.TryAppend(diagnostic.related.View()); !appended) {
+            return appended;
         }
 
         return line.TryAppend("'\n");
