@@ -63,7 +63,7 @@ inline Result<WireValueShape> ValueArrayElementShape(WireType elementWire) noexc
 // 수만큼의 work를 먼저 청구한다. 넘겨받은 ArchiveReader의 예산을 그대로 쓰므로
 // RecordReader::OpenValue로 연 값(또는 OpenField)이면 그 Record 트리의 공유 예산이다. 원본 byte는
 // reader보다 오래 살아야 한다. 이동만 되며 이동된 원본은 원소 0개의 빈 reader다.
-class ValueArrayReader {
+class ROCKS_SERIALIZATION_API ValueArrayReader {
 public:
     // payload(값 하나의 ArchiveReader, 위치 0)의 header를 읽고 검사한다. 검사 순서(모두 할당 전):
     // elementWire 자체가 원소 tag가 아니거나 shape가 elementWire와 모순이면 InvalidArgument(이때는
@@ -124,7 +124,7 @@ private:
 // 쓰고, 호출자는 원소를 out에 바로 쓴 뒤 End를 부른다(값 byte는 한 번만 쓴다). maxBytes는 header를
 // 포함한 payload 전체의 상한이다(보통 값 하나의 한도). 작업량은 out의 청구다. 실패하면 out의 내용은
 // 정해지지 않으므로 그 writer를 버린다. out은 이 writer보다 오래 살아야 한다.
-class ValueArrayWriter {
+class ROCKS_SERIALIZATION_API ValueArrayWriter {
 public:
     // elementWire가 원소 tag가 아니거나 shape가 그와 모순이면 InvalidArgument(reader와 같은 검사),
     // count > maxCount면 CapacityExceeded, header 8 byte + count × max(wire 최소, shape 최소)가

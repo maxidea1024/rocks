@@ -29,8 +29,10 @@ constexpr usize HookBytes = 1 + 4;
 constexpr usize HandlerBytes = 4 + 4 + 4 + 1 + 1 + 4 + 4 + 4;
 constexpr usize HandlerPathBytes = 4;
 constexpr usize EventBytes = 4 + 4;
-constexpr usize FunctionBytes = 4 * 3 + 2 * 3 * BytecodeBankCount + 2 + BytecodeHashBytes + 4 * 4;
+constexpr usize FunctionBytes =
+    4 * 3 + 2 * 3 * BytecodeBankCount + 2 + BytecodeHashBytes + 4 * 4 + 2 * 2;
 constexpr usize WordBytes = 4;
+constexpr usize ClassFieldBytes = TypeFieldBytes + 1; // 형식 v4: 표지 u8
 constexpr usize SwitchBytes = 12;
 constexpr usize CaseBytes = 12;
 constexpr usize AwaitBytes = 12;
@@ -185,6 +187,7 @@ Result<void> WriteBytecodeFile(const BytecodeModule& module, Array<uint8>& out) 
             writer.WriteU8(field.bank);
             writer.WriteU8(field.slots);
             writer.WriteU32LE(field.offset);
+            writer.WriteU8(field.flags);
         }
 
         writer.WriteU32LE(static_cast<uint32>(module.hooks.Size()));
@@ -236,6 +239,8 @@ Result<void> WriteBytecodeFile(const BytecodeModule& module, Array<uint8>& out) 
             writer.WriteU32LE(function.switchCount);
             writer.WriteU32LE(function.firstAwait);
             writer.WriteU32LE(function.awaitCount);
+            writer.WriteU16LE(function.heldFirst);
+            writer.WriteU16LE(function.heldCount);
         }
 
         writer.WriteU32LE(static_cast<uint32>(module.words.Size()));
@@ -527,7 +532,7 @@ private:
             entry.initializer = reader.ReadU32LE();
         }
 
-        if (!Count(reader, TypeFieldBytes, count) || !Resize(out_.classFields, count)) {
+        if (!Count(reader, ClassFieldBytes, count) || !Resize(out_.classFields, count)) {
             return Failure();
         }
 
@@ -536,6 +541,7 @@ private:
             field.bank = reader.ReadU8();
             field.slots = reader.ReadU8();
             field.offset = reader.ReadU32LE();
+            field.flags = reader.ReadU8();
         }
 
         if (!Count(reader, HookBytes, count) || !Resize(out_.hooks, count)) {
@@ -616,6 +622,8 @@ private:
             function.switchCount = reader.ReadU32LE();
             function.firstAwait = reader.ReadU32LE();
             function.awaitCount = reader.ReadU32LE();
+            function.heldFirst = reader.ReadU16LE();
+            function.heldCount = reader.ReadU16LE();
         }
 
         if (!Count(reader, WordBytes, count) || !Resize(out_.words, count)) {
@@ -844,8 +852,12 @@ public:
             uint32 running[BytecodeBankCount] = {};
             for (uint32 at = entry.firstField; at < entry.firstField + entry.fieldCount; ++at) {
                 const BytecodeTypeField& field = module_.classFields[at];
+                // held 표지는 Ref 1 slot 필드에만(형식 v4).
+                const bool held = (field.flags & BytecodeFieldHeld) != 0;
                 if (field.name >= strings || field.bank >= BytecodeBankCount || field.slots == 0 ||
-                    (field.bank != 0 && field.slots != 1) || field.offset != running[field.bank]) {
+                    (field.bank != 0 && field.slots != 1) || field.offset != running[field.bank] ||
+                    (field.flags & ~BytecodeFieldHeld) != 0 ||
+                    (held && field.bank != static_cast<uint8>(BytecodeBank::Ref))) {
                     return Reject(BytecodeLoadError::BadTable);
                 }
 
@@ -1003,7 +1015,12 @@ private:
             function.wordCount == 0 || function.wordCount > MaxFunctionWords ||
             usize(function.firstSwitch) + function.switchCount > module_.switches.Size() ||
             usize(function.firstAwait) + function.awaitCount > module_.awaits.Size() ||
-            function.returnBank >= BytecodeBankCount || function.returnSlots > MaxMarkerSlots) {
+            function.returnBank >= BytecodeBankCount || function.returnSlots > MaxMarkerSlots ||
+            (function.heldCount != 0 &&
+             (function.heldFirst < function.parameters[1] ||
+              (function.returnBank == static_cast<uint8>(BytecodeBank::Ref) &&
+               function.heldFirst < function.returnSlots) ||
+              uint32(function.heldFirst) + function.heldCount > function.registers[1]))) {
             return Reject(BytecodeLoadError::BadFunction);
         }
 
@@ -1282,7 +1299,9 @@ private:
 
             // 수신자·대상이 있는 호출은 Ref 창 0번이 있어야 한다. 같은 모듈 함수는 그 매개변수가
             // 창에 들어가야 한다.
-            if ((info.op == Opcode::Emit || info.op == Opcode::CallV) && !Window(R, 1)) {
+            // CALLW는 하위 대기 handle을 Ref 창 0번에 둔다(LC6c2 리뷰 B4).
+            if ((info.op == Opcode::Emit || info.op == Opcode::CallV || info.op == Opcode::CallW) &&
+                !Window(R, 1)) {
                 return BytecodeLoadError::BadRegister;
             }
 
@@ -1486,6 +1505,13 @@ private:
         }
         case Opcode::Fault:
             return BytecodeLoadError::None;
+        case Opcode::Release: {
+            // 유지 자원 지역 구간 안만(LC6d1 리뷰 — 손상된 모듈이 this 등을 멈추지 못하게).
+            const BytecodeFunction& owner = module_.functions[function_];
+            return a >= owner.heldFirst && a < uint32(owner.heldFirst) + owner.heldCount
+                       ? BytecodeLoadError::None
+                       : BytecodeLoadError::BadRegister;
+        }
         default:
             break;
         }

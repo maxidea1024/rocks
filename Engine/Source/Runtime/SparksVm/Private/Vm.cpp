@@ -87,6 +87,7 @@ Result<VmCallResult> VmExecution::Call(const VmLinkedModule& linked, uint32 func
     }
 
     Unwind();
+    depthBase_ = 0;
     if (!keepLogs_) {
         logs_.Clear();
         logText_.Clear();
@@ -236,8 +237,31 @@ Result<VmCallResult> VmExecution::MakeFault(VmFaultKind kind, uint32 word, uint6
 }
 
 void VmExecution::Unwind() noexcept {
+    // fault·ENDEXEC·정리: 맨 위 frame부터 held 구간을 뒤에서부터(선언 역순) 멈춘다(SparksRuntime
+    // 2.6절). 정상 반환은 컴파일러의 RELEASE가 이미 0으로 두었다.
+    for (usize frame = frames_.Size(); frame > 0; --frame) {
+        const Frame& entry = frames_[frame - 1];
+        ReleaseHeld(*entry.link, entry.function, refs_.Data() + entry.base[1],
+                    refs_.Size() - entry.base[1]);
+    }
+
     ReleaseRange(0, buffers_.Size());
     frames_.Clear();
+}
+
+void VmExecution::ReleaseHeld(const VmLinkedModule& link, uint32 function, uint64* refs,
+                              usize available) noexcept {
+    const BytecodeFunction& entry = link.Module().functions[function];
+    for (uint32 at = entry.heldCount; at > 0; --at) {
+        const usize slot = usize(entry.heldFirst) + at - 1;
+        if (slot < available && refs[slot] != 0 && link.host_ != nullptr) {
+            link.host_->ReleaseHeld(refs[slot]);
+        }
+
+        if (slot < available) {
+            refs[slot] = 0;
+        }
+    }
 }
 
 void VmExecution::ReleaseRange(usize begin, usize end) noexcept {

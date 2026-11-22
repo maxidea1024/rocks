@@ -64,7 +64,7 @@ enum class PackedKeyTimeFormat : uint8 {
 //   if (auto made = packed.TryPack(curve); !made) { return made; }
 //   const float value = packed.Evaluate(1.5f);
 ROCKS_STRUCT()
-struct PackedTangentCurve {
+struct ROCKS_CURVES_API PackedTangentCurve {
     ROCKS_GENERATED_BODY()
 public:
     // Empty 형식(키 없음·기본값 없음·외삽 Constant)이다. allocator는 packed byte 배열이 쓴다.

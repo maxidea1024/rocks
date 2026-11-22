@@ -56,7 +56,8 @@ struct PathKeyValue {
 //   key.text = "metal";
 //   if (auto made = AppendPathKey(key, wire); !made) { return made; }
 //   const PathKey keys[] = {{key.kind, wire.View()}};
-Result<void> AppendPathKey(const PathKeyValue& value, Array<uint8>& out) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void> AppendPathKey(const PathKeyValue& value,
+                                                   Array<uint8>& out) noexcept;
 
 // key.wire를 key.kind의 정규형으로 읽는다(할당 없음 — text는 key.wire를 빌린다).
 // 오류: kind가 Map 키 종류가 아니거나 wire가 정규형이 아니면(길이·Bool 0·1·좁은 정수 범위·길이
@@ -66,7 +67,7 @@ Result<void> AppendPathKey(const PathKeyValue& value, Array<uint8>& out) noexcep
 // 사용 예:
 //   auto value = ReadPathKey(path.keys[0]);
 //   if (value && value.Value().kind == ValueKind::Name) { /* value.Value().text */ }
-Result<PathKeyValue> ReadPathKey(const PathKey& key) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<PathKeyValue> ReadPathKey(const PathKey& key) noexcept;
 
 namespace detail {
 

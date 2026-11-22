@@ -86,7 +86,7 @@ struct BinnedAllocatorUsage {
 //   오류를 돌려주고 할당은 살아 있는 채로 남는다.
 // - 스레드: 모든 메서드를 여러 스레드에서 동시에 부를 수 있다. 파괴는 모든 호출이 끝난 뒤에 하고,
 //   반환하지 않은 할당이 남아 있으면 Fatal이다.
-class BinnedAllocator final : public Allocator {
+class ROCKS_CORE_API BinnedAllocator final : public Allocator {
 public:
     // slab 하나의 크기(byte)다. 예약 크기의 단위다.
     static constexpr usize SlabBytes = usize{64} << 10;

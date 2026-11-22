@@ -116,9 +116,9 @@ Result<usize> TryGetCompressedBlocksBound(uint32 blockSizeLog2, uint64 rawSize) 
 // source 전체를 컨테이너 하나로 압축해 output 뒤에 붙이고 붙인 byte 수를 반환한다. 코덱 작업
 // 메모리는 scratch에서 할당한다. 실패하면 output 길이를 되돌린다(capacity는 늘 수 있다). source와
 // output 저장소가 겹치면 InvalidArgument다.
-Result<usize> TryCompressBlocksAppend(const CompressedBlocksSettings& settings,
-                                      Span<const uint8> source, Array<uint8>& output,
-                                      Allocator& scratch) noexcept;
+ROCKS_COMPRESSION_API Result<usize>
+TryCompressBlocksAppend(const CompressedBlocksSettings& settings, Span<const uint8> source,
+                        Array<uint8>& output, Allocator& scratch) noexcept;
 
 // 증분 writer다. IO와 무관하게 블록을 하나씩 압축한다. 파일이면 인덱스 자리(IndexBytes)를 비워 두고
 // payload를 흘려 쓴 뒤 되돌아가 인덱스를 쓴다.

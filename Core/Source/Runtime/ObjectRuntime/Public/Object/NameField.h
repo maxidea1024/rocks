@@ -36,7 +36,8 @@ inline constexpr usize MaxNameFieldBytes = 3 * MaxNameBaseUtf16Units + 1 + 10;
 // UTF-16 단위 초과 → NFC 아님(정규화는 하지 않는다 — 입력 계층이 NFC로 만든다). 쓰기 검사·저장
 // encode·복원 1단계가 이 함수 하나로 검사한다(복원은 Archive reader가 String의 UTF-8을 먼저 본다 —
 // 오류 코드는 같다).
-Result<void> ValidateNameFieldText(StringView text, Allocator& scratch) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void> ValidateNameFieldText(StringView text,
+                                                           Allocator& scratch) noexcept;
 
 // token을 필드 값으로 쓸 수 있는지 보고, 저장할 표시 문자열을 lease로 돌려준다(저장 encode가 lease
 // 동안 View()를 쓴다). None 토큰(기본 None과 번호 없는 None 표시 변형)은 빈 lease(View()가 빈
@@ -61,7 +62,8 @@ Result<void> ValidateNameFieldText(StringView text, Allocator& scratch) noexcept
 //   }
 //
 //   return out.WriteString(display.Value().View());
-Result<NameLease> AcquireNameFieldText(NamePool* pool, Name token, Allocator& scratch) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<NameLease> AcquireNameFieldText(NamePool* pool, Name token,
+                                                               Allocator& scratch) noexcept;
 
 // token을 Name 필드에 쓸 수 있는지만 본다(AcquireNameFieldText와 같은 검사 — 얻은 lease는 바로
 // 놓는다). 필드 write(FieldWriteOperation)·staged write(생성 writeStaged)·경로 쓰기가 값을 게시하기
@@ -72,7 +74,8 @@ Result<NameLease> AcquireNameFieldText(NamePool* pool, Name token, Allocator& sc
 //       !valid) {
 //       return valid;   // pool 없음 Unsupported, 다른 pool의 토큰 WrongContext 등
 //   }
-Result<void> ValidateNameFieldToken(NamePool* pool, Name token, Allocator& scratch) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void> ValidateNameFieldToken(NamePool* pool, Name token,
+                                                            Allocator& scratch) noexcept;
 
 // text가 Name으로 None인지다(빈 문자열, 빈 base의 번호 이름 "_7", 번호 없는 "None"의 대소문자
 // 변형 — NameTextEquals(text, "")). 복원 2a는 None 문자열을 intern하지 않고 기본 None 토큰으로 둔다
@@ -83,6 +86,6 @@ Result<void> ValidateNameFieldToken(NamePool* pool, Name token, Allocator& scrat
 //   if (IsNoneNameText(text)) {
 //       token = Name{};   // intern하지 않는다
 //   }
-bool IsNoneNameText(StringView text) noexcept;
+ROCKS_OBJECTRUNTIME_API bool IsNoneNameText(StringView text) noexcept;
 
 } // namespace rocks

@@ -116,6 +116,9 @@ struct VmCallResult {
         0;           // 실행한 명령 수(fault를 낸 명령은 세지만 예산 초과로 막힌 명령은 세지 않는다)
     uint64 wait = 0; // Suspended일 때: 기다리는 대기 handle
     uint32 suspension = NoBytecodeIndex; // Suspended일 때: session의 정지 실행 번호
+    // 격리·Tick 중지로 돌리지 않았다(SparksRuntime 2.6절 — outcome은 Returned, 0 steps, 반환 값
+    // 없음).
+    bool skipped = false;
 };
 
 class VmSession;
@@ -247,6 +250,9 @@ private:
         VmBuffer** b = nullptr;
     };
 
+    // frame 하나(link의 function, Ref 레지스터 refs부터 available개)의 held 구간을 멈춘다.
+    static void ReleaseHeld(const VmLinkedModule& link, uint32 function, uint64* refs,
+                            usize available) noexcept;
     // 정지했던 실행(frame·레지스터를 session이 되돌려 놓았다)을 이어 간다(SparksRuntime 2.4절).
     Result<VmCallResult> Continue(const VmLimits& limits) noexcept;
     Result<void> PushFrame(const VmLinkedModule& linked, uint32 function,
@@ -315,6 +321,8 @@ private:
     uint64 liveBytes_ = 0;
     // 언어 함수 묶음(참조 번호별 — VmLibrary가 배치를 정한다)과 그 모듈, Random·로그 상태.
     RandomStream random_{0};
+    // 재개한 하위 실행의 바깥 frame 수(누적 호출 깊이 — SparksRuntime 2.5절, LC6c2 리뷰 B1).
+    uint32 depthBase_ = 0;
     Array<LogEntry> logs_;
     uint32 droppedLogs_ = 0;
     Array<char> logText_;

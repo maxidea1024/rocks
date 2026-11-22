@@ -8,14 +8,14 @@ advance 0.25 -> ok (1 suspended)
 advance 0.25 -> ok (0 suspended)
   resume #1 Timer.Wait -> ok (14 steps)
   log info "waited 0.5"
-fields #1 -> Timer(Trail: "wd", Ticks: 0)
+fields #1 -> Timer(Trail: "wd", Ticks: 0, Peer: none)
 Timer.Twice(#1) -> suspended (16 steps)
 advance 0.5 -> ok (1 suspended)
   resume #1 Timer.Twice -> suspended (17 steps)
   log info "waited 0.5"
 advance 0.1 -> ok (0 suspended)
   resume #1 Timer.Twice -> ok (6 steps)
-fields #1 -> Timer(Trail: "wdwd", Ticks: 1)
+fields #1 -> Timer(Trail: "wdwd", Ticks: 1, Peer: none)
 Timer.Both(#1) -> suspended (13 steps)
 advance 0.5 -> ok (1 suspended)
 advance 0.5 -> ok (0 suspended)
@@ -58,8 +58,8 @@ advance 0.2 -> ok (0 suspended)
   log info "waited 0.1"
   log info "waited 0.1"
   log info "waited 0.2"
-fields #1 -> Timer(Trail: "wdwdwd", Ticks: 1)
-fields #2 -> Timer(Trail: "wwdd", Ticks: 0)
+fields #1 -> Timer(Trail: "wdwdwd", Ticks: 1, Peer: none)
+fields #2 -> Timer(Trail: "wwdd", Ticks: 0, Peer: none)
 new #3 Waiter -> ok (3 steps)
 hook #3 Enable -> ok (0 steps)
 Waiter.Watch(#3, #1) -> void (3 steps)
@@ -125,7 +125,7 @@ advance 0.1 -> ok (1 suspended)
 advance 0.1 -> ok (1 suspended)
   resume #6 Timer.Loop -> suspended (11 steps)
 stats -> waits 1, suspended 1, skipped 1
-fields #6 -> Timer(Trail: "", Ticks: 4)
+fields #6 -> Timer(Trail: "", Ticks: 4, Peer: none)
 new #7 Crowd -> ok (3 steps)
 hook #7 Enable -> ok (0 steps)
 Crowd.Join(#7, #5) -> void (9 steps)
@@ -250,3 +250,96 @@ advance 0.25 0 -> ok (0 suspended)
 stats -> waits 0, suspended 0, skipped 2
 detach #10 -> ok
 stats -> waits 0, suspended 0, skipped 2
+# LC6c2 review: an event emitted before the wait is not received; a handler connection and an event
+# wait share the connection order; a child that finishes ends its Race before its own emits are
+# delivered; child completion inside the delivery traversal; Race between children; ENDEXEC in a child
+# (before and after suspension); `a?.F()` in All (null is an already finished argument); @restart with a
+# child; Disable with a child; paused groups.
+new #12 Timer -> ok (5 steps)
+hook #12 Enable -> ok (0 steps)
+new #13 Waiter -> ok (3 steps)
+hook #13 Enable -> ok (0 steps)
+Waiter.Watch(#13, #12) -> void (3 steps)
+Timer.EmitThenWait(#12) -> suspended (6 steps)
+  deliver #13 Waiter.on Source.Go -> suspended (7 steps)
+stats -> waits 2, suspended 2, skipped 2
+Timer.Fire(#12, 2) -> void (4 steps)
+  log info "late go"
+  resume #12 Timer.EmitThenWait -> ok (4 steps)
+advance 0.25 -> ok (0 suspended)
+  resume #13 Waiter.on Source.Go -> ok (11 steps)
+  log info "go 1"
+Timer.RaceEmit(#12) -> suspended (16 steps)
+advance 0.1 -> ok (1 suspended)
+  resume #12 Timer.EmitLater -> ok (5 steps)
+  resume #12 Timer.RaceEmit -> ok (4 steps)
+  deliver #13 Waiter.on Source.Go -> suspended (7 steps)
+  log info "race emit"
+stats -> waits 1, suspended 1, skipped 3
+Timer.AllHear(#12) -> suspended (12 steps)
+advance 0.1 -> ok (3 suspended)
+Timer.Fire(#12, 3) -> void (4 steps)
+  log info "heard"
+  log info "all hear"
+  resume #12 Timer.HearGo -> ok (4 steps)
+  resume #12 Timer.AllHear -> ok (4 steps)
+advance 0.25 -> ok (0 suspended)
+  resume #13 Waiter.on Source.Go -> ok (11 steps)
+  log info "go 1"
+Timer.RaceKids(#12) -> suspended (21 steps)
+advance 0.1 -> ok (0 suspended)
+  resume #12 Timer.Child -> ok (4 steps)
+  resume #12 Timer.RaceKids -> ok (4 steps)
+  log info "child"
+  log info "race kids"
+stats -> waits 0, suspended 0, skipped 4
+Timer.RaceBad(#12) -> suspended (21 steps)
+advance 0.1 -> ok (0 suspended)
+  resume #12 Timer.Bad -> fault AssertFailed at 137:9 (5 steps)
+  resume #12 Timer.RaceBad -> fault AssertFailed at 137:9 (5 steps)
+  log error "child fault"
+stats -> waits 0, suspended 0, skipped 4
+Timer.TryGroup(#12) -> suspended (27 steps)
+advance 0.1 -> ok (0 suspended)
+  resume #12 Timer.TryLater -> ended error(3) (13 steps)
+  resume #12 Timer.TryGroup -> ok (4 steps)
+  log info "try group"
+Timer.Maybe(#12) -> suspended (11 steps)
+advance 0.1 -> ok (0 suspended)
+  resume #12 Timer.Maybe -> ok (4 steps)
+  log info "maybe"
+new #14 Timer -> ok (5 steps)
+hook #14 Enable -> ok (0 steps)
+Timer.SetPeer(#12, #14) -> void (3 steps)
+Timer.Maybe(#12) -> suspended (17 steps)
+advance 0.1 -> ok (0 suspended)
+  resume #12 Timer.Child -> ok (4 steps)
+  resume #12 Timer.Maybe -> ok (4 steps)
+  log info "child"
+  log info "maybe"
+detach #13 -> ok
+new #15 Splitter -> ok (0 steps)
+hook #15 Enable -> ok (0 steps)
+Splitter.Watch(#15, #12) -> void (3 steps)
+Timer.Fire(#12, 4) -> void (4 steps)
+  deliver #15 Splitter.on Source.Go -> suspended (17 steps)
+Timer.Fire(#12, 5) -> void (4 steps)
+  deliver #15 Splitter.on Source.Go -> suspended (17 steps)
+stats -> waits 4, suspended 2, skipped 4
+advance 0.2 -> ok (0 suspended)
+  resume #15 Splitter.Hold -> ok (1 steps)
+  resume #15 Splitter.on Source.Go -> ok (8 steps)
+  log info "split 5"
+Timer.Fire(#12, 6) -> void (4 steps)
+  deliver #15 Splitter.on Source.Go -> suspended (17 steps)
+hook #15 Disable -> ok (0 steps)
+stats -> waits 0, suspended 0, skipped 4
+Timer.PausedMix(#12) -> suspended (13 steps)
+advance 0 0.1 paused -> ok (1 suspended)
+advance 0 0 -> ok (0 suspended)
+  resume #12 Timer.PausedMix -> ok (4 steps)
+  log info "paused mix"
+detach #15 -> ok
+detach #14 -> ok
+detach #12 -> ok
+stats -> waits 0, suspended 0, skipped 4

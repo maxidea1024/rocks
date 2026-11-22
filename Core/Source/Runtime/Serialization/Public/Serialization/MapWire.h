@@ -55,7 +55,7 @@ namespace rocks {
 // Map payload를 header부터 검증하고 항목(키, 값)을 차례로 읽게 한다. 열 때 할당하지 않고 항목
 // 수만큼의 work를 먼저 청구한다. 넘겨받은 ArchiveReader의 예산을 그대로 쓴다. 원본 byte는
 // reader보다 오래 살아야 한다. 이동만 되며 이동된 원본은 항목 0개의 빈 reader다.
-class MapWireReader {
+class ROCKS_SERIALIZATION_API MapWireReader {
 public:
     // payload(값 하나의 ArchiveReader, 위치 0)의 header를 검사한다. 검사 순서(모두 할당 전):
     // keyWire·keyShape가 키 자리의 것이 아니거나 valueWire·valueShape가 값 자리의 것이 아니거나
@@ -122,7 +122,7 @@ private:
 // 쓰고, 호출자는 항목마다 키·값을 out에 바로 쓴 뒤 End를 부른다. maxBytes는 header를 포함한 payload
 // 전체의 상한이다. 작업량은 out의 청구다. 실패하면 out의 내용은 정해지지 않으므로 그 writer를
 // 버린다. out은 이 writer보다 오래 살아야 한다.
-class MapWireWriter {
+class ROCKS_SERIALIZATION_API MapWireWriter {
 public:
     // keyWire·valueWire가 그 자리의 tag가 아니거나 shape와 모순이면 InvalidArgument(reader와 같은
     // 검사), count > maxCount나 header 12 byte + count × (키 + 값 최소 크기) > maxBytes면 쓰기 전에

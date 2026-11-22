@@ -265,7 +265,7 @@ struct ThreadBinding {
 // 이 스레드의 묶음이다. 그 스레드만 읽고 쓴다(10.1절 표). 저장소는 Config .cpp의
 // thread_local이다(공개 헤더에 thread_local을 두지 않는다 — Docs/Design/BuildTargets.ko.md 3.8절
 // BD29).
-ThreadBinding& CurrentBinding() noexcept;
+ROCKS_CONFIG_API ThreadBinding& CurrentBinding() noexcept;
 
 } // namespace detail
 

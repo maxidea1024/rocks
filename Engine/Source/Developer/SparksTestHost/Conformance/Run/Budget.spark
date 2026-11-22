@@ -1,0 +1,91 @@
+class Store : ScriptableComponent {
+    var First = "";
+    var Second = "";
+    event Ping();
+
+    fn Grown(times: int): string {
+        var text = "0123456789abcdef";
+        var count = 0;
+        for (step in 0..<times) {
+            text = "${text}${text}";
+            count += step;
+        }
+
+        Assert(count >= 0, "steps");
+
+        return text;
+    }
+
+    fn FillFirst(times: int) {
+        First = Grown(times);
+    }
+
+    fn FillSecond(times: int) {
+        Second = Grown(times);
+    }
+
+    fn FillFirstPlus(times: int) {
+        First = "${Grown(times)}x";
+    }
+
+    fn Fire() {
+        emit Ping();
+    }
+
+    async fn Wait() {
+        await Delay(1.0, Clock.Game);
+        Log.Info("waited");
+    }
+}
+
+class Crowd : ScriptableComponent {
+    var Sources: Array<Store> = [];
+
+    fn Join(source: Store) {
+        Sources.Add(source);
+    }
+
+    on Sources.Ping(source: Store) {
+        if (source == source) {
+            Log.Info("ping");
+        }
+    }
+}
+
+class Pair : ScriptableComponent {
+    var Left: Store?;
+    var Right: Store?;
+
+    fn Use(source: Store) {
+        Right = source;
+    }
+
+    fn Swap(source: Store) {
+        Left = source;
+        Right = null;
+    }
+
+    on Left.Ping() {
+        Log.Info("left ping");
+    }
+
+    on Right.Ping() {
+        Log.Info("right ping");
+    }
+}
+
+class Busy : ScriptableComponent {
+    var Sources: Array<Store> = [];
+
+    fn Join(source: Store) {
+        Sources.Add(source);
+    }
+
+    @skipWhileBusy
+    on Sources.Ping(source: Store) {
+        await Delay(1.0, Clock.Game);
+        if (source == source) {
+            Log.Info("busy done");
+        }
+    }
+}

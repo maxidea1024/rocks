@@ -21,8 +21,8 @@ namespace rocks::platform {
 [[nodiscard]] bool IsDataIndependentTimingEnabled() noexcept;
 
 // FEAT_DIT가 있고 꺼져 있으면 켜고 true를 돌려준다. true일 때만 EndDataIndependentTiming으로 끈다.
-[[nodiscard]] bool BeginDataIndependentTiming() noexcept;
-void EndDataIndependentTiming() noexcept;
+[[nodiscard]] ROCKS_PLATFORMBASE_API bool BeginDataIndependentTiming() noexcept;
+ROCKS_PLATFORMBASE_API void EndDataIndependentTiming() noexcept;
 
 // Begin·End를 묶은 범위 객체다. 겹쳐 만들어도 바깥 범위가 끝날 때까지 켜져 있다.
 class DataIndependentTimingScope {

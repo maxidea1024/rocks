@@ -228,8 +228,10 @@ public:
 //   없는 link를 루트로 넘기면 Stat 오류를 그대로 반환한다(아무것도 지우지 않는다). 마지막 구성
 //   요소가 "."·".."이면 InvalidArgument다. 중간 실패는 그 상태로 멈추고 실패 원인을 반환한다(이미
 //   지운 항목은 복구하지 않는다).
-FileStatus MakeDirectoryTree(FileSystem& system, const char* path, usize pathBytes) noexcept;
-FileStatus DeleteDirectoryTree(FileSystem& system, const char* path, usize pathBytes) noexcept;
+ROCKS_PLATFORMBASE_API FileStatus MakeDirectoryTree(FileSystem& system, const char* path,
+                                                    usize pathBytes) noexcept;
+ROCKS_PLATFORMBASE_API FileStatus DeleteDirectoryTree(FileSystem& system, const char* path,
+                                                      usize pathBytes) noexcept;
 
 // 실제 OS 파일 시스템. 객체는 상태가 없고 동시 호출이 가능하다. macOS는 일반 파일을 검사한다.
 // Windows는 device namespace를 거부하고 FILE_TYPE_DISK를 검사하지만 링크·재분석 지점으로
@@ -240,7 +242,7 @@ FileStatus DeleteDirectoryTree(FileSystem& system, const char* path, usize pathB
 // 대상을 검사하며 결과와 이후 접근 사이의 변경을 막지 않는다. ReadAt/Truncate는 없다.
 // Windows는 경로가 MAX_PATH 근처를 넘으면(상대 경로는 현재 디렉터리를 붙인 길이 기준) 확장 경로로
 // 바꿔 긴 경로를 지원한다.
-FileSystem& PhysicalFileSystem() noexcept;
+ROCKS_PLATFORMBASE_API FileSystem& PhysicalFileSystem() noexcept;
 
 // 사용 예: File file; if (auto s = file.Open("data.bin", FileOpenMode::ReadExisting))
 // { auto read = file.Read(buffer, capacity); ...; auto closed = file.Close(); }
@@ -251,7 +253,7 @@ FileSystem& PhysicalFileSystem() noexcept;
 // 동일 File에 같은 스레드에서 재진입하면 Busy다. callback이 다른 스레드의 동일 File 호출을
 // 기다리는 구성은 교착하므로 금지한다. IsOpen의 동일 스레드 재진입은 Fatal이다.
 // 객체 파괴 전 모든 호출을 중지한다. Close 오류는 terminal이며 소멸 중 오류는 Fatal이다.
-class File final {
+class ROCKS_PLATFORMBASE_API File final {
 public:
     File() noexcept = default;
     ~File() noexcept;

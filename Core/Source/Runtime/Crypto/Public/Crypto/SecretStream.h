@@ -92,7 +92,7 @@ private:
 TryDeriveSecretStreamKey(const KdfKey& master, uint64 subkeyId, KdfContext context) noexcept;
 
 // 보내는 쪽이다. header를 먼저 보내고 메시지마다 TryPush의 출력을 보낸다.
-class SecretStreamWriter {
+class ROCKS_CRYPTO_API SecretStreamWriter {
 public:
     static constexpr usize HeaderBytes = 24;
     static constexpr usize OverheadBytes = 17; // 암호화된 tag 1 + MAC 16

@@ -457,6 +457,13 @@ public static class LinkTypes
     }
 
     /// <summary>
+    /// 링크 방식이 그 구성을 빌드할 수 있는가다. Modular는 Debug·Development만이다(배포·sanitizer·coverage 구성은 Monolithic — 입력 검사와
+    /// 프로젝트 파일 생성이 같은 판정을 쓴다).
+    /// </summary>
+    public static bool SupportsConfiguration(NativeLinkType linkType, NativeConfiguration configuration) =>
+        linkType == NativeLinkType.Monolithic || configuration is NativeConfiguration.Debug or NativeConfiguration.Development;
+
+    /// <summary>
     /// Modular 호스트 모듈인가(Docs/Design/ModuleLoader.ko.md 3.14절 ML4b): Modular에서 모듈 표 제공 모듈에 닿는(진입점 모듈인) 실행 파일
     /// 모듈이다. 공유 라이브러리로 링크하고 실행 파일은 빌드 생성 진입 TU와 Launch만 링크한다. 입력 검사가 그런 실행 파일이 Launch에 닿게 한다.
     /// </summary>

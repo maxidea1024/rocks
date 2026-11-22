@@ -115,6 +115,8 @@ inline constexpr uint32 IrFaultTryInHook = 2; // Awake·Enable·Start 안의 `tr
 // 경로 쓰기로 읽은 원소가 없다(IndexOutOfRange — SL §4 "복합 대입과 경로 쓰기는 키가 없으면
 // fault").
 inline constexpr uint32 IrFaultMissingElement = 3;
+// 아직 실행 모델이 없는 형태(가상 async 함수를 `All`·`Race` 인자로 — ContractViolation).
+inline constexpr uint32 IrFaultUnsupported = 4;
 
 // 단항·이항 산술 종류다(정수 overflow·실수 유한성 검사는 명령의 scalar 해석으로 정한다).
 enum class IrArith : uint8 {

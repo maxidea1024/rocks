@@ -69,13 +69,14 @@ enum class GeneralCategory : uint8 {
 StringView UnicodeVersionText() noexcept;
 
 // input을 form으로 정규화해 out에 붙인다(UAX #15).
-Result<void> TryNormalize(NormalizationForm form, StringView input,
-                          StringBuilderBase& out) noexcept;
+ROCKS_CORE_API Result<void> TryNormalize(NormalizationForm form, StringView input,
+                                         StringBuilderBase& out) noexcept;
 
 // input이 이미 form인지 본다. 빠른 검사(quick check)와 결합 등급 순서로 대부분 판정하고, 애매한
 // 경우(NFC_QC = Maybe)만 allocator로 정규화해 비교한다. 잘못된 UTF-8은 InvalidArgument, 그 비교의
 // 할당 실패는 allocator 오류(OutOfMemory 등)다.
-Result<bool> IsNormalized(NormalizationForm form, StringView input, Allocator& allocator) noexcept;
+ROCKS_CORE_API Result<bool> IsNormalized(NormalizationForm form, StringView input,
+                                         Allocator& allocator) noexcept;
 
 // 단순 case folding(CaseFolding.txt의 C·S)을 적용해 out에 붙인다. 코드 포인트 수는 같고 UTF-8 byte
 // 수는 바뀔 수 있다(예: U+023A → U+2C65). 길이가 바뀌는 full folding(ß → ss)과 터키어 규칙은 쓰지

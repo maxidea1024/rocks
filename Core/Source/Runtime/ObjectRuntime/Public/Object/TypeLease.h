@@ -24,7 +24,7 @@ struct RuntimeStructFieldOps;
 //   for (usize index = 0; index < view.Schema().fields.Size(); ++index) {
 //       const RuntimeStructFieldOps& member = view.FieldOps(index);
 //   }
-class StructView {
+class ROCKS_OBJECTRUNTIME_API StructView {
 public:
     static constexpr usize NoField = IndexNone;
 
@@ -139,7 +139,7 @@ enum class TypeKind : uint8 {
 // 불변 스키마와 콜백 코드의 수명을 유지한다. lease가 있으면 Unregister는 Busy다.
 // Registry와 그 Allocator가 모든 lease보다 오래 살아야 한다.
 // 서로 다른 lease의 Clone/Reset은 동시 호출 가능하나 같은 래퍼의 동시 변경은 금지한다.
-class TypeLease {
+class ROCKS_OBJECTRUNTIME_API TypeLease {
 public:
     // FieldIndex가 필드를 찾지 못했을 때의 값이다.
     static constexpr usize NoField = IndexNone;

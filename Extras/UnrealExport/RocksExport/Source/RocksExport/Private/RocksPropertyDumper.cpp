@@ -65,6 +65,11 @@ void FRocksPropertyDumper::ExcludeStruct(const UScriptStruct* Struct)
 	}
 }
 
+void FRocksPropertyDumper::MarkExpanded(const UObject* Object)
+{
+	Expanded.Add(Object);
+}
+
 void FRocksPropertyDumper::ExcludeProperty(const FProperty* Property)
 {
 	if (Property != nullptr)

@@ -42,7 +42,7 @@ struct NamePoolStats {
 // 않는다. pool은 allocator를 빌린다. 병행 사용에는 thread-safe allocator가 필요하다. allocator의
 // 호출과 후보/entry 해제는 gate 밖에서 한다. 콜백은 Stats/Shutdown에 재진입 가능하지만 pool 파괴는
 // 금지다.
-class NamePool {
+class ROCKS_CORE_API NamePool {
 public:
     explicit NamePool(Allocator& allocator) noexcept;
     ~NamePool() noexcept;

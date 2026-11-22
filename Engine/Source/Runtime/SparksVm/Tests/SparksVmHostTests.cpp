@@ -79,6 +79,9 @@ public:
                generations[number - 1] == (handle & NumericLimits<uint32>::Max());
     }
 
+    void ReleaseHeld(uint64) noexcept override {
+    }
+
     VmFaultKind GetContext(VmHostCall& call) noexcept override {
         call.Refs()[0] = Handle(1);
         return VmFaultKind::None;
@@ -786,6 +789,9 @@ public:
 
     bool IsAlive(uint64 handle) noexcept override {
         return handle == One || handle == Two;
+    }
+
+    void ReleaseHeld(uint64) noexcept override {
     }
 
     VmFaultKind GetContext(VmHostCall&) noexcept override {

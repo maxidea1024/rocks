@@ -85,7 +85,7 @@ using DirectoryChangeVisitor = bool (*)(const DirectoryChange& change, void* con
 // 스레드: 한 감시기의 Open·Poll·Wait·Close는 같은 스레드에서 호출한다(다른 스레드의 동시 호출은
 // Busy). visitor 안에서 같은 감시기를 호출하면 Busy다. 객체 파괴 전 Close를 부르지 않았으면
 // 소멸자가 닫는다.
-class DirectoryWatcher final {
+class ROCKS_PLATFORMBASE_API DirectoryWatcher final {
 public:
     DirectoryWatcher() noexcept = default;
     ~DirectoryWatcher() noexcept;

@@ -20,7 +20,7 @@ struct SystemAllocatorTestAccess;
 //   SystemAllocator memory;
 //   auto block = memory.Allocate(64, 16);
 //   if (block) { /* 사용 */ (void)memory.Deallocate(block.Value()); }
-class SystemAllocator final : public Allocator {
+class ROCKS_CORE_API SystemAllocator final : public Allocator {
 public:
     SystemAllocator() noexcept;
     // 모든 호출과 사용자를 끝내고 live allocation이 0일 때만 파괴한다. 잔존 시 Fatal로 진단한다.

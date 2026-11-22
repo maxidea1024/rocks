@@ -14,7 +14,8 @@ namespace rocks::trace_control {
 
 // 이 모듈의 리플렉션 타입(설정 struct·명령 인자 struct)을 등록한다. 설정 문맥을 만들기 전, 엔진의
 // 모듈 등록 단계에서 부른다. 실패: ModuleRegistration의 오류.
-Result<void> RegisterTraceControlTypes(ModuleRegistration& registration) noexcept;
+ROCKS_TRACECONTROL_API Result<void>
+RegisterTraceControlTypes(ModuleRegistration& registration) noexcept;
 
 // 콘솔 영역 `trace`, 설정 struct TracePresetSettings, 세션 설정 핸들(trace.* — TraceSettings.h)을
 // 설정 문맥에 등록한다. 파일 층을 읽기 전에 부른다. 실패: ConfigContext::RegisterConsoleRegion·

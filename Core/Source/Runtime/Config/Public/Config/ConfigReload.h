@@ -41,7 +41,7 @@ enum class ConfigFileRoot : uint8 {
     User
 };
 
-class ConfigFileReloader {
+class ROCKS_CONFIG_API ConfigFileReloader {
 public:
     // context·files는 이 객체보다 오래 살아야 한다.
     ConfigFileReloader(ConfigContext& context, platform::FileSystem& files) noexcept;

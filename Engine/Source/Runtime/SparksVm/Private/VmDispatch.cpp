@@ -23,6 +23,8 @@ using detail::VmDouble;
 // 1(도달하지 않는 경로)과 그 밖은 Unreachable로 본다.
 constexpr uint32 VmFaultHookTryCode = 2;
 constexpr uint32 VmFaultMissingElementCode = 3;
+// 아직 실행 모델이 없는 형태(가상 async 함수의 하위 실행 — SparksRuntime 2.5절).
+constexpr uint32 VmFaultUnsupportedCode = 4;
 
 // 합성 곱 묶음의 slot 수다.
 constexpr uint32 VmQuatSlots = 4;
@@ -596,6 +598,14 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
 
             if (boundary != 0) {
                 const usize childRef = frames_[boundary].base[1];
+                // 잘라 내는 frame들의 held 지역을 위에서부터 멈춘다(Unwind와 같은 순서 — LC6d1 리뷰
+                // B1).
+                for (usize index = frames_.Size(); index > boundary; --index) {
+                    const Frame& cut = frames_[index - 1];
+                    ReleaseHeld(*cut.link, cut.function, refs_.Data() + cut.base[1],
+                                refs_.Size() - cut.base[1]);
+                }
+
                 ReleaseRange(frames_[boundary].base[2], buffers_.Size());
                 static_cast<void>(frames_.TryResize(boundary));
                 pc = frames_[frames_.Size() - 1].pc;
@@ -737,7 +747,7 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
                 return MakeFault(VmFaultKind::ContractViolation, at, steps);
             }
 
-            if (frames_.Size() >= limits.callDepth) {
+            if (frames_.Size() + depthBase_ >= limits.callDepth) {
                 return MakeFault(VmFaultKind::BudgetExceeded, at, steps);
             }
 
@@ -786,7 +796,7 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
                 break;
             }
 
-            if (frames_.Size() >= limits.callDepth) {
+            if (frames_.Size() + depthBase_ >= limits.callDepth) {
                 return MakeFault(VmFaultKind::BudgetExceeded, at, steps);
             }
 
@@ -809,6 +819,19 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
 
             pc = frames_[frames_.Size() - 1].pc;
             reload();
+            break;
+        }
+        case Opcode::Release: {
+            // 지역 유지 자원을 멈춘다(SparksRuntime 2.6절): 0이면 할 일 없음.
+            if (r[a] != 0) {
+                if (link_->host_ == nullptr) {
+                    return MakeFault(VmFaultKind::ContractViolation, at, steps);
+                }
+
+                link_->host_->ReleaseHeld(r[a]);
+                r[a] = 0;
+            }
+
             break;
         }
         case Opcode::WaitEv: {
@@ -932,11 +955,12 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
             break;
         }
         case Opcode::Fault:
-            return MakeFault(DecodeAx(word) == VmFaultHookTryCode ? VmFaultKind::HookTryFailed
-                             : DecodeAx(word) == VmFaultMissingElementCode
-                                 ? VmFaultKind::IndexOutOfRange
-                                 : VmFaultKind::Unreachable,
-                             at, steps);
+            return MakeFault(
+                DecodeAx(word) == VmFaultHookTryCode          ? VmFaultKind::HookTryFailed
+                : DecodeAx(word) == VmFaultMissingElementCode ? VmFaultKind::IndexOutOfRange
+                : DecodeAx(word) == VmFaultUnsupportedCode    ? VmFaultKind::ContractViolation
+                                                              : VmFaultKind::Unreachable,
+                at, steps);
         case Opcode::NewA:
         case Opcode::NewSet:
         case Opcode::NewM:

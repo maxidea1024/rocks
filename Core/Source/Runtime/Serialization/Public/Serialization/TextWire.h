@@ -49,12 +49,13 @@ struct TextWireValue {
 // OutOfMemory다(out의 오류). 실패하면 out의 byte는 호출 전 그대로다(소비한 예산은 환급하지 않는다).
 // ArchiveWriter의 Write*처럼 원문이 out 자신의 View를 가리켜도 된다(성장 뒤 위치를 보정한다).
 // 예산은 operation 하나와 쓴 byte(원문 UTF-8 검사 포함)다.
-Result<void> WriteTextWire(ArchiveWriter& out, const TextWireValue& value) noexcept;
+ROCKS_SERIALIZATION_API Result<void> WriteTextWire(ArchiveWriter& out,
+                                                   const TextWireValue& value) noexcept;
 
 // 값 하나를 읽는다. 형태 byte가 셋 밖이거나 내용이 잘렸거나 원문이 유효한 UTF-8이 아니거나
 // Localized의 textId·sourceRevision이 0이면 InvalidArgument, 원문 길이가 maxValueBytes를 넘으면
 // CapacityExceeded다. 실패하면 cursor는 호출 전 위치다(소비한 예산은 환급하지 않는다). 예산은 읽은
 // Read*마다 operation 하나와 byte다.
-Result<TextWireValue> ReadTextWire(ArchiveReader& in) noexcept;
+ROCKS_SERIALIZATION_API Result<TextWireValue> ReadTextWire(ArchiveReader& in) noexcept;
 
 } // namespace rocks

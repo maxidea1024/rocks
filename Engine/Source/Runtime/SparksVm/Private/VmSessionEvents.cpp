@@ -82,7 +82,13 @@ uint32 VmSession::QueuedCount() const noexcept {
 }
 
 void VmSession::BeginEntry() noexcept {
-    // 진입 하나의 기록(로그·전달)을 모은다.
+    // 진입 하나의 기록(로그·전달)을 모은다. 적용 루프 안의 hook은 루프의 기록을 잇는다.
+    if (nested_) {
+        currentDepth_ = 0;
+        currentRoot_ = 0;
+        return;
+    }
+
     execution_.logs_.Clear();
     execution_.logText_.Clear();
     execution_.droppedLogs_ = 0;
@@ -281,7 +287,7 @@ void VmSession::DropWrites(uint32 instance) noexcept {
     static_cast<void>(writes_.TryResize(kept));
 }
 
-Result<void> VmSession::Reconnect(uint32 instance, const VmEventKey& field) noexcept {
+Result<void> VmSession::Reconnect(uint32 instance, const VmEventKey& field, uint8 phases) noexcept {
     // 쓴 필드를 경로 첫 마디로 쓰는 handler(instance 클래스 사슬 — 다른 모듈 기반 포함, key로
     // 대조: LC6b 리뷰 S4)의 연결을 다시 푼다. `on A.B.Changed`는 다시 연결한 뒤 한 번 전달한다(SL
     // 5.3절 — A가 null이 된 경우 포함, LC6b 리뷰 S3).
@@ -305,13 +311,13 @@ Result<void> VmSession::Reconnect(uint32 instance, const VmEventKey& field) noex
                 continue;
             }
 
-            if (auto connected = Connect(instance, &module, index); !connected) {
+            if (auto connected = Connect(instance, &module, index, phases); !connected) {
                 return connected;
             }
 
             const bool changed =
                 handler.eventRef == NoBytecodeIndex && bytecode.String(handler.event) == "Changed";
-            if (!changed || handler.pathCount < 2) {
+            if ((phases & ConnectAdd) == 0 || !changed || handler.pathCount < 2) {
                 continue;
             }
 
@@ -373,10 +379,20 @@ Result<void> VmSession::EndFragment() noexcept {
             queue_[write.item].publisher = 0;
         }
 
-        // 경로 원천 필드가 바뀌었으면 활성 instance의 그 handler 연결을 다시 푼다(SL 5.5절 — 그
-        // 필드를 경로 첫 마디로 쓰는 handler, 원천이 처음 채워진 경우 포함).
-        if (!same && status && entry.enabled) {
-            status = Reconnect(write.instance, write.module->keys_[write.fieldRef]);
+        writes_[index].changed = !same;
+    }
+
+    // 경로 원천 필드가 바뀌었으면 활성 instance의 그 handler 연결을 다시 푼다(SL 5.5절 — 그 필드를
+    // 경로 첫 마디로 쓰는 handler, 원천이 처음 채워진 경우 포함). 바뀐 모든 필드의 낡은 연결을 먼저
+    // 지우고 그다음 더한다(LC6d4 리뷰 B2).
+    const uint8 phases[] = {ConnectRemove, ConnectAdd};
+    for (const uint8 phase : phases) {
+        for (usize index = 0; index < writes_.Size() && status; ++index) {
+            const Write& write = writes_[index];
+            if (write.changed && write.instance < instances_.Size() &&
+                instances_[write.instance].attached && instances_[write.instance].enabled) {
+                status = Reconnect(write.instance, write.module->keys_[write.fieldRef], phase);
+            }
         }
     }
 
@@ -486,8 +502,8 @@ Result<void> VmSession::ResolvePath(uint32 instance, const VmLinkedModule& modul
     return Result<void>::Success();
 }
 
-Result<void> VmSession::Connect(uint32 instance, const VmLinkedModule* only,
-                                uint32 onlyHandler) noexcept {
+Result<void> VmSession::Connect(uint32 instance, const VmLinkedModule* only, uint32 onlyHandler,
+                                uint8 phases) noexcept {
     // instance의 클래스 사슬(기반 먼저)의 handler마다 경로를 풀어 연결을 맞춘다: 남는 발행자의
     // 항목은 순번을 지키고, 사라진 것은 지우고, 새것은 끝에 더한다.
     const VmLinkedModule* chainModules[MaxBaseDepth] = {};
@@ -524,25 +540,42 @@ Result<void> VmSession::Connect(uint32 instance, const VmLinkedModule* only,
                 changed ? module.keys_[bytecode.handlerPaths[handler.firstPath + sourceCount]]
                         : module.keys_[handler.eventRef];
             // 사라진 발행자의 항목을 지운다.
-            usize kept = 0;
-            for (usize at2 = 0; at2 < connections_.Size(); ++at2) {
-                Connection& connection = connections_[at2];
-                bool remove = false;
-                if (connection.subscriber == instance && connection.module == &module &&
-                    connection.handler == index) {
-                    remove = true;
-                    for (const uint64 publisher : publishers) {
-                        remove = remove && publisher != connection.publisher;
+            if ((phases & ConnectRemove) == 0) {
+                goto add;
+            }
+
+            {
+                usize kept = 0;
+                for (usize at2 = 0; at2 < connections_.Size(); ++at2) {
+                    Connection& connection = connections_[at2];
+                    bool remove = false;
+                    if (connection.subscriber == instance && connection.module == &module &&
+                        connection.handler == index) {
+                        remove = true;
+                        for (const uint64 publisher : publishers) {
+                            remove = remove && publisher != connection.publisher;
+                        }
+                    }
+
+                    if (!remove) {
+                        connections_[kept++] = connection;
                     }
                 }
 
-                if (!remove) {
-                    connections_[kept++] = connection;
-                }
+                static_cast<void>(connections_.TryResize(kept));
             }
 
-            static_cast<void>(connections_.TryResize(kept));
-            // 새 발행자를 끝에 더한다.
+        add:
+            if ((phases & ConnectAdd) == 0) {
+                continue;
+            }
+
+            // 새 발행자를 끝에 더한다(이 instance의 연결 수는 한 번 세고 더할 때마다 올린다).
+            uint32 mine = 0;
+            for (const Connection& other : connections_) {
+                mine += other.subscriber == instance ? 1 : 0;
+            }
+
             for (const uint64 publisher : publishers) {
                 bool exists = false;
                 for (const Connection& connection : connections_) {
@@ -551,7 +584,17 @@ Result<void> VmSession::Connect(uint32 instance, const VmLinkedModule* only,
                               connection.handler == index && connection.publisher == publisher);
                 }
 
-                if (exists) {
+                // 격리된 instance는 발행자로 다시 연결하지 않는다(사용자 코드를 돌리지 않는다 —
+                // LC6d3 리뷰 위험).
+                const uint32 owner = Find(publisher);
+                if (exists || (owner != NoBytecodeIndex && instances_[owner].isolated)) {
+                    continue;
+                }
+
+                // 구독 연결 상한: 만들지 않고 센다(연결은 조각 밖에서 생긴다 — fault 아님).
+                if (mine >= budgets_.connectionsPerInstance ||
+                    connections_.Size() >= budgets_.connectionsPerSession) {
+                    ++droppedConnections_;
                     continue;
                 }
 
@@ -566,6 +609,8 @@ Result<void> VmSession::Connect(uint32 instance, const VmLinkedModule* only,
                 if (!connections_.TryPushBack(connection)) {
                     return Result<void>::Failure(ErrorCode::OutOfMemory);
                 }
+
+                ++mine;
             }
         }
     }
@@ -617,6 +662,7 @@ Result<void> VmSession::Drain() noexcept {
                 // 한 handler에만(경로 원천 — SL 5.3절): 그 instance가 그대로 활성일 때 한 번.
                 if (targetDone || item.target >= instances_.Size() ||
                     !instances_[item.target].attached || !instances_[item.target].enabled ||
+                    instances_[item.target].pendingDestroy ||
                     instances_[item.target].serial != item.targetSerial) {
                     break;
                 }
@@ -642,8 +688,10 @@ Result<void> VmSession::Drain() noexcept {
                 uint32 waitChosen = NoBytecodeIndex;
                 for (uint32 at = 0; at < waits_.Size(); ++at) {
                     const Wait& wait = waits_[at];
+                    const bool pending = wait.instance < instances_.Size() &&
+                                         instances_[wait.instance].pendingDestroy;
                     if (wait.used && wait.kind == WaitKind::Event && !wait.done &&
-                        !wait.cancelled && wait.publisher == item.publisher &&
+                        !wait.cancelled && !pending && wait.publisher == item.publisher &&
                         wait.key == item.key && wait.afterSequence < item.sequence &&
                         wait.connectionOrder > lastOrder &&
                         (chosen == connections_.Size() ||
@@ -678,6 +726,10 @@ Result<void> VmSession::Drain() noexcept {
 
                 connection = connections_[chosen];
                 lastOrder = connection.order;
+                if (instances_[connection.subscriber].pendingDestroy ||
+                    instances_[connection.subscriber].isolated) {
+                    continue; // 파괴 적용됨: 새 전달 없음(SparksRuntime 2.6절)
+                }
             }
 
             const BytecodeModule& bytecode = connection.module->Module();
@@ -725,6 +777,12 @@ Result<void> VmSession::Drain() noexcept {
             const uint32 bufferCount = function.parameters[VmEventBufBank] < item.bufferCount
                                            ? function.parameters[VmEventBufBank]
                                            : item.bufferCount;
+            // 동시 실행 상한: 새 handler 실행을 건너뛰고 센다(fault 아님 — SL 9.3절).
+            if (ExecutionsFull(connection.subscriber)) {
+                ++skippedExecutions_;
+                continue;
+            }
+
             currentDepth_ = item.depth;
             currentRoot_ = item.root;
             const uint32 outerInstance = currentInstance_;
@@ -736,7 +794,8 @@ Result<void> VmSession::Drain() noexcept {
                 *connection.module, handler.function,
                 Span<const uint64>(itemValues_.Data() + item.firstScalar, scalarCount),
                 Span<const uint64>(refs, refCount),
-                Span<VmBuffer* const>(itemBuffers_.Data() + item.firstBuffer, bufferCount));
+                Span<VmBuffer* const>(itemBuffers_.Data() + item.firstBuffer, bufferCount),
+                FragmentLimits(false));
             currentInstance_ = outerInstance;
             SettleWaits(called);
             currentPublisher_ = 0;
@@ -747,6 +806,10 @@ Result<void> VmSession::Drain() noexcept {
             if (!called) {
                 ReleaseItem(item);
                 return Result<void>::Failure(called.Error());
+            }
+
+            if (called.Value().outcome == VmOutcome::Faulted) {
+                NoteFault(connection.subscriber, called.Value(), true); // 그 실행 트리만 끝
             }
 
             Delivery delivery;
@@ -786,7 +849,7 @@ Result<void> VmSession::Drain() noexcept {
 }
 
 Result<void> VmSession::OpenPhase() noexcept {
-    if (execution_.running_) {
+    if (closed_ || execution_.running_) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -804,6 +867,10 @@ Result<void> VmSession::OpenPhase() noexcept {
 
 Result<void> VmSession::Emit(uint64 publisher, const VmEventKey& key, Span<const uint64> scalars,
                              Span<const uint64> refs, Span<VmBuffer* const> buffers) noexcept {
+    if (closed_) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
     if (execution_.running_) {
         // 실행 중(native 호출 안)의 발행: 넣기만 한다(LC6b 리뷰 B4 — 전달은 바깥 진입).
         ErrorCode error = ErrorCode::None;

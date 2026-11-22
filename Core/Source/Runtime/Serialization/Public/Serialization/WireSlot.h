@@ -85,7 +85,7 @@ inline Result<WireValueShape> WireSlotShape(WireSlot slot, WireType wire) noexce
 //   }
 //
 //   return value.Value().End();
-class PrefixedRecordWriter {
+class ROCKS_SERIALIZATION_API PrefixedRecordWriter {
 public:
     // wire가 Record·InstancedStruct가 아니면 쓰기 전에 InvalidArgument다. out의 쓰기 오류를 그대로
     // 돌려준다.
@@ -134,6 +134,7 @@ private:
 //   }
 //
 //   auto value = parent.OpenNestedRecord(allocator, record.Value(), structId, 1, version, limit);
-Result<Span<const uint8>> ReadPrefixedRecord(ArchiveReader& entries) noexcept;
+ROCKS_SERIALIZATION_API Result<Span<const uint8>>
+ReadPrefixedRecord(ArchiveReader& entries) noexcept;
 
 } // namespace rocks

@@ -56,7 +56,7 @@ class PathCursor;
 // 준비물은 처음 묶은 배열 하나에만 쓴다(다른 배열에 묶으면 InvalidArgument(InvalidValue)). 준비와
 // 게시 사이에 그 배열을 바꾸면 다시 묶기가 Busy다(살아 있는 객체는 변경 표지도 BeginBatchPublish를
 // Busy로 만든다).
-class PreparedStructElements {
+class ROCKS_OBJECTRUNTIME_API PreparedStructElements {
 public:
     // allocator는 index 표·참조 목록·블록 목록의 allocator다(원소 블록과 색인은 배열의 allocator로
     // 만든다).
@@ -195,10 +195,9 @@ public:
 
 private:
     friend class detail::PathCursor;
-    friend Result<void> PathPrepareStructElements(ObjectRegistry&, const ObjectAccessContext&,
-                                                  const PathTarget&, PropertyPath,
-                                                  PreparedStructElements&,
-                                                  PropertyPathFailure*) noexcept;
+    friend ROCKS_OBJECTRUNTIME_API Result<void>
+    PathPrepareStructElements(ObjectRegistry&, const ObjectAccessContext&, const PathTarget&,
+                              PropertyPath, PreparedStructElements&, PropertyPathFailure*) noexcept;
 
     // 묶음 게시 구간의 검사합에서 지울 원소의 참조 하나를 뺀다(trace 방문 함수).
     static void NoteRemoved(void* registry, ObjectHandle handle) noexcept;
@@ -262,9 +261,9 @@ private:
 // 사용 예:
 //   PreparedStructElements stage(allocator);
 //   auto bound = PathPrepareStructElements(registry, access, mesh, materialsPath.View(), stage);
-Result<void> PathPrepareStructElements(ObjectRegistry& registry, const ObjectAccessContext& access,
-                                       const PathTarget& target, PropertyPath path,
-                                       PreparedStructElements& out,
-                                       PropertyPathFailure* failure = nullptr) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void>
+PathPrepareStructElements(ObjectRegistry& registry, const ObjectAccessContext& access,
+                          const PathTarget& target, PropertyPath path, PreparedStructElements& out,
+                          PropertyPathFailure* failure = nullptr) noexcept;
 
 } // namespace rocks

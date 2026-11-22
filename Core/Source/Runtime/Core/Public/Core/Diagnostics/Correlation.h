@@ -93,10 +93,11 @@ namespace detail {
 // 칸 하나를 쌓는다(쌓기 칸 확장을 0으로 하고 관찰자를 부른다). restored는 사본 복원인지다.
 // CorrelationScope의 느린 경로이고, 쌓기 여부를 직접 정하는 scope(TraceTaskScope)도 쓴다. 결과가
 // None이 아니면 같은 스레드에서 LIFO 순서로 PopCorrelation을 불러야 한다.
-CorrelationPushState PushCorrelation(const CorrelationEntry& entry, bool restored) noexcept;
+ROCKS_CORE_API CorrelationPushState PushCorrelation(const CorrelationEntry& entry,
+                                                    bool restored) noexcept;
 
 // PushCorrelation이 쌓은 칸을 내린다(state는 None이 아니어야 한다). 순서가 어긋나면 Fatal이다.
-void PopCorrelation(CorrelationPushState state) noexcept;
+ROCKS_CORE_API void PopCorrelation(CorrelationPushState state) noexcept;
 
 } // namespace detail
 
@@ -128,7 +129,7 @@ private:
 };
 
 // 이 스레드 스택 맨 위 칸의 사본이다. 비어 있으면 valid가 false다.
-CorrelationToken CaptureCorrelation() noexcept;
+ROCKS_CORE_API CorrelationToken CaptureCorrelation() noexcept;
 
 // 이 스레드 스택 맨 위의 id를 out에 쓴다. 비어 있으면 false이고 out은 바뀌지 않는다.
 bool CurrentCorrelation(CorrelationIds& out) noexcept;
@@ -136,19 +137,19 @@ bool CurrentCorrelation(CorrelationIds& out) noexcept;
 // 이 스레드 스택의 깊이다(넘쳐 세기만 한 쌓기는 빼고). 비어 있는지를 분기 하나로 볼 수 있다.
 // 깊이는 Core .cpp의 thread_local이라 호출 하나를 거친다(공개 헤더에 thread_local을 두지 않는다 —
 // Docs/Design/BuildTargets.ko.md 3.8절 BD29).
-usize CorrelationDepth() noexcept;
+ROCKS_CORE_API usize CorrelationDepth() noexcept;
 
 // 쌓기·내리기 관찰자를 정한다(원자 포인터 하나). 같은 관찰자를 다시 주면 아무것도 바꾸지 않고
 // 성공하고(trace는 세션 Start마다 다시 건다), 다른 관찰자가 이미 있으면 AlreadyExists다. nullptr은
 // 해제이며, 다른 스레드가 쌓기·내리기를 하지 않는 종료 단계에서만 부른다(그래서 해제 뒤에는 불리지
 // 않는다). observer와 그 함수는 해제될 때까지 살아 있어야 한다(보통 정적 객체로 두고 해제하지
 // 않는다).
-Result<void> SetCorrelationObserver(const CorrelationObserver* observer) noexcept;
+ROCKS_CORE_API Result<void> SetCorrelationObserver(const CorrelationObserver* observer) noexcept;
 
 namespace detail {
 
 // 맨 위 칸이다(상위 계층이 사본을 만들기 전에 ext를 채울 때). 비어 있으면 nullptr이다.
-CorrelationEntry* TopCorrelationEntry() noexcept;
+ROCKS_CORE_API CorrelationEntry* TopCorrelationEntry() noexcept;
 
 // 지금 걸린 관찰자다(시험이 잠시 바꿨다가 되돌릴 때).
 const CorrelationObserver* CurrentCorrelationObserver() noexcept;

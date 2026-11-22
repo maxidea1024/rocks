@@ -23,7 +23,7 @@
 //   auto written = compressor.Value().TryCompress(batch, Span<uint8>(out, outBytes));
 namespace rocks {
 
-class FixedWorkspaceCompressor {
+class ROCKS_COMPRESSION_API FixedWorkspaceCompressor {
 public:
     FixedWorkspaceCompressor() noexcept = default;
     ~FixedWorkspaceCompressor() noexcept;

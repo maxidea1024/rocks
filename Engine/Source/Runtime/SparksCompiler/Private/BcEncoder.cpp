@@ -1068,6 +1068,34 @@ bool BytecodeEncoder::Allocate() noexcept {
         function.parameters[bank] = static_cast<uint16>(registers_[bank]);
     }
 
+    // 유지 자원 지역(이름 있는 held 타입 Ref)은 매개변수 뒤 고정 구간에 둔다(SparksRuntime 2.6절
+    // R18): 그 레지스터는 언제나 0이거나 유지 자원이라 VM이 fault·취소에서 frame만 보고 멈춘다.
+    // 임시 값은 넣지 않는다(옮긴 사본을 두 번 멈추지 않게).
+    const uint32 refBank = static_cast<uint32>(BytecodeBank::Ref);
+    // 반환은 r0부터 쓰므로(RET) held 구간은 Ref 반환 slot 뒤다 — 맨 아래 frame의 반환값을 정리가
+    // 유지 자원으로 멈추지 않게(LC6d1 리뷰 B2).
+    {
+        const uint32 signature =
+            f.symbol == NoSymbol ? NoSignature : c_.symbols_[f.symbol].signature;
+        const uint32 returns =
+            signature == NoSignature ? NoType : c_.signatures_[signature].returnType;
+        const IrLayout layout = IrBuilder::Layout(checker_, returns);
+        if (layout.bank == IrBank::Ref && registers_[refBank] < layout.slots) {
+            registers_[refBank] = layout.slots;
+        }
+    }
+
+    function.heldFirst = static_cast<uint16>(registers_[refBank]);
+    for (uint32 vreg = 0; vreg < registers; ++vreg) {
+        const IrRegister& entry = f.registers[vreg];
+        if (entry.bank == IrBank::Ref && entry.slot == 0 && !entry.name.IsEmpty() &&
+            fixed[vreg] == 0 && start_[vreg] != NoPosition && checker_.IsHeldType(entry.type)) {
+            fits = fits && placeFixed(vreg);
+        }
+    }
+
+    function.heldCount = static_cast<uint16>(registers_[refBank] - function.heldFirst);
+
     // 선형 스캔: 시작 순(같으면 번호 순)으로, 시작 전에 끝난 자리를 다시 쓴다. 묶음은 연속 자리 중
     // 가장 낮은 곳에 둔다.
     Array<uint32> tuples(checker_.allocator_);

@@ -235,7 +235,7 @@ internal static class InputValidation
             throw new ArgumentException("Modular linking is not supported on Android; use LinkType Monolithic.");
         }
 
-        if (request.Configuration is not (NativeConfiguration.Debug or NativeConfiguration.Development))
+        if (!LinkTypes.SupportsConfiguration(request.LinkType, request.Configuration))
         {
             throw new ArgumentException($"Modular linking supports only the Debug and Development configurations, not {request.Configuration}.");
         }

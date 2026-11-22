@@ -339,6 +339,27 @@ TEST(SparksBytecodeFile_VerifierRejections) {
     CHECK(patch(Opcode::CallW, [&](uint32) noexcept {
               return EncodeABx(Opcode::CallW, 0, notFunction);
           }) == BytecodeLoadError::BadReference);
+    // CALLW는 Ref 창 0번(하위 대기 handle 자리)이 있어야 한다(LC6c2 리뷰 B4).
+    const uint32 spawning = functionOf(find(Opcode::CallW));
+    CHECK(verify([&](BytecodeModule& m) noexcept {
+              m.functions[spawning].frame[1] = m.functions[spawning].registers[1];
+          }) == BytecodeLoadError::BadRegister);
+    // 형식 v4(SparksRuntime 2.6절): held 구간이 할당 수 밖, CLASS 필드의 모르는 표지·Scalar held.
+    CHECK(verify([&](BytecodeModule& m) noexcept {
+              m.functions[0].heldFirst = m.functions[0].registers[1];
+              m.functions[0].heldCount = 1;
+          }) == BytecodeLoadError::BadFunction);
+    REQUIRE(!original.classFields.IsEmpty());
+    CHECK(verify([](BytecodeModule& m) noexcept { m.classFields[0].flags = 2; }) ==
+          BytecodeLoadError::BadTable);
+    CHECK(verify([](BytecodeModule& m) noexcept {
+              for (BytecodeTypeField& field : m.classFields) {
+                  if (field.bank == 0) {
+                      field.flags = BytecodeFieldHeld;
+                      return;
+                  }
+              }
+          }) == BytecodeLoadError::BadTable);
     // await 표에서 빠진 AWAIT, 같은 주소의 await 항목 둘.
     const uint32 awaiting = functionOf(find(Opcode::Await));
     CHECK(verify([&](BytecodeModule& m) noexcept { m.functions[awaiting].awaitCount = 0; }) ==

@@ -28,6 +28,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRocksExportPropertyDumpTest, "RocksExport.Prop
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRocksExportBundleWriterTest, "RocksExport.BundleWriter", RocksExportAutomationPrivate::Flags)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRocksExportDeterminismTest, "RocksExport.ExportDeterminism", RocksExportAutomationPrivate::Flags)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRocksExportTextureTest, "RocksExport.TextureExtraction", RocksExportAutomationPrivate::Flags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRocksExportStaticMeshTest, "RocksExport.StaticMeshExtraction", RocksExportAutomationPrivate::Flags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRocksExportSkeletalTest, "RocksExport.SkeletalExtraction", RocksExportAutomationPrivate::Flags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRocksExportAnimationTest, "RocksExport.AnimationExtraction", RocksExportAutomationPrivate::Flags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRocksExportMaterialTest, "RocksExport.MaterialExtraction", RocksExportAutomationPrivate::Flags)
 
 bool FRocksExportSha256Test::RunTest(const FString&)
 {
@@ -62,6 +66,26 @@ bool FRocksExportDeterminismTest::RunTest(const FString&)
 bool FRocksExportTextureTest::RunTest(const FString&)
 {
 	return RocksExportAutomationPrivate::Report(*this, &RocksExportSelfTest::RunTextureExtraction);
+}
+
+bool FRocksExportStaticMeshTest::RunTest(const FString&)
+{
+	return RocksExportAutomationPrivate::Report(*this, &RocksExportSelfTest::RunStaticMeshExtraction);
+}
+
+bool FRocksExportSkeletalTest::RunTest(const FString&)
+{
+	return RocksExportAutomationPrivate::Report(*this, &RocksExportSelfTest::RunSkeletalExtraction);
+}
+
+bool FRocksExportAnimationTest::RunTest(const FString&)
+{
+	return RocksExportAutomationPrivate::Report(*this, &RocksExportSelfTest::RunAnimationExtraction);
+}
+
+bool FRocksExportMaterialTest::RunTest(const FString&)
+{
+	return RocksExportAutomationPrivate::Report(*this, &RocksExportSelfTest::RunMaterialExtraction);
 }
 
 #endif

@@ -936,6 +936,181 @@ TEST(SparksConformance_RunGoldenAllocationFailureWithHost) {
     CHECK(failures > 0);
 }
 
+TEST(SparksConformance_RunGoldenAllocationFailureAsync) {
+    // async 실행(SparksRuntime 2.4·2.5절)의 모든 할당 실패 자리: 정지(전체·하위 실행 경계), 대기
+    // 표, 묶음, 이벤트 대기의 전달 순회 안 재개, 하위 실행의 끝·fault 전파, 취소. 실패는
+    // OutOfMemory로 돌아오고 새는 할당이 없다.
+    SystemAllocator backing;
+    constexpr StringView Source = R"(class Pulse : ScriptableComponent {
+    var Count = 0;
+    event Go(n: int);
+
+    fn Fire(n: int) {
+        emit Go(n);
+    }
+
+    async fn Child() {
+        let text = "c${Count}";
+        await NextTick();
+        Count += 1;
+        Log.Info(text);
+    }
+
+    async fn Quick() {
+        if (Count > 1000) {
+            await NextTick();
+        }
+
+        Count += 1;
+    }
+
+    async fn Listen() {
+        await Go;
+        Count += 10;
+    }
+
+    async fn Bad() {
+        await NextTick();
+        Assert(false, "bad");
+    }
+
+    async fn Work() {
+        let label = "w${Count}";
+        await All(Child(), Quick(), Delay(0.1, Clock.Game));
+        await Race(Listen(), Delay(5.0, Clock.UI));
+        Log.Info(label);
+    }
+
+    async fn Fails() {
+        await All(Bad(), NextTick());
+    }
+
+    async fn Never() {
+        await Race(Child(), Delay(9.0, Clock.Game));
+    }
+
+    var Hum: Loop?;
+
+    fn Swap() {
+        Hum = Owner.StartLoop();
+    }
+
+    async fn Hold() {
+        let held = Owner.StartLoop();
+        await NextTick();
+        held?.Stop();
+    }
+
+    fn Fail() {
+        Assert(false, "fail");
+    }
+}
+)";
+    constexpr StringView Golden = R"(new #1 Pulse -> ok
+hook #1 Enable -> ok
+Pulse.Work(#1) -> ok
+Pulse.Fails(#1) -> ok
+Pulse.Never(#1) -> ok
+Pulse.Swap(#1) -> ok
+Pulse.Swap(#1) -> ok
+Pulse.Hold(#1) -> ok
+limits 4096 2 -> ok
+Pulse.Hold(#1) -> ok
+Pulse.Hold(#1) -> ok
+budget -> ok
+limits 4096 256 -> ok
+advance 0.1 -> ok
+advance 0.1 -> ok
+Pulse.Fire(#1, 1) -> ok
+fields #1 -> ok
+Pulse.Fail(#1) -> ok
+Pulse.Fail(#1) -> ok
+Pulse.Fail(#1) -> ok
+Pulse.Fire(#1, 2) -> ok
+request #1 disable -> ok
+request #1 destroy -> ok
+apply -> ok
+endframe -> ok
+close -> ok
+)";
+    constexpr StringView Schema = R"({
+  "format": 1, "package": "Rocks", "module": "Engine",
+  "types": [
+    {"name": "Loop", "id": "5a7e0000000000000000000000000300", "kind": "object", "held": true,
+     "functions": [{"name": "Stop", "id": "5a7e0000000000000000000000000302"}]},
+    {"name": "Actor", "id": "5a7e0000000000000000000000000001", "kind": "object",
+     "functions": [{"name": "StartLoop", "id": "5a7e0000000000000000000000000301",
+                    "returns": "Loop?", "effects": ["acquire"]}]},
+    {"name": "Component", "id": "5a7e0000000000000000000000000005", "kind": "object",
+     "fields": [{"name": "Owner", "id": "5a7e0000000000000000000000000131", "type": "Actor"}]},
+    {"name": "ScriptableComponent", "id": "5a7e0000000000000000000000000007", "kind": "object",
+     "base": "Component", "scriptExtensible": true}
+  ]
+})";
+    const CaseFile schemas[] = {{"Schema/Engine.sparkbind.json", Schema}};
+    uint64 attempts = 0;
+    uint64 failures = 0;
+    SystemAllocator side; // 기대값은 세는 allocator 밖에 둔다
+    String expected(side);
+    for (uint64 failAt = 0; failAt == 0 || failAt <= attempts; ++failAt) {
+        test::NFailAllocator allocator(backing);
+        const uint64 before = backing.Stats().liveAllocations;
+        {
+            CaseInput input;
+            input.name = "Run/Pulse.spark";
+            input.schemas = schemas;
+            input.source = Source;
+            input.expect = "clean\n";
+            input.hasRun = true;
+            input.run = failAt == 0 ? Golden : expected.View();
+            Report report(allocator);
+            if (failAt != 0) {
+                allocator.FailOnAttempt(failAt);
+            }
+
+            auto ran = RunCase(allocator, input, report);
+            const uint64 used = allocator.Attempts();
+            allocator.DisableFailure();
+            if (failAt == 0) {
+                // 첫 바퀴는 실제 결과(명령 수 포함)를 얻는다 — 이후 바퀴의 기대값이다.
+                REQUIRE(ran);
+                REQUIRE(report.Failures().Size() == 1);
+                const StringView failure = report.Failures()[0].View();
+                const StringView marker = "  actual run:\n";
+                usize at = 0;
+                while (at + marker.ByteCount() <= failure.ByteCount() &&
+                       StringView(failure.Data() + at, marker.ByteCount()) != marker) {
+                    ++at;
+                }
+
+                REQUIRE(at + marker.ByteCount() <= failure.ByteCount());
+                const StringView actual(failure.Data() + at + marker.ByteCount(),
+                                        failure.ByteCount() - at - marker.ByteCount());
+                CHECK(actual.StartsWith("new #1 Pulse -> ok ("));
+                CHECK(actual.Contains("close -> ok (ledger 0 buffers)",
+                                      StringComparison::CaseSensitive));
+                CHECK(actual.Contains("host release", StringComparison::CaseSensitive));
+                REQUIRE(expected.TryAppend(actual));
+                attempts = used;
+            } else if (!ran) {
+                CHECK(ran.Error() == ErrorCode::OutOfMemory);
+                ++failures;
+            } else {
+                // 실패를 삼킨 경로는 결과가 같아야 한다(거짓 실패 없음).
+                if (!report.Failures().IsEmpty()) {
+                    PrintFailures(report);
+                }
+
+                CHECK(report.Failures().IsEmpty());
+            }
+        }
+
+        CHECK(backing.Stats().liveAllocations == before);
+    }
+
+    CHECK(failures > 0);
+}
+
 // 폴더 사례(13.1절 "패키지 사례"): 배치 오류는 사례마다 실패 하나이고, 폴더 사례의 지시는 파일
 // 경로를 쓰며 파일 사례는 쓰지 않는다. schema 폴더에는 *.sparkbind.json만 둔다.
 TEST(SparksConformance_FolderCasesAndSchemas) {

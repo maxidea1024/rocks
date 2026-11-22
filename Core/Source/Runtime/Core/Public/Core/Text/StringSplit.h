@@ -70,7 +70,7 @@ Result<usize> TrySplitIntoArray(StringView text, StringView delimiter, Array<Str
 //
 // 사용 예:
 //   auto colon = TryFindUnescaped("a\\:b:C:\\x", ":", ",;:");   // 4 — 키 "a\\:b", 값 "C:\\x"
-Result<usize>
+ROCKS_CORE_API Result<usize>
 TryFindUnescaped(StringView text, StringView delimiter, StringView escapeCharacters,
                  StringComparison comparison = StringComparison::CaseSensitive) noexcept;
 
@@ -83,8 +83,8 @@ TryFindUnescaped(StringView text, StringView delimiter, StringView escapeCharact
 // 사용 예:
 //   StringBuilder<64> key(allocator);
 //   TryAppendUnescaped(key, "a\\:b", ",;:");   // key == "a:b"
-Result<void> TryAppendUnescaped(StringBuilderBase& out, StringView piece,
-                                StringView escapeCharacters) noexcept;
+ROCKS_CORE_API Result<void> TryAppendUnescaped(StringBuilderBase& out, StringView piece,
+                                               StringView escapeCharacters) noexcept;
 
 // parts를 separator로 이은 새 String을 만든다(UE FString::Join 대응). parts가 비면 빈 문자열이다.
 // 실패: 잘못된 UTF-8은 InvalidArgument, 그 밖에 Overflow·allocator 오류.

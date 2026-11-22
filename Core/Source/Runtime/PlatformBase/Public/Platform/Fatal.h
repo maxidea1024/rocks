@@ -12,7 +12,7 @@ namespace rocks::platform {
 // 사용 예:
 //   const char line[] = "[Warning][Log] queue saturated";
 //   WriteDiagnostic(line, sizeof(line) - 1);
-void WriteDiagnostic(const char* bytes, usize count) noexcept;
+ROCKS_PLATFORMBASE_API void WriteDiagnostic(const char* bytes, usize count) noexcept;
 
 // Fatal·FatalAt이 크래시 수집기를 거쳐 끝낼 때의 프로세스 종료 코드다(Windows 예외 코드로도 쓴다).
 // 사용자 정의 예외 코드 영역(0xE...)이라 OS NTSTATUS와 겹치지 않는다.
@@ -30,9 +30,10 @@ inline constexpr uint32 RocksRecursiveCrashExitCode = 0xE0524B52;
 // Windows 종료 코드는 RocksFatalExceptionCode다. POSIX는 이전 SIGABRT 동작으로 abort한다. abort를
 // SIGABRT 처리기로 되돌리는 순환은 없다. 부른 위치(return address)를 크래시 기록에 남긴다.
 // 정상 종료의 자원 정리를 하지 않으며 출력의 완전한 저장도 보장하지 않는다.
-[[noreturn]] void Fatal(const char* message) noexcept;
+[[noreturn]] ROCKS_PLATFORMBASE_API void Fatal(const char* message) noexcept;
 
 // 위치를 아는 호출자(assert)용 Fatal이다. file은 정적 수명 문자열(nullptr 가능)이다.
-[[noreturn]] void FatalAt(const char* message, const char* file, uint32 line) noexcept;
+[[noreturn]] ROCKS_PLATFORMBASE_API void FatalAt(const char* message, const char* file,
+                                                 uint32 line) noexcept;
 
 } // namespace rocks::platform

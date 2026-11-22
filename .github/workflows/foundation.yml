@@ -101,6 +101,15 @@ jobs:
           $executable = if ($IsWindows) { 'out/ci-commandlet/bin/RocksCommandlet.exe' } else { 'out/ci-commandlet/bin/RocksCommandlet' }
           dotnet run --project Programs/Rocks.Commandlet.Tests -- --executable $executable
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      # Modular linking (Docs/Design/BuildTargets.ko.md section 3.8 BS8d2): the FoundationTests module closure links as shared libraries
+      # without missing exports, and the executable runs through the Modular entry (Docs/Design/ModuleLoader.ko.md section 3.14).
+      - name: Build and run the Modular link check
+        run: |
+          dotnet msbuild Rocks.proj /t:Build /p:Adaptive=off /p:Configuration=Debug /p:RocksTarget=ModularCheck /p:NativeOutput=out/ci-modular /v:minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $executable = if ($IsWindows) { 'out/ci-modular/bin/ModularCheck.exe' } else { 'out/ci-modular/bin/ModularCheck' }
+          & $executable
+          exit $LASTEXITCODE
       # C++ uses clang-format 21.1.6 installed above; C# uses dotnet format of the SDK pinned by global.json (Build/Format/Rocks.Format.slnx).
       - name: Verify C++ and C# formatting
         run: dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll format --root .

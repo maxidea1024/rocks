@@ -1,0 +1,59 @@
+# Budgets (SparksRuntime 2.6, LC6d4 — SL 9.3): instance memory is checked on Buf field writes
+# (BudgetExceeded), subscription connections over the per-instance limit are not made and are counted,
+# and new executions over the per-instance limit are skipped and counted (not faults).
+new #1 Store -> ok (5 steps)
+hook #1 Enable -> ok (0 steps)
+Store.FillFirst(#1, 19) -> void (285 steps)
+Store.FillSecond(#1, 19) -> void (285 steps)
+Store.FillFirstPlus(#1, 19) -> fault BudgetExceeded at 28:9 (288 steps)
+Store.FillSecond(#1, 4) -> void (75 steps)
+limits 2 2 -> ok
+new #2 Store -> ok (5 steps)
+new #3 Store -> ok (5 steps)
+hook #2 Enable -> ok (0 steps)
+hook #3 Enable -> ok (0 steps)
+new #4 Crowd -> ok (3 steps)
+hook #4 Enable -> ok (0 steps)
+Crowd.Join(#4, #1) -> void (9 steps)
+Crowd.Join(#4, #2) -> void (9 steps)
+Crowd.Join(#4, #3) -> void (9 steps)
+Store.Fire(#3) -> void (3 steps)
+Store.Fire(#2) -> void (3 steps)
+  log info "ping"
+  deliver #4 Crowd.on Sources.Ping -> ok (6 steps)
+Store.Wait(#1) -> suspended (7 steps)
+Store.Wait(#1) -> suspended (7 steps)
+Store.Wait(#1) -> skipped (0 steps)
+budget -> connections dropped 1, executions skipped 1
+limits 1 1 -> ok
+new #5 Pair -> ok (0 steps)
+hook #5 Enable -> ok (0 steps)
+Pair.Use(#5, #2) -> void (3 steps)
+Pair.Swap(#5, #3) -> void (5 steps)
+Store.Fire(#3) -> void (3 steps)
+  log info "left ping"
+  deliver #5 Pair.on Left.Ping -> ok (4 steps)
+limits 2 1 -> ok
+new #6 Busy -> ok (3 steps)
+hook #6 Enable -> ok (0 steps)
+Busy.Join(#6, #2) -> void (9 steps)
+Busy.Join(#6, #3) -> void (9 steps)
+Store.Fire(#2) -> void (3 steps)
+  log info "ping"
+  deliver #4 Crowd.on Sources.Ping -> ok (6 steps)
+  deliver #6 Busy.on Sources.Ping -> suspended (7 steps)
+Store.Fire(#3) -> void (3 steps)
+  log info "left ping"
+  deliver #5 Pair.on Left.Ping -> ok (4 steps)
+budget -> connections dropped 1, executions skipped 2
+detach #5 -> ok
+detach #6 -> ok
+advance 1.0 -> ok (0 suspended)
+  resume #1 Store.Wait -> ok (4 steps)
+  resume #1 Store.Wait -> ok (4 steps)
+  log info "waited"
+  log info "waited"
+detach #4 -> ok
+detach #3 -> ok
+detach #2 -> ok
+detach #1 -> ok

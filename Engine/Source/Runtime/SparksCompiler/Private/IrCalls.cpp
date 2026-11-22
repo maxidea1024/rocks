@@ -273,7 +273,10 @@ uint32 IrBuilder::LowerCall(uint32 node, uint32 expected) noexcept {
     }
 
     // a?.F(...): a가 있으면 꺼낸 수신자로 부르고(인자도 그때만 계산한다) 결과는 T?, 없으면 없음.
-    const uint32 result = NewValue(type);
+    // 대기를 만드는 호출(`All(a?.F(), …)`)이면 결과는 대기 handle이고 없음은 null — 묶음이 바로
+    // 끝난 인자로 본다(SparksRuntime 2.5절, LC6c2 리뷰 B5).
+    const bool waits = entry.signature != NoSignature && c_.signatures_[entry.signature].isAsync;
+    const uint32 result = waits ? NewWait() : NewValue(type);
     const uint32 some = NewValue(checker_.boolType_);
     Add(IrOp::IsSome, some, receiver, NoIrRegister, 0, node);
     const uint32 present = NewBlock();
@@ -293,7 +296,7 @@ uint32 IrBuilder::LowerCall(uint32 node, uint32 expected) noexcept {
                              : checker_.NonOptional(type);
     const uint32 value = EmitCall(node, callee, Unwrap(receiver, receiverType, node), arguments,
                                   inner, mutating ? IrCallMutating : IrCallDirect);
-    MoveValue(result, Coerce(value, type, node), node);
+    MoveValue(result, waits ? value : Coerce(value, type, node), node);
     Add(IrOp::Jump, done, NoIrRegister, NoIrRegister, 0, node);
     StartBlock(absent);
     LoadNone(result, node);
@@ -365,11 +368,11 @@ uint32 IrBuilder::EmitCall(uint32 node, uint32 callee, uint32 receiver,
         Add(IrOp::Call, result, operands, static_cast<uint32>(values.Size()), callee, node,
             IrCallChild);
     } else if (wait && IsDirectAwaitCallee(callee)) {
-        // 가상 async 호출의 하위 실행은 아직 없다: 부르고 대기 자리를 null로 둔다(묶음이
-        // ContractViolation으로 확정적으로 멈춘다 — 반환 창의 값을 대기로 읽지 않게).
-        const uint32 returns = c_.signatures_[signature].returnType;
-        const uint32 discarded = NewValue(returns == NoType ? checker_.voidType_ : returns);
-        Add(IrOp::Call, discarded, operands, static_cast<uint32>(values.Size()), callee, node, sub);
+        // 가상 async 호출의 하위 실행(CALLV 경계)은 아직 없다: 부르지 않고 그 자리에서
+        // ContractViolation으로 멈춘다(동기로 부르면 그 안의 정지가 사슬 전체를 멈춰 묶음 의미가
+        // 틀어진다 — LC6c2 리뷰). 뒤 코드는 도달하지 않는 block이다.
+        Add(IrOp::Fault, NoIrRegister, NoIrRegister, NoIrRegister, IrFaultUnsupported, node);
+        StartBlock(NewBlock());
         LoadNone(result, node);
     } else {
         Add(IrOp::Call, result, operands, static_cast<uint32>(values.Size()), callee, node, sub);

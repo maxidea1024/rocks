@@ -12,12 +12,13 @@ class ConstructionContext;
 
 namespace detail {
 Result<void> RetainRoot(ObjectRegistry*, ObjectHandle) noexcept;
-void ReleaseRoot(ObjectRegistry*, ObjectHandle) noexcept;
-Result<void*> AccessBorrow(ObjectRegistry*, ObjectHandle, const void*) noexcept;
+ROCKS_OBJECTRUNTIME_API void ReleaseRoot(ObjectRegistry*, ObjectHandle) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void*> AccessBorrow(ObjectRegistry*, ObjectHandle,
+                                                   const void*) noexcept;
 Result<ObjectLifecycle> InspectBorrow(ObjectRegistry*, ObjectHandle) noexcept;
-void ReleaseBorrow(ObjectRegistry*, ObjectHandle) noexcept;
-void ReleaseBackend(ObjectRegistry*, ObjectHandle) noexcept;
-void ReleaseEncodePin(ObjectRegistry*, ObjectHandle) noexcept;
+ROCKS_OBJECTRUNTIME_API void ReleaseBorrow(ObjectRegistry*, ObjectHandle) noexcept;
+ROCKS_OBJECTRUNTIME_API void ReleaseBackend(ObjectRegistry*, ObjectHandle) noexcept;
+ROCKS_OBJECTRUNTIME_API void ReleaseEncodePin(ObjectRegistry*, ObjectHandle) noexcept;
 class PathCursor;
 } // namespace detail
 

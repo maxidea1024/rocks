@@ -67,9 +67,9 @@ double LinearToSrgb(double linear) noexcept;
 double Gamma22ToLinear(double encoded) noexcept;
 
 // 8비트 sRGB → 선형: decode(value/255)를 가장 가까운 float로 반올림한 값(생성 표, 정확).
-float SrgbByteToLinear(uint8 value) noexcept;
+ROCKS_DETERMINISTICMATH_API float SrgbByteToLinear(uint8 value) noexcept;
 // 선형 → 8비트 sRGB: round-half-up(encode(linear)·255)를 정확히 계산한다(경계 표 이분 탐색).
 // NaN·0 이하는 0, 1 이상은 255.
-uint8 LinearToSrgbByte(float linear) noexcept;
+ROCKS_DETERMINISTICMATH_API uint8 LinearToSrgbByte(float linear) noexcept;
 
 } // namespace rocks::deterministic

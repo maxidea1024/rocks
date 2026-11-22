@@ -197,7 +197,7 @@ uint64 LogInstallGeneration() noexcept;
 //   lock 안에서도 된다(생산자는 sink lock을 잡지 않는다. Sync는 호출 스레드가 sink lock을 잡으므로
 //   sink 콜백이 잡는 lock 안에서 Sync 로그를 남기지 않는다).
 // - Pump는 Manual 모드에서 어느 스레드에서나 부를 수 있지만 한 번에 하나만 돈다(겹친 호출은 0).
-class LogSystem {
+class ROCKS_CORE_API LogSystem {
 public:
     LogSystem(Allocator& allocator, const LogSystemConfig& config) noexcept;
     ~LogSystem() noexcept;
@@ -473,7 +473,7 @@ private:
 //
 // 사용 예:
 //   LogInstallScope installed(logs);
-class LogInstallScope {
+class ROCKS_CORE_API LogInstallScope {
 public:
     explicit LogInstallScope(LogSystem& system) noexcept;
     ~LogInstallScope() noexcept;

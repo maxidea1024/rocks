@@ -16,15 +16,28 @@
 //   auto enabled = session.RunHook(instance.Value(), BytecodeHookKind::Enable, {}, {});
 //   session.Detach(instance.Value());
 //
-// 재진입: 실행 중(handler·hook의 native 호출 안)에 host가 부를 수 있는 진입은 Emit뿐이다(항목만
-// 넣고 전달은 바깥 진입이 한다). 그 밖의 진입은 실행 중이면 InvalidArgument다(LC6b 리뷰 B4 —
-// 활성 전환·파괴의 지연 적용은 LC6d).
+// 재진입: 실행 중(handler·hook의 native 호출 안)에 host가 부를 수 있는 진입은 Emit·RequestEnabled·
+// RequestDestroy뿐이다(항목·요청만 넣고 전달·적용은 바깥 진입이 한다). 그 밖의 진입은 실행 중이면
+// InvalidArgument다(LC6b 리뷰 B4 — 활성 전환·파괴의 지연 적용은 LC6d).
 
 namespace rocks::sparks {
 
 namespace detail {
 class VmLibrary;
 } // namespace detail
+
+// session 예산이다(SparksRuntime 2.6절 — SL 9.3절 기본값, 논리 단위). host가 session을 만들 때
+// 프로젝트 설정으로 정한다(실행 중에는 바꾸지 않는다 — 시험은 SetBudgets로 줄인다).
+struct VmSessionBudgets {
+    uint64 fragmentInstructions = 1000000;            // 실행 조각(호출·재개)마다
+    uint64 teardownInstructions = 100000;             // Disable·Destroy hook
+    uint32 callDepth = 256;                           // frame(하위 실행은 바깥 frame 포함)
+    uint64 sessionMemory = uint64(512) * 1024 * 1024; // 실행 문맥 ledger byte
+    uint64 instanceMemory = uint64(16) * 1024 * 1024; // instance 필드가 직접 쥔 버퍼 byte
+    uint32 connectionsPerInstance = 4096;             // 구독 연결(구독 instance마다)
+    uint32 connectionsPerSession = 1048576;
+    uint32 executionsPerInstance = 256; // 정지 실행(동시 실행·대기)
+};
 
 class VmSession final {
 public:
@@ -100,6 +113,9 @@ public:
         uint32 function = NoBytecodeIndex;
         VmCallResult result;
         bool resumed = false; // 정지했던 실행의 재개(SparksRuntime 2.4절)
+        // 적용 루프·프레임 끝 정리가 부른 수명 hook(SparksRuntime 2.6절 — function은 없다).
+        bool hook = false;
+        BytecodeHookKind hookKind = BytecodeHookKind::Enable;
     };
 
     Span<const Delivery> Deliveries() const noexcept {
@@ -123,6 +139,84 @@ public:
     uint32 SuspendedCount() const noexcept;
     // 대기 표의 살아 있는 항목 수다(재개·취소된 대기는 돌려받는다 — 장시간 반복에도 일정).
     uint32 WaitCount() const noexcept;
+    // ---- 지연 적용·종료(SparksRuntime 2.6절 — LC6d2) ----
+
+    static constexpr uint32 MaxApplyRounds = 64;        // 적용 루프(SL 9.3절)
+    static constexpr uint32 MaxPendingRequests = 65536; // 요청 큐 상한(넘으면 CapacityExceeded)
+
+    // 활성 전환·파괴 요청을 넣는다(실행 중에도 — host native `SetEnabled`·`Destroy`가 부른다).
+    // 실패: 없는 instance·session 종료 뒤면 InvalidArgument, 할당 실패는 OutOfMemory.
+    Result<void> RequestEnabled(uint32 instance, bool enabled) noexcept;
+    Result<void> RequestDestroy(uint32 instance) noexcept;
+    // 스크립트 단계 끝: 요청 순으로 Enable·Disable hook을 돌리고(그 emit은 같은 큐로 전달) 그동안
+    // 생긴 요청을 이어 처리한다(64회 — 남으면 다음 단계로). 파괴 요청은 PendingDestroy로 표시한다.
+    Result<void> ApplyRequests() noexcept;
+    // 프레임 끝 정리: PendingDestroy instance를 요청 순으로 Disable(활성이면) → Destroy hook →
+    // Detach한다.
+    Result<void> EndFrame() noexcept;
+    // session을 닫는다(SL 9.1절): admission 차단 → 모든 instance Detach → 큐·Changed 자리 폐기 →
+    // 연결·대기 표 해제. 뒤에는 실행 문맥 ledger가 0이다. 실행 중이면 InvalidArgument.
+    Result<void> CloseSession() noexcept;
+    // 남은(다음 단계로 넘긴) 요청 수다.
+    uint32 PendingRequests() const noexcept {
+        return static_cast<uint32>(requests_.Size());
+    }
+
+    // 적용 루프가 64회 안에 끝나지 않아 요청을 다음 단계로 넘긴 횟수다(보고).
+    uint64 DeferredApplies() const noexcept {
+        return deferredApplies_;
+    }
+
+    // ---- fault 처리·격리(SparksRuntime 2.6절 — LC6d3, SL 8.3절) ----
+
+    static constexpr uint32 IsolationFaults = 3;         // 이 수번째 fault에서 격리
+    static constexpr uint64 IsolationWindowFrames = 600; // 그 fault들이 든 프레임 폭(경계 포함)
+
+    enum class InstanceState : uint8 {
+        Normal,
+        TicksStopped, // Tick 계열 fault — 그 모듈이 다시 링크될 때까지 Tick·FixedTick·LateTick 없음
+        Isolated      // admission은 Destroy hook만
+    };
+
+    InstanceState StateOf(uint32 instance) const noexcept;
+
+    // fault 위치별 기록이다: (모듈과 그 링크 세대, 함수, 주소, 종류)마다 첫 상세(원문 위치·instance
+    // handle)와 횟수(SL 8.3절 "보고" — 재링크한 새 revision은 새 위치다). CloseSession이 비운다.
+    struct FaultRecord {
+        const VmLinkedModule* module = nullptr;
+        uint64 generation = 0;
+        uint32 function = NoBytecodeIndex;
+        uint32 address = NoBytecodeIndex;
+        VmFaultKind kind = VmFaultKind::None;
+        BytecodeLocation location;
+        uint64 instance = 0; // 첫 fault의 instance handle(없으면 0)
+        uint64 count = 0;
+    };
+
+    Span<const FaultRecord> Faults() const noexcept {
+        return faults_.View();
+    }
+
+    // ---- 예산(SparksRuntime 2.6절 — LC6d4) ----
+
+    // 예산을 바꾼다(host가 session을 만들 때 — SD34 실행 중 변경 금지). 실패: 실행 중이거나 0인
+    // 상한이 있으면 InvalidArgument.
+    Result<void> SetBudgets(const VmSessionBudgets& budgets) noexcept;
+
+    const VmSessionBudgets& Budgets() const noexcept {
+        return budgets_;
+    }
+
+    // 연결 상한으로 거부한 연결 시도 수(원천이 바뀌어 다시 풀 때마다 다시 센다), 동시 실행 상한으로
+    // 건너뛴 실행(전달·Call) 수다(보고 — 거부는 fault가 아니다).
+    uint64 DroppedConnections() const noexcept {
+        return droppedConnections_;
+    }
+
+    uint64 SkippedExecutions() const noexcept {
+        return skippedExecutions_;
+    }
+
     // `@skipWhileBusy`로 버린 이벤트 수다(디버거 표시 — SL 6.1절 SD11).
     uint64 SkippedWhileBusy() const noexcept {
         return skippedWhileBusy_;
@@ -159,12 +253,13 @@ private:
     // 정지한 실행이다(R9 — frame stack 전체).
     struct Suspended {
         explicit Suspended(Allocator& allocator) noexcept
-            : frames(allocator), generations(allocator), scalars(allocator), refs(allocator),
-              buffers(allocator) {
+            : frames(allocator), generations(allocator), held(allocator), scalars(allocator),
+              refs(allocator), buffers(allocator) {
         }
 
         Array<VmExecution::Frame> frames;
         Array<uint64> generations; // frame 모듈의 링크 세대(다시 링크했으면 재개하지 않고 취소)
+        Array<uint32> held;        // frame마다 held 구간(first << 16 | count — 정지 때 보관)
         Array<uint64> scalars;
         Array<uint64> refs;
         Array<VmBuffer*> buffers;
@@ -177,6 +272,7 @@ private:
         uint64 order = 0;
         RandomStream random{0}; // 실행의 Random stream(재개가 이어 쓴다 — SL 6.3절)
         uint64 childWait = 0;   // 하위 실행이면 부모 묶음 안의 하위 대기 handle
+        uint32 depthOffset = 0; // 바깥 frame 수(재개 때 누적 호출 깊이 — LC6c2 리뷰 B1)
         // 이벤트 handler로 시작된 실행이면 그 발행자·handler(재진입 판정 — SD11).
         uint64 publisher = 0;
         const VmLinkedModule* handlerModule = nullptr;
@@ -235,7 +331,8 @@ private:
     Result<void> ResumeSuspended(uint32 suspended, uint64 wait, uint32 depth, uint64 root,
                                  bool inDrain) noexcept;
     // 하위 실행의 끝(반환·fault)을 부모 묶음에 반영한다.
-    Result<void> FinishChild(uint64 childWait, const VmCallResult& result, bool inDrain) noexcept;
+    Result<void> FinishChild(uint64 childWait, const VmCallResult& result, uint32 depth,
+                             uint64 root, bool inDrain) noexcept;
     // 대기가 완료되지 않은 채 끝났다(발행자 파괴·하위 실행 취소 — SD13): Race는 남은 인자를,
     // All·단독은 실행을 취소한다.
     void FailWait(uint32 wait) noexcept;
@@ -312,6 +409,7 @@ private:
         // 첫 쓰기에서 확보한 Changed 자리(SL 5.3절 — 활성 instance, 억제 문맥 밖).
         bool reserved = false;
         usize item = 0;
+        bool changed = false; // 조각 끝 판정: 시작 값과 다르다(원천 연결 다시 풀기)
     };
 
     // EMIT(실행 중)이 부른다: 항목을 넣는다. 반환은 fault 종류.
@@ -332,11 +430,16 @@ private:
     void DropWrites(uint32 instance) noexcept;
     // instance의 field key를 경로 첫 마디로 쓰는 handler 연결을 다시 풀고, `on A.B.Changed`면 한 번
     // 전달할 항목을 넣는다(SL 5.3·5.5절).
-    Result<void> Reconnect(uint32 instance, const VmEventKey& field) noexcept;
+    // phases는 ConnectRemove·ConnectAdd 조합이다(조각 끝은 바뀐 모든 필드를 지우기 전부 → 더하기
+    // 전부로 — 쓰기 순서가 상한 판정을 바꾸지 않게, LC6d4 리뷰 B2).
+    Result<void> Reconnect(uint32 instance, const VmEventKey& field, uint8 phases) noexcept;
+    static constexpr uint8 ConnectRemove = 1;
+    static constexpr uint8 ConnectAdd = 2;
     // 큐를 비운다(단계 전달 상한까지).
     Result<void> Drain() noexcept;
     // instance의 연결을 (다시) 푼다 — handler 하나(handler가 NoIndex면 전부).
-    Result<void> Connect(uint32 instance, const VmLinkedModule* module, uint32 handler) noexcept;
+    Result<void> Connect(uint32 instance, const VmLinkedModule* module, uint32 handler,
+                         uint8 phases = ConnectRemove | ConnectAdd) noexcept;
     // 경로를 풀어 발행자 handle들을 publishers에 둔다(배열이면 fromArray).
     Result<void> ResolvePath(uint32 instance, const VmLinkedModule& module, uint32 firstPath,
                              uint32 pathCount, Array<uint64>& publishers, bool& fromArray) noexcept;
@@ -354,8 +457,19 @@ private:
         const VmLinkedModule* module = nullptr;
         uint32 classIndex = NoBytecodeIndex;
         bool attached = false;
-        bool enabled = false; // Enable hook이 끝났고 Disable 전(연결이 살아 있다)
-        uint64 serial = 0;    // 생성 번호(session 안에서 유일 — 번호 재사용 구별)
+        bool enabled = false;        // Enable hook이 끝났고 Disable 전(연결이 살아 있다)
+        uint64 serial = 0;           // 생성 번호(session 안에서 유일 — 번호 재사용 구별)
+        bool pendingDestroy = false; // 파괴 적용됨(새 전달·admission 없음 — 프레임 끝에 정리)
+        // fault 처리(LC6d3).
+        bool isolated = false;
+        bool ticksStopped = false;
+        const VmLinkedModule* tickStopModule = nullptr; // Tick fault가 난 모듈
+        uint64 tickStopGeneration = 0;                  // 그 모듈의 링크 세대(새로 링크되면 푼다)
+        bool destroyRan = false;   // Destroy hook을 돌렸다(격리 instance는 1회만)
+        uint32 suspendedCount = 0; // 이 instance의 정지 실행 수(동시 실행 상한 — O(1))
+        bool enabledOnce = false;  // 첫 Enable(spawn)이 끝났다 — 뒤 Enable은 재활성화
+        uint64 faultFrames[IsolationFaults] = {};
+        uint32 faultCount = 0;
         Array<uint64> scalars;
         Array<uint64> refs;
         Array<VmBuffer*> buffers;
@@ -374,6 +488,9 @@ private:
                     uint32 offset, uint32 slots, uint64*& values, VmBuffer**& buffers,
                     uint32& instance, uint32& at) noexcept;
     void ReleaseFields(Instance& instance) noexcept;
+    // instance의 유지 자원 필드를 선언 역순(파생 → 기반)으로 멈추고 null로 둔다(Disable 뒤·Detach —
+    // SparksRuntime 2.6절).
+    void ReleaseHeldFields(uint32 instance) noexcept;
 
     Allocator* allocator_;
     VmHost* host_;
@@ -418,6 +535,46 @@ private:
     uint32 currentHandler_ = NoBytecodeIndex;
     uint64 skippedWhileBusy_ = 0;
     uint64 nextSerial_ = 1;
+    // 지연 적용(LC6d2).
+    enum class RequestKind : uint8 {
+        Enable,
+        Disable,
+        Destroy
+    };
+
+    struct Request {
+        uint32 instance = NoBytecodeIndex;
+        uint64 serial = 0;
+        RequestKind kind = RequestKind::Enable;
+    };
+
+    Array<Request> requests_;
+    Array<Request> applying_;
+    Array<Request> destroys_;
+    bool closed_ = false;
+    uint64 deferredApplies_ = 0;
+    // 예산(LC6d4).
+    VmSessionBudgets budgets_;
+    uint64 droppedConnections_ = 0;
+    uint64 skippedExecutions_ = 0;
+    // 조각 하나의 예산이다(Teardown이면 작은 명령 예산).
+    VmLimits FragmentLimits(bool teardown) const noexcept;
+    // instance의 정지 실행이 동시 실행 상한에 닿았는지다.
+    bool ExecutionsFull(uint32 instance) const noexcept;
+    // Buf 필드 at에 incoming을 두면 instance 메모리 예산 안인지다.
+    bool FitsInstanceMemory(uint32 instance, uint32 at, const VmBuffer* incoming) const noexcept;
+    // fault 처리(LC6d3).
+    Array<FaultRecord> faults_;
+    uint64 activeFrame_ = 0; // 일시 정지가 아닌 프레임 수(격리 창의 기준)
+    // fault를 위치별로 기록하고, counts면 instance의 격리 창에 센다(세 번째면 격리).
+    void NoteFault(uint32 instance, const VmCallResult& result, bool counts) noexcept;
+    void RecordFault(const VmFault& fault, uint32 instance) noexcept;
+    // 격리(SL 8.3절): Disable hook 없이 실행 취소 → 유지 자원 필드 → 연결·이벤트 대기 폐기. 값
+    // 필드는 둔다.
+    void Isolate(uint32 instance) noexcept;
+    bool nested_ = false; // 적용 루프 안(진입 기록을 이어 모은다)
+    // 수명 hook 하나를 적용 기록으로 돌린다.
+    Result<void> ApplyHook(uint32 instance, BytecodeHookKind kind) noexcept;
 };
 
 } // namespace rocks::sparks

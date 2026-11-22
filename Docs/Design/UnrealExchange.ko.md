@@ -1,6 +1,6 @@
 # Unreal 교환 형식과 추출 플러그인 설계
 
-기준일: 2026-11-22, 개정 10(UX2·UX3을 추출 UX2a·UX3a와 임포트 UX2b·UX3b로 나눔, UX2a 텍스처 추출 — 4.5절). 개정 9(UX1b UE 플러그인 골격 구현 — 11.7절). 개정 8(UX1b를 UE 플러그인 골격 UX1b와 Rocks 임포트 연결 UX1c로 나눔). 개정 7(UX1a coverage 100% — 10.4절 끝 시험과 coverage 문단). 개정 6(UX1a 리더·경로 대응·임포트 순서 구현 — 10.4절, 3.4·3.5절 정렬·의존 `class`). 개정 5(UX1을 UX1a·UX1b로 나눔). 개정 4(UXR5 경계 정책 검사 구현 — 11.1절). 개정 3(13절 요구를 다른 문서에 반영하고 상태 열을 더함, 태그 키 이름). 개정 2(교차 검증 반영 — 18절). UE 에디터에서 텍스처·정적 메시·스켈레톤·스킨 메시·애니메이션 클립·머티리얼을 꺼내 Rocks 에셋으로 가져오는 경로를 정한다. 경로는 세 부분이다. UE 쪽 추출 플러그인 `RocksExport`, 둘 사이의 교환 형식 **Unreal 교환 묶음**, Rocks 쪽 임포터 플러그인 `UnrealExchange`다.
+기준일: 2026-11-22, 개정 14(UX4를 UX4a·UX4b로 나눔, UX4a 머티리얼 계열 추출 — 8.6절). 개정 13(UX8을 UX8a·UX8b로 나눔, UX8a 애니메이션 클립 추출 — 7.1절). 개정 12(UX7을 UX7a·UX7b로 나눔, UX7a 스켈레톤·스킨 메시 추출 — 6.3절). 개정 11(UX3a 정적 메시 추출 — 5.4절). 개정 10(UX2·UX3을 추출 UX2a·UX3a와 임포트 UX2b·UX3b로 나눔, UX2a 텍스처 추출 — 4.5절). 개정 9(UX1b UE 플러그인 골격 구현 — 11.7절). 개정 8(UX1b를 UE 플러그인 골격 UX1b와 Rocks 임포트 연결 UX1c로 나눔). 개정 7(UX1a coverage 100% — 10.4절 끝 시험과 coverage 문단). 개정 6(UX1a 리더·경로 대응·임포트 순서 구현 — 10.4절, 3.4·3.5절 정렬·의존 `class`). 개정 5(UX1을 UX1a·UX1b로 나눔). 개정 4(UXR5 경계 정책 검사 구현 — 11.1절). 개정 3(13절 요구를 다른 문서에 반영하고 상태 열을 더함, 태그 키 이름). 개정 2(교차 검증 반영 — 18절). UE 에디터에서 텍스처·정적 메시·스켈레톤·스킨 메시·애니메이션 클립·머티리얼을 꺼내 Rocks 에셋으로 가져오는 경로를 정한다. 경로는 세 부분이다. UE 쪽 추출 플러그인 `RocksExport`, 둘 사이의 교환 형식 **Unreal 교환 묶음**, Rocks 쪽 임포터 플러그인 `UnrealExchange`다.
 
 - 배경: 사용자 지시(2026-11-19). 엔진 시험을 위해 UE에서 쓰던 콘텐츠를 Rocks로 가져온다. `.uasset`을 직접 해석하는 방식은 어려움이 많으므로 UE 플러그인이 Rocks가 읽을 수 있는 형태로 추출한다.
 - 받는 쪽 자료구조: 텍스처는 [에셋 시스템](AssetSystem.ko.md) 12절, 머티리얼은 [머티리얼 시스템](MaterialSystem.ko.md) 4절, 메시·스켈레톤·애니메이션은 [메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets.ko.md)이 정한다. 이 문서는 추출과 대응만 다룬다.
@@ -200,6 +200,19 @@ Rocks 임포트 모드(`--mesh-normals=`, ImportRecord `options`에 남는다):
 - `unreal`(기본): `prepared`를 Rocks 원본으로 쓴다. 이미 계산된 값이므로 `recomputeNormals`·`recomputeTangents`·`generateLightmapUVs`를 끄고 lightmap 번호는 `preparedBuild` 값을 쓴다. UE 원래 플래그는 ImportRecord `options`에 남긴다.
 - `rocks`: `source`(순수 원본)와 UE 빌드 설정을 그대로 쓴다. Rocks 빌더가 계산한다.
 
+### 5.4 구현에서 정한 점(UX3a)
+
+UX3a(UE 쪽 정적 메시 추출, `FRocksStaticMeshExtractor`·`FRocksMeshDescriptionWriter`) 중 5절이 정하지 않았거나 다르게 정한 점이다. 모두 권장안으로 확정했다.
+
+1. **`data` 스키마.** `data`는 `{ "lods": [...], "collision": … }`다. LOD 항목은 `hasSource`·`source`·`prepared`·`preparedBuild`(`{ "SrcLightmapIndex", "DstLightmapIndex" }` — 5.3절 사본 설정이 고친 값)·`generated`·`baked` 순이다. 원본이 없는 LOD의 `source`·`prepared`·`preparedBuild`, 생성 LOD가 아닌 LOD의 `baked`는 `null`이다. 5.2절 예시의 LOD별 `build`·`reduction`·`screenSize`는 `data`에 다시 쓰지 않는다 — `settings`의 `SourceModels[i]`(UE `FStaticMeshSourceModel` 덤프: `BuildSettings`·`ReductionSettings`·`ScreenSize` 기본값과 플랫폼별 값)에 이미 있어 두 곳에 같은 값을 두지 않는다.
+2. **MeshSource 기록.** `{ "counts": { "vertices", "corners", "edges", "polygons", "triangles", "polygonGroups" }, "topology": [blob 7개], "attributes": [{ "element", "name", "type", "channels", "data" }] }`다. 위상 blob은 MeshAnimationAssets 9.1절 순서이고 모두 `u32`(components 1·2·1·1·1·3·1, count = 코너 수·변 수·다각형 수 + 1·둘레 길이 합·다각형 수·삼각형 수·삼각형 수)다. 변은 작은 정점 번호를 먼저 쓴다. 요소 번호는 메시 설명 사본을 `Compact`한 순서다. 속성 `element`는 `Vertex`·`Corner`·`Edge`·`Polygon`·`Triangle`·`PolygonGroup`, `type`은 `Float`·`Vec2`·`Vec3`·`Vec4`·`UInt32`·`Bool`·`Name`이다. 값 blob은 MeshAnimationAssets 3.4.1절 배치(채널 우선)이고 배치 이름은 Float·Vec* `f32`(components = 성분 수 × 채널), UInt32 `u32`, Bool `u8`(components = 채널), Name `names`(components = 채널), count = 그 요소 수다. 정점 위치는 속성 `Vertex`·`Position`이다(MA1 3.7절 1). 속성은 (요소 번호, 이름 UTF-8 byte) 순이다(MeshAnimationAssets 9.2절).
+3. **속성 대응.** MeshAnimationAssets 3.2절 표대로 UE 이름 상수로 맞춘다: 정점 `Position`(UE 이름은 끝에 공백이 있는 `"Position "` — MeshAttributes.cpp), 코너 `Normal`·`Tangent`·`BinormalSign`·`Color`·`TexCoord`(UE `TextureCoordinate`, 채널 ≤ 8), 변 `IsHard`, 다각형 `PartName`(UE `ObjectName`), 다각형 묶음 `MaterialSlotName`(UE `ImportedMaterialSlotName`). 그 밖의 UE 속성은 같은 요소·이름으로 보존한다(float·FVector2f·FVector3f·FVector4f·bool·FName, int32는 `UInt32`에 비트 그대로). transient 속성(삼각형 법선 등)과 번호 참조 속성(위상)은 쓰지 않는다. 다른 값 타입, Rocks 엔진 이름과 겹치는 보존 속성, 채널이 상한(255, TexCoord 8)을 넘는 속성은 빼고 `SkippedMeshAttribute` 진단(info·warning)을 단다. 채널 0인 속성은 값이 없어 쓰지 않는다. FName `None`은 빈 문자열이다. 이름의 NFC 정규화는 하지 않는다(UE 이름은 사실상 ASCII — 아니면 Rocks 검증이 잡는다).
+4. **`prepared`.** LOD마다 메시 설명 사본(`CloneMeshDescription`)과 빌드 설정 사본에 `FMeshDescriptionHelper::SetupRenderMeshDescription(메시, 사본, IsNaniteEnabled(), bNeedTangents = true)`를 적용하고 다시 압축한다(5.3절). 원본 에셋은 바꾸지 않는다(자기 시험이 확인한다 — 7번). lightmap UV 생성이 켜진 LOD는 `prepared`에 UV 채널이 늘 수 있고 고친 번호가 `preparedBuild`다.
+5. **`generated`와 `baked`.** `generated` = `!IsMeshDescriptionValid(i) || IsReductionActive(i)`(5.1절). 참이면 그 LOD의 `FStaticMeshLODResources` CPU 사본(에디터는 쿠킹 데이터를 요구하지 않으므로 `bNeedsCPUAccess`가 켜져 있다 — StaticMesh.cpp)을 삼각형 메시로 바꾼다: 렌더 정점 하나 = 정점 하나 = 코너 하나, 다각형 = 삼각형, 변은 정점 쌍마다 하나(처음 나온 순서), 다각형 묶음 = 섹션(이름은 `StaticMaterials[섹션 머티리얼 번호].ImportedMaterialSlotName`). 코너 속성은 `Normal`(TangentZ)·`Tangent`(TangentX)·`BinormalSign`(TangentZ.w)·`TexCoord`·`Color`(8비트 sRGB를 선형으로 — info `BakedColorQuantized`)다. 같은 정점을 두 번 쓰는 삼각형은 빼고 info `BakedDegenerateTriangles`(개수)를 단다(Rocks 불변식이 같은 정점을 잇는 변을 받지 않는다). 렌더 데이터가 없으면 `baked`는 `null`이고 warning `BakedUnavailable`이다. `baked` 위치에는 `BuildScale3D`가 이미 들어 있다(5.1절).
+6. **`settings`와 `collision`.** `settings`는 UStaticMesh UPROPERTY 덤프 전체다(LOD 설정, 슬롯·섹션 정보·소켓, Nanite 설정, lightmap, 경계 확장, LOD 그룹·최소 LOD, `ComplexCollisionMesh`·`DistanceFieldReplacementMesh` 참조 — 참조는 의존에 합친다). UE의 `BodySetup`은 transient UPROPERTY(따로 직렬화)라 덤프에 들지 않으므로 `data.collision`에 BodySetup 객체의 덤프(`AggGeom` 형상 전부, `CollisionTraceFlag`, `bDoubleSidedGeometry`, 물리 머티리얼 등)를 쓴다. 없으면 `null`이다. level set 계열 형상은 info `LevelSetCollision`(개수)이고 Nanite 고해상도 원본은 info `HiResSourceSkipped`다(5.1절). 메시 설명을 기록으로 바꾸지 못하면 그 기록은 `null`이고 error `MeshSourceUnavailable`이다.
+7. **자기 시험.** `RocksExport.StaticMeshExtraction`(commandlet `-SelfTest`에도 포함)이 엔진 정육면체·구를 내보내고 LOD 수, LOD 0 원본의 수(압축한 메시 설명과 같음)·위상 배열 7개·위치 blob bytes(메시 설명 값과 같음)·엔진 속성 8종·`prepared`·`preparedBuild`를 확인한다. 추출 전후의 에셋 UPROPERTY 덤프, LOD별 원본 메시 설명 기록의 digest, 빌드 설정 lightmap 번호가 같은지로 "`prepared` 추출이 원본 설정을 바꾸지 않음"(12.2절)을 본다.
+8. **Rocks 쪽 왕복 확인.** 선택 시험 `UnrealExchange_ExternalBundle`(11.7절 18번)이 Ready 정적 메시의 `source`·`prepared`·`baked` 기록마다 blob을 `LoadExchangeBlob`으로 읽어 MA1 `MeshSource`(Add*·AddAttribute)로 적재하고 `ValidateMeshSource`를 통과하는지, MA2a `BuildStaticMeshLod`(기본 빌드 설정)가 성공하는지 본다. 이 적재 코드는 시험 안에만 있다. 임포터의 적재·모드 처리는 UX3b다. 수동 검증(2026-11-22): 엔진 BasicShapes 6개와 시험 프로젝트 메시 2개(OBJ로 임포트한 오각기둥 — n-gon 다각형 7개·삼각형 16개, 섹션 2개, 다각형 `PartName`, 볼록 충돌 / 구 사본에 축소 LOD 둘 — `generated`·`baked`)를 닫힘과 함께 내보낸 묶음(에셋 26개)을 두 번 내보내 `createdUtc` 말고 bytes가 같고, 리더가 18개 기록(원본 8·prepared 8·baked 2) 모두 적재·검증·빌드에 성공했다(경고는 시험이 슬롯 이름을 주지 않아 나는 `MaterialSlotFallback`뿐이다).
+
 ## 6. 스켈레톤·스킨 메시
 
 ### 6.1 스켈레톤
@@ -214,6 +227,19 @@ Rocks 임포트 모드(`--mesh-normals=`, ImportRecord `options`에 남는다):
 - **UE 준비 원본 없음.** 스킨 메시 빌더의 공개 API는 `Build(FSkeletalMeshRenderData&, …)` 하나이고(SkeletalMeshBuilder.h:40), 법선·tangent는 MeshDescription이 아니라 `FSkeletalMeshLODModel`에 계산된다(SkeletalMeshBuilder.cpp:295, 586). 그래서 정적 메시식 사본을 만들 수 없다. 스킨 메시는 `rocks` 모드(순수 원본 + UE 빌드 설정)만 지원한다.
 - **자동 생성 LOD**(`GetMeshDescription`이 nullptr — SkeletalMesh.h:533-538): `GetImportedModel()`(E/Classes/Engine/SkinnedAsset.h:299)의 `LODModels[i].Sections[s].SoftVertices`에서 정점·영향(`FSoftSkinVertex::InfluenceBones`·`InfluenceWeights`, uint16 × 12 — SkeletalMeshTypes.h:57-73)을 읽어 `baked`로 쓴다. 본 번호는 섹션 지역 번호라 `Section.BoneMap`으로 메시 본 번호로 바꾼다(SkeletalMeshLODModel.h:61, 75). morph는 `UMorphTarget::GetMorphLODModels()[i]`의 `FMorphTargetDelta`(MorphTarget.h:19-25, 239)에서 읽는다. 정점 색은 8비트라 손실이 있다(`BakedColorQuantized` 정보 진단).
 
+### 6.3 구현에서 정한 점(UX7a)
+
+UX7a(UE 쪽 스켈레톤·스킨 메시 추출, `FRocksSkeletonExtractor`·`FRocksSkeletalMeshExtractor`, `FRocksMeshDescriptionWriter` 확장) 중 6절이 정하지 않았거나 다르게 정한 점이다. 모두 권장안으로 확정했다.
+
+1. **본 배열.** 스켈레톤과 스킨 메시의 `data.bones`는 원본 계층(raw — 가상 본 제외)의 본마다 `{ "name", "exportName", "parent", "pose": { "translation": [x, y, z], "rotation": [x, y, z, w], "scale": [x, y, z] } }`다(pose는 UE `FTransform` double — 11.4절 `%.17g`). 스켈레톤만 본마다 `retargetMode`(UE `EBoneTranslationRetargetingMode` 값 이름 `Animation`·`Skeleton`·`AnimationScaled`·`AnimationRelative`·`OrientAndScale` — Rocks `BoneTranslationRetarget`와 같은 이름·순서)를 더한다. 회전은 UE 값 그대로이며 정규화는 Rocks 쪽(MeshAnimationAssets 6.4절 3 — 저장 전 정규화)이 한다.
+2. **스켈레톤 `data`·`settings`.** `data`는 `{ "bones", "curves" }`이고 `curves`는 `ForEachCurveMetaData`의 커브마다 `{ "name", "isMaterial", "isMorphTarget", "linkedBones": [본 이름], "maxLod" }`(이름 UTF-8 byte 순)다. 가상 본·소켓·슬롯 묶음·리타깃 원본·호환 스켈레톤·blend profile은 `settings`(USkeleton UPROPERTY 덤프 — `VirtualBones`·`Sockets`(하위 객체 펼침)·`SlotGroups`·`AnimRetargetSources`·`CompatibleSkeletons`·`BlendProfiles` 등)에 이름 그대로 있다. 같은 값을 `data`에 다시 쓰지 않는다(Rocks 대응은 UX7b).
+3. **스킨 메시 `data`·`settings`.** `data`는 `{ "bones", "lods" }`이고 LOD 항목은 `hasSource`(`HasMeshDescription`)·`source`(메시 설명 사본의 MeshSource 기록)·`generated`(= 원본 없음)·`baked`다. 스킨 메시에는 UE 준비 원본이 없으므로(6.2절) `prepared` 키를 두지 않는다. `settings`는 USkeletalMesh UPROPERTY 덤프(LOD 정보·빌드 설정·머티리얼 슬롯·스켈레톤·물리 에셋 참조·morph target 객체·가중치 프로필 등)다. **덤프는 LOD를 읽은 뒤에 한다.** UE는 메시 설명을 처음 읽을 때 `SourceModels`의 캐시(삼각형·정점 수, bounds, 가중치 프로필·morph 이름)를 채우므로, 먼저 덤프하면 같은 에셋을 이미 읽었는지(에디터 세션)에 따라 bytes가 달라진다.
+4. **스킨 속성(MeshSource 기록, 5.4절 2·3번에 더함).** 정점 `SkinWeights`·`SkinWeights-<profile>`(UE 이름과 같다)은 `BoneInfluences`(`boneInfluences` 배치 — 시작 표 + (본, 가중치) 쌍)이고 본 번호는 UE 원본 계층 번호, 가중치는 UE 16비트 값(`GetRawWeight`, 합 65535) 그대로, 순서는 UE 저장 순서다. 정점 `Morph-<이름>`(위치 변화량)은 그대로, UE 코너 쪽 `Morph-<이름>`(법선 변화량)은 코너 `MorphNormal-<이름>`(6.2절)이며 둘 다 `SparseVec3`(`sparseVec3` 배치 — 비트 단위 +0.0 셋인 항목은 빼고 번호 오름차순)다. 값 타입 `BoneInfluences`·`SparseVec3`를 기록 `type`에 더했다. UE 메시 설명의 본 요소·원본 부분(source geometry part)은 기록에 넣지 않는다(본은 `data.bones`).
+5. **`baked`(생성 LOD).** `GetImportedModel()->LODModels[i]`(6.2절)의 섹션 `SoftVertices`를 정점 = 코너로, `IndexBuffer`를 섹션별 삼각형으로 옮긴다(정적 메시 5.4절 5번과 같은 변환 — 공용 `FRocksBakedMesh`). 영향은 섹션 `BoneMap`으로 메시 본 번호로 바꾸고 가중치 0 칸은 버린다. morph는 각 `UMorphTarget::GetMorphLODModels()[i]`의 `SourceIdx`(렌더 정점 = baked 정점)·`PositionDelta`·`TangentZDelta`를 `Morph-`·`MorphNormal-`로 쓴다(morph 이름 순). 색은 8비트라 info `BakedColorQuantized`다(6.2절).
+6. **자기 시험.** `RocksExport.SkeletalExtraction`(commandlet `-SelfTest`에도 포함)이 엔진 튜토리얼 스킨 메시·스켈레톤을 내보내 본 수·이름·부모·`retargetMode` 존재, LOD 수, LOD 0 스킨 가중치 영향 수(시작 표 마지막 값)를 원본과 대조하고, 추출 전후 덤프가 같은지 본다(원본 메시 설명을 먼저 읽어 둔 상태 — 3번).
+7. **Rocks 쪽 왕복 확인.** 선택 시험 `UnrealExchange_ExternalBundle`이 스켈레톤을 MA4a `Skeleton`(본·리타깃 방식·커브)으로 채워 `ValidateSkeleton`을, 스킨 메시는 본 계층 `ValidateBoneHierarchy`, 묶음 안 스켈레톤 의존과의 `MergeBoneHierarchy` 판정, LOD 기록(source·baked)의 MeshSource 적재·`ValidateMeshSource`(본 수)·MA5a `BuildSkinnedMeshLod`를 확인한다.
+8. **수동 검증(2026-11-22).** 엔진 `SkeletalCube`·튜토리얼 `TutorialTPP`(본 68개)와 시험 프로젝트 콘텐츠 — 손으로 만든 glTF(관절 둘의 기둥, 섞인 가중치, morph target `Bulge`, 애니메이션)를 Interchange로 임포트한 스킨 메시·스켈레톤, 튜토리얼 메시 사본에 `regenerate_lod`로 만든 생성 LOD 둘 — 을 내보낸 묶음(에셋 14개, 물리 에셋은 범위 밖 Unsupported)을 두 번 내보내 `createdUtc` 말고 bytes가 같고, 리더가 스켈레톤 3개 검증, 스킨 메시 4개 병합 판정, LOD 기록 6개(원본 4·baked 2, morph 1개 포함) 적재·검증·스킨 빌드를 모두 통과했다.
+
 ## 7. 애니메이션 클립
 
 - 데이터 모델(`GetDataModelInterface()`, E/Classes/Animation/AnimSequenceBase.h:243-291): `GetFrameRate()`, `GetNumberOfFrames()`, `GetNumberOfKeys()`(= 프레임 수 + 1).
@@ -222,6 +248,19 @@ Rocks 임포트 모드(`--mesh-normals=`, ImportRecord `options`에 남는다):
 - 이벤트: `Notifies`의 `GetTriggerTime()`·`GetDuration()`, `TrackIndex`, `NotifyName`, notify 클래스 경로(`Notify` 또는 `NotifyStateClass`의 클래스), `NotifyTriggerChance`, 서버·follower 트리거 플래그. notify 객체의 프로퍼티도 `properties`로 덤프하지만 Rocks v1은 받지 않는다(버리고 경고 — MeshAnimationAssets 7.3절). `AnimNotifyTracks` 이름, `AuthoredSyncMarkers`.
 - 설정: MeshAnimationAssets 7.1절 표의 UE 프로퍼티(additive·root motion·interpolation·RateScale·bLoop·PlatformTargetFrameRate·RetargetSource). `RefPoseSeq`는 Hard 의존으로 기록한다.
 - animated bone attribute는 개수만 진단으로 남긴다.
+
+### 7.1 구현에서 정한 점(UX8a)
+
+UX8a(UE 쪽 애니메이션 클립 추출, `FRocksAnimSequenceExtractor`) 중 7절이 정하지 않았거나 다르게 정한 점이다. 모두 권장안으로 확정했다.
+
+1. **`data` 스키마.** `{ "frameRate": { "numerator", "denominator" }, "frameCount", "keyCount", "boneTracks", "curves", "transformCurves", "events", "eventTracks", "syncMarkers" }`다. 본 트랙은 데이터 모델 트랙 순서(`GetBoneTrackNames`)의 `{ "bone", "translation", "rotation", "scale" }`이고 성분마다 blob 하나(`f32`, 이동·크기 components 3, 회전 4 — x·y·z·w, count = 키 수 또는 모든 키가 비트 단위로 같으면 1)다. 값은 `GetBoneTrackTransforms`의 double `FTransform`을 float로 바꾼 것이다(7절). 정렬·이름 대소문자 접기는 Rocks `StoreClipSource`가 한다(MeshAnimationAssets 7.5절 6).
+2. **커브.** float 커브는 `{ "name", "flags", "curve" }`, transform 커브는 `{ "name", "flags", "channels": [커브 9개 — 이동 x·y·z, 회전 x·y·z, 크기 x·y·z] }`다. 커브 객체는 `{ "keys": [{ "interpMode", "tangentMode", "tangentWeightMode", "time", "value", "arriveTangent", "arriveTangentWeight", "leaveTangent", "leaveTangentWeight" }], "preInfinityExtrap", "postInfinityExtrap", "defaultValue" }`이고 열거는 UE 값 이름(`RCIM_Cubic`·`RCTM_Auto`·`RCTWM_WeightedNone`·`RCCE_Constant` 등), `flags`는 UE `EAnimAssetCurveFlags` 비트 그대로(`AACF_Editable` 0x04·`AACF_Metadata` 0x10·`AACF_Disabled` 0x40 — Rocks `editable`·`metadata`·`disabled`로 옮기는 것은 임포트), `defaultValue`는 UE 값 그대로다(UE "기본값 없음"은 float 최대값 — Rocks `Optional` 비움으로 옮기는 것은 임포트). `RCTM_SmartAuto`는 Rocks에 없어 임포트가 `Auto`로 본다(UX8b에서 확정).
+3. **이벤트.** notify마다 `{ "time", "duration", "track", "name", "type", "triggerChance", "triggerOnDedicatedServer", "triggerOnFollower", "properties" }`다. `time`·`duration`은 `GetTriggerTime()`·`GetDuration()`(link 방식을 계산한 절대 값 — MeshAnimationAssets 7.3절), `type`은 notify 또는 notify state 객체의 클래스 경로(없으면 `null`), `properties`는 그 객체의 UPROPERTY 덤프(Rocks v1은 받지 않고 `EventPropertiesDropped` — 7절)다. 순서는 UE `Notifies` 순서이고 정렬은 Rocks(`SortClipEvents`)가 한다. `eventTracks`는 `AnimNotifyTracks` 이름, `syncMarkers`는 `AuthoredSyncMarkers`의 `{ "name", "time", "track" }`다.
+4. **`settings`.** UAnimSequence UPROPERTY 덤프(additive·root motion·interpolation·`RateScale`·`bLoop`·`PlatformTargetFrameRate`·`RetargetSource`·`RefPoseSeq`·압축 설정 참조 등)다. 데이터 모델(`DataModelInterface`·`DataModel` — 시퀀서 채널을 담은 하위 객체)은 `data`에 풀어 쓰므로 덤프에서 뺀다. `RefPoseSeq`·스켈레톤 참조는 의존에 합쳐진다(압축 설정 에셋은 범위 밖 의존).
+5. **진단.** animated bone attribute는 info `AnimatedBoneAttributes`(개수), 데이터 모델이 없으면 error `NoAnimationData`다.
+6. **자기 시험.** `RocksExport.AnimationExtraction`(commandlet `-SelfTest`에도 포함)이 엔진 튜토리얼 걷기 클립을 내보내 비율·프레임·키 수, 본 트랙 이름·순서, 모든 트랙의 회전 blob이 데이터 모델 키의 float 변환과 bytes가 같은지, `settings`에 데이터 모델이 없는지, 추출 전후 덤프가 같은지 본다.
+7. **Rocks 쪽 왕복 확인.** 선택 시험 `UnrealExchange_ExternalBundle`이 클립마다 본 트랙을 MA6a `ClipSource`로 적재해 `ValidateClipSource`, 키 시간 `SampleClipSource`가 키 값과 비트로 같은지, 커브를 `ClipCurve`(`TangentCurve`)로 옮기고 이벤트·이벤트 트랙·동기 마커를 `AnimationClip`에 담아 정렬 뒤 `ValidateAnimationClip`, 묶음 안 스켈레톤으로 원본 비율·두 배 비율 `BuildClipPlayback`과 쿠킹 샘플링(`SampleClipPlayback`)이 성공하는지 본다.
+8. **수동 검증(2026-11-22).** 엔진 튜토리얼 클립 둘(대기 188프레임·걷기 55프레임, 본 68개), 시험 프로젝트의 걷기 사본(notify 트랙 둘, notify `AnimNotify_PlaySound` 하나, notify state `AnimNotifyState_TimedParticleEffect` 하나, 동기 마커 둘, float 커브 하나 — Python `AnimationLibrary`로 더함), glTF로 임포트한 기둥 클립(morph 커브 `Bulge`)을 닫힘과 함께 내보낸 묶음(에셋 6개)을 두 번 내보내 `createdUtc` 말고 bytes가 같고, 리더가 클립 4개 모두 위 7번을 통과했다(키 불일치 0, 모르는 본 트랙 0).
 
 ## 8. 머티리얼
 
@@ -273,6 +312,21 @@ UE 5.8은 엔진 기본이 Substrate 꺼짐이지만(`r.Substrate` 기본 0 — 
   3. `baked`도 없으면 엔진 기본 머티리얼을 부모로 둔 `MaterialInstance`로 저장하고 `UntranslatedMaterialNode` 경고(노드 클래스 목록)를 낸다. 자리 노드가 든 그래프로 저장하지 않는 이유: 출력에 닿은 자리 노드는 쿠킹 오류이고(MaterialSystem 5.4절 V12), 쿠킹은 하나라도 실패하면 게시하지 않으므로(AssetSystem 10절) 머티리얼 하나가 프로젝트 쿠킹 전체를 막는다.
 - 인스턴스는 부모가 1번으로 번역되었으면 override를 Rocks 파라미터 키로 옮긴다. 부모가 2·3번이면 인스턴스도 같은 결과를 따른다(2번이면 그 인스턴스용 구운 텍스처가 필요하므로 플러그인이 인스턴스도 굽는다).
 - 번역 결과 확인: `resolved` 파라미터 값과 Rocks 인스턴스 해석 결과를 대조한다(다르면 `ParameterResolveMismatch` 경고).
+
+### 8.6 구현에서 정한 점(UX4a)
+
+UX4a(UE 쪽 머티리얼 계열 추출, `FRocksMaterialExtractor`) 중 8.1·8.2절이 정하지 않았거나 다르게 정한 점이다. 모두 권장안으로 확정했다. 번역(8.5절)·Substrate 번역(8.3절)·굽기(8.4절)는 하지 않는다.
+
+1. **노드 식별자는 객체 이름이다(8.1절을 고침).** 8.1절은 연결을 대상 노드 GUID(`MaterialExpressionGuid`)로 정했지만 엔진 콘텐츠에서도 GUID가 겹치는 노드가 흔하다(내보낸 엔진 그래프 29개 중 11개, `M_Grid`는 노드 91개 중 13개가 다른 노드와 GUID가 같다 — 같은 클래스 노드끼리 겹치므로 복사한 노드가 GUID를 물려받은 것으로 보인다). UObject 이름은 같은 Outer(그 머티리얼·함수) 안에서 UE가 유일하게 보장하므로 노드마다 `name`(예: `MaterialExpressionAdd_3`)을 쓰고 연결 `from.node`는 그 이름이다. `guid`는 노드 속성으로 남긴다. 8.5절 "GUID 순으로 첫 노드"는 GUID가 같으면 이름 순으로 정한다(UX4b).
+2. **`data` 스키마.** Material은 `{ "nodes", "outputs" }`, MaterialFunction은 `{ "nodes" }`, MaterialInstanceConstant는 `{ "resolved" }`, MaterialFunctionInstance·MaterialParameterCollection은 `{}`다(settings 덤프가 전부다 — 함수 인스턴스의 부모·override, 컬렉션의 scalar·vector 파라미터 이름·`Id`·기본값). 노드는 `{ "guid", "name", "class", "position": [x, y], "inputs", "outputs", "properties" }`이고 expression 다음 comment 순(각자 UE 배열 순서)이다. 입력은 `CountInputs`·`GetInput`·`GetInputName` 순서의 `{ "name", "from": { "node", "output" } | null, "mask": [r, g, b, a] | null }`(mask는 연결이 있고 `Mask`가 켜졌을 때만), 출력은 `GetOutputs()`의 `{ "name"(None이면 ""), "mask" }`다. `properties`는 노드 UPROPERTY 덤프에서 소유 역참조(`Material`·`Function`), 위치·GUID·`Outputs`(노드 키로 따로 쓴다), 입력 구조체(`FExpressionInput` 계열 — 덤퍼 공통 규칙, 11.7절)를 뺀 것이다. 함수 호출의 `MaterialFunction`, 텍스처·컬렉션 참조는 `{ "objectPath" }`라 의존에 합쳐지고, 노드끼리 참조(이름 있는 reroute의 `Declaration` 등)는 `{ "subobject": 노드 이름 }`이다. Custom 노드의 include 파일은 info `CustomIncludeSkipped`(파일 수)다.
+3. **출력 핀.** `UMaterialEditorOnlyData`의 핀 프로퍼티를 선언 순으로 쓴다. 핀 구조체는 `FMaterialInput` 계열이고 `MaterialAttributes`만 `FExpressionInput` 계열이다(EP/Materials/Material.h:157-265, 333-413). `bUseMaterialAttributes`면 `MaterialAttributes` 하나, 아니면 나머지 전부다(29개 — 고정 배열 `CustomizedUVs[8]`은 칸마다 `CustomizedUVs[0]`…`[7]`). 핀은 `{ "name", "from", "mask", "constant" }`이고 `constant`는 `UseConstant`가 켜졌을 때 핀 구조체가 직접 선언한 상수 칸(`Constant` 하나면 그 값, `FVector2MaterialInput`은 `[ConstantX, ConstantY]`), 아니면 `null`이다.
+4. **`settings`.** 객체 UPROPERTY 덤프에서 그래프 묶음(`FMaterialExpressionCollection` — 노드·comment 배열)과 핀(`FMaterialInput` 계열)을 뺀다. 노드는 settings 덤프 전에 "펼친 객체"로 표시해서 settings에서 노드를 만나도 `{ "subobject" }`만 쓴다(노드 본문은 `data.nodes`에만 있다). `UMaterialEditorOnlyData` 하위 객체(파라미터 그룹, `SubstrateConversionVersion` 등)는 settings에 남는다. 인스턴스 settings에는 `Parent`, override 배열 9종, `StaticParametersRuntime`, `BasePropertyOverrides`, 에디터 데이터의 static 파라미터가 들어간다.
+5. **`resolved`.** `GetAllParametersOfType`을 `EMaterialParameterType` 전 종류(Scalar·Vector·DoubleVector·Texture·TextureCollection·Font·RuntimeVirtualTexture·SparseVolumeTexture·StaticSwitch·ParameterCollection·StaticComponentMask — EP/Materials/MaterialParameters.h:187-205)로 부른 결과다. 항목은 `{ "parameter": FMaterialParameterInfo 덤프(Name·Association·Index), "type": 종류 이름, "value" }`이고 값은 scalar 수, vector·double vector 4개, switch bool, component mask bool 4개, 텍스처 계열·컬렉션 `{ "objectPath" }` 또는 `null`, font `{ "font", "page" }`다. 종류 이름은 플러그인 표로 쓴다(`StaticComponentMask`가 `NumRuntime`과 같은 값이라 UEnum 값 조회는 `NumRuntime`을 낸다). 순서는 `parameter`의 compact JSON bytes 순, 같으면 종류 번호 순이다(8.2절 "파라미터 키 순"의 결정적 형태).
+6. **Substrate.** 그래프는 에디터 메모리 그대로 쓴다. Substrate 노드도 다른 노드와 같은 형식으로 덤프하고 플러그인은 따로 진단하지 않는다(8.3절 — 판정은 Rocks 번역). 판단 근거인 `projectSettings.substrate`(bundle.json)와 `SubstrateConversionVersion`(settings의 에디터 데이터)이 묶음에 있다.
+7. **자기 시험.** `RocksExport.MaterialExtraction`(commandlet `-SelfTest`에도 포함)이 엔진 `M_Grid`(함수 호출·이름 있는 reroute·파라미터, GUID 겹침 포함), 인스턴스 사슬 `Widget3DPassThrough_Translucent_OneSided`, 컬렉션 참조 머티리얼 `M_RenderNormalizedDepth_01`을 내보내 노드 수·순서·이름·클래스, 모든 입력 연결(대상 이름·출력 번호)을 UE 그래프와, `BaseColor` 핀 연결을 UE 핀과 대조하고, 출력 핀이 개별 핀인지, settings에 노드·핀이 펼쳐지지 않았는지, 함수·컬렉션·부모 참조가 dependencies에 있는지, `resolved` 수가 `GetAllParametersOfType` 전 종류의 합이고 scalar 값이 `GetScalarParameterValue`와 같은지, 추출 전후 덤프가 같은지 본다.
+8. **Rocks 쪽 확인.** 받는 MaterialSystem 클래스가 아직 없으므로 선택 시험 `UnrealExchange_ExternalBundle`은 머티리얼 계열 Ready 기록의 구조 불변식만 본다: 노드 모양, 노드 이름 유일, 모든 연결(노드 입력·머티리얼 출력 핀)의 대상 노드가 있고 출력 번호가 그 노드 `outputs` 범위 안, mask가 `null` 또는 0·1 넷, 출력 핀 이름 유일, 함수 호출의 함수와 인스턴스 부모가 dependencies에 있음, settings·data의 모든 `{ "objectPath" }`가 dependencies에 있음, `resolved` 항목 모양. 노드 이름이나 출력 번호를 바꾼 묶음 사본은 이 검사에서 실패한다.
+9. **함수 인스턴스 시험 콘텐츠 없음.** 엔진 콘텐츠에 MaterialFunctionInstance가 없고, Python에서는 만들 수 없다(`MaterialFunctionInstanceFactory`의 `InitialParent`가 스크립트에 노출되지 않고 `UMaterialFunctionInstance::SetParent`는 C++ 전용이다). 함수 인스턴스는 settings 덤프만 쓰는 경로라 추출 코드는 MPC와 같다. 실제 콘텐츠로 확인하는 일은 UX4b(번역)에서 시험 콘텐츠를 C++로 만들 때 한다.
+10. **수동 검증(2026-11-22).** 엔진 머티리얼 5개 선택(`M_Grid`, `M_RenderNormalizedDepth_01`·`M_RenderMotionVectors` — MPC `MPC_R2T` 참조, `Widget3DPassThrough_Translucent_OneSided`·`TranslucentLaserPointerMaterialInst` — 인스턴스 사슬 2단)을 닫힘과 함께 내보낸 묶음(에셋 46개 — Material 5·MaterialFunction 24·MaterialInstanceConstant 4·MPC 1·텍스처 12)을 두 번 내보내 `createdUtc` 말고 bytes가 같고, 리더가 머티리얼 계열 34개 모두 위 8번을 통과했다(노드 1,046개 연결 전부 해석). 정적 메시·스킨 메시 묶음을 다시 내보내 그 안의 엔진 머티리얼(`WorldGridMaterial`, Interchange 기본 머티리얼·함수, 튜토리얼 캐릭터 머티리얼)도 통과했다. 교환 범위 밖 의존(`TextureRenderTarget2D` 등)은 기존대로 의존에만 남는다.
 
 ## 9. 식별·경로·의존
 
@@ -498,22 +552,25 @@ UX1b 구현(`Extras/UnrealExport/RocksExport/` — 플러그인 골격·commandl
 
 ## 14. 단계
 
-ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으며 착수는 사용자가 정한다. 사용자 지시(2026-11-21 "진행 가능한거부터")에 따라 UX1의 Rocks 리더 부분을 UX1a로 떼어 먼저 한다. UE 플러그인은 소스 빌드 없이 Launcher 설치판을 C:에 받아 빌드한다(사용자 결정 2026-11-20). 사용자가 UE 5.8.4 설치판을 받았으므로(2026-11-22) UX1의 UE 쪽을 UX1b로, Rocks 임포트 연결을 UX1c로 나눈다. UX2 이후 단계도 UE 추출 쪽은 Rocks 리더 왕복으로 검증해 Rocks 임포트(에셋 시스템 A2f–A5·MA b 단계)보다 먼저 할 수 있다. 그래서 텍스처·정적 메시는 추출(UX2a·UX3a, UE)과 임포트(UX2b·UX3b, Rocks)로 나눈다(개정 10, 사용자 지시 "진행 가능한거부터").
+ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으며 착수는 사용자가 정한다. 사용자 지시(2026-11-21 "진행 가능한거부터")에 따라 UX1의 Rocks 리더 부분을 UX1a로 떼어 먼저 한다. UE 플러그인은 소스 빌드 없이 Launcher 설치판을 C:에 받아 빌드한다(사용자 결정 2026-11-20). 사용자가 UE 5.8.4 설치판을 받았으므로(2026-11-22) UX1의 UE 쪽을 UX1b로, Rocks 임포트 연결을 UX1c로 나눈다. UX2 이후 단계도 UE 추출 쪽은 Rocks 리더 왕복으로 검증해 Rocks 임포트(에셋 시스템 A2f–A5·MA b 단계)보다 먼저 할 수 있다. 그래서 텍스처·정적 메시는 추출(UX2a·UX3a, UE)과 임포트(UX2b·UX3b, Rocks)로 나눈다(개정 10, 사용자 지시 "진행 가능한거부터"). 스켈레톤·스킨 메시도 같이 UX7a·UX7b로, 애니메이션 클립도 UX8a·UX8b로 나눈다(개정 12·13).
 
 | 단계 | 쪽 | 내용 | 선행 |
 |---|---|---|---|
 | UX1a | Rocks | 묶음 형식 v1 리더·검증(JSON 스키마·blob SHA-256·크기), 경로 대응·이름 보정, 위상 정렬(SCC), 손으로 만든 묶음 fixture와 변조 시험 — 에셋 DB에 쓰지 않는 부분. **구현**(2026-11-21, 10.4절) | MA1(원본 메시 형태 확인용), 엔진 플러그인 빌드 지원(BuildTargets 3.6절) |
 | UX1b | UE | 플러그인 골격(11절 — Editor 모듈, commandlet `-run=RocksExport`, 메뉴, 묶음 writer, 자체 SHA-256, 숫자 서식, UPROPERTY 덤프, 닫힘, redirector)과 에셋 JSON 공통부. 설치판 엔진에 대고 `RunUAT BuildPlugin`으로 빌드하고, 엔진 콘텐츠를 내보낸 묶음을 UX1a 리더로 읽어 왕복 검증한다(에셋 종류별 본문은 UX2 이후). **구현**(2026-11-22, 11.7절) | UX1a, UE 5.8 Launcher 설치판(C:) |
 | UX1c | Rocks | 임포트 프레임워크 연결, 기존 에셋 조회 `ExchangeExistingAssets`(태그 `UnrealExchange.ObjectPath`) 구현, `--only` 닫힘, Commandlet 명령 `asset-import-unreal` 등록 | UX1b, A2f(AssetDatabase 임포트 프레임워크) |
-| UX2a | UE | 텍스처 추출(4절 — 원본 mip 사슬 blob, 형식·감마·손실 원본 표시, 설정 덤프). Rocks 리더 왕복(묶음·blob 검사)과 UE 자기 시험(blob과 `FTextureSource` 원본 대조)으로 검증한다 | UX1b |
+| UX2a | UE | 텍스처 추출(4절 — 원본 mip 사슬 blob, 형식·감마·손실 원본 표시, 설정 덤프). Rocks 리더 왕복(묶음·blob 검사)과 UE 자기 시험(blob과 `FTextureSource` 원본 대조)으로 검증한다. **구현**(2026-11-22, 4.5절) | UX1b |
 | UX2b | Rocks | 텍스처 임포트(4.2절 형식 대응, 4.3절 `LossySource`·`--allow-lossy-origin`, 4.4절 설정 대조) | UX2a, UX1c, A5 |
-| UX3a | UE | 정적 메시 추출(5절 — `source`·`prepared`·생성 LOD·충돌, 5.2절 `MeshSource` 기록). Rocks 리더 왕복과 MA1 `MeshSource` 적재·검증으로 확인한다 | UX1b |
+| UX3a | UE | 정적 메시 추출(5절 — `source`·`prepared`·생성 LOD·충돌, 5.2절 `MeshSource` 기록). Rocks 리더 왕복과 MA1 `MeshSource` 적재·검증으로 확인한다. **구현**(2026-11-22, 5.4절) | UX1b |
 | UX3b | Rocks | 정적 메시 임포트(5.1·5.3절 모드, `bakedSource`) | UX3a, UX1c, MeshAnimationAssets MA2b–MA3 |
-| UX4 | 둘 다 | 머티리얼·인스턴스·함수·컬렉션 추출, 옛 출력 핀 그래프 번역 표 1차, 파라미터 병합, 대체 규칙 3번 | UX2b, MaterialSystem MS3·MS6 |
-| UX5 | 둘 다 | Substrate 그래프 번역(8.3절) | UX4 |
-| UX6 | 둘 다 | 굽기 대체(8.4절)와 "구운 표면" 내장 머티리얼, 대체 규칙 2번 | UX4 |
-| UX7 | 둘 다 | 스켈레톤·스킨 메시(6절, 생성 LOD 복원 포함) | UX3b, MA4b–MA5 |
-| UX8 | 둘 다 | 애니메이션 클립(7절) | UX7, MA6 |
+| UX4a | UE | 머티리얼·인스턴스·함수·컬렉션 추출(8.1·8.2절 — 그래프·출력 핀·인스턴스 `resolved`·설정 덤프, Substrate 그래프도 그대로 덤프). Rocks 리더 왕복과 그래프 구조 불변식으로 확인한다. **구현**(2026-11-22, 8.6절) | UX1b |
+| UX4b | Rocks | 머티리얼 임포트: 옛 출력 핀 그래프 번역 표 1차, 파라미터 병합, 대체 규칙 3번(8.5절) | UX4a, UX2b, MaterialSystem MS3·MS6 |
+| UX5 | 둘 다 | Substrate 그래프 번역(8.3절) | UX4b |
+| UX6 | 둘 다 | 굽기 대체(8.4절)와 "구운 표면" 내장 머티리얼, 대체 규칙 2번 | UX4b |
+| UX7a | UE | 스켈레톤·스킨 메시 추출(6절 — 본 계층·커브, 스킨 가중치·morph, 생성 LOD 복원). Rocks 리더 왕복과 MA4a 스켈레톤 검증·병합 판정, MA5a 스킨 빌드로 확인한다. **구현**(2026-11-22, 6.3절) | UX3a |
+| UX7b | Rocks | 스켈레톤·스킨 메시 임포트(본 병합 저장, 슬롯·소켓·가중치 프로필 대응) | UX7a, UX3b, MA4b–MA5 |
+| UX8a | UE | 애니메이션 클립 추출(7절 — 본 트랙·커브·이벤트·동기 마커). Rocks 리더 왕복과 MA6a 원본 검증·샘플링·쿠킹 v1 변환으로 확인한다. **구현**(2026-11-22, 7.1절) | UX7a |
+| UX8b | Rocks | 애니메이션 클립 임포트(커브 열거·플래그 대응, 이벤트 속성 버림 경고, 스켈레톤 Build 의존) | UX8a, UX7b, MA6 |
 
 ## 15. 결정 사항
 
@@ -536,7 +593,7 @@ ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으�
 
 | 항목 | 확인 시점 |
 |---|---|
-| UE가 같은 이름 파라미터 노드의 기본값이 다를 때 쓰는 값 | UX4 |
+| UE가 같은 이름 파라미터 노드의 기본값이 다를 때 쓰는 값 | UX4b |
 | 정적 메시 정점 버퍼 생성의 퇴화·용접 임계값 상수 값(Rocks 상수로 옮김) | MA2·UX3b |
 
 ## 17. 개정 이력
@@ -551,6 +608,10 @@ ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으�
 - 개정 8(2026-11-22): UX1b를 UE 쪽(플러그인 골격·writer·리더 왕복 검증)과 UX1c(Rocks 임포트 연결·기존 에셋 조회·Commandlet 명령)로 나눴다. UX2 이후 추출 쪽은 Rocks 임포트보다 먼저 할 수 있다고 적었다. UE 설치판 받음(2026-11-22).
 - 개정 9(2026-11-22): UX1b를 구현했다(`Extras/UnrealExport/RocksExport/` — Editor 모듈, commandlet `-run=RocksExport`, 메뉴, 묶음 writer, SHA-256, 숫자 서식, UPROPERTY 덤프, 닫힘·redirector, 에셋 JSON 공통부, 자기 시험). 구현에서 정한 점을 11.7절에 적었다: UX1b 의존 목록은 AssetRegistry 패키지 의존(3.5절에 더함), 범위 밖 선택·클래스 대응, 에셋 여럿인 패키지는 내보내지 않음(형식 v1 한계), 원자적 쓰기, 덤프 세부, 플러그인 진단 코드, `engineCommit`은 changelist. 모듈 의존은 쓰는 단계에서 더한다(11.1절). 엔진 콘텐츠(`/Engine/BasicShapes/...`)와 redirector가 있는 시험 콘텐츠를 내보내 Rocks 리더(EngineTests 선택 시험 `UnrealExchange_ExternalBundle`)로 읽었다.
 - 개정 10(2026-11-22): UX2·UX3을 UE 쪽 추출(UX2a·UX3a, 선행 UX1b)과 Rocks 쪽 임포트(UX2b·UX3b)로 나눴다(사용자 지시 "진행 가능한거부터"). UX4·UX7 선행을 임포트 단계로 고쳤다. UX2a(텍스처 추출)를 구현하고 정한 점을 4.5절에 적었다: `data.source` 스키마, mip·층별 blob 배치, `settings` 덤프에서 `Source` 제외, 손실 원본은 표시만, 본문 조각 조립.
+- 개정 11(2026-11-22): UX3a(정적 메시 추출)를 구현하고 정한 점을 5.4절에 적었다: `data.lods`·`collision` 스키마(LOD 설정은 `settings.SourceModels`), MeshSource 기록 형식(위상 blob 7개·속성 배치·요소·타입 이름), UE 속성 대응·보존 규칙(UE 위치 이름 `"Position "`), `prepared` 사본 처리, 생성 LOD `baked` 변환, BodySetup 덤프, 진단, 자기 시험과 Rocks 쪽 MeshSource 적재·검증·빌드 확인.
+- 개정 12(2026-11-22): UX7을 UE 쪽 추출 UX7a(선행 UX3a)와 Rocks 쪽 임포트 UX7b로 나눴다. UX7a(스켈레톤·스킨 메시 추출)를 구현하고 정한 점을 6.3절에 적었다: 본 배열·리타깃 방식·커브 스키마, 스킨 메시 `data`(준비 원본 없음), settings 덤프를 LOD를 읽은 뒤에 하는 이유(UE 캐시), MeshSource 기록의 `BoneInfluences`·`SparseVec3` 속성, LOD 모델 기반 `baked`, 자기 시험과 Rocks 쪽 스켈레톤 검증·병합 판정·스킨 빌드 확인.
+- 개정 13(2026-11-22): UX8을 UE 쪽 추출 UX8a(선행 UX7a)와 Rocks 쪽 임포트 UX8b로 나눴다. UX8a(애니메이션 클립 추출)를 구현하고 정한 점을 7.1절에 적었다: `data` 스키마(본 트랙 성분 blob·상수 접기), 커브·transform 커브 객체(UE 열거 이름·플래그 비트·기본값 그대로), 이벤트(계산한 절대 시간·종류 클래스·속성 덤프)·이벤트 트랙·동기 마커, settings 덤프에서 데이터 모델 제외, 자기 시험과 Rocks 쪽 MA6a 원본 검증·샘플링·클립 검증·쿠킹 변환 확인.
+- 개정 14(2026-11-22): UX4를 UE 쪽 추출 UX4a(선행 UX1b)와 Rocks 쪽 임포트 UX4b(번역 표·파라미터 병합·대체 규칙 3번)로 나누고 UX5·UX6 선행을 UX4b로 고쳤다. UX4a(머티리얼 계열 추출)를 구현하고 정한 점을 8.6절에 적었다: 노드 식별자를 GUID에서 객체 이름으로 바꿈(엔진 콘텐츠의 GUID 겹침 — 8.1절을 고침), `data` 스키마(노드·입력·출력·properties 제외 규칙), 출력 핀(`FMaterialInput` 계열, `bUseMaterialAttributes` 선택, 상수 칸), settings 제외(그래프 묶음·핀, 노드 미펼침), `resolved` 형식·순서·종류 이름 표, Substrate 그대로 덤프, 자기 시험과 Rocks 쪽 구조 불변식 검사, 함수 인스턴스 시험 콘텐츠 없음.
 
 ## 18. 교차 검증 기록(개정 2)
 

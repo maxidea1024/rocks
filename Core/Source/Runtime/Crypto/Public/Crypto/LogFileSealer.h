@@ -56,7 +56,7 @@ inline constexpr usize LogFilePublicKeyBytes = 1216;
 inline constexpr usize LogFilePrivateKeyBytes = 32;
 
 // 개발자 공개키로 로그 파일을 봉인한다. 한 FileLogSink가 쓴다(호출은 sink가 직렬화한다).
-class LogFileSealer final : public LogFileCipher {
+class ROCKS_CRYPTO_API LogFileSealer final : public LogFileCipher {
 public:
     // recipientPublicKey는 X-Wing 공개키(LogFilePublicKeyBytes)다. 복사한다. 길이가 틀리면 생성은
     // 되지만 TryWriteHeader가 InvalidArgument로 실패한다(호스트가 실수로 평문 sink를 쓰지 않게,

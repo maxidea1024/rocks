@@ -68,6 +68,8 @@ public:
         module_ = module;
     }
     bool IsAlive(uint64 handle) noexcept override;
+    // 유지 자원을 멈춘다: `release #n` 기록, 그 객체는 죽은 것으로 둔다.
+    void ReleaseHeld(uint64 handle) noexcept override;
     VmFaultKind GetContext(VmHostCall& call) noexcept override;
     VmFaultKind GetField(VmHostCall& call, uint64 object) noexcept override;
     VmFaultKind SetField(VmHostCall& call, uint64 object) noexcept override;

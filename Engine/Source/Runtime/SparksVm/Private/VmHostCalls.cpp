@@ -130,12 +130,22 @@ VmFaultKind VmExecution::CallHost(Opcode op, uint32 word, uint32 extra, const Ba
                             : op == Opcode::GetFR || op == Opcode::SetFR ? 1
                                                                          : 2;
         const uint64 object = get ? banks.r[bb] : banks.r[a];
+        // 유지 자원 필드 쓰기가 저장 전에 실패하면 새 자원(우변 — 고정되지 않은 임시 레지스터)을
+        // 멈춘다(누수 방지 — LC6d1 리뷰 B4). keep은 필드에 이미 같은 값이 있는 경우다.
+        const VmLinkedModule::LocalField& local = link_->localFields_[DecodeAx(extra)];
+        auto dropNew = [&](uint64 keep) noexcept {
+            if (!get && local.held && bank == static_cast<uint32>(BytecodeBank::Ref) &&
+                banks.r[bb] != 0 && banks.r[bb] != keep) {
+                host->ReleaseHeld(banks.r[bb]);
+                banks.r[bb] = 0;
+            }
+        };
         if (!Alive(object)) {
+            dropNew(0);
             return VmFaultKind::ContractViolation; // 꺼낸 참조에만 낸다(6.2절)
         }
 
         // 같은 모듈 Sparks 클래스 필드: session instance 저장소(SparksRuntime 2.2절).
-        const VmLinkedModule::LocalField& local = link_->localFields_[DecodeAx(extra)];
         if (local.classIndex != NoBytecodeIndex) {
             uint64* values = nullptr;
             VmBuffer** buffers = nullptr;
@@ -144,7 +154,14 @@ VmFaultKind VmExecution::CallHost(Opcode op, uint32 word, uint32 extra, const Ba
             if (session_ == nullptr ||
                 !session_->FieldSlots(object, *link_, local.classIndex, bank, local.offset, c,
                                       values, buffers, instance, where)) {
+                dropNew(0);
                 return VmFaultKind::ContractViolation;
+            }
+
+            // instance 메모리 예산(SparksRuntime 2.6절 — Buf 필드 쓰기에서 거부).
+            if (!get && bank == static_cast<uint32>(BytecodeBank::Buf) &&
+                !session_->FitsInstanceMemory(instance, where, banks.b[bb])) {
+                return VmFaultKind::BudgetExceeded;
             }
 
             // 쓰기 전에 조각의 시작 값을 기록한다(Changed — SparksRuntime 2.3절).
@@ -152,8 +169,17 @@ VmFaultKind VmExecution::CallHost(Opcode op, uint32 word, uint32 extra, const Ba
                 const VmFaultKind noted =
                     session_->NoteWrite(instance, *link_, DecodeAx(extra), bank, where, c, error);
                 if (noted != VmFaultKind::None || error != ErrorCode::None) {
+                    dropNew(bank == static_cast<uint32>(BytecodeBank::Ref) ? values[0] : 0);
                     return noted;
                 }
+            }
+
+            // 유지 자원 필드: 새 자원(우변 — 이미 획득)을 저장하기 전에 이전 값을 멈춘다(획득 →
+            // 이전 해제 → 저장, SL 7.1절).
+            if (!get && local.held && bank == static_cast<uint32>(BytecodeBank::Ref) &&
+                values[0] != 0 && values[0] != banks.r[bb]) {
+                host->ReleaseHeld(values[0]);
+                values[0] = 0;
             }
 
             const uint32 at = get ? a : bb;

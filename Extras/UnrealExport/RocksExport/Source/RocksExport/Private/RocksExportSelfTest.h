@@ -28,6 +28,24 @@ namespace RocksExportSelfTest
 	// SHA-256·bytes·blob 파일 내용을 대조하고, data.source 표와 settings(Source 제외), 손실 원본 표시를 확인한다.
 	void RunTextureExtraction(TArray<FString>& Errors);
 
+	// 정적 메시 추출(5.4절): 엔진 메시를 내보내 LOD 수·원본 수·위치 blob·엔진 속성·prepared를 확인하고, 추출 전후의
+	// 에셋 덤프·원본 메시 digest·빌드 설정 lightmap 번호가 같은지(12.2절 — prepared가 원본 설정을 바꾸지 않음) 본다.
+	void RunStaticMeshExtraction(TArray<FString>& Errors);
+
+	// 스켈레톤·스킨 메시 추출(6.3절): 튜토리얼 스킨 메시와 스켈레톤을 내보내 본 계층(수·이름·부모·리타깃 방식), LOD 수,
+	// LOD 0 스킨 가중치 영향 수를 원본과 대조하고 추출 전후 덤프가 같은지 본다.
+	void RunSkeletalExtraction(TArray<FString>& Errors);
+
+	// 애니메이션 추출(7.1절): 튜토리얼 걷기 클립을 내보내 비율·프레임·키 수, 본 트랙 이름·순서, 회전 blob을 데이터
+	// 모델 값과 대조하고, settings에 데이터 모델이 없고 추출 전후 덤프가 같은지 본다.
+	void RunAnimationExtraction(TArray<FString>& Errors);
+
+	// 머티리얼 추출(8.6절): 엔진 머티리얼(함수 호출·이름 있는 reroute·파라미터)·인스턴스 사슬·컬렉션 참조 머티리얼을
+	// 내보내 노드 수·이름·연결(입력과 출력 핀)을 UE 그래프와 대조하고, settings에 노드·핀이 펼쳐지지 않았는지, 함수·
+	// 컬렉션·부모 참조가 dependencies에 있는지, resolved가 GetAllParametersOfType 결과와 같은지, 추출 전후 덤프가
+	// 같은지 본다.
+	void RunMaterialExtraction(TArray<FString>& Errors);
+
 	// 위 전부를 돌린다. 모두 통과하면 true다.
 	bool RunAll(TArray<FString>& Errors);
 }

@@ -78,7 +78,7 @@ struct PathRunner;
 // 처리하고 다음 단계는 Descend로 넘긴다. 아래 멤버는 생성 템플릿용이며 오류를 돌려주는 함수는 실패
 // 사유를 지금 단계에 기록한다(처음 기록한 것만 남는다). 크기는 약 3.4 KB(단계 프레임 17개 — key
 // 단계의 키 값 포함)이고 경로 연산마다 스택에 하나 둔다(작은 스택 worker는 그 몫을 잡는다).
-class PathCursor {
+class ROCKS_OBJECTRUNTIME_API PathCursor {
 public:
     PathCursor(const PathCursor&) = delete;
     PathCursor& operator=(const PathCursor&) = delete;

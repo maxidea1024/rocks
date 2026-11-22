@@ -1,7 +1,18 @@
 #include "RocksExportSelfTest.h"
 
 #include "AssetRegistry/IAssetRegistry.h"
+#include "Animation/AnimData/IAnimationDataModel.h"
+#include "Animation/AnimSequence.h"
+#include "Animation/Skeleton.h"
+#include "Engine/SkeletalMesh.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/Texture.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialExpression.h"
+#include "Materials/MaterialExpressionComment.h"
+#include "Materials/MaterialInstanceConstant.h"
+#include "MeshDescription.h"
+#include "SkeletalMeshAttributes.h"
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
@@ -11,6 +22,7 @@
 #include "RocksExportSelfTestTypes.h"
 #include "RocksExporter.h"
 #include "RocksJsonWriter.h"
+#include "RocksMeshDescriptionWriter.h"
 #include "RocksPropertyDumper.h"
 #include "RocksSha256.h"
 #include "RocksTextureExtractor.h"
@@ -620,6 +632,501 @@ void RocksExportSelfTest::RunTextureExtraction(TArray<FString>& Errors)
 	IFileManager::Get().DeleteDirectory(*Root, false, true);
 }
 
+void RocksExportSelfTest::RunStaticMeshExtraction(TArray<FString>& Errors)
+{
+	using namespace RocksExportSelfTestPrivate;
+
+	static const TCHAR* const Meshes[] = {CubePath, SpherePath};
+
+	// 에셋 상태의 지문: UPROPERTY 덤프 전체, LOD별 원본 메시 설명 기록의 digest, 빌드 설정의 lightmap 번호.
+	const auto Snapshot = [](UStaticMesh& Mesh)
+	{
+		FString Text;
+		FRocksPropertyDumper Dumper(&Mesh);
+		FRocksJsonWriter Writer(FRocksJsonWriter::EStyle::Compact);
+		Dumper.DumpObject(&Mesh, Writer);
+		Text = Utf8ToString(Writer.Finish());
+		for (int32 Lod = 0; Lod < Mesh.GetNumSourceModels(); ++Lod)
+		{
+			const FMeshBuildSettings& Settings = Mesh.GetSourceModel(Lod).BuildSettings;
+			Text += FString::Printf(TEXT("|%d:%d:%d"), Lod, Settings.SrcLightmapIndex, Settings.DstLightmapIndex);
+			FMeshDescription Source;
+			if (Mesh.IsMeshDescriptionValid(Lod) && Mesh.CloneMeshDescription(Lod, Source))
+			{
+				FRocksMeshDescriptionWriter::Compact(Source);
+				FRocksMeshSourceRecord Record;
+				TArray<FRocksExportDiagnostic> Ignored;
+				FString Problem;
+				Text += FRocksMeshDescriptionWriter::FromMeshDescription(Source, Record, Ignored, Problem) ? FRocksMeshDescriptionWriter::Digest(Record) : Problem;
+			}
+		}
+
+		return Text;
+	};
+
+	IAssetRegistry::GetChecked().SearchAllAssets(true);
+	const FString Root = SelfTestDirectory() / TEXT("StaticMesh");
+	IFileManager::Get().DeleteDirectory(*Root, false, true);
+	const FString Output = Root / TEXT("Meshes.rxbundle");
+	TArray<FString> Before;
+	for (const TCHAR* Path : Meshes)
+	{
+		UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, Path);
+		Expect(Errors, Mesh != nullptr, FString::Printf(TEXT("cannot load %s"), Path));
+		Before.Add(Mesh != nullptr ? Snapshot(*Mesh) : FString());
+	}
+
+	FRocksExportOptions Options;
+	Options.OutputDirectory = Output;
+	Options.bClosure = false;
+	for (const TCHAR* Path : Meshes)
+	{
+		Options.Selections.Add(Path);
+	}
+
+	FRocksExportResult Result;
+	Expect(Errors, FRocksExporter::Export(Options, Result), FString::Printf(TEXT("static mesh export: %s"), *Result.Error));
+	for (int32 Index = 0; Index < UE_ARRAY_COUNT(Meshes); ++Index)
+	{
+		const TCHAR* Path = Meshes[Index];
+		UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, Path);
+		if (Mesh == nullptr)
+		{
+			continue;
+		}
+
+		// 12.2절: prepared 추출(SetupRenderMeshDescription)이 원본 에셋 설정·원본 메시를 바꾸지 않는다.
+		Expect(Errors, Snapshot(*Mesh) == Before[Index], FString::Printf(TEXT("%s: extraction changed the asset"), Path));
+
+		TArray<uint8> Json;
+		const TSharedPtr<FJsonObject> Asset = LoadBytes(Output / FRocksBundleWriter::AssetFileForPackage(FSoftObjectPath(Path).GetLongPackageName()), Json) ? ParseJson(Json) : nullptr;
+		Expect(Errors, Asset.IsValid(), FString::Printf(TEXT("%s: no mesh JSON"), Path));
+		if (!Asset.IsValid())
+		{
+			continue;
+		}
+
+		const TArray<TSharedPtr<FJsonValue>>& Lods = Asset->GetObjectField(TEXT("data"))->GetArrayField(TEXT("lods"));
+		Expect(Errors, Lods.Num() == Mesh->GetNumSourceModels() && Asset->GetObjectField(TEXT("settings"))->HasField(TEXT("SourceModels")),
+			FString::Printf(TEXT("%s: LOD list or settings"), Path));
+		if (Lods.IsEmpty())
+		{
+			continue;
+		}
+
+		// LOD 0 원본: 수와 위치 blob이 압축한 원본 메시 설명과 같고, 엔진 속성이 다 있으며, prepared가 있다.
+		FMeshDescription Source;
+		FRocksMeshSourceRecord Record;
+		TArray<FRocksExportDiagnostic> Ignored;
+		FString Problem;
+		const bool bRecord = Mesh->CloneMeshDescription(0, Source) && (FRocksMeshDescriptionWriter::Compact(Source), FRocksMeshDescriptionWriter::FromMeshDescription(Source, Record, Ignored, Problem));
+		const TSharedPtr<FJsonObject> Lod0 = Lods[0]->AsObject();
+		const TSharedPtr<FJsonObject> SourceJson = Lod0->GetObjectField(TEXT("source"));
+		const TSharedPtr<FJsonObject> Counts = SourceJson->GetObjectField(TEXT("counts"));
+		Expect(Errors, bRecord && Lod0->GetBoolField(TEXT("hasSource")) && uint32(Counts->GetNumberField(TEXT("vertices"))) == Record.VertexCount
+			&& uint32(Counts->GetNumberField(TEXT("triangles"))) == Record.TriangleCount && uint32(Counts->GetNumberField(TEXT("polygons"))) == Record.PolygonCount
+			&& SourceJson->GetArrayField(TEXT("topology")).Num() == 7, FString::Printf(TEXT("%s: LOD 0 counts"), Path));
+
+		TSet<FString> Names;
+		for (const TSharedPtr<FJsonValue>& Item : SourceJson->GetArrayField(TEXT("attributes")))
+		{
+			const TSharedPtr<FJsonObject> Attribute = Item->AsObject();
+			const FString Key = Attribute->GetStringField(TEXT("element")) + TEXT(".") + Attribute->GetStringField(TEXT("name"));
+			Names.Add(Key);
+			if (Key == TEXT("Vertex.Position"))
+			{
+				TArray<uint8> Written;
+				const FRocksMeshAttribute* Expected = Record.Attributes.FindByPredicate([](const FRocksMeshAttribute& A) { return A.Element == ERocksMeshElement::Vertex && A.Name == TEXT("Position"); });
+				const FString Hex = Attribute->GetObjectField(TEXT("data"))->GetStringField(TEXT("blob"));
+				Expect(Errors, Expected != nullptr && LoadBytes(Output / FRocksBundleWriter::BlobFileForHex(Hex), Written) && int64(Written.Num()) == Expected->Bytes.Num()
+					&& FMemory::Memcmp(Written.GetData(), Expected->Bytes.GetData(), Written.Num()) == 0, FString::Printf(TEXT("%s: position blob"), Path));
+			}
+		}
+
+		for (const TCHAR* Required : {TEXT("Vertex.Position"), TEXT("Corner.Normal"), TEXT("Corner.Tangent"), TEXT("Corner.BinormalSign"), TEXT("Corner.Color"), TEXT("Corner.TexCoord"), TEXT("Edge.IsHard"), TEXT("PolygonGroup.MaterialSlotName")})
+		{
+			Expect(Errors, Names.Contains(Required), FString::Printf(TEXT("%s: attribute %s missing"), Path, Required));
+		}
+
+		Expect(Errors, Lod0->GetObjectField(TEXT("prepared"))->GetObjectField(TEXT("counts"))->GetNumberField(TEXT("vertices")) == double(Record.VertexCount)
+			&& Lod0->GetObjectField(TEXT("preparedBuild"))->HasField(TEXT("DstLightmapIndex")), FString::Printf(TEXT("%s: prepared"), Path));
+	}
+
+	IFileManager::Get().DeleteDirectory(*Root, false, true);
+}
+
+void RocksExportSelfTest::RunSkeletalExtraction(TArray<FString>& Errors)
+{
+	using namespace RocksExportSelfTestPrivate;
+
+	static const TCHAR* const MeshPath = TEXT("/Engine/Tutorial/SubEditors/TutorialAssets/Character/TutorialTPP.TutorialTPP");
+	static const TCHAR* const SkeletonPath = TEXT("/Engine/Tutorial/SubEditors/TutorialAssets/Character/TutorialTPP_Skeleton.TutorialTPP_Skeleton");
+
+	const auto Dump = [](UObject& Object)
+	{
+		FRocksPropertyDumper Dumper(&Object);
+		FRocksJsonWriter Writer(FRocksJsonWriter::EStyle::Compact);
+		Dumper.DumpObject(&Object, Writer);
+		return Utf8ToString(Writer.Finish());
+	};
+
+	IAssetRegistry::GetChecked().SearchAllAssets(true);
+	USkeletalMesh* Mesh = LoadObject<USkeletalMesh>(nullptr, MeshPath);
+	USkeleton* Skeleton = LoadObject<USkeleton>(nullptr, SkeletonPath);
+	Expect(Errors, Mesh != nullptr && Skeleton != nullptr, TEXT("cannot load the tutorial skeletal mesh"));
+	if (Mesh == nullptr || Skeleton == nullptr)
+	{
+		return;
+	}
+
+	// UE는 메시 설명을 처음 읽을 때 SourceModels 캐시를 채운다(설정 변경이 아니다). 먼저 읽어 둔 상태에서 비교한다.
+	for (int32 Lod = 0; Lod < Mesh->GetLODNum(); ++Lod)
+	{
+		FMeshDescription Warm;
+		Mesh->CloneMeshDescription(Lod, Warm);
+	}
+
+	const FString MeshBefore = Dump(*Mesh);
+	const FString SkeletonBefore = Dump(*Skeleton);
+	const FString Root = SelfTestDirectory() / TEXT("Skeletal");
+	IFileManager::Get().DeleteDirectory(*Root, false, true);
+	const FString Output = Root / TEXT("Skeletal.rxbundle");
+	FRocksExportOptions Options;
+	Options.OutputDirectory = Output;
+	Options.bClosure = false;
+	Options.Selections = {MeshPath, SkeletonPath};
+	FRocksExportResult Result;
+	Expect(Errors, FRocksExporter::Export(Options, Result), FString::Printf(TEXT("skeletal export: %s"), *Result.Error));
+	const auto Difference = [](const FString& Before, const FString& After)
+	{
+		int32 At = 0;
+		while (At < Before.Len() && At < After.Len() && Before[At] == After[At])
+		{
+			++At;
+		}
+
+		return FString::Printf(TEXT("at %d: before '%s' after '%s'"), At, *Before.Mid(FMath::Max(0, At - 120), 240), *After.Mid(FMath::Max(0, At - 120), 240));
+	};
+
+	const FString MeshAfter = Dump(*Mesh);
+	const FString SkeletonAfter = Dump(*Skeleton);
+	Expect(Errors, MeshAfter == MeshBefore, FString::Printf(TEXT("skeletal mesh extraction changed the asset %s"), *Difference(MeshBefore, MeshAfter)));
+	Expect(Errors, SkeletonAfter == SkeletonBefore, FString::Printf(TEXT("skeleton extraction changed the asset %s"), *Difference(SkeletonBefore, SkeletonAfter)));
+
+	TArray<uint8> Json;
+	const TSharedPtr<FJsonObject> SkeletonJson = LoadBytes(Output / FRocksBundleWriter::AssetFileForPackage(FSoftObjectPath(SkeletonPath).GetLongPackageName()), Json) ? ParseJson(Json) : nullptr;
+	const TSharedPtr<FJsonObject> MeshJson = LoadBytes(Output / FRocksBundleWriter::AssetFileForPackage(FSoftObjectPath(MeshPath).GetLongPackageName()), Json) ? ParseJson(Json) : nullptr;
+	Expect(Errors, SkeletonJson.IsValid() && MeshJson.IsValid(), TEXT("skeletal JSON missing"));
+	if (!SkeletonJson.IsValid() || !MeshJson.IsValid())
+	{
+		return;
+	}
+
+	// 본 계층: 수·이름·부모가 원본 계층(raw)과 같고 스켈레톤 본에는 리타깃 방식이 있다.
+	const FReferenceSkeleton& SkeletonBones = Skeleton->GetReferenceSkeleton();
+	const TArray<TSharedPtr<FJsonValue>>& Bones = SkeletonJson->GetObjectField(TEXT("data"))->GetArrayField(TEXT("bones"));
+	bool bBonesMatch = Bones.Num() == SkeletonBones.GetRawBoneNum();
+	for (int32 Bone = 0; bBonesMatch && Bone < Bones.Num(); ++Bone)
+	{
+		const TSharedPtr<FJsonObject> Info = Bones[Bone]->AsObject();
+		bBonesMatch = Info->GetStringField(TEXT("name")) == SkeletonBones.GetRawRefBoneInfo()[Bone].Name.ToString()
+			&& int32(Info->GetNumberField(TEXT("parent"))) == SkeletonBones.GetRawRefBoneInfo()[Bone].ParentIndex && Info->HasField(TEXT("retargetMode"));
+	}
+
+	Expect(Errors, bBonesMatch, TEXT("skeleton bones differ from the reference skeleton"));
+	const TSharedPtr<FJsonObject> MeshData = MeshJson->GetObjectField(TEXT("data"));
+	Expect(Errors, MeshData->GetArrayField(TEXT("bones")).Num() == Mesh->GetRefSkeleton().GetRawBoneNum()
+		&& MeshData->GetArrayField(TEXT("lods")).Num() == Mesh->GetLODNum(), TEXT("mesh bones or LOD count"));
+
+	// LOD 0 원본의 스킨 가중치: 영향 수 합이 메시 설명과 같다(BoneInfluences 시작 표 마지막 값).
+	FMeshDescription Source;
+	const bool bSource = Mesh->CloneMeshDescription(0, Source);
+	int64 Expected = 0;
+	if (bSource)
+	{
+		const FSkeletalMeshAttributesShared Attributes(Source);
+		const FSkinWeightsVertexAttributesConstRef Weights = Attributes.GetVertexSkinWeights();
+		for (const FVertexID Vertex : Source.Vertices().GetElementIDs())
+		{
+			Expected += Weights.Get(Vertex).Num();
+		}
+	}
+
+	int64 Written = -1;
+	const TSharedPtr<FJsonObject> Lod0 = MeshData->GetArrayField(TEXT("lods"))[0]->AsObject()->GetObjectField(TEXT("source"));
+	for (const TSharedPtr<FJsonValue>& Item : Lod0->GetArrayField(TEXT("attributes")))
+	{
+		const TSharedPtr<FJsonObject> Attribute = Item->AsObject();
+		if (Attribute->GetStringField(TEXT("name")) != TEXT("SkinWeights") || Attribute->GetStringField(TEXT("type")) != TEXT("BoneInfluences"))
+		{
+			continue;
+		}
+
+		TArray<uint8> Blob;
+		const TSharedPtr<FJsonObject> Ref = Attribute->GetObjectField(TEXT("data"));
+		const int64 Count = int64(Ref->GetNumberField(TEXT("count")));
+		if (LoadBytes(Output / FRocksBundleWriter::BlobFileForHex(Ref->GetStringField(TEXT("blob"))), Blob) && Blob.Num() >= (Count + 1) * 4)
+		{
+			uint32 Last = 0;
+			FMemory::Memcpy(&Last, Blob.GetData() + Count * 4, sizeof(Last));
+			Written = Last;
+		}
+	}
+
+	Expect(Errors, bSource && Written == Expected, FString::Printf(TEXT("skin weight influences %lld, expected %lld"), Written, Expected));
+	IFileManager::Get().DeleteDirectory(*Root, false, true);
+}
+
+void RocksExportSelfTest::RunAnimationExtraction(TArray<FString>& Errors)
+{
+	using namespace RocksExportSelfTestPrivate;
+
+	static const TCHAR* const ClipPath = TEXT("/Engine/Tutorial/SubEditors/TutorialAssets/Character/Tutorial_Walk_Fwd.Tutorial_Walk_Fwd");
+	IAssetRegistry::GetChecked().SearchAllAssets(true);
+	UAnimSequence* Sequence = LoadObject<UAnimSequence>(nullptr, ClipPath);
+	Expect(Errors, Sequence != nullptr && Sequence->GetDataModel() != nullptr, TEXT("cannot load the tutorial walk animation"));
+	if (Sequence == nullptr || Sequence->GetDataModel() == nullptr)
+	{
+		return;
+	}
+
+	const auto Dump = [](UObject& Object)
+	{
+		FRocksPropertyDumper Dumper(&Object);
+		FRocksJsonWriter Writer(FRocksJsonWriter::EStyle::Compact);
+		Dumper.DumpObject(&Object, Writer);
+		return Utf8ToString(Writer.Finish());
+	};
+
+	const IAnimationDataModel* Model = Sequence->GetDataModel();
+	TArray<FName> TrackNames;
+	Model->GetBoneTrackNames(TrackNames);
+	const FString Before = Dump(*Sequence);
+	const FString Root = SelfTestDirectory() / TEXT("Animation");
+	IFileManager::Get().DeleteDirectory(*Root, false, true);
+	const FString Output = Root / TEXT("Animation.rxbundle");
+	FRocksExportOptions Options;
+	Options.OutputDirectory = Output;
+	Options.bClosure = false;
+	Options.Selections = {ClipPath};
+	FRocksExportResult Result;
+	Expect(Errors, FRocksExporter::Export(Options, Result), FString::Printf(TEXT("animation export: %s"), *Result.Error));
+	Expect(Errors, Dump(*Sequence) == Before, TEXT("animation extraction changed the asset"));
+
+	TArray<uint8> Json;
+	const TSharedPtr<FJsonObject> Asset = LoadBytes(Output / FRocksBundleWriter::AssetFileForPackage(FSoftObjectPath(ClipPath).GetLongPackageName()), Json) ? ParseJson(Json) : nullptr;
+	Expect(Errors, Asset.IsValid(), TEXT("animation JSON missing"));
+	if (!Asset.IsValid())
+	{
+		return;
+	}
+
+	const TSharedPtr<FJsonObject> Data = Asset->GetObjectField(TEXT("data"));
+	Expect(Errors, !Asset->GetObjectField(TEXT("settings"))->HasField(TEXT("DataModelInterface")), TEXT("settings dump holds the data model"));
+	Expect(Errors, int32(Data->GetNumberField(TEXT("frameCount"))) == Model->GetNumberOfFrames() && int32(Data->GetNumberField(TEXT("keyCount"))) == Model->GetNumberOfKeys()
+		&& Data->GetObjectField(TEXT("frameRate"))->GetNumberField(TEXT("numerator")) == double(Model->GetFrameRate().Numerator), TEXT("animation frame counts or rate"));
+
+	// 본 트랙: 이름·순서가 데이터 모델과 같고, 회전 blob이 UE 키 FTransform 회전의 float 변환과 bytes가 같다(키 1개로
+	// 접혔으면 모든 키가 같다).
+	const TArray<TSharedPtr<FJsonValue>>& Tracks = Data->GetArrayField(TEXT("boneTracks"));
+	bool bTracks = Tracks.Num() == TrackNames.Num();
+	for (int32 Track = 0; bTracks && Track < Tracks.Num(); ++Track)
+	{
+		const TSharedPtr<FJsonObject> Item = Tracks[Track]->AsObject();
+		bTracks = Item->GetStringField(TEXT("bone")) == TrackNames[Track].ToString();
+		TArray<FTransform> Keys;
+		Model->GetBoneTrackTransforms(TrackNames[Track], Keys);
+		const TSharedPtr<FJsonObject> Rotation = Item->GetObjectField(TEXT("rotation"));
+		TArray<uint8> Blob;
+		bTracks = bTracks && LoadBytes(Output / FRocksBundleWriter::BlobFileForHex(Rotation->GetStringField(TEXT("blob"))), Blob);
+		const int32 Count = int32(Rotation->GetNumberField(TEXT("count")));
+		for (int32 Key = 0; bTracks && Key < Keys.Num(); ++Key)
+		{
+			const FQuat4f Expected(Keys[Key].GetRotation());
+			const float Values[] = {Expected.X, Expected.Y, Expected.Z, Expected.W};
+			const int32 Stored = Count == 1 ? 0 : Key;
+			bTracks = Blob.Num() >= (Stored + 1) * int32(sizeof(Values)) && FMemory::Memcmp(Blob.GetData() + Stored * sizeof(Values), Values, sizeof(Values)) == 0;
+		}
+	}
+
+	Expect(Errors, bTracks, TEXT("animation bone tracks differ from the data model"));
+	IFileManager::Get().DeleteDirectory(*Root, false, true);
+}
+
+void RocksExportSelfTest::RunMaterialExtraction(TArray<FString>& Errors)
+{
+	using namespace RocksExportSelfTestPrivate;
+
+	static const TCHAR* const GridPath = TEXT("/Engine/EngineMaterials/M_Grid.M_Grid");
+	static const TCHAR* const InstancePath = TEXT("/Engine/EngineMaterials/Widget3DPassThrough_Translucent_OneSided.Widget3DPassThrough_Translucent_OneSided");
+	static const TCHAR* const DepthPath = TEXT("/Engine/ArtTools/RenderToTexture/Materials/M_RenderNormalizedDepth_01.M_RenderNormalizedDepth_01");
+	static const TCHAR* const CollectionPath = TEXT("/Engine/ArtTools/RenderToTexture/Materials/MPC_R2T.MPC_R2T");
+	static const TCHAR* const FunctionCallClass = TEXT("MaterialExpressionMaterialFunctionCall");
+	IAssetRegistry::GetChecked().SearchAllAssets(true);
+	UMaterial* Grid = LoadObject<UMaterial>(nullptr, GridPath);
+	UMaterialInstanceConstant* Instance = LoadObject<UMaterialInstanceConstant>(nullptr, InstancePath);
+	Expect(Errors, Grid != nullptr && Grid->GetEditorOnlyData() != nullptr && Instance != nullptr && Instance->Parent != nullptr,
+		TEXT("cannot load the engine grid material or the widget material instance"));
+	if (Grid == nullptr || Grid->GetEditorOnlyData() == nullptr || Instance == nullptr || Instance->Parent == nullptr)
+	{
+		return;
+	}
+
+	const auto Dump = [](UObject& Object)
+	{
+		FRocksPropertyDumper Dumper(&Object);
+		FRocksJsonWriter Writer(FRocksJsonWriter::EStyle::Compact);
+		Dumper.DumpObject(&Object, Writer);
+		return Utf8ToString(Writer.Finish());
+	};
+
+	const FString Before = Dump(*Grid);
+	const FString Root = SelfTestDirectory() / TEXT("Material");
+	IFileManager::Get().DeleteDirectory(*Root, false, true);
+	const FString Output = Root / TEXT("Material.rxbundle");
+	FRocksExportOptions Options;
+	Options.OutputDirectory = Output;
+	Options.bClosure = false;
+	Options.Selections = {GridPath, InstancePath, DepthPath};
+	FRocksExportResult Result;
+	Expect(Errors, FRocksExporter::Export(Options, Result), FString::Printf(TEXT("material export: %s"), *Result.Error));
+	Expect(Errors, Dump(*Grid) == Before, TEXT("material extraction changed the asset"));
+
+	const auto Load = [&Output](const TCHAR* Path, TArray<uint8>& Json)
+	{
+		return LoadBytes(Output / FRocksBundleWriter::AssetFileForPackage(FSoftObjectPath(Path).GetLongPackageName()), Json) ? ParseJson(Json) : nullptr;
+	};
+
+	const auto HasDependency = [](const TSharedPtr<FJsonObject>& Asset, const FString& Path)
+	{
+		for (const TSharedPtr<FJsonValue>& Dependency : Asset->GetArrayField(TEXT("dependencies")))
+		{
+			if (Dependency->AsObject()->GetStringField(TEXT("objectPath")) == Path)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	};
+
+	TArray<uint8> GridJson;
+	TArray<uint8> InstanceJson;
+	TArray<uint8> DepthJson;
+	const TSharedPtr<FJsonObject> GridAsset = Load(GridPath, GridJson);
+	const TSharedPtr<FJsonObject> InstanceAsset = Load(InstancePath, InstanceJson);
+	const TSharedPtr<FJsonObject> DepthAsset = Load(DepthPath, DepthJson);
+	Expect(Errors, GridAsset.IsValid() && InstanceAsset.IsValid() && DepthAsset.IsValid(), TEXT("material JSON missing"));
+	if (!GridAsset.IsValid() || !InstanceAsset.IsValid() || !DepthAsset.IsValid())
+	{
+		return;
+	}
+
+	// 노드: expression 다음 comment, UE 배열 순서. 이름·클래스와 입력 연결(대상 노드 이름·출력 번호)이 UE 그래프와 같다.
+	TArray<const UMaterialExpression*> Expected;
+	for (const TObjectPtr<UMaterialExpression>& Expression : Grid->GetExpressions())
+	{
+		Expected.Add(Expression.Get());
+	}
+
+	for (const TObjectPtr<UMaterialExpressionComment>& Comment : Grid->GetEditorComments())
+	{
+		Expected.Add(Comment.Get());
+	}
+
+	const TSharedPtr<FJsonObject> GridData = GridAsset->GetObjectField(TEXT("data"));
+	const TArray<TSharedPtr<FJsonValue>>& Nodes = GridData->GetArrayField(TEXT("nodes"));
+	bool bNodes = Nodes.Num() == Expected.Num();
+	bool bFunctions = true;
+	TSet<FString> Names;
+	for (int32 Index = 0; bNodes && Index < Nodes.Num(); ++Index)
+	{
+		const TSharedPtr<FJsonObject> Node = Nodes[Index]->AsObject();
+		UMaterialExpression* Expression = const_cast<UMaterialExpression*>(Expected[Index]);
+		bool bDuplicate = false;
+		Names.Add(Node->GetStringField(TEXT("name")), &bDuplicate);
+		bNodes = !bDuplicate && Node->GetStringField(TEXT("name")) == Expression->GetName() && Node->GetStringField(TEXT("class")) == Expression->GetClass()->GetName();
+		const TArray<TSharedPtr<FJsonValue>>& Inputs = Node->GetArrayField(TEXT("inputs"));
+		bNodes = bNodes && Inputs.Num() == Expression->CountInputs();
+		for (int32 Slot = 0; bNodes && Slot < Inputs.Num(); ++Slot)
+		{
+			const FExpressionInput* Input = Expression->GetInput(Slot);
+			const TSharedPtr<FJsonObject>* From = nullptr;
+			const bool bLinked = Inputs[Slot]->AsObject()->TryGetObjectField(TEXT("from"), From);
+			const bool bConnected = Input != nullptr && Input->Expression != nullptr;
+			bNodes = bLinked == bConnected
+				&& (!bConnected || ((*From)->GetStringField(TEXT("node")) == Input->Expression->GetName() && int32((*From)->GetNumberField(TEXT("output"))) == Input->OutputIndex));
+		}
+
+		if (Node->GetStringField(TEXT("class")) == FunctionCallClass)
+		{
+			const TSharedPtr<FJsonObject>* Function = nullptr;
+			bFunctions = bFunctions && Node->GetObjectField(TEXT("properties"))->TryGetObjectField(TEXT("MaterialFunction"), Function)
+				&& HasDependency(GridAsset, (*Function)->GetStringField(TEXT("objectPath")));
+		}
+	}
+
+	Expect(Errors, bNodes, TEXT("material nodes or links differ from the UE graph"));
+	Expect(Errors, bFunctions, TEXT("material function call without a dependency"));
+
+	// 출력 핀: 개별 핀(bUseMaterialAttributes 꺼짐)이고 BaseColor 연결이 UE 핀과 같다.
+	const FExpressionInput& BaseColor = Grid->GetEditorOnlyData()->BaseColor;
+	bool bPins = !Grid->bUseMaterialAttributes && BaseColor.Expression != nullptr;
+	bool bBaseColor = false;
+	for (const TSharedPtr<FJsonValue>& Pin : GridData->GetArrayField(TEXT("outputs")))
+	{
+		const TSharedPtr<FJsonObject> Item = Pin->AsObject();
+		const TSharedPtr<FJsonObject>* From = nullptr;
+		bPins = bPins && Item->GetStringField(TEXT("name")) != TEXT("MaterialAttributes");
+		if (bPins && Item->GetStringField(TEXT("name")) == TEXT("BaseColor"))
+		{
+			bBaseColor = Item->TryGetObjectField(TEXT("from"), From) && (*From)->GetStringField(TEXT("node")) == BaseColor.Expression->GetName();
+		}
+	}
+
+	Expect(Errors, bPins && bBaseColor, TEXT("material output pins differ from the UE material"));
+
+	// settings에는 노드·핀이 펼쳐지지 않는다(그래프는 data에만 있다).
+	const FString GridText = Utf8ToString(GridJson);
+	const int32 DataAt = GridText.Find(TEXT("\n  \"data\": "));
+	const FString SettingsText = DataAt != INDEX_NONE ? GridText.Left(DataAt) : GridText;
+	Expect(Errors, DataAt != INDEX_NONE && !SettingsText.Contains(TEXT("\"class\": \"/Script/Engine.MaterialExpression")) && !SettingsText.Contains(TEXT("\"BaseColor\"")),
+		TEXT("material settings expand graph nodes or output pins"));
+
+	// 컬렉션 참조 노드의 컬렉션이 dependencies에 있다.
+	Expect(Errors, HasDependency(DepthAsset, CollectionPath), TEXT("material parameter collection missing from dependencies"));
+
+	// 인스턴스: 부모 참조와 resolved(GetAllParametersOfType 전 종류의 합, scalar 값 일치).
+	const TSharedPtr<FJsonObject>* Parent = nullptr;
+	Expect(Errors, InstanceAsset->GetObjectField(TEXT("settings"))->TryGetObjectField(TEXT("Parent"), Parent) && (*Parent)->GetStringField(TEXT("objectPath")) == Instance->Parent->GetPathName()
+		&& HasDependency(InstanceAsset, Instance->Parent->GetPathName()), TEXT("material instance parent reference"));
+	int32 ParameterCount = 0;
+	for (int32 Type = 0; Type < int32(EMaterialParameterType::Num); ++Type)
+	{
+		TMap<FMaterialParameterInfo, FMaterialParameterMetadata> Parameters;
+		Instance->GetAllParametersOfType(EMaterialParameterType(Type), Parameters);
+		ParameterCount += Parameters.Num();
+	}
+
+	const TArray<TSharedPtr<FJsonValue>>& Resolved = InstanceAsset->GetObjectField(TEXT("data"))->GetArrayField(TEXT("resolved"));
+	bool bResolved = Resolved.Num() == ParameterCount && ParameterCount > 0;
+	for (const TSharedPtr<FJsonValue>& Entry : Resolved)
+	{
+		const TSharedPtr<FJsonObject> Item = Entry->AsObject();
+		if (Item->GetStringField(TEXT("type")) != TEXT("Scalar"))
+		{
+			continue;
+		}
+
+		float Value = 0.0f;
+		const FName Name(*Item->GetObjectField(TEXT("parameter"))->GetStringField(TEXT("Name")));
+		bResolved = bResolved && Instance->GetScalarParameterValue(FHashedMaterialParameterInfo(Name), Value) && float(Item->GetNumberField(TEXT("value"))) == Value;
+	}
+
+	Expect(Errors, bResolved, TEXT("material instance resolved parameters differ from GetAllParametersOfType"));
+	IFileManager::Get().DeleteDirectory(*Root, false, true);
+}
+
 bool RocksExportSelfTest::RunAll(TArray<FString>& Errors)
 {
 	RunSha256(Errors);
@@ -629,5 +1136,9 @@ bool RocksExportSelfTest::RunAll(TArray<FString>& Errors)
 	RunBundleWriter(Errors);
 	RunExportDeterminism(Errors);
 	RunTextureExtraction(Errors);
+	RunStaticMeshExtraction(Errors);
+	RunSkeletalExtraction(Errors);
+	RunAnimationExtraction(Errors);
+	RunMaterialExtraction(Errors);
 	return Errors.IsEmpty();
 }

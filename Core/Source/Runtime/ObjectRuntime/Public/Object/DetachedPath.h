@@ -35,7 +35,7 @@ using DetachedPathFunction = Result<void> (*)(PathCursor& cursor, void* value) n
 //   }
 //
 //   auto count = PathCount(registry, access, PathTarget::Value(box), path.View());
-class DetachedValue {
+class ROCKS_OBJECTRUNTIME_API DetachedValue {
 public:
     explicit DetachedValue(Allocator& allocator) noexcept : allocator_(&allocator) {
     }
@@ -137,7 +137,7 @@ private:
 // 변경은 변경 표지가 잡아 BeginBatchPublish가 Busy다 — C++ 직접 쓰기는 호출자 책임) 상자를 비우면
 // 계약 위반이다. 같은 묶음의 게시 자리들은 서로 겹치지 않아야 한다(한 자리가 다른 자리를 담으면
 // 먼저 게시한 쪽이 뒤 자리의 주소를 무효로 만들 수 있다).
-class PreparedAttach {
+class ROCKS_OBJECTRUNTIME_API PreparedAttach {
 public:
     PreparedAttach() noexcept = default;
     PreparedAttach(const PreparedAttach&) = delete;
@@ -199,7 +199,7 @@ private:
 //   auto batch = registry.BeginBatchPublish(access, mesh, stamp, targets, edges);
 //   ...
 //   prepared.Publish(batch.Value(), value.reference);
-class PreparedReference {
+class ROCKS_OBJECTRUNTIME_API PreparedReference {
 public:
     PreparedReference() noexcept = default;
     PreparedReference(const PreparedReference&) = delete;
@@ -258,9 +258,9 @@ private:
 // 사용 예:
 //   DetachedValue box(registry.ObjectAllocator());
 //   auto detached = PathDetach(registry, access, mesh, slotsPath.View(), box);
-Result<void> PathDetach(ObjectRegistry& registry, const ObjectAccessContext& access,
-                        const PathTarget& target, PropertyPath path, DetachedValue& box,
-                        PropertyPathFailure* failure = nullptr) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void>
+PathDetach(ObjectRegistry& registry, const ObjectAccessContext& access, const PathTarget& target,
+           PropertyPath path, DetachedValue& box, PropertyPathFailure* failure = nullptr) noexcept;
 
 // path의 끝(필드·멤버 하나)을 box와 맞바꿀 자리를 찾아 out에 둔다(값은 아직 바꾸지 않는다).
 // 게시된 객체는 읽기 Borrow로 찾으므로 변경 표지를 올리지 않는다 — 대입 묶음은 표지를 읽은 뒤
@@ -280,10 +280,12 @@ Result<void> PathDetach(ObjectRegistry& registry, const ObjectAccessContext& acc
 //   auto located = PathPrepareAttach(registry, access, mesh, slotsPath.View(), box, prepared);
 //   ...
 //   prepared.Publish(batch.Value());
-Result<void> PathPrepareAttach(ObjectRegistry& registry, const ObjectAccessContext& access,
-                               const PathTarget& target, PropertyPath path, DetachedValue& box,
-                               PreparedAttach& out, PropertyPathFailure* failure = nullptr,
-                               bool validateHooks = true) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void> PathPrepareAttach(ObjectRegistry& registry,
+                                                       const ObjectAccessContext& access,
+                                                       const PathTarget& target, PropertyPath path,
+                                                       DetachedValue& box, PreparedAttach& out,
+                                                       PropertyPathFailure* failure = nullptr,
+                                                       bool validateHooks = true) noexcept;
 
 // path의 끝(단일 강한 참조 위치 — ObjectRef 필드, 인라인 struct·StructRefArray 원소의 ObjectRef
 // 멤버, 정적 배열의 ObjectRef 원소)을 value(ObjectReference)로 바꿀 자리를 찾아 out에 둔다(리플렉션
@@ -295,9 +297,9 @@ Result<void> PathPrepareAttach(ObjectRegistry& registry, const ObjectAccessConte
 // 오류: 시작 위치가 분리된 값이면 Unsupported(NoPathAccess), 끝이 단일 강한 참조 위치가 아니면
 // (ObjectRefArray·ObjectRefMap 원소 포함) InvalidArgument(InvalidValue), value가 ObjectReference가
 // 아니면 TypeMismatch. 그 밖의 순서는 PathWrite와 같다.
-Result<void> PathPrepareReference(ObjectRegistry& registry, const ObjectAccessContext& access,
-                                  const PathTarget& target, PropertyPath path,
-                                  const FieldValue& value, PreparedReference& out,
-                                  PropertyPathFailure* failure = nullptr) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void>
+PathPrepareReference(ObjectRegistry& registry, const ObjectAccessContext& access,
+                     const PathTarget& target, PropertyPath path, const FieldValue& value,
+                     PreparedReference& out, PropertyPathFailure* failure = nullptr) noexcept;
 
 } // namespace rocks

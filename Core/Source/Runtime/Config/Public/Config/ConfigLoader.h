@@ -28,7 +28,8 @@ namespace rocks::config {
 //       // context.Diagnostics()의 파일·줄·열 보고
 //   }
 //   context.Sync();
-Result<void> LoadConfigFiles(ConfigContext& context, platform::FileSystem& files) noexcept;
+ROCKS_CONFIG_API Result<void> LoadConfigFiles(ConfigContext& context,
+                                              platform::FileSystem& files) noexcept;
 
 // 명령줄 대입 인자의 접두사다(`--set=<target>=<value>`).
 inline constexpr StringView SetArgumentPrefix = "--set=";
@@ -44,7 +45,7 @@ inline constexpr StringView SetArgumentPrefix = "--set=";
 //   AddCommandLineAssignments(context, arguments);         // 세션 층
 //   context.Sync();
 //   context.CompleteStartup();
-Result<uint32> AddCommandLineAssignments(ConfigContext& context,
-                                         Span<const StringView> arguments) noexcept;
+ROCKS_CONFIG_API Result<uint32>
+AddCommandLineAssignments(ConfigContext& context, Span<const StringView> arguments) noexcept;
 
 } // namespace rocks::config

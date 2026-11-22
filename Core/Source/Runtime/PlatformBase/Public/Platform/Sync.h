@@ -16,7 +16,7 @@ enum class WaitResult {
 // 할당 없는 native mutex wrapper이며 같은 thread의 재귀 Lock은 지원하지 않는다.
 // 잠근 thread가 Unlock해야 하며, 모든 사용자와 대기자가 끝난 뒤에만 파괴한다.
 // 잘못된 사용의 검출 여부나 대기 순서의 공정성은 플랫폼 공통 보장이 아니다.
-class Mutex {
+class ROCKS_PLATFORMBASE_API Mutex {
 public:
     Mutex() noexcept;
     ~Mutex() noexcept;
@@ -66,7 +66,7 @@ private:
 // 유한 반복 대기는 최초 monotonic deadline의 남은 시간만 넘겨 timeout을 연장하지 않는다.
 // 같은 대기 묶음은 같은 Mutex를 사용한다. 모든 waiter 종료 뒤 파괴하며 native 초기화 실패는
 // Fatal다.
-class ConditionVariable {
+class ROCKS_PLATFORMBASE_API ConditionVariable {
 public:
     ConditionVariable() noexcept;
     ~ConditionVariable() noexcept;
@@ -83,7 +83,7 @@ private:
 
 // Signal 이후 Reset까지 모든 waiter와 이후 Wait가 통과한다. thread affinity는 없다.
 // 동시 Signal/Reset/Wait를 지원하나 파괴 전에는 모든 caller를 종료해야 한다. Close/detach는 없다.
-class ManualResetEvent {
+class ROCKS_PLATFORMBASE_API ManualResetEvent {
 public:
     explicit ManualResetEvent(bool signaled = false) noexcept;
     ManualResetEvent(const ManualResetEvent&) = delete;
@@ -105,7 +105,7 @@ private:
 // Wait 성공은 permit 하나를 소비한다. Release는 count 전체를 더하거나 실패 시 전혀 바꾸지 않는다.
 // initial<=maximum, maximum>0이 생성 전제다(위반은 Fatal). Release(0)/한도 초과는 false다.
 // 동시 Wait/Release를 지원한다. 공정성은 보장하지 않으며 모든 caller 종료 뒤 파괴한다.
-class Semaphore {
+class ROCKS_PLATFORMBASE_API Semaphore {
 public:
     Semaphore(uint32 initialCount, uint32 maximumCount) noexcept;
     Semaphore(const Semaphore&) = delete;
