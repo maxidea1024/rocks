@@ -64,9 +64,10 @@ public:
     bool AppendName(uint64 value, StringBuilderBase& out) noexcept override;
     bool AppendEnumName(uint64 type, uint64 value, StringBuilderBase& out) noexcept override;
 
-    // 가상 호출의 Sparks 대상을 찾을 링크된 모듈이다(`.run` 실행기가 링크 뒤 둔다).
-    void SetModule(const VmLinkedModule* module) noexcept {
-        module_ = module;
+    // 가상 호출의 Sparks 대상을 찾을 링크된 모듈들이다(`.run` 실행기가 링크 뒤 둔다 — 실행 단위 순,
+    // SparksReload 6절 LC7c2a). modules는 바꾸면 다시 부르고 그동안 살아 있어야 한다.
+    void SetModules(Span<const VmLinkedModule* const> modules) noexcept {
+        modules_ = modules;
     }
     bool IsAlive(uint64 handle) noexcept override;
     // 유지 자원을 멈춘다: `release #n` 기록, 그 객체는 죽은 것으로 둔다.
@@ -141,7 +142,7 @@ private:
     Array<String> names_;       // 리터럴 이름 표
     Array<String> trace_;
     bool outOfMemory_ = false;
-    const VmLinkedModule* module_ = nullptr;
+    Span<const VmLinkedModule* const> modules_;
 };
 
 } // namespace rocks::sparks::conformance::detail

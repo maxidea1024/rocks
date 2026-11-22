@@ -662,4 +662,30 @@ TEST(Audio_DSP1_ResamplerRetargetBetweenBlocksSplitInvariant) {
     }
 }
 
+TEST(Audio_DSP1_ResamplerOutputFramesBefore) {
+    SystemAllocator allocator;
+    // r = 0.5: 위치 0, 0.5, 1, … → 위치 3 이전 출력은 6개(0–2.5).
+    LinearResampler half = MakeResampler(1, 0.5);
+    CHECK(half.OutputFramesBefore(3) == 6);
+    CHECK(half.OutputFramesBefore(0) == 0 && half.OutputFramesBefore(-5) == 0);
+    CHECK(half.OutputFramesBefore(1) == 2);
+    // 상한은 MaxBlockFrames다.
+    CHECK(half.OutputFramesBefore(int64{1} << 40) == MaxBlockFrames);
+
+    // 소비 뒤 위치가 음수(−0.75)여도 같은 규칙이다: 위치 −0.75, 0, 0.75 → 입력 1 이전 3개.
+    LinearResampler threeQuarter = MakeResampler(1, 0.75);
+    PlanarBuffer input = MakeBuffer(1, 8, allocator);
+    FillLinear(input.View(), 1.0f);
+    PlanarBuffer output = MakeBuffer(1, 3, allocator);
+    REQUIRE(threeQuarter.Process(input.View().Slice(0, 3), output.View()));
+    CHECK(threeQuarter.Position() == -0.75);
+    CHECK(threeQuarter.OutputFramesBefore(1) == 3);
+
+    // 비율 보간 경로를 따른다: 1 → 2(4 frame) 위치 0, 1.25, 2.75, 4.5, 6.5 → 입력 5 이전 4개.
+    LinearResampler ramp = MakeResampler(1, 1.0);
+    REQUIRE(ramp.SetFrameRatio(2.0, 4));
+    CHECK(ramp.OutputFramesBefore(5) == 4);
+    CHECK(ramp.OutputFramesBefore(7) == 5);
+}
+
 } // namespace audio_filter_resampler_tests_file

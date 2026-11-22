@@ -101,11 +101,17 @@ struct NuggetBackendPut {
 };
 
 struct NuggetPutResult {
+    explicit NuggetPutResult(Allocator& allocator) noexcept : record(allocator) {
+    }
+
     NuggetStatus status = NuggetStatus::Dropped;
     ErrorCode error = ErrorCode::None;
     // 이 Put의 Record digest와 기존 항목의 digest(Exists·Conflict)다.
     Sha256Digest digest{};
     Sha256Digest existing{};
+    // 계획한 Record다(저장 표현 포함 — 계획이 성공했을 때만, 아니면 빈 Record). NuggetCache가
+    // Memory 계층 항목으로 쓴다.
+    NuggetRecord record;
 };
 
 // GC 기준이다(9.1절 결정 9): unusedDays일보다 오래 쓰지 않은 항목을 지우고, 남은 합이 maxBytes를

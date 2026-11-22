@@ -49,6 +49,11 @@ public:
     // outputFrames > MaxBlockFrames는 InvalidArgument다.
     [[nodiscard]] Result<uint32> InputFramesNeeded(uint32 outputFrames) const noexcept;
 
+    // 출력 위치가 inputFrame(소비하지 않은 입력의 첫 frame 기준, 음수 가능) 이상이 되기 전까지의
+    // 출력 frame 수다. 비율 보간 경로를 따라 MaxBlockFrames까지 센다(그 이상이면 MaxBlockFrames).
+    // 믹서가 clip 끝 판정에 쓴다(Docs/Design/AudioSystem.ko.md 3.22.5절).
+    uint32 OutputFramesBefore(int64 inputFrame) const noexcept;
+
     // output.frameCount frame을 만들고 소비한 입력 frame 수를 돌려준다.
     // - input·output의 채널 수는 ChannelCount()와 같아야 하고, output.frameCount ≤ MaxBlockFrames,
     //   input.frameCount ≥ InputFramesNeeded(output.frameCount)여야 한다. 아니면

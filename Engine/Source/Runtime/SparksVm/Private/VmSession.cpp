@@ -715,6 +715,24 @@ VmSession::FieldView VmSession::Fields(uint32 instance) const noexcept {
     return view;
 }
 
+uint32 VmSession::ClassChain(uint32 instance, Span<const VmLinkedModule*> modules,
+                             Span<uint32> classes) const noexcept {
+    if (instance >= instances_.Size() || !instances_[instance].attached) {
+        return 0;
+    }
+
+    const VmLinkedModule* chainModules[MaxBaseDepth] = {};
+    uint32 chainClasses[MaxBaseDepth] = {};
+    const uint32 depth = Chain(instance, chainModules, chainClasses);
+    uint32 count = 0;
+    for (; count < depth && count < modules.Size() && count < classes.Size(); ++count) {
+        modules[count] = chainModules[count];
+        classes[count] = chainClasses[count];
+    }
+
+    return count;
+}
+
 const VmLinkedModule* VmSession::ModuleOf(uint32 instance) const noexcept {
     return instance < instances_.Size() ? instances_[instance].module : nullptr;
 }

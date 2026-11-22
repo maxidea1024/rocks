@@ -356,6 +356,10 @@ public:
     };
 
     FieldView Fields(uint32 instance) const noexcept;
+    // instance의 클래스 사슬(파생 → 기반, 다른 모듈 기반 포함 — 엔진 기반은 빠진다)을 modules·
+    // classes에 담고 그 수를 돌려준다(두 span 중 짧은 길이까지 — 시험·덤프용).
+    uint32 ClassChain(uint32 instance, Span<const VmLinkedModule*> modules,
+                      Span<uint32> classes) const noexcept;
     // instance의 클래스다.
     const VmLinkedModule* ModuleOf(uint32 instance) const noexcept;
     uint32 ClassOf(uint32 instance) const noexcept;

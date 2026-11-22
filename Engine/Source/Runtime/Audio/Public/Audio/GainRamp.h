@@ -30,6 +30,10 @@ public:
     // view의 모든 채널에 frame마다 현재 이득을 곱하고 그만큼 진행한다.
     void Apply(const PlanarView& view) noexcept;
 
+    // destination[n] += source[n] × 이득(n)을 frames frame 하고 그만큼 진행한다. 채널 이득
+    // 행렬(믹서 voice → 출력 채널)에 쓴다. Apply와 같은 이득 열이다.
+    void MixAdd(const float* source, float* destination, uint32 frames) noexcept;
+
     // frames만큼 처리한 것처럼 진행만 한다(가상화된 voice 등 출력 없이 시간만 흐를 때).
     void Advance(uint32 frames) noexcept;
 
