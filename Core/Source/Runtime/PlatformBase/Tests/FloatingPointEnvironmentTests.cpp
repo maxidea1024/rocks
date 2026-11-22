@@ -147,4 +147,60 @@ TEST(FloatingPointEnvironment_RunNestsAndKeepsStatusFlags) {
 
     CHECK(IsDeterministicFloatingPointEnvironment());
 }
+
+TEST(FloatingPointEnvironment_RealtimeAudioFlushesAndRestores) {
+    // 실시간 오디오 실행: 안에서는 기준 환경 + FTZ(비정규 결과 0, nearest 유지), 끝나면 원래
+    // 설정이다.
+    struct Inside {
+        bool realtime = false;
+        bool deterministic = true;
+        double product = 1.0;
+        double third = 0.0;
+    };
+
+    const uint64 original = platform::detail::ReadFloatingPointControl();
+    const double expectedThird = OneThird();
+    CHECK(!IsRealtimeAudioFloatingPointEnvironment());
+    const uint64 disturbed[] = {original, original | platform::detail::RoundTowardZeroBits(),
+                                original | platform::detail::DenormalsAreZeroBit()};
+    for (uint64 control : disturbed) {
+        platform::detail::WriteFloatingPointControl(control);
+        Inside inside;
+        RunWithRealtimeAudioFloatingPoint(
+            [](void* context) noexcept {
+                auto& state = *static_cast<Inside*>(context);
+                state.realtime = IsRealtimeAudioFloatingPointEnvironment();
+                state.deterministic = IsDeterministicFloatingPointEnvironment();
+                state.product = SubnormalProduct(MinimumNormal, 0.5);
+                state.third = OneThird();
+            },
+            &inside);
+        const uint64 after = platform::detail::ReadFloatingPointControl();
+        platform::detail::WriteFloatingPointControl(original);
+        CHECK(inside.realtime && !inside.deterministic);
+        CHECK(inside.product == 0.0);
+        CHECK(BitCast<uint64>(inside.third) == BitCast<uint64>(expectedThird));
+        CHECK(WithoutStatus(after) == WithoutStatus(control));
+    }
+
+    // 결정적 실행 안에서 부르면 FTZ가 켜지고, 끝나면 결정적 환경으로 돌아간다.
+    struct Nested {
+        bool inner = false;
+        bool restored = false;
+    } nested;
+    RunWithDeterministicFloatingPoint(
+        [](void* context) noexcept {
+            auto& state = *static_cast<Nested*>(context);
+            RunWithRealtimeAudioFloatingPoint(
+                [](void* innerContext) noexcept {
+                    *static_cast<bool*>(innerContext) = IsRealtimeAudioFloatingPointEnvironment();
+                },
+                &state.inner);
+            state.restored = IsDeterministicFloatingPointEnvironment();
+        },
+        &nested);
+    CHECK(nested.inner && nested.restored);
+    CHECK(IsDeterministicFloatingPointEnvironment());
+}
+
 } // namespace floating_point_environment_tests_file

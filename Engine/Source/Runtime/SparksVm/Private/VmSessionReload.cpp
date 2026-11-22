@@ -533,6 +533,9 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
     using Outcome = Result<VmReloadReport>;
     const VmLinkedModule* old = plan.old_;
     const VmLinkedModule* fresh = plan.fresh_;
+    // G5 주입(시험 전용)은 이 적용 하나에만 걸린다.
+    const bool injectRollback = injectRollback_;
+    injectRollback_ = false;
     // 조각 밖 경계에는 쓰기 기록이 없다(저장소 위치를 바꾸므로 남아 있으면 적용하지 않는다).
     if (closed_ || execution_.running_ || old == nullptr || fresh == nullptr ||
         !writes_.IsEmpty()) {
@@ -1164,6 +1167,12 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
         if (instance.enabled && !instance.isolated) {
             connected = Connect(moving[at].instance, nullptr, NoBytecodeIndex);
         }
+    }
+
+    // G5(SparksReload 6절): 연결 실패와 같은 되돌리기 경로를 밟는다.
+    if (connected && injectRollback) {
+        injectionFired_ = true;
+        connected = Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
     if (!connected) {

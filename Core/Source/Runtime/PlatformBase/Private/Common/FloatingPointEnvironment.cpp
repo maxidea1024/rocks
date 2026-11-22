@@ -110,12 +110,13 @@ bool IsDeterministicFloatingPointEnvironment() noexcept {
     return detail::IsExpected(detail::ReadFloatingPointControl());
 }
 
-bool RunWithDeterministicFloatingPoint(void (*function)(void* context) noexcept,
-                                       void* context) noexcept {
-    const uint64 saved = detail::ReadFloatingPointControl();
-    const bool changed = !detail::IsExpected(saved);
-    if (changed) {
-        detail::WriteFloatingPointControl(detail::MakeExpected(saved));
+namespace {
+
+// 제어 설정을 target으로 바꾸고 function(context)를 실행한 뒤 호출 전 값으로 되돌린다.
+void RunWithControl(uint64 saved, uint64 target, void (*function)(void* context) noexcept,
+                    void* context) noexcept {
+    if (target != saved) {
+        detail::WriteFloatingPointControl(target);
     }
 
     // 포인터를 compiler가 추적할 수 없게 세탁한다. 대상을 모르는 호출은 inline되지 않고(ThinLTO
@@ -130,8 +131,29 @@ bool RunWithDeterministicFloatingPoint(void (*function)(void* context) noexcept,
     if (restored != current) {
         detail::WriteFloatingPointControl(restored);
     }
+}
 
+} // namespace
+
+bool RunWithDeterministicFloatingPoint(void (*function)(void* context) noexcept,
+                                       void* context) noexcept {
+    const uint64 saved = detail::ReadFloatingPointControl();
+    const bool changed = !detail::IsExpected(saved);
+    RunWithControl(saved, changed ? detail::MakeExpected(saved) : saved, function, context);
     return changed;
+}
+
+bool IsRealtimeAudioFloatingPointEnvironment() noexcept {
+    const uint64 control = detail::ReadFloatingPointControl();
+    const uint64 flush = detail::FlushToZeroBit();
+    return (control & flush) != 0 && detail::IsExpected(control & ~flush);
+}
+
+void RunWithRealtimeAudioFloatingPoint(void (*function)(void* context) noexcept,
+                                       void* context) noexcept {
+    const uint64 saved = detail::ReadFloatingPointControl();
+    RunWithControl(saved, detail::MakeExpected(saved) | detail::FlushToZeroBit(), function,
+                   context);
 }
 
 } // namespace rocks::platform
