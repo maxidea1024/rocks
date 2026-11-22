@@ -25,7 +25,7 @@ internal static class GameProjectTests
             Assembly(Path.Combine(root, "assembly"));
             if (OperatingSystem.IsWindows())
             {
-                Shell(Path.Combine(root, "shell"));
+                await Shell(Path.Combine(root, "shell"));
             }
         }
         finally
@@ -662,7 +662,7 @@ internal static class GameProjectTests
 
     // 셸 메뉴 등록(Docs/Design/ProjectFiles.ko.md 12절, PJ8): 임시 하위 키를 Classes·선택기 키로 주어 실제 HKCU Classes에는 쓰지 않는다.
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
-    private static void Shell(string root)
+    private static async Task Shell(string root)
     {
         string FakeSdk(string name, int manifest, string engine, bool cli)
         {
@@ -674,6 +674,10 @@ internal static class GameProjectTests
                 Write(sdk, "Tools/Rocks.Build.Cli/Rocks.Build.Cli.dll", "");
             }
 
+            // 메뉴 shim이 부르는 SDK 스크립트의 가짜다: 받은 -Project를 파일에 적고 종료 코드를 돌려준다.
+            Write(sdk, "Build/GenerateProjectFiles.ps1",
+                "param([string] $Project)\nSet-Content -LiteralPath (Join-Path $PSScriptRoot 'received.txt') -Value $Project -Encoding utf8NoBOM\n" +
+                "exit $(if ($Project.EndsWith('fail.rocksproject')) { 1 } else { 0 })\n");
             return sdk;
         }
 
@@ -682,56 +686,118 @@ internal static class GameProjectTests
         string high = FakeSdk("High", current, "0.2.0", true);
         string oldManifest = FakeSdk("OldManifest", current - 1, "0.3.0", true);
         string noCli = FakeSdk("NoCli", current, "0.4.0", false);
+        string broken = FakeSdk("Broken", current, "0.5.0", true);
+        File.WriteAllText(Path.Combine(broken, SdkAssociation.ManifestName), "{ \"Version\": " + current + ", \"EngineVersion\": [ }");
         var registry = new MemoryRegistry();
-        foreach (string sdk in new[] { low, high, oldManifest, noCli, Path.Combine(root, "Removed") })
+        foreach (string sdk in new[] { low, high, oldManifest, noCli, broken, Path.Combine(root, "Removed") })
         {
             registry.Register(sdk);
         }
 
         const string testsKey = @"Software\Rocks\Tests";
         string scope = testsKey + @"\" + Guid.NewGuid().ToString("B");
-        string classes = scope + @"\Classes";
-        string selector = scope + @"\ProjectSelector";
+        var locations = new ShellLocations(scope + @"\Classes", scope + @"\ProjectSelector", Path.Combine(root, "shim", "ShellMenu.ps1"));
+        string pwsh = Environment.GetEnvironmentVariable("PATH")!.Split(Path.PathSeparator).Select(directory => Path.Combine(directory.Trim('"'), "pwsh.exe"))
+            .First(File.Exists);
+        string? Value(string key, string name = "")
+        {
+            using var opened = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(key);
+            return opened?.GetValue(name) as string;
+        }
+
+        bool HasValue(string key, string name)
+        {
+            using var opened = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(key);
+            return opened?.GetValueNames().Contains(name, StringComparer.OrdinalIgnoreCase) == true;
+        }
+
+        string verb = locations.Classes + @"\SystemFileAssociations\.rocksproject\shell\rocksgenproj";
         try
         {
-            ShellSelection selection = ShellRegistration.Write(registry, classes, selector);
-            string cli = Path.Combine(high, "Tools", "Rocks.Build.Cli", "Rocks.Build.Cli.dll");
-            Require(Same(selection.Sdk, high) && Same(selection.Cli, cli), "the selector is the highest valid SDK: " + selection.Sdk);
-            string? Value(string key, string name = "")
-            {
-                using var opened = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(key);
-                return opened?.GetValue(name) as string;
-            }
+            // 연결이 비어 있으면 기본 연결을 잡는다. 동사는 SystemFileAssociations에 있다. 손상된 manifest는 그 SDK만 버린다.
+            ShellSelection selection = ShellRegistration.Write(registry, locations, pwsh);
+            Require(Same(selection.Sdk, high), "the selector is the highest valid SDK: " + selection.Sdk);
+            string command = Value(verb + @"\command")!;
+            Require(Value(verb) == "Generate Visual Studio project files" && command == ShellRegistration.MenuCommand(pwsh, locations.Shim) &&
+                !command.Contains("cmd.exe", StringComparison.OrdinalIgnoreCase) && command.EndsWith("-Project \"%1\"", StringComparison.Ordinal),
+                "shell menu verb and command: " + command);
+            Require(Value(locations.Classes + @"\.rocksproject") == ShellRegistration.ProgId &&
+                HasValue(locations.Classes + @"\.rocksproject\OpenWithProgids", ShellRegistration.ProgId) &&
+                Same(Value(locations.Selector, "Sdk")!, high) && Value(locations.Selector, "Shim") == locations.Shim, "association and selector values");
 
-            string command = Value(classes + @"\" + ShellRegistration.ProgId + @"\shell\rocksgenproj\command")!;
-            Require(Value(classes + @"\.rocksproject") == ShellRegistration.ProgId && Value(classes + @"\" + ShellRegistration.ProgId + @"\shell\rocksgenproj") ==
-                "Generate Visual Studio project files" && command == ShellRegistration.MenuCommand(selection.Cli) &&
-                command.Contains("projectfiles --project \"%1\"", StringComparison.Ordinal) && command.Contains("shell-register again", StringComparison.Ordinal),
-                "shell menu values: " + command);
-            Require(Same(Value(selector, "Sdk")!, high) && Same(Value(selector, "Cli")!, cli), "selector values");
+            // shim 회귀: %·!·공백·괄호가 든 경로를 그대로 넘기고, 실패하면 종료 코드가 남는다. SDK 스크립트·dotnet이 없으면 안내한다.
+            async Task<ProcessResult> Menu(string project, IReadOnlyDictionary<string, string?>? environment = null) => await ProcessRunner.RunAsync(
+                // -NonInteractive: 실패 경로의 Enter 대기(Read-Host)가 시험을 멈추지 않게 한다(오류를 쓰고 종료 코드는 그대로다).
+                new(pwsh, ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", locations.Shim, "-Project", project], root, environment,
+                    Timeout: TimeSpan.FromMinutes(2)));
+            string tricky = Path.Combine(root, "%USERNAME% !x! (1)", "My Game.rocksproject");
+            var ran = await Menu(tricky);
+            Require(ran.ExitCode == 0 && File.ReadAllText(Path.Combine(high, "Build", "received.txt")).Trim() == tricky,
+                "the menu shim must pass the project path unexpanded: " + ran.StdOut + ran.StdErr);
+            var failed = await Menu(Path.Combine(root, "fail.rocksproject"));
+            Require(failed.ExitCode == 1, "a failed generation keeps its exit code: " + failed.ExitCode);
+            var withoutDotnet = await Menu(tricky, new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["PATH"] = Environment.GetFolderPath(Environment.SpecialFolder.System),
+                ["SystemRoot"] = Environment.GetEnvironmentVariable("SystemRoot")
+            });
+            Require(withoutDotnet.ExitCode == 1 && withoutDotnet.StdOut.Contains("needs the .NET SDK", StringComparison.Ordinal),
+                "the menu must explain a missing dotnet: " + withoutDotnet.StdOut + withoutDotnet.StdErr);
+            File.Delete(Path.Combine(high, "Build", "GenerateProjectFiles.ps1"));
+            var removed = await Menu(tricky);
+            Require(removed.ExitCode == 1 && removed.StdOut.Contains("shell-register again", StringComparison.Ordinal),
+                "the menu must explain a removed SDK: " + removed.StdOut + removed.StdErr);
 
             // 같은 엔진 버전이면 등록 ID ordinal 첫째다.
             string twin = FakeSdk("Twin", current, "0.2.0", true);
             registry.Register(twin);
             string expected = registry.List().Where(entry => Same(entry.Path, high) || Same(entry.Path, twin)).OrderBy(entry => entry.Id, StringComparer.Ordinal).First().Path;
-            Require(Same(ShellRegistration.Write(registry, classes, selector).Sdk, expected), "equal engine versions pick the first ID");
+            Require(Same(ShellRegistration.Write(registry, locations, pwsh).Sdk, expected), "equal engine versions pick the first ID");
 
-            // 지우기는 다른 프로그램이 가져간 .rocksproject 연결을 남긴다.
-            using (var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(classes + @"\.rocksproject"))
+            // 해제는 우리 값만 지운다: 처음부터 우리 연결이면 키까지 사라진다.
+            ShellRegistration.Remove(locations);
+            Require(Microsoft.Win32.Registry.CurrentUser.OpenSubKey(locations.Classes + @"\.rocksproject") is null &&
+                Microsoft.Win32.Registry.CurrentUser.OpenSubKey(locations.Classes + @"\SystemFileAssociations") is null &&
+                Microsoft.Win32.Registry.CurrentUser.OpenSubKey(locations.Classes + @"\" + ShellRegistration.ProgId) is null &&
+                Microsoft.Win32.Registry.CurrentUser.OpenSubKey(locations.Selector) is null && !File.Exists(locations.Shim), "shell-unregister removes what it wrote");
+
+            // 다른 프로그램의 연결을 미리 심어 두면: 등록은 기본값을 바꾸지 않고 OpenWithProgids에 더하며, 해제는 그 연결을 그대로 남긴다.
+            using (var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(locations.Classes + @"\.rocksproject"))
             {
                 key.SetValue("", "Other.Application");
             }
 
-            ShellRegistration.Remove(classes, selector);
-            Require(Value(classes + @"\.rocksproject") == "Other.Application" && Microsoft.Win32.Registry.CurrentUser.OpenSubKey(classes + @"\" + ShellRegistration.ProgId) is null &&
-                Microsoft.Win32.Registry.CurrentUser.OpenSubKey(selector) is null, "shell-unregister keeps another program's association");
+            using (var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(locations.Classes + @"\.rocksproject\OpenWithProgids"))
+            {
+                key.SetValue("Other.Application", Array.Empty<byte>(), Microsoft.Win32.RegistryValueKind.None);
+            }
 
-            // 유효한 SDK가 없으면 이유를 적은 오류다.
+            using (var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(locations.Classes + @"\SystemFileAssociations\.rocksproject\shell\othertool"))
+            {
+                key.SetValue("", "Other tool");
+            }
+
+            Write(high, "Build/GenerateProjectFiles.ps1", "exit 0\n");
+            ShellRegistration.Write(registry, locations, pwsh);
+            Require(Value(locations.Classes + @"\.rocksproject") == "Other.Application" &&
+                HasValue(locations.Classes + @"\.rocksproject\OpenWithProgids", ShellRegistration.ProgId) &&
+                HasValue(locations.Classes + @"\.rocksproject\OpenWithProgids", "Other.Application") && Value(verb) is not null,
+                "shell-register keeps another program's association and adds itself to OpenWithProgids");
+            ShellRegistration.Remove(locations);
+            Require(Value(locations.Classes + @"\.rocksproject") == "Other.Application" &&
+                HasValue(locations.Classes + @"\.rocksproject\OpenWithProgids", "Other.Application") &&
+                !HasValue(locations.Classes + @"\.rocksproject\OpenWithProgids", ShellRegistration.ProgId) &&
+                Value(locations.Classes + @"\SystemFileAssociations\.rocksproject\shell\othertool") == "Other tool" && Value(verb) is null,
+                "shell-unregister keeps another program's association, its OpenWithProgids entry and its verbs");
+
+            // 유효한 SDK가 없으면 이유를 적은 오류다(손상된 manifest 포함).
             var invalid = new MemoryRegistry();
             invalid.Register(oldManifest);
             invalid.Register(noCli);
-            string error = Error(() => ShellRegistration.Write(invalid, classes, selector));
-            Require(error.Contains("manifest version", StringComparison.Ordinal) && error.Contains("no build CLI", StringComparison.Ordinal), "no valid selector SDK: " + error);
+            invalid.Register(broken);
+            string error = Error(() => ShellRegistration.Write(invalid, locations, pwsh));
+            Require(error.Contains("manifest version", StringComparison.Ordinal) && error.Contains("no build CLI", StringComparison.Ordinal) &&
+                error.Contains("unreadable SDK manifest", StringComparison.Ordinal), "no valid selector SDK: " + error);
         }
         finally
         {

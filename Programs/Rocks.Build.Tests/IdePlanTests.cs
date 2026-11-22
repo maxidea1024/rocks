@@ -414,6 +414,18 @@ internal static class IdePlanTests
         IReadOnlyList<SingleFileResult> failed = await SingleFileCompile.RunAsync(single, [broken, spaced], CancellationToken.None);
         Check(failed[0].Process.ExitCode != 0 && failed[1].Process.ExitCode == 0, "a compiler failure is reported per file and the next file still compiles");
 
+        // 원본이 없어진 기록은 다음 실행이 지운다. Windows는 대소문자가 다른 경로도 같은 object 이름이다(디스크 철자로 해시).
+        string orphan = Path.Combine(output, SingleFileCompile.DirectoryName, "0000000000000000");
+        File.WriteAllText(orphan + ".json", "{ \"source\": \"" + Path.Combine(source, "Gone.cpp").Replace("\\", "\\\\") + "\" }");
+        File.WriteAllText(orphan + (request.Toolchain.Platform == NativePlatform.Windows ? ".obj" : ".o"), "x");
+        await SingleFileCompile.RunAsync(single, [spaced], CancellationToken.None);
+        Check(!File.Exists(orphan + ".json") && !File.Exists(orphan + ".obj") && !File.Exists(orphan + ".o"), "records of removed sources are cleaned up");
+        if (OperatingSystem.IsWindows())
+        {
+            Check(SingleFileCompile.ObjectPath(single, spaced.ToUpperInvariant()) == SingleFileCompile.ObjectPath(single, spaced),
+                "a differently cased path names the same object");
+        }
+
         // 계획에 없는 소스·헤더는 아무것도 컴파일하기 전에 거부한다. 다른 타깃 안내를 붙인다.
         string unplanned = Path.Combine(source, "Unplanned.cpp");
         File.WriteAllText(unplanned, "int Unplanned() noexcept { return 0; }\n");

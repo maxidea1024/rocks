@@ -226,8 +226,7 @@ internal static class IdeScriptsTests
         }
 
         string[] Build(params string[] extra) => ["build", "--root", repository, "--target", SmallTarget, "--configuration", "Debug", .. extra];
-        // 터미널(CLI 직접)에서는 note 형식이다(Rocks.proj의 -warnAsError가 경고 형식을 오류로 바꾸지 않게, 9절).
-        bool Stale(string output) => output.Contains("note RPF0001:", StringComparison.Ordinal);
+        bool Stale(string output) => output.Contains("warning RPF0001:", StringComparison.Ordinal);
         await Cli("projectfiles", "--root", repository);
         Require(!Stale(await Cli(Build())), "a fresh build reported stale project files");
         foreach (string[] mode in new[] { new[] { "--unity", "off" }, ["--adaptive", "off"], ["--pch", "off"] })
@@ -410,6 +409,17 @@ internal static class IdeScriptsTests
             }
         }
 
+        // 이 타깃이 컴파일하지 않는 파일은 그 파일을 컴파일하는 타깃 이름을 안내한다(원천은 1단계만, 7.4절).
+        // LaunchTests 타깃의 소스다(MathBench는 컴파일하지 않는다).
+        string other = Directory.GetFiles(Path.Combine(repository, "Programs", "LaunchTests"), "*.cpp", SearchOption.AllDirectories)
+            .Order(StringComparer.Ordinal).First();
+        {
+            var elsewhere = await ProcessRunner.RunAsync(new("dotnet", [cli, "build", "--root", repository, "--target", SmallTarget, "--configuration", "Debug",
+                "--compiler", Compiler(build), "--files", other], repository, Timeout: TimeSpan.FromMinutes(10)));
+            Require(elsewhere.ExitCode != 0 && elsewhere.StdErr.Contains("is not compiled by this target and configuration; it is compiled by", StringComparison.Ordinal),
+                "compiling another target's file must name the targets that compile it: " + elsewhere.StdErr);
+        }
+
         var withoutProbes = await ProcessRunner.RunAsync(new("dotnet", ["msbuild", Path.Combine(repository, "Rocks.proj"), "-t:Build", "-nologo",
             "-p:RocksTarget=" + SmallTarget, "-p:Configuration=Debug", "-p:Compiler=" + Compiler(build)], repository));
         Require(withoutProbes.ExitCode == 0, "building after removing the selection probes failed: " + withoutProbes.StdOut);
@@ -494,6 +504,11 @@ internal static class IdeScriptsTests
         IReadOnlyDictionary<string, string?>? environment, bool expectSuccess)
     {
         string? msbuild = await ProjectFilesWriterTests.VisualStudioMSBuildAsync();
+        // ROCKS_REQUIRE_VS_MSBUILD=1이면 Visual Studio 18 MSBuild 경로를 반드시 탄다(VS 18이 있는 PC·CI 이미지용).
+        Require(msbuild is not null || Environment.GetEnvironmentVariable("ROCKS_REQUIRE_VS_MSBUILD") != "1",
+            "ROCKS_REQUIRE_VS_MSBUILD=1 but no Visual Studio 18 MSBuild with the ClangCL toolset was found");
+        Console.WriteLine(msbuild is not null ? $"compile one file ({selected}): Visual Studio MSBuild NMakeCompileSelectedFiles"
+            : $"compile one file ({selected}): evaluated NMakeCompileFileCommandLine through cmd (no Visual Studio 18)");
         if (msbuild is not null)
         {
             // 명령줄 -p:는 ';'를 속성 구분자로 읽으므로 %3B로 이스케이프한다(MSBuild가 값에서 되돌린다).

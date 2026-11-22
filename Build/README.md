@@ -25,7 +25,7 @@ Visual Studio 솔루션·프로젝트 파일(UE GenerateProjectFiles 대응, [�
 - 요구: Visual Studio 2026, 구성 요소 "C++ Clang tools for Windows"(`Microsoft.VisualStudio.Component.VC.Llvm.ClangToolset` — IntelliSense가 ClangCL 모드로 돈다), PowerShell 7(`pwsh`).
 - Visual Studio의 빌드·다시 빌드·정리는 `Build/IdeBuild.bat`를 거쳐 `Rocks.Build.Cli build`·`clean`을 부른다. 생성할 때의 clang-cl을 그대로 쓰므로 IDE 빌드 뒤 같은 구성의 `Rocks.proj` 빌드는 0 action이다. 솔루션 빌드는 저장소마다 잠금 하나로 프로젝트를 하나씩 빌드한다.
 - 파일 하나 컴파일(Ctrl+F7)은 `build --files <경로>`(게임은 `game --files`)를 부른다: 메타 생성을 맞춘 뒤 그 소스의 논리 명령(IntelliSense와 같은 명령)을 `<출력>/SingleFile/<해시>.obj`로 돌리고, 평소 object·증분 기록은 건드리지 않는다. 헤더는 고를 수 없다.
-- 소스·모듈 규칙·도구 모음이 바뀌면 빌드가 `RPF0001`로 재생성을 알린다(Visual Studio 빌드에서는 오류 목록의 경고, 터미널에서는 `note` 줄 — `-warnAsError`로 빌드를 실패시키지 않는다). 자동으로 다시 만들지 않는다.
+- 소스·모듈 규칙·도구 모음이 바뀌면 빌드가 `warning RPF0001`(Visual Studio 오류 목록에도 나온다)로 재생성을 알린다. 저장소 `Directory.Build.rsp`의 `-warnNotAsError:RPF0001` 덕분에 `-warnAsError`에서도 빌드를 실패시키지 않는다. 자동으로 다시 만들지 않는다.
 - 시작 프로젝트는 처음 한 번 고른다("Set as Startup Project" — 솔루션 직렬화기가 항목을 이름순으로 써서 생성기가 정할 수 없다).
 - `Rocks.proj`의 `BootstrapTools`도 같은 잠금과 도구 지문(`Build/Tools.ps1`, `out/dotnet/.rocks-tools.json`)을 쓴다. 그 뒤의 빌드 단계는 잠금 밖이라 터미널 빌드 도중 Visual Studio가 도구 원본 변경으로 도구를 다시 빌드하면 겹칠 수 있다.
 - 루트에 `Rocks.proj`와 `Rocks.slnx`가 함께 있으므로 `dotnet msbuild`·`dotnet build`에는 늘 `Rocks.proj`를 적는다(적지 않으면 MSB1011).

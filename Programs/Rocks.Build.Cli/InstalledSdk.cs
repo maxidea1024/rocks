@@ -449,7 +449,8 @@ public static class InstalledSdk
         if (options.TryGetValue(SingleFileCommand.Option, out string? files))
         {
             return await SingleFileCommand.RunAsync(GamePlanning.Request(toolchain, configuration, project, output, plan.Modules, targets, sdk, engineVersion,
-                BuildCommand.Jobs(options)), files, project, cancellationToken);
+                BuildCommand.Jobs(options)), files, project, cancellationToken, SingleFileCommand.GameTargets(project, sdk, rulesPath, rules.Target.Name,
+                projectDescriptor, availablePlugins, toolchain, configuration, sdkModules, engineVersion));
         }
 
         var result = await new NativeBuildEngine().BuildAsync(GamePlanning.Request(toolchain, configuration, project, output, plan.Modules, targets, sdk,
