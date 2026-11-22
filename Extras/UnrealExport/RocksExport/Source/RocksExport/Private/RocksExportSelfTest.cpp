@@ -7,6 +7,10 @@
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/Texture.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialExpression.h"
+#include "Materials/MaterialExpressionComment.h"
+#include "Materials/MaterialInstanceConstant.h"
 #include "MeshDescription.h"
 #include "SkeletalMeshAttributes.h"
 #include "Dom/JsonObject.h"
@@ -949,6 +953,180 @@ void RocksExportSelfTest::RunAnimationExtraction(TArray<FString>& Errors)
 	IFileManager::Get().DeleteDirectory(*Root, false, true);
 }
 
+void RocksExportSelfTest::RunMaterialExtraction(TArray<FString>& Errors)
+{
+	using namespace RocksExportSelfTestPrivate;
+
+	static const TCHAR* const GridPath = TEXT("/Engine/EngineMaterials/M_Grid.M_Grid");
+	static const TCHAR* const InstancePath = TEXT("/Engine/EngineMaterials/Widget3DPassThrough_Translucent_OneSided.Widget3DPassThrough_Translucent_OneSided");
+	static const TCHAR* const DepthPath = TEXT("/Engine/ArtTools/RenderToTexture/Materials/M_RenderNormalizedDepth_01.M_RenderNormalizedDepth_01");
+	static const TCHAR* const CollectionPath = TEXT("/Engine/ArtTools/RenderToTexture/Materials/MPC_R2T.MPC_R2T");
+	static const TCHAR* const FunctionCallClass = TEXT("MaterialExpressionMaterialFunctionCall");
+	IAssetRegistry::GetChecked().SearchAllAssets(true);
+	UMaterial* Grid = LoadObject<UMaterial>(nullptr, GridPath);
+	UMaterialInstanceConstant* Instance = LoadObject<UMaterialInstanceConstant>(nullptr, InstancePath);
+	Expect(Errors, Grid != nullptr && Grid->GetEditorOnlyData() != nullptr && Instance != nullptr && Instance->Parent != nullptr,
+		TEXT("cannot load the engine grid material or the widget material instance"));
+	if (Grid == nullptr || Grid->GetEditorOnlyData() == nullptr || Instance == nullptr || Instance->Parent == nullptr)
+	{
+		return;
+	}
+
+	const auto Dump = [](UObject& Object)
+	{
+		FRocksPropertyDumper Dumper(&Object);
+		FRocksJsonWriter Writer(FRocksJsonWriter::EStyle::Compact);
+		Dumper.DumpObject(&Object, Writer);
+		return Utf8ToString(Writer.Finish());
+	};
+
+	const FString Before = Dump(*Grid);
+	const FString Root = SelfTestDirectory() / TEXT("Material");
+	IFileManager::Get().DeleteDirectory(*Root, false, true);
+	const FString Output = Root / TEXT("Material.rxbundle");
+	FRocksExportOptions Options;
+	Options.OutputDirectory = Output;
+	Options.bClosure = false;
+	Options.Selections = {GridPath, InstancePath, DepthPath};
+	FRocksExportResult Result;
+	Expect(Errors, FRocksExporter::Export(Options, Result), FString::Printf(TEXT("material export: %s"), *Result.Error));
+	Expect(Errors, Dump(*Grid) == Before, TEXT("material extraction changed the asset"));
+
+	const auto Load = [&Output](const TCHAR* Path, TArray<uint8>& Json)
+	{
+		return LoadBytes(Output / FRocksBundleWriter::AssetFileForPackage(FSoftObjectPath(Path).GetLongPackageName()), Json) ? ParseJson(Json) : nullptr;
+	};
+
+	const auto HasDependency = [](const TSharedPtr<FJsonObject>& Asset, const FString& Path)
+	{
+		for (const TSharedPtr<FJsonValue>& Dependency : Asset->GetArrayField(TEXT("dependencies")))
+		{
+			if (Dependency->AsObject()->GetStringField(TEXT("objectPath")) == Path)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	};
+
+	TArray<uint8> GridJson;
+	TArray<uint8> InstanceJson;
+	TArray<uint8> DepthJson;
+	const TSharedPtr<FJsonObject> GridAsset = Load(GridPath, GridJson);
+	const TSharedPtr<FJsonObject> InstanceAsset = Load(InstancePath, InstanceJson);
+	const TSharedPtr<FJsonObject> DepthAsset = Load(DepthPath, DepthJson);
+	Expect(Errors, GridAsset.IsValid() && InstanceAsset.IsValid() && DepthAsset.IsValid(), TEXT("material JSON missing"));
+	if (!GridAsset.IsValid() || !InstanceAsset.IsValid() || !DepthAsset.IsValid())
+	{
+		return;
+	}
+
+	// 노드: expression 다음 comment, UE 배열 순서. 이름·클래스와 입력 연결(대상 노드 이름·출력 번호)이 UE 그래프와 같다.
+	TArray<const UMaterialExpression*> Expected;
+	for (const TObjectPtr<UMaterialExpression>& Expression : Grid->GetExpressions())
+	{
+		Expected.Add(Expression.Get());
+	}
+
+	for (const TObjectPtr<UMaterialExpressionComment>& Comment : Grid->GetEditorComments())
+	{
+		Expected.Add(Comment.Get());
+	}
+
+	const TSharedPtr<FJsonObject> GridData = GridAsset->GetObjectField(TEXT("data"));
+	const TArray<TSharedPtr<FJsonValue>>& Nodes = GridData->GetArrayField(TEXT("nodes"));
+	bool bNodes = Nodes.Num() == Expected.Num();
+	bool bFunctions = true;
+	TSet<FString> Names;
+	for (int32 Index = 0; bNodes && Index < Nodes.Num(); ++Index)
+	{
+		const TSharedPtr<FJsonObject> Node = Nodes[Index]->AsObject();
+		UMaterialExpression* Expression = const_cast<UMaterialExpression*>(Expected[Index]);
+		bool bDuplicate = false;
+		Names.Add(Node->GetStringField(TEXT("name")), &bDuplicate);
+		bNodes = !bDuplicate && Node->GetStringField(TEXT("name")) == Expression->GetName() && Node->GetStringField(TEXT("class")) == Expression->GetClass()->GetName();
+		const TArray<TSharedPtr<FJsonValue>>& Inputs = Node->GetArrayField(TEXT("inputs"));
+		bNodes = bNodes && Inputs.Num() == Expression->CountInputs();
+		for (int32 Slot = 0; bNodes && Slot < Inputs.Num(); ++Slot)
+		{
+			const FExpressionInput* Input = Expression->GetInput(Slot);
+			const TSharedPtr<FJsonObject>* From = nullptr;
+			const bool bLinked = Inputs[Slot]->AsObject()->TryGetObjectField(TEXT("from"), From);
+			const bool bConnected = Input != nullptr && Input->Expression != nullptr;
+			bNodes = bLinked == bConnected
+				&& (!bConnected || ((*From)->GetStringField(TEXT("node")) == Input->Expression->GetName() && int32((*From)->GetNumberField(TEXT("output"))) == Input->OutputIndex));
+		}
+
+		if (Node->GetStringField(TEXT("class")) == FunctionCallClass)
+		{
+			const TSharedPtr<FJsonObject>* Function = nullptr;
+			bFunctions = bFunctions && Node->GetObjectField(TEXT("properties"))->TryGetObjectField(TEXT("MaterialFunction"), Function)
+				&& HasDependency(GridAsset, (*Function)->GetStringField(TEXT("objectPath")));
+		}
+	}
+
+	Expect(Errors, bNodes, TEXT("material nodes or links differ from the UE graph"));
+	Expect(Errors, bFunctions, TEXT("material function call without a dependency"));
+
+	// 출력 핀: 개별 핀(bUseMaterialAttributes 꺼짐)이고 BaseColor 연결이 UE 핀과 같다.
+	const FExpressionInput& BaseColor = Grid->GetEditorOnlyData()->BaseColor;
+	bool bPins = !Grid->bUseMaterialAttributes && BaseColor.Expression != nullptr;
+	bool bBaseColor = false;
+	for (const TSharedPtr<FJsonValue>& Pin : GridData->GetArrayField(TEXT("outputs")))
+	{
+		const TSharedPtr<FJsonObject> Item = Pin->AsObject();
+		const TSharedPtr<FJsonObject>* From = nullptr;
+		bPins = bPins && Item->GetStringField(TEXT("name")) != TEXT("MaterialAttributes");
+		if (bPins && Item->GetStringField(TEXT("name")) == TEXT("BaseColor"))
+		{
+			bBaseColor = Item->TryGetObjectField(TEXT("from"), From) && (*From)->GetStringField(TEXT("node")) == BaseColor.Expression->GetName();
+		}
+	}
+
+	Expect(Errors, bPins && bBaseColor, TEXT("material output pins differ from the UE material"));
+
+	// settings에는 노드·핀이 펼쳐지지 않는다(그래프는 data에만 있다).
+	const FString GridText = Utf8ToString(GridJson);
+	const int32 DataAt = GridText.Find(TEXT("\n  \"data\": "));
+	const FString SettingsText = DataAt != INDEX_NONE ? GridText.Left(DataAt) : GridText;
+	Expect(Errors, DataAt != INDEX_NONE && !SettingsText.Contains(TEXT("\"class\": \"/Script/Engine.MaterialExpression")) && !SettingsText.Contains(TEXT("\"BaseColor\"")),
+		TEXT("material settings expand graph nodes or output pins"));
+
+	// 컬렉션 참조 노드의 컬렉션이 dependencies에 있다.
+	Expect(Errors, HasDependency(DepthAsset, CollectionPath), TEXT("material parameter collection missing from dependencies"));
+
+	// 인스턴스: 부모 참조와 resolved(GetAllParametersOfType 전 종류의 합, scalar 값 일치).
+	const TSharedPtr<FJsonObject>* Parent = nullptr;
+	Expect(Errors, InstanceAsset->GetObjectField(TEXT("settings"))->TryGetObjectField(TEXT("Parent"), Parent) && (*Parent)->GetStringField(TEXT("objectPath")) == Instance->Parent->GetPathName()
+		&& HasDependency(InstanceAsset, Instance->Parent->GetPathName()), TEXT("material instance parent reference"));
+	int32 ParameterCount = 0;
+	for (int32 Type = 0; Type < int32(EMaterialParameterType::Num); ++Type)
+	{
+		TMap<FMaterialParameterInfo, FMaterialParameterMetadata> Parameters;
+		Instance->GetAllParametersOfType(EMaterialParameterType(Type), Parameters);
+		ParameterCount += Parameters.Num();
+	}
+
+	const TArray<TSharedPtr<FJsonValue>>& Resolved = InstanceAsset->GetObjectField(TEXT("data"))->GetArrayField(TEXT("resolved"));
+	bool bResolved = Resolved.Num() == ParameterCount && ParameterCount > 0;
+	for (const TSharedPtr<FJsonValue>& Entry : Resolved)
+	{
+		const TSharedPtr<FJsonObject> Item = Entry->AsObject();
+		if (Item->GetStringField(TEXT("type")) != TEXT("Scalar"))
+		{
+			continue;
+		}
+
+		float Value = 0.0f;
+		const FName Name(*Item->GetObjectField(TEXT("parameter"))->GetStringField(TEXT("Name")));
+		bResolved = bResolved && Instance->GetScalarParameterValue(FHashedMaterialParameterInfo(Name), Value) && float(Item->GetNumberField(TEXT("value"))) == Value;
+	}
+
+	Expect(Errors, bResolved, TEXT("material instance resolved parameters differ from GetAllParametersOfType"));
+	IFileManager::Get().DeleteDirectory(*Root, false, true);
+}
+
 bool RocksExportSelfTest::RunAll(TArray<FString>& Errors)
 {
 	RunSha256(Errors);
@@ -961,5 +1139,6 @@ bool RocksExportSelfTest::RunAll(TArray<FString>& Errors)
 	RunStaticMeshExtraction(Errors);
 	RunSkeletalExtraction(Errors);
 	RunAnimationExtraction(Errors);
+	RunMaterialExtraction(Errors);
 	return Errors.IsEmpty();
 }

@@ -16,6 +16,7 @@
 #include "RocksExportCommon.h"
 #include "RocksJsonWriter.h"
 #include "RocksAnimSequenceExtractor.h"
+#include "RocksMaterialExtractor.h"
 #include "RocksSkeletalMeshExtractor.h"
 #include "RocksSkeletonExtractor.h"
 #include "RocksStaticMeshExtractor.h"
@@ -97,13 +98,13 @@ namespace RocksExporterPrivate
 		}
 	}
 
-	// 범위 안 종류의 본문을 만든다(UX2a 텍스처, UX3a 정적 메시, UX7a 스켈레톤·스킨 메시, UX8a 애니메이션). 로드 실패는 에셋 수준
+	// 범위 안 종류의 본문을 만든다(UX2a 텍스처, UX3a 정적 메시, UX7a 스켈레톤·스킨 메시, UX8a 애니메이션, UX4a 머티리얼 계열). 로드 실패는 에셋 수준
 	// error 진단이다. blob 쓰기 실패만 false다.
 	static bool ExtractBody(FRocksExportAsset& Asset, FRocksBundleWriter& Bundle, FRocksAssetBody& OutBody, FString& OutError)
 	{
 		const bool bTexture = FRocksTextureExtractor::IsTextureClass(Asset.ClassName);
 		const bool bKnown = bTexture || Asset.ClassName == TEXT("StaticMesh") || Asset.ClassName == TEXT("Skeleton") || Asset.ClassName == TEXT("SkeletalMesh")
-			|| Asset.ClassName == TEXT("AnimSequence");
+			|| Asset.ClassName == TEXT("AnimSequence") || FRocksMaterialExtractor::IsMaterialClass(Asset.ClassName);
 		if (!Asset.bInScope || !bKnown)
 		{
 			return true;
@@ -130,6 +131,10 @@ namespace RocksExporterPrivate
 		else if (UAnimSequence* Sequence = Cast<UAnimSequence>(Object))
 		{
 			bExtracted = FRocksAnimSequenceExtractor::Extract(*Sequence, Bundle, OutBody, OutError);
+		}
+		else if (Object != nullptr && FRocksMaterialExtractor::IsMaterialClass(Asset.ClassName))
+		{
+			FRocksMaterialExtractor::Extract(*Object, OutBody);
 		}
 		else
 		{
