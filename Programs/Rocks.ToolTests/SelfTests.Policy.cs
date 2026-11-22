@@ -484,7 +484,8 @@ internal static partial class SelfTests
                 ""));
             NoFailures(PolicyChecks.InitializerListDeductions(temporary.Root));
 
-            // 중괄호 목록 범위와 auto 복사 초기화는 런타임·도구·시험 소스 어디서든 위반이다.
+            // 중괄호 목록 범위와 auto 복사 초기화는 래퍼를 직접 include하지 않으면 런타임·도구·시험 소스 어디서든 위반이고,
+            // 래퍼를 꺾쇠·따옴표로 include하면 허용이다. 주석 속 include는 인정하지 않는다.
             foreach (string source in new[] { "for (bool hasBase : {false, true}) {",
                 "for (ObjectGraphStage* stage : {&first, &second}) {", "for(int v:{1,2}){}",
                 "for (const auto& [key, value] : {Pair{1, 2}}) {", "auto values = {1, 2, 3};",
@@ -493,14 +494,32 @@ internal static partial class SelfTests
                 foreach (string file in new[] { probe, "Core/Source/Runtime/Core/Private/Probe.cpp",
                     "Engine/Source/Runtime/Probe/Public/Probe.h", "Programs/Sandbox/Private/Probe.cpp" })
                 {
-                    temporary.Write(file, "// first line\n" + source + "\n");
+                    temporary.Write(file, "// #include <Base/InitializerList.h>\n" + source + "\n");
                     var failures = PolicyChecks.InitializerListDeductions(temporary.Root);
                     Verify.That(failures.Count == 1 && failures[0].Line == 2 &&
                         failures[0].ToString().Contains("initializer-list-deduction", StringComparison.Ordinal),
                         $"initializer_list deduction escaped audit in {file}: {source}");
+                    temporary.Write(file, "#include <Base/InitializerList.h>\n" + source + "\n");
+                    NoFailures(PolicyChecks.InitializerListDeductions(temporary.Root));
+                    temporary.Write(file, "#include \"Base/InitializerList.h\"\n" + source + "\n");
+                    NoFailures(PolicyChecks.InitializerListDeductions(temporary.Root));
                     temporary.Write(file, "// clean\n");
                 }
             }
+
+            // <initializer_list> 직접 include는 래퍼 밖 어디서든(시험 포함) 위반이고 래퍼 자신만 허용이다.
+            foreach (string file in new[] { probe, "Core/Source/Runtime/Core/Private/Probe.cpp", "Programs/Sandbox/Private/Probe.cpp" })
+            {
+                temporary.Write(file, "#pragma once\n#include <initializer_list>\n");
+                var failures = PolicyChecks.InitializerListDeductions(temporary.Root);
+                Verify.That(failures.Count == 1 && failures[0].Line == 2 &&
+                    failures[0].ToString().Contains("initializer-list-header", StringComparison.Ordinal),
+                    $"direct <initializer_list> include escaped audit in {file}");
+                temporary.Write(file, "// clean\n");
+            }
+
+            temporary.Write("Core/Source/Runtime/Base/Public/Base/InitializerList.h", "#pragma once\n#include <initializer_list>\n");
+            NoFailures(PolicyChecks.InitializerListDeductions(temporary.Root));
         });
         suite.Add("Policy.RepositoryPythonFreeMainPath", () => NoFailures(PolicyChecks.PythonFreeMainPath(options.Root)));
         suite.Add("Policy.RuntimePositiveAndNegativeControls", () =>

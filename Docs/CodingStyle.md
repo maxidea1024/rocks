@@ -92,11 +92,13 @@
 
 ## 중괄호 목록 추론
 
-형식 추론이 `std::initializer_list`를 요구하는 문법을 쓰지 않는다. 엔진은 STL 헤더를 쓰지 않으므로 Android(NDK) 빌드에는 `<initializer_list>`가 없어 컴파일되지 않는다(Windows에서도 엔진 헤더만으로는 보이지 않는다. 다른 STL 헤더가 끼어 있으면 그 헤더가 간접으로 들여와 통과할 수 있다).
+형식 추론이 `std::initializer_list`를 요구하는 문법(중괄호 목록 range-for, auto 중괄호 복사 초기화)은 `<Base/InitializerList.h>`를 직접 include한 파일에서만 쓴다. 엔진은 STL 헤더를 쓰지 않으므로 이 헤더 없이는 Android(NDK) 빌드에 `std::initializer_list`가 보이지 않아 컴파일되지 않는다(Windows에서는 다른 STL 헤더가 간접으로 들여와 우연히 통과할 수 있다).
 
-- range-for의 범위를 중괄호 목록으로 쓰지 않는다: `for (bool x : {true, false})` 대신 `const bool cases[] = {true, false}; for (bool x : cases)`.
-- auto 변수를 중괄호 목록으로 복사 초기화하지 않는다: `auto values = {1, 2};` 대신 배열이나 `Array`.
-- 정책 검사 `initializer-list-deduction`(`PolicyChecks.InitializerListDeductions`)이 엔진 소유 C++ 소스 전체(시험 포함)에서 두 형태를 거부한다.
+- 허용 형태: `for (bool x : {true, false})`, `auto values = {1, 2};`. 지역 배열(`const bool cases[] = {true, false}; for (bool x : cases)`)도 여전히 쓸 수 있다.
+- `<initializer_list>`는 `Base/InitializerList.h`만 include한다. 다른 파일은 래퍼를 include한다(직접 include 금지 — 표준 헤더 철자를 한 곳에 모아 STL 예외 범위를 좁힌다).
+- `std::initializer_list` 이름을 코드에 직접 쓰는 일(컨테이너의 initializer_list 생성자 등)은 이 예외에 들지 않는다. Runtime의 `std::` 금지(`PolicyChecks.Runtime`)가 그대로 막는다. 필요하면 따로 결정한다.
+- 전역으로 열지 않는 이유: MSVC `<initializer_list>`는 `<cstddef>`·`<xtr1common>`·`yvals_core.h`를 함께 열어 PCH 없는 번역 단위마다 약 25 ms(2026-11-22 측정, Clang 22.1.8 `-fsyntax-only` 81 ms 대 55 ms)가 든다. `Base/Types.h`에 넣으면 공개 헤더 검사처럼 PCH를 쓰지 않는 모든 번역 단위가 이 비용을 낸다. 그래서 `Base/PlacementNew.h`와 같은 opt-in 래퍼로 둔다.
+- 정책 검사 `initializer-list-deduction`(`PolicyChecks.InitializerListDeductions`)이 엔진 소유 C++ 소스 전체(시험 포함)에서 래퍼를 직접 include하지 않은 파일의 두 형태를 거부하고, `initializer-list-header`가 래퍼 밖의 `<initializer_list>` 직접 include를 거부한다. 간접 include(다른 헤더가 래퍼를 include)는 인정하지 않는다. 쓰는 파일이 스스로 include해야 include 정리에 깨지지 않는다.
 
 ## 컴파일러 진단
 

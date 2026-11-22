@@ -1,6 +1,6 @@
 # 머티리얼 시스템(MaterialSystem) 설계
 
-기준일: 2026-11-20, 개정 6(초안). [엔진 구현 계획](EngineImplementationPlan.ko.md) 14.1·14.4–14.9절의 머티리얼 요구를 구현 스펙으로 정한다. 범위는 다음과 같다.
+기준일: 2026-11-22, 개정 7(초안). [엔진 구현 계획](EngineImplementationPlan.ko.md) 14.1·14.4–14.9절의 머티리얼 요구를 구현 스펙으로 정한다. 범위는 다음과 같다.
 - 머티리얼 에셋 모델(머티리얼·인스턴스·함수·레이어·파라미터 컬렉션)과 쿠킹 데이터
 - 그래프 스키마, typed IR, IR에서 HLSL을 만드는 코드 생성
 - 퍼뮤테이션, 파라미터 layout과 상수 식, 인스턴스 override와 static 변형
@@ -27,6 +27,7 @@ UE 근거는 UE 5.8.4(`release`, commit `f45729c0b6f097038e72b52d366a62baeca3275
 - [에셋 시스템](AssetSystem.ko.md)(개정 8): 에셋·참조 종류·에셋 너겟 키·Cooker.
 - [텍스처 스트리밍](TextureStreaming.ko.md)(개정 3) 결정 T4: 재질 sampling scale 공급.
 - [Renderer](Renderer.ko.md)(개정 3): GBuffer 배치·조명 평가·pass 목록과 pass 셰이더, 그리고 14절 "렌더러가 머티리얼에 요구하는 계약"(`SurfaceAttributes`와 머티리얼 함수, shading model·블렌드 모드·영역 번호표, pass별 경로·퍼뮤테이션, 경계표, 이 문서 요구의 처리). 이 문서는 그 계약에 맞춘다(10.1절). 두 문서의 정합 결과는 10.4절이다. 이 문서에서 "Renderer 스펙"이라 부른다.
+- [노드 그래프](NodeGraph.ko.md)(개정 2): 그래프 문서 모델(`GraphDocument`)·노드 서술 등록표·`GraphSchema`·변경·undo·복사·의미 바이트·migration. 머티리얼 그래프는 그 위의 도메인 schema다(3.2·4.3·5.2·5.5·14절).
 
 **용어 방침.** UE 구조는 따르되 이름은 Rocks 이름을 쓴다. UE의 클래스·함수·CVar 이름은 대응표(2절)와 "UE 5.8 방식" 표·근거에만 적는다. shader·pass·BSDF·closure·GBuffer·uniform·sampler·permutation처럼 업계에서 함께 쓰는 말은 그대로 쓴다. 계획 문서에 이미 있는 Rocks 이름(MaterialSchema·MaterialCompiler·MaterialRuntime·MaterialCook·CompileCoordinator·PreviewSession)은 그대로 쓴다.
 
@@ -116,12 +117,12 @@ UE는 번역기·에셋·실행 상태를 한 모듈에 두어 쿠커와 게임�
 
 | 모듈 | 계층 | 책임 | 의존 | 금지 |
 |---|---|---|---|---|
-| **MaterialSchema** | Engine Runtime | 그래프 데이터 타입(`MaterialGraph`·노드·간선·핀 키), 노드 descriptor 표(데이터만), 파라미터 schema, 품질 수준·기본 속성 묶음, `MaterialShaderTraits`, semantic hash. 영역·블렌드 모드·shading model 번호표는 참조만 한다(Renderer 소유, 10.4절 D2) | Core·MetaSchema·Serialization·ShaderCore(셰이더 타입 id만)·RenderData(번호표 C++ 정의, 10.4절 D2) | RHI·Graphics·RenderBase·ObjectRuntime 객체 포인터·노드 lowering 코드 |
+| **MaterialSchema** | Engine Runtime | 머티리얼 그래프 schema(`MaterialGraph` = NodeGraph `GraphDocument`, 도메인 `Material`)와 `GraphSchema` 구현, 노드 descriptor 표(데이터만), 파라미터 schema, 품질 수준·기본 속성 묶음, `MaterialShaderTraits`, semantic hash. 영역·블렌드 모드·shading model 번호표는 참조만 한다(Renderer 소유, 10.4절 D2) | Core·MetaSchema·Serialization·NodeGraph·ShaderCore(셰이더 타입 id만)·RenderData(번호표 C++ 정의, 10.4절 D2) | RHI·Graphics·RenderBase·ObjectRuntime 객체 포인터·노드 lowering 코드 |
 | **MaterialCompiler** | Engine Developer | 그래프 검증, 함수·레이어 펼치기, IR 생성·분석·최적화, HLSL 생성, 상수 식 생성, layout, 진단·원문 위치 지도 | MaterialSchema·ShaderCore·Core | 장치·프로세스 실행(셰이더 컴파일은 하지 않는다)·EditorFramework |
 | **MaterialRuntime** | Engine Runtime | `MaterialRenderState`, 상수 식 실행, 상수 블록 채움, 텍스처 handle 해석, 셰이더 집합 열기, 기본 머티리얼 대체 | MaterialSchema·RenderBase·ShaderCore·GraphicsTypes | ObjectRuntime·AssetRuntime(렌더 층 "Object 없음", 계획 3.1절)·그래프·컴파일러 |
 | **Material**(계획의 MaterialAssetBridge) | Engine Runtime | 에셋 클래스(`MaterialBase`·`Material`·`MaterialInstance`·`MaterialFunction`·`MaterialFunctionInstance`·`ParameterCollection`), `DynamicMaterialInstance`, 쿠킹 데이터 → `MaterialRenderState` 생성 | AssetRuntime·ObjectRuntime·MaterialSchema·MaterialRuntime | 컴파일러·셰이더 도구 |
 | **MaterialCook** | Engine Developer | 번역 너겟·셰이더 job 목록·쿠킹 처리기·퍼뮤테이션 보고 | Material·MaterialCompiler·RendererShaders(pass 셰이더 타입 목록)·AssetCooker·AssetNugget·ShaderCompiler | Release 링크 금지 |
-| **EditorMaterial** | Engine Editor | `CompileCoordinator`·`PreviewSession`·그래프 편집 명령(계획 14.6절) | 위 모듈·EditorBackend·Renderer | 화면 코드에서 shader 의미·검증 재구현 금지(계획 14.6절) |
+| **EditorMaterial** | Engine Editor | `CompileCoordinator`·`PreviewSession`·그래프 편집 명령(계획 14.6절) | 위 모듈·EditorBackend·Renderer·GraphView | 화면 코드에서 shader 의미·검증 재구현 금지(계획 14.6절) |
 
 계획과 다른 점:
 - **에셋 모듈 이름.** 계획의 MaterialAssetBridge는 에셋 클래스가 사는 곳이다. 텍스처 에셋 모듈이 `Texture`(AssetSystem 3절)이므로 `Material`로 맞춘다(결정 MD8).
@@ -129,16 +130,17 @@ UE는 번역기·에셋·실행 상태를 한 모듈에 두어 쿠커와 게임�
 - **MaterialSchema가 특성 타입을 가진다.** pass 셰이더 거르기 함수가 머티리얼 특성을 받아야 하는데, 이 거르기는 쿠커(Developer)와 게임(Runtime) 모두에서 실행된다. 그래서 장치 없는 MaterialSchema에 둔다.
 - **MaterialCompiler는 셰이더를 컴파일하지 않는다.** 그래프 → 원문까지만 하고, job 제출은 MaterialCook·CompileCoordinator가 ShaderCompiler(셰이더 시스템 3절)로 한다. 그래서 MaterialCompiler는 프로세스·도구 없이 시험된다(계획 MT08 headless).
 - **계획의 ShaderWorker**는 셰이더 시스템 이름 ShaderCompileWorker(셰이더 시스템 14절)다.
+- **그래프 공통 층.** 그래프 데이터 모델·변경·undo·복사·노드 등록표는 공통 모듈 `NodeGraph`([노드 그래프](NodeGraph.ko.md) 11절)에 있고, MaterialSchema는 그 위의 도메인 schema다. NodeGraph의 의존(Core·MetaSchema·Serialization)이 MaterialSchema와 같아 Runtime 배치가 유지된다. 그래프 편집 화면은 `GraphView`(Editor)다.
 
 의존 방향(→는 의존):
 
 ```text
-EditorMaterial → { MaterialCook, MaterialCompiler, Material, Renderer, EditorBackend }
+EditorMaterial → { MaterialCook, MaterialCompiler, Material, Renderer, EditorBackend, GraphView }
 MaterialCook   → { Material, MaterialCompiler, RendererShaders, 정점 입력 타입 선언(16절 MRB8), AssetCooker, AssetNugget, ShaderCompiler }
 MaterialCompiler → { MaterialSchema, ShaderCore, Core }
 Material(Runtime) → { AssetRuntime, ObjectRuntime, MaterialSchema, MaterialRuntime }
 MaterialRuntime → { MaterialSchema, RenderBase, ShaderCore, GraphicsTypes }
-MaterialSchema → { Core, MetaSchema, Serialization, ShaderCore, RenderData(번호표) }
+MaterialSchema → { Core, MetaSchema, Serialization, NodeGraph, ShaderCore, RenderData(번호표) }
 Renderer → { RendererShaders, MaterialRuntime, RenderBase, RenderGraph, … }   (Material 에셋 모듈은 모른다)
 RendererShaders(Renderer 3.2절) → { ShaderCore, RenderData, MaterialSchema }
 ```
@@ -184,9 +186,9 @@ UE는 파라미터 기본값을 `FMaterialCachedExpressionData`의 타입별 병
 
 ### 4.3 리플렉션과 저장
 
-- **그래프 저장.** `MaterialGraph`는 `ROCKS_STRUCT`다. 노드는 `Array<MaterialNodeRecord>`이고 노드별 속성은 노드 타입이 정한 `ROCKS_STRUCT`를 `InstancedStruct`(리플렉션 B9, ReflectionExtensions)로 담는다. 노드 위치·주석·접힘 같은 화면 데이터는 `MaterialGraphLayout` 구조체로 따로 둔다(semantic hash 밖, 5.5절).
-- **모르는 노드.** 등록되지 않은 `NodeTypeId`(plugin 비활성 등)는 속성 바이트를 그대로 보존하는 자리 노드로 읽는다(계획 14.6절). 출력에 닿으면 쿠킹 오류다(5.4절 V12).
-- **스키마 변경.** 노드 타입마다 `schemaVersion`을 두고 migration 함수를 등록한다(계획 14.6절). 핀 제거·이름 변경은 `PinKey`가 안정 키라 간선이 보존되며, 제거된 핀에 붙은 간선은 진단과 함께 끊는다.
+- **그래프 저장.** 머티리얼 에셋은 NodeGraph `GraphDocument`(도메인 `Material`)를 필드로 갖는다([노드 그래프](NodeGraph.ko.md) GD1·9.1절). 노드별 속성은 노드 타입이 정한 `ROCKS_STRUCT`의 리플렉션 Record 바이트(`PropertyRecord`, 노드 그래프 GD23)로 담는다. 속성 안의 에셋 참조는 `AssetId`로 저장해 AssetSystem 6.2절 의존 종류로 보고한다(노드 그래프 6.2절). 노드 위치·크기·접힘·주석 상자 같은 배치 데이터는 `GraphDocumentLayout`으로 따로 두고 EditorOnly로 표시한다(semantic hash 밖, 5.5절).
+- **모르는 노드.** 등록되지 않은 `NodeTypeId`(plugin 비활성 등)는 속성 바이트를 그대로 보존하는 자리 노드로 읽는다(계획 14.6절, 노드 그래프 GD14). 출력에 닿으면 쿠킹 오류다(5.4절 V12).
+- **스키마 변경.** 노드 타입마다 `schemaVersion`을 두고 migration 함수를 등록한다(계획 14.6절, 노드 그래프 10절). 핀 이름 변경은 `PinKey`가 안정 키라 간선이 보존된다. 사라진 핀에 간선이나 사용자 기본값이 있으면 고아 핀으로 남기고(노드 그래프 6.4절), 고아 핀에 닿은 간선은 번역 오류로 보고한다.
 - **파라미터 override.** 종류별 배열 `scalarOverrides`·`vectorOverrides`·`textureOverrides`·`dynamicBoolOverrides`·`staticOverrides`로 둔다. 원소는 `{ key : ParameterKey, value }` 구조체이고 `ParameterKey`는 9.2절이다. 텍스처 값은 `ObjectRef<Texture>` 멤버라 AssetSystem 6.1절의 패키지 사이 Hard 간선 관찰 대상(구조체 배열 원소의 참조 멤버)에 든다. `InstancedStruct`에 담으면 그 관찰 대상 밖이라 쓰지 않는다.
 
 ### 4.4 참조와 의존(AssetSystem 6.2절 종류)
@@ -228,12 +230,14 @@ Build 의존 순환(함수가 자기 자신을 부름, 인스턴스 부모 사�
 
 ### 5.2 노드·핀·간선
 
-- **그래프** = 노드 목록 + 간선 목록 + 출력 노드 하나(`MaterialOutput`). 함수 그래프는 입력·출력 노드를 여럿 가진다.
-- **노드** = `{ NodeId, NodeTypeId, schemaVersion, properties(InstancedStruct) }`. 핀은 노드 타입 descriptor가 정한다. 개수가 바뀌는 핀(임의 HLSL 노드의 입력, 함수 호출 노드의 입출력)은 노드 속성에서 핀 목록을 만드는 descriptor 함수가 정한다.
+형식은 [노드 그래프](NodeGraph.ko.md) 6절(문서·노드·간선·정규 순서·불변식 GI1–GI10)을 따른다. 이 절은 머티리얼 쪽 규칙만 적는다.
+
+- **그래프** = NodeGraph `GraphDocument`(도메인 `Material`). 출력 노드(`MaterialOutput`)는 하나다. schema의 `CreateDefaultNodes`가 만들고 문서당 하나 capability로 지킨다. 함수 그래프는 입력·출력 노드를 여럿 가진다.
+- **노드** = `{ NodeId, NodeTypeId, schemaVersion, properties(PropertyRecord) }`. 속성은 리플렉션 Record 바이트다(노드 그래프 GD23). 핀은 인스턴스로 저장하지 않는다. 저장하는 것은 입력 기본값 override와 고아 핀뿐이다(노드 그래프 GD3). 핀은 노드 타입 descriptor가 정한다. 개수가 바뀌는 핀(임의 HLSL 노드의 입력, 함수 호출 노드의 입출력)은 노드 속성에서 핀 목록을 만드는 descriptor 함수가 정한다.
 - **핀** = `{ PinKey, 방향, 타입 제약, 기본값(입력 핀), 단계 제약, 필수 여부 }`. `PinKey`는 노드 타입 descriptor가 선언한 안정 키다(계획 14.6절 PinId). 표시 이름·배열 순번과 독립이라 핀 이름을 바꿔도 키는 그대로다. 핀을 없애거나 합치면 노드 migration이 옛 키를 새 키로 옮긴다.
 - **간선** = `(출력 NodeId, 출력 PinKey) → (입력 NodeId, 입력 PinKey)`. 입력 핀은 간선 하나, 출력 핀은 여럿을 가진다.
-- **재경유(reroute)·주석**은 화면 노드다. 재경유는 IR을 만들 때 간선으로 접히며 semantic hash에서도 접힌 간선으로 센다. 그래서 재경유를 더해도 compile이 일어나지 않는다.
-- 노드 타입 descriptor(계획 14.6절 `MaterialNodeDescriptor`)는 MaterialSchema에 데이터로 두고, lowering 함수(노드 → IR)는 MaterialCompiler에 둔다. plugin은 둘을 같은 module lease로 등록한다(계획 14.6절 `RegisterMaterialNode`).
+- **재경유(reroute)**는 의미 비교 때 접히는 공통 노드 `Reroute`다(노드 그래프 6.1절). IR을 만들 때와 semantic hash를 계산할 때 재경유를 빼고 간선을 이어 붙인다. 그래서 재경유를 더하거나 옮겨도 compile이 일어나지 않는다. **주석**은 노드가 아니라 배치 데이터(`GraphDocumentLayout`의 주석 상자)다.
+- 노드 타입 descriptor(계획 14.6절 `MaterialNodeDescriptor`)는 NodeGraph `NodeTypeDescriptor`에 머티리얼 확장(단계·capability)을 더한 것이다. MaterialSchema에 데이터로 두고, lowering 함수(노드 → IR)는 MaterialCompiler에 둔다. plugin은 둘을 같은 module lease로 등록한다(계획 14.6절 `RegisterMaterialNode`).
 
 ### 5.3 타입 체계
 
@@ -282,15 +286,17 @@ Build 의존 순환(함수가 자기 자신을 부름, 인스턴스 부모 사�
 
 ### 5.5 안정 id와 semantic hash
 
-- `NodeId`: 노드를 만들 때 정하는 Guid다. 복사·붙여넣기는 새 Guid를 받는다. 저장 순서와 무관하다.
+- `NodeId`: 노드를 만들 때 정하는 Guid다(NodeGraph `GraphIdSource`, 노드 그래프 8.5절). 복사·붙여넣기는 새 Guid를 받는다. 저장 순서와 무관하다.
 - `ParameterId`: 파라미터 노드를 만들 때 정하는 Guid다. 이름을 바꿔도 유지된다. 에셋 복제는 새 Guid를 받는다.
-- **semantic hash**: 그래프의 의미 부분만 정규화해 SHA-256한 값이다.
-  - 노드를 `NodeId`로 정렬하고, 노드마다 (`NodeTypeId`, schemaVersion, 속성 정규 바이트)를 쓴다. 속성 정규 바이트는 리플렉션 binary codec 출력이다(기본값 포함, float는 bit 패턴).
-  - 간선은 (입력 NodeId, 입력 PinKey) 순으로 정렬해 쓴다. 재경유는 접은 뒤 센다.
+- **semantic hash**: [노드 그래프](NodeGraph.ko.md) 8.4절 의미 바이트를 SHA-256한 값이다. 머티리얼 schema의 `NormalizeSemanticNode`가 아래 규칙을 정한다.
+  - 재경유를 먼저 접는다.
+  - 노드를 `NodeId`로 정렬하고, 노드마다 (`NodeTypeId`, schemaVersion, 속성 Record 바이트, 입력 기본값 override, 활성 상태, 고아 핀)을 쓴다. 속성 Record 바이트는 리플렉션 binary codec 출력이다(기본값 포함, float는 bit 패턴).
+  - 간선은 노드 그래프 6.3절 정규 순서(입력 NodeId, 입력 PinKey, 출력 NodeId, 출력 PinKey)로 쓴다.
   - 출력에 닿지 않는 노드도 넣는다. 닿지 않는 노드를 고쳐도 키가 바뀌지만 번역 결과는 같으므로, 셰이더 집합 id(8.6절)가 같아 셰이더는 다시 쌓이지 않는다.
-  - 파라미터 노드의 기본값(scalar·vector·텍스처·dynamic bool)은 넣지 않는다(4.5절). static 파라미터 기본값은 넣는다.
-  - 화면 데이터(위치·크기·주석 문구·색·접힘·선택)는 넣지 않는다. 그래서 노드를 옮겨도 compile이 일어나지 않는다(계획 14.6·14.8절, MT04).
-- semantic hash는 에디터 상태 판정(현재 그래프와 마지막 성공 결과의 일치, 계획 14.8절)과 번역 너겟 키(12.2절)에 쓴다.
+  - 파라미터 노드의 기본값(scalar·vector·텍스처·dynamic bool)은 `NormalizeSemanticNode`가 걸러 넣지 않는다(4.5절). static 파라미터 기본값은 넣는다.
+  - 배치 데이터(`GraphDocumentLayout`: 위치·크기·접힘·주석 상자·색)와 선택은 넣지 않는다. 그래서 노드를 옮겨도 compile이 일어나지 않는다(계획 14.6·14.8절, MT04).
+  - hash는 migration을 거친 그래프로 계산한다. 쿠커는 저장 바이트를 읽은 뒤 같은 migration을 메모리에서 적용하고 계산하므로, 에디터에서 연 그래프와 쿠커의 번역 너겟 키가 같다(노드 그래프 8.4절).
+- semantic hash는 에디터 상태 판정(현재 그래프와 마지막 성공 결과의 일치, 계획 14.8절)과 번역 너겟 키(12.2절)에 쓴다. 편집 충돌 검사는 문서 revision 하나로 하고, compile 필요 여부는 semantic hash로 판정한다(노드 그래프 GD8).
 
 ### 5.6 출력 노드(영역별 typed output)
 
@@ -989,14 +995,14 @@ UE 대조:
 
 ## 14. 에디터 요구
 
-그래프 편집 화면은 범위 밖이다. 아래는 에디터가 쓰도록 이 문서의 모듈이 제공해야 하는 기능이다. 화면 Element는 UiToolkit `GraphView`(UiToolkit 6절 에디터 프레임워크 표의 "그래프 편집" 행)를 쓴다.
+그래프 편집 화면은 범위 밖이다. 아래는 에디터가 쓰도록 이 문서의 모듈이 제공해야 하는 기능이다. 그래프 데이터·편집 명령·undo는 공통 `NodeGraph`, 화면은 `GraphView` 모듈을 쓴다([노드 그래프](NodeGraph.ko.md) 11절, UiToolkit 6절 "그래프 편집" 행).
 
 | ID | 기능 | 제공 모듈 | 계획 대응 |
 |---|---|---|---|
-| E1 | 노드 타입 목록·검색 메타데이터(분류·키워드·핀 설명) | MaterialSchema | 14.5 "node 검색·palette" |
-| E2 | 편집 명령 API(노드 추가·삭제·연결·속성 변경)와 expected revision transaction, undo/redo 단위 | EditorMaterial(EditorBackend transaction) | 14.8 |
-| E3 | 연결 가능성 질의(핀 타입·단계·암묵 변환 결과) | MaterialCompiler(V1 부분 검사, 동기·빠름) | 14.5 "typed pin 연결" |
-| E4 | 진단 목록(노드·핀 위치, 심각도) | MaterialCompiler | MT02 |
+| E1 | 노드 타입 목록·검색 메타데이터(분류·키워드·핀 설명) | MaterialSchema(NodeGraph 노드 등록표·메뉴 질의, 노드 그래프 7·10절) | 14.5 "node 검색·palette" |
+| E2 | 편집 명령 API(노드 추가·삭제·연결·속성 변경)와 expected revision transaction, undo/redo 단위 | NodeGraph `GraphMutator`·patch(노드 그래프 8절) + EditorMaterial(EditorBackend transaction 연결, 도메인 명령) | 14.8 |
+| E3 | 연결 가능성 질의(핀 타입·단계·암묵 변환 결과) | MaterialSchema `GraphSchema::CanConnect`(타입 표·단계, 노드 그래프 7절) + MaterialCompiler(V1 부분 검사, 동기·빠름) | 14.5 "typed pin 연결" |
+| E4 | 진단 목록(노드·핀 위치, 심각도) | MaterialCompiler(형식은 NodeGraph `GraphDiagnostic`, 노드 그래프 GD19) | MT02 |
 | E5 | 컴파일 상태 이벤트(대기·번역·job 진행·성공·실패·마지막 성공과 다름) | CompileCoordinator | 14.8 |
 | E6 | 미리보기 세션(메시·조명·환경·카메라·렌더 경로 전환) offscreen 렌더 | PreviewSession + Renderer | 14.5 "실시간 확인" |
 | E7 | 노드 미리보기 요청·해상도·동시 수 상한 | CompileCoordinator | 14.5, 14.8 |
@@ -1005,7 +1011,7 @@ UE 대조:
 | E10 | 퍼뮤테이션 수(프로필별)·static 변형 추가 비용 표시 | MaterialCook(조회 API) | 14.1, 14.5 |
 | E11 | 인스턴스 편집 데이터(파라미터 그룹·정렬·범위·override 여부·reset) | Material(에셋 모듈) | 14.5 "인스턴스 편집" |
 | E12 | 의존 추적(이 함수를 쓰는 머티리얼, 이 머티리얼의 인스턴스) | AssetIndex 역방향 의존 | 14.5 "재사용" |
-| E13 | 모르는 노드 자리 표시·migration 결과 보고 | MaterialSchema | 14.6, MT10 |
+| E13 | 모르는 노드 자리 표시·migration 결과 보고 | NodeGraph(자리 노드·migration 실행, 노드 그래프 10절) + MaterialSchema(migration 함수) | 14.6, MT10 |
 | E14 | headless 번역·쿠킹 명령(`material-compile`·`asset-cook`) | MaterialCook·Programs/Commandlet | MT08 |
 
 화면 코드는 shader 의미·검증을 다시 구현하지 않는다(계획 14.6절). E3·E4는 화면이 부르는 유일한 검증 경로다.
@@ -1024,7 +1030,7 @@ UE 대조:
 | 셰이더 시스템 개정 MSR1–MSR11(16절) | 셰이더 시스템 | 각 단계 | |
 | A1–A4(AssetRuntime·ProjectLayout·에셋 너겟·Cooker) | 에셋 시스템 | MS3 | 에셋·너겟·쿠킹 |
 | A5(텍스처 에셋) | 에셋 시스템 | MS3 | 텍스처 파라미터 |
-| 리플렉션 B9(`InstancedStruct`·`OrderedMap`·`Optional`) | ReflectionExtensions | MS1 | 노드 속성 저장 |
+| NG0–NG3(문서 모델·Record 바이트 속성 GD23·`GraphMutator`·조각 codec·migration·고아 핀) | [노드 그래프](NodeGraph.ko.md) | MS1 | 그래프 데이터·노드 속성 저장·migration |
 | RB3–RB5(셰이더 집합·바인딩·상수 블록·정점 입력 타입) | 렌더 기반 | MS4 | 실행 시 바인딩 |
 | Renderer 스펙 14절 계약(개정 3)과 MRD1–MRD12 처리(Renderer 14.7절) | Renderer | MS2(계약)·MS4(구현) | 생성 원문 계약 |
 | Renderer RS0(Unlit base pass·depth prepass)·RS2(Deferred) | Renderer 17.2절 | MS4(RS0), MS-T6(RS2) | 렌더 연결과 두 경로 기준 영상. 반대로 Renderer RS0은 MS1–MS3과 MS4의 렌더 상태 부분을 선행으로 둔다(Renderer 17.1절) |
@@ -1035,7 +1041,7 @@ UE 대조:
 
 | 단계 | 내용 | 완료 기준 | 계획 대응 |
 |---|---|---|---|
-| MS1 | MaterialSchema: 그래프 데이터·노드 descriptor 등록·semantic hash·리플렉션 저장·migration 틀 | 저장/재열기 왕복, 화면 편집의 semantic hash 불변, 모르는 노드 보존, 노드 등록 해제 drain | MAT0 |
+| MS1 | MaterialSchema: NodeGraph 위 머티리얼 schema·노드 descriptor 등록·semantic hash 정규화(`NormalizeSemanticNode`)·migration 함수 | 저장/재열기 왕복, 화면 편집의 semantic hash 불변, 모르는 노드 보존, 노드 등록 해제 drain | MAT0 |
 | MS2 | MaterialCompiler: 검증(V1–V12)·IR·최적화·HLSL 생성·상수 식·layout(SF1 표면 범위) | MS-T1·T2·T3, 생성 원문이 엔진 컴파일 프로필 모든 형식에서 컴파일·워커 규칙 검사 통과, V 규칙 음성 대조 | MAT0 |
 | MS3 | Material 에셋 모듈·MaterialCook: 에셋 클래스·번역 너겟·job 목록·쿠킹 데이터·라이브러리 항목·퍼뮤테이션 보고 | MS-T4·T5, 원본 없이 쿠킹 데이터만으로 로드, 부분 쿠킹(함수 변경의 역의존만) | MAT0–MAT2 |
 | MS4 | MaterialRuntime + Renderer 연결: 렌더 상태·상수 식 실행·상수 블록·텍스처 handle·기본 머티리얼·두 렌더 경로 | MS-T6·T7·T8, 계획 MT03 | MAT1 |
@@ -1178,4 +1184,5 @@ UE 대조:
 | 3(초안) | 2026-11-18 | 셰이더 시스템 개정 13의 MSR1·MSR12·MSR13 반영 상태와 공유 출처일 때의 생성 규칙(13절 9항 대응)을 적었다 |
 | 4(초안) | 2026-11-18 | 셰이더 시스템 개정 16의 MSR5 반영 상태를 적었다(Renderer RQ13과 같은 개정) |
 | 5(초안) | 2026-11-18 | RenderBase 개정 16의 상수 버퍼 예산에 맞춰 9.7절 컬렉션 개수 근거와 크기 상한(GLES `vec4` 합에서 계산)을 고쳤다. 셰이더 시스템 개정 17의 공통 상한 폐기에 맞춰 backend 표 문구를 고쳤다 |
+| 7(초안) | 2026-11-22 | [노드 그래프](NodeGraph.ko.md) 개정 2의 GR2를 반영해 그래프 데이터 모델·변경·undo·의미 바이트를 공통 `NodeGraph`로 옮겼다. 3.2절: MaterialSchema가 NodeGraph에, EditorMaterial이 GraphView에 의존. 4.3절: 노드 속성을 `InstancedStruct`에서 Record 바이트로, 배치는 `GraphDocumentLayout`, 사라진 핀은 고아 핀. 5.2절: 형식은 노드 그래프 6절 참조, 재경유는 의미 비교 때 접히는 공통 노드, 주석은 배치 데이터. 5.5절: semantic hash를 의미 바이트 + `NormalizeSemanticNode`로 정의(입력 기본값·활성 상태·고아 핀 포함, 간선 정규 순서, migration 뒤 계산). 14절: E1–E4·E13 제공 모듈. 15.1절: MS1 선행을 B9에서 NG0–NG3으로. 15.2절: MS1 내용 |
 | 6(초안) | 2026-11-20 | 메시 에셋 스펙(MeshAnimationAssets MR4)과 Unreal 교환 스펙(UnrealExchange UXR4)의 요구를 받았다: 8.4절 메시 정점 입력 타입 둘(정적·skinned)과 morph 특성, 9.2절 외부 그래프 번역의 같은 이름 파라미터 병합·"공유" 표시 규칙, 11.3절 엔진 내장 "구운 표면" 머티리얼 |

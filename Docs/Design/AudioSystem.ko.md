@@ -1,6 +1,6 @@
 # 오디오 시스템 설계
 
-기준일: 2026-11-22, 개정 3(3.20절 AU1 구현 세부 DSP1, 3.13.2절 패닝을 UE 방식으로 고침). 개정 2: 8절 다른 문서 개정 반영. 소리를 재생하는 엔진 기능 전체를 정한다. 범위는 실시간 믹서, 장치 출력, 엔진·World 연결, 사운드 에셋, 임포트, 코덱·쿠킹, 스트리밍, 감쇠·공간화·동시 발음·가상화, 버스·효과·리버브 존, 진단이다. UE 5.8의 AudioMixerCore·AudioMixer·SignalProcessing·Engine 오디오 클래스와 AudioGameplayVolume 플러그인에 해당한다.
+기준일: 2026-11-22, 개정 5(DSP1 리뷰 반영 — HPF fs/2 clamp, HPF bypass 20 Hz, 리샘플러 비율 범위 UE와 같게). 개정 4: DSP1 구현 반영(리샘플러 고정소수점, 방위각 경계, 오류 코드). 개정 3: 3.20절 AU1 구현 세부 DSP1, 3.13.2절 패닝을 UE 방식으로 고침. 개정 2: 8절 다른 문서 개정 반영. 소리를 재생하는 엔진 기능 전체를 정한다. 범위는 실시간 믹서, 장치 출력, 엔진·World 연결, 사운드 에셋, 임포트, 코덱·쿠킹, 스트리밍, 감쇠·공간화·동시 발음·가상화, 버스·효과·리버브 존, 진단이다. UE 5.8의 AudioMixerCore·AudioMixer·SignalProcessing·Engine 오디오 클래스와 AudioGameplayVolume 플러그인에 해당한다.
 
 [엔진 구현 계획](EngineImplementationPlan.ko.md) §18은 AudioRT 무대기 계약(Object·파일 IO·동적 할당·lock·직접 로그 금지), voice handle 세대, stop mailbox, epoch ACK, 48 kHz·256/512 frame, 성능 목표를 이미 정했다. 이 문서는 그 계약을 구현 수준으로 구체화한다. 설계가 애매한 곳은 UE 방식을 따르고, Rocks 원칙(결정적 시험, `Result` 오류, 명시적 소유, 전역 생성자 금지)과 부딪히는 곳만 다르게 정한다(7절).
 
@@ -650,7 +650,7 @@ Master
 
 ### 3.20 AU1 구현 세부 — DSP1(개정 3)
 
-AU1을 둘로 나눈다. DSP1은 스레드·큐 없이 버퍼를 받는 순수 DSP와 형식 타입이고, DSP2(dynamics·biquad EQ·plate 리버브)와 Inline 믹서가 뒤따른다. 모두 `Audio` 모듈(`Engine/Source/Runtime/Audio`, `EngineModuleRules`, 유니티 빌드, 의존 Core)이고 이름공간은 `rocks::audio`다. 시험은 모듈 `Tests/`에 두고 FoundationTests에 등록한다. 모든 처리 함수는 `noexcept`이고 할당하지 않는다(할당은 생성 `TryCreate`에서만).
+AU1을 둘로 나눈다. DSP1은 스레드·큐 없이 버퍼를 받는 순수 DSP와 형식 타입이고, DSP2(dynamics·biquad EQ·plate 리버브)와 Inline 믹서가 뒤따른다. 모두 `Audio` 모듈(`Engine/Source/Runtime/Audio`, `EngineModuleRules`, 유니티 빌드, 의존 Core)이고 이름공간은 `rocks::audio`다. 시험은 모듈 `Tests/`에 두고 EngineTests(`FoundationTests.Build.cs`의 `EngineTestModules`)에 등록한다. 모든 처리 함수는 `noexcept`이고 할당하지 않는다(할당은 생성 `TryCreate`에서만).
 
 #### 3.20.1 형식(`Audio/AudioFormat.h`)
 
@@ -666,30 +666,33 @@ AU1을 둘로 나눈다. DSP1은 스레드·큐 없이 버퍼를 받는 순수 D
 
 #### 3.20.3 gain ramp(`Audio/GainRamp.h`)
 
-`GainRamp`: 현재값·목표값·남은 frame 수. `SetTarget(target, rampFrames)`(0이면 즉시), `Apply(PlanarView, frames)`. frame마다 현재값을 곱한 뒤 한 단계 진행하고, 남은 수가 0이 되는 frame에서 현재값을 목표값으로 정확히 맞춘다(부동소수 누적 오차가 목표에 남지 않게). 블록을 어떻게 나눠 불러도 같은 출력이다(시험).
+`GainRamp`: 현재값·목표값·남은 frame 수. `SetTarget(target, rampFrames)`(0이면 즉시, target은 유한해야 하고 아니면 assert — 출력 전체를 오염시키는 호출자 계약 위반), `Apply(PlanarView, frames)`. frame마다 현재값을 곱한 뒤 한 단계 진행하고, 남은 수가 0이 되는 frame에서 현재값을 목표값으로 정확히 맞춘다(부동소수 누적 오차가 목표에 남지 않게). 블록을 어떻게 나눠 불러도 같은 출력이다(시험).
 
 #### 3.20.4 1극 필터(`Audio/OnePoleFilter.h`)
 
 UE `FInterpolatedLPF`·`FInterpolatedHPF`(`Source/Runtime/SignalProcessing/Private/InterpolatedOnePole.cpp`)와 같은 식이다. source의 차폐·공기 흡수·사용자 LPF/HPF가 쓴다.
 - LPF: `b1 = exp(−π·clamp(2·fc/fs, 0, 1))`, `y = x + b1·(z − x)`, `z = y`.
-- HPF: `G = tan(π·min(fc, fs/2)/fs)`, `a0 = G/(1 + G)`, `v = (x − z)·a0`, `lp = v + z`, `z = v + lp`, `y = x − lp`. UE는 `FastTan` 근사를 쓰고 Rocks는 `PlatformMath::Tan`을 쓴다(7절).
+- HPF: fc를 UE `NyquistLimit`처럼 [0, fs/2 − 1 Hz]로 자른 뒤(`HighPassNyquistMargin` = 1 Hz) `G = tan(π·fc/fs)`, `a0 = G/(1 + G)`, `v = (x − z)·a0`, `lp = v + z`, `z = v + lp`, `y = x − lp`. UE는 `FastTan` 근사를 쓰고 Rocks는 `PlatformMath::Tan`을 쓴다(7절).
 - 계수 보간: `SetCutoff(fc, interpFrames)`는 계수를 `interpFrames` frame에 걸쳐 선형으로 옮긴다. 첫 설정은 보간 없이 바로 적용한다(UE `bIsFirstFrequencyChange`).
-- bypass: LPF 차단 주파수가 `FilterBypassFrequency` = 20000 Hz 이상이면 처리하지 않는다(UE `MAX_FILTER_FREQUENCY` — `Source/Runtime/AudioMixerCore/Public/AudioDefines.h:48`, 판정 `AudioMixerSourceManager.cpp:3589`). HPF는 `FilterMinFrequency` = 0 Hz 이하면 bypass다. bypass에서 다시 켤 때 상태 `z`는 0에서 시작한다.
+- bypass: LPF 차단 주파수가 `FilterBypassFrequency` − `FilterFrequencyTolerance`(20000 Hz − 1e-4) 이상이면 처리하지 않는다. HPF는 `FilterMinFrequency` + `FilterFrequencyTolerance`(20 Hz + 1e-4) 이하면 bypass다(UE `MAX_FILTER_FREQUENCY`·`MIN_FILTER_FREQUENCY`·`KINDA_SMALL_NUMBER` — `Source/Runtime/AudioMixerCore/Public/AudioDefines.h:47–48`, 판정 `AudioMixerSourceManager.cpp:3589–3590`). bypass에서 다시 켤 때 상태 `z`는 0에서 시작한다.
+- fs/2 clamp가 필요한 이유: a0 = 1이면 극이 −1에 놓여 상태 `z`가 Nyquist 성분을 따라 끝없이 커지고 `(x − z) + z`의 자릿수 소실이 출력 잡음이 된다(8 kHz 믹서에서 HPF 5 kHz 같은 정상 입력으로 닿는다). 1 Hz를 빼면 상태는 정상값 |a0/(1 − a0)|에 머문다(시험).
+- ramp 중 재설정은 마지막으로 쓴 계수에서 새 ramp를 시작한다.
 
 #### 3.20.5 선형 리샘플러(`Audio/LinearResampler.h`)
 
 UE 런타임 리샘플러 `FRuntimeResampler`(`Source/Runtime/SignalProcessing/Public/DSP/RuntimeResampler.h:13–16`)는 선형 보간이다. Rocks 런타임도 선형이고, 고품질 리샘플은 쿠킹(3.11.2절)이 맡는다.
-- 비율 r = 출력 1 frame당 입력 frame 진행량(= pitch × srcRate / mixRate). 범위 `[MinFrameRatio, MaxFrameRatio]` = [1/64, 64]이고 밖은 `InvalidArgument`.
-- 상태: 입력 위치 `position`(double, 현재 입력 블록의 첫 frame 기준), 직전 입력 frame(채널마다). 출력 frame n은 `x[i] + (x[i+1] − x[i])·frac`(i = floor(position), frac = position − i)이고 `x[-1]`은 직전 블록의 마지막 frame이다.
+- 비율 r = 출력 1 frame당 입력 frame 진행량(= pitch × srcRate / mixRate). 범위 `[MinFrameRatio, MaxFrameRatio]` = [0.01, 100]이고(UE `FRuntimeResampler`와 같음) 밖은 `InvalidArgument`.
+- 상태: 입력 위치 `position`(현재 입력 블록의 첫 frame 기준)과 비율은 32.32 고정소수점(int64)이고, 직전 입력 frame(채널마다)을 둔다. double 누적은 블록 기준점이 바뀌면 반올림이 달라져 블록 분할 불변을 지키지 못한다(개정 4에서 고침). `Process`는 다음 출력 위치보다 앞선 입력을 모두 소비한다(소비 수 = ceil(다음 위치)). 그래서 남는 위치는 (−1, 0]이다. 비율 보간 길이 상한은 `MaxRatioInterpFrames` = 2^20 frame이다. 출력 frame n은 `x[i] + (x[i+1] − x[i])·frac`(i = floor(position), frac = position − i)이고 `x[-1]`은 직전 `Process`가 마지막으로 소비한 frame이다(소비가 0인 호출은 바꾸지 않는다).
 - `SetFrameRatio(r, interpFrames)`: 비율을 `interpFrames` 출력 frame에 걸쳐 선형으로 옮긴다(UE `SetFrameRatio(InRatio, InNumFramesToInterpolate)`).
-- `InputFramesNeeded(outputFrames)`: 그만큼 내려면 필요한 입력 frame 수(보간 진행 중이면 그 경로를 따라 계산). `Process(input, output) -> 소비한 입력 frame 수`. 입력이 모자라면 `InvalidArgument`이고 상태를 바꾸지 않는다.
+- `InputFramesNeeded(outputFrames)`: 그만큼 내려면 필요한 입력 frame 수(보간 진행 중이면 그 경로를 따라 계산). `Process(input, output) -> 소비한 입력 frame 수`. `Process`는 입력 검사를 위해 `InputFramesNeeded`와 같은 경로를 한 번 더 계산한다(블록당 출력 frame 수만큼의 정수 연산, 성능 문제가 보이면 AU1 믹서에서 합친다). 입력이 모자라면 `InvalidArgument`이고 상태를 바꾸지 않는다.
 - 블록 분할 불변: 같은 입력·비율이면 출력 블록을 어떻게 나눠도 같은 PCM이다(시험). r = 1이고 위치가 정수면 입력을 그대로 낸다.
 
 #### 3.20.6 패너(`Audio/Panner.h`)
 
-- `ComputeAzimuthDegrees(listenerForward, listenerRight, listenerToSound)`: UE `GetAzimuth`와 같다. 앞·오른쪽 축 내적으로 2D 방향을 만들고 정규화한 뒤 `atan(|y/x|)`와 사분면으로 0–360°를 만든다(x ≈ 0이면 90°). 입력은 단위 벡터(cm 좌표계의 방향, 3.13.1절).
-- 스피커 방위각 표: 스테레오 FL 270°·FR 90°, 5.1·7.1은 FL 330°·FR 30°·SL 250°·SR 110°·BL 210°·BR 150°. FC·LFE는 방위각 계산에서 뺀다(UE `bAllowCenterChannel3DPanning` 기본 false — `Source/Runtime/Engine/Private/AudioDevice.cpp:374`).
+- `ComputeAzimuthDegrees(listenerForward, listenerRight, listenerToSound)`: UE `GetAzimuth`와 같다. 앞·오른쪽 축 내적으로 2D 방향을 만들고 사분면을 따져 0–360°를 만든다(atan2와 같음). UE는 x = 0·y < 0(정왼쪽)에서 90°를 내는 경계 결함이 있어 Rocks는 270°로 바로잡는다. 수평 성분이 없으면(수직) 0°다. 입력은 단위 벡터(cm 좌표계의 방향, 3.13.1절).
+- 스피커 방위각 표: 스테레오 FL 270°·FR 90°, 5.1·7.1은 FL 330°·FR 30°·SL 250°·SR 110°·BL 210°·BR 150°. 5.1의 서라운드 쌍은 SL·SR(±110°, ITU-R BS.775)로 고정한다. UE는 장치 채널 마스크를 따르며 Windows 5.1 기본 마스크는 BL·BR(210°·150°)이다(`WindowsMMDeviceInfoCache.cpp:206–215`). 장치가 back 마스크를 보고할 때 SL·SR을 BL·BR 스피커로 내보내는 일은 AU9에서 장치 마스크를 확인하며 정한다. FC·LFE는 방위각 계산에서 뺀다(UE `bAllowCenterChannel3DPanning` 기본 false — `Source/Runtime/Engine/Private/AudioDevice.cpp:374`).
 - `ComputeChannelGains(layout, azimuth, nonSpatializedAmount, lfeBleed, Span<float> out)`: 방위각을 감싸는 두 스피커를 찾고 각도 비율 f로 `next = sin(f·π/2)`, `prev = cos(f·π/2)`(0–1로 자름). 채널마다 `Lerp(pan, 1/채널 수, nonSpatializedAmount)`, LFE는 `lfeBleed`, 쌍이 아닌 채널의 pan은 0이다(UE `Get3DChannelMap` OmniDirectional — `AudioMixerDevice.cpp:2983–3125`).
+- UE `Get3DChannelMap`의 FC 하한(`VoiceCenterChannelVolume`과 `Max`)은 AU3에서 source 파라미터로 더한다(지금은 0).
 - 센터 전용(`centerChannelOnly`): 스테레오는 양쪽 1/√2, 그 밖은 FC = 1.
 - 스테레오 원본의 좌우 방위각 spread는 AU3에서 이 함수를 채널마다 두 번 부르는 것으로 한다.
 
@@ -698,7 +701,7 @@ UE 런타임 리샘플러 `FRuntimeResampler`(`Source/Runtime/SignalProcessing/P
 UE `FBaseAttenuationSettings::AttenuationEval`(`Source/Runtime/Engine/Private/Attenuation.cpp:170–258`)과 같은 식이다. 구 모양은 `distance = max(|d| − innerRadius, 0)`(같은 파일 145–149행).
 - `falloff = max(falloffDistance, 1)`, `d = distance × distanceScale`, `ε` = `AttenuationEpsilon` = 1e-4(UE `KINDA_SMALL_NUMBER`).
 - Linear `1 − d/falloff`, Logarithmic `−0.5·ln(max(d, ε)/falloff)`, Inverse `0.02/(max(d, ε)/falloff)`, LogReverse `d > falloff`면 0, 아니면 `1 + 0.5·ln(max(1 − d/falloff, ε))`, NaturalSound `α = d/falloff`에서 `10^(α·dBAtMax/20)`(Hold는 α를 0–1로 자름, Silent는 α ≥ 1이면 0, Continues는 자르지 않음, `dBAtMax` ≤ 0 — 기본 −60).
-- 결과는 0–1로 자른다. `Custom`(커브)은 AU7에서 Curves 모듈 커브로 더한다(지금 `EvaluateDistanceAttenuation`은 `Custom`이면 `UnsupportedSetting`).
+- 결과는 0–1로 자른다. `Custom`(커브)은 AU7에서 Curves 모듈 커브로 더한다(지금 `EvaluateDistanceAttenuation`은 `Custom`이면 `Unsupported`).
 
 #### 3.20.8 시험(DSP1)
 
@@ -706,9 +709,9 @@ UE `FBaseAttenuationSettings::AttenuationEval`(`Source/Runtime/Engine/Private/At
 |---|---|
 | 버퍼 | 정렬, 생성 인자 음성, 할당 실패 N회(`NFailAllocator`), `MixAddRamp` 이득 식 |
 | gain ramp | 목표 정확 도달, 블록 분할 불변, 0 frame ramp, 램프 중 목표 변경 |
-| 1극 필터 | 계수 식(double 기준값 대조), DC·Nyquist 응답 방향, 계수 보간 경로, bypass 경계(19999·20000 Hz), 블록 분할 불변 |
-| 리샘플러 | r = 1 항등, r = 0.5·2·44.1/48 위치·값, 블록 분할 불변, 비율 보간, 입력 부족 음성, 범위 밖 비율 음성 |
-| 패너 | 방위각 사분면(0·45·90·135·180·225·270·315°), 정면·후면 1/√2, 정오른쪽 R = 1, 리스너 180° 회전 대칭, 5.1 쌍 선택, 비공간화 비율, 센터 전용, equal-power 합 1 |
+| 1극 필터 | 계수 식(double 기준값 대조, HPF fs/2 clamp), DC·Nyquist 응답 방향, LPF·HPF 계수 보간 경로(정답 대조), ramp 중 재설정, bypass 경계(LPF 19999.99·20000 Hz, HPF 20·20.01 Hz), 다시 켜기, HPF fs/2 이상 1분 Nyquist 유계, 블록 분할 불변 |
+| 리샘플러 | r = 1 항등, r = 0.5·2·0.75·44.1/48 위치·값, 블록 분할 불변, 소비 0 호출(r = 0.01, 1 frame씩), 블록 사이 비율 재설정 분할 불변, 비율 보간, 입력 부족 음성, 범위 밖 비율 음성(유한·비유한) |
+| 패너 | 방위각 사분면(0·45·90·135·180·225·270·315°)과 UE 경계 결함 자리(정왼쪽·정후면·수직), 정면·후면 1/√2, 5.1·7.1 한 바퀴 equal-power, 정오른쪽 R = 1, 리스너 180° 회전 대칭, 5.1 쌍 선택, 비공간화 비율, 센터 전용, equal-power 합 1 |
 | 거리 감쇠 | 모델마다 0·내부 반경·중간·falloff·falloff 밖 값(double 기준값 대조), falloff < 1, NaturalSound 세 모드, Custom 음성 |
 
 ## 4. 결정 요약
@@ -819,6 +822,10 @@ UE `FBaseAttenuationSettings::AttenuationEval`(`Source/Runtime/Engine/Private/At
 | Android | OpenSL ES만 | AAudio 우선(miniaudio), 없으면 OpenSL ES | AAudio가 현재 권장 API |
 | 실행 판정 | `FApp::CanEverRenderAudio` 정적 지역 변수 | `RunTraits` 값 | AppInfo 설계(명령줄 고정 시점 명시) |
 | 오류 | `check`·로그 | `Result`, 원래 OS 오류 코드 보존 | Rocks 원칙 |
+| 런타임 리샘플러 위치 | 16.16 고정소수점(`RuntimeResampler.cpp:17`) | 32.32 고정소수점(3.20.5절) | 비율·위치 정밀도(16.16은 비율 오차 2^-17), 블록 분할과 무관한 bit 동일 출력(결정적 시험) |
+| 방위각 경계 | 정왼쪽(x = 0·y < 0) 90°, 정후면(x < 0·y = 0) 0°, 수직(수평 성분 0) 90°(경계 결함) | 270°·180°·0°(atan2와 같음, 수직은 정면) | 결함 수정, 다른 방향은 같음 |
+| 5.1 서라운드 쌍 | 장치 마스크(Windows 기본 BL·BR 210°·150°) | SL·SR 250°·110° 고정, 장치 마스크 대응은 AU9 | ITU-R BS.775 배치, 내부 순서 고정(3.3절) |
+| HPF 계수 | `FastTan` 근사 | `PlatformMath::Tan` | 정확한 기준값 대조 |
 | 다채널 분리 임포트 | `_L`·`_R` 파일 묶음 임포트 | 받지 않음 | 수요 생기면 |
 
 ## 8. 다른 문서 개정
@@ -865,3 +872,5 @@ UE `FBaseAttenuationSettings::AttenuationEval`(`Source/Runtime/Engine/Private/At
   - 권장 13: `ERequiredSubmixes`, 로딩 동작 `Inherited`·SeekRestart 실험 표시, A2f 사용 규칙(roles·옵션 이름·loop 필드·`loopOverride`·`normalize` 표현·PCM 상한·8비트·A2f1a 상태), 디코더 SIMD 고정·너겟 키, Inline·Thread 시험 조건, 파라미터 seqlock, AudioRT 종료 깨우기·Null 타이머 join, 선행 관계(PR9→AU3, PR17→AU8b, PR20→AU10, 캐시 기본 상수), AD24 인용·`AudioOpus` ClientOnly·`HostServices` 등록, Opus 48 kHz 결과(rate 표 적용 범위·loop 반올림·채널 매핑·청크 pre-roll 복제·loop 머리 PCM — AD28), 준비 결과 집합(AAA10), bypass 꼬리(AD27), `SpatialIndex` 의존·Sparks 스키마.
 - 개정 2(2026-11-22): 8절 다른 문서 개정을 반영했다(계획 1.17, 동기화 3, AppInfo 4, 엔진 런타임 6절, 크래시·실행 13, 플랫폼 계층 앱 수명 이벤트, 빌드 타깃 20, 에셋 시스템, Sparks 통합 2). 깨우기 신호 이름을 `RealtimeWakeSignal`(동기화 9.6절)로 맞췄다. PR9는 데스크톱 포커스가 PlatformWindow에 있어 AU3이 아니라 AU9만 막는다.
 - 개정 3(2026-11-22): 3.20절 AU1 구현 세부(DSP1 — 형식·planar 버퍼·gain ramp·1극 필터·선형 리샘플러·패너·거리 감쇠, UE 5.8 식 대조)를 더했다. 3.13.2절 패닝을 UE `Get3DChannelMap`의 방위각 각도 비율 방식으로 고쳤다(개정 2까지의 right 축 투영 식은 UE와 결과가 달랐다).
+- 개정 4(2026-11-22): DSP1 구현을 반영했다. 리샘플러 위치·비율은 블록 분할 불변을 위해 32.32 고정소수점이다(double 누적 버림). 소비 규칙은 ceil(다음 위치)이다. 정왼쪽 방위각은 UE 경계 결함(90°)을 따르지 않고 270°다. HPF fc ≥ fs/2는 a0 = 1이다. `Custom` 감쇠는 `Unsupported`다. 시험 등록 위치는 EngineTests다.
+- 개정 5(2026-11-22): DSP1 리뷰 반영. 필수 — HPF fc ≥ fs/2의 a0 = 1(극 −1, 상태 발산)을 UE처럼 fs/2 − 1 Hz clamp로 고쳤다. 권장 — HPF bypass를 UE와 같은 20 Hz(+ KINDA_SMALL)로, 리샘플러 비율 범위를 UE와 같은 [0.01, 100]으로 맞췄다. 7절의 UE 리샘플러 서술(16.16 고정소수점)·방위각 경계 차이(정후면·수직)·5.1 서라운드 쌍 선택을 기록했다. gain ramp 목표 유한 계약, `VoiceCenterChannelVolume`은 AU3, 시험 표를 보강했다.

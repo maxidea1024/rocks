@@ -32,6 +32,8 @@ constexpr platform::FileStatus MemoryMissing{platform::FileCode::NotFound, 2};
 constexpr platform::FileStatus MemoryWrongType{platform::FileCode::WrongType, 0};
 constexpr platform::FileStatus MemoryExists{platform::FileCode::AlreadyExists, 80};
 constexpr platform::FileStatus MemoryNotDurable{platform::FileCode::NotDurable, 5};
+// MemoryFaults::readFailFrom의 "끔" 표지다.
+constexpr uint64 MemoryNoReadLimit = ~uint64{0};
 
 // 파일 시스템 전체의 고장 주입이다(저장 경로 — 성공 상태면 주입하지 않는다).
 struct MemoryFaults {
@@ -53,6 +55,9 @@ struct MemoryFaults {
     // 다시 열 때).
     platform::FileStatus openRead{};
     const char* readSuffix = nullptr;
+    // 읽기가 이 위치(byte)를 넘어 읽으려 하면 실패한다(MemoryNoReadLimit은 끔) — 앞쪽(머리·표)은
+    // 읽히고 뒤쪽(값 byte)만 실패하는 파일. 모든 핸들에 적용된다.
+    uint64 readFailFrom = MemoryNoReadLimit;
     // Delete·Stat의 실패다(Stat는 statPath가 비어 있지 않으면 그 Content 상대 경로에만).
     platform::FileStatus remove{};
     // Move의 실패다(7.1절 17 A2e2 — 이동 시험).
@@ -76,7 +81,8 @@ public:
     }
 
     platform::FileTransfer Read(void* destination, usize bytes) noexcept override {
-        if (failRead_) {
+        if (failRead_ || (faults_->readFailFrom != MemoryNoReadLimit &&
+                          position_ + bytes > faults_->readFailFrom)) {
             return {MemoryError, 0};
         }
 

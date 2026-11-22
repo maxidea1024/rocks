@@ -203,6 +203,11 @@ TEST(NuggetFile_ValueTableAndSizeTampering) {
                 auto read = ReadNuggetValue(opened.Value(), reader, other, stored);
                 CHECK(other == index ? read.Error() == ErrorCode::InvalidArgument
                                      : static_cast<bool>(read));
+                // 흘려 읽는 검증도 같은 판정이다.
+                uint8 buffer[4096];
+                auto verified = VerifyNuggetValue(opened.Value(), reader, other, buffer);
+                CHECK(other == index ? verified.Error() == ErrorCode::InvalidArgument
+                                     : static_cast<bool>(verified));
             }
         }
     }
@@ -448,6 +453,65 @@ private:
 };
 
 } // namespace
+
+// 흘려 읽는 값 검증: 버퍼 크기(1 byte·값보다 작음·같음·큼)와 상관없이 정상 값은 통과, 빈 값(크기
+// 0)도 통과, index 범위 밖·빈 버퍼 InvalidArgument, 읽기 IO 오류는 그 조각(첫·중간·마지막)마다
+// 그대로 돌려준다(손상과 구분).
+TEST(NuggetFile_VerifyValue) {
+    SystemAllocator allocator;
+    Built built(allocator);
+    NuggetMemoryReader reader(built.file.View());
+    auto view = OpenNuggetFile(allocator, reader);
+    REQUIRE(view);
+    Array<uint8> buffer(allocator);
+    REQUIRE(buffer.TryResize(NuggetChunkBytes + 64));
+    const Span<uint8> storage = buffer.View();
+    for (usize index = 0; index < 3; ++index) {
+        const usize stored = static_cast<usize>(view.Value().record.values[index].storedSize);
+        const usize sizes[] = {1, 7, stored - 1, stored, stored + 1};
+        for (usize size : sizes) {
+            REQUIRE(size <= storage.Size());
+            CHECK(VerifyNuggetValue(view.Value(), reader, index, storage.Slice(0, size)));
+        }
+    }
+
+    CHECK(VerifyNuggetValue(view.Value(), reader, 3, storage).Error() ==
+          ErrorCode::InvalidArgument);
+    CHECK(VerifyNuggetValue(view.Value(), reader, 0, Span<uint8>()).Error() ==
+          ErrorCode::InvalidArgument);
+
+    // 빈 값.
+    const NuggetStoredValue empty[] = {IdentityValue(2, Span<const uint8>())};
+    auto plan = PlanNuggetFile(allocator, NuggetBucketTexture, Digest(3), empty, {}, {});
+    REQUIRE(plan);
+    Array<uint8> emptyFile(allocator);
+    REQUIRE(AppendNuggetFile(plan.Value(), empty, emptyFile));
+    NuggetMemoryReader emptyReader(emptyFile.View());
+    auto emptyView = OpenNuggetFile(allocator, emptyReader);
+    REQUIRE(emptyView);
+    CHECK(VerifyNuggetValue(emptyView.Value(), emptyReader, 0, storage));
+
+    // 값 1(1 MiB + 5)을 4096 byte씩: 조각마다 읽기 실패를 주입한다.
+    FailingReader failing(built.file.View());
+    auto failingView = OpenNuggetFile(allocator, failing);
+    REQUIRE(failingView);
+    const uint32 opened = failing.calls;
+    const usize step = 4096;
+    const uint64 large = failingView.Value().record.values[1].storedSize;
+    const uint32 chunks = static_cast<uint32>((large + step - 1) / step);
+    const uint32 failures[] = {1, chunks / 2, chunks};
+    for (uint32 failAt : failures) {
+        failing.calls = opened;
+        failing.failAt = opened + failAt;
+        CHECK(VerifyNuggetValue(failingView.Value(), failing, 1, storage.Slice(0, step)).Error() ==
+              ErrorCode::Busy);
+    }
+
+    failing.failAt = 0;
+    failing.calls = opened;
+    CHECK(VerifyNuggetValue(failingView.Value(), failing, 1, storage.Slice(0, step)));
+    CHECK(failing.calls == opened + chunks);
+}
 
 // 읽기 IO 오류는 그대로 돌려준다(머리·Record·조각 표·값 — 손상과 구분), 해시가 맞는 깨진 Record는
 // 손상이다.
