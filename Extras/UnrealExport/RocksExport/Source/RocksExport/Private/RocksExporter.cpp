@@ -4,6 +4,7 @@
 #include "HAL/IConsoleManager.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/ConfigCacheIni.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/Texture.h"
 #include "Misc/EngineVersion.h"
 #include "RocksAssetBody.h"
@@ -11,6 +12,7 @@
 #include "RocksExportClosure.h"
 #include "RocksExportCommon.h"
 #include "RocksJsonWriter.h"
+#include "RocksStaticMeshExtractor.h"
 #include "RocksTextureExtractor.h"
 
 namespace RocksExporterPrivate
@@ -89,22 +91,29 @@ namespace RocksExporterPrivate
 		}
 	}
 
-	// 범위 안 종류의 본문을 만든다(UX2a 텍스처). 로드 실패는 에셋 수준 error 진단이다. blob 쓰기 실패만 false다.
+	// 범위 안 종류의 본문을 만든다(UX2a 텍스처, UX3a 정적 메시). 로드 실패는 에셋 수준 error 진단이다. blob 쓰기
+	// 실패만 false다.
 	static bool ExtractBody(FRocksExportAsset& Asset, FRocksBundleWriter& Bundle, FRocksAssetBody& OutBody, FString& OutError)
 	{
-		if (!Asset.bInScope || !FRocksTextureExtractor::IsTextureClass(Asset.ClassName))
+		const bool bTexture = FRocksTextureExtractor::IsTextureClass(Asset.ClassName);
+		const bool bStaticMesh = Asset.ClassName == TEXT("StaticMesh");
+		if (!Asset.bInScope || (!bTexture && !bStaticMesh))
 		{
 			return true;
 		}
 
-		UTexture* Texture = Cast<UTexture>(FSoftObjectPath(Asset.ObjectPath).TryLoad());
-		if (Texture == nullptr)
+		UObject* Object = FSoftObjectPath(Asset.ObjectPath).TryLoad();
+		UTexture* Texture = bTexture ? Cast<UTexture>(Object) : nullptr;
+		UStaticMesh* StaticMesh = bStaticMesh ? Cast<UStaticMesh>(Object) : nullptr;
+		if (Texture == nullptr && StaticMesh == nullptr)
 		{
-			Asset.Diagnostics.Add({TEXT("LoadFailed"), RocksExport::SeverityError, TEXT("the asset could not be loaded as a texture")});
+			Asset.Diagnostics.Add({TEXT("LoadFailed"), RocksExport::SeverityError, FString::Printf(TEXT("the asset could not be loaded as %s"), *Asset.ClassName)});
 			return true;
 		}
 
-		if (!FRocksTextureExtractor::Extract(*Texture, Bundle, OutBody, OutError))
+		const bool bExtracted = Texture != nullptr ? FRocksTextureExtractor::Extract(*Texture, Bundle, OutBody, OutError)
+			: FRocksStaticMeshExtractor::Extract(*StaticMesh, Bundle, OutBody, OutError);
+		if (!bExtracted)
 		{
 			return false;
 		}
