@@ -253,7 +253,14 @@ private:
     // 끝난 하위 대기 handle이다(CALLW 경계 frame이 반환·ENDEXEC로 끝남).
     uint64 NewChildDone(ErrorCode& error) noexcept;
     // 로드 요청 대기 handle이다(AWAIT의 대기 값이 표지 없는 요청 handle일 때 — 요청이 아니면 0).
-    uint64 NewLoadWait(uint64 request, ErrorCode& error) noexcept;
+    // owned면 대기가 요청을 쥐고 돌려받을 때 멈춘다(지역에 담지 않은 `try await X.Load()`), take면
+    // 결과를 꺼내는 기다림이다(요청당 1회 — 두 번째는 0).
+    uint64 NewLoadWait(uint64 request, bool owned, bool take, ErrorCode& error) noexcept;
+    // 재개할 수 없는 정지 실행을 fault로 끝낸다(결과를 둘 수 없음 — 예산·모양): 기록·격리 창·부모
+    // 전파는 보통 fault와 같다.
+    Result<void> FaultSuspended(uint32 suspended, VmFaultKind kind) noexcept;
+    // root 묶음에 로드 대기가 있는지다(고정 재개 단계는 재개하지 않는다 — SL 5.4절 순서 5).
+    bool TreeHasLoad(uint32 root) const noexcept;
     // CALLW 경계(frame boundary)부터 맨 위까지를 하위 정지 실행으로 옮기고 하위 대기 handle을
     // child에 둔다(AWAIT가 부른다 — 부르는 쪽 frame은 실행 문맥에 남는다).
     VmFaultKind SuspendChild(usize boundary, uint64 wait, uint32 resultRegister, uint32 resultBank,
@@ -321,9 +328,10 @@ private:
         uint64 connectionOrder = 0;
         uint64 afterSequence = 0;
         uint32 child =
-            NoBytecodeIndex;  // Child: 하위 정지 실행 번호(끝났거나 아직 정지 전이면 없음)
-        uint64 loadValue = 0; // Load: 결과 객체 handle
-        uint64 loadError = 0; // Load: 0 성공, 아니면 `Error` case + 1
+            NoBytecodeIndex;      // Child: 하위 정지 실행 번호(끝났거나 아직 정지 전이면 없음)
+        uint64 loadValue = 0;     // Load: 결과 객체 handle
+        uint64 loadError = 0;     // Load: 0 성공, 아니면 `Error` case + 1
+        bool ownsRequest = false; // Load: 돌려받을 때 요청을 멈춘다(ReleaseHeld)
         bool used = false;
         bool done = false;
         bool cancelled = false;
@@ -337,7 +345,7 @@ private:
     uint64 NewWait(WaitKind kind, uint8 clock, double seconds, Span<const uint64> children,
                    ErrorCode& error) noexcept;
     // 단계 시작 때 완료된 대기의 정지 실행을 순서대로 재개한다.
-    Result<void> ResumeDone() noexcept;
+    Result<void> ResumeDone(bool fixedPhase = false) noexcept;
     // 정지 실행 하나를 재개한다(handle은 기다리던 대기 — 바뀌었으면 하지 않는다). depth·root는 재개
     // 조각의 연쇄 깊이·루트, inDrain이면 전달 순회 안(조각 끝만 정리하고 큐는 바깥이 비운다).
     Result<void> ResumeSuspended(uint32 suspended, uint64 wait, uint32 depth, uint64 root,

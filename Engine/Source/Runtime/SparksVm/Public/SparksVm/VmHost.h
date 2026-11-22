@@ -144,13 +144,19 @@ public:
     // WatchLoad는 handle이 요청 인지와 끝났으면 결과(value — 객체 handle, error — 0이면 성공,
     // 아니면 `Error` case + 1)를 알려 준다. 끝나지 않았으면 host가 끝날 때
     // VmSession::CompleteLoad를 부른다.
+    // WatchLoad는 조회다(사용자 코드·할당 없음). take면 결과를 꺼내는 기다림(`try await req` — SL
+    // 7.3절 요청당 1회)이고 이미 꺼냈으면 Taken이다(All·Race 인자·IsDone은 take가 아니다). host는
+    // 모든 요청을 언젠가 끝내야 한다(성공 값은 0이 아닌 객체). CompleteLoad는 game thread에서,
+    // VmHost 콜백 밖에서 부른다.
     enum class LoadState : uint8 {
         NotRequest,
         Pending,
-        Ready
+        Ready,
+        Taken
     };
     virtual uint64 StartLoad(uint64 assetLo, uint64 assetHi) noexcept = 0;
-    virtual LoadState WatchLoad(uint64 request, uint64& value, uint64& error) noexcept = 0;
+    virtual LoadState WatchLoad(uint64 request, bool take, uint64& value,
+                                uint64& error) noexcept = 0;
     // 문맥 객체 handle을 call.Refs()[0]에 둔다.
     virtual VmFaultKind GetContext(VmHostCall& call) noexcept = 0;
     // 살아 있는 object의 필드를 창에 둔다(Buf는 PutBuffer로).

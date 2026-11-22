@@ -40,7 +40,10 @@ Result<void> Reject(StringBuilderBase& reason, const BytecodeModule& module, uin
                         module.String(entry.name), why);
     // 모양 불일치는 서술자를 함께 보인다(진단).
     if (!detail.IsEmpty()) {
-        reason.AppendFormat(" [{}]", detail);
+        constexpr usize MaxShown = 64; // 신뢰할 수 없는 서술자는 잘라 보인다
+        const StringView shown(detail.Data(),
+                               detail.ByteCount() < MaxShown ? detail.ByteCount() : MaxShown);
+        reason.AppendFormat(" [{}{}]", shown, detail.ByteCount() > MaxShown ? "..." : "");
     }
 
     if (reason.HasFailed()) {

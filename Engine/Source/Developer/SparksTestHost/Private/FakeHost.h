@@ -72,7 +72,7 @@ public:
     void ReleaseHeld(uint64 handle) noexcept override;
     // 로드: 요청은 `LoadRequest` 객체(기록 `load #n`), 끝은 `.run` `load` 지시가 Complete로 둔다.
     uint64 StartLoad(uint64 assetLo, uint64 assetHi) noexcept override;
-    LoadState WatchLoad(uint64 request, uint64& value, uint64& error) noexcept override;
+    LoadState WatchLoad(uint64 request, bool take, uint64& value, uint64& error) noexcept override;
     // 요청을 끝낸다(결과를 기억한다 — 아직 기다리지 않은 요청도). 요청이 아니면 false.
     bool CompleteLoad(uint64 request, uint64 value, uint64 error) noexcept;
     VmFaultKind GetContext(VmHostCall& call) noexcept override;
@@ -116,6 +116,8 @@ private:
         bool done = false;
         uint64 value = 0;
         uint64 error = 0;
+        bool taken = false;    // 결과를 꺼낸 기다림이 있었다
+        bool released = false; // ReleaseHeld로 관심을 반환했다
     };
     uint64 HandleOf(uint32 index) const noexcept;
     FakeFieldValue* FieldOf(FakeObject& object, uint64 binding, VmExecution& execution) noexcept;

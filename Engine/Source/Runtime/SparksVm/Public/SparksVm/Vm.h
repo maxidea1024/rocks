@@ -235,7 +235,7 @@ public:
         bool child = false; // CALLW가 만든 하위 실행 경계(SparksRuntime 2.5절)
     };
 
-public:
+private:
     // 새 버퍼 할당의 결과다: 버퍼, 또는 예산·상한 fault(BudgetExceeded), 또는 할당자 실패.
     struct Allocation {
         VmBuffer* buffer = nullptr;

@@ -25,6 +25,8 @@ constexpr uint32 VmFaultHookTryCode = 2;
 constexpr uint32 VmFaultMissingElementCode = 3;
 // 아직 실행 모델이 없는 형태(가상 async 함수의 하위 실행 — SparksRuntime 2.5절).
 constexpr uint32 VmFaultUnsupportedCode = 4;
+// AWAIT EXTRA의 "대기가 요청을 쥔다" 표지 위치다(SparksBytecode — 형식 v4).
+constexpr uint32 VmAwaitOwnedShift = 16;
 
 // 합성 곱 묶음의 slot 수다.
 constexpr uint32 VmQuatSlots = 4;
@@ -864,7 +866,9 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
             // 표지 없는 값은 로드 요청 handle이다(SparksRuntime 2.6절 — LC6d5): 요청 대기를 만든다.
             if ((wait & VmWaitTag) == 0) {
                 ErrorCode error = ErrorCode::None;
-                wait = session_->NewLoadWait(wait, error);
+                // EXTRA bit 16: 피연산자가 지역이 아닌 요청이다(대기가 쥐고 멈춘다 — LC6d5 리뷰 1).
+                const bool owned = ((resultShape >> VmAwaitOwnedShift) & 1) != 0;
+                wait = session_->NewLoadWait(wait, owned, true, error);
                 if (error != ErrorCode::None) {
                     return failed(error);
                 }
@@ -886,7 +890,7 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
             if (boundary != 0) {
                 const usize childRef = frames_[boundary].base[1];
                 uint64 child = 0;
-                fault = session_->SuspendChild(boundary, wait, a, resultShape >> 8,
+                fault = session_->SuspendChild(boundary, wait, a, (resultShape >> 8) & 0xFF,
                                                resultShape & 0xFF, child, error);
                 if (error != ErrorCode::None) {
                     return failed(error);
@@ -904,8 +908,8 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
             }
 
             uint32 suspension = NoBytecodeIndex;
-            fault =
-                session_->Suspend(wait, a, resultShape >> 8, resultShape & 0xFF, suspension, error);
+            fault = session_->Suspend(wait, a, (resultShape >> 8) & 0xFF, resultShape & 0xFF,
+                                      suspension, error);
             if (error != ErrorCode::None) {
                 return failed(error);
             }

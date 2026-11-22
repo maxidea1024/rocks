@@ -81,6 +81,13 @@ void VmSession::FreeWaitTree(uint32 root) noexcept {
             }
         }
 
+        // 대기가 쥔 요청(지역에 담지 않은 `try await X.Load()`)을 멈춘다(LC6d5 리뷰 1).
+        if (waits_[node].kind == WaitKind::Load && waits_[node].ownsRequest && host_ != nullptr) {
+            const uint64 request = waits_[node].publisher;
+            waits_[node].ownsRequest = false;
+            host_->ReleaseHeld(request);
+        }
+
         const uint32 parent = waits_[node].parent;
         const uint32 next = waits_[node].nextSibling;
         Wait& wait = waits_[node];
@@ -182,7 +189,7 @@ uint64 VmSession::NewWait(WaitKind kind, uint8 clock, double seconds, Span<const
 
         // 표지 없는 인자는 지역에 담은 로드 요청이다(SL 6.1절 SD41): 요청 대기로 바꾼다.
         if ((child & VmWaitTag) == 0) {
-            child = NewLoadWait(child, error);
+            child = NewLoadWait(child, false, false, error);
             if (child == 0) {
                 for (uint32 at = waits_[index].firstChild; at != NoBytecodeIndex;) {
                     const uint32 next = waits_[at].nextSibling;
@@ -272,16 +279,16 @@ uint64 VmSession::NewChildDone(ErrorCode& error) noexcept {
     return handle;
 }
 
-uint64 VmSession::NewLoadWait(uint64 request, ErrorCode& error) noexcept {
+uint64 VmSession::NewLoadWait(uint64 request, bool owned, bool take, ErrorCode& error) noexcept {
     if (host_ == nullptr || request == 0) {
         return 0;
     }
 
     uint64 value = 0;
     uint64 failure = 0;
-    const VmHost::LoadState state = host_->WatchLoad(request, value, failure);
-    if (state == VmHost::LoadState::NotRequest) {
-        return 0;
+    const VmHost::LoadState state = host_->WatchLoad(request, take, value, failure);
+    if (state == VmHost::LoadState::NotRequest || state == VmHost::LoadState::Taken) {
+        return 0; // 요청이 아니거나 결과를 이미 꺼냈다(SL 7.3절 — ContractViolation)
     }
 
     const uint64 handle = NewWait(WaitKind::Load, 0, 0.0, Span<const uint64>(), error);
@@ -291,6 +298,7 @@ uint64 VmSession::NewLoadWait(uint64 request, ErrorCode& error) noexcept {
     }
 
     waits_[index].publisher = request;
+    waits_[index].ownsRequest = owned;
     if (state == VmHost::LoadState::Ready) {
         // 이미 끝났어도 정지하고 다음 재개 단계에 재개한다(SL 6.1절 — 항상 정지).
         waits_[index].done = true;
@@ -746,16 +754,25 @@ Result<void> VmSession::ResumeSuspended(uint32 chosen, uint64 wait, uint32 depth
         return Result<void>::Success();
     }
 
-    // 로드 요청 대기의 결과(Result<T> — SparksRuntime 2.6절): Buf 결과면 Result 버퍼를 먼저 만든다
-    // (할당이 실패하면 아무것도 바꾸지 않고 돌아간다).
+    // 앞 실행(반환한 조각)이 남긴 frame·레지스터를 비운다(덧붙이면 frame base가 어긋난다 — 남은
+    // 버퍼가 결과 할당의 예산에 잡히지 않게 먼저).
+    execution_.Unwind();
+    execution_.ReleaseReturned();
+
+    // 로드 요청 대기의 결과(Result<T> — SparksRuntime 2.6절): `Soft<T>`의 T는 에셋(Ref)이라
+    // Result는 Buf다. 다른 모양은 손상이다(ContractViolation). 예산 초과는 BudgetExceeded
+    // fault다(LC6d5 리뷰 3).
     uint32 resultWait = NoBytecodeIndex;
     const bool loaded =
         DecodeWait(entry.wait, resultWait) && waits_[resultWait].kind == WaitKind::Load;
     const uint64 loadValue = loaded ? waits_[resultWait].loadValue : 0;
     const uint64 loadError = loaded ? waits_[resultWait].loadError : 0;
     VmBuffer* loadResult = nullptr;
-    if (loaded && entry.resultBank == static_cast<uint32>(BytecodeBank::Buf) &&
-        entry.resultSlots != 0) {
+    if (loaded && entry.resultSlots != 0) {
+        if (entry.resultBank != static_cast<uint32>(BytecodeBank::Buf) || entry.resultSlots != 1) {
+            return FaultSuspended(chosen, VmFaultKind::ContractViolation);
+        }
+
         const uint64 budget = budgets_.sessionMemory;
         VmExecution::Allocation made =
             loadError != 0
@@ -766,8 +783,7 @@ Result<void> VmSession::ResumeSuspended(uint32 chosen, uint64 wait, uint32 depth
                 return Result<void>::Failure(made.error);
             }
 
-            CancelSuspended(chosen); // 예산 초과: 결과를 둘 수 없다 — 실행을 끝낸다
-            return Result<void>::Success();
+            return FaultSuspended(chosen, VmFaultKind::BudgetExceeded);
         }
 
         loadResult = made.buffer;
@@ -780,8 +796,6 @@ Result<void> VmSession::ResumeSuspended(uint32 chosen, uint64 wait, uint32 depth
         }
     }
 
-    // 앞 실행(반환한 조각)이 남긴 frame·레지스터를 비운다(덧붙이면 frame base가 어긋난다).
-    execution_.Unwind();
     execution_.scalars_.Clear();
     execution_.refs_.Clear();
     execution_.buffers_.Clear();
@@ -807,10 +821,7 @@ Result<void> VmSession::ResumeSuspended(uint32 chosen, uint64 wait, uint32 depth
     for (uint32 slot = 0; slot < entry.resultSlots; ++slot) {
         const usize at = usize(top.base[entry.resultBank]) + entry.resultRegister + slot;
         if (entry.resultBank == 0) {
-            execution_.scalars_[at] = !loaded          ? 0
-                                      : slot == 0      ? loadError
-                                      : loadError == 0 ? loadValue
-                                                       : 0;
+            execution_.scalars_[at] = 0;
         } else if (entry.resultBank == 1) {
             execution_.refs_[at] = 0;
         } else {
@@ -980,7 +991,71 @@ Result<void> VmSession::FinishChild(uint64 childWait, const VmCallResult& result
     return Result<void>::Success();
 }
 
-Result<void> VmSession::ResumeDone() noexcept {
+bool VmSession::TreeHasLoad(uint32 root) const noexcept {
+    uint32 node = root;
+    for (;;) {
+        if (waits_[node].kind == WaitKind::Load) {
+            return true;
+        }
+
+        if (waits_[node].firstChild != NoBytecodeIndex) {
+            node = waits_[node].firstChild;
+            continue;
+        }
+
+        while (node != root && waits_[node].nextSibling == NoBytecodeIndex) {
+            node = waits_[node].parent;
+        }
+
+        if (node == root) {
+            return false;
+        }
+
+        node = waits_[node].nextSibling;
+    }
+}
+
+Result<void> VmSession::FaultSuspended(uint32 suspended, VmFaultKind kind) noexcept {
+    // 정지 지점(맨 위 frame의 pc 앞 AWAIT)을 위치로 하는 fault 결과다.
+    const Suspended& entry = suspended_[suspended];
+    const VmExecution::Frame& top = entry.frames[entry.frames.Size() - 1];
+    VmCallResult result;
+    result.outcome = VmOutcome::Faulted;
+    result.fault.kind = kind;
+    result.fault.module = top.link;
+    result.fault.function = top.function;
+    const BytecodeModule& module = top.link->Module();
+    const uint32 word = top.pc > 0 ? top.pc - 1 : 0;
+    result.fault.address = word - module.functions[top.function].firstWord;
+    if (word < module.locations.Size()) {
+        result.fault.location = module.locations[word];
+    }
+
+    const uint32 instance = entry.instance;
+    const uint64 childWait = entry.childWait;
+    Delivery delivery;
+    delivery.subscriber = instance < instances_.Size() ? instances_[instance].handle : uint64(0);
+    delivery.module = entry.frames[0].link;
+    delivery.function = entry.frames[0].function;
+    delivery.result = result;
+    delivery.resumed = true;
+    const bool recorded = static_cast<bool>(deliveries_.TryPushBack(delivery));
+    CancelSuspended(suspended, false);
+    Result<void> finished = Result<void>::Success();
+    if (childWait != 0) {
+        finished = FinishChild(childWait, result, 0, 0, false); // 하위 fault는 부모 fault(R15)
+    } else {
+        NoteFault(instance, result, true);
+    }
+
+    if (!recorded) {
+        return Result<void>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    return finished;
+}
+
+Result<void> VmSession::ResumeDone(bool fixedPhase) noexcept {
     // 단계 시작 때 끝난 최상위 대기의 정지 실행을 (등록 프레임, instance 생성 번호, 등록 순번)
     // 순으로 재개한다(SL 6.1절). 재개된 조각이 이미 끝난 대기를 다시 기다리면 다음 단계에
     // 재개한다(같은 단계에서 다시 고르지 않는다 — 끝나지 않는 반복 방지).
@@ -988,7 +1063,8 @@ Result<void> VmSession::ResumeDone() noexcept {
     resumeWaits_.Clear();
     for (uint32 at = 0; at < suspended_.Size(); ++at) {
         uint32 index = NoBytecodeIndex;
-        if (suspended_[at].live && DecodeWait(suspended_[at].wait, index) && waits_[index].done) {
+        if (suspended_[at].live && DecodeWait(suspended_[at].wait, index) && waits_[index].done &&
+            !(fixedPhase && TreeHasLoad(WaitRoot(index)))) {
             if (!resumeOrder_.TryPushBack(at)) {
                 return Result<void>::Failure(ErrorCode::OutOfMemory);
             }
@@ -1127,7 +1203,7 @@ Result<void> VmSession::FixedStep() noexcept {
         }
     }
 
-    Result<void> resumed = ResumeDone();
+    Result<void> resumed = ResumeDone(true); // 로드 완료는 가변 재개 단계(SL 5.4절 순서 5)
     if (resumed) {
         resumed = Drain();
     }

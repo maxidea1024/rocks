@@ -1487,9 +1487,10 @@ private:
             return ok(registers, BytecodeLoadError::BadRegister);
         }
         case Opcode::Await: {
-            const uint32 resultBank = ax >> 8;
+            // EXTRA: 결과 bank << 8 | slot 수, bit 16은 "대기가 요청을 쥔다"(LC6d5).
+            const uint32 resultBank = (ax >> 8) & 0xFF;
             const uint32 slots = ax & 0xFF;
-            return resultBank >= BytecodeBankCount || slots > MaxMarkerSlots
+            return resultBank >= BytecodeBankCount || slots > MaxMarkerSlots || (ax >> 17) != 0
                        ? BytecodeLoadError::BadOperand
                        : ok(Tuple(R, b, 1) && (slots == 0 || Tuple(resultBank, a, slots)),
                             BytecodeLoadError::BadRegister);

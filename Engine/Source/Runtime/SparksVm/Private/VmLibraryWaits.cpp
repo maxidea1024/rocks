@@ -102,7 +102,8 @@ bool VmLibrary::LoadDone(VmLibraryContext& context, uint64 request) noexcept {
     VmHost* host = context.execution->link_ != nullptr ? context.execution->link_->Host() : nullptr;
     uint64 value = 0;
     uint64 error = 0;
-    return host != nullptr && host->WatchLoad(request, value, error) == VmHost::LoadState::Ready;
+    return host != nullptr &&
+           host->WatchLoad(request, false, value, error) == VmHost::LoadState::Ready;
 }
 
 uint64 VmLibrary::NewWait(VmLibraryContext& context, uint8 kind, uint8 clock, double seconds,

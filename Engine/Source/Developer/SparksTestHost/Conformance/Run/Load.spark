@@ -24,4 +24,24 @@ class Loader : ScriptableComponent {
         let data = try await request;
         Got = data;
     }
+
+    async fn Direct() {
+        Got = try await Icon.Load();
+        Log.Info("direct");
+    }
+
+    async fn Twice() {
+        let request = Icon.Load();
+        let first = try await request;
+        let second = try await request;
+        Got = second;
+        Got = first;
+        Log.Info("twice");
+    }
+
+    async fn RaceLoad() {
+        let request = Icon.Load();
+        await Race(request, Delay(1.0, Clock.Game));
+        Log.Info("race ${request.IsDone}");
+    }
 }

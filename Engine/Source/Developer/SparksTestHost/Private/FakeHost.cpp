@@ -570,6 +570,10 @@ bool FakeHost::IsAlive(uint64 handle) noexcept {
 }
 
 void FakeHost::ReleaseHeld(uint64 handle) noexcept {
+    for (FakeLoad& load : loads_) {
+        load.released = load.released || load.request == handle;
+    }
+
     StringBuilder<64> text(*allocator_);
     text.Append("release ");
     FormatHandle(text, handle);
@@ -606,9 +610,15 @@ uint64 FakeHost::StartLoad(uint64 assetLo, uint64 assetHi) noexcept {
     return request;
 }
 
-VmHost::LoadState FakeHost::WatchLoad(uint64 request, uint64& value, uint64& error) noexcept {
-    for (const FakeLoad& load : loads_) {
-        if (load.request == request) {
+VmHost::LoadState FakeHost::WatchLoad(uint64 request, bool take, uint64& value,
+                                      uint64& error) noexcept {
+    for (FakeLoad& load : loads_) {
+        if (load.request == request && !load.released) {
+            if (take && load.taken) {
+                return LoadState::Taken;
+            }
+
+            load.taken = load.taken || take;
             value = load.value;
             error = load.error;
             return load.done ? LoadState::Ready : LoadState::Pending;
