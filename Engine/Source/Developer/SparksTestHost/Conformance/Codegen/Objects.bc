@@ -33,39 +33,41 @@ t24 = "LoopHandle.Pause"
 t25 = "Door.Toggle"
 t26 = ">b"
 t27 = "Door.Open"
-t28 = "Door.Opened"
-t29 = "Door.Describe"
-t30 = ">e"
-t31 = "Door.State"
-t32 = "idle"
-t33 = "working"
-t34 = "Door.Total"
-t35 = "skip"
-t36 = "Door.on Owner.Damaged"
-t37 = ">w"
-t38 = "NextTick"
-t39 = "Door.Find"
-t40 = "Component.Owner"
-t41 = "Pawn"
-t42 = "Door.$init"
-t43 = "Array<string>"
-t44 = "Map<string, int>"
-t45 = "Door"
-t46 = "ScriptableComponent"
-t47 = "Cue"
-t48 = "Open"
-t49 = "Info"
-t50 = "State"
-t51 = "Names"
-t52 = "Scores"
-t53 = "Hum"
-t54 = "Opened"
-t55 = "x"
-t56 = "Actor.Damaged"
-t57 = "Owner"
-t58 = "Damaged"
-t59 = "sparks 0.4.0"
-t60 = "Main"
+t28 = "x,x>void"
+t29 = "Door.Opened"
+t30 = "Door.Describe"
+t31 = ">e"
+t32 = "Door.State"
+t33 = "idle"
+t34 = "working"
+t35 = "Door.Total"
+t36 = "skip"
+t37 = "Door.on Owner.Damaged"
+t38 = ">w"
+t39 = "NextTick"
+t40 = "Door.Find"
+t41 = "Component.Owner"
+t42 = "Pawn"
+t43 = "Door.$init"
+t44 = "Array<string>"
+t45 = "Map<string, int>"
+t46 = "Door"
+t47 = "ScriptableComponent"
+t48 = "Cue"
+t49 = "Open"
+t50 = "Info"
+t51 = "State"
+t52 = "Names"
+t53 = "Scores"
+t54 = "Hum"
+t55 = "Opened"
+t56 = "x"
+t57 = "x,f64>void"
+t58 = "Actor.Damaged"
+t59 = "Owner"
+t60 = "Damaged"
+t61 = "sparks 0.4.0"
+t62 = "Main"
 ref0 = context World
 ref1 = field World.Audio args ">x"
 ref2 = field Door.Cue args ">x"
@@ -78,7 +80,7 @@ ref8 = field Door.Names args ">A<s>"
 ref9 = field Door.Scores args ">M<s,i64>"
 ref10 = native LoopHandle.Pause args "x>void"
 ref11 = field Door.Open args ">b"
-ref12 = event Door.Opened
+ref12 = event Door.Opened args "x,x>void"
 ref13 = field Door.State args ">e"
 ref14 = language NextTick args ">w"
 ref15 = field Component.Owner args ">x"
@@ -86,7 +88,7 @@ ref16 = type Pawn
 ref17 = type Stats type0
 ref18 = type Array<string>
 ref19 = type Map<string, int>
-ref20 = event Actor.Damaged
+ref20 = event Actor.Damaged args "x,f64>void"
 type0 = struct Stats s4 r0 b0
   field0 Level s0 x1
   field1 Offset s1 x3
@@ -165,9 +167,9 @@ function Door.Describe  scalar=1/1 ref=1/1 buf=1/1 params=0/1/0 returns bx1
   0000  GETF.S  s0, r0, ref13    ; 44:17
   0002  SWITCH  s0, switch0    ; 44:9
   0003  FAULT  1    ; 52:5
-  0004  LOADSTR  b0, t32    ; 46:24
+  0004  LOADSTR  b0, t33    ; 46:24
   0005  RET  b0 x1    ; 46:17
-  0006  LOADSTR  b0, t33    ; 49:24
+  0006  LOADSTR  b0, t34    ; 49:24
   0007  RET  b0 x1    ; 49:17
 
 function Door.Total  scalar=5/5 ref=1/1 buf=3/3 params=0/1/0 returns sx1
@@ -192,7 +194,7 @@ function Door.Total  scalar=5/5 ref=1/1 buf=3/3 params=0/1/0 returns sx1
   0021  BRF  s3, 0032    ; 61:9
   0022  MOV.S  s3, s1    ; 61:9
   0023  GETVAL  b1, b0, s1 [bx1 key sx0]    ; 61:21
-  0025  LOADSTR  b2, t35    ; 62:25
+  0025  LOADSTR  b2, t36    ; 62:25
   0026  EQ.STR  s4, b1, b2    ; 62:17
   0027  BRT  s4, 0033    ; 62:17
   0028  JMP  0034    ; 62:17

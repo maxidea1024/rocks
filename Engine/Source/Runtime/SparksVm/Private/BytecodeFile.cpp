@@ -739,7 +739,8 @@ public:
                   ref.kind == BytecodeRefKind::NativeFunction ||
                   ref.kind == BytecodeRefKind::ImportedFunction ||
                   ref.kind == BytecodeRefKind::VirtualFunction ||
-                  ref.kind == BytecodeRefKind::Field || ref.kind == BytecodeRefKind::StructField) &&
+                  ref.kind == BytecodeRefKind::Event || ref.kind == BytecodeRefKind::Field ||
+                  ref.kind == BytecodeRefKind::StructField) &&
                  ref.arguments < strings);
             // 같은 모듈 함수 참조는 함수 표 번호가 있어야 한다(CALL이 그 함수로 간다).
             const bool functionOk =
