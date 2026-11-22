@@ -20,5 +20,5 @@ public sealed class AssetTestFixtures : EngineModuleRules
     // MeshSource: MeshSourceData fields. Mesh: SimpleCollision fields.
     protected override string[] PublicDependencies => ["AssetRuntime", "CoreTypeBindings", "Localization", "Curves", "MeshSource", "Mesh"];
 
-    protected override IReadOnlyList<string> Metadata => ["AssetTestFixtures/TestAssets.h", "AssetTestFixtures/ValueAssets.h", "AssetTestFixtures/CombinationAssets.h", "AssetTestFixtures/MeshAssets.h"];
+    protected override IReadOnlyList<string> Metadata => ["AssetTestFixtures/TestAssets.h", "AssetTestFixtures/ValueAssets.h", "AssetTestFixtures/CombinationAssets.h", "AssetTestFixtures/MeshAssets.h", "AssetTestFixtures/NuggetAssets.h"];
 }

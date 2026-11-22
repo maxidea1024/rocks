@@ -1024,7 +1024,7 @@ public:
 
 ### 10.6 값 순회 VisitValues(2026-11-22 — AssetSystem 9.1절 A3a 요구)
 
-- `VisitValues(대상, ValueVisitor&, options)`: ExportJson과 같은 스키마·경로 연산 순회(단일 값은 PathRead, 배열은 PathCount와 원소 경로, Map·Set은 PathReadKeys와 key 경로)로 필드 이름(실효 도구 이름)·FieldValue·컨테이너 시작(종류·원소 수)·끝을 선언 순서대로 visitor에 넘긴다. Map 항목·Set 원소는 저장 순서대로 넘기고 정렬은 소비자가 한다(에셋 너겟 키는 정규 인코딩 byte 사전순 — AssetSystem 9.1절 결정 2). Text·InstancedStruct·Opaque 등 ExportJson이 쓰지 못하는 종류는 같은 규칙으로 Unsupported다. 용도는 에셋 너겟 키의 리플렉션 값 기록(`WriteReflected`)이며 ExportJson 순회를 따로 복제하지 않기 위한 공용 경로다.
+- `VisitValues(대상, ValueVisitor&, options)`: ExportJson과 같은 스키마·경로 연산 순회(단일 값은 PathRead, 배열은 PathCount와 원소 경로, Map·Set은 PathReadKeys와 key 경로)로 필드 이름(실효 도구 이름)·FieldValue·컨테이너 시작(종류·원소 수)·끝을 선언 순서대로 visitor에 넘긴다. Map 항목·Set 원소는 저장 순서대로 넘기고 정렬은 소비자가 한다(에셋 너겟 키는 정규 인코딩 byte 사전순 — AssetSystem 9.1절 결정 2). Text·InstancedStruct·Opaque 등 ExportJson이 쓰지 못하는 종류는 같은 규칙으로 Unsupported다. 용도는 에셋 너겟 키의 리플렉션 값 기록(`WriteReflected`)이며 ExportJson 순회를 따로 복제하지 않기 위한 공용 경로다. visitor는 순회 중 대상을 바꾸지 않는다(계약 — 바꾸면 경로 연산 오류가 날 수 있다).
 
 ## 11. InstancedStruct(B9j)
 
