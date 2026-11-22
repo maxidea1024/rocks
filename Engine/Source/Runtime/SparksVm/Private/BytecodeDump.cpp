@@ -125,6 +125,11 @@ public:
                     out_.AppendFormat(" formerly {}", module_.String(field.formerName));
                 }
 
+                // 형태 표기는 타입 표기와 다를 때만(형식 v6 — struct·enum을 펼친 경우).
+                if (module_.String(field.shape) != module_.String(field.type)) {
+                    out_.AppendFormat(" shape {}", module_.String(field.shape));
+                }
+
                 out_.Append("\n");
             }
 

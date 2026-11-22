@@ -31,7 +31,7 @@ namespace rocks {
 //   있다(이전 세대 작업은 Shutdown이 모두 끝냈으므로 선행에서 뺀다).
 // - Submit·Last·Wait는 어느 스레드에서나 부를 수 있다. Submit은 내부 잠금을 쥔 채
 //   scheduler.Submit을 부르므로 scheduler allocator 콜백에서 같은 체인을 다시 부르면 교착이다.
-class SerialTaskChain {
+class ROCKS_TASK_API SerialTaskChain {
 public:
     explicit SerialTaskChain(WorkerScheduler& scheduler, TaskLane lane = TaskLane::Worker) noexcept;
     ~SerialTaskChain() noexcept = default;

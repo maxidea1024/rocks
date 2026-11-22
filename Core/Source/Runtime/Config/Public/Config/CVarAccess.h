@@ -14,7 +14,7 @@ namespace detail {
 inline constexpr usize ScopedTagBytes = 32;
 
 // 프로세스 전체에서 겹치지 않는 범위 임시 변경 태그를 tag에 쓰고 그 view를 돌려준다.
-StringView MakeScopedTag(char (&tag)[ScopedTagBytes]) noexcept;
+ROCKS_CONFIG_API StringView MakeScopedTag(char (&tag)[ScopedTagBytes]) noexcept;
 
 // 범위 임시 변경을 끝낼 지우기다. 생성 때 미리 만들고 큐 자리도 잡아 두므로 소멸에 실패 경로가
 // 없다. channel은 값을 쓴 문맥의 통로다(소멸 때 묶인 문맥과 무관하게 이 문맥의 값을 지운다).
@@ -25,13 +25,14 @@ struct ScopedRemoval {
 
 // 이 스레드에 묶인 문맥의 Scoped 층 (tag)에 값을 쓰고, 끝낼 때 넣을 지우기를 removal에 만든다.
 // 오류: CVar::Set과 같다(실패하면 removal은 비어 있다).
-Result<void> BeginScopedOverride(const VarDefinition& definition, const ScalarValue& value,
-                                 StringView tag, SourceLocation where,
-                                 ScopedRemoval& removal) noexcept;
+ROCKS_CONFIG_API Result<void> BeginScopedOverride(const VarDefinition& definition,
+                                                  const ScalarValue& value, StringView tag,
+                                                  SourceLocation where,
+                                                  ScopedRemoval& removal) noexcept;
 
 // 범위 임시 변경을 끝낸다: 미리 만든 지우기를 그 문맥의 큐에 넣는다(큐 한도와 무관 — 실패하지
 // 않는다). 문맥이 이미 없어졌으면 할 일이 없다. 어느 스레드에서나 부를 수 있다.
-void EndScopedOverride(ScopedRemoval& removal) noexcept;
+ROCKS_CONFIG_API void EndScopedOverride(ScopedRemoval& removal) noexcept;
 
 } // namespace detail
 

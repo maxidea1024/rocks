@@ -62,22 +62,22 @@ enum class TextFieldInput : uint8 {
 };
 
 // 정의된 TextUse 값인지 본다(도구가 정수·문자열에서 만든 값을 검사할 때 쓴다).
-bool IsValidTextUse(TextUse use) noexcept;
+ROCKS_REFLECTIONTEXT_API bool IsValidTextUse(TextUse use) noexcept;
 
 // 용도의 출력 제외 플래그(FieldFlags 비트의 합)를 돌려준다. 전제: IsValidTextUse(use) — 아니면
 // Fatal.
-uint32 TextOutputExcludedFlags(TextUse use) noexcept;
+ROCKS_REFLECTIONTEXT_API uint32 TextOutputExcludedFlags(TextUse use) noexcept;
 
 // 용도의 입력 제외 플래그를 돌려준다. 오류: Report(입력 불가)와 정의되지 않은 값은 InvalidArgument.
 // 입력 진입점(PrepareAssignments·ImportJson)이 맨 앞에서 불러 용도를 검사한다.
-Result<uint32> TextInputExcludedFlags(TextUse use) noexcept;
+ROCKS_REFLECTIONTEXT_API Result<uint32> TextInputExcludedFlags(TextUse use) noexcept;
 
 // flags(그 위치의 유효 플래그)인 필드를 용도의 출력에서 빼는지 본다. 전제: IsValidTextUse(use).
-bool IsTextOutputExcluded(TextUse use, uint32 flags) noexcept;
+ROCKS_REFLECTIONTEXT_API bool IsTextOutputExcluded(TextUse use, uint32 flags) noexcept;
 
 // flags(그 위치의 유효 플래그)인 필드에 대한 입력 판정이다. 제외가 ReadOnly보다
 // 먼저다(Transient이면서 ReadOnly인 필드는 Excluded). 전제: 입력을 받는
 // 용도(TextInputExcludedFlags가 성공하는 값) — Report나 정의되지 않은 값이면 Fatal.
-TextFieldInput ClassifyTextInput(TextUse use, uint32 flags) noexcept;
+ROCKS_REFLECTIONTEXT_API TextFieldInput ClassifyTextInput(TextUse use, uint32 flags) noexcept;
 
 } // namespace rocks::reflection_text

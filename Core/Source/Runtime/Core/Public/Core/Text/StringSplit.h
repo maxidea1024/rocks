@@ -60,8 +60,9 @@ struct SplitOptions {
 // 실패하면 out을 호출 전 크기로 되돌린다.
 // 주의: byte 단위 검색이므로 text와 delimiter는 유효한 UTF-8이어야 한다(아니면 조각이 문자 중간에서
 // 잘릴 수 있다).
-Result<usize> TrySplitIntoArray(StringView text, StringView delimiter, Array<StringView>& out,
-                                SplitOptions options = {}) noexcept;
+ROCKS_CORE_API Result<usize> TrySplitIntoArray(StringView text, StringView delimiter,
+                                               Array<StringView>& out,
+                                               SplitOptions options = {}) noexcept;
 
 // text에서 escape되지 않은 첫 delimiter의 byte 위치를 돌려준다(없으면 StringView::NotFound).
 // escape 규칙은 SplitOptions::escapeCharacters와 같다(빈 목록이면 StringView::Find와 같다). 첫
@@ -88,7 +89,7 @@ ROCKS_CORE_API Result<void> TryAppendUnescaped(StringBuilderBase& out, StringVie
 
 // parts를 separator로 이은 새 String을 만든다(UE FString::Join 대응). parts가 비면 빈 문자열이다.
 // 실패: 잘못된 UTF-8은 InvalidArgument, 그 밖에 Overflow·allocator 오류.
-Result<String> TryJoin(Allocator& allocator, Span<const StringView> parts,
-                       StringView separator) noexcept;
+ROCKS_CORE_API Result<String> TryJoin(Allocator& allocator, Span<const StringView> parts,
+                                      StringView separator) noexcept;
 
 } // namespace rocks

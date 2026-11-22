@@ -23,8 +23,8 @@ struct LogContextEntry {
 // 돌려준 view는 범위가 바뀌기 전까지만 유효하다(캡처가 곧바로 복사한다).
 Span<const LogContextEntry> CurrentLogContext(bool& truncated) noexcept;
 
-void PushLogContext(const char* name, usize nameBytes, StringView value) noexcept;
-void PopLogContext() noexcept;
+ROCKS_CORE_API void PushLogContext(const char* name, usize nameBytes, StringView value) noexcept;
+ROCKS_CORE_API void PopLogContext() noexcept;
 
 } // namespace detail
 

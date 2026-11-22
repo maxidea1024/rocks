@@ -40,8 +40,9 @@ enum class TraceWriteResult : uint8 {
 namespace detail {
 
 // TraceWrite의 느린 경로다. 채널이 켜져 있을 때만 부른다.
-TraceWriteResult TraceWriteRecord(const TraceEventType& type, const void* fixed, usize fixedBytes,
-                                  Span<const TraceVariablePart> variable) noexcept;
+ROCKS_TRACECAPTURE_API TraceWriteResult
+TraceWriteRecord(const TraceEventType& type, const void* fixed, usize fixedBytes,
+                 Span<const TraceVariablePart> variable) noexcept;
 
 } // namespace detail
 

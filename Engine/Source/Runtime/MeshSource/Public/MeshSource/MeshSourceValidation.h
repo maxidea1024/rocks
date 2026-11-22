@@ -35,8 +35,9 @@ struct MeshValidateOptions {
 //   }
 //
 // 스레드: mesh를 읽기만 한다(같은 mesh를 고치는 스레드가 없어야 한다).
-Result<void> ValidateMeshSource(const MeshSource& mesh, const MeshValidateOptions& options = {},
-                                MeshDiagnostic* failure = nullptr) noexcept;
+ROCKS_MESHSOURCE_API Result<void> ValidateMeshSource(const MeshSource& mesh,
+                                                     const MeshValidateOptions& options = {},
+                                                     MeshDiagnostic* failure = nullptr) noexcept;
 
 // 임포트·편집 결과를 저장하기 전의 값 정리다(3.3절 — UE ValidateAndFixData 대응, 3.2절 스킨 가중치
 // 정규화). 먼저 ValidateMeshSource를 부른다.
@@ -50,9 +51,10 @@ Result<void> ValidateMeshSource(const MeshSource& mesh, const MeshValidateOption
 // 오류: 검증 실패는 ValidateMeshSource와 같다. 영향이 있는데 가중치 합이 0인 정점은 InvalidMeshData
 // (issue ZeroWeightSum)다. 경고 배열 할당 실패는 그 오류다. 실패하면 mesh와 warnings는
 // 그대로다(값을 고치기 전에 모든 실패를 먼저 확인한다).
-Result<void> SanitizeMeshSource(MeshSource& mesh, const MeshValidateOptions& options,
-                                Array<MeshDiagnostic>& warnings,
-                                MeshDiagnostic* failure = nullptr) noexcept;
+ROCKS_MESHSOURCE_API Result<void> SanitizeMeshSource(MeshSource& mesh,
+                                                     const MeshValidateOptions& options,
+                                                     Array<MeshDiagnostic>& warnings,
+                                                     MeshDiagnostic* failure = nullptr) noexcept;
 
 // influences의 가중치를 합이 BoneWeightTotal이 되게 정규화한다(3.2절): 각 가중치를 w × Total / 합
 // 으로 내림한 뒤 반올림 잔차(Total − 새 합, 영향 수 미만)를 원래 가중치가 가장 큰 영향에 더한다.
@@ -60,6 +62,6 @@ Result<void> SanitizeMeshSource(MeshSource& mesh, const MeshValidateOptions& opt
 //
 // 반환: 값을 바꿨으면 true다. 영향이 있는데 합이 0이면 바꾸지 않고 false다(호출자가 오류로 다룬다
 // — SanitizeMeshSource는 ZeroWeightSum으로 거부한다).
-bool NormalizeBoneWeights(Span<BoneInfluence> influences) noexcept;
+ROCKS_MESHSOURCE_API bool NormalizeBoneWeights(Span<BoneInfluence> influences) noexcept;
 
 } // namespace rocks

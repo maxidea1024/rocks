@@ -18,8 +18,9 @@ namespace detail {
 
 using ParallelForInvoke = ErrorCode (*)(void* body, usize begin, usize end) noexcept;
 
-Result<void> RunParallelFor(WorkerScheduler& scheduler, Allocator& scratch, usize count, void* body,
-                            ParallelForInvoke invoke, const ParallelForOptions& options) noexcept;
+ROCKS_TASK_API Result<void> RunParallelFor(WorkerScheduler& scheduler, Allocator& scratch,
+                                           usize count, void* body, ParallelForInvoke invoke,
+                                           const ParallelForOptions& options) noexcept;
 
 } // namespace detail
 

@@ -16,7 +16,7 @@ namespace rocks {
 // 0-byte/null no-op은 먼저 처리되며 Stats·LimitBytes·PeakBytes는 게시된 스냅샷을 읽을 수 있다.
 // 상위 콜백이 다른 스레드의 이 allocator 호출 완료를 기다리는 것은 교착 위험으로 금지한다.
 // 상위 allocator의 실패한 Deallocate는 allocation의 소유권과 내용을 유지해야 한다.
-class BudgetAllocator final : public Allocator {
+class ROCKS_CORE_API BudgetAllocator final : public Allocator {
 public:
     explicit BudgetAllocator(Allocator& backing, uint64 limitBytes) noexcept;
     ~BudgetAllocator() noexcept override;

@@ -282,7 +282,7 @@ private:
 // 오차 비교는 Equals를 사용한다.
 // UE FLinearColor와 달리 Color에서의 암시적 변환 생성자(UE에서는 sRGB decode)가 없다. 호출자가
 // FromSRGB(sRGB decode)와 Color::ReinterpretAsLinear(단순 /255) 중 하나를 명시한다.
-struct LinearColor {
+struct ROCKS_CORE_API LinearColor {
     float r = 0.0f;
     float g = 0.0f;
     float b = 0.0f;

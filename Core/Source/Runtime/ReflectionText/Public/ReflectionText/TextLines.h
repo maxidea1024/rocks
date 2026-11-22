@@ -37,7 +37,7 @@ namespace rocks::reflection_text {
 //       !written) {
 //       ...
 //   }
-Result<void> ExportLines(const AssignmentTarget& target, String& out,
-                         const TextCodecOptions& options) noexcept;
+ROCKS_REFLECTIONTEXT_API Result<void> ExportLines(const AssignmentTarget& target, String& out,
+                                                  const TextCodecOptions& options) noexcept;
 
 } // namespace rocks::reflection_text

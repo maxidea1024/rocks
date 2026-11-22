@@ -101,8 +101,9 @@ private:
 
 // condition이 traits에서 참인지다. 거짓이면 reason에 사유(영어 문장 — 진단·로그용)를 쓴다.
 // 오류: 할당 실패.
-Result<bool> MatchDeviceCondition(const DeviceTraits& traits, const DeviceCondition& condition,
-                                  String& reason) noexcept;
+ROCKS_CONFIG_API Result<bool> MatchDeviceCondition(const DeviceTraits& traits,
+                                                   const DeviceCondition& condition,
+                                                   String& reason) noexcept;
 
 // conditions가 모두 참인지다(비면 참). 거짓이면 첫 거짓 조건의 사유를 reason에 쓴다.
 Result<bool> MatchDeviceConditions(const DeviceTraits& traits,

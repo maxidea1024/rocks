@@ -366,6 +366,12 @@ TEST(SparksBytecodeFile_VerifierRejections) {
     CHECK(verify([](BytecodeModule& m) noexcept {
               m.classFields[0].formerName = static_cast<uint32>(m.stringOffsets.Size());
           }) == BytecodeLoadError::BadTable);
+    // 형식 v6(SparksReload 5절): 형태 표기가 문자열 표 밖(NoIndex 포함 — 언제나 있다).
+    CHECK(verify([](BytecodeModule& m) noexcept { m.classFields[0].shape = NoBytecodeIndex; }) ==
+          BytecodeLoadError::BadTable);
+    CHECK(verify([](BytecodeModule& m) noexcept {
+              m.classFields[0].shape = static_cast<uint32>(m.stringOffsets.Size());
+          }) == BytecodeLoadError::BadTable);
     // await 표에서 빠진 AWAIT, 같은 주소의 await 항목 둘.
     const uint32 awaiting = functionOf(find(Opcode::Await));
     CHECK(verify([&](BytecodeModule& m) noexcept { m.functions[awaiting].awaitCount = 0; }) ==

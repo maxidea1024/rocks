@@ -27,6 +27,6 @@ struct KeyId {
 };
 
 // 무작위 KeyId(UUID v4, Nil이 나오지 않는다)다. OS 난수 실패는 DependencyFailed다.
-[[nodiscard]] Result<KeyId> TryNewKeyId() noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<KeyId> TryNewKeyId() noexcept;
 
 } // namespace rocks::crypto

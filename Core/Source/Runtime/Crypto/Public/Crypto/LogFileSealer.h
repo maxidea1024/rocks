@@ -105,7 +105,7 @@ struct LogFileDecodeSummary {
 
 // 봉인한 로그 파일의 머리에 LogFileFlagCompressedBatches가 있는지다(복호 전에 묶음 평문을 풀지
 // 정할 때). 머리가 짧거나 magic이 다르면 false다.
-bool LogFileHasCompressedBatches(Span<const uint8> file) noexcept;
+ROCKS_CRYPTO_API bool LogFileHasCompressedBatches(Span<const uint8> file) noexcept;
 
 // file(봉인한 로그 파일 전체)을 recipient 개인키로 열어 묶음마다 output에 평문을 넘긴다. 평문
 // 버퍼는 allocator로 잡는다.
@@ -113,7 +113,7 @@ bool LogFileHasCompressedBatches(Span<const uint8> file) noexcept;
 // - 완전한 기록의 인증이 실패하면(변조·다른 키·순서 위반·끝 표시 뒤의 byte) AuthenticationFailed다.
 //   그 전까지의 묶음은 이미 output에 넘어갔다.
 // - 끝 표시 없이 끝나면 성공이고 endMarker가 거짓이다(호출자가 "비정상 종료"를 알린다).
-[[nodiscard]] Result<LogFileDecodeSummary>
+[[nodiscard]] ROCKS_CRYPTO_API Result<LogFileDecodeSummary>
 TryDecodeLogFile(const KemKeyPair& recipient, Span<const uint8> file, Allocator& allocator,
                  LogFileDecodeOutput output, void* context) noexcept;
 

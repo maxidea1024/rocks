@@ -45,7 +45,7 @@ struct DebugAllocatorStats {
 // quarantine 한도는 payload byte 기준이며 기록·guard·정렬 여유는 포함하지 않는다.
 // 스레드 전용 backing은 FlushQuarantine/파괴도 해당 스레드에서 해야 한다. 파괴 중 backing이
 // 격리 저장소의 반환을 거부하면 Fatal이다.
-class DebugAllocator final : public Allocator {
+class ROCKS_CORE_API DebugAllocator final : public Allocator {
 public:
     explicit DebugAllocator(Allocator& backing, usize quarantineBytes = 1024 * 1024) noexcept;
     ~DebugAllocator() noexcept override;

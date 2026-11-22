@@ -10,7 +10,7 @@ namespace rocks::detail {
 // 플랫폼 할당을 그대로 부르는 추적 없는 allocator다. 할당자가 자기 원장의 저장소를 받을 때 쓴다 —
 // 원장 저장소를 자기 자신에게서 받으면 추적이 되돌아 들어온다. 상태가 없어 여러 스레드에서 불러도
 // 되지만, FailOnAttempt를 쓰는 동안은 호출자가 직렬화한다(원장은 소유 할당자의 잠금 안에서만 쓴다).
-class UntrackedPlatformAllocator final : public Allocator {
+class ROCKS_CORE_API UntrackedPlatformAllocator final : public Allocator {
 public:
     // 잘못된 정렬(0, 2의 거듭제곱 아님)은 InvalidArgument, 0 byte는 성공한 nullptr다.
     Result<void*> Allocate(usize bytes, usize alignment, uint32 tag = 0) noexcept override;
@@ -39,7 +39,7 @@ private:
 //   if (auto inserted = ledger_.Insert(address, bytes); !inserted) { /* 블록을 반환하고 실패 */ }
 //   usize bytes = 0;
 //   if (!ledger_.Remove(address, bytes)) { return Result<void>::Failure(ErrorCode::NotFound); }
-class AddressLedger {
+class ROCKS_CORE_API AddressLedger {
 public:
     // storage는 원장 표의 저장소이고 이 원장보다 오래 살아야 한다.
     explicit AddressLedger(Allocator& storage) noexcept;

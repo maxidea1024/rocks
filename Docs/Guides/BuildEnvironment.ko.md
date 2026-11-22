@@ -159,6 +159,7 @@ dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll policy -
 | 유니티 묶음·PCH를 끈 검증 빌드(빠진 include 찾기) | `dotnet msbuild Rocks.proj -t:Build -p:Unity=off -p:Pch=off -p:Configuration=Debug -p:RocksTarget=Foundation` |
 | Release(ThinLTO) | `dotnet msbuild Rocks.proj -t:Test -p:Configuration=Release -p:RocksTarget=Foundation` |
 | AddressSanitizer | `dotnet msbuild Rocks.proj -t:Test -p:Configuration=Asan -p:RocksTarget=Foundation` |
+| Modular(모듈마다 공유 라이브러리 — export 누락 확인, native 시험만, [빌드 타깃](../Design/BuildTargets.ko.md) 3.8절 BS8d5) | `dotnet msbuild Rocks.proj -t:Test -p:Configuration=Debug -p:RocksTarget=FoundationModular` |
 | CI처럼 검증 도구 모음만 받기 | 명령 뒤에 `-p:RequireVerifiedToolchain=on` |
 
 유니티 빌드·PCH는 [유니티 빌드·PCH](../Design/UnityBuildPch.ko.md) 11절, 구성별 옵션은 [빌드 안내](../../Build/README.md#빌드-구성)에 있다.

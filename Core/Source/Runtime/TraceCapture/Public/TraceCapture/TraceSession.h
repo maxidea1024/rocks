@@ -19,7 +19,7 @@ struct TraceSessionState;
 
 // 수집 통계 채널 "stats"다(Trace.Stats, TraceSessionSettings::statsIntervalPumps). 세션이 꺼진
 // 상태로 등록한다.
-extern TraceChannel TraceStatsChannel;
+ROCKS_TRACECAPTURE_API extern TraceChannel TraceStatsChannel;
 
 // 스레드 블록과 블록 풀의 메모리 배치다(Docs/Design/TraceSystem.ko.md 4.1절). 블록 하나는 앞에서
 // 뒤로 자라는 기록 영역과 블록 끝의 머리 정보로 이뤄진다. 풀은 PageBlocks개 블록을 한 페이지로 한

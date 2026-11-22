@@ -37,13 +37,13 @@ uint32 CrashHelperJobWaitMilliseconds() noexcept;
 // 시험 전용: 도우미가 부모를 캡처한 뒤 소유 CAS 전에 부르는 함수다. 시험 실행 파일이 도우미 진입
 // (RunCrashHelperIfRequested) 전에 건다. 캡처와 부모의 요청 거두기 사이의 순서를 결정적으로 만든다.
 using CrashHelperCaptureHook = void (*)(HANDLE parent) noexcept;
-void SetCrashHelperCaptureHook(CrashHelperCaptureHook hook) noexcept;
+ROCKS_PLATFORMBASE_API void SetCrashHelperCaptureHook(CrashHelperCaptureHook hook) noexcept;
 
 // 시험 전용: 도우미 인자가 올바를 때 도우미 루프 대신 부르는 고장 난 도우미 본체다(부모 프로세스·
 // 크래시 요청 이벤트 핸들을 받고 반환값이 도우미 종료 코드다). 시험 실행 파일이 도우미 진입 전에
 // 건다(정적 초기화). 제품 코드에는 빈 칸만 있다.
 using CrashHelperOverride = int (*)(HANDLE parent, HANDLE request) noexcept;
-void SetCrashHelperOverride(CrashHelperOverride body) noexcept;
+ROCKS_PLATFORMBASE_API void SetCrashHelperOverride(CrashHelperOverride body) noexcept;
 
 // SetCrashOutputDirectory 뒤 교환 블록의 폴더 경로를 고친다.
 void UpdateCrashHelperFolders() noexcept;

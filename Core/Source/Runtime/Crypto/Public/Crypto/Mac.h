@@ -58,11 +58,11 @@ inline constexpr usize MinMacKeyBytes = 16;
 inline constexpr usize MaxHmacKeyBytes = 4096;
 
 // 알고리즘의 tag 길이다. 열거값이 아니면 InvalidArgument다.
-[[nodiscard]] Result<usize> TryGetMacTagBytes(MacAlgorithm algorithm) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<usize> TryGetMacTagBytes(MacAlgorithm algorithm) noexcept;
 
 // 알고리즘에 묶인 MAC 키다. move-only이며 생성 뒤 바뀌지 않으므로 여러 스레드가 동시에
 // TryMac·TryVerifyMac에 써도 된다. 이동된 키는 빈 키다. 소멸 때 지운다.
-class MacKey {
+class ROCKS_CRYPTO_API MacKey {
 public:
     MacKey() noexcept = default;
     ~MacKey() noexcept;
@@ -115,16 +115,17 @@ private:
 };
 
 // tag.Size()는 알고리즘의 tag 길이와 같아야 한다(아니면 InvalidArgument). 빈 키는 StaleHandle이다.
-[[nodiscard]] Result<void> TryMac(const MacKey& key, Span<const uint8> message,
-                                  Span<uint8> tag) noexcept;
-[[nodiscard]] Result<void> TryMac(const MacKey& key, Span<const Span<const uint8>> pieces,
-                                  Span<uint8> tag) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void> TryMac(const MacKey& key, Span<const uint8> message,
+                                                   Span<uint8> tag) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void>
+TryMac(const MacKey& key, Span<const Span<const uint8>> pieces, Span<uint8> tag) noexcept;
 
 // tag가 맞으면 성공, 다르거나 길이가 틀리면 AuthenticationFailed다(상수 시간 비교).
-[[nodiscard]] Result<void> TryVerifyMac(const MacKey& key, Span<const uint8> message,
-                                        Span<const uint8> tag) noexcept;
-[[nodiscard]] Result<void> TryVerifyMac(const MacKey& key, Span<const Span<const uint8>> pieces,
-                                        Span<const uint8> tag) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void>
+TryVerifyMac(const MacKey& key, Span<const uint8> message, Span<const uint8> tag) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void> TryVerifyMac(const MacKey& key,
+                                                         Span<const Span<const uint8>> pieces,
+                                                         Span<const uint8> tag) noexcept;
 
 // 증분 MAC이다. 큰 메시지를 조각으로 넣는다. 상태는 키에서 파생된 비밀이므로 키 저장소 슬롯에 둔다.
 // move-only이며 한 번에 한 스레드만 쓴다. 키 객체는 만든 뒤 필요 없다(상태가 키를 복사해 둔다.
@@ -136,7 +137,7 @@ private:
 // - 끝난 뒤의 호출은 검증이 실패했으면 AuthenticationFailed(sticky, 9.1절), 아니면
 //   InvalidArgument다. 기본 생성한 객체와 이동된 객체는 StaleHandle이다.
 // - 끝난 직후와 소멸 때 상태를 지운다.
-class MacState {
+class ROCKS_CRYPTO_API MacState {
 public:
     MacState() noexcept = default;
     ~MacState() noexcept;
@@ -176,13 +177,14 @@ namespace hazmat {
 // HMAC 키를 1 byte부터 받는다. 16 byte보다 짧은 키를 요구하는 기존 상호운용 형식(예: RFC 4231 시험
 // 사례 2의 4 byte 키)에서만 쓴다. MAC 강도는 키 bit 수를 넘지 못한다. BLAKE2b keyed는 libsodium
 // 하한 16 byte, AES-CMAC은 16·32 byte가 그대로다. 나머지 규칙은 MacKey::TryImport와 같다.
-[[nodiscard]] Result<MacKey> TryImportShortMacKey(MacAlgorithm algorithm,
-                                                  Span<const uint8> keyBytes) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<MacKey>
+TryImportShortMacKey(MacAlgorithm algorithm, Span<const uint8> keyBytes) noexcept;
 
 // 키 byte를 평문으로 output에 복사한다(10.4절: 시험·상호운용 도구 전용, 저장은 KeyBlob).
 // output.Size()는 key.KeyBytes()와 같아야 한다(아니면 InvalidArgument). 빈 키는 StaleHandle이다.
 // output은 호출자가 지운다.
-[[nodiscard]] Result<void> TryExportKey(const MacKey& key, Span<uint8> output) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void> TryExportKey(const MacKey& key,
+                                                         Span<uint8> output) noexcept;
 
 } // namespace hazmat
 

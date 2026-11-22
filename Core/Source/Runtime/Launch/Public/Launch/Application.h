@@ -249,8 +249,8 @@ inline constexpr const char* WindowedApplicationDescriptionSymbol =
 
 // 프로세스 종료 요청을 원자 표시로 남긴다. 아무 스레드·신호 처리기에서 부를 수 있다. 엔진 호스트는
 // 게임 스레드에서 IsTerminationRequested()를 보고 Engine::RequestExit()로 옮긴다(설계 20절).
-void RequestTermination() noexcept;
-bool IsTerminationRequested() noexcept;
+ROCKS_LAUNCH_API void RequestTermination() noexcept;
+ROCKS_LAUNCH_API bool IsTerminationRequested() noexcept;
 
 } // namespace rocks::launch
 

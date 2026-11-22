@@ -171,9 +171,10 @@ struct LogCaptureTemplate {
 };
 
 // 타입을 지운 인자 배열로 캡처한다. 공개 진입점은 CaptureLog다.
-Result<usize> WriteLogCapture(const LogCaptureTarget& target, LogLevel level,
-                              const LogCategory& category, const LogCaptureTemplate& text,
-                              const FormatArg* args, usize count) noexcept;
+ROCKS_CORE_API Result<usize> WriteLogCapture(const LogCaptureTarget& target, LogLevel level,
+                                             const LogCategory& category,
+                                             const LogCaptureTemplate& text, const FormatArg* args,
+                                             usize count) noexcept;
 
 // LogStructure만 가진 타입을 "{@Name}"이 아닌 자리(런타임 템플릿)에
 // 썼을 때의 서식 함수다. 그 자리만 "<format error>"가 된다(리터럴
@@ -339,11 +340,14 @@ Result<usize> CaptureLog(const LogCaptureTarget& target, LogLevel level,
 //
 // 수명: event의 view는 capture·블록·target 영역을 가리킨다. sink가 event를 다 쓸 때까지 그 영역을
 // 바꾸거나 블록을 돌려주지 않는다. 힙 할당은 없다.
-Result<void> RenderLogCapture(Span<const uint8> capture, const LogBlockProvider* blocks,
-                              const LogRenderTarget& target, LogEvent& event) noexcept;
+ROCKS_CORE_API Result<void> RenderLogCapture(Span<const uint8> capture,
+                                             const LogBlockProvider* blocks,
+                                             const LogRenderTarget& target,
+                                             LogEvent& event) noexcept;
 
 // 캡처가 빌린 블록을 모두 돌려준다. 렌더·sink가 끝난 뒤나, 캡처를 버릴 때(큐가 가득 참 등) 한 번
 // 부른다. 손상된 캡처는 아무것도 하지 않는다.
-void ReleaseLogCaptureBlocks(Span<const uint8> capture, LogBlockProvider& blocks) noexcept;
+ROCKS_CORE_API void ReleaseLogCaptureBlocks(Span<const uint8> capture,
+                                            LogBlockProvider& blocks) noexcept;
 
 } // namespace rocks

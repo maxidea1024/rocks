@@ -61,7 +61,7 @@ constexpr bool HasCrashCapability(CrashCapability set, CrashCapability flag) noe
 // 이 플랫폼·구성에서 크래시 수집이 할 수 있는 기능이다. 설치 전에는 빌드가 지원하는 최대 범위이고,
 // 설치 뒤에는 실제 준비 상태를 반영한다(Windows: 도우미가 떠 있지 않으면 OutOfProcessDump·
 // UnreportedExitRecord가 꺼지고, 도우미도 DbgHelp도 없거나 내장 모드면 Minidump도 꺼진다).
-CrashCapability QueryCrashCapabilities() noexcept;
+ROCKS_PLATFORMBASE_API CrashCapability QueryCrashCapabilities() noexcept;
 
 // 덤프에 담는 범위다. 크게 할수록 분석할 수 있는 것이 늘지만 파일·작성 시간·개인정보 노출이 는다.
 enum class CrashDumpDetail : uint8 {
@@ -206,7 +206,7 @@ ROCKS_PLATFORMBASE_API bool SetCrashOutputDirectory(const char* directory) noexc
 //
 // 사용 예:
 //   if (!platform::CheckUnhandledCrashFilter()) { ... Log::Warning ... }
-bool CheckUnhandledCrashFilter() noexcept;
+ROCKS_PLATFORMBASE_API bool CheckUnhandledCrashFilter() noexcept;
 
 // 크래시 메타데이터에 남길 연관 파일·식별 정보 칸이다. 크래시 때 "associatedFiles"에 들어간다.
 // LogFile은 FileLogSink가 파일을 열거나 회전할 때 출력 스레드에서 현재 로그 파일 경로를 쓴다.
@@ -237,7 +237,7 @@ ROCKS_PLATFORMBASE_API bool SetCrashAnnotation(CrashAnnotation slot, const char*
 // 이 프로세스의 크래시 폴더(설치 때 굳힌 절대 경로, UTF-8)를 buffer에 NUL 종료로 복사하고 길이(NUL
 // 제외)를 돌려준다. 설치 전이거나 buffer가 모자라면 0이다. 폴더는 크래시 때 만들어진다(지금은 없을
 // 수 있다). 만들 수 없으면 임시 폴더 아래 같은 이름을 쓴다. 시작 로그·진단용이다.
-usize CopyCrashReportFolder(char* buffer, usize capacity) noexcept;
+ROCKS_PLATFORMBASE_API usize CopyCrashReportFolder(char* buffer, usize capacity) noexcept;
 
 // StartCrashHelper의 결과다.
 enum class CrashHelperStart : uint8 {
@@ -259,7 +259,7 @@ ROCKS_PLATFORMBASE_API CrashHelperStart StartCrashHelper() noexcept;
 
 // 지금 떠 있는 덤프 도우미의 프로세스 id다. 도우미가 없으면(설치 전, InProcess, 시작 실패, 내장,
 // 다른 플랫폼) 0이다. 진단·시험용이다.
-uint32 CrashHelperProcessId() noexcept;
+ROCKS_PLATFORMBASE_API uint32 CrashHelperProcessId() noexcept;
 
 // 도우미 모드 진입점이다. 실행 파일의 main은 다른 무엇보다 먼저 부른다. 인자가 도우미 호출이면
 // 도우미를 끝까지 돌리고 그 종료 코드를 exitCode에 둔 뒤 true다(main은 그 값을 반환한다). 아니면
@@ -305,8 +305,8 @@ ROCKS_PLATFORMBASE_API void SetRunPhase(RunPhase phase, const char* stageName) n
 
 // 지금 단계와 단계 이름이다(크래시 기록이 남길 값, 진단·시험용). 이름은 SetRunPhase에 넘긴 정적
 // 문자열이고 아직 표시가 없으면 nullptr다. 아무 스레드에서 부를 수 있다.
-RunPhase CurrentRunPhase() noexcept;
-const char* CurrentRunStage() noexcept;
+ROCKS_PLATFORMBASE_API RunPhase CurrentRunPhase() noexcept;
+ROCKS_PLATFORMBASE_API const char* CurrentRunStage() noexcept;
 
 // 보호 호출이다. Windows는 SEH 경계 안에서 body를 부르고 처리되지 않은 예외를 공통 보고 경로로
 // 보낸다. 다른 플랫폼은 그냥 부른다(신호 처리기가 프로세스 전역이다). body의 반환값을 돌려준다.
@@ -387,6 +387,7 @@ ROCKS_PLATFORMBASE_API bool RegisterTerminationCallback(TerminationCallback call
 
 // 등록을 푼다. 그 콜백이 이미 크래시 처리로 불리고 있으면 돌아오지 않는다(프로세스가 곧 끝난다).
 // 그래서 user가 가리키는 객체를 콜백 도중에 파괴하지 않는다. 이미 풀린 handle은 무시한다.
-void UnregisterTerminationCallback(TerminationCallbackHandle& handle) noexcept;
+ROCKS_PLATFORMBASE_API void
+UnregisterTerminationCallback(TerminationCallbackHandle& handle) noexcept;
 
 } // namespace rocks::platform

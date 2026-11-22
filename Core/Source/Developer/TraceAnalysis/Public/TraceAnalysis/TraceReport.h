@@ -30,6 +30,7 @@ inline constexpr uint32 TraceReportVersion = 4;
 //   byte, 첫·마지막 표본 사이의 출력 byte와 시간(ns — 대역폭은 둘의 비)
 // 이름 정의가 없는 구간은 "<unknown:id>"로 쓴다.
 // 실패: 메모리 부족 OutOfMemory.
-Result<void> WriteTraceReportJson(const TraceModel& model, Array<uint8>& out) noexcept;
+ROCKS_TRACEANALYSIS_API Result<void> WriteTraceReportJson(const TraceModel& model,
+                                                          Array<uint8>& out) noexcept;
 
 } // namespace rocks

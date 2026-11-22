@@ -40,7 +40,7 @@ enum class DayOfWeek : uint8 {
 //   이전에도 그레고리력 규칙을 그대로 적용한다).
 // - 연산자(+, -)는 범위를 넘으면 Fatal이다. 외부 데이터는 같은 일을 하는 Try* 함수로 다룬다.
 // - tick 값은 PlatformBase의 파일 시각(FileInfo::modifiedTicks)과 같은 단위·기준이다.
-class DateTime {
+class ROCKS_CORE_API DateTime {
 public:
     // 9999-12-31 23:59:59.9999999의 tick이다.
     static constexpr int64 MaxTicks = 3155378975999999999;
@@ -234,7 +234,7 @@ private:
 // - 연도는 4자리(0001–9999), 시 0–23, 분·초 0–59, 오프셋 시 0–23·분 0–59다. 24:00과 윤초(60초)는
 // 받지 않는다. 실패: 문법 오류와 존재하지 않는 날짜·시각은 InvalidArgument, 오프셋을 적용한 결과가
 // 범위 밖이면 Overflow다.
-Result<DateTime> TryParseIso8601(StringView text) noexcept;
+ROCKS_CORE_API Result<DateTime> TryParseIso8601(StringView text) noexcept;
 
 // "{}"로 ISO 8601 UTC 형식 "YYYY-MM-DDThh:mm:ss[.소수부]Z"를 쓴다.
 //   2026-11-12 09:30:00 → "2026-11-12T09:30:00Z",  0.25초 → "…:00.25Z"(소수부는 0이 아닐 때만, 끝의
@@ -244,8 +244,11 @@ Result<DateTime> TryParseIso8601(StringView text) noexcept;
 // 로그처럼 줄마다 폭이 같아야 하는 출력에 쓴다. 그 밖의 spec은 InvalidArgument다.
 template <>
 struct Formatter<DateTime> {
-    static Result<void> Format(StringBuilderBase& out, const DateTime& time,
-                               StringView spec) noexcept;
+    // 클래스 전체가 아니라 Format만 export한다 — dllimport 클래스의 constexpr 멤버(IsValidSpec)는
+    // 상수식에서 쓸 수 없다(로그 spec 검사가 consteval — Docs/Design/BuildTargets.ko.md 3.8절
+    // BS8d5).
+    static ROCKS_CORE_API Result<void> Format(StringBuilderBase& out, const DateTime& time,
+                                              StringView spec) noexcept;
 
     static constexpr bool IsValidSpec(StringView spec) noexcept {
         return spec.IsEmpty() || spec == "ms";

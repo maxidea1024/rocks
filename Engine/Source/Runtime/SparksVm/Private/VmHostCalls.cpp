@@ -140,7 +140,10 @@ VmFaultKind VmExecution::CallHost(Opcode op, uint32 word, uint32 extra, const Ba
                 banks.r[bb] = 0;
             }
         };
-        if (!Alive(object)) {
+        // reload 기본값 계산(SparksReload 5절)은 임시 저장소를 쓰므로 host 객체를 보지 않는다.
+        const bool staging = session_ != nullptr && local.classIndex != NoBytecodeIndex &&
+                             session_->IsStaging(*link_, local.classIndex);
+        if (!staging && !Alive(object)) {
             dropNew(0);
             return VmFaultKind::ContractViolation; // 꺼낸 참조에만 낸다(6.2절)
         }
@@ -159,13 +162,13 @@ VmFaultKind VmExecution::CallHost(Opcode op, uint32 word, uint32 extra, const Ba
             }
 
             // instance 메모리 예산(SparksRuntime 2.6절 — Buf 필드 쓰기에서 거부).
-            if (!get && bank == static_cast<uint32>(BytecodeBank::Buf) &&
+            if (!get && !staging && bank == static_cast<uint32>(BytecodeBank::Buf) &&
                 !session_->FitsInstanceMemory(instance, where, banks.b[bb])) {
                 return VmFaultKind::BudgetExceeded;
             }
 
             // 쓰기 전에 조각의 시작 값을 기록한다(Changed — SparksRuntime 2.3절).
-            if (!get) {
+            if (!get && !staging) {
                 const VmFaultKind noted =
                     session_->NoteWrite(instance, *link_, DecodeAx(extra), bank, where, c, error);
                 if (noted != VmFaultKind::None || error != ErrorCode::None) {
@@ -199,6 +202,11 @@ VmFaultKind VmExecution::CallHost(Opcode op, uint32 word, uint32 extra, const Ba
                         values[slot] = registers[at + slot];
                     }
                 }
+            }
+
+            // spawn 뒤 쓰기 bit(SparksReload K5 — 새 기본값은 쓰지 않은 필드에만).
+            if (!get && !staging) {
+                session_->MarkWritten(instance, bank, where, c);
             }
 
             return VmFaultKind::None;

@@ -155,7 +155,8 @@ struct StaticMeshBuildResult {
 //
 // 인자: out은 성공하면 통째로 바뀐다(경고 포함). failure는 실패하면 채운다(성공하면 건드리지
 // 않는다). 스레드: input.source를 읽기만 한다(그 메시를 고치는 스레드가 없어야 한다).
-Result<void> BuildStaticMeshLod(const StaticMeshBuildInput& input, StaticMeshBuildResult& out,
-                                MeshDiagnostic* failure = nullptr) noexcept;
+ROCKS_MESHTOOLS_API Result<void> BuildStaticMeshLod(const StaticMeshBuildInput& input,
+                                                    StaticMeshBuildResult& out,
+                                                    MeshDiagnostic* failure = nullptr) noexcept;
 
 } // namespace rocks

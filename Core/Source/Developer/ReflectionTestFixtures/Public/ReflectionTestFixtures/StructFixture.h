@@ -19,35 +19,17 @@ struct StructLeaf {
     explicit StructLeaf(Allocator& allocator) noexcept : label(allocator) {
     }
 
-    // v1 Record를 v2로 올린다(필드를 그대로 옮기고 버전만 올린다). 시험이 호출 수를 센다.
-    static Result<Array<uint8>> Migrate(Allocator& allocator, TypeId type, uint32 from, uint32 to,
-                                        Span<const uint8> source) noexcept {
-        ++migrations;
-        auto reader = RecordReader::Open(allocator, source, type, from, from);
-        if (!reader) {
-            return Result<Array<uint8>>::Failure(reader.Error());
-        }
-
-        RecordBuilder builder(allocator, type, to);
-        for (usize index = 0; index < reader.Value().FieldCount(); ++index) {
-            auto field = reader.Value().Next();
-            if (!field) {
-                return Result<Array<uint8>>::Failure(field.Error());
-            }
-
-            if (auto added = builder.AddField(field.Value().id, field.Value().wireType,
-                                              field.Value().payload);
-                !added) {
-                return Result<Array<uint8>>::Failure(added.Error());
-            }
-        }
-
-        return builder.Build();
-    }
+    // v1 Record를 v2로 올린다(필드를 그대로 옮기고 버전만 올린다). 시험이 호출 수를 센다. 정의는
+    // Private/StructFixture.cpp다 — 시험이 함수 주소를 생성 ops의 migrate와 비교하므로 Modular에서
+    // 주소가 하나여야 한다(헤더 inline 정의는 공유 라이브러리마다 사본이 생긴다 —
+    // Docs/Design/BuildTargets.ko.md 3.8절 BS8d5).
+    ROCKS_REFLECTIONTESTFIXTURES_API static Result<Array<uint8>>
+    Migrate(Allocator& allocator, TypeId type, uint32 from, uint32 to,
+            Span<const uint8> source) noexcept;
 
     // 정의는 Private/FixtureState.cpp다(공개 헤더에 쓰기 가능한 정적 저장소를 두지 않는다 —
     // BuildTargets BD29).
-    static uint32 migrations;
+    ROCKS_REFLECTIONTESTFIXTURES_API static uint32 migrations;
     ROCKS_PROPERTY() uint32 count = 0;
     ROCKS_PROPERTY() String label;
     ROCKS_PROPERTY() TextureGroup group = TextureGroup::World;
@@ -90,7 +72,7 @@ struct StructOwner final : Object {
 
     // 정의는 Private/FixtureState.cpp다(공개 헤더에 쓰기 가능한 정적 저장소를 두지 않는다 —
     // BuildTargets BD29).
-    static uint32 constructed;
+    ROCKS_REFLECTIONTESTFIXTURES_API static uint32 constructed;
     ROCKS_PROPERTY() StructHolder holder;
     ROCKS_PROPERTY() uint32 plain = 0;
     ROCKS_PROPERTY(EditorOnly) StructLeaf extra;

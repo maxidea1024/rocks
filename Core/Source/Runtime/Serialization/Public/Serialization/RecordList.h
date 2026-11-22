@@ -46,7 +46,7 @@ struct RecordListLimits {
 // 목록 데이터의 사본은 이 builder buffer(성장 여유 용량 포함, 성장 중에는 이전·새 buffer가 잠시
 // 함께 있다), 부모 builder, 부모 Build 결과로 여러 벌이 된다. 큰 목록은 항목을 하나씩 만들어 바로
 // AddItem하고, Finish 뒤에는 builder를 일찍 파괴한다. 복사·이동하지 않는다.
-class RecordListBuilder {
+class ROCKS_SERIALIZATION_API RecordListBuilder {
 public:
     explicit RecordListBuilder(Allocator&, RecordListLimits = {}) noexcept;
     RecordListBuilder(const RecordListBuilder&) = delete;

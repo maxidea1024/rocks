@@ -80,7 +80,7 @@ struct DedicatedLaneStats {
 //   스레드도 잠금을 놓은 뒤로는 lane을 건드리지 않는다). 다만 파괴 전에 다른 스레드의
 //   Post·Flush·Stats·IsExecutingTask 호출도 모두 반환해야 한다(거부되는 Post도 큐 칸 반환을
 //   위해 lane을 쓴다).
-class DedicatedLane {
+class ROCKS_TASK_API DedicatedLane {
 public:
     explicit DedicatedLane(Allocator& allocator) noexcept;
     ~DedicatedLane() noexcept;

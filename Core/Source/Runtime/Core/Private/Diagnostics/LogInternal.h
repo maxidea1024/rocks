@@ -79,7 +79,7 @@ void DeliverFatalToLogSystem(LogSystem& system, Span<const uint8> capture) noexc
 
 // 출력 스레드의 CurrentThreadId 값이다(아직 없으면 0). 종료 flush의 출력 스레드 판정을 시험이
 // 재현할 때 쓴다.
-uint64 LogWriterThreadId(const LogSystem& system) noexcept;
+ROCKS_CORE_API uint64 LogWriterThreadId(const LogSystem& system) noexcept;
 
 // AssertFailed의 보고 경로다(설계 11절): 비상 출력 → 설치된 LogSystem에 Fatal 기록 전달 → 종료.
 // 같은 스레드에서 Fatal 보고 중이면 바로 platform::FatalAt으로 간다. 종료는

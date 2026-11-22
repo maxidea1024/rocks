@@ -58,20 +58,22 @@ t49 = "SoundAsset"
 t50 = "Open"
 t51 = "bool"
 t52 = "Info"
-t53 = "State"
-t54 = "Mode"
-t55 = "Names"
-t56 = "Scores"
-t57 = "Hum"
-t58 = "LoopHandle?"
-t59 = "Opened"
-t60 = "x"
-t61 = "x,f64>void"
-t62 = "Actor.Damaged"
-t63 = "Owner"
-t64 = "Damaged"
-t65 = "sparks 0.4.0"
-t66 = "Main"
+t53 = "Stats{Level:int,Offset:vec3}"
+t54 = "State"
+t55 = "Mode"
+t56 = "Mode{Idle,Busy,Done}"
+t57 = "Names"
+t58 = "Scores"
+t59 = "Hum"
+t60 = "LoopHandle?"
+t61 = "Opened"
+t62 = "x"
+t63 = "x,f64>void"
+t64 = "Actor.Damaged"
+t65 = "Owner"
+t66 = "Damaged"
+t67 = "sparks 0.4.0"
+t68 = "Main"
 ref0 = context World
 ref1 = field World.Audio args ">x"
 ref2 = field Door.Cue args ">x"
@@ -99,8 +101,8 @@ type0 = struct Stats s4 r0 b0
 class0 = Door : ScriptableComponent s2 r2 b3 init Door.$init
   field Cue r0 x1 SoundAsset
   field Open s0 x1 bool
-  field Info b0 x1 Stats
-  field State s1 x1 Mode
+  field Info b0 x1 Stats shape Stats{Level:int,Offset:vec3}
+  field State s1 x1 Mode shape Mode{Idle,Busy,Done}
   field Names b1 x1 Array<string>
   field Scores b2 x1 Map<string, int>
   field Hum r1 x1 LoopHandle? held

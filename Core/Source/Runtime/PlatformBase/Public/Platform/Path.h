@@ -48,6 +48,7 @@ ROCKS_PLATFORMBASE_API FileStatus GetStandardDirectory(StandardDirectory kind, c
 // Context.getFilesDir()/getCacheDir() 또는 ANativeActivity의 internalDataPath와 cache 경로를
 // 넘긴다. 여러 번 호출하면 마지막 값이 쓰이며 스레드 안전하다. 실패: null·빈 값·상대 경로·너무 긴
 // 경로는 InvalidArgument. desktop(Windows·macOS)은 OS 기본 디렉터리를 쓰므로 Unsupported다.
-FileStatus RegisterApplicationDirectories(const char* dataPath, const char* cachePath) noexcept;
+ROCKS_PLATFORMBASE_API FileStatus RegisterApplicationDirectories(const char* dataPath,
+                                                                 const char* cachePath) noexcept;
 
 } // namespace rocks::platform

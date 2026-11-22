@@ -145,7 +145,7 @@ struct NameKey {
 
 // text의 NameKey다. NamePool::TryIntern과 같은 번호 접미사·None 규칙으로 해석한다. 잘못된 UTF-8은
 // InvalidArgument다. pool·allocator가 필요 없다.
-Result<NameKey> TryMakeNameKey(StringView text) noexcept;
+ROCKS_CORE_API Result<NameKey> TryMakeNameKey(StringView text) noexcept;
 
 // Name 원문을 base와 번호 접미사로 나눈 결과다. SplitNameText가 만든다.
 struct NameTextParts {

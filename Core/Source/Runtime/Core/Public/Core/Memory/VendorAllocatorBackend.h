@@ -16,7 +16,7 @@ namespace detail {
 
 // 함수 주소와 순서는 생성 후 변경되지 않는다. Bind가 반환하는 context가 이 객체를
 // 빌리므로 이동·복사를 금지하며, 객체는 ExternalAllocator보다 오래 살아야 한다.
-class VendorAllocatorBinding {
+class ROCKS_CORE_API VendorAllocatorBinding {
 public:
     VendorAllocatorBinding(const VendorAllocatorBinding&) = delete;
     VendorAllocatorBinding& operator=(const VendorAllocatorBinding&) = delete;

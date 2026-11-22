@@ -6,7 +6,7 @@
 // 쓴다(시험은 지역 저장소를 채워 전역 상태를 건드리지 않는다).
 namespace rocks::detail {
 
-class CommandLineStorage {
+class ROCKS_CORE_API CommandLineStorage {
 public:
     // 진입점 인자를 UTF-8로 옮기고 실행 파일 경로를 OS에서 읽는다. 오류는
     // ProcessCommandLine::Capture와 같다(AlreadyExists 제외). 실패하면 빈 상태다.

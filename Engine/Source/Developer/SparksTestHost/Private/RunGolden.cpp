@@ -1057,6 +1057,29 @@ struct RunInjection {
     bool cancel = false;
 };
 
+// session의 관찰 가능한 상태(instance별 module·class·필드 값과 Buf 포인터, 연결·거부·정지 실행·
+// 대기·큐 수)를 out에 담는다(실패한 reload가 session을 바꾸지 않았는지 대조 — SparksReload K3).
+// 할당 실패면 false.
+bool SnapshotSession(const VmSession& session, Array<uint64>& out) noexcept {
+    out.Clear();
+    bool ok = out.TryPushBack(session.ConnectionCount()) &&
+              out.TryPushBack(session.DroppedConnections()) &&
+              out.TryPushBack(session.SuspendedCount()) && out.TryPushBack(session.WaitCount()) &&
+              out.TryPushBack(session.QueuedCount()) && out.TryPushBack(session.AttachedCount());
+    for (uint32 instance = 0; ok && session.ModuleOf(instance) != nullptr; ++instance) {
+        const VmSession::FieldView fields = session.Fields(instance);
+        ok = out.TryPushBack(uint64(reinterpret_cast<uptr>(session.ModuleOf(instance)))) &&
+             out.TryPushBack(session.ClassOf(instance)) && out.TryPushBack(fields.scalars.Size()) &&
+             out.TryPushBack(fields.refs.Size()) && out.TryPushBack(fields.buffers.Size()) &&
+             out.TryAppend(fields.scalars) && out.TryAppend(fields.refs);
+        for (VmBuffer* const buffer : fields.buffers) {
+            ok = ok && out.TryPushBack(uint64(reinterpret_cast<uptr>(buffer)));
+        }
+    }
+
+    return ok;
+}
+
 // 사례 하나의 revision 원문 상한이다(쓰임 표시 bit 수).
 constexpr usize RunMaxRevisionFiles = 32;
 
@@ -1457,29 +1480,60 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
 
                     actual.AppendFormat("rejected ({})", reason.View());
                 } else {
+                    // 적용 실패(OutOfMemory·InvalidArgument)면 session이 그대로여야
+                    // 한다(SparksReload K3 — 할당 실패 전수 시험이 모든 실패 자리에서 본다, LC7b
+                    // 리뷰).
+                    Array<uint64> before(allocator);
+                    if (!SnapshotSession(session, before)) {
+                        return Result<void>::Failure(ErrorCode::OutOfMemory);
+                    }
+
                     auto applied = session.ApplyReload(plan);
                     if (!applied) {
+                        Array<uint64> after(allocator);
+                        if (!SnapshotSession(session, after)) {
+                            return Result<void>::Failure(ErrorCode::OutOfMemory);
+                        }
+
+                        if (after.Size() != before.Size()) {
+                            return fail(".run: a failed reload changed the session");
+                        }
+
+                        for (usize at = 0; at < after.Size(); ++at) {
+                            if (after[at] != before[at]) {
+                                return fail(".run: a failed reload changed the session");
+                            }
+                        }
+                    }
+
+                    if (!applied && applied.Error() != ErrorCode::InvalidArgument) {
                         return Result<void>::Failure(applied.Error());
                     }
 
-                    const VmReloadReport& report = applied.Value();
-                    if (report.restartError != ErrorCode::None) {
-                        return Result<void>::Failure(report.restartError);
-                    }
+                    // 적용 거부(새 `$init` fault — 기본값 레코드 재합성 실패, SparksReload 5절)는
+                    // session이 그대로다.
+                    if (!applied) {
+                        actual.Append("apply failed (InvalidArgument)");
+                    } else {
+                        const VmReloadReport& report = applied.Value();
+                        if (report.restartError != ErrorCode::None) {
+                            return Result<void>::Failure(report.restartError);
+                        }
 
-                    actual.AppendFormat("ok (instances {}, moved {}, defaulted {}, lost {}, "
-                                        "removed {}, ",
-                                        report.instances, report.moved, report.defaulted,
-                                        report.lost, report.removed);
-                    actual.AppendFormat("cancelled {}, restarted {}, previous {})",
-                                        report.cancelled, report.restarted, report.previous);
-                    host.SetModule(&revision.linked);
-                    code = &revision.module;
-                    current = &revision.linked;
-                    currentCompilation = &revision.compilation;
-                    currentMain = revision.main;
-                    values.Rebind(revision.compilation);
-                    delivered = true;
+                        actual.AppendFormat("ok (instances {}, moved {}, defaulted {}, lost {}, "
+                                            "removed {}, ",
+                                            report.instances, report.moved, report.defaulted,
+                                            report.lost, report.removed);
+                        actual.AppendFormat("cancelled {}, restarted {}, previous {})",
+                                            report.cancelled, report.restarted, report.previous);
+                        host.SetModule(&revision.linked);
+                        code = &revision.module;
+                        current = &revision.linked;
+                        currentCompilation = &revision.compilation;
+                        currentMain = revision.main;
+                        values.Rebind(revision.compilation);
+                        delivered = true;
+                    }
                 }
             } else if (verb == "budget") {
                 // 예산 거부 집계(SparksRuntime 2.6절 — LC6d4).
@@ -1487,18 +1541,32 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
                 actual.AppendFormat("connections dropped {}, executions skipped {}",
                                     session.DroppedConnections(), session.SkippedExecutions());
             } else if (verb == "limits") {
-                // `limits <connections> <executions>`: 시험용으로 instance 구독 연결·동시 실행
-                // 상한을 줄인다(host는 session을 만들 때 정한다).
+                // `limits <connections> <executions> [<instructions>]`: 시험용으로 instance 구독
+                // 연결·동시 실행 상한(과 조각 명령 예산 — reload 기본값 레코드의 fault 시험)을
+                // 줄인다(host는 session을 만들 때 정한다).
                 actual.Append(directive).Append(RunArrow);
+                usize space = 0;
+                while (space < rest.ByteCount() && rest.Data()[space] != ' ') {
+                    ++space;
+                }
+
                 auto connections = TryParseUInt32(target);
-                auto executions = TryParseUInt32(rest);
-                if (!connections || !executions) {
+                auto executions = TryParseUInt32(StringView(rest.Data(), space));
+                const bool hasInstructions = space < rest.ByteCount();
+                auto instructions = hasInstructions
+                                        ? TryParseUInt64(StringView(rest.Data() + space + 1,
+                                                                    rest.ByteCount() - space - 1))
+                                        : Result<uint64>::Success(0);
+                if (!connections || !executions || !instructions) {
                     return bad("'limits' needs connection and execution counts");
                 }
 
                 VmSessionBudgets budgets = session.Budgets();
                 budgets.connectionsPerInstance = connections.Value();
                 budgets.executionsPerInstance = executions.Value();
+                if (hasInstructions) {
+                    budgets.fragmentInstructions = instructions.Value();
+                }
                 if (!session.SetBudgets(budgets)) {
                     return bad("'limits' needs non-zero counts");
                 }

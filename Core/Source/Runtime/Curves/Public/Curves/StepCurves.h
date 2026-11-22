@@ -70,7 +70,7 @@ struct StringStepKey {
 //   if (auto added = curve.TryAddKey(1.0f, 3); !added) { return added.Error(); }
 //   const int32 value = curve.Evaluate(2.0f);   // 3
 ROCKS_STRUCT()
-struct IntegerStepCurve {
+struct ROCKS_CURVES_API IntegerStepCurve {
     ROCKS_GENERATED_BODY()
 public:
     // 키 없는 커브다(기본값 없음, useDefaultBeforeFirstKey 거짓). allocator는 키 배열이 쓴다.
@@ -173,7 +173,7 @@ private:
 //   if (auto added = curve.TryAddKey(0.5f, pool.TryIntern("Walk").Value()); !added) { ... }
 //   const Name state = curve.Evaluate(1.0f);   // Walk
 ROCKS_STRUCT()
-struct NameStepCurve {
+struct ROCKS_CURVES_API NameStepCurve {
     ROCKS_GENERATED_BODY()
 public:
     explicit NameStepCurve(Allocator& allocator) noexcept : keys_(allocator) {
@@ -239,7 +239,7 @@ private:
 //   if (auto added = curve.TryAddKey(0.0f, "Intro"); !added) { return added.Error(); }
 //   const StringView text = curve.Evaluate(3.0f);   // "Intro"
 ROCKS_STRUCT()
-struct StringStepCurve {
+struct ROCKS_CURVES_API StringStepCurve {
     ROCKS_GENERATED_BODY()
 public:
     explicit StringStepCurve(Allocator& allocator) noexcept : keys_(allocator) {

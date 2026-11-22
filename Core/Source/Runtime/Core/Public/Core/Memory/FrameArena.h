@@ -204,7 +204,7 @@ private:
 // - 수명: backing은 arena보다 오래 살아야 하고 여러 스레드의 Allocate·Deallocate를 지원해야
 //   한다. backing은 arena 잠금 안에서 부르므로 backing 콜백이 같은 arena를 부르면 교착이다
 //   (금지). writer가 열린 채 파괴하면 Fatal이다.
-class FrameArena final : public detail::FrameArenaFactory<FrameArena> {
+class ROCKS_CORE_API FrameArena final : public detail::FrameArenaFactory<FrameArena> {
 public:
     explicit FrameArena(Allocator& backing, const FrameArenaConfig& config = {}) noexcept;
     ~FrameArena() noexcept;
@@ -287,7 +287,7 @@ private:
 //   파괴는 Fatal). 만든 객체의 수명은 writer가 아니라 arena 수명이다(writer를 파괴해도 객체는
 //   Reset까지 산다).
 // - 할당 함수의 오류 규칙은 FrameArena와 같다.
-class FrameArenaWriter final : public detail::FrameArenaFactory<FrameArenaWriter> {
+class ROCKS_CORE_API FrameArenaWriter final : public detail::FrameArenaFactory<FrameArenaWriter> {
 public:
     explicit FrameArenaWriter(FrameArena& arena) noexcept;
     ~FrameArenaWriter() noexcept;

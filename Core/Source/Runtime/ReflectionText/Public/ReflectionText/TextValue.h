@@ -67,10 +67,10 @@ struct TextScalarType {
 
 // 자리의 단일 값 형식이다: Field면 단일 값 필드의 형식(Optional은 내부, 컨테이너는 원소·Map 값),
 // Element·MapValue·SetElement면 원소·값 형식이다. Map 키·Set 원소는 SlotKeyType이다.
-TextScalarType SlotValueType(const TextSlot& slot) noexcept;
+ROCKS_REFLECTIONTEXT_API TextScalarType SlotValueType(const TextSlot& slot) noexcept;
 
 // Map 키(키 enum 포함)·Set 원소의 형식이다(그 밖의 필드는 Opaque).
-TextScalarType SlotKeyType(const TextSlot& slot) noexcept;
+ROCKS_REFLECTIONTEXT_API TextScalarType SlotKeyType(const TextSlot& slot) noexcept;
 
 // 값 텍스트 하나의 모양이다.
 enum class TextValueShape : uint8 {
@@ -254,20 +254,23 @@ Result<void> DescribeTextPath(const TypeLease& type, PropertyPath path, TextSlot
 //   어느 단계에 있음). ReadOnly는 판정하지 않는다(slot.flags — 대입 묶음이 대상·값으로 정한다).
 // 오류: 용도가 입력을 받지 않음(Report)·옵션 InvalidArgument, 입력 한도 CapacityExceeded, 진단
 // 할당 실패, 빈 lease InvalidArgument.
-Result<bool> ResolveTextPath(TextCodecContext& context, const TypeLease& type, StringView text,
-                             TextSource source, TextPath& out) noexcept;
+ROCKS_REFLECTIONTEXT_API Result<bool> ResolveTextPath(TextCodecContext& context,
+                                                      const TypeLease& type, StringView text,
+                                                      TextSource source, TextPath& out) noexcept;
 
 // path를 텍스트로 out 뒤에 붙인다(FormatPropertyPath + KeyHook). 용도의 출력 제외 플래그가 경로의
 // 어느 단계에 있으면 아무것도 쓰지 않고 false다. InstancedStruct 뒤 멤버 단계는 문맥의
 // InstancedTypes()로 푼다(없으면 그 경로는 InvalidArgument). 오류: FormatPropertyPath·
 // DescribeTextPath의 오류.
-Result<bool> FormatTextPath(TextCodecContext& context, const TypeLease& type, PropertyPath path,
-                            String& out) noexcept;
+ROCKS_REFLECTIONTEXT_API Result<bool> FormatTextPath(TextCodecContext& context,
+                                                     const TypeLease& type, PropertyPath path,
+                                                     String& out) noexcept;
 
 // 대입 텍스트 `<경로>=<값>`을 `[...]`와 key 따옴표 밖의 첫 `=`에서 나눈다(String 키 `a=b`는
 // `m["a=b"]=1`로 쓴다 — 1.5절). `=`가 없으면 false다(path·value는 바뀌지 않는다). 따옴표 안의
 // `\"`·`\\`는 건너뛴다. 할당하지 않는다.
-bool SplitTextAssignment(StringView text, StringView& path, StringView& value) noexcept;
+ROCKS_REFLECTIONTEXT_API bool SplitTextAssignment(StringView text, StringView& path,
+                                                  StringView& value) noexcept;
 
 // 단일 값 텍스트 하나를 type의 값으로 out에 읽는다(목록 escape를 푼 원문 — 목록이 아니면 그대로).
 // out의 kind·값 칸·type(enum ID)을 정하고 present는 true다. 텍스트 byte를 입력 누계에 더한다.
@@ -298,14 +301,17 @@ ROCKS_REFLECTIONTEXT_API Result<void> FormatTextScalar(TextCodecContext& context
 // 모양·Map 항목에 `:` 없음·StaticArray 원소 수 ≠ N), OutOfRange(원소 수 > maxElements·필드
 // MaxElements), DuplicateKey(Set 원소·Map 키 중복 — Name은 pool 비교 규칙, String은 byte),
 // Unsupported(Set 원소 자리, 통째로 쓸 수 없는 필드). 오류: ParseTextScalar와 같다.
-Result<bool> ParseTextValue(TextCodecContext& context, const TextSlot& slot, StringView text,
-                            TextSource source, StringView pathText, TextValue& out) noexcept;
+ROCKS_REFLECTIONTEXT_API Result<bool> ParseTextValue(TextCodecContext& context,
+                                                     const TextSlot& slot, StringView text,
+                                                     TextSource source, StringView pathText,
+                                                     TextValue& out) noexcept;
 
 // value를 자리(slot)의 텍스트로 out 뒤에 붙인다(ParseTextValue와 왕복한다). 목록 원소는 `,`·`;`를,
 // Map 키는 `:`도 escape한다. 오류: 모양이 자리와 맞지 않음 InvalidArgument, 목록으로 쓸 수 없는
 // 원소(원소 하나뿐인 빈 문자열, 다음 구분자와 escape 쌍이 되는 `\`로 끝나는 원소·키)·
 // FormatTextScalar의 Unsupported, 붙이기 실패. 실패하면 out에 앞부분이 남을 수 있다.
-Result<void> FormatTextValue(TextCodecContext& context, const TextSlot& slot,
-                             const TextValue& value, String& out) noexcept;
+ROCKS_REFLECTIONTEXT_API Result<void> FormatTextValue(TextCodecContext& context,
+                                                      const TextSlot& slot, const TextValue& value,
+                                                      String& out) noexcept;
 
 } // namespace rocks::reflection_text

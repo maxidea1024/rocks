@@ -62,11 +62,12 @@ ROCKS_CORE_API void LogSubmit(LogLevel level, const LogCategory& category,
                               usize count) noexcept;
 // 설치된 LogSystem 기준 활성 여부다. 설치가 없으면 Warning 이상만 참이고, countDrop이면 거짓일 때
 // 설치 전 버림으로 센다(Lazy가 쓴다).
-bool LogIsEnabledSlow(LogLevel level, const LogCategory& category, bool countDrop) noexcept;
-void LogSubmitLazy(LogLevel level, const LogCategory& category, StringView message,
-                   SourceLocation where) noexcept;
-void LogAppendLine(FixedStringBuilder& out, const LogCaptureTemplate& text, const FormatArg* args,
-                   usize count) noexcept;
+ROCKS_CORE_API bool LogIsEnabledSlow(LogLevel level, const LogCategory& category,
+                                     bool countDrop) noexcept;
+ROCKS_CORE_API void LogSubmitLazy(LogLevel level, const LogCategory& category, StringView message,
+                                  SourceLocation where) noexcept;
+ROCKS_CORE_API void LogAppendLine(FixedStringBuilder& out, const LogCaptureTemplate& text,
+                                  const FormatArg* args, usize count) noexcept;
 [[noreturn]] ROCKS_CORE_API void LogFatal(const LogCategory& category,
                                           const LogCaptureTemplate& text, const FormatArg* args,
                                           usize count) noexcept;

@@ -20,7 +20,7 @@ struct SegmentCryptoProbe {
 
 // salt(32 byte, 아니면 InvalidArgument)를 받는 암호화 제출이다. 나머지는 TrySubmitSegmentEncrypt와
 // 같다.
-[[nodiscard]] Result<void>
+[[nodiscard]] ROCKS_CRYPTO_API Result<void>
 TrySubmitSegmentEncryptWithSalt(WorkerScheduler& scheduler, SegmentCryptoTask& task,
                                 const SegmentStreamKey& key, const SegmentStreamParams& params,
                                 Span<const uint8> associatedData, Span<const uint8> plaintext,
@@ -29,7 +29,7 @@ TrySubmitSegmentEncryptWithSalt(WorkerScheduler& scheduler, SegmentCryptoTask& t
                                 SegmentCryptoProbe probe) noexcept;
 
 // probe를 받는 복호 제출이다. 나머지는 TrySubmitSegmentDecrypt와 같다.
-[[nodiscard]] Result<void> TrySubmitSegmentDecryptWithProbe(
+[[nodiscard]] ROCKS_CRYPTO_API Result<void> TrySubmitSegmentDecryptWithProbe(
     WorkerScheduler& scheduler, SegmentCryptoTask& task, const SegmentStreamKey& key,
     Span<const uint8> associatedData, Span<const uint8> ciphertext, Span<uint8> plaintext,
     const SegmentCryptoOptions& options, Span<const WorkerTaskHandle> dependencies,

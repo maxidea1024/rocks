@@ -40,12 +40,13 @@ struct DecimalNumber {
 // number를 format으로 가장 가깝게(동점은 짝수) 반올림한 비트(부호 제외)다. 최댓값을 넘어 무한대로
 // 반올림되면 무한대 비트를, 가장 작은 비정규 수의 절반 이하면 0을 돌려준다. 입력 크기와 무관하게
 // 정확하다.
-uint64 ToBinary(const DecimalNumber& number, BinaryFormat format) noexcept;
+ROCKS_CORE_API uint64 ToBinary(const DecimalNumber& number, BinaryFormat format) noexcept;
 
 // number와 bits·bits+1(유한 양수 또는 0인 이웃 두 값)의 중간점을 정확히 비교한다(-1·0·1). 잘린
 // 꼬리가 있으면 같음을 큼으로 본다. 시험이 ToBinary와 독립인 이분 탐색 기준값을 만들 때도 쓴다.
 // bits는 형식의 어떤 유한 값이어도 된다(최악 약 4650비트 — 큰 정수 용량 5120비트 안).
-int32 CompareWithHalfway(const DecimalNumber& number, uint64 bits, BinaryFormat format) noexcept;
+ROCKS_CORE_API int32 CompareWithHalfway(const DecimalNumber& number, uint64 bits,
+                                        BinaryFormat format) noexcept;
 
 // 최단 왕복 표기 value = significand × 10^exponent. 다시 읽으면 같은 값이 되는 가장 짧은 10진
 // 수이며, 그런 수가 여럿이면 참값에 가장 가까운 것(동점은 짝수)이다. significand에 끝 0이 남을 수
@@ -56,10 +57,10 @@ struct ShortestDecimal {
 };
 
 // bits는 부호를 뺀 0이 아닌 유한 값의 IEEE 비트다(0이면 Fatal — 호출자가 먼저 처리한다).
-ShortestDecimal Shortest(uint64 bits, BinaryFormat format) noexcept;
+ROCKS_CORE_API ShortestDecimal Shortest(uint64 bits, BinaryFormat format) noexcept;
 
 // float 비트를 같은 값의 double 비트로 넓힌다(정수 연산 — FTZ·DAZ와 무관, NaN은 quiet NaN 비트).
-uint64 FloatBitsToDoubleBits(uint32 bits) noexcept;
+ROCKS_CORE_API uint64 FloatBitsToDoubleBits(uint32 bits) noexcept;
 
 // double의 정확한 10진 전개 0.d1d2…dn × 10^pointPosition. digits는 ASCII이고 끝 0은 없다(값 0이면
 // count 0). 가장 긴 경우는 정수부 16자리 + 소수부 1074자리다.
@@ -70,10 +71,10 @@ struct ExactDecimal {
 };
 
 // doubleBits는 유한 double의 비트다(부호는 무시한다).
-void ExpandExact(uint64 doubleBits, ExactDecimal& out) noexcept;
+ROCKS_CORE_API void ExpandExact(uint64 doubleBits, ExactDecimal& out) noexcept;
 
 // out을 앞에서부터 keep자리만 남기도록 가장 가까운 값(동점은 짝수)으로 반올림한다. keep이 0 이하면
 // 첫 숫자보다 앞 자리에서 반올림한다(결과는 0 또는 10^pointPosition). 끝 0은 지운다.
-void RoundExact(ExactDecimal& out, int64 keep) noexcept;
+ROCKS_CORE_API void RoundExact(ExactDecimal& out, int64 keep) noexcept;
 
 } // namespace rocks::detail::decimal

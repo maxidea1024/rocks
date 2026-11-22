@@ -197,6 +197,19 @@ Result<uint32> VmSession::CreateInstance(uint64 handle, const VmLinkedModule& mo
         return Result<uint32>::Failure(resized.Error());
     }
 
+    // slot별 쓰기 bit(SparksReload K5 — 0으로 시작, `$init`은 표시하지 않는다).
+    const usize totalSlots =
+        instance.scalars.Size() + instance.refs.Size() + instance.buffers.Size();
+    if (auto resized =
+            instance.written.TryResize((totalSlots + VmWrittenWordBits - 1) / VmWrittenWordBits);
+        !resized) {
+        return Result<uint32>::Failure(resized.Error());
+    }
+
+    for (uint64& value : instance.written) {
+        value = 0;
+    }
+
     for (uint64& value : instance.scalars) {
         value = 0;
     }
@@ -255,6 +268,7 @@ Result<uint32> VmSession::CreateInstance(uint64 handle, const VmLinkedModule& mo
     BeginEntry();
     execution_.keepLogs_ = true;
     suppressChanged_ = true;
+    initializing_ = true;
     struct KeepLogs {
         VmSession& session;
         ~KeepLogs() noexcept {
@@ -262,6 +276,7 @@ Result<uint32> VmSession::CreateInstance(uint64 handle, const VmLinkedModule& mo
             static_cast<void>(session.EndFragment());
             session.execution_.keepLogs_ = false;
             session.suppressChanged_ = false;
+            session.initializing_ = false;
         }
     } keepLogs{*this};
     for (uint32 at = depth; at > 0; --at) {
@@ -664,6 +679,7 @@ Result<void> VmSession::Detach(uint32 instance) noexcept {
     entry.scalars.Empty();
     entry.refs.Empty();
     entry.buffers.Empty();
+    entry.written.Empty();
     return Result<void>::Success();
 }
 
@@ -710,6 +726,22 @@ uint32 VmSession::ClassOf(uint32 instance) const noexcept {
 bool VmSession::FieldSlots(uint64 handle, const VmLinkedModule& module, uint32 classIndex,
                            uint32 bank, uint32 offset, uint32 slots, uint64*& values,
                            VmBuffer**& buffers, uint32& instanceOut, uint32& atOut) noexcept {
+    // reload 기본값 계산(SparksReload 5절): 그 클래스 임시 저장소다(instance 번호 없음 — Changed
+    // 기록·instance 메모리 예산·쓰기 bit를 건너뛴다).
+    if (IsStaging(module, classIndex)) {
+        if (bank >= BytecodeBankCount || usize(offset) + slots > staging_.sizes[bank]) {
+            return false;
+        }
+
+        values = bank == 0   ? staging_.scalars + offset
+                 : bank == 1 ? staging_.refs + offset
+                             : nullptr;
+        buffers = bank == 2 ? staging_.buffers + offset : nullptr;
+        instanceOut = VmNoInstance;
+        atOut = offset;
+        return true;
+    }
+
     const uint32 number = Find(handle);
     if (number == VmNoInstance) {
         return false;
@@ -769,6 +801,23 @@ bool VmSession::FieldSlots(uint64 handle, const VmLinkedModule& module, uint32 c
     instanceOut = number;
     atOut = static_cast<uint32>(at);
     return true;
+}
+
+void VmSession::MarkWritten(uint32 instance, uint32 bank, uint32 at, uint32 slots) noexcept {
+    if (initializing_ || instance >= instances_.Size() || bank >= BytecodeBankCount) {
+        return;
+    }
+
+    Instance& entry = instances_[instance];
+    const usize base = bank == 0   ? 0
+                       : bank == 1 ? entry.scalars.Size()
+                                   : entry.scalars.Size() + entry.refs.Size();
+    for (uint32 slot = 0; slot < slots; ++slot) {
+        const usize bit = base + at + slot;
+        if (bit / VmWrittenWordBits < entry.written.Size()) {
+            entry.written[bit / VmWrittenWordBits] |= uint64(1) << (bit % VmWrittenWordBits);
+        }
+    }
 }
 
 Result<void> VmSession::RequestEnabled(uint32 instance, bool enabled) noexcept {

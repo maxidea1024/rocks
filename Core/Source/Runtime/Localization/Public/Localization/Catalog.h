@@ -31,7 +31,7 @@ struct CatalogLimits {
 // allocator는 마지막 snapshot 해제까지 살아 있고 해당 스레드의 Allocate/Deallocate를 지원해야 한다.
 // allocator 콜백에서 현재 호출의 입력 snapshot 래퍼를 Reset/move하는 재진입은 금지한다.
 // culture와 revision은 자동 정규화하지 않는 opaque identity다. 전역 locale을 사용하지 않는다.
-class CatalogSnapshot {
+class ROCKS_LOCALIZATION_API CatalogSnapshot {
 public:
     CatalogSnapshot() noexcept = default;
     CatalogSnapshot(CatalogSnapshot&&) noexcept;
@@ -67,7 +67,7 @@ private:
 // 소멸은 모든 store API 호출 종료 뒤 수행한다. allocator 콜백은 store gate 밖에서 실행한다.
 // Publish 순서는 caller가 결정한다. culture/revision의 최신성이나 비동기 요청 순서를 추측하지
 // 않는다.
-class CatalogStore {
+class ROCKS_LOCALIZATION_API CatalogStore {
 public:
     CatalogStore() noexcept = default;
     ~CatalogStore() noexcept;

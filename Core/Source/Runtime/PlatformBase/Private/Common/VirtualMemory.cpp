@@ -27,6 +27,10 @@ namespace detail {
 
 thread_local VirtualMemoryFaults virtualMemoryFaults;
 
+VirtualMemoryFaults& ThisThreadVirtualMemoryFaults() noexcept {
+    return virtualMemoryFaults;
+}
+
 } // namespace detail
 
 VirtualMemoryRegion::~VirtualMemoryRegion() noexcept {

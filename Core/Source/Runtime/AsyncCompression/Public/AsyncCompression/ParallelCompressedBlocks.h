@@ -37,10 +37,9 @@ TryCompressBlocksAppend(WorkerScheduler& scheduler, const CompressedBlocksSettin
 // reader는 열린 CompressedBlocksReader이고 나머지 인자는 reader.TryRead(rawOffset, destination,
 // stored, storedBase, context, verify)와 같다(읽기 문맥 대신 scratch에서 helper마다 해제 문맥을
 // 만든다).
-Result<void> TryReadCompressedBlocks(WorkerScheduler& scheduler,
-                                     const CompressedBlocksReader& reader, uint64 rawOffset,
-                                     Span<uint8> destination, Span<const uint8> stored,
-                                     uint64 storedBase, Allocator& scratch,
-                                     bool verify = true) noexcept;
+ROCKS_ASYNCCOMPRESSION_API Result<void>
+TryReadCompressedBlocks(WorkerScheduler& scheduler, const CompressedBlocksReader& reader,
+                        uint64 rawOffset, Span<uint8> destination, Span<const uint8> stored,
+                        uint64 storedBase, Allocator& scratch, bool verify = true) noexcept;
 
 } // namespace rocks

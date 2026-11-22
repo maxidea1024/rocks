@@ -38,12 +38,12 @@ inline constexpr uint64 AesGcmMaxAssociatedBytes = (uint64{1} << 61) - 1;
 //   스레드가 동시에 읽어도 된다. 소유자(키 객체)가 하나만 돌려준다.
 // - 오류: kernels가 비었으면 Unsupported, key 길이가 16·32가 아니면 InvalidArgument, 키 저장소가
 //   찼으면 OutOfMemory다. 실패하면 슬롯을 남기지 않는다.
-[[nodiscard]] Result<AesSchedule*> TryCreateAesSchedule(const AesKernels& kernels,
-                                                        Span<const uint8> key) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<AesSchedule*>
+TryCreateAesSchedule(const AesKernels& kernels, Span<const uint8> key) noexcept;
 
 // 스케줄 슬롯 전체를 지우고 키 저장소에 돌려준다. nullptr는 아무 일도 하지 않는다. 키 저장소가 준
 // 살아 있는 슬롯이 아니면 Fatal이다(SecretArena 규칙).
-void DestroyAesSchedule(AesSchedule* schedule) noexcept;
+ROCKS_CRYPTO_API void DestroyAesSchedule(AesSchedule* schedule) noexcept;
 
 // ---- GCM 일회성 ----
 
@@ -55,10 +55,10 @@ void DestroyAesSchedule(AesSchedule* schedule) noexcept;
 // - 길이 오류(nonce·tag, 두 버퍼 길이 차이, 평문·AD 상한 초과)와 빈 표는 호출자가 막았어야 할
 //   결함이므로 Fatal이다.
 // - 쓰는 동안 만든 keystream·GHASH 누적값·E_K(J0)는 돌아가기 전에 지운다.
-void AesGcmSealDetached(const AesKernels& kernels, const AesSchedule& schedule,
-                        Span<const uint8> nonce, Span<const uint8> associatedData,
-                        Span<const uint8> plaintext, Span<uint8> ciphertext,
-                        Span<uint8> tag) noexcept;
+ROCKS_CRYPTO_API void AesGcmSealDetached(const AesKernels& kernels, const AesSchedule& schedule,
+                                         Span<const uint8> nonce, Span<const uint8> associatedData,
+                                         Span<const uint8> plaintext, Span<uint8> ciphertext,
+                                         Span<uint8> tag) noexcept;
 
 // AES-GCM 열기(분리 tag)다. tag가 맞으면 plaintext에 평문을 쓰고 true다. 틀리면 plaintext 전체를
 // 0으로 지우고 false다(호출자는 AuthenticationFailed로 돌려준다). tag는 상수 시간으로 비교한다.
@@ -66,10 +66,10 @@ void AesGcmSealDetached(const AesKernels& kernels, const AesSchedule& schedule,
 //   메모리여야 한다(8절 AES-GCM 복호 규칙과 같다).
 // - 인자 규칙은 AesGcmSealDetached와 같다(plaintext는 ciphertext와 같은 주소이거나 겹치지 않는다).
 //   tag 길이도 호출자가 16 byte로 맞춘다(잘린 tag는 호출자가 AuthenticationFailed로 거부한다).
-[[nodiscard]] bool AesGcmOpenDetached(const AesKernels& kernels, const AesSchedule& schedule,
-                                      Span<const uint8> nonce, Span<const uint8> associatedData,
-                                      Span<const uint8> ciphertext, Span<const uint8> tag,
-                                      Span<uint8> plaintext) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API bool
+AesGcmOpenDetached(const AesKernels& kernels, const AesSchedule& schedule, Span<const uint8> nonce,
+                   Span<const uint8> associatedData, Span<const uint8> ciphertext,
+                   Span<const uint8> tag, Span<uint8> plaintext) noexcept;
 
 // ---- GCM 멀티파트(9.3절) ----
 

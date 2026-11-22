@@ -27,8 +27,8 @@ struct Node final : Base {
     // logical destroy 이후 필드를 다시 역참조하지 않고 destructor에서 commit 결과를 관찰한다.
     // 정의는 Private/FixtureState.cpp다(공개 헤더에 쓰기 가능한 정적 저장소를 두지 않는다 —
     // BuildTargets BD29).
-    static bool destroyedWithOldLabel;
-    static bool destroyedWithNewLabel;
+    ROCKS_REFLECTIONTESTFIXTURES_API static bool destroyedWithOldLabel;
+    ROCKS_REFLECTIONTESTFIXTURES_API static bool destroyedWithNewLabel;
 
     ~Node() noexcept {
         destroyedWithOldLabel = label.View() == StringView("old");
@@ -55,7 +55,7 @@ class AbstractBase : public Object {
 public:
     // 정의는 Private/FixtureState.cpp다(공개 헤더에 쓰기 가능한 정적 저장소를 두지 않는다 —
     // BuildTargets BD29).
-    static uint32 constructions;
+    ROCKS_REFLECTIONTESTFIXTURES_API static uint32 constructions;
 
     AbstractBase() noexcept {
         ++constructions;
@@ -98,7 +98,7 @@ struct AbstractByPolicy : Object {
 
     // 정의는 Private/FixtureState.cpp다(공개 헤더에 쓰기 가능한 정적 저장소를 두지 않는다 —
     // BuildTargets BD29).
-    static uint32 constructions;
+    ROCKS_REFLECTIONTESTFIXTURES_API static uint32 constructions;
 
     AbstractByPolicy() noexcept {
         ++constructions;
@@ -150,9 +150,9 @@ struct AssetFields final : Object {
     // 시험이 파괴 시점의 icon 값을 확인한다(쓰기 도중 논리 파괴되어도 값이 바뀌지 않았는지). 정의는
     // Private/FixtureState.cpp다(공개 헤더에 쓰기 가능한 정적 저장소를 두지 않는다 — BuildTargets
     // BD29).
-    static AssetId destroyedIcon;
-    static char destroyedIconPath[DestroyedIconPathCapacity];
-    static usize destroyedIconPathBytes;
+    ROCKS_REFLECTIONTESTFIXTURES_API static AssetId destroyedIcon;
+    ROCKS_REFLECTIONTESTFIXTURES_API static char destroyedIconPath[DestroyedIconPathCapacity];
+    ROCKS_REFLECTIONTESTFIXTURES_API static usize destroyedIconPathBytes;
 
     ~AssetFields() noexcept {
         destroyedIcon = icon.asset;

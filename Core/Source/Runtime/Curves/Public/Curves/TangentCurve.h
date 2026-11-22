@@ -42,7 +42,7 @@ namespace rocks {
 //   curve.AutoSetTangents();
 //   const float value = curve.Evaluate(2.5f);   // 순환: 1.5초 자리의 값
 ROCKS_STRUCT()
-struct TangentCurve : ScalarCurveBase {
+struct ROCKS_CURVES_API TangentCurve : ScalarCurveBase {
     ROCKS_GENERATED_BODY()
 public:
     // 키 없는 커브다(기본값 없음·앞·뒤 외삽 Constant). allocator는 키 배열이 쓴다.

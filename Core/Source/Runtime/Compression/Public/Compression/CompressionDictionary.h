@@ -56,7 +56,7 @@ inline constexpr usize MaxDictionaryBytes = usize{32} << 20;
 // 압축용 사전(zstd CDict)이다. 압축 수준이 사전에 고정된다(settings의 형식·수준). 결과는 zstd 표준
 // 경로(ZSTD_createCDict(L) + refCDict)와 같은 매개변수를 고른다: 작은 입력은 사전 준비 표를 쓰고,
 // 큰 입력(128KiB 이상이고 사전의 6배 이상)은 그 수준의 전체 표로 사전을 다시 적재한다.
-class CompressDictionary {
+class ROCKS_COMPRESSION_API CompressDictionary {
 public:
     CompressDictionary() noexcept = default;
 
@@ -87,7 +87,7 @@ private:
 //   Unsupported로 거부한다(zstd는 ID 없는 frame을 검사 없이 사전으로 풀어 틀린 결과를 낼 수 있다).
 // - raw 사전(ID 0)은 frame에서 사전 불일치를 알 수 없다. checksum이 있는 frame이면 checksum 불일치
 //   (InvalidArgument)로 걸린다.
-class DecompressDictionary {
+class ROCKS_COMPRESSION_API DecompressDictionary {
 public:
     DecompressDictionary() noexcept = default;
 
@@ -113,6 +113,6 @@ private:
 // zstd frame 헤더에 기록된 사전 ID를 읽는다(0은 기록 없음). 로더·수신 측이 맞는 사전을 고를 때
 // 쓴다. frame이 zstd frame이 아니거나 헤더가 불완전·손상이면 InvalidArgument, window가 구현
 // 상한(2^31)을 넘으면 해제와 같이 Unsupported다. skippable frame은 0이다.
-Result<uint32> TryGetZstdFrameDictionaryId(Span<const uint8> frame) noexcept;
+ROCKS_COMPRESSION_API Result<uint32> TryGetZstdFrameDictionaryId(Span<const uint8> frame) noexcept;
 
 } // namespace rocks

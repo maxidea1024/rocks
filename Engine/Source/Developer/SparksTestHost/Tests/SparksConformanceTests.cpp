@@ -1283,6 +1283,240 @@ close -> ok
     CHECK(failures > 0);
 }
 
+TEST(SparksConformance_RunGoldenAllocationFailureReloadFields) {
+    // R2 migration(Docs/Design/SparksReload.ko.md 5절 — LC7b)의 모든 할당 실패 자리: 계획(원천·운명
+    // 표), 기본값 레코드(새 `$init`), instance마다 새 저장소·쓰기 bit, 연결 표 사본, 연결 다시
+    // 풀기(실패하면 되돌린다), 이전 revision 기록. 실패는 OutOfMemory로 돌아오고 새는 할당이 없다.
+    SystemAllocator backing;
+    constexpr StringView Source = R"(struct Stats {
+    var Level: int = 1;
+}
+
+class Lamp : ScriptableComponent {
+    @edit var Cue: SoundAsset;
+    var Count = 0;
+    var Label = "lamp";
+    var Old = 3;
+    var Moniker = "m";
+    var Info = Stats();
+    var Items: Array<int> = [];
+    var Hum: LoopHandle?;
+    var Drop: LoopHandle?;
+    var Peer: Lamp?;
+    event Ping(n: int);
+    event Pong(n: int);
+
+    on Enable() {
+        Hum = World.Audio.StartLoop(Cue);
+        Drop = World.Audio.StartLoop(Cue);
+    }
+
+    fn Bump() {
+        Count += 1;
+        Label = "${Label}!";
+        Moniker = "renamed";
+        Items.Add(2);
+    }
+
+    fn Watch(target: Lamp) {
+        Peer = target;
+    }
+
+    fn Fire(n: int) {
+        emit Ping(n);
+        emit Pong(n);
+    }
+
+    on Peer.Ping(n: int) {
+        Log.Info("ping v1 ${n}");
+    }
+
+    on Peer.Pong(n: int) {
+        Log.Info("pong v1 ${n}");
+    }
+
+    async fn UseOld() {
+        await Delay(1.0, Clock.Game);
+        Old += 1;
+    }
+
+    async fn UseCount() {
+        await Delay(1.0, Clock.Game);
+        Count += 10;
+        Log.Info("count ${Label}");
+    }
+}
+)";
+    constexpr StringView Second = R"(struct Stats {
+    var Level: int = 1;
+    var Bonus: int = 0;
+}
+
+class Lamp : ScriptableComponent {
+    @edit var Cue: SoundAsset;
+    var Count = 5;
+    var Label = "lamp";
+    @formerly("Moniker") var Title = "t";
+    var Info = Stats();
+    var Items: Array<int> = [];
+    var Hum: LoopHandle?;
+    var Peer: Lamp?;
+    var Fresh = "new";
+    event Ping(n: int);
+    event Pong(n: int);
+    event Ring(n: int);
+
+    on Enable() {
+        Hum = World.Audio.StartLoop(Cue);
+    }
+
+    fn Bump() {
+        Count += 1;
+    }
+
+    fn Watch(target: Lamp) {
+        Peer = target;
+    }
+
+    fn Fire(n: int) {
+        emit Ping(n);
+        emit Pong(n);
+        emit Ring(n);
+    }
+
+    on Peer.Ping(n: int) {
+        Log.Info("ping v2 ${n}");
+    }
+
+    on Peer.Ring(n: int) {
+        Log.Info("ring v2 ${n}");
+    }
+
+    async fn UseCount() {
+        await Delay(1.0, Clock.Game);
+        Count += 10;
+        Log.Info("count ${Label}");
+    }
+}
+)";
+    const CaseFile revisions[] = {{"v2", Second}};
+    constexpr StringView Golden = R"(new #1 Lamp -> ok
+new #2 Lamp -> ok
+new #3 Lamp -> ok
+hook #1 Enable -> ok
+hook #2 Enable -> ok
+hook #3 Enable -> ok
+Lamp.Watch(#2, #1) -> ok
+Lamp.Watch(#3, #1) -> ok
+Lamp.Bump(#2) -> ok
+Lamp.UseOld(#2) -> ok
+Lamp.UseCount(#2) -> ok
+reload v2 keep -> ok
+Lamp.Fire(#1, 1) -> ok
+advance 1.0 -> ok
+fields #2 -> ok
+fields #3 -> ok
+close -> ok
+)";
+    constexpr StringView Schema = R"({
+  "format": 1, "package": "Rocks", "module": "Engine",
+  "types": [
+    {"name": "Actor", "id": "5a7e0000000000000000000000000001", "kind": "object"},
+    {"name": "Component", "id": "5a7e0000000000000000000000000005", "kind": "object",
+     "fields": [{"name": "Owner", "id": "5a7e0000000000000000000000000131", "type": "Actor"}]},
+    {"name": "ScriptableComponent", "id": "5a7e0000000000000000000000000007", "kind": "object",
+     "base": "Component", "scriptExtensible": true},
+    {"name": "SoundAsset", "id": "5a7e000000000000000000000000000e", "kind": "asset"},
+    {"name": "LoopHandle", "id": "5a7e00000000000000000000000002e0", "kind": "object",
+     "held": true},
+    {"name": "AudioSystem", "id": "5a7e000000000000000000000000000f", "kind": "object",
+     "functions": [{"name": "StartLoop", "id": "5a7e00000000000000000000000002f2",
+                    "parameters": [{"name": "sound", "type": "SoundAsset"}],
+                    "returns": "LoopHandle?", "effects": ["acquire"]}]},
+    {"name": "World", "id": "5a7e0000000000000000000000000010", "kind": "object",
+     "fields": [{"name": "Audio", "id": "5a7e0000000000000000000000000161",
+                 "type": "AudioSystem"}]}
+  ]
+})";
+    const CaseFile schemas[] = {{"Schema/Engine.sparkbind.json", Schema}};
+    SystemAllocator side; // 기대값은 세는 allocator 밖에 둔다
+    uint64 attempts = 0;
+    uint64 failures = 0;
+    String expected(side);
+    for (uint64 failAt = 0; failAt == 0 || failAt <= attempts; ++failAt) {
+        test::NFailAllocator allocator(backing);
+        const uint64 before = backing.Stats().liveAllocations;
+        {
+            CaseInput input;
+            input.name = "Run/ReloadFields.spark";
+            input.schemas = schemas;
+            input.source = Source;
+            input.expect = "clean\n";
+            input.hasRun = true;
+            input.revisions = revisions;
+            input.run = failAt == 0 ? Golden : expected.View();
+            Report report(allocator);
+            if (failAt != 0) {
+                allocator.FailOnAttempt(failAt);
+            }
+
+            auto ran = RunCase(allocator, input, report);
+            const uint64 used = allocator.Attempts();
+            allocator.DisableFailure();
+            if (failAt == 0) {
+                REQUIRE(ran);
+                if (report.Failures().Size() != 1) {
+                    PrintFailures(report);
+                }
+
+                REQUIRE(report.Failures().Size() == 1);
+                const StringView failure = report.Failures()[0].View();
+                const StringView marker = "  actual run:\n";
+                usize at = 0;
+                while (at + marker.ByteCount() <= failure.ByteCount() &&
+                       StringView(failure.Data() + at, marker.ByteCount()) != marker) {
+                    ++at;
+                }
+
+                REQUIRE(at + marker.ByteCount() <= failure.ByteCount());
+                const StringView actual(failure.Data() + at + marker.ByteCount(),
+                                        failure.ByteCount() - at - marker.ByteCount());
+                // 3 instance × 9 필드: 옮김(쓴 필드·유지 자원)·기본값·손실(Info — struct 형태)·
+                // 삭제(Old·Drop), UseOld는 삭제 필드를 써서 keep이어도 취소된다.
+                CHECK(actual.Contains("reload v2 keep -> ok (instances 3, moved 9, defaulted 15, "
+                                      "lost 3, removed 6, cancelled 1, restarted 0, previous 1)",
+                                      StringComparison::CaseSensitive));
+                CHECK(actual.Contains("ping v2 1", StringComparison::CaseSensitive));
+                CHECK(actual.Contains("ring v2 1", StringComparison::CaseSensitive));
+                CHECK(!actual.Contains("pong", StringComparison::CaseSensitive));
+                CHECK(actual.Contains("count lamp!", StringComparison::CaseSensitive));
+                CHECK(actual.Contains("Title: \"renamed\"", StringComparison::CaseSensitive));
+                CHECK(actual.Contains("close -> ok (ledger 0 buffers)",
+                                      StringComparison::CaseSensitive));
+                if (!actual.Contains("ring v2 1", StringComparison::CaseSensitive)) {
+                    PrintFailures(report);
+                }
+
+                REQUIRE(expected.TryAppend(actual));
+                attempts = used;
+            } else if (!ran) {
+                CHECK(ran.Error() == ErrorCode::OutOfMemory);
+                ++failures;
+            } else {
+                if (!report.Failures().IsEmpty()) {
+                    PrintFailures(report);
+                }
+
+                CHECK(report.Failures().IsEmpty());
+            }
+        }
+
+        CHECK(backing.Stats().liveAllocations == before);
+    }
+
+    CHECK(failures > 0);
+}
+
 // 폴더 사례(13.1절 "패키지 사례"): 배치 오류는 사례마다 실패 하나이고, 폴더 사례의 지시는 파일
 // 경로를 쓰며 파일 사례는 쓰지 않는다. schema 폴더에는 *.sparkbind.json만 둔다.
 TEST(SparksConformance_FolderCasesAndSchemas) {

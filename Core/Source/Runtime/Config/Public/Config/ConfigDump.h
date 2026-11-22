@@ -36,7 +36,7 @@ namespace rocks::config {
 //   StringBuilder<> text(allocator);
 //   JsonWriter writer(text);
 //   if (auto dumped = WriteConfigDump(context, writer); !dumped || !writer.Finish()) { ... }
-Result<void> WriteConfigDump(ConfigContext& context, JsonWriter& writer) noexcept;
+ROCKS_CONFIG_API Result<void> WriteConfigDump(ConfigContext& context, JsonWriter& writer) noexcept;
 
 // config-dump Commandlet 이름이다(Commandlet 이름 문법 — 소문자·숫자·'-').
 inline constexpr StringView ConfigDumpCommandletName = "config-dump";
@@ -45,7 +45,7 @@ inline constexpr StringView ConfigDumpCommandletName = "config-dump";
 // 돌려준다(인자를 받지 않는다 — 인자가 있으면 Error 스트림에 사용법을 쓰고 2). context는 registry의
 // 마지막 실행보다 오래 살아야 하고, 실행은 context의 소유 스레드(= registry의 소유 스레드)에서
 // 한다. 오류: CommandletRegistry::Register의 오류(이름 중복 AlreadyExists 등).
-Result<void> RegisterConfigDumpCommandlet(CommandletRegistry& registry,
-                                          ConfigContext& context) noexcept;
+ROCKS_CONFIG_API Result<void> RegisterConfigDumpCommandlet(CommandletRegistry& registry,
+                                                           ConfigContext& context) noexcept;
 
 } // namespace rocks::config

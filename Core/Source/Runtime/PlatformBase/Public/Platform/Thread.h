@@ -91,12 +91,12 @@ private:
 
 // SleepFor의 모든 값은 유한 millisecond다. 0은 즉시 반환한다. 실제 wake 시점의 정확성은 보장하지
 // 않는다.
-void SleepFor(uint32 milliseconds) noexcept;
+ROCKS_PLATFORMBASE_API void SleepFor(uint32 milliseconds) noexcept;
 
 // 현재 스레드의 OS 이름을 buffer에 UTF-8로 복사하고(NUL 포함) 길이(NUL 제외)를 돌려준다. 이름이
 // 없거나 조회할 수 없거나 capacity가 모자라면 0이다(buffer는 capacity가 0이 아니면 빈 문자열).
 // MaxThreadNameBytes + 1 byte buffer면 Thread::Start로 붙인 이름을 모두 받는다. 진단·시험용이다.
-usize CopyCurrentThreadName(char* buffer, usize capacity) noexcept;
+ROCKS_PLATFORMBASE_API usize CopyCurrentThreadName(char* buffer, usize capacity) noexcept;
 ROCKS_PLATFORMBASE_API void YieldThread() noexcept;
 // 이 프로세스가 쓸 수 있는 논리 프로세서 수다(1 이상 — affinity·컨테이너 제한을 따른다). 작업
 // 스레드 수의 기본값을 정할 때 쓴다(예: 엔진 GC 표식 scheduler의 worker 수). OS가 알려 주지 않으면

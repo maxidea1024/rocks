@@ -39,7 +39,7 @@ struct StackStats {
 // 반환되거나 Reset/Trim을 수행하면 표시는 무효가 된다. Array와 같은 컨테이너가 성장할 때
 // 새 버퍼를 할당한 뒤 이전 버퍼를 반환하면 LIFO 규약을 어긴다. stack에서는 성장하지 않는
 // 단일 버퍼와 다른 할당의 역순 반환이 보장되는 사용만 허용한다.
-class StackAllocator final : public Allocator {
+class ROCKS_CORE_API StackAllocator final : public Allocator {
 public:
     explicit StackAllocator(Allocator& backing, usize chunkBytes = 65536) noexcept;
     ~StackAllocator() noexcept override;
