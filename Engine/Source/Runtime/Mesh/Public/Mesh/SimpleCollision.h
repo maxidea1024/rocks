@@ -222,9 +222,10 @@ enum class CollisionIssue : uint8 {
 };
 
 // 이름이다(정적 수명, 모르는 값은 "Unknown").
-const char* CollisionIssueName(CollisionIssue issue) noexcept;
-const char* CollisionShapeKindName(CollisionShapeKind kind) noexcept;
-const char* UnsupportedCollisionFeatureName(UnsupportedCollisionFeature feature) noexcept;
+ROCKS_MESH_API const char* CollisionIssueName(CollisionIssue issue) noexcept;
+ROCKS_MESH_API const char* CollisionShapeKindName(CollisionShapeKind kind) noexcept;
+ROCKS_MESH_API const char*
+UnsupportedCollisionFeatureName(UnsupportedCollisionFeature feature) noexcept;
 
 // 진단이 위치를 가리키지 않을 때의 번호다.
 inline constexpr uint32 CollisionNoIndex = NumericLimits<uint32>::Max();
@@ -248,12 +249,13 @@ struct CollisionDiagnostic {
 
 // diagnostic을 AssetSystem 4.6절 형식으로 옮긴다: code·error는 그대로, asset은 인자, section은 0,
 // detail은 index(CollisionNoIndex면 count)다.
-AssetDiagnostic ToAssetDiagnostic(const CollisionDiagnostic& diagnostic, AssetId asset) noexcept;
+ROCKS_MESH_API AssetDiagnostic ToAssetDiagnostic(const CollisionDiagnostic& diagnostic,
+                                                 AssetId asset) noexcept;
 
 // 임포터가 받지 않는 형상·값을 버릴 때 낼 경고다(code UnsupportedCollisionShape, issue
 // UnsupportedFeature, related = feature, count = 버린 수).
-CollisionDiagnostic MakeUnsupportedCollisionWarning(UnsupportedCollisionFeature feature,
-                                                    uint64 count) noexcept;
+ROCKS_MESH_API CollisionDiagnostic
+MakeUnsupportedCollisionWarning(UnsupportedCollisionFeature feature, uint64 count) noexcept;
 
 // collision의 값 필드가 4.8절 2–4 규칙을 지키는지 본다(형상 수, 그다음
 // 구·상자·캡슐·테이퍼드·실린더· 볼록 순, 배열 번호 순, 첫 위반에서 멈춘다). 볼록 형상의 bulk는 보지
@@ -261,23 +263,24 @@ CollisionDiagnostic MakeUnsupportedCollisionWarning(UnsupportedCollisionFeature 
 //
 // 오류: 위반은 failure->code InvalidCollisionData, ErrorCode InvalidArgument(형상 수만
 // CapacityExceeded)와 issue·shape·index·related다. 스레드: collision을 읽기만 한다.
-Result<void> ValidateSimpleCollision(const SimpleCollision& collision,
-                                     CollisionDiagnostic* failure = nullptr) noexcept;
+ROCKS_MESH_API Result<void>
+ValidateSimpleCollision(const SimpleCollision& collision,
+                        CollisionDiagnostic* failure = nullptr) noexcept;
 
 // geometry가 4.8절 3의 점·index 규칙을 지키는지 본다(점 수, 점 유한, index 수, 범위, 삼각형 수).
 // 오류: InvalidCollisionData·InvalidArgument(점 수 상한만 CapacityExceeded)와
 // issue·related다(shape는 Convex, index는 CollisionNoIndex — 호출자가 채운다).
-Result<void> ValidateConvexGeometry(const ConvexGeometry& geometry,
-                                    CollisionDiagnostic* failure = nullptr) noexcept;
+ROCKS_MESH_API Result<void> ValidateConvexGeometry(const ConvexGeometry& geometry,
+                                                   CollisionDiagnostic* failure = nullptr) noexcept;
 
 // geometry를 bulk entry 둘(점·index)로 쓰고 convex의 vertices·indices를 바꾼다. 먼저
 // ValidateConvexGeometry로 본다. 같은 내용이면 같은 byte다.
 //
 // 오류: 검증 실패는 그 진단, 할당 실패는 그 오류다. 실패하면 convex는 그대로다(bulk에 더한 entry는
 // 남을 수 있다 — 참조가 없어 저장되지 않는다).
-Result<void> StoreConvexGeometry(const ConvexGeometry& geometry, MemoryBulkSource& bulk,
-                                 CollisionConvex& convex,
-                                 CollisionDiagnostic* failure = nullptr) noexcept;
+ROCKS_MESH_API Result<void> StoreConvexGeometry(const ConvexGeometry& geometry,
+                                                MemoryBulkSource& bulk, CollisionConvex& convex,
+                                                CollisionDiagnostic* failure = nullptr) noexcept;
 
 // convex의 bulk를 package에서 읽어 out을 다시 만든다. 배치(원소 크기의 배수)와
 // ValidateConvexGeometry를 본다.
@@ -285,14 +288,14 @@ Result<void> StoreConvexGeometry(const ConvexGeometry& geometry, MemoryBulkSourc
 // 오류: 위반은 CorruptPackage·InvalidArgument(원래 판정은 issue), bulk를 못 읽으면
 // CorruptPackage(BulkUnreadable)와 Package::BulkBytes의 오류, 할당 실패는 그 오류다. 실패하면 out은
 // 그대로다. 스레드: package를 읽으므로 그 Registry 소유 스레드에서 부른다.
-Result<void> LoadConvexGeometry(const CollisionConvex& convex, const Package& package,
-                                ConvexGeometry& out,
-                                CollisionDiagnostic* failure = nullptr) noexcept;
+ROCKS_MESH_API Result<void> LoadConvexGeometry(const CollisionConvex& convex,
+                                               const Package& package, ConvexGeometry& out,
+                                               CollisionDiagnostic* failure = nullptr) noexcept;
 
 // collision의 볼록 형상마다 LoadConvexGeometry로 bulk를 본다(진단 index = 볼록 형상 번호).
 // scratch는 임시 점·index 배열의 할당기다. 오류: LoadConvexGeometry와 같다.
-Result<void> ValidateSimpleCollisionBulk(const SimpleCollision& collision, const Package& package,
-                                         Allocator& scratch,
-                                         CollisionDiagnostic* failure = nullptr) noexcept;
+ROCKS_MESH_API Result<void>
+ValidateSimpleCollisionBulk(const SimpleCollision& collision, const Package& package,
+                            Allocator& scratch, CollisionDiagnostic* failure = nullptr) noexcept;
 
 } // namespace rocks
