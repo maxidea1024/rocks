@@ -478,6 +478,26 @@ bool HasStem(Span<const CaseItem> list, StringView stem) noexcept {
     return false;
 }
 
+bool SplitRevisionStem(StringView stem, StringView& base) noexcept;
+
+// stem이 reload revision 원문인지다: `.spark`만 있고(폴더·짝 파일 없음) `<사례>.<버전>`의 사례에
+// `.spark`·`.run`이 있다(목록 순서는 RunArea의 종류 번호 — 0 `.spark`, 1 폴더, 8 `.run`).
+bool IsRevisionStem(const Array<CaseItem>* lists, usize kinds, StringView stem) noexcept {
+    StringView base;
+    if (!SplitRevisionStem(stem, base) || !HasStem(lists[0].View(), stem) ||
+        !HasStem(lists[0].View(), base) || !HasStem(lists[8].View(), base)) {
+        return false;
+    }
+
+    for (usize kind = 1; kind < kinds; ++kind) {
+        if (HasStem(lists[kind].View(), stem)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 // stem이 `<사례>.<버전>`이면 사례 stem을 base에 두고 true다(버전에는 점이 없다).
 bool SplitRevisionStem(StringView stem, StringView& base) noexcept {
     for (usize at = stem.ByteCount(); at > 0; --at) {
@@ -651,13 +671,9 @@ Result<void> RunArea(Allocator& allocator, platform::FileSystem& files, StringVi
             syntaxTreeName = StringView();
         }
 
-        // `.run`이 있는 파일 사례 옆의 `<사례>.<버전>.spark`(자기 `.expect` 없음)는 reload revision
+        // `.run`이 있는 파일 사례 옆의 `<사례>.<버전>.spark`(짝 파일 없음)는 reload revision
         // 원문이다(SparksReload K9 — 그 사례가 읽는다).
-        StringView revisionBase;
-        if (expectName.IsEmpty() && !sourceName.IsEmpty() && syntaxTreeName.IsEmpty() &&
-            namesName.IsEmpty() && typesName.IsEmpty() && irName.IsEmpty() &&
-            bytecodeName.IsEmpty() && runName.IsEmpty() && SplitRevisionStem(stem, revisionBase) &&
-            HasStem(lists[0].View(), revisionBase) && HasStem(lists[8].View(), revisionBase)) {
+        if (IsRevisionStem(lists, KindCount, stem)) {
             continue;
         }
 
@@ -675,9 +691,8 @@ Result<void> RunArea(Allocator& allocator, platform::FileSystem& files, StringVi
         Array<StringView> revisionNames(allocator);
         for (const CaseItem& candidate : lists[0]) {
             StringView base;
-            if (!runName.IsEmpty() && folderName.IsEmpty() &&
-                SplitRevisionStem(candidate.stem, base) && base == stem &&
-                !HasStem(lists[2].View(), candidate.stem)) {
+            if (SplitRevisionStem(candidate.stem, base) && base == stem &&
+                IsRevisionStem(lists, KindCount, candidate.stem)) {
                 if (auto pushed = revisionNames.TryPushBack(items[candidate.item].name.View());
                     !pushed) {
                     return pushed;

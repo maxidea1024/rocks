@@ -1,5 +1,6 @@
 #include "BcEncoder.h"
 #include "IrBuilder.h"
+#include "LanguageNames.h"
 
 // CLASS 구역(형식 버전 3 — Docs/Design/SparksRuntime.ko.md 2.1절)을 쓴다: 모듈의 class마다 기반,
 // 자기 필드 배치(bank 구역 안 위치), hook(이름 하나짜리 `on X`), handler(`on 경로.이벤트` — 재진입
@@ -31,6 +32,42 @@ constexpr ClassHookName ClassHookNames[] = {
 };
 
 } // namespace
+
+void BytecodeEncoder::AppendFieldType(StringBuilderBase& out, uint32 type) noexcept {
+    // 표시 타입과 같은 모양이되 다른 모듈 선언은 타입 인자에서도 `<경로>:` 접두다(LC7a 리뷰 7 —
+    // `Array<Door>`와 `Array<other:Door>`를 가른다).
+    if (type == NoType || type >= c_.types_.Size()) {
+        out.Append("?");
+        return;
+    }
+
+    const TypeEntry& entry = c_.types_[type];
+    const Symbol& symbol = c_.symbols_[entry.symbol];
+    Qualify(out, entry.symbol);
+    if (symbol.kind == SymbolKind::BuiltinType) {
+        const StringView canonical = LanguageNames()[symbol.index].canonical;
+        out.Append(canonical.IsEmpty() ? symbol.name : canonical);
+    } else {
+        out.Append(symbol.name);
+    }
+
+    if (entry.argumentCount != 0) {
+        out.Append("<");
+        for (uint32 index = 0; index < entry.argumentCount; ++index) {
+            if (index != 0) {
+                out.Append(", ");
+            }
+
+            AppendFieldType(out, c_.typeArguments_[entry.firstArgument + index]);
+        }
+
+        out.Append(">");
+    }
+
+    if (entry.optional) {
+        out.Append("?");
+    }
+}
 
 bool BytecodeEncoder::EncodeClasses(Span<const uint64> bodies) noexcept {
     const SyntaxTree& tree = c_.trees_[module_];
@@ -129,10 +166,8 @@ bool BytecodeEncoder::EncodeClasses(Span<const uint64> bodies) noexcept {
                                   : uint8(0);
                 // 형식 v5(SparksReload K4): reload 필드 대응의 타입 표기(정규 표시 이름 — 다른 모듈
                 // 선언은 `<경로>:` 접두)와 `@formerly` 옛 이름.
-                const uint32 fieldType = checker_.FieldType(memberSymbol);
                 StringBuilder<64> descriptor(checker_.allocator_);
-                Qualify(descriptor, checker_.SymbolOf(checker_.NonOptional(fieldType)));
-                checker_.AppendDisplayType(descriptor, fieldType);
+                AppendFieldType(descriptor, checker_.FieldType(memberSymbol));
                 if (descriptor.HasFailed()) {
                     Fail(descriptor.Status().Error());
                     return NoBytecodeIndex;

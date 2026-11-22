@@ -1057,6 +1057,9 @@ struct RunInjection {
     bool cancel = false;
 };
 
+// 사례 하나의 revision 원문 상한이다(쓰임 표시 bit 수).
+constexpr usize RunMaxRevisionFiles = 32;
+
 // reload한 revision 하나다(SparksReload K9): 컴파일 결과와 `.sparkc` 왕복 bytecode·링크.
 struct RunRevision {
     explicit RunRevision(Allocator& allocator) noexcept
@@ -1224,6 +1227,7 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
     // reload한 revision(SparksReload K9)은 session보다 오래 산다(session이 옛 revision을 참조할 수
     // 있다). 지금 revision의 bytecode·링크·compilation은 아래 포인터가 가리킨다.
     Array<UniquePtr<RunRevision>> revisions(allocator);
+    usize revisionsUsed = 0; // reload가 쓴 revision 원문 bit(쓰지 않은 원문은 사례 실패 — 오타)
     const BytecodeModule* code = &loaded;
     const VmLinkedModule* current = &linked;
     const Compilation* currentCompilation = &compilation;
@@ -1408,8 +1412,11 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
                 }
 
                 const CaseFile* source = nullptr;
-                for (const CaseFile& file : input.revisions) {
-                    source = file.path == target ? &file : source;
+                for (usize at = 0; at < input.revisions.Size() && at < RunMaxRevisionFiles; ++at) {
+                    if (input.revisions[at].path == target) {
+                        source = &input.revisions[at];
+                        revisionsUsed |= usize(1) << at;
+                    }
                 }
 
                 if (source == nullptr) {
@@ -1456,6 +1463,10 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
                     }
 
                     const VmReloadReport& report = applied.Value();
+                    if (report.restartError != ErrorCode::None) {
+                        return Result<void>::Failure(report.restartError);
+                    }
+
                     actual.AppendFormat("ok (instances {}, moved {}, defaulted {}, lost {}, "
                                         "removed {}, ",
                                         report.instances, report.moved, report.defaulted,
@@ -2213,6 +2224,24 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
             }
 
             return fail(reason.View());
+        }
+    }
+
+    // 사례 옆 revision 원문은 모두 `reload`가 써야 한다(이름 오타가 조용히 빠지지 않게).
+    if (input.revisions.Size() > RunMaxRevisionFiles) {
+        return fail(".run: too many revision files next to the case");
+    }
+
+    for (usize at = 0; at < input.revisions.Size(); ++at) {
+        if ((revisionsUsed & (usize(1) << at)) == 0) {
+            StringBuilder<MessageInlineBytes> unused(allocator);
+            unused.AppendFormat(".run: revision '{}' is not used by any 'reload'",
+                                input.revisions[at].path);
+            if (unused.HasFailed()) {
+                return Result<void>::Failure(unused.Status().Error());
+            }
+
+            return fail(unused.View());
         }
     }
 

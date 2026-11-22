@@ -136,6 +136,17 @@ Result<void> VmSession::PlanReload(const VmLinkedModule& old, const VmLinkedModu
         return VmReject(reason, "the new revision is not linked with the session host");
     }
 
+    // 아직 참조되는 이전 revision 객체로 되돌리면 이전 revision 기록이 순환한다(LC7a 리뷰 3).
+    PruneRetired();
+    bool retiredFresh = false;
+    for (const Retired& entry : retired_) {
+        retiredFresh = retiredFresh || entry.link == &fresh || entry.successor == &fresh;
+    }
+
+    if (retiredFresh || Uses(&fresh)) {
+        return VmReject(reason, "the new revision is still referenced by the session");
+    }
+
     const BytecodeModule& before = old.Module();
     const BytecodeModule& after = fresh.Module();
     if (VmText(before, before.path) != VmText(after, after.path)) {
@@ -271,6 +282,7 @@ Result<void> VmSession::PlanReload(const VmLinkedModule& old, const VmLinkedModu
     plan.old_ = &old;
     plan.fresh_ = &fresh;
     plan.executions_ = executions;
+    plan.serial_ = nextSerial_;
     return Result<void>::Success();
 }
 
@@ -282,7 +294,7 @@ bool VmSession::Uses(const VmLinkedModule* link) const noexcept {
     }
 
     for (const Instance& instance : instances_) {
-        if (instance.attached && instance.module == link) {
+        if (instance.attached && (instance.module == link || instance.tickStopModule == link)) {
             return true;
         }
     }
@@ -439,20 +451,10 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
         return Outcome::Failure(ErrorCode::InvalidArgument);
     }
 
-    // 계획 뒤에 생긴 instance도 대응이 있어야 한다(낡은 계획 — 아무것도 바꾸지 않는다).
-    for (uint32 instance = 0; instance < instances_.Size(); ++instance) {
-        if (!instances_[instance].attached) {
-            continue;
-        }
-
-        const VmLinkedModule* chainModules[MaxBaseDepth] = {};
-        uint32 chainClasses[MaxBaseDepth] = {};
-        const uint32 depth = Chain(instance, chainModules, chainClasses);
-        for (uint32 at = 0; at < depth; ++at) {
-            if (chainModules[at] == old && plan.classMap_[chainClasses[at]] == NoBytecodeIndex) {
-                return Outcome::Failure(ErrorCode::InvalidArgument);
-            }
-        }
+    // 계획 뒤에 instance가 생겼으면 낡은 계획이다(판정은 계획 때의 instance로 했다 — 필드·handler
+    // 변경을 허용한 클래스에 새 instance가 있을 수 있다, LC7a 리뷰 2). 아무것도 바꾸지 않는다.
+    if (plan.serial_ != nextSerial_) {
+        return Outcome::Failure(ErrorCode::InvalidArgument);
     }
 
     PruneRetired();
@@ -464,6 +466,8 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
     };
 
     struct Restart {
+        uint32 suspended = NoBytecodeIndex; // 후보 루트 실행(취소됐을 때만 다시 부른다)
+        uint64 wait = 0;
         uint32 instance = NoBytecodeIndex;
         uint64 serial = 0;
         const VmLinkedModule* module = nullptr;
@@ -540,7 +544,12 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
         return false;
     };
 
+    // 큐 항목(key 글자)도 old를 붙잡는다(전달되면 놓는다 — 만료 취소의 대상은 아니다).
     bool oldStays = false;
+    for (usize at = queueHead_; at < queue_.Size(); ++at) {
+        oldStays = oldStays || queue_[at].module == old;
+    }
+
     for (const Suspended& entry : suspended_) {
         if (!entry.live || policyCancels(entry)) {
             continue;
@@ -575,10 +584,15 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
         cancel.suspended = at;
         cancel.wait = entry.wait;
         static_cast<void>(cancels.TryPushBack(cancel)); // 예약함
-        // 맨 아래 frame이 Start hook인 루트 실행이면 적용 뒤 그 instance의 Start를 다시 부른다
-        // (지금 revision의 같은 클래스 Start).
-        if (entry.frames.IsEmpty() || entry.childWait != 0 || entry.instance >= instances_.Size() ||
-            !instances_[entry.instance].attached) {
+    }
+
+    // 맨 아래 frame이 Start hook인 루트 실행은 모두 후보다: 취소된 뒤(직접이든 하위 실행 취소가
+    // 이어서든 — LC7a 리뷰 1) 그 instance의 Start를 지금 revision의 같은 클래스 Start로 다시
+    // 부른다.
+    for (uint32 at = 0; at < suspended_.Size(); ++at) {
+        const Suspended& entry = suspended_[at];
+        if (!entry.live || entry.frames.IsEmpty() || entry.childWait != 0 ||
+            entry.instance >= instances_.Size() || !instances_[entry.instance].attached) {
             continue;
         }
 
@@ -616,6 +630,8 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
                                     : VmHookOf(link->Module(), owner, BytecodeHookKind::Start);
         if (function != NoBytecodeIndex) {
             Restart restart;
+            restart.suspended = at;
+            restart.wait = entry.wait;
             restart.instance = entry.instance;
             restart.serial = instances_[entry.instance].serial;
             restart.module = link;
@@ -627,13 +643,24 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
     // ---- 여기부터 바꾼다(실패 없음) ----
     VmReloadReport report;
     report.classes = plan.classes_;
-    // (1) 취소(취소가 이어 취소한 실행은 건너뛴다).
+    // (1) 취소(취소가 이어 취소한 실행은 건너뛴다). 보고는 이어진 취소까지 센다.
+    const uint32 liveBefore = SuspendedCount();
     for (const Cancel& cancel : cancels) {
         if (suspended_[cancel.suspended].live && suspended_[cancel.suspended].wait == cancel.wait) {
             CancelSuspended(cancel.suspended);
-            ++report.cancelled;
         }
     }
+
+    report.cancelled = liveBefore - SuspendedCount();
+    usize restartCount = 0;
+    for (const Restart& restart : restarts) {
+        const Suspended& entry = suspended_[restart.suspended];
+        if (!entry.live || entry.wait != restart.wait) {
+            restarts[restartCount++] = restart;
+        }
+    }
+
+    static_cast<void>(restarts.TryResize(restartCount));
 
     // (2) instance의 module·class 번호 교체(R1 — 같은 배치라 저장소는 그대로), Tick 중지 해제.
     for (uint32 instance = 0; instance < instances_.Size(); ++instance) {
@@ -688,9 +715,17 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
     for (usize at = queueHead_; at < queue_.Size(); ++at) {
         Item& item = queue_[at];
         if (item.targetModule == old) {
-            item.targetHandler = plan.handlerMap_[item.targetHandler];
-            item.targetModule = item.targetHandler == NoBytecodeIndex ? nullptr : fresh;
-            item.target = item.targetHandler == NoBytecodeIndex ? NoBytecodeIndex : item.target;
+            const uint32 handler = plan.handlerMap_[item.targetHandler];
+            if (handler == NoBytecodeIndex) {
+                // 대상 handler가 없어졌다: 항목을 버린다(모두에게 전달되지 않게 — LC7a 리뷰 4).
+                ReleaseItem(item);
+                item.publisher = 0;
+                continue;
+            }
+
+            item.targetHandler = handler;
+            item.targetModule = fresh;
+            item.key = HandlerKey(*fresh, handler); // old의 key 글자를 가리키지 않게
         }
     }
 
@@ -745,11 +780,12 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
             continue;
         }
 
-        // 할당 실패는 남은 Start를 부르지 않고 알린다(reload 자체는 적용됐다).
+        // 할당 실패는 남은 Start를 부르지 않고 보고에 남긴다(reload 자체는 적용됐다).
         if (auto ran = ApplyHook(restart.instance, BytecodeHookKind::Start, restart.module,
                                  restart.function);
             !ran) {
-            return Outcome::Failure(ran.Error());
+            report.restartError = ran.Error();
+            break;
         }
 
         ++report.restarted;

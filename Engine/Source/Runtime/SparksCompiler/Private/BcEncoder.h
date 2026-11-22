@@ -47,6 +47,8 @@ private:
     // 열쇠다.
     uint32 AddRef(BytecodeRefKind kind, uint32 name, uint32 detail,
                   uint32 arguments = NoBytecodeIndex) noexcept;
+    // CLASS 필드의 타입 표기(형식 v5 — SparksReload K4)를 out에 붙인다.
+    void AppendFieldType(StringBuilderBase& out, uint32 type) noexcept;
     // 언어 함수 호출의 피연산자 서술자(SparksVm 6a절)를 out에 붙인다.
     void AppendDescriptor(StringBuilderBase& out, uint32 type) noexcept;
     // native 함수·객체 필드 참조의 서술자 문자열 번호다(SparksVm 6.1절).
