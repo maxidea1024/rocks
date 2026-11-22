@@ -742,7 +742,7 @@ Result<void> VmSession::ResumeSuspended(uint32 chosen, uint64 wait, uint32 depth
     currentDepth_ = depth;
     currentRoot_ = root;
     execution_.depthBase_ = depthOffset;
-    auto continued = execution_.Continue(VmLimits());
+    auto continued = execution_.Continue(FragmentLimits(false));
     execution_.depthBase_ = 0;
     currentInstance_ = NoBytecodeIndex;
     currentPublisher_ = 0;

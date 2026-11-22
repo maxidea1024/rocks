@@ -158,6 +158,12 @@ VmFaultKind VmExecution::CallHost(Opcode op, uint32 word, uint32 extra, const Ba
                 return VmFaultKind::ContractViolation;
             }
 
+            // instance 메모리 예산(SparksRuntime 2.6절 — Buf 필드 쓰기에서 거부).
+            if (!get && bank == static_cast<uint32>(BytecodeBank::Buf) &&
+                !session_->FitsInstanceMemory(instance, where, banks.b[bb])) {
+                return VmFaultKind::BudgetExceeded;
+            }
+
             // 쓰기 전에 조각의 시작 값을 기록한다(Changed — SparksRuntime 2.3절).
             if (!get) {
                 const VmFaultKind noted =

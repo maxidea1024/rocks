@@ -26,6 +26,19 @@ namespace detail {
 class VmLibrary;
 } // namespace detail
 
+// session 예산이다(SparksRuntime 2.6절 — SL 9.3절 기본값, 논리 단위). host가 session을 만들 때
+// 프로젝트 설정으로 정한다(실행 중에는 바꾸지 않는다 — 시험은 SetBudgets로 줄인다).
+struct VmSessionBudgets {
+    uint64 fragmentInstructions = 1000000;            // 실행 조각(호출·재개)마다
+    uint64 teardownInstructions = 100000;             // Disable·Destroy hook
+    uint32 callDepth = 256;                           // frame(하위 실행은 바깥 frame 포함)
+    uint64 sessionMemory = uint64(512) * 1024 * 1024; // 실행 문맥 ledger byte
+    uint64 instanceMemory = uint64(16) * 1024 * 1024; // instance 필드가 직접 쥔 버퍼 byte
+    uint32 connectionsPerInstance = 4096;             // 구독 연결(구독 instance마다)
+    uint32 connectionsPerSession = 1048576;
+    uint32 executionsPerInstance = 256; // 정지 실행(동시 실행·대기)
+};
+
 class VmSession final {
 public:
     VmSession(Allocator& allocator, VmHost* host) noexcept;
@@ -128,9 +141,8 @@ public:
     uint32 WaitCount() const noexcept;
     // ---- 지연 적용·종료(SparksRuntime 2.6절 — LC6d2) ----
 
-    static constexpr uint32 MaxApplyRounds = 64;           // 적용 루프(SL 9.3절)
-    static constexpr uint64 TeardownInstructions = 100000; // Disable·Destroy hook 명령 예산
-    static constexpr uint32 MaxPendingRequests = 65536;    // 요청 큐 상한(넘으면 CapacityExceeded)
+    static constexpr uint32 MaxApplyRounds = 64;        // 적용 루프(SL 9.3절)
+    static constexpr uint32 MaxPendingRequests = 65536; // 요청 큐 상한(넘으면 CapacityExceeded)
 
     // 활성 전환·파괴 요청을 넣는다(실행 중에도 — host native `SetEnabled`·`Destroy`가 부른다).
     // 실패: 없는 instance·session 종료 뒤면 InvalidArgument, 할당 실패는 OutOfMemory.
@@ -183,6 +195,26 @@ public:
 
     Span<const FaultRecord> Faults() const noexcept {
         return faults_.View();
+    }
+
+    // ---- 예산(SparksRuntime 2.6절 — LC6d4) ----
+
+    void SetBudgets(const VmSessionBudgets& budgets) noexcept {
+        budgets_ = budgets;
+    }
+
+    const VmSessionBudgets& Budgets() const noexcept {
+        return budgets_;
+    }
+
+    // 연결 상한으로 만들지 않은 연결 수, 동시 실행 상한으로 건너뛴 실행(전달·Call) 수다(보고 —
+    // 거부는 fault가 아니다).
+    uint64 DroppedConnections() const noexcept {
+        return droppedConnections_;
+    }
+
+    uint64 SkippedExecutions() const noexcept {
+        return skippedExecutions_;
     }
 
     // `@skipWhileBusy`로 버린 이벤트 수다(디버거 표시 — SL 6.1절 SD11).
@@ -514,6 +546,16 @@ private:
     Array<Request> destroys_;
     bool closed_ = false;
     uint64 deferredApplies_ = 0;
+    // 예산(LC6d4).
+    VmSessionBudgets budgets_;
+    uint64 droppedConnections_ = 0;
+    uint64 skippedExecutions_ = 0;
+    // 조각 하나의 예산이다(Teardown이면 작은 명령 예산).
+    VmLimits FragmentLimits(bool teardown) const noexcept;
+    // instance의 정지 실행이 동시 실행 상한에 닿았는지다.
+    bool ExecutionsFull(uint32 instance) const noexcept;
+    // Buf 필드 at에 incoming을 두면 instance 메모리 예산 안인지다.
+    bool FitsInstanceMemory(uint32 instance, uint32 at, const VmBuffer* incoming) const noexcept;
     // fault 처리(LC6d3).
     Array<FaultRecord> faults_;
     uint64 activeFrame_ = 0; // 일시 정지가 아닌 프레임 수(격리 창의 기준)

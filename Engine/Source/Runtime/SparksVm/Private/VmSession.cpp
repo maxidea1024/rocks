@@ -272,7 +272,7 @@ Result<uint32> VmSession::CreateInstance(uint64 handle, const VmLinkedModule& mo
 
         const uint64 self[] = {handle};
         auto called = execution_.Call(*chainModules[at - 1], link.initializer, {},
-                                      Span<const uint64>(self, 1), {});
+                                      Span<const uint64>(self, 1), {}, FragmentLimits(false));
         if (!called) {
             static_cast<void>(Detach(number));
             return Result<uint32>::Failure(called.Error());
@@ -394,10 +394,8 @@ Result<VmCallResult> VmSession::RunHook(uint32 instance, BytecodeHookKind kind,
 
             currentInstance_ = instance;
             // Disable·Destroy(Teardown)는 명령 예산이 작다(SL 9.3절).
-            VmLimits limits;
-            if (kind == BytecodeHookKind::Disable || kind == BytecodeHookKind::Destroy) {
-                limits.instructions = TeardownInstructions;
-            }
+            const VmLimits limits = FragmentLimits(kind == BytecodeHookKind::Disable ||
+                                                   kind == BytecodeHookKind::Destroy);
 
             auto called =
                 execution_.Call(*chainModules[at - 1], bytecode.hooks[hook].function, scalars,
@@ -506,6 +504,17 @@ Result<VmCallResult> VmSession::Call(uint32 instance, const VmLinkedModule& modu
         refArguments[at + 1] = refs[at];
     }
 
+    // 동시 실행 상한: 새 실행을 건너뛴다(fault 아님 — SL 9.3절).
+    if (ExecutionsFull(instance)) {
+        BeginEntry();
+        execution_.ReleaseReturned();
+        execution_.returned_.Clear();
+        ++skippedExecutions_;
+        VmCallResult skipped;
+        skipped.skipped = true;
+        return Result<VmCallResult>::Success(skipped);
+    }
+
     if (instances_[instance].isolated) {
         BeginEntry();
         execution_.ReleaseReturned(); // 앞 호출의 반환 값을 남기지 않는다(LC6d3 리뷰 1)
@@ -525,7 +534,8 @@ Result<VmCallResult> VmSession::Call(uint32 instance, const VmLinkedModule& modu
     } keepLogs{execution_};
     currentInstance_ = instance;
     auto called = execution_.Call(module, function, scalars,
-                                  Span<const uint64>(refArguments, refs.Size() + 1), buffers);
+                                  Span<const uint64>(refArguments, refs.Size() + 1), buffers,
+                                  FragmentLimits(false));
     currentInstance_ = NoBytecodeIndex;
     SettleWaits(called);
     if (!called) {
@@ -1038,6 +1048,38 @@ void VmSession::Isolate(uint32 instance) noexcept {
     Disconnect(instance);
     DropWrites(instance);
     EndEventWaits(entry.handle);
+}
+
+VmLimits VmSession::FragmentLimits(bool teardown) const noexcept {
+    VmLimits limits;
+    limits.instructions = teardown ? budgets_.teardownInstructions : budgets_.fragmentInstructions;
+    limits.callDepth = budgets_.callDepth;
+    limits.memoryBytes = budgets_.sessionMemory; // 실행 문맥 ledger는 session 하나다(R1)
+    return limits;
+}
+
+bool VmSession::ExecutionsFull(uint32 instance) const noexcept {
+    uint32 count = 0;
+    for (const Suspended& entry : suspended_) {
+        count += entry.live && entry.instance == instance ? 1 : 0;
+    }
+
+    return count >= budgets_.executionsPerInstance;
+}
+
+bool VmSession::FitsInstanceMemory(uint32 instance, uint32 at,
+                                   const VmBuffer* incoming) const noexcept {
+    // instance 필드가 직접 쥔 버퍼의 크기 합(원소 버퍼는 바깥 버퍼에 원소 크기로만 든다 — R22
+    // 근사).
+    uint64 total = incoming != nullptr ? incoming->bytes : 0;
+    const Array<VmBuffer*>& buffers = instances_[instance].buffers;
+    for (usize slot = 0; slot < buffers.Size(); ++slot) {
+        if (slot != at && buffers[slot] != nullptr) {
+            total += buffers[slot]->bytes;
+        }
+    }
+
+    return total <= budgets_.instanceMemory;
 }
 
 } // namespace rocks::sparks

@@ -564,6 +564,18 @@ Result<void> VmSession::Connect(uint32 instance, const VmLinkedModule* only,
                     continue;
                 }
 
+                // 구독 연결 상한: 만들지 않고 센다(연결은 조각 밖에서 생긴다 — fault 아님).
+                uint32 mine = 0;
+                for (const Connection& other : connections_) {
+                    mine += other.subscriber == instance ? 1 : 0;
+                }
+
+                if (mine >= budgets_.connectionsPerInstance ||
+                    connections_.Size() >= budgets_.connectionsPerSession) {
+                    ++droppedConnections_;
+                    continue;
+                }
+
                 Connection connection;
                 connection.publisher = publisher;
                 connection.key = key;
@@ -743,6 +755,12 @@ Result<void> VmSession::Drain() noexcept {
                                            : item.bufferCount;
             currentDepth_ = item.depth;
             currentRoot_ = item.root;
+            // 동시 실행 상한: 새 handler 실행을 건너뛰고 센다(fault 아님 — SL 9.3절).
+            if (ExecutionsFull(connection.subscriber)) {
+                ++skippedExecutions_;
+                continue;
+            }
+
             const uint32 outerInstance = currentInstance_;
             currentInstance_ = connection.subscriber;
             currentPublisher_ = item.publisher;
@@ -752,7 +770,8 @@ Result<void> VmSession::Drain() noexcept {
                 *connection.module, handler.function,
                 Span<const uint64>(itemValues_.Data() + item.firstScalar, scalarCount),
                 Span<const uint64>(refs, refCount),
-                Span<VmBuffer* const>(itemBuffers_.Data() + item.firstBuffer, bufferCount));
+                Span<VmBuffer* const>(itemBuffers_.Data() + item.firstBuffer, bufferCount),
+                FragmentLimits(false));
             currentInstance_ = outerInstance;
             SettleWaits(called);
             currentPublisher_ = 0;

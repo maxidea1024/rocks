@@ -1155,6 +1155,7 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
             line.StartsWith("phase ") || line.StartsWith("advance ") || line == "fixed" ||
             line.StartsWith("fixed ") || line == "stats" || line.StartsWith("stats ") ||
             line.StartsWith("request ") || line.StartsWith("state ") || line == "apply" ||
+            line == "budget" || line.StartsWith("budget ") || line.StartsWith("limits ") ||
             line.StartsWith("apply ") || line == "endframe" || line.StartsWith("endframe ") ||
             line == "close" || line.StartsWith("close ")) {
             usize arrowAt = line.ByteCount();
@@ -1233,6 +1234,26 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
                 }
 
                 delivered = verb != "close";
+            } else if (verb == "budget") {
+                // 예산 거부 집계(SparksRuntime 2.6절 — LC6d4).
+                actual.Append(directive).Append(RunArrow);
+                actual.AppendFormat("connections dropped {}, executions skipped {}",
+                                    session.DroppedConnections(), session.SkippedExecutions());
+            } else if (verb == "limits") {
+                // `limits <connections> <executions>`: 시험용으로 instance 구독 연결·동시 실행
+                // 상한을 줄인다(host는 session을 만들 때 정한다).
+                actual.Append(directive).Append(RunArrow);
+                auto connections = TryParseUInt32(target);
+                auto executions = TryParseUInt32(rest);
+                if (!connections || !executions) {
+                    return bad("'limits' needs connection and execution counts");
+                }
+
+                VmSessionBudgets budgets = session.Budgets();
+                budgets.connectionsPerInstance = connections.Value();
+                budgets.executionsPerInstance = executions.Value();
+                session.SetBudgets(budgets);
+                actual.Append("ok");
             } else if (verb == "stats") {
                 // session의 async 상태(SparksRuntime 2.4절): 대기 표 항목·정지 실행·skip 수.
                 actual.Append(directive).Append(RunArrow);
