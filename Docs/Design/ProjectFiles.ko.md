@@ -1,6 +1,6 @@
 # Visual Studio 프로젝트 파일 생성 설계
 
-기준일: 2026-11-22, 개정 19. Rocks 저장소와 게임 프로젝트에서 Visual Studio 솔루션·프로젝트 파일을 만드는 방법을 정한다(UE 5.8 GenerateProjectFiles 대응).
+기준일: 2026-11-22, 개정 20. Rocks 저장소와 게임 프로젝트에서 Visual Studio 솔루션·프로젝트 파일을 만드는 방법을 정한다(UE 5.8 GenerateProjectFiles 대응).
 - **엔진 모드**: 저장소 루트에서 `projectfiles --root`로 엔진·Programs·C# 도구 솔루션을 만든다. 엔진에는 `.rocksproject`가 없다.
 - **IntelliSense**: 부작용 없는 IDE 계획 모드로 빌드 계획의 논리 compile 명령(`compile_commands.json`과 같은 원천)을 만들고, 파일별 설정으로 옮긴다.
 - **NMake 빌드**: 프로젝트의 빌드·다시 빌드·정리는 Rocks.Build를 부른다. Visual Studio가 직접 컴파일하지 않는다.
@@ -560,6 +560,14 @@ UE는 에디터 대화 상자에서 만든다. Rocks는 에디터 전에도 쓸 
 
 UE는 HKLM에 ProgID를 쓰고 UnrealVersionSelector가 메뉴를 받는다(`DesktopPlatformWindows.cpp:526-556`, `UnrealVersionSelector.cpp:392`). Rocks는 관리자 권한이 필요 없는 HKCU를 쓰고, 별도 선택기 실행 파일 없이 CLI가 그 역할을 한다. "SDK 바꾸기" 메뉴(UE `switchversion`)는 고르는 UI가 필요해서 두지 않고 `associate` CLI로 한다.
 
+구현(PJ8, 개정 20):
+- **명령.** `shell-register`와 `shell-unregister`(Windows 전용, 옵션 없음). 등록부는 10.2절과 같은 기본 등록부(`ROCKS_SDK_REGISTRY` 재정의 포함)를 읽는다.
+- **선택기 SDK.** 등록 SDK 중 `rocks-sdk.json`이 있고 manifest 판이 이 CLI의 판과 같고 엔진 버전을 읽을 수 있고 `Tools/Rocks.Build.Cli/Rocks.Build.Cli.dll`이 있는 것만 유효하다. 그중 엔진 버전(주·부·패치)이 가장 높은 것, 같으면 등록 ID ordinal 첫째다. 유효한 SDK가 없으면 버린 이유를 적은 오류다.
+- **쓰는 값(HKCU).** `Software\Classes\.rocksproject`(기본값 `Rocks.ProjectFile`), `Software\Classes\Rocks.ProjectFile`(기본값 `Rocks game project`), `…\shell\rocksgenproj`(기본값 "Generate Visual Studio project files"), `…\shell\rocksgenproj\command`, `Software\Rocks\ProjectSelector`(값 `Sdk`·`Cli`). 쓴 뒤 `SHChangeNotify(SHCNE_ASSOCCHANGED)`로 탐색기에 알린다(UE도 같다).
+- **메뉴 명령.** `cmd.exe /d /s /c "if exist "<선택기 CLI>" (dotnet "<선택기 CLI>" projectfiles --project "%1" || pause) else (echo … Run Rocks.Build.Cli shell-register again. & pause)"`. 선택기 SDK가 지워졌으면 다시 등록하라고 알리고, 생성이 실패하면 창을 멈춰 오류를 보인다. 연결 해석과 다른 SDK CLI로의 위임은 `projectfiles --project`가 한다(10.4절 위임).
+- **지우기.** `shell-unregister`는 `.rocksproject`의 기본값이 `Rocks.ProjectFile`일 때만 그 키를 지우고(다른 프로그램의 연결은 두지 않는다), `Rocks.ProjectFile`과 `ProjectSelector`를 지운다.
+- **시험.** `GameProjectTests`가 레지스트리의 임시 하위 키(`HKCU\Software\Rocks\Tests\<GUID>`)를 Classes·선택기 키로 주어 쓰기·값·지우기를 시험한다: 가장 높은 유효 SDK 선택(판이 다른 manifest·없는 CLI·사라진 SDK 제외), 같은 버전의 ID 순, 명령 문자열, 다른 프로그램 연결 보존, 유효한 SDK 없음 오류. 실제 HKCU Classes에는 쓰지 않는다(수동 확인은 사용자 점검 목록).
+
 ## 13. 다른 IDE
 
 - **VS Code·clangd**: 범위 밖이다. 빌드 출력마다 있는 `compile_commands.json`(논리 명령, PCH 헤더·정의 헤더 강제 include 포함)을 clangd에 `--compile-commands-dir=out/<출력>`으로 주면 된다. 이 안내를 `Build/README.md`에 한 줄로 적는다(PJ2). `.vscode/` 생성은 하지 않는다.
@@ -773,3 +781,4 @@ Visual Studio 없이 결정적으로 검사한다. 시험은 `Rocks.Build.Tests`
 | 17 | 2026-11-22 | PJ7 구현(7.4절 구현 단락). `SingleFileCompile`(IDE 계획의 논리 명령, `SingleFile/<해시>.obj`·`.json`, 정의 헤더 `WriteIfChanged`, 증분 기록 불변), `build --files`·`game --files`, `NMakeCompileFileCommandLine`(Windows 행, `-WorkingDir`·`$(SelectedFiles)`), `IdeBuild.ps1 -Action Compile`. 시험은 V6·게임 프로젝트 파일 시험에 더했다 |
 | 18 | 2026-11-22 | PJ6 반영·PJ7 리뷰 반영(7.4절). `NMakeCompileFileCommandLine`을 `NMakeCompile` item 메타데이터로 옮겼다(속성은 VS가 읽지 않는다). object 경로 인자 규칙을 `CompileObjectArguments`(`/Fo…`, `-o <경로>`)로 모아 낡음 지문·명령 비교·파일 하나 컴파일이 함께 쓴다(macOS 지문 불일치). 시험은 VS 18이 있으면 `MSBuild.exe -t:NMakeCompileSelectedFiles`를 실제로 돌리고, V6에 공백·한글 이름 두 파일을 한 번에 고르는 사례를 더했다. `RPF0001`은 Visual Studio 빌드(`ROCKS_IDE_BUILD=1`)에서만 `warning` 형식이고 터미널에서는 `note RPF0001:`이다 — 저장소 `Directory.Build.rsp`의 `-warnAsError` 때문에 `Rocks.proj` Exec가 경고 형식을 오류로 바꿔, 소스를 더한 뒤 터미널 빌드가 실패했다(V6의 두 파일 사례가 드러냈다) |
 | 19 | 2026-11-22 | PJ7 리뷰 나머지(7.4절·10.2절·11.6절). Ctrl+F7은 1단계 원천만, 안 되면 컴파일하는 타깃 이름을 안내. 게임 `--files`의 evidence는 `SINGLE-FILE`. object 해시는 디스크 철자, 없어진 원본의 기록 정리. 소문자 매크로 `small`·`hyper`·`pascal`·`cdecl`. 등록부 잠금 경합 시험(자식이 잠금을 쥐고 신호, 부모가 경합을 관찰한 뒤 gate로 해제). `Running`은 `HasExited` 예외를 실행 중으로 본다. Ctrl+F7 비용을 적었다(L22). 시험: `CompileObjectArguments`·목록 파서 단위, IDE 계획 fixture의 여러 파일·한글/공백 경로·response file·계획에 없는 소스·컴파일 실패 종료 코드·여러 모듈 ordinal 선택, CLI 거부(`test`·`sdk`·`--plan-only`) |
+| 20 | 2026-11-22 | PJ8 구현(12절 구현 단락): `shell-register`·`shell-unregister`, 선택기 SDK(유효한 등록 SDK 중 최고 엔진 버전), HKCU Classes·ProjectSelector 값, `cmd.exe` 메뉴 명령(지워진 선택기 안내, 실패 시 멈춤), `SHChangeNotify`, 임시 하위 키 시험 |

@@ -492,7 +492,7 @@ public static class InstalledSdk
     }
 
     // manifest 최상위 Version 칸의 값이다. 객체가 아니거나 칸이 없거나 정수가 아니면 null이다(버전 불일치로 알린다).
-    private static int? ManifestVersionOf(string manifestText)
+    internal static int? ManifestVersionOf(string manifestText)
     {
         using JsonDocument document = JsonDocument.Parse(manifestText);
         return document.RootElement.ValueKind == JsonValueKind.Object &&
