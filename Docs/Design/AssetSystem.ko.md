@@ -794,7 +794,10 @@ A3는 Rockpile 설계([Rockpile](Rockpile.ko.md) 12·17절)가 요구한 레코�
 - A3c2 상태: **구현** — 대조표 14.1.59절, coverage 14.1.60절. 구현에서 정한 것:
   - 요청 항목은 캐시의 내부 Get·Put(종료 검사 없음)을 부른다 — Shutdown의 drain 동안 Put 항목이 끝나야 하므로(동기 Get·Put만 종료 뒤 Cancelled). 시작 전 취소는 요청이 본다.
   - 완료 handle 상태는 Pending(진행 중)이거나 끝난 상태뿐이다(외부 이벤트). scheduler를 Shutdown(Cancel)으로 끝내면 완료 handle이 항목보다 먼저 Cancelled가 된다 — 그 scheduler의 요청은 scheduler Shutdown이 돌아온 뒤에 결과를 보거나 소멸한다(헤더 계약, 보통은 캐시 Shutdown을 먼저 부른다). 남은 항목은 worker가 capture를 정리할 때 ticket이 Cancelled로 끝내고 진행 중 목록에서 뺀다(캐시 Shutdown이 영영 기다리지 않는다).
-  - `IsCancelRequested()`(취소 요청 여부)를 공개한다 — 진행 중 소멸 시험의 순서 gate이고 호출자 진단에도 쓴다.
+  - `IsCancelRequested()`(취소 요청 여부)를 공개하고, 시험 hook `NuggetRequestHooks::onCancel`(취소 요청 때 부름 — 진행 중 소멸 시험의 순서 gate)을 둔다.
+  - Shutdown의 drain·마지막 대기는 진행 중 목록의 조건 변수(요청이 빠질 때 알림)로 기다린다 — 완료 handle을 기다리지 않으므로 handle이 먼저 끝난 요청(scheduler Cancel·handle 직접 취소)이 목록에 남아도 바쁜 반복이 없다.
+  - 항목이 아직 진행 중 목록에 남은 요청의 다시 Start는 Busy다(완료 handle이 먼저 끝난 경우 — 옛 ticket이 새 무장 표를 읽지 않게).
+  - 리뷰 반영(권장 셋): 다시 Start 막기·계약(handle 직접 취소 금지 포함), 조건 변수 대기, 진행 중 소멸 시험의 폴링을 취소 hook으로.
   - 시험 hook 파일 시스템은 여러 worker가 동시에 열어도 callback을 한 번만 부른다(꺼내기를 잠금 안에서 — 처음 구현은 두 worker가 함께 callback을 보고 한쪽이 null을 불러 간헐 크래시가 났다).
 
 ## 10. Cooker
@@ -2848,7 +2851,7 @@ A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항�
 
 #### 14.1.59 요구 대조표(A3c2 — 요청 객체·Shutdown)
 
-시험은 EngineTests `Engine/Source/Developer/AssetNugget/Tests/NuggetRequestTests.cpp`(`NuggetRequest_*` 10 — 실제 디스크·메모리 파일 시스템·hook 파일 시스템 gate·자식 프로세스)다. 시험 공용 도구는 `Tests/NuggetTestSupport.h`(hook 파일 시스템·gate).
+시험은 EngineTests `Engine/Source/Developer/AssetNugget/Tests/NuggetRequestTests.cpp`(`NuggetRequest_*` 11 — 실제 디스크·메모리 파일 시스템·hook 파일 시스템 gate·자식 프로세스)다. 시험 공용 도구는 `Tests/NuggetTestSupport.h`(hook 파일 시스템·gate).
 
 | 요구(절) | 항목 | 시험 |
 |---|---|---|
@@ -2859,20 +2862,19 @@ A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항�
 | required(결정 10) | failed 항목(Put 쓰기 실패·Get 읽기 실패) → Outcome DependencyFailed, required 아니면 성공, 실패 아닌 Dropped는 required여도 성공 | `NuggetRequest_RequiredOutcome` |
 | Shutdown(결정 12) | 요청 없음(이후 Start 모두 Cancelled·바로 완료, 동기 Get·Put Cancelled, 두 번째 무시, IsShutDown), drain 0(진행 중 Put 끝냄·남은 Put·Get Cancelled), drain 1 ms 기한 초과(같음), drain 끝까지(Put 모두 끝냄·Get Cancelled), hook 두 지점, Shutdown이 돌아오면 모든 항목이 끝남 | `NuggetRequest_Shutdown` |
 | 버려진 항목 | scheduler Shutdown(Cancel)이 시작 안 한 항목의 body를 버리면 ticket이 Cancelled로 끝내고 목록에서 뺌(캐시 Shutdown이 바로 돌아옴) | `NuggetRequest_AbandonedItems` |
-| 수명 | worker 아닌 스레드의 진행 중 소멸(취소 요청 → 완료 대기 — IsCancelRequested gate), Fatal 셋(같은 scheduler worker에서 진행 중 소멸·진행 중 요청의 worker에서 Shutdown·진행 중 요청이 있는 캐시 소멸 — 자식 프로세스 비정상 종료·문구) | `NuggetRequest_DestroyWhileRunning`·`NuggetRequest_Fatal` |
+| 완료 handle이 먼저 끝남 | handle 직접 취소(scheduler Cancel과 같은 상황) 뒤 항목이 목록에 남은 동안 다시 Start Busy(값은 항목에 남음), 캐시 Shutdown이 목록이 빌 때까지 기다림, 그 뒤 다시 Start | `NuggetRequest_RestartWhileSettling` |
+| 수명 | worker 아닌 스레드의 진행 중 소멸(취소 요청 → 완료 대기 — 취소 hook gate), Fatal 셋(같은 scheduler worker에서 진행 중 소멸·진행 중 요청의 worker에서 Shutdown·진행 중 요청이 있는 캐시 소멸 — 자식 프로세스 비정상 종료·문구) | `NuggetRequest_DestroyWhileRunning`·`NuggetRequest_Fatal` |
 | 할당 실패 | 요청 allocator: 결과 slot·입력 복사(bucket·값 선택·inputs·meta)·예약 표 실패는 Start 실패(OutOfMemory·값은 항목에 남음), 항목 capture 실패는 그 항목과 뒤 항목 Dropped(OutOfMemory), 실패 없는 결과는 기준과 같다(Get·Put) | `NuggetRequest_AllocationFailures` |
 | 조합(14 완료 조건 2) | 요청 종류(Get·Put) × 항목 경로(실행·시작 전 취소·제출 실패·상한 초과·capture 정리) × 종료(없음·drain 0·기한 초과·끝까지·scheduler Cancel) × 실패(IO·할당·Fatal) | 위 시험 |
 
 #### 14.1.60 Coverage(A3c2)
 
-측정(2026-11-23, Windows, `ROCKS_MSVC_TOOLSET=14.44`): `-Target EngineTests -Filter Nugget -Sources Engine/Source/Developer/AssetNugget/Private` — `NuggetRequest.cpp` 줄 349/351·분기 119/120, `NuggetCache.cpp` 줄 834/840·분기 416/427(A3c1 몫 포함).
+측정(2026-11-23, Windows, `ROCKS_MSVC_TOOLSET=14.44`): `-Target EngineTests -Filter Nugget -Sources Engine/Source/Developer/AssetNugget/Private` — `NuggetRequest.cpp` 줄 352/354·분기 125/126, `NuggetCache.cpp` 줄 828/834·분기 409/419(A3c1 몫 포함, 리뷰 반영 뒤).
 
 | 위치 | 닿지 않는 것 | 근거 |
 |---|---|---|
 | `NuggetRequest::WaitForCompletion`·`~NuggetCache`·`NuggetCache::Shutdown`의 `platform::Fatal` | 그 갈래 | 자식 프로세스(`NuggetRequest_Fatal`)에서 실행하고 문구까지 확인한다 — 부모 측정에는 자식의 profile이 합쳐지지 않는다 |
 | `ReservePutBytes`의 CAS 재시도 | 재시도 | 다른 스레드가 같은 순간 예약할 때만이다(경합 — 결정적으로 만들 수 없다). 재시도는 같은 판정을 다시 한다 |
-| `FirstPending`의 `Clone` 실패 | 실패 | 유효한 handle의 Clone은 참조 수가 2^64에 닿을 때만 실패한다 |
-| `Shutdown`의 drain `Wait` 실패 | 실패 | 유효한 handle의 Wait는 같은 scheduler worker에서만 실패하고(WrongThread) 그 경우는 앞에서 Fatal이다 |
 | `Shutdown`의 `Notify(AfterCancelGets)` 줄 | 줄 수 0 | 측정 산물이다 — 앞 잠금 블록(Fatal 갈래 포함) 뒤 gap 영역이 그 줄에 붙는다. hook 두 지점은 시험이 확인한다 |
 
 ## 15. PNG 디코더 범위

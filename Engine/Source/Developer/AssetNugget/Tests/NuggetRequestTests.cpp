@@ -576,30 +576,9 @@ TEST(NuggetRequest_AbandonedItems) {
     CHECK(scene.cache.IsShutDown());
 }
 
-namespace {
-
-// 요청을 소멸하는 쪽이 취소를 요청할 때까지 기다렸다가 놓아 주는 스레드다(취소 요청은 소멸자가
-// 기다리기 직전에 건다 — 그 뒤에만 blocker를 놓는다).
-struct ReleaseAfterCancel {
-    static void Entry(void* context) noexcept {
-        auto* self = static_cast<ReleaseAfterCancel*>(context);
-        constexpr uint32 PollMs = 1;
-        platform::ManualResetEvent never;
-        while (!self->request->IsCancelRequested()) {
-            (void)never.Wait(PollMs);
-        }
-
-        self->release->Signal();
-    }
-
-    const NuggetRequest* request = nullptr;
-    platform::ManualResetEvent* release = nullptr;
-};
-
-} // namespace
-
 // 진행 중 요청을 worker가 아닌 스레드에서 소멸하면 취소를 요청하고 완료를 기다린다(시작하지 않은
-// 항목은 취소, 예약한 대기 Put byte는 돌려받는다).
+// 항목은 취소, 예약한 대기 Put byte는 돌려받는다). blocker는 취소 hook이 놓는다(소멸자가 기다리기
+// 직전 — 순서는 hook으로만).
 TEST(NuggetRequest_DestroyWhileRunning) {
     NuggetCacheLimits limits;
     limits.pendingPutBytes = 1000;
@@ -612,22 +591,45 @@ TEST(NuggetRequest_DestroyWhileRunning) {
     REQUIRE(scene.scheduler.Submit(Move(blocker.Value())));
     auto request = UniquePtr<NuggetPutRequest>::TryMake(scene.allocator, scene.allocator);
     REQUIRE(request);
+    request.Value()->SetHooks(NuggetRequestHooks{
+        [](void* context) noexcept { static_cast<platform::ManualResetEvent*>(context)->Signal(); },
+        &release});
     NuggetPutItem items[] = {PutItem(scene.allocator, Key(1), 1000, 1)};
     REQUIRE(request.Value()->Start(scene.cache, items, scene.scheduler));
     CHECK(!request.Value()->IsCancelRequested());
-    ReleaseAfterCancel helper;
-    helper.request = request.Value().Get();
-    helper.release = &release;
-    platform::Thread thread;
-    REQUIRE(thread.Start(&ReleaseAfterCancel::Entry, &helper) == platform::ThreadStatus::Success);
     request.Value().Reset();
-    REQUIRE(thread.Join() == platform::ThreadStatus::Success);
     // 예약을 돌려받았다.
     NuggetPutRequest after(scene.allocator);
     NuggetPutItem full[] = {PutItem(scene.allocator, Key(2), 1000, 2)};
     REQUIRE(after.Start(scene.cache, full, scene.scheduler));
     REQUIRE(WaitDone(after));
-    CHECK(after.Results().Value()[0].status == NuggetStatus::Stored);
+    CHECK(after.Results().Value()[0].status == NuggetStatus::Stored && !after.IsCancelRequested());
+}
+
+// 완료 handle이 항목보다 먼저 끝난 경우(직접 취소 — scheduler Shutdown(Cancel)과 같은 상황): 항목이
+// 아직 진행 중 목록에 남아 있으면 다시 Start는 Busy이고, 목록에서 빠진 뒤에는 다시 Start할 수 있다.
+TEST(NuggetRequest_RestartWhileSettling) {
+    RequestScene scene("nugget-request-settling", 2);
+    REQUIRE(scene.ready);
+    NuggetGate gate;
+    scene.files.Arm(".tmp", platform::FileOpenMode::CreateNew, &NuggetGate::Hold, &gate);
+    NuggetPutRequest put(scene.allocator);
+    NuggetPutItem items[] = {PutItem(scene.allocator, Key(1), 100, 1)};
+    REQUIRE(put.Start(scene.cache, items, scene.scheduler));
+    REQUIRE(gate.entered.Wait() == platform::WaitResult::Signaled);
+    // 남은 worker가 이벤트 취소를 처리한다(완료 handle은 끝났지만 항목은 gate에 붙잡혀 있다).
+    REQUIRE(put.Handle().RequestCancel());
+    REQUIRE(WaitDone(put));
+    NuggetPutItem again[] = {PutItem(scene.allocator, Key(2), 100, 2)};
+    CHECK(put.Start(scene.cache, again, scene.scheduler).Error() == ErrorCode::Busy &&
+          again[0].values.Size() == 1);
+    gate.release.Signal();
+    // 캐시 Shutdown은 목록이 빌 때까지 기다린다 — 그 뒤 다시 Start는 Busy가 아니다(종료한 캐시라
+    // Cancelled).
+    scene.cache.Shutdown(platform::InfiniteTimeout);
+    REQUIRE(put.Start(scene.cache, again, scene.scheduler));
+    REQUIRE(WaitDone(put));
+    CHECK(put.Results().Value()[0].status == NuggetStatus::Cancelled);
 }
 
 // 할당 실패(요청 allocator): Start의 결과 slot·입력 복사(bucket·값 선택·inputs·meta)·예약 표·항목

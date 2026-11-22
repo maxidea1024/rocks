@@ -40,6 +40,13 @@ NuggetRequest::~NuggetRequest() noexcept = default;
 
 void NuggetRequest::RequestCancel() noexcept {
     platform::AtomicStore<platform::MemoryOrder::Release>(&cancelled_, uint32{1});
+    if (hooks_.onCancel != nullptr) {
+        hooks_.onCancel(hooks_.context);
+    }
+}
+
+bool NuggetRequest::IsBusy() const noexcept {
+    return IsRunning() || platform::AtomicLoad<platform::MemoryOrder::Acquire>(&registered_) != 0;
 }
 
 bool NuggetRequest::IsRunning() const noexcept {
@@ -95,7 +102,6 @@ Result<void> NuggetRequest::Begin(NuggetCache& cache, WorkerScheduler& scheduler
     cancelled_ = 0;
     remaining_ = static_cast<uint32>(count + 1);
     registered = cache.Register(*this);
-    registered_ = registered;
     if (!registered) {
         // 종료한 캐시다 — 항목은 Cancelled(결과 slot 초기값), 제출 표지만 남긴다.
         remaining_ = 1;
@@ -142,7 +148,7 @@ void NuggetRequest::FinishOne() noexcept {
 
     // 마지막이다: 목록에서 빼고 완료한다(완료 뒤에는 이 객체를 건드리지 않는다 — 소유자가 소멸할 수
     // 있다).
-    if (registered_) {
+    if (platform::AtomicLoad<platform::MemoryOrder::Acquire>(&registered_) != 0) {
         cache_->Unregister(*this);
     }
 
@@ -198,7 +204,7 @@ NuggetGetRequest::~NuggetGetRequest() noexcept {
 
 Result<void> NuggetGetRequest::Start(NuggetCache& cache, Span<const NuggetGetItem> items,
                                      WorkerScheduler& scheduler) noexcept {
-    if (IsRunning()) {
+    if (IsBusy()) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
 
@@ -300,7 +306,7 @@ NuggetPutRequest::~NuggetPutRequest() noexcept {
 
 Result<void> NuggetPutRequest::Start(NuggetCache& cache, Span<NuggetPutItem> items,
                                      WorkerScheduler& scheduler) noexcept {
-    if (IsRunning()) {
+    if (IsBusy()) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
 

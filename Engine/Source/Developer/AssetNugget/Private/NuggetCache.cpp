@@ -107,6 +107,7 @@ bool NuggetCache::Register(NuggetRequest& request) noexcept {
     }
 
     requests_ = &request;
+    platform::AtomicStore<platform::MemoryOrder::Release>(&request.registered_, uint32{1});
     return true;
 }
 
@@ -124,6 +125,8 @@ void NuggetCache::Unregister(NuggetRequest& request) noexcept {
 
     request.newer_ = nullptr;
     request.older_ = nullptr;
+    platform::AtomicStore<platform::MemoryOrder::Release>(&request.registered_, uint32{0});
+    requestsChanged_.NotifyAll();
 }
 
 bool NuggetCache::ReservePutBytes(uint64 bytes) noexcept {
@@ -143,20 +146,6 @@ bool NuggetCache::ReservePutBytes(uint64 bytes) noexcept {
 
 void NuggetCache::ReleasePutBytes(uint64 bytes) noexcept {
     (void)platform::AtomicFetchSub<platform::MemoryOrder::AcquireRelease>(&pendingPutBytes_, bytes);
-}
-
-WorkerTaskHandle NuggetCache::FirstPending(bool putOnly) noexcept {
-    platform::LockGuard lock(requestMutex_);
-    for (NuggetRequest* request = requests_; request != nullptr; request = request->older_) {
-        if (!putOnly || request->put_) {
-            auto cloned = request->done_.Handle().Clone();
-            if (cloned) {
-                return Move(cloned.Value());
-            }
-        }
-    }
-
-    return WorkerTaskHandle{};
 }
 
 void NuggetCache::Shutdown(uint32 drainMs) noexcept {
@@ -182,38 +171,46 @@ void NuggetCache::Shutdown(uint32 drainMs) noexcept {
     }
 
     Notify(NuggetCacheStep::AfterCancelGets);
-    // Put 요청은 drainMs(전체 기한)까지 기다린다.
+    // Put 요청은 drainMs(전체 기한)까지 목록에서 빠지기를 기다린다(목록 변경 조건 변수 — 바쁜 반복
+    // 없음). 그 뒤 남은 요청에 취소를 요청한다.
     constexpr uint64 NanosecondsPerMillisecond = 1000000;
     const uint64 deadline =
         platform::MonotonicNanoseconds() + uint64{drainMs} * NanosecondsPerMillisecond;
-    for (;;) {
-        WorkerTaskHandle pending = FirstPending(true);
-        const uint64 now = platform::MonotonicNanoseconds();
-        if (!pending.IsValid() || now >= deadline) {
-            break;
-        }
-
-        const uint64 left =
-            (deadline - now + NanosecondsPerMillisecond - 1) / NanosecondsPerMillisecond;
-        auto waited = pending.Wait(static_cast<uint32>(
-            left < platform::InfiniteTimeout ? left : platform::InfiniteTimeout - 1));
-        if (!waited || waited.Value() != platform::WaitResult::Signaled) {
-            break;
-        }
-    }
-
     {
         platform::LockGuard lock(requestMutex_);
+        for (;;) {
+            bool putPending = false;
+            for (NuggetRequest* request = requests_; request != nullptr;
+                 request = request->older_) {
+                if (request->put_) {
+                    putPending = true;
+                    break;
+                }
+            }
+
+            const uint64 now = platform::MonotonicNanoseconds();
+            if (!putPending || now >= deadline) {
+                break;
+            }
+
+            const uint64 left =
+                (deadline - now + NanosecondsPerMillisecond - 1) / NanosecondsPerMillisecond;
+            (void)requestsChanged_.Wait(requestMutex_,
+                                        static_cast<uint32>(left < platform::InfiniteTimeout
+                                                                ? left
+                                                                : platform::InfiniteTimeout - 1));
+        }
+
         for (NuggetRequest* request = requests_; request != nullptr; request = request->older_) {
             request->RequestCancel();
         }
     }
 
     Notify(NuggetCacheStep::AfterDrain);
-    // 모든 요청이 실제로 끝날 때까지 기다린다(Rockpile 12.2절 "모든 요청의 완료를 보장").
-    for (WorkerTaskHandle pending = FirstPending(false); pending.IsValid();
-         pending = FirstPending(false)) {
-        (void)pending.Wait(platform::InfiniteTimeout);
+    // 모든 요청이 목록에서 빠질 때까지 기다린다(Rockpile 12.2절 "모든 요청의 완료를 보장").
+    platform::LockGuard lock(requestMutex_);
+    while (requests_ != nullptr) {
+        (void)requestsChanged_.Wait(requestMutex_);
     }
 }
 

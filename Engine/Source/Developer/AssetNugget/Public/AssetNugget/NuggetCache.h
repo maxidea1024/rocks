@@ -293,8 +293,6 @@ private:
     void Unregister(NuggetRequest& request) noexcept;
     bool ReservePutBytes(uint64 bytes) noexcept;
     void ReleasePutBytes(uint64 bytes) noexcept;
-    // 진행 중 목록에서 조건에 맞는 첫 요청의 완료 handle 복제다(없으면 빈 handle).
-    WorkerTaskHandle FirstPending(bool putOnly) noexcept;
     void Notify(NuggetCacheStep step) noexcept {
         if (hooks_.callback != nullptr) {
             hooks_.callback(hooks_.context, step);
@@ -323,6 +321,8 @@ private:
 
     // 요청 목록(이중 연결)·종료 표지·대기 Put byte다. 목록은 requestMutex_로 지킨다.
     platform::Mutex requestMutex_;
+    // 목록이 바뀔 때(요청이 빠질 때) 알린다 — Shutdown의 drain·마지막 대기.
+    platform::ConditionVariable requestsChanged_;
     NuggetRequest* requests_ = nullptr;
     uint32 shutDown_ = 0;
     uint64 pendingPutBytes_ = 0;

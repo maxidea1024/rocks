@@ -27,8 +27,9 @@
 //   으로 기다린다.
 // - scheduler를 Shutdown(Cancel)으로 끝내면 완료 handle(외부 이벤트)이 항목보다 먼저 Cancelled가
 //   된다(남은 항목은 worker가 capture를 정리하며 Cancelled로 끝낸다). 그 scheduler의 요청은
-//   scheduler Shutdown이 돌아온 뒤에 결과를 보거나 소멸한다. 보통은 NuggetCache::Shutdown을 먼저
-//   부른다.
+//   scheduler Shutdown이 돌아온 뒤에 결과를 보거나 소멸하거나 다시 Start한다. 보통은
+//   NuggetCache::Shutdown을 먼저 부른다. 완료 handle을 직접 취소하지 않는다(취소는 RequestCancel —
+//   직접 취소해도 같은 상황이다). 항목이 아직 진행 중 목록에 남아 있으면 다시 Start는 Busy다.
 namespace rocks {
 
 struct NuggetGetItem {
@@ -51,8 +52,15 @@ struct NuggetPutItem {
     NuggetPolicy policy = NuggetPolicy::Default;
 };
 
+// 시험 hook이다: 취소가 요청될 때(RequestCancel — 진행 중 소멸 포함) 부른다(제품 코드는 걸지
+// 않는다).
+struct NuggetRequestHooks {
+    void (*onCancel)(void* context) noexcept = nullptr;
+    void* context = nullptr;
+};
+
 // 두 요청의 공용 부분이다(직접 만들지 않는다).
-class NuggetRequest {
+class ROCKS_ASSETNUGGET_API NuggetRequest {
 public:
     NuggetRequest(const NuggetRequest&) = delete;
     NuggetRequest& operator=(const NuggetRequest&) = delete;
@@ -69,6 +77,11 @@ public:
     // 취소가 요청됐는지다(RequestCancel·NuggetCache::Shutdown·진행 중 소멸).
     bool IsCancelRequested() const noexcept;
 
+    // 시험 hook이다(Start 전에 건다).
+    void SetHooks(const NuggetRequestHooks& hooks) noexcept {
+        hooks_ = hooks;
+    }
+
 protected:
     // allocator는 결과 slot·입력 복사·항목 작업 capture에 쓴다(worker에서도 쓰므로 동시 할당을
     // 지원해야 한다 — System·Binned 등).
@@ -79,6 +92,8 @@ protected:
 
     // 진행 중이면(Start 뒤 완료 전) true다.
     bool IsRunning() const noexcept;
+    // 다시 Start할 수 없으면(진행 중이거나 항목이 아직 진행 중 목록에 남음) true다.
+    bool IsBusy() const noexcept;
     // 결과를 볼 수 있는지다: Start 전 StaleHandle, 완료 전 Busy.
     Result<void> CheckDone() const noexcept;
     // 진행 중이면 취소를 요청하고 완료를 기다린다(파생 소멸자가 결과 slot보다 먼저 부른다). 같은
@@ -118,12 +133,14 @@ private:
     uint32 remaining_ = 0;
     uint32 cancelled_ = 0;
     bool put_ = false;
-    bool registered_ = false;
+    // 캐시 진행 중 목록에 있는지다(캐시가 잠금 안에서 원자적으로 쓴다).
+    uint32 registered_ = 0;
+    NuggetRequestHooks hooks_{};
     NuggetRequest* newer_ = nullptr;
     NuggetRequest* older_ = nullptr;
 };
 
-class NuggetGetRequest final : public NuggetRequest {
+class ROCKS_ASSETNUGGET_API NuggetGetRequest final : public NuggetRequest {
 public:
     explicit NuggetGetRequest(Allocator& allocator) noexcept;
     ~NuggetGetRequest() noexcept;
@@ -159,7 +176,7 @@ private:
     Array<NuggetCacheGetResult> results_;
 };
 
-class NuggetPutRequest final : public NuggetRequest {
+class ROCKS_ASSETNUGGET_API NuggetPutRequest final : public NuggetRequest {
 public:
     explicit NuggetPutRequest(Allocator& allocator) noexcept;
     ~NuggetPutRequest() noexcept;
