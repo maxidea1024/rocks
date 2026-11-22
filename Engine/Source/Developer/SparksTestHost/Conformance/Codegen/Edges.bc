@@ -175,43 +175,45 @@ function Sum  scalar=10/10 ref=0/0 buf=3/3 params=0/0/2 returns sx1
 
 function Beacon.on this.Pinged  scalar=2/2 ref=4/6 buf=0/0 params=1/1/0 returns sx0
   body e0c1666837e60881d607f5287a9e4c9ce33723a47db194efb4362d49fe38f71d
-  await 0022  live r0..r1
-  await 0030  live r1
-  0000  GETCTX  r1, ref0    ; 83:19
-  0001  GETF.R  r1, r1, ref1    ; 83:19
-  0003  GETF.R  r2, r0, ref2    ; 83:41
-  0005  MOV.R  r4, r1    ; 83:19
-  0006  MOV.R  r5, r2    ; 83:19
+  held r1 x1
+  await 0023  live r0..r1
+  await 0031  live r1
+  0000  GETCTX  r2, ref0    ; 83:19
+  0001  GETF.R  r2, r2, ref1    ; 83:19
+  0003  GETF.R  r3, r0, ref2    ; 83:41
+  0005  MOV.R  r4, r2    ; 83:19
+  0006  MOV.R  r5, r3    ; 83:19
   0007  CALLN  ref3    ; 83:19
-  0008  MOV.R  r1, r4    ; 83:19
-  0009  GETCTX  r2, ref0    ; 84:15
-  0010  GETF.R  r2, r2, ref1    ; 84:15
-  0012  GETF.R  r3, r0, ref2    ; 84:37
-  0014  MOV.R  r4, r2    ; 84:15
-  0015  MOV.R  r5, r3    ; 84:15
-  0016  CALLN  ref3    ; 84:15
-  0017  MOV.R  r2, r4    ; 84:15
-  0018  RELEASE  r1    ; 84:9
-  0019  MOV.R  r1, r2    ; 84:9
-  0020  CALLL  ref4    ; 85:16
-  0021  MOV.R  r2, r4    ; 85:16
-  0022  AWAIT  -, r2    ; 85:9
-  0024  GETF.R  r2, r0, ref5    ; 86:27
-  0026  ISSOME.R  s1, r2    ; 86:13
-  0027  BRF  s1, 0033    ; 86:13
-  0028  WAITEV  r2, r2, ref6    ; 87:19
-  0030  AWAIT  -, r2    ; 87:13
-  0032  JMP  0036    ; 87:13
-  0033  ISSOME.R  s1, r1    ; 90:9
-  0034  BRT  s1, 0037    ; 90:9
-  0035  JMP  0041    ; 90:9
-  0036  JMP  0033    ; 86:9
-  0037  MOV.R  r2, r1    ; 90:9
-  0038  MOV.R  r4, r2    ; 90:9
-  0039  CALLN  ref7    ; 90:9
-  0040  JMP  0041    ; 90:9
-  0041  RELEASE  r1    ; 82:32
-  0042  RET  -    ; 92:5
+  0008  MOV.R  r2, r4    ; 83:19
+  0009  MOV.R  r1, r2    ; 83:9
+  0010  GETCTX  r2, ref0    ; 84:15
+  0011  GETF.R  r2, r2, ref1    ; 84:15
+  0013  GETF.R  r3, r0, ref2    ; 84:37
+  0015  MOV.R  r4, r2    ; 84:15
+  0016  MOV.R  r5, r3    ; 84:15
+  0017  CALLN  ref3    ; 84:15
+  0018  MOV.R  r2, r4    ; 84:15
+  0019  RELEASE  r1    ; 84:9
+  0020  MOV.R  r1, r2    ; 84:9
+  0021  CALLL  ref4    ; 85:16
+  0022  MOV.R  r2, r4    ; 85:16
+  0023  AWAIT  -, r2    ; 85:9
+  0025  GETF.R  r2, r0, ref5    ; 86:27
+  0027  ISSOME.R  s1, r2    ; 86:13
+  0028  BRF  s1, 0034    ; 86:13
+  0029  WAITEV  r2, r2, ref6    ; 87:19
+  0031  AWAIT  -, r2    ; 87:13
+  0033  JMP  0037    ; 87:13
+  0034  ISSOME.R  s1, r1    ; 90:9
+  0035  BRT  s1, 0038    ; 90:9
+  0036  JMP  0042    ; 90:9
+  0037  JMP  0034    ; 86:9
+  0038  MOV.R  r2, r1    ; 90:9
+  0039  MOV.R  r4, r2    ; 90:9
+  0040  CALLN  ref7    ; 90:9
+  0041  JMP  0042    ; 90:9
+  0042  RELEASE  r1    ; 82:32
+  0043  RET  -    ; 92:5
 
 function Beacon.Ping  scalar=1/2 ref=2/3 buf=0/0 params=0/2/0 returns sx0
   body 12404951a9deb3d23cdff23082da7cbdc4ddbb5aaf1f4cedc6867c515b88e216

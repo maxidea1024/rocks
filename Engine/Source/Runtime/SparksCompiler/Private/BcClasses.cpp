@@ -123,6 +123,9 @@ bool BytecodeEncoder::EncodeClasses(Span<const uint64> bodies) noexcept {
                 field.bank = static_cast<uint8>(bank);
                 field.slots = static_cast<uint8>(layout.slots);
                 field.offset = stored.slots[bank];
+                field.flags = checker_.IsHeldType(checker_.FieldType(memberSymbol))
+                                  ? BytecodeFieldHeld
+                                  : uint8(0);
                 stored.slots[bank] = static_cast<uint16>(stored.slots[bank] + layout.slots);
                 if (!out_.classFields.TryPushBack(field)) {
                     Fail(ErrorCode::OutOfMemory);

@@ -99,7 +99,7 @@ class0 = Door : ScriptableComponent s2 r2 b3 init Door.$init
   field State s1 x1
   field Names b1 x1
   field Scores b2 x1
-  field Hum r1 x1
+  field Hum r1 x1 held
   hook Enable Door.on Enable
   hook Disable Door.on Disable
   handler Owner.Damaged Door.on Owner.Damaged await skipWhileBusy ref15 -> ref20
@@ -207,32 +207,34 @@ function Door.Total  scalar=5/5 ref=1/1 buf=3/3 params=0/1/0 returns sx1
   0035  MOV.S  s0, s3    ; 66:13
   0036  JMP  0029    ; 61:9
 
-function Door.on Owner.Damaged  scalar=2/2 ref=3/5 buf=0/0 params=1/1/0 returns sx0
+function Door.on Owner.Damaged  scalar=2/2 ref=4/6 buf=0/0 params=1/1/0 returns sx0
   body 0e51f140e9e5f00ff0d63d45805b678476feea5a6635fcb07c6d6b90671771cb
-  await 0016  live r1
-  0000  GETCTX  r1, ref0    ; 74:21
-  0001  GETF.R  r1, r1, ref1    ; 74:21
-  0003  GETF.R  r2, r0, ref2    ; 74:43
-  0005  MOV.R  r3, r1    ; 74:21
-  0006  MOV.R  r4, r2    ; 74:21
+  held r1 x1
+  await 0017  live r1
+  0000  GETCTX  r2, ref0    ; 74:21
+  0001  GETF.R  r2, r2, ref1    ; 74:21
+  0003  GETF.R  r3, r0, ref2    ; 74:43
+  0005  MOV.R  r4, r2    ; 74:21
+  0006  MOV.R  r5, r3    ; 74:21
   0007  CALLN  ref3    ; 74:21
-  0008  MOV.R  r1, r3    ; 74:21
-  0009  LOADK  s1, k1    ; 75:22
-  0010  LT.F  s1, s1, s0    ; 75:13
-  0011  BRF  s1, 0014    ; 75:13
-  0012  RELEASE  r1    ; 76:13
-  0013  RET  -    ; 76:13
-  0014  CALLL  ref14    ; 79:15
-  0015  MOV.R  r2, r3    ; 79:15
-  0016  AWAIT  -, r2    ; 79:9
-  0018  ISSOME.R  s1, r1    ; 80:9
-  0019  BRF  s1, 0024    ; 80:9
-  0020  MOV.R  r2, r1    ; 80:9
-  0021  MOV.R  r3, r2    ; 80:9
-  0022  CALLN  ref10    ; 80:9
-  0023  JMP  0024    ; 80:9
-  0024  RELEASE  r1    ; 73:37
-  0025  RET  -    ; 81:5
+  0008  MOV.R  r2, r4    ; 74:21
+  0009  MOV.R  r1, r2    ; 74:9
+  0010  LOADK  s1, k1    ; 75:22
+  0011  LT.F  s1, s1, s0    ; 75:13
+  0012  BRF  s1, 0015    ; 75:13
+  0013  RELEASE  r1    ; 76:13
+  0014  RET  -    ; 76:13
+  0015  CALLL  ref14    ; 79:15
+  0016  MOV.R  r2, r4    ; 79:15
+  0017  AWAIT  -, r2    ; 79:9
+  0019  ISSOME.R  s1, r1    ; 80:9
+  0020  BRF  s1, 0025    ; 80:9
+  0021  MOV.R  r2, r1    ; 80:9
+  0022  MOV.R  r4, r2    ; 80:9
+  0023  CALLN  ref10    ; 80:9
+  0024  JMP  0025    ; 80:9
+  0025  RELEASE  r1    ; 73:37
+  0026  RET  -    ; 81:5
 
 function Door.Find  scalar=1/1 ref=2/2 buf=0/0 params=0/1/0 returns rx1
   body 5a11da282c1509b2985915b7280c5915d67f20778e632c589d701337ea5e4f44

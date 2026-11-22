@@ -113,7 +113,11 @@ struct BytecodeTypeField {
     uint8 bank = 0;
     uint8 slots = 0;
     uint32 offset = 0;
+    uint8 flags = 0; // CLASS 필드만(형식 v4): BytecodeFieldHeld
 };
+
+// CLASS 필드 표지다(SparksRuntime 2.6절): 유지 자원 필드(Ref 1 slot — Disable·Detach가 해제).
+inline constexpr uint8 BytecodeFieldHeld = 1;
 
 // 수명·물리 hook 종류다(SL 5.1절 — 클래스당 종류마다 하나).
 enum class BytecodeHookKind : uint8 {
@@ -203,6 +207,10 @@ struct BytecodeFunction {
     uint32 switchCount = 0;
     uint32 firstAwait = 0;
     uint32 awaitCount = 0;
+    // 유지 자원 지역의 Ref 구간(형식 v4 — SparksRuntime 2.6절 R18): 언제나 0이거나 유지 자원
+    // handle이다. 매개변수 뒤·할당 수 안.
+    uint16 heldFirst = 0;
+    uint16 heldCount = 0;
 };
 
 class BytecodeModule final {

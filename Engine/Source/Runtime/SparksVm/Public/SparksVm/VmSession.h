@@ -159,12 +159,13 @@ private:
     // 정지한 실행이다(R9 — frame stack 전체).
     struct Suspended {
         explicit Suspended(Allocator& allocator) noexcept
-            : frames(allocator), generations(allocator), scalars(allocator), refs(allocator),
-              buffers(allocator) {
+            : frames(allocator), generations(allocator), held(allocator), scalars(allocator),
+              refs(allocator), buffers(allocator) {
         }
 
         Array<VmExecution::Frame> frames;
         Array<uint64> generations; // frame 모듈의 링크 세대(다시 링크했으면 재개하지 않고 취소)
+        Array<uint32> held;        // frame마다 held 구간(first << 16 | count — 정지 때 보관)
         Array<uint64> scalars;
         Array<uint64> refs;
         Array<VmBuffer*> buffers;
@@ -376,6 +377,9 @@ private:
                     uint32 offset, uint32 slots, uint64*& values, VmBuffer**& buffers,
                     uint32& instance, uint32& at) noexcept;
     void ReleaseFields(Instance& instance) noexcept;
+    // instance의 유지 자원 필드를 선언 역순(파생 → 기반)으로 멈추고 null로 둔다(Disable 뒤·Detach —
+    // SparksRuntime 2.6절).
+    void ReleaseHeldFields(uint32 instance) noexcept;
 
     Allocator* allocator_;
     VmHost* host_;

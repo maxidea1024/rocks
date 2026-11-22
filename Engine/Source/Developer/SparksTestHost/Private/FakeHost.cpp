@@ -569,6 +569,22 @@ bool FakeHost::IsAlive(uint64 handle) noexcept {
     return Find(handle) != nullptr;
 }
 
+void FakeHost::ReleaseHeld(uint64 handle) noexcept {
+    StringBuilder<64> text(*allocator_);
+    text.Append("release ");
+    FormatHandle(text, handle);
+    if (text.HasFailed()) {
+        outOfMemory_ = true;
+        return;
+    }
+
+    Record(text.View());
+    if (FakeObject* target = Find(handle)) {
+        target->alive = false;
+        ++target->generation;
+    }
+}
+
 uint64 FakeHost::NewObject(StringView type) noexcept {
     FakeObject object{String(*allocator_), 1, true, Array<FakeFieldValue>(*allocator_)};
     if (!object.type.TryAssign(type) || !objects_.TryPushBack(static_cast<FakeObject&&>(object))) {

@@ -156,6 +156,14 @@ VmFaultKind VmExecution::CallHost(Opcode op, uint32 word, uint32 extra, const Ba
                 }
             }
 
+            // 유지 자원 필드: 새 자원(우변 — 이미 획득)을 저장하기 전에 이전 값을 멈춘다(획득 →
+            // 이전 해제 → 저장, SL 7.1절).
+            if (!get && local.held && bank == static_cast<uint32>(BytecodeBank::Ref) &&
+                values[0] != 0 && values[0] != banks.r[bb]) {
+                host->ReleaseHeld(values[0]);
+                values[0] = 0;
+            }
+
             const uint32 at = get ? a : bb;
             for (uint32 slot = 0; slot < c; ++slot) {
                 if (bank == static_cast<uint32>(BytecodeBank::Buf)) {

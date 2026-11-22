@@ -316,6 +316,7 @@ Result<void> LinkModule(const BytecodeModule& module, VmHost* host, VmLinkedModu
                         bound.bank = field.bank;
                         bound.slots = field.slots;
                         bound.offset = field.offset;
+                        bound.held = (field.flags & BytecodeFieldHeld) != 0;
                         out.hosts_[ref].bank = field.bank;
                         out.hosts_[ref].slots = field.slots;
                         local = true;

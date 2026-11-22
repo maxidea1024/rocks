@@ -247,6 +247,9 @@ private:
         VmBuffer** b = nullptr;
     };
 
+    // frame 하나(link의 function, Ref 레지스터 refs부터 available개)의 held 구간을 멈춘다.
+    static void ReleaseHeld(const VmLinkedModule& link, uint32 function, uint64* refs,
+                            usize available) noexcept;
     // 정지했던 실행(frame·레지스터를 session이 되돌려 놓았다)을 이어 간다(SparksRuntime 2.4절).
     Result<VmCallResult> Continue(const VmLimits& limits) noexcept;
     Result<void> PushFrame(const VmLinkedModule& linked, uint32 function,
