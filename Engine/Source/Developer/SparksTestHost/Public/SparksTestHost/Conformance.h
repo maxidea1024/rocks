@@ -140,6 +140,13 @@ struct CaseFile {
     StringView text;
 };
 
+// 폴더 사례의 reload revision 하나다(Docs/Design/SparksReload.ko.md 6절 LC7c2b — 사례 폴더 옆
+// `<사례>.<버전>/`, 바뀐 파일만).
+struct CaseRevision {
+    StringView version;
+    Span<const CaseFile> files; // 사례 폴더 기준 경로
+};
+
 // 사례 하나의 입력이다.
 struct CaseInput {
     // 사례 이름이다. 파일 사례는 진단 경로이기도 하다("Lexical/Bom.spark"), 폴더 사례는
@@ -166,6 +173,8 @@ struct CaseInput {
     // `.run` `reload <버전>`의 revision 원문(Docs/Design/SparksReload.ko.md K9 — 파일 사례 옆
     // `<사례>.<버전>.spark`, path는 버전).
     Span<const CaseFile> revisions;
+    // 폴더 사례의 revision(`<사례>.<버전>/` — 바뀐 파일만, 같은 경로로 덮는다).
+    Span<const CaseRevision> folderRevisions;
     bool hasNames = false; // `.names`가 있는지
     StringView names;      // `.names` 내용(hasNames일 때만)
 };

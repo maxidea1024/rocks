@@ -1,0 +1,20 @@
+open class Root : ScriptableComponent {
+}
+
+open class Fixture : Root {
+    var Level = 1;
+    event Ping(n: int);
+
+    fn Send(n: int) {
+        emit Ping(n);
+    }
+
+    fn Raise() {
+        Level += 1;
+        Log.Info("raised ${Level}");
+    }
+}
+
+fn Twice(n: int): int {
+    return n * 2;
+}

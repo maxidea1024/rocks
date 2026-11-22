@@ -1667,6 +1667,212 @@ close -> ok
     CHECK(failures > 0);
 }
 
+TEST(SparksConformance_RunGoldenAllocationFailureBundle) {
+    // 모듈 묶음 reload(Docs/Design/SparksReload.ko.md 6절 — LC7c2b)의 모든 할당 실패 자리: 폴더
+    // revision 덮어쓰기·컴파일, 재컴파일 범위·묶음 결정, 묶음 모듈 링크·import, 쌍마다 계획·적용.
+    // 실패는 OutOfMemory로 돌아오고 새는 할당이 없다(실패한 적용은 session 그대로 — `.run` 대조).
+    SystemAllocator backing;
+    constexpr StringView Manifest = "{ name: \"Game\", sparks: 1, profile: \"full\" }\n";
+    constexpr StringView Base = R"(open class Fixture : ScriptableComponent {
+    var Level = 1;
+    event Ping(n: int);
+
+    fn Send(n: int) {
+        emit Ping(n);
+    }
+
+    fn Raise() {
+        Level += 1;
+        Log.Info("raised ${Level}");
+    }
+}
+
+fn Twice(n: int): int {
+    return n * 2;
+}
+)";
+    constexpr StringView Main = R"(import Base;
+
+class Door : Fixture {
+    var Peer: Fixture?;
+    var Seen = 0;
+
+    fn Watch(target: Fixture) {
+        Peer = target;
+    }
+
+    fn Fire(n: int) {
+        Send(Twice(n));
+    }
+
+    on Peer.Ping(n: int) {
+        Seen += n;
+        Log.Info("seen v1 ${n}");
+    }
+
+    async fn Later(n: int) {
+        await Delay(1.0, Clock.Game);
+        Log.Info("later ${Twice(n)}");
+    }
+}
+)";
+    constexpr StringView Util = R"(class Lamp : ScriptableComponent {
+    var Glow = 1;
+
+    fn Brighten() {
+        Glow += 1;
+    }
+}
+)";
+    constexpr StringView Second = R"(open class Fixture : ScriptableComponent {
+    var Bonus = 5;
+    var Level = 1;
+    event Ping(n: int);
+
+    fn Send(n: int) {
+        emit Ping(n);
+    }
+
+    fn Raise() {
+        Level += 1;
+        Log.Info("raised ${Level}");
+    }
+}
+
+fn Twice(n: int): int {
+    return n * 3;
+}
+)";
+    constexpr StringView ThirdMain = R"(import Base;
+
+class Door : Fixture {
+    var Peer: Fixture?;
+    var Seen = 0;
+
+    fn Watch(target: Fixture) {
+        Peer = target;
+    }
+
+    fn Fire(n: int) {
+        Send(Twice(n));
+    }
+
+    on Peer.Ping(n: int) {
+        Seen += n;
+        Log.Info("seen v3 ${n}");
+    }
+
+    async fn Later(n: int) {
+        await Delay(1.0, Clock.Game);
+        Log.Info("later ${Twice(n)}");
+    }
+}
+)";
+    const CaseFile files[] = {{"Game/SparksPackage.json5", Manifest},
+                              {"Game/Base.spark", Base},
+                              {"Game/Main.spark", Main},
+                              {"Game/Util.spark", Util}};
+    const CaseFile second[] = {{"Game/Base.spark", Second}};
+    const CaseFile third[] = {{"Game/Base.spark", Second}, {"Game/Main.spark", ThirdMain}};
+    const CaseRevision revisions[] = {{"v2", second}, {"v3", third}};
+    constexpr StringView Golden = R"(new #1 Door -> ok
+new #2 Door -> ok
+new #3 Lamp -> ok
+hook #1 Enable -> ok
+hook #2 Enable -> ok
+Door.Watch(#2, #1) -> ok
+Fixture.Raise(#2) -> ok
+Door.Later(#2, 5) -> ok
+reload v2 keep -> ok
+Door.Fire(#1, 2) -> ok
+advance 1.0 -> ok
+reload v3 -> ok
+Door.Fire(#1, 1) -> ok
+fields #2 -> ok
+close -> ok
+)";
+    constexpr StringView Schema = R"({
+  "format": 1, "package": "Rocks", "module": "Engine",
+  "types": [
+    {"name": "Actor", "id": "5a7e0000000000000000000000000001", "kind": "object"},
+    {"name": "Component", "id": "5a7e0000000000000000000000000005", "kind": "object",
+     "fields": [{"name": "Owner", "id": "5a7e0000000000000000000000000131", "type": "Actor"}]},
+    {"name": "ScriptableComponent", "id": "5a7e0000000000000000000000000007", "kind": "object",
+     "base": "Component", "scriptExtensible": true}
+  ]
+})";
+    const CaseFile schemas[] = {{"Schema/Engine.sparkbind.json", Schema}};
+    SystemAllocator side; // 기대값은 세는 allocator 밖에 둔다
+    uint64 attempts = 0;
+    uint64 failures = 0;
+    String expected(side);
+    for (uint64 failAt = 0; failAt == 0 || failAt <= attempts; ++failAt) {
+        test::NFailAllocator allocator(backing);
+        const uint64 before = backing.Stats().liveAllocations;
+        {
+            CaseInput input;
+            input.name = "Run/Bundle";
+            input.folder = true;
+            input.files = files;
+            input.schemas = schemas;
+            input.expect = "clean\n";
+            input.hasRun = true;
+            input.folderRevisions = revisions;
+            input.run = failAt == 0 ? Golden : expected.View();
+            Report report(allocator);
+            if (failAt != 0) {
+                allocator.FailOnAttempt(failAt);
+            }
+
+            auto ran = RunCase(allocator, input, report);
+            const uint64 used = allocator.Attempts();
+            allocator.DisableFailure();
+            if (failAt == 0) {
+                REQUIRE(ran);
+                if (report.Failures().Size() != 1) {
+                    PrintFailures(report);
+                }
+
+                REQUIRE(report.Failures().Size() == 1);
+                const StringView failure = report.Failures()[0].View();
+                const StringView marker = "  actual run:\n";
+                usize at = 0;
+                while (at + marker.ByteCount() <= failure.ByteCount() &&
+                       StringView(failure.Data() + at, marker.ByteCount()) != marker) {
+                    ++at;
+                }
+
+                REQUIRE(at + marker.ByteCount() <= failure.ByteCount());
+                const StringView actual(failure.Data() + at + marker.ByteCount(),
+                                        failure.ByteCount() - at - marker.ByteCount());
+                CHECK(actual.Contains("reload v2 keep -> ok (modules 2, instances 2",
+                                      StringComparison::CaseSensitive));
+                CHECK(actual.Contains("later 10", StringComparison::CaseSensitive));
+                CHECK(actual.Contains("reload v3 -> ok (modules 1, instances 2",
+                                      StringComparison::CaseSensitive));
+                CHECK(actual.Contains("seen v3 3", StringComparison::CaseSensitive));
+                CHECK(actual.Contains("close -> ok (ledger 0 buffers)",
+                                      StringComparison::CaseSensitive));
+                REQUIRE(expected.TryAppend(actual));
+                attempts = used;
+            } else if (!ran) {
+                CHECK(ran.Error() == ErrorCode::OutOfMemory);
+                ++failures;
+            } else {
+                if (!report.Failures().IsEmpty()) {
+                    PrintFailures(report);
+                }
+
+                CHECK(report.Failures().IsEmpty());
+            }
+        }
+
+        CHECK(backing.Stats().liveAllocations == before);
+    }
+
+    CHECK(failures > 0);
+}
+
 // 폴더 사례(13.1절 "패키지 사례"): 배치 오류는 사례마다 실패 하나이고, 폴더 사례의 지시는 파일
 // 경로를 쓰며 파일 사례는 쓰지 않는다. schema 폴더에는 *.sparkbind.json만 둔다.
 TEST(SparksConformance_FolderCasesAndSchemas) {

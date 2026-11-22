@@ -1,0 +1,7 @@
+class Lamp : ScriptableComponent {
+    var Glow = 1;
+
+    fn Brighten() {
+        Glow += 1;
+    }
+}

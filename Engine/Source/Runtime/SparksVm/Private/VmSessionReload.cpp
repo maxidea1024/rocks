@@ -117,81 +117,160 @@ bool VmSession::HasInstancesOf(const VmLinkedModule& module, uint32 classIndex) 
 Result<void> VmSession::PlanReload(const VmLinkedModule& old, const VmLinkedModule& fresh,
                                    VmReloadExecutions executions, VmReloadPlan& plan,
                                    StringBuilderBase& reason) noexcept {
-    plan.old_ = nullptr;
-    plan.fresh_ = nullptr;
-    plan.classes_ = 0;
-    plan.classMap_.Clear();
-    plan.fieldMap_.Clear();
-    plan.handlerMap_.Clear();
-    plan.changed_.Clear();
-    plan.sources_.Clear();
-    plan.fate_.Clear();
+    VmReloadModule pair;
+    pair.old = &old;
+    pair.fresh = &fresh;
+    return PlanReload(Span<const VmReloadModule>(&pair, 1), executions, plan, reason);
+}
+
+Result<void> VmSession::PlanReload(Span<const VmReloadModule> modules,
+                                   VmReloadExecutions executions, VmReloadPlan& plan,
+                                   StringBuilderBase& reason) noexcept {
+    plan.entries_.Clear();
     if (closed_ || execution_.running_) {
         return VmReject(reason, "the session is closed or running");
     }
 
-    bool oldKnown = false;
-    bool freshKnown = false;
-    for (const VmLinkedModule* existing : modules_) {
-        oldKnown = oldKnown || existing == &old;
-        freshKnown = freshKnown || existing == &fresh;
-    }
-
-    if (!oldKnown) {
-        return VmReject(reason, "the old revision is not a session module");
-    }
-
-    if (freshKnown || &fresh == &old) {
-        return VmReject(reason, "the new revision must be a new linked module");
-    }
-
-    if (!fresh.Linked() || !fresh.ImportsLinked() || fresh.Host() != host_) {
-        return VmReject(reason, "the new revision is not linked with the session host");
+    if (modules.IsEmpty()) {
+        return VmReject(reason, "the reload set is empty");
     }
 
     // 아직 참조되는 이전 revision 객체로 되돌리면 이전 revision 기록이 순환한다(LC7a 리뷰 3).
     PruneRetired();
-    bool retiredFresh = false;
-    for (const Retired& entry : retired_) {
-        retiredFresh = retiredFresh || entry.link == &fresh || entry.successor == &fresh;
+    auto oldOf = [&](const VmLinkedModule* link) noexcept {
+        for (const VmReloadModule& pair : modules) {
+            if (pair.old == link) {
+                return true;
+            }
+        }
+
+        return false;
+    };
+    for (usize at = 0; at < modules.Size(); ++at) {
+        const VmLinkedModule* old = modules[at].old;
+        const VmLinkedModule* fresh = modules[at].fresh;
+        if (old == nullptr || fresh == nullptr) {
+            return VmReject(reason, "a reload pair is missing a module");
+        }
+
+        bool oldKnown = false;
+        bool freshKnown = false;
+        for (const VmLinkedModule* existing : modules_) {
+            oldKnown = oldKnown || existing == old;
+            freshKnown = freshKnown || existing == fresh;
+        }
+
+        if (!oldKnown) {
+            return VmReject(reason, "the old revision is not a session module");
+        }
+
+        if (freshKnown || fresh == old || oldOf(fresh)) {
+            return VmReject(reason, "the new revision must be a new linked module");
+        }
+
+        for (usize before = 0; before < at; ++before) {
+            if (modules[before].old == old || modules[before].fresh == fresh) {
+                return VmReject(reason, "a module appears twice in the reload set");
+            }
+        }
+
+        if (!fresh->Linked() || !fresh->ImportsLinked() || fresh->Host() != host_) {
+            return VmReject(reason, "the new revision is not linked with the session host");
+        }
+
+        bool retiredFresh = false;
+        for (const Retired& entry : retired_) {
+            retiredFresh = retiredFresh || entry.link == fresh || entry.successor == fresh;
+        }
+
+        if (retiredFresh || Uses(fresh)) {
+            return VmReject(reason, "the new revision is still referenced by the session");
+        }
+
+        const BytecodeModule& before = old->Module();
+        const BytecodeModule& after = fresh->Module();
+        if (VmText(before, before.path) != VmText(after, after.path)) {
+            return VmReject(reason, "the new revision has another module path");
+        }
+
+        // 새 revision은 묶음의 옛 revision을 부르지 않는다(묶음은 함께 바뀐다 — 6절 LC7c2b).
+        for (const VmLinkedModule::Import& import : fresh->imports_) {
+            if (import.module != nullptr && oldOf(import.module)) {
+                return VmReject(reason,
+                                "the new revision of {} imports an old revision of the "
+                                "reload set",
+                                VmText(after, after.path));
+            }
+        }
     }
 
-    if (retiredFresh || Uses(&fresh)) {
-        return VmReject(reason, "the new revision is still referenced by the session");
+    // 묶음 밖 session 모듈이 묶음의 옛 revision을 import하면 그 모듈도 묶음에 넣어야 한다(옛
+    // revision을 계속 부르게 된다).
+    for (const VmLinkedModule* existing : modules_) {
+        if (oldOf(existing)) {
+            continue;
+        }
+
+        for (const VmLinkedModule::Import& import : existing->imports_) {
+            if (import.module != nullptr && oldOf(import.module)) {
+                const BytecodeModule& code = existing->Module();
+                return VmReject(reason,
+                                "module {} imports a module of the reload set (reload it too)",
+                                VmText(code, code.path));
+            }
+        }
     }
 
-    const BytecodeModule& before = old.Module();
-    const BytecodeModule& after = fresh.Module();
-    if (VmText(before, before.path) != VmText(after, after.path)) {
-        return VmReject(reason, "the new revision has another module path");
-    }
-
-    if (!plan.classMap_.TryResize(before.classes.Size()) ||
-        !plan.fieldMap_.TryResize(before.classFields.Size()) ||
-        !plan.handlerMap_.TryResize(before.handlers.Size()) ||
-        !plan.changed_.TryResize(before.functions.Size()) ||
-        !plan.sources_.TryResize(after.classFields.Size()) ||
-        !plan.fate_.TryResize(before.classFields.Size())) {
+    if (!plan.entries_.TryReserve(modules.Size())) {
         return Result<void>::Failure(ErrorCode::OutOfMemory);
     }
 
-    for (uint32& value : plan.classMap_) {
+    for (const VmReloadModule& pair : modules) {
+        VmReloadPlan::Entry entry(*plan.allocator_);
+        entry.old = pair.old;
+        entry.fresh = pair.fresh;
+        if (auto planned = PlanModule(entry, reason); !planned) {
+            plan.entries_.Clear();
+            return planned;
+        }
+
+        static_cast<void>(plan.entries_.TryPushBack(Move(entry))); // 예약함
+    }
+
+    plan.executions_ = executions;
+    plan.serial_ = nextSerial_;
+    return Result<void>::Success();
+}
+
+Result<void> VmSession::PlanModule(VmReloadPlan::Entry& entry, StringBuilderBase& reason) noexcept {
+    const BytecodeModule& before = entry.old->Module();
+    const BytecodeModule& after = entry.fresh->Module();
+    if (!entry.classMap.TryResize(before.classes.Size()) ||
+        !entry.fieldMap.TryResize(before.classFields.Size()) ||
+        !entry.handlerMap.TryResize(before.handlers.Size()) ||
+        !entry.changed.TryResize(before.functions.Size()) ||
+        !entry.sources.TryResize(after.classFields.Size()) ||
+        !entry.fate.TryResize(before.classFields.Size())) {
+        return Result<void>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    for (uint32& value : entry.classMap) {
         value = NoBytecodeIndex;
     }
 
-    for (uint32& value : plan.fieldMap_) {
+    for (uint32& value : entry.fieldMap) {
         value = NoBytecodeIndex;
     }
 
-    for (uint32& value : plan.handlerMap_) {
+    for (uint32& value : entry.handlerMap) {
         value = NoBytecodeIndex;
     }
 
-    for (uint32& value : plan.sources_) {
+    for (uint32& value : entry.sources) {
         value = NoBytecodeIndex;
     }
 
-    for (uint8& value : plan.fate_) {
+    for (uint8& value : entry.fate) {
         value = VmFieldRemoved;
     }
 
@@ -201,7 +280,7 @@ Result<void> VmSession::PlanReload(const VmLinkedModule& old, const VmLinkedModu
         const BytecodeClass& oldEntry = before.classes[oldClass];
         const StringView name = before.String(oldEntry.name);
         const uint32 newClass = VmFindClass(after, name);
-        const bool used = HasInstancesOf(old, oldClass);
+        const bool used = HasInstancesOf(*entry.old, oldClass);
         if (newClass == NoBytecodeIndex) {
             if (used) {
                 return VmReject(reason,
@@ -224,8 +303,8 @@ Result<void> VmSession::PlanReload(const VmLinkedModule& old, const VmLinkedModu
             continue;
         }
 
-        plan.classMap_[oldClass] = newClass;
-        ++plan.classes_;
+        entry.classMap[oldClass] = newClass;
+        ++entry.classes;
         // 필드 대응(K4·5절): 새 필드마다 같은 이름의 옛 필드를 먼저, 그다음 아직 원천이 아닌 옛
         // 필드 중 `@formerly` 옛 이름과 같은 것. 타입·형태 표기와 bank·slot이 같으면 옮김, 다르면
         // 손실이다. 어느 새 필드의 원천도 아닌 옛 필드는 삭제다.
@@ -236,7 +315,7 @@ Result<void> VmSession::PlanReload(const VmLinkedModule& old, const VmLinkedModu
             for (uint32 candidate = oldEntry.firstField; candidate < oldEnd; ++candidate) {
                 if (before.String(before.classFields[candidate].name) ==
                     after.String(after.classFields[field].name)) {
-                    plan.sources_[field] = candidate;
+                    entry.sources[field] = candidate;
                     break;
                 }
             }
@@ -244,7 +323,7 @@ Result<void> VmSession::PlanReload(const VmLinkedModule& old, const VmLinkedModu
 
         auto sourced = [&](uint32 candidate) noexcept {
             for (uint32 field = newEntry.firstField; field < newEnd; ++field) {
-                if (plan.sources_[field] == candidate) {
+                if (entry.sources[field] == candidate) {
                     return true;
                 }
             }
@@ -253,21 +332,21 @@ Result<void> VmSession::PlanReload(const VmLinkedModule& old, const VmLinkedModu
         };
         for (uint32 field = newEntry.firstField; field < newEnd; ++field) {
             const uint32 former = after.classFields[field].formerName;
-            if (plan.sources_[field] != NoBytecodeIndex || former == NoBytecodeIndex) {
+            if (entry.sources[field] != NoBytecodeIndex || former == NoBytecodeIndex) {
                 continue;
             }
 
             for (uint32 candidate = oldEntry.firstField; candidate < oldEnd; ++candidate) {
                 if (!sourced(candidate) &&
                     before.String(before.classFields[candidate].name) == after.String(former)) {
-                    plan.sources_[field] = candidate;
+                    entry.sources[field] = candidate;
                     break;
                 }
             }
         }
 
         for (uint32 field = newEntry.firstField; field < newEnd; ++field) {
-            const uint32 source = plan.sources_[field];
+            const uint32 source = entry.sources[field];
             if (source == NoBytecodeIndex) {
                 continue;
             }
@@ -277,8 +356,8 @@ Result<void> VmSession::PlanReload(const VmLinkedModule& old, const VmLinkedModu
             const bool same = VmText(after, now.type) == VmText(before, was.type) &&
                               VmText(after, now.shape) == VmText(before, was.shape) &&
                               now.bank == was.bank && now.slots == was.slots;
-            plan.fate_[source] = same ? VmFieldMoved : VmFieldLost;
-            plan.fieldMap_[source] = same ? field : NoBytecodeIndex;
+            entry.fate[source] = same ? VmFieldMoved : VmFieldLost;
+            entry.fieldMap[source] = same ? field : NoBytecodeIndex;
         }
 
         // handler 대응(함수 이름·경로·이벤트).
@@ -288,7 +367,7 @@ Result<void> VmSession::PlanReload(const VmLinkedModule& old, const VmLinkedModu
                  candidate < newEntry.firstHandler + newEntry.handlerCount; ++candidate) {
                 if (VmSameHandler(before, before.handlers[handler], after,
                                   after.handlers[candidate])) {
-                    plan.handlerMap_[handler] = candidate;
+                    entry.handlerMap[handler] = candidate;
                     break;
                 }
             }
@@ -304,13 +383,9 @@ Result<void> VmSession::PlanReload(const VmLinkedModule& old, const VmLinkedModu
                 before.functions[function].bodyHash[at] != after.functions[match].bodyHash[at];
         }
 
-        plan.changed_[function] = changed ? 1 : 0;
+        entry.changed[function] = changed ? 1 : 0;
     }
 
-    plan.old_ = &old;
-    plan.fresh_ = &fresh;
-    plan.executions_ = executions;
-    plan.serial_ = nextSerial_;
     return Result<void>::Success();
 }
 
@@ -452,14 +527,14 @@ bool VmSession::TranslateField(const VmLinkedModule*& module, uint32& classIndex
 }
 
 bool VmSession::FieldsReach(const VmLinkedModule& link, uint32 function,
-                            const VmReloadPlan& plan) const noexcept {
+                            const VmReloadPlan::Entry& entry) const noexcept {
     // 필드 명령(GETF·SETF)의 Field 참조가 가리키는 로컬 필드마다 이전 revision 기록과 이번 대응(old
     // → fresh)으로 새 revision까지 옮겨지는지 본다(SparksReload 5절 — 옮기지 못하면 그 실행은
     // 취소).
     const BytecodeModule& code = link.Module();
-    const BytecodeFunction& entry = code.functions[function];
-    const uint32 end = entry.firstWord + entry.wordCount;
-    for (uint32 at = entry.firstWord; at < end;) {
+    const BytecodeFunction& body = code.functions[function];
+    const uint32 end = body.firstWord + body.wordCount;
+    for (uint32 at = body.firstWord; at < end;) {
         const Opcode op = DecodeOpcode(code.words[at]);
         const bool extra = InfoOf(op).extra;
         const uint32 ref = extra && at + 1 < end ? DecodeAx(code.words[at + 1]) : NoBytecodeIndex;
@@ -474,10 +549,10 @@ bool VmSession::FieldsReach(const VmLinkedModule& link, uint32 function,
         uint32 classIndex = local.classIndex;
         uint32 offset = local.offset;
         // FieldSlots와 같은 상한(MaxRevisions 단계 — LC7b 리뷰 6).
-        for (uint32 hop = 0; module != plan.fresh_; ++hop) {
+        for (uint32 hop = 0; module != entry.fresh; ++hop) {
             bool moved = false;
-            if (hop < MaxRevisions && module == plan.old_) {
-                moved = TranslateStep(plan.fresh_, plan.classMap_.View(), plan.fieldMap_.View(),
+            if (hop < MaxRevisions && module == entry.old) {
+                moved = TranslateStep(entry.fresh, entry.classMap.View(), entry.fieldMap.View(),
                                       module, classIndex, local.bank, local.slots, offset);
             } else if (hop < MaxRevisions) {
                 moved = TranslateField(module, classIndex, local.bank, local.slots, offset);
@@ -531,28 +606,44 @@ VmEventKey VmSession::HandlerKey(const VmLinkedModule& module, uint32 handler) c
 
 Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
     using Outcome = Result<VmReloadReport>;
-    const VmLinkedModule* old = plan.old_;
-    const VmLinkedModule* fresh = plan.fresh_;
     // G5 주입(시험 전용)은 이 적용 하나에만 걸린다.
     const bool injectRollback = injectRollback_;
     injectRollback_ = false;
+    const usize pairs = plan.entries_.Size();
     // 조각 밖 경계에는 쓰기 기록이 없다(저장소 위치를 바꾸므로 남아 있으면 적용하지 않는다).
-    if (closed_ || execution_.running_ || old == nullptr || fresh == nullptr ||
-        !writes_.IsEmpty()) {
+    if (closed_ || execution_.running_ || pairs == 0 || !writes_.IsEmpty()) {
         return Outcome::Failure(ErrorCode::InvalidArgument);
     }
 
-    usize slot = modules_.Size();
-    for (usize at = 0; at < modules_.Size(); ++at) {
-        if (modules_[at] == fresh) {
-            return Outcome::Failure(ErrorCode::InvalidArgument);
+    // 쌍 번호다(old가 묶음의 옛 revision이 아니면 pairs).
+    auto pairOf = [&](const VmLinkedModule* link) noexcept {
+        for (usize at = 0; at < pairs; ++at) {
+            if (plan.entries_[at].old == link) {
+                return at;
+            }
         }
 
-        slot = modules_[at] == old ? at : slot;
+        return pairs;
+    };
+    Array<usize> slots(*allocator_);
+    if (!slots.TryResize(pairs)) {
+        return Outcome::Failure(ErrorCode::OutOfMemory);
     }
 
-    if (slot == modules_.Size()) {
-        return Outcome::Failure(ErrorCode::InvalidArgument);
+    for (usize pair = 0; pair < pairs; ++pair) {
+        const VmReloadPlan::Entry& entry = plan.entries_[pair];
+        slots[pair] = modules_.Size();
+        for (usize at = 0; at < modules_.Size(); ++at) {
+            if (modules_[at] == entry.fresh) {
+                return Outcome::Failure(ErrorCode::InvalidArgument);
+            }
+
+            slots[pair] = modules_[at] == entry.old ? at : slots[pair];
+        }
+
+        if (slots[pair] == modules_.Size()) {
+            return Outcome::Failure(ErrorCode::InvalidArgument);
+        }
     }
 
     // 계획 뒤에 instance가 생겼으면 낡은 계획이다(판정은 계획 때의 instance로 했다 — 필드·handler
@@ -562,8 +653,6 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
     }
 
     PruneRetired();
-    const BytecodeModule& before = old->Module();
-    const BytecodeModule& after = fresh->Module();
     // 할당은 바꾸기 전에 모두 마친다(SparksReload K3 — 실패면 session 그대로).
     struct Cancel {
         uint32 suspended = NoBytecodeIndex;
@@ -581,33 +670,61 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
 
     Array<Cancel> cancels(*allocator_);
     Array<Restart> restarts(*allocator_);
-    Retired retiring(*allocator_);
-    retiring.link = old;
-    retiring.successor = fresh;
+    Array<Retired> retiring(*allocator_);
     if (!cancels.TryReserve(suspended_.Size()) || !restarts.TryReserve(suspended_.Size()) ||
-        !retiring.classMap.TryAppend(plan.classMap_.View()) ||
-        !retiring.fieldMap.TryAppend(plan.fieldMap_.View()) ||
-        !retired_.TryReserve(retired_.Size() + 1)) {
+        !retiring.TryReserve(pairs) || !retired_.TryReserve(retired_.Size() + pairs)) {
         return Outcome::Failure(ErrorCode::OutOfMemory);
     }
 
-    // revision 상한(SL §12.4): fresh, old(남는 실행이 있으면), old 앞의 옛 revision. 넘으면 가장
-    // 오래된 revision을 frame에 가진 실행을 취소한다.
-    const VmLinkedModule* older[MaxRevisions] = {};
-    uint32 olderCount = 0;
-    for (const VmLinkedModule* link = old; olderCount < MaxRevisions;) {
-        const VmLinkedModule* previous = nullptr;
-        for (const Retired& entry : retired_) {
-            previous = entry.successor == link ? entry.link : previous;
+    for (const VmReloadPlan::Entry& entry : plan.entries_) {
+        Retired record(*allocator_);
+        record.link = entry.old;
+        record.successor = entry.fresh;
+        if (!record.classMap.TryAppend(entry.classMap.View()) ||
+            !record.fieldMap.TryAppend(entry.fieldMap.View())) {
+            return Outcome::Failure(ErrorCode::OutOfMemory);
         }
 
-        if (previous == nullptr) {
-            break;
-        }
-
-        older[olderCount++] = previous; // 새것 → 옛것 순
-        link = previous;
+        static_cast<void>(retiring.TryPushBack(Move(record))); // 예약함
     }
+
+    // 쌍마다 old 앞의 이전 revision(새것 → 옛것 순 — revision 상한, SL §12.4).
+    Array<const VmLinkedModule*> older(*allocator_);
+    Array<uint32> olderCount(*allocator_);
+    if (!older.TryResize(pairs * MaxRevisions) || !olderCount.TryResize(pairs)) {
+        return Outcome::Failure(ErrorCode::OutOfMemory);
+    }
+
+    for (usize pair = 0; pair < pairs; ++pair) {
+        olderCount[pair] = 0;
+        for (const VmLinkedModule* link = plan.entries_[pair].old;
+             olderCount[pair] < MaxRevisions;) {
+            const VmLinkedModule* previous = nullptr;
+            for (const Retired& entry : retired_) {
+                previous = entry.successor == link ? entry.link : previous;
+            }
+
+            if (previous == nullptr) {
+                break;
+            }
+
+            older[pair * MaxRevisions + olderCount[pair]++] = previous;
+            link = previous;
+        }
+    }
+
+    // 이전 revision이 어느 쌍의 사슬인지다(아니면 pairs).
+    auto olderPair = [&](const VmLinkedModule* link) noexcept {
+        for (usize pair = 0; pair < pairs; ++pair) {
+            for (uint32 at = 0; at < olderCount[pair]; ++at) {
+                if (older[pair * MaxRevisions + at] == link) {
+                    return pair;
+                }
+            }
+        }
+
+        return pairs;
+    };
 
     // 실행별 처리(K6): Cancel이면 새 revision과 본문이 다른(삭제된) 함수를 frame에 가진 실행을
     // 취소한다 — old의 frame은 계획의 대응표로, 앞서 Keep으로 남은 더 오래된 revision의 frame은
@@ -618,69 +735,80 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
         }
 
         for (const VmExecution::Frame& frame : entry.frames) {
-            if (frame.link == old) {
-                if (frame.function < plan.changed_.Size() && plan.changed_[frame.function] != 0) {
+            const usize pair = pairOf(frame.link);
+            if (pair < pairs) {
+                const Array<uint8>& changed = plan.entries_[pair].changed;
+                if (frame.function < changed.Size() && changed[frame.function] != 0) {
                     return true;
                 }
 
                 continue;
             }
 
-            for (uint32 at = 0; at < olderCount; ++at) {
-                if (frame.link != older[at]) {
-                    continue;
-                }
+            const usize chain = olderPair(frame.link);
+            if (chain == pairs) {
+                continue;
+            }
 
-                const BytecodeModule& code = frame.link->Module();
-                const BytecodeFunction& was = code.functions[frame.function];
-                const uint32 match = VmFindFunction(after, code.String(was.name));
-                bool changed = match == NoBytecodeIndex;
-                for (usize byte = 0; !changed && byte < BytecodeHashBytes; ++byte) {
-                    changed = was.bodyHash[byte] != after.functions[match].bodyHash[byte];
-                }
+            const BytecodeModule& after = plan.entries_[chain].fresh->Module();
+            const BytecodeModule& code = frame.link->Module();
+            const BytecodeFunction& was = code.functions[frame.function];
+            const uint32 match = VmFindFunction(after, code.String(was.name));
+            bool changed = match == NoBytecodeIndex;
+            for (usize byte = 0; !changed && byte < BytecodeHashBytes; ++byte) {
+                changed = was.bodyHash[byte] != after.functions[match].bodyHash[byte];
+            }
 
-                if (changed) {
-                    return true;
-                }
+            if (changed) {
+                return true;
             }
         }
 
         return false;
     };
-    // "필드 깨짐" 함수 표(old와 이전 revision마다 — 5절, LC7b 리뷰 1): 새 revision으로 옮기지
-    // 못하는 (손실·삭제) 필드를 필드 명령으로 참조하거나, 같은 모듈 호출로 그런 함수에 닿는
+    // "필드 깨짐" 함수 표(쌍마다 old와 이전 revision — 5절, LC7b 리뷰 1): 새 revision으로 옮기지
+    // 못하는(손실·삭제) 필드를 필드 명령으로 참조하거나, 같은 모듈 호출로 그런 함수에 닿는
     // 함수다(재개 뒤 부를 callee까지 — 실행 중 fault 대신 취소).
-    const VmLinkedModule* links[MaxRevisions + 1] = {old};
-    uint32 linkStart[MaxRevisions + 2] = {};
-    uint32 linkCount = 1;
-    for (uint32 at = 0; at < olderCount; ++at) {
-        links[linkCount++] = older[at];
-    }
-
-    for (uint32 at = 0; at < linkCount; ++at) {
-        linkStart[at + 1] =
-            linkStart[at] + static_cast<uint32>(links[at]->Module().functions.Size());
-    }
-
-    Array<uint8> broken(*allocator_);
-    if (!broken.TryResize(linkStart[linkCount])) {
+    Array<const VmLinkedModule*> scanned(*allocator_);
+    Array<usize> scannedPair(*allocator_);
+    Array<uint32> scannedStart(*allocator_);
+    if (!scannedStart.TryPushBack(0)) {
         return Outcome::Failure(ErrorCode::OutOfMemory);
     }
 
-    for (uint32 at = 0; at < linkCount; ++at) {
-        for (uint32 function = linkStart[at]; function < linkStart[at + 1]; ++function) {
+    for (usize pair = 0; pair < pairs; ++pair) {
+        for (uint32 at = 0; at <= olderCount[pair]; ++at) {
+            const VmLinkedModule* link =
+                at == 0 ? plan.entries_[pair].old : older[pair * MaxRevisions + at - 1];
+            const uint32 start = scannedStart[scannedStart.Size() - 1];
+            if (!scanned.TryPushBack(link) || !scannedPair.TryPushBack(pair) ||
+                !scannedStart.TryPushBack(start +
+                                          static_cast<uint32>(link->Module().functions.Size()))) {
+                return Outcome::Failure(ErrorCode::OutOfMemory);
+            }
+        }
+    }
+
+    Array<uint8> broken(*allocator_);
+    if (!broken.TryResize(scannedStart[scannedStart.Size() - 1])) {
+        return Outcome::Failure(ErrorCode::OutOfMemory);
+    }
+
+    for (usize at = 0; at < scanned.Size(); ++at) {
+        const VmReloadPlan::Entry& entry = plan.entries_[scannedPair[at]];
+        for (uint32 function = scannedStart[at]; function < scannedStart[at + 1]; ++function) {
             broken[function] =
-                FieldsReach(*links[at], function - linkStart[at], plan) ? uint8(0) : uint8(1);
+                FieldsReach(*scanned[at], function - scannedStart[at], entry) ? uint8(0) : uint8(1);
         }
 
         // 호출 폐포: 더 바뀌지 않을 때까지(함수 수만큼이면 끝난다).
-        const Span<const uint8> flags(broken.Data() + linkStart[at],
-                                      linkStart[at + 1] - linkStart[at]);
+        const Span<const uint8> flags(broken.Data() + scannedStart[at],
+                                      scannedStart[at + 1] - scannedStart[at]);
         for (bool grew = true; grew;) {
             grew = false;
-            for (uint32 function = linkStart[at]; function < linkStart[at + 1]; ++function) {
+            for (uint32 function = scannedStart[at]; function < scannedStart[at + 1]; ++function) {
                 if (broken[function] == 0 &&
-                    CallsBroken(*links[at], function - linkStart[at], flags)) {
+                    CallsBroken(*scanned[at], function - scannedStart[at], flags)) {
                     broken[function] = 1;
                     grew = true;
                 }
@@ -691,14 +819,17 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
     // 설정과 무관한 취소(SL 12.4 — 5절): 삭제된 handler로 시작된 실행, "필드 깨짐" 함수를 old 또는
     // 이전 revision frame에 가진 실행.
     auto forcedCancels = [&](const Suspended& entry) noexcept {
-        if (entry.handlerModule == old && entry.handler < plan.handlerMap_.Size() &&
-            plan.handlerMap_[entry.handler] == NoBytecodeIndex) {
-            return true;
+        const usize handlerPair = pairOf(entry.handlerModule);
+        if (handlerPair < pairs) {
+            const Array<uint32>& handlers = plan.entries_[handlerPair].handlerMap;
+            if (entry.handler < handlers.Size() && handlers[entry.handler] == NoBytecodeIndex) {
+                return true;
+            }
         }
 
         for (const VmExecution::Frame& frame : entry.frames) {
-            for (uint32 at = 0; at < linkCount; ++at) {
-                if (frame.link == links[at] && broken[linkStart[at] + frame.function] != 0) {
+            for (usize at = 0; at < scanned.Size(); ++at) {
+                if (frame.link == scanned[at] && broken[scannedStart[at] + frame.function] != 0) {
                     return true;
                 }
             }
@@ -710,10 +841,20 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
         return policyCancels(entry) || forcedCancels(entry);
     };
 
-    // 큐 항목(key 글자)도 old를 붙잡는다(전달되면 놓는다 — 만료 취소의 대상은 아니다).
-    bool oldStays = false;
+    // 쌍마다 취소 뒤에도 old를 붙잡는 것이 있는지다(큐 항목의 key 글자 포함 — 전달되면 놓는다,
+    // 만료 취소의 대상은 아니다).
+    Array<uint8> stays(*allocator_);
+    if (!stays.TryResize(pairs)) {
+        return Outcome::Failure(ErrorCode::OutOfMemory);
+    }
+
+    for (usize pair = 0; pair < pairs; ++pair) {
+        stays[pair] = 0;
+    }
+
     for (usize at = queueHead_; at < queue_.Size(); ++at) {
-        oldStays = oldStays || queue_[at].module == old;
+        const usize pair = pairOf(queue_[at].module);
+        stays[pair < pairs ? pair : 0] |= pair < pairs ? 1 : 0;
     }
 
     for (const Suspended& entry : suspended_) {
@@ -722,18 +863,22 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
         }
 
         for (const VmExecution::Frame& frame : entry.frames) {
-            oldStays = oldStays || frame.link == old;
+            const usize pair = pairOf(frame.link);
+            stays[pair < pairs ? pair : 0] |= pair < pairs ? 1 : 0;
         }
     }
 
     // 정리 뒤 old 앞의 revision은 많아야 MaxRevisions - 1개라 넘치는 것은 그 앞쪽뿐이다.
-    const uint32 live = 1 + (oldStays ? 1 : 0) + olderCount;
-    const uint32 expire = live > MaxRevisions ? live - MaxRevisions : 0;
     auto expired = [&](const Suspended& entry) noexcept {
         for (const VmExecution::Frame& frame : entry.frames) {
-            for (uint32 at = olderCount - expire; expire <= olderCount && at < olderCount; ++at) {
-                if (frame.link == older[at]) {
-                    return true;
+            for (usize pair = 0; pair < pairs; ++pair) {
+                const uint32 live = 1 + stays[pair] + olderCount[pair];
+                const uint32 expire = live > MaxRevisions ? live - MaxRevisions : 0;
+                for (uint32 at = olderCount[pair] - expire;
+                     expire <= olderCount[pair] && at < olderCount[pair]; ++at) {
+                    if (frame.link == older[pair * MaxRevisions + at]) {
+                        return true;
+                    }
                 }
             }
         }
@@ -772,9 +917,10 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
 
         const VmLinkedModule* link = bottom.link;
         for (uint32 hop = 0; owner != NoBytecodeIndex && hop <= MaxRevisions; ++hop) {
-            if (link == old) {
-                owner = plan.classMap_[owner];
-                link = fresh;
+            const usize pair = pairOf(link);
+            if (pair < pairs) {
+                owner = plan.entries_[pair].classMap[owner];
+                link = plan.entries_[pair].fresh;
                 continue;
             }
 
@@ -813,6 +959,7 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
             : scalars(allocator), refs(allocator), buffers(allocator) {
         }
 
+        const VmLinkedModule* module = nullptr;
         uint32 classIndex = NoBytecodeIndex;
         Array<uint64> scalars;
         Array<uint64> refs;
@@ -831,6 +978,7 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
         uint32 depth = 0;
         const VmLinkedModule* modules[MaxBaseDepth] = {};
         uint32 classes[MaxBaseDepth] = {};
+        usize pairs[MaxBaseDepth] = {};     // 사슬 원소의 쌍(바뀌지 않는 원소는 묶음 쌍 수)
         uint32 refStart[MaxBaseDepth] = {}; // 옛 저장소에서 사슬 원소의 Ref 구역 시작
         Array<uint64> scalars;
         Array<uint64> refs;
@@ -863,15 +1011,17 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
 
     // 새 클래스의 기본값 레코드를 만든다(새 `$init`을 그 클래스 임시 저장소로 — 5절). 실패는
     // 할당자 오류, fault는 기본값 레코드 재합성 실패라 InvalidArgument다.
-    auto defaultsOf = [&](uint32 classIndex, uint64 handle) noexcept -> Result<const Defaults*> {
+    auto defaultsOf = [&](const VmLinkedModule* fresh, uint32 classIndex,
+                          uint64 handle) noexcept -> Result<const Defaults*> {
         for (const Defaults& entry : defaults) {
-            if (entry.classIndex == classIndex) {
+            if (entry.module == fresh && entry.classIndex == classIndex) {
                 return Result<const Defaults*>::Success(&entry);
             }
         }
 
-        const BytecodeClass& entry = after.classes[classIndex];
+        const BytecodeClass& entry = fresh->Module().classes[classIndex];
         Defaults made(*allocator_);
+        made.module = fresh;
         made.classIndex = classIndex;
         if (!made.scalars.TryResize(entry.slots[0]) || !made.refs.TryResize(entry.slots[1]) ||
             !made.buffers.TryResize(entry.slots[2]) || !defaults.TryPushBack(Move(made))) {
@@ -932,17 +1082,19 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
 
         const VmLinkedModule* chainModules[MaxBaseDepth] = {};
         uint32 chainClasses[MaxBaseDepth] = {};
+        usize chainPairs[MaxBaseDepth] = {};
         const uint32 depth = Chain(instance, chainModules, chainClasses);
         bool touched = false;
         for (uint32 at = 0; at < depth; ++at) {
-            touched = touched || chainModules[at] == old;
+            chainPairs[at] = pairOf(chainModules[at]);
+            touched = touched || chainPairs[at] < pairs;
         }
 
         if (!touched) {
             continue;
         }
 
-        // 새 사슬(old 클래스 → 대응 새 클래스)의 구역 시작: 기반부터 bank별로 쌓는다.
+        // 새 사슬(묶음 클래스 → 대응 새 클래스)의 구역 시작: 기반부터 bank별로 쌓는다.
         uint32 oldStart[MaxBaseDepth][BytecodeBankCount] = {};
         uint32 newStart[MaxBaseDepth][BytecodeBankCount] = {};
         uint32 oldTotal[BytecodeBankCount] = {};
@@ -950,15 +1102,16 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
         for (uint32 at = depth; at > 0; --at) {
             const uint32 index = at - 1;
             const BytecodeClass& was = chainModules[index]->Module().classes[chainClasses[index]];
-            const bool mapped = chainModules[index] == old;
+            const usize pair = chainPairs[index];
             const uint32 mappedClass =
-                mapped ? plan.classMap_[chainClasses[index]] : NoBytecodeIndex;
-            if (mapped && mappedClass == NoBytecodeIndex) {
+                pair < pairs ? plan.entries_[pair].classMap[chainClasses[index]] : NoBytecodeIndex;
+            if (pair < pairs && mappedClass == NoBytecodeIndex) {
                 discard();
                 return Outcome::Failure(ErrorCode::InvalidArgument); // 계획이 거부했어야 한다
             }
 
-            const BytecodeClass& now = mapped ? after.classes[mappedClass] : was;
+            const BytecodeClass& now =
+                pair < pairs ? plan.entries_[pair].fresh->Module().classes[mappedClass] : was;
             for (uint32 bank = 0; bank < BytecodeBankCount; ++bank) {
                 oldStart[index][bank] = oldTotal[bank];
                 newStart[index][bank] = newTotal[bank];
@@ -974,36 +1127,39 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
         }
 
         // 새 클래스의 기본값 레코드(사슬에서 처음 만나는 instance의 handle로 `$init`).
-        const Defaults* chainDefaults[MaxBaseDepth] = {};
         for (uint32 at = 0; at < depth; ++at) {
-            if (chainModules[at] != old) {
+            if (chainPairs[at] == pairs) {
                 continue;
             }
 
-            auto made = defaultsOf(plan.classMap_[chainClasses[at]], entry.handle);
+            const VmReloadPlan::Entry& pair = plan.entries_[chainPairs[at]];
+            auto made = defaultsOf(pair.fresh, pair.classMap[chainClasses[at]], entry.handle);
             if (!made) {
                 discard();
                 return Outcome::Failure(made.Error());
             }
-
-            chainDefaults[at] = made.Value();
         }
 
-        // defaults가 자라 앞서 받은 포인터가 옮겨졌을 수 있다: 번호로 다시 찾는다.
+        // defaults가 자랐을 수 있어 포인터는 다 만든 뒤 찾는다.
+        const Defaults* chainDefaults[MaxBaseDepth] = {};
         for (uint32 at = 0; at < depth; ++at) {
             for (const Defaults& candidate : defaults) {
-                if (chainModules[at] == old &&
-                    candidate.classIndex == plan.classMap_[chainClasses[at]]) {
+                if (chainPairs[at] < pairs &&
+                    candidate.module == plan.entries_[chainPairs[at]].fresh &&
+                    candidate.classIndex ==
+                        plan.entries_[chainPairs[at]].classMap[chainClasses[at]]) {
                     chainDefaults[at] = &candidate;
                 }
             }
         }
 
         const usize totalSlots = usize(newTotal[0]) + newTotal[1] + newTotal[2];
+        const usize ownPair = pairOf(entry.module);
         Moving made(*allocator_);
         made.instance = instance;
-        made.module = entry.module == old ? fresh : entry.module;
-        made.classIndex = entry.module == old ? plan.classMap_[entry.classIndex] : entry.classIndex;
+        made.module = ownPair < pairs ? plan.entries_[ownPair].fresh : entry.module;
+        made.classIndex =
+            ownPair < pairs ? plan.entries_[ownPair].classMap[entry.classIndex] : entry.classIndex;
         made.depth = depth;
         if (!made.scalars.TryResize(newTotal[0]) || !made.refs.TryResize(newTotal[1]) ||
             !made.buffers.TryResize(newTotal[2]) ||
@@ -1060,10 +1216,11 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
         for (uint32 at = 0; at < depth; ++at) {
             target.modules[at] = chainModules[at];
             target.classes[at] = chainClasses[at];
+            target.pairs[at] = chainPairs[at];
             target.refStart[at] = oldStart[at][1];
             const BytecodeClass& was = chainModules[at]->Module().classes[chainClasses[at]];
-            if (chainModules[at] != old) {
-                // old 밖 구역(다른 모듈 기반·파생)은 그대로 옮긴다(위치만 밀린다).
+            if (chainPairs[at] == pairs) {
+                // 묶음 밖 구역(다른 모듈 기반·파생)은 그대로 옮긴다(위치만 밀린다).
                 for (uint32 bank = 0; bank < BytecodeBankCount; ++bank) {
                     for (uint32 index = 0; index < was.slots[bank]; ++index) {
                         copySlot(bank, usize(oldStart[at][bank]) + index,
@@ -1074,12 +1231,15 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
                 continue;
             }
 
-            const BytecodeClass& now = after.classes[plan.classMap_[chainClasses[at]]];
+            const VmReloadPlan::Entry& pair = plan.entries_[chainPairs[at]];
+            const BytecodeModule& before = pair.old->Module();
+            const BytecodeModule& after = pair.fresh->Module();
+            const BytecodeClass& now = after.classes[pair.classMap[chainClasses[at]]];
             for (uint32 field = now.firstField; field < now.firstField + now.fieldCount; ++field) {
                 const BytecodeTypeField& declared = after.classFields[field];
-                const uint32 source = plan.sources_[field];
+                const uint32 source = pair.sources[field];
                 const usize to = usize(newStart[at][declared.bank]) + declared.offset;
-                if (source != NoBytecodeIndex && plan.fieldMap_[source] == field) {
+                if (source != NoBytecodeIndex && pair.fieldMap[source] == field) {
                     // 옮김: 유지 자원은 그대로, 쓴 필드는 옛 값, 쓰지 않은 필드는 새 기본값(K5).
                     const BytecodeTypeField& previous = before.classFields[source];
                     const usize from = usize(oldStart[at][previous.bank]) + previous.offset;
@@ -1107,7 +1267,7 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
             }
 
             for (uint32 field = was.firstField; field < was.firstField + was.fieldCount; ++field) {
-                removed += plan.fate_[field] == VmFieldRemoved ? 1 : 0;
+                removed += pair.fate[field] == VmFieldRemoved ? 1 : 0;
             }
         }
     }
@@ -1138,20 +1298,24 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
         swapStorage(entry);
     }
 
-    modules_[slot] = fresh;
+    for (usize pair = 0; pair < pairs; ++pair) {
+        modules_[slots[pair]] = plan.entries_[pair].fresh;
+    }
+
     // 연결의 module·handler·key 교체(순서 유지 — K8), 삭제된 handler의 연결은 지운다.
     usize kept = 0;
     for (usize at = 0; at < connections_.Size(); ++at) {
         Connection connection = connections_[at];
-        if (connection.module == old) {
-            const uint32 handler = plan.handlerMap_[connection.handler];
+        const usize pair = pairOf(connection.module);
+        if (pair < pairs) {
+            const uint32 handler = plan.entries_[pair].handlerMap[connection.handler];
             if (handler == NoBytecodeIndex) {
                 continue;
             }
 
-            connection.module = fresh;
+            connection.module = plan.entries_[pair].fresh;
             connection.handler = handler;
-            connection.key = HandlerKey(*fresh, handler);
+            connection.key = HandlerKey(*plan.entries_[pair].fresh, handler);
         }
 
         connections_[kept++] = connection;
@@ -1181,7 +1345,10 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
         static_cast<void>(connections_.TryAppend(savedConnections.View()));
         droppedConnections_ = dropped;
         nextOrder_ = order;
-        modules_[slot] = old;
+        for (usize pair = 0; pair < pairs; ++pair) {
+            modules_[slots[pair]] = plan.entries_[pair].old;
+        }
+
         for (Moving& entry : moving) {
             swapStorage(entry);
         }
@@ -1192,7 +1359,11 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
 
     // ---- 확정(실패 없음) ----
     VmReloadReport report;
-    report.classes = plan.classes_;
+    report.modules = static_cast<uint32>(pairs);
+    for (const VmReloadPlan::Entry& entry : plan.entries_) {
+        report.classes += entry.classes;
+    }
+
     report.instances = static_cast<uint32>(moving.Size());
     report.moved = moved;
     report.defaulted = defaulted;
@@ -1202,16 +1373,18 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
     // 저장소의 Buf를 놓는다(옮긴 값은 새 저장소가 자기 참조를 쥐었다).
     for (Moving& entry : moving) {
         for (uint32 at = 0; at < entry.depth; ++at) {
-            if (entry.modules[at] != old) {
+            if (entry.pairs[at] == pairs) {
                 continue;
             }
 
+            const VmReloadPlan::Entry& pair = plan.entries_[entry.pairs[at]];
+            const BytecodeModule& before = pair.old->Module();
             const BytecodeClass& was = before.classes[entry.classes[at]];
             for (uint32 field = was.firstField + was.fieldCount; field > was.firstField; --field) {
                 const BytecodeTypeField& declared = before.classFields[field - 1];
                 const usize where = usize(entry.refStart[at]) + declared.offset;
                 if ((declared.flags & BytecodeFieldHeld) == 0 ||
-                    plan.fate_[field - 1] == VmFieldMoved || where >= entry.refs.Size() ||
+                    pair.fate[field - 1] == VmFieldMoved || where >= entry.refs.Size() ||
                     entry.refs[where] == 0) {
                     continue;
                 }
@@ -1228,7 +1401,7 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
     discard();
     // Tick 중지 해제(그 모듈의 새 revision — SL 8.3절).
     for (Instance& entry : instances_) {
-        if (entry.attached && entry.ticksStopped && entry.tickStopModule == old) {
+        if (entry.attached && entry.ticksStopped && pairOf(entry.tickStopModule) < pairs) {
             entry.ticksStopped = false;
             entry.tickStopModule = nullptr;
         }
@@ -1256,8 +1429,9 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
     // 한 handler에만 갈 큐 항목, 정지 실행의 시작 handler(재진입 판정)를 새 번호로.
     for (usize at = queueHead_; at < queue_.Size(); ++at) {
         Item& item = queue_[at];
-        if (item.targetModule == old) {
-            const uint32 handler = plan.handlerMap_[item.targetHandler];
+        const usize pair = pairOf(item.targetModule);
+        if (pair < pairs) {
+            const uint32 handler = plan.entries_[pair].handlerMap[item.targetHandler];
             if (handler == NoBytecodeIndex) {
                 // 대상 handler가 없어졌다: 항목을 버린다(모두에게 전달되지 않게 — LC7a 리뷰 4).
                 ReleaseItem(item);
@@ -1266,20 +1440,25 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
             }
 
             item.targetHandler = handler;
-            item.targetModule = fresh;
-            item.key = HandlerKey(*fresh, handler); // old의 key 글자를 가리키지 않게
+            item.targetModule = plan.entries_[pair].fresh;
+            item.key = HandlerKey(*plan.entries_[pair].fresh, handler); // old의 key 글자 대신
         }
     }
 
     for (Suspended& entry : suspended_) {
-        if (entry.live && entry.handlerModule == old) {
-            entry.handler = plan.handlerMap_[entry.handler];
-            entry.handlerModule = entry.handler == NoBytecodeIndex ? nullptr : fresh;
+        const usize pair = entry.live ? pairOf(entry.handlerModule) : pairs;
+        if (pair < pairs) {
+            entry.handler = plan.entries_[pair].handlerMap[entry.handler];
+            entry.handlerModule =
+                entry.handler == NoBytecodeIndex ? nullptr : plan.entries_[pair].fresh;
         }
     }
 
     // 이전 revision 기록(Keep 실행의 필드 번역).
-    static_cast<void>(retired_.TryPushBack(Move(retiring))); // 예약함
+    for (Retired& record : retiring) {
+        static_cast<void>(retired_.TryPushBack(Move(record))); // 예약함
+    }
+
     for (const Suspended& entry : suspended_) {
         bool previous = false;
         for (const VmExecution::Frame& frame : entry.frames) {
@@ -1292,8 +1471,7 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
     }
 
     PruneRetired();
-    plan.old_ = nullptr;
-    plan.fresh_ = nullptr;
+    plan.entries_.Clear();
     // 취소된 Start 다시 부르기(instance 생성 순 — 적용 기록 `  hook` 줄).
     for (usize at = 1; at < restarts.Size(); ++at) {
         for (usize back = at; back > 0 && restarts[back - 1].serial > restarts[back].serial;

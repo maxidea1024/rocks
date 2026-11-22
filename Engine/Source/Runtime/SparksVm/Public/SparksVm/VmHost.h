@@ -224,6 +224,9 @@ private:
                                    StringBuilderBase& reason) noexcept;
     friend Result<void> LinkImports(Span<VmLinkedModule* const> modules,
                                     StringBuilderBase& reason) noexcept;
+    friend Result<void> LinkImports(Span<VmLinkedModule* const> modules,
+                                    Span<const VmLinkedModule* const> targets,
+                                    StringBuilderBase& reason) noexcept;
 
     // 다른 모듈 함수 참조의 대상이다(참조 번호별 — ImportedFunction이 아니면 비었다). generation은
     // 푼 때의 대상 링크 세대다: 대상을 다시 링크하면 세대가 바뀌어 CALL이 ContractViolation이다.
@@ -282,5 +285,12 @@ Result<void> LinkModule(const BytecodeModule& module, VmHost* host, VmLinkedModu
 // <번호> (import <이름>): <사유>`), 할당 실패는 OutOfMemory. 모든 module의 ImportsLinked가 참이
 // 된다.
 Result<void> LinkImports(Span<VmLinkedModule* const> modules, StringBuilderBase& reason) noexcept;
+
+// modules의 import만 modules와 targets 안의 함수로 푼다(SparksReload 6절 LC7c2b — reload 묶음의 새
+// revision을 묶음 밖 지금 모듈에 잇는다). targets는 이름 찾기 대상일 뿐 바꾸지 않는다(그 import·
+// 세대 그대로). 조건·실패는 위와 같다(targets도 같은 host로 링크돼 있어야 한다).
+Result<void> LinkImports(Span<VmLinkedModule* const> modules,
+                         Span<const VmLinkedModule* const> targets,
+                         StringBuilderBase& reason) noexcept;
 
 } // namespace rocks::sparks
