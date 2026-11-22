@@ -4,6 +4,7 @@
 #include <Core/Containers/Array.h>
 #include <Core/Containers/Span.h>
 #include <Core/Memory/UniquePtr.h>
+#include <Core/TypeKey.h>
 
 // 소유자(Engine·World)와 수명을 같이하는 Subsystem 묶음이다. Subsystem은 의존을 선언하고, 묶음은
 // 의존 순서대로 만들고 초기화하며 역순으로 정리한다. 모든 시스템을 Subsystem으로 만들 필요는 없다
@@ -25,18 +26,17 @@
 //   auto* navigation = world.GetSubsystem<NavigationSubsystem>();   // 없으면 nullptr
 namespace rocks {
 
-namespace detail {
-template <class T>
-// const를 붙이지 않는다: 읽기 전용 상수는 링커의 동일 데이터 병합(ICF)으로 주소가 합쳐질 수 있다.
-inline uint8 SubsystemIdentity = 0;
-} // namespace detail
-
-// Subsystem 타입의 실행 중 식별 키다. 저장하거나 다른 실행 이미지와 비교하지 않는다.
+// Subsystem 타입의 실행 중 식별 키다. 저장하지 않는다. 키는 TypeKeyOf<T>()다(Core/TypeKey.h, UE는
+// UClass* — Docs/Design/BuildTargets.ko.md 3.8절 BS8e). 다른 모듈이 GetSubsystem<T>()·의존 목록으로
+// 찾는 Subsystem은 공개 헤더에 ROCKS_DECLARE_NATIVE_TYPE_KEY(T, 모듈 API 매크로)를 두고 .cpp 하나에
+// ROCKS_DEFINE_NATIVE_TYPE_KEY(T)로 정의한다 — 그래야 Modular(모듈마다 공유 라이브러리)에서 모듈
+// 사이에 키가 같다. 선언하지 않은 타입의 키는 실행 이미지마다 다르다(한 모듈 안에서만 쓰는
+// Subsystem·시험용).
 using SubsystemKey = const void*;
 
 template <class T>
 SubsystemKey SubsystemKeyOf() noexcept {
-    return &detail::SubsystemIdentity<T>;
+    return TypeKeyOf<T>();
 }
 
 // Subsystem 한 종류의 생성 정보다. name은 진단용 정적 문자열이다. dependencies 배열은 묶음이

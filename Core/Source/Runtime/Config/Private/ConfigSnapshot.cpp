@@ -386,3 +386,5 @@ Result<void> PublishSnapshot(ConfigState& state, const SharedPtr<const NamedBloc
 } // namespace detail
 
 } // namespace rocks::config
+
+ROCKS_DEFINE_NATIVE_TYPE_KEY(rocks::config::ConfigSnapshot)
