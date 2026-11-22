@@ -56,6 +56,16 @@
 - **구현 세부(LC6b 확정):** key는 링크가 정한다(`VmEventKey` — 선언 모듈 경로와 `Class.Member`, 엔진 선언은 빈 경로). Changed 항목·연결의 key는 감시 필드의 key다(이벤트 key와 이름이 겹치지 않는다). 연결은 instance의 Enable hook 뒤에 기반 사슬의 handler 전부를 풀어 만들고, 활성 instance에서 경로 첫 마디 필드가 조각 안에서 바뀌면 그 필드를 원천으로 쓰는 handler를 다시 푼다(남는 발행자의 항목은 순번 유지). handler 인자는 선언한 만큼 bank마다 앞에서부터 넘긴다(배열 원천은 발행한 원소가 첫 Ref 인자). 반환값이 있는 메서드는 반환 slot·버퍼를 보관하고 전달한 뒤 실행 문맥의 반환 자리로 되돌린다. 이월 항목의 죽은 객체 인자는 지금 null로 넘긴다 — non-null 인자의 항목 폐기·보고는 인자 타입(서술자의 `?<x>`)을 대조하는 LC6d에서 한다.
 
 
+### 2.4 async 실행(LC6c)
+
+- **실행(Execution)과 정지(R9):** `AWAIT`·`AWAITEV`가 실행을 정지하면 VM은 실행 문맥의 frame stack 전체(frame 표와 bank별 레지스터 구간 — 바닥 frame부터 정지 frame까지)를 session의 실행 표 항목으로 옮긴다(Buf 레지스터의 참조는 옮긴다 — 복사·Retain 없음). `Call`의 결과는 `VmOutcome::Suspended`(대기 handle과 실행 번호)다. 재개는 그 항목을 실행 문맥으로 되돌리고 정지 명령 다음부터 이어 간다(결과는 `AWAIT`의 A — 결과 bank·slot은 EXTRA). await 지점의 생존 구간 표(SparksBytecode)는 검증용이며 저장은 frame 전체다(정지 실행은 많지 않고 frame은 작다 — 측정 뒤 생존 구간만 저장).
+- **대기 handle:** Ref bank 값이며 상위 비트 `VmWaitTag`(1 << 63)로 객체 handle과 구별한다(host handle은 이 비트를 쓰지 않는다 — VmHost 계약). 대기 표(session)의 항목: 종류(Delay·NextTick·NextFixedTick·이벤트·All·Race·로드 요청), 시계(Game·UI), 기한, 등록 tick, 자식 범위(All·Race), 완료 표지. 언어 함수 `Delay`·`NextTick`·`NextFixedTick`·`All`·`Race`(LC5c에서 묶음 없이 링크하던 것)는 session이 대기 항목을 만들어 handle을 돌려준다.
+- **시계와 재개(SL §6.1):** host가 `Advance(gameDelta, uiDelta, paused)`로 시계를 진행하고 프레임 번호를 올린다. 재개 단계(`ResumeStep(kind)` — 가변 tick 재개·고정 재개)는 기한이 된 대기를 (등록 tick, instance 안정 key, 등록 순번) 순으로 재개한다. 기본 대기의 `await`는 이미 완료돼도 항상 정지한다. 이벤트 대기는 전달 순회 안에서 연결 순서로 재개한다(발행자 파괴는 대기를 끝내지 않은 채 실행 종료 — SL §6.1).
+- **All·Race:** 인자 대기를 모두 시작한 뒤 판정한다. All은 모두 완료되면, Race는 첫 완료(같은 처리 시점이면 인자 순)에서 완료하고 나머지를 취소한다. 하위 작업의 fault는 부모 실행의 fault다.
+- **취소:** instance Disable·Detach·CloseSession은 그 instance의 정지 실행을 취소한다(frame의 Buf를 놓는다 — 유지 자원 해제는 LC6d). `@restart`는 같은 발행자로 시작된 정지 실행을 취소하고 새로 시작하며, `@skipWhileBusy`는 그런 실행이 있으면 새 이벤트를 버리고 횟수를 센다(디버거 표시).
+- **async fn 호출:** `AWAIT`가 async 함수의 대기를 기다리는 형태(`await F()`)는 정지 지점이 아니다 — 호출된 함수 안의 기본 대기가 정지하면 호출 사슬 전체가 하나의 실행으로 정지한다(frame stack 전체를 옮기므로 자연히 된다).
+- **`.run` 지시:** `advance <초>`(Game·UI 시계 진행·프레임 +1·가변 재개 단계), `fixed`(고정 재개), 정지한 실행의 결과는 `-> suspended`, 재개된 실행은 `  resume #구독자 <함수> -> 결과` 줄이다.
+
 ## 3. 순서
 
 - **스크립트 단계(SL §5.4):** host가 `OpenPhase(kind)`로 열고, 그 단계의 실행 조각(hook·handler·재개)을 VM이 돌린 뒤 발행 큐를 비우고(연쇄 상한·전달 상한), 활성 전환 적용 → 파괴 적용 요청을 host에 넘기고(적용 루프 64회), `ClosePhase`로 닫는다. 단계 밖의 실행은 없다(엔진이 연 진입도 단계 하나를 연다).
@@ -77,4 +87,5 @@
 - **R6 기본값 생성 함수:** 컴파일러가 클래스마다 만든다(struct 기본값을 생성 자리에서 내리는 LC5 V10과 같은 방향). 대안(CLASS 구역에 상수 원형)은 식 초기값을 담지 못한다.
 - **R7 handler 경로는 필드 참조:** 대안(경로 글자를 실행 중 이름으로 풀기)은 상속 필드·엔진 필드의 주인 타입을 실행 중에 알 수 없고 매번 이름을 찾는다.
 - **R8 연결 표는 명시 항목:** 대안(전달할 때마다 모든 instance의 경로를 풀기)은 연결 순서(SL §5.4 "항목이 delegate에 추가된 순서")를 지킬 수 없고 O(instance × handler)다.
-- R9–R12(정지 frame 보관 형식, 취소 시 자원 해제 순서, 격리 시 연결 삭제 순서, reload 경계)는 각 하위 단계 착수 때 이 절에 확정한다.
+- **R9 정지는 frame stack 전체를 옮긴다:** 대안(생존 구간만 저장)은 저장량이 적지만 frame 사이의 창·부르는 쪽 레지스터를 다시 맞추는 규칙이 필요하다. 정지 실행 수와 frame 크기가 작아 전체 이동이 단순하고 결정적이다(측정 뒤 바꾼다).
+- R10–R12(취소 시 자원 해제 순서, 격리 시 연결 삭제 순서, reload 경계)는 각 하위 단계 착수 때 이 절에 확정한다.
