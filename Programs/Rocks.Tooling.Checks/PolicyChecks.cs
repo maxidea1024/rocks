@@ -29,6 +29,8 @@ public static partial class PolicyChecks
     {
         ["Core/Source/Runtime/Core/Public/Core/Tuple.h"] = Pattern(
             "#\\s*include\\s*<utility>|\\bstd\\s*::\\s*(?:tuple_size|tuple_element)\\b"),
+        // 중괄호 목록 추론이 찾는 std::initializer_list를 여는 래퍼다(Docs/CodingStyle.md "중괄호 목록 추론").
+        ["Core/Source/Runtime/Base/Public/Base/InitializerList.h"] = Pattern("\\bstd\\s*::\\s*initializer_list(?![A-Za-z0-9_])"),
     };
 
     // OS별 전처리기 분기다(C++23 #elifdef·#elifndef 포함). Base/Compiler.h만 ROCKS_PLATFORM_* 정의·검증을 위해 쓸 수 있다.

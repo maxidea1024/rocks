@@ -119,6 +119,10 @@ struct BytecodeTypeField {
     // `@formerly` 옛 이름의 문자열 번호(없으면 NoIndex). reload의 필드 대응이 쓴다.
     uint32 type = NoBytecodeIndex;
     uint32 formerName = NoBytecodeIndex;
+    // CLASS 필드만(형식 v6 — SparksReload 5절): 형태 표기(타입 표기의 Sparks struct·enum 뒤에
+    // `{…}`로 배치·case를 펼친 글자 — 펼칠 것이 없으면 타입 표기와 같은 번호). reload는 타입과
+    // 형태가 모두 같아야 옛 값을 옮긴다.
+    uint32 shape = NoBytecodeIndex;
 };
 
 // CLASS 필드 표지다(SparksRuntime 2.6절): 유지 자원 필드(Ref 1 slot — Disable·Detach가 해제).

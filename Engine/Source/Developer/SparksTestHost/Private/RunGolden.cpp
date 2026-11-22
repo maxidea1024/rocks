@@ -1055,7 +1055,34 @@ namespace {
 struct RunInjection {
     uint32 await = 0;
     bool cancel = false;
+    uint32 reload = 0; // Gate G5: n번째 ApplyReload를 되돌린다(SparksReload 6절)
 };
+
+// session의 관찰 가능한 상태(instance별 module·class·필드 값과 Buf 포인터, 연결·거부·정지 실행·
+// 대기·큐 수)를 out에 담는다(실패한 reload가 session을 바꾸지 않았는지 대조 — SparksReload K3).
+// 할당 실패면 false.
+bool SnapshotSession(const VmSession& session, Array<uint64>& out) noexcept {
+    out.Clear();
+    bool ok = out.TryPushBack(session.ConnectionCount()) &&
+              out.TryPushBack(session.DroppedConnections()) &&
+              out.TryPushBack(session.SuspendedCount()) && out.TryPushBack(session.WaitCount()) &&
+              out.TryPushBack(session.QueuedCount()) && out.TryPushBack(session.AttachedCount());
+    for (uint32 instance = 0; ok && session.ModuleOf(instance) != nullptr; ++instance) {
+        const VmSession::FieldView fields = session.Fields(instance);
+        ok = out.TryPushBack(uint64(reinterpret_cast<uptr>(session.ModuleOf(instance)))) &&
+             out.TryPushBack(session.ClassOf(instance)) && out.TryPushBack(fields.scalars.Size()) &&
+             out.TryPushBack(fields.refs.Size()) && out.TryPushBack(fields.buffers.Size()) &&
+             out.TryAppend(fields.scalars) && out.TryAppend(fields.refs);
+        for (VmBuffer* const buffer : fields.buffers) {
+            ok = ok && out.TryPushBack(uint64(reinterpret_cast<uptr>(buffer)));
+        }
+    }
+
+    return ok;
+}
+
+// G5가 주입하는 reload 적용 수 상한이다(적용 표시 bit 수 — 넘는 적용은 행렬에서 빠진다).
+constexpr uint32 RunMaxGateReloads = 64;
 
 // 사례 하나의 revision 원문 상한이다(쓰임 표시 bit 수).
 constexpr usize RunMaxRevisionFiles = 32;
@@ -1157,8 +1184,13 @@ Result<bool> CompileRevision(Allocator& allocator, const CaseInput& input, const
 
 Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
                            const Compilation& compilation, uint32 mainModule, Report& report,
-                           const RunInjection& injection, uint32& awaitsSeen) noexcept {
-    const bool gateOnly = injection.await != 0;
+                           const RunInjection& injection, uint32& awaitsSeen,
+                           uint64& reloadsApplied) noexcept {
+    const bool gateOnly = injection.await != 0 || injection.reload != 0;
+    // 적용에 성공한 reload(ApplyReload 호출 순 bit — G5는 이것만 주입한다: 앞 단계에서 스스로
+    // 거부되는 적용에는 되돌릴 임시 반영이 없다).
+    reloadsApplied = 0;
+    uint32 reloadsSeen = 0;
     StringBuilder<MessageInlineBytes> message(allocator);
     auto fail = [&](StringView reason) noexcept -> Result<void> {
         if (gateOnly) {
@@ -1267,10 +1299,18 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
                 execution.LiveBytes() != 0 || host.HeldLive() != 0 ||
                 host.ReleaseAnomalies() != 0) {
                 StringBuilder<MessageInlineBytes> leak(allocator);
-                leak.AppendFormat("{}: G4 {} after the {} injected at await {}", input.name,
-                                  !session.InjectionFired() ? "injection did not fire"
-                                                            : "leak or over-release",
-                                  injection.cancel ? "cancel" : "fault", injection.await);
+                if (injection.reload != 0) {
+                    leak.AppendFormat("{}: G5 {} after the rollback injected at reload {}",
+                                      input.name,
+                                      !session.InjectionFired() ? "injection did not fire"
+                                                                : "leak or over-release",
+                                      injection.reload);
+                } else {
+                    leak.AppendFormat("{}: G4 {} after the {} injected at await {}", input.name,
+                                      !session.InjectionFired() ? "injection did not fire"
+                                                                : "leak or over-release",
+                                      injection.cancel ? "cancel" : "fault", injection.await);
+                }
                 if (!leak.HasFailed()) {
                     static_cast<void>(report.TryAddFailure(leak.View()));
                 }
@@ -1444,6 +1484,37 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
                     return bad(why.View());
                 }
 
+                // 판정 거부·적용 실패면 session이 그대로여야 한다(SparksReload K3·6절 G5 — 주입
+                // 실행에서도 기록한다).
+                Array<uint64> before(allocator);
+                if (!SnapshotSession(session, before)) {
+                    return Result<void>::Failure(ErrorCode::OutOfMemory);
+                }
+
+                auto unchanged = [&]() noexcept -> Result<void> {
+                    Array<uint64> after(allocator);
+                    if (!SnapshotSession(session, after)) {
+                        return Result<void>::Failure(ErrorCode::OutOfMemory);
+                    }
+
+                    bool same = after.Size() == before.Size();
+                    for (usize at = 0; same && at < after.Size(); ++at) {
+                        same = after[at] == before[at];
+                    }
+
+                    if (same) {
+                        return Result<void>::Success();
+                    }
+
+                    StringBuilder<MessageInlineBytes> changed(allocator);
+                    changed.AppendFormat("{}: a refused or failed reload changed the session",
+                                         input.name);
+                    if (changed.HasFailed()) {
+                        return Result<void>::Failure(changed.Status().Error());
+                    }
+
+                    return report.TryAddFailure(changed.View());
+                };
                 VmReloadPlan plan(allocator);
                 StringBuilder<MessageInlineBytes> reason(allocator);
                 auto planned = session.PlanReload(*current, revision.linked,
@@ -1455,31 +1526,57 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
                         return Result<void>::Failure(planned.Error());
                     }
 
+                    if (auto kept = unchanged(); !kept) {
+                        return kept;
+                    }
+
                     actual.AppendFormat("rejected ({})", reason.View());
                 } else {
+                    // 적용 실패(OutOfMemory·InvalidArgument)도 대조한다(할당 실패 전수 시험이 모든
+                    // 실패 자리에서 본다 — LC7b 리뷰). G5는 n번째 적용을 되돌린다.
+                    if (++reloadsSeen == injection.reload) {
+                        session.InjectReloadRollback();
+                    }
+
                     auto applied = session.ApplyReload(plan);
+                    if (applied && reloadsSeen <= RunMaxGateReloads) {
+                        reloadsApplied |= uint64(1) << (reloadsSeen - 1);
+                    }
+
                     if (!applied) {
+                        if (auto kept = unchanged(); !kept) {
+                            return kept;
+                        }
+                    }
+
+                    if (!applied && applied.Error() != ErrorCode::InvalidArgument) {
                         return Result<void>::Failure(applied.Error());
                     }
 
-                    const VmReloadReport& report = applied.Value();
-                    if (report.restartError != ErrorCode::None) {
-                        return Result<void>::Failure(report.restartError);
-                    }
+                    // 적용 거부(새 `$init` fault — 기본값 레코드 재합성 실패, SparksReload 5절)는
+                    // session이 그대로다.
+                    if (!applied) {
+                        actual.Append("apply failed (InvalidArgument)");
+                    } else {
+                        const VmReloadReport& report = applied.Value();
+                        if (report.restartError != ErrorCode::None) {
+                            return Result<void>::Failure(report.restartError);
+                        }
 
-                    actual.AppendFormat("ok (instances {}, moved {}, defaulted {}, lost {}, "
-                                        "removed {}, ",
-                                        report.instances, report.moved, report.defaulted,
-                                        report.lost, report.removed);
-                    actual.AppendFormat("cancelled {}, restarted {}, previous {})",
-                                        report.cancelled, report.restarted, report.previous);
-                    host.SetModule(&revision.linked);
-                    code = &revision.module;
-                    current = &revision.linked;
-                    currentCompilation = &revision.compilation;
-                    currentMain = revision.main;
-                    values.Rebind(revision.compilation);
-                    delivered = true;
+                        actual.AppendFormat("ok (instances {}, moved {}, defaulted {}, lost {}, "
+                                            "removed {}, ",
+                                            report.instances, report.moved, report.defaulted,
+                                            report.lost, report.removed);
+                        actual.AppendFormat("cancelled {}, restarted {}, previous {})",
+                                            report.cancelled, report.restarted, report.previous);
+                        host.SetModule(&revision.linked);
+                        code = &revision.module;
+                        current = &revision.linked;
+                        currentCompilation = &revision.compilation;
+                        currentMain = revision.main;
+                        values.Rebind(revision.compilation);
+                        delivered = true;
+                    }
                 }
             } else if (verb == "budget") {
                 // 예산 거부 집계(SparksRuntime 2.6절 — LC6d4).
@@ -1487,18 +1584,32 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
                 actual.AppendFormat("connections dropped {}, executions skipped {}",
                                     session.DroppedConnections(), session.SkippedExecutions());
             } else if (verb == "limits") {
-                // `limits <connections> <executions>`: 시험용으로 instance 구독 연결·동시 실행
-                // 상한을 줄인다(host는 session을 만들 때 정한다).
+                // `limits <connections> <executions> [<instructions>]`: 시험용으로 instance 구독
+                // 연결·동시 실행 상한(과 조각 명령 예산 — reload 기본값 레코드의 fault 시험)을
+                // 줄인다(host는 session을 만들 때 정한다).
                 actual.Append(directive).Append(RunArrow);
+                usize space = 0;
+                while (space < rest.ByteCount() && rest.Data()[space] != ' ') {
+                    ++space;
+                }
+
                 auto connections = TryParseUInt32(target);
-                auto executions = TryParseUInt32(rest);
-                if (!connections || !executions) {
+                auto executions = TryParseUInt32(StringView(rest.Data(), space));
+                const bool hasInstructions = space < rest.ByteCount();
+                auto instructions = hasInstructions
+                                        ? TryParseUInt64(StringView(rest.Data() + space + 1,
+                                                                    rest.ByteCount() - space - 1))
+                                        : Result<uint64>::Success(0);
+                if (!connections || !executions || !instructions) {
                     return bad("'limits' needs connection and execution counts");
                 }
 
                 VmSessionBudgets budgets = session.Budgets();
                 budgets.connectionsPerInstance = connections.Value();
                 budgets.executionsPerInstance = executions.Value();
+                if (hasInstructions) {
+                    budgets.fragmentInstructions = instructions.Value();
+                }
                 if (!session.SetBudgets(budgets)) {
                     return bad("'limits' needs non-zero counts");
                 }
@@ -2301,8 +2412,9 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
                             Report& report) noexcept {
     const usize failures = report.Failures().Size();
     uint32 awaits = 0;
+    uint64 reloads = 0;
     if (auto ran = RunScriptCase(allocator, input, compilation, mainModule, report, RunInjection(),
-                                 awaits);
+                                 awaits, reloads);
         !ran) {
         return ran;
     }
@@ -2320,11 +2432,30 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
             injection.await = await;
             injection.cancel = cancel;
             uint32 seen = 0;
+            uint64 seenReloads = 0;
             if (auto ran = RunScriptCase(allocator, input, compilation, mainModule, report,
-                                         injection, seen);
+                                         injection, seen, seenReloads);
                 !ran) {
                 return ran;
             }
+        }
+    }
+
+    // Gate G5(SparksReload 6절): ApplyReload까지 간 reload마다 임시 반영 뒤 되돌리기를 주입한다
+    // (출력은 비교하지 않는다 — 상태 대조·주입 발생·누수만).
+    for (uint32 reload = 1; reload <= RunMaxGateReloads; ++reload) {
+        if ((reloads & (uint64(1) << (reload - 1))) == 0) {
+            continue;
+        }
+
+        RunInjection injection;
+        injection.reload = reload;
+        uint32 seen = 0;
+        uint64 seenReloads = 0;
+        if (auto ran = RunScriptCase(allocator, input, compilation, mainModule, report, injection,
+                                     seen, seenReloads);
+            !ran) {
+            return ran;
         }
     }
 

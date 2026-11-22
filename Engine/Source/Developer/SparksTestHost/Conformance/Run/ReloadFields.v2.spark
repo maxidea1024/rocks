@@ -1,0 +1,85 @@
+enum Mode {
+    Idle,
+    Paused,
+    Busy
+}
+
+struct Stats {
+    var Level: int = 1;
+    var Bonus: int = 0;
+}
+
+open class Fixture : ScriptableComponent {
+    var Added = 9;
+    var Base = 1;
+    var More = 0;
+    var Rig: LoopHandle?;
+}
+
+class Lamp : Fixture {
+    @edit var Cue: SoundAsset;
+    var Pad = 0;
+    var Count = 100;
+    var Spare = 7;
+    var Label = "lamp";
+    var Kind = "k";
+    @formerly("Moniker") var Title = "t";
+    var Info = Stats();
+    var State = Mode.Idle;
+    var Items: Array<int> = [];
+    var Hum: LoopHandle?;
+    var Swap = 0;
+    var Peer: Lamp?;
+    var Mate: Lamp?;
+    var Ready = 50;
+    var Fresh = "new";
+    event Ping(n: int);
+    event Pong(n: int);
+
+    on Enable() {
+        Hum = World.Audio.StartLoop(Cue);
+        Ready = 4;
+    }
+
+    fn Bump() {
+        Count += 1;
+    }
+
+    fn Watch(target: Lamp) {
+        Peer = target;
+        Mate = target;
+    }
+
+    fn Fire(n: int) {
+        emit Ping(n);
+        emit Pong(n);
+    }
+
+    on Peer.Ping(n: int) {
+        Log.Info("peer ping v2 ${n}");
+    }
+
+    on Mate.Ping(n: int) {
+        Log.Info("mate ping v2 ${n}");
+    }
+
+    async fn LongCount() {
+        await Delay(5.0, Clock.Game);
+        Count += 1000;
+        Log.Info("long ${Count}");
+    }
+
+    async fn UseCount() {
+        await Delay(1.0, Clock.Game);
+        Count += 10;
+        Log.Info("count ${Count}");
+    }
+}
+
+class Plain : ScriptableComponent {
+    var Value = 1;
+
+    fn Touch() {
+        Value = 2;
+    }
+}

@@ -321,6 +321,34 @@ Result<void> ReadNuggetValue(const NuggetFileView& view, NuggetRangeReader& read
     return Result<void>::Success();
 }
 
+Result<void> VerifyNuggetValue(const NuggetFileView& view, NuggetRangeReader& reader, usize index,
+                               Span<uint8> buffer) noexcept {
+    if (index >= view.record.values.Size() || buffer.IsEmpty()) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const NuggetValueRow& row = view.record.values[index];
+    Sha256 hasher;
+    uint64 done = 0;
+    while (done < row.storedSize) {
+        const uint64 left = row.storedSize - done;
+        const usize step = left < buffer.Size() ? static_cast<usize>(left) : buffer.Size();
+        const Span<uint8> target = buffer.Slice(0, step);
+        if (auto read = reader.ReadAt(view.offsets[index] + done, target); !read) {
+            return read;
+        }
+
+        hasher.Update(Span<const uint8>(target.Data(), target.Size()));
+        done += step;
+    }
+
+    if (!(hasher.Finish() == row.contentHash)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return Result<void>::Success();
+}
+
 Result<void> DecodeNuggetValue(Allocator& allocator, const NuggetValueRow& row,
                                Span<const uint8> stored, Array<uint8>& out) noexcept {
     auto corrupt = [] { return Result<void>::Failure(ErrorCode::InvalidArgument); };

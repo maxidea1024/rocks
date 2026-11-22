@@ -2,7 +2,7 @@
 
 STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-driven 렌더러
 
-**설계 기준일 2026.11.22 · 개정 1.17 · 상태: 구현 제안 / 성능 미측정**
+**설계 기준일 2026.11.22 · 개정 1.18 · 상태: 구현 제안 / 성능 미측정**
 
 **추가 요구 반영:** Deferred·Forward 정식 지원, 업스케일링, 태깅·컴포넌트·프리팹, Unreal 참고 체계 확대, 컷씬 제작 핵심화, Blueprint 제외·자체 언어 채택, 하이엔드 포스트이펙트 전체 기능군, UBT 계열 자체 빌드 도구·분산 빌드·반복 개발 최적화, 정식 헤드리스 모드, 필수 노드 기반 머티리얼 에디터.
 
@@ -35,6 +35,8 @@ STL 비사용 Core · Object와 점진 GC · 단일 UI 툴킷 에디터 · GPU-d
 **1.16 레벨 스크립트:** 사용자 결정(2026-11-20, 모든 항목 권장안)으로 Blueprint 제외를 유지하고, UE Level Blueprint에 해당하는 빈 곳을 Sparks 기반 타입 `LevelScript`(레벨마다 숨은 Actor 0 또는 1개, 배치 불가)로 채운다. 노드 기반 시각 편집기는 보류 선택지로만 둔다(만든다면 Sparks 코드로 내보내고 실행은 Sparks). 엔진 Actor가 물리 이벤트 `TriggerEntered`·`TriggerExited`·`CollisionEntered`·`CollisionExited`를 노출하고, 배치한 Actor에 편집기에서 ScriptableComponent를 붙일 수 있음을 명시한다. 정본은 [레벨 스크립트](LevelScript.ko.md)(결정 LD1–LD20)다. 개정 범위는 표지·20.2·20.4·20.5·22.1·22.3·23.1·24.1·33.2·33.7·33.19절이다.
 
 **1.17 오디오:** 오디오 구현 정본을 [오디오 시스템](AudioSystem.ko.md)(결정 AD1–AD28, 단계 AU1–AU10)으로 둔다. 18절의 AudioRT 금지 목록·handle 세대·stop mailbox·epoch ACK·성능 목표는 그대로다. 실행 구조만 UE 5.8과 같게 고친다: 전용 AudioRT 스레드가 블록을 렌더해 출력 링에 넣고, 장치 콜백은 링에서 복사하고 잠금 없이 AudioRT를 깨우기만 한다(AD2). 개정 범위는 표지·18절이다.
+
+**1.18 노드 그래프:** 그래프 편집 공통 층을 [노드 그래프](NodeGraph.ko.md)(개정 2)로 둔다. 데이터 모델·변경·undo·복사·노드 등록표는 `NodeGraph`(Engine Runtime), 텍스트·commandlet은 `NodeGraphTools`(Engine Developer), 화면은 `GraphView`(Engine Editor)다. 머티리얼·오디오·애니메이션 등 전문 편집기는 그 위에 도메인 schema만 얹는다. Blueprint·범용 gameplay node graph 제외는 그대로다. 개정 범위는 표지·14.6·22.2절이다.
 
 ## 1. 목표와 실행 전략
 
@@ -1382,15 +1384,15 @@ Unreal의 문서는 live update·node preview·platform stats·generated shader 
 
 | 모듈·예정 파일 | 의존·책임 | 금지 의존·수명 |
 |---|---|---|
-| MaterialSchema: Public/Material/GraphSchema.h, NodeDescriptor.h, ParameterSchema.h | Core·MetaSchema·Serialization; stable NodeId/PinId/ParameterId·schema version·domain | RHI·World·에디터 UI·Object 포인터 없음 |
+| MaterialSchema: Public/Material/GraphSchema.h, NodeDescriptor.h, ParameterSchema.h | Core·MetaSchema·Serialization·NodeGraph; NodeGraph `GraphSchema` 구현·노드 서술 등록·stable NodeId/PinId/ParameterId·schema version·domain | RHI·World·에디터 UI·Object 포인터 없음 |
 | MaterialCompiler: GraphValidator.cpp, MaterialIR.cpp, HlslEmitter.cpp, SourceMap.cpp | Host Core·MaterialSchema·ShaderWorker; typed DAG 검증·IR·HLSL·diagnostic | EditorFramework 없이 headless 실행; host DXC/STL은 Runtime에 유입 금지 |
 | MaterialRuntime: MaterialHandle.h, MaterialInstance.h, MaterialBinding.cpp | Core·RenderData·RHI 계약; cooked shader set·parameter layout·frame snapshot | graph UI·Clang·DXC·원본 node 구현 없음 |
 | MaterialAssetBridge: MaterialAsset.cpp | AssetRuntime·ObjectRuntime·MaterialSchema/Runtime; 원본·의존 asset·cooked artifact 연결 | Renderer가 Object graph를 순회하지 않음 |
 | MaterialCook: MaterialCook.cpp | Host-only target; Asset 도구·MaterialSchema·MaterialCompiler·cooked format 계약 | Shipping 링크 제외; Compiler/DXC 의존은 이 target에서만 사용 |
-| EditorMaterial: GraphCommands.cpp, PreviewSession.cpp, CompileCoordinator.cpp | EditorBackend transaction·asset bridge·compiler service·renderer preview | async callback에 raw Object/widget 주소 캡처 금지 |
-| EditorMaterial 화면: MaterialGraphView.cpp, InstancePanel.cpp, DiagnosticsPanel.cpp | EditorFramework `GraphView` Element; 그래프·속성·인스턴스·오류 화면 | 화면 코드에서 별도 shader 의미/validator 구현 금지 |
+| EditorMaterial: GraphCommands.cpp, PreviewSession.cpp, CompileCoordinator.cpp | EditorBackend transaction·NodeGraph `GraphMutator`·asset bridge·compiler service·renderer preview | async callback에 raw Object/widget 주소 캡처 금지 |
+| EditorMaterial 화면: MaterialGraphView.cpp, InstancePanel.cpp, DiagnosticsPanel.cpp | `GraphView` 모듈(Editor, 노드 그래프 11절)·EditorFramework; 그래프·속성·인스턴스·오류 화면 | 화면 코드에서 별도 shader 의미/validator 구현 금지 |
 
-경로는 모듈 내부 Public/Private 상대 경로 제안이다. MaterialSchema/MaterialRuntime은 Runtime STL 비사용 정책을 따른다. 그래프 canvas widget은 필요하면 다른 전문 도구에서 재사용할 수 있으나 node 의미·VM·execution flow를 통합한 범용 Blueprint 시스템으로 확대하지 않는다. 그래프 화면과 preview viewport는 동일한 preview session/route epoch를 사용한다.
+경로는 모듈 내부 Public/Private 상대 경로 제안이다. MaterialSchema/MaterialRuntime은 Runtime STL 비사용 정책을 따른다. 그래프 데이터 모델은 공통 `NodeGraph`, 그래프 canvas는 공통 `GraphView`이고 다른 전문 도구(오디오·애니메이션·VFX·PCG)도 같은 것을 쓴다([노드 그래프](NodeGraph.ko.md)). 다만 node 의미·VM·execution flow를 통합한 범용 Blueprint 시스템으로 확대하지 않는다(노드 그래프 GD20). 그래프 화면과 preview viewport는 동일한 preview session/route epoch를 사용한다.
 
 ~~~cpp
 struct MaterialNodeDescriptor {
@@ -1418,7 +1420,7 @@ Result<NodeRegistration> RegisterMaterialNode(const MaterialNodeDescriptor&, Nod
 
 예시는 signature 초안이다. registration은 schema·pin type·domain·stage·backend 지원·parameter migration·lowering ops를 검증한다. snapshot은 compiler가 소유하는 immutable native 데이터이며 Task에 Object 주소를 전달하지 않는다. descriptor의 배열은 등록 시 소유 복사하고 lowering function pointer는 module lease로 보호한다. unregister는 신규 compile admission 차단·진행 작업 drain 뒤 수행한다. 새 node는 plugin 등록과 backend conformance로 추가하며 Core 파일 수정을 요구하지 않는다.
 
-NodeId/PinId/ParameterId는 표시 이름과 분리한다. graph schema는 layout revision과 semantic revision을 구분하고 node 이동·comment 변경이 shader compile을 유발하지 않게 한다. unknown node는 editor에서 payload를 보존하는 placeholder로 열되, 출력에 도달하는 미지원 node는 target cook 오류로 처리한다. 함수·layer 참조의 순환과 shader dataflow cycle을 진단한다. 구조 변경·parameter rename·pin 제거에는 schema migration과 인스턴스 override 보존 정책이 필요하다.
+NodeId/PinId/ParameterId는 표시 이름과 분리한다. 문서 revision 하나로 편집 충돌을 검사하고, compile 여부는 semantic hash(배치 데이터 제외)로 판정해 node 이동·comment 변경이 shader compile을 유발하지 않게 한다(노드 그래프 GD8). unknown node는 editor에서 payload를 보존하는 placeholder로 열되, 출력에 도달하는 미지원 node는 target cook 오류로 처리한다. 함수·layer 참조의 순환과 shader dataflow cycle을 진단한다. 구조 변경·parameter rename·pin 제거에는 schema migration과 인스턴스 override 보존 정책이 필요하다.
 
 ### 14.7 셰이더 의미·인스턴스·레이어
 
@@ -1914,7 +1916,7 @@ M3는 UI 툴킷 위의 Outliner, Inspector, Asset Browser, 3D viewport, transfor
 
 Script Editor는 자체 언어의 문법 강조·자동 완성·정의 이동·진단·breakpoint·call stack·watch를 제공한다. 범용 node graph로 게임 로직을 작성하는 기능은 구현하지 않는다. 컷씬 편집기는 25절의 독립 핵심 제작 도구로 개발한다.
 
-transaction은 객체 주소가 아닌 stable ID·FieldId·old/new value·asset revision을 기록한다. 생성·삭제·reparent·prefab structural override는 graph patch로 저장하고 undo 기간의 snapshot 메모리를 budget으로 제한한다. 삭제 객체를 undo용 root로 무제한 유지하지 않는다. 변환 drag·multi-edit·복합 component 추가는 atomic group으로 취급한다.
+transaction은 객체 주소가 아닌 stable ID·FieldId·old/new value·asset revision을 기록한다. 생성·삭제·reparent·prefab structural override는 graph patch로 저장하고 undo 기간의 snapshot 메모리를 budget으로 제한한다. 삭제 객체를 undo용 root로 무제한 유지하지 않는다. 변환 drag·multi-edit·복합 component 추가는 atomic group으로 취급한다. 이 graph patch는 객체 계층용이다. 노드 그래프 편집(노드 추가·연결·붙여넣기·접기)의 patch는 [노드 그래프](NodeGraph.ko.md) 8절의 `GraphPatch`이며, 같은 Transaction에 들어가고 같은 undo 메모리 budget을 쓴다.
 
 저장은 임시 파일→fsync/flush 정책→atomic replace→revision publication으로 수행한다. 외부 파일 변경·저장 충돌·프로세스 강제 종료를 감지하고 journal로 복구한다. source control 연동은 checkout/status/diff/asset lock을 adapter로 제공한다. multi-user editing은 단독 transaction·revision 충돌 해결이 안정화된 P3 이후 과제다.
 
