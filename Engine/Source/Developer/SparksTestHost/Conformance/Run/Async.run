@@ -1,0 +1,93 @@
+# Async execution (SparksRuntime 2.4): AWAIT suspends the whole frame stack into the session, waits
+# complete on advance/fixed, resumed executions are `resume` lines in (frame, instance, order) order,
+# `await F()` of an async fn is not a suspension point, Disable and detach cancel suspended executions.
+new #1 Timer -> ok (5 steps)
+hook #1 Enable -> ok (0 steps)
+Timer.Wait(#1, 0.5) -> suspended (12 steps)
+advance 0.25 -> ok (1 suspended)
+advance 0.25 -> ok (0 suspended)
+  resume #1 Timer.Wait -> ok (14 steps)
+  log info "waited 0.5"
+fields #1 -> Timer(Trail: "wd", Ticks: 0)
+Timer.Twice(#1) -> suspended (16 steps)
+advance 0.5 -> ok (1 suspended)
+  resume #1 Timer.Twice -> suspended (17 steps)
+  log info "waited 0.5"
+advance 0.1 -> ok (0 suspended)
+  resume #1 Timer.Twice -> ok (6 steps)
+fields #1 -> Timer(Trail: "wdwd", Ticks: 1)
+Timer.Both(#1) -> suspended (13 steps)
+advance 0.5 -> ok (1 suspended)
+advance 0.5 -> ok (0 suspended)
+  resume #1 Timer.Both -> ok (4 steps)
+  log info "both"
+Timer.First(#1) -> suspended (13 steps)
+advance 0.1 -> ok (0 suspended)
+  resume #1 Timer.First -> ok (4 steps)
+  log info "first"
+advance 10 -> ok (0 suspended)
+Timer.Fixed(#1) -> suspended (3 steps)
+advance 0.1 -> ok (1 suspended)
+fixed -> ok (0 suspended)
+  resume #1 Timer.Fixed -> ok (4 steps)
+  log info "fixed"
+fixed -> ok (0 suspended)
+Timer.Count(#1, 3) -> suspended (6 steps)
+advance 0.1 -> ok (1 suspended)
+  resume #1 Timer.Count -> suspended (17 steps)
+  log info "count 1"
+advance 0.1 -> ok (1 suspended)
+  resume #1 Timer.Count -> suspended (17 steps)
+  log info "count 2"
+advance 0.1 -> ok (0 suspended)
+  resume #1 Timer.Count -> ok (15 steps)
+  log info "count 3"
+advance 0.1 -> ok (0 suspended)
+Timer.Late(#1) -> suspended (7 steps)
+advance 0 -> ok (0 suspended)
+  resume #1 Timer.Late -> ok (4 steps)
+new #2 Timer -> ok (5 steps)
+hook #2 Enable -> ok (0 steps)
+Timer.Wait(#2, 0.1) -> suspended (12 steps)
+Timer.Wait(#1, 0.1) -> suspended (12 steps)
+Timer.Wait(#2, 0.2) -> suspended (12 steps)
+advance 0.2 -> ok (0 suspended)
+  resume #1 Timer.Wait -> ok (14 steps)
+  resume #2 Timer.Wait -> ok (14 steps)
+  resume #2 Timer.Wait -> ok (14 steps)
+  log info "waited 0.1"
+  log info "waited 0.1"
+  log info "waited 0.2"
+fields #1 -> Timer(Trail: "wdwdwd", Ticks: 1)
+fields #2 -> Timer(Trail: "wwdd", Ticks: 0)
+new #3 Waiter -> ok (3 steps)
+hook #3 Enable -> ok (0 steps)
+Waiter.Watch(#3, #1) -> void (3 steps)
+new #4 Restarter -> ok (3 steps)
+hook #4 Enable -> ok (0 steps)
+Restarter.Watch(#4, #1) -> void (3 steps)
+Timer.Fire(#1, 4) -> void (4 steps)
+  deliver #3 Waiter.on Source.Go -> suspended (7 steps)
+  deliver #4 Restarter.on Source.Go -> suspended (7 steps)
+Timer.Fire(#1, 5) -> void (4 steps)
+  deliver #4 Restarter.on Source.Go -> suspended (7 steps)
+advance 0.25 -> ok (0 suspended)
+  resume #3 Waiter.on Source.Go -> ok (11 steps)
+  resume #4 Restarter.on Source.Go -> ok (11 steps)
+  log info "go 4"
+  log info "restart go 5"
+fields #3 -> Waiter(Source: #1, Got: 4)
+fields #4 -> Restarter(Source: #1, Got: 5)
+Timer.Count(#1, 5) -> suspended (6 steps)
+advance 0.1 -> ok (1 suspended)
+  resume #1 Timer.Count -> suspended (17 steps)
+  log info "count 1"
+hook #1 Disable -> ok (0 steps)
+advance 0.1 -> ok (0 suspended)
+hook #1 Enable -> ok (0 steps)
+Timer.Wait(#2, 1.0) -> suspended (12 steps)
+detach #2 -> ok
+advance 2 -> ok (0 suspended)
+detach #1 -> ok
+detach #3 -> ok
+detach #4 -> ok

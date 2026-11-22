@@ -66,6 +66,7 @@ constexpr StringView RunArrow = " -> ";
 // 전달 기록 줄의 머리다(`  deliver #구독자 <함수> -> <결과> (<명령 수> steps)` — SparksRuntime
 // 2.3절).
 constexpr StringView RunDeliverPrefix = "  deliver ";
+constexpr StringView RunResumePrefix = "  resume ";
 
 // 호출 뒤 `Log.*` 기록 줄의 머리다(`  log <수준> "<메시지>"`).
 constexpr StringView RunLogPrefix = "  log ";
@@ -1005,7 +1006,7 @@ private:
 static void AppendDeliveries(StringBuilderBase& actual, const VmSession& session,
                              const FakeHost& host) noexcept {
     for (const VmSession::Delivery& delivery : session.Deliveries()) {
-        actual.Append(RunDeliverPrefix);
+        actual.Append(delivery.resumed ? RunResumePrefix : RunDeliverPrefix);
         host.FormatHandle(actual, delivery.subscriber);
         const BytecodeModule& module = delivery.module->Module();
         actual.Append(" ").Append(module.String(module.functions[delivery.function].name));
@@ -1021,6 +1022,9 @@ static void AppendDeliveries(StringBuilderBase& actual, const VmSession& session
             break;
         case VmOutcome::Ended:
             actual.AppendFormat("ended error({})", delivery.result.errorCode - 1);
+            break;
+        case VmOutcome::Suspended:
+            actual.Append("suspended");
             break;
         }
 
@@ -1131,7 +1135,7 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
 
         // 로그 줄은 앞 호출의 기록이다 — 실행기가 다시 쓴다.
         if (line.StartsWith(RunLogPrefix) || line.StartsWith(RunHostPrefix) ||
-            line.StartsWith(RunDeliverPrefix)) {
+            line.StartsWith(RunDeliverPrefix) || line.StartsWith(RunResumePrefix)) {
             continue;
         }
 
@@ -1139,7 +1143,8 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
         // `fields #n`, `detach #n`. 결과는 `-> ok (N steps)`·fault·필드 표기와 log·host 줄이다.
         if (line.StartsWith("new ") || line.StartsWith("hook ") || line.StartsWith("fields ") ||
             line.StartsWith("detach ") || line.StartsWith("emit ") || line == "phase" ||
-            line.StartsWith("phase ")) {
+            line.StartsWith("phase ") || line.StartsWith("advance ") || line == "fixed" ||
+            line.StartsWith("fixed ")) {
             usize arrowAt = line.ByteCount();
             for (usize index = 0; index + RunArrow.ByteCount() <= line.ByteCount(); ++index) {
                 if (StringView(line.Data() + index, RunArrow.ByteCount()) == RunArrow) {
@@ -1197,6 +1202,29 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
                 }
 
                 actual.AppendFormat("ok ({} queued)", session.QueuedCount());
+                delivered = true;
+            } else if (verb == "advance" || verb == "fixed") {
+                // 시계 진행(SparksRuntime 2.4절 — LC6c): `advance <초>`는 Game·UI 시계를 같이
+                // 진행하고 가변 재개 단계를, `fixed`는 고정 재개 단계를 돈다. 재개된 실행은
+                // `  resume` 줄이다.
+                actual.Append(directive).Append(RunArrow);
+                Result<void> stepped = Result<void>::Success();
+                if (verb == "advance") {
+                    auto seconds = TryParseDouble(target);
+                    if (!seconds) {
+                        return bad("'advance' needs seconds");
+                    }
+
+                    stepped = session.Advance(seconds.Value(), seconds.Value());
+                } else {
+                    stepped = session.FixedStep();
+                }
+
+                if (!stepped) {
+                    return Result<void>::Failure(stepped.Error());
+                }
+
+                actual.AppendFormat("ok ({} suspended)", session.SuspendedCount());
                 delivered = true;
             } else if (!number || number.Value() == 0) {
                 return bad("expected an object '#<number>' after the directive");
@@ -1458,6 +1486,9 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
                 case VmOutcome::Ended:
                     actual.AppendFormat("ended error({})", result.errorCode - 1);
                     break;
+                case VmOutcome::Suspended:
+                    actual.Append("suspended");
+                    break;
                 }
 
                 actual.AppendFormat(" ({} steps)", result.steps);
@@ -1576,7 +1607,7 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
             const Signature& signature = compilation.Signatures()[symbol->signature];
             returned = values.TypeOf(signature.returnType, true);
             uint32 returnSlots = 0;
-            if (!values.Slots(returned, returnSlots) || signature.isAsync) {
+            if (!values.Slots(returned, returnSlots)) {
                 problem.Append("the return type is not supported by .run yet");
             }
 
@@ -1720,6 +1751,9 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
             break;
         case VmOutcome::Ended:
             actual.AppendFormat("ended error({})", result.errorCode - 1);
+            break;
+        case VmOutcome::Suspended:
+            actual.Append("suspended");
             break;
         }
 

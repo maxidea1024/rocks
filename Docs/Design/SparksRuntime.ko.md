@@ -3,6 +3,7 @@
 이 문서는 Sparks 언어 코어의 LC6(실행 모델)을 정한다. 언어 의미는 SparksLanguage(SL) §4.3·§5·§6·§7·§8.3·§9가 정본이고, 이 문서는 그 의미를 VM 쪽에서 어떻게 실현하는지(자료 구조·순서·host interface 2차·bytecode 형식 v3·시험)를 정한다. LC5(SparksVm.ko.md)의 링크·host interface 1차 위에 쌓는다.
 
 - 개정 1(2026-11-22): 첫 판. 하위 단계 LC6a–LC6e, 결정 R1–R12.
+- 개정 2(2026-11-22): LC6c를 LC6c1(정지·기본 대기·All/Race·시계·재개 순서·취소·재진입 — 구현)과 LC6c2(이벤트 대기·async 함수 호출의 대기 값·`paused`·Start 준비 대기)로 나눔. `await F()` 직접 호출 lowering, `.run` `advance`·`fixed`, 재개 전 실행 문맥 비우기(2.4절).
 
 ## 1. 하위 단계
 
@@ -10,7 +11,8 @@
 |---|---|---|
 | LC6a session·instance·hook | `VmSession`(실행 단위 — SL §9.1 소유 범위), bytecode 형식 v3의 CLASS 구역(클래스 필드 배치·기본값 생성 함수·hook 표·handler 표·이벤트 표), instance 생성(필드 저장소는 session — Sparks 클래스 필드의 `GETF`·`SETF`는 VM이 직접), 수명 hook 실행(Awake·Enable·Start·Tick 계열·Disable·Destroy — 기반 먼저 누적), Detach | `.run` instance 지시 golden(§4)의 hook 순서·필드 값 |
 | LC6b 발행·전달 | `emit`·발행 큐(FIFO)·연결 표(slot·generation)·`on 경로.이벤트` 연결(자기 필드·객체 필드·배열 원천·native 이벤트는 host 2차)·Changed(조각 값 기준)·연쇄 깊이 상한 16·전달 상한·이월 재검증 | 전달 순서 golden, CascadeLimit·BudgetExceeded 시험 |
-| LC6c async 실행 | 실행 조각과 정지(`AWAIT`·`AWAITEV` — frame 보관), 대기(`Delay`·`NextTick`·`NextFixedTick`·이벤트·`All`·`Race`), 재개 큐(순서 key — SL §6.1), 취소(await 지점), 재진입 정책(`@skipWhileBusy`·`@restart`), Execution 트리·EndExec, Start 준비 대기 | 재개 순서·취소 golden |
+| LC6c1 async 실행 | 실행 조각과 정지(`AWAIT` — frame stack 보관), 기본 대기(`Delay`·`NextTick`·`NextFixedTick`·`All`·`Race`), 시계·재개 순서(SL §6.1), 취소(Disable·Detach), 재진입 정책(`@skipWhileBusy`·`@restart`), `await F()`(async 함수) 직접 호출 | `Run/Async` golden(재개 순서·취소·재진입), 할당 실패 전수 |
+| LC6c2 async 나머지 | 이벤트 대기(`AWAITEV` — 전달 순회 안 재개), async 함수 호출을 대기 값으로 쓰기(`All(F(), G())` — 하위 실행·fault 전파), 시계 `paused`, Start 준비 대기, Execution 트리·EndExec | 이벤트 대기·하위 실행 golden |
 | LC6d 자원·지연·격리 | 유지 자원(획득 → 해제 → 저장, 실행·instance 범위 해제), 로드 요청 handle(host 2차), 활성 전환·파괴 지연 큐(적용 루프 64회), fault 위치별 처리와 격리(SL §8.3 표), 예산(instance·session — SL §9.3), CloseSession(ledger 0) | 누수 0 시험, 격리·예산 시험 |
 | LC6e 시나리오·Gate | SL §2 예시 시나리오 전달 순서 golden, Gate G1(누수 0)·G4(fault 격리) | corpus `Scenario/*` 통과 |
 
@@ -65,6 +67,15 @@
 - **취소:** instance Disable·Detach·CloseSession은 그 instance의 정지 실행을 취소한다(frame의 Buf를 놓는다 — 유지 자원 해제는 LC6d). `@restart`는 같은 발행자로 시작된 정지 실행을 취소하고 새로 시작하며, `@skipWhileBusy`는 그런 실행이 있으면 새 이벤트를 버리고 횟수를 센다(디버거 표시).
 - **async fn 호출:** `AWAIT`가 async 함수의 대기를 기다리는 형태(`await F()`)는 정지 지점이 아니다 — 호출된 함수 안의 기본 대기가 정지하면 호출 사슬 전체가 하나의 실행으로 정지한다(frame stack 전체를 옮기므로 자연히 된다).
 - **`.run` 지시:** `advance <초>`(Game·UI 시계 진행·프레임 +1·가변 재개 단계), `fixed`(고정 재개), 정지한 실행의 결과는 `-> suspended`, 재개된 실행은 `  resume #구독자 <함수> -> 결과` 줄이다.
+- **LC6c1 구현(개정 2):**
+  - **API:** `VmSession::Advance(gameDelta, uiDelta)`(프레임 +1 — 앞 프레임에 등록한 `NextTick`, 등록 프레임 뒤이고 기한이 된 `Delay`를 완료), `FixedStep()`(앞 고정 step에 등록한 `NextFixedTick`), `SuspendedCount()`, `SkippedWhileBusy()`. 위 `ResumeStep(kind)`는 이 두 진입으로 나눴다(가변·고정 단계를 host가 따로 부른다). `paused`는 LC6c2.
+  - **기한:** `Delay(s)`의 기한은 등록 시각 + max(s, 0)이고, 등록한 프레임 안에서는 완료하지 않는다(0초도 다음 프레임 — "기본 대기는 이미 완료돼도 정지").
+  - **재개:** 완료된 최상위 대기의 정지 실행을 (등록 프레임, instance 번호, 등록 순번) 순으로 하나씩 되돌려 이어 간다. 되돌리기 전에 실행 문맥의 남은 frame·레지스터(앞 조각의 것)를 비운다 — 덧붙이면 frame base가 어긋난다(구현 중 발견, `Run/Async`의 같은 단계 재개 세 개가 고정한다). 기본 대기의 결과는 없다(결과 slot은 0·null). 재개한 조각 뒤에는 발행 큐를 비운다.
+  - **All·Race:** 자식 대기에 부모 번호를 둔다(한 대기는 한 묶음의 인자만). 완료는 위로 전파하고, Race는 끝나지 않은 자식을 취소한다. 묶음 인자를 직접 기다리거나 같은 대기를 두 번 기다리면 ContractViolation이다(언어가 막는다 — 안전장치).
+  - **취소:** Disable hook 실행 전과 Detach에서 그 instance의 정지 실행을 취소한다(대기는 cancelled, frame의 Buf는 놓는다). 정지한 hook은 끝난 것으로 보고 기반 사슬을 잇는다.
+  - **재진입:** 정지 실행은 시작한 handler(모듈·handler 번호)와 발행자를 기억한다. 전달할 때 같은 (구독 instance, handler, 발행자)의 정지 실행이 있으면 `@skipWhileBusy`는 전달을 버리고 횟수를 세며, `@restart`는 그 실행을 취소하고 새로 시작한다.
+  - **`await F()`(async 함수):** 컴파일러가 호출 결과를 대기 handle이 아니라 반환 값으로 내리고 `AWAIT`를 두지 않는다(`await a?.F()`도 같다). 이전 lowering은 호출 결과를 Ref 대기로 읽어 반환 값과 bank가 어긋났다(Codegen `Flow`·`Review` golden 갱신).
+  - **세션 밖:** `AWAIT`와 대기 언어 함수는 session 밖 실행에서 ContractViolation이다(컴파일된 코드는 async 함수·handler만 기다리고 이들은 session으로 부른다 — 안전장치).
 
 ## 3. 순서
 

@@ -193,6 +193,30 @@ Result<void> VmExecution::PushFrame(const VmLinkedModule& linked, uint32 functio
     return frames_.TryPushBack(frame);
 }
 
+Result<VmCallResult> VmExecution::Continue(const VmLimits& limits) noexcept {
+    if (running_ || frames_.IsEmpty()) {
+        return Result<VmCallResult>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    ReleaseReturned();
+    returned_.Clear();
+    struct RunJob {
+        VmExecution* self;
+        const VmLimits* limits;
+        Result<VmCallResult> result;
+    };
+    RunJob job{this, &limits, Result<VmCallResult>::Failure(ErrorCode::InvalidArgument)};
+    running_ = true;
+    platform::RunWithDeterministicFloatingPoint(
+        [](void* context) noexcept {
+            RunJob& run = *static_cast<RunJob*>(context);
+            run.result = run.self->Run(*run.limits);
+        },
+        &job);
+    running_ = false;
+    return static_cast<Result<VmCallResult>&&>(job.result);
+}
+
 Result<VmCallResult> VmExecution::MakeFault(VmFaultKind kind, uint32 word, uint64 steps) noexcept {
     // fault는 실행 문맥 전체를 끝낸다(V3). 자리는 지금 frame의 함수 안 주소다.
     VmCallResult result;

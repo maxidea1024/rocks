@@ -53,6 +53,8 @@ private:
     uint32 NewValue(uint32 type, StringView name = StringView()) noexcept;
     // 대기 handle(Ref, 타입 NoType — 덤프는 `wait`)을 잡는다.
     uint32 NewWait() noexcept;
+    // callee가 frame을 쌓아 부르는 Sparks async 함수(최상위·메서드·interface)인지다.
+    bool IsDirectAwaitCallee(uint32 callee) const noexcept;
     uint32 SlotCount(uint32 first) const noexcept;
     // 묶음 to ← from(slot마다 Move).
     void MoveValue(uint32 to, uint32 from, uint32 node) noexcept;
@@ -175,6 +177,9 @@ private:
     bool overrideSpan_ = false;
     uint32 current_ = NoIrBlock;
     uint32 this_ = NoIrRegister;
+    // `await F()`의 호출 노드(Sparks async 함수): 그 호출은 대기 handle 대신 반환 값을 직접 낸다 —
+    // 호출된 함수 안의 기본 대기가 호출 사슬 전체를 정지한다(SparksRuntime 2.4절).
+    uint32 directAwaitCall_ = NoNode;
     uint32 returnType_ = 0;
     // 지역 이름: (심볼 << 32) | 첫 레지스터. 블록을 떠나면 그 블록의 것을 뗀다(뒤에서부터 찾는다).
     Array<uint64> locals_;

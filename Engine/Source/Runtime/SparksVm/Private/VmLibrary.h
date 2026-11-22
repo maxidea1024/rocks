@@ -113,6 +113,7 @@ bool VmLanguageMutates(StringView name) noexcept;
 Span<const VmLibraryEntry> VmMathEntries() noexcept;
 Span<const VmLibraryEntry> VmTextEntries() noexcept;
 Span<const VmLibraryEntry> VmCollectionEntries() noexcept;
+Span<const VmLibraryEntry> VmWaitEntries() noexcept;
 
 // 호출 하나의 문맥이다: 창(bank별 시작), 서술자, 예산. 결과는 결과 bank의 창 0번부터 둔다(값을
 // 바꾸는 메서드의 수신자는 그 bank 창 0번에 그대로 남는다 — 결과와 bank가 다르다).
@@ -195,6 +196,10 @@ public:
     static void FreeShell(VmLibraryContext& context, VmBuffer* buffer) noexcept;
 
     static RandomStream& Random(VmLibraryContext& context) noexcept;
+    // session 대기를 만든다(SparksRuntime 2.4절 — kind는 VmSession::WaitKind 순번). session 밖이면
+    // 0.
+    static uint64 NewWait(VmLibraryContext& context, uint8 kind, uint8 clock, double seconds,
+                          Span<const uint64> children) noexcept;
     // handle이 살아 있는 객체인지다(host — 6.2절).
     static bool Alive(VmLibraryContext& context, uint64 handle) noexcept;
     // 실행 문맥의 할당자다(임시 서식 builder용).

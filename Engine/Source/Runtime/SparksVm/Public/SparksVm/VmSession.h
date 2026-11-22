@@ -18,6 +18,10 @@
 
 namespace rocks::sparks {
 
+namespace detail {
+class VmLibrary;
+} // namespace detail
+
 class VmSession final {
 public:
     VmSession(Allocator& allocator, VmHost* host) noexcept;
@@ -88,6 +92,7 @@ public:
         const VmLinkedModule* module = nullptr;
         uint32 function = NoBytecodeIndex;
         VmCallResult result;
+        bool resumed = false; // 정지했던 실행의 재개(SparksRuntime 2.4절)
     };
 
     Span<const Delivery> Deliveries() const noexcept {
@@ -96,6 +101,21 @@ public:
 
     // 큐에 남은(이월) 항목 수다.
     uint32 QueuedCount() const noexcept;
+
+    // ---- async(SparksRuntime 2.4절 — LC6c) ----
+
+    // 시계를 진행하고(프레임 +1) 가변 재개 단계를 돈다: 기한이 된 Delay·NextTick 대기의 실행을
+    // (등록 프레임, instance, 등록 순번) 순으로 재개한다. 재개된 실행은 Deliveries에 resumed로
+    // 남는다.
+    Result<void> Advance(double gameDelta, double uiDelta) noexcept;
+    // 고정 재개 단계(NextFixedTick)를 돈다.
+    Result<void> FixedStep() noexcept;
+    // 정지해 있는 실행 수다.
+    uint32 SuspendedCount() const noexcept;
+    // `@skipWhileBusy`로 버린 이벤트 수다(디버거 표시 — SL 6.1절 SD11).
+    uint64 SkippedWhileBusy() const noexcept {
+        return skippedWhileBusy_;
+    }
 
     // instance의 필드 저장소(기반 사슬 전체 — bank별)다(시험·덤프용).
     struct FieldView {
@@ -114,6 +134,74 @@ public:
 
 private:
     friend class VmExecution;
+    friend class detail::VmLibrary;
+
+    // 정지한 실행이다(R9 — frame stack 전체).
+    struct Suspended {
+        explicit Suspended(Allocator& allocator) noexcept
+            : frames(allocator), scalars(allocator), refs(allocator), buffers(allocator) {
+        }
+
+        Array<VmExecution::Frame> frames;
+        Array<uint64> scalars;
+        Array<uint64> refs;
+        Array<VmBuffer*> buffers;
+        uint32 resultRegister = 0;
+        uint32 resultBank = 0;
+        uint32 resultSlots = 0;
+        uint64 wait = 0;
+        uint32 instance = NoBytecodeIndex;
+        uint64 order = 0;
+        // 이벤트 handler로 시작된 실행이면 그 발행자·handler(재진입 판정 — SD11).
+        uint64 publisher = 0;
+        const VmLinkedModule* handlerModule = nullptr;
+        uint32 handler = NoBytecodeIndex;
+        bool live = false;
+    };
+
+    enum class WaitKind : uint8 {
+        Delay,
+        NextTick,
+        NextFixedTick,
+        All,
+        Race
+    };
+
+    // 대기 하나다(handle = VmWaitTag | 번호).
+    struct Wait {
+        WaitKind kind = WaitKind::NextTick;
+        uint8 clock = 0; // 0 Game, 1 UI
+        double deadline = 0.0;
+        uint64 frame = 0;     // 등록 프레임
+        uint64 fixedStep = 0; // 등록 고정 step
+        uint32 firstChild = 0;
+        uint32 childCount = 0;
+        uint32 parent = NoBytecodeIndex;
+        uint32 suspension = NoBytecodeIndex; // 이 대기를 기다리는 정지 실행
+        uint32 instance = NoBytecodeIndex;
+        uint64 order = 0;
+        bool done = false;
+        bool cancelled = false;
+    };
+
+    // AWAIT(실행 중)이 부른다: 실행 문맥의 frame·레지스터를 옮겨 정지 실행을 만든다.
+    VmFaultKind Suspend(uint64 wait, uint32 resultRegister, uint32 resultBank, uint32 resultSlots,
+                        uint32& suspension, ErrorCode& error) noexcept;
+    // 대기를 만든다(언어 함수 — 실패는 0과 error).
+    uint64 NewWait(WaitKind kind, uint8 clock, double seconds, Span<const uint64> children,
+                   ErrorCode& error) noexcept;
+    // 완료된 대기의 정지 실행을 순서대로 재개한다.
+    Result<void> ResumeDone() noexcept;
+    // 대기 done 전파(All·Race)와 Race의 나머지 취소.
+    void CompleteWait(uint32 wait) noexcept;
+    // instance의 정지 실행을 취소한다(Disable·Detach — SL 6.1절).
+    void CancelExecutions(uint32 instance) noexcept;
+    // 정지 실행 하나를 취소한다(대기를 끝내고 frame의 Buf를 놓는다).
+    void CancelSuspended(uint32 suspended) noexcept;
+    // 같은 발행자로 시작된 handler 실행이 정지해 있으면 그 번호(없으면 NoBytecodeIndex).
+    uint32 FindBusy(uint32 instance, const VmLinkedModule* module, uint32 handler,
+                    uint64 publisher) const noexcept;
+    void ReleaseSuspended(Suspended& suspended) noexcept;
 
     // 연결 하나(SL 5.5절 — 연결 표의 항목)다.
     struct Connection {
@@ -227,6 +315,21 @@ private:
     uint64 currentRoot_ = 0;
     uint32 deliveredInPhase_ = 0;
     bool suppressChanged_ = false; // 초기화·Awake·Enable·Disable·Destroy 문맥
+    // async(LC6c).
+    Array<Suspended> suspended_;
+    Array<Wait> waits_;
+    Array<uint32> waitChildren_;
+    double gameTime_ = 0.0;
+    double uiTime_ = 0.0;
+    uint64 frame_ = 0;
+    uint64 fixedStep_ = 0;
+    uint64 nextWaitOrder_ = 1;
+    uint32 currentInstance_ = NoBytecodeIndex; // 실행 중인 조각의 instance(정지 실행의 주인)
+    // 실행 중인 handler 조각의 발행자·handler(정지 실행에 남긴다).
+    uint64 currentPublisher_ = 0;
+    const VmLinkedModule* currentHandlerModule_ = nullptr;
+    uint32 currentHandler_ = NoBytecodeIndex;
+    uint64 skippedWhileBusy_ = 0;
 };
 
 } // namespace rocks::sparks

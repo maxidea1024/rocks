@@ -3,6 +3,7 @@
 #include <Core/Text/StringBuilder.h>
 #include <Platform/Memory.h>
 #include <SparksVm/Vm.h>
+#include <SparksVm/VmSession.h>
 
 #include "VmArithmetic.h"
 #include "VmFormat.h"
@@ -766,6 +767,35 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
             pc = frames_[frames_.Size() - 1].pc;
             reload();
             break;
+        }
+        case Opcode::Await: {
+            // 대기 handle B로 정지한다(SparksRuntime 2.4절): frame·레지스터를 session에 옮기고
+            // Suspended를 돌려준다. 재개는 EXTRA 다음(재개 블록으로의 JMP)부터다.
+            const uint32 resultShape = DecodeAx(words[pc++]);
+            const uint64 wait = r[bb];
+            if (session_ == nullptr || (wait & VmWaitTag) == 0) {
+                return MakeFault(VmFaultKind::ContractViolation, at, steps);
+            }
+
+            frames_[frames_.Size() - 1].pc = pc;
+            ErrorCode error = ErrorCode::None;
+            uint32 suspension = NoBytecodeIndex;
+            fault =
+                session_->Suspend(wait, a, resultShape >> 8, resultShape & 0xFF, suspension, error);
+            if (error != ErrorCode::None) {
+                return failed(error);
+            }
+
+            if (fault != VmFaultKind::None) {
+                return MakeFault(fault, at, steps);
+            }
+
+            VmCallResult suspended;
+            suspended.outcome = VmOutcome::Suspended;
+            suspended.steps = steps;
+            suspended.wait = wait;
+            suspended.suspension = suspension;
+            return Result<VmCallResult>::Success(suspended);
         }
         case Opcode::Emit: {
             Banks banks;

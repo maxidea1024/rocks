@@ -271,6 +271,23 @@ bool VmParseSignature(StringView text, VmSignature& out) noexcept {
 }
 
 bool VmMatchPattern(StringView pattern, StringView descriptor) noexcept {
+    // `w*>w`: 대기 하나 이상(All·Race — 인자 수는 소스에 고정되지만 함수마다 다르다).
+    if (pattern == "w*>w") {
+        if (!descriptor.EndsWith(">w") || descriptor.ByteCount() < 3) {
+            return false;
+        }
+
+        const StringView operands(descriptor.Data(), descriptor.ByteCount() - 2);
+        for (usize at = 0; at < operands.ByteCount(); ++at) {
+            const bool even = at % 2 == 0;
+            if (operands.Data()[at] != (even ? 'w' : ',')) {
+                return false;
+            }
+        }
+
+        return operands.ByteCount() % 2 == 1;
+    }
+
     // 자리표시(대문자 I F N V O T U)는 서술자의 타입 하나를 받고, 같은 글자는 같은 글자열이어야
     // 한다. 그 밖의 글자는 그대로 같아야 한다(`A<`·`M<`·`R<`·`S<`의 대문자는 뒤가 `<`라 자리표시가
     // 아니다).
@@ -333,7 +350,7 @@ int64 VmLibraryContext::Integer(uint32 index) const noexcept {
 
 VmLibraryFunction VmLibrary::Find(StringView name, StringView descriptor) noexcept {
     const Span<const VmLibraryEntry> tables[] = {VmMathEntries(), VmTextEntries(),
-                                                 VmCollectionEntries()};
+                                                 VmCollectionEntries(), VmWaitEntries()};
     for (const Span<const VmLibraryEntry> table : tables) {
         for (const VmLibraryEntry& entry : table) {
             if (entry.name == name && VmMatchPattern(entry.pattern, descriptor)) {
@@ -363,33 +380,16 @@ bool VmLibrary::Deferred(StringView name) noexcept {
     // 대기(LC6)와 host가 필요한 부록 B 항목(SparksVm 1절 LC5c 표).
     // 정확한 이름이다(접두어로 받으면 오타 이름이 로드를 통과한다 — LC5d1 리뷰). 타입 인자
     // (`CVars.Find<int>`)는 떼고 본다.
-    constexpr StringView Names[] = {"Delay",
-                                    "NextTick",
-                                    "NextFixedTick",
-                                    "All",
-                                    "Race",
-                                    "Time.Delta",
-                                    "Time.FixedDelta",
-                                    "Time.UiDelta",
-                                    "Time.GameSeconds",
-                                    "Time.Frame",
-                                    "Assets.LoadAll",
-                                    "Assets.Find",
-                                    "Soft.Load",
-                                    "LoadRequest.IsDone",
-                                    "LoadRequest.Progress",
-                                    "Tag.Find",
-                                    "TagSet.Has",
-                                    "TagSet.HasAny",
-                                    "TagSet.HasAll",
-                                    "TagSet.Add",
-                                    "TagSet.Remove",
-                                    "InputAction.Value",
-                                    "Text.Find",
-                                    "CVars.Find",
-                                    "CVarRef.Value",
-                                    "Settings.Get",
-                                    "Class.Create"};
+    constexpr StringView Names[] = {
+
+        "Time.Delta",           "Time.FixedDelta",   "Time.UiDelta",
+        "Time.GameSeconds",     "Time.Frame",        "Assets.LoadAll",
+        "Assets.Find",          "Soft.Load",         "LoadRequest.IsDone",
+        "LoadRequest.Progress", "Tag.Find",          "TagSet.Has",
+        "TagSet.HasAny",        "TagSet.HasAll",     "TagSet.Add",
+        "TagSet.Remove",        "InputAction.Value", "Text.Find",
+        "CVars.Find",           "CVarRef.Value",     "Settings.Get",
+        "Class.Create"};
     usize end = name.ByteCount();
     for (usize index = 0; index < name.ByteCount() && end == name.ByteCount(); ++index) {
         end = name.Data()[index] == '<' ? index : end;

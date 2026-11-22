@@ -529,6 +529,21 @@ Result<void> VmSession::Drain() noexcept {
             const BytecodeModule& bytecode = connection.module->Module();
             const BytecodeHandler& handler = bytecode.handlers[connection.handler];
             const BytecodeFunction& function = bytecode.functions[handler.function];
+            // 재진입(SL 6.1절 SD11): 같은 발행자로 시작된 이 handler 실행이 정지해 있으면
+            // `@skipWhileBusy`는 새 이벤트를 버리고(횟수를 센다) `@restart`는 그 실행을 취소한다.
+            if (handler.reentry != BytecodeReentry::None) {
+                const uint32 busy = FindBusy(connection.subscriber, connection.module,
+                                             connection.handler, item.publisher);
+                if (busy != NoBytecodeIndex) {
+                    if (handler.reentry == BytecodeReentry::SkipWhileBusy) {
+                        ++skippedWhileBusy_;
+                        continue;
+                    }
+
+                    CancelSuspended(busy);
+                }
+            }
+
             // 인자: handler가 선언한 만큼 앞에서부터(배열 원천은 발행한 원소가 첫 Ref 인자).
             uint64 refs[VmEventMaxArguments] = {};
             uint32 refCount = 0;
@@ -558,11 +573,20 @@ Result<void> VmSession::Drain() noexcept {
                                            : item.bufferCount;
             currentDepth_ = item.depth;
             currentRoot_ = item.root;
+            const uint32 outerInstance = currentInstance_;
+            currentInstance_ = connection.subscriber;
+            currentPublisher_ = item.publisher;
+            currentHandlerModule_ = connection.module;
+            currentHandler_ = connection.handler;
             auto called = execution_.Call(
                 *connection.module, handler.function,
                 Span<const uint64>(itemValues_.Data() + item.firstScalar, scalarCount),
                 Span<const uint64>(refs, refCount),
                 Span<VmBuffer* const>(itemBuffers_.Data() + item.firstBuffer, bufferCount));
+            currentInstance_ = outerInstance;
+            currentPublisher_ = 0;
+            currentHandlerModule_ = nullptr;
+            currentHandler_ = NoBytecodeIndex;
             currentDepth_ = 0;
             currentRoot_ = 0;
             if (!called) {

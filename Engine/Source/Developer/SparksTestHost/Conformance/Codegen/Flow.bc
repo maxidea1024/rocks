@@ -120,43 +120,40 @@ function Mover.Check  scalar=2/2 ref=1/1 buf=0/0 params=1/1/0 returns sx1
   0007  RET  s1 x1    ; 29:9
 
 function Mover.Run  scalar=4/6 ref=3/5 buf=0/0 params=0/1/0 returns sx2
-  body d38ffee630a1298f6b26a411a6ae804f2830b7ba459d649f7cdbab0e00213248
-  await 0003  live r0
-  await 0011  live s0..s2
-  await 0029  live s2..s3
+  body f5e6a2881a37c3df10829f1f3ca48c3e0f749dff6f66a421cfa273f8f67a2469
+  await 0026  live s2..s3
   0000  MOV.R  r3, r0    ; 33:27
   0001  CALL  ref2    ; 33:27
-  0002  MOV.R  r1, r3    ; 33:27
-  0003  AWAIT  s0 x2, r1    ; 33:17
-  0005  TRY.S  s2, s0 x2, else 0014    ; 33:17
-  0007  MOV.R  r3, r0    ; 34:19
-  0008  MOV.S  s4, s2    ; 34:19
-  0009  CALL  ref3    ; 34:19
-  0010  MOV.R  r1, r3    ; 34:19
-  0011  AWAIT  s3 x1, r1    ; 34:9
-  0013  JMP  0015    ; 34:9
-  0014  RETERR.S  s0 x2    ; 33:17
-  0015  TRY.S  s0, s3 x1, else 0032    ; 34:9
-  0017  CALLL  ref1    ; 35:19
-  0018  MOV.R  r1, r3    ; 35:19
-  0019  LOADK  s0, k4    ; 35:37
-  0020  LOADI  s1, 0    ; 35:42
-  0021  MOV.S  s4, s0    ; 35:31
-  0022  MOV.S  s5, s1    ; 35:31
-  0023  CALLL  ref4    ; 35:31
-  0024  MOV.R  r2, r3    ; 35:31
-  0025  MOV.R  r3, r1    ; 35:15
-  0026  MOV.R  r4, r2    ; 35:15
-  0027  CALLL  ref5    ; 35:15
-  0028  MOV.R  r1, r3    ; 35:15
-  0029  AWAIT  -, r1    ; 35:9
-  0031  JMP  0033    ; 35:9
-  0032  RETERR.S  s3 x1    ; 34:9
-  0033  LOADI  s0, 1    ; 36:20
-  0034  ADD.I64  s0, s2, s0    ; 36:16
-  0035  LOADI  s1, 0    ; 36:9
-  0036  MOV.S  s2, s0    ; 36:9
-  0037  RET  s1 x2    ; 36:9
+  0002  MOV.S  s0, s4    ; 33:27
+  0003  MOV.S  s1, s5    ; 33:27
+  0004  TRY.S  s2, s0 x2, else 0013    ; 33:17
+  0006  MOV.R  r3, r0    ; 34:19
+  0007  MOV.S  s4, s2    ; 34:19
+  0008  CALL  ref3    ; 34:19
+  0009  MOV.S  s3, s4    ; 34:19
+  0010  TRY.S  s0, s3 x1, else 0029    ; 34:9
+  0012  JMP  0014    ; 34:9
+  0013  RETERR.S  s0 x2    ; 33:17
+  0014  CALLL  ref1    ; 35:19
+  0015  MOV.R  r1, r3    ; 35:19
+  0016  LOADK  s0, k4    ; 35:37
+  0017  LOADI  s1, 0    ; 35:42
+  0018  MOV.S  s4, s0    ; 35:31
+  0019  MOV.S  s5, s1    ; 35:31
+  0020  CALLL  ref4    ; 35:31
+  0021  MOV.R  r2, r3    ; 35:31
+  0022  MOV.R  r3, r1    ; 35:15
+  0023  MOV.R  r4, r2    ; 35:15
+  0024  CALLL  ref5    ; 35:15
+  0025  MOV.R  r1, r3    ; 35:15
+  0026  AWAIT  -, r1    ; 35:9
+  0028  JMP  0030    ; 35:9
+  0029  RETERR.S  s3 x1    ; 34:9
+  0030  LOADI  s0, 1    ; 36:20
+  0031  ADD.I64  s0, s2, s0    ; 36:16
+  0032  LOADI  s1, 0    ; 36:9
+  0033  MOV.S  s2, s0    ; 36:9
+  0034  RET  s1 x2    ; 36:9
 
 function Mover.on Owner.Damaged  scalar=4/6 ref=4/6 buf=0/0 params=1/1/0 returns sx0
   body 4ad03533439467d251f5777beb499fd2de7a9cb08a364d118b8b34d488d5ad0c
