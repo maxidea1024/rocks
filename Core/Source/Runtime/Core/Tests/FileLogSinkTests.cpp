@@ -149,8 +149,8 @@ public:
         return inner.Open(path, bytes, mode, out);
     }
 
-    platform::FileStatus Exists(const char* path, usize bytes, bool& exists) noexcept override {
-        return inner.Exists(path, bytes, exists);
+    platform::FileStatus FileExists(const char* path, usize bytes, bool& exists) noexcept override {
+        return inner.FileExists(path, bytes, exists);
     }
 
     platform::FileStatus Delete(const char* path, usize bytes) noexcept override {
@@ -317,7 +317,7 @@ TEST(FileLogSinkRotatesAndKeepsRetentionCount) {
     FixedStringBuilder serverPath{Span<char>(server)};
     (void)serverPath.TryAppendFormat("{}/Test-Server-20260101T000000000Z.log", directory.View());
     bool serverKept = false;
-    CHECK(platform::PhysicalFileSystem().Exists(server, serverPath.ByteCount(), serverKept) &&
+    CHECK(platform::PhysicalFileSystem().FileExists(server, serverPath.ByteCount(), serverKept) &&
           serverKept);
 }
 
@@ -554,9 +554,9 @@ public:
         return inner.Open(mapped.path, mapped.bytes, mode, out);
     }
 
-    platform::FileStatus Exists(const char* path, usize bytes, bool& exists) noexcept override {
+    platform::FileStatus FileExists(const char* path, usize bytes, bool& exists) noexcept override {
         const MappedPath mapped = Map(path, bytes);
-        return inner.Exists(mapped.path, mapped.bytes, exists);
+        return inner.FileExists(mapped.path, mapped.bytes, exists);
     }
 
     platform::FileStatus Delete(const char* path, usize bytes) noexcept override {

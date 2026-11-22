@@ -37,7 +37,7 @@ Result<bool> ReadWholeFile(platform::FileSystem& files, StringView path,
                            Array<char>& out) noexcept {
     out.Clear();
     bool exists = false;
-    if (auto checked = files.Exists(path.Data(), path.ByteCount(), exists); !checked) {
+    if (auto checked = files.FileExists(path.Data(), path.ByteCount(), exists); !checked) {
         return Result<bool>::Failure(ToErrorCode(checked.code));
     }
 

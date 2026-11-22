@@ -33,7 +33,7 @@ TEST(PlatformFileWindowsReservedNameRejectedAcrossEntryPoints) {
     auto& system = rocks::platform::PhysicalFileSystem();
     constexpr const char* name = "NUL.txt";
     bool exists = true;
-    CHECK(system.Exists(name, 7, exists).code == rocks::platform::FileCode::Unsupported);
+    CHECK(system.FileExists(name, 7, exists).code == rocks::platform::FileCode::Unsupported);
     CHECK(exists);
     CHECK(system.Delete(name, 7).code == rocks::platform::FileCode::Unsupported);
     rocks::platform::File file;

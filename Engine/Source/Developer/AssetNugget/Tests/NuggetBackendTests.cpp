@@ -115,7 +115,7 @@ bool WriteAll(platform::FileSystem& files, StringView path, Span<const uint8> by
 
 bool Exists(platform::FileSystem& files, StringView path) noexcept {
     bool exists = false;
-    return files.Exists(path.Data(), path.ByteCount(), exists) && exists;
+    return files.FileExists(path.Data(), path.ByteCount(), exists) && exists;
 }
 
 // tmp 안의 파일 수다.

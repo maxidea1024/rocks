@@ -628,8 +628,8 @@ TEST(NuggetBackendRace_HeldShardLock) {
     CHECK(backend.Put(NuggetBackendPut{NuggetBucketTexture, Key(4), values}).status ==
           NuggetStatus::Stored);
     bool lockKept = false;
-    CHECK(platform::PhysicalFileSystem().Exists(lock.View().Data(), lock.View().ByteCount(),
-                                                lockKept) &&
+    CHECK(platform::PhysicalFileSystem().FileExists(lock.View().Data(), lock.View().ByteCount(),
+                                                    lockKept) &&
           lockKept);
 }
 
@@ -655,8 +655,8 @@ TEST(NuggetBackendRace_AllocationFailures) {
             entry.TryAppend(StringView(hex, 64)) && entry.TryAppend(".rnug"));
     auto exists = [&]() noexcept {
         bool found = false;
-        return platform::PhysicalFileSystem().Exists(entry.View().Data(), entry.View().ByteCount(),
-                                                     found) &&
+        return platform::PhysicalFileSystem().FileExists(entry.View().Data(),
+                                                         entry.View().ByteCount(), found) &&
                found;
     };
     uint32 failures = 0;
@@ -903,7 +903,7 @@ TEST(NuggetBackendRace_CollectFilterAndAllocations) {
     CHECK(collected.Value().removed == 1 && collected.Value().temporaries == 1);
     for (const String& path : strays) {
         bool found = false;
-        CHECK(files.Exists(path.View().Data(), path.View().ByteCount(), found) && found);
+        CHECK(files.FileExists(path.View().Data(), path.View().ByteCount(), found) && found);
     }
 
     REQUIRE(backend.Put(NuggetBackendPut{NuggetBucketTexture, Key(1), values}).status ==

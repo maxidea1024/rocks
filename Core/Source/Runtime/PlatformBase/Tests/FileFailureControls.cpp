@@ -46,7 +46,7 @@ public:
         }
         return {};
     }
-    platform::FileStatus Exists(const char*, usize, bool&) noexcept override {
+    platform::FileStatus FileExists(const char*, usize, bool&) noexcept override {
         return {platform::FileCode::Unsupported, 0};
     }
     platform::FileStatus Delete(const char*, usize) noexcept override {

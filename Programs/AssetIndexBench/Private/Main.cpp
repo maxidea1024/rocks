@@ -214,7 +214,7 @@ int RunMain(launch::ApplicationContext& context) noexcept {
     platform::FileSystem& files = platform::PhysicalFileSystem();
     const StringView content = layout.ContentDirectory();
     bool exists = false;
-    if (!files.Exists(content.Data(), content.ByteCount(), exists) || !exists) {
+    if (!files.FileExists(content.Data(), content.ByteCount(), exists) || !exists) {
         printf("generating %llu packages...\n", static_cast<unsigned long long>(count));
         const uint64 start = platform::MonotonicTicks();
         if (!Generate(allocator, content, count)) {
