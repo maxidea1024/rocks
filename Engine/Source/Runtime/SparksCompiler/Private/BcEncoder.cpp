@@ -337,7 +337,10 @@ uint32 BytecodeEncoder::HostDescriptor(BytecodeRefKind kind, uint32 symbol) noex
                 ? (entry.flags & SymbolFlags::Static) != 0
                 : entry.kind != SymbolKind::Method && entry.kind != SymbolKind::InterfaceMethod;
         if (!first) {
-            descriptor.Append("x");
+            // struct 메서드의 this는 struct 값(Buf `st`)이다(LC5d2 리뷰 B4).
+            const bool structOwner =
+                entry.owner != NoSymbol && c_.symbols_[entry.owner].kind == SymbolKind::Struct;
+            descriptor.Append(structOwner ? "st" : "x");
         }
 
         for (uint32 index = 0; index < signature.parameterCount; ++index) {
@@ -1833,6 +1836,16 @@ void BytecodeEncoder::EncodeNew(const IrInstruction& i) noexcept {
         // 결과가 Ref면 객체(Sparks class·엔진 component — NEWC), 아니면 값 struct(NEWS — Sparks
         // struct는 TYPE이 있고 엔진 struct·TagSet은 host 배치라 없다, LC5d).
         const bool component = BankOf(i.a) == 1;
+        // 언어 타입 `TagSet()`(빈 집합)은 null 버퍼다(SparksVm 6.5절 — VM이 이름으로 가리지 않게
+        // 컴파일러가 LOADNULL.B로 낸다, LC5d2 리뷰 S5).
+        const uint32 created = checker_.SymbolOf(checker_.NonOptional(type));
+        if (!component && created != NoSymbol &&
+            c_.symbols_[created].kind == SymbolKind::PreludeType &&
+            c_.symbols_[created].name == "TagSet") {
+            Word(EncodeABC(Opcode::LoadNullB, Phys(i.a), 0, 0), span);
+            break;
+        }
+
         Word(EncodeABx(component ? Opcode::NewC : Opcode::NewS, Phys(i.a), Bx(TypeRef(type))),
              span);
         for (uint32 pair = 0; pair < i.c; ++pair) {

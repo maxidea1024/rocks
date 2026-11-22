@@ -902,4 +902,37 @@ TEST(SparksVmHost_VirtualCastAndEngineStructs) {
     CHECK(reason.View() == "ref 0 (virtual Thing.Speak): no host to bind this reference");
 }
 
+TEST(SparksVmHost_StructFieldBanksAreSeparated) {
+    // Scalar 필드만 있는 struct 버퍼를 Ref 필드(같은 위치 0) 명령으로 읽으면 ContractViolation이다
+    // (LC5d2 리뷰 B3 — 사용자 Scalar 값이 handle로 바뀌지 않는다).
+    SystemAllocator allocator;
+    Assembler assembler(allocator);
+    const StringView scalarNames[] = {"X"};
+    const uint8 scalarBanks[] = {0};
+    const uint8 one[] = {1};
+    const uint32 a =
+        assembler.StructRef("A", Span<const StringView>(scalarNames, 1),
+                            Span<const uint8>(scalarBanks, 1), Span<const uint8>(one, 1));
+    const StringView refNames[] = {"O"};
+    const uint8 refBanks[] = {1};
+    const uint32 b = assembler.StructRef("B", Span<const StringView>(refNames, 1),
+                                         Span<const uint8>(refBanks, 1), Span<const uint8>(one, 1));
+    const uint32 o = assembler.FieldRef(b, 0);
+    Shape shape;
+    shape.registers[1] = 1;
+    shape.frame[1] = 1;
+    shape.registers[2] = 1;
+    shape.frame[2] = 1;
+    assembler.Begin("Forge", shape);
+    assembler.Emit(EncodeABx(Opcode::NewS, 0, a));
+    assembler.Emit(EncodeABC(Opcode::GetSFR, 0, 0, 1));
+    assembler.Emit(EncodeAx(Opcode::Extra, o));
+    assembler.Emit(EncodeABC(Opcode::Ret, 0, 0, 0));
+    assembler.End();
+    REQUIRE(Verify(assembler));
+    VmExecution execution(allocator);
+    CHECK(Faults(Run(execution, assembler.Linked(), 0, {}), VmFaultKind::ContractViolation));
+    CHECK(execution.LiveBuffers() == 0);
+}
+
 } // namespace sparks_vm_host_tests_file

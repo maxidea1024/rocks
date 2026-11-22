@@ -148,8 +148,10 @@ Result<void> LinkModule(const BytecodeModule& module, VmHost* host, VmLinkedModu
     out.languageIndex_.Clear();
     out.languages_.Clear();
     out.imports_.Clear();
+    out.shapes_.Clear();
     out.importsLinked_ = false;
     out.linked_ = false;
+    ++out.generation_;
     const usize count = module.refs.Size();
     if (auto resized = out.hosts_.TryResize(count); !resized) {
         return resized;
@@ -160,6 +162,10 @@ Result<void> LinkModule(const BytecodeModule& module, VmHost* host, VmLinkedModu
     }
 
     if (auto resized = out.imports_.TryResize(count); !resized) {
+        return resized;
+    }
+
+    if (auto resized = out.shapes_.TryResize(count); !resized) {
         return resized;
     }
 
@@ -199,6 +205,28 @@ Result<void> LinkModule(const BytecodeModule& module, VmHost* host, VmLinkedModu
             platform::MemoryCopy(out.languages_.Data() + at, &binding, sizeof(binding));
             out.languageIndex_[ref] = static_cast<uint32>(at / detail::VmLanguageWords);
             continue;
+        }
+
+        // import·가상 함수의 서술자 모양(6.5절 — 대상 함수와 대조).
+        if (entry.kind == BytecodeRefKind::ImportedFunction ||
+            entry.kind == BytecodeRefKind::VirtualFunction) {
+            detail::VmSignature signature;
+            if (entry.arguments == NoBytecodeIndex ||
+                !detail::VmParseSignature(module.String(entry.arguments), signature)) {
+                return Reject(reason, module, ref, "invalid call descriptor");
+            }
+
+            VmLinkedModule::Shape& shape = out.shapes_[ref];
+            for (uint32 operand = 0; operand < signature.operandCount; ++operand) {
+                const detail::VmTypeNode& node = signature.nodes[signature.operands[operand]];
+                shape.parameters[node.bank] =
+                    static_cast<uint16>(shape.parameters[node.bank] + node.slots);
+            }
+
+            const detail::VmTypeNode& result = signature.nodes[signature.result];
+            shape.returnBank = result.slots == 0 ? 0 : result.bank;
+            shape.returnSlots = result.slots;
+            shape.valid = true;
         }
 
         if (entry.kind == BytecodeRefKind::ImportedFunction) {
@@ -280,7 +308,8 @@ Result<void> LinkModule(const BytecodeModule& module, VmHost* host, VmLinkedModu
             if (hostStructField || FieldBank(op, bank)) {
                 const uint32 ref = DecodeAx(module.words[function.firstWord + address + 1]);
                 const VmHostBinding& field = out.hosts_[ref];
-                if (field.bank != bank || field.slots != DecodeC(word)) {
+                const bool unbound = hostStructField && host == nullptr; // 실행 중 계약 위반
+                if (!unbound && (field.bank != bank || field.slots != DecodeC(word))) {
                     StringBuilder<VmLinkReasonBytes> why(out.hosts_.GetAllocator());
                     why.AppendFormat("the field instruction does not match the bound field '{}'",
                                      module.String(module.refs[ref].name));
@@ -358,11 +387,29 @@ VmFaultKind VmHost::InitializeStruct(VmHostCall&) noexcept {
     return VmFaultKind::None;
 }
 
-bool VmHost::AppendName(uint64, uint64, StringBuilderBase&) noexcept {
+bool VmHost::AppendName(uint64, StringBuilderBase&) noexcept {
+    return false;
+}
+
+bool VmHost::AppendEnumName(uint64, uint64, StringBuilderBase&) noexcept {
     return false;
 }
 
 Result<void> LinkImports(Span<VmLinkedModule* const> modules, StringBuilderBase& reason) noexcept {
+    // 모두 링크에 성공했고 같은 host여야 한다(LC5d2 리뷰 B1·B2 — host마다 handle 공간이 다르다).
+    for (VmLinkedModule* linked : modules) {
+        if (linked == nullptr || !linked->linked_ || linked->host_ != modules[0]->host_) {
+            reason.Append(linked == nullptr || !linked->linked_
+                              ? "a module in the import set is not linked"
+                              : "the modules are linked to different hosts");
+            if (reason.HasFailed()) {
+                return Result<void>::Failure(reason.Status().Error());
+            }
+
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
     for (VmLinkedModule* linked : modules) {
         const BytecodeModule& module = *linked->module_;
         for (uint32 ref = 0; ref < module.refs.Size(); ++ref) {
@@ -433,6 +480,31 @@ Result<void> LinkImports(Span<VmLinkedModule* const> modules, StringBuilderBase&
 
             linked->imports_[ref].module = target;
             linked->imports_[ref].function = function;
+            linked->imports_[ref].generation = target->generation_;
+        }
+
+        // 이 import를 부르는 CALL마다 부르는 쪽 창이 대상 매개변수를 담는지 본다(LC5d2 리뷰 S3 —
+        // 로드에서 거부).
+        for (const BytecodeFunction& function : module.functions) {
+            for (uint32 address = 0; address < function.wordCount; ++address) {
+                const uint32 word = module.words[function.firstWord + address];
+                const Opcode op = DecodeOpcode(word);
+                if (op == Opcode::Call &&
+                    module.refs[DecodeBx(word)].kind == BytecodeRefKind::ImportedFunction) {
+                    const VmLinkedModule::Import& import = linked->imports_[DecodeBx(word)];
+                    const BytecodeFunction& called =
+                        import.module->module_->functions[import.function];
+                    for (uint32 bank = 0; bank < BytecodeBankCount; ++bank) {
+                        if (called.parameters[bank] >
+                            uint32(function.frame[bank]) - function.registers[bank]) {
+                            return RejectWord(reason, module, function, address,
+                                              "the imported call does not fit the call window");
+                        }
+                    }
+                }
+
+                address += InfoOf(op).extra ? 1 : 0;
+            }
         }
     }
 

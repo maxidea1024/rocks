@@ -49,11 +49,23 @@ VmFaultKind VmExecution::ResolveVirtualCall(uint32 ref, const Banks& banks, VmVi
     if (fault == VmFaultKind::None && call.error_ == ErrorCode::None && target.native) {
         call.binding_ = target.binding;
         fault = host->CallNative(call);
-    } else if (fault == VmFaultKind::None && call.error_ == ErrorCode::None &&
-               (target.module == nullptr || !target.module->Linked() ||
-                !target.module->ImportsLinked() ||
-                target.function >= target.module->Module().functions.Size())) {
-        fault = VmFaultKind::ContractViolation; // host가 준 대상이 실행할 수 없다
+    } else if (fault == VmFaultKind::None && call.error_ == ErrorCode::None) {
+        // host가 준 Sparks 대상은 같은 host로 링크했고, 함수 모양이 가상 서술자와 같아야 한다
+        // (LC5d2 리뷰 B2·S2).
+        const VmLinkedModule::Shape& shape = link_->shapes_[ref];
+        bool runnable = target.module != nullptr && target.module->Linked() &&
+                        target.module->ImportsLinked() && target.module->host_ == link_->host_ &&
+                        target.function < target.module->Module().functions.Size() && shape.valid;
+        if (runnable) {
+            const BytecodeFunction& called = target.module->Module().functions[target.function];
+            runnable = called.returnSlots == shape.returnSlots &&
+                       (shape.returnSlots == 0 || called.returnBank == shape.returnBank);
+            for (uint32 bank = 0; bank < BytecodeBankCount; ++bank) {
+                runnable = runnable && called.parameters[bank] == shape.parameters[bank];
+            }
+        }
+
+        fault = runnable ? VmFaultKind::None : VmFaultKind::ContractViolation;
     }
 
     error = call.error_;

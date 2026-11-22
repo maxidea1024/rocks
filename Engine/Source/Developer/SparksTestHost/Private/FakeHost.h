@@ -60,7 +60,8 @@ public:
     VmFaultKind ResolveVirtual(VmHostCall& call, uint64 receiver,
                                VmVirtualTarget& target) noexcept override;
     bool IsA(uint64 handle, uint64 type) noexcept override;
-    bool AppendName(uint64 type, uint64 value, StringBuilderBase& out) noexcept override;
+    bool AppendName(uint64 value, StringBuilderBase& out) noexcept override;
+    bool AppendEnumName(uint64 type, uint64 value, StringBuilderBase& out) noexcept override;
 
     // 가상 호출의 Sparks 대상을 찾을 링크된 모듈이다(`.run` 실행기가 링크 뒤 둔다).
     void SetModule(const VmLinkedModule* module) noexcept {

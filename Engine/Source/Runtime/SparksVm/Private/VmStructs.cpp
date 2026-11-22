@@ -27,10 +27,17 @@ uint64 VmStructBits(VmBuffer* buffer) noexcept {
 // 필드가 struct 버퍼의 자기 bank 구역 안인지다(Buf 필드는 끝의 capacity slot, 그 밖은 앞쪽) —
 // 다른 struct의 필드 참조가 버퍼 밖이나 다른 bank를 읽지 않게 한다(SparksVm 2.2절).
 bool FieldFits(const VmBuffer* buffer, const BytecodeTypeField& field) noexcept {
+    // struct 버퍼: count = 전체 slot, capacity = Buf slot 수, indexCapacity = Scalar slot 수
+    // (LC5d2 리뷰 B3 — Scalar 값을 Ref handle로 읽지 않게 bank 구역을 정확히 대조한다).
+    const uint64 scalars = buffer->indexCapacity;
     const uint64 split = uint64(buffer->count) - buffer->capacity;
     const uint64 end = uint64(field.offset) + field.slots;
-    return field.bank == VmStructBufBank ? field.offset >= split && end <= buffer->count
-                                         : end <= split;
+    if (field.bank == VmStructBufBank) {
+        return field.offset >= split && end <= buffer->count;
+    }
+
+    return field.bank == VmStructScalarBank ? end <= scalars
+                                            : field.offset >= scalars && end <= split;
 }
 
 // 필드 명령의 값 bank다(GETSF·SETSF의 S·R·B 순).
@@ -106,13 +113,6 @@ VmFaultKind VmExecution::Structured(Opcode op, uint32 word, uint32 extra, const 
     case Opcode::NewS: {
         // TYPE의 struct 배치로 모든 slot이 0·null인 버퍼(기본값은 컴파일러의 SETSF).
         const uint32 typeIndex = module.refs[DecodeBx(word)].detail;
-        // 언어 타입 `TagSet`의 생성(`TagSet()` — 빈 집합)은 null 버퍼다(6.5절 — null이 빈 값).
-        if (typeIndex == NoBytecodeIndex &&
-            module.String(module.refs[DecodeBx(word)].name) == "TagSet") {
-            put(a, nullptr);
-            return VmFaultKind::None;
-        }
-
         // TYPE이 없으면 엔진 struct다: host 배치(6.5절). 배치가 없으면(객체·enum 타입) 계약 위반.
         uint64 groups[BytecodeBankCount] = {};
         const VmHostBinding& host = link_->hosts_[DecodeBx(word)];
@@ -135,6 +135,7 @@ VmFaultKind VmExecution::Structured(Opcode op, uint32 word, uint32 extra, const 
 
         allocation.buffer->count = static_cast<uint32>(slots);
         allocation.buffer->capacity = static_cast<uint32>(groups[VmStructBufBank]);
+        allocation.buffer->indexCapacity = static_cast<uint32>(groups[VmStructScalarBank]);
         uint64* target = VmStructSlots(allocation.buffer);
         for (uint64 slot = 0; slot < slots; ++slot) {
             target[slot] = 0;
@@ -191,6 +192,7 @@ VmFaultKind VmExecution::Structured(Opcode op, uint32 word, uint32 extra, const 
             VmBuffer* copy = allocation.buffer;
             copy->count = slot->count;
             copy->capacity = slot->capacity;
+            copy->indexCapacity = slot->indexCapacity;
             platform::MemoryCopy(VmStructSlots(copy), VmStructSlots(slot),
                                  uint64(slot->count) * sizeof(uint64));
             for (uint32 at = copy->count - copy->capacity; at < copy->count; ++at) {

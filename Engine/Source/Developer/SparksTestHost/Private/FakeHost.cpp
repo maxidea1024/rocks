@@ -15,6 +15,7 @@ constexpr uint8 FakeScalarBank = 0;
 constexpr uint8 FakeRefBank = 1;
 constexpr uint8 FakeBufBank = 2;
 constexpr uint32 FakeMaxSlots = 32;
+constexpr uint32 FakeMaxBaseDepth = 64;
 
 struct FakeLetter {
     StringView name;
@@ -914,7 +915,10 @@ StringView FakeHost::BaseOf(StringView type) const noexcept {
 
 bool FakeHost::Derives(StringView type, StringView ancestor) const noexcept {
     // 기반 사슬(첫 기반)과 Sparks 클래스가 구현한 interface(기반 목록)를 본다.
-    for (StringView current = type; !current.IsEmpty(); current = BaseOf(current)) {
+    // 기반 사슬은 FakeMaxBaseDepth까지만 따라간다(schema base 순환 방어).
+    uint32 depth = 0;
+    for (StringView current = type; !current.IsEmpty() && depth < FakeMaxBaseDepth;
+         current = BaseOf(current), ++depth) {
         if (current == ancestor) {
             return true;
         }
@@ -953,7 +957,9 @@ VmFaultKind FakeHost::ResolveVirtual(VmHostCall& call, uint64 receiver,
     StringView member;
     FakeSplit(bindings_[call.Binding()].name.View(), owner, member);
     const BytecodeModule& module = module_->Module();
-    for (StringView current = object->type.View(); !current.IsEmpty(); current = BaseOf(current)) {
+    uint32 depth = 0;
+    for (StringView current = object->type.View(); !current.IsEmpty() && depth < FakeMaxBaseDepth;
+         current = BaseOf(current), ++depth) {
         for (uint32 index = 0; index < module.functions.Size(); ++index) {
             StringView name = module.String(module.functions[index].name);
             if (name.ByteCount() == current.ByteCount() + 1 + member.ByteCount() &&
@@ -969,17 +975,17 @@ VmFaultKind FakeHost::ResolveVirtual(VmHostCall& call, uint64 receiver,
     return VmFaultKind::ContractViolation;
 }
 
-bool FakeHost::AppendName(uint64 type, uint64 value, StringBuilderBase& out) noexcept {
-    if (type == 0) {
-        // Name·Tag: 리터럴 이름 표(번호 + 1).
-        if (value == 0 || value > names_.Size()) {
-            return false;
-        }
-
-        out.Append(names_[value - 1].View());
-        return true;
+bool FakeHost::AppendName(uint64 value, StringBuilderBase& out) noexcept {
+    // Name·Tag: 리터럴 이름 표(번호 + 1), 0은 없음(None — 빈 글자).
+    if (value > names_.Size()) {
+        return false;
     }
 
+    out.Append(value == 0 ? StringView() : names_[value - 1].View());
+    return true;
+}
+
+bool FakeHost::AppendEnumName(uint64 type, uint64 value, StringBuilderBase& out) noexcept {
     const FakeBinding& binding = bindings_[type];
     if (binding.schemaType == nullptr || binding.schemaType->kind != SchemaTypeKind::Enum ||
         value >= binding.schemaType->caseCount) {

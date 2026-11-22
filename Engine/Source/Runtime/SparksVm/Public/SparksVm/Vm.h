@@ -76,6 +76,8 @@ enum class VmOutcome : uint8 {
 // 0:0)다.
 struct VmFault {
     VmFaultKind kind = VmFaultKind::None;
+    const VmLinkedModule* module =
+        nullptr; // function·location이 속한 모듈(다른 모듈 함수일 수 있다)
     uint32 function = NoBytecodeIndex;
     uint32 address = NoBytecodeIndex;
     BytecodeLocation location;

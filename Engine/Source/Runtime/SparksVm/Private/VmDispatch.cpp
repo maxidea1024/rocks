@@ -339,7 +339,11 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
                     // 엔진 enum: host 이름 표(6.5절).
                     VmHost* host = link_->host_;
                     if (host == nullptr ||
-                        !host->AppendName(link_->hosts_[extra & MaxBx].id, s[bb], text)) {
+                        !host->AppendEnumName(link_->hosts_[extra & MaxBx].id, s[bb], text)) {
+                        if (text.HasFailed()) {
+                            return failed(text.Status().Error()); // 할당 실패는 fault가 아니다
+                        }
+
                         return MakeFault(VmFaultKind::ContractViolation, at, steps);
                     }
                 } else {
@@ -354,7 +358,11 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
             } else if ((extra >> 16) == static_cast<uint32>(ScalarKind::Name)) {
                 // Name·Tag: host 이름 표(6.5절).
                 VmHost* host = link_->host_;
-                if (host == nullptr || !host->AppendName(0, s[bb], text)) {
+                if (host == nullptr || !host->AppendName(s[bb], text)) {
+                    if (text.HasFailed()) {
+                        return failed(text.Status().Error());
+                    }
+
                     return MakeFault(VmFaultKind::ContractViolation, at, steps);
                 }
             } else {
@@ -671,8 +679,17 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
             const VmLinkedModule* target = link_;
             uint32 callee = ref.detail;
             if (ref.kind == BytecodeRefKind::ImportedFunction) {
-                target = link_->imports_[refIndex].module;
-                callee = link_->imports_[refIndex].function;
+                // 대상이 그 뒤 다시 링크됐으면(세대가 다르면) 계약 위반이다(LC5d2 리뷰 B1).
+                const VmLinkedModule::Import& import = link_->imports_[refIndex];
+                if (import.module == nullptr || !import.module->Linked() ||
+                    !import.module->ImportsLinked() ||
+                    import.generation != import.module->generation_ ||
+                    import.function >= import.module->Module().functions.Size()) {
+                    return MakeFault(VmFaultKind::ContractViolation, at, steps);
+                }
+
+                target = import.module;
+                callee = import.function;
             } else if (ref.kind != BytecodeRefKind::Function) {
                 return MakeFault(VmFaultKind::ContractViolation, at, steps);
             }
