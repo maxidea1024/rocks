@@ -1,0 +1,41 @@
+struct Label {
+    var Words: string = "";
+    var Count: int = 0;
+}
+
+class Probe : ScriptableComponent {
+    var Data: DataAsset = Asset("/Game/Data/Rules");
+    var Names: Set<string> = [];
+
+    event Ready();
+
+    fn Order(a: string, b: string?): bool {
+        return a < b ?? "" || a >= "m" || b == "x";
+    }
+
+    fn Same(x: int?, y: int?, q: quat, r: quat): bool {
+        let turned = q * r;
+        _ = turned;
+        return x == y;
+    }
+
+    fn Make(): Label {
+        let soft: Soft<DataAsset> = Asset("/Game/Data/Rules");
+        _ = soft;
+        let text = "tab\tquote\" \$sign \u{1F600}";
+        let raw = @"line ""one""";
+        _ = raw;
+        let added = Names.Add(text);
+        _ = added;
+        return Label(Words: text, Count: 2);
+    }
+
+    async fn Later() {
+        await NextTick();
+        emit Ready();
+    }
+
+    fn Look(): Probe? {
+        return Owner.Find<Probe>();
+    }
+}

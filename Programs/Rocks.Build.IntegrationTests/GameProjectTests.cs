@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using Rocks.Build.Cli;
 using Rocks.Build.Descriptors;
+using Rocks.Tooling.Common;
 
 namespace Rocks.Build.IntegrationTests;
 
@@ -18,16 +19,22 @@ internal static class GameProjectTests
         try
         {
             Association(Path.Combine(root, "association"));
-            Registries(Path.Combine(root, "registry"));
+            await Registries(Path.Combine(root, "registry"));
             Snapshot(Path.Combine(root, "snapshot"));
             await CleanAsync(Path.Combine(root, "clean"));
+            Assembly(Path.Combine(root, "assembly"));
+            if (OperatingSystem.IsWindows())
+            {
+                await Shell(Path.Combine(root, "shell"));
+            }
         }
         finally
         {
             Directory.Delete(root, recursive: true);
         }
 
-        Console.WriteLine("PASS game project: SDK association and registries, input snapshot and rule exclusions, game clean boundaries");
+        Console.WriteLine("PASS game project: SDK association and registries, input snapshot and rule exclusions, game clean boundaries, " +
+            "multi-configuration SDK assembly, shell menu registration");
     }
 
     private static void Association(string root)
@@ -114,7 +121,7 @@ internal static class GameProjectTests
         Require(Error(() => Resolve(registry)).Contains("is not an installed SDK", StringComparison.Ordinal), "a path association without a manifest");
     }
 
-    private static void Registries(string root)
+    private static async Task Registries(string root)
     {
         string first = Sdk(root, "First", 0, 1, 0);
         string second = Sdk(root, "Second", 0, 1, 1);
@@ -124,6 +131,8 @@ internal static class GameProjectTests
         Require(saved["fileVersion"]!.GetValue<int>() == 1 && saved["sdks"]!.AsArray().Count == 1, "JSON registry file format");
         JsonFileRobustness(Path.Combine(root, "robust"), first, second);
         Concurrency(Path.Combine(root, "concurrent", "Sdks.json"));
+        await CrossProcessAsync(Path.Combine(root, "processes", "Sdks.json"));
+        await ContentionAsync(Path.Combine(root, "contention", "Sdks.json"));
 
         if (OperatingSystem.IsWindows())
         {
@@ -208,7 +217,8 @@ internal static class GameProjectTests
         Require(registry.Unregister("{00000000-0000-0000-0000-000000000004}") && JsonNode.Parse(File.ReadAllText(file))!["sdks"]!.AsArray().Count == 3,
             "JSON: unregistering removes only that entry");
 
-        foreach (string text in new[] { "{ broken", "{ \"fileVersion\": 2, \"sdks\": [] }", "{ \"fileVersion\": 1, \"sdks\": {} }" })
+        foreach (string text in new[] { "{ broken", "{ \"fileVersion\": 2, \"sdks\": [] }", "{ \"fileVersion\": 1, \"sdks\": {} }",
+            "{ \"fileVersion\": 1, \"fileVersion\": 1, \"sdks\": [] }", "{ \"fileVersion\": 1, \"sdks\": [ { \"id\": \"a\", \"id\": \"b\", \"path\": \"x\" } ] }" })
         {
             File.WriteAllText(file, text);
             var unreadable = new List<string>();
@@ -223,6 +233,80 @@ internal static class GameProjectTests
             }
 
             Require(File.ReadAllText(file) == text, "JSON: an unreadable registry file must stay unchanged: " + text);
+        }
+    }
+
+    // 교차 프로세스 잠금: 자식 프로세스 둘이 같은 등록부에 동시에 등록해도 항목을 잃지 않는다(JSON은 잠금 파일, Windows 레지스트리는 사용자 SID
+    // 전역 mutex). 같은 프로세스 안 시험(Concurrency)과 달리 운영체제 잠금이 프로세스 사이에서 배제하는지 본다.
+    private static async Task CrossProcessAsync(string file)
+    {
+        const int perWriter = 12;
+        string writer = typeof(GameProjectTests).Assembly.Location;
+        async Task Run(string kind, string target)
+        {
+            ProcessResult[] results = await Task.WhenAll(new[] { "A", "B" }.Select(prefix => ProcessRunner.RunAsync(new("dotnet",
+                [writer, "--registry-writer", kind, target, prefix, perWriter.ToString(System.Globalization.CultureInfo.InvariantCulture)],
+                Path.GetDirectoryName(writer)!, Timeout: TimeSpan.FromMinutes(5)))));
+            Require(results.All(result => result.ExitCode == 0), kind + " registry writers failed: " + string.Join("\n", results.Select(result => result.StdOut + result.StdErr)));
+            ISdkRegistry registry = kind == "json" ? new JsonSdkRegistry(target) : OperatingSystem.IsWindows() ? new WindowsSdkRegistry(target) : throw new PlatformNotSupportedException();
+            Require(registry.List().Count == 2 * perWriter, $"{kind}: concurrent registrations from two processes lost entries: {registry.List().Count}");
+        }
+
+        await Run("json", file);
+        if (OperatingSystem.IsWindows())
+        {
+            string subKey = @"Software\Rocks\Tests\" + Guid.NewGuid().ToString("B");
+            try
+            {
+                await Run("windows", subKey);
+            }
+            finally
+            {
+                Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(subKey, throwOnMissingSubKey: false);
+            }
+        }
+    }
+
+    // 잠금 경합: 자식이 잠금을 쥐고 HELD를 쓰면, 부모의 등록은 경합을 관찰하고(hook) 끝나지 않은 채 기다리다가, gate(표준 입력 한 줄)로 자식이 놓은 뒤
+    // 성공한다. 순서는 신호와 gate가 정하고 시간 대기는 쓰지 않는다(hook 대기의 상한은 멈춤 방지일 뿐이다).
+    private static async Task ContentionAsync(string file)
+    {
+        string writer = typeof(GameProjectTests).Assembly.Location;
+        var start = new System.Diagnostics.ProcessStartInfo("dotnet", [writer, "--registry-lock-holder", file])
+        {
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true
+        };
+        using var holder = System.Diagnostics.Process.Start(start)!;
+        Require(holder.StandardOutput.ReadLine() == "HELD", "the lock holder did not take the lock");
+        using var contended = new ManualResetEventSlim();
+        SdkRegistries.ContentionObserved = _ => contended.Set();
+        try
+        {
+            Task<string> register = Task.Run(() => new JsonSdkRegistry(file).Register(Path.Combine(Path.GetDirectoryName(file)!, "Contended")));
+            Require(contended.Wait(TimeSpan.FromMinutes(2)), "registration did not observe the held lock");
+            Require(!register.IsCompleted, "registration must wait while another process holds the lock");
+            holder.StandardInput.WriteLine();
+            holder.StandardInput.Flush();
+            await holder.WaitForExitAsync();
+            string id = await register;
+            Require(holder.ExitCode == 0 && new JsonSdkRegistry(file).List().Any(entry => entry.Id == id), "registration after the lock was released");
+        }
+        finally
+        {
+            SdkRegistries.ContentionObserved = null;
+        }
+    }
+
+    /// <summary>교차 프로세스 시험의 자식 본문이다: 접두가 붙은 SDK 경로 count개를 등록한다.</summary>
+    internal static void WriteRegistry(string kind, string target, string prefix, int count)
+    {
+        ISdkRegistry registry = kind == "json" ? new JsonSdkRegistry(target)
+            : OperatingSystem.IsWindows() ? new WindowsSdkRegistry(target) : throw new PlatformNotSupportedException(kind);
+        for (int index = 0; index < count; ++index)
+        {
+            registry.Register(Path.Combine(Path.GetTempPath(), "rocks-registry-writer", prefix + index.ToString(System.Globalization.CultureInfo.InvariantCulture)));
         }
     }
 
@@ -387,11 +471,348 @@ internal static class GameProjectTests
             .SequenceEqual([CleanCommand.OutputMarker, ".rocks-invocation.lock"], StringComparer.Ordinal), "game clean must keep only the lock files");
         Require(File.Exists(Path.Combine(other, "bin/Game.exe")), "game clean must not touch another configuration");
 
+        // 네이티브 빌드 전에 실패한 출력(호출 잠금만 있다)도 Rocks 출력이라 비운다 — 실패한 빌드 뒤 Rebuild가 막히지 않는다.
+        string failed = GameProjectLayout.DefaultOutput(project, "Game", NativeConfiguration.Development);
+        Write(failed, ".rocks-invocation.lock", "");
+        Write(failed, "game-build-evidence.json", "{}");
+        Require(await CleanCommand.RunAsync(Options(("configuration", "Development")), CancellationToken.None) == 0 &&
+            Directory.EnumerateFileSystemEntries(failed).Select(Path.GetFileName).SequenceEqual([".rocks-invocation.lock"]),
+            "an output with the invocation lock and a build record is a Rocks output");
+        // 호출 잠금만 있고 실행 기록이 없으면(예: 생성 영역 밖의 다른 잠금 사용자) 거부한다.
+        Write(failed, "kept.txt", "x");
+        await Expect(() => CleanCommand.RunAsync(Options(("configuration", "Development")), CancellationToken.None), "has no .native-build.lock");
+        // 프로젝트 파일 생성 영역은 호출 잠금과 실행 기록이 있어도 늘 거부한다(게임·엔진 모두).
+        string projectFiles = Path.Combine(project, "out", "ProjectFiles");
+        Write(projectFiles, ".rocks-invocation.lock", "");
+        Write(projectFiles, "action-report.json", "{}");
+        Write(projectFiles, "Game.vcxproj", "<Project />");
+        await Expect(() => CleanCommand.RunAsync(Options(("output", projectFiles)), CancellationToken.None), "generated project files area");
+        await Expect(() => CleanCommand.RunAsync(Options(("output", Path.Combine(projectFiles, "Programs"))), CancellationToken.None), "generated project files area");
+        await Expect(() => CleanCommand.CleanAsync(root, Path.Combine(root, "out", "ProjectFiles"), CancellationToken.None), "generated project files area");
+        Require(File.Exists(Path.Combine(projectFiles, "Game.vcxproj")), "clean touched the project files area");
+
         await Expect(() => CleanCommand.RunAsync(Options(("output", Path.Combine(project, "out"))), CancellationToken.None), "only build outputs under");
         await Expect(() => CleanCommand.RunAsync(Options(("output", Path.Combine(project, "Source"))), CancellationToken.None), "only build outputs under");
         await Expect(() => CleanCommand.RunAsync(Options(("output", Path.Combine(root, "out", "x"))), CancellationToken.None), "only build outputs under");
         await Expect(() => CleanCommand.RunAsync(Options(("root", root)), CancellationToken.None), "belong to engine targets");
         await Expect(() => CleanCommand.RunAsync(Options(("platform", "android")), CancellationToken.None), "belong to engine targets");
+    }
+
+    // 다중 구성 SDK 조립(Docs/Design/ProjectFiles.ko.md 10.3절, V10의 내보내기 오류): Libraries/·Metadata/는 구성 디렉터리로 가고, 한 벌 파일은
+    // 구성마다 같아야 하며 한 구성에만 있어도 오류다. 실패하면 대상이 생기지 않고 stage도 남지 않는다.
+    private static void Assembly(string root)
+    {
+        Directory.CreateDirectory(root);
+        string Stage(string name, params (string Path, string Text)[] files)
+        {
+            string directory = Path.Combine(root, "stage-" + name);
+            foreach ((string path, string text) in files)
+            {
+                Write(directory, path, text);
+            }
+
+            return directory;
+        }
+
+        string destination = Path.Combine(root, "Sdk");
+        using (var assembly = new SdkAssembly(destination))
+        {
+            string[] debug = assembly.Merge(NativeConfiguration.Debug, Stage("debug", ("Headers/M/0/M.h", "header"), ("Libraries/M.lib", "debug"),
+                ("Metadata/M/M.rocksmeta.json", "meta"), ("Tools/Tool.dll", "tool")));
+            Require(debug.SequenceEqual(["Configurations/Debug/Libraries/M.lib", "Configurations/Debug/Metadata/M/M.rocksmeta.json"]),
+                "per-configuration files go under Configurations/Debug: " + string.Join(", ", debug));
+            assembly.Merge(NativeConfiguration.Release, Stage("release", ("Headers/M/0/M.h", "header"), ("Libraries/M.lib", "release"),
+                ("Metadata/M/M.rocksmeta.json", "meta"), ("Tools/Tool.dll", "tool")));
+            assembly.RequireSameSharedFiles();
+            try
+            {
+                assembly.Merge(NativeConfiguration.Development, Stage("development", ("Headers/M/0/M.h", "other header")));
+                throw new InvalidOperationException("a configuration-independent file that differs must fail the export");
+            }
+            catch (InvalidOperationException error) when (error.Message.Contains("SDK file Headers/M/0/M.h differs between the Debug and Development", StringComparison.Ordinal))
+            {
+            }
+        }
+
+        using (var assembly = new SdkAssembly(destination))
+        {
+            assembly.Merge(NativeConfiguration.Debug, Stage("debug-extra", ("Headers/M/0/M.h", "header"), ("Headers/M/0/Extra.h", "extra")));
+            assembly.Merge(NativeConfiguration.Release, Stage("release-extra", ("Headers/M/0/M.h", "header")));
+            try
+            {
+                assembly.RequireSameSharedFiles();
+                throw new InvalidOperationException("a configuration-independent file in one configuration only must fail the export");
+            }
+            catch (InvalidOperationException error) when (error.Message.Contains("Headers/M/0/Extra.h is in the Debug configuration but not in Release", StringComparison.Ordinal))
+            {
+            }
+
+            try
+            {
+                assembly.Publish();
+                throw new InvalidOperationException("publishing an assembly without a built configuration must fail");
+            }
+            catch (InvalidOperationException error) when (error.Message.Contains("no configuration to publish", StringComparison.Ordinal))
+            {
+            }
+        }
+
+        Require(!Directory.Exists(destination) && !Directory.EnumerateDirectories(root, "Sdk.staging-*").Any(), "a failed assembly must leave no SDK or stage");
+        Directory.CreateDirectory(destination);
+        try
+        {
+            using var existing = new SdkAssembly(destination);
+            throw new InvalidOperationException("an existing SDK destination must be rejected");
+        }
+        catch (IOException error) when (error.Message.Contains("already exists", StringComparison.Ordinal))
+        {
+        }
+
+        // new-project(Docs/Design/ProjectFiles.ko.md 11절): 이름 검사, 두 단계 치환, 템플릿 철자 검사.
+        NewProjectCommand.ValidateName("MyGame", ["Core", "Launch"]);
+        foreach (string bad in new[] { "Ab", "lowercase", "Bad-Name", "Rocks", "ROCKS", "RocksSdk", "Std", "Posix", "Core", "LAUNCH", "Class", "Namespace",
+            "A23456789012345678901234567890123", "CON", "Nul", "COM1", "Lpt9", "Errno", "Stdin", "Stderr", "Near", "Far", "Interface", "Linux", "Unix", "Small",
+            "Hyper", "Pascal", "Cdecl" })
+        {
+            Error(() => NewProjectCommand.ValidateName(bad, ["Core", "Launch"]));
+        }
+
+        Require(NewProjectCommand.Replace("FoundationTemplate FOUNDATIONTEMPLATE foundationtemplate Foundationtemplate", "FoundationTemplate", "Zed") ==
+            "Zed ZED zed Foundationtemplate", "three spellings, case sensitive");
+        // 템플릿 이름을 담은 이름은 쓰기 전에 거부한다(대소문자 무시).
+        NewProjectCommand.RequireDistinctFromTemplate("Zed", "FoundationTemplate");
+        Error(() => NewProjectCommand.RequireDistinctFromTemplate("FoundationTemplateX", "FoundationTemplate"));
+        Error(() => NewProjectCommand.RequireDistinctFromTemplate("MyFoundationtemplate", "FoundationTemplate"));
+        string templateRoot = Path.Combine(root, "template");
+        Write(templateRoot, NewProjectCommand.TemplateFile, "{ \"fileVersion\": 1, \"templateName\": \"FixtureTemplate\", \"description\": \"x\", " +
+            "\"ignore\": [\"Template.json\"], \"replaceInExtensions\": [\".h\"] }");
+        Write(templateRoot, "Source/FixtureTemplate.h", "namespace fixturetemplate {}");
+        NewProjectCommand.CheckTemplate(NewProjectCommand.ReadTemplate(templateRoot));
+        Write(templateRoot, "Source/Mixed.h", "struct Fixturetemplate;");
+        try
+        {
+            NewProjectCommand.CheckTemplate(NewProjectCommand.ReadTemplate(templateRoot));
+            throw new InvalidOperationException("a mixed template spelling must be rejected");
+        }
+        catch (InvalidDataException error) when (error.Message.Contains("'Fixturetemplate'", StringComparison.Ordinal))
+        {
+        }
+
+        // 복사 대상: 빌드·IDE 산출물(out/·Saved/·점 디렉터리·최상위 *.slnx)은 기본으로 빼고, ignore는 파일·디렉터리·glob을 받는다.
+        File.Delete(Path.Combine(templateRoot, "Source/Mixed.h"));
+        Write(templateRoot, NewProjectCommand.TemplateFile, "{ \"fileVersion\": 1, \"templateName\": \"FixtureTemplate\", \"description\": \"x\", " +
+            "\"ignore\": [\"Template.json\", \"Docs/\", \"*.md\", \"Source/Gen?.h\"], \"replaceInExtensions\": [\".h\"] }");
+        foreach (string produced in new[] { "out/windows-x-debug/a.obj", "out/ProjectFiles/X.vcxproj", ".vs/X/db", "Saved/Crashes/x.dmp", "X.slnx",
+            "Docs/Guide.txt", "README.md", "Source/Gen1.h" })
+        {
+            Write(templateRoot, produced, "x");
+        }
+
+        string[] copied = [.. NewProjectCommand.Files(NewProjectCommand.ReadTemplate(templateRoot)).Select(file => file.Relative)];
+        Require(copied.SequenceEqual(["Source/FixtureTemplate.h"]), "template files to copy: " + string.Join(", ", copied));
+
+        // 인코딩: 엄격한 UTF-8, BOM 여부를 돌려주고, NUL 바이트와 잘못된 바이트는 거부한다.
+        string text = Path.Combine(templateRoot, "encoded.h");
+        File.WriteAllBytes(text, [0xEF, 0xBB, 0xBF, (byte)'a']);
+        Require(NewProjectCommand.ReadText(text) == ("a", true), "BOM is reported and stripped from the text");
+        File.WriteAllBytes(text, [(byte)'a', 0, (byte)'b']);
+        try
+        {
+            NewProjectCommand.ReadText(text);
+            throw new InvalidOperationException("a NUL byte must be rejected");
+        }
+        catch (InvalidDataException error) when (error.Message.Contains("NUL", StringComparison.Ordinal))
+        {
+        }
+
+        File.WriteAllBytes(text, [(byte)'a', 0xC3, 0x28]);
+        try
+        {
+            NewProjectCommand.ReadText(text);
+            throw new InvalidOperationException("invalid UTF-8 must be rejected");
+        }
+        catch (InvalidDataException error) when (error.Message.Contains("not valid UTF-8", StringComparison.Ordinal))
+        {
+        }
+
+        Write(templateRoot, NewProjectCommand.TemplateFile, "{ \"fileVersion\": 1, \"templateName\": \"FixtureTemplate\", \"description\": \"x\", " +
+            "\"ignore\": [], \"replaceInExtensions\": [], \"extra\": 1 }");
+        try
+        {
+            NewProjectCommand.ReadTemplate(templateRoot);
+            throw new InvalidOperationException("an unknown Template.json field must be rejected");
+        }
+        catch (InvalidDataException error) when (error.Message.Contains("unknown field 'extra'", StringComparison.Ordinal))
+        {
+        }
+
+        // 게임 프로젝트 파일의 구성은 SDK 구성 ∩ IDE 구성이다(구성 순서, Coverage는 빠진다).
+        Require(GameProjectFiles.Configurations(["Release", "Coverage", "Asan", "Development"])
+            .SequenceEqual([NativeConfiguration.Development, NativeConfiguration.Release, NativeConfiguration.Asan]) &&
+            GameProjectFiles.Configurations(["Coverage"]).Length == 0, "game project files configuration intersection");
+
+        // 구성 목록: 쉼표·세미콜론, 구성 순서로 정렬, 이름은 정확히, 중복·빈 칸 거부.
+        Require(SdkExportCommand.Parse("Release;Debug").SequenceEqual([NativeConfiguration.Debug, NativeConfiguration.Release]) &&
+            SdkExportCommand.Parse("Debug, Development").SequenceEqual([NativeConfiguration.Debug, NativeConfiguration.Development]), "configuration list parsing");
+        foreach (string bad in new[] { "debug", "Debug,Debug", "", "Debug,", "Fast" })
+        {
+            Error(() => SdkExportCommand.Parse(bad));
+        }
+    }
+
+    // 셸 메뉴 등록(Docs/Design/ProjectFiles.ko.md 12절, PJ8): 임시 하위 키를 Classes·선택기 키로 주어 실제 HKCU Classes에는 쓰지 않는다.
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static async Task Shell(string root)
+    {
+        string FakeSdk(string name, int manifest, string engine, bool cli)
+        {
+            string sdk = Path.Combine(root, name);
+            string[] parts = engine.Split('.');
+            Write(sdk, SdkAssociation.ManifestName, $"{{ \"Version\": {manifest}, \"EngineVersion\": {{ \"Major\": {parts[0]}, \"Minor\": {parts[1]}, \"Patch\": {parts[2]} }} }}");
+            if (cli)
+            {
+                Write(sdk, "Tools/Rocks.Build.Cli/Rocks.Build.Cli.dll", "");
+            }
+
+            // 메뉴 shim이 부르는 SDK 스크립트의 가짜다: 받은 -Project를 파일에 적고 종료 코드를 돌려준다.
+            Write(sdk, "Build/GenerateProjectFiles.ps1",
+                "param([string] $Project)\nSet-Content -LiteralPath (Join-Path $PSScriptRoot 'received.txt') -Value $Project -Encoding utf8NoBOM\n" +
+                "exit $(if ($Project.EndsWith('fail.rocksproject')) { 1 } else { 0 })\n");
+            return sdk;
+        }
+
+        int current = InstalledSdk.ManifestVersion;
+        string low = FakeSdk("Low", current, "0.1.5", true);
+        string high = FakeSdk("High", current, "0.2.0", true);
+        string oldManifest = FakeSdk("OldManifest", current - 1, "0.3.0", true);
+        string noCli = FakeSdk("NoCli", current, "0.4.0", false);
+        string broken = FakeSdk("Broken", current, "0.5.0", true);
+        File.WriteAllText(Path.Combine(broken, SdkAssociation.ManifestName), "{ \"Version\": " + current + ", \"EngineVersion\": [ }");
+        var registry = new MemoryRegistry();
+        foreach (string sdk in new[] { low, high, oldManifest, noCli, broken, Path.Combine(root, "Removed") })
+        {
+            registry.Register(sdk);
+        }
+
+        const string testsKey = @"Software\Rocks\Tests";
+        string scope = testsKey + @"\" + Guid.NewGuid().ToString("B");
+        var locations = new ShellLocations(scope + @"\Classes", scope + @"\ProjectSelector", Path.Combine(root, "shim", "ShellMenu.ps1"));
+        string pwsh = Environment.GetEnvironmentVariable("PATH")!.Split(Path.PathSeparator).Select(directory => Path.Combine(directory.Trim('"'), "pwsh.exe"))
+            .First(File.Exists);
+        string? Value(string key, string name = "")
+        {
+            using var opened = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(key);
+            return opened?.GetValue(name) as string;
+        }
+
+        bool HasValue(string key, string name)
+        {
+            using var opened = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(key);
+            return opened?.GetValueNames().Contains(name, StringComparer.OrdinalIgnoreCase) == true;
+        }
+
+        string verb = locations.Classes + @"\SystemFileAssociations\.rocksproject\shell\rocksgenproj";
+        try
+        {
+            // 연결이 비어 있으면 기본 연결을 잡는다. 동사는 SystemFileAssociations에 있다. 손상된 manifest는 그 SDK만 버린다.
+            ShellSelection selection = ShellRegistration.Write(registry, locations, pwsh);
+            Require(Same(selection.Sdk, high), "the selector is the highest valid SDK: " + selection.Sdk);
+            string command = Value(verb + @"\command")!;
+            Require(Value(verb) == "Generate Visual Studio project files" && command == ShellRegistration.MenuCommand(pwsh, locations.Shim) &&
+                !command.Contains("cmd.exe", StringComparison.OrdinalIgnoreCase) && command.EndsWith("-Project \"%1\"", StringComparison.Ordinal),
+                "shell menu verb and command: " + command);
+            Require(Value(locations.Classes + @"\.rocksproject") == ShellRegistration.ProgId &&
+                HasValue(locations.Classes + @"\.rocksproject\OpenWithProgids", ShellRegistration.ProgId) &&
+                Same(Value(locations.Selector, "Sdk")!, high) && Value(locations.Selector, "Shim") == locations.Shim, "association and selector values");
+
+            // shim 회귀: %·!·공백·괄호가 든 경로를 그대로 넘기고, 실패하면 종료 코드가 남는다. SDK 스크립트·dotnet이 없으면 안내한다.
+            async Task<ProcessResult> Menu(string project, IReadOnlyDictionary<string, string?>? environment = null) => await ProcessRunner.RunAsync(
+                // -NonInteractive: 실패 경로의 Enter 대기(Read-Host)가 시험을 멈추지 않게 한다(오류를 쓰고 종료 코드는 그대로다).
+                new(pwsh, ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", locations.Shim, "-Project", project], root, environment,
+                    Timeout: TimeSpan.FromMinutes(2)));
+            string tricky = Path.Combine(root, "%USERNAME% !x! (1)", "My Game.rocksproject");
+            var ran = await Menu(tricky);
+            Require(ran.ExitCode == 0 && File.ReadAllText(Path.Combine(high, "Build", "received.txt")).Trim() == tricky,
+                "the menu shim must pass the project path unexpanded: " + ran.StdOut + ran.StdErr);
+            var failed = await Menu(Path.Combine(root, "fail.rocksproject"));
+            Require(failed.ExitCode == 1, "a failed generation keeps its exit code: " + failed.ExitCode);
+            var withoutDotnet = await Menu(tricky, new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["PATH"] = Environment.GetFolderPath(Environment.SpecialFolder.System),
+                ["SystemRoot"] = Environment.GetEnvironmentVariable("SystemRoot")
+            });
+            Require(withoutDotnet.ExitCode == 1 && withoutDotnet.StdOut.Contains("needs the .NET SDK", StringComparison.Ordinal),
+                "the menu must explain a missing dotnet: " + withoutDotnet.StdOut + withoutDotnet.StdErr);
+            File.Delete(Path.Combine(high, "Build", "GenerateProjectFiles.ps1"));
+            var removed = await Menu(tricky);
+            Require(removed.ExitCode == 1 && removed.StdOut.Contains("shell-register again", StringComparison.Ordinal),
+                "the menu must explain a removed SDK: " + removed.StdOut + removed.StdErr);
+
+            // 같은 엔진 버전이면 등록 ID ordinal 첫째다.
+            string twin = FakeSdk("Twin", current, "0.2.0", true);
+            registry.Register(twin);
+            string expected = registry.List().Where(entry => Same(entry.Path, high) || Same(entry.Path, twin)).OrderBy(entry => entry.Id, StringComparer.Ordinal).First().Path;
+            Require(Same(ShellRegistration.Write(registry, locations, pwsh).Sdk, expected), "equal engine versions pick the first ID");
+
+            // 해제는 우리 값만 지운다: 처음부터 우리 연결이면 키까지 사라진다.
+            ShellRegistration.Remove(locations);
+            Require(Microsoft.Win32.Registry.CurrentUser.OpenSubKey(locations.Classes + @"\.rocksproject") is null &&
+                Microsoft.Win32.Registry.CurrentUser.OpenSubKey(locations.Classes + @"\SystemFileAssociations") is null &&
+                Microsoft.Win32.Registry.CurrentUser.OpenSubKey(locations.Classes + @"\" + ShellRegistration.ProgId) is null &&
+                Microsoft.Win32.Registry.CurrentUser.OpenSubKey(locations.Selector) is null && !File.Exists(locations.Shim), "shell-unregister removes what it wrote");
+
+            // 다른 프로그램의 연결을 미리 심어 두면: 등록은 기본값을 바꾸지 않고 OpenWithProgids에 더하며, 해제는 그 연결을 그대로 남긴다.
+            using (var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(locations.Classes + @"\.rocksproject"))
+            {
+                key.SetValue("", "Other.Application");
+            }
+
+            using (var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(locations.Classes + @"\.rocksproject\OpenWithProgids"))
+            {
+                key.SetValue("Other.Application", Array.Empty<byte>(), Microsoft.Win32.RegistryValueKind.None);
+            }
+
+            using (var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(locations.Classes + @"\SystemFileAssociations\.rocksproject\shell\othertool"))
+            {
+                key.SetValue("", "Other tool");
+            }
+
+            Write(high, "Build/GenerateProjectFiles.ps1", "exit 0\n");
+            ShellRegistration.Write(registry, locations, pwsh);
+            Require(Value(locations.Classes + @"\.rocksproject") == "Other.Application" &&
+                HasValue(locations.Classes + @"\.rocksproject\OpenWithProgids", ShellRegistration.ProgId) &&
+                HasValue(locations.Classes + @"\.rocksproject\OpenWithProgids", "Other.Application") && Value(verb) is not null,
+                "shell-register keeps another program's association and adds itself to OpenWithProgids");
+            ShellRegistration.Remove(locations);
+            Require(Value(locations.Classes + @"\.rocksproject") == "Other.Application" &&
+                HasValue(locations.Classes + @"\.rocksproject\OpenWithProgids", "Other.Application") &&
+                !HasValue(locations.Classes + @"\.rocksproject\OpenWithProgids", ShellRegistration.ProgId) &&
+                Value(locations.Classes + @"\SystemFileAssociations\.rocksproject\shell\othertool") == "Other tool" && Value(verb) is null,
+                "shell-unregister keeps another program's association, its OpenWithProgids entry and its verbs");
+
+            // 유효한 SDK가 없으면 이유를 적은 오류다(손상된 manifest 포함).
+            var invalid = new MemoryRegistry();
+            invalid.Register(oldManifest);
+            invalid.Register(noCli);
+            invalid.Register(broken);
+            string error = Error(() => ShellRegistration.Write(invalid, locations, pwsh));
+            Require(error.Contains("manifest version", StringComparison.Ordinal) && error.Contains("no build CLI", StringComparison.Ordinal) &&
+                error.Contains("unreadable SDK manifest", StringComparison.Ordinal), "no valid selector SDK: " + error);
+        }
+        finally
+        {
+            Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(scope, throwOnMissingSubKey: false);
+            bool empty;
+            using (var tests = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(testsKey))
+            {
+                empty = tests is not null && tests.SubKeyCount == 0 && tests.ValueCount == 0;
+            }
+
+            if (empty)
+            {
+                Microsoft.Win32.Registry.CurrentUser.DeleteSubKey(testsKey, throwOnMissingSubKey: false);
+            }
+        }
     }
 
     private sealed class MemoryRegistry : ISdkRegistry

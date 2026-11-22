@@ -152,6 +152,21 @@ public:
         return Result<void>::Success();
     }
 
+    // 저장할 Soft 참조 값의 asset 대신 쓸 asset을 돌려준다(기본은 info.asset — 저장은 객체를
+    // 바꾸지 않는다). 저장 문맥이 null이 아닌 값에만, Required 검사 모드가 아닐 때 부르고(struct
+    // 치환과 같은 조건) 바뀐 asset을 쓴 뒤 수집(CollectSoftReference)도 바뀐 asset으로 한다. 객체
+    // 경로는 그대로다. null asset을 돌려주면 InvalidArgument다(경로만 남은 값은 SoftObjectRef
+    // 규칙이 거부한다). Map 키·Set 원소의 값도 부른다(순서는 삽입 순서라 그대로다 — 두 키를 같게
+    // 만들지 않는 것은 hook의 책임이다).
+    //
+    // 사용 예(패키지 복제 — 원본 id를 가리키는 값을 사본 id로, AssetSystem.ko.md 7.1절 17 A2e3b):
+    //   Result<AssetId> SubstituteSoftReference(const SoftReferenceInfo& info) noexcept override {
+    //       return Result<AssetId>::Success(info.asset == source_ ? copy_ : info.asset);
+    //   }
+    virtual Result<AssetId> SubstituteSoftReference(const SoftReferenceInfo& info) noexcept {
+        return Result<AssetId>::Success(info.asset);
+    }
+
     // 복원 1단계에서 관찰할 struct ID다(로드 시작 때 한 번 읽는다 — 미등록 ID는 NotFound, 참조
     // (강한·weak)나 Name을 담는 struct는 InvalidArgument — 1단계 임시 값에는 참조 대상도 Name
     // 토큰도 만들 수 없다, StructView::ContainsStrongReference·ContainsWeakReference·ContainsName —

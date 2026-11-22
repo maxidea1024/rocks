@@ -44,12 +44,14 @@ namespace Rocks.Build.Cli
         // profile이 있으면 묶음 크기 실측의 실행 하나를 도는 build다(UnityProfileCommand가 부른다 — Docs/Design/UnityBuildPch.ko.md 12절).
         // 조합이 있으면 그 모듈에만 조합을 재정의로 얹고, 빌드 대상을 그 모듈로 줄이고, 그 모듈의 object를 지워 처음부터 컴파일한 뒤 결과
         // 행을 채운다. 조합이 없으면(준비 실행) 그 모듈이 의존하는 모듈만 빌드한다. 출력은 이 명령의 것이어야 한다(평소 빌드 출력 거부).
-        internal static async Task<int> RunAsync(string[] args, CancellationToken cancellationToken, UnityProfileRun? profile)
+        // sdkAssembly가 있으면 다중 구성 SDK 내보내기(SdkExportCommand)가 부른 구성 하나의 sdk 빌드다. 빌드가 끝나면 그 구성을 조립에 더한다.
+        internal static async Task<int> RunAsync(string[] args, CancellationToken cancellationToken, UnityProfileRun? profile,
+            SdkAssembly? sdkAssembly = null)
         {
             if (args.Length == 0)
             {
-                throw new ArgumentException("Expected build, test, sdk, game, bootstrap, clean, sdk-register, sdk-unregister, associate, unity-profile, or " +
-                    "projectfiles command.");
+                throw new ArgumentException("Expected build, test, sdk, game, bootstrap, clean, sdk-register, sdk-unregister, associate, new-project, " +
+                    "shell-register, shell-unregister, unity-profile, or projectfiles command.");
             }
 
             if (args[0] == UnityProfileCommand.Name)
@@ -70,9 +72,9 @@ namespace Rocks.Build.Cli
             var options = Parse(args.Skip(1).ToArray());
             var allowed = args[0] switch
             {
-                "game" => new HashSet<string>(["sdk", "project", "target", "configuration", "output", "compiler", "jobs", MetadataLayout.VerifySourcesOption, RequireVerifiedToolchainOption, .. BuildModeOptions], StringComparer.Ordinal),
-                "sdk" => new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination", "register", MetadataLayout.VerifySourcesOption, RequireVerifiedToolchainOption, .. BuildModeOptions], StringComparer.Ordinal),
-                "build" or "test" => new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "platform", "android-abi", "android-api", "android-ndk", "adb", MetadataLayout.VerifySourcesOption, PlanOnlyOption, RequireVerifiedToolchainOption, .. BuildModeOptions], StringComparer.Ordinal),
+                "game" => new HashSet<string>(["sdk", "project", "target", "configuration", "output", "compiler", "jobs", SingleFileCommand.Option, MetadataLayout.VerifySourcesOption, RequireVerifiedToolchainOption, .. BuildModeOptions], StringComparer.Ordinal),
+                "sdk" => new HashSet<string>(["root", "target", "configuration", "configurations", "output", "compiler", "rules", "jobs", "destination", "register", MetadataLayout.VerifySourcesOption, RequireVerifiedToolchainOption, .. BuildModeOptions], StringComparer.Ordinal),
+                "build" or "test" => new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "platform", SingleFileCommand.Option, "android-abi", "android-api", "android-ndk", "adb", MetadataLayout.VerifySourcesOption, PlanOnlyOption, RequireVerifiedToolchainOption, .. BuildModeOptions], StringComparer.Ordinal),
                 // 미리 빌드한 바이너리를 사용자 저장소에 받는다(build·test는 받지 않는다, Docs/Design/ShaderSystem.ko.md 8절 2항).
                 "bootstrap" => new HashSet<string>(["root", "library", "store", "mirror", "offline", "windows-sdk"], StringComparer.Ordinal),
                 // 출력 디렉터리 하나를 비운다(Docs/Design/ProjectFiles.ko.md 7.3절 — Visual Studio Clean·Rebuild가 부른다).
@@ -81,6 +83,10 @@ namespace Rocks.Build.Cli
                 SdkCommands.Register => new HashSet<string>(["sdk"], StringComparer.Ordinal),
                 SdkCommands.Unregister => new HashSet<string>(["sdk", "id"], StringComparer.Ordinal),
                 SdkCommands.Associate => new HashSet<string>(["project", "sdk", "id", "version"], StringComparer.Ordinal),
+                // .rocksproject 탐색기 메뉴(Docs/Design/ProjectFiles.ko.md 12절).
+                "shell-register" or "shell-unregister" => new HashSet<string>(StringComparer.Ordinal),
+                // 템플릿에서 새 게임 프로젝트를 만든다(Docs/Design/ProjectFiles.ko.md 11.5절).
+                NewProjectCommand.Name => new HashSet<string>(["template", "name", "destination", "sdk", "projectfiles", "compiler"], StringComparer.Ordinal),
                 _ => throw new ArgumentException($"Unknown command: {args[0]}")
             };
             foreach (var name in options.Keys)
@@ -107,7 +113,22 @@ namespace Rocks.Build.Cli
 
             if (args[0] is SdkCommands.Register or SdkCommands.Unregister or SdkCommands.Associate)
             {
-                return SdkCommands.Run(args[0], options, SdkRegistries.Default());
+                int registered = SdkCommands.Run(args[0], options, SdkRegistries.Default());
+                // 연결을 바꾸면 이미 만든 게임 프로젝트 파일을 다시 만든다(Docs/Design/ProjectFiles.ko.md 10.4절, Windows 호스트).
+                return registered != 0 || args[0] != SdkCommands.Associate || !OperatingSystem.IsWindows()
+                    ? registered
+                    : await GameProjectFiles.RegenerateAsync(options["project"], cancellationToken);
+            }
+
+            if (args[0] is "shell-register" or "shell-unregister")
+            {
+                return OperatingSystem.IsWindows() ? ShellRegistration.Run(args[0], SdkRegistries.Default())
+                    : throw new ArgumentException($"'{args[0]}' registers the Windows Explorer menu and runs on Windows hosts only.");
+            }
+
+            if (args[0] == NewProjectCommand.Name)
+            {
+                return await NewProjectCommand.RunAsync(options, cancellationToken);
             }
 
             if (args[0] == CleanCommand.Name)
@@ -125,6 +146,12 @@ namespace Rocks.Build.Cli
                 throw new ArgumentException($"Unknown command: {args[0]}");
             }
 
+            // 설치 SDK는 구성마다 이 빌드 흐름을 돌려 한 SDK로 조립한다(Docs/Design/ProjectFiles.ko.md 10.3절).
+            if (args[0] == "sdk" && sdkAssembly is null)
+            {
+                return await SdkExportCommand.RunAsync(args, options, cancellationToken);
+            }
+
             // 받은 경로는 디스크에 있는 철자로 맞춘다(Docs/Design/UnityBuildPch.ko.md 4.4절). 규칙 평가와 메타 생성이 빌드 엔진보다 먼저
             // 이 경로로 파일을 쓰므로 여기서 한다.
             var root = PathSpelling.OnDisk(Path.GetFullPath(options.GetValueOrDefault("root", Directory.GetCurrentDirectory())));
@@ -136,9 +163,11 @@ namespace Rocks.Build.Cli
             }
 
             Timing(options);
-            if (options.TryGetValue("register", out string? register) && register is not ("on" or "off"))
+            // 파일 하나 컴파일(Docs/Design/ProjectFiles.ko.md 7.4절)은 build 전용이고 계획만·묶음 실측과 함께 쓰지 않는다. 출력을 만지기 전에 알린다.
+            bool singleFile = options.ContainsKey(SingleFileCommand.Option);
+            if (singleFile && (args[0] != "build" || profile is not null || options.GetValueOrDefault(PlanOnlyOption, "off") == "on"))
             {
-                throw new ArgumentException("register must be on or off.");
+                throw new ArgumentException($"--{SingleFileCommand.Option} compiles single files with 'build' only, without --{PlanOnlyOption} on.");
             }
 
             var targetName = options.GetValueOrDefault("target", args[0] == "sdk" ? "Engine" : "Foundation");
@@ -229,7 +258,12 @@ namespace Rocks.Build.Cli
             Directory.CreateDirectory(output);
             await using var invocationLock = await OutputInvocationLock.AcquireAsync(output, cancellationToken);
             // 앞 실행의 PASS 보고서가 이번 실행의 실패(메타 단계·빌드 예외 포함)를 성공으로 보이게 하지 않는다.
-            WritePendingReport(output, "Current build has not completed.");
+            // 파일 하나 컴파일은 빌드 보고서(action-report)를 바꾸지 않는다.
+            if (!singleFile)
+            {
+                WritePendingReport(output, "Current build has not completed.");
+            }
+
             Directory.CreateDirectory(Path.Combine(output, "Generated"));
             var evidence = await BuildEvidence.StartAsync(root, Path.GetRelativePath(Path.Combine(root, "out"), output), toolchain.Environment);
             evidence.SetConfiguration(configuration.ToString(), targetName, configuration == NativeConfiguration.Asan ? "address" : "none", toolchain.CompilerPath, toolchain.Identity);
@@ -267,6 +301,16 @@ namespace Rocks.Build.Cli
                 {
                     await evidence.FinishAsync("Metadata validation failed.");
                     return 1;
+                }
+
+                // 파일 하나 컴파일: 메타 생성까지 평소처럼 한 뒤 고른 소스의 논리 명령만 돈다(증분 기록·보고서·평소 object는 그대로다).
+                if (options.TryGetValue(SingleFileCommand.Option, out string? files))
+                {
+                    int compiled = await SingleFileCommand.RunAsync(EnginePlanning.Request(toolchain, configuration, rules.Target, root, output,
+                        plan.Modules, buildRoots, engineVersion, Jobs(options)), files, root, cancellationToken,
+                        SingleFileCommand.EngineTargets(root, rulesPath, targetName, toolchain, configuration, engineVersion));
+                    await evidence.FinishAsync("Single-file compile: no build was run.");
+                    return compiled;
                 }
 
                 var modules = plan.Modules.ToList();
@@ -412,13 +456,8 @@ namespace Rocks.Build.Cli
 
                 if (args[0] == "sdk")
                 {
-                    await InstalledSdk.ExportAsync(root, options["destination"], configuration, toolchain, engineVersion,
+                    await sdkAssembly!.AddConfigurationAsync(root, configuration, toolchain, engineVersion, evidence.SourceBefore,
                         InstalledSdk.Reachable(plan.Modules, targets), plan.Generated, result, cancellationToken);
-                    // 등록은 명시적으로만 한다(기본 off — 시험·CI·임시 SDK가 사용자 등록부에 쌓이지 않게, 10.2절).
-                    if (options.GetValueOrDefault("register", "off") == "on")
-                    {
-                        Console.WriteLine($"Registered {options["destination"]} as {SdkRegistries.Default().Register(options["destination"])}.");
-                    }
                 }
 
                 if (args[0] == "test")
@@ -614,7 +653,7 @@ namespace Rocks.Build.Cli
 
         internal static Dictionary<string, string> Parse(string[] args)
         {
-            var allowed = new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination", "sdk", "project", "platform", "android-abi", "android-api", "android-ndk", "adb", "library", "store", "mirror", "offline", MetadataLayout.VerifySourcesOption, PlanOnlyOption, .. BuildModeOptions, "windows-sdk", RequireVerifiedToolchainOption, .. UnityProfileCommand.Options, .. ProjectFilesCommand.Options, .. SdkCommands.Options], StringComparer.Ordinal);
+            var allowed = new HashSet<string>(["root", "target", "configuration", "output", "compiler", "rules", "jobs", "destination", "sdk", "project", "platform", "android-abi", "android-api", "android-ndk", "adb", "library", "store", "mirror", "offline", MetadataLayout.VerifySourcesOption, PlanOnlyOption, .. BuildModeOptions, "windows-sdk", RequireVerifiedToolchainOption, .. UnityProfileCommand.Options, .. ProjectFilesCommand.Options, .. SdkCommands.Options, .. SdkExportCommand.Options, .. NewProjectCommand.Options, SingleFileCommand.Option], StringComparer.Ordinal);
             var values = new Dictionary<string, string>(StringComparer.Ordinal);
             for (var index = 0; index < args.Length; index += 2)
             {

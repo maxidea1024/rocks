@@ -1059,6 +1059,836 @@ finally
     Directory.Delete(cacheDirectory, true);
 }
 
+// asset-alias-*·별칭 해석(AssetSystem.ko.md 4.3절, 7.1절 17 — A2e1): 목록(만료·shadowed·missing·지금 경로), 열기가 옛
+// 경로를 별칭으로 풀고 경고 AliasResolved, 별칭 경로에 새 패키지는 DuplicatePath, prune은 Config 텍스트에 쓰인 만료 항목을
+// 남기고 나머지 만료 항목을 지운다, remove, 깨진 표의 진단 줄, 사용법·환경 오류, 재구축이 별칭 표 임시 파일을 지운다.
+string aliasDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-alias-{Environment.ProcessId}");
+try
+{
+    string project = Path.Combine(aliasDirectory, "Aliased");
+    Directory.CreateDirectory(project);
+    File.WriteAllText(Path.Combine(project, "Aliased.rocksproject"), "{}\n");
+    string projectOption = $"--project={project}";
+    string configDirectory = Path.Combine(project, "Config");
+    string aliasFile = Path.Combine(configDirectory, "AssetAliases.json");
+
+    async Task<ProcessResult> RunAlias(params string[] arguments) =>
+        await ProcessRunner.RunAsync(new(executable, arguments, workingDirectory, Timeout: TimeSpan.FromSeconds(30)));
+
+    void ReportAlias(string label, bool passed, ProcessResult result)
+    {
+        Console.WriteLine($"{label}: {(passed ? "PASS" : "FAIL")}");
+        if (!passed)
+        {
+            ++failures;
+            Console.Error.WriteLine($"  exit={result.ExitCode}; stdout={result.StdOut}; stderr={result.StdErr}");
+        }
+    }
+
+    void ProjectResultCheck(ProcessResult result, string label, Func<ProcessResult, bool> check) =>
+        ReportAlias(label, check(result), result);
+
+    ProcessResult made = await RunAlias("asset-new", "Skeleton", "/Game/Al/Hero", projectOption);
+    ReportAlias("alias: asset-new", made.ExitCode == 0, made);
+    string heroId = made.StdOut.Trim().Split(' ').Last();
+    const string missingId = "5e570000-a55e-7000-0000-00000000dead";
+
+    // 별칭 표: 만료(2000년)·만료 아님(2100년)·지금 경로와 같은 경로(shadowed)·없는 대상.
+    string Alias(string path, string asset, string created, int days) =>
+        $"{{\"path\": \"{path}\", \"asset\": \"{asset}\", \"created\": \"{created}\", \"days\": {days}}}";
+    void WriteAliases(params string[] entries)
+    {
+        Directory.CreateDirectory(configDirectory);
+        File.WriteAllText(aliasFile, "{\"version\": 1, \"aliases\": [" + string.Join(", ", entries) + "]}\n");
+    }
+
+    WriteAliases(
+        Alias("/Game/Al/OldHero", heroId, "2000-01-01T00:00:00Z", 1),
+        Alias("/Game/Al/Hero", heroId, "2100-01-01T00:00:00Z", 90),
+        Alias("/Game/Al/Gone", missingId, "2100-01-01T00:00:00Z", 90),
+        Alias("/Game/Al/Named", heroId, "2000-01-01T00:00:00Z", 1));
+    ProcessResult listed = await RunAlias("asset-alias-list", projectOption);
+    string expectedList =
+        $"/Game/Al/Gone {missingId} 2100-01-01T00:00:00Z 2100-04-01T00:00:00Z -> missing\n" +
+        $"/Game/Al/Hero {heroId} 2100-01-01T00:00:00Z 2100-04-01T00:00:00Z shadowed -> /Game/Al/Hero\n" +
+        $"/Game/Al/Named {heroId} 2000-01-01T00:00:00Z 2000-01-02T00:00:00Z expired -> /Game/Al/Hero\n" +
+        $"/Game/Al/OldHero {heroId} 2000-01-01T00:00:00Z 2000-01-02T00:00:00Z expired -> /Game/Al/Hero\n";
+    ReportAlias("asset-alias-list", listed.ExitCode == 0 && listed.StdOut == expectedList && listed.StdErr.Length == 0, listed);
+
+    // 열기가 옛 경로를 푼다(경고), 별칭 경로에 새 패키지는 점유.
+    ProcessResult info = await RunAlias("asset-info", "/Game/Al/OldHero", projectOption);
+    ReportAlias("asset-info through an alias", info.ExitCode == 0 &&
+        info.StdErr.Contains($"asset-info: AliasResolved: /Game/Al/OldHero: warning resolved through an alias to {heroId}",
+            StringComparison.Ordinal), info);
+    ProcessResult occupied = await RunAlias("asset-new", "Skeleton", "/Game/Al/OldHero", projectOption);
+    ReportAlias("asset-new on an alias path", occupied.ExitCode == 1 &&
+        occupied.StdErr.Contains("DuplicatePath", StringComparison.Ordinal), occupied);
+
+    // prune: Named는 Config 텍스트에 쓰여 남고 OldHero는 지운다(만료 아닌 둘은 남는다).
+    File.WriteAllText(Path.Combine(configDirectory, "Game.ini"), "[Startup]\nMap=\"/Game/Al/Named\"\n");
+    ProcessResult pruned = await RunAlias("asset-alias-prune", projectOption);
+    ReportAlias("asset-alias-prune", pruned.ExitCode == 0 &&
+        pruned.StdOut == "asset-alias-prune: 1 removed, 1 in use, 2 kept\n" &&
+        pruned.StdErr.Contains("asset-alias-prune: AliasInUse: Config/Game.ini:2: warning /Game/Al/Named is still named",
+            StringComparison.Ordinal) &&
+        !File.ReadAllText(aliasFile).Contains("/Game/Al/OldHero", StringComparison.Ordinal), pruned);
+
+    // remove: 있으면 지운다, 없으면 NotFound 1, 경로 규칙 위반 1.
+    ProcessResult removed = await RunAlias("asset-alias-remove", "/Game/Al/Named", projectOption);
+    ReportAlias("asset-alias-remove", removed.ExitCode == 0 &&
+        removed.StdOut == "asset-alias-remove: removed /Game/Al/Named\n" &&
+        !File.ReadAllText(aliasFile).Contains("/Game/Al/Named", StringComparison.Ordinal), removed);
+    ProcessResult notThere = await RunAlias("asset-alias-remove", "/Game/Al/Named", projectOption);
+    ReportAlias("asset-alias-remove missing", notThere.ExitCode == 1 &&
+        notThere.StdErr.Contains("NotFound: /Game/Al/Named: no alias", StringComparison.Ordinal), notThere);
+    ProcessResult badPath = await RunAlias("asset-alias-remove", "Game/Al/Named", projectOption);
+    ReportAlias("asset-alias-remove invalid path", badPath.ExitCode == 1 &&
+        badPath.StdErr.Contains("InvalidPath: Game/Al/Named", StringComparison.Ordinal), badPath);
+
+    // 깨진 표: JSON 문법(줄·열)과 칸 위반(항목 번호) — 별칭 명령은 1, 색인에 있는 경로 열기는 그대로.
+    File.WriteAllText(aliasFile, "{\n  \"version\": 1,\n  \"aliases\": [,]\n}\n");
+    ProcessResult syntax = await RunAlias("asset-alias-list", projectOption);
+    ReportAlias("asset-alias-list corrupt JSON", syntax.ExitCode == 1 &&
+        syntax.StdErr.Contains("CorruptAliasTable: Config/AssetAliases.json: JSON syntax at line 3 column", StringComparison.Ordinal), syntax);
+    WriteAliases(Alias("/Game/Al/X", heroId, "2000-01-01T00:00:00Z", 0));
+    ProcessResult field = await RunAlias("asset-alias-prune", projectOption);
+    ReportAlias("asset-alias-prune corrupt field", field.ExitCode == 1 &&
+        field.StdErr.Contains("CorruptAliasTable: Config/AssetAliases.json: invalid days (entry 0)", StringComparison.Ordinal), field);
+    File.WriteAllText(aliasFile, "{\"version\": 2, \"aliases\": []}");
+    ProcessResult header = await RunAlias("asset-alias-remove", "/Game/Al/X", projectOption);
+    ReportAlias("asset-alias-remove corrupt header", header.ExitCode == 1 &&
+        header.StdErr.Contains("CorruptAliasTable: Config/AssetAliases.json: invalid version", StringComparison.Ordinal), header);
+    ProcessResult infoDirect = await RunAlias("asset-info", "/Game/Al/Hero", projectOption);
+    ReportAlias("asset-info ignores a corrupt alias table", infoDirect.ExitCode == 0, infoDirect);
+    File.Delete(aliasFile);
+
+    // 쓰기 실패: 별칭 표 자리가 디렉터리.
+    WriteAliases(Alias("/Game/Al/Y", heroId, "2000-01-01T00:00:00Z", 1));
+    ProcessResult beforeDirectory = await RunAlias("asset-alias-list", projectOption);
+    File.Delete(aliasFile);
+    Directory.CreateDirectory(aliasFile);
+    ProcessResult unreadable = await RunAlias("asset-alias-list", projectOption);
+    ReportAlias("asset-alias-list alias table is a directory", beforeDirectory.ExitCode == 0 && unreadable.ExitCode == 1 &&
+        unreadable.StdErr.Contains(": Config/AssetAliases.json: cannot read the alias table", StringComparison.Ordinal), unreadable);
+    Directory.Delete(aliasFile);
+
+    // 재구축이 Config의 별칭 표 임시 파일을 지운다.
+    string aliasOrphan = Path.Combine(configDirectory, "AssetAliases.json.0123abcd-0123-4567-89ab-0123456789ab.tmp");
+    File.WriteAllBytes(aliasOrphan, [1]);
+    ProcessResult rebuilt = await RunAlias("asset-index-rebuild", projectOption);
+    ReportAlias("asset-index-rebuild removes alias temporary files", rebuilt.ExitCode == 0 &&
+        rebuilt.StdOut.EndsWith(", 1 orphans removed\n", StringComparison.Ordinal) && !File.Exists(aliasOrphan), rebuilt);
+
+    // 잠금 Busy(Windows), 사용법, 도움말, 프로젝트 없음.
+    if (OperatingSystem.IsWindows())
+    {
+        string lockPath = Path.Combine(project, "Intermediate", "AssetDatabase.lock");
+        using FileStream locked = new(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
+        locked.Lock(0, 1);
+        foreach (string[] arguments in new[] { new[] { "asset-alias-remove", "/Game/Al/Y" }, new[] { "asset-alias-prune" } })
+        {
+            ProcessResult busy = await RunAlias([.. arguments, projectOption]);
+            ReportAlias($"{arguments[0]} locked", busy.ExitCode == 1 &&
+                busy.StdErr.Contains($"{arguments[0]}: Busy: ", StringComparison.Ordinal), busy);
+        }
+
+        locked.Unlock(0, 1);
+    }
+
+    // prune 검색이 상한(파일 하나 64 MiB)에 닿으면 아무것도 지우지 않고 경고한다.
+    WriteAliases(Alias("/Game/Al/Y", heroId, "2000-01-01T00:00:00Z", 1));
+    string hugeFile = Path.Combine(configDirectory, "Huge.bin");
+    using (FileStream huge = new(hugeFile, FileMode.Create, FileAccess.Write))
+    {
+        huge.SetLength((64L << 20) + 1);
+    }
+
+    ProjectResultCheck(await RunAlias("asset-alias-prune", projectOption), "asset-alias-prune truncated", result =>
+        result.ExitCode == 0 && result.StdOut == "asset-alias-prune: 0 removed, 0 in use, 1 kept\n" &&
+        result.StdErr.Contains("AliasSearchTruncated: ", StringComparison.Ordinal) &&
+        File.ReadAllText(aliasFile).Contains("/Game/Al/Y", StringComparison.Ordinal));
+    File.Delete(hugeFile);
+
+    if (OperatingSystem.IsWindows())
+    {
+        // 별칭 표를 삭제 공유 없이 열어 두면 교체가 실패한다(remove — 표 그대로).
+        using (new FileStream(aliasFile, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            ProjectResultCheck(await RunAlias("asset-alias-remove", "/Game/Al/Y", projectOption), "asset-alias-remove cannot write",
+                result => result.ExitCode == 1 &&
+                    result.StdErr.Contains(": Config/AssetAliases.json: cannot write the alias table", StringComparison.Ordinal));
+        }
+
+        // 검색할 파일을 공유 없이 열어 두면 읽기가 실패한다(prune — 표 그대로).
+        string lockedText = Path.Combine(configDirectory, "Locked.ini");
+        File.WriteAllText(lockedText, "x\n");
+        using (new FileStream(lockedText, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            ProjectResultCheck(await RunAlias("asset-alias-prune", projectOption), "asset-alias-prune cannot search",
+                result => result.ExitCode == 1 &&
+                    result.StdErr.Contains(": cannot search or write (AssetAliases.json)", StringComparison.Ordinal) &&
+                    File.ReadAllText(aliasFile).Contains("/Game/Al/Y", StringComparison.Ordinal));
+        }
+
+        File.Delete(lockedText);
+
+        // 무효 출력 핸들: 목록 줄·prune 경고 줄을 쓰지 못하면 1이다.
+        File.WriteAllText(Path.Combine(configDirectory, "Uses.ini"), "/Game/Al/Y\n");
+        foreach (string command in new[] { "asset-alias-list", "asset-alias-prune" })
+        {
+            uint code = WindowsInvalidStandardHandles.Run(executable, $"{command} \"--project={project}\"", workingDirectory);
+            Console.WriteLine($"invalid output handles ({command}): {(code == 1 ? "PASS" : "FAIL")}");
+            if (code != 1)
+            {
+                ++failures;
+                Console.Error.WriteLine($"  exit={code}");
+            }
+        }
+
+        File.Delete(Path.Combine(configDirectory, "Uses.ini"));
+
+        // 검색 상한 경고 줄을 쓰지 못해도 1이다.
+        using (FileStream huge = new(hugeFile, FileMode.Create, FileAccess.Write))
+        {
+            huge.SetLength((64L << 20) + 1);
+        }
+
+        uint truncatedCode = WindowsInvalidStandardHandles.Run(executable, $"asset-alias-prune \"--project={project}\"", workingDirectory);
+        Console.WriteLine($"invalid output handles (asset-alias-prune truncated): {(truncatedCode == 1 ? "PASS" : "FAIL")}");
+        if (truncatedCode != 1)
+        {
+            ++failures;
+            Console.Error.WriteLine($"  exit={truncatedCode}");
+        }
+
+        File.Delete(hugeFile);
+    }
+
+    // 환경: Content가 파일이면 목록의 검색이, Intermediate가 파일이면 잠금이 실패한다.
+    string aliasBrokenContent = Path.Combine(aliasDirectory, "AliasBrokenContent");
+    string aliasBrokenLock = Path.Combine(aliasDirectory, "AliasBrokenLock");
+    foreach (string directory in new[] { aliasBrokenContent, aliasBrokenLock })
+    {
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, $"{Path.GetFileName(directory)}.rocksproject"), "{}\n");
+    }
+
+    File.WriteAllBytes(Path.Combine(aliasBrokenContent, "Content"), [1]);
+    File.WriteAllBytes(Path.Combine(aliasBrokenLock, "Intermediate"), [1]);
+    ProjectResultCheck(await RunAlias("asset-alias-list", $"--project={aliasBrokenContent}"), "asset-alias-list content is a file",
+        result => result.ExitCode == 1 && result.StdErr.Contains(": cannot scan the content directory", StringComparison.Ordinal));
+    foreach (string[] arguments in new[] { new[] { "asset-alias-remove", "/Game/A" }, new[] { "asset-alias-prune" } })
+    {
+        ProjectResultCheck(await RunAlias([.. arguments, $"--project={aliasBrokenLock}"]), $"{arguments[0]} cannot lock",
+            result => result.ExitCode == 1 && result.StdErr.Contains(": cannot lock the project", StringComparison.Ordinal));
+    }
+
+    string[][] aliasUsage =
+    [
+        ["asset-alias-list", "extra", projectOption],
+        ["asset-alias-list", "--under=/Game", projectOption],
+        ["asset-alias-list", "--wait=5s", projectOption],
+        ["asset-alias-remove", projectOption],
+        ["asset-alias-remove", "/Game/A", "/Game/B", projectOption],
+        ["asset-alias-remove", "/Game/A", projectOption, projectOption],
+        ["asset-alias-prune", "extra", projectOption],
+        ["asset-alias-prune", "--wait=", projectOption],
+    ];
+    foreach (string[] arguments in aliasUsage)
+    {
+        ProcessResult usage = await RunAlias(arguments);
+        ReportAlias($"{arguments[0]} usage: {string.Join(' ', arguments.Skip(1).Where(argument => argument != projectOption))}",
+            usage.ExitCode == 2 && usage.StdErr.StartsWith($"usage: {arguments[0]}", StringComparison.Ordinal), usage);
+    }
+
+    foreach (string name in new[] { "asset-alias-list", "asset-alias-remove", "asset-alias-prune" })
+    {
+        ProcessResult help = await RunAlias(name, "--help");
+        ReportAlias($"{name} help", help.ExitCode == 0 && help.StdOut.StartsWith($"usage: {name}", StringComparison.Ordinal), help);
+        string[] noProjectArguments = name == "asset-alias-remove" ? [name, "/Game/A"] : [name];
+        ProcessResult noProject = await RunAlias(noProjectArguments);
+        ReportAlias($"{name} without a project", noProject.ExitCode == 1 &&
+            noProject.StdErr.Contains("no project found", StringComparison.Ordinal), noProject);
+    }
+}
+finally
+{
+    Directory.Delete(aliasDirectory, true);
+}
+
+// asset-move(AssetSystem.ko.md 4.4절, 7.1절 17 — A2e2): 파일·디렉터리 이동(요약 줄·디스크·옛 경로의 별칭 해석), 대소문자만
+// 바꾸기(별칭 없음), 거부(대상 점유 — 색인 항목·다른 에셋 별칭, 없는 원본, 대상이 원본 아래), 사용법·도움말·프로젝트 없음·잠금 Busy.
+string moveDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-move-{Environment.ProcessId}");
+try
+{
+    string project = Path.Combine(moveDirectory, "Moving");
+    Directory.CreateDirectory(project);
+    File.WriteAllText(Path.Combine(project, "Moving.rocksproject"), "{}\n");
+    string projectOption = $"--project={project}";
+    string content = Path.Combine(project, "Content");
+
+    async Task<ProcessResult> RunMove(params string[] arguments) =>
+        await ProcessRunner.RunAsync(new(executable, arguments, workingDirectory, Timeout: TimeSpan.FromSeconds(30)));
+
+    void ReportMove(string label, bool passed, ProcessResult result)
+    {
+        Console.WriteLine($"{label}: {(passed ? "PASS" : "FAIL")}");
+        if (!passed)
+        {
+            ++failures;
+            Console.Error.WriteLine($"  exit={result.ExitCode}; stdout={result.StdOut}; stderr={result.StdErr}");
+        }
+    }
+
+    ProcessResult hero = await RunMove("asset-new", "Skeleton", "/Game/Mv/Hero", projectOption);
+    ProcessResult leaf = await RunMove("asset-new", "Skeleton", "/Game/Mv/Sub/Leaf", projectOption);
+    ProcessResult single = await RunMove("asset-new", "Skeleton", "/Game/Single", projectOption);
+    ReportMove("move: asset-new", hero.ExitCode == 0 && leaf.ExitCode == 0 && single.ExitCode == 0, hero);
+    string heroId = hero.StdOut.Trim().Split(' ').Last();
+
+    // 파일 하나(대상 부모 디렉터리를 만든다).
+    ProcessResult file = await RunMove("asset-move", "/Game/Single", "/Game/Elsewhere/Single2", projectOption);
+    ReportMove("asset-move file", file.ExitCode == 0 &&
+        file.StdOut == "asset-move: 1 packages moved, 1 aliases added\n" && file.StdErr.Length == 0 &&
+        File.Exists(Path.Combine(content, "Elsewhere", "Single2.rasset")) &&
+        !File.Exists(Path.Combine(content, "Single.rasset")), file);
+
+    // 디렉터리(하위 디렉터리째 한 번의 OS 이동).
+    ProcessResult directory = await RunMove("asset-move", "/Game/Mv", "/Game/Moved", projectOption);
+    ReportMove("asset-move directory", directory.ExitCode == 0 &&
+        directory.StdOut == "asset-move: 2 packages moved, 2 aliases added\n" && directory.StdErr.Length == 0 &&
+        File.Exists(Path.Combine(content, "Moved", "Hero.rasset")) &&
+        File.Exists(Path.Combine(content, "Moved", "Sub", "Leaf.rasset")) &&
+        !Directory.Exists(Path.Combine(content, "Mv")), directory);
+
+    // 옛 경로는 별칭으로 열린다(경고), 새 경로는 그대로 열린다.
+    ProcessResult oldPath = await RunMove("asset-info", "/Game/Mv/Hero", projectOption);
+    ReportMove("asset-info through a move alias", oldPath.ExitCode == 0 &&
+        oldPath.StdErr.Contains($"asset-info: AliasResolved: /Game/Mv/Hero: warning resolved through an alias to {heroId}",
+            StringComparison.Ordinal), oldPath);
+    ProcessResult newPath = await RunMove("asset-info", "/Game/Moved/Hero", projectOption);
+    ReportMove("asset-info at the new path", newPath.ExitCode == 0 && newPath.StdErr.Length == 0, newPath);
+
+    // 대소문자만 바꾸기(별칭 없음).
+    ProcessResult caseOnly = await RunMove("asset-move", "/Game/Moved", "/Game/moved", projectOption);
+    ReportMove("asset-move case only", caseOnly.ExitCode == 0 &&
+        caseOnly.StdOut == "asset-move: 2 packages moved, 0 aliases added\n" &&
+        new DirectoryInfo(content).GetDirectories().Any(entry => entry.Name == "moved"), caseOnly);
+
+    // 거부: 대상 점유(색인 항목·다른 에셋의 별칭), 없는 원본, 대상이 원본 아래.
+    ProcessResult occupied = await RunMove("asset-move", "/Game/Elsewhere/Single2", "/Game/moved/Hero", projectOption);
+    ReportMove("asset-move onto a package", occupied.ExitCode == 1 &&
+        occupied.StdErr.Contains($"asset-move: DuplicatePath: /Game/Elsewhere/Single2: AlreadyExists (related {heroId})",
+            StringComparison.Ordinal) && File.Exists(Path.Combine(content, "Elsewhere", "Single2.rasset")), occupied);
+    ProcessResult onAlias = await RunMove("asset-move", "/Game/Elsewhere/Single2", "/Game/Mv/Hero", projectOption);
+    ReportMove("asset-move onto another asset's alias", onAlias.ExitCode == 1 &&
+        onAlias.StdErr.Contains($"asset-move: DuplicatePath: /Game/Elsewhere/Single2: AlreadyExists (related {heroId})",
+            StringComparison.Ordinal), onAlias);
+    ProcessResult missing = await RunMove("asset-move", "/Game/Nowhere", "/Game/X", projectOption);
+    ReportMove("asset-move missing source", missing.ExitCode == 1 &&
+        missing.StdErr.Contains("asset-move: NotFound: /Game/Nowhere: failed", StringComparison.Ordinal), missing);
+    ProcessResult inside = await RunMove("asset-move", "/Game/moved", "/Game/moved/Inner", projectOption);
+    ReportMove("asset-move into itself", inside.ExitCode == 1 &&
+        inside.StdErr.Contains("asset-move: InvalidArgument: /Game/moved: failed", StringComparison.Ordinal), inside);
+
+    // 잠금 Busy(Windows), 사용법, 도움말, 프로젝트 없음.
+    if (OperatingSystem.IsWindows())
+    {
+        string lockPath = Path.Combine(project, "Intermediate", "AssetDatabase.lock");
+        using FileStream locked = new(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
+        locked.Lock(0, 1);
+        ProcessResult busy = await RunMove("asset-move", "/Game/moved", "/Game/Other", projectOption);
+        ReportMove("asset-move locked", busy.ExitCode == 1 &&
+            busy.StdErr.Contains("asset-move: Busy: ", StringComparison.Ordinal), busy);
+        locked.Unlock(0, 1);
+    }
+
+    string[][] moveUsage =
+    [
+        ["asset-move", projectOption],
+        ["asset-move", "/Game/A", projectOption],
+        ["asset-move", "/Game/A", "/Game/B", "/Game/C", projectOption],
+        ["asset-move", "/Game/A", "/Game/B", "--wait=", projectOption],
+        ["asset-move", "/Game/A", "/Game/B", "--json", projectOption],
+    ];
+    foreach (string[] arguments in moveUsage)
+    {
+        ProcessResult usage = await RunMove(arguments);
+        ReportMove($"asset-move usage: {string.Join(' ', arguments.Skip(1).Where(argument => argument != projectOption))}",
+            usage.ExitCode == 2 && usage.StdErr.StartsWith("usage: asset-move", StringComparison.Ordinal), usage);
+    }
+
+    ProcessResult moveHelp = await RunMove("asset-move", "--help");
+    ReportMove("asset-move help", moveHelp.ExitCode == 0 &&
+        moveHelp.StdOut.StartsWith("usage: asset-move", StringComparison.Ordinal), moveHelp);
+    ProcessResult moveNoProject = await RunMove("asset-move", "/Game/A", "/Game/B");
+    ReportMove("asset-move without a project", moveNoProject.ExitCode == 1 &&
+        moveNoProject.StdErr.Contains("no project found", StringComparison.Ordinal), moveNoProject);
+}
+finally
+{
+    Directory.Delete(moveDirectory, true);
+}
+
+// asset-delete(AssetSystem.ko.md 7.1절 17 — A2e3a): 지우기(요약 줄·파일·지운 별칭 경고 줄), 디스크 참조자 거부(참조자 줄·
+// 진단 줄)와 --force(경고 줄 — 참조자는 MissingDependency), id로 고르기, 없음·별칭 경로 따르지 않음·경로 규칙, 잠금 Busy,
+// 사용법·도움말·프로젝트 없음.
+string deleteDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-delete-{Environment.ProcessId}");
+try
+{
+    string project = Path.Combine(deleteDirectory, "Deleting");
+    Directory.CreateDirectory(project);
+    File.WriteAllText(Path.Combine(project, "Deleting.rocksproject"), "{}\n");
+    string projectOption = $"--project={project}";
+    string content = Path.Combine(project, "Content");
+
+    async Task<ProcessResult> RunDelete(params string[] arguments) =>
+        await ProcessRunner.RunAsync(new(executable, arguments, workingDirectory, Timeout: TimeSpan.FromSeconds(30)));
+
+    void ReportDelete(string label, bool passed, ProcessResult result)
+    {
+        Console.WriteLine($"{label}: {(passed ? "PASS" : "FAIL")}");
+        if (!passed)
+        {
+            ++failures;
+            Console.Error.WriteLine($"  exit={result.ExitCode}; stdout={result.StdOut}; stderr={result.StdErr}");
+        }
+    }
+
+    ProcessResult hero = await RunDelete("asset-new", "Skeleton", "/Game/Dl/Hero", projectOption);
+    ProcessResult run = await RunDelete("asset-new", "AnimationClip", "/Game/Dl/Run", "skeleton=/Game/Dl/Hero", projectOption);
+    ProcessResult leaf = await RunDelete("asset-new", "Skeleton", "/Game/Dl/Leaf", projectOption);
+    ProcessResult moved = await RunDelete("asset-move", "/Game/Dl/Leaf", "/Game/Dl/Leaf2", projectOption);
+    ReportDelete("delete: setup", hero.ExitCode == 0 && run.ExitCode == 0 && leaf.ExitCode == 0 && moved.ExitCode == 0, run);
+    string heroId = hero.StdOut.Trim().Split(' ').Last();
+    string runId = run.StdOut.Trim().Split(' ').Last();
+    string leafId = leaf.StdOut.Trim().Split(' ').Last();
+
+    // 지우기와 그 에셋을 가리키던 별칭.
+    ProcessResult deleted = await RunDelete("asset-delete", "/Game/Dl/Leaf2", projectOption);
+    ReportDelete("asset-delete", deleted.ExitCode == 0 &&
+        deleted.StdOut == $"asset-delete: deleted /Game/Dl/Leaf2 {leafId}\n" &&
+        deleted.StdErr.Contains($"asset-delete: AliasRemoved: /Game/Dl/Leaf: warning removed the alias to {leafId}",
+            StringComparison.Ordinal) &&
+        !File.Exists(Path.Combine(content, "Dl", "Leaf2.rasset")), deleted);
+    // 별칭이 지워졌으므로 옛 경로는 없다.
+    ProcessResult oldInfo = await RunDelete("asset-info", "/Game/Dl/Leaf", projectOption);
+    ReportDelete("asset-info after delete", oldInfo.ExitCode == 1 &&
+        oldInfo.StdErr.Contains("asset-info: NotFound: /Game/Dl/Leaf", StringComparison.Ordinal), oldInfo);
+
+    // 디스크 참조자: 거부(참조자 줄·진단 줄), --force는 경고 줄과 함께 지운다.
+    ProcessResult refused = await RunDelete("asset-delete", "/Game/Dl/Hero", projectOption);
+    ReportDelete("asset-delete referenced", refused.ExitCode == 1 &&
+        refused.StdErr.Contains($"asset-delete: ReferencedBy: /Game/Dl/Run: {runId} references /Game/Dl/Hero",
+            StringComparison.Ordinal) &&
+        refused.StdErr.Contains($"asset-delete: ReferencedBy: /Game/Dl/Hero: InvalidArgument (related {runId})",
+            StringComparison.Ordinal) &&
+        refused.StdOut.Length == 0 && File.Exists(Path.Combine(content, "Dl", "Hero.rasset")), refused);
+    ProcessResult forced = await RunDelete("asset-delete", "/Game/Dl/Hero", "--force", projectOption);
+    ReportDelete("asset-delete --force", forced.ExitCode == 0 &&
+        forced.StdErr.Contains($"asset-delete: ReferencedBy: /Game/Dl/Run: warning {runId} references /Game/Dl/Hero",
+            StringComparison.Ordinal) &&
+        forced.StdOut == $"asset-delete: deleted /Game/Dl/Hero {heroId}\n" &&
+        !File.Exists(Path.Combine(content, "Dl", "Hero.rasset")), forced);
+    ProcessResult verified = await RunDelete("asset-index-verify", projectOption);
+    ReportDelete("asset-index-verify after a forced delete", verified.StdErr.Contains("MissingDependency", StringComparison.Ordinal),
+        verified);
+
+    // id로 고르기, 없음·별칭 경로·경로 규칙.
+    ProcessResult byId = await RunDelete("asset-delete", runId, projectOption);
+    ReportDelete("asset-delete by id", byId.ExitCode == 0 &&
+        byId.StdOut == $"asset-delete: deleted /Game/Dl/Run {runId}\n", byId);
+    ProcessResult missing = await RunDelete("asset-delete", "/Game/Nowhere", projectOption);
+    ReportDelete("asset-delete missing", missing.ExitCode == 1 &&
+        missing.StdErr.Contains("asset-delete: NotFound: /Game/Nowhere: failed", StringComparison.Ordinal), missing);
+    ProcessResult invalid = await RunDelete("asset-delete", "Game/Bad", projectOption);
+    ReportDelete("asset-delete invalid path", invalid.ExitCode == 1 &&
+        invalid.StdErr.Contains("asset-delete: InvalidPath: Game/Bad", StringComparison.Ordinal), invalid);
+
+    if (OperatingSystem.IsWindows())
+    {
+        string lockPath = Path.Combine(project, "Intermediate", "AssetDatabase.lock");
+        using FileStream locked = new(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
+        locked.Lock(0, 1);
+        ProcessResult busy = await RunDelete("asset-delete", "/Game/Dl/Run", projectOption);
+        ReportDelete("asset-delete locked", busy.ExitCode == 1 &&
+            busy.StdErr.Contains("asset-delete: Busy: ", StringComparison.Ordinal), busy);
+        locked.Unlock(0, 1);
+    }
+
+    string[][] deleteUsage =
+    [
+        ["asset-delete", projectOption],
+        ["asset-delete", "/Game/A", "/Game/B", projectOption],
+        ["asset-delete", "/Game/A", "--wait=", projectOption],
+        ["asset-delete", "/Game/A", "--json", projectOption],
+    ];
+    foreach (string[] arguments in deleteUsage)
+    {
+        ProcessResult usage = await RunDelete(arguments);
+        ReportDelete($"asset-delete usage: {string.Join(' ', arguments.Skip(1).Where(argument => argument != projectOption))}",
+            usage.ExitCode == 2 && usage.StdErr.StartsWith("usage: asset-delete", StringComparison.Ordinal), usage);
+    }
+
+    ProcessResult deleteHelp = await RunDelete("asset-delete", "--help");
+    ReportDelete("asset-delete help", deleteHelp.ExitCode == 0 &&
+        deleteHelp.StdOut.StartsWith("usage: asset-delete", StringComparison.Ordinal), deleteHelp);
+    ProcessResult deleteNoProject = await RunDelete("asset-delete", "/Game/A");
+    ReportDelete("asset-delete without a project", deleteNoProject.ExitCode == 1 &&
+        deleteNoProject.StdErr.Contains("no project found", StringComparison.Ordinal), deleteNoProject);
+}
+finally
+{
+    Directory.Delete(deleteDirectory, true);
+}
+
+// asset-duplicate(AssetSystem.ko.md 7.1절 17 — A2e3b): 경로·id로 고른 원본의 사본(새 id·새 파일·열림), 대상 점유(패키지·다른 에셋 별칭),
+// 없는 원본·대상 경로 규칙, 잠금 Busy, 사용법·도움말·프로젝트 없음.
+string duplicateDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-duplicate-{Environment.ProcessId}");
+try
+{
+    string project = Path.Combine(duplicateDirectory, "Duplicating");
+    Directory.CreateDirectory(project);
+    File.WriteAllText(Path.Combine(project, "Duplicating.rocksproject"), "{}\n");
+    string projectOption = $"--project={project}";
+    string content = Path.Combine(project, "Content");
+
+    async Task<ProcessResult> RunDuplicate(params string[] arguments) =>
+        await ProcessRunner.RunAsync(new(executable, arguments, workingDirectory, Timeout: TimeSpan.FromSeconds(30)));
+
+    void ReportDuplicate(string label, bool passed, ProcessResult result)
+    {
+        Console.WriteLine($"{label}: {(passed ? "PASS" : "FAIL")}");
+        if (!passed)
+        {
+            ++failures;
+            Console.Error.WriteLine($"  exit={result.ExitCode}; stdout={result.StdOut}; stderr={result.StdErr}");
+        }
+    }
+
+    ProcessResult hero = await RunDuplicate("asset-new", "Skeleton", "/Game/Dp/Hero", projectOption);
+    ProcessResult run = await RunDuplicate("asset-new", "AnimationClip", "/Game/Dp/Run", "skeleton=/Game/Dp/Hero", "rateScale=2",
+        projectOption);
+    ReportDuplicate("duplicate: setup", hero.ExitCode == 0 && run.ExitCode == 0, run);
+    string heroId = hero.StdOut.Trim().Split(' ').Last();
+    string runId = run.StdOut.Trim().Split(' ').Last();
+
+    // 경로로 고른 원본: 새 id·새 파일, 사본을 열면 값과 참조가 같다.
+    ProcessResult copied = await RunDuplicate("asset-duplicate", "/Game/Dp/Run", "/Game/Dp/Run2", projectOption);
+    string copyId = copied.StdOut.Trim().Split(' ').Last();
+    ReportDuplicate("asset-duplicate", copied.ExitCode == 0 && copied.StdOut.StartsWith("/Game/Dp/Run2 ", StringComparison.Ordinal) &&
+        copyId != runId && copyId.Length == 36 && copied.StdErr.Length == 0 &&
+        File.Exists(Path.Combine(content, "Dp", "Run2.rasset")) && File.Exists(Path.Combine(content, "Dp", "Run.rasset")), copied);
+    ProcessResult copyInfo = await RunDuplicate("asset-info", "/Game/Dp/Run2", projectOption);
+    ReportDuplicate("asset-info of a copy", copyInfo.ExitCode == 0 &&
+        copyInfo.StdOut.Contains("skeleton=/Game/Dp/Hero\n", StringComparison.Ordinal) &&
+        copyInfo.StdOut.Contains("rateScale=2\n", StringComparison.Ordinal), copyInfo);
+
+    // id로 고른 원본.
+    ProcessResult byId = await RunDuplicate("asset-duplicate", heroId, "/Game/Dp/Hero2", projectOption);
+    ReportDuplicate("asset-duplicate by id", byId.ExitCode == 0 && byId.StdOut.StartsWith("/Game/Dp/Hero2 ", StringComparison.Ordinal) &&
+        !byId.StdOut.Contains(heroId, StringComparison.Ordinal), byId);
+
+    // 거부: 대상이 패키지·다른 에셋의 별칭, 없는 원본, 대상 경로 규칙.
+    ProcessResult occupied = await RunDuplicate("asset-duplicate", "/Game/Dp/Run", "/Game/Dp/Hero", projectOption);
+    ReportDuplicate("asset-duplicate onto a package", occupied.ExitCode == 1 &&
+        occupied.StdErr.Contains("asset-duplicate: DuplicatePath: /Game/Dp/Run: AlreadyExists", StringComparison.Ordinal), occupied);
+    ProcessResult moved = await RunDuplicate("asset-move", "/Game/Dp/Hero2", "/Game/Dp/Hero3", projectOption);
+    string hero2Id = byId.StdOut.Trim().Split(' ').Last();
+    ProcessResult onAlias = await RunDuplicate("asset-duplicate", "/Game/Dp/Run", "/Game/Dp/Hero2", projectOption);
+    ReportDuplicate("asset-duplicate onto an alias", moved.ExitCode == 0 && onAlias.ExitCode == 1 &&
+        onAlias.StdErr.Contains($"asset-duplicate: DuplicatePath: /Game/Dp/Run: AlreadyExists (related {hero2Id})",
+            StringComparison.Ordinal), onAlias);
+    ProcessResult missing = await RunDuplicate("asset-duplicate", "/Game/Nowhere", "/Game/X", projectOption);
+    ReportDuplicate("asset-duplicate missing source", missing.ExitCode == 1 &&
+        missing.StdErr.Contains("asset-duplicate: NotFound: /Game/Nowhere", StringComparison.Ordinal), missing);
+    ProcessResult invalid = await RunDuplicate("asset-duplicate", "/Game/Dp/Run", "Game/X", projectOption);
+    ReportDuplicate("asset-duplicate invalid target", invalid.ExitCode == 1 &&
+        invalid.StdErr.Contains("asset-duplicate: InvalidPath: /Game/Dp/Run", StringComparison.Ordinal), invalid);
+
+    if (OperatingSystem.IsWindows())
+    {
+        string lockPath = Path.Combine(project, "Intermediate", "AssetDatabase.lock");
+        using FileStream locked = new(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
+        locked.Lock(0, 1);
+        ProcessResult busy = await RunDuplicate("asset-duplicate", "/Game/Dp/Run", "/Game/Dp/Run9", projectOption);
+        ReportDuplicate("asset-duplicate locked", busy.ExitCode == 1 &&
+            busy.StdErr.Contains("asset-duplicate: Busy: ", StringComparison.Ordinal), busy);
+        locked.Unlock(0, 1);
+    }
+
+    string[][] duplicateUsage =
+    [
+        ["asset-duplicate", projectOption],
+        ["asset-duplicate", "/Game/A", projectOption],
+        ["asset-duplicate", "/Game/A", "/Game/B", "/Game/C", projectOption],
+        ["asset-duplicate", "/Game/A", "/Game/B", "--force", projectOption],
+    ];
+    foreach (string[] arguments in duplicateUsage)
+    {
+        ProcessResult usage = await RunDuplicate(arguments);
+        ReportDuplicate($"asset-duplicate usage: {string.Join(' ', arguments.Skip(1).Where(argument => argument != projectOption))}",
+            usage.ExitCode == 2 && usage.StdErr.StartsWith("usage: asset-duplicate", StringComparison.Ordinal), usage);
+    }
+
+    ProcessResult duplicateHelp = await RunDuplicate("asset-duplicate", "--help");
+    ReportDuplicate("asset-duplicate help", duplicateHelp.ExitCode == 0 &&
+        duplicateHelp.StdOut.StartsWith("usage: asset-duplicate", StringComparison.Ordinal), duplicateHelp);
+    ProcessResult duplicateNoProject = await RunDuplicate("asset-duplicate", "/Game/A", "/Game/B");
+    ReportDuplicate("asset-duplicate without a project", duplicateNoProject.ExitCode == 1 &&
+        duplicateNoProject.StdErr.Contains("no project found", StringComparison.Ordinal), duplicateNoProject);
+}
+finally
+{
+    Directory.Delete(duplicateDirectory, true);
+}
+
+// asset-fix-duplicate-id(AssetSystem.ko.md 7.1절 17 — A2e4b): 밖에서 복사한 Skeleton 사본을 새 id로(출력 두 줄 — 옛 id 참조는 남은
+// 원본으로), verify의 같은 id 진단이 사라지고 원본을 참조하는 AnimationClip은 그대로, 같은 id가 아님·없음·경로 규칙 거부, 잠금 Busy,
+// 사용법·도움말·프로젝트 없음. OrphanedOutput 경고는 명령이 임포트 기록을 만들 수 없어(A2f 전) C++ 시험이 맡는다.
+string fixDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-fix-id-{Environment.ProcessId}");
+try
+{
+    string project = Path.Combine(fixDirectory, "Fixing");
+    Directory.CreateDirectory(project);
+    File.WriteAllText(Path.Combine(project, "Fixing.rocksproject"), "{}\n");
+    string projectOption = $"--project={project}";
+    string content = Path.Combine(project, "Content");
+
+    async Task<ProcessResult> RunFix(params string[] arguments) =>
+        await ProcessRunner.RunAsync(new(executable, arguments, workingDirectory, Timeout: TimeSpan.FromSeconds(30)));
+
+    void ReportFix(string label, bool passed, ProcessResult result)
+    {
+        Console.WriteLine($"{label}: {(passed ? "PASS" : "FAIL")}");
+        if (!passed)
+        {
+            ++failures;
+            Console.Error.WriteLine($"  exit={result.ExitCode}; stdout={result.StdOut}; stderr={result.StdErr}");
+        }
+    }
+
+    ProcessResult hero = await RunFix("asset-new", "Skeleton", "/Game/Fx/Hero", projectOption);
+    ProcessResult run = await RunFix("asset-new", "AnimationClip", "/Game/Fx/Run", "skeleton=/Game/Fx/Hero", projectOption);
+    ReportFix("fix-id: setup", hero.ExitCode == 0 && run.ExitCode == 0, run);
+    string heroId = hero.StdOut.Trim().Split(' ').Last();
+    File.Copy(Path.Combine(content, "Fx", "Hero.rasset"), Path.Combine(content, "Fx", "Hero2.rasset"));
+    ProcessResult twin = await RunFix("asset-index-verify", projectOption);
+    ReportFix("fix-id: duplicated id before", twin.ExitCode == 1 &&
+        twin.StdErr.Contains("DuplicateAssetId", StringComparison.Ordinal), twin);
+
+    ProcessResult fixedId = await RunFix("asset-fix-duplicate-id", "/Game/Fx/Hero2", projectOption);
+    string[] lines = fixedId.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+    string newId = lines.Length == 2 ? lines[0].Split(' ').Last() : "";
+    ReportFix("asset-fix-duplicate-id", fixedId.ExitCode == 0 && fixedId.StdErr.Length == 0 && lines.Length == 2 &&
+        lines[0] == $"asset-fix-duplicate-id: /Game/Fx/Hero2 {heroId} -> {newId}" && newId.Length == 36 && newId != heroId &&
+        lines[1] == $"asset-fix-duplicate-id: references to {heroId} resolve to /Game/Fx/Hero", fixedId);
+    ProcessResult clean = await RunFix("asset-index-verify", projectOption);
+    ReportFix("fix-id: verify is clean after", clean.ExitCode == 0 && clean.StdErr.Length == 0, clean);
+    ProcessResult runInfo = await RunFix("asset-info", "/Game/Fx/Run", projectOption);
+    ReportFix("fix-id: the clip still references the original", runInfo.ExitCode == 0 &&
+        runInfo.StdOut.Contains("skeleton=/Game/Fx/Hero\n", StringComparison.Ordinal), runInfo);
+    ProcessResult copyInfo = await RunFix("asset-info", "/Game/Fx/Hero2", projectOption);
+    ProcessResult fixedList = await RunFix("asset-list", "--under=/Game/Fx", projectOption);
+    ReportFix("fix-id: the copy opens and lists with the new id", copyInfo.ExitCode == 0 && fixedList.ExitCode == 0 &&
+        fixedList.StdOut.Contains($"/Game/Fx/Hero {heroId}", StringComparison.Ordinal) &&
+        fixedList.StdOut.Contains($"/Game/Fx/Hero2 {newId}", StringComparison.Ordinal), fixedList);
+
+    // 같은 id가 셋이면 하나를 고쳐도 남은 둘은 아직 같은 id다(still shared by — 경로 키 순), 하나를 더 고치면 원본으로 풀린다.
+    File.Copy(Path.Combine(content, "Fx", "Hero.rasset"), Path.Combine(content, "Fx", "Hero3.rasset"));
+    File.Copy(Path.Combine(content, "Fx", "Hero.rasset"), Path.Combine(content, "Fx", "Hero4.rasset"));
+    ProcessResult shared = await RunFix("asset-fix-duplicate-id", "/Game/Fx/Hero3", projectOption);
+    string[] sharedLines = shared.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+    ReportFix("asset-fix-duplicate-id with two remaining", shared.ExitCode == 0 && sharedLines.Length == 3 &&
+        sharedLines[1] == $"asset-fix-duplicate-id: {heroId} is still shared by /Game/Fx/Hero" &&
+        sharedLines[2] == $"asset-fix-duplicate-id: {heroId} is still shared by /Game/Fx/Hero4", shared);
+    ProcessResult last = await RunFix("asset-fix-duplicate-id", "/Game/Fx/Hero4", projectOption);
+    ReportFix("asset-fix-duplicate-id the last copy", last.ExitCode == 0 &&
+        last.StdOut.EndsWith($"asset-fix-duplicate-id: references to {heroId} resolve to /Game/Fx/Hero\n", StringComparison.Ordinal),
+        last);
+
+    ProcessResult notDuplicate = await RunFix("asset-fix-duplicate-id", "/Game/Fx/Hero", projectOption);
+    ReportFix("asset-fix-duplicate-id not a duplicate", notDuplicate.ExitCode == 1 &&
+        notDuplicate.StdErr.Contains("asset-fix-duplicate-id: InvalidArgument: /Game/Fx/Hero", StringComparison.Ordinal), notDuplicate);
+    ProcessResult missing = await RunFix("asset-fix-duplicate-id", "/Game/Nowhere", projectOption);
+    ReportFix("asset-fix-duplicate-id missing", missing.ExitCode == 1 &&
+        missing.StdErr.Contains("asset-fix-duplicate-id: NotFound: /Game/Nowhere", StringComparison.Ordinal), missing);
+    ProcessResult invalid = await RunFix("asset-fix-duplicate-id", "Game/X", projectOption);
+    ReportFix("asset-fix-duplicate-id invalid path", invalid.ExitCode == 1 &&
+        invalid.StdErr.Contains("asset-fix-duplicate-id: InvalidPath: Game/X", StringComparison.Ordinal), invalid);
+
+    if (OperatingSystem.IsWindows())
+    {
+        string lockPath = Path.Combine(project, "Intermediate", "AssetDatabase.lock");
+        using FileStream locked = new(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
+        locked.Lock(0, 1);
+        ProcessResult busy = await RunFix("asset-fix-duplicate-id", "/Game/Fx/Hero2", projectOption);
+        ReportFix("asset-fix-duplicate-id locked", busy.ExitCode == 1 &&
+            busy.StdErr.Contains("asset-fix-duplicate-id: Busy: ", StringComparison.Ordinal), busy);
+        locked.Unlock(0, 1);
+    }
+
+    string[][] fixUsage =
+    [
+        ["asset-fix-duplicate-id", projectOption],
+        ["asset-fix-duplicate-id", "/Game/A", "/Game/B", projectOption],
+        ["asset-fix-duplicate-id", "/Game/A", "--force", projectOption],
+    ];
+    foreach (string[] arguments in fixUsage)
+    {
+        ProcessResult usage = await RunFix(arguments);
+        ReportFix($"asset-fix-duplicate-id usage: {string.Join(' ', arguments.Skip(1).Where(argument => argument != projectOption))}",
+            usage.ExitCode == 2 && usage.StdErr.StartsWith("usage: asset-fix-duplicate-id", StringComparison.Ordinal), usage);
+    }
+
+    ProcessResult fixHelp = await RunFix("asset-fix-duplicate-id", "--help");
+    ReportFix("asset-fix-duplicate-id help", fixHelp.ExitCode == 0 &&
+        fixHelp.StdOut.StartsWith("usage: asset-fix-duplicate-id", StringComparison.Ordinal), fixHelp);
+    ProcessResult fixNoProject = await RunFix("asset-fix-duplicate-id", "/Game/A");
+    ReportFix("asset-fix-duplicate-id without a project", fixNoProject.ExitCode == 1 &&
+        fixNoProject.StdErr.Contains("no project found", StringComparison.Ordinal), fixNoProject);
+}
+finally
+{
+    Directory.Delete(fixDirectory, true);
+}
+
+// asset-orphans-*·verify 경고(AssetSystem.ko.md 7.1절 17 — A2e4a): 고아 출력 fixture(Orphan 2311 — owner 2312 없음, HeroOrphan
+// 2313 — 기록 없는 Hero가 owner)로 목록 줄(경로 키 순, owner 경로·missing), 경고만인 verify는 종료 0, 고아 지우기·고아 아닌 거부,
+// 잠금 Busy, 사용법·도움말·프로젝트 없음.
+string orphanDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-orphans-{Environment.ProcessId}");
+try
+{
+    void WriteOrphanContent(string root, string relative, byte[] bytes)
+    {
+        string path = Path.Combine(root, "Content", relative);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllBytes(path, bytes);
+    }
+
+    const string orphanId = "5e570000-a55e-7000-0000-000000000907";
+    const string heroOrphanId = "5e570000-a55e-7000-0000-000000000909";
+    const string missingOwnerId = "5e570000-a55e-7000-0000-000000000908";
+    string project = Path.Combine(orphanDirectory, "Orphans");
+    Directory.CreateDirectory(project);
+    File.WriteAllText(Path.Combine(project, "Orphans.rocksproject"), "{}\n");
+    WriteOrphanContent(project, "Characters/Hero.rasset", fixtures["CommandletHeroPackage"]);
+    WriteOrphanContent(project, "Items/Base.rasset", fixtures["CommandletBasePackage"]);
+    WriteOrphanContent(project, "Outputs/Orphan.rasset", fixtures["CommandletOrphanPackage"]);
+    WriteOrphanContent(project, "Outputs/HeroOrphan.rasset", fixtures["CommandletHeroOrphanPackage"]);
+    string projectOption = $"--project={project}";
+    string warningsOnly = Path.Combine(orphanDirectory, "WarningsOnly");
+    Directory.CreateDirectory(warningsOnly);
+    File.WriteAllText(Path.Combine(warningsOnly, "WarningsOnly.rocksproject"), "{}\n");
+    WriteOrphanContent(warningsOnly, "Outputs/Orphan.rasset", fixtures["CommandletOrphanPackage"]);
+
+    async Task<ProcessResult> RunOrphans(params string[] arguments) =>
+        await ProcessRunner.RunAsync(new(executable, arguments, workingDirectory, Timeout: TimeSpan.FromSeconds(30)));
+
+    void ReportOrphans(string label, bool passed, ProcessResult result)
+    {
+        Console.WriteLine($"{label}: {(passed ? "PASS" : "FAIL")}");
+        if (!passed)
+        {
+            ++failures;
+            Console.Error.WriteLine($"  exit={result.ExitCode}; stdout={result.StdOut}; stderr={result.StdErr}");
+        }
+    }
+
+    ProcessResult listed = await RunOrphans("asset-orphans-list", projectOption);
+    ReportOrphans("asset-orphans-list", listed.ExitCode == 0 && listed.StdErr.Length == 0 &&
+        listed.StdOut == $"/Game/Outputs/HeroOrphan {heroOrphanId} owner /Game/Characters/Hero\n" +
+                         $"/Game/Outputs/Orphan {orphanId} owner missing\n", listed);
+
+    // 경고만 있는 verify는 종료 0이다(진단 줄은 쓴다).
+    ProcessResult warned = await RunOrphans("asset-index-verify", $"--project={warningsOnly}");
+    ReportOrphans("asset-index-verify warnings only", warned.ExitCode == 0 &&
+        warned.StdErr.Contains($"OrphanedOutput: Content/Outputs/Orphan.rasset: warning the owning import {missingOwnerId} is not in the index",
+            StringComparison.Ordinal) &&
+        warned.StdOut == "asset-index-verify: 1 packages, 1 diagnostics\n", warned);
+    ProcessResult mixed = await RunOrphans("asset-index-verify", projectOption);
+    ReportOrphans("asset-index-verify errors and warnings", mixed.ExitCode == 1 &&
+        mixed.StdErr.Contains("OrphanedOutput: Content/Outputs/HeroOrphan.rasset: warning the owning import", StringComparison.Ordinal) &&
+        mixed.StdErr.Contains("has no import record of its own", StringComparison.Ordinal) &&
+        mixed.StdErr.Contains("MissingDependency", StringComparison.Ordinal), mixed);
+
+    // 지우기: 고아가 아니면 거부, 고아는 지운다.
+    ProcessResult notOrphan = await RunOrphans("asset-orphans-delete", "/Game/Characters/Hero", projectOption);
+    ReportOrphans("asset-orphans-delete not an orphan", notOrphan.ExitCode == 1 &&
+        notOrphan.StdErr.Contains("asset-orphans-delete: InvalidArgument: /Game/Characters/Hero: failed", StringComparison.Ordinal) &&
+        File.Exists(Path.Combine(project, "Content", "Characters", "Hero.rasset")), notOrphan);
+    ProcessResult deleted = await RunOrphans("asset-orphans-delete", "/Game/Outputs/Orphan", projectOption);
+    ReportOrphans("asset-orphans-delete", deleted.ExitCode == 0 &&
+        deleted.StdOut == $"asset-orphans-delete: deleted /Game/Outputs/Orphan {orphanId}\n" &&
+        !File.Exists(Path.Combine(project, "Content", "Outputs", "Orphan.rasset")), deleted);
+    ProcessResult after = await RunOrphans("asset-orphans-list", projectOption);
+    ReportOrphans("asset-orphans-list after a delete", after.ExitCode == 0 &&
+        after.StdOut == $"/Game/Outputs/HeroOrphan {heroOrphanId} owner /Game/Characters/Hero\n", after);
+    // 같은 id owner가 둘이면 owner는 AssetId로 쓴다(Hero 사본).
+    WriteOrphanContent(project, "Characters/HeroCopy.rasset", fixtures["CommandletHeroPackage"]);
+    ProcessResult twin = await RunOrphans("asset-orphans-list", projectOption);
+    ReportOrphans("asset-orphans-list with a duplicated owner id", twin.ExitCode == 0 &&
+        twin.StdOut == $"/Game/Outputs/HeroOrphan {heroOrphanId} owner 5e570000-a55e-7000-0000-0000000008fc\n", twin);
+    File.Delete(Path.Combine(project, "Content", "Characters", "HeroCopy.rasset"));
+
+    // Content가 파일이면 검색 실패다.
+    string brokenContent = Path.Combine(orphanDirectory, "BrokenContent");
+    Directory.CreateDirectory(brokenContent);
+    File.WriteAllText(Path.Combine(brokenContent, "BrokenContent.rocksproject"), "{}\n");
+    File.WriteAllBytes(Path.Combine(brokenContent, "Content"), [1]);
+    ProcessResult unscanned = await RunOrphans("asset-orphans-list", $"--project={brokenContent}");
+    ReportOrphans("asset-orphans-list content is a file", unscanned.ExitCode == 1 &&
+        unscanned.StdErr.Contains("asset-orphans-list: cannot scan", StringComparison.Ordinal), unscanned);
+
+    ProcessResult missing = await RunOrphans("asset-orphans-delete", "/Game/Outputs/Orphan", projectOption);
+    ReportOrphans("asset-orphans-delete missing", missing.ExitCode == 1 &&
+        missing.StdErr.Contains("asset-orphans-delete: NotFound: /Game/Outputs/Orphan: failed", StringComparison.Ordinal), missing);
+
+    if (OperatingSystem.IsWindows())
+    {
+        string lockPath = Path.Combine(project, "Intermediate", "AssetDatabase.lock");
+        Directory.CreateDirectory(Path.GetDirectoryName(lockPath)!);
+        using FileStream locked = new(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
+        locked.Lock(0, 1);
+        ProcessResult busy = await RunOrphans("asset-orphans-delete", "/Game/Outputs/HeroOrphan", projectOption);
+        ReportOrphans("asset-orphans-delete locked", busy.ExitCode == 1 &&
+            busy.StdErr.Contains("asset-orphans-delete: Busy: ", StringComparison.Ordinal), busy);
+        // 목록은 잠금을 잡지 않는다.
+        ProcessResult unlockedList = await RunOrphans("asset-orphans-list", projectOption);
+        ReportOrphans("asset-orphans-list while locked", unlockedList.ExitCode == 0, unlockedList);
+        locked.Unlock(0, 1);
+    }
+
+    string[][] orphanUsage =
+    [
+        ["asset-orphans-delete", projectOption],
+        ["asset-orphans-delete", "/Game/A", "/Game/B", projectOption],
+        ["asset-orphans-delete", "/Game/A", "--force", projectOption],
+        ["asset-orphans-list", "extra", projectOption],
+        ["asset-orphans-list", "--under=/Game", projectOption],
+    ];
+    foreach (string[] arguments in orphanUsage)
+    {
+        ProcessResult usage = await RunOrphans(arguments);
+        ReportOrphans($"{arguments[0]} usage: {string.Join(' ', arguments.Skip(1).Where(argument => argument != projectOption))}",
+            usage.ExitCode == 2 && usage.StdErr.StartsWith($"usage: {arguments[0]}", StringComparison.Ordinal), usage);
+    }
+
+    foreach (string name in new[] { "asset-orphans-list", "asset-orphans-delete" })
+    {
+        ProcessResult help = await RunOrphans(name, "--help");
+        ReportOrphans($"{name} help", help.ExitCode == 0 && help.StdOut.StartsWith($"usage: {name}", StringComparison.Ordinal), help);
+        string[] noProjectArguments = name == "asset-orphans-delete" ? [name, "/Game/A"] : [name];
+        ProcessResult noProject = await RunOrphans(noProjectArguments);
+        ReportOrphans($"{name} without a project", noProject.ExitCode == 1 &&
+            noProject.StdErr.Contains("no project found", StringComparison.Ordinal), noProject);
+    }
+}
+finally
+{
+    Directory.Delete(orphanDirectory, true);
+}
+
 if (OperatingSystem.IsWindows())
 {
     // 무효 stderr 핸들을 child의 표준 오류로 직접 설정해 출력 실패를 재현한다.

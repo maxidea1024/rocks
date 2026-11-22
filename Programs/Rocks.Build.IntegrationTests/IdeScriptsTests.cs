@@ -34,13 +34,16 @@ internal static class IdeScriptsTests
         }
 
         await CleanBoundariesAsync(repository);
+        await SingleFileRejectionsAsync(repository);
+        await SetupSelfTestAsync(repository);
         await SdkScriptsAsync(repository);
+        await RootScriptAsync(repository);
         await LockOrderAsync(repository);
         await ToolInputsAsync(repository);
         await NMakeCommandsAsync(repository);
         await StalenessAsync(repository);
-        Console.WriteLine("PASS IDE scripts: clean boundaries, SDK scripts, IDE build lock order, tool inputs and rebuild decisions, Visual Studio or NMake build/clean/rebuild, " +
-            "terminal no-op, failure exit codes, RPF0001");
+        Console.WriteLine("PASS IDE scripts: clean boundaries, setup self test (-Command and -File, pwsh and 5.1), SDK scripts, IDE build lock order, tool inputs and rebuild decisions, Visual Studio or NMake build/clean/rebuild, " +
+            "terminal no-op, failure exit codes, RPF0001, compile one file, root GenerateProjectFiles.ps1");
     }
 
     private static async Task CleanBoundariesAsync(string repository)
@@ -224,7 +227,7 @@ internal static class IdeScriptsTests
         }
 
         string[] Build(params string[] extra) => ["build", "--root", repository, "--target", SmallTarget, "--configuration", "Debug", .. extra];
-        bool Stale(string output) => output.Contains("warning RPF0001", StringComparison.Ordinal);
+        bool Stale(string output) => output.Contains("warning RPF0001:", StringComparison.Ordinal);
         await Cli("projectfiles", "--root", repository);
         Require(!Stale(await Cli(Build())), "a fresh build reported stale project files");
         foreach (string[] mode in new[] { new[] { "--unity", "off" }, ["--adaptive", "off"], ["--pch", "off"] })
@@ -249,8 +252,46 @@ internal static class IdeScriptsTests
         Require(!Stale(await Cli(Build())), "project files are stale after removing the probe and regenerating");
     }
 
-    // 설치 SDK에 실린 스크립트: Tools.ps1은 도구를 빌드하지 않고(-ListInputs는 해당 없음), IdeBuild.ps1·GenerateProjectFiles.ps1은 게임 호출
-    // 형태(-Project·-Sdk)에서도 매개변수를 묶은 뒤 error RB0002로 멈춘다(게임 모드는 PJ5).
+    // --files는 build 전용이고 --plan-only on과 함께 쓰지 않는다(출력을 만들기 전에 거부, Docs/Design/ProjectFiles.ko.md 7.4절).
+    private static async Task SingleFileRejectionsAsync(string repository)
+    {
+        string cli = Path.Combine(repository, "out", "dotnet", "bin", "Rocks.Build.Cli", "Debug", "net10.0", "Rocks.Build.Cli.dll");
+        string source = Path.Combine(repository, "Programs", SmallTarget, "Private", "Main.cpp");
+        foreach ((string[] arguments, string expected) in new (string[], string)[]
+                 {
+                     (["test", "--root", repository, "--target", SmallTarget, "--files", source], "with 'build' only"),
+                     (["build", "--root", repository, "--target", SmallTarget, "--files", source, "--plan-only", "on"], "with 'build' only"),
+                     (["sdk", "--root", repository, "--target", "Engine", "--files", source, "--destination", Path.Combine(repository, "out", "never-sdk")],
+                         "--files")
+                 })
+        {
+            var result = await ProcessRunner.RunAsync(new("dotnet", [cli, .. arguments], repository));
+            Require(result.ExitCode != 0 && (result.StdOut + result.StdErr).Contains(expected, StringComparison.Ordinal),
+                $"{arguments[0]} accepted --files: " + result.StdOut + result.StdErr);
+        }
+
+        Require(!Directory.Exists(Path.Combine(repository, "out", "never-sdk")), "a rejected sdk --files wrote a destination");
+    }
+
+    // 설치 마법사 셀프 테스트를 CI와 같은 -Command 호출과 -File 호출로, PowerShell 7과 Windows PowerShell 5.1 모두에서 돌린다. -Command는 스크립트를
+    // 세션 안에서 불러 GetNewClosure 클로저가 스크립트 함수를 보지 못하는 문제가 -File에서는 드러나지 않았다(CI만 실패).
+    private static async Task SetupSelfTestAsync(string repository)
+    {
+        string setup = Path.Combine(repository, "Build", "Setup.ps1");
+        foreach (string shell in new[] { "pwsh", "powershell" })
+        {
+            foreach (string[] form in new[] { new[] { "-Command", "& '" + setup.Replace("'", "''", StringComparison.Ordinal) + "' -SelfTest" }, ["-File", setup, "-SelfTest"] })
+            {
+                var result = await ProcessRunner.RunAsync(new(shell, ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", .. form], repository,
+                    Timeout: TimeSpan.FromMinutes(5)));
+                Require(result.ExitCode == 0 && result.StdOut.Contains("Setup self test: PASS", StringComparison.Ordinal),
+                    $"Setup self test failed with {shell} {form[0]}: " + result.StdOut + result.StdErr);
+            }
+        }
+    }
+
+    // 설치 SDK에 실린 스크립트: Tools.ps1은 도구를 빌드하지 않고(-ListInputs는 해당 없음), IdeBuild.ps1·GenerateProjectFiles.ps1은 게임 형태만
+    // 받는다. 엔진 작업 사본의 IdeBuild.ps1은 게임 형태를 거부한다.
     private static async Task SdkScriptsAsync(string repository)
     {
         string sdk = Directory.CreateTempSubdirectory("rocks-sdk-scripts-").FullName;
@@ -271,16 +312,58 @@ internal static class IdeScriptsTests
             Require(tools.ExitCode == 0 && tools.StdOut.Contains("ship with the installed SDK", StringComparison.Ordinal), "SDK Tools.ps1: " + tools.StdOut + tools.StdErr);
             var inputs = await Script("Tools.ps1", "-ListInputs");
             Require(inputs.ExitCode == 0 && inputs.StdOut.Contains("not applicable", StringComparison.Ordinal), "SDK Tools.ps1 -ListInputs: " + inputs.StdOut + inputs.StdErr);
-            var game = await Script("IdeBuild.ps1", "-Action", "Build", "-Project", Path.Combine(sdk, "Game.rocksproject"), "-Sdk", sdk, "-Target", "Game",
-                "-Configuration", "Debug", "-Compiler", "clang-cl.exe");
-            Require(game.ExitCode == 1 && game.StdOut.Contains("error RB0002", StringComparison.Ordinal), "SDK IdeBuild.ps1 game form: " + game.StdOut + game.StdErr);
-            var generate = await Script("GenerateProjectFiles.ps1", "-Project", Path.Combine(sdk, "Game.rocksproject"));
-            Require(generate.ExitCode == 1 && generate.StdOut.Contains("error RB0002", StringComparison.Ordinal),
-                "SDK GenerateProjectFiles.ps1 game form: " + generate.StdOut + generate.StdErr);
+            // 설치 SDK는 게임 형태(-Project·-Sdk)만, 엔진 작업 사본은 엔진 형태만 받는다(10.4절). 실제 게임 형태 실행은 본 흐름이 시험한다.
+            var engineForm = await Script("IdeBuild.ps1", "-Action", "Build", "-Target", "Game", "-Configuration", "Debug", "-Platform", "Windows");
+            Require(engineForm.ExitCode == 1 && engineForm.StdOut.Contains("error RB0002: an installed SDK builds game projects only", StringComparison.Ordinal),
+                "SDK IdeBuild.ps1 engine form: " + engineForm.StdOut + engineForm.StdErr);
+            var halfGame = await Script("IdeBuild.ps1", "-Action", "Build", "-Project", Path.Combine(sdk, "Game.rocksproject"), "-Target", "Game",
+                "-Configuration", "Debug");
+            Require(halfGame.ExitCode == 1 && halfGame.StdOut.Contains("error RB0002", StringComparison.Ordinal), "SDK IdeBuild.ps1 without -Sdk: " +
+                halfGame.StdOut + halfGame.StdErr);
+            var engineGame = await ProcessRunner.RunAsync(new("pwsh", ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                Path.Combine(repository, "Build", "IdeBuild.ps1"), "-Action", "Build", "-Project", Path.Combine(sdk, "Game.rocksproject"), "-Sdk", sdk,
+                "-Target", "Game", "-Configuration", "Debug"], repository));
+            Require(engineGame.ExitCode == 1 && engineGame.StdOut.Contains("error RB0002: game projects build with the IdeBuild.ps1 of their installed SDK",
+                StringComparison.Ordinal), "engine IdeBuild.ps1 game form: " + engineGame.StdOut + engineGame.StdErr);
+            var generate = await Script("GenerateProjectFiles.ps1");
+            Require(generate.ExitCode == 1 && generate.StdOut.Contains("error RB0002: an installed SDK generates game project files only", StringComparison.Ordinal),
+                "SDK GenerateProjectFiles.ps1 without -Project: " + generate.StdOut + generate.StdErr);
         }
         finally
         {
             Directory.Delete(sdk, recursive: true);
+        }
+    }
+
+    // 루트 GenerateProjectFiles.ps1(12절): 인자를 그대로 Build/GenerateProjectFiles.ps1에 넘기고 그 종료 코드를 돌려주며, Windows PowerShell 5.1은
+    // 거부한다. 실제 생성 대신 인자를 출력하고 7로 끝나는 가짜 Build 스크립트를 두어 전달만 확인한다(공백·괄호·작은따옴표가 든 경로).
+    private static async Task RootScriptAsync(string repository)
+    {
+        string root = Directory.CreateTempSubdirectory("rocks-root-script-").FullName;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(root, "Build"));
+            string script = Path.Combine(root, "GenerateProjectFiles.ps1");
+            File.Copy(Path.Combine(repository, "GenerateProjectFiles.ps1"), script);
+            File.WriteAllText(Path.Combine(root, "Build", "GenerateProjectFiles.ps1"),
+                "param([string] $Compiler, [string] $Project, [string] $Sdk)\n" +
+                "[Console]::Out.WriteLine(\"compiler=<$Compiler> project=<$Project> sdk=<$Sdk> bound=$($PSBoundParameters.Count)\")\n" +
+                "exit 7\n");
+            string project = Path.Combine(root, "My Game (1)'s", "Game.rocksproject");
+            var forwarded = await ProcessRunner.RunAsync(new("pwsh", ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script,
+                "-Project", project, "-Sdk", "C:/sdk dir", "-Compiler", "clang-cl.exe"], root));
+            Require(forwarded.ExitCode == 7 && forwarded.StdOut.Contains($"compiler=<clang-cl.exe> project=<{project}> sdk=<C:/sdk dir> bound=3",
+                StringComparison.Ordinal), "root GenerateProjectFiles.ps1 forwarding: " + forwarded.ExitCode + " " + forwarded.StdOut + forwarded.StdErr);
+            var bare = await ProcessRunner.RunAsync(new("pwsh", ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script], root));
+            Require(bare.ExitCode == 7 && bare.StdOut.Contains("compiler=<> project=<> sdk=<> bound=0", StringComparison.Ordinal),
+                "root GenerateProjectFiles.ps1 without arguments: " + bare.ExitCode + " " + bare.StdOut + bare.StdErr);
+            var legacy = await ProcessRunner.RunAsync(new("powershell", ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script], root));
+            Require(legacy.ExitCode != 0 && !(legacy.StdOut + legacy.StdErr).Contains("compiler=<", StringComparison.Ordinal),
+                "root GenerateProjectFiles.ps1 under Windows PowerShell 5.1: " + legacy.ExitCode + " " + legacy.StdOut + legacy.StdErr);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
         }
     }
 
@@ -319,6 +402,61 @@ internal static class IdeScriptsTests
             "the terminal build after the IDE build was not a no-op: " + terminal.StdOut);
         Require(!terminal.StdOut.Contains("RPF0001", StringComparison.Ordinal), "the terminal build reported stale project files: " + terminal.StdOut);
 
+        // 파일 하나 컴파일(Ctrl+F7): 논리 명령·별도 object·증분 기록 불변, -WorkingDir 상대 경로. 그 뒤 터미널 빌드는 여전히 0 action이다.
+        using (var database = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(outputDirectory, "compile_commands.json"))))
+        {
+            string source = database.RootElement.EnumerateArray().Select(entry => Path.GetFullPath(entry.GetProperty("file").GetString()!))
+                .First(file => file.StartsWith(Path.Combine(repository, "Programs", SmallTarget) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) &&
+                    file.EndsWith(".cpp", StringComparison.OrdinalIgnoreCase));
+            // 헤더는 확장자로 거부하므로 있을 필요가 없다(MathBench에는 헤더가 없다).
+            string header = Path.Combine(repository, "Programs", SmallTarget, "Private", "Selected.h");
+            await CompileSelectedAsync(project, "Debug", outputDirectory, [source], header, repository);
+        }
+
+        var afterCompile = await ProcessRunner.RunAsync(new("dotnet", ["msbuild", Path.Combine(repository, "Rocks.proj"), "-t:Build", "-nologo",
+            "-p:RocksTarget=" + SmallTarget, "-p:Configuration=Debug", "-p:Compiler=" + Compiler(build)], repository));
+        Require(afterCompile.ExitCode == 0 && afterCompile.StdOut.Contains("executed=0;", StringComparison.Ordinal),
+            "the terminal build after compiling one file was not a no-op: " + afterCompile.StdOut);
+
+        // 두 파일(공백·한글 이름)을 한 번에 고른다: 빌드해 compile_commands.json에 넣은 뒤 Ctrl+F7로 함께 컴파일하고, 지운 뒤 다시 빌드한다.
+        string[] probes = [Path.Combine(repository, "Programs", SmallTarget, "Private", "Selected One.cpp"),
+            Path.Combine(repository, "Programs", SmallTarget, "Private", "선택 둘.cpp")];
+        try
+        {
+            for (int index = 0; index < probes.Length; ++index)
+            {
+                File.WriteAllText(probes[index], $"int RocksSelectedProbe{index}() noexcept;\nint RocksSelectedProbe{index}() noexcept {{ return {index}; }}\n");
+            }
+
+            var withProbes = await ProcessRunner.RunAsync(new("dotnet", ["msbuild", Path.Combine(repository, "Rocks.proj"), "-t:Build", "-nologo",
+                "-p:RocksTarget=" + SmallTarget, "-p:Configuration=Debug", "-p:Compiler=" + Compiler(build)], repository));
+            Require(withProbes.ExitCode == 0, "building with the selection probes failed: " + withProbes.StdOut);
+            await CompileSelectedAsync(project, "Debug", outputDirectory, probes, Path.Combine(repository, "Programs", SmallTarget, "Private", "Selected.h"),
+                repository);
+        }
+        finally
+        {
+            foreach (string probe in probes)
+            {
+                File.Delete(probe);
+            }
+        }
+
+        // 이 타깃이 컴파일하지 않는 파일은 그 파일을 컴파일하는 타깃 이름을 안내한다(원천은 1단계만, 7.4절).
+        // LaunchTests 타깃의 소스다(MathBench는 컴파일하지 않는다).
+        string other = Directory.GetFiles(Path.Combine(repository, "Programs", "LaunchTests"), "*.cpp", SearchOption.AllDirectories)
+            .Order(StringComparer.Ordinal).First();
+        {
+            var elsewhere = await ProcessRunner.RunAsync(new("dotnet", [cli, "build", "--root", repository, "--target", SmallTarget, "--configuration", "Debug",
+                "--compiler", Compiler(build), "--files", other], repository, Timeout: TimeSpan.FromMinutes(10)));
+            Require(elsewhere.ExitCode != 0 && elsewhere.StdErr.Contains("is not compiled by this target and configuration; it is compiled by", StringComparison.Ordinal),
+                "compiling another target's file must name the targets that compile it: " + elsewhere.StdErr);
+        }
+
+        var withoutProbes = await ProcessRunner.RunAsync(new("dotnet", ["msbuild", Path.Combine(repository, "Rocks.proj"), "-t:Build", "-nologo",
+            "-p:RocksTarget=" + SmallTarget, "-p:Configuration=Debug", "-p:Compiler=" + Compiler(build)], repository));
+        Require(withoutProbes.ExitCode == 0, "building after removing the selection probes failed: " + withoutProbes.StdOut);
+
         // 도구를 다시 빌드한 회차에도 실패는 실패다(도구 빌드 출력이 종료 코드에 섞이지 않는다).
         File.Delete(Path.Combine(repository, "out", "dotnet", ".rocks-tools.json"));
         var failing = await ProcessRunner.RunAsync(new("pwsh", ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
@@ -356,6 +494,119 @@ internal static class IdeScriptsTests
             await process.WaitForExitAsync();
             Require(process.ExitCode == 0, what + " failed: " + await output + await errors);
         }
+    }
+
+    /// <summary>
+    /// 파일 하나 컴파일(Ctrl+F7, Docs/Design/ProjectFiles.ko.md 7.4절) 시험: Visual Studio 18이 있으면 그 MSBuild로
+    /// <c>-t:NMakeCompileSelectedFiles -p:SelectedFiles=&lt;프로젝트 디렉터리 상대 경로;…&gt;</c>를 실제로 돌린다(VS가 타는 경로 — NMakeCompile item
+    /// 메타데이터). 없으면 item 정의의 NMakeCompileFileCommandLine을 평가해 cmd로 돌린다. 소스마다 object가 생기고, 기록한 인자가 빌드한
+    /// compile_commands.json의 그 소스 명령(object 경로 제외)과 같고, native-cache.json·action-report.json이 byte 그대로다. 헤더를 고르면 실패한다.
+    /// </summary>
+    internal static async Task CompileSelectedAsync(string projectPath, string configuration, string output, IReadOnlyList<string> sources, string header,
+        string workingDirectory, IReadOnlyDictionary<string, string?>? environment = null)
+    {
+        byte[] Bytes(string name) => File.ReadAllBytes(Path.Combine(output, name));
+        byte[] cache = Bytes("native-cache.json");
+        byte[] report = Bytes("action-report.json");
+        string Relative(string path) => Path.GetRelativePath(Path.GetDirectoryName(projectPath)!, path);
+        await CompileSelectedFilesAsync(projectPath, configuration, string.Join(';', sources.Select(Relative)), workingDirectory, environment, expectSuccess: true);
+        static string[] WithoutObject(IEnumerable<string> arguments) => [.. CompileObjectArguments.Without([.. arguments])];
+        using var database = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "compile_commands.json")));
+        string[] records = Directory.GetFiles(Path.Combine(output, "SingleFile"), "*.json");
+        foreach (string source in sources)
+        {
+            using var record = System.Text.Json.JsonDocument.Parse(File.ReadAllText(records.Single(path =>
+                string.Equals(System.Text.Json.JsonDocument.Parse(File.ReadAllText(path)).RootElement.GetProperty("source").GetString(), source,
+                    StringComparison.OrdinalIgnoreCase))));
+            string objectPath = record.RootElement.GetProperty("object").GetString()!;
+            Require(File.Exists(objectPath) && Path.GetDirectoryName(objectPath)!.EndsWith("SingleFile", StringComparison.Ordinal), "single-file object " + objectPath);
+            string[] compiled = WithoutObject(record.RootElement.GetProperty("arguments").EnumerateArray().Select(item => item.GetString()!));
+            bool matched = database.RootElement.EnumerateArray().Where(entry => string.Equals(Path.GetFullPath(entry.GetProperty("file").GetString()!), source,
+                StringComparison.OrdinalIgnoreCase)).Any(entry => WithoutObject(entry.GetProperty("arguments").EnumerateArray().Skip(1).Select(item => item.GetString()!))
+                .SequenceEqual(compiled, StringComparer.Ordinal));
+            Require(matched, $"the single-file command of {source} is not the logical command of the build: " + string.Join(' ', compiled));
+        }
+
+        Require(Bytes("native-cache.json").AsSpan().SequenceEqual(cache) && Bytes("action-report.json").AsSpan().SequenceEqual(report),
+            "compiling one file changed the incremental record or the action report");
+        await CompileSelectedFilesAsync(projectPath, configuration, Relative(header), workingDirectory, environment, expectSuccess: false);
+    }
+
+    // Visual Studio 18이 있으면 그 MSBuild의 NMakeCompileSelectedFiles를, 없으면 평가한 item 정의의 명령을 cmd로 돌린다.
+    private static async Task CompileSelectedFilesAsync(string projectPath, string configuration, string selected, string workingDirectory,
+        IReadOnlyDictionary<string, string?>? environment, bool expectSuccess)
+    {
+        string? msbuild = await ProjectFilesWriterTests.VisualStudioMSBuildAsync();
+        // ROCKS_REQUIRE_VS_MSBUILD=1이면 Visual Studio 18 MSBuild 경로를 반드시 탄다(VS 18이 있는 PC·CI 이미지용).
+        Require(msbuild is not null || Environment.GetEnvironmentVariable("ROCKS_REQUIRE_VS_MSBUILD") != "1",
+            "ROCKS_REQUIRE_VS_MSBUILD=1 but no Visual Studio 18 MSBuild with the ClangCL toolset was found");
+        Console.WriteLine(msbuild is not null ? $"compile one file ({selected}): Visual Studio MSBuild NMakeCompileSelectedFiles"
+            : $"compile one file ({selected}): evaluated NMakeCompileFileCommandLine through cmd (no Visual Studio 18)");
+        if (msbuild is not null)
+        {
+            // 명령줄 -p:는 ';'를 속성 구분자로 읽으므로 %3B로 이스케이프한다(MSBuild가 값에서 되돌린다).
+            var result = await ProcessRunner.RunAsync(new(msbuild, [projectPath, "-nologo", "-t:NMakeCompileSelectedFiles", "-p:Configuration=" + configuration,
+                "-p:Platform=x64", "-p:SelectedFiles=" + selected.Replace(";", "%3B", StringComparison.Ordinal)], Path.GetDirectoryName(projectPath)!,
+                MergedVisualStudioEnvironment(environment), Timeout: TimeSpan.FromMinutes(10)));
+            Require((result.ExitCode == 0) == expectSuccess && !result.StdOut.Contains("MSB8005", StringComparison.Ordinal),
+                $"Visual Studio NMakeCompileSelectedFiles ({selected}): exit code {result.ExitCode}: " + result.StdOut + result.StdErr);
+            return;
+        }
+
+        string command = CompileFileCommand(projectPath, configuration, selected);
+        Require(command.Contains("-Action Compile", StringComparison.Ordinal), "NMakeCompileFileCommandLine: " + command);
+        await RunCommand(command, "compile one file", workingDirectory, environment, expectSuccess);
+    }
+
+    // Visual Studio MSBuild 환경(.NET SDK MSBuild 변수 제거)에 시험이 준 변수(시험 등록부 등)를 얹는다.
+    private static Dictionary<string, string?> MergedVisualStudioEnvironment(IReadOnlyDictionary<string, string?>? environment)
+    {
+        Dictionary<string, string?> merged = ProjectFilesWriterTests.VisualStudioEnvironment();
+        foreach ((string key, string? value) in environment ?? new Dictionary<string, string?>())
+        {
+            if (key.StartsWith("ROCKS_", StringComparison.OrdinalIgnoreCase))
+            {
+                merged[key] = value;
+            }
+        }
+
+        return merged;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static string CompileFileCommand(string path, string configuration, string selected)
+    {
+        using var collection = new ProjectCollection();
+        var project = new Project(path, new Dictionary<string, string> { ["Configuration"] = configuration, ["Platform"] = "x64", ["SelectedFiles"] = selected },
+            null, collection, ProjectLoadSettings.IgnoreMissingImports | ProjectLoadSettings.IgnoreInvalidImports);
+        return project.ItemDefinitions.TryGetValue("NMakeCompile", out ProjectItemDefinition? definition)
+            ? definition.GetMetadataValue("NMakeCompileFileCommandLine") : "";
+    }
+
+    // NMake처럼 명령줄 문자열을 cmd에 그대로 넘긴다.
+    private static async Task RunCommand(string command, string what, string directory, IReadOnlyDictionary<string, string?>? environment, bool expectSuccess)
+    {
+        var start = new ProcessStartInfo("cmd.exe", "/d /s /c \"" + command + "\"")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            WorkingDirectory = directory
+        };
+        if (environment is not null)
+        {
+            start.Environment.Clear();
+            foreach ((string key, string? value) in environment)
+            {
+                start.Environment[key] = value;
+            }
+        }
+
+        using var process = Process.Start(start)!;
+        Task<string> output = process.StandardOutput.ReadToEndAsync();
+        Task<string> errors = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        Require((process.ExitCode == 0) == expectSuccess, $"{what}: exit code {process.ExitCode}: " + await output + await errors);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

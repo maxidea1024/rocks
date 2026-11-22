@@ -1,0 +1,261 @@
+module "Main"
+compiler "sparks 0.4.0"
+profile full
+content 952fed61677bb6cec0ed21413bf3aaa036a47b49596564be633cd0e1f15ccc73
+interface 3b8905df816ecd5eaed1c5f53e0505dc9bc42e18c57e5f0e2961768a812a5125
+k0 = 0x3ff8000000000000
+k1 = 0x4024000000000000
+t0 = "Door.on Enable"
+t1 = "World"
+t2 = ">x"
+t3 = "World.Audio"
+t4 = "Door.Cue"
+t5 = "x,x>?<x>"
+t6 = "AudioSystem.StartLoop"
+t7 = ">?<x>"
+t8 = "Door.Hum"
+t9 = ">st"
+t10 = "Door.Info"
+t11 = "Stats"
+t12 = "Level"
+t13 = "Offset"
+t14 = "Stats.Level"
+t15 = "Stats.Offset"
+t16 = ">A<s>"
+t17 = "Door.Names"
+t18 = "front"
+t19 = ">M<s,i64>"
+t20 = "Door.Scores"
+t21 = "a"
+t22 = "Door.on Disable"
+t23 = "x>void"
+t24 = "LoopHandle.Pause"
+t25 = "Door.Toggle"
+t26 = ">b"
+t27 = "Door.Open"
+t28 = "x,x>void"
+t29 = "Door.Opened"
+t30 = "Door.Describe"
+t31 = ">e"
+t32 = "Door.State"
+t33 = "idle"
+t34 = "working"
+t35 = "Door.Total"
+t36 = "skip"
+t37 = "Door.on Owner.Damaged"
+t38 = ">w"
+t39 = "NextTick"
+t40 = "Door.Find"
+t41 = "Component.Owner"
+t42 = "Pawn"
+t43 = "Door.$init"
+t44 = "Array<string>"
+t45 = "Map<string, int>"
+t46 = "Door"
+t47 = "ScriptableComponent"
+t48 = "Cue"
+t49 = "Open"
+t50 = "Info"
+t51 = "State"
+t52 = "Names"
+t53 = "Scores"
+t54 = "Hum"
+t55 = "Opened"
+t56 = "x"
+t57 = "x,f64>void"
+t58 = "Actor.Damaged"
+t59 = "Owner"
+t60 = "Damaged"
+t61 = "sparks 0.4.0"
+t62 = "Main"
+ref0 = context World
+ref1 = field World.Audio args ">x"
+ref2 = field Door.Cue args ">x"
+ref3 = native AudioSystem.StartLoop args "x,x>?<x>"
+ref4 = field Door.Hum args ">?<x>"
+ref5 = field Door.Info args ">st"
+ref6 = struct-field Stats.Level field0
+ref7 = struct-field Stats.Offset field1
+ref8 = field Door.Names args ">A<s>"
+ref9 = field Door.Scores args ">M<s,i64>"
+ref10 = native LoopHandle.Pause args "x>void"
+ref11 = field Door.Open args ">b"
+ref12 = event Door.Opened args "x,x>void"
+ref13 = field Door.State args ">e"
+ref14 = language NextTick args ">w"
+ref15 = field Component.Owner args ">x"
+ref16 = type Pawn
+ref17 = type Stats type0
+ref18 = type Array<string>
+ref19 = type Map<string, int>
+ref20 = event Actor.Damaged args "x,f64>void"
+type0 = struct Stats s4 r0 b0
+  field0 Level s0 x1
+  field1 Offset s1 x3
+class0 = Door : ScriptableComponent s2 r2 b3 init Door.$init
+  field Cue r0 x1
+  field Open s0 x1
+  field Info b0 x1
+  field State s1 x1
+  field Names b1 x1
+  field Scores b2 x1
+  field Hum r1 x1
+  hook Enable Door.on Enable
+  hook Disable Door.on Disable
+  handler Owner.Damaged Door.on Owner.Damaged await skipWhileBusy ref15 -> ref20
+  event Opened args "x"
+
+function Door.on Enable  scalar=4/4 ref=3/5 buf=2/2 params=0/1/0 returns sx0
+  body 2671c374163979eebdbcfe80ec6e1529d02ba76792b4ab1bddce7f0220cfce7c
+  0000  GETCTX  r1, ref0    ; 24:15
+  0001  GETF.R  r1, r1, ref1    ; 24:15
+  0003  GETF.R  r2, r0, ref2    ; 24:37
+  0005  MOV.R  r3, r1    ; 24:15
+  0006  MOV.R  r4, r2    ; 24:15
+  0007  CALLN  ref3    ; 24:15
+  0008  MOV.R  r1, r3    ; 24:15
+  0009  SETF.R  r0, r1, ref4    ; 24:9
+  0011  GETF.B  b0, r0, ref5    ; 25:9
+  0013  LOADI  s0, 2    ; 25:22
+  0014  SETSF.S  b0, s0, ref6    ; 25:9
+  0016  SETF.B  r0, b0, ref5    ; 25:9
+  0018  GETF.B  b0, r0, ref5    ; 26:9
+  0020  GETSF.S  s0, b0, ref7    ; 26:9
+  0022  LOADK  s3, k0    ; 26:25
+  0023  MOV.S  s0, s3    ; 26:9
+  0024  SETSF.S  b0, s0, ref7    ; 26:9
+  0026  SETF.B  r0, b0, ref5    ; 26:9
+  0028  GETF.B  b0, r0, ref8    ; 27:9
+  0030  LOADI  s0, 0    ; 27:15
+  0031  LOADSTR  b1, t18    ; 27:20
+  0032  SETE  b0, s0, b1 [bx1 key sx1]    ; 27:9
+  0034  SETF.B  r0, b0, ref8    ; 27:9
+  0036  GETF.B  b0, r0, ref9    ; 28:9
+  0038  LOADSTR  b1, t21    ; 28:16
+  0039  LOADI  s0, 1    ; 28:23
+  0040  SETE  b0, b1, s0 [sx1 key bx1]    ; 28:9
+  0042  SETF.B  r0, b0, ref9    ; 28:9
+  0044  RET  -    ; 29:5
+
+function Door.on Disable  scalar=1/1 ref=2/3 buf=0/0 params=0/1/0 returns sx0
+  body c1375cd765a330f131368a68f4e491ad361ef9500b6dc55b3eb98cf701cffe64
+  0000  GETF.R  r1, r0, ref4    ; 32:9
+  0002  ISSOME.R  s0, r1    ; 32:9
+  0003  BRF  s0, 0007    ; 32:9
+  0004  MOV.R  r2, r1    ; 32:9
+  0005  CALLN  ref10    ; 32:9
+  0006  JMP  0007    ; 32:9
+  0007  LOADNULL.R  r1    ; 33:15
+  0008  SETF.R  r0, r1, ref4    ; 33:9
+  0010  RET  -    ; 34:5
+
+function Door.Toggle  scalar=1/1 ref=2/4 buf=0/0 params=0/2/0 returns sx0
+  body 63308118eaed101c833437bcc25ae543cc640341761faf22a5ee111682d7a90d
+  0000  GETF.S  s0, r0, ref11    ; 37:17
+  0002  NOT  s0, s0    ; 37:16
+  0003  SETF.S  r0, s0, ref11    ; 37:9
+  0005  GETF.S  s0, r0, ref11    ; 38:13
+  0007  BRF  s0, 0011    ; 38:13
+  0008  MOV.R  r2, r0    ; 39:13
+  0009  MOV.R  r3, r1    ; 39:13
+  0010  EMIT  ref12    ; 39:13
+  0011  RET  -    ; 41:5
+
+function Door.Describe  scalar=1/1 ref=1/1 buf=1/1 params=0/1/0 returns bx1
+  body f3b87e1abfc93f8c9b1df8bab52bb17c37e4e1ee1509a02ffb740a106857c9df
+  switch0 [0: 0004, 1: 0006, 2: 0006] else 0003
+  0000  GETF.S  s0, r0, ref13    ; 44:17
+  0002  SWITCH  s0, switch0    ; 44:9
+  0003  FAULT  1    ; 52:5
+  0004  LOADSTR  b0, t33    ; 46:24
+  0005  RET  b0 x1    ; 46:17
+  0006  LOADSTR  b0, t34    ; 49:24
+  0007  RET  b0 x1    ; 49:17
+
+function Door.Total  scalar=5/5 ref=1/1 buf=3/3 params=0/1/0 returns sx1
+  body 04d4bdf3b8ebfa0953353c96a80f452528fa2c484997788b69ae2d6d7e400b31
+  0000  LOADI  s0, 0    ; 55:19
+  0001  GETF.B  b0, r0, ref9    ; 56:29
+  0003  LOADI  s1, 0    ; 56:9
+  0004  LEN  s2, b0    ; 56:9
+  0005  LT.I  s3, s1, s2    ; 56:9
+  0006  BRF  s3, 0016    ; 56:9
+  0007  GETKEY  b1, b0, s1 [bx1 key sx0]    ; 56:14
+  0009  GETVAL  s3, b0, s1 [sx1 key sx0]    ; 56:20
+  0011  ADD.I64  s3, s0, s3    ; 58:13
+  0012  MOV.S  s0, s3    ; 58:13
+  0013  LOADI  s3, 1    ; 56:9
+  0014  ADD.I64  s1, s1, s3    ; 56:9
+  0015  JMP  0005    ; 56:9
+  0016  GETF.B  b0, r0, ref8    ; 61:29
+  0018  LOADI  s1, 0    ; 61:9
+  0019  LEN  s2, b0    ; 61:9
+  0020  LT.I  s3, s1, s2    ; 61:9
+  0021  BRF  s3, 0032    ; 61:9
+  0022  MOV.S  s3, s1    ; 61:9
+  0023  GETVAL  b1, b0, s1 [bx1 key sx0]    ; 61:21
+  0025  LOADSTR  b2, t36    ; 62:25
+  0026  EQ.STR  s4, b1, b2    ; 62:17
+  0027  BRT  s4, 0033    ; 62:17
+  0028  JMP  0034    ; 62:17
+  0029  LOADI  s4, 1    ; 61:9
+  0030  ADD.I64  s1, s1, s4    ; 61:9
+  0031  JMP  0020    ; 61:9
+  0032  RET  s0 x1    ; 69:9
+  0033  JMP  0032    ; 63:17
+  0034  ADD.I64  s3, s0, s3    ; 66:13
+  0035  MOV.S  s0, s3    ; 66:13
+  0036  JMP  0029    ; 61:9
+
+function Door.on Owner.Damaged  scalar=2/2 ref=3/5 buf=0/0 params=1/1/0 returns sx0
+  body 0e51f140e9e5f00ff0d63d45805b678476feea5a6635fcb07c6d6b90671771cb
+  await 0016  live r1
+  0000  GETCTX  r1, ref0    ; 74:21
+  0001  GETF.R  r1, r1, ref1    ; 74:21
+  0003  GETF.R  r2, r0, ref2    ; 74:43
+  0005  MOV.R  r3, r1    ; 74:21
+  0006  MOV.R  r4, r2    ; 74:21
+  0007  CALLN  ref3    ; 74:21
+  0008  MOV.R  r1, r3    ; 74:21
+  0009  LOADK  s1, k1    ; 75:22
+  0010  LT.F  s1, s1, s0    ; 75:13
+  0011  BRF  s1, 0014    ; 75:13
+  0012  RELEASE  r1    ; 76:13
+  0013  RET  -    ; 76:13
+  0014  CALLL  ref14    ; 79:15
+  0015  MOV.R  r2, r3    ; 79:15
+  0016  AWAIT  -, r2    ; 79:9
+  0018  ISSOME.R  s1, r1    ; 80:9
+  0019  BRF  s1, 0024    ; 80:9
+  0020  MOV.R  r2, r1    ; 80:9
+  0021  MOV.R  r3, r2    ; 80:9
+  0022  CALLN  ref10    ; 80:9
+  0023  JMP  0024    ; 80:9
+  0024  RELEASE  r1    ; 73:37
+  0025  RET  -    ; 81:5
+
+function Door.Find  scalar=1/1 ref=2/2 buf=0/0 params=0/1/0 returns rx1
+  body 5a11da282c1509b2985915b7280c5915d67f20778e632c589d701337ea5e4f44
+  0000  GETF.R  r1, r0, ref15    ; 84:20
+  0002  CAST  r1, r1, ref16    ; 84:20
+  0004  ISSOME.R  s0, r1    ; 85:9
+  0005  BRF  s0, 0007    ; 85:9
+  0006  RET  r1 x1    ; 86:9
+  0007  LOADNULL.R  r1    ; 85:36
+  0008  RET  r1 x1    ; 85:26
+
+function Door.$init  scalar=1/1 ref=1/1 buf=1/1 params=0/1/0 returns sx0
+  body 599a7a9b546c117da59a2923351bc5e72d546e0add8b377deab2015b0adda03c
+  0000  LOADI  s0, 0    ; 14:5
+  0001  SETF.S  r0, s0, ref11    ; 14:5
+  0003  LOADI  s0, 1    ; 15:5
+  0004  NEWS  b0, ref17    ; 15:5
+  0005  SETSF.S  b0, s0, ref6    ; 15:5
+  0007  SETF.B  r0, b0, ref5    ; 15:5
+  0009  LOADI  s0, 0    ; 16:5
+  0010  SETF.S  r0, s0, ref13    ; 16:5
+  0012  NEWA  b0, ref18    ; 17:5
+  0013  SETF.B  r0, b0, ref8    ; 17:5
+  0015  NEWM  b0, ref19    ; 18:5
+  0016  SETF.B  r0, b0, ref9    ; 18:5
+  0018  RET  -    ; 88:1

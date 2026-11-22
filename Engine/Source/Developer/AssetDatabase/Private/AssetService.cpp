@@ -1,9 +1,13 @@
+#include "AssetDatabaseInternal.h"
+
 #include <AssetDatabase/AssetIndexCache.h>
 #include <AssetDatabase/AssetService.h>
 #include <AssetDatabase/AssetTextResolver.h>
 #include <AssetDatabase/LogicalPath.h>
 #include <AssetRuntime/Package.generated.h>
 #include <AssetRuntime/Package.h>
+#include <Core/Assert.h>
+#include <Core/FileError.h>
 #include <Core/Text/Json.h>
 #include <Core/Text/StringBuilder.h>
 #include <Object/AssetId.h>
@@ -15,6 +19,9 @@ namespace rocks {
 
 namespace {
 
+using asset_database_detail::AfterComponents;
+using asset_database_detail::IsSameOrUnder;
+using asset_database_detail::LogicalComponents;
 using reflection_text::AssignmentTarget;
 using reflection_text::TextAssignment;
 using reflection_text::TextCodecOptions;
@@ -74,7 +81,8 @@ AssetService::AssetService(Allocator& allocator, const ProjectLayout& layout,
       set_(allocator, MakeSetConfig(config, layout, index_)), read_(config.packages.read),
       types_(config.packages.types), files_(config.packages.files),
       cacheFiles_(config.cacheFiles != nullptr ? config.cacheFiles : config.packages.files),
-      useCache_(config.useCache) {
+      useCache_(config.useCache), aliases_(allocator, layout), aliasLookup_(*this),
+      clock_(config.clock), aliasDays_(config.aliasDays), aliasSearch_(config.aliasSearch) {
     read_.expectedKind = PackageKind::Editor;
 }
 
@@ -104,6 +112,990 @@ Result<void> AssetService::Initialize() noexcept {
 
     initialized_ = true;
     return Result<void>::Success();
+}
+
+namespace {
+
+// 이동하는 패키지 하나다(파일이 있으면 그 색인 항목, 없으면 저장하지 않은 새 패키지).
+struct MovedPackage {
+    explicit MovedPackage(Allocator& allocator) noexcept : oldPath(allocator), newPath(allocator) {
+    }
+
+    MovedPackage(MovedPackage&&) noexcept = default;
+    MovedPackage& operator=(MovedPackage&&) noexcept = default;
+
+    AssetId id{};
+    String oldPath;
+    String newPath;
+    bool saved = false;
+};
+
+} // namespace
+
+Result<void> AssetService::Move(const AssetDatabaseLock& lock, StringView source, StringView target,
+                                AssetMoveResult& result, Array<EditorWarning>* warnings,
+                                AssetDiagnostic* failure) noexcept {
+    result = AssetMoveResult{};
+    if (!initialized_ || !lock.IsHeldFor(*layout_)) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, ErrorCode::InvalidArgument);
+    }
+
+    auto from = ParseLogicalPath(*allocator_, source);
+    auto to = ParseLogicalPath(*allocator_, target);
+    if (!from || !to) {
+        const ErrorCode error = !from ? from.Error() : to.Error();
+        return FailAsset<void>(failure,
+                               error == ErrorCode::InvalidArgument
+                                   ? AssetDiagnosticCode::InvalidPath
+                                   : AssetDiagnosticCode::None,
+                               error);
+    }
+
+    const bool caseOnly = from.Value().Key() == to.Value().Key();
+    if (!caseOnly && IsSameOrUnder(to.Value().Key(), from.Value().Key())) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, ErrorCode::InvalidArgument);
+    }
+
+    const StringView content = layout_->ContentDirectory();
+    // Content 상대 OS 이름(파일은 `.rasset`까지, 디렉터리는 확장자 없이)이다.
+    auto relativeOf = [&](const LogicalPath& path, bool directory, String& out) noexcept {
+        String file(*allocator_);
+        Result<void> made = layout_->TryMakeFilePath(path, file);
+        if (!made) {
+            return made;
+        }
+
+        const usize trim = directory ? EditorPackageExtension.ByteCount() : 0;
+        return out.TryAssign(StringView(file.View().Data() + content.ByteCount() + 1,
+                                        file.View().ByteCount() - content.ByteCount() - 1 - trim));
+    };
+    auto pathFailure = [&](ErrorCode error) noexcept {
+        return FailAsset<void>(failure,
+                               error == ErrorCode::OutOfMemory ? AssetDiagnosticCode::None
+                                                               : AssetDiagnosticCode::InvalidPath,
+                               error);
+    };
+    auto occupied = [&](AssetId related) noexcept {
+        return FailAsset<void>(failure, AssetDiagnosticCode::DuplicatePath,
+                               ErrorCode::AlreadyExists, {}, 0, 0, related);
+    };
+
+    // 원본 종류: 색인의 패키지, 저장하지 않은 새 패키지, 논리 디렉터리.
+    Array<MovedPackage> moved(*allocator_);
+    String fromRelative(*allocator_);
+    String toRelative(*allocator_);
+    bool directory = false;
+    auto entry = index_.FindByPath(from.Value());
+    if (!entry && entry.Error() == ErrorCode::AlreadyExists) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::DuplicatePath,
+                               ErrorCode::AlreadyExists);
+    }
+
+    const usize components = LogicalComponents(from.Value().Text());
+    auto addMoved = [&](AssetId id, StringView oldPath, bool saved) noexcept -> Result<void> {
+        MovedPackage package(*allocator_);
+        package.id = id;
+        package.saved = saved;
+        Result<void> step = package.oldPath.TryAssign(oldPath);
+        if (step) {
+            step = package.newPath.TryAssign(to.Value().Text());
+        }
+
+        if (step) {
+            step = package.newPath.TryAppend(AfterComponents(oldPath, components));
+        }
+
+        if (step) {
+            step = moved.TryPushBack(rocks::Move(package));
+        }
+
+        return step;
+    };
+    if (entry) {
+        if (auto step = fromRelative.TryAssign(entry.Value()->fileName.View()); !step) {
+            return step;
+        }
+
+        if (auto step = addMoved(entry.Value()->id, entry.Value()->path.View(), true); !step) {
+            return step;
+        }
+    } else {
+        // 저장하지 않은 새 패키지(같은 키) 또는 그 아래(디렉터리).
+        for (usize index = 0; index < set_.Count(); ++index) {
+            const EditorPackageInfo& info = set_.At(index);
+            if (!info.unsaved) {
+                continue;
+            }
+
+            auto path = ParseLogicalPath(*allocator_, info.logicalPath.View());
+            if (!path) {
+                return Result<void>::Failure(path.Error());
+            }
+
+            if (IsSameOrUnder(path.Value().Key(), from.Value().Key())) {
+                directory = directory || path.Value().Key() != from.Value().Key();
+                if (auto step = addMoved(info.id, path.Value().Text(), false); !step) {
+                    return step;
+                }
+            }
+        }
+
+        Array<const AssetIndexEntry*> under(*allocator_);
+        if (auto listed = index_.ListUnder(from.Value().Text(), true, under); !listed) {
+            return listed;
+        }
+
+        for (const AssetIndexEntry* item : under) {
+            directory = true;
+            if (auto step = addMoved(item->id, item->path.View(), true); !step) {
+                return step;
+            }
+        }
+
+        // 원본의 OS 이름: 항목이 있으면 그 파일 이름의 앞 구성 요소(실제 철자), 없으면 배치 규칙
+        // (새 패키지 하나는 파일 이름 `.rasset`, 디렉터리는 디렉터리 이름 — 대소문자 구분 FS에서
+        // 철자가 다른 항목 없는 디렉터리는 찾지 못한다, 한계).
+        if (!under.IsEmpty()) {
+            const StringView file = under[0]->fileName.View();
+            const StringView rest = AfterComponents(file, components - 1);
+            if (auto step = fromRelative.TryAssign(
+                    StringView(file.Data(), file.ByteCount() - rest.ByteCount()));
+                !step) {
+                return step;
+            }
+
+            // 논리 디렉터리가 대소문자만 다른 OS 디렉터리 둘 이상(대소문자 구분 FS)에 걸치면 한
+            // 번의 OS 이동으로 옮길 수 없다(경로 키 충돌과 같은 거부 — 하나로 합친 뒤 옮긴다).
+            for (const AssetIndexEntry* item : under) {
+                if (!IsSameOrUnder(item->fileName.View(), fromRelative.View())) {
+                    return FailAsset<void>(failure, AssetDiagnosticCode::DuplicatePath,
+                                           ErrorCode::AlreadyExists, item->id);
+                }
+            }
+        } else if (auto made = relativeOf(from.Value(), directory || moved.IsEmpty(), fromRelative);
+                   !made) {
+            return pathFailure(made.Error());
+        }
+
+        if (moved.IsEmpty()) {
+            // 패키지가 없는 디렉터리도 옮긴다(빈 디렉터리·패키지 아닌 파일).
+            String full(*allocator_);
+            const StringView pieces[] = {content, "/", fromRelative.View()};
+            for (StringView piece : pieces) {
+                if (auto appended = full.TryAppend(piece); !appended) {
+                    return appended;
+                }
+            }
+
+            platform::FileInfo info;
+            if (!files_->Stat(full.View().Data(), full.View().ByteCount(), info) ||
+                info.type != platform::FileType::Directory) {
+                return FailAsset<void>(failure, AssetDiagnosticCode::None, ErrorCode::NotFound);
+            }
+
+            directory = true;
+        }
+    }
+
+    if (auto made = relativeOf(to.Value(), directory, toRelative); !made) {
+        return pathFailure(made.Error());
+    }
+
+    // 대상이 비어 있어야 한다(대소문자만 바꾸는 이름 변경 밖): 색인·Content 이름·새 패키지.
+    if (!caseOnly) {
+        auto existing = index_.FindByPath(to.Value());
+        Array<const AssetIndexEntry*> under(*allocator_);
+        if (auto listed = index_.ListUnder(to.Value().Text(), true, under); !listed) {
+            return listed;
+        }
+
+        if (existing || existing.Error() == ErrorCode::AlreadyExists || !under.IsEmpty()) {
+            return occupied(existing ? existing.Value()->id : AssetId{});
+        }
+
+        for (usize index = 0; index < set_.Count(); ++index) {
+            if (!set_.At(index).unsaved) {
+                continue;
+            }
+
+            auto path = ParseLogicalPath(*allocator_, set_.At(index).logicalPath.View());
+            if (!path) {
+                return Result<void>::Failure(path.Error());
+            }
+
+            if (IsSameOrUnder(path.Value().Key(), to.Value().Key())) {
+                return occupied(set_.At(index).id);
+            }
+        }
+
+        String full(*allocator_);
+        const StringView pieces[] = {content, "/", toRelative.View()};
+        for (StringView piece : pieces) {
+            if (auto appended = full.TryAppend(piece); !appended) {
+                return appended;
+            }
+        }
+
+        platform::FileInfo info;
+        const platform::FileStatus stat =
+            files_->Stat(full.View().Data(), full.View().ByteCount(), info);
+        if (stat) {
+            return occupied({});
+        }
+
+        if (stat.code != platform::FileCode::NotFound) {
+            return FailAsset<void>(failure, AssetDiagnosticCode::None, FileErrorCode(stat));
+        }
+    }
+
+    // 별칭: 옮긴 패키지마다 옛 경로 → id(대소문자만이면 없음), 새 경로의 별칭이 같은 에셋이면
+    // 지우고(되돌아오기 — UE TryMoveRedirector), 다른 에셋이면 점유.
+    auto aliases = Aliases(failure);
+    if (!aliases) {
+        return Result<void>::Failure(aliases.Error());
+    }
+
+    AssetClock& clock = clock_ != nullptr ? *clock_ : systemClock_;
+    auto now = DateTime::TryFromTicks(clock.NowTicks());
+    if (!now) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, now.Error());
+    }
+
+    Array<AssetAliasInput> adds(*allocator_);
+    Array<String> removeKeys(*allocator_);
+    for (const MovedPackage& package : moved) {
+        auto newPath = ParseLogicalPath(*allocator_, package.newPath.View());
+        String check(*allocator_);
+        Result<void> made = newPath ? layout_->TryMakeFilePath(newPath.Value(), check)
+                                    : Result<void>::Failure(newPath.Error());
+        if (!made) {
+            return FailAsset<void>(failure,
+                                   made.Error() == ErrorCode::OutOfMemory
+                                       ? AssetDiagnosticCode::None
+                                       : AssetDiagnosticCode::InvalidPath,
+                                   made.Error(), package.id);
+        }
+
+        const usize alias = aliases.Value()->Find(newPath.Value().Key());
+        if (alias != AssetAliasNone) {
+            if (aliases.Value()->At(alias).asset != package.id) {
+                return occupied(aliases.Value()->At(alias).asset);
+            }
+
+            String key(*allocator_);
+            if (auto assigned = key.TryAssign(newPath.Value().Key()); !assigned) {
+                return assigned;
+            }
+
+            if (auto pushed = removeKeys.TryPushBack(rocks::Move(key)); !pushed) {
+                return pushed;
+            }
+        }
+
+        if (package.saved && !caseOnly) {
+            AssetAliasInput input;
+            input.path = package.oldPath.View();
+            input.asset = package.id;
+            input.created = now.Value();
+            input.days = aliasDays_;
+            if (auto pushed = adds.TryPushBack(input); !pushed) {
+                return pushed;
+            }
+        }
+    }
+
+    // 준비: 집합 경로 표와 색인(옛 이름의 지금 내용을 새 이름으로 — 이동 전에 읽는다).
+    EditorRelocation relocation(*allocator_);
+    if (auto prepared = set_.PrepareRelocate(from.Value(), to.Value(), fromRelative.View(),
+                                             toRelative.View(), relocation, failure);
+        !prepared) {
+        return prepared;
+    }
+
+    // OS 이름은 별칭을 쓰기 전에 만든다(그 뒤의 실패는 OS 단계뿐 — 되돌리기가 그것만 다룬다).
+    String fromFull(*allocator_);
+    String toFull(*allocator_);
+    const StringView fromPieces[] = {content, "/", fromRelative.View()};
+    const StringView toPieces[] = {content, "/", toRelative.View()};
+    for (StringView piece : fromPieces) {
+        if (auto appended = fromFull.TryAppend(piece); !appended) {
+            return appended;
+        }
+    }
+
+    for (StringView piece : toPieces) {
+        if (auto appended = toFull.TryAppend(piece); !appended) {
+            return appended;
+        }
+    }
+
+    // 원본이 디스크에 없으면(저장하지 않은 새 패키지뿐) OS 이동과 색인 갱신이 없다. 파일이 있어야
+    // 할 패키지(색인 항목)가 있는데 없으면 MissingFile, Stat 오류는 그 오류다.
+    platform::FileInfo sourceInfo;
+    const platform::FileStatus sourceStat =
+        files_->Stat(fromFull.View().Data(), fromFull.View().ByteCount(), sourceInfo);
+    const bool onDisk = static_cast<bool>(sourceStat);
+    // 저장하지 않은 새 패키지 하나인데 그 파일 이름이 디스크에 있으면 색인이 낡았다(색인에 없는
+    // 파일) — 그 파일을 옮기지 않고 거부한다(asset-index-rebuild 뒤 다시 한다).
+    if (onDisk && !entry && !directory) {
+        return occupied({});
+    }
+
+    if (!onDisk) {
+        if (sourceStat.code != platform::FileCode::NotFound) {
+            return FailAsset<void>(failure, AssetDiagnosticCode::None, FileErrorCode(sourceStat));
+        }
+
+        for (const MovedPackage& package : moved) {
+            if (package.saved) {
+                return FailAsset<void>(failure, AssetDiagnosticCode::MissingFile,
+                                       ErrorCode::NotFound, package.id);
+            }
+        }
+    }
+
+    AssetIndexRefresh plan(*allocator_);
+    const AssetIndexMove indexMove{fromRelative.View(), toRelative.View()};
+    AssetIndexRefreshPaths paths;
+    if (onDisk) {
+        paths.moves = Span<const AssetIndexMove>(&indexMove, 1);
+    }
+
+    if (auto prepared = index_.PrepareRefreshPaths(*files_, paths, read_, plan); !prepared) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, prepared.Error());
+    }
+
+    // 열린 패키지를 파일에서 뗀다(읽지 않은 bulk를 메모리로 — 이동 뒤 옛 경로를 읽지 않게).
+    if (auto detached = set_.DetachUnder(fromRelative.View(), failure); !detached) {
+        return detached;
+    }
+
+    // 별칭을 먼저 쓴다(OS 이동이 실패하면 되돌린다 — 이동 뒤 쓰기가 실패하면 고칠 길이 없다).
+    Array<StringView> removeViews(*allocator_);
+    for (const String& key : removeKeys) {
+        if (auto pushed = removeViews.TryPushBack(key.View()); !pushed) {
+            return pushed;
+        }
+    }
+
+    // 경고 자리를 미리 잡는다(경고는 이 호출에 많아야 하나 — 성공의 NotDurable 또는 OS 실패의
+    // AliasNotRestored, 바꾼 뒤에는 할당 실패가 없어야 한다).
+    if (warnings != nullptr) {
+        if (auto reserved = warnings->TryReserve(warnings->Size() + 1); !reserved) {
+            return reserved;
+        }
+    }
+
+    const bool writeAliases = !adds.IsEmpty() || !removeViews.IsEmpty();
+    bool notDurable = false;
+    if (writeAliases) {
+        if (auto written = aliases.Value()->Write(*files_, lock, removeViews.View(), adds.View(),
+                                                  notDurable, failure);
+            !written) {
+            return written;
+        }
+    }
+
+    if (onDisk) {
+        // 대상 부모(Content 또는 그 아래)를 만든다. toFull은 언제나 Content 뒤 '/'를 품는다.
+        ErrorCode osError = ErrorCode::None;
+        usize parent = toFull.View().ByteCount() - 1;
+        while (toFull.View().Data()[parent] != '/') {
+            --parent;
+        }
+
+        if (auto made = platform::MakeDirectoryTree(*files_, toFull.View().Data(), parent); !made) {
+            osError = FileErrorCode(made);
+        }
+
+        if (osError == ErrorCode::None) {
+            if (auto renamed = files_->Move(fromFull.View().Data(), fromFull.View().ByteCount(),
+                                            toFull.View().Data(), toFull.View().ByteCount(), false);
+                !renamed) {
+                osError = FileErrorCode(renamed);
+            }
+        }
+
+        if (osError != ErrorCode::None) {
+            // 별칭을 되돌린다(되돌리지 못한 별칭은 옮기지 못한 옛 경로 → 그 에셋 — 색인이 이겨
+            // 해롭지 않다, 경고로 알린다).
+            if (writeAliases) {
+                if (auto restored = aliases.Value()->Restore(*files_, lock);
+                    !restored && warnings != nullptr) {
+                    EditorWarning warning;
+                    warning.kind = EditorWarningKind::AliasNotRestored;
+                    warning.diagnostic.error = restored.Error();
+                    // 자리는 위에서 잡았다.
+                    (void)warnings->TryPushBack(warning);
+                }
+            }
+
+            return FailAsset<void>(failure, AssetDiagnosticCode::None, osError);
+        }
+    }
+
+    // 확정(실패 없음).
+    set_.CommitRelocate(relocation);
+    index_.CommitRefresh(plan);
+    if (notDurable && warnings != nullptr) {
+        EditorWarning warning;
+        warning.kind = EditorWarningKind::NotDurable;
+        warning.diagnostic.code = AssetDiagnosticCode::NotDurable;
+        // 자리는 위에서 잡았다.
+        (void)warnings->TryPushBack(warning);
+    }
+
+    result.packages = moved.Size();
+    result.aliases = adds.Size();
+    return Result<void>::Success();
+}
+
+Result<void> AssetService::Delete(const AssetDatabaseLock& lock, StringView target, bool force,
+                                  AssetDeleteResult& result, Array<EditorWarning>* warnings,
+                                  AssetDiagnostic* failure) noexcept {
+    result.id = AssetId{};
+    result.path.Clear();
+    result.aliases = 0;
+    result.referencerPaths.Clear();
+    result.referencerIds.Clear();
+    if (!initialized_ || !lock.IsHeldFor(*layout_)) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, ErrorCode::InvalidArgument);
+    }
+
+    // 대상: 색인 항목 또는 저장하지 않은 새 패키지(별칭으로 풀지 않는다 — 지금 이름으로 고른다).
+    const AssetIndexEntry* entry = nullptr;
+    const EditorPackageInfo* unsaved = nullptr;
+    if (target.StartsWith("/", StringComparison::CaseSensitive)) {
+        auto path = ParseLogicalPath(*allocator_, target);
+        if (!path) {
+            return FailAsset<void>(failure,
+                                   path.Error() == ErrorCode::InvalidArgument
+                                       ? AssetDiagnosticCode::InvalidPath
+                                       : AssetDiagnosticCode::None,
+                                   path.Error());
+        }
+
+        auto found = index_.FindByPath(path.Value());
+        if (found) {
+            entry = found.Value();
+        } else if (found.Error() == ErrorCode::AlreadyExists) {
+            return FailAsset<void>(failure, AssetDiagnosticCode::DuplicatePath,
+                                   ErrorCode::AlreadyExists);
+        } else {
+            for (usize index = 0; index < set_.Count() && unsaved == nullptr; ++index) {
+                const EditorPackageInfo& info = set_.At(index);
+                if (!info.unsaved) {
+                    continue;
+                }
+
+                auto other = ParseLogicalPath(*allocator_, info.logicalPath.View());
+                if (!other) {
+                    return Result<void>::Failure(other.Error());
+                }
+
+                if (other.Value().Key() == path.Value().Key()) {
+                    unsaved = &info;
+                }
+            }
+        }
+    } else {
+        auto parsed = AssetId::TryParse(target);
+        if (!parsed || parsed.Value().IsNull()) {
+            return FailAsset<void>(failure, AssetDiagnosticCode::InvalidPath,
+                                   ErrorCode::InvalidArgument);
+        }
+
+        auto found = index_.FindById(parsed.Value());
+        if (found) {
+            entry = found.Value();
+        } else if (found.Error() == ErrorCode::AlreadyExists) {
+            return FailAsset<void>(failure, AssetDiagnosticCode::DuplicateAssetId,
+                                   ErrorCode::AlreadyExists, parsed.Value());
+        } else {
+            const EditorPackageInfo* info = set_.Find(parsed.Value());
+            unsaved = info != nullptr && info->unsaved ? info : nullptr;
+        }
+    }
+
+    if (entry == nullptr && unsaved == nullptr) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, ErrorCode::NotFound);
+    }
+
+    // 경로로 고른 항목도 id가 겹치면 거부한다(어느 파일인지 id로 가릴 수 없다 — 먼저
+    // asset-fix-duplicate-id).
+    if (entry != nullptr && entry->duplicateId) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::DuplicateAssetId,
+                               ErrorCode::AlreadyExists, entry->id);
+    }
+
+    const AssetId id = entry != nullptr ? entry->id : unsaved->id;
+    result.id = id;
+    if (auto assigned = result.path.TryAssign(entry != nullptr ? entry->path.View()
+                                                               : unsaved->logicalPath.View());
+        !assigned) {
+        return assigned;
+    }
+
+    // 디스크 참조자(색인 — 모든 종류). 자신은 나오지 않는다(writer가 자기 의존을 빼고 reader가
+    // 거부한다 — 5.4절 Dependencies).
+    if (entry != nullptr) {
+        Array<const AssetIndexEntry*> referencers(*allocator_);
+        if (auto listed = index_.Referencers(id, AllDependencyKinds, referencers); !listed) {
+            return listed;
+        }
+
+        for (const AssetIndexEntry* referencer : referencers) {
+            String path(*allocator_);
+            if (auto assigned = path.TryAssign(referencer->path.View()); !assigned) {
+                return assigned;
+            }
+
+            if (auto pushed = result.referencerPaths.TryPushBack(rocks::Move(path)); !pushed) {
+                return pushed;
+            }
+
+            if (auto pushed = result.referencerIds.TryPushBack(referencer->id); !pushed) {
+                return pushed;
+            }
+        }
+
+        if (!result.referencerIds.IsEmpty() && !force) {
+            return FailAsset<void>(failure, AssetDiagnosticCode::ReferencedBy,
+                                   ErrorCode::InvalidArgument, id, 0, 0, result.referencerIds[0]);
+        }
+    }
+
+    // 메모리 참조(다른 열린 패키지 — force여도 거부: 끊긴 참조가 저장되지 않게).
+    AssetId firstOpen;
+    auto incoming = set_.IncomingReferences(id, &firstOpen);
+    if (!incoming) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, incoming.Error(), id);
+    }
+
+    if (incoming.Value() != 0) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::ReferencedBy, ErrorCode::Busy, id, 0,
+                               0, firstOpen);
+    }
+
+    // 대상을 가리키는 별칭(갈 곳이 없어진다 — 지운다).
+    auto aliases = Aliases(failure);
+    if (!aliases) {
+        return Result<void>::Failure(aliases.Error());
+    }
+
+    Array<usize> aliasRows(*allocator_);
+    for (usize row = 0; row < aliases.Value()->Count(); ++row) {
+        if (aliases.Value()->At(row).asset == id) {
+            if (auto pushed = aliasRows.TryPushBack(row); !pushed) {
+                return pushed;
+            }
+        }
+    }
+
+    // 지울 별칭 키·경로 사본(쓰기가 표를 바꾼다)과 파일 이름·색인 준비는 바꾸기 전에 만든다.
+    Array<String> aliasKeys(*allocator_);
+    Array<String> aliasPaths(*allocator_);
+    Array<StringView> removeViews(*allocator_);
+    for (usize row : aliasRows) {
+        String key(*allocator_);
+        String path(*allocator_);
+        Result<void> step = key.TryAssign(aliases.Value()->At(row).key.View());
+        if (step) {
+            step = path.TryAssign(aliases.Value()->At(row).path.View());
+        }
+
+        if (step) {
+            step = aliasKeys.TryPushBack(rocks::Move(key));
+        }
+
+        if (step) {
+            step = aliasPaths.TryPushBack(rocks::Move(path));
+        }
+
+        if (!step) {
+            return step;
+        }
+    }
+
+    for (const String& key : aliasKeys) {
+        if (auto pushed = removeViews.TryPushBack(key.View()); !pushed) {
+            return pushed;
+        }
+    }
+
+    String full(*allocator_);
+    AssetIndexRefresh plan(*allocator_);
+    if (entry != nullptr) {
+        const StringView pieces[] = {layout_->ContentDirectory(), "/", entry->fileName.View()};
+        for (StringView piece : pieces) {
+            if (auto appended = full.TryAppend(piece); !appended) {
+                return appended;
+            }
+        }
+
+        const StringView removed = entry->fileName.View();
+        AssetIndexRefreshPaths paths;
+        paths.removed = Span<const StringView>(&removed, 1);
+        if (auto prepared = index_.PrepareRefreshPaths(*files_, paths, read_, plan); !prepared) {
+            return FailAsset<void>(failure, AssetDiagnosticCode::None, prepared.Error(), id);
+        }
+    }
+
+    // 경고 자리(지운 별칭마다 하나 + NotDurable 또는 AliasNotRestored 하나 — 바꾼 뒤에는 할당
+    // 실패가 없다).
+    if (warnings != nullptr) {
+        if (auto reserved = warnings->TryReserve(warnings->Size() + aliasKeys.Size() + 1);
+            !reserved) {
+            return reserved;
+        }
+    }
+
+    bool notDurable = false;
+    const bool writeAliases = !removeViews.IsEmpty();
+    if (writeAliases) {
+        if (auto written =
+                aliases.Value()->Write(*files_, lock, removeViews.View(), {}, notDurable, failure);
+            !written) {
+            return written;
+        }
+    }
+
+    // 닫기·지우기 실패 뒤 별칭을 되돌린다(되돌리지 못하면 경고 — 남은 별칭은 아직 있는 에셋을
+    // 가리킨다).
+    auto restoreAliases = [&]() noexcept {
+        if (!writeAliases) {
+            return;
+        }
+
+        if (auto restored = aliases.Value()->Restore(*files_, lock);
+            !restored && warnings != nullptr) {
+            EditorWarning warning;
+            warning.kind = EditorWarningKind::AliasNotRestored;
+            warning.diagnostic.error = restored.Error();
+            warning.diagnostic.asset = id;
+            // 자리는 위에서 잡았다.
+            (void)warnings->TryPushBack(warning);
+        }
+    };
+
+    // 집합에서 닫는다(Discard는 실패할 수 있어 파일을 지운 뒤로 미루지 않는다).
+    if (set_.Find(id) != nullptr) {
+        if (auto closed = set_.Close(id, failure); !closed) {
+            restoreAliases();
+            return closed;
+        }
+    }
+
+    if (entry != nullptr) {
+        // 파일이 이미 없으면(낡은 색인 — 밖에서 지웠다) 바라는 상태라 성공이다(색인을 확정한다).
+        if (auto deleted = files_->Delete(full.View().Data(), full.View().ByteCount());
+            !deleted && deleted.code != platform::FileCode::NotFound) {
+            restoreAliases();
+            return FailAsset<void>(failure, AssetDiagnosticCode::None, FileErrorCode(deleted), id);
+        }
+
+        index_.CommitRefresh(plan);
+    }
+
+    // 확정 뒤 경고(자리는 위에서 잡았다).
+    if (warnings != nullptr) {
+        for (const String& path : aliasPaths) {
+            EditorWarning warning;
+            warning.kind = EditorWarningKind::AliasRemoved;
+            warning.diagnostic.asset = id;
+            for (usize index = 0; index < path.View().ByteCount(); ++index) {
+                warning.text[index] = path.View().Data()[index];
+            }
+
+            (void)warnings->TryPushBack(warning);
+        }
+
+        if (notDurable) {
+            EditorWarning warning;
+            warning.kind = EditorWarningKind::NotDurable;
+            warning.diagnostic.code = AssetDiagnosticCode::NotDurable;
+            (void)warnings->TryPushBack(warning);
+        }
+    }
+
+    result.aliases = aliasKeys.Size();
+    return Result<void>::Success();
+}
+
+Result<void> AssetService::DeleteOrphan(const AssetDatabaseLock& lock, StringView path,
+                                        AssetDeleteResult& result, Array<EditorWarning>* warnings,
+                                        AssetDiagnostic* failure) noexcept {
+    result.id = AssetId{};
+    result.path.Clear();
+    result.aliases = 0;
+    result.referencerPaths.Clear();
+    result.referencerIds.Clear();
+    if (!initialized_ || !lock.IsHeldFor(*layout_)) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, ErrorCode::InvalidArgument);
+    }
+
+    auto parsed = ParseLogicalPath(*allocator_, path);
+    if (!parsed) {
+        return FailAsset<void>(failure,
+                               parsed.Error() == ErrorCode::InvalidArgument
+                                   ? AssetDiagnosticCode::InvalidPath
+                                   : AssetDiagnosticCode::None,
+                               parsed.Error());
+    }
+
+    auto entry = index_.FindByPath(parsed.Value());
+    if (!entry) {
+        return FailAsset<void>(failure,
+                               entry.Error() == ErrorCode::AlreadyExists
+                                   ? AssetDiagnosticCode::DuplicatePath
+                                   : AssetDiagnosticCode::None,
+                               entry.Error());
+    }
+
+    // 고아가 아니거나 판정할 수 없으면(읽지 못한 기록·패키지) 지우지 않는다.
+    const AssetOrphanReason reason = index_.OrphanReason(*entry.Value());
+    if (reason == AssetOrphanReason::None || reason == AssetOrphanReason::Undetermined) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, ErrorCode::InvalidArgument,
+                               entry.Value()->id);
+    }
+
+    return Delete(lock, parsed.Value().Text(), false, result, warnings, failure);
+}
+
+Result<void> AssetService::FixDuplicateId(const AssetDatabaseLock& lock, StringView path,
+                                          AssetFixIdResult& result, Array<EditorWarning>* warnings,
+                                          AssetDiagnostic* failure) noexcept {
+    result.path.Clear();
+    result.oldId = AssetId{};
+    result.newId = AssetId{};
+    result.remaining.Clear();
+    if (!initialized_ || !lock.IsHeldFor(*layout_)) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, ErrorCode::InvalidArgument);
+    }
+
+    auto parsed = ParseLogicalPath(*allocator_, path);
+    if (!parsed) {
+        return FailAsset<void>(failure,
+                               parsed.Error() == ErrorCode::InvalidArgument
+                                   ? AssetDiagnosticCode::InvalidPath
+                                   : AssetDiagnosticCode::None,
+                               parsed.Error());
+    }
+
+    auto entry = index_.FindByPath(parsed.Value());
+    if (!entry) {
+        return FailAsset<void>(failure,
+                               entry.Error() == ErrorCode::AlreadyExists
+                                   ? AssetDiagnosticCode::DuplicatePath
+                                   : AssetDiagnosticCode::None,
+                               entry.Error());
+    }
+
+    const AssetId oldId = entry.Value()->id;
+    result.oldId = oldId;
+    if (auto assigned = result.path.TryAssign(entry.Value()->path.View()); !assigned) {
+        return assigned;
+    }
+
+    if (!entry.Value()->duplicateId) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, ErrorCode::InvalidArgument,
+                               oldId);
+    }
+
+    // 옛 id를 쓰는 남은 항목(경로 키 순)과 고칠 파일 이름 사본(쓰기 뒤 항목이 바뀐다).
+    for (usize index = 0; index < index_.Count(); ++index) {
+        const AssetIndexEntry& other = index_.At(index);
+        if (!(other.id == oldId) || &other == entry.Value()) {
+            continue;
+        }
+
+        String remaining(*allocator_);
+        if (auto assigned = remaining.TryAssign(other.path.View()); !assigned) {
+            return assigned;
+        }
+
+        if (auto pushed = result.remaining.TryPushBack(rocks::Move(remaining)); !pushed) {
+            return pushed;
+        }
+    }
+
+    String fileName(*allocator_);
+    if (auto assigned = fileName.TryAssign(entry.Value()->fileName.View()); !assigned) {
+        return assigned;
+    }
+
+    auto made = AssetId::TryNew();
+    if (!made) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, made.Error(), oldId);
+    }
+
+    if (auto fixed = set_.FixDuplicateId(fileName.View(), made.Value(), lock, warnings, failure);
+        !fixed) {
+        return fixed;
+    }
+
+    result.newId = made.Value();
+    return Result<void>::Success();
+}
+
+Result<void> AssetService::Duplicate(const AssetDatabaseLock& lock, StringView source,
+                                     StringView target, AssetDuplicateResult& result,
+                                     Array<EditorWarning>* warnings,
+                                     AssetDiagnostic* failure) noexcept {
+    result.id = AssetId{};
+    result.path.Clear();
+    if (!initialized_ || !lock.IsHeldFor(*layout_)) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, ErrorCode::InvalidArgument);
+    }
+
+    auto to = ParseLogicalPath(*allocator_, target);
+    if (!to) {
+        return FailAsset<void>(failure,
+                               to.Error() == ErrorCode::InvalidArgument
+                                   ? AssetDiagnosticCode::InvalidPath
+                                   : AssetDiagnosticCode::None,
+                               to.Error());
+    }
+
+    // 별칭 점유(어느 에셋의 별칭이든 — 사본은 새 에셋이다).
+    auto aliases = Aliases(failure);
+    if (!aliases) {
+        return Result<void>::Failure(aliases.Error());
+    }
+
+    const usize alias = aliases.Value()->Find(to.Value().Key());
+    if (alias != AssetAliasNone) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::DuplicatePath,
+                               ErrorCode::AlreadyExists, {}, 0, 0,
+                               aliases.Value()->At(alias).asset);
+    }
+
+    AssetId id;
+    if (auto opened = OpenTarget(source, id, warnings, failure); !opened) {
+        return Result<void>::Failure(opened.Error());
+    }
+
+    auto made = AssetId::TryNew();
+    if (!made) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, made.Error(), id);
+    }
+
+    if (auto assigned = result.path.TryAssign(to.Value().Text()); !assigned) {
+        return assigned;
+    }
+
+    if (auto duplicated = set_.Duplicate(id, to.Value(), made.Value(), lock, warnings, failure);
+        !duplicated) {
+        return duplicated;
+    }
+
+    result.id = made.Value();
+    return Result<void>::Success();
+}
+
+Result<AssetAliasTable*> AssetService::Aliases(AssetDiagnostic* failure) noexcept {
+    if (!initialized_) {
+        return FailAsset<AssetAliasTable*>(failure, AssetDiagnosticCode::None,
+                                           ErrorCode::InvalidArgument);
+    }
+
+    if (!aliases_.IsLoaded()) {
+        if (auto loaded = aliases_.Load(*files_, failure); !loaded) {
+            return Result<AssetAliasTable*>::Failure(loaded.Error());
+        }
+    }
+
+    return Result<AssetAliasTable*>::Success(&aliases_);
+}
+
+Result<AssetId> AssetService::AliasLookup::ResolveAlias(const LogicalPath& path,
+                                                        Array<EditorWarning>* warnings) noexcept {
+    return service_->ResolveAliasPath(path, warnings, nullptr);
+}
+
+Result<AssetId> AssetService::ResolveAliasPath(const LogicalPath& path,
+                                               Array<EditorWarning>* warnings,
+                                               AssetDiagnostic* failure) noexcept {
+    AssetDiagnostic unreadable;
+    auto aliases = Aliases(&unreadable);
+    if (!aliases) {
+        if (failure != nullptr) {
+            *failure = unreadable;
+        }
+
+        // 원인을 경고로도 남긴다(참조 값 해석은 진단 칸 없이 부른다 — 대입 진단 Unresolved만으로는
+        // 원인을 알 수 없다).
+        if (warnings != nullptr && aliases.Error() != ErrorCode::OutOfMemory) {
+            EditorWarning warning;
+            warning.kind = EditorWarningKind::AliasTableUnreadable;
+            warning.diagnostic = unreadable;
+            if (auto pushed = warnings->TryPushBack(warning); !pushed) {
+                return Result<AssetId>::Failure(pushed.Error());
+            }
+        }
+
+        return Result<AssetId>::Failure(aliases.Error());
+    }
+
+    const usize at = aliases.Value()->Find(path.Key());
+    if (at == AssetAliasNone) {
+        return Result<AssetId>::Failure(ErrorCode::NotFound);
+    }
+
+    const AssetId target = aliases.Value()->At(at).asset;
+    if (warnings != nullptr) {
+        EditorWarning warning;
+        warning.kind = EditorWarningKind::AliasResolved;
+        warning.diagnostic.code = AssetDiagnosticCode::AliasResolved;
+        warning.diagnostic.asset = target;
+        warning.diagnostic.detail = at;
+        // 옛 경로 텍스트를 경고에 담는다(뒤에 별칭 표가 바뀌어도 그대로다 — 논리 경로 상한 안).
+        const StringView old = aliases.Value()->At(at).path.View();
+        for (usize index = 0; index < old.ByteCount(); ++index) {
+            warning.text[index] = old.Data()[index];
+        }
+        if (auto pushed = warnings->TryPushBack(warning); !pushed) {
+            return Result<AssetId>::Failure(pushed.Error());
+        }
+    }
+
+    return Result<AssetId>::Success(target);
+}
+
+Result<void> AssetService::AliasRemove(const AssetDatabaseLock& lock, StringView path,
+                                       bool& notDurable, AssetDiagnostic* failure) noexcept {
+    notDurable = false;
+    auto aliases = Aliases(failure);
+    if (!aliases) {
+        return Result<void>::Failure(aliases.Error());
+    }
+
+    auto parsed = ParseLogicalPath(*allocator_, path);
+    if (!parsed) {
+        return FailAsset<void>(failure,
+                               parsed.Error() == ErrorCode::InvalidArgument
+                                   ? AssetDiagnosticCode::InvalidPath
+                                   : AssetDiagnosticCode::None,
+                               parsed.Error());
+    }
+
+    if (aliases.Value()->Find(parsed.Value().Key()) == AssetAliasNone) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, ErrorCode::NotFound);
+    }
+
+    const StringView keys[] = {parsed.Value().Key()};
+    return aliases.Value()->Write(*files_, lock, keys, {}, notDurable, failure);
+}
+
+Result<void> AssetService::AliasPrune(const AssetDatabaseLock& lock, AssetAliasPruneReport& report,
+                                      AssetDiagnostic* failure) noexcept {
+    auto aliases = Aliases(failure);
+    if (!aliases) {
+        return Result<void>::Failure(aliases.Error());
+    }
+
+    AssetClock& clock = clock_ != nullptr ? *clock_ : systemClock_;
+    return aliases.Value()->Prune(*files_, lock, clock.NowTicks(), aliasSearch_, report, failure);
 }
 
 Result<void> AssetService::FlushCache(const AssetDatabaseLock& lock) noexcept {
@@ -146,7 +1138,44 @@ Result<ObjectHandle> AssetService::OpenTarget(StringView target, AssetId& id,
                                            path.Error());
         }
 
-        opened = set_.Open(path.Value(), warnings, failure);
+        // 저장하지 않은 새 패키지는 색인에 없다 — 같은 경로 키면 그 패키지다(색인과 겹치지 않는다
+        // — Create가 거부한다).
+        for (usize index = 0; index < set_.Count(); ++index) {
+            const EditorPackageInfo& info = set_.At(index);
+            if (!info.unsaved) {
+                continue;
+            }
+
+            auto other = ParseLogicalPath(*allocator_, info.logicalPath.View());
+            if (!other) {
+                return FailAsset<ObjectHandle>(failure, AssetDiagnosticCode::None, other.Error());
+            }
+
+            if (other.Value().Key() == path.Value().Key()) {
+                id = info.id;
+                return set_.Registry().FindChild(set_.Access(), info.package, "");
+            }
+        }
+
+        AssetDiagnostic missing;
+        opened = set_.Open(path.Value(), warnings, &missing);
+        // 색인에 없는 경로(진단 None의 NotFound — 파일이 사라진 MissingFile과 다르다)는 별칭으로
+        // 푼다(7.1절 17 A2e1).
+        if (!opened && opened.Error() == ErrorCode::NotFound &&
+            missing.code == AssetDiagnosticCode::None) {
+            auto aliased = ResolveAliasPath(path.Value(), warnings, failure);
+            if (!aliased) {
+                if (aliased.Error() == ErrorCode::NotFound && failure != nullptr) {
+                    *failure = missing;
+                }
+
+                return Result<ObjectHandle>::Failure(aliased.Error());
+            }
+
+            opened = set_.Open(aliased.Value(), warnings, failure);
+        } else if (failure != nullptr && !opened) {
+            *failure = missing;
+        }
     } else {
         auto parsed = AssetId::TryParse(target);
         if (!parsed || parsed.Value().IsNull()) {
@@ -194,12 +1223,30 @@ Result<AssetId> AssetService::New(const AssetDatabaseLock& lock, StringView type
                                   parsed.Error());
     }
 
+    // 별칭이 있는 경로는 점유된 것이다(7.1절 12·17 — 별칭을 지운 뒤 쓴다).
+    auto aliases = Aliases(failure);
+    if (!aliases) {
+        return Result<AssetId>::Failure(aliases.Error());
+    }
+
+    if (const usize alias = aliases.Value()->Find(parsed.Value().Key()); alias != AssetAliasNone) {
+        if (failure != nullptr) {
+            *failure = AssetDiagnostic{};
+            failure->code = AssetDiagnosticCode::DuplicatePath;
+            failure->error = ErrorCode::AlreadyExists;
+            failure->related = aliases.Value()->At(alias).asset;
+        }
+
+        return Result<AssetId>::Failure(ErrorCode::AlreadyExists);
+    }
+
     auto lease = FindClass(type, true, failure);
     if (!lease) {
         return Result<AssetId>::Failure(lease.Error());
     }
 
     AssetTextResolver resolver(*allocator_, set_, index_, warnings);
+    resolver.SetAliases(&aliasLookup_);
     const TextCodecOptions options = CodecOptions(set_, resolver);
     AssignInitializer initializer(assignments, options, diagnostics);
     auto created = set_.Create(parsed.Value(), lease.Value().Id(), {}, failure, &initializer);
@@ -238,6 +1285,7 @@ Result<void> AssetService::Set(const AssetDatabaseLock& lock, StringView target,
     }
 
     AssetTextResolver resolver(*allocator_, set_, index_, warnings);
+    resolver.SetAliases(&aliasLookup_);
     resolver.SetWeakScope(id);
     const TextCodecOptions options = CodecOptions(set_, resolver);
     auto prepared = reflection_text::PrepareAssignments(
@@ -271,6 +1319,7 @@ Result<void> AssetService::Info(StringView target, const AssetInfoOptions& optio
     }
 
     AssetTextResolver resolver(*allocator_, set_, index_, warnings);
+    resolver.SetAliases(&aliasLookup_);
     TextCodecOptions codec = CodecOptions(set_, resolver);
     codec.use = options.all ? TextUse::Report : TextUse::Edit;
     const AssignmentTarget live =

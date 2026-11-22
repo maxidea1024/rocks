@@ -3,7 +3,7 @@
 #include <Meta/Annotations.h>
 #include <Object/Object.h>
 
-namespace sample {
+namespace foundationtemplate {
 
 ROCKS_CLASS()
 class GameObject final : public rocks::Object {
@@ -14,4 +14,4 @@ public:
     rocks::int32 health = 100;
 };
 
-} // namespace sample
+} // namespace foundationtemplate

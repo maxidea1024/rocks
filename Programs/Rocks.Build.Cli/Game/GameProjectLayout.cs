@@ -23,6 +23,18 @@ internal static class GameProjectLayout
     /// <summary>호스트의 게임 출력 플랫폼 이름이다(엔진 출력 이름과 같은 철자).</summary>
     public static string HostPlatformName => OperatingSystem.IsWindows() ? "windows" : "macos";
 
+    /// <summary>
+    /// <c>--target</c>가 없을 때의 게임 타깃 이름이다: 게임 루트의 <c>.rocksproject</c>(정확히 하나) 이름이다. UE도 <c>&lt;프로젝트&gt;.Target.cs</c>가 기본
+    /// 게임 타깃이고, 템플릿에서 만든 프로젝트의 타깃 이름이 프로젝트 이름이다(Docs/Design/ProjectFiles.ko.md 11.1절).
+    /// </summary>
+    public static string DefaultTarget(string project)
+    {
+        string[] files = Directory.GetFiles(project, "*" + Rocks.Build.Descriptors.DescriptorReader.ProjectExtension, SearchOption.TopDirectoryOnly);
+        return files.Length == 1 ? Path.GetFileNameWithoutExtension(files[0])
+            : throw new ArgumentException($"The game project root must contain exactly one {Rocks.Build.Descriptors.DescriptorReader.ProjectExtension} file " +
+                $"(found {files.Length}); pass --target <name>.");
+    }
+
     /// <summary>게임 타깃·구성의 기본 출력 디렉터리다.</summary>
     public static string DefaultOutput(string project, string target, NativeConfiguration configuration) =>
         Path.Combine(project, "out", $"{HostPlatformName}-{target.ToLowerInvariant()}-{configuration.ToString().ToLowerInvariant()}");
@@ -60,8 +72,8 @@ internal static class GameProjectLayout
     }
 
     /// <summary>
-    /// 게임 규칙 파일(<c>*.Build.cs</c>·<c>*.Target.cs</c>)이다. 빼는 곳, 출력, 프로젝트 안에 둔 SDK 아래로는 내려가지 않는다. 링크(reparse
-    /// point)는 따라가지 않고 거부한다(입력 snapshot과 같다). 정렬해 돌려준다.
+    /// 게임 규칙 파일(<c>*.Build.cs</c>·<c>*.Target.cs</c>)이다. 빼는 곳, 출력, 프로젝트 안에 둔 SDK 아래로는 내려가지 않는다. 링크(symlink·
+    /// junction)는 따라가지 않고 거부한다(입력 snapshot과 같다). 정렬해 돌려준다.
     /// </summary>
     public static string[] RuleFiles(string project, string output, string sdk)
     {
@@ -95,7 +107,7 @@ internal static class GameProjectLayout
 
     private static void RejectLink(string path)
     {
-        if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+        if (FileLinks.IsLink(path))
         {
             throw new IOException("Game rule discovery cannot follow links: " + path);
         }

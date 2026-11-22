@@ -1,6 +1,6 @@
 # Unreal 교환 형식과 추출 플러그인 설계
 
-기준일: 2026-11-22, 개정 8(UX1b를 UE 플러그인 골격 UX1b와 Rocks 임포트 연결 UX1c로 나눔). 개정 7(UX1a coverage 100% — 10.4절 끝 시험과 coverage 문단). 개정 6(UX1a 리더·경로 대응·임포트 순서 구현 — 10.4절, 3.4·3.5절 정렬·의존 `class`). 개정 5(UX1을 UX1a·UX1b로 나눔). 개정 4(UXR5 경계 정책 검사 구현 — 11.1절). 개정 3(13절 요구를 다른 문서에 반영하고 상태 열을 더함, 태그 키 이름). 개정 2(교차 검증 반영 — 18절). UE 에디터에서 텍스처·정적 메시·스켈레톤·스킨 메시·애니메이션 클립·머티리얼을 꺼내 Rocks 에셋으로 가져오는 경로를 정한다. 경로는 세 부분이다. UE 쪽 추출 플러그인 `RocksExport`, 둘 사이의 교환 형식 **Unreal 교환 묶음**, Rocks 쪽 임포터 플러그인 `UnrealExchange`다.
+기준일: 2026-11-22, 개정 11(UX3a 정적 메시 추출 — 5.4절). 개정 10(UX2·UX3을 추출 UX2a·UX3a와 임포트 UX2b·UX3b로 나눔, UX2a 텍스처 추출 — 4.5절). 개정 9(UX1b UE 플러그인 골격 구현 — 11.7절). 개정 8(UX1b를 UE 플러그인 골격 UX1b와 Rocks 임포트 연결 UX1c로 나눔). 개정 7(UX1a coverage 100% — 10.4절 끝 시험과 coverage 문단). 개정 6(UX1a 리더·경로 대응·임포트 순서 구현 — 10.4절, 3.4·3.5절 정렬·의존 `class`). 개정 5(UX1을 UX1a·UX1b로 나눔). 개정 4(UXR5 경계 정책 검사 구현 — 11.1절). 개정 3(13절 요구를 다른 문서에 반영하고 상태 열을 더함, 태그 키 이름). 개정 2(교차 검증 반영 — 18절). UE 에디터에서 텍스처·정적 메시·스켈레톤·스킨 메시·애니메이션 클립·머티리얼을 꺼내 Rocks 에셋으로 가져오는 경로를 정한다. 경로는 세 부분이다. UE 쪽 추출 플러그인 `RocksExport`, 둘 사이의 교환 형식 **Unreal 교환 묶음**, Rocks 쪽 임포터 플러그인 `UnrealExchange`다.
 
 - 배경: 사용자 지시(2026-11-19). 엔진 시험을 위해 UE에서 쓰던 콘텐츠를 Rocks로 가져온다. `.uasset`을 직접 해석하는 방식은 어려움이 많으므로 UE 플러그인이 Rocks가 읽을 수 있는 형태로 추출한다.
 - 받는 쪽 자료구조: 텍스처는 [에셋 시스템](AssetSystem.ko.md) 12절, 머티리얼은 [머티리얼 시스템](MaterialSystem.ko.md) 4절, 메시·스켈레톤·애니메이션은 [메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets.ko.md)이 정한다. 이 문서는 추출과 대응만 다룬다.
@@ -85,7 +85,7 @@
 | `objectPath` | UE 객체 경로 |
 | `class` | 교환 클래스 이름(`Texture2D`·`StaticMesh`·…, UE 클래스 이름에서 `U` 접두사를 뺀 것) |
 | `ueClass` | 실제 UE 클래스 경로(파생 클래스 구분용, 예 `/Script/Engine.Texture2D`) |
-| `dependencies` | `[{ "objectPath": …, "class": 교환 클래스 이름, "kind": "hard" | "soft" }]` — 이 에셋 JSON 안에서 참조한 객체 전부. objectPath 순 엄격 증가(한 객체 한 번, 둘 다면 hard). `class`는 묶음에 없는 대상의 9.3절 분류에 쓴다(10.4절 9번) |
+| `dependencies` | `[{ "objectPath": …, "class": 교환 클래스 이름, "kind": "hard" | "soft" }]` — 이 에셋 JSON 안에서 참조한 객체 전부와 AssetRegistry 패키지 의존의 에셋(11.7절 4번). objectPath 순 엄격 증가(한 객체 한 번, 둘 다면 hard). `class`는 묶음에 없는 대상의 9.3절 분류에 쓴다(10.4절 9번) |
 | `diagnostics` | 추출 중 플러그인이 낸 진단 `[{ "code", "severity", "message" }]` |
 | `settings` | 에셋 설정(종류별, 4–8절). 키는 UE 프로퍼티 이름 그대로다(대소문자 변환 없음 — 11.5절) |
 | `data` | 원본 데이터(종류별) |
@@ -131,6 +131,30 @@ layer의 감마 공간(`GetGammaSpace(Layer)` — Texture.h:400)은 `gammaSpace`
 
 UTexture·차원별 클래스의 저장 프로퍼티를 이름 그대로 `settings`에 쓴다. Rocks 텍스처 설정은 UE 5.8 이름과 1:1 대조표가 이미 있다(AssetSystem 12.4절). 임포트는 그 표로 옮기고, 표에서 "후속"인 설정이 기본값이 아니면 `UnsupportedSetting` 경고를 낸다. `Texture2DArray`의 `SourceTextures`·`VolumeTexture`의 `Source2DTexture` 같은 에셋 참조는 의존으로 기록한다.
 
+### 4.5 구현에서 정한 점(UX2a)
+
+UX2a(UE 쪽 텍스처 추출, `FRocksTextureExtractor`) 중 4절이 정하지 않았거나 다르게 정한 점이다. 모두 권장안으로 확정했다.
+
+1. **`data` 스키마.** `data`는 `{ "source": … }` 하나다. `source`는 다음 키를 이 순서로 갖는다.
+
+   | 키 | 내용 |
+   |---|---|
+   | `format` | 층 0 원본 형식(4.2절 표 왼쪽 이름에서 `TSF_`를 뗀 것: `G8`·`BGRA8`·`BGRE8`·`RGBA16`·`RGBA16F`·`G16`·`RGBA32F`·`R16F`·`R32F`) |
+   | `compression` | 원본 보관 형식(`None`·`PNG`·`JPEG`·`UEJPEG`·`UEDELTA` — `TSCF_`를 뗀 것). 정보용이다. 픽셀은 언제나 푼 값이다 |
+   | `lossyOrigin` | `JPEG`·`UEJPEG`이면 `"jpeg"`, 아니면 `null`(4.3절) |
+   | `longLat` | `IsLongLatCubemap()`(4.1절) |
+   | `numLayers`·`numBlocks` | 층·블록 수(4.1절 — 둘 이상이면 Rocks 임포트가 `UnsupportedSourceLayout`) |
+   | `layers` | 층마다 `{ "format", "gammaSpace" }`(`gammaSpace`는 `Linear`·`Pow22`·`sRGB` — 4.2절 `GetGammaSpace(Layer)`) |
+   | `blocks` | 블록마다 `{ "blockX", "blockY", "sizeX", "sizeY", "numSlices", "numMips", "mips": [ { "sizeX", "sizeY", "numSlices", "pixels": [층마다 blob 참조] } ] }` |
+
+   mip 크기는 `FTextureSource::FMipData::GetMipDataWithInfo`의 `FImageInfo`를 그대로 적는다(볼륨은 mip마다 깊이가 줄고 배열·큐브는 slice 수가 그대로다 — `GetMippedNumSlices`). 원본이 없으면(`Source.IsValid()` 거짓) `source`는 `null`이고 error 진단 `NoSourceData`다(4.1절). 층 형식이 위 9종이 아니면 `null`과 `UnsupportedSourceFormat`, mip 사슬을 풀지 못하면 `null`과 `SourceReadFailed`다(모두 error, 에셋 수준 — 내보내기는 계속한다).
+2. **blob 배치.** mip 하나·층 하나 = blob 하나다(4.1절 (block, layer, mip)). 바이트는 `GetMipData(nullptr)`로 한 번 푼 사슬의 그 mip view를 그대로 쓴다(slice 순서, 행 우선, 패딩 없음). 배치는 `G8` u8×1, `BGRA8`·`BGRE8` u8×4(UE 저장 순서 B·G·R·A/E 그대로 — 교환·해제는 Rocks 임포트, 4.2절), `RGBA16` u16×4, `RGBA16F` f16×4, `G16` u16×1, `RGBA32F` f32×4, `R16F` f16×1, `R32F` f32×1이고 `count`는 texel 수(sizeX × sizeY × numSlices)다.
+3. **`settings`.** 텍스처 객체의 UPROPERTY 덤프 전체다(4.4절, 11.5·11.7절 13번 규칙). `Source` 프로퍼티(FTextureSource의 UPROPERTY — 크기·형식·블록 표·Id)는 `data`와 겹치므로 뺀다. 덤프가 모은 참조(`CompositeTexture`·`SourceTextures`·`Source2DTexture` 등)는 의존 목록에 합친다(11.7절 4번). enum 값은 UE C++ 값 이름 그대로다(`TA_Wrap`·`TC_Default`·`TEXTUREGROUP_World` — `GetNameStringByValue`). 접두를 떼는 것은 Rocks 임포트의 대조표(AssetSystem 12.4절 — Rocks 이름은 접두를 뗀다)가 한다.
+4. **손실 원본.** 플러그인은 거부하지 않는다. 푼 픽셀을 쓰고 `lossyOrigin`과 info 진단 `LossyOrigin`을 남긴다. 거부·허용(`LossySource`·`--allow-lossy-origin`)은 Rocks 임포트(UX2b)가 한다. UE 5.8 엔진 콘텐츠에도 있다(`/Engine/EngineMaterials/T_Grid_Crosses` G8 JPEG, `/Engine/EditorMaterials/Dataflow/T_CheckerBoard` BGRA8 JPEG).
+5. **로드.** 범위 안 텍스처는 본문을 위해 로드한다(`FSoftObjectPath::TryLoad`). 로드하지 못하면 error 진단 `LoadFailed`이고 본문은 빈 객체다. blob 쓰기 실패(디스크·크기 불일치)는 내보내기 전체 실패다.
+6. **본문 조립.** 의존·진단이 본문 추출 결과에 따라 바뀌므로 본문(`settings`·`data`)을 먼저 조각으로 만들고(`FRocksJsonWriter` 기준 깊이 1, `FinishFragment`) 에셋 JSON에 그대로 끼운다(`RawValue`). 그래서 bytes는 한 writer로 쓴 것과 같다.
+7. **자기 시험.** `RocksExport.TextureExtraction`(commandlet `-SelfTest`에도 포함)이 엔진 텍스처 8개(BGRA8 PNG, G8 JPEG, RGBA16F, BGRE8 UE Delta 큐브, BGRA8 큐브·볼륨·2D 배열, R32F 볼륨)를 내보내고, blob마다 `FTextureSource::GetMipData(Out, Block, Layer, Mip)`(LockMip을 거치는 다른 경로)로 꺼낸 원본과 SHA-256·`bytes`·blob 파일 내용·`count`·`layout`을 대조한다. `settings`에 `Source`가 없고 `SRGB`·`CompressionSettings`가 있는지, `format`·`lossyOrigin`·`longLat`·블록·층 수도 본다. 결정성은 `ExportDeterminism`(정육면체 닫힘에 텍스처 2개가 든다)이 본다. 수동 검증(2026-11-22): 엔진 텍스처 15개와 시험 프로젝트에 임포트한 16비트 PNG 2개(G16·RGBA16 — 엔진 콘텐츠에 없다)를 닫힘과 함께 내보낸 묶음(에셋 20개, 원본 형식 G8·BGRA8·BGRE8·G16·RGBA16·RGBA16F·RGBA32F·R32F, 보관 형식 None·PNG·JPEG·UEDELTA, 2D·큐브(위도경도 포함)·2D 배열·볼륨)을 두 번 내보내 `createdUtc` 말고 bytes가 같고, Rocks 리더(`UnrealExchange_ExternalBundle`)가 blob 전부의 크기·SHA-256을 확인해 20개 모두 Ready였다. R16F 원본과 TextureCubeArray는 엔진 콘텐츠에 없어 확인하지 못했다.
+
 ## 5. 정적 메시
 
 ### 5.1 추출
@@ -175,6 +199,19 @@ Helper.SetupRenderMeshDescription(StaticMesh, MeshCopy, bForNanite, /*bNeedTange
 Rocks 임포트 모드(`--mesh-normals=`, ImportRecord `options`에 남는다):
 - `unreal`(기본): `prepared`를 Rocks 원본으로 쓴다. 이미 계산된 값이므로 `recomputeNormals`·`recomputeTangents`·`generateLightmapUVs`를 끄고 lightmap 번호는 `preparedBuild` 값을 쓴다. UE 원래 플래그는 ImportRecord `options`에 남긴다.
 - `rocks`: `source`(순수 원본)와 UE 빌드 설정을 그대로 쓴다. Rocks 빌더가 계산한다.
+
+### 5.4 구현에서 정한 점(UX3a)
+
+UX3a(UE 쪽 정적 메시 추출, `FRocksStaticMeshExtractor`·`FRocksMeshDescriptionWriter`) 중 5절이 정하지 않았거나 다르게 정한 점이다. 모두 권장안으로 확정했다.
+
+1. **`data` 스키마.** `data`는 `{ "lods": [...], "collision": … }`다. LOD 항목은 `hasSource`·`source`·`prepared`·`preparedBuild`(`{ "SrcLightmapIndex", "DstLightmapIndex" }` — 5.3절 사본 설정이 고친 값)·`generated`·`baked` 순이다. 원본이 없는 LOD의 `source`·`prepared`·`preparedBuild`, 생성 LOD가 아닌 LOD의 `baked`는 `null`이다. 5.2절 예시의 LOD별 `build`·`reduction`·`screenSize`는 `data`에 다시 쓰지 않는다 — `settings`의 `SourceModels[i]`(UE `FStaticMeshSourceModel` 덤프: `BuildSettings`·`ReductionSettings`·`ScreenSize` 기본값과 플랫폼별 값)에 이미 있어 두 곳에 같은 값을 두지 않는다.
+2. **MeshSource 기록.** `{ "counts": { "vertices", "corners", "edges", "polygons", "triangles", "polygonGroups" }, "topology": [blob 7개], "attributes": [{ "element", "name", "type", "channels", "data" }] }`다. 위상 blob은 MeshAnimationAssets 9.1절 순서이고 모두 `u32`(components 1·2·1·1·1·3·1, count = 코너 수·변 수·다각형 수 + 1·둘레 길이 합·다각형 수·삼각형 수·삼각형 수)다. 변은 작은 정점 번호를 먼저 쓴다. 요소 번호는 메시 설명 사본을 `Compact`한 순서다. 속성 `element`는 `Vertex`·`Corner`·`Edge`·`Polygon`·`Triangle`·`PolygonGroup`, `type`은 `Float`·`Vec2`·`Vec3`·`Vec4`·`UInt32`·`Bool`·`Name`이다. 값 blob은 MeshAnimationAssets 3.4.1절 배치(채널 우선)이고 배치 이름은 Float·Vec* `f32`(components = 성분 수 × 채널), UInt32 `u32`, Bool `u8`(components = 채널), Name `names`(components = 채널), count = 그 요소 수다. 정점 위치는 속성 `Vertex`·`Position`이다(MA1 3.7절 1). 속성은 (요소 번호, 이름 UTF-8 byte) 순이다(MeshAnimationAssets 9.2절).
+3. **속성 대응.** MeshAnimationAssets 3.2절 표대로 UE 이름 상수로 맞춘다: 정점 `Position`(UE 이름은 끝에 공백이 있는 `"Position "` — MeshAttributes.cpp), 코너 `Normal`·`Tangent`·`BinormalSign`·`Color`·`TexCoord`(UE `TextureCoordinate`, 채널 ≤ 8), 변 `IsHard`, 다각형 `PartName`(UE `ObjectName`), 다각형 묶음 `MaterialSlotName`(UE `ImportedMaterialSlotName`). 그 밖의 UE 속성은 같은 요소·이름으로 보존한다(float·FVector2f·FVector3f·FVector4f·bool·FName, int32는 `UInt32`에 비트 그대로). transient 속성(삼각형 법선 등)과 번호 참조 속성(위상)은 쓰지 않는다. 다른 값 타입, Rocks 엔진 이름과 겹치는 보존 속성, 채널이 상한(255, TexCoord 8)을 넘는 속성은 빼고 `SkippedMeshAttribute` 진단(info·warning)을 단다. 채널 0인 속성은 값이 없어 쓰지 않는다. FName `None`은 빈 문자열이다. 이름의 NFC 정규화는 하지 않는다(UE 이름은 사실상 ASCII — 아니면 Rocks 검증이 잡는다).
+4. **`prepared`.** LOD마다 메시 설명 사본(`CloneMeshDescription`)과 빌드 설정 사본에 `FMeshDescriptionHelper::SetupRenderMeshDescription(메시, 사본, IsNaniteEnabled(), bNeedTangents = true)`를 적용하고 다시 압축한다(5.3절). 원본 에셋은 바꾸지 않는다(자기 시험이 확인한다 — 7번). lightmap UV 생성이 켜진 LOD는 `prepared`에 UV 채널이 늘 수 있고 고친 번호가 `preparedBuild`다.
+5. **`generated`와 `baked`.** `generated` = `!IsMeshDescriptionValid(i) || IsReductionActive(i)`(5.1절). 참이면 그 LOD의 `FStaticMeshLODResources` CPU 사본(에디터는 쿠킹 데이터를 요구하지 않으므로 `bNeedsCPUAccess`가 켜져 있다 — StaticMesh.cpp)을 삼각형 메시로 바꾼다: 렌더 정점 하나 = 정점 하나 = 코너 하나, 다각형 = 삼각형, 변은 정점 쌍마다 하나(처음 나온 순서), 다각형 묶음 = 섹션(이름은 `StaticMaterials[섹션 머티리얼 번호].ImportedMaterialSlotName`). 코너 속성은 `Normal`(TangentZ)·`Tangent`(TangentX)·`BinormalSign`(TangentZ.w)·`TexCoord`·`Color`(8비트 sRGB를 선형으로 — info `BakedColorQuantized`)다. 같은 정점을 두 번 쓰는 삼각형은 빼고 info `BakedDegenerateTriangles`(개수)를 단다(Rocks 불변식이 같은 정점을 잇는 변을 받지 않는다). 렌더 데이터가 없으면 `baked`는 `null`이고 warning `BakedUnavailable`이다. `baked` 위치에는 `BuildScale3D`가 이미 들어 있다(5.1절).
+6. **`settings`와 `collision`.** `settings`는 UStaticMesh UPROPERTY 덤프 전체다(LOD 설정, 슬롯·섹션 정보·소켓, Nanite 설정, lightmap, 경계 확장, LOD 그룹·최소 LOD, `ComplexCollisionMesh`·`DistanceFieldReplacementMesh` 참조 — 참조는 의존에 합친다). UE의 `BodySetup`은 transient UPROPERTY(따로 직렬화)라 덤프에 들지 않으므로 `data.collision`에 BodySetup 객체의 덤프(`AggGeom` 형상 전부, `CollisionTraceFlag`, `bDoubleSidedGeometry`, 물리 머티리얼 등)를 쓴다. 없으면 `null`이다. level set 계열 형상은 info `LevelSetCollision`(개수)이고 Nanite 고해상도 원본은 info `HiResSourceSkipped`다(5.1절). 메시 설명을 기록으로 바꾸지 못하면 그 기록은 `null`이고 error `MeshSourceUnavailable`이다.
+7. **자기 시험.** `RocksExport.StaticMeshExtraction`(commandlet `-SelfTest`에도 포함)이 엔진 정육면체·구를 내보내고 LOD 수, LOD 0 원본의 수(압축한 메시 설명과 같음)·위상 배열 7개·위치 blob bytes(메시 설명 값과 같음)·엔진 속성 8종·`prepared`·`preparedBuild`를 확인한다. 추출 전후의 에셋 UPROPERTY 덤프, LOD별 원본 메시 설명 기록의 digest, 빌드 설정 lightmap 번호가 같은지로 "`prepared` 추출이 원본 설정을 바꾸지 않음"(12.2절)을 본다.
+8. **Rocks 쪽 왕복 확인.** 선택 시험 `UnrealExchange_ExternalBundle`(11.7절 18번)이 Ready 정적 메시의 `source`·`prepared`·`baked` 기록마다 blob을 `LoadExchangeBlob`으로 읽어 MA1 `MeshSource`(Add*·AddAttribute)로 적재하고 `ValidateMeshSource`를 통과하는지, MA2a `BuildStaticMeshLod`(기본 빌드 설정)가 성공하는지 본다. 이 적재 코드는 시험 안에만 있다. 임포터의 적재·모드 처리는 UX3b다. 수동 검증(2026-11-22): 엔진 BasicShapes 6개와 시험 프로젝트 메시 2개(OBJ로 임포트한 오각기둥 — n-gon 다각형 7개·삼각형 16개, 섹션 2개, 다각형 `PartName`, 볼록 충돌 / 구 사본에 축소 LOD 둘 — `generated`·`baked`)를 닫힘과 함께 내보낸 묶음(에셋 26개)을 두 번 내보내 `createdUtc` 말고 bytes가 같고, 리더가 18개 기록(원본 8·prepared 8·baked 2) 모두 적재·검증·빌드에 성공했다(경고는 시험이 슬롯 이름을 주지 않아 나는 `MaterialSlotFallback`뿐이다).
 
 ## 6. 스켈레톤·스킨 메시
 
@@ -379,7 +416,7 @@ Extras/UnrealExport/RocksExport/
   - 네임스페이스 판정은 주석·문자열을 지운 텍스트로 한다(설명 주석에서 상대 엔진 이름을 언급하는 것은 허용). 서술자 확장자는 대소문자를 무시한다. `Extras/`가 없으면 그쪽 검사는 할 일이 없다.
 - 코드 규약은 UE 코딩 표준(F·U 접두사, UE 컨테이너)을 따른다. 손으로 쓴 주석은 한국어, 로그·진단 메시지는 영어다(Rocks 규약과 같은 언어 경계).
 - 지원 UE 버전은 5.8 하나다. `.uplugin`의 `EngineVersion`을 5.8로 두고, 코드는 `ENGINE_MAJOR_VERSION`·`ENGINE_MINOR_VERSION`이 다르면 `#error`로 멈춘다(메시지 영어).
-- 모듈: `Type: "Editor"`, `LoadingPhase: "Default"`. `Editor` 타입은 `GIsEditor`일 때 로드되고 commandlet도 `GIsEditor`를 켜므로 commandlet에서 로드된다(RT/Projects/Private/ModuleDescriptor.cpp:724-742, RT/Launch/Private/LaunchEngineLoop.cpp:2223). 의존 모듈: UnrealEd, AssetRegistry, ToolMenus, ContentBrowser, MeshDescription, StaticMeshDescription, SkeletalMeshDescription, MeshBuilder, MaterialEditor, MaterialBaking, Json, JsonUtilities.
+- 모듈: `Type: "Editor"`, `LoadingPhase: "Default"`. `Editor` 타입은 `GIsEditor`일 때 로드되고 commandlet도 `GIsEditor`를 켜므로 commandlet에서 로드된다(RT/Projects/Private/ModuleDescriptor.cpp:724-742, RT/Launch/Private/LaunchEngineLoop.cpp:2223). 의존 모듈: UnrealEd, AssetRegistry, ToolMenus, ContentBrowser, MeshDescription, StaticMeshDescription, SkeletalMeshDescription, MeshBuilder, MaterialEditor, MaterialBaking, Json. 각 모듈은 그것을 쓰는 단계에서 더한다(UX1b 목록과 JsonUtilities 제외 — 11.7절 1번).
 
 ### 11.2 진입점
 
@@ -421,6 +458,30 @@ float는 9자리, double은 17자리 유효숫자(`%.9g`·`%.17g`)로 쓴다. �
 | `FRocksPropertyDumper` | 11.5절 |
 | `FRocksExportClosure` | AssetRegistry 의존 닫힘·redirector 풀기 |
 
+### 11.7 구현에서 정한 점(UX1b)
+
+UX1b 구현(`Extras/UnrealExport/RocksExport/` — 플러그인 골격·commandlet·메뉴·writer·SHA-256·숫자 서식·UPROPERTY 덤프·닫힘·redirector·에셋 JSON 공통부) 중 3·9·11절이 정하지 않았거나 다르게 정한 점이다. 모두 권장안으로 확정했다.
+
+1. **모듈 의존은 쓰는 단계에서 더한다.** UX1b는 AssetRegistry·ContentBrowser·Core·CoreUObject·DesktopPlatform(디렉터리 대화상자)·Engine·Json(자기 시험이 결과를 UE 파서로 다시 읽는다)·Projects(플러그인 버전)·Slate·SlateCore·ToolMenus·UnrealEd다. 11.1절 목록의 메시·머티리얼·굽기 모듈은 UX2 이후 그것을 쓰는 단계에서 더한다. JsonUtilities는 쓰지 않는다(`FJsonObjectConverter`를 쓰지 않으므로 — 11.5절).
+2. **클래스 구성 추가.** 11.6절 표에 더해 `FRocksJsonWriter`(JSON 텍스트·숫자 서식 — writer와 분리해 덤프·정렬 키도 같은 서식을 쓴다)와 `FRocksExporter`(commandlet과 메뉴가 함께 쓰는 내보내기 흐름)를 둔다. 자기 시험은 `RocksExportSelfTest`(함수 묶음)와 그 시험 타입(`FRocksSelfTestStruct`)이다.
+3. **UX1b는 에셋을 로드하지 않는다.** `class`·`ueClass`는 AssetRegistry의 클래스 경로로 정하고 `settings`·`data`는 빈 객체다. 종류별 본문(4–8절)이 로드를 요구하는 단계(UX2 이후)에서 로드한다. 교환 클래스는 실제 클래스부터 상위로 올라가며 처음 만나는 2절 클래스 이름이다(파생 클래스는 `ueClass`로 구분 — 3.5절). 2절 클래스를 상속해도 2절이 범위 밖으로 둔 IES `TextureLightProfile`은 범위 밖이다. 클래스를 찾지 못하면(로드되지 않은 Blueprint 클래스) 클래스 경로의 이름을 쓰고 범위 밖이다.
+4. **의존 목록의 출처.** 3.5절은 `dependencies`를 "에셋 JSON 안에서 참조한 객체"로 정한다. 본문이 빈 UX1b에서는 AssetRegistry 패키지 의존(9.3절 — Hard·Soft 질의)을 쓴다. 의존 패키지의 에셋 하나하나가 항목이고(objectPath·교환 클래스·kind), `/Script/`·`/Memory/` 패키지와 자기 자신은 뺀다. 본문을 쓰는 단계는 덤프가 모은 참조(`FRocksPropertyDumper::GetReferences`)를 합친다(합집합, 둘 다면 Hard). 패키지 의존은 저장된 참조 전체라 본문 참조를 포함하므로 Rocks 임포트 순서(10.4절 14번)의 간선이 지금부터 맞다.
+5. **닫힘과 범위 밖 선택.** 닫힘(9.3절)은 범위 안 에셋에서만 Hard 의존을 따라가고, 범위 안 대상만 더한다. 범위 밖 대상은 의존 항목으로만 남는다(Rocks 리더가 순서·누락 판정에서 뺀다 — 10.4절 9번). 사용자가 직접 고른 범위 밖 에셋(레벨·Blueprint 등)은 `assets`에 그 클래스 이름으로 넣고 에셋 JSON 공통부(의존 포함)와 `UnsupportedAsset` 경고 진단을 쓴다. Rocks 리더는 그 JSON을 읽지 않고 `UnsupportedAsset` 경고를 낸다. 범위 밖 에셋에서는 닫힘을 따라가지 않는다.
+6. **선택 문법.** `-Assets=`는 쉼표·세미콜론으로 나눈 목록이다. 항목은 객체 경로(`/Game/A.A`), 패키지 경로(`/Game/A` — 그 패키지의 에셋 전부), 폴더 재귀(`/Game/Dir/...`)다. 맞는 에셋이 없으면 실패다. AssetRegistry 조회는 기본 필터를 따른다(에디터에서 Blueprint 생성 클래스 `_C` 항목을 뺀다 — 그러지 않으면 Blueprint 패키지가 에셋 둘로 보인다). 에디터 메뉴는 선택한 에셋 전부를 넘긴다(11.2절의 `GetSelectedAssetsOfType` 대신 `SelectedAssets` — 범위 밖 선택도 위 5번 규칙으로 다룬다).
+7. **redirector.** 대상은 AssetRegistry의 redirector 태그 `DestinationObject`로 읽고, 태그가 없으면 redirector를 로드해 `DestinationObject`를 본다. 사슬은 끝까지 따라가고 `RedirectMaxChain`(= 64) 단계를 넘거나 순환하면 끊어진 사슬이다. 지나간 redirector마다 `{ from: 그 경로, to: 사슬 끝 }`을 적는다(사슬 없음 — 10.4절 10번). 의존 항목의 `objectPath`는 사슬 끝을 쓴다(리더는 `from`도 풀므로 어느 쪽이든 되지만 하나로 정한다). 선택한 redirector가 끊어졌으면 내보내기 실패, 의존 쪽이면 그 의존을 빼고 `BrokenRedirector` 경고 진단이다.
+8. **에셋 여럿인 패키지.** 형식 v1은 에셋 파일 이름(10.4절 8번)과 Rocks 경로(9.1절)를 패키지 경로에서 만들므로 한 패키지에 에셋이 둘 이상이면 담을 수 없다. 그런 패키지의 에셋은 내보내지 않고(경고 로그), 그것을 Hard로 참조한 에셋에 `MultiAssetPackage` 경고 진단을 단다. 의존 항목은 남으므로 Rocks 임포트는 9.3절 누락 규칙(머티리얼·텍스처는 경고, 그 밖은 오류)을 따른다. UE 5.8 엔진 콘텐츠에도 있다(`/Engine/BasicShapes/M_Cube_WorldGridMaterial_8D67460644F5AEE976EC80B26230FFEB` — 머티리얼과 텍스처). 버린 대안: 파일·경로를 objectPath로 만드는 형식 변경 — 9.1절 대응과 리더(10.4절 8번)를 함께 바꿔야 하고, UE 5 콘텐츠는 패키지당 에셋 하나가 원칙이라 실제 콘텐츠가 요구할 때 `formatVersion`과 함께 정한다.
+9. **플러그인 진단 코드.** 에셋 JSON `diagnostics`의 `code`는 `UnsupportedAsset`(범위 밖 선택), `MissingUnrealPackage`(의존 패키지가 AssetRegistry에 없음), `BrokenRedirector`, `InvalidObjectPath`(의존 경로가 10.4절 7번 문법을 어겨 적지 않음), `MultiAssetPackage`이고 모두 `warning`이다. 묶음에 들 에셋 자신의 경로가 문법을 어기면 내보내기 실패다. Rocks 리더는 `code` 문자열을 해석하지 않는다(형식만 본다).
+10. **`bundle.json` 값.** `engineVersion`은 `FEngineVersion`의 주.부.패치(`5.8.4`)다. `engineCommit`은 설치판(Launcher) 엔진에 git commit이 없으므로 Perforce changelist 번호(10진, 5.8.4 = `58902052`)를 쓰고, 0이면(소스 빌드) `unknown`이다. `substrate`는 `r.Substrate` 값, `retainJpegFormat`은 Editor ini `[TextureImporter] RetainJpegFormat`(없으면 UE 기본 True)이다. `environment`는 굽기(UX6) 전이라 쓰지 않는다. `createdUtc`는 초 단위 ISO 8601 UTC(`2026-11-22T02:59:17Z`)다.
+11. **JSON 텍스트.** 들여쓰기 두 칸, 줄바꿈 LF, 끝에 LF 하나, 빈 객체·배열은 `{}`·`[]`다. 문자열은 따옴표·역슬래시·제어 문자(U+0000–U+001F — 짧은 escape 5종, 나머지 `\u00XX`)만 escape하고 나머지는 UTF-8 그대로다. 짝 없는 UTF-16 surrogate는 U+FFFD로 바꾼다(UE 문자열은 UTF-16이라 생길 수 있고, Rocks 리더는 잘못된 UTF-8을 받지 않는다). 정렬(3.2절·10.4절 6번)은 code point 비교로 한다(UTF-8 byte 순과 같다).
+12. **숫자 서식 구현.** `std::to_chars(…, std::chars_format::general, 9 | 17)`이다. C 표준이 `printf`의 `%.9g`·`%.17g`와 같은 결과를 정하고 로캘을 보지 않는다(UE `FString::Printf`·CRT `printf`는 프로세스 로캘의 소수점을 따를 수 있다). 정수는 `std::to_chars` 10진이다.
+13. **UPROPERTY 덤프 세부(11.5절).** 키 순서는 `TFieldIterator` 순(그 클래스 선언부터 상위 쪽), 고정 배열(`ArrayDim` > 1)은 배열이다. enum은 이름(`GetNameStringByValue`), enum에 없는 값은 정수다. `FText`는 원문(source string — 표시 문자열은 언어마다 다르다)이다. `FSoftObjectPath` 구조체와 soft 참조는 `{ "objectPath" }`다. 하위 객체(덤프 루트를 Outer 사슬에 둠)는 처음 만날 때만 `{ "subobject": 루트 기준 경로, "class": 클래스 경로, "properties": {…} }`로 펼치고 다시 만나면 `{ "subobject" }`만 쓴다(공유·순환 참조). `TSet`은 배열, `TMap`은 `{ "key", "value" }` 객체의 배열이다. 둘 다 원소(키)의 compact JSON 표기의 UTF-8 byte 순으로 정렬한다(키가 문자열이 아닐 수 있어 같은 규칙을 모든 키 타입에 쓴다). delegate·field path·optional 같은 그 밖의 타입은 UE `ExportText` 문자열이다. 참조 수집은 `/Script/`·`/Memory/`·transient 패키지를 뺀다.
+14. **원자적 쓰기.** 모든 파일을 `<출력>.staging`에 쓰고, `bundle.json`을 마지막에 쓴 뒤 기존 출력을 `<출력>.previous`로 옮기고 staging을 출력 이름으로 바꾼 다음 옛것을 지운다. 출력 이름에는 언제나 완성된 묶음만 있다. 기존 출력이 묶음(`bundle.json` 있음)도 빈 디렉터리도 아니면 덮지 않고 실패한다(오타로 다른 디렉터리를 지우지 않게). 실패·중단이면 staging을 지우고 출력은 그대로다. blob은 한 번의 내보내기 안에서 같은 hex를 한 번만 쓰고, 고정 배치는 `bytes` = 원소 크기 × components × count를 쓰기 전에 확인한다(10.4절 11번과 같은 규칙).
+15. **commandlet 인자.** `-Closure`와 `-NoClosure`를 함께 주면 실패다. `-BakeMaterials`·`-BakeSize`는 굽기 단계(UX6) 전이라 실패로 거부한다(조용히 무시하지 않는다). `-SelfTest`는 자기 시험만 돌린다. 그 밖의 스위치는 엔진 스위치(`-unattended` 등)라 보지 않는다. 종료 코드는 성공 0, 실패 1이다(`UseCommandletResultAsExitCode`).
+16. **에디터 메뉴.** 2절 상위 클래스 메뉴 8개에 동적 항목 "Export to Rocks..."를 단다. 옵션 대화상자는 지금 출력 디렉터리 선택(`IDesktopPlatform::OpenDirectoryDialog`)뿐이고 닫힘은 켠다. 굽기 같은 옵션은 그 단계에서 더한다. AssetRegistry가 검색 중이면 끝날 때까지 기다린다. 결과는 메시지 대화상자로 알린다.
+17. **자기 시험(12.2절).** commandlet `-SelfTest`와 UE Automation `RocksExport.*` 6개(`Sha256`·`NumberFormat`·`JsonWriter`·`PropertyDump`·`BundleWriter`·`ExportDeterminism`)가 같은 함수를 부른다. SHA-256은 FIPS 180-4 예제 4개와 백만 `a`, 1 byte씩·997 byte 조각·블록 경계 길이(55·56·63·64·65·119·120)의 분할 일치다. 숫자 서식은 표기 16개(printf 기대값), 비유한값, 결정적 비트 패턴 2만 개의 왕복(`std::from_chars`로 다시 읽어 비트 비교), 독일어 로캘에서의 같은 표기다. 덤프는 시험 구조체의 기대 JSON 전체 비교·참조 수집과 엔진 에셋(정육면체 메시·기본 머티리얼) 두 번 덤프의 일치·UE 파서 읽기다. writer는 blob 경로·중복·크기 검사, 교체·중단·묶음 아닌 디렉터리 보호다. 결정성은 `/Engine/BasicShapes/Cube`를 두 번 내보내 `createdUtc` 줄 말고 bytes가 같은지와 형식(키·정렬·파일 대응)이다. `prepared` 추출이 원본 설정을 바꾸지 않는지는 UX3a에서 더한다.
+18. **Rocks 쪽 왕복 확인.** EngineTests에 선택 시험 `UnrealExchange_ExternalBundle`(`Tests/ExchangeExternalBundleTests.cpp`)을 둔다. 환경 변수 `ROCKS_UNREAL_EXCHANGE_BUNDLE`이 묶음 디렉터리를 가리키면 리더로 읽고 임포트 순서를 계산해 결과를 출력하며, 묶음 수준 오류 없음·오류 진단 없음·범위 안 에셋 Ready·범위 밖 Unsupported·실패한 저장 단위 없음을 확인한다. 변수가 없으면 SKIP을 출력하고 통과한다(기본 CI 불변). 환경 변수 읽기는 TestSupport `test::ReadEnvironmentVariable`(Win64 `GetEnvironmentVariableW`, POSIX `getenv`)이다.
+19. **빌드 환경.** `RunUAT BuildPlugin -TargetPlatforms=Win64`는 경고 없이 빌드된다. 확인한 PC에서 UBT는 VS 2026의 MSVC(폴더 14.50.35717, 컴파일러 14.50.35740 — `Windows_SDK.json`의 금지 구간 14.50.0–14.50.35722 밖, 선호 범위 안)와 Windows SDK 10.0.22621.0을 골랐다. 사용자 전역 UBT 설정(`%APPDATA%\Unreal Engine\UnrealBuildTool\BuildConfiguration.xml`)에 UE 5.8이 모르는 값(`VisualStudio2019`)이 있으면 UBT가 설정 읽기에서 멈춘다. 그 PC에서는 빌드 프로세스에만 `USERPROFILE`·`APPDATA`·`LOCALAPPDATA`를 작업 폴더로 바꿔 그 파일을 보지 않게 했다(파일은 다른 UE 버전용이라 고치지 않았다).
+
 ## 12. 시험
 
 ### 12.1 Rocks 쪽(UE 없이)
@@ -450,19 +511,21 @@ float는 9자리, double은 17자리 유효숫자(`%.9g`·`%.17g`)로 쓴다. �
 
 ## 14. 단계
 
-ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으며 착수는 사용자가 정한다. 사용자 지시(2026-11-21 "진행 가능한거부터")에 따라 UX1의 Rocks 리더 부분을 UX1a로 떼어 먼저 한다. UE 플러그인은 소스 빌드 없이 Launcher 설치판을 C:에 받아 빌드한다(사용자 결정 2026-11-20). 사용자가 UE 5.8.4 설치판을 받았으므로(2026-11-22) UX1의 UE 쪽을 UX1b로, Rocks 임포트 연결을 UX1c로 나눈다. UX2 이후 단계도 UE 추출 쪽은 Rocks 리더 왕복으로 검증해 Rocks 임포트(에셋 시스템 A2f–A5·MA b 단계)보다 먼저 할 수 있다.
+ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으며 착수는 사용자가 정한다. 사용자 지시(2026-11-21 "진행 가능한거부터")에 따라 UX1의 Rocks 리더 부분을 UX1a로 떼어 먼저 한다. UE 플러그인은 소스 빌드 없이 Launcher 설치판을 C:에 받아 빌드한다(사용자 결정 2026-11-20). 사용자가 UE 5.8.4 설치판을 받았으므로(2026-11-22) UX1의 UE 쪽을 UX1b로, Rocks 임포트 연결을 UX1c로 나눈다. UX2 이후 단계도 UE 추출 쪽은 Rocks 리더 왕복으로 검증해 Rocks 임포트(에셋 시스템 A2f–A5·MA b 단계)보다 먼저 할 수 있다. 그래서 텍스처·정적 메시는 추출(UX2a·UX3a, UE)과 임포트(UX2b·UX3b, Rocks)로 나눈다(개정 10, 사용자 지시 "진행 가능한거부터").
 
 | 단계 | 쪽 | 내용 | 선행 |
 |---|---|---|---|
 | UX1a | Rocks | 묶음 형식 v1 리더·검증(JSON 스키마·blob SHA-256·크기), 경로 대응·이름 보정, 위상 정렬(SCC), 손으로 만든 묶음 fixture와 변조 시험 — 에셋 DB에 쓰지 않는 부분. **구현**(2026-11-21, 10.4절) | MA1(원본 메시 형태 확인용), 엔진 플러그인 빌드 지원(BuildTargets 3.6절) |
-| UX1b | UE | 플러그인 골격(11절 — Editor 모듈, commandlet `-run=RocksExport`, 메뉴, 묶음 writer, 자체 SHA-256, 숫자 서식, UPROPERTY 덤프, 닫힘, redirector)과 에셋 JSON 공통부. 설치판 엔진에 대고 `RunUAT BuildPlugin`으로 빌드하고, 엔진 콘텐츠를 내보낸 묶음을 UX1a 리더로 읽어 왕복 검증한다(에셋 종류별 본문은 UX2 이후) | UX1a, UE 5.8 Launcher 설치판(C:) |
+| UX1b | UE | 플러그인 골격(11절 — Editor 모듈, commandlet `-run=RocksExport`, 메뉴, 묶음 writer, 자체 SHA-256, 숫자 서식, UPROPERTY 덤프, 닫힘, redirector)과 에셋 JSON 공통부. 설치판 엔진에 대고 `RunUAT BuildPlugin`으로 빌드하고, 엔진 콘텐츠를 내보낸 묶음을 UX1a 리더로 읽어 왕복 검증한다(에셋 종류별 본문은 UX2 이후). **구현**(2026-11-22, 11.7절) | UX1a, UE 5.8 Launcher 설치판(C:) |
 | UX1c | Rocks | 임포트 프레임워크 연결, 기존 에셋 조회 `ExchangeExistingAssets`(태그 `UnrealExchange.ObjectPath`) 구현, `--only` 닫힘, Commandlet 명령 `asset-import-unreal` 등록 | UX1b, A2f(AssetDatabase 임포트 프레임워크) |
-| UX2 | 둘 다 | 텍스처 추출·임포트(4절) | UX1b(추출), UX1c·A5(임포트) |
-| UX3 | 둘 다 | 정적 메시 추출(`source`·`prepared`·생성 LOD·충돌)·임포트 | UX1b(추출), UX1c·MeshAnimationAssets MA2b–MA3 |
-| UX4 | 둘 다 | 머티리얼·인스턴스·함수·컬렉션 추출, 옛 출력 핀 그래프 번역 표 1차, 파라미터 병합, 대체 규칙 3번 | UX2, MaterialSystem MS3·MS6 |
+| UX2a | UE | 텍스처 추출(4절 — 원본 mip 사슬 blob, 형식·감마·손실 원본 표시, 설정 덤프). Rocks 리더 왕복(묶음·blob 검사)과 UE 자기 시험(blob과 `FTextureSource` 원본 대조)으로 검증한다. **구현**(2026-11-22, 4.5절) | UX1b |
+| UX2b | Rocks | 텍스처 임포트(4.2절 형식 대응, 4.3절 `LossySource`·`--allow-lossy-origin`, 4.4절 설정 대조) | UX2a, UX1c, A5 |
+| UX3a | UE | 정적 메시 추출(5절 — `source`·`prepared`·생성 LOD·충돌, 5.2절 `MeshSource` 기록). Rocks 리더 왕복과 MA1 `MeshSource` 적재·검증으로 확인한다. **구현**(2026-11-22, 5.4절) | UX1b |
+| UX3b | Rocks | 정적 메시 임포트(5.1·5.3절 모드, `bakedSource`) | UX3a, UX1c, MeshAnimationAssets MA2b–MA3 |
+| UX4 | 둘 다 | 머티리얼·인스턴스·함수·컬렉션 추출, 옛 출력 핀 그래프 번역 표 1차, 파라미터 병합, 대체 규칙 3번 | UX2b, MaterialSystem MS3·MS6 |
 | UX5 | 둘 다 | Substrate 그래프 번역(8.3절) | UX4 |
 | UX6 | 둘 다 | 굽기 대체(8.4절)와 "구운 표면" 내장 머티리얼, 대체 규칙 2번 | UX4 |
-| UX7 | 둘 다 | 스켈레톤·스킨 메시(6절, 생성 LOD 복원 포함) | UX3, MA4b–MA5 |
+| UX7 | 둘 다 | 스켈레톤·스킨 메시(6절, 생성 LOD 복원 포함) | UX3b, MA4b–MA5 |
 | UX8 | 둘 다 | 애니메이션 클립(7절) | UX7, MA6 |
 
 ## 15. 결정 사항
@@ -487,7 +550,7 @@ ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으�
 | 항목 | 확인 시점 |
 |---|---|
 | UE가 같은 이름 파라미터 노드의 기본값이 다를 때 쓰는 값 | UX4 |
-| 정적 메시 정점 버퍼 생성의 퇴화·용접 임계값 상수 값(Rocks 상수로 옮김) | MA2·UX3 |
+| 정적 메시 정점 버퍼 생성의 퇴화·용접 임계값 상수 값(Rocks 상수로 옮김) | MA2·UX3b |
 
 ## 17. 개정 이력
 
@@ -499,6 +562,9 @@ ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으�
 - 개정 6(2026-11-21): UX1a를 구현했다(엔진 플러그인 빌드 BS9a–BS9d 뒤). 구현에서 정한 점을 10.4절에 적었다. 형식 v1을 좁혔다: `assets`·`redirects`·`dependencies` 정렬과 유일성, 의존 항목의 대상 `class`, redirect 사슬 금지, `file` 이름 규칙(3.4·3.5절). 리더가 내는 진단 8개를 `AssetDiagnosticCode`에 등록했다(AssetSystem 4.6절).
 - 개정 7(2026-11-21): UX1a 플러그인 Private coverage를 줄 93.96%·분기 91.36%에서 100%·100%로 올렸다. 닿을 수 있는 오류 분기는 실패 주입 시험을 더했고 실패할 수 없는 결과 검사는 구조를 바꿔 없앴다(10.4절 끝 문단).
 - 개정 8(2026-11-22): UX1b를 UE 쪽(플러그인 골격·writer·리더 왕복 검증)과 UX1c(Rocks 임포트 연결·기존 에셋 조회·Commandlet 명령)로 나눴다. UX2 이후 추출 쪽은 Rocks 임포트보다 먼저 할 수 있다고 적었다. UE 설치판 받음(2026-11-22).
+- 개정 9(2026-11-22): UX1b를 구현했다(`Extras/UnrealExport/RocksExport/` — Editor 모듈, commandlet `-run=RocksExport`, 메뉴, 묶음 writer, SHA-256, 숫자 서식, UPROPERTY 덤프, 닫힘·redirector, 에셋 JSON 공통부, 자기 시험). 구현에서 정한 점을 11.7절에 적었다: UX1b 의존 목록은 AssetRegistry 패키지 의존(3.5절에 더함), 범위 밖 선택·클래스 대응, 에셋 여럿인 패키지는 내보내지 않음(형식 v1 한계), 원자적 쓰기, 덤프 세부, 플러그인 진단 코드, `engineCommit`은 changelist. 모듈 의존은 쓰는 단계에서 더한다(11.1절). 엔진 콘텐츠(`/Engine/BasicShapes/...`)와 redirector가 있는 시험 콘텐츠를 내보내 Rocks 리더(EngineTests 선택 시험 `UnrealExchange_ExternalBundle`)로 읽었다.
+- 개정 10(2026-11-22): UX2·UX3을 UE 쪽 추출(UX2a·UX3a, 선행 UX1b)과 Rocks 쪽 임포트(UX2b·UX3b)로 나눴다(사용자 지시 "진행 가능한거부터"). UX4·UX7 선행을 임포트 단계로 고쳤다. UX2a(텍스처 추출)를 구현하고 정한 점을 4.5절에 적었다: `data.source` 스키마, mip·층별 blob 배치, `settings` 덤프에서 `Source` 제외, 손실 원본은 표시만, 본문 조각 조립.
+- 개정 11(2026-11-22): UX3a(정적 메시 추출)를 구현하고 정한 점을 5.4절에 적었다: `data.lods`·`collision` 스키마(LOD 설정은 `settings.SourceModels`), MeshSource 기록 형식(위상 blob 7개·속성 배치·요소·타입 이름), UE 속성 대응·보존 규칙(UE 위치 이름 `"Position "`), `prepared` 사본 처리, 생성 LOD `baked` 변환, BodySetup 덤프, 진단, 자기 시험과 Rocks 쪽 MeshSource 적재·검증·빌드 확인.
 
 ## 18. 교차 검증 기록(개정 2)
 

@@ -6,6 +6,7 @@
 #include <Platform/FloatingPointEnvironment.h>
 #include <Platform/Memory.h>
 #include <Platform/Thread.h>
+#include <TestSupport/NFailAllocator.h>
 #include <TestSupport/Test.h>
 #include <stdio.h>
 #include <string.h>
@@ -593,6 +594,47 @@ TEST(Json_WriterRejectsInvalidUse) {
 
         CHECK(ok);
     }
+}
+
+// 첫 오류: 한 번 실패하면 이후 호출과 Finish가 그 첫 오류로 실패한다(할당 실패는 OutOfMemory —
+// 중간 결과를 보지 않고 Finish만 봐도 원인을 안다). 잘못된 사용 뒤에는 InvalidArgument다.
+TEST(Json_WriterKeepsFirstError) {
+    SystemAllocator allocator;
+    test::NFailAllocator failing(allocator);
+    uint32 failures = 0;
+    for (uint64 attempt = 1;; ++attempt) {
+        StringBuilder<8> text(failing);
+        JsonWriter writer(text);
+        failing.FailOnAttempt(attempt);
+        (void)writer.BeginObject();
+        (void)writer.Key("name");
+        (void)writer.String("a value long enough to grow the builder past its inline bytes");
+        (void)writer.Key("list");
+        (void)writer.BeginArray();
+        (void)writer.Int64(1);
+        (void)writer.EndArray();
+        (void)writer.EndObject();
+        auto finished = writer.Finish();
+        const bool triggered = failing.Attempts() >= attempt;
+        failing.DisableFailure();
+        if (!triggered) {
+            CHECK(finished);
+            break;
+        }
+
+        CHECK(!finished && finished.Error() == ErrorCode::OutOfMemory);
+        auto after = writer.Null();
+        CHECK(!after && after.Error() == ErrorCode::OutOfMemory);
+        ++failures;
+    }
+
+    CHECK(failures > 0);
+    StringBuilder<> text(allocator);
+    JsonWriter misuse(text);
+    REQUIRE(misuse.BeginArray());
+    auto wrong = misuse.EndObject();
+    auto finished = misuse.Finish();
+    CHECK(!wrong && !finished && finished.Error() == ErrorCode::InvalidArgument);
 }
 
 TEST(Json_WriterEscapesNumbersAndAliasing) {

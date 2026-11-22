@@ -53,6 +53,8 @@ struct MemoryFaults {
     const char* readSuffix = nullptr;
     // Delete·Stat의 실패다(Stat는 statPath가 비어 있지 않으면 그 Content 상대 경로에만).
     platform::FileStatus remove{};
+    // Move의 실패다(7.1절 17 A2e2 — 이동 시험).
+    platform::FileStatus move{};
     platform::FileStatus stat{};
     const char* statPath = nullptr;
 };
@@ -436,6 +438,88 @@ public:
         return faults.replace;
     }
 
+    // 같은 파일 시스템 안 이동이다(파일·디렉터리 — 디렉터리면 하위 노드 경로를 모두 바꾼다).
+    // faults.move가 실패 상태면 아무것도 바꾸지 않고 그것을 돌려준다. 원본이 없으면 NotFound,
+    // 대상이 있으면 AlreadyExists(디렉터리는 replaceExisting이어도), 대상 부모가 디렉터리가 아니면
+    // NotFound다. 같은 경로면 아무것도 하지 않는다.
+    platform::FileStatus Move(const char* from, usize fromBytes, const char* to, usize toBytes,
+                              bool replaceExisting) noexcept override {
+        if (!faults.move) {
+            return faults.move;
+        }
+
+        const StringView source(from, fromBytes);
+        const StringView target(to, toBytes);
+        Node* node = Find(source);
+        if (node == nullptr) {
+            return MemoryMissing;
+        }
+
+        if (source == target) {
+            return {};
+        }
+
+        Node* existing = Find(target);
+        if (existing != nullptr &&
+            (!replaceExisting || existing->type == platform::FileType::Directory ||
+             node->type == platform::FileType::Directory)) {
+            return MemoryExists;
+        }
+
+        if (!ParentIsDirectory(target)) {
+            return MemoryMissing;
+        }
+
+        if (existing != nullptr) {
+            Remove(RelativeOf(target));
+            node = Find(source);
+        }
+
+        // 원본과 그 아래 노드의 경로 앞부분을 바꾼다(이름은 마지막 구성 요소).
+        Array<char> fromPath(*allocator_);
+        if (!fromPath.TryAppend(Span<const char>(from, fromBytes))) {
+            return MemoryError;
+        }
+
+        for (Node& each : nodes_) {
+            const StringView path(each.path.Data(), each.path.Size());
+            const StringView prefix(fromPath.Data(), fromPath.Size());
+            const bool self = path == prefix;
+            const bool below = path.ByteCount() > prefix.ByteCount() &&
+                               path.StartsWith(prefix, StringComparison::CaseSensitive) &&
+                               path.Data()[prefix.ByteCount()] == '/';
+            if (!self && !below) {
+                continue;
+            }
+
+            Array<char> moved(*allocator_);
+            if (!moved.TryAppend(Span<const char>(to, toBytes)) ||
+                !moved.TryAppend(Span<const char>(path.Data() + prefix.ByteCount(),
+                                                  path.ByteCount() - prefix.ByteCount()))) {
+                return MemoryError;
+            }
+
+            each.path = rocks::Move(moved);
+            if (self) {
+                const StringView relative = RelativeOf(target);
+                usize slash = relative.ByteCount();
+                while (slash > 0 && relative.Data()[slash - 1] != '/') {
+                    --slash;
+                }
+
+                each.name.Clear();
+                if (!each.name.TryAppend(
+                        Span<const char>(relative.Data() + slash, relative.ByteCount() - slash)) ||
+                    !each.name.TryPushBack('\0')) {
+                    return MemoryError;
+                }
+            }
+        }
+
+        ++moves;
+        return {};
+    }
+
     platform::FileStatus EnumerateDirectory(const char* path, usize pathBytes,
                                             platform::DirectoryVisitor visitor,
                                             void* context) noexcept override {
@@ -485,6 +569,7 @@ public:
     uint32 opens = 0;
     uint32 deletes = 0;
     uint32 replaces = 0;
+    uint32 moves = 0;
 
 private:
     bool Add(StringView relative, platform::FileType type, bool link, Span<const uint8> bytes,

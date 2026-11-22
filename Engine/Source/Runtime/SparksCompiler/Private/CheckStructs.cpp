@@ -338,4 +338,271 @@ void TypeChecker::AnalyzeStructs(bool cycles) noexcept {
     }
 }
 
+void TypeChecker::CheckDefaultCycles() noexcept {
+    // 간선: struct S의 필드 초기값 안의 struct T 생성 식(`T(...)` — 배열·Map 리터럴 안 포함). S와
+    // T가 같은 강한 연결 묶음이면(자기 간선 포함) 그 생성 식에 S0429다. 다만 묶음의 간선이 모두
+    // 필드 초기값 전체인 생성(값 필드를 채우는 것)이면 값 순환이라 S0426이 이미 알리므로 내지
+    // 않는다(연쇄 방지). 묶음은 반복형 Kosaraju로 찾는다(재귀 없음).
+    Compilation& c = compilation_;
+    const uint32 symbolCount = static_cast<uint32>(c.symbols_.Size());
+    Array<uint32> local(allocator_);
+    Array<uint32> structs(allocator_);
+    if (auto resized = local.TryResize(symbolCount); !resized) {
+        binder_.error_ = resized.Error();
+        return;
+    }
+
+    for (uint32 id = 0; id < symbolCount; ++id) {
+        local[id] = NoLocalIndex;
+        if (c.symbols_[id].kind == SymbolKind::Struct && c.symbols_[id].node != NoNode &&
+            c.symbols_[id].module < c.modules_.Size()) {
+            local[id] = static_cast<uint32>(structs.Size());
+            if (!structs.TryPushBack(id)) {
+                binder_.error_ = ErrorCode::OutOfMemory;
+                return;
+            }
+        }
+    }
+
+    const uint32 count = static_cast<uint32>(structs.Size());
+    Array<uint32> firstEdge(allocator_);
+    Array<StructEdge> edges(allocator_); // target, field = 생성 식 노드
+    Array<uint8> direct(allocator_);     // 그 생성 식이 필드 초기값 전체(괄호 안 포함)인지
+    Array<uint32> pending(allocator_);
+    for (uint32 index = 0; index < count && binder_.error_ == ErrorCode::None; ++index) {
+        if (!firstEdge.TryPushBack(static_cast<uint32>(edges.Size()))) {
+            binder_.error_ = ErrorCode::OutOfMemory;
+            return;
+        }
+
+        const Symbol& entry = c.symbols_[structs[index]];
+        const SyntaxTree& tree = c.trees_[entry.module];
+        const uint32 members = tree.Child(entry.node, 3);
+        if (members == NoNode || tree.Node(members).kind != SyntaxKind::List) {
+            continue;
+        }
+
+        for (const uint32 member : tree.Children(members)) {
+            const uint32 initializer =
+                tree.Node(member).kind == SyntaxKind::Field ? tree.Child(member, 4) : NoNode;
+            if (initializer == NoNode) {
+                continue;
+            }
+
+            pending.Clear();
+            if (!pending.TryPushBack(initializer)) {
+                binder_.error_ = ErrorCode::OutOfMemory;
+                return;
+            }
+
+            while (!pending.IsEmpty()) {
+                const uint32 node = pending[pending.Size() - 1];
+                static_cast<void>(pending.TryResize(pending.Size() - 1));
+                if (tree.Node(node).kind == SyntaxKind::Call) {
+                    const uint32 callee = c.NodeSymbol(entry.module, tree.Child(node, 0));
+                    uint32 whole = initializer;
+                    while (whole != NoNode && tree.Node(whole).kind == SyntaxKind::Parenthesized) {
+                        whole = tree.Child(whole, 0);
+                    }
+
+                    if (callee != NoSymbol && callee < symbolCount &&
+                        local[callee] != NoLocalIndex &&
+                        (!edges.TryPushBack(StructEdge{local[callee], node}) ||
+                         !direct.TryPushBack(node == whole ? 1 : 0))) {
+                        binder_.error_ = ErrorCode::OutOfMemory;
+                        return;
+                    }
+                }
+
+                for (const uint32 child : tree.Children(node)) {
+                    if (child != NoNode && !pending.TryPushBack(child)) {
+                        binder_.error_ = ErrorCode::OutOfMemory;
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    if (!firstEdge.TryPushBack(static_cast<uint32>(edges.Size()))) {
+        binder_.error_ = ErrorCode::OutOfMemory;
+        return;
+    }
+
+    if (edges.IsEmpty()) {
+        return;
+    }
+
+    // 역 간선(CSR).
+    Array<uint32> reverseFirst(allocator_);
+    Array<uint32> reverse(allocator_);
+    if (!reverseFirst.TryResize(count + 1) || !reverse.TryResize(edges.Size())) {
+        binder_.error_ = ErrorCode::OutOfMemory;
+        return;
+    }
+
+    for (uint32 at = 0; at <= count; ++at) {
+        reverseFirst[at] = 0;
+    }
+
+    for (const StructEdge& edge : edges) {
+        ++reverseFirst[edge.target + 1];
+    }
+
+    for (uint32 at = 0; at < count; ++at) {
+        reverseFirst[at + 1] += reverseFirst[at];
+    }
+
+    {
+        Array<uint32> cursor(allocator_);
+        if (!cursor.TryResize(count)) {
+            binder_.error_ = ErrorCode::OutOfMemory;
+            return;
+        }
+
+        for (uint32 at = 0; at < count; ++at) {
+            cursor[at] = reverseFirst[at];
+        }
+
+        for (uint32 source = 0; source < count; ++source) {
+            for (uint32 at = firstEdge[source]; at < firstEdge[source + 1]; ++at) {
+                reverse[cursor[edges[at].target]++] = source;
+            }
+        }
+    }
+
+    // 1) 끝난 순서(반복 DFS — 프레임은 (노드, 다음 간선)).
+    Array<uint32> finished(allocator_);
+    Array<uint8> seen(allocator_);
+    Array<TarjanFrame> frames(allocator_);
+    if (!seen.TryResize(count)) {
+        binder_.error_ = ErrorCode::OutOfMemory;
+        return;
+    }
+
+    for (uint32 at = 0; at < count; ++at) {
+        seen[at] = 0;
+    }
+
+    for (uint32 root = 0; root < count; ++root) {
+        if (seen[root] != 0) {
+            continue;
+        }
+
+        seen[root] = 1;
+        if (!frames.TryPushBack(TarjanFrame{root, firstEdge[root]})) {
+            binder_.error_ = ErrorCode::OutOfMemory;
+            return;
+        }
+
+        while (!frames.IsEmpty()) {
+            TarjanFrame& frame = frames[frames.Size() - 1];
+            if (frame.edge < firstEdge[frame.node + 1]) {
+                const uint32 next = edges[frame.edge++].target;
+                if (seen[next] == 0) {
+                    seen[next] = 1;
+                    if (!frames.TryPushBack(TarjanFrame{next, firstEdge[next]})) {
+                        binder_.error_ = ErrorCode::OutOfMemory;
+                        return;
+                    }
+                }
+
+                continue;
+            }
+
+            if (!finished.TryPushBack(frame.node)) {
+                binder_.error_ = ErrorCode::OutOfMemory;
+                return;
+            }
+
+            static_cast<void>(frames.TryResize(frames.Size() - 1));
+        }
+    }
+
+    // 2) 역 그래프를 끝난 순서의 거꾸로 돌며 묶음 번호를 준다.
+    Array<uint32> component(allocator_);
+    if (!component.TryResize(count)) {
+        binder_.error_ = ErrorCode::OutOfMemory;
+        return;
+    }
+
+    for (uint32 at = 0; at < count; ++at) {
+        component[at] = NoLocalIndex;
+    }
+
+    uint32 components = 0;
+    for (usize order = finished.Size(); order > 0; --order) {
+        const uint32 root = finished[order - 1];
+        if (component[root] != NoLocalIndex) {
+            continue;
+        }
+
+        pending.Clear();
+        component[root] = components;
+        if (!pending.TryPushBack(root)) {
+            binder_.error_ = ErrorCode::OutOfMemory;
+            return;
+        }
+
+        while (!pending.IsEmpty()) {
+            const uint32 node = pending[pending.Size() - 1];
+            static_cast<void>(pending.TryResize(pending.Size() - 1));
+            for (uint32 at = reverseFirst[node]; at < reverseFirst[node + 1]; ++at) {
+                if (component[reverse[at]] == NoLocalIndex) {
+                    component[reverse[at]] = components;
+                    if (!pending.TryPushBack(reverse[at])) {
+                        binder_.error_ = ErrorCode::OutOfMemory;
+                        return;
+                    }
+                }
+            }
+        }
+
+        ++components;
+    }
+
+    // 3) 값 필드 생성만이 아닌(컨테이너 안 등) 간선이 있는 묶음을 고른다.
+    Array<uint8> reported(allocator_);
+    if (!reported.TryResize(components)) {
+        binder_.error_ = ErrorCode::OutOfMemory;
+        return;
+    }
+
+    for (uint32 at = 0; at < components; ++at) {
+        reported[at] = 0;
+    }
+
+    for (uint32 source = 0; source < count; ++source) {
+        for (uint32 at = firstEdge[source]; at < firstEdge[source + 1]; ++at) {
+            if (component[edges[at].target] == component[source] && direct[at] == 0) {
+                reported[component[source]] = 1;
+            }
+        }
+    }
+
+    // 4) 그 묶음 안의 생성 간선마다 S0429(선언 순).
+    for (uint32 source = 0; source < count && binder_.error_ == ErrorCode::None; ++source) {
+        const Symbol& owner = c.symbols_[structs[source]];
+        for (uint32 at = firstEdge[source]; at < firstEdge[source + 1]; ++at) {
+            const StructEdge& edge = edges[at];
+            if (component[edge.target] != component[source] || reported[component[source]] == 0) {
+                continue;
+            }
+
+            CheckContext context;
+            context.module = owner.module;
+            StringBuilder<CompilationMessageInlineBytes> message(allocator_);
+            message.AppendFormat("The default value of struct '{}' constructs '{}', which leads "
+                                 "back to '{}' without end.",
+                                 owner.name, c.symbols_[structs[edge.target]].name, owner.name);
+            if (binder_.Succeeded(message)) {
+                Report(context, DiagnosticCode::StructDefaultCycle, edge.field, message.View(),
+                       "Field initializers run every time the struct is created, so a struct "
+                       "whose initializers create it again has no finite default.",
+                       "Start the field empty (for example '[]') and fill it in a function.");
+            }
+        }
+    }
+}
+
 } // namespace rocks::sparks::detail

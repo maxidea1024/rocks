@@ -481,16 +481,27 @@ inline Result<void> WriteValueWire(ArchiveWriter& out, FieldEncodeContext& conte
             return required;
         }
 
-        if (auto written = out.WriteGuid(value.guid); !written) {
-            return written;
+        // null이 아닌 값은 hook이 asset을 바꿀 수 있다(패키지 복제 — 자기 패키지 값을 사본 id로).
+        AssetId written = asset;
+        if (!isNull) {
+            auto substituted = context.SubstituteSoftReference(asset, text, type.type);
+            if (!substituted) {
+                return Result<void>::Failure(substituted.Error());
+            }
+
+            written = substituted.Value();
         }
 
-        if (auto written = out.WriteString(text); !written) {
-            return written;
+        if (auto guid = out.WriteGuid(written.value); !guid) {
+            return guid;
+        }
+
+        if (auto path = out.WriteString(text); !path) {
+            return path;
         }
 
         if (!isNull && !context.IsRequiredCheck()) {
-            return context.CollectSoftReference(asset, text, type.type);
+            return context.CollectSoftReference(written, text, type.type);
         }
 
         return Result<void>::Success();

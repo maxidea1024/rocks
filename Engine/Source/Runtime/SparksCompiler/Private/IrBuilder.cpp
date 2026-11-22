@@ -94,10 +94,14 @@ const char* IrOpName(IrOp op) noexcept {
         return "EMIT";
     case IrOp::Await:
         return "AWAIT";
+    case IrOp::WaitEvent:
+        return "WAITEV";
     case IrOp::Try:
         return "TRY";
     case IrOp::ReturnError:
         return "RETURN.ERROR";
+    case IrOp::EndExecution:
+        return "END.EXECUTION";
     case IrOp::New:
         return "NEW";
     case IrOp::Concat:
@@ -229,7 +233,8 @@ IrLayout IrBuilder::Layout(TypeChecker& checker, uint32 type) noexcept {
 IrBuilder::IrBuilder(TypeChecker& checker, IrFunction& function) noexcept
     : checker_(checker), c_(checker.compilation_), function_(function),
       tree_(&checker.compilation_.trees_[function.module]), module_(function.module),
-      locals_(checker.allocator_), held_(checker.allocator_), loops_(checker.allocator_) {
+      locals_(checker.allocator_), held_(checker.allocator_), loops_(checker.allocator_),
+      defaulting_(checker.allocator_) {
 }
 
 bool IrBuilder::Failed() const noexcept {
@@ -273,7 +278,7 @@ bool IrBuilder::Terminated() const noexcept {
     const IrOp last = function_.instructions[block.first + block.count - 1].op;
     return last == IrOp::Jump || last == IrOp::Branch || last == IrOp::Switch ||
            last == IrOp::Return || last == IrOp::Await || last == IrOp::Fault ||
-           last == IrOp::Try || last == IrOp::ReturnError;
+           last == IrOp::Try || last == IrOp::ReturnError || last == IrOp::EndExecution;
 }
 
 void IrBuilder::Add(const IrInstruction& instruction) noexcept {
@@ -414,7 +419,7 @@ bool IrBuilder::Validate() const noexcept {
         const IrOp last = f.instructions[block.first + block.count - 1].op;
         if (last != IrOp::Jump && last != IrOp::Branch && last != IrOp::Switch &&
             last != IrOp::Return && last != IrOp::Await && last != IrOp::Fault &&
-            last != IrOp::Try && last != IrOp::ReturnError) {
+            last != IrOp::Try && last != IrOp::ReturnError && last != IrOp::EndExecution) {
             return false;
         }
     }
@@ -466,6 +471,7 @@ bool IrBuilder::Validate() const noexcept {
             break;
         case IrOp::Return:
         case IrOp::ReturnError:
+        case IrOp::EndExecution:
             ok = optional(i.b);
             break;
         case IrOp::GetField:
@@ -487,6 +493,9 @@ bool IrBuilder::Validate() const noexcept {
             break;
         case IrOp::Await:
             ok = optional(i.a) && optional(i.b) && target(i.c);
+            break;
+        case IrOp::WaitEvent:
+            ok = isRegister(i.a) && isRegister(i.b);
             break;
         case IrOp::Try:
             ok = optional(i.a) && isRegister(i.b) && target(i.c) && target(i.extra);

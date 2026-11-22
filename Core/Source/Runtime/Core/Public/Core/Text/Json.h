@@ -397,7 +397,8 @@ struct JsonWriterOptions {
 // 오류: 구조 오류(키 없이 값, 같은 객체의 중복 키 — 자기 reader가 거부한다, 닫지 않은 컨테이너,
 // Finish 뒤 호출 등)·NaN·Inf(Json5로 읽은 문서 값 포함, Preserve도)·잘못된 UTF-8·무효 JsonValue는
 // InvalidArgument, maxDepth 초과는 CapacityExceeded, builder·색인 할당 실패는 OutOfMemory. 한 번
-// 실패하면 이후 호출은 모두 실패하고 builder에는 실패 전까지 쓴 내용이 남는다(그 결과는 버린다).
+// 실패하면 이후 호출은 모두 그 첫 오류로 실패하고(Finish 포함 — 중간 결과를 보지 않고 Finish만 봐도
+// 첫 오류를 얻는다) builder에는 실패 전까지 쓴 내용이 남는다(그 결과는 버린다).
 // 복사하지 않는다.
 class ROCKS_CORE_API JsonWriter final {
 public:
@@ -498,6 +499,8 @@ private:
     bool rootWritten_ = false;
     bool finished_ = false;
     bool failed_ = false;
+    // 첫 실패의 오류다(이후 호출과 Finish가 이것으로 실패한다).
+    ErrorCode firstError_ = ErrorCode::None;
 };
 
 } // namespace rocks

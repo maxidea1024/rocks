@@ -64,13 +64,17 @@ void JsonWriter::PopFrame() noexcept {
 }
 
 Result<void> JsonWriter::Fail(ErrorCode code) noexcept {
+    if (!failed_) {
+        firstError_ = code;
+    }
+
     failed_ = true;
     return Result<void>::Failure(code);
 }
 
 Result<void> JsonWriter::Check(Result<void> result) noexcept {
     if (!result) {
-        failed_ = true;
+        return Fail(result.Error());
     }
 
     return result;
@@ -90,7 +94,12 @@ Result<void> JsonWriter::WriteIndent(usize depth) noexcept {
 
 // 값 앞의 구분자(쉼표·줄바꿈·들여쓰기)를 쓴다.
 Result<void> JsonWriter::BeforeValue() noexcept {
-    if (failed_ || finished_) {
+    // 한 번 실패한 뒤에는 첫 오류로 실패한다(할당 실패가 InvalidArgument로 바뀌지 않게).
+    if (failed_) {
+        return Result<void>::Failure(firstError_);
+    }
+
+    if (finished_) {
         return Fail(ErrorCode::InvalidArgument);
     }
 
@@ -234,8 +243,11 @@ Result<void> JsonWriter::BeginContainer(bool object) noexcept {
 }
 
 Result<void> JsonWriter::EndContainer(bool object) noexcept {
-    if (failed_ || finished_ || FrameCount() == 0 || TopFrame().object != object ||
-        expectingValue_) {
+    if (failed_) {
+        return Result<void>::Failure(firstError_);
+    }
+
+    if (finished_ || FrameCount() == 0 || TopFrame().object != object || expectingValue_) {
         return Fail(ErrorCode::InvalidArgument);
     }
 
@@ -271,7 +283,11 @@ Result<void> JsonWriter::EndArray() noexcept {
 }
 
 Result<void> JsonWriter::Key(StringView key) noexcept {
-    if (failed_ || finished_ || FrameCount() == 0 || !TopFrame().object || expectingValue_) {
+    if (failed_) {
+        return Result<void>::Failure(firstError_);
+    }
+
+    if (finished_ || FrameCount() == 0 || !TopFrame().object || expectingValue_) {
         return Fail(ErrorCode::InvalidArgument);
     }
 
@@ -540,7 +556,11 @@ Result<void> JsonWriter::Value(JsonValue value) noexcept {
 }
 
 Result<void> JsonWriter::Finish() noexcept {
-    if (failed_ || finished_ || FrameCount() != 0 || !rootWritten_) {
+    if (failed_) {
+        return Result<void>::Failure(firstError_);
+    }
+
+    if (finished_ || FrameCount() != 0 || !rootWritten_) {
         return Fail(ErrorCode::InvalidArgument);
     }
 

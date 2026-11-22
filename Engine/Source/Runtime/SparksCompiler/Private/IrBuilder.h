@@ -24,7 +24,7 @@ public:
     // function.module·node·symbol·owner를 채운 함수를 받는다.
     IrBuilder(TypeChecker& checker, IrFunction& function) noexcept;
 
-    // function.node의 본문을 내린다. 할당 실패면 false(오류는 binder에).
+    // function.node의 본문을 내린다(class 노드면 초기화 함수). 할당 실패면 false(오류는 binder에).
     bool Build() noexcept;
 
     // 타입의 slot 배치다.
@@ -36,6 +36,9 @@ public:
 
 private:
     bool Failed() const noexcept;
+    // class 초기화 함수 `<Class>.$init`(SparksRuntime 2.1절): 자기 필드의 초기값(없으면 0·null이
+    // 아닌 0 값)을 선언 순으로 this에 쓴다.
+    bool BuildInitializer() noexcept;
     void Fail(ErrorCode error) noexcept;
 
     // ---- 블록·명령·값(IrBuilder.cpp) ----
@@ -50,11 +53,21 @@ private:
     uint32 NewValue(uint32 type, StringView name = StringView()) noexcept;
     // 대기 handle(Ref, 타입 NoType — 덤프는 `wait`)을 잡는다.
     uint32 NewWait() noexcept;
+    // callee가 frame을 쌓아 부르는 Sparks async 함수(최상위·메서드·interface)인지다.
+    bool IsDirectAwaitCallee(uint32 callee) const noexcept;
+    // 이벤트 식이면 그 이벤트 대기 handle(WAITEV), 아니면 NoIrRegister.
+    uint32 LowerEventWait(uint32 node) noexcept;
     uint32 SlotCount(uint32 first) const noexcept;
     // 묶음 to ← from(slot마다 Move).
     void MoveValue(uint32 to, uint32 from, uint32 node) noexcept;
     // 묶음을 없음(Scalar는 모두 0, Ref·Buf는 null)으로 둔다.
     void LoadNone(uint32 value, uint32 node) noexcept;
+    // struct 생성에서 빠진 필드의 값이다(SparksBytecode 5절 TYPE 구역): 초기값(그 필드의 모듈 구문
+    // 트리로 내리고 원문 위치는 생성 자리 node)이나 0 값. 0 slot·null로 충분하면 NoIrRegister.
+    uint32 LowerFieldDefault(uint32 field, uint32 node) noexcept;
+    // 타입의 0 값(SL §3.2)이다: 문자열 `""`, 빈 컨테이너, struct 기본값, quat·mat4·Transform
+    // 단위값. 0 slot·null로 충분한 타입(숫자·bool·enum·`T?`·그 밖의 수학 타입)은 NoIrRegister.
+    uint32 LowerZero(uint32 type, uint32 node) noexcept;
     // 지역 이름(인자·지역·binding)의 첫 레지스터다.
     uint32 LocalRegister(uint32 symbol) const noexcept;
     void BindLocal(uint32 symbol, uint32 first) noexcept;
@@ -112,6 +125,8 @@ private:
     uint32 LowerChainedAwait(uint32 node, uint32 call) noexcept;
     // 대기 피연산자가 재개 때 돌려주는 값의 타입이다.
     uint32 AwaitResultType(uint32 operandNode) noexcept;
+    // 본문이 `on Awake`·`on Enable`·`on Start` hook인지다(`try` 실패가 fault인 자리).
+    bool InStartupHook() const noexcept;
     uint32 LowerTry(uint32 node) noexcept;
 
     // ---- 문장(IrStatements.cpp) ----
@@ -164,12 +179,17 @@ private:
     bool overrideSpan_ = false;
     uint32 current_ = NoIrBlock;
     uint32 this_ = NoIrRegister;
+    // `await F()`의 호출 노드(Sparks async 함수): 그 호출은 대기 handle 대신 반환 값을 직접 낸다 —
+    // 호출된 함수 안의 기본 대기가 호출 사슬 전체를 정지한다(SparksRuntime 2.4절).
+    uint32 directAwaitCall_ = NoNode;
     uint32 returnType_ = 0;
     // 지역 이름: (심볼 << 32) | 첫 레지스터. 블록을 떠나면 그 블록의 것을 뗀다(뒤에서부터 찾는다).
     Array<uint64> locals_;
     // 살아 있는 지역 유지 자원의 첫 레지스터(선언 순)다.
     Array<uint32> held_;
     Array<Loop> loops_;
+    // 기본값을 내리는 중인 struct 심볼들이다(S0429가 막는 순환의 방어 — 끝없는 재귀를 막는다).
+    Array<uint32> defaulting_;
 };
 
 } // namespace rocks::sparks::detail

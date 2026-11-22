@@ -123,6 +123,7 @@ enum class DiagnosticCode : uint16 {
     RecursiveStruct = 426,
     InitializerTooDeep = 427,
     ObjectFieldNeedsOptional = 428,
+    StructDefaultCycle = 429,
     IntegerDivision = 501,
     FloatToIntConversion = 502,
     ConstantOverflow = 503,
@@ -180,6 +181,10 @@ enum class DiagnosticCode : uint16 {
     NotReplicable = 1002,
     NetWriteOutsideAuthority = 1003,
     RpcCall = 1004,
+    DataIdLost = 1005,
+    InvalidIdManifest = 1006,
+    IdNameReserved = 1007,
+    IdClaimedTwice = 1008,
     ManifestSyntax = 1101,
     UnknownManifestKey = 1102,
     MissingManifestKey = 1103,
@@ -193,7 +198,8 @@ enum class DiagnosticCode : uint16 {
     PackageFolderConflict = 1111,
     DuplicatePackage = 1112,
     FullProfileOnly = 1113,
-    InvalidBindingSchema = 1120
+    InvalidBindingSchema = 1120,
+    FunctionTooLarge = 1150
 };
 
 // 진단 코드 표기의 숫자 자리 수다("S0412").

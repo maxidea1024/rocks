@@ -1,0 +1,249 @@
+enum Tint {
+    Red,
+    Green,
+    Blue
+}
+
+fn Added(items: Array<int>, value: int): Array<int> {
+    var copy = items;
+    copy.Add(value);
+    return copy;
+}
+
+fn Shared(): string {
+    let first = [1, 2];
+    var second = first;
+    second.Add(3);
+    return "${first.Count} ${second.Count}";
+}
+
+fn Inserted(items: Array<string>, index: int, value: string): Array<string> {
+    var copy = items;
+    copy.Insert(index, value);
+    return copy;
+}
+
+fn RemovedAt(items: Array<string>, index: int): Array<string> {
+    var copy = items;
+    copy.RemoveAt(index);
+    return copy;
+}
+
+fn Cleared(items: Array<string>): Array<string> {
+    var copy = items;
+    copy.Clear();
+    copy.Add("new");
+    return copy;
+}
+
+fn Reversed(items: Array<vec3>): Array<vec3> {
+    var copy = items;
+    copy.Reverse();
+    return copy;
+}
+
+fn Search(items: Array<string>, value: string): string {
+    let at = items.IndexOf(value) ?? -1;
+    return "${items.Contains(value)} ${at}";
+}
+
+fn Removed(items: Array<int>, value: int): string {
+    var copy = items;
+    let removed = copy.Remove(value);
+    return "${removed} ${copy.Count}";
+}
+
+fn SortedInts(items: Array<int>): Array<int> {
+    var copy = items;
+    copy.Sort();
+    return copy;
+}
+
+fn SortedFloats(items: Array<float>): Array<float> {
+    var copy = items;
+    copy.Sort();
+    return copy;
+}
+
+fn SortedWords(items: Array<string>): Array<string> {
+    var copy = items;
+    copy.Sort();
+    return copy;
+}
+
+fn SortedTints(): string {
+    var tints = [Tint.Blue, Tint.Red, Tint.Green, Tint.Red];
+    tints.Sort();
+    var text = "";
+    for (tint in tints) {
+        text = "${text}${tint};";
+    }
+
+    return text;
+}
+
+fn MapOps(scores: Map<string, int>, key: string): string {
+    var copy = scores;
+    let had = copy.ContainsKey(key);
+    let removed = copy.Remove(key);
+    return "${had} ${removed} ${copy.Count} ${scores.Count}";
+}
+
+fn MapKeys(scores: Map<string, int>): Array<string> {
+    return scores.Keys();
+}
+
+fn MapValues(scores: Map<string, int>): Array<int> {
+    return scores.Values();
+}
+
+fn MapCleared(scores: Map<string, int>): Map<string, int> {
+    var copy = scores;
+    copy.Clear();
+    copy["z"] = 26;
+    return copy;
+}
+
+fn Reinserted(): Map<string, int> {
+    var scores: Map<string, int> = ["a": 1, "b": 2, "c": 3];
+    let first = scores.Remove("a");
+    scores["a"] = 4;
+    let second = scores.Remove("c");
+    Assert(first && second, "both keys exist");
+    return scores;
+}
+
+fn SetOps(values: Set<string>, value: string): string {
+    var copy = values;
+    let added = copy.Add(value);
+    let again = copy.Add(value);
+    let has = copy.Contains(value);
+    let removed = copy.Remove(value);
+    return "${added} ${again} ${has} ${removed} ${copy.Count} ${values.Count}";
+}
+
+fn SetCleared(values: Set<int>): Set<int> {
+    var copy = values;
+    copy.Clear();
+    let added = copy.Add(5);
+    Assert(added, "the set is empty");
+    return copy;
+}
+
+fn Rolls(seed: int): Array<int> {
+    var rolls: Array<int> = [];
+    for (i in 0..<5) {
+        rolls.Add(Random.Int(seed, seed + 10 + i));
+    }
+
+    return rolls;
+}
+
+fn RollFloat(): float {
+    return Random.Float(1.0, 2.0);
+}
+
+fn RollEmpty(min: int, max: int): int {
+    return Random.Int(min, max);
+}
+
+fn Coins(p: float): string {
+    return "${Random.Chance(p)} ${Random.Chance(p)}";
+}
+
+fn Checked(n: int): Result<int> {
+    if (n < 0) {
+        return Error.NotFound;
+    }
+
+    return n;
+}
+
+fn Named(text: string): Result<string> {
+    if (text == "") {
+        return Error.InvalidArgument;
+    }
+
+    return text;
+}
+
+fn ScalarParts(n: int): string {
+    let result = Checked(n);
+    let value = result.Value ?? -1;
+    let failed = result.Error == Error.NotFound || result.Error == Error.InvalidArgument;
+    return "${value} ${failed}";
+}
+
+fn BufferParts(text: string): string {
+    let result = Named(text);
+    let value = result.Value ?? "none";
+    let failed = result.Error == Error.NotFound || result.Error == Error.InvalidArgument;
+    return "${value} ${failed}";
+}
+
+fn SortedBytes(items: Array<int8>): Array<int8> {
+    var copy = items;
+    copy.Sort();
+    return copy;
+}
+
+fn SortedWide(items: Array<uint64>): Array<uint64> {
+    var copy = items;
+    copy.Sort();
+    return copy;
+}
+
+fn SortedSingles(items: Array<float32>): Array<float32> {
+    var copy = items;
+    copy.Sort();
+    return copy;
+}
+
+fn SharedMapClear(scores: Map<string, int>): string {
+    var copy = scores;
+    copy.Clear();
+    return "${copy.Count} ${scores.Count}";
+}
+
+fn SharedSetAdd(values: Set<int>): string {
+    var copy = values;
+    let added = copy.Add(99);
+    return "${added} ${copy.Count} ${values.Count}";
+}
+
+fn Many(count: int): int {
+    var items: Array<int> = [];
+    for (i in 0..<count) {
+        items.Add(i);
+    }
+
+    var unique: Set<int> = [];
+    for (item in items) {
+        let added = unique.Add(item % 7);
+        _ = added;
+    }
+
+    return items.Count * 100 + unique.Count;
+}
+
+fn RollWide(): int {
+    return Random.Int(-9223372036854775807 - 1, 9223372036854775807);
+}
+
+fn RollSame(x: float): float {
+    return Random.Float(x, x);
+}
+
+fn RollHuge(): float {
+    return Random.Float(-1.7e308, 1.7e308);
+}
+
+fn Coin(): bool {
+    return Random.Chance(0.5);
+}
+
+fn Wrapped(text: string): string {
+    let result = Named(text);
+    let value = result.Value ?? "none";
+    return value;
+}

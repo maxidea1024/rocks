@@ -21,13 +21,16 @@ dotnet msbuild Rocks.proj /t:Build /p:Configuration=Release /p:RocksTarget=Engin
 
 Visual Studio 솔루션·프로젝트 파일(UE GenerateProjectFiles 대응, [설계](../Docs/Design/ProjectFiles.ko.md)):
 
-- 만들기: 루트의 `GenerateProjectFiles.bat`(탐색기에서 실행해도 된다, 실패하면 멈춘다)이나 `pwsh Build/GenerateProjectFiles.ps1`. 도구를 필요할 때만 빌드한 뒤 루트 `Rocks.slnx`와 `out/ProjectFiles/`를 쓰고 바뀐 파일만 다시 쓴다. 저장소 쪽 리플렉션 생성 헤더가 아직 없으면 어느 타깃을 한 번 빌드하라고 알린다.
+- 만들기: 루트의 `GenerateProjectFiles.bat`(탐색기에서 실행해도 된다, 실패하면 멈춘다)이나 PowerShell 7의 `./GenerateProjectFiles.ps1`(같은 인자, `Build/GenerateProjectFiles.ps1`에 넘긴다). 도구를 필요할 때만 빌드한 뒤 루트 `Rocks.slnx`와 `out/ProjectFiles/`를 쓰고 바뀐 파일만 다시 쓴다. 저장소 쪽 리플렉션 생성 헤더가 아직 없으면 어느 타깃을 한 번 빌드하라고 알린다.
 - 요구: Visual Studio 2026, 구성 요소 "C++ Clang tools for Windows"(`Microsoft.VisualStudio.Component.VC.Llvm.ClangToolset` — IntelliSense가 ClangCL 모드로 돈다), PowerShell 7(`pwsh`).
 - Visual Studio의 빌드·다시 빌드·정리는 `Build/IdeBuild.bat`를 거쳐 `Rocks.Build.Cli build`·`clean`을 부른다. 생성할 때의 clang-cl을 그대로 쓰므로 IDE 빌드 뒤 같은 구성의 `Rocks.proj` 빌드는 0 action이다. 솔루션 빌드는 저장소마다 잠금 하나로 프로젝트를 하나씩 빌드한다.
-- 소스·모듈 규칙·도구 모음이 바뀌면 빌드가 `warning RPF0001`(Visual Studio 오류 목록에 나온다)로 재생성을 알린다. 자동으로 다시 만들지 않는다.
+- 파일 하나 컴파일(Ctrl+F7)은 `build --files <경로>`(게임은 `game --files`)를 부른다: 메타 생성을 맞춘 뒤 그 소스의 논리 명령(IntelliSense와 같은 명령)을 `<출력>/SingleFile/<해시>.obj`로 돌리고, 평소 object·증분 기록은 건드리지 않는다. 헤더는 고를 수 없다.
+- 소스·모듈 규칙·도구 모음이 바뀌면 빌드가 `warning RPF0001`(Visual Studio 오류 목록에도 나온다)로 재생성을 알린다. 저장소 `Directory.Build.rsp`의 `-warnNotAsError:RPF0001` 덕분에 `-warnAsError`에서도 빌드를 실패시키지 않는다. 자동으로 다시 만들지 않는다.
 - 시작 프로젝트는 처음 한 번 고른다("Set as Startup Project" — 솔루션 직렬화기가 항목을 이름순으로 써서 생성기가 정할 수 없다).
 - `Rocks.proj`의 `BootstrapTools`도 같은 잠금과 도구 지문(`Build/Tools.ps1`, `out/dotnet/.rocks-tools.json`)을 쓴다. 그 뒤의 빌드 단계는 잠금 밖이라 터미널 빌드 도중 Visual Studio가 도구 원본 변경으로 도구를 다시 빌드하면 겹칠 수 있다.
 - 루트에 `Rocks.proj`와 `Rocks.slnx`가 함께 있으므로 `dotnet msbuild`·`dotnet build`에는 늘 `Rocks.proj`를 적는다(적지 않으면 MSB1011).
+- 게임 프로젝트: `pwsh <SDK>/Build/GenerateProjectFiles.ps1 -Project <게임> [-Sdk <SDK>]`(엔진 작업 사본의 같은 스크립트도 된다, CLI `projectfiles --project`)가 `<게임>/<이름>.slnx`와 `<게임>/out/ProjectFiles/`를 쓴다. SDK는 게임 빌드처럼 `engineAssociation`·등록부로 고르고, 솔루션 구성은 SDK가 가진 구성이다. 게임 프로젝트 하나(루트에 정의된 타깃), 하위 디렉터리 타깃 프로젝트, SDK 공개 헤더만 담는 `RocksSdk`(빌드 안 함)가 든다. Visual Studio 빌드는 SDK의 `Build/IdeBuild.bat`로 SDK CLI의 `game`·`clean --project`를 부른다. `associate`로 연결을 바꾸면 이미 만든 게임 프로젝트 파일을 다시 만든다.
+- 탐색기 메뉴: `Rocks.Build.Cli shell-register`를 한 번 실행하면 `.rocksproject` 우클릭에 "Generate Visual Studio project files"가 생긴다(HKCU, 관리자 권한 불필요). 메뉴는 등록 SDK 중 엔진 버전이 가장 높은 SDK의 CLI로 생성하고, 프로젝트의 연결이 다른 SDK면 그 SDK의 CLI로 넘긴다. SDK를 지우거나 새로 등록했으면 다시 실행한다. `shell-unregister`로 지운다(다른 프로그램의 `.rocksproject` 연결은 남긴다).
 - VS Code·clangd는 생성하지 않는다. 빌드 출력의 `compile_commands.json`을 `--compile-commands-dir=out/<출력>`으로 주면 된다.
 
 ### 빌드 구성
@@ -106,7 +109,7 @@ public sealed class Physics : EngineModuleRules
 - **Patch**: 데이터 축(패키지 formatVersion·섹션 schemaVersion·타입 스키마·커스텀 버전·클래스 기본값 지문·쿠커 버전)과 공개 API를 바꾸지 않는 수정만 담은 릴리스. 같은 주·부의 모든 패치는 서로의 에디터 패키지를 읽는다(호환 판정은 패치를 보지 않는다).
 - **Minor**: 릴리스 경계 — 데이터 축이나 공개 API가 바뀐 뒤의 첫 릴리스에 올린다(개발 중 변경마다 올리지 않는다). 더 새 부 버전이 저장한 에디터 패키지는 이전 엔진이 `NewerVersion`으로 거부하고, 게임 프로젝트는 `engineVersion`을 새 주·부로 바꿔야 연결된다.
 - **Major**: 1.0 이후에 쓴다.
-- 올릴 때 `Build/Build.version`과 게임 템플릿 `Templates/Game/Foundation/Game.rocksproject`의 `engineVersion`(주·부)을 같은 변경에서 함께 바꾼다(`Rocks.Build.Tests`가 둘의 일치와 파일의 한 줄 정규형을 확인한다).
+- 올릴 때 `Build/Build.version`과 게임 템플릿 `Templates/Game/Foundation/FoundationTemplate.rocksproject`의 `engineVersion`(주·부)을 같은 변경에서 함께 바꾼다(`Rocks.Build.Tests`가 둘의 일치와 파일의 한 줄 정규형을 확인한다).
 - 엔진 버전은 쿠킹 패키지·cookKey·에셋 너겟 키에 들어가지 않는다. 쿠커 출력의 의미가 바뀌면 엔진 버전이 아니라 쿠커 버전을 올린다.
 
 MSBuild는 .NET 도구와 C# 규칙을 빌드하고 단계를 조직한다. `Rocks.Build`가 네이티브 작업 그래프, 입력·출력 해시, 증분 여부, 실패 복구를 담당한다. `Build/Rules/*.Build.cs`는 모듈을, `*.Target.cs`는 실행 대상을 정의한다. 규칙은 신뢰된 프로젝트 코드이며 동적으로 읽는 외부 입력은 명시해야 한다.
@@ -114,9 +117,13 @@ MSBuild는 .NET 도구와 C# 규칙을 빌드하고 단계를 조직한다. `Roc
 ## 설치 SDK와 게임 빌드
 
 ```text
-dotnet msbuild Rocks.proj /t:InstalledSdk /p:SdkDestination=C:/work/rocks-sdk/debug /p:Configuration=Debug
-dotnet msbuild Rocks.proj /t:Game /p:SdkDirectory=C:/work/rocks-sdk/debug /p:GameDirectory=C:/work/my-game /p:Configuration=Debug
+dotnet msbuild Rocks.proj /t:InstalledSdk /p:SdkDestination=C:/work/rocks-sdk/0.1.0
+dotnet msbuild Rocks.proj /t:Game /p:SdkDirectory=C:/work/rocks-sdk/0.1.0 /p:GameDirectory=C:/work/my-game /p:Configuration=Debug
 ```
+
+설치 SDK 하나가 여러 구성을 담는다. 기본은 Debug·Development·Release이고 `/p:SdkConfigurations=Debug+Release`(CLI `sdk --configurations Debug+Release`, 쉼표도 된다)로 고른다 — MSBuild `-p:`는 쉼표·세미콜론을 속성 구분자로 읽으므로 `+`로 잇는다. Asan·Coverage는 적을 때만 들어간다. `/t:InstalledSdk`는 `/p:Configuration`을 쓰지 않는다(Debug가 아니면 경고). 구성마다 엔진을 기본 출력(`out/dotnet-<platform>-<target>-<구성>`)에 빌드한 뒤 한 SDK로 조립한다. 구성과 무관한 부분(`Headers/`·`Tools/`·`Licenses/`·`Build/` 스크립트 등)은 한 벌이고, 라이브러리와 리플렉션 descriptor·명세는 `Configurations/<구성>/Libraries/`·`Configurations/<구성>/Metadata/<모듈>/`에 있다. 한 벌 파일이 구성마다 다르면 내보내기 오류다. 게임 빌드는 요청 구성이 SDK에 없으면 가진 구성 목록과 함께 멈춘다([Visual Studio 프로젝트 파일](../Docs/Design/ProjectFiles.ko.md) 10.3절).
+
+새 게임은 템플릿에서 만든다: `Rocks.Build.Cli new-project --template Foundation --name <이름> --destination <부모> [--sdk <SDK>] [--projectfiles on|off]`(SDK가 싣는 `Templates/Game/<이름>`, 경로도 된다). 템플릿 이름(`FoundationTemplate`)의 세 철자를 새 이름으로 바꿔 복사하고, `engineVersion`을 SDK에 맞추고, identity 명세를 `ids reissue`로 새 ID로 바꾸며, Windows에서는 Visual Studio 솔루션도 만든다. 게임 빌드는 `--target`(`/p:GameTarget`)이 없으면 `.rocksproject` 이름의 타깃을 빌드한다.
 
 게임 출력은 `<게임>/out/<platform>-<target>-<configuration>`(소문자, 예: `out/windows-game-debug`)이다. 게임 입력 snapshot과 게임 규칙 파일 탐색은 이름이 `.`으로 시작하는 디렉터리(`.vs`·`.git` 등), 게임 루트 바로 아래의 `out/`·`Saved/`, 루트의 `*.slnx`를 보지 않는다. 그 안의 파일을 규칙이 읽으면 명시 입력으로 적는다. 게임 출력 하나를 비우려면 `Rocks.Build.Cli clean --project <게임> --target <T> --configuration <C>`를 쓴다(잠금 파일 둘만 남긴다).
 
@@ -161,12 +168,12 @@ dotnet out/dotnet/bin/Rocks.Build.Cli/Debug/net10.0/Rocks.Build.Cli.dll bootstra
 리플렉션 헤더는 그 헤더를 소유한 모듈의 규칙이 `Metadata`(모듈의 public 또는 private include 디렉터리 기준 철자)로 선언한다. `SourceModuleRules`는 `protected override IReadOnlyList<string> Metadata => ["Module/Type.h"];`로, `ModuleRules`를 직접 상속하는 게임 모듈은 `NativeModuleInput`의 `Metadata`와 명세 위치 `ModuleDirectory`로 적는다. 식별자는 모듈 폴더의 소스 관리되는 `<모듈>.rocksids.json`에 보관하며 일반 빌드는 파일을 수정하거나 누락된 ID를 자동 발급하지 않는다. 새 선언은 메타컴파일러의 명시적인 저작 명령으로 등록하고, 이름을 바꿀 때는 새 ID를 만들지 말고 `ids rename`을 사용한다. 삭제할 선언은 `ids retire`로 폐기하고, 타입을 다른 모듈로 옮길 때는 `ids move`로 ID를 유지한다. 모듈의 활성 명세 항목이 소스에 없거나, 두 명세에 같은 ID나 같은 이름이 있으면 빌드가 실패한다.
 
 ```text
-dotnet out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll ids add --manifest SampleGame.rocksids.json --type sample::Character --field sample::Character::health
-dotnet out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll ids rename --manifest SampleGame.rocksids.json --kind field --old sample::Character::health --new sample::Character::hitPoints
+dotnet out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll ids add --manifest MyGame.rocksids.json --type sample::Character --field sample::Character::health
+dotnet out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll ids rename --manifest MyGame.rocksids.json --kind field --old sample::Character::health --new sample::Character::hitPoints
 dotnet out/dotnet/bin/Rocks.MetaCompiler/Debug/net10.0/Rocks.MetaCompiler.dll ids move --from Old.rocksids.json --to New.rocksids.json --type sample::Character
 ```
 
-빌드는 리플렉션 헤더가 있는 모듈을 의존 순서로 하나씩 생성한다. 생성 헤더는 `<출력>/Generated/<모듈>/Public|Private/<원본 철자의 .h를 .generated.h로>`이며 그 모듈의 public·private include로 전파된다(`#include <Module/Type.generated.h>`). 모듈 생성 헤더 `<모듈>/<모듈>.module.generated.h`는 `rocks::generated::<모듈>::RegisterModuleTypes`(의존 모듈부터 public 타입을 등록한다)의 선언만 담고, private 헤더의 타입을 등록하는 `RegisterPrivateModuleTypes`는 `<모듈>/<모듈>.private.module.generated.h`가 선언한다. 두 함수와 모듈 로더가 부르는 자기 타입 함수 `RegisterModuleOwnTypes`(의존 모듈 없이 이 모듈 타입만)의 정의는 모듈 생성 소스 `<출력>/Generated/<모듈>/Source/<모듈>.module.generated.cpp`에 있고 빌드가 그 모듈의 번역 단위로 한 번 컴파일한다(손으로 쓴 소스가 없는 리플렉션 모듈도 그래서 정적 라이브러리가 된다). 타입별 생성 헤더도 선언·컴파일 타임 형질·inline `Trace`만 담고, 스키마·연산 표·등록·복사·검증·정적 검사 같은 본문은 타입별 생성 소스 `<출력>/Generated/<모듈>/Source/Public|Private/<원본 철자의 .h를 .generated.cpp로>`에 있어 같은 방식으로 한 번 컴파일된다. 본문의 계약 위반(생성·소멸 noexcept, 접근 권한 등)은 이 compile action이 잡고 빌드가 컴파일러 출력 뒤에 `RMC3000` 안내를 붙인다. `--verify-metadata-sources on`을 주면 메타 단계가 생성 소스까지 게시 전에 컴파일해 원본 위치와 함께 거부한다. `GeneratedType<T>`를 쓰는 코드는 그 타입의 생성 헤더를 직접 include하고, 손으로 쓴 헤더는 모듈 생성 헤더를 include하지 않는다(정책 검사 `module-generated-header-include` — [리플렉션 생성 소스](../Docs/Design/ReflectionGeneratedSources.ko.md)). 다른 모듈의 타입은 그 모듈의 descriptor를 import해 상속·참조한다 — 빌드 중에는 이번 실행의 stage descriptor를 쓰고, 모두 성공하면 `<출력>/Metadata/<모듈>.rocksmeta.json`으로 게시한다. private 헤더의 타입은 그 모듈 안에서만 쓴다. 설치형 SDK는 리플렉션 모듈의 descriptor와 명세를 `Metadata/<모듈>/`에 담고(`rocks-sdk.json` 버전 12 — 4는 `ProvidesBuildInfo`를, 5는 `EngineVersion`을, 6은 모듈 표 표지 `ProvidesModuleTable`·`ThirdParty`를 더했고, 8은 메타데이터 모듈 라이브러리가 진입점을 담게 바뀌었고, 9는 타입별 생성 헤더의 본문을 SDK 라이브러리로 옮기고 공유 PCH 제공 모듈의 `SharedPchHeader`를 더했고, 10은 실행 중 적재 모듈 목록 `DynamicModules`를, 11은 로딩 단계 `LoadingPhase`와 부트 표지 `ProvidesLaunch`를 더했고, 12는 의존 목록을 `PublicDependencies`·`PrivateDependencies`로 나눴다. 이전 버전 SDK는 거부한다), 게임 빌드는 SDK 모듈을 다시 생성하지 않고 그 descriptor를 import한다. SDK는 생성 헤더와 라이브러리만 싣고 생성 소스는 싣지 않는다 — SDK 모듈의 타입 본문과 등록 함수는 SDK 라이브러리에서 링크된다. 사용 계약과 진단 코드는 [리플렉션 메타데이터](../Docs/Implementation/ReflectionMetadata.ko.md)를 따른다.
+빌드는 리플렉션 헤더가 있는 모듈을 의존 순서로 하나씩 생성한다. 생성 헤더는 `<출력>/Generated/<모듈>/Public|Private/<원본 철자의 .h를 .generated.h로>`이며 그 모듈의 public·private include로 전파된다(`#include <Module/Type.generated.h>`). 모듈 생성 헤더 `<모듈>/<모듈>.module.generated.h`는 `rocks::generated::<모듈>::RegisterModuleTypes`(의존 모듈부터 public 타입을 등록한다)의 선언만 담고, private 헤더의 타입을 등록하는 `RegisterPrivateModuleTypes`는 `<모듈>/<모듈>.private.module.generated.h`가 선언한다. 두 함수와 모듈 로더가 부르는 자기 타입 함수 `RegisterModuleOwnTypes`(의존 모듈 없이 이 모듈 타입만)의 정의는 모듈 생성 소스 `<출력>/Generated/<모듈>/Source/<모듈>.module.generated.cpp`에 있고 빌드가 그 모듈의 번역 단위로 한 번 컴파일한다(손으로 쓴 소스가 없는 리플렉션 모듈도 그래서 정적 라이브러리가 된다). 타입별 생성 헤더도 선언·컴파일 타임 형질·inline `Trace`만 담고, 스키마·연산 표·등록·복사·검증·정적 검사 같은 본문은 타입별 생성 소스 `<출력>/Generated/<모듈>/Source/Public|Private/<원본 철자의 .h를 .generated.cpp로>`에 있어 같은 방식으로 한 번 컴파일된다. 본문의 계약 위반(생성·소멸 noexcept, 접근 권한 등)은 이 compile action이 잡고 빌드가 컴파일러 출력 뒤에 `RMC3000` 안내를 붙인다. `--verify-metadata-sources on`을 주면 메타 단계가 생성 소스까지 게시 전에 컴파일해 원본 위치와 함께 거부한다. `GeneratedType<T>`를 쓰는 코드는 그 타입의 생성 헤더를 직접 include하고, 손으로 쓴 헤더는 모듈 생성 헤더를 include하지 않는다(정책 검사 `module-generated-header-include` — [리플렉션 생성 소스](../Docs/Design/ReflectionGeneratedSources.ko.md)). 다른 모듈의 타입은 그 모듈의 descriptor를 import해 상속·참조한다 — 빌드 중에는 이번 실행의 stage descriptor를 쓰고, 모두 성공하면 `<출력>/Metadata/<모듈>.rocksmeta.json`으로 게시한다. private 헤더의 타입은 그 모듈 안에서만 쓴다. 설치형 SDK는 리플렉션 모듈의 descriptor와 명세를 구성마다 `Configurations/<구성>/Metadata/<모듈>/`에 담고(`rocks-sdk.json` 버전 14 — 4는 `ProvidesBuildInfo`를, 5는 `EngineVersion`을, 6은 모듈 표 표지 `ProvidesModuleTable`·`ThirdParty`를 더했고, 8은 메타데이터 모듈 라이브러리가 진입점을 담게 바뀌었고, 9는 타입별 생성 헤더의 본문을 SDK 라이브러리로 옮기고 공유 PCH 제공 모듈의 `SharedPchHeader`를 더했고, 10은 실행 중 적재 모듈 목록 `DynamicModules`를, 11은 로딩 단계 `LoadingPhase`와 부트 표지 `ProvidesLaunch`를 더했고, 12는 의존 목록을 `PublicDependencies`·`PrivateDependencies`로 나눴고, 13은 `HasGlobalState`를, 14는 구성별 `Configurations`를 더했다. 이전 버전 SDK는 거부한다), 게임 빌드는 SDK 모듈을 다시 생성하지 않고 그 descriptor를 import한다. SDK는 생성 헤더와 라이브러리만 싣고 생성 소스는 싣지 않는다 — SDK 모듈의 타입 본문과 등록 함수는 SDK 라이브러리에서 링크된다. 사용 계약과 진단 코드는 [리플렉션 메타데이터](../Docs/Implementation/ReflectionMetadata.ko.md)를 따른다.
 
 명세와 코드 변경은 함께 버전 관리한다. CI PR 검사는 실제 공통 조상·양쪽 부모·병합 결과의 모든 명세를 ID 기준으로 합쳐 비교해 이름/ID 충돌, 이력 손실 및 서로 다른 이름 변경을 거부한다(명세를 옮겨도 ID가 사라진 것으로 보지 않는다). 직접 push, 강제 push 또는 이 검사가 필수로 설정되지 않은 저장소는 자동으로 보호되지 않는다. 동일 선언에 두 ID가 이미 발급된 경우 자동으로 하나를 선택하지 않으며 데이터 마이그레이션 도구도 아직 없다. 소스에서 빠진 메타 입력은 자동 탐색하지 않으므로 모든 리플렉션 헤더를 소유 모듈의 `Metadata`에 등록해야 한다.
 

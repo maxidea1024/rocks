@@ -155,7 +155,7 @@ L5:
     BRANCH s16, L6, L8    ; 61:9
 L6:
     s17 = MOVE s14    ; 61:9
-    b18 = GETE b12[s14]    ; 61:21
+    b18 = GETVALUE b12[s14]    ; 61:21
     b19 = LOADSTR.PIECE "skip"    ; 62:25
     s20 = EQ b18, b19    ; 62:17
     BRANCH s20, L9, L10    ; 62:17
@@ -237,3 +237,25 @@ L1:
 L2:
     r5 = LOADNULL    ; 85:36
     RETURN r5    ; 85:26
+
+function Door.$init()
+  r0 this: Door
+  s1: bool [Bool]
+  s2: int [I64]
+  b3: Stats
+  s4: Mode [Enum]
+  b5: Array<string>
+  b6: Map<string, int>
+L0:
+    s1 = LOADINT 0    ; 14:5
+    SETF r0.Door.Open, s1    ; 14:5
+    s2 = LOADINT 1    ; 15:5
+    b3 = NEW Stats(Level: s2)    ; 15:5
+    SETF r0.Door.Info, b3    ; 15:5
+    s4 = LOADINT 0    ; 16:5
+    SETF r0.Door.State, s4    ; 16:5
+    b5 = NEW.COLLECTION Array()    ; 17:5
+    SETF r0.Door.Names, b5    ; 17:5
+    b6 = NEW.COLLECTION Map()    ; 18:5
+    SETF r0.Door.Scores, b6    ; 18:5
+    RETURN    ; 88:1

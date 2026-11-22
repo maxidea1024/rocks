@@ -1,6 +1,6 @@
 # Sparks typed IR·bytecode·.sparkc
 
-기준일: 2026-11-22 · 개정 2(LC4a 구현 반영) · 상위 문서: [Sparks 언어](SparksLanguage.ko.md)(이하 SL) §11·§12.1–§12.3·18.2절 LC4
+기준일: 2026-11-22 · 개정 3(LC4d 리뷰 반영 — 안정 ID 맞춤 순서·type rename 승계·S1007·S1008, hash 정규화) · 상위 문서: [Sparks 언어](SparksLanguage.ko.md)(이하 SL) §11·§12.1–§12.3·18.2절 LC4
 
 이 문서는 언어 코어 LC4(typed IR, bank 할당, 32비트 명령, `.sparkc`, verifier, 안정 ID, interface·body hash, 덤프)의 설계 정본이다. 실행(interpreter·값 버퍼·fault)은 LC5, 실행 모델(instance·hook·큐·async)은 LC6이 이 형식을 읽는다. SL은 요구(레지스터 VM, 3 bank, 타입별 opcode, 32비트 고정 명령, verifier, 결정적 덤프)를 정하고, 이 문서는 그 형식을 정한다.
 
@@ -50,7 +50,7 @@ VM 레지스터는 bank 셋이다(SL §11): **Scalar**(태그 없는 64비트), 
 | 군 | 명령(대표) | 비고 |
 |---|---|---|
 | 이동·상수 | `MOV.S/R/B`, `LOADK.I64/F64`, `LOADNULL.R/B`, `LOADBOOL` | 묶음은 slot마다 한 명령 |
-| 정수 | `ADD/SUB/MUL/DIV/MOD/NEG.<w>` (`w` = I8…I64·U8…U64) | 그 타입 범위 밖이면 `IntegerOverflow` fault, 0 나눗셈 `DivisionByZero` |
+| 정수 | `ADD/SUB/MUL/DIV/MOD/NEG.<w>` (`w` = I8…I64·U8…U64) | 그 타입 범위 밖이면 `IntegerOverflow` fault, 0 나눗셈 `DivideByZero`(`DIV`·`MOD`는 내림 방식 — SL §3.3) |
 | 실수 | `ADD/SUB/MUL/DIV/NEG.F32/F64`, `MIN/MAX/ABS…`(부록 B Math) | 결과가 유한하지 않으면 `NonFinite` fault. FMA 축약 금지 |
 | 비교·논리 | `EQ/NE/LT/LE.<w>/F64/STR/REF`, `NOT` | `&&`·`||`·`??`는 분기로 내린다 |
 | 변환 | `CONV.<from>.<to>` | 범위 검사·반올림 규칙은 SL §3.10 변환 |
@@ -70,7 +70,7 @@ VM 레지스터는 bank 셋이다(SL §11): **Scalar**(태그 없는 64비트), 
 - **명령:** `IrInstruction{op, sub, a, b, c, extra, span}` 하나가 3.1절 군의 명령 하나다. 타입별 opcode(`ADD.I32` 등)는 IR에서 목적 레지스터의 Scalar 해석으로 정하고, 이름은 LC4b의 bytecode 선택에서 붙인다. 묶음 연산(벡터 산술·이동)은 slot마다 명령 하나로 펼친다. 비교는 묶음 전체를 한 명령으로 비교한다(slot 수를 extra에).
 - **인자 목록:** 호출·생성·발행·문자열 잇기의 인자는 연속 레지스터가 아니라 함수의 피연산자 표(`operands`)의 구간이다. 연속 레지스터 요구(4절 인자 규약)는 LC4b 할당이 이동을 넣어 맞춘다. 생성 `NEW`는 sub로 해석한다: struct·component는 (필드 심볼, 값) 쌍(빠진 필드는 실행 중 기본값), 검증 리터럴(`Tag`·`Row`·`Asset`·`Loc`…)은 (인자 이름 글자, 값) 쌍, 컬렉션은 원소(Map은 key·값 차례), `Result`(Buf 표현)는 값 하나(`NEW.OK`·`NEW.ERROR`).
 - **대기:** `AWAIT`는 블록 끝 명령이며 대기 b(대기 handle, 로드 요청)나 (발행자 b, 이벤트 extra)를 기다리고, 재개하면 결과를 a에 받고 블록 c로 간다. 결과 타입은 피연산자가 정한다(async 함수는 반환 타입, `LoadRequest<T>`는 `Result<T>`, 그 밖은 없음 — `try await`의 Try 노드 타입이 꺼낸 `T`라 따로 구한다).
-- **Result:** Scalar 표현은 앞 slot(오류 코드)을 직접 쓴다 — 성공 0, 실패 `Error` case 번호 + 1(정해진 오류는 코드를 바로 싣는다). `TRY`는 끝 명령이다: 성공이면 값을 꺼내 성공 블록으로, 실패면 실패 블록으로 간다. 실패 블록은 살아 있는 지역 유지 자원을 모두 해제하고(D5) `RETURN.ERROR`로 같은 오류를 이 함수의 Result 타입으로 반환한다.
+- **Result:** Scalar 표현은 앞 slot(오류 코드)을 직접 쓴다 — 성공 0, 실패 `Error` case 번호 + 1(정해진 오류는 코드를 바로 싣는다). `TRY`는 끝 명령이다: 성공이면 값을 꺼내 성공 블록으로, 실패면 실패 블록으로 간다. 실패 블록은 살아 있는 지역 유지 자원을 모두 해제한 뒤(D5): Result 함수는 `RETURN.ERROR`로 같은 오류를 이 함수의 Result 타입으로 반환하고, 그 밖의 함수·handler는 `END.EXECUTION`으로 현재 실행(Execution 트리)을 끝내고 오류를 위치별 1회 기록하며(SL §8.4 — fault가 아니다), `on Awake`·`on Enable`·`on Start` 안이면 그 hook의 fault(`FAULT 2`, SD43)다. 경로 쓰기(복합 대입·멤버·원소 쓰기의 앞 경로, 값을 바꾸는 메서드의 수신자)로 읽은 원소가 없으면 `FAULT 3`(`IndexOutOfRange`)이다 — `GET.ELEMENT` 뒤 있음 검사와 실패 블록(LC5b2).
 - **문자열:** 보간 없는 문자열은 `LOADSTR` 하나, 보간은 조각(`LOADSTR.PIECE` — escape를 풀지 않은 원문 조각, LC4b가 상수 표에 넣을 때 푼다)과 값의 문자열 변환(`CONVERT`)을 `CONCAT`으로 잇는다. 상수(`const`)와 verbatim은 리터럴 원문 그대로다.
 - **값 경로 쓰기:** 대입 대상은 값 경로(지역 → 필드·성분 slot·원소)로 왼쪽부터 한 번 평가한다(객체·key의 식은 한 번만 — 부작용이 두 번 나지 않는다). 그다음 오른쪽 값을 계산하고(SL §3.3 왼쪽에서 오른쪽), 경로 끝에 쓴 뒤 값 타입(struct Buf·수학 타입 slot·컨테이너)을 지난 단계는 바깥 값에 차례로 다시 쓴다(`Info.Offset.X = 1` → Info를 읽고 Offset slot을 바꿔 Info에 다시 `SETF`, `a[k] = v` → `SETE` 뒤 a를 다시 쓴다). 객체 참조(Ref)에서 경로가 새로 시작한다. 복합 대입은 같은 경로의 현재 값을 읽어 계산한다.
 - **값을 바꾸는 메서드:** 언어 메서드 중 경로를 바꾸는 것(`Add`·`Remove`… SL §3.11)은 `CALL.MUT`다. 수신자 묶음은 in/out 인자이며(호출이 바뀐 값을 그 레지스터에 남긴다) 수신자 경로에 다시 쓴다.
@@ -97,15 +97,16 @@ bytecode 형식(opcode 번호·명령 모양·함수 표·상수 표)은 새 모
 
 ### 4.1 frame과 호출 창(LC4b 확정)
 
-- **frame:** 함수 하나의 frame은 bank마다 레지스터 배열이다(Scalar·Ref·Buf 각각 0–255). 매개변수는 선언 순서로 bank마다 0번부터(값 묶음은 연속), class 본문의 `this`는 Ref 0번이고 나머지 Ref 매개변수가 1번부터다. 반환값은 bank의 0번부터 돌려준다.
-- **호출 창(Lua 방식 register window):** 호출은 부르는 쪽 frame의 bank마다 맨 위 구간(창 base — 할당된 레지스터 수)에 인자를 놓고 `CALL`한다. 부르는 함수의 frame은 창 base에서 시작한다(창이 곧 부르는 쪽의 0번). 반환값은 창 base로 돌아오고, 부르는 쪽이 결과 레지스터로 옮긴다. 창은 할당에 참여하지 않으며 frame 크기는 `할당한 수 + 가장 큰 창`이다(bank마다 256 이하, 넘으면 S1201).
-- **창 쓰는 명령:** `CALL`·`EMIT`·`NEW`(생성 인자)·`CONCAT`은 인자 묶음을 창에 둔다(IR의 피연산자 목록 → 창으로 이동). 수신자는 Ref 창의 첫 칸이다.
+- **frame:** 함수 하나의 frame은 bank마다 레지스터 배열이다(Scalar·Ref·Buf 각각 0–255). 매개변수는 선언 순서로 bank마다 0번부터(값 묶음은 연속), class 본문의 `this`는 Ref 0번(struct 메서드의 `this`는 Buf 0번)이고 나머지 같은 bank 매개변수가 그 뒤다. 반환값은 bank의 0번부터 돌려준다. 함수 표는 반환 값의 bank·slot 수를 둔다(`RETERR`가 그 모양의 Result를 만든다).
+- **호출 창(Lua 방식 register window):** 호출은 부르는 쪽 frame의 bank마다 맨 위 구간(창 base — 할당된 레지스터 수)에 인자를 놓고 `CALL`한다. 부르는 함수의 frame은 창 base에서 시작한다(창이 곧 부르는 쪽의 0번). 반환값은 창 base로 돌아오고, 부르는 쪽이 결과 레지스터로 옮긴다. 창은 할당에 참여하지 않으며 frame 크기는 `할당한 수 + 가장 큰 창`이다(bank마다 256 이하, 넘으면 S1150).
+- **창 쓰는 명령:** `CALL`·`EMIT`·`NEWLIT`(이름 지정 인자)·`CONCAT`은 인자 묶음을 창에 둔다(IR의 피연산자 목록 → 창으로 이동, bank마다 차례로). 수신자는 그 bank 창의 첫 칸이다. 구조체·컬렉션 생성은 창 없이 `NEWS`·`NEWA` 뒤 필드·원소마다 `SETSF`·`APPEND`·`PUT`이다.
 
 ### 4.2 할당
 
-- 가상 레지스터 묶음 하나(값 하나)가 실제 레지스터 연속 구간 하나다. 살아 있는 구간은 블록 배치 순서의 명령 번호로 센다: 묶음을 쓰는 첫 명령부터 마지막 읽기까지, 반복의 back-edge가 걸친 구간은 반복 끝까지 늘린다(블록 단위 생존 분석 — 블록 끝에서 살아 있는 묶음은 블록 끝까지).
+- 생성(`NEWS` 뒤 `SETSF`…)과 합성 곱처럼 결과를 먼저 쓰고 피연산자를 읽는 명령은 결과 묶음을 읽기 위치부터 살려(early clobber) 피연산자와 다른 레지스터에 둔다. await 지점 생존 표는 `emit`의 암묵 대상 `this`도 읽기로 센다.
+- 가상 레지스터 묶음 하나(값 하나)가 실제 레지스터 연속 구간 하나다. 생존은 가상 레지스터 slot마다 블록 단위로 구하고(역방향 고정점), 묶음의 구간은 블록 배치 순서의 명령 번호(읽기 2k·쓰기 2k + 1)로 slot 구간들을 합친 것이다(블록 입구·출구에서 살아 있으면 그 경계까지). 도달하지 않는 블록은 내지 않는다. 구간은 배치 순서의 연속 구간이라 실제 생존의 상위 집합이다(await 지점 표도 같다 — 보수적).
 - bank마다 구간 시작 순으로 선형 스캔해 끝난 구간의 레지스터를 다시 쓴다(묶음 크기만큼 연속으로 빈 곳 중 가장 낮은 번호). 매개변수·`this`는 고정 번호다. 결정적이다(같은 IR → 같은 번호).
-- bank 레지스터 256개를 넘거나 함수 명령이 32,767개를 넘으면(분기 거리 16비트) S1201 "function is too large"다(위치는 함수 이름).
+- bank 레지스터 256개를 넘거나 함수 명령이 32,767개를 넘으면(분기 거리 16비트) S1150 "function is too large"다(위치는 함수 이름).
 
 ### 4.3 명령 형식
 
@@ -118,12 +119,13 @@ bytecode 형식(opcode 번호·명령 모양·함수 표·상수 표)은 새 모
 | | `LOADK` | A ← Scalar 상수 표[Bx](64비트 — 정수·double 비트·이름 id) |
 | | `LOADSTR` | Buf A ← 문자열 표[Bx] |
 | | `LOADNULL.R` `LOADNULL.B` | A ← null |
-| 정수 | `ADD` `SUB` `MUL` `DIV` `MOD` `.I8`–`.I64`·`.U8`–`.U64`, `NEG.I8`–`.I64` | A ← B op C(그 타입 범위 밖이면 `IntegerOverflow`, 0 나눗셈 `DivisionByZero`) |
+| 정수 | `ADD` `SUB` `MUL` `DIV` `MOD` `.I8`–`.I64`·`.U8`–`.U64`, `NEG.I8`–`.I64` | A ← B op C(그 타입 범위 밖이면 `IntegerOverflow`, 0 나눗셈 `DivideByZero`, `DIV`·`MOD`는 내림 방식) |
 | 실수 | `ADD` `SUB` `MUL` `DIV` `NEG` `.F32`·`.F64` | 결과가 유한하지 않으면 `NonFinite`. F32는 결과를 float로 반올림 |
+| 합성 | `MUL.QUAT` `MUL.MAT4` A B C | quat·mat4 곱(UE `FQuat`·`FMatrix`의 `operator*`와 같은 순서, A·B·C는 묶음 첫 레지스터). 성분별 곱이 아니다 |
 | 논리 | `NOT` | A ← !B |
-| 비교 | `EQ` `NE` `LT` `LE` `.I`(부호 있는 정수·bool·enum·이름 — 64비트 확장값), `LT.U` `LE.U`, `EQ` `NE` `LT` `LE` `.F`, `EQ.STR` `NE.STR`, `EQ.R` `NE.R`(handle), `EQ.B` `NE.B`(Buf 값 비교) | A ← B cmp C. `>`·`>=`는 B·C를 바꾼 `LT`·`LE`다 |
-| | `EQN` `NEN` + EXTRA(slot 수) | Scalar 묶음 비교(`T?`·`Soft<T>`) |
-| 변환 | `CONV` | A ← B, C = (원래 Scalar 종류 << 4) \| 목적 종류(범위 밖은 `ConversionOutOfRange`) |
+| 비교 | `EQ` `NE` `LT` `LE` `.I`(부호 있는 정수·bool·enum·이름 — 64비트 확장값), `LT.U` `LE.U`, `EQ` `NE` `LT` `LE` `.F`, `EQ.STR` `NE.STR` `LT.STR` `LE.STR`(UTF-8 byte 순 — `string?` 포함), `EQ.R` `NE.R`(handle), `EQ.B` `NE.B`(Buf 값 비교 — 같음만) | A ← B cmp C. `>`·`>=`는 B·C를 바꾼 `LT`·`LE`다 |
+| | `EQN` `NEN` + EXTRA(slot 수), `EQN.F` `NEN.F` | Scalar 묶음 비교. 성분이 모두 실수(와 있음 표지)면 `.F`(실수 비교 — -0.0 == 0.0), 그 밖(`int?`·`Soft<T>`의 AssetId)은 비트 비교 |
+| 변환 | `CONV` | A ← B, C = (원래 Scalar 종류 << 4) \| 목적 종류(정확히 들어가지 않으면 `IntegerOverflow`, float32 범위 밖은 `NonFinite` — SL §3.3) |
 | | `TOSTR` + EXTRA(표시 종류·enum 타입 번호) | Buf A ← Scalar 묶음 B의 문자열(보간 규칙 SL §3.2) |
 | | `CAST` + EXTRA(타입 번호) | Ref A ← B가 그 타입이면 B, 아니면 null |
 | 제어 | `JMP` sBx, `BRT` A sBx, `BRF` A sBx | 분기 거리는 다음 명령 기준 |
@@ -135,15 +137,22 @@ bytecode 형식(opcode 번호·명령 모양·함수 표·상수 표)은 새 모
 | | `GETSF.S/R/B` `SETSF.S/R/B` + EXTRA | struct 값(Buf)의 필드 읽기·쓰기(COW) |
 | | `GETCTX` A Bx | Ref A ← 문맥 이름 표[Bx](`World`·`Time`…) |
 | 컨테이너 | `GETE` `SETE` `LEN` `GETKEY` `GETVAL` + EXTRA(key bank·원소 bank·원소 slot 수) | `GETE`는 `T?`를 돌려준다(SL §3.10 인덱스) |
-| 호출 | `CALL` Bx(모듈 함수 표 — 사용자 함수), `CALLV` Bx(open·interface — 실행 중 대상 결정), `CALLN` Bx(import 표의 native 함수), `CALLL` Bx(언어 함수 — 부록 B 번호), `CALLRPC` Bx | 각 명령 앞의 `WINDOW` A B C가 bank별 창 base(Scalar A·Ref B·Buf C)를 준다. 대기를 만드는 함수의 결과는 Ref 창 0번의 대기 handle |
-| 이벤트 | `EMIT` Bx(이벤트 표) | `WINDOW` 뒤. 대상은 Ref 창 0번(자기 객체면 this) |
+| 호출 | `CALL` Bx(모듈 함수 표 — 사용자 함수), `CALLV` Bx(open·interface — 실행 중 대상 결정), `CALLN` Bx(import 표의 native 함수), `CALLL` Bx(언어 함수 — 부록 B 번호), `CALLRPC` Bx | 창 base는 함수 표의 bank별 할당 수(`registers`)다. 대기를 만드는 함수의 결과는 Ref 창 0번의 대기 handle. `CALL.MUT`(값을 바꾸는 언어 메서드)는 수신자를 창 0번에서 돌려받고 같은 bank의 결과는 그 다음 자리에서 받는다. Buf 수신자는 창으로 옮긴다(창에 복사한 뒤 원래 레지스터를 `LOADNULL.B`, 돌려받은 뒤 창 0번을 `LOADNULL.B`) — 참조가 하나여야 COW가 호출마다 복제하지 않는다 |
+| 이벤트 | `EMIT` Bx(이벤트 표) | 대상은 Ref 창 0번(자기 객체면 this), 인자는 그 뒤 |
 | 대기 | `AWAIT` A B + EXTRA(결과 bank·slot 수) | 대기 handle B로 정지, 재개하면 결과를 A에. 블록 끝 명령이며 재개는 다음 명령 |
-| | `AWAITEV` B + EXTRA(이벤트 번호) | 발행자 B의 이벤트를 기다린다 |
-| Result | `TRY.S` A B C(slot 수) `TRY.B` A B | 오류면 같은 오류로 반환, 아니면 값을 A에 |
-| 생성 | `NEWS` A Bx(struct 타입 — 기본값), `NEWC` A Bx(component), `NEWA`·`NEWSET` A Bx(원소 타입), `NEWM` A Bx(Map 타입), `APPEND` A B, `PUT` A B C, `NEWLIT` A Bx(리터럴 표 — 쿡 GUID·이름), `OK` `ERR` | 구조체 생성은 `NEWS` 뒤에 필드마다 `SETSF` |
+| | `WAITEV` A B + EXTRA(이벤트 참조) | 발행자 B의 이벤트 대기 handle을 A에(`await X.E`는 `WAITEV` + `AWAIT`, SparksRuntime 2.5절 — 이전 `AWAITEV` 대체) |
+| | `CALLW` Bx | `CALL`과 같되 하위 실행 경계: 반환·정지하면 하위 대기 handle을 Ref 창 0번에(void async 함수의 `All`·`Race` 인자 — SparksRuntime 2.5절) |
+| Result | `TRY.S` A B C(slot 수) `TRY.B` A B C(값 bank << 5 \| slot 수) + EXTRA(부호 있는 24비트 거리) | 성공이면 값을 A에 두고 다음 명령, 오류면 EXTRA 거리(EXTRA 다음 단어 기준)의 실패 블록으로 |
+| | `RETERR.S` A B(slot 수) `RETERR.B` A | Result의 오류를 이 함수의 Result로 반환(함수 표의 반환 모양 — Result 함수에만) |
+| | `ENDEXEC.S` A B(slot 수) `ENDEXEC.B` A | Result가 아닌 함수·handler의 `try` 실패: 현재 실행을 끝내고 오류를 기록(끝 명령) |
+| 생성 | `NEWS` A Bx(struct 타입 — 기본값), `NEWC` A Bx(component), `NEWA`·`NEWSET` A Bx(원소 타입), `NEWM` A Bx(Map 타입), `APPEND` A B, `PUT` A B C, `NEWLIT` A + EXTRA(리터럴 참조 16비트 \| 인자 수 6비트 << 16 \| 결과 bank << 22), `OK` A B + EXTRA(값 bank·slot), `ERR` A B(`Error` case 번호 — Scalar Result의 코드 case + 1은 VM이 만든다) | 구조체 생성은 `NEWS` 뒤에 필드마다 `SETSF`. 생성 결과 레지스터는 피연산자 값과 겹치지 않는다(할당이 결과를 읽기 위치부터 살린다 — early clobber). 리터럴 참조의 이름은 결과 타입(`Tag`·`Soft<DataAsset>`·하드 참조 `DataAsset`…), 글자는 보조 번호, 이름 지정 인자(`Loc`)는 인자 표 `이름=bank 글자;…`(창에 놓는 순서) |
 | 문자열 | `CONCAT` A B C | Buf A ← 창의 B부터 C개 조각 |
 | 자원 | `RELEASE` A | Ref A의 유지 자원을 해제(null이면 아무것도 안 함) |
 | fault | `FAULT` Ax | fault 종류 Ax |
+
+- **참조 이름:** 다른 모듈의 Sparks 선언(함수·필드·타입·이벤트)은 `<import 경로>:` 접두로 같은 이름의 다른 모듈 선언과 구별한다(LC4d가 안정 ID를 더한다). 명시한 타입 인자가 있는 호출은 참조 이름이 `Owner.Name<T>`이고 보조 번호가 첫 타입 인자의 Type 참조다.
+- **별칭:** 한 명령의 결과 레지스터가 읽는 레지스터와 같을 수 있다(`AWAIT`·`TRY.S`·`GETE`·산술). VM은 피연산자를 모두 읽은 뒤 쓰고, 묶음 복사는 앞에서부터 한다. `CONCAT`의 조각은 모두 Buf(문자열)다.
+- **표 번호 한도:** Bx 16비트 자리(상수·문자열·참조·switch 표)는 65,536개까지다. 넘으면 S1150이다.
 
 ### 4.4 블록 배치와 분기
 
@@ -155,27 +164,44 @@ bytecode 형식(opcode 번호·명령 모양·함수 표·상수 표)은 새 모
 
 ### 4.6 bytecode 덤프(`.bc`)
 
-결정적 영어 텍스트(`Compilation::AppendBytecodeDump`). 모듈 상수 표(`k<번호> = 값`, 문자열은 따옴표 안 escape 표기)·참조 표(함수·필드·타입·이벤트, 이름), 함수마다 머리 줄 `function Owner.Name  scalar=<n> ref=<n> buf=<n>`, await 지점(`await @주소: live s0..s3 r0`), 명령마다 `  0004  ADD.I64  s4, s0, s3    ; 2:12` — 주소(4자리 10진), opcode 이름, 피연산자(레지스터 `s`·`r`·`b` + 번호, 상수 `k3(1.5)`, 분기 대상 주소, 표 번호와 이름), 원문 위치. EXTRA 단어는 앞 명령 줄에 합쳐 쓴다(주소는 2 늘어난다). corpus `.bc` golden은 `Codegen` 영역 사례가 쓴다. 헤더(format·hash)는 LC4c·LC4d에서 더한다.
+결정적 ASCII 영어 텍스트(`AppendBytecodeDump` — 모듈만 읽으므로 `.sparkc`에서 읽은 모듈도 같은 글자를 낸다). 머리(`module "경로"`, `compiler "버전"`, `profile core|full`, `content`·`interface` hash 16진), 상수 표(`k<번호> = 0x<16진 64비트>`), 문자열 표(`t<번호> = "…"` — 제어 문자와 ASCII 밖 byte는 `\xHH`), 참조 표(`ref<번호> = 종류 이름 [보조]`), 함수마다 머리 줄 `function 이름  scalar=할당/frame ref=… buf=… params=s/r/b returns <bank>x<slot>`, await 지점(`await 0003  live s0..s2 r0`), switch 표(`switch<번호> [값: 주소, …] else 주소`), 명령마다 `  0004  ADD.I64  s4, s0, s3    ; 2:12` — 주소(4자리 10진), opcode 이름, 피연산자(레지스터 `s`·`r`·`b` + 번호, 상수 `k<번호>`·문자열 `t<번호>`, 분기 대상 주소, 참조 `ref<번호>`, 컨테이너 표지 `[값 bank·slot key bank·slot]`), 원문 위치. EXTRA 단어는 앞 명령 줄에 합쳐 쓴다(주소는 2 늘어난다). corpus `.bc` golden은 `Codegen` 영역 사례가 쓴다.
 
 ## 5. `.sparkc`와 verifier(LC4c)
 
-- **형식:** little-endian. 머리 `"SPKC"`·형식 버전(u32)·compiler version 문자열·모듈 import 경로·content hash(SHA-256 32바이트)·interface hash(SHA-256)·profile. 이어 길이 접두 구역(section): `IMPT`(import 모듈과 그 interface hash, native FunctionId·시그니처 hash, Tag·Action·Row 이름), `TYPE`(class·struct·enum·이벤트·필드 — TypeId·FieldId·초기값), `FUNC`(함수: 시그니처, bank 크기, 문맥, 명령, await 지점 표, 예외 없는 원문 위치 표), `KCON`(상수), `DBUG`(분리 디버그 — 원문 위치·지역 이름). 쓰기는 Core `ByteWriter`, 읽기는 `ByteReader`다.
-- **결정성:** 같은 입력 → 같은 바이트. 표의 순서는 선언 순서(모듈 안), 해시 표 순회를 쓰지 않는다.
-- **verifier(로드 시 선형 1회, SL §11):** 구조(구역 길이·명령 수·분기 대상이 함수 안·피연산자가 bank 크기 안·상수·필드·함수 번호 범위), 타입(각 명령의 피연산자 bank·Scalar 표현 종류, 대기 지점 레지스터 형태와 재개 블록의 일치, 초기화 전 읽기 없음 — 블록 단위 dataflow), 바인딩(native FunctionId·시그니처 hash가 실행 중 schema와 같음, 자원 정책), 문맥(함수 문맥이 금지하는 명령 — `AWAIT`가 대기 금지 문맥에 없음 등). 거부는 모듈 단위다(SL §12 표 "로드").
-- 변조 시험: 명령 1바이트·구역 길이·상수 번호를 바꾼 파일이 정해진 사유로 거부된다.
+- **형식(LC4c 확정, 형식 버전 1):** little-endian. 머리: magic `"SPKC"`, 형식 버전(u32 — `BytecodeFormatVersion`), compiler version·모듈 import 경로(KCON 문자열 표 번호 u32 둘), content hash(원문 UTF-8의 SHA-256 32바이트), interface hash(SHA-256 32바이트 — LC4d가 채우고 그 전에는 0), profile(u8 — manifest `profile`: 0 core, 1 full). 이어 길이 접두 구역(4바이트 tag + u32 길이 + 내용)이 정해진 순서로 하나씩 온다: `KCON`(Scalar 상수 u64들, 문자열 — 길이 + byte), `REFS`(참조 — 종류 u8, 이름 문자열 번호 u32, 보조 번호 u32, 리터럴 인자 표·언어 함수 서술자(SparksVm 6a절) 문자열 번호 u32), `FUNC`(함수 표 — 이름·명령 구간·bank별 할당 수·frame 크기·매개변수 수·반환 bank·slot 수·body hash(32바이트)·switch·await 구간, 명령 단어, switch 표와 case, await 지점과 생존 구간), `DBUG`(분리 디버그 — 명령 단어마다 줄·열). 형식 버전 2(LC5b3)는 `REFS`와 `FUNC` 사이에 `TYPE`을 둔다(아래 "TYPE 구역"). 형식 버전 3(LC6a)은 `TYPE`과 `FUNC` 사이에 `CLAS`를 둔다(클래스·필드·hook·handler·이벤트 — 배치와 검사는 SparksRuntime.ko.md 2.1절). 모르는 tag, 순서 어긋남, 구역 길이와 내용의 불일치, 파일 끝 뒤의 byte는 거부다. `IMPT`(import 모듈의 interface hash, native FunctionId·시그니처 hash, Tag·Action·Row 이름)와 class 배치(LC6)는 뒤 형식 버전에서 더한다. 쓰기는 Core `ByteWriter`, 읽기는 `ByteReader`다.
+- **TYPE 구역(형식 버전 2, LC5b3 확정):** 이 모듈이 참조하는 Sparks struct·enum(다른 모듈 것 포함 — 처음 참조한 순)과 언어 enum `Clock`(case는 언어 표 순)의 배치다. struct 하나의 bank별 slot 합은 16비트이며 넘으면 S1150이다. 타입마다 이름(문자열 번호 — Type 참조 이름과 같은 표시 이름), 종류(u8: 0 struct, 1 enum), 첫 필드 번호·필드 수(u32 둘), bank별 slot 수(u16 셋 — struct)이고, 필드(enum은 case)마다 이름 문자열 번호(u32), bank(u8), slot 수(u8), 절대 slot 위치(u32)다. struct 값 버퍼의 내용은 bank 묶음 순(Scalar slot들, Ref slot들, Buf slot들)이며 필드는 선언 순으로 그 bank 묶음 안에 놓인다 — VM은 끝의 Buf slot들만 원소 버퍼로 놓는다. Type 참조의 보조 번호는 TYPE 번호(struct·enum일 때, 아니면 없음), StructField 참조의 보조 번호는 TYPE 필드 번호다(Sparks struct — 엔진 schema struct의 필드는 TYPE에 없고 보조 번호도 없다, 배치는 host 바인딩 LC5d). 기본값은 TYPE에 두지 않는다: Sparks struct 생성은 컴파일러가 빠진 필드마다 초기값(필드 초기값은 상수식 — SL §3.11)이나 0 값(SL §3.2 — 문자열 `""`·빈 컨테이너·struct 기본값·수학 단위값처럼 0 slot이 아닌 것만)을 생성 자리에서 내려 `SETSF`로 채운다(`NEWS`는 모든 slot이 0·null인 버퍼). 다른 모듈의 초기값도 그 모듈의 구문 트리로 내리고 원문 위치는 생성 자리다.
+- **결정성:** 같은 입력 → 같은 바이트. 표의 순서는 처음 나온 순서·선언 순서이고 해시 표 순회를 쓰지 않는다. 읽어 다시 쓴 파일과 그 bytecode 덤프는 원본과 byte 단위로 같다(시험: corpus의 `.bc` 사례마다 쓰기 → 읽기 → 덤프 비교).
+- **verifier(로드 시 선형 1회, SL §11 — `VerifyBytecode`):** 구조를 본다 — 표 번호(함수 이름·참조 이름·리터럴 글자·같은 모듈 함수 번호), 함수 명령 구간이 명령 배열 안, 원문 위치 표의 길이, bank별 할당 수 ≤ frame 크기 ≤ 256, 매개변수 수 ≤ 할당 수. 명령마다: 알려진 opcode, EXTRA가 필요한 명령 뒤에 EXTRA가 있고 그 밖에는 EXTRA가 홀로 오지 않음, 레지스터 피연산자가 그 bank frame 안 — 묶음은 구간 전체다: `RET`(B·C가 함수 표의 반환 모양과 같음)·`RETERR`·`ENDEXEC`·`CONCAT`·`EQN`·`MUL.QUAT`/`MUL.MAT4`(4·16)·`AWAIT`·`TRY`(원본 C slot, 결과 C − 1)·`OK`, 필드 명령은 C(값 slot 수 — Ref·Buf는 1), `TOSTR`는 C(원본 slot 수 — 표시 종류와 맞음), 컨테이너 명령은 표지의 값·key bank·slot으로 각 피연산자, 같은 모듈 `CALL`은 부르는 함수의 매개변수가 호출 창(frame − 할당 수)에 들어감, `EMIT`·`CALLV`는 Ref 창 0번, `NEWLIT`은 인자 표 형식·인자 수·bank별 창, `CONV`는 숫자 종류 사이, 쓰지 않는 자리(`JMP`·호출의 A, 값 없는 `RET`의 A·C, 표지의 bit 7)는 0, 상수·문자열·참조 번호가 표 안이고 참조 종류가 명령과 맞음(`CALL` → 함수, `CALLN` → native, `EMIT`·`WAITEV` → 이벤트, 필드 명령 → 필드, 생성·`CAST` → 타입, `GETCTX` → 문맥, `NEWLIT` → 리터럴), 분기·`TRY` 실패 거리·switch case·await 주소가 함수 안의 명령 시작(EXTRA 단어가 아님), 모든 `AWAIT`가 await 표에 정확히 한 번 있음, 함수의 마지막 명령이 끝 명령(`JMP`·`RET`·`RETERR`·`ENDEXEC`·`FAULT`), 반환 slot 수 ≤ 그 bank frame, 같은 모듈 함수 참조는 함수 번호가 있음, profile은 0·1. 생존 구간은 할당 수 안. 문자열 표의 UTF-8 검사는 하지 않는다(VM은 문자열을 byte 열로 다룬다). switch case 값의 순서는 원문 순이다(정렬은 요구하지 않는다 — VM이 선형으로 찾거나 자기 색인을 만든다). struct 필드 명령(`GETSF`·`SETSF`)은 StructField 참조의 TYPE 필드와 bank·slot 수(C)가 맞아야 하고, `NEWS`의 Type 참조는 TYPE의 struct, enum `TOSTR`의 Type 참조는 TYPE의 enum이어야 한다(형식 버전 2). 객체 필드의 slot 수는 바인딩 검사(LC5d)에서 본다. 거부는 모듈 단위이며 사유(`BytecodeLoadError`)와 함수·주소를 돌려준다(SL §12 표 "로드"). 타입(Scalar 표현 종류·초기화 전 읽기 — 블록 단위 dataflow)·바인딩(native 시그니처 hash)·문맥(대기 금지 문맥의 `AWAIT`) 검사는 TYPE·IMPT 구역과 함수 문맥 표가 생기는 형식 버전 2(LC4d·LC6)에서 더한다.
+- **컴파일 직후 검사:** 컴파일러는 내린 모듈마다 verifier를 돌린다(거부는 컴파일러 결함 — Fatal). 그래서 corpus 전체가 verifier를 거친다.
+- 변조 시험: magic·버전·구역 tag·구역 길이·명령 1바이트(opcode·레지스터)·상수·참조 번호·분기 거리를 바꾼 파일이 정해진 사유로 거부된다.
 
 ## 6. 안정 ID·hash(LC4d)
 
-- **ID manifest:** 패키지마다 `<패키지>.rocksids.json`. Sparks 컴파일러가 두 번째 발급자이고 이름 키는 `<패키지>/<모듈 경로>.<선언>[.<멤버>]`, kind는 `type`·`field`·`subobject`·`function`·`rpc`·`enumCase`다(SL §12.2). 메타 컴파일러 `StableIdManifest.cs`의 kind·이름 검사를 넓힌다(SE-R8 파서 부분).
-- **발급:** 개발 빌드의 컴파일이 새 선언에 ID를 준다(입력 중 미완성 선언 제외 — 구문 오류가 있는 모듈은 발급하지 않는다). 데이터 연결 ID(`@save`·`@net`·`@edit` 필드, 소유 component, enum case)의 소실은 오류 S1005(새 코드), `@formerly`는 aliases로 기록한다.
-- **interface hash:** 모듈의 공개 선언(이름·시그니처·필드 타입·const 값·이벤트·함수별 효과 집합 — SL §12.3)을 정규 순서로 직렬화한 SHA-256. **body hash:** 함수 본문의 IR 덤프 바이트 SHA-256.
-- **재컴파일 범위:** 본문만 바뀌면 그 함수만, interface hash가 바뀌면 import한 모듈도 다시 검사한다.
+### 6.1 ID manifest(LC4d 확정)
+
+- **파일:** 패키지 폴더의 `<패키지>.rocksids.json`(C++ 모듈과 같은 형식 — `schema: 1`, `entries`의 `kind`·`name`·`id`·`aliases`·`retired`). 메타 컴파일러 `StableIdManifest.cs`가 Sparks kind와 이름 키를 받도록 넓힌다(SE-R8): kind는 기존 `type`·`field`에 `subobject`·`function`·`rpc`·`enumCase`를 더하고, Sparks 이름 키는 `<패키지>/<모듈 경로>.<선언>[.<멤버>]`다(예: `Game/Doors/Door.Door.Open`). 모듈 경로는 `.spark`를 뺀 패키지 안 경로(`/` 구분), 선언·멤버는 Sparks 식별자, handler 멤버는 `on(<경로>)`(예: `Game/Main.Door.on(Owner.Damaged)`). 멤버 ID(`field`·`subobject`·`function`·`rpc`·`enumCase`)의 주인은 모듈 경로 뒤 첫 선언(`<패키지>/<모듈>.<선언>`)이며 활성 멤버의 주인은 같은 파일의 활성 `type` 항목의 현재 이름이어야 한다(C++ `::` 이름과 같은 규칙 — 메타 컴파일러의 병합 검사 `StableIdMergeValidator`도 같은 주인 규칙을 모든 멤버 kind에 쓴다). 컴파일러도 manifest를 C#과 같은 수준으로 검사한다(S1006): 같은 (kind, 이름)이 이름·alias·은퇴 이름 사이에 둘, 같은 ID가 둘, 다른 패키지의 이름·alias, 주인 없는 활성 멤버.
+- **ID를 받는 선언:** class·struct·enum(`type`), 그 필드(`field` — class의 `let` 필드이고 초기값이 component 생성식(`let Hinge = Hinge()`)이면 `subobject`, 객체 타입의 참조 필드(`@edit let Target: Door`)는 `field`), enum case(`enumCase`), handler·`@rpc`·`@cheat`·`@editorButton`·`override fn`·interface를 구현하는 함수(`function` — SL §12.2: 기반 목록의 Sparks·엔진 interface(엔진 `base` 체인 포함) 메서드마다 class가 찾는 구현 함수 — 기반 class에서 상속한 구현이면 그 함수), `@rpc` 함수의 RpcId(`rpc`). 최상위 함수·지역은 ID가 없다. ID의 kind는 바뀌지 않는다: field와 subobject 사이로 선언 형태만 바꾸면 S1005다(메시지가 형태 변경을 알린다 — 은퇴와 데이터 이전이 필요하다).
+- **컴파일러의 역할:** 컴파일러는 GUID를 만들지 않는다(같은 입력 → 같은 출력). 패키지 manifest를 입력(`Compilation::AddIdManifest`)으로 받아 선언의 이름 키를 ID로 풀고, manifest에 없는 선언은 **발급 대기** 목록(`PendingIds` — kind·이름 키·`@formerly`의 옛 이름)으로 돌려준다. 발급(새 GUID·aliases 기록)은 그 목록을 받는 도구(CLI `sparks ids`·편집기 — LC8)가 manifest에 쓴다. manifest가 없는 패키지는 모든 선언이 발급 대기다.
+- **맞춤 순서:** 두 번 돈다(선언 순서와 무관하게 같은 결과). (1) 현재 이름 키가 활성 항목의 **현재 이름**과 같으면 그 항목이다. alias나 은퇴한 이름과 같으면 S1007 `id-name-reserved`다(옛 데이터가 그 이름을 가리킬 수 있다 — C# manifest의 "alias는 자동 이름 복구 수단이 아니다"와 같다). S1007·S1008을 낸 선언은 발급 대기에 넣지 않는다(오류가 있는 컴파일에서 도구는 발급하지 않는다). (2) 남은 선언은 `@formerly`, 그다음 주인 type의 rename 승계로 잇는다. 둘 다 아니면 발급 대기(새 ID)다.
+- **`@formerly("Old")`:** 선언의 옛 이름이다. 옛 키는 글자에 `/`가 있으면 전체 키(모듈을 옮긴 type — `@formerly("Game/Doors/Door.Door")`), 아니면 type은 같은 모듈 아래 이름, 멤버는 같은 주인 아래 이름(주인 type도 `@formerly`로 이어졌으면 옛 주인 키 아래)이다. manifest에 그 옛 키(현재 이름 또는 alias)의 활성 항목이 있으면 그 ID를 잇고, 발급 대기에 rename(옛 이름은 항목의 **현재 이름** — alias로 찾았어도, 주인 type도 rename이면 type rename 뒤의 키)을 남긴다. 그 항목을 이미 다른 선언이 이었으면(옛 이름이 아직 선언돼 있거나 `@formerly` 둘이 같은 이름) S1008 `id-claimed-twice`다(위치는 `@formerly`를 단 선언). 옛 키가 manifest에 없거나 은퇴했으면 진단하지 않는다(이미 옮겼거나 처음부터 없었다).
+- **type rename의 멤버 승계:** type이 `@formerly`로 이어지면 그 멤버는 `<옛 주인 키>.<같은 멤버 이름>`의 활성 항목을 잇고 발급 대기를 남기지 않는다 — 도구의 type rename(`StableIdManifest.Rename`)이 멤버 항목을 새 주인 아래로 함께 옮긴다. 멤버 이름도 바꿨으면 멤버에 `@formerly("<옛 멤버 이름>")`을 단다(옛 주인 아래에서 찾는다).
+- **모듈 이동:** type에 전체 키 `@formerly("<패키지>/<옛 모듈>.<옛 이름>")`을 달면 멤버까지 이어진다. 또는 도구의 `rocks ids rename`으로 manifest를 먼저 옮긴다.
+- **입력 전제:** 컴파일은 패키지의 모듈을 모두 담는다. 컴파일에 없는 모듈의 항목은 지운 것으로 판정한다(LSP의 단일 파일 검사도 패키지 전체를 넣는다 — 원문을 다시 분석하지 않는 모듈은 이전 트리로).
+- **S1005 `data-id-lost`:** manifest의 활성(retired가 아닌) `type`·`field`·`subobject`·`enumCase` 항목의 이름이 현재 선언의 이름 키에도 `@formerly` 옛 이름에도 없으면 오류다(저장·복제·편집 데이터가 연결을 잃을 수 있다). 위치는 manifest 파일의 그 항목 `name` 값, 수정 예는 새 이름에 `@formerly("<옛 이름>")`(모듈 이동이면 전체 옛 키)을 붙이거나, `rocks ids rename`으로 옮기거나, `rocks ids retire`로 은퇴시키기다. `function`·`rpc` 항목이 사라지는 것은 오류가 아니다(도구가 retire한다). 컴파일하지 않은 모듈(구문 오류 등)의 항목은 판정하지 않는다(입력 중 미완성 — SL §12.2).
+- **은퇴한 이름:** 은퇴한 항목의 이름·alias를 새 선언에 쓰면 S1007이다(도구는 은퇴 이름의 재발급을 거부하므로 발급 대기에 영원히 남는 대신 컴파일이 알린다).
+- **결정 D8:** 사라진 필드는 데이터 연결 여부(`@save`·`@net`·`@edit`)와 관계없이 S1005다 — manifest에는 그 attribute가 없고, 이전 컴파일 결과에 기대면 결과가 컴파일 이력에 달린다. 대안(일반 필드는 조용히 retire)은 `@save` 필드를 지운 실수를 놓친다.
+
+### 6.2 hash(LC4d 확정)
+
+- **interface hash:** 모듈의 공개 표면을 정규 텍스트로 쓴 뒤 SHA-256한 것(`BytecodeModule::interfaceHash`, `.sparkc` 머리). 정규 텍스트는 선언 순으로 import 경로 목록, 확장 이벤트, class·struct·interface·enum(이름·attribute·기반·필드 이름·타입·attribute·초기값 식), const(이름·타입·값), 함수(이름·attribute·매개변수 타입·반환 타입·async)와 LC3b 효과 집합(함수별 — 본문이 바뀌어 효과가 바뀌면 interface가 바뀐다, SL §12.3)이다. 원문 조각(attribute·초기값·값)은 토큰을 공백 하나로 이은 것이라 원문 위치·주석·공백은 들어가지 않는다(`1+1`과 `1 + 1`은 같다). 다른 모듈의 Sparks 타입은 `<패키지>:<import 경로>:` 접두로 구별한다. handler는 interface가 아니다(호출할 수 없다) — handler의 추가·삭제·경로 변경은 아래 함수 집합 비교가 잡는다. 본문은 넣지 않는다.
+- **body hash:** 함수·handler마다 그 IR 덤프 byte(각 줄 끝의 위치 주석 `    ; <줄>:<열>`만 뺀다 — 같은 본문이 줄만 옮겨도 같고, 문자열 조각 안의 같은 글자는 그대로 들어간다)의 SHA-256(`BytecodeFunction::bodyHash`, `.sparkc` FUNC 표).
+- **재컴파일 범위(`FindRecompileScope`):** 이전 컴파일(진단 없이 Codegen까지 간 **마지막 성공 컴파일**)의 모듈별 interface hash·함수별 body hash와 지금 것을 비교한다. 모듈은 (패키지 이름, import 경로), 함수는 이름으로 맞춘다. interface가 바뀌었거나 새 모듈이거나 이전에 있던 함수(handler 포함 — 지운 handler, 경로를 바꾼 handler)가 사라졌으면 그 모듈을, 그리고 그것을 import하는 모듈(전이 폐포)을 다시 검사한다. 그 밖의 모듈은 body hash가 바뀌었거나 새로 생긴 함수만 다시 내린다(본문 reload R1). 다시 검사하는 모듈의 함수는 함수 목록에 따로 넣지 않는다. 줄만 옮긴 함수는 "안 바뀜"이다 — reload는 모듈 bytecode(DBUG 위치 포함)를 새 컴파일 것으로 통째로 바꾸므로 위치는 따로 갱신하지 않는다. binding schema·manifest profile·사전(SL §12.3의 다른 입력)이 바뀌면 범위를 쓰지 않고 전체를 다시 검사한다(호출자 책임).
 
 ## 7. 결정 항목(권장안 — 2026-11-22 확정)
 
 - **D1 값 표현:** 수학 타입은 Scalar 펼침, struct·문자열·컨테이너는 Buf(COW). 대안(모든 값 타입을 Buf)은 수학 연산마다 할당이 생기고, 대안(struct도 펼침)은 표현이 둘이 된다.
 - **D2 IR 형식:** 비SSA 3-주소, 지역 이름 = 가상 레지스터 묶음. 최적화는 범위 밖이므로 SSA 구성·해체 비용이 이득이 없다.
-- **D3 레지스터 상한:** bank마다 256(8비트), 함수 명령 32,767개(16비트 분기 거리). 넘으면 컴파일 오류(S1201). 대안(16비트 피연산자)은 명령이 64비트가 되어 SL §11의 32비트 고정 명령과 어긋난다.
+- **D3 레지스터 상한:** bank마다 256(8비트), 함수 명령 32,767개(16비트 분기 거리). 넘으면 컴파일 오류(S1150). 대안(16비트 피연산자)은 명령이 64비트가 되어 SL §11의 32비트 고정 명령과 어긋난다.
 - **D7 호출 규약:** bank별 register window(Lua 방식). 대안(호출마다 인자 배열 할당)은 호출당 할당이 생기고, 대안(모든 값을 한 bank)은 SL §11의 3 bank 결정과 어긋난다.
 - **D4 상수 표 범위:** 모듈 하나. 함수마다 두면 본문 reload가 쉬우나 중복이 많다 — 본문 reload(LC7)는 함수 단위 상수 구간을 따로 두지 않고 모듈 상수 표를 덧붙이는 방식으로 한다.
 - **D5 유지 자원 해제:** 컴파일러가 블록을 떠나는 모든 경로에 `RELEASE`를 낸다(실행 중 범위 추적 없이). fault·취소는 LC6 실행이 frame의 유지 자원 표로 해제한다.

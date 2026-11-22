@@ -1,0 +1,44 @@
+fn Greet(name: string, n: int): string {
+    return "Hello ${name} x${n}";
+}
+
+fn Show(v: vec3, f: float, g: float32, b: bool): string {
+    return "${v} ${f} ${g} ${b}";
+}
+
+fn Wide(n: uint64, m: int8, q: quat): string {
+    return "${n}/${m} ${q}";
+}
+
+fn Order(a: string, b: string): bool {
+    return a < b;
+}
+
+fn Same(a: string, b: string): bool {
+    return a == b;
+}
+
+fn Pick(flag: bool): string? {
+    if (flag) {
+        return "yes";
+    }
+
+    return null;
+}
+
+fn OrDefault(text: string?): string {
+    return text ?? "none";
+}
+
+fn Verbatim(): string {
+    return @"C:\path ""quoted""";
+}
+
+fn Repeat(text: string, count: int): string {
+    var result = "";
+    for (i in 0..<count) {
+        result = "${result}${text}${i}";
+    }
+
+    return result;
+}

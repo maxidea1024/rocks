@@ -165,6 +165,19 @@ public:
         return StringView(data_, count);
     }
 
+    // offset부터 byteCount byte를 빌리는 부분 view다(검증하지 않는 byte 단위 — UE FStringView::Mid
+    // 대응). 호출자가 경계를 알 때 쓴다(예: ASCII 구분자 자리에서 자르기 — 유효한 UTF-8을 ASCII
+    // byte 자리에서 자르면 결과도 유효하다). 경계·UTF-8 검증이 필요하면 TrySliceBytes를 쓴다.
+    // offset + byteCount가 ByteCount()를 넘으면 계약 위반으로 Fatal이다.
+    // 예: StringView("Art/Rock.png").SliceBytes(4, 4) == "Rock"
+    constexpr StringView SliceBytes(usize offset, usize byteCount) const noexcept {
+        if (offset > bytes_ || byteCount > bytes_ - offset) {
+            platform::Fatal("StringView::SliceBytes range is out of bounds");
+        }
+
+        return StringView(data_ + offset, byteCount);
+    }
+
     // 원본 전체가 유효한 UTF-8인지와 양 끝이 code point 경계인지 검사한다.
     // byte 범위 초과·문자 중간 절단은 InvalidArgument다. 빈 slice도 UTF 경계가 필요하다.
     // 반환 view는 새 storage를 만들지 않으며 grapheme 경계까지 보장하지 않는다.

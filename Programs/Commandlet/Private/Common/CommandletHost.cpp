@@ -1,7 +1,8 @@
 #include "CommandletHost.h"
-#include "AssetCommandletSupport.h"
-#include "AssetEditCommandlet.h"
-#include "AssetIndexCommandlet.h"
+#include <AssetCommandlets/AssetAliasCommandlet.h>
+#include <AssetCommandlets/AssetCommandletSupport.h>
+#include <AssetCommandlets/AssetEditCommandlet.h>
+#include <AssetCommandlets/AssetIndexCommandlet.h>
 #include "ContentSignCommandlet.h"
 #include "LogCommandlet.h"
 #include <Config/ConfigDump.h>
@@ -213,6 +214,35 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
     if (!registered) {
         return 1;
     }
+    registered =
+        registry.Register({"asset-move", "Move or rename an editor package or a directory of them.",
+                           &RunAssetMoveCommand, &assetContext});
+    if (!registered) {
+        return 1;
+    }
+    registered =
+        registry.Register({"asset-delete", "Delete an editor package that nothing references.",
+                           &RunAssetDeleteCommand, &assetContext});
+    if (!registered) {
+        return 1;
+    }
+    registered = registry.Register(
+        {"asset-duplicate", "Save a copy of an editor package under a new path and AssetId.",
+         &RunAssetDuplicateCommand, &assetContext});
+    if (!registered) {
+        return 1;
+    }
+    registered = registry.Register({"asset-orphans-delete", "Delete an orphaned import output.",
+                                    &RunAssetOrphansDeleteCommand, &assetContext});
+    if (!registered) {
+        return 1;
+    }
+    registered = registry.Register({"asset-fix-duplicate-id",
+                                    "Give a package a new AssetId when another file has its id.",
+                                    &RunAssetFixDuplicateIdCommand, &assetContext});
+    if (!registered) {
+        return 1;
+    }
     registered = registry.Register(
         {"asset-index-rebuild",
          "Rescan the project without the index cache, clean temporary files and rewrite the cache.",
@@ -223,6 +253,27 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
     registered = registry.Register({"asset-index-verify",
                                     "Check the editor packages of the project and report problems.",
                                     &RunAssetIndexVerifyCommand, &allocator});
+    if (!registered) {
+        return 1;
+    }
+    registered = registry.Register({"asset-orphans-list", "List the orphaned import outputs.",
+                                    &RunAssetOrphansListCommand, &allocator});
+    if (!registered) {
+        return 1;
+    }
+    registered = registry.Register({"asset-alias-list", "List the path aliases of the project.",
+                                    &RunAssetAliasListCommand, &allocator});
+    if (!registered) {
+        return 1;
+    }
+    registered = registry.Register({"asset-alias-remove", "Remove a path alias of the project.",
+                                    &RunAssetAliasRemoveCommand, &allocator});
+    if (!registered) {
+        return 1;
+    }
+    registered = registry.Register(
+        {"asset-alias-prune", "Remove the expired path aliases that no config file still names.",
+         &RunAssetAliasPruneCommand, &allocator});
     if (!registered) {
         return 1;
     }

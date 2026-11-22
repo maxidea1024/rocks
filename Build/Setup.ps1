@@ -420,7 +420,8 @@ function Get-RocksBuildToolsStatus {
 
     $name = "$($instance.displayName) $($instance.installationVersion)"
     $data = @{ Path = $instance.installationPath; Add = $VcComponents }
-    $sdk = Get-RocksWindowsSdks
+    # @(...): a function returns one SDK as a single object, and StrictMode rejects .Count on it (CI images have one SDK).
+    $sdk = @(Get-RocksWindowsSdks)
     if ($sdk.Count -eq 0) { return New-RocksStatus $false "$name, no Windows SDK" $install '' $data }
     $tools = Get-RocksMsvcToolsDirectory $instance
     $pinned = Get-RocksEnvironmentValue 'ROCKS_MSVC_TOOLSET'
@@ -691,9 +692,12 @@ function Invoke-RocksSetup($Steps, [bool] $CheckOnly, [bool] $AssumeYes, [script
 # --- Self test -------------------------------------------------------------------------------------------------------------------------
 
 # A fake step for the main flow tests: State.<Name> says whether it passes, its install sets it (or throws) and counts the call.
+# GetNewClosure binds the closure to a new module scope that does not see script-scope functions when the script runs with -Command (as CI
+# does), so the closure calls New-RocksStatus through a captured reference.
 function New-RocksFakeStep([string] $Name, [hashtable] $State, [bool] $Installable = $true, [bool] $Fails = $false) {
+    $newStatus = ${function:New-RocksStatus}
     $check = {
-        if ($State[$Name]) { return New-RocksStatus $true 'fake' }
+        if ($State[$Name]) { return & $newStatus $true 'fake' }
         $install = $null
         if ($Installable) {
             $install = {
@@ -704,7 +708,7 @@ function New-RocksFakeStep([string] $Name, [hashtable] $State, [bool] $Installab
             }
         }
 
-        return New-RocksStatus $false 'fake missing' $install '' @{ State = $State; Name = $Name; Fails = $Fails }
+        return & $newStatus $false 'fake missing' $install '' @{ State = $State; Name = $Name; Fails = $Fails }
     }.GetNewClosure()
     return @{ Name = $Name; Check = $check }
 }
@@ -827,9 +831,10 @@ function Invoke-RocksSelfTest {
         # A step that an earlier install provides (the IDE provides the build tools) is checked again and not installed twice.
         $state = @{ installs = @(); asks = 0 }
         $ide = New-RocksFakeStep 'Ide' $state
+        $newStatus = ${function:New-RocksStatus}
         $tools = @{ Name = 'Tools'; Check = {
-            if ($state['Ide']) { return New-RocksStatus $true 'from the IDE' }
-            return New-RocksStatus $false 'missing' { param($d) $d.State['installs'] += @('Tools') } '' @{ State = $state }
+            if ($state['Ide']) { return & $newStatus $true 'from the IDE' }
+            return & $newStatus $false 'missing' { param($d) $d.State['installs'] += @('Tools') } '' @{ State = $state }
         }.GetNewClosure() }
         $code = Invoke-RocksSetup @($ide, $tools) $false $true $null
         Assert-Rocks ($code -eq 0 -and ($state['installs'] -join ',') -eq 'Ide') "flow: a step provided by an earlier install is not installed ($($state['installs'] -join ','))"

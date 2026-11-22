@@ -1187,7 +1187,7 @@ Rocks는 이 값을 쓰지 않는다.
 | GcBench·WorldBench(engine-runtime 이식 때 추가) | Tool | Full, `suppressSystemErrorDialogs` | None | TestSupport `PrepareAutomatedTestProcess`·HostFailure 링크를 Launch 설정으로 바꾼다. 손 파싱 입력이 `Span<const StringView>` | 인자·출력·종료 코드 |
 | LogBench | Tool | Full | None(자체 LogSystem을 잰다) | 같음 | 같음 |
 | ShaderToolSpike | Tool | Full | Stderr | `PrepareSpikeProcess`를 `suppressSystemErrorDialogs`로 바꾼다 | 인자·종료 코드. 도구 로그 시작 실패 때 본문을 계속 도는 동작(Launch 정책도 같다, D22) |
-| 게임 템플릿(`Templates/Game/Foundation`) | EngineHost(게임 기본값) | Full | None | `int main()`을 매크로와 `Run`으로 바꾼다. `Game.Build.cs` 의존에 `Launch`를 더한다 | 종료 코드 0–4 |
+| 게임 템플릿(`Templates/Game/Foundation`) | EngineHost(게임 기본값) | Full | None | `int main()`을 매크로와 `Run`으로 바꾼다. `<프로젝트>.Build.cs`(템플릿 `FoundationTemplate.Build.cs`) 의존에 `Launch`를 더한다 | 종료 코드 0–4 |
 | C# 도구(Rocks.Build.Cli·MetaCompiler·ToolTests 등) | — | 대상 아님 | — | 바꾸지 않는다(요구 14절) | — |
 
 - **새 실행 프로그램.** 템플릿과 이 문서의 예(7.4절)를 따른다. 엔진이 소유한 native 소스가 `main`·`wmain`·`WinMain`·`wWinMain`을 직접 정의하면 policy `process-entry-point`가 실패로 알린다(예외 목록은 `Launch/EntryPoint.h`와 내장 호스트 시험 실행 파일뿐, 25절 LC4).
@@ -1741,7 +1741,7 @@ bool SetCrashAnnotation(CrashAnnotation slot, const char* text, usize bytes) noe
     - 시험 probe 서명은 `int (*)(int, const char* const*)`로 바꿨다(Launch 인자를 const 그대로 넘긴다). `PrepareAutomatedTestProcess`는 지웠다(TestRunner가 대화상자를 끈다). `PrepareFatalTestProcess`는 `SuppressSystemErrorDialogs`를 부르는 얇은 함수로 남겼다(probe가 실패 지점에서 의도를 드러낸다). 시험 실행기 안의 크래시 시험은 "설치 안 됨" 대신 "Launch가 설치함"과 `ValidateCrashReportingOptions`를 단언한다. `ProcessCommandLine_CapturesOnce`는 실행기가 이미 캡처한 상태에서 두 번째 캡처가 AlreadyExists이고 값이 그대로인지 본다.
     - 벤치: 손 파싱이 `Span<const StringView>`다. SpatialIndexBench JSON의 `argv[0]`은 실행 파일 절대 경로가 됐다(전에는 셸이 준 철자).
     - ShaderToolSpike: `PrepareSpikeProcess`(Win64 파일 하나)를 지우고 `suppressSystemErrorDialogs`·도구 로그 Stderr다.
-    - 게임 템플릿: `Run(context)` 본문, kind EngineHost, Full. `Game.Build.cs` 의존에 `Launch`를 더했다(템플릿 소스는 영어 주석 정책).
+    - 게임 템플릿: `Run(context)` 본문, kind EngineHost, Full. `<프로젝트>.Build.cs`(템플릿 `FoundationTemplate.Build.cs`) 의존에 `Launch`를 더했다(템플릿 소스는 영어 주석 정책).
     - 내장 호스트 시험 실행 파일의 `SetErrorMode`는 그대로 뒀다(Rocks를 내장한 외부 호스트 자신의 정책을 흉내 낸다).
   - **시험 추가.** `Native.Launch.settings-warnings`(잘못된 예산 경고와 유지, 없는 도우미 경로 경고), `Native.Launch.off-no-teardown`, `Native.Launch.reinstalled-crash`(InProcess로 다시 건 뒤 프로세스 안 덤프·helper null), 내장 호스트의 `--in-process`·`no-teardown`, `Launch_FailedContinuingStageIsNotStopped`, `Launch_TerminationRequestFlag` 되돌림(`detail::ClearTerminationRequest`), `Policy.ProcessEntryPoints`, `CrashReporting_ValidationRejectsInvalidOptions`.
 - LC4 리뷰 반영(2026-11-19, LC5와 함께, 커밋 전).

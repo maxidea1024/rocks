@@ -21,7 +21,7 @@ bool SplitReference(StringView text, StringView& head, StringView& objectPath) n
     for (usize index = 0; index < text.ByteCount(); ++index) {
         if (text.Data()[index] == ObjectPathSeparator) {
             head = StringView(text.Data(), index);
-            objectPath = StringView(text.Data() + index + 1, text.ByteCount() - index - 1);
+            objectPath = text.SliceBytes(index + 1, text.ByteCount() - index - 1);
             return !objectPath.IsEmpty();
         }
     }
@@ -39,8 +39,7 @@ Result<void> ValidateObjectPath(StringView path, Allocator& scratch) noexcept {
             continue;
         }
 
-        if (auto valid =
-                ValidateNameComponent(StringView(path.Data() + start, index - start), scratch);
+        if (auto valid = ValidateNameComponent(path.SliceBytes(start, index - start), scratch);
             !valid) {
             return valid;
         }
@@ -93,6 +92,11 @@ Result<AssetId> AssetTextResolver::ResolveId(StringView head) noexcept {
 
     auto entry = index_->FindByPath(path.Value());
     if (!entry) {
+        // 색인에 없는 경로는 별칭으로 푼다(옛 경로 — 같은 경로 키 둘은 그대로 오류).
+        if (entry.Error() == ErrorCode::NotFound && aliases_ != nullptr) {
+            return aliases_->ResolveAlias(path.Value(), warnings_);
+        }
+
         return Result<AssetId>::Failure(entry.Error());
     }
 

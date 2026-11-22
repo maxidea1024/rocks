@@ -122,6 +122,32 @@ public:
         return substituted;
     }
 
+    // 지금 위치의 null이 아닌 Soft 참조 값의 asset 대신 저장할 asset이다(hook이 없거나 검사
+    // 모드면 asset — FieldCodecHooks::SubstituteSoftReference). hook이 null을 돌려주면
+    // InvalidArgument다.
+    Result<AssetId> SubstituteSoftReference(AssetId asset, StringView objectPath,
+                                            TypeId expectedType) noexcept {
+        FieldCodecHooks* hooks = Hooks();
+        if (!hooks || !Current() || IsRequiredCheck()) {
+            return Result<AssetId>::Success(asset);
+        }
+
+        PathStep steps[MaxPropertyPathSteps];
+        SoftReferenceInfo info;
+        info.asset = asset;
+        info.objectPath = objectPath;
+        info.expectedType = expectedType;
+        info.effectiveFlags = EffectiveFlags();
+        info.objectIndex = ObjectIndex();
+        info.path = BuildPath(steps);
+        auto substituted = hooks->SubstituteSoftReference(info);
+        if (substituted && substituted.Value().IsNull()) {
+            return Result<AssetId>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        return substituted;
+    }
+
 protected:
     FieldEncodeContext(const FieldEncodePolicy& policy, FieldCodecHooks* hooks,
                        uint32 referenceWire) noexcept

@@ -1,0 +1,35 @@
+fn ToByte(a: int): uint8 {
+    return uint8(a);
+}
+
+fn ToInt8(a: uint64): int8 {
+    return int8(a);
+}
+
+fn ToInt(a: uint64): int {
+    return int(a);
+}
+
+fn ToUnsigned(a: int): uint64 {
+    return uint64(a);
+}
+
+fn Widen(a: int): float {
+    return float(a);
+}
+
+fn WidenUnsigned(a: uint64): float {
+    return float(a);
+}
+
+fn Widen32(a: int32): float32 {
+    return float32(a);
+}
+
+fn Narrow(a: float): float32 {
+    return float32(a);
+}
+
+fn Grow(a: float32): float {
+    return float(a);
+}

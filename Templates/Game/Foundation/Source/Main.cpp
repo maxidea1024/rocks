@@ -1,5 +1,5 @@
 #include <GameObject.generated.h>
-#include <SampleGame/SampleGame.module.generated.h>
+#include <FoundationTemplate/FoundationTemplate.module.generated.h>
 #include <Launch/EntryPoint.h>
 
 namespace {
@@ -13,20 +13,20 @@ int Run(rocks::launch::ApplicationContext& context) noexcept {
     rocks::TypeRegistry types(allocator);
     // RegisterModuleTypes (declared in the module generated header, defined in the module generated
     // source that the build compiles into this executable) registers the reflection types of this
-    // module and its dependencies, bases first. GeneratedType<sample::GameObject> comes from the
-    // generated header of that type, <GameObject.generated.h>.
+    // module and its dependencies, bases first. GeneratedType<foundationtemplate::GameObject> comes
+    // from the generated header of that type, <GameObject.generated.h>.
     rocks::ModuleRegistration registration(types, allocator);
-    if (!rocks::generated::SampleGame::RegisterModuleTypes(registration)) {
+    if (!rocks::generated::FoundationTemplate::RegisterModuleTypes(registration)) {
         return 1;
     }
     rocks::ObjectRegistry objects(allocator, types, {100, 1});
-    auto created = objects.NewObject<sample::GameObject>(
-        objects.OwnerAccess(), rocks::GeneratedType<sample::GameObject>::Id());
+    auto created = objects.NewObject<foundationtemplate::GameObject>(
+        objects.OwnerAccess(), rocks::GeneratedType<foundationtemplate::GameObject>::Id());
     if (!created) {
         return 2;
     }
-    auto borrowed =
-        objects.Resolve<sample::GameObject>(objects.OwnerAccess(), created.Value().Handle());
+    auto borrowed = objects.Resolve<foundationtemplate::GameObject>(objects.OwnerAccess(),
+                                                                    created.Value().Handle());
     if (!borrowed) {
         return 3;
     }
@@ -34,10 +34,12 @@ int Run(rocks::launch::ApplicationContext& context) noexcept {
     return object && object.Value()->health == 100 ? 0 : 4;
 }
 
-// The name names crash report folders (Saved/Crashes/SampleGame-<start UTC>-<pid>/).
+// The name names crash report folders (Saved/Crashes/FoundationTemplate-<start UTC>-<pid>/).
 const rocks::launch::ApplicationDescription& Describe() noexcept {
     static constexpr rocks::launch::ApplicationDescription Description{
-        .name = "SampleGame", .kind = rocks::launch::ApplicationKind::EngineHost, .run = &Run};
+        .name = "FoundationTemplate",
+        .kind = rocks::launch::ApplicationKind::EngineHost,
+        .run = &Run};
     return Description;
 }
 

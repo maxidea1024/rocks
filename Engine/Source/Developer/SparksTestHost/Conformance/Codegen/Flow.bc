@@ -1,0 +1,212 @@
+module "Main"
+compiler "sparks 0.4.0"
+profile full
+content d07e45231b7e254c54c25ae4de7aa9ff15c032e4d3da0d19c60d196d7995e898
+interface 58849464a0a56e477684a5841f96bb1c1df1472d1c6c378d0e55e2f949f03df2
+k0 = 0x0000000000000000
+k1 = 0x3ff0000000000000
+k2 = 0x4000000000000000
+k3 = 0x4008000000000000
+k4 = 0x3fe0000000000000
+k5 = 0x4014000000000000
+k6 = 0x3fb999999999999a
+t0 = "Wrap"
+t1 = "Mover.SetSpeed"
+t2 = ">f64"
+t3 = "Mover.Speed"
+t4 = "Mover.Fetch"
+t5 = ">w"
+t6 = "NextTick"
+t7 = "Mover.Check"
+t8 = "Mover.Run"
+t9 = "f64,e>w"
+t10 = "Delay"
+t11 = "w,w>w"
+t12 = "All"
+t13 = "Mover.on Owner.Damaged"
+t14 = "World"
+t15 = ">x"
+t16 = "World.Audio"
+t17 = "Mover.Cue"
+t18 = "x,x>?<x>"
+t19 = "AudioSystem.StartLoop"
+t20 = "Component.Owner"
+t21 = "x,x>void"
+t22 = "Actor.Pushed"
+t23 = "x>void"
+t24 = "LoopHandle.Pause"
+t25 = "Mover.$init"
+t26 = "Mover"
+t27 = "ScriptableComponent"
+t28 = "Cue"
+t29 = "Speed"
+t30 = "x,f64>void"
+t31 = "Actor.Damaged"
+t32 = "Owner"
+t33 = "Damaged"
+t34 = "sparks 0.4.0"
+t35 = "Main"
+ref0 = field Mover.Speed args ">f64"
+ref1 = language NextTick args ">w"
+ref2 = function Mover.Fetch #2
+ref3 = function Mover.Check #3
+ref4 = language Delay args "f64,e>w"
+ref5 = language All args "w,w>w"
+ref6 = context World
+ref7 = field World.Audio args ">x"
+ref8 = field Mover.Cue args ">x"
+ref9 = native AudioSystem.StartLoop args "x,x>?<x>"
+ref10 = rpc Mover.SetSpeed
+ref11 = field Component.Owner args ">x"
+ref12 = event Actor.Pushed args "x,x>void"
+ref13 = native LoopHandle.Pause args "x>void"
+ref14 = event Actor.Damaged args "x,f64>void"
+class0 = Mover : ScriptableComponent s1 r1 b0 init Mover.$init
+  field Cue r0 x1
+  field Speed s0 x1
+  handler Owner.Damaged Mover.on Owner.Damaged await skipWhileBusy ref11 -> ref14
+
+function Wrap  scalar=8/8 ref=0/0 buf=0/0 params=1/0/0 returns sx4
+  body db8b8a03718bc7ebb103f347e4037bf0cfb87c92939a0d9794bfb9146885acdd
+  0000  LOADI  s1, 0    ; 4:14
+  0001  EQ.I  s1, s0, s1    ; 4:9
+  0002  BRF  s1, 0009    ; 4:9
+  0003  LOADI  s1, 2    ; 5:16
+  0004  LOADI  s1, 3    ; 5:9
+  0005  LOADI  s2, 0    ; 5:9
+  0006  LOADI  s3, 0    ; 5:9
+  0007  LOADI  s4, 0    ; 5:9
+  0008  RET  s1 x4    ; 5:9
+  0009  LOADK  s1, k0    ; 8:12
+  0010  LOADK  s2, k0    ; 8:12
+  0011  LOADK  s3, k0    ; 8:12
+  0012  LOADK  s4, k1    ; 8:17
+  0013  MOV.S  s1, s4    ; 8:17
+  0014  LOADK  s4, k2    ; 8:22
+  0015  MOV.S  s2, s4    ; 8:22
+  0016  LOADK  s4, k3    ; 8:27
+  0017  MOV.S  s3, s4    ; 8:27
+  0018  LOADI  s4, 0    ; 8:5
+  0019  MOV.S  s5, s1    ; 8:5
+  0020  MOV.S  s6, s2    ; 8:5
+  0021  MOV.S  s7, s3    ; 8:5
+  0022  RET  s4 x4    ; 8:5
+
+function Mover.SetSpeed  scalar=1/1 ref=1/1 buf=0/0 params=1/1/0 returns sx0
+  body f2106c148b9789fd2307ae71b5d09844205ddc16964ffb229e40a448aa28c131
+  0000  SETF.S  r0, s0, ref0    ; 16:9
+  0002  RET  -    ; 17:5
+
+function Mover.Fetch  scalar=3/3 ref=2/3 buf=0/0 params=0/1/0 returns sx2
+  body 47fef5bc4bbb4af34b506e9c213d1b78fb6e3793a9eb52da7cfab3e746eac022
+  await 0002  live
+  0000  CALLL  ref1    ; 20:15
+  0001  MOV.R  r1, r2    ; 20:15
+  0002  AWAIT  -, r1    ; 20:9
+  0004  LOADI  s0, 1    ; 21:16
+  0005  LOADI  s1, 0    ; 21:9
+  0006  MOV.S  s2, s0    ; 21:9
+  0007  RET  s1 x2    ; 21:9
+
+function Mover.Check  scalar=2/2 ref=1/1 buf=0/0 params=1/1/0 returns sx1
+  body 7b5e2718c2b6f56021e41fe8c9366bee971d0c211d9bfa920be14ef6f71a3de5
+  0000  LOADI  s1, 0    ; 25:17
+  0001  LT.I  s1, s0, s1    ; 25:13
+  0002  BRF  s1, 0006    ; 25:13
+  0003  LOADI  s1, 3    ; 26:20
+  0004  LOADI  s1, 4    ; 26:13
+  0005  RET  s1 x1    ; 26:13
+  0006  LOADI  s1, 0    ; 29:9
+  0007  RET  s1 x1    ; 29:9
+
+function Mover.Run  scalar=4/6 ref=3/5 buf=0/0 params=0/1/0 returns sx2
+  body f5e6a2881a37c3df10829f1f3ca48c3e0f749dff6f66a421cfa273f8f67a2469
+  await 0026  live s2..s3
+  0000  MOV.R  r3, r0    ; 33:27
+  0001  CALL  ref2    ; 33:27
+  0002  MOV.S  s0, s4    ; 33:27
+  0003  MOV.S  s1, s5    ; 33:27
+  0004  TRY.S  s2, s0 x2, else 0013    ; 33:17
+  0006  MOV.R  r3, r0    ; 34:19
+  0007  MOV.S  s4, s2    ; 34:19
+  0008  CALL  ref3    ; 34:19
+  0009  MOV.S  s3, s4    ; 34:19
+  0010  TRY.S  s0, s3 x1, else 0029    ; 34:9
+  0012  JMP  0014    ; 34:9
+  0013  RETERR.S  s0 x2    ; 33:17
+  0014  CALLL  ref1    ; 35:19
+  0015  MOV.R  r1, r3    ; 35:19
+  0016  LOADK  s0, k4    ; 35:37
+  0017  LOADI  s1, 0    ; 35:42
+  0018  MOV.S  s4, s0    ; 35:31
+  0019  MOV.S  s5, s1    ; 35:31
+  0020  CALLL  ref4    ; 35:31
+  0021  MOV.R  r2, r3    ; 35:31
+  0022  MOV.R  r3, r1    ; 35:15
+  0023  MOV.R  r4, r2    ; 35:15
+  0024  CALLL  ref5    ; 35:15
+  0025  MOV.R  r1, r3    ; 35:15
+  0026  AWAIT  -, r1    ; 35:9
+  0028  JMP  0030    ; 35:9
+  0029  RETERR.S  s3 x1    ; 34:9
+  0030  LOADI  s0, 1    ; 36:20
+  0031  ADD.I64  s0, s2, s0    ; 36:16
+  0032  LOADI  s1, 0    ; 36:9
+  0033  MOV.S  s2, s0    ; 36:9
+  0034  RET  s1 x2    ; 36:9
+
+function Mover.on Owner.Damaged  scalar=4/6 ref=4/6 buf=0/0 params=1/1/0 returns sx0
+  body 4ad03533439467d251f5777beb499fd2de7a9cb08a364d118b8b34d488d5ad0c
+  await 0040  live s0..s1 r0..r1
+  0000  LOADI  s1, 3    ; 41:20
+  0001  LOADI  s2, 0    ; 42:23
+  0002  LT.I  s2, s2, s1    ; 42:16
+  0003  BRF  s2, 0020    ; 42:16
+  0004  GETCTX  r1, ref6    ; 43:24
+  0005  GETF.R  r1, r1, ref7    ; 43:24
+  0007  GETF.R  r2, r0, ref8    ; 43:46
+  0009  MOV.R  r4, r1    ; 43:24
+  0010  MOV.R  r5, r2    ; 43:24
+  0011  CALLN  ref9    ; 43:24
+  0012  MOV.R  r1, r4    ; 43:24
+  0013  LOADI  s2, 1    ; 44:21
+  0014  SUB.I64  s2, s1, s2    ; 44:13
+  0015  MOV.S  s1, s2    ; 44:13
+  0016  LOADK  s2, k5    ; 45:26
+  0017  LT.F  s2, s2, s0    ; 45:17
+  0018  BRT  s2, 0031    ; 45:17
+  0019  JMP  0034    ; 45:17
+  0020  MOV.R  r4, r0    ; 53:9
+  0021  MOV.S  s4, s0    ; 53:9
+  0022  CALLRPC  ref10    ; 53:9
+  0023  GETF.R  r2, r0, ref11    ; 54:14
+  0025  GETF.R  r3, r0, ref11    ; 54:27
+  0027  MOV.R  r4, r2    ; 54:9
+  0028  MOV.R  r5, r3    ; 54:9
+  0029  EMIT  ref12    ; 54:9
+  0030  RET  -    ; 55:5
+  0031  ISSOME.R  s2, r1    ; 46:17
+  0032  BRT  s2, 0043    ; 46:17
+  0033  JMP  0047    ; 46:17
+  0034  LOADK  s2, k6    ; 50:25
+  0035  LOADI  s3, 0    ; 50:30
+  0036  MOV.S  s4, s2    ; 50:19
+  0037  MOV.S  s5, s3    ; 50:19
+  0038  CALLL  ref4    ; 50:19
+  0039  MOV.R  r2, r4    ; 50:19
+  0040  AWAIT  -, r2    ; 50:13
+  0042  JMP  0049    ; 50:13
+  0043  MOV.R  r2, r1    ; 46:17
+  0044  MOV.R  r4, r2    ; 46:17
+  0045  CALLN  ref13    ; 46:17
+  0046  JMP  0047    ; 46:17
+  0047  RELEASE  r1    ; 47:17
+  0048  JMP  0020    ; 47:17
+  0049  RELEASE  r1    ; 42:26
+  0050  JMP  0001    ; 42:9
+
+function Mover.$init  scalar=1/1 ref=1/1 buf=0/0 params=0/1/0 returns sx0
+  body a3cfeb478d4926d5fc16fd91dbf1fcd1805d14e1e16654957be4d6832b8f983b
+  0000  LOADK  s0, k1    ; 13:5
+  0001  SETF.S  r0, s0, ref0    ; 13:5
+  0003  RET  -    ; 56:1

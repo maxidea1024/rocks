@@ -8,6 +8,7 @@
 #include <AssetRuntime/AssetTypeHooks.h>
 #include <AssetRuntime/PackageLoad.h>
 #include <Core/Containers/Array.h>
+#include <Core/Containers/HashMap.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Object/ConstructionContext.h>
 #include <Object/ObjectRegistry.h>
@@ -83,12 +84,40 @@ enum class EditorWarningKind : uint8 {
     // 저장: 교체는 보이지만 디렉터리 동기화를 확인하지 못했다(진단 NotDurable — 저장은 성공).
     NotDurable,
     // 저장: 그 디렉터리의 고아 임시 파일을 지우지 못했다(진단 None과 그 오류 — 저장은 성공).
-    OrphanNotDeleted
+    OrphanNotDeleted,
+    // 해석: 색인에 없는 논리 경로를 별칭으로 풀었다(진단 AliasResolved, asset = 대상, text = 옛
+    // 경로 — 7.1절 17 A2e1).
+    AliasResolved,
+    // 해석: 별칭 표를 읽지 못해 색인에 없는 경로를 풀지 못했다(진단 = 별칭 표 진단 — 대입은 따로
+    // Unresolved로 실패한다).
+    AliasTableUnreadable,
+    // 이동: OS 이동이 실패해 먼저 쓴 별칭 표를 되돌리려 했지만 되돌리지 못했다(진단 None과 그 오류
+    // — 별칭 표에 옮기지 못한 옛 경로가 남는다, 해석은 색인을 먼저 보므로 해롭지 않다 — 7.1절 17
+    // A2e2).
+    AliasNotRestored,
+    // 삭제: 지운 에셋을 가리키던 별칭을 지웠다(진단 None, asset = 지운 에셋, text = 별칭 경로 —
+    // 7.1절 17 A2e3).
+    AliasRemoved,
+    // 복제: 원본의 ImportRecord가 다른 임포트의 출력을 가리키는 참조 기록이라 사본에서 버렸다(진단
+    // None, asset = 사본 id, related = 그 소유자 — 7.1절 17 A2e3b).
+    ImportRecordDropped,
+    // ID 수정: 새 id로 바꾼 패키지나 그 형제 출력이 고아가 됐다(진단 OrphanedOutput, asset = 고아,
+    // related = 그 owner — 7.1절 17 A2e4b).
+    OrphanedOutput
 };
+
+// 경고의 경로 텍스트 칸 크기다(논리 경로 상한 + NUL — 할당 없이 복사되는 경고).
+inline constexpr usize EditorWarningTextBytes = 257;
 
 struct EditorWarning {
     EditorWarningKind kind = EditorWarningKind::ExcludedDependency;
     AssetDiagnostic diagnostic;
+    // 경고 종류가 정한 경로 텍스트다(AliasResolved — 옛 경로, NUL로 끝남).
+    char text[EditorWarningTextBytes] = {};
+
+    StringView Text() const noexcept {
+        return StringView(text);
+    }
 };
 
 // 저장 옵션이다.
@@ -162,6 +191,58 @@ struct EditorPackageInfo {
     FilePackageBulkStore* store = nullptr;
 };
 
+// 열린 패키지 경로 바꾸기 준비다(EditorPackageSet::PrepareRelocate가 채우고 CommitRelocate가 쓴다 —
+// 7.1절 17 A2e2). 새 이름을 모두 할당해 두고 확정은 옮기기만 한다(실패 없음). 준비와 확정 사이에
+// 집합을 바꾸면(열기·만들기·저장) 안 된다.
+class EditorRelocation {
+public:
+    explicit EditorRelocation(Allocator& allocator) noexcept : changes_(allocator) {
+    }
+
+    EditorRelocation(const EditorRelocation&) = delete;
+    EditorRelocation& operator=(const EditorRelocation&) = delete;
+
+    // 바뀌는 열린 패키지 수다.
+    usize Count() const noexcept {
+        return changes_.Size();
+    }
+
+private:
+    friend class EditorPackageSet;
+
+    struct Change {
+        explicit Change(Allocator& allocator) noexcept
+            : fileName(allocator), logicalPath(allocator) {
+        }
+
+        Change(Change&&) noexcept = default;
+        Change& operator=(Change&&) noexcept = default;
+
+        AssetId id{};
+        String fileName;
+        String logicalPath;
+    };
+
+    Array<Change> changes_;
+    usize openCount_ = 0;
+    bool ready_ = false;
+};
+
+// 열린 패키지 사이 강한 간선 표의 키다(소유 패키지 → 대상 패키지 — 7.1절 17 A2e3).
+struct EditorEdgeKey {
+    ObjectHandle owner{};
+    ObjectHandle target{};
+
+    bool operator==(const EditorEdgeKey&) const noexcept = default;
+};
+
+template <>
+struct Hash<EditorEdgeKey> {
+    uint64 operator()(const EditorEdgeKey& key) const noexcept {
+        return HashCombine(Hash<ObjectHandle>{}(key.owner), Hash<ObjectHandle>{}(key.target));
+    }
+};
+
 class EditorPackageSet final : public PackageImportResolver {
 public:
     // allocator는 집합보다 오래 산다(Registry·표·bulk raw byte가 쓴다).
@@ -229,8 +310,97 @@ public:
                       Array<EditorWarning>* warnings = nullptr,
                       AssetDiagnostic* failure = nullptr) noexcept;
 
+    // 열린 패키지 source의 메모리 상태(저장하지 않은 편집 포함 — UE DuplicateAsset)를 newId로
+    // target에 새 파일로 쓴다(7.1절 17 A2e3b). 사본은 집합에 열지 않고 원본 정보(파일·지문·dirty·
+    // 저장소)는 바꾸지 않는다. writer 복제 옵션(PackageWriteOptions::duplicateId —
+    // DuplicateTransient 필드는 기본값, 원본 id를 가리키는 Soft 참조는 newId)으로 쓰고,
+    // ImportRecord는 소유 기록이면 owner와 원본 자신의 출력만 newId로 남겨 쓰고(형제 출력은 원본
+    // 임포트의 것) 참조 기록이면 기록과 ImportOwner 의존을 버린다(경고 ImportRecordDropped).
+    // hook에는 저장할 id로 newId를 준다. 쓰기는 저장과 같은 길(임시 → 재검증 → Replace → 색인
+    // Refresh)이다. 별칭 점유는 보지 않는다(서비스가 본다).
+    //
+    // 오류(failure 진단 — 앞에서 걸리면 아무것도 쓰지 않는다): Initialize 전·hook 표 없음·잠금
+    // 아님·newId null InvalidArgument, Create 초기화 안 Busy, 원본이 열리지 않음 NotFound, newId가
+    // 열려 있거나 색인에 있음 DuplicateAssetId / AlreadyExists, 읽기 전용 NewerVersion /
+    // Unsupported, 미해결 import MissingDependency / InvalidArgument(related = 첫 대상), 대상
+    // 점유(파일·색인 같은 경로 키·저장하지 않은 새 패키지 경로) DuplicatePath / AlreadyExists, OS
+    // 경로 상한 InvalidPath / CapacityExceeded, 대표 에셋·hook·WritePackage·IO·재검증의 오류(저장과
+    // 같다), 할당 실패.
+    Result<void> Duplicate(AssetId source, const LogicalPath& target, AssetId newId,
+                           const AssetDatabaseLock& lock, Array<EditorWarning>* warnings = nullptr,
+                           AssetDiagnostic* failure = nullptr) noexcept;
+
+    // fileName(Content 상대 이름 — 색인 항목이 같은 id 둘 이상인 DuplicateAssetId 파일)의 패키지를
+    // newId로 다시 쓴다(7.1절 17 A2e4b — asset-fix-duplicate-id). 그 파일을 이름으로 열고(의존
+    // 닫힘째), 복제 모드 쓰기(writer duplicateId)로 같은 경로에 교체한다. 교체 직전에 그 패키지를
+    // 이번 열기가 연 패키지째 닫는다(의존·Hard 순환 상대도 — 전에 열려 있던 것은 그대로다).
+    // ImportRecord: 소유 기록은
+    // owner와 자기 출력을 newId로 쓰고 형제 출력은 뺀다(형제는 남는 같은 id 파일의 임포트다), 참조
+    // 기록은 그대로다. 쓰기 뒤 색인 판정(AssetIndex::OrphanReason)으로 고친 항목과 형제 항목 가운데
+    // 고아가 된 것마다 경고 OrphanedOutput(related = 그 owner, detail = 사유)이다.
+    //
+    // 사용 예(서비스 — 색인 항목의 파일 이름과 새 id):
+    //   auto made = AssetId::TryNew();
+    //   if (made) { auto fixed = set.FixDuplicateId("Copies/Hero2.rasset", made.Value(), lock); }
+    //
+    // 오류(failure 진단 — 앞에서 걸리면 아무것도 바꾸지 않는다): Initialize 전·hook 표 없음·잠금
+    // 아님·newId null InvalidArgument, Create 초기화 안 Busy, 색인에 그 파일 항목이 없음 NotFound,
+    // 같은 id 둘이 아님 InvalidArgument, 그 id가 열려 있음 Busy, 읽기 전용 NewerVersion /
+    // Unsupported, newId가 열려 있거나 색인에 있음 DuplicateAssetId / AlreadyExists, 열기의 오류,
+    // 미해결 import MissingDependency / InvalidArgument, hook·쓰기·IO·재검증의 오류(저장과 같다),
+    // 닫기의 Discard 오류(임시 파일을 지운다), 할당 실패. 열기 뒤 실패면 이번에 연 패키지를 닫는다.
+    // 닫은 뒤 교체가 실패하면 패키지는 닫힌 채 파일·색인 그대로다.
+    Result<void> FixDuplicateId(StringView fileName, AssetId newId, const AssetDatabaseLock& lock,
+                                Array<EditorWarning>* warnings = nullptr,
+                                AssetDiagnostic* failure = nullptr) noexcept;
+
     // 열린 패키지 정보다(없으면 null). 다음 Open까지 유효하다.
     const EditorPackageInfo* Find(AssetId id) const noexcept;
+
+    // 이동하는 열린 패키지의 경로를 바꿀 준비를 한다(7.1절 17 A2e2). 저장된 패키지는 fileName이
+    // fromFile(Content 상대 OS 이름 — 파일 또는 디렉터리, 이동하는 실제 이름)과 같거나 그 아래면 그
+    // 앞부분을 toFile로 바꾼다(OS 이동과 같은 규칙 — 디스크의 실제 이름, 빈 fromFile은 없음).
+    // 저장하지 않은 새 패키지는 logicalPath(첫 저장의 경로)가 from(논리 경로 — 패키지 또는 논리
+    // 디렉터리)과 같거나 그 아래면 to 뒤에 나머지 구성 요소를 붙인다. 오류(failure 진단): 새 논리
+    // 경로 규칙 위반(길이 등) InvalidPath / InvalidArgument, 할당 실패 — 둘 다 집합 그대로.
+    Result<void> PrepareRelocate(const LogicalPath& from, const LogicalPath& to,
+                                 StringView fromFile, StringView toFile, EditorRelocation& plan,
+                                 AssetDiagnostic* failure = nullptr) noexcept;
+    // 준비한 경로 바꾸기를 할당 없이 확정한다(준비하지 않은 plan·그 사이 집합 변경은 계약 위반 —
+    // 단언).
+    void CommitRelocate(EditorRelocation& plan) noexcept;
+
+    // fileName이 fromFile(Content 상대 OS 이름 — 파일 또는 디렉터리)과 같거나 그 아래인 저장된 열린
+    // 패키지의 bulk 저장소를 파일에서 떼어 낸다(FilePackageBulkStore::Detach — 읽지 않은 bulk를
+    // 메모리로 읽고 캐시 핸들을 닫는다, UE ResetLoaders, 7.1절 6). 이동·삭제 전에 부른다. 오류:
+    // Detach의 오류(그때까지 뗀 것은 그대로 — 메모리 bulk는 동작이 같다).
+    Result<void> DetachUnder(StringView fromFile, AssetDiagnostic* failure = nullptr) noexcept;
+
+    // 관찰자에 쌓인 패키지 사이 강한 간선 변화를 간선 표에 적용한다(7.1절 17 A2e3). 묶음을 쌍별로
+    // 합친 뒤 표 용량을 먼저 잡고 무할당으로 적용한다. Open(새 패키지)·Create·Save·Close가 시작할
+    // 때 부르므로(실패하면 그 호출이 아무것도 바꾸지 않고 그 오류) 관찰자는 그 호출 사이의 편집만
+    // 쌓는다(키 상한 observerMaxKeys) — 편집만 오래 하는 host는 직접 불러도 된다. 오류: Initialize
+    // 전 InvalidArgument, TakeChanges의 오류, 할당 실패(꺼낸 묶음을 쥔 채 다음 호출이 다시 적용한다
+    // — 잃지 않는다).
+    Result<void> SyncReferences() noexcept;
+
+    // 다른 열린 패키지에서 id 패키지의 객체로 들어오는 강한 참조 다중도 합이다(SyncReferences
+    // 뒤 — 저장하지 않은 편집 포함). referencer가 있으면 첫 참조 패키지(id 순 — 없으면 null id)를
+    // 둔다. 열리지 않은 id는 0이다. 오류: SyncReferences의 오류.
+    //
+    // 사용 예:
+    //   AssetId first;
+    //   auto incoming = set.IncomingReferences(heroId, &first);
+    //   if (incoming && incoming.Value() != 0) { /* first가 Hero를 참조한다 */ }
+    Result<usize> IncomingReferences(AssetId id, AssetId* referencer = nullptr) noexcept;
+
+    // 열린 패키지를 닫는다(7.1절 17 A2e3 — 삭제): 그 패키지를 Discard하고(되돌릴 수 없다 —
+    // 저장하지 않은 편집도 버린다) 파일 캐시 핸들을 닫고 표에서 뺀다. 오류(failure 진단):
+    // Initialize 전 InvalidArgument, Create의 초기화 안 Busy, 열리지 않음 NotFound(진단 None), 다른
+    // 열린 패키지가 참조함 ReferencedBy / Busy(related = 첫 참조자 — 끊긴 참조가 남지 않게, 그
+    // 패키지를 먼저 닫거나 참조를 고친다), SyncReferences·Discard의 오류(진단 None — 아무것도
+    // 바뀌지 않는다), 할당 실패.
+    Result<void> Close(AssetId id, AssetDiagnostic* failure = nullptr) noexcept;
 
     // 열린 패키지 수와 id 순 i번째 정보다.
     usize Count() const noexcept {
@@ -256,17 +426,48 @@ public:
 private:
     struct Pending;
 
+    // rootFile이 있으면 루트 패키지(id)는 색인 id 조회 대신 그 파일을 연다(ID 수정 — 같은 id 둘).
     Result<ObjectHandle> OpenEntry(AssetId id, Array<EditorWarning>* warnings,
-                                   AssetDiagnostic* failure) noexcept;
+                                   AssetDiagnostic* failure, StringView rootFile = {}) noexcept;
+    // before(id 순 — 어떤 일 전에 열려 있던 id)에 없는 열린 패키지를 모두 닫는다(7.1절 17 A2e4b —
+    // ID 수정이 연 패키지: 고칠 패키지와 그 의존 닫힘, Hard 순환 상대 포함). 원래 열려 있던
+    // 패키지는 새로 연 패키지를 참조할 수 없으므로(열기는 기존 패키지의 미해결 import를 다시 묶지
+    // 않는다) 끊긴 참조가 남지 않는다. Discard는 id 역순이다. 오류: 할당 실패(아무것도 닫지
+    // 않는다), Discard 실패(그 오류 — 앞서 닫은 것은 닫힌 채, 남은 것은 열린 채이고 닫힌 패키지로의
+    // 참조는 Discard된 객체를 가리킨다(Resolve는 Destroyed) — 같은 before로 다시 부르면 남은 것을
+    // 닫는다). 닫을 것이 없으면 성공이다.
+    Result<void> CloseOpened(Span<const AssetId> before) noexcept;
+    // 열린 저장된 패키지의 캐시 핸들 경로(Content/fileName — 저장하지 않은 새 패키지는 빈
+    // 문자열)다.
+    Result<void> OpenCachePath(const EditorPackageInfo& info, String& out) const noexcept;
+    // 열린 패키지 at을 Discard하고 캐시 핸들(cachePath — 비면 없음)을 닫고 표에서 뺀다.
+    Result<void> DiscardOpen(usize at, StringView cachePath) noexcept;
     // 저장의 판정(교체 전 — 실패하면 아무것도 쓰지 않는다)과 쓰기·교체·뒷정리다.
     struct SavePlan;
+    // 복제 쓰기다(사본 id와 다시 쓴 ImportRecord byte).
+    // closeSource면 교체 직전에 openedBefore에 없는 열린 패키지(같은 경로의 원본과 그 의존 — ID
+    // 수정)를 닫는다(CloseOpened).
+    struct DuplicateWrite {
+        AssetId id{};
+        Span<const uint8> importRecord{};
+        bool closeSource = false;
+        Span<const AssetId> openedBefore{};
+    };
     Result<void> PlanSave(EditorPackageInfo& info, const EditorSaveOptions& options, SavePlan& plan,
                           AssetDiagnostic& diagnostic) noexcept;
-    Result<void> WriteAndReplace(EditorPackageInfo& info, SavePlan& plan,
-                                 Array<EditorWarning>* warnings,
+    // 새 파일 대상(논리 경로의 NFC 이름 — 첫 저장·복제)을 plan에 정한다.
+    Result<void> PlanNewTarget(const LogicalPath& path, AssetId id, SavePlan& plan,
+                               AssetDiagnostic& diagnostic) noexcept;
+    // 대표 에셋 타입 hook의 Tags·Build 의존과 importOwner를 plan에 모은다(asset은 저장할 id — hook
+    // 문맥에 준다).
+    Result<void> PlanHookOutputs(const EditorPackageInfo& info, AssetId asset,
+                                 Span<const PackageDependencyEntry> importOwner, SavePlan& plan,
                                  AssetDiagnostic& diagnostic) noexcept;
-    void DeleteOrphans(const EditorPackageInfo& info, StringView target,
-                       Array<EditorWarning>* warnings) noexcept;
+    // duplicate가 있으면 복제 모드다(원본 정보·저장소를 바꾸지 않는다).
+    Result<void> WriteAndReplace(EditorPackageInfo& info, SavePlan& plan,
+                                 Array<EditorWarning>* warnings, AssetDiagnostic& diagnostic,
+                                 const DuplicateWrite* duplicate = nullptr) noexcept;
+    void DeleteOrphans(AssetId id, StringView target, Array<EditorWarning>* warnings) noexcept;
     Result<void> PreparePending(Pending& pending, AssetDiagnostic& diagnostic) noexcept;
     usize LowerBound(AssetId id) const noexcept;
 
@@ -278,6 +479,9 @@ private:
     // 열린 패키지 정보(id 순)와 그 RootRef(같은 순서)다.
     Array<EditorPackageInfo> open_;
     Array<RootRef<Object>> roots_;
+    // 패키지 사이 강한 간선 다중도 표와 꺼냈지만 아직 적용하지 못한 관찰자 묶음이다.
+    HashMap<EditorEdgeKey, int64> edges_;
+    Array<ReferenceEdgeDelta> pendingEdges_;
     // Create가 초기화를 부르는 동안이다(그 안의 Create·Save는 Busy).
     bool creating_ = false;
 };

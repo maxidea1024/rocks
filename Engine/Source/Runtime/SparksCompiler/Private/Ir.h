@@ -55,43 +55,47 @@ struct IrRegister {
 
 // 명령 종류다. 이름은 덤프에 그대로 쓴다(IrOpName). "목록"은 operands[b, b + c)이다.
 enum class IrOp : uint8 {
-    Move,        // a := b (slot 하나)
-    LoadInt,     // a := 정수 상수(b 아래 32비트, extra 위 32비트)
-    LoadFloat,   // a := 실수 상수(double 비트 — b 아래 32비트, extra 위 32비트)
-    LoadString,  // a := 문자열 상수(strings[b]). sub IrStringPiece면 escape를 풀지 않은 원문 조각
-    LoadNull,    // a := null(Ref·Buf)
-    Unary,       // a := op(b) — sub = IrArith
-    Binary,      // a := b op c — sub = IrArith
-    Compare,     // a := 묶음 b cmp 묶음 c(slot 수 extra) — sub = IrCompare
-    Convert,     // a := conv(b) — 목적 해석은 a. sub IrConvertCast면 `as?`(대상 타입 심볼 extra)
-    Jump,        // goto block a
-    Branch,      // if b then block a else block c
-    Switch,      // b의 값으로 분기(표 cases[a, a + c)), 어느 것도 아니면 block extra
-    Return,      // 반환(값 묶음 b — 없으면 NoIrRegister)
-    IsSome,      // a := b가 null·없음이 아님
-    GetField,    // a := 필드 extra(수신자 b — NoIrRegister면 문맥 이름)
-    SetField,    // 필드 extra(수신자 a) := b
-    GetElement,  // a := b[c] (컨테이너 원소·Map 값)
-    SetElement,  // a[b] := c
-    Length,      // a := 컨테이너 b의 원소 수
-    GetEntry,    // a := 컨테이너 b의 c번째 항목(sub IrEntryKey면 key, IrEntryValue면 값)
-    Call,        // a := 함수 extra(목록 — 수신자가 있으면 첫 인자). sub IrCallRpc면 RPC 송신
-    Emit,        // 이벤트 extra를 대상 a(this면 NoIrRegister)에 발행(목록이 인자)
-    Await,       // 정지: 대기 b(sub IrAwaitEvent면 발행자 b·이벤트 extra), 재개하면 a := 결과,
-                 // block c로
-    Try,         // Result b가 성공이면 a := 값, block extra로. 실패면 block c로(끝 명령)
-    New,         // a := 생성 extra(목록 — sub로 해석: IrNewStruct는 (필드, 값) 쌍, IrNewLiteral은
-                 // (이름 글자 번호, 값) 쌍, IrNewCollection은 원소·(key, 값), IrNewResult*는 값)
-    Concat,      // a := 문자열 조각 목록을 잇는다
-    ReturnError, // Result b의 오류를 이 함수의 Result로 반환(끝 명령)
-    Release,     // 지역 유지 자원 a를 해제
-    Fault        // 실행 중 fault(종류 extra) — 도달하면 안 되는 경로
+    Move,         // a := b (slot 하나)
+    LoadInt,      // a := 정수 상수(b 아래 32비트, extra 위 32비트)
+    LoadFloat,    // a := 실수 상수(double 비트 — b 아래 32비트, extra 위 32비트)
+    LoadString,   // a := 문자열 상수(strings[b]). sub IrStringPiece면 escape를 풀지 않은 원문 조각
+    LoadNull,     // a := null(Ref·Buf)
+    Unary,        // a := op(b) — sub = IrArith
+    Binary,       // a := b op c — sub = IrArith
+    Compare,      // a := 묶음 b cmp 묶음 c(slot 수 extra) — sub = IrCompare
+    Convert,      // a := conv(b) — 목적 해석은 a. sub IrConvertCast면 `as?`(대상 타입 심볼 extra)
+    Jump,         // goto block a
+    Branch,       // if b then block a else block c
+    Switch,       // b의 값으로 분기(표 cases[a, a + c)), 어느 것도 아니면 block extra
+    Return,       // 반환(값 묶음 b — 없으면 NoIrRegister)
+    IsSome,       // a := b가 null·없음이 아님
+    GetField,     // a := 필드 extra(수신자 b — NoIrRegister면 문맥 이름)
+    SetField,     // 필드 extra(수신자 a) := b
+    GetElement,   // a := b[c] (컨테이너 원소·Map 값)
+    SetElement,   // a[b] := c
+    Length,       // a := 컨테이너 b의 원소 수
+    GetEntry,     // a := 컨테이너 b의 c번째 항목(sub IrEntryKey면 key, IrEntryValue면 값)
+    Call,         // a := 함수 extra(목록 — 수신자가 있으면 첫 인자). sub IrCallRpc면 RPC 송신
+    Emit,         // 이벤트 extra를 대상 a(this면 NoIrRegister)에 발행(목록이 인자)
+    Await,        // 정지: 대기 b, 재개하면 a := 결과, block c로
+    WaitEvent,    // a := 발행자 b의 이벤트 extra 대기 handle(SparksRuntime 2.5절)
+    Try,          // Result b가 성공이면 a := 값, block extra로. 실패면 block c로(끝 명령)
+    New,          // a := 생성 extra(목록 — sub로 해석: IrNewStruct는 (필드, 값) 쌍, IrNewLiteral은
+                  // (이름 글자 번호, 값) 쌍, IrNewCollection은 원소·(key, 값), IrNewResult*는 값)
+    Concat,       // a := 문자열 조각 목록을 잇는다
+    ReturnError,  // Result b의 오류를 이 함수의 Result로 반환(끝 명령)
+    EndExecution, // Result가 아닌 함수·handler의 `try` 실패: 현재 실행을 끝내고 b의 오류를 기록(끝
+                  // 명령)
+    Release,      // 지역 유지 자원 a를 해제
+    Fault         // 실행 중 fault(종류 extra) — 도달하면 안 되는 경로
 };
 
 // 명령의 sub 값이다(op마다 뜻이 다르다).
 inline constexpr uint8 IrCallDirect = 0;
 inline constexpr uint8 IrCallRpc = 1;
 inline constexpr uint8 IrCallMutating = 2; // 수신자 묶음(첫 인자)을 호출이 바꾼다(in/out)
+// void async 함수를 대기 값으로 부른다(`All`·`Race` 인자 — 하위 실행, 결과는 대기 handle).
+inline constexpr uint8 IrCallChild = 3;
 inline constexpr uint8 IrNewStruct = 0;
 inline constexpr uint8 IrNewLiteral = 1;
 inline constexpr uint8 IrNewCollection = 2;
@@ -100,7 +104,6 @@ inline constexpr uint8 IrNewResultError = 4;
 inline constexpr uint8 IrConvertValue = 0;
 inline constexpr uint8 IrConvertCast = 1;
 inline constexpr uint8 IrAwaitValue = 0;
-inline constexpr uint8 IrAwaitEvent = 1;
 inline constexpr uint8 IrStringConstant = 0;
 inline constexpr uint8 IrStringPiece = 1;
 inline constexpr uint8 IrEntryKey = 0;
@@ -108,6 +111,12 @@ inline constexpr uint8 IrEntryValue = 1;
 
 // Fault 종류다.
 inline constexpr uint32 IrFaultUnreachable = 1;
+inline constexpr uint32 IrFaultTryInHook = 2; // Awake·Enable·Start 안의 `try` 실패(SD43)
+// 경로 쓰기로 읽은 원소가 없다(IndexOutOfRange — SL §4 "복합 대입과 경로 쓰기는 키가 없으면
+// fault").
+inline constexpr uint32 IrFaultMissingElement = 3;
+// 아직 실행 모델이 없는 형태(가상 async 함수를 `All`·`Race` 인자로 — ContractViolation).
+inline constexpr uint32 IrFaultUnsupported = 4;
 
 // 단항·이항 산술 종류다(정수 overflow·실수 유한성 검사는 명령의 scalar 해석으로 정한다).
 enum class IrArith : uint8 {
@@ -117,7 +126,8 @@ enum class IrArith : uint8 {
     Div,
     Mod,
     Neg,
-    Not
+    Not,
+    Compose // quat·mat4 곱(묶음 전체 — 성분별이 아니다)
 };
 
 enum class IrCompare : uint8 {

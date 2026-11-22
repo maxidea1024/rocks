@@ -516,7 +516,7 @@ VerbatimLit  = '@"' { VerbatimChar | '""' } '"' ;                 (* escape·보
 | `Math`(모든 숫자 타입 공용 판) | `Min` `Max` `Abs` `Clamp(x, lo, hi)` `Sign` | §3.1 오버로딩 규칙(인자는 같은 타입). `Clamp`의 `lo > hi`는 `AssertFailed`. 부호 있는 타입의 최솟값에 대한 `Abs`는 `IntegerOverflow`. 부호 없는 타입에는 `Abs`·`Sign`이 없다 |
 | `Math`(모든 정수 타입) | `Div(a, b)` | 내림 몫, `b == 0`은 `DivideByZero` |
 | `Math`(`float`=`float64`; `float32`는 변환 후 사용 — Go의 math처럼) | `Floor` `Ceil` `Round` `Trunc`(→ float), `FloorToInt` `CeilToInt` `RoundToInt` `TruncToInt`(→ int), `Sqrt` `Pow` `Exp` `Ln` `Sin` `Cos` `Tan` `Asin` `Acos` `Atan` `Atan2(y, x)`, `Radians` `Degrees`, `Lerp(a, b, t)` `InverseLerp(a, b, v)`, `EaseIn` `EaseOut` `EaseInOut`(t를 [0, 1]로 clamp), `NearlyEqual(a, b, tolerance)`, 상수 `Math.Pi` | 삼각함수는 라디안. 결과가 NaN·Inf면 `NonFinite`(`Sqrt(-1.0)` 등). **초월 함수는 VM·AOT가 같은 Core Math 함수를 호출한다**(§12.5). 플랫폼 간 비트 동일성은 Core Math의 결정성 수준(CurveData D17과 같은 UE 수준 — Windows x64에서 UE와 같은 비트)을 따른다. `InverseLerp`의 `a == b`는 `DivideByZero` |
-| `vec2`–`vec4` | 필드 `X` `Y` `Z` `W`, `+` `-`(벡터끼리), `*` `/`(float와), 단항 `-`, `Dot` `Cross`(vec3) `Length` `LengthSquared` `Distance(b)` `Normalize()` | `Normalize()`는 길이가 1e-8 미만이면 0 벡터를 반환한다(UE `GetSafeNormal`). 성분별 곱은 `Math.Scale(a, b)` |
+| `vec2`–`vec4` | 필드 `X` `Y` `Z` `W`, `+` `-`(벡터끼리), `*` `/`(float와), 단항 `-`, `Dot` `Cross`(vec3) `Length` `LengthSquared` `Distance(b)` `Normalize()` | `Normalize()`는 길이 제곱이 1e-8 미만이면 0 벡터를 반환한다(UE `GetSafeNormal`과 같은 제곱 비교 — 길이 제곱이 무한대면 역수가 0이라 0 벡터다). 성분별 곱은 `Math.Scale(a, b)` |
 | `quat` | `quat(X, Y, Z, W)`, `*`(합성: `a * b`는 b를 먼저 적용 — UE `FQuat`과 같음), `Rotate(v)` `Inverse()` `FromAxisAngle(axis, radians)` `ToRotator()` | 기본값 단위 quat. 0 길이 axis는 단위 quat을 반환 |
 | `Rotator` | 필드 `Pitch` `Yaw` `Roll`(도), 이름 지정 생성, `ToQuat()` `Forward()` `Right()` `Up()` | UE `FRotator` 규약 |
 | `Transform` | 필드 `Location` `Rotation`(quat) `Scale`(vec3), `TransformPosition(v)` `InverseTransformPosition(v)` `TransformVector(v)` `ToMatrix()` | 기본값 단위. 0 scale의 역변환은 `NonFinite` |
@@ -524,7 +524,7 @@ VerbatimLit  = '@"' { VerbatimChar | '""' } '"' ;                 (* escape·보
 | `Color` | 필드 `R` `G` `B` `A`(선형 float), 이름 지정 생성 | 기본값 (0, 0, 0, 0) |
 | `string` | `Length`(UTF-8 byte 수), `CharCount()`(code point 수), `Contains` `StartsWith` `EndsWith`, `Find(s): int?`(byte 위치), `Slice(start, end)`, `Split(sep): Array<string>`, `Trim()`, `ToUpperAscii()` `ToLowerAscii()` | `Slice`의 범위 밖 또는 code point 경계가 아닌 위치는 `IndexOutOfRange`. 화면 표시는 `Text`(§3.5) |
 | `Format` | `Format.Fixed(x: float, decimals: int): string`, `Format.Padded(i: int, width: int): string` | 보간 `${}`의 최단 표기 외 서식. `decimals`는 0–9, 밖이면 `AssertFailed` |
-| `Parse` | `Parse.Int(s): int?`, `Parse.Float(s): float?` | 10진·`FloatLit` 문법만, 실패는 `null` |
+| `Parse` | `Parse.Int(s): int?`, `Parse.Float(s): float?` | 부호(`+`·`-`) 선택 뒤 10진 숫자(`Int`), `Float`는 `숫자[.숫자]`·`.숫자`와 지수 선택(`FloatLit`에 정수 표기 허용). 자릿수 구분자 `_`·16진·공백·`inf`·`nan`·범위 밖은 `null` |
 | `Array<T>` | `[i]` 읽기 `T?`, `[i] = v`, `Add` `Insert(i, v)` `RemoveAt(i)` `Clear()` `Reverse()`, `==` 가능한 원소: `Contains` `IndexOf: int?` `Remove(v): bool`, `<` 가능한 원소(int·float·string·enum): `Sort()`. 값 원소: `Count`. 객체 원소: `SlotCount`(파괴된 자리 포함) `AliveCount()` `Compact()` | 객체 원소 Array에는 `Count`가 없다(SD40). `Compact()`는 파괴된 자리를 제거한다. 순회는 시작 시점 내용의 사본이다 |
 | `Map<K, V>` | `[k]` 읽기 `V?`, `[k] = v`, `Count` `ContainsKey` `Remove(k): bool` `Keys(): Array<K>` `Values(): Array<V>` `Clear()` | 삽입 순서 |
 | `Set<T>` | `Count` `Add(v): bool` `Remove(v): bool` `Contains` `Clear()` | 삽입 순서 |
@@ -879,6 +879,7 @@ Class<T> { fn Create(): T }             // full, T는 class 타입
 
 - const의 타입은 `bool`·숫자 타입·`string`·enum(엔진 enum·`Clock` 포함)·`Tag`·`vec2`–`vec4`·`quat`·`Rotator`·`Color`·`Transform`이다. 그 밖은 S0512이며 위치는 타입 표기다.
 - const 초기값은 상수식이어야 한다. 필드 초기값은 상수식이거나, 초기값 자체(괄호 안 포함)가 component 생성(인자는 상수식)이어야 한다 — 원소·인자 안의 component 생성은 상수식이 아니다. 어기면 S0510이며 위치는 처음으로 상수식이 아닌 하위 식이다(왼쪽부터).
+- struct 필드 초기값이 생성하는 struct(`T(...)` — 배열·Map 리터럴 안 포함)를 따라 그 struct로 돌아오면 S0429다(`struct Tree { var Kids: Array<Tree> = [Tree()]; }` — 기본값이 끝없이 커진다). 같은 강한 연결 묶음 안의 생성 식마다 하나이며 위치는 그 생성 식이다. 값 순환(S0426)과 달리 컨테이너를 거쳐도 순환이다.
 - const 초기값이 서로를 가리키면(자기 자신 포함) 순환 하나에 S0511 하나다. 위치는 순환에 든 const 중 (패키지 이름, 모듈 import 경로, 원문 위치) byte 순으로 처음인 것의 이름이다(S0323과 같은 순서). 순환에 든 const와 S0510을 받은 const의 값은 정해지지 않으며 그 const를 쓰는 자리(case 값 등)는 더 진단하지 않는다.
 
 **객체 필드(S0428).** `?` 없는 객체 타입(엔진 `object`·Sparks class·interface) 필드는 class의 (a) component 생성을 초기값으로 둔 `let` 필드와 (b) Component·Actor 파생 class(LevelScript 파생 제외 — S0413, LC3)의 `@edit` 필드에만 쓴다. 그 밖(struct 필드, WorldService·WidgetController·DataAsset 파생 class의 필드, `@edit`도 component 생성도 없는 필드)은 S0428이며 `T?`를 제시한다. 위치는 필드의 타입 표기(표기가 없으면 필드 이름)다.
@@ -1566,6 +1567,7 @@ Characters/PlayerCharacter.spark:42:5: error S0731: Cannot assign to a function 
 | S0426 | `recursive-struct` | struct가 필드로 자신을 값으로 담는다(직접·다른 struct를 거쳐, 순환 하나에 하나) | 컨테이너에 담거나 class로 |
 | S0427 | `initializer-too-deep` | 필드·const 초기값이 다른 초기값을 따라가는 연쇄가 64단계를 넘는다(이름 의존은 미리 정하므로 값의 멤버 등으로 이어진 연쇄) | 중간 값을 const·지역으로 나눈다 |
 | S0428 | `object-field-needs-optional` | `?` 없는 객체 타입 필드가 §3.11의 허용 자리(component 생성 `let` 필드, Component·Actor 파생 class의 `@edit` 필드)가 아니다 | `T?` |
+| S0429 | `struct-default-cycle` | struct 필드 초기값이 생성하는 struct를 따라 같은 struct로 돌아온다(기본값이 끝없다 — §3.11) | 필드를 빈 값(`[]`)으로 시작하고 함수에서 채운다 |
 | S0501 | `integer-division` | 정수(상수 포함)끼리의 `/`, 정수 변수의 `/=` | `Math.Div(a, b)`, `float(a) / float(b)` |
 | S0502 | `float-to-int-conversion` | 실수 → 정수 타입 변환 호출 | `Math.FloorToInt` 등 |
 | S0503 | `constant-overflow` | 타입 없는 정수 상수식이 −2^63..2^64−1을 벗어난다, 정해진 상수 식이 그 타입의 범위를 벗어난다 | 값을 줄인다 |
@@ -1604,6 +1606,10 @@ Characters/PlayerCharacter.spark:42:5: error S0731: Cannot assign to a function 
 | S1002 | `not-replicable` | `@net` 필드·RPC 매개변수가 복제 타입이 아니다, RPC 반환 타입이 `void`가 아니다 | `Soft<T>`·객체 참조 |
 | S1003 | `net-write-outside-authority` | 권한 구역 밖의 `@net` 필드 쓰기(직접·호출) | `if (Owner.HasAuthority) { ... }` |
 | S1004 | `rpc-call` | `@rpc` 함수를 접두 없이·다른 대상 접두로 부른다, `@rpc`가 아닌 함수에 접두 | `Server.F(...)` |
+| S1005 | `data-id-lost` | 패키지 ID manifest의 활성 `type`·`field`·`subobject`·`enumCase` 항목이 현재 선언에도 `@formerly`에도 없다(저장·복제·편집 데이터가 연결을 잃는다 — [SparksBytecode](SparksBytecode.ko.md) 6.1절, LC4d). 위치는 manifest의 그 `name` 값 | 새 이름에 `@formerly("<옛 이름>")`(모듈 이동이면 전체 옛 키)을 붙이거나, `rocks ids rename`으로 옮기거나, `rocks ids retire`로 은퇴시킨다. field와 subobject 사이로 형태만 바뀌었으면 형태를 되돌리거나 은퇴·데이터 이전 |
+| S1006 | `invalid-id-manifest` | 패키지 ID manifest(`<패키지>.rocksids.json`)가 공유 형식(`schema: 1`, 항목의 kind·name·id·aliases·retired)이 아니거나, 다른 패키지의 이름·alias, 같은 이름·ID 둘, 주인 type 없는 활성 멤버를 담는다 | 도구로 다시 만든다(손으로 고치지 않는다) |
+| S1007 | `id-name-reserved` | 선언의 이름 키가 ID manifest의 alias(다른 ID의 옛 이름)이거나 은퇴한 이름이다([SparksBytecode](SparksBytecode.ko.md) 6.1절). 위치는 선언 이름 | 다른 이름을 쓴다 |
+| S1008 | `id-claimed-twice` | `@formerly`가 가리키는 ID를 다른 선언이 이미 쓴다(옛 이름이 아직 선언돼 있거나 두 `@formerly`가 같은 이름). 위치는 `@formerly`를 단 선언 이름 | `@formerly`를 빼거나 다른 선언의 이름을 먼저 바꾼다 |
 
 - **유지 자원·로드(S09xx, LC3c):** 규칙과 위치는 §3.14다.
 
@@ -1668,6 +1674,7 @@ Characters/PlayerCharacter.spark:42:5: error S0731: Cannot assign to a function 
 | S1112 | `duplicate-package` | 한 컴파일에 같은 이름(ASCII 대소문자만 다른 것 포함)의 패키지가 둘 있다 | 한쪽 이름을 바꾼다 |
 | S1113 | `full-profile-only` | `profile: "core"` 패키지에서 full 문법(§1.3·§3.11)을 썼다 | `profile: "full"` 또는 core 대안 |
 | S1120 | `invalid-binding-schema` | binding schema 파일이 §10.2 형식이 아니다(문법, key, kind가 허용하지 않는 key, 값, 이름 규칙·키워드, ID 표기·중복, 타입 표기 문법, 중복 이름, 파일 사이 타입 이름·ID·모듈 중복) | 생성기를 다시 돌린다(손으로 고치지 않는다) |
+| S1150 | `function-too-large` | 함수가 bytecode 한계를 넘는다(bank마다 동시에 쓰는 값 256 slot, 명령 32,767개 — [SparksBytecode](SparksBytecode.ko.md) 4.2절, LC4b). 위치는 함수 이름 | 함수를 작은 함수로 나눈다 |
 
 - 사전 대조 리터럴(`Tag`·`Action`·`CVar`)이 사전에서 이름이 바뀐 경우 사전의 redirect(`@formerly`와 같은 역할)를 따라 자동 변환하고 빠른 수정으로 소스를 고친다. redirect도 없으면 오류다.
 
@@ -2173,7 +2180,7 @@ class DoorLogic : ScriptableComponent {
   - `.ast`(구문 트리 golden)는 파일 사례에만 둔다(폴더 사례 옆의 `.ast`는 corpus 오류).
 - **이름 해석 golden(LC2b, SD58):** 사례 옆에 `<사례>.names`가 있으면 이름 해석 덤프(`AppendNameDump`, 형식은 `Compilation.h`)가 파일 내용과 바이트 단위로 같아야 한다. 파일 사례는 그 모듈의 덤프, 폴더 사례는 이름 해석을 한 모듈마다 `== <사례 폴더 기준 경로>` 줄과 그 덤프를 경로 byte 순으로 이은 것이다. 판정·실패 보고는 `.ast`와 같다.
 - **식 타입 golden(LC2c, SD58):** 사례 옆에 `<사례>.types`가 있으면 식 타입 덤프(`AppendTypeDump`, §3.10)가 파일 내용과 바이트 단위로 같아야 한다. 묶는 방식(파일·폴더 사례)과 판정·실패 보고는 `.names`와 같고, 타입 검사를 하지 않은 사례(`stage`가 `types`보다 앞)에 `.types`가 있으면 실패다.
-- **구문 트리 golden(LC1b, SD58):** 사례 옆에 `<사례>.ast`가 있으면 그 사례의 구문 트리 덤프(`AppendSyntaxDump`, 형식은 `SyntaxTree.h`)가 파일 내용과 바이트 단위로 같아야 한다(끝의 LF 포함). `.ast`는 선택이며 `.spark` 없이 있으면 corpus 오류이고, 원문 검사가 막아(S0101·S0103) 트리가 없는 사례에 `.ast`가 있어도 실패다. 진단(`.expect`)과 트리는 따로 판정한다. 다르면 첫 다른 줄과 실제 트리 전체를 보인다(검토 뒤 golden 갱신에 쓴다). 사례 실행은 컴파일(LC2a부터 manifest·schema·모듈 경로·어휘·구문 분석·import 해석, 마일스톤마다 늘어난다)이다. 이후 IR·bytecode 덤프 golden도 같은 방식(`.ir`·`.bytecode`)으로 더한다.
+- **구문 트리 golden(LC1b, SD58):** 사례 옆에 `<사례>.ast`가 있으면 그 사례의 구문 트리 덤프(`AppendSyntaxDump`, 형식은 `SyntaxTree.h`)가 파일 내용과 바이트 단위로 같아야 한다(끝의 LF 포함). `.ast`는 선택이며 `.spark` 없이 있으면 corpus 오류이고, 원문 검사가 막아(S0101·S0103) 트리가 없는 사례에 `.ast`가 있어도 실패다. 진단(`.expect`)과 트리는 따로 판정한다. 다르면 첫 다른 줄과 실제 트리 전체를 보인다(검토 뒤 golden 갱신에 쓴다). 사례 실행은 컴파일(LC2a부터 manifest·schema·모듈 경로·어휘·구문 분석·import 해석, 마일스톤마다 늘어난다)이다. IR·bytecode 덤프 golden도 같은 방식(`.ir`·`.bc` — `.bc`는 `.sparkc` 왕복도 본다)이다. 실행 golden `.run`(LC5 — [SparksVm](SparksVm.ko.md) 7절)은 진단 없는 파일 사례의 최상위 함수 호출을 줄마다 적고, 실행기가 `.sparkc` 왕복을 거친 모듈을 VM으로 실행해 결과(값·fault 종류와 위치·실행 끝)와 명령 수를 다시 써서 비교한다.
 - corpus는 `Engine/Source/Developer/SparksTestHost/Conformance`에 두고 시험이 실행 중 엔진 디렉터리 탐색으로 찾는다. 저장소가 줄 끝을 LF로 정규화하므로 CRLF·잘못된 UTF-8·BOM처럼 바이트가 중요한 사례는 C++ 시험에 직접 넣는다.
 - 제안 목표(미측정): 파일 1,000개 기준 자동완성 p95 100 ms, 편집 후 진단 p95 300 ms. 검증: 후보 golden test, prefix fuzz, CLI와의 진단 동등성, rename 후 저장 데이터 보존.
 

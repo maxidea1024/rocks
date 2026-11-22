@@ -2,6 +2,10 @@
 #include <Platform/Fatal.h>
 
 #include "CompilationChecker.h"
+#include <Core/Encoding/Sha256.h>
+#include <SparksVm/BytecodeFile.h>
+
+#include "BcEncoder.h"
 #include "IrBuilder.h"
 
 // 모듈 전체의 IR 내림과 IR 덤프(`.ir`)다(Docs/Design/SparksBytecode.ko.md 3.2절, LC4a). 오류 없는
@@ -73,6 +77,8 @@ const char* ArithName(uint8 sub) noexcept {
         return "NEG";
     case IrArith::Not:
         return "NOT";
+    case IrArith::Compose:
+        return "COMPOSE";
     }
 
     return "?";
@@ -174,6 +180,8 @@ private:
             }
         } else if (function_.symbol != NoSymbol) {
             out_.Append(c_.symbols_[function_.symbol].name);
+        } else if (tree.Node(function_.node).kind == SyntaxKind::Class) {
+            out_.Append("$init"); // class 초기화 함수(SparksRuntime 2.1절)
         }
 
         out_.Append("(");
@@ -394,6 +402,7 @@ private:
             Assign(i.a);
             out_.Append(i.sub == IrCallRpc        ? "CALL.RPC "
                         : i.sub == IrCallMutating ? "CALL.MUT "
+                        : i.sub == IrCallChild    ? "CALL.CHILD "
                                                   : "CALL ");
             SymbolName(i.extra);
             if (i.types != NoIrRegister) {
@@ -427,12 +436,14 @@ private:
             Assign(i.a);
             out_.Append("AWAIT ");
             Register(i.b);
-            if (i.sub == IrAwaitEvent) {
-                out_.Append(".");
-                SymbolName(i.extra);
-            }
-
             out_.AppendFormat(" -> L{}", i.c);
+            break;
+        case IrOp::WaitEvent:
+            Assign(i.a);
+            out_.Append("WAITEV ");
+            Register(i.b);
+            out_.Append(".");
+            SymbolName(i.extra);
             break;
         case IrOp::Try:
             Assign(i.a);
@@ -442,6 +453,10 @@ private:
             break;
         case IrOp::ReturnError:
             out_.Append("    RETURN.ERROR ");
+            Register(i.b);
+            break;
+        case IrOp::EndExecution:
+            out_.Append("    END.EXECUTION ");
             Register(i.b);
             break;
         case IrOp::New:
@@ -459,6 +474,11 @@ private:
             break;
         case IrOp::Fault:
             out_.AppendFormat("    FAULT {}", i.extra);
+            if (i.b != NoIrRegister) {
+                out_.Append(" ");
+                Register(i.b);
+            }
+
             break;
         default:
             out_.AppendFormat("    {}", name);
@@ -516,8 +536,18 @@ void TypeChecker::LowerProgram() noexcept {
         return;
     }
 
+    if (auto resized = c.lowered_.TryResize(c.modules_.Size()); !resized) {
+        binder_.error_ = resized.Error();
+        return;
+    }
+
     for (uint32 module = 0; module < c.modules_.Size() && binder_.error_ == ErrorCode::None;
          ++module) {
+        if (auto pushed = c.bytecode_.TryPushBack(BytecodeModule(*c.allocator_)); !pushed) {
+            binder_.error_ = pushed.Error();
+            return;
+        }
+
         if (c.nodeBase_[module] != NoNode) {
             LowerModule(module);
         }
@@ -525,11 +555,15 @@ void TypeChecker::LowerProgram() noexcept {
 }
 
 void TypeChecker::LowerModule(uint32 module) noexcept {
-    // 최상위 함수와 class·struct의 함수·handler를 선언 순으로 내린다.
+    // 최상위 함수와 class·struct의 함수·handler를 선언 순으로 내린다. 같은 모듈 함수의 번호를 먼저
+    // 정해 두고(앞선 함수가 뒤 함수를 부르는 CALL의 참조) 함수마다 IR → bytecode로 쓴다.
     Compilation& c = compilation_;
     const SyntaxTree& tree = c.trees_[module];
     StringBuilder<CompilationMessageInlineBytes> out(allocator_);
-    auto lower = [&](uint32 node, uint32 owner) noexcept {
+    Array<uint64> bodies(allocator_); // (owner << 32) | node
+    const uint32 root = tree.Root();
+    const uint32 declarations = root == NoNode ? NoNode : tree.Child(root, 1);
+    auto collect = [&](uint32 node, uint32 owner) noexcept {
         const SyntaxNode& entry = tree.Node(node);
         const bool handler = entry.kind == SyntaxKind::Handler;
         if ((!handler && entry.kind != SyntaxKind::Function) ||
@@ -537,10 +571,86 @@ void TypeChecker::LowerModule(uint32 module) noexcept {
             return;
         }
 
+        if (auto pushed = bodies.TryPushBack((uint64(owner) << 32) | node); !pushed) {
+            binder_.error_ = pushed.Error();
+        }
+    };
+    if (declarations != NoNode) {
+        for (const uint32 declaration : tree.Children(declarations)) {
+            const SyntaxKind kind = tree.Node(declaration).kind;
+            if (kind == SyntaxKind::Function) {
+                collect(declaration, NoSymbol);
+                continue;
+            }
+
+            if (kind != SyntaxKind::Class && kind != SyntaxKind::Struct) {
+                continue;
+            }
+
+            const uint32 owner = c.NodeSymbol(module, tree.Child(declaration, 2));
+            const uint32 members = tree.Child(declaration, kind == SyntaxKind::Class ? 4 : 3);
+            if (members == NoNode || tree.Node(members).kind != SyntaxKind::List) {
+                continue;
+            }
+
+            for (const uint32 member : tree.Children(members)) {
+                collect(member, owner);
+            }
+
+            // class 초기화 함수 `<Class>.$init`(SparksRuntime 2.1절 — R6): 초기값이 있거나 0 값이
+            // 0·null이 아닌(non-null Buf — 문자열·컨테이너·struct) 필드가 있을 때만.
+            bool initializes = false;
+            for (const uint32 member : tree.Children(members)) {
+                if (kind != SyntaxKind::Class || tree.Node(member).kind != SyntaxKind::Field) {
+                    continue;
+                }
+
+                const uint32 field = c.NodeSymbol(module, tree.Child(member, 2));
+                const uint32 type = field == NoSymbol ? NoType : FieldType(field);
+                const IrLayout layout = IrBuilder::Layout(*this, type);
+                // 0 값이 0·null이 아닌 타입(SL 3.2절): non-null Buf(문자열·컨테이너·struct)와
+                // 단위값 수학 타입(quat·mat4·Transform — LC6a 리뷰 B1). LowerZero와 같은 판정이다.
+                const uint32 symbol = type == NoType ? NoSymbol : SymbolOf(NonOptional(type));
+                const StringView name = symbol == NoSymbol ? StringView() : c.symbols_[symbol].name;
+                const bool identity = symbol != NoSymbol &&
+                                      (c.symbols_[symbol].kind == SymbolKind::BuiltinType ||
+                                       c.symbols_[symbol].kind == SymbolKind::PreludeType) &&
+                                      (name == "quat" || name == "mat4" || name == "Transform");
+                initializes = initializes || tree.Child(member, 4) != NoNode ||
+                              (type != NoType && !IsOptional(type) &&
+                               (layout.bank == IrBank::Buf || identity));
+            }
+
+            if (initializes) {
+                if (auto pushed = bodies.TryPushBack((uint64(owner) << 32) | declaration);
+                    !pushed) {
+                    binder_.error_ = pushed.Error();
+                }
+            }
+        }
+    }
+
+    BytecodeEncoder encoder(*this, module, c.bytecode_[module]);
+    for (usize index = 0; index < bodies.Size(); ++index) {
+        const uint32 node = static_cast<uint32>(bodies[index]);
+        if (tree.Node(node).kind == SyntaxKind::Function) {
+            const uint32 symbol = c.NodeSymbol(module, tree.Child(node, 2));
+            if (symbol != NoSymbol) {
+                encoder.Declare(symbol, static_cast<uint32>(index));
+            }
+        }
+    }
+
+    for (usize index = 0; index < bodies.Size() && binder_.error_ == ErrorCode::None; ++index) {
+        const uint32 node = static_cast<uint32>(bodies[index]);
+        const uint32 owner = static_cast<uint32>(bodies[index] >> 32);
+        const bool handler = tree.Node(node).kind == SyntaxKind::Handler;
+        const bool initializer = tree.Node(node).kind == SyntaxKind::Class;
         IrFunction function(allocator_);
         function.module = module;
         function.node = node;
-        function.symbol = handler ? NoSymbol : c.NodeSymbol(module, tree.Child(node, 2));
+        function.symbol =
+            handler || initializer ? NoSymbol : c.NodeSymbol(module, tree.Child(node, 2));
         function.owner = owner;
         IrBuilder builder(*this, function);
         if (!builder.Build()) {
@@ -555,38 +665,138 @@ void TypeChecker::LowerModule(uint32 module) noexcept {
             out.Append("\n"); // 함수 사이의 빈 줄
         }
 
+        const usize headerStart = out.View().ByteCount();
         IrWriter(*this, function, out).Write();
-    };
-    const uint32 root = tree.Root();
-    const uint32 declarations = root == NoNode ? NoNode : tree.Child(root, 1);
-    if (declarations == NoNode) {
-        return;
-    }
-
-    for (const uint32 declaration : tree.Children(declarations)) {
-        const SyntaxKind kind = tree.Node(declaration).kind;
-        if (kind == SyntaxKind::Function) {
-            lower(declaration, NoSymbol);
-            continue;
+        // 함수 표시 이름은 IR 덤프 머리 줄의 "function "·"handler " 뒤, 매개변수 앞이다.
+        const StringView dump = out.View();
+        usize begin = headerStart;
+        while (begin < dump.ByteCount() && dump.Data()[begin] != ' ') {
+            ++begin;
         }
 
-        if (kind != SyntaxKind::Class && kind != SyntaxKind::Struct) {
-            continue;
+        usize finish = begin + 1;
+        while (finish < dump.ByteCount() && dump.Data()[finish] != '(') {
+            ++finish;
         }
 
-        const uint32 owner = c.NodeSymbol(module, tree.Child(declaration, 2));
-        const uint32 members = tree.Child(declaration, kind == SyntaxKind::Class ? 4 : 3);
-        if (members == NoNode || tree.Node(members).kind != SyntaxKind::List) {
-            continue;
+        const StringView name(dump.Data() + begin + 1, finish > begin + 1 ? finish - begin - 1 : 0);
+        StringBuilder<128> owned(allocator_);
+        owned.Append(name);
+        if (!binder_.Succeeded(owned)) {
+            return;
         }
 
-        for (const uint32 member : tree.Children(members)) {
-            lower(member, owner);
+        const uint32 nameNode = tree.Child(node, 2);
+        if (!encoder.Encode(function, static_cast<uint32>(index), owned.View(), nameNode)) {
+            return;
+        }
+
+        // body hash: 이 함수 IR 덤프에서 위치 주석(`    ; 줄:열`)을 뺀 글자의 SHA-256(6.2절 — 줄만
+        // 옮긴 본문은 같은 hash).
+        Sha256 hasher;
+        const StringView functionText(out.View().Data() + headerStart,
+                                      out.View().ByteCount() - headerStart);
+        usize lineStart = 0;
+        constexpr StringView LocationMark = "    ; ";
+        for (usize at = 0; at <= functionText.ByteCount(); ++at) {
+            if (at < functionText.ByteCount() && functionText.Data()[at] != '\n') {
+                continue;
+            }
+
+            // 줄 끝의 `    ; <줄>:<열>` 접미만 뗀다(문자열 조각 안의 같은 글자는 그대로 둔다).
+            StringView line(functionText.Data() + lineStart, at - lineStart);
+            for (usize mark = line.ByteCount(); mark >= LocationMark.ByteCount(); --mark) {
+                const usize begin = mark - LocationMark.ByteCount();
+                if (StringView(line.Data() + begin, LocationMark.ByteCount()) != LocationMark) {
+                    continue;
+                }
+
+                usize digits = 0;
+                usize colons = 0;
+                bool location = mark < line.ByteCount();
+                for (usize index = mark; index < line.ByteCount() && location; ++index) {
+                    const char c = line.Data()[index];
+                    if (c == ':') {
+                        location = digits > 0 && colons == 0;
+                        ++colons;
+                        digits = 0;
+                    } else {
+                        location = c >= '0' && c <= '9';
+                        ++digits;
+                    }
+                }
+
+                if (location && colons == 1 && digits > 0) {
+                    line = StringView(line.Data(), begin);
+                }
+
+                break;
+            }
+
+            hasher.Update(
+                Span<const uint8>(reinterpret_cast<const uint8*>(line.Data()), line.ByteCount()));
+            hasher.Update(Span<const uint8>(reinterpret_cast<const uint8*>("\n"), 1));
+            lineStart = at + 1;
+        }
+
+        const Sha256Digest body = hasher.Finish();
+        BytecodeFunction& encoded = c.bytecode_[module].functions[index];
+        for (usize at = 0; at < BytecodeHashBytes; ++at) {
+            encoded.bodyHash[at] = body.bytes[at];
         }
     }
 
     if (!binder_.Succeeded(out)) {
         return;
+    }
+
+    if (!encoder.EncodeClasses(bodies.View())) {
+        return;
+    }
+
+    // 모듈 머리(5절): compiler version, import 경로, 원문 content hash, profile. 그리고 verifier —
+    // 컴파일러가 낸 모듈의 거부는 내림의 결함이다.
+    BytecodeModule& bytecode = c.bytecode_[module];
+    bytecode.compiler = encoder.String(SparksCompilerVersion);
+    bytecode.path = encoder.String(c.Text(c.modules_[module].importPath));
+    const SourceFile& source = c.sources_->Get(c.modules_[module].source);
+    const Sha256Digest digest = Sha256::Hash(Span<const uint8>(
+        reinterpret_cast<const uint8*>(source.Text().Data()), source.Text().ByteCount()));
+    for (usize index = 0; index < BytecodeHashBytes; ++index) {
+        bytecode.contentHash[index] = digest.bytes[index];
+    }
+
+    // interface hash(6.2절): 공개 표면의 정규 텍스트.
+    StringBuilder<CompilationMessageInlineBytes> surface(allocator_);
+    AppendInterfaceText(surface, module);
+    if (!binder_.Succeeded(surface)) {
+        return;
+    }
+
+    const Sha256Digest interfaceDigest = Sha256::Hash(Span<const uint8>(
+        reinterpret_cast<const uint8*>(surface.View().Data()), surface.View().ByteCount()));
+    for (usize index = 0; index < BytecodeHashBytes; ++index) {
+        bytecode.interfaceHash[index] = interfaceDigest.bytes[index];
+    }
+
+    const uint32 package = c.modules_[module].package;
+    bytecode.profile = package != NoPackage && package < c.packages_.Size() &&
+                               c.packages_[package].manifest.GetProfile() == Profile::Full
+                           ? 1
+                           : 0;
+    if (binder_.error_ != ErrorCode::None) {
+        return;
+    }
+
+    if (const BytecodeRejection rejection = VerifyBytecode(bytecode);
+        rejection.error != BytecodeLoadError::None) {
+        // 인코딩의 결함: 사유와 자리를 진단 출력에 남기고 멈춘다.
+        StringBuilder<256> reason(allocator_);
+        reason.AppendFormat("Sparks verifier: {} in function {} at {}\n",
+                            BytecodeLoadErrorName(rejection.error), rejection.function,
+                            rejection.address);
+        platform::WriteDiagnostic(reason.View().Data(), reason.ByteCount());
+        platform::Fatal("Sparks bytecode rejected by the verifier");
     }
 
     const StringView text = out.View();
@@ -599,14 +809,32 @@ void TypeChecker::LowerModule(uint32 module) noexcept {
 
     c.irDumps_[module] =
         Compilation::TextRef{static_cast<uint32>(offset), static_cast<uint32>(text.ByteCount())};
+    c.lowered_[module] = 1;
 }
 
 } // namespace rocks::sparks::detail
 
 namespace rocks::sparks {
 
+const BytecodeModule* Compilation::ModuleBytecode(uint32 module) const noexcept {
+    return module < bytecode_.Size() && module < lowered_.Size() && lowered_[module] != 0 &&
+                   lastStage_ >= CompilationStage::Codegen
+               ? &bytecode_[module]
+               : nullptr;
+}
+
+Result<void> Compilation::AppendBytecodeDump(StringBuilderBase& out, uint32 module) const noexcept {
+    const BytecodeModule* bytecode = ModuleBytecode(module);
+    if (bytecode == nullptr) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return rocks::sparks::AppendBytecodeDump(out, *bytecode);
+}
+
 Result<void> Compilation::AppendIrDump(StringBuilderBase& out, uint32 module) const noexcept {
-    if (module >= irDumps_.Size() || lastStage_ < CompilationStage::Codegen) {
+    if (module >= irDumps_.Size() || module >= lowered_.Size() || lowered_[module] == 0 ||
+        lastStage_ < CompilationStage::Codegen) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 

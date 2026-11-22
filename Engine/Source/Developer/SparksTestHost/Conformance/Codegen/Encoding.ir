@@ -1,0 +1,123 @@
+function Probe.Order(b1, b2)
+  r0 this: Probe
+  b1 a: string
+  b2 b: string?
+  s3: bool [Bool]
+  b4: string
+  s5: bool [Bool]
+  b6: string
+  b7: string
+  s8: bool [Bool]
+  b9: string
+  s10: bool [Bool]
+  b11: string
+  s12: bool [Bool]
+L0:
+    s5 = ISSOME b2    ; 13:20
+    BRANCH s5, L4, L5    ; 13:20
+L1:
+    s3 = LOADINT 1    ; 13:16
+    JUMP L2    ; 13:16
+L2:
+    RETURN s3    ; 13:9
+L3:
+    b9 = LOADSTR.PIECE "m"    ; 13:36
+    s10 = GE b1, b9    ; 13:31
+    BRANCH s10, L1, L7    ; 13:31
+L4:
+    b6 = MOVE b2    ; 13:20
+    b4 = MOVE b6    ; 13:20
+    JUMP L6    ; 13:20
+L5:
+    b7 = LOADSTR.PIECE ""    ; 13:25
+    b4 = MOVE b7    ; 13:20
+    JUMP L6    ; 13:20
+L6:
+    s8 = LT b1, b4    ; 13:16
+    BRANCH s8, L1, L3    ; 13:16
+L7:
+    b11 = LOADSTR.PIECE "x"    ; 13:48
+    s12 = EQ b2, b11    ; 13:43
+    s3 = MOVE s12    ; 13:16
+    JUMP L2    ; 13:16
+
+function Probe.Same(s1, s3, s5, s9)
+  r0 this: Probe
+  s1..s2 x: int? [Flag I64]
+  s3..s4 y: int? [Flag I64]
+  s5..s8 q: quat [F64 F64 F64 F64]
+  s9..s12 r: quat [F64 F64 F64 F64]
+  s13..s16: quat [F64 F64 F64 F64]
+  s17..s20 turned: quat [F64 F64 F64 F64]
+  s21: bool [Bool]
+L0:
+    s13 = COMPOSE.F64 s5, s9    ; 17:22
+    s17 = MOVE s13    ; 17:9
+    s18 = MOVE s14    ; 17:9
+    s19 = MOVE s15    ; 17:9
+    s20 = MOVE s16    ; 17:9
+    s21 = EQx2 s1, s3    ; 19:16
+    RETURN s21    ; 19:9
+
+function Probe.Make()
+  r0 this: Probe
+  b1: string
+  s2..s3: Soft<DataAsset> [AssetLo AssetHi]
+  s4..s5 soft: Soft<DataAsset> [AssetLo AssetHi]
+  b6: string
+  b7 text: string
+  b8: string
+  b9 raw: string
+  b10: Set<string>
+  s11: bool [Bool]
+  s12 added: bool [Bool]
+  s13: int [I64]
+  b14: Label
+L0:
+    b1 = LOADSTR.PIECE "/Game/Data/Rules"    ; 23:43
+    s2 = NEW.LITERAL Asset(b1)    ; 23:37
+    s4 = MOVE s2    ; 23:9
+    s5 = MOVE s3    ; 23:9
+    b6 = LOADSTR.PIECE "tab\tquote\" \$sign \u{1F600}"    ; 25:20
+    b7 = MOVE b6    ; 25:9
+    b8 = LOADSTR @"line ""one"""    ; 26:19
+    b9 = MOVE b8    ; 26:9
+    b10 = GETF r0.Probe.Names    ; 28:21
+    s11 = CALL.MUT Set.Add(b10, b7)    ; 28:21
+    SETF r0.Probe.Names, b10    ; 28:21
+    s12 = MOVE s11    ; 28:9
+    s13 = LOADINT 2    ; 30:42
+    b14 = NEW Label(Words: b7, Count: s13)    ; 30:16
+    RETURN b14    ; 30:9
+
+function Probe.Later()
+  r0 this: Probe
+  r1: wait
+L0:
+    r1 = CALL NextTick()    ; 34:15
+    AWAIT r1 -> L1    ; 34:9
+L1:
+    EMIT this.Probe.Ready()    ; 35:9
+    RETURN    ; 36:5
+
+function Probe.Look()
+  r0 this: Probe
+  r1: Actor
+  r2: Probe?
+L0:
+    r1 = GETF r0.Component.Owner    ; 39:16
+    r2 = CALL Actor.Find<Probe>(r1)    ; 39:16
+    RETURN r2    ; 39:9
+
+function Probe.$init()
+  r0 this: Probe
+  b1: string
+  r2: DataAsset
+  b3: Set<string>
+L0:
+    b1 = LOADSTR.PIECE "/Game/Data/Rules"    ; 7:5
+    r2 = NEW.LITERAL Asset(b1)    ; 7:5
+    SETF r0.Probe.Data, r2    ; 7:5
+    b3 = NEW.COLLECTION Set()    ; 8:5
+    SETF r0.Probe.Names, b3    ; 8:5
+    RETURN    ; 41:1

@@ -1,13 +1,14 @@
 #include "AssetDatabaseInternal.h"
+#include "AtomicFileWrite.h"
 
 #include <AssetDatabase/AssetIndexCache.h>
+#include <AssetDatabase/ImportRecord.h>
 #include <AssetRuntime/PackageFormat.h>
 #include <AssetRuntime/PackageTags.h>
 #include <Core/Algorithms.h>
 #include <Core/Build/BuildInfo.h>
 #include <Core/Encoding/ByteReader.h>
 #include <Core/Encoding/ByteWriter.h>
-#include <Core/FileError.h>
 #include <Core/Text/Unicode.h>
 #include <Object/AssetId.h>
 
@@ -15,9 +16,6 @@
 namespace rocks {
 
 namespace {
-
-using asset_database_detail::EditorAppendGuidText;
-using asset_database_detail::EditorTempSuffix;
 
 // 파일 첫 4 byte다("RKAI").
 constexpr uint32 CacheMagic = 0x49414b52u;
@@ -193,7 +191,19 @@ Result<bool> ReadEntry(ByteReader& reader, AssetIndexCacheEntry& entry) noexcept
         }
 
         entry.importRecord.importerVersion = reader.ReadU32LE();
-        entry.importRecord.outputCount = static_cast<usize>(reader.ReadU64LE());
+        const uint32 outputs = reader.ReadU32LE();
+        if (reader.Failed() || outputs > MaxImportOutputs) {
+            return Result<bool>::Success(false);
+        }
+
+        if (auto reserved = entry.importRecord.outputs.TryReserve(outputs); !reserved) {
+            return Result<bool>::Failure(reserved.Error());
+        }
+
+        for (uint32 index = 0; index < outputs; ++index) {
+            (void)entry.importRecord.outputs.TryPushBack(AssetId{ReadGuid(reader)});
+        }
+
         if (reader.Failed()) {
             return Result<bool>::Success(false);
         }
@@ -444,7 +454,10 @@ Result<void> EncodeAssetIndexCache(const AssetIndex& index, const AssetIndexCach
             WriteGuid(writer, entry->importRecord.importerId);
             WriteText(writer, entry->importRecord.importerName.View());
             writer.WriteU32LE(entry->importRecord.importerVersion);
-            writer.WriteU64LE(static_cast<uint64>(entry->importRecord.outputCount));
+            writer.WriteU32LE(static_cast<uint32>(entry->importRecord.outputs.Size()));
+            for (AssetId output : entry->importRecord.outputs) {
+                WriteGuid(writer, output.value);
+            }
         }
     }
 
@@ -477,79 +490,10 @@ Result<void> WriteAssetIndexCache(platform::FileSystem& files, const ProjectLayo
         return encoded;
     }
 
-    const StringView directory = layout.IntermediateDirectory();
-    if (auto made = platform::MakeDirectoryTree(files, directory.Data(), directory.ByteCount());
-        !made) {
-        return Result<void>::Failure(FileErrorCode(made));
-    }
-
-    String target(allocator);
-    String temp(allocator);
-    const StringView targetPieces[] = {directory, "/", AssetIndexCacheFileName};
-    for (StringView piece : targetPieces) {
-        if (auto appended = target.TryAppend(piece); !appended) {
-            return appended;
-        }
-    }
-
-    auto guid = TryNewGuid();
-    if (!guid) {
-        return Result<void>::Failure(guid.Error());
-    }
-
-    if (auto assigned = temp.TryAssign(target.View()); !assigned) {
-        return assigned;
-    }
-
-    Result<void> step = temp.TryAppend(".");
-    if (step) {
-        step = EditorAppendGuidText(temp, guid.Value());
-    }
-
-    if (step) {
-        step = temp.TryAppend(EditorTempSuffix);
-    }
-
-    if (!step) {
-        return step;
-    }
-
-    auto discard = [&]() noexcept {
-        (void)files.Delete(temp.View().Data(), temp.View().ByteCount());
-    };
-    {
-        platform::File file;
-        if (auto opened = file.Open(files, temp.View().Data(), temp.View().ByteCount(),
-                                    platform::FileOpenMode::CreateNew);
-            !opened) {
-            return Result<void>::Failure(FileErrorCode(opened));
-        }
-
-        const platform::FileTransfer written = file.WriteAll(bytes.Data(), bytes.Size());
-        if (!written.status) {
-            (void)file.Close();
-            discard();
-            return Result<void>::Failure(FileErrorCode(written.status));
-        }
-
-        if (auto flushed = file.Flush(); !flushed) {
-            (void)file.Close();
-            discard();
-            return Result<void>::Failure(FileErrorCode(flushed));
-        }
-
-        if (auto closed = file.Close(); !closed) {
-            discard();
-            return Result<void>::Failure(FileErrorCode(closed));
-        }
-    }
-
-    const platform::FileStatus replaced =
-        files.Replace(temp.View().Data(), temp.View().ByteCount(), target.View().Data(),
-                      target.View().ByteCount());
-    if (!replaced && replaced.code != platform::FileCode::NotDurable) {
-        discard();
-        return Result<void>::Failure(FileErrorCode(replaced));
+    auto written = asset_database_detail::WriteFileAtomically(
+        files, allocator, layout.IntermediateDirectory(), AssetIndexCacheFileName, bytes.View());
+    if (!written) {
+        return Result<void>::Failure(written.Error());
     }
 
     return Result<void>::Success();
