@@ -97,6 +97,61 @@ public:
             }
         }
 
+        // CLASS 표(형식 버전 3): 기반, 자기 필드 bank별 slot 수, 초기화 함수,
+        // 필드·hook·handler·이벤트.
+        for (usize index = 0; index < module_.classes.Size(); ++index) {
+            const BytecodeClass& entry = module_.classes[index];
+            out_.AppendFormat("class{} = {}", index, module_.String(entry.name));
+            if (entry.baseClass != NoBytecodeIndex) {
+                out_.AppendFormat(" : class{}", entry.baseClass);
+            } else if (entry.baseName != NoBytecodeIndex) {
+                out_.AppendFormat(" : {}", module_.String(entry.baseName));
+            }
+
+            out_.AppendFormat(" s{} r{} b{}", entry.slots[0], entry.slots[1], entry.slots[2]);
+            if (entry.initializer != NoBytecodeIndex) {
+                out_.AppendFormat(" init {}",
+                                  module_.String(module_.functions[entry.initializer].name));
+            }
+
+            out_.Append("\n");
+            for (uint32 at = entry.firstField; at < entry.firstField + entry.fieldCount; ++at) {
+                const BytecodeTypeField& field = module_.classFields[at];
+                out_.AppendFormat("  field {} {}{} x{}\n", module_.String(field.name),
+                                  BankLetter(field.bank), field.offset, field.slots);
+            }
+
+            for (uint32 at = entry.firstHook; at < entry.firstHook + entry.hookCount; ++at) {
+                const BytecodeHook& hook = module_.hooks[at];
+                out_.AppendFormat("  hook {} {}\n", BytecodeHookKindName(hook.kind),
+                                  module_.String(module_.functions[hook.function].name));
+            }
+
+            for (uint32 at = entry.firstHandler; at < entry.firstHandler + entry.handlerCount;
+                 ++at) {
+                const BytecodeHandler& handler = module_.handlers[at];
+                const StringView path = module_.String(handler.path);
+                out_.AppendFormat("  handler {}{}{} {}{}{}\n", path, path.IsEmpty() ? "" : ".",
+                                  module_.String(handler.event),
+                                  module_.String(module_.functions[handler.function].name),
+                                  handler.awaits != 0 ? " await" : "",
+                                  handler.reentry == BytecodeReentry::SkipWhileBusy
+                                      ? " skipWhileBusy"
+                                  : handler.reentry == BytecodeReentry::Restart ? " restart"
+                                                                                : "");
+            }
+
+            for (uint32 at = entry.firstEvent; at < entry.firstEvent + entry.eventCount; ++at) {
+                const BytecodeEvent& event = module_.events[at];
+                out_.AppendFormat("  event {}", module_.String(event.name));
+                if (event.arguments != NoBytecodeIndex) {
+                    out_.AppendFormat(" args \"{}\"", module_.String(event.arguments));
+                }
+
+                out_.Append("\n");
+            }
+        }
+
         for (const BytecodeFunction& function : module_.functions) {
             Function(function);
         }

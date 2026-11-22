@@ -712,6 +712,10 @@ void TypeChecker::LowerModule(uint32 module) noexcept {
         return;
     }
 
+    if (!encoder.EncodeClasses(bodies.View())) {
+        return;
+    }
+
     // 모듈 머리(5절): compiler version, import 경로, 원문 content hash, profile. 그리고 verifier —
     // 컴파일러가 낸 모듈의 거부는 내림의 결함이다.
     BytecodeModule& bytecode = c.bytecode_[module];

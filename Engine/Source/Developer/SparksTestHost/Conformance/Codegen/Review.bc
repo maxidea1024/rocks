@@ -49,8 +49,18 @@ t37 = "Hp"
 t38 = "x>?<x>"
 t39 = "Actor.Find<Hp>"
 t40 = "Hp.Opened"
-t41 = "sparks 0.4.0"
-t42 = "Main"
+t41 = "ScriptableComponent"
+t42 = "Shield"
+t43 = "Points"
+t44 = "Names"
+t45 = "Cue"
+t46 = "Hum"
+t47 = "Cursor"
+t48 = "Opened"
+t49 = "Owner"
+t50 = "Damaged"
+t51 = "sparks 0.4.0"
+t52 = "Main"
 ref0 = field Hp.Cursor args ">i64"
 ref1 = language NextTick args ">w"
 ref2 = context World
@@ -71,6 +81,15 @@ ref16 = field Component.Owner args ">x"
 ref17 = type Hp
 ref18 = native Actor.Find<Hp> type ref17 args "x>?<x>"
 ref19 = event Hp.Opened
+class0 = Hp : ScriptableComponent s3 r2 b2
+  field Shield s0 x2
+  field Points b0 x1
+  field Names b1 x1
+  field Cue r0 x1
+  field Hum r1 x1
+  field Cursor s2 x1
+  handler Owner.Damaged Hp.on Owner.Damaged await skipWhileBusy
+  event Opened
 
 function Hp.Next  scalar=2/2 ref=1/1 buf=0/0 params=0/1/0 returns sx1
   body 9d0482c72ff4aa43abd9010708874a2daa68f02ef545fe7ae0f18e27ad135c70

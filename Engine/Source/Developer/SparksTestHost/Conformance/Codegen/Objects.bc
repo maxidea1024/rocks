@@ -47,8 +47,21 @@ t38 = "NextTick"
 t39 = "Door.Find"
 t40 = "Component.Owner"
 t41 = "Pawn"
-t42 = "sparks 0.4.0"
-t43 = "Main"
+t42 = "Door"
+t43 = "ScriptableComponent"
+t44 = "Cue"
+t45 = "Open"
+t46 = "Info"
+t47 = "State"
+t48 = "Names"
+t49 = "Scores"
+t50 = "Hum"
+t51 = "Opened"
+t52 = "x"
+t53 = "Owner"
+t54 = "Damaged"
+t55 = "sparks 0.4.0"
+t56 = "Main"
 ref0 = context World
 ref1 = field World.Audio args ">x"
 ref2 = field Door.Cue args ">x"
@@ -69,6 +82,18 @@ ref16 = type Pawn
 type0 = struct Stats s4 r0 b0
   field0 Level s0 x1
   field1 Offset s1 x3
+class0 = Door : ScriptableComponent s2 r2 b3
+  field Cue r0 x1
+  field Open s0 x1
+  field Info b0 x1
+  field State s1 x1
+  field Names b1 x1
+  field Scores b2 x1
+  field Hum r1 x1
+  hook Enable Door.on Enable
+  hook Disable Door.on Disable
+  handler Owner.Damaged Door.on Owner.Damaged await skipWhileBusy
+  event Opened args "x"
 
 function Door.on Enable  scalar=4/4 ref=3/5 buf=2/2 params=0/1/0 returns sx0
   body 2671c374163979eebdbcfe80ec6e1529d02ba76792b4ab1bddce7f0220cfce7c

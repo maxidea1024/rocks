@@ -32,8 +32,12 @@ t25 = "Component.Owner"
 t26 = "Probe"
 t27 = "x>?<x>"
 t28 = "Actor.Find<Probe>"
-t29 = "sparks 0.4.0"
-t30 = "Main"
+t29 = "ScriptableComponent"
+t30 = "Data"
+t31 = "Names"
+t32 = "Ready"
+t33 = "sparks 0.4.0"
+t34 = "Main"
 ref0 = literal Soft<DataAsset> "/Game/Data/Rules"
 ref1 = field Probe.Names args ">S<s>"
 ref2 = language Set.Add args "S<s>,s>b"
@@ -48,6 +52,10 @@ ref10 = native Actor.Find<Probe> type ref9 args "x>?<x>"
 type0 = struct Label s1 r0 b1
   field0 Words b1 x1
   field1 Count s0 x1
+class0 = Probe : ScriptableComponent s0 r1 b1
+  field Data r0 x1
+  field Names b0 x1
+  event Ready
 
 function Probe.Order  scalar=2/2 ref=1/1 buf=4/4 params=0/1/2 returns sx1
   body 469c72ae2abf2adaa4db3c8702146865ec531d7388c1bd305d03f60778b67128

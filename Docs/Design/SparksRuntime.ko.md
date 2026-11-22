@@ -22,6 +22,16 @@
 - **bytecode 형식 v3(R4):** CLASS 구역을 더한다 — 클래스(이름, 기반 클래스 참조, 엔진 기반 타입 이름, 필드 범위, hook 범위, handler 범위, 이벤트 범위, bank별 slot 수, 기본값 생성 함수 번호), 필드(이름, bank, slot 수, 위치 — TYPE 필드와 같은 규칙), hook(종류, 함수 번호), handler(경로 글자, 이벤트 이름, 함수 번호, 재진입 정책, await 여부), 이벤트(이름, 인자 서술자). 컴파일러가 클래스마다 기본값 생성 함수(`<Class>.$init` — 필드 초기값 식을 선언 순으로 `SETF`)를 만든다. verifier는 번호·범위·배치를 본다.
 - **host interface 2차(R5):** `VmSessionHost`(VmHost 파생): 시계(GameClock·UIClock 값, 프레임 번호), 활성 전환·파괴 적용 요청(`RequestSetEnabled`·`RequestDestroy`), native 이벤트 연결·해제(발행자 handle, 이벤트 묶음, 연결 slot), native 이벤트 항목 넣기(host → session), 유지 자원 해제(`ReleaseHeld`), 로드 요청 시작·상태·결과·lease 반환, fault·진단 보고. session 쪽 진입은 `CreateInstance`·`RunHook`·`OpenPhase`·`ClosePhase`·`Enqueue`·`Resume`·`Detach`·`CloseSession`이다(SL §11 "host가 VM에 들어오는 것").
 
+### 2.1 CLASS 구역(형식 v3 — LC6a)
+
+- **클래스 항목:** 이름(문자열 — 표시 이름 `Door`), 기반(같은 모듈 클래스 번호, 다른 모듈 Sparks 클래스는 참조 이름 `<경로>:Class`, 엔진 기반은 엔진 타입 이름 — 셋 중 하나), 필드 범위(이 클래스가 선언한 필드만), hook 범위, handler 범위, 이벤트 범위, bank별 자기 필드 slot 수, 초기화 함수 번호(없으면 NoIndex).
+- **필드 항목:** 이름, bank, slot 수, bank 안 위치(자기 클래스 구역 안 — instance 저장소에서는 기반 클래스 구역 뒤에 놓인다: bank마다 기반 사슬의 slot 수 합이 시작 위치). 객체 필드 참조(`Field` — `Door.Open`)는 링크가 같은 모듈 클래스 필드면 (클래스, 필드)로 묶는다(host 묶음 아님).
+- **hook 항목:** 종류(Awake·Enable·Start·Tick·FixedTick·LateTick·Disable·Destroy·TriggerEnter·TriggerExit·CollisionEnter·CollisionExit·Validate), 함수 번호. 클래스당 종류마다 하나(누적은 기반 사슬을 따라 기반 먼저 — SL §5.1).
+- **handler 항목:** 경로 글자(`Owner`·`Target.Current`·`Widget.RetryButton` — 빈 글자는 자기 이벤트), 이벤트 이름(`Damaged`·`Changed`), 함수 번호, 재진입 정책(없음·`@skipWhileBusy`·`@restart`), await 여부.
+- **이벤트 항목:** 이름, 인자 서술자(SparksVm 6a 문법 — `x,f64>void`의 피연산자 부분).
+- **초기화 함수(R6):** 컴파일러가 클래스마다 `<Class>.$init`(this 하나, 반환 없음)을 만든다. 본문은 그 클래스가 선언한 필드의 초기값(SL §3.2 — 초기값 식, 없으면 0 값 중 slot 0·null로 충분하지 않은 것: 문자열 `""`·빈 컨테이너·struct 기본값·단위 quat 등)을 선언 순으로 자기 필드에 쓴다. 초기값이 모두 0·null인 클래스는 함수가 없다. session은 instance를 만들 때 기반 사슬의 초기화 함수를 기반 먼저 부른다(이 실행은 Changed를 내지 않는다 — SL §5.3 "초기값").
+- **verifier:** 클래스·필드·hook·handler·이벤트 범위가 표 안, 기반 클래스 번호가 앞선 클래스(순환 없음), 필드 배치(bank 0–2, Ref·Buf 1 slot, 위치가 자기 slot 수 안), hook 종류 중복 없음, 함수 번호가 함수 표 안, 초기화 함수의 매개변수 모양(Ref 1).
+
 ## 3. 순서
 
 - **스크립트 단계(SL §5.4):** host가 `OpenPhase(kind)`로 열고, 그 단계의 실행 조각(hook·handler·재개)을 VM이 돌린 뒤 발행 큐를 비우고(연쇄 상한·전달 상한), 활성 전환 적용 → 파괴 적용 요청을 host에 넘기고(적용 루프 64회), `ClosePhase`로 닫는다. 단계 밖의 실행은 없다(엔진이 연 진입도 단계 하나를 연다).
