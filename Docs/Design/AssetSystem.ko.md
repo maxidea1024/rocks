@@ -708,9 +708,9 @@ A3는 Rockpile 설계([Rockpile](Rockpile.ko.md) 12·17절)가 요구한 레코�
    - Get은 값 선택(ValueId 목록 — 비면 전체)·`SkipData`·`SkipMeta`를 받고 고른 값만 읽어 검증한다(UE `GetValue`·`GetChunks`의 값 단위 대응). 검증 실패는 `Corrupt` 결과 + 파일 삭제(삭제 실패는 진단만). echo의 key가 다르면 손상, bucket만 다르면(같은 키를 다른 bucket으로 청한 호출자 결함) 삭제하지 않고 `Miss` + 진단이다.
    - Put은 9절 쓰기 판정. `Exists`면 Touch한다(GC가 방금 다시 만든 항목을 지우지 않게 — UE 파일 저장소도 기존 항목을 갱신한다). 한도 위반 Put(Record 1 MiB·값 16 GiB·잘못된 bucket·정렬 위반 inputs)은 `Dropped` + 진단(InvalidArgument·CapacityExceeded)이다.
    - 저장 압축: 값의 원본이 임계(`NuggetStoreCompressBytes` 64 KiB) 이상이면 RCBK(Zstd)로 압축하고 더 작을 때만 `Rcbk`로 쓴다 — 게시 전에 왕복 해제해 RawHash를 확인한다(Rockpile 5.4절 writer 계약).
-   - Touch(`SetModifiedTime`)는 최선 노력이다. tmp 24시간 경과 파일은 backend를 열 때와 GC에서 지운다 — 키 잠금 파일(`*.lock`)은 try-lock을 잡은 뒤에만 지운다(잡힌 잠금을 지우지 않는다 — Windows는 지우기가 실패하고 POSIX는 `FileLock`의 dev/ino 재확인이 지킨다). 읽기 전용 루트(공유 경로)면 Get은 되고 Put은 `Dropped` + 진단이다.
+   - Touch(`SetModifiedTime`)는 최선 노력이다. tmp 24시간 경과 임시 파일(`*.tmp`)은 backend를 열 때와 GC에서 지운다 — 잠금 파일(`*.lock`)은 지우지 않는다(PlatformBase `FileLock` 계약: 지우면 POSIX에서 Release와 unlink 사이에 옛 inode를 잡은 쪽과 새 파일을 잡은 쪽이 함께 잠금을 쥔다 — 그래서 잠금은 개수가 고정된 shard다, 결정 8). 읽기 전용 루트(공유 경로)면 Get은 되고 Put은 `Dropped` + 진단이다.
 8. **동시성(A3b)**: 두 프로세스가 같은 키를 동시에 게시하면 no-replace 이동 하나만 이기고 다른 쪽은 기존을 읽어 `Exists`·`Conflict`를 판정한다. 읽는 쪽은 이동으로만 나타나는 완전한 파일만 본다.
-   - 손상 항목 교체는 키 단위 잠금(`<root>/tmp/<key>.lock`, PlatformBase `FileLock` — 드문 경로)을 쥐고 기존을 다시 읽어 여전히 손상·읽을 수 없을 때만 `FileSystem::Replace`한다. 잠금 안에서 정상 항목을 만나면 그것을 기존으로 판정한다(`Exists`·`Conflict` — 다른 프로세스의 교체를 덮어쓰지 않는다). 잠금을 못 잡으면(시간 상한) `Dropped`.
+   - 손상 항목 교체는 shard 잠금(`<root>/tmp/<k0k1>.lock` — 키 첫 byte로 256개, 개수가 고정이라 쌓이지 않고 지우지 않는다, PlatformBase `FileLock` — 드문 경로라 shard 경합 비용이 없다)을 쥐고 기존을 다시 읽어 여전히 손상·읽을 수 없을 때만 `FileSystem::Replace`한다. 잠금 안에서 정상 항목을 만나면 그것을 기존으로 판정한다(`Exists`·`Conflict` — 다른 프로세스의 교체를 덮어쓰지 않는다). 잠금을 못 잡으면(시간 상한) `Dropped`.
    - Windows: 읽기는 삭제 공유(`FILE_SHARE_DELETE`)로 열어 GC·손상 삭제가 열린 읽기 때문에 실패하지 않게 한다(PlatformBase Win64 열기 규칙). delete-pending 이름으로의 no-replace 이동은 AlreadyExists가 아니라 AccessDenied가 날 수 있다 — 그 Put은 `Dropped`(일시적, 진단). 열린 대상에 대한 Replace 실패·GC 삭제 실패는 그 항목을 건너뛰고 진단한다.
    - 시험은 결정적 gate(파일 존재 대기 아닌 명시 이벤트)로 두 자식 프로세스의 경합 순서를 고정한다(같은 키 동시 Put, GC 대 Put, 교체 대 교체).
 9. **GC(A3b)**: `Collect({maxBytes, unusedDays}, now)` — 항목 파일을 훑어(디렉터리 `<k0k1>`·이름 `<key>.rnug`만, 다른 이름은 건드리지 않는다) 마지막 사용 시각(수정 시각)이 `unusedDays`보다 오래된 것을 지우고, 남은 합이 `maxBytes`를 넘으면 오래된 것부터(같은 시각이면 키 byte 순) 지운다. 결과는 지운 수·byte·남은 수·byte·건너뛴 수. 지우는 중 다른 프로세스가 같은 항목을 쓰거나 읽어도 무해하다(지운 뒤 Put은 새로 게시되고, 읽기는 미적중).
@@ -731,7 +731,7 @@ A3는 Rockpile 설계([Rockpile](Rockpile.ko.md) 12·17절)가 요구한 레코�
 | 단계 | 범위 | 시험 |
 |---|---|---|
 | A3a | ReflectionText `VisitValues`(공용 순회), 키(`NuggetKeyWriter`·태그 전부·`WriteReflected`·`NuggetKeyTrace`·공통 머리·세대 둘·SCC 식), bucket, Record 쓰기·읽기·digest, `.rnug` v2 쓰기·읽기(메모리·범위 reader), 조각 해시 표 | 태그 경계(None·길이 접두·Map·Set 정렬)·NaN payload 변형·-0·유효하지 않은 UTF-8, 공통 머리 항목 하나씩 바꾸면 키가 바뀜, 리플렉션 필드 변이(값·맞바꿈·이름), SCC 입력 순서 섞기·구성원 중복·외부 튜플 중복·같은 접두 역할, Record·머리 byte 변조 위치마다 거부, 한도 경계, golden byte·digest |
-| A3b | `NuggetFileSystemBackend`(Get·Put·Touch·ReportCorrupt·Remove, 검증·손상 삭제, Exists·Conflict·교체·키 잠금, 저장 압축 왕복), GC, tmp 정리(잡힌 잠금 파일 보존) | 적중·미적중, 손상(파일 변조 위치마다)·삭제, bucket만 다른 echo, 같은 키 다른 digest, 두 프로세스 동시 기록·GC 대 Put·교체 대 교체(gate), Windows 삭제 공유·delete-pending 이동·Replace 실패, 읽기 전용 루트, GC 시각·용량·순서, 할당·IO 실패 주입, 실제 디스크 |
+| A3b | `NuggetFileSystemBackend`(Get·Put·Touch·ReportCorrupt·Remove, 검증·손상 삭제, Exists·Conflict·교체·shard 잠금, 저장 압축 왕복), GC, tmp 정리(임시 파일만 — 잠금 파일은 지우지 않음) | 적중·미적중, 손상(파일 변조 위치마다)·삭제, bucket만 다른 echo, 같은 키 다른 digest, 두 프로세스 동시 기록·GC 대 Put·교체 대 교체(gate), Windows 삭제 공유·delete-pending 이동·Replace 실패, 읽기 전용 루트, GC 시각·용량·순서, 할당·IO 실패 주입, 실제 디스크 |
 | A3c | `NuggetCache`(Memory 계층·설정·backend 선택·세션 고정·소비 입력·통계), 요청 객체(일괄·비동기·취소·Dropped·Shutdown), SCC Record 헬퍼 | 계층 적중 순서, 설정 파일 오류, off·rockpile 계약, DigestChanged 뒤 재고정과 Memory 축출, 많은 Record를 소비한 세션의 메모리 상한(고정 표만 커짐), 64 MiB 넘는 재생성 Record·고정 상한 초과 → 캐시 없음, inputs 어긋남, SkipData·SkipMeta·PartialRecord 조합, 취소 지점마다, 대기 상한, Shutdown 중 Get·drain, 진행 중 요청이 있는 캐시 소멸(Fatal 자식 프로세스), 4,096 구성원 초과 SCC, `required` 오류 경로, 할당 실패 |
 
 - A3a 상태: **구현** — 대조표 14.1.53절, coverage 14.1.54절. 구현에서 정한 것:
@@ -742,6 +742,24 @@ A3는 Rockpile 설계([Rockpile](Rockpile.ko.md) 12·17절)가 요구한 레코�
   - Record: schema Guid `ROCKPILE`/1(입력 항목 /2), 필드 1–6 순서·wire를 읽을 때 본다(TLV는 순서를 강제하지 않는다). 정규 형식에 Identity의 storedSize = rawSize·ContentHash = RawHash, indexLength ≤ storedSize, 표 해시는 storedSize ≥ 1 MiB일 때만을 더했다. 소비 입력 비교는 bucket 길이 → 내용 → key → digest(bucket ≤ 64 byte라 LE 길이 byte 사전순과 같다).
   - `.rnug` v2: 쓰기는 계획(`PlanNuggetFile` — 머리 + Record byte·값마다 조각 표, 값 byte는 복사하지 않는다)과 붙이기(`AppendNuggetFile`)로 나눴다(A3b가 큰 값을 파일로 흘려 쓴다). 읽기는 `OpenNuggetFile`(머리·Record·표 검증) → `ReadNuggetValue`(ContentHash) → `DecodeNuggetValue`(Identity 복사·Rcbk 해제와 IndexHash·RawHash). 다른 파일 버전·더 새 Record schema 버전은 Unsupported(손상과 구분 — 읽는 쪽은 지우지 않고 미적중으로 다룬다, 공유 `localPath`의 새 도구 항목을 옛 도구가 지우지 않게). `DecodeNuggetValue`는 공개 함수라 받은 행을 먼저 정규 형식 행 검사(`IsValidNuggetValueRow`)로 거부한다.
   - 리뷰 반영(필수 둘·권장 여섯): 더 새 Record schema의 Unsupported 전달, enum 문장, VisitValues의 "visitor는 순회 중 대상을 바꾸지 않는다" 계약, 항목 열기 실패 전달, Rcbk 색인 규칙과 공개 해제의 행 검사, 할당 실패 시험의 byte 비교, SCC 입력 검사(빈 목록·튜플 구성원·SCC 안 간선), Name 대소문자 접기.
+
+- A3b 구현 세부(2026-11-22, 착수 — 권장안으로 확정, 결정 7–9를 구체화):
+  - API `NuggetFileSystemBackend(allocator, files, root, clock)`: `Open()`(루트·`tmp` 만들기 — 만들 수 없으면 읽기 전용 모드, 24시간 지난 tmp 정리), `Get(NuggetBackendGet) -> NuggetGetResult`(상태·digest·Record·값마다 원본 byte, 원인 오류), `Put(NuggetBackendPut) -> NuggetPutResult`(상태·새 digest·기존 digest), `Touch(key)`, `Remove(key)`(관리용 — `ReportCorrupt`도 같다), `Collect({maxBytes, unusedDays}) -> 지운·남은·건너뛴 수와 byte`. Get·Put은 실패를 Result로 돌려주지 않고 상태(`Miss`·`Corrupt`·`Dropped` 등)와 원인 오류로 돌려준다(캐시 실패는 빌드 실패가 아니다 — R-1, `required` 판정은 A3c 캐시가 한다). 상태 enum `NuggetStatus`는 결정 13의 열하나다.
+  - 시각은 주입한 `NuggetClock`(기본 `NuggetSystemClock` — `DateTime::UtcNow`의 tick, 시험은 수동 시계)이다. Touch·tmp 나이·GC의 기준이다.
+  - 경로: 항목 `<root>/<k0k1>/<key 64자 소문자 hex>.rnug`, 임시 `<root>/tmp/<Guid>.tmp`, shard 잠금 `<root>/tmp/<k0k1>.lock`(지우지 않는다). 잠금은 PlatformBase `FileLock`(물리 파일 시스템)이라 루트는 물리 경로다(시험의 메모리 파일 시스템도 물리 임시 루트 위에 둔다 — A2와 같다). 잠금 대기 상한은 기본 `NuggetReplaceLockMs` 5초(`SetReplaceLockTimeout`으로 바꾼다 — 시험).
+  - Put 순서: 값마다 저장 압축 판단(64 KiB 이상이면 RCBK Zstd 기본 수준·블록 64 KiB로 압축해 더 작을 때만, `DecodeNuggetValue`로 왕복해 RawHash 확인) → `PlanNuggetFile` → tmp에 머리·값·표를 흘려 쓰기·Flush·Close → `Move(no-replace)`. 대상이 있으면 기존을 열어 digest 비교(같으면 값 byte의 ContentHash까지 고정 버퍼로 흘려 읽어 확인한 뒤 `Exists` + Touch — 손상 항목을 Exists로 남기지 않는다, 값 하나 16 GiB를 통째로 올리지 않는다, 값이 손상이면 아래 교체로, 다르면 `Conflict` + 기존 digest), 기존이 손상이면 shard 잠금 안에서 다시 열어 여전히 손상일 때만 `Replace`(`Stored`). 기존이 다른 버전(Unsupported — 새 도구의 항목)이면 지우지도 바꾸지도 않고 `Dropped`(Unsupported)다. 어느 경우든 tmp는 지운다(못 지우면 다음 tmp 정리가 지운다).
+  - Get: 없음 `Miss`, 다른 버전 `Miss`(Unsupported — 지우지 않는다), 손상 `Corrupt`(지운다), key가 다른 echo는 손상, bucket만 다르면 `Miss`(InvalidArgument — 지우지 않는다), 청한 값이 없으면 `partial`이면 `Partial`(있는 값만) 아니면 `Miss`, 같은 ValueId를 두 번 청하면 `Miss`(InvalidArgument — 행은 ValueId 오름차순이라 이진 검색), `skipData`면 값을 읽지 않는다(Record만 — 조각 표는 연 때 이미 검증), `skipMeta`면 meta를 비운다. 적중이면 Touch(실패는 무시).
+  - 시험 hook `NuggetBackendHooks`(지점 `NuggetBackendStep` — 이동 직전 `BeforePublish`, 이동이 AlreadyExists였을 때 판정 직전 `BeforeJudge`, 손상 교체의 잠금 안 재판정 직전 `BeforeJudgeLocked`): 같은 프로세스의 경합 순서와 두 프로세스 시험의 pipe gate를 결정적으로 만든다. 제품 코드는 걸지 않는다.
+- A3b 상태: **구현** — 대조표 14.1.55절, coverage 14.1.56절. 구현에서 정한 것:
+  - 루트를 만들 수 없으면(자리가 파일 등) 열기 실패다. 읽기 전용 모드는 tmp를 만들 수 없을 때다(이미 있는 루트 디렉터리는 만들기가 성공하므로 루트로는 판정하지 않는다).
+  - 같은 digest의 기존 항목은 값 byte의 ContentHash까지 확인한 뒤에만 `Exists`다(열기 검증은 값 byte를 읽지 않으므로 — 손상 값을 가진 항목을 Exists로 남기면 다음 Get까지 손상이 남는다). 손상이면 교체 경로로 간다.
+  - 이동이 AlreadyExists였는데 판정 때 항목이 없으면(GC·손상 삭제) 한 번 더 이동하고, 그것도 실패하면 `Dropped`(Busy)다. 이동의 다른 실패(delete-pending 이름의 AccessDenied 등)·디렉터리 만들기·쓰기·Flush·Close 실패는 `Dropped`(그 오류)이고 tmp를 지운다.
+  - 기존 항목을 읽을 수 없으면(IO 오류·할당 실패) 손상으로 보지 않는다 — Get은 `Miss`(그 오류), Put은 `Dropped`(그 오류)이고 지우지 않는다. 손상(InvalidArgument)만 지운다.
+  - GC는 루트의 16진 두 글자 디렉터리(link 아님) 안의 `<그 두 글자로 시작하는 64자 소문자 16진>.rnug` 일반 파일(link 아님)만 본다. 지우지 못한 항목은 `skipped`이고 남은 합에서 빼지 않는다. tmp 정리는 `.tmp`·`.lock` 일반 파일만이다(디렉터리·다른 이름은 두고, 잠금은 try-lock 뒤에만).
+  - `FileSystem::Exists`는 디렉터리에 거짓이다(UE `FileExists`와 같다 — 시험은 디렉터리를 Stat으로 본다. A3 뒤 `FileExists`·`DirectoryExists`로 바꾼다 — 사용자 지시 2026-11-22).
+  - 리뷰 반영(필수 하나·권장 넷): 키별 잠금 파일을 tmp 정리가 try-lock 뒤 지우던 것을 고정 256개 shard 잠금(지우지 않음)으로 바꿨다(FileLock 계약 — POSIX에서 상호 배제가 깨졌다, 처음 설계의 "try-lock 뒤에만 지운다"는 틀렸다). Exists 확인을 고정 버퍼 흘려 읽기로(`VerifyNuggetValue`), 잠금 대기 상한 주입, 값 선택 중복 거부·이진 검색.
+  - 남는 경합: 잠금 밖 경로(Get의 손상 삭제 + 다른 Put의 no-replace 이동)가 잠금 안 재판정과 `Replace` 사이에 끼면 새 정상 항목을 다른 정상 값으로 덮을 수 있다. 결과는 정상 값끼리의 교체이고(digest가 다르면 다른 세션에 `DigestChanged`) 틀린 적중은 아니다 — 모든 쓰기를 잠그지 않는 대가로 받아들인다(no-replace 이동이 동시 쓰기의 기본 경로).
+
 
 ## 10. Cooker
 
@@ -2729,6 +2747,36 @@ A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항�
 | `KeyVisitor`의 항목 열기(`StartEntry`) 실패 | 실패 | BeginSet·BeginMap이 원소 수만큼 자리를 잡고 순회 문법상 항목 이벤트 수가 그 수와 같다 — 실패는 순회 결함일 때만이고 그때 오류로 멈춘다(조용히 앞 항목에 섞지 않는다) |
 | `DecodeNuggetValue`의 Rcbk `TryRead` 할당 실패 갈래 | OutOfMemory | 해제 문맥(디코더)을 `TryCreate`에서 만들고 원본 전체를 destination에 바로 해제하므로 `TryRead`는 할당하지 않는다(블록 일부 읽기만 문맥 버퍼를 쓴다). 그 밖의 실패는 손상이다 |
 | `TextVisit.cpp`의 `PathReadInstancedType`·`PathIsOptionalSet`·`PathCount`·byte 배열 `PathRead` 실패 | 실패 | 계약상 visitor는 순회 중 대상을 바꾸지 않는다(TextVisit.h — 바꾸면 경로 연산 오류가 날 수 있다). 그 전제에서 순회는 스키마로 만든 경로로 소유 스레드에서 동기로 읽으며 이 넷은 할당하지 않는 읽기다(타입·set 여부·원소 수·uint8 원소) — 경로 오류·대상 소멸이 생길 수 없다. ExportJson의 같은 자리도 같다. 할당이 있는 읽기(값·키·key wire·byte 배열 자리)는 할당 실패 시험이 덮는다 |
+
+#### 14.1.55 요구 대조표(A3b — 파일 시스템 backend)
+
+시험은 EngineTests `Engine/Source/Developer/AssetNugget/Tests/NuggetBackendTests.cpp`(`NuggetBackend_*` 6 — 실제 디스크)와 `NuggetBackendRaceTests.cpp`(`NuggetBackendRace_*` 12 — 메모리 파일 시스템 실패 주입·hook 경합·두 프로세스·할당 실패)다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 왕복(9.1 결정 7) | Stored·Hit(값 byte·digest·Record·inputs·meta), 저장 압축 판단(압축되는 큰 값만 Rcbk, 작은 값·압축되지 않는 큰 값 Identity), 값 선택·partial(Partial)·없는 값 Miss·같은 ValueId 두 번 Miss(InvalidArgument)·skipData·skipMeta, 없는 키 Miss(None), 다른 bucket Miss(InvalidArgument — 유지), 1 MiB 넘는 값(조각 표), 정규 형식 위반 Put Dropped(InvalidArgument·잘못된 bucket), 임시 파일 없음 | `NuggetBackend_RoundTrip` |
+| 쓰기 판정(9절·9.1 결정 7) | 같은 Record Exists(기존 digest·Touch), 다른 Record Conflict(기존 유지), 손상(머리·Record·값·끝 위치) Get Corrupt 삭제, 손상 위 Put 교체, 다른 버전 Get Miss·Put Dropped(Unsupported — 유지), 다른 키 파일(echo) 손상, 기록 RawHash가 틀린 파일 Corrupt | `NuggetBackend_ExistsAndConflict`·`NuggetBackend_CorruptionAndVersions`·`NuggetBackend_SystemClockAndWrongRawHash` |
+| GC·관리(9.1 결정 9) | Touch(지금 시각)·없는 키 NotFound, Get 적중 Touch·touch 끔, Remove 있음·없음, unusedDays 제거, maxBytes 오래된 것부터·같은 시각 경로 순, 항목이 아닌 이름(16진 아닌 두 글자·`zz`·하위 디렉터리·길이·확장자·16진 아닌 키·접두 불일치·link 디렉터리·link 파일), 지난 tmp 지움·젊은 tmp·잠금 파일(잡힘·안 잡힘 모두 — 지우지 않는다)·다른 이름·디렉터리 유지, 시스템 시계 | `NuggetBackend_TouchRemoveAndCollect`·`NuggetBackendRace_CollectFilterAndAllocations`·`NuggetBackendRace_LinksAndDurability` |
+| 열기(A3b 상태) | 빈 루트 InvalidArgument, 루트 자리가 파일, 열기 전 Get·Put·Collect InvalidArgument, 읽기 전용(tmp 못 만듦 — Get Hit·Put Dropped Unsupported), tmp 열거 실패 무시 | `NuggetBackend_OpenAndReadOnly`·`NuggetBackendRace_TemporaryListingFailure` |
+| IO 실패(9.1 결정 8) | 만들기·쓰기 두 번째까지·Flush·Close·이동 AccessDenied·디렉터리 만들기 Dropped(tmp·항목 없음), 이동 AlreadyExists인데 항목 없고 재이동 실패 Dropped(Busy), 기존 항목 열기 사용 중·크기·읽기 실패·값 byte만 읽기 실패(Exists 확인 — 손상 아님) Put Dropped·Get Miss(유지), 교체 실패 Dropped, 교체 NotDurable Stored, 읽기 열기 실패 Miss, Remove 지우기 실패, 손상 삭제 실패 Corrupt 그대로, Touch 실패(적중은 무시), GC 지우기 실패 skipped·하위 열거 실패 건너뜀·루트 열거 실패 오류·tmp 지우기 실패 세지 않음 | `NuggetBackendRace_WriteFailures`·`NuggetBackendRace_SettleFailures`·`NuggetBackendRace_ManagementFailures`·`NuggetBackendRace_LinksAndDurability` |
+| 경합(9.1 결정 8) | 이동 직전 다른 backend 게시(같은 Record Exists·다른 Record Conflict — 먼저 게시한 쪽 유지), 판정 직전 지워짐 → 재게시 Stored, GC 대 Put, 손상 교체 잠금 안에서 다른 쪽이 고침(같은 Record Exists·다른 Record Conflict — 덮어쓰지 않음), 두 프로세스(pipe gate — 자식 Exists·Conflict), 다른 프로세스가 쥔 shard 잠금(주입한 대기 상한 뒤 Dropped Busy·항목 유지, 풀린 뒤 교체) | `NuggetBackendRace_InProcess`·`NuggetBackendRace_ConditionalReplace`·`NuggetBackendRace_TwoProcesses`·`NuggetBackendRace_HeldShardLock` |
+| 흘려 읽는 값 검증(A3b 구현 세부) | `VerifyNuggetValue`: 버퍼 크기(1·7·값−1·값·값+1) 무관 통과, 빈 값, index 범위 밖·빈 버퍼 InvalidArgument, 값 byte 변조는 그 값만(ReadNuggetValue와 같은 판정), 읽기 IO 오류(첫·중간·마지막 조각) 전파, 조각 수만큼 읽음 | `NuggetFile_VerifyValue`·`NuggetFile_ValueTableAndSizeTampering` |
+| 할당 실패 | Put(Dropped OutOfMemory·항목 없음)·Get(Miss·항목 유지)·같은 Put 판정 경로·손상 교체 경로·값 선택 partial Get·열기·Touch·Remove·GC(하위 디렉터리·지난 tmp) — 실패 없는 결과는 기준과 같다 | `NuggetBackendRace_AllocationFailures`·`NuggetBackendRace_MoreAllocationFailures`·`NuggetBackendRace_CollectFilterAndAllocations` |
+| 조합(14 완료 조건 2) | 기존 항목 상태(없음·정상 같은 digest·정상 다른 digest·손상·다른 버전·읽을 수 없음·판정 중 사라짐·잠금 안 고쳐짐) × 경로(Get·Put·Collect) × 실행(같은 프로세스·두 프로세스) × 실패(IO·할당) | 위 시험 |
+
+#### 14.1.56 Coverage(A3b)
+
+측정(2026-11-22, Windows, `ROCKS_MSVC_TOOLSET=14.44`, 리뷰 반영 뒤): `-Target EngineTests -Filter Nugget -Sources Engine/Source/Developer/AssetNugget/Private` — `NuggetFileSystemBackend.cpp` 줄 788/794·분기 357/366, `NuggetFile.cpp`(`VerifyNuggetValue` 포함) 줄 313/313·분기 159/160(남은 하나는 14.1.54의 `TryRead` 할당 실패 갈래).
+
+닿지 않은 곳과 근거:
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| `FileReader::ReadAt`의 범위 검사 | 범위 밖 | 부르는 쪽(`OpenNuggetFile`·`ReadNuggetValue`)이 파일 크기와 부분 합을 먼저 검증하고 그 안만 읽는다 |
+| `FileReader::ReadAt`의 Seek 실패 | 실패 | 연 파일 안 위치로의 Seek는 OS 실패 말고는 실패하지 않는다(메모리 파일 시스템도 실패를 주입하지 않는다) — 읽기 실패는 `MemoryFault::Read`가 덮는다 |
+| `ChooseStorage`의 압축 설정 실패 | 실패 | 상수 인자(Zstd 기본 수준·블록 2^16 — 12–24 안)이고 Zstd는 이 저장소의 Core ThirdParty로 늘 빌드된다 |
+| Put의 임시 파일 이름 Guid 발급 실패 | 실패 | OS 보안 난수 실패(14.1.22와 같다) |
+| Get·판정 switch의 암묵 default | 그 갈래 | `EntryState` 다섯 값을 모두 다룬다(clang이 default 없는 switch의 빠짐 갈래를 센다) |
 
 ## 15. PNG 디코더 범위
 
