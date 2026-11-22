@@ -1,0 +1,27 @@
+class Door : ScriptableComponent {
+    var Trail = "";
+    var Peer: Door?;
+    event Moved();
+
+    fn Link(other: Door) {
+        Peer = other;
+    }
+
+    on Enable() {
+        Trail = "${Trail}E";
+        emit Moved();
+    }
+
+    on Disable() {
+        Trail = "${Trail}D";
+    }
+
+    on Destroy() {
+        Trail = "${Trail}X";
+        Log.Info("destroy ${Trail}");
+    }
+
+    on Peer.Moved() {
+        Log.Info("peer moved");
+    }
+}

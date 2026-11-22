@@ -82,7 +82,13 @@ uint32 VmSession::QueuedCount() const noexcept {
 }
 
 void VmSession::BeginEntry() noexcept {
-    // 진입 하나의 기록(로그·전달)을 모은다.
+    // 진입 하나의 기록(로그·전달)을 모은다. 적용 루프 안의 hook은 루프의 기록을 잇는다.
+    if (nested_) {
+        currentDepth_ = 0;
+        currentRoot_ = 0;
+        return;
+    }
+
     execution_.logs_.Clear();
     execution_.logText_.Clear();
     execution_.droppedLogs_ = 0;
@@ -678,6 +684,9 @@ Result<void> VmSession::Drain() noexcept {
 
                 connection = connections_[chosen];
                 lastOrder = connection.order;
+                if (instances_[connection.subscriber].pendingDestroy) {
+                    continue; // 파괴 적용됨: 새 전달 없음(SparksRuntime 2.6절)
+                }
             }
 
             const BytecodeModule& bytecode = connection.module->Module();
@@ -786,7 +795,7 @@ Result<void> VmSession::Drain() noexcept {
 }
 
 Result<void> VmSession::OpenPhase() noexcept {
-    if (execution_.running_) {
+    if (closed_ || execution_.running_) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -804,6 +813,10 @@ Result<void> VmSession::OpenPhase() noexcept {
 
 Result<void> VmSession::Emit(uint64 publisher, const VmEventKey& key, Span<const uint64> scalars,
                              Span<const uint64> refs, Span<VmBuffer* const> buffers) noexcept {
+    if (closed_) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
     if (execution_.running_) {
         // 실행 중(native 호출 안)의 발행: 넣기만 한다(LC6b 리뷰 B4 — 전달은 바깥 진입).
         ErrorCode error = ErrorCode::None;

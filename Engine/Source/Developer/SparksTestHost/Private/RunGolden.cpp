@@ -67,6 +67,7 @@ constexpr StringView RunArrow = " -> ";
 // 2.3절).
 constexpr StringView RunDeliverPrefix = "  deliver ";
 constexpr StringView RunResumePrefix = "  resume ";
+constexpr StringView RunHookPrefix = "  hook ";
 
 // 호출 뒤 `Log.*` 기록 줄의 머리다(`  log <수준> "<메시지>"`).
 constexpr StringView RunLogPrefix = "  log ";
@@ -1006,10 +1007,17 @@ private:
 static void AppendDeliveries(StringBuilderBase& actual, const VmSession& session,
                              const FakeHost& host) noexcept {
     for (const VmSession::Delivery& delivery : session.Deliveries()) {
-        actual.Append(delivery.resumed ? RunResumePrefix : RunDeliverPrefix);
+        actual.Append(delivery.hook      ? RunHookPrefix
+                      : delivery.resumed ? RunResumePrefix
+                                         : RunDeliverPrefix);
         host.FormatHandle(actual, delivery.subscriber);
-        const BytecodeModule& module = delivery.module->Module();
-        actual.Append(" ").Append(module.String(module.functions[delivery.function].name));
+        if (delivery.hook) {
+            actual.Append(" ").Append(BytecodeHookKindName(delivery.hookKind));
+        } else {
+            const BytecodeModule& module = delivery.module->Module();
+            actual.Append(" ").Append(module.String(module.functions[delivery.function].name));
+        }
+
         actual.Append(" -> ");
         switch (delivery.result.outcome) {
         case VmOutcome::Returned:
@@ -1135,7 +1143,8 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
 
         // 로그 줄은 앞 호출의 기록이다 — 실행기가 다시 쓴다.
         if (line.StartsWith(RunLogPrefix) || line.StartsWith(RunHostPrefix) ||
-            line.StartsWith(RunDeliverPrefix) || line.StartsWith(RunResumePrefix)) {
+            line.StartsWith(RunDeliverPrefix) || line.StartsWith(RunResumePrefix) ||
+            line.StartsWith(RunHookPrefix)) {
             continue;
         }
 
@@ -1144,7 +1153,10 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
         if (line.StartsWith("new ") || line.StartsWith("hook ") || line.StartsWith("fields ") ||
             line.StartsWith("detach ") || line.StartsWith("emit ") || line == "phase" ||
             line.StartsWith("phase ") || line.StartsWith("advance ") || line == "fixed" ||
-            line.StartsWith("fixed ") || line == "stats" || line.StartsWith("stats ")) {
+            line.StartsWith("fixed ") || line == "stats" || line.StartsWith("stats ") ||
+            line.StartsWith("request ") || line == "apply" || line.StartsWith("apply ") ||
+            line == "endframe" || line.StartsWith("endframe ") || line == "close" ||
+            line.StartsWith("close ")) {
             usize arrowAt = line.ByteCount();
             for (usize index = 0; index + RunArrow.ByteCount() <= line.ByteCount(); ++index) {
                 if (StringView(line.Data() + index, RunArrow.ByteCount()) == RunArrow) {
@@ -1203,6 +1215,24 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
 
                 actual.AppendFormat("ok ({} queued)", session.QueuedCount());
                 delivered = true;
+            } else if (verb == "apply" || verb == "endframe" || verb == "close") {
+                // 지연 적용·프레임 끝 정리·session 종료(SparksRuntime 2.6절 — LC6d2). 돌린 수명
+                // hook은 `  hook #n <종류> -> 결과` 줄이다.
+                actual.Append(directive).Append(RunArrow);
+                Result<void> applied = verb == "apply"      ? session.ApplyRequests()
+                                       : verb == "endframe" ? session.EndFrame()
+                                                            : session.CloseSession();
+                if (!applied) {
+                    return Result<void>::Failure(applied.Error());
+                }
+
+                if (verb == "close") {
+                    actual.AppendFormat("ok (ledger {} buffers)", execution.LiveBuffers());
+                } else {
+                    actual.AppendFormat("ok ({} pending)", session.PendingRequests());
+                }
+
+                delivered = verb != "close";
             } else if (verb == "stats") {
                 // session의 async 상태(SparksRuntime 2.4절): 대기 표 항목·정지 실행·skip 수.
                 actual.Append(directive).Append(RunArrow);
@@ -1281,7 +1311,23 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
                         return bad("the object has no instance (use 'new' first)");
                     }
 
-                    if (verb == "detach") {
+                    if (verb == "request") {
+                        // `request #n enable|disable|destroy`(지연 적용 요청 —
+                        // SparksRuntime 2.6절).
+                        const bool destroy = rest == "destroy";
+                        if (!destroy && rest != "enable" && rest != "disable") {
+                            return bad("'request' needs enable, disable or destroy");
+                        }
+
+                        auto requested = destroy
+                                             ? session.RequestDestroy(instance)
+                                             : session.RequestEnabled(instance, rest == "enable");
+                        if (!requested) {
+                            return Result<void>::Failure(requested.Error());
+                        }
+
+                        actual.Append("ok");
+                    } else if (verb == "detach") {
                         if (auto detached = session.Detach(instance); !detached) {
                             return Result<void>::Failure(detached.Error());
                         }

@@ -903,7 +903,7 @@ Result<void> VmSession::ResumeDone() noexcept {
 }
 
 Result<void> VmSession::Advance(double gameDelta, double uiDelta, bool paused) noexcept {
-    if (execution_.running_ || !math::IsFinite(gameDelta) || !math::IsFinite(uiDelta) ||
+    if (closed_ || execution_.running_ || !math::IsFinite(gameDelta) || !math::IsFinite(uiDelta) ||
         gameDelta < 0.0 || uiDelta < 0.0) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
@@ -960,7 +960,7 @@ Result<void> VmSession::Advance(double gameDelta, double uiDelta, bool paused) n
 }
 
 Result<void> VmSession::FixedStep() noexcept {
-    if (execution_.running_) {
+    if (closed_ || execution_.running_) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 

@@ -23,7 +23,7 @@ VmSession::VmSession(Allocator& allocator, VmHost* host) noexcept
       itemValues_(allocator), itemBuffers_(allocator), writes_(allocator), writeValues_(allocator),
       writeBuffers_(allocator), deliveries_(allocator), suspended_(allocator), waits_(allocator),
       freeWaits_(allocator), fragmentWaits_(allocator), resumeOrder_(allocator),
-      resumeWaits_(allocator) {
+      resumeWaits_(allocator), requests_(allocator), applying_(allocator), destroys_(allocator) {
     execution_.session_ = this;
 }
 
@@ -49,7 +49,7 @@ VmSession::~VmSession() noexcept {
 }
 
 Result<void> VmSession::AddModule(const VmLinkedModule& linked) noexcept {
-    if (execution_.running_ || !linked.Linked() || linked.Host() != host_) {
+    if (closed_ || execution_.running_ || !linked.Linked() || linked.Host() != host_) {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -158,6 +158,10 @@ bool VmSession::RegionStart(const VmLinkedModule& module, uint32 classIndex,
 Result<uint32> VmSession::CreateInstance(uint64 handle, const VmLinkedModule& module,
                                          uint32 classIndex, VmCallResult& init) noexcept {
     init = VmCallResult();
+    if (closed_) {
+        return Result<uint32>::Failure(ErrorCode::InvalidArgument); // 종료 뒤 admission 없음
+    }
+
     bool known = false;
     for (const VmLinkedModule* existing : modules_) {
         known = known || existing == &module;
@@ -289,7 +293,10 @@ Result<uint32> VmSession::CreateInstance(uint64 handle, const VmLinkedModule& mo
 Result<VmCallResult> VmSession::RunHook(uint32 instance, BytecodeHookKind kind,
                                         Span<const uint64> scalars, Span<const uint64> refs,
                                         Span<VmBuffer* const> buffers) noexcept {
-    if (execution_.running_ || instance >= instances_.Size() || !instances_[instance].attached) {
+    if (closed_ || execution_.running_ || instance >= instances_.Size() ||
+        !instances_[instance].attached ||
+        (instances_[instance].pendingDestroy && kind != BytecodeHookKind::Disable &&
+         kind != BytecodeHookKind::Destroy)) {
         return Result<VmCallResult>::Failure(ErrorCode::InvalidArgument);
     }
 
@@ -354,9 +361,15 @@ Result<VmCallResult> VmSession::RunHook(uint32 instance, BytecodeHookKind kind,
             }
 
             currentInstance_ = instance;
+            // Disable·Destroy(Teardown)는 명령 예산이 작다(SL 9.3절).
+            VmLimits limits;
+            if (kind == BytecodeHookKind::Disable || kind == BytecodeHookKind::Destroy) {
+                limits.instructions = TeardownInstructions;
+            }
+
             auto called =
                 execution_.Call(*chainModules[at - 1], bytecode.hooks[hook].function, scalars,
-                                Span<const uint64>(refArguments, refs.Size() + 1), buffers);
+                                Span<const uint64>(refArguments, refs.Size() + 1), buffers, limits);
             currentInstance_ = NoBytecodeIndex;
             SettleWaits(called);
             if (!called) {
@@ -415,7 +428,8 @@ Result<VmCallResult> VmSession::RunHook(uint32 instance, BytecodeHookKind kind,
 Result<VmCallResult> VmSession::Call(uint32 instance, const VmLinkedModule& module, uint32 function,
                                      Span<const uint64> scalars, Span<const uint64> refs,
                                      Span<VmBuffer* const> buffers) noexcept {
-    if (execution_.running_ || instance >= instances_.Size() || !instances_[instance].attached ||
+    if (closed_ || execution_.running_ || instance >= instances_.Size() ||
+        !instances_[instance].attached || instances_[instance].pendingDestroy ||
         refs.Size() + 1 > VmSessionMaxRefArguments) {
         return Result<VmCallResult>::Failure(ErrorCode::InvalidArgument);
     }
@@ -622,6 +636,178 @@ bool VmSession::FieldSlots(uint64 handle, const VmLinkedModule& module, uint32 c
     instanceOut = number;
     atOut = static_cast<uint32>(at);
     return true;
+}
+
+Result<void> VmSession::RequestEnabled(uint32 instance, bool enabled) noexcept {
+    if (closed_ || instance >= instances_.Size() || !instances_[instance].attached) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    Request request;
+    request.instance = instance;
+    request.serial = instances_[instance].serial;
+    request.kind = enabled ? RequestKind::Enable : RequestKind::Disable;
+    return requests_.TryPushBack(request) ? Result<void>::Success()
+                                          : Result<void>::Failure(ErrorCode::OutOfMemory);
+}
+
+Result<void> VmSession::RequestDestroy(uint32 instance) noexcept {
+    if (closed_ || instance >= instances_.Size() || !instances_[instance].attached) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    Request request;
+    request.instance = instance;
+    request.serial = instances_[instance].serial;
+    request.kind = RequestKind::Destroy;
+    return requests_.TryPushBack(request) ? Result<void>::Success()
+                                          : Result<void>::Failure(ErrorCode::OutOfMemory);
+}
+
+Result<void> VmSession::ApplyHook(uint32 instance, BytecodeHookKind kind) noexcept {
+    // 수명 hook 하나를 돌리고 적용 기록(`  hook` 줄)으로 남긴다. 기록은 그 hook이 낸 전달보다
+    // 앞이다 (결과는 돌린 뒤 채운다).
+    Delivery delivery;
+    delivery.subscriber = instances_[instance].handle;
+    delivery.module = instances_[instance].module;
+    delivery.hook = true;
+    delivery.hookKind = kind;
+    const usize at = deliveries_.Size();
+    if (!deliveries_.TryPushBack(delivery)) {
+        return Result<void>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    auto ran = RunHook(instance, kind, Span<const uint64>(), Span<const uint64>());
+    execution_.keepLogs_ = true; // RunHook이 끈 기록 모음을 다시 켠다(적용 루프는 한 진입)
+    if (!ran) {
+        return Result<void>::Failure(ran.Error());
+    }
+
+    deliveries_[at].result = ran.Value();
+    return Result<void>::Success();
+}
+
+Result<void> VmSession::ApplyRequests() noexcept {
+    if (closed_ || execution_.running_) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 요청 순으로 적용하고 그동안 생긴 요청은 다음 회차에(64회 — SL 5.4·9.3절). 남은 요청은 다음
+    // 단계로 넘긴다(PendingRequests).
+    BeginEntry();
+    execution_.keepLogs_ = true;
+    nested_ = true;
+    Result<void> status = Result<void>::Success();
+    for (uint32 round = 0; round < MaxApplyRounds && !requests_.IsEmpty() && status; ++round) {
+        applying_.Clear();
+        if (!applying_.TryAppend(requests_.View())) {
+            status = Result<void>::Failure(ErrorCode::OutOfMemory);
+            break;
+        }
+
+        requests_.Clear();
+        for (usize at = 0; at < applying_.Size() && status; ++at) {
+            const Request request = applying_[at];
+            if (request.instance >= instances_.Size() || !instances_[request.instance].attached ||
+                instances_[request.instance].serial != request.serial ||
+                instances_[request.instance].pendingDestroy) {
+                continue; // 그 사이 Detach·파괴됐다
+            }
+
+            Instance& entry = instances_[request.instance];
+            if (request.kind == RequestKind::Enable && !entry.enabled) {
+                status = ApplyHook(request.instance, BytecodeHookKind::Enable);
+            } else if (request.kind == RequestKind::Disable && entry.enabled) {
+                status = ApplyHook(request.instance, BytecodeHookKind::Disable);
+            } else if (request.kind == RequestKind::Destroy) {
+                entry.pendingDestroy = true;
+                if (!destroys_.TryPushBack(request)) {
+                    status = Result<void>::Failure(ErrorCode::OutOfMemory);
+                }
+            }
+        }
+    }
+
+    nested_ = false;
+    execution_.keepLogs_ = false;
+    return status;
+}
+
+Result<void> VmSession::EndFrame() noexcept {
+    if (closed_ || execution_.running_) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // 파괴 적용된 instance를 요청 순으로: Disable(활성이면) → Destroy hook → Detach(SL 9.1절 표).
+    BeginEntry();
+    execution_.keepLogs_ = true;
+    nested_ = true;
+    Result<void> status = Result<void>::Success();
+    for (usize at = 0; at < destroys_.Size() && status; ++at) {
+        const Request request = destroys_[at];
+        if (request.instance >= instances_.Size() || !instances_[request.instance].attached ||
+            instances_[request.instance].serial != request.serial) {
+            continue;
+        }
+
+        if (instances_[request.instance].enabled) {
+            status = ApplyHook(request.instance, BytecodeHookKind::Disable);
+        }
+
+        if (status) {
+            status = ApplyHook(request.instance, BytecodeHookKind::Destroy);
+        }
+
+        if (auto detached = Detach(request.instance); !detached && status) {
+            status = static_cast<Result<void>&&>(detached);
+        }
+    }
+
+    destroys_.Clear();
+    nested_ = false;
+    execution_.keepLogs_ = false;
+    return status;
+}
+
+Result<void> VmSession::CloseSession() noexcept {
+    if (execution_.running_) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // admission 차단 → 모든 instance Detach(정지 실행 취소·유지 자원·연결) → 큐·Changed 자리 폐기 →
+    // 연결·대기 표 해제(SL 9.1절). 사용자 코드를 돌리지 않는다.
+    closed_ = true;
+    DetachAll();
+    for (uint32 at = 0; at < suspended_.Size(); ++at) {
+        if (suspended_[at].live) {
+            CancelSuspended(at, false); // instance 없는 실행(안전장치)
+        }
+    }
+
+    for (usize at = queueHead_; at < queue_.Size(); ++at) {
+        ReleaseItem(queue_[at]);
+    }
+
+    queue_.Clear();
+    queueHead_ = 0;
+    itemValues_.Clear();
+    itemBuffers_.Clear();
+    for (VmBuffer* buffer : writeBuffers_) {
+        execution_.Release(buffer);
+    }
+
+    writes_.Clear();
+    writeValues_.Clear();
+    writeBuffers_.Clear();
+    connections_.Clear();
+    waits_.Clear();
+    freeWaits_.Clear();
+    fragmentWaits_.Clear();
+    requests_.Clear();
+    destroys_.Clear();
+    execution_.Unwind();
+    execution_.ReleaseReturned();
+    return Result<void>::Success();
 }
 
 } // namespace rocks::sparks

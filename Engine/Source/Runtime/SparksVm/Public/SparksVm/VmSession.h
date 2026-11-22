@@ -100,6 +100,9 @@ public:
         uint32 function = NoBytecodeIndex;
         VmCallResult result;
         bool resumed = false; // 정지했던 실행의 재개(SparksRuntime 2.4절)
+        // 적용 루프·프레임 끝 정리가 부른 수명 hook(SparksRuntime 2.6절 — function은 없다).
+        bool hook = false;
+        BytecodeHookKind hookKind = BytecodeHookKind::Enable;
     };
 
     Span<const Delivery> Deliveries() const noexcept {
@@ -123,6 +126,29 @@ public:
     uint32 SuspendedCount() const noexcept;
     // 대기 표의 살아 있는 항목 수다(재개·취소된 대기는 돌려받는다 — 장시간 반복에도 일정).
     uint32 WaitCount() const noexcept;
+    // ---- 지연 적용·종료(SparksRuntime 2.6절 — LC6d2) ----
+
+    static constexpr uint32 MaxApplyRounds = 64;           // 적용 루프(SL 9.3절)
+    static constexpr uint64 TeardownInstructions = 100000; // Disable·Destroy hook 명령 예산
+
+    // 활성 전환·파괴 요청을 넣는다(실행 중에도 — host native `SetEnabled`·`Destroy`가 부른다).
+    // 실패: 없는 instance·session 종료 뒤면 InvalidArgument, 할당 실패는 OutOfMemory.
+    Result<void> RequestEnabled(uint32 instance, bool enabled) noexcept;
+    Result<void> RequestDestroy(uint32 instance) noexcept;
+    // 스크립트 단계 끝: 요청 순으로 Enable·Disable hook을 돌리고(그 emit은 같은 큐로 전달) 그동안
+    // 생긴 요청을 이어 처리한다(64회 — 남으면 다음 단계로). 파괴 요청은 PendingDestroy로 표시한다.
+    Result<void> ApplyRequests() noexcept;
+    // 프레임 끝 정리: PendingDestroy instance를 요청 순으로 Disable(활성이면) → Destroy hook →
+    // Detach한다.
+    Result<void> EndFrame() noexcept;
+    // session을 닫는다(SL 9.1절): admission 차단 → 모든 instance Detach → 큐·Changed 자리 폐기 →
+    // 연결·대기 표 해제. 뒤에는 실행 문맥 ledger가 0이다. 실행 중이면 InvalidArgument.
+    Result<void> CloseSession() noexcept;
+    // 남은(다음 단계로 넘긴) 요청 수다.
+    uint32 PendingRequests() const noexcept {
+        return static_cast<uint32>(requests_.Size());
+    }
+
     // `@skipWhileBusy`로 버린 이벤트 수다(디버거 표시 — SL 6.1절 SD11).
     uint64 SkippedWhileBusy() const noexcept {
         return skippedWhileBusy_;
@@ -357,8 +383,9 @@ private:
         const VmLinkedModule* module = nullptr;
         uint32 classIndex = NoBytecodeIndex;
         bool attached = false;
-        bool enabled = false; // Enable hook이 끝났고 Disable 전(연결이 살아 있다)
-        uint64 serial = 0;    // 생성 번호(session 안에서 유일 — 번호 재사용 구별)
+        bool enabled = false;        // Enable hook이 끝났고 Disable 전(연결이 살아 있다)
+        uint64 serial = 0;           // 생성 번호(session 안에서 유일 — 번호 재사용 구별)
+        bool pendingDestroy = false; // 파괴 적용됨(새 전달·admission 없음 — 프레임 끝에 정리)
         Array<uint64> scalars;
         Array<uint64> refs;
         Array<VmBuffer*> buffers;
@@ -424,6 +451,26 @@ private:
     uint32 currentHandler_ = NoBytecodeIndex;
     uint64 skippedWhileBusy_ = 0;
     uint64 nextSerial_ = 1;
+    // 지연 적용(LC6d2).
+    enum class RequestKind : uint8 {
+        Enable,
+        Disable,
+        Destroy
+    };
+
+    struct Request {
+        uint32 instance = NoBytecodeIndex;
+        uint64 serial = 0;
+        RequestKind kind = RequestKind::Enable;
+    };
+
+    Array<Request> requests_;
+    Array<Request> applying_;
+    Array<Request> destroys_;
+    bool closed_ = false;
+    bool nested_ = false; // 적용 루프 안(진입 기록을 이어 모은다)
+    // 수명 hook 하나를 적용 기록으로 돌린다.
+    Result<void> ApplyHook(uint32 instance, BytecodeHookKind kind) noexcept;
 };
 
 } // namespace rocks::sparks

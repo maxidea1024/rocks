@@ -1,0 +1,35 @@
+# Deferred apply (SparksRuntime 2.6, LC6d2): requests queue and apply in order at the end of a script
+# phase (hook lines), a destroy marks the instance pending (no new deliveries or requests), the frame end
+# runs Disable then Destroy and detaches, and CloseSession leaves an empty ledger.
+new #1 Door -> ok (3 steps)
+new #2 Door -> ok (3 steps)
+hook #2 Enable -> ok (9 steps)
+Door.Link(#2, #1) -> void (3 steps)
+request #1 enable -> ok
+apply -> ok (0 pending)
+  hook #1 Enable -> ok (9 steps)
+  deliver #2 Door.on Peer.Moved -> ok (4 steps)
+  log info "peer moved"
+request #1 disable -> ok
+request #1 enable -> ok
+apply -> ok (0 pending)
+  hook #1 Disable -> ok (7 steps)
+  hook #1 Enable -> ok (9 steps)
+  deliver #2 Door.on Peer.Moved -> ok (4 steps)
+  log info "peer moved"
+fields #1 -> Door(Trail: "EDE", Peer: none)
+request #1 destroy -> ok
+request #1 disable -> ok
+apply -> ok (0 pending)
+endframe -> ok (0 pending)
+  hook #1 Disable -> ok (7 steps)
+  hook #1 Destroy -> ok (14 steps)
+  log info "destroy EDEDX"
+stats -> waits 0, suspended 0, skipped 0
+request #2 destroy -> ok
+apply -> ok (0 pending)
+endframe -> ok (0 pending)
+  hook #2 Disable -> ok (7 steps)
+  hook #2 Destroy -> ok (14 steps)
+  log info "destroy EDX"
+close -> ok (ledger 0 buffers)
