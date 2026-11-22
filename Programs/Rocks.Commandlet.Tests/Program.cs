@@ -1643,6 +1643,142 @@ finally
     Directory.Delete(duplicateDirectory, true);
 }
 
+// asset-orphans-*·verify 경고(AssetSystem.ko.md 7.1절 17 — A2e4a): 고아 출력 fixture(Orphan 2311 — owner 2312 없음, HeroOrphan
+// 2313 — 기록 없는 Hero가 owner)로 목록 줄(경로 키 순, owner 경로·missing), 경고만인 verify는 종료 0, 고아 지우기·고아 아닌 거부,
+// 잠금 Busy, 사용법·도움말·프로젝트 없음.
+string orphanDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-orphans-{Environment.ProcessId}");
+try
+{
+    void WriteOrphanContent(string root, string relative, byte[] bytes)
+    {
+        string path = Path.Combine(root, "Content", relative);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllBytes(path, bytes);
+    }
+
+    const string orphanId = "5e570000-a55e-7000-0000-000000000907";
+    const string heroOrphanId = "5e570000-a55e-7000-0000-000000000909";
+    const string missingOwnerId = "5e570000-a55e-7000-0000-000000000908";
+    string project = Path.Combine(orphanDirectory, "Orphans");
+    Directory.CreateDirectory(project);
+    File.WriteAllText(Path.Combine(project, "Orphans.rocksproject"), "{}\n");
+    WriteOrphanContent(project, "Characters/Hero.rasset", fixtures["CommandletHeroPackage"]);
+    WriteOrphanContent(project, "Items/Base.rasset", fixtures["CommandletBasePackage"]);
+    WriteOrphanContent(project, "Outputs/Orphan.rasset", fixtures["CommandletOrphanPackage"]);
+    WriteOrphanContent(project, "Outputs/HeroOrphan.rasset", fixtures["CommandletHeroOrphanPackage"]);
+    string projectOption = $"--project={project}";
+    string warningsOnly = Path.Combine(orphanDirectory, "WarningsOnly");
+    Directory.CreateDirectory(warningsOnly);
+    File.WriteAllText(Path.Combine(warningsOnly, "WarningsOnly.rocksproject"), "{}\n");
+    WriteOrphanContent(warningsOnly, "Outputs/Orphan.rasset", fixtures["CommandletOrphanPackage"]);
+
+    async Task<ProcessResult> RunOrphans(params string[] arguments) =>
+        await ProcessRunner.RunAsync(new(executable, arguments, workingDirectory, Timeout: TimeSpan.FromSeconds(30)));
+
+    void ReportOrphans(string label, bool passed, ProcessResult result)
+    {
+        Console.WriteLine($"{label}: {(passed ? "PASS" : "FAIL")}");
+        if (!passed)
+        {
+            ++failures;
+            Console.Error.WriteLine($"  exit={result.ExitCode}; stdout={result.StdOut}; stderr={result.StdErr}");
+        }
+    }
+
+    ProcessResult listed = await RunOrphans("asset-orphans-list", projectOption);
+    ReportOrphans("asset-orphans-list", listed.ExitCode == 0 && listed.StdErr.Length == 0 &&
+        listed.StdOut == $"/Game/Outputs/HeroOrphan {heroOrphanId} owner /Game/Characters/Hero\n" +
+                         $"/Game/Outputs/Orphan {orphanId} owner missing\n", listed);
+
+    // 경고만 있는 verify는 종료 0이다(진단 줄은 쓴다).
+    ProcessResult warned = await RunOrphans("asset-index-verify", $"--project={warningsOnly}");
+    ReportOrphans("asset-index-verify warnings only", warned.ExitCode == 0 &&
+        warned.StdErr.Contains($"OrphanedOutput: Content/Outputs/Orphan.rasset: warning the owning import {missingOwnerId} is not in the index",
+            StringComparison.Ordinal) &&
+        warned.StdOut == "asset-index-verify: 1 packages, 1 diagnostics\n", warned);
+    ProcessResult mixed = await RunOrphans("asset-index-verify", projectOption);
+    ReportOrphans("asset-index-verify errors and warnings", mixed.ExitCode == 1 &&
+        mixed.StdErr.Contains("OrphanedOutput: Content/Outputs/HeroOrphan.rasset: warning the owning import", StringComparison.Ordinal) &&
+        mixed.StdErr.Contains("has no import record of its own", StringComparison.Ordinal) &&
+        mixed.StdErr.Contains("MissingDependency", StringComparison.Ordinal), mixed);
+
+    // 지우기: 고아가 아니면 거부, 고아는 지운다.
+    ProcessResult notOrphan = await RunOrphans("asset-orphans-delete", "/Game/Characters/Hero", projectOption);
+    ReportOrphans("asset-orphans-delete not an orphan", notOrphan.ExitCode == 1 &&
+        notOrphan.StdErr.Contains("asset-orphans-delete: InvalidArgument: /Game/Characters/Hero: failed", StringComparison.Ordinal) &&
+        File.Exists(Path.Combine(project, "Content", "Characters", "Hero.rasset")), notOrphan);
+    ProcessResult deleted = await RunOrphans("asset-orphans-delete", "/Game/Outputs/Orphan", projectOption);
+    ReportOrphans("asset-orphans-delete", deleted.ExitCode == 0 &&
+        deleted.StdOut == $"asset-orphans-delete: deleted /Game/Outputs/Orphan {orphanId}\n" &&
+        !File.Exists(Path.Combine(project, "Content", "Outputs", "Orphan.rasset")), deleted);
+    ProcessResult after = await RunOrphans("asset-orphans-list", projectOption);
+    ReportOrphans("asset-orphans-list after a delete", after.ExitCode == 0 &&
+        after.StdOut == $"/Game/Outputs/HeroOrphan {heroOrphanId} owner /Game/Characters/Hero\n", after);
+    // 같은 id owner가 둘이면 owner는 AssetId로 쓴다(Hero 사본).
+    WriteOrphanContent(project, "Characters/HeroCopy.rasset", fixtures["CommandletHeroPackage"]);
+    ProcessResult twin = await RunOrphans("asset-orphans-list", projectOption);
+    ReportOrphans("asset-orphans-list with a duplicated owner id", twin.ExitCode == 0 &&
+        twin.StdOut == $"/Game/Outputs/HeroOrphan {heroOrphanId} owner 5e570000-a55e-7000-0000-0000000008fc\n", twin);
+    File.Delete(Path.Combine(project, "Content", "Characters", "HeroCopy.rasset"));
+
+    // Content가 파일이면 검색 실패다.
+    string brokenContent = Path.Combine(orphanDirectory, "BrokenContent");
+    Directory.CreateDirectory(brokenContent);
+    File.WriteAllText(Path.Combine(brokenContent, "BrokenContent.rocksproject"), "{}\n");
+    File.WriteAllBytes(Path.Combine(brokenContent, "Content"), [1]);
+    ProcessResult unscanned = await RunOrphans("asset-orphans-list", $"--project={brokenContent}");
+    ReportOrphans("asset-orphans-list content is a file", unscanned.ExitCode == 1 &&
+        unscanned.StdErr.Contains("asset-orphans-list: cannot scan", StringComparison.Ordinal), unscanned);
+
+    ProcessResult missing = await RunOrphans("asset-orphans-delete", "/Game/Outputs/Orphan", projectOption);
+    ReportOrphans("asset-orphans-delete missing", missing.ExitCode == 1 &&
+        missing.StdErr.Contains("asset-orphans-delete: NotFound: /Game/Outputs/Orphan: failed", StringComparison.Ordinal), missing);
+
+    if (OperatingSystem.IsWindows())
+    {
+        string lockPath = Path.Combine(project, "Intermediate", "AssetDatabase.lock");
+        Directory.CreateDirectory(Path.GetDirectoryName(lockPath)!);
+        using FileStream locked = new(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
+        locked.Lock(0, 1);
+        ProcessResult busy = await RunOrphans("asset-orphans-delete", "/Game/Outputs/HeroOrphan", projectOption);
+        ReportOrphans("asset-orphans-delete locked", busy.ExitCode == 1 &&
+            busy.StdErr.Contains("asset-orphans-delete: Busy: ", StringComparison.Ordinal), busy);
+        // 목록은 잠금을 잡지 않는다.
+        ProcessResult unlockedList = await RunOrphans("asset-orphans-list", projectOption);
+        ReportOrphans("asset-orphans-list while locked", unlockedList.ExitCode == 0, unlockedList);
+        locked.Unlock(0, 1);
+    }
+
+    string[][] orphanUsage =
+    [
+        ["asset-orphans-delete", projectOption],
+        ["asset-orphans-delete", "/Game/A", "/Game/B", projectOption],
+        ["asset-orphans-delete", "/Game/A", "--force", projectOption],
+        ["asset-orphans-list", "extra", projectOption],
+        ["asset-orphans-list", "--under=/Game", projectOption],
+    ];
+    foreach (string[] arguments in orphanUsage)
+    {
+        ProcessResult usage = await RunOrphans(arguments);
+        ReportOrphans($"{arguments[0]} usage: {string.Join(' ', arguments.Skip(1).Where(argument => argument != projectOption))}",
+            usage.ExitCode == 2 && usage.StdErr.StartsWith($"usage: {arguments[0]}", StringComparison.Ordinal), usage);
+    }
+
+    foreach (string name in new[] { "asset-orphans-list", "asset-orphans-delete" })
+    {
+        ProcessResult help = await RunOrphans(name, "--help");
+        ReportOrphans($"{name} help", help.ExitCode == 0 && help.StdOut.StartsWith($"usage: {name}", StringComparison.Ordinal), help);
+        string[] noProjectArguments = name == "asset-orphans-delete" ? [name, "/Game/A"] : [name];
+        ProcessResult noProject = await RunOrphans(noProjectArguments);
+        ReportOrphans($"{name} without a project", noProject.ExitCode == 1 &&
+            noProject.StdErr.Contains("no project found", StringComparison.Ordinal), noProject);
+    }
+}
+finally
+{
+    Directory.Delete(orphanDirectory, true);
+}
+
 if (OperatingSystem.IsWindows())
 {
     // 무효 stderr 핸들을 child의 표준 오류로 직접 설정해 출력 실패를 재현한다.

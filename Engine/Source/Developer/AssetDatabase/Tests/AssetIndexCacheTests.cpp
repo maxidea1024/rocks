@@ -163,6 +163,8 @@ struct EntrySpec {
     StringView tagValues[2] = {"v", "w"};
     uint8 present = 0;
     StringView importerName = "Imp";
+    // 출력 id 수다(상한 MaxImportOutputs를 넘기면 거부 — 7.1절 17 A2e4).
+    uint32 outputCount = 1;
     // 이름 길이를 부풀려 경계를 넘긴다.
     uint32 nameBytesOverride = 0;
     bool rawName = false;
@@ -216,7 +218,11 @@ void WriteEntry(ByteWriter& writer, const EntrySpec& spec) noexcept {
         writer.WriteZeros(32);
         WriteSpecText(writer, spec.importerName);
         writer.WriteU32LE(1);
-        writer.WriteU64LE(1);
+        writer.WriteU32LE(spec.outputCount);
+        for (uint32 index = 0; index < spec.outputCount && index < 2; ++index) {
+            writer.WriteU64LE(7);
+            writer.WriteU64LE(index + 1);
+        }
     }
 }
 
@@ -442,12 +448,13 @@ TEST(AssetIndexCache_RejectsUntrustedInput) {
     auto accepted = cache.Parse(good.View(), key);
     REQUIRE(accepted && accepted.Value());
     REQUIRE(cache.Count() == 2);
-    CHECK(
-        cache.At(0).readOnly && cache.At(0).dependencies.Size() == 2 &&
-        cache.At(0).dependencies[1].kind == PackageDependencyKind::ImportOwner &&
-        cache.At(0).dependencies[0].required && cache.At(0).tags.Size() == 2 &&
-        cache.At(0).importRecord.present && cache.At(0).importRecord.importerName.View() == "Imp" &&
-        cache.At(0).importRecord.importerVersion == 1 && cache.At(0).importRecord.outputCount == 1);
+    CHECK(cache.At(0).readOnly && cache.At(0).dependencies.Size() == 2 &&
+          cache.At(0).dependencies[1].kind == PackageDependencyKind::ImportOwner &&
+          cache.At(0).dependencies[0].required && cache.At(0).tags.Size() == 2 &&
+          cache.At(0).importRecord.present &&
+          cache.At(0).importRecord.importerName.View() == "Imp" &&
+          cache.At(0).importRecord.importerVersion == 1 &&
+          cache.At(0).importRecord.outputs.Size() == 1);
 
     // 헤더.
     {
@@ -510,7 +517,8 @@ TEST(AssetIndexCache_RejectsUntrustedInput) {
                     {EntrySpec{}, "null id"},
                     {EntrySpec{}, "zero type"},
                     {EntrySpec{}, "tag key too long"},
-                    {EntrySpec{}, "tag value too long"}};
+                    {EntrySpec{}, "tag value too long"},
+                    {EntrySpec{}, "output count"}};
     cases[0].spec.rawName = true;
     cases[0].spec.rawNameByte = 0xff;
     cases[1].spec.name = "";
@@ -544,6 +552,8 @@ TEST(AssetIndexCache_RejectsUntrustedInput) {
     cases[17].spec.tagKeys[0] = longKey.View();
     cases[18].spec.tagCount = 1;
     cases[18].spec.tagValues[0] = longValue.View();
+    cases[19].spec.present = 1;
+    cases[19].spec.outputCount = static_cast<uint32>(MaxImportOutputs + 1);
     for (const Case& item : cases) {
         const Array<uint8> bytes =
             MakeCache(env.allocator, key, Span<const EntrySpec>(&item.spec, 1));

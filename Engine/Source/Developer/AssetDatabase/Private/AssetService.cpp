@@ -822,6 +822,46 @@ Result<void> AssetService::Delete(const AssetDatabaseLock& lock, StringView targ
     return Result<void>::Success();
 }
 
+Result<void> AssetService::DeleteOrphan(const AssetDatabaseLock& lock, StringView path,
+                                        AssetDeleteResult& result, Array<EditorWarning>* warnings,
+                                        AssetDiagnostic* failure) noexcept {
+    result.id = AssetId{};
+    result.path.Clear();
+    result.aliases = 0;
+    result.referencerPaths.Clear();
+    result.referencerIds.Clear();
+    if (!initialized_ || !lock.IsHeldFor(*layout_)) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, ErrorCode::InvalidArgument);
+    }
+
+    auto parsed = ParseLogicalPath(*allocator_, path);
+    if (!parsed) {
+        return FailAsset<void>(failure,
+                               parsed.Error() == ErrorCode::InvalidArgument
+                                   ? AssetDiagnosticCode::InvalidPath
+                                   : AssetDiagnosticCode::None,
+                               parsed.Error());
+    }
+
+    auto entry = index_.FindByPath(parsed.Value());
+    if (!entry) {
+        return FailAsset<void>(failure,
+                               entry.Error() == ErrorCode::AlreadyExists
+                                   ? AssetDiagnosticCode::DuplicatePath
+                                   : AssetDiagnosticCode::None,
+                               entry.Error());
+    }
+
+    // 고아가 아니거나 판정할 수 없으면(읽지 못한 기록·패키지) 지우지 않는다.
+    const AssetOrphanReason reason = index_.OrphanReason(*entry.Value());
+    if (reason == AssetOrphanReason::None || reason == AssetOrphanReason::Undetermined) {
+        return FailAsset<void>(failure, AssetDiagnosticCode::None, ErrorCode::InvalidArgument,
+                               entry.Value()->id);
+    }
+
+    return Delete(lock, parsed.Value().Text(), false, result, warnings, failure);
+}
+
 Result<void> AssetService::Duplicate(const AssetDatabaseLock& lock, StringView source,
                                      StringView target, AssetDuplicateResult& result,
                                      Array<EditorWarning>* warnings,

@@ -35,6 +35,24 @@ constexpr uint64 DerivedId = 2102;
 constexpr uint64 BuildId = 2103;
 constexpr uint64 ImportOwnerId = 2104;
 constexpr uint64 VillainId = 2105;
+
+// Verify 결과에서 고아 출력 경고를 떼고 그 수를 준다(Hero의 참조 기록 — owner ImportOwnerId가
+// 색인에 없다, 7.1절 17 A2e4). 의존 대조 시험은 나머지를 본다.
+usize TakeOrphans(Array<AssetIndexDiagnostic>& verified) noexcept {
+    usize orphans = 0;
+    for (usize index = verified.Size(); index-- > 0;) {
+        if (verified[index].code == AssetDiagnosticCode::OrphanedOutput) {
+            CHECK(verified[index].asset == FixedId(HeroId) &&
+                  verified[index].relatedAsset == FixedId(ImportOwnerId) &&
+                  verified[index].detail == static_cast<uint64>(AssetOrphanReason::OwnerMissing));
+            (void)verified.TryRemoveAt(index);
+            ++orphans;
+        }
+    }
+
+    return orphans;
+}
+
 constexpr uint64 CookedId = 2106;
 constexpr uint64 OtherTagsId = 2107;
 constexpr uint64 BadTagsId = 2108;
@@ -359,7 +377,7 @@ TEST(AssetIndex_DiskScanAndQueries) {
     // Hero는 2104를 가리키는 참조 ImportRecord(요약은 owner만), Villain은 ImportRecord 없음이다.
     CHECK(hero.importRecord.present && hero.importRecord.owner == FixedId(ImportOwnerId));
     CHECK(hero.importRecord.importerId == Guid{} && hero.importRecord.importerName.IsEmpty() &&
-          hero.importRecord.importerVersion == 0 && hero.importRecord.outputCount == 0);
+          hero.importRecord.importerVersion == 0 && hero.importRecord.outputs.Size() == 0);
     CHECK(!index.At(first + 1).importRecord.present);
     CHECK(index.At(first + 1).fileName.View() == "Characters/Villain.rasset");
     CHECK(index.At(first + 2).fileName.View() == "Items/Base.rasset");
@@ -545,6 +563,9 @@ TEST(AssetIndex_DiskScanAndQueries) {
     // Verify: Hero의 Soft → 2109만 누락이다.
     Array<AssetIndexDiagnostic> verified(env.allocator);
     REQUIRE(index.Verify(&env.types, verified));
+    // 이 장면에는 id를 모르는 진단(손상·이름 규칙)이 있어 Hero의 owner 없음을 확정하지 않는다
+    // (Undetermined — 고아 경고 없음, 7.1절 17 A2e4).
+    CHECK(TakeOrphans(verified) == 0);
     REQUIRE(verified.Size() == 1);
     CHECK(verified[0].code == AssetDiagnosticCode::MissingDependency);
     CHECK(verified[0].error == ErrorCode::NotFound);
@@ -646,6 +667,7 @@ TEST(AssetIndex_VerifyTypes) {
         for (usize which = 0; which < 3; ++which) {
             Array<AssetIndexDiagnostic> out(env.allocator);
             REQUIRE(index.Verify(registries[which], out));
+            CHECK(TakeOrphans(out) == 1);
             C hero = C::None;
             C villain = C::None;
             for (const AssetIndexDiagnostic& diagnostic : out) {
@@ -838,6 +860,8 @@ TEST(AssetIndex_Diagnostics) {
     // (Good/hero)의 Hard 대상 Derived는 색인에 없고, Soft 대상 Hero는 id가 둘이라 대조하지 않는다.
     Array<AssetIndexDiagnostic> verified(env.allocator);
     REQUIRE(index.Verify(nullptr, verified));
+    // id를 모르는 진단이 있어 Hero 둘의 owner 없음을 확정하지 않는다(Undetermined).
+    CHECK(TakeOrphans(verified) == 0);
     uint32 missingDerived = 0;
     uint32 missingSoft = 0;
     for (const AssetIndexDiagnostic& diagnostic : verified) {
@@ -1028,7 +1052,7 @@ TEST(AssetIndex_ImportRecords) {
         const bool present = shape == RecordShape::Owner || shape == RecordShape::Reference;
         CHECK(entry.importRecord.present == present);
         if (!present) {
-            CHECK(entry.importRecord.owner.IsNull() && entry.importRecord.outputCount == 0);
+            CHECK(entry.importRecord.owner.IsNull() && entry.importRecord.outputs.Size() == 0);
             continue;
         }
 
@@ -1037,11 +1061,11 @@ TEST(AssetIndex_ImportRecords) {
             CHECK(entry.importRecord.importerId == RecordImporter);
             CHECK(entry.importRecord.importerName.View() == "RockImporter");
             CHECK(entry.importRecord.importerVersion == 4);
-            CHECK(entry.importRecord.outputCount == 2);
+            CHECK(entry.importRecord.outputs.Size() == 2);
         } else {
             CHECK(entry.importRecord.owner == FixedId(RecordOwnerId));
             CHECK(entry.importRecord.importerName.IsEmpty());
-            CHECK(entry.importRecord.outputCount == 0);
+            CHECK(entry.importRecord.outputs.Size() == 0);
         }
     }
 
@@ -1369,7 +1393,8 @@ TEST(AssetIndex_AllocationFailures) {
             CHECK(index.Diagnostics()[0].fileName.View() == "Aaa-broken.rasset");
             CHECK(under.Size() == 2 && typed.Size() == 2 && tagged.Size() == 2);
             CHECK(referencers.Size() == 3 && dependencies.Size() == 2);
-            CHECK(verified.Size() == 2);
+            // id를 모르는 진단(손상 파일·이름 규칙)이 있어 고아를 확정하지 않는다(Undetermined).
+            CHECK(TakeOrphans(verified) == 0 && verified.Size() == 2);
             break;
         }
 

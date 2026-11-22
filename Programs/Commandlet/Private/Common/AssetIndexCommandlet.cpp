@@ -22,6 +22,7 @@ namespace {
 
 constexpr StringView ListName = "asset-list";
 constexpr StringView VerifyName = "asset-index-verify";
+constexpr StringView OrphansListName = "asset-orphans-list";
 constexpr StringView RebuildName = "asset-index-rebuild";
 
 constexpr StringView RebuildUsage =
@@ -47,7 +48,15 @@ constexpr StringView VerifyUsage =
     "  Scan Content/ and check the packages: invalid names, package checks, duplicate asset\n"
     "  ids and paths, missing dependencies and type mismatches. Each problem is one line\n"
     "  '<diagnostic code>: <path>: <description>' on standard error; the exit code is 1 when\n"
-    "  there is any. --wait is accepted like the other asset commands; checking takes no lock.\n";
+    "  there is any problem other than a warning (an orphaned import output is a warning).\n"
+    "  --wait is accepted like the other asset commands; checking takes no lock.\n";
+
+constexpr StringView OrphansListUsage =
+    "usage: asset-orphans-list [--project=<dir>] [--wait=<seconds>]\n"
+    "  List the orphaned import outputs: packages whose import record points at an owner that\n"
+    "  is not in the project, has no import record of its own or does not list them. One line\n"
+    "  '<path> <AssetId> owner <owner path|AssetId|missing>' each, in path order (an AssetId\n"
+    "  when several packages share the owner id). Listing takes no lock.\n";
 
 // "--이름=값" 옵션이다. 모르는 이름·같은 이름 두 번·값 없음·위치 인수는 사용법 오류다.
 struct Options {
@@ -267,7 +276,13 @@ Result<int32> RunAssetIndexVerifyCommand(void* context, Span<const StringView> a
         }
     }
 
+    // 경고(고아 출력)만이면 종료 0이다(13절).
     const usize problems = index.Diagnostics().Size() + verified.Size();
+    bool errors = !index.Diagnostics().IsEmpty();
+    for (const AssetIndexDiagnostic& diagnostic : verified) {
+        errors = errors || !AssetIndexDiagnosticIsWarning(diagnostic);
+    }
+
     StringBuilder<LineBytes> summary(allocator);
     if (auto formatted = summary.TryAppendFormat("{}: {} packages, {} diagnostics\n", VerifyName,
                                                  index.Count(), problems);
@@ -275,7 +290,73 @@ Result<int32> RunAssetIndexVerifyCommand(void* context, Span<const StringView> a
         return Result<int32>::Failure(formatted.Error());
     }
 
-    return Write(output, CommandletStream::Output, summary.View(), problems == 0 ? 0 : 1);
+    return Write(output, CommandletStream::Output, summary.View(), errors ? 1 : 0);
+}
+
+Result<int32> RunAssetOrphansListCommand(void* context, Span<const StringView> args,
+                                         CommandletOutput& output) noexcept {
+    Allocator& allocator = *static_cast<Allocator*>(context);
+    Options options;
+    if (!options.Parse(args, false)) {
+        return Write(output, CommandletStream::Error, OrphansListUsage, 2);
+    }
+
+    if (options.help) {
+        return Write(output, CommandletStream::Output, OrphansListUsage, 0);
+    }
+
+    ProjectLayout layout(allocator);
+    Result<int32> failure = Result<int32>::Success(1);
+    if (!OpenProject(output, allocator, OrphansListName, options.project, layout, failure)) {
+        return failure;
+    }
+
+    // 목록은 색인 캐시를 읽는다(쓰지 않는다 — 잠금을 잡지 않는 명령, asset-list와 같다).
+    AssetIndexCache cache(allocator);
+    auto loaded = cache.Load(platform::PhysicalFileSystem(), layout, IndexReadOptions());
+    if (!loaded) {
+        return Result<int32>::Failure(loaded.Error());
+    }
+
+    ScanScheduler scan(allocator);
+    AssetIndex index(allocator, layout, scan.Get());
+    if (auto rebuilt = index.Rebuild(platform::PhysicalFileSystem(), IndexReadOptions(),
+                                     loaded.Value() ? &cache : nullptr);
+        !rebuilt) {
+        if (rebuilt.Error() == ErrorCode::OutOfMemory) {
+            return Result<int32>::Failure(rebuilt.Error());
+        }
+
+        return Fail(output, allocator, OrphansListName, 1, "cannot scan '{}' ({})",
+                    layout.ContentDirectory(), ErrorCodeName(rebuilt.Error()));
+    }
+
+    Array<const AssetIndexEntry*> orphans(allocator);
+    if (auto listed = index.Orphans(orphans); !listed) {
+        return Result<int32>::Failure(listed.Error());
+    }
+
+    for (const AssetIndexEntry* orphan : orphans) {
+        // owner: 색인에 하나면 그 경로, 같은 id가 둘 이상이면 AssetId, 없으면 missing.
+        auto owner = index.FindById(orphan->importRecord.owner);
+        StringBuilder<LineBytes> line(allocator);
+        Result<void> formatted =
+            owner ? line.TryAppendFormat("{} {} owner {}\n", orphan->path.View(), orphan->id,
+                                         owner.Value()->path.View())
+            : owner.Error() == ErrorCode::NotFound
+                ? line.TryAppendFormat("{} {} owner missing\n", orphan->path.View(), orphan->id)
+                : line.TryAppendFormat("{} {} owner {}\n", orphan->path.View(), orphan->id,
+                                       orphan->importRecord.owner);
+        if (!formatted) {
+            return Result<int32>::Failure(formatted.Error());
+        }
+
+        if (auto written = Write(output, CommandletStream::Output, line.View(), 0); !written) {
+            return written;
+        }
+    }
+
+    return Result<int32>::Success(0);
 }
 
 Result<int32> RunAssetIndexRebuildCommand(void* context, Span<const StringView> args,

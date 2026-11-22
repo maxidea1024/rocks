@@ -2,6 +2,7 @@
 #include "AtomicFileWrite.h"
 
 #include <AssetDatabase/AssetIndexCache.h>
+#include <AssetDatabase/ImportRecord.h>
 #include <AssetRuntime/PackageFormat.h>
 #include <AssetRuntime/PackageTags.h>
 #include <Core/Algorithms.h>
@@ -190,7 +191,19 @@ Result<bool> ReadEntry(ByteReader& reader, AssetIndexCacheEntry& entry) noexcept
         }
 
         entry.importRecord.importerVersion = reader.ReadU32LE();
-        entry.importRecord.outputCount = static_cast<usize>(reader.ReadU64LE());
+        const uint32 outputs = reader.ReadU32LE();
+        if (reader.Failed() || outputs > MaxImportOutputs) {
+            return Result<bool>::Success(false);
+        }
+
+        if (auto reserved = entry.importRecord.outputs.TryReserve(outputs); !reserved) {
+            return Result<bool>::Failure(reserved.Error());
+        }
+
+        for (uint32 index = 0; index < outputs; ++index) {
+            (void)entry.importRecord.outputs.TryPushBack(AssetId{ReadGuid(reader)});
+        }
+
         if (reader.Failed()) {
             return Result<bool>::Success(false);
         }
@@ -441,7 +454,10 @@ Result<void> EncodeAssetIndexCache(const AssetIndex& index, const AssetIndexCach
             WriteGuid(writer, entry->importRecord.importerId);
             WriteText(writer, entry->importRecord.importerName.View());
             writer.WriteU32LE(entry->importRecord.importerVersion);
-            writer.WriteU64LE(static_cast<uint64>(entry->importRecord.outputCount));
+            writer.WriteU32LE(static_cast<uint32>(entry->importRecord.outputs.Size()));
+            for (AssetId output : entry->importRecord.outputs) {
+                WriteGuid(writer, output.value);
+            }
         }
     }
 
