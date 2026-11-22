@@ -1,6 +1,6 @@
 # Unreal 교환 형식과 추출 플러그인 설계
 
-기준일: 2026-11-22, 개정 12(UX7을 UX7a·UX7b로 나눔, UX7a 스켈레톤·스킨 메시 추출 — 6.3절). 개정 11(UX3a 정적 메시 추출 — 5.4절). 개정 10(UX2·UX3을 추출 UX2a·UX3a와 임포트 UX2b·UX3b로 나눔, UX2a 텍스처 추출 — 4.5절). 개정 9(UX1b UE 플러그인 골격 구현 — 11.7절). 개정 8(UX1b를 UE 플러그인 골격 UX1b와 Rocks 임포트 연결 UX1c로 나눔). 개정 7(UX1a coverage 100% — 10.4절 끝 시험과 coverage 문단). 개정 6(UX1a 리더·경로 대응·임포트 순서 구현 — 10.4절, 3.4·3.5절 정렬·의존 `class`). 개정 5(UX1을 UX1a·UX1b로 나눔). 개정 4(UXR5 경계 정책 검사 구현 — 11.1절). 개정 3(13절 요구를 다른 문서에 반영하고 상태 열을 더함, 태그 키 이름). 개정 2(교차 검증 반영 — 18절). UE 에디터에서 텍스처·정적 메시·스켈레톤·스킨 메시·애니메이션 클립·머티리얼을 꺼내 Rocks 에셋으로 가져오는 경로를 정한다. 경로는 세 부분이다. UE 쪽 추출 플러그인 `RocksExport`, 둘 사이의 교환 형식 **Unreal 교환 묶음**, Rocks 쪽 임포터 플러그인 `UnrealExchange`다.
+기준일: 2026-11-22, 개정 13(UX8을 UX8a·UX8b로 나눔, UX8a 애니메이션 클립 추출 — 7.1절). 개정 12(UX7을 UX7a·UX7b로 나눔, UX7a 스켈레톤·스킨 메시 추출 — 6.3절). 개정 11(UX3a 정적 메시 추출 — 5.4절). 개정 10(UX2·UX3을 추출 UX2a·UX3a와 임포트 UX2b·UX3b로 나눔, UX2a 텍스처 추출 — 4.5절). 개정 9(UX1b UE 플러그인 골격 구현 — 11.7절). 개정 8(UX1b를 UE 플러그인 골격 UX1b와 Rocks 임포트 연결 UX1c로 나눔). 개정 7(UX1a coverage 100% — 10.4절 끝 시험과 coverage 문단). 개정 6(UX1a 리더·경로 대응·임포트 순서 구현 — 10.4절, 3.4·3.5절 정렬·의존 `class`). 개정 5(UX1을 UX1a·UX1b로 나눔). 개정 4(UXR5 경계 정책 검사 구현 — 11.1절). 개정 3(13절 요구를 다른 문서에 반영하고 상태 열을 더함, 태그 키 이름). 개정 2(교차 검증 반영 — 18절). UE 에디터에서 텍스처·정적 메시·스켈레톤·스킨 메시·애니메이션 클립·머티리얼을 꺼내 Rocks 에셋으로 가져오는 경로를 정한다. 경로는 세 부분이다. UE 쪽 추출 플러그인 `RocksExport`, 둘 사이의 교환 형식 **Unreal 교환 묶음**, Rocks 쪽 임포터 플러그인 `UnrealExchange`다.
 
 - 배경: 사용자 지시(2026-11-19). 엔진 시험을 위해 UE에서 쓰던 콘텐츠를 Rocks로 가져온다. `.uasset`을 직접 해석하는 방식은 어려움이 많으므로 UE 플러그인이 Rocks가 읽을 수 있는 형태로 추출한다.
 - 받는 쪽 자료구조: 텍스처는 [에셋 시스템](AssetSystem.ko.md) 12절, 머티리얼은 [머티리얼 시스템](MaterialSystem.ko.md) 4절, 메시·스켈레톤·애니메이션은 [메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets.ko.md)이 정한다. 이 문서는 추출과 대응만 다룬다.
@@ -248,6 +248,19 @@ UX7a(UE 쪽 스켈레톤·스킨 메시 추출, `FRocksSkeletonExtractor`·`FRoc
 - 이벤트: `Notifies`의 `GetTriggerTime()`·`GetDuration()`, `TrackIndex`, `NotifyName`, notify 클래스 경로(`Notify` 또는 `NotifyStateClass`의 클래스), `NotifyTriggerChance`, 서버·follower 트리거 플래그. notify 객체의 프로퍼티도 `properties`로 덤프하지만 Rocks v1은 받지 않는다(버리고 경고 — MeshAnimationAssets 7.3절). `AnimNotifyTracks` 이름, `AuthoredSyncMarkers`.
 - 설정: MeshAnimationAssets 7.1절 표의 UE 프로퍼티(additive·root motion·interpolation·RateScale·bLoop·PlatformTargetFrameRate·RetargetSource). `RefPoseSeq`는 Hard 의존으로 기록한다.
 - animated bone attribute는 개수만 진단으로 남긴다.
+
+### 7.1 구현에서 정한 점(UX8a)
+
+UX8a(UE 쪽 애니메이션 클립 추출, `FRocksAnimSequenceExtractor`) 중 7절이 정하지 않았거나 다르게 정한 점이다. 모두 권장안으로 확정했다.
+
+1. **`data` 스키마.** `{ "frameRate": { "numerator", "denominator" }, "frameCount", "keyCount", "boneTracks", "curves", "transformCurves", "events", "eventTracks", "syncMarkers" }`다. 본 트랙은 데이터 모델 트랙 순서(`GetBoneTrackNames`)의 `{ "bone", "translation", "rotation", "scale" }`이고 성분마다 blob 하나(`f32`, 이동·크기 components 3, 회전 4 — x·y·z·w, count = 키 수 또는 모든 키가 비트 단위로 같으면 1)다. 값은 `GetBoneTrackTransforms`의 double `FTransform`을 float로 바꾼 것이다(7절). 정렬·이름 대소문자 접기는 Rocks `StoreClipSource`가 한다(MeshAnimationAssets 7.5절 6).
+2. **커브.** float 커브는 `{ "name", "flags", "curve" }`, transform 커브는 `{ "name", "flags", "channels": [커브 9개 — 이동 x·y·z, 회전 x·y·z, 크기 x·y·z] }`다. 커브 객체는 `{ "keys": [{ "interpMode", "tangentMode", "tangentWeightMode", "time", "value", "arriveTangent", "arriveTangentWeight", "leaveTangent", "leaveTangentWeight" }], "preInfinityExtrap", "postInfinityExtrap", "defaultValue" }`이고 열거는 UE 값 이름(`RCIM_Cubic`·`RCTM_Auto`·`RCTWM_WeightedNone`·`RCCE_Constant` 등), `flags`는 UE `EAnimAssetCurveFlags` 비트 그대로(`AACF_Editable` 0x04·`AACF_Metadata` 0x10·`AACF_Disabled` 0x40 — Rocks `editable`·`metadata`·`disabled`로 옮기는 것은 임포트), `defaultValue`는 UE 값 그대로다(UE "기본값 없음"은 float 최대값 — Rocks `Optional` 비움으로 옮기는 것은 임포트). `RCTM_SmartAuto`는 Rocks에 없어 임포트가 `Auto`로 본다(UX8b에서 확정).
+3. **이벤트.** notify마다 `{ "time", "duration", "track", "name", "type", "triggerChance", "triggerOnDedicatedServer", "triggerOnFollower", "properties" }`다. `time`·`duration`은 `GetTriggerTime()`·`GetDuration()`(link 방식을 계산한 절대 값 — MeshAnimationAssets 7.3절), `type`은 notify 또는 notify state 객체의 클래스 경로(없으면 `null`), `properties`는 그 객체의 UPROPERTY 덤프(Rocks v1은 받지 않고 `EventPropertiesDropped` — 7절)다. 순서는 UE `Notifies` 순서이고 정렬은 Rocks(`SortClipEvents`)가 한다. `eventTracks`는 `AnimNotifyTracks` 이름, `syncMarkers`는 `AuthoredSyncMarkers`의 `{ "name", "time", "track" }`다.
+4. **`settings`.** UAnimSequence UPROPERTY 덤프(additive·root motion·interpolation·`RateScale`·`bLoop`·`PlatformTargetFrameRate`·`RetargetSource`·`RefPoseSeq`·압축 설정 참조 등)다. 데이터 모델(`DataModelInterface`·`DataModel` — 시퀀서 채널을 담은 하위 객체)은 `data`에 풀어 쓰므로 덤프에서 뺀다. `RefPoseSeq`·스켈레톤 참조는 의존에 합쳐진다(압축 설정 에셋은 범위 밖 의존).
+5. **진단.** animated bone attribute는 info `AnimatedBoneAttributes`(개수), 데이터 모델이 없으면 error `NoAnimationData`다.
+6. **자기 시험.** `RocksExport.AnimationExtraction`(commandlet `-SelfTest`에도 포함)이 엔진 튜토리얼 걷기 클립을 내보내 비율·프레임·키 수, 본 트랙 이름·순서, 모든 트랙의 회전 blob이 데이터 모델 키의 float 변환과 bytes가 같은지, `settings`에 데이터 모델이 없는지, 추출 전후 덤프가 같은지 본다.
+7. **Rocks 쪽 왕복 확인.** 선택 시험 `UnrealExchange_ExternalBundle`이 클립마다 본 트랙을 MA6a `ClipSource`로 적재해 `ValidateClipSource`, 키 시간 `SampleClipSource`가 키 값과 비트로 같은지, 커브를 `ClipCurve`(`TangentCurve`)로 옮기고 이벤트·이벤트 트랙·동기 마커를 `AnimationClip`에 담아 정렬 뒤 `ValidateAnimationClip`, 묶음 안 스켈레톤으로 원본 비율·두 배 비율 `BuildClipPlayback`과 쿠킹 샘플링(`SampleClipPlayback`)이 성공하는지 본다.
+8. **수동 검증(2026-11-22).** 엔진 튜토리얼 클립 둘(대기 188프레임·걷기 55프레임, 본 68개), 시험 프로젝트의 걷기 사본(notify 트랙 둘, notify `AnimNotify_PlaySound` 하나, notify state `AnimNotifyState_TimedParticleEffect` 하나, 동기 마커 둘, float 커브 하나 — Python `AnimationLibrary`로 더함), glTF로 임포트한 기둥 클립(morph 커브 `Bulge`)을 닫힘과 함께 내보낸 묶음(에셋 6개)을 두 번 내보내 `createdUtc` 말고 bytes가 같고, 리더가 클립 4개 모두 위 7번을 통과했다(키 불일치 0, 모르는 본 트랙 0).
 
 ## 8. 머티리얼
 
@@ -524,7 +537,7 @@ UX1b 구현(`Extras/UnrealExport/RocksExport/` — 플러그인 골격·commandl
 
 ## 14. 단계
 
-ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으며 착수는 사용자가 정한다. 사용자 지시(2026-11-21 "진행 가능한거부터")에 따라 UX1의 Rocks 리더 부분을 UX1a로 떼어 먼저 한다. UE 플러그인은 소스 빌드 없이 Launcher 설치판을 C:에 받아 빌드한다(사용자 결정 2026-11-20). 사용자가 UE 5.8.4 설치판을 받았으므로(2026-11-22) UX1의 UE 쪽을 UX1b로, Rocks 임포트 연결을 UX1c로 나눈다. UX2 이후 단계도 UE 추출 쪽은 Rocks 리더 왕복으로 검증해 Rocks 임포트(에셋 시스템 A2f–A5·MA b 단계)보다 먼저 할 수 있다. 그래서 텍스처·정적 메시는 추출(UX2a·UX3a, UE)과 임포트(UX2b·UX3b, Rocks)로 나눈다(개정 10, 사용자 지시 "진행 가능한거부터"). 스켈레톤·스킨 메시도 같이 UX7a·UX7b로 나눈다(개정 12).
+ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으며 착수는 사용자가 정한다. 사용자 지시(2026-11-21 "진행 가능한거부터")에 따라 UX1의 Rocks 리더 부분을 UX1a로 떼어 먼저 한다. UE 플러그인은 소스 빌드 없이 Launcher 설치판을 C:에 받아 빌드한다(사용자 결정 2026-11-20). 사용자가 UE 5.8.4 설치판을 받았으므로(2026-11-22) UX1의 UE 쪽을 UX1b로, Rocks 임포트 연결을 UX1c로 나눈다. UX2 이후 단계도 UE 추출 쪽은 Rocks 리더 왕복으로 검증해 Rocks 임포트(에셋 시스템 A2f–A5·MA b 단계)보다 먼저 할 수 있다. 그래서 텍스처·정적 메시는 추출(UX2a·UX3a, UE)과 임포트(UX2b·UX3b, Rocks)로 나눈다(개정 10, 사용자 지시 "진행 가능한거부터"). 스켈레톤·스킨 메시도 같이 UX7a·UX7b로, 애니메이션 클립도 UX8a·UX8b로 나눈다(개정 12·13).
 
 | 단계 | 쪽 | 내용 | 선행 |
 |---|---|---|---|
@@ -540,7 +553,8 @@ ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으�
 | UX6 | 둘 다 | 굽기 대체(8.4절)와 "구운 표면" 내장 머티리얼, 대체 규칙 2번 | UX4 |
 | UX7a | UE | 스켈레톤·스킨 메시 추출(6절 — 본 계층·커브, 스킨 가중치·morph, 생성 LOD 복원). Rocks 리더 왕복과 MA4a 스켈레톤 검증·병합 판정, MA5a 스킨 빌드로 확인한다. **구현**(2026-11-22, 6.3절) | UX3a |
 | UX7b | Rocks | 스켈레톤·스킨 메시 임포트(본 병합 저장, 슬롯·소켓·가중치 프로필 대응) | UX7a, UX3b, MA4b–MA5 |
-| UX8 | 둘 다 | 애니메이션 클립(7절) | UX7a(추출), UX7b·MA6(임포트) |
+| UX8a | UE | 애니메이션 클립 추출(7절 — 본 트랙·커브·이벤트·동기 마커). Rocks 리더 왕복과 MA6a 원본 검증·샘플링·쿠킹 v1 변환으로 확인한다. **구현**(2026-11-22, 7.1절) | UX7a |
+| UX8b | Rocks | 애니메이션 클립 임포트(커브 열거·플래그 대응, 이벤트 속성 버림 경고, 스켈레톤 Build 의존) | UX8a, UX7b, MA6 |
 
 ## 15. 결정 사항
 
@@ -580,6 +594,7 @@ ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으�
 - 개정 10(2026-11-22): UX2·UX3을 UE 쪽 추출(UX2a·UX3a, 선행 UX1b)과 Rocks 쪽 임포트(UX2b·UX3b)로 나눴다(사용자 지시 "진행 가능한거부터"). UX4·UX7 선행을 임포트 단계로 고쳤다. UX2a(텍스처 추출)를 구현하고 정한 점을 4.5절에 적었다: `data.source` 스키마, mip·층별 blob 배치, `settings` 덤프에서 `Source` 제외, 손실 원본은 표시만, 본문 조각 조립.
 - 개정 11(2026-11-22): UX3a(정적 메시 추출)를 구현하고 정한 점을 5.4절에 적었다: `data.lods`·`collision` 스키마(LOD 설정은 `settings.SourceModels`), MeshSource 기록 형식(위상 blob 7개·속성 배치·요소·타입 이름), UE 속성 대응·보존 규칙(UE 위치 이름 `"Position "`), `prepared` 사본 처리, 생성 LOD `baked` 변환, BodySetup 덤프, 진단, 자기 시험과 Rocks 쪽 MeshSource 적재·검증·빌드 확인.
 - 개정 12(2026-11-22): UX7을 UE 쪽 추출 UX7a(선행 UX3a)와 Rocks 쪽 임포트 UX7b로 나눴다. UX7a(스켈레톤·스킨 메시 추출)를 구현하고 정한 점을 6.3절에 적었다: 본 배열·리타깃 방식·커브 스키마, 스킨 메시 `data`(준비 원본 없음), settings 덤프를 LOD를 읽은 뒤에 하는 이유(UE 캐시), MeshSource 기록의 `BoneInfluences`·`SparseVec3` 속성, LOD 모델 기반 `baked`, 자기 시험과 Rocks 쪽 스켈레톤 검증·병합 판정·스킨 빌드 확인.
+- 개정 13(2026-11-22): UX8을 UE 쪽 추출 UX8a(선행 UX7a)와 Rocks 쪽 임포트 UX8b로 나눴다. UX8a(애니메이션 클립 추출)를 구현하고 정한 점을 7.1절에 적었다: `data` 스키마(본 트랙 성분 blob·상수 접기), 커브·transform 커브 객체(UE 열거 이름·플래그 비트·기본값 그대로), 이벤트(계산한 절대 시간·종류 클래스·속성 덤프)·이벤트 트랙·동기 마커, settings 덤프에서 데이터 모델 제외, 자기 시험과 Rocks 쪽 MA6a 원본 검증·샘플링·클립 검증·쿠킹 변환 확인.
 
 ## 18. 교차 검증 기록(개정 2)
 

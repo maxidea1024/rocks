@@ -1,7 +1,9 @@
 #include "ExchangeTestSupport.h"
 
+#include <Animation/ClipSource.h>
 #include <Animation/SkeletonMerge.h>
 #include <Animation/Tests/AnimationTestSupport.h>
+#include <Animation/Tests/ClipTestSupport.h>
 #include <AssetRuntime/AssetDiagnostic.h>
 #include <MeshSource/MeshSource.h>
 #include <MeshSource/MeshSourceValidation.h>
@@ -22,7 +24,9 @@
 // 설정)가 성공해야 한다 (UnrealExchange.ko.md 5.4절 — UX3a 왕복 확인, 임포트 연결은 UX3b).
 // 스켈레톤은 MA4a Skeleton으로 채워 ValidateSkeleton을, 스킨 메시는 메시 계층 검증·스켈레톤 병합
 // 판정(MergeBoneHierarchy)과 LOD 기록의 MeshSource 적재· 검증(본 수)·BuildSkinnedMeshLod를 통과해야
-// 한다(6.3절 — UX7a).
+// 한다(6.3절 — UX7a). 클립은 MA6a ClipSource로 적재해
+// ValidateClipSource, 키 시간 샘플링, 원본·두 배 비율 BuildClipPlayback과 쿠킹 샘플링을 통과해야
+// 한다(7.1절 — UX8a).
 using namespace rocks;
 using namespace rocks::exchange_test;
 namespace exchange_external_bundle_tests_file {
@@ -69,6 +73,21 @@ constexpr StringView RetargetModeNames[] = {"Animation", "Skeleton", "AnimationS
                                             "AnimationRelative", "OrientAndScale"};
 // 시험이 만드는 스켈레톤 패키지 id의 시작 값이다.
 constexpr uint64 ExternalSkeletonFirstId = 0x7000;
+// 시험이 만드는 클립 패키지 id의 시작 값이다(에셋 번호를 더한다).
+constexpr uint64 ExternalClipFirstId = 0x9000;
+// UE FRichCurve 열거 값 이름(Rocks Curves 열거 순서)이다. RCTM_SmartAuto는 Auto로 본다.
+constexpr StringView CurveInterpNames[] = {"RCIM_Linear", "RCIM_Constant", "RCIM_Cubic"};
+constexpr StringView CurveTangentNames[] = {"RCTM_Auto", "RCTM_User", "RCTM_Break",
+                                            "RCTM_SmartAuto"};
+constexpr usize SmartAutoTangent = 3;
+constexpr StringView CurveWeightNames[] = {"RCTWM_WeightedNone", "RCTWM_WeightedArrive",
+                                           "RCTWM_WeightedLeave", "RCTWM_WeightedBoth"};
+constexpr StringView CurveExtrapolationNames[] = {"RCCE_Cycle", "RCCE_CycleWithOffset",
+                                                  "RCCE_Oscillate", "RCCE_Linear", "RCCE_Constant"};
+// UE 커브 플래그 비트(AnimCurveTypes.h EAnimAssetCurveFlags)다.
+constexpr int64 UeCurveEditable = 0x04;
+constexpr int64 UeCurveMetadata = 0x10;
+constexpr int64 UeCurveDisabled = 0x40;
 
 // printf의 %.*s 인자 길이다.
 int PrintLength(StringView text) noexcept {
@@ -587,13 +606,330 @@ usize CheckSkeletalMesh(const ExchangeBundle& bundle, uint32 asset,
     return checked;
 }
 
+// 유한한 float인가다(NaN·±Inf의 차는 NaN이다).
+bool FiniteFloat(float value) noexcept {
+    return value - value == 0.0f;
+}
+
+// 교환 FRichCurve 객체(7.1절)를 TangentCurve로 옮긴다. UE 열거 값 이름을 Rocks 값으로
+// 바꾸고(RCTM_SmartAuto는 Auto), DefaultValue가 UE "없음" 표지(float 최대)면 비운다.
+bool ReadTangentCurve(JsonValue object, Allocator& allocator, TangentCurve& out) noexcept {
+    const JsonValue keys = object.Find("keys");
+    if (!keys.IsArray()) {
+        return false;
+    }
+
+    Array<TangentCurveKey> converted(allocator);
+    for (usize index = 0; index < keys.Size(); ++index) {
+        const JsonValue item = keys.At(index);
+        TangentCurveKey key;
+        constexpr const char* Fields[] = {"time",          "value",
+                                          "arriveTangent", "arriveTangentWeight",
+                                          "leaveTangent",  "leaveTangentWeight"};
+        double numbers[sizeof(Fields) / sizeof(Fields[0])] = {};
+        for (usize at = 0; at < sizeof(Fields) / sizeof(Fields[0]); ++at) {
+            if (!ReadExchangeNumber(item.Find(Fields[at]), numbers[at])) {
+                return false;
+            }
+        }
+
+        const usize interp = NameIndex(Span<const StringView>(CurveInterpNames),
+                                       item.Find("interpMode").GetString());
+        usize tangent = NameIndex(Span<const StringView>(CurveTangentNames),
+                                  item.Find("tangentMode").GetString());
+        tangent = tangent == SmartAutoTangent ? 0 : tangent;
+        const usize weight = NameIndex(Span<const StringView>(CurveWeightNames),
+                                       item.Find("tangentWeightMode").GetString());
+        if (interp >= sizeof(CurveInterpNames) / sizeof(CurveInterpNames[0]) ||
+            tangent >= SmartAutoTangent ||
+            weight >= sizeof(CurveWeightNames) / sizeof(CurveWeightNames[0])) {
+            return false;
+        }
+
+        key.time = static_cast<float>(numbers[0]);
+        key.value = static_cast<float>(numbers[1]);
+        key.arriveTangent = static_cast<float>(numbers[2]);
+        key.arriveTangentWeight = static_cast<float>(numbers[3]);
+        key.leaveTangent = static_cast<float>(numbers[4]);
+        key.leaveTangentWeight = static_cast<float>(numbers[5]);
+        key.interp = static_cast<CurveInterp>(interp);
+        key.tangentMode = static_cast<CurveTangentMode>(tangent);
+        key.tangentWeight = static_cast<CurveTangentWeight>(weight);
+        if (!converted.TryPushBack(key)) {
+            return false;
+        }
+    }
+
+    const usize pre = NameIndex(Span<const StringView>(CurveExtrapolationNames),
+                                object.Find("preInfinityExtrap").GetString());
+    const usize post = NameIndex(Span<const StringView>(CurveExtrapolationNames),
+                                 object.Find("postInfinityExtrap").GetString());
+    double defaultValue = 0.0;
+    if (pre >= sizeof(CurveExtrapolationNames) / sizeof(CurveExtrapolationNames[0]) ||
+        post >= sizeof(CurveExtrapolationNames) / sizeof(CurveExtrapolationNames[0]) ||
+        !ReadExchangeNumber(object.Find("defaultValue"), defaultValue) ||
+        !out.TrySetKeys(converted.View())) {
+        return false;
+    }
+
+    out.preExtrapolation = static_cast<CurveExtrapolation>(pre);
+    out.postExtrapolation = static_cast<CurveExtrapolation>(post);
+    if (static_cast<float>(defaultValue) != NumericLimits<float>::Max()) {
+        out.defaultValue = static_cast<float>(defaultValue);
+    }
+
+    return true;
+}
+
+// 성분 blob 하나(f32 × components, 키 1개 또는 키 수)를 읽는다.
+template <typename T>
+bool ReadClipComponent(const ExchangeBundle& bundle, uint32 asset, JsonValue reference,
+                       Allocator& allocator, ExchangeDiagnostics& diagnostics,
+                       Array<T>& out) noexcept {
+    Array<uint8> bytes(allocator);
+    if (!LoadBlobBytes(bundle, asset, reference, bytes, diagnostics) ||
+        bytes.Size() % sizeof(T) != 0) {
+        return false;
+    }
+
+    for (usize at = 0; at < bytes.Size(); at += sizeof(T)) {
+        T value;
+        memcpy(&value, bytes.Data() + at, sizeof(T));
+        if (!out.TryPushBack(value)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// 클립 하나(7.4절 — UX8a): 원본 본 트랙을 ClipSource로 적재해 ValidateClipSource, 키 시간 샘플링이
+// 키 값과 비트로 같은지, 커브를 ClipCurve(TangentCurve)로 옮겨 원본 비율·두 배 비율
+// BuildClipPlayback과 쿠킹 샘플링을 본다.
+usize CheckClip(const ExchangeBundle& bundle, uint32 asset, Span<const LoadedSkeleton> skeletons,
+                asset_test::AssetEnv& env, ExchangeDiagnostics& diagnostics) {
+    const ExchangeAsset& entry = bundle.Assets()[asset];
+    const JsonValue data = entry.data;
+    const Skeleton* skeleton = nullptr;
+    for (const ExchangeDependency& dependency : entry.dependencies) {
+        for (const LoadedSkeleton& loaded : skeletons) {
+            if (dependency.target != ExchangeNoIndex &&
+                bundle.Assets()[dependency.target].objectPath == loaded.objectPath) {
+                skeleton = loaded.skeleton;
+            }
+        }
+    }
+
+    CHECK(skeleton != nullptr);
+    auto numerator = data.Find("frameRate").Find("numerator").TryGetInt64();
+    auto denominator = data.Find("frameRate").Find("denominator").TryGetInt64();
+    auto frames = data.Find("frameCount").TryGetUInt64();
+    auto rate = numerator && denominator
+                    ? FrameRate::TryCreate(static_cast<int32>(numerator.Value()),
+                                           static_cast<int32>(denominator.Value()))
+                    : Result<FrameRate>::Failure(ErrorCode::InvalidArgument);
+    if (skeleton == nullptr || !rate || !frames) {
+        CHECK(rate && frames);
+        return 0;
+    }
+
+    ClipSource source(env.allocator);
+    source.frameRate = rate.Value();
+    source.frameCount = static_cast<uint32>(frames.Value());
+    const JsonValue tracks = data.Find("boneTracks");
+    bool loaded = tracks.IsArray();
+    for (usize index = 0; loaded && index < tracks.Size(); ++index) {
+        const JsonValue item = tracks.At(index);
+        ClipTrack track(env.allocator);
+        auto bone = env.names.TryIntern(item.Find("bone").GetString());
+        loaded = bone &&
+                 ReadClipComponent(bundle, asset, item.Find("translation"), env.allocator,
+                                   diagnostics, track.translation) &&
+                 ReadClipComponent(bundle, asset, item.Find("rotation"), env.allocator, diagnostics,
+                                   track.rotation) &&
+                 ReadClipComponent(bundle, asset, item.Find("scale"), env.allocator, diagnostics,
+                                   track.scale);
+        if (loaded) {
+            track.bone = bone.Value();
+            loaded = static_cast<bool>(source.tracks.TryPushBack(Move(track)));
+        }
+    }
+
+    ClipDiagnostic failure;
+    const bool valid =
+        loaded && static_cast<bool>(ValidateClipSource(source, env.allocator, &failure));
+    CHECK(valid);
+    if (!valid) {
+        printf("    clip invalid: %s\n", loaded ? ClipIssueName(failure.issue) : "load failed");
+        return 0;
+    }
+
+    // 키 시간의 샘플링은 그 키 값이다(MA6a 7.5절 8 — subframe 0).
+    usize mismatches = 0;
+    for (uint32 track = 0; track < source.tracks.Size(); ++track) {
+        const ClipTrack& keys = source.tracks[track];
+        for (uint32 key = 0; key < source.KeyCount(); ++key) {
+            const double seconds = static_cast<double>(key) * source.frameRate.Denominator() /
+                                   source.frameRate.Numerator();
+            const Transform3f sampled =
+                SampleClipSource(source, track, seconds, ClipInterpolation::Linear);
+            const Vec3& translation = keys.translation[keys.translation.Size() == 1 ? 0 : key];
+            const Quat& rotation = keys.rotation[keys.rotation.Size() == 1 ? 0 : key];
+            const Vec3& scale = keys.scale[keys.scale.Size() == 1 ? 0 : key];
+            mismatches += memcmp(&sampled.translation, &translation, sizeof(Vec3)) != 0 ||
+                                  memcmp(&sampled.rotation, &rotation, sizeof(Quat)) != 0 ||
+                                  memcmp(&sampled.scale, &scale, sizeof(Vec3)) != 0
+                              ? 1
+                              : 0;
+        }
+    }
+
+    CHECK(mismatches == 0);
+    Array<ClipCurve> curves(env.allocator);
+    const JsonValue curveList = data.Find("curves");
+    bool curvesOk = curveList.IsArray();
+    for (usize index = 0; curvesOk && index < curveList.Size(); ++index) {
+        const JsonValue item = curveList.At(index);
+        ClipCurve curve(env.allocator);
+        auto name = env.names.TryIntern(item.Find("name").GetString());
+        auto flags = item.Find("flags").TryGetInt64();
+        curvesOk =
+            name && flags && ReadTangentCurve(item.Find("curve"), env.allocator, curve.curve);
+        if (curvesOk) {
+            curve.name = name.Value();
+            curve.editable = (flags.Value() & UeCurveEditable) != 0;
+            curve.metadata = (flags.Value() & UeCurveMetadata) != 0;
+            curve.disabled = (flags.Value() & UeCurveDisabled) != 0;
+            curvesOk = static_cast<bool>(curves.TryPushBack(Move(curve)));
+        }
+    }
+
+    CHECK(curvesOk);
+
+    // 이벤트·이벤트 트랙·동기 마커를 AnimationClip에 담아 정렬(SortClipEvents·SortClipSyncMarkers
+    // — 7.5절 11) 뒤 ValidateAnimationClip을 본다. 커브는 그 클립 원본 커브로 옮긴다.
+    ObjectHandle package{};
+    AnimationClip* clip = asset_test::Pointer<AnimationClip>(
+        *env.source,
+        clip_test::MakeClip(env, ExternalClipFirstId + asset, PackageKind::Editor, package));
+    bool clipOk = clip != nullptr;
+    if (clipOk) {
+        clip->source.frameRate = source.frameRate;
+        clip->source.frameCount = source.frameCount;
+        for (ClipCurve& curve : curves) {
+            clipOk = clipOk && static_cast<bool>(clip->source.curves.TryPushBack(Move(curve)));
+        }
+
+        const JsonValue eventTracks = data.Find("eventTracks");
+        for (usize index = 0; clipOk && index < eventTracks.Size(); ++index) {
+            auto name = env.names.TryIntern(eventTracks.At(index).GetString());
+            clipOk = name && clip->eventTracks.TryPushBack(name.Value());
+        }
+
+        const JsonValue events = data.Find("events");
+        for (usize index = 0; clipOk && index < events.Size(); ++index) {
+            const JsonValue item = events.At(index);
+            ClipEvent event;
+            double time = 0.0;
+            double duration = 0.0;
+            double chance = 0.0;
+            auto track = item.Find("track").TryGetInt64();
+            auto name = env.names.TryIntern(item.Find("name").GetString());
+            auto type = item.Find("type").IsString()
+                            ? env.names.TryIntern(item.Find("type").GetString())
+                            : Result<Name>::Success(Name{});
+            clipOk = track && name && type && ReadExchangeNumber(item.Find("time"), time) &&
+                     ReadExchangeNumber(item.Find("duration"), duration) &&
+                     ReadExchangeNumber(item.Find("triggerChance"), chance);
+            if (clipOk) {
+                event.time = static_cast<float>(time);
+                event.duration = static_cast<float>(duration);
+                event.track = static_cast<int32>(track.Value());
+                event.name = name.Value();
+                event.type = type.Value();
+                event.triggerChance = static_cast<float>(chance);
+                event.triggerOnDedicatedServer = item.Find("triggerOnDedicatedServer").GetBool();
+                event.triggerOnFollower = item.Find("triggerOnFollower").GetBool();
+                clipOk = static_cast<bool>(clip->events.TryPushBack(event));
+            }
+        }
+
+        const JsonValue markers = data.Find("syncMarkers");
+        for (usize index = 0; clipOk && index < markers.Size(); ++index) {
+            const JsonValue item = markers.At(index);
+            ClipSyncMarker marker;
+            double time = 0.0;
+            auto track = item.Find("track").TryGetInt64();
+            auto name = env.names.TryIntern(item.Find("name").GetString());
+            clipOk = track && name && ReadExchangeNumber(item.Find("time"), time);
+            if (clipOk) {
+                marker.name = name.Value();
+                marker.time = static_cast<float>(time);
+                marker.track = static_cast<int32>(track.Value());
+                clipOk = static_cast<bool>(clip->syncMarkers.TryPushBack(marker));
+            }
+        }
+    }
+
+    if (clipOk) {
+        SortClipEvents(*clip);
+        SortClipSyncMarkers(*clip);
+        clipOk = static_cast<bool>(ValidateAnimationClip(*clip, env.allocator, &failure));
+    }
+
+    printf(
+        "    clip asset: %d (%zu events, %zu event tracks, %zu sync markers) %s\n", clipOk,
+        clip != nullptr ? clip->events.Size() : 0, clip != nullptr ? clip->eventTracks.Size() : 0,
+        clip != nullptr ? clip->syncMarkers.Size() : 0, clipOk ? "" : ClipIssueName(failure.issue));
+    CHECK(clipOk);
+    if (clip == nullptr) {
+        return 0;
+    }
+
+    usize builds = 0;
+    const int32 rateFactors[] = {1, 2};
+    for (const int32 factor : rateFactors) {
+        ClipBuildInput input;
+        input.source = &source;
+        input.curves = clip->source.curves.View();
+        input.skeleton = skeleton;
+        input.targetRate = FrameRate::TryCreate(source.frameRate.Numerator() * factor,
+                                                source.frameRate.Denominator())
+                               .Value();
+        ClipPlayback cooked(env.allocator);
+        ClipBuildReport report(env.allocator);
+        const bool built = static_cast<bool>(BuildClipPlayback(input, cooked, report, &failure));
+        bool finite = built;
+        for (uint32 track = 0; built && track < cooked.tracks.Size(); ++track) {
+            const Transform3f mid =
+                SampleClipPlayback(cooked, track, cooked.Length() * 0.5, ClipInterpolation::Linear);
+            finite = finite && FiniteFloat(mid.translation.x) && FiniteFloat(mid.rotation.w) &&
+                     FiniteFloat(mid.scale.z);
+        }
+
+        printf("    cook x%d: built %d (%u samples, %zu tracks, %zu curves, %zu unknown bone "
+               "tracks) sampling %s %s\n",
+               factor, built, cooked.sampleCount, cooked.tracks.Size(), cooked.curves.Size(),
+               report.warnings.Size(), finite ? "finite" : "non-finite",
+               built ? "" : ClipIssueName(failure.issue));
+        CHECK(built && finite);
+        builds += built ? 1 : 0;
+    }
+
+    printf("    clip: %u frames at %d/%d, %zu tracks, %zu curves, %zu key mismatches\n",
+           source.frameCount, source.frameRate.Numerator(), source.frameRate.Denominator(),
+           source.tracks.Size(), clip->source.curves.Size(), mismatches);
+    return builds;
+}
+
 // 스켈레톤·스킨 메시를 확인한다(6.3절 7번). 둘 다 없으면 아무것도 하지 않는다. 확인한 기록 수다.
 usize CheckSkeletalAssets(const ExchangeBundle& bundle, ExchangeDiagnostics& diagnostics) {
     bool any = false;
     for (const ExchangeAsset& asset : bundle.Assets()) {
         any = any || (asset.state == ExchangeAssetState::Ready &&
                       (asset.exchangeClass == ExchangeClass::Skeleton ||
-                       asset.exchangeClass == ExchangeClass::SkeletalMesh));
+                       asset.exchangeClass == ExchangeClass::SkeletalMesh ||
+                       asset.exchangeClass == ExchangeClass::AnimSequence));
     }
 
     if (!any) {
@@ -642,6 +978,17 @@ usize CheckSkeletalAssets(const ExchangeBundle& bundle, ExchangeDiagnostics& dia
                    asset.objectPath.Data());
             checked += CheckSkeletalMesh(bundle, static_cast<uint32>(index), skeletons.View(), env,
                                          diagnostics);
+        }
+    }
+
+    for (usize index = 0; index < bundle.Assets().Size(); ++index) {
+        const ExchangeAsset& asset = bundle.Assets()[index];
+        if (asset.state == ExchangeAssetState::Ready &&
+            asset.exchangeClass == ExchangeClass::AnimSequence) {
+            printf("  clip [%zu] %.*s\n", index, PrintLength(asset.objectPath),
+                   asset.objectPath.Data());
+            checked +=
+                CheckClip(bundle, static_cast<uint32>(index), skeletons.View(), env, diagnostics);
         }
     }
 
@@ -714,7 +1061,8 @@ TEST(UnrealExchange_ExternalBundle) {
     }
 
     printf("Mesh records: %zu checked\n", meshRecords);
-    printf("Skinned mesh records: %zu checked\n", CheckSkeletalAssets(bundle, diagnostics));
+    printf("Skinned mesh records and clip builds: %zu checked\n",
+           CheckSkeletalAssets(bundle, diagnostics));
 }
 
 } // namespace exchange_external_bundle_tests_file

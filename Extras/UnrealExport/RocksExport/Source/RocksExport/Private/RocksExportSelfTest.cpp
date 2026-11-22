@@ -1,6 +1,8 @@
 #include "RocksExportSelfTest.h"
 
 #include "AssetRegistry/IAssetRegistry.h"
+#include "Animation/AnimData/IAnimationDataModel.h"
+#include "Animation/AnimSequence.h"
 #include "Animation/Skeleton.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
@@ -871,6 +873,82 @@ void RocksExportSelfTest::RunSkeletalExtraction(TArray<FString>& Errors)
 	IFileManager::Get().DeleteDirectory(*Root, false, true);
 }
 
+void RocksExportSelfTest::RunAnimationExtraction(TArray<FString>& Errors)
+{
+	using namespace RocksExportSelfTestPrivate;
+
+	static const TCHAR* const ClipPath = TEXT("/Engine/Tutorial/SubEditors/TutorialAssets/Character/Tutorial_Walk_Fwd.Tutorial_Walk_Fwd");
+	IAssetRegistry::GetChecked().SearchAllAssets(true);
+	UAnimSequence* Sequence = LoadObject<UAnimSequence>(nullptr, ClipPath);
+	Expect(Errors, Sequence != nullptr && Sequence->GetDataModel() != nullptr, TEXT("cannot load the tutorial walk animation"));
+	if (Sequence == nullptr || Sequence->GetDataModel() == nullptr)
+	{
+		return;
+	}
+
+	const auto Dump = [](UObject& Object)
+	{
+		FRocksPropertyDumper Dumper(&Object);
+		FRocksJsonWriter Writer(FRocksJsonWriter::EStyle::Compact);
+		Dumper.DumpObject(&Object, Writer);
+		return Utf8ToString(Writer.Finish());
+	};
+
+	const IAnimationDataModel* Model = Sequence->GetDataModel();
+	TArray<FName> TrackNames;
+	Model->GetBoneTrackNames(TrackNames);
+	const FString Before = Dump(*Sequence);
+	const FString Root = SelfTestDirectory() / TEXT("Animation");
+	IFileManager::Get().DeleteDirectory(*Root, false, true);
+	const FString Output = Root / TEXT("Animation.rxbundle");
+	FRocksExportOptions Options;
+	Options.OutputDirectory = Output;
+	Options.bClosure = false;
+	Options.Selections = {ClipPath};
+	FRocksExportResult Result;
+	Expect(Errors, FRocksExporter::Export(Options, Result), FString::Printf(TEXT("animation export: %s"), *Result.Error));
+	Expect(Errors, Dump(*Sequence) == Before, TEXT("animation extraction changed the asset"));
+
+	TArray<uint8> Json;
+	const TSharedPtr<FJsonObject> Asset = LoadBytes(Output / FRocksBundleWriter::AssetFileForPackage(FSoftObjectPath(ClipPath).GetLongPackageName()), Json) ? ParseJson(Json) : nullptr;
+	Expect(Errors, Asset.IsValid(), TEXT("animation JSON missing"));
+	if (!Asset.IsValid())
+	{
+		return;
+	}
+
+	const TSharedPtr<FJsonObject> Data = Asset->GetObjectField(TEXT("data"));
+	Expect(Errors, !Asset->GetObjectField(TEXT("settings"))->HasField(TEXT("DataModelInterface")), TEXT("settings dump holds the data model"));
+	Expect(Errors, int32(Data->GetNumberField(TEXT("frameCount"))) == Model->GetNumberOfFrames() && int32(Data->GetNumberField(TEXT("keyCount"))) == Model->GetNumberOfKeys()
+		&& Data->GetObjectField(TEXT("frameRate"))->GetNumberField(TEXT("numerator")) == double(Model->GetFrameRate().Numerator), TEXT("animation frame counts or rate"));
+
+	// 본 트랙: 이름·순서가 데이터 모델과 같고, 회전 blob이 UE 키 FTransform 회전의 float 변환과 bytes가 같다(키 1개로
+	// 접혔으면 모든 키가 같다).
+	const TArray<TSharedPtr<FJsonValue>>& Tracks = Data->GetArrayField(TEXT("boneTracks"));
+	bool bTracks = Tracks.Num() == TrackNames.Num();
+	for (int32 Track = 0; bTracks && Track < Tracks.Num(); ++Track)
+	{
+		const TSharedPtr<FJsonObject> Item = Tracks[Track]->AsObject();
+		bTracks = Item->GetStringField(TEXT("bone")) == TrackNames[Track].ToString();
+		TArray<FTransform> Keys;
+		Model->GetBoneTrackTransforms(TrackNames[Track], Keys);
+		const TSharedPtr<FJsonObject> Rotation = Item->GetObjectField(TEXT("rotation"));
+		TArray<uint8> Blob;
+		bTracks = bTracks && LoadBytes(Output / FRocksBundleWriter::BlobFileForHex(Rotation->GetStringField(TEXT("blob"))), Blob);
+		const int32 Count = int32(Rotation->GetNumberField(TEXT("count")));
+		for (int32 Key = 0; bTracks && Key < Keys.Num(); ++Key)
+		{
+			const FQuat4f Expected(Keys[Key].GetRotation());
+			const float Values[] = {Expected.X, Expected.Y, Expected.Z, Expected.W};
+			const int32 Stored = Count == 1 ? 0 : Key;
+			bTracks = Blob.Num() >= (Stored + 1) * int32(sizeof(Values)) && FMemory::Memcmp(Blob.GetData() + Stored * sizeof(Values), Values, sizeof(Values)) == 0;
+		}
+	}
+
+	Expect(Errors, bTracks, TEXT("animation bone tracks differ from the data model"));
+	IFileManager::Get().DeleteDirectory(*Root, false, true);
+}
+
 bool RocksExportSelfTest::RunAll(TArray<FString>& Errors)
 {
 	RunSha256(Errors);
@@ -882,5 +960,6 @@ bool RocksExportSelfTest::RunAll(TArray<FString>& Errors)
 	RunTextureExtraction(Errors);
 	RunStaticMeshExtraction(Errors);
 	RunSkeletalExtraction(Errors);
+	RunAnimationExtraction(Errors);
 	return Errors.IsEmpty();
 }
