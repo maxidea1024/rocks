@@ -1808,6 +1808,56 @@ try
     ProcessResult importNoProject = await RunImport("asset-import", "/Game/A", source);
     ReportImport("asset-import without a project", importNoProject.ExitCode == 1 &&
         importNoProject.StdErr.Contains("no project found", StringComparison.Ordinal), importNoProject);
+
+    // asset-reimport(A2f2a): 기록 없는 에셋은 InvalidArgument, 사용법·도움말·프로젝트 없음.
+    ProcessResult skeleton = await RunImport("asset-new", "Skeleton", "/Game/Plain", projectOption);
+    ProcessResult notImported = await RunImport("asset-reimport", "/Game/Plain", projectOption);
+    ReportImport("asset-reimport without an import record", skeleton.ExitCode == 0 && notImported.ExitCode == 1 &&
+        notImported.StdErr.Contains("asset-reimport: InvalidArgument: /Game/Plain", StringComparison.Ordinal), notImported);
+    string[][] reimportUsage =
+    [
+        ["asset-reimport", projectOption],
+        ["asset-reimport", "/Game/A", "a.png", projectOption],
+        ["asset-reimport", "/Game/A", "--importer=x", projectOption],
+        ["asset-reimport", "/Game/A", "--source=a", "--source.px=b", projectOption],
+    ];
+    foreach (string[] arguments in reimportUsage)
+    {
+        ProcessResult usage = await RunImport(arguments);
+        ReportImport($"asset-reimport usage: {string.Join(' ', arguments.Skip(1).Where(argument => argument != projectOption))}",
+            usage.ExitCode == 2 && usage.StdErr.StartsWith("usage: asset-reimport", StringComparison.Ordinal), usage);
+    }
+
+    ProcessResult reimportHelp = await RunImport("asset-reimport", "--help");
+    ReportImport("asset-reimport help", reimportHelp.ExitCode == 0 &&
+        reimportHelp.StdOut.StartsWith("usage: asset-reimport", StringComparison.Ordinal), reimportHelp);
+    ProcessResult reimportNoProject = await RunImport("asset-reimport", "/Game/A");
+    ReportImport("asset-reimport without a project", reimportNoProject.ExitCode == 1 &&
+        reimportNoProject.StdErr.Contains("no project found", StringComparison.Ordinal), reimportNoProject);
+
+    // asset-info --import(A2f2b): 기록 없는 에셋은 InvalidArgument(패키지를 열지 않는다), 없는 경로 NotFound,
+    // --all과 함께·두 번은 사용법 오류, 도움말에 --import.
+    ProcessResult statusPlain = await RunImport("asset-info", "/Game/Plain", "--import", projectOption);
+    ReportImport("asset-info import without an import record", statusPlain.ExitCode == 1 &&
+        statusPlain.StdErr.Contains("asset-info: InvalidArgument: /Game/Plain", StringComparison.Ordinal), statusPlain);
+    ProcessResult statusMissing = await RunImport("asset-info", "/Game/Nope", "--import", "--json", projectOption);
+    ReportImport("asset-info import missing", statusMissing.ExitCode == 1 &&
+        statusMissing.StdErr.Contains("asset-info: NotFound: /Game/Nope", StringComparison.Ordinal), statusMissing);
+    string[][] statusUsage =
+    [
+        ["asset-info", "/Game/Plain", "--import", "--all", projectOption],
+        ["asset-info", "/Game/Plain", "--import", "--import", projectOption],
+    ];
+    foreach (string[] arguments in statusUsage)
+    {
+        ProcessResult usage = await RunImport(arguments);
+        ReportImport($"asset-info usage: {string.Join(' ', arguments.Skip(1).Where(argument => argument != projectOption))}",
+            usage.ExitCode == 2 && usage.StdErr.StartsWith("usage: asset-info", StringComparison.Ordinal), usage);
+    }
+
+    ProcessResult infoHelp = await RunImport("asset-info", "--help");
+    ReportImport("asset-info help mentions import", infoHelp.ExitCode == 0 &&
+        infoHelp.StdOut.Contains("--import", StringComparison.Ordinal), infoHelp);
 }
 finally
 {

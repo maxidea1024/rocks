@@ -104,6 +104,8 @@ inline constexpr uint8 IrNewResultError = 4;
 inline constexpr uint8 IrConvertValue = 0;
 inline constexpr uint8 IrConvertCast = 1;
 inline constexpr uint8 IrAwaitValue = 0;
+// 피연산자가 지역에 담지 않은 유지 자원(로드 요청)이다 — 대기가 쥐고 멈춘다(LC6d5).
+inline constexpr uint8 IrAwaitOwned = 1;
 inline constexpr uint8 IrStringConstant = 0;
 inline constexpr uint8 IrStringPiece = 1;
 inline constexpr uint8 IrEntryKey = 0;

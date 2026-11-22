@@ -300,6 +300,19 @@ dotnet msbuild Rocks.proj -t:Test -p:RocksPlatform=android -p:AndroidAbi=x86_64
 4. 초기 파일 I/O의 부분·정확 전송, Unicode, OS 권한·오류·링크, 소유권과 실패 주입을 보강한다. 플랫폼 디렉터리 조회, 파일 wrapper 관리자와 디렉터리 순회·동기 나머지 기능, async/mapped는 단계적으로 추가한다.
 5. Windows/macOS 각각에서 경고 오류 빌드, 공개 헤더 단독 컴파일, 정상·경계·음성 대조와 sanitizer 가능 범위를 확인한다. 실기기 및 검증되지 않은 플랫폼은 미검증으로 남긴다. 추가 플랫폼은 필수 구현과 공통 계약 테스트를 통과한 뒤 지원 대상으로 표시한다.
 
+## 앱 수명 이벤트 (2026-11-22 설계, 오디오 요구)
+
+[오디오 시스템](AudioSystem.ko.md) PR9가 요구한다. 데스크톱 창 포커스는 PlatformWindow가 이미 준다(`Window::HasFocus`·`FocusLost` — `Engine/Source/Runtime/PlatformWindow/Public/PlatformWindow/Window.h:72,98`). 비활성 창 볼륨(`audio.unfocused.volume`)은 이것으로 한다. 없는 것은 창과 무관한 앱 수준 수명이다.
+
+UE 5.8은 `FCoreDelegates`의 `ApplicationWillDeactivateDelegate`·`ApplicationHasReactivatedDelegate`·`ApplicationWillEnterBackgroundDelegate`·`ApplicationHasEnteredForegroundDelegate`·`GetApplicationWillTerminateDelegate`(`Engine/Source/Runtime/Core/Public/Misc/CoreDelegates.h:349–366`)로 알리고, Android 오디오 포커스는 `GameActivity`의 `onAudioFocusChange`(`Engine/Build/Android/Java/src/com/epicgames/unreal/GameActivity.java.template:5074`)가 받는다.
+
+- 이벤트: `platform::AppLifecycleEvent { Activated, Deactivated, EnteredBackground, EnteredForeground, WillTerminate, AudioFocusLost, AudioFocusLostTransient, AudioFocusDuck, AudioFocusGained }`.
+- 전달: OS 콜백 스레드는 고정 크기 큐에 넣기만 한다. 엔진 호스트가 `PumpEvents`에서 게임 스레드로 꺼내 전달한다. UE처럼 OS 스레드에서 delegate를 바로 부르지 않는다(콜백 안에서 게임 상태를 만지지 않게). 큐가 차면 같은 종류는 합치고 버린 수를 센다.
+- Windows·macOS: 앱의 어느 창도 포커스가 없으면 `Deactivated`, 하나라도 얻으면 `Activated`(`WM_ACTIVATEAPP`·`NSApplicationDidResignActiveNotification`/`DidBecomeActive`). 백그라운드·오디오 포커스 이벤트는 없다.
+- Android: `onPause`·`onResume` → `EnteredBackground`·`EnteredForeground`, `AudioManager` 포커스 변경 → 오디오 포커스 이벤트. iOS는 보류 플랫폼이라 정하지 않는다(오디오 세션 인터럽션은 iOS 착수 때).
+- `WillTerminate`는 정상 종료 요청과 같은 경로([크래시 처리·실행](CrashHandlingAndLaunch.ko.md) 20절)로 잇는다.
+- 단계: Windows·macOS 활성 이벤트는 오디오 AU3과 함께, Android는 오디오 AU9와 함께 구현한다.
+
 ## UE 5.8 원본 기준 기반 기능 후속 목록
 
 다음 항목은 UE 5.8(5.8.4, commit `f45729c0b6f0`)의 지정 헤더(`Engine/Source/Runtime/Core/Public/` 아래) 선언과 Rocks `Core/Source/Runtime/PlatformBase`, `Core/Source/Runtime/Core` 공개 API를 대조한 결과다. 처음 대조는 UE 5.6 commit `cdda65ce`로 했고, 표의 헤더와 심볼(메모리 기본 연산·통계·`PageProtect`·가상 메모리 블록·named shared memory, `IFileHandle`·`IPlatformFile`·`IPhysicalPlatformFile`·async read·mapped file·journal, `FThread::Detach`·`FRunnableThread::Suspend`·`Kill`, TLS slot 네 함수, DLL load·export·free)이 5.8에도 모두 있음을 다시 확인했다. UE 헤더의 선언은 기능 범위의 근거이며, 해당 기능이 모든 UE 플랫폼에서 동일하게 구현된다는 뜻은 아니다. Rocks의 기존 일부 구현은 부분 지원으로 기록하고 나머지는 후속으로 분류한다.

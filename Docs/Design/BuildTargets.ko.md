@@ -1,6 +1,6 @@
 # 빌드 타깃·모듈 의존·플러그인 조건 설계
 
-기준일: 2026-11-22, 개정 20. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
+기준일: 2026-11-22, 개정 21. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
 - **타깃 종류 확장**: Editor·Client·Server 타깃과, 타깃 종류에 따라 코드·데이터를 컴파일에서 빼는 매크로.
 - **모듈 의존 공개 범위**: 의존마다 Public(소비자에게 include·정의를 넘김)과 Private(이 모듈 안에서만 씀)을 나눈다.
 - **플러그인 활성 조건**: 프로젝트가 플러그인을 특정 타깃·플랫폼·구성에서만 켠다.
@@ -66,7 +66,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`, commit 
 - 플랫폼 열은 3.7절과 [전체 계획](EngineImplementationPlan.ko.md) 130행(Windows·macOS 에디터, Android·iOS 클라이언트, Linux 서버·기반 시험)을 따른다. 표 밖의 조합은 빌드 규칙이 이유와 함께 거부한다.
 - **`CompileWithEditor`**: Program 타깃 속성이다(UE `bCompileAgainstEditor`, `TargetRules.cs:1395-1400`). 켜면 `ROCKS_WITH_EDITOR=1`·`ROCKS_WITH_EDITOR_DATA=1`이 되고 Editor 모듈을 링크할 수 있다. 에디터 모듈을 쓰는 commandlet용이다. 기본은 꺼짐이다.
 - **`WithEditorData`**: Program 타깃 속성이다. 켜면 `ROCKS_WITH_EDITOR_DATA=1`이다. 에디터 데이터를 읽는 에셋 도구용이다. 기본은 꺼짐이다(BD19). UE는 Program 기본값이 1이지만(`TargetRules.cs:1201-1203`) 시험 타깃은 0이다(`UBT/Configuration/Rules/TestTargetRules.cs:316-317`). Rocks Program의 대부분이 시험·벤치마크라 0을 기본으로 한다. 이렇게 하면 Program의 기본 매크로 조합이 Game과 같아 설치 SDK 라이브러리를 공유한다(3.2절).
-- **Server 타깃의 기능 축소**(렌더·오디오·입력 backend 제외, UE `USE_NULL_RHI=1` — `TargetRules.cs:3492-3493`)의 범위는 네트워크 단계 스펙에서 정한다. 이 문서는 그 결정이 기댈 type·매크로·검사를 준비한다(3.7절).
+- **Server 타깃의 기능 축소**(렌더·오디오·입력 backend 제외, UE `USE_NULL_RHI=1` — `TargetRules.cs:3492-3493`)의 범위는 네트워크 단계 스펙에서 정한다. 이 문서는 그 결정이 기댈 type·매크로·검사를 준비한다(3.7절). 오디오 모듈의 범위는 [오디오 시스템](AudioSystem.ko.md) AD24가 정했다(개정 20): 장치 backend `AudioMiniaudio`와 디코더 `AudioOpus`는 `ClientOnly`, `Audio`·`EngineAudio`는 `Runtime`(서버에서는 재생 요청이 `Ignored`)이고, Server 쿠킹은 오디오 payload를 넣지 않는다.
 - **빌드 주입 상수**: [AppInfo·CommandLine](AppInfoCommandLine.ko.md)이 정한 `build::TargetType`(565행, 아직 미구현)을 같은 다섯 값으로 넓힌다. 실행 중 분기는 `build::Description()` 상수로 한다. UE의 `UE_GAME`·`UE_EDITOR`·`UE_SERVER`·`UE_CLIENT`·`IS_PROGRAM` 같은 타깃 종류 매크로는 두지 않는다(BD3). 실행 종류 `HostKind`(같은 문서 304행 — "에디터·서버는 생길 때 더한다")는 타깃 종류와 다른 축이다. Editor·Server 타깃이 생길 때 `HostKind`에 `Editor`·`Server`를 더한다.
 
 ### 3.2 타깃 종류 매크로
@@ -385,7 +385,7 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 - **export 수 진단(빌드)**: Windows DLL 하나의 export 상한은 65535다(넘으면 링커가 오류). Modular Windows 빌드가 끝나면 공유 라이브러리마다 PE export 디렉터리의 함수 수를 읽어 빌드 출력에 모듈별 수를 한 줄로 남기고(`note: Modular exports: Core 4123, ...` — 큰 순서), 상한의 90%(올림 58982) 이상인 모듈은 따로 한 줄로 알린다(`ModularExports`). 세는 대상은 이번 계획이 공유 라이브러리로 링크한 모듈(`LinkTypes.CompilesAsSharedLibrary`)이고, 읽을 수 없는 파일은 그 모듈만 "읽지 못했다"는 줄로 남긴다(링크가 끝난 빌드를 진단 때문에 실패시키지 않는다)(상한에 닿기 전에 멤버 단위 export로 줄이라는 안내 — BD27 한계). macOS·Linux는 상한이 없어 세지 않는다.
 - 시험: 메타 컴파일러 시험 — 같은 모듈 base는 매크로 없이 통과, import base에 `Exported`가 없으면 RMC2002(키워드와 이름 사이 주석 속 매크로는 세지 않는다), 있으면 통과, 다른 모듈 매크로는 RMC2007, 매크로가 실제 export 철자로 펼쳐지는 경우(Modular 메타 단계와 같다)도 `Exported`, descriptor 왕복에 `Exported` 표지, schema 1 descriptor 거부. 빌드 시험 Modular fixture — export 수 줄과 경고 문턱(문턱 값을 낮춘 판정 함수로).
 
-**BS8d4 남은 키 세부(개정 20 — 사용자 결정 2026-11-22: UE 방식 생성 키 확장).**
+**BS8d4 남은 키 세부(개정 21 — 사용자 결정 2026-11-22: UE 방식 생성 키 확장).**
 - 문제: 리플렉션 struct·enum, Binds 미러의 실제 타입(`Color`·`Vec3`·`InterpCurve<…>` 등 Core 값 타입), 리플렉션하지 않는 native 등록 타입의 키(`NativeTypeKey<T>()`)는 inline 변수 주소(`NativeTypeIdentity<T>`)라 Modular에서 공유 라이브러리마다 따로 생긴다. 등록 모듈과 다른 모듈의 조회(`AcquireStructByNative`·`InstancedStruct` 타입 비교·경로 검사 등)가 실행 중에 엇갈린다. 컴파일·링크는 통과하므로 빌드가 잡지 못한다.
 - 결정(UE 방식): UE가 리플렉션 struct·enum 정보를 생성 `.gen.cpp`의 export 함수(`StaticStruct`·`StaticEnum`)로, 엔진 기본 struct를 export 선언 목록(`TBaseStructure<FVector>` 등 — `CoreUObject/Public/UObject/Class.h`)으로 주는 것과 같이 한다.
   1. **리플렉션 struct·enum**: 클래스처럼(BS8b) 생성 헤더의 `GeneratedType<X>`가 `static ROCKS_<M>_API const void* NativeKey() noexcept`를 선언하고 생성 `.cpp`가 const가 아닌 정적 지역 저장소의 주소로 정의한다. `NativeTypeKey<X>()`는 그것을 쓰고, 리플렉션 struct(`ReflectedDeclarationV`)인데 생성 헤더가 보이지 않으면 `static_assert`다. enum은 본문 표지를 둘 수 없어(UE도 `UENUM`은 생성 헤더 include로 푼다) 생성 헤더 없는 쓰임을 판정하지 못한다 — 그때는 native 키가 되어 조회가 `NotFound`로 실패한다(조용한 손상은 아니고 시험이 잡는다). 리플렉션하지 않는 enum도 native 등록 타입으로 쓸 수 있어(시험의 지역 enum) 모든 enum을 막을 수는 없다.
@@ -695,4 +695,5 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 | 17 | 2026-11-22 | BD5에 빌드 구성 축을 적었다: SDK 변형(매크로 조합 × 링크 방식)과 직교하며, SDK 하나가 여러 구성을 `Configurations/<구성>/`에 싣는다(manifest 14, [Visual Studio 프로젝트 파일](ProjectFiles.ko.md) 10.3절 PJ4) |
 | 18 | 2026-11-22 | BS8d2 세부: Foundation 폐포 Modular 측정(미해결 기호 735 — 클래스 93·자유 함수 162·변수 2), 붙이는 규칙(클래스 단위 우선·선언마다·공개 헤더만·비공개 선언은 공개로 옮김), 링크 오류를 따라 붙임, 확인 타깃 `ModularCheck`(Modular 빌드·실행으로 ML4b Launch 성공 경로 확인) |
 | 19 | 2026-11-22 | BS8d3 세부: 상속 export 진단(선언부 원문의 API 매크로 → descriptor `Exported` 표지·schema 2, import base에 없으면 RMC2002, 루트 Object는 정책 필수), 다른 모듈이 상속하는 Object·Actor·SceneComponent·Asset 클래스 단위 export, Windows Modular export 수 진단(모듈별 줄·상한 90% 경고) |
-| 20 | 2026-11-22 | BS8d4 세부(사용자 결정 — UE 방식 생성 키 확장): 리플렉션 struct·enum 생성 키(NativeKey), Binds 실제 타입 목록 `BoundCoreValueV`와 CoreTypeBindings 생성 키, native 등록 타입 키 매크로 쌍, `StructElementOps`에서 키를 빼고 원소를 지우는 호출이 키를 넘김, `ROCKS_DECLARE·DEFINE_GRAPH_SHARED_DATA`와 호스트 서비스 키의 `Api` 인자 |
+| 20 | 2026-11-22 | 오디오 모듈 유형([오디오 시스템](AudioSystem.ko.md) AD24): `AudioMiniaudio`·`AudioOpus`는 ClientOnly, `Audio`·`EngineAudio`는 Runtime, Server 쿠킹은 오디오 payload 제외 — 3.1절 Server 기능 축소 문단 |
+| 21 | 2026-11-22 | BS8d4 세부(사용자 결정 — UE 방식 생성 키 확장): 리플렉션 struct·enum 생성 키(NativeKey), Binds 실제 타입 목록 `BoundCoreValueV`와 CoreTypeBindings 생성 키, native 등록 타입 키 매크로 쌍, `StructElementOps`에서 키를 빼고 원소를 지우는 호출이 키를 넘김, `ROCKS_DECLARE·DEFINE_GRAPH_SHARED_DATA`와 호스트 서비스 키의 `Api` 인자 |

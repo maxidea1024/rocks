@@ -10,6 +10,9 @@
 #include "ConformanceInternal.h"
 #include "FakeHost.h"
 
+#include <Core/Memory/UniquePtr.h>
+#include <Core/Move.h>
+#include <SparksCompiler/PackageManifest.h>
 #include <SparksVm/VmSession.h>
 
 // `.run` 실행 golden이다(Docs/Design/SparksVm.ko.md 7절, LC5a). 줄마다 최상위 함수 호출 하나
@@ -86,7 +89,12 @@ class RunValues final {
 public:
     RunValues(const Compilation& compilation, StringBuilderBase& problem,
               FakeHost* host = nullptr) noexcept
-        : c_(compilation), problem_(problem), host_(host) {
+        : c_(&compilation), problem_(problem), host_(host) {
+    }
+
+    // 타입 번호를 풀 compilation을 바꾼다(reload한 revision의 함수·필드 — SparksReload K9).
+    void Rebind(const Compilation& compilation) noexcept {
+        c_ = &compilation;
     }
 
     // type의 모양이다. honorOptional이 false면 옵션 표지를 무시한다(Optional의 안쪽).
@@ -98,7 +106,7 @@ public:
             return result;
         }
 
-        const TypeEntry& entry = c_.Types()[type];
+        const TypeEntry& entry = c_->Types()[type];
         if (honorOptional && entry.optional) {
             // 객체의 `T?`는 같은 Ref slot이다(0이 없음).
             result.shape = TypeOf(type, false).shape == RunShape::Object ? RunShape::Object
@@ -110,7 +118,7 @@ public:
             return result;
         }
 
-        const Symbol& symbol = c_.Symbols()[entry.symbol];
+        const Symbol& symbol = c_->Symbols()[entry.symbol];
         // Sparks enum, 언어 enum `Clock`, 엔진 enum(case는 EnumCase 심볼 — 선언 순).
         if (symbol.kind == SymbolKind::Enum ||
             (symbol.kind == SymbolKind::PreludeType && symbol.name == "Clock") ||
@@ -126,9 +134,9 @@ public:
 
         // 객체: Sparks class·interface, 엔진 object·asset·interface(Ref bank).
         if (symbol.kind == SymbolKind::Class || symbol.kind == SymbolKind::Interface ||
-            (symbol.kind == SymbolKind::EngineType && c_.SchemaIsValid(symbol.index) &&
-             c_.Schema(symbol.index).Types()[symbol.item].kind != SchemaTypeKind::Enum &&
-             c_.Schema(symbol.index).Types()[symbol.item].kind != SchemaTypeKind::Struct)) {
+            (symbol.kind == SymbolKind::EngineType && c_->SchemaIsValid(symbol.index) &&
+             c_->Schema(symbol.index).Types()[symbol.item].kind != SchemaTypeKind::Enum &&
+             c_->Schema(symbol.index).Types()[symbol.item].kind != SchemaTypeKind::Struct)) {
             result.shape = RunShape::Object;
             return result;
         }
@@ -172,7 +180,7 @@ public:
 
     // symbol을 주인으로 하는 enum case가 있는지다(엔진 enum 판정).
     bool HasCases(uint32 symbol) const noexcept {
-        for (const Symbol& item : c_.Symbols()) {
+        for (const Symbol& item : c_->Symbols()) {
             if (item.kind == SymbolKind::EnumCase && item.owner == symbol) {
                 return true;
             }
@@ -183,8 +191,8 @@ public:
 
     // Result<T>의 T다.
     uint32 ResultValue(uint32 type) const noexcept {
-        const TypeEntry& entry = c_.Types()[type];
-        return c_.TypeArguments()[entry.firstArgument];
+        const TypeEntry& entry = c_->Types()[type];
+        return c_->TypeArguments()[entry.firstArgument];
     }
 
     // Scalar slot 수다(지원하지 않는 모양은 false).
@@ -265,18 +273,18 @@ public:
             return field.type;
         }
 
-        const SyntaxTree* tree = c_.ModuleTree(field.module);
+        const SyntaxTree* tree = c_->ModuleTree(field.module);
         return tree == nullptr ? NoType
-                               : c_.ExpressionType(field.module, tree->Child(field.node, 4));
+                               : c_->ExpressionType(field.module, tree->Child(field.node, 4));
     }
 
     // struct 값을 `Name(필드: 값, …)`로 쓴다. 필드 slot 위치는 TYPE 구역 규칙(bank 묶음 Scalar·
     // Ref·Buf, 선언 순)으로 다시 계산한다 — VM 배치가 어긋나면 golden이 드러낸다.
     void FormatStruct(StringBuilderBase& out, const RunType& type,
                       const VmBuffer* value) const noexcept {
-        const uint32 symbol = c_.Types()[type.type].symbol;
-        const Symbol& owner = c_.Symbols()[symbol];
-        const SyntaxTree* tree = c_.ModuleTree(owner.module);
+        const uint32 symbol = c_->Types()[type.type].symbol;
+        const Symbol& owner = c_->Symbols()[symbol];
+        const SyntaxTree* tree = c_->ModuleTree(owner.module);
         const uint32 members = tree == nullptr ? NoNode : tree->Child(owner.node, 3);
         const uint64* payload = reinterpret_cast<const uint64*>(value->Bytes());
         uint32 groups[3] = {};
@@ -294,12 +302,12 @@ public:
                     continue;
                 }
 
-                const uint32 field = c_.NodeSymbol(owner.module, tree->Child(member, 2));
+                const uint32 field = c_->NodeSymbol(owner.module, tree->Child(member, 2));
                 if (field == NoSymbol) {
                     continue;
                 }
 
-                const RunType fieldType = TypeOf(FieldTypeOf(c_.Symbols()[field]), true);
+                const RunType fieldType = TypeOf(FieldTypeOf(c_->Symbols()[field]), true);
                 uint32 slots = 0;
                 const bool bufferField = IsBuffer(fieldType);
                 const bool known = Slots(fieldType, slots);
@@ -310,7 +318,7 @@ public:
                     continue;
                 }
 
-                out.Append(first ? "" : ", ").Append(c_.Symbols()[field].name).Append(": ");
+                out.Append(first ? "" : ", ").Append(c_->Symbols()[field].name).Append(": ");
                 first = false;
                 if (bufferField) {
                     FormatValue(out, fieldType,
@@ -365,10 +373,11 @@ public:
             return;
         }
 
-        const TypeEntry& entry = c_.Types()[type.type];
+        const TypeEntry& entry = c_->Types()[type.type];
         const bool map = buffer->kind == VmBufferKind::Map;
-        const RunType key = TypeOf(c_.TypeArguments()[entry.firstArgument], true);
-        const RunType value = map ? TypeOf(c_.TypeArguments()[entry.firstArgument + 1], true) : key;
+        const RunType key = TypeOf(c_->TypeArguments()[entry.firstArgument], true);
+        const RunType value =
+            map ? TypeOf(c_->TypeArguments()[entry.firstArgument + 1], true) : key;
         out.Append(buffer->kind == VmBufferKind::Array ? "[" : "{");
         const uint32 stride = uint32(buffer->keySlots) + buffer->valueSlots;
         const uint64* slots = reinterpret_cast<const uint64*>(buffer->Bytes());
@@ -528,15 +537,15 @@ public:
     // 읽어 host 컨테이너를 만든다(VmExecution::NewContainer). 틀리면 problem에 이유를 쓰고 false.
     bool ParseContainer(StringView text, const RunType& type, VmExecution& execution,
                         Allocator& allocator, VmBuffer*& created) noexcept {
-        const TypeEntry& entry = c_.Types()[type.type];
-        const StringView name = c_.Symbols()[entry.symbol].name;
+        const TypeEntry& entry = c_->Types()[type.type];
+        const StringView name = c_->Symbols()[entry.symbol].name;
         const bool map = name == "Map";
         const VmBufferKind kind = map             ? VmBufferKind::Map
                                   : name == "Set" ? VmBufferKind::Set
                                                   : VmBufferKind::Array;
-        const RunType first = TypeOf(c_.TypeArguments()[entry.firstArgument], true);
+        const RunType first = TypeOf(c_->TypeArguments()[entry.firstArgument], true);
         const RunType second =
-            map ? TypeOf(c_.TypeArguments()[entry.firstArgument + 1], true) : RunType();
+            map ? TypeOf(c_->TypeArguments()[entry.firstArgument + 1], true) : RunType();
         uint32 firstSlots = 0;
         uint32 secondSlots = 0;
         if (!Slots(first, firstSlots) || (map && !Slots(second, secondSlots))) {
@@ -883,8 +892,8 @@ public:
                 break;
             }
 
-            const uint32 symbol = c_.Types()[type.type].symbol;
-            const uint64 handle = host_->ObjectArgument(number.Value(), c_.Symbols()[symbol].name);
+            const uint32 symbol = c_->Types()[type.type].symbol;
+            const uint64 handle = host_->ObjectArgument(number.Value(), c_->Symbols()[symbol].name);
             if (handle == 0) {
                 OutOfMemory();
                 return false;
@@ -980,9 +989,9 @@ public:
 private:
     // enum 타입의 index번째 case 이름이다(없으면 빈 글자). case는 선언 순 심볼이다.
     StringView CaseName(uint32 type, uint64 index) const noexcept {
-        const uint32 owner = c_.Types()[type].symbol;
+        const uint32 owner = c_->Types()[type].symbol;
         uint64 seen = 0;
-        for (const Symbol& symbol : c_.Symbols()) {
+        for (const Symbol& symbol : c_->Symbols()) {
             if (symbol.kind == SymbolKind::EnumCase && symbol.owner == owner) {
                 if (seen == index) {
                     return symbol.name;
@@ -995,7 +1004,7 @@ private:
         return StringView();
     }
 
-    const Compilation& c_;
+    const Compilation* c_;
     StringBuilderBase& problem_;
     FakeHost* host_ = nullptr;
     bool outOfMemory_ = false;
@@ -1040,11 +1049,119 @@ static void AppendDeliveries(StringBuilderBase& actual, const VmSession& session
     }
 }
 
-Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
-                            const Compilation& compilation, uint32 mainModule,
-                            Report& report) noexcept {
+namespace {
+
+// G4 주입 하나다(0이면 보통 실행).
+struct RunInjection {
+    uint32 await = 0;
+    bool cancel = false;
+};
+
+// reload한 revision 하나다(SparksReload K9): 컴파일 결과와 `.sparkc` 왕복 bytecode·링크.
+struct RunRevision {
+    explicit RunRevision(Allocator& allocator) noexcept
+        : sources(allocator), compilation(allocator, sources), module(allocator),
+          linked(allocator) {
+    }
+
+    SourceSet sources;
+    Compilation compilation;
+    BytecodeModule module;
+    VmLinkedModule linked;
+    uint32 main = NoModule;
+};
+
+// revision 원문을 파일 사례와 같은 설정(schema·manifest·모듈 경로)으로 컴파일하고 `.sparkc` 왕복 뒤
+// host로 링크한다. 진단·거부는 false와 why, 할당 실패는 Result 실패다.
+Result<bool> CompileRevision(Allocator& allocator, const CaseInput& input, const CaseFile& source,
+                             FakeHost& host, RunRevision& revision,
+                             StringBuilderBase& why) noexcept {
+    auto refuse = [&](StringView text) noexcept -> Result<bool> {
+        if (auto appended = why.TryAppendFormat("revision '{}' {}", source.path, text); !appended) {
+            return Result<bool>::Failure(appended.Error());
+        }
+
+        return Result<bool>::Success(false);
+    };
+    DiagnosticList diagnostics(allocator);
+    for (const CaseFile& schema : input.schemas) {
+        auto id = revision.sources.TryAdd(schema.path, schema.text, diagnostics);
+        if (!id) {
+            return Result<bool>::Failure(id.Error());
+        }
+
+        if (auto added = revision.compilation.AddBindingSchema(id.Value()); !added) {
+            return Result<bool>::Failure(added.Error());
+        }
+    }
+
+    auto manifest = revision.sources.TryAdd(ManifestFileName, FileCaseManifest, diagnostics);
+    if (!manifest) {
+        return Result<bool>::Failure(manifest.Error());
+    }
+
+    auto package = revision.compilation.AddPackage(manifest.Value());
+    if (!package) {
+        return Result<bool>::Failure(package.Error());
+    }
+
+    // 진단 경로는 사례 이름 그대로다(원문 위치는 보고하지 않는다 — 진단이 있으면 실패).
+    auto file = revision.sources.TryAdd(input.name, source.text, diagnostics);
+    if (!file) {
+        return Result<bool>::Failure(file.Error());
+    }
+
+    auto module = revision.compilation.AddModule(package.Value(), file.Value(), FileCaseModulePath);
+    if (!module) {
+        return Result<bool>::Failure(module.Error());
+    }
+
+    revision.main = module.Value();
+    if (auto checked = revision.compilation.Check(diagnostics); !checked) {
+        return Result<bool>::Failure(checked.Error());
+    }
+
+    const BytecodeModule* bytecode = revision.compilation.ModuleBytecode(revision.main);
+    if (diagnostics.Count() != 0 || bytecode == nullptr) {
+        return refuse("has diagnostics");
+    }
+
+    Array<uint8> bytes(allocator);
+    if (auto written = WriteBytecodeFile(*bytecode, bytes); !written) {
+        return Result<bool>::Failure(written.Error());
+    }
+
+    BytecodeRejection rejection;
+    if (auto read = ReadBytecodeFile(bytes.View(), revision.module, rejection); !read) {
+        if (read.Error() != ErrorCode::InvalidArgument) {
+            return Result<bool>::Failure(read.Error());
+        }
+
+        return refuse("was rejected by the bytecode reader");
+    }
+
+    StringBuilder<MessageInlineBytes> reason(allocator);
+    if (auto link = LinkModule(revision.module, &host, revision.linked, reason); !link) {
+        if (link.Error() != ErrorCode::InvalidArgument) {
+            return Result<bool>::Failure(link.Error());
+        }
+
+        return refuse("was not linked");
+    }
+
+    return Result<bool>::Success(true);
+}
+
+Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
+                           const Compilation& compilation, uint32 mainModule, Report& report,
+                           const RunInjection& injection, uint32& awaitsSeen) noexcept {
+    const bool gateOnly = injection.await != 0;
     StringBuilder<MessageInlineBytes> message(allocator);
     auto fail = [&](StringView reason) noexcept -> Result<void> {
+        if (gateOnly) {
+            return Result<void>::Success(); // 주입 실행은 출력·지시 오류를 보지 않는다(누수만)
+        }
+
         if (auto formatted = message.TryAppendFormat("{}: {}", input.name, reason); !formatted) {
             return formatted;
         }
@@ -1104,12 +1221,58 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
     RunValues values(compilation, problem, &host);
     StringBuilder<MessageInlineBytes> actual(allocator);
     Array<uint64> arguments(allocator);
+    // reload한 revision(SparksReload K9)은 session보다 오래 산다(session이 옛 revision을 참조할 수
+    // 있다). 지금 revision의 bytecode·링크·compilation은 아래 포인터가 가리킨다.
+    Array<UniquePtr<RunRevision>> revisions(allocator);
+    const BytecodeModule* code = &loaded;
+    const VmLinkedModule* current = &linked;
+    const Compilation* currentCompilation = &compilation;
+    uint32 currentMain = mainModule;
     // 실행 단위는 session 하나다(SparksRuntime 2.2절 — 메서드 호출의 수신자는 session instance).
     VmSession session(allocator, &host);
     VmExecution& execution = session.Execution();
-    if (auto added = session.AddModule(linked); !added) {
+    if (auto added = session.AddModule(*current); !added) {
         return added;
     }
+
+    session.InjectAwait(injection.await, injection.cancel);
+    // G4: 주입 실행은 어느 출구에서든 CloseSession 뒤 ledger·유지 자원 0을 본다(누수는 실패 기록).
+    struct LeakGate {
+        bool active;
+        const CaseInput& input;
+        const RunInjection& injection;
+        VmSession& session;
+        FakeHost& host;
+        VmExecution& execution;
+        Report& report;
+        uint32& awaitsSeen;
+        Allocator& allocator;
+        ~LeakGate() noexcept {
+            awaitsSeen = session.AwaitCount();
+            if (!active) {
+                return;
+            }
+
+            // 강제 정리(CloseSession) 전에 Detach 뒤 정지 실행·대기·연결이 0인지 본다(리뷰 4).
+            session.DetachAll();
+            const bool lingering = session.SuspendedCount() != 0 || session.WaitCount() != 0 ||
+                                   session.ConnectionCount() != 0;
+            static_cast<void>(session.CloseSession());
+            host.ReleaseAll(execution);
+            if (lingering || !session.InjectionFired() || execution.LiveBuffers() != 0 ||
+                execution.LiveBytes() != 0 || host.HeldLive() != 0 ||
+                host.ReleaseAnomalies() != 0) {
+                StringBuilder<MessageInlineBytes> leak(allocator);
+                leak.AppendFormat("{}: G4 {} after the {} injected at await {}", input.name,
+                                  !session.InjectionFired() ? "injection did not fire"
+                                                            : "leak or over-release",
+                                  injection.cancel ? "cancel" : "fault", injection.await);
+                if (!leak.HasFailed()) {
+                    static_cast<void>(report.TryAddFailure(leak.View()));
+                }
+            }
+        }
+    } leakGate{gateOnly, input, injection, session, host, execution, report, awaitsSeen, allocator};
 
     // host가 필드에 보관한 버퍼는 어느 출구에서도 놓는다(LC5d1 리뷰 B5 — execution이 host보다 먼저
     // 선언돼 이 guard가 사라질 때 아직 살아 있다).
@@ -1156,8 +1319,9 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
             line.StartsWith("fixed ") || line == "stats" || line.StartsWith("stats ") ||
             line.StartsWith("request ") || line.StartsWith("state ") || line == "apply" ||
             line == "budget" || line.StartsWith("budget ") || line.StartsWith("limits ") ||
-            line.StartsWith("apply ") || line == "endframe" || line.StartsWith("endframe ") ||
-            line == "close" || line.StartsWith("close ")) {
+            line.StartsWith("load ") || line.StartsWith("apply ") || line == "endframe" ||
+            line.StartsWith("endframe ") || line == "close" || line.StartsWith("close ") ||
+            line.StartsWith("reload ")) {
             usize arrowAt = line.ByteCount();
             for (usize index = 0; index + RunArrow.ByteCount() <= line.ByteCount(); ++index) {
                 if (StringView(line.Data() + index, RunArrow.ByteCount()) == RunArrow) {
@@ -1234,6 +1398,78 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
                 }
 
                 delivered = verb != "close";
+            } else if (verb == "reload") {
+                // `reload <버전> [keep|cancel]`(SparksReload K9): 사례 옆 `<사례>.<버전>.spark`를
+                // 같은 설정으로 컴파일·링크하고 PlanReload·ApplyReload한다(기본 cancel — Tryout).
+                // 다시 부른 Start는 `  hook` 줄이다.
+                actual.Append(directive).Append(RunArrow);
+                if (!rest.IsEmpty() && rest != "keep" && rest != "cancel") {
+                    return bad("'reload' takes 'keep' or 'cancel' after the version");
+                }
+
+                const CaseFile* source = nullptr;
+                for (const CaseFile& file : input.revisions) {
+                    source = file.path == target ? &file : source;
+                }
+
+                if (source == nullptr) {
+                    return bad("'reload' needs a <case>.<version>.spark file next to the case");
+                }
+
+                auto made = UniquePtr<RunRevision>::TryMake(allocator, allocator);
+                if (!made) {
+                    return Result<void>::Failure(made.Error());
+                }
+
+                // session이 참조할 수 있으므로 계획 전에 보관한다.
+                if (auto pushed = revisions.TryPushBack(Move(made.Value())); !pushed) {
+                    return pushed;
+                }
+
+                RunRevision& revision = *revisions[revisions.Size() - 1];
+                StringBuilder<MessageInlineBytes> why(allocator);
+                auto compiled = CompileRevision(allocator, input, *source, host, revision, why);
+                if (!compiled) {
+                    return Result<void>::Failure(compiled.Error());
+                }
+
+                if (!compiled.Value()) {
+                    return bad(why.View());
+                }
+
+                VmReloadPlan plan(allocator);
+                StringBuilder<MessageInlineBytes> reason(allocator);
+                auto planned = session.PlanReload(*current, revision.linked,
+                                                  rest == "keep" ? VmReloadExecutions::Keep
+                                                                 : VmReloadExecutions::Cancel,
+                                                  plan, reason);
+                if (!planned) {
+                    if (planned.Error() != ErrorCode::InvalidArgument) {
+                        return Result<void>::Failure(planned.Error());
+                    }
+
+                    actual.AppendFormat("rejected ({})", reason.View());
+                } else {
+                    auto applied = session.ApplyReload(plan);
+                    if (!applied) {
+                        return Result<void>::Failure(applied.Error());
+                    }
+
+                    const VmReloadReport& report = applied.Value();
+                    actual.AppendFormat("ok (instances {}, moved {}, defaulted {}, lost {}, "
+                                        "removed {}, ",
+                                        report.instances, report.moved, report.defaulted,
+                                        report.lost, report.removed);
+                    actual.AppendFormat("cancelled {}, restarted {}, previous {})",
+                                        report.cancelled, report.restarted, report.previous);
+                    host.SetModule(&revision.linked);
+                    code = &revision.module;
+                    current = &revision.linked;
+                    currentCompilation = &revision.compilation;
+                    currentMain = revision.main;
+                    values.Rebind(revision.compilation);
+                    delivered = true;
+                }
             } else if (verb == "budget") {
                 // 예산 거부 집계(SparksRuntime 2.6절 — LC6d4).
                 actual.Append(directive).Append(RunArrow);
@@ -1324,9 +1560,9 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
                 actual.Append(directive).Append(RunArrow);
                 if (verb == "new") {
                     uint32 classIndex = NoBytecodeIndex;
-                    for (uint32 index = 0; index < loaded.classes.Size(); ++index) {
+                    for (uint32 index = 0; index < code->classes.Size(); ++index) {
                         classIndex =
-                            loaded.String(loaded.classes[index].name) == rest ? index : classIndex;
+                            code->String(code->classes[index].name) == rest ? index : classIndex;
                     }
 
                     if (classIndex == NoBytecodeIndex) {
@@ -1338,7 +1574,7 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
                         return Result<void>::Failure(ErrorCode::OutOfMemory);
                     }
 
-                    auto created = session.CreateInstance(handle, linked, classIndex, result);
+                    auto created = session.CreateInstance(handle, *current, classIndex, result);
                     if (!created) {
                         if (created.Error() != ErrorCode::InvalidArgument) {
                             return Result<void>::Failure(created.Error());
@@ -1351,11 +1587,42 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
                 } else {
                     const uint64 handle = host.ObjectArgument(number.Value(), StringView());
                     const uint32 instance = handle == 0 ? NoBytecodeIndex : session.Find(handle);
-                    if (instance == NoBytecodeIndex && verb != "emit") {
+                    if (instance == NoBytecodeIndex && verb != "emit" && verb != "load") {
                         return bad("the object has no instance (use 'new' first)");
                     }
 
-                    if (verb == "state") {
+                    if (verb == "load") {
+                        // `load #요청 #객체` | `load #요청 error <코드>`(SparksRuntime 2.6절 —
+                        // LC6d5): host가 로드 요청을 끝낸다.
+                        uint64 value = 0;
+                        uint64 code = 0;
+                        if (rest.StartsWith("error ")) {
+                            auto parsed =
+                                TryParseUInt32(StringView(rest.Data() + 6, rest.ByteCount() - 6));
+                            if (!parsed || parsed.Value() == 0) {
+                                return bad("'load' needs a non-zero error code");
+                            }
+
+                            code = parsed.Value();
+                        } else {
+                            auto object = rest.StartsWith("#")
+                                              ? TryParseUInt32(StringView(rest.Data() + 1,
+                                                                          rest.ByteCount() - 1))
+                                              : Result<uint32>::Failure(ErrorCode::InvalidArgument);
+                            if (!object || object.Value() == 0) {
+                                return bad("'load' needs '#<object>' or 'error <code>'");
+                            }
+
+                            value = host.ObjectArgument(object.Value(), "DataAsset");
+                        }
+
+                        if (!host.CompleteLoad(handle, value, code)) {
+                            return bad("'load' needs a load request");
+                        }
+
+                        session.CompleteLoad(handle, value, code);
+                        actual.Append("ok");
+                    } else if (verb == "state") {
                         // instance의 fault 처리 상태(SparksRuntime 2.6절 — LC6d3).
                         const VmSession::InstanceState state = session.StateOf(instance);
                         actual.Append(state == VmSession::InstanceState::Isolated ? "isolated"
@@ -1389,34 +1656,35 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
                         const VmLinkedModule* chainModules[64] = {};
                         uint32 chainClasses[64] = {};
                         uint32 depth = 0;
-                        uint32 current = session.ClassOf(instance);
-                        while (current != NoBytecodeIndex && depth < 64) {
-                            chainModules[depth] = &linked;
-                            chainClasses[depth++] = current;
-                            current = loaded.classes[current].baseClass;
+                        uint32 walk = session.ClassOf(instance);
+                        while (walk != NoBytecodeIndex && depth < 64) {
+                            chainModules[depth] = current;
+                            chainClasses[depth++] = walk;
+                            walk = code->classes[walk].baseClass;
                         }
 
                         const VmSession::FieldView storage = session.Fields(instance);
-                        actual.Append(loaded.String(loaded.classes[session.ClassOf(instance)].name))
+                        actual.Append(code->String(code->classes[session.ClassOf(instance)].name))
                             .Append("(");
                         bool firstField = true;
                         for (uint32 at = depth; at > 0; --at) {
-                            const BytecodeClass& entry = loaded.classes[chainClasses[at - 1]];
+                            const BytecodeClass& entry = code->classes[chainClasses[at - 1]];
                             uint32 start[BytecodeBankCount] = {};
                             static_cast<void>(session.RegionStart(*chainModules[at - 1],
                                                                   chainClasses[at - 1], start));
-                            const StringView className = loaded.String(entry.name);
+                            const StringView className = code->String(entry.name);
                             for (uint32 field = entry.firstField;
                                  field < entry.firstField + entry.fieldCount; ++field) {
-                                const BytecodeTypeField& slot = loaded.classFields[field];
-                                const StringView fieldName = loaded.String(slot.name);
+                                const BytecodeTypeField& slot = code->classFields[field];
+                                const StringView fieldName = code->String(slot.name);
                                 const Symbol* symbol = nullptr;
-                                for (const Symbol& candidate : compilation.Symbols()) {
+                                for (const Symbol& candidate : currentCompilation->Symbols()) {
                                     if (candidate.kind == SymbolKind::Field &&
-                                        candidate.module == mainModule &&
+                                        candidate.module == currentMain &&
                                         candidate.name == fieldName &&
                                         candidate.owner != NoSymbol &&
-                                        compilation.Symbols()[candidate.owner].name == className) {
+                                        currentCompilation->Symbols()[candidate.owner].name ==
+                                            className) {
                                         symbol = &candidate;
                                     }
                                 }
@@ -1471,6 +1739,8 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
                         arguments.Clear();
                         refArguments.Clear();
                         bool parsed = true;
+                        // 할당 실패는 형식 오류가 아니다(할당 실패 전수 — LC7a).
+                        ErrorCode exhausted = ErrorCode::None;
                         if (open < rest.ByteCount()) {
                             if (!rest.EndsWith(")")) {
                                 return bad("expected ')' after the hook arguments");
@@ -1483,20 +1753,36 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
                                     if (item.StartsWith("#")) {
                                         auto object = TryParseUInt32(
                                             StringView(item.Data() + 1, item.ByteCount() - 1));
+                                        if (!object || object.Value() == 0) {
+                                            parsed = false;
+                                            return;
+                                        }
+
                                         const uint64 argument =
-                                            object ? host.ObjectArgument(object.Value(), "Actor")
-                                                   : 0;
-                                        parsed =
-                                            parsed && argument != 0 &&
-                                            static_cast<bool>(refArguments.TryPushBack(argument));
+                                            host.ObjectArgument(object.Value(), "Actor");
+                                        if (argument == 0) {
+                                            exhausted = ErrorCode::OutOfMemory;
+                                        } else if (auto pushed = refArguments.TryPushBack(argument);
+                                                   !pushed) {
+                                            exhausted = pushed.Error();
+                                        }
+
                                         return;
                                     }
 
                                     auto real = TryParseDouble(item);
-                                    parsed = parsed && real &&
-                                             static_cast<bool>(arguments.TryPushBack(
-                                                 platform::BitCast<uint64>(real.Value())));
+                                    if (!real) {
+                                        parsed = false;
+                                    } else if (auto pushed = arguments.TryPushBack(
+                                                   platform::BitCast<uint64>(real.Value()));
+                                               !pushed) {
+                                        exhausted = pushed.Error();
+                                    }
                                 });
+                        }
+
+                        if (exhausted != ErrorCode::None) {
+                            return Result<void>::Failure(exhausted);
                         }
 
                         if (!parsed) {
@@ -1531,12 +1817,12 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
 
                         const StringView owner(eventName.Data(), dot);
                         bool local = false;
-                        for (const BytecodeClass& candidate : loaded.classes) {
-                            local = local || loaded.String(candidate.name) == owner;
+                        for (const BytecodeClass& candidate : code->classes) {
+                            local = local || code->String(candidate.name) == owner;
                         }
 
                         VmEventKey key;
-                        key.path = local ? loaded.String(loaded.path) : StringView();
+                        key.path = local ? code->String(code->path) : StringView();
                         key.name = eventName;
                         arguments.Clear();
                         refArguments.Clear();
@@ -1679,9 +1965,9 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
 
         const StringView name(call.Data(), open);
         uint32 function = NoBytecodeIndex;
-        for (uint32 index = 0; problem.ByteCount() == 0 && index < loaded.functions.Size();
+        for (uint32 index = 0; problem.ByteCount() == 0 && index < code->functions.Size();
              ++index) {
-            if (loaded.String(loaded.functions[index].name) == name) {
+            if (code->String(code->functions[index].name) == name) {
                 function = index;
             }
         }
@@ -1698,12 +1984,12 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
         }
 
         const Symbol* symbol = nullptr;
-        for (const Symbol& candidate : compilation.Symbols()) {
+        for (const Symbol& candidate : currentCompilation->Symbols()) {
             const bool method = !owner.IsEmpty() && candidate.kind == SymbolKind::Method &&
                                 candidate.owner != NoSymbol &&
-                                compilation.Symbols()[candidate.owner].name == owner;
+                                currentCompilation->Symbols()[candidate.owner].name == owner;
             if ((method || (owner.IsEmpty() && candidate.kind == SymbolKind::Function)) &&
-                candidate.module == mainModule && candidate.name == member) {
+                candidate.module == currentMain && candidate.name == member) {
                 symbol = &candidate;
             }
         }
@@ -1722,7 +2008,7 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
         buffers.Clear();
         RunType returned;
         if (problem.ByteCount() == 0) {
-            const Signature& signature = compilation.Signatures()[symbol->signature];
+            const Signature& signature = currentCompilation->Signatures()[symbol->signature];
             returned = values.TypeOf(signature.returnType, true);
             uint32 returnSlots = 0;
             if (!values.Slots(returned, returnSlots)) {
@@ -1766,7 +2052,8 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
                     }
 
                     const RunType type = values.TypeOf(
-                        compilation.SignatureParameters()[signature.firstParameter + parameter],
+                        currentCompilation
+                            ->SignatureParameters()[signature.firstParameter + parameter],
                         true);
                     ++parameter;
                     uint32 slots = 0;
@@ -1810,20 +2097,19 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
         auto invoke = [&]() noexcept -> Result<VmCallResult> {
             const Span<VmBuffer* const> passed(buffers.Data(), buffers.Size());
             if (owner.IsEmpty()) {
-                return execution.Call(linked, function, arguments.View(), refArguments.View(),
+                return execution.Call(*current, function, arguments.View(), refArguments.View(),
                                       passed);
             }
 
             uint32 classIndex = NoBytecodeIndex;
-            for (uint32 index = 0; index < loaded.classes.Size(); ++index) {
-                classIndex =
-                    loaded.String(loaded.classes[index].name) == owner ? index : classIndex;
+            for (uint32 index = 0; index < code->classes.Size(); ++index) {
+                classIndex = code->String(code->classes[index].name) == owner ? index : classIndex;
             }
 
             uint32 instance = session.Find(refArguments[0]);
             if (instance == NoBytecodeIndex && classIndex != NoBytecodeIndex) {
                 VmCallResult init;
-                auto created = session.CreateInstance(refArguments[0], linked, classIndex, init);
+                auto created = session.CreateInstance(refArguments[0], *current, classIndex, init);
                 if (!created) {
                     return Result<VmCallResult>::Failure(created.Error());
                 }
@@ -1840,7 +2126,7 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
             }
 
             return session.Call(
-                instance, linked, function, arguments.View(),
+                instance, *current, function, arguments.View(),
                 Span<const uint64>(refArguments.Data() + 1, refArguments.Size() - 1), passed);
         };
         auto called = invoke();
@@ -1930,17 +2216,36 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
         }
     }
 
+    // Gate G1(SparksRuntime 4절): Detach 뒤 정지 실행·대기·연결이 0이고(강제 정리 전), CloseSession
+    // 뒤 실행 문맥 ledger와 유지 자원이 0이며 과다·이중 해제가 없다.
     session.DetachAll();
+    if (session.SuspendedCount() != 0 || session.WaitCount() != 0 ||
+        session.ConnectionCount() != 0) {
+        return fail(".run: executions, waits or connections remain after detaching everything");
+    }
+
+    if (auto closed = session.CloseSession(); !closed) {
+        return Result<void>::Failure(closed.Error());
+    }
+
+    if (host.ReleaseAnomalies() != 0) {
+        return fail(".run: a held resource was released twice or was not held");
+    }
+
     host.ReleaseAll(execution);
     if (execution.LiveBuffers() != 0 || execution.LiveBytes() != 0) {
         return fail(".run: buffers are still alive after the fake host released its fields");
+    }
+
+    if (host.HeldLive() != 0) {
+        return fail(".run: held resources are still alive after CloseSession");
     }
 
     if (actual.HasFailed()) {
         return Result<void>::Failure(actual.Status().Error());
     }
 
-    if (actual.View() == input.run) {
+    if (gateOnly || actual.View() == input.run) {
         return Result<void>::Success();
     }
 
@@ -1958,6 +2263,43 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
     }
 
     return report.TryAddFailure(message.View());
+}
+
+} // namespace
+
+Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
+                            const Compilation& compilation, uint32 mainModule,
+                            Report& report) noexcept {
+    const usize failures = report.Failures().Size();
+    uint32 awaits = 0;
+    if (auto ran = RunScriptCase(allocator, input, compilation, mainModule, report, RunInjection(),
+                                 awaits);
+        !ran) {
+        return ran;
+    }
+
+    // Gate G4(SparksRuntime 4절): 통과한 사례는 모든 AWAIT에서 fault·취소를 하나씩 주입해 누수를
+    // 본다.
+    if (!input.gateSweep || report.Failures().Size() != failures) {
+        return Result<void>::Success();
+    }
+
+    for (uint32 await = 1; await <= awaits; ++await) {
+        const bool modes[] = {false, true};
+        for (const bool cancel : modes) {
+            RunInjection injection;
+            injection.await = await;
+            injection.cancel = cancel;
+            uint32 seen = 0;
+            if (auto ran = RunScriptCase(allocator, input, compilation, mainModule, report,
+                                         injection, seen);
+                !ran) {
+                return ran;
+            }
+        }
+    }
+
+    return Result<void>::Success();
 }
 
 } // namespace rocks::sparks::conformance::detail

@@ -569,24 +569,121 @@ bool FakeHost::IsAlive(uint64 handle) noexcept {
     return Find(handle) != nullptr;
 }
 
+bool FakeHost::IsHeldType(StringView type) const noexcept {
+    if (type.EndsWith("?")) {
+        type = StringView(type.Data(), type.ByteCount() - 1);
+    }
+
+    for (uint32 schema = 0; schema < compilation_.SchemaCount(); ++schema) {
+        if (!compilation_.SchemaIsValid(schema)) {
+            continue;
+        }
+
+        const BindingSchema& entry = compilation_.Schema(schema);
+        for (const SchemaType& declared : entry.Types()) {
+            if (declared.held && entry.Text(declared.name) == type) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+uint32 FakeHost::HeldLive() const noexcept {
+    uint32 count = 0;
+    for (const FakeObject& object : objects_) {
+        count += object.held ? 1 : 0;
+    }
+
+    return count;
+}
+
 void FakeHost::ReleaseHeld(uint64 handle) noexcept {
+    for (FakeLoad& load : loads_) {
+        load.released = load.released || load.request == handle;
+    }
+
+    // 기록 글자는 바꾸기 전 handle 상태로 만든다(살아 있던 `#n`).
     StringBuilder<64> text(*allocator_);
     text.Append("release ");
     FormatHandle(text, handle);
+    // 장부를 기록보다 먼저 바꾼다(기록 할당이 실패해도 장부는 맞다 — LC6e 리뷰 6).
+    FakeObject* target = Find(handle);
+    if (target == nullptr || !target->held) {
+        ++releaseAnomalies_; // held가 아니거나 이미 멈춘·죽은 handle
+    } else {
+        target->alive = false;
+        target->held = false;
+        ++target->generation;
+    }
+
     if (text.HasFailed()) {
         outOfMemory_ = true;
         return;
     }
 
     Record(text.View());
-    if (FakeObject* target = Find(handle)) {
-        target->alive = false;
-        ++target->generation;
+}
+
+uint64 FakeHost::StartLoad(uint64 assetLo, uint64 assetHi) noexcept {
+    const uint64 request = NewObject("LoadRequest");
+    if (FakeObject* made = Find(request)) {
+        made->held = true; // 로드 요청은 유지 자원이다
     }
+
+    FakeLoad load;
+    load.request = request;
+    if (request == 0 || !loads_.TryPushBack(load)) {
+        outOfMemory_ = true;
+        return request;
+    }
+
+    StringBuilder<64> text(*allocator_);
+    text.AppendFormat("load {}:{} -> ", assetLo, assetHi);
+    FormatHandle(text, request);
+    if (text.HasFailed()) {
+        outOfMemory_ = true;
+        return request;
+    }
+
+    Record(text.View());
+    return request;
+}
+
+VmHost::LoadState FakeHost::WatchLoad(uint64 request, bool take, uint64& value,
+                                      uint64& error) noexcept {
+    for (FakeLoad& load : loads_) {
+        if (load.request == request && !load.released) {
+            if (take && load.taken) {
+                return LoadState::Taken;
+            }
+
+            load.taken = load.taken || take;
+            value = load.value;
+            error = load.error;
+            return load.done ? LoadState::Ready : LoadState::Pending;
+        }
+    }
+
+    return LoadState::NotRequest;
+}
+
+bool FakeHost::CompleteLoad(uint64 request, uint64 value, uint64 error) noexcept {
+    for (FakeLoad& load : loads_) {
+        if (load.request == request) {
+            load.done = true;
+            load.value = value;
+            load.error = error;
+            return true;
+        }
+    }
+
+    return false;
 }
 
 uint64 FakeHost::NewObject(StringView type) noexcept {
-    FakeObject object{String(*allocator_), 1, true, Array<FakeFieldValue>(*allocator_)};
+    FakeObject object{String(*allocator_), 1, true, false, Array<FakeFieldValue>(*allocator_)};
     if (!object.type.TryAssign(type) || !objects_.TryPushBack(static_cast<FakeObject&&>(object))) {
         outOfMemory_ = true;
         return 0;
@@ -850,6 +947,10 @@ VmFaultKind FakeHost::CallNative(VmHostCall& call) noexcept {
             return VmFaultKind::None;
         }
 
+        if (IsHeldType(binding.resultType.View())) {
+            Find(created)->held = true; // 획득한 유지 자원(G1 장부 — 실패 출구는 아래에서 지운다)
+        }
+
         call.Refs()[0] = created;
         FormatHandle(text, created);
     } else if (binding.bank == FakeBufBank) {
@@ -884,6 +985,13 @@ VmFaultKind FakeHost::CallNative(VmHostCall& call) noexcept {
     }
 
     if (text.HasFailed()) {
+        // 호출이 실패로 끝나면 획득도 없다(장부를 되돌린다 — LC6e 리뷰 6).
+        if (binding.bank == FakeRefBank && binding.slots != 0 && !call.Refs().IsEmpty()) {
+            if (FakeObject* made = Find(call.Refs()[0])) {
+                made->held = false;
+            }
+        }
+
         call.Fail(text.Status().Error());
         return VmFaultKind::None;
     }

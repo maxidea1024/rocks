@@ -52,6 +52,23 @@ VmFaultKind WaitGroup(W& call, uint8 kind) noexcept {
                    VmLibrary::NewWait(call, kind, 0, 0.0, Span<const uint64>(children, count)));
 }
 
+// Soft<T>.Load(): host가 로드를 시작한 요청 handle(SparksRuntime 2.6절 — LC6d5).
+VmFaultKind SoftLoad(W& call) noexcept {
+    const uint64 request = VmLibrary::StartLoad(call, call.Scalars(0)[0], call.Scalars(0)[1]);
+    if (request == 0) {
+        return VmFaultKind::ContractViolation; // host 없음·계약 위반
+    }
+
+    call.r[0] = request;
+    return VmFaultKind::None;
+}
+
+// LoadRequest<T>.IsDone: host가 끝났다고 알린 요청인지다.
+VmFaultKind RequestIsDone(W& call) noexcept {
+    call.s[0] = VmLibrary::LoadDone(call, call.Ref(0)) ? 1 : 0;
+    return VmFaultKind::None;
+}
+
 VmFaultKind WaitAll(W& call) noexcept {
     return WaitGroup(call, 3);
 }
@@ -66,12 +83,27 @@ constexpr VmLibraryEntry VmWaitTable[] = {
     {"NextFixedTick", ">w", WaitNextFixedTick},
     {"All", "w*>w", WaitAll},
     {"Race", "w*>w", WaitRace},
+    {"Soft.Load", "zs2>x", SoftLoad},
+    {"LoadRequest.IsDone", "x>b", RequestIsDone},
 };
 
 } // namespace
 
 Span<const VmLibraryEntry> VmWaitEntries() noexcept {
     return Span<const VmLibraryEntry>(VmWaitTable, sizeof(VmWaitTable) / sizeof(VmWaitTable[0]));
+}
+
+uint64 VmLibrary::StartLoad(VmLibraryContext& context, uint64 assetLo, uint64 assetHi) noexcept {
+    VmHost* host = context.execution->link_ != nullptr ? context.execution->link_->Host() : nullptr;
+    return host == nullptr ? 0 : host->StartLoad(assetLo, assetHi);
+}
+
+bool VmLibrary::LoadDone(VmLibraryContext& context, uint64 request) noexcept {
+    VmHost* host = context.execution->link_ != nullptr ? context.execution->link_->Host() : nullptr;
+    uint64 value = 0;
+    uint64 error = 0;
+    return host != nullptr &&
+           host->WatchLoad(request, false, value, error) == VmHost::LoadState::Ready;
 }
 
 uint64 VmLibrary::NewWait(VmLibraryContext& context, uint8 kind, uint8 clock, double seconds,

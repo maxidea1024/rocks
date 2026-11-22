@@ -1,0 +1,3 @@
+class Panel : ScriptableComponent {
+    var Width = 1;
+}

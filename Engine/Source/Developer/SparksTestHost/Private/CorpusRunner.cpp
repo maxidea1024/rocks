@@ -305,13 +305,14 @@ bool CheckFolderLayout(const Array<LoadedFile>& loaded, StringBuilderBase& reaso
 }
 
 // 사례 하나를 돈다(파일 사례 또는 폴더 사례). syntaxTreeName·namesName은 `.ast`·`.names`가 없으면
-// 비어 있다.
+// 비어 있다. revisionNames는 reload revision 원문 파일 이름(`<사례>.<버전>.spark`)이다.
 Result<void> RunPairedCase(Allocator& allocator, platform::FileSystem& files, StringView areaPath,
                            StringView areaName, StringView stem, StringView expectName,
                            StringView sourceName, StringView folderName, StringView syntaxTreeName,
                            StringView namesName, StringView typesName, StringView irName,
                            StringView bytecodeName, StringView runName,
-                           Span<const CaseFile> schemas, Report& report) noexcept {
+                           Span<const StringView> revisionNames, Span<const CaseFile> schemas,
+                           Report& report) noexcept {
     Array<LoadedFile> loaded(allocator);
     // 0: .expect, 1: .spark 또는 없음, 2: .ast 또는 없음, 3: .names 또는 없음, 4: .types 또는 없음,
     // 5: .ir 또는 없음, 6: .bc 또는 없음, 7: .run 또는 없음
@@ -416,7 +417,42 @@ Result<void> RunPairedCase(Allocator& allocator, platform::FileSystem& files, St
     input.ir = textOf(irName);
     input.hasBytecode = present[6];
     input.bytecode = textOf(bytecodeName);
+    // reload revision 원문(path는 버전 — `<사례>.<버전>.spark`).
+    Array<LoadedFile> revisionFiles(allocator);
+    Array<CaseFile> revisions(allocator);
+    for (const StringView& name : revisionNames) {
+        auto full = Path::Combine(allocator, areaPath, name);
+        if (!full) {
+            return Result<void>::Failure(full.Error());
+        }
+
+        auto read = LoadFile(allocator, files, full.Value().View(), name, areaName, name,
+                             revisionFiles, report);
+        if (!read) {
+            return Result<void>::Failure(read.Error());
+        }
+
+        if (!read.Value()) {
+            return Result<void>::Success();
+        }
+    }
+
+    for (usize at = 0; at < revisionFiles.Size(); ++at) {
+        const StringView name = revisionNames[at];
+        const usize skip = stem.ByteCount() + 1;
+        const StringView version(name.Data() + skip,
+                                 name.ByteCount() - skip - detail::SourceExtension.ByteCount());
+        const LoadedFile& file = revisionFiles[at];
+        if (auto pushed = revisions.TryPushBack(
+                CaseFile{version, StringView(file.bytes.Data(), file.bytes.Size())});
+            !pushed) {
+            return pushed;
+        }
+    }
+
+    input.revisions = revisions.View();
     input.hasRun = present[7];
+    input.gateSweep = present[7]; // 저장소 corpus는 Gate G4 주입 행렬도 돈다(SparksRuntime 4절)
     input.run = textOf(runName);
     input.name = caseName.View();
     return RunCase(allocator, input, report);
@@ -430,6 +466,32 @@ struct CaseItem {
 
 bool CaseItemLess(const CaseItem& left, const CaseItem& right) noexcept {
     return StringView::CompareBytes(left.stem, right.stem) < 0;
+}
+
+bool HasStem(Span<const CaseItem> list, StringView stem) noexcept {
+    for (const CaseItem& item : list) {
+        if (item.stem == stem) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// stem이 `<사례>.<버전>`이면 사례 stem을 base에 두고 true다(버전에는 점이 없다).
+bool SplitRevisionStem(StringView stem, StringView& base) noexcept {
+    for (usize at = stem.ByteCount(); at > 0; --at) {
+        if (stem.Data()[at - 1] == '.') {
+            if (at == 1 || at == stem.ByteCount()) {
+                return false;
+            }
+
+            base = StringView(stem.Data(), at - 1);
+            return true;
+        }
+    }
+
+    return false;
 }
 
 // 영역 폴더 하나의 사례를 돈다. 짝은 stem(확장자를 뗀 이름, 폴더는 이름 그대로)으로 맞춘다.
@@ -589,6 +651,16 @@ Result<void> RunArea(Allocator& allocator, platform::FileSystem& files, StringVi
             syntaxTreeName = StringView();
         }
 
+        // `.run`이 있는 파일 사례 옆의 `<사례>.<버전>.spark`(자기 `.expect` 없음)는 reload revision
+        // 원문이다(SparksReload K9 — 그 사례가 읽는다).
+        StringView revisionBase;
+        if (expectName.IsEmpty() && !sourceName.IsEmpty() && syntaxTreeName.IsEmpty() &&
+            namesName.IsEmpty() && typesName.IsEmpty() && irName.IsEmpty() &&
+            bytecodeName.IsEmpty() && runName.IsEmpty() && SplitRevisionStem(stem, revisionBase) &&
+            HasStem(lists[0].View(), revisionBase) && HasStem(lists[8].View(), revisionBase)) {
+            continue;
+        }
+
         if (expectName.IsEmpty()) {
             if (auto added = AddLayoutFailure(report, allocator, areaName,
                                               sourceName.IsEmpty() ? folderName : sourceName,
@@ -600,9 +672,23 @@ Result<void> RunArea(Allocator& allocator, platform::FileSystem& files, StringVi
             continue;
         }
 
-        if (auto ran = RunPairedCase(allocator, files, areaPath, areaName, stem, expectName,
-                                     sourceName, folderName, syntaxTreeName, namesName, typesName,
-                                     irName, bytecodeName, runName, schemas, report);
+        Array<StringView> revisionNames(allocator);
+        for (const CaseItem& candidate : lists[0]) {
+            StringView base;
+            if (!runName.IsEmpty() && folderName.IsEmpty() &&
+                SplitRevisionStem(candidate.stem, base) && base == stem &&
+                !HasStem(lists[2].View(), candidate.stem)) {
+                if (auto pushed = revisionNames.TryPushBack(items[candidate.item].name.View());
+                    !pushed) {
+                    return pushed;
+                }
+            }
+        }
+
+        if (auto ran =
+                RunPairedCase(allocator, files, areaPath, areaName, stem, expectName, sourceName,
+                              folderName, syntaxTreeName, namesName, typesName, irName,
+                              bytecodeName, runName, revisionNames.View(), schemas, report);
             !ran) {
             return ran;
         }

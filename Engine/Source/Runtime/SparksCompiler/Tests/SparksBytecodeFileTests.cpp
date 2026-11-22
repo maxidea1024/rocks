@@ -360,6 +360,12 @@ TEST(SparksBytecodeFile_VerifierRejections) {
                   }
               }
           }) == BytecodeLoadError::BadTable);
+    // 형식 v5(SparksReload K4): CLASS 필드의 타입 서술자·옛 이름이 문자열 표 밖.
+    CHECK(verify([](BytecodeModule& m) noexcept { m.classFields[0].type = NoBytecodeIndex; }) ==
+          BytecodeLoadError::BadTable);
+    CHECK(verify([](BytecodeModule& m) noexcept {
+              m.classFields[0].formerName = static_cast<uint32>(m.stringOffsets.Size());
+          }) == BytecodeLoadError::BadTable);
     // await 표에서 빠진 AWAIT, 같은 주소의 await 항목 둘.
     const uint32 awaiting = functionOf(find(Opcode::Await));
     CHECK(verify([&](BytecodeModule& m) noexcept { m.functions[awaiting].awaitCount = 0; }) ==

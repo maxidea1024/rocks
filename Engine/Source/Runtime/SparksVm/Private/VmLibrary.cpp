@@ -273,19 +273,27 @@ bool VmParseSignature(StringView text, VmSignature& out) noexcept {
 bool VmMatchPattern(StringView pattern, StringView descriptor) noexcept {
     // `w*>w`: 대기 하나 이상(All·Race — 인자 수는 소스에 고정되지만 함수마다 다르다).
     if (pattern == "w*>w") {
+        // 인자는 대기(`w`)나 지역에 담은 로드 요청(`x` — SL 6.1절 SD41)이다.
         if (!descriptor.EndsWith(">w") || descriptor.ByteCount() < 3) {
             return false;
         }
 
         const StringView operands(descriptor.Data(), descriptor.ByteCount() - 2);
-        for (usize at = 0; at < operands.ByteCount(); ++at) {
-            const bool even = at % 2 == 0;
-            if (operands.Data()[at] != (even ? 'w' : ',')) {
+        usize start = 0;
+        for (usize at = 0; at <= operands.ByteCount(); ++at) {
+            if (at < operands.ByteCount() && operands.Data()[at] != ',') {
+                continue;
+            }
+
+            const StringView operand(operands.Data() + start, at - start);
+            if (operand != "w" && operand != "x") {
                 return false;
             }
+
+            start = at + 1;
         }
 
-        return operands.ByteCount() % 2 == 1;
+        return true;
     }
 
     // 자리표시(대문자 I F N V O T U)는 서술자의 타입 하나를 받고, 같은 글자는 같은 글자열이어야
@@ -382,14 +390,11 @@ bool VmLibrary::Deferred(StringView name) noexcept {
     // (`CVars.Find<int>`)는 떼고 본다.
     constexpr StringView Names[] = {
 
-        "Time.Delta",           "Time.FixedDelta",   "Time.UiDelta",
-        "Time.GameSeconds",     "Time.Frame",        "Assets.LoadAll",
-        "Assets.Find",          "Soft.Load",         "LoadRequest.IsDone",
-        "LoadRequest.Progress", "Tag.Find",          "TagSet.Has",
-        "TagSet.HasAny",        "TagSet.HasAll",     "TagSet.Add",
-        "TagSet.Remove",        "InputAction.Value", "Text.Find",
-        "CVars.Find",           "CVarRef.Value",     "Settings.Get",
-        "Class.Create"};
+        "Time.Delta", "Time.FixedDelta", "Time.UiDelta",      "Time.GameSeconds",
+        "Time.Frame", "Assets.LoadAll",  "Assets.Find",       "LoadRequest.Progress",
+        "Tag.Find",   "TagSet.Has",      "TagSet.HasAny",     "TagSet.HasAll",
+        "TagSet.Add", "TagSet.Remove",   "InputAction.Value", "Text.Find",
+        "CVars.Find", "CVarRef.Value",   "Settings.Get",      "Class.Create"};
     usize end = name.ByteCount();
     for (usize index = 0; index < name.ByteCount() && end == name.ByteCount(); ++index) {
         end = name.Data()[index] == '<' ? index : end;

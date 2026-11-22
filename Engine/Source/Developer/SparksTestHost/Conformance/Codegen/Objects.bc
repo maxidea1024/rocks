@@ -54,20 +54,24 @@ t45 = "Map<string, int>"
 t46 = "Door"
 t47 = "ScriptableComponent"
 t48 = "Cue"
-t49 = "Open"
-t50 = "Info"
-t51 = "State"
-t52 = "Names"
-t53 = "Scores"
-t54 = "Hum"
-t55 = "Opened"
-t56 = "x"
-t57 = "x,f64>void"
-t58 = "Actor.Damaged"
-t59 = "Owner"
-t60 = "Damaged"
-t61 = "sparks 0.4.0"
-t62 = "Main"
+t49 = "SoundAsset"
+t50 = "Open"
+t51 = "bool"
+t52 = "Info"
+t53 = "State"
+t54 = "Mode"
+t55 = "Names"
+t56 = "Scores"
+t57 = "Hum"
+t58 = "LoopHandle?"
+t59 = "Opened"
+t60 = "x"
+t61 = "x,f64>void"
+t62 = "Actor.Damaged"
+t63 = "Owner"
+t64 = "Damaged"
+t65 = "sparks 0.4.0"
+t66 = "Main"
 ref0 = context World
 ref1 = field World.Audio args ">x"
 ref2 = field Door.Cue args ">x"
@@ -93,13 +97,13 @@ type0 = struct Stats s4 r0 b0
   field0 Level s0 x1
   field1 Offset s1 x3
 class0 = Door : ScriptableComponent s2 r2 b3 init Door.$init
-  field Cue r0 x1
-  field Open s0 x1
-  field Info b0 x1
-  field State s1 x1
-  field Names b1 x1
-  field Scores b2 x1
-  field Hum r1 x1 held
+  field Cue r0 x1 SoundAsset
+  field Open s0 x1 bool
+  field Info b0 x1 Stats
+  field State s1 x1 Mode
+  field Names b1 x1 Array<string>
+  field Scores b2 x1 Map<string, int>
+  field Hum r1 x1 LoopHandle? held
   hook Enable Door.on Enable
   hook Disable Door.on Disable
   handler Owner.Damaged Door.on Owner.Damaged await skipWhileBusy ref15 -> ref20
