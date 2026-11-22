@@ -268,6 +268,10 @@ private:
                          ErrorCode& error) noexcept;
     // handle이 0이 아니고 host가 살아 있다고 답하는지다(SL 4.1절).
     bool Alive(uint64 handle) noexcept;
+    // CALLV(6.5절)의 대상을 host에 묻는다. native 대상이면 여기서 부르고 target.native가 참이다.
+    // Sparks 대상이면 부르는 쪽이 frame을 만든다(target.module·function).
+    VmFaultKind ResolveVirtualCall(uint32 ref, const Banks& banks, VmVirtualTarget& target,
+                                   ErrorCode& error) noexcept;
     // 오류 코드 code의 Buf Result(값 없음)를 만든다.
     Allocation MakeErrorResult(uint64 code, uint64 budget) noexcept;
 

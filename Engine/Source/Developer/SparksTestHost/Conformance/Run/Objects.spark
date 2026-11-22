@@ -54,3 +54,43 @@ class Mover : ScriptableComponent {
         return first == second;
     }
 }
+
+open class Speaker : ScriptableComponent {
+    open fn Speak(): string {
+        return "base";
+    }
+}
+
+class Loud : Speaker {
+    override fn Speak(): string {
+        return "LOUD";
+    }
+}
+
+class Talker : ScriptableComponent {
+    fn Talk(other: Speaker): string {
+        return other.Speak();
+    }
+
+    fn IsPawn(actor: Actor): bool {
+        if (let pawn = actor as? Pawn) {
+            return pawn.HasAuthority || true;
+        }
+
+        return false;
+    }
+
+    fn Echo(pawn: Pawn): Pawn {
+        return pawn;
+    }
+
+    fn Named(): string {
+        let home = Tag("Game.Home");
+        return "${home}";
+    }
+
+    fn Spawned(): int {
+        let spawn = SpawnParams(Count: 2, Category: Tag("Game.Spawn"));
+        return spawn.Count + 3;
+    }
+}

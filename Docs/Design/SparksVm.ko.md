@@ -125,6 +125,8 @@ class VmHost {
 - **`CAST A B` + Type:** TYPE이 없는 Type 참조(엔진 타입·Sparks 클래스·interface)는 host가 묶고, 실행 중 `VmHost::IsA(handle, 묶음)`이 참이면 A ← B, 아니면 0이다(죽은 handle은 0).
 - **엔진 struct:** TYPE이 없는 struct Type 참조는 host가 bank별 slot 수를 돌려주고(`VmHostBinding::structSlots`), `NEWS`는 그 배치의 0·null 버퍼를 만든 뒤 `VmHost::InitializeStruct`가 schema 기본값을 채운다(창은 버퍼 안 bank별 구역). 엔진 struct의 `StructField` 참조(보조 번호 없음)는 host가 (bank, slot 수, bank 구역 안 위치)로 묶고 `GETSF`·`SETSF`는 그 위치를 쓴다(링크가 필드 명령의 bank·slot 수를 대조).
 - **이름 표기:** 엔진 enum의 `TOSTR`(TYPE 없는 Type 참조)·`Name`·`Tag`의 `TOSTR`는 `VmHost::AppendName(묶음 또는 0, 값, out)`이 글자를 붙인다(이름 표는 host — Tag는 이름 번호, 엔진 enum은 case 번호).
+- **묶기 범위:** TYPE 없는 Type·StructField 참조는 host가 있을 때만 묶는다(컨테이너 원소 타입처럼 실행 중 host가 필요 없는 Type 참조도 있다 — host 없이 링크하면 그 참조를 쓰는 `NEWS`·`CAST`·`TOSTR`·`GETSF`는 실행 중 `ContractViolation`, `CAST`는 없음). `VirtualFunction`은 host가 없으면 링크 거부다. 엔진 struct의 필드 명령은 링크가 host 필드 배치(bank·slot 수)와 대조한다. 엔진 struct의 Buf 필드는 null로 시작한다(schema 기본값의 Buf 필드는 연동 EI5).
+- **`TagSet()`:** 언어 타입 `TagSet`의 생성(`NEWS` — Type 이름 `TagSet`)은 null(빈 값)을 둔다.
 - **`TagSet`·`Text`의 0 값:** null 버퍼가 빈 값이다(SL §3.2 "빈 TagSet·빈 Text") — 그 타입의 연산(LC6·EI5 host 함수)이 null을 빈 값으로 받는다. 따로 만들지 않는다.
 
 ### 6.4 결정(LC5d — 권장안 확정)

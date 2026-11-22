@@ -17,10 +17,14 @@ constexpr usize VmLinkReasonBytes = 256;
 constexpr uint8 VmLinkRefBank = static_cast<uint8>(BytecodeBank::Ref);
 constexpr uint8 VmLinkBufBank = static_cast<uint8>(BytecodeBank::Buf);
 
-// host가 묶는 참조 종류인지다.
-bool HostBound(BytecodeRefKind kind) noexcept {
+// host가 묶는 참조인지다(TYPE이 없는 Type·StructField — 엔진 타입·Sparks 클래스 — 포함, 6.5절).
+bool HostBound(const BytecodeRef& ref) noexcept {
+    const BytecodeRefKind kind = ref.kind;
     return kind == BytecodeRefKind::NativeFunction || kind == BytecodeRefKind::Field ||
-           kind == BytecodeRefKind::Context || kind == BytecodeRefKind::Literal;
+           kind == BytecodeRefKind::Context || kind == BytecodeRefKind::Literal ||
+           kind == BytecodeRefKind::VirtualFunction ||
+           ((kind == BytecodeRefKind::Type || kind == BytecodeRefKind::StructField) &&
+            ref.detail == NoBytecodeIndex);
 }
 
 // 표 번호의 글자다(없으면 빈 글자).
@@ -80,6 +84,26 @@ bool FitsWindow(const detail::VmSignature& signature, const BytecodeFunction& fu
     }
 
     return true;
+}
+
+// struct 필드 명령의 bank다(아니면 false).
+bool StructFieldBank(Opcode op, uint8& bank) noexcept {
+    switch (op) {
+    case Opcode::GetSFS:
+    case Opcode::SetSFS:
+        bank = static_cast<uint8>(BytecodeBank::Scalar);
+        return true;
+    case Opcode::GetSFR:
+    case Opcode::SetSFR:
+        bank = VmLinkRefBank;
+        return true;
+    case Opcode::GetSFB:
+    case Opcode::SetSFB:
+        bank = VmLinkBufBank;
+        return true;
+    default:
+        return false;
+    }
 }
 
 // 필드 명령의 bank다(필드 명령이 아니면 false).
@@ -182,11 +206,19 @@ Result<void> LinkModule(const BytecodeModule& module, VmHost* host, VmLinkedModu
             continue;
         }
 
-        if (!HostBound(entry.kind)) {
+        if (!HostBound(entry)) {
             continue; // LC5d2·LC6이 묶는다(그 명령은 실행 중 ContractViolation — V5)
         }
 
+        // TYPE 없는 Type·StructField는 host가 없으면 묶지 않는다(컨테이너 원소 타입 같은 참조도
+        // Type이다 — 그 값을 쓰는 NEWS·CAST·TOSTR·GETSF는 실행 중 ContractViolation).
+        const bool optional =
+            entry.kind == BytecodeRefKind::Type || entry.kind == BytecodeRefKind::StructField;
         if (host == nullptr) {
+            if (optional) {
+                continue;
+            }
+
             return Reject(reason, module, ref, "no host to bind this reference");
         }
 
@@ -223,7 +255,8 @@ Result<void> LinkModule(const BytecodeModule& module, VmHost* host, VmLinkedModu
             return Reject(reason, module, ref, "a context value must be one Ref slot");
         }
 
-        if ((entry.kind == BytecodeRefKind::Field || entry.kind == BytecodeRefKind::Literal) &&
+        if ((entry.kind == BytecodeRefKind::Field || entry.kind == BytecodeRefKind::Literal ||
+             entry.kind == BytecodeRefKind::StructField) &&
             (binding.bank > VmLinkBufBank || binding.slots == 0 ||
              (single && binding.slots != 1))) {
             return Reject(reason, module, ref, "the host returned an invalid value layout");
@@ -239,7 +272,12 @@ Result<void> LinkModule(const BytecodeModule& module, VmHost* host, VmLinkedModu
             const Opcode op = DecodeOpcode(word);
             const bool extra = InfoOf(op).extra;
             uint8 bank = 0;
-            if (FieldBank(op, bank)) {
+            // 엔진 struct 필드(TYPE 없는 StructField)의 GETSF·SETSF도 host 배치와 대조한다(6.5절).
+            const bool hostStructField =
+                StructFieldBank(op, bank) &&
+                module.refs[DecodeAx(module.words[function.firstWord + address + 1])].detail ==
+                    NoBytecodeIndex;
+            if (hostStructField || FieldBank(op, bank)) {
                 const uint32 ref = DecodeAx(module.words[function.firstWord + address + 1]);
                 const VmHostBinding& field = out.hosts_[ref];
                 if (field.bank != bank || field.slots != DecodeC(word)) {
@@ -270,9 +308,9 @@ Result<void> LinkModule(const BytecodeModule& module, VmHost* host, VmLinkedModu
                 }
             }
 
-            // CALLN: 서술자의 피연산자·결과가 창에 들어가야 한다(LC5d1 리뷰 B4 — host가 창 밖을
-            // 쓰지 않게 VM이 먼저 막는다).
-            if (op == Opcode::CallN) {
+            // CALLN·CALLV: 서술자의 피연산자·결과가 창에 들어가야 한다(LC5d1 리뷰 B4 — host가 창
+            // 밖을 쓰지 않게 VM이 먼저 막는다).
+            if (op == Opcode::CallN || op == Opcode::CallV) {
                 const BytecodeRef& entry = module.refs[DecodeBx(word)];
                 detail::VmSignature signature;
                 if (entry.arguments == NoBytecodeIndex ||
@@ -306,6 +344,22 @@ Result<void> LinkModule(const BytecodeModule& module, VmHost* host, VmLinkedModu
     out.importsLinked_ = !imports;
     out.linked_ = true;
     return Result<void>::Success();
+}
+
+VmFaultKind VmHost::ResolveVirtual(VmHostCall&, uint64, VmVirtualTarget&) noexcept {
+    return VmFaultKind::ContractViolation;
+}
+
+bool VmHost::IsA(uint64, uint64) noexcept {
+    return false;
+}
+
+VmFaultKind VmHost::InitializeStruct(VmHostCall&) noexcept {
+    return VmFaultKind::None;
+}
+
+bool VmHost::AppendName(uint64, uint64, StringBuilderBase&) noexcept {
+    return false;
 }
 
 Result<void> LinkImports(Span<VmLinkedModule* const> modules, StringBuilderBase& reason) noexcept {

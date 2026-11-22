@@ -30,6 +30,11 @@ struct FakeBinding {
     uint8 bank = 0;
     uint8 slots = 0;
     uint64 literal = 0; // 리터럴 값(이름 표 번호 + 1)
+    // Type·VirtualFunction·StructField(LC5d2): schema 타입(엔진) — 없으면 Sparks 타입이다.
+    const BindingSchema* schema = nullptr;
+    const SchemaType* schemaType = nullptr;
+    uint16 structSlots[BytecodeBankCount] = {};
+    uint16 offset = 0;
 };
 
 // 객체 필드 값 하나다.
@@ -52,6 +57,15 @@ public:
 
     Result<VmHostBinding> Bind(const VmBindRequest& request,
                                StringBuilderBase& reason) noexcept override;
+    VmFaultKind ResolveVirtual(VmHostCall& call, uint64 receiver,
+                               VmVirtualTarget& target) noexcept override;
+    bool IsA(uint64 handle, uint64 type) noexcept override;
+    bool AppendName(uint64 type, uint64 value, StringBuilderBase& out) noexcept override;
+
+    // 가상 호출의 Sparks 대상을 찾을 링크된 모듈이다(`.run` 실행기가 링크 뒤 둔다).
+    void SetModule(const VmLinkedModule* module) noexcept {
+        module_ = module;
+    }
     bool IsAlive(uint64 handle) noexcept override;
     VmFaultKind GetContext(VmHostCall& call) noexcept override;
     VmFaultKind GetField(VmHostCall& call, uint64 object) noexcept override;
@@ -84,6 +98,10 @@ public:
 
 private:
     FakeObject* Find(uint64 handle) noexcept;
+    // 타입 이름 type이 ancestor이거나 그 파생(Sparks 기반·구현 interface, schema base 사슬)인지다.
+    bool Derives(StringView type, StringView ancestor) const noexcept;
+    // 타입 이름 type의 기반 타입 이름이다(없으면 빈 글자 — 첫 기반만).
+    StringView BaseOf(StringView type) const noexcept;
     uint64 NewObject(StringView type) noexcept;
     uint64 HandleOf(uint32 index) const noexcept;
     FakeFieldValue* FieldOf(FakeObject& object, uint64 binding, VmExecution& execution) noexcept;
@@ -96,6 +114,7 @@ private:
     Array<String> names_;       // 리터럴 이름 표
     Array<String> trace_;
     bool outOfMemory_ = false;
+    const VmLinkedModule* module_ = nullptr;
 };
 
 } // namespace rocks::sparks::conformance::detail

@@ -40,6 +40,21 @@ struct VmHostBinding {
     uint64 id = 0;
     uint8 bank = 0;
     uint8 slots = 0;
+    // 엔진 struct 필드(StructField)의 struct payload 안 절대 slot 위치(bank 묶음 Scalar·Ref·Buf 순
+    // — TYPE 필드와 같은 규칙, 6.5절).
+    uint16 offset = 0;
+    // 엔진 struct 타입(Type)의 bank별 slot 수(0이면 struct가 아니다 — 객체·enum 타입).
+    uint16 structSlots[BytecodeBankCount] = {};
+};
+
+class VmLinkedModule;
+
+// 가상 호출의 대상이다(6.5절): Sparks 함수(링크된 모듈과 함수 번호) 또는 native(묶음 번호).
+struct VmVirtualTarget {
+    const VmLinkedModule* module = nullptr; // Sparks 함수면 그 모듈
+    uint32 function = NoBytecodeIndex;
+    bool native = false;
+    uint64 binding = 0; // native면 CallNative에 줄 묶음 번호
 };
 
 // host 호출 하나의 창과 도구다. 창은 bank별 연속 slot이다: CALLN·NEWLIT은 이 frame의 할당 수부터
@@ -116,6 +131,19 @@ public:
     virtual VmFaultKind CallNative(VmHostCall& call) noexcept = 0;
     // 리터럴 값을 결과 bank 창 0번에 만든다(이름 지정 인자는 창에 있다).
     virtual VmFaultKind MakeLiteral(VmHostCall& call) noexcept = 0;
+
+    // ---- LC5d2(6.5절) — 기본 구현은 계약 위반·거짓·0 값이다. ----
+    // CALLV의 살아 있는 수신자 receiver(창 Ref 0번)와 묶음(call.Binding())의 대상을 target에 둔다.
+    virtual VmFaultKind ResolveVirtual(VmHostCall& call, uint64 receiver,
+                                       VmVirtualTarget& target) noexcept;
+    // 살아 있는 handle이 묶은 타입(Type 묶음 번호)인지다(CAST — `as?`).
+    virtual bool IsA(uint64 handle, uint64 type) noexcept;
+    // 새 엔진 struct의 schema 기본값을 채운다(call.Scalars()·Refs()가 그 struct의 Scalar·Ref 구역,
+    // Buf 필드는 null로 남는다 — 엔진 struct의 Buf 필드 기본값은 연동 EI5).
+    virtual VmFaultKind InitializeStruct(VmHostCall& call) noexcept;
+    // 이름 표기를 붙인다: type이 0이면 Name·Tag 값(이름 번호), 아니면 엔진 enum(Type 묶음)의 case.
+    // 모르는 값은 false(ContractViolation).
+    virtual bool AppendName(uint64 type, uint64 value, StringBuilderBase& out) noexcept;
 };
 
 // 링크된 모듈이다: 모듈과 host, 참조 번호별 묶음. 모듈과 host는 이 객체보다 오래 살아야 한다.

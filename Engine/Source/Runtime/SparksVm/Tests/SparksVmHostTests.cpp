@@ -762,4 +762,144 @@ TEST(SparksVmHost_LinkAllocationFailure) {
     CHECK(failures > 0);
 }
 
+// LC5d2 훅(6.5절)을 쓰는 시험 host다: 가상 대상(번호 1 수신자는 native, 2는 실행할 수 없는 대상),
+// IsA(번호 1만 Thing), 엔진 struct 배치(Scalar 2·Ref 1, 기본값 Scalar 0번 = 42).
+class VirtualHost final : public VmHost {
+public:
+    Result<VmHostBinding> Bind(const VmBindRequest& request, StringBuilderBase&) noexcept override {
+        VmHostBinding binding;
+        binding.id = 1;
+        if (request.kind == BytecodeRefKind::Type && request.name == "Point") {
+            binding.structSlots[0] = 2;
+            binding.structSlots[1] = 1;
+        } else if (request.kind == BytecodeRefKind::StructField) {
+            binding.bank = 0;
+            binding.slots = 1;
+            binding.offset = request.name == "Point.Y" ? 1 : 0;
+        } else if (request.kind == BytecodeRefKind::VirtualFunction) {
+            binding.bank = 0;
+            binding.slots = 1;
+        }
+
+        return Result<VmHostBinding>::Success(binding);
+    }
+
+    bool IsAlive(uint64 handle) noexcept override {
+        return handle == One || handle == Two;
+    }
+
+    VmFaultKind GetContext(VmHostCall&) noexcept override {
+        return VmFaultKind::ContractViolation;
+    }
+
+    VmFaultKind GetField(VmHostCall&, uint64) noexcept override {
+        return VmFaultKind::ContractViolation;
+    }
+
+    VmFaultKind SetField(VmHostCall&, uint64) noexcept override {
+        return VmFaultKind::ContractViolation;
+    }
+
+    VmFaultKind CallNative(VmHostCall& call) noexcept override {
+        call.Scalars()[0] = 99; // native 가상 대상의 결과
+        return VmFaultKind::None;
+    }
+
+    VmFaultKind MakeLiteral(VmHostCall&) noexcept override {
+        return VmFaultKind::ContractViolation;
+    }
+
+    VmFaultKind ResolveVirtual(VmHostCall&, uint64 receiver,
+                               VmVirtualTarget& target) noexcept override {
+        if (receiver == One) {
+            target.native = true;
+            target.binding = 7;
+        }
+
+        return VmFaultKind::None; // Two: 비어 있는 대상(실행할 수 없음)
+    }
+
+    bool IsA(uint64 handle, uint64) noexcept override {
+        return handle == One;
+    }
+
+    VmFaultKind InitializeStruct(VmHostCall& call) noexcept override {
+        call.Scalars()[0] = 42;
+        return VmFaultKind::None;
+    }
+
+    static constexpr uint64 One = (uint64(1) << HostHandleShift) | 1;
+    static constexpr uint64 Two = (uint64(2) << HostHandleShift) | 1;
+};
+
+TEST(SparksVmHost_VirtualCastAndEngineStructs) {
+    SystemAllocator allocator;
+    VirtualHost host;
+    Assembler assembler(allocator);
+    BytecodeRef speak;
+    speak.kind = BytecodeRefKind::VirtualFunction;
+    speak.name = assembler.String("Thing.Speak");
+    speak.arguments = assembler.String("x>i64");
+    REQUIRE(assembler.module.refs.TryPushBack(speak));
+    const uint32 thing = assembler.Ref(BytecodeRefKind::Type, "Thing");
+    const uint32 point = assembler.Ref(BytecodeRefKind::Type, "Point");
+    BytecodeRef y;
+    y.kind = BytecodeRefKind::StructField;
+    y.name = assembler.String("Point.Y");
+    REQUIRE(assembler.module.refs.TryPushBack(y));
+    const uint32 yRef = static_cast<uint32>(assembler.module.refs.Size() - 1);
+    // 0 Speak(r0) = CALLV Thing.Speak.
+    Shape window = Windowed();
+    window.returnSlots = 1;
+    assembler.Begin("Speak", window);
+    assembler.Emit(EncodeABC(Opcode::MovR, 4, 0, 0));
+    assembler.Emit(EncodeABx(Opcode::CallV, 0, 0));
+    assembler.Emit(EncodeABC(Opcode::MovS, 0, 4, 0));
+    assembler.Emit(EncodeABC(Opcode::Ret, 0, 1, 0));
+    assembler.End();
+    // 1 Cast(r0) = ISSOME(r0 as? Thing).
+    Shape one = Plain();
+    one.returnSlots = 1;
+    assembler.Begin("Cast", one);
+    assembler.Emit(EncodeABC(Opcode::Cast, 1, 0, 0));
+    assembler.Emit(EncodeAx(Opcode::Extra, thing));
+    assembler.Emit(EncodeABC(Opcode::IsSomeR, 0, 1, 0));
+    assembler.Emit(EncodeABC(Opcode::Ret, 0, 1, 0));
+    assembler.End();
+    // 2 Point() = NEWS Point 뒤 Y(기본값 0) + X(host 기본값 42).
+    assembler.Begin("Point", one);
+    assembler.Emit(EncodeABx(Opcode::NewS, 0, point));
+    assembler.Emit(EncodeABC(Opcode::GetSFS, 1, 0, 1));
+    assembler.Emit(EncodeAx(Opcode::Extra, yRef));
+    assembler.Emit(EncodeAsBx(Opcode::LoadI, 2, 5));
+    assembler.Emit(EncodeABC(Opcode::AddI64, 0, 1, 2));
+    assembler.Emit(EncodeABC(Opcode::Ret, 0, 1, 0));
+    assembler.End();
+    REQUIRE(assembler.Verified());
+    VmExecution execution(allocator);
+    const VmLinkedModule& linked = assembler.Linked(&host);
+    const uint64 one1 = VirtualHost::One;
+    const uint64 two = VirtualHost::Two;
+    const uint64 dead = (uint64(3) << HostHandleShift) | 1;
+    // native 대상은 그 자리에서 부른다, 실행할 수 없는 대상·죽은 수신자는 계약 위반이다.
+    CHECK(Returns(Run(execution, linked, 0, {}, Span<const uint64>(&one1, 1)), 99));
+    CHECK(Faults(Run(execution, linked, 0, {}, Span<const uint64>(&two, 1)),
+                 VmFaultKind::ContractViolation));
+    CHECK(Faults(Run(execution, linked, 0, {}, Span<const uint64>(&dead, 1)),
+                 VmFaultKind::ContractViolation));
+    // `as?`: 살아 있고 그 타입이면 있음.
+    CHECK(Returns(Run(execution, linked, 1, {}, Span<const uint64>(&one1, 1)), 1));
+    CHECK(Returns(Run(execution, linked, 1, {}, Span<const uint64>(&two, 1)), 0));
+    CHECK(Returns(Run(execution, linked, 1, {}, Span<const uint64>(&dead, 1)), 0));
+    // 엔진 struct: host 배치·기본값, host 필드 위치.
+    CHECK(Returns(Run(execution, linked, 2, {}, Span<const uint64>(&one1, 1)), 5));
+    CHECK(execution.LiveBuffers() == 0);
+
+    // host 없이는 가상 함수 참조를 묶지 못한다(TYPE 없는 Type·StructField는 묶지 않고 넘어간다).
+    VmLinkedModule bare(allocator);
+    StringBuilder<256> reason(allocator);
+    CHECK(!LinkModule(assembler.module, nullptr, bare, reason));
+    CHECK(reason.View() == "ref 0 (virtual Thing.Speak): no host to bind this reference");
+}
+
 } // namespace sparks_vm_host_tests_file

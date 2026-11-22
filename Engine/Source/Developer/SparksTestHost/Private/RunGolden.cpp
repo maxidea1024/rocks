@@ -1031,6 +1031,10 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
 
     // 가짜 host로 링크한다(SparksVm 6.1절 — 못 묶으면 사례 실패).
     FakeHost host(allocator, compilation);
+    if (host.RanOutOfMemory()) {
+        return Result<void>::Failure(ErrorCode::OutOfMemory);
+    }
+
     VmLinkedModule linked(allocator);
     {
         StringBuilder<MessageInlineBytes> reason(allocator);
@@ -1049,6 +1053,7 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
         }
     }
 
+    host.SetModule(&linked);
     Array<uint64> refArguments(allocator);
     StringBuilder<MessageInlineBytes> problem(allocator);
     RunValues values(compilation, problem, &host);

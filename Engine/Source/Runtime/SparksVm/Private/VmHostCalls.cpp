@@ -23,6 +23,43 @@ bool VmExecution::Alive(uint64 handle) noexcept {
     return handle != 0 && host != nullptr && host->IsAlive(handle);
 }
 
+VmFaultKind VmExecution::ResolveVirtualCall(uint32 ref, const Banks& banks, VmVirtualTarget& target,
+                                            ErrorCode& error) noexcept {
+    VmHost* host = link_->host_;
+    const BytecodeFunction& current = module_->functions[frames_[frames_.Size() - 1].function];
+    const uint32 refs = uint32(current.frame[1]) - current.registers[1];
+    if (host == nullptr || refs == 0) {
+        return VmFaultKind::ContractViolation;
+    }
+
+    VmHostCall call;
+    call.execution_ = this;
+    call.binding_ = link_->hosts_[ref].id;
+    call.scalars_ = Span<uint64>(banks.s + current.registers[0],
+                                 uint32(current.frame[0]) - current.registers[0]);
+    call.refs_ = Span<uint64>(banks.r + current.registers[1], refs);
+    call.buffers_ = Span<VmBuffer*>(banks.b + current.registers[2],
+                                    uint32(current.frame[2]) - current.registers[2]);
+    const uint64 receiver = call.refs_[0];
+    if (!Alive(receiver)) {
+        return VmFaultKind::ContractViolation; // 꺼낸 참조에만 낸다(6.5절)
+    }
+
+    VmFaultKind fault = host->ResolveVirtual(call, receiver, target);
+    if (fault == VmFaultKind::None && call.error_ == ErrorCode::None && target.native) {
+        call.binding_ = target.binding;
+        fault = host->CallNative(call);
+    } else if (fault == VmFaultKind::None && call.error_ == ErrorCode::None &&
+               (target.module == nullptr || !target.module->Linked() ||
+                !target.module->ImportsLinked() ||
+                target.function >= target.module->Module().functions.Size())) {
+        fault = VmFaultKind::ContractViolation; // host가 준 대상이 실행할 수 없다
+    }
+
+    error = call.error_;
+    return fault;
+}
+
 VmFaultKind VmExecution::CallHost(Opcode op, uint32 word, uint32 extra, const Banks& banks,
                                   ErrorCode& error) noexcept {
     VmHost* host = link_->host_;

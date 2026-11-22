@@ -62,6 +62,20 @@ VmFaultKind VmExecution::Structured(Opcode op, uint32 word, uint32 extra, const 
         banks.b[at] = value;
         Release(previous);
     };
+    // StructField 참조 ref의 배치다: TYPE 필드, 또는 엔진 struct 필드의 host 묶음(6.5절).
+    auto fieldOf = [&](uint32 ref, BytecodeTypeField& out) noexcept {
+        const uint32 detail = module.refs[ref].detail;
+        if (detail != NoBytecodeIndex) {
+            out = module.typeFields[detail];
+            return true;
+        }
+
+        const VmHostBinding& host = link_->hosts_[ref];
+        out.bank = host.bank;
+        out.slots = host.slots;
+        out.offset = host.offset;
+        return host.slots != 0;
+    };
     // bank 레지스터 at부터 slots개를 target에 복사한다(Buf는 참조 +1).
     auto store = [&](uint64* target, uint32 bank, uint32 at, uint32 slots) noexcept {
         for (uint32 slot = 0; slot < slots; ++slot) {
@@ -92,12 +106,26 @@ VmFaultKind VmExecution::Structured(Opcode op, uint32 word, uint32 extra, const 
     case Opcode::NewS: {
         // TYPE의 struct 배치로 모든 slot이 0·null인 버퍼(기본값은 컴파일러의 SETSF).
         const uint32 typeIndex = module.refs[DecodeBx(word)].detail;
-        if (typeIndex == NoBytecodeIndex) {
-            return VmFaultKind::ContractViolation; // 엔진 struct·TagSet(host 배치 — LC5d)
+        // 언어 타입 `TagSet`의 생성(`TagSet()` — 빈 집합)은 null 버퍼다(6.5절 — null이 빈 값).
+        if (typeIndex == NoBytecodeIndex &&
+            module.String(module.refs[DecodeBx(word)].name) == "TagSet") {
+            put(a, nullptr);
+            return VmFaultKind::None;
         }
 
-        const BytecodeType& type = module.types[typeIndex];
-        const uint64 slots = uint64(type.slots[0]) + type.slots[1] + type.slots[2];
+        // TYPE이 없으면 엔진 struct다: host 배치(6.5절). 배치가 없으면(객체·enum 타입) 계약 위반.
+        uint64 groups[BytecodeBankCount] = {};
+        const VmHostBinding& host = link_->hosts_[DecodeBx(word)];
+        for (uint32 bank = 0; bank < BytecodeBankCount; ++bank) {
+            groups[bank] = typeIndex == NoBytecodeIndex ? host.structSlots[bank]
+                                                        : module.types[typeIndex].slots[bank];
+        }
+
+        const uint64 slots = groups[0] + groups[1] + groups[2];
+        if (slots == 0 && typeIndex == NoBytecodeIndex) {
+            return VmFaultKind::ContractViolation;
+        }
+
         const Allocation allocation =
             AllocateBytes(VmBufferKind::Struct, slots * sizeof(uint64), budget);
         error = allocation.error;
@@ -106,37 +134,49 @@ VmFaultKind VmExecution::Structured(Opcode op, uint32 word, uint32 extra, const 
         }
 
         allocation.buffer->count = static_cast<uint32>(slots);
-        allocation.buffer->capacity = type.slots[VmStructBufBank];
+        allocation.buffer->capacity = static_cast<uint32>(groups[VmStructBufBank]);
         uint64* target = VmStructSlots(allocation.buffer);
         for (uint64 slot = 0; slot < slots; ++slot) {
             target[slot] = 0;
         }
 
         put(a, allocation.buffer);
+        if (typeIndex == NoBytecodeIndex && link_->host_ != nullptr) {
+            // schema 기본값은 host가 채운다(Scalar·Ref 구역 — Buf 필드는 null).
+            VmHostCall call;
+            call.execution_ = this;
+            call.binding_ = host.id;
+            call.scalars_ = Span<uint64>(target, groups[0]);
+            call.refs_ = Span<uint64>(target + groups[0], groups[1]);
+            const VmFaultKind fault = link_->host_->InitializeStruct(call);
+            error = call.error_;
+            return fault;
+        }
+
         return VmFaultKind::None;
     }
     case Opcode::GetSFS:
     case Opcode::GetSFR:
     case Opcode::GetSFB: {
         // A ← struct B의 필드(C slot).
-        const uint32 field = module.refs[DecodeAx(extra)].detail;
+        BytecodeTypeField field;
         VmBuffer* value = banks.b[bb];
-        if (field == NoBytecodeIndex || value == nullptr || value->kind != VmBufferKind::Struct ||
-            !FieldFits(value, module.typeFields[field])) {
-            return VmFaultKind::ContractViolation; // 엔진 struct(LC5d)·null struct·다른 struct
+        if (!fieldOf(DecodeAx(extra), field) || value == nullptr ||
+            value->kind != VmBufferKind::Struct || !FieldFits(value, field)) {
+            return VmFaultKind::ContractViolation; // null struct·다른 struct
         }
 
-        load(VmStructSlots(value) + module.typeFields[field].offset, VmFieldBank(op), a, c);
+        load(VmStructSlots(value) + field.offset, VmFieldBank(op), a, c);
         return VmFaultKind::None;
     }
     case Opcode::SetSFS:
     case Opcode::SetSFR:
     case Opcode::SetSFB: {
         // struct A의 필드 ← B(C slot). 공유된 struct는 먼저 복제한다(COW).
-        const uint32 field = module.refs[DecodeAx(extra)].detail;
+        BytecodeTypeField field;
         VmBuffer*& slot = banks.b[a];
-        if (field == NoBytecodeIndex || slot == nullptr || slot->kind != VmBufferKind::Struct ||
-            !FieldFits(slot, module.typeFields[field])) {
+        if (!fieldOf(DecodeAx(extra), field) || slot == nullptr ||
+            slot->kind != VmBufferKind::Struct || !FieldFits(slot, field)) {
             return VmFaultKind::ContractViolation;
         }
 
@@ -162,7 +202,7 @@ VmFaultKind VmExecution::Structured(Opcode op, uint32 word, uint32 extra, const 
         }
 
         const uint32 bank = VmFieldBank(op);
-        uint64* target = VmStructSlots(slot) + module.typeFields[field].offset;
+        uint64* target = VmStructSlots(slot) + field.offset;
         const uint64 previous = target[0]; // Buf 필드는 slot 하나다
         store(target, bank, bb, c);
         if (bank == VmStructBufBank) {
