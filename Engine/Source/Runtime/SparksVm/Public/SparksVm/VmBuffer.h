@@ -30,7 +30,8 @@ inline constexpr uint64 MaxBufferBytes = uint64(64) * 1024 * 1024;
 // 버퍼 하나의 머리로 세는 byte다(ledger·예산 — 플랫폼마다 같게 실제 머리 크기 대신 이 값을 센다).
 inline constexpr uint64 VmBufferHeaderBytes = 64;
 
-// 실행 문맥 하나의 기본 메모리 예산(논리 byte)이다(SL 9.3절 instance 예산의 LC5 자리).
+// session 밖에서 VmExecution을 바로 부를 때의 기본 메모리 예산(byte)이다(session은
+// VmSessionBudgets).
 inline constexpr uint64 DefaultMemoryBudget = uint64(16) * 1024 * 1024;
 
 struct VmBuffer {

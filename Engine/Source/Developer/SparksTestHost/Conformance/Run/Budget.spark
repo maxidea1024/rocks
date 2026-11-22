@@ -24,6 +24,10 @@ class Store : ScriptableComponent {
         Second = Grown(times);
     }
 
+    fn FillFirstPlus(times: int) {
+        First = "${Grown(times)}x";
+    }
+
     fn Fire() {
         emit Ping();
     }
@@ -44,6 +48,44 @@ class Crowd : ScriptableComponent {
     on Sources.Ping(source: Store) {
         if (source == source) {
             Log.Info("ping");
+        }
+    }
+}
+
+class Pair : ScriptableComponent {
+    var Left: Store?;
+    var Right: Store?;
+
+    fn Use(source: Store) {
+        Right = source;
+    }
+
+    fn Swap(source: Store) {
+        Left = source;
+        Right = null;
+    }
+
+    on Left.Ping() {
+        Log.Info("left ping");
+    }
+
+    on Right.Ping() {
+        Log.Info("right ping");
+    }
+}
+
+class Busy : ScriptableComponent {
+    var Sources: Array<Store> = [];
+
+    fn Join(source: Store) {
+        Sources.Add(source);
+    }
+
+    @skipWhileBusy
+    on Sources.Ping(source: Store) {
+        await Delay(1.0, Clock.Game);
+        if (source == source) {
+            Log.Info("busy done");
         }
     }
 }
