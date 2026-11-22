@@ -237,6 +237,12 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
     if (!registered) {
         return 1;
     }
+    registered = registry.Register({"asset-fix-duplicate-id",
+                                    "Give a package a new AssetId when another file has its id.",
+                                    &RunAssetFixDuplicateIdCommand, &assetContext});
+    if (!registered) {
+        return 1;
+    }
     registered = registry.Register(
         {"asset-index-rebuild",
          "Rescan the project without the index cache, clean temporary files and rewrite the cache.",

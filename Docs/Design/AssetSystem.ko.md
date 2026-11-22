@@ -571,6 +571,14 @@ A2는 에디터 쪽 에셋 데이터베이스다(4·5.4·5.5·7·8·13·16절). 
         - 명령: `asset-orphans-list`(잠금 없음 — 표준 출력에 경로 키 순으로 `<path> <AssetId> owner <owner path|AssetId|missing>`, owner가 색인에 하나면 그 경로, 같은 id 둘 이상이면 AssetId, 없으면 missing, 요약 없음), `asset-orphans-delete <path>`(잠금 — 출력은 asset-delete와 같다).
         - 기존 시험 fixture의 영향: 색인 시험의 Hero는 색인에 없는 owner(ImportOwnerId)를 가리키는 참조 기록이라 이제 고아다 — 의존 대조 시험은 Verify 결과에서 고아 경고를 떼어 그 수를 따로 단언한다(`TakeOrphans`). 명령 시험 fixture(`AssetIndexCommandletFixtures.h`)에 고아 출력 둘(Orphan 2311 — owner 2312 없음, HeroOrphan 2313 — 기록 없는 Hero가 owner)을 더했다(기존 배열은 그대로).
         - 상태: **구현** — 대조표 14.1.41절, coverage 14.1.42절.
+      - A2e4b 구현 세부(2026-11-22, 권장안으로 확정):
+        - 집합: `EditorPackageSet::FixDuplicateId(fileName, newId, lock, warnings, failure)`. 그 파일의 색인 항목이 `duplicateId`여야 하고(아니면 InvalidArgument), 그 id가 집합에 열려 있으면(어느 파일이든 — Registry가 id로 찾는다) Busy(먼저 닫거나 저장 뒤 다시 연다 — 명령 프로세스는 열지 않은 채 시작한다), 색인 항목이 읽기 전용이면 `NewerVersion` / Unsupported, newId가 null이면 InvalidArgument, 열려 있거나 색인에 있으면 `DuplicateAssetId`. 열기는 그 파일 이름으로 한다(루트 패키지만 색인 id 조회 대신 주어진 파일 — 의존 닫힘은 열기와 같다, `OpenEntry`의 파일 지정). 미해결 import가 있으면 `MissingDependency` / InvalidArgument(복제와 같다 — 연 패키지는 닫는다).
+        - ImportRecord: 소유 기록이면 owner와 outputs의 자기 출력을 newId로 바꾸고 형제 출력은 뺀다(복제와 같다 — 형제의 참조 기록은 옛 id를 가리키고, 옛 id는 남는 같은 id 파일의 것이다. 새 기록이 형제를 적으면 형제가 가리키지 않는 출력을 주장한다). 참조 기록이면 그대로 둔다(소유자의 outputs는 옛 id를 적으므로 이 패키지는 고아가 된다). 고아 경고는 쓰기 뒤 색인 판정(`AssetIndex::OrphanReason` — `asset-orphans-list`와 같은 판정, 할당 없음)으로 고친 파일의 새 항목과 형제 id 항목만 본다: 사유가 OwnerMissing·OwnerNotImporter·NotListed면 경고 `OrphanedOutput`(asset = 그 항목, related = 그 항목 기록의 owner, detail = 사유). 처음 설계는 형제를 늘 고아로 경고했으나 남는 같은 id 파일(대개 같은 기록을 가진 원본)이 형제를 적으므로 보통 고아가 아니다 — 남는 파일이 형제를 적지 않을 때(우연한 id 충돌)만 고아다. 경고 자리는 판정 항목 수(1 + 형제 id 항목 수 — 쓰기는 이 파일 항목만 바꾼다)만큼 쓰기 전에 잡는다.
+        - 쓰기: 복제 모드 쓰기(writer `duplicateId` — 헤더·자기 Soft·DuplicateTransient)를 같은 경로에 교체로 한다. 교체 직전에 이번 열기가 연 패키지를 모두 닫는다(`CloseOpened` — 열기 전에 열린 id를 적어 두고 그 밖의 열린 패키지: 고칠 패키지와 그 의존 닫힘, Hard 순환 상대 포함. 처음 구현은 고칠 패키지의 참조자 닫힘만 닫아(`CloseGroup`) 이번에 연 의존이 열린 채 남았고 묶음 계산이 고정점 반복이었다 — A2e4b 리뷰 권장. 원래 열려 있던 패키지는 새로 연 패키지를 참조할 수 없다 — 열기는 기존 패키지의 미해결 import를 다시 묶지 않는다 — 그래서 끊긴 참조가 남지 않고 편집을 잃지 않는다). Discard는 할당이 있어 교체 뒤로 미루지 않는다 — 닫기가 실패하면 임시 파일을 지우고 그 오류, 파일·색인 그대로(중간 Discard 실패면 앞서 닫은 것은 닫힌 채이고 남은 것의 닫힌 패키지로의 참조는 Discard된 객체를 가리킨다(Resolve는 Destroyed) — 실패 경로가 같은 기록으로 남은 것을 다시 닫는다), 교체가 실패하면 패키지는 닫힌 채 파일·색인 그대로. 실패 경로(열기 뒤 판정·hook·쓰기 실패)도 이번에 연 것을 닫는다. 교체 뒤 색인 갱신으로 그 파일은 새 id가 되고 같은 id 진단이 사라진다.
+        - 서비스 `AssetService::FixDuplicateId(lock, path, result, warnings, failure)`: 경로(별칭으로 풀지 않는다)의 색인 항목(같은 경로 키 둘은 DuplicatePath) → 새 id 발급 → 집합 `FixDuplicateId`. 결과 `AssetFixIdResult`: 경로·옛 id·새 id·옛 id를 쓰는 남은 항목 경로들(다른 패키지의 옛 id 참조는 그쪽을 가리킨다 — 출력에 적는다).
+        - 명령 `asset-fix-duplicate-id <path>`(잠금): 표준 출력 `asset-fix-duplicate-id: <path> <옛 id> -> <새 id>` 한 줄과 남은 쪽마다 `asset-fix-duplicate-id: references to <옛 id> resolve to <남은 path>`(남은 것이 하나일 때 — 둘 이상이면 아직 같은 id라 `asset-fix-duplicate-id: <옛 id> is still shared by <남은 path>`, A2e4b 리뷰 권장), 경고 줄(OrphanedOutput 등), 캐시 쓰기.
+        - ID 수정은 같은 파일을 다시 쓰므로 부모 디렉터리를 만들지 않는다(복제·첫 저장만 만든다).
+        - 상태: **구현** — 대조표 14.1.43절, coverage 14.1.44절.
     - 시험 기반: 메모리 파일 시스템에 Move(파일·디렉터리, `replaceExisting` 거짓, 대소문자만 바꾸는 이름 변경 = 같은 노드, 하위 노드 경로 바꾸기)와 n번째 Move·Delete 실패·오류 종류 주입(Busy·AccessDenied·AlreadyExists)을 더한다. 실제 디스크 시험 하나: 읽지 않은 bulk가 있는 열린 패키지를 가진 디렉터리를 이동(Windows는 안에 열린 핸들이 있는 디렉터리 이름을 바꾸지 못한다 — Detach가 캐시 핸들을 모두 닫는지 본다).
     - 버린 대안: UE처럼 필요할 때만 별칭(Rocks는 텍스트 참조를 고칠 수 없으므로 늘 만든다), 이동 뒤 별칭 쓰기(실패하면 별칭을 더할 명령이 없어 텍스트 참조가 조용히 깨진다 — 교차 검증 필수), 에셋마다 디렉터리 이동(중간 상태가 남는다), 강제 삭제가 디스크 참조자를 null로 고쳐 쓰기(사용자가 모르는 많은 파일을 바꾼다 — UE도 디스크는 건드리지 않는다), 강제 삭제가 열린 참조자를 null·dirty로(UE 방식 — 사용자가 저장하면 조용히 참조를 잃는다, Busy로 먼저 알린다), 복제를 파일 byte 복사 + id 바꾸기로(저장하지 않은 편집을 잃는다), 별칭 점유를 `EditorPackageSet`에(라이브러리가 사용자 데이터 파일을 알게 된다), 별칭 파일 JSON5(도구가 다시 쓰는 파일은 엄격 JSON).
 
@@ -2375,6 +2383,44 @@ A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항�
 | 목록·verify·지우기 줄 쓰기 실패 | 실패 | 14.1.36과 같다 |
 
 리뷰: 1차 미충족(필수 둘 — 판정할 수 없는 경우를 고아로 단정, 같은 id owner 찾기의 O(n²)). `Undetermined`와 id 범위 이진 검색으로 고쳤고, 권장(같은 서비스에서 owner를 지운 뒤 출력 판정 — 시험, `TakeOrphans` 뒤 빈 줄)도 반영했다. 판정 불가는 목록에 나오지 않으므로 `unknown` 표기는 두지 않는다. 기록을 읽지 못한 진단 판정은 칸(ImportRecord)만 본다 — 그 칸의 진단은 UnsupportedVersion·CorruptPackage뿐이라 코드 대조는 닿을 수 없는 분기였다.
+
+#### 14.1.43 요구 대조표(A2e4b — 같은 id 고치기)
+
+시험은 EngineTests `Engine/Source/Developer/AssetDatabase/Tests/AssetFixIdTests.cpp`(6개)와 C# `Programs/Rocks.Commandlet.Tests/Program.cs`의 "asset-fix-duplicate-id" 항목 17개(Windows 전용 1개)다. `Close`를 `OpenCachePath`·`DiscardOpen`으로 나눈 것은 기존 삭제 시험(`AssetDelete_*`)이 그대로 돈다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 다시 쓰기(7.1-17 A2e4b) | 헤더 id 새 id, bulk·값 그대로(새 id로 열어 읽음), 의존(Hard Base)·hook 출력(Tags·Build — hook이 받은 id는 새 id), 원본 파일 byte 그대로, 색인이 새 검색과 같고 같은 id 진단이 사라짐(옛 id·새 id 하나씩), 이번에 연 패키지(사본·의존 Base·Derived) 모두 닫힘·전에 열린 패키지(Hero·Base)는 그대로, 고친 뒤 원본도 id로 열림, 자기 Soft 참조는 새 id(자기 의존 아님), 같은 id 셋이면 남은 경로 둘(경로 키 순)·셋째를 고치면 옛 id 하나, NotDurable 경고(asset = 새 id), 경고 목록 없이도(Hard 의존이 있는 Villain 사본) | `AssetFixId_RewritesCopy` |
+| ImportRecord·고아 경고(7.1-17 A2e4b) | 소유 기록: owner·자기 출력만 새 id, 형제 출력 뺌, 임포터·원본 그대로. 남는 같은 id 파일이 형제를 적음(대개의 복사) — 경고·고아 없음, 적지 않음(우연한 충돌) — 형제 OwnerNotImporter 경고(asset·related = 옛 id·detail)와 `Orphans` 한 항목, 남는 파일의 기록을 읽지 못함 — Undetermined라 경고·고아 없음. 참조 기록: byte 그대로(owner Base), 고친 패키지 NotListed 경고와 고아 한 항목. 고치기 전 고아 없음, 경고 목록 없이도 성공 | `AssetFixId_ImportRecords` |
+| Hard 순환(7.1-17 A2e4b) | CycleA 사본을 고치면 열기가 CycleB까지 열고 묶음째 닫힘(둘 다·새 id 열리지 않음), 고친 파일의 Hard 의존 CycleB 그대로, 고친 뒤 CycleB를 열면 남은 CycleA, 고친 파일도 새 id로 열림 | `AssetFixId_HardCycle` |
+| 서비스 거부(7.1-17 A2e4b) | Initialize 전·잠금 아님 InvalidArgument, 경로 규칙 InvalidPath, 없음 NotFound(옛 id·경로 비움), 별칭 경로는 풀지 않음 NotFound, 같은 경로 키 둘 DuplicatePath, 같은 id 아님 InvalidArgument(asset·결과 옛 id·경로·남은 것 없음), 읽기 전용 NewerVersion / Unsupported, 미해결 import MissingDependency(related·닫힘·파일 그대로) — 모두 파일·색인 그대로 | `AssetFixId_RejectsAndFailures` |
+| 집합 거부(7.1-17 A2e4b) | null 새 id·잠금 아님·hook 없음·Initialize 전 InvalidArgument, 파일 없음 NotFound, 같은 id 아님 InvalidArgument(asset), 새 id가 색인에 있음·색인에 같은 id 둘·열린 저장하지 않은 패키지 DuplicateAssetId(related·asset = 옛 id), 만들기 초기화 안 Busy, 옛 id가 열려 있음(먼저 연 Base에 밖에서 사본이 생김) — 사본·원본 모두 Busy | `AssetFixId_RejectsAndFailures` |
+| 실패(7.1-17 A2e4b) | hook 실패(Busy — 아무것도 쓰지 않음·닫힘), 경고 자리 할당 실패, 임시 파일 만들기·쓰기·Flush·Close·교체 실패(임시 파일 없음·asset = 옛 id·닫힘·파일·색인 그대로) | `AssetFixId_RejectsAndFailures` |
+| 할당 실패(7.1-17 A2e4b) | 소유 기록 Leaf 사본(형제 고아 경고 경로)·Hard 순환 사본(이번에 연 것 닫기의 중간 Discard 실패 포함)·Hero 사본(bulk·의존·hook)의 모든 할당 실패가 OutOfMemory·파일·색인 그대로·옛 id와 이번에 연 의존 닫힘·먼저 연 Derived는 성공·실패 모두 열린 채(열린 id 기록의 할당 실패 포함, GC 표 실패는 Registry가 삼킨 성공) | `AssetFixId_AllocationFailures` |
+| 실제 디스크(7.1-17 A2e4b) | 디스크의 Hero 사본을 고친 뒤 새 id로 열어 bulk 읽기, 원본도 열림 | `AssetFixId_RealDisk` |
+| 명령(13, 7.1-17 A2e4b) | 고치기 전 verify DuplicateAssetId, 출력 두 줄(옛 id → 새 id·남은 원본), 같은 id 셋에서 하나 고치기(still shared by 둘)·마지막 사본 고치기(원본으로 풀림), 고친 뒤 verify 깨끗(종료 0), 원본을 참조하는 AnimationClip 그대로, 목록의 id 둘, 같은 id 아님 InvalidArgument 줄, 없음 NotFound, 경로 규칙 InvalidPath, 잠금 Busy(Windows), 사용법 셋·도움말·프로젝트 없음. OrphanedOutput 경고 줄은 명령이 임포트 기록을 만들 수 없어(A2f 전 — 시험 fixture는 명령에서 편집용으로 열리지 않는다) C++ 시험이 경고를 단언한다(줄 서식은 다른 경고와 같은 공용 경로) | C# 15개 |
+| 조합(14 완료 조건 2) | 기록 상태(없음·소유·참조) × 남는 같은 id 파일(같은 기록·기록 없음·기록 읽지 못함) × 의존 모양(없음·Hard·Hard 순환·bulk) × 경고 목록(있음·없음) × 결과(성공·거부·IO 실패·할당 실패) | 위 시험 |
+
+#### 14.1.44 Coverage(A2e4b)
+
+측정(2026-11-22, Windows, `ROCKS_MSVC_TOOLSET=14.44`): `-Target EngineTests -Filter Asset -Sources Engine/Source/Developer/AssetDatabase/Private`(329개 통과), 명령은 C# 시험 구동기(378 PASS).
+
+| 범위 | 줄 | 분기 |
+|---|---|---|
+| `EditorPackageSet::FixDuplicateId`·`CloseOpened`·`DiscardOpen`·`OpenCachePath`·`Close` | 모두 닿음 | 모두 닿음 |
+| `WriteAndReplace` ID 수정 모드(이번에 연 것 닫기·디렉터리 만들기 생략) | 기존 4곳 제외 모두 | 같음 |
+| `AssetService::FixDuplicateId` | 1곳 제외 모두 | 같음 |
+| `RunAssetFixDuplicateIdCommand` | 출력 실패 제외 모두 | 같음 |
+
+닿지 않은 곳과 근거:
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| `AssetService::FixDuplicateId` 새 id 발급 실패 | 실패 | OS 보안 난수 실패(14.1.22와 같다) |
+| `WriteAndReplace` 경고 자리·임시 이름 guid·다시 읽기 열기 실패 | 실패 | 14.1.40과 같다(이번 단계가 바꾸지 않은 줄 — ID 수정은 경고 자리를 미리 넉넉히 잡는다) |
+| `RunAssetFixDuplicateIdCommand` 경고 줄·결과 줄 서식·쓰기 실패 | 실패 | 14.1.36과 같다 |
+
+리뷰: 충족(필수 없음). 권장 넷을 반영했다 — 이번 열기가 연 의존이 열린 채 남음과 묶음 계산의 고정점 반복(참조자 닫힘 `CloseGroup` → 열기 전 기록 밖을 닫는 `CloseOpened`, 시험에서 닫힘·그대로 단언), 중간 Discard 실패 뒤 남은 참조의 상태(주석·7.1-17), 남은 같은 id가 둘 이상일 때의 결과 줄(still shared by).
 
 ## 15. PNG 디코더 범위
 

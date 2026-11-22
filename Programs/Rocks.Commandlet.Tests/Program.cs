@@ -1643,6 +1643,116 @@ finally
     Directory.Delete(duplicateDirectory, true);
 }
 
+// asset-fix-duplicate-id(AssetSystem.ko.md 7.1절 17 — A2e4b): 밖에서 복사한 Skeleton 사본을 새 id로(출력 두 줄 — 옛 id 참조는 남은
+// 원본으로), verify의 같은 id 진단이 사라지고 원본을 참조하는 AnimationClip은 그대로, 같은 id가 아님·없음·경로 규칙 거부, 잠금 Busy,
+// 사용법·도움말·프로젝트 없음. OrphanedOutput 경고는 명령이 임포트 기록을 만들 수 없어(A2f 전) C++ 시험이 맡는다.
+string fixDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-fix-id-{Environment.ProcessId}");
+try
+{
+    string project = Path.Combine(fixDirectory, "Fixing");
+    Directory.CreateDirectory(project);
+    File.WriteAllText(Path.Combine(project, "Fixing.rocksproject"), "{}\n");
+    string projectOption = $"--project={project}";
+    string content = Path.Combine(project, "Content");
+
+    async Task<ProcessResult> RunFix(params string[] arguments) =>
+        await ProcessRunner.RunAsync(new(executable, arguments, workingDirectory, Timeout: TimeSpan.FromSeconds(30)));
+
+    void ReportFix(string label, bool passed, ProcessResult result)
+    {
+        Console.WriteLine($"{label}: {(passed ? "PASS" : "FAIL")}");
+        if (!passed)
+        {
+            ++failures;
+            Console.Error.WriteLine($"  exit={result.ExitCode}; stdout={result.StdOut}; stderr={result.StdErr}");
+        }
+    }
+
+    ProcessResult hero = await RunFix("asset-new", "Skeleton", "/Game/Fx/Hero", projectOption);
+    ProcessResult run = await RunFix("asset-new", "AnimationClip", "/Game/Fx/Run", "skeleton=/Game/Fx/Hero", projectOption);
+    ReportFix("fix-id: setup", hero.ExitCode == 0 && run.ExitCode == 0, run);
+    string heroId = hero.StdOut.Trim().Split(' ').Last();
+    File.Copy(Path.Combine(content, "Fx", "Hero.rasset"), Path.Combine(content, "Fx", "Hero2.rasset"));
+    ProcessResult twin = await RunFix("asset-index-verify", projectOption);
+    ReportFix("fix-id: duplicated id before", twin.ExitCode == 1 &&
+        twin.StdErr.Contains("DuplicateAssetId", StringComparison.Ordinal), twin);
+
+    ProcessResult fixedId = await RunFix("asset-fix-duplicate-id", "/Game/Fx/Hero2", projectOption);
+    string[] lines = fixedId.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+    string newId = lines.Length == 2 ? lines[0].Split(' ').Last() : "";
+    ReportFix("asset-fix-duplicate-id", fixedId.ExitCode == 0 && fixedId.StdErr.Length == 0 && lines.Length == 2 &&
+        lines[0] == $"asset-fix-duplicate-id: /Game/Fx/Hero2 {heroId} -> {newId}" && newId.Length == 36 && newId != heroId &&
+        lines[1] == $"asset-fix-duplicate-id: references to {heroId} resolve to /Game/Fx/Hero", fixedId);
+    ProcessResult clean = await RunFix("asset-index-verify", projectOption);
+    ReportFix("fix-id: verify is clean after", clean.ExitCode == 0 && clean.StdErr.Length == 0, clean);
+    ProcessResult runInfo = await RunFix("asset-info", "/Game/Fx/Run", projectOption);
+    ReportFix("fix-id: the clip still references the original", runInfo.ExitCode == 0 &&
+        runInfo.StdOut.Contains("skeleton=/Game/Fx/Hero\n", StringComparison.Ordinal), runInfo);
+    ProcessResult copyInfo = await RunFix("asset-info", "/Game/Fx/Hero2", projectOption);
+    ProcessResult fixedList = await RunFix("asset-list", "--under=/Game/Fx", projectOption);
+    ReportFix("fix-id: the copy opens and lists with the new id", copyInfo.ExitCode == 0 && fixedList.ExitCode == 0 &&
+        fixedList.StdOut.Contains($"/Game/Fx/Hero {heroId}", StringComparison.Ordinal) &&
+        fixedList.StdOut.Contains($"/Game/Fx/Hero2 {newId}", StringComparison.Ordinal), fixedList);
+
+    // 같은 id가 셋이면 하나를 고쳐도 남은 둘은 아직 같은 id다(still shared by — 경로 키 순), 하나를 더 고치면 원본으로 풀린다.
+    File.Copy(Path.Combine(content, "Fx", "Hero.rasset"), Path.Combine(content, "Fx", "Hero3.rasset"));
+    File.Copy(Path.Combine(content, "Fx", "Hero.rasset"), Path.Combine(content, "Fx", "Hero4.rasset"));
+    ProcessResult shared = await RunFix("asset-fix-duplicate-id", "/Game/Fx/Hero3", projectOption);
+    string[] sharedLines = shared.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+    ReportFix("asset-fix-duplicate-id with two remaining", shared.ExitCode == 0 && sharedLines.Length == 3 &&
+        sharedLines[1] == $"asset-fix-duplicate-id: {heroId} is still shared by /Game/Fx/Hero" &&
+        sharedLines[2] == $"asset-fix-duplicate-id: {heroId} is still shared by /Game/Fx/Hero4", shared);
+    ProcessResult last = await RunFix("asset-fix-duplicate-id", "/Game/Fx/Hero4", projectOption);
+    ReportFix("asset-fix-duplicate-id the last copy", last.ExitCode == 0 &&
+        last.StdOut.EndsWith($"asset-fix-duplicate-id: references to {heroId} resolve to /Game/Fx/Hero\n", StringComparison.Ordinal),
+        last);
+
+    ProcessResult notDuplicate = await RunFix("asset-fix-duplicate-id", "/Game/Fx/Hero", projectOption);
+    ReportFix("asset-fix-duplicate-id not a duplicate", notDuplicate.ExitCode == 1 &&
+        notDuplicate.StdErr.Contains("asset-fix-duplicate-id: InvalidArgument: /Game/Fx/Hero", StringComparison.Ordinal), notDuplicate);
+    ProcessResult missing = await RunFix("asset-fix-duplicate-id", "/Game/Nowhere", projectOption);
+    ReportFix("asset-fix-duplicate-id missing", missing.ExitCode == 1 &&
+        missing.StdErr.Contains("asset-fix-duplicate-id: NotFound: /Game/Nowhere", StringComparison.Ordinal), missing);
+    ProcessResult invalid = await RunFix("asset-fix-duplicate-id", "Game/X", projectOption);
+    ReportFix("asset-fix-duplicate-id invalid path", invalid.ExitCode == 1 &&
+        invalid.StdErr.Contains("asset-fix-duplicate-id: InvalidPath: Game/X", StringComparison.Ordinal), invalid);
+
+    if (OperatingSystem.IsWindows())
+    {
+        string lockPath = Path.Combine(project, "Intermediate", "AssetDatabase.lock");
+        using FileStream locked = new(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
+        locked.Lock(0, 1);
+        ProcessResult busy = await RunFix("asset-fix-duplicate-id", "/Game/Fx/Hero2", projectOption);
+        ReportFix("asset-fix-duplicate-id locked", busy.ExitCode == 1 &&
+            busy.StdErr.Contains("asset-fix-duplicate-id: Busy: ", StringComparison.Ordinal), busy);
+        locked.Unlock(0, 1);
+    }
+
+    string[][] fixUsage =
+    [
+        ["asset-fix-duplicate-id", projectOption],
+        ["asset-fix-duplicate-id", "/Game/A", "/Game/B", projectOption],
+        ["asset-fix-duplicate-id", "/Game/A", "--force", projectOption],
+    ];
+    foreach (string[] arguments in fixUsage)
+    {
+        ProcessResult usage = await RunFix(arguments);
+        ReportFix($"asset-fix-duplicate-id usage: {string.Join(' ', arguments.Skip(1).Where(argument => argument != projectOption))}",
+            usage.ExitCode == 2 && usage.StdErr.StartsWith("usage: asset-fix-duplicate-id", StringComparison.Ordinal), usage);
+    }
+
+    ProcessResult fixHelp = await RunFix("asset-fix-duplicate-id", "--help");
+    ReportFix("asset-fix-duplicate-id help", fixHelp.ExitCode == 0 &&
+        fixHelp.StdOut.StartsWith("usage: asset-fix-duplicate-id", StringComparison.Ordinal), fixHelp);
+    ProcessResult fixNoProject = await RunFix("asset-fix-duplicate-id", "/Game/A");
+    ReportFix("asset-fix-duplicate-id without a project", fixNoProject.ExitCode == 1 &&
+        fixNoProject.StdErr.Contains("no project found", StringComparison.Ordinal), fixNoProject);
+}
+finally
+{
+    Directory.Delete(fixDirectory, true);
+}
+
 // asset-orphans-*·verify 경고(AssetSystem.ko.md 7.1절 17 — A2e4a): 고아 출력 fixture(Orphan 2311 — owner 2312 없음, HeroOrphan
 // 2313 — 기록 없는 Hero가 owner)로 목록 줄(경로 키 순, owner 경로·missing), 경고만인 verify는 종료 0, 고아 지우기·고아 아닌 거부,
 // 잠금 Busy, 사용법·도움말·프로젝트 없음.

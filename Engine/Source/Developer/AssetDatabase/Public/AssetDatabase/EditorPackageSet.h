@@ -100,7 +100,10 @@ enum class EditorWarningKind : uint8 {
     AliasRemoved,
     // 복제: 원본의 ImportRecord가 다른 임포트의 출력을 가리키는 참조 기록이라 사본에서 버렸다(진단
     // None, asset = 사본 id, related = 그 소유자 — 7.1절 17 A2e3b).
-    ImportRecordDropped
+    ImportRecordDropped,
+    // ID 수정: 새 id로 바꾼 패키지나 그 형제 출력이 고아가 됐다(진단 OrphanedOutput, asset = 고아,
+    // related = 그 owner — 7.1절 17 A2e4b).
+    OrphanedOutput
 };
 
 // 경고의 경로 텍스트 칸 크기다(논리 경로 상한 + NUL — 할당 없이 복사되는 경고).
@@ -327,6 +330,30 @@ public:
                            const AssetDatabaseLock& lock, Array<EditorWarning>* warnings = nullptr,
                            AssetDiagnostic* failure = nullptr) noexcept;
 
+    // fileName(Content 상대 이름 — 색인 항목이 같은 id 둘 이상인 DuplicateAssetId 파일)의 패키지를
+    // newId로 다시 쓴다(7.1절 17 A2e4b — asset-fix-duplicate-id). 그 파일을 이름으로 열고(의존
+    // 닫힘째), 복제 모드 쓰기(writer duplicateId)로 같은 경로에 교체한다. 교체 직전에 그 패키지를
+    // 이번 열기가 연 패키지째 닫는다(의존·Hard 순환 상대도 — 전에 열려 있던 것은 그대로다).
+    // ImportRecord: 소유 기록은
+    // owner와 자기 출력을 newId로 쓰고 형제 출력은 뺀다(형제는 남는 같은 id 파일의 임포트다), 참조
+    // 기록은 그대로다. 쓰기 뒤 색인 판정(AssetIndex::OrphanReason)으로 고친 항목과 형제 항목 가운데
+    // 고아가 된 것마다 경고 OrphanedOutput(related = 그 owner, detail = 사유)이다.
+    //
+    // 사용 예(서비스 — 색인 항목의 파일 이름과 새 id):
+    //   auto made = AssetId::TryNew();
+    //   if (made) { auto fixed = set.FixDuplicateId("Copies/Hero2.rasset", made.Value(), lock); }
+    //
+    // 오류(failure 진단 — 앞에서 걸리면 아무것도 바꾸지 않는다): Initialize 전·hook 표 없음·잠금
+    // 아님·newId null InvalidArgument, Create 초기화 안 Busy, 색인에 그 파일 항목이 없음 NotFound,
+    // 같은 id 둘이 아님 InvalidArgument, 그 id가 열려 있음 Busy, 읽기 전용 NewerVersion /
+    // Unsupported, newId가 열려 있거나 색인에 있음 DuplicateAssetId / AlreadyExists, 열기의 오류,
+    // 미해결 import MissingDependency / InvalidArgument, hook·쓰기·IO·재검증의 오류(저장과 같다),
+    // 닫기의 Discard 오류(임시 파일을 지운다), 할당 실패. 열기 뒤 실패면 이번에 연 패키지를 닫는다.
+    // 닫은 뒤 교체가 실패하면 패키지는 닫힌 채 파일·색인 그대로다.
+    Result<void> FixDuplicateId(StringView fileName, AssetId newId, const AssetDatabaseLock& lock,
+                                Array<EditorWarning>* warnings = nullptr,
+                                AssetDiagnostic* failure = nullptr) noexcept;
+
     // 열린 패키지 정보다(없으면 null). 다음 Open까지 유효하다.
     const EditorPackageInfo* Find(AssetId id) const noexcept;
 
@@ -399,14 +426,32 @@ public:
 private:
     struct Pending;
 
+    // rootFile이 있으면 루트 패키지(id)는 색인 id 조회 대신 그 파일을 연다(ID 수정 — 같은 id 둘).
     Result<ObjectHandle> OpenEntry(AssetId id, Array<EditorWarning>* warnings,
-                                   AssetDiagnostic* failure) noexcept;
+                                   AssetDiagnostic* failure, StringView rootFile = {}) noexcept;
+    // before(id 순 — 어떤 일 전에 열려 있던 id)에 없는 열린 패키지를 모두 닫는다(7.1절 17 A2e4b —
+    // ID 수정이 연 패키지: 고칠 패키지와 그 의존 닫힘, Hard 순환 상대 포함). 원래 열려 있던
+    // 패키지는 새로 연 패키지를 참조할 수 없으므로(열기는 기존 패키지의 미해결 import를 다시 묶지
+    // 않는다) 끊긴 참조가 남지 않는다. Discard는 id 역순이다. 오류: 할당 실패(아무것도 닫지
+    // 않는다), Discard 실패(그 오류 — 앞서 닫은 것은 닫힌 채, 남은 것은 열린 채이고 닫힌 패키지로의
+    // 참조는 Discard된 객체를 가리킨다(Resolve는 Destroyed) — 같은 before로 다시 부르면 남은 것을
+    // 닫는다). 닫을 것이 없으면 성공이다.
+    Result<void> CloseOpened(Span<const AssetId> before) noexcept;
+    // 열린 저장된 패키지의 캐시 핸들 경로(Content/fileName — 저장하지 않은 새 패키지는 빈
+    // 문자열)다.
+    Result<void> OpenCachePath(const EditorPackageInfo& info, String& out) const noexcept;
+    // 열린 패키지 at을 Discard하고 캐시 핸들(cachePath — 비면 없음)을 닫고 표에서 뺀다.
+    Result<void> DiscardOpen(usize at, StringView cachePath) noexcept;
     // 저장의 판정(교체 전 — 실패하면 아무것도 쓰지 않는다)과 쓰기·교체·뒷정리다.
     struct SavePlan;
     // 복제 쓰기다(사본 id와 다시 쓴 ImportRecord byte).
+    // closeSource면 교체 직전에 openedBefore에 없는 열린 패키지(같은 경로의 원본과 그 의존 — ID
+    // 수정)를 닫는다(CloseOpened).
     struct DuplicateWrite {
         AssetId id{};
         Span<const uint8> importRecord{};
+        bool closeSource = false;
+        Span<const AssetId> openedBefore{};
     };
     Result<void> PlanSave(EditorPackageInfo& info, const EditorSaveOptions& options, SavePlan& plan,
                           AssetDiagnostic& diagnostic) noexcept;
