@@ -1,6 +1,6 @@
 # Visual Studio 프로젝트 파일 생성 설계
 
-기준일: 2026-11-22, 개정 21. Rocks 저장소와 게임 프로젝트에서 Visual Studio 솔루션·프로젝트 파일을 만드는 방법을 정한다(UE 5.8 GenerateProjectFiles 대응).
+기준일: 2026-11-22, 개정 22. Rocks 저장소와 게임 프로젝트에서 Visual Studio 솔루션·프로젝트 파일을 만드는 방법을 정한다(UE 5.8 GenerateProjectFiles 대응).
 - **엔진 모드**: 저장소 루트에서 `projectfiles --root`로 엔진·Programs·C# 도구 솔루션을 만든다. 엔진에는 `.rocksproject`가 없다.
 - **IntelliSense**: 부작용 없는 IDE 계획 모드로 빌드 계획의 논리 compile 명령(`compile_commands.json`과 같은 원천)을 만들고, 파일별 설정으로 옮긴다.
 - **NMake 빌드**: 프로젝트의 빌드·다시 빌드·정리는 Rocks.Build를 부른다. Visual Studio가 직접 컴파일하지 않는다.
@@ -122,7 +122,7 @@ Foundation Debug에서 모듈 31개는 모든 파일이 같은 인자다. 나머
 - 재생성: 수동이다. 빌드가 생성기와 같은 필터의 상태 지문과 대조해 낡았으면 경고만 한다(PJD17).
 - 게임: 출력에 타깃 이름, snapshot·규칙 탐색에서 점 디렉터리·`out/`·`Saved/`·최상위 `.slnx` 제외, `engineAssociation`(경로 또는 등록 ID, 없으면 `engineVersion`과 Verify 호환 조건으로 등록 SDK를 고름), 명시적으로만 하는 등록, 다중 구성 SDK(PJD18–PJD23, PJD40).
 - 템플릿: 고유 이름 `FoundationTemplate`의 실제 프로젝트, `Template.json`, 두 단계 치환, `ids reissue`, `new-project` 명령(PJD24–PJD26, PJD43).
-- 진입점: 루트 `GenerateProjectFiles.bat`, `Build/*.ps1`, 명시 등록하는 HKCU 셸 메뉴(PJD27–PJD28).
+- 진입점: 루트 `GenerateProjectFiles.bat`·`GenerateProjectFiles.ps1`, `Build/*.ps1`, 명시 등록하는 HKCU 셸 메뉴(PJD27–PJD28).
 - 디버그: 실행 프로젝트를 솔루션 첫 항목에, Asan 런타임 경로를 디버거 환경에(PJD41). 파일 하나 컴파일은 논리 명령을 별도 object로(PJD29, PJD42).
 
 ## 6. 엔진 모드 솔루션
@@ -546,11 +546,12 @@ UE는 에디터 대화 상자에서 만든다. Rocks는 에디터 전에도 쓸 
 | 파일 | 하는 일 |
 |---|---|
 | `GenerateProjectFiles.bat`(저장소 루트, 새 파일) | `pwsh … -File Build\GenerateProjectFiles.ps1 %*`. 탐색기에서 실행해도 되도록 실패하면 `pause`(UE `GenerateProjectFiles.bat`과 같다). 실행 위치는 판정하지 않는다 — `%cmdcmdline%`는 터미널에서도 `cmd /c "<전체 경로>"`라 구별할 수 없다(개정 10) |
+| `GenerateProjectFiles.ps1`(저장소 루트) | PowerShell에서 쓰는 같은 진입점이다(개정 22). 인자(`-Compiler`·`-Project`·`-Sdk`)를 그대로 `Build/GenerateProjectFiles.ps1`에 넘기고 종료 코드를 돌려준다. 터미널용이라 멈추지 않는다. `#Requires -Version 7.0`이라 Windows PowerShell 5.1에서는 바로 거부된다 |
 | `Build/GenerateProjectFiles.ps1` | IDE 빌드 잠금 안에서 엔진: 도구 준비 → `projectfiles --root`. 게임(`-Project`): SDK 도구로 `projectfiles --project` |
 | `Build/Tools.ps1` | 도구 준비(지문 비교, 다르면 `dotnet build`). `Rocks.proj` `BootstrapTools`도 부른다 |
 | `Build/IdeBuild.bat`·`.ps1` | NMake 명령(7.1절) |
 
-- 스크립트는 `Build/` 아래 기존 스크립트처럼 영어다(`build-file-english` 정책). 루트의 새 `GenerateProjectFiles.bat`은 정책의 루트 파일 목록(`Docs/CodingStyle.md` `build-file-english`)에 더한다.
+- 스크립트는 `Build/` 아래 기존 스크립트처럼 영어다(`build-file-english` 정책). 루트의 `GenerateProjectFiles.bat`·`GenerateProjectFiles.ps1`은 정책의 루트 파일 목록(`Docs/CodingStyle.md` `build-file-english`)에 더한다.
 - SDK 내보내기는 `Build/GenerateProjectFiles.ps1`·`Build/IdeBuild.*`·`Build/Tools.ps1`을 `<sdk>/Build/`에 싣는다(파일 해시 목록에 든다). `Tools.ps1`은 루트에 `rocks-sdk.json`이 있으면 SDK 모드다: `Update-RocksTools`는 빌드하지 않고 실린 CLI(`Tools/Rocks.Build.Cli/Rocks.Build.Cli.dll`)가 있는지만 보며, `$RocksCli`가 그 경로다(엔진 모드는 `out/dotnet/bin/…`). `IdeBuild.ps1`·`GenerateProjectFiles.ps1`의 게임 모드(`-Project`)는 게임 생성기(PJ5)와 함께 들어가므로, 그 전에는 SDK 안에서 `error RB0002`로 멈춘다(개정 9). 게임 호출 형태(`-Project`·`-Sdk`, `-Platform` 없음)가 매개변수 바인딩 오류 대신 이 줄을 내도록 두 매개변수를 미리 선언하고 `-Platform`은 기본 `Windows`다. SDK 모드의 `Tools.ps1 -ListInputs`는 해당 없음을 알리고 0이다(개정 10).
 - `pwsh`(PowerShell 7)가 필요하다. Windows는 설치 마법사가 늘 설치하고, macOS도 `Rocks.proj` `BootstrapTools`가 `Build/Tools.ps1`을 부르므로 설치 마법사 기본 단계에서 `Build/Toolchain.json`에 고정한 공식 tar.gz(SHA-256)를 푼다(개정 8, [설치 마법사](SetupWizard.ko.md)).
 
@@ -608,7 +609,7 @@ UE는 HKLM에 ProgID를 쓰고 UnrealVersionSelector가 메뉴를 받는다(`Des
 | PJD24 | 템플릿은 고유 이름(`FoundationTemplate`)의 실제 프로젝트. 토큰 없음 | 확정 |
 | PJD25 | `Template.json`. 치환은 세 철자·대소문자 구분·두 단계, 경로와 내용에 같은 규칙, 남은 이름 검사 | 확정 |
 | PJD26 | `new-project` CLI, 기술자 재작성, MetaCompiler `ids reissue`(새 ID, 별칭 비움, 은퇴 항목 삭제). SDK가 `Templates/`를 싣는다 | 확정 |
-| PJD27 | 루트 `GenerateProjectFiles.bat` + `Build/GenerateProjectFiles.ps1`·`Build/Tools.ps1`·`Build/IdeBuild.*`(pwsh 7). SDK에도 싣는다 | 확정(개정 2: `Tools.ps1`) |
+| PJD27 | 루트 `GenerateProjectFiles.bat`·`GenerateProjectFiles.ps1`(개정 22) + `Build/GenerateProjectFiles.ps1`·`Build/Tools.ps1`·`Build/IdeBuild.*`(pwsh 7). SDK에도 싣는다 | 확정(개정 2: `Tools.ps1`) |
 | PJD28 | 셸 메뉴는 `shell-register`로만 만드는 HKCU ProgID `Rocks.ProjectFile`. 선택기는 유효한 등록 SDK 중 최고 판의 CLI가 맡고 맞는 SDK로 넘긴다 | 확정(개정 2: 명시 등록·최고 판) |
 | PJD29 | 파일 하나 컴파일은 `build --files`(게임은 `game --files`, PJ7). 그 전에는 `NMakeCompileFileCommandLine`을 내보내지 않는다 | 확정(개정 2: 내보내기 시점, 개정 17 구현) |
 | PJD30 | VS Code·Rider·Xcode 생성은 범위 밖. clangd는 `compile_commands.json` 안내만 | 확정 |
@@ -786,3 +787,4 @@ Visual Studio 없이 결정적으로 검사한다. 시험은 `Rocks.Build.Tests`
 | 19 | 2026-11-22 | PJ7 리뷰 나머지(7.4절·10.2절·11.6절). Ctrl+F7은 1단계 원천만, 안 되면 컴파일하는 타깃 이름을 안내. 게임 `--files`의 evidence는 `SINGLE-FILE`. object 해시는 디스크 철자, 없어진 원본의 기록 정리. 소문자 매크로 `small`·`hyper`·`pascal`·`cdecl`. 등록부 잠금 경합 시험(자식이 잠금을 쥐고 신호, 부모가 경합을 관찰한 뒤 gate로 해제). `Running`은 `HasExited` 예외를 실행 중으로 본다. Ctrl+F7 비용을 적었다(L22). 시험: `CompileObjectArguments`·목록 파서 단위, IDE 계획 fixture의 여러 파일·한글/공백 경로·response file·계획에 없는 소스·컴파일 실패 종료 코드·여러 모듈 ordinal 선택, CLI 거부(`test`·`sdk`·`--plan-only`) |
 | 20 | 2026-11-22 | PJ8 구현(12절 구현 단락): `shell-register`·`shell-unregister`, 선택기 SDK(유효한 등록 SDK 중 최고 엔진 버전), HKCU Classes·ProjectSelector 값, `cmd.exe` 메뉴 명령(지워진 선택기 안내, 실패 시 멈춤), `SHChangeNotify`, 임시 하위 키 시험 |
 | 21 | 2026-11-22 | 최종 리뷰 반영. (1) 탐색기 메뉴는 `SystemFileAssociations` 동사, `.rocksproject` 기본값은 비었을 때만, `OpenWithProgids` 추가, 해제는 우리 값만(PJD44, UE와 다른 점). (2) `RPF0001`은 늘 `warning`이고 `Directory.Build.rsp`에 `-warnNotAsError:RPF0001`. (3) 메뉴는 cmd 없이 `pwsh -File <shim> -Project "%1"`, shim이 SDK의 `GenerateProjectFiles.ps1`을 IDE 잠금 안에서 부르고 SDK·dotnet 없음을 안내. (4) 손상된 manifest는 그 SDK만 버린다. (5) "UE도 SHChangeNotify" 문구 정정. (6) 게임 Ctrl+F7도 컴파일하는 타깃 안내, 안내 단계 catch를 넓힘. (7) 시험: `RemoveOrphans`, 대소문자가 다른 경로의 같은 object 이름, 실제 엔진의 안내 문구, 경로 표시와 `ROCKS_REQUIRE_VS_MSBUILD`, 남의 연결을 심은 등록·해제, shim 회귀(`%`·`!`·공백 경로, SDK·dotnet 없음) |
+| 22 | 2026-11-22 | 루트에 `GenerateProjectFiles.ps1`을 더했다(12절, PJD27). bat과 같은 진입점을 PowerShell에서 쓰도록 `Build/GenerateProjectFiles.ps1`에 인자를 그대로 넘기고 종료 코드를 돌려준다. 정책 `build-file-english` 루트 목록에 더했고, IntegrationTests가 인자 전달·종료 코드·5.1 거부를 확인한다 |
