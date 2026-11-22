@@ -135,7 +135,7 @@ struct ConsoleNameIndex {
 
 } // namespace detail
 
-class ConfigSnapshot {
+class ROCKS_CONFIG_API ConfigSnapshot {
 public:
     explicit ConfigSnapshot(Allocator& allocator) noexcept;
     ConfigSnapshot(const ConfigSnapshot&) = delete;

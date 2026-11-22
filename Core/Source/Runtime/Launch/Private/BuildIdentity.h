@@ -11,6 +11,6 @@ inline constexpr usize BuildIdentityBytes = 160;
 // 크래시 메타데이터 "build" 객체에 붙일 JSON 멤버 조각(중괄호 없음)을 buffer에 NUL 종료로 쓰고
 // 길이를 돌려준다. 예: "engineVersion": "0.1.0", "toolBuildId": "e3b0...". 값은 숫자·'.'·hex뿐이라
 // escape가 필요 없다. 다 들어가지 않으면 0이고 buffer는 빈 문자열이다(capacity가 1 이상일 때).
-usize FormatBuildIdentity(char* buffer, usize capacity) noexcept;
+ROCKS_LAUNCH_API usize FormatBuildIdentity(char* buffer, usize capacity) noexcept;
 
 } // namespace rocks::launch::detail

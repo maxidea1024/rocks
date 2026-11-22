@@ -44,22 +44,24 @@ inline constexpr StringView UserChangeTag = "user";
 // 값은 다음 Sync에 바뀐다. 설정 struct·콘솔 설정은 먼저 등록해 둔다(등록 전 이름은 모르는 키다).
 // 오류: 초기화 전 InvalidArgument, 모르는 branch NotFound, 다른 스레드 WrongThread, 할당 실패.
 // 버린 조각은 오류가 아니다.
-Result<void> AddUserFileText(ConfigContext& context, StringView tag, StringView branch,
-                             StringView sourceName, StringView text, bool replace = false) noexcept;
+ROCKS_CONFIG_API Result<void> AddUserFileText(ConfigContext& context, StringView tag,
+                                              StringView branch, StringView sourceName,
+                                              StringView text, bool replace = false) noexcept;
 
 // 사용자 설정 값 하나를 사용자 층에 쓴다(설정 화면의 변경 — AddAssignment(User, UserChangeTag,
 // target, value)). target은 `<Branch>.<Section>.<필드 경로>` 또는 콘솔 설정 이름이고 UserConfig
 // 필드·설정이어야 한다. 값은 다음 Sync에 바뀐다(RestartRequired 값은 시작 뒤면 재시작 대기가
 // 된다). 오류: AddAssignment와 같다(UserConfig가 아니면 InvalidArgument — 진단 LayerNotAllowed).
-Result<void> SetUserValue(ConfigContext& context, StringView target, StringView value) noexcept;
+ROCKS_CONFIG_API Result<void> SetUserValue(ConfigContext& context, StringView target,
+                                           StringView value) noexcept;
 
 // branch 하나의 사용자 파일 내용을 writer에 객체 하나로 쓴다(Finish는 호출자가 한다): 사용자 층까지
 // 합친 값과 그 아래 층(Engine … DeviceProfile)만 합친 값이 다른 UserConfig 필드·독립 콘솔 설정만
 // 쓴다. 세션·콘솔 층 값은 쓰지 않는다. 마지막 Sync의 입력을 쓴다(큐는 보지 않는다). 반환: 쓴 값
 // 수(0이면 `$version`만 있는 객체다). 오류: 초기화 전 InvalidArgument, 모르는 branch NotFound, 다른
 // 스레드 WrongThread, ExportJson·writer의 오류.
-Result<uint32> WriteUserConfig(ConfigContext& context, StringView branch,
-                               JsonWriter& writer) noexcept;
+ROCKS_CONFIG_API Result<uint32> WriteUserConfig(ConfigContext& context, StringView branch,
+                                                JsonWriter& writer) noexcept;
 
 // 사용자 층 폴더(`<userDataDir>/<projectName>/Config`)를 out에 쓴다. 오류: 봉인 모드(사용자 층이
 // 없다)·userDataDir·projectName이 비었으면 Unsupported, 초기화 전 InvalidArgument, 할당 실패.
@@ -81,7 +83,7 @@ struct UserConfigSaveResult {
 // 출시·개발 빌드 모두 저장한다(사용자 설정은 출시 기능이다). 오류: UserConfigDirectory의 오류,
 // WriteUserConfig의 오류, 파일 연산의 오류(FileErrorCode — 그 branch에서 멈춘다. 앞 branch는 이미
 // 바뀌었고 그 branch의 옛 파일은 그대로다).
-Result<UserConfigSaveResult> SaveUserConfig(ConfigContext& context,
-                                            platform::FileSystem& files) noexcept;
+ROCKS_CONFIG_API Result<UserConfigSaveResult> SaveUserConfig(ConfigContext& context,
+                                                             platform::FileSystem& files) noexcept;
 
 } // namespace rocks::config

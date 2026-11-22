@@ -10,9 +10,9 @@ namespace rocks {
 
 // 표준 채널 "mark"(표지)·"span"(시간 띠)·"frame"(프레임 경계)이다. 세션이 Start 때 등록하며
 // 처음에는 꺼져 있다.
-extern TraceChannel TraceMarkChannel;
-extern TraceChannel TraceSpanChannel;
-extern TraceChannel TraceFrameChannel;
+ROCKS_TRACECAPTURE_API extern TraceChannel TraceMarkChannel;
+ROCKS_TRACECAPTURE_API extern TraceChannel TraceSpanChannel;
+ROCKS_TRACECAPTURE_API extern TraceChannel TraceFrameChannel;
 
 namespace detail {
 struct TraceMarkSiteAccess;
@@ -54,7 +54,7 @@ private:
 
 // 표지 인자를 TraceStandardFormat의 tag 형식으로 모은다. 정수는 64비트로 넓히고, 실수는 double,
 // 문자열은 길이와 byte다. 합이 MaxMarkArgumentBytes를 넘으면 넘친 인자부터 버리고 Truncated를 켠다.
-class TraceMarkArguments {
+class ROCKS_TRACECAPTURE_API TraceMarkArguments {
 public:
     template <typename T>
     void Add(const T& value) noexcept {
@@ -97,7 +97,8 @@ private:
 };
 
 namespace detail {
-void EmitTraceMark(TraceMarkSite& site, const TraceMarkArguments& arguments) noexcept;
+ROCKS_TRACECAPTURE_API void EmitTraceMark(TraceMarkSite& site,
+                                          const TraceMarkArguments& arguments) noexcept;
 } // namespace detail
 
 // 한 시점의 이름 있는 사건을 남긴다(UE TRACE_BOOKMARK 대응, Docs/Design/TraceSystem.ko.md 6.3절).
@@ -123,8 +124,8 @@ struct TraceSpanId {
 };
 
 namespace detail {
-TraceSpanId BeginTraceSpan(StringView name) noexcept;
-void EndTraceSpan(TraceSpanId span) noexcept;
+ROCKS_TRACECAPTURE_API TraceSpanId BeginTraceSpan(StringView name) noexcept;
+ROCKS_TRACECAPTURE_API void EndTraceSpan(TraceSpanId span) noexcept;
 } // namespace detail
 
 // 시간 띠를 연다(UE region 대응, 6.3절). 다른 스레드에서 닫아도 된다. 시작과 끝은 돌려받은 id로만
@@ -153,7 +154,7 @@ enum class TraceFrameKind : uint8 {
 };
 
 namespace detail {
-void WriteTraceFrame(bool begin, TraceFrameKind kind, uint64 frame) noexcept;
+ROCKS_TRACECAPTURE_API void WriteTraceFrame(bool begin, TraceFrameKind kind, uint64 frame) noexcept;
 } // namespace detail
 
 // 프레임 경계(종류별 시작·끝 tick과 프레임 번호)다(6.3절). 채널 "frame"이 꺼져 있으면 분기 하나다.

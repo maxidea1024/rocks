@@ -63,7 +63,7 @@ inline constexpr uint64 SecretStreamMaxMessageBytes = 64 * ((uint64{1} << 32) - 
 
 // secretstream 키(32 byte)다. move-only이며 생성 뒤 바뀌지 않으므로 여러 스레드가 동시에 Writer·
 // Reader를 만들어도 된다. 키 저장소에 있고 소멸 때 지운다. 평문 내보내기는 hazmat::TryExportKey다.
-class SecretStreamKey {
+class ROCKS_CRYPTO_API SecretStreamKey {
 public:
     SecretStreamKey() noexcept = default;
 
@@ -88,7 +88,7 @@ private:
 
 // master에서 secretstream 키를 뽑는다(Kdf.h 타입 파생, 키 타입을 섞는다). 빈 master는 StaleHandle,
 // 키 저장소가 찼으면 OutOfMemory다.
-[[nodiscard]] Result<SecretStreamKey>
+[[nodiscard]] ROCKS_CRYPTO_API Result<SecretStreamKey>
 TryDeriveSecretStreamKey(const KdfKey& master, uint64 subkeyId, KdfContext context) noexcept;
 
 // 보내는 쪽이다. header를 먼저 보내고 메시지마다 TryPush의 출력을 보낸다.
@@ -151,7 +151,7 @@ struct SecretStreamMessage {
 };
 
 // 받는 쪽이다. Writer가 보낸 순서대로 TryPull을 부르고, 끝에 TryFinish로 스트림 완결을 확인한다.
-class SecretStreamReader {
+class ROCKS_CRYPTO_API SecretStreamReader {
 public:
     SecretStreamReader() noexcept = default;
     ~SecretStreamReader() noexcept;
@@ -215,7 +215,8 @@ private:
 namespace hazmat {
 
 // 키 byte를 평문으로 output에 복사한다(10.4절). output.Size()는 SecretStreamKeyBytes여야 한다.
-[[nodiscard]] Result<void> TryExportKey(const SecretStreamKey& key, Span<uint8> output) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void> TryExportKey(const SecretStreamKey& key,
+                                                         Span<uint8> output) noexcept;
 
 } // namespace hazmat
 

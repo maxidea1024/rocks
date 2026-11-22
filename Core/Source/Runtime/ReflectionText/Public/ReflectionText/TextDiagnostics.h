@@ -83,7 +83,7 @@ struct TextDiagnostic {
 };
 
 // 진단 이름(열거자 철자 그대로 — "UnknownProperty" 등)이다. 정의되지 않은 값이면 빈 view다.
-StringView TextDiagnosticCodeName(TextDiagnosticCode code) noexcept;
+ROCKS_REFLECTIONTEXT_API StringView TextDiagnosticCodeName(TextDiagnosticCode code) noexcept;
 
 // 진단 모음 기본 한도다(TextCodecOptions::maxDiagnostics 기본값).
 inline constexpr uint32 DefaultMaxTextDiagnostics = 256;

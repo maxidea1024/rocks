@@ -85,7 +85,8 @@ struct GcSoakReport {
 //   options.seed = 7;
 //   GcSoakReport report;
 //   if (!RunGcSoak(allocator, options, report)) { /* report.failure, report.failureTick */ }
-bool RunGcSoak(Allocator& allocator, const GcSoakOptions& options, GcSoakReport& report) noexcept;
+ROCKS_GCSOAK_API bool RunGcSoak(Allocator& allocator, const GcSoakOptions& options,
+                                GcSoakReport& report) noexcept;
 
 // 클러스터 장기 smoke 설정이다(GC-S7, Docs/Design/GarbageCollectionScale.ko.md 13.8절).
 // - packages: true면 패키지 정책 Registry(패키지 클러스터 — 생성·부분/전체 Discard·Discard 없는
@@ -139,7 +140,7 @@ struct GcClusterSoakReport {
 //   options.packages = true;
 //   GcClusterSoakReport report;
 //   if (!RunGcClusterSoak(allocator, options, report)) { /* report.failure */ }
-bool RunGcClusterSoak(Allocator& allocator, const GcClusterSoakOptions& options,
-                      GcClusterSoakReport& report) noexcept;
+ROCKS_GCSOAK_API bool RunGcClusterSoak(Allocator& allocator, const GcClusterSoakOptions& options,
+                                       GcClusterSoakReport& report) noexcept;
 
 } // namespace rocks

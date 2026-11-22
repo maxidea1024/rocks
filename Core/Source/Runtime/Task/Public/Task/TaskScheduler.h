@@ -31,7 +31,7 @@ struct TaskDesc {
 
 // 완료 결과만 공유하며 body 캡처를 보존하지 않는다. 복사·조회·해제는 생성 스레드에 한정한다.
 // 내부 카운터는 atomic이 아니며 allocator는 마지막 handle 해제까지 살아 있어야 한다.
-class TaskHandle {
+class ROCKS_TASK_API TaskHandle {
 public:
     TaskHandle() noexcept = default;
     TaskHandle(const TaskHandle&) noexcept;
@@ -56,7 +56,7 @@ private:
 // worker·의존성 그래프·취소·별도 cleanup lane은 아직 제공하지 않는다.
 // 성공 반환 시 body와 캡처 정리가 모두 끝나며, handle은 executor보다 오래 보관할 수 있다.
 // 단, allocator는 executor와 남은 모든 완료 handle보다 오래 살아야 한다.
-class InlineExecutor {
+class ROCKS_TASK_API InlineExecutor {
 public:
     explicit InlineExecutor(Allocator&) noexcept;
     // 승인 전 오류는 caller의 body 소유권을 유지한다. 성공 승인 뒤에는 body를 소비한다.

@@ -99,7 +99,7 @@ struct SegmentStreamParams {
 // 어긋날 수 없다). 매개변수는 헤더에 기록되고 키 파생에 묶이므로 같은 마스터 키를 다른 매개변수로
 // 써도 파생 키가 다르다. move-only이며 생성 뒤 바뀌지 않으므로 여러 스레드가 동시에 써도 된다. 키
 // 저장소에 있고 소멸 때 지운다. 평문 내보내기는 hazmat::TryExportKey다.
-class SegmentStreamKey {
+class ROCKS_CRYPTO_API SegmentStreamKey {
 public:
     SegmentStreamKey() noexcept = default;
 
@@ -132,10 +132,9 @@ private:
 
 // master에서 세그먼트 스트림 키를 뽑는다(Kdf.h 타입 파생, 키 타입을 섞는다). id는 결과 키의 Id()다.
 // 빈 master는 StaleHandle, Nil id는 InvalidArgument, 키 저장소가 찼으면 OutOfMemory다.
-[[nodiscard]] Result<SegmentStreamKey> TryDeriveSegmentStreamKey(const KdfKey& master,
-                                                                 uint64 subkeyId,
-                                                                 KdfContext context,
-                                                                 KeyId id) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<SegmentStreamKey>
+TryDeriveSegmentStreamKey(const KdfKey& master, uint64 subkeyId, KdfContext context,
+                          KeyId id) noexcept;
 
 // 헤더에서 읽은 값이다. commitment 확인 전이라 아직 인증되지 않았다.
 struct SegmentHeaderInfo {
@@ -153,7 +152,8 @@ struct SegmentHeaderInfo {
 // 불일치 AuthenticationFailed → 모르는 버전 Unsupported → 길이가 SegmentHeaderBytes가 아님
 // AuthenticationFailed → 모르는 알고리즘 Unsupported → 범위 밖 크기·모르는 flags bit·Nil keyId
 // AuthenticationFailed. 비밀을 다루지 않는다.
-[[nodiscard]] Result<SegmentHeaderInfo> TryPeekSegmentHeader(Span<const uint8> header) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<SegmentHeaderInfo>
+TryPeekSegmentHeader(Span<const uint8> header) noexcept;
 
 // 전체 암호문 크기에서 정해지는 세그먼트 배치다. 오프셋은 헤더를 포함한 전체 암호문 기준이다.
 struct SegmentLayout {
@@ -166,25 +166,26 @@ struct SegmentLayout {
 
 // 매개변수의 스트림당 평문 상한이다. ChaCha20-Poly1305는 2^32 × (S − 16), AES-256-GCM은 세그먼트
 // 암호문 합 상한에서 정해지는 2^40 − 2^44 / S − 16 byte다. 범위 밖 매개변수는 InvalidArgument다.
-[[nodiscard]] Result<uint64>
+[[nodiscard]] ROCKS_CRYPTO_API Result<uint64>
 TryGetSegmentStreamMaxPlaintextBytes(const SegmentStreamParams& params) noexcept;
 
 // plaintextBytes를 봉인한 스트림의 전체 암호문 크기(헤더 포함)다. 범위 밖 매개변수는
 // InvalidArgument, 평문 상한을 넘으면 CapacityExceeded다.
-[[nodiscard]] Result<uint64> TryGetSegmentStreamCiphertextBytes(const SegmentStreamParams& params,
-                                                                uint64 plaintextBytes) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<uint64>
+TryGetSegmentStreamCiphertextBytes(const SegmentStreamParams& params,
+                                   uint64 plaintextBytes) noexcept;
 
 // 전체 암호문 크기(헤더 포함, 파일 크기 등 메시지에서 온 값)에서 세그먼트 배치를 계산한다. 범위 밖
 // 매개변수는 InvalidArgument다. 형식이 허용하지 않는 크기(본문 16 byte 미만, 세그먼트 2^32개 초과,
 // 세그먼트가 둘 이상인데 마지막이 16 byte 이하, AES 세그먼트 암호문 합 상한 초과)는
 // AuthenticationFailed다.
-[[nodiscard]] Result<SegmentLayout> TryGetSegmentLayout(const SegmentStreamParams& params,
-                                                        uint64 ciphertextBytes) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<SegmentLayout>
+TryGetSegmentLayout(const SegmentStreamParams& params, uint64 ciphertextBytes) noexcept;
 
 // 순차 암호화다. 헤더와 세그먼트를 역압(StreamProgress)이 있는 byte 스트림으로 낸다. 출력 창은 1
 // byte여도 된다. 마지막 세그먼트인지는 다음 입력이나 TryFinish가 와야 알 수 있으므로 세그먼트
 // 출력은 한 세그먼트 늦게 나온다(평문 한 세그먼트와 봉인 한 세그먼트를 버퍼에 둔다).
-class SegmentStreamEncryptor {
+class ROCKS_CRYPTO_API SegmentStreamEncryptor {
 public:
     SegmentStreamEncryptor() noexcept = default;
     ~SegmentStreamEncryptor() noexcept;
@@ -235,7 +236,7 @@ private:
 // 순차 복호다. 헤더부터 전체 암호문을 역압이 있는 byte 스트림으로 받는다. 세그먼트 하나를 다 받아
 // 검증한 뒤에만 그 평문을 내보낸다(버퍼는 세그먼트 하나 크기). 마지막 판정에는 시도가 없다: 꽉 찬
 // 세그먼트 뒤에 byte가 더 오면 last = 0으로, TryFinish가 오면 last = 1로 연다.
-class SegmentStreamDecryptor {
+class ROCKS_CRYPTO_API SegmentStreamDecryptor {
 public:
     SegmentStreamDecryptor() noexcept = default;
     ~SegmentStreamDecryptor() noexcept;
@@ -292,7 +293,7 @@ struct SegmentRange {
 
 // 전체 암호문 크기를 알 때 쓰는 임의 접근 복호다. 세그먼트마다 독립적으로 검증·복호한다. const
 // 함수는 여러 스레드가 동시에 불러도 된다(키 상태는 생성 뒤 바뀌지 않는다). move-only다.
-class SegmentStreamRandomAccess {
+class ROCKS_CRYPTO_API SegmentStreamRandomAccess {
 public:
     SegmentStreamRandomAccess() noexcept = default;
 
@@ -355,7 +356,7 @@ private:
 // 실패 경로가 없다(성공 뒤에 표시하면 두 스레드가 같은 index를 서로 다른 평문으로 동시에 봉인할 수
 // 있다). 봉인을 다시 하려면 새 writer(새 salt)로 전체를 다시 쓴다. move-only이며, 옮기거나
 // 소멸시키는 동안 다른 스레드가 쓰지 않게 한다.
-class SegmentStreamParallelWriter {
+class ROCKS_CRYPTO_API SegmentStreamParallelWriter {
 public:
     SegmentStreamParallelWriter() noexcept = default;
     ~SegmentStreamParallelWriter() noexcept;
@@ -409,7 +410,8 @@ namespace hazmat {
 
 // 마스터 키 byte를 평문으로 output에 복사한다(10.4절). output.Size()는 SegmentStreamKeyBytes여야
 // 한다.
-[[nodiscard]] Result<void> TryExportKey(const SegmentStreamKey& key, Span<uint8> output) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void> TryExportKey(const SegmentStreamKey& key,
+                                                         Span<uint8> output) noexcept;
 
 } // namespace hazmat
 

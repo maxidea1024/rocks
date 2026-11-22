@@ -74,6 +74,27 @@ Result<void> JsonPathBuilder::Assign(PropertyPath path, Allocator& allocator) no
     return Result<void>::Success();
 }
 
+Result<TypeLease> ReadTargetRoot(const AssignmentTarget& target, PathTarget& root) noexcept {
+    root = PathTarget(target.Handle());
+    switch (target.GetKind()) {
+    case AssignmentTarget::Kind::Live:
+        return target.Registry().AcquireType(target.Access(), target.Handle());
+    case AssignmentTarget::Kind::Staged:
+        root = PathTarget::Staged(*target.Transaction(), target.Handle());
+        return target.Transaction()->AcquireType(target.Handle());
+    case AssignmentTarget::Kind::Value:
+        break;
+    }
+
+    const TypeLease* type = target.StructType();
+    if (!type || !type->IsValid() || type->Kind() != TypeKind::Struct || !target.Storage()) {
+        return Result<TypeLease>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    root = PathTarget::Value(*type, type->Struct(), target.Storage(), target.ValueAllocator());
+    return type->Clone();
+}
+
 } // namespace detail
 
 namespace {
@@ -82,11 +103,6 @@ using detail::FieldSlot;
 using detail::JsonPathBuilder;
 using detail::PartSlot;
 using detail::SchemaScope;
-
-StringView ToolName(const FieldSchema& field) noexcept {
-    const Span<const char> name = EffectiveToolName(field);
-    return StringView(name.Data(), name.Size());
-}
 
 // 대상 하나의 JSON 쓰기다.
 struct Exporter {
@@ -234,7 +250,7 @@ Result<void> Exporter::WriteField(const SchemaScope& scope, usize index, uint32 
         return Result<void>::Failure(ErrorCode::Unsupported);
     }
 
-    Result<void> written = writer.Key(ToolName(*slot.field));
+    Result<void> written = writer.Key(detail::FieldToolName(*slot.field));
     if (written) {
         written = WriteValue(slot);
     }
@@ -512,28 +528,8 @@ Result<void> ExportJson(const AssignmentTarget& target, JsonWriter& writer,
     }
 
     const ObjectAccessContext& access = target.Access();
-    Result<TypeLease> lease = Result<TypeLease>::Failure(ErrorCode::InvalidArgument);
     PathTarget root = PathTarget(target.Handle());
-    switch (target.GetKind()) {
-    case AssignmentTarget::Kind::Live:
-        lease = registry.AcquireType(access, target.Handle());
-        break;
-    case AssignmentTarget::Kind::Staged:
-        lease = target.Transaction()->AcquireType(target.Handle());
-        root = PathTarget::Staged(*target.Transaction(), target.Handle());
-        break;
-    case AssignmentTarget::Kind::Value: {
-        const TypeLease* type = target.StructType();
-        if (!type || !type->IsValid() || type->Kind() != TypeKind::Struct || !target.Storage()) {
-            return Result<void>::Failure(ErrorCode::InvalidArgument);
-        }
-
-        lease = type->Clone();
-        root = PathTarget::Value(*type, type->Struct(), target.Storage(), allocator);
-        break;
-    }
-    }
-
+    auto lease = detail::ReadTargetRoot(target, root);
     if (!lease) {
         return Result<void>::Failure(lease.Error());
     }

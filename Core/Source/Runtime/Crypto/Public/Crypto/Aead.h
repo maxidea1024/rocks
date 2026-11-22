@@ -76,20 +76,20 @@ struct AeadInfo {
 };
 
 // 알고리즘 정보다. 열거값이 아니면 InvalidArgument다.
-[[nodiscard]] Result<AeadInfo> TryGetAeadInfo(AeadAlgorithm algorithm) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<AeadInfo> TryGetAeadInfo(AeadAlgorithm algorithm) noexcept;
 
 // 기본 AEAD다(XChaCha20-Poly1305). 모든 기기에서 같은 값이다(결정 D2).
-[[nodiscard]] AeadAlgorithm GetPreferredAead() noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API AeadAlgorithm GetPreferredAead() noexcept;
 
 // 고수준 TrySeal의 출력 길이(nonce + plaintextBytes + tag)다. 넘치면 Overflow, 열거값이 아니면
 // InvalidArgument다.
-[[nodiscard]] Result<usize> TryGetSealedBytes(AeadAlgorithm algorithm,
-                                              usize plaintextBytes) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<usize> TryGetSealedBytes(AeadAlgorithm algorithm,
+                                                               usize plaintextBytes) noexcept;
 
 // 알고리즘에 묶인 AEAD 키다. move-only이며 생성 뒤 바뀌지 않는다. AES-GCM 키는 만들 때 AES 경량
 // 계층 키 스케줄(라운드 키·GHASH H 거듭제곱)을, AES-256-GCM 키는 libsodium 키 확장 상태도 함께 한
 // 번 계산해 키 저장소에 둔다(지연 계산하지 않는다, 5.3절). 평문 내보내기는 hazmat::TryExportKey다.
-class AeadKey {
+class ROCKS_CRYPTO_API AeadKey {
 public:
     AeadKey() noexcept = default;
     ~AeadKey() noexcept;
@@ -137,17 +137,19 @@ private:
 // master에서 AEAD 키를 뽑는다(Kdf.h 타입 파생, 키 타입·알고리즘을 섞는다). 알고리즘 오류는
 // AeadKey::TryGenerate와 같고 먼저 검사한다. 빈 master는 StaleHandle, 키 저장소가 찼으면
 // OutOfMemory다.
-[[nodiscard]] Result<AeadKey> TryDeriveAeadKey(const KdfKey& master, uint64 subkeyId,
-                                               KdfContext context,
-                                               AeadAlgorithm algorithm) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<AeadKey> TryDeriveAeadKey(const KdfKey& master,
+                                                                uint64 subkeyId, KdfContext context,
+                                                                AeadAlgorithm algorithm) noexcept;
 
 // 무작위 nonce를 만들어 봉인한다. 출력 = nonce ‖ 암호문 ‖ tag이고 쓴 byte 수를 돌려준다.
 // - 무작위 nonce가 안전하지 않은 알고리즘(randomNonceSafe false)은 Unsupported다.
 // - output이 TryGetSealedBytes보다 작거나 평문이 상한을 넘으면 CapacityExceeded다.
 // - 허용되지 않은 겹침(제자리 규칙 밖, AD와 출력)은 InvalidArgument다.
 // - 빈 키는 StaleHandle, nonce용 OS 난수 실패는 DependencyFailed다.
-[[nodiscard]] Result<usize> TrySeal(const AeadKey& key, Span<const uint8> associatedData,
-                                    Span<const uint8> plaintext, Span<uint8> output) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<usize> TrySeal(const AeadKey& key,
+                                                     Span<const uint8> associatedData,
+                                                     Span<const uint8> plaintext,
+                                                     Span<uint8> output) noexcept;
 
 // TrySeal의 출력을 연다. 평문 byte 수를 돌려준다.
 // - sealed가 nonce + tag보다 짧거나 tag가 맞지 않으면 AuthenticationFailed이고 plaintext 전체를
@@ -155,8 +157,10 @@ private:
 // - plaintext가 평문 길이보다 작으면 CapacityExceeded다(쓰지 않는다).
 // - 허용되지 않은 겹침은 InvalidArgument, 무작위 nonce 알고리즘이 아닌 키는 Unsupported, 빈 키는
 //   StaleHandle이다.
-[[nodiscard]] Result<usize> TryOpen(const AeadKey& key, Span<const uint8> associatedData,
-                                    Span<const uint8> sealed, Span<uint8> plaintext) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<usize> TryOpen(const AeadKey& key,
+                                                     Span<const uint8> associatedData,
+                                                     Span<const uint8> sealed,
+                                                     Span<uint8> plaintext) noexcept;
 
 namespace detail {
 struct SequenceTestAccess;
@@ -165,7 +169,8 @@ struct SequenceTestAccess;
 namespace hazmat {
 
 // 키 byte를 평문으로 output에 복사한다(10.4절). output.Size()는 키 길이와 같아야 한다.
-[[nodiscard]] Result<void> TryExportKey(const AeadKey& key, Span<uint8> output) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void> TryExportKey(const AeadKey& key,
+                                                         Span<uint8> output) noexcept;
 
 // nonce를 호출자가 책임진다. 같은 키로 같은 nonce를 두 번 쓰면 기밀성과 무결성이 모두
 // 깨진다(AEGIS-256·XChaCha20-Poly1305가 아니면 무작위 nonce도 쓰지 않는다). 결합 형식은 암호문 ‖
@@ -174,26 +179,23 @@ namespace hazmat {
 //   bit가 아닌 nonce는 Unsupported다(표준은 허용하지만 지원하지 않는다).
 // - 출력이 작거나 평문이 상한을 넘으면 CapacityExceeded다.
 // - 여는 쪽은 tag 불일치·잘린 입력이 AuthenticationFailed이고 plaintext 전체를 0으로 지운다.
-[[nodiscard]] Result<usize> TrySealWithNonce(const AeadKey& key, Span<const uint8> nonce,
-                                             Span<const uint8> associatedData,
-                                             Span<const uint8> plaintext,
-                                             Span<uint8> sealed) noexcept;
-[[nodiscard]] Result<usize> TryOpenWithNonce(const AeadKey& key, Span<const uint8> nonce,
-                                             Span<const uint8> associatedData,
-                                             Span<const uint8> sealed,
-                                             Span<uint8> plaintext) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<usize>
+TrySealWithNonce(const AeadKey& key, Span<const uint8> nonce, Span<const uint8> associatedData,
+                 Span<const uint8> plaintext, Span<uint8> sealed) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<usize>
+TryOpenWithNonce(const AeadKey& key, Span<const uint8> nonce, Span<const uint8> associatedData,
+                 Span<const uint8> sealed, Span<uint8> plaintext) noexcept;
 
 // 분리 형식이다. ciphertext.Size()는 plaintext.Size()와 같아야 한다(다르면 InvalidArgument). 봉인
 // 쪽 tag.Size()는 tag 길이와 같아야 하고(InvalidArgument), 여는 쪽 tag 길이가 틀리면 잘린 tag로
 // 보고 AuthenticationFailed다.
-[[nodiscard]] Result<void> TrySealDetached(const AeadKey& key, Span<const uint8> nonce,
-                                           Span<const uint8> associatedData,
-                                           Span<const uint8> plaintext, Span<uint8> ciphertext,
-                                           Span<uint8> tag) noexcept;
-[[nodiscard]] Result<void> TryOpenDetached(const AeadKey& key, Span<const uint8> nonce,
-                                           Span<const uint8> associatedData,
-                                           Span<const uint8> ciphertext, Span<const uint8> tag,
-                                           Span<uint8> plaintext) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void>
+TrySealDetached(const AeadKey& key, Span<const uint8> nonce, Span<const uint8> associatedData,
+                Span<const uint8> plaintext, Span<uint8> ciphertext, Span<uint8> tag) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void>
+TryOpenDetached(const AeadKey& key, Span<const uint8> nonce, Span<const uint8> associatedData,
+                Span<const uint8> ciphertext, Span<const uint8> tag,
+                Span<uint8> plaintext) noexcept;
 
 // 순번 봉인기가 다 썼다는 표지다(NextSequence()). 쓸 수 있는 순번은 0부터 이 값 - 1까지다.
 inline constexpr uint64 AeadSequenceExhausted = NumericLimits<uint64>::Max();
@@ -239,7 +241,7 @@ inline constexpr uint64 AeadSequenceExhausted = NumericLimits<uint64>::Max();
 //   if (!sealer) { return sealer.Error(); }
 //   auto written = sealer.Value().TrySeal(header, payload, record);
 //   if (!written && sealer.Value().IsExhausted()) { /* 새 키로 바꾼다 */ }
-class AeadSequenceSealer {
+class ROCKS_CRYPTO_API AeadSequenceSealer {
 public:
     AeadSequenceSealer() noexcept = default;
 
@@ -309,7 +311,7 @@ private:
 //   새 정보는 아니지만, 프레이밍 계층이 최대 레코드 길이를 먼저 막는다.
 // - 스트림 끝(절단) 인증은 프로토콜 몫이다(TLS close_notify처럼). 이 객체에는 끝 표시가 없다.
 // - 한 스레드에서 쓴다. move-only이고 옮겨 간 객체는 StaleHandle이다.
-class AeadSequenceOpener {
+class ROCKS_CRYPTO_API AeadSequenceOpener {
 public:
     AeadSequenceOpener() noexcept = default;
 

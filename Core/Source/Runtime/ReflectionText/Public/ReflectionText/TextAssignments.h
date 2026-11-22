@@ -63,7 +63,8 @@ struct TextAssignment {
 // 사용 예:
 //   TextAssignment assignment;
 //   if (!MakeTextAssignment("scores[\"a=b\"]=3", 0, assignment)) { /* 형식 오류 */ }
-bool MakeTextAssignment(StringView text, uint32 sourceIndex, TextAssignment& out) noexcept;
+ROCKS_REFLECTIONTEXT_API bool MakeTextAssignment(StringView text, uint32 sourceIndex,
+                                                 TextAssignment& out) noexcept;
 
 // 대입 묶음의 대상이다. 값 타입이며 가리키는 Registry·트랜잭션·struct 값을 소유하지 않는다 —
 // 그것들은 묶음(PreparedAssignments·PublishedAssignments)보다 오래 살아야 한다.

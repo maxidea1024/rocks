@@ -20,16 +20,17 @@ RegisterTraceControlTypes(ModuleRegistration& registration) noexcept;
 // 콘솔 영역 `trace`, 설정 struct TracePresetSettings, 세션 설정 핸들(trace.* — TraceSettings.h)을
 // 설정 문맥에 등록한다. 파일 층을 읽기 전에 부른다. 실패: ConfigContext::RegisterConsoleRegion·
 // RegisterSettings·Register의 오류.
-Result<void> RegisterTraceSettings(config::ConfigContext& config) noexcept;
+ROCKS_TRACECONTROL_API Result<void> RegisterTraceSettings(config::ConfigContext& config) noexcept;
 
 // 설정 문맥의 최신 snapshot에서 세션 값(trace.* 핸들)을 읽는다. 부팅 값을 읽으므로 config는
 // 봉인(CompleteStartup) 뒤여야 한다. 오류: 초기화 전·봉인 전 InvalidArgument.
-Result<TraceCaptureSettings> ReadTraceCaptureSettings(const config::ConfigContext& config) noexcept;
+ROCKS_TRACECONTROL_API Result<TraceCaptureSettings>
+ReadTraceCaptureSettings(const config::ConfigContext& config) noexcept;
 
 // 세션 값을 세션 설정으로 옮긴다(음수는 0, 너무 큰 값은 그 칸의 최대값). allocator와 writer 방식은
 // 호출자가 정한다.
-TraceSessionSettings MakeTraceSessionSettings(const TraceCaptureSettings& settings,
-                                              Allocator& allocator) noexcept;
+ROCKS_TRACECONTROL_API TraceSessionSettings
+MakeTraceSessionSettings(const TraceCaptureSettings& settings, Allocator& allocator) noexcept;
 
 // 채널 켜기·끄기의 결과다.
 struct TraceChannelChange {
@@ -60,7 +61,7 @@ struct TraceChannelChange {
 //
 // 스레드: 설정 문맥의 소유 스레드(게임 lane)에서만 쓴다. 수명: session·config보다 먼저 파괴한다.
 // 파괴할 때 이 객체가 붙인 파일 출력을 뗀다.
-class TraceController {
+class ROCKS_TRACECONTROL_API TraceController {
 public:
     TraceController(Allocator& allocator, TraceSession& session,
                     config::ConfigContext& config) noexcept;

@@ -46,7 +46,7 @@ inline constexpr usize Ed25519PublicKeyBytes = 32;
 inline constexpr usize Ed25519SignatureBytes = 64;
 inline constexpr usize Ed25519SeedBytes = 32;
 
-struct Ed25519PublicKey {
+struct ROCKS_CRYPTO_API Ed25519PublicKey {
     uint8 bytes[Ed25519PublicKeyBytes] = {};
 
     // 32 byte가 아니면 InvalidArgument다. 점이 올바른지(정규·small-order 아님)는 검증 때 보고,
@@ -70,7 +70,7 @@ struct Ed25519Signature {
 
 // Ed25519 서명 키다. move-only이며 생성 뒤 바뀌지 않는다. 키 저장소에 libsodium 비밀키(seed 32 byte
 // ‖ 공개키 32 byte)를 둔다.
-class Ed25519SigningKey {
+class ROCKS_CRYPTO_API Ed25519SigningKey {
 public:
     Ed25519SigningKey() noexcept = default;
 
@@ -97,20 +97,21 @@ private:
 };
 
 // message에 서명한다. 빈 키는 StaleHandle이다.
-[[nodiscard]] Result<Ed25519Signature> TrySign(const Ed25519SigningKey& key,
-                                               Span<const uint8> message) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<Ed25519Signature> TrySign(const Ed25519SigningKey& key,
+                                                                Span<const uint8> message) noexcept;
 
 // 서명을 확인한다. 맞으면 성공이다. 서명이 64 byte가 아니거나, 맞지 않거나, 공개키가 올바른 점이
 // 아니면 AuthenticationFailed다(어느 검사인지는 알리지 않는다). message는 기밀 평문이어도 된다(DIT
 // 구간에서 해시한다, 6.3절).
-[[nodiscard]] Result<void> TryVerify(const Ed25519PublicKey& key, Span<const uint8> message,
-                                     Span<const uint8> signature) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void> TryVerify(const Ed25519PublicKey& key,
+                                                      Span<const uint8> message,
+                                                      Span<const uint8> signature) noexcept;
 
 // Ed25519ph 서명(RFC 8032 5.1, context 없음)이다. 메시지를 조각으로 넣고 TryFinish로 서명한다.
 // - SHA-512 상태는 allocator에서 할당한다(키가 없는 상태라 키 저장소를 쓰지 않는다, 9.1절).
 // - TryFinish 뒤에는 Reset 전까지 TryUpdate·TryFinish가 InvalidArgument다.
 // - 한 스레드에서 쓴다. move-only이고 기본 생성한 객체와 옮겨 간 객체는 StaleHandle이다.
-class Ed25519phSigner {
+class ROCKS_CRYPTO_API Ed25519phSigner {
 public:
     Ed25519phSigner() noexcept = default;
     ~Ed25519phSigner() noexcept;
@@ -143,7 +144,7 @@ private:
 
 // Ed25519ph 검증이다. 상태·수명 규칙은 Ed25519phSigner와 같다. 검증 실패는 sticky다(9.1절): 실패한
 // 뒤에는 Reset 전까지 TryUpdate·TryFinish가 AuthenticationFailed다(성공한 뒤에는 InvalidArgument).
-class Ed25519phVerifier {
+class ROCKS_CRYPTO_API Ed25519phVerifier {
 public:
     Ed25519phVerifier() noexcept = default;
     ~Ed25519phVerifier() noexcept;
@@ -185,7 +186,8 @@ namespace hazmat {
 // 서명 키의 seed(32 byte)를 평문으로 output에 복사한다(10.4절, 서명 키의 정본이 seed라 이름이
 // TryExportKey가 아니다). 빈 키는 StaleHandle, output.Size()가 32가 아니면 InvalidArgument다.
 // output은 호출자가 지운다.
-[[nodiscard]] Result<void> TryExportSeed(const Ed25519SigningKey& key, Span<uint8> output) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void> TryExportSeed(const Ed25519SigningKey& key,
+                                                          Span<uint8> output) noexcept;
 
 } // namespace hazmat
 

@@ -38,7 +38,7 @@ namespace rocks::platform::windows {
 //   WideString path;
 //   if (const FileStatus status = path.AssignUtf8(text, bytes); !status) { return status; }
 //   const HANDLE file = CreateFileW(path.Value(), ...);
-class WideString {
+class ROCKS_PLATFORMBASE_API WideString {
 public:
     WideString() noexcept = default;
 
@@ -110,7 +110,7 @@ private:
 // 사용 예:
 //   Utf8String name;
 //   if (name.AssignWide(description, WideLength(description))) { Use(name.Value(), name.Bytes()); }
-class Utf8String {
+class ROCKS_PLATFORMBASE_API Utf8String {
 public:
     Utf8String() noexcept = default;
 
@@ -201,8 +201,9 @@ struct [[nodiscard]] TextConversion {
 //   wchar_t title[MaxTitleCharacters];
 //   (void)ConvertUtf8ToWide(text.Data(), text.ByteCount(), title, MaxTitleCharacters,
 //                           TextFit::Truncate); // 실패하면 title은 ""
-TextConversion ConvertUtf8ToWide(const char* text, usize bytes, wchar_t* buffer, usize capacity,
-                                 TextFit fit) noexcept;
+ROCKS_PLATFORMBASE_API TextConversion ConvertUtf8ToWide(const char* text, usize bytes,
+                                                        wchar_t* buffer, usize capacity,
+                                                        TextFit fit) noexcept;
 
 // UTF-16 text(units개, NUL 종료 불필요)를 UTF-8로 buffer(capacity byte, NUL 포함)에 쓴다. 할당하지
 // 않는다. 입력 전체를 먼저 검사하므로 Truncate에서도 잘린 뒤쪽의 짝 없는 surrogate는 실패다.
@@ -212,8 +213,9 @@ TextConversion ConvertUtf8ToWide(const char* text, usize bytes, wchar_t* buffer,
 //   const TextConversion converted = ConvertWideToUtf8(wide, WideLength(wide, MaxUnits), name,
 //                                                      NameBytes, TextFit::Exact);
 //   if (!converted) { return converted.status; }
-TextConversion ConvertWideToUtf8(const wchar_t* text, usize units, char* buffer, usize capacity,
-                                 TextFit fit) noexcept;
+ROCKS_PLATFORMBASE_API TextConversion ConvertWideToUtf8(const wchar_t* text, usize units,
+                                                        char* buffer, usize capacity,
+                                                        TextFit fit) noexcept;
 
 // text의 NUL 앞 UTF-16 단위 수다. maxUnits 안에 NUL이 없으면 maxUnits다. DXGI_ADAPTER_DESC1의
 // Description처럼 NUL 종료가 보장되지 않는 고정 배열 필드를 넘기기 전에 쓴다. text는 maxUnits개를

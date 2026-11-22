@@ -91,7 +91,7 @@ inline constexpr usize DatagramWindowSize = 2048;
 
 // 서버 정적 공개키와 그 KeyId다. 클라이언트가 배포 설정·서버 목록으로 받는 값이다. NetCore는 id를
 // 패킷에 실어 서버가 키를 찾게 한다(시도하지 않는다).
-struct ChannelPublicKey {
+struct ROCKS_CRYPTO_API ChannelPublicKey {
     KeyId id;
     uint8 bytes[ChannelKeyBytes] = {};
 
@@ -112,7 +112,7 @@ struct ChannelPublicKey {
 // 비밀키는 키 저장소에 있고 소멸 때 지운다. 보관은 KeyBlob(타입 10), 평문 내보내기는
 // hazmat::TryExportKey다. 키 회전은 새 KeyId로 새 키를 만들고, 옛 키는 그 id를 아는 클라이언트가
 // 남아 있는 동안 둔다.
-class ChannelServerKey {
+class ROCKS_CRYPTO_API ChannelServerKey {
 public:
     ChannelServerKey() noexcept = default;
 
@@ -157,7 +157,7 @@ class NoiseHandshake;
 // 한 스레드에서 쓴다(봉인과 전송 큐 넣기를 함께 직렬화한다). 받는 쪽 DatagramOpener와는 다른
 // 객체이므로 송신 스레드와 수신 스레드가 따로 써도 된다. move-only이고 옮겨 간 객체는
 // StaleHandle이다. 키는 키 저장소에 있고 소멸 때 지운다.
-class DatagramSealer {
+class ROCKS_CRYPTO_API DatagramSealer {
 public:
     DatagramSealer() noexcept = default;
 
@@ -209,7 +209,7 @@ private:
 //   오류는 AEAD를 시도하지 않으므로 세지 않는다.
 // - 한 스레드에서 쓴다. move-only이고 옮겨 간 객체는 StaleHandle이다. 키는 키 저장소에 있고 소멸 때
 //   지운다.
-class DatagramOpener {
+class ROCKS_CRYPTO_API DatagramOpener {
 public:
     DatagramOpener() noexcept = default;
 
@@ -289,7 +289,7 @@ enum class NoiseStep : uint8 {
 // - ephemeral 비밀키, chaining key, 대칭 키, 서버 정적 비밀키 사본은 키 저장소에 있고 Split·실패·
 //   소멸 때 지운다.
 // - 한 스레드에서 쓴다. move-only이고 옮겨 간 객체는 StaleHandle이다.
-class NoiseHandshake {
+class ROCKS_CRYPTO_API NoiseHandshake {
 public:
     NoiseHandshake() noexcept = default;
     ~NoiseHandshake() noexcept;
@@ -372,7 +372,8 @@ namespace hazmat {
 
 // 서버 정적 비밀키(32 byte)를 평문으로 output에 복사한다(Crypto 10.4절). 빈 키는 StaleHandle,
 // output.Size()가 32가 아니거나 키와 겹치면 InvalidArgument다. output은 호출자가 지운다.
-[[nodiscard]] Result<void> TryExportKey(const ChannelServerKey& key, Span<uint8> output) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void> TryExportKey(const ChannelServerKey& key,
+                                                         Span<uint8> output) noexcept;
 
 } // namespace hazmat
 

@@ -139,7 +139,7 @@ struct PathParts {
 // Normalize/Join/MakeAbsolute/MakeRelative/IsUnder는 문자 단위의 논리 연산이다.
 // 심볼릭 링크·정션·TOCTOU·실제 파일 동일성이나 접근 권한을 검사하지 않으므로
 // 보안 경계 또는 파일 존재 검사에 사용하지 않는다.
-class Path final {
+class ROCKS_CORE_API Path final {
 public:
     static PathStyle HostStyle() noexcept;
     static Result<PathRoot> Root(StringView path, PathStyle style = HostStyle()) noexcept;

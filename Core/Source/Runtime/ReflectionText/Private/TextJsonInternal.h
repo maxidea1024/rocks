@@ -80,6 +80,17 @@ private:
     Array<Array<uint8>> wires_;
 };
 
+// 필드의 실효 도구 이름이다(JSON 키·순회 필드 이름 — ROCKS_PROPERTY(Name="…") 또는 C++ 이름).
+inline StringView FieldToolName(const FieldSchema& field) noexcept {
+    const Span<const char> name = EffectiveToolName(field);
+    return StringView(name.Data(), name.Size());
+}
+
+// 읽기 순회(ExportJson·VisitValues)의 대상 뿌리다: 대상 타입 lease를 돌려주고 root에 경로 연산의
+// 뿌리(살아 있는 객체·staged 객체·struct 값)를 둔다. 오류: struct 값 대상의 lease·storage가 없거나
+// struct가 아니면 InvalidArgument, 타입 조회의 오류.
+Result<TypeLease> ReadTargetRoot(const AssignmentTarget& target, PathTarget& root) noexcept;
+
 // 필드 하나(scope의 index번째)의 자리다: 부모 단계 플래그 합 parentFlags에 필드 플래그를 더한다
 // (DescribeTextPath와 같은 자리 — part는 Field).
 inline TextSlot FieldSlot(const SchemaScope& scope, usize index, uint32 parentFlags) noexcept {

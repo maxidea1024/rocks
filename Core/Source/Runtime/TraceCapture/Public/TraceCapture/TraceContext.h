@@ -9,7 +9,7 @@ namespace rocks {
 
 // 표준 채널 "context"다. 세션이 Start 때 등록하며 처음에는 꺼져 있다. 꺼져 있어도 문맥 스택 자체는
 // 동작한다(로그가 같은 상관 id를 쓴다).
-extern TraceChannel TraceContextChannel;
+ROCKS_TRACECAPTURE_API extern TraceChannel TraceContextChannel;
 
 // 상관 id 묶음과 저장한 문맥(사본)이다(Docs/Design/TraceSystem.ko.md 6.4절). 스택은 Core
 // CorrelationScope 하나이고(로그와 trace가 같은 값을 쓴다, 계획 29.4절), trace는 칸의 확장 칸에
@@ -51,7 +51,7 @@ private:
 
 // 이 스레드 문맥 스택 맨 위의 사본이다. 채널이 켜져 있고 세션이 있으면 문맥 정의를 먼저 써서, 같은
 // 세션에서의 복원이 id만으로 끝나게 한다. 스택이 비어 있으면 valid가 false다.
-TraceContextToken TraceCaptureContext() noexcept;
+ROCKS_TRACECAPTURE_API TraceContextToken TraceCaptureContext() noexcept;
 
 // 이 스레드 문맥 스택 맨 위의 값을 out에 쓴다. 스택이 비어 있으면 false이고 out은 바뀌지 않는다.
 inline bool TraceCurrentContext(TraceContextValues& out) noexcept {
@@ -75,6 +75,7 @@ uint64 TraceContextObserverInstallFailures() noexcept;
 // 어느 세션에 등록되든 스레드 정보 기록(Trace.ThreadInfo, 정의 기록)에 들어간다. 지금 세션이 있으면
 // 바로 등록해 정보를 낸다. 이름·묶음은 TraceStandardFormat::MaxThreadNameBytes를 넘으면 앞부분만
 // 쓴다.
-void TraceSetThreadInfo(StringView name, StringView group = {}, int32 sortOrder = 0) noexcept;
+ROCKS_TRACECAPTURE_API void TraceSetThreadInfo(StringView name, StringView group = {},
+                                               int32 sortOrder = 0) noexcept;
 
 } // namespace rocks

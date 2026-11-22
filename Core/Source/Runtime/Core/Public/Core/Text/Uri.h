@@ -35,7 +35,7 @@ struct UriView {
 // path, scheme 없는 상대 참조의 첫 segment에 ':'가 있는 경우. IRI(비ASCII 문자 직접 사용)는
 // 지원하지 않으므로 호출자가 먼저 UTF-8을 percent-encoding해야 한다. 성공·실패 모두 입력을 바꾸지
 // 않는다.
-Result<UriView> TryParseUri(StringView text) noexcept;
+ROCKS_CORE_API Result<UriView> TryParseUri(StringView text) noexcept;
 
 // percent-decoding 방식이다. Component는 RFC 3986 그대로 '+'를 유지하고, FormUrlEncoded는
 // application/x-www-form-urlencoded처럼 '+'를 공백으로 바꾼다.
@@ -47,25 +47,27 @@ enum class PercentDecodeMode : uint8 {
 // %HH를 byte로 바꿔 output에 쓰고 쓴 byte 수를 반환한다. 결과 byte가 유효한 UTF-8인지는 검사하지
 // 않는다(필요하면 StringView::ValidateUtf8). 실패하면 output을 바꾸지 않는다.
 // 오류: 잘못된 '%' 표기는 InvalidArgument, output 부족은 CapacityExceeded.
-Result<usize> TryPercentDecode(StringView text, Span<char> output,
-                               PercentDecodeMode mode = PercentDecodeMode::Component) noexcept;
+ROCKS_CORE_API Result<usize>
+TryPercentDecode(StringView text, Span<char> output,
+                 PercentDecodeMode mode = PercentDecodeMode::Component) noexcept;
 
 // unreserved(A–Z a–z 0–9 - . _ ~)를 제외한 모든 byte를 대문자 %HH로 바꾼다(UE UrlEncode와 같은 문자
 // 집합). 결과 길이를 반환하고 NUL을 붙이지 않는다. 실패하면 output을 바꾸지 않는다.
 // 오류: output 부족은 CapacityExceeded, 길이 계산 overflow는 Overflow.
-Result<usize> TryPercentEncode(StringView text, Span<char> output) noexcept;
+ROCKS_CORE_API Result<usize> TryPercentEncode(StringView text, Span<char> output) noexcept;
 
 // TryPercentEncode에 필요한 출력 크기다.
-Result<usize> PercentEncodedSize(StringView text) noexcept;
+ROCKS_CORE_API Result<usize> PercentEncodedSize(StringView text) noexcept;
 
 // query("a=1&b=2", '?' 제외)에서 name과 정확히(대소문자 구분, 인코딩 해제 없이) 일치하는 첫
 // 파라미터의 원문 값을 찾는다. "flag"처럼 '='가 없으면 빈 값으로 찾은 것으로 본다. 값 view는
 // query를 빌린다.
-bool FindQueryParameter(StringView query, StringView name, StringView& value) noexcept;
+ROCKS_CORE_API bool FindQueryParameter(StringView query, StringView name,
+                                       StringView& value) noexcept;
 
 // TryResolveUriReference가 요구하는 출력 크기(base + reference + 2 byte)다. 결과는 이보다 짧을 수
 // 있다. 오류: 길이 계산 overflow는 Overflow.
-Result<usize> ResolvedUriMaxSize(StringView base, StringView reference) noexcept;
+ROCKS_CORE_API Result<usize> ResolvedUriMaxSize(StringView base, StringView reference) noexcept;
 
 // reference를 base 기준으로 해석한 대상 URI를 output에 쓰고 길이를 반환한다(NUL 없음). RFC 3986
 // §5.2.2(strict: reference에 scheme이 있으면 base와 같은 scheme이어도 절대 URI로 본다), §5.2.3
@@ -83,11 +85,11 @@ Result<usize> ResolvedUriMaxSize(StringView base, StringView reference) noexcept
 //   char buffer[256];
 //   auto resolved = TryResolveUriReference("http://a/b/c/d;p?q", "../g", Span<char>(buffer));
 //   // resolved.Value() == 12, buffer = "http://a/b/g"
-Result<usize> TryResolveUriReference(StringView base, StringView reference,
-                                     Span<char> output) noexcept;
+ROCKS_CORE_API Result<usize> TryResolveUriReference(StringView base, StringView reference,
+                                                    Span<char> output) noexcept;
 
 // TryNormalizeUri가 요구하는 출력 크기(text + 2 byte)다. 오류: 길이 계산 overflow는 Overflow.
-Result<usize> NormalizedUriMaxSize(StringView text) noexcept;
+ROCKS_CORE_API Result<usize> NormalizedUriMaxSize(StringView text) noexcept;
 
 // URI 참조를 정규화해 output에 쓰고 길이를 반환한다(NUL 없음). 같은 자원을 가리키는 표기를 하나로
 // 모아 비교·캐시 키로 쓰기 위한 것이다.
@@ -106,6 +108,6 @@ Result<usize> NormalizedUriMaxSize(StringView text) noexcept;
 //   char buffer[64];
 //   auto normalized = TryNormalizeUri("HTTP://Example.COM:80/a/./%7euser", Span<char>(buffer));
 //   // buffer = "http://example.com/a/~user"
-Result<usize> TryNormalizeUri(StringView text, Span<char> output) noexcept;
+ROCKS_CORE_API Result<usize> TryNormalizeUri(StringView text, Span<char> output) noexcept;
 
 } // namespace rocks

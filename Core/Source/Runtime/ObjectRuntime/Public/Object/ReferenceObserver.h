@@ -49,7 +49,7 @@ struct ReferenceEdgeDelta {
 //   options.policy = {NativeTypeKey<Package>(), true};
 //   options.referenceObserver = &observer;
 //   ObjectRegistry assets(allocator, types, context, options);
-class ReferenceObserver {
+class ROCKS_OBJECTRUNTIME_API ReferenceObserver {
 public:
     // TakeChanges 사이에 둘 수 있는 키 수의 기본 상한이다.
     static constexpr usize DefaultMaxKeys = usize(1) << 20;

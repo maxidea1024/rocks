@@ -20,7 +20,7 @@ namespace rocks {
 // 멈출 수 있다). 조회 인자는 그 요소 수 미만이어야 한다(ROCKS_ASSERT).
 // 수명: 반환 span은 다음 Build·파괴까지 유효하다. 스레드: Build 뒤 조회는 여러 스레드가 함께 해도
 // 된다(읽기만 한다).
-class MeshTopologyIndex {
+class ROCKS_MESHSOURCE_API MeshTopologyIndex {
 public:
     explicit MeshTopologyIndex(Allocator& allocator) noexcept;
 

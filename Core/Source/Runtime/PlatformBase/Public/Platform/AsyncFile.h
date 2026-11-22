@@ -25,7 +25,7 @@ enum class AsyncIoBackend : uint8 {
 };
 
 // 플랫폼 기본 backend다(Windows: Native, 그 밖: WorkerPool).
-AsyncIoBackend DefaultAsyncIoBackend() noexcept;
+ROCKS_PLATFORMBASE_API AsyncIoBackend DefaultAsyncIoBackend() noexcept;
 
 // 요청 하나의 최종 결과다. 완료 통지는 요청마다 정확히 한 번이다.
 // - 읽기 Success: bytes만큼 읽었다. offset이 파일 끝 이상이면 bytes 0의 성공(EOF), 끝에 걸치면
@@ -87,7 +87,7 @@ struct AsyncIoFault {
 //   Shutdown 성공 뒤 다시 Start할 수 있다. 소멸 시 열린 파일이 남아 있으면 수명 오류로 Fatal이다.
 // - 메서드는 여러 스레드에서 호출할 수 있다. Start·Shutdown·소멸은 다른 호출과 겹치지 않는다.
 // - 완료 callback 안에서 Shutdown하거나 context를 파괴하지 않는다.
-class AsyncIoContext {
+class ROCKS_PLATFORMBASE_API AsyncIoContext {
 public:
     AsyncIoContext() noexcept;
     ~AsyncIoContext() noexcept;
@@ -245,7 +245,7 @@ private:
 
 // 호출자가 소유하는 요청 레코드다(읽기·쓰기 공용). 진행 중에는 이동·복사·파괴하지 않는다.
 // 완료 뒤에는 같은 객체로 다시 제출할 수 있다. 소멸 시 진행 중이면 취소 후 완료까지 기다린다.
-class AsyncIoRequest {
+class ROCKS_PLATFORMBASE_API AsyncIoRequest {
 public:
     AsyncIoRequest() noexcept;
     ~AsyncIoRequest() noexcept;

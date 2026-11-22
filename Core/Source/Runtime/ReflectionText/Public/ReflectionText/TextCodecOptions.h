@@ -76,6 +76,7 @@ struct TextCodecOptions {
 // 오류: use·mapMerge가 정의되지 않은 값이거나 한도가 0, maxElements > MaxArrayElements면
 // InvalidArgument. 입력 가능 여부(Report)는 보지 않는다 — 입력 진입점은 TextInputExcludedFlags로
 // 본다.
-Result<void> ValidateTextCodecOptions(const TextCodecOptions& options) noexcept;
+ROCKS_REFLECTIONTEXT_API Result<void>
+ValidateTextCodecOptions(const TextCodecOptions& options) noexcept;
 
 } // namespace rocks::reflection_text

@@ -111,7 +111,7 @@ struct LogTextOutput {
 // 사용 예:
 //   auto layout = LogLayout::Parse("[{Level:u3}] {Message}{NewLine}");
 //   TextLogSink sink(output, layout.Value());
-class TextLogSink final : public RuntimeLogSink {
+class ROCKS_CORE_API TextLogSink final : public RuntimeLogSink {
 public:
     // 렌더 버퍼 크기다.
     static constexpr usize BufferBytes = 4096;
@@ -180,7 +180,7 @@ private:
 // 사용 예:
 //   JsonLinesLogSink json(fileOutput);
 //   logs.AddSink(json);
-class JsonLinesLogSink final : public RuntimeLogSink {
+class ROCKS_CORE_API JsonLinesLogSink final : public RuntimeLogSink {
 public:
     // 한 줄 렌더 버퍼 크기다.
     static constexpr usize BufferBytes = 16384;

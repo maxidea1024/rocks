@@ -18,7 +18,7 @@
 namespace rocks::platform {
 
 // 지금 스레드의 DIT가 켜져 있는가. FEAT_DIT가 없으면 false다.
-[[nodiscard]] bool IsDataIndependentTimingEnabled() noexcept;
+[[nodiscard]] ROCKS_PLATFORMBASE_API bool IsDataIndependentTimingEnabled() noexcept;
 
 // FEAT_DIT가 있고 꺼져 있으면 켜고 true를 돌려준다. true일 때만 EndDataIndependentTiming으로 끈다.
 [[nodiscard]] ROCKS_PLATFORMBASE_API bool BeginDataIndependentTiming() noexcept;

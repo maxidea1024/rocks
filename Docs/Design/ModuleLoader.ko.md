@@ -328,7 +328,7 @@ public:
   3. 단계마다 엔진·게임·플러그인 모듈을 함께 의존 순서로 시작한다.
   4. 게임 모듈 적재 실패는 report와 함께 시작을 중단한다. 다시 빌드를 권하는 편집기 UI는 Rocks Studio 설계에서 정한다.
   - 빌드 시점에 이미 플러그인 조건을 해석해 게임 Editor 타깃을 만들었으므로, 실행 중 해석 결과와 빌드 결과가 다르면 `Incompatible`이다(게임 manifest에 빌드한 플러그인 목록을 싣고 대조한다).
-- **시험(MD20)**: 시험·도구 실행 파일도 모듈 표를 가지고 로더로 모듈을 시작한다. 시험 `TEST` 정적 등록은 지금 예외를 유지한다. Modular 시험([빌드 타깃](BuildTargets.ko.md) BD31)에서 `TEST` 등록 목록의 머리는 공유 라이브러리 하나에 한 벌만 두고(BD29 — ML4b까지는 모든 시험이 든 호스트 모듈, 모듈 `Private/` 시험을 모듈 공유 라이브러리에 링크하는 BS8d5에서 Core로 옮긴다 — 3.14절), 시험 묶음이 들어간 공유 라이브러리는 실행 중 해제하지 않는다.
+- **시험(MD20)**: 시험·도구 실행 파일도 모듈 표를 가지고 로더로 모듈을 시작한다. 시험 `TEST` 정적 등록은 지금 예외를 유지한다. Modular 시험([빌드 타깃](BuildTargets.ko.md) BD31)에서 `TEST` 등록 목록의 머리는 공유 라이브러리 하나에 한 벌만 두고(BD29 — 모든 시험이 든 호스트 모듈. BS8d5(빌드 타깃 개정 22 — 사용자 결정)가 시험을 호스트 하나에 두기로 해 Core로 옮기지 않는다 — 3.14절), 시험 묶음이 들어간 공유 라이브러리는 실행 중 해제하지 않는다.
 
 ### 3.10 ML2 연결 — ML1 전(개정 3)
 
@@ -496,13 +496,13 @@ MD21(3.5절)을 구현한다. Modular 실행 파일은 부트 모듈만 import�
 - **내장 진입**: `RunEmbeddedApplication`은 호스트가 자기 진입점을 가진다는 정의라 MD21(실행 파일은 진입 스텁)과 맞지 않는다. Modular에서는 지원하지 않는다: 그런 실행 파일은 `RocksApplicationDescription`을 export하지 않아 Modular 진입이 알리고, Modular 빌드의 "Launch.Modules"는 Modular 진입이 만든 로더가 없으면 Error 한 번과 `ModuleStartupFailureExitCode`로 끝난다. 내장 시험 프로그램(`LaunchEmbeddedHost`)은 Monolithic 시험 타깃에만 있다.
 - **manifest 행 키 `host`(schema 3)**: 3.13절의 `executable`을 `host`로 바꾼다. 그 행은 호스트 모듈이고 다른 행처럼 OS로 싣는다(`file`은 호스트 공유 라이브러리). 호스트 행은 하나 이하다. 그래서 `TryCreateFromManifest`의 `executableEntry` 인자를 없앤다. 뜻이 바뀌었으므로 schema를 3으로 올린다(옛 manifest는 `Incompatible`).
 - **`FindHostSymbol(symbol, address, lease)`**: 호스트 행 라이브러리에서 C 기호를 찾는다. 찾으면 true와 주소이고 주소는 lease가 살아 있는 동안 유효하다(호출자는 로더 파괴 전에 lease를 놓는다). 정적 표 로더이거나 호스트 행이 없거나 기호가 없으면 false다. Launch만 쓴다.
-- **모듈 표 함수는 Monolithic에만**: `GeneratedModuleTable()` 선언(`Core/Module/ModuleEntry.h`)을 `ROCKS_MONOLITHIC`일 때만 둔다. Modular에서 부르면 링크 오류 대신 컴파일 오류다. Launch는 Monolithic에서만 그 표로 로더를 만든다. 정적 표를 직접 시험하는 곳(DynamicModuleTests·ModuleLoaderTests·EngineAssetsTests·GpuTraceTests)은 Modular 시험 실행 파일을 처음 빌드하는 BS8d5에서 `test::ProcessModules()`로 옮기거나 `ROCKS_MONOLITHIC`으로 감싼다.
+- **모듈 표 함수는 Monolithic에만**: `GeneratedModuleTable()` 선언(`Core/Module/ModuleEntry.h`)을 `ROCKS_MONOLITHIC`일 때만 둔다. Modular에서 부르면 링크 오류 대신 컴파일 오류다. Launch는 Monolithic에서만 그 표로 로더를 만든다. 정적 표를 직접 시험하는 곳 가운데 Foundation 시험(DynamicModuleTests·ModuleLoaderTests)은 BS8d5가 `ROCKS_MONOLITHIC`으로 감쌌다. Engine 시험(EngineAssetsTests·GpuTraceTests)은 EngineTests가 Monolithic이라 지금은 그대로이고, Engine 층 Modular 때 `test::ProcessModules()`로 옮기거나 감싼다.
 - **`HostSettingsOptions::modules`는 필수**: 지금은 없으면 `GeneratedModuleTable()`을 쓴다. Modular에는 그 표가 없고, 로더가 없는 설정 등록은 Modular에서 늦게 실린 모듈을 빠뜨린다. 그래서 없으면 `Initialize`가 `InvalidArgument`로 실패한다(Error 한 번). Commandlet `BootSettings`는 Launch 로더를 넘기고, 시험은 `test::ProcessModules()`를 넘긴다.
-- **시험 등록 머리(MD20)**: ML4b는 시험 배치를 바꾸지 않는다. 지금 `TEST` 등록 목록의 머리(`first`)와 `Registration`은 시험 runner(실행 파일 모듈 `Private/Main.cpp`)에 있고 모든 시험 소스가 그 모듈에 컴파일되므로, 호스트 공유 라이브러리 하나에 한 벌이다. 모듈 `Private/` 시험을 그 모듈 공유 라이브러리에 링크하고 머리를 Core 한 벌로 옮기는 일(BD31·MD20)은 비공개 기호를 쓰는 시험이 Modular에서 링크되게 하는 일과 함께 BS8d5가 한다. 같은 때 정할 것: 전역 `operator new` 대체로 할당을 세는 시험(`OperatorNewCounter.cpp`)은 Modular에서 호스트 이미지 안의 할당만 센다(Windows는 이미지마다, POSIX는 `RTLD_LOCAL`).
+- **시험 등록 머리(MD20)**: ML4b는 시험 배치를 바꾸지 않는다. 지금 `TEST` 등록 목록의 머리(`first`)와 `Registration`은 시험 runner(실행 파일 모듈 `Private/Main.cpp`)에 있고 모든 시험 소스가 그 모듈에 컴파일되므로, 호스트 공유 라이브러리 하나에 한 벌이다. BS8d5(빌드 타깃 개정 22 — 사용자 결정)는 시험을 호스트 하나에 두고 시험이 부르는 내부 선언을 export하기로 해 머리는 호스트에 그대로 남는다(모듈 공유 라이브러리 링크는 순환 때문에 버렸다). 같은 때 정할 것: 전역 `operator new` 대체로 할당을 세는 시험(`OperatorNewCounter.cpp`)은 Modular에서 호스트 이미지 안의 할당만 센다(Windows는 이미지마다, POSIX는 `RTLD_LOCAL`).
 - **빌드 입력 검사**: Core에 닿는 타깃의 Modular 거부(BS8d1의 "Launch에 닿으면 거부")를 푼다. 대신 모듈 표 제공 모듈에 닿는 Modular 실행 파일이 Launch에 닿지 않으면 거부한다. 실행 파일이 둘 이상이면 거부하는 규칙(BS8d1)은 그대로다.
 - **한계**:
   - 크래시 메타데이터의 주 모듈 정보(Windows CodeView — `GetModuleHandleW(nullptr)`)는 진입 스텁을 가리킨다. 덤프의 모듈 목록에는 모든 모듈이 있으므로 기호 대조는 된다. 메타데이터에 호스트 모듈을 적는 일은 크래시 파이프라인 후속으로 둔다.
-  - 부트 모듈은 실행 파일 import(OS가 같은 폴더에서 찾는다)와 로더의 절대 경로 적재로 두 번 열린다. Windows는 같은 경로면 같은 모듈(참조 수만 는다)이지만, 실행 파일 경로를 다른 철자(subst·junction)로 얻으면 두 번 실릴 수 있다. BS8d5의 Modular 시험이 부트 모듈이 한 번만 실렸는지 확인한다.
+  - 부트 모듈은 실행 파일 import(OS가 같은 폴더에서 찾는다)와 로더의 절대 경로 적재로 두 번 열린다. Windows는 같은 경로면 같은 모듈(참조 수만 는다)이지만, 실행 파일 경로를 다른 철자(subst·junction)로 얻으면 두 번 실릴 수 있다. 로더 경로는 실행 파일 이미지 경로(OS가 import를 찾는 응용 프로그램 디렉터리와 같은 철자)에서 만들므로 보통은 같은 모듈이고, 실행 중 확인은 하지 않는다(빌드 타깃 3.8절 BS8d5 한계).
 - **시험**:
   - 빌드 시험 Modular fixture: 가짜 Launch(`ProvidesLaunch`, Modular 진입 C 함수를 export — 받은 manifest 이름과 호스트 기술을 찍는다)로 실행 파일이 import하는 Rocks 공유 라이브러리가 Launch뿐인지(Windows는 import 표, macOS는 `otool -L`), 호스트 공유 라이브러리와 export, manifest의 `host` 행, 창 subsystem 진입 함수, 호스트의 동적 모듈 미링크, 입력 거부(Launch 없음)를 본다. Linux(`readelf -d`)는 Linux 빌드 단계(BS6)에서 더한다.
   - 로더 시험: `host` 키(schema 3) 해석과 호스트 행 둘 거부, 정적 표 로더의 `FindHostSymbol`은 false.
@@ -543,7 +543,7 @@ MD21(3.5절)을 구현한다. Modular 실행 파일은 부트 모듈만 import�
 | MD17 | 모듈 이름은 대소문자를 구분해 비교하고, 대소문자만 다른 이름은 빌드가 거부한다 | 권장안 |
 | MD18 | 형식 있는 조회는 `Find<T>(name)`이고 UE `GetModuleChecked<T>`처럼 검사 없는 `static_cast`다. `HostServices` 형식 키는 소유 모듈 cpp에 out-of-line으로 정의해 export한다. 키 형식·매크로는 Core에 둔다(개정 6 — Core의 `LogSystem`도 서비스가 되게) | 권장안 |
 | MD19 | Rocks Studio는 프로젝트 기술자·플러그인 조건으로 켤 모듈을 정하고, 빌드가 게임 manifest에 실은 플러그인 목록과 다르면 `Incompatible`이다 | 권장안 |
-| MD20 | 시험·도구 실행 파일도 모듈 표를 가지고 로더로 모듈을 시작한다. 시험 `TEST` 정적 등록은 예외를 유지하고, Modular에서 등록 목록 머리는 TestSupport에 한 벌, 시험 묶음 공유 라이브러리는 해제하지 않는다 | 권장안 |
+| MD20 | 시험·도구 실행 파일도 모듈 표를 가지고 로더로 모듈을 시작한다. 시험 `TEST` 정적 등록은 예외를 유지하고, Modular에서 등록 목록 머리는 시험 호스트 모듈에 한 벌(BS8d5), 시험 묶음 공유 라이브러리는 해제하지 않는다 | 권장안 |
 | MD21 | Modular 실행 파일은 부트 모듈만 import하고, 본문은 타깃의 호스트 모듈에 두어 로더가 적재한다. 부트 모듈 누락만 report 계약의 예외다 | 권장안 |
 | MD22 | 로더는 시작 전에 manifest의 모든 모듈 바이너리를 준비(`Prepare`)한다. HostSettings는 설정 확정 전에 모든 모듈의 `registerSettings`를 의존 순서로 부른다 | 권장안 |
 

@@ -610,9 +610,13 @@ TEST(ModuleLoaderRejectsMalformedTables) {
     CHECK(journal.count == 0);
 }
 
-// 이 시험 실행 파일의 빌드 생성 모듈 표(GeneratedModuleTable)로 로더를 만들고 실행 파일 모듈 자신을
-// 적재하면 표의 모든 모듈이 의존 순서로 시작한다(MD20: 시험 실행 파일도 로더로 모듈을 시작한다). 표
-// 검사가 통과한다는 것은 빌드가 진입 기술 이름·의존 순서를 맞게 만들었다는 뜻이다.
+#if ROCKS_MONOLITHIC
+// 정적 모듈 표(GeneratedModuleTable)로 로더를 하나 더 만드는 시험은 Monolithic에서만 돈다 —
+// Modular에는 그 표가 없고 manifest 로더의 행은 진입 함수가 비어
+// 있다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d5). 이 시험 실행 파일의 빌드 생성 모듈
+// 표(GeneratedModuleTable)로 로더를 만들고 실행 파일 모듈 자신을 적재하면 표의 모든 모듈이 의존
+// 순서로 시작한다(MD20: 시험 실행 파일도 로더로 모듈을 시작한다). 표 검사가 통과한다는 것은 빌드가
+// 진입 기술 이름·의존 순서를 맞게 만들었다는 뜻이다.
 TEST(ModuleLoaderStartsThisExecutableModuleTable) {
     SystemAllocator allocator;
     const ModuleTable table = GeneratedModuleTable();
@@ -653,3 +657,4 @@ TEST(ModuleLoaderStartsThisExecutableModuleTable) {
                            : ModuleState::Stopped));
     }
 }
+#endif

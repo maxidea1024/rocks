@@ -29,29 +29,29 @@
 namespace rocks::platform {
 
 // 현재 스레드의 환경이 기대 환경인지다.
-bool IsDeterministicFloatingPointEnvironment() noexcept;
+ROCKS_PLATFORMBASE_API bool IsDeterministicFloatingPointEnvironment() noexcept;
 
 // 현재 스레드의 제어 설정을 기대 환경으로 바꾸고 function(context)를 실행한 뒤, 제어 설정을 호출 전
 // 값으로 되돌린다(function 안에서 누가 바꿨어도 되돌린다). 실행 중 쌓인 상태 플래그는 남긴다.
 // 중첩해도 된다. 반환: 호출 전 환경이 기대 환경이 아니어서 바꿔야 했는지(진단용 — 누가 환경을 바꿔
 // 놓았는지 찾을 때). function은 예외를 던지지 않아야 하며(엔진은 예외를 쓰지 않는다) 같은
 // 스레드에서 끝나야 한다.
-bool RunWithDeterministicFloatingPoint(void (*function)(void* context) noexcept,
-                                       void* context) noexcept;
+ROCKS_PLATFORMBASE_API bool
+RunWithDeterministicFloatingPoint(void (*function)(void* context) noexcept, void* context) noexcept;
 
 namespace detail {
 
 // 시험용: 제어 레지스터(MXCSR 또는 FPCR) 값을 그대로 읽고 쓴다.
-uint64 ReadFloatingPointControl() noexcept;
-void WriteFloatingPointControl(uint64 value) noexcept;
+ROCKS_PLATFORMBASE_API uint64 ReadFloatingPointControl() noexcept;
+ROCKS_PLATFORMBASE_API void WriteFloatingPointControl(uint64 value) noexcept;
 // 비정규 수를 0으로 만드는 비트(x64 FTZ, ARM64 FZ)다.
-uint64 FlushToZeroBit() noexcept;
+ROCKS_PLATFORMBASE_API uint64 FlushToZeroBit() noexcept;
 // 비정규 입력을 0으로 보는 비트(x64 DAZ, ARM64는 FZ가 겸하므로 FZ)다.
-uint64 DenormalsAreZeroBit() noexcept;
+ROCKS_PLATFORMBASE_API uint64 DenormalsAreZeroBit() noexcept;
 // 반올림 모드를 0 쪽(truncate)으로 바꾸는 비트 패턴이다(x64 RC = 11, ARM64 RMode = 11).
-uint64 RoundTowardZeroBits() noexcept;
+ROCKS_PLATFORMBASE_API uint64 RoundTowardZeroBits() noexcept;
 // 제어 설정이 아닌 상태 플래그 비트(x64 MXCSR bit 0–5, ARM64는 FPCR에 없으므로 0)다.
-uint64 StatusFlagBits() noexcept;
+ROCKS_PLATFORMBASE_API uint64 StatusFlagBits() noexcept;
 
 } // namespace detail
 

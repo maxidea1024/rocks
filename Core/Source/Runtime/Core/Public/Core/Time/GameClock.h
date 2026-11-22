@@ -80,7 +80,7 @@ struct StepPlan {
 
 // 한 시간 도메인(엔진 전체 또는 World 하나)의 게임 시계다. pause와 timeScale은 서로 독립 상태라서
 // pause를 풀면 직전 scale이 그대로 적용된다. 상태 변경은 다음 Advance부터 반영된다(프레임 경계).
-class GameClock {
+class ROCKS_CORE_API GameClock {
 public:
     GameClock() noexcept = default;
 

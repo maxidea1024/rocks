@@ -142,12 +142,13 @@ public:
 // CapacityExceeded)다. 이름 원문을 읽지 못하면(stale 토큰 등) 그 pool 오류, 할당 실패는 그 오류이고
 // 진단 코드는 None이다.
 // 스레드: skeleton을 읽기만 한다.
-Result<void> ValidateSkeleton(const Skeleton& skeleton, NamePool& names, Allocator& scratch,
-                              SkeletonDiagnostic* failure = nullptr) noexcept;
+ROCKS_ANIMATION_API Result<void> ValidateSkeleton(const Skeleton& skeleton, NamePool& names,
+                                                  Allocator& scratch,
+                                                  SkeletonDiagnostic* failure = nullptr) noexcept;
 
 // Animation 리플렉션 타입(BoneInfo·BoneHierarchy·Skeleton 등)을 등록한다(생성 집계 함수
 // generated::Animation::RegisterModuleTypes를 부른다 — 의존 모듈 타입도 함께). 도구·시험은 직접,
 // 엔진은 애니메이션 에셋 모듈이 부른다.
-Result<void> RegisterAnimationTypes(ModuleRegistration& registration) noexcept;
+ROCKS_ANIMATION_API Result<void> RegisterAnimationTypes(ModuleRegistration& registration) noexcept;
 
 } // namespace rocks

@@ -14,7 +14,7 @@ namespace rocks::crypto::detail {
 // 만들고, 시험은 고정 키(Noise 공식 벡터의 init_ephemeral·resp_ephemeral)로 golden을 재현한다.
 // ephemeralSecret이 비어 있지도 32 byte도 아니면 InvalidArgument(상태 불변)이고, 나머지 인자·오류는
 // 공개 TryWriteMessage와 같다.
-struct ChannelFactory {
+struct ROCKS_CRYPTO_API ChannelFactory {
     [[nodiscard]] static Result<usize> TryWriteMessage(NoiseHandshake& handshake,
                                                        Span<const uint8> ephemeralSecret,
                                                        Span<const uint8> payload,

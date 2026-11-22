@@ -32,7 +32,7 @@ namespace rocks {
 // - 구성 요소(Days·Hours·Minutes·Seconds·Milliseconds·FractionTicks)는 0 쪽으로 자른 값이다. 음수
 // 간격의
 //   구성 요소는 모두 0 이하다(-1.5초는 Seconds() -1, Milliseconds() -500).
-class TimeSpan {
+class ROCKS_CORE_API TimeSpan {
 public:
     static constexpr int64 TicksPerMicrosecond = 10;
     static constexpr int64 TicksPerMillisecond = 10000;
@@ -236,7 +236,7 @@ private:
 //   "01:30:00" → 1시간 30분,  "-2.03:00:00.5" → -(2일 3시간 0.5초),  "00:00:00.25" → 0.25초
 // 시는 0–23, 분·초는 0–59, 소수부는 1–7자리(10^-7초 단위, 짧으면 뒤를 0으로 본다)다. 공백은 받지
 // 않는다. 실패: 문법·범위 오류는 InvalidArgument, 전체 값이 TimeSpan 범위를 넘으면 Overflow다.
-Result<TimeSpan> TryParseTimeSpan(StringView text) noexcept;
+ROCKS_CORE_API Result<TimeSpan> TryParseTimeSpan(StringView text) noexcept;
 
 // "{}"로 서식화한다: "[-][일.]시:분:초[.소수부 7자리]". 일은 0이 아닐 때만, 소수부는 0이 아닐 때만
 // 쓴다.
@@ -244,8 +244,11 @@ Result<TimeSpan> TryParseTimeSpan(StringView text) noexcept;
 // spec("{:...}")은 받지 않는다(InvalidArgument).
 template <>
 struct Formatter<TimeSpan> {
-    static Result<void> Format(StringBuilderBase& out, const TimeSpan& span,
-                               StringView spec) noexcept;
+    // 클래스 전체가 아니라 Format만 export한다 — dllimport 클래스의 constexpr 멤버(IsValidSpec)는
+    // 상수식에서 쓸 수 없다(로그 spec 검사가 consteval — Docs/Design/BuildTargets.ko.md 3.8절
+    // BS8d5).
+    static ROCKS_CORE_API Result<void> Format(StringBuilderBase& out, const TimeSpan& span,
+                                              StringView spec) noexcept;
 
     static constexpr bool IsValidSpec(StringView spec) noexcept {
         return spec.IsEmpty();

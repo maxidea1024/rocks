@@ -14,7 +14,7 @@ namespace rocks::detail {
 // manifest 하나에서 만든 모듈 표와 그 저장소다. 로더가 소유하고 로더와 같이 산다(행 배열·이름이
 // 정적 수명이 아니다). 소멸하면 연 라이브러리를 적재 역순으로 닫는다 — 그 전에 로더가 모든 모듈을
 // 내리고 수명 객체를 파괴해야 한다.
-struct ModuleManifestData {
+struct ROCKS_MODULELOADER_API ModuleManifestData {
     explicit ModuleManifestData(Allocator& allocator) noexcept;
     ~ModuleManifestData() noexcept;
     ModuleManifestData(const ModuleManifestData&) = delete;
@@ -41,8 +41,8 @@ struct ModuleManifestData {
 // manifest 본문을 엄격하게 해석해 data를 채운다(OS 적재 없음). 실패하면 false이고 report에
 // Incompatible(단계 "Manifest")과 키 경로·JSON 위치를 담은 문구를 쓴다. 할당 실패는 false와
 // OutOfMemory 문구다(code Incompatible, error OutOfMemory).
-bool ParseModuleManifest(StringView text, ModuleManifestData& data,
-                         ModuleLoadReport& report) noexcept;
+ROCKS_MODULELOADER_API bool ParseModuleManifest(StringView text, ModuleManifestData& data,
+                                                ModuleLoadReport& report) noexcept;
 
 // 해석한 행의 바이너리를 의존 순서로 준비한다(MD22 Prepare): 파일 크기 대조, OS 적재, export
 // 진입점 RocksModuleEntry 조회와 호출, 진입 기술 대조. 호스트 행도 다른 행과 같이 싣는다.

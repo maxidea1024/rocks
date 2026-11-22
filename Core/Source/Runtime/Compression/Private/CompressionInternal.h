@@ -95,8 +95,9 @@ Result<CompressionLevelRange> PluginLevelRange(CompressionFormat format) noexcep
 //   InvalidArgument, 압축하지 않는 형식은 Unsupported다.
 // - StreamFormatError: 스트림 입구. 모르는 형식은 InvalidArgument, 스트림이 아닌 형식(Lz4 raw
 //   block)과 압축 스트림의 해제 전용 형식은 Unsupported다.
-ErrorCode CompressFormatError(CompressionFormat format) noexcept;
-ErrorCode StreamFormatError(CompressionFormat format, bool compressing) noexcept;
+ROCKS_COMPRESSION_API ErrorCode CompressFormatError(CompressionFormat format) noexcept;
+ROCKS_COMPRESSION_API ErrorCode StreamFormatError(CompressionFormat format,
+                                                  bool compressing) noexcept;
 
 // 취소 확인·32bit 길이 분할의 단위다. Deflate·Zlib·Gzip과 LZ4 frame·Brotli 해제는 입력 소비나 출력
 // 생성이, zstd·LZ4 frame 압축은 입력 소비가, zstd 해제는 입력 소비가 이만큼 진행될 때마다 취소를

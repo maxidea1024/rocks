@@ -160,7 +160,8 @@ struct CompressionFormatInfo {
 
 // 형식의 이름·revision이다. 모르는 값·등록되지 않았거나 해제(진행 중 포함)된 값은
 // InvalidArgument다.
-Result<CompressionFormatInfo> TryGetCompressionFormatInfo(CompressionFormat format) noexcept;
+ROCKS_COMPRESSION_API Result<CompressionFormatInfo>
+TryGetCompressionFormatInfo(CompressionFormat format) noexcept;
 
 // 이름으로 형식을 찾는다(내장·사용자 등록 형식 공통). 형식 이름 문법(소문자 ASCII
 // [a-z0-9_-]로 된 비지 않은 조각을 '.'로 이은 1–32byte) 위반은 InvalidArgument이며 대문자가
@@ -168,7 +169,7 @@ Result<CompressionFormatInfo> TryGetCompressionFormatInfo(CompressionFormat form
 //
 // 사용 예(설정 파일의 "zstd"·"oodle.kraken" 같은 이름을 형식 값으로):
 //   auto format = TryFindCompressionFormat(StringView("zstd"));
-Result<CompressionFormat> TryFindCompressionFormat(StringView name) noexcept;
+ROCKS_COMPRESSION_API Result<CompressionFormat> TryFindCompressionFormat(StringView name) noexcept;
 
 // 검증된 형식·수준 쌍이다. 생성 함수만 만들 수 있어 압축 함수는 만들 때 유효했던 설정을 받는다.
 // 사용자 등록 형식은 설정을 만든 뒤 해제가 시작될 수 있으며, 그 뒤 이 설정을 쓰는 압축 함수·
@@ -212,8 +213,9 @@ ROCKS_COMPRESSION_API Result<usize> TryGetCompressBound(CompressionFormat format
 
 // source를 압축해 destination 앞부분에 쓰고 쓴 byte 수를 반환한다. scratch는 코덱 작업 메모리이며
 // 호출 안에서 모두 반환한다. 필요한 크기는 TryGetCompressBound로 미리 구한다.
-Result<usize> TryCompress(const CompressionSettings& settings, Span<const uint8> source,
-                          Span<uint8> destination, Allocator& scratch) noexcept;
+ROCKS_COMPRESSION_API Result<usize> TryCompress(const CompressionSettings& settings,
+                                                Span<const uint8> source, Span<uint8> destination,
+                                                Allocator& scratch) noexcept;
 
 // source를 압축해 output 뒤에 붙인다. 작업 메모리는 output.GetAllocator()를 쓴다. source가 output
 // 저장소
@@ -259,8 +261,9 @@ ROCKS_COMPRESSION_API Result<usize> TryDecompressAppend(CompressionFormat format
 // 사전을 쓰는 일회성 변형이다(CompressionDictionary.h). 형식·수준은 사전이 정하며 계약은 사전 없는
 // 함수와 같다. 빈 사전 handle은 StaleHandle이다. 사전 준비(CDict·DDict)는 handle이 가지므로
 // 호출마다 드는 비용은 사전 없는 함수와 같은 문맥 생성뿐이다.
-Result<usize> TryCompress(const CompressDictionary& dictionary, Span<const uint8> source,
-                          Span<uint8> destination, Allocator& scratch) noexcept;
+ROCKS_COMPRESSION_API Result<usize> TryCompress(const CompressDictionary& dictionary,
+                                                Span<const uint8> source, Span<uint8> destination,
+                                                Allocator& scratch) noexcept;
 ROCKS_COMPRESSION_API Result<usize> TryCompressAppend(const CompressDictionary& dictionary,
                                                       Span<const uint8> source,
                                                       Array<uint8>& output) noexcept;

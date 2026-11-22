@@ -66,7 +66,7 @@ enum class FileSeekOrigin {
 // close의 최종 상태를 보장하지 않을 수 있으므로 자원 회수가 보장되지 않으며 이전 native
 // 핸들로 재시도해서는 안 된다. OS close 실패에 대한 실제 강제 주입 검증은 아직 없다.
 // Destroy는 Close 이후 인스턴스와 그 메타데이터를 해제하며 예외를 내지 않는다.
-class FileHandle {
+class ROCKS_PLATFORMBASE_API FileHandle {
 public:
     virtual FileTransfer Read(void* destination, usize bytes) noexcept = 0;
     virtual FileTransfer Write(const void* source, usize bytes) noexcept = 0;
@@ -132,7 +132,7 @@ using DirectoryVisitor = bool (*)(const DirectoryEntry& entry, void* context) no
 // 한다. wrapper는 하위 FileSystem과 그 핸들의 수명을 직접 유지해야 한다.
 // Open을 직접 호출하면 반환한 핸들은 caller가 직렬화하고 Close 결과와 무관하게 Destroy를
 // 정확히 한 번 호출한다.
-class FileSystem {
+class ROCKS_PLATFORMBASE_API FileSystem {
 public:
     virtual ~FileSystem() = default;
     virtual FileStatus Open(const char* path, usize pathBytes, FileOpenMode mode,
@@ -304,7 +304,7 @@ private:
 //   lock.Release();
 //
 // 스레드: 한 객체를 여러 스레드가 동시에 쓰지 않는다.
-class FileLock final {
+class ROCKS_PLATFORMBASE_API FileLock final {
 public:
     FileLock() noexcept = default;
     ~FileLock() noexcept;

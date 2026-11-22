@@ -66,7 +66,7 @@ enum class GeneralCategory : uint8 {
 };
 
 // 표를 만든 Unicode 버전이다("18.0.0").
-StringView UnicodeVersionText() noexcept;
+ROCKS_CORE_API StringView UnicodeVersionText() noexcept;
 
 // input을 form으로 정규화해 out에 붙인다(UAX #15).
 ROCKS_CORE_API Result<void> TryNormalize(NormalizationForm form, StringView input,
@@ -81,18 +81,18 @@ ROCKS_CORE_API Result<bool> IsNormalized(NormalizationForm form, StringView inpu
 // 단순 case folding(CaseFolding.txt의 C·S)을 적용해 out에 붙인다. 코드 포인트 수는 같고 UTF-8 byte
 // 수는 바뀔 수 있다(예: U+023A → U+2C65). 길이가 바뀌는 full folding(ß → ss)과 터키어 규칙은 쓰지
 // 않는다.
-Result<void> TrySimpleCaseFold(StringView input, StringBuilderBase& out) noexcept;
+ROCKS_CORE_API Result<void> TrySimpleCaseFold(StringView input, StringBuilderBase& out) noexcept;
 
 // 대소문자를 무시하는 비교 키 = NFC(SimpleCaseFold(NFD(input)))를 out에 붙인다(Unicode §3.13 정준
 // caseless 일치의 simple folding 판). 멱등이다: 키의 키는 같은 키다.
-Result<void> TryMakeCaselessKey(StringView input, StringBuilderBase& out) noexcept;
+ROCKS_CORE_API Result<void> TryMakeCaselessKey(StringView input, StringBuilderBase& out) noexcept;
 
 // 코드 포인트 하나의 속성이다. 0x10FFFF를 넘으면 Cn·0·false다(surrogate는 Cs).
-GeneralCategory GetGeneralCategory(char32_t codePoint) noexcept;
-uint8 GetCanonicalCombiningClass(char32_t codePoint) noexcept;
-bool IsDefaultIgnorable(char32_t codePoint) noexcept;
+ROCKS_CORE_API GeneralCategory GetGeneralCategory(char32_t codePoint) noexcept;
+ROCKS_CORE_API uint8 GetCanonicalCombiningClass(char32_t codePoint) noexcept;
+ROCKS_CORE_API bool IsDefaultIgnorable(char32_t codePoint) noexcept;
 
 // 단순 case folding 한 글자(없으면 그대로)다.
-char32_t SimpleCaseFold(char32_t codePoint) noexcept;
+ROCKS_CORE_API char32_t SimpleCaseFold(char32_t codePoint) noexcept;
 
 } // namespace rocks

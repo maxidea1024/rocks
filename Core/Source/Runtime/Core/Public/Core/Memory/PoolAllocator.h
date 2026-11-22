@@ -24,7 +24,7 @@ namespace rocks {
 // 반환이 거부되면 Fatal이다. 이 allocator는 객체 생성과 소멸을 대신하지 않는다. 사용 중인
 // 블록을 모두 반환한 후에만
 // Trim/Shutdown이 가능하며, 남은 블록이 있을 때 파괴하면 Fatal이다.
-class PoolAllocator final : public Allocator {
+class ROCKS_CORE_API PoolAllocator final : public Allocator {
 public:
     // blockBytes와 blocksPerChunk는 0보다 커야 하고 blockAlignment는 2의 거듭제곱이어야
     // 한다. 설정 자체가 잘못되면 Fatal, 표현할 수 없는 저장소 크기는 Allocate에서 Overflow다.

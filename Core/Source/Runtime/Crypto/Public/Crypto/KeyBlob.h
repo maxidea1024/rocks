@@ -102,7 +102,7 @@ struct KeyBlobInfo {
 // AuthenticationFailed, 모르는 타입·(타입, 알고리즘)·방식은 Unsupported, 그 뒤 keyId·길이·방식
 // 매개변수의 형식 오류는 AuthenticationFailed다. 비용 상한은 보지 않는다(호출자가 passwordCost로
 // 정책을 정한다).
-[[nodiscard]] Result<KeyBlobInfo> TryPeekKeyBlob(Span<const uint8> blob) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<KeyBlobInfo> TryPeekKeyBlob(Span<const uint8> blob) noexcept;
 
 // KeyBlob에 담을 수 있는 키 타입이다(닫힌 목록).
 template <typename TKey>
@@ -217,17 +217,18 @@ template <KeyBlobKey TKey>
 [[nodiscard]] Result<UnwrappedKey<TKey>> TryUnwrapKeyWithPassword(Span<const uint8> password,
                                                                   Span<const uint8> blob) noexcept;
 
-// 정의는 KeyBlob.cpp에 있고 위 10개 타입으로만 인스턴스화한다.
+// 정의는 KeyBlob.cpp에 있고 위 10개 타입으로만 인스턴스화한다. Modular에서 시험·다른 모듈이
+// 부르므로 인스턴스를 export한다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d5).
 #define ROCKS_CRYPTO_KEYBLOB_EXTERN(TKey)                                                          \
-    extern template Result<usize> TryGetKeyBlobBytes<TKey>(const TKey&,                            \
-                                                           KeyBlobWrapMethod) noexcept;            \
-    extern template Result<usize> TryWrapKey<TKey>(const KdfKey&, KeyId, const TKey&, KeyId,       \
-                                                   Span<uint8>) noexcept;                          \
-    extern template Result<usize> TryWrapKeyWithPassword<TKey>(                                    \
+    extern template ROCKS_CRYPTO_API Result<usize> TryGetKeyBlobBytes<TKey>(                       \
+        const TKey&, KeyBlobWrapMethod) noexcept;                                                  \
+    extern template ROCKS_CRYPTO_API Result<usize> TryWrapKey<TKey>(                               \
+        const KdfKey&, KeyId, const TKey&, KeyId, Span<uint8>) noexcept;                           \
+    extern template ROCKS_CRYPTO_API Result<usize> TryWrapKeyWithPassword<TKey>(                   \
         Span<const uint8>, PasswordCost, const TKey&, KeyId, Span<uint8>) noexcept;                \
-    extern template Result<UnwrappedKey<TKey>> TryUnwrapKey<TKey>(const KdfKey&,                   \
-                                                                  Span<const uint8>) noexcept;     \
-    extern template Result<UnwrappedKey<TKey>> TryUnwrapKeyWithPassword<TKey>(                     \
+    extern template ROCKS_CRYPTO_API Result<UnwrappedKey<TKey>> TryUnwrapKey<TKey>(                \
+        const KdfKey&, Span<const uint8>) noexcept;                                                \
+    extern template ROCKS_CRYPTO_API Result<UnwrappedKey<TKey>> TryUnwrapKeyWithPassword<TKey>(    \
         Span<const uint8>, Span<const uint8>) noexcept;
 
 ROCKS_CRYPTO_KEYBLOB_EXTERN(AeadKey)

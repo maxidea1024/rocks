@@ -59,7 +59,7 @@ inline constexpr usize CompressedBlocksHeaderBytes = 48;
 
 // 블록 컨테이너 설정이다. 형식은 Lz4·Zstd·Deflate만 쓴다(Zlib·Gzip 래퍼와 Lz4Frame frame은
 // 컨테이너와 중복이다. LZ4 블록은 Lz4 raw block으로 저장한다).
-class CompressedBlocksSettings {
+class ROCKS_COMPRESSION_API CompressedBlocksSettings {
 public:
     // 실패: Zlib·Gzip·Lz4Frame·Brotli·사용자 등록 형식(codec ID가 파일에 남는 영속 값이라 실행마다
     // 바뀌는 형식 값을 쓸 수 없다)·모르는 형식, blockSizeLog2가 12–24 밖이면 InvalidArgument다.
@@ -111,7 +111,8 @@ private:
 // rawSize byte를 담은 컨테이너의 최대 크기(헤더 + 블록 표 + rawSize)다. 블록은 원본보다 커지지
 // 않는다. 실패: blockSizeLog2 범위 밖·블록 수가 u32를 넘으면 InvalidArgument, 크기 overflow는
 // Overflow다.
-Result<usize> TryGetCompressedBlocksBound(uint32 blockSizeLog2, uint64 rawSize) noexcept;
+ROCKS_COMPRESSION_API Result<usize> TryGetCompressedBlocksBound(uint32 blockSizeLog2,
+                                                                uint64 rawSize) noexcept;
 
 // source 전체를 컨테이너 하나로 압축해 output 뒤에 붙이고 붙인 byte 수를 반환한다. 코덱 작업
 // 메모리는 scratch에서 할당한다. 실패하면 output 길이를 되돌린다(capacity는 늘 수 있다). source와
@@ -135,7 +136,7 @@ TryCompressBlocksAppend(const CompressedBlocksSettings& settings, Span<const uin
 //   file.Seek(0); file.Write(index);
 //
 // 이동 전용이며 이동된 객체는 StaleHandle이다. 할당기는 객체보다 오래 살아야 한다.
-class CompressedBlocksWriter {
+class ROCKS_COMPRESSION_API CompressedBlocksWriter {
 public:
     CompressedBlocksWriter() noexcept = default;
     ~CompressedBlocksWriter() noexcept;
@@ -188,7 +189,7 @@ class CompressedBlocksReadContext;
 // 컨테이너 인덱스를 검사해 연 reader다. 열린 뒤에는 불변이라 여러 스레드가 const로 공유한다(읽기
 // 문맥은 스레드마다 따로 둔다). 이동 전용이며 이동된 객체는 StaleHandle이다. 할당기는 객체보다
 // 오래 살아야 한다.
-class CompressedBlocksReader {
+class ROCKS_COMPRESSION_API CompressedBlocksReader {
 public:
     CompressedBlocksReader() noexcept = default;
     ~CompressedBlocksReader() noexcept;
@@ -314,7 +315,7 @@ private:
 // 해제한 블록 캐시를 가진다. 캐시는 (reader가 열릴 때 받은 고유 번호, 블록)으로 식별하므로 다른
 // reader나 다시 연 reader와 섞이지 않는다. 같은 reader로 읽는 저장 byte 자체를 바꿨다면
 // Invalidate를 부른다. 이동 전용이다.
-class CompressedBlocksReadContext {
+class ROCKS_COMPRESSION_API CompressedBlocksReadContext {
 public:
     CompressedBlocksReadContext() noexcept = default;
     CompressedBlocksReadContext(CompressedBlocksReadContext&& other) noexcept;

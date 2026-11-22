@@ -56,7 +56,7 @@ inline constexpr uint64 AesGcmMaxAssociatedBytes = (uint64{1} << 61) - 1;
 //   auto key = crypto::hazmat::AesKey::TryImport(keyBytes);    // 16 또는 32 byte
 //   if (!key) { return key.Error(); }
 //   auto done = crypto::hazmat::TryAesCtrXor(key.Value(), counterBlock, input, output);
-class AesKey {
+class ROCKS_CRYPTO_API AesKey {
 public:
     AesKey() noexcept = default;
     ~AesKey() noexcept;
@@ -114,7 +114,7 @@ enum class AesCtrCounterWidth : uint8 {
 //   auto ctr = crypto::hazmat::AesCtr::TryCreate(key, initialCounterBlock);   // 기본 Bits128
 //   if (!ctr) { return ctr.Error(); }
 //   for (...) { if (auto done = ctr.Value().TryProcess(chunk, outChunk); !done) { ... } }
-class AesCtr {
+class ROCKS_CRYPTO_API AesCtr {
 public:
     AesCtr() noexcept = default;
     ~AesCtr() noexcept;
@@ -151,7 +151,7 @@ private:
 // 일회성 AES-CTR이다. 인자·오류·겹침 규칙은 AesCtr::TryCreate·TryProcess와 같고 키 저장소를 쓰지
 // 않는다. 카운터가 모자라면(input이 initialCounterBlock부터 폭 안에 남은 블록보다 길면) 쓰기 전에
 // CapacityExceeded다.
-[[nodiscard]] Result<void>
+[[nodiscard]] ROCKS_CRYPTO_API Result<void>
 TryAesCtrXor(const AesKey& key, Span<const uint8> initialCounterBlock, Span<const uint8> input,
              Span<uint8> output, AesCtrCounterWidth width = AesCtrCounterWidth::Bits128) noexcept;
 
@@ -175,7 +175,7 @@ TryAesCtrXor(const AesKey& key, Span<const uint8> initialCounterBlock, Span<cons
 //   auto written = encryptor.Value().TryUpdate(chunk, outChunk);   // 조각마다
 //   uint8 tag[crypto::hazmat::AesGcmTagBytes];
 //   auto finished = encryptor.Value().TryFinish(Span<uint8>(tag));
-class AesGcmEncryptor {
+class ROCKS_CRYPTO_API AesGcmEncryptor {
 public:
     AesGcmEncryptor() noexcept = default;
     ~AesGcmEncryptor() noexcept;
@@ -223,7 +223,7 @@ private:
 // - TryFinishVerify는 결과와 관계없이 끝낸다. tag 불일치·길이가 틀린 tag(잘린 tag)는
 //   AuthenticationFailed이고 sticky다: 뒤의 모든 호출이 AuthenticationFailed다(Reset 전까지).
 //   성공한 뒤의 호출은 InvalidArgument다.
-class AesGcmDecryptor {
+class ROCKS_CRYPTO_API AesGcmDecryptor {
 public:
     AesGcmDecryptor() noexcept = default;
     ~AesGcmDecryptor() noexcept;

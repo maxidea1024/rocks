@@ -33,7 +33,7 @@ namespace rocks::cvar {
 // 치트 허용 상태다(CVar 13.1절 — `cheat.enabled`, bool, Replicated, 기본 true). ConfigContext::
 // Initialize가 등록한다. 꺼져 있으면 `Cheat()` 변수의 콘솔 쓰기와 치트 명령 실행을 CheatsDisabled로
 // 거부한다. 게임 규칙 객체가 Code 층에, 서버가 Server 층에 쓴다.
-extern CVar<bool> CheatsEnabled;
+ROCKS_CONFIG_API extern CVar<bool> CheatsEnabled;
 
 } // namespace rocks::cvar
 

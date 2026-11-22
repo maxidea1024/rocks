@@ -46,20 +46,24 @@ inline constexpr usize HkdfSha512MaxOutputBytes = 255 * HkdfSha512PrkBytes;
 // extract와 expand를 한 번에 한다. salt가 비어 있으면 RFC 5869대로 해시 길이의 0 byte와 같다.
 // output은 해시 길이 × 255 이하다(넘거나 알고리즘이 열거값이 아니면 InvalidArgument). 빈 output은
 // 아무것도 하지 않는 성공이다. output이 다른 인자와 겹치면 쓰기 전에 InvalidArgument다.
-[[nodiscard]] Result<void> TryHkdf(HkdfAlgorithm algorithm, Span<const uint8> inputKeyMaterial,
-                                   Span<const uint8> salt, Span<const uint8> info,
-                                   Span<uint8> output) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void> TryHkdf(HkdfAlgorithm algorithm,
+                                                    Span<const uint8> inputKeyMaterial,
+                                                    Span<const uint8> salt, Span<const uint8> info,
+                                                    Span<uint8> output) noexcept;
 
 // PRK = HMAC(salt, ikm)다. prk.Size()는 해시 길이(32·64)와 같아야 한다. 증분 extract는 두지
 // 않는다(IKM은 공유 비밀처럼 짧다).
-[[nodiscard]] Result<void> TryHkdfExtract(HkdfAlgorithm algorithm, Span<const uint8> salt,
-                                          Span<const uint8> inputKeyMaterial,
-                                          Span<uint8> prk) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void> TryHkdfExtract(HkdfAlgorithm algorithm,
+                                                           Span<const uint8> salt,
+                                                           Span<const uint8> inputKeyMaterial,
+                                                           Span<uint8> prk) noexcept;
 
 // PRK에서 output.Size()만큼 뽑는다. prk.Size()는 해시 길이와 정확히 같아야 한다(RFC 5869는 더 긴
 // PRK도 허용하지만 libsodium이 받지 않는다).
-[[nodiscard]] Result<void> TryHkdfExpand(HkdfAlgorithm algorithm, Span<const uint8> prk,
-                                         Span<const uint8> info, Span<uint8> output) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void> TryHkdfExpand(HkdfAlgorithm algorithm,
+                                                          Span<const uint8> prk,
+                                                          Span<const uint8> info,
+                                                          Span<uint8> output) noexcept;
 
 // ---- BLAKE2b KDF ----
 
@@ -103,7 +107,7 @@ inline constexpr usize KdfMaxDerivedBytes = 64;
 
 // BLAKE2b KDF의 마스터 키(32 byte)다. move-only이며 생성 뒤 바뀌지 않으므로 여러 스레드가 동시에
 // 파생에 써도 된다. 키 저장소에 있고 소멸 때 지운다. 평문 내보내기는 hazmat::TryExportKey다.
-class KdfKey {
+class ROCKS_CRYPTO_API KdfKey {
 public:
     KdfKey() noexcept = default;
 
@@ -130,19 +134,20 @@ private:
 // master에서 subkeyId·context로 bytes(16–64) 길이의 비밀을 뽑는다. libsodium
 // crypto_kdf_derive_from_key와 같은 byte다. 같은 입력은 언제나 같은 결과이고, id나 context가 다르면
 // 독립인 값이다. 빈 키는 StaleHandle, 길이가 범위 밖이면 InvalidArgument다.
-[[nodiscard]] Result<SecretBytes> TryDeriveSecret(const KdfKey& master, uint64 subkeyId,
-                                                  KdfContext context, usize bytes) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<SecretBytes>
+TryDeriveSecret(const KdfKey& master, uint64 subkeyId, KdfContext context, usize bytes) noexcept;
 
 // 알고리즘의 권장 길이로 MAC 키를 뽑는다. 키 타입과 알고리즘을 파생 입력에 섞는다(위 지침).
 // 알고리즘이 열거값이 아니면 InvalidArgument, 이 기기에서 쓸 수 없으면(AES HW가 없는 AES-CMAC)
 // Unsupported다(파생 전에 검사한다).
-[[nodiscard]] Result<MacKey> TryDeriveMacKey(const KdfKey& master, uint64 subkeyId,
-                                             KdfContext context, MacAlgorithm algorithm) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<MacKey> TryDeriveMacKey(const KdfKey& master, uint64 subkeyId,
+                                                              KdfContext context,
+                                                              MacAlgorithm algorithm) noexcept;
 
 // 하위 마스터 키(32 byte)를 뽑는다. 키 계층(앱 → 기능 → 항목)을 만들 때 쓴다. 키 타입을 파생 입력에
 // 섞는다.
-[[nodiscard]] Result<KdfKey> TryDeriveKdfKey(const KdfKey& master, uint64 subkeyId,
-                                             KdfContext context) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<KdfKey> TryDeriveKdfKey(const KdfKey& master, uint64 subkeyId,
+                                                              KdfContext context) noexcept;
 
 // transcript(조각 목록)에 묶인 하위 마스터 키(32 byte)를 뽑는다. KEM 공유 비밀처럼 맥락(공개키·
 // 암호문·역할·협상 값)에 묶어야 하는 비밀에서 세션 키를 만들 때 쓴다(예: 서명 기반 AKE의 ML-KEM
@@ -154,7 +159,7 @@ private:
 //   const Span<const uint8> transcript[] = {recipientKey.View(), ciphertext, role};
 //   auto session = crypto::TryDeriveBoundKdfKey(shared.Value(), 1, HandshakeContext,
 //                                               Span<const Span<const uint8>>(transcript));
-[[nodiscard]] Result<KdfKey>
+[[nodiscard]] ROCKS_CRYPTO_API Result<KdfKey>
 TryDeriveBoundKdfKey(const KdfKey& master, uint64 subkeyId, KdfContext context,
                      Span<const Span<const uint8>> transcript) noexcept;
 
@@ -162,7 +167,8 @@ namespace hazmat {
 
 // 키 byte(32)를 평문으로 output에 복사한다(10.4절: 시험·상호운용 도구 전용, 저장은 KeyBlob).
 // output.Size()는 32여야 한다(아니면 InvalidArgument). 빈 키는 StaleHandle이다.
-[[nodiscard]] Result<void> TryExportKey(const KdfKey& key, Span<uint8> output) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void> TryExportKey(const KdfKey& key,
+                                                         Span<uint8> output) noexcept;
 
 } // namespace hazmat
 

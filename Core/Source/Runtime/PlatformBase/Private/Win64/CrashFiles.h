@@ -53,7 +53,7 @@ DWORD CaptureCrashSnapshot(HANDLE process, CrashDumpDetail detail, HPSS& snapsho
 // 시험용: 덤프 callback마다 callback 종류로 부른다(nullptr이면 끈다). 덤프의 특정 단계에서 다른
 // 스레드가 lock을 잡게 맞추는 시험이 쓴다(TestSupport). 설치 전에 한 번 건다.
 using CrashDumpCallbackHook = void (*)(ULONG callbackType) noexcept;
-void SetCrashDumpCallbackHookForTest(CrashDumpCallbackHook hook) noexcept;
+ROCKS_PLATFORMBASE_API void SetCrashDumpCallbackHookForTest(CrashDumpCallbackHook hook) noexcept;
 
 // 설치 때 굳힌 크래시 폴더 경로다(UTF-16과 진단용 UTF-8).
 const wchar_t* CrashPrimaryFolder() noexcept;

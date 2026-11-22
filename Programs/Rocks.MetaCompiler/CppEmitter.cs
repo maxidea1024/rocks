@@ -889,6 +889,13 @@ internal static class CppEmitter
     // 필드 접근·Binds 검사 등)에 모듈 API 매크로를 붙이는 줄 출력이다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d2). 다른 모듈의 생성 코드·
     // 헤더 템플릿이 이 정적 멤버를 부르므로 Modular에서 export해야 한다. inline 정의(`{`)·constexpr·이미 매크로가 있는 선언은 그대로 둔다.
     // 클래스 단위로 붙이지 않는 것은 NativeKey처럼 멤버에 이미 붙인 선언과 겹치면 안 되기 때문이다.
+    // 선언 줄에 본문({…} — 마지막 닫는 괄호 뒤의 {)이 있는가다. 기본 인자의 {}(`ModuleLease module = {}`)는 괄호 안이라 본문이 아니다.
+    private static bool HasBody(string declaration)
+    {
+        int lastParen = declaration.LastIndexOf(')');
+        return declaration.IndexOf('{', lastParen < 0 ? 0 : lastParen) >= 0;
+    }
+
     private static Action<string> ExportingLine(string module, Action<string> Line)
     {
         string macro = ApiMacro(module);
@@ -898,9 +905,10 @@ internal static class CppEmitter
             string trimmed = text.TrimStart();
             // 멤버 템플릿(앞 줄이 template <...>)은 쓰는 쪽에서 인스턴스가 생기므로 붙이지 않는다(BD27).
             bool outOfLine = !afterTemplate && trimmed.StartsWith("static ", StringComparison.Ordinal) &&
-                !trimmed.StartsWith("static constexpr", StringComparison.Ordinal) && trimmed.EndsWith(';') && !trimmed.Contains('{') &&
+                !trimmed.StartsWith("static constexpr", StringComparison.Ordinal) && trimmed.EndsWith(';') && !HasBody(trimmed) &&
                 !trimmed.Contains(macro, StringComparison.Ordinal);
-            afterTemplate = trimmed.StartsWith("template", StringComparison.Ordinal) && !trimmed.EndsWith(';');
+            // template 머리만 있는 줄(`template <...>`)이다. 머리와 선언이 한 줄인 템플릿(`template <class V> static ... {}`)은 다음 줄과 무관하다.
+            afterTemplate = trimmed.StartsWith("template", StringComparison.Ordinal) && trimmed.TrimEnd().EndsWith('>');
             Line(outOfLine ? text[..(text.Length - trimmed.Length)] + "static " + macro + " " + trimmed["static ".Length..] : text);
         };
     }

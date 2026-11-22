@@ -4,8 +4,10 @@
 #include <Core/Text/StringBuilder.h>
 #include <Core/Module/ModuleEntry.h>
 #include <HostConfig/HostSettings.h>
+#include <ModuleLoader/ModuleLoader.h>
 #include <LogHost/LogHost.h>
 #include <Platform/Clock.h>
+#include <Platform/Fatal.h>
 #include <Platform/File.h>
 #include <Platform/Process.h>
 #include <Platform/Thread.h>
@@ -302,10 +304,22 @@ TEST(HostSettings_ProjectDirectoryAndUserData) {
 }
 } // namespace host_settings_tests_file
 
-// Config 모듈의 진입점이다(모듈 표 시험이 실제 기기 프로필 설정 등록을 함께 싣는다).
-const rocks::ModuleEntry& RocksModuleEntry_Config() noexcept;
-
 namespace host_settings_test {
+
+// Config 모듈의 진입 기술이다(모듈 표 시험이 실제 기기 프로필 설정 등록을 함께 싣는다). 프로세스
+// 로더가 가진 것을 쓴다 — Modular에서 Config의 진입 함수(RocksModuleEntry_Config)는 Config 공유
+// 라이브러리 밖으로 export되지 않는다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d5).
+const ModuleEntry& ConfigEntry() noexcept {
+    ModuleLoader& modules = test::ProcessModules();
+    const ModuleTable table = modules.Table();
+    for (usize index = 0; index < table.Size(); ++index) {
+        if (StringView(table[index].name) == StringView("Config")) {
+            return modules.EntryAt(index);
+        }
+    }
+
+    platform::Fatal("HostSettingsTests: the process module loader has no Config module");
+}
 
 constinit CVar<int32> LateModuleValue =
     cvar::Var("render.late_module.value", 1).Help("Value owned by a module that starts late");
@@ -328,7 +342,7 @@ const ModuleEntry& LateSettingsEntry() noexcept {
 constexpr const char* ConfigOnly[] = {"Config"};
 
 constexpr ModuleTableRow LateRows[] = {
-    {"Config", &RocksModuleEntry_Config, nullptr, 0, LoadingPhase::Default},
+    {"Config", &ConfigEntry, nullptr, 0, LoadingPhase::Default},
     {"LateSettings", &LateSettingsEntry, ConfigOnly, 1, LoadingPhase::PostDefault},
 };
 

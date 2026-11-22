@@ -66,13 +66,13 @@ struct KemInfo {
 };
 
 // 알고리즘 정보다. 열거값이 아니면 InvalidArgument다.
-[[nodiscard]] Result<KemInfo> TryGetKemInfo(KemAlgorithm algorithm) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<KemInfo> TryGetKemInfo(KemAlgorithm algorithm) noexcept;
 
 // 기본 KEM(X-Wing)이다.
-[[nodiscard]] KemAlgorithm GetPreferredKem() noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API KemAlgorithm GetPreferredKem() noexcept;
 
 // KEM 공개키다(값 타입). 기본 생성한 값은 비어 있다.
-class KemPublicKey {
+class ROCKS_CRYPTO_API KemPublicKey {
 public:
     KemPublicKey() noexcept = default;
 
@@ -102,7 +102,7 @@ private:
 };
 
 // KEM 키 쌍이다. move-only이며 생성 뒤 바뀌지 않는다. 키 저장소에 seed만 둔다.
-class KemKeyPair {
+class ROCKS_CRYPTO_API KemKeyPair {
 public:
     KemKeyPair() noexcept = default;
 
@@ -143,20 +143,21 @@ private:
 //   부분이 small-order 점) AuthenticationFailed이고 ciphertext를 지운다.
 // - 키 저장소가 찼으면 OutOfMemory다. 캡슐화 난수는 libsodium 난수 경로이고 OS 난수 실패는
 //   Fatal이다.
-[[nodiscard]] Result<KdfKey> TryEncapsulate(const KemPublicKey& recipient,
-                                            Span<uint8> ciphertext) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<KdfKey> TryEncapsulate(const KemPublicKey& recipient,
+                                                             Span<uint8> ciphertext) noexcept;
 
 // 암호문에서 공유 비밀을 얻는다. 빈 키 쌍은 StaleHandle이다. 암호문 길이가 틀리거나 X-Wing의 X25519
 // 부분이 small-order 점이면 AuthenticationFailed다. ML-KEM 부분이 변조되면 오류 없이 다른 공유
 // 비밀이 나온다(암묵적 거부). ML-KEM 확장 비밀키를 둘 임시 슬롯이 없으면 OutOfMemory다.
-[[nodiscard]] Result<KdfKey> TryDecapsulate(const KemKeyPair& recipient,
-                                            Span<const uint8> ciphertext) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<KdfKey> TryDecapsulate(const KemKeyPair& recipient,
+                                                             Span<const uint8> ciphertext) noexcept;
 
 namespace hazmat {
 
 // seed를 평문으로 output에 복사한다(10.4절). 빈 키 쌍은 StaleHandle, output.Size()가
 // KemInfo::seedBytes와 다르면 InvalidArgument다. output은 호출자가 지운다.
-[[nodiscard]] Result<void> TryExportSeed(const KemKeyPair& key, Span<uint8> output) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void> TryExportSeed(const KemKeyPair& key,
+                                                          Span<uint8> output) noexcept;
 
 } // namespace hazmat
 

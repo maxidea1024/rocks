@@ -34,7 +34,7 @@ struct ExternalAllocatorBackend {
 // 악의적이거나 이 계약을 위반하는 공급자의 모든 오류를 격리하지는 못한다.
 // 객체 파괴 전 모든 호출을 끝내고 받은 주소를 반환해야 한다. 추적 중 작업이나 살아 있는
 // allocation은 Fatal이다. 조회·조기 반환 호출까지 파괴와 경합하지 않도록 caller가 보장한다.
-class ExternalAllocator final : public Allocator {
+class ROCKS_CORE_API ExternalAllocator final : public Allocator {
 public:
     // metadata를 생략하면 플랫폼 할당을 사용한다. 별도로 지정하면 기록 확보 실패를
     // 주입할 수 있다. 기록 확보 실패 시 backend는 호출하지 않는다.

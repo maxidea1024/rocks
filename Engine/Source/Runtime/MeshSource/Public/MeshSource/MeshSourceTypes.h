@@ -157,11 +157,11 @@ enum class MeshIssue : uint8 {
 // name이 prefix(엔진 접두 이름 — MeshAttributeName::SkinWeightsPrefix·MorphPrefix·
 // MorphNormalPrefix)로 시작하고 접두 뒤가 비어 있지 않은지다. 접두 비교는 ASCII 대소문자를
 // 무시한다(3.7절 5 — ValidateMeshSource의 판정과 같다). 빌드가 프로필·morph 속성을 고를 때 쓴다.
-bool MatchesMeshAttributePrefix(StringView name, StringView prefix) noexcept;
+ROCKS_MESHSOURCE_API bool MatchesMeshAttributePrefix(StringView name, StringView prefix) noexcept;
 
 // 진단 세부 규칙의 이름이다(예: DuplicateEdge → "DuplicateEdge"). 모르는 값은 "Unknown"이다. 반환
 // 문자열은 정적 수명이다(로그·명령행 진단 줄이 쓴다).
-const char* MeshIssueName(MeshIssue issue) noexcept;
+ROCKS_MESHSOURCE_API const char* MeshIssueName(MeshIssue issue) noexcept;
 
 // 원본 메시의 진단 하나다(3.7절 10). 실패한 호출은 out 인자로 하나를 채우고(성공하면 건드리지
 // 않는다), 경고는 SanitizeMeshSource가 배열로 돌려준다.
@@ -184,6 +184,7 @@ struct MeshDiagnostic {
 
 // diagnostic을 AssetSystem 4.6절 형식으로 옮긴다: code·error는 그대로, asset은 인자, section은 0,
 // detail은 index(MeshNoIndex면 count)다.
-AssetDiagnostic ToAssetDiagnostic(const MeshDiagnostic& diagnostic, AssetId asset) noexcept;
+ROCKS_MESHSOURCE_API AssetDiagnostic ToAssetDiagnostic(const MeshDiagnostic& diagnostic,
+                                                       AssetId asset) noexcept;
 
 } // namespace rocks

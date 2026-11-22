@@ -11,11 +11,12 @@ class ObjectRegistry;
 class ConstructionContext;
 
 namespace detail {
-Result<void> RetainRoot(ObjectRegistry*, ObjectHandle) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void> RetainRoot(ObjectRegistry*, ObjectHandle) noexcept;
 ROCKS_OBJECTRUNTIME_API void ReleaseRoot(ObjectRegistry*, ObjectHandle) noexcept;
 ROCKS_OBJECTRUNTIME_API Result<void*> AccessBorrow(ObjectRegistry*, ObjectHandle,
                                                    const void*) noexcept;
-Result<ObjectLifecycle> InspectBorrow(ObjectRegistry*, ObjectHandle) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<ObjectLifecycle> InspectBorrow(ObjectRegistry*,
+                                                              ObjectHandle) noexcept;
 ROCKS_OBJECTRUNTIME_API void ReleaseBorrow(ObjectRegistry*, ObjectHandle) noexcept;
 ROCKS_OBJECTRUNTIME_API void ReleaseBackend(ObjectRegistry*, ObjectHandle) noexcept;
 ROCKS_OBJECTRUNTIME_API void ReleaseEncodePin(ObjectRegistry*, ObjectHandle) noexcept;
