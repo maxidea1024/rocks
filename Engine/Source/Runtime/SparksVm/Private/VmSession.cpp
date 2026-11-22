@@ -23,7 +23,8 @@ VmSession::VmSession(Allocator& allocator, VmHost* host) noexcept
       itemValues_(allocator), itemBuffers_(allocator), writes_(allocator), writeValues_(allocator),
       writeBuffers_(allocator), deliveries_(allocator), suspended_(allocator), waits_(allocator),
       freeWaits_(allocator), fragmentWaits_(allocator), resumeOrder_(allocator),
-      resumeWaits_(allocator), requests_(allocator), applying_(allocator), destroys_(allocator) {
+      resumeWaits_(allocator), requests_(allocator), applying_(allocator), destroys_(allocator),
+      faults_(allocator) {
     execution_.session_ = this;
 }
 
@@ -300,6 +301,22 @@ Result<VmCallResult> VmSession::RunHook(uint32 instance, BytecodeHookKind kind,
         return Result<VmCallResult>::Failure(ErrorCode::InvalidArgument);
     }
 
+    // 격리: Destroy hook만(SL 8.3절). Tick 중지: 모듈이 다시 링크되기 전까지 Tick 계열 없음.
+    const bool tickKind = kind == BytecodeHookKind::Tick || kind == BytecodeHookKind::FixedTick ||
+                          kind == BytecodeHookKind::LateTick;
+    Instance& target = instances_[instance];
+    if (target.ticksStopped && target.module->generation_ != target.tickStopGeneration) {
+        target.ticksStopped = false;
+    }
+
+    if ((target.isolated && kind != BytecodeHookKind::Destroy) ||
+        (target.ticksStopped && tickKind)) {
+        BeginEntry(); // 앞 진입의 기록을 남기지 않는다
+        VmCallResult skipped;
+        skipped.skipped = true;
+        return Result<VmCallResult>::Success(skipped);
+    }
+
     // 기반 사슬(파생 → 기반)을 모아 기반부터 부른다(SL 5.1절 누적).
     const VmLinkedModule* chainModules[VmSessionMaxBaseDepth] = {};
     uint32 chainClasses[VmSessionMaxBaseDepth] = {};
@@ -390,6 +407,27 @@ Result<VmCallResult> VmSession::RunHook(uint32 instance, BytecodeHookKind kind,
             execution_.ReleaseReturned();
             // 정지한 hook은 끝난 것으로 보고 사슬을 잇는다(재개는 Advance — SparksRuntime 2.4절).
             if (result.outcome != VmOutcome::Returned && result.outcome != VmOutcome::Suspended) {
+                // fault 위치별 처리(SL 8.3절 표): spawn 경로(Awake·첫 Enable)는 host가 spawn 실패로
+                // 처리하고, 재활성화 Enable·Start는 격리, Tick 계열은 Tick 중지, 그 밖은 격리 창에
+                // 센다.
+                if (result.outcome == VmOutcome::Faulted) {
+                    if (tickKind) {
+                        RecordFault(result.fault);
+                        instances_[instance].ticksStopped = true;
+                        instances_[instance].tickStopGeneration =
+                            instances_[instance].module->generation_;
+                    } else if (kind == BytecodeHookKind::Start ||
+                               (kind == BytecodeHookKind::Enable &&
+                                instances_[instance].enabledOnce)) {
+                        RecordFault(result.fault);
+                        Isolate(instance);
+                    } else {
+                        NoteFault(instance, result,
+                                  kind != BytecodeHookKind::Awake &&
+                                      kind != BytecodeHookKind::Enable);
+                    }
+                }
+
                 // hook 쓰기의 기록을 억제 중에 정리한 뒤 전달은 억제 없이(LC6b 리뷰 B2).
                 if (auto ended = EndFragment(); !ended) {
                     return Result<VmCallResult>::Failure(ended.Error());
@@ -412,6 +450,7 @@ Result<VmCallResult> VmSession::RunHook(uint32 instance, BytecodeHookKind kind,
     suppressChanged_ = false;
     if (kind == BytecodeHookKind::Enable) {
         instances_[instance].enabled = true;
+        instances_[instance].enabledOnce = true;
         for (Connection& connection : connections_) {
             connection.active = connection.subscriber == instance ? true : connection.active;
         }
@@ -443,6 +482,13 @@ Result<VmCallResult> VmSession::Call(uint32 instance, const VmLinkedModule& modu
         refArguments[at + 1] = refs[at];
     }
 
+    if (instances_[instance].isolated) {
+        BeginEntry();
+        VmCallResult skipped;
+        skipped.skipped = true; // 격리: admission 없음(SL 8.3절)
+        return Result<VmCallResult>::Success(skipped);
+    }
+
     BeginEntry();
     execution_.keepLogs_ = true;
     struct KeepLogs {
@@ -458,6 +504,10 @@ Result<VmCallResult> VmSession::Call(uint32 instance, const VmLinkedModule& modu
     SettleWaits(called);
     if (!called) {
         return called;
+    }
+
+    if (called.Value().outcome == VmOutcome::Faulted) {
+        NoteFault(instance, called.Value(), true);
     }
 
     // 반환 값은 전달(다른 Call) 뒤에도 읽을 수 있어야 한다: 반환 slot·버퍼를 보관하고 전달한 뒤
@@ -718,6 +768,10 @@ Result<void> VmSession::ApplyRequests() noexcept {
             }
 
             Instance& entry = instances_[request.instance];
+            if (entry.isolated && request.kind != RequestKind::Destroy) {
+                continue; // 격리: 다시 활성화할 수 없다(SL 8.3절)
+            }
+
             if (request.kind == RequestKind::Enable && !entry.enabled) {
                 status = ApplyHook(request.instance, BytecodeHookKind::Enable);
             } else if (request.kind == RequestKind::Disable && entry.enabled) {
@@ -811,6 +865,70 @@ Result<void> VmSession::CloseSession() noexcept {
     execution_.Unwind();
     execution_.ReleaseReturned();
     return Result<void>::Success();
+}
+
+VmSession::InstanceState VmSession::StateOf(uint32 instance) const noexcept {
+    if (instance >= instances_.Size() || !instances_[instance].attached) {
+        return InstanceState::Normal;
+    }
+
+    const Instance& entry = instances_[instance];
+    return entry.isolated       ? InstanceState::Isolated
+           : entry.ticksStopped ? InstanceState::TicksStopped
+                                : InstanceState::Normal;
+}
+
+void VmSession::RecordFault(const VmFault& fault) noexcept {
+    for (FaultRecord& record : faults_) {
+        if (record.module == fault.module && record.function == fault.function &&
+            record.address == fault.address && record.kind == fault.kind) {
+            ++record.count;
+            return;
+        }
+    }
+
+    FaultRecord record;
+    record.module = fault.module;
+    record.function = fault.function;
+    record.address = fault.address;
+    record.kind = fault.kind;
+    record.count = 1;
+    static_cast<void>(faults_.TryPushBack(record)); // 기록 실패는 기록만 버린다
+}
+
+void VmSession::NoteFault(uint32 instance, const VmCallResult& result, bool counts) noexcept {
+    RecordFault(result.fault);
+    if (!counts || instance >= instances_.Size() || !instances_[instance].attached ||
+        instances_[instance].isolated) {
+        return;
+    }
+
+    // 직전 IsolationWindowFrames 프레임(일시 정지 제외, 경계 포함) 안의 세 번째 fault면
+    // 격리(SL 8.3절 SD42). 고리에는 마지막 세 fault의 프레임이 있다.
+    Instance& entry = instances_[instance];
+    entry.faultFrames[entry.faultCount % IsolationFaults] = activeFrame_;
+    ++entry.faultCount;
+    if (entry.faultCount >= IsolationFaults) {
+        const uint64 oldest = entry.faultFrames[entry.faultCount % IsolationFaults];
+        if (activeFrame_ - oldest <= IsolationWindowFrames) {
+            Isolate(instance);
+        }
+    }
+}
+
+void VmSession::Isolate(uint32 instance) noexcept {
+    Instance& entry = instances_[instance];
+    if (entry.isolated) {
+        return;
+    }
+
+    entry.isolated = true;
+    entry.enabled = false;
+    CancelExecutions(instance, true);
+    ReleaseHeldFields(instance);
+    Disconnect(instance);
+    DropWrites(instance);
+    EndEventWaits(entry.handle);
 }
 
 } // namespace rocks::sparks

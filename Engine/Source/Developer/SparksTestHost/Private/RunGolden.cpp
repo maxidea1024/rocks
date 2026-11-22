@@ -1021,7 +1021,7 @@ static void AppendDeliveries(StringBuilderBase& actual, const VmSession& session
         actual.Append(" -> ");
         switch (delivery.result.outcome) {
         case VmOutcome::Returned:
-            actual.Append("ok");
+            actual.Append(delivery.result.skipped ? "skipped" : "ok");
             break;
         case VmOutcome::Faulted:
             actual.AppendFormat("fault {} at {}:{}", VmFaultKindName(delivery.result.fault.kind),
@@ -1154,9 +1154,9 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
             line.StartsWith("detach ") || line.StartsWith("emit ") || line == "phase" ||
             line.StartsWith("phase ") || line.StartsWith("advance ") || line == "fixed" ||
             line.StartsWith("fixed ") || line == "stats" || line.StartsWith("stats ") ||
-            line.StartsWith("request ") || line == "apply" || line.StartsWith("apply ") ||
-            line == "endframe" || line.StartsWith("endframe ") || line == "close" ||
-            line.StartsWith("close ")) {
+            line.StartsWith("request ") || line.StartsWith("state ") || line == "apply" ||
+            line.StartsWith("apply ") || line == "endframe" || line.StartsWith("endframe ") ||
+            line == "close" || line.StartsWith("close ")) {
             usize arrowAt = line.ByteCount();
             for (usize index = 0; index + RunArrow.ByteCount() <= line.ByteCount(); ++index) {
                 if (StringView(line.Data() + index, RunArrow.ByteCount()) == RunArrow) {
@@ -1245,18 +1245,38 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
                 actual.Append(directive).Append(RunArrow);
                 Result<void> stepped = Result<void>::Success();
                 if (verb == "advance") {
-                    // `advance <Game 초> [<UI 초>] [paused]`.
+                    // `advance <Game 초> [<UI 초>] [paused] [x<횟수>]` — 횟수만큼 진행하고 마지막
+                    // 진행의 기록만 쓴다(격리 창 같은 긴 프레임 시험).
+                    StringView options = rest;
+                    uint32 repeat = 1;
+                    for (usize at = options.ByteCount(); at > 0; --at) {
+                        if (options.Data()[at - 1] == 'x' &&
+                            (at == 1 || options.Data()[at - 2] == ' ')) {
+                            auto count = TryParseUInt32(
+                                StringView(options.Data() + at, options.ByteCount() - at));
+                            if (!count || count.Value() == 0) {
+                                return bad("'advance' needs a repeat count after 'x'");
+                            }
+
+                            repeat = count.Value();
+                            options = RunValues::Trim(StringView(options.Data(), at - 1));
+                            break;
+                        }
+                    }
+
                     constexpr StringView Paused = "paused";
-                    const bool paused = rest.EndsWith(Paused);
+                    const bool paused = options.EndsWith(Paused);
                     const StringView uiText = RunValues::Trim(StringView(
-                        rest.Data(), rest.ByteCount() - (paused ? Paused.ByteCount() : 0)));
+                        options.Data(), options.ByteCount() - (paused ? Paused.ByteCount() : 0)));
                     auto seconds = TryParseDouble(target);
                     auto ui = TryParseDouble(uiText.IsEmpty() ? target : uiText);
                     if (!seconds || !ui) {
                         return bad("'advance' needs seconds");
                     }
 
-                    stepped = session.Advance(seconds.Value(), ui.Value(), paused);
+                    for (uint32 step = 0; step < repeat && stepped; ++step) {
+                        stepped = session.Advance(seconds.Value(), ui.Value(), paused);
+                    }
                     if (!stepped && stepped.Error() == ErrorCode::InvalidArgument) {
                         actual.Append("invalid");
                         stepped = Result<void>::Success();
@@ -1311,7 +1331,14 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
                         return bad("the object has no instance (use 'new' first)");
                     }
 
-                    if (verb == "request") {
+                    if (verb == "state") {
+                        // instance의 fault 처리 상태(SparksRuntime 2.6절 — LC6d3).
+                        const VmSession::InstanceState state = session.StateOf(instance);
+                        actual.Append(state == VmSession::InstanceState::Isolated ? "isolated"
+                                      : state == VmSession::InstanceState::TicksStopped
+                                          ? "ticks stopped"
+                                          : "normal");
+                    } else if (verb == "request") {
                         // `request #n enable|disable|destroy`(지연 적용 요청 —
                         // SparksRuntime 2.6절).
                         const bool destroy = rest == "destroy";
@@ -1544,7 +1571,7 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
             if (ran) {
                 switch (result.outcome) {
                 case VmOutcome::Returned:
-                    actual.Append("ok");
+                    actual.Append(result.skipped ? "skipped" : "ok");
                     break;
                 case VmOutcome::Faulted:
                     actual.AppendFormat("fault {} at {}:{}", VmFaultKindName(result.fault.kind),
@@ -1805,7 +1832,9 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
         actual.Append(call).Append(RunArrow);
         switch (result.outcome) {
         case VmOutcome::Returned:
-            if (values.IsBuffer(returned)) {
+            if (result.skipped) {
+                actual.Append("skipped"); // 격리된 instance(반환 값 없음)
+            } else if (values.IsBuffer(returned)) {
                 values.FormatValue(actual, returned, execution.ReturnedBuffers()[0]);
             } else {
                 values.Format(actual, returned, execution.ReturnedSlots());

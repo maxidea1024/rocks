@@ -149,6 +149,32 @@ public:
         return static_cast<uint32>(requests_.Size());
     }
 
+    // ---- fault 처리·격리(SparksRuntime 2.6절 — LC6d3, SL 8.3절) ----
+
+    static constexpr uint32 IsolationFaults = 3;         // 이 수번째 fault에서 격리
+    static constexpr uint64 IsolationWindowFrames = 600; // 그 fault들이 든 프레임 폭(경계 포함)
+
+    enum class InstanceState : uint8 {
+        Normal,
+        TicksStopped, // Tick 계열 fault — 그 모듈이 다시 링크될 때까지 Tick·FixedTick·LateTick 없음
+        Isolated      // admission은 Destroy hook만
+    };
+
+    InstanceState StateOf(uint32 instance) const noexcept;
+
+    // fault 위치별 기록이다: (모듈, 함수, 주소, 종류)마다 첫 기록과 횟수(SL 8.3절 "보고").
+    struct FaultRecord {
+        const VmLinkedModule* module = nullptr;
+        uint32 function = NoBytecodeIndex;
+        uint32 address = NoBytecodeIndex;
+        VmFaultKind kind = VmFaultKind::None;
+        uint64 count = 0;
+    };
+
+    Span<const FaultRecord> Faults() const noexcept {
+        return faults_.View();
+    }
+
     // `@skipWhileBusy`로 버린 이벤트 수다(디버거 표시 — SL 6.1절 SD11).
     uint64 SkippedWhileBusy() const noexcept {
         return skippedWhileBusy_;
@@ -386,6 +412,13 @@ private:
         bool enabled = false;        // Enable hook이 끝났고 Disable 전(연결이 살아 있다)
         uint64 serial = 0;           // 생성 번호(session 안에서 유일 — 번호 재사용 구별)
         bool pendingDestroy = false; // 파괴 적용됨(새 전달·admission 없음 — 프레임 끝에 정리)
+        // fault 처리(LC6d3).
+        bool isolated = false;
+        bool ticksStopped = false;
+        uint64 tickStopGeneration = 0; // Tick 중지 때 모듈 링크 세대(바뀌면 푼다)
+        bool enabledOnce = false;      // 첫 Enable(spawn)이 끝났다 — 뒤 Enable은 재활성화
+        uint64 faultFrames[IsolationFaults] = {};
+        uint32 faultCount = 0;
         Array<uint64> scalars;
         Array<uint64> refs;
         Array<VmBuffer*> buffers;
@@ -468,6 +501,15 @@ private:
     Array<Request> applying_;
     Array<Request> destroys_;
     bool closed_ = false;
+    // fault 처리(LC6d3).
+    Array<FaultRecord> faults_;
+    uint64 activeFrame_ = 0; // 일시 정지가 아닌 프레임 수(격리 창의 기준)
+    // fault를 위치별로 기록하고, counts면 instance의 격리 창에 센다(세 번째면 격리).
+    void NoteFault(uint32 instance, const VmCallResult& result, bool counts) noexcept;
+    void RecordFault(const VmFault& fault) noexcept;
+    // 격리(SL 8.3절): Disable hook 없이 실행 취소 → 유지 자원 필드 → 연결·이벤트 대기 폐기. 값
+    // 필드는 둔다.
+    void Isolate(uint32 instance) noexcept;
     bool nested_ = false; // 적용 루프 안(진입 기록을 이어 모은다)
     // 수명 hook 하나를 적용 기록으로 돌린다.
     Result<void> ApplyHook(uint32 instance, BytecodeHookKind kind) noexcept;

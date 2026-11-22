@@ -684,7 +684,8 @@ Result<void> VmSession::Drain() noexcept {
 
                 connection = connections_[chosen];
                 lastOrder = connection.order;
-                if (instances_[connection.subscriber].pendingDestroy) {
+                if (instances_[connection.subscriber].pendingDestroy ||
+                    instances_[connection.subscriber].isolated) {
                     continue; // 파괴 적용됨: 새 전달 없음(SparksRuntime 2.6절)
                 }
             }
@@ -756,6 +757,10 @@ Result<void> VmSession::Drain() noexcept {
             if (!called) {
                 ReleaseItem(item);
                 return Result<void>::Failure(called.Error());
+            }
+
+            if (called.Value().outcome == VmOutcome::Faulted) {
+                NoteFault(connection.subscriber, called.Value(), true); // 그 실행 트리만 끝
             }
 
             Delivery delivery;

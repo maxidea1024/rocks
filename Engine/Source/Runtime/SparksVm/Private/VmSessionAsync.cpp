@@ -777,6 +777,10 @@ Result<void> VmSession::ResumeSuspended(uint32 chosen, uint64 wait, uint32 depth
 
     currentDepth_ = 0;
     currentRoot_ = 0;
+    if (childWait == 0 && continued.Value().outcome == VmOutcome::Faulted) {
+        NoteFault(instance, continued.Value(), true); // 실행 트리의 뿌리 fault(하위는 부모가 센다)
+    }
+
     if (childWait != 0 && continued.Value().outcome != VmOutcome::Suspended) {
         if (auto finished = FinishChild(childWait, continued.Value(), depth, root, inDrain);
             !finished && failure == ErrorCode::None) {
@@ -825,7 +829,12 @@ Result<void> VmSession::FinishChild(uint64 childWait, const VmCallResult& result
             }
 
             const uint64 up = parent.childWait;
+            const uint32 parentInstance = parent.instance;
             CancelSuspended(owner, false);
+            if (up == 0) {
+                NoteFault(parentInstance, result, true); // 실행 트리 하나는 한 번 센다
+            }
+
             if (up == 0 || !DecodeWait(up, node)) {
                 return failure == ErrorCode::None ? Result<void>::Success()
                                                   : Result<void>::Failure(failure);
@@ -933,6 +942,7 @@ Result<void> VmSession::Advance(double gameDelta, double uiDelta, bool paused) n
     }
 
     ++frame_;
+    activeFrame_ += paused ? 0 : 1;
     gameTime_ += gameDelta;
     uiTime_ += uiDelta;
     for (uint32 index = 0; index < waits_.Size(); ++index) {

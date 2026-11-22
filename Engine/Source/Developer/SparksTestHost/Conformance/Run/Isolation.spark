@@ -1,0 +1,42 @@
+class Ticker : ScriptableComponent {
+    var Count = 0;
+    var Source: Ticker?;
+    event Ping();
+
+    on Enable() {
+        Assert(Count < 100, "enable");
+    }
+
+    on Tick(dt: float) {
+        Count += 1;
+        Assert(Count < 2 && dt >= 0.0, "tick");
+    }
+
+    on Start() {
+        Assert(Count < 50, "start");
+    }
+
+    fn Fail() {
+        Assert(false, "call");
+    }
+
+    fn Fire() {
+        emit Ping();
+    }
+
+    fn Watch(target: Ticker) {
+        Source = target;
+    }
+
+    fn Bump(value: int) {
+        Count = value;
+    }
+
+    on Source.Ping() {
+        Assert(false, "handler");
+    }
+
+    on Destroy() {
+        Log.Info("destroy ${Count}");
+    }
+}

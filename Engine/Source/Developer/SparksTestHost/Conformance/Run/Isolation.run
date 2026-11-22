@@ -1,0 +1,72 @@
+# Fault handling by location (SparksRuntime 2.6, LC6d3 — SL 8.3): a Tick-family fault stops the Tick
+# hooks; a handler or call fault counts toward isolation (third within 600 unpaused frames); a
+# re-enable or Start fault isolates; an isolated instance only runs its Destroy hook.
+new #1 Ticker -> ok (3 steps)
+hook #1 Enable -> ok (8 steps)
+hook #1 Tick(0.1) -> ok (17 steps)
+hook #1 Tick(0.1) -> fault AssertFailed at 12:9 (13 steps)
+  log error "tick"
+state #1 -> ticks stopped
+hook #1 Tick(0.1) -> skipped (0 steps)
+hook #1 LateTick(0.1) -> skipped (0 steps)
+new #2 Ticker -> ok (3 steps)
+hook #2 Enable -> ok (8 steps)
+Ticker.Watch(#2, #1) -> void (3 steps)
+Ticker.Fire(#1) -> void (3 steps)
+  log error "handler"
+  deliver #2 Ticker.on Source.Ping -> fault AssertFailed at 36:9 (5 steps)
+advance 0.1 -> ok (0 suspended)
+Ticker.Fire(#1) -> void (3 steps)
+  log error "handler"
+  deliver #2 Ticker.on Source.Ping -> fault AssertFailed at 36:9 (5 steps)
+state #2 -> normal
+advance 0.1 -> ok (0 suspended)
+Ticker.Fire(#1) -> void (3 steps)
+  log error "handler"
+  deliver #2 Ticker.on Source.Ping -> fault AssertFailed at 36:9 (5 steps)
+state #2 -> isolated
+Ticker.Fire(#1) -> void (3 steps)
+Ticker.Bump(#2, 7) -> skipped (0 steps)
+hook #2 Enable -> skipped (0 steps)
+fields #2 -> Ticker(Count: 0, Source: #1)
+request #2 enable -> ok
+request #2 destroy -> ok
+apply -> ok (0 pending)
+endframe -> ok (0 pending)
+  hook #2 Destroy -> ok (9 steps)
+  log info "destroy 0"
+new #3 Ticker -> ok (3 steps)
+hook #3 Enable -> ok (8 steps)
+Ticker.Fail(#3) -> fault AssertFailed at 20:9 (5 steps)
+  log error "call"
+advance 0.1 x300 -> ok (0 suspended)
+Ticker.Fail(#3) -> fault AssertFailed at 20:9 (5 steps)
+  log error "call"
+advance 0.1 x301 -> ok (0 suspended)
+Ticker.Fail(#3) -> fault AssertFailed at 20:9 (5 steps)
+  log error "call"
+state #3 -> normal
+advance 0.1 0.1 paused x900 -> ok (0 suspended)
+Ticker.Fail(#3) -> fault AssertFailed at 20:9 (5 steps)
+  log error "call"
+state #3 -> isolated
+new #4 Ticker -> ok (3 steps)
+hook #4 Enable -> ok (8 steps)
+hook #4 Disable -> ok (0 steps)
+Ticker.Bump(#4, 500) -> void (2 steps)
+hook #4 Enable -> fault AssertFailed at 7:9 (7 steps)
+  log error "enable"
+state #4 -> isolated
+new #5 Ticker -> ok (3 steps)
+Ticker.Bump(#5, 500) -> void (2 steps)
+hook #5 Enable -> fault AssertFailed at 7:9 (7 steps)
+  log error "enable"
+state #5 -> normal
+Ticker.Bump(#5, 60) -> void (2 steps)
+hook #5 Start -> fault AssertFailed at 16:9 (7 steps)
+  log error "start"
+state #5 -> isolated
+detach #1 -> ok
+detach #3 -> ok
+detach #4 -> ok
+detach #5 -> ok
