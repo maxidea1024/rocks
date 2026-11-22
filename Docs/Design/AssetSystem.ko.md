@@ -607,6 +607,7 @@ A2는 에디터 쪽 에셋 데이터베이스다(4·5.4·5.5·7·8·13·16절). 
       - 저장은 A2f1b와 같은 순서(바뀐 출력 → 주 출력). 기록은 원본 SHA-256·byte 수·importerVersion(지금 등록 버전)·옵션·outputs를 새로 쓴다. 중간 실패(교차 검증 필수 3): 이번에 새로 만든 key의 출력 파일은 A2f1b와 같이 지운다(못 지우면 `OrphanNotDeleted`). 이미 갱신한 기존 출력은 새 원본 내용으로 남고 주 출력 기록은 옛 SHA·옵션 그대로다 — 임포트 상태가 `SourceChanged`로 보이고, 같은 재임포트를 다시 하면 수렴한다(제자리 갱신은 멱등이다).
       - 임포트 상태 `AssetService::ImportStatus(path, out)` — 원본마다 current·`SourceChanged`(byte 수가 다르면 읽지 않고 곧바로, 같으면 SHA-256 비교 — 원본 시각은 VCS 체크아웃에서 믿을 수 없고 5.4절 스키마에 없으므로 기록하지 않는다)·`MissingSource`, 임포터 `ImporterOutdated`(등록 버전 > 기록 버전 — 자동 재임포트 없음, 16.1절)·`UnsupportedSourceFormat`(등록 없음). `asset-info`가 기록이 있는 패키지면 `import.importer=<이름> <기록 버전>`·`import.source.<역할>=<root>:<relative> <상태>` 줄을 덧붙인다(Edit 형식의 끝 — Report·JSON은 `import` 객체).
       - 명령 `asset-reimport <path> [--source=<파일> | --source.<역할>=<파일>…] [설정…]`: 출력 `asset-reimport: <path> <id>` + 새 출력 줄, 경고 줄.
+      - 나눔과 고침(2026-11-22, 구현 착수 — 권장안으로 확정): A2f2a(재임포트 서비스·`asset-reimport`) → A2f2b(임포트 상태·`asset-info` import 줄). 대상(주 출력·색인에 있는 기록 출력)이 열려 있으면 dirty가 아니어도 Busy다(위의 "dirty면 Busy"를 고친다 — 임포터가 열린 깨끗한 패키지를 메모리에서 고친 뒤 실패하면 되돌릴 길이 없다: 닫기는 참조자가 있으면 실패하고, 열린 채 두면 메모리가 파일과 달라진다. A2e4b ID 수정의 "그 id가 열려 있으면 Busy"와 같다 — 에디터의 트랜잭션 되돌리기는 에디터 단계). 그래서 재임포트가 여는 패키지는 모두 이번에 연 것이라 실패하면 `CloseOpened`로 되돌린다(새로 만든 출력 파일은 A2f1b와 같이 지운다, 이미 저장한 기존 출력은 새 내용으로 남는다 — 위 중간 실패). 기록 원본의 역할 집합은 임포터 roles와 같아야 한다(임포터 버전이 역할을 바꿨으면 `InvalidImportOption` — 다시 임포트한다). 기록 옵션의 schema가 지금 옵션 struct가 아니거나(옵션 없는 임포터에 옵션 기록 포함) 버전이 더 새면 `InvalidImportOption`이다. `--source=`는 기록 원본이 하나일 때만 받는다.
     - 시험: C++ 서비스 시험이 시험 임포터(AssetTestFixtures — 원본 텍스트 `value=<n>`·`bulk=<hex>`·`outputs=<key>:<type>,…` → TestAsset, 옵션 struct `TestImportOptions{scale, failAt}`, 역할 둘 변형, 기본 확장자 없는 변형)로 모든 흐름·실패·할당 실패를 확인하고, EngineTests가 명령 함수를 프로세스 안에서 부른다(위).
     - A2f1a 상태: **구현** — 대조표 14.1.45절, coverage 14.1.46절. 구현에서 정한 것: 진단 여덟 개는 `OrphanedOutput` 뒤에 더했다. 표 파일·원본 읽기는 별칭 표의 `ReadWhole`을 모듈 공용(`WholeFileRead.cpp`)으로 옮겨 같이 쓴다. 루트 수 상한은 JSON 노드 상한이 막는다(넘으면 TooManyNodes → CapacityExceeded). 성분 수는 정규화한 `/` 경로의 빈 아닌 성분을 센다(드라이브 `C:`도 하나 — 상대 비교만 쓴다). `ReadImportSource`는 byte 상한 인자를 받는다(여러 원본은 남은 합계 예산을 준다). 원본 위치 검사는 `IsValidImportSourceLocation`(ImportRecord와 같은 판정)이다. 임포터 표의 옵션 struct 조회는 `AcquireValueType(…, Struct)`이고 종류 불일치(TypeMismatch)는 InvalidArgument로 돌려준다. 원본 위치 규칙을 고쳤다(빈 루트 = 절대 경로 — 5.7절 ImportRecord 배치 참고). 주 출력 타입의 속성 이름이 예약 이름과 같으면(예: 시험 TestAsset의 `source`) 그 설정은 `asset-import`가 아닌 `asset-set`으로 넣는다(한계 — 예약 이름은 명령 문법이 먼저 쓴다). 리뷰 반영(권장 넷): 루트 이름은 byte 그대로 기록·비교하므로 대소문자만 다른 두 이름(기본 `Project`와 겹치는 `project` 포함)을 InvalidArgument로 거부한다. Windows 장치 이름공간 경로(`\\?\C:\…`·`\\?\UNC\…`·`\\.\…`)는 Core `Path`가 Unsupported로 거부한다(루트 표·기록 위치 — UNC로 잘못 기록하지 않는다, 벗겨 쓰지 않는다: 그 형태는 사용자가 원본 경로로 줄 까닭이 없다). 기록 규칙이 `\`를 금지하므로 POSIX에서 이름에 `\`가 든 원본(`a\b.png`)은 기록할 수 없다(한계 — InvalidArgument). 원본 역할 문자 규칙은 지금 임포터 표(`[A-Za-z0-9_.]`)가 ImportRecord(길이·UTF-8만)보다 좁다 — A2f1b가 `--source.<역할>` 대조(대소문자 구분, byte 일치)를 정할 때 한 곳(ImportRecord 쪽 공개 판정)으로 모은다.
     - A2f1b 상태: **구현** — 대조표 14.1.47절, coverage 14.1.48절. 구현에서 정한 것:
@@ -620,6 +621,20 @@ A2는 에디터 쪽 에셋 데이터베이스다(4·5.4·5.5·7·8·13·16절). 
       - 리뷰 반영(충족 — 권장 다섯): 주 경로의 별칭·색인·저장하지 않은 새 패키지 점유는 원본을 읽기 전에 본다(큰 원본을 헛되이 읽지 않게 — 디스크에만 있는 파일은 Output의 Create가 본다). 되돌리기는 할당하지 않는다 — OS 경로 버퍼(Content 경로 + `MaxNativePathBytes`)와 색인 갱신 이름 표를 저장 전에 잡는다. 되돌리기의 색인 갱신(RefreshPaths)이 실패하면(읽기 오류) 이 서비스의 색인은 다음 갱신·검색까지 지운 파일 항목을 남긴다(같은 경로 다시 임포트는 DuplicatePath — 새 프로세스·`asset-index-rebuild`는 맞춘다). 이번 임포트의 경고(절대 경로·임포터 경고)는 따로 모았다가 성공할 때만 넘긴다(실패한 임포트가 만들지 않은 id의 경고를 남기지 않는다 — 되돌리기의 OrphanNotDeleted와 저장의 NotDurable은 남는다). 남은 시험 임시 디렉터리는 중단된 실행의 잔재였다.
       - A2f2에 넘기는 것: 옵션 Record는 모든 필드를 적으므로 새 임포터 버전의 옵션 기본값 변경은 재임포트에 반영되지 않는다(16.1절 기존 옵션 유지 — UE와 같다, 바꾸려면 명시 대입).
       - 명령 문법: `--<경로>=<값>` 설정(첫 이름이 예약 이름이면 사용법 오류 — `--cube` 등은 A5), `--unset=`·`--erase=`, `--source.<역할>=`(같은 역할 둘·빈 역할·빈 파일은 사용법 오류, 위치 인자 원본과 섞지 않는다), `--importer=`. 상대 원본 경로는 작업 디렉터리 기준 절대 경로로 바꾼다(ProjectLayout과 같다).
+    - A2f2a 상태: **구현** — 대조표 14.1.49절, coverage 14.1.50절. 구현에서 정한 것:
+      - 새 임포트와 재임포트는 실행 본문 하나(`AssetService::RunImport(ImportRun&)` — 원본 읽기·옵션·임포터 호출·저장·되돌리기)를 같이 쓰고, 재임포트는 그 앞에 기록 판정과 기존 출력 열기를 더한다. 문맥의 `Output`은 기록에 있는 key면 연 기존 패키지의 대표 에셋을(같은 타입), 없으면 새 패키지를 준다.
+      - 판정 순서(앞에서 실패하면 뒤는 보지 않는다 — 모두 파일·색인·열린 패키지 그대로): 경로·색인 → 주 출력 같은 id 둘·읽기 전용·소유 기록 → 열림 Busy → 임포터(기록 id — 없으면 `UnsupportedSourceFormat`, 기록 버전이 더 새면 `NewerVersion`) → 기록 출력마다(같은 id 둘·읽기 전용·기록이 이 owner의 참조 기록이 아님·열림 Busy — 색인에 없으면 새로 만든다) → 별칭·루트 표 → 주 출력 열기 → 미해결 import → 기록 원본·역할·바꾸기 → 기존 출력 열기 → 실행.
+      - 주 출력에 미해결 import가 있으면 임포터를 부르기 전에 `MissingDependency`(related = 첫 대상)로 거부한다 — 저장이 미해결 import를 거부하므로(복제·ID 수정과 같은 규칙) 임포터를 헛되이 돌리지 않는다. 진단의 대상은 패키지를 닫기 전에 복사한다.
+      - 옵션 Record의 필드 1이 없거나 wire가 String이 아니면 InvalidArgument(`InvalidImportOption`)다. schema가 다르면 TypeMismatch, 버전이 더 새면 Unsupported — 오류 코드는 판정 단계의 것이고 진단은 모두 `InvalidImportOption`이다.
+      - 원본 수가 임포터 roles 수와 다르거나 역할 집합이 다르면 `InvalidImportOption`이다(임포터 버전이 역할을 바꿨다 — 다시 임포트한다).
+      - 기록에 있는데 이번에 내지 않은 출력의 `OrphanedOutput` 경고(asset = 그 출력, related = 주 출력)는 이번 경고와 같이 성공할 때만 넘긴다.
+      - 결과·명령 출력 줄은 이번에 낸 출력 모두다(기존 출력 갱신 포함 — 새로 만든 것만이 아니다). 명령은 `asset-import`와 인자 해석·출력을 같이 쓴다(`--importer=`·위치 인자 원본은 사용법 오류, `--source=`는 한 번, `--source=`와 `--source.<역할>=`은 섞지 않는다).
+      - 시험 임포터 계약: 임포트가 정하는 필드(값·`hard` 참조 — 없으면 null)는 매번 모두 쓴다(제자리 갱신이 옛 값을 남기지 않는다), 추가 TestAsset 출력도 값을 쓴다. 재임포트 여부는 `lastReimport`로 확인한다.
+      - 리뷰 반영(필수 둘·권장 넷):
+        - 성공한 새 임포트·재임포트는 이번에 연 패키지(출력과 그 의존)를 `CloseOpened(before)`로 닫는다. 열린 채 두면 같은 서비스의 다음 재임포트가 "열림 → Busy"에 걸린다. 저장한 깨끗한 패키지이고 원래 열려 있던 패키지는 그것들을 참조할 수 없으므로 잃는 것이 없다. 결과 객체를 보려면 다시 연다(`Info`·`Packages().Open`). 닫기 실패(할당·Discard)는 성공을 바꾸지 않는다 — 저장은 끝났고 남은 패키지는 열린 채다(호출자가 Close한다, 할당 실패 시험이 "삼킨 실패면 GC 표이거나 열린 패키지가 남는다"로 단언한다). 버린 대안: 열린 채 두고 계약에 적기(에디터식 — 임포트 직후 재임포트가 늘 Busy라 쓸 수 없다, 메모리 되돌리기는 에디터 트랜잭션 단계).
+        - 판정은 색인 요약으로 하고 열기는 파일 기록으로 하므로, 파일 기록의 owner·임포터 id·버전·출력 id 목록이 색인 요약과 다르면(색인 뒤 밖에서 바뀜) `ExternalModification` / StaleHandle로 거부한다(Open의 "다른 id"와 같은 진단).
+        - 기록 출력 타입(주 출력 포함)이 그 패키지의 대표 타입(색인)과 다르면 `TypeMismatch` / TypeMismatch(asset = 그 출력)로 거부한다 — 손 편집 기록에서 임포터가 `Output(key, T)`로 T 아닌 객체를 받지 않게.
+        - 옵션 Record 시험은 사례마다 기대 오류를 짝지었다. 할당 실패 시험은 진단 None을 단언하고 먼저 저장된 기존 출력을 반복마다 처음 내용으로 되돌린다.
     - 버린 대안: 임포터가 패키지를 직접 만들고 저장(원자성·점유·기록 규칙이 임포터마다 흩어진다 — 문맥이 출력을 준다), 옵션을 객체(UE ImportUI `UObject`)로(공개 전 객체가 패키지에 들지 않는 일회 값이라 struct 값 대입으로 충분), 옵션 접두사 `--options.<필드>=`(13절 문법이 바뀌고 UE 명령행 관례와 다르다 — 등록 때 이름 충돌을 막는다), 확장자 경합 우선순위(UE `ImportPriority` — 결과가 등록 순서에 달린다), 타입이 바뀐 출력을 같은 id 새 객체로 바꾸기(위), 재임포트가 참조 기록 출력에서 owner를 따라가기(무엇이 바뀌는지 숨긴다 — 명시 거부), 명령 성공 경로 시험을 A5로 미루기(지금 닿는 코드를 미구현 사유로 남긴다 — 교차 검증 필수 4), 시험 전용 Commandlet 실행 파일(타깃이 하나 더 생긴다 — 프로세스 안 호출이 작다).
 
 ## 8. 동시성
@@ -2537,6 +2552,39 @@ A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항�
 | 주 출력·추가 출력 id 발급 실패 | 실패 | OS 보안 난수 실패(14.1.22와 같다) |
 | 옵션·설정 대입 묶음 `Publish` 실패 | 실패 | Prepare와 Publish 사이에 대상이 바뀌거나 죽을 수 없다(같은 스레드, 사이에 다른 일이 없다) — 값 단위는 무할당으로 맞바꾼다(ReflectionText 10.2절). 검사는 API 계약대로 둔다 |
 | 명령의 인자·경로·줄 서식 할당 실패, 작업 디렉터리 조회 실패 | 실패 | 명령 allocator는 세션 전체(TypeRegistry 등)에 쓰여 그 실패는 서비스·세션 할당 실패 시험이 덮는다(14.1.26과 같은 줄 서식 근거), 작업 디렉터리 조회는 OS 실패 |
+
+#### 14.1.49 요구 대조표(A2f2a — 재임포트)
+
+시험은 EngineTests `Engine/Source/Developer/AssetDatabase/Tests/AssetImportTests.cpp`의 `AssetReimport_*` 4개(기록은 실제 임포트로 만들거나 `PutCrafted`로 손으로 만든다 — 주 출력 Leaf·기록 출력 Villain), `Engine/Source/Developer/AssetCommandlets/Tests/AssetImportCommandletTests.cpp`의 `AssetReimportCommand_Reimports`, C# `Programs/Rocks.Commandlet.Tests/Program.cs`의 "asset-reimport" 항목 7개(제품 실행 파일)다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 리뷰 반영(7.1-18 A2f2a) | 같은 서비스에서 이어서(재임포트 → 재임포트, 새 임포트 → 재임포트 — 성공 뒤 열린 패키지 없음), 기록 출력 타입이 대표 타입과 다름(주 출력·출력) TypeMismatch, 색인 뒤 밖에서 바뀐 기록(출력 목록·임포터 버전·임포터) ExternalModification, 옵션 사례별 오류 코드, 할당 실패의 삼킨 실패(GC 표·성공 뒤 닫기) | `AssetReimport_InPlace`·`AssetReimport_Rejects`·`AssetReimport_AllocationFailures`·`AssetImport_AllocationFailures` |
+| 제자리 갱신(7.1-18 A2f2) | 같은 id·이동한 출력도 색인 경로로, 기존 출력 key는 같은 패키지·새 key는 새 출력(`<path>_<key>`), 다른 패키지의 참조가 그대로 풀림, 기록 원본 SHA-256·byte 수·임포터 버전 새로, 문맥 `IsReimport`, 기록 옵션 유지·명시 대입만 바꿈, `--source=`·`--source.<역할>=` 바꾸기(원본 둘 중 하나), 청하지 않은 기존 출력 OrphanedOutput(asset·related)·고아, 지워진 기록 출력은 새 id 새 출력, 경고 목록 없이도 | `AssetReimport_InPlace`·`AssetReimport_Rejects`(역할 하나 바꾸기) |
+| 거부(7.1-18 A2f2, 나눔과 고침) | Initialize 전·잠금 아님·경로 규칙·없음·같은 경로 키 둘, 기록 없음·참조 기록(related), 임포터 없음·임포터 표 없음·기록 버전이 더 새, 주 출력·출력 열림 Busy(dirty 아니어도), 출력 다른 owner·읽기 전용·같은 id 둘, 주 출력 같은 id 둘·읽기 전용, 역할 다름·원본 수 다름·모르는 루트·원본 없음 MissingSource·모르는 바꾸기 역할·원본 둘인 기록에 `--source=`, 옵션 Record 여섯(schema·버전·wire·JSON·모르는 필드·필드 1 없음)·옵션 없는 임포터에 기록, 손상된 출력 파일, 주 출력 없음, 미해결 import MissingDependency(related), 타입이 다른 요청 TypeMismatch, 실패 진단 인자 없이도 — 모두 파일·색인·열린 패키지 그대로 | `AssetReimport_Rejects` |
+| 중간 실패(7.1-18 A2f2) | 주 출력 저장 실패: 새로 만든 출력 파일 지움, 먼저 저장한 기존 출력은 새 내용, 주 출력 파일 그대로(옛 SHA), 같은 재임포트로 수렴 | `AssetReimport_PartialFailure` |
+| 할당 실패(7.1-18 A2f2) | 기존 출력·새 출력·고아 출력·옵션 기록·명시 대입·무관한 열린 패키지가 있는 재임포트의 모든 할당 실패 OutOfMemory·주 출력 파일·열린 패키지 그대로(GC 표 실패는 삼킨 성공 — 처음 상태로 되돌려 이어 감) | `AssetReimport_AllocationFailures` |
+| 명령(13, 7.1-18 A2f2 — 프로세스 안) | 결과 줄·출력 줄(기존 출력 포함)·임포터 재임포트 여부, `--source=` 바꾸기와 옵션, 실패 줄(기록 없음 InvalidArgument·원본 없음 MissingSource), 사용법 일곱·도움말 | `AssetReimportCommand_Reimports` |
+| 명령(13 — 제품 실행 파일) | 기록 없음 InvalidArgument, 사용법 넷·도움말·프로젝트 없음 | C# 7개 |
+| 조합(14 완료 조건 2) | 원본(기록 그대로·`--source=`·역할 하나 바꾸기) × 출력(기존 갱신·새 key·지워져 다시 만듦·고아) × 대입(기록 옵션·명시 옵션·설정·없음) × 경고(있음·없음·목록 없음) × 결과(성공·거부·임포터 실패·저장 실패·할당 실패) × 실행(서비스·명령 함수·제품 실행 파일) | 위 시험 |
+
+#### 14.1.50 Coverage(A2f2a)
+
+측정(2026-11-22, Windows, `ROCKS_MSVC_TOOLSET=14.44`): `-Target EngineTests -Filter AssetReimport,AssetImport -Sources Engine/Source/Developer/AssetDatabase/Private,Engine/Source/Developer/AssetCommandlets/Private`. `AssetServiceImport.cpp` 줄 1053/1063·분기 506/518.
+
+| 범위 | 줄 | 분기 |
+|---|---|---|
+| `AssetServiceImport.cpp`(`Reimport`·`RunImport`·문맥 기존 출력·기록 옵션) | 아래 제외 모두 | 같음 |
+| `RunAssetReimportCommand`·`ParseImport`(재임포트 분기) | 아래 제외 모두 | 같음 |
+
+닿지 않은 곳과 근거:
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| 새 출력·주 출력 id 발급 실패 | 실패 | OS 보안 난수 실패(14.1.48과 같다) |
+| 옵션·설정 대입 묶음 `Publish` 실패(새 임포트·재임포트·기록 옵션) | 실패 | 14.1.48과 같다 — Prepare와 Publish 사이에 대상이 바뀌거나 죽을 수 없다 |
+| 기록 옵션 `Find`의 NotFound 아닌 실패 | 실패 | Find는 없음(NotFound)과 예산 소진만 실패한다. 기본 한도로 연 Record는 필드 4096개 이하라 연산 예산(1M)을 Open·Find가 다 쓸 수 없다. 검사는 API 계약대로 둔다 |
+| 명령의 원본 목록·경로·줄 서식 할당 실패, 작업 디렉터리 조회 실패 | 실패 | 14.1.48과 같다 |
 
 ## 15. PNG 디코더 범위
 

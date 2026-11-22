@@ -127,6 +127,12 @@ struct Run {
         return ran ? ran.Value() : -1;
     }
 
+    int32 Reimport(Span<const StringView> args) noexcept {
+        CommandletOutput output = captured.Output();
+        auto ran = RunAssetReimportCommand(&context, args, output);
+        return ran ? ran.Value() : -1;
+    }
+
     AssetCommandContext context;
     Captured captured;
 };
@@ -357,6 +363,88 @@ TEST(AssetImportCommand_Usage) {
     const StringView helpArgs[] = {"--help"};
     CHECK(help.Call(helpArgs) == 0 && help.captured.out.View().StartsWith("usage: asset-import"));
     CHECK(state.test.calls == 0);
+}
+
+// asset-reimport(7.1절 18 A2f2a): 임포트한 에셋을 기록대로 다시(결과 줄·출력 줄), `--source=` 원본
+// 바꾸기와 설정, 실패 줄(기록 없음 InvalidArgument·원본 없음 MissingSource), 사용법·도움말.
+TEST(AssetReimportCommand_Reimports) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    CommandScene scene("reimport-command");
+    REQUIRE(scene.ready);
+    REQUIRE(scene.WriteFile("Rock.trock", "value=2\noutputs=extra") &&
+            scene.WriteFile("Other.trock", "value=5\noutputs=extra"));
+    ImporterState state;
+    char project[512] = {};
+    FixedStringBuilder projectOption{Span<char>(project)};
+    REQUIRE(projectOption.TryAppendFormat("--project={}", scene.root.Root()));
+    char source[512] = {};
+    FixedStringBuilder sourcePath{Span<char>(source)};
+    REQUIRE(sourcePath.TryAppendFormat("{}/Rock.trock", scene.root.Root()));
+    {
+        Run run(env.allocator, &state);
+        const StringView args[] = {"/Game/Rock", sourcePath.View(), projectOption.View()};
+        REQUIRE(run.Call(args) == 0);
+    }
+
+    {
+        Run run(env.allocator, &state);
+        const StringView args[] = {"/Game/Rock", projectOption.View()};
+        CHECK(run.Reimport(args) == 0);
+        CHECK(run.captured.out.View().StartsWith("asset-reimport: /Game/Rock ") &&
+              StringView(run.captured.out.View())
+                  .Contains("asset-reimport: output extra /Game/Rock_extra ") &&
+              run.captured.error.IsEmpty() && state.test.lastReimport);
+    }
+
+    {
+        char other[512] = {};
+        FixedStringBuilder otherOption{Span<char>(other)};
+        REQUIRE(otherOption.TryAppendFormat("--source={}/Other.trock", scene.root.Root()));
+        Run run(env.allocator, &state);
+        const StringView args[] = {"/Game/Rock", otherOption.View(), "--scale=2",
+                                   projectOption.View()};
+        CHECK(run.Reimport(args) == 0);
+    }
+
+    // 실패 줄: 기록 없는 에셋(시험 임포터가 만든 추가 출력 — 참조 기록), 원본 없음.
+    {
+        Run run(env.allocator, &state);
+        const StringView args[] = {"/Game/Rock_extra", projectOption.View()};
+        CHECK(run.Reimport(args) == 1);
+        CHECK(StringView(run.captured.error.View())
+                  .Contains("asset-reimport: InvalidArgument: /Game/Rock_extra"));
+    }
+
+    {
+        Run run(env.allocator, &state);
+        const StringView args[] = {"/Game/Rock", "--source=missing-file.trock",
+                                   projectOption.View()};
+        CHECK(run.Reimport(args) == 1);
+        CHECK(StringView(run.captured.error.View())
+                  .Contains("asset-reimport: MissingSource: /Game/Rock"));
+    }
+
+    // 사용법(종료 2)·도움말.
+    const StringView noPath[] = {"--wait=1"};
+    const StringView positionalSource[] = {"/Game/A", "a.trock"};
+    const StringView importer[] = {"/Game/A", "--importer=x"};
+    const StringView sourceTwice[] = {"/Game/A", "--source=a", "--source=b"};
+    const StringView mixed[] = {"/Game/A", "--source=a", "--source.px=b"};
+    const StringView mixedReverse[] = {"/Game/A", "--source.px=b", "--source=a"};
+    const StringView emptySource[] = {"/Game/A", "--source="};
+    const Span<const StringView> cases[] = {noPath, positionalSource, importer,   sourceTwice,
+                                            mixed,  mixedReverse,     emptySource};
+    for (Span<const StringView> args : cases) {
+        Run run(env.allocator, &state);
+        CHECK(run.Reimport(args) == 2);
+        CHECK(run.captured.error.View().StartsWith("usage: asset-reimport"));
+    }
+
+    Run help(env.allocator, &state);
+    const StringView helpArgs[] = {"--help"};
+    CHECK(help.Reimport(helpArgs) == 0 &&
+          help.captured.out.View().StartsWith("usage: asset-reimport"));
 }
 
 } // namespace asset_import_commandlet_tests_file

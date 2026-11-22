@@ -237,6 +237,13 @@ int Run(Span<const StringView> args, CommandletOutput output, Allocator& allocat
     if (!registered) {
         return 1;
     }
+    registered = registry.Register({"asset-reimport",
+                                    "Import the recorded sources of an asset again in place.",
+                                    &RunAssetReimportCommand, &assetContext});
+    if (!registered) {
+        return 1;
+    }
+
     registered = registry.Register({"asset-import", "Import a source file into a new asset.",
                                     &RunAssetImportCommand, &assetContext});
     if (!registered) {

@@ -297,6 +297,30 @@ public:
                         Array<EditorWarning>* warnings = nullptr,
                         AssetDiagnostic* failure = nullptr) noexcept;
 
+    // asset-reimport <path> [--source=<파일> | --source.<역할>=<파일>…] [설정…](7.1절 18 A2f2a):
+    // path(지금 이름 — 별칭으로 풀지 않는다)의 소유 기록대로 원본을 다시 읽어 기록의 임포터로
+    // 출력을 제자리 갱신한다. overrides는 원본 바꾸기다(역할이 빈 하나 = `--source=` — 기록 원본이
+    // 하나일 때만, 아니면 기록에 있는 역할). 옵션은 기록 Record에 명시 대입만 더한다. 기록 출력은
+    // AssetId로 찾는다(이동해도 따라간다 — 색인에 없으면 그 key는 새 출력). 임포터가 청하지 않은
+    // 기존 출력은 경고 OrphanedOutput. 저장·되돌리기·경고는 Import와 같다(이미 저장한 기존 출력은
+    // 실패해도 새 내용으로 남는다 — 같은 재임포트를 다시 하면 수렴한다).
+    //
+    // 오류(failure 진단): Initialize 전·잠금 아님 InvalidArgument, 경로 규칙 InvalidPath, 없음
+    // NotFound(진단 None), 같은 경로 키 둘 DuplicatePath, 같은 id 둘 DuplicateAssetId(주 출력·출력
+    // — asset), 읽기 전용 NewerVersion / Unsupported, 기록 없음·참조 기록(related = owner)·출력의
+    // 기록이 이 owner의 참조 기록이 아님(asset·related) InvalidArgument, 주 출력·출력이 열려 있음
+    // Busy(asset), 임포터 없음 UnsupportedSourceFormat / Unsupported, 기록 임포터 버전이 더 새
+    // NewerVersion / Unsupported, 기록 역할이 임포터 roles와 다름·모르는 바꾸기 역할·`--source=`의
+    // 원본 수·옵션 기록 형식 InvalidImportOption, 모르는 원본 루트 MissingSource(detail = 원본
+    // 번호), Import의 원본·대입·임포터·출력(타입이 다른 기존 출력 TypeMismatch / InvalidArgument)·
+    // 저장 오류, 할당 실패.
+    Result<void> Reimport(const AssetDatabaseLock& lock, StringView path,
+                          Span<const AssetImportSourceInput> overrides,
+                          Span<const reflection_text::TextAssignment> assignments,
+                          reflection_text::TextDiagnostics& diagnostics, AssetImportResult& result,
+                          Array<EditorWarning>* warnings = nullptr,
+                          AssetDiagnostic* failure = nullptr) noexcept;
+
     // asset-fix-duplicate-id <path>: 같은 id 파일 둘 이상 가운데 path의 파일을 새 id로 다시 쓴다
     // (7.1절 17 A2e4b — EditorPackageSet::FixDuplicateId). 경로는 지금 이름이다(별칭으로 풀지
     // 않는다). 고아가 생기면 경고 OrphanedOutput.
@@ -359,6 +383,11 @@ private:
     // 둔다.
     Result<ObjectHandle> OpenTarget(StringView target, AssetId& id, Array<EditorWarning>* warnings,
                                     AssetDiagnostic* failure) noexcept;
+    // 새 임포트·재임포트가 같이 쓰는 실행이다(AssetServiceImport.cpp — 원본 읽기·옵션·임포터·설정·
+    // 저장·되돌리기).
+    struct ImportRun;
+    Result<void> RunImport(ImportRun& run) noexcept;
+
     // 타입 도구 이름의 클래스 lease다(에셋 클래스만이면 requireAsset).
     Result<TypeLease> FindClass(StringView name, bool requireAsset,
                                 AssetDiagnostic* failure) noexcept;

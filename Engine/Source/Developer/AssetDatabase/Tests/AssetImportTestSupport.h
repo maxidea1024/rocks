@@ -186,13 +186,19 @@ public:
                     return Result<void>::Failure(made.Error());
                 }
 
+                if (TypeNamed(type) == IdOf<TestAsset>()) {
+                    Pointer<TestAsset>(context.Registry(), made.Value())->value =
+                        static_cast<int32>(total);
+                }
+
                 if (wantsReference && key == reference) {
                     referenced = made.Value();
                 }
             }
         }
 
-        if (!referenced.IsNull() && !main.IsNull()) {
+        // 임포트가 정하는 필드는 매번 모두 쓴다(참조가 없으면 null).
+        if (!main.IsNull()) {
             auto set = context.Registry().SetReference(
                 context.Access(), main, Pointer<TestAsset>(context.Registry(), main)->hard,
                 referenced);
@@ -222,12 +228,14 @@ public:
             return context.Fail(AssetDiagnosticCode::InvalidSource, ErrorCode::InvalidArgument, 6);
         }
 
-        CHECK(!context.IsReimport());
+        lastReimport = context.IsReimport();
         return Result<void>::Success();
     }
 
     AssetImporterInfo info_;
     uint32 calls = 0;
+    // 마지막으로 성공한 Import가 재임포트였는지다.
+    bool lastReimport = false;
 };
 
 inline AssetImporterInfo TestImporterInfo() noexcept {
