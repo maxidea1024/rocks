@@ -117,9 +117,15 @@ public:
             out_.Append("\n");
             for (uint32 at = entry.firstField; at < entry.firstField + entry.fieldCount; ++at) {
                 const BytecodeTypeField& field = module_.classFields[at];
-                out_.AppendFormat("  field {} {}{} x{}{}\n", module_.String(field.name),
+                out_.AppendFormat("  field {} {}{} x{} {}{}", module_.String(field.name),
                                   BankLetter(field.bank), field.offset, field.slots,
+                                  module_.String(field.type),
                                   (field.flags & BytecodeFieldHeld) != 0 ? " held" : "");
+                if (field.formerName != NoBytecodeIndex) {
+                    out_.AppendFormat(" formerly {}", module_.String(field.formerName));
+                }
+
+                out_.Append("\n");
             }
 
             for (uint32 at = entry.firstHook; at < entry.firstHook + entry.hookCount; ++at) {

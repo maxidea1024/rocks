@@ -99,6 +99,7 @@ bool BytecodeEncoder::EncodeClasses(Span<const uint64> bodies) noexcept {
         }
 
         // 자기 필드: 선언 순, bank마다 이어 붙인 위치.
+        Array<char> formerScratch(checker_.allocator_);
         const uint32 members = tree.Child(node, 4);
         stored.firstField = static_cast<uint32>(out_.classFields.Size());
         stored.firstEvent = static_cast<uint32>(out_.events.Size());
@@ -126,6 +127,20 @@ bool BytecodeEncoder::EncodeClasses(Span<const uint64> bodies) noexcept {
                 field.flags = checker_.IsHeldType(checker_.FieldType(memberSymbol))
                                   ? BytecodeFieldHeld
                                   : uint8(0);
+                // 형식 v5(SparksReload K4): reload 필드 대응의 타입 표기(정규 표시 이름 — 다른 모듈
+                // 선언은 `<경로>:` 접두)와 `@formerly` 옛 이름.
+                const uint32 fieldType = checker_.FieldType(memberSymbol);
+                StringBuilder<64> descriptor(checker_.allocator_);
+                Qualify(descriptor, checker_.SymbolOf(checker_.NonOptional(fieldType)));
+                checker_.AppendDisplayType(descriptor, fieldType);
+                if (descriptor.HasFailed()) {
+                    Fail(descriptor.Status().Error());
+                    return NoBytecodeIndex;
+                }
+
+                field.type = AddString(descriptor.View());
+                const StringView former = checker_.FormerName(module_, member, formerScratch);
+                field.formerName = former.IsEmpty() ? NoBytecodeIndex : AddString(former);
                 stored.slots[bank] = static_cast<uint16>(stored.slots[bank] + layout.slots);
                 if (!out_.classFields.TryPushBack(field)) {
                     Fail(ErrorCode::OutOfMemory);

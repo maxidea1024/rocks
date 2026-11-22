@@ -61,8 +61,8 @@ type0 = struct Label s1 r0 b1
   field0 Words b1 x1
   field1 Count s0 x1
 class0 = Probe : ScriptableComponent s0 r1 b1 init Probe.$init
-  field Data r0 x1
-  field Names b0 x1
+  field Data r0 x1 DataAsset
+  field Names b0 x1 Set<string>
   event Ready
 
 function Probe.Order  scalar=2/2 ref=1/1 buf=4/4 params=0/1/2 returns sx1

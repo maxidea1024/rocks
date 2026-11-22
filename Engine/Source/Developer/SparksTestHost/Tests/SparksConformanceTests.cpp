@@ -1111,6 +1111,178 @@ close -> ok
     CHECK(failures > 0);
 }
 
+TEST(SparksConformance_RunGoldenAllocationFailureReload) {
+    // hot reload(Docs/Design/SparksReload.ko.md — LC7a)의 모든 할당 실패 자리: revision 컴파일·
+    // 링크, 계획(대응표), 적용(취소·이전 revision 기록·Start 다시 부르기), 이전 revision 코드의
+    // 필드 번역. 실패는 OutOfMemory로 돌아오고 새는 할당이 없다(판정 실패는 session 그대로).
+    SystemAllocator backing;
+    constexpr StringView Source = R"(class Door : ScriptableComponent {
+    var Opened = 0;
+    var Peer: Door?;
+    var Name = "a";
+    event Knock(n: int);
+
+    async fn Slow() {
+        await Delay(1.0, Clock.Game);
+        Opened += 10;
+        Name = "${Name}s";
+        Log.Info("slow v1 ${Name}");
+    }
+
+    fn Watch(target: Door) {
+        Peer = target;
+    }
+
+    fn Fire(n: int) {
+        emit Knock(n);
+    }
+
+    on Peer.Knock(n: int) {
+        Log.Info("knocked v1 ${n}");
+    }
+
+    on Tick(dt: float) {
+        Opened += 1;
+        Assert(Opened < 2 && dt >= 0.0, "tick v1");
+    }
+}
+
+class Panel : ScriptableComponent {
+    var Width = 1;
+}
+)";
+    SystemAllocator side; // 원문·기대값은 세는 allocator 밖에 둔다
+    auto version = [&](StringView from, StringView to) noexcept {
+        String text(side);
+        usize at = 0;
+        while (at < Source.ByteCount()) {
+            if (at + from.ByteCount() <= Source.ByteCount() &&
+                StringView(Source.Data() + at, from.ByteCount()) == from) {
+                CHECK(text.TryAppend(to));
+                at += from.ByteCount();
+                continue;
+            }
+
+            CHECK(text.TryAppend(StringView(Source.Data() + at, 1)));
+            ++at;
+        }
+
+        return text;
+    };
+    const String second = version("v1", "v2");
+    const String third = version("v1", "v3");
+    const StringView removed = R"(class Panel : ScriptableComponent {
+    var Width = 1;
+}
+)";
+    const CaseFile revisions[] = {
+        {"v2", second.View()}, {"v3", third.View()}, {"removed", removed}};
+    constexpr StringView Golden = R"(new #1 Door -> ok
+new #2 Door -> ok
+new #3 Panel -> ok
+hook #1 Enable -> ok
+hook #2 Enable -> ok
+Door.Watch(#2, #1) -> ok
+Door.Slow(#2) -> ok
+Door.Slow(#1) -> ok
+hook #1 Tick(0.1) -> ok
+hook #1 Tick(0.1) -> ok
+reload removed -> ok
+reload v2 keep -> ok
+advance 1.0 -> ok
+Door.Slow(#2) -> ok
+Door.Slow(#1) -> ok
+reload v3 keep -> ok
+Door.Slow(#2) -> ok
+reload v2 -> ok
+Door.Fire(#1, 1) -> ok
+advance 1.0 -> ok
+fields #2 -> ok
+close -> ok
+)";
+    constexpr StringView Schema = R"({
+  "format": 1, "package": "Rocks", "module": "Engine",
+  "types": [
+    {"name": "Actor", "id": "5a7e0000000000000000000000000001", "kind": "object"},
+    {"name": "Component", "id": "5a7e0000000000000000000000000005", "kind": "object",
+     "fields": [{"name": "Owner", "id": "5a7e0000000000000000000000000131", "type": "Actor"}]},
+    {"name": "ScriptableComponent", "id": "5a7e0000000000000000000000000007", "kind": "object",
+     "base": "Component", "scriptExtensible": true}
+  ]
+})";
+    const CaseFile schemas[] = {{"Schema/Engine.sparkbind.json", Schema}};
+    uint64 attempts = 0;
+    uint64 failures = 0;
+    String expected(side);
+    for (uint64 failAt = 0; failAt == 0 || failAt <= attempts; ++failAt) {
+        test::NFailAllocator allocator(backing);
+        const uint64 before = backing.Stats().liveAllocations;
+        {
+            CaseInput input;
+            input.name = "Run/Reload.spark";
+            input.schemas = schemas;
+            input.source = Source;
+            input.expect = "clean\n";
+            input.hasRun = true;
+            input.revisions = revisions;
+            input.run = failAt == 0 ? Golden : expected.View();
+            Report report(allocator);
+            if (failAt != 0) {
+                allocator.FailOnAttempt(failAt);
+            }
+
+            auto ran = RunCase(allocator, input, report);
+            const uint64 used = allocator.Attempts();
+            allocator.DisableFailure();
+            if (failAt == 0) {
+                REQUIRE(ran);
+                REQUIRE(report.Failures().Size() == 1);
+                const StringView failure = report.Failures()[0].View();
+                const StringView marker = "  actual run:\n";
+                usize at = 0;
+                while (at + marker.ByteCount() <= failure.ByteCount() &&
+                       StringView(failure.Data() + at, marker.ByteCount()) != marker) {
+                    ++at;
+                }
+
+                REQUIRE(at + marker.ByteCount() <= failure.ByteCount());
+                const StringView actual(failure.Data() + at + marker.ByteCount(),
+                                        failure.ByteCount() - at - marker.ByteCount());
+                CHECK(actual.Contains("reload removed -> rejected (class Door was removed",
+                                      StringComparison::CaseSensitive));
+                CHECK(actual.Contains("previous 2)", StringComparison::CaseSensitive));
+                CHECK(actual.Contains("slow v1 as", StringComparison::CaseSensitive));
+                // 더 오래된 revision(v2)의 실행은 새 본문과 같아 남고, v3의 실행은 취소된다.
+                CHECK(actual.Contains("cancelled 1, restarted 0, previous 2)",
+                                      StringComparison::CaseSensitive));
+                CHECK(actual.Contains("slow v2 ass", StringComparison::CaseSensitive));
+                CHECK(actual.Contains("knocked v2 1", StringComparison::CaseSensitive));
+                CHECK(actual.Contains("close -> ok (ledger 0 buffers)",
+                                      StringComparison::CaseSensitive));
+                if (!actual.Contains("previous 2)", StringComparison::CaseSensitive)) {
+                    PrintFailures(report);
+                }
+
+                REQUIRE(expected.TryAppend(actual));
+                attempts = used;
+            } else if (!ran) {
+                CHECK(ran.Error() == ErrorCode::OutOfMemory);
+                ++failures;
+            } else {
+                if (!report.Failures().IsEmpty()) {
+                    PrintFailures(report);
+                }
+
+                CHECK(report.Failures().IsEmpty());
+            }
+        }
+
+        CHECK(backing.Stats().liveAllocations == before);
+    }
+
+    CHECK(failures > 0);
+}
+
 // 폴더 사례(13.1절 "패키지 사례"): 배치 오류는 사례마다 실패 하나이고, 폴더 사례의 지시는 파일
 // 경로를 쓰며 파일 사례는 쓰지 않는다. schema 폴더에는 *.sparkbind.json만 둔다.
 TEST(SparksConformance_FolderCasesAndSchemas) {

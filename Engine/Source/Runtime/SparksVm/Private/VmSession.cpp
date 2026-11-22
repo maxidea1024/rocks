@@ -24,7 +24,7 @@ VmSession::VmSession(Allocator& allocator, VmHost* host) noexcept
       writeBuffers_(allocator), deliveries_(allocator), suspended_(allocator), waits_(allocator),
       freeWaits_(allocator), fragmentWaits_(allocator), resumeOrder_(allocator),
       resumeWaits_(allocator), requests_(allocator), applying_(allocator), destroys_(allocator),
-      faults_(allocator) {
+      faults_(allocator), retired_(allocator) {
     execution_.session_ = this;
 }
 
@@ -294,6 +294,14 @@ Result<uint32> VmSession::CreateInstance(uint64 handle, const VmLinkedModule& mo
 Result<VmCallResult> VmSession::RunHook(uint32 instance, BytecodeHookKind kind,
                                         Span<const uint64> scalars, Span<const uint64> refs,
                                         Span<VmBuffer* const> buffers) noexcept {
+    return RunHookImpl(instance, kind, scalars, refs, buffers, nullptr, NoBytecodeIndex);
+}
+
+Result<VmCallResult> VmSession::RunHookImpl(uint32 instance, BytecodeHookKind kind,
+                                            Span<const uint64> scalars, Span<const uint64> refs,
+                                            Span<VmBuffer* const> buffers,
+                                            const VmLinkedModule* onlyModule,
+                                            uint32 onlyFunction) noexcept {
     if (closed_ || execution_.running_ || instance >= instances_.Size() ||
         !instances_[instance].attached ||
         (instances_[instance].pendingDestroy && kind != BytecodeHookKind::Disable &&
@@ -388,7 +396,9 @@ Result<VmCallResult> VmSession::RunHook(uint32 instance, BytecodeHookKind kind,
         const BytecodeModule& bytecode = chainModules[at - 1]->Module();
         const BytecodeClass& entry = bytecode.classes[chainClasses[at - 1]];
         for (uint32 hook = entry.firstHook; hook < entry.firstHook + entry.hookCount; ++hook) {
-            if (bytecode.hooks[hook].kind != kind) {
+            if (bytecode.hooks[hook].kind != kind ||
+                (onlyModule != nullptr && (chainModules[at - 1] != onlyModule ||
+                                           bytecode.hooks[hook].function != onlyFunction))) {
                 continue;
             }
 
@@ -708,27 +718,43 @@ bool VmSession::FieldSlots(uint64 handle, const VmLinkedModule& module, uint32 c
     // 필드의 클래스가 instance 클래스의 기반 사슬에 있어야 한다(다른 클래스 instance의 저장소를
     // 같은 위치로 읽지 않는다).
     Instance& instance = instances_[number];
-    const VmLinkedModule* current = instance.module;
-    uint32 currentClass = instance.classIndex;
-    bool related = false;
-    for (uint32 depth = 0; depth < VmSessionMaxBaseDepth && !related; ++depth) {
-        related = current == &module && currentClass == classIndex;
-        const VmLinkedModule* baseModule = nullptr;
-        uint32 baseClass = NoBytecodeIndex;
-        if (related || !BaseOf(*current, currentClass, baseModule, baseClass)) {
-            break;
+    const VmLinkedModule* fieldModule = &module;
+    uint32 fieldClass = classIndex;
+    uint32 fieldOffset = offset;
+    auto relatedTo = [&]() noexcept {
+        const VmLinkedModule* current = instance.module;
+        uint32 currentClass = instance.classIndex;
+        for (uint32 depth = 0; depth < VmSessionMaxBaseDepth; ++depth) {
+            if (current == fieldModule && currentClass == fieldClass) {
+                return true;
+            }
+
+            const VmLinkedModule* baseModule = nullptr;
+            uint32 baseClass = NoBytecodeIndex;
+            if (!BaseOf(*current, currentClass, baseModule, baseClass)) {
+                return false;
+            }
+
+            current = baseModule;
+            currentClass = baseClass;
         }
 
-        current = baseModule;
-        currentClass = baseClass;
+        return false;
+    };
+    bool related = bank < BytecodeBankCount && relatedTo();
+    // 이전 revision 코드(Keep 실행)의 필드는 지금 revision 위치로 옮겨 쓴다(SparksReload K1).
+    for (uint32 hop = 0; !related && bank < BytecodeBankCount && hop < MaxRevisions &&
+                         TranslateField(fieldModule, fieldClass, bank, slots, fieldOffset);
+         ++hop) {
+        related = relatedTo();
     }
 
     uint32 start[BytecodeBankCount] = {};
-    if (bank >= BytecodeBankCount || !related || !RegionStart(module, classIndex, start)) {
+    if (bank >= BytecodeBankCount || !related || !RegionStart(*fieldModule, fieldClass, start)) {
         return false;
     }
 
-    const usize at = usize(start[bank]) + offset;
+    const usize at = usize(start[bank]) + fieldOffset;
     const usize size = bank == 0   ? instance.scalars.Size()
                        : bank == 1 ? instance.refs.Size()
                                    : instance.buffers.Size();
@@ -779,7 +805,8 @@ Result<void> VmSession::RequestDestroy(uint32 instance) noexcept {
                                           : Result<void>::Failure(ErrorCode::OutOfMemory);
 }
 
-Result<void> VmSession::ApplyHook(uint32 instance, BytecodeHookKind kind) noexcept {
+Result<void> VmSession::ApplyHook(uint32 instance, BytecodeHookKind kind,
+                                  const VmLinkedModule* onlyModule, uint32 onlyFunction) noexcept {
     // 수명 hook 하나를 돌리고 적용 기록(`  hook` 줄)으로 남긴다. 기록은 그 hook이 낸 전달보다
     // 앞이다 (결과는 돌린 뒤 채운다).
     Delivery delivery;
@@ -792,7 +819,8 @@ Result<void> VmSession::ApplyHook(uint32 instance, BytecodeHookKind kind) noexce
         return Result<void>::Failure(ErrorCode::OutOfMemory);
     }
 
-    auto ran = RunHook(instance, kind, Span<const uint64>(), Span<const uint64>());
+    auto ran = RunHookImpl(instance, kind, Span<const uint64>(), Span<const uint64>(),
+                           Span<VmBuffer* const>(), onlyModule, onlyFunction);
     execution_.keepLogs_ = true; // RunHook이 끈 기록 모음을 다시 켠다(적용 루프는 한 진입)
     if (!ran) {
         // 돌지 못한 hook의 거짓 기록을 남기지 않는다(그 뒤 기록은 없다 — 실패에서 멈췄다).

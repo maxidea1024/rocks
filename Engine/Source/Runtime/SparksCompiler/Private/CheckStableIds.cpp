@@ -134,6 +134,49 @@ bool NameLess(const ManifestIdName& left, const ManifestIdName& right) noexcept 
 
 } // namespace
 
+StringView TypeChecker::FormerName(uint32 module, uint32 declaration,
+                                   Array<char>& scratch) noexcept {
+    const SyntaxTree& tree = compilation_.trees_[module];
+    const uint32 attributes = tree.Child(declaration, 1);
+    if (attributes == NoNode || tree.Node(attributes).kind != SyntaxKind::List) {
+        return StringView();
+    }
+
+    for (const uint32 attribute : tree.Children(attributes)) {
+        if (tree.Node(attribute).kind != SyntaxKind::Attribute ||
+            TokenText(module, attribute) != "formerly") {
+            continue;
+        }
+
+        const uint32 list = tree.Child(attribute, 0);
+        if (list == NoNode || tree.Node(list).childCount == 0) {
+            return StringView();
+        }
+
+        const uint32 value = tree.Child(tree.Child(list, 0), 1);
+        if (value == NoNode || tree.Node(value).kind != SyntaxKind::String) {
+            return StringView();
+        }
+
+        // 보간 없는 문자열(검사기가 S0623으로 본다) — 조각 하나의 원문을 푼다.
+        scratch.Clear();
+        for (const uint32 part : tree.Children(value)) {
+            StringLiteralReader reader = StringLiteralReader::ForPiece(TokenText(module, part));
+            uint8 byte = 0;
+            while (reader.Next(byte)) {
+                if (auto pushed = scratch.TryPushBack(static_cast<char>(byte)); !pushed) {
+                    binder_.error_ = pushed.Error();
+                    return StringView();
+                }
+            }
+        }
+
+        return StringView(scratch.Data(), scratch.Size());
+    }
+
+    return StringView();
+}
+
 void TypeChecker::CheckStableIds() noexcept {
     Compilation& c = compilation_;
     // 진단이 난 원문(구문·타입 오류 등)의 모듈은 판정하지 않는다(입력 중 미완성 — SL §12.2).
@@ -263,48 +306,10 @@ void TypeChecker::CheckPackageIds(uint32 package, Span<const uint8> unstable,
 
         return path;
     };
-    // `@formerly("Old")`의 옛 이름이다(없으면 빈 글자, 디코드한 byte는 scratch에).
+    // `@formerly("Old")`의 옛 이름(디코드한 byte는 scratch에 — FormerName).
     Array<char> scratch(allocator_);
     auto formerly = [&](uint32 module, uint32 declaration) noexcept -> StringView {
-        const SyntaxTree& tree = c.trees_[module];
-        const uint32 attributes = tree.Child(declaration, 1);
-        if (attributes == NoNode || tree.Node(attributes).kind != SyntaxKind::List) {
-            return StringView();
-        }
-
-        for (const uint32 attribute : tree.Children(attributes)) {
-            if (tree.Node(attribute).kind != SyntaxKind::Attribute ||
-                TokenText(module, attribute) != "formerly") {
-                continue;
-            }
-
-            const uint32 list = tree.Child(attribute, 0);
-            if (list == NoNode || tree.Node(list).childCount == 0) {
-                return StringView();
-            }
-
-            const uint32 value = tree.Child(tree.Child(list, 0), 1);
-            if (value == NoNode || tree.Node(value).kind != SyntaxKind::String) {
-                return StringView();
-            }
-
-            // 보간 없는 문자열(검사기가 S0623으로 본다) — 조각 하나의 원문을 푼다.
-            scratch.Clear();
-            for (const uint32 part : tree.Children(value)) {
-                StringLiteralReader reader = StringLiteralReader::ForPiece(TokenText(module, part));
-                uint8 byte = 0;
-                while (reader.Next(byte)) {
-                    if (auto pushed = scratch.TryPushBack(static_cast<char>(byte)); !pushed) {
-                        binder_.error_ = pushed.Error();
-                        return StringView();
-                    }
-                }
-            }
-
-            return StringView(scratch.Data(), scratch.Size());
-        }
-
-        return StringView();
+        return FormerName(module, declaration, scratch);
     };
     // 요구를 더한다. owner가 NoWanted면 type(키 `<패키지>/<모듈>.<이름>`), 아니면 그 주인 키 뒤
     // `.<이름>`이다.

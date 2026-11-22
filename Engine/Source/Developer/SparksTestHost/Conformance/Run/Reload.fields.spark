@@ -1,0 +1,51 @@
+class Door : ScriptableComponent {
+    var Opened = 0;
+    var Extra = 2;
+    var Peer: Door?;
+    @edit var Icon: Soft<DataAsset>;
+    var Got: DataAsset?;
+    event Knock(n: int);
+
+    on Start() {
+        Log.Info("start v2");
+        Got = try await Icon.Load();
+        Log.Info("started v2");
+    }
+
+    on Tick(dt: float) {
+        Opened += 1;
+        Assert(Opened < 100 && dt >= 0.0, "tick v2");
+    }
+
+    async fn Slow() {
+        await Delay(1.0, Clock.Game);
+        Opened += 10;
+        Log.Info("slow v2 ${Opened}");
+    }
+
+    async fn Steady() {
+        await Delay(1.0, Clock.Game);
+        Opened += 100;
+        Log.Info("steady ${Opened}");
+    }
+
+    fn Version(): string {
+        return "v2";
+    }
+
+    fn Watch(target: Door) {
+        Peer = target;
+    }
+
+    fn Fire(n: int) {
+        emit Knock(n);
+    }
+
+    on Peer.Knock(n: int) {
+        Log.Info("knocked v2 ${n}");
+    }
+}
+
+class Panel : ScriptableComponent {
+    var Width = 1;
+}

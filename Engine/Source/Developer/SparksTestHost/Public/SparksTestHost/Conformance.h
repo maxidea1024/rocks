@@ -32,7 +32,8 @@
 // "== <경로>" 줄과 덤프를 경로 순으로 이은 것)·<사례>.types(식 타입,
 // AppendTypeDump)·<사례>.ir(typed IR, AppendIrDump — 진단 없는 사례만)·<사례>.bc(bytecode)·
 // <사례>.run(VM 실행 golden — 파일 사례의 최상위 함수 호출과 결과, SparksVm 7절)도 같은 모양으로
-// 둔다. 짝이 맞지 않거나(`.spark`·폴더 없는
+// 둔다. `.run`이 있는 파일 사례 옆의 `<사례>.<버전>.spark`(자기 `.expect` 없음)는 사례가 아니라
+// `reload <버전>`의 revision 원문이다(SparksReload K9). 짝이 맞지 않거나(`.spark`·폴더 없는
 // `.expect`·`.ast`·`.names`, `.expect` 없는 사례, 폴더 사례 옆의 `.ast`)
 // 낯선 파일이 있으면 그 자리의 실패로 기록한다(빈 기대값이 조용히 통과하지 않게).
 //
@@ -161,7 +162,10 @@ struct CaseInput {
     // Gate G4(SparksRuntime 4절): `.run`이 통과하면 모든 `AWAIT`에서 fault·취소를 하나씩 주입해
     // 다시 돌리고 CloseSession 뒤 ledger·유지 자원이 0인지만 본다(출력은 비교하지 않는다).
     bool gateSweep = false;
-    StringView run;        // `.run` 내용(hasRun일 때만)
+    StringView run; // `.run` 내용(hasRun일 때만)
+    // `.run` `reload <버전>`의 revision 원문(Docs/Design/SparksReload.ko.md K9 — 파일 사례 옆
+    // `<사례>.<버전>.spark`, path는 버전).
+    Span<const CaseFile> revisions;
     bool hasNames = false; // `.names`가 있는지
     StringView names;      // `.names` 내용(hasNames일 때만)
 };

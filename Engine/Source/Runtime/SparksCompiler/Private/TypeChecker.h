@@ -312,6 +312,9 @@ private:
     void CheckStableIds() noexcept;
     // interface 구현 함수(상속한 구현·엔진 interface 포함)를 marks(심볼 번호)에 표시한다.
     void MarkInterfaceImplementations(Array<uint8>& marks) noexcept;
+    // 선언(멤버 포함 — 1번 자식이 attribute 목록)의 `@formerly("Old")` 옛 이름이다(없으면 빈 글자).
+    // 디코드한 byte는 scratch에 둔다(다음 호출까지 유효). 할당 실패는 binder 오류.
+    StringView FormerName(uint32 module, uint32 declaration, Array<char>& scratch) noexcept;
     void CheckPackageIds(uint32 package, Span<const uint8> unstable,
                          Span<const uint8> implementations) noexcept;
     // 이름 키의 모듈을 이 컴파일에서 판정했는지다(진단이 난 모듈의 항목은 S1005로 보지 않는다).

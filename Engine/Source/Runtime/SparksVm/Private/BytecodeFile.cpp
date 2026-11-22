@@ -32,7 +32,7 @@ constexpr usize EventBytes = 4 + 4;
 constexpr usize FunctionBytes =
     4 * 3 + 2 * 3 * BytecodeBankCount + 2 + BytecodeHashBytes + 4 * 4 + 2 * 2;
 constexpr usize WordBytes = 4;
-constexpr usize ClassFieldBytes = TypeFieldBytes + 1; // 형식 v4: 표지 u8
+constexpr usize ClassFieldBytes = TypeFieldBytes + 1 + 4 + 4; // 형식 v4 표지 u8, v5 타입·옛 이름
 constexpr usize SwitchBytes = 12;
 constexpr usize CaseBytes = 12;
 constexpr usize AwaitBytes = 12;
@@ -188,6 +188,8 @@ Result<void> WriteBytecodeFile(const BytecodeModule& module, Array<uint8>& out) 
             writer.WriteU8(field.slots);
             writer.WriteU32LE(field.offset);
             writer.WriteU8(field.flags);
+            writer.WriteU32LE(field.type);
+            writer.WriteU32LE(field.formerName);
         }
 
         writer.WriteU32LE(static_cast<uint32>(module.hooks.Size()));
@@ -542,6 +544,8 @@ private:
             field.slots = reader.ReadU8();
             field.offset = reader.ReadU32LE();
             field.flags = reader.ReadU8();
+            field.type = reader.ReadU32LE();
+            field.formerName = reader.ReadU32LE();
         }
 
         if (!Count(reader, HookBytes, count) || !Resize(out_.hooks, count)) {
@@ -856,7 +860,8 @@ public:
                 const bool held = (field.flags & BytecodeFieldHeld) != 0;
                 if (field.name >= strings || field.bank >= BytecodeBankCount || field.slots == 0 ||
                     (field.bank != 0 && field.slots != 1) || field.offset != running[field.bank] ||
-                    (field.flags & ~BytecodeFieldHeld) != 0 ||
+                    (field.flags & ~BytecodeFieldHeld) != 0 || field.type >= strings ||
+                    (field.formerName != NoBytecodeIndex && field.formerName >= strings) ||
                     (held && field.bank != static_cast<uint8>(BytecodeBank::Ref))) {
                     return Reject(BytecodeLoadError::BadTable);
                 }

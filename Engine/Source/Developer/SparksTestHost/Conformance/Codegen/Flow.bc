@@ -39,13 +39,15 @@ t25 = "Mover.$init"
 t26 = "Mover"
 t27 = "ScriptableComponent"
 t28 = "Cue"
-t29 = "Speed"
-t30 = "x,f64>void"
-t31 = "Actor.Damaged"
-t32 = "Owner"
-t33 = "Damaged"
-t34 = "sparks 0.4.0"
-t35 = "Main"
+t29 = "SoundAsset"
+t30 = "Speed"
+t31 = "float"
+t32 = "x,f64>void"
+t33 = "Actor.Damaged"
+t34 = "Owner"
+t35 = "Damaged"
+t36 = "sparks 0.4.0"
+t37 = "Main"
 ref0 = field Mover.Speed args ">f64"
 ref1 = language NextTick args ">w"
 ref2 = function Mover.Fetch #2
@@ -62,8 +64,8 @@ ref12 = event Actor.Pushed args "x,x>void"
 ref13 = native LoopHandle.Pause args "x>void"
 ref14 = event Actor.Damaged args "x,f64>void"
 class0 = Mover : ScriptableComponent s1 r1 b0 init Mover.$init
-  field Cue r0 x1
-  field Speed s0 x1
+  field Cue r0 x1 SoundAsset
+  field Speed s0 x1 float
   handler Owner.Damaged Mover.on Owner.Damaged await skipWhileBusy ref11 -> ref14
 
 function Wrap  scalar=8/8 ref=0/0 buf=0/0 params=1/0/0 returns sx4
