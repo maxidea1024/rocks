@@ -1,6 +1,8 @@
 #include <AssetNugget/NuggetCache.h>
+#include <AssetNugget/NuggetRequest.h>
 #include <Core/Algorithms.h>
 #include <Platform/Atomics.h>
+#include <Platform/Clock.h>
 #include <Platform/Fatal.h>
 
 namespace rocks {
@@ -81,7 +83,139 @@ NuggetCache::NuggetCache(Allocator& allocator, platform::FileSystem& files, Nugg
       index_(allocator), entries_(allocator) {
 }
 
-NuggetCache::~NuggetCache() noexcept = default;
+NuggetCache::~NuggetCache() noexcept {
+    if (requests_ != nullptr) {
+        // 진행 중 요청이 이 캐시를 가리킨다 — Shutdown으로 먼저 끝내야 한다(9.1절 결정 12).
+        platform::Fatal("NuggetCache destroyed with requests in flight");
+    }
+}
+
+bool NuggetCache::IsShutDown() const noexcept {
+    return platform::AtomicLoad<platform::MemoryOrder::Acquire>(&shutDown_) != 0;
+}
+
+bool NuggetCache::Register(NuggetRequest& request) noexcept {
+    platform::LockGuard lock(requestMutex_);
+    if (IsShutDown()) {
+        return false;
+    }
+
+    request.newer_ = nullptr;
+    request.older_ = requests_;
+    if (requests_ != nullptr) {
+        requests_->newer_ = &request;
+    }
+
+    requests_ = &request;
+    return true;
+}
+
+void NuggetCache::Unregister(NuggetRequest& request) noexcept {
+    platform::LockGuard lock(requestMutex_);
+    if (request.newer_ == nullptr) {
+        requests_ = request.older_;
+    } else {
+        request.newer_->older_ = request.older_;
+    }
+
+    if (request.older_ != nullptr) {
+        request.older_->newer_ = request.newer_;
+    }
+
+    request.newer_ = nullptr;
+    request.older_ = nullptr;
+}
+
+bool NuggetCache::ReservePutBytes(uint64 bytes) noexcept {
+    uint64 current = platform::AtomicLoad<platform::MemoryOrder::Relaxed>(&pendingPutBytes_);
+    for (;;) {
+        if (bytes > limits_.pendingPutBytes || current > limits_.pendingPutBytes - bytes) {
+            return false;
+        }
+
+        if (platform::AtomicCompareExchangeWeak<platform::MemoryOrder::AcquireRelease,
+                                                platform::MemoryOrder::Relaxed>(
+                &pendingPutBytes_, current, current + bytes)) {
+            return true;
+        }
+    }
+}
+
+void NuggetCache::ReleasePutBytes(uint64 bytes) noexcept {
+    (void)platform::AtomicFetchSub<platform::MemoryOrder::AcquireRelease>(&pendingPutBytes_, bytes);
+}
+
+WorkerTaskHandle NuggetCache::FirstPending(bool putOnly) noexcept {
+    platform::LockGuard lock(requestMutex_);
+    for (NuggetRequest* request = requests_; request != nullptr; request = request->older_) {
+        if (!putOnly || request->put_) {
+            auto cloned = request->done_.Handle().Clone();
+            if (cloned) {
+                return Move(cloned.Value());
+            }
+        }
+    }
+
+    return WorkerTaskHandle{};
+}
+
+void NuggetCache::Shutdown(uint32 drainMs) noexcept {
+    {
+        platform::LockGuard lock(requestMutex_);
+        if (IsShutDown()) {
+            return;
+        }
+
+        platform::AtomicStore<platform::MemoryOrder::Release>(&shutDown_, uint32{1});
+        for (NuggetRequest* request = requests_; request != nullptr; request = request->older_) {
+            if (request->scheduler_->IsCurrentWorker()) {
+                // 그 요청의 남은 항목을 기다릴 수 없다(교착) — 계약 위반이다.
+                platform::Fatal("NuggetCache::Shutdown called on a worker of a pending request");
+            }
+        }
+
+        for (NuggetRequest* request = requests_; request != nullptr; request = request->older_) {
+            if (!request->put_) {
+                request->RequestCancel();
+            }
+        }
+    }
+
+    Notify(NuggetCacheStep::AfterCancelGets);
+    // Put 요청은 drainMs(전체 기한)까지 기다린다.
+    constexpr uint64 NanosecondsPerMillisecond = 1000000;
+    const uint64 deadline =
+        platform::MonotonicNanoseconds() + uint64{drainMs} * NanosecondsPerMillisecond;
+    for (;;) {
+        WorkerTaskHandle pending = FirstPending(true);
+        const uint64 now = platform::MonotonicNanoseconds();
+        if (!pending.IsValid() || now >= deadline) {
+            break;
+        }
+
+        const uint64 left =
+            (deadline - now + NanosecondsPerMillisecond - 1) / NanosecondsPerMillisecond;
+        auto waited = pending.Wait(static_cast<uint32>(
+            left < platform::InfiniteTimeout ? left : platform::InfiniteTimeout - 1));
+        if (!waited || waited.Value() != platform::WaitResult::Signaled) {
+            break;
+        }
+    }
+
+    {
+        platform::LockGuard lock(requestMutex_);
+        for (NuggetRequest* request = requests_; request != nullptr; request = request->older_) {
+            request->RequestCancel();
+        }
+    }
+
+    Notify(NuggetCacheStep::AfterDrain);
+    // 모든 요청이 실제로 끝날 때까지 기다린다(Rockpile 12.2절 "모든 요청의 완료를 보장").
+    for (WorkerTaskHandle pending = FirstPending(false); pending.IsValid();
+         pending = FirstPending(false)) {
+        (void)pending.Wait(platform::InfiniteTimeout);
+    }
+}
 
 Result<void> NuggetCache::Open(const NuggetCacheSettings& settings,
                                StringView projectRoot) noexcept {
@@ -388,9 +522,20 @@ void NuggetCache::Insert(MemoryEntry&& candidate) noexcept {
 }
 
 NuggetCacheGetResult NuggetCache::Get(const NuggetCacheGet& request) noexcept {
+    return Fetch(request, false);
+}
+
+NuggetCacheGetResult NuggetCache::Fetch(const NuggetCacheGet& request, bool forRequest) noexcept {
     NuggetCacheGetResult result(*allocator_);
     if (!opened_) {
         result.error = ErrorCode::InvalidArgument;
+        return result;
+    }
+
+    // 요청 항목은 종료 중에도 끝낸다(drain — 시작 전 취소는 요청이 본다).
+    if (!forRequest && IsShutDown()) {
+        // 종료 뒤 호출이다(통계에 세지 않는다).
+        result.status = NuggetStatus::Cancelled;
         return result;
     }
 
@@ -635,6 +780,10 @@ void NuggetCache::Settle(const NuggetCachePut& request, const Sha256Digest& dige
 }
 
 NuggetCachePutResult NuggetCache::Put(const NuggetCachePut& request) noexcept {
+    return Store(request, false);
+}
+
+NuggetCachePutResult NuggetCache::Store(const NuggetCachePut& request, bool forRequest) noexcept {
     NuggetCachePutResult result;
     auto drop = [&](ErrorCode error, bool failed) noexcept {
         result.status = NuggetStatus::Dropped;
@@ -646,6 +795,11 @@ NuggetCachePutResult NuggetCache::Put(const NuggetCachePut& request) noexcept {
     if (!opened_) {
         // 열기 전 호출은 계약 위반이다(통계에 세지 않는다 — Get과 같다).
         result.error = ErrorCode::InvalidArgument;
+        return result;
+    }
+
+    if (!forRequest && IsShutDown()) {
+        result.status = NuggetStatus::Cancelled;
         return result;
     }
 

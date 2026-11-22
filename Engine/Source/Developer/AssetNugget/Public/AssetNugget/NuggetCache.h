@@ -9,6 +9,7 @@
 #include <Core/Memory/SharedPtr.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Platform/Sync.h>
+#include <Task/WorkerScheduler.h>
 
 // 에셋 너겟 캐시다(Docs/Design/AssetSystem.ko.md 9.1절 결정 10·11·13–15, "A3c1 구현 세부").
 // Memory 계층(프로세스 안) → backend 하나(FileSystem). 세션 고정 표가 한 세션이 쓴 Record digest를
@@ -38,12 +39,30 @@ inline constexpr usize NuggetMemoryValueBytes = 64ull * 1024 * 1024;
 inline constexpr usize NuggetPinnedBytes = 256ull * 1024 * 1024;
 inline constexpr usize NuggetMemoryEntryBytes = 256;
 inline constexpr usize NuggetMemoryInputBytes = 128;
+// 진행 중 Put 요청 항목 값 byte 합의 기본 상한이다(9.1절 결정 12).
+inline constexpr uint64 NuggetPendingPutBytes = 1024ull * 1024 * 1024;
+
+class NuggetRequest;
 
 // 상한이다(시험은 작게 준다).
 struct NuggetCacheLimits {
     usize memoryBytes = NuggetMemoryBytes;
     usize memoryValueBytes = NuggetMemoryValueBytes;
     usize pinnedBytes = NuggetPinnedBytes;
+    uint64 pendingPutBytes = NuggetPendingPutBytes;
+};
+
+// 시험 hook의 Shutdown 지점이다(제품 코드는 hook을 걸지 않는다).
+enum class NuggetCacheStep : uint8 {
+    // 새 Start를 막고 진행 중 Get 요청에 취소를 요청한 직후.
+    AfterCancelGets,
+    // Put 요청을 drainMs까지 기다리고 남은 Put 요청에 취소를 요청한 직후.
+    AfterDrain
+};
+
+struct NuggetCacheHooks {
+    void (*callback)(void* context, NuggetCacheStep step) noexcept = nullptr;
+    void* context = nullptr;
 };
 
 // 적중한 곳이다.
@@ -125,6 +144,7 @@ public:
                 const NuggetCacheLimits& limits = {}) noexcept;
     NuggetCache(const NuggetCache&) = delete;
     NuggetCache& operator=(const NuggetCache&) = delete;
+    // 진행 중 요청이 있으면 Fatal이다(요청이 이 캐시를 가리킨다 — Shutdown으로 먼저 끝낸다).
     ~NuggetCache() noexcept;
 
     // 설정대로 backend를 연다(결정은 이때 한 번). off는 backend 없음, rockpile은 Unsupported,
@@ -168,6 +188,19 @@ public:
                                       NuggetPolicy policy = NuggetPolicy::Default) noexcept;
 
     NuggetCacheStats Stats() const noexcept;
+
+    // 종료한다(9.1절 결정 12): 새 요청 Start를 막고(이후 Start는 모든 항목 Cancelled) 진행 중 Get
+    // 요청에 취소를 요청한 뒤, Put 요청은 drainMs(전체 기한)까지 완료를 기다리고 남은 Put 요청에
+    // 취소를 요청한 다음 모든 요청이 끝날 때까지 기다린다. 이후 동기 Get·Put은 Cancelled다. 두 번째
+    // 호출은 아무것도 하지 않는다. 진행 중 요청의 scheduler worker에서 부르면 Fatal(기다리면 교착).
+    void Shutdown(uint32 drainMs) noexcept;
+
+    bool IsShutDown() const noexcept;
+
+    // 시험 hook이다.
+    void SetHooks(const NuggetCacheHooks& hooks) noexcept {
+        hooks_ = hooks;
+    }
 
     // 결과 오류가 backend 실패(failed — required 요청의 오류)인지다. 아닌 것: None,
     // Unsupported(다른 버전·읽기 전용), CapacityExceeded(한도 위반 — 캐시하지 않음, 9.1절 결정 7),
@@ -236,6 +269,9 @@ private:
     using PinMap = HashMap<Sha256Digest, Pin, SeededHash<Sha256Digest>>;
     using EntryIndex = HashMap<Sha256Digest, SlotHandle, SeededHash<Sha256Digest>>;
 
+    // Get·Put의 본체다. forRequest면 종료 뒤에도 실행한다(요청 항목 — drain).
+    NuggetCacheGetResult Fetch(const NuggetCacheGet& request, bool forRequest) noexcept;
+    NuggetCachePutResult Store(const NuggetCachePut& request, bool forRequest) noexcept;
     bool LookupMemory(const NuggetCacheGet& request, MemoryView& view) noexcept;
     Verdict Judge(const Sha256Digest& key, const Sha256Digest& digest,
                   Span<const NuggetInput> inputs) noexcept;
@@ -249,6 +285,21 @@ private:
     void EvictKey(const Sha256Digest& key) noexcept;
     void Trim() noexcept;
     void Count(uint64& counter) noexcept;
+
+    // 요청(NuggetRequest)이 쓴다: 진행 중 목록 등록·해제(종료 뒤 등록은 false), 대기 Put byte
+    // 예약·반환.
+    friend class NuggetRequest;
+    bool Register(NuggetRequest& request) noexcept;
+    void Unregister(NuggetRequest& request) noexcept;
+    bool ReservePutBytes(uint64 bytes) noexcept;
+    void ReleasePutBytes(uint64 bytes) noexcept;
+    // 진행 중 목록에서 조건에 맞는 첫 요청의 완료 handle 복제다(없으면 빈 handle).
+    WorkerTaskHandle FirstPending(bool putOnly) noexcept;
+    void Notify(NuggetCacheStep step) noexcept {
+        if (hooks_.callback != nullptr) {
+            hooks_.callback(hooks_.context, step);
+        }
+    }
 
     Allocator* allocator_;
     platform::FileSystem* files_;
@@ -269,6 +320,13 @@ private:
     usize memoryBytes_ = 0;
     usize pinnedBytes_ = 0;
     NuggetCacheStats stats_{};
+
+    // 요청 목록(이중 연결)·종료 표지·대기 Put byte다. 목록은 requestMutex_로 지킨다.
+    platform::Mutex requestMutex_;
+    NuggetRequest* requests_ = nullptr;
+    uint32 shutDown_ = 0;
+    uint64 pendingPutBytes_ = 0;
+    NuggetCacheHooks hooks_{};
 };
 
 } // namespace rocks
