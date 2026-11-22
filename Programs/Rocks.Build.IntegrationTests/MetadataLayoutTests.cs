@@ -102,9 +102,21 @@ internal static class MetadataLayoutTests
         NativeModuleInput nested = fixture.Module("Nested") with { ModuleDirectory = "A/Nested", PublicIncludeDirectories = [fixture.Path("A/Nested/Public")] };
         Require(MetadataLayout.Apply(fixture.Context, [sourceOnly, nested], ["A"]).Generated.Single().Headers.Count == 4,
             "a nested module's header was claimed by the enclosing module");
+        Directory.Delete(fixture.Path("A/Nested"), recursive: true);
 
         // ModuleDirectory가 없는 모듈의 표지 헤더는 명세 위치를 정할 수 없어 거부한다.
         Expect("RMC2100", () => MetadataLayout.Apply(fixture.Context, [module with { ModuleDirectory = null }], ["A"]));
+        // 그러나 그 모듈의 include 디렉터리가 다른 모듈 폴더를 감싸면(시험 실행 파일이 상위 폴더를 include로 둔다) 그 안의 헤더는 그 모듈
+        // 몫이라 거부하지 않는다(다른 모듈 폴더 안의 include 디렉터리를 직접 두어도 같다, 서드파티 폴더도 훑지 않는다).
+        NativeModuleInput runner = new() { Name = "Runner", PrivateIncludeDirectories = [fixture.Root, fixture.Path("A/Public")], PublicDependencies = ["A"] };
+        Require(MetadataLayout.Apply(fixture.Context, [sourceOnly, runner], ["Runner"]).Generated.Select(found => found.Name).SequenceEqual(["A"]),
+            "a module without ModuleDirectory claimed headers of the modules under its include directory");
+
+        // 엔진 계획처럼 modules를 타깃에서 닿는 모듈로 줄여 넘겨도(A가 빠짐) 전체 규칙 모듈(allModules)로 A의 폴더를 알아본다.
+        NativeModuleInput alone = runner with { PublicDependencies = [] };
+        Require(MetadataLayout.Apply(fixture.Context, [alone], ["Runner"], allModules: [sourceOnly, alone]).Generated.Count == 0,
+            "a module without ModuleDirectory claimed headers of a module outside the reachable set");
+        Expect("RMC2100", () => MetadataLayout.Apply(fixture.Context, [alone], ["Runner"]));
     }
 
     private static void ValidModulesGetGeneratedIncludeDirectories()

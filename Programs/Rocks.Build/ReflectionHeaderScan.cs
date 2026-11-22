@@ -93,6 +93,12 @@ public static class ReflectionHeaderScan
         }
 
         string[] skipped = [.. scanned.Concat(excluded).Select(Path.GetFullPath)];
+        // 시작 폴더 자체가 제외 폴더 안이면(다른 모듈 폴더 안의 include 디렉터리) 훑을 것이 없다.
+        if (skipped.Any(skip => IsInside(root, skip)))
+        {
+            return [];
+        }
+
         return [.. Headers(root, skipped).Where(path => HasMarkup(File.ReadAllText(path))).Order(StringComparer.Ordinal)];
     }
 

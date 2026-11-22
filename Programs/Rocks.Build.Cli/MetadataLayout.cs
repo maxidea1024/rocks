@@ -65,8 +65,12 @@ public static class MetadataLayout
     // ActionGraph와 같이 모듈 이름은 대소문자를 무시해 비교한다.
     private static readonly StringComparer NameComparer = StringComparer.OrdinalIgnoreCase;
 
+    /// <summary>
+    /// allModules는 다른 모듈 폴더를 알아보는 데 쓰는 전체 규칙 모듈이다(1.10절 — 탐색은 다른 모듈 폴더 안을 훑지 않는다). 엔진 계획은
+    /// modules를 타깃에서 닿는 모듈로 줄여 넘기므로(DescriptorModuleSet.Apply) 줄이기 전 목록을 따로 준다. 생략하면 modules다.
+    /// </summary>
     public static MetadataPlan Apply(BuildContext context, IReadOnlyList<NativeModuleInput> modules, IEnumerable<string> roots,
-        bool createDirectories = true)
+        bool createDirectories = true, IReadOnlyList<NativeModuleInput>? allModules = null)
     {
         var byName = new Dictionary<string, NativeModuleInput>(NameComparer);
         foreach (NativeModuleInput module in modules)
@@ -79,7 +83,7 @@ public static class MetadataLayout
 
         HashSet<string> reachable = Reachable(roots, byName);
         // 모듈 폴더 전체를 훑을 때 그 안에 든 다른 모듈의 폴더는 그 모듈 몫이다(1.10절).
-        string[] moduleDirectories = [.. modules.Where(module => !string.IsNullOrWhiteSpace(module.ModuleDirectory))
+        string[] moduleDirectories = [.. (allModules ?? modules).Where(module => !string.IsNullOrWhiteSpace(module.ModuleDirectory))
             .Select(module => context.PathInRoot(module.ModuleDirectory!)).Distinct(PathComparer)];
         var owners = new Dictionary<string, string>(PathComparer);
         var generated = new List<MetadataModule>();
@@ -321,9 +325,10 @@ public static class MetadataLayout
             foreach (string include in includes.Select(Path.GetFullPath).Where(include => IsUnder(include, root) && !IsUnder(include, output) &&
                 !include.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Contains("ThirdParty", StringComparer.OrdinalIgnoreCase)))
             {
-                if (ReflectionHeaderScan.Discover(include, [include], []) is { Count: > 0 } stray)
+                // 다른 모듈 폴더 안의 헤더는 그 모듈 몫이다(시험 실행 파일 모듈이 Core/Source/Runtime 같은 상위 폴더를 include로 둔다).
+                if (ReflectionHeaderScan.MarkedOutside(include, [], moduleDirectories) is { Count: > 0 } stray)
                 {
-                    throw new ArgumentException($"RMC2100: Module '{module.Name}' has reflection header '{stray[0].Path}' but no ModuleDirectory " +
+                    throw new ArgumentException($"RMC2100: Module '{module.Name}' has reflection header '{stray[0]}' but no ModuleDirectory " +
                         "(the identity manifest location); set ModuleDirectory in its rules (Docs/Design/ReflectionFoundations.ko.md section 1.10).");
                 }
             }
