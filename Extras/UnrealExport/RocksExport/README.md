@@ -40,3 +40,9 @@ UnrealEditor-Cmd.exe <프로젝트>.uproject -run=RocksExport -Assets=/Engine/Ba
 | `-SelfTest` | SHA-256·숫자 서식·JSON·UPROPERTY 덤프·writer·결정성 자기 시험 |
 
 자기 시험은 UE Automation 시험 `RocksExport.*`로도 돈다.
+
+## golden 묶음
+
+Rocks 저장소의 시험용 golden 묶음(`Engine/Plugins/Importers/UnrealExchange/Tests/Bundles/Golden.rxbundle`)은 이 플러그인으로
+만든다. 원본 콘텐츠를 만드는 스크립트는 `Scripts/Golden/`(`make_column_gltf.py`, `make_golden_content.py`)에 있고, 차례와
+내보내기 명령은 설계 12.3절이다. 플러그인 출력 형식을 바꾸면 golden도 다시 만든다.

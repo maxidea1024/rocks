@@ -26,9 +26,11 @@ inline constexpr uint32 UnrealImportMaxDepth = 256;
 // UE 객체 경로의 byte 상한이다(UE NAME_SIZE와 같은 값, 10.4절 7번).
 inline constexpr usize UnrealObjectPathMaxBytes = 1024;
 
-// 리더 상한(10.4절 16번). JSON 파일 하나, blob 하나, 묶음의 에셋 수, redirect 수, 에셋 하나의 의존
-// 수, 묶음 하나가 담는 진단 수다. 진단은 상한을 넘으면 개수만 센다.
+// 리더 상한(10.4절 16번). JSON 파일 하나, 묶음의 JSON 파일(bundle.json + 에셋 JSON) 크기 합,
+// blob 하나, 묶음의 에셋 수, redirect 수, 에셋 하나의 의존 수, 묶음 하나가 담는 진단 수다. 진단은
+// 상한을 넘으면 개수만 센다. JSON 합 상한은 리더가 문서를 모두 메모리에 두기 때문이다(10.4절 18번).
 inline constexpr uint64 UnrealExchangeMaxJsonBytes = 64ull << 20;
+inline constexpr uint64 UnrealExchangeMaxBundleJsonBytes = 1ull << 30;
 inline constexpr uint64 UnrealExchangeMaxBlobBytes = 4ull << 30;
 inline constexpr uint32 UnrealExchangeMaxAssets = 1u << 20;
 inline constexpr uint32 UnrealExchangeMaxRedirects = 1u << 20;

@@ -151,7 +151,7 @@ TEST(UnrealExchange_FixtureBlobTampering) {
                             ExchangeIssue::BlobConflict, ErrorCode::InvalidArgument));
     }
 
-    const FileFault faults[] = {FileFault::Open, FileFault::Size, FileFault::Read,
+    const FileFault faults[] = {FileFault::Stat, FileFault::Open, FileFault::Size, FileFault::Read,
                                 FileFault::Short};
     for (const FileFault fault : faults) {
         MemoryFiles files(allocator);
@@ -169,6 +169,42 @@ TEST(UnrealExchange_FixtureBlobTampering) {
                             fault == FileFault::Short ? ExchangeIssue::BlobSize
                                                       : ExchangeIssue::ReadFailed,
                             expected));
+        CHECK(files.OpenHandles() == 0);
+    }
+
+    // digest 앞 8 byte가 같고 나머지가 다른 두 blob은 다른 blob이다(수집 사슬의 키 충돌 — 10.4절
+    // 21번). 파일 확인은 끈다(hex만 바꾼 참조라 파일이 없다).
+    {
+        MemoryFiles files(allocator);
+        REQUIRE(LoadFixture(allocator, files));
+        StringBuilder<256> path(allocator);
+        REQUIRE(FixtureFile("assets/Game/Meshes/SM_Rock.json", path));
+        REQUIRE(files.ReplaceOnce(
+            path.View(), "0f88646c73f1452bd75860b1581d665ce9d289117aa4da99bc4e27a237467769",
+            "4fb8f2852abd9d09d75860b1581d665ce9d289117aa4da99bc4e27a237467769"));
+        ExchangeReadOptions options;
+        options.verifyBlobs = false;
+        ExchangeBundle bundle(allocator);
+        ExchangeDiagnostics diagnostics(allocator);
+        REQUIRE(ReadExchangeBundle(files, FixtureDirectory, options, bundle, diagnostics));
+        const ExchangeAsset& rock = bundle.Assets()[RockMeshAsset];
+        REQUIRE(rock.state == ExchangeAssetState::Ready);
+        REQUIRE(rock.blobs.Size() == 2);
+        CHECK(!(rock.blobs[0].digest == rock.blobs[1].digest));
+    }
+
+    // blob 자리가 일반 파일이 아니면(디렉터리) 그 blob을 쓰는 에셋이 NotRegularFile로 실패한다.
+    {
+        MemoryFiles files(allocator);
+        REQUIRE(LoadFixture(allocator, files));
+        StringBuilder<256> path(allocator);
+        REQUIRE(FixtureBlobPath(PositionsHex, path));
+        REQUIRE(files.SetKind(path.View(), platform::FileType::Directory, false));
+        ExchangeBundle bundle(allocator);
+        ExchangeDiagnostics diagnostics(allocator);
+        REQUIRE(ReadExchangeBundle(files, FixtureDirectory, {}, bundle, diagnostics));
+        CHECK(FailedExactly(bundle, diagnostics, Span<const uint32>(positionUsers),
+                            ExchangeIssue::NotRegularFile, ErrorCode::InvalidArgument));
         CHECK(files.OpenHandles() == 0);
     }
 

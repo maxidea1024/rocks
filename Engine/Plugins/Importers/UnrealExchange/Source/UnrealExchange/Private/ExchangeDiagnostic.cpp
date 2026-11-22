@@ -64,6 +64,10 @@ const char* ExchangeIssueName(ExchangeIssue issue) noexcept {
         return "FailedDependency";
     case ExchangeIssue::FailedMember:
         return "FailedMember";
+    case ExchangeIssue::NotRegularFile:
+        return "NotRegularFile";
+    case ExchangeIssue::ExporterError:
+        return "ExporterError";
     }
 
     return "Unknown";

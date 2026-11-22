@@ -1,0 +1,21 @@
+{
+  "objectPath": "/Game/RxGolden/SK_Column/SkeletalMeshes/SK_Column_PhysicsAsset.SK_Column_PhysicsAsset",
+  "class": "PhysicsAsset",
+  "ueClass": "/Script/Engine.PhysicsAsset",
+  "dependencies": [
+    {
+      "objectPath": "/Game/RxGolden/SK_Column/SkeletalMeshes/SK_Column.SK_Column",
+      "class": "SkeletalMesh",
+      "kind": "soft"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "UnsupportedAsset",
+      "severity": "warning",
+      "message": "class PhysicsAsset is outside the exchange scope; only the common part is written"
+    }
+  ],
+  "settings": {},
+  "data": {}
+}

@@ -338,25 +338,25 @@ namespace RocksMaterialExtractorPrivate
 		case EMaterialParameterType::Font:
 			Writer.BeginObject();
 			Writer.Key(TEXT("font"));
-			Dumper.DumpObjectReference(Value.Font.Value, Writer);
+			Dumper.DumpObjectReference(Value.Font.Value, Writer, false);
 			Writer.Key(TEXT("page"));
 			Writer.Int(Value.Font.Page);
 			Writer.EndObject();
 			return;
 		case EMaterialParameterType::Texture:
-			Dumper.DumpObjectReference(Value.Texture, Writer);
+			Dumper.DumpObjectReference(Value.Texture, Writer, false);
 			return;
 		case EMaterialParameterType::TextureCollection:
-			Dumper.DumpObjectReference(Value.TextureCollection, Writer);
+			Dumper.DumpObjectReference(Value.TextureCollection, Writer, false);
 			return;
 		case EMaterialParameterType::RuntimeVirtualTexture:
-			Dumper.DumpObjectReference(Value.RuntimeVirtualTexture, Writer);
+			Dumper.DumpObjectReference(Value.RuntimeVirtualTexture, Writer, false);
 			return;
 		case EMaterialParameterType::SparseVolumeTexture:
-			Dumper.DumpObjectReference(Value.SparseVolumeTexture, Writer);
+			Dumper.DumpObjectReference(Value.SparseVolumeTexture, Writer, false);
 			return;
 		case EMaterialParameterType::ParameterCollection:
-			Dumper.DumpObjectReference(Value.ParameterCollection, Writer);
+			Dumper.DumpObjectReference(Value.ParameterCollection, Writer, false);
 			return;
 		default:
 			Writer.Null();
