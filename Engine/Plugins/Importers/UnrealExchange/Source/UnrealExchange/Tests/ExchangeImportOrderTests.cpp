@@ -69,9 +69,17 @@ TEST(UnrealExchange_PlanFixture) {
             const ExchangeImportUnit& unit = plan.Units()[index];
             CHECK(plan.Members(unit)[0] == expectedFirst[index]);
             CHECK(unit.depth == expectedDepth[index]);
-            CHECK(unit.state == ExchangeUnitState::Ready &&
-                  unit.failure == AssetDiagnosticCode::None &&
-                  unit.failureAsset == ExchangeNoIndex);
+            // 메시 둘(SM_Rock ↔ SM_Rock_Collision)은 Hard 순환이라 실패한다(10.5절 8번 — UXR11 전).
+            if (index == 7) {
+                CHECK(unit.state == ExchangeUnitState::Failed &&
+                      unit.failure == AssetDiagnosticCode::UnsupportedCycle &&
+                      unit.failureAsset == 6);
+            } else {
+                CHECK(unit.state == ExchangeUnitState::Ready &&
+                      unit.failure == AssetDiagnosticCode::None &&
+                      unit.failureAsset == ExchangeNoIndex);
+            }
+
             for (const uint32 member : plan.Members(unit)) {
                 CHECK(plan.UnitOf(member) == index);
             }
@@ -91,7 +99,10 @@ TEST(UnrealExchange_PlanFixture) {
         REQUIRE(shared.TryAppend("/U_Shared"));
         AppendSuffix("/Game/My Props/_Shared", shared);
         CHECK(plan.MappedPath(8) == shared.View() && plan.Renamed(8));
-        REQUIRE(diagnostics.Items().Size() == 2);
+        REQUIRE(diagnostics.Items().Size() == 4);
+        CHECK(diagnostics.Items()[2].issue == ExchangeIssue::HardCycle &&
+              diagnostics.Items()[2].asset == 6 && diagnostics.Items()[3].asset == 7 &&
+              diagnostics.Items()[3].code == AssetDiagnosticCode::UnsupportedCycle);
         CHECK(diagnostics.Items()[0].code == AssetDiagnosticCode::UnrealPathRenamed &&
               diagnostics.Items()[0].severity == ExchangeSeverity::Info &&
               diagnostics.Items()[0].asset == 8 &&
@@ -166,8 +177,8 @@ TEST(UnrealExchange_PlanCycles) {
     }
 
     {
-        // Hard 순환 셋(메시)과 머티리얼↔텍스처 Hard 순환은 한 단위로 허용, 머티리얼↔함수는 Build
-        // 순환.
+        // Hard 순환 셋(메시)과 머티리얼↔텍스처 Hard 순환은 한 단위로 묶이고 다중 에셋 원자 저장
+        // (UXR11) 전까지 HardCycle로 실패한다. 머티리얼↔함수는 Build 순환.
         const SyntheticDependency meshB[] = {{"/Game/S/B.B", "StaticMesh"}};
         const SyntheticDependency meshC[] = {{"/Game/S/C.C", "StaticMesh"}};
         const SyntheticDependency meshA[] = {{"/Game/S/A.A", "StaticMesh"}};
@@ -194,14 +205,17 @@ TEST(UnrealExchange_PlanCycles) {
                               diagnostics));
         CHECK(UnitOfAsset(plan, 0).state == ExchangeUnitState::Failed &&
               UnitOfAsset(plan, 0).memberCount == 2 && plan.UnitOf(0) == plan.UnitOf(2));
-        CHECK(UnitOfAsset(plan, 1).state == ExchangeUnitState::Ready &&
+        CHECK(UnitOfAsset(plan, 1).state == ExchangeUnitState::Failed &&
+              UnitOfAsset(plan, 1).failure == AssetDiagnosticCode::UnsupportedCycle &&
               UnitOfAsset(plan, 1).memberCount == 2 && plan.UnitOf(1) == plan.UnitOf(8));
+        CHECK(HasDiagnostic(diagnostics, AssetDiagnosticCode::UnsupportedCycle,
+                            ExchangeIssue::HardCycle, 8));
         CHECK(UnitOfAsset(plan, 3).state == ExchangeUnitState::Ready &&
               UnitOfAsset(plan, 3).depth == 1);
-        CHECK(UnitOfAsset(plan, 5).state == ExchangeUnitState::Ready &&
+        CHECK(UnitOfAsset(plan, 5).state == ExchangeUnitState::Failed &&
               UnitOfAsset(plan, 5).memberCount == 3 && plan.UnitOf(6) == plan.UnitOf(5) &&
               plan.UnitOf(7) == plan.UnitOf(5));
-        CHECK(diagnostics.Count(ExchangeSeverity::Error) == 2);
+        CHECK(diagnostics.Count(ExchangeSeverity::Error) == 7);
     }
 
     CHECK(allocator.Stats().liveAllocations == 0);
@@ -213,14 +227,24 @@ public:
     explicit ListedAssets(Span<const StringView> paths) noexcept : paths_(paths) {
     }
 
-    bool Contains(StringView objectPath) const noexcept override {
+    Result<ExchangeExistingMatch> Find(StringView objectPath,
+                                       Span<const StringView> formerPaths) const noexcept override {
+        (void)formerPaths;
+        ExchangeExistingMatch match;
         for (const StringView& path : paths_) {
             if (path == objectPath) {
-                return true;
+                match.state = ExchangeExistingState::Found;
+                match.id = AssetId{Guid{1, 1}};
+                match.path = "/Game/Existing";
             }
         }
 
-        return false;
+        return Result<ExchangeExistingMatch>::Success(match);
+    }
+
+    Result<bool> PathTaken(StringView logicalPath) const noexcept override {
+        (void)logicalPath;
+        return Result<bool>::Success(false);
     }
 
 private:
@@ -404,7 +428,8 @@ TEST(UnrealExchange_PlanDepthLimit) {
         REQUIRE(PlanExchangeImport(bundle, {}, plan, diagnostics));
         REQUIRE(plan.Units().Size() == 1);
         CHECK(plan.Units()[0].memberCount == LongChain &&
-              plan.Units()[0].state == ExchangeUnitState::Ready);
+              plan.Units()[0].state == ExchangeUnitState::Failed &&
+              plan.Units()[0].failure == AssetDiagnosticCode::UnsupportedCycle);
         const Span<const uint32> members = plan.Members(plan.Units()[0]);
         for (uint32 index = 0; index < LongChain; ++index) {
             CHECK(members[index] == index);

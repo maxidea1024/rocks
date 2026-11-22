@@ -23,6 +23,9 @@ public sealed class CommandletHost : ModuleRules
         // Animation: the asset type module the asset commands start (Skeleton, AnimationClip — AssetRuntime is its dependency); the
         // texture module joins after A5.
         // Launch: the common entry point (command line capture, crash reporting and the tool log, Docs/Design/CrashHandlingAndLaunch.ko.md).
-        PublicDependencies = ["Core", "Launch", "TraceAnalysis", "Crypto", "Compression", "HostConfig", "AssetRuntime", "AssetCommandlets", "Animation"]
+        // UnrealExchange (plugin enabled by the Commandlet target): the asset-import-unreal command (Docs/Design/UnrealExchange.ko.md section
+        // 10.5; a Program may depend on the modules of plugins its target enables, Docs/Design/BuildTargets.ko.md BD39).
+        PublicDependencies = ["Core", "Launch", "TraceAnalysis", "Crypto", "Compression", "HostConfig", "AssetRuntime", "AssetCommandlets", "Animation",
+            "UnrealExchange"]
     };
 }

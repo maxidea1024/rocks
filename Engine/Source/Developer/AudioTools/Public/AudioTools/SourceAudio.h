@@ -6,13 +6,15 @@
 #include <Core/Result.h>
 #include <Core/Text/String.h>
 
-// 오디오 원본 파일 디코드 결과와 디코더다(Docs/Design/AudioSystem.ko.md 3.10절, 3.25절). 파일
+// 오디오 원본 파일 디코드 결과와 디코더다(Docs/Design/AudioSystem.ko.md 3.10절, 3.25–3.26절). 파일
 // byte를 받아 planar float32 PCM과 loop·cue 메타데이터를 낸다. SoundClipImporter가 이 결과를
-// SoundClip bulk로 옮긴다.
+// SoundClip bulk로 옮긴다. 디코더: WAV·AIFF(자체), MP3(minimp3).
 //
 // 오류 코드(임포터가 진단으로 옮긴다):
-// - InvalidArgument: 필수 chunk 없음·크기·길이 불일치, float 표본 NaN·무한대(InvalidSource)
-// - Unsupported: 모르는 부호화, 9채널 이상, rate 범위 밖(UnsupportedSourceFormat)
+// - InvalidArgument: 필수 chunk·MPEG frame 없음, 크기·길이 불일치,
+//   float 표본 NaN·무한대(InvalidSource)
+// - Unsupported: 모르는 부호화, Layer I·II, 9채널 이상, rate 범위 밖, stream 중간 형식 변경
+//   (UnsupportedSourceFormat)
 // - CapacityExceeded: 디코드한 PCM이 MaxSoundClipPcmBytes를 넘음(할당 전에 판정)
 // - OutOfMemory: 할당 실패
 //
@@ -110,6 +112,11 @@ public:
         return ignoredChunks_;
     }
 
+    // 결과 할당에 쓰는 allocator다(디코더가 임시 버퍼에도 쓴다).
+    Allocator& GetAllocator() noexcept {
+        return *allocator_;
+    }
+
     // 디코더 구현이 채운다.
     void Reset() noexcept;
     Result<float*> TryAllocatePcm(uint32 channels, uint32 sampleRate, uint64 frames,
@@ -143,5 +150,12 @@ ROCKS_AUDIOTOOLS_API Result<void> DecodeWav(Span<const uint8> file,
 // AIFF·AIFF-C를 디코드한다(3.25.3절). out은 먼저 비우고, 실패하면 다시 비운다.
 ROCKS_AUDIOTOOLS_API Result<void> DecodeAiff(Span<const uint8> file,
                                              DecodedSourceAudio& out) noexcept;
+
+// MPEG-1·2·2.5 Layer III(MP3)를 디코드한다(3.26절). ID3v2·ID3v1·APEv2 tag는 건너뛰고,
+// Xing/Info(LAME) tag가 있으면 encoder delay·padding을 잘라 원본 길이로 맞춘다. 채널·rate가 중간에
+// 바뀌거나 Layer I·II면 Unsupported, MPEG frame이 없으면 InvalidArgument다. 표본 형식은 Lossy,
+// 코덱은 Mp3다. out은 먼저 비우고, 실패하면 다시 비운다.
+ROCKS_AUDIOTOOLS_API Result<void> DecodeMp3(Span<const uint8> file,
+                                            DecodedSourceAudio& out) noexcept;
 
 } // namespace rocks::audio
