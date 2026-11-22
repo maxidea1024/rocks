@@ -1,0 +1,54 @@
+diff --git a/src/libFLAC/stream_decoder.c b/src/libFLAC/stream_decoder.c
+index 914c9e5..d5f71e8 100644
+--- a/src/libFLAC/stream_decoder.c
++++ b/src/libFLAC/stream_decoder.c
+@@ -4142,6 +4142,14 @@ FLAC__StreamDecoderTellStatus file_tell_callback_(const FLAC__StreamDecoder *dec
+ 	}
+ }
+ 
++/* Rocks modification (Engine/Source/ThirdParty/Flac/ThirdParty.json "modifications" and Rocks.patch): the Microsoft
++ * CRT deprecates the POSIX name fileno (-Wdeprecated-declarations), so Windows uses _fileno like the stdin path above. */
++#if defined _WIN32 && !defined __CYGWIN__
++#define ROCKS_FLAC_FILENO _fileno
++#else
++#define ROCKS_FLAC_FILENO fileno
++#endif
++
+ FLAC__StreamDecoderLengthStatus file_length_callback_(const FLAC__StreamDecoder *decoder, FLAC__uint64 *stream_length, void *client_data)
+ {
+ 	struct flac_stat_s filestats;
+@@ -4151,9 +4159,9 @@ FLAC__StreamDecoderLengthStatus file_length_callback_(const FLAC__StreamDecoder
+ 		return FLAC__STREAM_DECODER_LENGTH_STATUS_UNSUPPORTED;
+ 
+ #ifndef FLAC__USE_FILELENGTHI64
+-	if(flac_fstat(fileno(decoder->private_->file), &filestats) != 0)
++	if(flac_fstat(ROCKS_FLAC_FILENO(decoder->private_->file), &filestats) != 0)
+ #else
+-	filestats.st_size = _filelengthi64(fileno(decoder->private_->file));
++	filestats.st_size = _filelengthi64(ROCKS_FLAC_FILENO(decoder->private_->file));
+ 	if(filestats.st_size < 0)
+ #endif
+ 		return FLAC__STREAM_DECODER_LENGTH_STATUS_ERROR;
+diff --git a/src/share/win_utf8_io/win_utf8_io.c b/src/share/win_utf8_io/win_utf8_io.c
+index 0d75cbf..0016fe4 100644
+--- a/src/share/win_utf8_io/win_utf8_io.c
++++ b/src/share/win_utf8_io/win_utf8_io.c
+@@ -34,6 +34,7 @@
+ #endif
+ 
+ #include <io.h>
++#include <share.h>
+ #include <windows.h>
+ #include "share/win_utf8_io.h"
+ 
+@@ -319,7 +320,9 @@ FILE* fopen_utf8(const char *filename, const char *mode)
+ 	do {
+ 		if (!(wname = wchar_from_utf8(filename))) break;
+ 		if (!(wmode = wchar_from_utf8(mode))) break;
+-		f = _wfopen(wname, wmode);
++		/* Rocks modification (Engine/Source/ThirdParty/Flac/ThirdParty.json "modifications"): _wfopen is deprecated in
++		 * the Microsoft CRT (-Wdeprecated-declarations). _wfsopen with _SH_DENYNO opens with the same sharing as _wfopen. */
++		f = _wfsopen(wname, wmode, _SH_DENYNO);
+ 	} while(0);
+ 
+ 	free(wname);

@@ -1,0 +1,127 @@
+{
+  "schema": 1,
+  "name": "Vorbis",
+  "version": "1.3.7",
+  "upstreamDirectory": "libvorbis-1.3.7",
+  "globalState": false,
+  "source": {
+    "url": "https://downloads.xiph.org/releases/vorbis/libvorbis-1.3.7.tar.xz",
+    "sha256": "b33cc4934322bcbf6efcbacf49e3ca01aadbea4114ec9589d1b1e9d20f72954b",
+    "verification": "Official Xiph.Org release tarball, downloaded on 2026-11-23; its SHA-256 matches downloads.xiph.org/releases/vorbis/SHA256SUMS. Imported files are libvorbis and vorbisfile sources without the encoder setup (vorbisenc.c and its mode and codebook tables), the public codec.h and vorbisfile.h, and COPYING."
+  },
+  "licenses": [
+    {
+      "spdx": "BSD-3-Clause",
+      "upstreamExpression": "COPYING (Xiph.Org BSD-style license)",
+      "file": "libvorbis-1.3.7/COPYING",
+      "binaryNoticeRequired": true
+    }
+  ],
+  "translationUnits": [
+    "libvorbis-1.3.7/lib/analysis.c",
+    "libvorbis-1.3.7/lib/bitrate.c",
+    "libvorbis-1.3.7/lib/block.c",
+    "libvorbis-1.3.7/lib/codebook.c",
+    "libvorbis-1.3.7/lib/envelope.c",
+    "libvorbis-1.3.7/lib/floor0.c",
+    "libvorbis-1.3.7/lib/floor1.c",
+    "libvorbis-1.3.7/lib/info.c",
+    "libvorbis-1.3.7/lib/lpc.c",
+    "libvorbis-1.3.7/lib/lsp.c",
+    "libvorbis-1.3.7/lib/mapping0.c",
+    "libvorbis-1.3.7/lib/mdct.c",
+    "libvorbis-1.3.7/lib/psy.c",
+    "libvorbis-1.3.7/lib/registry.c",
+    "libvorbis-1.3.7/lib/res0.c",
+    "libvorbis-1.3.7/lib/sharedbook.c",
+    "libvorbis-1.3.7/lib/smallft.c",
+    "libvorbis-1.3.7/lib/synthesis.c",
+    "libvorbis-1.3.7/lib/vorbisfile.c",
+    "libvorbis-1.3.7/lib/window.c"
+  ],
+  "includeDirectories": [
+    "libvorbis-1.3.7/include"
+  ],
+  "defines": [],
+  "platformDefines": {},
+  "consumerDefines": [
+    "OV_EXCLUDE_STATIC_CALLBACKS"
+  ],
+  "adapterHeaders": [
+    "libvorbis-1.3.7/include/vorbis/vorbisfile.h",
+    "libvorbis-1.3.7/include/vorbis/codec.h"
+  ],
+  "files": {
+    "COPYING": "ec1815db59fcd302846df949d7424876cb2e2dc5ed1606c5fb0b36787b1cf43a",
+    "include/vorbis/codec.h": "1d031e3cbae7defe966426e33802450a56388a1323eec1ec629e6d4095c676c5",
+    "include/vorbis/vorbisfile.h": "7d98264e57b0190ef0a2701a0bea5f982e82fc1bedd93cd9408a2fff7790f803",
+    "lib/analysis.c": "cf75d75c762f27ee9f50e9be794e47551d86cbdfb00fbce962ba3280a9516e4d",
+    "lib/backends.h": "1253a0cf54a10b46591bf1dac1717b3bd76abe89188217cd7fbfaa8f50745df5",
+    "lib/bitrate.c": "fd8940a065820c247e0e115b9a10af82c09ed419f8c9a6b88eddaaed221f52b3",
+    "lib/bitrate.h": "06bd012d67f97a5dc1de135371060a0c879a83b01c69d2cceee4ddc7cbef2676",
+    "lib/block.c": "7f65c7031c2b94405d2c1b5f0a73cc19efe9506e95736ba0b38d86bd42170a7e",
+    "lib/codebook.c": "662728ef6190968fd717af62b19578006357090814b15b2f03ddc7a98871b345",
+    "lib/codebook.h": "1a0bf4ebc17645910080155a83bd39b810c7e73703e97c65c5e7ccfdcb89ec55",
+    "lib/codec_internal.h": "3f32ac0e4e94cb0dde4800b243e1239cda9e4df1d277acf334fb48a648a08f8b",
+    "lib/envelope.c": "ae9f845d39776f7b6072543368a18037f778c56385a5cb6377dac388f44b3b51",
+    "lib/envelope.h": "4bc533e8455ad005fca72274ce10e8c7cff69251f0641d98a8a71922be0ba0ce",
+    "lib/floor0.c": "20185fa3bff19f7c162a113f8fb969f3961079454b3ffd2019e9e555b0bbc61c",
+    "lib/floor1.c": "36b2c4a825d317393cd5a1c01275736f4cffe91d97ef11963dcf259247195d6b",
+    "lib/highlevel.h": "22758888e37c71831d2dca16848f03443ed5b5308247c727a58c83f23294716c",
+    "lib/info.c": "14b1bf6dc0e385449b20ada63cf2a2b873c80ebfa3207a70c7883ce9f5f306ca",
+    "lib/lookup.c": "4b169c62256e13a6575aaf38eb49514d8e7825c0df2429a669768b5a6d6716fa",
+    "lib/lookup.h": "1efc9bdd275e812a7cca384e0880ddc85ea94c4c845bcd41a4fe5a557b32ac86",
+    "lib/lookup_data.h": "cd14d76eb3380d091bbcdda5bc361e5f2f31803e71e3a2287ac4d1435ed57bd5",
+    "lib/lpc.c": "e782bd2780f354fcb0156855260c082ccdeed76dc1152ba7a6ae45b98520dfeb",
+    "lib/lpc.h": "90b11956f6fe25980613e1fce79d13a49e1109ad76e87c1f11891940df4f78f5",
+    "lib/lsp.c": "cf618a3be06feb94e39eb7a06ad0db4fd8462f8edac93faf4765b28516a9f5ef",
+    "lib/lsp.h": "588111726561c1caa8a22278eb63b7b4fa84dfbeea14d99a1d9d46b77aacda0c",
+    "lib/mapping0.c": "d3f26fa42c4345f36885e93650ee6da07861b37ea816b131e5fafb7a7c6d19e2",
+    "lib/masking.h": "627fdc3683edda9800edffe0360807d782c1236ba4ad5d05f013517c104b9147",
+    "lib/mdct.c": "e32b379d7a3d9253524abae3c41c5ac2486bf166cf65996efc4e68db1b164993",
+    "lib/mdct.h": "f8ac37e630cd3c0b8790d4de79134e1015dff3a9136beab7835ff8b2e489fe0f",
+    "lib/misc.h": "f83ebd3e0327e6b12cfe11239826691a9fad3f4870b7f8444d7ba54ace289e4a",
+    "lib/os.h": "b9e31c7a0f46d43f6788670fd63f8f3db1584a8915f696e664ec8cf0c8fe81be",
+    "lib/psy.c": "e8ccec1fba7d00961d5c67fec30b488c912f0ad7842ec7b1aeab987b97744b6e",
+    "lib/psy.h": "99d1f493b63185d702868d8f6616ab69bb546ffb61afb3f47a0f637c3ff5b391",
+    "lib/registry.c": "4259a70a4de23ab48a0af4ff08e0f68102052c6c7d3535c06bd7d7e2fdb82a65",
+    "lib/registry.h": "29a25a4e34b3d41458b7a7e1757da9c63cea24322c39616b7fe16b3bf51ab55a",
+    "lib/res0.c": "0d3daf9327dbe14460d9b11df1ea0d9de709e3326d70b607d65720323d0caf62",
+    "lib/scales.h": "455637c2955912086613c0acf0451091dd22707bf1560ac9f964b975998fb545",
+    "lib/sharedbook.c": "a883767bf16552f5cf8686b58b86e55819dcb63487c5307fee5d45820b836a40",
+    "lib/smallft.c": "21b4cd38bc6d50991f4abca4d2619fe1fa27ee74a22bd935804f4cd62b77472a",
+    "lib/smallft.h": "6df874852a7247f181e9a8e7ead541a40893cc50c0a17f1f3e799db25c5a9e61",
+    "lib/synthesis.c": "d5f92aaed1e7b59f3c01e0405813009cda29a61a0e6155d60980907d93c1eeb3",
+    "lib/vorbisfile.c": "ce0143582214941a6fa3fcc94d78fef838fda912dbfdf80ce5f2bc7abe71403a",
+    "lib/window.c": "bea202730509aa12bc5f0da703be1a04a7e7dd04b2ee7a2b3a6f8b133edaacbc",
+    "lib/window.h": "9bb736d228deae67699012cc38f81d379e0b077432f162f2dcd1087f7669dc98"
+  },
+  "pragmaDirectives": [],
+  "notes": [
+    "Ogg Vorbis source decoder for the audio importer (Docs/Design/AudioSystem.ko.md sections 3.10.1 and 3.28). Developer only: AudioTools links it, runtime targets do not.",
+    "Vorbis.Build.cs adds the Ogg include directories, because libvorbis includes ogg/ogg.h; the consumer links both Ogg and Vorbis.",
+    "The block, psy, envelope and bitrate sources are part of the analysis side but block.c references them from the shared dsp setup, so they are compiled; vorbisenc.c (encoder setup) is not imported.",
+    "Decoding is float math without SIMD or runtime CPU dispatch, so decoded samples are fixed per architecture and compiler flags (section 3.10.1).",
+    "Consumers define OV_EXCLUDE_STATIC_CALLBACKS (the library's own guard) so that vorbisfile.h does not put the unused stdio callback functions into every including C++ unit; AudioTools uses memory callbacks.",
+    "lookup.c is imported but not compiled: with FLOAT_LOOKUP and INT_LOOKUP undefined it produces no definitions.",
+    "A Linux tool build would need HAVE_ALLOCA_H (glibc -std=c17 does not declare alloca otherwise) and Vorbis before Ogg in the static link order (GNU ld resolves left to right)."
+  ],
+  "modifications": [
+    {
+      "file": "lib/info.c",
+      "upstreamSha256": "03af6059fe7e50d0b37a0370707139227e6cd4cc74be56473cd22f0300739fca",
+      "reason": "Build the comment strings with memcpy and the known lengths instead of strcpy and strcat, which the Microsoft CRT deprecates (-Wdeprecated-declarations); the results are the same strings."
+    },
+    {
+      "file": "lib/floor1.c",
+      "upstreamSha256": "fd4f403b56bf5538d1cc33fcf9236bca230553c143273fe17f5846ed928b6a64",
+      "reason": "Remove the local y2b sum in fit_line (encoder floor fitting), which was accumulated but never read (-Wunused-but-set-variable)."
+    },
+    {
+      "file": "lib/vorbisfile.c",
+      "upstreamSha256": "557752159e4c96e4ca339d28a4454c9d7edbf6b2bca6cbe4e8a5f8c44ef9196f",
+      "reason": "Open with _fsopen(path, \"rb\", _SH_DENYNO) instead of the deprecated fopen on Windows in ov_fopen (-Wdeprecated-declarations; same sharing mode), give host_is_big_endian a (void) prototype (-Wstrict-prototypes), and mark the fpu control variable of ov_read_filter as used, because os.h makes the rounding macros empty on ARM64 (-Wunused-variable)."
+    }
+  ],
+  "patch": "Rocks.patch"
+}

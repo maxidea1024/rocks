@@ -136,4 +136,32 @@ TEST(NodeGraph_ReflectionJsonRoundTrip) {
     CHECK(SameBytes(original, imported));
 }
 
+// 리플렉션 배열 상한(MaxElements 리터럴)이 C++ 상수와 같다. 생성 schema는 생성 .cpp에만 있어 컴파일
+// 시점에 잇지 못하므로 등록된 schema로 확인한다.
+bool FieldMaxElements(ReflectionEnv& reflection, const void* nativeType, StringView field,
+                      uint32 expected) noexcept {
+    auto lease = reflection.types.AcquireStructByNative(nativeType);
+    if (!lease) {
+        return false;
+    }
+
+    for (const FieldSchema& schema : lease.Value().Schema().fields) {
+        if (StringView(schema.name.Data(), schema.name.Size()) == field) {
+            return schema.maxElements == expected;
+        }
+    }
+
+    return false;
+}
+
+TEST(NodeGraph_ReflectionLimitsMatchConstants) {
+    TestEnv env;
+    REQUIRE(env.ready);
+    ReflectionEnv reflection(env);
+    REQUIRE(reflection.registered);
+    CHECK(FieldMaxElements(reflection, NativeTypeKey<PropertyRecord>(), "bytes",
+                           MaxPropertyRecordBytes));
+    CHECK(FieldMaxElements(reflection, NativeTypeKey<Graph>(), "edges", MaxGraphEdges));
+}
+
 } // namespace node_graph_reflection_tests_file

@@ -4,13 +4,52 @@
 #include <Core/Result.h>
 #include <Core/Text/StringView.h>
 #include <NodeGraph/GraphDocument.h>
+#include <NodeGraph/GraphReadView.h>
+#include <NodeGraph/NodeTypeDescriptor.h>
 
-// 도메인 그래프 schema다(Docs/Design/NodeGraph.ko.md 7절). schema는 정책만 맡는다(GD9). NG0은
-// 도메인 식별·핀 타입 표·의미 정규화만 둔다. 나머지(연결 판정·검증·붙여넣기·기본 노드·메뉴·drop)는
-// 쓰는 단계에서 더한다(14절).
+// 도메인 그래프 schema다(Docs/Design/NodeGraph.ko.md 7·8.6절). schema는 정책만 맡는다(GD9). 지금
+// 있는 것: 도메인 식별·핀 타입 표·의미 정규화(NG0), 연결 판정·기본 노드·검증(NG1). 붙여넣기 허용은
+// NG2, 메뉴·drop은 NG5에서 더한다(14절).
 namespace rocks::nodegraph {
 
 class SemanticNodeWriter;
+class GraphCommandList;
+class GraphIdSource;
+struct GraphDiagnosticList;
+
+// 연결 판정의 처리다(7절, UE ECanCreateConnectionResponse 대응).
+enum class ConnectAction : uint8 {
+    Deny,
+    Make,
+    // 입력 핀의 기존 간선을 빼고 잇는다.
+    MakeReplacingInput,
+    // 출력 핀의 기존 간선을 빼고 잇는다.
+    MakeReplacingOutput,
+    MakeReplacingBoth,
+    // conversionNodeType 노드를 사이에 넣어 잇는다(첫 입력 핀·첫 출력 핀).
+    MakeWithConversion
+};
+
+// 연결 판정 결과다.
+struct ConnectVerdict {
+    ConnectAction action = ConnectAction::Deny;
+    // MakeWithConversion일 때의 변환 노드 종류다.
+    Name conversionNodeType;
+    // 거부·경고 사유(도메인 코드)다.
+    uint32 reasonCode = 0;
+};
+
+// 연결 판정의 입력이다. 핀 서술은 판정 동안만 유효하다.
+struct ConnectQuery {
+    const Graph* graph = nullptr;
+    PinRef from;
+    PinRef to;
+    const PinDescriptor* fromPin = nullptr;
+    const PinDescriptor* toPin = nullptr;
+    // 입력 핀·출력 핀에 지금 있는 간선 수다.
+    uint32 toEdgeCount = 0;
+    uint32 fromEdgeCount = 0;
+};
 
 // 핀 타입 하나의 정보다. PinTypeId는 표의 색인이다.
 struct PinTypeInfo {
@@ -56,6 +95,22 @@ public:
     // 바이트를 넘긴다. 결정적이어야 한다(같은 노드에 같은 바이트).
     virtual Result<void> NormalizeSemanticNode(const GraphNode& node,
                                                SemanticNodeWriter& writer) const noexcept;
+
+    // 연결 판정이다. 동기·빠름(화면 hover마다 부른다). 기본: 핀 종류가 같고 타입이 같거나 한쪽이
+    // UnresolvedPinType이면 연결하고, 입력 핀이 maxEdges만큼 차 있으면 MakeReplacingInput(UE 단일
+    // 입력 핀 기본), 그 밖은 Deny다. 순환 금지가 필요한 도메인은
+    // WouldCreateCycle(GraphReadView.h)로 본다.
+    virtual ConnectVerdict CanConnect(const GraphReadView& view,
+                                      const ConnectQuery& query) const noexcept;
+
+    // 새 그래프(role)의 기본 노드 명령을 out에 덧붙인다(예: 머티리얼 출력 노드). id는 ids에서
+    // 받는다. 기본은 아무것도 더하지 않는다.
+    virtual Result<void> CreateDefaultNodes(GraphRole role, Guid graph, GraphIdSource& ids,
+                                            GraphCommandList& out) const noexcept;
+
+    // 도메인 구조 검사다(컴파일 진단과 별개, 빠름). 진단을 out에 더한다. 기본은 없음이다.
+    virtual Result<void> Validate(const GraphReadView& view,
+                                  GraphDiagnosticList& out) const noexcept;
 };
 
 } // namespace rocks::nodegraph
