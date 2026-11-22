@@ -10,9 +10,11 @@ inline bool SameEntry(const AssetIndexEntry& left, const AssetIndexEntry& right)
     if (!(left.id == right.id) || !(left.type == right.type) ||
         !(left.fingerprint == right.fingerprint) || left.fileBytes != right.fileBytes ||
         left.modifiedTicks != right.modifiedTicks || left.readOnly != right.readOnly ||
-        left.path.View() != right.path.View() || left.key.View() != right.key.View() ||
-        left.fileName.View() != right.fileName.View() || left.duplicateId != right.duplicateId ||
-        left.duplicatePath != right.duplicatePath ||
+        left.hasContentHash != right.hasContentHash || !(left.contentHash == right.contentHash) ||
+        left.contentHashBytes != right.contentHashBytes ||
+        left.contentHashTicks != right.contentHashTicks || left.path.View() != right.path.View() ||
+        left.key.View() != right.key.View() || left.fileName.View() != right.fileName.View() ||
+        left.duplicateId != right.duplicateId || left.duplicatePath != right.duplicatePath ||
         left.dependencies.Size() != right.dependencies.Size() ||
         left.tags.Size() != right.tags.Size() ||
         left.importRecord.present != right.importRecord.present ||
