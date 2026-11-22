@@ -327,6 +327,12 @@ public:
         return awaitCount_;
     }
 
+    // Gate G5(SparksReload 6절 — 시험 전용): 다음 ApplyReload가 연결 다시 풀기까지 마친 뒤 되돌리기
+    // 경로를 밟고 InvalidArgument를 돌려준다(그 적용이 앞에서 실패하면 주입은 일어나지 않는다).
+    void InjectReloadRollback() noexcept {
+        injectRollback_ = true;
+    }
+
     // 주입이 실제로 일어났는지다(fault를 냈거나 취소를 실행했다 — 헛도는 G4를 잡는다).
     bool InjectionFired() const noexcept {
         return injectionFired_;
@@ -678,6 +684,7 @@ private:
     uint32 injectedSuspension_ = NoBytecodeIndex; // 조각 끝에 취소할 정지 실행
     uint64 injectedWait_ = 0;                     // 그 실행이 기다리던 대기(슬롯 재사용 대조)
     bool injectionFired_ = false;
+    bool injectRollback_ = false; // G5: 다음 ApplyReload를 되돌린다
     // AWAIT 하나를 센다: 주입 fault면 true(취소 주입은 다음 정지를 표시한다).
     bool CountAwait() noexcept;
     // 지연 적용(LC6d2).
