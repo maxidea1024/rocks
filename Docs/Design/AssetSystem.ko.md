@@ -755,7 +755,7 @@ A3는 Rockpile 설계([Rockpile](Rockpile.ko.md) 12·17절)가 요구한 레코�
   - 같은 digest의 기존 항목은 값 byte의 ContentHash까지 확인한 뒤에만 `Exists`다(열기 검증은 값 byte를 읽지 않으므로 — 손상 값을 가진 항목을 Exists로 남기면 다음 Get까지 손상이 남는다). 손상이면 교체 경로로 간다.
   - 이동이 AlreadyExists였는데 판정 때 항목이 없으면(GC·손상 삭제) 한 번 더 이동하고, 그것도 실패하면 `Dropped`(Busy)다. 이동의 다른 실패(delete-pending 이름의 AccessDenied 등)·디렉터리 만들기·쓰기·Flush·Close 실패는 `Dropped`(그 오류)이고 tmp를 지운다.
   - 기존 항목을 읽을 수 없으면(IO 오류·할당 실패) 손상으로 보지 않는다 — Get은 `Miss`(그 오류), Put은 `Dropped`(그 오류)이고 지우지 않는다. 손상(InvalidArgument)만 지운다.
-  - GC는 루트의 16진 두 글자 디렉터리(link 아님) 안의 `<그 두 글자로 시작하는 64자 소문자 16진>.rnug` 일반 파일(link 아님)만 본다. 지우지 못한 항목은 `skipped`이고 남은 합에서 빼지 않는다. tmp 정리는 `.tmp`·`.lock` 일반 파일만이다(디렉터리·다른 이름은 두고, 잠금은 try-lock 뒤에만).
+  - GC는 루트의 16진 두 글자 디렉터리(link 아님) 안의 `<그 두 글자로 시작하는 64자 소문자 16진>.rnug` 일반 파일(link 아님)만 본다. 지우지 못한 항목은 `skipped`이고 남은 합에서 빼지 않는다. tmp 정리는 지난 `.tmp` 일반 파일만이다(디렉터리·다른 이름·잠금 파일은 둔다).
   - `FileSystem::Exists`는 디렉터리에 거짓이다(UE `FileExists`와 같다 — 시험은 디렉터리를 Stat으로 본다. A3 뒤 `FileExists`·`DirectoryExists`로 바꾼다 — 사용자 지시 2026-11-22).
   - 리뷰 반영(필수 하나·권장 넷): 키별 잠금 파일을 tmp 정리가 try-lock 뒤 지우던 것을 고정 256개 shard 잠금(지우지 않음)으로 바꿨다(FileLock 계약 — POSIX에서 상호 배제가 깨졌다, 처음 설계의 "try-lock 뒤에만 지운다"는 틀렸다). Exists 확인을 고정 버퍼 흘려 읽기로(`VerifyNuggetValue`), 잠금 대기 상한 주입, 값 선택 중복 거부·이진 검색.
   - 남는 경합: 잠금 밖 경로(Get의 손상 삭제 + 다른 Put의 no-replace 이동)가 잠금 안 재판정과 `Replace` 사이에 끼면 새 정상 항목을 다른 정상 값으로 덮을 수 있다. 결과는 정상 값끼리의 교체이고(digest가 다르면 다른 세션에 `DigestChanged`) 틀린 적중은 아니다 — 모든 쓰기를 잠그지 않는 대가로 받아들인다(no-replace 이동이 동시 쓰기의 기본 경로).
