@@ -1,7 +1,9 @@
 #include "RocksExportSelfTest.h"
 
 #include "AssetRegistry/IAssetRegistry.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/Texture.h"
+#include "MeshDescription.h"
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
@@ -11,6 +13,7 @@
 #include "RocksExportSelfTestTypes.h"
 #include "RocksExporter.h"
 #include "RocksJsonWriter.h"
+#include "RocksMeshDescriptionWriter.h"
 #include "RocksPropertyDumper.h"
 #include "RocksSha256.h"
 #include "RocksTextureExtractor.h"
@@ -620,6 +623,129 @@ void RocksExportSelfTest::RunTextureExtraction(TArray<FString>& Errors)
 	IFileManager::Get().DeleteDirectory(*Root, false, true);
 }
 
+void RocksExportSelfTest::RunStaticMeshExtraction(TArray<FString>& Errors)
+{
+	using namespace RocksExportSelfTestPrivate;
+
+	static const TCHAR* const Meshes[] = {CubePath, SpherePath};
+
+	// 에셋 상태의 지문: UPROPERTY 덤프 전체, LOD별 원본 메시 설명 기록의 digest, 빌드 설정의 lightmap 번호.
+	const auto Snapshot = [](UStaticMesh& Mesh)
+	{
+		FString Text;
+		FRocksPropertyDumper Dumper(&Mesh);
+		FRocksJsonWriter Writer(FRocksJsonWriter::EStyle::Compact);
+		Dumper.DumpObject(&Mesh, Writer);
+		Text = Utf8ToString(Writer.Finish());
+		for (int32 Lod = 0; Lod < Mesh.GetNumSourceModels(); ++Lod)
+		{
+			const FMeshBuildSettings& Settings = Mesh.GetSourceModel(Lod).BuildSettings;
+			Text += FString::Printf(TEXT("|%d:%d:%d"), Lod, Settings.SrcLightmapIndex, Settings.DstLightmapIndex);
+			FMeshDescription Source;
+			if (Mesh.IsMeshDescriptionValid(Lod) && Mesh.CloneMeshDescription(Lod, Source))
+			{
+				FRocksMeshDescriptionWriter::Compact(Source);
+				FRocksMeshSourceRecord Record;
+				TArray<FRocksExportDiagnostic> Ignored;
+				FString Problem;
+				Text += FRocksMeshDescriptionWriter::FromMeshDescription(Source, Record, Ignored, Problem) ? FRocksMeshDescriptionWriter::Digest(Record) : Problem;
+			}
+		}
+
+		return Text;
+	};
+
+	IAssetRegistry::GetChecked().SearchAllAssets(true);
+	const FString Root = SelfTestDirectory() / TEXT("StaticMesh");
+	IFileManager::Get().DeleteDirectory(*Root, false, true);
+	const FString Output = Root / TEXT("Meshes.rxbundle");
+	TArray<FString> Before;
+	for (const TCHAR* Path : Meshes)
+	{
+		UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, Path);
+		Expect(Errors, Mesh != nullptr, FString::Printf(TEXT("cannot load %s"), Path));
+		Before.Add(Mesh != nullptr ? Snapshot(*Mesh) : FString());
+	}
+
+	FRocksExportOptions Options;
+	Options.OutputDirectory = Output;
+	Options.bClosure = false;
+	for (const TCHAR* Path : Meshes)
+	{
+		Options.Selections.Add(Path);
+	}
+
+	FRocksExportResult Result;
+	Expect(Errors, FRocksExporter::Export(Options, Result), FString::Printf(TEXT("static mesh export: %s"), *Result.Error));
+	for (int32 Index = 0; Index < UE_ARRAY_COUNT(Meshes); ++Index)
+	{
+		const TCHAR* Path = Meshes[Index];
+		UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, Path);
+		if (Mesh == nullptr)
+		{
+			continue;
+		}
+
+		// 12.2절: prepared 추출(SetupRenderMeshDescription)이 원본 에셋 설정·원본 메시를 바꾸지 않는다.
+		Expect(Errors, Snapshot(*Mesh) == Before[Index], FString::Printf(TEXT("%s: extraction changed the asset"), Path));
+
+		TArray<uint8> Json;
+		const TSharedPtr<FJsonObject> Asset = LoadBytes(Output / FRocksBundleWriter::AssetFileForPackage(FSoftObjectPath(Path).GetLongPackageName()), Json) ? ParseJson(Json) : nullptr;
+		Expect(Errors, Asset.IsValid(), FString::Printf(TEXT("%s: no mesh JSON"), Path));
+		if (!Asset.IsValid())
+		{
+			continue;
+		}
+
+		const TArray<TSharedPtr<FJsonValue>>& Lods = Asset->GetObjectField(TEXT("data"))->GetArrayField(TEXT("lods"));
+		Expect(Errors, Lods.Num() == Mesh->GetNumSourceModels() && Asset->GetObjectField(TEXT("settings"))->HasField(TEXT("SourceModels")),
+			FString::Printf(TEXT("%s: LOD list or settings"), Path));
+		if (Lods.IsEmpty())
+		{
+			continue;
+		}
+
+		// LOD 0 원본: 수와 위치 blob이 압축한 원본 메시 설명과 같고, 엔진 속성이 다 있으며, prepared가 있다.
+		FMeshDescription Source;
+		FRocksMeshSourceRecord Record;
+		TArray<FRocksExportDiagnostic> Ignored;
+		FString Problem;
+		const bool bRecord = Mesh->CloneMeshDescription(0, Source) && (FRocksMeshDescriptionWriter::Compact(Source), FRocksMeshDescriptionWriter::FromMeshDescription(Source, Record, Ignored, Problem));
+		const TSharedPtr<FJsonObject> Lod0 = Lods[0]->AsObject();
+		const TSharedPtr<FJsonObject> SourceJson = Lod0->GetObjectField(TEXT("source"));
+		const TSharedPtr<FJsonObject> Counts = SourceJson->GetObjectField(TEXT("counts"));
+		Expect(Errors, bRecord && Lod0->GetBoolField(TEXT("hasSource")) && uint32(Counts->GetNumberField(TEXT("vertices"))) == Record.VertexCount
+			&& uint32(Counts->GetNumberField(TEXT("triangles"))) == Record.TriangleCount && uint32(Counts->GetNumberField(TEXT("polygons"))) == Record.PolygonCount
+			&& SourceJson->GetArrayField(TEXT("topology")).Num() == 7, FString::Printf(TEXT("%s: LOD 0 counts"), Path));
+
+		TSet<FString> Names;
+		for (const TSharedPtr<FJsonValue>& Item : SourceJson->GetArrayField(TEXT("attributes")))
+		{
+			const TSharedPtr<FJsonObject> Attribute = Item->AsObject();
+			const FString Key = Attribute->GetStringField(TEXT("element")) + TEXT(".") + Attribute->GetStringField(TEXT("name"));
+			Names.Add(Key);
+			if (Key == TEXT("Vertex.Position"))
+			{
+				TArray<uint8> Written;
+				const FRocksMeshAttribute* Expected = Record.Attributes.FindByPredicate([](const FRocksMeshAttribute& A) { return A.Element == ERocksMeshElement::Vertex && A.Name == TEXT("Position"); });
+				const FString Hex = Attribute->GetObjectField(TEXT("data"))->GetStringField(TEXT("blob"));
+				Expect(Errors, Expected != nullptr && LoadBytes(Output / FRocksBundleWriter::BlobFileForHex(Hex), Written) && int64(Written.Num()) == Expected->Bytes.Num()
+					&& FMemory::Memcmp(Written.GetData(), Expected->Bytes.GetData(), Written.Num()) == 0, FString::Printf(TEXT("%s: position blob"), Path));
+			}
+		}
+
+		for (const TCHAR* Required : {TEXT("Vertex.Position"), TEXT("Corner.Normal"), TEXT("Corner.Tangent"), TEXT("Corner.BinormalSign"), TEXT("Corner.Color"), TEXT("Corner.TexCoord"), TEXT("Edge.IsHard"), TEXT("PolygonGroup.MaterialSlotName")})
+		{
+			Expect(Errors, Names.Contains(Required), FString::Printf(TEXT("%s: attribute %s missing"), Path, Required));
+		}
+
+		Expect(Errors, Lod0->GetObjectField(TEXT("prepared"))->GetObjectField(TEXT("counts"))->GetNumberField(TEXT("vertices")) == double(Record.VertexCount)
+			&& Lod0->GetObjectField(TEXT("preparedBuild"))->HasField(TEXT("DstLightmapIndex")), FString::Printf(TEXT("%s: prepared"), Path));
+	}
+
+	IFileManager::Get().DeleteDirectory(*Root, false, true);
+}
+
 bool RocksExportSelfTest::RunAll(TArray<FString>& Errors)
 {
 	RunSha256(Errors);
@@ -629,5 +755,6 @@ bool RocksExportSelfTest::RunAll(TArray<FString>& Errors)
 	RunBundleWriter(Errors);
 	RunExportDeterminism(Errors);
 	RunTextureExtraction(Errors);
+	RunStaticMeshExtraction(Errors);
 	return Errors.IsEmpty();
 }

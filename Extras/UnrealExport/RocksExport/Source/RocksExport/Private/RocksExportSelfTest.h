@@ -28,6 +28,10 @@ namespace RocksExportSelfTest
 	// SHA-256·bytes·blob 파일 내용을 대조하고, data.source 표와 settings(Source 제외), 손실 원본 표시를 확인한다.
 	void RunTextureExtraction(TArray<FString>& Errors);
 
+	// 정적 메시 추출(5.4절): 엔진 메시를 내보내 LOD 수·원본 수·위치 blob·엔진 속성·prepared를 확인하고, 추출 전후의
+	// 에셋 덤프·원본 메시 digest·빌드 설정 lightmap 번호가 같은지(12.2절 — prepared가 원본 설정을 바꾸지 않음) 본다.
+	void RunStaticMeshExtraction(TArray<FString>& Errors);
+
 	// 위 전부를 돌린다. 모두 통과하면 true다.
 	bool RunAll(TArray<FString>& Errors);
 }
