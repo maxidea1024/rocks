@@ -1,5 +1,5 @@
-#include "AssetIndexCommandlet.h"
-#include "AssetCommandletSupport.h"
+#include <AssetCommandlets/AssetIndexCommandlet.h>
+#include <AssetCommandlets/AssetCommandletSupport.h>
 
 #include <AssetDatabase/AssetIndex.h>
 #include <AssetDatabase/AssetIndexCache.h>

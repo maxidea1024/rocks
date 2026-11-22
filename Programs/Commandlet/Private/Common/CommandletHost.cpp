@@ -1,8 +1,8 @@
 #include "CommandletHost.h"
-#include "AssetAliasCommandlet.h"
-#include "AssetCommandletSupport.h"
-#include "AssetEditCommandlet.h"
-#include "AssetIndexCommandlet.h"
+#include <AssetCommandlets/AssetAliasCommandlet.h>
+#include <AssetCommandlets/AssetCommandletSupport.h>
+#include <AssetCommandlets/AssetEditCommandlet.h>
+#include <AssetCommandlets/AssetIndexCommandlet.h>
 #include "ContentSignCommandlet.h"
 #include "LogCommandlet.h"
 #include <Config/ConfigDump.h>

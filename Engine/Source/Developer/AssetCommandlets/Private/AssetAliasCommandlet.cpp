@@ -1,5 +1,5 @@
-#include "AssetAliasCommandlet.h"
-#include "AssetCommandletSupport.h"
+#include <AssetCommandlets/AssetAliasCommandlet.h>
+#include <AssetCommandlets/AssetCommandletSupport.h>
 
 #include <AssetDatabase/AssetAliasTable.h>
 #include <AssetDatabase/AssetClock.h>
