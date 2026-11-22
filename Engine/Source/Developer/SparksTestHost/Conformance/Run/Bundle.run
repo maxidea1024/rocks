@@ -1,8 +1,10 @@
 # Reloading a bundle of modules (SparksReload LC7c2b): each revision folder overlays the case files;
 # the bundle is the modules whose source changed, the recompile scope and the modules that import
 # them (Util stays out); the derived class region moves when its base in another module grows; a kept
-# execution of the old Main revision still calls the old Base function through its old imports; a
-# base change of a class with instances refuses the whole bundle without changes.
+# execution of the old Main revision still calls the old Base functions through its old imports (old
+# Base stays alive and its field writes reach the moved field); under cancel an execution whose own
+# body is unchanged but which calls a changed function through an import is cancelled; a base change
+# of a class with instances refuses the whole bundle without changes.
 new #1 Door -> ok (6 steps)
 new #2 Door -> ok (6 steps)
 new #3 Lamp -> ok (3 steps)
@@ -24,12 +26,18 @@ Door.Fire(#1, 2) -> void (14 steps)
   log info "seen v1 6"
   deliver #2 Door.on Peer.Ping -> ok (11 steps)
 advance 1.0 -> ok (0 suspended)
-  resume #2 Door.Later -> ok (14 steps)
+  resume #2 Door.Later -> ok (29 steps)
   log info "later 10"
+  log info "raised 3"
+fields #2 -> Door(Bonus: 5, Level: 3, Peer: #1, Seen: 10)
 reload v3 -> ok (modules 1, instances 2, moved 2, defaulted 2, lost 0, removed 0, cancelled 0, restarted 0, previous 0)
 Door.Fire(#1, 1) -> void (14 steps)
   log info "seen v3 3"
   deliver #2 Door.on Peer.Ping -> ok (11 steps)
+Door.Later(#2, 5) -> suspended (7 steps)
+reload v4 -> ok (modules 2, instances 2, moved 3, defaulted 5, lost 0, removed 0, cancelled 1, restarted 0, previous 0)
+advance 1.0 -> ok (0 suspended)
+stats -> waits 0, suspended 0, skipped 0
 detach #1 -> ok
 detach #2 -> ok
 detach #3 -> ok

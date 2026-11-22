@@ -360,6 +360,11 @@ public:
         return injectionFired_;
     }
 
+    // Gate G5 대조 상태(시험 전용 — SparksReload 6절, LC7c 리뷰 4)를 out 끝에 붙인다: session 모듈
+    // 목록, 연결마다 (발행자, 구독자, 모듈, handler, key 글자 위치·길이, 순번), 다음 연결 순번,
+    // instance마다 쓰기 bit와 Tick 중지 모듈. 할당 실패면 false.
+    bool AppendGateState(Array<uint64>& out) const noexcept;
+
     // 연결 표 항목 수다(G1 — Detach 뒤 0).
     uint32 ConnectionCount() const noexcept {
         return static_cast<uint32>(connections_.Size());
@@ -787,13 +792,19 @@ private:
     // link의 function이 필드 명령으로 참조하는 로컬 필드가 모두 계획의 새 revision까지 옮겨지는지다
     // (이전 revision 기록과 계획의 old → fresh 대응 — SparksReload 5절).
     bool FieldsReach(const VmLinkedModule& link, uint32 function,
-                     const VmReloadPlan::Entry& entry) const noexcept;
+                     const VmReloadPlan& plan) const noexcept;
     // 쌍 하나의 대응표를 만든다(entry.old·fresh가 정해져 있다 — 판정 실패는 reason과
     // InvalidArgument).
     Result<void> PlanModule(VmReloadPlan::Entry& entry, StringBuilderBase& reason) noexcept;
-    // link의 function이 같은 모듈 호출로 broken(link 함수 번호별 표지)인 함수를 부르는지다.
-    bool CallsBroken(const VmLinkedModule& link, uint32 function,
-                     Span<const uint8> broken) const noexcept;
+    // link의 function이 같은 모듈 호출이나 import 호출로 flags(links[i]의 함수는 starts[i]부터)에
+    // 표지된 함수를 부르는지다(LC7c 리뷰 2).
+    bool CallsFlagged(const VmLinkedModule& link, uint32 function,
+                      Span<const VmLinkedModule* const> links, Span<const uint32> starts,
+                      Span<const uint8> flags) const noexcept;
+    // 정지 실행이 frame 모듈이나 그 import 폐포로 link에 닿는지다(import는 정적으로 묶인다 — LC7c
+    // 리뷰 1). 따라간 모듈이 MaxReachModules를 넘으면 닿는다고 본다.
+    static constexpr uint32 MaxReachModules = 256;
+    bool ExecutionReaches(const Suspended& execution, const VmLinkedModule* link) const noexcept;
     // reload 기본값 계산 중인 클래스 저장소다(SparksReload 5절 — 그 동안만 module이 있다).
     struct Staging {
         const VmLinkedModule* module = nullptr;

@@ -1,6 +1,6 @@
 # 오디오 시스템 설계
 
-기준일: 2026-11-23, 개정 12(3.24절 ADPCM 블록 코덱 앞당김). 개정 11: Mixer2 구현 리뷰 반영 — mailbox·stop-all 최소 fade, 시험 강화. 개정 10: 3.23절 AU1 Mixer2 스레드 경계 — 소유 분리, seqlock·mailbox·stop-all·시작/terminal·ACK, 반복 Stop 규칙). 개정 9: Mixer1 구현 리뷰 반영 — fade 끝·동점 규칙, 종류별 무시 계수, 마스터 gain 상한, 비유한 정리를 limiter 앞으로. 개정 8: 3.22절 AU1 믹서 코어 — 명령 인자 전달로 PR3을 AU2로, 상태 표, Q 불변 ramp, FTZ 실행 함수. DSP2 리뷰 반영 — 비유한 key, ratio·gain 범위, 큰 블록, FTZ·DAZ 계약. 개정 6: 3.21절 AU1 DSP2 dynamics, DSP2 범위 바로잡음. 개정 5: DSP1 리뷰 반영 — HPF fs/2 clamp, HPF bypass 20 Hz, 리샘플러 비율 범위 UE와 같게. 개정 4: DSP1 구현 반영(리샘플러 고정소수점, 방위각 경계, 오류 코드). 개정 3: 3.20절 AU1 구현 세부 DSP1, 3.13.2절 패닝을 UE 방식으로 고침. 개정 2: 8절 다른 문서 개정 반영. 소리를 재생하는 엔진 기능 전체를 정한다. 범위는 실시간 믹서, 장치 출력, 엔진·World 연결, 사운드 에셋, 임포트, 코덱·쿠킹, 스트리밍, 감쇠·공간화·동시 발음·가상화, 버스·효과·리버브 존, 진단이다. UE 5.8의 AudioMixerCore·AudioMixer·SignalProcessing·Engine 오디오 클래스와 AudioGameplayVolume 플러그인에 해당한다.
+기준일: 2026-11-23, 개정 13(3.25절 WAV·AIFF 원본 디코드). 개정 12: 3.24절 ADPCM 블록 코덱 앞당김. 개정 11: Mixer2 구현 리뷰 반영 — mailbox·stop-all 최소 fade, 시험 강화. 개정 10: 3.23절 AU1 Mixer2 스레드 경계 — 소유 분리, seqlock·mailbox·stop-all·시작/terminal·ACK, 반복 Stop 규칙). 개정 9: Mixer1 구현 리뷰 반영 — fade 끝·동점 규칙, 종류별 무시 계수, 마스터 gain 상한, 비유한 정리를 limiter 앞으로. 개정 8: 3.22절 AU1 믹서 코어 — 명령 인자 전달로 PR3을 AU2로, 상태 표, Q 불변 ramp, FTZ 실행 함수. DSP2 리뷰 반영 — 비유한 key, ratio·gain 범위, 큰 블록, FTZ·DAZ 계약. 개정 6: 3.21절 AU1 DSP2 dynamics, DSP2 범위 바로잡음. 개정 5: DSP1 리뷰 반영 — HPF fs/2 clamp, HPF bypass 20 Hz, 리샘플러 비율 범위 UE와 같게. 개정 4: DSP1 구현 반영(리샘플러 고정소수점, 방위각 경계, 오류 코드). 개정 3: 3.20절 AU1 구현 세부 DSP1, 3.13.2절 패닝을 UE 방식으로 고침. 개정 2: 8절 다른 문서 개정 반영. 소리를 재생하는 엔진 기능 전체를 정한다. 범위는 실시간 믹서, 장치 출력, 엔진·World 연결, 사운드 에셋, 임포트, 코덱·쿠킹, 스트리밍, 감쇠·공간화·동시 발음·가상화, 버스·효과·리버브 존, 진단이다. UE 5.8의 AudioMixerCore·AudioMixer·SignalProcessing·Engine 오디오 클래스와 AudioGameplayVolume 플러그인에 해당한다.
 
 [엔진 구현 계획](EngineImplementationPlan.ko.md) §18은 AudioRT 무대기 계약(Object·파일 IO·동적 할당·lock·직접 로그 금지), voice handle 세대, stop mailbox, epoch ACK, 48 kHz·256/512 frame, 성능 목표를 이미 정했다. 이 문서는 그 계약을 구현 수준으로 구체화한다. 설계가 애매한 곳은 UE 방식을 따르고, Rocks 원칙(결정적 시험, `Result` 오류, 명시적 소유, 전역 생성자 금지)과 부딪히는 곳만 다르게 정한다(7절).
 
@@ -1087,6 +1087,71 @@ Mixer1(3.22절)은 제어 쪽 API와 `RenderBlock`이 같은 voice 슬롯을 읽
 | 임의 접근 | 서로 다른 0 아닌 스테레오에서 블록 경계·블록 안 시작(블록 1 이상 포함)의 디코드가 처음부터 디코드한 결과의 같은 구간과 같음 |
 | 음성 | 계수 색인 7, 짧은 블록, payload 크기 불일치, 범위 밖 frame(`startFrame > totalFrames` 포함), 넘침 경계의 frame 수 |
 
+### 3.25 AU4 앞당김 — 원본 디코드 라이브러리: WAV·AIFF(개정 13)
+
+`SoundClipImporter`(A2f `AssetImporter`)와 `SoundClip` 에셋은 AU3(`EngineAudio`)의 `SoundClip` 타입 뒤에 붙인다. 이번 범위는 `AudioTools`의 원본 디코드 함수다. 파일 byte를 받아 planar PCM과 메타데이터를 낸다. ThirdParty 디코더(FLAC·Vorbis·Opus·MP3)는 같은 결과 형식으로 이어서 더한다.
+
+#### 3.25.1 결과 형식(`AudioTools/SourceAudio.h`)
+
+- `DecodedSourceAudio`
+  - `channels`(1–8), `sampleRate`, `frames`
+  - `sampleFormat`(원본 표본 형식): `UInt8`·`Int16`·`Int24`·`Int32`·`Float32`·`Float64`·손실 코덱
+  - `sourceCodec`: `Pcm`·`Flac`·`Vorbis`·`Opus`·`Mp3`
+  - `pcm`: planar float32. 채널 하나가 frame 수만큼 이어지고 채널이 차례로 이어진다.
+  - `loops`: `smpl` loop 목록 `{start, end(포함하지 않음)}`
+  - `cues`: `cue ` 위치 목록 `{id, frame, name}`. name은 `LIST adtl labl`이고 UTF-8 그대로 둔다.
+  - `ignoredChunks`: 모르는 chunk 수. 임포터의 `IgnoredSourceChunks` 경고에 쓴다.
+- float32 변환:
+  - 8비트(부호 없음): (v − 128) / 128
+  - 16비트: v / 32768
+  - 24비트: v / 8388608
+  - 32비트 정수: v / 2147483648(double로 계산한 뒤 float로)
+  - float64: float로 반올림
+  - 24비트 이하 정수는 float32로 손실 없이 표현되므로, 3.10.1절 bulk 저장 형식(int16·int24)으로 정확히 되돌릴 수 있다.
+- 오류 코드:
+  - `InvalidSource`에 대응: `ErrorCode::InvalidArgument`(chunk 경계·크기·길이 불일치)
+  - `UnsupportedSourceFormat`에 대응: `ErrorCode::Unsupported`(모르는 부호화, 9채널 이상, rate가 [8000, 192000] 밖)
+  - PCM 상한 `MaxSoundClipPcmBytes`(2 GiB) 초과: `ErrorCode::CapacityExceeded`
+  - 할당 실패: `OutOfMemory`
+  - 진단 코드로 옮기는 일은 임포터가 한다.
+
+#### 3.25.2 WAV(`DecodeWav`, UE `FWaveModInfo::ReadWaveInfo` — `Engine/Private/Audio.cpp`)
+
+- RIFF(LE)·RIFX(BE) `WAVE`다. chunk는 짝수 byte로 맞춘다(홀수 크기 뒤 pad 1 byte).
+  - chunk가 파일 끝을 넘거나, RIFF 크기가 파일보다 크면 `InvalidArgument`다.
+  - RIFF 크기가 파일보다 작으면 그 크기까지만 읽는다.
+- `fmt `(16·18·40 byte)는 다음을 받는다.
+  - `WAVE_FORMAT_PCM`(1): 8·16·24·32비트
+  - `IEEE_FLOAT`(3): 32·64비트
+  - `EXTENSIBLE`(0xFFFE): SubFormat GUID가 PCM이나 IEEE_FLOAT이고, validBits ≤ bitsPerSample
+  - `blockAlign = channels × bits/8`이어야 한다(아니면 `InvalidArgument`).
+  - 그 밖의 부호화(ADPCM·µ-law 등)는 `Unsupported`다(UE도 거부).
+- `data`: 크기가 blockAlign의 배수가 아니면 남는 byte를 버린다(UE와 같다).
+  - `fmt `보다 먼저 와도 된다.
+  - 둘 중 하나가 없거나 frame이 0이면 `InvalidArgument`다.
+- `smpl`: loop마다 `{start, end}`다. 파일 값의 end는 포함 위치라 +1로 바꾼다. frame 범위를 넘으면 그 loop를 버리고 셈에 넣지 않는다.
+- `cue `: `{id, sampleOffset}`. `LIST`/`adtl`의 `labl`(`{id, 문자열}`)로 이름을 붙인다. 끝의 NUL은 뗀다.
+- 모르는 chunk(`fact`·`bext`·`id3 ` 등 포함)는 건너뛰고 `ignoredChunks`를 센다. 같은 chunk가 둘 이상이면 첫 것을 쓴다.
+
+#### 3.25.3 AIFF·AIFF-C(`DecodeAiff`)
+
+- `FORM`(BE), `AIFF`·`AIFC`다.
+  - `COMM`: channels, frames, bits, rate(80비트 IEEE extended → 정수 rate. 소수가 있거나 범위 밖이면 `Unsupported`)
+  - AIFC면 압축 type을 받는다: `NONE`(BE 정수), `sowt`(LE 정수), `fl32`·`FL32`(BE float32). 그 밖은 `Unsupported`다.
+  - `SSND`: offset·blockSize 머리 뒤 PCM이다. 길이가 frames × channels × bytes보다 짧으면 `InvalidArgument`다.
+- 정수 bits는 8·16·24·32이고 8비트는 부호 있음이다(WAV와 다르다).
+- `MARK`·`INST` loop는 지금 읽지 않는다. 모르는 chunk로 센다(필요해지면 더한다).
+
+#### 3.25.4 시험
+
+| 대상 | 확인 |
+|---|---|
+| WAV 부호화 | 8·16·24·32비트 정수, float32·64, EXTENSIBLE(PCM·float GUID), RIFX, 1·2·8채널: 표본 값 정확 일치(손으로 만든 byte) |
+| WAV chunk | 홀수 크기 pad, `fmt `·`data` 순서, 중복 chunk, `smpl` loop(+1 변환·범위 밖 버림), `cue `·`labl` 이름, 모르는 chunk 계수 |
+| AIFF | `NONE`·`sowt`·`fl32`, 80비트 rate(44100·48000·22050), 8비트 부호 |
+| 음성 | 잘린 chunk, RIFF 크기 초과, blockAlign 불일치, 압축 WAV `Unsupported`, 9채널, rate 범위 밖, 빈 data, AIFF 짧은 SSND |
+| 상한 | `MaxSoundClipPcmBytes`를 넘는 머리 → `CapacityExceeded`(할당 전) |
+
 ## 4. 결정 요약
 
 - 모듈: `Audio`(믹서·DSP·backend 인터페이스) / `AudioMiniaudio`(장치, ClientOnly) / `AudioOpus` / `EngineAudio`(Object 세계) / `AudioTools`(임포트·쿠킹). 의존은 단방향.
@@ -1261,3 +1326,4 @@ Mixer1(3.22절)은 제어 쪽 API와 `RenderBlock`이 같은 voice 슬롯을 읽
 - 개정 10(2026-11-22): 3.23절 AU1 Mixer2 스레드 경계(제어·RT 슬롯 소유 분리, 공통 순번, generation 묶은 seqlock, stop mailbox, Play에 실은 stop-all epoch, 시작·terminal 슬롯과 `releaseMixFrame` ACK, 계수 스냅샷, pending 정리, 범위 한정 두 스레드 시험)을 더했다. 초안 교차 검증 1회 반영(필수 5 — 새 수명 seqlock 소실, ACK 한 블록 어긋남, stop-all이 대기 Play를 놓침, pending 막힘, RT 계수 경쟁 읽기). 3.22.4절 상태 표의 Reserved 거부·반복 Stop(더 이른 끝만)·Finished 해제 조건, 3.5.3절 ACK 문구, 7절 UE 명령 경로 비교를 고쳤다.
 - 개정 11(2026-11-23): Mixer2 구현 리뷰 반영. 필수 — mailbox는 마지막 값이 아니라 그 수명의 최소 fade만 쓴다(스케줄링에 따라 steal이 사라지던 문제·ABA), stop-all은 RT가 처리한 epoch를 출판하고 제어가 미처리 epoch의 짧은 fade를 유지한다. 권장 — 두 스레드 시험을 ACK gate·terminal 관찰로 강화, 처리 순서·Stopping·Prepared stop-all·짧은 fade·stale 거부·clip 해제 시험, seqlock·계수 칸 static_assert. 참고 — seqlock 순번 64비트 문구, stop-all 건너뜀은 무시 계수에서 뺀다.
 - 개정 12(2026-11-23): 3.24절 AU5 앞당김 — ADPCM 블록 코덱(UE MS ADPCM 형식·식, 채널 블록 교차 배치, 계수 탐색 인코더, 임의 접근 디코드). 청크 표·`AudioDecoder` 인터페이스·쿠킹은 PR11 뒤, Opus는 PR6 뒤. 구현 리뷰 반영: 넘침 없는 크기 검사, delta 상한·64비트 디코드, 유효 frame 오차, 리터럴 표·byte 대조 시험.
+- 개정 13(2026-11-23): 3.25절 AU4 앞당김 — 원본 디코드 라이브러리(결과 형식 `DecodedSourceAudio`, WAV RIFF/RIFX·EXTENSIBLE·smpl·cue·labl, AIFF·AIFF-C NONE·sowt·fl32). `SoundClipImporter`·`SoundClip` 에셋은 AU3 뒤.
