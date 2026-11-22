@@ -42,6 +42,15 @@
 - **필드 로컬 묶음(R2):** 링크는 Field 참조 이름의 주인이 같은 모듈 CLASS 구역의 클래스면 host에 묻지 않고 (클래스, 필드)로 묶는다. 실행 중 `GETF`·`SETF`는 실행 문맥의 session에서 handle의 instance를 찾아 저장소를 직접 쓴다. instance가 아니거나 session 밖이면 `ContractViolation`이다. 클래스 구역의 시작은 bank마다 기반 사슬(같은 모듈 기반, `<경로>:Class` 기반은 session 모듈에서 찾음, 엔진 기반에서 멈춤)의 slot 합이다 — 파생 클래스와 무관하게 같은 위치다.
 - **`.run`(LC5 corpus)의 메서드 호출:** `Class.Method(#this, …)`는 `#this`에 그 클래스 instance가 없으면 먼저 `CreateInstance`(기본값 적용)하고 session으로 부른다. 가짜 host의 Sparks 필드 흉내(LC5d1)는 없앤다.
 
+### 2.3 발행·전달(LC6b)
+
+- **handler 경로의 참조(R7):** CLASS의 handler 항목은 경로 글자 대신 경로 필드 참조 목록(`Field` 참조 번호 — 경로 마디마다 하나, 자기 이벤트는 0개)을 가진다. `Changed`는 마지막 마디가 감시 필드다(`on State.Changed` → 경로 `[State]`, 발행자는 그 필드를 가진 객체 = self). 그 밖의 이벤트는 경로 끝 객체가 발행자다(`on Owner.Damaged` → `[Component.Owner]`, `on Opened` → `[]` = self). 링크가 참조를 묶으므로 실행 중 이름으로 필드를 찾지 않는다(엔진 필드 `Owner`는 host 묶음).
+- **연결 표(SL §5.5):** session이 가진다. 항목은 (발행자 handle, 이벤트 key, 구독 instance, handler — 모듈·함수 번호, 활성, 추가 순번). 이벤트 key는 Sparks 이벤트면 (모듈, `Event` 참조 이름 `Class.Event`), Changed면 (필드 참조 이름 + `.Changed`), native 이벤트면 host 묶음 번호다. instance의 Enable이 반환된 뒤 그 instance의 handler 경로를 풀어 항목을 더하고(경로 마디가 `Array<객체>`면 원소마다 — 같은 객체는 하나), Disable은 비활성으로 표시, Detach는 삭제한다. 실행 조각이 끝날 때 그 조각이 쓴 경로 원천 필드가 있으면 그 instance의 연결을 다시 풀어 추가·제거한다(유지되는 항목은 순번을 지킨다).
+- **발행 큐(SL §5.4):** `EMIT Bx`(Ref 창 0번 발행자, 인자는 그 뒤)는 항목(발행자, 이벤트 key, 인자 사본 — Buf는 참조 +1, 깊이)을 session 큐 끝에 넣는다. 깊이: 단계를 시작한 조각의 발행은 1, 깊이 d 항목의 handler가 낸 발행은 d+1; 17이 될 항목을 넣으려는 조각은 `CascadeLimit` fault이고 같은 루트의 미전달 항목을 폐기한다. 큐 상한 262,144를 넘기면 그 조각의 `BudgetExceeded`.
+- **전달:** 실행 조각(hook·handler·메서드)이 끝날 때마다 session은 큐를 FIFO로 비운다: 항목 하나를 꺼내 그 시점의 활성 연결(발행자·key가 같은 것)을 순번대로 실행하고 다음 항목으로 간다. 단계당 전달 항목 상한 65,536을 넘는 항목은 다음 단계로 이월하고, 이월 항목은 전달 직전 인자 객체의 생존을 다시 본다(`?` 없는 인자가 죽었으면 폐기·보고, `T?`는 null).
+- **Changed(SL §5.3):** 조각 안에서 instance 필드를 처음 쓸 때 시작 값을 보관하고, 조각 끝에 끝 값과 다르면(Scalar 비트, 문자열 byte, 컨테이너·struct 원소별, 객체 동일성) Changed 항목을 넣는다(깊이 규칙 같음). Awake·Enable hook 안의 쓰기, 초기화, Disable·Destroy 문맥의 쓰기는 내지 않는다.
+- **단계:** `OpenPhase()`·`ClosePhase()` — 단계 안의 모든 진입(hook·메서드·host 이벤트 넣기)은 끝에 큐를 비운다. `.run` 지시: `phase`(새 단계 — 이월 항목 전달), `emit #n Class.Event(인자)`(host 진입으로 발행 — 깊이 1).
+
 ## 3. 순서
 
 - **스크립트 단계(SL §5.4):** host가 `OpenPhase(kind)`로 열고, 그 단계의 실행 조각(hook·handler·재개)을 VM이 돌린 뒤 발행 큐를 비우고(연쇄 상한·전달 상한), 활성 전환 적용 → 파괴 적용 요청을 host에 넘기고(적용 루프 64회), `ClosePhase`로 닫는다. 단계 밖의 실행은 없다(엔진이 연 진입도 단계 하나를 연다).
@@ -61,4 +70,6 @@
 - **R4 CLASS 구역:** 대안(함수 이름 규칙 `Door.on Enable`로 hook·handler를 찾음)은 경로·재진입 정책·await 여부를 담을 수 없다. 형식 버전을 3으로 올린다(이전 형식은 받지 않는다 — 초기 단계, 하위호환 없음).
 - **R5 host interface는 VmHost 파생:** LC5 링크·묶기를 그대로 쓰고 실행 모델에 필요한 것만 더한다.
 - **R6 기본값 생성 함수:** 컴파일러가 클래스마다 만든다(struct 기본값을 생성 자리에서 내리는 LC5 V10과 같은 방향). 대안(CLASS 구역에 상수 원형)은 식 초기값을 담지 못한다.
-- R7–R12(전달 상한 이월·재검증, 정지 frame 보관 형식, 취소 시 자원 해제 순서, 격리 시 연결 삭제 순서, reload 경계, 결정적 순서 key)는 각 하위 단계 착수 때 이 절에 확정한다.
+- **R7 handler 경로는 필드 참조:** 대안(경로 글자를 실행 중 이름으로 풀기)은 상속 필드·엔진 필드의 주인 타입을 실행 중에 알 수 없고 매번 이름을 찾는다.
+- **R8 연결 표는 명시 항목:** 대안(전달할 때마다 모든 instance의 경로를 풀기)은 연결 순서(SL §5.4 "항목이 delegate에 추가된 순서")를 지킬 수 없고 O(instance × handler)다.
+- R9–R12(정지 frame 보관 형식, 취소 시 자원 해제 순서, 격리 시 연결 삭제 순서, reload 경계)는 각 하위 단계 착수 때 이 절에 확정한다.
