@@ -1,5 +1,6 @@
 #include "../../AssetDatabase/Tests/AssetDatabaseTestSupport.h"
 #include "../../AssetDatabase/Tests/MemoryFileSystem.h"
+#include "NuggetTestSupport.h"
 
 #include <AssetNugget/NuggetCache.h>
 #include <Core/Memory/SystemAllocator.h>
@@ -19,6 +20,7 @@ namespace nugget_cache_tests_file {
 using rocks::asset_database_test::MemoryFault;
 using rocks::asset_database_test::MemoryFileSystem;
 using rocks::asset_database_test::TempProject;
+using rocks::nugget_test::HookFileSystem;
 
 namespace {
 
@@ -179,89 +181,6 @@ NuggetInput Input(Allocator& allocator, const Sha256Digest& key,
     input.digest = digest;
     return input;
 }
-
-// 물리 파일 시스템에 넘기되 한 번 hook을 거는 래퍼다: 경로가 suffix로 끝나고 열기 방식이 mode인 첫
-// Open 직전에 callback을 부른다(캐시 잠금 밖 backend IO 사이 — 경합 창을 결정적으로 만든다).
-// callback 안에서 같은 캐시를 다시 불러도 된다(hook은 부르기 전에 풀린다).
-class HookFileSystem final : public platform::FileSystem {
-public:
-    void Arm(StringView pathSuffix, platform::FileOpenMode openMode, void (*function)(void*),
-             void* functionContext) noexcept {
-        suffix = pathSuffix;
-        mode = openMode;
-        callback = function;
-        context = functionContext;
-    }
-
-    platform::FileStatus Open(const char* path, usize pathBytes, platform::FileOpenMode openMode,
-                              platform::FileHandle*& out) noexcept override {
-        if (callback != nullptr && openMode == mode &&
-            StringView(path, pathBytes).EndsWith(suffix, StringComparison::CaseSensitive)) {
-            auto* function = callback;
-            callback = nullptr;
-            function(context);
-        }
-
-        return inner->Open(path, pathBytes, openMode, out);
-    }
-
-    platform::FileStatus Exists(const char* path, usize pathBytes, bool& exists) noexcept override {
-        return inner->Exists(path, pathBytes, exists);
-    }
-
-    platform::FileStatus Delete(const char* path, usize pathBytes) noexcept override {
-        return inner->Delete(path, pathBytes);
-    }
-
-    platform::FileStatus Stat(const char* path, usize pathBytes,
-                              platform::FileInfo& info) noexcept override {
-        return inner->Stat(path, pathBytes, info);
-    }
-
-    platform::FileStatus MakeDirectory(const char* path, usize pathBytes) noexcept override {
-        return inner->MakeDirectory(path, pathBytes);
-    }
-
-    platform::FileStatus DeleteDirectory(const char* path, usize pathBytes) noexcept override {
-        return inner->DeleteDirectory(path, pathBytes);
-    }
-
-    platform::FileStatus EnumerateDirectory(const char* path, usize pathBytes,
-                                            platform::DirectoryVisitor visitor,
-                                            void* visitorContext) noexcept override {
-        return inner->EnumerateDirectory(path, pathBytes, visitor, visitorContext);
-    }
-
-    platform::FileStatus Move(const char* from, usize fromBytes, const char* to, usize toBytes,
-                              bool replaceExisting) noexcept override {
-        return inner->Move(from, fromBytes, to, toBytes, replaceExisting);
-    }
-
-    platform::FileStatus Copy(const char* from, usize fromBytes, const char* to, usize toBytes,
-                              bool replaceExisting) noexcept override {
-        return inner->Copy(from, fromBytes, to, toBytes, replaceExisting);
-    }
-
-    platform::FileStatus Replace(const char* from, usize fromBytes, const char* to,
-                                 usize toBytes) noexcept override {
-        return inner->Replace(from, fromBytes, to, toBytes);
-    }
-
-    platform::FileStatus SetModifiedTime(const char* path, usize pathBytes,
-                                         int64 modifiedTicks) noexcept override {
-        return inner->SetModifiedTime(path, pathBytes, modifiedTicks);
-    }
-
-    platform::FileStatus SyncDirectory(const char* path, usize pathBytes) noexcept override {
-        return inner->SyncDirectory(path, pathBytes);
-    }
-
-    platform::FileSystem* inner = &platform::PhysicalFileSystem();
-    StringView suffix{};
-    platform::FileOpenMode mode = platform::FileOpenMode::ReadExisting;
-    void (*callback)(void*) = nullptr;
-    void* context = nullptr;
-};
 
 } // namespace
 
