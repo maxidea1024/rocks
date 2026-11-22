@@ -15,7 +15,7 @@
 | 방식 | UE 에디터 플러그인이 에디터 메모리의 객체에서 원본 데이터를 꺼낸다 | `.uasset` 해석은 UE 직렬화(버전·커스텀 버전·bulk·압축·tagged property)를 Rocks에 다시 만드는 일이다. glTF·FBX는 텍스처 설정·머티리얼 그래프·n-gon·애니메이션 이벤트를 담지 못하고, glTF는 좌표 변환(Y 위, 오른손, m)까지 들어간다(결정 UX-D1) |
 | 형식 | 디렉터리 하나: `bundle.json`(목록) + 에셋별 JSON + 내용 주소 blob(`blobs/<sha256>.bin`) | 사람이 읽고 diff할 수 있는 메타데이터와, 크고 중복되는 배열의 분리. 같은 blob은 한 번만 쓴다 |
 | 데이터 수준 | "UE 원본": 텍스처 `FTextureSource` 픽셀, 메시 `FMeshDescription`, 애니메이션 데이터 모델, 머티리얼 그래프 | Rocks가 자체 빌드·쿠킹을 하므로 UE 빌드 결과(렌더 버퍼·압축 텍스처·압축 애니메이션)는 원본으로 쓰지 않는다. 축소로 만든 LOD처럼 원본이 없는 것만 보조로 받는다 |
-| 손실 원본 텍스처 | UE에 JPEG로 저장된 원본은 기본 거부(`LossySource`), 명시 옵션 `--allow-lossy-origin`이면 받고 ImportRecord에 표시 | 사용자 결정(2026-11-20). UE 5.8은 기본 설정에서 JPEG 바이트를 원본으로 보관한다(4.3절) |
+| 손실 원본 텍스처 | UE에 JPEG·UEJPEG로 저장된 원본도 옵션 없이 받는다(해제한 픽셀) | 사용자 결정(2026-11-23 — 2026-11-20의 기본 거부·`--allow-lossy-origin`을 대체, AssetSystem 12.2절 JPEG 허용과 같다). UE 5.8은 기본 설정에서 JPEG 바이트를 원본으로 보관한다(4.3절) |
 | 메시 법선·tangent | 정적 메시는 기본으로 "UE 준비 원본"(UE 빌드 전처리를 적용한 사본)을 Rocks 원본으로 쓰고 재계산 플래그를 끈다. 옵션으로 순수 원본 + UE 플래그. 스킨 메시는 순수 원본만 | UE와 같은 셰이딩을 시험하려면 UE의 법선·tangent 계산 결과가 필요하다(5.3절). 스킨 메시는 UE에 사본용 공개 함수가 없다(6.2절) |
 | 머티리얼 | 그래프 전체를 노드 단위로 추출하고 Rocks 노드로 번역한다. 번역하지 못하면 플러그인이 구운 텍스처로 "구운 표면" 대체를, 그것도 없으면 엔진 기본 머티리얼 인스턴스로 대체한다 | 그래프만으로는 번역 표가 덜 찬 동안 쓸 수 없고, 굽기만으로는 파라미터·인스턴스 구조가 사라진다. Epic GLTFExporter도 "단순하면 직접, 아니면 굽기" 순서다(8.4절) |
 | 애니메이션 | 프레임별 평가 Transform(float) + 커브 키 + 이벤트 | UE 5.8 데이터 모델이 회전을 Euler 채널로 저장한다(MeshAnimationAssets 7.2절) |
@@ -125,7 +125,7 @@ layer의 감마 공간(`GetGammaSpace(Layer)` — Texture.h:400)은 `gammaSpace`
 `GetSourceCompression()`(Texture.h:395)이 `TSCF_JPEG`·`TSCF_UEJPEG`이면 원본 자체가 손실 데이터다. UE 5.8은 JPEG 임포트 때 `[TextureImporter] RetainJpegFormat`(기본 True — Engine/Config/BaseEditor.ini:284-288)이면 JPEG 바이트를 원본으로 보관한다. Interchange 경로(Engine/Plugins/Interchange/Runtime/Source/Import/Private/Texture/InterchangeTextureFactory.cpp:717-721)와 옛 팩토리 경로(Ed/Private/Factories/EditorFactories.cpp:2967-3003) 모두 이 설정을 따른다.
 
 - 플러그인: 해제한 픽셀을 그대로 추출하고 `lossyOrigin: "jpeg"`를 기록한다. 원래 JPEG 바이트(`GetBulkDataPayload()`, Texture.h:443-446)는 넣지 않는다.
-- Rocks 임포트: 기본은 `LossySource` 오류로 거부한다. `--allow-lossy-origin`을 주면 받고, ImportRecord의 `options`에 그 옵션을, 결과에 `lossyOrigin`을 남기며 `LossyOriginAccepted` 경고를 낸다(사용자 결정 2026-11-20). 옵션이 `options`에 남으므로 재임포트도 같은 판단을 한다. 이 표시는 쿠킹 결과를 바꾸지 않는다.
+- Rocks 임포트: 옵션 없이 받는다(사용자 결정 2026-11-23 — 파일 원본 JPEG 허용과 같다, AssetSystem 12.2절). 처음 결정(2026-11-20)의 기본 거부·`--allow-lossy-origin`·`LossyOriginAccepted` 경고는 없앴다. `lossyOrigin`은 플러그인 출력의 정보 칸으로만 남는다.
 - `TSCF_None`·`TSCF_PNG`·`TSCF_UEDELTA`는 무손실이다(TextureDefines.h:337-346. UEDELTA는 무손실 delta + Oodle — Texture.cpp:2612-2650).
 
 ### 4.4 설정
@@ -151,7 +151,7 @@ UX2a(UE 쪽 텍스처 추출, `FRocksTextureExtractor`) 중 4절이 정하지 �
    mip 크기는 `FTextureSource::FMipData::GetMipDataWithInfo`의 `FImageInfo`를 그대로 적는다(볼륨은 mip마다 깊이가 줄고 배열·큐브는 slice 수가 그대로다 — `GetMippedNumSlices`). 원본이 없으면(`Source.IsValid()` 거짓) `source`는 `null`이고 error 진단 `NoSourceData`다(4.1절). 층 형식이 위 9종이 아니면 `null`과 `UnsupportedSourceFormat`, mip 사슬을 풀지 못하면 `null`과 `SourceReadFailed`다(모두 error, 에셋 수준 — 내보내기는 계속한다).
 2. **blob 배치.** mip 하나·층 하나 = blob 하나다(4.1절 (block, layer, mip)). 바이트는 `GetMipData(nullptr)`로 한 번 푼 사슬의 그 mip view를 그대로 쓴다(slice 순서, 행 우선, 패딩 없음). 배치는 `G8` u8×1, `BGRA8`·`BGRE8` u8×4(UE 저장 순서 B·G·R·A/E 그대로 — 교환·해제는 Rocks 임포트, 4.2절), `RGBA16` u16×4, `RGBA16F` f16×4, `G16` u16×1, `RGBA32F` f32×4, `R16F` f16×1, `R32F` f32×1이고 `count`는 texel 수(sizeX × sizeY × numSlices)다.
 3. **`settings`.** 텍스처 객체의 UPROPERTY 덤프 전체다(4.4절, 11.5·11.7절 13번 규칙). `Source` 프로퍼티(FTextureSource의 UPROPERTY — 크기·형식·블록 표·Id)는 `data`와 겹치므로 뺀다. 덤프가 모은 참조(`CompositeTexture`·`SourceTextures`·`Source2DTexture` 등)는 의존 목록에 합친다(11.7절 4번). enum 값은 UE C++ 값 이름 그대로다(`TA_Wrap`·`TC_Default`·`TEXTUREGROUP_World` — `GetNameStringByValue`). 접두를 떼는 것은 Rocks 임포트의 대조표(AssetSystem 12.4절 — Rocks 이름은 접두를 뗀다)가 한다.
-4. **손실 원본.** 플러그인은 거부하지 않는다. 푼 픽셀을 쓰고 `lossyOrigin`과 info 진단 `LossyOrigin`을 남긴다. 거부·허용(`LossySource`·`--allow-lossy-origin`)은 Rocks 임포트(UX2b)가 한다. UE 5.8 엔진 콘텐츠에도 있다(`/Engine/EngineMaterials/T_Grid_Crosses` G8 JPEG, `/Engine/EditorMaterials/Dataflow/T_CheckerBoard` BGRA8 JPEG).
+4. **손실 원본.** 플러그인은 거부하지 않는다. 푼 픽셀을 쓰고 `lossyOrigin`과 info 진단 `LossyOrigin`을 남긴다. 받는 판단은 Rocks 임포트(UX2b)가 한다. UE 5.8 엔진 콘텐츠에도 있다(`/Engine/EngineMaterials/T_Grid_Crosses` G8 JPEG, `/Engine/EditorMaterials/Dataflow/T_CheckerBoard` BGRA8 JPEG).
 5. **로드.** 범위 안 텍스처는 본문을 위해 로드한다(`FSoftObjectPath::TryLoad`). 로드하지 못하면 error 진단 `LoadFailed`이고 본문은 빈 객체다. blob 쓰기 실패(디스크·크기 불일치)는 내보내기 전체 실패다.
 6. **본문 조립.** 의존·진단이 본문 추출 결과에 따라 바뀌므로 본문(`settings`·`data`)을 먼저 조각으로 만들고(`FRocksJsonWriter` 기준 깊이 1, `FinishFragment`) 에셋 JSON에 그대로 끼운다(`RawValue`). 그래서 bytes는 한 writer로 쓴 것과 같다.
 7. **자기 시험.** `RocksExport.TextureExtraction`(commandlet `-SelfTest`에도 포함)이 엔진 텍스처 8개(BGRA8 PNG, G8 JPEG, RGBA16F, BGRE8 UE Delta 큐브, BGRA8 큐브·볼륨·2D 배열, R32F 볼륨)를 내보내고, blob마다 `FTextureSource::GetMipData(Out, Block, Layer, Mip)`(LockMip을 거치는 다른 경로)로 꺼낸 원본과 SHA-256·`bytes`·blob 파일 내용·`count`·`layout`을 대조한다. `settings`에 `Source`가 없고 `SRGB`·`CompressionSettings`가 있는지, `format`·`lossyOrigin`·`longLat`·블록·층 수도 본다. 결정성은 `ExportDeterminism`(정육면체 닫힘에 텍스처 2개가 든다)이 본다. 수동 검증(2026-11-22): 엔진 텍스처 15개와 시험 프로젝트에 임포트한 16비트 PNG 2개(G16·RGBA16 — 엔진 콘텐츠에 없다)를 닫힘과 함께 내보낸 묶음(에셋 20개, 원본 형식 G8·BGRA8·BGRE8·G16·RGBA16·RGBA16F·RGBA32F·R32F, 보관 형식 None·PNG·JPEG·UEDELTA, 2D·큐브(위도경도 포함)·2D 배열·볼륨)을 두 번 내보내 `createdUtc` 말고 bytes가 같고, Rocks 리더(`UnrealExchange_ExternalBundle`)가 blob 전부의 크기·SHA-256을 확인해 20개 모두 Ready였다. R16F 원본과 TextureCubeArray는 엔진 콘텐츠에 없어 확인하지 못했다.
@@ -365,7 +365,7 @@ UE 객체 경로 `/<Mount>/<경로>/<이름>.<이름>` → Rocks 논리 경로 `
 - 새 에셋은 AssetSystem 4.1절대로 무작위 AssetId를 받는다.
 - ImportRecord(AssetSystem 5.4절 스키마):
   - `sources`: role `asset`(에셋 JSON — root는 묶음 디렉터리를 등록한 원본 루트, relativePath, sha256, bytes), role `blob:<sha256>`(그 JSON이 참조한 blob마다 하나).
-  - `options`: `objectPath`, `--mesh-normals`, `--allow-lossy-origin`, UE 원래 빌드 플래그(5.3절).
+  - `options`: `objectPath`, `--mesh-normals`, UE 원래 빌드 플래그(5.3절).
 - 태그(Tags 섹션, AssetIndex 검색 키): `UnrealExchange.ObjectPath` = 현재 objectPath, `UnrealExchange.FormerPaths` = 묶음 `redirects`로 알게 된 옛 경로 목록. 임포터가 정하는 태그 키를 AssetIndex가 검색할 수 있어야 한다(요구 UXR2).
 - 재임포트: 묶음 에셋의 objectPath, 또는 그 objectPath로 이어지는 `redirects`의 옛 경로를 `UnrealExchange.ObjectPath`·`UnrealExchange.FormerPaths` 태그로 찾는다. 찾으면 그 에셋에 다시 임포트한다(ID 유지). UE에서 이름을 바꿔도 UE redirector가 남아 있으면 같은 Rocks 에셋으로 이어진다. redirector를 지운 뒤의 이름 변경은 새 에셋이 된다.
 
@@ -396,7 +396,7 @@ UE 쪽 지식(클래스 이름·프로퍼티 이름·enum 값)은 이 모듈에�
 
 ```text
 asset-import-unreal <묶음 디렉터리> [--root=/Game/Unreal] [--only=<objectPath>...]
-                    [--allow-lossy-origin] [--mesh-normals=unreal|rocks] [--dry-run]
+                    [--mesh-normals=unreal|rocks] [--dry-run]
 ```
 
 - `--only`는 지정한 에셋과 그 Hard 닫힘을 가져온다(경로 대응은 9.1절이라 결과가 전체 임포트와 같다).
@@ -413,7 +413,6 @@ AssetSystem 4.6절 진단 표에 등록한다(요구 UXR3).
 | `UnsupportedBundleVersion` | 오류 | 모르는 `formatVersion` |
 | `UnknownField` | 경고 | 모르는 JSON 키 |
 | `UnsupportedAsset` | 경고 | 범위 밖 클래스(2절) |
-| `LossySource` / `LossyOriginAccepted` | 오류 / 경고 | 4.3절 |
 | `UnsupportedSourceLayout` | 오류 | UDIM·다층·위도경도 큐브 |
 | `GammaMismatch` | 경고 | 4.2절 |
 | `GeneratedLodBaked` / `BakedColorQuantized` | 정보 | 5.1·6.2절 |
@@ -587,7 +586,7 @@ RocksExport로 만든 실제 묶음 `Engine/Plugins/Importers/UnrealExchange/Tes
 
 | ID | 대상 | 요구 | 상태 |
 |---|---|---|---|
-| UXR1 | [에셋 시스템](AssetSystem.ko.md) 12.2절 | 무손실 원본 원칙의 예외: Unreal 교환 경로에서 `--allow-lossy-origin`으로 받은 손실 원본과 `LossyOriginAccepted`, ImportRecord `lossyOrigin` 표시 | 반영(AssetSystem 개정 10, 12.2절) |
+| UXR1 | [에셋 시스템](AssetSystem.ko.md) 12.2절 | (2026-11-23 대체) JPEG 원본 허용 — 파일·Unreal 교환 모두 옵션 없이 받는다, 처음의 `--allow-lossy-origin`·`LossyOriginAccepted`·ImportRecord `lossyOrigin` 표시 | 반영(AssetSystem 개정 10, 12.2절) |
 | UXR2 | 에셋 시스템 7절(AssetIndex)·5.2절 Tags | 임포터가 정하는 태그 키(`UnrealExchange.ObjectPath`·`UnrealExchange.FormerPaths`)를 기록하고 검색할 수 있게 한다 | 반영(AssetSystem 개정 10, 7절 — 임포터 키는 `<임포터 이름>.` 접두) |
 | UXR3 | 에셋 시스템 4.6절 | 10.3절 진단 코드 등록 | 반영(AssetSystem 개정 10, 4.6절) |
 | UXR4 | [머티리얼 시스템](MaterialSystem.ko.md) 5.4·9.2절 | 같은 이름 파라미터 병합·함수 global 파라미터 끌어올리기(8.5절)를 번역 결과가 V8을 통과하는 형태로 받는지 확인. 엔진 내장 "구운 표면" 부모 머티리얼 정의(엔진 콘텐츠 `/Engine` 마운트는 후속이므로 그 전까지 두는 곳 포함) | 반영(MaterialSystem 개정 6, 9.2·11.3절) |
@@ -605,7 +604,7 @@ ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으�
 | UX1b | UE | 플러그인 골격(11절 — Editor 모듈, commandlet `-run=RocksExport`, 메뉴, 묶음 writer, 자체 SHA-256, 숫자 서식, UPROPERTY 덤프, 닫힘, redirector)과 에셋 JSON 공통부. 설치판 엔진에 대고 `RunUAT BuildPlugin`으로 빌드하고, 엔진 콘텐츠를 내보낸 묶음을 UX1a 리더로 읽어 왕복 검증한다(에셋 종류별 본문은 UX2 이후). **구현**(2026-11-22, 11.7절) | UX1a, UE 5.8 Launcher 설치판(C:) |
 | UX1c | Rocks | 임포트 프레임워크 연결, 기존 에셋 조회 `ExchangeExistingAssets`(태그 `UnrealExchange.ObjectPath`) 구현, `--only` 닫힘, Commandlet 명령 `asset-import-unreal` 등록 | UX1b, A2f(AssetDatabase 임포트 프레임워크) |
 | UX2a | UE | 텍스처 추출(4절 — 원본 mip 사슬 blob, 형식·감마·손실 원본 표시, 설정 덤프). Rocks 리더 왕복(묶음·blob 검사)과 UE 자기 시험(blob과 `FTextureSource` 원본 대조)으로 검증한다. **구현**(2026-11-22, 4.5절) | UX1b |
-| UX2b | Rocks | 텍스처 임포트(4.2절 형식 대응, 4.3절 `LossySource`·`--allow-lossy-origin`, 4.4절 설정 대조) | UX2a, UX1c, A5 |
+| UX2b | Rocks | 텍스처 임포트(4.2절 형식 대응, 4.3절 JPEG·UEJPEG 원본 허용, 4.4절 설정 대조) | UX2a, UX1c, A5 |
 | UX3a | UE | 정적 메시 추출(5절 — `source`·`prepared`·생성 LOD·충돌, 5.2절 `MeshSource` 기록). Rocks 리더 왕복과 MA1 `MeshSource` 적재·검증으로 확인한다. **구현**(2026-11-22, 5.4절) | UX1b |
 | UX3b | Rocks | 정적 메시 임포트(5.1·5.3절 모드, `bakedSource`) | UX3a, UX1c, MeshAnimationAssets MA2b–MA3 |
 | UX4a | UE | 머티리얼·인스턴스·함수·컬렉션 추출(8.1·8.2절 — 그래프·출력 핀·인스턴스 `resolved`·설정 덤프, Substrate 그래프도 그대로 덤프). Rocks 리더 왕복과 그래프 구조 불변식으로 확인한다. **구현**(2026-11-22, 8.6절) | UX1b |
@@ -684,7 +683,7 @@ ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으�
 | notify 속성 보존 서술이 메시 문서와 불일치 | 사소 | 받지 않고 경고로 통일(7절) |
 | 위상 blob 7개와 bulk 하나의 대응 | 사소 | 임포트가 이어 붙임(5.2절) |
 | 결정성 시험의 AssetId 비교 규칙이 없음 | 사소 | 결정적 발급기 주입(12.1절, UXR6) |
-| `--allow-lossy-origin`이 재임포트에 남지 않음 | 사소 | `options`에 기록(4.3절) |
+| `--allow-lossy-origin`이 재임포트에 남지 않음 | 사소 | `options`에 기록(4.3절) — 2026-11-23 옵션 폐지로 해당 없음 |
 | "다른 문서에 반영할 요구" 절 없음 | 사소 | 13절 |
 | 굽기·Substrate를 v1에 모두 넣는 범위 | 사소 | UX5(Substrate)·UX6(굽기)로 분리 |
 | Rocks 임포터 위치(핵심 계층) | 사소 | 엔진 플러그인(10.1절, UX-D11) |

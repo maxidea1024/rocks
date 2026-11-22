@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Core/Assert.h>
 #include <Core/Containers/Array.h>
 #include <Core/Containers/Span.h>
 #include <Core/Result.h>
@@ -10,7 +11,7 @@
 // SoundClip bulk로 옮긴다.
 //
 // 오류 코드(임포터가 진단으로 옮긴다):
-// - InvalidArgument: chunk 경계·크기·길이 불일치(InvalidSource)
+// - InvalidArgument: 필수 chunk 없음·크기·길이 불일치, float 표본 NaN·무한대(InvalidSource)
 // - Unsupported: 모르는 부호화, 9채널 이상, rate 범위 밖(UnsupportedSourceFormat)
 // - CapacityExceeded: 디코드한 PCM이 MaxSoundClipPcmBytes를 넘음(할당 전에 판정)
 // - OutOfMemory: 할당 실패
@@ -90,8 +91,9 @@ public:
         return codec_;
     }
 
-    // 채널 index의 표본(frame 수만큼)이다.
+    // 채널 index의 표본(frame 수만큼)이다. index는 ChannelCount()보다 작아야 한다.
     const float* Channel(uint32 index) const noexcept {
+        ROCKS_ASSERT(index < channels_);
         return pcm_.Data() + static_cast<usize>(index) * frames_;
     }
 
@@ -134,11 +136,11 @@ private:
     uint32 ignoredChunks_ = 0;
 };
 
-// RIFF/RIFX WAVE를 디코드한다(3.25.2절). out은 먼저 비운다.
+// RIFF/RIFX WAVE를 디코드한다(3.25.2절). out은 먼저 비우고, 실패하면 다시 비운다.
 ROCKS_AUDIOTOOLS_API Result<void> DecodeWav(Span<const uint8> file,
                                             DecodedSourceAudio& out) noexcept;
 
-// AIFF·AIFF-C를 디코드한다(3.25.3절). out은 먼저 비운다.
+// AIFF·AIFF-C를 디코드한다(3.25.3절). out은 먼저 비우고, 실패하면 다시 비운다.
 ROCKS_AUDIOTOOLS_API Result<void> DecodeAiff(Span<const uint8> file,
                                              DecodedSourceAudio& out) noexcept;
 
