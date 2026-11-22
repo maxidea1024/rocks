@@ -1,6 +1,6 @@
 # 노드 그래프(NodeGraph) 설계
 
-기준일: 2026-11-22, 개정 2. 이 문서는 여러 전용 편집기(머티리얼·사운드·애니메이션·VFX·PCG 등)가 함께 쓰는 노드 그래프 체계를 정한다. 범위는 다음과 같다.
+기준일: 2026-11-22, 개정 3. 이 문서는 여러 전용 편집기(머티리얼·사운드·애니메이션·VFX·PCG 등)가 함께 쓰는 노드 그래프 체계를 정한다. 범위는 다음과 같다.
 
 - 그래프 데이터 모델과 도메인 schema 접점
 - 변경·undo·통지
@@ -345,7 +345,7 @@ UAF(AnimNext)는 RigVM의 model·controller·view 구조를 그대로 상속한�
 | GD13 | 노드 버전 | 서술의 `schemaVersion`과 migration 함수(옛 키 → 새 키 재지정, 속성 변환, 1:1 노드 교체). 여러 노드 → 하나 교체는 후속(NG8) | UE `ReconstructNode` 재구성 | RigVM `GetUpgradeInfo`·MetaSound 자동 갱신과 같은 방향이다 |
 | GD14 | 모르는 노드 | 등록되지 않은 `NodeTypeId`는 속성 Record 바이트를 그대로 보존하는 자리 노드로 연다. 편집·저장 왕복에서 바이트가 바뀌지 않는다. 출력에 닿으면 도메인 컴파일 오류다 | 열기 실패, 삭제 | 머티리얼 시스템 V12·E13, 계획 14.6절. 속성이 Record 바이트(GD23)라서 리플렉션 쪽 보존 기능 없이도 성립한다 |
 | GD15 | 화면 갱신 | 통지 단위 증분 갱신. 노드 하나가 바뀌면 그 노드 시각만 다시 만든다. 전체 재생성은 문서 다시 읽기 때만 한다. 노드 시각은 모델을 포인터로 잡지 않고 `NodeId`로 찾는다 | UE의 기본 전체 재생성 | 2.5절 |
-| GD16 | 화면 공간 색인 | 노드 hit test는 UiCore hit grid(노드 시각이 Element이므로)를 쓴다. 캔버스 좌표의 culling·연결선 hover·marquee는 공용 2D 균일 격자를 쓴다. 이 격자는 [공간 색인](SpatialIndex.ko.md) 2D 격자 후속으로 공용 구현하고, GraphView에 따로 만들지 않는다 | UE 선형 탐색, GraphView 전용 격자 | 2.6절. UiCore hit grid는 그려진 Element만 담으므로 화면 밖 culling에는 쓸 수 없다. 범용 기능을 기능 모듈에 따로 구현하지 않는다 |
+| GD16 | 화면 공간 색인 | 노드 hit test는 UiCore hit grid(노드 시각이 Element이므로)를 쓴다. 캔버스 좌표의 culling·연결선 hover·marquee는 공용 2D 균일 격자를 쓴다. 이 격자는 [공간 색인](SpatialIndex.ko.md) 5.3절 공용 2D 균일 격자이고, GraphView에 따로 만들지 않는다 | UE 선형 탐색, GraphView 전용 격자 | 2.6절. UiCore hit grid는 그려진 Element만 담으므로 화면 밖 culling에는 쓸 수 없다. 범용 기능을 기능 모듈에 따로 구현하지 않는다 |
 | GD17 | 공통 층 경계 | NodeGraph·NodeGraphTools·GraphView는 어떤 도메인 모듈에도 의존하지 않는다. 도메인 전용 위젯·디버그 표시는 시각 등록과 overlay hook으로 넣는다. policy 검사로 막는다 | UE GraphEditor의 Kismet 의존 | 2.6절 |
 | GD18 | 주석 상자 소속 | 주석 상자 안 노드 목록을 저장하지 않는다. 상자 drag 시작 때 기하로 계산해 이동 patch에 넣는다 | UE `NodesUnderComment`를 선택 때 갱신 | 저장 데이터가 기하와 어긋나지 않는다 |
 | GD19 | 진단 | `GraphDiagnostic{AssetId, GraphId, NodeId, PinKey(선택), 심각도, 코드, 메시지}`. 도메인 검증·컴파일러가 내고 화면은 그대로 표시한다. 노드에 오류 필드를 저장하지 않는다 | UE 노드 필드 `ErrorType`·`ErrorMsg` | 머티리얼 시스템 5.4절의 `(AssetId, NodeId, PinKey, 코드, 메시지)`에 GraphId를 더했다. 진단은 컴파일 결과이고 문서 상태가 아니다 |
@@ -828,15 +828,15 @@ NodeGraph는 Runtime 계층이다. 그러나 게임이 쓰지 않으면 Release 
 
 ## 15. 다른 문서 개정 요청
 
-이 개정에서는 아래 문서를 고치지 않았다. 해당 단계 착수 전에 반영한다.
+GR1·GR2·GR3·GR5는 개정 3에서 반영했다. GR4는 오디오 문서를 다른 작업이 고치는 중이라 그 뒤에 반영한다.
 
-| ID | 문서 | 개정 내용 |
-|---|---|---|
-| GR1 | [UI 툴킷](UiToolkit.ko.md) 2·6·9절 | "그래프 편집" 행을 `GraphView` 모듈(Editor 계층, 이 문서 11절)로 바꾸고, EditorFramework 책임에서 그래프 Element를 뺀다. UT6의 "그래프 Element"를 NG5–NG7로 잇는다 |
-| GR2 | [머티리얼 시스템](MaterialSystem.ko.md) 3.2·5.2·5.5·14·15절 | 3.2절: MaterialSchema가 NodeGraph에 의존한다. 5.2절: 형식은 이 문서 6절을 참조하고, "재경유·주석은 화면 노드"를 "재경유는 의미 비교 때 접히는 공통 노드, 주석은 배치 데이터"로 고친다. 5.5절: semantic hash는 이 문서 8.4절 의미 바이트 + `NormalizeSemanticNode`(파라미터 기본값 제외)로 정의하고, 입력 기본값·활성 상태·고아 핀 포함을 명시하며, migration 뒤 계산임을 적는다. 14절: E1–E4·E13의 제공 모듈에 NodeGraph를 더한다. 15.1절: MS1 선행의 "리플렉션 B9(`InstancedStruct`) 노드 속성 저장"을 NG0–NG3(Record 바이트, GD23)으로 바꾼다 |
-| GR3 | [엔진 구현 계획](EngineImplementationPlan.ko.md) 14.6·22.2절 | 14.6절 MaterialSchema 행과 그래프 canvas 재사용 문장에 NodeGraph·GraphView를 적는다. 22.2절에 "노드 그래프 편집 patch는 노드 그래프 설계 8절"을 더한다(22.2절의 graph patch는 객체 계층용이므로 구분) |
-| GR4 | [오디오 시스템](AudioSystem.ko.md) AU10 | `SoundEvent`·`SoundGraph`가 NodeGraph 위에 선다고 적는다 |
-| GR5 | [공간 색인](SpatialIndex.ko.md) | 2D 균일 격자 후속을 공용 구현으로 정하고, 그래프 화면 요구(GD16: 캔버스 좌표 bbox 질의·갱신 빈도)를 적는다. NG6 선행이다 |
+| ID | 문서 | 개정 내용 | 상태 |
+|---|---|---|---|
+| GR1 | [UI 툴킷](UiToolkit.ko.md) 2·6·9절 | "그래프 편집" 행을 `GraphView` 모듈(Editor 계층, 이 문서 11절)로 바꾸고, EditorFramework 책임에서 그래프 Element를 뺀다. UT6의 "그래프 Element"를 NG5–NG7로 잇는다 | 반영(UiToolkit 초안 2.4) |
+| GR2 | [머티리얼 시스템](MaterialSystem.ko.md) 3.2·5.2·5.5·14·15절 | 3.2절: MaterialSchema가 NodeGraph에 의존한다. 5.2절: 형식은 이 문서 6절을 참조하고, "재경유·주석은 화면 노드"를 "재경유는 의미 비교 때 접히는 공통 노드, 주석은 배치 데이터"로 고친다. 5.5절: semantic hash는 이 문서 8.4절 의미 바이트 + `NormalizeSemanticNode`(파라미터 기본값 제외)로 정의하고, 입력 기본값·활성 상태·고아 핀 포함을 명시하며, migration 뒤 계산임을 적는다. 14절: E1–E4·E13의 제공 모듈에 NodeGraph를 더한다. 15.1절: MS1 선행의 "리플렉션 B9(`InstancedStruct`) 노드 속성 저장"을 NG0–NG3(Record 바이트, GD23)으로 바꾼다 | 반영(MaterialSystem 개정 7) |
+| GR3 | [엔진 구현 계획](EngineImplementationPlan.ko.md) 14.6·22.2절 | 14.6절 MaterialSchema 행과 그래프 canvas 재사용 문장에 NodeGraph·GraphView를 적는다. 22.2절에 "노드 그래프 편집 patch는 노드 그래프 설계 8절"을 더한다(22.2절의 graph patch는 객체 계층용이므로 구분) | 반영(계획 개정 1.18) |
+| GR4 | [오디오 시스템](AudioSystem.ko.md) AU10 | `SoundEvent`·`SoundGraph`가 NodeGraph 위에 선다고 적는다 | 미반영 |
+| GR5 | [공간 색인](SpatialIndex.ko.md) | 2D 균일 격자 후속을 공용 구현으로 정하고, 그래프 화면 요구(GD16: 캔버스 좌표 bbox 질의·갱신 빈도)를 적는다. NG6 선행이다 | 반영(SpatialIndex 개정 8, 5.3절) |
 
 ## 16. 위험
 
@@ -888,3 +888,4 @@ NodeGraph는 Runtime 계층이다. 그러나 게임이 쓰지 않으면 Release 
     - B9 구현 완료 표기(1절), Runtime 배치 근거(GD21)
 
   리플렉션 개정 요청(개정 1의 GR3)은 GD23으로 필요 없어져 지우고, 요청 번호를 GR1–GR5로 다시 매겼다.
+- 개정 3(2026-11-22): 다른 문서 개정 요청 GR1·GR2·GR3·GR5를 해당 문서에 반영하고 15절에 상태 열을 더했다. GR4(오디오)는 미반영이다. GD16의 2D 격자 참조를 공간 색인 5.3절로 고쳤다.
