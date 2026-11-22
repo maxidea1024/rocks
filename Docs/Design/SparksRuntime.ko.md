@@ -52,7 +52,9 @@
 - **발행 큐(SL §5.4):** `EMIT Bx`(Ref 창 0번 발행자, 인자는 그 뒤)는 항목(발행자, 이벤트 key, 인자 사본 — Buf는 참조 +1, 깊이)을 session 큐 끝에 넣는다. 깊이: 단계를 시작한 조각의 발행은 1, 깊이 d 항목의 handler가 낸 발행은 d+1; 17이 될 항목을 넣으려는 조각은 `CascadeLimit` fault이고 같은 루트의 미전달 항목을 폐기한다. 큐 상한 262,144를 넘기면 그 조각의 `BudgetExceeded`.
 - **전달:** 실행 조각(hook·handler·메서드)이 끝날 때마다 session은 큐를 FIFO로 비운다: 항목 하나를 꺼내 그 시점의 활성 연결(발행자·key가 같은 것)을 순번대로 실행하고 다음 항목으로 간다. 단계당 전달 항목 상한 65,536을 넘는 항목은 다음 단계로 이월하고, 이월 항목은 전달 직전 인자 객체의 생존을 다시 본다(`?` 없는 인자가 죽었으면 폐기·보고, `T?`는 null).
 - **Changed(SL §5.3):** 조각 안에서 instance 필드를 처음 쓸 때 시작 값을 보관하고, 조각 끝에 끝 값과 다르면(Scalar 비트, 문자열 byte, 컨테이너·struct 원소별, 객체 동일성) Changed 항목을 넣는다(깊이 규칙 같음). Awake·Enable hook 안의 쓰기, 초기화, Disable·Destroy 문맥의 쓰기는 내지 않는다.
-- **단계:** `OpenPhase()`·`ClosePhase()` — 단계 안의 모든 진입(hook·메서드·host 이벤트 넣기)은 끝에 큐를 비운다. `.run` 지시: `phase`(새 단계 — 이월 항목 전달), `emit #n Class.Event(인자)`(host 진입으로 발행 — 깊이 1).
+- **단계:** `OpenPhase()` — 새 단계(단계당 전달 수 초기화 — 이월 항목 전달). 모든 진입(`RunHook`·`Call`·`Emit`·`OpenPhase`)은 끝에 큐를 비운다(단계를 닫는 별도 호출은 없다 — 활성 전환·파괴 적용은 LC6d가 더한다). `.run` 지시: `phase`(결과 `ok (N queued)`), `emit #n Class.Event(인자)`(host 진입 발행 — 깊이 1, Class가 그 모듈 클래스가 아니면 엔진 이벤트 key), 실행된 handler는 결과 줄 뒤 `  deliver #구독자 <함수> -> 결과 (N steps)` 줄이다.
+- **구현 세부(LC6b 확정):** key는 링크가 정한다(`VmEventKey` — 선언 모듈 경로와 `Class.Member`, 엔진 선언은 빈 경로). Changed 항목·연결의 key는 감시 필드의 key다(이벤트 key와 이름이 겹치지 않는다). 연결은 instance의 Enable hook 뒤에 기반 사슬의 handler 전부를 풀어 만들고, 활성 instance에서 경로 첫 마디 필드가 조각 안에서 바뀌면 그 필드를 원천으로 쓰는 handler를 다시 푼다(남는 발행자의 항목은 순번 유지). handler 인자는 선언한 만큼 bank마다 앞에서부터 넘긴다(배열 원천은 발행한 원소가 첫 Ref 인자). 반환값이 있는 메서드는 반환 slot·버퍼를 보관하고 전달한 뒤 실행 문맥의 반환 자리로 되돌린다. 이월 항목의 죽은 객체 인자는 지금 null로 넘긴다 — non-null 인자의 항목 폐기·보고는 인자 타입(서술자의 `?<x>`)을 대조하는 LC6d에서 한다.
+
 
 ## 3. 순서
 

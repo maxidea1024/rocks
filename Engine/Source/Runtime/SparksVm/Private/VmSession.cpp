@@ -19,11 +19,24 @@ constexpr usize VmSessionMaxRefArguments = 256;
 
 VmSession::VmSession(Allocator& allocator, VmHost* host) noexcept
     : allocator_(&allocator), host_(host), execution_(allocator), modules_(allocator),
-      instances_(allocator), byHandle_(allocator) {
+      instances_(allocator), byHandle_(allocator), connections_(allocator), queue_(allocator),
+      itemValues_(allocator), itemBuffers_(allocator), writes_(allocator), writeValues_(allocator),
+      writeBuffers_(allocator), deliveries_(allocator) {
     execution_.session_ = this;
 }
 
 VmSession::~VmSession() noexcept {
+    // 남은 발행 항목·Changed 시작 값의 참조를 놓고 instance를 모두 Detach한다(CloseSession).
+    for (usize at = queueHead_; at < queue_.Size(); ++at) {
+        ReleaseItem(queue_[at]);
+    }
+
+    for (VmBuffer* buffer : writeBuffers_) {
+        execution_.Release(buffer);
+    }
+
+    writes_.Clear();
+    writeBuffers_.Clear();
     DetachAll();
 }
 
@@ -223,17 +236,19 @@ Result<uint32> VmSession::CreateInstance(uint64 handle, const VmLinkedModule& mo
         currentClass = baseClass;
     }
 
-    // 사슬의 모든 `$init` 기록·명령 수를 모은다(LC6a 리뷰 B4 — RunHook과 같은 규칙).
-    execution_.logs_.Clear();
-    execution_.logText_.Clear();
-    execution_.droppedLogs_ = 0;
+    // 사슬의 모든 `$init` 기록·명령 수를 모은다(LC6a 리뷰 B4 — RunHook과 같은 규칙). 초기화의
+    // 쓰기는 Changed를 내지 않는다(SL 5.3절).
+    BeginEntry();
     execution_.keepLogs_ = true;
+    suppressChanged_ = true;
     struct KeepLogs {
-        VmExecution& execution;
+        VmSession& session;
         ~KeepLogs() noexcept {
-            execution.keepLogs_ = false;
+            session.execution_.keepLogs_ = false;
+            session.suppressChanged_ = false;
+            static_cast<void>(session.EndFragment()); // 시작 값 기록을 놓는다(억제 중)
         }
-    } keepLogs{execution_};
+    } keepLogs{*this};
     for (uint32 at = depth; at > 0; --at) {
         const BytecodeClass& link = chainModules[at - 1]->Module().classes[chainClasses[at - 1]];
         if (link.initializer == NoBytecodeIndex) {
@@ -289,17 +304,25 @@ Result<VmCallResult> VmSession::RunHook(uint32 instance, BytecodeHookKind kind,
     }
 
     VmCallResult result;
-    // 사슬의 모든 호출 기록을 모은다(처음 호출 전에 비우고, 끝나면 다시 호출마다 비운다).
-    execution_.logs_.Clear();
-    execution_.logText_.Clear();
-    execution_.droppedLogs_ = 0;
+    // 사슬의 모든 호출 기록을 모은다. Awake·Enable·Disable·Destroy 문맥의 쓰기는 Changed를 내지
+    // 않는다(SL 5.3절). Disable은 연결을 끄고(항목 유지) Enable은 연결을 풀어 켠다(SL 5.5절).
+    BeginEntry();
     execution_.keepLogs_ = true;
+    suppressChanged_ = kind == BytecodeHookKind::Awake || kind == BytecodeHookKind::Enable ||
+                       kind == BytecodeHookKind::Disable || kind == BytecodeHookKind::Destroy;
     struct KeepLogs {
-        VmExecution& execution;
+        VmSession& session;
         ~KeepLogs() noexcept {
-            execution.keepLogs_ = false;
+            session.execution_.keepLogs_ = false;
+            session.suppressChanged_ = false;
         }
-    } keepLogs{execution_};
+    } keepLogs{*this};
+    if (kind == BytecodeHookKind::Disable) {
+        instances_[instance].enabled = false;
+        for (Connection& connection : connections_) {
+            connection.active = connection.subscriber == instance ? false : connection.active;
+        }
+    }
     // this(Ref 0번) 뒤에 hook 인자 Ref를 둔다.
     uint64 refArguments[VmSessionMaxRefArguments] = {};
     if (refs.Size() + 1 > VmSessionMaxRefArguments) {
@@ -331,9 +354,28 @@ Result<VmCallResult> VmSession::RunHook(uint32 instance, BytecodeHookKind kind,
             result.steps = steps;
             execution_.ReleaseReturned();
             if (result.outcome != VmOutcome::Returned) {
+                if (auto drained = Drain(); !drained) {
+                    return Result<VmCallResult>::Failure(drained.Error());
+                }
+
                 return Result<VmCallResult>::Success(result);
             }
         }
+    }
+
+    if (kind == BytecodeHookKind::Enable) {
+        instances_[instance].enabled = true;
+        for (Connection& connection : connections_) {
+            connection.active = connection.subscriber == instance ? true : connection.active;
+        }
+
+        if (auto connected = Connect(instance, nullptr, NoBytecodeIndex); !connected) {
+            return Result<VmCallResult>::Failure(connected.Error());
+        }
+    }
+
+    if (auto drained = Drain(); !drained) {
+        return Result<VmCallResult>::Failure(drained.Error());
     }
 
     return Result<VmCallResult>::Success(result);
@@ -353,8 +395,47 @@ Result<VmCallResult> VmSession::Call(uint32 instance, const VmLinkedModule& modu
         refArguments[at + 1] = refs[at];
     }
 
-    return execution_.Call(module, function, scalars,
-                           Span<const uint64>(refArguments, refs.Size() + 1), buffers);
+    BeginEntry();
+    execution_.keepLogs_ = true;
+    struct KeepLogs {
+        VmExecution& execution;
+        ~KeepLogs() noexcept {
+            execution.keepLogs_ = false;
+        }
+    } keepLogs{execution_};
+    auto called = execution_.Call(module, function, scalars,
+                                  Span<const uint64>(refArguments, refs.Size() + 1), buffers);
+    if (!called) {
+        return called;
+    }
+
+    // 반환 값은 전달(다른 Call) 뒤에도 읽을 수 있어야 한다: 반환 slot·버퍼를 보관하고 전달한 뒤
+    // 실행 문맥의 반환 자리로 되돌린다(버퍼 참조는 옮긴다).
+    Array<uint64> slots(*allocator_);
+    Array<VmBuffer*> returned(*allocator_);
+    if (!slots.TryAppend(execution_.returned_.View()) ||
+        !returned.TryAppend(execution_.returnedBuffers_.View())) {
+        return Result<VmCallResult>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    execution_.returned_.Clear();
+    execution_.returnedBuffers_.Clear(); // 참조는 returned가 쥔다
+    auto drained = Drain();
+    execution_.ReleaseReturned();
+    static_cast<void>(execution_.returned_.TryAppend(slots.View()));
+    if (!execution_.returnedBuffers_.TryAppend(returned.View())) {
+        for (VmBuffer* buffer : returned) {
+            execution_.Release(buffer);
+        }
+
+        return Result<VmCallResult>::Failure(ErrorCode::OutOfMemory);
+    }
+
+    if (!drained) {
+        return Result<VmCallResult>::Failure(drained.Error());
+    }
+
+    return called;
 }
 
 void VmSession::ReleaseFields(Instance& instance) noexcept {
@@ -369,6 +450,7 @@ void VmSession::Detach(uint32 instance) noexcept {
         return;
     }
 
+    Disconnect(instance);
     Instance& entry = instances_[instance];
     ReleaseFields(entry);
     static_cast<void>(byHandle_.Erase(entry.handle));
@@ -420,7 +502,7 @@ uint32 VmSession::ClassOf(uint32 instance) const noexcept {
 
 bool VmSession::FieldSlots(uint64 handle, const VmLinkedModule& module, uint32 classIndex,
                            uint32 bank, uint32 offset, uint32 slots, uint64*& values,
-                           VmBuffer**& buffers) noexcept {
+                           VmBuffer**& buffers, uint32& instanceOut, uint32& atOut) noexcept {
     const uint32 number = Find(handle);
     if (number == VmNoInstance) {
         return false;
@@ -461,6 +543,8 @@ bool VmSession::FieldSlots(uint64 handle, const VmLinkedModule& module, uint32 c
              : bank == 1 ? instance.refs.Data() + at
                          : nullptr;
     buffers = bank == 2 ? instance.buffers.Data() + at : nullptr;
+    instanceOut = number;
+    atOut = static_cast<uint32>(at);
     return true;
 }
 

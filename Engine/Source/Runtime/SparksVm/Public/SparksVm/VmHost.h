@@ -49,6 +49,17 @@ struct VmHostBinding {
 
 class VmLinkedModule;
 
+// 이벤트·필드의 정규 key다(SparksRuntime 2.3절): 선언한 모듈의 경로(엔진 선언은 빈 글자)와
+// `Class.Member` 이름. 모듈 사이에서 같은 선언은 같은 key다.
+struct VmEventKey {
+    StringView path;
+    StringView name;
+
+    bool operator==(const VmEventKey& other) const noexcept {
+        return path == other.path && name == other.name;
+    }
+};
+
 // 가상 호출의 대상이다(6.5절): Sparks 함수(링크된 모듈과 함수 번호) 또는 native(묶음 번호).
 struct VmVirtualTarget {
     const VmLinkedModule* module = nullptr; // Sparks 함수면 그 모듈
@@ -60,6 +71,8 @@ struct VmVirtualTarget {
 // host 호출 하나의 창과 도구다. 창은 bank별 연속 slot이다: CALLN·NEWLIT은 이 frame의 할당 수부터
 // frame 끝까지(인자는 수신자 먼저 bank별로 앞에서부터, 결과는 결과 bank의 0번부터), GETF는 결과
 // 레지스터 묶음, SETF는 값 레지스터 묶음(읽기만), GETCTX는 결과 Ref 하나다.
+class VmSession;
+
 class VmHostCall final {
 public:
     // 묶음 번호(VmHostBinding::id)다.
@@ -100,6 +113,7 @@ public:
 
 private:
     friend class VmExecution;
+    friend class VmSession;
 
     uint64 binding_ = 0;
     Span<uint64> scalars_;
@@ -152,7 +166,7 @@ class VmLinkedModule final {
 public:
     explicit VmLinkedModule(Allocator& allocator) noexcept
         : hosts_(allocator), languageIndex_(allocator), languages_(allocator), imports_(allocator),
-          shapes_(allocator), localFields_(allocator) {
+          shapes_(allocator), localFields_(allocator), keys_(allocator) {
     }
 
     VmLinkedModule(const VmLinkedModule&) = delete;
@@ -224,6 +238,7 @@ private:
     Array<Import> imports_;
     Array<Shape> shapes_;
     Array<LocalField> localFields_;
+    Array<VmEventKey> keys_; // Event·Field 참조의 정규 key(그 밖은 빈 글자)
     bool importsLinked_ = false;
     bool linked_ = false;
     uint64 generation_ = 0; // LinkModule마다 바뀐다(이 객체를 가리키는 import의 무효화)

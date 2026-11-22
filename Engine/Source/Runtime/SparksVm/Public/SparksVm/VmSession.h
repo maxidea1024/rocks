@@ -67,6 +67,36 @@ public:
         return execution_;
     }
 
+    // ---- 발행·전달(SparksRuntime 2.3절 — LC6b) ----
+
+    // 상한(SL 5.4절 — 프로젝트 설정의 기본값).
+    static constexpr uint32 MaxCascadeDepth = 16;
+    static constexpr uint32 MaxDeliveriesPerPhase = 65536;
+    static constexpr uint32 MaxQueuedItems = 262144;
+
+    // 새 스크립트 단계를 연다: 단계당 전달 수를 0으로 두고 이월 항목을 전달한다.
+    Result<void> OpenPhase() noexcept;
+
+    // host 진입 발행이다(native 이벤트·시험): 발행자 handle과 key의 항목을 깊이 1로 넣고 전달한다.
+    // 인자는 Scalar·Ref·Buf별(Buf는 빌려 준다 — 항목이 참조를 더한다).
+    Result<void> Emit(uint64 publisher, const VmEventKey& key, Span<const uint64> scalars,
+                      Span<const uint64> refs, Span<VmBuffer* const> buffers) noexcept;
+
+    // 마지막 진입(RunHook·Call·Emit·OpenPhase)에서 실행된 handler 기록이다(다음 진입이 지운다).
+    struct Delivery {
+        uint64 subscriber = 0;
+        const VmLinkedModule* module = nullptr;
+        uint32 function = NoBytecodeIndex;
+        VmCallResult result;
+    };
+
+    Span<const Delivery> Deliveries() const noexcept {
+        return deliveries_.View();
+    }
+
+    // 큐에 남은(이월) 항목 수다.
+    uint32 QueuedCount() const noexcept;
+
     // instance의 필드 저장소(기반 사슬 전체 — bank별)다(시험·덤프용).
     struct FieldView {
         Span<const uint64> scalars;
@@ -85,6 +115,71 @@ public:
 private:
     friend class VmExecution;
 
+    // 연결 하나(SL 5.5절 — 연결 표의 항목)다.
+    struct Connection {
+        uint64 publisher = 0;
+        VmEventKey key;
+        uint32 subscriber = NoBytecodeIndex; // instance 번호
+        const VmLinkedModule* module = nullptr;
+        uint32 handler = NoBytecodeIndex; // 그 모듈 handlers 번호
+        bool fromArray = false;           // 배열 원천: 첫 인자가 발행한 원소
+        bool active = true;
+        uint64 order = 0; // 추가 순번(전달 순서)
+    };
+
+    // 발행 큐 항목이다(인자는 values_·buffers_ 저장소의 구간).
+    struct Item {
+        uint64 publisher = 0;
+        VmEventKey key;
+        const VmLinkedModule* module = nullptr; // 이벤트 모양의 모듈(없으면 인자 검사 없음)
+        uint32 eventRef = NoBytecodeIndex;
+        uint32 depth = 1;
+        uint64 root = 0;
+        uint32 firstScalar = 0;
+        uint32 scalarCount = 0;
+        uint32 firstRef = 0;
+        uint32 refCount = 0;
+        uint32 firstBuffer = 0;
+        uint32 bufferCount = 0;
+        bool carried = false;
+    };
+
+    // 조각 안에서 처음 쓴 필드(Changed — SL 5.3절)다.
+    struct Write {
+        uint32 instance = NoBytecodeIndex;
+        const VmLinkedModule* module = nullptr;
+        uint32 fieldRef = NoBytecodeIndex;
+        uint32 bank = 0;
+        uint32 at = 0; // instance 저장소 위치
+        uint32 slots = 0;
+        uint32 firstValue = 0; // writeValues_ 구간(Scalar·Ref) 또는 writeBuffers_ 번호(Buf)
+    };
+
+    // EMIT(실행 중)이 부른다: 항목을 넣는다. 반환은 fault 종류.
+    VmFaultKind EnqueueFromScript(const VmLinkedModule& module, uint32 eventRef,
+                                  Span<const uint64> scalars, Span<const uint64> refs,
+                                  Span<VmBuffer* const> buffers, ErrorCode& error) noexcept;
+    VmFaultKind Enqueue(uint64 publisher, const VmEventKey& key, const VmLinkedModule* module,
+                        uint32 eventRef, uint32 depth, uint64 root, Span<const uint64> scalars,
+                        Span<const uint64> refs, Span<VmBuffer* const> buffers,
+                        ErrorCode& error) noexcept;
+    // 로컬 필드 쓰기를 기록한다(조각에서 처음이면 시작 값 보관).
+    void NoteWrite(uint32 instance, const VmLinkedModule& module, uint32 fieldRef, uint32 bank,
+                   uint32 at, uint32 slots) noexcept;
+    // 조각 끝: Changed 확정, 원천 필드가 바뀐 연결 다시 풀기. 실패는 할당자 오류.
+    Result<void> EndFragment() noexcept;
+    // 큐를 비운다(단계 전달 상한까지).
+    Result<void> Drain() noexcept;
+    // instance의 연결을 (다시) 푼다 — handler 하나(handler가 NoIndex면 전부).
+    Result<void> Connect(uint32 instance, const VmLinkedModule* module, uint32 handler) noexcept;
+    // 경로를 풀어 발행자 handle들을 publishers에 둔다(배열이면 fromArray).
+    Result<void> ResolvePath(uint32 instance, const VmLinkedModule& module, uint32 firstPath,
+                             uint32 pathCount, Array<uint64>& publishers, bool& fromArray) noexcept;
+    void Disconnect(uint32 instance) noexcept;
+    void ReleaseItem(Item& item) noexcept;
+    // 진입 하나(RunHook·Call·Emit·OpenPhase)의 앞뒤: 기록 모음·전달.
+    void BeginEntry() noexcept;
+
     struct Instance {
         explicit Instance(Allocator& allocator) noexcept
             : scalars(allocator), refs(allocator), buffers(allocator) {
@@ -94,6 +189,7 @@ private:
         const VmLinkedModule* module = nullptr;
         uint32 classIndex = NoBytecodeIndex;
         bool attached = false;
+        bool enabled = false; // Enable hook이 끝났고 Disable 전(연결이 살아 있다)
         Array<uint64> scalars;
         Array<uint64> refs;
         Array<VmBuffer*> buffers;
@@ -103,8 +199,10 @@ private:
     bool BaseOf(const VmLinkedModule& module, uint32 classIndex, const VmLinkedModule*& baseModule,
                 uint32& baseClass) const noexcept;
     // GETF·SETF의 로컬 필드 자리다(instance가 아니면 false).
+    // instance·at은 instance 번호와 저장소 위치(Changed 기록)다.
     bool FieldSlots(uint64 handle, const VmLinkedModule& module, uint32 classIndex, uint32 bank,
-                    uint32 offset, uint32 slots, uint64*& values, VmBuffer**& buffers) noexcept;
+                    uint32 offset, uint32 slots, uint64*& values, VmBuffer**& buffers,
+                    uint32& instance, uint32& at) noexcept;
     void ReleaseFields(Instance& instance) noexcept;
 
     Allocator* allocator_;
@@ -113,6 +211,22 @@ private:
     Array<const VmLinkedModule*> modules_;
     Array<Instance> instances_;
     HashMap<uint64, uint32> byHandle_;
+    // 발행·전달(LC6b).
+    Array<Connection> connections_;
+    Array<Item> queue_;
+    usize queueHead_ = 0;
+    Array<uint64> itemValues_;
+    Array<VmBuffer*> itemBuffers_;
+    Array<Write> writes_;
+    Array<uint64> writeValues_;
+    Array<VmBuffer*> writeBuffers_;
+    Array<Delivery> deliveries_;
+    uint64 nextOrder_ = 1;
+    uint64 nextRoot_ = 1;
+    uint32 currentDepth_ = 0; // 실행 중인 조각의 깊이(0은 단계를 시작한 조각)
+    uint64 currentRoot_ = 0;
+    uint32 deliveredInPhase_ = 0;
+    bool suppressChanged_ = false; // 초기화·Awake·Enable·Disable·Destroy 문맥
 };
 
 } // namespace rocks::sparks

@@ -767,6 +767,23 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
             reload();
             break;
         }
+        case Opcode::Emit: {
+            Banks banks;
+            banks.s = s;
+            banks.r = r;
+            banks.b = b;
+            ErrorCode error = ErrorCode::None;
+            fault = EmitEvent(word, banks, error);
+            if (error != ErrorCode::None) {
+                return failed(error);
+            }
+
+            if (fault != VmFaultKind::None) {
+                return MakeFault(fault, at, steps);
+            }
+
+            break;
+        }
         case Opcode::Cast: {
             // `as?`(6.5절): 살아 있고 host가 그 타입이라고 답하면 B, 아니면 null.
             const uint32 type = DecodeAx(words[pc++]);

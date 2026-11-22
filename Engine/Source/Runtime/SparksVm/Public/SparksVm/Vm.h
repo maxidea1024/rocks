@@ -271,6 +271,8 @@ private:
     // host 명령(GETF·SETF·GETCTX·CALLN·NEWLIT — VmHostCalls.cpp, SparksVm 6.2절)을 실행한다.
     VmFaultKind CallHost(Opcode op, uint32 word, uint32 extra, const Banks& banks,
                          ErrorCode& error) noexcept;
+    // EMIT(SparksRuntime 2.3절)을 session 발행 큐에 넣는다.
+    VmFaultKind EmitEvent(uint32 word, const Banks& banks, ErrorCode& error) noexcept;
     // handle이 0이 아니고 host가 살아 있다고 답하는지다(SL 4.1절).
     bool Alive(uint64 handle) noexcept;
     // CALLV(6.5절)의 대상을 host에 묻는다. native 대상이면 여기서 부르고 target.native가 참이다.
