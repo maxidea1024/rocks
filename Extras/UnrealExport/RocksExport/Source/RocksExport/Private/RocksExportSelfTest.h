@@ -32,6 +32,10 @@ namespace RocksExportSelfTest
 	// 에셋 덤프·원본 메시 digest·빌드 설정 lightmap 번호가 같은지(12.2절 — prepared가 원본 설정을 바꾸지 않음) 본다.
 	void RunStaticMeshExtraction(TArray<FString>& Errors);
 
+	// 스켈레톤·스킨 메시 추출(6.3절): 튜토리얼 스킨 메시와 스켈레톤을 내보내 본 계층(수·이름·부모·리타깃 방식), LOD 수,
+	// LOD 0 스킨 가중치 영향 수를 원본과 대조하고 추출 전후 덤프가 같은지 본다.
+	void RunSkeletalExtraction(TArray<FString>& Errors);
+
 	// 위 전부를 돌린다. 모두 통과하면 true다.
 	bool RunAll(TArray<FString>& Errors);
 }

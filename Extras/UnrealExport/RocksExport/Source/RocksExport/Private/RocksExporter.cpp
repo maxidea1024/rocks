@@ -4,6 +4,8 @@
 #include "HAL/IConsoleManager.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/ConfigCacheIni.h"
+#include "Animation/Skeleton.h"
+#include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/Texture.h"
 #include "Misc/EngineVersion.h"
@@ -12,6 +14,8 @@
 #include "RocksExportClosure.h"
 #include "RocksExportCommon.h"
 #include "RocksJsonWriter.h"
+#include "RocksSkeletalMeshExtractor.h"
+#include "RocksSkeletonExtractor.h"
 #include "RocksStaticMeshExtractor.h"
 #include "RocksTextureExtractor.h"
 
@@ -91,28 +95,41 @@ namespace RocksExporterPrivate
 		}
 	}
 
-	// 범위 안 종류의 본문을 만든다(UX2a 텍스처, UX3a 정적 메시). 로드 실패는 에셋 수준 error 진단이다. blob 쓰기
-	// 실패만 false다.
+	// 범위 안 종류의 본문을 만든다(UX2a 텍스처, UX3a 정적 메시, UX7a 스켈레톤·스킨 메시). 로드 실패는 에셋 수준
+	// error 진단이다. blob 쓰기 실패만 false다.
 	static bool ExtractBody(FRocksExportAsset& Asset, FRocksBundleWriter& Bundle, FRocksAssetBody& OutBody, FString& OutError)
 	{
 		const bool bTexture = FRocksTextureExtractor::IsTextureClass(Asset.ClassName);
-		const bool bStaticMesh = Asset.ClassName == TEXT("StaticMesh");
-		if (!Asset.bInScope || (!bTexture && !bStaticMesh))
+		const bool bKnown = bTexture || Asset.ClassName == TEXT("StaticMesh") || Asset.ClassName == TEXT("Skeleton") || Asset.ClassName == TEXT("SkeletalMesh");
+		if (!Asset.bInScope || !bKnown)
 		{
 			return true;
 		}
 
 		UObject* Object = FSoftObjectPath(Asset.ObjectPath).TryLoad();
-		UTexture* Texture = bTexture ? Cast<UTexture>(Object) : nullptr;
-		UStaticMesh* StaticMesh = bStaticMesh ? Cast<UStaticMesh>(Object) : nullptr;
-		if (Texture == nullptr && StaticMesh == nullptr)
+		bool bExtracted = true;
+		if (UTexture* Texture = bTexture ? Cast<UTexture>(Object) : nullptr)
+		{
+			bExtracted = FRocksTextureExtractor::Extract(*Texture, Bundle, OutBody, OutError);
+		}
+		else if (UStaticMesh* StaticMesh = Cast<UStaticMesh>(Object))
+		{
+			bExtracted = FRocksStaticMeshExtractor::Extract(*StaticMesh, Bundle, OutBody, OutError);
+		}
+		else if (USkeleton* Skeleton = Cast<USkeleton>(Object))
+		{
+			FRocksSkeletonExtractor::Extract(*Skeleton, OutBody);
+		}
+		else if (USkeletalMesh* SkeletalMesh = Cast<USkeletalMesh>(Object))
+		{
+			bExtracted = FRocksSkeletalMeshExtractor::Extract(*SkeletalMesh, Bundle, OutBody, OutError);
+		}
+		else
 		{
 			Asset.Diagnostics.Add({TEXT("LoadFailed"), RocksExport::SeverityError, FString::Printf(TEXT("the asset could not be loaded as %s"), *Asset.ClassName)});
 			return true;
 		}
 
-		const bool bExtracted = Texture != nullptr ? FRocksTextureExtractor::Extract(*Texture, Bundle, OutBody, OutError)
-			: FRocksStaticMeshExtractor::Extract(*StaticMesh, Bundle, OutBody, OutError);
 		if (!bExtracted)
 		{
 			return false;

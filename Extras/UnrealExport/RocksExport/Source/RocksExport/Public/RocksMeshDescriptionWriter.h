@@ -6,7 +6,9 @@ class FRocksBundleWriter;
 class FRocksJsonWriter;
 struct FMeshDescription;
 struct FRocksExportDiagnostic;
+class FSkeletalMeshLODModel;
 struct FStaticMeshLODResources;
+class UMorphTarget;
 
 // Rocks MeshSource 요소(MeshAnimationAssets 3.4절 MeshElement 번호와 같은 순서)다.
 enum class ERocksMeshElement : uint8
@@ -29,6 +31,8 @@ enum class ERocksMeshValueType : uint8
 	UInt32 = 5,
 	Bool = 6,
 	Name = 7,
+	BoneInfluences = 8,
+	SparseVec3 = 9,
 };
 
 // 속성 하나다. Bytes는 MeshAnimationAssets 3.4.1절 배치(채널 우선, little-endian, Name은 uint32 길이 + UTF-8)다.
@@ -64,13 +68,48 @@ struct FRocksMeshSourceRecord
 	TArray<FRocksMeshAttribute> Attributes;
 };
 
+// UE 빌드 결과(정적 메시 렌더 LOD·스킨 메시 LOD 모델)를 삼각형 메시로 옮기는 중간 형태다(5.1·6.2절 baked). 렌더 정점
+// 하나가 정점 하나·코너 하나이고 섹션 하나가 다각형 묶음 하나다.
+struct FRocksBakedMesh
+{
+	struct FSection
+	{
+		uint32 FirstIndex = 0;
+		uint32 NumTriangles = 0;
+		FName SlotName;
+	};
+
+	struct FMorph
+	{
+		FName Name;
+		// 정점 번호 → (위치 변화량, 법선 변화량). 번호 오름차순으로 쓴다.
+		TMap<uint32, TPair<FVector3f, FVector3f>> Deltas;
+	};
+
+	TArray<FVector3f> Positions;
+	TArray<FVector4f> TangentZ;
+	TArray<FVector3f> TangentX;
+	int32 TexCoordCount = 0;
+	// 채널 c의 정점 v는 TexCoords[c × 정점 수 + v]다.
+	TArray<FVector2f> TexCoords;
+	// 8비트 sRGB 정점 색이다(없으면 비어 있다).
+	TArray<FColor> Colors;
+	TArray<uint32> Indices;
+	TArray<FSection> Sections;
+	// 정점마다 (메시 본 번호, 가중치 0–65535) 목록이다(스킨 메시만, 정적 메시는 비어 있다).
+	TArray<TArray<TPair<uint16, uint16>>> Influences;
+	TArray<FMorph> Morphs;
+};
+
 // FMeshDescription·정적 메시 렌더 LOD → 교환 MeshSource 기록이다(11.6절 FRocksMeshDescriptionWriter, 5.2절, 5.4절).
 //
 // 속성 대응(MeshAnimationAssets 3.2절 표): 정점 Position, 코너 Normal·Tangent·BinormalSign·Color·TexCoord(UE
 // TextureCoordinate), 변 IsHard, 다각형 PartName(UE ObjectName), 다각형 묶음 MaterialSlotName(UE ImportedMaterialSlotName).
 // 그 밖의 UE 속성은 같은 요소·이름으로 보존한다(float·FVector2f·FVector3f·FVector4f·int32(UInt32 비트 그대로)·bool·
 // FName). transient·번호 참조 속성은 쓰지 않고, 다른 타입이거나 Rocks 엔진 이름과 겹치는 보존 속성은 빼고
-// SkippedMeshAttribute 진단을 단다.
+// SkippedMeshAttribute 진단을 단다. 스킨 메시 속성은 정점 SkinWeights·SkinWeights-<profile>(BoneInfluences — UE 원본
+// 본 번호와 16비트 가중치 그대로), 정점 Morph-<이름>(SparseVec3 위치 변화량), 코너 MorphNormal-<이름>(UE 코너 쪽
+// Morph-<이름>, SparseVec3 법선 변화량)이다(MeshAnimationAssets 3.2절, UnrealExchange.ko.md 6.3절).
 //
 // 게임 스레드에서 쓴다.
 class ROCKSEXPORT_API FRocksMeshDescriptionWriter
@@ -83,6 +122,14 @@ public:
 	// 정점 하나·코너 하나다. 같은 정점을 두 번 쓰는 삼각형은 뺀다(진단 BakedDegenerateTriangles). SectionSlotNames는
 	// 섹션마다의 머티리얼 슬롯 이름(ImportedMaterialSlotName)이다. CPU 데이터가 없으면 false와 OutError다.
 	static bool FromStaticMeshLod(const FStaticMeshLODResources& Lod, TConstArrayView<FName> SectionSlotNames, FRocksMeshSourceRecord& OutRecord, TArray<FRocksExportDiagnostic>& OutDiagnostics, FString& OutError);
+
+	// 스킨 메시 LOD 모델(UE GetImportedModel — 자동 생성 LOD의 결과)을 기록으로 옮긴다(6.2절 baked). 영향은 섹션 BoneMap으로
+	// 메시 본 번호로 바꾸고, morph는 각 UMorphTarget의 그 LOD 변화량(SourceIdx = 렌더 정점)을 쓴다.
+	static bool FromSkeletalLodModel(const FSkeletalMeshLODModel& Model, TConstArrayView<FName> SectionSlotNames, TConstArrayView<const UMorphTarget*> MorphTargets, int32 Lod, FRocksMeshSourceRecord& OutRecord, TArray<FRocksExportDiagnostic>& OutDiagnostics, FString& OutError);
+
+	// baked 중간 형태를 기록으로 옮긴다(같은 정점을 두 번 쓰는 삼각형은 빼고 BakedDegenerateTriangles, 색이 있으면
+	// BakedColorQuantized). 인덱스가 범위 밖이면 false와 OutError다.
+	static bool FromBakedMesh(const FRocksBakedMesh& Mesh, FRocksMeshSourceRecord& OutRecord, TArray<FRocksExportDiagnostic>& OutDiagnostics, FString& OutError);
 
 	// 기록을 5.2절 JSON 객체로 쓰고 위상·속성을 blob으로 저장한다. blob 쓰기 실패만 false다.
 	static bool Write(const FRocksMeshSourceRecord& Record, FRocksBundleWriter& Bundle, FRocksJsonWriter& Writer, FString& OutError);

@@ -29,6 +29,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRocksExportBundleWriterTest, "RocksExport.Bund
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRocksExportDeterminismTest, "RocksExport.ExportDeterminism", RocksExportAutomationPrivate::Flags)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRocksExportTextureTest, "RocksExport.TextureExtraction", RocksExportAutomationPrivate::Flags)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRocksExportStaticMeshTest, "RocksExport.StaticMeshExtraction", RocksExportAutomationPrivate::Flags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRocksExportSkeletalTest, "RocksExport.SkeletalExtraction", RocksExportAutomationPrivate::Flags)
 
 bool FRocksExportSha256Test::RunTest(const FString&)
 {
@@ -68,6 +69,11 @@ bool FRocksExportTextureTest::RunTest(const FString&)
 bool FRocksExportStaticMeshTest::RunTest(const FString&)
 {
 	return RocksExportAutomationPrivate::Report(*this, &RocksExportSelfTest::RunStaticMeshExtraction);
+}
+
+bool FRocksExportSkeletalTest::RunTest(const FString&)
+{
+	return RocksExportAutomationPrivate::Report(*this, &RocksExportSelfTest::RunSkeletalExtraction);
 }
 
 #endif
