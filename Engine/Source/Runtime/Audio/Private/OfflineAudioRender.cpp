@@ -21,14 +21,8 @@ Result<OfflineAudioRender> OfflineAudioRender::TryCreate(const AudioMixerConfig&
 }
 
 Result<void> OfflineAudioRender::Submit(const AudioRtCommand& command) noexcept {
-    AudioRtCommand stamped = command;
-    stamped.sequence = nextSequence_;
-    if (auto pushed = pending_.TryPushBack(stamped); !pushed) {
-        return pushed;
-    }
-
-    ++nextSequence_;
-    return Result<void>::Success();
+    // 순번은 제어 API(PreparePlay·Make*)가 매긴 값을 그대로 쓴다(3.23.1절).
+    return pending_.TryPushBack(command);
 }
 
 Result<void> OfflineAudioRender::Render(Span<float> interleaved, uint32 blockCount) noexcept {

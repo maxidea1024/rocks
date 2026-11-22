@@ -500,7 +500,30 @@ bool VmHost::AppendEnumName(uint64, uint64, StringBuilderBase&) noexcept {
 }
 
 Result<void> LinkImports(Span<VmLinkedModule* const> modules, StringBuilderBase& reason) noexcept {
+    return LinkImports(modules, Span<const VmLinkedModule* const>(), reason);
+}
+
+Result<void> LinkImports(Span<VmLinkedModule* const> modules,
+                         Span<const VmLinkedModule* const> targets,
+                         StringBuilderBase& reason) noexcept {
+    if (modules.IsEmpty()) {
+        return Result<void>::Success();
+    }
+
     // 모두 링크에 성공했고 같은 host여야 한다(LC5d2 리뷰 B1·B2 — host마다 handle 공간이 다르다).
+    for (const VmLinkedModule* target : targets) {
+        if (target == nullptr || !target->linked_ || target->host_ != modules[0]->host_) {
+            reason.Append(target == nullptr || !target->linked_
+                              ? "a module in the import set is not linked"
+                              : "the modules are linked to different hosts");
+            if (reason.HasFailed()) {
+                return Result<void>::Failure(reason.Status().Error());
+            }
+
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+    }
+
     for (VmLinkedModule* linked : modules) {
         if (linked == nullptr || !linked->linked_ || linked->host_ != modules[0]->host_) {
             reason.Append(linked == nullptr || !linked->linked_
@@ -535,7 +558,15 @@ Result<void> LinkImports(Span<VmLinkedModule* const> modules, StringBuilderBase&
 
             const StringView path(name.Data(), colon);
             const StringView member(name.Data() + colon + 1, name.ByteCount() - colon - 1);
+            // 같은 경로가 둘 다에 있으면 modules가 우선이다(reload 묶음의 새 revision).
             const VmLinkedModule* target = nullptr;
+            for (const VmLinkedModule* candidate : targets) {
+                const BytecodeModule& other = *candidate->module_;
+                if (other.path != NoBytecodeIndex && other.String(other.path) == path) {
+                    target = candidate;
+                }
+            }
+
             for (const VmLinkedModule* candidate : modules) {
                 const BytecodeModule& other = *candidate->module_;
                 if (other.path != NoBytecodeIndex && other.String(other.path) == path) {

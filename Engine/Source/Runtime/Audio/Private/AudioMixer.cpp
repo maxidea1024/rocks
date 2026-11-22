@@ -4,9 +4,16 @@
 #include <Core/Assert.h>
 #include <Core/Math/MathUtility.h>
 #include <Core/Move.h>
+#include <Platform/Atomics.h>
 #include <Platform/FloatingPointEnvironment.h>
+#include <Platform/Memory.h>
 
 namespace rocks::audio {
+
+using platform::AtomicLoad;
+using platform::AtomicStore;
+using platform::AtomicThreadFence;
+using platform::MemoryOrder;
 
 namespace {
 
@@ -19,6 +26,29 @@ static_assert(MaxMixBlockFrames < MaxBlockFrames,
 // (UE ToMonoMatrix의 FL·FR)이다.
 constexpr float MonoUpmixLinearGain = 0.5f;
 constexpr float StereoToMonoGain = 0.707f;
+
+// 64비트 원자 word의 상위 32비트 자리와 하위 mask다(mailbox·stop-all·terminal 묶음).
+constexpr uint32 HighWordShift = 32;
+constexpr uint64 LowWordMask = NumericLimits<uint32>::Max();
+constexpr uint64 ReasonMask = NumericLimits<uint8>::Max();
+
+// seqlock 내용 word 색인이다.
+enum SeqlockWord : uint32 {
+    SeqlockGeneration,
+    SeqlockSequenceLow,
+    SeqlockSequenceHigh,
+    SeqlockGain,
+    SeqlockPitch,
+    SeqlockPanMode,
+    SeqlockAzimuth,
+    SeqlockNonSpatialized,
+    SeqlockLowPass,
+    SeqlockHighPass,
+    SeqlockWordCount
+};
+
+// seqlock version의 홀수 bit(쓰는 중)다.
+constexpr uint32 SeqlockWritingBit = 1;
 
 bool IsValidBlockFrames(uint32 frames) noexcept {
     return frames >= MinMixBlockFrames && frames <= MaxMixBlockFrames &&
@@ -56,6 +86,11 @@ uint32 NextGeneration(uint32 generation) noexcept {
     return generation + 1 == 0 ? 1 : generation + 1;
 }
 
+// generation 차이(부호 있음)다. 양수면 a가 b보다 새롭다(3.23.1절 — 2^31 한계).
+int32 GenerationDelta(uint32 a, uint32 b) noexcept {
+    return static_cast<int32>(a - b);
+}
+
 // loop 구간의 [시작, 끝)이다. 0/0이면 clip 전체다.
 void LoopRange(const AudioClipDesc& desc, uint32& begin, uint32& end) noexcept {
     if (desc.loopBegin == 0 && desc.loopEnd == 0) {
@@ -73,10 +108,23 @@ PlanarView WithChannels(PlanarView view, uint32 channels) noexcept {
     return view;
 }
 
+uint32 FloatBits(float value) noexcept {
+    return platform::BitCast<uint32>(value);
+}
+
+float BitsFloat(uint32 bits) noexcept {
+    return platform::BitCast<float>(bits);
+}
+
 } // namespace
 
+// SharedVoice의 seqlock 내용 칸과 계수 스냅샷 칸이 정의와 어긋나지 않게 묶는다.
+static_assert(sizeof(AudioMixerCounters) % sizeof(uint64) == 0,
+              "AudioMixerCounters must hold only uint64 fields");
+
 AudioMixer::AudioMixer(const AudioMixerConfig& config, Allocator& allocator) noexcept
-    : config_(config), voices_(allocator), clips_(allocator) {
+    : config_(config), controlVoices_(allocator), clips_(allocator), sharedVoices_(allocator),
+      voices_(allocator) {
 }
 
 Result<AudioMixer> AudioMixer::TryCreate(const AudioMixerConfig& config,
@@ -99,6 +147,14 @@ Result<AudioMixer> AudioMixer::TryCreate(const AudioMixerConfig& config,
 
     mixer.limiter_ = Move(limiter.Value());
     if (auto resized = mixer.voices_.TryResize(config.maxVoices); !resized) {
+        return Result<AudioMixer>::Failure(resized.Error());
+    }
+
+    if (auto resized = mixer.controlVoices_.TryResize(config.maxVoices); !resized) {
+        return Result<AudioMixer>::Failure(resized.Error());
+    }
+
+    if (auto resized = mixer.sharedVoices_.TryResize(config.maxVoices); !resized) {
         return Result<AudioMixer>::Failure(resized.Error());
     }
 
@@ -127,7 +183,7 @@ Result<AudioMixer> AudioMixer::TryCreate(const AudioMixerConfig& config,
     return Result<AudioMixer>::Success(Move(mixer));
 }
 
-// --- clip 표 ---
+// --- 제어 쪽: clip 표 ---
 
 Result<AudioClipId> AudioMixer::RegisterClip(const AudioClipDesc& desc) noexcept {
     if (desc.channelCount == 0 || desc.channelCount > MaxClipChannels || desc.frameCount == 0 ||
@@ -184,40 +240,51 @@ Result<void> AudioMixer::UnregisterClip(AudioClipId clip) noexcept {
     return Result<void>::Success();
 }
 
-// --- voice ---
+// --- 제어 쪽: voice ---
 
-AudioMixer::VoiceSlot* AudioMixer::FindVoice(AudioVoiceHandle voice) noexcept {
-    if (voice.index >= voices_.Size()) {
+AudioMixer::ControlVoice* AudioMixer::FindControl(AudioVoiceHandle voice) noexcept {
+    if (voice.index >= controlVoices_.Size()) {
         return nullptr;
     }
 
-    VoiceSlot& slot = voices_[voice.index];
-    return slot.state != AudioVoiceState::Idle && slot.generation == voice.generation ? &slot
-                                                                                      : nullptr;
+    ControlVoice& slot = controlVoices_[voice.index];
+    return slot.state != ControlState::Idle && slot.generation == voice.generation ? &slot
+                                                                                   : nullptr;
 }
 
-const AudioMixer::VoiceSlot* AudioMixer::FindVoice(AudioVoiceHandle voice) const noexcept {
-    if (voice.index >= voices_.Size()) {
+const AudioMixer::ControlVoice* AudioMixer::FindControl(AudioVoiceHandle voice) const noexcept {
+    if (voice.index >= controlVoices_.Size()) {
         return nullptr;
     }
 
-    const VoiceSlot& slot = voices_[voice.index];
-    return slot.state != AudioVoiceState::Idle && slot.generation == voice.generation ? &slot
-                                                                                      : nullptr;
+    const ControlVoice& slot = controlVoices_[voice.index];
+    return slot.state != ControlState::Idle && slot.generation == voice.generation ? &slot
+                                                                                   : nullptr;
+}
+
+Result<void> AudioMixer::CheckCommandTarget(AudioVoiceHandle voice) const noexcept {
+    const ControlVoice* slot = FindControl(voice);
+    if (slot == nullptr) {
+        return Result<void>::Failure(ErrorCode::StaleHandle);
+    }
+
+    // Play를 만들지 않은 voice에는 명령을 낼 수 없다(3.23.1절 — RT가 첫 명령으로 수명을 안다).
+    if (slot->state == ControlState::Reserved) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    return Result<void>::Success();
 }
 
 Result<AudioVoiceHandle> AudioMixer::AcquireVoice() noexcept {
-    const uint32 count = static_cast<uint32>(voices_.Size());
+    const uint32 count = static_cast<uint32>(controlVoices_.Size());
     for (uint32 step = 0; step < count; ++step) {
         const uint32 index = (nextVoiceSearch_ + step) % count;
-        VoiceSlot& slot = voices_[index];
-        if (slot.state == AudioVoiceState::Idle) {
-            slot.state = AudioVoiceState::Reserved;
-            slot.collected = false;
-            slot.hasPendingParams = false;
-            slot.startMixFrame = UnsetMixFrame;
-            slot.endMixFrame = UnsetMixFrame;
-            slot.endReason = AudioVoiceEndReason::None;
+        ControlVoice& slot = controlVoices_[index];
+        if (slot.state == ControlState::Idle) {
+            slot.state = ControlState::Reserved;
+            slot.releaseMixFrame = UnsetMixFrame;
+            slot.requestedStopFade = NumericLimits<uint32>::Max();
             nextVoiceSearch_ = (index + 1) % count;
             return Result<AudioVoiceHandle>::Success(AudioVoiceHandle{index, slot.generation});
         }
@@ -229,7 +296,7 @@ Result<AudioVoiceHandle> AudioMixer::AcquireVoice() noexcept {
 Result<AudioRtCommand> AudioMixer::PreparePlay(AudioVoiceHandle voice, AudioClipId clip,
                                                uint32 startFrame, bool loop,
                                                const AudioVoiceParams& params) noexcept {
-    VoiceSlot* slot = FindVoice(voice);
+    ControlVoice* slot = FindControl(voice);
     if (slot == nullptr || clip.index >= clips_.Size() || !clips_[clip.index].registered ||
         clips_[clip.index].generation != clip.generation) {
         return Result<AudioRtCommand>::Failure(ErrorCode::StaleHandle);
@@ -241,7 +308,7 @@ Result<AudioRtCommand> AudioMixer::PreparePlay(AudioVoiceHandle voice, AudioClip
     LoopRange(desc, loopBegin, loopEnd);
     // 방위각 패닝은 mono clip만이다(stereo spread는 AU3).
     const bool azimuthOnStereo = params.panMode == AudioPanMode::Azimuth && desc.channelCount != 1;
-    if (slot->state != AudioVoiceState::Reserved || startFrame >= desc.frameCount ||
+    if (slot->state != ControlState::Reserved || startFrame >= desc.frameCount ||
         (loop && startFrame >= loopEnd) || !IsValidParams(params) || azimuthOnStereo) {
         return Result<AudioRtCommand>::Failure(ErrorCode::InvalidArgument);
     }
@@ -249,63 +316,221 @@ Result<AudioRtCommand> AudioMixer::PreparePlay(AudioVoiceHandle voice, AudioClip
     // clip을 voice에 묶고 사용 수를 올린다. ReleaseVoice가 내린다(해제된 PCM을 읽지 않게).
     ++clips_[clip.index].users;
     slot->clipIndex = clip.index;
-    slot->startFrame = startFrame;
-    slot->loop = loop;
-    slot->state = AudioVoiceState::Prepared;
+    slot->state = ControlState::Submitted;
 
     AudioRtCommand command;
     command.type = AudioRtCommandType::Play;
     command.voice = voice;
     command.params = params;
+    command.clipIndex = clip.index;
+    command.startFrame = startFrame;
+    command.loop = loop;
+    command.stopAllEpoch = controlStopAllEpoch_;
+    command.sequence = ++nextSequence_;
     return Result<AudioRtCommand>::Success(command);
 }
 
+Result<AudioRtCommand> AudioMixer::MakeStop(AudioVoiceHandle voice, uint64 mixFrame,
+                                            uint32 fadeFrames) noexcept {
+    if (auto checked = CheckCommandTarget(voice); !checked) {
+        return Result<AudioRtCommand>::Failure(checked.Error());
+    }
+
+    AudioRtCommand command;
+    command.type = AudioRtCommandType::Stop;
+    command.voice = voice;
+    command.mixFrame = mixFrame;
+    command.fadeFrames = fadeFrames;
+    command.sequence = ++nextSequence_;
+    return Result<AudioRtCommand>::Success(command);
+}
+
+Result<AudioRtCommand> AudioMixer::MakeSetParams(AudioVoiceHandle voice, uint64 mixFrame,
+                                                 const AudioVoiceParams& params,
+                                                 uint32 rampFrames) noexcept {
+    if (auto checked = CheckCommandTarget(voice); !checked) {
+        return Result<AudioRtCommand>::Failure(checked.Error());
+    }
+
+    const AudioClipDesc& desc = clips_[controlVoices_[voice.index].clipIndex].desc;
+    if (!IsValidParams(params) ||
+        (params.panMode == AudioPanMode::Azimuth && desc.channelCount != 1)) {
+        return Result<AudioRtCommand>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    AudioRtCommand command;
+    command.type = AudioRtCommandType::SetParams;
+    command.voice = voice;
+    command.mixFrame = mixFrame;
+    command.params = params;
+    command.rampFrames = rampFrames;
+    command.sequence = ++nextSequence_;
+    return Result<AudioRtCommand>::Success(command);
+}
+
+Result<AudioRtCommand> AudioMixer::MakeSetMasterGain(uint64 mixFrame, float gain,
+                                                     uint32 rampFrames) noexcept {
+    if (!math::IsFinite(gain) || gain < 0.0f || gain > MaxMasterGain) {
+        return Result<AudioRtCommand>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    AudioRtCommand command;
+    command.type = AudioRtCommandType::SetMasterGain;
+    command.mixFrame = mixFrame;
+    command.masterGain = gain;
+    command.rampFrames = rampFrames;
+    command.sequence = ++nextSequence_;
+    return Result<AudioRtCommand>::Success(command);
+}
+
+Result<void> AudioMixer::PublishParams(AudioVoiceHandle voice,
+                                       const AudioVoiceParams& params) noexcept {
+    if (auto checked = CheckCommandTarget(voice); !checked) {
+        return checked;
+    }
+
+    const AudioClipDesc& desc = clips_[controlVoices_[voice.index].clipIndex].desc;
+    if (!IsValidParams(params) ||
+        (params.panMode == AudioPanMode::Azimuth && desc.channelCount != 1)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    // seqlock 쓰기(3.23.2절): version을 홀수로 → release fence → 내용 → version을 짝수로(release).
+    SharedVoice& shared = sharedVoices_[voice.index];
+    const uint64 sequence = ++nextSequence_;
+    const uint32 version = AtomicLoad<MemoryOrder::Relaxed>(&shared.version);
+    AtomicStore<MemoryOrder::Relaxed>(&shared.version, version + 1);
+    AtomicThreadFence<MemoryOrder::Release>();
+    const uint32 words[SeqlockWords] = {voice.generation,
+                                        static_cast<uint32>(sequence & LowWordMask),
+                                        static_cast<uint32>(sequence >> HighWordShift),
+                                        FloatBits(params.gain),
+                                        FloatBits(params.pitch),
+                                        static_cast<uint32>(params.panMode),
+                                        FloatBits(params.azimuthDegrees),
+                                        FloatBits(params.nonSpatializedAmount),
+                                        FloatBits(params.lowPassCutoffHz),
+                                        FloatBits(params.highPassCutoffHz)};
+    for (uint32 word = 0; word < SeqlockWords; ++word) {
+        AtomicStore<MemoryOrder::Relaxed>(&shared.contents[word], words[word]);
+    }
+
+    AtomicStore<MemoryOrder::Release>(&shared.version, version + 2);
+    return Result<void>::Success();
+}
+
+Result<void> AudioMixer::RequestStop(AudioVoiceHandle voice, uint32 fadeFrames) noexcept {
+    if (auto checked = CheckCommandTarget(voice); !checked) {
+        return checked;
+    }
+
+    // mailbox에는 이 수명에서 낸 fade의 최소값만 쓴다. 값이 줄기만 하므로 RT가 언제 읽어도 가장
+    // 이른 끝을 보고, 같은 값이 되돌아오는 ABA도 없다(3.23.3절).
+    ControlVoice& control = controlVoices_[voice.index];
+    if (fadeFrames >= control.requestedStopFade) {
+        return Result<void>::Success();
+    }
+
+    control.requestedStopFade = fadeFrames;
+    const uint64 value = (static_cast<uint64>(voice.generation) << HighWordShift) | fadeFrames;
+    AtomicStore<MemoryOrder::Release>(&sharedVoices_[voice.index].mailbox, value);
+    return Result<void>::Success();
+}
+
+void AudioMixer::StopAll(uint32 fadeFrames) noexcept {
+    // RT가 아직 이전 epoch를 처리하지 않았으면 그 fade와 새 fade 중 짧은 쪽을 낸다(마지막 쓰기가
+    // 앞선 StopAll(0)을 지우지 않게 — 3.23.4절).
+    if (AtomicLoad<MemoryOrder::Acquire>(&publishedStopAllEpoch_) != controlStopAllEpoch_ &&
+        controlStopAllFade_ < fadeFrames) {
+        fadeFrames = controlStopAllFade_;
+    }
+
+    controlStopAllFade_ = fadeFrames;
+    ++controlStopAllEpoch_;
+    const uint64 value = (static_cast<uint64>(controlStopAllEpoch_) << HighWordShift) | fadeFrames;
+    AtomicStore<MemoryOrder::Release>(&stopAllWord_, value);
+}
+
+bool AudioMixer::ReadTerminal(uint32 index, uint32 generation, AudioVoiceTerminal& terminal,
+                              uint64& releaseMixFrame) const noexcept {
+    const SharedVoice& shared = sharedVoices_[index];
+    const uint64 word = AtomicLoad<MemoryOrder::Acquire>(&shared.terminal);
+    if (word == 0 || static_cast<uint32>(word >> HighWordShift) != generation) {
+        return false;
+    }
+
+    terminal.voice = AudioVoiceHandle{index, generation};
+    terminal.reason = static_cast<AudioVoiceEndReason>(word & ReasonMask);
+    terminal.endMixFrame = AtomicLoad<MemoryOrder::Relaxed>(&shared.endMixFrame);
+    releaseMixFrame = AtomicLoad<MemoryOrder::Relaxed>(&shared.releaseMixFrame);
+    return true;
+}
+
 Result<void> AudioMixer::ReleaseVoice(AudioVoiceHandle voice) noexcept {
-    VoiceSlot* slot = FindVoice(voice);
+    ControlVoice* slot = FindControl(voice);
     if (slot == nullptr) {
         return Result<void>::Failure(ErrorCode::StaleHandle);
     }
 
-    const bool reserved = slot->state == AudioVoiceState::Reserved;
-    const bool collectedFinish = slot->state == AudioVoiceState::Finished && slot->collected;
-    if (!reserved && !collectedFinish) {
+    if (slot->state == ControlState::Finished && CompletedMixFrame() >= slot->releaseMixFrame) {
+        ROCKS_ASSERT(clips_[slot->clipIndex].users > 0);
+        --clips_[slot->clipIndex].users;
+    } else if (slot->state != ControlState::Reserved) {
         return Result<void>::Failure(ErrorCode::Busy);
     }
 
-    // Finished는 PreparePlay를 거쳤으므로 clip이 묶여 있다.
-    if (collectedFinish) {
-        ROCKS_ASSERT(clips_[slot->clipIndex].users > 0);
-        --clips_[slot->clipIndex].users;
-    }
-
-    slot->state = AudioVoiceState::Idle;
+    slot->state = ControlState::Idle;
     slot->generation = NextGeneration(slot->generation);
     return Result<void>::Success();
 }
 
 Result<AudioVoiceStatus> AudioMixer::QueryVoice(AudioVoiceHandle voice) const noexcept {
-    const VoiceSlot* slot = FindVoice(voice);
+    const ControlVoice* slot = FindControl(voice);
     if (slot == nullptr) {
         return Result<AudioVoiceStatus>::Failure(ErrorCode::StaleHandle);
     }
 
     AudioVoiceStatus status;
-    status.state = slot->state;
-    status.startMixFrame = slot->startMixFrame;
-    status.endMixFrame = slot->endMixFrame;
-    status.endReason = slot->endReason;
+    if (slot->state == ControlState::Reserved) {
+        status.state = AudioVoiceState::Reserved;
+        return Result<AudioVoiceStatus>::Success(status);
+    }
+
+    // 읽기 순서: terminal → start(3.23.5절).
+    AudioVoiceTerminal terminal;
+    uint64 releaseMixFrame = UnsetMixFrame;
+    const bool finished = ReadTerminal(voice.index, voice.generation, terminal, releaseMixFrame);
+    const SharedVoice& shared = sharedVoices_[voice.index];
+    const bool started =
+        AtomicLoad<MemoryOrder::Acquire>(&shared.startGeneration) == voice.generation;
+    if (started) {
+        status.startMixFrame = AtomicLoad<MemoryOrder::Relaxed>(&shared.startMixFrame);
+    }
+
+    if (finished) {
+        status.state = AudioVoiceState::Finished;
+        status.endReason = terminal.reason;
+        status.endMixFrame = terminal.endMixFrame;
+        status.releaseMixFrame = releaseMixFrame;
+    } else {
+        status.state = started ? AudioVoiceState::Playing : AudioVoiceState::Prepared;
+    }
+
     return Result<AudioVoiceStatus>::Success(status);
 }
 
 uint32 AudioMixer::CollectFinished(Span<AudioVoiceTerminal> out) noexcept {
     uint32 written = 0;
-    for (uint32 index = 0; index < voices_.Size() && written < out.Size(); ++index) {
-        VoiceSlot& slot = voices_[index];
-        if (slot.state == AudioVoiceState::Finished && !slot.collected) {
-            out[written].voice = AudioVoiceHandle{index, slot.generation};
-            out[written].reason = slot.endReason;
-            out[written].endMixFrame = slot.endMixFrame;
-            slot.collected = true;
+    for (uint32 index = 0; index < controlVoices_.Size() && written < out.Size(); ++index) {
+        ControlVoice& slot = controlVoices_[index];
+        if (slot.state != ControlState::Submitted) {
+            continue;
+        }
+
+        uint64 releaseMixFrame = UnsetMixFrame;
+        if (ReadTerminal(index, slot.generation, out[written], releaseMixFrame)) {
+            slot.state = ControlState::Finished;
+            slot.releaseMixFrame = releaseMixFrame;
             ++written;
         }
     }
@@ -313,14 +538,226 @@ uint32 AudioMixer::CollectFinished(Span<AudioVoiceTerminal> out) noexcept {
     return written;
 }
 
-// --- 명령 적용 ---
-
-void AudioMixer::Finish(VoiceSlot& slot, AudioVoiceEndReason reason, uint64 frame) noexcept {
-    slot.state = AudioVoiceState::Finished;
-    slot.endReason = reason;
-    slot.endMixFrame = frame;
-    slot.collected = false;
+uint64 AudioMixer::CompletedMixFrame() const noexcept {
+    return AtomicLoad<MemoryOrder::Acquire>(&completedMixFrame_);
 }
+
+AudioMixerCounters AudioMixer::CountersSnapshot() const noexcept {
+    uint64 words[CounterSnapshotWords] = {};
+    for (uint32 index = 0; index < CounterSnapshotWords; ++index) {
+        words[index] = AtomicLoad<MemoryOrder::Relaxed>(&counterSnapshot_[index]);
+    }
+
+    AudioMixerCounters counters;
+    uint32 next = 0;
+    counters.lateCommands = words[next++];
+    counters.lateFrames = words[next++];
+    counters.deferredCommands = words[next++];
+    counters.staleCommands = words[next++];
+    for (uint64& ignored : counters.ignoredCommands) {
+        ignored = words[next++];
+    }
+
+    counters.clampedParams = words[next++];
+    counters.nonFiniteSamples = words[next++];
+    counters.clippedSamples = words[next++];
+    counters.skippedSeqlockReads = words[next++];
+    return counters;
+}
+
+// --- RT 쪽: 경계 값 처리 ---
+
+void AudioMixer::AdoptLifetime(VoiceSlot& slot, uint32 generation) noexcept {
+    slot.generation = generation;
+    slot.state = AudioVoiceState::Prepared;
+    slot.hasPendingParams = false;
+    slot.pendingParamsSequence = 0;
+    slot.lastAppliedSequence = 0;
+    slot.stopReason = AudioVoiceEndReason::Stopped;
+}
+
+void AudioMixer::Finish(uint32 index, VoiceSlot& slot, AudioVoiceEndReason reason,
+                        uint64 frame) noexcept {
+    slot.state = AudioVoiceState::Finished;
+    // 두 frame을 쓴 뒤 word를 출판한다. 이 뒤로 RT는 그 수명의 clip·PCM·DSP를 읽지 않는다.
+    SharedVoice& shared = sharedVoices_[index];
+    AtomicStore<MemoryOrder::Relaxed>(&shared.endMixFrame, frame);
+    AtomicStore<MemoryOrder::Relaxed>(&shared.releaseMixFrame, mixFrame_ + config_.blockFrames);
+    const uint64 word =
+        (static_cast<uint64>(slot.generation) << HighWordShift) | static_cast<uint64>(reason);
+    AtomicStore<MemoryOrder::Release>(&shared.terminal, word);
+}
+
+void AudioMixer::ApplyStop(uint32 index, VoiceSlot& slot, uint32 fadeFrames, uint64 frame,
+                           AudioVoiceEndReason reason, bool countIgnored) noexcept {
+    switch (slot.state) {
+    case AudioVoiceState::Prepared:
+        // 시작 전 Stop은 fade 없이 바로 끝낸다(UE StopInternal). 뒤에 오는 Play는 무시된다.
+        Finish(index, slot, reason, frame);
+        return;
+    case AudioVoiceState::Playing:
+        if (fadeFrames == 0) {
+            Finish(index, slot, reason, frame);
+        } else {
+            slot.state = AudioVoiceState::Stopping;
+            slot.stopReason = reason;
+            slot.fade.SetTarget(0.0f, fadeFrames);
+        }
+
+        return;
+    case AudioVoiceState::Stopping:
+        // 반복 Stop은 남은 fade보다 일찍 끝날 때만 받아들인다(steal의 fade 0 포함).
+        if (fadeFrames == 0) {
+            Finish(index, slot, reason, frame);
+            return;
+        }
+
+        if (fadeFrames < slot.fade.RemainingFrames()) {
+            slot.stopReason = reason;
+            slot.fade.SetTarget(0.0f, fadeFrames);
+            return;
+        }
+
+        break;
+    case AudioVoiceState::Idle:
+    case AudioVoiceState::Reserved:
+    case AudioVoiceState::Finished:
+        break;
+    }
+
+    // stop-all이 건너뛴 voice는 명령 무시가 아니므로 세지 않는다.
+    if (countIgnored) {
+        ++counters_.ignoredCommands[static_cast<uint32>(AudioRtCommandType::Stop)];
+    }
+}
+
+void AudioMixer::ProcessStopAll(uint64 frame) noexcept {
+    const uint64 word = AtomicLoad<MemoryOrder::Acquire>(&stopAllWord_);
+    const uint32 epoch = static_cast<uint32>(word >> HighWordShift);
+    if (epoch == processedStopAllEpoch_) {
+        return;
+    }
+
+    processedStopAllEpoch_ = epoch;
+    AtomicStore<MemoryOrder::Release>(&publishedStopAllEpoch_, epoch);
+    const uint32 fadeFrames = static_cast<uint32>(word & LowWordMask);
+    for (uint32 index = 0; index < voices_.Size(); ++index) {
+        VoiceSlot& slot = voices_[index];
+        if (slot.state == AudioVoiceState::Prepared || slot.state == AudioVoiceState::Playing ||
+            slot.state == AudioVoiceState::Stopping) {
+            ApplyStop(index, slot, fadeFrames, frame, AudioVoiceEndReason::StoppedAll, false);
+        }
+    }
+}
+
+void AudioMixer::ProcessMailboxes(uint64 frame) noexcept {
+    for (uint32 index = 0; index < voices_.Size(); ++index) {
+        VoiceSlot& slot = voices_[index];
+        const uint64 value = AtomicLoad<MemoryOrder::Acquire>(&sharedVoices_[index].mailbox);
+        if (value == 0 || value == slot.lastMailbox) {
+            continue;
+        }
+
+        slot.lastMailbox = value;
+        const uint32 generation = static_cast<uint32>(value >> HighWordShift);
+        const int32 delta = GenerationDelta(generation, slot.generation);
+        if (delta < 0) {
+            ++counters_.staleCommands;
+            continue;
+        }
+
+        // Play가 아직 대기 중인데 stop이 먼저 보이면 새 수명을 Prepared로 열고 바로 끝낸다.
+        if (delta > 0) {
+            AdoptLifetime(slot, generation);
+        }
+
+        ApplyStop(index, slot, static_cast<uint32>(value & LowWordMask), frame,
+                  AudioVoiceEndReason::Stopped, true);
+    }
+}
+
+bool AudioMixer::ReadSeqlock(uint32 index, uint32& generation, uint64& sequence,
+                             AudioVoiceParams& params) noexcept {
+    static_assert(SeqlockWords == SeqlockWordCount,
+                  "Seqlock contents must match the SeqlockWord layout");
+    static_assert(CounterSnapshotWords * sizeof(uint64) == sizeof(AudioMixerCounters),
+                  "Counter snapshot must cover every AudioMixerCounters field");
+    // seqlock 읽기(3.23.2절): version(acquire) → 내용(relaxed) → acquire fence → version 재확인.
+    // 홀수·불일치면 건너뛰고 재시도하지 않는다(대기 금지).
+    const SharedVoice& shared = sharedVoices_[index];
+    const uint32 before = AtomicLoad<MemoryOrder::Acquire>(&shared.version);
+    if ((before & SeqlockWritingBit) != 0) {
+        ++counters_.skippedSeqlockReads;
+        return false;
+    }
+
+    if (before == 0) {
+        return false;
+    }
+
+    uint32 words[SeqlockWords] = {};
+    for (uint32 word = 0; word < SeqlockWords; ++word) {
+        words[word] = AtomicLoad<MemoryOrder::Relaxed>(&shared.contents[word]);
+    }
+
+    if (seqlockReadHook_ != nullptr) {
+        seqlockReadHook_(*this, index);
+    }
+
+    AtomicThreadFence<MemoryOrder::Acquire>();
+    const uint32 after = AtomicLoad<MemoryOrder::Relaxed>(&shared.version);
+    if (before != after) {
+        ++counters_.skippedSeqlockReads;
+        return false;
+    }
+
+    generation = words[SeqlockGeneration];
+    sequence = (static_cast<uint64>(words[SeqlockSequenceHigh]) << HighWordShift) |
+               words[SeqlockSequenceLow];
+    params.gain = BitsFloat(words[SeqlockGain]);
+    params.pitch = BitsFloat(words[SeqlockPitch]);
+    params.panMode = static_cast<AudioPanMode>(words[SeqlockPanMode]);
+    params.azimuthDegrees = BitsFloat(words[SeqlockAzimuth]);
+    params.nonSpatializedAmount = BitsFloat(words[SeqlockNonSpatialized]);
+    params.lowPassCutoffHz = BitsFloat(words[SeqlockLowPass]);
+    params.highPassCutoffHz = BitsFloat(words[SeqlockHighPass]);
+    return true;
+}
+
+void AudioMixer::ApplySeqlock(uint32 index, VoiceSlot& slot, bool immediate) noexcept {
+    uint32 generation = 0;
+    uint64 sequence = 0;
+    AudioVoiceParams params;
+    if (!ReadSeqlock(index, generation, sequence, params) || generation != slot.generation ||
+        sequence <= slot.lastAppliedSequence) {
+        return;
+    }
+
+    slot.lastAppliedSequence = sequence;
+    if (slot.state == AudioVoiceState::Prepared) {
+        if (!slot.hasPendingParams || sequence > slot.pendingParamsSequence) {
+            slot.params = params;
+            slot.pendingParamsSequence = sequence;
+            slot.hasPendingParams = true;
+        }
+
+        return;
+    }
+
+    ApplyParams(slot, params, immediate ? 0u : DefaultParamRampFrames, immediate);
+}
+
+void AudioMixer::ProcessSeqlocks() noexcept {
+    for (uint32 index = 0; index < voices_.Size(); ++index) {
+        VoiceSlot& slot = voices_[index];
+        if (slot.state == AudioVoiceState::Prepared || slot.state == AudioVoiceState::Playing ||
+            slot.state == AudioVoiceState::Stopping) {
+            ApplySeqlock(index, slot, false);
+        }
+    }
+}
+
+// --- RT 쪽: 명령 ---
 
 void AudioMixer::ApplyParams(VoiceSlot& slot, const AudioVoiceParams& requested, uint32 rampFrames,
                              bool immediate) noexcept {
@@ -404,13 +841,15 @@ void AudioMixer::ApplyParams(VoiceSlot& slot, const AudioVoiceParams& requested,
     slot.params = params;
 }
 
-void AudioMixer::StartVoice(VoiceSlot& slot, const AudioRtCommand& command, uint64 frame) noexcept {
+void AudioMixer::StartVoice(uint32 index, VoiceSlot& slot, const AudioRtCommand& command,
+                            uint64 frame) noexcept {
+    slot.clipIndex = command.clipIndex;
+    slot.loop = command.loop;
     const AudioClipDesc& desc = clips_[slot.clipIndex].desc;
-    // 같은 voice에 Play보다 뒤 sequence로 저장된 SetParams가 있으면 그것이 이긴다.
-    const AudioVoiceParams& params =
-        slot.hasPendingParams && slot.pendingParamsSequence > command.sequence ? slot.params
-                                                                               : command.params;
-    const AudioVoiceParams initial = params;
+    // Play보다 뒤 순번으로 저장된 파라미터(SetParams·seqlock)가 있으면 그것이 이긴다.
+    const bool pendingWins = slot.hasPendingParams && slot.pendingParamsSequence > command.sequence;
+    const AudioVoiceParams initial = pendingWins ? slot.params : command.params;
+    slot.lastAppliedSequence = pendingWins ? slot.pendingParamsSequence : command.sequence;
 
     // DSP 상태는 clip 채널 수로 다시 만든다(할당 없음). 인자는 늘 유효하다.
     auto resampler = LinearResampler::TryCreate(desc.channelCount, 1.0);
@@ -421,14 +860,33 @@ void AudioMixer::StartVoice(VoiceSlot& slot, const AudioRtCommand& command, uint
     slot.lowPass = lowPass.Value();
     slot.highPass = highPass.Value();
     slot.fade.Reset(1.0f);
-    slot.sourceCursor = slot.startFrame;
+    slot.sourceCursor = command.startFrame;
     ApplyParams(slot, initial, 0, true);
     slot.hasPendingParams = false;
     slot.state = AudioVoiceState::Playing;
-    slot.startMixFrame = frame;
+
+    SharedVoice& shared = sharedVoices_[index];
+    AtomicStore<MemoryOrder::Relaxed>(&shared.startMixFrame, frame);
+    AtomicStore<MemoryOrder::Release>(&shared.startGeneration, slot.generation);
+
+    // PreparePlay 뒤 Play 적용 전에 낸 출판도 바로 반영한다(3.23.2절).
+    ApplySeqlock(index, slot, true);
 }
 
 void AudioMixer::ApplyCommand(const AudioRtCommand& command, uint64 frame) noexcept {
+    const auto isValidBinding = [this](const AudioRtCommand& play) noexcept {
+        if (play.clipIndex >= clips_.Size() || clips_[play.clipIndex].desc.channelCount == 0) {
+            return false;
+        }
+
+        const AudioClipDesc& desc = clips_[play.clipIndex].desc;
+        uint32 loopBegin = 0;
+        uint32 loopEnd = 0;
+        LoopRange(desc, loopBegin, loopEnd);
+        return play.startFrame < desc.frameCount && (!play.loop || play.startFrame < loopEnd);
+    };
+
+    const uint32 typeIndex = static_cast<uint32>(command.type);
     if (command.type == AudioRtCommandType::SetMasterGain) {
         const float gain = ClampCounted(command.masterGain, 0.0f, MaxMasterGain, DefaultMasterGain,
                                         counters_.clampedParams);
@@ -436,53 +894,66 @@ void AudioMixer::ApplyCommand(const AudioRtCommand& command, uint64 frame) noexc
         return;
     }
 
-    VoiceSlot* slot = FindVoice(command.voice);
-    if (slot == nullptr) {
+    if (command.voice.index >= voices_.Size()) {
         ++counters_.staleCommands;
         return;
     }
 
+    const uint32 index = command.voice.index;
+    VoiceSlot& slot = voices_[index];
+    const int32 delta = GenerationDelta(command.voice.generation, slot.generation);
+    if (command.voice.generation == 0 || delta < 0) {
+        ++counters_.staleCommands;
+        return;
+    }
+
+    if (delta > 0) {
+        AdoptLifetime(slot, command.voice.generation);
+    }
+
     switch (command.type) {
     case AudioRtCommandType::Play:
-        if (slot->state == AudioVoiceState::Prepared) {
-            StartVoice(*slot, command, frame);
+        if (slot.state != AudioVoiceState::Prepared) {
+            break;
+        }
+
+        // StopAll보다 먼저 만든 Play는 시작하지 않는다(3.23.4절).
+        if (GenerationDelta(command.stopAllEpoch, processedStopAllEpoch_) < 0) {
+            Finish(index, slot, AudioVoiceEndReason::StoppedAll, frame);
             return;
         }
 
-        break;
+        // 제어 API를 거치지 않은 손 명령의 clip 묶음을 거른다(시험 전용, PreparePlay와 같은 규칙).
+        if (!isValidBinding(command)) {
+            Finish(index, slot, AudioVoiceEndReason::StartFailed, frame);
+            return;
+        }
+
+        StartVoice(index, slot, command, frame);
+        return;
     case AudioRtCommandType::Stop:
-        if (slot->state == AudioVoiceState::Prepared) {
-            // 시작 전 Stop은 fade 없이 바로 끝낸다(UE StopInternal). 뒤에 오는 Play는 무시된다.
-            Finish(*slot, AudioVoiceEndReason::Stopped, frame);
-            return;
-        }
-
-        if (slot->state == AudioVoiceState::Playing) {
-            if (command.fadeFrames == 0) {
-                Finish(*slot, AudioVoiceEndReason::Stopped, frame);
-            } else {
-                slot->state = AudioVoiceState::Stopping;
-                slot->fade.SetTarget(0.0f, command.fadeFrames);
-            }
-
-            return;
-        }
-
-        break;
+        ApplyStop(index, slot, command.fadeFrames, frame, AudioVoiceEndReason::Stopped, true);
+        return;
     case AudioRtCommandType::SetParams:
-        if (slot->state == AudioVoiceState::Prepared) {
-            if (!slot->hasPendingParams || command.sequence > slot->pendingParamsSequence) {
-                slot->params = command.params;
-                slot->pendingParamsSequence = command.sequence;
-                slot->hasPendingParams = true;
+        // 두 최신값 경로(seqlock·SetParams)는 제어 순번으로 비교한다(3.23.2절).
+        if (command.sequence <= slot.lastAppliedSequence) {
+            break;
+        }
+
+        if (slot.state == AudioVoiceState::Prepared) {
+            if (!slot.hasPendingParams || command.sequence > slot.pendingParamsSequence) {
+                slot.params = command.params;
+                slot.pendingParamsSequence = command.sequence;
+                slot.hasPendingParams = true;
                 return;
             }
 
             break;
         }
 
-        if (slot->state == AudioVoiceState::Playing || slot->state == AudioVoiceState::Stopping) {
-            ApplyParams(*slot, command.params, command.rampFrames, false);
+        if (slot.state == AudioVoiceState::Playing || slot.state == AudioVoiceState::Stopping) {
+            ApplyParams(slot, command.params, command.rampFrames, false);
+            slot.lastAppliedSequence = command.sequence;
             return;
         }
 
@@ -491,10 +962,10 @@ void AudioMixer::ApplyCommand(const AudioRtCommand& command, uint64 frame) noexc
         break;
     }
 
-    ++counters_.ignoredCommands[static_cast<uint32>(command.type)];
+    ++counters_.ignoredCommands[typeIndex];
 }
 
-// --- 렌더 ---
+// --- RT 쪽: 렌더 ---
 
 RenderBlockResult AudioMixer::RenderBlock(Span<const AudioRtCommand> commands,
                                           Span<float> interleavedOut) noexcept {
@@ -505,6 +976,11 @@ RenderBlockResult AudioMixer::RenderBlock(Span<const AudioRtCommand> commands,
 
     const uint64 blockStart = mixFrame_;
     const uint64 blockEnd = blockStart + blockFrames;
+    // 블록 시작 순서: stop-all → stop mailbox → seqlock → 명령(3.23.7절).
+    ProcessStopAll(blockStart);
+    ProcessMailboxes(blockStart);
+    ProcessSeqlocks();
+
     uint32 segmentStart = 0;
     uint32 segmentCount = 1;
     usize index = 0;
@@ -548,6 +1024,7 @@ RenderBlockResult AudioMixer::RenderBlock(Span<const AudioRtCommand> commands,
     RenderSegment(segmentStart, blockFrames - segmentStart);
     FinishMaster(interleavedOut);
     mixFrame_ = blockEnd;
+    PublishBlockEnd();
     RenderBlockResult result;
     result.consumedCommands = static_cast<uint32>(index);
     return result;
@@ -561,7 +1038,7 @@ void AudioMixer::RenderSegment(uint32 offset, uint32 frames) noexcept {
     for (uint32 index = 0; index < voices_.Size(); ++index) {
         VoiceSlot& slot = voices_[index];
         if (slot.state == AudioVoiceState::Playing || slot.state == AudioVoiceState::Stopping) {
-            RenderVoice(slot, offset, frames);
+            RenderVoice(index, slot, offset, frames);
         }
     }
 
@@ -610,7 +1087,7 @@ void AudioMixer::AdvanceCursor(VoiceSlot& slot, uint32 consumed) noexcept {
     }
 }
 
-void AudioMixer::RenderVoice(VoiceSlot& slot, uint32 offset, uint32 frames) noexcept {
+void AudioMixer::RenderVoice(uint32 index, VoiceSlot& slot, uint32 offset, uint32 frames) noexcept {
     const AudioClipDesc& desc = clips_[slot.clipIndex].desc;
     const uint32 sourceChannels = desc.channelCount;
     const uint32 outputs = OutputChannelCount();
@@ -625,8 +1102,8 @@ void AudioMixer::RenderVoice(VoiceSlot& slot, uint32 offset, uint32 frames) noex
             needed = slot.resampler.InputFramesNeeded(chunk).Value();
         }
 
-        // 끝 판정(3.22.5절): 자연 끝은 다음 출력 위치가 원본 끝 이상이 되는 frame, fade 끝은 fade가
-        // 0에 닿는 frame이다. 같은 frame이면 자연 끝이 이긴다.
+        // 끝 판정(3.22.5절): 자연 끝은 다음 출력 위치가 원본 끝 이상이 되는 frame, fade 끝은 fade
+        // 길이를 다 낸 다음 frame이다. 같은 frame이면 자연 끝이 이긴다.
         AudioVoiceEndReason ending = AudioVoiceEndReason::None;
         if (!slot.loop) {
             const int64 remaining =
@@ -643,7 +1120,7 @@ void AudioMixer::RenderVoice(VoiceSlot& slot, uint32 offset, uint32 frames) noex
             if (fadeRemaining < chunk ||
                 (fadeRemaining == chunk && ending == AudioVoiceEndReason::None)) {
                 chunk = fadeRemaining;
-                ending = AudioVoiceEndReason::Stopped;
+                ending = slot.stopReason;
             }
         }
 
@@ -669,7 +1146,7 @@ void AudioMixer::RenderVoice(VoiceSlot& slot, uint32 offset, uint32 frames) noex
         }
 
         if (ending != AudioVoiceEndReason::None) {
-            Finish(slot, ending, segmentStartFrame + produced);
+            Finish(index, slot, ending, segmentStartFrame + produced);
             return;
         }
     }
@@ -706,6 +1183,29 @@ void AudioMixer::FinishMaster(Span<float> interleavedOut) noexcept {
             interleavedOut[static_cast<usize>(frame) * channels + channel] = value;
         }
     }
+}
+
+void AudioMixer::PublishBlockEnd() noexcept {
+    uint64 words[CounterSnapshotWords] = {};
+    uint32 next = 0;
+    words[next++] = counters_.lateCommands;
+    words[next++] = counters_.lateFrames;
+    words[next++] = counters_.deferredCommands;
+    words[next++] = counters_.staleCommands;
+    for (const uint64 ignored : counters_.ignoredCommands) {
+        words[next++] = ignored;
+    }
+
+    words[next++] = counters_.clampedParams;
+    words[next++] = counters_.nonFiniteSamples;
+    words[next++] = counters_.clippedSamples;
+    words[next++] = counters_.skippedSeqlockReads;
+    for (uint32 word = 0; word < CounterSnapshotWords; ++word) {
+        AtomicStore<MemoryOrder::Relaxed>(&counterSnapshot_[word], words[word]);
+    }
+
+    // ACK: 이 블록이 끝났다. 이번 블록에 terminal을 낸 voice는 RT가 더 건드리지 않는다.
+    AtomicStore<MemoryOrder::Release>(&completedMixFrame_, mixFrame_);
 }
 
 } // namespace rocks::audio

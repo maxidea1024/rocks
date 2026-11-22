@@ -1,0 +1,36 @@
+# Reloading a bundle of modules (SparksReload LC7c2b): each revision folder overlays the case files;
+# the bundle is the modules whose source changed, the recompile scope and the modules that import
+# them (Util stays out); the derived class region moves when its base in another module grows; a kept
+# execution of the old Main revision still calls the old Base function through its old imports; a
+# base change of a class with instances refuses the whole bundle without changes.
+new #1 Door -> ok (6 steps)
+new #2 Door -> ok (6 steps)
+new #3 Lamp -> ok (3 steps)
+hook #1 Enable -> ok (0 steps)
+hook #2 Enable -> ok (0 steps)
+Door.Watch(#2, #1) -> void (3 steps)
+Fixture.Raise(#2) -> void (13 steps)
+  log info "raised 2"
+Lamp.Brighten(#3) -> void (5 steps)
+Door.Fire(#1, 2) -> void (14 steps)
+  log info "seen v1 4"
+  deliver #2 Door.on Peer.Ping -> ok (11 steps)
+Door.Later(#2, 5) -> suspended (7 steps)
+reload bad -> rejected (the base of class Fixture changed while it has instances (they need a respawn))
+reload v2 keep -> ok (modules 2, instances 2, moved 3, defaulted 5, lost 0, removed 0, cancelled 0, restarted 0, previous 1)
+fields #2 -> Door(Bonus: 5, Level: 2, Peer: #1, Seen: 4)
+fields #3 -> Lamp(Glow: 2)
+Door.Fire(#1, 2) -> void (14 steps)
+  log info "seen v1 6"
+  deliver #2 Door.on Peer.Ping -> ok (11 steps)
+advance 1.0 -> ok (0 suspended)
+  resume #2 Door.Later -> ok (14 steps)
+  log info "later 10"
+reload v3 -> ok (modules 1, instances 2, moved 2, defaulted 2, lost 0, removed 0, cancelled 0, restarted 0, previous 0)
+Door.Fire(#1, 1) -> void (14 steps)
+  log info "seen v3 3"
+  deliver #2 Door.on Peer.Ping -> ok (11 steps)
+detach #1 -> ok
+detach #2 -> ok
+detach #3 -> ok
+close -> ok (ledger 0 buffers)

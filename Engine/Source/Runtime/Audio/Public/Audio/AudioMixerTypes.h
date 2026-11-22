@@ -94,8 +94,13 @@ enum class AudioRtCommandType : uint8 {
     SetMasterGain
 };
 
-// 믹서에 넘기는 고정 크기 POD 명령이다(3.5.2절). 문자열·소유 포인터를 담지 않는다.
-// - Play: params가 초기 파라미터다. clip·시작 frame·loop는 PreparePlay가 voice에 묶어 둔다.
+inline constexpr uint32 AudioRtCommandTypeCount = 4;
+
+// 믹서에 넘기는 고정 크기 POD 명령이다(3.5.2절). 문자열·소유 포인터를 담지 않는다. 제어
+// API(PreparePlay· MakeStop·MakeSetParams·MakeSetMasterGain)가 만들고 sequence를 매긴다. 손으로
+// 채운 명령은 시험 전용이다.
+// - Play: params가 초기 파라미터, clip 묶음(clipIndex·startFrame·loop)과 제출 시점의 stopAllEpoch를
+// 싣는다.
 // - Stop: fadeFrames(0이면 그 frame에서 바로 끝).
 // - SetParams: params와 rampFrames.
 // - SetMasterGain: masterGain(선형)과 rampFrames.
@@ -108,6 +113,10 @@ struct AudioRtCommand {
     uint32 rampFrames = DefaultParamRampFrames;
     uint32 fadeFrames = DefaultStopFadeFrames;
     float masterGain = DefaultMasterGain;
+    uint32 clipIndex = NumericLimits<uint32>::Max();
+    uint32 startFrame = 0;
+    bool loop = false;
+    uint32 stopAllEpoch = 0;
 };
 
 enum class AudioVoiceState : uint8 {
@@ -122,15 +131,23 @@ enum class AudioVoiceState : uint8 {
 enum class AudioVoiceEndReason : uint8 {
     None,
     NaturalEnd,
-    Stopped
+    // Stop 명령·RequestStop.
+    Stopped,
+    // StopAll(장치 stop-all epoch).
+    StoppedAll,
+    // clip 묶음이 잘못된 Play(제어 API를 거치지 않은 손 명령).
+    StartFailed
 };
 
-// QueryVoice 결과다.
+// QueryVoice 결과다. 제어 쪽은 RT의 Stopping을 따로 보지 못하므로 재생 중이면 Playing이다.
 struct AudioVoiceStatus {
     AudioVoiceState state = AudioVoiceState::Idle;
     uint64 startMixFrame = UnsetMixFrame;
     uint64 endMixFrame = UnsetMixFrame;
     AudioVoiceEndReason endReason = AudioVoiceEndReason::None;
+    // terminal을 게시한 블록의 끝 frame이다. CompletedMixFrame()이 이 값에 닿아야 voice를 놓을 수
+    // 있다.
+    uint64 releaseMixFrame = UnsetMixFrame;
 };
 
 // CollectFinished가 돌려주는 terminal 기록이다.
@@ -147,7 +164,9 @@ struct AudioMixerCounters {
     uint64 deferredCommands = 0;
     uint64 staleCommands = 0;
     // 상태 표(3.22.4절)가 무시한 명령을 종류별로 센다. 색인은 AudioRtCommandType이다.
-    uint64 ignoredCommands[4] = {};
+    uint64 ignoredCommands[AudioRtCommandTypeCount] = {};
+    // 홀수 version·찢어진 읽기로 건너뛴 seqlock 읽기 수다.
+    uint64 skippedSeqlockReads = 0;
     uint64 clampedParams = 0;
     uint64 nonFiniteSamples = 0;
     uint64 clippedSamples = 0;

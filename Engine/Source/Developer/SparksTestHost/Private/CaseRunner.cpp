@@ -587,4 +587,14 @@ Result<void> RunCase(Allocator& allocator, const CaseInput& input, Report& repor
     return report.TryAddFailure(message.View());
 }
 
+namespace detail {
+
+Result<bool> AddFolderSources(Allocator& allocator, const CaseInput& input, SourceSet& sources,
+                              DiagnosticList& diagnostics, Compilation& compilation,
+                              StringView& reason) noexcept {
+    return AddFolderCase(allocator, input, sources, diagnostics, compilation, reason);
+}
+
+} // namespace detail
+
 } // namespace rocks::sparks::conformance
