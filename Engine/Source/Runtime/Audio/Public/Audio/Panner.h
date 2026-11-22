@@ -24,8 +24,8 @@ namespace rocks::audio {
 // - listenerForward·listenerRight: 리스너의 앞(+X)·오른쪽(+Y) 단위 축(UE 좌표계, 3.13.1절).
 // - listenerToSound: 리스너에서 소리로 가는 단위 방향.
 // 수평 성분이 없으면(정확히 위·아래) 0°다.
-float ComputeAzimuthDegrees(const Vec3& listenerForward, const Vec3& listenerRight,
-                            const Vec3& listenerToSound) noexcept;
+ROCKS_AUDIO_API float ComputeAzimuthDegrees(const Vec3& listenerForward, const Vec3& listenerRight,
+                                            const Vec3& listenerToSound) noexcept;
 
 // 레이아웃의 채널마다 패닝 이득을 out에 쓴다(out[i] = 레이아웃의 i번째 채널, AudioFormat.h 순서).
 // - azimuthDegrees: [0, 360). 밖이면 360으로 감싼다. 유한하지 않으면 InvalidArgument.
@@ -33,12 +33,13 @@ float ComputeAzimuthDegrees(const Vec3& listenerForward, const Vec3& listenerRig
 // - lfeBleed: [0, 1]. LFE 채널 이득이다.
 // - Mono 레이아웃은 1이다. out 크기가 ChannelCount(layout)보다 작으면 InvalidArgument.
 // - 범위 밖 비율·bleed는 InvalidArgument이고 out을 쓰지 않는다.
-Result<void> ComputeChannelGains(ChannelLayout layout, float azimuthDegrees,
-                                 float nonSpatializedAmount, float lfeBleed,
-                                 Span<float> out) noexcept;
+ROCKS_AUDIO_API Result<void> ComputeChannelGains(ChannelLayout layout, float azimuthDegrees,
+                                                 float nonSpatializedAmount, float lfeBleed,
+                                                 Span<float> out) noexcept;
 
 // 센터 전용 재생의 이득이다(UE bCenterChannelOnly). 스테레오는 양쪽 1/√2, Mono는 1, 그 밖은 FC =
 // 1이고 나머지는 0이다. out 크기가 모자라면 InvalidArgument.
-Result<void> ComputeCenterChannelOnlyGains(ChannelLayout layout, Span<float> out) noexcept;
+ROCKS_AUDIO_API Result<void> ComputeCenterChannelOnlyGains(ChannelLayout layout,
+                                                           Span<float> out) noexcept;
 
 } // namespace rocks::audio

@@ -30,7 +30,8 @@ namespace rocks::graphics {
 //       printf("%s: %s (VkResult %lld)\n", report.stage, report.detail,
 //              static_cast<long long>(report.nativeCode));
 //   }
-Result<UniquePtr<Device>> CreateVulkanDevice(Allocator& allocator, const DeviceDesc& desc,
-                                             DeviceCreateReport* report = nullptr) noexcept;
+ROCKS_VULKANGRAPHICS_API Result<UniquePtr<Device>>
+CreateVulkanDevice(Allocator& allocator, const DeviceDesc& desc,
+                   DeviceCreateReport* report = nullptr) noexcept;
 
 } // namespace rocks::graphics

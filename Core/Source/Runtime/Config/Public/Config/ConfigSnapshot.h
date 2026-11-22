@@ -6,6 +6,7 @@
 #include <Core/Memory/UniquePtr.h>
 #include <Core/Text/Name.h>
 #include <Core/Text/String.h>
+#include <Core/TypeKey.h>
 #include <Object/RuntimeTypeOps.h>
 
 // 설정 snapshot이다(Docs/Design/CVarSystem.ko.md 7.2·10.1절, ConfigSystem.ko.md 5.3절 — CVR2).
@@ -270,3 +271,7 @@ ROCKS_CONFIG_API ThreadBinding& CurrentBinding() noexcept;
 } // namespace detail
 
 } // namespace rocks::config
+
+// 렌더 설정 참조(RenderBase RenderSettingsRef)가 게임 lane에서 담고 렌더러 모듈에서 꺼내므로 모듈
+// 사이에 같은 타입 키를 export한다(Core/TypeKey.h, Docs/Design/BuildTargets.ko.md 3.8절 BS8e).
+ROCKS_DECLARE_NATIVE_TYPE_KEY(rocks::config::ConfigSnapshot, ROCKS_CONFIG_API)

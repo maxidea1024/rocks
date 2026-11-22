@@ -37,19 +37,20 @@ class ConfigContext;
 
 // `asset.*` CVar를 등록한다(모듈 RegisterSettings가 부르고, 호스트 없이 설정 문맥을 만드는 시험도
 // 부른다). 오류는 ConfigContext::Register와 같다.
-Result<void> RegisterEngineAssetsSettings(config::ConfigContext& context) noexcept;
+ROCKS_ENGINEASSETS_API Result<void>
+RegisterEngineAssetsSettings(config::ConfigContext& context) noexcept;
 
 // 쿠킹 루트를 정한다(11.8절 3): configured가 비지 않았으면 그것, 비었으면 executableDir + "/Cooked"
 // 다. out 뒤에 붙인다. 오류: executableDir도 비었으면 InvalidArgument, 할당 실패.
-Result<void> ResolveCookedRoot(StringView configured, StringView executableDir,
-                               String& out) noexcept;
+ROCKS_ENGINEASSETS_API Result<void>
+ResolveCookedRoot(StringView configured, StringView executableDir, String& out) noexcept;
 
 // configured가 비지 않았으면 그것, 비었으면 빌드 플랫폼의 기본 실행 프로파일 id(Windows·Mac·
 // Android — 10절 TargetProfile)다.
-StringView ResolveRuntimeProfile(StringView configured) noexcept;
+ROCKS_ENGINEASSETS_API StringView ResolveRuntimeProfile(StringView configured) noexcept;
 
 // 실행 파일 경로에서 디렉터리 부분이다('/'·'\\' 마지막 구분자 앞, 없으면 빈 값).
-StringView ExecutableDirectoryOf(StringView executablePath) noexcept;
+ROCKS_ENGINEASSETS_API StringView ExecutableDirectoryOf(StringView executablePath) noexcept;
 
 // 서명하지 않은 쿠킹 매니페스트 파일 이름이다(11.4절 — 서명 봉투는 ContentEnvelopeFileName).
 inline constexpr StringView CookedManifestFileName = "CookedManifest.rman";
@@ -77,7 +78,7 @@ struct EngineAssetsStats {
     uint64 contentVersion = 0;
 };
 
-class EngineAssetsSubsystem final : public EngineSubsystem {
+class ROCKS_ENGINEASSETS_API EngineAssetsSubsystem final : public EngineSubsystem {
 public:
     // allocator는 쿠킹 루트·프로파일 문자열의 저장소다(Subsystem 생성 정보가 엔진 allocator를
     // 준다).
@@ -160,6 +161,10 @@ private:
 };
 
 // 엔진 Subsystem 목록에 넣는 생성 정보다.
-EngineSubsystemType EngineAssetsSubsystemType() noexcept;
+ROCKS_ENGINEASSETS_API EngineSubsystemType EngineAssetsSubsystemType() noexcept;
 
 } // namespace rocks
+
+// 다른 모듈(게임·시험)이 GetSubsystem<EngineAssetsSubsystem>()으로 찾으므로 모듈 사이에 같은 키를
+// export한다(World/Subsystem.h SubsystemKeyOf, Docs/Design/BuildTargets.ko.md 3.8절 BS8e).
+ROCKS_DECLARE_NATIVE_TYPE_KEY(rocks::EngineAssetsSubsystem, ROCKS_ENGINEASSETS_API)

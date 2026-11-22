@@ -151,7 +151,7 @@ class SyntaxTreeBuilder;
 } // namespace detail
 
 // 파일 하나의 구문 트리다. ParseFile이 채운다.
-class SyntaxTree final {
+class ROCKS_SPARKSCOMPILER_API SyntaxTree final {
 public:
     explicit SyntaxTree(Allocator& allocator) noexcept;
 
@@ -203,11 +203,12 @@ private:
 // id 파일을 어휘·구문 분석해 tree를 채운다(tree의 이전 내용은 버린다). 파일은 IsUsable()이어야 한다
 // (아니면 InvalidArgument). 구문 오류는 diagnostics에 붙고 트리는 복구된 모양으로 끝까지 만든다.
 // 실패: 할당 실패는 그 오류이며 tree·diagnostics의 내용은 정해지지 않는다(호출자가 버린다).
-Result<void> ParseFile(const SourceSet& sources, SourceId id, DiagnosticList& diagnostics,
-                       SyntaxTree& tree) noexcept;
+ROCKS_SPARKSCOMPILER_API Result<void> ParseFile(const SourceSet& sources, SourceId id,
+                                                DiagnosticList& diagnostics,
+                                                SyntaxTree& tree) noexcept;
 
 // 노드 종류의 이름이다(덤프·진단용, 영어 — 예: "LocalVariable").
-StringView SyntaxKindName(SyntaxKind kind) noexcept;
+ROCKS_SPARKSCOMPILER_API StringView SyntaxKindName(SyntaxKind kind) noexcept;
 
 // 구문 트리를 검증용 텍스트로 붙인다(SD58). 형식: 한 줄에 노드 하나(LF로 끝난다), 깊이마다 공백 2칸
 // 들여쓰기,
@@ -217,7 +218,7 @@ StringView SyntaxKindName(SyntaxKind kind) noexcept;
 // 글자의 `\`·`"`·LF·CR·tab은 `\\`·`\"`·`\n`·`\r`·`\t`로, 나머지 제어 문자(U+0000–U+001F, U+007F)는
 // `\u{XX}`로 쓴다. 결정적이다(같은 원문 → 같은 바이트).
 // 실패: tree를 분석하지 않았으면(Root() == NoNode) InvalidArgument, out의 할당 실패는 그 오류.
-Result<void> AppendSyntaxDump(StringBuilderBase& out, const SourceSet& sources,
-                              const SyntaxTree& tree) noexcept;
+ROCKS_SPARKSCOMPILER_API Result<void>
+AppendSyntaxDump(StringBuilderBase& out, const SourceSet& sources, const SyntaxTree& tree) noexcept;
 
 } // namespace rocks::sparks

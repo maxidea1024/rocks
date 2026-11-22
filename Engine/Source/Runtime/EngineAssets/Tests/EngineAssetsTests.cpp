@@ -2,6 +2,7 @@
 
 #include <Core/Memory/SystemAllocator.h>
 #include <Core/Module/ModuleEntry.h>
+#include <ModuleLoader/ModuleLoader.h>
 #include <Object/ConstructionContext.h>
 #include <Platform/Process.h>
 #include <Platform/Thread.h>
@@ -952,12 +953,15 @@ TEST(EngineAssets_PumpBudgetVariables) {
 
 // 모듈 진입점(11.8절 1·3): 실행 파일 모듈 표의 EngineAssets 행에 RegisterSettings가
 // 있고(HostSettings가 부르는 경로), 그것이 asset.* CVar를 등록한다 — 등록 뒤 asset.cooked_root
-// 대입을 받는다.
+// 대입을 받는다. 표는 프로세스 로더의 것이다(Modular에는 정적 표가 없다 — 진입 기술은 EntryAt,
+// Docs/Design/ModuleLoader.ko.md 3.14절).
 TEST(EngineAssets_ModuleEntryRegistersSettings) {
     const ModuleEntry* found = nullptr;
-    for (const ModuleTableRow& row : GeneratedModuleTable()) {
-        if (strcmp(row.name, "EngineAssets") == 0) {
-            found = &row.entry();
+    ModuleLoader& modules = test::ProcessModules();
+    const ModuleTable table = modules.Table();
+    for (usize index = 0; index < table.Size(); ++index) {
+        if (strcmp(table[index].name, "EngineAssets") == 0) {
+            found = &modules.EntryAt(index);
         }
     }
 

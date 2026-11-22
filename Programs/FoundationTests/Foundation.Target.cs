@@ -88,3 +88,20 @@ internal static class LaunchTestPrograms
 {
     public static readonly string[] Names = ["LaunchProbe", "LaunchWindowedProbe", "LaunchEmbeddedHost"];
 }
+
+// Modular build of the engine tests (Docs/Design/BuildTargets.ko.md section 3.8 BS8e): the engine layer modules link as shared libraries and the
+// test executable starts through the Modular entry. The test module is EngineModularTests (the EngineTests sources without the engine plugin tests:
+// Modular targets cannot enable plugins until the plugin binary manifest, ModuleLoader ML5).
+public sealed class EngineModularTarget : TargetRules
+{
+    public override string Name => "EngineModular";
+
+    // Development tool and test executable (not subject to the Release exclusion policy).
+    public override TargetType Type => TargetType.Program;
+
+    public override Rocks.Build.NativeLinkType LinkType => Rocks.Build.NativeLinkType.Modular;
+
+    public override IReadOnlyList<string> Modules => ["EngineModularTests"];
+
+    public override string TestExecutable => "EngineModularTests";
+}

@@ -59,14 +59,14 @@ struct DistanceAttenuationSettings {
 };
 
 // 구 모양 감쇠의 거리(cm)다: max(distance − innerRadius, 0). 음수·NaN 입력은 0이다.
-float SphereAttenuationDistance(float distance, float innerRadius) noexcept;
+ROCKS_AUDIO_API float SphereAttenuationDistance(float distance, float innerRadius) noexcept;
 
 // 감쇠 이득([0, 1])이다.
 // - distance: 0 이상 유한(cm). 아니면 InvalidArgument.
 // - settings의 falloffDistance·distanceScale이 음수·비유한이거나 naturalSoundAttenuationDb > 0이면
 //   InvalidArgument.
 // - model이 Custom이면 Unsupported.
-Result<float> EvaluateDistanceAttenuation(const DistanceAttenuationSettings& settings,
-                                          float distance) noexcept;
+ROCKS_AUDIO_API Result<float>
+EvaluateDistanceAttenuation(const DistanceAttenuationSettings& settings, float distance) noexcept;
 
 } // namespace rocks::audio

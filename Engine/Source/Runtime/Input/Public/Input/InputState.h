@@ -30,7 +30,7 @@ struct GamepadDeadZone {
 // - FocusLost는 눌린 키·마우스 버튼을 모두 놓은 것으로 처리하고 WasReleased를 세운다.
 //
 // 스레드: 동기화하지 않는다. BeginFrame은 게임 스레드의 프레임 시작에서 호출한다.
-class InputState {
+class ROCKS_INPUT_API InputState {
 public:
     InputState() noexcept = default;
 

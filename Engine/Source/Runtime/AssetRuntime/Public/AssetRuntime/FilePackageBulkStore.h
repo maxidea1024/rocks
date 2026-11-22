@@ -23,7 +23,7 @@ inline constexpr usize DefaultPackageFileCacheCapacity = 64;
 // 수명: 이 캐시를 쓰는 모든 저장소보다 오래 살아야 한다(저장소 소멸자가 자기 핸들을 닫는다).
 //
 // 스레드: 한 스레드(에디터 Registry 소유 스레드)에서 쓴다.
-class PackageFileCache {
+class ROCKS_ASSETRUNTIME_API PackageFileCache {
 public:
     PackageFileCache(Allocator& allocator, platform::FileSystem& files,
                      usize capacity = DefaultPackageFileCacheCapacity) noexcept;
@@ -112,7 +112,8 @@ private:
 // 잇는다(객체의 BulkDataRef는 그대로).
 //
 // 스레드: 한 스레드에서 쓴다.
-class FilePackageBulkStore final : public PackageBulkStore, public PackageBulkSource {
+class ROCKS_ASSETRUNTIME_API FilePackageBulkStore final : public PackageBulkStore,
+                                                          public PackageBulkSource {
 public:
     // cache는 이 저장소보다 오래 살아야 한다(소멸할 때 자기 경로의 캐시 핸들을 닫는다).
     FilePackageBulkStore(Allocator& allocator, PackageFileCache& cache) noexcept;

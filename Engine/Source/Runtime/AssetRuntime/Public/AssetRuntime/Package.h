@@ -40,7 +40,7 @@ struct PackageAccess;
 // 스레드: 에셋 객체 Registry의 소유 스레드(Game) 전용이다. BulkBytes가 준 span은 이 객체가 살아
 // 있는 동안 유효하다(Borrow 범위 안에서만 쓴다).
 ROCKS_CLASS()
-class Package final : public Object {
+class ROCKS_ASSETRUNTIME_API Package final : public Object {
     ROCKS_GENERATED_BODY()
 
 public:
@@ -119,8 +119,9 @@ private:
 //   auto package = NewPackage(registry, access, AssetId::TryNew().Value(), PackageKind::Editor);
 //   auto texture = registry.NewObject<Texture2D>(access, textureType, package.Value().Handle(),
 //   "");
-Result<RootRef<Package>> NewPackage(ObjectRegistry& registry, const ObjectAccessContext& access,
-                                    AssetId id, PackageKind kind = PackageKind::Editor) noexcept;
+ROCKS_ASSETRUNTIME_API Result<RootRef<Package>>
+NewPackage(ObjectRegistry& registry, const ObjectAccessContext& access, AssetId id,
+           PackageKind kind = PackageKind::Editor) noexcept;
 
 // transaction 안에 새 빈 패키지를 만든다(공개 전 — Docs/Design/AssetSystem.ko.md 7.1절 15 A2c3).
 // 같은 트랜잭션에서 대표 에셋을 만들고(NewRepresentativeAsset) 값을 채운 뒤 Commit으로 함께
@@ -136,8 +137,9 @@ Result<RootRef<Package>> NewPackage(ObjectRegistry& registry, const ObjectAccess
 //   auto asset = NewRepresentativeAsset(transaction, package.Value(), meshType);
 //   ... transaction.GetForWrite<Mesh>(asset.Value()) 로 값을 채운다 ...
 //   auto root = transaction.Commit();   // 첫 객체(Package)의 root
-Result<ObjectHandle> NewPackage(ConstructionContext& transaction, AssetId id,
-                                PackageKind kind = PackageKind::Editor) noexcept;
+ROCKS_ASSETRUNTIME_API Result<ObjectHandle>
+NewPackage(ConstructionContext& transaction, AssetId id,
+           PackageKind kind = PackageKind::Editor) noexcept;
 
 // transaction의 공개 전 Package(NewPackage(transaction, ...))에 대표 에셋(type — Asset 파생
 // 클래스)을 만들고 Id()를 그 패키지 id로 둔다. 반환은 공개 전 에셋 handle이다.
@@ -145,17 +147,20 @@ Result<ObjectHandle> NewPackage(ConstructionContext& transaction, AssetId id,
 // 오류: package가 이 트랜잭션의 Package가 아니면 transaction.Get의 오류(StaleHandle·TypeMismatch
 // 등), type이 Asset 파생이 아니거나 대표 자식이 이미 있으면 transaction.Create의 오류(트랜잭션이
 // 오류 상태로 고정된다).
-Result<ObjectHandle> NewRepresentativeAsset(ConstructionContext& transaction, ObjectHandle package,
-                                            TypeId type) noexcept;
+ROCKS_ASSETRUNTIME_API Result<ObjectHandle> NewRepresentativeAsset(ConstructionContext& transaction,
+                                                                   ObjectHandle package,
+                                                                   TypeId type) noexcept;
 
 // package에 bulk 저장소를 잇는다(에디터가 새로 만든 패키지 — 로드한 패키지는
 // PackageLoadState::SetBulkStore). 오류: null 저장소, 이미 저장소나 로드한 bulk가 있는 패키지는
 // InvalidArgument(저장소는 호출자에게 남는다).
-Result<void> AttachBulkStore(Package& package, UniquePtr<PackageBulkStore>& store) noexcept;
+ROCKS_ASSETRUNTIME_API Result<void> AttachBulkStore(Package& package,
+                                                    UniquePtr<PackageBulkStore>& store) noexcept;
 
 // AssetRuntime 리플렉션 타입(Package·Asset·BulkDataRef)을 등록한다(생성 집계 함수
 // generated::AssetRuntime::RegisterModuleTypes를 부른다). 엔진은 EngineAssets가, 도구·시험은 직접
 // 부른다.
-Result<void> RegisterAssetRuntimeTypes(ModuleRegistration& registration) noexcept;
+ROCKS_ASSETRUNTIME_API Result<void>
+RegisterAssetRuntimeTypes(ModuleRegistration& registration) noexcept;
 
 } // namespace rocks

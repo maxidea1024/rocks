@@ -57,7 +57,8 @@ struct AssetIndexCacheKey {
 };
 
 // options(색인 읽기 옵션)의 캐시 키다.
-AssetIndexCacheKey MakeAssetIndexCacheKey(const PackageReadOptions& options) noexcept;
+ROCKS_ASSETDATABASE_API AssetIndexCacheKey
+MakeAssetIndexCacheKey(const PackageReadOptions& options) noexcept;
 
 // 캐시 항목이다(진단 없이 색인된 파일 하나).
 struct AssetIndexCacheEntry {
@@ -79,7 +80,7 @@ struct AssetIndexCacheEntry {
     AssetIndexImportSummary importRecord;
 };
 
-class AssetIndexCache {
+class ROCKS_ASSETDATABASE_API AssetIndexCache {
 public:
     explicit AssetIndexCache(Allocator& allocator) noexcept;
 
@@ -122,15 +123,17 @@ private:
 
 // index의 항목 가운데 파일 자신의 진단(같은 id·경로 진단 밖)이 없는 것을 key의 캐시 byte로 out에
 // 쓴다(파일 이름 순). 오류: 할당 실패.
-Result<void> EncodeAssetIndexCache(const AssetIndex& index, const AssetIndexCacheKey& key,
-                                   Array<uint8>& out) noexcept;
+ROCKS_ASSETDATABASE_API Result<void> EncodeAssetIndexCache(const AssetIndex& index,
+                                                           const AssetIndexCacheKey& key,
+                                                           Array<uint8>& out) noexcept;
 
 // index를 layout의 캐시 파일로 쓴다: `Intermediate/AssetIndex.cache.<guid>.tmp`에 쓰고
 // Flush·Close한 뒤 원자 교체한다(NotDurable은 성공 — 캐시). lock은 이 프로젝트의 잡은 쓰기
 // 잠금이어야 한다. 오류: 잠금이 아니면 InvalidArgument, 디렉터리 만들기·쓰기·교체 IO(임시 파일은
 // 지운다), 임시 이름 발급 실패, 할당 실패.
-Result<void> WriteAssetIndexCache(platform::FileSystem& files, const ProjectLayout& layout,
-                                  const AssetDatabaseLock& lock, const AssetIndex& index,
-                                  const PackageReadOptions& options) noexcept;
+ROCKS_ASSETDATABASE_API Result<void>
+WriteAssetIndexCache(platform::FileSystem& files, const ProjectLayout& layout,
+                     const AssetDatabaseLock& lock, const AssetIndex& index,
+                     const PackageReadOptions& options) noexcept;
 
 } // namespace rocks

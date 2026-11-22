@@ -141,7 +141,7 @@ struct CookedManifestEntry {
 };
 
 // 매니페스트 모델이다. entries는 AssetId 엄격 오름차순이다.
-struct CookedManifest {
+struct ROCKS_ASSETRUNTIME_API CookedManifest {
     explicit CookedManifest(Allocator& allocator) noexcept
         : profileId(allocator), entries(allocator) {
     }
@@ -169,8 +169,9 @@ struct CookedManifest {
 //
 // 오류: 위반은 CorruptPackage / InvalidArgument(section = CookedManifestField, detail = 항목 번호
 // 또는 CookedManifestNoEntry, asset·related), scratch 할당 실패는 진단 None과 그 오류다.
-Result<void> ValidateCookedManifest(const CookedManifest& manifest, Allocator& scratch,
-                                    AssetDiagnostic* failure = nullptr) noexcept;
+ROCKS_ASSETRUNTIME_API Result<void>
+ValidateCookedManifest(const CookedManifest& manifest, Allocator& scratch,
+                       AssetDiagnostic* failure = nullptr) noexcept;
 
 // 모델을 검증한 뒤 out을 그 매니페스트 byte로 바꾼다(AS 10.1절 1 — 같은 모델이면 같은 byte). 게시
 // (임시 파일·Flush·Replace)는 호출자(쿠커) 몫이다.
@@ -182,8 +183,9 @@ Result<void> ValidateCookedManifest(const CookedManifest& manifest, Allocator& s
 // 사용 예:
 //   Array<uint8> bytes(allocator);
 //   if (auto written = WriteCookedManifest(allocator, manifest, bytes, &failure); !written) { ... }
-Result<void> WriteCookedManifest(Allocator& allocator, const CookedManifest& manifest,
-                                 Array<uint8>& out, AssetDiagnostic* failure = nullptr) noexcept;
+ROCKS_ASSETRUNTIME_API Result<void>
+WriteCookedManifest(Allocator& allocator, const CookedManifest& manifest, Array<uint8>& out,
+                    AssetDiagnostic* failure = nullptr) noexcept;
 
 // 매니페스트 byte를 검증하고 모델로 푼다(AS 10.1절 2의 순서). 결과는 bytes를 빌리지 않는다.
 //
@@ -193,28 +195,32 @@ Result<void> WriteCookedManifest(Allocator& allocator, const CookedManifest& man
 // 사용 예:
 //   auto manifest = ReadCookedManifest(allocator, bytes.View(), &failure);
 //   const CookedManifestEntry* entry = manifest ? manifest.Value().Find(id) : nullptr;
-Result<CookedManifest> ReadCookedManifest(Allocator& allocator, Span<const uint8> bytes,
-                                          AssetDiagnostic* failure = nullptr) noexcept;
+ROCKS_ASSETRUNTIME_API Result<CookedManifest>
+ReadCookedManifest(Allocator& allocator, Span<const uint8> bytes,
+                   AssetDiagnostic* failure = nullptr) noexcept;
 
 // 로더 시작 대조다: 매니페스트 profileId가 실행 프로파일과 다르면 IncompatibleCook / Unsupported
 // (section = ProfileId)다.
-Result<void> CheckCookedManifestProfile(const CookedManifest& manifest, StringView runtimeProfile,
-                                        AssetDiagnostic* failure = nullptr) noexcept;
+ROCKS_ASSETRUNTIME_API Result<void>
+CheckCookedManifestProfile(const CookedManifest& manifest, StringView runtimeProfile,
+                           AssetDiagnostic* failure = nullptr) noexcept;
 
 // 부분 쿠킹 병합 대조다: profileId·profileSettings·cookSettings·cookerVersion이 모두 같아야 하고,
 // 아니면 IncompatibleCook / Unsupported(section = 처음 다른 칸)다.
-Result<void> CheckCookedManifestMerge(const CookedManifest& existing,
-                                      const CookedManifest& incoming,
-                                      AssetDiagnostic* failure = nullptr) noexcept;
+ROCKS_ASSETRUNTIME_API Result<void>
+CheckCookedManifestMerge(const CookedManifest& existing, const CookedManifest& incoming,
+                         AssetDiagnostic* failure = nullptr) noexcept;
 
 // 연 패키지를 항목과 대조한다(AS 10.1절 8): CheckCookedPackageFile(file 길이·SHA-256)을 먼저 하고
 // 그다음 CheckCookedPackageContents(contents — file의 ReadPackage 결과)를 한다.
 //
 // 오류: 다르면 CorruptPackage / InvalidArgument(section = CookedManifestField, detail =
 // CookedManifestNoEntry, asset = entry.asset, related = 의존 칸이면 처음 다른 자리의 대상)다.
-Result<void> CheckCookedPackage(const CookedManifest& manifest, const CookedManifestEntry& entry,
-                                Span<const uint8> file, const PackageContents& contents,
-                                AssetDiagnostic* failure = nullptr) noexcept;
+ROCKS_ASSETRUNTIME_API Result<void> CheckCookedPackage(const CookedManifest& manifest,
+                                                       const CookedManifestEntry& entry,
+                                                       Span<const uint8> file,
+                                                       const PackageContents& contents,
+                                                       AssetDiagnostic* failure = nullptr) noexcept;
 
 // 파일 쪽 대조다(AS 11.6절 3 — 로더가 해석 전에 부른다): file 길이 = packageBytes(PackageBytes),
 // SHA-256 = packageSha256(PackageSha256). 오류는 CheckCookedPackage와 같다.
@@ -233,7 +239,8 @@ Result<void> CheckCookedPackageContents(const CookedManifest& manifest,
 // 쿠킹 루트 기준 패키지 파일 경로(AS 4.2절 `Packages/<a>/<A>-<h>.rpkg`)를 out 뒤에 붙인다.
 //
 // 오류: out의 할당 실패는 그 오류다(실패하면 out 길이는 그대로가 아닐 수 있다 — 호출자가 버린다).
-Result<void> AppendCookedPackagePath(StringBuilderBase& out, AssetId asset,
-                                     const Sha256Digest& packageSha256) noexcept;
+ROCKS_ASSETRUNTIME_API Result<void>
+AppendCookedPackagePath(StringBuilderBase& out, AssetId asset,
+                        const Sha256Digest& packageSha256) noexcept;
 
 } // namespace rocks

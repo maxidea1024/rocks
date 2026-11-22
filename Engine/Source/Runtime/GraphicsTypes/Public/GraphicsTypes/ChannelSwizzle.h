@@ -80,7 +80,7 @@ constexpr ChannelSwizzle ComposeSwizzle(const ChannelSwizzle& outer,
 
 // 진단·도구용 이름이다(열거자 이름, 범위 밖은 "Unknown"). Parse는 대소문자를 무시하며 모르는
 // 이름은 InvalidArgument다.
-const char* SwizzleSourceName(SwizzleSource source) noexcept;
-Result<SwizzleSource> ParseSwizzleSource(StringView name) noexcept;
+ROCKS_GRAPHICSTYPES_API const char* SwizzleSourceName(SwizzleSource source) noexcept;
+ROCKS_GRAPHICSTYPES_API Result<SwizzleSource> ParseSwizzleSource(StringView name) noexcept;
 
 } // namespace rocks::graphics

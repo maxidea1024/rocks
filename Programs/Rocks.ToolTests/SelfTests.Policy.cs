@@ -1006,6 +1006,41 @@ internal static partial class SelfTests
             ];
             Verify.That(Check().SetEquals(expected), "thread_local in public headers: " + string.Join(", ", Check()));
         });
+        // 공개 헤더 타입 표지(Docs/Design/BuildTargets.ko.md 3.8절 BD29·BS8e): 변수 템플릿의 주소를 타입 키로 쓰지 않는다(Core/TypeKey.h만 예외).
+        suite.Add("Policy.PublicHeaderRejectsVariableTemplateTypeTags", () =>
+        {
+            using TemporaryDirectory temporary = new();
+            HashSet<(string Path, int Line)> Check()
+            {
+                var failures = PolicyChecks.PublicHeaderTypeTags(temporary.Root);
+                Verify.That(failures.All(failure => failure.Rule == "public-header-type-tag"), "rule name");
+                return failures.Select(failure => (failure.Path, failure.Line)).ToHashSet();
+            }
+
+            // 통과: TypeKey.h 자체, Private 헤더·시험 소스, 주소를 쓰지 않는 변수 템플릿(값으로만 읽음), 주석 속 예, 서드파티 그룹.
+            temporary.Write("Core/Source/Runtime/Core/Public/Core/TypeKey.h",
+                "#pragma once\ntemplate <class T>\ninline unsigned char NativeTypeIdentity = 0;\nconst void* K() { return &NativeTypeIdentity<int>; }\n");
+            temporary.Write("Core/Source/Runtime/Probe/Private/ProbeTag.h", "#pragma once\ntemplate <class T>\ninline char Tag = 0;\nconst void* k = &Tag<int>;\n");
+            temporary.Write("Core/Source/Runtime/Probe/Tests/ProbeTests.cpp", "template <class T>\ninline char Tag = 0;\nconst void* k = &Tag<int>;\n");
+            temporary.Write("Core/Source/Runtime/Probe/Public/Probe/Value.h",
+                "#pragma once\ntemplate <class T>\ninline constexpr bool IsProbeV = false;\nbool b = IsProbeV<int> && true;\n" +
+                "template <class T>\ninline constexpr bool IsOtherV = true;\nbool c = true &&IsOtherV<int>;\n// &Tag<int> in a comment\n");
+            temporary.Write("Core/Source/ThirdParty/Fake/Public/Fake.h", "#pragma once\ntemplate <class T>\ninline char Tag = 0;\nconst void* k = &Tag<int>;\n");
+            Verify.That(Check().Count == 0, "allowed uses were rejected: " + string.Join(", ", Check()));
+            // 위반: constexpr·const 없는 표지, detail:: 한정 주소, 엔진 플러그인 모듈의 공개 헤더.
+            temporary.Write("Core/Source/Runtime/Probe/Public/Probe/Bad.h",
+                "#pragma once\nnamespace detail {\ntemplate <class T>\ninline constexpr char Tag = 0;\n}\n" +
+                "template <class T> const void* Key() { return &detail::Tag<T>; }\ntemplate <class T>\ninline unsigned char Other{};\n" +
+                "template <class T> bool Same(const void* k) { return k == & Other<T>; }\n");
+            temporary.Write("Engine/Plugins/Importers/Fake/Source/FakeImporter/Public/FakeImporter/Bad.h",
+                "#pragma once\ntemplate <class T> inline int Marker = 0;\nconst void* k = &Marker<int>;\n");
+            HashSet<(string, int)> expected =
+            [
+                ("Core/Source/Runtime/Probe/Public/Probe/Bad.h", 4), ("Core/Source/Runtime/Probe/Public/Probe/Bad.h", 8),
+                ("Engine/Plugins/Importers/Fake/Source/FakeImporter/Public/FakeImporter/Bad.h", 2)
+            ];
+            Verify.That(Check().SetEquals(expected), "variable template type tags in public headers: " + string.Join(", ", Check()));
+        });
         // 모듈 API 매크로(Docs/Design/BuildTargets.ko.md 3.8절 BD27·BS8d2): 자기 모듈의 매크로만, 공개 헤더에만(허용한 내부 헤더 예외), 소스에는
         // 쓰지 않는다.
         suite.Add("Policy.ModuleApiMacrosBelongToTheirModule", () =>

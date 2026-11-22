@@ -56,7 +56,7 @@ struct ManifestName {
     SourceSpan span; // 원문의 그 값(따옴표 포함)
 };
 
-class PackageManifest final {
+class ROCKS_SPARKSCOMPILER_API PackageManifest final {
 public:
     explicit PackageManifest(Allocator& allocator) noexcept;
 
@@ -123,7 +123,8 @@ private:
 // 하나, 계속 읽어 모두 알린다) false를 돌려준다 — 그때도 `name` 값 자체가 맞으면
 // Name()·NameSpan()은 그 값이고(패키지 이름 중복 검사용), 나머지 내용은 정해지지 않는다. 파일은
 // IsUsable()이어야 한다(아니면 InvalidArgument). 실패: 할당 실패.
-Result<bool> ReadPackageManifest(const SourceSet& sources, SourceId id, DiagnosticList& diagnostics,
-                                 PackageManifest& out) noexcept;
+ROCKS_SPARKSCOMPILER_API Result<bool> ReadPackageManifest(const SourceSet& sources, SourceId id,
+                                                          DiagnosticList& diagnostics,
+                                                          PackageManifest& out) noexcept;
 
 } // namespace rocks::sparks

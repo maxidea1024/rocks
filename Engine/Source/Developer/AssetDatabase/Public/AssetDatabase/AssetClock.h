@@ -27,7 +27,7 @@ protected:
 };
 
 // platform::UtcTicks를 읽는 시계다.
-class SystemAssetClock final : public AssetClock {
+class ROCKS_ASSETDATABASE_API SystemAssetClock final : public AssetClock {
 public:
     int64 NowTicks() noexcept override;
 };

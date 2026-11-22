@@ -153,7 +153,7 @@ struct TraceOutputId {
 // 현재 세션의 serial이다(세션마다 1부터 늘어나는 번호, 세션이 없으면 0). 세션별로 한 번 써야 하는
 // 정의(GPU queue 정의 등)를 다시 쓸지 정할 때 쓴다. 어느 스레드에서나 부를 수 있다(relaxed 읽기에
 // 가까운 acquire 읽기 하나).
-uint64 TraceCurrentSessionSerial() noexcept;
+ROCKS_TRACECAPTURE_API uint64 TraceCurrentSessionSerial() noexcept;
 
 // 한 실행의 trace 수집 소유자다(UE TraceLog 전역 상태 대응, Docs/Design/TraceSystem.ko.md 3절).
 // 채널 표·이벤트 형 표·블록 풀·정의 버퍼와 저장소·출력·writer를 가진다.

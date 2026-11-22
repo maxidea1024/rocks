@@ -116,11 +116,11 @@ enum class AssetDiagnosticCode : uint16 {
 
 // 진단 이름이다(예: CorruptPackage → "CorruptPackage"). 모르는 값은 "Unknown"이다. 반환 문자열은
 // 정적 수명이다. 명령행 진단 줄 `<진단 코드>: <path>: <설명>`(AS 13절)과 로그가 쓴다.
-const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept;
+ROCKS_ASSETRUNTIME_API const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept;
 
 // 경고·정보 수준 진단인지다(4.6절·MeshAnimationAssets 11절·UnrealExchange 10.3절 표의 경고·정보 —
 // 실패가 아니라 결과에 남는다). 임포터 경고(AssetImportContext::Warn)는 이 코드만 받는다.
-bool AssetDiagnosticIsWarning(AssetDiagnosticCode code) noexcept;
+ROCKS_ASSETRUNTIME_API bool AssetDiagnosticIsWarning(AssetDiagnosticCode code) noexcept;
 
 // 실패 하나의 분류와 위치다. 실패한 호출이 out 인자로 채운다(성공하면 건드리지 않는다).
 struct AssetDiagnostic {

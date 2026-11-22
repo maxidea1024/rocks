@@ -28,7 +28,7 @@ namespace rocks {
 //
 // 수명: registry와 allocator는 이 객체보다 오래 산다. 로더에서 뗀 뒤 파괴한다(파괴는 남은 기록을
 // 해제하지 않고 놓기만 한다). 등록·해제는 TypeRegistry와 같은 스레드(로더 스레드)에서 한다.
-class ModuleTypeRegistrations final : public ModuleTypeRegistrar {
+class ROCKS_OBJECTRUNTIME_API ModuleTypeRegistrations final : public ModuleTypeRegistrar {
 public:
     ModuleTypeRegistrations(TypeRegistry& registry, Allocator& allocator) noexcept;
     ~ModuleTypeRegistrations() noexcept override = default;

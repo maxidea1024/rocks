@@ -51,7 +51,7 @@ class RenderLaneProcessor;
 
 // 렌더 lane 작업 안에서만 쓰는 lane 쪽 문맥이다. 장치는 소유 스레드(렌더 lane) 전용 호출을 포함해
 // 모두 쓸 수 있다. 문맥은 작업 호출 동안만 유효하며 저장하지 않는다.
-class RenderLaneContext {
+class ROCKS_RENDERBASE_API RenderLaneContext {
 public:
     graphics::Device& Device() const noexcept;
 
@@ -83,7 +83,7 @@ protected:
 };
 
 // 프레임 packet 작업의 문맥이다.
-class RenderFrameContext : public RenderLaneContext {
+class ROCKS_RENDERBASE_API RenderFrameContext : public RenderLaneContext {
 public:
     // 게임 lane이 BeginFrame에서 받은 프레임 번호(1부터)다.
     uint64 FrameNumber() const noexcept {
@@ -177,7 +177,7 @@ struct LaneMarker {
 
 // 게임 lane이 확보한 프레임 slot이다. SubmitFrame으로 넘기거나 AbandonFrame으로 버린다. 이동
 // 전용이다.
-class FrameTicket {
+class ROCKS_RENDERBASE_API FrameTicket {
 public:
     FrameTicket() noexcept = default;
     FrameTicket(FrameTicket&& other) noexcept;
@@ -269,7 +269,7 @@ using RenderFrameFunction = void (*)(RenderFrameContext& context, T& packet) noe
 //
 // 수명: allocator·device·processor는 RenderLane보다 오래 산다. 실행 중(Start 뒤 Stop 전)에 파괴하면
 // Fatal이다. 장치 파괴는 Stop(소유권 반납) 뒤 게임 lane이 한다.
-class RenderLane {
+class ROCKS_RENDERBASE_API RenderLane {
 public:
     RenderLane(Allocator& allocator, graphics::Device& device) noexcept;
     ~RenderLane() noexcept;

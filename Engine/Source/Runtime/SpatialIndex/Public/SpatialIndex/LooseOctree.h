@@ -304,7 +304,7 @@ struct RayQueryShape {
 //               return QueryControl::Continue;
 //           });
 //   }
-class LooseOctree {
+class ROCKS_SPATIALINDEX_API LooseOctree {
 public:
     // 설정을 검사하고 빈 옥트리를 만든다. 내부 할당 계수 adapter 하나(수십 byte)를 allocator에서
     // 할당한다. 컨테이너 저장소는 첫 변경에서 잡는다. 할당 실패는 그 allocator 오류(OutOfMemory
@@ -591,7 +591,7 @@ private:
 // 반올림 한계는 Intersection.h 설명을 따른다). 필터는 공간 판정보다 먼저 적용하며 질의 mask 0은
 // 아무것도 돌려주지 않는다(오류 아님). 질의 형상이 유효하지 않으면 아무것도 방문하지 않고
 // InvalidArgument다. 검색은 힙 할당을 하지 않는다.
-class LooseOctreeReader {
+class ROCKS_SPATIALINDEX_API LooseOctreeReader {
 public:
     LooseOctreeReader(const LooseOctreeReader&) noexcept = default;
     LooseOctreeReader& operator=(const LooseOctreeReader&) noexcept = default;
@@ -847,7 +847,7 @@ private:
 // 겹쳐 열어도 된다(visitor 안의 재검색). 검색 호출마다 atomic을 건드리지 않도록 범위는
 // 질의 단위가 아니라 읽기 묶음 단위로 둔다. 범위는 복사·이동할 수 없고 만든 스레드에서
 // 끝낸다(reader는 복사해 다른 스레드에 넘길 수 있다).
-class SpatialReadScope {
+class ROCKS_SPATIALINDEX_API SpatialReadScope {
 public:
     explicit SpatialReadScope(const LooseOctree& tree) noexcept;
     ~SpatialReadScope() noexcept;

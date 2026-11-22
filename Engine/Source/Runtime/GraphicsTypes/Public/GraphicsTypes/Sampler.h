@@ -87,7 +87,7 @@ struct SamplerDesc {
 };
 
 // 열거값 범위와 maxAnisotropy(1–16)를 검사한다.
-bool IsValidSamplerDesc(const SamplerDesc& desc) noexcept;
+ROCKS_GRAPHICSTYPES_API bool IsValidSamplerDesc(const SamplerDesc& desc) noexcept;
 
 // border 색의 선형 RGBA 값이다(out[4]).
 void BorderColorValue(BorderColor color, float (&out)[4]) noexcept;
@@ -95,10 +95,10 @@ void BorderColorValue(BorderColor color, float (&out)[4]) noexcept;
 // 진단·도구용 이름이다(열거자 이름: "Point"·"Bilinear"·"Trilinear"·"AnisotropicPoint"·
 // "AnisotropicLinear", "Wrap"·"Clamp"·"Mirror"·"Border", "TransparentBlack"·"OpaqueBlack"·
 // "OpaqueWhite"). Parse는 대소문자를 무시하며 모르는 이름은 InvalidArgument다.
-const char* FilterName(Filter filter) noexcept;
+ROCKS_GRAPHICSTYPES_API const char* FilterName(Filter filter) noexcept;
 const char* AddressModeName(AddressMode mode) noexcept;
 const char* BorderColorName(BorderColor color) noexcept;
-Result<Filter> ParseFilter(StringView name) noexcept;
+ROCKS_GRAPHICSTYPES_API Result<Filter> ParseFilter(StringView name) noexcept;
 Result<AddressMode> ParseAddressMode(StringView name) noexcept;
 Result<BorderColor> ParseBorderColor(StringView name) noexcept;
 

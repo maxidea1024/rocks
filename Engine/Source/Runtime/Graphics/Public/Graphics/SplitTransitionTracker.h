@@ -33,7 +33,7 @@ enum class SplitEndResult : uint8 {
     Unknown
 };
 
-class SplitTransitionTracker {
+class ROCKS_GRAPHICS_API SplitTransitionTracker {
 public:
     explicit SplitTransitionTracker(Allocator& allocator) noexcept;
 

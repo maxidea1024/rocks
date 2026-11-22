@@ -53,7 +53,7 @@ struct AssetSourceLocation {
     bool absolute = false;
 };
 
-class AssetSourceRoots {
+class ROCKS_ASSETDATABASE_API AssetSourceRoots {
 public:
     AssetSourceRoots(Allocator& allocator, const ProjectLayout& layout) noexcept;
 
@@ -103,9 +103,10 @@ private:
 // MaxImportTotalSourceBytes와의 작은 값을 준다). 오류(failure 진단): 없음 MissingSource / NotFound,
 // limit 초과 InvalidSource / CapacityExceeded, 읽기 IO 오류 InvalidSource / 그 오류, 할당 실패(진단
 // None).
-Result<void> ReadImportSource(platform::FileSystem& files, StringView path, Array<uint8>& bytes,
-                              Sha256Digest& digest, uint64 limit = MaxImportSourceBytes,
-                              AssetDiagnostic* failure = nullptr) noexcept;
+ROCKS_ASSETDATABASE_API Result<void> ReadImportSource(platform::FileSystem& files, StringView path,
+                                                      Array<uint8>& bytes, Sha256Digest& digest,
+                                                      uint64 limit = MaxImportSourceBytes,
+                                                      AssetDiagnostic* failure = nullptr) noexcept;
 
 // 임포트 상태의 원본 흘려 읽기 버퍼 크기다(7.1절 18 A2f2b — 원본을 통째로 올리지 않는다).
 inline constexpr usize ImportStatusReadBytes = 64 * 1024;
@@ -121,8 +122,10 @@ inline constexpr usize ImportStatusReadBytes = 64 * 1024;
 //   ErrorCode error = ErrorCode::None;
 //   const AssetDiagnosticCode state =
 //       CheckImportSource(files, path, source.bytes, source.sha256, buffer.View(), error);
-AssetDiagnosticCode CheckImportSource(platform::FileSystem& files, StringView path, uint64 bytes,
-                                      const Sha256Digest& digest, Span<uint8> buffer,
-                                      ErrorCode& error) noexcept;
+ROCKS_ASSETDATABASE_API AssetDiagnosticCode CheckImportSource(platform::FileSystem& files,
+                                                              StringView path, uint64 bytes,
+                                                              const Sha256Digest& digest,
+                                                              Span<uint8> buffer,
+                                                              ErrorCode& error) noexcept;
 
 } // namespace rocks

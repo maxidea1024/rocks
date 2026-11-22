@@ -121,7 +121,7 @@ struct AssetAliasPruneReport {
     Array<AssetAliasUse> uses;
 };
 
-class AssetAliasTable {
+class ROCKS_ASSETDATABASE_API AssetAliasTable {
 public:
     // layout은 빌린다(표보다 오래 산다). maxEntries는 항목 수 상한이다(읽기·쓰기 — 시험이 줄여
     // 경계를 본다, 기본 MaxAssetAliases).
@@ -206,6 +206,6 @@ private:
 };
 
 // 별칭이 만료되는 시각(tick)이다(created + days 일 — 넘치면 최댓값).
-int64 AssetAliasExpiryTicks(const AssetAlias& alias) noexcept;
+ROCKS_ASSETDATABASE_API int64 AssetAliasExpiryTicks(const AssetAlias& alias) noexcept;
 
 } // namespace rocks

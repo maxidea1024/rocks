@@ -44,7 +44,7 @@ protected:
 // 크기는
 //   budgetBytes를 넘지 않는다(넘으면 빈 staging부터 지우고, 그래도 넘으면 CapacityExceeded).
 // - 모든 함수가 스레드 안전이다(자체 잠금). StagingSource 호출은 잠금 안에서 한다.
-class StagingPool {
+class ROCKS_GRAPHICS_API StagingPool {
 public:
     StagingPool(Allocator& allocator, StagingSource& source, uint64 budgetBytes) noexcept;
     ~StagingPool() noexcept;

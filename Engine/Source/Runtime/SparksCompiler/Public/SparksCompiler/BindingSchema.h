@@ -149,7 +149,7 @@ namespace detail {
 class SchemaReader;
 } // namespace detail
 
-class BindingSchema final {
+class ROCKS_SPARKSCOMPILER_API BindingSchema final {
 public:
     explicit BindingSchema(Allocator& allocator) noexcept;
 
@@ -230,10 +230,11 @@ private:
 // 하나, 계속 읽어 모두 알린다) false를 돌려준다 — 그때 out의 내용은 정해지지 않는다. 한 파일 안의
 // 검사만 한다(여러 파일 사이의 이름·ID 중복은 Compilation이 본다). 파일은 IsUsable()이어야 한다
 // (아니면 InvalidArgument). 실패: 할당 실패.
-Result<bool> ReadBindingSchema(const SourceSet& sources, SourceId id, DiagnosticList& diagnostics,
-                               BindingSchema& out) noexcept;
+ROCKS_SPARKSCOMPILER_API Result<bool> ReadBindingSchema(const SourceSet& sources, SourceId id,
+                                                        DiagnosticList& diagnostics,
+                                                        BindingSchema& out) noexcept;
 
 // TypeId 등 안정 ID 표기(32자리 소문자 16진, 모두 0은 아님 — `.rocksids.json`과 같다)인지다.
-bool IsStableIdText(StringView text) noexcept;
+ROCKS_SPARKSCOMPILER_API bool IsStableIdText(StringView text) noexcept;
 
 } // namespace rocks::sparks

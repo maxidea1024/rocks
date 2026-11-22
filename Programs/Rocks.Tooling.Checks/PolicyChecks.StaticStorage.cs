@@ -41,6 +41,57 @@ public static partial class PolicyChecks
         return failures;
     }
 
+    private const string PublicHeaderTypeTagRule = "public-header-type-tag";
+
+    // 타입 키를 두는 한 곳이다(Core/TypeKey.h — 선언한 export 키가 없는 타입의 inline 표지).
+    private const string TypeKeyHeader = "Core/Source/Runtime/Core/Public/Core/TypeKey.h";
+
+    // 변수 템플릿 선언이다: template <...> inline [constexpr|constinit] [const] 타입(여러 낱말 — unsigned char) 이름 = | { | ;
+    private static readonly Regex VariableTemplateDeclaration = new(
+        @"\btemplate\s*<[^;{}()]*>\s*inline\s+(?:constexpr\s+|constinit\s+)?(?:const\s+)?(?:[\w:]+\s+)+?(?<name>\w+)\s*(?:=|\{|;)",
+        RegexOptions.CultureInvariant, TimeSpan.FromSeconds(10));
+
+    /// <summary>
+    /// 엔진 소유 모듈의 공개 헤더에서 변수 템플릿의 주소를 타입 표지로 쓰는 곳을 찾는다(Docs/Design/BuildTargets.ko.md 3.8절 BD29·BS8e, 규칙
+    /// <c>public-header-type-tag</c>). 같은 헤더에 <c>template &lt;class T&gt; inline … Name = …;</c> 선언과 그 주소 <c>&amp;Name&lt;</c>가 함께
+    /// 있으면 선언 줄을 알린다. inline 변수는 Modular(모듈마다 공유 라이브러리)에서 이미지마다 따로 생겨 모듈 사이에 키가 갈라지고(조회가 조용히
+    /// 실패한다), const면 Monolithic에서도 링커 동일 데이터 병합(ICF)이 서로 다른 타입의 주소를 합칠 수 있다. 타입 키는 Core/TypeKey.h의
+    /// <c>TypeKeyOf&lt;T&gt;()</c>를 쓴다(그 헤더만 예외). BS8c의 공개 헤더 검사(<c>-Wunique-object-duplication</c>)는 템플릿 문맥을 보지 못해 이
+    /// 어휘 검사가 그 자리를 맡는다. 주석·리터럴은 보지 않는다. 사용 예: <c>PolicyChecks.PublicHeaderTypeTags(root)</c>.
+    /// </summary>
+    public static IReadOnlyList<CheckFailure> PublicHeaderTypeTags(string root)
+    {
+        List<CheckFailure> failures = [];
+        foreach (string path in NativeSources(root, OwnedSourceRoots))
+        {
+            string relative = Relative(root, path);
+            if (!relative.EndsWith(".h", StringComparison.Ordinal) || !IsPublicModuleHeader(relative) || relative == TypeKeyHeader)
+            {
+                continue;
+            }
+
+            string code = WithoutCommentsAndLiterals(File.ReadAllText(path, StrictUtf8));
+            foreach (Match match in VariableTemplateDeclaration.Matches(code))
+            {
+                string name = match.Groups["name"].Value;
+                // 단항 주소 연산자만 본다: 앞이 대입·비교·괄호·쉼표·중괄호·세미콜론·조건 기호이거나 return이다(`X<T> && Y`의 &&나 이항 &는 아니다).
+                if (!Regex.IsMatch(code, @"(?:[=(,{;?:!]|\breturn)\s*&\s*(?:[\w:]+::)?" + Regex.Escape(name) + @"\s*<", RegexOptions.CultureInvariant,
+                    TimeSpan.FromSeconds(10)))
+                {
+                    continue;
+                }
+
+                int line = 1 + code.AsSpan(0, match.Groups["name"].Index).Count('\n');
+                failures.Add(new(relative, line, PublicHeaderTypeTagRule,
+                    $"the address of variable template '{name}' is used as a type tag in a public header: each shared library gets its own " +
+                    "copy (Modular) and a const tag can be merged by identical data folding. Use TypeKeyOf<T>() from <Core/TypeKey.h> and " +
+                    "declare ROCKS_DECLARE_NATIVE_TYPE_KEY for a type used across modules"));
+            }
+        }
+
+        return failures;
+    }
+
     // 엔진 소유 모듈의 공개 헤더인가: <루트>/Source/<그룹>/<모듈>/Public/… (그룹이 ThirdParty면 아니다) 또는 엔진 플러그인 모듈의 Public/ 아래.
     private static bool IsPublicModuleHeader(string relative)
     {

@@ -1,6 +1,6 @@
 # 빌드 타깃·모듈 의존·플러그인 조건 설계
 
-기준일: 2026-11-22, 개정 22. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
+기준일: 2026-11-22, 개정 23. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
 - **타깃 종류 확장**: Editor·Client·Server 타깃과, 타깃 종류에 따라 코드·데이터를 컴파일에서 빼는 매크로.
 - **모듈 의존 공개 범위**: 의존마다 Public(소비자에게 include·정의를 넘김)과 Private(이 모듈 안에서만 씀)을 나눈다.
 - **플러그인 활성 조건**: 프로젝트가 플러그인을 특정 타깃·플랫폼·구성에서만 켠다.
@@ -328,6 +328,7 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
   6. **BS8d4 남은 키**: struct·enum·native 등록 타입 키의 모듈 사이 통합(BS8b 한계), `ROCKS_GRAPH_SHARED_DATA` 선언·정의 나누기(BS8c 한계).
   7. **BS8d5 검사 체인**: `Modular` FoundationTests를 로더로 실행해 통과(Windows 로컬, macOS CI) — BS8·ML4 완료 기준.
   8. **BS8d6 Modular 크래시·Launch 하니스**(개정 22에서 더함): native 하니스의 크래시·Launch 시험을 Modular에서 돌린다(Launch 시험 프로그램의 Modular 타깃, cdb 스택 검사의 모듈 이름, 도우미 프로세스의 Modular 진입). Editor가 Modular라 크래시 수집 경로를 확인한다.
+  9. **BS8e Engine 층 Modular export**(개정 23에서 더함): Engine 층 모듈과 Engine 시험이 부르는 선언의 export, 시험 타깃 `EngineModular`(엔진 플러그인 시험 제외 — 플러그인 Modular는 ML5). 모듈을 맡은 세션은 목록을 받아 붙인다.
 - 버린 안: 실행 파일이 모듈 표를 export하고 Core가 OS 기호 조회로 찾는 임시 방식(UE에 없고 ML4가 대체하면 버릴 코드다).
 
 **BS8d1 구현 세부(개정 15).**
@@ -414,11 +415,26 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
   - 무할당 시험(`OperatorNewCounter.cpp`의 전역 `operator new` 대체)은 Modular에서 호스트 이미지 안의 할당만 센다(Windows는 이미지마다, POSIX는 `RTLD_LOCAL`). 다른 모듈 안의 `operator new`는 세지 않으므로 그 시험은 Modular에서 약해진다 — Monolithic 체인이 원래 강도로 본다.
   - 부트 모듈 두 번 적재(ML4b 한계 — 실행 파일 import와 로더의 절대 경로 적재가 다른 철자로 같은 DLL을 두 번 싣는 경우)는 실행 중에 확인하지 않는다. manifest 로더의 경로는 실행 파일 이미지 경로(`GetExecutablePath` — Windows `GetModuleFileNameW`)의 디렉터리이고, 이는 OS가 실행 파일 import를 찾는 응용 프로그램 디렉터리와 같은 철자라 보통은 같은 모듈이다. 확인하려면 주소가 속한 이미지를 찾는 플랫폼 API가 필요해 요구가 생길 때 더한다(FoundationModular 시험이 두 번 적재된 Core의 공유 상태 — 로그·할당자 — 를 쓰면 실패하므로 같은 철자 경로의 회귀는 시험이 드러낸다).
 
+**BS8e Engine 층 Modular export 세부(개정 23).**
+- 범위: Engine 층 모듈(Engine/Source)과 Engine 시험이 부르는 Core 층 선언을 Modular로 링크되게 한다. Editor(BD17 — Modular)가 엔진 모듈 공유 라이브러리를 싣기 전에 export 누락을 시험 빌드로 먼저 잡는다(BD31과 같은 이유). 규칙은 BS8d2(붙이는 자리)와 BS8d5(시험용 내부 export·비공개 헤더 허용 목록·inline 함수 주소·thread_local)를 그대로 쓴다.
+- 측정(2026-11-22, Windows Debug, `/FORCE:UNRESOLVED`는 측정에서만): Engine 시험을 Modular로 빌드하면 매크로를 붙일 선언이 364곳이다(빌드를 세 번 돌려 링크가 진행되며 드러난 것까지). 많은 순으로 AssetRuntime 68·Graphics 40·GraphicsTypes 32·AssetDatabase 29·Animation 25·SparksCompiler 23·AssetNugget 19·SparksVm 17·Mesh 16·RenderBase 15이고, Core 층 6곳(`Log`·`ModuleTypeRegistrations`·Trace 함수 둘·`LogicalProcessorCount`·HostConfig `FindEngineDirectory`)도 있다. 비공개 헤더는 AssetRuntime `PackageInternal.h`·EngineAssets `EngineAssetsInternal.h`·MeshTools `MeshBuildInternal.h` 셋이다. friend 재선언(`InstantiatePackages`·`ParseLogicalPath`·`LinkModule`·`LinkImports`·`TryParseExpectation`)에도 붙인다.
+- 분담: 모듈을 맡은 세션이 있으면 그 세션이 목록을 받아 붙인다(Animation·Mesh·MeshSource·MeshTools — rocks-ff, 55곳). 나머지는 이 단계가 붙이고 그 세션들에 알린다.
+- 시험 타깃 `EngineModular`: Modular Program 타깃, 실행 파일은 시험 모듈 `EngineModularTests` 하나(`EngineTests`와 같은 소스, 엔진 플러그인 시험 제외). 로컬 체인과 CI(Windows·macOS)가 `/t:Test`로 돈다(BS8d5와 같이 native 시험만).
+- 엔진 플러그인 제외: `EngineTests`는 켠 엔진 플러그인의 시험 모듈(`PluginTestModules` — UnrealExchange)을 링크하는데, `Modular` 타깃의 플러그인은 플러그인 binary manifest(플러그인마다 `<Plugin>/Binaries/<Platform>/` — [모듈 로더](ModuleLoader.ko.md) MD12, ML5) 전까지 거부한다(BD41). 그래서 Modular 시험 모듈은 플러그인 시험을 빼고(`TestsModule.PluginTests`), 플러그인 모듈의 export는 ML5에서 한다. 플러그인 manifest를 지금 앞당기지 않은 것은 플러그인 활성 조건 해석·빌드 목록 대조와 한 묶음(ML5 — Rocks Studio)이기 때문이다.
+- 정적 모듈 표를 쓰는 Engine 시험(ModuleLoader 3.14절): `EngineAssets_ModuleEntryRegistersSettings`는 프로세스 로더 표(`test::ProcessModules()`·`EntryAt`)로 옮겼고, 정적 표로 새 로더를 만드는 `GpuTrace_RenderBaseModuleRegistersThroughTheTraceService`는 `ROCKS_MONOLITHIC`으로 감쌌다.
+- 타입 키(Core `Core/TypeKey.h`): 헤더의 변수 템플릿 주소를 타입 표지로 쓰던 세 곳은 Modular에서 이미지마다 주소가 달라 모듈 사이 조회가 갈라진다 — BD29가 금지한 주소 식별 정적 객체인데 템플릿 문맥이라 BS8c 검사가 보지 못했다. 그래서 BS8d4의 native 등록 타입 키 기구(`NativeTypeKeyTraits`·`ROCKS_DECLARE_NATIVE_TYPE_KEY`·`ROCKS_DEFINE_NATIVE_TYPE_KEY`·이미지 지역 표지 `NativeTypeIdentity`)를 ObjectRuntime에서 Core로 내리고 `TypeKeyOf<T>()`(선언한 export 키, 없으면 이미지 지역 표지 — 선언이 보이는지는 템플릿 기본 인자로 판정, BS8d4와 같은 ODR 이유)를 두었다. `NativeTypeKey`(리플렉션 생성 키 우선)는 그 위에 있다. 다른 모듈이 같은 키를 써야 하는 타입은 export 키를 선언한다.
+  - Subsystem(`World/Subsystem.h` `SubsystemKeyOf`): 다른 모듈(시험·게임)의 `GetSubsystem<EngineAssetsSubsystem>()`이 nullptr였다(EngineModular 첫 실행에서 찾음 — UE는 `UClass*`). `EngineAssetsSubsystem`이 export 키를 선언한다.
+  - 렌더 설정 참조(`RenderBase/RenderSettings.h` `RenderSettingsRef`): 게임 lane이 담고 렌더러 모듈이 꺼낸다. RenderBase는 ObjectRuntime에 의존하지 않으므로(렌더 층 "Object 없음") Core 기구를 쓴다. `ConfigSnapshot`(Config)이 export 키를 선언한다. 옛 표지는 `const`라 Monolithic에서도 ICF가 서로 다른 타입의 주소를 합칠 수 있었다.
+  - 콘솔 명령 대상(`Config/CVarCommand.h` `CommandContext::Target<T>`·`ConfigContext::BindCommand`): 대상을 묶는 모듈과 명령 함수의 모듈이 다르면 Modular에서 Fatal이었다. 대상 타입(`int32` 같은 기본 타입 포함)은 보통 한 모듈 안이라 이미지 지역 표지로 충분하고, 모듈을 넘으면 그 타입이 키를 선언한다. 옛 표지도 `const`였다.
+  - 정책 `public-header-type-tag`: 엔진 소유 모듈 공개 헤더에서 같은 헤더의 변수 템플릿 선언과 그 주소(`&Name<`)가 함께 있으면 거부한다(`Core/TypeKey.h`만 예외). 어휘 검사라 다른 헤더에 선언한 변수 템플릿의 주소는 보지 못한다.
+- 이름 상수의 주소: 헤더의 `inline constexpr char[]`(예 `EngineStageReady`)도 이미지마다 사본이다(inline 함수 주소와 같은 이유 — BS8d5). 계약이 문자열 내용인 자리(크래시 기록 단계 이름)는 내용으로 비교한다(시험 `Engine_MarksRunStagesForCrashRecords`).
+- 한계: Engine 층 크래시·Launch 하니스는 BS8d6과 같이 Monolithic만 본다. 엔진 플러그인 모듈의 Modular 링크는 ML5다.
+
 **모듈 API 매크로(BD27).**
 - 빌드가 C++ 모듈마다 `ROCKS_<MODULE>_API`(모듈 이름 대문자)를 정의한다. UE `<MODULE>_API`(`UEBuildModule.cs:223, 239`)에 해당하고, 이름은 Rocks 매크로 접두 규칙을 따른다.
 - 값은 UE와 같다(`UEBuildModule.cs:750-770`). `Monolithic`이면 빈 값이다. `Modular`이면 그 모듈 자신의 컴파일에서는 export, 다른 모듈의 컴파일에서는 import다.
 - export·import 철자는 `Base/Compiler.h`의 `ROCKS_DLLEXPORT`·`ROCKS_DLLIMPORT`다. Windows는 `__declspec(dllexport)`·`__declspec(dllimport)`, macOS·Linux는 둘 다 `__attribute__((visibility("default")))`다.
-- `Modular` 빌드의 가시성 옵션은 UE와 같다(`bHideSymbolsByDefault`). Linux는 공유 라이브러리 컴파일에 `-fvisibility-ms-compat`(`Platform/Linux/LinuxToolChain.cs:432-446` — 공유 라이브러리가 아닐 때만 `-fvisibility=hidden`), macOS는 `-fvisibility-ms-compat`·`-fvisibility-inlines-hidden`(`Platform/Mac/MacToolChain.cs:158-162`)이다. 함수·변수는 기본으로 숨겨지고 타입 정보는 보이므로, 함수·변수의 export 누락이 세 플랫폼 모두에서 링크 오류로 드러난다.
+- `Modular` 빌드의 가시성 옵션은 UE와 같다(`bHideSymbolsByDefault`). Linux는 공유 라이브러리 컴파일에 `-fvisibility-ms-compat`(`Platform/Linux/LinuxToolChain.cs:432-446` — 공유 라이브러리가 아닐 때만 `-fvisibility=hidden`), macOS는 `-fvisibility-ms-compat`·`-fvisibility-inlines-hidden`(`Platform/Mac/MacToolChain.cs:158-162`)이다. 함수·변수는 기본으로 숨겨지고 타입 정보는 보이므로, 함수·변수의 export 누락이 세 플랫폼 모두에서 링크 오류로 드러난다. 예외: 클래스 단위로 export한 클래스의 inline 멤버가 같은 모듈의 export하지 않은 내부 기호를 부르는 누락은 Windows에서 드러나지 않는다(dllimport 클래스의 inline 멤버는 DLL 쪽 사본을 부른다). macOS는 그 inline 멤버가 쓰는 쪽에 펼쳐져(`-fvisibility-inlines-hidden`) 링크 오류가 나므로 macOS CI가 잡는다(BS8e 리뷰).
 - 붙이는 곳: 다른 모듈이 부르는 inline이 아닌 함수·전역 변수, 클래스 전체(`class ROCKS_CORE_API Foo`) 또는 멤버 함수 하나씩. inline·`constexpr`·템플릿 정의에는 붙이지 않는다(UE와 같다).
 - 규칙 파일·명령줄은 `ROCKS_*_API`와 `ROCKS_MONOLITHIC`을 정의할 수 없다(빌드 예약 — `InputValidation.cs:163`의 예약 접두 목록에 BS2가 `ROCKS_WITH_`를 더할 때 같이 더한다). 메타 컴파일러의 Clang 실행(`MetadataRunner`)과 공개 헤더 검사(BD9)도 같은 정의를 받는다.
 - 정책 검사: 모듈 API 매크로는 자기 모듈의 매크로만 쓴다(다른 모듈 이름의 `_API`를 붙이면 오류).
@@ -715,3 +731,4 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 | 20 | 2026-11-22 | 오디오 모듈 유형([오디오 시스템](AudioSystem.ko.md) AD24): `AudioMiniaudio`·`AudioOpus`는 ClientOnly, `Audio`·`EngineAudio`는 Runtime, Server 쿠킹은 오디오 payload 제외 — 3.1절 Server 기능 축소 문단 |
 | 21 | 2026-11-22 | BS8d4 세부(사용자 결정 — UE 방식 생성 키 확장): 리플렉션 struct·enum 생성 키(NativeKey), Binds 실제 타입 목록 `BoundCoreValueV`와 CoreTypeBindings 생성 키, native 등록 타입 키 매크로 쌍, `StructElementOps`에서 키를 빼고 원소를 지우는 호출이 키를 넘김, `ROCKS_DECLARE·DEFINE_GRAPH_SHARED_DATA`와 호스트 서비스 키의 `Api` 인자 |
 | 22 | 2026-11-22 | BS8d5 세부(사용자 결정 — 시험용 내부 export): Modular FoundationTests 측정(1,174 — 공개 359·내부 85), BD31 개정(시험은 호스트 하나, 순환 6개 모듈 때문에 모듈 공유 라이브러리 링크를 버림, 내부 선언 export·비공개 헤더 허용 목록), 시험 타깃 `FoundationModular`, 정적 모듈 표 시험, `constinit`과 dllimport 주소, inline 함수 주소·thread_local·constexpr 멤버 클래스 export 한계, 무할당 시험·부트 모듈 두 번 적재 한계, `ModularCheck`를 `FoundationModular`로 대체 |
+| 23 | 2026-11-22 | BS8e Engine 층 Modular export 세부: 측정 364곳(비공개 헤더 셋, friend 재선언), 세션 분담, 시험 타깃 `EngineModular`(시험 모듈 `EngineModularTests`, 엔진 플러그인 시험 제외 — 플러그인 Modular는 ML5), 정적 모듈 표 Engine 시험 둘, 타입 키 기구를 Core `TypeKeyOf`로(Subsystem·렌더 설정 참조·콘솔 명령 대상), 정책 `public-header-type-tag`, 이름 상수 주소, BD27 inline 멤버 예외 |

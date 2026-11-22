@@ -102,7 +102,7 @@ struct GraphPoolEntry {
 // 먼저 파괴한다. 파괴는 export 중인 자원의 소유를 그 handle에 넘기고(DetachRetireSink, 그 뒤
 // handle의 Retire는 장치 Retire다) 나머지를 모두 장치 Retire로 넘긴다(장치가 마지막 사용 fence 뒤에
 // 해제한다). export에 쓴 RenderHandleTable은 풀보다 오래 살아야 한다.
-class GraphResourcePool final : public RenderRetireSink {
+class ROCKS_RENDERGRAPH_API GraphResourcePool final : public RenderRetireSink {
 public:
     GraphResourcePool(Allocator& allocator, graphics::Device& device,
                       const GraphResourcePoolConfig& config = {}) noexcept;

@@ -65,7 +65,7 @@ using WorldSubsystemType = SubsystemType<WorldSubsystem>;
 //   ModuleRegistration modules(types, allocator);       // types 뒤에 선언해 먼저 파괴한다
 //   if (auto registered = RegisterWorldTypes(modules); !registered) { ... }
 //   auto spinner = RegisterNativeClass<Spinner>(types);  // Actor.generated.h를 include한 TU
-Result<void> RegisterWorldTypes(ModuleRegistration& registration) noexcept;
+ROCKS_WORLD_API Result<void> RegisterWorldTypes(ModuleRegistration& registration) noexcept;
 
 // World GC 일정 방식이다(Docs/Design/GarbageCollectionScale.ko.md 17.3절).
 // - Incremental: World 파괴가 있으면 프레임 끝마다 WorldDesc::gcBudget만큼 증분 slice를 진행한다.
@@ -230,7 +230,7 @@ inline constexpr bool IsSpanV<Span<R>> = true;
 // <World/World.module.generated.h>는 등록 함수의 선언만 담는다).
 //
 // 스레드: 생성한 게임 스레드에서만 사용한다.
-class World final : private TickExecutor {
+class ROCKS_WORLD_API World final : private TickExecutor {
 public:
     World(Allocator& allocator, TypeRegistry& types, const WorldDesc& desc) noexcept;
     World(const World&) = delete;

@@ -53,7 +53,7 @@ enum class ContentEnvelopeField : uint32 {
 
 // 칸 이름이다(예: Key → "Key" — 로그용, 정적 수명). 봉투 칸이 아닌 값은 "None"이다(진단 section 0 —
 // 신뢰 정보 오류·할당 실패).
-const char* ContentEnvelopeFieldName(ContentEnvelopeField field) noexcept;
+ROCKS_ASSETRUNTIME_API const char* ContentEnvelopeFieldName(ContentEnvelopeField field) noexcept;
 
 // 신뢰하는 서명 공개키 하나다(CS3 — 콘텐츠 서명 전용 키).
 struct TrustedContentKey {
@@ -79,15 +79,16 @@ struct ContentEnvelopeInfo {
 
 // scope = SHA-256(productId ‖ 0 ‖ channel)이다. productId·channel은 비지 않은 ASCII 식별자
 // ([A-Za-z0-9_.-])다. 오류: 형식 InvalidArgument.
-Result<Sha256Digest> MakeContentScope(StringView productId, StringView channel) noexcept;
+ROCKS_ASSETRUNTIME_API Result<Sha256Digest> MakeContentScope(StringView productId,
+                                                             StringView channel) noexcept;
 
 // manifest byte를 봉투로 감싸 서명한다(5절 content-sign). 같은 입력이면 같은 byte다. out을 바꾼다
 // (실패하면 그대로). 오류: null keyId·매니페스트가 CookedManifestMaxFileBytes 초과 InvalidArgument·
 // CapacityExceeded, 빈 키 StaleHandle(Crypto), 할당 실패.
-Result<void> WriteContentEnvelope(Allocator& allocator, Span<const uint8> manifest,
-                                  const crypto::Ed25519SigningKey& key, crypto::KeyId keyId,
-                                  uint64 contentVersion, const Sha256Digest& scope,
-                                  Array<uint8>& out) noexcept;
+ROCKS_ASSETRUNTIME_API Result<void>
+WriteContentEnvelope(Allocator& allocator, Span<const uint8> manifest,
+                     const crypto::Ed25519SigningKey& key, crypto::KeyId keyId,
+                     uint64 contentVersion, const Sha256Digest& scope, Array<uint8>& out) noexcept;
 
 // 봉투를 4절 순서로 검증하고 같은 버퍼 안의 매니페스트 byte를 돌려준다. 판정 순서와 진단(7절 2):
 //   길이(헤더·서명 136 byte 미만, ContentEnvelopeMaxBytes 초과) CorruptPackage / InvalidArgument
@@ -98,10 +99,10 @@ Result<void> WriteContentEnvelope(Allocator& allocator, Span<const uint8> manife
 //   불일치 ContentNotTrusted / AuthenticationFailed(Signature). 신뢰 정보가 잘못됐으면(키 없음·null
 //   id·같은 id) 봉투를 보기 전에 InvalidArgument(진단 None)다. 검증 상태(SHA-512)는 allocator에서
 //   할당하고 그 실패는 그 오류다(진단 None).
-Result<Span<const uint8>> VerifyContentEnvelope(Allocator& allocator, Span<const uint8> envelope,
-                                                const ContentTrust& trust,
-                                                ContentEnvelopeInfo* info = nullptr,
-                                                AssetDiagnostic* failure = nullptr) noexcept;
+ROCKS_ASSETRUNTIME_API Result<Span<const uint8>>
+VerifyContentEnvelope(Allocator& allocator, Span<const uint8> envelope, const ContentTrust& trust,
+                      ContentEnvelopeInfo* info = nullptr,
+                      AssetDiagnostic* failure = nullptr) noexcept;
 
 // 신뢰 키 한 줄 텍스트다(content-sign keygen의 공개 파일, 신뢰 목록에 넣는 값 — 7절 5): keyId
 // 소문자 hex 32자(RFC 9562 byte 순서), 공백 하나, 공개키 소문자 hex 64자.
@@ -116,11 +117,12 @@ inline constexpr usize TrustedContentKeyTextChars =
     ContentKeyIdHexChars + 1 + ContentPublicKeyHexChars;
 
 // key를 그 텍스트와 NUL로 쓴다.
-void FormatTrustedContentKey(const TrustedContentKey& key,
-                             char (&out)[TrustedContentKeyTextChars + 1]) noexcept;
+ROCKS_ASSETRUNTIME_API void
+FormatTrustedContentKey(const TrustedContentKey& key,
+                        char (&out)[TrustedContentKeyTextChars + 1]) noexcept;
 
 // 그 텍스트 한 줄을 읽는다(hex 대소문자 무관, 끝의 "\n"·"\r\n" 하나는 받는다). 오류: 길이·구분자·
 // hex가 아닌 문자, null keyId는 InvalidArgument다(공개키 점의 올바름은 검증 때 본다 — Crypto).
-Result<TrustedContentKey> ParseTrustedContentKey(StringView text) noexcept;
+ROCKS_ASSETRUNTIME_API Result<TrustedContentKey> ParseTrustedContentKey(StringView text) noexcept;
 
 } // namespace rocks

@@ -81,15 +81,16 @@ inline constexpr const char MetalToolName[] = "MetalToolchain";
 
 // 표를 만든 빌드 대상 호스트 키다("windows-x64"·"macos-arm64" 등). 개발 호스트가 아닌 대상
 // (Android)은 빈 문자열이고 모든 도구의 fileCount가 0이다. 정의는 생성 TU에 있다.
-const char* ShaderToolHostKey() noexcept;
+ROCKS_SHADERTOOLTABLE_API const char* ShaderToolHostKey() noexcept;
 
 // 모든 binary 도구다(이름 ordinal 순). 정의는 생성 TU에 있다.
-Span<const ShaderTool> ShaderTools() noexcept;
+ROCKS_SHADERTOOLTABLE_API Span<const ShaderTool> ShaderTools() noexcept;
 
 // 이름이 정확히 같은(대소문자 구분) 도구다. 없으면 nullptr다.
-const ShaderTool* FindShaderTool(StringView name) noexcept;
+ROCKS_SHADERTOOLTABLE_API const ShaderTool* FindShaderTool(StringView name) noexcept;
 
 // tool의 이 호스트 파일 가운데 role이 같은 첫 파일이다. 없으면 nullptr다.
-const ShaderToolFile* FindShaderToolFile(const ShaderTool& tool, ShaderToolFileRole role) noexcept;
+ROCKS_SHADERTOOLTABLE_API const ShaderToolFile*
+FindShaderToolFile(const ShaderTool& tool, ShaderToolFileRole role) noexcept;
 
 } // namespace rocks::shader
