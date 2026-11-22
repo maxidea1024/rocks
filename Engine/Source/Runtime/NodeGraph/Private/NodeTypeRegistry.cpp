@@ -1,3 +1,6 @@
+#include "GraphMutatorCore.h"
+
+#include <Core/Hash.h>
 #include <Core/Text/NamePool.h>
 #include <NodeGraph/GraphSemantic.h>
 #include <NodeGraph/NodeTypeRegistry.h>
@@ -23,11 +26,41 @@ bool RegistryPinValid(const PinDescriptor& pin, uint32 typeCount) noexcept {
            (pin.type == UnresolvedPinType || pin.type < typeCount);
 }
 
+uint64 RegistryNameHash(Name name) noexcept {
+    return HashCombine(name.kind == NameKind::Normal ? name.id : 0, name.number);
+}
+
+uint64 RegistryTypeKey(Name domain, Name type) noexcept {
+    return HashCombine(RegistryNameHash(domain), RegistryNameHash(type));
+}
+
 } // namespace
 
 Result<void> GraphSchema::NormalizeSemanticNode(const GraphNode& node,
                                                 SemanticNodeWriter& writer) const noexcept {
     return writer.WriteNode(node);
+}
+
+ConnectVerdict GraphSchema::CanConnect(const GraphReadView& view,
+                                       const ConnectQuery& query) const noexcept {
+    static_cast<void>(view);
+    return detail::DefaultConnectVerdict(query);
+}
+
+Result<void> GraphSchema::CreateDefaultNodes(GraphRole role, Guid graph, GraphIdSource& ids,
+                                             GraphCommandList& out) const noexcept {
+    static_cast<void>(role);
+    static_cast<void>(graph);
+    static_cast<void>(ids);
+    static_cast<void>(out);
+    return Result<void>::Success();
+}
+
+Result<void> GraphSchema::Validate(const GraphReadView& view,
+                                   GraphDiagnosticList& out) const noexcept {
+    static_cast<void>(view);
+    static_cast<void>(out);
+    return Result<void>::Success();
 }
 
 Result<void> PinList::Add(const PinDescriptor& pin) noexcept {
@@ -57,7 +90,8 @@ const PinDescriptor* PinList::Find(Name key) const noexcept {
 }
 
 NodeTypeRegistry::NodeTypeRegistry(Allocator& allocator, NamePool& names) noexcept
-    : allocator_(allocator), names_(names), schemas_(allocator), nodeTypes_(allocator) {
+    : allocator_(allocator), names_(names), schemas_(allocator), nodeTypes_(allocator),
+      typeLookup_(allocator) {
 }
 
 NodeTypeRegistry::~NodeTypeRegistry() noexcept = default;
@@ -246,10 +280,60 @@ Result<NodeTypeRegistrationId> NodeTypeRegistry::AddNodeType(Name domain,
         return Result<NodeTypeRegistrationId>::Failure(pushed.Error());
     }
 
+    // 조회 표는 최적화다: 넣지 못하면 선형 탐색이 찾는다.
+    const uint32 index = static_cast<uint32>(nodeTypes_.Size() - 1);
+    AddTypeLookup(domain, descriptor.type, index);
+
     NodeTypeRegistrationId id;
     id.value = nextId_;
     ++nextId_;
     return Result<NodeTypeRegistrationId>::Success(id);
+}
+
+void NodeTypeRegistry::AddTypeLookup(Name domain, Name type, uint32 index) noexcept {
+    // 충돌(같은 hash의 다른 종류)이나 넣기 실패가 있으면 표가 불완전하다 — 빗나간 조회를 선형
+    // 탐색으로 확인한다.
+    const uint64 key = RegistryTypeKey(domain, type);
+    if (const uint32* existing = typeLookup_.Find(key); existing != nullptr) {
+        typeLookupComplete_ = false;
+        return;
+    }
+
+    if (!typeLookup_.InsertOrAssign(key, index)) {
+        static_cast<void>(typeLookup_.Erase(key));
+        typeLookupComplete_ = false;
+    }
+}
+
+void NodeTypeRegistry::RebuildTypeLookup() noexcept {
+    typeLookup_.Clear();
+    typeLookupComplete_ = true;
+    for (usize index = 0; index < nodeTypes_.Size(); ++index) {
+        const RegisteredNodeType& entry = nodeTypes_[index].registered;
+        AddTypeLookup(entry.domain, entry.descriptor.type, static_cast<uint32>(index));
+    }
+}
+
+const RegisteredNodeType* NodeTypeRegistry::LookupNodeType(Name domain, Name type) const noexcept {
+    if (const uint32* index = typeLookup_.Find(RegistryTypeKey(domain, type)); index != nullptr) {
+        const RegisteredNodeType& entry = nodeTypes_[*index].registered;
+        if (entry.domain == domain && entry.descriptor.type == type) {
+            return &entry;
+        }
+    }
+
+    // 표가 완전하면 빗나감이 곧 없음이다.
+    if (typeLookupComplete_) {
+        return nullptr;
+    }
+
+    for (const NodeTypeEntry& entry : nodeTypes_) {
+        if (entry.registered.domain == domain && entry.registered.descriptor.type == type) {
+            return &entry.registered;
+        }
+    }
+
+    return nullptr;
 }
 
 Result<NodeTypeRegistrationId>
@@ -284,7 +368,9 @@ Result<void> NodeTypeRegistry::UnregisterNodeType(NodeTypeRegistrationId id) noe
         // 공통 종류(도메인 None)는 해제할 수 없다.
         if (id.value != 0 && nodeTypes_[index].id.value == id.value &&
             !nodeTypes_[index].registered.domain.IsNone()) {
-            return nodeTypes_.TryRemoveAt(index);
+            auto removed = nodeTypes_.TryRemoveAt(index);
+            RebuildTypeLookup();
+            return removed;
         }
     }
 
@@ -302,23 +388,12 @@ const GraphSchema* NodeTypeRegistry::FindSchema(Name domain) const noexcept {
 }
 
 const RegisteredNodeType* NodeTypeRegistry::FindNodeType(Name domain, Name type) const noexcept {
-    for (const NodeTypeEntry& entry : nodeTypes_) {
-        if (entry.registered.domain.IsNone() && entry.registered.descriptor.type == type) {
-            return &entry.registered;
-        }
+    // 공통 종류가 먼저다(도메인 None으로 등록돼 있다).
+    if (const RegisteredNodeType* common = LookupNodeType(Name(), type); common != nullptr) {
+        return common;
     }
 
-    if (domain.IsNone()) {
-        return nullptr;
-    }
-
-    for (const NodeTypeEntry& entry : nodeTypes_) {
-        if (entry.registered.domain == domain && entry.registered.descriptor.type == type) {
-            return &entry.registered;
-        }
-    }
-
-    return nullptr;
+    return domain.IsNone() ? nullptr : LookupNodeType(domain, type);
 }
 
 Result<void> NodeTypeRegistry::CollectPins(const GraphDocument& document, const Graph& graph,

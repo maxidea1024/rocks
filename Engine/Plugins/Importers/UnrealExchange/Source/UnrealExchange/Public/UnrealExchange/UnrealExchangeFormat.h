@@ -3,6 +3,7 @@
 #include <Base/NumericLimits.h>
 #include <Base/Types.h>
 #include <Core/Text/NameComponent.h>
+#include <Core/Text/StringView.h>
 
 // Unreal 교환 묶음 형식의 공통 상수다(Docs/Design/UnrealExchange.ko.md 3절, 9절, 10.4절). 묶음은 UE
 // 쪽 RocksExport 플러그인이 쓰고 이 플러그인의 리더(ExchangeBundle.h)가 읽는다.
@@ -39,6 +40,11 @@ inline constexpr uint32 UnrealExchangeMaxDiagnostics = 4096;
 
 // blob을 검증할 때 한 번에 읽는 조각 크기다(파일 전체를 메모리에 올리지 않는다, 10.4절 12번).
 inline constexpr usize UnrealExchangeBlobChunkBytes = 64 * 1024;
+
+// 임포트한 에셋의 색인 태그 키다(9.2절 — 지금 UE objectPath와 묶음 redirect로 알게 된 옛 경로들,
+// 기존 에셋 조회가 찾는다, 10.5절 4번). 임포터 키는 `<임포터 이름>.` 접두다(AssetSystem 7절).
+inline constexpr StringView UnrealExchangeObjectPathTag = "UnrealExchange.ObjectPath";
+inline constexpr StringView UnrealExchangeFormerPathsTag = "UnrealExchange.FormerPaths";
 
 // 에셋·의존 번호가 없음을 나타내는 값이다.
 inline constexpr uint32 ExchangeNoIndex = NumericLimits<uint32>::Max();

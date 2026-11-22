@@ -19,7 +19,7 @@
 | A2 | AssetDatabase(7.1절, 하위 단계 A2a–A2f): `ProjectLayout`, 경로 정책, 인덱스(검색·의존·별칭·진단·캐시·감시), 저장·dirty, 이동·복제·삭제, 임포트 프레임워크, 각 단계의 13절 명령 | 인덱스·이동·동시 쓰기 시험(하위 단계마다 A1과 같은 완료 조건 넷) |
 | A3 | AssetNugget(9.1절, 하위 단계 A3a–A3c — Rockpile 레코드 계약): 키(공통 머리·세대·SCC)·Record(`.rnug` v2)·`NuggetFileSystemBackend`·`NuggetCache`(Memory 계층·세션 고정·소비 입력 대조)·일괄·비동기 요청, `NuggetRockpileBackend`는 계약 | 적중·무효화·손상·동시 기록·GC 시험 |
 | A4 | AssetCooker(10.2절 — 하위 단계 A4a–A4e) | 원본 없이 쿠킹·재현성·부분 쿠킹 시험 |
-| A5 | 텍스처: `Texture` 계열, `TextureSource`, ImageCore(BMP·TGA·PNG·PSD·DDS·TIFF·Radiance HDR·무손실 OpenEXR — 12.2절), TextureTools(임포터·빌드·쿠킹 처리기), 클래스 기본값 레코드·차이 쓰기·override 집합·지문(cookKey·Summary 지문 열 — A1 Summary·A4 cookKey 산출물을 이때 고친다, RuntimeClassMetadata '클래스 기본값 결정') | 14절 텍스처 시나리오 |
+| A5 | 텍스처: `Texture` 계열, `TextureSource`, ImageCore(BMP·TGA·PNG·JPEG·PSD·DDS·TIFF·Radiance HDR·무손실 OpenEXR — 12.2절), TextureTools(임포터·빌드·쿠킹 처리기), 클래스 기본값 레코드·차이 쓰기·override 집합·지문(cookKey·Summary 지문 열 — A1 Summary·A4 cookKey 산출물을 이때 고친다, RuntimeClassMetadata '클래스 기본값 결정') | 14절 텍스처 시나리오 |
 | A6 | 남은 명령행(쿠킹·너겟 — A2 명령은 각 하위 단계에서 더한다)·문서·검증 보고 | 14절 결과 기록 |
 
 ## 2. 사전 조사(2026-11-12)
@@ -124,7 +124,7 @@ AssetRuntime은 Engine을 모른다. 도구는 Engine을 링크하지 않고 `As
 | `AliasResolved`, `RootLost`(감시 루트 소실) | 그 밖 |
 | `InvalidMeshData`, `NonFiniteAttribute`, `UvOutOfRange`, `NonNormalizedWeights`, `TooManyInfluences`, `InfluencesTrimmed`, `MissingInfluences`(경고), `MaterialSlotFallback`, `NegativeBuildScale`, `UnsupportedCollisionShape`, `InvalidCollisionData`, `InvalidSkeletonData`, `SkeletonMismatch`, `UnknownBoneTrack`, `InvalidClipData`, `EventPropertiesDropped` | 메시·애니메이션([MeshAnimationAssets](MeshAnimationAssets.ko.md) 11절 — 앞 다섯 코드는 MA1이, `MaterialSlotFallback`·`NegativeBuildScale`은 MA2a가, `InvalidSkeletonData`·`SkeletonMismatch`는 MA4a가, `InfluencesTrimmed`(정보)·`MissingInfluences`는 MA5a가, `InvalidCollisionData`·`UnsupportedCollisionShape`(임포터 경고)는 MA3a가, `InvalidClipData`·`UnknownBoneTrack`·`EventPropertiesDropped`는 MA6a가 `AssetDiagnosticCode`에 등록, 나머지는 설계) |
 | `DuplicateLevelScript`(`levelScript` 말고 또 있는 LevelScript 파생 Actor), `LevelScriptNotInLevel`(`levelScript`가 `actors` 원소가 아님), `CrossLevelReference`(레벨에 저장하는 참조가 다른 Level, 또는 영속 Entity 참조 전 다른 셀의 객체를 가리킴), `NotPlaceableClass`(편집기 배치 명령이 `NotPlaceable` 클래스를 받음), `LevelScriptCollider`(LevelScript의 Collider component) | 레벨(설계 — [레벨 스크립트](LevelScript.ko.md) 4.9절. 저장·쿡은 InvalidArgument, cooked 로드는 CorruptPackage) |
-| `CorruptBundle`, `UnsupportedBundleVersion`, `UnknownField`, `UnsupportedAsset`, `LossyOriginAccepted`, `UnsupportedSourceLayout`, `GammaMismatch`, `GeneratedLodBaked`, `BakedColorQuantized`, `UnrealPathRenamed`, `UnrealPathTooLong`, `UnrealPathCollision`, `MissingUnrealDependency`, `UntranslatedMaterialNode`, `MaterialBakedFallback`, `ParameterDefaultConflict`, `ParameterResolveMismatch` | Unreal 교환 임포트([Unreal 교환 형식](UnrealExchange.ko.md) 10.3절). `CorruptBundle`·`UnsupportedBundleVersion`·`UnknownField`·`UnsupportedAsset`·`UnrealPathRenamed`·`UnrealPathTooLong`·`UnrealPathCollision`·`MissingUnrealDependency`는 UX1a 리더가 내며 `AssetDiagnosticCode`에 등록(2026-11-21, 10.4절), 나머지는 설계 |
+| `CorruptBundle`, `UnsupportedBundleVersion`, `UnknownField`, `UnsupportedAsset`, `UnsupportedSourceLayout`, `GammaMismatch`, `GeneratedLodBaked`, `BakedColorQuantized`, `UnrealPathRenamed`, `UnrealPathTooLong`, `UnrealPathCollision`, `MissingUnrealDependency`, `UntranslatedMaterialNode`, `MaterialBakedFallback`, `ParameterDefaultConflict`, `ParameterResolveMismatch` | Unreal 교환 임포트([Unreal 교환 형식](UnrealExchange.ko.md) 10.3절). `CorruptBundle`·`UnsupportedBundleVersion`·`UnknownField`·`UnsupportedAsset`·`UnrealPathRenamed`·`UnrealPathTooLong`·`UnrealPathCollision`·`MissingUnrealDependency`는 UX1a 리더가 내며 `AssetDiagnosticCode`에 등록(2026-11-21, 10.4절), 나머지는 설계 |
 
 ## 5. 패키지 포맷 v1
 
@@ -695,8 +695,8 @@ A3는 Rockpile 설계([Rockpile](Rockpile.ko.md) 12·17절)가 요구한 레코�
 2. **키(A3a)**: `NuggetKeyWriter` — 고정 순서로 타입 태그(u8)와 값을 SHA-256에 흘려 넣는다(byte 열을 모으지 않는다).
    - 태그: None(값 없음 — Optional unset 등, 다음 필드와 경계가 섞이지 않게)·Bool·U32·U64·I64·F32·F64(bit 패턴 — NaN은 payload·부호와 무관하게 quiet NaN 하나로 단일화, -0과 +0은 다르다)·Guid(16 byte, 정규 인코딩)·Digest(32 byte)·String(u64 길이 + UTF-8, 유효하지 않은 UTF-8은 InvalidArgument)·Bytes(u64 길이 + byte)·List(u64 원소 수 — 원소는 이어지는 기록)·Map(u64 항목 수 — 항목은 키·값 기록 쌍, 키의 정규 인코딩 byte 사전순으로 정렬해 쓴다)·Set(u64 원소 수 — 정규 인코딩 byte 사전순). Map·Set은 그 컨테이너의 항목 인코딩만 임시로 모아 정렬한 뒤 흘려 넣는다(원소 수는 리플렉션 상한 `MaxArrayElements` 안 — 중첩 컨테이너는 안쪽부터 같은 규칙)·Field(u64 길이 + 필드 이름 — 리플렉션 기록이 필드마다 앞에 둔다)·Struct(struct 시작)·End(struct 끝 — 필드 수를 미리 모르는 struct의 경계, 중첩 struct의 필드가 바깥 필드와 섞이지 않게)·Raw(이미 인코딩한 항목 byte를 그대로 — Map·Set 정렬 뒤 흘려 넣을 때만, 태그를 따로 쓰지 않는다). 길이 접두가 모든 가변 길이에 있으므로 이웃 기록과 경계가 모호하지 않다.
    - 리플렉션 값 기록 `WriteReflected(lease, value)`: struct 필드를 선언 순서로 Field(이름) + 태그 + 값으로 쓴다(재귀 — struct·Array·Map·Set·Optional(unset이면 None)·enum(underlying 정수 — 열거자 이름만 바꾸는 것은 결과에 영향이 없다)·Transform 등 리플렉션 값 종류 전부. 쓸 수 없는 종류(객체 참조·Opaque)는 Unsupported). 순회는 ReflectionText에 공용 visitor(`VisitValues(target, visitor, options)` — ExportJson과 같은 스키마·경로 연산 순회, 필드 이름·FieldValue·컨테이너 시작·끝을 차례로 넘긴다)를 더해 쓴다 — 순회를 AssetNugget에 따로 만들지 않는다(기반 보강, ReflectionExtensions 10절에 함께 적는다). 이름·타입이 들어가므로 같은 타입 필드를 맞바꾸거나 이름만 바꿔도 키가 바뀐다. 처리기는 설정을 손으로 쓰지 않고 이것으로 쓴다(R-0의 가장 흔한 실패 — 필드 빠뜨림 — 를 막는다). 처리기마다 "설정 필드 하나씩 바꾸면 키가 바뀐다" 변이 시험을 의무로 둔다.
-   - 키 진단: 선택 기록 sink(`NuggetKeyTrace` — 태그·값을 사람이 읽는 줄로)를 writer에 걸 수 있다(미적중 원인 추적·golden 시험 — UE DDC 키 디버깅 대응). 걸지 않으면 비용이 없다.
-   - 공통 머리 `WriteNuggetKeyHeader(writer, {processor, processorVersion}, projectGeneration)`는 `"RocksAssetNugget"`·키 형식 버전(1)·엔진 세대 Guid·프로젝트 세대 Guid(없으면 null)·처리기 Guid·처리기 버전 Guid·`deterministic::Version`·`build::ToolchainFingerprint()` 순서로 쓴다(9절 공통 항목. 인코더 이름·버전·설정은 처리기가 `WriteEncoder(name, version, settings)` 목록으로 이어 쓴다). 키 = `Finish()`의 SHA-256(`NuggetKey`). 에셋이 아닌 처리기(셰이더 job — N1)는 이 키를 Record 키로 그대로 쓴다.
+   - 키 진단: 선택 기록 sink(`NuggetKeyTrace` — 태그·값을 사람이 읽는 줄로)를 writer에 걸 수 있다(미적중 원인 추적·golden 시험 — UE DDC 키 디버깅 대응). 걸지 않으면 비용이 없다 `WriteRaw`(이미 인코딩한 byte)는 `raw <크기>` 뒤에 내용을 32 byte씩 16진 줄로 남긴다(손으로 정렬해 흘린 Map·Set의 키 불일치를 trace로 찾게 — 2026-11-23 rocks-c1 제안).
+   - 공통 머리 `WriteNuggetKeyHeader(writer, {processor, processorVersion}, projectGeneration)`는 `"RocksAssetNugget"`·키 형식 버전(1)·엔진 세대 Guid·프로젝트 세대 Guid(없으면 null)·처리기 Guid·처리기 버전 Guid·`deterministic::Version`·`build::ToolchainFingerprint()` 순서로 쓴다(9절 공통 항목. 인코더 이름·버전·설정은 처리기가 `WriteNuggetEncoder(writer, name, version, settings)` 목록으로 이어 쓴다). 키 = `Finish()`의 SHA-256(`NuggetKey`). 에셋이 아닌 처리기(셰이더 job — N1)는 이 키를 Record 키로 그대로 쓴다.
 3. **SCC 키와 Record 주소(A3a)**: 에셋 처리기는 SCC 식(9절)을 쓴다 — `NuggetSccKey(members, external)`.
    - 입력: 구성원 (AssetId, 지역 입력 키), SCC 밖 의존 튜플 (구성원 AssetId, 역할 문자열, 의존 AssetId, 그 의존의 구성원 key). 함수가 정렬한다(입력 순서와 무관한 결과): 비교는 각 원소의 정규 인코딩 byte(AssetId 16 byte, 역할은 u64 길이 + UTF-8)의 사전순이고 튜플은 필드 순서대로 비교한다. 빈 구성원 목록·구성원 AssetId 중복·null AssetId는 InvalidArgument, 튜플의 구성원 AssetId가 구성원이 아니거나 의존 AssetId가 구성원이면(SCC 안 간선은 외부 의존이 아니다) InvalidArgument. 외부 튜플의 완전 중복은 하나로 합친다(같은 의존을 같은 역할로 두 번 참조해도 결과는 같다 — 간선 다중도는 처리 결과에 영향이 없다).
    - SCC key = SHA-256(태그, 정렬된 구성원 목록, 정렬된 외부 튜플 목록). 구성원 key = SHA-256(태그, SCC key, AssetId).
@@ -907,6 +907,15 @@ A3는 Rockpile 설계([Rockpile](Rockpile.ko.md) 12·17절)가 요구한 레코�
 | A4d | 게시·전체 정리·부분 병합·재사용 조건·IncompatibleCook·CorruptEntry·실패 시 게시본 불변·보고서 | 시나리오 13·22·27 |
 | A4e | `asset-cook` 명령·`--verify-nuggets`(NuggetMismatch 등록)·bundle 지정자(리플렉션 조정)·저장 때 bundle 태그 | 명령 출력·verify(A4는 늘 같음)·bundle 구성원 |
 
+- A4a 상태: **구현** — 대조표 14.1.61절, coverage 14.1.62절. 구현에서 정한 것:
+  - 모듈 `Engine/Source/Developer/AssetCooker`(`CookConfig.h` — `TargetProfile`·`PrimaryAssetRule`·`CookSettings`·`CookBulkCodec` 리플렉션 타입, `ReadTargetProfile`·`ReadCookSettings`·`HashTargetProfile`·`HashCookSettings`·`ClassifyCookPath`). 엔진 기본 파일 `Engine/Config/TargetProfiles/Windows.json`(graphicsBackend D3D12)·`Android.json`(빈 backend — 후속).
+  - PrimaryAsset 규칙은 `{type, directories}`다(UE `FPrimaryAssetTypeInfo` — 디렉터리는 하나 이상, 빈 목록은 거부, 진단은 규칙 순번 index와 디렉터리 순번 item). 처음 구현은 "codec이 배열 원소 안의 배열에 대입하지 못한다"고 보고 `{type, directory}`로 바꿨으나 틀린 가정이었다 — 그 제약은 Config의 배열 연산 문법(`+=` 등)의 것이고 ImportJson은 원소 안 배열을 통째 교체로 받는다(리뷰 필수 — 확인 없이 스키마를 바꾸지 않는다).
+  - 리뷰 반영(필수 둘·권장 둘): `directories` 배열 복원, `WriteReflected` 실패 갈래는 문자열 칸 읽기(FieldValue)가 할당하므로 도달 가능 — 할당 실패 시험에 규칙 SHA-256을 더해 덮었다(처음 근거 "할당하지 않는다"는 틀렸다), 할당 실패 시험의 끝 상태를 기준(시스템 allocator)과 칸·SHA-256까지 대조, 주입했으면 적어도 하나가 실패(삼킨 실패 없음).
+  - 프로파일 id는 `[A-Za-z0-9_]` 1–64 byte(파일 이름 — 경로 문자가 들어가지 않게)이고 읽기가 미리 채운다(파일에서 생략 가능, 다르면 거부 — 대소문자 구분). 읽을 때마다 기본값에서 시작한다.
+  - 거부는 `InvalidArgument` + `CookConfigFailure{code InvalidSetting, file, field, index, line, column}`, codec 진단은 호출자의 `TextDiagnostics`에 남는다. 읽기·할당 오류는 code None + 그 오류(규칙 위반과 구분 — 경로 판정 `ClassifyCookPath`도 할당 실패를 `OutOfMemory`로 돌려준다, 처음 구현은 규칙 위반으로 바꿨다).
+  - 경로: 에셋은 LogicalPath 규칙, 디렉터리는 끝 '/'를 뗀 것이 마운트(`/Game/` — 대소문자 무시)이거나 논리 경로다. 마운트 없는 `/Game`(끝 '/' 없음)은 거부(에셋 경로에는 이름이 필요하다).
+  - 설정 파일 상한 `CookConfigMaxFileBytes` 1 MiB.
+
 ## 11. 런타임 로딩과 수명(계획 §9.2 계약)
 
 ### 11.1 API
@@ -1091,11 +1100,12 @@ UE와 다른 점과 이유:
 | 무손실 OpenEXR(압축 없음·RLE·ZIPS·ZIP·PIZ, half·float·uint 채널, scanline·tile) | 채널 수·정밀도에 따라 R16F·RGBA16F·R32F·RGBA32F |
 | DDS 비압축 DXGI 형식(R8·R8G8·RGBA8·BGRA8·BGRX8·R16·RGBA16·R16F·RGBA16F·R32F·RGBA32F, sRGB 변형, 레거시 헤더의 같은 형식) | 같은 정밀도의 TextureSource 형식. 2D·Cube·2DArray·Volume·CubeArray와 원본 mip 체인을 그대로 받는다 |
 | TIFF 무손실(압축 없음·LZW·Deflate·PackBits, 8·16비트 정수, 32비트 float, 회색·RGB·알파·팔레트, strip·tile) | G8·G16·GA8·GA16·RGBA8·RGBA16·R32F·RGBA32F(PNG·PSD와 같은 대응) |
-| JPEG, 손실 WebP, 손실 압축 EXR(B44·B44A·DWAA·DWAB, 32비트 float 채널의 PXR24), JPEG 압축 TIFF, 블록 압축 DDS(BC1–7 등) | `LossySource`로 거부(사용자 결정: 무손실만). 블록 압축 DDS는 UE 5.8도 원본으로 받지 않는다 — DDS 파서는 BC를 인식하지만 원본 형식 대응표(`DXGIRawFormatMap`, `DXGIFormatGetClosestRawFormat`)에 없어 "DXGIFormat not supported"로 거부(ImageCore/Private/DDSFile.cpp 1289·1350, UnrealEd/Private/Factories/EditorFactories.cpp `UTextureFactory::ImportDDS` 3289·3320–3325) |
+| JPEG(JFIF·Adobe·EXIF 컨테이너, baseline·progressive, 8비트 정밀도, 회색 1성분·YCbCr/RGB 3성분) | 회색 G8, 색 RGBA8(알파 255, sRGB). 임포트 때 libjpeg-turbo로 풀어 정규 픽셀로 저장한다(12.1절 원칙). CMYK·YCCK(4성분)·12비트·lossless JPEG는 `UnsupportedSourceFormat`. EXIF 회전 정보는 적용하지 않는다(UE 5.8 ImageWrapper JPEG와 같다) |
+| 손실 WebP, 손실 압축 EXR(B44·B44A·DWAA·DWAB, 32비트 float 채널의 PXR24), JPEG 압축 TIFF, 블록 압축 DDS(BC1–7 등) | `LossySource`로 거부(사용자 결정: JPEG 밖의 손실 원본은 받지 않는다 — 2026-11-23 개정). 블록 압축 DDS는 UE 5.8도 원본으로 받지 않는다 — DDS 파서는 BC를 인식하지만 원본 형식 대응표(`DXGIRawFormatMap`, `DXGIFormatGetClosestRawFormat`)에 없어 "DXGIFormat not supported"로 거부(ImageCore/Private/DDSFile.cpp 1289·1350, UnrealEd/Private/Factories/EditorFactories.cpp `UTextureFactory::ImportDDS` 3289·3320–3325) |
 
 2026-11-13 사용자 결정: DDS(비압축)·TIFF(무손실)·Radiance HDR·무손실 OpenEXR 디코더를 A5 범위에 넣는다(HDR·EXR은 처음에 "후속"이었다). PCX는 UE가 받지만 쓰이지 않으므로 지원하지 않는다. IES(조명 프로파일)는 텍스처 원본이 아니라 별도 에셋 종류라 조명 단계, UDIM은 가상 텍스처(12.4절 계약)와 함께 다룬다. 블록 압축(BC·ASTC·ETC)은 원본이 아니라 쿠킹 결과 형식이며 텍스처 파이프라인의 압축 단계(화면 마일스톤 뒤, 사용자 결정 순서)에서 인코더와 함께 구현한다.
 
-2026-11-20 사용자 결정(무손실 원칙의 좁은 예외): UE 5.8은 JPEG로 임포트한 텍스처를 기본 설정에서 JPEG 바이트 그대로 원본으로 보관한다. 그래서 [Unreal 교환 형식](UnrealExchange.ko.md)(4.3절)으로 가져오는 텍스처 가운데 원본부터 손실 데이터인 것이 있다. 이런 텍스처는 기본으로 `LossySource` 오류다. 명시 옵션 `--allow-lossy-origin`을 주면 해제한 픽셀을 원본으로 받고, ImportRecord의 `options`에 옵션을, 결과에 `lossyOrigin` 표시를 남기며 `LossyOriginAccepted` 경고를 낸다. 옵션이 `options`에 남으므로 재임포트도 같게 판단한다. 이 예외는 Unreal 교환 경로에만 있고, 파일 원본 임포트(위 표)의 JPEG 거부는 그대로다.
+2026-11-23 사용자 결정(2026-11-20 결정을 대체): JPEG 원본을 UE처럼 받는다. UE 5.8은 JPEG를 임포트할 때 기본 설정(`[TextureImporter] RetainJpegFormat` = True — BaseEditor.ini)에서 JPEG 바이트를 원본으로 보관하고 빌드 때 푼다(EditorFactories.cpp 2960–3006). Rocks는 받는 범위를 UE와 같게 하되 저장은 12.1절 원칙대로 **임포트 때 풀어 정규 픽셀로** 둔다 — 근거: 디코더 버전과 무관한 동일 빌드 입력, 빌드·쿠킹 경로에 원본 형식 코드가 없음(결정성 — 10절). 대가는 원본 크기(JPEG보다 크다 — Zstd로 줄인다)이고, JPEG 바이트 보관(UE `RetainJpegFormat` 대응 — 빌드가 결정적 정수 IDCT로 푼다)은 크기가 문제가 될 때의 후속 선택이다. 디코더는 외부 라이브러리 libjpeg-turbo다(ThirdParty, 버전 고정 — UE ImageWrapper와 같은 구현. 사용자 결정 2026-11-23: 구현 난이도가 큰 것은 외부 라이브러리, 간단한 것은 자체 구현 — progressive·Huffman·IDCT·업샘플링·마커 변형을 직접 만들고 검증하는 비용이 크다). 정수 IDCT `JDCT_ISLOW`, SIMD 없이 C 경로로 빌드한다(NASM 빌드 의존을 두지 않는다 — 임포트 때 한 번 푸는 용도라 속도보다 빌드 단순성, 결과는 정수 산술이라 호스트와 무관하다). ImageCore가 libjpeg-turbo 호출을 감싸 다른 원본 디코더와 같은 결과 형식(G8·RGBA8)·진단(`InvalidSource`·`UnsupportedSourceFormat`)으로 낸다. 다른 원본 디코더(BMP·TGA·PNG·PSD·DDS·TIFF·HDR·EXR)는 자체 구현 그대로다(zlib 등 범용 압축은 Core Compression). [Unreal 교환 형식](UnrealExchange.ko.md)(4.3절)으로 가져오는 JPEG·UEJPEG 원본 텍스처도 옵션 없이 받는다(해제한 픽셀 — `--allow-lossy-origin`·`LossyOriginAccepted`는 없앴다).
 
 원본별 규칙:
 
@@ -1208,7 +1218,7 @@ UE와 다른 점과 이유:
 | `NumLayers`·`LayerFormat`·`LayerColorInfo_LockProtected`(다층 원본) | numLayers = 1만 | 계약 |
 | `Blocks`·`BaseBlockX`·`BaseBlockY`·`BlockDataOffsets`(UDIM 다중 블록) | 블록 1개만 | 계약(가상 텍스처와 함께) |
 | `bLongLatCubemap` | 없음 | 후속(equirect → Cube 변환 — HDR 디코더는 A5) |
-| `CompressionFormat`(None·PNG·JPEG·UEJPEG·UEDELTA) | 정규 픽셀 + Zstd(원본 압축 바이트를 저장하지 않음 — 12.1절 근거, JPEG는 손실이라 받지 않음) | 구현(설계 차이) |
+| `CompressionFormat`(None·PNG·JPEG·UEJPEG·UEDELTA) | 정규 픽셀 + Zstd(원본 압축 바이트를 저장하지 않음 — 12.1절 근거. JPEG도 받되 풀어서 저장한다 — UE 기본 `RetainJpegFormat` 보관은 후속 선택, 12.2절 2026-11-23) | 구현(설계 차이) |
 | `Id`·`bGuidIsHash` | 콘텐츠 SHA-256(`BulkDataRef`) | 구현 |
 | `BulkData`(FEditorBulkData) | `BulkDataRef` → Bulk 섹션 | 구현 |
 | `Owner`, `BulkDataLock`·`LockState`·`LockedMipData`·`NumLockedMips`, `TornOffGammaSpace`·`TornOffOwnerName`·`TornOffTextureClass` | 런타임 소유·잠금·분리 상태(데이터 아님) | 대응하지 않음 |
@@ -2914,6 +2924,28 @@ A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항�
 | `NuggetRequest::WaitForCompletion`·`~NuggetCache`·`NuggetCache::Shutdown`의 `platform::Fatal` | 그 갈래 | 자식 프로세스(`NuggetRequest_Fatal`)에서 실행하고 문구까지 확인한다 — 부모 측정에는 자식의 profile이 합쳐지지 않는다 |
 | `ReservePutBytes`의 CAS 재시도 | 재시도 | 다른 스레드가 같은 순간 예약할 때만이다(경합 — 결정적으로 만들 수 없다). 재시도는 같은 판정을 다시 한다 |
 | `Shutdown`의 `Notify(AfterCancelGets)` 줄 | 줄 수 0 | 측정 산물이다 — 앞 잠금 블록(Fatal 갈래 포함) 뒤 gap 영역이 그 줄에 붙는다. hook 두 지점은 시험이 확인한다 |
+
+#### 14.1.61 요구 대조표(A4a — 쿠킹 설정)
+
+시험은 EngineTests `Engine/Source/Developer/AssetCooker/Tests/CookConfigTests.cpp`(`CookConfig_*` 7 — 메모리 파일 시스템, 엔진 기본 파일은 저장소 `Engine/Config`)다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 프로파일 병합(10.2 결정 2) | 엔진만(id 채움·기본값), 엔진 위 프로젝트(멤버 병합 — 없는 칸은 엔진 값), 다시 읽으면 기본값에서 시작, 엔진 기본 파일 Windows·Android | `CookConfig_ProfileMerge` |
+| 프로파일 거부 | id 형식(빈·공백·`..`·`-`·`~`·65 byte, 64 byte는 형식 통과), 엔진 파일 없음(프로젝트만 있어도), 파일 id 다름(엔진·프로젝트, 대소문자), bulkAlignment(4·12·131072·3 거부, 0·8·65536 받음), JSON 문법 위치, 모르는 키·enum 값·타입(진단), 크기 상한(CapacityExceeded), 읽기·크기·열기 실패(code None), failure 없이 거부 | `CookConfig_ProfileRejects`·`CookConfig_Boundaries` |
+| 쿠킹 규칙(결정 3) | 파일 없으면 기본값, 모든 칸(규칙의 디렉터리 둘), 경로 형식 13가지(에셋·디렉터리·마운트·대소문자·끝 '/' 없는 마운트·다른 마운트·빈 구성 요소·공백·빈·'/'), 경로 판정의 할당 실패 | `CookConfig_SettingsFields` |
+| 쿠킹 규칙 거부 | alwaysCook·neverCook 경로(순번), PrimaryAsset 타입(모름·struct·Asset 아닌 클래스 — 순번)·디렉터리(에셋 경로·다른 마운트·여럿 중 셋째 — 디렉터리 순번·빈 목록·칸 없음), JSON 문법, 대입 진단(배열 칸에 문자열 — 원소 안 배열 포함·모르는 키), 읽기 실패 | `CookConfig_SettingsRejects` |
+| SHA-256(결정 2·3) | 같은 내용 같음(다시 읽기), 프로파일 칸 넷마다·규칙 변형 여덟(값·원소·순서·Soft·PrimaryAsset)마다 서로 다름, 타입 미등록 NotFound | `CookConfig_Hashes`·`CookConfig_Boundaries` |
+| 할당 실패 | 프로파일·규칙 읽기·두 SHA-256 — 실패한 호출은 모두 OutOfMemory(규칙 위반으로 바꾸지 않는다), 주입하면 적어도 하나 실패, 실패 없는 결과는 기준과 칸·SHA-256까지 같다 | `CookConfig_AllocationFailures` |
+| 조합(14 완료 조건 2) | 파일(엔진·프로젝트·규칙) × 상태(없음·정상·문법·진단·규칙 위반·크기·IO) × 칸 | 위 시험 |
+
+#### 14.1.62 Coverage(A4a)
+
+측정(2026-11-23, Windows, `ROCKS_MSVC_TOOLSET=14.44`): `-Target EngineTests -Filter CookConfig -Sources Engine/Source/Developer/AssetCooker/Private` — `CookConfig.cpp` 줄 264/266·분기 143/144(리뷰 반영 뒤 — 남은 줄 둘은 아래 Publish 갈래).
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| `ApplyJsonFile`의 `Publish` 실패 | 실패 | 값 대상의 게시는 준비한 사본과 무할당 맞바꾸기다(ReflectionText TextAssignments.h — 실패는 살아 있는 객체의 묶음 게시에만 있다) |
 
 ## 15. PNG 디코더 범위
 

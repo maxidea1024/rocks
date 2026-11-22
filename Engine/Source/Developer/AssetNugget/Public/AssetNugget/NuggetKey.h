@@ -96,6 +96,7 @@ public:
     void WriteStructBegin() noexcept;
     void WriteStructEnd() noexcept;
     // 이미 인코딩한 기록 byte를 그대로 흘려 넣는다(태그를 붙이지 않는다 — 정렬한 Map·Set 항목).
+    // trace에는 `raw <크기>`와 내용 16진 줄(32 byte씩)을 남긴다.
     void WriteRaw(Span<const uint8> encoded) noexcept;
 
     // 오류 상태로 만든다(이미 오류면 첫 오류를 둔다 — 키 기록을 돕는 함수가 자기 실패를 기록기에

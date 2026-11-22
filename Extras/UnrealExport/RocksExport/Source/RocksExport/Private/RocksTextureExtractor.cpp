@@ -145,7 +145,7 @@ namespace RocksTextureExtractorPrivate
 		{
 			Writer.String(TEXT("jpeg"));
 			Body.Diagnostics.Add({TEXT("LossyOrigin"), RocksExport::SeverityInfo,
-				TEXT("the source is stored as JPEG; Rocks import rejects it unless --allow-lossy-origin is given")});
+				TEXT("the source is stored as JPEG; decoded pixels are exported and Rocks import accepts them")});
 		}
 		else
 		{

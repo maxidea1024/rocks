@@ -3,6 +3,7 @@
 #include <Platform/Memory.h>
 #include <Platform/Path.h>
 #include <Platform/Process.h>
+#include <Platform/StandardStream.h>
 #include <Platform/Thread.h>
 #include <TestSupport/ProcessProbe.h>
 #include <TestSupport/Test.h>
@@ -443,6 +444,52 @@ TEST(Process_LargeInputAndOutputDoNotDeadlock) {
 
     AlignedFree(input);
     AlignedFree(output);
+}
+
+TEST(StandardStream_PipesPassBytesUnchanged) {
+    // 표준 스트림 API(Platform/StandardStream.h — SE-B7): 자식이 ReadStandardInput·
+    // WriteStandardStream으로 pipe 입력을 출력에 그대로 옮긴다(CR·LF·NUL·Ctrl-Z·비 UTF-8 byte도
+    // 바뀌지 않는다 — text 모드 변환 없음). 오류 스트림은 따로 간다.
+    constexpr usize Bytes = 70000; // pipe 버퍼보다 커서 여러 번 읽고 쓴다
+    static uint8 input[Bytes];
+    static uint8 output[Bytes + 1];
+    for (usize at = 0; at < Bytes; ++at) {
+        const uint8 special[] = {'\r', '\n', 0, 0x1A, 0xFF, 0x80};
+        input[at] = at % 7 == 0 ? special[(at / 7) % sizeof(special)] : uint8(at * 31 + 7);
+    }
+
+    Probe probe;
+    probe.Add("platform-cat");
+    ProcessStartInfo info = probe.Info();
+    info.input = ProcessStreamMode::Pipe;
+    info.output = ProcessStreamMode::Pipe;
+    info.error = ProcessStreamMode::Pipe;
+    char error[16];
+    ProcessRunOptions options;
+    options.input = input;
+    options.inputBytes = Bytes;
+    options.output = output;
+    options.outputCapacity = Bytes + 1u;
+    options.error = error;
+    options.errorCapacity = sizeof(error);
+    const auto run = RunProbe(info, options);
+    if (!SkipUnsupported(run.status)) {
+        CHECK(run.status);
+        CHECK(run.exit.kind == ProcessExitKind::Exited && run.exit.code == 0);
+        CHECK(run.outputBytes == Bytes && memcmp(input, output, Bytes) == 0);
+        CHECK(run.errorBytes == 4 && memcmp(error, "done", 4) == 0);
+    }
+}
+
+TEST(StandardStream_RejectsBadArguments) {
+    // null buffer·용량 0은 InvalidArgument, 0 byte 쓰기는 성공(아무것도 쓰지 않는다).
+    CHECK(platform::WriteStandardStream(StandardStream::Output, nullptr, 1).status.code ==
+          FileCode::InvalidArgument);
+    const FileTransfer empty = platform::WriteStandardStream(StandardStream::Error, "", 0);
+    CHECK(empty.status && empty.bytes == 0);
+    char buffer[4];
+    CHECK(platform::ReadStandardInput(nullptr, 4).status.code == FileCode::InvalidArgument);
+    CHECK(platform::ReadStandardInput(buffer, 0).status.code == FileCode::InvalidArgument);
 }
 
 TEST(Process_OutputBeyondCapacityIsDrainedAndTruncated) {

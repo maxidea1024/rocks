@@ -193,9 +193,23 @@ Result<void> VmSession::PlanReload(Span<const VmReloadModule> modules,
             return VmReject(reason, "the new revision has another module path");
         }
 
-        // 새 revision은 묶음의 옛 revision을 부르지 않는다(묶음은 함께 바뀐다 — 6절 LC7c2b).
+        // 새 revision은 묶음의 다른 새 revision이나 묶음 밖 지금 모듈만 부른다(묶음은 함께
+        // 바뀐다 — 6절 LC7c2b, LC7c 리뷰 3: 이전 revision·session 밖 모듈도 아니다).
         for (const VmLinkedModule::Import& import : fresh->imports_) {
-            if (import.module != nullptr && oldOf(import.module)) {
+            if (import.module == nullptr) {
+                continue;
+            }
+
+            bool current = false;
+            for (const VmLinkedModule* existing : modules_) {
+                current = current || (existing == import.module && !oldOf(existing));
+            }
+
+            for (const VmReloadModule& other : modules) {
+                current = current || other.fresh == import.module;
+            }
+
+            if (!current) {
                 return VmReject(reason,
                                 "the new revision of {} imports an old revision of the "
                                 "reload set",
@@ -435,10 +449,15 @@ bool VmSession::Uses(const VmLinkedModule* link) const noexcept {
 }
 
 void VmSession::PruneRetired() noexcept {
-    // 직접 참조되는 revision과, 그 revision의 필드 번역이 지나가는 뒤 revision만 남긴다(포인터만
-    // 비교한다 — 놓인 revision 객체를 읽지 않는다).
+    // 직접 참조되거나 살아 있는 실행이 import로 닿는 revision과, 그 revision의 필드 번역이 지나가는
+    // 뒤 revision만 남긴다(import는 정적으로 묶인다 — Keep 실행의 옛 코드가 부르는 옛 revision도
+    // 산다, LC7c 리뷰 1). 포인터만 비교한다 — 놓인 revision 객체를 읽지 않는다.
     for (Retired& entry : retired_) {
         entry.needed = Uses(entry.link);
+        for (const Suspended& execution : suspended_) {
+            entry.needed =
+                entry.needed || (execution.live && ExecutionReaches(execution, entry.link));
+        }
     }
 
     for (bool grew = true; grew;) {
@@ -462,6 +481,90 @@ void VmSession::PruneRetired() noexcept {
             static_cast<void>(retired_.TryRemoveAt(at - 1));
         }
     }
+}
+
+bool VmSession::ExecutionReaches(const Suspended& execution,
+                                 const VmLinkedModule* link) const noexcept {
+    // frame 모듈에서 import(전이)를 따라 link에 닿는지다. 따라간 모듈이 상한을 넘으면 닿는다고
+    // 본다(보수적 — revision을 더 오래 붙잡을 뿐이다).
+    const VmLinkedModule* seen[MaxReachModules] = {};
+    uint32 count = 0;
+    for (const VmExecution::Frame& frame : execution.frames) {
+        if (frame.link == link) {
+            return true;
+        }
+
+        bool known = false;
+        for (uint32 at = 0; at < count; ++at) {
+            known = known || seen[at] == frame.link;
+        }
+
+        if (!known) {
+            if (count == MaxReachModules) {
+                return true;
+            }
+
+            seen[count++] = frame.link;
+        }
+    }
+
+    for (uint32 at = 0; at < count; ++at) {
+        for (const VmLinkedModule::Import& import : seen[at]->imports_) {
+            if (import.module == nullptr) {
+                continue;
+            }
+
+            if (import.module == link) {
+                return true;
+            }
+
+            bool known = false;
+            for (uint32 other = 0; other < count; ++other) {
+                known = known || seen[other] == import.module;
+            }
+
+            if (!known) {
+                if (count == MaxReachModules) {
+                    return true;
+                }
+
+                seen[count++] = import.module;
+            }
+        }
+    }
+
+    return false;
+}
+bool VmSession::AppendGateState(Array<uint64>& out) const noexcept {
+    auto bits = [](const void* pointer) noexcept {
+        return uint64(reinterpret_cast<uptr>(pointer));
+    };
+    bool ok = out.TryPushBack(modules_.Size()) && out.TryPushBack(nextOrder_);
+    for (const VmLinkedModule* module : modules_) {
+        ok = ok && out.TryPushBack(bits(module));
+    }
+
+    for (const Connection& connection : connections_) {
+        ok = ok && out.TryPushBack(connection.publisher) &&
+             out.TryPushBack(connection.subscriber) && out.TryPushBack(bits(connection.module)) &&
+             out.TryPushBack(connection.handler) &&
+             out.TryPushBack(bits(connection.key.name.Data())) &&
+             out.TryPushBack(connection.key.name.ByteCount()) &&
+             out.TryPushBack(bits(connection.key.path.Data())) &&
+             out.TryPushBack(connection.order) && out.TryPushBack(connection.active ? 1 : 0);
+    }
+
+    for (const Instance& instance : instances_) {
+        if (!instance.attached) {
+            continue;
+        }
+
+        ok = ok && out.TryAppend(instance.written.View()) &&
+             out.TryPushBack(bits(instance.tickStopModule)) &&
+             out.TryPushBack(instance.ticksStopped ? 1 : 0);
+    }
+
+    return ok;
 }
 
 bool VmSession::References(const VmLinkedModule& linked) noexcept {
@@ -527,7 +630,7 @@ bool VmSession::TranslateField(const VmLinkedModule*& module, uint32& classIndex
 }
 
 bool VmSession::FieldsReach(const VmLinkedModule& link, uint32 function,
-                            const VmReloadPlan::Entry& entry) const noexcept {
+                            const VmReloadPlan& plan) const noexcept {
     // 필드 명령(GETF·SETF)의 Field 참조가 가리키는 로컬 필드마다 이전 revision 기록과 이번 대응(old
     // → fresh)으로 새 revision까지 옮겨지는지 본다(SparksReload 5절 — 옮기지 못하면 그 실행은
     // 취소).
@@ -548,11 +651,28 @@ bool VmSession::FieldsReach(const VmLinkedModule& link, uint32 function,
         const VmLinkedModule* module = &link;
         uint32 classIndex = local.classIndex;
         uint32 offset = local.offset;
-        // FieldSlots와 같은 상한(MaxRevisions 단계 — LC7b 리뷰 6).
-        for (uint32 hop = 0; module != entry.fresh; ++hop) {
+        // FieldSlots와 같은 상한(MaxRevisions 단계 — LC7b 리뷰 6). 끝은 쌍의 새 revision이거나
+        // 묶음 밖 지금 모듈이다(이전 revision 기록·이번 대응으로 옮긴다).
+        for (uint32 hop = 0;; ++hop) {
+            const VmReloadPlan::Entry* pair = nullptr;
+            bool fresh = false;
+            for (const VmReloadPlan::Entry& entry : plan.entries_) {
+                fresh = fresh || entry.fresh == module;
+                pair = entry.old == module ? &entry : pair;
+            }
+
+            bool current = false;
+            for (const VmLinkedModule* existing : modules_) {
+                current = current || existing == module;
+            }
+
+            if (fresh || (current && pair == nullptr)) {
+                break;
+            }
+
             bool moved = false;
-            if (hop < MaxRevisions && module == entry.old) {
-                moved = TranslateStep(entry.fresh, entry.classMap.View(), entry.fieldMap.View(),
+            if (hop < MaxRevisions && pair != nullptr) {
+                moved = TranslateStep(pair->fresh, pair->classMap.View(), pair->fieldMap.View(),
                                       module, classIndex, local.bank, local.slots, offset);
             } else if (hop < MaxRevisions) {
                 moved = TranslateField(module, classIndex, local.bank, local.slots, offset);
@@ -567,10 +687,21 @@ bool VmSession::FieldsReach(const VmLinkedModule& link, uint32 function,
     return true;
 }
 
-bool VmSession::CallsBroken(const VmLinkedModule& link, uint32 function,
-                            Span<const uint8> broken) const noexcept {
-    // 같은 모듈 함수 호출(CALL·CALLW의 Function 참조)이 "필드 깨짐" 함수를 부르는지다(LC7b 리뷰 1 —
-    // 다른 모듈 import와 가상 호출은 host가 지금 revision으로 푼다).
+bool VmSession::CallsFlagged(const VmLinkedModule& link, uint32 function,
+                             Span<const VmLinkedModule* const> links, Span<const uint32> starts,
+                             Span<const uint8> flags) const noexcept {
+    // 같은 모듈 호출(CALL·CALLW의 Function 참조 — 같은 revision)과 import 호출(정적으로 묶인 대상
+    // revision — LC7c 리뷰 2)이 표지된 함수를 부르는지다. 가상 호출은 host가 지금 revision으로
+    // 푼다.
+    auto flagged = [&](const VmLinkedModule* target, uint32 callee) noexcept {
+        for (usize at = 0; at < links.Size(); ++at) {
+            if (links[at] == target && callee < starts[at + 1] - starts[at]) {
+                return flags[starts[at] + callee] != 0;
+            }
+        }
+
+        return false;
+    };
     const BytecodeModule& code = link.Module();
     const BytecodeFunction& entry = code.functions[function];
     const uint32 end = entry.firstWord + entry.wordCount;
@@ -583,15 +714,24 @@ bool VmSession::CallsBroken(const VmLinkedModule& link, uint32 function,
         }
 
         const uint32 ref = DecodeBx(word);
-        if (ref < code.refs.Size() && code.refs[ref].kind == BytecodeRefKind::Function &&
-            code.refs[ref].detail < broken.Size() && broken[code.refs[ref].detail] != 0) {
+        if (ref >= code.refs.Size()) {
+            continue;
+        }
+
+        if (code.refs[ref].kind == BytecodeRefKind::Function &&
+            flagged(&link, code.refs[ref].detail)) {
+            return true;
+        }
+
+        if (code.refs[ref].kind == BytecodeRefKind::ImportedFunction &&
+            ref < link.imports_.Size() && link.imports_[ref].module != nullptr &&
+            flagged(link.imports_[ref].module, link.imports_[ref].function)) {
             return true;
         }
     }
 
     return false;
 }
-
 VmEventKey VmSession::HandlerKey(const VmLinkedModule& module, uint32 handler) const noexcept {
     const BytecodeModule& bytecode = module.Module();
     const BytecodeHandler& entry = bytecode.handlers[handler];
@@ -713,102 +853,102 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
         }
     }
 
-    // 이전 revision이 어느 쌍의 사슬인지다(아니면 pairs).
-    auto olderPair = [&](const VmLinkedModule* link) noexcept {
-        for (usize pair = 0; pair < pairs; ++pair) {
-            for (uint32 at = 0; at < olderCount[pair]; ++at) {
-                if (older[pair * MaxRevisions + at] == link) {
-                    return pair;
-                }
-            }
-        }
-
-        return pairs;
-    };
-
-    // 실행별 처리(K6): Cancel이면 새 revision과 본문이 다른(삭제된) 함수를 frame에 가진 실행을
-    // 취소한다 — old의 frame은 계획의 대응표로, 앞서 Keep으로 남은 더 오래된 revision의 frame은
-    // 새 revision의 같은 이름 함수와 본문 hash를 직접 비교한다.
-    auto policyCancels = [&](const Suspended& entry) noexcept {
-        if (plan.executions_ != VmReloadExecutions::Cancel) {
-            return false;
-        }
-
-        for (const VmExecution::Frame& frame : entry.frames) {
-            const usize pair = pairOf(frame.link);
-            if (pair < pairs) {
-                const Array<uint8>& changed = plan.entries_[pair].changed;
-                if (frame.function < changed.Size() && changed[frame.function] != 0) {
-                    return true;
-                }
-
-                continue;
-            }
-
-            const usize chain = olderPair(frame.link);
-            if (chain == pairs) {
-                continue;
-            }
-
-            const BytecodeModule& after = plan.entries_[chain].fresh->Module();
-            const BytecodeModule& code = frame.link->Module();
-            const BytecodeFunction& was = code.functions[frame.function];
-            const uint32 match = VmFindFunction(after, code.String(was.name));
-            bool changed = match == NoBytecodeIndex;
-            for (usize byte = 0; !changed && byte < BytecodeHashBytes; ++byte) {
-                changed = was.bodyHash[byte] != after.functions[match].bodyHash[byte];
-            }
-
-            if (changed) {
-                return true;
-            }
-        }
-
-        return false;
-    };
-    // "필드 깨짐" 함수 표(쌍마다 old와 이전 revision — 5절, LC7b 리뷰 1): 새 revision으로 옮기지
-    // 못하는(손실·삭제) 필드를 필드 명령으로 참조하거나, 같은 모듈 호출로 그런 함수에 닿는
-    // 함수다(재개 뒤 부를 callee까지 — 실행 중 fault 대신 취소).
+    // 판정 표(LC7c 리뷰 1·2): 쌍의 old와 살아 있는 모든 이전 revision의 함수마다
+    // - "바뀜"(Cancel 정책 — K6): 그 모듈 경로의 최신 revision(묶음이면 새 revision, 아니면 지금
+    //   모듈)과 본문이 다르거나 없다,
+    // - "필드 깨짐"(정책 무관 — 5절): 옮기지 못하는(손실·삭제) 필드를 필드 명령으로 참조한다.
+    // 둘 다 같은 모듈 호출과 정적으로 묶인 import 호출의 폐포로 넓힌다(재개 뒤 부를 callee까지 —
+    // 옛 코드가 낡은 함수를 부르거나 실행 중 fault 대신 취소).
     Array<const VmLinkedModule*> scanned(*allocator_);
-    Array<usize> scannedPair(*allocator_);
     Array<uint32> scannedStart(*allocator_);
     if (!scannedStart.TryPushBack(0)) {
         return Outcome::Failure(ErrorCode::OutOfMemory);
     }
 
-    for (usize pair = 0; pair < pairs; ++pair) {
-        for (uint32 at = 0; at <= olderCount[pair]; ++at) {
-            const VmLinkedModule* link =
-                at == 0 ? plan.entries_[pair].old : older[pair * MaxRevisions + at - 1];
-            const uint32 start = scannedStart[scannedStart.Size() - 1];
-            if (!scanned.TryPushBack(link) || !scannedPair.TryPushBack(pair) ||
-                !scannedStart.TryPushBack(start +
-                                          static_cast<uint32>(link->Module().functions.Size()))) {
-                return Outcome::Failure(ErrorCode::OutOfMemory);
+    auto scan = [&](const VmLinkedModule* link) noexcept -> bool {
+        for (const VmLinkedModule* known : scanned) {
+            if (known == link) {
+                return true;
             }
+        }
+
+        const uint32 start = scannedStart[scannedStart.Size() - 1];
+        return scanned.TryPushBack(link) &&
+               scannedStart.TryPushBack(start +
+                                        static_cast<uint32>(link->Module().functions.Size()));
+    };
+    for (const VmReloadPlan::Entry& entry : plan.entries_) {
+        if (!scan(entry.old)) {
+            return Outcome::Failure(ErrorCode::OutOfMemory);
         }
     }
 
+    for (const Retired& entry : retired_) {
+        if (!scan(entry.link)) {
+            return Outcome::Failure(ErrorCode::OutOfMemory);
+        }
+    }
+
+    Array<uint8> changedFlags(*allocator_);
     Array<uint8> broken(*allocator_);
-    if (!broken.TryResize(scannedStart[scannedStart.Size() - 1])) {
+    const uint32 scannedFunctions = scannedStart[scannedStart.Size() - 1];
+    if (!changedFlags.TryResize(scannedFunctions) || !broken.TryResize(scannedFunctions)) {
         return Outcome::Failure(ErrorCode::OutOfMemory);
     }
 
-    for (usize at = 0; at < scanned.Size(); ++at) {
-        const VmReloadPlan::Entry& entry = plan.entries_[scannedPair[at]];
-        for (uint32 function = scannedStart[at]; function < scannedStart[at + 1]; ++function) {
-            broken[function] =
-                FieldsReach(*scanned[at], function - scannedStart[at], entry) ? uint8(0) : uint8(1);
+    // 모듈 경로의 최신 revision이다(쌍이면 새 revision, 아니면 지금 모듈 — 없으면 nullptr).
+    auto newest = [&](const VmLinkedModule* link) noexcept -> const VmLinkedModule* {
+        const BytecodeModule& code = link->Module();
+        const StringView path = VmText(code, code.path);
+        for (const VmReloadPlan::Entry& entry : plan.entries_) {
+            if (VmText(entry.fresh->Module(), entry.fresh->Module().path) == path) {
+                return entry.fresh;
+            }
         }
 
-        // 호출 폐포: 더 바뀌지 않을 때까지(함수 수만큼이면 끝난다).
-        const Span<const uint8> flags(broken.Data() + scannedStart[at],
-                                      scannedStart[at + 1] - scannedStart[at]);
-        for (bool grew = true; grew;) {
-            grew = false;
+        for (const VmLinkedModule* existing : modules_) {
+            if (VmText(existing->Module(), existing->Module().path) == path) {
+                return existing;
+            }
+        }
+
+        return nullptr;
+    };
+    for (usize at = 0; at < scanned.Size(); ++at) {
+        const BytecodeModule& code = scanned[at]->Module();
+        const VmLinkedModule* latest = newest(scanned[at]);
+        for (uint32 function = scannedStart[at]; function < scannedStart[at + 1]; ++function) {
+            const uint32 local = function - scannedStart[at];
+            const BytecodeFunction& was = code.functions[local];
+            const uint32 match = latest == nullptr
+                                     ? NoBytecodeIndex
+                                     : VmFindFunction(latest->Module(), code.String(was.name));
+            bool changed = match == NoBytecodeIndex;
+            for (usize byte = 0; !changed && byte < BytecodeHashBytes; ++byte) {
+                changed = was.bodyHash[byte] != latest->Module().functions[match].bodyHash[byte];
+            }
+
+            changedFlags[function] = changed ? 1 : 0;
+            broken[function] = FieldsReach(*scanned[at], local, plan) ? uint8(0) : uint8(1);
+        }
+    }
+
+    // 호출 폐포: 모든 scanned revision을 한 번에(import가 revision 사이를 잇는다) 더 바뀌지 않을
+    // 때까지.
+    for (bool grew = true; grew;) {
+        grew = false;
+        for (usize at = 0; at < scanned.Size(); ++at) {
             for (uint32 function = scannedStart[at]; function < scannedStart[at + 1]; ++function) {
-                if (broken[function] == 0 &&
-                    CallsBroken(*scanned[at], function - scannedStart[at], flags)) {
+                const uint32 local = function - scannedStart[at];
+                if (changedFlags[function] == 0 &&
+                    CallsFlagged(*scanned[at], local, scanned.View(), scannedStart.View(),
+                                 changedFlags.View())) {
+                    changedFlags[function] = 1;
+                    grew = true;
+                }
+
+                if (broken[function] == 0 && CallsFlagged(*scanned[at], local, scanned.View(),
+                                                          scannedStart.View(), broken.View())) {
                     broken[function] = 1;
                     grew = true;
                 }
@@ -816,8 +956,31 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
         }
     }
 
-    // 설정과 무관한 취소(SL 12.4 — 5절): 삭제된 handler로 시작된 실행, "필드 깨짐" 함수를 old 또는
-    // 이전 revision frame에 가진 실행.
+    // frame 함수의 표지다(scanned revision이 아니면 0 — 지금 모듈의 코드는 낡지 않았다).
+    auto frameFlag = [&](const Array<uint8>& flags, const VmExecution::Frame& frame) noexcept {
+        for (usize at = 0; at < scanned.Size(); ++at) {
+            if (frame.link == scanned[at]) {
+                return flags[scannedStart[at] + frame.function] != 0;
+            }
+        }
+
+        return false;
+    };
+    auto policyCancels = [&](const Suspended& entry) noexcept {
+        if (plan.executions_ != VmReloadExecutions::Cancel) {
+            return false;
+        }
+
+        for (const VmExecution::Frame& frame : entry.frames) {
+            if (frameFlag(changedFlags, frame)) {
+                return true;
+            }
+        }
+
+        return false;
+    };
+    // 설정과 무관한 취소(SL 12.4 — 5절): 삭제된 handler로 시작된 실행, "필드 깨짐" 함수를 frame에
+    // 가진 실행.
     auto forcedCancels = [&](const Suspended& entry) noexcept {
         const usize handlerPair = pairOf(entry.handlerModule);
         if (handlerPair < pairs) {
@@ -828,10 +991,8 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
         }
 
         for (const VmExecution::Frame& frame : entry.frames) {
-            for (usize at = 0; at < scanned.Size(); ++at) {
-                if (frame.link == scanned[at] && broken[scannedStart[at] + frame.function] != 0) {
-                    return true;
-                }
+            if (frameFlag(broken, frame)) {
+                return true;
             }
         }
 
@@ -841,8 +1002,8 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
         return policyCancels(entry) || forcedCancels(entry);
     };
 
-    // 쌍마다 취소 뒤에도 old를 붙잡는 것이 있는지다(큐 항목의 key 글자 포함 — 전달되면 놓는다,
-    // 만료 취소의 대상은 아니다).
+    // 쌍마다 취소 뒤에도 old를 붙잡는 것이 있는지다: 큐 항목의 key 글자(전달되면 놓는다 — 만료
+    // 취소의 대상은 아니다), 남는 실행의 frame과 그 import 폐포(LC7c 리뷰 1).
     Array<uint8> stays(*allocator_);
     if (!stays.TryResize(pairs)) {
         return Outcome::Failure(ErrorCode::OutOfMemory);
@@ -850,35 +1011,28 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
 
     for (usize pair = 0; pair < pairs; ++pair) {
         stays[pair] = 0;
-    }
-
-    for (usize at = queueHead_; at < queue_.Size(); ++at) {
-        const usize pair = pairOf(queue_[at].module);
-        stays[pair < pairs ? pair : 0] |= pair < pairs ? 1 : 0;
-    }
-
-    for (const Suspended& entry : suspended_) {
-        if (!entry.live || mustCancel(entry)) {
-            continue;
+        for (usize at = queueHead_; at < queue_.Size(); ++at) {
+            stays[pair] |= queue_[at].module == plan.entries_[pair].old ? 1 : 0;
         }
 
-        for (const VmExecution::Frame& frame : entry.frames) {
-            const usize pair = pairOf(frame.link);
-            stays[pair < pairs ? pair : 0] |= pair < pairs ? 1 : 0;
+        for (const Suspended& entry : suspended_) {
+            if (entry.live && stays[pair] == 0 && !mustCancel(entry) &&
+                ExecutionReaches(entry, plan.entries_[pair].old)) {
+                stays[pair] = 1;
+            }
         }
     }
 
-    // 정리 뒤 old 앞의 revision은 많아야 MaxRevisions - 1개라 넘치는 것은 그 앞쪽뿐이다.
+    // 정리 뒤 old 앞의 revision은 많아야 MaxRevisions - 1개라 넘치는 것은 그 앞쪽뿐이다. 실행이
+    // frame이나 import 폐포로 닿으면 만료 취소한다.
     auto expired = [&](const Suspended& entry) noexcept {
-        for (const VmExecution::Frame& frame : entry.frames) {
-            for (usize pair = 0; pair < pairs; ++pair) {
-                const uint32 live = 1 + stays[pair] + olderCount[pair];
-                const uint32 expire = live > MaxRevisions ? live - MaxRevisions : 0;
-                for (uint32 at = olderCount[pair] - expire;
-                     expire <= olderCount[pair] && at < olderCount[pair]; ++at) {
-                    if (frame.link == older[pair * MaxRevisions + at]) {
-                        return true;
-                    }
+        for (usize pair = 0; pair < pairs; ++pair) {
+            const uint32 live = 1 + stays[pair] + olderCount[pair];
+            const uint32 expire = live > MaxRevisions ? live - MaxRevisions : 0;
+            for (uint32 at = olderCount[pair] - expire;
+                 expire <= olderCount[pair] && at < olderCount[pair]; ++at) {
+                if (ExecutionReaches(entry, older[pair * MaxRevisions + at])) {
+                    return true;
                 }
             }
         }
