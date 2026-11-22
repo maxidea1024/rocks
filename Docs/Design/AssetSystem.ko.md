@@ -907,6 +907,15 @@ A3는 Rockpile 설계([Rockpile](Rockpile.ko.md) 12·17절)가 요구한 레코�
 | A4d | 게시·전체 정리·부분 병합·재사용 조건·IncompatibleCook·CorruptEntry·실패 시 게시본 불변·보고서 | 시나리오 13·22·27 |
 | A4e | `asset-cook` 명령·`--verify-nuggets`(NuggetMismatch 등록)·bundle 지정자(리플렉션 조정)·저장 때 bundle 태그 | 명령 출력·verify(A4는 늘 같음)·bundle 구성원 |
 
+- A4a 상태: **구현** — 대조표 14.1.61절, coverage 14.1.62절. 구현에서 정한 것:
+  - 모듈 `Engine/Source/Developer/AssetCooker`(`CookConfig.h` — `TargetProfile`·`PrimaryAssetRule`·`CookSettings`·`CookBulkCodec` 리플렉션 타입, `ReadTargetProfile`·`ReadCookSettings`·`HashTargetProfile`·`HashCookSettings`·`ClassifyCookPath`). 엔진 기본 파일 `Engine/Config/TargetProfiles/Windows.json`(graphicsBackend D3D12)·`Android.json`(빈 backend — 후속).
+  - PrimaryAsset 규칙은 `{type, directories}`다(UE `FPrimaryAssetTypeInfo` — 디렉터리는 하나 이상, 빈 목록은 거부, 진단은 규칙 순번 index와 디렉터리 순번 item). 처음 구현은 "codec이 배열 원소 안의 배열에 대입하지 못한다"고 보고 `{type, directory}`로 바꿨으나 틀린 가정이었다 — 그 제약은 Config의 배열 연산 문법(`+=` 등)의 것이고 ImportJson은 원소 안 배열을 통째 교체로 받는다(리뷰 필수 — 확인 없이 스키마를 바꾸지 않는다).
+  - 리뷰 반영(필수 둘·권장 둘): `directories` 배열 복원, `WriteReflected` 실패 갈래는 문자열 칸 읽기(FieldValue)가 할당하므로 도달 가능 — 할당 실패 시험에 규칙 SHA-256을 더해 덮었다(처음 근거 "할당하지 않는다"는 틀렸다), 할당 실패 시험의 끝 상태를 기준(시스템 allocator)과 칸·SHA-256까지 대조, 주입했으면 적어도 하나가 실패(삼킨 실패 없음).
+  - 프로파일 id는 `[A-Za-z0-9_]` 1–64 byte(파일 이름 — 경로 문자가 들어가지 않게)이고 읽기가 미리 채운다(파일에서 생략 가능, 다르면 거부 — 대소문자 구분). 읽을 때마다 기본값에서 시작한다.
+  - 거부는 `InvalidArgument` + `CookConfigFailure{code InvalidSetting, file, field, index, line, column}`, codec 진단은 호출자의 `TextDiagnostics`에 남는다. 읽기·할당 오류는 code None + 그 오류(규칙 위반과 구분 — 경로 판정 `ClassifyCookPath`도 할당 실패를 `OutOfMemory`로 돌려준다, 처음 구현은 규칙 위반으로 바꿨다).
+  - 경로: 에셋은 LogicalPath 규칙, 디렉터리는 끝 '/'를 뗀 것이 마운트(`/Game/` — 대소문자 무시)이거나 논리 경로다. 마운트 없는 `/Game`(끝 '/' 없음)은 거부(에셋 경로에는 이름이 필요하다).
+  - 설정 파일 상한 `CookConfigMaxFileBytes` 1 MiB.
+
 ## 11. 런타임 로딩과 수명(계획 §9.2 계약)
 
 ### 11.1 API
@@ -2915,6 +2924,28 @@ A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항�
 | `NuggetRequest::WaitForCompletion`·`~NuggetCache`·`NuggetCache::Shutdown`의 `platform::Fatal` | 그 갈래 | 자식 프로세스(`NuggetRequest_Fatal`)에서 실행하고 문구까지 확인한다 — 부모 측정에는 자식의 profile이 합쳐지지 않는다 |
 | `ReservePutBytes`의 CAS 재시도 | 재시도 | 다른 스레드가 같은 순간 예약할 때만이다(경합 — 결정적으로 만들 수 없다). 재시도는 같은 판정을 다시 한다 |
 | `Shutdown`의 `Notify(AfterCancelGets)` 줄 | 줄 수 0 | 측정 산물이다 — 앞 잠금 블록(Fatal 갈래 포함) 뒤 gap 영역이 그 줄에 붙는다. hook 두 지점은 시험이 확인한다 |
+
+#### 14.1.61 요구 대조표(A4a — 쿠킹 설정)
+
+시험은 EngineTests `Engine/Source/Developer/AssetCooker/Tests/CookConfigTests.cpp`(`CookConfig_*` 7 — 메모리 파일 시스템, 엔진 기본 파일은 저장소 `Engine/Config`)다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 프로파일 병합(10.2 결정 2) | 엔진만(id 채움·기본값), 엔진 위 프로젝트(멤버 병합 — 없는 칸은 엔진 값), 다시 읽으면 기본값에서 시작, 엔진 기본 파일 Windows·Android | `CookConfig_ProfileMerge` |
+| 프로파일 거부 | id 형식(빈·공백·`..`·`-`·`~`·65 byte, 64 byte는 형식 통과), 엔진 파일 없음(프로젝트만 있어도), 파일 id 다름(엔진·프로젝트, 대소문자), bulkAlignment(4·12·131072·3 거부, 0·8·65536 받음), JSON 문법 위치, 모르는 키·enum 값·타입(진단), 크기 상한(CapacityExceeded), 읽기·크기·열기 실패(code None), failure 없이 거부 | `CookConfig_ProfileRejects`·`CookConfig_Boundaries` |
+| 쿠킹 규칙(결정 3) | 파일 없으면 기본값, 모든 칸(규칙의 디렉터리 둘), 경로 형식 13가지(에셋·디렉터리·마운트·대소문자·끝 '/' 없는 마운트·다른 마운트·빈 구성 요소·공백·빈·'/'), 경로 판정의 할당 실패 | `CookConfig_SettingsFields` |
+| 쿠킹 규칙 거부 | alwaysCook·neverCook 경로(순번), PrimaryAsset 타입(모름·struct·Asset 아닌 클래스 — 순번)·디렉터리(에셋 경로·다른 마운트·여럿 중 셋째 — 디렉터리 순번·빈 목록·칸 없음), JSON 문법, 대입 진단(배열 칸에 문자열 — 원소 안 배열 포함·모르는 키), 읽기 실패 | `CookConfig_SettingsRejects` |
+| SHA-256(결정 2·3) | 같은 내용 같음(다시 읽기), 프로파일 칸 넷마다·규칙 변형 여덟(값·원소·순서·Soft·PrimaryAsset)마다 서로 다름, 타입 미등록 NotFound | `CookConfig_Hashes`·`CookConfig_Boundaries` |
+| 할당 실패 | 프로파일·규칙 읽기·두 SHA-256 — 실패한 호출은 모두 OutOfMemory(규칙 위반으로 바꾸지 않는다), 주입하면 적어도 하나 실패, 실패 없는 결과는 기준과 칸·SHA-256까지 같다 | `CookConfig_AllocationFailures` |
+| 조합(14 완료 조건 2) | 파일(엔진·프로젝트·규칙) × 상태(없음·정상·문법·진단·규칙 위반·크기·IO) × 칸 | 위 시험 |
+
+#### 14.1.62 Coverage(A4a)
+
+측정(2026-11-23, Windows, `ROCKS_MSVC_TOOLSET=14.44`): `-Target EngineTests -Filter CookConfig -Sources Engine/Source/Developer/AssetCooker/Private` — `CookConfig.cpp` 줄 264/266·분기 143/144(리뷰 반영 뒤 — 남은 줄 둘은 아래 Publish 갈래).
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| `ApplyJsonFile`의 `Publish` 실패 | 실패 | 값 대상의 게시는 준비한 사본과 무할당 맞바꾸기다(ReflectionText TextAssignments.h — 실패는 살아 있는 객체의 묶음 게시에만 있다) |
 
 ## 15. PNG 디코더 범위
 
