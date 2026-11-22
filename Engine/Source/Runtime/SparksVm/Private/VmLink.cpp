@@ -34,14 +34,15 @@ StringView TextOf(const BytecodeModule& module, uint32 index) noexcept {
 
 // 거부 사유를 적고 InvalidArgument(사유를 적지 못하면 그 오류)를 돌려준다.
 Result<void> Reject(StringBuilderBase& reason, const BytecodeModule& module, uint32 ref,
-                    StringView why) noexcept {
+                    StringView why, StringView detail = StringView()) noexcept {
     const BytecodeRef& entry = module.refs[ref];
     reason.AppendFormat("ref {} ({} {}): {}", ref, BytecodeRefKindName(entry.kind),
                         module.String(entry.name), why);
-    // 서술자가 있으면 함께 보인다(모양 불일치 진단).
-    if (entry.arguments != NoBytecodeIndex && entry.arguments < module.stringOffsets.Size()) {
-        reason.AppendFormat(" [{}]", module.String(entry.arguments));
+    // 모양 불일치는 서술자를 함께 보인다(진단).
+    if (!detail.IsEmpty()) {
+        reason.AppendFormat(" [{}]", detail);
     }
+
     if (reason.HasFailed()) {
         return Result<void>::Failure(reason.Status().Error());
     }
@@ -249,7 +250,8 @@ Result<void> LinkModule(const BytecodeModule& module, VmHost* host, VmLinkedModu
             // 이름과 서술자 모양으로 구현을 고른다(리뷰 A1 — 모양이 다르면 거부).
             binding.function = detail::VmLibrary::Find(name, module.String(entry.arguments));
             if (binding.function == nullptr) {
-                return Reject(reason, module, ref, "unknown language function or descriptor shape");
+                return Reject(reason, module, ref, "unknown language function or descriptor shape",
+                              module.String(entry.arguments));
             }
 
             const usize at = out.languages_.Size();
