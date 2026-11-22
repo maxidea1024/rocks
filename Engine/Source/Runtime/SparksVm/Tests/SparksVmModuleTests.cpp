@@ -221,6 +221,14 @@ TEST(SparksVmModule_ImportSetRules) {
 
         void ReleaseHeld(uint64) noexcept override {
         }
+
+        uint64 StartLoad(uint64, uint64) noexcept override {
+            return 0;
+        }
+
+        LoadState WatchLoad(uint64, bool, uint64&, uint64&) noexcept override {
+            return LoadState::NotRequest;
+        }
         VmFaultKind GetContext(VmHostCall&) noexcept override {
             return VmFaultKind::ContractViolation;
         }

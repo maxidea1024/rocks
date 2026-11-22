@@ -148,18 +148,44 @@ struct MadeOutput {
     AssetId id{};
     TypeId type{};
     ObjectHandle asset{};
+    // 이번에 만든 패키지인지(거짓이면 재임포트의 기존 출력 — 실패해도 지우지 않는다)와 임포터가
+    // 이번에 청했는지다(청하지 않은 기존 출력은 고아 경고).
+    bool created = true;
+    bool used = true;
 };
 
-// 서비스가 임포터에 주는 문맥이다(새 임포트 — 출력은 저장하지 않은 새 패키지).
-class NewImportContext final : public AssetImportContext {
+// 서비스가 임포터에 주는 문맥이다: 새 출력은 저장하지 않은 새 패키지, 재임포트는 기존 출력을
+// 미리 등록해 같은 key 요청에 그 대표 에셋을 준다(타입 정확 일치 — 7.1절 18 A2f2).
+class ImportContext final : public AssetImportContext {
 public:
-    NewImportContext(Allocator& allocator, EditorPackageSet& set, TypeRegistry& types,
-                     const AssetAliasTable& aliases, StringView path, const AssetImporterInfo& info,
-                     Span<const AssetImportSource> sources, const void* options, AssetId mainId,
-                     Array<EditorWarning>* warnings) noexcept
+    ImportContext(Allocator& allocator, EditorPackageSet& set, TypeRegistry& types,
+                  const AssetAliasTable& aliases, StringView path, const AssetImporterInfo& info,
+                  Span<const AssetImportSource> sources, const void* options, AssetId mainId,
+                  Array<EditorWarning>* warnings, bool reimport) noexcept
         : allocator_(allocator), set_(set), types_(types), aliases_(aliases), path_(path),
           info_(info), sources_(sources), options_(options), mainId_(mainId), warnings_(warnings),
-          access_(set.Access()), outputs_(allocator) {
+          reimport_(reimport), access_(set.Access()), outputs_(allocator) {
+    }
+
+    // 재임포트의 기존 출력 하나를 등록한다(아직 청하지 않음). 오류: 할당 실패.
+    Result<void> AddExisting(StringView key, StringView path, AssetId id, TypeId type,
+                             ObjectHandle asset) noexcept {
+        MadeOutput made(allocator_);
+        Result<void> step = made.key.TryAssign(key);
+        if (step) {
+            step = made.path.TryAssign(path);
+        }
+
+        if (step) {
+            made.id = id;
+            made.type = type;
+            made.asset = asset;
+            made.created = false;
+            made.used = false;
+            step = outputs_.TryPushBack(rocks::Move(made));
+        }
+
+        return step;
     }
 
     Span<const AssetImportSource> Sources() const noexcept override {
@@ -171,7 +197,7 @@ public:
     }
 
     bool IsReimport() const noexcept override {
-        return false;
+        return reimport_;
     }
 
     ObjectRegistry& Registry() noexcept override {
@@ -194,15 +220,31 @@ public:
             return Out::Failure(error);
         };
         const bool main = key.IsEmpty();
-        if ((main && type != info_.outputType) || (!main && !IsOutputKey(key)) ||
-            outputs_.Size() >= MaxImportOutputs) {
+        if ((main && type != info_.outputType) || (!main && !IsOutputKey(key))) {
             return invalid(AssetDiagnosticCode::None, ErrorCode::InvalidArgument);
         }
 
-        for (const MadeOutput& made : outputs_) {
-            if (made.key.View() == key) {
+        // 같은 key: 청하지 않은 기존 출력이면 그것(타입 정확 일치), 이미 청했으면 두 번째 요청.
+        for (MadeOutput& made : outputs_) {
+            if (made.key.View() != key) {
+                continue;
+            }
+
+            if (made.used) {
                 return invalid(AssetDiagnosticCode::None, ErrorCode::InvalidArgument);
             }
+
+            if (made.type != type) {
+                return invalid(AssetDiagnosticCode::TypeMismatch, ErrorCode::InvalidArgument,
+                               made.id);
+            }
+
+            made.used = true;
+            return Out::Success(made.asset);
+        }
+
+        if (outputs_.Size() >= MaxImportOutputs) {
+            return invalid(AssetDiagnosticCode::None, ErrorCode::InvalidArgument);
         }
 
         auto lease = types_.Acquire(type);
@@ -331,12 +373,92 @@ private:
     const void* options_;
     AssetId mainId_;
     Array<EditorWarning>* warnings_;
+    bool reimport_;
     ObjectAccessContext access_;
     Array<MadeOutput> outputs_;
     AssetDiagnostic failure_;
 };
 
+// 기록 옵션 Record(schema = 옵션 struct, 버전 ≤ 지금 버전, 필드 1 = JSON)를 target에 대입한다.
+// 오류: schema·버전·형식 위반(Record 판정의 오류 — 호출자는 InvalidImportOption), JSON 문법
+// InvalidArgument, 대입 진단 InvalidArgument(diagnostics), 할당 실패.
+Result<void> ApplyRecordedOptions(Allocator& allocator, const AssignmentTarget& target,
+                                  const TypeLease& lease, Span<const uint8> record,
+                                  const TextCodecOptions& codec,
+                                  TextDiagnostics& diagnostics) noexcept {
+    auto reader = RecordReader::Open(allocator, record, lease.Id(), 1, lease.Schema().version);
+    if (!reader) {
+        return Result<void>::Failure(reader.Error());
+    }
+
+    // 필드 1이 없거나(NotFound) wire가 String이 아니면 형식 위반이다(InvalidArgument).
+    auto field = reader.Value().Find(ImportOptionsTextField);
+    if (!field && field.Error() != ErrorCode::NotFound) {
+        return Result<void>::Failure(field.Error());
+    }
+
+    if (!field || field.Value().wireType != static_cast<uint32>(WireType::String)) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    JsonDocument document(allocator);
+    const Span<const uint8> payload = field.Value().payload;
+    const JsonError parsed =
+        document.Parse(StringView(reinterpret_cast<const char*>(payload.Data()), payload.Size()));
+    if (!parsed.Succeeded()) {
+        return Result<void>::Failure(parsed.code == JsonErrorCode::OutOfMemory
+                                         ? ErrorCode::OutOfMemory
+                                         : ErrorCode::InvalidArgument);
+    }
+
+    auto prepared = reflection_text::ImportJson(document.Root(), target, codec, diagnostics);
+    if (!prepared) {
+        return Result<void>::Failure(prepared.Error());
+    }
+
+    auto published = prepared.Value().Publish();
+    return published ? Result<void>::Success() : Result<void>::Failure(published.Error());
+}
+
 } // namespace
+
+// 새 임포트·재임포트가 같이 쓰는 실행의 입력이다(원본은 임포터 roles 순 절대 경로).
+struct AssetService::ImportRun {
+    // 재임포트의 기존 출력 하나(주 출력은 빈 key)다.
+    struct Existing {
+        explicit Existing(Allocator& allocator) noexcept : key(allocator), path(allocator) {
+        }
+
+        Existing(Existing&&) noexcept = default;
+        Existing& operator=(Existing&&) noexcept = default;
+
+        String key;
+        String path;
+        AssetId id{};
+        TypeId type{};
+        ObjectHandle asset{};
+    };
+
+    explicit ImportRun(Allocator& allocator) noexcept : existing(allocator) {
+    }
+
+    const AssetDatabaseLock* lock = nullptr;
+    const LogicalPath* path = nullptr;
+    AssetId mainId{};
+    AssetImporter* importer = nullptr;
+    Span<const AssetImportSourceInput> sources{};
+    const AssetSourceRoots* roots = nullptr;
+    const AssetAliasTable* aliases = nullptr;
+    Span<const AssetId> before{};
+    Span<const TextAssignment> assignments{};
+    TextDiagnostics* diagnostics = nullptr;
+    AssetImportResult* result = nullptr;
+    Array<EditorWarning>* warnings = nullptr;
+    AssetDiagnostic* failure = nullptr;
+    bool reimport = false;
+    Span<const uint8> recordedOptions{};
+    Array<Existing> existing;
+};
 
 Result<void> AssetService::Import(const AssetDatabaseLock& lock, StringView path,
                                   Span<const AssetImportSourceInput> sources, StringView importer,
@@ -471,23 +593,70 @@ Result<void> AssetService::Import(const AssetDatabaseLock& lock, StringView path
         return loaded;
     }
 
-    Array<ReadSource> read(allocator);
-    Array<AssetImportSource> contextSources(allocator);
-    if (auto reserved = read.TryReserve(roles.Size()); !reserved) {
+    // 원본을 임포터 roles 순으로 둔다(역할은 roles의 것).
+    Array<AssetImportSourceInput> ordered(allocator);
+    if (auto reserved = ordered.TryReserve(roles.Size()); !reserved) {
         return FailImport<void>(failure, AssetDiagnosticCode::None, reserved.Error());
     }
 
-    if (auto reserved = contextSources.TryReserve(roles.Size()); !reserved) {
+    for (usize index = 0; index < roles.Size(); ++index) {
+        (void)ordered.TryPushBack(AssetImportSourceInput{roles[index], sources[order[index]].path});
+    }
+
+    // 지금 열린 id다(실패하면 이번에 연 것만 닫는다).
+    Array<AssetId> before(allocator);
+    if (auto reserved = before.TryReserve(set_.Count()); !reserved) {
+        return FailImport<void>(failure, AssetDiagnosticCode::None, reserved.Error());
+    }
+
+    for (usize index = 0; index < set_.Count(); ++index) {
+        (void)before.TryPushBack(set_.At(index).id);
+    }
+
+    ImportRun run(allocator);
+    run.lock = &lock;
+    run.path = &parsed.Value();
+    run.mainId = mainId.Value();
+    run.importer = chosen;
+    run.sources = ordered.View();
+    run.roots = &roots;
+    run.aliases = aliases.Value();
+    run.before = before.View();
+    run.assignments = assignments;
+    run.diagnostics = &diagnostics;
+    run.result = &result;
+    run.warnings = warnings;
+    run.failure = failure;
+    return RunImport(run);
+}
+
+Result<void> AssetService::RunImport(ImportRun& run) noexcept {
+    Allocator& allocator = *allocator_;
+    const AssetDatabaseLock& lock = *run.lock;
+    TextDiagnostics& diagnostics = *run.diagnostics;
+    AssetImportResult& result = *run.result;
+    Array<EditorWarning>* warnings = run.warnings;
+    AssetDiagnostic* failure = run.failure;
+    const Span<const TextAssignment> assignments = run.assignments;
+    AssetImporter* chosen = run.importer;
+    const AssetImporterInfo& info = chosen->Info();
+    Array<ReadSource> read(allocator);
+    Array<AssetImportSource> contextSources(allocator);
+    if (auto reserved = read.TryReserve(run.sources.Size()); !reserved) {
+        return FailImport<void>(failure, AssetDiagnosticCode::None, reserved.Error());
+    }
+
+    if (auto reserved = contextSources.TryReserve(run.sources.Size()); !reserved) {
         return FailImport<void>(failure, AssetDiagnosticCode::None, reserved.Error());
     }
 
     uint64 remaining = MaxImportTotalSourceBytes;
     // 이번 임포트의 경고(절대 경로·임포터 경고)는 따로 모아 성공할 때만 넘긴다.
     Array<EditorWarning> pending(allocator);
-    for (usize index = 0; index < roles.Size(); ++index) {
-        const AssetImportSourceInput& input = sources[order[index]];
+    for (usize index = 0; index < run.sources.Size(); ++index) {
+        const AssetImportSourceInput& input = run.sources[index];
         ReadSource source(allocator);
-        Result<void> step = source.role.TryAssign(roles[index]);
+        Result<void> step = source.role.TryAssign(run.sources[index].role);
         if (step) {
             step = source.path.TryAssign(input.path);
         }
@@ -496,7 +665,7 @@ Result<void> AssetService::Import(const AssetDatabaseLock& lock, StringView path
             return FailImport<void>(failure, AssetDiagnosticCode::None, step.Error());
         }
 
-        if (auto located = roots.Locate(input.path, source.location); !located) {
+        if (auto located = run.roots->Locate(input.path, source.location); !located) {
             return FailImport<void>(failure, AssetDiagnosticCode::InvalidSource, located.Error(),
                                     {}, index);
         }
@@ -517,7 +686,7 @@ Result<void> AssetService::Import(const AssetDatabaseLock& lock, StringView path
             EditorWarning warning;
             warning.kind = EditorWarningKind::ImportWarning;
             warning.diagnostic.code = AssetDiagnosticCode::AbsoluteSourcePath;
-            warning.diagnostic.asset = mainId.Value();
+            warning.diagnostic.asset = run.mainId;
             warning.diagnostic.detail = index;
             if (auto pushed = pending.TryPushBack(warning); !pushed) {
                 return FailImport<void>(failure, AssetDiagnosticCode::None, pushed.Error());
@@ -571,6 +740,16 @@ Result<void> AssetService::Import(const AssetDatabaseLock& lock, StringView path
     if (options.Get() != nullptr) {
         const AssignmentTarget target = AssignmentTarget::Value(
             set_.Registry(), set_.Access(), options.Lease(), options.Get(), allocator);
+        // 재임포트: 기록 옵션(JSON)을 먼저 대입한다(명시 대입만 바꾼다 — 16.1절).
+        if (!run.recordedOptions.IsEmpty()) {
+            if (auto applied = ApplyRecordedOptions(allocator, target, options.Lease(),
+                                                    run.recordedOptions, codec, diagnostics);
+                !applied) {
+                return FailImport<void>(failure, AssetDiagnosticCode::InvalidImportOption,
+                                        applied.Error());
+            }
+        }
+
         if (!optionAssignments.IsEmpty()) {
             auto prepared = reflection_text::PrepareAssignments(target, optionAssignments.View(),
                                                                 codec, diagnostics);
@@ -610,23 +789,18 @@ Result<void> AssetService::Import(const AssetDatabaseLock& lock, StringView path
         }
 
         optionsRecord = rocks::Move(built.Value());
+    } else if (!run.recordedOptions.IsEmpty()) {
+        // 옵션 없는 임포터에 옵션 기록이 있다(임포터 버전이 옵션을 뺐다 — 다시 임포트한다).
+        return FailImport<void>(failure, AssetDiagnosticCode::InvalidImportOption,
+                                ErrorCode::InvalidArgument);
     }
 
-    // 임포터 호출(지금 열린 id를 적어 두고 실패하면 이번에 연 것을 닫는다).
-    Array<AssetId> before(allocator);
-    if (auto reserved = before.TryReserve(set_.Count()); !reserved) {
-        return FailImport<void>(failure, AssetDiagnosticCode::None, reserved.Error());
-    }
-
-    for (usize index = 0; index < set_.Count(); ++index) {
-        (void)before.TryPushBack(set_.At(index).id);
-    }
-
-    NewImportContext context(allocator, set_, *types_, *aliases.Value(), parsed.Value().Text(),
-                             info, contextSources.View(), options.Get(), mainId.Value(),
-                             warnings != nullptr ? &pending : nullptr);
+    // 임포터 호출(실패하면 이번에 연 것을 닫는다 — 열린 id는 호출자가 적었다).
+    ImportContext context(allocator, set_, *types_, *run.aliases, run.path->Text(), info,
+                          contextSources.View(), options.Get(), run.mainId,
+                          warnings != nullptr ? &pending : nullptr, run.reimport);
     auto abandon = [&](const AssetDiagnostic& diagnostic) noexcept {
-        (void)set_.CloseOpened(before.View());
+        (void)set_.CloseOpened(run.before);
         if (failure != nullptr) {
             *failure = diagnostic;
         }
@@ -637,15 +811,23 @@ Result<void> AssetService::Import(const AssetDatabaseLock& lock, StringView path
         AssetDiagnostic diagnostic;
         diagnostic.code = error == ErrorCode::OutOfMemory ? AssetDiagnosticCode::None : code;
         diagnostic.error = error;
-        diagnostic.asset = mainId.Value();
+        diagnostic.asset = run.mainId;
         return abandon(diagnostic);
     };
+    for (const ImportRun::Existing& existing : run.existing) {
+        if (auto added = context.AddExisting(existing.key.View(), existing.path.View(), existing.id,
+                                             existing.type, existing.asset);
+            !added) {
+            return abandonWith(AssetDiagnosticCode::None, added.Error());
+        }
+    }
+
     if (auto imported = chosen->Import(context); !imported) {
         AssetDiagnostic diagnostic = context.LastFailure();
         if (diagnostic.error != imported.Error()) {
             diagnostic = AssetDiagnostic{};
             diagnostic.error = imported.Error();
-            diagnostic.asset = mainId.Value();
+            diagnostic.asset = run.mainId;
         }
 
         return abandon(diagnostic);
@@ -653,11 +835,29 @@ Result<void> AssetService::Import(const AssetDatabaseLock& lock, StringView path
 
     const MadeOutput* main = nullptr;
     for (const MadeOutput& made : context.Outputs()) {
-        main = made.key.IsEmpty() ? &made : main;
+        main = made.key.IsEmpty() && made.used ? &made : main;
     }
 
     if (main == nullptr) {
         return abandonWith(AssetDiagnosticCode::None, ErrorCode::InvalidArgument);
+    }
+
+    // 재임포트: 기록에 있는데 이번에 청하지 않은 기존 출력은 고아다(그 패키지는 그대로 — 16.1절).
+    if (warnings != nullptr) {
+        for (const MadeOutput& made : context.Outputs()) {
+            if (made.used) {
+                continue;
+            }
+
+            EditorWarning warning;
+            warning.kind = EditorWarningKind::OrphanedOutput;
+            warning.diagnostic.code = AssetDiagnosticCode::OrphanedOutput;
+            warning.diagnostic.asset = made.id;
+            warning.diagnostic.related = run.mainId;
+            if (auto pushed = pending.TryPushBack(warning); !pushed) {
+                return abandonWith(AssetDiagnosticCode::None, pushed.Error());
+            }
+        }
     }
 
     // 설정(주 출력의 저장 속성).
@@ -678,6 +878,7 @@ Result<void> AssetService::Import(const AssetDatabaseLock& lock, StringView path
     Array<ImportSourceInput> recordSources(allocator);
     Array<ImportOutputInput> recordOutputs(allocator);
     Array<String> savedFiles(allocator);
+    Array<AssetId> savedIds(allocator);
     Result<void> step = recordSources.TryReserve(read.Size());
     if (step) {
         step = recordOutputs.TryReserve(context.Outputs().Size());
@@ -700,6 +901,10 @@ Result<void> AssetService::Import(const AssetDatabaseLock& lock, StringView path
     }
 
     if (step) {
+        step = savedIds.TryReserve(context.Outputs().Size());
+    }
+
+    if (step) {
         step = result.path.TryAssign(main->path.View());
     }
 
@@ -708,7 +913,7 @@ Result<void> AssetService::Import(const AssetDatabaseLock& lock, StringView path
     }
 
     for (const MadeOutput& made : context.Outputs()) {
-        if (!step || made.key.IsEmpty()) {
+        if (!step || made.key.IsEmpty() || !made.used) {
             continue;
         }
 
@@ -737,12 +942,14 @@ Result<void> AssetService::Import(const AssetDatabaseLock& lock, StringView path
     }
 
     for (const MadeOutput& made : context.Outputs()) {
-        (void)recordOutputs.TryPushBack(ImportOutputInput{made.key.View(), made.id, made.type});
+        if (made.used) {
+            (void)recordOutputs.TryPushBack(ImportOutputInput{made.key.View(), made.id, made.type});
+        }
     }
 
     // 저장 실패의 되돌리기: 만든 패키지를 닫고 이번에 쓴 출력 파일을 지운다(못 지우면 경고).
     auto rollback = [&](const AssetDiagnostic& diagnostic) noexcept {
-        (void)set_.CloseOpened(before.View());
+        (void)set_.CloseOpened(run.before);
         for (usize index = 0; index < savedFiles.Size(); ++index) {
             target.Clear();
             (void)target.TryAppend(layout_->ContentDirectory());
@@ -755,7 +962,7 @@ Result<void> AssetService::Import(const AssetDatabaseLock& lock, StringView path
                 EditorWarning warning;
                 warning.kind = EditorWarningKind::OrphanNotDeleted;
                 warning.diagnostic.error = FileErrorCode(deleted);
-                warning.diagnostic.asset = result.outputs[index].id;
+                warning.diagnostic.asset = savedIds[index];
                 (void)warnings->TryPushBack(warning);
             }
 
@@ -787,21 +994,22 @@ Result<void> AssetService::Import(const AssetDatabaseLock& lock, StringView path
     // 다른 출력 먼저(참조 기록 owner = 주 출력), 주 출력 마지막(소유 기록).
     const EditorSaveOptions save{};
     for (const MadeOutput& made : context.Outputs()) {
-        if (made.key.IsEmpty()) {
+        if (made.key.IsEmpty() || !made.used) {
             continue;
         }
 
         ImportRecordInput reference;
-        reference.owner = mainId.Value();
+        reference.owner = run.mainId;
         AssetDiagnostic diagnostic;
         auto record = WriteImportRecord(allocator, made.id, reference);
-        Result<void> saved =
-            record ? set_.SetImportRecord(made.id, record.Value().View(), mainId.Value())
-                   : Result<void>::Failure(record.Error());
+        Result<void> saved = record
+                                 ? set_.SetImportRecord(made.id, record.Value().View(), run.mainId)
+                                 : Result<void>::Failure(record.Error());
         // 저장 뒤 파일 이름을 담을 자리를 먼저 잡는다(저장 뒤 복사가 실패하면 그 파일을 되돌리기
         // 목록에 넣지 못해 고아로 남는다).
+        // 기존 출력(재임포트)은 실패해도 지우지 않으므로 이름을 담지 않는다.
         String file(allocator);
-        if (saved) {
+        if (saved && made.created) {
             saved = file.TryReserve(MaxNativePathBytes());
         }
 
@@ -820,12 +1028,15 @@ Result<void> AssetService::Import(const AssetDatabaseLock& lock, StringView path
             return rollback(diagnostic);
         }
 
-        (void)file.TryAssign(set_.Find(made.id)->fileName.View());
-        (void)savedFiles.TryPushBack(rocks::Move(file));
+        if (made.created) {
+            (void)file.TryAssign(set_.Find(made.id)->fileName.View());
+            (void)savedFiles.TryPushBack(rocks::Move(file));
+            (void)savedIds.TryPushBack(made.id);
+        }
     }
 
     ImportRecordInput owned;
-    owned.owner = mainId.Value();
+    owned.owner = run.mainId;
     owned.importerId = info.id;
     owned.importerName = info.name;
     owned.importerVersion = info.version;
@@ -833,21 +1044,20 @@ Result<void> AssetService::Import(const AssetDatabaseLock& lock, StringView path
     owned.options = optionsRecord.View();
     owned.outputs = recordOutputs.View();
     AssetDiagnostic diagnostic;
-    auto record = WriteImportRecord(allocator, mainId.Value(), owned);
-    Result<void> saved =
-        record ? set_.SetImportRecord(mainId.Value(), record.Value().View(), AssetId{})
-               : Result<void>::Failure(record.Error());
+    auto record = WriteImportRecord(allocator, run.mainId, owned);
+    Result<void> saved = record ? set_.SetImportRecord(run.mainId, record.Value().View(), AssetId{})
+                                : Result<void>::Failure(record.Error());
     if (saved) {
         saved = reserveWarnings();
     }
 
     if (!saved) {
         diagnostic.error = saved.Error();
-        diagnostic.asset = mainId.Value();
+        diagnostic.asset = run.mainId;
         return rollback(diagnostic);
     }
 
-    if (saved = set_.Save(mainId.Value(), lock, save, warnings, &diagnostic); !saved) {
+    if (saved = set_.Save(run.mainId, lock, save, warnings, &diagnostic); !saved) {
         return rollback(diagnostic);
     }
 
@@ -858,8 +1068,335 @@ Result<void> AssetService::Import(const AssetDatabaseLock& lock, StringView path
         }
     }
 
-    result.id = mainId.Value();
+    // 이번에 연 패키지(출력·그 의존)를 닫는다 — 저장한 깨끗한 패키지이고 원래 열려 있던 패키지는
+    // 그것들을 참조할 수 없다(열기는 기존 패키지의 미해결 import를 다시 묶지 않는다). 열린 채 두면
+    // 같은 서비스의 다음 재임포트가 Busy다(7.1절 18 A2f2a). 닫기 실패(할당·Discard)는 성공을 바꾸지
+    // 않는다 — 저장은 끝났고, 남은 패키지는 열린 채다(호출자가 Close한다).
+    (void)set_.CloseOpened(run.before);
+    result.id = run.mainId;
     return Result<void>::Success();
+}
+
+Result<void> AssetService::Reimport(const AssetDatabaseLock& lock, StringView path,
+                                    Span<const AssetImportSourceInput> overrides,
+                                    Span<const TextAssignment> assignments,
+                                    TextDiagnostics& diagnostics, AssetImportResult& result,
+                                    Array<EditorWarning>* warnings,
+                                    AssetDiagnostic* failure) noexcept {
+    Allocator& allocator = *allocator_;
+    result.id = AssetId{};
+    result.path.Clear();
+    result.outputs.Clear();
+    if (!initialized_ || !lock.IsHeldFor(*layout_)) {
+        return FailImport<void>(failure, AssetDiagnosticCode::None, ErrorCode::InvalidArgument);
+    }
+
+    auto parsed = ParseLogicalPath(allocator, path);
+    if (!parsed) {
+        return FailImport<void>(failure,
+                                parsed.Error() == ErrorCode::InvalidArgument
+                                    ? AssetDiagnosticCode::InvalidPath
+                                    : AssetDiagnosticCode::None,
+                                parsed.Error());
+    }
+
+    auto entry = index_.FindByPath(parsed.Value());
+    if (!entry) {
+        return FailImport<void>(failure,
+                                entry.Error() == ErrorCode::AlreadyExists
+                                    ? AssetDiagnosticCode::DuplicatePath
+                                    : AssetDiagnosticCode::None,
+                                entry.Error());
+    }
+
+    // 주 출력: 같은 id 하나·읽기 전용 아님·소유 기록·열려 있지 않음.
+    const AssetIndexEntry& main = *entry.Value();
+    const AssetId mainId = main.id;
+    if (main.duplicateId) {
+        return FailImport<void>(failure, AssetDiagnosticCode::DuplicateAssetId,
+                                ErrorCode::AlreadyExists, mainId);
+    }
+
+    if (main.readOnly) {
+        return FailImport<void>(failure, AssetDiagnosticCode::NewerVersion, ErrorCode::Unsupported,
+                                mainId);
+    }
+
+    if (!main.importRecord.present || main.importRecord.owner != mainId) {
+        if (failure != nullptr) {
+            *failure = AssetDiagnostic{};
+            failure->error = ErrorCode::InvalidArgument;
+            failure->asset = mainId;
+            failure->related = main.importRecord.present ? main.importRecord.owner : AssetId{};
+        }
+
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (set_.Find(mainId) != nullptr) {
+        return FailImport<void>(failure, AssetDiagnosticCode::None, ErrorCode::Busy, mainId);
+    }
+
+    AssetImporter* importer =
+        importers_ != nullptr ? importers_->FindById(main.importRecord.importerId) : nullptr;
+    if (importer == nullptr) {
+        return FailImport<void>(failure, AssetDiagnosticCode::UnsupportedSourceFormat,
+                                ErrorCode::Unsupported, mainId);
+    }
+
+    if (main.importRecord.importerVersion > importer->Info().version) {
+        return FailImport<void>(failure, AssetDiagnosticCode::NewerVersion, ErrorCode::Unsupported,
+                                mainId);
+    }
+
+    // 기록 출력(주 출력 말고): 색인에 없으면(지워짐) 새 출력으로, 있으면 같은 id 하나·읽기 전용
+    // 아님·이 owner의 참조 기록·열려 있지 않음.
+    for (AssetId output : main.importRecord.outputs) {
+        if (output == mainId) {
+            continue;
+        }
+
+        auto found = index_.FindById(output);
+        if (!found && found.Error() == ErrorCode::NotFound) {
+            continue;
+        }
+
+        if (!found) {
+            return FailImport<void>(failure, AssetDiagnosticCode::DuplicateAssetId, found.Error(),
+                                    output);
+        }
+
+        const AssetIndexEntry& other = *found.Value();
+        if (other.readOnly) {
+            return FailImport<void>(failure, AssetDiagnosticCode::NewerVersion,
+                                    ErrorCode::Unsupported, output);
+        }
+
+        if (!other.importRecord.present || other.importRecord.owner != mainId) {
+            if (failure != nullptr) {
+                *failure = AssetDiagnostic{};
+                failure->error = ErrorCode::InvalidArgument;
+                failure->asset = output;
+                failure->related = mainId;
+            }
+
+            return Result<void>::Failure(ErrorCode::InvalidArgument);
+        }
+
+        if (set_.Find(output) != nullptr) {
+            return FailImport<void>(failure, AssetDiagnosticCode::None, ErrorCode::Busy, output);
+        }
+    }
+
+    auto aliases = Aliases(failure);
+    if (!aliases) {
+        return Result<void>::Failure(aliases.Error());
+    }
+
+    AssetSourceRoots roots(allocator, *layout_);
+    if (auto loaded = roots.Load(*files_, failure); !loaded) {
+        return loaded;
+    }
+
+    // 지금 열린 id(실패하면 이번에 연 것 — 주 출력·출력과 그 의존 — 을 닫는다).
+    Array<AssetId> before(allocator);
+    if (auto reserved = before.TryReserve(set_.Count()); !reserved) {
+        return FailImport<void>(failure, AssetDiagnosticCode::None, reserved.Error());
+    }
+
+    for (usize index = 0; index < set_.Count(); ++index) {
+        (void)before.TryPushBack(set_.At(index).id);
+    }
+
+    auto close = [&](AssetDiagnosticCode code, ErrorCode error, AssetId asset,
+                     uint64 detail = 0) noexcept {
+        (void)set_.CloseOpened(before.View());
+        return FailImport<void>(failure, code, error, asset, detail);
+    };
+    // 주 출력을 열어 온전한 기록을 읽는다.
+    if (auto opened = set_.Open(mainId, warnings, failure); !opened) {
+        (void)set_.CloseOpened(before.View());
+        return Result<void>::Failure(opened.Error());
+    }
+
+    const EditorPackageInfo* mainInfo = set_.Find(mainId);
+    // 미해결 import가 있으면 저장할 수 없다(asset-set과 같다 — 복제·ID 수정과 같은 규칙).
+    if (!mainInfo->unresolved.IsEmpty()) {
+        // 닫기 전에 대상을 꺼낸다(닫으면 정보가 사라진다).
+        const AssetId target = mainInfo->unresolved[0].target;
+        (void)set_.CloseOpened(before.View());
+        if (failure != nullptr) {
+            *failure = AssetDiagnostic{};
+            failure->code = AssetDiagnosticCode::MissingDependency;
+            failure->error = ErrorCode::InvalidArgument;
+            failure->asset = mainId;
+            failure->related = target;
+        }
+
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    auto record = ReadImportRecord(allocator, mainId, mainInfo->importRecord.View());
+    if (!record) {
+        return close(AssetDiagnosticCode::None, record.Error(), mainId);
+    }
+
+    const ImportRecord& recorded = record.Value();
+    // 판정은 색인 요약으로 했다 — 파일 기록이 그 요약과 다르면(색인 뒤 밖에서 바뀜) 판정하지 않은
+    // 출력을 열 수 있으므로 거부한다(Open의 다른 id와 같은 ExternalModification / StaleHandle).
+    // owner는 따로 보지 않는다 — 소유 기록이 아니게 바뀌면 임포터 id가 비어 다르다.
+    bool same = recorded.importerId == main.importRecord.importerId &&
+                recorded.importerVersion == main.importRecord.importerVersion &&
+                recorded.outputs.Size() == main.importRecord.outputs.Size();
+    for (usize index = 0; same && index < recorded.outputs.Size(); ++index) {
+        same = recorded.outputs[index].asset == main.importRecord.outputs[index];
+    }
+
+    if (!same) {
+        return close(AssetDiagnosticCode::ExternalModification, ErrorCode::StaleHandle, mainId);
+    }
+
+    // 원본: 기록 역할 집합 = 임포터 roles, 바꾸기를 적용한 뒤 루트로 푼다(임포터 roles 순).
+    const AssetImporterInfo& info = importer->Info();
+    const StringView defaultRoles[] = {DefaultImportSourceRole};
+    const Span<const StringView> roles =
+        info.roles.IsEmpty() ? Span<const StringView>(defaultRoles) : info.roles;
+    if (recorded.sources.Size() != roles.Size()) {
+        return close(AssetDiagnosticCode::InvalidImportOption, ErrorCode::InvalidArgument, mainId);
+    }
+
+    const bool single = overrides.Size() == 1 && overrides[0].role.IsEmpty();
+    if (single && recorded.sources.Size() != 1) {
+        return close(AssetDiagnosticCode::InvalidImportOption, ErrorCode::InvalidArgument, mainId);
+    }
+
+    for (usize index = 0; index < overrides.Size() && !single; ++index) {
+        bool known = false;
+        for (const ImportSource& source : recorded.sources) {
+            known = known || source.role.View() == overrides[index].role;
+        }
+
+        if (!known) {
+            return close(AssetDiagnosticCode::InvalidImportOption, ErrorCode::InvalidArgument,
+                         mainId, index);
+        }
+    }
+
+    Array<String> resolved(allocator);
+    Array<AssetImportSourceInput> ordered(allocator);
+    if (auto reserved = resolved.TryReserve(roles.Size()); !reserved) {
+        return close(AssetDiagnosticCode::None, reserved.Error(), mainId);
+    }
+
+    if (auto reserved = ordered.TryReserve(roles.Size()); !reserved) {
+        return close(AssetDiagnosticCode::None, reserved.Error(), mainId);
+    }
+
+    for (usize index = 0; index < roles.Size(); ++index) {
+        const ImportSource* source = nullptr;
+        for (const ImportSource& one : recorded.sources) {
+            source = one.role.View() == roles[index] ? &one : source;
+        }
+
+        if (source == nullptr) {
+            return close(AssetDiagnosticCode::InvalidImportOption, ErrorCode::InvalidArgument,
+                         mainId, index);
+        }
+
+        StringView chosen{};
+        for (const AssetImportSourceInput& override : overrides) {
+            chosen = single || override.role == roles[index] ? override.path : chosen;
+        }
+
+        if (chosen.IsEmpty()) {
+            String path(allocator);
+            if (auto unpacked =
+                    roots.Resolve(source->root.View(), source->relativePath.View(), path);
+                !unpacked) {
+                return close(unpacked.Error() == ErrorCode::NotFound
+                                 ? AssetDiagnosticCode::MissingSource
+                                 : AssetDiagnosticCode::InvalidSource,
+                             unpacked.Error(), mainId, index);
+            }
+
+            (void)resolved.TryPushBack(rocks::Move(path));
+            chosen = resolved[resolved.Size() - 1].View();
+        }
+
+        (void)ordered.TryPushBack(AssetImportSourceInput{roles[index], chosen});
+    }
+
+    // 기존 출력을 연다(주 출력은 빈 key — 기록 key·타입, 경로는 지금 색인 경로).
+    ImportRun run(allocator);
+    if (auto reserved = run.existing.TryReserve(recorded.outputs.Size()); !reserved) {
+        return close(AssetDiagnosticCode::None, reserved.Error(), mainId);
+    }
+
+    for (const ImportOutput& output : recorded.outputs) {
+        auto found = output.asset == mainId ? Result<const AssetIndexEntry*>::Success(&main)
+                                            : index_.FindById(output.asset);
+        if (!found) {
+            continue;
+        }
+
+        // 기록 타입은 그 패키지의 대표 타입이어야 한다(손 편집·손상 기록 — 임포터가 Output(key,
+        // T)로 받은 객체가 T가 아니면 안 된다).
+        if (found.Value()->type != output.type) {
+            return close(AssetDiagnosticCode::TypeMismatch, ErrorCode::TypeMismatch, output.asset);
+        }
+
+        AssetDiagnostic diagnostic;
+        auto opened = set_.Open(output.asset, warnings, &diagnostic);
+        if (!opened) {
+            (void)set_.CloseOpened(before.View());
+            if (failure != nullptr) {
+                *failure = diagnostic;
+            }
+
+            return Result<void>::Failure(opened.Error());
+        }
+
+        ImportRun::Existing existing(allocator);
+        Result<void> step = existing.key.TryAssign(output.outputKey.View());
+        if (step) {
+            step = existing.path.TryAssign(found.Value()->path.View());
+        }
+
+        if (!step) {
+            return close(AssetDiagnosticCode::None, step.Error(), mainId);
+        }
+
+        // Open은 패키지를 준다 — 임포터에는 대표 에셋(이름 빈 자식 — 패키지에 늘 있다)을 준다.
+        auto representative = set_.Registry().FindChild(set_.Access(), opened.Value(), "");
+
+        existing.id = output.asset;
+        existing.type = output.type;
+        existing.asset = representative.Value();
+        (void)run.existing.TryPushBack(rocks::Move(existing));
+    }
+
+    run.lock = &lock;
+    run.path = &parsed.Value();
+    run.mainId = mainId;
+    run.importer = importer;
+    run.sources = ordered.View();
+    run.roots = &roots;
+    run.aliases = aliases.Value();
+    run.before = before.View();
+    run.assignments = assignments;
+    run.diagnostics = &diagnostics;
+    run.result = &result;
+    run.warnings = warnings;
+    run.failure = failure;
+    run.reimport = true;
+    run.recordedOptions = recorded.options.View();
+    // 실행 앞부분(원본·옵션)의 실패도 이번에 연 주 출력·출력을 닫는다.
+    auto ran = RunImport(run);
+    if (!ran) {
+        (void)set_.CloseOpened(before.View());
+    }
+
+    return ran;
 }
 
 } // namespace rocks

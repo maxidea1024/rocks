@@ -84,6 +84,48 @@ struct AssetImportResult {
     Array<AssetImportOutput> outputs;
 };
 
+// 임포트 원본 하나의 상태다(7.1절 18 A2f2b — ImportStatus).
+struct AssetImportSourceStatus {
+    explicit AssetImportSourceStatus(Allocator& allocator) noexcept
+        : role(allocator), root(allocator), relative(allocator) {
+    }
+
+    // 기록의 역할·루트(빈 문자열 = 절대 경로)·상대 경로다.
+    String role;
+    String root;
+    String relative;
+    // None(current — 크기·SHA-256이 기록과 같다), SourceChanged, MissingSource(파일 없음·모르는
+    // 루트), InvalidSource(위치 규칙 위반·읽기 IO 오류 — error에 그 오류)다.
+    AssetDiagnosticCode state = AssetDiagnosticCode::None;
+    ErrorCode error = ErrorCode::None;
+};
+
+// asset-info --import 결과다(7.1절 18 A2f2b). 참조 기록(출력 패키지)이면 owner·ownerPath만 채운다.
+struct AssetImportStatus {
+    explicit AssetImportStatus(Allocator& allocator) noexcept
+        : ownerPath(allocator), importerName(allocator), sources(allocator) {
+    }
+
+    // 대상 패키지 id와 기록 owner다(owner == id면 소유 기록). ownerPath는 owner의 색인 논리 경로다
+    // (색인에 없거나 같은 id 둘이면 빈 문자열).
+    AssetId id{};
+    AssetId owner{};
+    String ownerPath;
+    // 기록의 임포터 id·이름·버전과 상태다: None(current), ImporterOutdated(등록 버전이 더 새),
+    // NewerVersion(기록 버전이 더 새 — 재임포트가 거부한다), UnsupportedSourceFormat(등록 없음).
+    Guid importerId{};
+    String importerName;
+    uint32 importerVersion = 0;
+    AssetDiagnosticCode importer = AssetDiagnosticCode::None;
+    // 기록 원본마다다(기록 순서).
+    Array<AssetImportSourceStatus> sources;
+
+    // 소유 기록인지다.
+    bool Owned() const noexcept {
+        return owner == id;
+    }
+};
+
 // asset-info 출력 선택이다(13절).
 struct AssetInfoOptions {
     // JSON 출력(ExportJson)이다(기본은 `<경로>=<값>` 줄 — ExportLines).
@@ -297,6 +339,55 @@ public:
                         Array<EditorWarning>* warnings = nullptr,
                         AssetDiagnostic* failure = nullptr) noexcept;
 
+    // asset-reimport <path> [--source=<파일> | --source.<역할>=<파일>…] [설정…](7.1절 18 A2f2a):
+    // path(지금 이름 — 별칭으로 풀지 않는다)의 소유 기록대로 원본을 다시 읽어 기록의 임포터로
+    // 출력을 제자리 갱신한다. overrides는 원본 바꾸기다(역할이 빈 하나 = `--source=` — 기록 원본이
+    // 하나일 때만, 아니면 기록에 있는 역할). 옵션은 기록 Record에 명시 대입만 더한다. 기록 출력은
+    // AssetId로 찾는다(이동해도 따라간다 — 색인에 없으면 그 key는 새 출력). 임포터가 청하지 않은
+    // 기존 출력은 경고 OrphanedOutput. 저장·되돌리기·경고는 Import와 같다(이미 저장한 기존 출력은
+    // 실패해도 새 내용으로 남는다 — 같은 재임포트를 다시 하면 수렴한다).
+    //
+    // 오류(failure 진단): Initialize 전·잠금 아님 InvalidArgument, 경로 규칙 InvalidPath, 없음
+    // NotFound(진단 None), 같은 경로 키 둘 DuplicatePath, 같은 id 둘 DuplicateAssetId(주 출력·출력
+    // — asset), 읽기 전용 NewerVersion / Unsupported, 기록 없음·참조 기록(related = owner)·출력의
+    // 기록이 이 owner의 참조 기록이 아님(asset·related) InvalidArgument, 주 출력·출력이 열려 있음
+    // Busy(asset), 임포터 없음 UnsupportedSourceFormat / Unsupported, 기록 임포터 버전이 더 새
+    // NewerVersion / Unsupported, 기록 역할이 임포터 roles와 다름·모르는 바꾸기 역할·`--source=`의
+    // 원본 수·옵션 기록 형식 InvalidImportOption, 모르는 원본 루트 MissingSource(detail = 원본
+    // 번호), Import의 원본·대입·임포터·출력(타입이 다른 기존 출력 TypeMismatch / InvalidArgument)·
+    // 저장 오류, 할당 실패.
+    Result<void> Reimport(const AssetDatabaseLock& lock, StringView path,
+                          Span<const AssetImportSourceInput> overrides,
+                          Span<const reflection_text::TextAssignment> assignments,
+                          reflection_text::TextDiagnostics& diagnostics, AssetImportResult& result,
+                          Array<EditorWarning>* warnings = nullptr,
+                          AssetDiagnostic* failure = nullptr) noexcept;
+
+    // asset-info <path|AssetId> --import(7.1절 18 A2f2b): 대상의 ImportRecord를 디스크에서 읽어
+    // 임포트 상태를 out에 쓴다. 패키지를 열지 않는다(파일의 ImportRecord 칸만 부분 읽기 — 상태는
+    // 디스크 기준이고 열린 패키지를 남기지 않는다). 잠금을 잡지 않는다. 대상 경로는 별칭으로도
+    // 푼다(경고 AliasResolved). 원본마다 크기를 먼저 보고 같으면 고정 버퍼로 흘려 읽어 SHA-256을
+    // 비교한다. 원본의 상태(없음·바뀜·읽기 오류)는 실패가 아니라 out의 상태다.
+    //
+    // 오류(failure 진단): Initialize 전 InvalidArgument, 대상 텍스트 형식 InvalidPath /
+    // InvalidArgument, 없음 NotFound(진단 None), 같은 경로 키 둘 DuplicatePath / AlreadyExists,
+    // 같은 id 둘 DuplicateAssetId / AlreadyExists, 파일 읽기 실패(열기 — 사라졌으면 MissingFile /
+    // NotFound, 부분 읽기의 진단), 헤더 id가 색인과 다름 ExternalModification / StaleHandle, 기록
+    // 없음 InvalidArgument(진단 None), 읽지 못하는 기록(다른 스키마·더 새 버전) NewerVersion /
+    // Unsupported, 기록 형식 위반 CorruptPackage(칸 ImportRecord), 원본 루트 표 Load의 오류, 할당
+    // 실패(진단 None). 실패하면 out은 정해지지 않는다.
+    //
+    // 사용 예:
+    //   AssetImportStatus status(allocator);
+    //   if (service.ImportStatus("/Game/Rock", status)) {
+    //       for (const AssetImportSourceStatus& source : status.sources) {
+    //           if (source.state == AssetDiagnosticCode::SourceChanged) { /* 재임포트 권장 */ }
+    //       }
+    //   }
+    Result<void> ImportStatus(StringView target, AssetImportStatus& out,
+                              Array<EditorWarning>* warnings = nullptr,
+                              AssetDiagnostic* failure = nullptr) noexcept;
+
     // asset-fix-duplicate-id <path>: 같은 id 파일 둘 이상 가운데 path의 파일을 새 id로 다시 쓴다
     // (7.1절 17 A2e4b — EditorPackageSet::FixDuplicateId). 경로는 지금 이름이다(별칭으로 풀지
     // 않는다). 고아가 생기면 경고 OrphanedOutput.
@@ -359,6 +450,11 @@ private:
     // 둔다.
     Result<ObjectHandle> OpenTarget(StringView target, AssetId& id, Array<EditorWarning>* warnings,
                                     AssetDiagnostic* failure) noexcept;
+    // 새 임포트·재임포트가 같이 쓰는 실행이다(AssetServiceImport.cpp — 원본 읽기·옵션·임포터·설정·
+    // 저장·되돌리기).
+    struct ImportRun;
+    Result<void> RunImport(ImportRun& run) noexcept;
+
     // 타입 도구 이름의 클래스 lease다(에셋 클래스만이면 requireAsset).
     Result<TypeLease> FindClass(StringView name, bool requireAsset,
                                 AssetDiagnostic* failure) noexcept;

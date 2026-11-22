@@ -1,0 +1,57 @@
+# SL 2.2 door scenario (SparksRuntime LC6e): delivery order of Pressed→Opening→Changed→Tick→Open→Opened,
+# @skipWhileBusy while opening, Disable during the await cancels and reverts, and the key check.
+new #1 Switch -> ok (0 steps)
+hook #1 Enable -> ok (0 steps)
+new #2 Bag -> ok (3 steps)
+hook #2 Enable -> ok (0 steps)
+new #3 DoorLogic -> ok (14 steps)
+new #4 Watcher -> ok (0 steps)
+hook #4 Enable -> ok (0 steps)
+Watcher.Watch(#4, #3) -> void (3 steps)
+DoorLogic.Setup(#3, #1, #2) -> void (5 steps)
+hook #3 Awake -> ok (0 steps)
+hook #3 Enable -> ok (29 steps)
+  log info "pose Closed 0.0"
+Switch.Press(#1, #20) -> void (4 steps)
+  log info "ignored"
+  deliver #3 DoorLogic.on Trigger.Pressed -> ok (29 steps)
+Bag.AddIron(#2) -> void (11 steps)
+Switch.Press(#1, #20) -> void (4 steps)
+  log info "open sound"
+  log info "pose Opening 0.0"
+  deliver #3 DoorLogic.on Trigger.Pressed -> suspended (36 steps)
+  deliver #3 DoorLogic.on State.Changed -> ok (34 steps)
+Switch.Press(#1, #20) -> void (4 steps)
+hook #3 Tick(0.3) -> ok (23 steps)
+  log info "swing 0.5"
+advance 0.35 -> ok (1 suspended)
+hook #3 Tick(0.3) -> ok (23 steps)
+  log info "swing 1.0"
+advance 0.3 -> ok (0 suspended)
+  resume #3 DoorLogic.on Trigger.Pressed -> ok (8 steps)
+  deliver #3 DoorLogic.on State.Changed -> ok (33 steps)
+  deliver #4 Watcher.on Door.Opened -> ok (7 steps)
+  log info "pose Open 1.0"
+  log info "opened"
+fields #3 -> DoorLogic(OpenAngle: 90, RequiredKey: ?, SwingSeconds: 0.6, Trigger: #1, Pocket: #2, State: Open, ShownState: Open, Swing: 1)
+hook #3 Disable -> ok (5 steps)
+hook #3 Enable -> ok (29 steps)
+  log info "pose Open 1.0"
+new #5 DoorLogic -> ok (14 steps)
+DoorLogic.Setup(#5, #1, #2) -> void (5 steps)
+hook #5 Enable -> ok (29 steps)
+  log info "pose Closed 0.0"
+Switch.Press(#1, #20) -> void (4 steps)
+  log info "ignored"
+  log info "open sound"
+  log info "pose Opening 0.0"
+  deliver #3 DoorLogic.on Trigger.Pressed -> ok (8 steps)
+  deliver #5 DoorLogic.on Trigger.Pressed -> suspended (36 steps)
+  deliver #5 DoorLogic.on State.Changed -> ok (34 steps)
+hook #5 Disable -> ok (7 steps)
+fields #5 -> DoorLogic(OpenAngle: 90, RequiredKey: ?, SwingSeconds: 0.6, Trigger: #1, Pocket: #2, State: Closed, ShownState: Opening, Swing: 0)
+advance 1.0 -> ok (0 suspended)
+stats -> waits 0, suspended 0, skipped 1
+detach #5 -> ok
+detach #4 -> ok
+detach #3 -> ok

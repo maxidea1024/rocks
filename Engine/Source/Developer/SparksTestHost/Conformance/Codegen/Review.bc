@@ -56,18 +56,22 @@ t44 = "Hp.Points"
 t45 = "Array<string>"
 t46 = "ScriptableComponent"
 t47 = "Shield"
-t48 = "Points"
-t49 = "Names"
-t50 = "Cue"
-t51 = "Hum"
-t52 = "Cursor"
-t53 = "Opened"
-t54 = "x,f64>void"
-t55 = "Actor.Damaged"
-t56 = "Owner"
-t57 = "Damaged"
-t58 = "sparks 0.4.0"
-t59 = "Main"
+t48 = "int?"
+t49 = "Points"
+t50 = "Names"
+t51 = "Cue"
+t52 = "SoundAsset"
+t53 = "Hum"
+t54 = "LoopHandle?"
+t55 = "Cursor"
+t56 = "int"
+t57 = "Opened"
+t58 = "x,f64>void"
+t59 = "Actor.Damaged"
+t60 = "Owner"
+t61 = "Damaged"
+t62 = "sparks 0.4.0"
+t63 = "Main"
 ref0 = field Hp.Cursor args ">i64"
 ref1 = language NextTick args ">w"
 ref2 = context World
@@ -93,12 +97,12 @@ ref21 = field Hp.Points args ">A<v3>"
 ref22 = type Array<string>
 ref23 = event Actor.Damaged args "x,f64>void"
 class0 = Hp : ScriptableComponent s3 r2 b2 init Hp.$init
-  field Shield s0 x2
-  field Points b0 x1
-  field Names b1 x1
-  field Cue r0 x1
-  field Hum r1 x1 held
-  field Cursor s2 x1
+  field Shield s0 x2 int?
+  field Points b0 x1 Array<vec3>
+  field Names b1 x1 Array<string>
+  field Cue r0 x1 SoundAsset
+  field Hum r1 x1 LoopHandle? held
+  field Cursor s2 x1 int
   handler Owner.Damaged Hp.on Owner.Damaged await skipWhileBusy ref16 -> ref23
   event Opened
 

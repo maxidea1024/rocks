@@ -39,6 +39,53 @@ struct VmSessionBudgets {
     uint32 executionsPerInstance = 256; // 정지 실행(동시 실행·대기)
 };
 
+// reload의 정지 실행 처리다(Docs/Design/SparksReload.ko.md K6 — SL 12.4절 `ReloadExecutions`).
+enum class VmReloadExecutions : uint8 {
+    Keep,  // 정지 실행은 이전 revision 코드로 끝까지 간다
+    Cancel // 본문이 바뀐(삭제된) 함수를 frame에 가진 실행을 취소한다(Tryout 기본값)
+};
+
+// reload 결과다(SparksReload K7). 필드 수는 (instance, 필드) 쌍의 수다.
+struct VmReloadReport {
+    uint32 classes = 0;   // 새 revision 클래스에 대응한 옛 클래스
+    uint32 instances = 0; // 새 revision으로 옮긴 instance(기반 사슬에 그 모듈 클래스가 있다)
+    uint32 moved = 0;     // 옛 값을 옮긴 필드
+    uint32 defaulted = 0; // 새 기본값을 둔 필드(새 필드·쓰지 않은 필드 — R2)
+    uint32 lost = 0;      // 형식이 바뀌어 새 기본값을 둔 필드(R2)
+    uint32 removed = 0;   // 삭제된 필드(R2)
+    uint32 cancelled = 0; // 취소한 정지 실행(revision 상한 포함)
+    uint32 restarted = 0; // 다시 부른 Start hook
+    uint32 previous = 0;  // 이전 revision 코드로 도는 정지 실행
+};
+
+// PlanReload의 결과(클래스·필드·handler·함수 대응)다. ApplyReload가 소비한다.
+class VmReloadPlan final {
+public:
+    explicit VmReloadPlan(Allocator& allocator) noexcept
+        : classMap_(allocator), fieldMap_(allocator), handlerMap_(allocator), changed_(allocator) {
+    }
+
+    VmReloadPlan(const VmReloadPlan&) = delete;
+    VmReloadPlan& operator=(const VmReloadPlan&) = delete;
+
+    // 적용할 계획이 있는지다(PlanReload 성공 뒤 ApplyReload 전).
+    bool Ready() const noexcept {
+        return fresh_ != nullptr;
+    }
+
+private:
+    friend class VmSession;
+
+    const VmLinkedModule* old_ = nullptr;
+    const VmLinkedModule* fresh_ = nullptr;
+    VmReloadExecutions executions_ = VmReloadExecutions::Cancel;
+    uint32 classes_ = 0;
+    Array<uint32> classMap_;   // 옛 클래스 → 새 클래스(없으면 NoIndex)
+    Array<uint32> fieldMap_;   // 옛 classFields → 새 classFields(없으면 NoIndex)
+    Array<uint32> handlerMap_; // 옛 handler → 새 handler(없으면 NoIndex)
+    Array<uint8> changed_;     // 옛 함수: 1이면 본문이 바뀌었거나 삭제됐다
+};
+
 class VmSession final {
 public:
     VmSession(Allocator& allocator, VmHost* host) noexcept;
@@ -217,6 +264,66 @@ public:
         return skippedExecutions_;
     }
 
+    // ---- 로드 요청(SparksRuntime 2.6절 — LC6d5) ----
+
+    // host가 로드 요청의 끝을 알린다(언제든 — 실행 중이어도): 그 요청을 기다리는 대기를 끝내고
+    // 결과(value 객체 handle, error 0이면 성공·아니면 `Error` case + 1)를 둔다. 재개는 다음 재개
+    // 단계다(SL 5.4절 순서 5). 기다리는 대기가 없으면 할 일이 없다(host가 WatchLoad로 알린다).
+    void CompleteLoad(uint64 request, uint64 value, uint64 error) noexcept;
+
+    // ---- hot reload(Docs/Design/SparksReload.ko.md — LC7) ----
+
+    static constexpr uint32 MaxRevisions = 8; // 모듈별 살아 있는 revision(SL 12.4절)
+
+    // session 모듈 old를 fresh(같은 모듈 경로의 새 revision — 새 VmLinkedModule이고 session의
+    // host로 링크·import 풀기에 성공했다)로 바꾸는 계획을 세운다. session은 바뀌지 않는다. 판정
+    // 실패(instance가 있는 클래스의 삭제·기반 변경 — R3 필요, R1에서 필드 배치·handler 목록 변경)와
+    // 잘못된 인자는 reason에 이유(영어 한 문장)를 쓰고 InvalidArgument, 할당 실패는 OutOfMemory다.
+    // 사용 예:
+    //   VmReloadPlan plan(allocator);
+    //   if (session.PlanReload(old, fresh, VmReloadExecutions::Cancel, plan, reason)) {
+    //       auto report = session.ApplyReload(plan);
+    //   }
+    Result<void> PlanReload(const VmLinkedModule& old, const VmLinkedModule& fresh,
+                            VmReloadExecutions executions, VmReloadPlan& plan,
+                            StringBuilderBase& reason) noexcept;
+
+    // 계획을 적용한다(실행 중이 아닌 reload 경계 — SparksReload K3): 취소할 실행 취소 → instance·
+    // 연결·큐 항목을 새 revision으로 → session 모듈 목록 교체(그 모듈의 Tick 중지 해제) → 취소된
+    // Start 다시 부르기(적용 기록 `hook` 전달). 할당은 바꾸기 전에 모두 마친다: OutOfMemory면
+    // session은 그대로다(Start 다시 부르기의 할당 실패는 예외 — reload는 적용됐다). 계획 뒤
+    // session이 바뀌어 대응이 맞지 않거나 실행 중이면 InvalidArgument. 옛 revision은 References가
+    // false가 될 때까지 host가 보관한다(Keep 실행·큐 항목이 쓴다).
+    Result<VmReloadReport> ApplyReload(VmReloadPlan& plan) noexcept;
+
+    // session이 linked를 아직 참조하는지다(지금 모듈, instance, 연결, 큐 항목, 정지 실행의 frame,
+    // 이전 revision 코드의 필드 번역 경로). false면 host가 그 revision 객체와 bytecode를 놓아도
+    // 된다. 부를 때 더는 필요 없는 이전 revision 기록을 정리한다(놓기 전에 반드시 묻는다).
+    bool References(const VmLinkedModule& linked) noexcept;
+
+    // ---- Gate G4 주입(SparksRuntime 4절 — 시험 전용) ----
+
+    // nth번째로 실행되는 `AWAIT`(1부터)에서 fault를 내거나(cancel이 false) 정지 직후 그 실행을
+    // 취소한다(cancel). 0이면 주입하지 않는다. AwaitCount는 지금까지 실행된 `AWAIT` 수다.
+    void InjectAwait(uint32 nth, bool cancel) noexcept {
+        injectAt_ = nth;
+        injectCancel_ = cancel;
+    }
+
+    uint32 AwaitCount() const noexcept {
+        return awaitCount_;
+    }
+
+    // 주입이 실제로 일어났는지다(fault를 냈거나 취소를 실행했다 — 헛도는 G4를 잡는다).
+    bool InjectionFired() const noexcept {
+        return injectionFired_;
+    }
+
+    // 연결 표 항목 수다(G1 — Detach 뒤 0).
+    uint32 ConnectionCount() const noexcept {
+        return static_cast<uint32>(connections_.Size());
+    }
+
     // `@skipWhileBusy`로 버린 이벤트 수다(디버거 표시 — SL 6.1절 SD11).
     uint64 SkippedWhileBusy() const noexcept {
         return skippedWhileBusy_;
@@ -245,6 +352,15 @@ private:
     uint64 NewEventWait(uint64 publisher, const VmEventKey& key, ErrorCode& error) noexcept;
     // 끝난 하위 대기 handle이다(CALLW 경계 frame이 반환·ENDEXEC로 끝남).
     uint64 NewChildDone(ErrorCode& error) noexcept;
+    // 로드 요청 대기 handle이다(AWAIT의 대기 값이 표지 없는 요청 handle일 때 — 요청이 아니면 0).
+    // owned면 대기가 요청을 쥐고 돌려받을 때 멈춘다(지역에 담지 않은 `try await X.Load()`), take면
+    // 결과를 꺼내는 기다림이다(요청당 1회 — 두 번째는 0).
+    uint64 NewLoadWait(uint64 request, bool owned, bool take, ErrorCode& error) noexcept;
+    // 재개할 수 없는 정지 실행을 fault로 끝낸다(결과를 둘 수 없음 — 예산·모양): 기록·격리 창·부모
+    // 전파는 보통 fault와 같다.
+    Result<void> FaultSuspended(uint32 suspended, VmFaultKind kind) noexcept;
+    // root 묶음에 로드 대기가 있는지다(고정 재개 단계는 재개하지 않는다 — SL 5.4절 순서 5).
+    bool TreeHasLoad(uint32 root) const noexcept;
     // CALLW 경계(frame boundary)부터 맨 위까지를 하위 정지 실행으로 옮기고 하위 대기 handle을
     // child에 둔다(AWAIT가 부른다 — 부르는 쪽 frame은 실행 문맥에 남는다).
     VmFaultKind SuspendChild(usize boundary, uint64 wait, uint32 resultRegister, uint32 resultBank,
@@ -287,7 +403,8 @@ private:
         All,
         Race,
         Event, // 발행자의 이벤트(SparksRuntime 2.5절)
-        Child  // 하위 실행(CALLW)의 끝
+        Child, // 하위 실행(CALLW)의 끝
+        Load   // 로드 요청(publisher = 요청 handle — SparksRuntime 2.6절)
     };
 
     // 대기 하나다(handle = VmWaitTag | 세대 << 32 | 번호 — 돌려받은 번호의 옛 handle은 무효).
@@ -311,7 +428,10 @@ private:
         uint64 connectionOrder = 0;
         uint64 afterSequence = 0;
         uint32 child =
-            NoBytecodeIndex; // Child: 하위 정지 실행 번호(끝났거나 아직 정지 전이면 없음)
+            NoBytecodeIndex;      // Child: 하위 정지 실행 번호(끝났거나 아직 정지 전이면 없음)
+        uint64 loadValue = 0;     // Load: 결과 객체 handle
+        uint64 loadError = 0;     // Load: 0 성공, 아니면 `Error` case + 1
+        bool ownsRequest = false; // Load: 돌려받을 때 요청을 멈춘다(ReleaseHeld)
         bool used = false;
         bool done = false;
         bool cancelled = false;
@@ -325,7 +445,7 @@ private:
     uint64 NewWait(WaitKind kind, uint8 clock, double seconds, Span<const uint64> children,
                    ErrorCode& error) noexcept;
     // 단계 시작 때 완료된 대기의 정지 실행을 순서대로 재개한다.
-    Result<void> ResumeDone() noexcept;
+    Result<void> ResumeDone(bool fixedPhase = false) noexcept;
     // 정지 실행 하나를 재개한다(handle은 기다리던 대기 — 바뀌었으면 하지 않는다). depth·root는 재개
     // 조각의 연쇄 깊이·루트, inDrain이면 전달 순회 안(조각 끝만 정리하고 큐는 바깥이 비운다).
     Result<void> ResumeSuspended(uint32 suspended, uint64 wait, uint32 depth, uint64 root,
@@ -535,6 +655,16 @@ private:
     uint32 currentHandler_ = NoBytecodeIndex;
     uint64 skippedWhileBusy_ = 0;
     uint64 nextSerial_ = 1;
+    // Gate G4 주입.
+    uint32 injectAt_ = 0;
+    bool injectCancel_ = false;
+    uint32 awaitCount_ = 0;
+    bool cancelNext_ = false;                     // 다음 정지를 취소 표시한다
+    uint32 injectedSuspension_ = NoBytecodeIndex; // 조각 끝에 취소할 정지 실행
+    uint64 injectedWait_ = 0;                     // 그 실행이 기다리던 대기(슬롯 재사용 대조)
+    bool injectionFired_ = false;
+    // AWAIT 하나를 센다: 주입 fault면 true(취소 주입은 다음 정지를 표시한다).
+    bool CountAwait() noexcept;
     // 지연 적용(LC6d2).
     enum class RequestKind : uint8 {
         Enable,
@@ -573,8 +703,39 @@ private:
     // 필드는 둔다.
     void Isolate(uint32 instance) noexcept;
     bool nested_ = false; // 적용 루프 안(진입 기록을 이어 모은다)
-    // 수명 hook 하나를 적용 기록으로 돌린다.
-    Result<void> ApplyHook(uint32 instance, BytecodeHookKind kind) noexcept;
+    // 수명 hook 하나를 적용 기록으로 돌린다(onlyModule이 있으면 사슬에서 그 hook 함수 하나만 —
+    // reload의 Start 다시 부르기).
+    Result<void> ApplyHook(uint32 instance, BytecodeHookKind kind,
+                           const VmLinkedModule* onlyModule = nullptr,
+                           uint32 onlyFunction = NoBytecodeIndex) noexcept;
+    Result<VmCallResult> RunHookImpl(uint32 instance, BytecodeHookKind kind,
+                                     Span<const uint64> scalars, Span<const uint64> refs,
+                                     Span<VmBuffer* const> buffers,
+                                     const VmLinkedModule* onlyModule,
+                                     uint32 onlyFunction) noexcept;
+    // hot reload(LC7). 이전 revision(link)의 필드 번역표다: successor는 다음 revision.
+    struct Retired {
+        explicit Retired(Allocator& allocator) noexcept : classMap(allocator), fieldMap(allocator) {
+        }
+
+        const VmLinkedModule* link = nullptr;
+        const VmLinkedModule* successor = nullptr;
+        Array<uint32> classMap;
+        Array<uint32> fieldMap;
+        bool needed = false; // PruneRetired 임시
+    };
+
+    Array<Retired> retired_;
+    // module 클래스(기반 사슬 포함)의 instance가 있는지다.
+    bool HasInstancesOf(const VmLinkedModule& module, uint32 classIndex) const noexcept;
+    // 이전 revision 필드(module·classIndex·bank·offset)를 다음 revision 위치로 한 단계 옮긴다.
+    bool TranslateField(const VmLinkedModule*& module, uint32& classIndex, uint32 bank,
+                        uint32 slots, uint32& offset) const noexcept;
+    // link를 직접 참조하는 것이 있는지다(번역 경로 제외).
+    bool Uses(const VmLinkedModule* link) const noexcept;
+    void PruneRetired() noexcept;
+    // handler의 연결 key다(이벤트 또는 Changed 감시 필드).
+    VmEventKey HandlerKey(const VmLinkedModule& module, uint32 handler) const noexcept;
 };
 
 } // namespace rocks::sparks

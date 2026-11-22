@@ -1,0 +1,95 @@
+# Hot reload R1 (SparksReload LC7a): a new revision is a new linked module; instances, connections
+# and the session module move to it; Cancel cancels executions with a changed function on their
+# frames (a cancelled Start runs again), Keep leaves them on the previous revision; the Tick stop of
+# the module is lifted; class removal, base and layout changes are rejected without changes.
+new #1 Door -> ok (3 steps)
+new #2 Door -> ok (3 steps)
+new #3 Panel -> ok (3 steps)
+hook #1 Enable -> ok (0 steps)
+hook #1 Start -> suspended (9 steps)
+  log info "start v1"
+  host load 0:0 -> #4
+hook #2 Enable -> ok (0 steps)
+Door.Watch(#2, #1) -> void (3 steps)
+Door.Slow(#2) -> suspended (7 steps)
+Door.Steady(#2) -> suspended (7 steps)
+hook #2 Tick(0.1) -> ok (17 steps)
+hook #2 Tick(0.1) -> ok (17 steps)
+hook #2 Tick(0.1) -> fault AssertFailed at 16:9 (13 steps)
+  log error "tick v1"
+state #2 -> ticks stopped
+Door.Version(#1) -> "v1" (2 steps)
+reload removed -> rejected (class Door was removed while it has instances (they need a respawn))
+reload fields -> rejected (the fields of class Door changed (field migration is not supported yet))
+reload handlers -> rejected (the handlers of class Door changed (handler migration is not supported yet))
+reload base -> rejected (the base of class Panel changed while it has instances (they need a respawn))
+Door.Version(#1) -> "v1" (2 steps)
+reload v2 -> ok (instances 3, moved 9, defaulted 0, lost 0, removed 0, cancelled 2, restarted 1, previous 1)
+  host release #4
+  host load 0:0 -> #5
+  hook #1 Start -> suspended (9 steps)
+  log info "start v2"
+state #2 -> normal
+hook #2 Tick(0.1) -> ok (17 steps)
+Door.Version(#1) -> "v2" (2 steps)
+Door.Fire(#1, 5) -> void (4 steps)
+  log info "knocked v2 5"
+  deliver #2 Door.on Peer.Knock -> ok (8 steps)
+advance 1.0 -> ok (1 suspended)
+  resume #2 Door.Steady -> ok (13 steps)
+  log info "steady 104"
+fields #2 -> Door(Opened: 104, Peer: #1, Icon: ?, Got: none)
+Door.Slow(#2) -> suspended (7 steps)
+reload v3 keep -> ok (instances 3, moved 9, defaulted 0, lost 0, removed 0, cancelled 0, restarted 0, previous 2)
+Door.Version(#1) -> "v3" (2 steps)
+Door.Fire(#1, 6) -> void (4 steps)
+  log info "knocked v3 6"
+  deliver #2 Door.on Peer.Knock -> ok (8 steps)
+advance 1.0 -> ok (1 suspended)
+  resume #2 Door.Slow -> ok (13 steps)
+  log info "slow v2 114"
+fields #2 -> Door(Opened: 114, Peer: #1, Icon: ?, Got: none)
+# the kept Start of revision v2 finishes on v2 code and writes its fields through the newer layout
+load #5 #6 -> ok
+advance 0 -> ok (0 suspended)
+  host release #5
+  resume #1 Door.on Start -> ok (6 steps)
+  log info "started v2"
+fields #2 -> Door(Opened: 114, Peer: #1, Icon: ?, Got: none)
+fields #1 -> Door(Opened: 0, Peer: none, Icon: ?, Got: #6)
+# at most eight live revisions per module: the ninth expires the oldest kept execution
+Door.Slow(#2) -> suspended (7 steps)
+reload v2 keep -> ok (instances 3, moved 9, defaulted 0, lost 0, removed 0, cancelled 0, restarted 0, previous 1)
+Door.Slow(#2) -> suspended (7 steps)
+reload v3 keep -> ok (instances 3, moved 9, defaulted 0, lost 0, removed 0, cancelled 0, restarted 0, previous 2)
+Door.Slow(#2) -> suspended (7 steps)
+reload v2 keep -> ok (instances 3, moved 9, defaulted 0, lost 0, removed 0, cancelled 0, restarted 0, previous 3)
+Door.Slow(#2) -> suspended (7 steps)
+reload v3 keep -> ok (instances 3, moved 9, defaulted 0, lost 0, removed 0, cancelled 0, restarted 0, previous 4)
+Door.Slow(#2) -> suspended (7 steps)
+reload v2 keep -> ok (instances 3, moved 9, defaulted 0, lost 0, removed 0, cancelled 0, restarted 0, previous 5)
+Door.Slow(#2) -> suspended (7 steps)
+reload v3 keep -> ok (instances 3, moved 9, defaulted 0, lost 0, removed 0, cancelled 0, restarted 0, previous 6)
+Door.Slow(#2) -> suspended (7 steps)
+reload v2 keep -> ok (instances 3, moved 9, defaulted 0, lost 0, removed 0, cancelled 0, restarted 0, previous 7)
+Door.Slow(#2) -> suspended (7 steps)
+reload v3 keep -> ok (instances 3, moved 9, defaulted 0, lost 0, removed 0, cancelled 1, restarted 0, previous 7)
+stats -> waits 7, suspended 7, skipped 0
+advance 1.0 -> ok (0 suspended)
+  resume #2 Door.Slow -> ok (13 steps)
+  resume #2 Door.Slow -> ok (13 steps)
+  resume #2 Door.Slow -> ok (13 steps)
+  resume #2 Door.Slow -> ok (13 steps)
+  resume #2 Door.Slow -> ok (13 steps)
+  resume #2 Door.Slow -> ok (13 steps)
+  resume #2 Door.Slow -> ok (13 steps)
+  log info "slow v2 124"
+  log info "slow v3 134"
+  log info "slow v2 144"
+  log info "slow v3 154"
+  log info "slow v2 164"
+  log info "slow v3 174"
+  log info "slow v2 184"
+fields #2 -> Door(Opened: 184, Peer: #1, Icon: ?, Got: none)
+reload v2 -> ok (instances 3, moved 9, defaulted 0, lost 0, removed 0, cancelled 0, restarted 0, previous 0)
+stats -> waits 0, suspended 0, skipped 0

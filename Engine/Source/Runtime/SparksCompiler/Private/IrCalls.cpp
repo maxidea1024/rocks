@@ -776,9 +776,15 @@ uint32 IrBuilder::LowerAwait(uint32 node, uint32 operandNode) noexcept {
         source = Lower(operandNode, c_.ExpressionType(module_, operandNode));
     }
 
+    // 지역이 아닌 유지 자원(`try await X.Load()`)은 대기가 쥔다(SparksRuntime 2.6절 — LC6d5).
+    const bool local = operandNode != NoNode &&
+                       tree_->Node(operandNode).kind == SyntaxKind::Identifier &&
+                       LocalRegister(c_.NodeSymbol(module_, operandNode)) != NoIrRegister;
+    const bool owned = !local && source != NoIrRegister &&
+                       checker_.IsHeldType(c_.ExpressionType(module_, operandNode));
     const uint32 result = NewValue(resultType);
     const uint32 resume = NewBlock();
-    Add(IrOp::Await, result, source, resume, 0, node, IrAwaitValue);
+    Add(IrOp::Await, result, source, resume, 0, node, owned ? IrAwaitOwned : IrAwaitValue);
     StartBlock(resume);
     return result;
 }

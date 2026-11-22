@@ -19,6 +19,8 @@ enum class MemoryFault {
     OpenBusy,
     // 읽기 실패.
     Read,
+    // 열린 핸들의 크기 조회(Size) 실패.
+    Size,
     // 디렉터리 열거 실패·열거에서 없음(검색 중 지워진 디렉터리).
     Enumerate,
     EnumerateMissing
@@ -61,10 +63,11 @@ struct MemoryFaults {
 
 class MemoryHandle final : public platform::FileHandle {
 public:
-    void Reset(SharedPtr<Array<uint8>> content, bool failRead, bool writable, MemoryFaults* faults,
-               uint32* writeCalls) noexcept {
+    void Reset(SharedPtr<Array<uint8>> content, bool failRead, bool failSize, bool writable,
+               MemoryFaults* faults, uint32* writeCalls) noexcept {
         content_ = rocks::Move(content);
         failRead_ = failRead;
+        failSize_ = failSize;
         writable_ = writable;
         faults_ = faults;
         writeCalls_ = writeCalls;
@@ -127,6 +130,10 @@ public:
     }
 
     platform::FileStatus Size(uint64& bytes) noexcept override {
+        if (failSize_) {
+            return MemoryError;
+        }
+
         bytes = content_.Get()->Size();
         return {};
     }
@@ -150,6 +157,7 @@ public:
 private:
     SharedPtr<Array<uint8>> content_;
     bool failRead_ = false;
+    bool failSize_ = false;
     bool writable_ = false;
     MemoryFaults* faults_ = nullptr;
     uint32* writeCalls_ = nullptr;
@@ -306,8 +314,8 @@ public:
         }
 
         const bool writable = mode != platform::FileOpenMode::ReadExisting;
-        handle->Reset(node->content, node->fault == MemoryFault::Read, writable, &faults,
-                      &writeCalls_);
+        handle->Reset(node->content, node->fault == MemoryFault::Read,
+                      node->fault == MemoryFault::Size, writable, &faults, &writeCalls_);
         out = handle;
         ++opens;
         return {};
