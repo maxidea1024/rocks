@@ -3,6 +3,7 @@
 이 문서는 Sparks 언어 코어의 LC6(실행 모델)을 정한다. 언어 의미는 SparksLanguage(SL) §4.3·§5·§6·§7·§8.3·§9가 정본이고, 이 문서는 그 의미를 VM 쪽에서 어떻게 실현하는지(자료 구조·순서·host interface 2차·bytecode 형식 v3·시험)를 정한다. LC5(SparksVm.ko.md)의 링크·host interface 1차 위에 쌓는다.
 
 - 개정 1(2026-11-22): 첫 판. 하위 단계 LC6a–LC6e, 결정 R1–R12.
+- 개정 19(2026-11-22): LC6e 시나리오·Gate G1/G3/G4(2.7절), LC6 완료.
 - 개정 18(2026-11-22): LC6d5 리뷰 반영(2.6절).
 - 개정 17(2026-11-22): LC6d5 구현 메모(2.6절).
 - 개정 16(2026-11-22): LC6d4 리뷰 반영(2.6절).
@@ -169,6 +170,14 @@
 - **LC6d2 리뷰 반영(개정 13):** (1) 회차 안에서 활성 전환을 먼저(요청 순), 파괴를 나중에(요청 순) 적용한다(SL §5.1 "활성 전환 적용 → 파괴 적용"). (2) 적용이 할당에 실패하면 아직 적용하지 않은 요청을 큐 앞에 되돌린다(실패한 hook은 다시 돌리지 않는다). 파괴 표지는 정리 목록에 넣은 뒤에 둔다. (3) 프레임 끝 정리는 정리 목록을 한 묶음으로 Disable 전부 → Destroy 전부 → Detach 전부 하고(SL §4.3 — 같은 Actor의 component가 서로의 Disable 때 아직 붙어 있다), hook의 fault·예산 초과·할당 실패와 무관하게 끝까지 하며 첫 오류를 돌려준다. 정리는 엔진이 연 진입이라 새 스크립트 단계다(단계 전달 수 초기화·이월 항목). Destroy hook 안에서 생긴 요청은 다음 `ApplyRequests`가 받는다(host 순서: 단계 끝 `ApplyRequests` → 프레임 끝 `EndFrame` → 다음 단계). (4) PendingDestroy instance의 정지 실행은 재개하지 않고(시계·이벤트 대기·하위 실행 완료 모두 — 정리가 취소한다) 표적 Changed 전달도 하지 않는다. (5) 실행 중 `CreateInstance`는 `InvalidArgument`. (6) 요청 큐 상한 65,536(`CapacityExceeded`), 64회 안에 끝나지 않은 적용 횟수 `DeferredApplies()`, 돌지 못한 hook의 기록은 지운다, `CloseSession`은 전달 기록·로그도 비운다(모듈 포인터를 남기지 않는다). Teardown 예산은 기반 사슬의 hook 호출마다 새로 준다(사슬 중간 fault는 RunHook의 규칙대로 사슬을 멈춘다). 시험: `Run/Apply` 리뷰 절, 할당 실패 전수에 요청·적용·정리·종료. 남은 것: 64회 상한·요청 큐 상한은 hook 안에서 요청을 내는 host native가 있어야 시험된다(연동 단계), 닫은 뒤 진입 거부는 `.run`이 오류로 끝나므로 단위 시험이 필요하다.
 - **LC6d2 구현(개정 10):** `RequestEnabled`·`RequestDestroy`(실행 중에도 — 큐에만), `ApplyRequests`(회차마다 그때까지의 요청을 순서대로 — Enable은 비활성일 때, Disable은 활성일 때, 파괴는 PendingDestroy 표지와 정리 목록; 64회 뒤 남은 요청은 `PendingRequests`로 다음 단계에), `EndFrame`(정리 목록 순으로 Disable(활성이면) → Destroy → Detach), `CloseSession`(admission 차단 — 그 뒤 진입은 `InvalidArgument`; 모든 Detach, instance 없는 정지 실행 취소, 큐·Changed 자리·연결·대기 표·요청 비우기, 실행 문맥 정리). PendingDestroy instance에는 전달·`Call`·`RequestEnabled` 적용·Disable·Destroy 밖의 hook이 없다. 적용 루프와 정리는 한 진입으로 기록을 모으고, 돌린 hook은 `Delivery.hook`(`.run` `  hook #n <종류> -> 결과` — 그 hook이 낸 전달보다 앞)이다. Disable·Destroy hook은 Teardown 명령 예산(100,000)이다. `.run`: `request #n enable|disable|destroy`, `apply`·`endframe`(`ok (N pending)`), `close`(`ok (ledger N buffers)`). 시험 `Run/Apply`. 64회 상한은 hook 안에서 요청을 내는 host native가 있어야 시험된다(연동 단계 — 지금은 `.run` 지시뿐).
 - **결정:** R18 위와 같다. R19 대안(요청을 즉시 적용)은 전달 순회 중 연결·instance가 바뀌어 SL §5.4 순서가 깨진다. R20은 SL §9.1 표 순서 그대로다. R21 대안(모든 fault를 격리)은 일시적 오류 하나로 instance가 영구히 멈춘다 — SL SD42. R22 instance 메모리의 "직접 쥔 버퍼"는 근사다(중첩 컨테이너는 바깥 버퍼의 논리 크기에 원소 크기로만 든다) — 결정적이고 쓰기 지점에서 O(필드 수)다. R23 대안(VM이 로드 상태를 매 단계 묻기)은 host 왕복이 대기 수만큼 든다. R24 LC6d 시험은 하위 단계마다 `.run` golden과 할당 실패 전수를 둔다. R25 하위 단계는 LC6d1 → d2 → d3 → d4 → d5 순서로 커밋하고 각 리뷰어 1명.
+
+### 2.7 시나리오·Gate(LC6e)
+
+- **G1(누수 0):** 모든 `.run` 사례가 끝에 `CloseSession`을 하고 실행 문맥 ledger(살아 있는 버퍼·byte)와 가짜 host의 유지 자원 장부(held schema 타입 native 결과·로드 요청 중 멈추지 않은 수 — `FakeHost::HeldLive`)가 0인지 본다(아니면 사례 실패).
+- **G3(음성 대조):** 누수를 일부러 넣으면 G1이 실패하는지 확인했다(Detach의 필드 해제를 빼면 `Run/Held`·`Run/Objects`, 취소의 지역 해제를 빼면 `Run/Held`·`Run/Load`가 실패 — 2026-11-22 수동 확인, 코드에는 남기지 않는다).
+- **G4(실패 행렬):** 저장소 corpus의 `.run` 사례는 통과하면 실행된 모든 `AWAIT`(n번째)마다 fault 주입과 취소 주입(정지 직후 그 실행 취소 — 하위 실행이면 부모 묶음으로 전파)으로 한 번씩 다시 돌리고, 출력은 비교하지 않고 어느 출구에서든 `CloseSession` 뒤 ledger·유지 자원 0만 본다(`CaseInput::gateSweep`, `VmSession::InjectAwait` — 시험 전용 진입). 할당 실패 N번째 주입은 할당 실패 전수 시험(`SparksConformance_RunGoldenAllocationFailure*`)이 맡는다.
+- **시나리오:** corpus `Scenario/Door`는 SL §2.2 DoorLogic을 파일 사례로 옮긴 것이다(다른 패키지 import 대신 같은 파일의 Switch 이벤트·Bag): 열쇠 검사, Opening 쓰기와 Changed, 여는 동안 `@skipWhileBusy`, Tick 연출, 재개 뒤 Open과 Changed → Opened 전달 순서, 여는 도중 Disable의 취소와 되돌림(Disable 문맥 쓰기는 Changed 없음). SL §2.1 플레이어 캐릭터는 입력 action·component 생성·`Find<T>`가 엔진 연동(EI)에 있어 연동 단계에서 시나리오로 더한다.
+- **완료:** LC6(실행 모델)은 LC6a–LC6e로 끝났다. 남은 연동 몫은 각 절의 "남은 것"에 적었다.
 
 ## 3. 순서
 

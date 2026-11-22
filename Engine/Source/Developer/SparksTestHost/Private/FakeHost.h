@@ -48,6 +48,7 @@ struct FakeObject {
     String type;
     uint32 generation = 1;
     bool alive = true;
+    bool held = false; // 멈추지 않은 유지 자원(held 타입 native 결과·로드 요청 — G1 장부)
     Array<FakeFieldValue> fields;
 };
 
@@ -73,6 +74,8 @@ public:
     // 로드: 요청은 `LoadRequest` 객체(기록 `load #n`), 끝은 `.run` `load` 지시가 Complete로 둔다.
     uint64 StartLoad(uint64 assetLo, uint64 assetHi) noexcept override;
     LoadState WatchLoad(uint64 request, bool take, uint64& value, uint64& error) noexcept override;
+    // 멈추지 않은 유지 자원 수다(SparksRuntime 4절 G1 — CloseSession 뒤 0이어야 한다).
+    uint32 HeldLive() const noexcept;
     // 요청을 끝낸다(결과를 기억한다 — 아직 기다리지 않은 요청도). 요청이 아니면 false.
     bool CompleteLoad(uint64 request, uint64 value, uint64 error) noexcept;
     VmFaultKind GetContext(VmHostCall& call) noexcept override;
@@ -111,6 +114,8 @@ private:
     // 타입 이름 type의 기반 타입 이름이다(없으면 빈 글자 — 첫 기반만).
     StringView BaseOf(StringView type) const noexcept;
     uint64 NewObject(StringView type) noexcept;
+    // schema에서 type이 held 타입인지다(끝의 `?`는 뗀다).
+    bool IsHeldType(StringView type) const noexcept;
     struct FakeLoad {
         uint64 request = 0;
         bool done = false;

@@ -878,6 +878,11 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
                 }
             }
 
+            // Gate G4 주입(시험 전용): 이 정지 지점에서 fault.
+            if (session_->CountAwait()) {
+                return MakeFault(VmFaultKind::ContractViolation, at, steps);
+            }
+
             frames_[frames_.Size() - 1].pc = pc;
             ErrorCode error = ErrorCode::None;
             // 하위 실행 경계(CALLW) 위면 경계부터만 정지하고 부르는 쪽을 잇는다(SparksRuntime

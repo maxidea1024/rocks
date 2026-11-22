@@ -158,9 +158,12 @@ struct CaseInput {
     bool hasBytecode = false;     // `.bc`가 있는지(bytecode golden, AppendBytecodeDump)
     StringView bytecode;          // `.bc` 내용(hasBytecode일 때만)
     bool hasRun = false;          // `.run`이 있는지(실행 golden — Docs/Design/SparksVm.ko.md 7절)
-    StringView run;               // `.run` 내용(hasRun일 때만)
-    bool hasNames = false;        // `.names`가 있는지
-    StringView names;             // `.names` 내용(hasNames일 때만)
+    // Gate G4(SparksRuntime 4절): `.run`이 통과하면 모든 `AWAIT`에서 fault·취소를 하나씩 주입해
+    // 다시 돌리고 CloseSession 뒤 ledger·유지 자원이 0인지만 본다(출력은 비교하지 않는다).
+    bool gateSweep = false;
+    StringView run;        // `.run` 내용(hasRun일 때만)
+    bool hasNames = false; // `.names`가 있는지
+    StringView names;      // `.names` 내용(hasNames일 때만)
 };
 
 // 사례 하나를 실행한다. 기대와 다르면 report에 실패 항목을 더한다(한 사례에 진단·구문 트리 실패가

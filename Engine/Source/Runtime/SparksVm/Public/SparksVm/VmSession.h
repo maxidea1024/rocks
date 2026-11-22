@@ -224,6 +224,19 @@ public:
     // 단계다(SL 5.4절 순서 5). 기다리는 대기가 없으면 할 일이 없다(host가 WatchLoad로 알린다).
     void CompleteLoad(uint64 request, uint64 value, uint64 error) noexcept;
 
+    // ---- Gate G4 주입(SparksRuntime 4절 — 시험 전용) ----
+
+    // nth번째로 실행되는 `AWAIT`(1부터)에서 fault를 내거나(cancel이 false) 정지 직후 그 실행을
+    // 취소한다(cancel). 0이면 주입하지 않는다. AwaitCount는 지금까지 실행된 `AWAIT` 수다.
+    void InjectAwait(uint32 nth, bool cancel) noexcept {
+        injectAt_ = nth;
+        injectCancel_ = cancel;
+    }
+
+    uint32 AwaitCount() const noexcept {
+        return awaitCount_;
+    }
+
     // `@skipWhileBusy`로 버린 이벤트 수다(디버거 표시 — SL 6.1절 SD11).
     uint64 SkippedWhileBusy() const noexcept {
         return skippedWhileBusy_;
@@ -555,6 +568,14 @@ private:
     uint32 currentHandler_ = NoBytecodeIndex;
     uint64 skippedWhileBusy_ = 0;
     uint64 nextSerial_ = 1;
+    // Gate G4 주입.
+    uint32 injectAt_ = 0;
+    bool injectCancel_ = false;
+    uint32 awaitCount_ = 0;
+    bool cancelNext_ = false;                     // 다음 정지를 취소 표시한다
+    uint32 injectedSuspension_ = NoBytecodeIndex; // 조각 끝에 취소할 정지 실행
+    // AWAIT 하나를 센다: 주입 fault면 true(취소 주입은 다음 정지를 표시한다).
+    bool CountAwait() noexcept;
     // 지연 적용(LC6d2).
     enum class RequestKind : uint8 {
         Enable,

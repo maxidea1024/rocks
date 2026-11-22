@@ -1,0 +1,127 @@
+// SL 2.2 DoorLogic(전체 계획 23.1 예시의 확장)을 파일 사례로 옮긴 실행 시나리오(SparksRuntime LC6e):
+// 다른 패키지 import(Gameplay.Interaction·Items.Inventory) 대신 같은 파일의 Switch 이벤트와 Bag을 쓴다.
+enum DoorState {
+    Closed,
+    Opening,
+    Open
+}
+
+class Switch : ScriptableComponent {
+    event Pressed(actor: Actor);
+
+    fn Press(actor: Actor) {
+        emit Pressed(actor);
+    }
+}
+
+class Bag : ScriptableComponent {
+    var Keys: Array<Tag> = [];
+
+    fn AddIron() {
+        Keys.Add(Tag("Item.Key.Iron"));
+    }
+
+    fn Contains(key: Tag): bool {
+        for (item in Keys) {
+            if (item == key) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}
+
+class DoorLogic : ScriptableComponent {
+    @edit var OpenAngle: float = 90.0;
+    @edit var Hinge: SceneComponent;
+    @edit var RequiredKey = Tag("Item.Key.Iron");
+    @edit(Min: 0.05) var SwingSeconds: float = 0.6;
+    @edit var Trigger: Switch?;
+    @edit var Pocket: Bag?;
+    var State = DoorState.Closed;
+    var ShownState = DoorState.Closed;
+    var Swing = 0.0;
+
+    event Opened(by: Actor?);
+
+    fn Setup(source: Switch, bag: Bag) {
+        Trigger = source;
+        Pocket = bag;
+    }
+
+    on Enable() {
+        ShownState = State;
+        ApplyPose();
+    }
+
+    @skipWhileBusy
+    on Trigger.Pressed(actor: Actor) {
+        if (State != DoorState.Closed || !HasKey()) {
+            Log.Info("ignored");
+            return;
+        }
+
+        State = DoorState.Opening;
+        await Delay(SwingSeconds, Clock.Game);
+        State = DoorState.Open;
+        emit Opened(actor);
+    }
+
+    on Disable() {
+        if (State == DoorState.Opening) {
+            State = DoorState.Closed;
+        }
+    }
+
+    on State.Changed() {
+        if (ShownState == DoorState.Closed) {
+            Log.Info("open sound");
+        }
+
+        ShownState = State;
+        ApplyPose();
+    }
+
+    on Tick(dt: float) {
+        if (State != DoorState.Opening) {
+            return;
+        }
+
+        Swing = Math.Min(Swing + dt / SwingSeconds, 1.0);
+        Log.Info("swing ${Swing}");
+    }
+
+    fn ApplyPose() {
+        if (State == DoorState.Closed) {
+            Swing = 0.0;
+        }
+
+        if (State == DoorState.Open) {
+            Swing = 1.0;
+        }
+
+        Log.Info("pose ${State} ${Swing}");
+    }
+
+    fn HasKey(): bool {
+        let bag = Pocket ?? return false;
+        return bag.Contains(RequiredKey);
+    }
+}
+
+class Watcher : ScriptableComponent {
+    var Door: DoorLogic?;
+
+    fn Watch(target: DoorLogic) {
+        Door = target;
+    }
+
+    on Door.Opened(by: Actor?) {
+        if (by == null) {
+            Log.Info("opened by nobody");
+        } else {
+            Log.Info("opened");
+        }
+    }
+}

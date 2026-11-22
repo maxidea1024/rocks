@@ -569,6 +569,36 @@ bool FakeHost::IsAlive(uint64 handle) noexcept {
     return Find(handle) != nullptr;
 }
 
+bool FakeHost::IsHeldType(StringView type) const noexcept {
+    if (type.EndsWith("?")) {
+        type = StringView(type.Data(), type.ByteCount() - 1);
+    }
+
+    for (uint32 schema = 0; schema < compilation_.SchemaCount(); ++schema) {
+        if (!compilation_.SchemaIsValid(schema)) {
+            continue;
+        }
+
+        const BindingSchema& entry = compilation_.Schema(schema);
+        for (const SchemaType& declared : entry.Types()) {
+            if (declared.held && entry.Text(declared.name) == type) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+uint32 FakeHost::HeldLive() const noexcept {
+    uint32 count = 0;
+    for (const FakeObject& object : objects_) {
+        count += object.held ? 1 : 0;
+    }
+
+    return count;
+}
+
 void FakeHost::ReleaseHeld(uint64 handle) noexcept {
     for (FakeLoad& load : loads_) {
         load.released = load.released || load.request == handle;
@@ -585,12 +615,17 @@ void FakeHost::ReleaseHeld(uint64 handle) noexcept {
     Record(text.View());
     if (FakeObject* target = Find(handle)) {
         target->alive = false;
+        target->held = false;
         ++target->generation;
     }
 }
 
 uint64 FakeHost::StartLoad(uint64 assetLo, uint64 assetHi) noexcept {
     const uint64 request = NewObject("LoadRequest");
+    if (FakeObject* made = Find(request)) {
+        made->held = true; // 로드 요청은 유지 자원이다
+    }
+
     FakeLoad load;
     load.request = request;
     if (request == 0 || !loads_.TryPushBack(load)) {
@@ -642,7 +677,7 @@ bool FakeHost::CompleteLoad(uint64 request, uint64 value, uint64 error) noexcept
 }
 
 uint64 FakeHost::NewObject(StringView type) noexcept {
-    FakeObject object{String(*allocator_), 1, true, Array<FakeFieldValue>(*allocator_)};
+    FakeObject object{String(*allocator_), 1, true, false, Array<FakeFieldValue>(*allocator_)};
     if (!object.type.TryAssign(type) || !objects_.TryPushBack(static_cast<FakeObject&&>(object))) {
         outOfMemory_ = true;
         return 0;
@@ -904,6 +939,10 @@ VmFaultKind FakeHost::CallNative(VmHostCall& call) noexcept {
         if (created == 0) {
             call.Fail(ErrorCode::OutOfMemory);
             return VmFaultKind::None;
+        }
+
+        if (IsHeldType(binding.resultType.View())) {
+            Find(created)->held = true; // 획득한 유지 자원(G1 장부)
         }
 
         call.Refs()[0] = created;

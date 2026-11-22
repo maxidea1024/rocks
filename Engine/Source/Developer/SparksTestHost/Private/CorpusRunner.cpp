@@ -417,6 +417,7 @@ Result<void> RunPairedCase(Allocator& allocator, platform::FileSystem& files, St
     input.hasBytecode = present[6];
     input.bytecode = textOf(bytecodeName);
     input.hasRun = present[7];
+    input.gateSweep = present[7]; // 저장소 corpus는 Gate G4 주입 행렬도 돈다(SparksRuntime 4절)
     input.run = textOf(runName);
     input.name = caseName.View();
     return RunCase(allocator, input, report);

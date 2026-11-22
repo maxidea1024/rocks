@@ -321,6 +321,16 @@ void VmSession::CompleteLoad(uint64 request, uint64 value, uint64 error) noexcep
     }
 }
 
+bool VmSession::CountAwait() noexcept {
+    ++awaitCount_;
+    if (injectAt_ == 0 || awaitCount_ != injectAt_) {
+        return false;
+    }
+
+    cancelNext_ = injectCancel_;
+    return !injectCancel_;
+}
+
 void VmSession::SettleWaits(const Result<VmCallResult>& called) noexcept {
     uint32 awaited = NoBytecodeIndex;
     if (called && called.Value().outcome == VmOutcome::Suspended) {
@@ -344,6 +354,14 @@ void VmSession::SettleWaits(const Result<VmCallResult>& called) noexcept {
     }
 
     fragmentWaits_.Clear();
+    // G4 취소 주입: 이 조각이 정지시킨 실행을 취소한다(정지 지점의 취소 — 유지 자원·대기 정리).
+    if (injectedSuspension_ != NoBytecodeIndex) {
+        const uint32 target = injectedSuspension_;
+        injectedSuspension_ = NoBytecodeIndex;
+        if (target < suspended_.Size() && suspended_[target].live) {
+            CancelSuspended(target, true);
+        }
+    }
 }
 
 VmFaultKind VmSession::Suspend(uint64 wait, uint32 resultRegister, uint32 resultBank,
@@ -433,6 +451,11 @@ VmFaultKind VmSession::Suspend(uint64 wait, uint32 resultRegister, uint32 result
     entry.live = true;
     if (entry.instance < instances_.Size()) {
         ++instances_[entry.instance].suspendedCount;
+    }
+
+    if (cancelNext_) {
+        cancelNext_ = false;
+        injectedSuspension_ = number;
     }
 
     waits_[index].awaited = true;
@@ -538,6 +561,11 @@ VmFaultKind VmSession::SuspendChild(usize boundary, uint64 wait, uint32 resultRe
     entry.live = true;
     if (entry.instance < instances_.Size()) {
         ++instances_[entry.instance].suspendedCount;
+    }
+
+    if (cancelNext_) {
+        cancelNext_ = false;
+        injectedSuspension_ = number;
     }
 
     waits_[index].awaited = true;
