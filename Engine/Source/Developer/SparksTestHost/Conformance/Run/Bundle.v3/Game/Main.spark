@@ -20,5 +20,6 @@ class Door : Fixture {
     async fn Later(n: int) {
         await Delay(1.0, Clock.Game);
         Log.Info("later ${Twice(n)}");
+        Raise();
     }
 }

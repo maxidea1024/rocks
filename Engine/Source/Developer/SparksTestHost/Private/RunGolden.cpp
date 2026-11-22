@@ -1079,7 +1079,8 @@ bool SnapshotSession(const VmSession& session, Array<uint64>& out) noexcept {
         }
     }
 
-    return ok;
+    // 연결 내용·session 모듈·쓰기 bit·순번·Tick 중지(LC7c 리뷰 4 — 수만 같은 잘못된 복원도 잡는다).
+    return ok && session.AppendGateState(out);
 }
 
 // G5가 주입하는 reload 적용 수 상한이다(적용 표시 bit 수 — 넘는 적용은 행렬에서 빠진다).
@@ -2438,11 +2439,20 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
                         const StringView owner(eventName.Data(), dot);
                         usize unit = 0;
                         uint32 classIndex = NoBytecodeIndex;
-                        const bool local = findClass(owner, unit, classIndex) != 0;
+                        const uint32 owners = findClass(owner, unit, classIndex);
+                        if (owners > 1) {
+                            return bad("'emit' names a class of several modules (use "
+                                       "<path>:Class)");
+                        }
+
+                        // key 이름은 `<경로>:` 앞부분을 뗀 `Class.Event`다(LC7c 리뷰 5).
+                        StringView ownerPath;
+                        StringView qualifiedName;
+                        split(eventName, ownerPath, qualifiedName);
                         VmEventKey key;
-                        key.path =
-                            local ? codes[unit].code->String(codes[unit].code->path) : StringView();
-                        key.name = eventName;
+                        key.path = owners == 1 ? codes[unit].code->String(codes[unit].code->path)
+                                               : StringView();
+                        key.name = qualifiedName;
                         arguments.Clear();
                         refArguments.Clear();
                         bool parsed = true;

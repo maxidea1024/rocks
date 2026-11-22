@@ -3,6 +3,7 @@
 이 문서는 Sparks 언어 코어의 LC7(핫 리로드)을 정한다. 언어 의미는 SparksLanguage(SL) §12.4가 정본이고, 이 문서는 그 중 언어·VM 쪽(R1 본문 교체, R2 제자리 migration의 Sparks 필드·`on`·const, `ReloadExecutions`, 계획·판정·원자적 적용, 증분 재컴파일)을 VM session에서 어떻게 실현하는지 정한다. R3(instance 재생성)·R4(복제 schema)는 엔진 연동(L2·L3)이고, 사전·widget schema의 R2는 EI5다. 실행 모델은 SparksRuntime(LC6) 위에 쌓는다.
 
 - 개정 1(2026-11-22): 첫 판. 하위 단계 LC7a–LC7c, 결정 K1–K10.
+- 개정 10(2026-11-23): LC7c 리뷰 반영(6절 끝 "LC7c 리뷰 반영").
 - 개정 9(2026-11-23): LC7c3 구현·측정(6절 "LC7c3 설계").
 - 개정 8(2026-11-22): LC7c2b 구현(6절 "LC7c2b 설계").
 - 개정 7(2026-11-22): LC7c2를 LC7c2a(여러 모듈 `.run`)·LC7c2b(모듈 묶음 reload)로 나누고 LC7c2a 설계(6절).
@@ -129,6 +130,13 @@
     - Release 3회: 합계 23.8–30.1 ms(compile 19.8–26.1, bundle 1.0, link 0.8, plan 0.85–0.88, apply 1.26–1.44 ms).
     - Debug 1회: 합계 153 ms(compile 123, bundle 12, link 5.7, plan 8.6, apply 3.3 ms).
     - 판정: 목표 2 s(SL SD8)의 1.5 % 안팎이다. 컴파일이 80 % 이상을 차지하고 원문 크기에 비례하므로, 같은 비율이면 원문 약 9 MB에서 2 s에 닿는다. 그래서 K10의 모듈 단위 lowering 재사용은 지금 착수하지 않고, 프로젝트 원문이 MB 단위로 커지는 연동 단계(EI — Rocks Build compile action, SD6)에서 다시 잰다. 저장 감지·파일 읽기·편집기 요약은 이 측정 밖이다.
+- **LC7c 리뷰 반영(개정 10):**
+  - **1 — import로 닿는 옛 revision:** import는 링크 때 정적으로 묶이므로(Keep 실행의 옛 코드는 옛 대상을 부른다) 이전 revision 기록은 살아 있는 정지 실행이 frame 모듈과 그 import 폐포로 닿는 동안 남는다(`ExecutionReaches` — 따라간 모듈이 `MaxReachModules`(256)를 넘으면 닿는다고 본다). `References`는 그래서 그 revision을 참조 중으로 답한다(놓으면 옛 코드의 CALL이 놓인 객체를 부른다). revision 상한의 "old가 남는다"와 만료 취소도 같은 닿음으로 판정한다.
+  - **2 — 판정의 호출 폐포:** "바뀜"(Cancel)과 "필드 깨짐"(정책 무관)을 쌍의 old와 살아 있는 모든 이전 revision의 함수에 대해 계산한다. 초기값은 그 모듈 경로의 최신 revision(묶음이면 새 revision, 아니면 지금 모듈)과의 본문 비교·필드 번역이고, 같은 모듈 호출과 정적으로 묶인 import 호출을 따라 한 번의 전역 고정점으로 넓힌다. 그래서 자기 본문은 같아도 바뀐 함수를 부르는 옛 실행이 Cancel에서 취소된다(본문 hash가 같으면 동작이 같다는 K6의 전제는 callee가 이전 revision에 묶이면 깨진다 — 개정 10에서 바로잡음). 가상 호출은 host가 지금 revision으로 푼다.
+  - **3 — 새 revision의 import 대상:** 묶음의 다른 새 revision이거나 묶음 밖 지금 session 모듈이어야 한다(이전 revision·session 밖 모듈은 판정 실패).
+  - **4 — G5 대조:** `VmSession::AppendGateState`(시험 전용)가 session 모듈 목록, 연결마다 (발행자, 구독자, 모듈, handler, key 글자 위치·길이, 순번, 활성), 다음 연결 순번, instance마다 쓰기 bit·Tick 중지를 더한다. 주입 실행은 그 뒤의 출력·지시 오류를 보지 않는다(상태 대조와 누수만 — 한계로 남긴다).
+  - **5 — `emit`:** `<경로>:Class.Event`의 key 이름은 경로를 뗀 `Class.Event`이고, 여러 모듈에 있는 이름은 지시 오류다.
+  - 시험: `Run/Bundle`에 Keep 실행이 옛 Base 메서드(`Raise` — import 호출)로 배치가 바뀐 필드를 쓰는 경우와, Cancel에서 자기 본문은 같고 import로 바뀐 함수(`Twice`)를 부르는 실행의 취소(v4)를 더했다.
 
 ## 7. 시험
 
