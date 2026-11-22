@@ -10,6 +10,7 @@
 #include <AssetRuntime/AssetTypeHooks.h>
 #include <AssetRuntime/FilePackageBulkStore.h>
 #include <AssetRuntime/PackageReader.h>
+#include <Core/Encoding/Sha256.h>
 #include <Core/Time/DateTime.h>
 #include <Serialization/Record.h>
 #include <TestSupport/NFailAllocator.h>
@@ -889,6 +890,8 @@ struct CraftedRecord {
     TypeId leafType = IdOf<TestAsset>();
     TypeId villainType = IdOf<TestAsset>();
     bool mainOnly = false;
+    // 비어 있지 않으면 Leaf의 기록 byte를 이것으로 바꾼다(읽지 못하는 기록).
+    Span<const uint8> rawLeafRecord{};
 };
 
 bool PutCrafted(AssetEnv& env, Sources& sources, ImportScene& scene,
@@ -921,7 +924,8 @@ bool PutCrafted(AssetEnv& env, Sources& sources, ImportScene& scene,
     }
 
     PackageWriteOptions leafOptions = EditorOptions();
-    leafOptions.importRecord = ownedBytes.Value().View();
+    leafOptions.importRecord =
+        crafted.rawLeafRecord.IsEmpty() ? ownedBytes.Value().View() : crafted.rawLeafRecord;
     if (crafted.leafReadOnly) {
         leafOptions.customVersions = UnknownCustomVersions;
     }
@@ -1601,6 +1605,440 @@ TEST(AssetReimport_AllocationFailures) {
     }
 
     CHECK(failures > 0);
+}
+
+// AssetId 텍스트다.
+struct IdText {
+    explicit IdText(AssetId id) noexcept : builder{Span<char>(text)} {
+        CHECK(builder.TryAppendFormat("{}", id));
+    }
+
+    StringView View() const noexcept {
+        return builder.View();
+    }
+
+    char text[AssetId::TextBytes + 1] = {};
+    FixedStringBuilder builder;
+};
+
+// 임포트 상태(7.1절 18 A2f2b — 실제 임포트한 에셋): 소유 기록의 임포터·원본 current(경로·AssetId
+// 대상 같은 결과), 다른 출력의 owner·ownerPath, 원본 같은 크기 다른 내용·다른 크기 SourceChanged,
+// 원본 자리가 디렉터리·열기 사용 중·크기 조회 실패·읽기 실패 InvalidSource(error), 원본 없음
+// MissingSource, 패키지를 열지 않음(같은 서비스의 재임포트가 된다), 임포터 표 없음
+// UnsupportedSourceFormat, 별칭으로 푼 대상(경고 AliasResolved), 원본 대조 함수(빈 버퍼·작은
+// 버퍼로 여러 번 읽기).
+TEST(AssetImportStatus_Imported) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Sources sources(env.allocator);
+    REQUIRE(MakeSources(env, sources));
+    ImportScene scene(env, sources, "import-status");
+    REQUIRE(scene.ready);
+    constexpr StringView RockText = "value=2\noutputs=extra";
+    REQUIRE(scene.PutSource(RockSource, RockText));
+    AssetService service(env.allocator, scene.layout, scene.Config(env));
+    REQUIRE(service.Initialize());
+    const String source = scene.Absolute(env.allocator, RockSource);
+    const AssetImportSourceInput inputs[] = {{DefaultImportSourceRole, source.View()}};
+    TextDiagnostics diagnostics(env.allocator);
+    AssetImportResult imported(env.allocator);
+    REQUIRE(service.Import(scene.lock, "/Game/Rock", inputs, {}, {}, diagnostics, imported));
+    REQUIRE(imported.outputs.Size() == 1);
+
+    AssetImportStatus status(env.allocator);
+    auto sourceState = [&](StringView target) noexcept {
+        AssetDiagnostic failure;
+        auto shown = service.ImportStatus(target, status, nullptr, &failure);
+        return shown && status.sources.Size() == 1 ? status.sources[0].state
+                                                   : AssetDiagnosticCode::CorruptPackage;
+    };
+    // 소유 기록: 임포터·원본 current, 패키지를 열지 않는다.
+    REQUIRE(service.ImportStatus("/Game/Rock", status));
+    CHECK(status.Owned() && status.id == imported.id && status.importerId == TestImporterId &&
+          status.importerName.View() == "TestImporter" &&
+          status.importerVersion == TestImporterVersion &&
+          status.importer == AssetDiagnosticCode::None && status.ownerPath.IsEmpty());
+    REQUIRE(status.sources.Size() == 1);
+    CHECK(status.sources[0].role.View() == DefaultImportSourceRole &&
+          status.sources[0].root.View() == "Project" &&
+          status.sources[0].relative.View() == RockSource &&
+          status.sources[0].state == AssetDiagnosticCode::None &&
+          status.sources[0].error == ErrorCode::None);
+    CHECK(service.Packages().Count() == 0);
+    // AssetId 대상은 같은 결과다.
+    const IdText rockId(imported.id);
+    CHECK(sourceState(rockId.View()) == AssetDiagnosticCode::None && status.id == imported.id);
+    // 다른 출력: owner·ownerPath만.
+    REQUIRE(service.ImportStatus("/Game/Rock_extra", status));
+    CHECK(!status.Owned() && status.id == imported.outputs[0].id && status.owner == imported.id &&
+          status.ownerPath.View() == "/Game/Rock" && status.sources.IsEmpty());
+
+    // 원본 상태: 같은 크기 다른 내용·다른 크기 SourceChanged, 없음 MissingSource.
+    REQUIRE(scene.PutSource(RockSource, "value=3\noutputs=extra"));
+    CHECK(sourceState("/Game/Rock") == AssetDiagnosticCode::SourceChanged);
+    REQUIRE(scene.PutSource(RockSource, "value=30\noutputs=extra"));
+    CHECK(sourceState("/Game/Rock") == AssetDiagnosticCode::SourceChanged);
+    scene.files.Remove(RockSource);
+    CHECK(sourceState("/Game/Rock") == AssetDiagnosticCode::MissingSource &&
+          status.sources[0].error == ErrorCode::None);
+    // 원본 자리가 디렉터리·열기 사용 중·크기 조회 실패·읽기 실패(같은 크기라 읽는다) InvalidSource.
+    REQUIRE(scene.files.AddDirectory(RockSource));
+    CHECK(sourceState("/Game/Rock") == AssetDiagnosticCode::InvalidSource &&
+          status.sources[0].error != ErrorCode::None);
+    scene.files.Remove(RockSource);
+    const MemoryFault faults[] = {MemoryFault::OpenBusy, MemoryFault::Size, MemoryFault::Read};
+    for (MemoryFault fault : faults) {
+        scene.files.Remove(RockSource);
+        REQUIRE(scene.files.AddFile(RockSource, Bytes(RockText), fault));
+        CHECK(sourceState("/Game/Rock") == AssetDiagnosticCode::InvalidSource &&
+              status.sources[0].error != ErrorCode::None);
+    }
+
+    // 상태 조회는 패키지를 열지 않으므로 같은 서비스의 재임포트가 된다.
+    REQUIRE(scene.PutSource(RockSource, RockText));
+    CHECK(sourceState("/Game/Rock") == AssetDiagnosticCode::None);
+    AssetImportResult reimported(env.allocator);
+    REQUIRE(service.Reimport(scene.lock, "/Game/Rock", {}, {}, diagnostics, reimported));
+
+    // 임포터 표 없는 서비스: UnsupportedSourceFormat(원본 상태는 그대로 본다).
+    {
+        AssetServiceConfig config = scene.Config(env);
+        config.importers = nullptr;
+        AssetService bare(env.allocator, scene.layout, config);
+        REQUIRE(bare.Initialize());
+        REQUIRE(bare.ImportStatus("/Game/Rock", status));
+        CHECK(status.importer == AssetDiagnosticCode::UnsupportedSourceFormat &&
+              status.sources.Size() == 1 && status.sources[0].state == AssetDiagnosticCode::None);
+    }
+
+    // 별칭으로 푼 대상(옮긴 뒤 옛 경로): 경고 AliasResolved.
+    AssetMoveResult moved;
+    REQUIRE(service.Move(scene.lock, "/Game/Rock", "/Game/Moved/Rock", moved));
+    Array<EditorWarning> warnings(env.allocator);
+    REQUIRE(service.ImportStatus("/Game/Rock", status, &warnings));
+    CHECK(status.id == imported.id && warnings.Size() == 1 &&
+          warnings[0].kind == EditorWarningKind::AliasResolved);
+
+    // 원본 대조 함수: 빈 버퍼 InvalidSource / InvalidArgument, 작은 버퍼로 여러 번 읽어도 같다.
+    auto digest = Sha256::Hash(Bytes(RockText));
+    ErrorCode error = ErrorCode::None;
+    uint8 small[3] = {};
+    CHECK(CheckImportSource(scene.files, source.View(), RockText.ByteCount(), digest, {}, error) ==
+              AssetDiagnosticCode::InvalidSource &&
+          error == ErrorCode::InvalidArgument);
+    CHECK(CheckImportSource(scene.files, source.View(), RockText.ByteCount(), digest,
+                            Span<uint8>(small), error) == AssetDiagnosticCode::None &&
+          error == ErrorCode::None);
+    digest.bytes[0] ^= 1;
+    CHECK(CheckImportSource(scene.files, source.View(), RockText.ByteCount(), digest,
+                            Span<uint8>(small), error) == AssetDiagnosticCode::SourceChanged);
+    CHECK(Matches(env, scene, service.Index()));
+}
+
+// 임포트 상태(손으로 만든 기록 — Leaf 소유·Villain 참조): 임포터 버전 낮음 ImporterOutdated·높음
+// NewerVersion·모르는 임포터 UnsupportedSourceFormat, 원본 둘(역할 순), 모르는 루트 MissingSource
+// (NotFound), 절대 경로 원본(빈 루트 — 내용 비교로 SourceChanged), 기록 byte 수와 다른 원본
+// SourceChanged, owner가 색인에 없음·같은 id 둘이면 ownerPath 빔.
+TEST(AssetImportStatus_Crafted) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Sources sources(env.allocator);
+    REQUIRE(MakeSources(env, sources));
+    ImportScene scene(env, sources, "import-status-crafted");
+    REQUIRE(scene.ready);
+    REQUIRE(scene.PutSource(RockSource, "value=1") &&
+            scene.PutSource("SourceArt/px.png", "value=1") &&
+            scene.PutSource("SourceArt/nx.png", "value=2"));
+    AssetImportStatus status(env.allocator);
+    auto statusOf = [&](const CraftedRecord& record, StringView target) noexcept {
+        if (!PutCrafted(env, sources, scene, record)) {
+            return false;
+        }
+
+        AssetService service(env.allocator, scene.layout, scene.Config(env));
+        return service.Initialize() && service.ImportStatus(target, status) &&
+               service.Packages().Count() == 0;
+    };
+
+    // 기록 byte 수 0과 다른 원본은 읽지 않고 SourceChanged다.
+    REQUIRE(statusOf(CraftedRecord{}, "/Game/Leaf"));
+    REQUIRE(status.sources.Size() == 1);
+    CHECK(status.importer == AssetDiagnosticCode::None &&
+          status.sources[0].state == AssetDiagnosticCode::SourceChanged);
+    // 임포터 버전.
+    CraftedRecord older;
+    older.importerVersion = TestImporterVersion - 1;
+    REQUIRE(statusOf(older, "/Game/Leaf"));
+    CHECK(status.importer == AssetDiagnosticCode::ImporterOutdated &&
+          status.importerVersion == TestImporterVersion - 1);
+    CraftedRecord newer;
+    newer.importerVersion = TestImporterVersion + 1;
+    REQUIRE(statusOf(newer, "/Game/Leaf"));
+    CHECK(status.importer == AssetDiagnosticCode::NewerVersion);
+    constexpr Guid UnknownImporterId{0x5a5a, 0x77};
+    CraftedRecord unknown;
+    unknown.importerId = UnknownImporterId;
+    REQUIRE(statusOf(unknown, "/Game/Leaf"));
+    CHECK(status.importer == AssetDiagnosticCode::UnsupportedSourceFormat &&
+          status.importerId == UnknownImporterId);
+    // 원본 둘(역할 순).
+    CraftedRecord cube;
+    cube.importerId = CubeImporterId;
+    cube.importerVersion = 1;
+    cube.twoRoles = true;
+    REQUIRE(statusOf(cube, "/Game/Leaf"));
+    REQUIRE(status.sources.Size() == 2);
+    CHECK(status.sources[0].role.View() == "px" && status.sources[1].role.View() == "nx" &&
+          status.sources[1].relative.View() == "SourceArt/nx.png" &&
+          status.importer == AssetDiagnosticCode::None);
+    // 모르는 루트 MissingSource(NotFound).
+    CraftedRecord root;
+    root.root = "Nope";
+    REQUIRE(statusOf(root, "/Game/Leaf"));
+    CHECK(status.sources[0].state == AssetDiagnosticCode::MissingSource &&
+          status.sources[0].error == ErrorCode::NotFound);
+    // 절대 경로 원본(빈 루트): 빈 파일이면 크기는 같고 내용(SHA-256 — 기록은 0)이 다르다.
+    REQUIRE(scene.PutSource("SourceArt/Empty.trock", ""));
+    const String absolute = scene.Absolute(env.allocator, "SourceArt/Empty.trock");
+    CraftedRecord outside;
+    outside.root = "";
+    outside.relative = absolute.View();
+    REQUIRE(statusOf(outside, "/Game/Leaf"));
+    CHECK(status.sources[0].root.IsEmpty() &&
+          status.sources[0].relative.View() == absolute.View() &&
+          status.sources[0].state == AssetDiagnosticCode::SourceChanged);
+    // 참조 기록: owner가 색인에 있음(Base)·없음·같은 id 둘.
+    CraftedRecord base;
+    base.villainOwner = BaseId;
+    REQUIRE(statusOf(base, "/Game/Villain"));
+    CHECK(!status.Owned() && status.owner == FixedId(BaseId) &&
+          status.ownerPath.View() == "/Game/Base");
+    CraftedRecord nowhere;
+    nowhere.villainOwner = NowhereId;
+    REQUIRE(statusOf(nowhere, "/Game/Villain"));
+    CHECK(!status.Owned() && status.owner == FixedId(NowhereId) && status.ownerPath.IsEmpty());
+    REQUIRE(scene.files.AddFile("Content/Leaf2.rasset", scene.files.Bytes("Content/Leaf.rasset")));
+    REQUIRE(statusOf(CraftedRecord{}, "/Game/Villain"));
+    CHECK(status.owner == FixedId(LeafId) && status.ownerPath.IsEmpty());
+    scene.files.Remove("Content/Leaf2.rasset");
+}
+
+// 임포트 상태 거부(진단·오류): Initialize 전, 대상 형식(경로 규칙·AssetId 아님·null id), 없음
+// (경로·id), 같은 경로 키 둘 DuplicatePath, 같은 id 둘 DuplicateAssetId, 기록 없음, 읽지 못하는
+// 기록 NewerVersion / Unsupported, 형식 위반 CorruptPackage(칸 ImportRecord), 색인 뒤 사라진 파일
+// MissingFile, 다른 패키지로 바뀐 파일 ExternalModification, 열기 사용 중, 잘린 파일, 원본 루트 표
+// 손상.
+TEST(AssetImportStatus_Rejects) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Sources sources(env.allocator);
+    REQUIRE(MakeSources(env, sources));
+    ImportScene scene(env, sources, "import-status-rejects");
+    REQUIRE(scene.ready);
+    REQUIRE(PutCrafted(env, sources, scene, CraftedRecord{}));
+    AssetImportStatus status(env.allocator);
+    AssetDiagnostic failure;
+    auto rejects = [&](StringView target, ErrorCode error, AssetDiagnosticCode code) noexcept {
+        AssetService service(env.allocator, scene.layout, scene.Config(env));
+        if (!service.Initialize()) {
+            return false;
+        }
+
+        failure = AssetDiagnostic{};
+        auto shown = service.ImportStatus(target, status, nullptr, &failure);
+        return !shown && shown.Error() == error && failure.code == code &&
+               service.Packages().Count() == 0;
+    };
+    {
+        AssetService service(env.allocator, scene.layout, scene.Config(env));
+        CHECK(service.ImportStatus("/Game/Leaf", status).Error() == ErrorCode::InvalidArgument);
+    }
+
+    CHECK(rejects("Game/Leaf", ErrorCode::InvalidArgument, AssetDiagnosticCode::InvalidPath));
+    CHECK(rejects("not-an-id", ErrorCode::InvalidArgument, AssetDiagnosticCode::InvalidPath));
+    CHECK(rejects("00000000-0000-0000-0000-000000000000", ErrorCode::InvalidArgument,
+                  AssetDiagnosticCode::InvalidPath));
+    CHECK(rejects("/Game/Nope", ErrorCode::NotFound, AssetDiagnosticCode::None));
+    const IdText nowhere(FixedId(NowhereId));
+    CHECK(rejects(nowhere.View(), ErrorCode::NotFound, AssetDiagnosticCode::None));
+    CHECK(rejects("/Game/Base", ErrorCode::InvalidArgument, AssetDiagnosticCode::None) &&
+          failure.asset == FixedId(BaseId));
+    // 같은 경로 키 둘(대소문자만 다른 이름)·같은 id 둘.
+    REQUIRE(scene.files.AddFile("Content/LEAF.rasset", scene.files.Bytes("Content/Leaf.rasset")));
+    CHECK(rejects("/Game/Leaf", ErrorCode::AlreadyExists, AssetDiagnosticCode::DuplicatePath));
+    const IdText leaf(FixedId(LeafId));
+    CHECK(rejects(leaf.View(), ErrorCode::AlreadyExists, AssetDiagnosticCode::DuplicateAssetId) &&
+          failure.asset == FixedId(LeafId));
+    scene.files.Remove("Content/LEAF.rasset");
+    // 읽지 못하는 기록: 더 새 스키마 버전·필드 빠진 형식 위반.
+    {
+        RecordBuilder newer(env.allocator, ImportRecordSchema, 2);
+        auto newerBytes = newer.Build();
+        REQUIRE(newerBytes);
+        CraftedRecord unreadable;
+        unreadable.rawLeafRecord = newerBytes.Value().View();
+        REQUIRE(PutCrafted(env, sources, scene, unreadable));
+        CHECK(rejects("/Game/Leaf", ErrorCode::Unsupported, AssetDiagnosticCode::NewerVersion));
+        RecordBuilder broken(env.allocator, ImportRecordSchema, 1);
+        auto brokenBytes = broken.Build();
+        REQUIRE(brokenBytes);
+        CraftedRecord corrupt;
+        corrupt.rawLeafRecord = brokenBytes.Value().View();
+        REQUIRE(PutCrafted(env, sources, scene, corrupt));
+        CHECK(rejects("/Game/Leaf", ErrorCode::InvalidArgument,
+                      AssetDiagnosticCode::CorruptPackage) &&
+              failure.section == static_cast<uint32>(PackageSectionKind::ImportRecord));
+        REQUIRE(PutCrafted(env, sources, scene, CraftedRecord{}));
+    }
+
+    // 색인 뒤 파일: 사라짐 MissingFile, 다른 패키지 ExternalModification, 열기 사용 중, 잘림.
+    {
+        AssetService service(env.allocator, scene.layout, scene.Config(env));
+        REQUIRE(service.Initialize());
+        Array<uint8> leafBytes(env.allocator);
+        REQUIRE(leafBytes.TryAppend(scene.files.Bytes("Content/Leaf.rasset")));
+        auto again = [&](ErrorCode error, AssetDiagnosticCode code) noexcept {
+            failure = AssetDiagnostic{};
+            auto shown = service.ImportStatus("/Game/Leaf", status, nullptr, &failure);
+            return !shown && shown.Error() == error && failure.code == code &&
+                   failure.asset == FixedId(LeafId);
+        };
+        scene.files.Remove("Content/Leaf.rasset");
+        CHECK(again(ErrorCode::NotFound, AssetDiagnosticCode::MissingFile));
+        REQUIRE(scene.files.AddFile("Content/Leaf.rasset", sources.base.View()));
+        CHECK(again(ErrorCode::StaleHandle, AssetDiagnosticCode::ExternalModification));
+        scene.files.Remove("Content/Leaf.rasset");
+        REQUIRE(
+            scene.files.AddFile("Content/Leaf.rasset", leafBytes.View(), MemoryFault::OpenBusy));
+        CHECK(again(ErrorCode::Busy, AssetDiagnosticCode::None));
+        scene.files.Remove("Content/Leaf.rasset");
+        REQUIRE(scene.files.AddFile("Content/Leaf.rasset",
+                                    leafBytes.View().Left(leafBytes.Size() / 2)));
+        // 잘린 파일: 섹션 표가 파일 끝 밖을 가리킨다(부분 읽기 CorruptPackage / InvalidArgument).
+        CHECK(again(ErrorCode::InvalidArgument, AssetDiagnosticCode::CorruptPackage) &&
+              failure.section == 0);
+        // 진단 인자 없이도(잘린 파일·사라진 파일).
+        CHECK(service.ImportStatus("/Game/Leaf", status).Error() == ErrorCode::InvalidArgument);
+        scene.files.Remove("Content/Leaf.rasset");
+        CHECK(service.ImportStatus("/Game/Leaf", status).Error() == ErrorCode::NotFound);
+        REQUIRE(scene.files.AddFile("Content/Leaf.rasset", leafBytes.View()));
+    }
+
+    // 형식 위반 기록·별칭 대상이 색인에 없음, 진단 인자 없이도.
+    {
+        RecordBuilder broken(env.allocator, ImportRecordSchema, 1);
+        auto brokenBytes = broken.Build();
+        REQUIRE(brokenBytes);
+        CraftedRecord corrupt;
+        corrupt.rawLeafRecord = brokenBytes.Value().View();
+        REQUIRE(PutCrafted(env, sources, scene, corrupt));
+        AssetService service(env.allocator, scene.layout, scene.Config(env));
+        REQUIRE(service.Initialize());
+        CHECK(service.ImportStatus("/Game/Leaf", status).Error() == ErrorCode::InvalidArgument);
+        REQUIRE(PutCrafted(env, sources, scene, CraftedRecord{}));
+    }
+
+    {
+        AssetService service(env.allocator, scene.layout, scene.Config(env));
+        REQUIRE(service.Initialize());
+        AssetMoveResult moved;
+        REQUIRE(service.Move(scene.lock, "/Game/Villain", "/Game/Gone", moved));
+        REQUIRE(service.FlushCache(scene.lock));
+        scene.files.Remove("Content/Gone.rasset");
+        AssetService after(env.allocator, scene.layout, scene.Config(env));
+        REQUIRE(after.Initialize());
+        failure = AssetDiagnostic{};
+        auto shown = after.ImportStatus("/Game/Villain", status, nullptr, &failure);
+        CHECK(!shown && shown.Error() == ErrorCode::NotFound &&
+              failure.asset == FixedId(VillainId));
+        bool notDurable = false;
+        REQUIRE(after.AliasRemove(scene.lock, "/Game/Villain", notDurable));
+        REQUIRE(PutCrafted(env, sources, scene, CraftedRecord{}));
+    }
+
+    // 원본 루트 표 손상(JSON 문법)은 Load의 오류다.
+    REQUIRE(scene.files.AddFile("Config/AssetSources.json", Bytes("{")));
+    {
+        AssetService service(env.allocator, scene.layout, scene.Config(env));
+        REQUIRE(service.Initialize());
+        failure = AssetDiagnostic{};
+        // JSON 문법 오류의 줄·열(1, 2)이 detail이다((줄 << 32) | 열).
+        constexpr uint64 LineShift = 32;
+        auto shown = service.ImportStatus("/Game/Leaf", status, nullptr, &failure);
+        CHECK(!shown && shown.Error() == ErrorCode::InvalidArgument &&
+              failure.code == AssetDiagnosticCode::InvalidSource &&
+              failure.detail == ((uint64{1} << LineShift) | 2));
+        // 참조 기록은 원본 루트 표를 읽지 않는다.
+        CHECK(service.ImportStatus("/Game/Villain", status) && !status.Owned());
+    }
+
+    scene.files.Remove("Config/AssetSources.json");
+}
+
+// 임포트 상태 할당 실패: 소유 기록(원본 둘)·참조 기록의 모든 할당 실패가 OutOfMemory·진단 None이고
+// 성공 결과는 실패 없는 기준과 같다.
+TEST(AssetImportStatus_AllocationFailures) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    Sources sources(env.allocator);
+    REQUIRE(MakeSources(env, sources));
+    ImportScene scene(env, sources, "import-status-oom");
+    REQUIRE(scene.ready);
+    REQUIRE(scene.PutSource("SourceArt/px.png", "value=1") &&
+            scene.PutSource("SourceArt/nx.png", "value=2"));
+    CraftedRecord cube;
+    cube.importerId = CubeImporterId;
+    cube.importerVersion = 1;
+    cube.twoRoles = true;
+    REQUIRE(PutCrafted(env, sources, scene, cube));
+    const StringView targets[] = {"/Game/Leaf", "/Game/Villain"};
+    for (StringView target : targets) {
+        AssetImportStatus expected(env.allocator);
+        {
+            AssetService service(env.allocator, scene.layout, scene.Config(env));
+            REQUIRE(service.Initialize());
+            REQUIRE(service.ImportStatus(target, expected));
+        }
+
+        TaggedFailAllocator failing(env.allocator);
+        uint32 failures = 0;
+        for (uint64 attempt = 1;; ++attempt) {
+            AssetService service(failing, scene.layout, scene.Config(env));
+            REQUIRE(service.Initialize());
+            AssetImportStatus status(failing);
+            AssetDiagnostic failure;
+            failing.FailOnAttempt(attempt);
+            auto shown = service.ImportStatus(target, status, nullptr, &failure);
+            const bool failed = failing.Failed();
+            failing.DisableFailure();
+            if (!failed) {
+                REQUIRE(shown);
+                CHECK(status.id == expected.id && status.owner == expected.owner &&
+                      status.ownerPath.View() == expected.ownerPath.View() &&
+                      status.importerId == expected.importerId &&
+                      status.importerVersion == expected.importerVersion &&
+                      status.importer == expected.importer &&
+                      status.importerName.View() == expected.importerName.View() &&
+                      status.sources.Size() == expected.sources.Size());
+                for (usize index = 0; index < status.sources.Size(); ++index) {
+                    const AssetImportSourceStatus& got = status.sources[index];
+                    const AssetImportSourceStatus& want = expected.sources[index];
+                    CHECK(got.role.View() == want.role.View() &&
+                          got.root.View() == want.root.View() &&
+                          got.relative.View() == want.relative.View() && got.state == want.state &&
+                          got.error == want.error);
+                }
+
+                break;
+            }
+
+            CHECK(!shown && shown.Error() == ErrorCode::OutOfMemory &&
+                  failure.code == AssetDiagnosticCode::None);
+            ++failures;
+        }
+
+        CHECK(failures > 0);
+    }
 }
 
 } // namespace asset_import_tests_file

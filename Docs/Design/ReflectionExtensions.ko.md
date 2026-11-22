@@ -1022,6 +1022,10 @@ public:
 
 - `ExportJson(대상, JsonWriter&, options)`·`ImportJson(JsonValue, AssignmentTarget, options, diagnostics) -> Result<PreparedAssignments>`. import도 10.2절 묶음을 거친다(원자성·override 경로가 같다). 새 값(설정 struct·staged 객체)으로 읽는 경우는 실패하면 그 값을 버린다.
 
+### 10.6 값 순회 VisitValues(2026-11-22 — AssetSystem 9.1절 A3a 요구)
+
+- `VisitValues(대상, ValueVisitor&, options)`: ExportJson과 같은 스키마·경로 연산 순회(단일 값은 PathRead, 배열은 PathCount와 원소 경로, Map·Set은 PathReadKeys와 key 경로)로 필드 이름(실효 도구 이름)·FieldValue·컨테이너 시작(종류·원소 수)·끝을 선언 순서대로 visitor에 넘긴다. Map 항목·Set 원소는 저장 순서대로 넘기고 정렬은 소비자가 한다(에셋 너겟 키는 정규 인코딩 byte 사전순 — AssetSystem 9.1절 결정 2). Text·InstancedStruct·Opaque 등 ExportJson이 쓰지 못하는 종류는 같은 규칙으로 Unsupported다. 용도는 에셋 너겟 키의 리플렉션 값 기록(`WriteReflected`)이며 ExportJson 순회를 따로 복제하지 않기 위한 공용 경로다.
+
 ## 11. InstancedStruct(B9j)
 
 - C++ 값 타입 `InstancedStruct<Base = void>`(ObjectRuntime `Object/InstancedStruct.h`): struct 타입 lease(값이 사는 동안 타입 등록을 붙잡는다), 할당한 값 블록, allocator. 이동 전용, `TryClone`. API: `Emplace(TypeLease, Allocator&)`(기본 생성), `Emplace<S>(Allocator&)`, `Reset`, `Type()`, `Get<S>()`(native 키 대조), `IsEmpty`.

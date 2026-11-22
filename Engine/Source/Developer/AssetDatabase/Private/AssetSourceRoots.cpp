@@ -3,10 +3,12 @@
 #include <AssetDatabase/AssetSourceRoots.h>
 #include <AssetDatabase/ImportRecord.h>
 #include <Core/Algorithms.h>
+#include <Core/FileError.h>
 #include <Core/Text/Json.h>
 #include <Core/Text/Path.h>
 #include <Core/Text/StringBuilder.h>
 #include <Core/Text/Unicode.h>
+#include <Platform/File.h>
 
 namespace rocks {
 
@@ -379,6 +381,57 @@ Result<void> ReadImportSource(platform::FileSystem& files, StringView path, Arra
 
     digest = Sha256::Hash(bytes.View());
     return Result<void>::Success();
+}
+
+AssetDiagnosticCode CheckImportSource(platform::FileSystem& files, StringView path, uint64 bytes,
+                                      const Sha256Digest& digest, Span<uint8> buffer,
+                                      ErrorCode& error) noexcept {
+    error = ErrorCode::None;
+    if (buffer.IsEmpty()) {
+        error = ErrorCode::InvalidArgument;
+        return AssetDiagnosticCode::InvalidSource;
+    }
+
+    platform::File file;
+    if (auto opened =
+            file.Open(files, path.Data(), path.ByteCount(), platform::FileOpenMode::ReadExisting);
+        !opened) {
+        if (opened.code == platform::FileCode::NotFound) {
+            return AssetDiagnosticCode::MissingSource;
+        }
+
+        error = FileErrorCode(opened);
+        return AssetDiagnosticCode::InvalidSource;
+    }
+
+    uint64 size = 0;
+    if (auto sized = file.Size(size); !sized) {
+        error = FileErrorCode(sized);
+        return AssetDiagnosticCode::InvalidSource;
+    }
+
+    if (size != bytes) {
+        return AssetDiagnosticCode::SourceChanged;
+    }
+
+    // 크기를 잰 뒤 줄었으면 EndOfFile — 쓰는 중인 파일이라 IO 오류로 보고한다(ReadWhole과 같다).
+    Sha256 hasher;
+    uint64 remaining = bytes;
+    while (remaining != 0) {
+        const usize chunk =
+            remaining < buffer.Size() ? static_cast<usize>(remaining) : buffer.Size();
+        const platform::FileTransfer read = file.ReadExact(buffer.Data(), chunk);
+        if (!read.status) {
+            error = FileErrorCode(read.status);
+            return AssetDiagnosticCode::InvalidSource;
+        }
+
+        hasher.Update(Span<const uint8>(buffer.Data(), chunk));
+        remaining -= chunk;
+    }
+
+    return hasher.Finish() == digest ? AssetDiagnosticCode::None
+                                     : AssetDiagnosticCode::SourceChanged;
 }
 
 } // namespace rocks

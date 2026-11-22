@@ -129,7 +129,7 @@ uint8 LinearToSrgbByte(float linear) noexcept;   // 경계 표 이분 탐색. Na
 
 ### 3.1 용도와 요구
 
-`Config/AssetAliases.json`·`AssetSources.json`·`CookSettings.json`·`AssetNuggets.json`, `Engine/Config/TargetProfiles/*.json`, 도구 보고서. 버전 관리되는 파일을 도구가 다시 쓰고 그 SHA-256이 쿠킹 키에 들어가므로 **결정적 출력**(CRT·locale 무관)이 필요하고, 사람이 고친 파일을 읽으므로 **엄격하고 친절한 오류**가 필요하다.
+`Config/AssetAliases.json`·`AssetSources.json`·`CookSettings.json`·`AssetNuggets.json`, `Engine/Config/TargetProfiles/*.json`, 도구 보고서. 버전 관리되는 파일을 도구가 다시 쓰고 그 SHA-256이 쿠킹 키에 들어가므로 **결정적 출력**(CRT·locale 무관)이 필요하고, 사람이 고친 파일을 읽으므로 **엄격하고 친절한 오류**가 필요하다. `AssetNuggets.json`은 너겟 키·cookKey에 들어가지 않는다 — 예외는 프로젝트 세대 값(`generation`) 하나다(값만 키에 들어간다, AssetSystem 9.1절 결정 4).
 
 ### 3.2 숫자 변환(CRT 없이)
 

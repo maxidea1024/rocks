@@ -617,7 +617,7 @@ Build 의존 순환의 SCC 구성원은 함께 만들어지므로 **SCC 하나�
 
 | 대상 | 규칙 |
 |---|---|
-| `Config/AssetNuggets.json`(버전 관리, 프로젝트) | `backend`(12.1절), `required`, `localPath`(FileSystem). **너겟 키·cookKey에 들어가지 않는다** |
+| `Config/AssetNuggets.json`(버전 관리, 프로젝트) | `backend`(12.1절), `required`, `localPath`(FileSystem), `generation`(프로젝트 세대). **너겟 키·cookKey에 들어가지 않는다** — 예외는 프로젝트 세대 값 하나다(엔진 세대와 함께 키에 들어간다, 11.4절·AssetSystem 9.1절 결정 4) |
 | 사용자·기계 설정 | 제어 디렉터리 `config.json`과 환경 변수 allowlist(`ROCKS_ROCKPILE_HOME`·`ROCKS_ROCKPILE_EXE`·`ROCKS_ROCKPILE_TOKEN_FILE` 등): upstream URL·토큰 파일 경로·저장소 루트·자동 실행 끄기 |
 | `--verify-nuggets` | 적중 결과와 재생성 결과를 대조. 불일치면 두 digest와 출처를 보고한다(어느 쪽이 틀렸는지 판정하지 않는다). 대상 계층은 `--verify-nuggets-source=local`·`=remote`(기본 둘 다, AssetSystem 13절 옵션 문법) |
 | `nugget-gc` | NuggetFileSystemBackend 전용. Rockpile이면 `rockpile gc`로 위임하고 옵션 대응(`--max-bytes` → 물리 `maxBytes`, `--unused-days` → `maxUnusedDays`)을 따른다 |
@@ -754,7 +754,7 @@ Programs/
 
 ## 17. 다른 문서 개정 사항
 
-이 설계를 승인하면 함께 고친다(아직 반영하지 않았다).
+이 설계를 승인하면 함께 고친다. AssetSystem.ko.md 부분(아래 첫 항목)과 CoreDataFoundations 132행은 2026-11-22 A3 착수 때 반영했다(AssetSystem 17절 기록). 나머지는 서버 착수 때 반영한다.
 
 - **AssetSystem.ko.md**
   - 1절 A3 행: 레코드 계약·NuggetFileSystemBackend·NuggetRockpileBackend, R단계 연결.
