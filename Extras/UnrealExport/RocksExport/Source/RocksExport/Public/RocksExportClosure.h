@@ -45,6 +45,9 @@ struct FRocksExportRedirect
 // 상속하지만 2절이 빼는 클래스 포함)이면 Class 자신의 이름이다.
 ROCKSEXPORT_API FString RocksExchangeClassName(const UClass* Class, bool& bOutInScope);
 
+// AssetRegistry 항목의 교환 클래스 이름이다(클래스를 찾지 못하면 클래스 경로의 이름, 범위 밖).
+ROCKSEXPORT_API FString RocksExchangeClassNameOfAsset(const FAssetData& Asset, bool& bOutInScope);
+
 // Rocks 리더의 objectPath 문법(10.4절 7번)을 만족하는가다: 앞 '/', 패키지 구성 요소 2개 이상, 빈 구성 요소
 // 없음, '.'은 객체 이름 앞 하나, ':'(하위 객체)·역슬래시·제어 문자 없음, UTF-8 1024 byte 이하.
 ROCKSEXPORT_API bool RocksIsValidExchangeObjectPath(const FString& ObjectPath);

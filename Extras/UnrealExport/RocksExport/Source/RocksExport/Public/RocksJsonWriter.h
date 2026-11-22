@@ -30,7 +30,9 @@ public:
 		Compact,
 	};
 
-	explicit FRocksJsonWriter(EStyle InStyle = EStyle::Pretty);
+	// BaseDepth는 조각(fragment)을 쓸 때 바깥 문서에서 이 값이 놓일 들여쓰기 깊이다(4.5절 — 본문을 먼저 만들고
+	// 에셋 JSON에 끼운다). 보통은 0이다.
+	explicit FRocksJsonWriter(EStyle InStyle = EStyle::Pretty, int32 InBaseDepth = 0);
 
 	void BeginObject();
 	void EndObject();
@@ -48,11 +50,18 @@ public:
 	void Float(float Value);
 	void Double(double Value);
 
+	// 다른 writer가 FinishFragment로 만든 값 하나를 그대로 끼운다. 그 writer는 같은 Style과 이 자리의
+	// 깊이(BaseDepth)로 만들어야 들여쓰기가 맞는다.
+	void RawValue(TConstArrayView<uint8> Fragment);
+
 	// 값 하나(최상위)를 다 썼는가다.
 	bool IsComplete() const;
 
 	// 완성된 bytes를 꺼낸다. 전제: IsComplete. 이 뒤 writer는 비어 있는 새 상태다.
 	TArray<uint8> Finish();
+
+	// Finish와 같지만 끝 LF를 붙이지 않는다(RawValue로 끼울 조각).
+	TArray<uint8> FinishFragment();
 
 	// 11.4절 숫자 토큰이다(유한값은 숫자, 비유한값은 따옴표 붙은 문자열). 시험·정렬 키용.
 	static FString FormatFloat(float Value);
@@ -80,6 +89,7 @@ private:
 	TArray<uint8> Out;
 	TArray<FFrame> Stack;
 	EStyle Style;
+	int32 BaseDepth = 0;
 	bool bKeyPending = false;
 	bool bRootWritten = false;
 };

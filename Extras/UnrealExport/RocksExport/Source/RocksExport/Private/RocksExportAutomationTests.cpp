@@ -27,6 +27,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRocksExportJsonWriterTest, "RocksExport.JsonWr
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRocksExportPropertyDumpTest, "RocksExport.PropertyDump", RocksExportAutomationPrivate::Flags)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRocksExportBundleWriterTest, "RocksExport.BundleWriter", RocksExportAutomationPrivate::Flags)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRocksExportDeterminismTest, "RocksExport.ExportDeterminism", RocksExportAutomationPrivate::Flags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRocksExportTextureTest, "RocksExport.TextureExtraction", RocksExportAutomationPrivate::Flags)
 
 bool FRocksExportSha256Test::RunTest(const FString&)
 {
@@ -56,6 +57,11 @@ bool FRocksExportBundleWriterTest::RunTest(const FString&)
 bool FRocksExportDeterminismTest::RunTest(const FString&)
 {
 	return RocksExportAutomationPrivate::Report(*this, &RocksExportSelfTest::RunExportDeterminism);
+}
+
+bool FRocksExportTextureTest::RunTest(const FString&)
+{
+	return RocksExportAutomationPrivate::Report(*this, &RocksExportSelfTest::RunTextureExtraction);
 }
 
 #endif
