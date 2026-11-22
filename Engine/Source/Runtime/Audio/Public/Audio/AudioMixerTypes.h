@@ -1,0 +1,186 @@
+#pragma once
+
+#include <Audio/AudioFormat.h>
+#include <Audio/DynamicsProcessor.h>
+#include <Base/NumericLimits.h>
+
+// 믹서 설정·handle·명령·파라미터·결과 형식이다(Docs/Design/AudioSystem.ko.md 3.22절).
+namespace rocks::audio {
+
+// 블록 크기 Q의 기본값이다(계획 §18). 허용값은 64·128·256·512·1024다.
+inline constexpr uint32 DefaultMixBlockFrames = 256;
+inline constexpr uint32 MinMixBlockFrames = 64;
+inline constexpr uint32 MaxMixBlockFrames = 1024;
+
+// voice·clip 표 크기의 기본값과 상한이다.
+inline constexpr uint32 DefaultMaxVoices = 128;
+inline constexpr uint32 MaxMixerVoices = 1024;
+inline constexpr uint32 DefaultMaxClips = 256;
+inline constexpr uint32 MaxMixerClips = 65536;
+
+// 한 블록을 명령 offset으로 나눈 구간 수의 상한이다(3.3절 AD16).
+inline constexpr uint32 MaxBlockSegments = 16;
+
+// clip(메모리 PCM)의 채널 수 상한(AU1)과 원본 rate 범위다.
+inline constexpr uint32 MaxClipChannels = 2;
+inline constexpr uint32 MinClipSampleRate = 1000;
+inline constexpr uint32 MaxClipSampleRate = 384000;
+
+// voice 파라미터 범위다. pitch는 UE GlobalMin/MaxPitchScale 기본값이다.
+inline constexpr float MaxVoiceGain = 4.0f;
+
+// 마스터 이득의 상한과 기본값이다(SetMasterGain).
+inline constexpr float MaxMasterGain = 4.0f;
+inline constexpr float DefaultMasterGain = 1.0f;
+inline constexpr float MinPitch = 0.4f;
+inline constexpr float MaxPitch = 2.0f;
+
+// 제어 쪽 기본값이다. stop fade는 UE au.SourceFadeMin(512 frame)이다.
+inline constexpr uint32 DefaultStopFadeFrames = 512;
+inline constexpr uint32 DefaultParamRampFrames = 256;
+
+// 다음 블록 시작에 실행하라는 mixFrame 표지다. 호출자가 RenderBlock 전에 블록 시작 frame으로
+// 바꾼다.
+inline constexpr uint64 ImmediateMixFrame = NumericLimits<uint64>::Max();
+
+// 아직 정해지지 않은 mix frame(시작 전·끝 전)이다.
+inline constexpr uint64 UnsetMixFrame = NumericLimits<uint64>::Max();
+
+// voice 슬롯 handle이다. generation 0은 무효다.
+struct AudioVoiceHandle {
+    uint32 index = 0;
+    uint32 generation = 0;
+};
+
+// clip 표 handle이다. generation 0은 무효다.
+struct AudioClipId {
+    uint32 index = 0;
+    uint32 generation = 0;
+};
+
+// 소유하지 않는 planar float PCM이다. 메모리는 UnregisterClip이 성공할 때까지 살아 있어야 한다.
+// loopBegin·loopEnd가 둘 다 0이면 loop 구간은 clip 전체다.
+struct AudioClipDesc {
+    const float* channels[MaxClipChannels] = {};
+    uint32 channelCount = 0;
+    uint32 frameCount = 0;
+    uint32 sampleRate = 0;
+    uint32 loopBegin = 0;
+    uint32 loopEnd = 0;
+};
+
+enum class AudioPanMode : uint8 {
+    // mono는 양쪽 0.5(UE Linear 업믹스), stereo는 L→L·R→R.
+    Direct,
+    // 방위각 equal-power(3.20.6절). mono clip만.
+    Azimuth
+};
+
+// voice 파라미터다. 거리 감쇠·분류 gain은 제어 쪽이 gain에 곱해 넣는다.
+struct AudioVoiceParams {
+    float gain = 1.0f;
+    float pitch = 1.0f;
+    AudioPanMode panMode = AudioPanMode::Direct;
+    float azimuthDegrees = 0.0f;
+    float nonSpatializedAmount = 0.0f;
+    float lowPassCutoffHz = 20000.0f;
+    float highPassCutoffHz = 0.0f;
+};
+
+enum class AudioRtCommandType : uint8 {
+    Play,
+    Stop,
+    SetParams,
+    SetMasterGain
+};
+
+// 믹서에 넘기는 고정 크기 POD 명령이다(3.5.2절). 문자열·소유 포인터를 담지 않는다.
+// - Play: params가 초기 파라미터다. clip·시작 frame·loop는 PreparePlay가 voice에 묶어 둔다.
+// - Stop: fadeFrames(0이면 그 frame에서 바로 끝).
+// - SetParams: params와 rampFrames.
+// - SetMasterGain: masterGain(선형)과 rampFrames.
+struct AudioRtCommand {
+    AudioRtCommandType type = AudioRtCommandType::Play;
+    AudioVoiceHandle voice;
+    uint64 mixFrame = ImmediateMixFrame;
+    uint64 sequence = 0;
+    AudioVoiceParams params;
+    uint32 rampFrames = DefaultParamRampFrames;
+    uint32 fadeFrames = DefaultStopFadeFrames;
+    float masterGain = DefaultMasterGain;
+};
+
+enum class AudioVoiceState : uint8 {
+    Idle,
+    Reserved,
+    Prepared,
+    Playing,
+    Stopping,
+    Finished
+};
+
+enum class AudioVoiceEndReason : uint8 {
+    None,
+    NaturalEnd,
+    Stopped
+};
+
+// QueryVoice 결과다.
+struct AudioVoiceStatus {
+    AudioVoiceState state = AudioVoiceState::Idle;
+    uint64 startMixFrame = UnsetMixFrame;
+    uint64 endMixFrame = UnsetMixFrame;
+    AudioVoiceEndReason endReason = AudioVoiceEndReason::None;
+};
+
+// CollectFinished가 돌려주는 terminal 기록이다.
+struct AudioVoiceTerminal {
+    AudioVoiceHandle voice;
+    AudioVoiceEndReason reason = AudioVoiceEndReason::None;
+    uint64 endMixFrame = UnsetMixFrame;
+};
+
+// 믹서 계수다(진단·시험).
+struct AudioMixerCounters {
+    uint64 lateCommands = 0;
+    uint64 lateFrames = 0;
+    uint64 deferredCommands = 0;
+    uint64 staleCommands = 0;
+    // 상태 표(3.22.4절)가 무시한 명령을 종류별로 센다. 색인은 AudioRtCommandType이다.
+    uint64 ignoredCommands[4] = {};
+    uint64 clampedParams = 0;
+    uint64 nonFiniteSamples = 0;
+    uint64 clippedSamples = 0;
+};
+
+// 마스터 limiter 기본 프리셋이다(3.22.7절): −1 dBFS, 지연 0, 즉시 어택, 100 ms 릴리스.
+inline DynamicsSettings DefaultMasterLimiterSettings() noexcept {
+    DynamicsSettings settings;
+    settings.mode = DynamicsMode::Limiter;
+    settings.thresholdDb = -1.0f;
+    settings.kneeBandwidthDb = 0.0f;
+    settings.peakMode = EnvelopePeakMode::Peak;
+    settings.linkMode = DynamicsLinkMode::Peak;
+    settings.attackMs = 0.0f;
+    settings.releaseMs = 100.0f;
+    settings.lookaheadMs = 0.0f;
+    settings.analogMode = false;
+    return settings;
+}
+
+struct AudioMixerConfig {
+    uint32 sampleRate = DefaultMixSampleRate;
+    ChannelLayout layout = ChannelLayout::Stereo;
+    uint32 blockFrames = DefaultMixBlockFrames;
+    uint32 maxVoices = DefaultMaxVoices;
+    uint32 maxClips = DefaultMaxClips;
+    DynamicsSettings masterLimiter = DefaultMasterLimiterSettings();
+    bool masterLimiterEnabled = true;
+};
+
+// RenderBlock 결과다. consumedCommands는 commands 앞에서부터 소비한 수다.
+struct RenderBlockResult {
+    uint32 consumedCommands = 0;
+};
+
+} // namespace rocks::audio
