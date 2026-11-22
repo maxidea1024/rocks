@@ -4,6 +4,7 @@
 #include <Core/Containers/Array.h>
 #include <ReflectionText/TextAssignments.h>
 #include <Core/FileError.h>
+#include <Core/Text/Json.h>
 #include <Core/Text/Path.h>
 #include <Platform/File.h>
 
@@ -46,10 +47,16 @@ constexpr StringView SetUsage =
     "  unresolved imports as null. Takes the project write lock.\n";
 
 constexpr StringView InfoUsage =
-    "usage: asset-info <path|AssetId> [--json] [--all] [--project=<dir>] [--wait=<seconds>]\n"
+    "usage: asset-info <path|AssetId> [--json] [--all | --import] [--project=<dir>]\n"
+    "                  [--wait=<seconds>]\n"
     "  Print the representative asset as '<path>=<value>' lines that asset-set accepts as\n"
     "  they are, or as JSON with --json. --all also prints the fields that editing skips.\n"
-    "  Takes no lock.\n";
+    "  --import prints the import state instead: 'import.importer=<name> <version> <state>'\n"
+    "  and 'import.source.<role>=<root>:<relative> <state>' for an imported asset, or\n"
+    "  'import.owner=<path> <id>' for another output of an import. The state is 'current' or\n"
+    "  SourceChanged, MissingSource, InvalidSource, ImporterOutdated, NewerVersion,\n"
+    "  UnsupportedSourceFormat; a source line ends with ' (<error>)' when the state has a cause.\n"
+    "  The package is not opened. Takes no lock.\n";
 
 constexpr StringView MoveUsage =
     "usage: asset-move <path|directory> <new path> [--project=<dir>] [--wait=<seconds>]\n"
@@ -132,6 +139,7 @@ struct EditArgs {
     bool force = false;
     bool json = false;
     bool all = false;
+    bool import = false;
     bool help = false;
     Array<StringView> positional;
     Array<TextAssignment> assignments;
@@ -231,6 +239,8 @@ bool ParseEdit(Span<const StringView> args, const EditGrammar& grammar, EditArgs
                 flag = &out.json;
             } else if (argument == "--all" && grammar.infoFlags) {
                 flag = &out.all;
+            } else if (argument == "--import" && grammar.infoFlags) {
+                flag = &out.import;
             }
 
             if (flag != nullptr) {
@@ -277,8 +287,9 @@ bool ParseEdit(Span<const StringView> args, const EditGrammar& grammar, EditArgs
         }
     }
 
+    // --import는 속성 출력(--all)과 함께 쓰지 않는다.
     uint32 milliseconds = 0;
-    return out.positional.Size() == grammar.positionalCount &&
+    return out.positional.Size() == grammar.positionalCount && !(out.all && out.import) &&
            ParseWaitMilliseconds(out.wait, milliseconds);
 }
 
@@ -1014,6 +1025,196 @@ Result<int32> RunAssetDuplicateCommand(void* context, Span<const StringView> arg
     return FlushCache(output, allocator, DuplicateName, session);
 }
 
+// 임포트 상태 이름이다(None이면 current).
+StringView ImportStateName(AssetDiagnosticCode state) noexcept {
+    return state == AssetDiagnosticCode::None ? StringView("current")
+                                              : StringView(AssetDiagnosticName(state));
+}
+
+// asset-info --import 줄이다(7.1절 18 A2f2b).
+Result<void> AppendImportLines(const AssetImportStatus& status, StringBuilderBase& out) noexcept {
+    if (!status.Owned()) {
+        if (status.ownerPath.IsEmpty()) {
+            return out.TryAppendFormat("import.owner={} {}\n", status.owner, status.owner);
+        }
+
+        return out.TryAppendFormat("import.owner={} {}\n", status.ownerPath.View(), status.owner);
+    }
+
+    if (auto formatted =
+            out.TryAppendFormat("import.importer={} {} {}\n", status.importerName.View(),
+                                status.importerVersion, ImportStateName(status.importer));
+        !formatted) {
+        return formatted;
+    }
+
+    // 원인 오류가 있으면(InvalidSource·모르는 루트) 줄 끝에 ` (<오류>)`를 붙인다.
+    for (const AssetImportSourceStatus& source : status.sources) {
+        Result<void> formatted =
+            out.TryAppendFormat("import.source.{}={}:{} {}", source.role.View(), source.root.View(),
+                                source.relative.View(), ImportStateName(source.state));
+        if (formatted && source.error != ErrorCode::None) {
+            formatted = out.TryAppendFormat(" ({})", ErrorCodeName(source.error));
+        }
+
+        if (formatted) {
+            formatted = out.TryAppend("\n");
+        }
+
+        if (!formatted) {
+            return formatted;
+        }
+    }
+
+    return Result<void>::Success();
+}
+
+// JSON 키 하나와 문자열 값이다.
+Result<void> WriteJsonField(JsonWriter& writer, StringView key, StringView value) noexcept {
+    if (auto keyed = writer.Key(key); !keyed) {
+        return keyed;
+    }
+
+    return writer.String(value);
+}
+
+// asset-info --import --json 객체다(7.1절 18 A2f2b).
+Result<void> AppendImportJson(const AssetImportStatus& status, StringBuilderBase& out) noexcept {
+    JsonWriter writer(out);
+    Result<void> step = writer.BeginObject();
+    if (!status.Owned()) {
+        char owner[AssetId::TextBytes + 1] = {};
+        FixedStringBuilder ownerText{Span<char>(owner)};
+        if (step) {
+            step = ownerText.TryAppendFormat("{}", status.owner);
+        }
+
+        if (step) {
+            step = WriteJsonField(writer, "owner", ownerText.View());
+        }
+
+        if (step) {
+            step = writer.Key("ownerPath");
+        }
+
+        if (step) {
+            step =
+                status.ownerPath.IsEmpty() ? writer.Null() : writer.String(status.ownerPath.View());
+        }
+    } else {
+        if (step) {
+            step = writer.Key("importer");
+        }
+
+        if (step) {
+            step = writer.BeginObject();
+        }
+
+        if (step) {
+            step = WriteJsonField(writer, "name", status.importerName.View());
+        }
+
+        if (step) {
+            step = writer.Key("version");
+        }
+
+        if (step) {
+            step = writer.UInt64(status.importerVersion);
+        }
+
+        if (step) {
+            step = WriteJsonField(writer, "state", ImportStateName(status.importer));
+        }
+
+        if (step) {
+            step = writer.EndObject();
+        }
+
+        if (step) {
+            step = writer.Key("sources");
+        }
+
+        if (step) {
+            step = writer.BeginArray();
+        }
+
+        for (usize index = 0; step && index < status.sources.Size(); ++index) {
+            const AssetImportSourceStatus& source = status.sources[index];
+            step = writer.BeginObject();
+            if (step) {
+                step = WriteJsonField(writer, "role", source.role.View());
+            }
+
+            if (step) {
+                step = WriteJsonField(writer, "root", source.root.View());
+            }
+
+            if (step) {
+                step = WriteJsonField(writer, "relative", source.relative.View());
+            }
+
+            if (step) {
+                step = WriteJsonField(writer, "state", ImportStateName(source.state));
+            }
+
+            // 원인 오류(없으면 null)다.
+            if (step) {
+                step = writer.Key("error");
+            }
+
+            if (step) {
+                step = source.error == ErrorCode::None ? writer.Null()
+                                                       : writer.String(ErrorCodeName(source.error));
+            }
+
+            if (step) {
+                step = writer.EndObject();
+            }
+        }
+
+        if (step) {
+            step = writer.EndArray();
+        }
+    }
+
+    if (step) {
+        step = writer.EndObject();
+    }
+
+    if (step) {
+        step = writer.Finish();
+    }
+
+    return step;
+}
+
+// asset-info --import다.
+Result<int32> RunImportStatus(Allocator& allocator, const EditArgs& parsed, EditSession& session,
+                              CommandletOutput& output) noexcept {
+    AssetImportStatus status(allocator);
+    AssetDiagnostic diagnostic;
+    auto shown =
+        session.service->ImportStatus(parsed.positional[0], status, &session.warnings, &diagnostic);
+    if (auto warned = WriteWarnings(output, allocator, InfoName, session.warnings); !warned) {
+        return warned;
+    }
+
+    if (!shown) {
+        return WriteFailure(output, allocator, InfoName, parsed.positional[0], session.diagnostics,
+                            diagnostic, shown.Error());
+    }
+
+    // JSON은 Finish가 줄 끝을 붙인다.
+    StringBuilder<LineBytes> text(allocator);
+    Result<void> formatted =
+        parsed.json ? AppendImportJson(status, text) : AppendImportLines(status, text);
+    if (!formatted) {
+        return Result<int32>::Failure(formatted.Error());
+    }
+
+    return Write(output, CommandletStream::Output, text.View(), 0);
+}
+
 Result<int32> RunAssetInfoCommand(void* context, Span<const StringView> args,
                                   CommandletOutput& output) noexcept {
     const AssetCommandContext& command = *static_cast<const AssetCommandContext*>(context);
@@ -1032,6 +1233,10 @@ Result<int32> RunAssetInfoCommand(void* context, Span<const StringView> args,
     if (!OpenSession(output, allocator, InfoName, parsed.project, parsed.wait, false, session,
                      failure)) {
         return failure;
+    }
+
+    if (parsed.import) {
+        return RunImportStatus(allocator, parsed, session, output);
     }
 
     AssetInfoOptions options;

@@ -635,6 +635,22 @@ A2는 에디터 쪽 에셋 데이터베이스다(4·5.4·5.5·7·8·13·16절). 
         - 판정은 색인 요약으로 하고 열기는 파일 기록으로 하므로, 파일 기록의 owner·임포터 id·버전·출력 id 목록이 색인 요약과 다르면(색인 뒤 밖에서 바뀜) `ExternalModification` / StaleHandle로 거부한다(Open의 "다른 id"와 같은 진단).
         - 기록 출력 타입(주 출력 포함)이 그 패키지의 대표 타입(색인)과 다르면 `TypeMismatch` / TypeMismatch(asset = 그 출력)로 거부한다 — 손 편집 기록에서 임포터가 `Output(key, T)`로 T 아닌 객체를 받지 않게.
         - 옵션 Record 시험은 사례마다 기대 오류를 짝지었다. 할당 실패 시험은 진단 None을 단언하고 먼저 저장된 기존 출력을 반복마다 처음 내용으로 되돌린다.
+    - A2f2b 설계(2026-11-22, 착수 — 권장안으로 확정, 위 "임포트 상태"를 고친다):
+      - 출력 자리: `asset-info <path|AssetId> --import [--json]` — 속성 대신 임포트 상태만 쓴다. 위 초안의 "Edit 형식의 끝에 덧붙인다"는 버렸다: Edit 줄은 `asset-set`에 그대로 넣는 입력 형식이라(왕복 계약 — 13절, 시험 `asset-info lines round trip through asset-set`) 속성이 아닌 줄이 섞이면 왕복이 깨지고, `import`라는 이름의 속성과 줄·JSON 키가 겹칠 수 있다. `--import`는 `--all`과 함께 쓰지 않는다(사용법 오류).
+      - 서비스 `AssetService::ImportStatus(target, out, warnings, failure)`: 대상(`<path|AssetId>` — 별칭은 Info와 같이 풀고 경고 `AliasResolved`를 남긴다, 저장하지 않은 새 패키지는 색인에 없으므로 NotFound)을 색인에서 찾고 **패키지를 열지 않고** 파일의 ImportRecord 칸만 부분 읽기(`ReadPackageIndex`)로 읽는다 — 상태는 디스크 기준이고(열린 패키지의 저장하지 않은 기록이 아니다), 열린 패키지를 남기지 않는다(같은 서비스의 재임포트가 Busy에 걸리지 않게 — A2f2a 리뷰). 잠금을 잡지 않는다(읽기). 파일 헤더 id가 색인과 다르면 `ExternalModification` / StaleHandle.
+      - 결과 `AssetImportStatus`: 기록 없음이면 InvalidArgument(진단 None — 재임포트와 같다). 참조 기록(출력 패키지)이면 `owner`만 채운다(`asset-info --import`는 `import.owner=<owner 논리 경로|AssetId> <owner id>` 한 줄 — owner가 색인에 없으면 경로 자리에 id). 소유 기록이면 임포터(이름·기록 버전·상태)와 원본마다(역할·root·relative·상태)를 채운다. 기록을 읽지 못하면(다른 스키마·더 새 버전) `NewerVersion` / Unsupported, 형식 위반 `CorruptPackage`(칸 ImportRecord).
+      - 임포터 상태: 기록 id의 임포터가 없으면 `UnsupportedSourceFormat`, 등록 버전 > 기록 버전이면 `ImporterOutdated`, 기록 버전이 더 새면 `NewerVersion`(재임포트가 거부한다), 그 밖 current.
+      - 원본 상태: 기록 위치를 지금 루트로 풀어(모르는 루트 `MissingSource` — 재임포트와 같다, 위치 규칙 위반 `InvalidSource`) 파일을 연다. 없으면 `MissingSource`, 크기가 기록 byte 수와 다르면 읽지 않고 `SourceChanged`, 같으면 고정 크기 버퍼(`ImportStatusReadBytes` 64 KiB)로 흘려 읽으며 SHA-256을 계산해 다르면 `SourceChanged`, 같으면 current. 읽기 IO 오류는 `InvalidSource`(그 오류 — 원본마다 따로, 전체를 실패시키지 않는다: 상태 보고가 목적이라 다른 원본의 상태도 보여 준다). 원본을 통째로 메모리에 올리지 않는다(임포트 상한 MaxImportSourceBytes까지 큰 원본이 있다).
+      - 줄 형식(`--import`): `import.importer=<이름> <기록 버전> <상태>`, 원본마다 `import.source.<역할>=<root>:<relative> <상태>`(빈 root = 절대 경로 — `:` 뒤가 절대 경로), 상태는 `current` 또는 진단 이름(`SourceChanged`·`MissingSource`·`InvalidSource`·`ImporterOutdated`·`UnsupportedSourceFormat`·`NewerVersion`). JSON(`--import --json`): 소유 기록이면 `{"importer": {"name", "version", "state"}, "sources": [{"role", "root", "relative", "state"}]}`, 참조 기록이면 `{"owner": "<AssetId>", "ownerPath": "<논리 경로>" | null}`. 종료 코드는 상태와 무관하게 0이다(조회 명령 — 낡음 판정은 출력으로, 자동 재임포트 없음 16.1절).
+      - UE 대응: `UAssetImportData`의 원본 파일 정보(`FAssetImportInfo` — 상대 경로·타임스탬프·MD5)와 에디터의 원본 변경 감지. UE는 시각을 먼저 보고 해시로 확인하지만 여기서는 시각을 기록하지 않으므로(위) 크기 → SHA-256이다.
+    - A2f2b 상태: **구현** — 대조표 14.1.51절, coverage 14.1.52절. 구현에서 정한 것:
+      - 원본 대조는 공개 함수 `CheckImportSource(files, path, bytes, digest, buffer, error)`(AssetSourceRoots.h — 할당하지 않는다, 버퍼는 호출자가 `ImportStatusReadBytes`로 한 번 잡는다)다. 크기를 잰 뒤 줄어든 파일(EndOfFile)은 `ReadWhole`과 같이 IO 오류(InvalidSource)다. 빈 버퍼는 InvalidSource / InvalidArgument다.
+      - 참조 기록의 owner 경로는 `AssetIndex::FindById`(할당하지 않는다)로 찾고 없음·같은 id 둘이면 빈 경로다 — 원본 루트 표는 읽지 않는다(표가 깨져도 참조 기록 상태는 나온다).
+      - 별칭이 가리키는 id가 색인에 없으면(대상을 밖에서 지움) NotFound(asset = 그 id)다.
+      - 시험 파일 시스템(`MemoryFileSystem`)에 크기 조회 실패 `MemoryFault::Size`를 더했다(원본 크기 조회 실패를 실제로 만든다 — 미도달 사유로 남기지 않는다).
+      - JSON은 `JsonWriter::Finish`가 줄 끝을 붙인다(명령이 더 붙이지 않는다). 읽기 오류의 진단은 `ReadPackageIndex`의 진단(코드·칸)을 그대로 쓰고 asset만 대상 id로 채운다.
+      - 리뷰 반영(필수 하나·권장 둘): 잘린 파일(CorruptPackage / InvalidArgument)·원본 루트 표 손상(InvalidSource / InvalidArgument, detail = (줄 << 32) | 열)을 정확한 값으로 단언한다. 원본 상태에 원인 오류가 있으면(InvalidSource·모르는 루트의 NotFound) 줄 끝에 ` (<오류 이름>)`, JSON에 `"error": "<오류 이름>" | null`을 쓴다(결과 구조의 정보를 출력에서 잃지 않게 — Busy·AccessDenied를 가린다). 할당 실패 시험은 결과의 모든 필드(임포터 id·버전, 원본 root·relative·error 포함)를 기준과 비교한다.
+      - 버린 권장: `<path|AssetId>` 대상 해석을 private 함수 하나로 모으기. 세 곳의 계약이 다르다 — `Delete`는 별칭을 풀지 않고(지금 이름으로 고른다) 저장하지 않은 새 패키지를 포함하며 경로로 고른 항목도 같은 id 둘이면 거부한다, `OpenTarget`은 `EditorPackageSet::Open`을 거쳐 열기 진단을 쓰고 저장하지 않은 새 패키지를 포함한다, `ImportStatus`는 색인 항목만(파일을 고르므로 경로로 고른 같은 id 둘도 읽는다) 별칭과 함께 본다. 하나로 모으면 선택 인자 셋이 생겨 오히려 갈라짐을 숨긴다 — 경로 형식·AssetId 형식의 진단(InvalidPath)은 세 곳이 같다.
     - 버린 대안: 임포터가 패키지를 직접 만들고 저장(원자성·점유·기록 규칙이 임포터마다 흩어진다 — 문맥이 출력을 준다), 옵션을 객체(UE ImportUI `UObject`)로(공개 전 객체가 패키지에 들지 않는 일회 값이라 struct 값 대입으로 충분), 옵션 접두사 `--options.<필드>=`(13절 문법이 바뀌고 UE 명령행 관례와 다르다 — 등록 때 이름 충돌을 막는다), 확장자 경합 우선순위(UE `ImportPriority` — 결과가 등록 순서에 달린다), 타입이 바뀐 출력을 같은 id 새 객체로 바꾸기(위), 재임포트가 참조 기록 출력에서 owner를 따라가기(무엇이 바뀌는지 숨긴다 — 명시 거부), 명령 성공 경로 시험을 A5로 미루기(지금 닿는 코드를 미구현 사유로 남긴다 — 교차 검증 필수 4), 시험 전용 Commandlet 실행 파일(타깃이 하나 더 생긴다 — 프로세스 안 호출이 작다).
 
 ## 8. 동시성
@@ -1148,7 +1164,7 @@ asset-reimport <path> [--source=<파일> | --source.<역할>=<파일>…] [설�
 asset-new <Type> <path> [<속성>=<값>…]
 asset-set <path> <속성>=<값> [<속성>=<값>…]
 asset-list [--type=<Type>] [--under=<path>]
-asset-info <path|AssetId>
+asset-info <path|AssetId> [--json] [--all | --import]
 asset-move <path|디렉터리> <새 path>
 asset-duplicate <path> <새 path>
 asset-delete <path> [--force]
@@ -2585,6 +2601,41 @@ A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항�
 | 옵션·설정 대입 묶음 `Publish` 실패(새 임포트·재임포트·기록 옵션) | 실패 | 14.1.48과 같다 — Prepare와 Publish 사이에 대상이 바뀌거나 죽을 수 없다 |
 | 기록 옵션 `Find`의 NotFound 아닌 실패 | 실패 | Find는 없음(NotFound)과 예산 소진만 실패한다. 기본 한도로 연 Record는 필드 4096개 이하라 연산 예산(1M)을 Open·Find가 다 쓸 수 없다. 검사는 API 계약대로 둔다 |
 | 명령의 원본 목록·경로·줄 서식 할당 실패, 작업 디렉터리 조회 실패 | 실패 | 14.1.48과 같다 |
+
+#### 14.1.51 요구 대조표(A2f2b — 임포트 상태)
+
+시험은 EngineTests `Engine/Source/Developer/AssetDatabase/Tests/AssetImportTests.cpp`의 `AssetImportStatus_*` 4개, `Engine/Source/Developer/AssetCommandlets/Tests/AssetImportCommandletTests.cpp`의 `AssetInfoImportCommand_Reports`, C# `Programs/Rocks.Commandlet.Tests/Program.cs`의 "asset-info import"·"asset-info usage"·"asset-info help mentions import" 항목 5개다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 소유 기록 상태(7.1-18 A2f2b) | 임포터 id·이름·버전·current, 원본 역할·루트·상대 경로·current(error None), 경로·AssetId 대상 같은 결과, 패키지를 열지 않음(열린 패키지 0·같은 서비스 재임포트 성공) | `AssetImportStatus_Imported` |
+| 원본 상태 출력(7.1-18 A2f2b 리뷰 반영) | 원인 오류의 줄 끝 ` (<오류>)`·JSON `error`(없으면 null) | `AssetInfoImportCommand_Reports` |
+| 원본 상태(7.1-18 A2f2b) | 같은 크기 다른 내용·다른 크기·기록 byte 수와 다름 SourceChanged, 빈 파일(크기 같음·SHA-256 다름) SourceChanged, 없음 MissingSource(error None), 모르는 루트 MissingSource(NotFound), 디렉터리·열기 사용 중·크기 조회 실패·읽기 실패 InvalidSource(error), 절대 경로 원본(빈 루트), 원본 둘(역할 순), 대조 함수의 빈 버퍼·작은 버퍼 여러 번 읽기·다른 다이제스트 | `AssetImportStatus_Imported`·`AssetImportStatus_Crafted` |
+| 임포터 상태(7.1-18 A2f2b) | 등록 버전이 더 새 ImporterOutdated, 기록 버전이 더 새 NewerVersion, 모르는 임포터·임포터 표 없음 UnsupportedSourceFormat(원본 상태는 그대로) | `AssetImportStatus_Crafted`·`AssetImportStatus_Imported` |
+| 참조 기록(7.1-18 A2f2b) | owner·ownerPath(색인), owner가 색인에 없음·같은 id 둘이면 빈 경로, 원본 루트 표가 깨져도 나옴 | `AssetImportStatus_Imported`·`AssetImportStatus_Crafted`·`AssetImportStatus_Rejects` |
+| 대상(7.1-18 A2f2b) | 별칭으로 푼 대상(경고 AliasResolved), 별칭 대상이 색인에 없음 NotFound(asset) | `AssetImportStatus_Imported`·`AssetImportStatus_Rejects` |
+| 거부(7.1-18 A2f2b) | Initialize 전, 경로 규칙·AssetId 아님·null id InvalidPath, 없음(경로·id) NotFound, 같은 경로 키 둘 DuplicatePath, 같은 id 둘 DuplicateAssetId(asset), 기록 없음 InvalidArgument(asset), 더 새 스키마 기록 NewerVersion / Unsupported, 필드 빠진 기록 CorruptPackage(칸 ImportRecord), 색인 뒤 사라진 파일 MissingFile, 다른 패키지 ExternalModification / StaleHandle, 열기 사용 중 Busy, 잘린 파일 CorruptPackage / InvalidArgument(asset), 원본 루트 표 손상 InvalidSource / InvalidArgument(detail 줄·열), 진단 인자 없이도 — 모두 열린 패키지 0 | `AssetImportStatus_Rejects` |
+| 할당 실패(7.1-18 A2f2b) | 소유 기록(원본 둘)·참조 기록의 모든 할당 실패 OutOfMemory·진단 None, 성공 결과의 모든 필드가 기준과 같음 | `AssetImportStatus_AllocationFailures` |
+| 명령(13, 7.1-18 A2f2b — 프로세스 안) | 소유 기록 줄(정확한 두 줄)·JSON(이름·버전·상대 경로·state), owner 줄·JSON ownerPath, 원본을 바꾼 뒤 SourceChanged 줄, 원본 자리가 디렉터리면 InvalidSource와 원인(줄·JSON), 임포터 표 없는 세션 UnsupportedSourceFormat(종료 0), 별칭 경고 줄, owner가 색인에 없으면 경로 자리에 id·JSON null, 실패 줄(NotFound), 출력·경고 줄 쓰기 실패는 실행 오류, 사용법(`--import --all`·`--import` 두 번) | `AssetInfoImportCommand_Reports` |
+| 명령(13 — 제품 실행 파일) | 기록 없음 InvalidArgument, 없는 경로 NotFound(`--json`), 사용법 둘, 도움말에 `--import` | C# 5개 |
+| 조합(14 완료 조건 2) | 기록(소유·참조·없음·읽지 못함) × 원본 상태(current·SourceChanged 크기·내용·MissingSource 파일·루트·InvalidSource 넷) × 임포터 상태(넷) × 대상(경로·id·별칭) × 출력(줄·JSON) × 실행(서비스·명령 함수·제품 실행 파일) | 위 시험 |
+
+#### 14.1.52 Coverage(A2f2b)
+
+측정(2026-11-22, Windows, `ROCKS_MSVC_TOOLSET=14.44`): `-Target EngineTests -Filter AssetImportStatus,AssetInfoImportCommand -Sources Engine/Source/Developer/AssetDatabase/Private,Engine/Source/Developer/AssetCommandlets/Private`. `AssetServiceImportStatus.cpp` 줄 178/178·분기 92/94.
+
+| 범위 | 줄 | 분기 |
+|---|---|---|
+| `AssetServiceImportStatus.cpp` | 모두 닿음 | 아래 제외 모두 |
+| `CheckImportSource` | 모두 닿음 | 모두 닿음 |
+| `RunImportStatus`·`AppendImportLines`·`AppendImportJson`·`--import` 해석 | 아래 제외 모두 | 같음 |
+
+닿지 않은 곳과 근거:
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| `ImportStatus`의 원본 Resolve 오류 판정 | InvalidArgument(위치 규칙 위반) 갈래 | 기록을 읽을 때(`ReadImportRecord`) 원본마다 같은 규칙(`ImportValidRoot`·`ImportValidSourcePath`)을 이미 통과했다 — Resolve는 모르는 루트(NotFound)와 할당 실패만 낸다. Resolve 계약대로 판정은 둔다 |
+| 명령의 줄·JSON 서식 실패(`TryAppendFormat`·`JsonWriter`) | 실패 | 출력 버퍼는 명령 allocator로 자라고 그 실패는 할당 실패뿐이다 — 14.1.48과 같다(명령 allocator는 세션 전체에 쓰인다) |
 
 ## 15. PNG 디코더 범위
 

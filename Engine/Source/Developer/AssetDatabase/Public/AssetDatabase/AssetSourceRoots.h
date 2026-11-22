@@ -107,4 +107,22 @@ Result<void> ReadImportSource(platform::FileSystem& files, StringView path, Arra
                               Sha256Digest& digest, uint64 limit = MaxImportSourceBytes,
                               AssetDiagnostic* failure = nullptr) noexcept;
 
+// 임포트 상태의 원본 흘려 읽기 버퍼 크기다(7.1절 18 A2f2b — 원본을 통째로 올리지 않는다).
+inline constexpr usize ImportStatusReadBytes = 64 * 1024;
+
+// 임포트 원본 파일 path(절대 OS 경로)가 기록(byte 수 bytes·SHA-256 digest)과 같은지 본다(7.1절 18
+// A2f2b). 크기가 다르면 읽지 않는다. 같으면 buffer 크기씩 흘려 읽으며 SHA-256을 계산한다(할당하지
+// 않는다). 반환: None(같음), MissingSource(없음), SourceChanged(크기나 내용이 다름),
+// InvalidSource(열기·크기·읽기 IO 오류 — error에 그 오류, 크기를 잰 뒤 줄어든 파일 포함). 빈
+// buffer는 InvalidSource / InvalidArgument다.
+//
+// 사용 예:
+//   Array<uint8> buffer(allocator);   // TryResize(ImportStatusReadBytes)
+//   ErrorCode error = ErrorCode::None;
+//   const AssetDiagnosticCode state =
+//       CheckImportSource(files, path, source.bytes, source.sha256, buffer.View(), error);
+AssetDiagnosticCode CheckImportSource(platform::FileSystem& files, StringView path, uint64 bytes,
+                                      const Sha256Digest& digest, Span<uint8> buffer,
+                                      ErrorCode& error) noexcept;
+
 } // namespace rocks

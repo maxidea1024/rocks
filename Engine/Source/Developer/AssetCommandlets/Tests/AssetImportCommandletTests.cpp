@@ -96,6 +96,14 @@ struct CommandScene {
                static_cast<bool>(file.Close());
     }
 
+    bool RemoveFile(StringView relative) noexcept {
+        char path[1024] = {};
+        FixedStringBuilder builder{Span<char>(path)};
+        return builder.TryAppendFormat("{}/{}", root.Root(), relative) &&
+               static_cast<bool>(platform::PhysicalFileSystem().Delete(builder.View().Data(),
+                                                                       builder.View().ByteCount()));
+    }
+
     bool Exists(StringView relative) noexcept {
         char path[1024] = {};
         FixedStringBuilder builder{Span<char>(path)};
@@ -130,6 +138,12 @@ struct Run {
     int32 Reimport(Span<const StringView> args) noexcept {
         CommandletOutput output = captured.Output();
         auto ran = RunAssetReimportCommand(&context, args, output);
+        return ran ? ran.Value() : -1;
+    }
+
+    int32 Info(Span<const StringView> args) noexcept {
+        CommandletOutput output = captured.Output();
+        auto ran = RunAssetInfoCommand(&context, args, output);
         return ran ? ran.Value() : -1;
     }
 
@@ -445,6 +459,181 @@ TEST(AssetReimportCommand_Reimports) {
     const StringView helpArgs[] = {"--help"};
     CHECK(help.Reimport(helpArgs) == 0 &&
           help.captured.out.View().StartsWith("usage: asset-reimport"));
+}
+
+// asset-info --import(7.1절 18 A2f2b): 소유 기록 줄(임포터·원본 current)·JSON, 원본을 바꾼 뒤
+// SourceChanged, 다른 출력의 owner 줄·JSON(ownerPath), owner가 색인에 없는 owner 줄(id 둘), 실패
+// 줄(기록 없음), 임포터 표 없는 세션의 UnsupportedSourceFormat, --import --all 사용법 오류.
+TEST(AssetInfoImportCommand_Reports) {
+    AssetEnv env;
+    REQUIRE(env.Ready());
+    CommandScene scene("info-import-command");
+    REQUIRE(scene.ready);
+    REQUIRE(scene.WriteFile("Rock.trock", "value=2\noutputs=extra"));
+    ImporterState state;
+    char project[512] = {};
+    FixedStringBuilder projectOption{Span<char>(project)};
+    REQUIRE(projectOption.TryAppendFormat("--project={}", scene.root.Root()));
+    char source[512] = {};
+    FixedStringBuilder sourcePath{Span<char>(source)};
+    REQUIRE(sourcePath.TryAppendFormat("{}/Rock.trock", scene.root.Root()));
+    {
+        Run run(env.allocator, &state);
+        const StringView args[] = {"/Game/Rock", sourcePath.View(), projectOption.View()};
+        REQUIRE(run.Call(args) == 0);
+    }
+
+    {
+        Run run(env.allocator, &state);
+        const StringView args[] = {"/Game/Rock", "--import", projectOption.View()};
+        CHECK(run.Info(args) == 0);
+        CHECK(run.captured.out.View() == "import.importer=TestImporter 4 current\n"
+                                         "import.source.source=Project:Rock.trock current\n" &&
+              run.captured.error.IsEmpty());
+    }
+
+    {
+        Run run(env.allocator, &state);
+        const StringView args[] = {"/Game/Rock", "--import", "--json", projectOption.View()};
+        CHECK(run.Info(args) == 0);
+        const StringView out = run.captured.out.View();
+        CHECK(out.StartsWith("{") && out.EndsWith("}\n") &&
+              out.Contains("\"name\": \"TestImporter\"") && out.Contains("\"version\": 4") &&
+              out.Contains("\"relative\": \"Rock.trock\"") &&
+              out.Contains("\"state\": \"current\"") && out.Contains("\"error\": null"));
+    }
+
+    // 다른 출력: owner 줄·JSON.
+    {
+        Run run(env.allocator, &state);
+        const StringView args[] = {"/Game/Rock_extra", "--import", projectOption.View()};
+        CHECK(run.Info(args) == 0);
+        CHECK(run.captured.out.View().StartsWith("import.owner=/Game/Rock "));
+    }
+
+    {
+        Run run(env.allocator, &state);
+        const StringView args[] = {"/Game/Rock_extra", "--import", "--json", projectOption.View()};
+        CHECK(run.Info(args) == 0);
+        CHECK(StringView(run.captured.out.View()).Contains("\"ownerPath\": \"/Game/Rock\""));
+    }
+
+    // 원본을 바꾸면 SourceChanged.
+    REQUIRE(scene.WriteFile("Rock.trock", "value=3\noutputs=extra"));
+    {
+        Run run(env.allocator, &state);
+        const StringView args[] = {"/Game/Rock", "--import", projectOption.View()};
+        CHECK(run.Info(args) == 0);
+        CHECK(StringView(run.captured.out.View())
+                  .Contains("import.source.source=Project:Rock.trock SourceChanged\n"));
+    }
+
+    // 원본 자리가 디렉터리면 InvalidSource와 원인(줄 끝 괄호·JSON error).
+    char directory[512] = {};
+    FixedStringBuilder directoryPath{Span<char>(directory)};
+    REQUIRE(directoryPath.TryAppendFormat("{}/Rock.trock", scene.root.Root()));
+    REQUIRE(scene.RemoveFile("Rock.trock"));
+    REQUIRE(platform::PhysicalFileSystem().MakeDirectory(directoryPath.View().Data(),
+                                                         directoryPath.View().ByteCount()));
+    {
+        Run run(env.allocator, &state);
+        const StringView args[] = {"/Game/Rock", "--import", projectOption.View()};
+        CHECK(run.Info(args) == 0);
+        const StringView out = run.captured.out.View();
+        CHECK(out.Contains("import.source.source=Project:Rock.trock InvalidSource (") &&
+              out.EndsWith(")\n"));
+    }
+
+    {
+        Run run(env.allocator, &state);
+        const StringView args[] = {"/Game/Rock", "--import", "--json", projectOption.View()};
+        CHECK(run.Info(args) == 0);
+        const StringView out = run.captured.out.View();
+        CHECK(out.Contains("\"state\": \"InvalidSource\"") && !out.Contains("\"error\": null"));
+    }
+
+    REQUIRE(platform::PhysicalFileSystem().DeleteDirectory(directoryPath.View().Data(),
+                                                           directoryPath.View().ByteCount()));
+    REQUIRE(scene.WriteFile("Rock.trock", "value=3\noutputs=extra"));
+
+    // 출력 쓰기 실패는 실행 오류다(표준 출력).
+    {
+        Run run(env.allocator, &state);
+        run.captured.failWrites = true;
+        run.captured.failStream = CommandletStream::Output;
+        const StringView args[] = {"/Game/Rock", "--import", projectOption.View()};
+        CHECK(run.Info(args) == -1);
+    }
+
+    // 임포터 표 없는 세션: UnsupportedSourceFormat(종료 0).
+    {
+        Run run(env.allocator, nullptr);
+        const StringView args[] = {"/Game/Rock", "--import", projectOption.View()};
+        CHECK(run.Info(args) == 0);
+        CHECK(run.captured.out.View().StartsWith(
+            "import.importer=TestImporter 4 UnsupportedSourceFormat\n"));
+    }
+
+    // 별칭으로 푼 대상: 경고 줄(AliasResolved)과 상태 줄, 경고 줄 쓰기 실패는 실행 오류.
+    {
+        Run run(env.allocator, &state);
+        CommandletOutput output = run.captured.Output();
+        const StringView args[] = {"/Game/Rock_extra", "/Game/Moved/Extra", projectOption.View()};
+        auto moved = RunAssetMoveCommand(&run.context, args, output);
+        REQUIRE(moved && moved.Value() == 0);
+    }
+
+    {
+        Run run(env.allocator, &state);
+        const StringView args[] = {"/Game/Rock_extra", "--import", projectOption.View()};
+        CHECK(run.Info(args) == 0);
+        CHECK(run.captured.out.View().StartsWith("import.owner=/Game/Rock ") &&
+              StringView(run.captured.error.View())
+                  .Contains("AliasResolved: /Game/Rock_extra: warning resolved through an alias"));
+    }
+
+    {
+        Run run(env.allocator, &state);
+        run.captured.failWrites = true;
+        run.captured.failStream = CommandletStream::Error;
+        const StringView args[] = {"/Game/Rock_extra", "--import", projectOption.View()};
+        CHECK(run.Info(args) == -1);
+    }
+
+    // owner가 색인에 없는 다른 출력: 경로 자리에 id(주 출력 파일을 지움).
+    REQUIRE(scene.RemoveFile("Content/Rock.rasset"));
+    {
+        Run run(env.allocator, &state);
+        const StringView args[] = {"/Game/Rock_extra", "--import", projectOption.View()};
+        CHECK(run.Info(args) == 0);
+        const StringView out = run.captured.out.View();
+        CHECK(out.StartsWith("import.owner=") && !out.Contains("/Game/Rock"));
+    }
+
+    {
+        Run run(env.allocator, &state);
+        const StringView args[] = {"/Game/Rock_extra", "--import", "--json", projectOption.View()};
+        CHECK(run.Info(args) == 0);
+        CHECK(StringView(run.captured.out.View()).Contains("\"ownerPath\": null"));
+    }
+
+    // 실패 줄: 기록 없음(새 패키지), 없음.
+    {
+        Run run(env.allocator, &state);
+        const StringView args[] = {"/Game/Rock", "--import", projectOption.View()};
+        CHECK(run.Info(args) == 1);
+        CHECK(run.captured.error.View().StartsWith("asset-info: NotFound: /Game/Rock"));
+    }
+
+    // 사용법: --import --all, --import 두 번.
+    const StringView withAll[] = {"/Game/Rock", "--import", "--all"};
+    const StringView twice[] = {"/Game/Rock", "--import", "--import"};
+    const Span<const StringView> cases[] = {withAll, twice};
+    for (Span<const StringView> args : cases) {
+        Run run(env.allocator, &state);
+        CHECK(run.Info(args) == 2);
+        CHECK(run.captured.error.View().StartsWith("usage: asset-info"));
+    }
 }
 
 } // namespace asset_import_commandlet_tests_file
