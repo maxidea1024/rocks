@@ -21,8 +21,8 @@ fields #1 -> Door(Trail: "EDE", Peer: none)
 request #1 destroy -> ok
 request #1 disable -> ok
 apply -> ok (0 pending)
-endframe -> ok (0 pending)
   hook #1 Disable -> ok (7 steps)
+endframe -> ok (0 pending)
   hook #1 Destroy -> ok (14 steps)
   log info "destroy EDEDX"
 stats -> waits 0, suspended 0, skipped 0
@@ -32,4 +32,36 @@ endframe -> ok (0 pending)
   hook #2 Disable -> ok (7 steps)
   hook #2 Destroy -> ok (14 steps)
   log info "destroy EDX"
+# LC6d2 review: a pending-destroy instance neither resumes nor receives deliveries, the frame end runs
+# Disable for all then Destroy for all then detaches, a Teardown budget fault does not stop the cleanup,
+# and closing with live instances, suspended executions and queued items empties the ledger.
+new #3 Door -> ok (3 steps)
+new #4 Door -> ok (3 steps)
+hook #3 Enable -> ok (9 steps)
+hook #4 Enable -> ok (9 steps)
+Door.Link(#3, #4) -> void (3 steps)
+Door.Linger(#3) -> suspended (7 steps)
+request #3 destroy -> ok
+apply -> ok (0 pending)
+Door.Shout(#4) -> void (3 steps)
+advance 0.1 -> ok (1 suspended)
+stats -> waits 1, suspended 1, skipped 0
+request #4 destroy -> ok
+apply -> ok (0 pending)
+new #5 Heavy -> ok (0 steps)
+request #5 destroy -> ok
+apply -> ok (0 pending)
+endframe -> ok (0 pending)
+  hook #3 Disable -> ok (7 steps)
+  hook #4 Disable -> ok (7 steps)
+  hook #3 Destroy -> ok (14 steps)
+  hook #4 Destroy -> ok (14 steps)
+  hook #5 Destroy -> fault BudgetExceeded at 41:9 (100000 steps)
+  log info "destroy EDX"
+  log info "destroy EDX"
+stats -> waits 0, suspended 0, skipped 0
+new #6 Door -> ok (3 steps)
+hook #6 Enable -> ok (9 steps)
+Door.Link(#6, #6) -> void (3 steps)
+Door.Linger(#6) -> suspended (7 steps)
 close -> ok (ledger 0 buffers)

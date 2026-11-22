@@ -159,7 +159,7 @@ bool VmSession::RegionStart(const VmLinkedModule& module, uint32 classIndex,
 Result<uint32> VmSession::CreateInstance(uint64 handle, const VmLinkedModule& module,
                                          uint32 classIndex, VmCallResult& init) noexcept {
     init = VmCallResult();
-    if (closed_) {
+    if (closed_ || execution_.running_) {
         return Result<uint32>::Failure(ErrorCode::InvalidArgument); // 종료 뒤 admission 없음
     }
 
@@ -700,6 +700,10 @@ Result<void> VmSession::RequestEnabled(uint32 instance, bool enabled) noexcept {
     request.instance = instance;
     request.serial = instances_[instance].serial;
     request.kind = enabled ? RequestKind::Enable : RequestKind::Disable;
+    if (requests_.Size() >= MaxPendingRequests) {
+        return Result<void>::Failure(ErrorCode::CapacityExceeded); // 요청 큐 상한(리뷰 위험)
+    }
+
     return requests_.TryPushBack(request) ? Result<void>::Success()
                                           : Result<void>::Failure(ErrorCode::OutOfMemory);
 }
@@ -713,6 +717,10 @@ Result<void> VmSession::RequestDestroy(uint32 instance) noexcept {
     request.instance = instance;
     request.serial = instances_[instance].serial;
     request.kind = RequestKind::Destroy;
+    if (requests_.Size() >= MaxPendingRequests) {
+        return Result<void>::Failure(ErrorCode::CapacityExceeded);
+    }
+
     return requests_.TryPushBack(request) ? Result<void>::Success()
                                           : Result<void>::Failure(ErrorCode::OutOfMemory);
 }
@@ -733,6 +741,8 @@ Result<void> VmSession::ApplyHook(uint32 instance, BytecodeHookKind kind) noexce
     auto ran = RunHook(instance, kind, Span<const uint64>(), Span<const uint64>());
     execution_.keepLogs_ = true; // RunHook이 끈 기록 모음을 다시 켠다(적용 루프는 한 진입)
     if (!ran) {
+        // 돌지 못한 hook의 거짓 기록을 남기지 않는다(그 뒤 기록은 없다 — 실패에서 멈췄다).
+        static_cast<void>(deliveries_.TryResize(at));
         return Result<void>::Failure(ran.Error());
     }
 
@@ -745,49 +755,92 @@ Result<void> VmSession::ApplyRequests() noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    // 요청 순으로 적용하고 그동안 생긴 요청은 다음 회차에(64회 — SL 5.4·9.3절). 남은 요청은 다음
-    // 단계로 넘긴다(PendingRequests).
+    // 회차마다 그때까지의 요청을 활성 전환 먼저(요청 순), 파괴 나중(요청 순)으로 적용하고(SL 5.1·
+    // 5.4절 "활성 전환 적용 → 파괴 적용") 그동안 생긴 요청은 다음 회차에(64회 — 남으면 다음 단계로,
+    // 횟수를 센다). 할당 실패는 남은 요청을 큐 앞에 되돌려 다음 적용이 잇는다(LC6d2 리뷰 B1).
     BeginEntry();
-    execution_.keepLogs_ = true;
+    struct Nested {
+        VmSession& session;
+        ~Nested() noexcept {
+            session.nested_ = false;
+            session.execution_.keepLogs_ = false;
+        }
+    } nested{*this};
     nested_ = true;
-    Result<void> status = Result<void>::Success();
-    for (uint32 round = 0; round < MaxApplyRounds && !requests_.IsEmpty() && status; ++round) {
+    execution_.keepLogs_ = true;
+    ErrorCode failure = ErrorCode::None;
+    uint32 round = 0;
+    for (; round < MaxApplyRounds && !requests_.IsEmpty() && failure == ErrorCode::None; ++round) {
         applying_.Clear();
         if (!applying_.TryAppend(requests_.View())) {
-            status = Result<void>::Failure(ErrorCode::OutOfMemory);
-            break;
+            return Result<void>::Failure(ErrorCode::OutOfMemory);
         }
 
         requests_.Clear();
-        for (usize at = 0; at < applying_.Size() && status; ++at) {
-            const Request request = applying_[at];
-            if (request.instance >= instances_.Size() || !instances_[request.instance].attached ||
-                instances_[request.instance].serial != request.serial ||
-                instances_[request.instance].pendingDestroy) {
-                continue; // 그 사이 Detach·파괴됐다
-            }
+        auto live = [&](const Request& request) noexcept {
+            return request.instance < instances_.Size() && instances_[request.instance].attached &&
+                   instances_[request.instance].serial == request.serial &&
+                   !instances_[request.instance].pendingDestroy;
+        };
+        usize done = 0;
+        uint32 failedPass = 0;
+        for (uint32 pass = 0; pass < 2 && failure == ErrorCode::None; ++pass) {
+            for (usize at = 0; at < applying_.Size() && failure == ErrorCode::None; ++at) {
+                const Request request = applying_[at];
+                const bool destroy = request.kind == RequestKind::Destroy;
+                if ((pass == 0) == destroy || !live(request)) {
+                    continue;
+                }
 
-            Instance& entry = instances_[request.instance];
-            if (entry.isolated && request.kind != RequestKind::Destroy) {
-                continue; // 격리: 다시 활성화할 수 없다(SL 8.3절)
-            }
+                Instance& entry = instances_[request.instance];
+                Result<void> step = Result<void>::Success();
+                if (destroy) {
+                    // 정리 목록에 넣은 뒤 표지를 둔다(넣지 못하면 표지도 없다 — 리뷰 B2).
+                    if (!destroys_.TryPushBack(request)) {
+                        step = Result<void>::Failure(ErrorCode::OutOfMemory);
+                    } else {
+                        entry.pendingDestroy = true;
+                    }
+                } else if (entry.isolated) {
+                    // 격리: 다시 활성화할 수 없다(SL 8.3절).
+                } else if (request.kind == RequestKind::Enable && !entry.enabled) {
+                    step = ApplyHook(request.instance, BytecodeHookKind::Enable);
+                } else if (request.kind == RequestKind::Disable && entry.enabled) {
+                    step = ApplyHook(request.instance, BytecodeHookKind::Disable);
+                }
 
-            if (request.kind == RequestKind::Enable && !entry.enabled) {
-                status = ApplyHook(request.instance, BytecodeHookKind::Enable);
-            } else if (request.kind == RequestKind::Disable && entry.enabled) {
-                status = ApplyHook(request.instance, BytecodeHookKind::Disable);
-            } else if (request.kind == RequestKind::Destroy) {
-                entry.pendingDestroy = true;
-                if (!destroys_.TryPushBack(request)) {
-                    status = Result<void>::Failure(ErrorCode::OutOfMemory);
+                if (!step) {
+                    failure = step.Error();
+                    done = at;
+                    failedPass = pass;
                 }
             }
         }
+
+        if (failure != ErrorCode::None) {
+            // 실패한 요청 뒤의 요청(그 회차에서 아직 적용하지 않은 것)을 큐 앞에 되돌린다.
+            Array<Request> kept(*allocator_);
+            // 활성 전환 pass에서 실패했으면 그 뒤 활성 전환과 모든 파괴를, 파괴 pass에서 실패했으면
+            // 그 파괴부터를 되돌린다(실패한 hook은 다시 돌리지 않는다 — 넣지 못한 파괴는 되돌린다).
+            for (usize at = 0; at < applying_.Size(); ++at) {
+                const bool destroy = applying_[at].kind == RequestKind::Destroy;
+                const bool requeue = failedPass == 0 ? destroy || at > done : destroy && at >= done;
+                if (requeue && live(applying_[at]) && !kept.TryPushBack(applying_[at])) {
+                    break; // 되돌리지 못한 요청은 버린다(할당 실패 — 보고는 Result)
+                }
+            }
+
+            static_cast<void>(kept.TryAppend(requests_.View()));
+            requests_.Clear();
+            static_cast<void>(requests_.TryAppend(kept.View()));
+        }
     }
 
-    nested_ = false;
-    execution_.keepLogs_ = false;
-    return status;
+    if (round == MaxApplyRounds && !requests_.IsEmpty()) {
+        ++deferredApplies_; // 64회 안에 끝나지 않았다(다음 단계로 — 보고)
+    }
+
+    return failure == ErrorCode::None ? Result<void>::Success() : Result<void>::Failure(failure);
 }
 
 Result<void> VmSession::EndFrame() noexcept {
@@ -795,35 +848,54 @@ Result<void> VmSession::EndFrame() noexcept {
         return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    // 파괴 적용된 instance를 요청 순으로: Disable(활성이면) → Destroy hook → Detach(SL 9.1절 표).
+    // 프레임 끝 정리(SL 4.3절 — 정리 목록이 한 묶음): Disable 전부(활성이면) → Destroy 전부 →
+    // Detach 전부. 엔진이 연 진입이라 새 스크립트 단계다(이월 항목 포함). hook의 fault·예산
+    // 초과·할당 실패와 무관하게 끝까지 하고 첫 오류를 돌려준다(LC6d2 리뷰 B3).
     BeginEntry();
-    execution_.keepLogs_ = true;
+    struct Nested {
+        VmSession& session;
+        ~Nested() noexcept {
+            session.nested_ = false;
+            session.execution_.keepLogs_ = false;
+        }
+    } nested{*this};
     nested_ = true;
-    Result<void> status = Result<void>::Success();
-    for (usize at = 0; at < destroys_.Size() && status; ++at) {
-        const Request request = destroys_[at];
-        if (request.instance >= instances_.Size() || !instances_[request.instance].attached ||
-            instances_[request.instance].serial != request.serial) {
-            continue;
-        }
+    execution_.keepLogs_ = true;
+    deliveredInPhase_ = 0;
+    for (usize at = queueHead_; at < queue_.Size(); ++at) {
+        queue_[at].carried = true;
+    }
 
-        if (instances_[request.instance].enabled) {
-            status = ApplyHook(request.instance, BytecodeHookKind::Disable);
+    ErrorCode failure = ErrorCode::None;
+    auto note = [&](const Result<void>& step) noexcept {
+        if (!step && failure == ErrorCode::None) {
+            failure = step.Error();
         }
-
-        if (status) {
-            status = ApplyHook(request.instance, BytecodeHookKind::Destroy);
+    };
+    auto live = [&](const Request& request) noexcept {
+        return request.instance < instances_.Size() && instances_[request.instance].attached &&
+               instances_[request.instance].serial == request.serial;
+    };
+    for (const Request& request : destroys_) {
+        if (live(request) && instances_[request.instance].enabled) {
+            note(ApplyHook(request.instance, BytecodeHookKind::Disable));
         }
+    }
 
-        if (auto detached = Detach(request.instance); !detached && status) {
-            status = static_cast<Result<void>&&>(detached);
+    for (const Request& request : destroys_) {
+        if (live(request)) {
+            note(ApplyHook(request.instance, BytecodeHookKind::Destroy));
+        }
+    }
+
+    for (const Request& request : destroys_) {
+        if (live(request)) {
+            note(Detach(request.instance));
         }
     }
 
     destroys_.Clear();
-    nested_ = false;
-    execution_.keepLogs_ = false;
-    return status;
+    return failure == ErrorCode::None ? Result<void>::Success() : Result<void>::Failure(failure);
 }
 
 Result<void> VmSession::CloseSession() noexcept {
@@ -862,6 +934,9 @@ Result<void> VmSession::CloseSession() noexcept {
     fragmentWaits_.Clear();
     requests_.Clear();
     destroys_.Clear();
+    deliveries_.Clear(); // 모듈 포인터를 남기지 않는다(닫은 뒤 모듈을 먼저 놓아도 된다)
+    execution_.logs_.Clear();
+    execution_.logText_.Clear();
     execution_.Unwind();
     execution_.ReleaseReturned();
     return Result<void>::Success();

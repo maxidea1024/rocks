@@ -657,6 +657,11 @@ Result<void> VmSession::ResumeSuspended(uint32 chosen, uint64 wait, uint32 depth
         return Result<void>::Success(); // 앞서 재개한 조각이 취소했거나(@restart) 다시 정지했다
     }
 
+    // 파괴 적용된 instance의 실행은 재개하지 않는다(프레임 끝 정리가 취소한다 — LC6d2 리뷰 B4).
+    if (entry.instance < instances_.Size() && instances_[entry.instance].pendingDestroy) {
+        return Result<void>::Success();
+    }
+
     // 정지 뒤 frame의 모듈을 다시 링크했으면 이어 갈 수 없다: 취소한다(SL 12.4절 — 호환되지
     // 않는 reload).
     bool current = true;

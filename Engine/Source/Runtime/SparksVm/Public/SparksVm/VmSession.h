@@ -16,9 +16,9 @@
 //   auto enabled = session.RunHook(instance.Value(), BytecodeHookKind::Enable, {}, {});
 //   session.Detach(instance.Value());
 //
-// 재진입: 실행 중(handler·hook의 native 호출 안)에 host가 부를 수 있는 진입은 Emit뿐이다(항목만
-// 넣고 전달은 바깥 진입이 한다). 그 밖의 진입은 실행 중이면 InvalidArgument다(LC6b 리뷰 B4 —
-// 활성 전환·파괴의 지연 적용은 LC6d).
+// 재진입: 실행 중(handler·hook의 native 호출 안)에 host가 부를 수 있는 진입은 Emit·RequestEnabled·
+// RequestDestroy뿐이다(항목·요청만 넣고 전달·적용은 바깥 진입이 한다). 그 밖의 진입은 실행 중이면
+// InvalidArgument다(LC6b 리뷰 B4 — 활성 전환·파괴의 지연 적용은 LC6d).
 
 namespace rocks::sparks {
 
@@ -130,6 +130,7 @@ public:
 
     static constexpr uint32 MaxApplyRounds = 64;           // 적용 루프(SL 9.3절)
     static constexpr uint64 TeardownInstructions = 100000; // Disable·Destroy hook 명령 예산
+    static constexpr uint32 MaxPendingRequests = 65536;    // 요청 큐 상한(넘으면 CapacityExceeded)
 
     // 활성 전환·파괴 요청을 넣는다(실행 중에도 — host native `SetEnabled`·`Destroy`가 부른다).
     // 실패: 없는 instance·session 종료 뒤면 InvalidArgument, 할당 실패는 OutOfMemory.
@@ -147,6 +148,11 @@ public:
     // 남은(다음 단계로 넘긴) 요청 수다.
     uint32 PendingRequests() const noexcept {
         return static_cast<uint32>(requests_.Size());
+    }
+
+    // 적용 루프가 64회 안에 끝나지 않아 요청을 다음 단계로 넘긴 횟수다(보고).
+    uint64 DeferredApplies() const noexcept {
+        return deferredApplies_;
     }
 
     // ---- fault 처리·격리(SparksRuntime 2.6절 — LC6d3, SL 8.3절) ----
@@ -501,6 +507,7 @@ private:
     Array<Request> applying_;
     Array<Request> destroys_;
     bool closed_ = false;
+    uint64 deferredApplies_ = 0;
     // fault 처리(LC6d3).
     Array<FaultRecord> faults_;
     uint64 activeFrame_ = 0; // 일시 정지가 아닌 프레임 수(격리 창의 기준)

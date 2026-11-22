@@ -24,4 +24,24 @@ class Door : ScriptableComponent {
     on Peer.Moved() {
         Log.Info("peer moved");
     }
+
+    fn Shout() {
+        emit Moved();
+    }
+
+    async fn Linger() {
+        await Delay(0.1, Clock.Game);
+        Log.Info("lingered");
+    }
+}
+
+class Heavy : ScriptableComponent {
+    on Destroy() {
+        var total = 0;
+        for (index in 0..<200000) {
+            total += index;
+        }
+
+        Log.Info("unreachable ${total}");
+    }
 }

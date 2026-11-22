@@ -1014,7 +1014,11 @@ advance 0.1 -> ok
 advance 0.1 -> ok
 Pulse.Fire(#1, 1) -> ok
 fields #1 -> ok
-detach #1 -> ok
+request #1 disable -> ok
+request #1 destroy -> ok
+apply -> ok
+endframe -> ok
+close -> ok
 )";
     constexpr StringView Schema = R"({
   "format": 1, "package": "Rocks", "module": "Engine",
@@ -1070,7 +1074,8 @@ detach #1 -> ok
                 const StringView actual(failure.Data() + at + marker.ByteCount(),
                                         failure.ByteCount() - at - marker.ByteCount());
                 CHECK(actual.StartsWith("new #1 Pulse -> ok ("));
-                CHECK(actual.Contains("detach #1 -> ok", StringComparison::CaseSensitive));
+                CHECK(actual.Contains("close -> ok (ledger 0 buffers)",
+                                      StringComparison::CaseSensitive));
                 CHECK(actual.Contains("host release", StringComparison::CaseSensitive));
                 REQUIRE(expected.TryAppend(actual));
                 attempts = used;

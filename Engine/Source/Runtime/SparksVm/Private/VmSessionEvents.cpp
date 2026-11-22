@@ -623,6 +623,7 @@ Result<void> VmSession::Drain() noexcept {
                 // 한 handler에만(경로 원천 — SL 5.3절): 그 instance가 그대로 활성일 때 한 번.
                 if (targetDone || item.target >= instances_.Size() ||
                     !instances_[item.target].attached || !instances_[item.target].enabled ||
+                    instances_[item.target].pendingDestroy ||
                     instances_[item.target].serial != item.targetSerial) {
                     break;
                 }
@@ -648,8 +649,10 @@ Result<void> VmSession::Drain() noexcept {
                 uint32 waitChosen = NoBytecodeIndex;
                 for (uint32 at = 0; at < waits_.Size(); ++at) {
                     const Wait& wait = waits_[at];
+                    const bool pending = wait.instance < instances_.Size() &&
+                                         instances_[wait.instance].pendingDestroy;
                     if (wait.used && wait.kind == WaitKind::Event && !wait.done &&
-                        !wait.cancelled && wait.publisher == item.publisher &&
+                        !wait.cancelled && !pending && wait.publisher == item.publisher &&
                         wait.key == item.key && wait.afterSequence < item.sequence &&
                         wait.connectionOrder > lastOrder &&
                         (chosen == connections_.Size() ||
