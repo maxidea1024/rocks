@@ -32,6 +32,7 @@ constexpr usize EventBytes = 4 + 4;
 constexpr usize FunctionBytes =
     4 * 3 + 2 * 3 * BytecodeBankCount + 2 + BytecodeHashBytes + 4 * 4 + 2 * 2;
 constexpr usize WordBytes = 4;
+constexpr usize ClassFieldBytes = TypeFieldBytes + 1; // 형식 v4: 표지 u8
 constexpr usize SwitchBytes = 12;
 constexpr usize CaseBytes = 12;
 constexpr usize AwaitBytes = 12;
@@ -531,7 +532,7 @@ private:
             entry.initializer = reader.ReadU32LE();
         }
 
-        if (!Count(reader, TypeFieldBytes + 1, count) || !Resize(out_.classFields, count)) {
+        if (!Count(reader, ClassFieldBytes, count) || !Resize(out_.classFields, count)) {
             return Failure();
         }
 
@@ -1017,6 +1018,8 @@ private:
             function.returnBank >= BytecodeBankCount || function.returnSlots > MaxMarkerSlots ||
             (function.heldCount != 0 &&
              (function.heldFirst < function.parameters[1] ||
+              (function.returnBank == static_cast<uint8>(BytecodeBank::Ref) &&
+               function.heldFirst < function.returnSlots) ||
               uint32(function.heldFirst) + function.heldCount > function.registers[1]))) {
             return Reject(BytecodeLoadError::BadFunction);
         }
@@ -1502,6 +1505,13 @@ private:
         }
         case Opcode::Fault:
             return BytecodeLoadError::None;
+        case Opcode::Release: {
+            // 유지 자원 지역 구간 안만(LC6d1 리뷰 — 손상된 모듈이 this 등을 멈추지 못하게).
+            const BytecodeFunction& owner = module_.functions[function_];
+            return a >= owner.heldFirst && a < uint32(owner.heldFirst) + owner.heldCount
+                       ? BytecodeLoadError::None
+                       : BytecodeLoadError::BadRegister;
+        }
         default:
             break;
         }

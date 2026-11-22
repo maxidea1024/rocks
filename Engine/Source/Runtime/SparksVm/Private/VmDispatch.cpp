@@ -598,6 +598,14 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
 
             if (boundary != 0) {
                 const usize childRef = frames_[boundary].base[1];
+                // 잘라 내는 frame들의 held 지역을 위에서부터 멈춘다(Unwind와 같은 순서 — LC6d1 리뷰
+                // B1).
+                for (usize index = frames_.Size(); index > boundary; --index) {
+                    const Frame& cut = frames_[index - 1];
+                    ReleaseHeld(*cut.link, cut.function, refs_.Data() + cut.base[1],
+                                refs_.Size() - cut.base[1]);
+                }
+
                 ReleaseRange(frames_[boundary].base[2], buffers_.Size());
                 static_cast<void>(frames_.TryResize(boundary));
                 pc = frames_[frames_.Size() - 1].pc;

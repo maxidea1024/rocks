@@ -46,4 +46,39 @@ class Speaker : ScriptableComponent {
             count += 1;
         }
     }
+
+    fn Check(text: string): Result<string> {
+        if (text == "") {
+            return Error.InvalidArgument;
+        }
+
+        return text;
+    }
+
+    async fn Arm() {
+        let held = World.Audio.StartLoop(Cue);
+        let value = try Check("");
+        await NextTick();
+        held?.Pause();
+        Log.Info(value);
+    }
+
+    async fn Armed() {
+        await All(Arm(), NextTick());
+        Log.Info("armed");
+    }
+}
+
+class Guard : ScriptableComponent {
+    @edit var Cue: SoundAsset;
+    var Hum: LoopHandle?;
+
+    on Enable() {
+        Hum = World.Audio.StartLoop(Cue);
+    }
+
+    on Disable() {
+        Hum?.Pause();
+        Assert(false, "disable fails");
+    }
 }

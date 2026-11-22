@@ -988,6 +988,18 @@ TEST(SparksConformance_RunGoldenAllocationFailureAsync) {
     async fn Never() {
         await Race(Child(), Delay(9.0, Clock.Game));
     }
+
+    var Hum: Loop?;
+
+    fn Swap() {
+        Hum = Owner.StartLoop();
+    }
+
+    async fn Hold() {
+        let held = Owner.StartLoop();
+        await NextTick();
+        held?.Stop();
+    }
 }
 )";
     constexpr StringView Golden = R"(new #1 Pulse -> ok
@@ -995,6 +1007,9 @@ hook #1 Enable -> ok
 Pulse.Work(#1) -> ok
 Pulse.Fails(#1) -> ok
 Pulse.Never(#1) -> ok
+Pulse.Swap(#1) -> ok
+Pulse.Swap(#1) -> ok
+Pulse.Hold(#1) -> ok
 advance 0.1 -> ok
 advance 0.1 -> ok
 Pulse.Fire(#1, 1) -> ok
@@ -1004,7 +1019,11 @@ detach #1 -> ok
     constexpr StringView Schema = R"({
   "format": 1, "package": "Rocks", "module": "Engine",
   "types": [
-    {"name": "Actor", "id": "5a7e0000000000000000000000000001", "kind": "object"},
+    {"name": "Loop", "id": "5a7e0000000000000000000000000300", "kind": "object", "held": true,
+     "functions": [{"name": "Stop", "id": "5a7e0000000000000000000000000302"}]},
+    {"name": "Actor", "id": "5a7e0000000000000000000000000001", "kind": "object",
+     "functions": [{"name": "StartLoop", "id": "5a7e0000000000000000000000000301",
+                    "returns": "Loop?", "effects": ["acquire"]}]},
     {"name": "Component", "id": "5a7e0000000000000000000000000005", "kind": "object",
      "fields": [{"name": "Owner", "id": "5a7e0000000000000000000000000131", "type": "Actor"}]},
     {"name": "ScriptableComponent", "id": "5a7e0000000000000000000000000007", "kind": "object",
@@ -1051,7 +1070,8 @@ detach #1 -> ok
                 const StringView actual(failure.Data() + at + marker.ByteCount(),
                                         failure.ByteCount() - at - marker.ByteCount());
                 CHECK(actual.StartsWith("new #1 Pulse -> ok ("));
-                CHECK(actual.EndsWith("detach #1 -> ok\n"));
+                CHECK(actual.Contains("detach #1 -> ok", StringComparison::CaseSensitive));
+                CHECK(actual.Contains("host release", StringComparison::CaseSensitive));
                 REQUIRE(expected.TryAppend(actual));
                 attempts = used;
             } else if (!ran) {

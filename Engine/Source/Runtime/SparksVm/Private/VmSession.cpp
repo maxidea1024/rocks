@@ -329,11 +329,19 @@ Result<VmCallResult> VmSession::RunHook(uint32 instance, BytecodeHookKind kind,
                        kind == BytecodeHookKind::Disable || kind == BytecodeHookKind::Destroy;
     struct KeepLogs {
         VmSession& session;
+        uint32 instance;
+        bool disable;
         ~KeepLogs() noexcept {
+            // 비활성화: Disable hook이 끝난 뒤(fault·ENDEXEC·예산·할당 실패여도) 유지 자원 필드를
+            // 멈춘다(SL 9.2절 — LC6d1 리뷰 B3).
+            if (disable) {
+                session.ReleaseHeldFields(instance);
+            }
+
             session.execution_.keepLogs_ = false;
             session.suppressChanged_ = false;
         }
-    } keepLogs{*this};
+    } keepLogs{*this, instance, kind == BytecodeHookKind::Disable};
     if (kind == BytecodeHookKind::Disable) {
         CancelExecutions(instance, false); // 정지 실행 취소(SL 6.1절)
         instances_[instance].enabled = false;
@@ -399,11 +407,6 @@ Result<VmCallResult> VmSession::RunHook(uint32 instance, BytecodeHookKind kind,
 
     if (auto ended = EndFragment(); !ended) {
         return Result<VmCallResult>::Failure(ended.Error());
-    }
-
-    // 비활성화: Disable hook이 반환한 뒤 유지 자원 필드를 멈춘다(SL 9.2절 — null로 둔다).
-    if (kind == BytecodeHookKind::Disable) {
-        ReleaseHeldFields(instance);
     }
 
     suppressChanged_ = false;
