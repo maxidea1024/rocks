@@ -111,14 +111,17 @@ public:
 
     // ---- async(SparksRuntime 2.4절 — LC6c) ----
 
-    // 시계를 진행하고(프레임 +1) 가변 재개 단계를 돈다: 기한이 된 Delay·NextTick 대기의 실행을
-    // (등록 프레임, instance, 등록 순번) 순으로 재개한다. 재개된 실행은 Deliveries에 resumed로
-    // 남는다.
+    // 시계를 진행하고(프레임 +1) 가변 재개 단계(새 스크립트 단계 — 이월 항목 전달 포함)를 돈다:
+    // 단계 시작 때 기한이 된 Delay·NextTick 대기의 실행을 (등록 프레임, instance 생성 번호, 등록
+    // 순번) 순으로 재개한다. 재개된 실행은 Deliveries에 resumed로 남는다. 실패: 실행 중이거나
+    // delta가 유한한 0 이상이 아니면 InvalidArgument, 할당 실패는 OutOfMemory.
     Result<void> Advance(double gameDelta, double uiDelta) noexcept;
-    // 고정 재개 단계(NextFixedTick)를 돈다.
+    // 고정 재개 단계(NextFixedTick — 새 스크립트 단계)를 돈다.
     Result<void> FixedStep() noexcept;
     // 정지해 있는 실행 수다.
     uint32 SuspendedCount() const noexcept;
+    // 대기 표의 살아 있는 항목 수다(재개·취소된 대기는 돌려받는다 — 장시간 반복에도 일정).
+    uint32 WaitCount() const noexcept;
     // `@skipWhileBusy`로 버린 이벤트 수다(디버거 표시 — SL 6.1절 SD11).
     uint64 SkippedWhileBusy() const noexcept {
         return skippedWhileBusy_;
@@ -146,10 +149,12 @@ private:
     // 정지한 실행이다(R9 — frame stack 전체).
     struct Suspended {
         explicit Suspended(Allocator& allocator) noexcept
-            : frames(allocator), scalars(allocator), refs(allocator), buffers(allocator) {
+            : frames(allocator), generations(allocator), scalars(allocator), refs(allocator),
+              buffers(allocator) {
         }
 
         Array<VmExecution::Frame> frames;
+        Array<uint64> generations; // frame 모듈의 링크 세대(다시 링크했으면 재개하지 않고 취소)
         Array<uint64> scalars;
         Array<uint64> refs;
         Array<VmBuffer*> buffers;
@@ -158,7 +163,9 @@ private:
         uint32 resultSlots = 0;
         uint64 wait = 0;
         uint32 instance = NoBytecodeIndex;
+        uint64 serial = 0; // instance 생성 번호(재개 순서 key — 번호 재사용에 안정)
         uint64 order = 0;
+        RandomStream random{0}; // 실행의 Random stream(재개가 이어 쓴다 — SL 6.3절)
         // 이벤트 handler로 시작된 실행이면 그 발행자·handler(재진입 판정 — SD11).
         uint64 publisher = 0;
         const VmLinkedModule* handlerModule = nullptr;
@@ -174,21 +181,25 @@ private:
         Race
     };
 
-    // 대기 하나다(handle = VmWaitTag | 번호).
+    // 대기 하나다(handle = VmWaitTag | 세대 << 32 | 번호 — 돌려받은 번호의 옛 handle은 무효).
+    // All·Race의 자식은 firstChild·nextSibling 목록이다(인자 순).
     struct Wait {
         WaitKind kind = WaitKind::NextTick;
         uint8 clock = 0; // 0 Game, 1 UI
         double deadline = 0.0;
         uint64 frame = 0;     // 등록 프레임
         uint64 fixedStep = 0; // 등록 고정 step
-        uint32 firstChild = 0;
-        uint32 childCount = 0;
+        uint32 firstChild = NoBytecodeIndex;
+        uint32 nextSibling = NoBytecodeIndex;
         uint32 parent = NoBytecodeIndex;
         uint32 suspension = NoBytecodeIndex; // 이 대기를 기다리는 정지 실행
         uint32 instance = NoBytecodeIndex;
         uint64 order = 0;
+        uint32 generation = 0;
+        bool used = false;
         bool done = false;
         bool cancelled = false;
+        bool awaited = false; // AWAIT가 한 번 기다렸다(다시 기다릴 수 없다)
     };
 
     // AWAIT(실행 중)이 부른다: 실행 문맥의 frame·레지스터를 옮겨 정지 실행을 만든다.
@@ -197,12 +208,22 @@ private:
     // 대기를 만든다(언어 함수 — 실패는 0과 error).
     uint64 NewWait(WaitKind kind, uint8 clock, double seconds, Span<const uint64> children,
                    ErrorCode& error) noexcept;
-    // 완료된 대기의 정지 실행을 순서대로 재개한다.
+    // 단계 시작 때 완료된 대기의 정지 실행을 순서대로 재개한다.
     Result<void> ResumeDone() noexcept;
-    // 대기 done 전파(All·Race)와 Race의 나머지 취소.
+    // 대기 done 전파(All·Race)와 Race의 나머지 취소(반복 — 깊이 제한 없음).
     void CompleteWait(uint32 wait) noexcept;
-    // instance의 정지 실행을 취소한다(Disable·Detach — SL 6.1절).
-    void CancelExecutions(uint32 instance) noexcept;
+    // handle을 번호로 푼다(표지·범위·세대가 맞지 않으면 false).
+    bool DecodeWait(uint64 handle, uint32& index) const noexcept;
+    // 대기와 그 하위 묶음을 돌려받는다 / 취소 표시한다.
+    void FreeWaitTree(uint32 root) noexcept;
+    void CancelWaitTree(uint32 root) noexcept;
+    uint32 WaitRoot(uint32 index) const noexcept;
+    // 실행 하나(Call·Continue)가 끝난 뒤: 이 조각이 만든 대기 중 정지 실행이 기다리지 않는 것을
+    // 돌려받는다(기다리지 않은 대기 — 언어는 바로 기다린다, 손상·fault 대비).
+    void SettleWaits(const Result<VmCallResult>& called) noexcept;
+    // instance의 정지 실행을 취소한다(Disable·Detach — SL 6.1절). frames면 그 instance를 this로
+    // 쓰는 frame이 있는 실행도 취소한다(Detach — 다른 instance의 async 메서드 안에서 정지한 실행).
+    void CancelExecutions(uint32 instance, bool frames) noexcept;
     // 정지 실행 하나를 취소한다(대기를 끝내고 frame의 Buf를 놓는다).
     void CancelSuspended(uint32 suspended) noexcept;
     // 같은 발행자로 시작된 handler 실행이 정지해 있으면 그 번호(없으면 NoBytecodeIndex).
@@ -346,7 +367,9 @@ private:
     // async(LC6c).
     Array<Suspended> suspended_;
     Array<Wait> waits_;
-    Array<uint32> waitChildren_;
+    Array<uint32> freeWaits_;     // 돌려받은 대기 번호
+    Array<uint64> fragmentWaits_; // 실행 중인 조각이 만든 대기 handle
+    Array<uint32> resumeOrder_;   // 재개 단계의 순서(임시)
     double gameTime_ = 0.0;
     double uiTime_ = 0.0;
     uint64 frame_ = 0;

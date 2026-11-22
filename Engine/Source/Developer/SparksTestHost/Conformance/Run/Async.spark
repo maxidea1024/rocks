@@ -49,6 +49,60 @@ class Timer : ScriptableComponent {
     fn Fire(n: int) {
         emit Go(n);
     }
+
+    async fn Value(): int {
+        let v = await Late();
+        Log.Info("late ${v}");
+        return v + 1;
+    }
+
+    async fn Nested() {
+        await Race(All(Delay(3600.0, Clock.Game), NextTick()), NextTick());
+        Log.Info("nested");
+    }
+
+    async fn Clocks() {
+        await Race(Delay(1.0, Clock.UI), Delay(1.0, Clock.Game));
+        Log.Info("clocks");
+    }
+
+    async fn Negative() {
+        await Delay(-1.0, Clock.Game);
+        Log.Info("negative");
+    }
+
+    async fn Loop() {
+        while (true) {
+            await NextTick();
+            Ticks += 1;
+        }
+    }
+
+    async fn Emitting() {
+        await NextTick();
+        emit Go(7);
+    }
+
+    async fn Holding() {
+        let text = "held ${Ticks}";
+        await NextTick();
+        Log.Info(text);
+    }
+
+    async fn Faulting() {
+        await NextTick();
+        Assert(false, "after await");
+    }
+
+    async fn Child() {
+        await NextTick();
+        Log.Info("child");
+    }
+
+    async fn Group() {
+        await All(Child(), NextTick());
+        Log.Info("group");
+    }
 }
 
 class Waiter : ScriptableComponent {
@@ -83,3 +137,17 @@ class Restarter : ScriptableComponent {
     }
 }
 
+class Crowd : ScriptableComponent {
+    var Sources: Array<Timer> = [];
+
+    fn Join(source: Timer) {
+        Sources.Add(source);
+    }
+
+    @skipWhileBusy
+    on Sources.Go(source: Timer, n: int) {
+        let ticks = source.Ticks;
+        await Delay(0.25, Clock.Game);
+        Log.Info("crowd ${n} ${ticks}");
+    }
+}

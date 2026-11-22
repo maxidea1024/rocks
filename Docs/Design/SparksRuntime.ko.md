@@ -3,6 +3,7 @@
 이 문서는 Sparks 언어 코어의 LC6(실행 모델)을 정한다. 언어 의미는 SparksLanguage(SL) §4.3·§5·§6·§7·§8.3·§9가 정본이고, 이 문서는 그 의미를 VM 쪽에서 어떻게 실현하는지(자료 구조·순서·host interface 2차·bytecode 형식 v3·시험)를 정한다. LC5(SparksVm.ko.md)의 링크·host interface 1차 위에 쌓는다.
 
 - 개정 1(2026-11-22): 첫 판. 하위 단계 LC6a–LC6e, 결정 R1–R12.
+- 개정 4(2026-11-22): LC6c1 리뷰 반영 — 대기 번호 재사용(세대 handle)·조각 끝 정리, 재링크 뒤 재개 취소, 한 번만 기다림, 단계 시작 스냅샷 재개 순서(instance 생성 번호), 하위 묶음 취소 전파, Random 보존, Advance·FixedStep을 새 스크립트 단계로, Detach가 this frame 실행도 취소, async 함수를 대기 값으로 쓰는 호출의 임시 처리(2.4절 "LC6c1 리뷰 반영").
 - 개정 3(2026-11-22): LC6b 리뷰 반영 — Changed 자리를 첫 쓰기에서 확보(순서·fault), 비활성 instance 미발행, 경로 원천 변경 시 1회 전달, 다른 모듈 기반의 원천 대조를 key로, 진입마다 루트 초기화, 실행 중 재진입 계약, Detach의 쓰기 기록 정리(2.3절 "LC6b 리뷰 반영").
 - 개정 2(2026-11-22): LC6c를 LC6c1(정지·기본 대기·All/Race·시계·재개 순서·취소·재진입 — 구현)과 LC6c2(이벤트 대기·async 함수 호출의 대기 값·`paused`·Start 준비 대기)로 나눔. `await F()` 직접 호출 lowering, `.run` `advance`·`fixed`, 재개 전 실행 문맥 비우기(2.4절).
 
@@ -83,6 +84,15 @@
   - **재진입:** 정지 실행은 시작한 handler(모듈·handler 번호)와 발행자를 기억한다. 전달할 때 같은 (구독 instance, handler, 발행자)의 정지 실행이 있으면 `@skipWhileBusy`는 전달을 버리고 횟수를 세며, `@restart`는 그 실행을 취소하고 새로 시작한다.
   - **`await F()`(async 함수):** 컴파일러가 호출 결과를 대기 handle이 아니라 반환 값으로 내리고 `AWAIT`를 두지 않는다(`await a?.F()`도 같다). 이전 lowering은 호출 결과를 Ref 대기로 읽어 반환 값과 bank가 어긋났다(Codegen `Flow`·`Review` golden 갱신).
   - **세션 밖:** `AWAIT`와 대기 언어 함수는 session 밖 실행에서 ContractViolation이다(컴파일된 코드는 async 함수·handler만 기다리고 이들은 session으로 부른다 — 안전장치).
+- **LC6c1 리뷰 반영(개정 4):**
+  - **대기 표 재사용:** handle은 `VmWaitTag | 세대 << 32 | 번호`다. 재개(기다린 대기와 그 하위 묶음)·취소에서 번호를 돌려받고 세대를 올린다(옛 handle은 무효). 조각(Call·Continue 하나)이 끝나면 그 조각이 만든 대기 중 정지 실행이 기다리지 않는 묶음을 돌려받는다(언어는 대기를 바로 기다리거나 묶음에 넣는다 — fault·손상 대비). `while (true) { await NextTick(); }`는 대기 표를 1개로 유지한다(`stats` golden). 자식 목록은 firstChild·nextSibling이고 돌려받기·취소 전파·완료 전파는 재귀 없는 반복이다(깊은 묶음 사슬에도 stack 고정).
+  - **한 번만 기다림:** 대기는 `awaited` 표지를 두어 동시·순차 모두 두 번 기다릴 수 없다(ContractViolation). 묶음 인자는 살아 있고, 끝나거나 취소되지 않았고, 기다린 적 없고, 다른 묶음의 인자가 아니어야 한다(중복 인자 포함 — 언어가 막는다, 안전장치).
+  - **재개 단계:** 단계 시작 때 끝난 대기의 정지 실행을 모아 (등록 프레임, instance 생성 번호, 등록 순번)으로 정렬한 뒤 차례로 재개한다. 재개된 조각이 이미 끝난 대기를 기다리면 다음 단계에 재개한다(같은 단계에서 다시 고르지 않는다 — 끝나지 않는 반복 방지). `Advance`·`FixedStep`은 새 스크립트 단계다(단계 전달 수 초기화·이월 항목 전달·끝에 큐 비우기). delta는 유한한 0 이상이어야 한다(아니면 `InvalidArgument` — `.run` `advance -1 -> invalid`). `.run` `advance <Game 초> [<UI 초>]`로 두 시계를 따로 진행한다.
+  - **재링크:** 정지 실행은 frame마다 모듈의 링크 세대를 보관하고, 재개 전에 링크·import 링크·세대가 그대로가 아니면 재개하지 않고 취소한다(SL §12.4 호환되지 않는 reload와 같은 처리 — 옛 pc·함수 번호로 새 모듈을 읽지 않는다).
+  - **Random:** 정지 실행이 실행 문맥의 Random stream을 보관하고 재개가 이어 쓴다(다른 실행의 stream을 잇지 않는다 — SL §6.3).
+  - **취소 범위:** Disable은 그 instance가 시작한 실행, Detach는 그에 더해 그 instance를 this(frame Ref 0번)로 쓰는 frame이 있는 실행(다른 instance가 부른 이 instance의 async 메서드 안의 정지)도 취소한다. Race가 진 자식과 그 하위 묶음은 취소 표시하고 묶음과 함께 돌려받는다.
+  - **async 함수를 대기 값으로(`All(F(), G())`):** 하위 실행은 LC6c2다. 그때까지 컴파일러는 함수를 부르고 대기 자리를 null로 둔다 — 묶음이 ContractViolation으로 확정적으로 멈춘다(반환 창에 남은 값을 대기로 읽지 않는다, `Run/Async` `Group`).
+  - **남은 것(LC6c2·LC6d):** 정지 실행의 frame·레지스터 사본과 대기 표를 실행 메모리 예산·ledger에 넣기(LC6d), schema `overridable` async 엔진 함수가 Sparks override로 풀릴 때의 계약(연동 단계), 정지 실행 찾기(`FindBusy`·취소)의 선형 탐색(측정 뒤 색인), `VmCallResult::suspension` 번호는 재개·취소 뒤 다시 쓰인다(host가 보관하지 않는다).
 
 ## 3. 순서
 

@@ -22,7 +22,7 @@ VmSession::VmSession(Allocator& allocator, VmHost* host) noexcept
       instances_(allocator), byHandle_(allocator), connections_(allocator), queue_(allocator),
       itemValues_(allocator), itemBuffers_(allocator), writes_(allocator), writeValues_(allocator),
       writeBuffers_(allocator), deliveries_(allocator), suspended_(allocator), waits_(allocator),
-      waitChildren_(allocator) {
+      freeWaits_(allocator), fragmentWaits_(allocator), resumeOrder_(allocator) {
     execution_.session_ = this;
 }
 
@@ -39,7 +39,9 @@ VmSession::~VmSession() noexcept {
     writes_.Clear();
     writeBuffers_.Clear();
     for (Suspended& entry : suspended_) {
-        ReleaseSuspended(entry);
+        if (entry.live) {
+            ReleaseSuspended(entry);
+        }
     }
 
     DetachAll();
@@ -325,7 +327,7 @@ Result<VmCallResult> VmSession::RunHook(uint32 instance, BytecodeHookKind kind,
         }
     } keepLogs{*this};
     if (kind == BytecodeHookKind::Disable) {
-        CancelExecutions(instance); // 정지 실행 취소(SL 6.1절)
+        CancelExecutions(instance, false); // 정지 실행 취소(SL 6.1절)
         instances_[instance].enabled = false;
         for (Connection& connection : connections_) {
             connection.active = connection.subscriber == instance ? false : connection.active;
@@ -355,6 +357,7 @@ Result<VmCallResult> VmSession::RunHook(uint32 instance, BytecodeHookKind kind,
                 execution_.Call(*chainModules[at - 1], bytecode.hooks[hook].function, scalars,
                                 Span<const uint64>(refArguments, refs.Size() + 1), buffers);
             currentInstance_ = NoBytecodeIndex;
+            SettleWaits(called);
             if (!called) {
                 return called;
             }
@@ -429,6 +432,7 @@ Result<VmCallResult> VmSession::Call(uint32 instance, const VmLinkedModule& modu
     auto called = execution_.Call(module, function, scalars,
                                   Span<const uint64>(refArguments, refs.Size() + 1), buffers);
     currentInstance_ = NoBytecodeIndex;
+    SettleWaits(called);
     if (!called) {
         return called;
     }
@@ -479,7 +483,7 @@ Result<void> VmSession::Detach(uint32 instance) noexcept {
     }
 
     Disconnect(instance);
-    CancelExecutions(instance);
+    CancelExecutions(instance, true);
     DropWrites(instance); // 번호 재사용 뒤 남은 기록이 새 instance에 닿지 않게(LC6b 리뷰 B3)
     Instance& entry = instances_[instance];
     ReleaseFields(entry);

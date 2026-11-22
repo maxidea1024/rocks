@@ -702,6 +702,7 @@ Result<void> VmSession::Drain() noexcept {
                 Span<const uint64>(refs, refCount),
                 Span<VmBuffer* const>(itemBuffers_.Data() + item.firstBuffer, bufferCount));
             currentInstance_ = outerInstance;
+            SettleWaits(called);
             currentPublisher_ = 0;
             currentHandlerModule_ = nullptr;
             currentHandler_ = NoBytecodeIndex;

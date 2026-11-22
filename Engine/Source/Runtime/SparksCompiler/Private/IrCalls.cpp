@@ -345,7 +345,18 @@ uint32 IrBuilder::EmitCall(uint32 node, uint32 callee, uint32 receiver,
                       !(node == directAwaitCall_ && IsDirectAwaitCallee(callee));
     const uint32 result = wait ? NewWait() : NewValue(type);
     const uint32 operands = AddOperands(values.View());
-    Add(IrOp::Call, result, operands, static_cast<uint32>(values.Size()), callee, node, sub);
+    // Sparks async 함수를 대기 값으로 쓰는 호출(`All(F(), G())` — 하위 실행은 LC6c2): 지금은 함수를
+    // 부르고 대기 자리를 null로 둔다(묶음·AWAIT가 ContractViolation으로 확정적으로 멈춘다 — 반환
+    // 창의 남은 값을 대기로 읽지 않게, LC6c1 리뷰 S4).
+    if (wait && IsDirectAwaitCallee(callee)) {
+        const uint32 returns = c_.signatures_[signature].returnType;
+        const uint32 discarded = NewValue(returns == NoType ? checker_.voidType_ : returns);
+        Add(IrOp::Call, discarded, operands, static_cast<uint32>(values.Size()), callee, node, sub);
+        LoadNone(result, node);
+    } else {
+        Add(IrOp::Call, result, operands, static_cast<uint32>(values.Size()), callee, node, sub);
+    }
+
     // 명시한 타입 인자(`Find<Lamp>()`·`LoadAll<T>(...)`)는 호출의 타입 인자 목록으로 둔다(실행 중
     // native 호출이 받는다).
     const uint32 calleeNode = tree_->Child(node, 0);

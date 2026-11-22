@@ -1144,7 +1144,7 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
         if (line.StartsWith("new ") || line.StartsWith("hook ") || line.StartsWith("fields ") ||
             line.StartsWith("detach ") || line.StartsWith("emit ") || line == "phase" ||
             line.StartsWith("phase ") || line.StartsWith("advance ") || line == "fixed" ||
-            line.StartsWith("fixed ")) {
+            line.StartsWith("fixed ") || line == "stats" || line.StartsWith("stats ")) {
             usize arrowAt = line.ByteCount();
             for (usize index = 0; index + RunArrow.ByteCount() <= line.ByteCount(); ++index) {
                 if (StringView(line.Data() + index, RunArrow.ByteCount()) == RunArrow) {
@@ -1203,19 +1203,32 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
 
                 actual.AppendFormat("ok ({} queued)", session.QueuedCount());
                 delivered = true;
+            } else if (verb == "stats") {
+                // session의 async 상태(SparksRuntime 2.4절): 대기 표 항목·정지 실행·skip 수.
+                actual.Append(directive).Append(RunArrow);
+                actual.AppendFormat("waits {}, suspended {}, skipped {}", session.WaitCount(),
+                                    session.SuspendedCount(), session.SkippedWhileBusy());
             } else if (verb == "advance" || verb == "fixed") {
-                // 시계 진행(SparksRuntime 2.4절 — LC6c): `advance <초>`는 Game·UI 시계를 같이
-                // 진행하고 가변 재개 단계를, `fixed`는 고정 재개 단계를 돈다. 재개된 실행은
-                // `  resume` 줄이다.
+                // 시계 진행(SparksRuntime 2.4절 — LC6c): `advance <Game 초> [<UI 초>]`는 시계를
+                // 진행하고(UI를 빼면 Game과 같다) 가변 재개 단계를, `fixed`는 고정 재개 단계를
+                // 돈다. 재개된 실행은 `  resume` 줄이다.
                 actual.Append(directive).Append(RunArrow);
                 Result<void> stepped = Result<void>::Success();
                 if (verb == "advance") {
                     auto seconds = TryParseDouble(target);
-                    if (!seconds) {
+                    auto ui = TryParseDouble(rest.IsEmpty() ? target : rest);
+                    if (!seconds || !ui) {
                         return bad("'advance' needs seconds");
                     }
 
-                    stepped = session.Advance(seconds.Value(), seconds.Value());
+                    stepped = session.Advance(seconds.Value(), ui.Value());
+                    if (!stepped && stepped.Error() == ErrorCode::InvalidArgument) {
+                        actual.Append("invalid");
+                        stepped = Result<void>::Success();
+                        delivered = true;
+                        actual.Append("\n");
+                        continue;
+                    }
                 } else {
                     stepped = session.FixedStep();
                 }

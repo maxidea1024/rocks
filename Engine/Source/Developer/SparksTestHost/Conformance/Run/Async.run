@@ -91,3 +91,84 @@ advance 2 -> ok (0 suspended)
 detach #1 -> ok
 detach #3 -> ok
 detach #4 -> ok
+stats -> waits 0, suspended 0, skipped 1
+new #5 Timer -> ok (5 steps)
+hook #5 Enable -> ok (0 steps)
+new #6 Timer -> ok (5 steps)
+hook #6 Enable -> ok (0 steps)
+Timer.Value(#5) -> suspended (9 steps)
+advance 0 -> ok (0 suspended)
+  resume #5 Timer.Value -> ok (15 steps)
+  log info "late 0"
+stats -> waits 0, suspended 0, skipped 1
+Timer.Nested(#5) -> suspended (19 steps)
+stats -> waits 5, suspended 1, skipped 1
+advance 0.1 -> ok (0 suspended)
+  resume #5 Timer.Nested -> ok (4 steps)
+  log info "nested"
+stats -> waits 0, suspended 0, skipped 1
+Timer.Clocks(#5) -> suspended (17 steps)
+advance 0.5 2.0 -> ok (0 suspended)
+  resume #5 Timer.Clocks -> ok (4 steps)
+  log info "clocks"
+Timer.Negative(#5) -> suspended (7 steps)
+advance 0 -> ok (0 suspended)
+  resume #5 Timer.Negative -> ok (4 steps)
+  log info "negative"
+Timer.Loop(#6) -> suspended (5 steps)
+advance 0.1 -> ok (1 suspended)
+  resume #6 Timer.Loop -> suspended (11 steps)
+advance 0.1 -> ok (1 suspended)
+  resume #6 Timer.Loop -> suspended (11 steps)
+advance 0.1 -> ok (1 suspended)
+  resume #6 Timer.Loop -> suspended (11 steps)
+advance 0.1 -> ok (1 suspended)
+  resume #6 Timer.Loop -> suspended (11 steps)
+stats -> waits 1, suspended 1, skipped 1
+fields #6 -> Timer(Trail: "", Ticks: 4)
+new #7 Crowd -> ok (3 steps)
+hook #7 Enable -> ok (0 steps)
+Crowd.Join(#7, #5) -> void (9 steps)
+Crowd.Join(#7, #6) -> void (9 steps)
+Timer.Fire(#5, 1) -> void (4 steps)
+  deliver #7 Crowd.on Sources.Go -> suspended (8 steps)
+Timer.Fire(#6, 2) -> void (4 steps)
+  deliver #7 Crowd.on Sources.Go -> suspended (8 steps)
+Timer.Fire(#5, 3) -> void (4 steps)
+stats -> waits 3, suspended 3, skipped 2
+advance 0.25 -> ok (1 suspended)
+  resume #6 Timer.Loop -> suspended (11 steps)
+  resume #7 Crowd.on Sources.Go -> ok (12 steps)
+  resume #7 Crowd.on Sources.Go -> ok (12 steps)
+  log info "crowd 1 0"
+  log info "crowd 2 4"
+Timer.Emitting(#5) -> suspended (3 steps)
+advance 0.1 -> ok (2 suspended)
+  resume #5 Timer.Emitting -> ok (5 steps)
+  deliver #7 Crowd.on Sources.Go -> suspended (8 steps)
+  resume #6 Timer.Loop -> suspended (11 steps)
+advance 0.25 -> ok (1 suspended)
+  resume #6 Timer.Loop -> suspended (11 steps)
+  resume #7 Crowd.on Sources.Go -> ok (12 steps)
+  log info "crowd 7 0"
+Timer.Holding(#5) -> suspended (9 steps)
+advance 0.1 -> ok (1 suspended)
+  resume #5 Timer.Holding -> ok (3 steps)
+  resume #6 Timer.Loop -> suspended (11 steps)
+  log info "held 0"
+Timer.Faulting(#5) -> suspended (3 steps)
+advance 0.1 -> ok (1 suspended)
+  resume #5 Timer.Faulting -> fault AssertFailed at 94:9 (5 steps)
+  resume #6 Timer.Loop -> suspended (11 steps)
+  log error "after await"
+Timer.Group(#5) -> suspended (5 steps)
+advance 0.1 -> ok (1 suspended)
+  resume #5 Timer.Group -> fault ContractViolation at 103:15 (10 steps)
+  resume #6 Timer.Loop -> suspended (11 steps)
+  log info "child"
+advance -1 -> invalid
+detach #6 -> ok
+stats -> waits 0, suspended 0, skipped 2
+detach #5 -> ok
+detach #7 -> ok
+stats -> waits 0, suspended 0, skipped 2
