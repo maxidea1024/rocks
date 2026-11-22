@@ -44,6 +44,22 @@ FileStatus FileSystem::SyncDirectory(const char*, usize) noexcept {
     return {FileCode::Unsupported, 0};
 }
 
+FileStatus FileSystem::DirectoryExists(const char* path, usize pathBytes, bool& exists) noexcept {
+    FileInfo info;
+    const FileStatus status = Stat(path, pathBytes, info);
+    if (status.code == FileCode::NotFound) {
+        exists = false;
+        return {};
+    }
+
+    if (!status) {
+        return status;
+    }
+
+    exists = info.type == FileType::Directory;
+    return {};
+}
+
 FileStatus FileSystem::Copy(const char*, usize, const char*, usize, bool) noexcept {
     return {FileCode::Unsupported, 0};
 }

@@ -1,6 +1,7 @@
 #include <Core/Math/MathUtility.h>
 #include <Core/Text/NumberText.h>
 #include <Core/Text/StringBuilder.h>
+#include <Platform/Clock.h>
 #include <Platform/Memory.h>
 #include <SparksCompiler/Compilation.h>
 #include <SparksCompiler/Symbols.h>
@@ -1078,7 +1079,8 @@ bool SnapshotSession(const VmSession& session, Array<uint64>& out) noexcept {
         }
     }
 
-    return ok;
+    // 연결 내용·session 모듈·쓰기 bit·순번·Tick 중지(LC7c 리뷰 4 — 수만 같은 잘못된 복원도 잡는다).
+    return ok && session.AppendGateState(out);
 }
 
 // G5가 주입하는 reload 적용 수 상한이다(적용 표시 bit 수 — 넘는 적용은 행렬에서 빠진다).
@@ -1229,7 +1231,15 @@ Result<bool> CompileFolderRevision(Allocator& allocator, const CaseInput& input,
                                    const CaseRevision& source, FakeHost& host,
                                    const Compilation& before, Span<const RunCode> codes,
                                    RunFolderRevision& revision, Array<VmReloadModule>& pairs,
-                                   Array<RunCode>& next, StringBuilderBase& why) noexcept {
+                                   Array<RunCode>& next, StringBuilderBase& why,
+                                   RunTimings& spent) noexcept {
+    uint64 mark = platform::MonotonicNanoseconds();
+    // 단계 시간을 spent의 칸에 더하고 다음 단계를 시작한다(LC7c3 측정).
+    auto lap = [&](uint64& slot) noexcept {
+        const uint64 now = platform::MonotonicNanoseconds();
+        slot += now - mark;
+        mark = now;
+    };
     auto refuse = [&](StringView text) noexcept -> Result<bool> {
         if (auto appended = why.TryAppendFormat("revision '{}' {}", source.version, text);
             !appended) {
@@ -1294,6 +1304,7 @@ Result<bool> CompileFolderRevision(Allocator& allocator, const CaseInput& input,
         return refuse("has diagnostics or another module list");
     }
 
+    lap(spent.compile);
     // 새 compilation 모듈을 실행 단위(모듈 경로)로 맞춘다.
     if (!next.TryAppend(codes)) {
         return Result<bool>::Failure(ErrorCode::OutOfMemory);
@@ -1374,6 +1385,7 @@ Result<bool> CompileFolderRevision(Allocator& allocator, const CaseInput& input,
         }
     }
 
+    lap(spent.bundle);
     // 묶음 모듈의 새 revision: `.sparkc` 왕복 → 링크 → import(묶음 밖은 지금 모듈).
     Array<VmLinkedModule*> fresh(allocator);
     Array<const VmLinkedModule*> targets(allocator);
@@ -1445,6 +1457,7 @@ Result<bool> CompileFolderRevision(Allocator& allocator, const CaseInput& input,
         return refuse("imports were not linked");
     }
 
+    lap(spent.link);
     return Result<bool>::Success(true);
 }
 
@@ -1847,6 +1860,8 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
                 // LC7c2b의 묶음).
                 Array<VmReloadModule> pairs(allocator);
                 Array<RunCode> next(allocator);
+                RunTimings spent; // 이 reload의 단계 시간(적용되면 input.timings에 더한다)
+                const uint64 started = platform::MonotonicNanoseconds();
                 const Compilation* nextCompilation = nullptr;
                 StringBuilder<MessageInlineBytes> why(allocator);
                 if (!input.folder) {
@@ -1875,6 +1890,7 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
 
                     RunRevision& revision = *revisions[revisions.Size() - 1];
                     auto compiled = CompileRevision(allocator, input, *source, host, revision, why);
+                    spent.compile += platform::MonotonicNanoseconds() - started;
                     if (!compiled) {
                         return Result<void>::Failure(compiled.Error());
                     }
@@ -1921,7 +1937,7 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
                     RunFolderRevision& revision = *folderRevisions[folderRevisions.Size() - 1];
                     auto compiled =
                         CompileFolderRevision(allocator, input, *source, host, *currentCompilation,
-                                              codes.View(), revision, pairs, next, why);
+                                              codes.View(), revision, pairs, next, why, spent);
                     if (!compiled) {
                         return Result<void>::Failure(compiled.Error());
                     }
@@ -1966,6 +1982,7 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
                 };
                 VmReloadPlan plan(allocator);
                 StringBuilder<MessageInlineBytes> reason(allocator);
+                const uint64 planning = platform::MonotonicNanoseconds();
                 auto planned = session.PlanReload(pairs.View(),
                                                   rest == "keep" ? VmReloadExecutions::Keep
                                                                  : VmReloadExecutions::Cancel,
@@ -1987,7 +2004,19 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
                         session.InjectReloadRollback();
                     }
 
+                    const uint64 applying = platform::MonotonicNanoseconds();
+                    spent.plan += applying - planning;
                     auto applied = session.ApplyReload(plan);
+                    spent.apply += platform::MonotonicNanoseconds() - applying;
+                    if (applied && input.timings != nullptr) {
+                        input.timings->compile += spent.compile;
+                        input.timings->bundle += spent.bundle;
+                        input.timings->link += spent.link;
+                        input.timings->plan += spent.plan;
+                        input.timings->apply += spent.apply;
+                        ++input.timings->reloads;
+                    }
+
                     if (applied && reloadsSeen <= RunMaxGateReloads) {
                         reloadsApplied |= uint64(1) << (reloadsSeen - 1);
                     }
@@ -2410,11 +2439,20 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
                         const StringView owner(eventName.Data(), dot);
                         usize unit = 0;
                         uint32 classIndex = NoBytecodeIndex;
-                        const bool local = findClass(owner, unit, classIndex) != 0;
+                        const uint32 owners = findClass(owner, unit, classIndex);
+                        if (owners > 1) {
+                            return bad("'emit' names a class of several modules (use "
+                                       "<path>:Class)");
+                        }
+
+                        // key 이름은 `<경로>:` 앞부분을 뗀 `Class.Event`다(LC7c 리뷰 5).
+                        StringView ownerPath;
+                        StringView qualifiedName;
+                        split(eventName, ownerPath, qualifiedName);
                         VmEventKey key;
-                        key.path =
-                            local ? codes[unit].code->String(codes[unit].code->path) : StringView();
-                        key.name = eventName;
+                        key.path = owners == 1 ? codes[unit].code->String(codes[unit].code->path)
+                                               : StringView();
+                        key.name = qualifiedName;
                         arguments.Clear();
                         refArguments.Clear();
                         bool parsed = true;

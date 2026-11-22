@@ -993,8 +993,8 @@ TEST(AssetDelete_RealDisk) {
     String path(env.allocator);
     REQUIRE(path.TryAppend(project.Root()) && path.TryAppend("/Content/Dir/Hero.rasset"));
     bool exists = true;
-    REQUIRE(
-        platform::PhysicalFileSystem().Exists(path.View().Data(), path.View().ByteCount(), exists));
+    REQUIRE(platform::PhysicalFileSystem().FileExists(path.View().Data(), path.View().ByteCount(),
+                                                      exists));
     CHECK(!exists && service.Packages().Find(FixedId(HeroId)) == nullptr);
 }
 

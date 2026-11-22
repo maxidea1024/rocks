@@ -82,7 +82,7 @@ public:
         out = &handle;
         return {};
     }
-    FileStatus Exists(const char*, usize, bool&) noexcept override {
+    FileStatus FileExists(const char*, usize, bool&) noexcept override {
         return {FileCode::Unsupported, 0};
     }
     FileStatus Delete(const char*, usize) noexcept override {

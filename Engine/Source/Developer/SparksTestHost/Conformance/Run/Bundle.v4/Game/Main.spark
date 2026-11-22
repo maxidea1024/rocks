@@ -1,0 +1,25 @@
+import Base;
+
+class Door : Fixture {
+    var Peer: Fixture?;
+    var Seen = 0;
+
+    fn Watch(target: Fixture) {
+        Peer = target;
+    }
+
+    fn Fire(n: int) {
+        Send(Twice(n));
+    }
+
+    on Peer.Ping(n: int) {
+        Seen += n;
+        Log.Info("seen v3 ${n}");
+    }
+
+    async fn Later(n: int) {
+        await Delay(1.0, Clock.Game);
+        Log.Info("later ${Twice(n)}");
+        Raise();
+    }
+}

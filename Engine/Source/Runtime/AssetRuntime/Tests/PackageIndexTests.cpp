@@ -357,7 +357,7 @@ public:
         return {};
     }
 
-    platform::FileStatus Exists(const char*, usize, bool& exists) noexcept override {
+    platform::FileStatus FileExists(const char*, usize, bool& exists) noexcept override {
         exists = true;
         return {};
     }
