@@ -1,6 +1,6 @@
 # Unreal 교환 형식과 추출 플러그인 설계
 
-기준일: 2026-11-22, 개정 15(UX 묶음 리뷰 반영 — 퇴화 다각형 자기 변, 옛 경로 soft 참조, 원본 복제 실패·스킨 inline reduction·영향 12개 초과, golden 묶음 12.3절, 리더 상한·일반 파일·플러그인 error). 개정 14(UX4를 UX4a·UX4b로 나눔, UX4a 머티리얼 계열 추출 — 8.6절). 개정 13(UX8을 UX8a·UX8b로 나눔, UX8a 애니메이션 클립 추출 — 7.1절). 개정 12(UX7을 UX7a·UX7b로 나눔, UX7a 스켈레톤·스킨 메시 추출 — 6.3절). 개정 11(UX3a 정적 메시 추출 — 5.4절). 개정 10(UX2·UX3을 추출 UX2a·UX3a와 임포트 UX2b·UX3b로 나눔, UX2a 텍스처 추출 — 4.5절). 개정 9(UX1b UE 플러그인 골격 구현 — 11.7절). 개정 8(UX1b를 UE 플러그인 골격 UX1b와 Rocks 임포트 연결 UX1c로 나눔). 개정 7(UX1a coverage 100% — 10.4절 끝 시험과 coverage 문단). 개정 6(UX1a 리더·경로 대응·임포트 순서 구현 — 10.4절, 3.4·3.5절 정렬·의존 `class`). 개정 5(UX1을 UX1a·UX1b로 나눔). 개정 4(UXR5 경계 정책 검사 구현 — 11.1절). 개정 3(13절 요구를 다른 문서에 반영하고 상태 열을 더함, 태그 키 이름). 개정 2(교차 검증 반영 — 18절). UE 에디터에서 텍스처·정적 메시·스켈레톤·스킨 메시·애니메이션 클립·머티리얼을 꺼내 Rocks 에셋으로 가져오는 경로를 정한다. 경로는 세 부분이다. UE 쪽 추출 플러그인 `RocksExport`, 둘 사이의 교환 형식 **Unreal 교환 묶음**, Rocks 쪽 임포터 플러그인 `UnrealExchange`다.
+기준일: 2026-11-23, 개정 16(UX1c 설계 — 임포트 계획·`--only` 닫힘·기존 에셋 조회·종류별 임포터 표·`asset-import-unreal`, 10.5절; A2f 프레임워크에 없는 네 가지를 요구 UXR8–UXR11로 넘김, 13절). 개정 15(UX 묶음 리뷰 반영 — 퇴화 다각형 자기 변, 옛 경로 soft 참조, 원본 복제 실패·스킨 inline reduction·영향 12개 초과, golden 묶음 12.3절, 리더 상한·일반 파일·플러그인 error). 개정 14(UX4를 UX4a·UX4b로 나눔, UX4a 머티리얼 계열 추출 — 8.6절). 개정 13(UX8을 UX8a·UX8b로 나눔, UX8a 애니메이션 클립 추출 — 7.1절). 개정 12(UX7을 UX7a·UX7b로 나눔, UX7a 스켈레톤·스킨 메시 추출 — 6.3절). 개정 11(UX3a 정적 메시 추출 — 5.4절). 개정 10(UX2·UX3을 추출 UX2a·UX3a와 임포트 UX2b·UX3b로 나눔, UX2a 텍스처 추출 — 4.5절). 개정 9(UX1b UE 플러그인 골격 구현 — 11.7절). 개정 8(UX1b를 UE 플러그인 골격 UX1b와 Rocks 임포트 연결 UX1c로 나눔). 개정 7(UX1a coverage 100% — 10.4절 끝 시험과 coverage 문단). 개정 6(UX1a 리더·경로 대응·임포트 순서 구현 — 10.4절, 3.4·3.5절 정렬·의존 `class`). 개정 5(UX1을 UX1a·UX1b로 나눔). 개정 4(UXR5 경계 정책 검사 구현 — 11.1절). 개정 3(13절 요구를 다른 문서에 반영하고 상태 열을 더함, 태그 키 이름). 개정 2(교차 검증 반영 — 18절). UE 에디터에서 텍스처·정적 메시·스켈레톤·스킨 메시·애니메이션 클립·머티리얼을 꺼내 Rocks 에셋으로 가져오는 경로를 정한다. 경로는 세 부분이다. UE 쪽 추출 플러그인 `RocksExport`, 둘 사이의 교환 형식 **Unreal 교환 묶음**, Rocks 쪽 임포터 플러그인 `UnrealExchange`다.
 
 - 배경: 사용자 지시(2026-11-19). 엔진 시험을 위해 UE에서 쓰던 콘텐츠를 Rocks로 가져온다. `.uasset`을 직접 해석하는 방식은 어려움이 많으므로 UE 플러그인이 Rocks가 읽을 수 있는 형태로 추출한다.
 - 받는 쪽 자료구조: 텍스처는 [에셋 시스템](AssetSystem.ko.md) 12절, 머티리얼은 [머티리얼 시스템](MaterialSystem.ko.md) 4절, 메시·스켈레톤·애니메이션은 [메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets.ko.md)이 정한다. 이 문서는 추출과 대응만 다룬다.
@@ -367,6 +367,7 @@ UE 객체 경로 `/<Mount>/<경로>/<이름>.<이름>` → Rocks 논리 경로 `
   - `sources`: role `asset`(에셋 JSON — root는 묶음 디렉터리를 등록한 원본 루트, relativePath, sha256, bytes), role `blob:<sha256>`(그 JSON이 참조한 blob마다 하나).
   - `options`: `objectPath`, `--mesh-normals`, UE 원래 빌드 플래그(5.3절).
 - 태그(Tags 섹션, AssetIndex 검색 키): `UnrealExchange.ObjectPath` = 현재 objectPath, `UnrealExchange.FormerPaths` = 묶음 `redirects`로 알게 된 옛 경로 목록. 임포터가 정하는 태그 키를 AssetIndex가 검색할 수 있어야 한다(요구 UXR2).
+- 위 기록·태그를 쓰는 길은 A2f 임포트 프레임워크에 아직 없다(임포터 태그 UXR8, 가변 원본 역할 UXR9 — 13절). 종류별 임포트(UX2b 이후)가 그 보강 뒤에 쓴다.
 - 재임포트: 묶음 에셋의 objectPath, 또는 그 objectPath로 이어지는 `redirects`의 옛 경로를 `UnrealExchange.ObjectPath`·`UnrealExchange.FormerPaths` 태그로 찾는다. 찾으면 그 에셋에 다시 임포트한다(ID 유지). UE에서 이름을 바꿔도 UE redirector가 남아 있으면 같은 Rocks 에셋으로 이어진다. redirector를 지운 뒤의 이름 변경은 새 에셋이 된다.
 
 ### 9.3 의존과 순서
@@ -457,6 +458,45 @@ UX1a 구현(플러그인 모듈 `UnrealExchange`의 묶음 리더·검증, 경�
 20. **플러그인 error 진단(개정 15).** 에셋 JSON `diagnostics`에 `severity: error`가 하나라도 있으면 그 에셋은 Ready가 아니다: 첫 error 진단의 `code`를 text로 `InvalidSource`(새 세부 규칙 `ExporterError`, `InvalidArgument`)를 내고 Failed로 둔다. 기존 진단 코드 `InvalidSource`(임포트 원본이 쓸 수 없음 — AssetSystem 4.6절)를 그대로 써 AssetRuntime 진단 표를 늘리지 않는다. Hard 의존자는 임포트 순서 계산이 `FailedDependency`로 실패시킨다(15번).
 21. **blob 참조 수집(개정 15).** 한 에셋의 blob 사용 목록(처음 나온 순서, 같은 사용은 한 번, 같은 hex의 다른 bytes는 `BlobConflict`)을 만들 때 이미 모은 것과의 비교를 digest 앞 8 byte 키의 사슬로 한다(키별 마지막 번호 표 + 같은 키의 앞 번호). 전에는 참조마다 목록 전체를 훑어 참조 수의 제곱이었다. 결과 순서·진단은 같다.
 22. **의존 class 대조 범위(개정 15).** 의존 항목의 `class`는 대상이 묶음 안에 있을 때만 대상 에셋의 `class`와 대조한다(9번 — 다르면 손상). 묶음 밖(범위 밖 클래스·닫힘 밖) 대상은 대조할 것이 없어 그대로 둔다. 플러그인은 옛 경로(redirector) 참조를 대상 경로·클래스로 바꿔 의존에 적으므로(11.7절 21번) 묶음 안 대상의 대조를 늦추지 않는다(권장안 — 대조를 완화하면 실제 손상을 놓친다).
+
+### 10.5 임포트 계획과 명령(UX1c)
+
+UX1c는 A2f 임포트 프레임워크를 고치지 않고 할 수 있는 Rocks 쪽 연결이다(사용자 결정 2026-11-23 "나눠 진행"). 묶음을 읽어 무엇을 어디에 만들거나 다시 임포트할지 정하고(계획), 종류별 임포터를 순서대로 부르는 틀과 명령을 둔다. 실제 에셋을 만드는 종류별 임포터는 UX2b 이후이고, 그 전제인 프레임워크 보강 네 가지는 13절 UXR8–UXR11이다. 모두 권장안으로 정했다.
+
+1. **모듈 의존.** 공개 의존에 AssetDatabase(색인 태그 조회 `AssetIndex::FindByTag`, `AssetService`)와 AssetCommandlets(명령 세션 `EditSession`·`OpenSession`)를 더한다. 둘 다 Developer라 플러그인 종류(Developer)와 맞는다.
+2. **`--only` 닫힘(`SelectExchangeClosure`).** 값마다 묶음 redirect를 풀고(`from`이면 `to`) 묶음 에셋을 찾는다. 없으면 명령 실패(`NotFound`, 그 값)다. 고른 에셋에서 묶음 안 Hard 대상(`target`이 있는 의존)을 끝까지 따라가 고른다. Soft는 따라가지 않는다. 결과는 에셋마다 선택 표시(0·1)이고 `--only`가 없으면 모두 고른다. 범위 밖 클래스 에셋도 직접 고르면 선택에 들지만 계획에는 들지 않는다(건너뜀으로 보고).
+3. **선택과 결정성.** 경로 대응·겹침 판정과 기존 에셋 조회는 선택과 무관하게 묶음 전체에 한다. 그래서 같은 에셋의 대응 경로·겹침 실패·재임포트 대상은 `--only` 유무와 상관없이 같다(12.1절 "`--only` 결과와 전체 임포트의 경로·내용 일치"). 진단은 고른 에셋에 대해서만 낸다(겹침 진단의 관련 에셋은 고르지 않은 것일 수 있다). 단위·간선·Tarjan은 고른 에셋만 본다. 선택이 Hard 닫힘이므로 고른 에셋의 묶음 안 Hard 대상은 모두 고른 것이다.
+4. **기존 에셋 조회(`ExchangeExistingAssets`, 9.2절).** 조회 키는 에셋의 objectPath와 그 objectPath로 이어지는 redirect `from` 목록이다(redirect는 `to` 기준 색인을 한 번 만들어 찾는다). 두 단계로 찾는다: 먼저 `UnrealExchange.ObjectPath` = objectPath, 없으면 `UnrealExchange.ObjectPath` ∈ 옛 경로 또는 `UnrealExchange.FormerPaths` ∈ {objectPath, 옛 경로}(둘째 단계로 찾았다는 표시 `former`를 돌려준다). 처음 찾은 단계에서 서로 다른 색인 항목이 하나이고 그 id가 색인에서 유일하면 그 에셋(색인의 지금 경로와 함께), 항목이 둘 이상이거나 같은 AssetId의 다른 파일이 있으면(태그가 한쪽에만 있어도 — 재임포트가 어느 파일인지 정할 수 없다) 모호함이다. 인터페이스는 `Result<ExchangeExistingMatch> Find(objectPath, formerPaths)`와 경로 점유 `Result<bool> PathTaken(논리 경로)`다(조회 할당 실패를 삼키지 않게 — UX1a의 `bool Contains`를 대신한다). 색인 구현은 `ExchangeIndexLookup`(`AssetIndex` 위)이고, 처음 조회할 때 두 태그의 (키, 값) 정렬 표를 한 번 만들어 이진 검색한다(묶음 에셋마다 색인 전체를 훑으면 묶음 크기 × 색인 크기다 — 리뷰 권장).
+5. **재임포트 대상과 경로.** 기존 에셋을 찾으면 대상 경로는 그 에셋의 지금 경로다(9.1절 "재임포트에서는 기존 에셋 위치가 우선"). 판정은 모두 선택과 무관하게 묶음 전체에 한다.
+   - 같은 기존 에셋: 묶음 에셋 둘 이상이 같은 AssetId를 찾으면 첫 단계로 찾은 하나만 그 에셋에 다시 임포트하고, 둘째 단계로 찾은 나머지는 새 에셋이다. UE에서 B를 A로 바꾼 뒤 redirector를 지우고 새 B를 만든 경우로, 9.2절 "redirector를 지운 뒤의 이름 변경은 새 에셋"이다. 첫 단계로 찾은 것이 없거나 둘 이상이면 모두 모호함이다. 이것을 막지 않으면 두 묶음 에셋이 한 Rocks 에셋을 덮어쓴다(리뷰 필수 1).
+   - 모호함: 그 에셋은 `UnrealPathCollision`(세부 규칙 `AmbiguousExisting`, `AlreadyExists`, text = objectPath)으로 실패하고 단위 실패 전파(10.4절 15번)를 따른다. 묶음에 없는 Hard 대상의 조회가 모호하면 같은 진단을 내고 대상 클래스와 무관하게 `MissingDependency`로 단위를 실패시킨다(어느 쪽에 이을지 고를 수 없다).
+   - 경로 판정: 기존 에셋에 다시 임포트하는 에셋은 대응 경로의 길이 초과로 실패하지 않는다(쓰지 않는 경로). 겹침 키 집합에는 새 에셋의 대응 경로와 기존 에셋의 지금 경로를 함께 넣고, 겹치는 새 에셋만 `UnrealPathCollision`(`PathCollision`, related = 겹친 기존 에셋 쪽 묶음 에셋)으로 실패시킨다. 남은 새 에셋의 대응 경로를 색인의 다른 에셋이 쓰면 `UnrealPathCollision`(새 세부 규칙 `PathTaken`, text = 경로)이다 — dry run이 plan-create로 보고한 뒤 실행이 덮어쓰거나 실패하지 않게 한다(리뷰 권장 4).
+6. **계획 결과.** `ExchangeImportPlan`은 에셋마다 기존 에셋(`Existing(asset)` — id·경로, 없으면 null id)과 대상 경로(`TargetPath(asset)` — 기존 경로 또는 대응 경로)를 더 가진다. `--dry-run`은 계획까지만 하고 쓰지 않는다(잠금도 잡지 않는다).
+7. **종류별 임포터 표(`ExchangeKindTable`).** 교환 클래스마다 임포터 `ExchangeKindImporter` 하나를 등록한다(같은 클래스 둘은 `AlreadyExists`). 임포터는 요청(묶음, 에셋 번호, 대상 경로, 기존 AssetId, 명령 옵션, 이번 실행에서 이미 임포트한 에셋의 AssetId 표, 서비스·잠금)을 받아 만든 에셋의 AssetId를 돌려주고 진단을 묶음 진단에 더한다. 표는 명령 문맥의 등록 hook(`ExchangeKindSetup` — A2f의 `AssetImporterSetup`과 같은 모양)이 채운다. 제품 Commandlet은 지금 등록하는 것이 없다(UX2b부터 텍스처·메시·스켈레톤·클립·머티리얼 순으로 더한다). 시험은 서비스에 쓰지 않는 시험 임포터를 등록한다. 요청 형태는 첫 실제 임포터(UX2b)가 UXR8–UXR11과 함께 다시 본다.
+8. **실행 순서와 전파(`RunExchangeImport`).** 계획의 단위 순서(깊이, 가장 작은 objectPath)대로 Ready 단위의 구성원을 부른다. 에셋마다 결과는 고르지 않음·범위 밖·실패·건너뜀·임포트(새로 만듦 또는 재임포트)다.
+   - 실패한 단위(계획)는 부르지 않는다.
+   - 구성원이 둘 이상인 단위(Hard만의 순환 — 9.3절이 허용)는 다중 에셋 원자 저장(UXR11)이 없으므로 계획이 구성원 모두를 `UnsupportedCycle`(세부 규칙 `HardCycle`, `CycleDetected`)로 실패시키고 의존자에게 전파한다(실행이 아니라 계획에서 정해 dry run 결과가 실행과 같다 — 리뷰 필수 2). 같은 단위에 의존 실패가 있으면 그쪽(`MissingDependency`)이 먼저다(원인에 가깝다). 그래서 Ready 단위는 구성원이 하나다.
+   - 클래스에 등록된 임포터가 없으면 `UnsupportedAsset` 경고(세부 규칙 `NoKindImporter`, text = 교환 클래스 이름)를 내고 건너뛴다.
+   - 묶음 안 Hard 대상이 이번 실행에서 실패했으면 대상 클래스·기존 에셋과 무관하게 `MissingDependency`(세부 규칙 `FailedDependency`, related = 대상)로 실패한다 — 9.3절의 단위 실패 전파와 같고, 옛 버전의 기존 에셋에 조용히 잇지 않는다(리뷰 필수 2). 대상을 건너뛰었으면(임포터 없음) 기존 에셋이 있으면 그 id로 잇고, 없으면 묶음에 없는 대상과 같이 텍스처·`Material`·`MaterialInstanceConstant`는 `MissingUnrealDependency` 경고 뒤 계속, 그 밖은 `MissingDependency`다.
+   - 임포터 계약: 새 에셋은 null이 아닌 id, 재임포트는 기존 id 그대로다. 어기면 그 에셋의 실패(진단 코드 없음, `InvalidArgument`)다.
+   - 임포터 오류는 그 에셋의 실패이고 다음 에셋으로 넘어간다(9.3절 부분 결과). 할당 실패만 실행 전체를 멈춘다.
+9. **명령 `asset-import-unreal`.** 문법은 10.2절에 공통 옵션 `--project=<경로>`·`--wait=<초>`를 더한 것이다. 같은 옵션 둘(`--only` 제외), 빈 값, 모르는 옵션(이름은 대소문자 구분), `--mesh-normals`의 값이 `unreal`·`rocks`가 아님, `--wait`가 다른 에셋 명령의 규칙(10진 숫자, 하루 이하)을 어김, 위치 인자 수가 하나가 아님은 사용법 오류(종료 코드 2)다. `--dry-run`은 잠금을 잡지 않는다(다른 쪽이 잠금을 쥐어도 된다). `--mesh-normals`는 요청 옵션으로 임포터에 넘긴다(쓰는 것은 UX3b). 손실 원본 옵션 `--allow-lossy-origin`은 두지 않는다(사용자 결정 2026-11-23 — JPEG 원본은 옵션 없이 받는다, 4.3절). 출력:
+   - 표준 출력, 에셋마다 계획·실행 순서로: `asset-import-unreal: <동작> <objectPath> <대상 경로>[ <AssetId>]`. 동작은 `--dry-run`이면 `plan-create`(id 없음)·`plan-reimport`, 실행이면 `created`·`reimported`다. 실패는 `failed <objectPath> <진단 코드>`(코드가 없으면 원본 오류 이름), 건너뜀은 `skipped <objectPath> <unsupported|no-importer>`다.
+   - 표준 오류: 묶음 진단마다 `asset-import-unreal: <코드>: <objectPath 또는 bundle>: <error|warning|info> <세부 규칙>[ <text>]`(진단 순서, 상한을 넘어 버린 수는 `dropped <수> diagnostics` 한 줄), 그 뒤 서비스 경고마다 `asset-import-unreal: <코드>: <텍스트>: warning`, 색인 캐시를 쓰지 못하면 `<오류>: <Intermediate 경로>: warning CacheNotWritten`.
+   - 끝 줄(표준 출력): 실행이면 `asset-import-unreal: <만듦> created, <재임포트> reimported, <실패> failed, <건너뜀> skipped`, `--dry-run`이면 `<수> to create, <수> to reimport, <실패> failed, <건너뜀> skipped`. 종료 코드는 실패한 에셋이 없으면 0, 있으면 1이다. 묶음 읽기 전체 실패·`--only` 값이 묶음에 없음·계획 실패(잘못된 root)·종류별 임포터 등록 실패·세션 열기 실패(잠금 Busy 포함)는 그 실패 줄을 쓰고 1이다.
+10. **명령 등록.** Commandlet 실행 파일이 UnrealExchange 플러그인 모듈에 의존하고(BuildTargets BD39 — Program은 켠 플러그인 모듈에 의존할 수 있다) 호스트가 `asset-import-unreal`을 등록한다. 명령 함수는 플러그인의 `RunAssetImportUnrealCommand`(문맥 `UnrealExchangeCommandContext` — 에셋 명령 문맥과 종류별 임포터 등록 hook)이고, EngineTests가 시험 임포터로 프로세스 안에서 부른다. 모듈 시작이 명령을 스스로 등록하는 길(UE commandlet 클래스 탐색 대응)은 모듈 로더 쪽 기능이 없어 두지 않았다.
+11. **새 세부 규칙.** `AmbiguousExisting`·`PathTaken`(5번), `HardCycle`(8번), `NoKindImporter`(8번). 진단 코드는 기존 것(`UnrealPathCollision`·`UnsupportedCycle`·`UnsupportedAsset`·`MissingDependency`·`MissingUnrealDependency`)을 쓴다.
+12. **시험과 coverage(UX1c).** 시험은 다음과 같다.
+   - `ExchangeSelectionTests`: 닫힘, 선택 계획, 기존 에셋 충돌·경로 점유, `--only`와 전체 계획 대조.
+   - `ExchangeImportRunTests`: 임포터 표, 순서, 실행 중 전파, 임포터 계약, dry run.
+   - `ExchangeIndexLookupTests`: 실제 색인 위 두 단계, 중복 id, 경로 점유.
+   - `ExchangeCommandTests`: 명령 줄 전부, 잠금, 캐시 쓰기 실패, 진단 버림, 쓰기 하나하나의 실패.
+   - 제품 실행 파일의 C# 확인(`Rocks.Commandlet.Tests`).
+   - 할당 실패는 계획·조회·실행의 모든 지점을 n번째 실패로 돈다.
+   
+   플러그인 Private coverage는 줄 99.4%·분기 99.1%·함수 100%다. 계획·실행·리더 파일은 모두 100%다. 닿지 않는 것은 사유를 남긴다.
+   - `ExchangeCommand.cpp`의 할당 실패 경로(인자 목록·출력 줄 조립·단계 실패·임포터 등록·실행·캐시 쓰기의 OutOfMemory)는 닿지 않는다. 명령 하나가 세션 열기(색인 만들기)에서 수천 번 할당해 n번째 실패 반복이 너무 길다. 다른 에셋 명령 시험도 명령 단위 할당 실패를 돌지 않는다. 그 아래 함수(계획·조회·실행)의 할당 실패는 시험이 닿는다.
+   - `ExchangeIndexLookup::PathTaken`의 같은 경로 키 둘(`AlreadyExists`)은 대소문자를 무시하는 파일 시스템(시험 플랫폼 Windows)에서 만들 수 없어 닿지 않는다.
 
 ## 11. UE 플러그인 `RocksExport`
 
@@ -593,6 +633,10 @@ RocksExport로 만든 실제 묶음 `Engine/Plugins/Importers/UnrealExchange/Tes
 | UXR5 | 정책 검사(Rocks.Tooling.Checks) | `Extras/` 아래에 Rocks 모듈 규칙·서술자가 없음을 확인 | 구현(2026-11-20, 11.1절 `foreign-engine-boundary`) |
 | UXR6 | 에셋 시스템 시험 기반 | 결정적 AssetId 발급기 주입 지점(시험 전용) | 반영(AssetSystem 개정 10, 14.1절) |
 | UXR7 | [빌드 대상](BuildTargets.ko.md) | 첫 엔진 플러그인 `Engine/Plugins/Importers/UnrealExchange`의 서술자·종류(Developer)·Shipping 제외 | 반영(BuildTargets 개정 3, 3.6절) |
+| UXR8 | 에셋 시스템 7.1절 18(A2f)·5.4절 ImportRecord | 임포터 태그: 임포터가 정한 태그(키는 `<임포터 이름>.` 접두)를 남길 길. 지금 저장은 Tags를 타입 hook으로만 다시 만들어(7.1절 15) 임포터가 `UnrealExchange.ObjectPath`·`FormerPaths`를 넣을 수 없다. 권장: ImportRecord에 임포터 태그 목록을 두고 저장이 타입 hook 태그와 합쳐 쓴다(UE `UAssetImportData`가 AssetRegistry 태그를 내는 것과 같다 — 원천이 기록이라 플러그인을 끈 프로젝트에서 다시 저장해도 남는다), 문맥 `AddTag(key, value)`, 재임포트는 옛 기록의 태그를 읽을 수 있게(옛 경로 누적) | 요구(2026-11-23, 에셋 세션에 넘김) |
+| UXR9 | 에셋 시스템 7.1절 18(A2f) | 가변 원본: 9.2절은 에셋 JSON(역할 `asset`)과 blob마다 역할 `blob:<sha256>`을 기록한다. 지금 임포터 역할은 고정 목록이고 재임포트는 기록 역할만 바꿀 수 있다. 권장: 임포터가 역할 접두(`blob:`)를 선언하면 그 접두의 역할을 개수 제한 안에서 받고, 재임포트가 원본 목록 전체를 바꿀 수 있게 한다. 원본 합 상한(2 GiB)을 넘는 에셋은 실패로 둔다(한계) | 요구(2026-11-23, 에셋 세션에 넘김) |
+| UXR10 | 에셋 시스템 7.1절 18(A2f) | 기존 에셋 참조: 임포터가 이미 있는 다른 에셋(이번 실행에서 앞서 임포트한 것 포함)을 AssetId로 열어 출력의 Hard 참조로 걸 길(머티리얼 → 텍스처, 메시 → 머티리얼, 스킨 메시·클립 → 스켈레톤). 지금 문맥은 자기 출력끼리만 참조할 수 있다 | 요구(2026-11-23, 에셋 세션에 넘김) |
+| UXR11 | 에셋 시스템 7.1절 18(A2f)·6.2절 | 다중 에셋 원자 저장: 서로 Hard로 참조하는 여러 주 출력(각자 소유 기록)을 한 저장 묶음으로 저장(9.3절 Hard 순환 단위). 그 전까지 구성원이 둘 이상인 단위는 `HardCycle`로 실패한다(10.5절 8번) | 요구(2026-11-23, 에셋 세션에 넘김) |
 
 ## 14. 단계
 
@@ -602,19 +646,19 @@ ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으�
 |---|---|---|---|
 | UX1a | Rocks | 묶음 형식 v1 리더·검증(JSON 스키마·blob SHA-256·크기), 경로 대응·이름 보정, 위상 정렬(SCC), 손으로 만든 묶음 fixture와 변조 시험 — 에셋 DB에 쓰지 않는 부분. **구현**(2026-11-21, 10.4절) | MA1(원본 메시 형태 확인용), 엔진 플러그인 빌드 지원(BuildTargets 3.6절) |
 | UX1b | UE | 플러그인 골격(11절 — Editor 모듈, commandlet `-run=RocksExport`, 메뉴, 묶음 writer, 자체 SHA-256, 숫자 서식, UPROPERTY 덤프, 닫힘, redirector)과 에셋 JSON 공통부. 설치판 엔진에 대고 `RunUAT BuildPlugin`으로 빌드하고, 엔진 콘텐츠를 내보낸 묶음을 UX1a 리더로 읽어 왕복 검증한다(에셋 종류별 본문은 UX2 이후). **구현**(2026-11-22, 11.7절) | UX1a, UE 5.8 Launcher 설치판(C:) |
-| UX1c | Rocks | 임포트 프레임워크 연결, 기존 에셋 조회 `ExchangeExistingAssets`(태그 `UnrealExchange.ObjectPath`) 구현, `--only` 닫힘, Commandlet 명령 `asset-import-unreal` 등록 | UX1b, A2f(AssetDatabase 임포트 프레임워크) |
+| UX1c | Rocks | 임포트 계획과 명령(10.5절): `--only` 닫힘, 기존 에셋 조회 `ExchangeIndexLookup`(태그 `UnrealExchange.ObjectPath`·`FormerPaths`), 재임포트 대상 경로, 종류별 임포터 표와 실행 순서·실패 전파, Commandlet 명령 `asset-import-unreal`(`--dry-run` 포함) 등록. 실제 에셋 쓰기(종류별 임포터)는 UX2b 이후이고 그 전제 프레임워크 보강은 UXR8–UXR11 | UX1b, A2f |
 | UX2a | UE | 텍스처 추출(4절 — 원본 mip 사슬 blob, 형식·감마·손실 원본 표시, 설정 덤프). Rocks 리더 왕복(묶음·blob 검사)과 UE 자기 시험(blob과 `FTextureSource` 원본 대조)으로 검증한다. **구현**(2026-11-22, 4.5절) | UX1b |
-| UX2b | Rocks | 텍스처 임포트(4.2절 형식 대응, 4.3절 JPEG·UEJPEG 원본 허용, 4.4절 설정 대조) | UX2a, UX1c, A5 |
+| UX2b | Rocks | 텍스처 임포트(4.2절 형식 대응, 4.3절 JPEG·UEJPEG 원본 허용, 4.4절 설정 대조) | UX2a, UX1c, A5, UXR8·UXR9 |
 | UX3a | UE | 정적 메시 추출(5절 — `source`·`prepared`·생성 LOD·충돌, 5.2절 `MeshSource` 기록). Rocks 리더 왕복과 MA1 `MeshSource` 적재·검증으로 확인한다. **구현**(2026-11-22, 5.4절) | UX1b |
-| UX3b | Rocks | 정적 메시 임포트(5.1·5.3절 모드, `bakedSource`) | UX3a, UX1c, MeshAnimationAssets MA2b–MA3 |
+| UX3b | Rocks | 정적 메시 임포트(5.1·5.3절 모드, `bakedSource`) | UX3a, UX1c, MeshAnimationAssets MA2b–MA3, UXR8–UXR11(UXR11은 complex collision 메시 순환) |
 | UX4a | UE | 머티리얼·인스턴스·함수·컬렉션 추출(8.1·8.2절 — 그래프·출력 핀·인스턴스 `resolved`·설정 덤프, Substrate 그래프도 그대로 덤프). Rocks 리더 왕복과 그래프 구조 불변식으로 확인한다. **구현**(2026-11-22, 8.6절) | UX1b |
-| UX4b | Rocks | 머티리얼 임포트: 옛 출력 핀 그래프 번역 표 1차, 파라미터 병합, 대체 규칙 3번(8.5절) | UX4a, UX2b, MaterialSystem MS3·MS6 |
+| UX4b | Rocks | 머티리얼 임포트: 옛 출력 핀 그래프 번역 표 1차, 파라미터 병합, 대체 규칙 3번(8.5절) | UX4a, UX2b, MaterialSystem MS3·MS6, UXR8–UXR10 |
 | UX5 | 둘 다 | Substrate 그래프 번역(8.3절) | UX4b |
 | UX6 | 둘 다 | 굽기 대체(8.4절)와 "구운 표면" 내장 머티리얼, 대체 규칙 2번 | UX4b |
 | UX7a | UE | 스켈레톤·스킨 메시 추출(6절 — 본 계층·커브, 스킨 가중치·morph, 생성 LOD 복원). Rocks 리더 왕복과 MA4a 스켈레톤 검증·병합 판정, MA5a 스킨 빌드로 확인한다. **구현**(2026-11-22, 6.3절) | UX3a |
-| UX7b | Rocks | 스켈레톤·스킨 메시 임포트(본 병합 저장, 슬롯·소켓·가중치 프로필 대응) | UX7a, UX3b, MA4b–MA5 |
+| UX7b | Rocks | 스켈레톤·스킨 메시 임포트(본 병합 저장, 슬롯·소켓·가중치 프로필 대응) | UX7a, UX3b, MA4b–MA5, UXR8–UXR10 |
 | UX8a | UE | 애니메이션 클립 추출(7절 — 본 트랙·커브·이벤트·동기 마커). Rocks 리더 왕복과 MA6a 원본 검증·샘플링·쿠킹 v1 변환으로 확인한다. **구현**(2026-11-22, 7.1절) | UX7a |
-| UX8b | Rocks | 애니메이션 클립 임포트(커브 열거·플래그 대응, 이벤트 속성 버림 경고, 스켈레톤 Build 의존) | UX8a, UX7b, MA6 |
+| UX8b | Rocks | 애니메이션 클립 임포트(커브 열거·플래그 대응, 이벤트 속성 버림 경고, 스켈레톤 Build 의존) | UX8a, UX7b, MA6, UXR8–UXR10 |
 
 ## 15. 결정 사항
 
@@ -657,6 +701,7 @@ ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으�
 - 개정 13(2026-11-22): UX8을 UE 쪽 추출 UX8a(선행 UX7a)와 Rocks 쪽 임포트 UX8b로 나눴다. UX8a(애니메이션 클립 추출)를 구현하고 정한 점을 7.1절에 적었다: `data` 스키마(본 트랙 성분 blob·상수 접기), 커브·transform 커브 객체(UE 열거 이름·플래그 비트·기본값 그대로), 이벤트(계산한 절대 시간·종류 클래스·속성 덤프)·이벤트 트랙·동기 마커, settings 덤프에서 데이터 모델 제외, 자기 시험과 Rocks 쪽 MA6a 원본 검증·샘플링·클립 검증·쿠킹 변환 확인.
 - 개정 14(2026-11-22): UX4를 UE 쪽 추출 UX4a(선행 UX1b)와 Rocks 쪽 임포트 UX4b(번역 표·파라미터 병합·대체 규칙 3번)로 나누고 UX5·UX6 선행을 UX4b로 고쳤다. UX4a(머티리얼 계열 추출)를 구현하고 정한 점을 8.6절에 적었다: 노드 식별자를 GUID에서 객체 이름으로 바꿈(엔진 콘텐츠의 GUID 겹침 — 8.1절을 고침), `data` 스키마(노드·입력·출력·properties 제외 규칙), 출력 핀(`FMaterialInput` 계열, `bUseMaterialAttributes` 선택, 상수 칸), settings 제외(그래프 묶음·핀, 노드 미펼침), `resolved` 형식·순서·종류 이름 표, Substrate 그대로 덤프, 자기 시험과 Rocks 쪽 구조 불변식 검사, 함수 인스턴스 시험 콘텐츠 없음.
 - 개정 15(2026-11-22): UX 묶음 리뷰(리뷰어 1명, 034562c6 기준)를 반영했다. 중요: 퇴화 다각형의 자기 변을 빼고 변 속성을 같이 옮기며 둘레를 코너 변으로 복원(5.4절 9번), 옛 경로 soft 참조를 redirect 대상 경로·클래스로 의존에 적음(11.7절 21번)과 리더 의존 class 대조 범위(10.4절 22번), 원본 복제 실패 `MeshSourceUnavailable`·baked로 대신하지 않음(5.4절 10번, 6.3절 9번), 스킨 메시 inline reduction(6.2절, 6.3절 10번), 영향 12개 초과 줄이기(6.3절 11번), golden 묶음과 늘 도는 시험·MA1 저장 경로 적재(12.3절). 사소: blob 참조 수집 사슬(10.4절 21번), 예약 키 `@` 이스케이프(3.3절, 11.7절 23번), staging·previous 확인(11.7절 25번), mip 크기 불일치는 에셋 수준(4.5절 8번), 비NFC 이름은 임포트 몫(5.4절 3번), `resolved` 참조 Soft(8.6절 11번), weak·lazy Soft(11.7절 22번), 문자열 변형·optional(11.7절 24번), morph 번호 범위·`LODMaterialMap`(6.3절 12번), 키 수가 다른 트랙(7.1절 9번), 리더 JSON 합 상한·일반 파일·플러그인 error 진단(10.4절 18–20번). 리더 Private coverage는 바뀐 뒤에도 줄 2181·분기 1138·함수 127 모두 100%다(`Build/MeasureCoverage.ps1`, LLVM 22.1.8 툴체인).
+- 개정 16(2026-11-23): UX1c를 구현하고 리뷰(리뷰어 1명 — 필수 2·권장 5·사소 4)를 반영했다: 같은 기존 에셋을 찾은 묶음 에셋 둘(첫 단계만 재임포트), 실행 중 실패는 언제나 전파·Hard 순환은 계획에서 실패, `--wait` 검사, 기존 경로·색인 경로 점유(`PathTaken`), 태그가 한쪽에만 있는 중복 id, 태그 정렬 표, 임포터 계약, 출력 형식, 단계별 선행 요구(14절). 손실 원본 옵션은 사용자 결정(2026-11-23)에 따라 명령에 두지 않는다. 처음 설계는 다음과 같다. UX1c 설계를 10.5절에 적었다(사용자 결정 "나눠 진행"): `--only` 닫힘, 선택과 무관한 경로·겹침·조회(결정성), 기존 에셋 두 단계 조회와 모호함, 재임포트 대상 경로가 대응 경로보다 우선, 계획 결과의 기존 에셋·대상 경로, 종류별 임포터 표·실행 순서·실행 중 실패 전파, Hard 순환 단위는 UXR11 전까지 실패, 명령 문법·출력·종료 코드, Commandlet 등록 방식, 새 세부 규칙 셋. A2f 프레임워크에 없는 임포터 태그·가변 원본·기존 에셋 참조·다중 에셋 원자 저장을 요구 UXR8–UXR11로 13절에 적고, 종류별 임포트 단계의 선행에 더했다. 9.2절의 기록·태그가 그 보강 뒤라고 적었다.
 
 ## 18. 교차 검증 기록(개정 2)
 

@@ -1194,6 +1194,11 @@ bool IsExchangeMaterialFamily(ExchangeClass type) noexcept {
     }
 }
 
+bool IsExchangeReplaceableTarget(ExchangeClass type) noexcept {
+    return IsExchangeTextureClass(type) || type == ExchangeClass::Material ||
+           type == ExchangeClass::MaterialInstanceConstant;
+}
+
 ExchangeBundle::ExchangeBundle(Allocator& allocator) noexcept
     : allocator_(&allocator), directory_(allocator), assets_(allocator), redirects_(allocator) {
 }

@@ -1864,6 +1864,67 @@ finally
     Directory.Delete(importDirectory, true);
 }
 
+// asset-import-unreal(UnrealExchange.ko.md 10.5절): 제품 실행 파일에는 아직 종류별 임포터가 없다(UX2b부터). 저장소 fixture 묶음의
+// dry run(텍스처 하나 계획), 실행(임포터 없음 — 건너뜀 경고, 종료 0), 없는 --only 값, 사용법·도움말. 결과 줄 전체와 시험 임포터
+// 실행은 EngineTests가 명령 함수를 프로세스 안에서 부른다.
+string unrealDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-import-unreal-{Environment.ProcessId}");
+try
+{
+    string project = Path.Combine(unrealDirectory, "Unreal");
+    Directory.CreateDirectory(project);
+    File.WriteAllText(Path.Combine(project, "Unreal.rocksproject"), "{}\n");
+    string projectOption = $"--project={project}";
+    string bundle = Path.Combine(FindRepositoryRoot(executable).FullName, "Engine", "Plugins", "Importers", "UnrealExchange", "Tests",
+        "Bundles", "Basic.rxbundle");
+    const string textureOnly = "--only=/Game/Textures/T_Rock.T_Rock";
+
+    async Task<ProcessResult> RunUnreal(params string[] arguments) =>
+        await ProcessRunner.RunAsync(new(executable, arguments, workingDirectory, Timeout: TimeSpan.FromSeconds(30)));
+
+    void ReportUnreal(string label, bool passed, ProcessResult result)
+    {
+        Console.WriteLine($"{label}: {(passed ? "PASS" : "FAIL")}");
+        if (!passed)
+        {
+            ++failures;
+            Console.Error.WriteLine($"  exit={result.ExitCode}; stdout={result.StdOut}; stderr={result.StdErr}");
+        }
+    }
+
+    ProcessResult dryRun = await RunUnreal("asset-import-unreal", bundle, textureOnly, "--dry-run", projectOption);
+    ReportUnreal("asset-import-unreal dry run", dryRun.ExitCode == 0 &&
+        dryRun.StdOut.Contains("asset-import-unreal: plan-create /Game/Textures/T_Rock.T_Rock /Game/Unreal/Game/Textures/T_Rock\n",
+            StringComparison.Ordinal) &&
+        dryRun.StdOut.Contains("asset-import-unreal: 1 to create, 0 to reimport, 0 failed, 0 skipped", StringComparison.Ordinal), dryRun);
+    ProcessResult noImporter = await RunUnreal("asset-import-unreal", bundle, textureOnly, projectOption);
+    ReportUnreal("asset-import-unreal without a kind importer", noImporter.ExitCode == 0 &&
+        noImporter.StdOut.Contains("asset-import-unreal: skipped /Game/Textures/T_Rock.T_Rock no-importer", StringComparison.Ordinal) &&
+        noImporter.StdErr.Contains("warning NoKindImporter Texture2D", StringComparison.Ordinal), noImporter);
+    ProcessResult notFound = await RunUnreal("asset-import-unreal", bundle, "--only=/Game/Nope.Nope", "--dry-run", projectOption);
+    ReportUnreal("asset-import-unreal only not in the bundle", notFound.ExitCode == 1 &&
+        notFound.StdErr.Contains("asset-import-unreal: NotFound: /Game/Nope.Nope: not in the bundle", StringComparison.Ordinal), notFound);
+    string[][] unrealUsage =
+    [
+        ["asset-import-unreal", projectOption],
+        ["asset-import-unreal", bundle, "--mesh-normals=flat", projectOption],
+        ["asset-import-unreal", bundle, "--dry-run", "--dry-run", projectOption],
+    ];
+    foreach (string[] arguments in unrealUsage)
+    {
+        ProcessResult usage = await RunUnreal(arguments);
+        ReportUnreal($"asset-import-unreal usage: {string.Join(' ', arguments.Skip(1).Where(argument => argument != projectOption && argument != bundle))}",
+            usage.ExitCode == 2 && usage.StdErr.StartsWith("usage: asset-import-unreal", StringComparison.Ordinal), usage);
+    }
+
+    ProcessResult unrealHelp = await RunUnreal("asset-import-unreal", "--help");
+    ReportUnreal("asset-import-unreal help", unrealHelp.ExitCode == 0 &&
+        unrealHelp.StdOut.StartsWith("usage: asset-import-unreal", StringComparison.Ordinal), unrealHelp);
+}
+finally
+{
+    Directory.Delete(unrealDirectory, true);
+}
+
 // asset-orphans-*·verify 경고(AssetSystem.ko.md 7.1절 17 — A2e4a): 고아 출력 fixture(Orphan 2311 — owner 2312 없음, HeroOrphan
 // 2313 — 기록 없는 Hero가 owner)로 목록 줄(경로 키 순, owner 경로·missing), 경고만인 verify는 종료 0, 고아 지우기·고아 아닌 거부,
 // 잠금 Busy, 사용법·도움말·프로젝트 없음.
@@ -2084,17 +2145,7 @@ static byte[] EmptyCookedManifest(string profile)
 // Rocks.proj를 가진 첫 폴더다.
 static Dictionary<string, byte[]> ReadPackageFixtures(string executable)
 {
-    DirectoryInfo? root = new FileInfo(executable).Directory;
-    while (root is not null && !File.Exists(Path.Combine(root.FullName, "Rocks.proj")))
-    {
-        root = root.Parent;
-    }
-
-    if (root is null)
-    {
-        throw new InvalidOperationException("The repository root (Rocks.proj) is not above the executable.");
-    }
-
+    DirectoryInfo root = FindRepositoryRoot(executable);
     string header = File.ReadAllText(Path.Combine(root.FullName, "Engine", "Source", "Developer", "AssetDatabase", "Tests",
         "AssetIndexCommandletFixtures.h"));
     Dictionary<string, byte[]> arrays = [];
@@ -2106,6 +2157,18 @@ static Dictionary<string, byte[]> ReadPackageFixtures(string executable)
     }
 
     return arrays;
+}
+
+// 실행 파일 위쪽에서 Rocks.proj를 가진 첫 폴더(저장소 루트)다.
+static DirectoryInfo FindRepositoryRoot(string executable)
+{
+    DirectoryInfo? root = new FileInfo(executable).Directory;
+    while (root is not null && !File.Exists(Path.Combine(root.FullName, "Rocks.proj")))
+    {
+        root = root.Parent;
+    }
+
+    return root ?? throw new InvalidOperationException("The repository root (Rocks.proj) is not above the executable.");
 }
 
 // CRC-32(IEEE 802.3, 반사 다항식 0xEDB88320)다.

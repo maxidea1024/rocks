@@ -96,7 +96,7 @@ SE-R8의 파서 확장(새 kind와 Sparks 이름 키)은 LC4d에서 함께 했�
 | SE-B4 | 명령줄 파서(AppInfoCommandLine) | 설계만 | CLI는 `Core/Commandlet` registry로 시작한다 | — | AppInfoCommandLine |
 | SE-B5 | JSON5 2단계(`.json5` 파일 이름 규칙) | 일부 | reader는 있다(`Core/Text/Json.h`의 Json5 문법) | — | SL 3.4절 |
 | SE-B6 | 외부 모듈 서명 봉투 | 없음 | — | EI9 | ContentSigning, SL 12.7절 |
-| SE-B7 | 표준 입출력 API: 이진 표준 입력 읽기와 표준 출력 쓰기(CLI 출력, 언어 서버의 stdio 통신) | 없음 | `PlatformBase` 공개 헤더에 없다. 표준 출력 구현은 `Programs/Commandlet/Private/Win64/StandardOutput.cpp`에 프로그램 전용으로 있고, policy의 platform-boundary 허용 목록 밖의 새 프로그램은 `<Windows.h>`를 쓸 수 없다 | **LC8** | SL 13절 |
+| SE-B7 | 표준 입출력 API: 이진 표준 입력 읽기와 표준 출력 쓰기(CLI 출력, 언어 서버의 stdio 통신) | 완료(2026-11-23, LC8a) | `Platform/StandardStream.h` — `WriteStandardStream`·`ReadStandardInput`(Windows 콘솔은 UTF-16, pipe·파일은 byte 그대로, CRT stdio 없음 — SparksTools T2). 시험 `StandardStream_PipesPassBytesUnchanged`(process probe `platform-cat`). Commandlet의 전용 구현은 이 API로 옮길 수 있다(그 프로그램의 일) | **LC8** | SL 13절 |
 | SE-B8 | Trace 채널 `script` 등록 | 일부 | `TraceCapture` 모듈은 있다 | EI3 | TraceSystem, SL 11절 |
 | SE-B9 | target 정책 상수 `ScriptEval`·`ExternalModules`·`ScriptingBackend`·`AotOptimization` | 없음 | `Rocks.Build.Abstractions/BuildRules.cs`와 BuildTargets 문서에 없다 | EI8·EI9 | SL 12.5·12.6절 |
 | SE-B10 | 디버거(DAP) 전송: 소켓과 VM 디버거 연결 | 없음 | `PlatformBase` 공개 헤더에 소켓이 없다 | EI7 | SL 13절 |
