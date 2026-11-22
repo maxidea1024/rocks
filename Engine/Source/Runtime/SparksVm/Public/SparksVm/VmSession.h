@@ -56,6 +56,8 @@ struct VmReloadReport {
     uint32 cancelled = 0; // 취소한 정지 실행(revision 상한 포함)
     uint32 restarted = 0; // 다시 부른 Start hook
     uint32 previous = 0;  // 이전 revision 코드로 도는 정지 실행
+    // 취소된 Start 다시 부르기의 할당 실패(reload는 적용됐다 — 남은 Start는 부르지 않았다).
+    ErrorCode restartError = ErrorCode::None;
 };
 
 // PlanReload의 결과(클래스·필드·handler·함수 대응)다. ApplyReload가 소비한다.
@@ -80,6 +82,7 @@ private:
     const VmLinkedModule* fresh_ = nullptr;
     VmReloadExecutions executions_ = VmReloadExecutions::Cancel;
     uint32 classes_ = 0;
+    uint64 serial_ = 0;        // 계획 때 session의 다음 instance 생성 번호(낡은 계획 판정)
     Array<uint32> classMap_;   // 옛 클래스 → 새 클래스(없으면 NoIndex)
     Array<uint32> fieldMap_;   // 옛 classFields → 새 classFields(없으면 NoIndex)
     Array<uint32> handlerMap_; // 옛 handler → 새 handler(없으면 NoIndex)
@@ -277,7 +280,8 @@ public:
 
     // session 모듈 old를 fresh(같은 모듈 경로의 새 revision — 새 VmLinkedModule이고 session의
     // host로 링크·import 풀기에 성공했다)로 바꾸는 계획을 세운다. session은 바뀌지 않는다. 판정
-    // 실패(instance가 있는 클래스의 삭제·기반 변경 — R3 필요, R1에서 필드 배치·handler 목록 변경)와
+    // 실패(instance가 있는 클래스의 삭제·기반 변경 — R3 필요, R1에서 필드 배치·handler 목록 변경,
+    // fresh가 아직 참조되는 이전 revision 객체)와
     // 잘못된 인자는 reason에 이유(영어 한 문장)를 쓰고 InvalidArgument, 할당 실패는 OutOfMemory다.
     // 사용 예:
     //   VmReloadPlan plan(allocator);
@@ -291,9 +295,9 @@ public:
     // 계획을 적용한다(실행 중이 아닌 reload 경계 — SparksReload K3): 취소할 실행 취소 → instance·
     // 연결·큐 항목을 새 revision으로 → session 모듈 목록 교체(그 모듈의 Tick 중지 해제) → 취소된
     // Start 다시 부르기(적용 기록 `hook` 전달). 할당은 바꾸기 전에 모두 마친다: OutOfMemory면
-    // session은 그대로다(Start 다시 부르기의 할당 실패는 예외 — reload는 적용됐다). 계획 뒤
-    // session이 바뀌어 대응이 맞지 않거나 실행 중이면 InvalidArgument. 옛 revision은 References가
-    // false가 될 때까지 host가 보관한다(Keep 실행·큐 항목이 쓴다).
+    // session은 그대로다(Start 다시 부르기의 할당 실패는 보고의 restartError — reload는 적용됐다).
+    // 계획 뒤 instance가 생겼거나 다른 reload로 old가 바뀌었거나 실행 중이면 InvalidArgument. 옛
+    // revision은 References가 false가 될 때까지 host가 보관한다(Keep 실행·큐 항목이 쓴다).
     Result<VmReloadReport> ApplyReload(VmReloadPlan& plan) noexcept;
 
     // session이 linked를 아직 참조하는지다(지금 모듈, instance, 연결, 큐 항목, 정지 실행의 frame,
