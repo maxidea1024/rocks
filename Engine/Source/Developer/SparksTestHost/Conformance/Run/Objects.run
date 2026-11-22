@@ -18,8 +18,8 @@ Mover.Loop(#1, #4) -> false (29 steps)
   host AudioSystem.StartLoop(#6, #4) -> #7
   host LoopHandle.Pause(#7) -> void
   host LoopHandle.IsPlaying(#7) -> false
-Mover.Holder(#1) -> #9 (2 steps)
-Mover.Holder(#1) -> #9 (2 steps)
+Mover.Holder(#1) -> #8 (2 steps)
+Mover.Holder(#1) -> #8 (2 steps)
 Mover.Home(#1) -> false (6 steps)
 Mover.Count(#5) -> 0 (5 steps)
   host Actor.CountAll() -> 0

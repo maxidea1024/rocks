@@ -331,6 +331,7 @@ Result<VmHostBinding> FakeHost::Bind(const VmBindRequest& request,
         if (type == nullptr) {
             // Sparks 클래스 필드: schema가 없으므로 서술자의 배치를 그대로 받는다.
             expected.Append(request.descriptor);
+            binding.optional = request.descriptor.StartsWith(">?<");
             break;
         }
 
@@ -506,7 +507,8 @@ void FakeHost::FormatHandle(StringBuilderBase& out, uint64 handle) const noexcep
     out.AppendFormat("{}#{}", alive ? "" : "dead", number);
 }
 
-FakeFieldValue* FakeHost::FieldOf(FakeObject& object, uint64 binding) noexcept {
+FakeFieldValue* FakeHost::FieldOf(FakeObject& object, uint64 binding,
+                                  VmExecution& execution) noexcept {
     for (FakeFieldValue& value : object.fields) {
         if (value.binding == binding) {
             return &value;
@@ -528,6 +530,42 @@ FakeFieldValue* FakeHost::FieldOf(FakeObject& object, uint64 binding) noexcept {
         StringBuilder<64> name(*allocator_);
         name.Append(field.resultType.View());
         added.slots[0] = NewObject(name.View());
+    }
+
+    // non-null 문자열·컨테이너 필드는 그 타입의 0 값(빈 글자·빈 컨테이너 — SL 3.2절)에서
+    // 시작한다(필드 기본값 식은 instance 생성 — LC6).
+    const StringView descriptor = field.descriptor.View();
+    if (field.kind == BytecodeRefKind::Field && field.bank == FakeBufBank && !field.optional &&
+        descriptor.ByteCount() > 1) {
+        const StringView type(descriptor.Data() + 1, descriptor.ByteCount() - 1);
+        VmBuffer* zero = nullptr;
+        if (type == "s") {
+            auto made = execution.NewString("");
+            zero = made ? made.Value() : nullptr;
+            outOfMemory_ = outOfMemory_ || !made;
+        } else if (type.StartsWith("A<") || type.StartsWith("S<") || type.StartsWith("M<")) {
+            usize at = 2;
+            uint8 firstBank = 0;
+            uint8 firstSlots = 0;
+            uint8 secondBank = 0;
+            uint8 secondSlots = 0;
+            const bool map = type.StartsWith("M<");
+            if (FakeReadType(type, at, firstBank, firstSlots) &&
+                (!map || (at < type.ByteCount() && type.Data()[at] == ',' &&
+                          FakeReadType(type, ++at, secondBank, secondSlots)))) {
+                const uint32 marker =
+                    map ? EncodeContainerMarker(secondBank, secondSlots, firstBank, firstSlots)
+                        : EncodeContainerMarker(firstBank, firstSlots, 0, 0);
+                auto made = execution.NewContainer(type.StartsWith("A<")   ? VmBufferKind::Array
+                                                   : type.StartsWith("S<") ? VmBufferKind::Set
+                                                                           : VmBufferKind::Map,
+                                                   marker, Span<const uint64>());
+                zero = made ? made.Value() : nullptr;
+                outOfMemory_ = outOfMemory_ || (!made && made.Error() == ErrorCode::OutOfMemory);
+            }
+        }
+
+        added.buffer = zero;
     }
 
     return &added;
@@ -552,6 +590,10 @@ VmFaultKind FakeHost::GetContext(VmHostCall& call) noexcept {
         bindings_[call.Binding()].literal = created; // 문맥 객체 handle을 기억한다
     }
 
+    if (call.Refs().Size() < 1) {
+        return VmFaultKind::ContractViolation;
+    }
+
     call.Refs()[0] = bindings_[call.Binding()].literal;
     return VmFaultKind::None;
 }
@@ -562,7 +604,7 @@ VmFaultKind FakeHost::GetField(VmHostCall& call, uint64 object) noexcept {
         return VmFaultKind::ContractViolation;
     }
 
-    FakeFieldValue* value = FieldOf(*target, call.Binding());
+    FakeFieldValue* value = FieldOf(*target, call.Binding(), call.Execution());
     if (value == nullptr) {
         call.Fail(ErrorCode::OutOfMemory);
         return VmFaultKind::None;
@@ -589,7 +631,7 @@ VmFaultKind FakeHost::SetField(VmHostCall& call, uint64 object) noexcept {
         return VmFaultKind::ContractViolation;
     }
 
-    FakeFieldValue* value = FieldOf(*target, call.Binding());
+    FakeFieldValue* value = FieldOf(*target, call.Binding(), call.Execution());
     if (value == nullptr) {
         call.Fail(ErrorCode::OutOfMemory);
         return VmFaultKind::None;
@@ -670,6 +712,20 @@ VmFaultKind FakeHost::CallNative(VmHostCall& call) noexcept {
     }
 
     text.Append(") -> ");
+    // 창이 결과를 담지 못하면 계약 위반이다(6.2절 — 링크가 먼저 막지만 host도 쓰기 전에 본다).
+    const usize room = binding.bank == FakeRefBank   ? call.Refs().Size()
+                       : binding.bank == FakeBufBank ? call.Buffers().Size()
+                                                     : call.Scalars().Size();
+    if (binding.slots > room) {
+        return VmFaultKind::ContractViolation;
+    }
+
+    // 객체 수신자(서술자 첫 피연산자 `x`)가 죽었으면 계약 위반이다(SL 8.4절 — thunk가 non-null·
+    // 생존을 본다).
+    if (descriptor.StartsWith("x") && !IsAlive(receiver)) {
+        return VmFaultKind::ContractViolation;
+    }
+
     // 결과: 객체는 새 객체, Buf는 빈 값(문자열은 빈 글자), Scalar는 0.
     if (binding.slots == 0) {
         text.Append("void");
@@ -728,6 +784,10 @@ VmFaultKind FakeHost::CallNative(VmHostCall& call) noexcept {
 
 VmFaultKind FakeHost::MakeLiteral(VmHostCall& call) noexcept {
     const FakeBinding& binding = bindings_[call.Binding()];
+    if ((binding.bank == FakeScalarBank ? call.Scalars().Size() : call.Refs().Size()) < 1) {
+        return VmFaultKind::ContractViolation;
+    }
+
     if (binding.bank == FakeScalarBank) {
         call.Scalars()[0] = binding.literal;
         return VmFaultKind::None;

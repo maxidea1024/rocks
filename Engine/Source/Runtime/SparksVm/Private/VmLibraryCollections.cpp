@@ -520,8 +520,16 @@ VmFaultKind ResultValue(C& call) noexcept {
         return VmFaultKind::ContractViolation;
     }
 
+    // 성공 Result는 서술자의 값 배치(bank·slot 수)와 같아야 한다(LC5d1 리뷰 B2 — 다른 bank의 값을
+    // 포인터로 읽지 않는다).
     const uint64* payload = Slots(result);
+    const VmTypeNode& inner = call.Node(receiver.child[0]);
     const bool ok = payload[0] == 0 && result->count > 1;
+    if (ok && (result->valueBank != inner.bank || result->valueSlots != inner.slots ||
+               result->count != 1u + result->valueSlots)) {
+        return VmFaultKind::ContractViolation;
+    }
+
     if (call.ResultNode().bank == VmBuf) {
         VmBuffer* value = ok ? Child(payload[1]) : nullptr;
         VmLibrary::Retain(value);

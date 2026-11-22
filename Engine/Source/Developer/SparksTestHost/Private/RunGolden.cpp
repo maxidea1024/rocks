@@ -1055,6 +1055,15 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
     StringBuilder<MessageInlineBytes> actual(allocator);
     Array<uint64> arguments(allocator);
     VmExecution execution(allocator);
+    // host가 필드에 보관한 버퍼는 어느 출구에서도 놓는다(LC5d1 리뷰 B5 — execution이 host보다 먼저
+    // 선언돼 이 guard가 사라질 때 아직 살아 있다).
+    struct HostGuard {
+        FakeHost& host;
+        VmExecution& execution;
+        ~HostGuard() noexcept {
+            host.ReleaseAll(execution);
+        }
+    } hostGuard{host, execution};
     Array<VmBuffer*> buffers(allocator); // host가 만든 문자열 인자(호출 뒤 놓는다)
     // 형식 오류로 일찍 돌아가도 인자 버퍼를 놓는다.
     struct BufferGuard {
@@ -1180,11 +1189,15 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
                             text.StartsWith("#")
                                 ? TryParseUInt32(StringView(text.Data() + 1, text.ByteCount() - 1))
                                 : Result<uint32>::Failure(ErrorCode::InvalidArgument);
-                        const uint64 handle = number && number.Value() != 0
-                                                  ? host.ObjectArgument(number.Value(), owner)
-                                                  : 0;
-                        if (handle == 0 || !refArguments.TryPushBack(handle)) {
+                        if (!number || number.Value() == 0) {
                             problem.AppendFormat("cannot read '{}' as the receiver", text);
+                            return;
+                        }
+
+                        // 할당 실패는 사례 실패가 아니라 OutOfMemory다(LC5d1 리뷰 B6).
+                        const uint64 handle = host.ObjectArgument(number.Value(), owner);
+                        if (handle == 0 || !refArguments.TryPushBack(handle)) {
+                            values.OutOfMemory();
                         }
 
                         return;

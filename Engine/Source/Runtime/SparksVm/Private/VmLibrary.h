@@ -90,8 +90,9 @@ struct VmLibraryEntry {
     VmLibraryFunction function;
 };
 
-// 값 묶음 하나의 slot 상한이다(컨테이너 표지·서술자 — VmContainers의 표지 상한과 같다).
-inline constexpr uint32 VmMaxValueSlots = 32;
+// 값 묶음 하나의 slot 상한이다(서술자 — 컨테이너 표지의 5비트 slot 필드 최댓값과 같다: 32 이상은
+// 표지에서 잘려 0 stride가 된다, LC5d1 리뷰 B1).
+inline constexpr uint32 VmMaxValueSlots = 31;
 
 // 실행 하나의 `Log.*` 글자 상한이다(메모리 예산 밖의 host 메모리를 무한히 쓰지 않게).
 inline constexpr usize VmMaxLogBytes = 1024 * 1024;

@@ -122,7 +122,7 @@ public:
 class VmLinkedModule final {
 public:
     explicit VmLinkedModule(Allocator& allocator) noexcept
-        : hosts_(allocator), languageIndex_(allocator), languages_(allocator) {
+        : hosts_(allocator), languageIndex_(allocator), languages_(allocator), imports_(allocator) {
     }
 
     VmLinkedModule(const VmLinkedModule&) = delete;
@@ -136,6 +136,16 @@ public:
         return host_;
     }
 
+    // 다른 모듈 함수 참조를 모두 풀었는지다(LinkImports — 6.5절). 풀기 전에는 Call이 거부한다.
+    bool ImportsLinked() const noexcept {
+        return importsLinked_;
+    }
+
+    // LinkModule이 성공했는지다(실패한·링크하지 않은 객체는 Call이 거부한다 — LC5d1 리뷰).
+    bool Linked() const noexcept {
+        return linked_;
+    }
+
     // ref의 host 묶음이다(host가 묶지 않는 참조는 0).
     const VmHostBinding& HostBinding(uint32 ref) const noexcept {
         return hosts_[ref];
@@ -145,6 +155,14 @@ private:
     friend class VmExecution;
     friend Result<void> LinkModule(const BytecodeModule& module, VmHost* host, VmLinkedModule& out,
                                    StringBuilderBase& reason) noexcept;
+    friend Result<void> LinkImports(Span<VmLinkedModule* const> modules,
+                                    StringBuilderBase& reason) noexcept;
+
+    // 다른 모듈 함수 참조의 대상이다(참조 번호별 — ImportedFunction이 아니면 비었다).
+    struct Import {
+        const VmLinkedModule* module = nullptr;
+        uint32 function = NoBytecodeIndex;
+    };
 
     const BytecodeModule* module_ = nullptr;
     VmHost* host_ = nullptr;
@@ -153,6 +171,9 @@ private:
     // 모양은 VM 안의 것이라 단어 배열로 둔다.
     Array<uint32> languageIndex_;
     Array<uint64> languages_;
+    Array<Import> imports_;
+    bool importsLinked_ = false;
+    bool linked_ = false;
 };
 
 // verifier를 통과한 module의 참조를 모두 묶는다(6.1절). host가 nullptr이면 host가 묶어야 하는
@@ -161,5 +182,11 @@ private:
 // <이름>): <사유>` 또는 `function <이름> word <주소>: <사유>`), 할당 실패는 OutOfMemory.
 Result<void> LinkModule(const BytecodeModule& module, VmHost* host, VmLinkedModule& out,
                         StringBuilderBase& reason) noexcept;
+
+// 링크된 modules의 다른 모듈 함수 참조(`<import 경로>:Owner.Name`)를 modules 안의 함수로 푼다(6.5절
+// — 순환 import도 된다). 대상의 함수 표 모양(bank별 매개변수 수·반환 bank·slot 수)이 참조 서술자와
+// 같아야 한다. 실패: 대상 모듈·함수가 없거나 모양이 다르면 InvalidArgument(reason에 `ref <번호>
+// (import <이름>): <사유>`), 할당 실패는 OutOfMemory. 모든 module의 ImportsLinked가 참이 된다.
+Result<void> LinkImports(Span<VmLinkedModule* const> modules, StringBuilderBase& reason) noexcept;
 
 } // namespace rocks::sparks

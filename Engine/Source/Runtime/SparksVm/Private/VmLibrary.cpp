@@ -361,18 +361,43 @@ bool VmLanguageMutates(StringView name) noexcept {
 
 bool VmLibrary::Deferred(StringView name) noexcept {
     // 대기(LC6)와 host가 필요한 부록 B 항목(SparksVm 1절 LC5c 표).
-    constexpr StringView Names[] = {"Delay", "NextTick", "NextFixedTick", "All", "Race"};
-    constexpr StringView Owners[] = {"Time.",  "Assets.",  "Soft.",        "LoadRequest.",
-                                     "Tag.",   "TagSet.",  "InputAction.", "Text.",
-                                     "CVars.", "CVarRef.", "Settings.",    "Class."};
-    for (const StringView entry : Names) {
-        if (entry == name) {
-            return true;
-        }
+    // 정확한 이름이다(접두어로 받으면 오타 이름이 로드를 통과한다 — LC5d1 리뷰). 타입 인자
+    // (`CVars.Find<int>`)는 떼고 본다.
+    constexpr StringView Names[] = {"Delay",
+                                    "NextTick",
+                                    "NextFixedTick",
+                                    "All",
+                                    "Race",
+                                    "Time.Delta",
+                                    "Time.FixedDelta",
+                                    "Time.UiDelta",
+                                    "Time.GameSeconds",
+                                    "Time.Frame",
+                                    "Assets.LoadAll",
+                                    "Assets.Find",
+                                    "Soft.Load",
+                                    "LoadRequest.IsDone",
+                                    "LoadRequest.Progress",
+                                    "Tag.Find",
+                                    "TagSet.Has",
+                                    "TagSet.HasAny",
+                                    "TagSet.HasAll",
+                                    "TagSet.Add",
+                                    "TagSet.Remove",
+                                    "InputAction.Value",
+                                    "Text.Find",
+                                    "CVars.Find",
+                                    "CVarRef.Value",
+                                    "Settings.Get",
+                                    "Class.Create"};
+    usize end = name.ByteCount();
+    for (usize index = 0; index < name.ByteCount() && end == name.ByteCount(); ++index) {
+        end = name.Data()[index] == '<' ? index : end;
     }
 
-    for (const StringView owner : Owners) {
-        if (name.StartsWith(owner)) {
+    const StringView base(name.Data(), end);
+    for (const StringView entry : Names) {
+        if (entry == base) {
             return true;
         }
     }

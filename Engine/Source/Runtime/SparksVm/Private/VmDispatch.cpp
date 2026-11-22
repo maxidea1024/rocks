@@ -45,16 +45,17 @@ int VmCompareStrings(const VmBuffer* left, const VmBuffer* right) noexcept {
 } // namespace
 
 Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
-    const BytecodeModule& module = *module_;
-    const uint32* const words = module.words.Data();
     uint64 steps = 0;
     uint32 pc = frames_[frames_.Size() - 1].pc;
     uint64* s = nullptr;
     uint64* r = nullptr;
     VmBuffer** b = nullptr;
     // frame이 바뀌거나 stack이 다시 할당되면 bank 포인터를 다시 잡는다.
+    // frame의 모듈도 바뀐다(다른 모듈 함수 — 6.5절): 실행 문맥의 지금 모듈을 frame의 것으로 둔다.
     auto reload = [&]() noexcept {
         const Frame& frame = frames_[frames_.Size() - 1];
+        link_ = frame.link;
+        module_ = &frame.link->Module();
         s = scalars_.Data() + frame.base[0];
         r = refs_.Data() + frame.base[1];
         b = buffers_.Data() + frame.base[2];
@@ -69,7 +70,7 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
     auto leave = [&](uint32 bank, uint32 count, VmCallResult& out) noexcept -> Result<bool> {
         const Frame& frame = frames_[frames_.Size() - 1];
         const usize bufferBase = frame.base[2];
-        const usize frameEnd = bufferBase + module.functions[frame.function].frame[2];
+        const usize frameEnd = bufferBase + module_->functions[frame.function].frame[2];
         const bool buffers = bank == static_cast<uint32>(BytecodeBank::Buf);
         if (frames_.Size() == 1) {
             if (buffers) {
@@ -119,6 +120,8 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
         }
 
         ++steps;
+        const BytecodeModule& module = *module_;
+        const uint32* const words = module.words.Data();
         const uint32 word = words[pc++];
         const Opcode op = DecodeOpcode(word);
         const uint32 a = DecodeA(word);
@@ -576,6 +579,12 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
 
             const uint32 bank = c >> 5;
             const uint32 slots = c & 0x1F;
+            // 값 배치가 명령의 C와 같아야 한다(LC5d1 리뷰 B2 — count 밖·다른 bank를 읽지 않는다).
+            if (value->valueBank != bank || value->valueSlots != slots ||
+                value->count != 1u + slots) {
+                return MakeFault(VmFaultKind::ContractViolation, at, steps);
+            }
+
             for (uint32 slot = 0; slot < slots; ++slot) {
                 if (bank == static_cast<uint32>(BytecodeBank::Buf)) {
                     VmBuffer* child =
@@ -645,9 +654,15 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
             break;
         }
         case Opcode::Call: {
-            const BytecodeRef& ref = module.refs[DecodeBx(word)];
-            if (ref.kind != BytecodeRefKind::Function) {
-                // 다른 모듈·가상 호출은 LC5d·LC6(V5).
+            const uint32 refIndex = DecodeBx(word);
+            const BytecodeRef& ref = module.refs[refIndex];
+            // 같은 모듈 함수, 또는 LinkImports가 푼 다른 모듈 함수(6.5절).
+            const VmLinkedModule* target = link_;
+            uint32 callee = ref.detail;
+            if (ref.kind == BytecodeRefKind::ImportedFunction) {
+                target = link_->imports_[refIndex].module;
+                callee = link_->imports_[refIndex].function;
+            } else if (ref.kind != BytecodeRefKind::Function) {
                 return MakeFault(VmFaultKind::ContractViolation, at, steps);
             }
 
@@ -657,13 +672,19 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
 
             Frame& caller = frames_[frames_.Size() - 1];
             const BytecodeFunction& current = module.functions[caller.function];
+            const BytecodeFunction& called = target->Module().functions[callee];
             uint32 base[BytecodeBankCount] = {};
             for (uint32 bank = 0; bank < BytecodeBankCount; ++bank) {
                 base[bank] = caller.base[bank] + current.registers[bank];
+                // 다른 모듈 함수의 매개변수가 창에 들어가야 한다(같은 모듈은 verifier가 본다).
+                if (called.parameters[bank] >
+                    uint32(current.frame[bank]) - current.registers[bank]) {
+                    return MakeFault(VmFaultKind::ContractViolation, at, steps);
+                }
             }
 
             caller.pc = pc;
-            if (auto pushed = PushFrame(ref.detail, base); !pushed) {
+            if (auto pushed = PushFrame(*target, callee, base); !pushed) {
                 return failed(pushed.Error());
             }
 

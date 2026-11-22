@@ -309,7 +309,8 @@ uint32 BytecodeEncoder::SymbolRef(BytecodeRefKind kind, uint32 symbol, uint32 ty
 
     // native 함수·객체 필드는 host가 링크 때 대조할 서술자를 싣는다(SparksVm 6.1절).
     if (arguments == NoBytecodeIndex &&
-        (kind == BytecodeRefKind::NativeFunction || kind == BytecodeRefKind::Field)) {
+        (kind == BytecodeRefKind::NativeFunction || kind == BytecodeRefKind::Field ||
+         kind == BytecodeRefKind::ImportedFunction)) {
         arguments = HostDescriptor(kind, symbol);
     }
 
@@ -328,7 +329,10 @@ uint32 BytecodeEncoder::HostDescriptor(BytecodeRefKind kind, uint32 symbol) noex
                          entry.kind == SymbolKind::Field ? checker_.FieldType(symbol) : entry.type);
     } else if (entry.signature != NoSignature) {
         const Signature& signature = c_.signatures_[entry.signature];
-        bool first = (entry.flags & SymbolFlags::Static) != 0;
+        // 수신자: 엔진 함수는 static이 아니면, Sparks 함수는 메서드면 `x`(this)다.
+        bool first = entry.kind == SymbolKind::EngineFunction
+                         ? (entry.flags & SymbolFlags::Static) != 0
+                         : entry.kind != SymbolKind::Method;
         if (!first) {
             descriptor.Append("x");
         }

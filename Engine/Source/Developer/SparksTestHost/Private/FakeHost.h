@@ -86,7 +86,7 @@ private:
     FakeObject* Find(uint64 handle) noexcept;
     uint64 NewObject(StringView type) noexcept;
     uint64 HandleOf(uint32 index) const noexcept;
-    FakeFieldValue* FieldOf(FakeObject& object, uint64 binding) noexcept;
+    FakeFieldValue* FieldOf(FakeObject& object, uint64 binding, VmExecution& execution) noexcept;
     void Record(StringView text) noexcept;
 
     Allocator* allocator_;

@@ -126,8 +126,9 @@ public:
     // 한다(platform::RunWithDeterministicFloatingPoint). buffers는 빌려 준다(호출이 참조를 더하고
     // host의 참조는 그대로다 — null은 null 값). module은 verifier를 통과해야
     // 한다(ReadBytecodeFile·VerifyBytecode — 통과하지 않은 모듈은 정의되지 않은 동작). 이전 호출의
-    // 반환 버퍼는 먼저 놓는다. 실패: function이 범위 밖이거나 인자 slot 수가 다르면
-    // InvalidArgument, stack·버퍼 할당 실패는 OutOfMemory(그때 실행 중이던 버퍼는 모두 놓는다).
+    // 반환 버퍼는 먼저 놓는다. 실패: function이 범위 밖이거나 인자 slot 수가 다르거나 import를 아직
+    // 풀지 않았으면(LinkImports) InvalidArgument, stack·버퍼 할당 실패는 OutOfMemory(그때 실행
+    // 중이던 버퍼는 모두 놓는다).
     Result<VmCallResult> Call(const VmLinkedModule& linked, uint32 function,
                               Span<const uint64> scalars, Span<const uint64> refs,
                               Span<VmBuffer* const> buffers,
@@ -211,6 +212,7 @@ private:
     };
 
     struct Frame {
+        const VmLinkedModule* link = nullptr; // 이 frame 함수의 모듈(6.5절)
         uint32 function = 0;
         uint32 pc = 0; // 이 frame으로 돌아왔을 때 실행할 명령의 모듈 단어 번호
         uint32 base[BytecodeBankCount] = {};
@@ -230,7 +232,8 @@ private:
         VmBuffer** b = nullptr;
     };
 
-    Result<void> PushFrame(uint32 function, const uint32 (&base)[BytecodeBankCount]) noexcept;
+    Result<void> PushFrame(const VmLinkedModule& linked, uint32 function,
+                           const uint32 (&base)[BytecodeBankCount]) noexcept;
     Result<VmCallResult> Run(const VmLimits& limits) noexcept;
     Result<VmCallResult> MakeFault(VmFaultKind kind, uint32 word, uint64 steps) noexcept;
     // 실행 중 Buf stack을 모두 놓고 frame을 비운다(fault·실행 끝·할당 실패).

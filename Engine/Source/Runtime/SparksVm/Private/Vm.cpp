@@ -62,6 +62,10 @@ Result<VmCallResult> VmExecution::Call(const VmLinkedModule& linked, uint32 func
                                        Span<const uint64> scalars, Span<const uint64> refs,
                                        Span<VmBuffer* const> buffers,
                                        const VmLimits& limits) noexcept {
+    if (!linked.Linked() || !linked.ImportsLinked()) {
+        return Result<VmCallResult>::Failure(ErrorCode::InvalidArgument);
+    }
+
     const BytecodeModule& module = linked.Module();
     if (function >= module.functions.Size()) {
         return Result<VmCallResult>::Failure(ErrorCode::InvalidArgument);
@@ -93,7 +97,7 @@ Result<VmCallResult> VmExecution::Call(const VmLinkedModule& linked, uint32 func
     refs_.Clear();
     buffers_.Clear();
     const uint32 base[BytecodeBankCount] = {};
-    if (auto pushed = PushFrame(function, base); !pushed) {
+    if (auto pushed = PushFrame(linked, function, base); !pushed) {
         for (VmBuffer* buffer : buffers) {
             Release(buffer);
         }
@@ -134,12 +138,12 @@ Result<VmCallResult> VmExecution::Call(const VmLinkedModule& linked, uint32 func
     return static_cast<Result<VmCallResult>&&>(job.result);
 }
 
-Result<void> VmExecution::PushFrame(uint32 function,
+Result<void> VmExecution::PushFrame(const VmLinkedModule& linked, uint32 function,
                                     const uint32 (&base)[BytecodeBankCount]) noexcept {
     // 부르는 함수의 frame은 창 base에서 시작한다. 매개변수(창의 앞)는 부르는 쪽이 두었고, 나머지
     // 레지스터는 0·null로 채운다(V2 — 초기화 전 읽기도 정해진 값을 본다). Buf slot에 남은 값(앞선
     // 호출의 창)은 놓는다.
-    const BytecodeFunction& entry = module_->functions[function];
+    const BytecodeFunction& entry = linked.Module().functions[function];
     Array<uint64>* stacks[] = {&scalars_, &refs_};
     for (uint32 bank = 0; bank < BytecodeBankCount; ++bank) {
         const usize begin = usize(base[bank]) + entry.parameters[bank];
@@ -175,6 +179,7 @@ Result<void> VmExecution::PushFrame(uint32 function,
     }
 
     Frame frame;
+    frame.link = &linked;
     frame.function = function;
     frame.pc = entry.firstWord;
     for (uint32 bank = 0; bank < BytecodeBankCount; ++bank) {

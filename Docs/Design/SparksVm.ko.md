@@ -14,7 +14,7 @@
 | LC5b3 struct·Result | `.sparkc` 형식 버전 2의 `TYPE` 구역(struct 필드 배치·상수 기본값 원형, enum case 이름 — BC §5), `NEWS`·`GETSF`·`SETSF`, enum `TOSTR`, Buf `Result`(`OK`·`ERR`·`TRY.B`·`RETERR.B`·`ENDEXEC.B`) | struct·Result corpus golden |
 | LC5c 표준 API | 부록 B의 언어 함수·속성(`CALLL` — §6a): Math·벡터·quat·Rotator·Transform·mat4·문자열·Format·Parse·Array·Map·Set·Result·Log·Assert·Random. 시간·대기(`Delay`·`NextTick`·`All`·`Race`)·에셋·Tag·TagSet·InputAction·Text·CVars·Settings·Class는 host가 필요하므로 LC5d·LC6 | 함수마다 양성·음성(fault) corpus |
 | LC5d1 링크·host 기본 | 링크 단계(`VmLinkedModule` — 언어 함수·native·필드·문맥·리터럴 참조를 로드 때 모두 묶고 못 묶으면 거부), `VmHost`: 객체 handle 생존(`ISSOME.R`·`EQ.R`·`NE.R`), 필드(`GETF`·`SETF`), 문맥 이름(`GETCTX`), native 호출(`CALLN`), 리터럴(`NEWLIT`), 컴파일러의 native·필드 서술자 | SparksTestHost의 schema 기반 가짜 host로 `.run`의 객체 인자·host 호출 기록 golden, 링크 거부 시험 |
-| LC5d2 가상·모듈 사이·엔진 타입 | `CALLV`(host가 대상 결정 — native 또는 Sparks 함수), 다른 모듈 함수(`CALL` ImportedFunction — 링크가 host의 모듈 표로 푼다, frame마다 모듈), `CAST`(`as?` — host 타입 판정), 엔진 struct의 `NEWS`(host 배치·기본값), 엔진 enum·`Name`·`Tag`의 `TOSTR`(host 이름 표), `TagSet`·`Text`의 0 값 | 여러 모듈 사례·가상 호출·엔진 타입 corpus |
+| LC5d2 가상·모듈 사이·엔진 타입 | `CALLV`(host가 대상 결정 — native 또는 Sparks 함수), 다른 모듈 함수(`CALL` ImportedFunction — 링크가 host의 모듈 표로 푼다, frame마다 모듈), `CAST`(`as?` — host 타입 판정), 엔진 struct의 `NEWS`(host 배치·기본값), 엔진 enum·`Name`·`Tag`의 `TOSTR`(host 이름 표), `TagSet`·`Text`의 0 값(null이 빈 값 — 6.5절) | 여러 모듈 사례·가상 호출·엔진 타입 corpus |
 
 대기(`AWAIT`)·이벤트(`EMIT`·`AWAITEV`)·RPC 송신·유지 자원 해제(`RELEASE`)의 실행 의미는 LC6이다. LC5에서 VM은 이 명령을 만나면 `ContractViolation` fault로 실행을 끝낸다(LC6 전의 자리 — 결정적이다). 실행 corpus는 그 명령이 없는 동기 함수만 쓴다.
 
@@ -32,7 +32,7 @@
 - **수명:** 레지스터 복사(`MOV.B`·창으로의 이동)는 참조계수 +1, 덮어쓰기는 이전 값 −1(0이면 해제 — 원소의 Buf도 재귀적으로 놓는다. 값 struct는 순환이 없으므로(S0426) 깊이는 타입 깊이로 유한하고, 해제는 명시 stack으로 돌아 재귀 깊이에 기대지 않는다). frame을 내릴 때(`RET`) 반환 값 밖의 Buf 레지스터를, fault·실행 끝에는 모든 frame의 Buf 레지스터를 놓는다. 해제는 실패하지 않는다(SL §9 소유 범위 연산).
 - **ledger와 예산:** 실행 문맥마다 살아 있는 버퍼 수와 할당 byte를 센다(할당 +, 해제 −). 버퍼 하나는 정해진 머리 64 byte(`VmBufferHeaderBytes` — 플랫폼마다 실제 머리 크기가 달라도 같은 계수) + 8 byte 정렬한 내용(컨테이너는 용량만큼의 원소와 해시 색인)이다. AOT도 같은 머리 크기·증가 정책(아래 컨테이너)으로 센다(SL §12.5 — 계수는 VM·AOT가 같다). 새 버퍼가 메모리 예산(`VmLimits::memoryBytes` — 기본 16 MiB, SL §9.3 instance 예산의 LC5 자리)을 넘기거나 단일 버퍼가 16,777,216 원소 또는 64 MiB를 넘으면 그 명령 자리의 `BudgetExceeded`다(할당 위치를 보고 — SL §8.3). 할당자 실패(OS 메모리 부족)는 fault가 아니라 `Call`의 OutOfMemory다. 호출이 끝나 host가 반환 값을 놓으면 ledger는 0이어야 한다(시험이 확인한다).
 - **문자열:** byte 열(UTF-8 — 컴파일러 출력과 host 입력이 UTF-8이다. VM은 다시 검사하지 않는다). `LOADSTR`는 상수 문자열의 새 버퍼를 만든다(실행마다 — 모듈 상수 버퍼 공유는 측정 뒤). `CONCAT A B C`는 창의 Buf B..B+C(조각 — 모두 문자열)를 이어 새 버퍼를 A에 둔다. 비교 `EQ.STR`·`LT.STR`…는 byte 순(SL §3.2), `string?`의 null은 null끼리만 같고 순서 비교에서 null은 어떤 문자열보다 작다(컴파일러는 `string?` 순서 비교를 내지 않지만 정해 둔다). `EQ.B`·`NE.B`는 문자열 값 비교다(컨테이너·struct의 `==`는 언어에 없다 — 아래).
-- **0 값의 남은 자리:** `TagSet`·`Text`·엔진 struct 필드의 0 값(SL §3.2 — 빈 TagSet·빈 Text·schema 기본값)은 host가 필요하므로 LC5d에서 채운다(그때까지 null).
+- **0 값의 남은 자리:** `TagSet`·`Text`의 0 값은 null 버퍼(빈 값 — 6.5절), 엔진 struct 필드의 schema 기본값은 host가 `NEWS` 때 채운다(LC5d2).
 - **`TOSTR` 표기(SL §3.2 보간):** `bool`은 `true`·`false`, 정수는 10진, 실수는 다시 읽으면 같은 값이 되는 가장 짧은 10진(Core 서식 — `float32`는 float 값으로)이고 고정 소수점 표기에 소수점이 없으면 `.0`을 붙인다(`1.0`·`-0.0`·`1e+38`), 수학 타입은 성분을 `, `로 이은 괄호(`(1.0, 2.0, 3.0)` — `Transform`은 Location·Rotation·Scale 묶음 셋의 괄호), 이름·`Tag`는 LC5d(host의 이름 표), enum은 LC5b3(TYPE 구역의 case 이름 — Sparks enum과 언어 enum `Clock`, 엔진 enum은 host 이름 표라 LC5d까지 `ContractViolation`).
 - **COW:** 쓰는 명령(`SETE`·`SETSF`·`APPEND`·`PUT`·`CALL.MUT`)은 참조계수가 1보다 크면 먼저 복제하고 그 레지스터를 새 버퍼로 바꾼다(이전 버퍼는 감소). 순환은 생기지 않는다(closure·참조형 값이 없다 — SL §4.1).
 - **컨테이너(LC5b2):** 원소 배열은 삽입 순서이고 원소 하나는 key slot 묶음 뒤 값 slot 묶음이다(Array는 값만, Set은 원소를 key 자리에, Map은 둘 다). Buf slot은 원소 버퍼의 참조 하나를 가진다. 배치(bank·slot 수)는 명령의 컨테이너 표지에서 정하며 처음 원소를 넣는 명령(`APPEND`·`PUT`·`SETE`)이 버퍼에 적는다 — 빈 컨테이너는 배치가 없어도 된다(읽기는 없음·0을 돌려준다). Map·Set은 원소 배열 뒤에 열린 주소 해시 색인(원소 번호 + 1, 크기는 용량 2배 이상의 2의 거듭제곱)을 두고 key는 Core `HashStringBytes`(문자열 byte)·`MixHash`(slot 비트)로 흩는다 — 순회 순서는 색인과 무관하게 삽입 순이다(SL §6.3 결정적 순회). 용량은 2배로 늘리되(처음 4) 단일 버퍼 상한(원소 수·byte — 색인 포함)에 들어가는 만큼으로 자르고, 필요한 원소 수가 그 상한을 넘을 때만 `BudgetExceeded`다. 늘릴 때 원소는 옮기고(참조계수 그대로) 색인은 다시 만든다. 해시는 씨앗이 없다: 미리 만든 충돌 key가 들어오면 찾기 하나가 O(n)이고 명령어 예산은 이를 1로 센다(알려진 한계 — 실행 문맥 씨앗이나 탐사 수 계수는 버퍼가 실행 문맥 사이를 오가는 LC6에서 정한다).
@@ -82,7 +82,7 @@
 
 ### 6.1 링크(LC5d1)
 
-- **링크 단계:** `LinkModule(allocator, module, host)`가 verifier를 통과한 모듈의 참조 표를 처음부터 끝까지 한 번 묶어 `VmLinkedModule`(모듈 + 참조 번호별 묶음)을 만든다. `VmExecution::Call`은 링크된 모듈만 받는다. 못 묶은 참조가 하나라도 있으면 모듈 전체를 거부하고 `VmLinkError`(참조 번호·종류·이름·사유)를 돌려준다(SL §12 "로드" — 실행 중에 처음 부를 때 발견하는 일이 없다). 언어 함수 묶기(§6a)도 여기로 옮긴다(실행 문맥의 첫 호출 묶기 cache는 없앤다 — 모르는 이름·서술자는 실행 중 `ContractViolation`이 아니라 링크 거부다).
+- **링크 단계:** `LinkModule(module, host, out, reason)`가 verifier를 통과한 모듈의 참조 표를 처음부터 끝까지 한 번 묶어 `VmLinkedModule`(모듈 + 참조 번호별 묶음)을 만든다. `VmExecution::Call`은 링크에 성공한 모듈만 받는다(실패했거나 링크하지 않은 `VmLinkedModule`은 InvalidArgument). 못 묶은 참조가 하나라도 있으면 모듈 전체를 거부하고 `VmLinkError`(참조 번호·종류·이름·사유)를 돌려준다(SL §12 "로드" — 실행 중에 처음 부를 때 발견하는 일이 없다). 언어 함수 묶기(§6a)도 여기로 옮긴다(실행 문맥의 첫 호출 묶기 cache는 없앤다 — 모르는 이름·서술자는 실행 중 `ContractViolation`이 아니라 링크 거부다).
 - **묶는 참조:** `LanguageFunction`(VM 구현 표), `NativeFunction`·`Field`·`Context`·`Literal`(host `Bind`), `Function`(같은 모듈 — verifier가 이미 봄), `StructField`·TYPE이 있는 `Type`(TYPE 구역 — 묶을 것 없음). 그 밖(`ImportedFunction`·`VirtualFunction`·TYPE 없는 `Type`·`Event`·`RpcFunction`)은 LC5d2·LC6이 묶을 때까지 묶음 없음으로 두고, 그 명령은 지금처럼 실행 중 `ContractViolation`이다(V5).
 - **서술자 대조:** 컴파일러는 `NativeFunction` 참조의 `arguments`에 언어 함수와 같은 문법의 피연산자 서술자(§6a — 수신자 먼저, 결과)를, `Field` 참조에는 필드 타입 하나의 서술자(`>v3` — 결과 자리에 필드 타입)를 싣는다. host는 자기 schema의 시그니처를 같은 문법으로 만들어 글자로 비교하고 다르면 묶기를 거부한다(schema와 모듈이 어긋나면 로드에서 막는다 — BC §5의 "native 시그니처 hash"를 대신한다. 글자 비교라 진단이 읽힌다).
 - **필드 명령 대조:** 링크는 함수 명령을 한 번 훑어 `GETF`·`SETF`의 bank·slot 수(C)가 묶은 필드의 배치와 같은지 본다(다르면 거부). 실행 중에는 다시 보지 않는다.
@@ -104,11 +104,11 @@ class VmHost {
 
 - **`VmHostCall`:** 묶음 번호, bank별 창(시작 포인터와 크기 — `CALLN`·`NEWLIT`은 frame base + `registers[bank]`부터 frame 끝까지, `GETF`·`SETF`·`GETCTX`는 대상 레지스터 묶음), 실행 문맥(버퍼를 만들고 놓는 도구 — `NewString`·`NewContainer`·`Retain`·`Release`·`Put`), 할당자 오류 자리. 결과는 결과 bank 창 0번부터다(§6a와 같은 규칙 — 값을 바꾸는 수신자는 없다). Buf 결과는 host가 만든 버퍼의 참조를 넘겨 `Put`으로 둔다(이전 값은 놓는다). host는 창 크기 밖을 쓰지 않는다(넘으면 `ContractViolation`을 돌려준다).
 - **반환:** `VmFaultKind::None`이 성공이다. native 계약 위반은 `ContractViolation`(SL §8.4 — Fatal 금지), 할당자 실패는 `call.error = OutOfMemory`(실행은 `Call`의 OutOfMemory로 끝난다). 그 밖의 fault 종류도 돌려줄 수 있다(`IndexOutOfRange` 등 — 위치는 그 명령).
-- **handle 생존(SL §4.1 약한 참조):** `ISSOME.R`은 0이 아니고 `IsAlive`인 handle만 있음이다. `EQ.R`·`NE.R`은 죽은 handle을 0으로 바꿔 비교한다(파괴된 객체는 null과 같다). 레지스터의 handle 비트는 바꾸지 않는다(읽을 때 판정).
+- **handle 생존(SL §4.1 약한 참조):** `ISSOME.R`은 0이 아니고 `IsAlive`인 handle만 있음이다(host 없이 링크한 모듈에서는 모든 handle이 없음으로 읽힌다 — 객체는 host만 만든다). `EQ.R`·`NE.R`은 죽은 handle을 0으로 바꿔 비교한다(파괴된 객체는 null과 같다). 레지스터의 handle 비트는 바꾸지 않는다(읽을 때 판정).
 - **`GETF`·`SETF`:** 대상 객체가 0이거나 죽었으면 `ContractViolation`이다(컴파일러는 꺼낸 참조에만 내고 파괴는 단계 끝까지 미뤄지므로 동기 실행 안에서는 생기지 않는다 — 생기면 host·컴파일러 버그다). `GETF`의 결과 묶음은 레지스터 A부터(Buf는 host가 넘긴 참조, Ref는 handle — 생존은 쓸 때 판정), `SETF`의 값은 레지스터 B부터 읽기 전용으로 보인다. host가 Buf 값을 보관하면 `Retain`으로 참조를 더하고 바꾸거나 객체를 없앨 때 `Release`한다(그 버퍼는 실행 문맥 ledger에 살아 있는 것으로 남는다 — 아래 V12). `Changed` 후보 기록·`@net` 권한 검사는 host 일이다(LC6·EI7).
 - **`GETCTX A Bx`:** host가 문맥 객체 handle을 Ref A에 둔다(`World`·`Time`… — 늘 살아 있는 객체).
-- **`CALLN Bx`:** 인자는 bank별 창(수신자 먼저 — Ref 창 0번), 결과는 결과 bank 창 0번부터. 대기를 만드는 native(`async`)는 LC6이다(지금 링크는 받되 결과가 대기 handle `w`면 실행 중 `ContractViolation`).
-- **`NEWLIT A`:** 결과는 레지스터 A(결과 bank는 EXTRA)다. 이름 지정 인자가 없으면 host는 레지스터 A 묶음을 결과 창으로 받고, 있으면 인자는 호출 창에 있고 결과를 결과 bank 창 0번에 두면 VM이 A로 옮긴다. host는 리터럴 글자를 묶을 때 미리 검사·변환해 둘 수 있다(`Tag`·`Soft<T>`의 이름).
+- **`CALLN Bx`:** 인자는 bank별 창(수신자 먼저 — Ref 창 0번), 결과는 결과 bank 창 0번부터. 링크는 native 서술자의 피연산자·결과가 창에 들어가는지 본다(`CALLL`과 같은 규칙). 수신자의 생존·non-null 같은 schema 전제조건은 host thunk가 보고 위반은 `ContractViolation`이다(SL §8.4). 대기를 만드는 native(`async`)는 LC6이다(지금 링크는 받되 결과가 대기 handle `w`면 실행 중 `ContractViolation`).
+- **`NEWLIT A`:** 결과는 레지스터 A(결과 bank는 EXTRA — 링크가 묶음의 bank와 같은지, A부터 결과 묶음이 frame 안인지, 이름 지정 인자가 있으면 창이 결과를 담는지 본다)다. 이름 지정 인자가 없으면 host는 레지스터 A 묶음을 결과 창으로 받고, 있으면 인자는 호출 창에 있고 결과를 결과 bank 창 0번에 두면 VM이 A로 옮긴다. host는 리터럴 글자를 묶을 때 미리 검사·변환해 둘 수 있다(`Tag`·`Soft<T>`의 이름).
 
 ### 6.3 SparksTestHost의 가짜 host(LC5d1)
 
@@ -116,6 +116,16 @@ class VmHost {
 - 필드: 처음 읽으면 0 값이다. 단 non-null 객체 타입 필드(`World.Audio`)는 처음 읽을 때 그 타입의 새 객체를 만든다(엔진의 하위 객체처럼 — 결정적 번호). 쓴 값은 사례 끝까지 남는다(`.run` 줄 사이에도 — host 상태는 사례 하나에 하나).
 - native: 이름별 일반 동작 — 객체(또는 `T?` 객체) 결과는 그 타입의 새 객체, 숫자·bool은 0 값, 문자열은 빈 글자, `void`는 없음. `RequestDestroy`는 수신자를 바로 죽인다(generation 증가 — 파괴 지연은 LC6이 World bridge에서 한다. 여기서는 생존 판정을 시험한다). 호출마다 `  host <이름>(<인자>) -> <결과>` 기록을 남긴다.
 - 문맥 이름은 사례마다 하나의 객체(처음 쓸 때 만든다). 리터럴 `Tag`·`Soft<T>`는 글자를 이름 표에 넣고 그 번호(Scalar)를 돌려준다(빈 글자는 거부).
+
+### 6.5 모듈 사이·가상 호출과 엔진 타입(LC5d2)
+
+- **모듈 사이 호출:** `LinkModule`은 `ImportedFunction` 참조를 묶지 않고 둔다. 한 실행 단위의 모듈을 모두 링크한 뒤 `LinkImports(modules, reason)`가 참조 이름(`<import 경로>:Owner.Name`)의 경로로 모듈(`module.path`)을, 이름으로 함수를 찾아 (링크된 모듈, 함수 번호)로 묶는다(순환 import가 있어도 된다 — 모두 링크한 뒤 푼다). 컴파일러는 `ImportedFunction` 참조에도 서술자(같은 문법 — 수신자 `x` 먼저)를 싣고 링크는 대상 함수의 함수 표 모양(bank별 매개변수 수·반환 bank·slot 수)과 대조한다(어긋나면 거부). 풀지 못한 import가 있는 모듈은 `Call`이 InvalidArgument로 막는다(import를 푼 뒤에만 실행).
+- **frame의 모듈:** frame은 자기 링크된 모듈을 가진다. 다른 모듈 함수를 부르면 그 모듈의 명령·상수·참조 표로 바꿔 실행하고 `RET`이 부른 쪽 모듈로 돌아온다. 창 규칙은 같은 모듈 `CALL`과 같다(부르는 쪽 frame의 할당 수 위 — 대상 함수의 매개변수가 창에 들어가는지는 실행 중에 본다: 들어가지 않으면 `ContractViolation`).
+- **`CALLV Bx`:** `VirtualFunction` 참조(이름 `Owner.Method`, 서술자)는 host가 묶는다. 실행 중 VM은 수신자(Ref 창 0번)를 `VmHost::ResolveVirtual`에 넘기고 host는 대상을 돌려준다: native(묶음 번호 — `CallNative`처럼 부른다) 또는 Sparks 함수(링크된 모듈, 함수 번호 — `CALL`처럼 frame을 만든다). 수신자가 죽었거나 0이면 `ContractViolation`(컴파일러는 꺼낸 참조에만 낸다). host는 Sparks 클래스의 override 표(클래스 → 메서드 → 함수)를 가진다(EI2 ScriptRuntime이 타입 등록으로 만든다 — 가짜 host는 Compilation의 클래스·기반 사슬에서 만든다).
+- **`CAST A B` + Type:** TYPE이 없는 Type 참조(엔진 타입·Sparks 클래스·interface)는 host가 묶고, 실행 중 `VmHost::IsA(handle, 묶음)`이 참이면 A ← B, 아니면 0이다(죽은 handle은 0).
+- **엔진 struct:** TYPE이 없는 struct Type 참조는 host가 bank별 slot 수를 돌려주고(`VmHostBinding::structSlots`), `NEWS`는 그 배치의 0·null 버퍼를 만든 뒤 `VmHost::InitializeStruct`가 schema 기본값을 채운다(창은 버퍼 안 bank별 구역). 엔진 struct의 `StructField` 참조(보조 번호 없음)는 host가 (bank, slot 수, bank 구역 안 위치)로 묶고 `GETSF`·`SETSF`는 그 위치를 쓴다(링크가 필드 명령의 bank·slot 수를 대조).
+- **이름 표기:** 엔진 enum의 `TOSTR`(TYPE 없는 Type 참조)·`Name`·`Tag`의 `TOSTR`는 `VmHost::AppendName(묶음 또는 0, 값, out)`이 글자를 붙인다(이름 표는 host — Tag는 이름 번호, 엔진 enum은 case 번호).
+- **`TagSet`·`Text`의 0 값:** null 버퍼가 빈 값이다(SL §3.2 "빈 TagSet·빈 Text") — 그 타입의 연산(LC6·EI5 host 함수)이 null을 빈 값으로 받는다. 따로 만들지 않는다.
 
 ### 6.4 결정(LC5d — 권장안 확정)
 
