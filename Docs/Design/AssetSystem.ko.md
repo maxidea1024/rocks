@@ -17,7 +17,7 @@
 | A0-G | GraphicsTypes·Graphics: 차원(2D·Cube·3D·2DArray·CubeArray)·형식(R8·RG8·RGBA8·R16·RG16·RGBA16·R16F·RG16F·RGBA16F·R32F·RG32F·RGBA32F·BGRA8, sRGB 변형)·view swizzle(D3D12 `Shader4ComponentMapping`, OpenGL 채널별 `TEXTURE_SWIZZLE_R/G/B/A` — `TEXTURE_SWIZZLE_RGBA`는 OpenGL ES에 없다)·샘플러 W축 주소·필터 5종(Point·Bilinear·Trilinear·AnisotropicPoint·AnisotropicLinear — 기존 `Nearest`·`Anisotropic`의 이름 변경 포함)·**깊이 비교 샘플러**(비교 함수, 그림자용 — [렌더 기반](RenderBase.ko.md) SX13), 쿠킹 데이터 샘플러 D3D12·OpenGL. 착수 전 반영할 셰이더·렌더 요구: [셰이더 시스템](ShaderSystem.ko.md) 5.2절 G1(backend 중립 정의, Vulkan·Metal·GLES로 옮길 수 있을 것, 지원 표와 `UnsupportedCapability`)·G2(OpenGL 구현은 OpenGL ES 3.2 공통 API, 데스크톱 전용 DSA를 늘리지 않음, ES 확장 의존 형식·필터 조건)·G3(VulkanGraphics가 A0-G 범위를 받음, SH2), 텍스처 desc의 샘플러는 기본값이고 바인딩 때 다른 샘플러를 지정할 수 있게 둔다(렌더 기반 결정 R12, 바인딩 쪽은 GX2). **구현**(2026-11-18, 렌더 세션과 범위 확정 — 형식 목록은 [픽셀 형식](PixelFormat.ko.md) PF1–PF3에서 이미 끝났고, MSAA 텍스처·resolve, mip·slice 개별 view와 attachment, 바인딩 샘플러(GX6·SH2)는 렌더 세션 몫): GraphicsTypes `TextureDimension`(UE `ETextureDimension` 순서)·`CubeFace`(+X·−X·+Y·−Y·+Z·−Z, UE `ECubeFace`·D3D 면 순서와 방향)·`SwizzleSource`·`ChannelSwizzle`(`ComposeSwizzle`)·`CompareFunction`(Graphics `PipelineState.h`에서 옮겨 깊이 상태와 샘플러가 함께 쓴다)·`SamplerDesc`(`Filter` 5종 UE `ESamplerFilter` 순서, `addressW`, `comparison`·`compare`). Graphics `TextureDesc{dimension, depth, arraySize, swizzle}`·`TextureViewDesc::swizzle`·`ValidateTextureDesc`·`CheckTextureLimits`·`TextureSliceCount`·`TextureMipBytes`·`TextureDataBytes`, subresource = mip × slice(`SubresourceRange` slice 범위, `SubresourceStates`, 분리 전이 목록 지문은 slice 범위를 포함하고, begin·end 사이 접근 검사는 기록 장치(RenderBase 시험용 `RecordingDevice`)만 slice까지 본다 — 실제 backend는 이 검사를 하지 않고 D3D12 end·Vulkan begin 때 before 상태를 대조한다), 네 backend(D3D12·D3D11·Vulkan·OpenGL ES)의 차원별 생성·업로드·SRV·`ReadTexture`·전이, RenderGraph 풀 키(차원·깊이·층·swizzle)와 slice 단위 전이 기록. 지원 표는 [렌더 기반](RenderBase.ko.md) 4.4절 GX2 "구현(A0-G)"이다. 스펙과 다르게 정한 것: (1) 지원하지 않는 조합의 오류는 `UnsupportedCapability`가 아니라 Graphics의 기존 장치 능력 오류 `Unsupported`다(`UnsupportedCapability`는 A1에서 Core에 더하며, 그때 Graphics 계약을 함께 바꿀지 정한다). (2) 초기 픽셀·`UpdateTexture`·`ReadTexture`의 배치는 mip 우선(mip 하나 = 그 mip의 모든 slice·깊이 면)이다(mip별 스트리밍과 같은 단위). (3) view swizzle은 원 텍스처의 `TextureDesc::swizzle`을 이어받지 않는 view 형식 기준 대응이다. (4) D3D11은 view swizzle이 없어 항등이 아니면 `Unsupported`(셰이더 대체 없음). `AnisotropicPoint`는 하드웨어 대응이 없는 backend(D3D11, OPTIONS19 `AnisoFilterWithPointMipSupported`가 없는 D3D12)에서 UE처럼 `AnisotropicLinear`로 만든다(2026-11-18 사용자 결정 — 바꾼 사실은 `DeviceFeatures::anisotropicPointFilter` 거짓과 처음 한 번의 Debug 로그로 드러나고, 쿠킹 프로필은 UE 기본값(World 그룹 aniso + point)을 그대로 쓴다). 비교 샘플러는 깊이 형식(Depth·DepthStencil)에만 붙고(아니면 `InvalidArgument`), 그 텍스처의 view는 깊이 plane만 읽는다. (5) 비교 샘플러는 UE의 `SCF_Never`·`SCF_Less`가 아니라 `comparison` 표시 + `CompareFunction` 전체다. (6) 2D가 아닌 RenderTarget·DepthStencil과 다중 plane 형식(D24S8·D32S8·비디오)의 2D 아닌 차원은 `Unsupported`, OpenGL ES의 2D 아닌 깊이 텍스처 `ReadTexture`는 `Unsupported`다. (7) "쿠킹 데이터 샘플러 D3D12·OpenGL"은 AssetRuntime(A1)이 아직 없어 장치 계약 쪽만 했다: `TextureDesc::sampler`의 모든 값(필터·이방성·U·V·W 주소·border 색·비교)을 네 backend가 그대로 쓴다. `TexturePlatformData` → `TextureDesc` 연결은 A1·A5다 | self-test 확장(Sandbox `--self-test` RunTextureChecks: 차원별 왕복·셰이더 읽기·cube 면 방향·slice 전이, staging 업로드(배열·cube·3D, offset 0·512), BC1 배열·cube·3D 왕복, swizzle·A8 합성·view 독립, swizzle은 attachment·ReadTexture에 적용되지 않음, W축 주소, 비교 샘플러(점·선형 PCF), 필터 5종) |
 | A1 | AssetRuntime: 패키지 포맷 v1, `Package`·`Asset`, 에셋 객체 Registry, 쿠킹 매니페스트(`CookedManifest.rman`), 로더(worker IO·압축 해제, Game 스레드 객체 생성, SCC), `AssetManager`(scope·PrimaryAsset·bundle), `CancelToken`·`TaskLane`·`LoadPriority`, Core ErrorCode 추가(`UnsupportedCapability`·`AlreadyRegistered`·`ScopeClosed`), EngineAssets 모듈 | 포맷·SCC·수명·scope 시험 |
 | A2 | AssetDatabase(7.1절, 하위 단계 A2a–A2f): `ProjectLayout`, 경로 정책, 인덱스(검색·의존·별칭·진단·캐시·감시), 저장·dirty, 이동·복제·삭제, 임포트 프레임워크, 각 단계의 13절 명령 | 인덱스·이동·동시 쓰기 시험(하위 단계마다 A1과 같은 완료 조건 넷) |
-| A3 | AssetNugget | 적중·무효화·손상·동시 기록·GC 시험 |
+| A3 | AssetNugget(9.1절, 하위 단계 A3a–A3c — Rockpile 레코드 계약): 키(공통 머리·세대·SCC)·Record(`.rnug` v2)·`NuggetFileSystemBackend`·`NuggetCache`(Memory 계층·세션 고정·소비 입력 대조)·일괄·비동기 요청, `NuggetRockpileBackend`는 계약 | 적중·무효화·손상·동시 기록·GC 시험 |
 | A4 | AssetCooker | 원본 없이 쿠킹·재현성·부분 쿠킹 시험 |
 | A5 | 텍스처: `Texture` 계열, `TextureSource`, ImageCore(BMP·TGA·PNG·PSD·DDS·TIFF·Radiance HDR·무손실 OpenEXR — 12.2절), TextureTools(임포터·빌드·쿠킹 처리기), 클래스 기본값 레코드·차이 쓰기·override 집합·지문(cookKey·Summary 지문 열 — A1 Summary·A4 cookKey 산출물을 이때 고친다, RuntimeClassMetadata '클래스 기본값 결정') | 14절 텍스처 시나리오 |
 | A6 | 남은 명령행(쿠킹·너겟 — A2 명령은 각 하위 단계에서 더한다)·문서·검증 보고 | 14절 결과 기록 |
@@ -32,7 +32,7 @@
 | 비동기 | `WorkerScheduler`(DAG·취소), `AsyncReadFile/AsyncWriteFile`(IOCP, `Flush`) | 로더가 사용(11절) |
 | 파일 | `FileSystem`, `CreateNew`, no-replace Move, `Path`, Win64는 `FILE_SHARE_DELETE` 열기 | → A0-P, VFS(APK) → 후속 |
 | 해시·텍스트 | CRC32, `NameKey`, UTF-8 검증·`CodePointRange` | SHA-256·Unicode·JSON → A0-C |
-| 프로세스 | 없음 | 임포트 worker process는 17절 |
+| 프로세스 | 없음 | 임포트 worker process는 17절. PlatformBase `Process`·`LocalChannel`은 Rockpile R0(별도 작업 — A3는 쓰지 않는다) |
 | 그래픽 | `PixelFormat` 전체(PF1–PF3), 차원 5종·view swizzle·샘플러 W축·필터 5종·비교 샘플러(A0-G 구현) | 바인딩 샘플러 → GX6 |
 | 도구 | `CommandletRegistry`, `Programs/Commandlet` | `asset-*` → A6 |
 | 기존 에셋 코드(미커밋) | AssetRuntime(단일 `.rasset`), AssetTools(BMP·TGA·PSD·PNG 디코더 — PNG는 zlib 대기, 설정·mip 빌드) | 대체. 디코더 → ImageCore, mip → TextureTools |
@@ -48,7 +48,7 @@
 | Importer | AssetDatabase `Importer`, TextureTools `TextureImporter` | 구현(텍스처) |
 | Import Metadata | 에디터 패키지 `ImportRecord` 섹션 | 구현 |
 | Asset Registry(인덱스) | AssetDatabase `AssetIndex` | 구현 |
-| 에셋 너겟 | AssetNugget | 구현(로컬), 공유·원격 backend 계약 |
+| 에셋 너겟 | AssetNugget | 구현(로컬 — `NuggetFileSystemBackend`), `NuggetRockpileBackend`는 계약(Rockpile 서버 R0–R2는 별도 — [Rockpile](Rockpile.ko.md)), C++ 직접 원격 backend 없음 |
 | Cooker | AssetCooker | 구현(비압축 형식), 블록 압축 계약 |
 | Runtime Asset Loader | AssetRuntime `AssetLoader` | 구현(CPU ready), `Render` ready 계약 |
 | Asset Manager | AssetRuntime `AssetManager` | 구현(scope·PrimaryAsset·bundle·즉시 해제), 예산 LRU 해제 후속 |
@@ -656,14 +656,14 @@ A2는 에디터 쪽 에셋 데이터베이스다(4·5.4·5.5·7·8·13·16절). 
 ## 8. 동시성
 
 - 쓰기 잠금: `Intermediate/AssetDatabase.lock`을 `FileLock`(Windows `LockFileEx` + 삭제 공유 없는 열기, POSIX `flock` + 잠근 뒤 dev/ino 재확인)으로 잡은 프로세스만 에셋·별칭 표·인덱스 캐시·쿠킹 출력을 바꾼다. 잠금을 잡는 명령은 13절 목록이며 서비스 API도 같은 규칙이다. 쿠킹도 이 잠금을 쥐므로(에디터 패키지가 쿠킹 중 바뀌지 않게) 같은 프로젝트의 쿠킹은 프로파일과 무관하게 직렬화되고 쿠킹 출력에 따로 잠금을 두지 않는다. 못 잡으면 `Busy`(`--wait=<초>`).
-- 에셋 너겟은 내용 주소 저장소라 잠금 없이 동시 기록(9절).
+- 에셋 너겟(`NuggetFileSystemBackend`)은 키 주소 저장소라 잠금 없이 동시 기록한다(9절 — 같은 키의 동시 게시는 no-replace 이동이 하나만 남기고 나머지는 `Exists`·`Conflict`다). Rockpile backend는 서버가 저장소 잠금을 쥔다(Rockpile 6.8절).
 
 ## 9. 에셋 너겟
 
 - 위치: `<AssetNuggets>` = `Config/AssetNuggets.json`의 `localPath`(기본 `<Project>/Intermediate/AssetNuggets/`). 프로젝트 사이 공유 경로도 쓸 수 있다(내용 주소라 안전하다).
 - 에셋 너겟은 "캐시 키 → 가공 결과" 저장소다. 같은 에셋이라도 설정·대상 플랫폼이 다르면 결과가 다르므로(예: Windows용·Android용 `T_Wall`은 다른 키) **결과에 영향을 주는 입력은 빠짐없이 키에 들어가야 한다.** 빠진 입력은 오래된 결과를 돌려주는 버그가 되고, 불필요한 입력(경로·시각·locale)은 적중률만 떨어뜨린다(계획 §9.1).
-- 키: 처리기 `BuildKey(KeyWriter&)`가 고정 순서·타입 태그로 기록한 바이트의 SHA-256. 모든 처리기에 공통으로 들어가는 것: `"RocksAssetNugget" 형식 버전`, 처리기 Guid·처리기 버전 Guid, 결과를 만드는 **인코더·외부 라이브러리의 이름·버전·설정**(블록 압축 인코더 등 — 비압축이면 없음), **결정적 수학 버전**(A0-C), **툴체인 지문**(컴파일러 버전·컴파일러/링커 바이너리 해시·대상 triple·부동소수점 모델 — 빌드가 상수로 주입, [ReflectionFoundations](ReflectionFoundations.ko.md) 8.1절), 에셋 TypeId, 입력 bulk SHA-256, 결과에 영향을 주는 설정 전체(기본값 포함, float는 bit 패턴, NaN 단일화, `CompressionCacheId` 포함), 대상 프로파일 id와 출력 설정 전체, 의존 입력 (역할, AssetId, 그 의존 에셋의 같은 처리기 build key) 정렬 목록 — 의존의 설정·전이 Build 의존 변화까지 키에 들어간다(Merkle). 경로·시각·locale 제외. 엔진 버전도 넣지 않는다(출력 의미가 바뀌면 처리기 버전 Guid를 바꾼다 — [ReflectionFoundations](ReflectionFoundations.ko.md) 8.2절).
-- Build 의존 순환(지원 SCC, 6.2절)에서는 서로의 key가 서로를 포함해 값이 정해지지 않으므로 SCC 단위로 계산한다: SCC key = SHA-256(구성원의 지역 입력(위 항목 중 의존을 뺀 것)을 AssetId 순으로, SCC 밖 의존 튜플 (구성원 AssetId, 역할, 의존 AssetId, 그 key)의 정렬 목록), 구성원 key = SHA-256(SCC key, AssetId). 순환이 없어도 이 식 하나만 쓴다(구성원 하나인 SCC — 값 체계를 하나로 둔다).
+- 키: 처리기 `BuildKey(KeyWriter&)`가 고정 순서·타입 태그로 기록한 바이트의 SHA-256. 모든 처리기에 공통으로 들어가는 것: `"RocksAssetNugget" 형식 버전`, **에셋 너겟 세대 Guid 둘**(엔진 세대 상수와 프로젝트 세대 — `Config/AssetNuggets.json`의 `generation`, 없으면 null Guid. 둘 다 키에 들어가므로 엔진이 세대를 올리면 프로젝트 재정의와 무관하게 모든 키가 바뀐다. 오염 회수의 유일한 보장 수단 — Rockpile 11.4절), 처리기 Guid·처리기 버전 Guid, 결과를 만드는 **인코더·외부 라이브러리의 이름·버전·설정**(블록 압축 인코더 등 — 비압축이면 없음. 처리기가 결과의 일부로 거는 **결과 압축**은 이름·revision·수준·사전이 키에 들어가고, 에셋 너겟 계층이 저장할 때 거는 **저장 압축**(RCBK)은 키에 넣지 않는다 — Rockpile 5.3절), **결정적 수학 버전**(A0-C), **툴체인 지문**(컴파일러 버전·컴파일러/링커 바이너리 해시·대상 triple·부동소수점 모델 — 빌드가 상수로 주입, [ReflectionFoundations](ReflectionFoundations.ko.md) 8.1절), 에셋 TypeId, 입력 bulk SHA-256, 결과에 영향을 주는 설정 전체(기본값 포함, float는 bit 패턴, NaN 단일화, `CompressionCacheId` 포함), 대상 프로파일 id와 출력 설정 전체, 의존 입력 (역할, AssetId, 그 의존 에셋의 키 — 의존 에셋을 처리하는 그 처리기의 구성원 key) 정렬 목록 — 의존의 설정·전이 Build 의존 변화까지 키에 들어간다(Merkle). 경로·시각·locale 제외. 엔진 버전도 넣지 않는다(출력 의미가 바뀌면 처리기 버전 Guid를 바꾼다 — [ReflectionFoundations](ReflectionFoundations.ko.md) 8.2절).
+- Build 의존 순환(지원 SCC, 6.2절)에서는 서로의 key가 서로를 포함해 값이 정해지지 않으므로 SCC 단위로 계산한다: SCC key = SHA-256(태그, 구성원 (AssetId, 지역 입력 키 — 위 항목 중 의존을 뺀 것의 `NuggetKeyWriter` 키) 정렬 목록, SCC 밖 의존 튜플 (구성원 AssetId, 역할, 의존 AssetId, 그 의존의 구성원 key) 정렬 목록), 구성원 key = SHA-256(태그, SCC key, AssetId) — 정렬·중복 규칙과 Record 주소는 9.1절 결정 3. 순환이 없어도 이 식 하나만 쓴다(구성원 하나인 SCC — 값 체계를 하나로 둔다).
 - 텍스처 키의 구성(위 공통 항목의 텍스처 대응):
 
   | 입력 | 키에 넣는 값 |
@@ -678,12 +678,61 @@ A2는 에디터 쪽 에셋 데이터베이스다(4·5.4·5.5·7·8·13·16절). 
   | 대상 픽셀 형식 | 12.4.3절 규칙으로 확정한 쿠킹 형식·sRGB 표시·swizzle(설정·프로파일에서 유도되지만 유도 규칙의 버그를 막기 위해 결과 형식도 넣는다) |
   | 처리기 버전 | 텍스처 처리기 Guid·버전 Guid |
   | 인코더 버전 | 블록 압축 인코더 라이브러리 이름·버전·품질 설정(비압축 단계에는 없음) |
-- 값: `<AssetNuggets>/<key[0..2]>/<key>.rnug` = `{ "RNUG", 버전, key, 부분 수, 부분별(크기·SHA-256), 본문 }`(텍스처는 mip·slice별 부분).
-- 읽기: 검증 실패 → `CorruptEntry` 진단·삭제·미적중(경합으로 정상 항목을 지워도 재생성되므로 무해).
-- 쓰기: `<AssetNuggets>/tmp/<guid>` 기록·Flush → `Move(no-replace)`. 대상이 있으면 성공(게시 항목 불변). Put 실패는 치명적이지 않다. 전원 차단 뒤의 손상 항목은 읽기 검증이 거른다.
-- 정리: 적중 시 `SetModifiedTime`, `nugget-gc --max-bytes --unused-days`, `tmp` 24시간 경과 삭제.
-- 인터페이스: `NuggetBackend { Get, Put, Remove, Touch }`, 계층 `NuggetCache`(공유·원격은 계약). `--verify-nuggets`(적중 결과 = 재생성 결과 대조).
+- 값: 키 하나의 결과 묶음은 **Record**(Rockpile 5.2절 `RockpileRecord` TLV — echo·값 표·소비 입력·meta)와 값 byte다. `NuggetFileSystemBackend`는 이것을 `.rnug` v2 파일 하나(`<AssetNuggets>/<key[0..2]>/<key>.rnug`)로 둔다(9.1절 A3a). 텍스처는 mip·slice가 값 하나씩이다(ValueId).
+- 읽기: 모든 읽기를 검증한다 — 파일 머리의 Record SHA-256·Record 형식·echo(namespace·key)·파일 크기·조각 해시 표(크기·ChunkTableHash)·값마다 저장 byte SHA-256(ContentHash)과 해제 뒤 원본 SHA-256(RawHash). 검증 실패 → `CorruptEntry` 진단·삭제·미적중(경합으로 정상 항목을 지워도 재생성되므로 무해 — Rockpile R-0 "틀린 적중 0건"). 보장 범위는 읽은 값 전체다(값 단위 선택 — 읽지 않은 값은 검증하지 않는다). byte 범위 부분 읽기(Rockpile 8.6절 — 조각·블록 CRC 수준)는 계약이다.
+- 쓰기: `<AssetNuggets>/tmp/<guid>` 기록·Flush → `Move(no-replace)`. 대상이 있으면 기존 Record의 논리 digest와 비교해 같으면 `Exists`, 다르면 기존 유지·`Conflict`(비결정성·키 누락 진단), 기존이 읽을 수 없거나 손상이면 교체(`Stored`) — Rockpile 6.9절 판정. Put 실패는 치명적이지 않다(`required`일 때만 오류). 전원 차단 뒤의 손상 항목은 읽기 검증이 거른다.
+- 정리: 적중 시 `SetModifiedTime`, `nugget-gc --max-bytes --unused-days`(A6 명령, 서비스는 A3b), `tmp` 24시간 경과 삭제.
+- 인터페이스: 레코드 모델의 일괄·비동기 계약(Rockpile 12절) — `NuggetGetRequest`·`NuggetPutRequest`(호출자 소유, Core Task 관례), 계층 `NuggetCache` = Memory → 선택된 backend 하나(`NuggetFileSystemBackend` 또는 `NuggetRockpileBackend` — 계약), 세션 고정·소비 입력 대조, `NuggetPolicy`(UE `ECachePolicy`와 같은 비트), SCC Record(Rockpile 12.3절). `--verify-nuggets`(적중 결과 = 재생성 결과 대조, A4).
 - 원본 bulk는 에디터 패키지가 권위 저장소(계획 §9.4)이므로 에셋 너겟을 지워도 손실 없음. Virtual Asset(원본 bulk 분리 저장소)은 후속(17절).
+
+### 9.1 A3 세부(2026-11-22 설계 — Rockpile 레코드 계약, 사용자 결정, 교차 검증 2회 반영)
+
+A3는 Rockpile 설계([Rockpile](Rockpile.ko.md) 12·17절)가 요구한 레코드 모델로 처음부터 만든다(사용자 결정 2026-11-22 — 원래 9절의 단건·동기 `NuggetBackend { Get, Put, Remove, Touch }`와 `.rnug` v1은 쓰지 않는다: Rockpile 착수 때 API·형식을 다시 바꾸게 된다). 구현은 `NuggetFileSystemBackend`까지다. `NuggetRockpileBackend`는 계약(설정 `backend: "rockpile"`이면 `Unsupported`)이고 Rockpile 서버·`RockpileClient`·PlatformBase `Process`·`LocalChannel`(Rockpile R0–R2)은 별도 작업이다. ShaderSystem 5.2절 N1–N3(에셋이 아닌 처리기, 여러 부분 값, Rockpile 개정)도 여기서 반영한다. 애매한 곳은 UE 5.8 DerivedDataCache를 따른다(`Developer/DerivedDataCache` — `ICache::Put`·`Get`·`GetValue`·`GetChunks`(`Public/DerivedDataCache.h:56–126`), `ECachePolicy` 비트(`Public/DerivedDataCachePolicy.h:50–78`), 파일 저장소 경로 `Buckets/<bucket>/<b0>/<b1>/<hash>.udd`(`Private/FileSystemCacheStore.cpp:91–96`)).
+
+결정(권장안으로 확정, 교차 검증 2회 — 1회 필수 9·권장 9, 2회 필수 1·권장 3 반영):
+
+1. **모듈**: `Engine/Source/Developer/AssetNugget`(Developer — 에디터·도구만 링크, 게임은 쿠킹 결과만 읽는다). 의존 `Core`·`Serialization`(Record TLV)·`Task`(WorkerScheduler)·`Compression`(RCBK 저장 압축)·`DeterministicMath`(`deterministic::Version`)·`MetaSchema`·`ObjectRuntime`(리플렉션 값 기록 — 결정 2). AssetDatabase에 의존하지 않는다(위치는 호출자가 루트 경로로 준다 — 셰이더 컴파일처럼 프로젝트 없는 엔진 루트 사용도 같은 API, ShaderSystem 10절). 시험은 EngineTests(`Engine/Source/Developer/AssetNugget/Tests`).
+2. **키(A3a)**: `NuggetKeyWriter` — 고정 순서로 타입 태그(u8)와 값을 SHA-256에 흘려 넣는다(byte 열을 모으지 않는다).
+   - 태그: None(값 없음 — Optional unset 등, 다음 필드와 경계가 섞이지 않게)·Bool·U32·U64·I64·F32·F64(bit 패턴 — NaN은 payload·부호와 무관하게 quiet NaN 하나로 단일화, -0과 +0은 다르다)·Guid(16 byte, 정규 인코딩)·Digest(32 byte)·String(u64 길이 + UTF-8, 유효하지 않은 UTF-8은 InvalidArgument)·Bytes(u64 길이 + byte)·List(u64 원소 수 — 원소는 이어지는 기록)·Map(u64 항목 수 — 항목은 키·값 기록 쌍, 키의 정규 인코딩 byte 사전순으로 정렬해 쓴다)·Set(u64 원소 수 — 정규 인코딩 byte 사전순). Map·Set은 그 컨테이너의 항목 인코딩만 임시로 모아 정렬한 뒤 흘려 넣는다(원소 수는 리플렉션 상한 `MaxArrayElements` 안 — 중첩 컨테이너는 안쪽부터 같은 규칙)·Field(u64 길이 + 필드 이름 — 리플렉션 기록이 필드마다 앞에 둔다). 길이 접두가 모든 가변 길이에 있으므로 이웃 기록과 경계가 모호하지 않다.
+   - 리플렉션 값 기록 `WriteReflected(lease, value)`: struct 필드를 선언 순서로 Field(이름) + 태그 + 값으로 쓴다(재귀 — struct·Array·Map·Set·Optional(unset이면 None)·enum(underlying 정수와 열거자 이름)·Transform 등 리플렉션 값 종류 전부. 쓸 수 없는 종류(객체 참조·Opaque)는 Unsupported). 순회는 ReflectionText에 공용 visitor(`VisitValues(target, visitor, options)` — ExportJson과 같은 스키마·경로 연산 순회, 필드 이름·FieldValue·컨테이너 시작·끝을 차례로 넘긴다)를 더해 쓴다 — 순회를 AssetNugget에 따로 만들지 않는다(기반 보강, ReflectionExtensions 10절에 함께 적는다). 이름·타입이 들어가므로 같은 타입 필드를 맞바꾸거나 이름만 바꿔도 키가 바뀐다. 처리기는 설정을 손으로 쓰지 않고 이것으로 쓴다(R-0의 가장 흔한 실패 — 필드 빠뜨림 — 를 막는다). 처리기마다 "설정 필드 하나씩 바꾸면 키가 바뀐다" 변이 시험을 의무로 둔다.
+   - 키 진단: 선택 기록 sink(`NuggetKeyTrace` — 태그·값을 사람이 읽는 줄로)를 writer에 걸 수 있다(미적중 원인 추적·golden 시험 — UE DDC 키 디버깅 대응). 걸지 않으면 비용이 없다.
+   - 공통 머리 `WriteNuggetKeyHeader(writer, {processor, processorVersion}, projectGeneration)`는 `"RocksAssetNugget"`·키 형식 버전(1)·엔진 세대 Guid·프로젝트 세대 Guid(없으면 null)·처리기 Guid·처리기 버전 Guid·`deterministic::Version`·`build::ToolchainFingerprint()` 순서로 쓴다(9절 공통 항목. 인코더 이름·버전·설정은 처리기가 `WriteEncoder(name, version, settings)` 목록으로 이어 쓴다). 키 = `Finish()`의 SHA-256(`NuggetKey`). 에셋이 아닌 처리기(셰이더 job — N1)는 이 키를 Record 키로 그대로 쓴다.
+3. **SCC 키와 Record 주소(A3a)**: 에셋 처리기는 SCC 식(9절)을 쓴다 — `NuggetSccKey(members, external)`.
+   - 입력: 구성원 (AssetId, 지역 입력 키), SCC 밖 의존 튜플 (구성원 AssetId, 역할 문자열, 의존 AssetId, 그 의존의 구성원 key). 함수가 정렬한다(입력 순서와 무관한 결과): 비교는 각 원소의 정규 인코딩 byte(AssetId 16 byte, 역할은 u64 길이 + UTF-8)의 사전순이고 튜플은 필드 순서대로 비교한다. 구성원 AssetId 중복은 InvalidArgument. 외부 튜플의 완전 중복은 하나로 합친다(같은 의존을 같은 역할로 두 번 참조해도 결과는 같다 — 간선 다중도는 처리 결과에 영향이 없다).
+   - SCC key = SHA-256(태그, 정렬된 구성원 목록, 정렬된 외부 튜플 목록). 구성원 key = SHA-256(태그, SCC key, AssetId).
+   - **Record는 늘 SCC key로 저장한다**(구성원 하나인 SCC 포함 — 값 체계 하나, Rockpile 12.3절). 구성원 key는 Merkle 입력(다른 에셋이 이 에셋을 의존할 때 튜플의 key)과 구성원 조회 헬퍼(결정 15)의 입력으로만 쓴다. `inputs`에는 Record 키(SCC key)를 적는다. bucket은 구성원 하나거나 처리기가 하나면 그 처리기 bucket, 처리기가 섞이면 `scc`.
+4. **세대 Guid**: 엔진 상수 `EngineNuggetGeneration`과 프로젝트 세대(`Config/AssetNuggets.json`의 `generation`, 없으면 null Guid)가 둘 다 키에 들어간다(결정 2 공통 머리). 이 파일은 키에 들어가지 않는다는 규칙(Rockpile 12.4절)의 예외는 **프로젝트 세대 값 하나**다 — 파일 해시가 아니라 이 값만 들어가고 `backend`·`required`·`localPath`는 결과에 영향이 없어 넣지 않는다(CoreDataFoundations 132행·Rockpile 12.4절도 이렇게 고친다).
+5. **Record(A3a)**: Rockpile 5.2절 schema 그대로(`RockpileRecord` — 필드 순서 고정, 순서·중복·한도 위반은 `NonCanonical` → 읽기에서 손상). schema Guid·필드 Guid는 A3a가 `AssetNugget`의 `NuggetRecordSchema.h`에 정한다 — 필드 1 namespace(String), 2 bucket(String), 3 key(Bytes 32), 4 values(Bytes — 행 표), 5 inputs(RecordList — 원소 Record { 1 bucket, 2 key, 3 RecordDigest }), 6 meta(Bytes), 순서 = 필드 번호 순, 모르는 필드는 NonCanonical. Rockpile 명세 파일(`RockpileProtocol.json`, Rockpile 8.3절 — R0)이 생기면 같은 값을 그 파일로 옮기고 AssetNugget은 생성 상수를 쓴다(byte 불변 — golden 시험이 지킨다). echo = (namespace `rocks.nuggets`, bucket, key). bucket 규칙 `[a-z][a-z0-9_]{0,63}`(고정 소문자 ASCII 상수 `NuggetBucket` — `texture`·`shader`·`scc`). 값 표는 160 byte 행(ValueId 오름차순·중복 금지, reserved 0). 소비 입력 `inputs` = { bucket, key, RecordDigest } 정렬 목록(정규 인코딩 byte 사전순, 중복 금지). meta ≤ 64 KiB(결정적 정보만). Record ≤ 1 MiB(행 약 6,000). `RecordDigest` = Rockpile 5.3절 정규 인코딩의 SHA-256(저장 표현 — encoding·storedSize·ContentHash·IndexHash·ChunkTableHash — 은 넣지 않는다). encoding은 `Identity`·`Rcbk`를 구현하고 `Codec`(사용자 등록 형식)은 계약(읽기에서 그 코덱이 없으면 미적중 — A3에서는 늘 미적중). 값 하나 상한 16 GiB(Rockpile과 같다). 조각 해시 표(storedSize ≥ 1 MiB 값의 1 MiB 조각 SHA-256)를 만들고 ChunkTableHash를 채운다(같은 저장 압축이면 Rockpile backend와 Record byte가 같다 — `.rnug` v2 안에 표를 둔다).
+6. **`.rnug` v2 파일(A3a)**: `{ magic "RNUG", u32 버전 2, u64 Record byte 수, Record SHA-256(32 byte), Record, 값 저장 byte(ValueId 순, 이어서), 조각 해시 표(해당 값만, ValueId 순) }`, little-endian. 읽기는 머리의 Record SHA-256을 Record byte와 대조한 뒤 Record를 해석한다(meta·inputs·echo 밖 칸의 bit 변조도 손상 — Rockpile이 Record 본문을 blob 해시로 검증하는 것과 같은 보장, 6.7절). 파일 크기는 머리·Record·값·표 합과 정확히 같아야 한다(남는 byte는 손상). 조각 해시 표는 값을 읽지 않을 때도 크기(⌈storedSize / 1 MiB⌉ × 32)와 ChunkTableHash를 대조한다(손상된 표가 나중에 Rockpile로 올라가지 않게). 읽기 함수는 메모리 byte와 범위 reader(파일) 둘을 받는다.
+7. **`NuggetFileSystemBackend`(A3b)**: 루트(`localPath` — 기본 `<Project>/Intermediate/AssetNuggets/`)를 연다. 연산은 동기 내부 API(Get·Put·Touch·ReportCorrupt·Remove — 요청 객체가 worker에서 부른다).
+   - Get은 값 선택(ValueId 목록 — 비면 전체)·`SkipData`·`SkipMeta`를 받고 고른 값만 읽어 검증한다(UE `GetValue`·`GetChunks`의 값 단위 대응). 검증 실패는 `Corrupt` 결과 + 파일 삭제(삭제 실패는 진단만). echo의 key가 다르면 손상, bucket만 다르면(같은 키를 다른 bucket으로 청한 호출자 결함) 삭제하지 않고 `Miss` + 진단이다.
+   - Put은 9절 쓰기 판정. `Exists`면 Touch한다(GC가 방금 다시 만든 항목을 지우지 않게 — UE 파일 저장소도 기존 항목을 갱신한다). 한도 위반 Put(Record 1 MiB·값 16 GiB·잘못된 bucket·정렬 위반 inputs)은 `Dropped` + 진단(InvalidArgument·CapacityExceeded)이다.
+   - 저장 압축: 값의 원본이 임계(`NuggetStoreCompressBytes` 64 KiB) 이상이면 RCBK(Zstd)로 압축하고 더 작을 때만 `Rcbk`로 쓴다 — 게시 전에 왕복 해제해 RawHash를 확인한다(Rockpile 5.4절 writer 계약).
+   - Touch(`SetModifiedTime`)는 최선 노력이다. tmp 24시간 경과 파일은 backend를 열 때와 GC에서 지운다 — 키 잠금 파일(`*.lock`)은 try-lock을 잡은 뒤에만 지운다(잡힌 잠금을 지우지 않는다 — Windows는 지우기가 실패하고 POSIX는 `FileLock`의 dev/ino 재확인이 지킨다). 읽기 전용 루트(공유 경로)면 Get은 되고 Put은 `Dropped` + 진단이다.
+8. **동시성(A3b)**: 두 프로세스가 같은 키를 동시에 게시하면 no-replace 이동 하나만 이기고 다른 쪽은 기존을 읽어 `Exists`·`Conflict`를 판정한다. 읽는 쪽은 이동으로만 나타나는 완전한 파일만 본다.
+   - 손상 항목 교체는 키 단위 잠금(`<root>/tmp/<key>.lock`, PlatformBase `FileLock` — 드문 경로)을 쥐고 기존을 다시 읽어 여전히 손상·읽을 수 없을 때만 `FileSystem::Replace`한다. 잠금 안에서 정상 항목을 만나면 그것을 기존으로 판정한다(`Exists`·`Conflict` — 다른 프로세스의 교체를 덮어쓰지 않는다). 잠금을 못 잡으면(시간 상한) `Dropped`.
+   - Windows: 읽기는 삭제 공유(`FILE_SHARE_DELETE`)로 열어 GC·손상 삭제가 열린 읽기 때문에 실패하지 않게 한다(PlatformBase Win64 열기 규칙). delete-pending 이름으로의 no-replace 이동은 AlreadyExists가 아니라 AccessDenied가 날 수 있다 — 그 Put은 `Dropped`(일시적, 진단). 열린 대상에 대한 Replace 실패·GC 삭제 실패는 그 항목을 건너뛰고 진단한다.
+   - 시험은 결정적 gate(파일 존재 대기 아닌 명시 이벤트)로 두 자식 프로세스의 경합 순서를 고정한다(같은 키 동시 Put, GC 대 Put, 교체 대 교체).
+9. **GC(A3b)**: `Collect({maxBytes, unusedDays}, now)` — 항목 파일을 훑어(디렉터리 `<k0k1>`·이름 `<key>.rnug`만, 다른 이름은 건드리지 않는다) 마지막 사용 시각(수정 시각)이 `unusedDays`보다 오래된 것을 지우고, 남은 합이 `maxBytes`를 넘으면 오래된 것부터(같은 시각이면 키 byte 순) 지운다. 결과는 지운 수·byte·남은 수·byte·건너뛴 수. 지우는 중 다른 프로세스가 같은 항목을 쓰거나 읽어도 무해하다(지운 뒤 Put은 새로 게시되고, 읽기는 미적중).
+10. **`NuggetCache`(A3c)**: Memory 계층(프로세스 안) → backend 하나.
+    - Memory 계층은 Record와 값 byte를 쥔다(byte 상한 `NuggetMemoryBytes` 기본 256 MiB, 값 하나가 `NuggetMemoryValueBytes` 64 MiB를 넘으면 그 값은 쥐지 않는다, 넘치면 오래 쓰지 않은 Record부터 버린다). `SkipData` 적중은 Memory에 넣지 않는다(값이 없다). 축출하지 않는 것은 DigestChanged 뒤 다시 만든 Record(결정 11)뿐이다.
+    - 설정 `Config/AssetNuggets.json` = `{ "backend": "filesystem" | "rockpile" | "off" | "auto", "required": bool, "localPath": 문자열, "generation": Guid 문자열 }`(엄격 JSON, 모르는 키 거부, 없으면 기본값 — filesystem·false·`Intermediate/AssetNuggets`·null 세대). `auto`는 Rockpile이 생기기 전까지 filesystem이다(경고 없음 — R1a에서 Rockpile 접속 시도를 더한다). `rockpile`은 계약(`Unsupported` — 열기 실패). `off`는 모든 Get이 `Miss`·모든 Put이 `Dropped`(진단 없이). 결정은 `NuggetCache::Open` 때 한 번이다(R-2). 도중 backend 실패는 그 연산의 미적중·`Dropped` + 진단이고 `required`면 그 요청 결과가 오류다.
+11. **세션 고정·소비 입력 대조(A3c)**: 캐시가 세션 고정 표 key → (RecordDigest, `inputs`)를 둔다(첫 적중·첫 게시 — 값 byte는 쥐지 않는다, 전체 쿠킹이 거의 모든 Record를 소비해도 표는 키당 수십 byte다). 고정이 있는 키의 Get이 다른 digest를 보면 `DigestChanged`(그 Record에서 받은 값을 버리고 다시 얻거나 다시 만든다). 적중한 Record의 `inputs` 각 항목을 고정 표와 대조해 어긋나면 그 적중을 `Miss`로 다룬다(고정이 없으면 그 digest로 고정). 의존 결과를 소비해 Record를 만드는 처리기는 Put 때 소비한 (bucket, key, digest)를 `inputs`로 준다.
+    - FileSystem backend는 옛 판을 남기지 않으므로(Rockpile의 lease가 없다) DigestChanged 뒤 다시 만든 Record의 Put이 `Conflict`가 되어 디스크에 게시되지 않을 수 있다. 그때 세션이 다시 얻을 곳은 Memory뿐이므로 **DigestChanged 뒤 다시 만든 Record만** 값까지 Memory에 고정 보관한다(축출 제외 — 값 하나 64 MiB 제외 규칙의 예외). 고정 보관 합은 별도 상한 `NuggetPinnedBytes`(기본 256 MiB)를 둔다. 넘으면 고정을 포기하고 그 키를 세션 동안 "캐시 없음"(Get은 늘 `Miss` — 처리기가 다시 만든다, 통계·진단)으로 내린다. 고정 표의 digest는 다시 만든 Record의 것으로 바꾼다.
+12. **일괄·비동기 요청(A3c)**: Rockpile 12.2절 형태 — `NuggetGetRequest`·`NuggetPutRequest`(호출자 소유·고정 주소·이동 금지, `Start(cache, items, scheduler)`, `RequestCancel`, `Handle()`, `Results()`는 handle 완료 뒤, 소멸자는 취소 요청 뒤 완료 대기 — `CompressionTask`와 같은 수명 규칙, 같은 scheduler worker에서 진행 중 요청을 소멸하면 Fatal). 입력은 Start 때 snapshot한다(값 선택 목록 복사, Put 값 버퍼는 소유권 이전). 항목마다 worker 작업 하나이고 요청 handle은 모든 항목 작업에 의존하는 완료 작업이다(결과는 항목 순서 그대로). 대기 Put byte 상한(`NuggetPendingPutBytes` 기본 1 GiB)을 넘는 Put 항목은 즉시 `Dropped`. 취소는 협력적이다(항목 시작 전·값 사이·IO 단위 사이에서 관측 — 진행 중인 파일 IO는 끝낸다).
+    - `NuggetCache::Shutdown(drainMs)` 순서: 새 Start 거부(이후 Start는 모든 항목 `Cancelled`) → 진행 중 Get 취소 요청 → Put은 `drainMs`까지 완료를 기다림 → 남은 Put 취소 요청·진단 → **모든 요청이 실제로 끝날 때까지 기다림**(Rockpile 12.2절 "모든 요청의 완료를 보장"). 진행 중인 요청이 있는데 캐시를 소멸하거나(Shutdown 없이) scheduler worker에서 Shutdown을 부르면 Fatal(계약 위반 — 교착·끊긴 참조를 막는다).
+13. **결과 상태**: `Hit`·`Miss`·`Partial`(`PartialRecord`일 때 일부 값만)·`Stored`·`Exists`·`Conflict`(기존 digest를 함께)·`DigestChanged`·`Corrupt`(그 항목은 지웠다)·`Cancelled`·`Unknown`(commit 여부를 모르는 취소된 Put — 원격 전용. FileSystem의 이동은 동기·원자적이라 commit 여부를 늘 알아 생기지 않는다)·`Dropped`. 결과마다 원인 진단(코드·오류)을 담는다. 캐시는 통계(적중·미적중·Conflict·Corrupt·Dropped 수)를 원자 카운터로 둔다(결정성 gate — Conflict 0건 — 의 근거).
+14. **`NuggetPolicy`**: UE `ECachePolicy`와 같은 비트(`QueryLocal`·`QueryRemote`·`StoreLocal`·`StoreRemote`·`SkipData`·`SkipMeta`·`PartialRecord`·`KeepAlive`, `Default` = Query | Store). A3에는 원격이 없으므로 `QueryRemote`·`StoreRemote`는 원격 쪽 동작이 없다 — `QueryRemote`만 켠 Get은 `Miss`, `StoreRemote`는 `StoreLocal`을 함의한다(Rockpile 5.6절). `KeepAlive`는 Touch만 한다. 항목별 값이 요청 값보다 우선한다.
+15. **SCC Record(A3c)**: SCC 하나를 Record 하나로 둔다(결정 3·Rockpile 12.3절) — key = SCC key, ValueId = (구성원 순번 << 16) | 부분 번호, meta에 구성원 AssetId 목록(16 byte씩, 최대 4,096 — 넘으면 캐시하지 않고 `Dropped` + 진단), 처리기가 섞이면 bucket `scc`. 구성원 key로 찾는 쪽을 위해 `NuggetCache`가 (SCC key, 구성원 AssetId) → 그 구성원 값만 고르는 Get 헬퍼를 둔다.
+16. **명령**: `nugget-gc`·`--verify-nuggets`(`--verify-nuggets-source=local|remote`)는 A6·A4 명령이다(서비스와 시험은 A3). Rockpile이 생기면 `nugget-gc`는 `rockpile gc`로 위임한다(Rockpile 12.4절, 13절 문법).
+
+하위 단계(각각 14절 완료 조건 넷 — 대조표·조합·coverage 사유·리뷰어 판정):
+
+| 단계 | 범위 | 시험 |
+|---|---|---|
+| A3a | ReflectionText `VisitValues`(공용 순회), 키(`NuggetKeyWriter`·태그 전부·`WriteReflected`·`NuggetKeyTrace`·공통 머리·세대 둘·SCC 식), bucket, Record 쓰기·읽기·digest, `.rnug` v2 쓰기·읽기(메모리·범위 reader), 조각 해시 표 | 태그 경계(None·길이 접두·Map·Set 정렬)·NaN payload 변형·-0·유효하지 않은 UTF-8, 공통 머리 항목 하나씩 바꾸면 키가 바뀜, 리플렉션 필드 변이(값·맞바꿈·이름), SCC 입력 순서 섞기·구성원 중복·외부 튜플 중복·같은 접두 역할, Record·머리 byte 변조 위치마다 거부, 한도 경계, golden byte·digest |
+| A3b | `NuggetFileSystemBackend`(Get·Put·Touch·ReportCorrupt·Remove, 검증·손상 삭제, Exists·Conflict·교체·키 잠금, 저장 압축 왕복), GC, tmp 정리(잡힌 잠금 파일 보존) | 적중·미적중, 손상(파일 변조 위치마다)·삭제, bucket만 다른 echo, 같은 키 다른 digest, 두 프로세스 동시 기록·GC 대 Put·교체 대 교체(gate), Windows 삭제 공유·delete-pending 이동·Replace 실패, 읽기 전용 루트, GC 시각·용량·순서, 할당·IO 실패 주입, 실제 디스크 |
+| A3c | `NuggetCache`(Memory 계층·설정·backend 선택·세션 고정·소비 입력·통계), 요청 객체(일괄·비동기·취소·Dropped·Shutdown), SCC Record 헬퍼 | 계층 적중 순서, 설정 파일 오류, off·rockpile 계약, DigestChanged 뒤 재고정과 Memory 축출, 많은 Record를 소비한 세션의 메모리 상한(고정 표만 커짐), 64 MiB 넘는 재생성 Record·고정 상한 초과 → 캐시 없음, inputs 어긋남, SkipData·SkipMeta·PartialRecord 조합, 취소 지점마다, 대기 상한, Shutdown 중 Get·drain, 진행 중 요청이 있는 캐시 소멸(Fatal 자식 프로세스), 4,096 구성원 초과 SCC, `required` 오류 경로, 할당 실패 |
 
 ## 10. Cooker
 
@@ -1176,9 +1225,9 @@ asset-alias-remove <옛 path>
 asset-alias-prune
 asset-orphans-list
 asset-orphans-delete <path>
-asset-cook --profile=<id> [<path>…] [--verify-nuggets]
+asset-cook --profile=<id> [<path>…] [--verify-nuggets] [--verify-nuggets-source=local|remote]
 asset-load-cooked --profile=<id> <AssetId|경로 힌트>
-nugget-gc --max-bytes=<n> --unused-days=<n>
+nugget-gc --max-bytes=<n> --unused-days=<n>   (Rockpile backend면 `rockpile gc`로 위임 — --max-bytes → maxBytes, --unused-days → maxUnusedDays)
 공통 옵션: --project=<dir>(기본: 현재 디렉터리에서 위로 *.rocksproject 탐색), --wait=<초>(쓰기 잠금 대기, 기본 0)
 ```
 
@@ -1205,11 +1254,11 @@ nugget-gc --max-bytes=<n> --unused-days=<n>
 6. 복제본 새 ID·내부 참조 재매핑
 7. 중복 ID·깨진 참조·TypeMismatch·UnsupportedCycle 진단, 하드 순환 SCC 로드
 8. 인덱스 캐시 삭제 후 재구축, 에디터 밖 이동·삭제 후 재검색, 감시 Overflow·RootLost 복구
-9. 에셋 너겟 적중·설정 변경 무효화·툴체인 지문 변경 무효화·손상 복구·두 프로세스 동시 기록·GC
+9. 에셋 너겟 적중·설정 변경 무효화·툴체인 지문 변경 무효화·세대 변경 무효화·손상 복구·두 프로세스 동시 기록·GC(A3는 `NuggetFileSystemBackend` 경로 — Rockpile 경로는 Rockpile R1a가 같은 시나리오를 `NuggetRockpileBackend`로 다시 통과한다)
 10. mip 크기·대표 픽셀(12.5절 표: sRGB·알파·홀수·Unfiltered·PreserveBorder·FlipGreen·NoAlpha(비압축 결과 불변)·Normalize·Volume·Cube)
 11. 쿠킹 패키지만으로 로드, EditorOnly 데이터·필드 부재
 12. 잘못된 패키지(magic·CRC·섹션 순서·겹침·범위·크기)·UnsupportedVersion·NewerVersion
-13. 쿠킹 재현성(에셋 너겟 빈/찬, 두 번 쿠킹 동일 바이트, Debug·Release 도구 사이 동일 바이트), 부분 쿠킹 병합·전체 쿠킹 정리, 실패 시 게시본 불변
+13. 쿠킹 재현성(에셋 너겟 빈/찬, 두 번 쿠킹 동일 바이트, Debug·Release 도구 사이 동일 바이트 — Rockpile 경로는 R1b), 부분 쿠킹 병합·전체 쿠킹 정리, 실패 시 게시본 불변
 14. 저장 실패 주입 시 기존 보존, 열린 대상 교체, 잠금 Busy, ExternalModification
 15. 경로 정책: NFC/NFD 같은 이름, 대소문자 중복, 예약 이름, 길이, CaseCollision
 16. 소프트 참조 비자동 로드, 요청 합류·개별 취소, OnReady 중복 AlreadyRegistered, scope Revoke·ScopeClosed, 의존 retention, lease 해제 후 회수
@@ -2655,6 +2704,8 @@ A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항�
 
 계획 문서에 함께 반영한다.
 
+- 2026-11-22 Rockpile 17절의 AssetSystem 개정 반영(A3 착수, 사용자 결정 — Rockpile 레코드 계약): 1절 A3 행, 2절 프로세스 행, 3절 에셋 너겟 상태, 8절 동시 기록 문장, 9절(세대 Guid 둘·결과 압축과 저장 압축·Record·읽기 검증 보장 범위·쓰기 판정·인터페이스), 9.1절 A3 세부, 13절(`--verify-nuggets-source`·`nugget-gc` 위임), 14절 시나리오 9·13, 18절 계약 목록. 같은 날 CoreDataFoundations 132행·Rockpile 12.4절(프로젝트 세대 예외)도 고쳤다. Rockpile 17절의 나머지(계획 문서·Compression·PlatformLayer 등)는 Rockpile 서버 착수 때 반영한다.
+
 - 하드 참조 = 다른 패키지 객체로의 `ObjectRef`(에셋 객체 Registry 안), 소프트 = `SoftObjectRef<T>`(AssetId + 객체 경로), World 객체 → 에셋은 `SoftObjectRef` + `AssetLease`(6.3절). §7.1의 `ObjectRef<MaterialAsset>` 예시 수정.
 - 패키지당 대표 에셋 ID = 패키지 ID. 쿠킹 패키지 파일 이름은 `<AssetId>-<패키지 SHA-256 앞 16자>`(내용 주소, 4.2절).
 - §9.1: "AssetRegistry"는 AssetIndex(에디터 패키지 인덱스, 재검색으로 복원되는 캐시)이고, 별칭 표는 인덱스 안이 아니라 `Config/AssetAliases.json`의 버전 관리 사용자 데이터다(재검색으로 복원되지 않는다, 4.3절).
@@ -2672,4 +2723,4 @@ A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항�
 
 후속(이번 범위에 API도 없음): 에디터 UI, GPU 업로드·텍스처 mip 스트리밍(계획 §9.5), equirect Cube, Cube 면 경계 연속 mip, 임포트 worker process, Virtual Asset, VFS, 예산 LRU 해제, 실제 다중 출력 임포터(FBX·glTF), UE의 다른 텍스처 계열(렌더 타깃 에셋·IES `TextureLightProfile`·`RuntimeVirtualTexture`·미디어·동적 텍스처), 일반 에셋 사용자 데이터(`AssetUserData`), 쿠킹 결과 패키징(배포 위치 배치).
 
-계약(API·스키마는 있고 기본값이 아니거나 호출하면 명시 오류)으로 이번에 두는 것은 3·11·12절 표에 있다: 공유·원격 에셋 너겟 backend, 블록 압축, 12.4절 계약 설정(가상 텍스처·스트리밍·보정·색 관리·압축 설정 포함), `ReadyMask::Render`, `TaskLane::Worker`·`Render`.
+계약(API·스키마는 있고 기본값이 아니거나 호출하면 명시 오류)으로 이번에 두는 것은 3·11·12절 표에 있다: `NuggetRockpileBackend`(설정 `backend: "rockpile"` → Unsupported, Rockpile R1a), Record `Codec` encoding(늘 미적중), 너겟 byte 범위 부분 읽기(Rockpile 8.6절), `NuggetPolicy`의 원격 비트(원격 동작 없음), 블록 압축, 12.4절 계약 설정(가상 텍스처·스트리밍·보정·색 관리·압축 설정 포함), `ReadyMask::Render`, `TaskLane::Worker`·`Render`.
