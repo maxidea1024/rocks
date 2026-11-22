@@ -104,7 +104,7 @@ private:
 //   }
 //
 //   return list.Value().End();
-class RecordListWriter {
+class ROCKS_SERIALIZATION_API RecordListWriter {
 public:
     // count가 limits.maxItems를 넘거나 count 4 byte + count × 항목 최소 크기(52)가
     // limits.maxPayloadBytes를 넘으면 CapacityExceeded다(쓰기 전에 거부한다). out의 쓰기 오류를
@@ -159,7 +159,7 @@ private:
 // 부모 Record가 이미 청구했으므로 항목마다 operation 하나(색인)만 청구한다. OpenItem은 언제나 항목
 // Record의 header·TLV 색인만 청구한다(TLV payload를 다시 청구하지 않는다). 그래서 목록 안 struct 안
 // 목록처럼 중첩해도 작업이 깊이 배수로 불어나지 않는다.
-class RecordListReader {
+class ROCKS_SERIALIZATION_API RecordListReader {
 public:
     // 새 예산으로 연다(최상위 목록). itemLimits는 항목 Record와 예산(maxOperations·maxWork)의
     // 한도이고, 목록 payload 전체에는 listLimits.maxPayloadBytes가 적용된다.

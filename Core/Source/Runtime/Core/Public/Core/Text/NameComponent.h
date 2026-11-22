@@ -55,9 +55,9 @@ enum class NameComponentError : uint8 {
 //   if (auto valid = ValidateNameComponent(name, scratch, &reason, &offset); !valid) {
 //       // 도구 계층이 reason·offset으로 InvalidPath 진단을 만든다
 //   }
-Result<void> ValidateNameComponent(StringView component, Allocator& scratch,
-                                   NameComponentError* reason = nullptr,
-                                   usize* offset = nullptr) noexcept;
+ROCKS_CORE_API Result<void> ValidateNameComponent(StringView component, Allocator& scratch,
+                                                  NameComponentError* reason = nullptr,
+                                                  usize* offset = nullptr) noexcept;
 
 // 이름 구성 요소의 대소문자 무시 비교 키를 out 뒤에 붙인다. 키는 TryMakeCaselessKey와 같다
 // (NFC(simple case folding(NFD(x))) — Core/Text/Unicode.h). ASCII만으로 된 이름은 ASCII 소문자화로
@@ -74,6 +74,7 @@ Result<void> ValidateNameComponent(StringView component, Allocator& scratch,
 //       return made;
 //   }
 //   // "Body"·"BODY"·"body"는 같은 키 "body"다.
-Result<void> TryMakeNameComponentKey(StringView component, StringBuilderBase& out) noexcept;
+ROCKS_CORE_API Result<void> TryMakeNameComponentKey(StringView component,
+                                                    StringBuilderBase& out) noexcept;
 
 } // namespace rocks

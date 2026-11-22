@@ -55,10 +55,11 @@ namespace detail {
 
 // 설치된 LogSystem의 빠른 거부 하한(전역 최소와 재정의 중 가장 낮은 레벨)이다. 설치가 없으면 0이라
 // 모든 호출이 느린 경로(설치 전 처리)로 간다. LogSystem이 설치·레벨 변경 때 갱신한다.
-extern uint8 logFastMinimum;
+ROCKS_CORE_API extern uint8 logFastMinimum;
 
-void LogSubmit(LogLevel level, const LogCategory& category, const LogCaptureTemplate& text,
-               const FormatArg* args, usize count) noexcept;
+ROCKS_CORE_API void LogSubmit(LogLevel level, const LogCategory& category,
+                              const LogCaptureTemplate& text, const FormatArg* args,
+                              usize count) noexcept;
 // 설치된 LogSystem 기준 활성 여부다. 설치가 없으면 Warning 이상만 참이고, countDrop이면 거짓일 때
 // 설치 전 버림으로 센다(Lazy가 쓴다).
 bool LogIsEnabledSlow(LogLevel level, const LogCategory& category, bool countDrop) noexcept;
@@ -66,8 +67,9 @@ void LogSubmitLazy(LogLevel level, const LogCategory& category, StringView messa
                    SourceLocation where) noexcept;
 void LogAppendLine(FixedStringBuilder& out, const LogCaptureTemplate& text, const FormatArg* args,
                    usize count) noexcept;
-[[noreturn]] void LogFatal(const LogCategory& category, const LogCaptureTemplate& text,
-                           const FormatArg* args, usize count) noexcept;
+[[noreturn]] ROCKS_CORE_API void LogFatal(const LogCategory& category,
+                                          const LogCaptureTemplate& text, const FormatArg* args,
+                                          usize count) noexcept;
 
 inline bool LogFastReject(LogLevel level) noexcept {
     return static_cast<uint8>(level) <

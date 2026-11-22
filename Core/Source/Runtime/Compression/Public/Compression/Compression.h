@@ -125,7 +125,8 @@ struct CompressionLevelRange {
 };
 
 // 모르는 형식 값이면 InvalidArgument, 해제 전용 형식(Brotli)이면 Unsupported다.
-Result<CompressionLevelRange> TryGetCompressionLevelRange(CompressionFormat format) noexcept;
+ROCKS_COMPRESSION_API Result<CompressionLevelRange>
+TryGetCompressionLevelRange(CompressionFormat format) noexcept;
 
 // 형식 이름의 최대 길이(byte)다.
 inline constexpr usize MaxCompressionFormatNameBytes = 32;
@@ -172,7 +173,7 @@ Result<CompressionFormat> TryFindCompressionFormat(StringView name) noexcept;
 // 검증된 형식·수준 쌍이다. 생성 함수만 만들 수 있어 압축 함수는 만들 때 유효했던 설정을 받는다.
 // 사용자 등록 형식은 설정을 만든 뒤 해제가 시작될 수 있으며, 그 뒤 이 설정을 쓰는 압축 함수·
 // 문맥 생성·비동기 제출·스트림 생성은 InvalidArgument다.
-class CompressionSettings {
+class ROCKS_COMPRESSION_API CompressionSettings {
 public:
     // 수준이 GetCompressionLevelRange 범위 밖이거나 모르는 형식이면 InvalidArgument, 해제 전용
     // 형식(Brotli)이면 Unsupported다.
@@ -206,7 +207,8 @@ inline constexpr usize Lz4MaxInputBytes = 0x7E000000;
 // CapacityExceeded로 실패하지 않는다. Lz4 입력 한계 초과·모르는 형식은 InvalidArgument, 해제
 // 전용 형식(Brotli)은 Unsupported, 계산 overflow는 Overflow다. Lz4Frame은 헤더(최대 19byte) + 64KiB
 // 블록마다 4byte + 원본 + endmark·checksum 8byte다.
-Result<usize> TryGetCompressBound(CompressionFormat format, usize sourceBytes) noexcept;
+ROCKS_COMPRESSION_API Result<usize> TryGetCompressBound(CompressionFormat format,
+                                                        usize sourceBytes) noexcept;
 
 // source를 압축해 destination 앞부분에 쓰고 쓴 byte 수를 반환한다. scratch는 코덱 작업 메모리이며
 // 호출 안에서 모두 반환한다. 필요한 크기는 TryGetCompressBound로 미리 구한다.
@@ -216,18 +218,22 @@ Result<usize> TryCompress(const CompressionSettings& settings, Span<const uint8>
 // source를 압축해 output 뒤에 붙인다. 작업 메모리는 output.GetAllocator()를 쓴다. source가 output
 // 저장소
 // ([Data, Data + Capacity))를 가리키면 InvalidArgument다(성장 중 재할당으로 무효가 되기 때문이다).
-Result<usize> TryCompressAppend(const CompressionSettings& settings, Span<const uint8> source,
-                                Array<uint8>& output) noexcept;
+ROCKS_COMPRESSION_API Result<usize> TryCompressAppend(const CompressionSettings& settings,
+                                                      Span<const uint8> source,
+                                                      Array<uint8>& output) noexcept;
 
 // 작업 메모리 할당기를 따로 지정하는 변형이다.
-Result<usize> TryCompressAppend(const CompressionSettings& settings, Span<const uint8> source,
-                                Array<uint8>& output, Allocator& scratch) noexcept;
+ROCKS_COMPRESSION_API Result<usize> TryCompressAppend(const CompressionSettings& settings,
+                                                      Span<const uint8> source,
+                                                      Array<uint8>& output,
+                                                      Allocator& scratch) noexcept;
 
 // 해제 크기를 아는 경우의 해제다. 해제한 byte 수를 반환하며 결과가 destination보다 크면
 // CapacityExceeded다. 정확히 destination 크기인 결과는 성공이다. Lz4는 원본 크기가 기록되지
 // 않으므로 이 함수가 가장 빠른 경로다.
-Result<usize> TryDecompress(CompressionFormat format, Span<const uint8> source,
-                            Span<uint8> destination, Allocator& scratch) noexcept;
+ROCKS_COMPRESSION_API Result<usize> TryDecompress(CompressionFormat format,
+                                                  Span<const uint8> source, Span<uint8> destination,
+                                                  Allocator& scratch) noexcept;
 
 // 해제 크기를 모르는 경우의 해제다. 결과를 output 뒤에 붙이며 maxOutputBytes를 넘으면
 // CapacityExceeded다(악성 입력의 메모리 폭주 방지). 작업 메모리는 output.GetAllocator()를 쓴다.
@@ -239,30 +245,40 @@ Result<usize> TryDecompress(CompressionFormat format, Span<const uint8> source,
 // - Lz4는 크기 정보가 없어 출력이 부족하면 두 배로 늘려 처음부터 다시 해제한다(크기를 알면
 //   TryDecompress를 쓴다). 사용자 등록 형식도 같은 방식이다(CompressionCodec.h). 이 두 형식은
 //   손상 입력에서도 상한까지 출력을 늘려 볼 수 있어, 늘리다 할당이 실패하면 OutOfMemory다.
-Result<usize> TryDecompressAppend(CompressionFormat format, Span<const uint8> source,
-                                  usize maxOutputBytes, Array<uint8>& output) noexcept;
+ROCKS_COMPRESSION_API Result<usize> TryDecompressAppend(CompressionFormat format,
+                                                        Span<const uint8> source,
+                                                        usize maxOutputBytes,
+                                                        Array<uint8>& output) noexcept;
 
 // 작업 메모리 할당기를 따로 지정하는 변형이다.
-Result<usize> TryDecompressAppend(CompressionFormat format, Span<const uint8> source,
-                                  usize maxOutputBytes, Array<uint8>& output,
-                                  Allocator& scratch) noexcept;
+ROCKS_COMPRESSION_API Result<usize> TryDecompressAppend(CompressionFormat format,
+                                                        Span<const uint8> source,
+                                                        usize maxOutputBytes, Array<uint8>& output,
+                                                        Allocator& scratch) noexcept;
 
 // 사전을 쓰는 일회성 변형이다(CompressionDictionary.h). 형식·수준은 사전이 정하며 계약은 사전 없는
 // 함수와 같다. 빈 사전 handle은 StaleHandle이다. 사전 준비(CDict·DDict)는 handle이 가지므로
 // 호출마다 드는 비용은 사전 없는 함수와 같은 문맥 생성뿐이다.
 Result<usize> TryCompress(const CompressDictionary& dictionary, Span<const uint8> source,
                           Span<uint8> destination, Allocator& scratch) noexcept;
-Result<usize> TryCompressAppend(const CompressDictionary& dictionary, Span<const uint8> source,
-                                Array<uint8>& output) noexcept;
-Result<usize> TryCompressAppend(const CompressDictionary& dictionary, Span<const uint8> source,
-                                Array<uint8>& output, Allocator& scratch) noexcept;
-Result<usize> TryDecompress(const DecompressDictionary& dictionary, Span<const uint8> source,
-                            Span<uint8> destination, Allocator& scratch) noexcept;
-Result<usize> TryDecompressAppend(const DecompressDictionary& dictionary, Span<const uint8> source,
-                                  usize maxOutputBytes, Array<uint8>& output) noexcept;
-Result<usize> TryDecompressAppend(const DecompressDictionary& dictionary, Span<const uint8> source,
-                                  usize maxOutputBytes, Array<uint8>& output,
-                                  Allocator& scratch) noexcept;
+ROCKS_COMPRESSION_API Result<usize> TryCompressAppend(const CompressDictionary& dictionary,
+                                                      Span<const uint8> source,
+                                                      Array<uint8>& output) noexcept;
+ROCKS_COMPRESSION_API Result<usize> TryCompressAppend(const CompressDictionary& dictionary,
+                                                      Span<const uint8> source,
+                                                      Array<uint8>& output,
+                                                      Allocator& scratch) noexcept;
+ROCKS_COMPRESSION_API Result<usize> TryDecompress(const DecompressDictionary& dictionary,
+                                                  Span<const uint8> source, Span<uint8> destination,
+                                                  Allocator& scratch) noexcept;
+ROCKS_COMPRESSION_API Result<usize> TryDecompressAppend(const DecompressDictionary& dictionary,
+                                                        Span<const uint8> source,
+                                                        usize maxOutputBytes,
+                                                        Array<uint8>& output) noexcept;
+ROCKS_COMPRESSION_API Result<usize> TryDecompressAppend(const DecompressDictionary& dictionary,
+                                                        Span<const uint8> source,
+                                                        usize maxOutputBytes, Array<uint8>& output,
+                                                        Allocator& scratch) noexcept;
 
 // 반복 압축용 문맥이다. 코덱 상태(zstd 문맥·LZ4 상태·LZ4 frame 문맥·zlib deflate 상태)를 한 번
 // 할당해 재사용하므로 작은 입력을 많이 압축할 때 빠르다. 결과는 자유 함수와 byte 단위로 같다.
@@ -278,7 +294,7 @@ Result<usize> TryDecompressAppend(const DecompressDictionary& dictionary, Span<c
 //   for (auto& chunk : chunks) {
 //       auto bytes = compressor.Value().TryCompressAppend(chunk, packed);
 //   }
-class Compressor {
+class ROCKS_COMPRESSION_API Compressor {
 public:
     Compressor() noexcept = default;
     ~Compressor() noexcept;
@@ -310,7 +326,7 @@ private:
 };
 
 // 반복 해제용 문맥이다. 계약은 Compressor와 같다.
-class Decompressor {
+class ROCKS_COMPRESSION_API Decompressor {
 public:
     Decompressor() noexcept = default;
     ~Decompressor() noexcept;

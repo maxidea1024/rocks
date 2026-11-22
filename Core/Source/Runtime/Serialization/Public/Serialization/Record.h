@@ -88,7 +88,7 @@ Result<RecordHeader> ReadRecordHeader(Span<const uint8> record) noexcept;
 // fieldGuid16/type4/byteLength8/payload다. 동시 변경/allocator 재진입으로 현재 builder나 입력을
 // 변경하지 않는다. Add 순서를 보존하므로 같은 입력 순서는 deterministic하다. 정렬된 canonical
 // 순서는 강제하지 않는다.
-class RecordBuilder {
+class ROCKS_SERIALIZATION_API RecordBuilder {
 public:
     RecordBuilder(Allocator&, Guid schema, uint32 schemaVersion, RecordLimits = {}) noexcept;
     RecordBuilder(const RecordBuilder&) = delete;
@@ -146,7 +146,7 @@ private:
 //   out.WriteU32(value);                        // 값은 out에 바로 쓴다
 //   record.Value().EndField(WireType::U32);
 //   record.Value().End();
-class RecordWriter {
+class ROCKS_SERIALIZATION_API RecordWriter {
 public:
     // header 자리를 쓴다. schema 0·version 0은 InvalidArgument, limits.archive.maxTotalBytes가
     // header보다 작으면 CapacityExceeded다.
@@ -196,7 +196,7 @@ private:
 // 목록과 그 항목 reader가 모두 같은 예산을 공유하므로(값·항목마다 새 예산을 주지 않는다) 트리를
 // 순회해도 한도를 넘을 수 없다. 값을 따로 ArchiveReader::Create로 읽으면 새 예산이 생기므로
 // 신뢰하지 않는 입력은 OpenValue로 읽는다.
-class RecordReader {
+class ROCKS_SERIALIZATION_API RecordReader {
 public:
     static Result<RecordReader> Open(Allocator&, Span<const uint8>, Guid expectedSchema,
                                      uint32 minSchemaVersion, uint32 maxSchemaVersion,

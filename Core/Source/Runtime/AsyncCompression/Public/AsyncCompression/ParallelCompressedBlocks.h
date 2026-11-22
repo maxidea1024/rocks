@@ -25,10 +25,10 @@ class WorkerScheduler;
 //   블록은 문맥이 크므로(수준 19·16MiB 블록은 약 81MiB) worker 수로 조절한다.
 // - 블록 4개 이하이거나 1MiB 미만인 입력은 순차로 처리한다. helper 수는 원본 512KiB당 하나 이하다.
 // - 호출 스레드가 그 scheduler의 worker면 WrongThread다(자기 worker를 기다리면 교착한다).
-Result<usize> TryCompressBlocksAppend(WorkerScheduler& scheduler,
-                                      const CompressedBlocksSettings& settings,
-                                      Span<const uint8> source, Array<uint8>& output,
-                                      Allocator& scratch) noexcept;
+ROCKS_ASYNCCOMPRESSION_API Result<usize>
+TryCompressBlocksAppend(WorkerScheduler& scheduler, const CompressedBlocksSettings& settings,
+                        Span<const uint8> source, Array<uint8>& output,
+                        Allocator& scratch) noexcept;
 
 // 큰 범위 병렬 해제다. 블록은 destination에 바로 해제하고 걸치는 끝 블록만 임시 버퍼를 쓴다.
 // 작업 분배·제출 거부·반환 시점·WrongThread·scratch 조건은 위 병렬 TryCompressBlocksAppend와 같다

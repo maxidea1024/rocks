@@ -45,7 +45,7 @@ void EndScopedOverride(ScopedRemoval& removal) noexcept;
 //   const float distance = ShadowDistance.Get();
 //
 // 전제: snapshot이 null이 아니다(아니면 Fatal). 스레드: 만든 스레드에서 없애야 한다(아니면 Fatal).
-class SnapshotBinding {
+class ROCKS_CONFIG_API SnapshotBinding {
 public:
     explicit SnapshotBinding(SharedPtr<const config::ConfigSnapshot> snapshot) noexcept;
     ~SnapshotBinding();

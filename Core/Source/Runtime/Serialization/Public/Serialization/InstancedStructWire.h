@@ -51,12 +51,14 @@ struct InstancedStructWire {
 // byte가 0이면 비어 있음이고, 아니면 Record 하나여야 한다(ReadRecordHeader의 오류). 남은 byte가
 // reader의 maxValueBytes를 넘으면 CapacityExceeded다. 실패하면 cursor는 호출 전 위치다. 예산은
 // operation 하나이고 내용 byte는 단독 reader일 때만 청구한다(ReadPrefixedRecord와 같은 규칙).
-Result<InstancedStructWire> ReadInstancedStructField(ArchiveReader& payload) noexcept;
+ROCKS_SERIALIZATION_API Result<InstancedStructWire>
+ReadInstancedStructField(ArchiveReader& payload) noexcept;
 
 // 원소·Map 값 자리: u64 길이 + 내용 하나를 읽는다. 길이 0은 비어 있음, 아니면 내용이 Record
 // 하나여야 한다(ReadRecordHeader의 오류). 길이 prefix가 잘렸거나 길이가 남은 byte보다 크면
 // InvalidArgument, maxValueBytes를 넘으면 CapacityExceeded다. 실패하면 cursor는 호출 전 위치다.
 // 예산은 ReadPrefixedRecord와 같다.
-Result<InstancedStructWire> ReadInstancedStructElement(ArchiveReader& elements) noexcept;
+ROCKS_SERIALIZATION_API Result<InstancedStructWire>
+ReadInstancedStructElement(ArchiveReader& elements) noexcept;
 
 } // namespace rocks

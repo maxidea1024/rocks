@@ -9,7 +9,7 @@ namespace rocks {
 // 소유권은 이동으로만 전달한다. allocator는 문자열과 진행 중 호출보다 오래 살아야 한다.
 // allocator 콜백에서 같은 String을 변경하는 재진입은 금지한다.
 // 같은 String의 동시 읽기/쓰기는 caller가 동기화하며 allocator의 thread 계약도 지킨다.
-class String {
+class ROCKS_CORE_API String {
 public:
     explicit String(Allocator& allocator) noexcept;
     ~String() noexcept;

@@ -28,7 +28,7 @@ struct WorkerTaskStatus {
 
 // body 호출 동안 빌리는 실행 문맥이다. 저장하거나 다른 thread에서 사용하지 않는다.
 // 취소는 협력적 요청이며 실행 중 함수를 강제 중단하거나 이미 발생한 효과를 되돌리지 않는다.
-class WorkerTaskContext {
+class ROCKS_TASK_API WorkerTaskContext {
 public:
     bool IsCancellationRequested() const noexcept;
     void Fail(ErrorCode error) noexcept;
@@ -49,7 +49,7 @@ private:
 // scheduler 종료·파괴 뒤에도 결과를 유지한다. allocator는 마지막 handle보다 오래 살아 있어야 한다.
 // 별도 handle 래퍼의 동시 호출은 허용하지만 같은 래퍼의 move/Reset 경합은 caller가 막는다.
 // terminal 관측은 body capture와 dependency 보존분 정리가 모두 끝난 뒤에만 가능하다.
-class WorkerTaskHandle {
+class ROCKS_TASK_API WorkerTaskHandle {
 public:
     WorkerTaskHandle() noexcept = default;
     WorkerTaskHandle(WorkerTaskHandle&&) noexcept;
@@ -205,7 +205,7 @@ struct WorkerSchedulerStats {
 // deps<=64이며 inFlight 한도는 pending+running+capture cleanup+제출 예약의 합이다.
 // Start/Shutdown은 생성 thread 전용이다. Submit/Stats와 별도 handle 호출은 병행 가능하다.
 // scheduler 파괴 전 모든 외부 API 호출을 종료한다. callback에서 scheduler 자체 파괴는 금지다.
-class WorkerScheduler {
+class ROCKS_TASK_API WorkerScheduler {
 public:
     explicit WorkerScheduler(Allocator&) noexcept;
     ~WorkerScheduler() noexcept;

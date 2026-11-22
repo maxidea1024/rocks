@@ -483,13 +483,17 @@ namespace Rocks.Build.Cli
                         return 1;
                     }
 
+                    // 모듈 API 매크로(Docs/Design/BuildTargets.ko.md 3.8절 BD27)는 빌드가 정의 헤더로 넣는다. 정의 헤더 없이 헤더를 컴파일하는
+                    // 검사(native 컴파일 시험·생성 헤더 검증)는 Monolithic 값(빈 값)을 받는다.
+                    string[] apiMacros = [.. modules.Where(module => !module.ThirdParty)
+                        .SelectMany(module => new[] { "--clang-arg", "-D" + LinkTypes.ApiMacro(module.Name) + "=" })];
                     var checks = new List<string[]> {
                         new[] { "self", "--root", root, "--json", Path.Combine(output, "tool-self-report.json") },
                         // native 검사의 컴파일 시험(AlgorithmsCompilerTests 등)도 Core 헤더를 include하므로 구성·대상 OS 매크로를 받는다.
-                        new[] { "native", "--root", root, "--native-executable", executable, "--compiler", toolchain.CompilerPath, "--compile-commands", result.CompilationDatabasePath,
+                        (string[])["native", "--root", root, "--native-executable", executable, "--compiler", toolchain.CompilerPath, "--compile-commands", result.CompilationDatabasePath,
                             "--clang-arg", "-D" + NativeConfigurations.BuildMacro(configuration), "--clang-arg", "-D" + NativeConfigurations.PlatformMacro(toolchain.Platform),
-                            "--clang-arg", "-D" + LinkTypes.MonolithicDefine(rules.Target.LinkType),
-                            "--json", Path.Combine(output, "tool-native-report.json") }
+                            "--clang-arg", "-D" + LinkTypes.MonolithicDefine(rules.Target.LinkType), .. apiMacros,
+                            "--json", Path.Combine(output, "tool-native-report.json")]
                     };
                     if (configuration == NativeConfiguration.Asan)
                     {
@@ -502,7 +506,7 @@ namespace Rocks.Build.Cli
                         checks.Add(["meta", "--root", root, "--compiler", toolchain.CompilerPath, "--metacompiler", HostTool(root, "Rocks.MetaCompiler"),
                             "--clang-arg", "-D" + NativeConfigurations.BuildMacro(configuration),
                             "--clang-arg", "-D" + NativeConfigurations.PlatformMacro(toolchain.Platform),
-                            "--clang-arg", "-D" + LinkTypes.MonolithicDefine(rules.Target.LinkType),
+                            "--clang-arg", "-D" + LinkTypes.MonolithicDefine(rules.Target.LinkType), .. apiMacros,
                             "--json", Path.Combine(output, "tool-meta-report.json")]);
                     }
 

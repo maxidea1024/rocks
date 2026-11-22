@@ -36,7 +36,7 @@ enum class EditDistanceCase : uint8 {
 //   EditDistance("ab", "ba", 3, EditDistanceCase::Sensitive);                  // 1(맞바꾸기)
 //   EditDistance("--Verbose", "--verbose", 2, EditDistanceCase::AsciiInsensitive); // 0
 //   EditDistance("kitten", "sitting", 2, EditDistanceCase::Sensitive);         // 3(= 한도 + 1)
-usize EditDistance(StringView left, StringView right, usize limit,
-                   EditDistanceCase textCase) noexcept;
+ROCKS_CORE_API usize EditDistance(StringView left, StringView right, usize limit,
+                                  EditDistanceCase textCase) noexcept;
 
 } // namespace rocks

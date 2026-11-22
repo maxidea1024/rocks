@@ -38,8 +38,8 @@ namespace rocks::reflection_text {
 //       !written || !writer.Finish()) {
 //       ...
 //   }
-Result<void> ExportJson(const AssignmentTarget& target, JsonWriter& writer,
-                        const TextCodecOptions& options) noexcept;
+ROCKS_REFLECTIONTEXT_API Result<void> ExportJson(const AssignmentTarget& target, JsonWriter& writer,
+                                                 const TextCodecOptions& options) noexcept;
 
 // JSON 객체 root를 target에 읽는 대입 묶음을 준비한다(아무것도 게시하지 않는다 — Publish는
 // 호출자가 한다). import 의미(10.4절 표):
@@ -79,8 +79,8 @@ Result<void> ExportJson(const AssignmentTarget& target, JsonWriter& writer,
 //   if (!prepared) { /* diagnostics의 line·column 보고 */ }
 //
 //   auto published = prepared.Value().Publish();
-Result<PreparedAssignments> ImportJson(JsonValue root, const AssignmentTarget& target,
-                                       const TextCodecOptions& options,
-                                       TextDiagnostics& diagnostics) noexcept;
+ROCKS_REFLECTIONTEXT_API Result<PreparedAssignments>
+ImportJson(JsonValue root, const AssignmentTarget& target, const TextCodecOptions& options,
+           TextDiagnostics& diagnostics) noexcept;
 
 } // namespace rocks::reflection_text

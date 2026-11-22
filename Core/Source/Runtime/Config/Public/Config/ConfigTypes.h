@@ -211,7 +211,7 @@ enum class ConfigDiagnosticCode : uint8 {
 };
 
 // 진단 이름(열거자 철자)이다. 정의되지 않은 값이면 빈 view다.
-StringView ConfigDiagnosticCodeName(ConfigDiagnosticCode code) noexcept;
+ROCKS_CONFIG_API StringView ConfigDiagnosticCodeName(ConfigDiagnosticCode code) noexcept;
 
 // 진단 심각도다. Error가 하나라도 있으면 그 입력(층 추가·대입)은 받지 않는다.
 enum class ConfigSeverity : uint8 {
@@ -259,7 +259,7 @@ inline constexpr uint32 DefaultMaxConfigDiagnostics = 256;
 //       const ConfigDiagnostic item = diagnostics.Get(i);
 //       // item.source:item.position.line:item.position.column ConfigDiagnosticCodeName(item.code)
 //   }
-class ConfigDiagnostics {
+class ROCKS_CONFIG_API ConfigDiagnostics {
 public:
     // allocator는 텍스트·레코드 버퍼를 할당한다(모음보다 오래 살아야 한다).
     explicit ConfigDiagnostics(Allocator& allocator) noexcept;

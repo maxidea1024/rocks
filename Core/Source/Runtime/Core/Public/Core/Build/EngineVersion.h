@@ -28,7 +28,7 @@
 // 집합체라 {주, 부, 패치}로 만든다. 모든 연산은 실패하지 않고 공유 상태가 없다(스레드 안전).
 namespace rocks {
 
-struct EngineVersion {
+struct ROCKS_CORE_API EngineVersion {
     // ToChars가 쓰는 가장 긴 표기 "65535.65535.65535"(17자)와 NUL이다.
     static constexpr usize TextBytes = 18;
 

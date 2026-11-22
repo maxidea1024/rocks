@@ -40,7 +40,7 @@ struct FormatSupport {
     bool plugin = false;
 };
 
-FormatSupport ResolveFormat(CompressionFormat format) noexcept;
+ROCKS_COMPRESSION_API FormatSupport ResolveFormat(CompressionFormat format) noexcept;
 
 // 사용자 등록 코덱의 사용권이다. 쥐고 있는 동안 그 형식의 TryUnregisterCompressionCodec은
 // Busy이고 코덱 객체는 살아 있다. 이동 전용이다. 빈 lease(Codec() == nullptr)는 내장 형식을
@@ -48,7 +48,7 @@ FormatSupport ResolveFormat(CompressionFormat format) noexcept;
 // - 일회성 호출은 호출 동안, Compressor·Decompressor 상태는 문맥 수명 동안 쥔다. 비동기 작업은
 //   실행이 끝날 때, 실행되지 않으면 capture가 정리될 때 놓는다(늦어도 terminal 게시 전).
 // - 코덱 호출 중에는 표 잠금을 쥐지 않는다(코덱이 이 모듈을 다시 불러도 된다).
-class CodecLease {
+class ROCKS_COMPRESSION_API CodecLease {
 public:
     CodecLease() noexcept = default;
     ~CodecLease() noexcept;
@@ -121,8 +121,8 @@ struct CompressionProbe {
 };
 
 // Allocator 경유 코덱 할당이다. 0 byte 요청도 유효 주소를 돌려준다(코덱은 nullptr을 실패로 본다).
-void* CodecAllocate(Allocator& allocator, usize bytes) noexcept;
-void CodecFree(Allocator& allocator, void* address) noexcept;
+ROCKS_COMPRESSION_API void* CodecAllocate(Allocator& allocator, usize bytes) noexcept;
+ROCKS_COMPRESSION_API void CodecFree(Allocator& allocator, void* address) noexcept;
 
 // 빈 Span의 nullptr 대신 넘길 주소다. 코덱은 0 byte를 읽거나 쓰지 않지만 nullptr을 거부할 수
 // 있다(zlib next_out).
@@ -130,11 +130,13 @@ const uint8* NonNullSource(Span<const uint8> source) noexcept;
 uint8* NonNullDestination(Span<uint8> destination) noexcept;
 
 // [first, first + firstSize)와 [second, second + secondSize)가 겹치는지다. 빈 구간은 겹치지 않는다.
-bool Overlaps(const void* first, usize firstSize, const void* second, usize secondSize) noexcept;
+ROCKS_COMPRESSION_API bool Overlaps(const void* first, usize firstSize, const void* second,
+                                    usize secondSize) noexcept;
 
 // Append 출력의 쓰기 구간이 source와 겹치지 않는지 확인한다. 성장 재할당까지 고려해 capacity 전체와
 // 비교한다.
-bool OverlapsArrayStorage(Span<const uint8> source, const Array<uint8>& output) noexcept;
+ROCKS_COMPRESSION_API bool OverlapsArrayStorage(Span<const uint8> source,
+                                                const Array<uint8>& output) noexcept;
 
 // 사전 코덱(CDict·DDict)의 할당 경로다. zstd create 함수는 OOM과 손상을 모두 NULL로 알리므로 할당
 // 실패를 따로 기록한다. 코덱이 해제할 때도 쓰므로 코덱보다 오래 살아야 한다(사전 상태 안에 둔다).
@@ -203,10 +205,10 @@ struct DecompressorAccess {
 
 // zstdChecksum: zstd frame에 content checksum을 넣을지다. 블록 컨테이너는 자체 CRC가 있어 끈다.
 // dictionary가 있으면 형식·수준은 사전의 값이며 format·level 인자는 무시한다.
-Result<CompressorState*> CreateCompressorState(
+ROCKS_COMPRESSION_API Result<CompressorState*> CreateCompressorState(
     CompressionFormat format, int32 level, Allocator& allocator, bool zstdChecksum = true,
     const SharedPtr<DictionaryState>& dictionary = SharedPtr<DictionaryState>()) noexcept;
-void DestroyCompressorState(CompressorState* state) noexcept;
+ROCKS_COMPRESSION_API void DestroyCompressorState(CompressorState* state) noexcept;
 Result<DecompressorState*> CreateDecompressorState(
     CompressionFormat format, Allocator& allocator,
     const SharedPtr<DictionaryState>& dictionary = SharedPtr<DictionaryState>()) noexcept;
@@ -215,8 +217,8 @@ void DestroyDecompressorState(DecompressorState* state) noexcept;
 // 해제 문맥에 사전을 건다(nullptr이면 뗀다). 걸 때는 항상 다시 걸고, 떼어진 문맥을 떼는 것만
 // 생략한다. 사전을 가진 문맥(dictionary 보유)에는 쓰지 않는다. dictionary는 다음 Bind까지 살아
 // 있어야 한다.
-Result<void> BindDecompressorDictionary(DecompressorState& state,
-                                        const DictionaryState* dictionary) noexcept;
+ROCKS_COMPRESSION_API Result<void>
+BindDecompressorDictionary(DecompressorState& state, const DictionaryState* dictionary) noexcept;
 
 // 공개 API·비동기가 함께 쓰는 단일 구현이다. 인자 검증(겹침·한계)을 포함한다.
 Result<usize> CompressInto(CompressorState& state, Span<const uint8> source,
@@ -233,24 +235,24 @@ Result<usize> DecompressAppend(DecompressorState& state, Span<const uint8> sourc
 // 수준은 사전의 값). 사용자 등록 형식은 상태 블록을 스택에 두며(할당 없음) plugin으로 받은 사용권을
 // 쓰고, 빈 lease면 여기서 얻는다(비동기 작업은 제출할 때 얻은 사용권을 넘긴다: 대기 중에 해제가
 // 시작돼도 끝까지 실행한다). level은 검증된 설정의 값이다.
-Result<usize>
+ROCKS_COMPRESSION_API Result<usize>
 CompressAppendOnce(CompressionFormat format, int32 level, Span<const uint8> source,
                    Array<uint8>& output, Allocator& scratch, const CompressionProbe& probe,
                    const SharedPtr<DictionaryState>& dictionary = SharedPtr<DictionaryState>(),
                    CodecLease plugin = CodecLease()) noexcept;
-Result<usize>
+ROCKS_COMPRESSION_API Result<usize>
 DecompressIntoOnce(CompressionFormat format, Span<const uint8> source, Span<uint8> destination,
                    Allocator& scratch, const CompressionProbe& probe,
                    const SharedPtr<DictionaryState>& dictionary = SharedPtr<DictionaryState>(),
                    CodecLease plugin = CodecLease()) noexcept;
-Result<usize>
+ROCKS_COMPRESSION_API Result<usize>
 DecompressAppendOnce(CompressionFormat format, Span<const uint8> source, usize maxOutputBytes,
                      Array<uint8>& output, Allocator& scratch, const CompressionProbe& probe,
                      const SharedPtr<DictionaryState>& dictionary = SharedPtr<DictionaryState>(),
                      CodecLease plugin = CodecLease()) noexcept;
 
 // Append 출력의 기존 길이 base 뒤로 길이를 맞춘다. 축소는 실패하지 않는다.
-void RestoreLength(Array<uint8>& output, usize base) noexcept;
+ROCKS_COMPRESSION_API void RestoreLength(Array<uint8>& output, usize base) noexcept;
 
 // --- 코덱 adapter. 검증을 마친 입력만 받는다. ---
 
@@ -487,7 +489,7 @@ Result<StreamProgress> DecompressStep(void* codec, Span<const uint8> input, Span
                                       StreamDecodeState& state) noexcept;
 
 // CRC-32(Core Crc32와 같은 값). zlib의 braid·하드웨어 가속 구현을 쓴다. 길이 제한 없음.
-uint32 Crc32(Span<const uint8> data, uint32 previous = 0) noexcept;
+ROCKS_COMPRESSION_API uint32 Crc32(Span<const uint8> data, uint32 previous = 0) noexcept;
 } // namespace zlib
 
 } // namespace rocks::detail

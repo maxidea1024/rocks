@@ -13,9 +13,9 @@ enum class PathStyle {
 };
 
 // 선택한 호스트 구현을 반환한다. 미지원 호스트는 Unsupported다.
-PathStyle HostPathStyle() noexcept;
+ROCKS_PLATFORMBASE_API PathStyle HostPathStyle() noexcept;
 // 호스트 파일 경로의 기본 구분자를 반환한다. 경로 자체를 변환하지 않는다.
-char NativePathSeparator() noexcept;
+ROCKS_PLATFORMBASE_API char NativePathSeparator() noexcept;
 
 // 운영체제가 정하는 기본 디렉터리다(UE FPlatformProcess의 BaseDir·UserDir 계열 대응).
 // - Executable: 실행 파일이 있는 디렉터리
@@ -41,8 +41,8 @@ enum class StandardDirectory : uint8 {
 // Android: UserData·UserCache는 RegisterApplicationDirectories로 등록한 값이며 등록 전에는
 // NotFound다. Temporary는 등록된 cache, 없으면 TMPDIR·/data/local/tmp, Home은 등록된 data, 없으면
 // HOME이다.
-FileStatus GetStandardDirectory(StandardDirectory kind, char* buffer, usize capacity,
-                                usize& bytes) noexcept;
+ROCKS_PLATFORMBASE_API FileStatus GetStandardDirectory(StandardDirectory kind, char* buffer,
+                                                       usize capacity, usize& bytes) noexcept;
 
 // 모바일 앱이 시작할 때 OS가 준 앱 전용 디렉터리(절대 경로, UTF-8)를 등록한다. Android에서는
 // Context.getFilesDir()/getCacheDir() 또는 ANativeActivity의 internalDataPath와 cache 경로를

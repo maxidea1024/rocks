@@ -311,10 +311,10 @@ protected:
 //   if (auto parsed = ParsePropertyPath(lease, text, path, &failure); !parsed) {
 //       if (failure.reason == PropertyPathError::UnknownProperty) { ... }   // AS 4.6절 진단
 //   }
-Result<void> ParsePropertyPath(const TypeLease& type, StringView text, PropertyPathBuffer& out,
-                               PropertyPathFailure* failure = nullptr,
-                               PathKeyTextHook* hook = nullptr,
-                               PathInstancedTypeResolver* instanced = nullptr) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void>
+ParsePropertyPath(const TypeLease& type, StringView text, PropertyPathBuffer& out,
+                  PropertyPathFailure* failure = nullptr, PathKeyTextHook* hook = nullptr,
+                  PathInstancedTypeResolver* instanced = nullptr) noexcept;
 
 // 객체 문맥 판이다(리플렉션 B9j): 시작 위치 target(게시된 객체·staged 객체·struct 값 — 상자는
 // Unsupported)의 스키마로 해석하고 InstancedStruct 뒤 멤버는 그 자리의 지금 담긴 struct로 푼다(경로
@@ -326,10 +326,10 @@ Result<void> ParsePropertyPath(const TypeLease& type, StringView text, PropertyP
 //   if (auto parsed = ParsePropertyPath(registry, access, table, "row.damage", path); parsed) {
 //       auto written = PathWrite(registry, access, table, path.View(), value);
 //   }
-Result<void> ParsePropertyPath(ObjectRegistry& registry, const ObjectAccessContext& access,
-                               const PathTarget& target, StringView text, PropertyPathBuffer& out,
-                               PropertyPathFailure* failure = nullptr,
-                               PathKeyTextHook* hook = nullptr) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void>
+ParsePropertyPath(ObjectRegistry& registry, const ObjectAccessContext& access,
+                  const PathTarget& target, StringView text, PropertyPathBuffer& out,
+                  PropertyPathFailure* failure = nullptr, PathKeyTextHook* hook = nullptr) noexcept;
 
 // path를 type(클래스 또는 struct lease)의 스키마로 문자열 경로로 바꿔 out에 쓴다(실효 도구 이름 —
 // ParsePropertyPath와 왕복한다). key는 ParsePropertyPath의 키 텍스트로 쓴다(bool은 true·false,
@@ -347,15 +347,18 @@ Result<void> ParsePropertyPath(ObjectRegistry& registry, const ObjectAccessConte
 // 사용 예:
 //   String text(allocator);
 //   if (auto formatted = FormatPropertyPath(lease, path.View(), text); formatted) { ... }
-Result<void> FormatPropertyPath(const TypeLease& type, PropertyPath path, String& out,
-                                PathKeyTextHook* hook = nullptr,
-                                PathInstancedTypeResolver* instanced = nullptr) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void>
+FormatPropertyPath(const TypeLease& type, PropertyPath path, String& out,
+                   PathKeyTextHook* hook = nullptr,
+                   PathInstancedTypeResolver* instanced = nullptr) noexcept;
 
 // 객체 문맥 판이다(리플렉션 B9j — ParsePropertyPath의 객체 문맥 판과 같은 규칙). InstancedStruct 뒤
 // 멤버 단계를 지금 담긴 struct의 도구 이름으로 쓴다.
-Result<void> FormatPropertyPath(ObjectRegistry& registry, const ObjectAccessContext& access,
-                                const PathTarget& target, PropertyPath path, String& out,
-                                PathKeyTextHook* hook = nullptr) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void> FormatPropertyPath(ObjectRegistry& registry,
+                                                        const ObjectAccessContext& access,
+                                                        const PathTarget& target, PropertyPath path,
+                                                        String& out,
+                                                        PathKeyTextHook* hook = nullptr) noexcept;
 
 // ---- 경로 연산(소유 스레드 전용) ----
 //
@@ -433,9 +436,9 @@ Result<void> FormatPropertyPath(ObjectRegistry& registry, const ObjectAccessCont
 // 사용 예:
 //   FieldValue value(allocator);
 //   auto read = PathRead(registry, access, mesh, path.View(), value);
-Result<void> PathRead(ObjectRegistry& registry, const ObjectAccessContext& access,
-                      const PathTarget& target, PropertyPath path, FieldValue& out,
-                      PropertyPathFailure* failure = nullptr) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void>
+PathRead(ObjectRegistry& registry, const ObjectAccessContext& access, const PathTarget& target,
+         PropertyPath path, FieldValue& out, PropertyPathFailure* failure = nullptr) noexcept;
 
 // path의 단일 값(배열 원소 교체, Map 항목 넣기·교체 포함)을 value로 쓴다. previous가 있으면
 // 성공했을 때 쓰기 전 값을 담는다(CU4 Undo용 — Map에 없던 키를 넣었으면 previous는 kind = 값 종류,
@@ -451,10 +454,10 @@ Result<void> PathRead(ObjectRegistry& registry, const ObjectAccessContext& acces
 // 사용 예:
 //   FieldValue previous(allocator);
 //   auto written = PathWrite(registry, access, mesh, path.View(), value, &previous);
-Result<void> PathWrite(ObjectRegistry& registry, const ObjectAccessContext& access,
-                       const PathTarget& target, PropertyPath path, const FieldValue& value,
-                       FieldValue* previous = nullptr,
-                       PropertyPathFailure* failure = nullptr) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void>
+PathWrite(ObjectRegistry& registry, const ObjectAccessContext& access, const PathTarget& target,
+          PropertyPath path, const FieldValue& value, FieldValue* previous = nullptr,
+          PropertyPathFailure* failure = nullptr) noexcept;
 
 // path(마지막 단계는 index·key 없는 Array·Map·Set 필드)의 원소·항목 수를 돌려준다. 마지막 단계에
 // index·key가 있으면 InvalidArgument(IndexNotAllowed), 컨테이너가 아니면 TypeMismatch(NotArray)다.
@@ -462,9 +465,10 @@ Result<void> PathWrite(ObjectRegistry& registry, const ObjectAccessContext& acce
 // 사용 예:
 //   const PathStep words[] = {{WordsId}};
 //   auto count = PathCount(registry, access, holder, PropertyPath{words});
-Result<usize> PathCount(ObjectRegistry& registry, const ObjectAccessContext& access,
-                        const PathTarget& target, PropertyPath path,
-                        PropertyPathFailure* failure = nullptr) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<usize> PathCount(ObjectRegistry& registry,
+                                                const ObjectAccessContext& access,
+                                                const PathTarget& target, PropertyPath path,
+                                                PropertyPathFailure* failure = nullptr) noexcept;
 
 // path(마지막 단계는 index·key 없는 Map·Set 필드)의 키를 삽입 순서대로 모두 읽어 out을 그 목록으로
 // 바꾼다(리플렉션 B9i4 — JSON export가 Map·Set을 펼칠 때 쓴다. Map 값은 이어서 key 경로의
@@ -479,9 +483,11 @@ Result<usize> PathCount(ObjectRegistry& registry, const ObjectAccessContext& acc
 //   if (auto read = PathReadKeys(registry, access, holder, PropertyPath{scores}, keys); !read) {
 //       return read;
 //   }
-Result<void> PathReadKeys(ObjectRegistry& registry, const ObjectAccessContext& access,
-                          const PathTarget& target, PropertyPath path, Array<FieldValue>& out,
-                          PropertyPathFailure* failure = nullptr) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void> PathReadKeys(ObjectRegistry& registry,
+                                                  const ObjectAccessContext& access,
+                                                  const PathTarget& target, PropertyPath path,
+                                                  Array<FieldValue>& out,
+                                                  PropertyPathFailure* failure = nullptr) noexcept;
 
 // path 마지막 단계(index가 있어야 한다 — 없으면 InvalidArgument(IndexRequired))의 배열에서 index
 // 위치에 원소를 넣는다(index == 길이면 끝, 넘으면 InvalidArgument(IndexOutOfRange)). 단일 값 원소는
@@ -493,26 +499,28 @@ Result<void> PathReadKeys(ObjectRegistry& registry, const ObjectAccessContext& a
 // 사용 예:
 //   const PathStep steps[] = {{LodsId, lods.Size(), PathSelector::Index}};   // 끝에 넣기
 //   auto inserted = PathInsertElement(registry, access, mesh, PropertyPath{steps}, &value);
-Result<void> PathInsertElement(ObjectRegistry& registry, const ObjectAccessContext& access,
-                               const PathTarget& target, PropertyPath path, const FieldValue* value,
-                               PropertyPathFailure* failure = nullptr) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void>
+PathInsertElement(ObjectRegistry& registry, const ObjectAccessContext& access,
+                  const PathTarget& target, PropertyPath path, const FieldValue* value,
+                  PropertyPathFailure* failure = nullptr) noexcept;
 
 // path 마지막 단계(index가 있어야 한다)의 배열 원소를 지운다(뒤 원소를 당긴다). removed가 있으면
 // 성공했을 때 지운 단일 값 원소의 값을 담는다(allocator 규칙과 참조 handle이 약한 참조라는 점은
 // PathWrite의 previous와 같다). struct
 // 원소에 removed를 주면 InvalidArgument(AggregateValue)다 — struct 원소의 옛 값은 CU4가 연산 전
 // PathRead로 잎마다 만들고 "기본 원소 삽입 + 잎 쓰기"로 재생한다. 떼어 낸 원소는 게시 뒤 소멸한다.
-Result<void> PathRemoveElement(ObjectRegistry& registry, const ObjectAccessContext& access,
-                               const PathTarget& target, PropertyPath path,
-                               FieldValue* removed = nullptr,
-                               PropertyPathFailure* failure = nullptr) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void>
+PathRemoveElement(ObjectRegistry& registry, const ObjectAccessContext& access,
+                  const PathTarget& target, PropertyPath path, FieldValue* removed = nullptr,
+                  PropertyPathFailure* failure = nullptr) noexcept;
 
 // path(마지막 단계는 index·key 없는 Array·Map·Set 필드)의 원소·항목을 모두 지운다. Array<E>·Map·
 // Set은 용량까지 반환한다(원소와 저장소는 게시 뒤 반환). 오류는 PathCount와 같고 유효 플래그가
 // ReadOnly면 Unsupported(ReadOnly)다. 옛 값은 CU4가 연산 전 PathRead로 만든다.
-Result<void> PathClear(ObjectRegistry& registry, const ObjectAccessContext& access,
-                       const PathTarget& target, PropertyPath path,
-                       PropertyPathFailure* failure = nullptr) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void> PathClear(ObjectRegistry& registry,
+                                               const ObjectAccessContext& access,
+                                               const PathTarget& target, PropertyPath path,
+                                               PropertyPathFailure* failure = nullptr) noexcept;
 
 // path(마지막 단계는 Map·Set 필드의 key 단계 — 아니면 InvalidArgument(KeyRequired))의 키가 있는지
 // 돌려준다(리플렉션 B9f3). 읽기라 할당하지 않고 encode 고정도 쥐지 않는다(유효 플래그 ReadOnly는
@@ -522,9 +530,10 @@ Result<void> PathClear(ObjectRegistry& registry, const ObjectAccessContext& acce
 // 사용 예:
 //   auto present = PathContains(registry, access, holder, path.View());   // tags[Hero]
 //   if (present && present.Value()) { ... }
-Result<bool> PathContains(ObjectRegistry& registry, const ObjectAccessContext& access,
-                          const PathTarget& target, PropertyPath path,
-                          PropertyPathFailure* failure = nullptr) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<bool> PathContains(ObjectRegistry& registry,
+                                                  const ObjectAccessContext& access,
+                                                  const PathTarget& target, PropertyPath path,
+                                                  PropertyPathFailure* failure = nullptr) noexcept;
 
 // path(마지막 단계는 key 단계)에 키를 넣는다(리플렉션 B9f3): Set은 원소를 끝에 넣고(이미 있으면
 // 아무것도 하지 않는다), Map<K, 값 struct>는 기본 값(S(Allocator&) 또는 S() — Map의 allocator)을
@@ -538,9 +547,10 @@ Result<bool> PathContains(ObjectRegistry& registry, const ObjectAccessContext& a
 // 사용 예(텍스트 `points[hero]={}` 뒤 `points[hero].x=1`):
 //   auto inserted = PathInsertKey(registry, access, holder, path.View());
 //   if (!inserted) { return Result<void>::Failure(inserted.Error()); }
-Result<bool> PathInsertKey(ObjectRegistry& registry, const ObjectAccessContext& access,
-                           const PathTarget& target, PropertyPath path,
-                           PropertyPathFailure* failure = nullptr) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<bool> PathInsertKey(ObjectRegistry& registry,
+                                                   const ObjectAccessContext& access,
+                                                   const PathTarget& target, PropertyPath path,
+                                                   PropertyPathFailure* failure = nullptr) noexcept;
 
 // path(마지막 단계는 key 단계)의 Map 항목·Set 원소를 지운다(리플렉션 B9f3 — 남은 항목의 순서는
 // 그대로다). 없으면 NotFound(KeyNotFound)다. removed가 있으면 성공했을 때 지운 단일 값 Map 항목의
@@ -553,10 +563,11 @@ Result<bool> PathInsertKey(ObjectRegistry& registry, const ObjectAccessContext& 
 // 사용 예(asset-set의 --erase=perPlatform[Android]):
 //   FieldValue removed(allocator);
 //   auto erased = PathEraseKey(registry, access, texture, path.View(), &removed);
-Result<void> PathEraseKey(ObjectRegistry& registry, const ObjectAccessContext& access,
-                          const PathTarget& target, PropertyPath path,
-                          FieldValue* removed = nullptr,
-                          PropertyPathFailure* failure = nullptr) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void> PathEraseKey(ObjectRegistry& registry,
+                                                  const ObjectAccessContext& access,
+                                                  const PathTarget& target, PropertyPath path,
+                                                  FieldValue* removed = nullptr,
+                                                  PropertyPathFailure* failure = nullptr) noexcept;
 
 // path(마지막 단계는 Optional<값 struct> 필드 — index 없음)에 기본 값(S(Allocator&) 또는 S() —
 // ObjectRegistry::ObjectAllocator)을 만든다(리플렉션 B9e). 이미 set이면 기본 값으로 바꾼다(옛 값은
@@ -569,9 +580,10 @@ Result<void> PathEraseKey(ObjectRegistry& registry, const ObjectAccessContext& a
 //   const PathStep steps[] = {{PreviewId}};
 //   auto made = PathEmplaceOptional(registry, access, mesh, PropertyPath{steps});
 //   // 이어서 preview.width 같은 멤버를 PathWrite로 쓴다
-Result<void> PathEmplaceOptional(ObjectRegistry& registry, const ObjectAccessContext& access,
-                                 const PathTarget& target, PropertyPath path,
-                                 PropertyPathFailure* failure = nullptr) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void>
+PathEmplaceOptional(ObjectRegistry& registry, const ObjectAccessContext& access,
+                    const PathTarget& target, PropertyPath path,
+                    PropertyPathFailure* failure = nullptr) noexcept;
 
 // path(마지막 단계는 Optional<값 struct> 필드)를 unset으로 비운다(리플렉션 B9e — 이미 unset이면
 // 아무것도 하지 않는다). 옛 값은 게시 뒤 소멸한다. 오류는 PathEmplaceOptional과 같다(할당 없음).
@@ -583,9 +595,10 @@ Result<void> PathEmplaceOptional(ObjectRegistry& registry, const ObjectAccessCon
 //   if (auto cleared = PathResetOptional(registry, access, mesh, PropertyPath{steps}); !cleared) {
 //       return cleared;
 //   }
-Result<void> PathResetOptional(ObjectRegistry& registry, const ObjectAccessContext& access,
-                               const PathTarget& target, PropertyPath path,
-                               PropertyPathFailure* failure = nullptr) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void>
+PathResetOptional(ObjectRegistry& registry, const ObjectAccessContext& access,
+                  const PathTarget& target, PropertyPath path,
+                  PropertyPathFailure* failure = nullptr) noexcept;
 
 // path(마지막 단계는 Optional<값 struct> 필드)가 set인지 돌려준다(리플렉션 B9e — Docs/Design/
 // ReflectionExtensions.ko.md 6절). Optional<struct>는 통째 PathRead가 AggregateValue이고 멤버가
@@ -603,9 +616,10 @@ Result<void> PathResetOptional(ObjectRegistry& registry, const ObjectAccessConte
 //   }
 //
 //   if (!set.Value()) { /* --unset=preview 줄을 낸다 */ }
-Result<bool> PathIsOptionalSet(ObjectRegistry& registry, const ObjectAccessContext& access,
-                               const PathTarget& target, PropertyPath path,
-                               PropertyPathFailure* failure = nullptr) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<bool>
+PathIsOptionalSet(ObjectRegistry& registry, const ObjectAccessContext& access,
+                  const PathTarget& target, PropertyPath path,
+                  PropertyPathFailure* failure = nullptr) noexcept;
 
 // ---- InstancedStruct(리플렉션 B9j — Docs/Design/ReflectionExtensions.ko.md 11절) ----
 //
@@ -632,18 +646,20 @@ Result<bool> PathIsOptionalSet(ObjectRegistry& registry, const ObjectAccessConte
 //   auto made = PathSetInstancedType(registry, access, table, PropertyPath{steps},
 //                                    GeneratedType<WeaponRow>::Id());
 //   // 이어서 row.damage 같은 멤버를 PathWrite로 쓴다
-Result<void> PathSetInstancedType(ObjectRegistry& registry, const ObjectAccessContext& access,
-                                  const PathTarget& target, PropertyPath path, TypeId type,
-                                  PropertyPathFailure* failure = nullptr) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void>
+PathSetInstancedType(ObjectRegistry& registry, const ObjectAccessContext& access,
+                     const PathTarget& target, PropertyPath path, TypeId type,
+                     PropertyPathFailure* failure = nullptr) noexcept;
 
 // path(마지막 단계는 InstancedStruct 값)를 비운다(이미 비어 있으면 아무것도 하지 않는다). 옛 값은
 // 게시 뒤 소멸한다(할당 없음). 오류는 PathSetInstancedType의 끝·ReadOnly 오류와 같다.
 //
 // 사용 예(asset-set의 row=none):
 //   auto cleared = PathClearInstanced(registry, access, table, PropertyPath{steps});
-Result<void> PathClearInstanced(ObjectRegistry& registry, const ObjectAccessContext& access,
-                                const PathTarget& target, PropertyPath path,
-                                PropertyPathFailure* failure = nullptr) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void>
+PathClearInstanced(ObjectRegistry& registry, const ObjectAccessContext& access,
+                   const PathTarget& target, PropertyPath path,
+                   PropertyPathFailure* failure = nullptr) noexcept;
 
 // path(마지막 단계는 InstancedStruct 값)에 담긴 struct의 lease를 돌려준다(비어 있으면 빈 lease —
 // IsValid 거짓). 텍스트 출력(`_structType`·`row=<타입 도구 이름>`)과 Undo 기록이 쓴다. 읽기라
@@ -653,8 +669,9 @@ Result<void> PathClearInstanced(ObjectRegistry& registry, const ObjectAccessCont
 // 사용 예:
 //   auto type = PathReadInstancedType(registry, access, table, path.View());
 //   if (type && type.Value().IsValid()) { StringView name = ...; }
-Result<TypeLease> PathReadInstancedType(ObjectRegistry& registry, const ObjectAccessContext& access,
-                                        const PathTarget& target, PropertyPath path,
-                                        PropertyPathFailure* failure = nullptr) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<TypeLease>
+PathReadInstancedType(ObjectRegistry& registry, const ObjectAccessContext& access,
+                      const PathTarget& target, PropertyPath path,
+                      PropertyPathFailure* failure = nullptr) noexcept;
 
 } // namespace rocks

@@ -245,8 +245,10 @@ Result<void> ValidateInstancedEdit(const FieldWriteTarget& target) noexcept;
 //       !valid) {
 //       return valid;
 //   }
-Result<void> ValidateWeakTarget(ObjectRegistry& registry, const ObjectAccessContext& access,
-                                ObjectHandle target, const void* staticNative) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void> ValidateWeakTarget(ObjectRegistry& registry,
+                                                        const ObjectAccessContext& access,
+                                                        ObjectHandle target,
+                                                        const void* staticNative) noexcept;
 
 // ClassRef 값(ValueKind::ClassReference — 리플렉션 B9d2)의 쓰기 검사다(Docs/Design/
 // ReflectionExtensions.ko.md 5.2절 표의 "쓰기"). value가 0(null)이면 성공이고, 아니면
@@ -264,8 +266,10 @@ Result<void> ValidateWeakTarget(ObjectRegistry& registry, const ObjectAccessCont
 //       !valid) {
 //       return valid;
 //   }
-Result<void> ValidateClassReference(ObjectRegistry& registry, const ObjectAccessContext& access,
-                                    TypeId value, TypeId base, const void* baseNative) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void> ValidateClassReference(ObjectRegistry& registry,
+                                                            const ObjectAccessContext& access,
+                                                            TypeId value, TypeId base,
+                                                            const void* baseNative) noexcept;
 
 } // namespace detail
 

@@ -38,7 +38,7 @@ struct CommandletDefinition {
 // 등록 및 실행은 생성 스레드에서만 가능하다. sink/callback의 실행 재진입과 실행 중 등록은
 // Busy다. Count는 실행 중에도 허용한다.
 // 종료는 Run을 마친 뒤 registry와 caller가 소유한 context를 순서대로 파괴한다.
-class CommandletRegistry {
+class ROCKS_CORE_API CommandletRegistry {
 public:
     static constexpr usize Capacity = 64;
     static constexpr usize NameCapacity = 63;

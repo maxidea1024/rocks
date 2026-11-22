@@ -121,7 +121,7 @@ class DynamicLibraryLease;
 
 } // namespace platform
 
-class ModuleLoader final {
+class ROCKS_MODULELOADER_API ModuleLoader final {
     struct CreateTag {
         explicit CreateTag() = default;
     };

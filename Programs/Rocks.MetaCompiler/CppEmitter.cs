@@ -86,8 +86,18 @@ internal static class CppEmitter
         Line("// Include the generated header of a type (<Module/Type.generated.h>) to use its GeneratedType.");
         Line("#pragma once");
         Line("#include <Object/ModuleRegistration.h>");
+        // 모듈 API 매크로는 빌드가 정의 헤더로 넣는다. 빌드 밖에서 이 헤더를 컴파일하는 도구(시험)는 빈 값을 쓴다(Monolithic과 같다).
+        if (!privateTypes)
+        {
+            Line($"#ifndef {ApiMacro(module)}");
+            Line($"#define {ApiMacro(module)}");
+            Line("#endif");
+        }
+
         Line($"namespace rocks::generated::{module} {{");
-        Line(RegistrationSignature(privateTypes, declaration: true) + ";");
+        // public 등록 함수는 다른 모듈(의존 모듈의 등록·호스트)이 부르므로 모듈 API 매크로로 export한다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d2).
+        // private 등록 함수는 그 모듈 안에서만 부른다.
+        Line((privateTypes ? "" : ApiMacro(module) + " ") + RegistrationSignature(privateTypes, declaration: true) + ";");
         // public·private 헤더 모두 같은 선언을 둔다(어느 쪽만 있는 모듈도 있다 — 같은 선언의 반복은 허용된다).
         Line("// Registers only this module's own types (public, then private) without dependency modules; the module loader calls it.");
         Line(OwnTypesSignature() + ";");
@@ -255,7 +265,8 @@ internal static class CppEmitter
         Line("#pragma once");
         Line($"#include <{include}>");
         // 모듈 API 매크로는 빌드가 정의 헤더로 넣는다. 빌드 밖에서 이 헤더를 컴파일하는 도구(시험)는 빈 값을 쓴다(Monolithic과 같다).
-        if (schema.Ordered.Any(type => type.Header == include && !type.IsEnum && !type.IsStruct))
+        // 클래스(NativeKey)와 struct(out-of-line 정적 멤버 — BS8d2)가 매크로를 쓴다.
+        if (schema.Ordered.Any(type => type.Header == include && !type.IsEnum))
         {
             Line($"#ifndef {ApiMacro(module)}");
             Line($"#define {ApiMacro(module)}");
@@ -390,6 +401,7 @@ internal static class CppEmitter
     // 나머지 멤버의 선언. 생성 소스: bitfield 접근자, 정적 검사, Schema, ReferenceLayout, Ops, Register.
     private static void EmitClass(SchemaModel schema, ClassModel type, string module, Action<string> Line, Action<string> Body)
     {
+        Line = ExportingLine(module, Line);
         string native = "::" + type.NativeName;
         string self = $"GeneratedType<{native}>";
         string? baseId = type.Base == "rocks::Object" ? null : schema.Find(type.Base).Id;
@@ -873,6 +885,26 @@ internal static class CppEmitter
     // 모듈 API 매크로 이름이다(Docs/Design/BuildTargets.ko.md 3.8절 BD27 — 빌드가 모듈 정의 헤더에 정의한다).
     internal static string ApiMacro(string module) => "ROCKS_" + module.ToUpperInvariant() + "_API";
 
+    // 생성 헤더의 out-of-line 정적 멤버 선언(본문이 생성 소스에 있는 `static ... noexcept;` — ValidateTree·CopyValue·ReferenceLayout·비트
+    // 필드 접근·Binds 검사 등)에 모듈 API 매크로를 붙이는 줄 출력이다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d2). 다른 모듈의 생성 코드·
+    // 헤더 템플릿이 이 정적 멤버를 부르므로 Modular에서 export해야 한다. inline 정의(`{`)·constexpr·이미 매크로가 있는 선언은 그대로 둔다.
+    // 클래스 단위로 붙이지 않는 것은 NativeKey처럼 멤버에 이미 붙인 선언과 겹치면 안 되기 때문이다.
+    private static Action<string> ExportingLine(string module, Action<string> Line)
+    {
+        string macro = ApiMacro(module);
+        bool afterTemplate = false;
+        return text =>
+        {
+            string trimmed = text.TrimStart();
+            // 멤버 템플릿(앞 줄이 template <...>)은 쓰는 쪽에서 인스턴스가 생기므로 붙이지 않는다(BD27).
+            bool outOfLine = !afterTemplate && trimmed.StartsWith("static ", StringComparison.Ordinal) &&
+                !trimmed.StartsWith("static constexpr", StringComparison.Ordinal) && trimmed.EndsWith(';') && !trimmed.Contains('{') &&
+                !trimmed.Contains(macro, StringComparison.Ordinal);
+            afterTemplate = trimmed.StartsWith("template", StringComparison.Ordinal) && !trimmed.EndsWith(';');
+            Line(outOfLine ? text[..(text.Length - trimmed.Length)] + "static " + macro + " " + trimmed["static ".Length..] : text);
+        };
+    }
+
     // 리플렉션 클래스의 native 키다(Docs/Design/BuildTargets.ko.md 3.8절 BS8b). 헤더는 모듈 API 매크로로 export한 선언만 두고,
     // 생성 소스가 const가 아닌 정적 지역 저장소의 주소로 정의한다(소유 모듈에 하나 — 공유 라이브러리 사이에서도 같은 키). struct는
     // 내지 않는다: struct 키는 헤더 템플릿의 상수 연산표가 쓰는 inline 표지다(BS8b 한계).
@@ -888,6 +920,7 @@ internal static class CppEmitter
 
     private static void EmitStruct(SchemaModel schema, ClassModel type, string module, Action<string> Line, Action<string> Body)
     {
+        Line = ExportingLine(module, Line);
         string native = "::" + type.NativeName;
         string self = $"GeneratedType<{native}>";
         string True(bool value) => value ? "true" : "false";

@@ -64,7 +64,7 @@ struct ThreadOptions {
 // Join 성공 뒤 재시작 가능하다. detach는 없고 joinable 상태 소멸은 Fatal로 수명 오류를 드러낸다.
 // 동시 제어 요청은 gate로 중재한다. 진행 중 Join은 다른 Join/Start에 Busy/AlreadyJoinable을
 // 반환한다. self Join은 SelfJoin이다. 객체 파괴는 모든 제어 호출이 끝난 뒤 수행한다.
-class Thread {
+class ROCKS_PLATFORMBASE_API Thread {
 public:
     using Entry = void (*)(void*) noexcept;
 
@@ -97,7 +97,7 @@ void SleepFor(uint32 milliseconds) noexcept;
 // 없거나 조회할 수 없거나 capacity가 모자라면 0이다(buffer는 capacity가 0이 아니면 빈 문자열).
 // MaxThreadNameBytes + 1 byte buffer면 Thread::Start로 붙인 이름을 모두 받는다. 진단·시험용이다.
 usize CopyCurrentThreadName(char* buffer, usize capacity) noexcept;
-void YieldThread() noexcept;
+ROCKS_PLATFORMBASE_API void YieldThread() noexcept;
 // 이 프로세스가 쓸 수 있는 논리 프로세서 수다(1 이상 — affinity·컨테이너 제한을 따른다). 작업
 // 스레드 수의 기본값을 정할 때 쓴다(예: 엔진 GC 표식 scheduler의 worker 수). OS가 알려 주지 않으면
 // 1이다. Android는 sched_getaffinity, Apple은 sysconf, Windows는 활성 프로세서 수와 프로세스
@@ -128,7 +128,7 @@ struct ThreadStackRange {
 //
 // 사용 예:
 //   if (platform::CurrentThreadStackRange().Contains(&handle)) { return InvalidArgument; }
-ThreadStackRange CurrentThreadStackRange() noexcept;
+ROCKS_PLATFORMBASE_API ThreadStackRange CurrentThreadStackRange() noexcept;
 
 // ThreadExitSlot을 프로세스에서 만들 수 있는 수의 상한이다(넘으면 유효하지 않은 칸이 된다).
 inline constexpr uint32 MaxThreadExitSlots = 8;
@@ -180,7 +180,7 @@ inline constexpr uint32 MaxThreadExitSlots = 8;
 //   함수가 도는 스레드가 달라지면 "그 스레드에서 불린다"가 깨진다. 엔진은 fiber를 쓰지 않는다.
 // - 스레드: Get·Set은 아무 스레드에서나 부르고 그 스레드의 값을 읽고 쓴다. 생성끼리는 다른
 //   스레드에서 함께 해도 된다.
-class ThreadExitSlot final {
+class ROCKS_PLATFORMBASE_API ThreadExitSlot final {
 public:
     using Callback = void (*)(void* value) noexcept;
 

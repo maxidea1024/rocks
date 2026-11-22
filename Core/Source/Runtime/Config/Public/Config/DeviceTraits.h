@@ -58,7 +58,7 @@ struct DeviceTrait {
 
 // 기기 특성 목록이다(이름 하나에 값 하나 — 같은 이름을 다시 쓰면 바꾼다). 복사하지 않는다.
 // 스레드: 한 스레드에서 채운 뒤 읽기만 한다.
-class DeviceTraits {
+class ROCKS_CONFIG_API DeviceTraits {
 public:
     explicit DeviceTraits(Allocator& allocator) noexcept;
 

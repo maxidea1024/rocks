@@ -277,6 +277,7 @@ bool IsProcessRunning(uint32 processId) noexcept;
 // buffer에는 NUL도 쓴다). macOS·Android는 link를 푼 경로이고 Windows는 로더가 쓴 경로 그대로다.
 // buffer가 부족하면 Overflow이며 bytes에 필요한 길이(NUL 제외)를 둔다. buffer가 null인데 capacity가
 // 0이 아니면 InvalidArgument다. 그 밖은 OS 원인 코드다.
-FileStatus GetExecutablePath(char* buffer, usize capacity, usize& bytes) noexcept;
+ROCKS_PLATFORMBASE_API FileStatus GetExecutablePath(char* buffer, usize capacity,
+                                                    usize& bytes) noexcept;
 
 } // namespace rocks::platform

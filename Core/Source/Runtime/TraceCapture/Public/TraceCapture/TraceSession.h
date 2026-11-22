@@ -177,7 +177,7 @@ uint64 TraceCurrentSessionSerial() noexcept;
 // 제어 호출과 겹치지 않게 소유자가 순서를 정한다. 기록(TraceWrite)은 Stop과 겹쳐도 된다(Stop이 진행
 // 중인 기록이 끝나기를 기다린다).
 // 수명: 소멸자는 실행 중이면 Stop한다. 할당기는 Stop이 끝날 때까지 살아 있어야 한다.
-class TraceSession {
+class ROCKS_TRACECAPTURE_API TraceSession {
 public:
     TraceSession() noexcept = default;
     ~TraceSession() noexcept;

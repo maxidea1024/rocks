@@ -987,6 +987,39 @@ internal static partial class SelfTests
             ];
             Verify.That(Check().SetEquals(expected), "thread_local in public headers: " + string.Join(", ", Check()));
         });
+        // 모듈 API 매크로(Docs/Design/BuildTargets.ko.md 3.8절 BD27·BS8d2): 자기 모듈의 매크로만, 공개 헤더에만(허용한 내부 헤더 예외), 소스에는
+        // 쓰지 않는다.
+        suite.Add("Policy.ModuleApiMacrosBelongToTheirModule", () =>
+        {
+            using TemporaryDirectory temporary = new();
+            const string exported = "Core/Source/Runtime/Probe/Private/ProbeShared.h";
+            HashSet<(string Path, int Line)> Check()
+            {
+                var failures = PolicyChecks.ModuleApiMacros(temporary.Root, [exported]);
+                Verify.That(failures.All(failure => failure.Rule == "module-api-macro"), "rule name");
+                return failures.Select(failure => (failure.Path, failure.Line)).ToHashSet();
+            }
+
+            // 통과: 자기 모듈 공개 헤더, 허용한 내부 헤더, 주석·문자열 속 언급, 서드파티, 엔진 플러그인 모듈 자기 매크로.
+            temporary.Write("Core/Source/Runtime/Probe/Public/Probe/Probe.h",
+                "#pragma once\nclass ROCKS_PROBE_API Probe {};\nROCKS_PROBE_API int ProbeValue() noexcept;\n// ROCKS_CORE_API\nconst char* text = \"ROCKS_CORE_API\";\n");
+            temporary.Write(exported, "#pragma once\nROCKS_PROBE_API int SharedValue() noexcept;\n");
+            temporary.Write("Core/Source/ThirdParty/Fake/Public/Fake.h", "#pragma once\nROCKS_CORE_API int Fake();\n");
+            temporary.Write("Engine/Plugins/Importers/Fake/Source/FakeImporter/Public/FakeImporter/Fake.h",
+                "#pragma once\nclass ROCKS_FAKEIMPORTER_API Fake {};\n");
+            Verify.That(Check().Count == 0, "allowed uses were rejected: " + string.Join(", ", Check()));
+            // 위반: 다른 모듈 매크로(공개 헤더·플러그인), 비공개 헤더, 소스.
+            temporary.Write("Core/Source/Runtime/Probe/Public/Probe/Bad.h", "#pragma once\nROCKS_CORE_API int Wrong() noexcept;\n");
+            temporary.Write("Core/Source/Runtime/Probe/Private/Hidden.h", "#pragma once\nROCKS_PROBE_API int Hidden() noexcept;\n");
+            temporary.Write("Core/Source/Runtime/Probe/Private/Probe.cpp", "ROCKS_PROBE_API int ProbeValue() noexcept { return 1; }\n");
+            temporary.Write("Engine/Plugins/Importers/Fake/Source/FakeImporter/Public/FakeImporter/Bad.h", "#pragma once\nclass ROCKS_ENGINE_API Bad {};\n");
+            HashSet<(string, int)> expected =
+            [
+                ("Core/Source/Runtime/Probe/Public/Probe/Bad.h", 2), ("Core/Source/Runtime/Probe/Private/Hidden.h", 2),
+                ("Core/Source/Runtime/Probe/Private/Probe.cpp", 1), ("Engine/Plugins/Importers/Fake/Source/FakeImporter/Public/FakeImporter/Bad.h", 2)
+            ];
+            Verify.That(Check().SetEquals(expected), "module API macro misuse: " + string.Join(", ", Check()));
+        });
         // placement new 헤더(Docs/Design/UnityBuildPch.ko.md 8.4절): 시험 소스 밖에서는 <new> 대신 <Base/PlacementNew.h>를 쓴다. MSVC
         // 런타임 헤더 <vcruntime_new.h>는 Base/PlacementNew.h만 include한다.
         suite.Add("Policy.PlacementNewHeaderReplacesNew", () =>

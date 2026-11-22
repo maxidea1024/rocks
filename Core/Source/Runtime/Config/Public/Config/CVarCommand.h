@@ -41,7 +41,7 @@ template <class T>
 inline constexpr char TargetTypeTag = 0;
 
 // 명령 대상을 묶을 때와 다른 타입으로 꺼냈다(Fatal).
-[[noreturn]] void FatalTargetType(StringView command) noexcept;
+[[noreturn]] ROCKS_CONFIG_API void FatalTargetType(StringView command) noexcept;
 
 } // namespace detail
 

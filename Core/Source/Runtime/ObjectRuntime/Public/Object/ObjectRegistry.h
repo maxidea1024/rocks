@@ -43,7 +43,7 @@ Result<void> SetPathMemberReference(PathCursor& cursor, ObjectRef<T>& field,
 // Registry가 이름 색인과 Outer별 자식 고리를 소유한다. inner → outer는 언제나 GC가 추적하는 강한
 // 간선이고, 정책 없는 Registry에서 outer는 inner를 살리지 않는다. 패키지 정책 Registry에서는 outer
 // → inner도 강한 간선이라(자식 고리가 export 표다) 소속 객체는 Discard로만 죽는다.
-class ObjectRegistry {
+class ROCKS_OBJECTRUNTIME_API ObjectRegistry {
 public:
     ObjectRegistry(Allocator&, TypeRegistry&, ContextId, RegistryOptions = {}) noexcept;
     ~ObjectRegistry();
@@ -698,12 +698,16 @@ private:
     friend class ConstructionContext;
     friend class Object;
     friend Result<void> detail::RetainRoot(ObjectRegistry*, ObjectHandle) noexcept;
-    friend void detail::ReleaseRoot(ObjectRegistry*, ObjectHandle) noexcept;
-    friend Result<void*> detail::AccessBorrow(ObjectRegistry*, ObjectHandle, const void*) noexcept;
+    friend ROCKS_OBJECTRUNTIME_API void detail::ReleaseRoot(ObjectRegistry*, ObjectHandle) noexcept;
+    friend ROCKS_OBJECTRUNTIME_API Result<void*> detail::AccessBorrow(ObjectRegistry*, ObjectHandle,
+                                                                      const void*) noexcept;
     friend Result<ObjectLifecycle> detail::InspectBorrow(ObjectRegistry*, ObjectHandle) noexcept;
-    friend void detail::ReleaseBorrow(ObjectRegistry*, ObjectHandle) noexcept;
-    friend void detail::ReleaseBackend(ObjectRegistry*, ObjectHandle) noexcept;
-    friend void detail::ReleaseEncodePin(ObjectRegistry*, ObjectHandle) noexcept;
+    friend ROCKS_OBJECTRUNTIME_API void detail::ReleaseBorrow(ObjectRegistry*,
+                                                              ObjectHandle) noexcept;
+    friend ROCKS_OBJECTRUNTIME_API void detail::ReleaseBackend(ObjectRegistry*,
+                                                               ObjectHandle) noexcept;
+    friend ROCKS_OBJECTRUNTIME_API void detail::ReleaseEncodePin(ObjectRegistry*,
+                                                                 ObjectHandle) noexcept;
     template <class T>
     friend Result<void> detail::SetPathMemberReference(detail::PathCursor&, ObjectRef<T>&,
                                                        ObjectHandle) noexcept;

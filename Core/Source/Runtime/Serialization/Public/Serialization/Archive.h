@@ -33,7 +33,7 @@ struct WireAccess;
 // 원칙이 트리 전체에 적용된다. 한도를 예산이 들고 있어 공유자가 서로 다른 한도로 판정하지 않는다.
 // 사용량은 원자적으로 누적하므로 같은 예산을 공유하는 서로 다른 reader를 여러 스레드에서 써도
 // 된다(같은 reader의 병행은 여전히 금지).
-class ArchiveBudget {
+class ROCKS_SERIALIZATION_API ArchiveBudget {
 public:
     ArchiveBudget(uint64 maxOperations, uint64 maxWork) noexcept
         : maxOperations_(maxOperations), maxWork_(maxWork) {
@@ -61,7 +61,7 @@ private:
 // Guid는 high 다음 low를 각각 u64로 쓴다. bytes/string은 u64 byteLength+payload이며 종단 NUL은
 // 없다. allocator는 writer와 TakeBytes로 이전한 buffer보다 오래 살아야 한다. 동시 변경/allocator
 // 재진입은 금지다.
-class ArchiveWriter {
+class ROCKS_SERIALIZATION_API ArchiveWriter {
 public:
     explicit ArchiveWriter(Allocator&, ArchiveLimits = {}) noexcept;
     ArchiveWriter(ArchiveWriter&&) noexcept = default;
@@ -138,7 +138,7 @@ private:
 // 않는다. Create로 만든 reader는 자기 예산을, RecordReader::OpenValue로 연 reader는 그 Record
 // 트리의 공유 예산을 쓴다. 이동된 원본은 빈 입력이 된다(남은 예산으로 같은 입력을 다시 읽어 한도를
 // 늘리지 못한다).
-class ArchiveReader {
+class ROCKS_SERIALIZATION_API ArchiveReader {
 public:
     static Result<ArchiveReader> Create(Span<const uint8>, ArchiveLimits = {}) noexcept;
     ArchiveReader(ArchiveReader&& other) noexcept;

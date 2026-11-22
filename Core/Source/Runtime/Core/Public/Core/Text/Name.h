@@ -182,7 +182,7 @@ struct NameTextParts {
 // 사용 예:
 //   NameTextParts parts = SplitNameText("Socket_7");
 //   // parts.base == "Socket", parts.GetNumber() == 7
-NameTextParts SplitNameText(StringView text) noexcept;
+ROCKS_CORE_API NameTextParts SplitNameText(StringView text) noexcept;
 
 // 두 Name 원문이 같은 Name인지 pool·intern 없이 판정한다. 같은 pool에 두 원문을 TryIntern한 결과의
 // operator==와 같은 답이고, true이면 TryMakeNameKey의 key도 같다(유효 UTF-8 입력). Map<Name>
@@ -206,12 +206,12 @@ NameTextParts SplitNameText(StringView text) noexcept;
 //   NameTextEquals("Socket_7", "SOCKET_7");  // true
 //   NameTextEquals("Socket_7", "Socket_07"); // false
 //   NameTextEquals("none", "");              // true(둘 다 None)
-bool NameTextEquals(StringView left, StringView right) noexcept;
+ROCKS_CORE_API bool NameTextEquals(StringView left, StringView right) noexcept;
 
 // immutable 문자열의 조회 수명을 붙드는 이동 전용 lease다. pool 객체 자체를 소유하지 않으므로
 // pool/allocator는 모든 lease 반환과 진행 중 호출 종료까지 살아 있어야 한다.
 // 서로 다른 lease의 반환은 병행 가능하지만 같은 lease의 이동/반환/조회 경합은 caller가 막는다.
-class NameLease {
+class ROCKS_CORE_API NameLease {
 public:
     NameLease() noexcept = default;
     ~NameLease() noexcept;

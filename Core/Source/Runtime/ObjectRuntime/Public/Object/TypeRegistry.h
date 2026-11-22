@@ -25,7 +25,7 @@ struct TypeStats {
 // 등록·해제·Shutdown은 생성 스레드 전용이다. Acquire/Stats/lease 계수는 잠금으로 보호한다.
 // Allocator는 Registry보다 오래 살아야 하며 소멸 전 모든 lease를 반환해야 한다.
 // 콜백 코드는 입력 계약을 신뢰한다. 임의 플러그인의 메모리 안전성을 검증하지 않는다.
-class TypeRegistry {
+class ROCKS_OBJECTRUNTIME_API TypeRegistry {
 public:
     explicit TypeRegistry(Allocator& allocator) noexcept;
     ~TypeRegistry();

@@ -103,7 +103,7 @@ struct ApplicationSettings {
 
 // 본문이 받는 실행 문맥이다. Launch가 만들고 본문이 돌아갈 때까지 유효하다(복사하지 않는다). 본문을
 // 부른 스레드(주 스레드)에서 쓴다.
-class ApplicationContext {
+class ROCKS_LAUNCH_API ApplicationContext {
 public:
     ApplicationContext(const ApplicationContext&) = delete;
     ApplicationContext& operator=(const ApplicationContext&) = delete;

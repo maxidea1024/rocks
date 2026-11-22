@@ -49,7 +49,7 @@ namespace rocks {
 // Set payload를 header부터 검증하고 원소를 차례로 읽게 한다. 열 때 할당하지 않고 원소 수만큼의
 // work를 먼저 청구한다. 넘겨받은 ArchiveReader의 예산을 그대로 쓴다. 원본 byte는 reader보다 오래
 // 살아야 한다. 이동만 되며 이동된 원본은 원소 0개의 빈 reader다.
-class SetWireReader {
+class ROCKS_SERIALIZATION_API SetWireReader {
 public:
     // payload(값 하나의 ArchiveReader, 위치 0)의 header를 검사한다. 검사 순서는
     // ValueArrayReader::Open과 같고 원소 tag 자리만 WireSlot::Key다: elementWire·shape가 키 자리의
@@ -103,7 +103,7 @@ private:
 // 바깥 ArchiveWriter 위에 Set payload를 제자리로 쓴다(ValueArrayWriter와 같은 규약). maxBytes는
 // header를 포함한 payload 전체의 상한이다. 작업량은 out의 청구다. 실패하면 out의 내용은 정해지지
 // 않으므로 그 writer를 버린다. out은 이 writer보다 오래 살아야 한다.
-class SetWireWriter {
+class ROCKS_SERIALIZATION_API SetWireWriter {
 public:
     // elementWire가 키 tag가 아니거나 shape와 모순이면 InvalidArgument(reader와 같은 검사), count >
     // maxCount나 header 8 byte + count × 원소 최소 크기 > maxBytes면 쓰기 전에 CapacityExceeded다.

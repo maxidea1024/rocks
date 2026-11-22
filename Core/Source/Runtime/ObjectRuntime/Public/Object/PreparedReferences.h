@@ -70,7 +70,7 @@ struct PreparedReferencesAccess;
 // 소유 스레드 전용이다. 한 사본은 처음 묶은 컨테이너 하나에만 쓴다 — 다른 컨테이너에 닿는 연산은
 // InvalidArgument(InvalidValue)다. 준비와 게시 사이에 그 객체의 컨테이너를 바꾸면 계약 위반이다
 // (리플렉션 쓰기·Registry 참조 변경은 변경 표지가 잡아 BeginBatchPublish가 Busy다).
-class PreparedReferences {
+class ROCKS_OBJECTRUNTIME_API PreparedReferences {
 public:
     // allocator는 handle 목록(배열 사본·Previous·Current)의 allocator다. Map 사본과 새 배열 버퍼는
     // 컨테이너의 allocator로 만든다(게시가 같은 allocator를 요구한다).

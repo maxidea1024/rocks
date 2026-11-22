@@ -95,9 +95,9 @@ namespace detail {
 // null이면 판정을 미룬다) InvalidArgument → 9. 새 객체 경로가 MaxObjectPathBytes를 넘으면
 // CapacityExceeded. 같은 대표 자식 둘은 여기서 거부하지 않는다(이름 충돌 — 생성이 AlreadyExists로
 // 낸다).
-Result<void> CheckNewObjectIdentity(const RegistryPolicy& policy, const TypeLease& type,
-                                    const OuterSummary* outer, StringView name,
-                                    Allocator& scratch) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void>
+CheckNewObjectIdentity(const RegistryPolicy& policy, const TypeLease& type,
+                       const OuterSummary* outer, StringView name, Allocator& scratch) noexcept;
 
 // outer 아래 이름이 nameBytes byte인 새 객체의 객체 경로 길이다(outer가 null이면 outermost라 0).
 // 경로는 Outer 경로 + (둘 다 비어 있지 않으면 '.') + 이름이다(outermost·대표 자식은 빈 경로).

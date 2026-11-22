@@ -180,7 +180,7 @@ struct LogLayoutOutput {
 
 // 해석한 레이아웃이다. 값 타입(고정 배열)이라 복사해 sink에 둔다. 할당하지 않는다.
 // 스레드: Render는 const이고 상태를 바꾸지 않으므로 여러 스레드에서 동시에 불러도 된다.
-class LogLayout {
+class ROCKS_CORE_API LogLayout {
 public:
     // pattern을 해석한다. 실패: 모르는 토큰·형식, 위치 자리("{}"·"{0}"), 짝 없는 중괄호는
     // InvalidArgument, 토큰이 MaxLogLayoutTokens를 넘거나 리터럴이 MaxLogLayoutTextBytes를 넘으면

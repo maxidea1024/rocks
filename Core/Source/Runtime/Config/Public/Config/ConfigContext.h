@@ -285,7 +285,7 @@ DefaultWriteProbe*& ActiveDefaultWriteProbe() noexcept;
 
 } // namespace detail
 
-class ConfigContext {
+class ROCKS_CONFIG_API ConfigContext {
 public:
     ConfigContext(Allocator& allocator, ObjectRegistry& objects,
                   const ConfigContextOptions& options) noexcept;

@@ -18,6 +18,6 @@
 //   }
 namespace rocks {
 
-ErrorCode FileErrorCode(platform::FileStatus status) noexcept;
+ROCKS_CORE_API ErrorCode FileErrorCode(platform::FileStatus status) noexcept;
 
 } // namespace rocks

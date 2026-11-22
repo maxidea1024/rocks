@@ -19,6 +19,6 @@ namespace rocks::platform {
 // 플랫폼별 실패: Windows는 BCryptGenRandom 오류를 false로 돌려준다. macOS·Android의
 // arc4random_buf는 오류를 돌려주지 않으며, 엔트로피를 얻지 못하면 OS가 프로세스를 종료한다(false에
 // 도달하지 않는다).
-[[nodiscard]] bool TryFillSecureRandom(void* buffer, usize bytes) noexcept;
+[[nodiscard]] ROCKS_PLATFORMBASE_API bool TryFillSecureRandom(void* buffer, usize bytes) noexcept;
 
 } // namespace rocks::platform

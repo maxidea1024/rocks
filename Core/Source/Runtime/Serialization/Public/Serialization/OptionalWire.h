@@ -44,7 +44,7 @@ namespace rocks {
 // Optional payload를 검증하고 내부 값을 읽게 한다. 열 때 할당하지 않는다. 넘겨받은 ArchiveReader의
 // 예산을 그대로 쓴다. 원본 byte는 reader와 RecordBytes 범위보다 오래 살아야 한다. 이동만 되며
 // 이동된 원본은 unset의 빈 reader다.
-class OptionalWireReader {
+class ROCKS_SERIALIZATION_API OptionalWireReader {
 public:
     // payload(값 하나의 ArchiveReader, 위치 0)를 검사한다. 검사 순서(모두 할당 전):
     // innerWire·shape가 Optional 내부 자리의 것이 아니거나 모순이면 InvalidArgument(이때는
@@ -109,7 +109,7 @@ private:
 // BeginSet이 present와 내부 tag를 쓴 뒤 호출자가 내부 payload(단일 값의 Write* 또는 RecordWriter로
 // Record 하나)를 out에 바로 쓰고 End를 부른다. 작업량은 out의 청구다. 실패하면 out의 내용은
 // 정해지지 않으므로 그 writer를 버린다. out은 이 writer보다 오래 살아야 한다.
-class OptionalWireWriter {
+class ROCKS_SERIALIZATION_API OptionalWireWriter {
 public:
     // unset 값(present 0)을 쓴다. out의 쓰기 오류를 그대로 돌려준다(실패하면 out은 그대로다).
     static Result<void> WriteUnset(ArchiveWriter& out) noexcept;

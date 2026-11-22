@@ -43,7 +43,7 @@ internal static partial class MetaTests
             }
 
             // 설정 struct가 아닌 struct(Plain)에는 Settings()가 없다: Settings() 정의는 설정 struct 둘뿐이다.
-            Verify.Equal(2, generated.Split(Compact("static const SettingsSchema& Settings() noexcept"), StringSplitOptions.None).Length - 1,
+            Verify.Equal(2, generated.Split(Compact("static ROCKS_PROBE_API const SettingsSchema& Settings() noexcept"), StringSplitOptions.None).Length - 1,
                 "only settings structs get Settings()");
             ProcessResult compiled = await probe.CompileGeneratedAsync();
             Verify.Equal(0, compiled.ExitCode, "generated settings header compiles: " + compiled.StdOut + compiled.StdErr);

@@ -170,7 +170,7 @@ private:
 // - Close는 진행 중 요청이 있으면 Busy다. 소멸 시 진행 중 요청이 있으면 모두 취소하고 OS가 완료를
 //   알릴 때까지 기다린 뒤 닫는다(버퍼 조기 해제 방지). 장치가 응답하지 않으면 이 대기는 끝나지 않을
 //   수 있다.
-class AsyncReadFile {
+class ROCKS_PLATFORMBASE_API AsyncReadFile {
 public:
     AsyncReadFile() noexcept;
     ~AsyncReadFile() noexcept;
@@ -216,7 +216,7 @@ private:
 //   F_FULLFSYNC, 지원하지 않으면 fsync). 진행 중 요청이 있으면 Busy다. 오래 걸릴 수 있다.
 // - Close·소멸·요청 수명 규칙은 AsyncReadFile과 같다. 소멸 시 진행 중 쓰기는 취소를 요청하고 완료를
 //   기다리므로 일부만 쓰였을 수 있다.
-class AsyncWriteFile {
+class ROCKS_PLATFORMBASE_API AsyncWriteFile {
 public:
     AsyncWriteFile() noexcept;
     ~AsyncWriteFile() noexcept;
