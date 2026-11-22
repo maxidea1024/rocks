@@ -706,7 +706,7 @@ fn Size(items: Set<int>): int {
          "Run/Case.spark: .run line 1: cannot read '1e39' as a value of this parameter"},
         {"Half(inf)\n",
          "Run/Case.spark: .run line 1: cannot read 'inf' as a value of this parameter"},
-        {"new #1 Nope\n", "Run/Case.spark: .run line 1: 'new' needs a class of the module"},
+        {"new #1 Nope\n", "Run/Case.spark: .run line 1: 'new' needs a class of the modules"},
         {"fields #3\n",
          "Run/Case.spark: .run line 1: the object has no instance (use 'new' first)"},
         {"detach x\n",
@@ -747,8 +747,8 @@ fn Size(items: Set<int>): int {
         bool found = false;
         for (const String& failure : report.Failures()) {
             found = found || failure.View() ==
-                                 StringView("Run/Broken.spark: has a .run file but the module was "
-                                            "not lowered to bytecode (a file case without "
+                                 StringView("Run/Broken.spark: has a .run file but a module was "
+                                            "not lowered to bytecode (a case without "
                                             "diagnostics is needed)");
         }
 
@@ -1497,6 +1497,156 @@ close -> ok
                     PrintFailures(report);
                 }
 
+                REQUIRE(expected.TryAppend(actual));
+                attempts = used;
+            } else if (!ran) {
+                CHECK(ran.Error() == ErrorCode::OutOfMemory);
+                ++failures;
+            } else {
+                if (!report.Failures().IsEmpty()) {
+                    PrintFailures(report);
+                }
+
+                CHECK(report.Failures().IsEmpty());
+            }
+        }
+
+        CHECK(backing.Stats().liveAllocations == before);
+    }
+
+    CHECK(failures > 0);
+}
+
+TEST(SparksConformance_RunGoldenAllocationFailureModules) {
+    // 여러 모듈 `.run`(Docs/Design/SparksReload.ko.md 6절 — LC7c2a)의 모든 할당 실패 자리: 모듈마다
+    // `.sparkc` 왕복·링크, import 풀기, 실행 단위 표, 이름 찾기. 실패는 OutOfMemory로 돌아오고 새는
+    // 할당이 없다.
+    SystemAllocator backing;
+    constexpr StringView Manifest = "{ name: \"Game\", sparks: 1, profile: \"full\" }\n";
+    constexpr StringView Base = R"(open class Fixture : ScriptableComponent {
+    var Level = 1;
+    event Ping(n: int);
+
+    fn Raise() {
+        Level += 1;
+        Log.Info("raised ${Name()} ${Level}");
+    }
+
+    fn Send(n: int) {
+        emit Ping(n);
+    }
+
+    open fn Name(): string {
+        return "fixture";
+    }
+}
+
+fn Twice(n: int): int {
+    return n * 2;
+}
+)";
+    constexpr StringView Main = R"(import Base;
+
+class Door : Fixture {
+    var Peer: Fixture?;
+    var Seen = 0;
+
+    fn Watch(target: Fixture) {
+        Peer = target;
+    }
+
+    fn Fire(n: int) {
+        Send(Twice(n));
+    }
+
+    override fn Name(): string {
+        return "door";
+    }
+
+    on Peer.Ping(n: int) {
+        Seen += n;
+        Log.Info("seen ${n}");
+    }
+}
+
+class Lamp : Fixture {
+}
+)";
+    const CaseFile files[] = {{"Game/SparksPackage.json5", Manifest},
+                              {"Game/Base.spark", Base},
+                              {"Game/Main.spark", Main}};
+    constexpr StringView Golden = R"(new #1 Door -> ok
+new #2 Door -> ok
+new #3 Lamp -> ok
+hook #1 Enable -> ok
+hook #2 Enable -> ok
+Door.Watch(#2, #1) -> ok
+Door.Fire(#1, 3) -> ok
+Fixture.Raise(#1) -> ok
+Fixture.Raise(#3) -> ok
+fields #1 -> ok
+fields #2 -> ok
+close -> ok
+)";
+    constexpr StringView Schema = R"({
+  "format": 1, "package": "Rocks", "module": "Engine",
+  "types": [
+    {"name": "Actor", "id": "5a7e0000000000000000000000000001", "kind": "object"},
+    {"name": "Component", "id": "5a7e0000000000000000000000000005", "kind": "object",
+     "fields": [{"name": "Owner", "id": "5a7e0000000000000000000000000131", "type": "Actor"}]},
+    {"name": "ScriptableComponent", "id": "5a7e0000000000000000000000000007", "kind": "object",
+     "base": "Component", "scriptExtensible": true}
+  ]
+})";
+    const CaseFile schemas[] = {{"Schema/Engine.sparkbind.json", Schema}};
+    SystemAllocator side; // 기대값은 세는 allocator 밖에 둔다
+    uint64 attempts = 0;
+    uint64 failures = 0;
+    String expected(side);
+    for (uint64 failAt = 0; failAt == 0 || failAt <= attempts; ++failAt) {
+        test::NFailAllocator allocator(backing);
+        const uint64 before = backing.Stats().liveAllocations;
+        {
+            CaseInput input;
+            input.name = "Run/Modules";
+            input.folder = true;
+            input.files = files;
+            input.schemas = schemas;
+            input.expect = "clean\n";
+            input.hasRun = true;
+            input.run = failAt == 0 ? Golden : expected.View();
+            Report report(allocator);
+            if (failAt != 0) {
+                allocator.FailOnAttempt(failAt);
+            }
+
+            auto ran = RunCase(allocator, input, report);
+            const uint64 used = allocator.Attempts();
+            allocator.DisableFailure();
+            if (failAt == 0) {
+                REQUIRE(ran);
+                if (report.Failures().Size() != 1) {
+                    PrintFailures(report);
+                }
+
+                REQUIRE(report.Failures().Size() == 1);
+                const StringView failure = report.Failures()[0].View();
+                const StringView marker = "  actual run:\n";
+                usize at = 0;
+                while (at + marker.ByteCount() <= failure.ByteCount() &&
+                       StringView(failure.Data() + at, marker.ByteCount()) != marker) {
+                    ++at;
+                }
+
+                REQUIRE(at + marker.ByteCount() <= failure.ByteCount());
+                const StringView actual(failure.Data() + at + marker.ByteCount(),
+                                        failure.ByteCount() - at - marker.ByteCount());
+                CHECK(actual.Contains("log info \"seen 6\"", StringComparison::CaseSensitive));
+                CHECK(actual.Contains("raised door 2", StringComparison::CaseSensitive));
+                CHECK(actual.Contains("fields #2 -> Door(Level: 1, Peer: #1, Seen: 6)",
+                                      StringComparison::CaseSensitive));
+                CHECK(actual.Contains("close -> ok (ledger 0 buffers)",
+                                      StringComparison::CaseSensitive));
                 REQUIRE(expected.TryAppend(actual));
                 attempts = used;
             } else if (!ran) {

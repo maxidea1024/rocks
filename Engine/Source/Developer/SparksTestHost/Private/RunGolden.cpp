@@ -1087,6 +1087,27 @@ constexpr uint32 RunMaxGateReloads = 64;
 // 사례 하나의 revision 원문 상한이다(쓰임 표시 bit 수).
 constexpr usize RunMaxRevisionFiles = 32;
 
+// `.run`의 실행 단위(모듈 하나 — SparksReload 6절 LC7c2a)다: compilation 모듈 번호와 `.sparkc` 왕복
+// bytecode·링크. 링크는 session이 가리키므로 옮기지 않는다(UniquePtr로 둔다).
+struct RunUnit {
+    explicit RunUnit(Allocator& allocator) noexcept : loaded(allocator), linked(allocator) {
+    }
+
+    uint32 module = NoModule;
+    BytecodeModule loaded;
+    VmLinkedModule linked;
+};
+
+// 지금 revision의 실행 단위 하나다(reload가 바꾼다).
+struct RunCode {
+    const BytecodeModule* code = nullptr;
+    const VmLinkedModule* link = nullptr;
+    uint32 module = NoModule; // currentCompilation의 모듈 번호
+};
+
+// `fields`가 읽는 클래스 사슬 상한이다(VmSession 기반 깊이와 같다).
+constexpr uint32 RunMaxChain = 64;
+
 // reload한 revision 하나다(SparksReload K9): 컴파일 결과와 `.sparkc` 왕복 bytecode·링크.
 struct RunRevision {
     explicit RunRevision(Allocator& allocator) noexcept
@@ -1203,39 +1224,51 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
 
         return report.TryAddFailure(message.View());
     };
-    const BytecodeModule* bytecode =
-        input.folder ? nullptr : compilation.ModuleBytecode(mainModule);
-    if (bytecode == nullptr) {
-        return fail("has a .run file but the module was not lowered to bytecode (a file case "
-                    "without diagnostics is needed)");
-    }
-
-    // 실행은 `.sparkc` 왕복을 거친 모듈로 한다(로드 경로와 같게).
-    Array<uint8> file(allocator);
-    if (auto written = WriteBytecodeFile(*bytecode, file); !written) {
-        return written;
-    }
-
-    BytecodeModule loaded(allocator);
-    BytecodeRejection rejection;
-    if (auto read = ReadBytecodeFile(file.View(), loaded, rejection); !read) {
-        if (read.Error() != ErrorCode::InvalidArgument) {
-            return read;
-        }
-
-        return fail("the .sparkc of the module was rejected");
-    }
-
-    // 가짜 host로 링크한다(SparksVm 6.1절 — 못 묶으면 사례 실패).
+    // 실행 단위(SparksReload 6절 LC7c2a): 파일 사례는 그 모듈 하나, 폴더 사례는 모든 모듈이다.
+    // 실행은 `.sparkc` 왕복을 거친 모듈로 하고(로드 경로와 같게) 가짜 host로 링크한다(SparksVm
+    // 6.1절 — 못 묶으면 사례 실패).
     FakeHost host(allocator, compilation);
     if (host.RanOutOfMemory()) {
         return Result<void>::Failure(ErrorCode::OutOfMemory);
     }
 
-    VmLinkedModule linked(allocator);
-    {
+    Array<UniquePtr<RunUnit>> units(allocator);
+    const uint32 firstModule = input.folder ? 0 : mainModule;
+    const uint32 endModule = input.folder ? compilation.ModuleCount() : mainModule + 1;
+    for (uint32 module = firstModule; module < endModule; ++module) {
+        const BytecodeModule* bytecode = compilation.ModuleBytecode(module);
+        if (bytecode == nullptr) {
+            return fail("has a .run file but a module was not lowered to bytecode (a case "
+                        "without diagnostics is needed)");
+        }
+
+        auto made = UniquePtr<RunUnit>::TryMake(allocator, allocator);
+        if (!made) {
+            return Result<void>::Failure(made.Error());
+        }
+
+        if (auto pushed = units.TryPushBack(Move(made.Value())); !pushed) {
+            return pushed;
+        }
+
+        RunUnit& unit = *units[units.Size() - 1];
+        unit.module = module;
+        Array<uint8> file(allocator);
+        if (auto written = WriteBytecodeFile(*bytecode, file); !written) {
+            return written;
+        }
+
+        BytecodeRejection rejection;
+        if (auto read = ReadBytecodeFile(file.View(), unit.loaded, rejection); !read) {
+            if (read.Error() != ErrorCode::InvalidArgument) {
+                return read;
+            }
+
+            return fail("the .sparkc of a module was rejected");
+        }
+
         StringBuilder<MessageInlineBytes> reason(allocator);
-        if (auto link = LinkModule(loaded, &host, linked, reason); !link) {
+        if (auto link = LinkModule(unit.loaded, &host, unit.linked, reason); !link) {
             if (link.Error() != ErrorCode::InvalidArgument) {
                 return link;
             }
@@ -1250,7 +1283,53 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
         }
     }
 
-    host.SetModule(&linked);
+    if (units.IsEmpty()) {
+        return fail("has a .run file but no module");
+    }
+
+    // 다른 모듈 함수 참조(import)를 푼다(SparksVm 6.5절).
+    {
+        Array<VmLinkedModule*> linking(allocator);
+        for (UniquePtr<RunUnit>& unit : units) {
+            if (auto pushed = linking.TryPushBack(&unit->linked); !pushed) {
+                return pushed;
+            }
+        }
+
+        StringBuilder<MessageInlineBytes> reason(allocator);
+        if (auto imported = LinkImports(linking.View(), reason); !imported) {
+            if (imported.Error() != ErrorCode::InvalidArgument) {
+                return imported;
+            }
+
+            StringBuilder<MessageInlineBytes> message(allocator);
+            message.AppendFormat(".run: the imports were not linked: {}", reason.View());
+            if (message.HasFailed()) {
+                return Result<void>::Failure(message.Status().Error());
+            }
+
+            return fail(message.View());
+        }
+    }
+
+    // 지금 revision의 실행 단위 표다(reload가 바꾼다). links는 가짜 host의 가상 호출 범위다.
+    Array<RunCode> codes(allocator);
+    Array<const VmLinkedModule*> links(allocator);
+    for (UniquePtr<RunUnit>& unit : units) {
+        RunCode entry;
+        entry.code = &unit->loaded;
+        entry.link = &unit->linked;
+        entry.module = unit->module;
+        if (auto pushed = codes.TryPushBack(entry); !pushed) {
+            return pushed;
+        }
+
+        if (auto pushed = links.TryPushBack(&unit->linked); !pushed) {
+            return pushed;
+        }
+    }
+
+    host.SetModules(links.View());
     Array<uint64> refArguments(allocator);
     StringBuilder<MessageInlineBytes> problem(allocator);
     RunValues values(compilation, problem, &host);
@@ -1260,16 +1339,82 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
     // 있다). 지금 revision의 bytecode·링크·compilation은 아래 포인터가 가리킨다.
     Array<UniquePtr<RunRevision>> revisions(allocator);
     usize revisionsUsed = 0; // reload가 쓴 revision 원문 bit(쓰지 않은 원문은 사례 실패 — 오타)
-    const BytecodeModule* code = &loaded;
-    const VmLinkedModule* current = &linked;
     const Compilation* currentCompilation = &compilation;
-    uint32 currentMain = mainModule;
     // 실행 단위는 session 하나다(SparksRuntime 2.2절 — 메서드 호출의 수신자는 session instance).
     VmSession session(allocator, &host);
     VmExecution& execution = session.Execution();
-    if (auto added = session.AddModule(*current); !added) {
-        return added;
+    for (const RunCode& entry : codes) {
+        if (auto added = session.AddModule(*entry.link); !added) {
+            return added;
+        }
     }
+
+    // 실행 단위에서 이름을 찾는다(`<모듈 경로>:이름`으로 고를 수 있다): 찾은 수(1이면 unit·index에
+    // 둔다 — 0은 없음, 2 이상은 여러 모듈에 있다).
+    auto split = [](StringView text, StringView& path, StringView& name) noexcept {
+        path = StringView();
+        name = text;
+        for (usize at = text.ByteCount(); at > 0; --at) {
+            if (text.Data()[at - 1] == ':') {
+                path = StringView(text.Data(), at - 1);
+                name = StringView(text.Data() + at, text.ByteCount() - at);
+                return;
+            }
+        }
+    };
+    auto findClass = [&](StringView text, usize& unit, uint32& index) noexcept {
+        StringView path;
+        StringView name;
+        split(text, path, name);
+        uint32 found = 0;
+        for (usize at = 0; at < codes.Size(); ++at) {
+            const BytecodeModule& code = *codes[at].code;
+            if (!path.IsEmpty() && code.String(code.path) != path) {
+                continue;
+            }
+
+            for (uint32 candidate = 0; candidate < code.classes.Size(); ++candidate) {
+                if (code.String(code.classes[candidate].name) == name) {
+                    unit = at;
+                    index = candidate;
+                    ++found;
+                }
+            }
+        }
+
+        return found;
+    };
+    auto findFunction = [&](StringView text, usize& unit, uint32& index) noexcept {
+        StringView path;
+        StringView name;
+        split(text, path, name);
+        uint32 found = 0;
+        for (usize at = 0; at < codes.Size(); ++at) {
+            const BytecodeModule& code = *codes[at].code;
+            if (!path.IsEmpty() && code.String(code.path) != path) {
+                continue;
+            }
+
+            for (uint32 candidate = 0; candidate < code.functions.Size(); ++candidate) {
+                if (code.String(code.functions[candidate].name) == name) {
+                    unit = at;
+                    index = candidate;
+                    ++found;
+                }
+            }
+        }
+
+        return found;
+    };
+    auto unitOf = [&](const VmLinkedModule* link) noexcept {
+        for (usize at = 0; at < codes.Size(); ++at) {
+            if (codes[at].link == link) {
+                return at;
+            }
+        }
+
+        return codes.Size();
+    };
 
     session.InjectAwait(injection.await, injection.cancel);
     // G4: 주입 실행은 어느 출구에서든 CloseSession 뒤 ledger·유지 자원 0을 본다(누수는 실패 기록).
@@ -1459,6 +1604,10 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
                     }
                 }
 
+                if (input.folder) {
+                    return bad("'reload' is not supported in folder cases yet");
+                }
+
                 if (source == nullptr) {
                     return bad("'reload' needs a <case>.<version>.spark file next to the case");
                 }
@@ -1517,7 +1666,7 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
                 };
                 VmReloadPlan plan(allocator);
                 StringBuilder<MessageInlineBytes> reason(allocator);
-                auto planned = session.PlanReload(*current, revision.linked,
+                auto planned = session.PlanReload(*codes[0].link, revision.linked,
                                                   rest == "keep" ? VmReloadExecutions::Keep
                                                                  : VmReloadExecutions::Cancel,
                                                   plan, reason);
@@ -1569,11 +1718,12 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
                                             report.lost, report.removed);
                         actual.AppendFormat("cancelled {}, restarted {}, previous {})",
                                             report.cancelled, report.restarted, report.previous);
-                        host.SetModule(&revision.linked);
-                        code = &revision.module;
-                        current = &revision.linked;
+                        codes[0].code = &revision.module;
+                        codes[0].link = &revision.linked;
+                        codes[0].module = revision.main;
+                        links[0] = &revision.linked;
+                        host.SetModules(links.View());
                         currentCompilation = &revision.compilation;
-                        currentMain = revision.main;
                         values.Rebind(revision.compilation);
                         delivered = true;
                     }
@@ -1681,22 +1831,28 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
             } else {
                 actual.Append(directive).Append(RunArrow);
                 if (verb == "new") {
+                    usize unit = 0;
                     uint32 classIndex = NoBytecodeIndex;
-                    for (uint32 index = 0; index < code->classes.Size(); ++index) {
-                        classIndex =
-                            code->String(code->classes[index].name) == rest ? index : classIndex;
+                    const uint32 found = findClass(rest, unit, classIndex);
+                    if (found == 0) {
+                        return bad("'new' needs a class of the modules");
                     }
 
-                    if (classIndex == NoBytecodeIndex) {
-                        return bad("'new' needs a class of the module");
+                    if (found > 1) {
+                        return bad("'new' names a class of several modules (use <path>:Class)");
                     }
 
-                    const uint64 handle = host.ObjectArgument(number.Value(), rest);
+                    StringView typePath;
+                    StringView typeName;
+                    split(rest, typePath, typeName);
+
+                    const uint64 handle = host.ObjectArgument(number.Value(), typeName);
                     if (handle == 0) {
                         return Result<void>::Failure(ErrorCode::OutOfMemory);
                     }
 
-                    auto created = session.CreateInstance(handle, *current, classIndex, result);
+                    auto created =
+                        session.CreateInstance(handle, *codes[unit].link, classIndex, result);
                     if (!created) {
                         if (created.Error() != ErrorCode::InvalidArgument) {
                             return Result<void>::Failure(created.Error());
@@ -1774,22 +1930,30 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
 
                         actual.Append("ok");
                     } else if (verb == "fields") {
-                        // 기반 사슬(기반 먼저)의 필드: `Class(Field: 값, …)`.
-                        const VmLinkedModule* chainModules[64] = {};
-                        uint32 chainClasses[64] = {};
-                        uint32 depth = 0;
-                        uint32 walk = session.ClassOf(instance);
-                        while (walk != NoBytecodeIndex && depth < 64) {
-                            chainModules[depth] = current;
-                            chainClasses[depth++] = walk;
-                            walk = code->classes[walk].baseClass;
+                        // 기반 사슬(기반 먼저 — 다른 모듈 기반 포함)의 필드: `Class(Field: 값, …)`.
+                        // 각 클래스는 그 실행 단위의 bytecode·심볼로 읽는다(LC7c2a).
+                        const VmLinkedModule* chainModules[RunMaxChain] = {};
+                        uint32 chainClasses[RunMaxChain] = {};
+                        const uint32 depth = session.ClassChain(
+                            instance, Span<const VmLinkedModule*>(chainModules, RunMaxChain),
+                            Span<uint32>(chainClasses, RunMaxChain));
+                        for (uint32 at = 0; at < depth; ++at) {
+                            if (unitOf(chainModules[at]) == codes.Size()) {
+                                return bad("'fields' found a class of an unknown module");
+                            }
+                        }
+
+                        if (depth == 0) {
+                            return bad("'fields' needs an instance");
                         }
 
                         const VmSession::FieldView storage = session.Fields(instance);
-                        actual.Append(code->String(code->classes[session.ClassOf(instance)].name))
-                            .Append("(");
+                        const BytecodeModule& own = *codes[unitOf(chainModules[0])].code;
+                        actual.Append(own.String(own.classes[chainClasses[0]].name)).Append("(");
                         bool firstField = true;
                         for (uint32 at = depth; at > 0; --at) {
+                            const RunCode& owner = codes[unitOf(chainModules[at - 1])];
+                            const BytecodeModule* code = owner.code;
                             const BytecodeClass& entry = code->classes[chainClasses[at - 1]];
                             uint32 start[BytecodeBankCount] = {};
                             static_cast<void>(session.RegionStart(*chainModules[at - 1],
@@ -1802,7 +1966,7 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
                                 const Symbol* symbol = nullptr;
                                 for (const Symbol& candidate : currentCompilation->Symbols()) {
                                     if (candidate.kind == SymbolKind::Field &&
-                                        candidate.module == currentMain &&
+                                        candidate.module == owner.module &&
                                         candidate.name == fieldName &&
                                         candidate.owner != NoSymbol &&
                                         currentCompilation->Symbols()[candidate.owner].name ==
@@ -1938,13 +2102,12 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
                         }
 
                         const StringView owner(eventName.Data(), dot);
-                        bool local = false;
-                        for (const BytecodeClass& candidate : code->classes) {
-                            local = local || code->String(candidate.name) == owner;
-                        }
-
+                        usize unit = 0;
+                        uint32 classIndex = NoBytecodeIndex;
+                        const bool local = findClass(owner, unit, classIndex) != 0;
                         VmEventKey key;
-                        key.path = local ? code->String(code->path) : StringView();
+                        key.path =
+                            local ? codes[unit].code->String(codes[unit].code->path) : StringView();
                         key.name = eventName;
                         arguments.Clear();
                         refArguments.Clear();
@@ -2085,14 +2248,19 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
             problem.Append("expected '<function>(<arguments>)'");
         }
 
-        const StringView name(call.Data(), open);
+        const StringView qualified(call.Data(), open);
+        usize unit = 0;
         uint32 function = NoBytecodeIndex;
-        for (uint32 index = 0; problem.ByteCount() == 0 && index < code->functions.Size();
-             ++index) {
-            if (code->String(code->functions[index].name) == name) {
-                function = index;
-            }
+        const uint32 functionsFound =
+            problem.ByteCount() == 0 ? findFunction(qualified, unit, function) : 0;
+        if (functionsFound > 1) {
+            problem.AppendFormat("'{}' is a function of several modules (use <path>:Name)",
+                                 qualified);
         }
+
+        StringView functionPath;
+        StringView name;
+        split(qualified, functionPath, name);
 
         // `Class.Method(#this, …)`는 클래스 메서드다: 가짜 host 객체 #this가 수신자다(6.3절 —
         // instance 실행 모델은 LC6, 여기서는 필드를 host가 흉내 낸다).
@@ -2111,7 +2279,8 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
                                 candidate.owner != NoSymbol &&
                                 currentCompilation->Symbols()[candidate.owner].name == owner;
             if ((method || (owner.IsEmpty() && candidate.kind == SymbolKind::Function)) &&
-                candidate.module == currentMain && candidate.name == member) {
+                functionsFound == 1 && candidate.module == codes[unit].module &&
+                candidate.name == member) {
                 symbol = &candidate;
             }
         }
@@ -2219,19 +2388,21 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
         auto invoke = [&]() noexcept -> Result<VmCallResult> {
             const Span<VmBuffer* const> passed(buffers.Data(), buffers.Size());
             if (owner.IsEmpty()) {
-                return execution.Call(*current, function, arguments.View(), refArguments.View(),
-                                      passed);
+                return execution.Call(*codes[unit].link, function, arguments.View(),
+                                      refArguments.View(), passed);
             }
 
+            const BytecodeModule& code = *codes[unit].code;
             uint32 classIndex = NoBytecodeIndex;
-            for (uint32 index = 0; index < code->classes.Size(); ++index) {
-                classIndex = code->String(code->classes[index].name) == owner ? index : classIndex;
+            for (uint32 index = 0; index < code.classes.Size(); ++index) {
+                classIndex = code.String(code.classes[index].name) == owner ? index : classIndex;
             }
 
             uint32 instance = session.Find(refArguments[0]);
             if (instance == NoBytecodeIndex && classIndex != NoBytecodeIndex) {
                 VmCallResult init;
-                auto created = session.CreateInstance(refArguments[0], *current, classIndex, init);
+                auto created =
+                    session.CreateInstance(refArguments[0], *codes[unit].link, classIndex, init);
                 if (!created) {
                     return Result<VmCallResult>::Failure(created.Error());
                 }
@@ -2248,7 +2419,7 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
             }
 
             return session.Call(
-                instance, *current, function, arguments.View(),
+                instance, *codes[unit].link, function, arguments.View(),
                 Span<const uint64>(refArguments.Data() + 1, refArguments.Size() - 1), passed);
         };
         auto called = invoke();
