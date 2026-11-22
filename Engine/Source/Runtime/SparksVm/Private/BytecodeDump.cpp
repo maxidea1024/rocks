@@ -117,8 +117,9 @@ public:
             out_.Append("\n");
             for (uint32 at = entry.firstField; at < entry.firstField + entry.fieldCount; ++at) {
                 const BytecodeTypeField& field = module_.classFields[at];
-                out_.AppendFormat("  field {} {}{} x{}\n", module_.String(field.name),
-                                  BankLetter(field.bank), field.offset, field.slots);
+                out_.AppendFormat("  field {} {}{} x{}{}\n", module_.String(field.name),
+                                  BankLetter(field.bank), field.offset, field.slots,
+                                  (field.flags & BytecodeFieldHeld) != 0 ? " held" : "");
             }
 
             for (uint32 at = entry.firstHook; at < entry.firstHook + entry.hookCount; ++at) {
@@ -213,6 +214,9 @@ private:
         out_.Append("  body ");
         Hash(function.bodyHash);
         out_.Append("\n");
+        if (function.heldCount != 0) {
+            out_.AppendFormat("  held r{} x{}\n", function.heldFirst, function.heldCount);
+        }
         for (uint32 index = function.firstAwait; index < function.firstAwait + function.awaitCount;
              ++index) {
             const BytecodeAwaitPoint& point = module_.awaits[index];

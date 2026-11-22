@@ -97,7 +97,7 @@ class0 = Hp : ScriptableComponent s3 r2 b2 init Hp.$init
   field Points b0 x1
   field Names b1 x1
   field Cue r0 x1
-  field Hum r1 x1
+  field Hum r1 x1 held
   field Cursor s2 x1
   handler Owner.Damaged Hp.on Owner.Damaged await skipWhileBusy ref16 -> ref23
   event Opened
@@ -131,41 +131,43 @@ function Hp.Compute  scalar=1/1 ref=2/3 buf=0/0 params=0/1/0 returns sx1
   0004  LOADI  s0, 2    ; 26:16
   0005  RET  s0 x1    ; 26:9
 
-function Hp.Hold  scalar=5/7 ref=3/5 buf=0/0 params=0/1/0 returns sx2
+function Hp.Hold  scalar=5/7 ref=4/6 buf=0/0 params=0/1/0 returns sx2
   body 8ad87646e6a82d074ee067398e334b0d8f4bc67ab94ddeab3fbe903fe79f9a76
-  await 0021  live s0..s2 r1
-  0000  GETCTX  r1, ref2    ; 30:21
-  0001  GETF.R  r1, r1, ref3    ; 30:21
-  0003  GETF.R  r2, r0, ref4    ; 30:43
-  0005  MOV.R  r3, r1    ; 30:21
-  0006  MOV.R  r4, r2    ; 30:21
+  held r1 x1
+  await 0022  live s0..s2 r1
+  0000  GETCTX  r2, ref2    ; 30:21
+  0001  GETF.R  r2, r2, ref3    ; 30:21
+  0003  GETF.R  r3, r0, ref4    ; 30:43
+  0005  MOV.R  r4, r2    ; 30:21
+  0006  MOV.R  r5, r3    ; 30:21
   0007  CALLN  ref5    ; 30:21
-  0008  MOV.R  r1, r3    ; 30:21
-  0009  MOV.R  r3, r0    ; 31:27
-  0010  CALL  ref6    ; 31:27
-  0011  MOV.S  s0, s5    ; 31:27
-  0012  MOV.S  s1, s6    ; 31:27
-  0013  TRY.S  s2, s0 x2, else 0024    ; 31:17
-  0015  LOADK  s3, k0    ; 32:21
-  0016  LOADI  s4, 0    ; 32:26
-  0017  MOV.S  s5, s3    ; 32:15
-  0018  MOV.S  s6, s4    ; 32:15
-  0019  CALLL  ref7    ; 32:15
-  0020  MOV.R  r2, r3    ; 32:15
-  0021  AWAIT  -, r2    ; 32:9
-  0023  JMP  0026    ; 32:9
-  0024  RELEASE  r1    ; 31:17
-  0025  RETERR.S  s0 x2    ; 31:17
-  0026  ISSOME.R  s0, r1    ; 33:9
-  0027  BRF  s0, 0032    ; 33:9
-  0028  MOV.R  r2, r1    ; 33:9
-  0029  MOV.R  r3, r2    ; 33:9
-  0030  CALLN  ref8    ; 33:9
-  0031  JMP  0032    ; 33:9
-  0032  LOADI  s0, 0    ; 34:9
-  0033  MOV.S  s1, s2    ; 34:9
-  0034  RELEASE  r1    ; 34:9
-  0035  RET  s0 x2    ; 34:9
+  0008  MOV.R  r2, r4    ; 30:21
+  0009  MOV.R  r1, r2    ; 30:9
+  0010  MOV.R  r4, r0    ; 31:27
+  0011  CALL  ref6    ; 31:27
+  0012  MOV.S  s0, s5    ; 31:27
+  0013  MOV.S  s1, s6    ; 31:27
+  0014  TRY.S  s2, s0 x2, else 0025    ; 31:17
+  0016  LOADK  s3, k0    ; 32:21
+  0017  LOADI  s4, 0    ; 32:26
+  0018  MOV.S  s5, s3    ; 32:15
+  0019  MOV.S  s6, s4    ; 32:15
+  0020  CALLL  ref7    ; 32:15
+  0021  MOV.R  r2, r4    ; 32:15
+  0022  AWAIT  -, r2    ; 32:9
+  0024  JMP  0027    ; 32:9
+  0025  RELEASE  r1    ; 31:17
+  0026  RETERR.S  s0 x2    ; 31:17
+  0027  ISSOME.R  s0, r1    ; 33:9
+  0028  BRF  s0, 0033    ; 33:9
+  0029  MOV.R  r2, r1    ; 33:9
+  0030  MOV.R  r4, r2    ; 33:9
+  0031  CALLN  ref8    ; 33:9
+  0032  JMP  0033    ; 33:9
+  0033  LOADI  s0, 0    ; 34:9
+  0034  MOV.S  s1, s2    ; 34:9
+  0035  RELEASE  r1    ; 34:9
+  0036  RET  s0 x2    ; 34:9
 
 function Hp.Equal  scalar=6/6 ref=1/1 buf=0/0 params=2/1/0 returns sx1
   body c8a68b337889c6df04f4fd5ca3dba025bd3849f52324d66cb20c6898186d40d0
@@ -285,39 +287,41 @@ function Hp.Consts  scalar=4/4 ref=1/1 buf=1/1 params=0/1/0 returns sx1
   0012  MOV.S  s0, s1    ; 67:16
   0013  RET  s0 x1    ; 67:9
 
-function Hp.on Owner.Damaged  scalar=2/2 ref=3/5 buf=0/0 params=1/1/0 returns sx0
+function Hp.on Owner.Damaged  scalar=2/2 ref=4/6 buf=0/0 params=1/1/0 returns sx0
   body 9e73ca9926309494fb8240eb2b754d4f818eb45d6e5e65365f40e38d9fe76f5d
-  await 0025  live r0..r1
-  0000  GETCTX  r1, ref2    ; 72:24
-  0001  GETF.R  r1, r1, ref3    ; 72:24
-  0003  GETF.R  r2, r0, ref4    ; 72:46
-  0005  MOV.R  r3, r1    ; 72:24
-  0006  MOV.R  r4, r2    ; 72:24
+  held r1 x1
+  await 0026  live r0..r1
+  0000  GETCTX  r2, ref2    ; 72:24
+  0001  GETF.R  r2, r2, ref3    ; 72:24
+  0003  GETF.R  r3, r0, ref4    ; 72:46
+  0005  MOV.R  r4, r2    ; 72:24
+  0006  MOV.R  r5, r3    ; 72:24
   0007  CALLN  ref5    ; 72:24
-  0008  MOV.R  r1, r3    ; 72:24
-  0009  ISSOME.R  s1, r1    ; 72:13
-  0010  BRF  s1, 0015    ; 72:13
-  0011  LOADK  s1, k0    ; 73:26
-  0012  LT.F  s1, s1, s0    ; 73:17
-  0013  BRT  s1, 0021    ; 73:17
-  0014  JMP  0023    ; 73:17
-  0015  GETF.R  r2, r0, ref16    ; 81:21
-  0017  MOV.R  r3, r2    ; 81:21
-  0018  CALLN  ref18    ; 81:21
-  0019  MOV.R  r2, r3    ; 81:21
-  0020  RET  -    ; 83:5
-  0021  RELEASE  r1    ; 74:17
-  0022  RET  -    ; 74:17
-  0023  WAITEV  r2, r0, ref19    ; 77:19
-  0025  AWAIT  -, r2    ; 77:13
-  0027  MOV.R  r2, r1    ; 78:13
-  0028  ISSOME.R  s1, r2    ; 78:13
-  0029  BRF  s1, 0033    ; 78:13
-  0030  MOV.R  r3, r2    ; 78:13
-  0031  CALLN  ref8    ; 78:13
-  0032  JMP  0033    ; 78:13
-  0033  RELEASE  r1    ; 72:52
-  0034  JMP  0015    ; 72:9
+  0008  MOV.R  r2, r4    ; 72:24
+  0009  ISSOME.R  s1, r2    ; 72:13
+  0010  BRF  s1, 0016    ; 72:13
+  0011  MOV.R  r1, r2    ; 72:13
+  0012  LOADK  s1, k0    ; 73:26
+  0013  LT.F  s1, s1, s0    ; 73:17
+  0014  BRT  s1, 0022    ; 73:17
+  0015  JMP  0024    ; 73:17
+  0016  GETF.R  r2, r0, ref16    ; 81:21
+  0018  MOV.R  r4, r2    ; 81:21
+  0019  CALLN  ref18    ; 81:21
+  0020  MOV.R  r2, r4    ; 81:21
+  0021  RET  -    ; 83:5
+  0022  RELEASE  r1    ; 74:17
+  0023  RET  -    ; 74:17
+  0024  WAITEV  r2, r0, ref19    ; 77:19
+  0026  AWAIT  -, r2    ; 77:13
+  0028  MOV.R  r2, r1    ; 78:13
+  0029  ISSOME.R  s1, r2    ; 78:13
+  0030  BRF  s1, 0034    ; 78:13
+  0031  MOV.R  r4, r2    ; 78:13
+  0032  CALLN  ref8    ; 78:13
+  0033  JMP  0034    ; 78:13
+  0034  RELEASE  r1    ; 72:52
+  0035  JMP  0016    ; 72:9
 
 function Hp.$init  scalar=1/1 ref=1/1 buf=1/1 params=0/1/0 returns sx0
   body d5de9e5ed63fc49f474fbc6f7058f61714eaa7875bb08b39d566445dfeb27f0e

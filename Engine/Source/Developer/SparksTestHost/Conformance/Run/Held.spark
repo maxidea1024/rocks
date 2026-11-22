@@ -1,0 +1,49 @@
+class Speaker : ScriptableComponent {
+    @edit var Cue: SoundAsset;
+    var Hum: LoopHandle?;
+    var Other: LoopHandle?;
+
+    on Enable() {
+        Hum = World.Audio.StartLoop(Cue);
+        Other = World.Audio.StartLoop(Cue);
+    }
+
+    fn Swap() {
+        Hum = World.Audio.StartLoop(Cue);
+    }
+
+    fn Stop() {
+        Hum = null;
+    }
+
+    async fn Siren() {
+        let first = World.Audio.StartLoop(Cue);
+        let second = World.Audio.StartLoop(Cue);
+        await Delay(0.5, Clock.Game);
+        first?.Pause();
+        second?.Pause();
+    }
+
+    async fn Faulty() {
+        let held = World.Audio.StartLoop(Cue);
+        await NextTick();
+        held?.Pause();
+        Assert(false, "boom");
+    }
+
+    async fn Waiting() {
+        let held = World.Audio.StartLoop(Cue);
+        await Delay(9.0, Clock.Game);
+        held?.Pause();
+    }
+
+    async fn Looping() {
+        var count = 0;
+        while (count < 2) {
+            let step = World.Audio.StartLoop(Cue);
+            await NextTick();
+            step?.Pause();
+            count += 1;
+        }
+    }
+}

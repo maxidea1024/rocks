@@ -1,0 +1,51 @@
+# Held resources (SparksRuntime 2.6, LC6d1): a field write acquires, releases the old value, then stores;
+# locals live in the function's held registers and stop in reverse declaration order at block end, on
+# fault and on cancel; Disable (after the hook) and detach stop held fields in reverse order.
+new #1 Speaker -> ok (0 steps)
+hook #1 Enable -> ok (17 steps)
+  host AudioSystem.StartLoop(#3, none) -> #4
+  host AudioSystem.StartLoop(#3, none) -> #5
+Speaker.Swap(#1) -> void (9 steps)
+  host AudioSystem.StartLoop(#3, none) -> #6
+  host release #4
+Speaker.Stop(#1) -> void (3 steps)
+  host release #6
+Speaker.Siren(#1) -> suspended (23 steps)
+  host AudioSystem.StartLoop(#3, none) -> #7
+  host AudioSystem.StartLoop(#3, none) -> #8
+advance 0.5 -> ok (0 suspended)
+  host LoopHandle.Pause(#7) -> void
+  host LoopHandle.Pause(#8) -> void
+  host release #8
+  host release #7
+  resume #1 Speaker.Siren -> ok (15 steps)
+Speaker.Faulty(#1) -> suspended (11 steps)
+  host AudioSystem.StartLoop(#3, none) -> #9
+advance 0.1 -> ok (0 suspended)
+  host LoopHandle.Pause(#9) -> void
+  host release #9
+  resume #1 Speaker.Faulty -> fault AssertFailed at 31:9 (11 steps)
+  log error "boom"
+Speaker.Looping(#1) -> suspended (15 steps)
+  host AudioSystem.StartLoop(#3, none) -> #10
+advance 0.1 -> ok (1 suspended)
+  host LoopHandle.Pause(#10) -> void
+  host release #10
+  host AudioSystem.StartLoop(#3, none) -> #11
+  resume #1 Speaker.Looping -> suspended (26 steps)
+advance 0.1 -> ok (0 suspended)
+  host LoopHandle.Pause(#11) -> void
+  host release #11
+  resume #1 Speaker.Looping -> ok (16 steps)
+Speaker.Waiting(#1) -> suspended (15 steps)
+  host AudioSystem.StartLoop(#3, none) -> #12
+hook #1 Disable -> ok (0 steps)
+  host release #12
+  host release #5
+fields #1 -> Speaker(Cue: none, Hum: none, Other: none)
+hook #1 Enable -> ok (17 steps)
+  host AudioSystem.StartLoop(#3, none) -> #13
+  host AudioSystem.StartLoop(#3, none) -> #14
+detach #1 -> ok
+  host release #14
+  host release #13

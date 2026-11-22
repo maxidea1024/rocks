@@ -813,6 +813,19 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
             reload();
             break;
         }
+        case Opcode::Release: {
+            // 지역 유지 자원을 멈춘다(SparksRuntime 2.6절): 0이면 할 일 없음.
+            if (r[a] != 0) {
+                if (link_->host_ == nullptr) {
+                    return MakeFault(VmFaultKind::ContractViolation, at, steps);
+                }
+
+                link_->host_->ReleaseHeld(r[a]);
+                r[a] = 0;
+            }
+
+            break;
+        }
         case Opcode::WaitEv: {
             // 발행자 B의 이벤트 대기 handle을 A에 둔다(SparksRuntime 2.5절).
             const uint32 eventRef = DecodeAx(words[pc++]);

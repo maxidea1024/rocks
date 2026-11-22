@@ -388,6 +388,11 @@ Result<VmCallResult> VmSession::RunHook(uint32 instance, BytecodeHookKind kind,
         return Result<VmCallResult>::Failure(ended.Error());
     }
 
+    // 비활성화: Disable hook이 반환한 뒤 유지 자원 필드를 멈춘다(SL 9.2절 — null로 둔다).
+    if (kind == BytecodeHookKind::Disable) {
+        ReleaseHeldFields(instance);
+    }
+
     suppressChanged_ = false;
     if (kind == BytecodeHookKind::Enable) {
         instances_[instance].enabled = true;
@@ -467,6 +472,39 @@ Result<VmCallResult> VmSession::Call(uint32 instance, const VmLinkedModule& modu
     return called;
 }
 
+void VmSession::ReleaseHeldFields(uint32 instance) noexcept {
+    const VmLinkedModule* chainModules[MaxBaseDepth] = {};
+    uint32 chainClasses[MaxBaseDepth] = {};
+    const uint32 depth = Chain(instance, chainModules, chainClasses);
+    // 파생 → 기반(선언 역순 — 기반 필드가 앞에 선언됐다), 클래스 안에서는 뒤에서부터.
+    for (uint32 at = 0; at < depth; ++at) {
+        uint32 start[BytecodeBankCount] = {};
+        if (!RegionStart(*chainModules[at], chainClasses[at], start)) {
+            continue;
+        }
+
+        const BytecodeModule& bytecode = chainModules[at]->Module();
+        const BytecodeClass& entry = bytecode.classes[chainClasses[at]];
+        for (uint32 field = entry.firstField + entry.fieldCount; field > entry.firstField;
+             --field) {
+            const BytecodeTypeField& declared = bytecode.classFields[field - 1];
+            if ((declared.flags & BytecodeFieldHeld) == 0) {
+                continue;
+            }
+
+            const usize slot = usize(start[1]) + declared.offset;
+            Array<uint64>& refs = instances_[instance].refs;
+            if (slot < refs.Size() && refs[slot] != 0) {
+                if (host_ != nullptr) {
+                    host_->ReleaseHeld(refs[slot]);
+                }
+
+                refs[slot] = 0;
+            }
+        }
+    }
+}
+
 void VmSession::ReleaseFields(Instance& instance) noexcept {
     for (VmBuffer*& buffer : instance.buffers) {
         execution_.Release(buffer);
@@ -485,6 +523,7 @@ Result<void> VmSession::Detach(uint32 instance) noexcept {
 
     Disconnect(instance);
     CancelExecutions(instance, true);
+    ReleaseHeldFields(instance);                // 필드 유지 자원(선언 역순 — SL 9.1절 Detach)
     EndEventWaits(instances_[instance].handle); // 발행자 파괴(SD13)
     DropWrites(instance); // 번호 재사용 뒤 남은 기록이 새 instance에 닿지 않게(LC6b 리뷰 B3)
     Instance& entry = instances_[instance];

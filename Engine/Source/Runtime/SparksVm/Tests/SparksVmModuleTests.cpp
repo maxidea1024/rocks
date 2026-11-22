@@ -218,6 +218,9 @@ TEST(SparksVmModule_ImportSetRules) {
         bool IsAlive(uint64) noexcept override {
             return false;
         }
+
+        void ReleaseHeld(uint64) noexcept override {
+        }
         VmFaultKind GetContext(VmHostCall&) noexcept override {
             return VmFaultKind::ContractViolation;
         }

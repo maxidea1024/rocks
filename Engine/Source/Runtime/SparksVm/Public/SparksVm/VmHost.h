@@ -135,6 +135,9 @@ public:
                                        StringBuilderBase& reason) noexcept = 0;
     // handle(0이 아님)이 살아 있는 객체인지다(generation 대조 — 죽은 handle은 null로 읽힌다).
     virtual bool IsAlive(uint64 handle) noexcept = 0;
+    // 유지 자원(binding schema `held` 타입 — SL 7.1절)을 멈춘다(SparksRuntime 2.6절). 사용자 코드를
+    // 부르지 않고 할당하지 않으며 실패하지 않는다(SL 9.1절). 이미 멈춘·죽은 handle도 받는다.
+    virtual void ReleaseHeld(uint64 handle) noexcept = 0;
     // 문맥 객체 handle을 call.Refs()[0]에 둔다.
     virtual VmFaultKind GetContext(VmHostCall& call) noexcept = 0;
     // 살아 있는 object의 필드를 창에 둔다(Buf는 PutBuffer로).
@@ -217,6 +220,7 @@ private:
         uint8 bank = 0;
         uint8 slots = 0;
         uint32 offset = 0; // 클래스 구역 안 위치
+        bool held = false; // 유지 자원 필드(쓰기가 이전 값을 해제 — SparksRuntime 2.6절)
     };
 
     // ImportedFunction·VirtualFunction 참조 서술자의 함수 모양(bank별 매개변수 slot 수와 반환 —

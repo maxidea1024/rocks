@@ -309,6 +309,7 @@ VmFaultKind VmSession::Suspend(uint64 wait, uint32 resultRegister, uint32 result
     auto failed = [&]() noexcept -> VmFaultKind {
         entry.frames.Clear();
         entry.generations.Clear();
+        entry.held.Clear();
         entry.scalars.Clear();
         entry.refs.Clear();
         entry.buffers.Clear();
@@ -317,6 +318,7 @@ VmFaultKind VmSession::Suspend(uint64 wait, uint32 resultRegister, uint32 result
     };
     entry.frames.Clear();
     entry.generations.Clear();
+    entry.held.Clear();
     entry.scalars.Clear();
     entry.refs.Clear();
     entry.buffers.Clear();
@@ -328,7 +330,9 @@ VmFaultKind VmSession::Suspend(uint64 wait, uint32 resultRegister, uint32 result
     }
 
     for (const VmExecution::Frame& frame : execution_.frames_) {
-        if (!entry.generations.TryPushBack(frame.link->generation_)) {
+        const BytecodeFunction& function = frame.link->Module().functions[frame.function];
+        if (!entry.generations.TryPushBack(frame.link->generation_) ||
+            !entry.held.TryPushBack((uint32(function.heldFirst) << 16) | function.heldCount)) {
             return failed();
         }
     }
@@ -394,6 +398,7 @@ VmFaultKind VmSession::SuspendChild(usize boundary, uint64 wait, uint32 resultRe
     auto failed = [&]() noexcept -> VmFaultKind {
         entry.frames.Clear();
         entry.generations.Clear();
+        entry.held.Clear();
         entry.scalars.Clear();
         entry.refs.Clear();
         entry.buffers.Clear();
@@ -405,6 +410,7 @@ VmFaultKind VmSession::SuspendChild(usize boundary, uint64 wait, uint32 resultRe
     const VmExecution::Frame first = execution_.frames_[boundary];
     entry.frames.Clear();
     entry.generations.Clear();
+    entry.held.Clear();
     entry.scalars.Clear();
     entry.refs.Clear();
     entry.buffers.Clear();
@@ -426,7 +432,9 @@ VmFaultKind VmSession::SuspendChild(usize boundary, uint64 wait, uint32 resultRe
             frame.base[bank] -= first.base[bank];
         }
 
-        if (!entry.generations.TryPushBack(frame.link->generation_)) {
+        const BytecodeFunction& function = frame.link->Module().functions[frame.function];
+        if (!entry.generations.TryPushBack(frame.link->generation_) ||
+            !entry.held.TryPushBack((uint32(function.heldFirst) << 16) | function.heldCount)) {
             return failed();
         }
     }
@@ -466,6 +474,22 @@ VmFaultKind VmSession::SuspendChild(usize boundary, uint64 wait, uint32 resultRe
 }
 
 void VmSession::ReleaseSuspended(Suspended& entry) noexcept {
+    // 취소: 맨 위 frame부터 held 구간을 뒤에서부터 멈춘다(정지 때 보관한 구간 — 재링크와 무관).
+    for (usize frame = entry.frames.Size(); frame > 0 && entry.live; --frame) {
+        const uint32 range = frame - 1 < entry.held.Size() ? entry.held[frame - 1] : 0;
+        const usize base = entry.frames[frame - 1].base[static_cast<uint32>(BytecodeBank::Ref)];
+        for (uint32 at = range & 0xFFFF; at > 0; --at) {
+            const usize slot = base + (range >> 16) + at - 1;
+            if (slot < entry.refs.Size() && entry.refs[slot] != 0) {
+                if (host_ != nullptr) {
+                    host_->ReleaseHeld(entry.refs[slot]);
+                }
+
+                entry.refs[slot] = 0;
+            }
+        }
+    }
+
     for (VmBuffer*& buffer : entry.buffers) {
         execution_.Release(buffer);
         buffer = nullptr;
@@ -473,6 +497,7 @@ void VmSession::ReleaseSuspended(Suspended& entry) noexcept {
 
     entry.frames.Empty();
     entry.generations.Empty();
+    entry.held.Empty();
     entry.scalars.Empty();
     entry.refs.Empty();
     entry.buffers.Empty();
@@ -696,6 +721,7 @@ Result<void> VmSession::ResumeSuspended(uint32 chosen, uint64 wait, uint32 depth
     currentChildWait_ = childWait;
     entry.frames.Empty();
     entry.generations.Empty();
+    entry.held.Empty();
     entry.scalars.Empty();
     entry.refs.Empty();
     entry.buffers.Empty();
