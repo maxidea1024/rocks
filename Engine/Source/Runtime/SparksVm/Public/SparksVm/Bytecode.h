@@ -47,7 +47,7 @@ enum class BytecodeRefKind : uint8 {
     Literal           // 검증 리터럴(name = 종류, detail = 글자의 문자열 번호)
 };
 
-const char* BytecodeRefKindName(BytecodeRefKind kind) noexcept;
+ROCKS_SPARKSVM_API const char* BytecodeRefKindName(BytecodeRefKind kind) noexcept;
 
 // 참조 표 항목이다. 이름은 표시 이름이며 다른 모듈의 Sparks 선언은 `<import 경로>:` 접두를 붙인다
 // (같은 이름의 두 모듈 선언을 구별한다 — LC4d가 안정 ID를 더한다).
@@ -142,7 +142,7 @@ enum class BytecodeHookKind : uint8 {
     Count
 };
 
-const char* BytecodeHookKindName(BytecodeHookKind kind) noexcept;
+ROCKS_SPARKSVM_API const char* BytecodeHookKindName(BytecodeHookKind kind) noexcept;
 
 // handler의 재진입 정책이다(SL 6.1절 — await가 있는 handler만 표시).
 enum class BytecodeReentry : uint8 {
@@ -273,6 +273,7 @@ public:
 // 상수·문자열·참조 표, 함수마다 머리 줄(bank별 할당 수/frame 크기, 매개변수 slot 수)·await
 // 지점·switch 표·명령(주소, opcode 이름, 피연산자, 원문 위치). 결정적이다. 실패: out의 할당 실패는
 // 그 오류.
-Result<void> AppendBytecodeDump(StringBuilderBase& out, const BytecodeModule& module) noexcept;
+ROCKS_SPARKSVM_API Result<void> AppendBytecodeDump(StringBuilderBase& out,
+                                                   const BytecodeModule& module) noexcept;
 
 } // namespace rocks::sparks

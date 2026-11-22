@@ -81,7 +81,7 @@ class NameBinder;
 class TypeChecker;
 } // namespace detail
 
-class Compilation final {
+class ROCKS_SPARKSCOMPILER_API Compilation final {
 public:
     Compilation(Allocator& allocator, const SourceSet& sources) noexcept;
 
@@ -389,7 +389,9 @@ private:
 // 모듈 번호를 modules에(번호 순), interface가 같은 모듈에서 body hash가 바뀐(또는 새) 함수를 (모듈
 // << 32 | 함수 표 번호)로 functions에 붙인다. 실패: after에 내리지 못한 모듈(진단·Codegen 전)이
 // 있으면 InvalidArgument, 할당 실패는 그 오류.
-Result<void> FindRecompileScope(const Compilation& before, const Compilation& after,
-                                Array<uint32>& modules, Array<uint64>& functions) noexcept;
+ROCKS_SPARKSCOMPILER_API Result<void> FindRecompileScope(const Compilation& before,
+                                                         const Compilation& after,
+                                                         Array<uint32>& modules,
+                                                         Array<uint64>& functions) noexcept;
 
 } // namespace rocks::sparks

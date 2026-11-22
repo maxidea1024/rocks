@@ -232,7 +232,7 @@ struct OpcodeInfo {
 };
 
 // opcode의 정보다. op는 Opcode::Count 앞이어야 한다(범위 밖은 호출자 버그 — Fatal).
-const OpcodeInfo& InfoOf(Opcode op) noexcept;
+ROCKS_SPARKSVM_API const OpcodeInfo& InfoOf(Opcode op) noexcept;
 
 // 명령 단어 만들기·읽기다.
 constexpr uint32 EncodeABC(Opcode op, uint32 a, uint32 b, uint32 c) noexcept {
@@ -324,6 +324,6 @@ enum class ScalarKind : uint8 {
     AssetHi
 };
 
-const char* ScalarKindName(ScalarKind kind) noexcept;
+ROCKS_SPARKSVM_API const char* ScalarKindName(ScalarKind kind) noexcept;
 
 } // namespace rocks::sparks

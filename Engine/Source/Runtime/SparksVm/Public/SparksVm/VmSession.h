@@ -89,7 +89,7 @@ private:
     Array<uint8> changed_;     // 옛 함수: 1이면 본문이 바뀌었거나 삭제됐다
 };
 
-class VmSession final {
+class ROCKS_SPARKSVM_API VmSession final {
 public:
     VmSession(Allocator& allocator, VmHost* host) noexcept;
     // 남은 instance를 모두 Detach한다(CloseSession — 실행 문맥 ledger가 0이 된다).

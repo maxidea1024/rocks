@@ -62,7 +62,7 @@ struct SourceId {
 };
 
 // 원문 하나다. SourceSet::TryAdd만 만든다. 이동은 SourceSet의 배열이 커질 때만 일어난다.
-class SourceFile final {
+class ROCKS_SPARKSCOMPILER_API SourceFile final {
 public:
     SourceFile(SourceFile&&) noexcept = default;
     SourceFile& operator=(SourceFile&&) noexcept = default;
@@ -118,7 +118,7 @@ private:
 };
 
 // 한 번의 컴파일이 다루는 원문 묶음이다. 파일을 더할 때 원문 검사를 하고 진단을 붙인다.
-class SourceSet final {
+class ROCKS_SPARKSCOMPILER_API SourceSet final {
 public:
     explicit SourceSet(Allocator& allocator) noexcept;
 

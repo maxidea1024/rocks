@@ -108,7 +108,7 @@ public:
 class AssetImporterTable;
 
 // 등록 해제 토큰이다(소멸하면 해제 — 이동만 된다). 표보다 먼저 사라져야 한다.
-class AssetImporterRegistration {
+class ROCKS_ASSETDATABASE_API AssetImporterRegistration {
 public:
     AssetImporterRegistration() noexcept = default;
     AssetImporterRegistration(AssetImporterRegistration&& other) noexcept;
@@ -131,7 +131,7 @@ private:
 };
 
 // 등록 임포터 표다. 소유 스레드에서만 쓴다.
-class AssetImporterTable {
+class ROCKS_ASSETDATABASE_API AssetImporterTable {
 public:
     AssetImporterTable(Allocator& allocator, TypeRegistry& types) noexcept;
 

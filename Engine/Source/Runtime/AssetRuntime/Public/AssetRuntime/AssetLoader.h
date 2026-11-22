@@ -68,7 +68,7 @@ protected:
 
 // WorkerScheduler에 제출하는 worker 구현이다(작업 묶음 하나를 allocator로 만든다). scheduler와
 // allocator는 이 객체와 로더보다 오래 살아야 한다.
-class WorkerSchedulerLoaderWorker final : public AssetLoaderWorker {
+class ROCKS_ASSETRUNTIME_API WorkerSchedulerLoaderWorker final : public AssetLoaderWorker {
 public:
     WorkerSchedulerLoaderWorker(WorkerScheduler& scheduler, Allocator& allocator) noexcept
         : scheduler_(scheduler), allocator_(allocator) {
@@ -330,11 +330,12 @@ struct AssetLoaderSnapshot {
 };
 
 // 이름이다(로그·도구용, 정적 수명). 모르는 값은 "Unknown"이다.
-const char* LoadPriorityName(LoadPriority priority) noexcept;
-const char* AssetLoadStateName(AssetLoadState state) noexcept;
-const char* AssetLoaderUnitPhaseName(AssetLoaderUnitPhase phase) noexcept;
-const char* AssetLoaderPackagePhaseName(AssetLoaderPackagePhase phase) noexcept;
-const char* AssetLoaderWaitName(AssetLoaderWait wait) noexcept;
+ROCKS_ASSETRUNTIME_API const char* LoadPriorityName(LoadPriority priority) noexcept;
+ROCKS_ASSETRUNTIME_API const char* AssetLoadStateName(AssetLoadState state) noexcept;
+ROCKS_ASSETRUNTIME_API const char* AssetLoaderUnitPhaseName(AssetLoaderUnitPhase phase) noexcept;
+ROCKS_ASSETRUNTIME_API const char*
+AssetLoaderPackagePhaseName(AssetLoaderPackagePhase phase) noexcept;
+ROCKS_ASSETRUNTIME_API const char* AssetLoaderWaitName(AssetLoaderWait wait) noexcept;
 
 // PostLoad까지 끝난 공개 패키지 하나다(TakePublished — 11.7절 2). group은 같은 단위(SCC)로 함께
 // 끝난 패키지가 같은 값을 갖는 순번(로더 수명 동안 증가)이고, slot은 로더가 쥔 RootRef 칸 번호다
@@ -346,7 +347,7 @@ struct AssetLoaderPublished {
     uint32 slot = 0;
 };
 
-class AssetLoader final : public PackageImportResolver {
+class ROCKS_ASSETRUNTIME_API AssetLoader final : public PackageImportResolver {
 public:
     explicit AssetLoader(const AssetLoaderConfig& config) noexcept;
     // Shutdown하지 않았으면 Shutdown한다. 초기화된 로더를 소유 스레드가 아닌 곳에서 파괴하면

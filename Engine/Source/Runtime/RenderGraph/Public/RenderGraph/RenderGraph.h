@@ -24,7 +24,7 @@ struct GraphState;
 } // namespace detail
 
 // pass 기록 함수가 받는 문맥이다. 기록 함수 호출 동안만 유효하며 저장하지 않는다.
-class GraphPassContext {
+class ROCKS_RENDERGRAPH_API GraphPassContext {
 public:
     // 이 pass를 기록하는 장치 기록 객체다. Raster pass는 그 렌더 타깃이 묶인 기록이다.
     graphics::CommandContext& Commands() const noexcept {
@@ -148,9 +148,9 @@ struct RenderGraphDesc {
 
 // 렌더 lane 프레임 작업에서 그래프 설정을 만든다: 장치·handle 표·그 slot의 프레임 arena·프레임
 // 번호를 문맥에서 가져온다(5절 렌더 lane·프레임 slot·FrameArena 연결).
-RenderGraphDesc MakeRenderGraphDesc(RenderFrameContext& frame, GraphResourcePool& pool,
-                                    GpuTrace* trace = nullptr,
-                                    GraphMode mode = GraphMode::Deferred) noexcept;
+ROCKS_RENDERGRAPH_API RenderGraphDesc
+MakeRenderGraphDesc(RenderFrameContext& frame, GraphResourcePool& pool, GpuTrace* trace = nullptr,
+                    GraphMode mode = GraphMode::Deferred) noexcept;
 
 // 렌더 그래프다. 한 프레임(또는 offscreen 작업 하나)의 pass를 모아 선언 순서대로 실행한다(결정 R5:
 // 재배치 없음). 범위: graphics queue와 async compute queue(RG4), aliasing·render pass 병합 끔,
@@ -220,7 +220,7 @@ RenderGraphDesc MakeRenderGraphDesc(RenderFrameContext& frame, GraphResourcePool
 // 스레드: 장치 소유 스레드(렌더 lane) 전용이다. 수명: 렌더 lane 프레임 작업 안에서 만들고 부순다.
 // 파괴는 pass 실행기를 부수고 남은 lease를 놓는다(Execute하지 않았으면 풀 자원·export handle도
 // 정리한다).
-class RenderGraph {
+class ROCKS_RENDERGRAPH_API RenderGraph {
 public:
     explicit RenderGraph(const RenderGraphDesc& desc) noexcept;
     ~RenderGraph() noexcept;

@@ -105,7 +105,7 @@ ROCKS_PLATFORMBASE_API void YieldThread() noexcept;
 //
 // 사용 예:
 //   const uint32 workers = platform::LogicalProcessorCount() - 1; // 호출 스레드 몫을 뺀다
-uint32 LogicalProcessorCount() noexcept;
+ROCKS_PLATFORMBASE_API uint32 LogicalProcessorCount() noexcept;
 
 // 스레드 스택이 차지하는 주소 범위 [low, high)다(guard page 포함 여부는 OS가 정한다 — 경계 근처의
 // 판정에 쓰지 말고 "이 주소가 스택 위 지역 변수인가"를 묻는 데 쓴다).

@@ -29,7 +29,7 @@ protected:
 //   MemoryPackageSink sink(allocator);
 //   auto written = WritePackage(allocator, registry, access, package, options, sink);
 //   Array<uint8> bytes = sink.Take();
-class MemoryPackageSink final : public PackageSink {
+class ROCKS_ASSETRUNTIME_API MemoryPackageSink final : public PackageSink {
 public:
     explicit MemoryPackageSink(Allocator& allocator) noexcept : bytes_(allocator) {
     }
@@ -60,7 +60,7 @@ private:
 //   if (!file.Open(files, temp, tempBytes, platform::FileOpenMode::CreateNew)) { ... }
 //   FilePackageSink sink(file);
 //   auto written = WritePackage(allocator, registry, access, package, options, sink);
-class FilePackageSink final : public PackageSink {
+class ROCKS_ASSETRUNTIME_API FilePackageSink final : public PackageSink {
 public:
     explicit FilePackageSink(platform::File& file) noexcept : file_(file) {
     }
@@ -165,9 +165,9 @@ struct PackageWriteResult {
 // 그대로다. 실패하면 sink에 쓴 byte는 정의되지 않는다(호출자가 버린다 — 파일 저장은 임시 파일).
 //
 // 스레드: Registry 소유 스레드 전용이다(그래프 저장이 encode 고정을 쥔다).
-Result<PackageWriteResult> WritePackage(Allocator& allocator, ObjectRegistry& registry,
-                                        const ObjectAccessContext& access, ObjectHandle package,
-                                        const PackageWriteOptions& options, PackageSink& sink,
-                                        AssetDiagnostic* failure = nullptr) noexcept;
+ROCKS_ASSETRUNTIME_API Result<PackageWriteResult>
+WritePackage(Allocator& allocator, ObjectRegistry& registry, const ObjectAccessContext& access,
+             ObjectHandle package, const PackageWriteOptions& options, PackageSink& sink,
+             AssetDiagnostic* failure = nullptr) noexcept;
 
 } // namespace rocks

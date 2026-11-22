@@ -52,12 +52,13 @@ struct PackageTag {
 // 오류: 빈 키·키 256 byte 초과·값이 패키지 문자열 상한 초과·잘못된 UTF-8·같은 (키, 값) 쌍 두 번은
 // InvalidArgument, 목록 전체가 Record 기본 한도(값 하나 RecordLimits::maxValueBytes)를 넘으면
 // CapacityExceeded(ReadPackageTags가 같은 기본 한도로 읽으므로 쓴 것은 모두 읽힌다), 할당 실패.
-Result<Array<uint8>> WritePackageTags(Allocator& allocator,
-                                      Span<const PackageTagInput> tags) noexcept;
+ROCKS_ASSETRUNTIME_API Result<Array<uint8>>
+WritePackageTags(Allocator& allocator, Span<const PackageTagInput> tags) noexcept;
 
 // Tags Record byte를 읽는다. 빈 byte는 빈 목록이다. 오류: 스키마 Guid가 PackageTagsSchema가
 // 아니거나 Record·항목 버전이 PackageTagsVersion 밖이면 Unsupported(다른 스키마·더 새 Tags),
 // 형식·순서·크기 위반은 InvalidArgument, 할당 실패.
-Result<Array<PackageTag>> ReadPackageTags(Allocator& allocator, Span<const uint8> bytes) noexcept;
+ROCKS_ASSETRUNTIME_API Result<Array<PackageTag>> ReadPackageTags(Allocator& allocator,
+                                                                 Span<const uint8> bytes) noexcept;
 
 } // namespace rocks

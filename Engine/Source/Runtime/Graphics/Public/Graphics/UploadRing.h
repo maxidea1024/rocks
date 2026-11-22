@@ -24,7 +24,7 @@ namespace rocks::graphics {
 // - 할당은 연속 구간이다. 끝에 자리가 없으면 0으로 감는다(wrap). 감을 때 끝에 남은 칸은 그 묶음이
 //   함께 붙잡는다. 다 회수돼 비어도 위치를 0으로 되돌리지 않고 이어 쓰므로 링 전체를 고르게 돈다.
 // - 스레드 안전하지 않다. backend가 자기 잠금 안에서 쓴다.
-class UploadRingAllocator {
+class ROCKS_GRAPHICS_API UploadRingAllocator {
 public:
     explicit UploadRingAllocator(Allocator& allocator) noexcept;
 

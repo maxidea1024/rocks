@@ -25,7 +25,8 @@ protected:
     ~AssetAliasResolver() = default;
 };
 
-class AssetTextResolver final : public reflection_text::TextReferenceResolver {
+class ROCKS_ASSETDATABASE_API AssetTextResolver final
+    : public reflection_text::TextReferenceResolver {
 public:
     // set·index는 빌린다(resolver가 쓰이는 동안 살아 있어야 한다 — index는 set의 설정과 같은
     // 색인이다). allocator는 경로 해석의 임시 할당에 쓴다. warnings가 있으면 Hard·Weak 해석이 연

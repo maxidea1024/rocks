@@ -180,7 +180,7 @@ struct AssetDuplicateResult {
     String path;
 };
 
-class AssetService {
+class ROCKS_ASSETDATABASE_API AssetService {
 public:
     // layout은 초기화한 프로젝트 배치다(빌림 — 서비스보다 오래 산다).
     AssetService(Allocator& allocator, const ProjectLayout& layout,
