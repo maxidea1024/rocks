@@ -583,7 +583,7 @@ Result<void> LinkImports(Span<VmLinkedModule* const> modules, StringBuilderBase&
             for (uint32 address = 0; address < function.wordCount; ++address) {
                 const uint32 word = module.words[function.firstWord + address];
                 const Opcode op = DecodeOpcode(word);
-                if (op == Opcode::Call &&
+                if ((op == Opcode::Call || op == Opcode::CallW) &&
                     module.refs[DecodeBx(word)].kind == BytecodeRefKind::ImportedFunction) {
                     const VmLinkedModule::Import& import = linked->imports_[DecodeBx(word)];
                     const BytecodeFunction& called =

@@ -150,6 +150,7 @@ VmFaultKind VmSession::Enqueue(uint64 publisher, const VmEventKey& key,
     item.eventRef = eventRef;
     item.depth = depth;
     item.root = root;
+    item.sequence = ++itemSequence_;
     item.firstScalar = static_cast<uint32>(itemValues_.Size());
     item.scalarCount = static_cast<uint32>(scalars.Size());
     item.firstRef = item.firstScalar + item.scalarCount;
@@ -634,6 +635,41 @@ Result<void> VmSession::Drain() noexcept {
                          connection.order < connections_[chosen].order)) {
                         chosen = at;
                     }
+                }
+
+                // 이벤트 대기(SparksRuntime 2.5절): 연결과 같은 순번 공간에서 등록 순으로, 등록
+                // 뒤에 넣은 항목만 받는다.
+                uint32 waitChosen = NoBytecodeIndex;
+                for (uint32 at = 0; at < waits_.Size(); ++at) {
+                    const Wait& wait = waits_[at];
+                    if (wait.used && wait.kind == WaitKind::Event && !wait.done &&
+                        !wait.cancelled && wait.publisher == item.publisher &&
+                        wait.key == item.key && wait.afterSequence < item.sequence &&
+                        wait.connectionOrder > lastOrder &&
+                        (chosen == connections_.Size() ||
+                         wait.connectionOrder < connections_[chosen].order) &&
+                        (waitChosen == NoBytecodeIndex ||
+                         wait.connectionOrder < waits_[waitChosen].connectionOrder)) {
+                        waitChosen = at;
+                    }
+                }
+
+                if (waitChosen != NoBytecodeIndex) {
+                    lastOrder = waits_[waitChosen].connectionOrder;
+                    CompleteWait(waitChosen);
+                    const uint32 top = WaitRoot(waitChosen);
+                    const uint32 owner = waits_[top].suspension;
+                    if (waits_[top].done && owner != NoBytecodeIndex && owner < suspended_.Size() &&
+                        suspended_[owner].live) {
+                        if (auto resumed = ResumeSuspended(owner, suspended_[owner].wait,
+                                                           item.depth, item.root, true);
+                            !resumed) {
+                            ReleaseItem(item);
+                            return resumed;
+                        }
+                    }
+
+                    continue;
                 }
 
                 if (chosen == connections_.Size()) {

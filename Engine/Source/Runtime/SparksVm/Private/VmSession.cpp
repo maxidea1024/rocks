@@ -22,7 +22,8 @@ VmSession::VmSession(Allocator& allocator, VmHost* host) noexcept
       instances_(allocator), byHandle_(allocator), connections_(allocator), queue_(allocator),
       itemValues_(allocator), itemBuffers_(allocator), writes_(allocator), writeValues_(allocator),
       writeBuffers_(allocator), deliveries_(allocator), suspended_(allocator), waits_(allocator),
-      freeWaits_(allocator), fragmentWaits_(allocator), resumeOrder_(allocator) {
+      freeWaits_(allocator), fragmentWaits_(allocator), resumeOrder_(allocator),
+      resumeWaits_(allocator) {
     execution_.session_ = this;
 }
 
@@ -484,6 +485,7 @@ Result<void> VmSession::Detach(uint32 instance) noexcept {
 
     Disconnect(instance);
     CancelExecutions(instance, true);
+    EndEventWaits(instances_[instance].handle); // 발행자 파괴(SD13)
     DropWrites(instance); // 번호 재사용 뒤 남은 기록이 새 instance에 닿지 않게(LC6b 리뷰 B3)
     Instance& entry = instances_[instance];
     ReleaseFields(entry);

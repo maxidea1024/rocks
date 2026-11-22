@@ -172,10 +172,10 @@ enum class Opcode : uint8 {
     CallRpc,
     Emit,
     // 대기·Result
-    Await,   // + EXTRA(결과 bank << 8 | slot 수)
-    AwaitEv, // + EXTRA(이벤트 참조)
-    TryS,    // A ← Result B..B+C의 값, 오류면 EXTRA(부호 있는 거리)로 분기
-    TryB,    // A ← Buf Result B의 값(C = 값 bank << 5 | slot 수), 오류면 EXTRA 거리로 분기
+    Await,  // + EXTRA(결과 bank << 8 | slot 수)
+    WaitEv, // A ← 발행자 B의 이벤트 대기 handle + EXTRA(이벤트 참조 — SparksRuntime 2.5절)
+    TryS,   // A ← Result B..B+C의 값, 오류면 EXTRA(부호 있는 거리)로 분기
+    TryB,   // A ← Buf Result B의 값(C = 값 bank << 5 | slot 수), 오류면 EXTRA 거리로 분기
     // 생성
     NewS,
     NewC,
@@ -192,6 +192,9 @@ enum class Opcode : uint8 {
     Release,
     Fault,
     Extra,
+    // 하위 실행 호출(CALL과 같은 창 — 반환·정지하면 하위 대기 handle을 Ref 창 0번에, SparksRuntime
+    // 2.5절). 번호를 앞 명령들 뒤에 두어 기존 번호를 바꾸지 않는다.
+    CallW,
     Count
 };
 

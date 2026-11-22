@@ -323,12 +323,20 @@ private:
             Ref(DecodeBx(word));
             return;
         case Opcode::Call:
+        case Opcode::CallW:
         case Opcode::CallV:
         case Opcode::CallN:
         case Opcode::CallL:
         case Opcode::CallRpc:
         case Opcode::Emit:
             Ref(DecodeBx(word));
+            return;
+        case Opcode::WaitEv:
+            Register(OperandBank::Ref, a);
+            out_.Append(", ");
+            Register(OperandBank::Ref, b);
+            out_.Append(", ");
+            Ref(DecodeAx(extra));
             return;
         case Opcode::Concat:
             Register(info.a, a);

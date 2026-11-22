@@ -803,6 +803,10 @@ void ForEachAccess(const IrFunction& f, const IrInstruction& i, Use&& use, Def&&
         useOne(i.b);
         defTuple(i.a);
         break;
+    case IrOp::WaitEvent:
+        useOne(i.b);
+        defOne(i.a);
+        break;
     case IrOp::Try:
         useTuple(i.b);
         defTuple(i.a);
@@ -1574,17 +1578,16 @@ void BytecodeEncoder::Instruction(const IrInstruction& i, uint32 layoutIndex) no
         Word(EncodeABx(Opcode::Emit, 0, Bx(SymbolRef(BytecodeRefKind::Event, i.extra))), span);
         return;
     }
+    case IrOp::WaitEvent:
+        Word(EncodeABC(Opcode::WaitEv, Phys(i.a), Phys(i.b), 0), span);
+        Word(EncodeAx(Opcode::Extra, SymbolRef(BytecodeRefKind::Event, i.extra)), span);
+        return;
     case IrOp::Await: {
         const uint32 address = static_cast<uint32>(out_.words.Size()) - firstWord_;
-        if (i.sub == IrAwaitEvent) {
-            Word(EncodeABC(Opcode::AwaitEv, Phys(i.b), 0, 0), span);
-            Word(EncodeAx(Opcode::Extra, SymbolRef(BytecodeRefKind::Event, i.extra)), span);
-        } else {
-            const uint32 slots = i.a == NoIrRegister ? 0 : f.registers[TupleFirst(i.a)].slots;
-            const uint32 bank = i.a == NoIrRegister ? 0 : BankOf(i.a);
-            Word(EncodeABC(Opcode::Await, Phys(i.a), Phys(i.b), 0), span);
-            Word(EncodeAx(Opcode::Extra, (bank << 8) | slots), span);
-        }
+        const uint32 slots = i.a == NoIrRegister ? 0 : f.registers[TupleFirst(i.a)].slots;
+        const uint32 bank = i.a == NoIrRegister ? 0 : BankOf(i.a);
+        Word(EncodeABC(Opcode::Await, Phys(i.a), Phys(i.b), 0), span);
+        Word(EncodeAx(Opcode::Extra, (bank << 8) | slots), span);
 
         // 정지 지점의 선형 위치: 이 명령의 쓰기 위치(2k + 1)까지 살아 있는 것이 보존 대상이다.
         const uint32 block = order_[layoutIndex];
@@ -1793,6 +1796,11 @@ void BytecodeEncoder::EncodeCall(const IrInstruction& i) noexcept {
                                                  calleeKind == SymbolKind::LanguageField ||
                                                  calleeKind == SymbolKind::PreludeValue);
     uint32 ref = language ? 0 : Bx(CallRef(i.extra, i.sub, i.types, op));
+    // 하위 실행 호출(SparksRuntime 2.5절): 같은 창 규칙의 CALLW.
+    if (i.sub == IrCallChild && op == Opcode::Call) {
+        op = Opcode::CallW;
+    }
+
     if (language) {
         op = Opcode::CallL;
         // 언어 함수: 피연산자(수신자 먼저)와 결과의 서술자를 리터럴 인자 자리에 싣는다(SparksVm

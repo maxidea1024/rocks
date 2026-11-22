@@ -115,7 +115,8 @@ public:
     // 단계 시작 때 기한이 된 Delay·NextTick 대기의 실행을 (등록 프레임, instance 생성 번호, 등록
     // 순번) 순으로 재개한다. 재개된 실행은 Deliveries에 resumed로 남는다. 실패: 실행 중이거나
     // delta가 유한한 0 이상이 아니면 InvalidArgument, 할당 실패는 OutOfMemory.
-    Result<void> Advance(double gameDelta, double uiDelta) noexcept;
+    // paused면 `Clock.Game` Delay와 NextTick을 완료하지 않는다(SL 6.1절 — UI 시계 대기는 진행).
+    Result<void> Advance(double gameDelta, double uiDelta, bool paused = false) noexcept;
     // 고정 재개 단계(NextFixedTick — 새 스크립트 단계)를 돈다.
     Result<void> FixedStep() noexcept;
     // 정지해 있는 실행 수다.
@@ -146,6 +147,15 @@ private:
     friend class VmExecution;
     friend class detail::VmLibrary;
 
+    // 이벤트 대기 handle을 만든다(WAITEV — 실패는 0과 error).
+    uint64 NewEventWait(uint64 publisher, const VmEventKey& key, ErrorCode& error) noexcept;
+    // 끝난 하위 대기 handle이다(CALLW 경계 frame이 반환·ENDEXEC로 끝남).
+    uint64 NewChildDone(ErrorCode& error) noexcept;
+    // CALLW 경계(frame boundary)부터 맨 위까지를 하위 정지 실행으로 옮기고 하위 대기 handle을
+    // child에 둔다(AWAIT가 부른다 — 부르는 쪽 frame은 실행 문맥에 남는다).
+    VmFaultKind SuspendChild(usize boundary, uint64 wait, uint32 resultRegister, uint32 resultBank,
+                             uint32 resultSlots, uint64& child, ErrorCode& error) noexcept;
+
     // 정지한 실행이다(R9 — frame stack 전체).
     struct Suspended {
         explicit Suspended(Allocator& allocator) noexcept
@@ -166,6 +176,7 @@ private:
         uint64 serial = 0; // instance 생성 번호(재개 순서 key — 번호 재사용에 안정)
         uint64 order = 0;
         RandomStream random{0}; // 실행의 Random stream(재개가 이어 쓴다 — SL 6.3절)
+        uint64 childWait = 0;   // 하위 실행이면 부모 묶음 안의 하위 대기 handle
         // 이벤트 handler로 시작된 실행이면 그 발행자·handler(재진입 판정 — SD11).
         uint64 publisher = 0;
         const VmLinkedModule* handlerModule = nullptr;
@@ -178,7 +189,9 @@ private:
         NextTick,
         NextFixedTick,
         All,
-        Race
+        Race,
+        Event, // 발행자의 이벤트(SparksRuntime 2.5절)
+        Child  // 하위 실행(CALLW)의 끝
     };
 
     // 대기 하나다(handle = VmWaitTag | 세대 << 32 | 번호 — 돌려받은 번호의 옛 handle은 무효).
@@ -196,6 +209,13 @@ private:
         uint32 instance = NoBytecodeIndex;
         uint64 order = 0;
         uint32 generation = 0;
+        // Event: 발행자·key·연결 순번(전달 순서)·등록 때 큐 항목 일련번호(그 뒤 항목만 받는다).
+        uint64 publisher = 0;
+        VmEventKey key;
+        uint64 connectionOrder = 0;
+        uint64 afterSequence = 0;
+        uint32 child =
+            NoBytecodeIndex; // Child: 하위 정지 실행 번호(끝났거나 아직 정지 전이면 없음)
         bool used = false;
         bool done = false;
         bool cancelled = false;
@@ -210,6 +230,17 @@ private:
                    ErrorCode& error) noexcept;
     // 단계 시작 때 완료된 대기의 정지 실행을 순서대로 재개한다.
     Result<void> ResumeDone() noexcept;
+    // 정지 실행 하나를 재개한다(handle은 기다리던 대기 — 바뀌었으면 하지 않는다). depth·root는 재개
+    // 조각의 연쇄 깊이·루트, inDrain이면 전달 순회 안(조각 끝만 정리하고 큐는 바깥이 비운다).
+    Result<void> ResumeSuspended(uint32 suspended, uint64 wait, uint32 depth, uint64 root,
+                                 bool inDrain) noexcept;
+    // 하위 실행의 끝(반환·fault)을 부모 묶음에 반영한다.
+    Result<void> FinishChild(uint64 childWait, const VmCallResult& result, bool inDrain) noexcept;
+    // 대기가 완료되지 않은 채 끝났다(발행자 파괴·하위 실행 취소 — SD13): Race는 남은 인자를,
+    // All·단독은 실행을 취소한다.
+    void FailWait(uint32 wait) noexcept;
+    // 발행자의 이벤트 대기를 끝낸다(Detach·엔진 객체 소멸).
+    void EndEventWaits(uint64 publisher) noexcept;
     // 대기 done 전파(All·Race)와 Race의 나머지 취소(반복 — 깊이 제한 없음).
     void CompleteWait(uint32 wait) noexcept;
     // handle을 번호로 푼다(표지·범위·세대가 맞지 않으면 false).
@@ -224,8 +255,9 @@ private:
     // instance의 정지 실행을 취소한다(Disable·Detach — SL 6.1절). frames면 그 instance를 this로
     // 쓰는 frame이 있는 실행도 취소한다(Detach — 다른 instance의 async 메서드 안에서 정지한 실행).
     void CancelExecutions(uint32 instance, bool frames) noexcept;
-    // 정지 실행 하나를 취소한다(대기를 끝내고 frame의 Buf를 놓는다).
-    void CancelSuspended(uint32 suspended) noexcept;
+    // 정지 실행 하나를 취소한다(대기를 돌려받고 frame의 Buf를 놓는다). propagate면 하위 실행의
+    // 취소를 부모 묶음에 알린다(FailWait — 묶음을 돌려받는 길에서는 끈다).
+    void CancelSuspended(uint32 suspended, bool propagate = true) noexcept;
     // 같은 발행자로 시작된 handler 실행이 정지해 있으면 그 번호(없으면 NoBytecodeIndex).
     uint32 FindBusy(uint32 instance, const VmLinkedModule* module, uint32 handler,
                     uint64 publisher) const noexcept;
@@ -263,6 +295,7 @@ private:
         // 구별).
         uint32 target = NoBytecodeIndex;
         uint64 targetSerial = 0;
+        uint64 sequence = 0; // 넣은 순 일련번호(이벤트 대기는 등록 뒤 항목만 받는다)
         const VmLinkedModule* targetModule = nullptr;
         uint32 targetHandler = NoBytecodeIndex;
     };
@@ -370,6 +403,9 @@ private:
     Array<uint32> freeWaits_;     // 돌려받은 대기 번호
     Array<uint64> fragmentWaits_; // 실행 중인 조각이 만든 대기 handle
     Array<uint32> resumeOrder_;   // 재개 단계의 순서(임시)
+    Array<uint64> resumeWaits_;   // resumeOrder_ 항목이 기다리던 대기(재개 전 대조)
+    uint64 currentChildWait_ = 0; // 재개 중인 하위 실행의 하위 대기(다시 정지하면 잇는다)
+    uint64 itemSequence_ = 0;     // 큐 항목 일련번호(이벤트 대기 대조)
     double gameTime_ = 0.0;
     double uiTime_ = 0.0;
     uint64 frame_ = 0;

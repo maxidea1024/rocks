@@ -229,6 +229,7 @@ public:
         uint32 function = 0;
         uint32 pc = 0; // 이 frame으로 돌아왔을 때 실행할 명령의 모듈 단어 번호
         uint32 base[BytecodeBankCount] = {};
+        bool child = false; // CALLW가 만든 하위 실행 경계(SparksRuntime 2.5절)
     };
 
 private:

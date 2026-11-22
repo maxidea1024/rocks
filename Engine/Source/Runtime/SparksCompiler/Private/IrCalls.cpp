@@ -324,6 +324,16 @@ uint32 IrBuilder::EmitCall(uint32 node, uint32 callee, uint32 receiver,
         }
 
         const uint32 valueNode = tree_->Child(arguments[index], 1);
+        // 이벤트 인자(`Race(Play(seq), Skip.Triggered)` — SL 6.1절 SD41)는 이벤트 대기 handle이다.
+        if (const uint32 eventWait = LowerEventWait(valueNode); eventWait != NoIrRegister) {
+            if (auto pushed = values.TryPushBack(eventWait); !pushed) {
+                Fail(pushed.Error());
+                return NoIrRegister;
+            }
+
+            continue;
+        }
+
         const uint32 argumentType = c_.ExpressionType(module_, valueNode);
         // 자리표시·제네릭 매개변수는 실제 타입을 쓴다(검사기가 인자 식의 타입을 기록했다).
         const bool concrete =
@@ -348,7 +358,15 @@ uint32 IrBuilder::EmitCall(uint32 node, uint32 callee, uint32 receiver,
     // Sparks async 함수를 대기 값으로 쓰는 호출(`All(F(), G())` — 하위 실행은 LC6c2): 지금은 함수를
     // 부르고 대기 자리를 null로 둔다(묶음·AWAIT가 ContractViolation으로 확정적으로 멈춘다 — 반환
     // 창의 남은 값을 대기로 읽지 않게, LC6c1 리뷰 S4).
-    if (wait && IsDirectAwaitCallee(callee)) {
+    const bool virtualCall = entry.kind == SymbolKind::InterfaceMethod ||
+                             (entry.flags & (SymbolFlags::Open | SymbolFlags::Override)) != 0;
+    if (wait && IsDirectAwaitCallee(callee) && !virtualCall) {
+        // 하위 실행(CALLW — SparksRuntime 2.5절): 결과는 하위 대기 handle이다.
+        Add(IrOp::Call, result, operands, static_cast<uint32>(values.Size()), callee, node,
+            IrCallChild);
+    } else if (wait && IsDirectAwaitCallee(callee)) {
+        // 가상 async 호출의 하위 실행은 아직 없다: 부르고 대기 자리를 null로 둔다(묶음이
+        // ContractViolation으로 확정적으로 멈춘다 — 반환 창의 값을 대기로 읽지 않게).
         const uint32 returns = c_.signatures_[signature].returnType;
         const uint32 discarded = NewValue(returns == NoType ? checker_.voidType_ : returns);
         Add(IrOp::Call, discarded, operands, static_cast<uint32>(values.Size()), callee, node, sub);
@@ -749,26 +767,44 @@ uint32 IrBuilder::LowerAwait(uint32 node, uint32 operandNode) noexcept {
         return value;
     }
 
-    const uint32 operandSymbol = c_.NodeSymbol(module_, operandNode);
-    const SyntaxKind operandKind =
-        operandNode == NoNode ? SyntaxKind::Error : tree_->Node(operandNode).kind;
-    const bool event =
-        operandSymbol != NoSymbol &&
-        (operandKind == SyntaxKind::Member || operandKind == SyntaxKind::Identifier) &&
-        (c_.symbols_[operandSymbol].kind == SymbolKind::Event ||
-         c_.symbols_[operandSymbol].kind == SymbolKind::EngineEvent ||
-         c_.symbols_[operandSymbol].kind == SymbolKind::LanguageEvent);
-    // 이벤트의 발행자: `x.E`면 x, 이름만 쓴 `E`면 자기 객체다.
-    const uint32 source = !event ? Lower(operandNode, c_.ExpressionType(module_, operandNode))
-                          : operandKind == SyntaxKind::Member
-                              ? Lower(tree_->Child(operandNode, 0), NoType)
-                              : this_;
+    // 이벤트(`await X.E`)는 이벤트 대기 handle을 만들어 기다린다(WAITEV + AWAIT — 2.5절).
+    uint32 source = LowerEventWait(operandNode);
+    if (source == NoIrRegister) {
+        source = Lower(operandNode, c_.ExpressionType(module_, operandNode));
+    }
+
     const uint32 result = NewValue(resultType);
     const uint32 resume = NewBlock();
-    Add(IrOp::Await, result, source, resume, event ? operandSymbol : 0, node,
-        event ? IrAwaitEvent : IrAwaitValue);
+    Add(IrOp::Await, result, source, resume, 0, node, IrAwaitValue);
     StartBlock(resume);
     return result;
+}
+
+uint32 IrBuilder::LowerEventWait(uint32 node) noexcept {
+    // 이벤트 식(`x.E`·이름만 쓴 `E`)이면 발행자의 이벤트 대기 handle, 아니면 NoIrRegister.
+    while (node != NoNode && tree_->Node(node).kind == SyntaxKind::Parenthesized) {
+        node = tree_->Child(node, 0);
+    }
+
+    if (node == NoNode) {
+        return NoIrRegister;
+    }
+
+    const SyntaxKind kind = tree_->Node(node).kind;
+    const uint32 symbol = c_.NodeSymbol(module_, node);
+    if (symbol == NoSymbol || (kind != SyntaxKind::Member && kind != SyntaxKind::Identifier) ||
+        (c_.symbols_[symbol].kind != SymbolKind::Event &&
+         c_.symbols_[symbol].kind != SymbolKind::EngineEvent &&
+         c_.symbols_[symbol].kind != SymbolKind::LanguageEvent)) {
+        return NoIrRegister;
+    }
+
+    // 발행자: `x.E`면 x, 이름만 쓴 `E`면 자기 객체다.
+    const uint32 publisher =
+        kind == SyntaxKind::Member ? Lower(tree_->Child(node, 0), NoType) : this_;
+    const uint32 wait = NewWait();
+    Add(IrOp::WaitEvent, wait, publisher, NoIrRegister, symbol, node);
+    return wait;
 }
 
 uint32 IrBuilder::LowerChainedAwait(uint32 node, uint32 call) noexcept {

@@ -102,10 +102,24 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
 
         // 반환 값(Buf면 0..count) 밖의 이 frame Buf 레지스터를 놓는다. 반환 값은 부르는 쪽 창에
         // 남아 그 slot이 참조를 가진다.
+        const bool child = frame.child;
+        const usize childRef = frame.base[1];
         ReleaseRange(bufferBase + (buffers ? count : 0), frameEnd);
         static_cast<void>(frames_.TryResize(frames_.Size() - 1)); // 축소는 실패하지 않는다
         pc = frames_[frames_.Size() - 1].pc;
         reload();
+        if (child) {
+            // 하위 실행 경계가 정지 없이 반환했다: 끝난 하위 대기를 부르는 쪽 Ref 창 0번에.
+            ErrorCode error = ErrorCode::None;
+            const uint64 handle = session_->NewChildDone(error);
+            if (handle == 0) {
+                return Result<bool>::Failure(error != ErrorCode::None ? error
+                                                                      : ErrorCode::OutOfMemory);
+            }
+
+            refs_[childRef] = handle;
+        }
+
         return Result<bool>::Success(false);
     };
     // 할당 실패(OS)는 실행을 끝내고 Result 실패로 돌려준다.
@@ -574,6 +588,28 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
                 return MakeFault(VmFaultKind::ContractViolation, at, steps);
             }
 
+            // 하위 실행 경계 위면 그 하위 실행만 끝난다(끝난 하위 대기 — SparksRuntime 2.5절).
+            usize boundary = 0;
+            for (usize index = frames_.Size(); index > 1 && boundary == 0; --index) {
+                boundary = frames_[index - 1].child ? index - 1 : 0;
+            }
+
+            if (boundary != 0) {
+                const usize childRef = frames_[boundary].base[1];
+                ReleaseRange(frames_[boundary].base[2], buffers_.Size());
+                static_cast<void>(frames_.TryResize(boundary));
+                pc = frames_[frames_.Size() - 1].pc;
+                reload();
+                ErrorCode error = ErrorCode::None;
+                const uint64 handle = session_->NewChildDone(error);
+                if (handle == 0) {
+                    return failed(error != ErrorCode::None ? error : ErrorCode::OutOfMemory);
+                }
+
+                refs_[childRef] = handle;
+                break;
+            }
+
             VmCallResult result;
             result.outcome = VmOutcome::Ended;
             result.errorCode =
@@ -673,7 +709,13 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
 
             break;
         }
-        case Opcode::Call: {
+        case Opcode::Call:
+        case Opcode::CallW: {
+            // CALLW는 하위 실행 경계다(session 안에서만 — SparksRuntime 2.5절).
+            if (op == Opcode::CallW && session_ == nullptr) {
+                return MakeFault(VmFaultKind::ContractViolation, at, steps);
+            }
+
             const uint32 refIndex = DecodeBx(word);
             const BytecodeRef& ref = module.refs[refIndex];
             // 같은 모듈 함수, 또는 LinkImports가 푼 다른 모듈 함수(6.5절).
@@ -717,6 +759,7 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
                 return failed(pushed.Error());
             }
 
+            frames_[frames_.Size() - 1].child = op == Opcode::CallW;
             pc = frames_[frames_.Size() - 1].pc;
             reload();
             break;
@@ -768,6 +811,24 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
             reload();
             break;
         }
+        case Opcode::WaitEv: {
+            // 발행자 B의 이벤트 대기 handle을 A에 둔다(SparksRuntime 2.5절).
+            const uint32 eventRef = DecodeAx(words[pc++]);
+            if (session_ == nullptr || !Alive(r[bb])) {
+                return MakeFault(VmFaultKind::ContractViolation, at, steps);
+            }
+
+            ErrorCode error = ErrorCode::None;
+            const uint64 handle = session_->NewEventWait(r[bb], link_->keys_[eventRef], error);
+            if (handle == 0) {
+                return error != ErrorCode::None
+                           ? failed(error)
+                           : MakeFault(VmFaultKind::ContractViolation, at, steps);
+            }
+
+            r[a] = handle;
+            break;
+        }
         case Opcode::Await: {
             // 대기 handle B로 정지한다(SparksRuntime 2.4절): frame·레지스터를 session에 옮기고
             // Suspended를 돌려준다. 재개는 EXTRA 다음(재개 블록으로의 JMP)부터다.
@@ -779,6 +840,33 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
 
             frames_[frames_.Size() - 1].pc = pc;
             ErrorCode error = ErrorCode::None;
+            // 하위 실행 경계(CALLW) 위면 경계부터만 정지하고 부르는 쪽을 잇는다(SparksRuntime
+            // 2.5절 R14).
+            usize boundary = 0;
+            for (usize index = frames_.Size(); index > 1 && boundary == 0; --index) {
+                boundary = frames_[index - 1].child ? index - 1 : 0;
+            }
+
+            if (boundary != 0) {
+                const usize childRef = frames_[boundary].base[1];
+                uint64 child = 0;
+                fault = session_->SuspendChild(boundary, wait, a, resultShape >> 8,
+                                               resultShape & 0xFF, child, error);
+                if (error != ErrorCode::None) {
+                    return failed(error);
+                }
+
+                if (fault != VmFaultKind::None) {
+                    return MakeFault(fault, at, steps);
+                }
+
+                static_cast<void>(frames_.TryResize(boundary));
+                pc = frames_[frames_.Size() - 1].pc;
+                reload();
+                refs_[childRef] = child;
+                break;
+            }
+
             uint32 suspension = NoBytecodeIndex;
             fault =
                 session_->Suspend(wait, a, resultShape >> 8, resultShape & 0xFF, suspension, error);

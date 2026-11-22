@@ -3,6 +3,7 @@
 이 문서는 Sparks 언어 코어의 LC6(실행 모델)을 정한다. 언어 의미는 SparksLanguage(SL) §4.3·§5·§6·§7·§8.3·§9가 정본이고, 이 문서는 그 의미를 VM 쪽에서 어떻게 실현하는지(자료 구조·순서·host interface 2차·bytecode 형식 v3·시험)를 정한다. LC5(SparksVm.ko.md)의 링크·host interface 1차 위에 쌓는다.
 
 - 개정 1(2026-11-22): 첫 판. 하위 단계 LC6a–LC6e, 결정 R1–R12.
+- 개정 6(2026-11-22): LC6c2 구현 메모(2.5절 "LC6c2 구현").
 - 개정 5(2026-11-22): LC6c2 설계(2.5절) — `WAITEV`(이벤트 대기 handle, `AWAITEV` 대체)·전달 순회 안 재개·발행자 파괴, `CALLW`(void async 호출의 하위 실행 — child frame 경계 정지·fault 전파), `Advance(…, paused)`. 결정 R13–R17.
 - 개정 4(2026-11-22): LC6c1 리뷰 반영 — 대기 번호 재사용(세대 handle)·조각 끝 정리, 재링크 뒤 재개 취소, 한 번만 기다림, 단계 시작 스냅샷 재개 순서(instance 생성 번호), 하위 묶음 취소 전파, Random 보존, Advance·FixedStep을 새 스크립트 단계로, Detach가 this frame 실행도 취소, async 함수를 대기 값으로 쓰는 호출의 임시 처리(2.4절 "LC6c1 리뷰 반영").
 - 개정 3(2026-11-22): LC6b 리뷰 반영 — Changed 자리를 첫 쓰기에서 확보(순서·fault), 비활성 instance 미발행, 경로 원천 변경 시 1회 전달, 다른 모듈 기반의 원천 대조를 key로, 진입마다 루트 초기화, 실행 중 재진입 계약, Detach의 쓰기 기록 정리(2.3절 "LC6b 리뷰 반영").
@@ -104,6 +105,12 @@
 - **하위 실행의 끝:** 하위 정지 실행은 다른 정지 실행과 같은 재개 순서로 재개한다. 반환하거나 `ENDEXEC`로 끝나면 그 하위 대기가 완료된다(`ENDEXEC`는 fault가 아니다 — 끝난 것으로 본다). fault면 부모 실행의 fault다(R15): 형제를 취소하고 부모 정지 실행을 그 fault(하위 실행의 위치)로 끝내 전달 기록에 남긴다. 부모가 취소되면(Race 패배·Disable·Detach) 하위 실행도 취소한다(대기를 돌려받을 때 그 하위 실행을 취소 — 깊이는 호출 깊이 상한으로 묶인다).
 - **일시 정지(R16):** `Advance(gameDelta, uiDelta, paused)` — `paused`면 프레임 번호와 시계는 진행하되(host가 Game delta 0을 준다) `Clock.Game`의 Delay와 `NextTick`은 완료하지 않는다(SL §6.1 — 일시 정지 중 재개하지 않음). `Clock.UI` Delay는 완료한다. `FixedStep`은 host가 SingleStep에서만 부른다(일시 정지와 무관 — 호출 자체가 1회 진행). `.run`: `advance <Game> <UI> paused`.
 - **Start 준비 대기:** `on Start`의 정지는 다른 hook과 같다(정지한 hook은 끝난 것으로 보고 사슬을 잇는다 — LC6c1). 준비 대기의 대상(로드 요청·Sequencer 준비·DataLayer)은 host 대기이므로 로드 요청 handle과 함께 LC6d·연동에서 더한다. 문맥 검사(Start에서 준비 대기만)는 컴파일러(LC3b)가 한다.
+- **LC6c2 구현(개정 6):**
+  - **번호:** `WAITEV`는 이전 `AWAITEV` 번호를, `CALLW`는 `EXTRA` 뒤 번호를 쓴다(기존 명령 번호를 바꾸지 않는다).
+  - **완료 순서:** 하위 실행이 끝나 부모 묶음이 끝나면 부모를 곧바로(같은 단계·같은 전달 순회 안) 재개한다. `Race(Child(), NextTick())`처럼 같은 재개 단계에서 둘이 끝날 수 있으면 시계 판정(단계 시작의 대기 훑기)이 먼저라 기본 대기 인자가 이기고 하위 실행은 취소된다(`Run/Async` `RaceChild`).
+  - **ENDEXEC:** 하위 실행 경계 위의 `ENDEXEC`는 그 하위 실행만 끝내고 끝난 하위 대기를 남긴다(정지 전이든 재개 뒤든 같다).
+  - **가상 async 호출:** interface·open·override 메서드를 `All`·`Race` 인자로 쓰는 하위 실행(`CALLV` 경계)은 아직 없다 — 컴파일러가 부르고 대기 자리를 null로 둬 묶음이 ContractViolation으로 멈춘다(연동 단계에서 `CALLV` 경계를 더한다).
+  - **시험:** `Run/Async`의 LC6c2 절(이벤트 대기 등록 전 항목 무시·전달 순회 안 재개, 발행자 detach의 단독·Race·All 처리, 하위 실행의 동기 반환·정지·fault 전파·Race 취소·3단 중첩, `advance … paused`), bytecode verifier 음성(`WAITEV` 참조·레지스터, `CALLW` 참조).
 - **결정:** R13 대안(`AWAITEV` 유지 + 묶음 인자용 별도 명령)은 대기를 만드는 길이 둘이 되어 발행자 파괴·순서 규칙이 두 번 구현된다. R14 대안(하위 실행을 처음부터 별도 실행 문맥에서 돌림)은 인자 창·반환 규약을 다시 만들어야 하고 같은 조각 안의 동기 구간(첫 await 전)이 다른 문맥이 된다 — 경계 표지는 보통 호출과 같은 경로를 쓰고 정지할 때만 나눈다. R15는 SL §6.1 "하위 작업의 fault는 부모 실행의 fault가 되어 형제를 취소한다" 그대로다. R16 대안(host가 일시 정지 중 Advance를 부르지 않음)은 UI 시계 대기(`Delay(0.0, Clock.UI)`)가 멈춘다. R17: LC6c2 시험은 `Run/Async`에 이벤트 대기·발행자 파괴·하위 실행(반환·정지·fault·취소)·일시 정지 사례를 더하고 할당 실패 전수를 본다.
 
 ## 3. 순서

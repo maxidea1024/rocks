@@ -55,6 +55,8 @@ private:
     uint32 NewWait() noexcept;
     // callee가 frame을 쌓아 부르는 Sparks async 함수(최상위·메서드·interface)인지다.
     bool IsDirectAwaitCallee(uint32 callee) const noexcept;
+    // 이벤트 식이면 그 이벤트 대기 handle(WAITEV), 아니면 NoIrRegister.
+    uint32 LowerEventWait(uint32 node) noexcept;
     uint32 SlotCount(uint32 first) const noexcept;
     // 묶음 to ← from(slot마다 Move).
     void MoveValue(uint32 to, uint32 from, uint32 node) noexcept;

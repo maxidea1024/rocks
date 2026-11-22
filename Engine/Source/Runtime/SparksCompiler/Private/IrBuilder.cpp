@@ -94,6 +94,8 @@ const char* IrOpName(IrOp op) noexcept {
         return "EMIT";
     case IrOp::Await:
         return "AWAIT";
+    case IrOp::WaitEvent:
+        return "WAITEV";
     case IrOp::Try:
         return "TRY";
     case IrOp::ReturnError:
@@ -491,6 +493,9 @@ bool IrBuilder::Validate() const noexcept {
             break;
         case IrOp::Await:
             ok = optional(i.a) && optional(i.b) && target(i.c);
+            break;
+        case IrOp::WaitEvent:
+            ok = isRegister(i.a) && isRegister(i.b);
             break;
         case IrOp::Try:
             ok = optional(i.a) && isRegister(i.b) && target(i.c) && target(i.extra);

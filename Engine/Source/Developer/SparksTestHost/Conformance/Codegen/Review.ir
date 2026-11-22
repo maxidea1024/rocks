@@ -299,12 +299,13 @@ handler Hp.on Owner.Damaged(s1)
   r8: LoopHandle
   s9: float [F64]
   s10: bool [Bool]
-  r11: LoopHandle?
-  s12: bool [Bool]
-  r13: LoopHandle
-  r14: Actor
-  r15: Hp?
-  r16 first: Hp?
+  r11: wait
+  r12: LoopHandle?
+  s13: bool [Bool]
+  r14: LoopHandle
+  r15: Actor
+  r16: Hp?
+  r17 first: Hp?
 L0:
     r2 = GETF World    ; 72:24
     r3 = GETF r2.World.Audio    ; 72:24
@@ -319,22 +320,23 @@ L1:
     s10 = GT s1, s9    ; 73:17
     BRANCH s10, L3, L4    ; 73:17
 L2:
-    r14 = GETF r0.Component.Owner    ; 81:21
-    r15 = CALL Actor.Find<Hp>(r14)    ; 81:21
-    r16 = MOVE r15    ; 81:9
+    r15 = GETF r0.Component.Owner    ; 81:21
+    r16 = CALL Actor.Find<Hp>(r15)    ; 81:21
+    r17 = MOVE r16    ; 81:9
     RETURN    ; 83:5
 L3:
     RELEASE r7    ; 74:17
     RETURN    ; 74:17
 L4:
-    AWAIT r0.Hp.Opened -> L5    ; 77:13
+    r11 = WAITEV r0.Hp.Opened    ; 77:19
+    AWAIT r11 -> L5    ; 77:13
 L5:
-    r11 = MOVE r7    ; 78:13
-    s12 = ISSOME r11    ; 78:13
-    BRANCH s12, L6, L7    ; 78:13
+    r12 = MOVE r7    ; 78:13
+    s13 = ISSOME r12    ; 78:13
+    BRANCH s13, L6, L7    ; 78:13
 L6:
-    r13 = MOVE r11    ; 78:13
-    CALL LoopHandle.Pause(r13)    ; 78:13
+    r14 = MOVE r12    ; 78:13
+    CALL LoopHandle.Pause(r14)    ; 78:13
     JUMP L8    ; 78:13
 L7:
     JUMP L8    ; 78:13

@@ -161,14 +161,92 @@ advance 0.1 -> ok (1 suspended)
   resume #5 Timer.Faulting -> fault AssertFailed at 94:9 (5 steps)
   resume #6 Timer.Loop -> suspended (11 steps)
   log error "after await"
-Timer.Group(#5) -> suspended (5 steps)
+Timer.Group(#5) -> suspended (13 steps)
 advance 0.1 -> ok (1 suspended)
-  resume #5 Timer.Group -> fault ContractViolation at 103:15 (10 steps)
+  resume #5 Timer.Child -> ok (4 steps)
+  resume #5 Timer.Group -> ok (4 steps)
   resume #6 Timer.Loop -> suspended (11 steps)
   log info "child"
+  log info "group"
 advance -1 -> invalid
 detach #6 -> ok
 stats -> waits 0, suspended 0, skipped 2
 detach #5 -> ok
 detach #7 -> ok
+stats -> waits 0, suspended 0, skipped 2
+# LC6c2 (SparksRuntime 2.5): event waits resume inside the delivery traversal, a publisher detach ends
+# them (alone: cancel, Race: keep the rest, All: cancel), void async calls in All/Race are child
+# executions (synchronous return, suspension, fault to the parent, Race cancel, nesting), paused.
+new #10 Timer -> ok (5 steps)
+hook #10 Enable -> ok (0 steps)
+new #11 Timer -> ok (5 steps)
+hook #11 Enable -> ok (0 steps)
+Timer.Fire(#10, 1) -> void (4 steps)
+Timer.WaitGo(#10) -> suspended (2 steps)
+Timer.Fire(#10, 2) -> void (4 steps)
+  log info "got go"
+  resume #10 Timer.WaitGo -> ok (4 steps)
+Timer.WaitOther(#10, #11) -> suspended (2 steps)
+Timer.RaceOther(#10, #11) -> suspended (12 steps)
+Timer.AllOther(#10, #11) -> suspended (8 steps)
+stats -> waits 7, suspended 3, skipped 2
+Timer.Fire(#11, 3) -> void (4 steps)
+  log info "other go"
+  log info "race other"
+  resume #10 Timer.WaitOther -> ok (4 steps)
+  resume #10 Timer.RaceOther -> ok (4 steps)
+stats -> waits 3, suspended 1, skipped 2
+advance 0.1 -> ok (0 suspended)
+  resume #10 Timer.AllOther -> ok (4 steps)
+  log info "all other"
+Timer.WaitOther(#10, #11) -> suspended (2 steps)
+Timer.RaceOther(#10, #11) -> suspended (12 steps)
+Timer.AllOther(#10, #11) -> suspended (8 steps)
+detach #11 -> ok
+stats -> waits 3, suspended 1, skipped 2
+advance 1.0 -> ok (0 suspended)
+  resume #10 Timer.RaceOther -> ok (4 steps)
+  log info "race other"
+stats -> waits 0, suspended 0, skipped 2
+Timer.Pair(#10) -> suspended (22 steps)
+  log info "quick"
+advance 0.1 -> ok (0 suspended)
+  resume #10 Timer.Child -> ok (4 steps)
+  resume #10 Timer.Pair -> ok (4 steps)
+  log info "child"
+  log info "pair"
+Timer.FaultGroup(#10) -> suspended (17 steps)
+stats -> waits 4, suspended 2, skipped 2
+advance 0.1 -> ok (0 suspended)
+  resume #10 Timer.Bad -> fault AssertFailed at 137:9 (5 steps)
+  resume #10 Timer.FaultGroup -> fault AssertFailed at 137:9 (5 steps)
+  log error "child fault"
+stats -> waits 0, suspended 0, skipped 2
+Timer.RaceChild(#10) -> suspended (13 steps)
+advance 0.1 -> ok (0 suspended)
+  resume #10 Timer.RaceChild -> ok (4 steps)
+  log info "race child"
+stats -> waits 0, suspended 0, skipped 2
+Timer.Deep(#10) -> suspended (27 steps)
+advance 0.1 -> ok (0 suspended)
+  resume #10 Timer.Child -> ok (4 steps)
+  resume #10 Timer.Middle -> ok (4 steps)
+  resume #10 Timer.Deep -> ok (4 steps)
+  log info "child"
+  log info "middle"
+  log info "deep"
+stats -> waits 0, suspended 0, skipped 2
+Timer.GameWait(#10) -> suspended (7 steps)
+Timer.UiWait(#10) -> suspended (7 steps)
+Timer.TickWait(#10) -> suspended (3 steps)
+advance 0 0.25 paused -> ok (2 suspended)
+  resume #10 Timer.UiWait -> ok (4 steps)
+  log info "ui"
+advance 0.25 0 -> ok (0 suspended)
+  resume #10 Timer.GameWait -> ok (4 steps)
+  resume #10 Timer.TickWait -> ok (4 steps)
+  log info "game"
+  log info "tick"
+stats -> waits 0, suspended 0, skipped 2
+detach #10 -> ok
 stats -> waits 0, suspended 0, skipped 2

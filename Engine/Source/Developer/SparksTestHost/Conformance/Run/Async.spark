@@ -103,6 +103,79 @@ class Timer : ScriptableComponent {
         await All(Child(), NextTick());
         Log.Info("group");
     }
+
+    async fn WaitGo() {
+        await Go;
+        Log.Info("got go");
+    }
+
+    async fn WaitOther(other: Timer) {
+        await other.Go;
+        Log.Info("other go");
+    }
+
+    async fn RaceOther(other: Timer) {
+        await Race(other.Go, Delay(1.0, Clock.Game));
+        Log.Info("race other");
+    }
+
+    async fn AllOther(other: Timer) {
+        await All(other.Go, NextTick());
+        Log.Info("all other");
+    }
+
+    async fn Quick() {
+        if (Ticks > 1000) {
+            await NextTick();
+        }
+
+        Log.Info("quick");
+    }
+
+    async fn Bad() {
+        await NextTick();
+        Assert(false, "child fault");
+    }
+
+    async fn Pair() {
+        await All(Quick(), Child());
+        Log.Info("pair");
+    }
+
+    async fn FaultGroup() {
+        await All(Bad(), Delay(5.0, Clock.Game));
+        Log.Info("unreachable");
+    }
+
+    async fn RaceChild() {
+        await Race(Child(), NextTick());
+        Log.Info("race child");
+    }
+
+    async fn Middle() {
+        await All(Child(), NextTick());
+        Log.Info("middle");
+    }
+
+    async fn Deep() {
+        await All(Middle(), Delay(0.05, Clock.Game));
+        Log.Info("deep");
+    }
+
+    async fn GameWait() {
+        await Delay(0.2, Clock.Game);
+        Log.Info("game");
+    }
+
+    async fn UiWait() {
+        await Delay(0.2, Clock.UI);
+        Log.Info("ui");
+    }
+
+    async fn TickWait() {
+        await NextTick();
+        Log.Info("tick");
+    }
 }
 
 class Waiter : ScriptableComponent {

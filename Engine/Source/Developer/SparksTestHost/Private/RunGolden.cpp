@@ -1215,13 +1215,18 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
                 actual.Append(directive).Append(RunArrow);
                 Result<void> stepped = Result<void>::Success();
                 if (verb == "advance") {
+                    // `advance <Game 초> [<UI 초>] [paused]`.
+                    constexpr StringView Paused = "paused";
+                    const bool paused = rest.EndsWith(Paused);
+                    const StringView uiText = RunValues::Trim(StringView(
+                        rest.Data(), rest.ByteCount() - (paused ? Paused.ByteCount() : 0)));
                     auto seconds = TryParseDouble(target);
-                    auto ui = TryParseDouble(rest.IsEmpty() ? target : rest);
+                    auto ui = TryParseDouble(uiText.IsEmpty() ? target : uiText);
                     if (!seconds || !ui) {
                         return bad("'advance' needs seconds");
                     }
 
-                    stepped = session.Advance(seconds.Value(), ui.Value());
+                    stepped = session.Advance(seconds.Value(), ui.Value(), paused);
                     if (!stepped && stepped.Error() == ErrorCode::InvalidArgument) {
                         actual.Append("invalid");
                         stepped = Result<void>::Success();
