@@ -27,7 +27,8 @@ public:
     VmSession& operator=(const VmSession&) = delete;
 
     // session 모듈 목록에 더한다(다른 모듈 기반 클래스를 찾는 범위). linked는 링크에 성공했고
-    // session의 host로 링크했어야 하며 session보다 오래 산다. 실패: 그 밖이면 InvalidArgument,
+    // session의 host로 링크했어야 하며 session보다 오래 산다. 같은 경로의 다른 모듈은 거부한다
+    // (기반 찾기가 섞이지 않게). 실패: 그 밖이면 InvalidArgument,
     // 할당 실패는 OutOfMemory.
     Result<void> AddModule(const VmLinkedModule& linked) noexcept;
 
@@ -41,14 +42,16 @@ public:
     // instance의 kind hook을 기반 사슬 순(기반 먼저)으로 부른다. scalars·refs는 this 뒤 인자(Tick의
     // dt 등)다. 첫 fault에서 멈추고 그 결과, 아니면 마지막 결과(hook이 없으면 Returned·0 steps)다.
     Result<VmCallResult> RunHook(uint32 instance, BytecodeHookKind kind, Span<const uint64> scalars,
-                                 Span<const uint64> refs) noexcept;
+                                 Span<const uint64> refs,
+                                 Span<VmBuffer* const> buffers = Span<VmBuffer* const>()) noexcept;
 
     // instance를 this로 module의 function을 부른다(refs는 this 뒤 Ref 인자).
     Result<VmCallResult> Call(uint32 instance, const VmLinkedModule& module, uint32 function,
                               Span<const uint64> scalars, Span<const uint64> refs,
                               Span<VmBuffer* const> buffers) noexcept;
 
-    // 필드 버퍼를 놓고 instance를 표에서 뺀다(번호는 다시 쓰지 않는다).
+    // 필드 버퍼와 저장소를 놓고 instance를 표에서 뺀다(번호는 뒤의 CreateInstance가 다시 쓸 수
+    // 있다).
     void Detach(uint32 instance) noexcept;
 
     // 붙은 instance를 모두 Detach한다(CloseSession).

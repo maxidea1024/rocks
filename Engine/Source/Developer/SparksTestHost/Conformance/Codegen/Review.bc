@@ -62,10 +62,11 @@ t50 = "Cue"
 t51 = "Hum"
 t52 = "Cursor"
 t53 = "Opened"
-t54 = "Owner"
-t55 = "Damaged"
-t56 = "sparks 0.4.0"
-t57 = "Main"
+t54 = "Actor.Damaged"
+t55 = "Owner"
+t56 = "Damaged"
+t57 = "sparks 0.4.0"
+t58 = "Main"
 ref0 = field Hp.Cursor args ">i64"
 ref1 = language NextTick args ">w"
 ref2 = context World
@@ -89,6 +90,7 @@ ref19 = event Hp.Opened
 ref20 = type Array<vec3>
 ref21 = field Hp.Points args ">A<v3>"
 ref22 = type Array<string>
+ref23 = event Actor.Damaged
 class0 = Hp : ScriptableComponent s3 r2 b2 init Hp.$init
   field Shield s0 x2
   field Points b0 x1
@@ -96,7 +98,7 @@ class0 = Hp : ScriptableComponent s3 r2 b2 init Hp.$init
   field Cue r0 x1
   field Hum r1 x1
   field Cursor s2 x1
-  handler Owner.Damaged Hp.on Owner.Damaged await skipWhileBusy
+  handler Owner.Damaged Hp.on Owner.Damaged await skipWhileBusy ref16 -> ref23
   event Opened
 
 function Hp.Next  scalar=2/2 ref=1/1 buf=0/0 params=0/1/0 returns sx1

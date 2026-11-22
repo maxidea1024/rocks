@@ -131,7 +131,7 @@ public:
                  ++at) {
                 const BytecodeHandler& handler = module_.handlers[at];
                 const StringView path = module_.String(handler.path);
-                out_.AppendFormat("  handler {}{}{} {}{}{}\n", path, path.IsEmpty() ? "" : ".",
+                out_.AppendFormat("  handler {}{}{} {}{}{}", path, path.IsEmpty() ? "" : ".",
                                   module_.String(handler.event),
                                   module_.String(module_.functions[handler.function].name),
                                   handler.awaits != 0 ? " await" : "",
@@ -139,6 +139,17 @@ public:
                                       ? " skipWhileBusy"
                                   : handler.reentry == BytecodeReentry::Restart ? " restart"
                                                                                 : "");
+                // 경로 참조(ref 번호)와 이벤트 참조.
+                for (uint32 step = handler.firstPath; step < handler.firstPath + handler.pathCount;
+                     ++step) {
+                    out_.AppendFormat(" ref{}", module_.handlerPaths[step]);
+                }
+
+                if (handler.eventRef != NoBytecodeIndex) {
+                    out_.AppendFormat(" -> ref{}", handler.eventRef);
+                }
+
+                out_.Append("\n");
             }
 
             for (uint32 at = entry.firstEvent; at < entry.firstEvent + entry.eventCount; ++at) {

@@ -386,6 +386,45 @@ TEST(SparksBytecodeFile_VerifierRejections) {
     CHECK(verify([](BytecodeModule& m) noexcept {
               m.classes[0].initializer = 0; // 함수 0은 this(Ref 1) 하나의 모양이 아니다
           }) == BytecodeLoadError::BadTable);
+    // 밀집 배치: bank별 필드 합이 클래스 slot 수(LC6a 리뷰 S3).
+    CHECK(verify([](BytecodeModule& m) noexcept { m.classes[0].slots[0] = 9; }) ==
+          BytecodeLoadError::BadTable);
+    // 같은 이름의 클래스 둘.
+    CHECK(verify([](BytecodeModule& m) noexcept {
+              BytecodeClass copy;
+              copy.name = m.classes[0].name;
+              static_cast<void>(m.classes.TryPushBack(copy));
+          }) == BytecodeLoadError::BadTable);
+    // 재진입 표시는 await가 있는 handler만.
+    CHECK(verify([](BytecodeModule& m) noexcept {
+              BytecodeHandler handler;
+              handler.path = 0;
+              handler.event = 0;
+              handler.function = 0;
+              handler.reentry = BytecodeReentry::Restart;
+              m.classes[0].firstHandler = static_cast<uint32>(m.handlers.Size());
+              m.classes[0].handlerCount = 1;
+              static_cast<void>(m.handlers.TryPushBack(handler));
+          }) == BytecodeLoadError::BadTable);
+    // hook 함수 모양: this(Ref)가 없는 함수(최상위 Twice)는 hook이 될 수 없다.
+    CHECK(verify([&](BytecodeModule& m) noexcept {
+              for (uint32 index = 0; index < m.functions.Size(); ++index) {
+                  if (m.String(m.functions[index].name) == "Twice") {
+                      m.hooks[0].function = index;
+                  }
+              }
+          }) == BytecodeLoadError::BadTable);
+    // handler 경로 참조는 필드·문맥 참조, 이벤트 참조는 Event다.
+    CHECK(verify([](BytecodeModule& m) noexcept {
+              BytecodeHandler handler;
+              handler.path = 0;
+              handler.event = 0;
+              handler.function = 0;
+              handler.eventRef = 0; // 참조 0은 Event가 아니다
+              m.classes[0].firstHandler = static_cast<uint32>(m.handlers.Size());
+              m.classes[0].handlerCount = 1;
+              static_cast<void>(m.handlers.TryPushBack(handler));
+          }) == BytecodeLoadError::BadTable);
 
     // 머리의 profile은 0·1이다.
     Array<uint8> copy(allocator);

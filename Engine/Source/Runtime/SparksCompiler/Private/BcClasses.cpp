@@ -133,16 +133,19 @@ bool BytecodeEncoder::EncodeClasses(Span<const uint64> bodies) noexcept {
                 continue;
             }
 
-            // 이벤트: 인자 서술자(매개변수 심볼 — 선언 순).
+            // 이벤트: 인자 서술자(선언의 매개변수 노드 — LC6a 리뷰 S6, 전체 심볼을 훑지 않는다).
             StringBuilder<128> arguments(checker_.allocator_);
             bool first = true;
-            for (uint32 at = 0; at < c_.symbols_.Size(); ++at) {
-                const Symbol& parameter = c_.symbols_[at];
-                if (parameter.kind == SymbolKind::Parameter && parameter.owner == memberSymbol) {
-                    arguments.Append(first ? "" : ",");
-                    first = false;
-                    AppendDescriptor(arguments, parameter.type);
+            const uint32 parameters = tree.Child(member, 3);
+            for (const uint32 parameter :
+                 parameters == NoNode ? Span<const uint32>() : tree.Children(parameters)) {
+                if (tree.Node(parameter).kind != SyntaxKind::Parameter) {
+                    continue;
                 }
+
+                arguments.Append(first ? "" : ",");
+                first = false;
+                AppendDescriptor(arguments, c_.NodeType(module_, tree.Child(parameter, 1)));
             }
 
             if (arguments.HasFailed()) {
@@ -216,6 +219,47 @@ bool BytecodeEncoder::EncodeClasses(Span<const uint64> bodies) noexcept {
             }
 
             BytecodeHandler handler;
+            // 경로 참조(R7): 마디마다 필드·문맥 참조(`this`는 마디가 없다). 하나라도 풀지
+            // 못하면(widget 경로 — 연동 단계) 경로를 비우고 이벤트 참조도 두지 않는다(실행 중
+            // 연결하지 않는다).
+            handler.firstPath = static_cast<uint32>(out_.handlerPaths.Size());
+            bool resolved = true;
+            for (usize at = 0; at + 1 < names.Size() && resolved; ++at) {
+                if (tree.Node(names[at]).kind == SyntaxKind::This) {
+                    continue;
+                }
+
+                const uint32 segment = c_.NodeSymbol(module_, names[at]);
+                const SymbolKind segmentKind =
+                    segment == NoSymbol ? SymbolKind::BuiltinType : c_.symbols_[segment].kind;
+                const bool field =
+                    segmentKind == SymbolKind::Field || segmentKind == SymbolKind::EngineField;
+                if (!field && segmentKind != SymbolKind::ContextName) {
+                    resolved = false;
+                    break;
+                }
+
+                const uint32 ref =
+                    SymbolRef(field ? BytecodeRefKind::Field : BytecodeRefKind::Context, segment);
+                if (!out_.handlerPaths.TryPushBack(ref)) {
+                    Fail(ErrorCode::OutOfMemory);
+                    return NoBytecodeIndex;
+                }
+
+                ++handler.pathCount;
+            }
+
+            const uint32 event =
+                names.IsEmpty() ? NoSymbol : c_.NodeSymbol(module_, names[names.Size() - 1]);
+            const bool changed = !names.IsEmpty() &&
+                                 checker_.TokenText(module_, names[names.Size() - 1]) == "Changed";
+            if (!resolved) {
+                static_cast<void>(out_.handlerPaths.TryResize(handler.firstPath));
+                handler.pathCount = 0;
+            } else if (!changed && event != NoSymbol) {
+                handler.eventRef = SymbolRef(BytecodeRefKind::Event, event);
+            }
+
             handler.path = AddString(joined.View());
             handler.event =
                 AddString(names.IsEmpty() ? StringView()

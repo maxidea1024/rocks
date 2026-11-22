@@ -2,6 +2,7 @@ open class Base : ScriptableComponent {
     var Trail = "";
     var Count = 0;
     var Seen: Array<string> = [];
+    var Spin: quat;
 
     on Awake() {
         Trail = "${Trail}A";
@@ -20,6 +21,10 @@ open class Base : ScriptableComponent {
     on Disable() {
         Trail = "${Trail}D";
     }
+
+    on LateTick(dt: float) {
+        Assert(dt < 1.0, "base late tick too slow");
+    }
 }
 
 class Derived : Base {
@@ -37,5 +42,9 @@ class Derived : Base {
 
     on Destroy() {
         Trail = "${Trail}X";
+    }
+
+    on LateTick(dt: float) {
+        Log.Info("derived late tick ${dt}");
     }
 }

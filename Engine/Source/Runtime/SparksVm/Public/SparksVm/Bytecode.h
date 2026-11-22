@@ -167,11 +167,17 @@ struct BytecodeHook {
 };
 
 struct BytecodeHandler {
-    uint32 path = NoBytecodeIndex;  // 경로 글자(빈 글자는 자기 이벤트)
-    uint32 event = NoBytecodeIndex; // 이벤트 이름
+    uint32 path = NoBytecodeIndex;  // 경로 글자(빈 글자는 자기 이벤트 — 표시용)
+    uint32 event = NoBytecodeIndex; // 이벤트 이름(표시용)
     uint32 function = NoBytecodeIndex;
     BytecodeReentry reentry = BytecodeReentry::None;
     uint8 awaits = 0;
+    // 경로 참조(handlerPaths 범위 — 마디마다 Field·Context 참조, SparksRuntime 2.3절 R7). Changed는
+    // 마지막 마디가 감시 필드다.
+    uint32 firstPath = 0;
+    uint32 pathCount = 0;
+    // 이벤트 참조(Event — Changed와 풀지 못한 경로는 NoBytecodeIndex).
+    uint32 eventRef = NoBytecodeIndex;
 };
 
 struct BytecodeEvent {
@@ -205,8 +211,9 @@ public:
         : scalars(allocator), stringBytes(allocator), stringOffsets(allocator),
           stringLengths(allocator), refs(allocator), types(allocator), typeFields(allocator),
           classes(allocator), classFields(allocator), hooks(allocator), handlers(allocator),
-          events(allocator), functions(allocator), words(allocator), locations(allocator),
-          switches(allocator), cases(allocator), awaits(allocator), liveRanges(allocator) {
+          handlerPaths(allocator), events(allocator), functions(allocator), words(allocator),
+          locations(allocator), switches(allocator), cases(allocator), awaits(allocator),
+          liveRanges(allocator) {
     }
 
     BytecodeModule(BytecodeModule&&) noexcept = default;
@@ -238,6 +245,7 @@ public:
     Array<BytecodeTypeField> classFields;
     Array<BytecodeHook> hooks;
     Array<BytecodeHandler> handlers;
+    Array<uint32> handlerPaths; // handler 경로 마디의 참조 번호
     Array<BytecodeEvent> events;
     Array<BytecodeFunction> functions;
     Array<uint32> words;               // 모든 함수의 명령 단어(함수는 구간)

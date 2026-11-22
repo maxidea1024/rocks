@@ -54,7 +54,7 @@ ref8 = event Actor.Pinged
 class0 = Beacon : Actor s0 r2 b0
   field Cue r0 x1
   field Target r1 x1
-  handler this.Pinged Beacon.on this.Pinged await skipWhileBusy
+  handler this.Pinged Beacon.on this.Pinged await skipWhileBusy -> ref8
 
 function Widths  scalar=8/8 ref=0/0 buf=0/0 params=7/0/0 returns sx1
   body 37cae9a4c071a3e2d18c904112dfc67b024e0e9b344be0fe427ec7d7709b34e0
