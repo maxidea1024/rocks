@@ -245,7 +245,7 @@ struct PropertyPath { Span<const PathStep> steps; Span<const PathKey> keys{}; };
 모듈 사이 계약(RF 1.4절, MC/ModuleDescriptor.cs:13·19·374-442)을 바꾼다. 읽기는 지금처럼 모르는 속성을 거부한다(schema 번호는 올리지 않는다 — 하위호환 없음).
 
 - 필드: `key`(Map), `element`(Optional·Set·StaticArray·Map 값), StaticArray의 `maxElements` = N, `bitfield`(bool, 14절).
-- 클래스: `within`(정규 이름), `toolName`, flags에 `Transient`·`Deprecated`.
+- 클래스: `within`(정규 이름), `toolName`, flags에 `Transient`·`Deprecated`·`Exported`(클래스 전체 export — [빌드 타깃](BuildTargets.ko.md) 3.8절 BS8d3, descriptor schema 2).
 - struct: `base`(정규 이름), `toolName`, flags에 `Atomic`, 비리플렉션 빈 base는 기록하지 않는다(12절).
 - 종류 검증(`IsSupportedValueKind`·`IsSupportedElementKind`·`KindAcceptsRequired`·`KindHasTargetType`)은 1.3절 C# 표를 쓴다. B9a1에서 이 넷과 `KindRequiresTargetId`를 지우고 `ValueKindTable.Has`로 바꿨다(필드 값 종류는 클래스면 Field, struct면 StructMember 열, 원소는 ArrayElement 열).
 

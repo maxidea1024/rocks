@@ -639,6 +639,10 @@ internal sealed class ClassModel
 
     public required bool Abstract { get; init; }
 
+    // 클래스 전체를 모듈 API 매크로로 export하는가(선언부 원문에 ROCKS_<M>_API — Docs/Design/BuildTargets.ko.md 3.8절 BS8d3). 이 모듈
+    // 클래스는 ClangAstParser가, import 클래스는 descriptor flags의 Exported가 채운다. 다른 모듈이 상속하는 기반은 true여야 한다(RMC2002).
+    public bool Exported { get; init; }
+
     // TypeFlags::WorldOnly. 선언이 직접 쓰거나 base에서 상속된다(SchemaValidator가 base를 보고 채운다).
     public bool WorldOnly { get; set; }
 

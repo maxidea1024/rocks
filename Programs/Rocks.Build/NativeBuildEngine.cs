@@ -135,11 +135,15 @@ public sealed class NativeBuildEngine
 
         bool succeeded = stable && results.All(value => value.Succeeded);
         string? moduleManifest = null;
+        IReadOnlyList<string> notices = plan.Notices;
         if (succeeded)
         {
             RemoveStaleOutputs(request, plan);
             // Modular 타깃의 모듈 manifest는 링크가 모두 성공한 뒤에 쓴다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d1).
             moduleManifest = ModuleManifests.Write(request);
+            // Modular Windows 공유 라이브러리의 export 수 진단(BS8d3)이다.
+            (IReadOnlyDictionary<string, int> exportCounts, IReadOnlyList<string> unreadable) = ModularExports.Count(request);
+            notices = [.. notices, .. ModularExports.Diagnose(exportCounts, unreadable: unreadable)];
             if (request.Timing)
             {
                 TimingReport.Write(request, plan);
@@ -169,7 +173,7 @@ public sealed class NativeBuildEngine
             UnityBatches = plan.UnityBatches.Count,
             PchActions = plan.Actions.Count(action => action.Kind == "Pch"),
             AdaptiveSeparated = plan.AdaptiveSeparated,
-            Notices = plan.Notices,
+            Notices = notices,
             Failure = !stable ? "Source/toolchain inputs changed during the build." :
                 results.FirstOrDefault(value => !value.Succeeded)?.StdErr,
             ToolchainFingerprint = prepared.ToolchainFingerprint,

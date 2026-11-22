@@ -7,7 +7,7 @@ namespace Rocks.ToolTests;
 internal static partial class ModuleMetaTests
 {
     private const string BitfieldParent = "#pragma once\n#include <Meta/Annotations.h>\n#include <Object/Object.h>\nnamespace probe {\n" +
-        "ROCKS_CLASS()\nstruct Parent : public rocks::Object {\nROCKS_PROPERTY() rocks::int32 value = 0;\nROCKS_PROPERTY() rocks::uint8 flag : 1 = 0;\n};\n}\n";
+        "ROCKS_CLASS()\nstruct ROCKS_LOWER_API Parent : public rocks::Object {\nROCKS_PROPERTY() rocks::int32 value = 0;\nROCKS_PROPERTY() rocks::uint8 flag : 1 = 0;\n};\n}\n";
 
     // 다른 모듈 base의 bitfield bool 필드는 descriptor의 `"bitfield": true`로 전해져, 파생 모듈의 함수표가 base의 생성 접근자를
     // 쓴다(생성 헤더는 MetaCompiler 검증 컴파일을 통과해야 게시된다).

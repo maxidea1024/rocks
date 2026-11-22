@@ -94,7 +94,7 @@ private:
 // assetId는 Transient·ReadOnly 리플렉션 필드이며 로드가 Commit 전에 소속 패키지의 id로
 // 설정한다(대표 에셋만 — 하위 Asset 파생 객체는 null로 둔다).
 ROCKS_CLASS(Abstract)
-class Asset : public Object {
+class ROCKS_ASSETRUNTIME_API Asset : public Object {
     ROCKS_GENERATED_BODY()
 
 public:

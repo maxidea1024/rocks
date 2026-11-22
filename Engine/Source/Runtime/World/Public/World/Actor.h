@@ -72,7 +72,7 @@ class SceneComponent;
 //
 // 스레드: World의 게임 스레드에서만 접근한다.
 ROCKS_CLASS(WorldOnly)
-class Actor : public Object {
+class ROCKS_WORLD_API Actor : public Object {
     ROCKS_GENERATED_BODY()
 
 public:
