@@ -3,6 +3,7 @@
 #include <Core/Memory/SharedPtr.h>
 #include <Base/TypeTraits.h>
 #include <Base/Types.h>
+#include <Core/TypeKey.h>
 
 // 프레임 packet의 렌더 설정 snapshot 참조다(Docs/Design/RenderBase.ko.md 12절, ConfigSystem.ko.md
 // 5.3절 — RB1 설정 snapshot). 게임 lane이 sync 지점 뒤 얻은 "렌더 읽기" 설정 snapshot(Config
@@ -11,8 +12,11 @@
 // 프레임마다 참조로 넘긴다.
 //
 // RenderBase는 ObjectRuntime에 의존하지 않으므로(계획 3.1절 렌더 층 "Object 없음") Config 타입을
-// 직접 이름 짓지 않는다. 이 참조는 snapshot의 공유 소유권과 타입 표지만 들고, 꺼낼 때 같은
-// 타입으로만 돌려준다. Config를 아는 쪽(실행 파일·렌더러 모듈)이 타입을 정한다.
+// 직접 이름 짓지 않는다. 이 참조는 snapshot의 공유 소유권과 타입 키만 들고, 꺼낼 때 같은
+// 타입으로만 돌려준다. Config를 아는 쪽(실행 파일·렌더러 모듈)이 타입을 정한다. 타입 키는
+// TypeKeyOf<T>()다(Core/TypeKey.h): 담는 쪽(게임 lane)과 꺼내는 쪽(렌더러 모듈)이 다른 모듈이면
+// T가 export 키를 선언해야 한다 — ConfigSnapshot은 선언한다(Docs/Design/BuildTargets.ko.md 3.8절
+// BS8e).
 //
 // 사용 예:
 //   // 게임 lane(Sync 뒤)
@@ -29,14 +33,6 @@
 // 스레드: 참조 계수만 원자적이다. snapshot 자체는 불변이어야 한다(ConfigSnapshot이 그렇다).
 namespace rocks::render {
 
-namespace detail {
-
-// 타입마다 하나인 표지 변수다(주소가 타입 표지다).
-template <class T>
-inline constexpr uint8 RenderSettingsTag = 0;
-
-} // namespace detail
-
 class RenderSettingsRef {
 public:
     RenderSettingsRef() noexcept = default;
@@ -49,7 +45,7 @@ public:
         if (snapshot) {
             const void* object = snapshot.Get();
             ref.owner_ = SharedPtr<const uint8>(snapshot, static_cast<const uint8*>(object));
-            ref.tag_ = &detail::RenderSettingsTag<RemoveConstT<T>>;
+            ref.tag_ = TypeKeyOf<RemoveConstT<T>>();
             ref.generation_ = snapshot->Generation();
         }
 
@@ -59,7 +55,7 @@ public:
     // 담은 snapshot이다. 비었거나 Share 때 타입이 T가 아니면 null이다.
     template <class T>
     const T* Get() const noexcept {
-        if (!owner_ || tag_ != &detail::RenderSettingsTag<RemoveConstT<T>>) {
+        if (!owner_ || tag_ != TypeKeyOf<RemoveConstT<T>>()) {
             return nullptr;
         }
 
@@ -84,7 +80,7 @@ public:
 
 private:
     SharedPtr<const uint8> owner_;
-    const uint8* tag_ = nullptr;
+    const void* tag_ = nullptr;
     uint64 generation_ = 0;
 };
 

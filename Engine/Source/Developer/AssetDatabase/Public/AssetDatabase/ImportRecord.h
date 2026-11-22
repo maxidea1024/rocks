@@ -157,7 +157,8 @@ struct ImportRecord {
 // 15·18): root는 0–MaxImportRootBytes byte·`/`·`\` 없음, root가 있으면 relativePath는 `/` 구분 상대
 // 경로, 비면 `/` 구분 절대 경로(POSIX `/a`·UNC `//server/share/a`·드라이브 `X:/a`).
 // AssetSourceRoots가 기록을 풀기 전에 쓴다.
-bool IsValidImportSourceLocation(StringView root, StringView relativePath) noexcept;
+ROCKS_ASSETDATABASE_API bool IsValidImportSourceLocation(StringView root,
+                                                         StringView relativePath) noexcept;
 
 // self 패키지의 ImportRecord byte를 쓴다(PackageWriteOptions::importRecord에 넘긴다). outputs는
 // outputKey byte 순으로 정렬해 쓰고 sources는 준 순서대로 쓴다.
@@ -166,23 +167,24 @@ bool IsValidImportSourceLocation(StringView root, StringView relativePath) noexc
 // 포함, 문자열 상한·UTF-8·NUL 없음, relativePath 형태(IsValidImportSourceLocation), root에 `/`·`\`
 // 없음, options는 Record envelope. 참조 기록: importerId null·이름 빈 값·버전 0·원본·옵션·출력
 // 없음)을 어기면 InvalidArgument, 전체가 Record 기본 한도를 넘으면 CapacityExceeded, 할당 실패.
-Result<Array<uint8>> WriteImportRecord(Allocator& allocator, AssetId self,
-                                       const ImportRecordInput& input) noexcept;
+ROCKS_ASSETDATABASE_API Result<Array<uint8>>
+WriteImportRecord(Allocator& allocator, AssetId self, const ImportRecordInput& input) noexcept;
 
 // self 패키지의 ImportRecord byte를 읽는다. 오류: self가 null이거나 bytes가 비었으면
 // InvalidArgument(섹션이 없으면 부르지 않는다), 스키마 Guid가 ImportRecordSchema가 아니거나 Record·
 // 항목 버전이 ImportRecordVersion 밖이면 Unsupported(다른 스키마·더 새 기록 — 색인은
 // UnsupportedVersion), 형식·순서·크기·규칙 위반(WriteImportRecord와 같은 규칙, 모르는 필드·빈 목록
 // 필드·wire가 다른 필드 포함)은 InvalidArgument, 할당 실패.
-Result<ImportRecord> ReadImportRecord(Allocator& allocator, AssetId self,
-                                      Span<const uint8> bytes) noexcept;
+ROCKS_ASSETDATABASE_API Result<ImportRecord> ReadImportRecord(Allocator& allocator, AssetId self,
+                                                              Span<const uint8> bytes) noexcept;
 
 // self 패키지의 ImportRecord와 Dependencies의 ImportOwner 항목을 대조한다(AS 7.1절 7·15). record가
 // null이면 ImportRecord 섹션이 없다는 뜻이다. 참조 기록이면 ImportOwner 항목이 정확히 하나이고 그
 // asset이 owner여야 하며, 소유 기록이거나 기록이 없으면 ImportOwner 항목이 없어야 한다. 다른
 // 스키마·더 새 기록(ReadImportRecord가 Unsupported)은 참조 기록인지 알 수 없으므로 부르지 않는다.
 // 오류: 위반은 InvalidArgument(호출자는 CorruptPackage — 칸 Dependencies로 보고한다).
-Result<void> CheckImportOwner(AssetId self, const ImportRecord* record,
-                              Span<const PackageDependencyEntry> dependencies) noexcept;
+ROCKS_ASSETDATABASE_API Result<void>
+CheckImportOwner(AssetId self, const ImportRecord* record,
+                 Span<const PackageDependencyEntry> dependencies) noexcept;
 
 } // namespace rocks

@@ -42,7 +42,7 @@ constexpr usize MaxNativePathBytes() noexcept {
     }
 }
 
-class ProjectLayout {
+class ROCKS_ASSETDATABASE_API ProjectLayout {
 public:
     explicit ProjectLayout(Allocator& allocator) noexcept;
 

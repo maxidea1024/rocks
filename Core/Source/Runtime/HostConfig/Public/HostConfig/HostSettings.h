@@ -100,7 +100,7 @@ ROCKS_HOSTCONFIG_API Result<void> UserDataDirectory(String& out) noexcept;
 // 실행 파일 위쪽 폴더에서 `Engine/Config` 폴더를 가진 첫 폴더를 찾아 그 `Engine` 경로를 out에 NUL로
 // 끝내 쓴다(빌드 출력이 저장소·설치 폴더 안에 있다). 반환: 경로 byte 수. 오류: 찾지 못하면
 // NotFound, 실행 파일 경로를 얻지 못하면 그 파일 상태의 오류, out이 작으면 CapacityExceeded.
-Result<usize> FindEngineDirectory(Span<char> out) noexcept;
+ROCKS_HOSTCONFIG_API Result<usize> FindEngineDirectory(Span<char> out) noexcept;
 
 class ROCKS_HOSTCONFIG_API HostSettings {
 public:

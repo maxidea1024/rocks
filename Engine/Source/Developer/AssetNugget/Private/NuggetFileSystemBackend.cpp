@@ -521,7 +521,7 @@ NuggetGetResult NuggetFileSystemBackend::Get(const NuggetBackendGet& request) no
 }
 
 NuggetPutResult NuggetFileSystemBackend::Put(const NuggetBackendPut& request) noexcept {
-    NuggetPutResult result;
+    NuggetPutResult result(*allocator_);
     if (!opened_ || readOnly_) {
         // 읽기 전용 루트(공유 경로 등)는 쓰지 않는다.
         result.error = opened_ ? ErrorCode::Unsupported : ErrorCode::InvalidArgument;
@@ -574,6 +574,8 @@ NuggetPutResult NuggetFileSystemBackend::Put(const NuggetBackendPut& request) no
     }
 
     result.digest = NuggetRecordDigest(plan.Value().record);
+    // 계획한 Record를 결과에 둔다(NuggetCache의 Memory 항목 — 아래 쓰기는 머리·표 byte만 쓴다).
+    result.record = Move(plan.Value().record);
     String entry(*allocator_);
     String temporary(*allocator_);
     String directory(*allocator_);
@@ -680,7 +682,7 @@ NuggetPutResult NuggetFileSystemBackend::Put(const NuggetBackendPut& request) no
         return result;
     }
 
-    return Settle(request.key, temporary.View(), entry.View(), result);
+    return Settle(request.key, temporary.View(), entry.View(), Move(result));
 }
 
 // 대상이 이미 있을 때의 판정이다(9절 쓰기 — Rockpile 6.9절): 같은 digest Exists, 다른 digest
@@ -688,15 +690,15 @@ NuggetPutResult NuggetFileSystemBackend::Put(const NuggetBackendPut& request) no
 // 않는다.
 NuggetPutResult NuggetFileSystemBackend::Settle(const Sha256Digest& key, StringView temporary,
                                                 StringView entry, NuggetPutResult result) noexcept {
+    // 결과를 정하고 임시 파일을 지운다(결과는 result에 남는다 — Record를 옮기지 않는다).
     auto finish = [&](NuggetStatus status, ErrorCode error) noexcept {
         (void)files_->Delete(temporary.Data(), temporary.ByteCount());
         result.status = status;
         result.error = error;
-        return result;
+        return true;
     };
-    // 기존 항목을 판정한다. 손상이 아니면 그 결과로 끝낸다.
-    auto judge = [&](bool& corrupt) noexcept {
-        corrupt = false;
+    // 기존 항목을 판정한다. 손상이 아니면 결과를 정하고 true다(손상이면 false — 교체로 간다).
+    auto judge = [&]() noexcept {
         FileReader reader;
         Result<NuggetFileView> view = Result<NuggetFileView>::Failure(ErrorCode::NotFound);
         ErrorCode error = ErrorCode::None;
@@ -746,15 +748,12 @@ NuggetPutResult NuggetFileSystemBackend::Settle(const Sha256Digest& key, StringV
             break;
         }
 
-        corrupt = true;
-        return result;
+        return false;
     };
 
-    bool corrupt = false;
     Notify(NuggetBackendStep::BeforeJudge, key);
-    NuggetPutResult judged = judge(corrupt);
-    if (!corrupt) {
-        return judged;
+    if (judge()) {
+        return Move(result);
     }
 
     // 손상 항목 교체: shard 잠금(키 첫 byte — 256개, 지우지 않는다) 안에서 다시 보고 여전히 손상일
@@ -784,31 +783,33 @@ NuggetPutResult NuggetFileSystemBackend::Settle(const Sha256Digest& key, StringV
     }
 
     if (!step) {
-        return finish(NuggetStatus::Dropped, step.Error());
+        finish(NuggetStatus::Dropped, step.Error());
+        return Move(result);
     }
 
     platform::FileLock lock;
     if (auto held =
             lock.Acquire(lockPath.View().Data(), lockPath.View().ByteCount(), replaceLockMs_);
         !held) {
-        return finish(NuggetStatus::Dropped, FileErrorCode(held));
+        finish(NuggetStatus::Dropped, FileErrorCode(held));
+        return Move(result);
     }
 
     Notify(NuggetBackendStep::BeforeJudgeLocked, key);
-    judged = judge(corrupt);
-    if (!corrupt) {
-        return judged;
+    if (judge()) {
+        return Move(result);
     }
 
     if (auto replaced = files_->Replace(temporary.Data(), temporary.ByteCount(), entry.Data(),
                                         entry.ByteCount());
         !replaced && replaced.code != platform::FileCode::NotDurable) {
-        return finish(NuggetStatus::Dropped, FileErrorCode(replaced));
+        finish(NuggetStatus::Dropped, FileErrorCode(replaced));
+        return Move(result);
     }
 
     result.status = NuggetStatus::Stored;
     result.error = ErrorCode::None;
-    return result;
+    return Move(result);
 }
 
 Result<void> NuggetFileSystemBackend::Touch(const Sha256Digest& key) noexcept {

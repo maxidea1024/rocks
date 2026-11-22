@@ -15,7 +15,7 @@ namespace detail {
 
 // 패키지 로드의 그래프 hook이다(Soft 참조·BulkDataRef 관찰·진단 수집). Prepare의 스레드에서 쓰이고
 // RequiredMissing만 소유 스레드(CheckRequired)에서 온다 — 한 번에 한 스레드만 쓴다.
-class PackageLoadHooks final : public FieldCodecHooks {
+class ROCKS_ASSETRUNTIME_API PackageLoadHooks final : public FieldCodecHooks {
 public:
     PackageLoadHooks(Allocator& allocator, bool cooked) noexcept;
 
@@ -108,7 +108,7 @@ struct PackageLoadOptions {
 // 이어받으므로 allocator는 이 상태로 만든 Package(Registry)보다 오래 살아야 한다(AS 5.7절 16).
 // registry·types는 이 상태보다 오래 살아야 한다. Prepare에 준 file byte는
 // 이 상태가 소유한다(그래프 1단계가 이름·필드 view를 빌린다). 이동·복사 금지다.
-class PackageLoadState {
+class ROCKS_ASSETRUNTIME_API PackageLoadState {
 public:
     // 소유 스레드에서 만든다(그래프 Stage가 소유 스레드·접근 문맥을 기억한다).
     PackageLoadState(Allocator& allocator, ObjectRegistry& registry, TypeRegistry& types,
@@ -163,12 +163,14 @@ public:
     }
 
 private:
-    friend Result<void> InstantiatePackages(ConstructionContext&, Span<PackageLoadState* const>,
-                                            PackageImportResolver*, Span<ObjectHandle>,
-                                            AssetDiagnostic*) noexcept;
-    friend Result<void> InstantiatePackages(ConstructionContext&, Span<PackageLoadState* const>,
-                                            const PackageInstantiateOptions&, Span<ObjectHandle>,
-                                            AssetDiagnostic*) noexcept;
+    friend ROCKS_ASSETRUNTIME_API Result<void>
+    InstantiatePackages(ConstructionContext&, Span<PackageLoadState* const>, PackageImportResolver*,
+                        Span<ObjectHandle>, AssetDiagnostic*) noexcept;
+    friend ROCKS_ASSETRUNTIME_API Result<void> InstantiatePackages(ConstructionContext&,
+                                                                   Span<PackageLoadState* const>,
+                                                                   const PackageInstantiateOptions&,
+                                                                   Span<ObjectHandle>,
+                                                                   AssetDiagnostic*) noexcept;
 
     Result<void> CrossCheck(AssetDiagnostic* failure, const TypeLease& representativeType) noexcept;
     // contents_를 채운 뒤의 Prepare 공통 단계다.
@@ -253,10 +255,10 @@ protected:
 // 트랜잭션·그래프 단계의 오류(할당·스레드·접근 문맥·종료·재진입)는 진단 None과 그 오류, Required
 // 실효 값 누락(쿠킹)은 CorruptPackage / InvalidArgument다. 객체를 만든 뒤의 실패는 트랜잭션을
 // 그 오류로 고정한다(호출자가 Rollback하거나 소멸자가 되돌린다 — 부분 공개 없음).
-Result<void> InstantiatePackages(ConstructionContext& transaction,
-                                 Span<PackageLoadState* const> packages,
-                                 PackageImportResolver* resolver, Span<ObjectHandle> outPackages,
-                                 AssetDiagnostic* failure = nullptr) noexcept;
+ROCKS_ASSETRUNTIME_API Result<void>
+InstantiatePackages(ConstructionContext& transaction, Span<PackageLoadState* const> packages,
+                    PackageImportResolver* resolver, Span<ObjectHandle> outPackages,
+                    AssetDiagnostic* failure = nullptr) noexcept;
 
 // InstantiatePackages의 선택이다.
 struct PackageInstantiateOptions {
@@ -272,10 +274,9 @@ struct PackageInstantiateOptions {
 // import와 미해결 기록이 된다. 그 밖의 오류(resolver의 다른 오류·잘못된 handle·타입 조회)는
 // Strict와 같다. 오류: NullMissing인데 unresolved가 null이면 InvalidArgument, 미해결 기록의 할당
 // 실패.
-Result<void> InstantiatePackages(ConstructionContext& transaction,
-                                 Span<PackageLoadState* const> packages,
-                                 const PackageInstantiateOptions& options,
-                                 Span<ObjectHandle> outPackages,
-                                 AssetDiagnostic* failure = nullptr) noexcept;
+ROCKS_ASSETRUNTIME_API Result<void>
+InstantiatePackages(ConstructionContext& transaction, Span<PackageLoadState* const> packages,
+                    const PackageInstantiateOptions& options, Span<ObjectHandle> outPackages,
+                    AssetDiagnostic* failure = nullptr) noexcept;
 
 } // namespace rocks

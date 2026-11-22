@@ -52,10 +52,10 @@ inline constexpr StringView NuggetBucketShader = "shader";
 inline constexpr StringView NuggetBucketScc = "scc";
 
 // bucket 이름 규칙(`[a-z][a-z0-9_]{0,63}`)인지다.
-bool IsValidNuggetBucket(StringView bucket) noexcept;
+ROCKS_ASSETNUGGET_API bool IsValidNuggetBucket(StringView bucket) noexcept;
 
 // namespace 이름 규칙(`[a-z0-9][a-z0-9._-]{0,63}`)인지다.
-bool IsValidNuggetNamespace(StringView name) noexcept;
+ROCKS_ASSETNUGGET_API bool IsValidNuggetNamespace(StringView name) noexcept;
 
 // 값의 저장 표현이다. Codec(사용자 등록 형식)은 계약이다(A3에서는 읽으면 늘 미적중).
 enum class NuggetEncoding : uint8 {
@@ -112,23 +112,26 @@ bool IsValidNuggetValueRow(const NuggetValueRow& row) noexcept;
 // 0, 크기 ≤ NuggetValueMaxBytes, ChunkTableHash는 storedSize ≥ NuggetChunkBytes일 때만 0이 아니다,
 // inputs bucket 규칙·정규 인코딩 byte 사전순·중복 없음, meta ≤ NuggetMetaMaxBytes. 위반은
 // InvalidArgument(NonCanonical)다.
-Result<void> ValidateNuggetRecord(const NuggetRecord& record) noexcept;
+ROCKS_ASSETNUGGET_API Result<void> ValidateNuggetRecord(const NuggetRecord& record) noexcept;
 
 // Record TLV byte다(필드 1–6 순서). 오류: 정규 형식 위반 InvalidArgument, 1 MiB 초과
 // CapacityExceeded, 할당 실패.
-Result<Array<uint8>> WriteNuggetRecord(Allocator& allocator, const NuggetRecord& record) noexcept;
+ROCKS_ASSETNUGGET_API Result<Array<uint8>> WriteNuggetRecord(Allocator& allocator,
+                                                             const NuggetRecord& record) noexcept;
 
 // Record TLV를 읽는다. schema·버전(다른 schema InvalidArgument, 더 새 버전 Unsupported), 필드
 // 1–6이 정확히 그 순서·wire로 있는지, 값 표 길이(160의 배수), 정규 형식을 본다. 오류: 형식·정규
 // 위반 InvalidArgument, 1 MiB 초과 CapacityExceeded, 더 새 버전 Unsupported, 할당 실패.
-Result<NuggetRecord> ReadNuggetRecord(Allocator& allocator, Span<const uint8> bytes) noexcept;
+ROCKS_ASSETNUGGET_API Result<NuggetRecord> ReadNuggetRecord(Allocator& allocator,
+                                                            Span<const uint8> bytes) noexcept;
 
 // 논리 digest다(Rockpile 5.3절): SHA-256(echo, ValueId 순 {ValueId, rawSize, RawHash}, inputs,
 // SHA-256(meta)) — 저장 표현(encoding·storedSize·ContentHash·IndexHash·ChunkTableHash)은 넣지
 // 않는다. 정수는 little-endian, 문자열은 u64 길이 + byte다.
-Sha256Digest NuggetRecordDigest(const NuggetRecord& record) noexcept;
+ROCKS_ASSETNUGGET_API Sha256Digest NuggetRecordDigest(const NuggetRecord& record) noexcept;
 
 // 소비 입력의 정규 인코딩 순서 비교다(u64 길이 + bucket, key, digest의 byte 사전순).
-int32 CompareNuggetInputs(const NuggetInput& left, const NuggetInput& right) noexcept;
+ROCKS_ASSETNUGGET_API int32 CompareNuggetInputs(const NuggetInput& left,
+                                                const NuggetInput& right) noexcept;
 
 } // namespace rocks

@@ -429,3 +429,5 @@ EngineSubsystemType EngineAssetsSubsystemType() noexcept {
 }
 
 } // namespace rocks
+
+ROCKS_DEFINE_NATIVE_TYPE_KEY(rocks::EngineAssetsSubsystem)

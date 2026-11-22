@@ -91,8 +91,8 @@ public:
     }
 
 private:
-    friend Result<bool> TryParseExpectation(StringView text, Expectation& out,
-                                            String& problem) noexcept;
+    friend ROCKS_SPARKSTESTHOST_API Result<bool>
+    TryParseExpectation(StringView text, Expectation& out, String& problem) noexcept;
 
     Array<ExpectedDiagnostic> diagnostics_;
     CompilationStage stage_ = CompilationStage::All;
@@ -102,7 +102,8 @@ private:
 // `.expect` 원문을 해석한다. 형식이 틀리면 false를 돌려주고 problem에 이유(영어 한 문장)를 쓴다.
 // out은 호출 전 내용을 버리고 새로 채운다(실패하면 내용은 정해지지 않는다). out의 경로는 text를
 // 가리킨다. Result 실패는 할당 실패뿐이다.
-Result<bool> TryParseExpectation(StringView text, Expectation& out, String& problem) noexcept;
+ROCKS_SPARKSTESTHOST_API Result<bool> TryParseExpectation(StringView text, Expectation& out,
+                                                          String& problem) noexcept;
 
 // 실행 결과다. 실패 항목은 "사례 이름: 이유" 형태의 영어 문장이며, 진단이 다르면 실제 진단 출력을
 // 뒤에 붙인다.
@@ -140,6 +141,24 @@ struct CaseFile {
     StringView text;
 };
 
+// 폴더 사례의 reload revision 하나다(Docs/Design/SparksReload.ko.md 6절 LC7c2b — 사례 폴더 옆
+// `<사례>.<버전>/`, 바뀐 파일만).
+struct CaseRevision {
+    StringView version;
+    Span<const CaseFile> files; // 사례 폴더 기준 경로
+};
+
+// `.run` reload의 단계별 측정이다(Docs/Design/SparksReload.ko.md 6절 LC7c3 — 누적 nanosecond,
+// 적용에 성공한 reload만). 시험은 시간을 단언하지 않고 보고만 한다.
+struct RunTimings {
+    uint64 compile = 0; // 새 compilation의 Check·lowering(모든 모듈)
+    uint64 bundle = 0;  // 묶음 결정(content hash·재컴파일 범위·import 폐포)
+    uint64 link = 0;    // 묶음 모듈의 `.sparkc` 왕복·링크·import 풀기
+    uint64 plan = 0;    // PlanReload
+    uint64 apply = 0;   // ApplyReload
+    uint32 reloads = 0;
+};
+
 // 사례 하나의 입력이다.
 struct CaseInput {
     // 사례 이름이다. 파일 사례는 진단 경로이기도 하다("Lexical/Bom.spark"), 폴더 사례는
@@ -166,6 +185,10 @@ struct CaseInput {
     // `.run` `reload <버전>`의 revision 원문(Docs/Design/SparksReload.ko.md K9 — 파일 사례 옆
     // `<사례>.<버전>.spark`, path는 버전).
     Span<const CaseFile> revisions;
+    // 폴더 사례의 revision(`<사례>.<버전>/` — 바뀐 파일만, 같은 경로로 덮는다).
+    Span<const CaseRevision> folderRevisions;
+    // 있으면 `.run` reload의 단계별 시간을 더한다(LC7c3 측정 — 저장소 corpus는 쓰지 않는다).
+    RunTimings* timings = nullptr;
     bool hasNames = false; // `.names`가 있는지
     StringView names;      // `.names` 내용(hasNames일 때만)
 };
@@ -173,14 +196,16 @@ struct CaseInput {
 // 사례 하나를 실행한다. 기대와 다르면 report에 실패 항목을 더한다(한 사례에 진단·구문 트리 실패가
 // 각각 하나씩 있을 수 있다). 폴더 사례의 파일 배치는 RunCorpus가 검사한 것으로 보며, 맞지 않으면
 // 실패 항목이다. Result 실패는 할당 실패뿐이다.
-Result<void> RunCase(Allocator& allocator, const CaseInput& input, Report& report) noexcept;
+ROCKS_SPARKSTESTHOST_API Result<void> RunCase(Allocator& allocator, const CaseInput& input,
+                                              Report& report) noexcept;
 
 // corpus 폴더 전체를 실행한다. 영역과 사례는 이름의 byte 순으로 돈다(결과가 결정적이다).
 // schemaDirectory의 `*.sparkbind.json`을 모든 사례와 함께 컴파일한다(비어 있으면 schema 없음).
 // 실패: corpus·schema 폴더를 열거할 수 없으면 NotFound(없음) 또는 InvalidArgument(그 밖의 파일
 // 오류), 할당 실패는 그 오류.
-Result<void> RunCorpus(Allocator& allocator, platform::FileSystem& files,
-                       StringView corpusDirectory, StringView schemaDirectory,
-                       Report& report) noexcept;
+ROCKS_SPARKSTESTHOST_API Result<void> RunCorpus(Allocator& allocator, platform::FileSystem& files,
+                                                StringView corpusDirectory,
+                                                StringView schemaDirectory,
+                                                Report& report) noexcept;
 
 } // namespace rocks::sparks::conformance

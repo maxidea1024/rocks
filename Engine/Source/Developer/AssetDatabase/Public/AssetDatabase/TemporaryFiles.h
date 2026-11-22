@@ -33,8 +33,9 @@ struct TemporaryFileFailure {
 //
 // 오류: 잠금이 아니면 InvalidArgument, Content·Intermediate·Config 자신의 열거 실패(없음 밖)는 그
 // 파일 오류, 할당 실패.
-Result<void> DeleteTemporaryOrphans(platform::FileSystem& files, const ProjectLayout& layout,
-                                    const AssetDatabaseLock& lock, usize& removed,
-                                    Array<TemporaryFileFailure>& failures) noexcept;
+ROCKS_ASSETDATABASE_API Result<void>
+DeleteTemporaryOrphans(platform::FileSystem& files, const ProjectLayout& layout,
+                       const AssetDatabaseLock& lock, usize& removed,
+                       Array<TemporaryFileFailure>& failures) noexcept;
 
 } // namespace rocks

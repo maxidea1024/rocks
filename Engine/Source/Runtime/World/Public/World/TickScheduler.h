@@ -127,7 +127,7 @@ struct TickSchedulerTestAccess;
 //   (priority 최소 힙 위상 정렬). 의존으로 묶이지 않은 항목끼리는 항상 (priority, 등록 순서)를
 //   따른다. 순서 계산은 등록 집합이 바뀐 단계에서만 다시 하며 단계 실행 중에는 할당하지 않는다.
 // - 스레드: 동기화하지 않는다. World의 게임 스레드에서만 쓴다. 병렬 실행은 후속 범위다.
-class TickScheduler {
+class ROCKS_WORLD_API TickScheduler {
 public:
     explicit TickScheduler(Allocator& allocator) noexcept;
     TickScheduler(const TickScheduler&) = delete;

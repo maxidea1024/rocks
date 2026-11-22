@@ -63,7 +63,7 @@ enum class VmFaultKind : uint8 {
     HookTryFailed
 };
 
-const char* VmFaultKindName(VmFaultKind kind) noexcept;
+ROCKS_SPARKSVM_API const char* VmFaultKindName(VmFaultKind kind) noexcept;
 
 // 호출 하나의 끝 모양이다.
 enum class VmOutcome : uint8 {
@@ -106,7 +106,7 @@ enum class VmLogLevel : uint8 {
     Debug
 };
 
-const char* VmLogLevelName(VmLogLevel level) noexcept;
+ROCKS_SPARKSVM_API const char* VmLogLevelName(VmLogLevel level) noexcept;
 
 struct VmCallResult {
     VmOutcome outcome = VmOutcome::Returned;
@@ -123,7 +123,7 @@ struct VmCallResult {
 
 class VmSession;
 
-class VmExecution final {
+class ROCKS_SPARKSVM_API VmExecution final {
 public:
     explicit VmExecution(Allocator& allocator) noexcept;
     // 남은 버퍼(반환 값 포함)를 모두 놓는다. host가 아직 놓지 않은 자기 버퍼는 호출자 버그다(Fatal

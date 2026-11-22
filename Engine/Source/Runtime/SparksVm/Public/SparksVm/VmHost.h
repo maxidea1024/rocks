@@ -73,7 +73,7 @@ struct VmVirtualTarget {
 // 레지스터 묶음, SETF는 값 레지스터 묶음(읽기만), GETCTX는 결과 Ref 하나다.
 class VmSession;
 
-class VmHostCall final {
+class ROCKS_SPARKSVM_API VmHostCall final {
 public:
     // 묶음 번호(VmHostBinding::id)다.
     uint64 Binding() const noexcept {
@@ -125,7 +125,7 @@ private:
 
 // 엔진 쪽 구현이다(SparksTestHost의 가짜 host, 엔진의 ScriptRuntime — EI2). 모든 함수는 스크립트
 // 입력으로 Fatal하지 않는다: 계약 위반은 ContractViolation, 할당 실패는 call.Fail(SL 8.4절).
-class VmHost {
+class ROCKS_SPARKSVM_API VmHost {
 public:
     virtual ~VmHost() noexcept = default;
 
@@ -220,10 +220,14 @@ public:
 private:
     friend class VmExecution;
     friend class VmSession;
-    friend Result<void> LinkModule(const BytecodeModule& module, VmHost* host, VmLinkedModule& out,
-                                   StringBuilderBase& reason) noexcept;
-    friend Result<void> LinkImports(Span<VmLinkedModule* const> modules,
-                                    StringBuilderBase& reason) noexcept;
+    friend ROCKS_SPARKSVM_API Result<void> LinkModule(const BytecodeModule& module, VmHost* host,
+                                                      VmLinkedModule& out,
+                                                      StringBuilderBase& reason) noexcept;
+    friend ROCKS_SPARKSVM_API Result<void> LinkImports(Span<VmLinkedModule* const> modules,
+                                                       StringBuilderBase& reason) noexcept;
+    friend ROCKS_SPARKSVM_API Result<void> LinkImports(Span<VmLinkedModule* const> modules,
+                                                       Span<const VmLinkedModule* const> targets,
+                                                       StringBuilderBase& reason) noexcept;
 
     // 다른 모듈 함수 참조의 대상이다(참조 번호별 — ImportedFunction이 아니면 비었다). generation은
     // 푼 때의 대상 링크 세대다: 대상을 다시 링크하면 세대가 바뀌어 CALL이 ContractViolation이다.
@@ -271,8 +275,8 @@ private:
 // 참조(native·필드·문맥·리터럴)가 있을 때 거부한다. out은 이전 내용을 버린다. 실패: 못 묶은 참조가
 // 있거나 필드 명령의 bank·slot 수가 묶음과 다르면 InvalidArgument(reason에 `ref <번호> (<종류>
 // <이름>): <사유>` 또는 `function <이름> word <주소>: <사유>`), 할당 실패는 OutOfMemory.
-Result<void> LinkModule(const BytecodeModule& module, VmHost* host, VmLinkedModule& out,
-                        StringBuilderBase& reason) noexcept;
+ROCKS_SPARKSVM_API Result<void> LinkModule(const BytecodeModule& module, VmHost* host,
+                                           VmLinkedModule& out, StringBuilderBase& reason) noexcept;
 
 // 링크된 modules의 다른 모듈 함수 참조(`<import 경로>:Owner.Name`)를 modules 안의 함수로 푼다(6.5절
 // —// 모든 module은 링크에 성공했고 같은 host여야 한다. 대상 모듈을 다시 링크하면 그 import는
@@ -281,6 +285,14 @@ Result<void> LinkModule(const BytecodeModule& module, VmHost* host, VmLinkedModu
 // 서술자와 같아야 한다. 실패: 대상 모듈·함수가 없거나 모양이 다르면 InvalidArgument(reason에 `ref
 // <번호> (import <이름>): <사유>`), 할당 실패는 OutOfMemory. 모든 module의 ImportsLinked가 참이
 // 된다.
-Result<void> LinkImports(Span<VmLinkedModule* const> modules, StringBuilderBase& reason) noexcept;
+ROCKS_SPARKSVM_API Result<void> LinkImports(Span<VmLinkedModule* const> modules,
+                                            StringBuilderBase& reason) noexcept;
+
+// modules의 import만 modules와 targets 안의 함수로 푼다(SparksReload 6절 LC7c2b — reload 묶음의 새
+// revision을 묶음 밖 지금 모듈에 잇는다). targets는 이름 찾기 대상일 뿐 바꾸지 않는다(그 import·
+// 세대 그대로). 조건·실패는 위와 같다(targets도 같은 host로 링크돼 있어야 한다).
+ROCKS_SPARKSVM_API Result<void> LinkImports(Span<VmLinkedModule* const> modules,
+                                            Span<const VmLinkedModule* const> targets,
+                                            StringBuilderBase& reason) noexcept;
 
 } // namespace rocks::sparks

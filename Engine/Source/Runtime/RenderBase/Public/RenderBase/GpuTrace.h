@@ -14,24 +14,24 @@
 namespace rocks::render {
 
 // 채널 "gpu"다. RegisterGpuTraceTypes가 세션에 꺼진 상태로 등록한다.
-extern TraceChannel GpuTraceChannel;
+ROCKS_RENDERBASE_API extern TraceChannel GpuTraceChannel;
 
 // 채널 "gpu"와 GPU 기록 형(Trace.GpuQueue·Trace.GpuCalibration·Trace.GpuScope·Trace.GpuFrame,
 // TraceStandardFormat)을 세션에 등록한다. RenderBase 모듈의 Startup이 호스트 서비스의 trace 세션에
 // 부른다(Docs/Design/ModuleLoader.ko.md 3.12절). 시험은 직접 부른다. 실패: TraceSession::
 // RegisterChannel·RegisterEventType의 오류다. 실패하면 이 호출이 등록한 것을 되돌린다.
-Result<void> RegisterGpuTraceTypes(TraceSession& session) noexcept;
+ROCKS_RENDERBASE_API Result<void> RegisterGpuTraceTypes(TraceSession& session) noexcept;
 
 // RegisterGpuTraceTypes의 등록을 형부터, 채널은 마지막에 푼다(RenderBase 모듈 Shutdown). 등록되지
 // 않은 것은 건너뛴다. 실패: TraceSession::UnregisterEventType·UnregisterChannel의 NotFound 밖 첫
 // 오류다(나머지는 계속 푼다).
-Result<void> UnregisterGpuTraceTypes(TraceSession& session) noexcept;
+ROCKS_RENDERBASE_API Result<void> UnregisterGpuTraceTypes(TraceSession& session) noexcept;
 
 // GPU tick을 calibration 쌍으로 trace tick(platform::MonotonicTicks, traceFrequency)으로 옮긴다.
 // 기준보다 앞선 tick은 그만큼 앞선 trace tick이다(0 아래는 0). 1초 미만 부분만 double로 계산해 중간
 // 곱이 넘치지 않는다. gpuFrequency가 0이면 cpuTicks를 돌려준다.
-uint64 GpuTicksToTraceTicks(const graphics::ClockCalibration& calibration, uint64 gpuTicks,
-                            uint64 traceFrequency) noexcept;
+ROCKS_RENDERBASE_API uint64 GpuTicksToTraceTicks(const graphics::ClockCalibration& calibration,
+                                                 uint64 gpuTicks, uint64 traceFrequency) noexcept;
 
 struct GpuTraceSettings {
     // debug marker(PushMarker·PopMarker)를 기록할지다. Release에서는 끈다(13.2절).
@@ -95,7 +95,7 @@ class GpuScope;
 // 스레드: BeginFrame·EndFrame·GpuScope는 장치를 소유한 스레드(렌더 lane)에서 부른다.
 // Consume·Stats는 어느 스레드에서나 부를 수 있다(내부 잠금). 수명: 장치·allocator보다 먼저
 // 파괴한다.
-class GpuTrace {
+class ROCKS_RENDERBASE_API GpuTrace {
 public:
     explicit GpuTrace(Allocator& allocator, const GpuTraceSettings& settings = {}) noexcept;
 
@@ -178,7 +178,7 @@ private:
 // 이름 있는 GPU 구간이다. 생성 때 marker push와 시작 timestamp를, 소멸 때 끝 timestamp와 marker
 // pop을 기록한다. 중첩할 수 있다(깊이가 기록에 남는다). GpuTrace::BeginFrame과 EndFrame 사이, 같은
 // CommandContext로 쓴다. 스택 객체로 쓴다.
-class GpuScope {
+class ROCKS_RENDERBASE_API GpuScope {
 public:
     GpuScope(GpuTrace& trace, graphics::CommandContext& commands, TraceScopeName& name) noexcept;
     ~GpuScope() noexcept;

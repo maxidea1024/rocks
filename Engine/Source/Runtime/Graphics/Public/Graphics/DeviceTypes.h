@@ -203,7 +203,7 @@ struct BufferDesc {
 // - Raw인데 ShaderRead·ShaderWrite가 없거나 size가 4 byte 배수가 아님
 // - Indirect인데 size가 4 byte 배수가 아님
 // 장치 한도(DeviceLimits::bufferBytes)는 backend가 따로 보고 넘으면 Unsupported다.
-Result<void> ValidateBufferDesc(const BufferDesc& desc) noexcept;
+ROCKS_GRAPHICS_API Result<void> ValidateBufferDesc(const BufferDesc& desc) noexcept;
 
 // 버퍼 view 종류다(UE EBufferType 대응).
 enum class BufferViewKind : uint8 {
@@ -272,8 +272,8 @@ struct ResolvedBufferView {
 // - Raw: Raw 버퍼가 아님, 형식 지정, offset이 16 byte 배수가 아님
 // - offset이 원소 byte 배수가 아니거나 버퍼 밖, elementCount 0인데 offset이 0이 아님, 범위가 버퍼
 //   끝을 넘음
-Result<ResolvedBufferView> ResolveBufferView(const BufferDesc& buffer,
-                                             const BufferViewDesc& view) noexcept;
+ROCKS_GRAPHICS_API Result<ResolvedBufferView>
+ResolveBufferView(const BufferDesc& buffer, const BufferViewDesc& view) noexcept;
 
 // 장치 한도로 view를 검사한다(backend가 ResolveBufferView 다음에 부른다). formatCaps는 view 형식의
 // 이 장치 능력이다(Typed만 본다). 실패: 시작 byte가 장치 정렬(texelBufferOffsetAlignment·
@@ -281,9 +281,10 @@ Result<ResolvedBufferView> ResolveBufferView(const BufferDesc& buffer,
 // TexelBufferWrite(ReadWrite) 능력이 없거나 원소 수가 texelBufferElements를 넘거나 구조화·raw
 // 범위가 storageBufferBytes를 넘으면 Unsupported(다른 형식·범위로 바꾸지 않는다). Vulkan backend는
 // 여기에 더해 버퍼의 모든 texel 용도 능력을 요구한다(Device::CreateBufferView 주석).
-Result<void> CheckBufferViewLimits(const DeviceLimits& limits, PixelFormatCaps formatCaps,
-                                   const BufferViewDesc& view,
-                                   const ResolvedBufferView& resolved) noexcept;
+ROCKS_GRAPHICS_API Result<void> CheckBufferViewLimits(const DeviceLimits& limits,
+                                                      PixelFormatCaps formatCaps,
+                                                      const BufferViewDesc& view,
+                                                      const ResolvedBufferView& resolved) noexcept;
 
 // 그리기에 묶는 버퍼 view slot 수다(GX6 파라미터 바인딩 전의 개발 경로 고정 배치, PipelineDesc
 // 주석). slot n은 HLSL register t(n + 1), GLSL ES typed는 텍스처 유닛 PS n + 1·VS n + 17
@@ -308,8 +309,8 @@ struct DrawBufferSlots {
 // 리플렉션한 slot 하나를 배치에 더한다(backend 공용). 같은 slot을 다른 단계가 이미 쓰면 종류·값
 // 계열·구조화 stride(둘 다 알 때)가 같아야 하고, 다르면 거짓이다(backend는 InvalidArgument로
 // 거부한다). stride는 Structured slot의 셰이더 선언 원소 byte이고 모르면 0이다.
-bool AddDrawBufferSlot(DrawBufferSlots& slots, uint32 slot, BufferViewKind kind,
-                       PixelShaderType type, uint32 stride = 0) noexcept;
+ROCKS_GRAPHICS_API bool AddDrawBufferSlot(DrawBufferSlots& slots, uint32 slot, BufferViewKind kind,
+                                          PixelShaderType type, uint32 stride = 0) noexcept;
 
 // 그리기에 묶인 view 하나의 요약이다(backend가 view 기록에서 만든다). bound가 거짓이면 묶인 것이
 // 없다. stride는 Structured view의 원소 byte(BufferDesc::stride)다.
@@ -323,8 +324,9 @@ struct BoundBufferViewInfo {
 // slots가 읽는 모든 slot에 같은 종류(Typed는 같은 값 계열, Structured는 셰이더가 선언한 stride를
 // 알 때 같은 원소 byte)의 view가 묶였는지다. 아니면 backend는 그 그리기를 무시하고 IgnoredDraws를
 // 올린다.
-bool DrawBufferSlotsSatisfied(const DrawBufferSlots& slots,
-                              const BoundBufferViewInfo (&bound)[MaxDrawBufferViews]) noexcept;
+ROCKS_GRAPHICS_API bool
+DrawBufferSlotsSatisfied(const DrawBufferSlots& slots,
+                         const BoundBufferViewInfo (&bound)[MaxDrawBufferViews]) noexcept;
 
 // index 형식이다(RenderBase 10.4절).
 enum class IndexFormat : uint8 {
@@ -435,28 +437,29 @@ struct TextureDesc {
 };
 
 // sampleCount가 1 이상 MaxSampleCount 이하의 2의 거듭제곱인지다(텍스처·파이프라인 공용).
-bool IsValidSampleCount(uint32 sampleCount) noexcept;
+ROCKS_GRAPHICS_API bool IsValidSampleCount(uint32 sampleCount) noexcept;
 
 // 텍스처의 subresource slice 수다(2D·3D 1, 2DArray arraySize, Cube 6, CubeArray 6 × arraySize).
 // 무효 차원은 0이다.
-uint32 TextureSliceCount(const TextureDesc& desc) noexcept;
+ROCKS_GRAPHICS_API uint32 TextureSliceCount(const TextureDesc& desc) noexcept;
 
 // desc 크기의 전체 mip 수다(3D는 깊이도 본다).
-uint32 TextureFullMipCount(const TextureDesc& desc) noexcept;
+ROCKS_GRAPHICS_API uint32 TextureFullMipCount(const TextureDesc& desc) noexcept;
 
 // mip level의 2D 이미지 수다(slice 수 × 3D면 그 mip의 깊이).
-uint32 TextureMipImageCount(const TextureDesc& desc, uint32 level) noexcept;
+ROCKS_GRAPHICS_API uint32 TextureMipImageCount(const TextureDesc& desc, uint32 level) noexcept;
 
 // mip level 하나의 데이터 byte다(모든 이미지, 다중 plane은 plane 합). 형식·크기가 잘못되거나
 // uint64를 넘치면 0이다.
-uint64 TextureMipBytes(const TextureDesc& desc, uint32 level) noexcept;
+ROCKS_GRAPHICS_API uint64 TextureMipBytes(const TextureDesc& desc, uint32 level) noexcept;
 
 // mip level 하나의 plane 하나 데이터 byte다(ReadTexture 출력 크기).
-uint64 TextureMipPlaneBytes(const TextureDesc& desc, uint32 level, uint32 plane) noexcept;
+ROCKS_GRAPHICS_API uint64 TextureMipPlaneBytes(const TextureDesc& desc, uint32 level,
+                                               uint32 plane) noexcept;
 
 // 초기 픽셀 전체 byte다(mip 0부터 mipLevels개의 TextureMipBytes 합). 잘못된 desc와 uint64 넘침은
 // 0이다.
-uint64 TextureDataBytes(const TextureDesc& desc) noexcept;
+ROCKS_GRAPHICS_API uint64 TextureDataBytes(const TextureDesc& desc) noexcept;
 
 // 장치와 무관한 텍스처 설정 규칙이다(backend가 생성 전에 부른다).
 // InvalidArgument:
@@ -473,7 +476,7 @@ uint64 TextureDataBytes(const TextureDesc& desc) noexcept;
 // Unsupported(이 단계의 계약 밖):
 // - Storage인데 cube·cube 배열
 // - 다중 plane 형식(깊이·스텐실 D24S8·D32S8, 비디오)인데 Texture2D가 아님
-Result<void> ValidateTextureDesc(const TextureDesc& desc) noexcept;
+ROCKS_GRAPHICS_API Result<void> ValidateTextureDesc(const TextureDesc& desc) noexcept;
 
 // 텍스처의 subresource 구성이다(Device::GetTextureSubresources). slices는 TextureSliceCount다.
 struct TextureSubresources {
@@ -486,7 +489,8 @@ struct TextureSubresources {
 // 장치 한도로 텍스처를 검사한다(ValidateTextureDesc 다음). 넘으면 Unsupported다: 한 변이
 // textureSize2D(Cube·CubeArray는 textureSizeCube, 3D는 세 축 모두 textureSize3D)를 넘음, slice
 // 수가 textureArrayLayers를 넘음, textureCubeArray 기능 없이 CubeArray.
-Result<void> CheckTextureLimits(const DeviceCaps& caps, const TextureDesc& desc) noexcept;
+ROCKS_GRAPHICS_API Result<void> CheckTextureLimits(const DeviceCaps& caps,
+                                                   const TextureDesc& desc) noexcept;
 
 // view 차원이다(UE FRHIViewDesc::FTextureSRV::FInitializer::SetDimension 대응, RenderBase 4.4절
 // 텍스처 GX2 나머지 B부). Same은 원 텍스처 차원이다(cube 계열의 쓰기 view는 Texture2DArray).
@@ -553,30 +557,32 @@ struct TextureViewDesc {
 
 // view의 실제 차원이다(Same을 원 텍스처 차원으로 푼다. cube 계열의 쓰기 view는 Texture2DArray).
 // 규칙 검사는 하지 않는다(ResolveTextureViewRange).
-TextureDimension TextureViewDimensionOf(TextureDimension texture,
-                                        const TextureViewDesc& desc) noexcept;
+ROCKS_GRAPHICS_API TextureDimension TextureViewDimensionOf(TextureDimension texture,
+                                                           const TextureViewDesc& desc) noexcept;
 
 // view를 읽는 셰이더가 명시 LOD의 기준으로 쓰는 mip이다(RenderBase 7.5절 view 기준 mip). 범위
 // view를 지원하는 장치(DeviceFeatures::textureViewRanges)는 0, 아니면(텍스처 전체가 묶인다)
 // desc.firstMip이다. 셰이더는 SampleLevel(s, uv, baseMip + lod)·Load(int3(p, baseMip + lod))처럼
 // 쓰고 기준 mip을 그리기별 상수로 받는다.
-uint32 TextureViewBaseMip(const DeviceFeatures& features, const TextureViewDesc& desc) noexcept;
+ROCKS_GRAPHICS_API uint32 TextureViewBaseMip(const DeviceFeatures& features,
+                                             const TextureViewDesc& desc) noexcept;
 
 // texture 형식에 desc가 맞는지 확인하고 view가 읽는 픽셀 형식(plane 형식 또는 sRGB 짝)을 돌려준다.
 // 장치와 무관한 규칙이며 backend가 생성 전에 부른다. 실패: 무효 형식·plane 범위 밖·plane에 맞지
 // 않는 형식·무효 swizzle InvalidArgument.
-Result<PixelFormat> ResolveTextureViewFormat(PixelFormat texture,
-                                             const TextureViewDesc& desc) noexcept;
+ROCKS_GRAPHICS_API Result<PixelFormat>
+ResolveTextureViewFormat(PixelFormat texture, const TextureViewDesc& desc) noexcept;
 
 // 위와 같고, 원 텍스처의 샘플러가 비교 샘플러면(comparisonSampler) view가 깊이 plane을 읽어야
 // 한다(스텐실 plane·비디오 plane view는 InvalidArgument). backend의 CreateTextureView가 부른다.
-Result<PixelFormat> ResolveTextureViewFormat(PixelFormat texture, const TextureViewDesc& desc,
-                                             bool comparisonSampler) noexcept;
+ROCKS_GRAPHICS_API Result<PixelFormat> ResolveTextureViewFormat(PixelFormat texture,
+                                                                const TextureViewDesc& desc,
+                                                                bool comparisonSampler) noexcept;
 
 // desc의 텍스처를 만들 때 형식에 필요한 능력이다(TextureUsage 주석, 3D는 Texture3D, Cube·
 // CubeArray는 TextureCube, 표본 수 2 이상은 Multisample을 더한다. 표본 수 자체는 장치가
 // GetPixelFormatSampleCounts로 따로 본다).
-PixelFormatCaps RequiredPixelFormatCaps(const TextureDesc& desc) noexcept;
+ROCKS_GRAPHICS_API PixelFormatCaps RequiredPixelFormatCaps(const TextureDesc& desc) noexcept;
 
 // 정점 배치 한계다(RenderBase 10.4절). 장치 최소 보장 쪽 값이다: 속성 16(Vulkan
 // maxVertexInputAttributes·GL_MAX_VERTEX_ATTRIBS 최소), stream 8(Metal 정점 buffer 상한), offset ≤
@@ -628,7 +634,7 @@ struct VertexLayout {
 // 배치 자체를 검사한다(파이프라인 생성이 부른다). 위반은 InvalidArgument다: 속성 수 > 16, stream 수
 // > 8, location ≥ 16 또는 중복, 모르는 형식, 속성의 stream이 streams 밖, offset > 2047·stride >
 // 2048 ·4 byte 배수 아님, offset + 형식 크기 > stride, 속성이 하나도 없는 stream.
-Result<void> ValidateVertexLayout(const VertexLayout& layout) noexcept;
+ROCKS_GRAPHICS_API Result<void> ValidateVertexLayout(const VertexLayout& layout) noexcept;
 
 // 정점 버퍼 묶기 하나다(SetVertexBuffers).
 struct VertexBufferBinding {
@@ -652,7 +658,7 @@ inline constexpr uint32 DrawConstantAlignment = 16;
 
 // drawConstantBytes 값이 규칙(DrawConstantAlignment 배수, MaxDrawConstantBytes 이하) 안인지다. 0은
 // 유효하다(그리기별 상수를 쓰지 않는 파이프라인).
-bool IsValidDrawConstantBytes(uint32 bytes) noexcept;
+ROCKS_GRAPHICS_API bool IsValidDrawConstantBytes(uint32 bytes) noexcept;
 
 // 그리기별 상수 구조체를 CommandContext::SetDrawConstants가 받는 byte view로 본다. 결과의 수명은
 // constants와 같다. 크기 규칙(16 byte 배수, 128 byte 이하)과 trivially copyable을 컴파일 시간에
@@ -753,17 +759,18 @@ struct PipelineDesc {
 // plane 없는 깊이 형식에 스텐실 시험, 모르는 enum 값(기본도형·비교·스텐실 연산·블렌드 계수·식·쓰기
 // mask·컬). 형식이 렌더 타깃·깊이 타깃이 될 수 있는지는 장치 능력이라 backend가 Unsupported로
 // 공개한다.
-Result<void> ValidatePipelineDesc(const PipelineDesc& desc) noexcept;
+ROCKS_GRAPHICS_API Result<void> ValidatePipelineDesc(const PipelineDesc& desc) noexcept;
 
 // 파이프라인이 장치 능력(DeviceCaps) 안인지다(backend가 ValidatePipelineDesc 다음에 부른다). 넘으면
 // Unsupported다: colorTargetCount > DeviceLimits::colorAttachments, 기능이 없는데 depthClamp·0이
 // 아닌 depthBiasClamp·alphaToCoverage를 켬, independentBlend 없이 타깃마다 다른 블렌드. 다른 값으로
 // 바꿔 만들지 않는다.
-Result<void> CheckPipelineFeatures(const DeviceCaps& caps, const PipelineDesc& desc) noexcept;
+ROCKS_GRAPHICS_API Result<void> CheckPipelineFeatures(const DeviceCaps& caps,
+                                                      const PipelineDesc& desc) noexcept;
 
 // 파이프라인이 깊이나 스텐실 값을 쓰는지다(깊이 쓰기, 또는 Keep이 아닌 스텐실 연산과 0이 아닌 쓰기
 // mask). 읽기 전용 깊이 attachment(DepthAttachment::readOnly)에서는 그런 그리기를 무시한다.
-bool PipelineWritesDepthStencil(const PipelineDesc& desc) noexcept;
+ROCKS_GRAPHICS_API bool PipelineWritesDepthStencil(const PipelineDesc& desc) noexcept;
 
 // compute 파이프라인 설정이다. 진입점은 HLSL CSMain, GLSL ES는 main(#version 320 es compute 셰이더,
 // layout(local_size_*))이다. 자원 배치(GX6 전 개발 경로 고정 배치):
@@ -787,7 +794,8 @@ struct ComputePipelineDesc {
 
 // 장치와 무관한 compute 파이프라인 규칙이다(backend가 생성 전에 부른다). 위반은 InvalidArgument다:
 // drawConstantBytes가 규칙 밖.
-Result<void> ValidateComputePipelineDesc(const ComputePipelineDesc& desc) noexcept;
+ROCKS_GRAPHICS_API Result<void>
+ValidateComputePipelineDesc(const ComputePipelineDesc& desc) noexcept;
 
 struct ClearColor {
     float r = 0.0f;
@@ -846,8 +854,9 @@ struct DepthAttachment {
 
 // attachment(mipLevel, slice)가 텍스처 안인지다. slice 상한은 3D면 그 mip의 깊이, 아니면 slice
 // 수다.
-bool IsAttachmentInRange(TextureDimension dimension, uint32 depth, uint32 mipLevels, uint32 slices,
-                         uint32 mipLevel, uint32 slice) noexcept;
+ROCKS_GRAPHICS_API bool IsAttachmentInRange(TextureDimension dimension, uint32 depth,
+                                            uint32 mipLevels, uint32 slices, uint32 mipLevel,
+                                            uint32 slice) noexcept;
 
 // 제출 queue 종류다(계획 11.2절 QueueId, RenderBase 8절 RG4). AsyncCompute는 graphics와 따로 도는
 // compute queue다(DeviceFeatures::asyncCompute가 있을 때만). copy queue는 그래프 밖 업로드·스트리밍
@@ -894,7 +903,7 @@ struct TransientPlacement {
 };
 
 // 텍스처 desc의 heap 종류다(RenderTarget·DepthStencil 용도면 Targets, 아니면 Textures).
-TransientHeapKind TransientHeapKindOf(const TextureDesc& desc) noexcept;
+ROCKS_GRAPHICS_API TransientHeapKind TransientHeapKindOf(const TextureDesc& desc) noexcept;
 
 // 패스 시작 설정이다(Device::BeginPass, GX4). 색 attachment는 앞에서부터 colorCount개를 쓴다. 모든
 // attachment의 크기(attachment mip의 크기)와 표본 수(TextureDesc::sampleCount)가 같아야 한다. 색도
@@ -970,7 +979,7 @@ using FenceCallback = void (*)(ErrorCode result, void* context) noexcept;
 
 // 새 장치 incarnation 번호다(1부터, 프로세스 안에서 다시 쓰지 않는다). backend가 장치를 만들 때
 // 부른다. 어느 스레드에서나 부를 수 있다.
-uint64 NewDeviceEpoch() noexcept;
+ROCKS_GRAPHICS_API uint64 NewDeviceEpoch() noexcept;
 
 // 스트리밍 staging handle이다(Device::AcquireStaging). 발급한 장치 안에서만 의미가 있다.
 struct StagingHandle {
@@ -1100,7 +1109,7 @@ struct ClockCalibration {
 // frequency(초당 tick) 기준 ticks를 ns로 바꾼다. 중간 곱이 넘치지 않으며 1초 미만 부분만 double로
 // 계산한다. frequency가 0이면 0이다. backend가 OS 시계 tick(예: QPC)을 CPU 시간축으로 옮길 때도
 // 쓴다.
-uint64 TicksToNanoseconds(uint64 ticks, uint64 frequency) noexcept;
+ROCKS_GRAPHICS_API uint64 TicksToNanoseconds(uint64 ticks, uint64 frequency) noexcept;
 
 // GPU tick을 calibration 기준으로 CPU 시간축 ns로 옮긴다. ticks가 기준보다 앞이면 그만큼 앞선
 // 시각이다(0 아래는 0). gpuFrequency가 0이면 cpuNanoseconds를 그대로 돌려준다. 두 시계의 drift는
@@ -1109,14 +1118,15 @@ uint64 TicksToNanoseconds(uint64 ticks, uint64 frequency) noexcept;
 // 사용 예:
 //   auto pair = device.CalibrateClocks();
 //   uint64 cpuTime = GpuTicksToCpuNanoseconds(pair.Value(), sample.ticks);
-uint64 GpuTicksToCpuNanoseconds(const ClockCalibration& calibration, uint64 ticks) noexcept;
+ROCKS_GRAPHICS_API uint64 GpuTicksToCpuNanoseconds(const ClockCalibration& calibration,
+                                                   uint64 ticks) noexcept;
 
 // debug marker 이름의 최대 byte 수다. 넘으면 UTF-8 글자 경계에서 자른다.
 inline constexpr usize MaxDebugMarkerNameBytes = 255;
 
 // name을 MaxDebugMarkerNameBytes 안으로 자른다(UTF-8 글자 중간에서 자르지 않는다). backend가
 // marker를 기록하기 전에 쓴다. 잘못된 UTF-8은 검사하지 않는다.
-StringView ClipDebugMarkerName(StringView name) noexcept;
+ROCKS_GRAPHICS_API StringView ClipDebugMarkerName(StringView name) noexcept;
 
 // 장치 정보다. 문자열은 장치가 소유하며 장치 수명 동안 유효하다.
 struct DeviceInfo {

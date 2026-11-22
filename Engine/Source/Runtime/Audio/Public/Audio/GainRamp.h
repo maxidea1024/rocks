@@ -14,7 +14,7 @@
 //   ramp.Apply(voiceBuffer);
 namespace rocks::audio {
 
-class GainRamp {
+class ROCKS_AUDIO_API GainRamp {
 public:
     explicit GainRamp(float initialGain = 1.0f) noexcept
         : start_(initialGain), target_(initialGain) {

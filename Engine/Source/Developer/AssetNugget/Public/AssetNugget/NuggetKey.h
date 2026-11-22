@@ -56,7 +56,7 @@ public:
 // 오류는 기록기 상태다: 유효하지 않은 UTF-8 String·Field는 InvalidArgument, buffer 할당 실패는
 // OutOfMemory로 첫 오류를 남기고 이후 기록을 무시한다. Finish·Error가 그 오류를 돌려준다.
 // 한 스레드에서 쓴다.
-class NuggetKeyWriter {
+class ROCKS_ASSETNUGGET_API NuggetKeyWriter {
 public:
     NuggetKeyWriter() noexcept = default;
     // 인코딩 byte를 buffer 끝에 붙이는 기록기다(해시하지 않는다 — Finish는 InvalidArgument).
@@ -143,13 +143,15 @@ inline constexpr Guid EngineNuggetGeneration{0x524e554747454e31ull, 0x0000000000
 
 // 키 공통 머리를 쓴다(9.1절 결정 2): "RocksAssetNugget"·키 형식 버전·엔진 세대·프로젝트 세대
 // (없으면 null Guid)·처리기 Guid·처리기 버전 Guid·결정적 수학 버전·툴체인 지문.
-void WriteNuggetKeyHeader(NuggetKeyWriter& writer, const NuggetProcessorId& processor,
-                          Guid projectGeneration) noexcept;
+ROCKS_ASSETNUGGET_API void WriteNuggetKeyHeader(NuggetKeyWriter& writer,
+                                                const NuggetProcessorId& processor,
+                                                Guid projectGeneration) noexcept;
 
 // 결과를 만드는 인코더·외부 라이브러리 하나를 쓴다(이름·버전·설정 byte — 처리기가 WriteList(n)
 // 뒤에 n번 부른다).
-void WriteNuggetEncoder(NuggetKeyWriter& writer, StringView name, StringView version,
-                        Span<const uint8> settings) noexcept;
+ROCKS_ASSETNUGGET_API void WriteNuggetEncoder(NuggetKeyWriter& writer, StringView name,
+                                              StringView version,
+                                              Span<const uint8> settings) noexcept;
 
 // SCC 구성원이다(9.1절 결정 3): AssetId와 지역 입력 키(의존을 뺀 입력의 키).
 struct NuggetSccMember {
@@ -169,11 +171,13 @@ struct NuggetSccDependency {
 // 무관). 빈 구성원 목록·구성원 AssetId 중복·null AssetId·유효하지 않은 UTF-8 역할, 튜플의 구성원이
 // 구성원이 아님·의존이 구성원임(SCC 안 간선)은 InvalidArgument, 튜플의 완전 중복은 하나로 합친다.
 // 정렬 자리 할당 실패는 OutOfMemory다.
-Result<Sha256Digest> NuggetSccKey(Allocator& allocator, Span<const NuggetSccMember> members,
-                                  Span<const NuggetSccDependency> external) noexcept;
+ROCKS_ASSETNUGGET_API Result<Sha256Digest>
+NuggetSccKey(Allocator& allocator, Span<const NuggetSccMember> members,
+             Span<const NuggetSccDependency> external) noexcept;
 
 // 구성원 key = SHA-256(태그, SCC key, AssetId)다(Merkle 입력·구성원 조회용 — Record는 SCC key로
 // 저장한다).
-Sha256Digest NuggetMemberKey(const Sha256Digest& sccKey, AssetId asset) noexcept;
+ROCKS_ASSETNUGGET_API Sha256Digest NuggetMemberKey(const Sha256Digest& sccKey,
+                                                   AssetId asset) noexcept;
 
 } // namespace rocks

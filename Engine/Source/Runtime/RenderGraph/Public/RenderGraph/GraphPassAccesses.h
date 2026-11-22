@@ -86,7 +86,7 @@ struct GraphRenderTarget {
 //
 // 스레드·수명: 그래프와 같은 스레드(렌더 lane)에서 쓰고 AddPass 뒤 버린다. 그래프보다 오래 살지
 // 않는다.
-class GraphPassAccesses {
+class ROCKS_RENDERGRAPH_API GraphPassAccesses {
 public:
     explicit GraphPassAccesses(FrameArena& arena) noexcept : arena_(arena) {
     }

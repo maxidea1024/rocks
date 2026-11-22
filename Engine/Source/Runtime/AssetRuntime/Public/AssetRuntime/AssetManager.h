@@ -62,7 +62,7 @@ struct AssetRequest {
 // 상주 수명 하나다(move-only). 쥐고 있는 동안 그 에셋의 상주 단위는 Discard되지 않는다. 소멸은
 // 어느 스레드에서도 되며 다음 Pump가 반영한다. scope Revoke·Shutdown으로 회수된 lease는 비어 있는
 // 것처럼 행동한다(IsValid false — 소멸은 무동작).
-class AssetLease {
+class ROCKS_ASSETRUNTIME_API AssetLease {
 public:
     AssetLease() noexcept = default;
     AssetLease(AssetLease&& other) noexcept;
@@ -94,7 +94,7 @@ private:
 
 // 요청 관심 하나다(move-only, 11.1절). 쥐고 있는 동안 로드가 진행되고, 끝난 뒤에도 상주를 붙잡는다.
 // 놓으면(소멸) 진행 중 요청은 취소되고 등록된 callback은 Cancelled를 한 번 받는다.
-class LoadTicket {
+class ROCKS_ASSETRUNTIME_API LoadTicket {
 public:
     LoadTicket() noexcept = default;
     LoadTicket(LoadTicket&& other) noexcept;
@@ -123,7 +123,7 @@ private:
 
 // RunWhenReady가 돌려주는 보류 명령 handle이다(move-only). 놓아도 명령은 취소되지 않는다(취소는
 // AssetManager::Cancel). 소멸은 어느 스레드에서도 된다.
-class DeferredCommand {
+class ROCKS_ASSETRUNTIME_API DeferredCommand {
 public:
     DeferredCommand() noexcept = default;
     DeferredCommand(DeferredCommand&& other) noexcept;
@@ -152,7 +152,7 @@ private:
 
 // 수명 범위다(Tryout·World — 11.1절, move-only). Revoke(또는 소멸) 뒤 그 scope의 새 요청은
 // ScopeClosed이고, 그 scope의 티켓·lease·보류 명령은 회수된다. Game 스레드에서만 소멸한다.
-class AssetScope {
+class ROCKS_ASSETRUNTIME_API AssetScope {
 public:
     AssetScope() noexcept = default;
     AssetScope(AssetScope&& other) noexcept;
@@ -209,7 +209,7 @@ private:
 
 // LoadPrimaryAsset의 묶음 티켓이다(move-only). 놓으면 구성 요청이 모두 취소되고 등록된 callback은
 // Cancelled를 한 번 받는다. 소멸은 어느 스레드에서도 된다.
-class PrimaryAssetTicket {
+class ROCKS_ASSETRUNTIME_API PrimaryAssetTicket {
 public:
     PrimaryAssetTicket() noexcept = default;
     PrimaryAssetTicket(PrimaryAssetTicket&& other) noexcept;
@@ -325,7 +325,7 @@ struct AssetManagerSnapshot {
     uint64 lateEdgesIntoDiscarding = 0;
 };
 
-class AssetManager final {
+class ROCKS_ASSETRUNTIME_API AssetManager final {
 public:
     explicit AssetManager(const AssetManagerConfig& config) noexcept;
     // Shutdown하지 않았으면 Shutdown한다. 살아 있는 lease·티켓·보류 명령 handle 객체가 남아 있으면

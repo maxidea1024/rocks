@@ -1,6 +1,6 @@
 # 렌더 기반(RenderBase) 설계
 
-기준일: 2026-11-20, 개정 33(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
+기준일: 2026-11-22, 개정 34(초안). UE 5.8 RenderCore 모듈이 맡는 일을 Rocks에 세우는 구현 스펙이다. 범위는 다음과 같다.
 - 렌더 lane과 프레임 전달, 장치 스레드 모델, 장치 자원 수명, 렌더 그래프
 - 셰이더 런타임 객체(셰이더 집합·파라미터 바인딩·상수 블록·파이프라인 캐시)
 - 정점 입력 타입, 공용 자원·그리기 유틸리티, GPU 계측
@@ -1207,7 +1207,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
   - 셰이더 형식별 값(UE `RC/Public/ShaderPlatformCachedIniValue.h:13–95`)은 셰이더 시스템의 형식 정의(셰이더 시스템 12.1절)나 TargetProfile 쪽으로 두고 콘솔 설정에 두지 않는다. 쿠킹 결과에 영향을 주는 값은 키에 들어가야 하기 때문이다.
   - 헤드리스·시험에서 결정적 값을 고정할 수 있어야 한다.
 - **구현(2026-11-17, RB1 설정 snapshot).** 게임 lane은 sync 지점(`ConfigContext::Sync`) 뒤 `ConfigContext::Snapshot()`을 `RenderSettingsRef::Share`로 감싸 `RenderLane::AttachSettings(ticket, ...)`로 그 프레임 slot에 담는다. 렌더 lane은 프레임 작업 안에서 `RenderFrameContext::Settings().Get<config::ConfigSnapshot>()`만 읽는다(registry·문맥은 읽지 않는다). slot의 참조는 그 slot을 다음에 다시 확보할 때(`BeginFrame`, GPU 완료 뒤) 또는 lane 정지 때 게임 lane에서 놓는다. 그래서 snapshot 수명은 그 프레임 slot이 끝날 때까지이고 파괴는 게임 lane에서 일어난다. 시험(`RenderBase/Tests/RenderSettingsTests.cpp`): sync 지점에서 바꾼 값은 다음 packet부터 보이고 이전 packet은 옛 값을 읽는다. GPU 완료 gate가 닫힌 동안 옛 snapshot이 살아 있고, slot을 다시 확보하면 놓인다.
-  - 스펙과 다른 점: RenderBase는 ObjectRuntime에 의존하지 않으므로(9.3절) Config 타입을 직접 이름 짓지 않는다. `RenderSettingsRef`는 snapshot의 공유 소유권(`SharedPtr` aliasing)과 타입 표지만 들고, 꺼낼 때 같은 타입으로만 돌려준다(다른 타입이면 null). 타입은 Config를 아는 쪽(실행 파일·렌더러 모듈)이 정한다. 담지 않은 프레임은 빈 참조를 읽는다(직전 프레임 값을 물려받지 않는다).
+  - 스펙과 다른 점: RenderBase는 ObjectRuntime에 의존하지 않으므로(9.3절) Config 타입을 직접 이름 짓지 않는다. `RenderSettingsRef`는 snapshot의 공유 소유권(`SharedPtr` aliasing)과 타입 표지만 들고, 꺼낼 때 같은 타입으로만 돌려준다(다른 타입이면 null). 타입 표지는 Core `TypeKeyOf<T>()`(Core/TypeKey.h)이고 `ConfigSnapshot`은 export 키를 선언한다. 공개 헤더의 변수 템플릿 주소를 표지로 쓰면 Modular 구성에서 DLL마다 주소가 달라 다른 모듈의 `Get<ConfigSnapshot>()`이 조용히 null이 되므로 버렸다(BuildTargets BS8e, 정책 `public-header-type-tag`). 타입은 Config를 아는 쪽(실행 파일·렌더러 모듈)이 정한다. 담지 않은 프레임은 빈 참조를 읽는다(직전 프레임 값을 물려받지 않는다).
 
 - **CVar 이관(설계, 구현 전).** [CVar·치트 명령 설계](CVarSystem.ko.md)(개정 2)가 콘솔 설정을 타입 있는 핸들 `CVar<T>`로 바꾼다. 착수 시점은 사용자가 정한다. 그때 RB1 연결은 다음처럼 바뀐다.
   - 렌더 snapshot은 "렌더 읽기" 표시가 있는 값만이 아니라 **모든 CVar**를 담는다(CVar VD6). 설정 struct 필드의 `RenderRead` 블록은 같은 snapshot 안에 남는다.
@@ -1470,6 +1470,7 @@ AssetSystem A5가 쿠킹하는 텍스처 플랫폼 데이터를 렌더(GPU 업�
   - 10.5절: typed buffer 원소 용량과 넘침(결정 R16), 행렬식 부호의 인스턴스 단위 분할과 재분류.
   - 11.1절: 빈 light grid의 셀 좌표 clamp, 검은 cube array 알파 0(UE와 같은 반사 합성 의미). 11.2절: MSAA resolve 범위(깊이 늘, velocity는 temporal 때, 색은 결정 R17), 스텐실 0, UE 줄 인용 정정.
   - 2절 용어(`SharedResourceStruct`·`DrawResourceStruct`·`GraphScope`), GX1 기능 이름 "VS layer 출력".
+- 개정 34(2026-11-22): RB1 설정 snapshot의 타입 표지를 Core `TypeKeyOf<T>()`로 바꾼 것(BuildTargets BS8e, 6e2553e0)을 12절 구현 메모에 반영했다. 변수 템플릿 주소 표지는 Modular에서 DLL마다 달라 버렸다.
 - 개정 33(2026-11-20): GX12·RG5 transient aliasing 설계(8절): 장치 transient heap(`Buffers`·`Textures`·`Targets`)·placed 자원·aliasing 획득(`ResourceTransition::acquire`, attachment `acquire`), 그래프 UE first fit 할당기(UE의 세 fence 대신 RG4로 넓힌 pass 구간), heap 캐시(두 queue 마지막 사용이 끝난 heap만 다시 씀, 16 프레임 GC, 128 MiB), 설정 `transientAliasing`(기본 켬)·`asyncComputeAliasing`(기본 끔), 진단 `transientBytes`·`transientPeakBytes`. RG4 남은 것: compute queue GPU 구간(`GpuTraceSettings::queue`, `RenderNotice` queue, `RenderGraphDesc::computeTrace`). 버린 대안: 종류 통합 heap, GPU 완료 없는 heap 재사용, 풀만. 같은 날 구현(D3D12·Vulkan·그래프·기록 장치 겹침 검출·Sandbox 시험)과 계측, D3D12 GPU 기반 검증 확인(`DeviceDesc::enableGpuValidation`, `Sandbox --self-test --gpu-validation`, 메시지 없음)을 적었다.
 - 개정 32(2026-11-20): RG4 async compute 설계(8절 "RG4 async compute 설계"): 장치 `QueueKind::AsyncCompute`·`DeviceFeatures::asyncCompute`·`efficientAsyncCompute`(UE 효율 판단)·`PassDesc::queue`·`Device::QueueWait`·queue별 `LastSubmittedFence`·`CalibrateClocks`·`TimestampSample::queue`, queue별 마지막 사용과 기록 저장소, Vulkan은 UE 5.8과 같은 조건(maintenance9 등)·공유 방식(2026-11-20 사용자 결정, 처음 넣은 concurrent 안은 버린 대안으로 옮김)이고 compute queue 경로는 maintenance9 장치 검증과 함께 후속. 그래프 `GraphAsyncCompute`(Auto·Always·Disabled), UE와 같은 fork·join·수명 연장, 다른 pipe 전이는 graphics queue에서(fork pass epilogue·prologue 기록, 소비 pass prologue), 그래프는 늘 graphics 제출로 끝남(epilogue join), 병합과 배타 계약. 결정 R6 확정(그래프 밖). 버린 대안: Vulkan concurrent 공유, binary semaphore, 동시 기록 둘, compute queue 전이, async pass 바로 앞 fork. 같은 날 구현(8절 "구현(2026-11-20, RG4)"): D3D12 compute queue·그래프 fork·join·기록 장치 경쟁 검출과 시험.
 - 개정 31(2026-11-20): RG3 병렬 기록 설계(8절 "RG3 병렬 기록 설계"): 기록 목록 `GraphCommandList`에 pass 기록 함수를 worker에서 기록하고 소유 스레드가 선언 순서로 재생(장치 호출 열이 직렬과 같음), 장치 쪽 스레드별 기록 객체는 버림, render pass 병합은 GX13 뒤로.

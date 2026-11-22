@@ -73,7 +73,7 @@ struct DynamicsSettings {
     float analysisWindowMs = 5.0f;
 };
 
-class DynamicsProcessor {
+class ROCKS_AUDIO_API DynamicsProcessor {
 public:
     // 처리기를 만든다.
     // - sampleRate는 IsValidMixSampleRate, channels는 1–MaxOutputChannels, settings는

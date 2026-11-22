@@ -760,6 +760,45 @@ A3는 Rockpile 설계([Rockpile](Rockpile.ko.md) 12·17절)가 요구한 레코�
   - 리뷰 반영(필수 하나·권장 넷): 키별 잠금 파일을 tmp 정리가 try-lock 뒤 지우던 것을 고정 256개 shard 잠금(지우지 않음)으로 바꿨다(FileLock 계약 — POSIX에서 상호 배제가 깨졌다, 처음 설계의 "try-lock 뒤에만 지운다"는 틀렸다). Exists 확인을 고정 버퍼 흘려 읽기로(`VerifyNuggetValue`), 잠금 대기 상한 주입, 값 선택 중복 거부·이진 검색.
   - 남는 경합: 잠금 밖 경로(Get의 손상 삭제 + 다른 Put의 no-replace 이동)가 잠금 안 재판정과 `Replace` 사이에 끼면 새 정상 항목을 다른 정상 값으로 덮을 수 있다. 결과는 정상 값끼리의 교체이고(digest가 다르면 다른 세션에 `DigestChanged`) 틀린 적중은 아니다 — 모든 쓰기를 잠그지 않는 대가로 받아들인다(no-replace 이동이 동시 쓰기의 기본 경로).
 
+- A3c 나눔(2026-11-22): A3c1 동기 캐시 코어(`NuggetCache` — 설정·backend 선택·Memory 계층·세션 고정·소비 입력 대조·정책·통계·SCC 헬퍼), A3c2 요청 객체(`NuggetGetRequest`·`NuggetPutRequest` — 일괄·비동기·취소·대기 Put 상한·`Shutdown`·진행 중 소멸 Fatal). 각각 14절 완료 조건 넷.
+- A3c1 구현 세부(권장안으로 확정, 결정 10·11·13–15를 구체화):
+  - 정책 `NuggetPolicy`(u32 비트 — `QueryLocal` 1·`QueryRemote` 2·`StoreLocal` 4·`StoreRemote` 8·`SkipData` 16·`SkipMeta` 32·`PartialRecord` 64·`KeepAlive` 128, `Query`·`Store`·`Default`, 비트 연산자). Get은 `QueryLocal`이 없으면 `Miss`(원격이 없다 — 결정 14), Put은 `StoreLocal`·`StoreRemote`가 둘 다 없으면 `Dropped`(오류 없음 — 저장하지 말라는 정책이다), `StoreRemote`는 `StoreLocal`을 함의한다. `KeepAlive`는 Memory 적중에서도 backend Touch를 한다(backend 적중은 A3b 규칙대로 늘 Touch).
+  - 설정 `ReadNuggetCacheSettings(allocator, files, projectRoot, failure)`: `Config/AssetNuggets.json`을 Core JSON(엄격)으로 읽는다(ReflectionText가 아닌 이유: 칸 넷짜리 고정 형식이고 모듈이 리플렉션 등록에 의존할 까닭이 없다 — `AssetAliases.json`과 같은 방식). 없으면 기본값(filesystem·false·`Intermediate/AssetNuggets`·null 세대). 거부(InvalidArgument + `NuggetSettingsFailure{field, line, column}`): JSON 문법, 루트가 객체 아님, 모르는 키, 칸 타입, `backend` 값이 넷 밖, `localPath` 빈 문자열·NUL 포함·Windows 현재 드라이브 루트(`\x`·`/x`)·드라이브 상대(`C:x`)·device namespace(프로세스의 현재 드라이브·디렉터리에 따라 위치가 바뀐다 — A2f1a 원본 루트와 같은 규칙, Core `Path::Root`), `generation`이 Guid 표준 문자열 아님. 그 밖 읽기 오류는 그 오류, 할당 실패 OutOfMemory. 상대 `localPath`는 프로젝트 루트 기준이고 루트에 붙은 경로(POSIX 루트·Windows 드라이브 절대·UNC)는 그대로다.
+  - `NuggetCache(allocator, files, clock, limits)` → `Open(settings, projectRoot)`: off는 backend 없음(모든 Get `Miss`·Put `Dropped`, 진단 없음 — Memory 계층도 쓰지 않는다), rockpile은 `Unsupported`(열기 실패), auto·filesystem은 `NuggetFileSystemBackend`를 연다. filesystem 열기 실패는 `required`면 Open 실패(그 오류), 아니면 off로 내리고 원인을 `OpenError()`로 남긴다(진단). 결정은 Open 때 한 번이다. Open은 한 번만(두 번째는 InvalidArgument), Open 전 Get·Put은 `Miss`·`Dropped`(InvalidArgument). Open 뒤 Get·Put·`GetSccMember`·`PutScc`·`Stats`는 여러 스레드에서 동시에 부를 수 있다(요청 객체의 worker). 내부 표(Memory·고정)는 mutex 하나로 지키고 backend IO는 잠금 밖에서 한다.
+  - 결과: `NuggetCacheGetResult{status, error, failed, source(None·Memory·Local), digest, record, values}`, `NuggetCachePutResult{status, error, failed, digest, existing}`. `failed`는 backend 실패인 Miss·Dropped(`NuggetCache::IsFailure` — IO·할당·잘못된 요청 등)이고 A3c2 요청이 `required`일 때 요청 오류로 올린다. 실패가 아닌 오류: None, Unsupported(다른 버전·읽기 전용), CapacityExceeded(한도 위반 — Record 1 MiB·SCC 4,096 등, 캐시하지 않음 — 결정 7 "Dropped + 진단"), Busy(일시 경합 — 손상 교체 잠금 대기 초과·재게시 실패). Corrupt는 실패가 아니다(지우고 미적중 — 다시 만든다).
+  - Memory 계층: 키 → 항목(bucket, digest, Record, 쥔 값 — ValueId 순) + LRU. 항목 크기 = 쥔 값 byte + meta + 행 × 160 + 입력 × `NuggetMemoryInputBytes`(128) + `NuggetMemoryEntryBytes`(256). Get 적중(SkipData 아님)과 Put(Record를 계획한 뒤 — 결과가 Stored·Exists·Conflict·Dropped라도, backend가 실패해도 이 세션이 쓴 값이다)이 넣는다. 값 하나가 `memoryValueBytes`(64 MiB)를 넘으면 그 값은 쥐지 않는다. 같은 digest 항목에는 없는 값을 더한다. 합이 `memoryBytes`(256 MiB)를 넘으면 고정 보관이 아닌 항목을 오래 쓰지 않은 것부터 버린다(크기가 상한보다 큰 항목은 넣지 않는다). Memory 적중 조건: 같은 bucket, SkipData거나 청한 값(비면 Record의 모든 값)을 다 쥠 — PartialRecord면 Record에 없는 값은 빠져도 된다(Partial), Record에 있는데 쥐지 않은 값이 있으면 backend로 간다. Put의 값 버퍼는 Memory로 옮겨 간다(`Span<NuggetValue>` — Put 뒤 bytes가 비어 있을 수 있다, 소유권 이전). 항목의 Record와 값은 공유 버퍼(`SharedPtr`)다: Memory 적중은 잠금 안에서 참조만 얻고 결과로의 복사는 잠금 밖에서 하며, 넣을 후보(Local 적중의 복사·Put의 이동)도 잠금 밖에서 만든 뒤 잠금 안에서는 연결만 한다 — 값 하나가 64 MiB여도 mutex를 쥔 동안 큰 복사가 없다(A3c2의 worker 여럿이 줄을 서지 않게).
+  - backend Put 결과에 계획한 Record를 더한다(`NuggetPutResult::record` — 계획이 성공했을 때, A3b API 확장). Memory 항목의 Record는 그것이다(backend 적중의 Record와 같은 저장 표현 — 값은 늘 해제한 원본).
+  - 세션 고정 표: key → (digest, 상태 — 보통·`changed`(DigestChanged를 돌려줌)·`regenerated`(그 뒤 다시 만든 Record를 고정 보관함)·`uncached`(캐시 없음)). 결정 11의 "(RecordDigest, inputs)"에서 inputs는 표에 두지 않는다 — 대조는 적중한 Record의 inputs로 하므로 표에 둘 까닭이 없다(키당 약 80 byte). Get 적중(Memory·backend 모두): (1) 고정이 있고 digest가 다르면 `DigestChanged` — 값을 버리고 Memory 항목을 지우고 `changed`로 표시한다. (2) inputs 각 항목의 key가 고정돼 있고 digest가 다르면 그 적중은 `Miss`(InputMismatch 통계 — 고정하지 않는다). (3) 받아들이면 고정 없는 inputs와 이 키를 그 digest로 고정한다. 고정 표 할당 실패는 `Miss`(OutOfMemory, failed). Put: `uncached`면 `Dropped`(오류 없음). `changed`인 키의 Put은 값 전부(64 MiB 규칙 예외)를 고정 보관(축출 제외)하고 고정 digest를 새 Record로 바꾼 뒤 `regenerated`로 둔다 — 고정 보관 합이 `pinnedBytes`(256 MiB)를 넘으면 그 키를 `uncached`로 내린다(이후 Get `Miss`·Put `Dropped`, 통계). 고정이 다른 digest인 보통 키의 Put(DigestChanged 없이 다른 Record — 비결정적 처리기)은 Memory에 넣지 않고 고정을 바꾸지 않는다. 고정이 없거나 같으면 이 Put의 digest로 고정한다(결과가 Conflict여도 — 이 세션은 자기가 만든 값을 이미 썼다. 디스크 판이 다르면 나중 Get이 DigestChanged를 내고 위 경로로 간다).
+  - 통계 `NuggetCacheStats`(원자 카운터): Memory 적중·Local 적중·Partial·Miss·DigestChanged·InputMismatch·Corrupt·Stored·Exists·Conflict·Dropped·Uncached 키 수·Memory byte·고정 보관 byte·고정 키 수.
+  - SCC 헬퍼(결정 15): `NuggetSccValueId(member, part)` = (member << 16) | part(member < 4,096, part < 65,536 — 넘으면 assert), `WriteNuggetSccMeta(members, meta)`(AssetId 16 byte씩, high → low big-endian, 순서 = 구성원 순번, 빈 목록·null·중복 InvalidArgument, 4,096 초과 CapacityExceeded), `FindNuggetSccMember(meta, asset)`(16 byte 배수 아님 InvalidArgument, 없으면 NotFound). `NuggetCache::PutScc(members, put)`은 meta를 구성원 목록으로 채워 Put한다(4,096 초과는 `Dropped`(CapacityExceeded — 캐시하지 않음, 실패 아님), 값 id의 구성원 순번이 구성원 수 이상이면 `Dropped`(InvalidArgument)). `GetSccMember(bucket, sccKey, asset, policy)`는 SkipData Get으로 meta를 얻어 순번을 찾고 그 순번의 값만 골라 다시 Get한다(구성원이 없으면 `Miss`(NotFound), 그 순번의 값이 없으면 빈 Hit).
+- A3c1 상태: **구현** — 대조표 14.1.57절, coverage 14.1.58절. 구현에서 정한 것:
+  - 모듈 파일 `NuggetPolicy.h`·`NuggetCacheSettings.h`·`NuggetScc.h`·`NuggetCache.h`. `localPath` 해석은 Core `Path::Root`(경로 문법 분류 — 이미 있는 공용 기능)를 쓴다.
+  - 고정 표 크기: 키당 약 80 byte(digest 32 + key 32 + 상태 + 해시 표 칸)이고 세션 동안 줄지 않는다(고정을 지우면 세션 일관성이 깨진다). 전체 쿠킹이 100만 키를 쓰면 약 80 MB다 — 결정 11의 "표만 커짐"이 받아들인 비용이다(값 byte는 쥐지 않는다).
+  - 불변식: Memory 항목의 digest는 늘 그 키의 고정 digest다(항목은 고정과 같을 때만 넣고, 고정이 바뀌는 곳 — 다시 만든 Record 고정 보관 — 은 항목을 바꾼다, DigestChanged는 항목을 지운다). 그래서 받아들인 적중의 Memory 합치기 대상은 같은 Record이고, 고정 보관 항목은 값을 다 쥐어 Memory가 늘 답한다(assert). 고정 보관 항목은 지우지 않는다 — DigestChanged(다른 bucket으로 같은 키를 청한 호출자 결함 등)도 건너뛴다.
+  - 고정 보관 판정은 Put 앞의 `Changed`와 Put 뒤 잠금 안의 상태를 둘 다 본다(잠금 밖 backend IO 사이에 다른 Put이 먼저 고정 보관했거나 Get이 DigestChanged를 냈으면 남기지 않는다). Get의 판정도 backend IO 뒤 잠금 안에서 캐시 없음을 다시 본다. 시험은 hook 파일 시스템(열기 직전 같은 캐시를 다시 부름)으로 이 창을 결정적으로 만든다.
+  - DigestChanged 뒤 디스크가 고정 판으로 돌아오면 적중을 받아들이고(고정 상태는 `Changed` 그대로) Memory에 넣는다 — 그 뒤 다시 만든 Record Put은 그 항목을 지우고 고정 보관한다.
+  - Memory 적중이 Record에 없는 값(PartialRecord 아님)을 보면 backend에 묻지 않고 `Miss`다(같은 digest의 Record는 그 값이 없다). 같은 값을 두 번 청하거나 bucket이 다르면 Memory는 답하지 않고 backend가 판정한다.
+  - 열기 전 Get·Put은 통계에 세지 않는다(계약 위반). off·Store 없음·캐시 없음 Put은 `Dropped`로 센다.
+  - 리뷰 반영(권장 넷): failed에서 한도 위반(CapacityExceeded)·일시 경합(Busy)을 뺐다(`IsFailure`), Memory 복사를 잠금 밖으로(공유 버퍼), `localPath`의 Windows 현재 드라이브 루트·드라이브 상대 거부(처음 구현은 PlatformBase에 상대 판정을 새로 더했으나 Core `Path::Root`가 이미 있어 되돌렸다), 고정 표 크기 기록.
+
+- A3c2 구현 세부(2026-11-22 착수 — 권장안으로 확정, 결정 12를 구체화):
+  - 파일 `NuggetRequest.h`. 항목 `NuggetGetItem{bucket, key, values, policy}`·`NuggetPutItem{bucket, key, values(Array<NuggetValue> — Start가 옮겨 간다), inputs, meta, policy}`. Start가 bucket·값 선택 목록·inputs·meta를 복사하고 Put 값 버퍼는 옮긴다(호출자 항목 배열은 Start 뒤 바로 놓아도 된다).
+  - `NuggetGetRequest`·`NuggetPutRequest`(호출자 소유·이동·복사 금지 — 결과 slot을 객체 안에 둔다): `Start(cache, items, scheduler)`, `RequestCancel()`, `Handle()`(완료 handle — 의존·Wait용), `Results()`(handle 완료 뒤 항목 순서 그대로, 시작 전 StaleHandle·완료 전 Busy), `Outcome()`(required 캐시에서 failed 항목이 있으면 DependencyFailed — 결정 10 "required면 그 요청 결과가 오류", 아니면 성공 — 결과와 같은 시점 규칙). 진행 중 Start는 Busy, 빈 항목 목록은 바로 완료다. 완료 뒤 같은 객체로 다시 Start할 수 있다.
+  - 완료 handle은 `WorkerTaskEvent`다: 남은 수를 (항목 수 + 1)로 두고 항목이 끝날 때마다 원자적으로 줄이며 Start가 제출을 마친 뒤 1을 줄인다 — 0이 되는 쪽이 캐시 진행 중 목록에서 빼고 Trigger한다(maxDependencies(16)에 묶이지 않는다, 제출 중에 완료되지 않는다). 항목마다 worker 작업 하나. 제출 실패(CapacityExceeded·ShuttingDown 등)는 그 항목과 뒤 항목을 `Dropped`(그 오류, 실패 아님)로 끝내고 이미 낸 항목은 끝까지 간다 — Start는 성공한다. 이벤트 만들기·결과 slot·입력 복사의 실패는 Start 실패(그 오류 — 아무것도 내지 않았다, 옮긴 Put 값은 항목에 남는다).
+  - 항목 작업의 capture는 ticket(요청·순번)을 쥔다. scheduler가 body를 실행하지 않고 capture를 정리하면(scheduler Shutdown(Cancel)·의존 실패) ticket 소멸자가 그 항목을 `Cancelled`로 끝낸다 — 요청이 영영 완료되지 않는 일이 없다.
+  - 취소는 협력적이다: 항목 작업이 시작할 때 요청 취소·작업 취소를 보면 `Cancelled`(Get·Put 모두 — FileSystem Put은 아직 쓰지 않았다), 진행 중 Get·Put은 끝낸다(캐시 연산은 동기 IO 단위). FileSystem에서 `Unknown`은 생기지 않는다(9.1 결정 13).
+  - 대기 Put byte 상한 `NuggetPendingPutBytes`(1 GiB — `NuggetCacheLimits::pendingPutBytes`): Start가 Put 항목 값 byte 합을 캐시 원자 카운터에 예약하고, 넘으면 그 항목은 제출하지 않고 `Dropped`(CapacityExceeded, 실패 아님 — 메모리 보호), 항목이 끝나면(실행·취소 모두) 돌려준다.
+  - 수명: 소멸자는 진행 중이면 취소를 요청하고 완료를 기다린다. 같은 scheduler의 worker(다른 작업의 body·capture 정리 포함)에서 진행 중인 요청을 소멸하면 Fatal(기다리면 교착 — CompressionTask와 같은 규칙). 요청은 Start 때 캐시 진행 중 목록에 들어가고 마지막 항목이 뺀다.
+  - `NuggetCache::Shutdown(drainMs)`: 새 Start 거부(이후 Start는 모든 항목 `Cancelled`, handle 바로 완료) → 진행 중 Get 요청 취소 → Put 요청은 drainMs(단조 시계 기준 전체 기한)까지 완료를 기다림 → 남은 Put 요청 취소 → 모든 요청 완료까지 기다림. 동기 Get·Put도 Shutdown 뒤에는 `Cancelled`(통계 없음 — 계약 밖 호출이 아니라 종료 뒤 호출이다). 진행 중 요청이 있는데 캐시를 소멸하거나 진행 중 요청의 scheduler worker에서 Shutdown을 부르면 Fatal. 두 번째 Shutdown은 아무것도 하지 않는다.
+  - 시험: hook 파일 시스템이 열기에서 `ManualResetEvent`를 기다려 항목 작업을 붙잡는다(잠·시간 경합 없음 — 순서는 이벤트로만). Shutdown의 단계 사이는 시험 hook `NuggetCacheHooks`(지점 `AfterCancelGets`·`AfterDrain`)로 잇는다. Fatal은 자식 프로세스(`--process-probe`, `PrepareFatalTestProcess`)로 확인한다.
+- A3c2 상태: **구현** — 대조표 14.1.59절, coverage 14.1.60절. 구현에서 정한 것:
+  - 요청 항목은 캐시의 내부 Get·Put(종료 검사 없음)을 부른다 — Shutdown의 drain 동안 Put 항목이 끝나야 하므로(동기 Get·Put만 종료 뒤 Cancelled). 시작 전 취소는 요청이 본다.
+  - 완료 handle 상태는 Pending(진행 중)이거나 끝난 상태뿐이다(외부 이벤트). scheduler를 Shutdown(Cancel)으로 끝내면 완료 handle이 항목보다 먼저 Cancelled가 된다 — 그 scheduler의 요청은 scheduler Shutdown이 돌아온 뒤에 결과를 보거나 소멸한다(헤더 계약, 보통은 캐시 Shutdown을 먼저 부른다). 남은 항목은 worker가 capture를 정리할 때 ticket이 Cancelled로 끝내고 진행 중 목록에서 뺀다(캐시 Shutdown이 영영 기다리지 않는다).
+  - `IsCancelRequested()`(취소 요청 여부)를 공개하고, 시험 hook `NuggetRequestHooks::onCancel`(취소 요청 때 부름 — 진행 중 소멸 시험의 순서 gate)을 둔다.
+  - Shutdown의 drain·마지막 대기는 진행 중 목록의 조건 변수(요청이 빠질 때 알림)로 기다린다 — 완료 handle을 기다리지 않으므로 handle이 먼저 끝난 요청(scheduler Cancel·handle 직접 취소)이 목록에 남아도 바쁜 반복이 없다.
+  - 항목이 아직 진행 중 목록에 남은 요청의 다시 Start는 Busy다(완료 handle이 먼저 끝난 경우 — 옛 ticket이 새 무장 표를 읽지 않게).
+  - 리뷰 반영(권장 셋): 다시 Start 막기·계약(handle 직접 취소 금지 포함), 조건 변수 대기, 진행 중 소멸 시험의 폴링을 취소 hook으로.
+  - 시험 hook 파일 시스템은 여러 worker가 동시에 열어도 callback을 한 번만 부른다(꺼내기를 잠금 안에서 — 처음 구현은 두 worker가 함께 callback을 보고 한쪽이 null을 불러 간헐 크래시가 났다).
 
 ## 10. Cooker
 
@@ -2777,6 +2816,66 @@ A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항�
 | `ChooseStorage`의 압축 설정 실패 | 실패 | 상수 인자(Zstd 기본 수준·블록 2^16 — 12–24 안)이고 Zstd는 이 저장소의 Core ThirdParty로 늘 빌드된다 |
 | Put의 임시 파일 이름 Guid 발급 실패 | 실패 | OS 보안 난수 실패(14.1.22와 같다) |
 | Get·판정 switch의 암묵 default | 그 갈래 | `EntryState` 다섯 값을 모두 다룬다(clang이 default 없는 switch의 빠짐 갈래를 센다) |
+
+#### 14.1.57 요구 대조표(A3c1 — 동기 캐시 코어)
+
+시험은 EngineTests `Engine/Source/Developer/AssetNugget/Tests/NuggetCacheTests.cpp`(`NuggetCache_*` 12 — 실제 디스크·메모리 파일 시스템·hook 파일 시스템), `NuggetCacheSettingsTests.cpp`(`NuggetSettings_*` 4), `NuggetSccTests.cpp`(`NuggetScc_*` 3), `NuggetBackendTests.cpp`(Put 결과 Record)다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 설정(9.1 결정 4·10) | 없는 파일 기본값·빈 객체, 모든 칸, backend 넷, 거부(문법 위치·failure 없이·루트 객체 아님 둘·모르는 키(대소문자)·칸 타입·backend 대문자·모르는 값·빈 localPath·NUL·Guid 32자·중괄호·잘못된 글자·숫자·주석·끝 쉼표·중복 키), 대문자 Guid 받음, 64 KiB 초과 CapacityExceeded·상한 그대로 읽음, 열기·크기·읽기 오류, 할당 실패, localPath 해석(상대·절대·드라이브 — 호스트 문법·할당 실패) | `NuggetSettings_*` |
+| localPath 경로 문법(A3c1 구현 세부) | 상대·POSIX 루트·드라이브 절대·드라이브 상대·현재 드라이브 루트·UNC·device namespace × 호스트(Windows 거부 셋 — 해석·설정 읽기 둘 다, POSIX는 이름·루트), 할당 실패 | `NuggetSettings_ResolveLocalPath` |
+| 열기(결정 10) | 열기 전 Get·Put InvalidArgument(통계 없음), off(Miss·Dropped 오류 없음, 통계), 두 번째 Open, rockpile Unsupported(다시 열 수 있음), auto·filesystem 루트 만듦, 루트 자리가 파일(required 실패·아니면 off + OpenError), required 성공, 세대·required 접근자 | `NuggetCache_OpenModes` |
+| Memory 계층(결정 10) | Put이 넣음(디스크를 지워도 Memory), Local 적중 뒤 Memory, 값 선택 순서, Record에 없는 값(Partial·확정 Miss), SkipData, SkipMeta(backend에는 meta를 청해 Memory가 쥠), 같은 값 두 번·다른 bucket은 backend 판정, 64 MiB 규칙(큰 값 안 쥠 — 그 값은 Local, 새 항목도, Put의 큰 값이 앞서도 작은 값만), 합치기(뒤·가운데 삽입·중복 없음), KeepAlive Touch, 축출(LRU·Get이 순서 갱신·상한보다 큰 항목 안 넣음·상한 0), SkipData 적중은 안 넣음, 통계 | `NuggetCache_MemoryLayer`·`NuggetCache_Eviction`·`NuggetCache_Policies` |
+| 세션 고정(결정 11) | DigestChanged(값 버림·반복), 다시 만든 Record 고정 보관(Conflict여도 — 64 MiB·Memory 상한 예외, 이후 Memory), 다시 만든 키의 다른 Put·같은 Put은 고정 보관 그대로, 고정 보관 상한 초과(합·항목 하나) 캐시 없음(Get Miss·Put Dropped·통계), 비결정 Put(Conflict·고정 유지), 같은 Record Put Exists, 디스크가 고정 판으로 돌아옴(적중·Memory, 이후 고정 보관이 항목을 바꿈) | `NuggetCache_PinsAndRegeneration`·`NuggetCache_RegenerationEdges` |
+| 잠금 밖 경합 창(A3c1 상태) | Get 읽기 사이 고정 보관(바깥 DigestChanged·고정 보관 항목 유지), Get 읽기 사이 캐시 없음(바깥 Miss), 다시 만든 Record Put 둘 겹침(늦은 쪽 고정 보관 그대로), 보통 Put 사이 DigestChanged(남기지 않음·이후 고정 보관) | `NuggetCache_Windows` |
+| 소비 입력(결정 11) | 다른 digest 소비 Miss(InputMismatch·고정 안 함), 같은 digest 적중, 고정 없는 입력 고정(이후 DigestChanged), Memory 적중도 대조(입력 키 다시 만든 뒤 Miss) | `NuggetCache_InputMismatch` |
+| 정책(결정 14) | Store 없음 Dropped(오류 없음), StoreRemote만 저장, QueryRemote만·Query 없음 Miss, QueryLocal 적중 | `NuggetCache_Policies` |
+| 결과 상태·실패 표지(결정 13) | 쓰기 실패 Dropped failed, 읽기 실패 Miss failed, 다른 버전 Miss Unsupported(실패 아님), 손상 Corrupt(지움·실패 아님·통계), 다른 버전 위 Put Dropped Unsupported(실패 아님·유지), 재게시 실패 Dropped Busy(실패 아님), Record 1 MiB 초과 Dropped CapacityExceeded(실패 아님), 다른 bucket Miss InvalidArgument failed, `IsFailure` 분류 표 | `NuggetCache_FailureFlags`·`NuggetCache_MemoryLayer` |
+| SCC(결정 15) | 값 번호·경계, meta golden·찾기·다시 쓰기·4,096 경계, 거부(빈·null·중복·초과·크기·상한 넘는 meta), PutScc·GetSccMember(부분 여럿·SkipMeta·값 없는 구성원 빈 Hit·구성원 아님 NotFound·Record 없음 Miss·4,096 초과 Dropped Capacity 실패 아님·순번 밖 값·중복 구성원 InvalidArgument·잘못된 meta InvalidArgument), 할당 실패 | `NuggetScc_*`·`NuggetCache_Scc` |
+| 할당 실패 | Open, PutScc·Get(Memory)·GetSccMember, 다시 만든 Record Put(고정 보관 실패 → 캐시 없음), Get Local 경로(입력·키 고정·Memory 넣기), Memory 적중 복사, 합치기 — 실패하면 Miss·Dropped(OutOfMemory, failed)이거나 Memory에 넣지 않은 적중, 실패 없는 결과는 기준과 같다 | `NuggetCache_AllocationFailures`·`NuggetCache_GetAllocationFailures` |
+| 동시 호출 | 네 스레드 × 20회 같은 키·다른 키 Put·Get(같은 키 Stored 하나 + Exists, 모든 적중 같은 digest, Conflict·Dropped·DigestChanged 0) | `NuggetCache_Concurrency` |
+| backend 확장 | Put 결과의 계획 Record(digest·key·값·Rcbk 표현·inputs·meta) | `NuggetBackend_RoundTrip` |
+| 조합(14 완료 조건 2) | 적중 출처(Memory·Local·없음) × 고정 상태(없음·Normal·Changed·Regenerated·Uncached) × 연산(Get·Put·PutScc·GetSccMember) × 정책(Query·Store·SkipData·SkipMeta·PartialRecord·KeepAlive) × 실패(IO·할당·경합 창) | 위 시험 |
+
+#### 14.1.58 Coverage(A3c1)
+
+측정(2026-11-22, Windows, `ROCKS_MSVC_TOOLSET=14.44`): `-Target EngineTests -Filter Nugget -Sources Engine/Source/Developer/AssetNugget/Private` — `NuggetCache.cpp` 줄 716/717·분기 365/371, `NuggetCacheSettings.cpp` 줄 153/153·분기 92/92, `NuggetScc.cpp` 줄 46/46·분기 29/31(리뷰 반영 뒤).
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| `NuggetCache::Open`·`Get`(판정 적용)의 switch 암묵 default | 그 갈래 | `NuggetBackendKind` 넷·`Verdict` 다섯 값을 모두 다룬다 |
+| `Evict`·`Insert`·`Settle`의 `ROCKS_ASSERT` | 실패 | 불변식(A3c1 상태): 고정 보관 항목은 지우지 않는다(EvictKey가 건너뜀), 받아들인 적중의 Memory 항목은 같은 Record이고 고정 보관 항목에는 오지 않는다, 고정은 지우지 않으므로 Changed를 본 Put에는 고정이 있다 |
+| `NuggetSccValueId`의 `ROCKS_ASSERT` | 실패 | 호출자 결함(순번·부분 번호 범위)이다 — 계약으로 막는다 |
+| `Put`의 `Array<NuggetPutValue>` 선언 줄 | 줄 수 0 | 측정 산물이다 — 앞 잠금 블록의 return 뒤 gap 영역이 그 줄에 붙는다. 다음 줄(같은 실행 흐름)도 실행된다 |
+
+#### 14.1.59 요구 대조표(A3c2 — 요청 객체·Shutdown)
+
+시험은 EngineTests `Engine/Source/Developer/AssetNugget/Tests/NuggetRequestTests.cpp`(`NuggetRequest_*` 11 — 실제 디스크·메모리 파일 시스템·hook 파일 시스템 gate·자식 프로세스)다. 시험 공용 도구는 `Tests/NuggetTestSupport.h`(hook 파일 시스템·gate).
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 일괄 요청(9.1 결정 12) | Put 값 이동(항목은 Start 뒤 빈다)·inputs·meta 복사, 결과 항목 순서(Stored·Hit·Miss·값 선택·SkipData), Outcome 성공, Start 전 Results·Outcome StaleHandle·빈 handle, 빈 요청 바로 완료, 끝난 객체로 다시 Start, 겹친 두 요청(나중 요청이 먼저 끝남 — 목록 중간 해제) | `NuggetRequest_PutThenGet` |
+| 진행 중·취소 | 진행 중 다시 Start Busy(Get·Put), Results·Outcome Busy, 취소 두 번, 시작 안 한 항목 Cancelled·진행 중 항목은 끝냄(Get·Put) | `NuggetRequest_BusyAndCancel`·`NuggetRequest_PutThenGet` |
+| 대기 Put 상한 | 합이 넘는 항목·상한보다 큰 항목 Dropped(CapacityExceeded, 실패 아님), 상한 그대로 받음, 끝난·취소된·제출 실패한·진행 중 소멸된 항목의 예약 반환 | `NuggetRequest_PendingPutBytes`·`NuggetRequest_SubmitFailures`·`NuggetRequest_DestroyWhileRunning` |
+| 제출 실패 | scheduler 시작 전 Start 실패(값은 항목에 남음 — Get·Put), maxInFlight 초과 항목과 뒤 항목 Dropped(그 오류·실패 아님)·낸 항목은 끝까지(Get·Put) | `NuggetRequest_SubmitFailures` |
+| required(결정 10) | failed 항목(Put 쓰기 실패·Get 읽기 실패) → Outcome DependencyFailed, required 아니면 성공, 실패 아닌 Dropped는 required여도 성공 | `NuggetRequest_RequiredOutcome` |
+| Shutdown(결정 12) | 요청 없음(이후 Start 모두 Cancelled·바로 완료, 동기 Get·Put Cancelled, 두 번째 무시, IsShutDown), drain 0(진행 중 Put 끝냄·남은 Put·Get Cancelled), drain 1 ms 기한 초과(같음), drain 끝까지(Put 모두 끝냄·Get Cancelled), hook 두 지점, Shutdown이 돌아오면 모든 항목이 끝남 | `NuggetRequest_Shutdown` |
+| 버려진 항목 | scheduler Shutdown(Cancel)이 시작 안 한 항목의 body를 버리면 ticket이 Cancelled로 끝내고 목록에서 뺌(캐시 Shutdown이 바로 돌아옴) | `NuggetRequest_AbandonedItems` |
+| 완료 handle이 먼저 끝남 | handle 직접 취소(scheduler Cancel과 같은 상황) 뒤 항목이 목록에 남은 동안 다시 Start Busy(값은 항목에 남음), 캐시 Shutdown이 목록이 빌 때까지 기다림, 그 뒤 다시 Start | `NuggetRequest_RestartWhileSettling` |
+| 수명 | worker 아닌 스레드의 진행 중 소멸(취소 요청 → 완료 대기 — 취소 hook gate), Fatal 셋(같은 scheduler worker에서 진행 중 소멸·진행 중 요청의 worker에서 Shutdown·진행 중 요청이 있는 캐시 소멸 — 자식 프로세스 비정상 종료·문구) | `NuggetRequest_DestroyWhileRunning`·`NuggetRequest_Fatal` |
+| 할당 실패 | 요청 allocator: 결과 slot·입력 복사(bucket·값 선택·inputs·meta)·예약 표 실패는 Start 실패(OutOfMemory·값은 항목에 남음), 항목 capture 실패는 그 항목과 뒤 항목 Dropped(OutOfMemory), 실패 없는 결과는 기준과 같다(Get·Put) | `NuggetRequest_AllocationFailures` |
+| 조합(14 완료 조건 2) | 요청 종류(Get·Put) × 항목 경로(실행·시작 전 취소·제출 실패·상한 초과·capture 정리) × 종료(없음·drain 0·기한 초과·끝까지·scheduler Cancel) × 실패(IO·할당·Fatal) | 위 시험 |
+
+#### 14.1.60 Coverage(A3c2)
+
+측정(2026-11-23, Windows, `ROCKS_MSVC_TOOLSET=14.44`): `-Target EngineTests -Filter Nugget -Sources Engine/Source/Developer/AssetNugget/Private` — `NuggetRequest.cpp` 줄 352/354·분기 125/126, `NuggetCache.cpp` 줄 828/834·분기 409/419(A3c1 몫 포함, 리뷰 반영 뒤).
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| `NuggetRequest::WaitForCompletion`·`~NuggetCache`·`NuggetCache::Shutdown`의 `platform::Fatal` | 그 갈래 | 자식 프로세스(`NuggetRequest_Fatal`)에서 실행하고 문구까지 확인한다 — 부모 측정에는 자식의 profile이 합쳐지지 않는다 |
+| `ReservePutBytes`의 CAS 재시도 | 재시도 | 다른 스레드가 같은 순간 예약할 때만이다(경합 — 결정적으로 만들 수 없다). 재시도는 같은 판정을 다시 한다 |
+| `Shutdown`의 `Notify(AfterCancelGets)` 줄 | 줄 수 0 | 측정 산물이다 — 앞 잠금 블록(Fatal 갈래 포함) 뒤 gap 영역이 그 줄에 붙는다. hook 두 지점은 시험이 확인한다 |
 
 ## 15. PNG 디코더 범위
 

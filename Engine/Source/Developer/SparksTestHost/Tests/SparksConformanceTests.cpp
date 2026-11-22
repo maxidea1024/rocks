@@ -706,7 +706,7 @@ fn Size(items: Set<int>): int {
          "Run/Case.spark: .run line 1: cannot read '1e39' as a value of this parameter"},
         {"Half(inf)\n",
          "Run/Case.spark: .run line 1: cannot read 'inf' as a value of this parameter"},
-        {"new #1 Nope\n", "Run/Case.spark: .run line 1: 'new' needs a class of the module"},
+        {"new #1 Nope\n", "Run/Case.spark: .run line 1: 'new' needs a class of the modules"},
         {"fields #3\n",
          "Run/Case.spark: .run line 1: the object has no instance (use 'new' first)"},
         {"detach x\n",
@@ -747,8 +747,8 @@ fn Size(items: Set<int>): int {
         bool found = false;
         for (const String& failure : report.Failures()) {
             found = found || failure.View() ==
-                                 StringView("Run/Broken.spark: has a .run file but the module was "
-                                            "not lowered to bytecode (a file case without "
+                                 StringView("Run/Broken.spark: has a .run file but a module was "
+                                            "not lowered to bytecode (a case without "
                                             "diagnostics is needed)");
         }
 
@@ -1515,6 +1515,576 @@ close -> ok
     }
 
     CHECK(failures > 0);
+}
+
+TEST(SparksConformance_RunGoldenAllocationFailureModules) {
+    // 여러 모듈 `.run`(Docs/Design/SparksReload.ko.md 6절 — LC7c2a)의 모든 할당 실패 자리: 모듈마다
+    // `.sparkc` 왕복·링크, import 풀기, 실행 단위 표, 이름 찾기. 실패는 OutOfMemory로 돌아오고 새는
+    // 할당이 없다.
+    SystemAllocator backing;
+    constexpr StringView Manifest = "{ name: \"Game\", sparks: 1, profile: \"full\" }\n";
+    constexpr StringView Base = R"(open class Fixture : ScriptableComponent {
+    var Level = 1;
+    event Ping(n: int);
+
+    fn Raise() {
+        Level += 1;
+        Log.Info("raised ${Name()} ${Level}");
+    }
+
+    fn Send(n: int) {
+        emit Ping(n);
+    }
+
+    open fn Name(): string {
+        return "fixture";
+    }
+}
+
+fn Twice(n: int): int {
+    return n * 2;
+}
+)";
+    constexpr StringView Main = R"(import Base;
+
+class Door : Fixture {
+    var Peer: Fixture?;
+    var Seen = 0;
+
+    fn Watch(target: Fixture) {
+        Peer = target;
+    }
+
+    fn Fire(n: int) {
+        Send(Twice(n));
+    }
+
+    override fn Name(): string {
+        return "door";
+    }
+
+    on Peer.Ping(n: int) {
+        Seen += n;
+        Log.Info("seen ${n}");
+    }
+}
+
+class Lamp : Fixture {
+}
+)";
+    const CaseFile files[] = {{"Game/SparksPackage.json5", Manifest},
+                              {"Game/Base.spark", Base},
+                              {"Game/Main.spark", Main}};
+    constexpr StringView Golden = R"(new #1 Door -> ok
+new #2 Door -> ok
+new #3 Lamp -> ok
+hook #1 Enable -> ok
+hook #2 Enable -> ok
+Door.Watch(#2, #1) -> ok
+Door.Fire(#1, 3) -> ok
+Fixture.Raise(#1) -> ok
+Fixture.Raise(#3) -> ok
+fields #1 -> ok
+fields #2 -> ok
+close -> ok
+)";
+    constexpr StringView Schema = R"({
+  "format": 1, "package": "Rocks", "module": "Engine",
+  "types": [
+    {"name": "Actor", "id": "5a7e0000000000000000000000000001", "kind": "object"},
+    {"name": "Component", "id": "5a7e0000000000000000000000000005", "kind": "object",
+     "fields": [{"name": "Owner", "id": "5a7e0000000000000000000000000131", "type": "Actor"}]},
+    {"name": "ScriptableComponent", "id": "5a7e0000000000000000000000000007", "kind": "object",
+     "base": "Component", "scriptExtensible": true}
+  ]
+})";
+    const CaseFile schemas[] = {{"Schema/Engine.sparkbind.json", Schema}};
+    SystemAllocator side; // 기대값은 세는 allocator 밖에 둔다
+    uint64 attempts = 0;
+    uint64 failures = 0;
+    String expected(side);
+    for (uint64 failAt = 0; failAt == 0 || failAt <= attempts; ++failAt) {
+        test::NFailAllocator allocator(backing);
+        const uint64 before = backing.Stats().liveAllocations;
+        {
+            CaseInput input;
+            input.name = "Run/Modules";
+            input.folder = true;
+            input.files = files;
+            input.schemas = schemas;
+            input.expect = "clean\n";
+            input.hasRun = true;
+            input.run = failAt == 0 ? Golden : expected.View();
+            Report report(allocator);
+            if (failAt != 0) {
+                allocator.FailOnAttempt(failAt);
+            }
+
+            auto ran = RunCase(allocator, input, report);
+            const uint64 used = allocator.Attempts();
+            allocator.DisableFailure();
+            if (failAt == 0) {
+                REQUIRE(ran);
+                if (report.Failures().Size() != 1) {
+                    PrintFailures(report);
+                }
+
+                REQUIRE(report.Failures().Size() == 1);
+                const StringView failure = report.Failures()[0].View();
+                const StringView marker = "  actual run:\n";
+                usize at = 0;
+                while (at + marker.ByteCount() <= failure.ByteCount() &&
+                       StringView(failure.Data() + at, marker.ByteCount()) != marker) {
+                    ++at;
+                }
+
+                REQUIRE(at + marker.ByteCount() <= failure.ByteCount());
+                const StringView actual(failure.Data() + at + marker.ByteCount(),
+                                        failure.ByteCount() - at - marker.ByteCount());
+                CHECK(actual.Contains("log info \"seen 6\"", StringComparison::CaseSensitive));
+                CHECK(actual.Contains("raised door 2", StringComparison::CaseSensitive));
+                CHECK(actual.Contains("fields #2 -> Door(Level: 1, Peer: #1, Seen: 6)",
+                                      StringComparison::CaseSensitive));
+                CHECK(actual.Contains("close -> ok (ledger 0 buffers)",
+                                      StringComparison::CaseSensitive));
+                REQUIRE(expected.TryAppend(actual));
+                attempts = used;
+            } else if (!ran) {
+                CHECK(ran.Error() == ErrorCode::OutOfMemory);
+                ++failures;
+            } else {
+                if (!report.Failures().IsEmpty()) {
+                    PrintFailures(report);
+                }
+
+                CHECK(report.Failures().IsEmpty());
+            }
+        }
+
+        CHECK(backing.Stats().liveAllocations == before);
+    }
+
+    CHECK(failures > 0);
+}
+
+TEST(SparksConformance_RunGoldenAllocationFailureBundle) {
+    // 모듈 묶음 reload(Docs/Design/SparksReload.ko.md 6절 — LC7c2b)의 모든 할당 실패 자리: 폴더
+    // revision 덮어쓰기·컴파일, 재컴파일 범위·묶음 결정, 묶음 모듈 링크·import, 쌍마다 계획·적용.
+    // 실패는 OutOfMemory로 돌아오고 새는 할당이 없다(실패한 적용은 session 그대로 — `.run` 대조).
+    SystemAllocator backing;
+    constexpr StringView Manifest = "{ name: \"Game\", sparks: 1, profile: \"full\" }\n";
+    constexpr StringView Base = R"(open class Fixture : ScriptableComponent {
+    var Level = 1;
+    event Ping(n: int);
+
+    fn Send(n: int) {
+        emit Ping(n);
+    }
+
+    fn Raise() {
+        Level += 1;
+        Log.Info("raised ${Level}");
+    }
+}
+
+fn Twice(n: int): int {
+    return n * 2;
+}
+)";
+    constexpr StringView Main = R"(import Base;
+
+class Door : Fixture {
+    var Peer: Fixture?;
+    var Seen = 0;
+
+    fn Watch(target: Fixture) {
+        Peer = target;
+    }
+
+    fn Fire(n: int) {
+        Send(Twice(n));
+    }
+
+    on Peer.Ping(n: int) {
+        Seen += n;
+        Log.Info("seen v1 ${n}");
+    }
+
+    async fn Later(n: int) {
+        await Delay(1.0, Clock.Game);
+        Log.Info("later ${Twice(n)}");
+    }
+}
+)";
+    constexpr StringView Util = R"(class Lamp : ScriptableComponent {
+    var Glow = 1;
+
+    fn Brighten() {
+        Glow += 1;
+    }
+}
+)";
+    constexpr StringView Second = R"(open class Fixture : ScriptableComponent {
+    var Bonus = 5;
+    var Level = 1;
+    event Ping(n: int);
+
+    fn Send(n: int) {
+        emit Ping(n);
+    }
+
+    fn Raise() {
+        Level += 1;
+        Log.Info("raised ${Level}");
+    }
+}
+
+fn Twice(n: int): int {
+    return n * 3;
+}
+)";
+    constexpr StringView ThirdMain = R"(import Base;
+
+class Door : Fixture {
+    var Peer: Fixture?;
+    var Seen = 0;
+
+    fn Watch(target: Fixture) {
+        Peer = target;
+    }
+
+    fn Fire(n: int) {
+        Send(Twice(n));
+    }
+
+    on Peer.Ping(n: int) {
+        Seen += n;
+        Log.Info("seen v3 ${n}");
+    }
+
+    async fn Later(n: int) {
+        await Delay(1.0, Clock.Game);
+        Log.Info("later ${Twice(n)}");
+    }
+}
+)";
+    const CaseFile files[] = {{"Game/SparksPackage.json5", Manifest},
+                              {"Game/Base.spark", Base},
+                              {"Game/Main.spark", Main},
+                              {"Game/Util.spark", Util}};
+    const CaseFile second[] = {{"Game/Base.spark", Second}};
+    const CaseFile third[] = {{"Game/Base.spark", Second}, {"Game/Main.spark", ThirdMain}};
+    const CaseRevision revisions[] = {{"v2", second}, {"v3", third}};
+    constexpr StringView Golden = R"(new #1 Door -> ok
+new #2 Door -> ok
+new #3 Lamp -> ok
+hook #1 Enable -> ok
+hook #2 Enable -> ok
+Door.Watch(#2, #1) -> ok
+Fixture.Raise(#2) -> ok
+Door.Later(#2, 5) -> ok
+reload v2 keep -> ok
+Door.Fire(#1, 2) -> ok
+advance 1.0 -> ok
+reload v3 -> ok
+Door.Fire(#1, 1) -> ok
+fields #2 -> ok
+close -> ok
+)";
+    constexpr StringView Schema = R"({
+  "format": 1, "package": "Rocks", "module": "Engine",
+  "types": [
+    {"name": "Actor", "id": "5a7e0000000000000000000000000001", "kind": "object"},
+    {"name": "Component", "id": "5a7e0000000000000000000000000005", "kind": "object",
+     "fields": [{"name": "Owner", "id": "5a7e0000000000000000000000000131", "type": "Actor"}]},
+    {"name": "ScriptableComponent", "id": "5a7e0000000000000000000000000007", "kind": "object",
+     "base": "Component", "scriptExtensible": true}
+  ]
+})";
+    const CaseFile schemas[] = {{"Schema/Engine.sparkbind.json", Schema}};
+    SystemAllocator side; // 기대값은 세는 allocator 밖에 둔다
+    uint64 attempts = 0;
+    uint64 failures = 0;
+    String expected(side);
+    for (uint64 failAt = 0; failAt == 0 || failAt <= attempts; ++failAt) {
+        test::NFailAllocator allocator(backing);
+        const uint64 before = backing.Stats().liveAllocations;
+        {
+            CaseInput input;
+            input.name = "Run/Bundle";
+            input.folder = true;
+            input.files = files;
+            input.schemas = schemas;
+            input.expect = "clean\n";
+            input.hasRun = true;
+            input.folderRevisions = revisions;
+            input.run = failAt == 0 ? Golden : expected.View();
+            Report report(allocator);
+            if (failAt != 0) {
+                allocator.FailOnAttempt(failAt);
+            }
+
+            auto ran = RunCase(allocator, input, report);
+            const uint64 used = allocator.Attempts();
+            allocator.DisableFailure();
+            if (failAt == 0) {
+                REQUIRE(ran);
+                if (report.Failures().Size() != 1) {
+                    PrintFailures(report);
+                }
+
+                REQUIRE(report.Failures().Size() == 1);
+                const StringView failure = report.Failures()[0].View();
+                const StringView marker = "  actual run:\n";
+                usize at = 0;
+                while (at + marker.ByteCount() <= failure.ByteCount() &&
+                       StringView(failure.Data() + at, marker.ByteCount()) != marker) {
+                    ++at;
+                }
+
+                REQUIRE(at + marker.ByteCount() <= failure.ByteCount());
+                const StringView actual(failure.Data() + at + marker.ByteCount(),
+                                        failure.ByteCount() - at - marker.ByteCount());
+                CHECK(actual.Contains("reload v2 keep -> ok (modules 2, instances 2",
+                                      StringComparison::CaseSensitive));
+                CHECK(actual.Contains("later 10", StringComparison::CaseSensitive));
+                CHECK(actual.Contains("reload v3 -> ok (modules 1, instances 2",
+                                      StringComparison::CaseSensitive));
+                CHECK(actual.Contains("seen v3 3", StringComparison::CaseSensitive));
+                CHECK(actual.Contains("close -> ok (ledger 0 buffers)",
+                                      StringComparison::CaseSensitive));
+                REQUIRE(expected.TryAppend(actual));
+                attempts = used;
+            } else if (!ran) {
+                CHECK(ran.Error() == ErrorCode::OutOfMemory);
+                ++failures;
+            } else {
+                if (!report.Failures().IsEmpty()) {
+                    PrintFailures(report);
+                }
+
+                CHECK(report.Failures().IsEmpty());
+            }
+        }
+
+        CHECK(backing.Stats().liveAllocations == before);
+    }
+
+    CHECK(failures > 0);
+}
+
+// pattern의 `$A`·`$B`를 a·b의 10진 글자로 바꿔 out에 붙인다(측정 사례 생성).
+void ExpandPattern(StringBuilderBase& out, StringView pattern, uint32 a, uint32 b) noexcept {
+    for (usize at = 0; at < pattern.ByteCount(); ++at) {
+        const char c = pattern.Data()[at];
+        if (c == '$' && at + 1 < pattern.ByteCount() &&
+            (pattern.Data()[at + 1] == 'A' || pattern.Data()[at + 1] == 'B')) {
+            out.AppendFormat("{}", pattern.Data()[at + 1] == 'A' ? a : b);
+            ++at;
+            continue;
+        }
+
+        out.Append(StringView(&c, 1));
+    }
+}
+
+TEST(SparksReload_MeasuresBodyReload) {
+    // 본문 reload 측정(Docs/Design/SparksReload.ko.md 6절 LC7c3): 바뀌는 Core 모듈(클래스·메서드·
+    // 함수 수십 개)과 그 함수를 import하는 모듈들, instance 수백 개와 구독 연결이 있는 폴더 사례를
+    // 만들어 Core 함수 하나의 본문만 바꾼 revision을 reload한다. 결과 줄만 단언하고 단계별 시간은
+    // 진단 출력에 쓴다(시간은 단언하지 않는다 — 기기·부하에 따라 다르다).
+    SystemAllocator allocator;
+    constexpr uint32 CoreClasses = 60;
+    constexpr uint32 CoreFunctions = 20;
+    constexpr uint32 MethodsPerClass = 12;
+    constexpr uint32 InstancesPerClass = 5;
+    constexpr uint32 UserModules = 4;
+    constexpr uint32 UserClasses = CoreFunctions; // 사용자 클래스마다 Core 함수 하나를 부른다
+    constexpr uint32 UserInstances = 2;
+    constexpr StringView Function = R"(fn Calc$A(n: int): int {
+    var total = n;
+    for (step in 0..<8) {
+        total += step * $B;
+    }
+
+    return total;
+}
+
+)";
+    constexpr StringView ClassHead = R"(open class C$A : ScriptableComponent {
+    var Count = $A;
+    var Label = "c$A";
+    var Items: Array<int> = [];
+    var Peer: C$A?;
+    event Ping(n: int);
+
+    fn Watch(target: C$A) {
+        Peer = target;
+    }
+
+    fn Fire(n: int) {
+        emit Ping(Calc0(n));
+    }
+
+    on Peer.Ping(n: int) {
+        Count += n;
+        Items.Add(n);
+        Label = "${Label}!";
+    }
+)";
+    constexpr StringView Method = R"(
+    fn M$B(n: int): int {
+        var value = n + Count;
+        if (value > $B) {
+            value -= $B;
+        }
+
+        return value;
+    }
+)";
+    constexpr StringView UserClass = R"(class U$Ax$B : ScriptableComponent {
+    var Total = 0;
+
+    fn Run(n: int) {
+        Total += Calc$B(n);
+    }
+}
+
+)";
+    StringBuilder<4096> core(allocator);
+    StringBuilder<4096> changed(allocator);
+    for (uint32 version = 0; version < 2; ++version) {
+        StringBuilderBase& out = version == 0 ? core : changed;
+        for (uint32 function = 0; function < CoreFunctions; ++function) {
+            // revision은 Calc0의 본문 한 곳만 바꾼다(곱하는 수).
+            ExpandPattern(out, Function, function,
+                          function + 1 + (version == 1 && function == 0 ? 1 : 0));
+        }
+
+        for (uint32 type = 0; type < CoreClasses; ++type) {
+            ExpandPattern(out, ClassHead, type, 0);
+            for (uint32 method = 0; method < MethodsPerClass; ++method) {
+                ExpandPattern(out, Method, type, method);
+            }
+
+            out.Append("}\n\n");
+        }
+    }
+
+    StringBuilder<4096> users[UserModules] = {
+        StringBuilder<4096>(allocator), StringBuilder<4096>(allocator),
+        StringBuilder<4096>(allocator), StringBuilder<4096>(allocator)};
+    StringBuilder<64> userPaths[UserModules] = {
+        StringBuilder<64>(allocator), StringBuilder<64>(allocator), StringBuilder<64>(allocator),
+        StringBuilder<64>(allocator)};
+    for (uint32 module = 0; module < UserModules; ++module) {
+        users[module].Append("import Core;\n\n");
+        for (uint32 type = 0; type < UserClasses; ++type) {
+            ExpandPattern(users[module], UserClass, module, type);
+        }
+
+        userPaths[module].AppendFormat("Game/User{}.spark", module);
+    }
+
+    // `.run`: Core instance마다 Enable, 클래스마다 2–5번이 1번을 구독, 사용자 instance 호출, 발행,
+    // reload, 발행, close(결과 값은 placeholder — 출력이 다르다는 실패 하나만 본다).
+    StringBuilder<4096> run(allocator);
+    uint32 object = 0;
+    for (uint32 type = 0; type < CoreClasses; ++type) {
+        const uint32 first = object + 1;
+        for (uint32 instance = 0; instance < InstancesPerClass; ++instance) {
+            ++object;
+            run.AppendFormat("new #{} C{} -> ok\nhook #{} Enable -> ok\n", object, type, object);
+            if (instance != 0) {
+                run.AppendFormat("C{}.Watch(#{}, #{}) -> void\n", type, object, first);
+            }
+        }
+
+        run.AppendFormat("C{}.Fire(#{}, 1) -> void\n", type, first);
+    }
+
+    for (uint32 module = 0; module < UserModules; ++module) {
+        for (uint32 type = 0; type < UserClasses; ++type) {
+            for (uint32 instance = 0; instance < UserInstances; ++instance) {
+                ++object;
+                run.AppendFormat("U{}x{}.Run(#{}, 3) -> void\n", module, type, object);
+            }
+        }
+    }
+
+    run.Append("reload v2 -> ok\nC0.Fire(#1, 2) -> void\nclose -> ok\n");
+    REQUIRE(!core.HasFailed());
+    REQUIRE(!changed.HasFailed());
+    REQUIRE(!run.HasFailed());
+    for (const StringBuilder<4096>& user : users) {
+        REQUIRE(!user.HasFailed());
+    }
+
+    constexpr StringView Manifest = "{ name: \"Game\", sparks: 1, profile: \"full\" }\n";
+    const CaseFile files[] = {
+        {"Game/SparksPackage.json5", Manifest}, {"Game/Core.spark", core.View()},
+        {userPaths[0].View(), users[0].View()}, {userPaths[1].View(), users[1].View()},
+        {userPaths[2].View(), users[2].View()}, {userPaths[3].View(), users[3].View()}};
+    const CaseFile second[] = {{"Game/Core.spark", changed.View()}};
+    const CaseRevision revisions[] = {{"v2", second}};
+    constexpr StringView Schema = R"({
+  "format": 1, "package": "Rocks", "module": "Engine",
+  "types": [
+    {"name": "Actor", "id": "5a7e0000000000000000000000000001", "kind": "object"},
+    {"name": "Component", "id": "5a7e0000000000000000000000000005", "kind": "object",
+     "fields": [{"name": "Owner", "id": "5a7e0000000000000000000000000131", "type": "Actor"}]},
+    {"name": "ScriptableComponent", "id": "5a7e0000000000000000000000000007", "kind": "object",
+     "base": "Component", "scriptExtensible": true}
+  ]
+})";
+    const CaseFile schemas[] = {{"Schema/Engine.sparkbind.json", Schema}};
+    RunTimings timings;
+    CaseInput input;
+    input.name = "Run/Measure";
+    input.folder = true;
+    input.files = files;
+    input.schemas = schemas;
+    input.expect = "clean\n";
+    input.hasRun = true;
+    input.folderRevisions = revisions;
+    input.run = run.View();
+    input.timings = &timings;
+    Report report(allocator);
+    REQUIRE(RunCase(allocator, input, report));
+    if (report.Failures().Size() != 1) {
+        PrintFailures(report);
+    }
+
+    REQUIRE(report.Failures().Size() == 1);
+    const StringView failure = report.Failures()[0].View();
+    // Core가 바뀌고 그 함수를 import하는 사용자 모듈 넷이 묶인다(5개). instance는 Core 300개 +
+    // 사용자 160개.
+    StringBuilder<128> expectedLine(allocator);
+    expectedLine.AppendFormat("reload v2 -> ok (modules {}, instances {},", 1 + UserModules,
+                              CoreClasses * InstancesPerClass +
+                                  UserModules * UserClasses * UserInstances);
+    REQUIRE(!expectedLine.HasFailed());
+    CHECK(failure.Contains(expectedLine.View(), StringComparison::CaseSensitive));
+    CHECK(failure.Contains("close -> ok (ledger 0 buffers)", StringComparison::CaseSensitive));
+    if (!failure.Contains(expectedLine.View(), StringComparison::CaseSensitive)) {
+        PrintFailures(report);
+    }
+
+    CHECK(timings.reloads == 1);
+    constexpr uint64 NanosecondsPerMicrosecond = 1000;
+    const uint64 total =
+        timings.compile + timings.bundle + timings.link + timings.plan + timings.apply;
+    StringBuilder<256> line(allocator);
+    line.AppendFormat(
+        "Sparks body reload ({} source bytes, {} instances): compile {} us, bundle {} "
+        "us, link {} us, plan {} us, apply {} us, total {} us\n",
+        core.ByteCount() + users[0].ByteCount() * UserModules,
+        CoreClasses * InstancesPerClass + UserModules * UserClasses * UserInstances,
+        timings.compile / NanosecondsPerMicrosecond, timings.bundle / NanosecondsPerMicrosecond,
+        timings.link / NanosecondsPerMicrosecond, timings.plan / NanosecondsPerMicrosecond,
+        timings.apply / NanosecondsPerMicrosecond, total / NanosecondsPerMicrosecond);
+    REQUIRE(!line.HasFailed());
+    platform::WriteDiagnostic(line.View().Data(), line.View().ByteCount());
 }
 
 // 폴더 사례(13.1절 "패키지 사례"): 배치 오류는 사례마다 실패 하나이고, 폴더 사례의 지시는 파일

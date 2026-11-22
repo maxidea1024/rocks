@@ -32,7 +32,7 @@ struct GpuPageAllocation {
 // - Free는 이웃 빈 구간과 합친다. 그래서 모두 놓으면 빈 구간이 하나(전체)다.
 // - 잘못된 Free(겹침·범위 밖)는 이후 할당이 GPU 메모리를 겹쳐 주게 하므로 Fatal이다.
 // - 스레드 안전하지 않다. backend가 자기 잠금 안에서 쓴다.
-class GpuPageAllocator {
+class ROCKS_GRAPHICS_API GpuPageAllocator {
 public:
     explicit GpuPageAllocator(Allocator& allocator) noexcept;
 

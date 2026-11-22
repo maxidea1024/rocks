@@ -427,6 +427,9 @@ TEST(GpuTrace_SettingsAndDisjointSamples) {
     }
 }
 
+// 정적 모듈 표로 새 로더를 만드는 시험이라 Monolithic에서만 돈다(Modular에는 정적 표가 없다 —
+// Docs/Design/ModuleLoader.ko.md 3.14절, BuildTargets.ko.md 3.8절 BS8e).
+#if ROCKS_MONOLITHIC
 // RenderBase 모듈(Docs/Design/ModuleLoader.ko.md 3.12절): 호스트가 실행 중인 trace 세션을 서비스로
 // 등록하면 모듈 Startup이 GPU 채널·형을 등록하고 모듈 lease를 잡으며, 묶음 종료가 등록을 풀고
 // lease를 놓는다. 같은 세션에서 엔진 묶음을 다시 시작하면 다시 등록된다(세션이 같은 이름 채널·같은
@@ -474,6 +477,7 @@ TEST(GpuTrace_RenderBaseModuleRegistersThroughTheTraceService) {
 
     CHECK(allocator.Stats().liveAllocations == 0);
 }
+#endif // ROCKS_MONOLITHIC
 
 // 형 등록이 중간에 실패하면 이 호출이 등록한 형과 채널만 되돌린다. 다른 채널에 같은 이름·다른
 // 스키마의 Trace.GpuScope가 먼저 있으면 TypeMismatch이고 GPU 채널은 등록되지 않은 채로 남는다.

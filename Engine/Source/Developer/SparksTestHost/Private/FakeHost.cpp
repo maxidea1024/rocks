@@ -1071,27 +1071,30 @@ bool FakeHost::IsA(uint64 handle, uint64 type) noexcept {
 
 VmFaultKind FakeHost::ResolveVirtual(VmHostCall& call, uint64 receiver,
                                      VmVirtualTarget& target) noexcept {
-    // 수신자 타입부터 기반 쪽으로 `<타입>.<메서드>` Sparks 함수를 찾는다(가장 가까운 override).
+    // 수신자 타입부터 기반 쪽으로 모든 모듈의 `<타입>.<메서드>` Sparks 함수를 찾는다(가장 가까운
+    // override — 같은 단계에서는 실행 단위 순).
     const FakeObject* object = Find(receiver);
-    if (object == nullptr || module_ == nullptr) {
+    if (object == nullptr || modules_.IsEmpty()) {
         return VmFaultKind::ContractViolation;
     }
 
     StringView owner;
     StringView member;
     FakeSplit(bindings_[call.Binding()].name.View(), owner, member);
-    const BytecodeModule& module = module_->Module();
     uint32 depth = 0;
     for (StringView current = object->type.View(); !current.IsEmpty() && depth < FakeMaxBaseDepth;
          current = BaseOf(current), ++depth) {
-        for (uint32 index = 0; index < module.functions.Size(); ++index) {
-            StringView name = module.String(module.functions[index].name);
-            if (name.ByteCount() == current.ByteCount() + 1 + member.ByteCount() &&
-                name.StartsWith(current) && name.Data()[current.ByteCount()] == '.' &&
-                name.EndsWith(member)) {
-                target.module = module_;
-                target.function = index;
-                return VmFaultKind::None;
+        for (const VmLinkedModule* linked : modules_) {
+            const BytecodeModule& module = linked->Module();
+            for (uint32 index = 0; index < module.functions.Size(); ++index) {
+                StringView name = module.String(module.functions[index].name);
+                if (name.ByteCount() == current.ByteCount() + 1 + member.ByteCount() &&
+                    name.StartsWith(current) && name.Data()[current.ByteCount()] == '.' &&
+                    name.EndsWith(member)) {
+                    target.module = linked;
+                    target.function = index;
+                    return VmFaultKind::None;
+                }
             }
         }
     }

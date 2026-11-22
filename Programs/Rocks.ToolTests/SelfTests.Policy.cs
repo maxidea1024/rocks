@@ -169,6 +169,45 @@ internal static partial class SelfTests
             var actual = failures.Select(failure => (failure.Path, failure.Line)).ToHashSet();
             Verify.That(actual.SetEquals(expected), "process entry point lines: " + string.Join("; ", failures));
         });
+        suite.Add("Policy.NodeGraphBoundary", () =>
+        {
+            NoFailures(PolicyChecks.NodeGraphBoundary(options.Root));
+            using TemporaryDirectory temporary = new();
+            // 양성: 허용 밖 의존(Private 목록 포함), Object 층·도메인 헤더 include, 객체·lease 타입 사용.
+            temporary.Write("Engine/Source/Runtime/NodeGraph/NodeGraph.Build.cs", string.Join('\n',
+                "public sealed class NodeGraph : EngineModuleRules",
+                "{",
+                "    protected override string[] PublicDependencies => [\"ObjectRuntime\", \"MaterialSchema\"];",
+                "    protected override string[] PrivateDependencies => [\"UiFramework\"];",
+                "    // protected override string[] PublicDependencies => [\"World\"];",
+                "    protected override string[] DynamicModules =>",
+                "    [",
+                "        \"ObjectRuntime\",",
+                "        \"MaterialEditor\",",
+                "    ];",
+                "}") + "\n");
+            temporary.Write("Engine/Source/Runtime/NodeGraph/Private/Bad.cpp", string.Join('\n',
+                "#include <Object/InstancedStruct.h>", "#include <Material/MaterialGraph.h>", "TypeLease lease;",
+                "ObjectHandle handle;", "Result<void> Run(ObjectRegistry& registry) noexcept;") + "\n");
+            // 음성: 허용 접두, 주석·문자열 안, 시험 폴더, 따옴표 include, 다른 모듈.
+            temporary.Write("Engine/Source/Runtime/NodeGraph/Public/NodeGraph/Good.h", string.Join('\n',
+                "#include <Core/Result.h>", "#include <NodeGraph/GraphDocument.h>", "#include \"Local.h\"",
+                "// InstancedStruct를 쓰지 않는다 <Object/TypeLease.h>", "const char* text = \"ObjectHandle\";") + "\n");
+            temporary.Write("Engine/Source/Runtime/NodeGraph/Tests/Probe.cpp", "#include <Object/ObjectRegistry.h>\nObjectRegistry* registry;\n");
+            temporary.Write("Engine/Source/Runtime/Other/Private/Other.cpp", "#include <Object/InstancedStruct.h>\n");
+            var failures = PolicyChecks.NodeGraphBoundary(temporary.Root);
+            var expected = new HashSet<(string, int)>
+            {
+                ("Engine/Source/Runtime/NodeGraph/NodeGraph.Build.cs", 3), ("Engine/Source/Runtime/NodeGraph/NodeGraph.Build.cs", 4),
+                ("Engine/Source/Runtime/NodeGraph/NodeGraph.Build.cs", 9),
+                ("Engine/Source/Runtime/NodeGraph/Private/Bad.cpp", 1), ("Engine/Source/Runtime/NodeGraph/Private/Bad.cpp", 2),
+                ("Engine/Source/Runtime/NodeGraph/Private/Bad.cpp", 3), ("Engine/Source/Runtime/NodeGraph/Private/Bad.cpp", 4),
+                ("Engine/Source/Runtime/NodeGraph/Private/Bad.cpp", 5),
+            };
+            var actual = failures.Select(failure => (failure.Path, failure.Line)).ToHashSet();
+            Verify.That(actual.SetEquals(expected), "nodegraph boundary lines: " + string.Join("; ", failures));
+            Verify.Equal(9, failures.Count, "nodegraph boundary failure count (include line 1 also names InstancedStruct)");
+        });
         suite.Add("Policy.DeterministicMathObjectRules", () =>
         {
             // 외부 심볼: 코드 생성 지원 심볼(COFF·ELF·Mach-O 이름)은 허용, CRT 수학·다른 모듈 함수는 거부.
@@ -1005,6 +1044,41 @@ internal static partial class SelfTests
                 ("Engine/Plugins/Importers/Fake/Source/FakeImporter/Public/FakeImporter/Bad.h", 2)
             ];
             Verify.That(Check().SetEquals(expected), "thread_local in public headers: " + string.Join(", ", Check()));
+        });
+        // 공개 헤더 타입 표지(Docs/Design/BuildTargets.ko.md 3.8절 BD29·BS8e): 변수 템플릿의 주소를 타입 키로 쓰지 않는다(Core/TypeKey.h만 예외).
+        suite.Add("Policy.PublicHeaderRejectsVariableTemplateTypeTags", () =>
+        {
+            using TemporaryDirectory temporary = new();
+            HashSet<(string Path, int Line)> Check()
+            {
+                var failures = PolicyChecks.PublicHeaderTypeTags(temporary.Root);
+                Verify.That(failures.All(failure => failure.Rule == "public-header-type-tag"), "rule name");
+                return failures.Select(failure => (failure.Path, failure.Line)).ToHashSet();
+            }
+
+            // 통과: TypeKey.h 자체, Private 헤더·시험 소스, 주소를 쓰지 않는 변수 템플릿(값으로만 읽음), 주석 속 예, 서드파티 그룹.
+            temporary.Write("Core/Source/Runtime/Core/Public/Core/TypeKey.h",
+                "#pragma once\ntemplate <class T>\ninline unsigned char NativeTypeIdentity = 0;\nconst void* K() { return &NativeTypeIdentity<int>; }\n");
+            temporary.Write("Core/Source/Runtime/Probe/Private/ProbeTag.h", "#pragma once\ntemplate <class T>\ninline char Tag = 0;\nconst void* k = &Tag<int>;\n");
+            temporary.Write("Core/Source/Runtime/Probe/Tests/ProbeTests.cpp", "template <class T>\ninline char Tag = 0;\nconst void* k = &Tag<int>;\n");
+            temporary.Write("Core/Source/Runtime/Probe/Public/Probe/Value.h",
+                "#pragma once\ntemplate <class T>\ninline constexpr bool IsProbeV = false;\nbool b = IsProbeV<int> && true;\n" +
+                "template <class T>\ninline constexpr bool IsOtherV = true;\nbool c = true &&IsOtherV<int>;\n// &Tag<int> in a comment\n");
+            temporary.Write("Core/Source/ThirdParty/Fake/Public/Fake.h", "#pragma once\ntemplate <class T>\ninline char Tag = 0;\nconst void* k = &Tag<int>;\n");
+            Verify.That(Check().Count == 0, "allowed uses were rejected: " + string.Join(", ", Check()));
+            // 위반: constexpr·const 없는 표지, detail:: 한정 주소, 엔진 플러그인 모듈의 공개 헤더.
+            temporary.Write("Core/Source/Runtime/Probe/Public/Probe/Bad.h",
+                "#pragma once\nnamespace detail {\ntemplate <class T>\ninline constexpr char Tag = 0;\n}\n" +
+                "template <class T> const void* Key() { return &detail::Tag<T>; }\ntemplate <class T>\ninline unsigned char Other{};\n" +
+                "template <class T> bool Same(const void* k) { return k == & Other<T>; }\n");
+            temporary.Write("Engine/Plugins/Importers/Fake/Source/FakeImporter/Public/FakeImporter/Bad.h",
+                "#pragma once\ntemplate <class T> inline int Marker = 0;\nconst void* k = &Marker<int>;\n");
+            HashSet<(string, int)> expected =
+            [
+                ("Core/Source/Runtime/Probe/Public/Probe/Bad.h", 4), ("Core/Source/Runtime/Probe/Public/Probe/Bad.h", 8),
+                ("Engine/Plugins/Importers/Fake/Source/FakeImporter/Public/FakeImporter/Bad.h", 2)
+            ];
+            Verify.That(Check().SetEquals(expected), "variable template type tags in public headers: " + string.Join(", ", Check()));
         });
         // 모듈 API 매크로(Docs/Design/BuildTargets.ko.md 3.8절 BD27·BS8d2): 자기 모듈의 매크로만, 공개 헤더에만(허용한 내부 헤더 예외), 소스에는
         // 쓰지 않는다.

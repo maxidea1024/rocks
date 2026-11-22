@@ -22,7 +22,7 @@ namespace rocks {
 // 무효화하지 않는다 — entry마다 따로 할당한다). 이 객체가 준 ref는 이 객체에만 쓸 수 있다(다른
 // source에서는 번호가 다른 byte를 가리킨다).
 // 스레드: 동기화하지 않는다. 한 스레드(저장하는 쪽)가 쓴다.
-class MemoryBulkSource final : public PackageBulkSource {
+class ROCKS_ASSETRUNTIME_API MemoryBulkSource final : public PackageBulkSource {
 public:
     explicit MemoryBulkSource(Allocator& allocator) noexcept
         : allocator_(&allocator), entries_(allocator) {

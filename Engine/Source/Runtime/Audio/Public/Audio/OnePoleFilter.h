@@ -41,7 +41,7 @@ inline constexpr float FilterFrequencyTolerance = 1.0e-4f;
 inline constexpr float HighPassNyquistMargin = 1.0f;
 
 // 1극 필터의 공통 상태다. 계수 하나를 보간하고 채널마다 z를 하나 둔다.
-class OnePoleFilterState {
+class ROCKS_AUDIO_API OnePoleFilterState {
 public:
     uint32 SampleRate() const noexcept {
         return sampleRate_;
@@ -94,7 +94,7 @@ protected:
     float z_[MaxOutputChannels] = {};
 };
 
-class OnePoleLowPass final : public OnePoleFilterState {
+class ROCKS_AUDIO_API OnePoleLowPass final : public OnePoleFilterState {
 public:
     // sampleRate는 IsValidMixSampleRate, channels는 1–MaxOutputChannels다. 밖이면 InvalidArgument.
     // 만든 직후는 bypass(설정 전)다.
@@ -111,7 +111,7 @@ public:
     static float ComputeCoefficient(float cutoffHz, uint32 sampleRate) noexcept;
 };
 
-class OnePoleHighPass final : public OnePoleFilterState {
+class ROCKS_AUDIO_API OnePoleHighPass final : public OnePoleFilterState {
 public:
     [[nodiscard]] static Result<OnePoleHighPass> TryCreate(uint32 sampleRate,
                                                            uint32 channels) noexcept;

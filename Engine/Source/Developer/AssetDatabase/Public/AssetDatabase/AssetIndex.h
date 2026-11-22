@@ -219,7 +219,7 @@ private:
     bool ready_ = false;
 };
 
-class AssetIndex {
+class ROCKS_ASSETDATABASE_API AssetIndex {
 public:
     // scheduler가 있으면 검색(Rebuild·RefreshPaths의 하위 트리)의 파일 읽기를 그 worker와 나눠
     // 한다(7.1절 16 A2d2 — 결과는 직렬과 같다). 그때 allocator·검색에 넘기는 FileSystem·layout의
@@ -446,8 +446,9 @@ private:
 // 할당 실패(그때 line에 붙인 일부가 남을 수 있다).
 //   StringBuilder<512> line(allocator);
 //   if (auto appended = AppendAssetIndexDiagnosticLine(line, diagnostic); !appended) { ... }
-Result<void> AppendAssetIndexDiagnosticLine(StringBuilderBase& line,
-                                            const AssetIndexDiagnostic& diagnostic) noexcept;
+ROCKS_ASSETDATABASE_API Result<void>
+AppendAssetIndexDiagnosticLine(StringBuilderBase& line,
+                               const AssetIndexDiagnostic& diagnostic) noexcept;
 
 // 경고 진단인지다(OrphanedOutput — 명령의 종료 코드는 경고 아닌 진단만 본다, 13절).
 inline bool AssetIndexDiagnosticIsWarning(const AssetIndexDiagnostic& diagnostic) noexcept {

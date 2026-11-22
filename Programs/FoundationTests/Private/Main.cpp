@@ -436,14 +436,17 @@ static int RunTestRunner(int argc, const char* const* argv) {
         }
     }
 
-    test::TestCase* cases[4096]{};
+    // 한 번에 고를 수 있는 시험 수의 상한이다. 시험 본문이 이 스레드 스택을 쓰므로 표는 정적
+    // 저장소에 둔다.
+    constexpr usize MaxRunnableTests = 16384;
+    static test::TestCase* cases[MaxRunnableTests]{};
     usize count = 0;
     for (test::TestCase* test = test::first; test != nullptr; test = test->next) {
         if (strstr(test->name, filter) == nullptr) {
             continue;
         }
 
-        if (count == 4096) {
+        if (count == MaxRunnableTests) {
             fprintf(stderr, "Test registry capacity exceeded\n");
             return 2;
         }

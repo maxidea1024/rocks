@@ -162,6 +162,6 @@ inline constexpr uint32 GamepadAxisCount = static_cast<uint32>(GamepadAxis::Coun
 
 // 키의 영문 이름이다(예: "W", "LeftShift", "Numpad5"). 진단·저장용이며 지역화하지 않는다. 범위 밖
 // 값은 "Unknown"이다. 반환 문자열은 정적 수명이다.
-const char* KeyName(Key key) noexcept;
+ROCKS_INPUT_API const char* KeyName(Key key) noexcept;
 
 } // namespace rocks::input

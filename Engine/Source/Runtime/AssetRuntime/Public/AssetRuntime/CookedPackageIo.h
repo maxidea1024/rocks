@@ -65,7 +65,7 @@ protected:
 //
 // 수명: io context와 allocator는 이 객체보다 오래 살아야 한다. 진행 중 요청이 남은 채로 파괴하면 안
 // 된다(로더 Shutdown이 모두 끝낸다). allocator는 다른 스레드의 해제를 지원해야 한다.
-class AsyncCookedPackageIo final : public CookedPackageIo {
+class ROCKS_ASSETRUNTIME_API AsyncCookedPackageIo final : public CookedPackageIo {
 public:
     // 한 번에 제출하는 읽기 조각의 기본 크기다(AsyncReadFile 한 요청의 상한 4 GiB − 1 아래 — 64 GiB
     // 패키지도 조각으로 읽는다).

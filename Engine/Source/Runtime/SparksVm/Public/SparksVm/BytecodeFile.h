@@ -39,7 +39,7 @@ enum class BytecodeLoadError : uint8 {
     BadEnd              // 함수의 마지막 명령이 끝 명령이 아니다
 };
 
-const char* BytecodeLoadErrorName(BytecodeLoadError error) noexcept;
+ROCKS_SPARKSVM_API const char* BytecodeLoadErrorName(BytecodeLoadError error) noexcept;
 
 // 거부의 자리다(함수·명령 주소 — 해당이 없으면 NoBytecodeIndex).
 struct BytecodeRejection {
@@ -50,14 +50,15 @@ struct BytecodeRejection {
 
 // module을 `.sparkc` byte로 out 끝에 덧붙인다. 실패: 할당 실패는 OutOfMemory, u32 길이를 넘는 표는
 // CapacityExceeded.
-Result<void> WriteBytecodeFile(const BytecodeModule& module, Array<uint8>& out) noexcept;
+ROCKS_SPARKSVM_API Result<void> WriteBytecodeFile(const BytecodeModule& module,
+                                                  Array<uint8>& out) noexcept;
 
 // bytes를 읽어 out(빈 모듈)을 채우고 verifier를 돌린다. 실패: 형식·verifier 거부는 InvalidArgument
 // (사유는 rejection), 할당 실패는 OutOfMemory. 실패하면 out의 내용은 정해지지 않는다.
-Result<void> ReadBytecodeFile(Span<const uint8> bytes, BytecodeModule& out,
-                              BytecodeRejection& rejection) noexcept;
+ROCKS_SPARKSVM_API Result<void> ReadBytecodeFile(Span<const uint8> bytes, BytecodeModule& out,
+                                                 BytecodeRejection& rejection) noexcept;
 
 // 모듈의 구조를 검사한다(5절 verifier). 통과면 error가 None이다.
-BytecodeRejection VerifyBytecode(const BytecodeModule& module) noexcept;
+ROCKS_SPARKSVM_API BytecodeRejection VerifyBytecode(const BytecodeModule& module) noexcept;
 
 } // namespace rocks::sparks

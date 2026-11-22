@@ -92,11 +92,11 @@ struct [[nodiscard]] ShaderToolLoadStatus {
 };
 
 // 진단용 열거자 이름이다(예: "NotBootstrapped"). 정적 수명이다.
-const char* ShaderToolLoadCodeName(ShaderToolLoadCode code) noexcept;
+ROCKS_SHADERTOOLLOADER_API const char* ShaderToolLoadCodeName(ShaderToolLoadCode code) noexcept;
 
 // 사용자에게 보일 영어 안내문이다(정적 수명). NotBootstrapped·DigestMismatch는 bootstrap 명령
 // (ShaderToolBootstrapCommand)을 담는다.
-const char* ShaderToolLoadMessage(ShaderToolLoadCode code) noexcept;
+ROCKS_SHADERTOOLLOADER_API const char* ShaderToolLoadMessage(ShaderToolLoadCode code) noexcept;
 
 // 저장소를 채우는 명령이다(저장소 루트에서 실행).
 inline constexpr const char ShaderToolBootstrapCommand[] =
@@ -107,11 +107,12 @@ inline constexpr const char ShaderToolBootstrapCommand[] =
 // %LOCALAPPDATA%\Rocks\ThirdParty, macOS ~/Library/Application Support/Rocks/ThirdParty. 디렉터리가
 // 있는지는 보지 않는다. 실패: buffer 부족 Overflow(bytes에 필요한 길이, NUL 제외), 개발 호스트가
 // 아닌 플랫폼(Android) Unsupported, 그 밖은 GetStandardDirectory의 오류다.
-platform::FileStatus GetShaderToolStoreRoot(char* buffer, usize capacity, usize& bytes) noexcept;
+ROCKS_SHADERTOOLLOADER_API platform::FileStatus GetShaderToolStoreRoot(char* buffer, usize capacity,
+                                                                       usize& bytes) noexcept;
 
 // 도구 공유 라이브러리 하나다. 이동만 된다. 함수 주소의 수명은 DynamicLibrary와 같다(Find가 준
 // lease가 살아 있는 동안 유효하다).
-class ShaderToolLibrary final {
+class ROCKS_SHADERTOOLLOADER_API ShaderToolLibrary final {
 public:
     ShaderToolLibrary() noexcept = default;
     ShaderToolLibrary(ShaderToolLibrary&& other) noexcept;
@@ -276,7 +277,7 @@ struct SpirvToolsFunctions {
 // 워커가 쓰는 도구 묶음이다. DXC·SPIRV-Cross·SPIRV-Tools는 필수이고 FXC는 표에 이 호스트 파일이
 // 있을 때만 연다(Windows 전용 도구). 열린 동안 모든 함수 표가 유효하다(lease를 쥔다). 복사·이동하지
 // 않는다.
-class ShaderToolSet final {
+class ROCKS_SHADERTOOLLOADER_API ShaderToolSet final {
 public:
     ShaderToolSet() noexcept = default;
     ShaderToolSet(const ShaderToolSet&) = delete;
@@ -341,7 +342,8 @@ private:
 // 표를 실제로 부를 수 있음을 확인하는 데도 쓴다. Windows 구현만 있다(Private/Win64가 dxcapi.h를
 // Windows 헤더와 함께 include한다). 다른 플랫폼은 UnsupportedHost, 함수 표가 비었으면 WrongState,
 // DXC 호출 실패는 CallFailed(file.nativeError에 HRESULT)다.
-ShaderToolLoadStatus QueryDxcVersion(const DxcFunctions& functions, uint32& major,
-                                     uint32& minor) noexcept;
+ROCKS_SHADERTOOLLOADER_API ShaderToolLoadStatus QueryDxcVersion(const DxcFunctions& functions,
+                                                                uint32& major,
+                                                                uint32& minor) noexcept;
 
 } // namespace rocks::shader

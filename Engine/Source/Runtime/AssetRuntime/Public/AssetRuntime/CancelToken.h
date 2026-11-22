@@ -27,7 +27,7 @@ struct CancelState;
 } // namespace detail
 
 // 취소 표시를 읽는 쪽이다. 복사할 수 있고(할당 없음) 기본값은 취소될 수 없는 token이다.
-class CancelToken {
+class ROCKS_ASSETRUNTIME_API CancelToken {
 public:
     CancelToken() noexcept = default;
     CancelToken(const CancelToken& other) noexcept;
@@ -55,7 +55,7 @@ private:
 
 // 취소 표시를 쓰는 쪽이다. 이동만 할 수 있다. 소멸은 취소하지 않는다(표시는 그대로, 공유 상태
 // 계수만 놓는다).
-class CancelSource {
+class ROCKS_ASSETRUNTIME_API CancelSource {
 public:
     CancelSource() noexcept = default;
     CancelSource(CancelSource&& other) noexcept;
