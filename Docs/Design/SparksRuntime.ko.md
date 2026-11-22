@@ -3,6 +3,7 @@
 이 문서는 Sparks 언어 코어의 LC6(실행 모델)을 정한다. 언어 의미는 SparksLanguage(SL) §4.3·§5·§6·§7·§8.3·§9가 정본이고, 이 문서는 그 의미를 VM 쪽에서 어떻게 실현하는지(자료 구조·순서·host interface 2차·bytecode 형식 v3·시험)를 정한다. LC5(SparksVm.ko.md)의 링크·host interface 1차 위에 쌓는다.
 
 - 개정 1(2026-11-22): 첫 판. 하위 단계 LC6a–LC6e, 결정 R1–R12.
+- 개정 20(2026-11-22): LC6e 리뷰 반영(2.7절).
 - 개정 19(2026-11-22): LC6e 시나리오·Gate G1/G3/G4(2.7절), LC6 완료.
 - 개정 18(2026-11-22): LC6d5 리뷰 반영(2.6절).
 - 개정 17(2026-11-22): LC6d5 구현 메모(2.6절).
@@ -177,6 +178,7 @@
 - **G3(음성 대조):** 누수를 일부러 넣으면 G1이 실패하는지 확인했다(Detach의 필드 해제를 빼면 `Run/Held`·`Run/Objects`, 취소의 지역 해제를 빼면 `Run/Held`·`Run/Load`가 실패 — 2026-11-22 수동 확인, 코드에는 남기지 않는다).
 - **G4(실패 행렬):** 저장소 corpus의 `.run` 사례는 통과하면 실행된 모든 `AWAIT`(n번째)마다 fault 주입과 취소 주입(정지 직후 그 실행 취소 — 하위 실행이면 부모 묶음으로 전파)으로 한 번씩 다시 돌리고, 출력은 비교하지 않고 어느 출구에서든 `CloseSession` 뒤 ledger·유지 자원 0만 본다(`CaseInput::gateSweep`, `VmSession::InjectAwait` — 시험 전용 진입). 할당 실패 N번째 주입은 할당 실패 전수 시험(`SparksConformance_RunGoldenAllocationFailure*`)이 맡는다.
 - **시나리오:** corpus `Scenario/Door`는 SL §2.2 DoorLogic을 파일 사례로 옮긴 것이다(다른 패키지 import 대신 같은 파일의 Switch 이벤트·Bag): 열쇠 검사, Opening 쓰기와 Changed, 여는 동안 `@skipWhileBusy`, Tick 연출, 재개 뒤 Open과 Changed → Opened 전달 순서, 여는 도중 Disable의 취소와 되돌림(Disable 문맥 쓰기는 Changed 없음). SL §2.1 플레이어 캐릭터는 입력 action·component 생성·`Find<T>`가 엔진 연동(EI)에 있어 연동 단계에서 시나리오로 더한다.
+- **LC6e 리뷰 반영(개정 20):** G4는 주입이 실제로 일어났는지(fault를 냈거나 취소를 실행했는지 — `InjectionFired`)를 단언한다(헛도는 행렬 방지). 취소 표시는 그 조각이 정지하지 못하면 조각 끝에 지우고(다른 정지로 새지 않게), 취소 대상은 슬롯 번호와 대기 handle로 대조한다(같은 조각의 슬롯 재사용). G1·G4는 강제 정리(`CloseSession`) 전에 모두 Detach한 뒤 정지 실행·대기·연결이 0인지 보고, 가짜 host는 held가 아니거나 이미 멈춘 handle에 온 `ReleaseHeld`를 이상으로 센다(과다·이중 해제 — 0이어야 한다). 가짜 host 장부는 기록 할당보다 먼저 바꾼다. 범위 메모: G4는 corpus에서 **실행된** await만 다룬다(정적 위치 대비 보고는 없다). G1은 VM ledger·유지 자원·정지 실행·대기·연결까지이고 revision lease·이름 pool·연결 참조계수는 엔진 연동(ModuleHost·NamePool)에서 본다. 할당 실패 N번째 주입은 할당 실패 전수 시험이 allocator live 수로 보고, host 획득 거부·재연결 실패 주입은 연동 단계다. G3 음성 대조는 수동이다(자동 고정 사례는 후속).
 - **완료:** LC6(실행 모델)은 LC6a–LC6e로 끝났다. 남은 연동 몫은 각 절의 "남은 것"에 적었다.
 
 ## 3. 순서

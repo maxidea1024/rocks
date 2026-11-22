@@ -237,6 +237,16 @@ public:
         return awaitCount_;
     }
 
+    // 주입이 실제로 일어났는지다(fault를 냈거나 취소를 실행했다 — 헛도는 G4를 잡는다).
+    bool InjectionFired() const noexcept {
+        return injectionFired_;
+    }
+
+    // 연결 표 항목 수다(G1 — Detach 뒤 0).
+    uint32 ConnectionCount() const noexcept {
+        return static_cast<uint32>(connections_.Size());
+    }
+
     // `@skipWhileBusy`로 버린 이벤트 수다(디버거 표시 — SL 6.1절 SD11).
     uint64 SkippedWhileBusy() const noexcept {
         return skippedWhileBusy_;
@@ -574,6 +584,8 @@ private:
     uint32 awaitCount_ = 0;
     bool cancelNext_ = false;                     // 다음 정지를 취소 표시한다
     uint32 injectedSuspension_ = NoBytecodeIndex; // 조각 끝에 취소할 정지 실행
+    uint64 injectedWait_ = 0;                     // 그 실행이 기다리던 대기(슬롯 재사용 대조)
+    bool injectionFired_ = false;
     // AWAIT 하나를 센다: 주입 fault면 true(취소 주입은 다음 정지를 표시한다).
     bool CountAwait() noexcept;
     // 지연 적용(LC6d2).

@@ -1142,11 +1142,19 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
                 return;
             }
 
+            // 강제 정리(CloseSession) 전에 Detach 뒤 정지 실행·대기·연결이 0인지 본다(리뷰 4).
+            session.DetachAll();
+            const bool lingering = session.SuspendedCount() != 0 || session.WaitCount() != 0 ||
+                                   session.ConnectionCount() != 0;
             static_cast<void>(session.CloseSession());
             host.ReleaseAll(execution);
-            if (execution.LiveBuffers() != 0 || host.HeldLive() != 0) {
+            if (lingering || !session.InjectionFired() || execution.LiveBuffers() != 0 ||
+                execution.LiveBytes() != 0 || host.HeldLive() != 0 ||
+                host.ReleaseAnomalies() != 0) {
                 StringBuilder<MessageInlineBytes> leak(allocator);
-                leak.AppendFormat("{}: G4 leak after the {} injected at await {}", input.name,
+                leak.AppendFormat("{}: G4 {} after the {} injected at await {}", input.name,
+                                  !session.InjectionFired() ? "injection did not fire"
+                                                            : "leak or over-release",
                                   injection.cancel ? "cancel" : "fault", injection.await);
                 if (!leak.HasFailed()) {
                     static_cast<void>(report.TryAddFailure(leak.View()));
@@ -2005,9 +2013,20 @@ Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
         }
     }
 
-    // Gate G1(SparksRuntime 4절): CloseSession 뒤 실행 문맥 ledger와 유지 자원이 0이다.
+    // Gate G1(SparksRuntime 4절): Detach 뒤 정지 실행·대기·연결이 0이고(강제 정리 전), CloseSession
+    // 뒤 실행 문맥 ledger와 유지 자원이 0이며 과다·이중 해제가 없다.
+    session.DetachAll();
+    if (session.SuspendedCount() != 0 || session.WaitCount() != 0 ||
+        session.ConnectionCount() != 0) {
+        return fail(".run: executions, waits or connections remain after detaching everything");
+    }
+
     if (auto closed = session.CloseSession(); !closed) {
         return Result<void>::Failure(closed.Error());
+    }
+
+    if (host.ReleaseAnomalies() != 0) {
+        return fail(".run: a held resource was released twice or was not held");
     }
 
     host.ReleaseAll(execution);

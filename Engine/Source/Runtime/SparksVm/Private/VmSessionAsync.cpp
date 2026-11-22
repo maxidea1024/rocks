@@ -328,6 +328,7 @@ bool VmSession::CountAwait() noexcept {
     }
 
     cancelNext_ = injectCancel_;
+    injectionFired_ = injectionFired_ || !injectCancel_;
     return !injectCancel_;
 }
 
@@ -355,10 +356,15 @@ void VmSession::SettleWaits(const Result<VmCallResult>& called) noexcept {
 
     fragmentWaits_.Clear();
     // G4 취소 주입: 이 조각이 정지시킨 실행을 취소한다(정지 지점의 취소 — 유지 자원·대기 정리).
+    // 표시를 소비하지 못한 취소(정지가 실패했다)는 다음 정지로 새지 않게 지운다(LC6e 리뷰 2).
+    cancelNext_ = false;
     if (injectedSuspension_ != NoBytecodeIndex) {
         const uint32 target = injectedSuspension_;
         injectedSuspension_ = NoBytecodeIndex;
-        if (target < suspended_.Size() && suspended_[target].live) {
+        // 같은 조각에서 슬롯이 재사용됐으면 다른 실행이다(대기 handle로 대조 — 리뷰 3).
+        if (target < suspended_.Size() && suspended_[target].live &&
+            suspended_[target].wait == injectedWait_) {
+            injectionFired_ = true;
             CancelSuspended(target, true);
         }
     }
@@ -456,6 +462,7 @@ VmFaultKind VmSession::Suspend(uint64 wait, uint32 resultRegister, uint32 result
     if (cancelNext_) {
         cancelNext_ = false;
         injectedSuspension_ = number;
+        injectedWait_ = wait;
     }
 
     waits_[index].awaited = true;
@@ -566,6 +573,7 @@ VmFaultKind VmSession::SuspendChild(usize boundary, uint64 wait, uint32 resultRe
     if (cancelNext_) {
         cancelNext_ = false;
         injectedSuspension_ = number;
+        injectedWait_ = wait;
     }
 
     waits_[index].awaited = true;

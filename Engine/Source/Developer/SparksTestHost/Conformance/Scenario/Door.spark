@@ -1,5 +1,7 @@
 // SL 2.2 DoorLogic(전체 계획 23.1 예시의 확장)을 파일 사례로 옮긴 실행 시나리오(SparksRuntime LC6e):
 // 다른 패키지 import(Gameplay.Interaction·Items.Inventory) 대신 같은 파일의 Switch 이벤트와 Bag을 쓴다.
+// 빠진 것(연동 단계): @net·@save·권한 구역(Owner.HasAuthority — SD45), @authorityOnly Actor 확장
+// 이벤트, Hinge 회전·Math.EaseOut, OpenSound·World.Audio.PlayAt(로그로 대신), actor.Tags·Find<T>.
 enum DoorState {
     Closed,
     Opening,
@@ -34,7 +36,6 @@ class Bag : ScriptableComponent {
 
 class DoorLogic : ScriptableComponent {
     @edit var OpenAngle: float = 90.0;
-    @edit var Hinge: SceneComponent;
     @edit var RequiredKey = Tag("Item.Key.Iron");
     @edit(Min: 0.05) var SwingSeconds: float = 0.6;
     @edit var Trigger: Switch?;

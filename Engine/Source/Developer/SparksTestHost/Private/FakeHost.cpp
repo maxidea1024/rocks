@@ -604,20 +604,26 @@ void FakeHost::ReleaseHeld(uint64 handle) noexcept {
         load.released = load.released || load.request == handle;
     }
 
+    // 기록 글자는 바꾸기 전 handle 상태로 만든다(살아 있던 `#n`).
     StringBuilder<64> text(*allocator_);
     text.Append("release ");
     FormatHandle(text, handle);
+    // 장부를 기록보다 먼저 바꾼다(기록 할당이 실패해도 장부는 맞다 — LC6e 리뷰 6).
+    FakeObject* target = Find(handle);
+    if (target == nullptr || !target->held) {
+        ++releaseAnomalies_; // held가 아니거나 이미 멈춘·죽은 handle
+    } else {
+        target->alive = false;
+        target->held = false;
+        ++target->generation;
+    }
+
     if (text.HasFailed()) {
         outOfMemory_ = true;
         return;
     }
 
     Record(text.View());
-    if (FakeObject* target = Find(handle)) {
-        target->alive = false;
-        target->held = false;
-        ++target->generation;
-    }
 }
 
 uint64 FakeHost::StartLoad(uint64 assetLo, uint64 assetHi) noexcept {
@@ -942,7 +948,7 @@ VmFaultKind FakeHost::CallNative(VmHostCall& call) noexcept {
         }
 
         if (IsHeldType(binding.resultType.View())) {
-            Find(created)->held = true; // 획득한 유지 자원(G1 장부)
+            Find(created)->held = true; // 획득한 유지 자원(G1 장부 — 실패 출구는 아래에서 지운다)
         }
 
         call.Refs()[0] = created;
@@ -979,6 +985,13 @@ VmFaultKind FakeHost::CallNative(VmHostCall& call) noexcept {
     }
 
     if (text.HasFailed()) {
+        // 호출이 실패로 끝나면 획득도 없다(장부를 되돌린다 — LC6e 리뷰 6).
+        if (binding.bank == FakeRefBank && binding.slots != 0 && !call.Refs().IsEmpty()) {
+            if (FakeObject* made = Find(call.Refs()[0])) {
+                made->held = false;
+            }
+        }
+
         call.Fail(text.Status().Error());
         return VmFaultKind::None;
     }

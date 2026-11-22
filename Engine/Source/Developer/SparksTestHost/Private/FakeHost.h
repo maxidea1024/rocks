@@ -76,6 +76,10 @@ public:
     LoadState WatchLoad(uint64 request, bool take, uint64& value, uint64& error) noexcept override;
     // 멈추지 않은 유지 자원 수다(SparksRuntime 4절 G1 — CloseSession 뒤 0이어야 한다).
     uint32 HeldLive() const noexcept;
+    // held가 아니거나 없는·이미 멈춘 handle에 온 ReleaseHeld 수다(과다·이중 해제 — G1/G4 0).
+    uint32 ReleaseAnomalies() const noexcept {
+        return releaseAnomalies_;
+    }
     // 요청을 끝낸다(결과를 기억한다 — 아직 기다리지 않은 요청도). 요청이 아니면 false.
     bool CompleteLoad(uint64 request, uint64 value, uint64 error) noexcept;
     VmFaultKind GetContext(VmHostCall& call) noexcept override;
@@ -130,6 +134,7 @@ private:
 
     Allocator* allocator_;
     Array<FakeLoad> loads_{*allocator_};
+    uint32 releaseAnomalies_ = 0;
     const Compilation& compilation_;
     Array<FakeBinding> bindings_;
     Array<FakeObject> objects_; // 번호 n은 n − 1번
