@@ -106,8 +106,9 @@ namespace RocksJsonWriterPrivate
 	}
 }
 
-FRocksJsonWriter::FRocksJsonWriter(EStyle InStyle)
+FRocksJsonWriter::FRocksJsonWriter(EStyle InStyle, int32 InBaseDepth)
 	: Style(InStyle)
+	, BaseDepth(InBaseDepth)
 {
 }
 
@@ -124,7 +125,7 @@ void FRocksJsonWriter::NewLine(int32 Depth)
 	}
 
 	Out.Add('\n');
-	for (int32 Index = 0; Index < Depth * RocksJsonWriterPrivate::IndentSpaces; ++Index)
+	for (int32 Index = 0; Index < (Depth + BaseDepth) * RocksJsonWriterPrivate::IndentSpaces; ++Index)
 	{
 		Out.Add(' ');
 	}
@@ -302,6 +303,13 @@ void FRocksJsonWriter::UInt(uint64 Value)
 	RocksJsonWriterPrivate::AppendInteger(Out, Value);
 }
 
+void FRocksJsonWriter::RawValue(TConstArrayView<uint8> Fragment)
+{
+	check(!Fragment.IsEmpty());
+	BeforeValue();
+	Out.Append(Fragment.GetData(), Fragment.Num());
+}
+
 void FRocksJsonWriter::Float(float Value)
 {
 	BeforeValue();
@@ -327,6 +335,12 @@ TArray<uint8> FRocksJsonWriter::Finish()
 		Out.Add('\n');
 	}
 
+	return FinishFragment();
+}
+
+TArray<uint8> FRocksJsonWriter::FinishFragment()
+{
+	checkf(IsComplete(), TEXT("JSON writer: incomplete document"));
 	TArray<uint8> Result = MoveTemp(Out);
 	Out.Reset();
 	bRootWritten = false;

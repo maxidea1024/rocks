@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "AssetRegistry/AssetData.h"
 
+struct FRocksAssetBody;
 struct FRocksExportAsset;
 struct FRocksExportRedirect;
 
@@ -31,8 +32,8 @@ struct FRocksExportResult
 // 묶음 내보내기다(11.6절 — 닫힘 FRocksExportClosure, 쓰기 FRocksBundleWriter). commandlet과 에디터 메뉴가 같은
 // 경로를 쓴다.
 //
-// UX1b 범위: 에셋 JSON 공통부(objectPath·class·ueClass·dependencies·diagnostics)를 쓰고 settings·data는 빈
-// 객체다. 종류별 본문은 UX2 이후 단계가 채운다(14절). 그래서 UX1b는 에셋을 로드하지 않는다(11.7절).
+// 에셋 JSON 공통부(objectPath·class·ueClass·dependencies·diagnostics)를 쓰고, 추출기가 있는 종류(UX2a 텍스처 —
+// 4.5절)는 에셋을 로드해 settings·data를 채운다. 나머지 종류의 본문은 빈 객체다(그 단계가 채운다, 14절).
 //
 // AssetRegistry 검색은 호출자가 끝내 둔다. 게임 스레드에서 부른다.
 class ROCKSEXPORT_API FRocksExporter
@@ -44,6 +45,6 @@ public:
 	// bundle.json bytes다(3.4절). CreatedUtc가 비면 createdUtc를 쓰지 않는다.
 	static TArray<uint8> MakeBundleJson(const TArray<FRocksExportAsset>& Assets, const TArray<FRocksExportRedirect>& Redirects, const FString& CreatedUtc);
 
-	// 에셋 JSON bytes다(3.5절).
-	static TArray<uint8> MakeAssetJson(const FRocksExportAsset& Asset);
+	// 에셋 JSON bytes다(3.5절). Body의 settings·data 조각이 비면 빈 객체다.
+	static TArray<uint8> MakeAssetJson(const FRocksExportAsset& Asset, const FRocksAssetBody& Body);
 };

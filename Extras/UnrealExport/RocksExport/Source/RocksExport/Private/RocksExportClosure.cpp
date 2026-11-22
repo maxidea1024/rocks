@@ -140,6 +140,11 @@ namespace RocksExportClosurePrivate
 	}
 }
 
+FString RocksExchangeClassNameOfAsset(const FAssetData& Asset, bool& bOutInScope)
+{
+	return RocksExportClosurePrivate::ClassNameOf(Asset, bOutInScope);
+}
+
 bool RocksIsValidExchangeObjectPath(const FString& ObjectPath)
 {
 	return RocksExportClosurePrivate::IsValidObjectPath(ObjectPath);

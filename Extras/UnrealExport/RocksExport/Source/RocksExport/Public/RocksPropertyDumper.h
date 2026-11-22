@@ -46,6 +46,9 @@ public:
 	// 덤프에서 뺄 구조체를 더한다(파생 구조체 포함).
 	void ExcludeStruct(const UScriptStruct* Struct);
 
+	// 덤프에서 뺄 프로퍼티 하나를 더한다(다른 키로 따로 쓰는 값 — 예: 텍스처 Source는 data에 쓴다, 4.5절).
+	void ExcludeProperty(const FProperty* Property);
+
 	// Object 클래스의 프로퍼티 전부를 JSON 객체 하나로 쓴다.
 	void DumpObject(const UObject* Object, FRocksJsonWriter& Writer);
 
@@ -66,6 +69,7 @@ private:
 
 	const UObject* DumpRoot;
 	TArray<const UScriptStruct*> ExcludedStructs;
+	TSet<const FProperty*> ExcludedProperties;
 	TSet<const UObject*> Expanded;
 	TMap<FString, bool> References;
 
