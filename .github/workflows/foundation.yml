@@ -105,6 +105,9 @@ jobs:
       # without missing exports, and the tests run through the Modular entry (Docs/Design/ModuleLoader.ko.md section 3.14).
       - name: Test FoundationTests as Modular
         run: dotnet msbuild Rocks.proj /t:Test /p:Adaptive=off /p:Configuration=Debug /p:RocksTarget=FoundationModular /p:NativeOutput=out/ci-modular /v:minimal
+      # Engine layer Modular linking (BS8e): the engine modules link as shared libraries (engine plugin tests excluded until ModuleLoader ML5).
+      - name: Test EngineTests as Modular
+        run: dotnet msbuild Rocks.proj /t:Test /p:Adaptive=off /p:Configuration=Debug /p:RocksTarget=EngineModular /p:NativeOutput=out/ci-engine-modular /v:minimal
       # C++ uses clang-format 21.1.6 installed above; C# uses dotnet format of the SDK pinned by global.json (Build/Format/Rocks.Format.slnx).
       - name: Verify C++ and C# formatting
         run: dotnet out/dotnet/bin/Rocks.ToolTests/Debug/net10.0/Rocks.ToolTests.dll format --root .

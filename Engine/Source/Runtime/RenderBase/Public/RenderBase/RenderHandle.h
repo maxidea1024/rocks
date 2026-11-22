@@ -102,7 +102,7 @@ struct RenderResourceLease {
 //   auto bound = handles.Texture(texture.Value());   // Ready면 장치 handle
 //
 // 스레드: 모든 함수가 스레드 안전이다. 수명: 표는 렌더 lane과 그 모든 작업보다 오래 살아야 한다.
-class RenderHandleTable {
+class ROCKS_RENDERBASE_API RenderHandleTable {
 public:
     explicit RenderHandleTable(Allocator& allocator) noexcept;
 
@@ -213,8 +213,9 @@ private:
 //   if (retired && !retired.Value().deferred) {
 //       ReleaseRetiredResource(device, handle, retired.Value());
 //   }
-void ReleaseRetiredResource(graphics::Device& device, RenderHandle handle,
-                            const RenderHandleTable::RetiredResource& retired) noexcept;
+ROCKS_RENDERBASE_API void
+ReleaseRetiredResource(graphics::Device& device, RenderHandle handle,
+                       const RenderHandleTable::RetiredResource& retired) noexcept;
 
 } // namespace rocks::render
 

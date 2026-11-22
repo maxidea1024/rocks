@@ -19,11 +19,12 @@ namespace rocks::sparks {
 // 정수 리터럴(10진·`0x` 16진·`0b` 2진, 구분자 `_` 포함)의 값이다. 범위 검사(S0109)는 쓰는 자리의
 // 타입을 아는 검사 단계(LC3)가 하므로 여기서는 uint64까지 받는다.
 // 실패: uint64를 넘으면 Overflow.
-Result<uint64> TryDecodeIntegerLiteral(StringView text) noexcept;
+ROCKS_SPARKSCOMPILER_API Result<uint64> TryDecodeIntegerLiteral(StringView text) noexcept;
 
 // 실수 리터럴(`1.5`·`.5`·`1e3`, 구분자 포함)의 값이다. 가장 가까운 double로 반올림하며 너무 작은
 // 값은 0 또는 비정규 수다. allocator는 구분자를 뺀 사본에 쓴다(짧은 리터럴은 할당하지 않는다).
 // 실패: 유한한 double을 넘으면 Overflow(S0113), 할당 실패는 그 오류.
-Result<double> TryDecodeFloatLiteral(Allocator& allocator, StringView text) noexcept;
+ROCKS_SPARKSCOMPILER_API Result<double> TryDecodeFloatLiteral(Allocator& allocator,
+                                                              StringView text) noexcept;
 
 } // namespace rocks::sparks

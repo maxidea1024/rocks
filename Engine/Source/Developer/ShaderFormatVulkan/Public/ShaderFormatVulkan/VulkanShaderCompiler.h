@@ -21,7 +21,8 @@ namespace rocks::shader {
 //   desc.shaderCompiler = compiler.Value().Get();
 //
 // 스레드: 한 번에 한 호출만 받는다(장치가 내부 잠금으로 직렬화한다).
-class VulkanShaderCompiler final : public graphics::ShaderSourceCompiler {
+class ROCKS_SHADERFORMATVULKAN_API VulkanShaderCompiler final
+    : public graphics::ShaderSourceCompiler {
 public:
     // 저장소의 DXC·SPIRV-Tools를 연다. 실패: 이 호스트에 도구가 없거나(Windows 밖) 저장소가
     // 비었거나 다르면 Unsupported·NotFound·DependencyFailed이고 diagnostics에 안내(bootstrap 명령

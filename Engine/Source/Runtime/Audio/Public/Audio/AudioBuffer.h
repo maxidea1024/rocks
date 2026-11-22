@@ -23,7 +23,7 @@ namespace rocks::audio {
 inline constexpr usize AudioBufferAlignment = 64;
 
 // 쓰기 가능한 planar 보기다. channels[0..channelCount)만 의미가 있다.
-struct PlanarView {
+struct ROCKS_AUDIO_API PlanarView {
     float* channels[MaxOutputChannels] = {};
     uint32 channelCount = 0;
     uint32 frameCount = 0;
@@ -37,7 +37,7 @@ struct PlanarView {
 };
 
 // 읽기 전용 planar 보기다. PlanarView에서 암시적으로 만들 수 있다.
-struct PlanarConstView {
+struct ROCKS_AUDIO_API PlanarConstView {
     const float* channels[MaxOutputChannels] = {};
     uint32 channelCount = 0;
     uint32 frameCount = 0;
@@ -55,7 +55,7 @@ struct PlanarConstView {
 
 // 채널 수 × frame 용량의 float32를 한 번에 할당해 소유하는 버퍼다. 채널마다 시작 주소가
 // AudioBufferAlignment에 맞는다. 처음 내용은 0이다. 이동만 된다.
-class PlanarBuffer {
+class ROCKS_AUDIO_API PlanarBuffer {
 public:
     // 버퍼를 만든다.
     // - channels: 1–MaxOutputChannels, frameCapacity: 1–MaxBlockFrames. 밖이면 InvalidArgument.
@@ -102,18 +102,19 @@ private:
 };
 
 // 모든 채널을 0으로 채운다.
-void Clear(const PlanarView& destination) noexcept;
+ROCKS_AUDIO_API void Clear(const PlanarView& destination) noexcept;
 
 // destination += source × gain. 두 보기의 채널 수·frame 수가 같아야 한다(다르면 assert).
-void MixAdd(const PlanarView& destination, const PlanarConstView& source, float gain) noexcept;
+ROCKS_AUDIO_API void MixAdd(const PlanarView& destination, const PlanarConstView& source,
+                            float gain) noexcept;
 
 // destination += source × g(n). n번째 frame(0부터)의 이득은 start + (end − start)·n/N이다(N = frame
 // 수, UE Audio::ArrayMixIn의 시작·끝 이득 규칙). 마지막 frame은 end에 닿지 않고 다음 블록이 end에서
 // 시작한다. 두 보기의 채널 수·frame 수가 같아야 한다.
-void MixAddRamp(const PlanarView& destination, const PlanarConstView& source, float startGain,
-                float endGain) noexcept;
+ROCKS_AUDIO_API void MixAddRamp(const PlanarView& destination, const PlanarConstView& source,
+                                float startGain, float endGain) noexcept;
 
 // 버퍼 전체에 gain을 곱한다.
-void Scale(const PlanarView& destination, float gain) noexcept;
+ROCKS_AUDIO_API void Scale(const PlanarView& destination, float gain) noexcept;
 
 } // namespace rocks::audio

@@ -11,6 +11,7 @@
 #include <Core/Lifetime/ModuleLease.h>
 #include <Core/Memory/UniquePtr.h>
 #include <Core/Module/HostServiceKey.h>
+#include <Core/TypeKey.h>
 #include <Meta/GeneratedType.h>
 #include <Meta/SettingsSchema.h>
 #include <Object/GeneratedFieldAccess.h>
@@ -561,7 +562,7 @@ public:
     template <class T>
     Result<void> BindCommand(const cvar::ConsoleCommand& command, T& target) noexcept {
         return BindCommandTarget(cvar::detail::HandleAccess::Definition(command), &target,
-                                 &cvar::detail::TargetTypeTag<T>, nullptr);
+                                 TypeKeyOf<T>(), nullptr);
     }
 
     // BindCommand로 묶은 대상이 expected면 푼다(그 뒤 Target은 null). 다른 대상이 묶여 있으면

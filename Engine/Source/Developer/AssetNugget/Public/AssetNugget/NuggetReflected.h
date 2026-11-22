@@ -29,7 +29,7 @@ namespace rocks {
 //   const AssignmentTarget target =
 //       AssignmentTarget::Value(registry, access, settingsLease, &settings, allocator);
 //   if (auto written = WriteReflected(writer, target); !written) { ... }
-Result<void> WriteReflected(NuggetKeyWriter& writer,
-                            const reflection_text::AssignmentTarget& target) noexcept;
+ROCKS_ASSETNUGGET_API Result<void>
+WriteReflected(NuggetKeyWriter& writer, const reflection_text::AssignmentTarget& target) noexcept;
 
 } // namespace rocks

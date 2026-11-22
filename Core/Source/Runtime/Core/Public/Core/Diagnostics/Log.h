@@ -132,7 +132,7 @@ private:
 // - args: 자리 수와 같아야 한다. 정수·실수·bool·char·포인터·enum·문자열·Formatter<T> 타입, 그리고
 //   "{@Name}" 자리에는 LogStructure<T> 타입(LG16, Core/Diagnostics/LogStructure.h).
 // - 반환은 없다. 로깅 실패는 버림·집계로 끝난다.
-class Log {
+class ROCKS_CORE_API Log {
 public:
     Log() = delete;
 

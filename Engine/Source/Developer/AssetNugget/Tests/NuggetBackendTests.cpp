@@ -174,6 +174,11 @@ TEST(NuggetBackend_RoundTrip) {
     REQUIRE(stored.status == NuggetStatus::Stored);
     CHECK(stored.error == ErrorCode::None &&
           TemporaryCount(allocator, platform::PhysicalFileSystem(), project.Root()) == 0);
+    // Put 결과는 계획한 Record다(저장 표현 포함 — NuggetCache Memory 항목).
+    CHECK(NuggetRecordDigest(stored.record) == stored.digest && stored.record.key == Key(1) &&
+          stored.record.values.Size() == 3 &&
+          stored.record.values[1].encoding == NuggetEncoding::Rcbk &&
+          stored.record.inputs.Size() == 1 && stored.record.meta.Size() == 2);
 
     NuggetGetResult hit = backend.Get(NuggetBackendGet{NuggetBucketTexture, Key(1)});
     REQUIRE(hit.status == NuggetStatus::Hit && hit.values.Size() == 3);

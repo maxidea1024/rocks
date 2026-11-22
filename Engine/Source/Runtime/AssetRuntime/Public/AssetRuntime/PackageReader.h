@@ -144,8 +144,9 @@ struct PackageContents {
 // NewerVersion·쿠킹 UnsupportedVersion / Unsupported, 낮으면 UnsupportedVersion / Unsupported(v1이
 // 첫 버전이다), headerBytes· bulkAlignment·reserved·sectionCount(1–32)·sectionTableOffset
 // 정렬·fileBytes 식·Stat 크기 불일치·64 GiB 초과는 CorruptPackage / InvalidArgument다.
-Result<PackageHeader> ReadPackageHeader(Span<const uint8> headerBytes, uint64 fileBytes,
-                                        AssetDiagnostic* failure = nullptr) noexcept;
+ROCKS_ASSETRUNTIME_API Result<PackageHeader>
+ReadPackageHeader(Span<const uint8> headerBytes, uint64 fileBytes,
+                  AssetDiagnostic* failure = nullptr) noexcept;
 
 // 패키지 파일 전체를 검증하고 해석한다(AS 5.1절 검증 순서 1–4, 5.2절 섹션 규칙, 5.3절 버전 축).
 // Objects graph의 내용 검증·Dependencies 대조·bulk 압축 해제는 PackageLoadState(PackageLoad.h)가
@@ -165,9 +166,9 @@ Result<PackageHeader> ReadPackageHeader(Span<const uint8> headerBytes, uint64 fi
 //   if (!contents) {
 //       Log::Warning(LogAsset, "{Code}", AssetDiagnosticName(failure.code));
 //   }
-Result<PackageContents> ReadPackage(Allocator& allocator, Span<const uint8> file,
-                                    const PackageReadOptions& options,
-                                    AssetDiagnostic* failure = nullptr) noexcept;
+ROCKS_ASSETRUNTIME_API Result<PackageContents>
+ReadPackage(Allocator& allocator, Span<const uint8> file, const PackageReadOptions& options,
+            AssetDiagnostic* failure = nullptr) noexcept;
 
 // 부분 읽기 결과다(AS 7.1절 13 — A2b). contents의 view(이름·ImportRecord·Tags 등)는 buffers의 소유
 // byte를 가리키므로 이 값을 옮겨도 유효하다. Objects·Bulk·BulkIndex는 읽지 않아 contents.objects·
@@ -199,24 +200,25 @@ struct PackageIndexView {
 //   auto view = ReadPackageIndex(allocator, reader, options, &diagnostic);
 //   if (view) { /* view.Value().contents.exports[0].type — 대표 타입 */ }
 class PackageRangeReader;
-Result<PackageIndexView> ReadPackageIndex(Allocator& allocator, PackageRangeReader& reader,
-                                          const PackageReadOptions& options,
-                                          AssetDiagnostic* failure = nullptr) noexcept;
+ROCKS_ASSETRUNTIME_API Result<PackageIndexView>
+ReadPackageIndex(Allocator& allocator, PackageRangeReader& reader,
+                 const PackageReadOptions& options, AssetDiagnostic* failure = nullptr) noexcept;
 
 // 에디터 지연 열기의 읽기다(AS 7.1절 15 — A2c1): Bulk 섹션 내용만 빼고 전체 읽기와 같은 판정을
 // 한다(BulkIndex는 읽어 배치를 Bulk 섹션 크기와 대조한다 — entry 사이 패딩·저장 CRC는 지연 읽기가
 // entry마다 본다). 섹션 사이 패딩은 읽지 않는다. 결과는 ReadPackageIndex처럼 소유 버퍼를 가리킨다
 // (contents.bulk는 비고 bulkEntries는 채운다). 오류는 ReadPackageIndex와 같다.
-Result<PackageIndexView> ReadPackageForEdit(Allocator& allocator, PackageRangeReader& reader,
-                                            const PackageReadOptions& options,
-                                            AssetDiagnostic* failure = nullptr) noexcept;
+ROCKS_ASSETRUNTIME_API Result<PackageIndexView>
+ReadPackageForEdit(Allocator& allocator, PackageRangeReader& reader,
+                   const PackageReadOptions& options, AssetDiagnostic* failure = nullptr) noexcept;
 
 // 패키지 파일의 지문(헤더 + 섹션 표 + tableCrc의 SHA-256 — PackageContents::fingerprint와 같다)을
 // 범위 읽기로 얻는다(AS 5.5절 1, 7.1절 15 — 저장의 외부 변경 검출·지연 읽기의 지문 대조). 헤더
 // 판정과 섹션 표 CRC만 본다. 오류: ReadPackageHeader의 진단, 표 CRC 위반 CorruptPackage /
 // InvalidArgument, 범위 읽기 오류는 진단 None과 그 오류, 할당 실패.
-Result<PackageFingerprint> ReadPackageFingerprint(Allocator& allocator, PackageRangeReader& reader,
-                                                  AssetDiagnostic* failure = nullptr) noexcept;
+ROCKS_ASSETRUNTIME_API Result<PackageFingerprint>
+ReadPackageFingerprint(Allocator& allocator, PackageRangeReader& reader,
+                       AssetDiagnostic* failure = nullptr) noexcept;
 
 // 저장한 패키지 파일의 재검증이다(AS 5.5절 5, 7.1절 15 — A2c1). 에디터 패키지로 헤더·섹션 표·
 // 모든 섹션 CRC·섹션 사이 패딩 0·BulkIndex 배치·entry 사이 패딩 0·entry 저장 CRC를 scratch 크기
@@ -226,19 +228,25 @@ Result<PackageFingerprint> ReadPackageFingerprint(Allocator& allocator, PackageR
 //
 // 오류: 빈 scratch InvalidArgument(진단 없음), 판정 위반은 ReadPackage와 같은 진단, 범위 읽기
 // 오류는 그 오류(진단 None), 할당 실패(작은 섹션과 BulkIndex만 할당한다).
-Result<void> VerifyPackageFile(Allocator& allocator, PackageRangeReader& reader,
-                               Span<uint8> scratch, AssetDiagnostic* failure = nullptr) noexcept;
+ROCKS_ASSETRUNTIME_API Result<void> VerifyPackageFile(Allocator& allocator,
+                                                      PackageRangeReader& reader,
+                                                      Span<uint8> scratch,
+                                                      AssetDiagnostic* failure = nullptr) noexcept;
 
 // bulk entry 하나의 저장 byte(stored — entry.storedBytes)를 raw(entry.rawBytes)에 풀고 SHA-256을
 // 확인한다(DecodePackageBulk와 에디터 지연 읽기가 같이 쓴다). 오류: 크기 불일치·컨테이너 형식·
 // rawSize 불일치·해제 실패·SHA-256 불일치는 InvalidArgument, 할당 실패.
-Result<void> DecodePackageBulkEntry(const PackageBulkEntry& entry, Span<const uint8> stored,
-                                    Span<uint8> raw, Allocator& allocator) noexcept;
+ROCKS_ASSETRUNTIME_API Result<void> DecodePackageBulkEntry(const PackageBulkEntry& entry,
+                                                           Span<const uint8> stored,
+                                                           Span<uint8> raw,
+                                                           Allocator& allocator) noexcept;
 
 // 위와 같되 out을 entry.rawBytes로 키워 쓴다. Zstd entry는 out을 키우기 전에 컨테이너 헤더의
 // rawSize를 entry와 대조한다(손상된 표로 큰 할당을 하지 않는다). 오류는 위와 같다.
-Result<void> DecodePackageBulkEntry(const PackageBulkEntry& entry, Span<const uint8> stored,
-                                    Array<uint8>& out, Allocator& allocator) noexcept;
+ROCKS_ASSETRUNTIME_API Result<void> DecodePackageBulkEntry(const PackageBulkEntry& entry,
+                                                           Span<const uint8> stored,
+                                                           Array<uint8>& out,
+                                                           Allocator& allocator) noexcept;
 
 // contents의 bulk entry를 모두 풀어 raw byte를 out 끝에 bulkId 순으로 이어 붙이고, entry별 위치를
 // slots에 채운다(rawBytes와 SHA-256 확인). raw 합이 maxRawBytes를 넘으면 CapacityExceeded다.
@@ -249,9 +257,9 @@ Result<void> DecodePackageBulkEntry(const PackageBulkEntry& entry, Span<const ui
 // 오류: 컨테이너 형식·Zstd가 아닌 codec·rawSize 불일치·블록 해제 실패·SHA-256 불일치는
 // CorruptPackage / InvalidArgument(진단 detail = bulkId), 할당 실패는 OutOfMemory다. 실패하면
 // out·slots는 호출 전 길이로 돌아간다.
-Result<void> DecodePackageBulk(const PackageContents& contents, Array<uint8>& out,
-                               Array<PackageBulkSlot>& slots, uint64 maxRawBytes,
-                               AssetDiagnostic* failure = nullptr) noexcept;
+ROCKS_ASSETRUNTIME_API Result<void>
+DecodePackageBulk(const PackageContents& contents, Array<uint8>& out, Array<PackageBulkSlot>& slots,
+                  uint64 maxRawBytes, AssetDiagnostic* failure = nullptr) noexcept;
 
 // Guid의 정렬 순서다((high, low) 부호 없는 수치 순 — AS 4.2절).
 constexpr bool GuidLess(const Guid& left, const Guid& right) noexcept {

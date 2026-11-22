@@ -206,7 +206,8 @@ enum class DiagnosticCode : uint16 {
 inline constexpr usize DiagnosticCodeDigits = 4;
 
 // 표시 번호를 "S0412" 형태로 out에 붙인다. 실패: out의 할당 실패.
-Result<void> AppendDiagnosticCode(StringBuilderBase& out, uint32 number) noexcept;
+ROCKS_SPARKSCOMPILER_API Result<void> AppendDiagnosticCode(StringBuilderBase& out,
+                                                           uint32 number) noexcept;
 
 // 코드 표의 한 행이다. name은 kebab-case 영어 이름이며 사람이 코드를 찾을 때 쓴다.
 struct DiagnosticCodeInfo {
@@ -215,10 +216,10 @@ struct DiagnosticCodeInfo {
 };
 
 // 정의된 모든 코드다(번호 오름차순).
-Span<const DiagnosticCodeInfo> AllDiagnosticCodes() noexcept;
+ROCKS_SPARKSCOMPILER_API Span<const DiagnosticCodeInfo> AllDiagnosticCodes() noexcept;
 
 // 표시 번호로 코드를 찾는다. 없는 번호면 nullptr이다(.expect 해석 등 외부 입력용).
-const DiagnosticCodeInfo* FindDiagnosticCode(uint32 number) noexcept;
+ROCKS_SPARKSCOMPILER_API const DiagnosticCodeInfo* FindDiagnosticCode(uint32 number) noexcept;
 
 // 진단 하나다. DiagnosticList만 만든다.
 class Diagnostic final {
@@ -277,7 +278,7 @@ private:
 };
 
 // 한 번의 컴파일이 낸 진단 목록이다. 한 스레드에서 쓴다. allocator가 목록보다 오래 살아야 한다.
-class DiagnosticList final {
+class ROCKS_SPARKSCOMPILER_API DiagnosticList final {
 public:
     explicit DiagnosticList(Allocator& allocator) noexcept;
 
@@ -342,7 +343,8 @@ Result<void> AppendDiagnostic(StringBuilderBase& out, const SourceSet& sources,
                               const Diagnostic& diagnostic) noexcept;
 
 // 목록 전체를 지금 순서대로 붙인다(정렬은 하지 않는다 — 먼저 Sort를 부른다).
-Result<void> AppendDiagnostics(StringBuilderBase& out, const SourceSet& sources,
-                               const DiagnosticList& diagnostics) noexcept;
+ROCKS_SPARKSCOMPILER_API Result<void> AppendDiagnostics(StringBuilderBase& out,
+                                                        const SourceSet& sources,
+                                                        const DiagnosticList& diagnostics) noexcept;
 
 } // namespace rocks::sparks

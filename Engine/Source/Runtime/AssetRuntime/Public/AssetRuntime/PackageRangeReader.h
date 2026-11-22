@@ -29,7 +29,7 @@ protected:
 };
 
 // 메모리 byte를 읽는다(byte는 이 객체보다 오래 살아야 한다).
-class MemoryPackageRangeReader final : public PackageRangeReader {
+class ROCKS_ASSETRUNTIME_API MemoryPackageRangeReader final : public PackageRangeReader {
 public:
     explicit MemoryPackageRangeReader(Span<const uint8> bytes) noexcept : bytes_(bytes) {
     }
@@ -45,7 +45,7 @@ private:
 };
 
 // 파일을 읽는다(열린 동안 파일 핸들을 쥔다 — 한 스레드에서 쓴다).
-class FilePackageRangeReader final : public PackageRangeReader {
+class ROCKS_ASSETRUNTIME_API FilePackageRangeReader final : public PackageRangeReader {
 public:
     FilePackageRangeReader() noexcept = default;
 

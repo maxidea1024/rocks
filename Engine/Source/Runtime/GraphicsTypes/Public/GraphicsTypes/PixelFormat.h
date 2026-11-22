@@ -274,10 +274,10 @@ struct PixelFormatInfo {
 };
 
 // 형식 정보다. 번호표 밖이면 Unknown 행(크기 0)을 준다.
-const PixelFormatInfo& GetPixelFormatInfo(PixelFormat format) noexcept;
+ROCKS_GRAPHICSTYPES_API const PixelFormatInfo& GetPixelFormatInfo(PixelFormat format) noexcept;
 
 // 번호표 안의 유효 형식인지다(Unknown은 false).
-bool IsValidPixelFormat(PixelFormat format) noexcept;
+ROCKS_GRAPHICSTYPES_API bool IsValidPixelFormat(PixelFormat format) noexcept;
 
 // 고정 번호다(바이너리 직렬화).
 constexpr uint32 PixelFormatNumber(PixelFormat format) noexcept {
@@ -285,40 +285,43 @@ constexpr uint32 PixelFormatNumber(PixelFormat format) noexcept {
 }
 
 // 번호의 형식이다. 실패: 번호표 밖 또는 0(Unknown) InvalidArgument.
-Result<PixelFormat> PixelFormatFromNumber(uint32 number) noexcept;
+ROCKS_GRAPHICSTYPES_API Result<PixelFormat> PixelFormatFromNumber(uint32 number) noexcept;
 
 // "RGBA8UnormSrgb" 같은 안정 이름이다. 번호표 밖이면 "Unknown"이다.
-const char* PixelFormatName(PixelFormat format) noexcept;
+ROCKS_GRAPHICSTYPES_API const char* PixelFormatName(PixelFormat format) noexcept;
 
 // 안정 이름의 형식이다(대소문자 구분). 실패: 모르는 이름("Unknown" 포함) NotFound.
-Result<PixelFormat> ParsePixelFormatName(StringView name) noexcept;
+ROCKS_GRAPHICSTYPES_API Result<PixelFormat> ParsePixelFormatName(StringView name) noexcept;
 
 // 폭 width를 덮는 블록 열 수(ceil(width / blockWidth))와 높이 height를 덮는 블록 행 수다. 무효
 // 형식이면 0이다.
-uint32 PixelFormatBlockColumns(PixelFormat format, uint32 width) noexcept;
-uint32 PixelFormatBlockRows(PixelFormat format, uint32 height) noexcept;
+ROCKS_GRAPHICSTYPES_API uint32 PixelFormatBlockColumns(PixelFormat format, uint32 width) noexcept;
+ROCKS_GRAPHICSTYPES_API uint32 PixelFormatBlockRows(PixelFormat format, uint32 height) noexcept;
 
 // plane 수다(단일 plane 1, 깊이·스텐실과 비디오 2, 무효 0).
-uint32 PixelFormatPlaneCount(PixelFormat format) noexcept;
+ROCKS_GRAPHICSTYPES_API uint32 PixelFormatPlaneCount(PixelFormat format) noexcept;
 
 // plane 하나의 행 바이트와 행 수다. 블록 압축 형식의 행은 블록 행이다. 다중 plane 형식은 plane
 // 크기(width >> widthShift)로 계산하며 폭·높이가 축소 배수가 아니면 0이다. 깊이·스텐실은 plane 0이
 // 깊이(D16 2·D24 4·D32F 4바이트 texel), plane 1이 스텐실(1바이트)이다. 범위 밖 plane은 0이다.
-uint64 PixelFormatPlaneRowBytes(PixelFormat format, uint32 plane, uint32 width) noexcept;
-uint32 PixelFormatPlaneRows(PixelFormat format, uint32 plane, uint32 height) noexcept;
+ROCKS_GRAPHICSTYPES_API uint64 PixelFormatPlaneRowBytes(PixelFormat format, uint32 plane,
+                                                        uint32 width) noexcept;
+ROCKS_GRAPHICSTYPES_API uint32 PixelFormatPlaneRows(PixelFormat format, uint32 plane,
+                                                    uint32 height) noexcept;
 
 // plane 하나의 2D 이미지 바이트다(행 바이트 × 행 수, readback·plane 업로드 크기).
-uint64 PixelFormatPlaneImageBytes(PixelFormat format, uint32 plane, uint32 width,
-                                  uint32 height) noexcept;
+ROCKS_GRAPHICSTYPES_API uint64 PixelFormatPlaneImageBytes(PixelFormat format, uint32 plane,
+                                                          uint32 width, uint32 height) noexcept;
 
 // 단일 plane 형식의 행 하나 바이트다(블록 압축은 블록 행 하나). 다중 plane 형식은 0이다.
-uint64 PixelFormatRowBytes(PixelFormat format, uint32 width) noexcept;
+ROCKS_GRAPHICSTYPES_API uint64 PixelFormatRowBytes(PixelFormat format, uint32 width) noexcept;
 
 // 2D 이미지 하나의 바이트다(행 사이 padding 없음, RenderBase 6.5절 배치). plane 크기의 합이며
 // plane 순서대로 잇는다(plane 0 전체 다음 plane 1). 깊이·스텐실(D24S8 4×4 = 64 + 16)과
 // 비디오(NV12 4×2 = 8 + 4)도 같다. 어느 plane이든 크기가 0이면(무효 형식·0 크기·축소 배수 아님)
 // 0이다.
-uint64 PixelFormatImageBytes(PixelFormat format, uint32 width, uint32 height) noexcept;
+ROCKS_GRAPHICSTYPES_API uint64 PixelFormatImageBytes(PixelFormat format, uint32 width,
+                                                     uint32 height) noexcept;
 
 // mip level의 크기다(max(1, size >> level)).
 constexpr uint32 MipExtent(uint32 size, uint32 level) noexcept {
@@ -345,7 +348,7 @@ constexpr uint32 FullMipCount(uint32 width, uint32 height) noexcept {
 //
 // 사용 예:
 //   MipChainBytes(PixelFormat::RGBA8Unorm, 4, 4, 1, 3);  // 64 + 16 + 4 = 84
-uint64 MipChainBytes(PixelFormat format, uint32 width, uint32 height, uint32 depth,
-                     uint32 mipLevels) noexcept;
+ROCKS_GRAPHICSTYPES_API uint64 MipChainBytes(PixelFormat format, uint32 width, uint32 height,
+                                             uint32 depth, uint32 mipLevels) noexcept;
 
 } // namespace rocks::graphics

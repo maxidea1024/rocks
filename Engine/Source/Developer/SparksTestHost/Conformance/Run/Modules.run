@@ -1,0 +1,23 @@
+# Several modules in one `.run` (SparksReload LC7c2a): a class whose base lives in another module, a
+# call to an imported top-level function, a handler on an event the base declares, and a virtual
+# call from the base module that the derived class overrides.
+new #1 Door -> ok (6 steps)
+new #2 Door -> ok (6 steps)
+new #3 Lamp -> ok (3 steps)
+hook #1 Enable -> ok (0 steps)
+hook #2 Enable -> ok (0 steps)
+Door.Watch(#2, #1) -> void (3 steps)
+Door.Fire(#1, 3) -> void (14 steps)
+  log info "seen 6"
+  deliver #2 Door.on Peer.Ping -> ok (11 steps)
+Fixture.Raise(#1) -> void (21 steps)
+  log info "raised door 2"
+Fixture.Raise(#3) -> void (21 steps)
+  log info "raised fixture 2"
+fields #1 -> Door(Level: 2, Peer: none, Seen: 0)
+fields #2 -> Door(Level: 1, Peer: #1, Seen: 6)
+fields #3 -> Lamp(Level: 2)
+detach #1 -> ok
+detach #2 -> ok
+detach #3 -> ok
+close -> ok (ledger 0 buffers)

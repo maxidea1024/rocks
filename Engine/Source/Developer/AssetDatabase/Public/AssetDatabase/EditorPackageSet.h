@@ -246,7 +246,7 @@ struct Hash<EditorEdgeKey> {
     }
 };
 
-class EditorPackageSet final : public PackageImportResolver {
+class ROCKS_ASSETDATABASE_API EditorPackageSet final : public PackageImportResolver {
 public:
     // allocator는 집합보다 오래 산다(Registry·표·bulk raw byte가 쓴다).
     EditorPackageSet(Allocator& allocator, const EditorPackageSetConfig& config) noexcept;

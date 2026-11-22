@@ -71,7 +71,7 @@ struct NativeWindowHandle {
 // - 닫기 버튼은 창을 파괴하지 않고 IsCloseRequested만 세운다. 실제 파괴는 Window 소멸이다.
 // - 포커스를 잃으면 FocusLost 이벤트를 넣는다(InputState가 눌린 키를 모두 놓는다).
 // - 키는 스캔코드(물리 위치) 기준 input::Key이고, 입력 문자는 Text 이벤트(UTF-32)로 따로 온다.
-class Window {
+class ROCKS_PLATFORMWINDOW_API Window {
 public:
     // 창을 만든다. 크기 0·잘못된 UTF-8 제목은 InvalidArgument(창을 만들기 전에 거른다), 창
     // backend가 없는 플랫폼은 Unsupported, OS 실패는 DependencyFailed다. report가 null이 아니면
@@ -149,6 +149,6 @@ enum class DesktopSessionState : uint8 {
 //   if (platform::QueryDesktopSessionState() == platform::DesktopSessionState::Disconnected) {
 //       // GDI 기반 창 출력 검사는 근거를 남기고 건너뛴다
 //   }
-DesktopSessionState QueryDesktopSessionState() noexcept;
+ROCKS_PLATFORMWINDOW_API DesktopSessionState QueryDesktopSessionState() noexcept;
 
 } // namespace rocks::platform

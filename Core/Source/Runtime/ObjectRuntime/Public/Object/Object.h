@@ -2,6 +2,7 @@
 
 #include <Base/TypeTraits.h>
 #include <Core/Result.h>
+#include <Core/TypeKey.h>
 #include <Meta/GeneratedType.h>
 #include <Object/BoundCoreValues.h>
 #include <Object/ObjectHandle.h>
@@ -75,18 +76,6 @@ private:
     ObjectHandle handle_;
 };
 
-// 리플렉션하지 않는 native 등록 타입의 표지다(키 매크로 쌍이 없을 때). 타입마다 고유한 주소다.
-// const를 붙이지 않는다: 읽기 전용 상수는 링커의 동일 데이터 병합(ICF)으로 서로 다른 타입의 주소가
-// 합쳐질 수 있다. inline 변수라 Modular에서는 공유 라이브러리마다 따로 생긴다 — 그 타입을 한 모듈
-// 안에서만 쓰면 충분하고, 다른 모듈도 쓰면 ROCKS_DECLARE_NATIVE_TYPE_KEY 쌍을 둔다
-// (Docs/Design/BuildTargets.ko.md 3.8절 BS8d4).
-template <class T>
-inline uint8 NativeTypeIdentity = 0;
-
-// native 등록 타입의 export 키 선언 자리다(ROCKS_DECLARE_NATIVE_TYPE_KEY가 특수화한다).
-template <class T>
-struct NativeTypeKeyTraits;
-
 // 정확한 C++ 타입 비교용 키다. 직렬화하거나 ABI에 노출하지 않는다. Object의 nullptr 키는 기반 타입
 // 조회를 뜻한다. 상속 판정은 등록된 base 사슬을 따라 TypeLease::IsNativeA가 한다. 키는 소유 모듈에
 // 하나라 공유 라이브러리 사이에서도 같다(Docs/Design/BuildTargets.ko.md 3.8절 BS8b·BS8d4).
@@ -96,8 +85,8 @@ struct NativeTypeKeyTraits;
 //   대상은 없으면 컴파일 오류다(번역 단위마다 다른 키를 막는다). enum은 본문 표지를 둘 수 없어
 //   판정하지 못한다: 생성 헤더 없이 리플렉션 enum의 키를 쓰면 native 키가 되어 조회가 NotFound로
 //   실패한다(리플렉션하지 않는 enum도 native 등록 타입으로 쓸 수 있다).
-// - native 등록 타입은 ROCKS_DECLARE_NATIVE_TYPE_KEY가 있으면 그 export 키, 없으면 inline 표지
-//   NativeTypeIdentity의 주소다.
+// - native 등록 타입은 TypeKeyOf<T>()다(Core/TypeKey.h — ROCKS_DECLARE_NATIVE_TYPE_KEY가 있으면 그
+//   export 키, 없으면 실행 이미지마다 다른 inline 표지의 주소).
 // 생성 키·키 매크로가 보이는지는 템플릿 인자(Generated·Keyed)의 기본값으로 정한다. 그래서 그것이
 // 보이는 번역 단위와 보이지 않는 번역 단위가 서로 다른 특수화를 쓴다 — 본문 안에서 판정하면 같은
 // 이름의 inline 정의가 둘이 되어(ODR 위반) 링커가 고른 정의에 따라 등록 키까지 바뀔 수 있다.
@@ -133,25 +122,3 @@ const void* NativeTypeKey() noexcept {
 }
 
 } // namespace rocks
-
-// native 등록 타입(리플렉션하지 않는 클래스·struct)의 export 키를 선언한다. 그 타입을 다른
-// 모듈에서도 키로 쓸 때 둔다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d4). 타입의 공개 헤더에서 타입
-// 정의 뒤 전역 namespace에 쓰고, Api는 그 모듈의 API 매크로다. 그 모듈의 .cpp 하나에
-// ROCKS_DEFINE_NATIVE_TYPE_KEY로 정의한다.
-//
-// 사용 예:
-//   // Spinner.h
-//   ROCKS_DECLARE_NATIVE_TYPE_KEY(game::Spinner, ROCKS_GAME_API)
-//   // Spinner.cpp
-//   ROCKS_DEFINE_NATIVE_TYPE_KEY(game::Spinner)
-#define ROCKS_DECLARE_NATIVE_TYPE_KEY(Type, Api)                                                   \
-    template <>                                                                                    \
-    struct rocks::NativeTypeKeyTraits<Type> {                                                      \
-        Api static const void* Key() noexcept;                                                     \
-    };
-
-#define ROCKS_DEFINE_NATIVE_TYPE_KEY(Type)                                                         \
-    const void* rocks::NativeTypeKeyTraits<Type>::Key() noexcept {                                 \
-        static unsigned char key = 0;                                                              \
-        return &key;                                                                               \
-    }

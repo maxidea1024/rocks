@@ -23,7 +23,7 @@ namespace rocks {
 // 잠금 파일 이름이다(Intermediate 아래).
 inline constexpr StringView AssetDatabaseLockFileName = "AssetDatabase.lock";
 
-class AssetDatabaseLock final {
+class ROCKS_ASSETDATABASE_API AssetDatabaseLock final {
 public:
     AssetDatabaseLock() noexcept = default;
     ~AssetDatabaseLock() noexcept = default;

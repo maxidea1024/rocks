@@ -28,7 +28,7 @@ class TypeRegistry;
 
 // 태그를 모은다. (키, 값) UTF-8 byte 순으로 두고 같은 쌍은 하나로 합친다. Write가 Tags Record
 // byte(PackageTags 값 스키마)를 만든다.
-class AssetTagSink {
+class ROCKS_ASSETRUNTIME_API AssetTagSink {
 public:
     explicit AssetTagSink(Allocator& allocator) noexcept : tags_(allocator) {
     }
@@ -48,7 +48,7 @@ private:
 };
 
 // Build 의존을 모은다. AssetId 순으로 정렬하고 같은 id는 하나로 합친다.
-class AssetDependencySink {
+class ROCKS_ASSETRUNTIME_API AssetDependencySink {
 public:
     explicit AssetDependencySink(Allocator& allocator) noexcept : dependencies_(allocator) {
     }
@@ -66,7 +66,7 @@ private:
 };
 
 // hook에 넘기는 문맥이다(hook 호출 동안만 유효하다).
-struct AssetTypeHookContext {
+struct ROCKS_ASSETRUNTIME_API AssetTypeHookContext {
     ObjectRegistry& registry;
     const ObjectAccessContext& access;
     ObjectHandle object;
@@ -96,7 +96,7 @@ struct AssetTypeHooks {
 };
 
 // 등록 handle이다. 소멸하거나 Release하면 표에서 그 항목을 지운다(모듈 등록 수명에 묶는다).
-class AssetTypeHookRegistration {
+class ROCKS_ASSETRUNTIME_API AssetTypeHookRegistration {
 public:
     AssetTypeHookRegistration() noexcept = default;
     AssetTypeHookRegistration(AssetTypeHookRegistration&& other) noexcept;
@@ -118,7 +118,7 @@ private:
     TypeId type{};
 };
 
-class AssetTypeHookTable {
+class ROCKS_ASSETRUNTIME_API AssetTypeHookTable {
 public:
     AssetTypeHookTable(Allocator& allocator, TypeRegistry& types) noexcept;
     // 모든 등록 handle을 놓은 뒤에 소멸해야 한다(남아 있으면 Fatal — 수명 계약 위반).

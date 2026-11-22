@@ -308,7 +308,7 @@ struct EngineStats {
 // 스레드: Initialize를 부른 게임 스레드에서만 사용한다(Shutdown·소멸도 같은 스레드 — GC scheduler와
 // World 수명이 그 스레드의 순서에 기댄다). RequestExit는 Debug·Development에서 검사한다. 예외는
 // RequestFullCollection이다(어느 스레드에서나).
-class Engine {
+class ROCKS_ENGINE_API Engine {
 public:
     explicit Engine(Allocator& allocator) noexcept;
     Engine(const Engine&) = delete;
