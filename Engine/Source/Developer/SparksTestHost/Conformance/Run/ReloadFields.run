@@ -2,26 +2,33 @@
 # match; a written field keeps its value, an unwritten one takes the new default (writes in Enable
 # count); a changed type, struct layout or enum case list loses the value; removed and changed held
 # fields stop their resources; handler connections keep their order and new `on` handlers go last; an
-# execution that uses a removed field is cancelled even with keep.
-new #1 Lamp -> ok (23 steps)
-new #2 Lamp -> ok (23 steps)
-new #3 Lamp -> ok (23 steps)
+# execution that uses a removed field (directly or through a callee) is cancelled even with keep, and
+# a kept execution writes fields whose offsets moved in two reloads; a disabled instance gets no
+# connections; a faulting new `$init` (here: the instruction budget) refuses the reload unchanged.
+new #1 Lamp -> ok (28 steps)
+new #2 Lamp -> ok (28 steps)
+new #3 Lamp -> ok (28 steps)
 new #4 Plain -> ok (3 steps)
-hook #1 Enable -> ok (27 steps)
-  host AudioSystem.StartLoop(#6, none) -> #7
-  host AudioSystem.StartLoop(#6, none) -> #8
-  host AudioSystem.StartLoop(#6, none) -> #9
-hook #2 Enable -> ok (27 steps)
-  host AudioSystem.StartLoop(#6, none) -> #10
-  host AudioSystem.StartLoop(#6, none) -> #11
-  host AudioSystem.StartLoop(#6, none) -> #12
-hook #3 Enable -> ok (27 steps)
-  host AudioSystem.StartLoop(#6, none) -> #13
-  host AudioSystem.StartLoop(#6, none) -> #14
-  host AudioSystem.StartLoop(#6, none) -> #15
+new #5 Lamp -> ok (28 steps)
+hook #1 Enable -> ok (35 steps)
+  host AudioSystem.StartLoop(#7, none) -> #8
+  host AudioSystem.StartLoop(#7, none) -> #9
+  host AudioSystem.StartLoop(#7, none) -> #10
+  host AudioSystem.StartLoop(#7, none) -> #11
+hook #2 Enable -> ok (35 steps)
+  host AudioSystem.StartLoop(#7, none) -> #12
+  host AudioSystem.StartLoop(#7, none) -> #13
+  host AudioSystem.StartLoop(#7, none) -> #14
+  host AudioSystem.StartLoop(#7, none) -> #15
+hook #3 Enable -> ok (35 steps)
+  host AudioSystem.StartLoop(#7, none) -> #16
+  host AudioSystem.StartLoop(#7, none) -> #17
+  host AudioSystem.StartLoop(#7, none) -> #18
+  host AudioSystem.StartLoop(#7, none) -> #19
 Lamp.Watch(#2, #1) -> void (5 steps)
 Lamp.Watch(#3, #1) -> void (5 steps)
-Lamp.Bump(#2) -> void (26 steps)
+Lamp.Watch(#5, #1) -> void (5 steps)
+Lamp.Bump(#2) -> void (28 steps)
 Plain.Touch(#4) -> void (3 steps)
 Lamp.Fire(#1, 1) -> void (7 steps)
   log info "peer ping v1 1"
@@ -33,18 +40,20 @@ Lamp.Fire(#1, 1) -> void (7 steps)
   deliver #2 Lamp.on Peer.Pong -> ok (8 steps)
   deliver #3 Lamp.on Peer.Pong -> ok (8 steps)
 Lamp.UseOld(#2) -> suspended (7 steps)
+Lamp.UseGone(#2) -> suspended (7 steps)
 Lamp.UseCount(#2) -> suspended (7 steps)
-fields #2 -> Lamp(Cue: none, Count: 1, Spare: 5, Label: "lit", Old: 3, Kind: 9, Moniker: "renamed", Info: Stats(Level: 3), State: Busy, Items: [2], Hum: #10, Drop: #11, Swap: #12, Peer: #1, Mate: #1, Ready: 4)
-fields #3 -> Lamp(Cue: none, Count: 0, Spare: 5, Label: "lamp", Old: 3, Kind: 1, Moniker: "m", Info: Stats(Level: 1), State: Idle, Items: [], Hum: #13, Drop: #14, Swap: #15, Peer: #1, Mate: #1, Ready: 4)
-reload v2 keep -> ok (instances 4, moved 15, defaulted 19, lost 12, removed 6, cancelled 1, restarted 0, previous 1)
+Lamp.LongCount(#3) -> suspended (7 steps)
+fields #2 -> Lamp(Base: 6, Gone: 2, Rig: #15, Cue: none, Count: 1, Spare: 5, Label: "lit", Old: 3, Kind: 9, Moniker: "renamed", Info: Stats(Level: 3), State: Busy, Items: [2], Hum: #12, Drop: #13, Swap: #14, Peer: #1, Mate: #1, Ready: 4)
+fields #3 -> Lamp(Base: 1, Gone: 2, Rig: #19, Cue: none, Count: 0, Spare: 5, Label: "lamp", Old: 3, Kind: 1, Moniker: "m", Info: Stats(Level: 1), State: Idle, Items: [], Hum: #16, Drop: #17, Swap: #18, Peer: #1, Mate: #1, Ready: 4)
+reload v2 keep -> ok (instances 5, moved 23, defaulted 42, lost 16, removed 12, cancelled 2, restarted 0, previous 2)
+  host release #10
   host release #9
-  host release #8
-  host release #12
-  host release #11
-  host release #15
   host release #14
-fields #2 -> Lamp(Cue: none, Count: 1, Spare: 7, Label: "lit", Kind: "k", Title: "renamed", Info: Stats(Level: 1, Bonus: 0), State: Idle, Items: [2], Hum: #10, Swap: 0, Peer: #1, Mate: #1, Ready: 4, Fresh: "new")
-fields #3 -> Lamp(Cue: none, Count: 100, Spare: 7, Label: "lamp", Kind: "k", Title: "t", Info: Stats(Level: 1, Bonus: 0), State: Idle, Items: [], Hum: #13, Swap: 0, Peer: #1, Mate: #1, Ready: 4, Fresh: "new")
+  host release #13
+  host release #18
+  host release #17
+fields #2 -> Lamp(Added: 9, Base: 6, More: 0, Rig: #15, Cue: none, Pad: 0, Count: 1, Spare: 7, Label: "lit", Kind: "k", Title: "renamed", Info: Stats(Level: 1, Bonus: 0), State: Idle, Items: [2], Hum: #12, Swap: 0, Peer: #1, Mate: #1, Ready: 4, Fresh: "new")
+fields #3 -> Lamp(Added: 9, Base: 1, More: 0, Rig: #19, Cue: none, Pad: 0, Count: 100, Spare: 7, Label: "lamp", Kind: "k", Title: "t", Info: Stats(Level: 1, Bonus: 0), State: Idle, Items: [], Hum: #16, Swap: 0, Peer: #1, Mate: #1, Ready: 4, Fresh: "new")
 fields #4 -> Plain(Value: 2)
 Lamp.Fire(#1, 2) -> void (7 steps)
   log info "peer ping v2 2"
@@ -55,21 +64,37 @@ Lamp.Fire(#1, 2) -> void (7 steps)
   deliver #3 Lamp.on Peer.Ping -> ok (8 steps)
   deliver #2 Lamp.on Mate.Ping -> ok (8 steps)
   deliver #3 Lamp.on Mate.Ping -> ok (8 steps)
-advance 1.0 -> ok (0 suspended)
+advance 1.0 -> ok (1 suspended)
   resume #2 Lamp.UseCount -> ok (13 steps)
   log info "count 11"
-fields #2 -> Lamp(Cue: none, Count: 11, Spare: 7, Label: "lit", Kind: "k", Title: "renamed", Info: Stats(Level: 1, Bonus: 0), State: Idle, Items: [2], Hum: #10, Swap: 0, Peer: #1, Mate: #1, Ready: 4, Fresh: "new")
+fields #2 -> Lamp(Added: 9, Base: 6, More: 0, Rig: #15, Cue: none, Pad: 0, Count: 11, Spare: 7, Label: "lit", Kind: "k", Title: "renamed", Info: Stats(Level: 1, Bonus: 0), State: Idle, Items: [2], Hum: #12, Swap: 0, Peer: #1, Mate: #1, Ready: 4, Fresh: "new")
 Lamp.Bump(#3) -> void (5 steps)
 # a path whose source field changed type is resolved again: the Mate connections go away
-reload v3 -> ok (instances 4, moved 14, defaulted 29, lost 3, removed 0, cancelled 0, restarted 0, previous 0)
+reload v3 -> ok (instances 5, moved 21, defaulted 60, lost 4, removed 0, cancelled 0, restarted 0, previous 1)
 Lamp.Fire(#1, 3) -> void (7 steps)
   log info "peer ping v3 3"
   log info "peer ping v3 3"
   deliver #2 Lamp.on Peer.Ping -> ok (8 steps)
   deliver #3 Lamp.on Peer.Ping -> ok (8 steps)
+advance 4.0 -> ok (0 suspended)
+  resume #3 Lamp.LongCount -> ok (13 steps)
+  log info "long 1101"
+fields #3 -> Lamp(Added: 9, Base: 1, More: 0, Rig: #19, Cue: none, Pad2: 0, Pad: 0, Count: 1101, Spare: 7, Label: "lamp", Kind: "k", Title: "t", Info: Stats(Level: 1, Bonus: 0), State: Idle, Items: [], Hum: #16, Swap: 0, Peer: #1, Mate: none, Ready: 4, Fresh: "new")
+limits 4096 256 5 -> ok
+reload v4 -> apply failed (InvalidArgument)
+limits 4096 256 1000000 -> ok
+fields #2 -> Lamp(Added: 9, Base: 6, More: 0, Rig: #15, Cue: none, Pad2: 0, Pad: 0, Count: 11, Spare: 7, Label: "lit", Kind: "k", Title: "renamed", Info: Stats(Level: 1, Bonus: 0), State: Idle, Items: [2], Hum: #12, Swap: 0, Peer: #1, Mate: none, Ready: 4, Fresh: "new")
+Lamp.Fire(#1, 4) -> void (7 steps)
+  log info "peer ping v3 4"
+  log info "peer ping v3 4"
+  deliver #2 Lamp.on Peer.Ping -> ok (8 steps)
+  deliver #3 Lamp.on Peer.Ping -> ok (8 steps)
 detach #2 -> ok
-  host release #10
+  host release #12
+  host release #15
 detach #3 -> ok
-  host release #13
+  host release #16
+  host release #19
 close -> ok (ledger 0 buffers)
-  host release #7
+  host release #8
+  host release #11

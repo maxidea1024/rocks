@@ -755,6 +755,9 @@ private:
     // (이전 revision 기록과 계획의 old → fresh 대응 — SparksReload 5절).
     bool FieldsReach(const VmLinkedModule& link, uint32 function,
                      const VmReloadPlan& plan) const noexcept;
+    // link의 function이 같은 모듈 호출로 broken(link 함수 번호별 표지)인 함수를 부르는지다.
+    bool CallsBroken(const VmLinkedModule& link, uint32 function,
+                     Span<const uint8> broken) const noexcept;
     // reload 기본값 계산 중인 클래스 저장소다(SparksReload 5절 — 그 동안만 module이 있다).
     struct Staging {
         const VmLinkedModule* module = nullptr;

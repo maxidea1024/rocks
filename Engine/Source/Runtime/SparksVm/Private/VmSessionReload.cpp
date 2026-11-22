@@ -473,12 +473,13 @@ bool VmSession::FieldsReach(const VmLinkedModule& link, uint32 function,
         const VmLinkedModule* module = &link;
         uint32 classIndex = local.classIndex;
         uint32 offset = local.offset;
+        // FieldSlots와 같은 상한(MaxRevisions 단계 — LC7b 리뷰 6).
         for (uint32 hop = 0; module != plan.fresh_; ++hop) {
             bool moved = false;
-            if (hop <= MaxRevisions && module == plan.old_) {
+            if (hop < MaxRevisions && module == plan.old_) {
                 moved = TranslateStep(plan.fresh_, plan.classMap_.View(), plan.fieldMap_.View(),
                                       module, classIndex, local.bank, local.slots, offset);
-            } else if (hop <= MaxRevisions) {
+            } else if (hop < MaxRevisions) {
                 moved = TranslateField(module, classIndex, local.bank, local.slots, offset);
             }
 
@@ -489,6 +490,31 @@ bool VmSession::FieldsReach(const VmLinkedModule& link, uint32 function,
     }
 
     return true;
+}
+
+bool VmSession::CallsBroken(const VmLinkedModule& link, uint32 function,
+                            Span<const uint8> broken) const noexcept {
+    // 같은 모듈 함수 호출(CALL·CALLW의 Function 참조)이 "필드 깨짐" 함수를 부르는지다(LC7b 리뷰 1 —
+    // 다른 모듈 import와 가상 호출은 host가 지금 revision으로 푼다).
+    const BytecodeModule& code = link.Module();
+    const BytecodeFunction& entry = code.functions[function];
+    const uint32 end = entry.firstWord + entry.wordCount;
+    for (uint32 at = entry.firstWord; at < end;) {
+        const uint32 word = code.words[at];
+        const Opcode op = DecodeOpcode(word);
+        at += InfoOf(op).extra ? 2 : 1;
+        if (op != Opcode::Call && op != Opcode::CallW) {
+            continue;
+        }
+
+        const uint32 ref = DecodeBx(word);
+        if (ref < code.refs.Size() && code.refs[ref].kind == BytecodeRefKind::Function &&
+            code.refs[ref].detail < broken.Size() && broken[code.refs[ref].detail] != 0) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 VmEventKey VmSession::HandlerKey(const VmLinkedModule& module, uint32 handler) const noexcept {
@@ -618,9 +644,49 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
 
         return false;
     };
-    // 설정과 무관한 취소(SL 12.4 — 5절): 삭제된 handler로 시작된 실행, 새 revision으로 옮기지
-    // 못하는 (손실·삭제) 필드를 필드 명령으로 참조하는 함수를 old 또는 이전 revision frame에 가진
-    // 실행.
+    // "필드 깨짐" 함수 표(old와 이전 revision마다 — 5절, LC7b 리뷰 1): 새 revision으로 옮기지
+    // 못하는 (손실·삭제) 필드를 필드 명령으로 참조하거나, 같은 모듈 호출로 그런 함수에 닿는
+    // 함수다(재개 뒤 부를 callee까지 — 실행 중 fault 대신 취소).
+    const VmLinkedModule* links[MaxRevisions + 1] = {old};
+    uint32 linkStart[MaxRevisions + 2] = {};
+    uint32 linkCount = 1;
+    for (uint32 at = 0; at < olderCount; ++at) {
+        links[linkCount++] = older[at];
+    }
+
+    for (uint32 at = 0; at < linkCount; ++at) {
+        linkStart[at + 1] =
+            linkStart[at] + static_cast<uint32>(links[at]->Module().functions.Size());
+    }
+
+    Array<uint8> broken(*allocator_);
+    if (!broken.TryResize(linkStart[linkCount])) {
+        return Outcome::Failure(ErrorCode::OutOfMemory);
+    }
+
+    for (uint32 at = 0; at < linkCount; ++at) {
+        for (uint32 function = linkStart[at]; function < linkStart[at + 1]; ++function) {
+            broken[function] =
+                FieldsReach(*links[at], function - linkStart[at], plan) ? uint8(0) : uint8(1);
+        }
+
+        // 호출 폐포: 더 바뀌지 않을 때까지(함수 수만큼이면 끝난다).
+        const Span<const uint8> flags(broken.Data() + linkStart[at],
+                                      linkStart[at + 1] - linkStart[at]);
+        for (bool grew = true; grew;) {
+            grew = false;
+            for (uint32 function = linkStart[at]; function < linkStart[at + 1]; ++function) {
+                if (broken[function] == 0 &&
+                    CallsBroken(*links[at], function - linkStart[at], flags)) {
+                    broken[function] = 1;
+                    grew = true;
+                }
+            }
+        }
+    }
+
+    // 설정과 무관한 취소(SL 12.4 — 5절): 삭제된 handler로 시작된 실행, "필드 깨짐" 함수를 old 또는
+    // 이전 revision frame에 가진 실행.
     auto forcedCancels = [&](const Suspended& entry) noexcept {
         if (entry.handlerModule == old && entry.handler < plan.handlerMap_.Size() &&
             plan.handlerMap_[entry.handler] == NoBytecodeIndex) {
@@ -628,13 +694,10 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
         }
 
         for (const VmExecution::Frame& frame : entry.frames) {
-            bool revision = frame.link == old;
-            for (uint32 at = 0; at < olderCount; ++at) {
-                revision = revision || frame.link == older[at];
-            }
-
-            if (revision && !FieldsReach(*frame.link, frame.function, plan)) {
-                return true;
+            for (uint32 at = 0; at < linkCount; ++at) {
+                if (frame.link == links[at] && broken[linkStart[at] + frame.function] != 0) {
+                    return true;
+                }
             }
         }
 
@@ -1094,6 +1157,7 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
     static_cast<void>(connections_.TryResize(kept));
     // ---- 연결 다시 풀기: 남는 발행자는 순서 유지, 새 `on`·새 발행자는 끝(K8) ----
     const uint64 dropped = droppedConnections_;
+    const uint64 order = nextOrder_; // 되돌리기에 복원(LC7b 리뷰 3)
     Result<void> connected = Result<void>::Success();
     for (usize at = 0; at < moving.Size() && connected; ++at) {
         const Instance& instance = instances_[moving[at].instance];
@@ -1107,6 +1171,7 @@ Result<VmReloadReport> VmSession::ApplyReload(VmReloadPlan& plan) noexcept {
         connections_.Clear();
         static_cast<void>(connections_.TryAppend(savedConnections.View()));
         droppedConnections_ = dropped;
+        nextOrder_ = order;
         modules_[slot] = old;
         for (Moving& entry : moving) {
             swapStorage(entry);

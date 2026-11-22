@@ -72,8 +72,9 @@ void BytecodeEncoder::AppendFieldType(StringBuilderBase& out, uint32 type) noexc
 void BytecodeEncoder::AppendFieldShape(StringBuilderBase& out, uint32 type,
                                        Array<uint32>& open) noexcept {
     // 타입 표기와 같되 Sparks struct·enum 이름 뒤에 `{…}`로 선언 순 필드(`이름:형태`)·case를
-    // 펼친다(형식 v6 — SparksReload 5절). 같은 경로에서 이미 펼친 타입은 이름만(순환). checker가
-    // 표를 늘릴 수 있어 항목은 복사해 쓴다.
+    // 펼친다(형식 v6 — SparksReload 5절). 한 형태 안에서 이미 펼친 타입은 이름만이다(순환과 같은
+    // struct를 여러 번 쓰는 배치의 지수 증가를 막는다 — LC7b 리뷰 2; 펼침 순서가 결정적이라 형태는
+    // 여전히 배치를 가른다). checker가 표를 늘릴 수 있어 항목은 복사해 쓴다.
     if (type == NoType || type >= c_.types_.Size()) {
         out.Append("?");
         return;
@@ -127,7 +128,6 @@ void BytecodeEncoder::AppendFieldShape(StringBuilderBase& out, uint32 type,
         }
 
         out.Append("}");
-        static_cast<void>(open.TryResize(open.Size() - 1));
     }
 
     if (entry.argumentCount != 0) {

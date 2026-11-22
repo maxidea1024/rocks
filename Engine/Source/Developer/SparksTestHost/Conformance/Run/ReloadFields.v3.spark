@@ -9,8 +9,17 @@ struct Stats {
     var Bonus: int = 0;
 }
 
-class Lamp : ScriptableComponent {
+open class Fixture : ScriptableComponent {
+    var Added = 9;
+    var Base = 1;
+    var More = 0;
+    var Rig: LoopHandle?;
+}
+
+class Lamp : Fixture {
     @edit var Cue: SoundAsset;
+    var Pad2 = 0;
+    var Pad = 0;
     var Count = 100;
     var Spare = 7;
     var Label = "lamp";
@@ -52,6 +61,12 @@ class Lamp : ScriptableComponent {
 
     on Mate.Ping(n: int) {
         Log.Info("mate ping v3 ${n}");
+    }
+
+    async fn LongCount() {
+        await Delay(5.0, Clock.Game);
+        Count += 1000;
+        Log.Info("long ${Count}");
     }
 
     async fn UseCount() {
