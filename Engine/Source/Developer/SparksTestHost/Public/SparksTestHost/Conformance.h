@@ -148,6 +148,17 @@ struct CaseRevision {
     Span<const CaseFile> files; // 사례 폴더 기준 경로
 };
 
+// `.run` reload의 단계별 측정이다(Docs/Design/SparksReload.ko.md 6절 LC7c3 — 누적 nanosecond,
+// 적용에 성공한 reload만). 시험은 시간을 단언하지 않고 보고만 한다.
+struct RunTimings {
+    uint64 compile = 0; // 새 compilation의 Check·lowering(모든 모듈)
+    uint64 bundle = 0;  // 묶음 결정(content hash·재컴파일 범위·import 폐포)
+    uint64 link = 0;    // 묶음 모듈의 `.sparkc` 왕복·링크·import 풀기
+    uint64 plan = 0;    // PlanReload
+    uint64 apply = 0;   // ApplyReload
+    uint32 reloads = 0;
+};
+
 // 사례 하나의 입력이다.
 struct CaseInput {
     // 사례 이름이다. 파일 사례는 진단 경로이기도 하다("Lexical/Bom.spark"), 폴더 사례는
@@ -176,6 +187,8 @@ struct CaseInput {
     Span<const CaseFile> revisions;
     // 폴더 사례의 revision(`<사례>.<버전>/` — 바뀐 파일만, 같은 경로로 덮는다).
     Span<const CaseRevision> folderRevisions;
+    // 있으면 `.run` reload의 단계별 시간을 더한다(LC7c3 측정 — 저장소 corpus는 쓰지 않는다).
+    RunTimings* timings = nullptr;
     bool hasNames = false; // `.names`가 있는지
     StringView names;      // `.names` 내용(hasNames일 때만)
 };

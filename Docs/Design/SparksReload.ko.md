@@ -3,6 +3,7 @@
 이 문서는 Sparks 언어 코어의 LC7(핫 리로드)을 정한다. 언어 의미는 SparksLanguage(SL) §12.4가 정본이고, 이 문서는 그 중 언어·VM 쪽(R1 본문 교체, R2 제자리 migration의 Sparks 필드·`on`·const, `ReloadExecutions`, 계획·판정·원자적 적용, 증분 재컴파일)을 VM session에서 어떻게 실현하는지 정한다. R3(instance 재생성)·R4(복제 schema)는 엔진 연동(L2·L3)이고, 사전·widget schema의 R2는 EI5다. 실행 모델은 SparksRuntime(LC6) 위에 쌓는다.
 
 - 개정 1(2026-11-22): 첫 판. 하위 단계 LC7a–LC7c, 결정 K1–K10.
+- 개정 9(2026-11-23): LC7c3 구현·측정(6절 "LC7c3 설계").
 - 개정 8(2026-11-22): LC7c2b 구현(6절 "LC7c2b 설계").
 - 개정 7(2026-11-22): LC7c2를 LC7c2a(여러 모듈 `.run`)·LC7c2b(모듈 묶음 reload)로 나누고 LC7c2a 설계(6절).
 - 개정 6(2026-11-22): LC7c 하위 단계(6절 — LC7c1 Gate G5, LC7c2 모듈 묶음 reload·증분 재컴파일, LC7c3 측정)와 LC7c1 설계.
@@ -96,7 +97,7 @@
 | LC7c1 Gate G5 | reload 롤백 주입 행렬: 통과한 `.run` 사례의 n번째 적용마다 임시 반영 뒤 되돌리기를 주입, 판정 거부·적용 실패 전후 session 상태 대조 | 저장소 corpus의 모든 `reload` 행에서 주입이 일어나고 상태 그대로·누수 0 |
 | LC7c2a 여러 모듈 `.run` | 폴더 사례의 `.run`: 모든 모듈 `.sparkc` 왕복·링크·`LinkImports`·session 모듈 등록, 가짜 host의 여러 모듈 가상 호출, 지시의 클래스·함수 이름은 모든 모듈에서 찾는다 | 폴더 사례 golden(다른 모듈 기반 클래스·import 호출·다른 모듈 이벤트 구독), 할당 실패 전수 — 완료(개정 7) |
 | LC7c2b 모듈 묶음 reload(완료 — 개정 8) | 바뀐 모듈과 interface가 바뀐 모듈에 의존하는 모듈을 한 계획·한 적용으로(SL 12.4 all-or-nothing), 의존 모듈 import 다시 풀기, 컴파일러 재컴파일 범위(`FindRecompileScope`)로 묶음 결정, `.run` 폴더 사례 reload | 폴더 사례 golden(의존 모듈의 struct 변경·호출 대상 변경), 할당 실패 전수 |
-| LC7c3 측정 | 본문 하나를 바꾼 모듈의 저장 → 컴파일 → 링크 → 적용 시간(목표 2 s — SL SD8) | 측정 시험(시간은 단언하지 않고 보고 — 결정적 시험 원칙), 문서에 Release 측정값 |
+| LC7c3 측정(완료 — 개정 9) | 본문 하나를 바꾼 모듈의 저장 → 컴파일 → 링크 → 적용 시간(목표 2 s — SL SD8) | 측정 시험(시간은 단언하지 않고 보고 — 결정적 시험 원칙), 문서에 Release 측정값 |
 
 - **LC7c1 설계:**
   - `VmSession::InjectReloadRollback()`(시험 전용 — G4 `InjectAwait`와 같은 자리): 다음 `ApplyReload`가 연결 다시 풀기까지 마친 뒤 연결 실패와 같은 되돌리기 경로를 밟고 `InvalidArgument`를 돌려준다(`InjectionFired`). 되돌리기는 LC7b의 할당 실패 경로와 같은 코드라 주입은 그 경로를 할당자 없이 모든 reload 상태(대기 실행·유지 자원·연결이 있는 상태 — SL G5)에서 밟게 한다.
@@ -120,6 +121,14 @@
   - **`.run`:** 폴더 사례의 revision은 사례 폴더 옆 `<사례>.<버전>/`(바뀐 파일만 — 같은 상대 경로로 덮는다. 모듈 추가·삭제는 지시 오류 — 엔진 연동의 모듈 목록 변경)이다. 사례 파일 전체에 덮어 다시 컴파일(진단이 있으면 사례 실패)하고 위 규칙으로 묶음을 정해 `reload <버전> -> ok (modules N, …)`(묶음 모듈 수를 앞에) 줄을 쓴다. 파일 사례의 출력은 그대로다. corpus 실행기는 `.run`이 있는 폴더 사례 옆의 짝 파일 없는 `<사례>.<버전>` 폴더를 revision으로 받는다. revision은 언제나 사례 원본 위에 덮는다(앞 revision 위가 아니다 — 앞 revision에서 바꾼 파일을 이어 쓰려면 그 revision 폴더에도 둔다).
   - 시험: `Run/Bundle`(기반 모듈의 필드 추가·함수 본문 변경과 import 폐포로 묶음 2개 — 독립 모듈 제외, 다른 모듈 기반이 커져 밀린 파생 구역, Keep으로 남은 옛 Main 실행이 옛 import로 옛 Base 함수를 부름, 기반 변경 거부로 묶음 전체 그대로, 한 모듈만 바뀐 revision — G4·G5 행렬 포함), `SparksVmReload_BundleRulesForImports`(묶음 밖 importer·새 revision의 옛 import·중복·빈 묶음 거부, 묶음 적용, targets 불변), `SparksConformance_RunGoldenAllocationFailureBundle`.
   - 한계: 가짜 host는 처음 compilation의 클래스 관계를 쓴다(LC7a 리뷰 반영과 같다). 모듈 추가·삭제와 패키지 의존 변경은 엔진 연동(SL 12.4 — 의존 graph 변경은 Tryout 재시작).
+- **LC7c3 설계(개정 9):**
+  - **무엇을 재나:** 본문 하나를 바꾼 revision의 reload 경로 전체 — 컴파일(새 compilation의 Check·lowering — 모든 모듈), 묶음 결정(content hash·`FindRecompileScope`·import 폐포), 링크(묶음 모듈 `.sparkc` 왕복·`LinkModule`·`LinkImports`), 계획(`PlanReload`), 적용(`ApplyReload` — instance 이전·연결 다시 풀기). 저장 감지·파일 읽기(편집기·Rocks Build의 몫)는 넣지 않는다.
+  - **어떻게:** `CaseInput::timings`(`RunTimings` — 단계별 누적 nanosecond와 적용에 성공한 reload 수)가 있으면 `.run`의 reload가 단계마다 `MonotonicNanoseconds`로 잰다(파일 사례는 컴파일과 링크를 compile에 함께 넣는다). 측정 시험은 생성한 폴더 사례(바뀌는 `Core` 모듈과 그것을 함수 import하는 모듈들, 클래스·필드·함수 수십~수백 개, instance 수백 개와 구독 연결)를 메모리에서 만들어 `RunCase`로 돌리고, 결과 줄(`reload v2 -> ok (modules N, …)`)만 단언한 뒤 측정값을 진단 출력에 쓴다. 시간은 단언하지 않는다(결정적 시험 원칙 — 기기·부하에 따라 다르다).
+  - **기록:** Release 측정값을 이 절에 적는다(기기·크기와 함께). 2 s를 넘으면 가장 큰 단계를 줄이는 후속을 이 절에 적는다(컴파일러의 모듈 단위 lowering 재사용 — K10의 증분 재컴파일 — 은 측정에서 컴파일이 지배적일 때 착수한다).
+  - **측정(2026-11-23, `SparksReload_MeasuresBodyReload`):** 모듈 5개(Core — 함수 20·클래스 60·클래스마다 메서드 12, 사용자 모듈 4 — 클래스 20씩), 원문 139 KB, instance 460, 구독 연결 240, 묶음 5모듈. 13th Gen Intel Core i5-13600KF, Windows 11:
+    - Release 3회: 합계 23.8–30.1 ms(compile 19.8–26.1, bundle 1.0, link 0.8, plan 0.85–0.88, apply 1.26–1.44 ms).
+    - Debug 1회: 합계 153 ms(compile 123, bundle 12, link 5.7, plan 8.6, apply 3.3 ms).
+    - 판정: 목표 2 s(SL SD8)의 1.5 % 안팎이다. 컴파일이 80 % 이상을 차지하고 원문 크기에 비례하므로, 같은 비율이면 원문 약 9 MB에서 2 s에 닿는다. 그래서 K10의 모듈 단위 lowering 재사용은 지금 착수하지 않고, 프로젝트 원문이 MB 단위로 커지는 연동 단계(EI — Rocks Build compile action, SD6)에서 다시 잰다. 저장 감지·파일 읽기·편집기 요약은 이 측정 밖이다.
 
 ## 7. 시험
 
