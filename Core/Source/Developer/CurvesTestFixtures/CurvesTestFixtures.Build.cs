@@ -19,6 +19,4 @@ public sealed class CurvesTestFixtures : CoreModuleRules
     protected override string[] PublicDependencies => ["Curves", "CoreTypeBindings"];
 
     protected override bool HasSources => false;
-
-    protected override IReadOnlyList<string> Metadata => ["CurvesTestFixtures/CurveFixture.h"];
 }

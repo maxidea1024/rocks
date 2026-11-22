@@ -24,7 +24,7 @@ namespace rocks {
 // 리플렉션(Docs/Design/ReflectionFoundations.ko.md 9.1절): WorldOnly 리플렉션 클래스다. 영속
 // 필드는 enabled(ReadOnly — 경로·리플렉션 쓰기가 World의 활성 전환 hook을 우회하지 않게, 바꿀 때는
 // SetEnabled)뿐이고, World 포인터·소유 Actor·Tick 설정·수명 기록은 ROCKS_NATIVE(저장하지 않는
-// 런타임 상태)다. 영속 상태를 더하는 파생은 ROCKS_CLASS(WorldOnly 상속)로 Metadata 헤더에, 영속
+// 런타임 상태)다. 영속 상태를 더하는 파생은 ROCKS_CLASS(WorldOnly 상속)로 리플렉션 헤더에, 영속
 // 상태가 없는 런타임 전용 파생은 위처럼 ROCKS_NATIVE_TYPE으로 둔다(그 생성 헤더
 // <World/Component.generated.h>를 RegisterNativeClass 전에 include한다).
 //

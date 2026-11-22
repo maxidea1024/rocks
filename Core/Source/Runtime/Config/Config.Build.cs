@@ -16,8 +16,6 @@ public sealed class Config : CoreModuleRules
     // Unity build: this module passes the unity collision policy checks (Docs/Design/UnityBuildPch.ko.md section 9.3).
     protected override UnityMode Unity => UnityMode.On;
 
+    // Reflection: the CF4 device profile settings struct (Config/DeviceProfileSettings.h, identity spec Config.rocksids.json) is found by its markup.
     protected override string[] PublicDependencies => ["ReflectionText", "ObjectRuntime", "Core"];
-
-    // CF4 device profiles are a settings struct of this module (identity spec Config.rocksids.json).
-    protected override IReadOnlyList<string> Metadata => ["Config/DeviceProfileSettings.h"];
 }

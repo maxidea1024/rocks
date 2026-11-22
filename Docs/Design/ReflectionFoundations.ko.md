@@ -26,7 +26,7 @@
 
 ### 1.1 선언
 
-- `NativeModuleInput`에 `Metadata`(헤더 include 철자 목록), `ModuleDirectory`(프로젝트 상대 경로), `ImportedMetadata`(SDK 모듈 전용 — 미리 생성된 descriptor·명세 경로, 1.8절)를 더한다. 규칙은 `Configure()`에서 설정한다(RuleLoader는 `Configure`만 부른다). `SourceModuleRules`는 기존 `{Layer}/Source/{Group}/{Name}`를 `ModuleDirectory`로 넘기고, `ModuleRules`를 직접 상속하는 게임 모듈은 명시한다. Metadata가 있으면 `ModuleDirectory`는 필수다(루트 기본값을 두지 않는다 — 실수로 루트 명세를 쓰지 않게). `Metadata`와 `ImportedMetadata`는 함께 쓸 수 없다.
+- (1.10절 개정 — 목록 선언을 빌드의 자동 탐색으로 바꿨다. 아래 `Metadata` 서술은 탐색 결과에 그대로 적용한다.) `NativeModuleInput`에 `Metadata`(헤더 include 철자 목록), `ModuleDirectory`(프로젝트 상대 경로), `ImportedMetadata`(SDK 모듈 전용 — 미리 생성된 descriptor·명세 경로, 1.8절)를 더한다. 규칙은 `Configure()`에서 설정한다(RuleLoader는 `Configure`만 부른다). `SourceModuleRules`는 기존 `{Layer}/Source/{Group}/{Name}`를 `ModuleDirectory`로 넘기고, `ModuleRules`를 직접 상속하는 게임 모듈은 명시한다. Metadata가 있으면 `ModuleDirectory`는 필수다(루트 기본값을 두지 않는다 — 실수로 루트 명세를 쓰지 않게). `Metadata`와 `ImportedMetadata`는 함께 쓸 수 없다.
 - 생성 include 디렉터리 추가·명세 경로 결정·검증은 Rocks.Build의 **공용 함수 하나**(`MetadataLayout.Apply(modules, outputDirectory)`)가 한다. RuleLoader(와 SDK 모듈 복원) 뒤, ActionGraph 앞에서 부르고 Program.cs·InstalledSdk·GameInputSnapshot·IntegrationTests가 모두 이 결과를 본다(같은 목록을 따로 계산하지 않는다).
 - Metadata의 철자는 모듈의 **public 또는 private include 디렉터리** 기준이다. public 헤더의 타입은 의존 모듈이 import할 수 있고, private 헤더의 타입은 그 모듈 안에서만 쓴다(UE도 Private 헤더의 UCLASS를 허용한다). 검증(존재·루트 안·symlink 정규화·같은 헤더의 모듈 사이 이중 소유 금지)은 지금의 `MetadataRunner` 규칙을 모듈마다 적용한다.
 - 생성 헤더는 원본 헤더를 같은 철자(`#include <철자>`)로 포함한다. 그 철자가 **그 헤더를 쓰는 모든 모듈**의 include 검색 순서에서 같은 파일로 풀려야 한다 — MetadataLayout이 생성 모듈과, public 헤더면 그 모듈에 의존하는 타깃 내 모든 모듈의 검색 순서로 확인한다(가리는 같은 철자 헤더가 있으면 RMC1001).
@@ -95,14 +95,30 @@
 
 - `InstalledSdk`: 생성 public 루트가 모듈의 public include 디렉터리에 들어가므로 기존 export가 `Headers/<M>/…`로 복사한다(별도 복사를 두지 않는다). descriptor·명세는 `Metadata/<M>/`로 내보내고 `rocks-sdk.json` 모듈 항목에 `descriptor`·`identityManifest`를 더한다(manifest 버전 3, 모르는 속성 거부 유지). SDK 모듈을 `NativeModuleInput`으로 되살릴 때(InstalledSdk의 모듈 복원 지점) 이 둘을 `ImportedMetadata`로 넘긴다 — SDK 모듈은 다시 생성하지 않고, 게임 빌드는 SDK descriptor를 import하고 SDK 명세를 명세 집합 검증에 넣는다. ThirdParty manifest 형식을 바꾸는 다른 세션의 InstalledSdk 변경과 겹치므로 착수 전에 조율한다.
 - `GameInputSnapshot`: 선언 입력에 모듈의 Metadata 헤더와 명세를 넣는다.
-- `Templates/Game`: FoundationTemplate 모듈(템플릿 `Templates/Game/Foundation`)은 `Source`를 public include 디렉터리로 두고(`GameObject.h` 철자) `Metadata`와 `ModuleDirectory = "."`를 선언한다. 명세는 `ids move`로 `SampleGame.rocksids.json`이 되었다(PJ6에서 템플릿 이름 `FoundationTemplate`으로 바꿔 지금은 `FoundationTemplate.rocksids.json`이고, 새 프로젝트는 `new-project`가 `<이름>.rocksids.json`으로 만든다). `Main.cpp`는 생성 철자를 쓰고 README를 고친다.
-- `Program.cs`: ToolTests `meta` 실행 조건은 "타깃에 Metadata 모듈이 있음"이다.
+- `Templates/Game`: FoundationTemplate 모듈(템플릿 `Templates/Game/Foundation`)은 `Source`를 public include 디렉터리로 두고(`GameObject.h` 철자) `ModuleDirectory = "."`를 선언한다(리플렉션 헤더는 1.10절 탐색이 찾는다). 명세는 `ids move`로 `SampleGame.rocksids.json`이 되었다(PJ6에서 템플릿 이름 `FoundationTemplate`으로 바꿔 지금은 `FoundationTemplate.rocksids.json`이고, 새 프로젝트는 `new-project`가 `<이름>.rocksids.json`으로 만든다). `Main.cpp`는 생성 철자를 쓰고 README를 고친다.
+- `Program.cs`: ToolTests `meta` 실행 조건은 "타깃에 Metadata 모듈이 있음"(1.10절 탐색 결과)이다.
 
 ### 1.9 fixture 이전과 시험
 
 - Foundation 리플렉션 fixture를 `Core/Source/Developer/ReflectionTestFixtures` 모듈(Public/`ReflectionTestFixtures/`)로 옮기고 명세를 `ids move`로 `ReflectionTestFixtures.rocksids.json`에 옮긴다(ID는 그대로). FoundationTests·EngineTests는 이 모듈에 의존한다(두 타깃 이중 owner가 없어진다).
 - 시험: Rocks.Build.IntegrationTests의 타깃 소유 전제를 모듈 소유 사례로 바꾸고, 모듈 사이 상속·참조(import), private 타입 import 거부, 고아 명세(활성·은퇴만), 명세 사이 ID 중복, 입력 밖 리플렉션 선언(RMC2003), 가리는 include 철자(RMC1001), stage import 후 실패 시 미게시·삭제 복구, SDK descriptor import, 명세 이동 PR의 병합 검사 통과를 더한다. ToolTests(`IdentityCompilerTests`·`MetaTests`·`IdentityInventoryTests`·`MetadataOutputTransactionTests`·`IdentityGitMergeTests`)를 새 CLI·다중 명세·합친 뷰로 고친다.
 - 문서: `Build/README.md`, `ReflectionMetadata.ko.md`(타깃 소유 서술).
+
+### 1.10 리플렉션 헤더 자동 탐색(B1 개정, 2026-11-22)
+
+UE는 모듈 규칙에 리플렉션 헤더를 적지 않는다. UBT가 모듈 폴더의 헤더를 훑어(`UHTExecution.cs` `SetupUObjectModule` — `FindHeaders`, 다른 플랫폼 폴더 제외) 줄 첫머리에 표지가 있는 헤더(`SourceFileMetadataCache.cs:137` `^\s*(UCLASS|USTRUCT|UENUM|UINTERFACE|UDELEGATE|…)\b`, `:324`)를 UHT 입력으로 삼고, 위치(Classes·Public·Internal·Private)로 공개 범위를 가른다. Rocks도 같게 한다 — 헤더를 더하거나 표지를 붙이면 규칙 파일을 고치지 않아도 빌드가 생성한다.
+
+- **규칙에서 지운다**: `SourceModuleRules.Metadata`·게임 모듈의 `Metadata = […]`와 정책 `reflection-metadata-not-literal`을 지운다(하위호환 없음). `NativeModuleInput.Metadata`는 규칙이 쓰지 않는 빌드 내부 값이 된다 — `MetadataLayout`이 탐색으로 채우고 그 뒤 단계(1.1–1.9절: 생성 위치·실행 단위·descriptor·명세·게시·SDK·입력 스냅샷)는 지금처럼 그 목록을 본다. `ModuleDirectory`는 그대로 규칙이 정한다(탐색 범위·명세 위치).
+- **탐색 범위**: 타깃에서 도달하는 모듈(SDK 모듈 `ImportedMetadata`·서드파티 모듈 제외) 중 `ModuleDirectory`가 있는 모듈마다, 그 모듈의 public·private include 디렉터리 가운데 `ModuleDirectory` 안에 있는 것(서드파티 include처럼 모듈 밖 디렉터리는 제외)의 `*.h`를 재귀로 훑는다. 철자는 그 include 디렉터리 기준 상대 경로(`/` 구분)다. 같은 헤더가 두 include 디렉터리에서 풀리면 public이 앞선다(1.1절 `ResolveHeader` 순서와 같다).
+- **표지**: 주석(`//`·`/* */` — `//` 끝 역슬래시 이음 포함)과 문자열·문자 리터럴(역슬래시 이음·raw string `R"x(…)x"` 포함)의 내용, 전처리 지시문 줄(역슬래시로 이어진 줄 포함)을 지운 줄이 공백 뒤 `ROCKS_CLASS(`·`ROCKS_STRUCT(`·`ROCKS_ENUM(`으로 시작하면 리플렉션 헤더다(UE 줄 첫머리 표지와 같은 판정 — UE는 주석을 지우지 않아 블록 주석 안 줄도 표지로 보지만 Rocks는 보지 않는다). 숫자 뒤 `'`는 자릿수 구분자(`1'000`)다. 확장자는 정확히 `.h`(대소문자 구분 — 플랫폼마다 같은 결과)다. 표지 판정은 어휘 수준이다: `#if 0`·꺼진 조건 안의 표지도 표지로 보고, 그 헤더가 리플렉션 선언을 내지 않으면 MetaCompiler가 RMC2000으로 거부한다(UE는 UHT가 빈 결과로 넘어간다 — Rocks는 빠진 선언을 조용히 넘기지 않는다; 그 줄을 지우거나 선언이 컴파일되게 한다). 리플렉션 선언의 조건은 BS 3.1절 규칙이 따로 검사한다.
+- **include 밖의 표지 헤더**: 빌드가 찾지 않는 자리의 표지 헤더는 그 타입이 조용히 빠지므로(리플렉션 헤더는 자기 생성 헤더를 include하지 않아 컴파일도 잡지 못한다) 빌드 오류다. 목록 방식의 "header not found"·"Metadata requires ModuleDirectory"가 하던 일이다.
+  - `ModuleDirectory`가 있는 모듈: 모듈 폴더 전체(UE UBT처럼 — 모듈 시험 `Tests/`, 빌드 출력·저장 폴더 `out`·`Binaries`·`Intermediate`·`Saved`·`.git`, 서드파티 `ThirdParty`, 모듈 폴더 안 다른 모듈의 `ModuleDirectory`, 디렉터리 링크 제외)에서 include 디렉터리 밖의 표지 헤더는 RMC2003이다(리플렉션 선언이 모듈 입력에 없음 — 메시지는 public include 디렉터리로 옮기라고 안내한다). 예: include 디렉터리가 아닌 `Private/`(SourceModuleRules는 `Private/`를 include 디렉터리로 두지 않는다 — 생성 헤더의 원본 포함 철자(1.1절)를 정할 수 없다), 모듈 루트, `Internal/`. UE는 Private 헤더의 UCLASS도 받는다 — 모듈 private 리플렉션 헤더가 필요해지면 `Private/`를 private include 디렉터리로 더하면 된다(그 include 디렉터리는 훑는다).
+  - `ModuleDirectory`가 없는 모듈: 프로젝트 루트 안 include 디렉터리(빌드 출력·서드파티 제외)에 표지 헤더가 있으면 RMC2100이다(명세 위치를 정할 수 없다 — 규칙에 `ModuleDirectory`를 둔다).
+- **순서·결정성**: 모듈 안 헤더는 철자의 서수 정렬 순서로 MetaCompiler에 넘긴다(목록 선언 순서가 없어졌으므로). 같은 입력이면 같은 목록·같은 생성물이다.
+- **증분**: 탐색은 빌드마다 한다(헤더 파일 목록과 내용을 읽는다 — 리플렉션 모듈 수십 개·헤더 수천 개 규모에서 비용이 작다, UE는 결과를 캐시한다 — 필요해지면 캐시를 더한다). 메타 단계는 빌드마다 모든 리플렉션 모듈에서 돌고 게시 트랜잭션이 바뀌지 않은 생성물을 건너뛰므로(1.7절), 표지를 붙이거나 떼거나 헤더를 더하고 지우면 다음 빌드가 생성물을 더하거나 지운다. 게임 입력 스냅샷(1.8절)은 프로젝트 트리와 include 디렉터리 전체를 해시하므로 표지 변경도 입력 변경이다.
+- **정책 검사**: `ROCKS_PROPERTY`·`ROCKS_NATIVE`가 리플렉션 헤더 밖에 있으면 거부하던 검사(목록을 읽던 것)는 규칙 `reflection-annotation-unscanned`가 된다 — 표지가 없는 파일·`.h`가 아닌 파일·모듈 시험(`Tests/`)의 annotation을 거부한다. 표지 판정은 빌드와 같은 함수(`ReflectionHeaderScan.HasMarkup`)를 쓴다. 표지 헤더의 위치(include 디렉터리 안인가)는 빌드가 모듈 폴더 전체를 훑어 거부하므로 정책은 보지 않는다(private include 디렉터리 헤더를 잘못 거부하지 않게).
+- **바뀌는 곳**: 모듈 규칙 14개·게임 템플릿·통합 시험의 게임 모듈 규칙(`Metadata` 줄 삭제), `SourceModuleRules`·`NativeModuleInput` 문서 주석, `MetadataLayout`(탐색), `PolicyChecks.Reflection`(목록 읽기 → 탐색), 문서(`Build/README.md`·`Programs/Rocks.Build/README.ko.md`·`Docs/Implementation/ReflectionMetadata.ko.md`·게임플레이 안내).
+- **시험**: 빌드 시험 — 표지 헤더만 목록에 오름(주석·`//` 이음·`#define`(이어진 줄 포함)·문자열(이음·raw string)·줄 중간·비슷한 이름·`.cpp`·대문자 `.H`·표지 없는 헤더 제외, 자릿수 구분자 뒤 표지는 포함), 하위 폴더 철자, 정렬, 모듈 밖 include 디렉터리 제외, include 밖 표지 헤더(`Private/`·모듈 루트·`Internal/`) RMC2003, `Tests/`·안쪽 모듈 폴더 제외, `ModuleDirectory` 없는 모듈의 표지 헤더 RMC2100, 규칙의 `Metadata` 거부, 표지를 떼면 고아 명세(RMC2102)·헤더를 지우면 생성물 삭제(통합 시험). 정책 시험 — 탐색 목록 밖 `ROCKS_PROPERTY` 거부. 지금 저장소에서 탐색 결과가 기존 목록 54개와 같은지(2026-11-22 확인 — 표지 헤더 54개가 목록과 1:1).
 
 ## 2. 지정자와 플래그(B2)
 
@@ -1041,6 +1057,7 @@ EngineVersion CurrentEngineVersion() noexcept {
 21. B8의 World 타입 이전 — rootComponent는 영속 강한 참조(UE와 같음), 부착 계층(parent·children)과 Tick 설정은 NATIVE(계층은 WeakObjectRef, Tick은 클래스 기본값 레코드와 함께 A5 — 결정 22), World 필드는 ReadOnly(CU5 setter 전), Engine은 World 타입을 Unregister하지 않고 TypeRegistry::Shutdown에 맡긴다, 리플렉션 base를 둔 native 파생을 지원한다(저장 불가). 에셋 Registry의 WorldOnly 거부는 A0-O(권고안으로 진행, 2026-11-14). 리플렉션 B9 B9d1이 WeakObjectRef PROPERTY를 가능하게 하며, 부착 계층을 리플렉션으로 옮길지는 World 단계가 정한다(RX 5.1절).
 22. 클래스 기본값 — UE식 객체 CDO 대신 타입별 불변 기본값 레코드·명시 override 집합·패키지 저장만 차이 저장(세이브게임·undo·스냅샷·복제는 전부 저장), A0-O graph v2는 누락 = 기준 형식 규칙과 실효 값 Required 진단을 처음부터 갖고, 레코드·차이 쓰기·지문은 A5(RuntimeClassMetadata '클래스 기본값 결정', 사용자 승인 2026-11-14). struct의 차이 단위는 Atomic 여부로 정한다(리플렉션 B9b — RX 3.1절). "전부 저장"은 기준 차이 없이 모든 값을 쓴다는 뜻이고, 세이브게임의 필드 범위는 SaveGame이 정한다(RX 9.1절).
 23. 엔진 버전의 단일 출처는 `Build/Build.version`이고 BuildInfo 생성 TU로만 주입한다(8.2절). 모듈 입력·ContextFingerprint·compile 정의에 넣지 않아 버전을 올려도 생성 TU와 link만 다시 돈다. 호환 술어는 프로젝트 연결(주·부 같음)과 패키지 로드(더 새 주·부만 거부) 둘로 이름을 나누고, 쿠킹 패키지·cookKey·너겟 키에는 엔진 버전을 넣지 않는다.
+24. 리플렉션 헤더는 모듈 규칙의 목록이 아니라 빌드의 자동 탐색으로 정한다(1.10절, 2026-11-22 — UE UBT 표지 훑기와 같다). 모듈 `Private/`의 표지 헤더는 include 디렉터리가 아니어서 오류로 두고, 필요해지면 `Private/` include와 함께 연다.
 
 열린 문제(이 단계 밖에서 정한다):
 

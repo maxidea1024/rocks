@@ -78,6 +78,9 @@ public static class MetadataLayout
         }
 
         HashSet<string> reachable = Reachable(roots, byName);
+        // 모듈 폴더 전체를 훑을 때 그 안에 든 다른 모듈의 폴더는 그 모듈 몫이다(1.10절).
+        string[] moduleDirectories = [.. modules.Where(module => !string.IsNullOrWhiteSpace(module.ModuleDirectory))
+            .Select(module => context.PathInRoot(module.ModuleDirectory!)).Distinct(PathComparer)];
         var owners = new Dictionary<string, string>(PathComparer);
         var generated = new List<MetadataModule>();
         var reserved = new List<string>();
@@ -90,7 +93,14 @@ public static class MetadataLayout
                 continue;
             }
 
-            if (module.Metadata.Count == 0)
+            if (module.Metadata.Count != 0)
+            {
+                throw new ArgumentException($"Module '{module.Name}': module rules do not declare Metadata; the build discovers reflection headers " +
+                    "by their ROCKS_CLASS/ROCKS_STRUCT/ROCKS_ENUM markup (Docs/Design/ReflectionFoundations.ko.md section 1.10). Remove the list.");
+            }
+
+            IReadOnlyList<ReflectionHeader> discovered = Discover(context, module, moduleDirectories);
+            if (discovered.Count == 0)
             {
                 if (CheckOrphanManifest(context, module) is string reservation)
                 {
@@ -101,27 +111,23 @@ public static class MetadataLayout
                 continue;
             }
 
-            if (module.ImportedMetadata is not null)
-            {
-                throw new ArgumentException($"Module '{module.Name}': Metadata and ImportedMetadata cannot be combined.");
-            }
-
-            if (string.IsNullOrWhiteSpace(module.ModuleDirectory))
-            {
-                throw new ArgumentException($"Module '{module.Name}': Metadata requires ModuleDirectory (the identity manifest location).");
-            }
-
-            string directory = InsideRoot(context, module.ModuleDirectory, $"Module '{module.Name}' ModuleDirectory");
+            string directory = InsideRoot(context, module.ModuleDirectory!, $"Module '{module.Name}' ModuleDirectory");
             string manifest = Path.Combine(directory, module.Name + ".rocksids.json");
             ValidateManifest(context, manifest, module.Name);
             var headers = new List<MetadataHeader>();
-            foreach (string include in module.Metadata)
+            foreach (ReflectionHeader found in discovered)
             {
-                ValidateSpelling(module.Name, include);
-                MetadataHeader header = ResolveHeader(context, module, include);
+                ValidateSpelling(module.Name, found.Include);
+                MetadataHeader header = ResolveHeader(context, module, found);
                 if (!owners.TryAdd(header.Path, module.Name))
                 {
-                    throw new ArgumentException($"Metadata '{include}': duplicate input ownership; modules '{owners[header.Path]}' and '{module.Name}' resolve to '{header.Path}'.");
+                    // 같은 모듈이 같은 물리 헤더를 다른 철자로 다시 찾으면(겹친 include 디렉터리) 처음 것만 쓴다.
+                    if (NameComparer.Equals(owners[header.Path], module.Name))
+                    {
+                        continue;
+                    }
+
+                    throw new ArgumentException($"Metadata '{found.Include}': duplicate input ownership; modules '{owners[header.Path]}' and '{module.Name}' resolve to '{header.Path}'.");
                 }
 
                 headers.Add(header);
@@ -155,7 +161,8 @@ public static class MetadataLayout
                     ? [.. module.PrivateIncludeDirectories, generatedPrivate]
                     : module.PrivateIncludeDirectories,
                 ReflectionSources = [.. module.ReflectionSources, .. layout.ReflectionSources],
-                ReflectionSourceFailureNote = ReflectionSourceFailureNote(module.Name)
+                ReflectionSourceFailureNote = ReflectionSourceFailureNote(module.Name),
+                Metadata = [.. headers.Select(header => header.Include)]
             });
         }
 
@@ -293,30 +300,68 @@ public static class MetadataLayout
         }
     }
 
-    private static MetadataHeader ResolveHeader(BuildContext context, NativeModuleInput module, string include)
+    // 모듈의 리플렉션 헤더를 표지로 찾는다(Docs/Design/ReflectionFoundations.ko.md 1.10절). SDK 모듈(ImportedMetadata — 미리 생성된
+    // descriptor)과 서드파티 모듈은 찾지 않는다. 표지 헤더가 빌드가 찾지 않는 자리에 있으면 그 타입이 조용히 빠지므로 거부한다:
+    // - ModuleDirectory가 있으면 모듈 폴더 전체(시험·빌드 출력·서드파티 폴더와 그 안의 다른 모듈 폴더 제외)에서 include 디렉터리 밖의 표지
+    //   헤더 — 생성 헤더가 원본을 포함할 철자가 없다(RMC2003 — 리플렉션 선언이 모듈 입력에 없다).
+    // - ModuleDirectory가 없으면 프로젝트 루트 안 include 디렉터리의 표지 헤더 — 명세 위치를 정할 수 없다(RMC2100).
+    private static IReadOnlyList<ReflectionHeader> Discover(BuildContext context, NativeModuleInput module, IReadOnlyList<string> moduleDirectories)
     {
-        foreach ((IReadOnlyList<string> directories, bool isPrivate) in new[] { (module.PublicIncludeDirectories, false), (module.PrivateIncludeDirectories, true) })
+        if (module.ImportedMetadata is not null || module.ThirdParty)
         {
-            foreach (string directory in directories)
-            {
-                string candidate = Path.GetFullPath(Path.Combine(directory, include));
-                if (!File.Exists(candidate))
-                {
-                    continue;
-                }
-
-                string canonical = Canonical(candidate);
-                string fromRoot = Path.GetRelativePath(Canonical(context.RootDirectory), canonical);
-                if (Path.IsPathRooted(fromRoot) || fromRoot.Split('/', '\\').Any(part => part == ".."))
-                {
-                    throw new ArgumentException($"Module '{module.Name}' Metadata '{include}': source must resolve inside the project root.");
-                }
-
-                return new(canonical, include, isPrivate);
-            }
+            return [];
         }
 
-        throw new ArgumentException($"Module '{module.Name}' Metadata '{include}': header not found in the module's public or private include directories.");
+        IReadOnlyList<string> includes = [.. module.PublicIncludeDirectories, .. module.PrivateIncludeDirectories];
+        if (string.IsNullOrWhiteSpace(module.ModuleDirectory))
+        {
+            // 루트 안이지만 빌드 출력(생성 헤더)과 서드파티(외부 라이브러리 헤더 — 표지가 없고 크다)는 훑지 않는다.
+            string root = Path.GetFullPath(context.RootDirectory);
+            string output = Path.GetFullPath(context.OutputDirectory);
+            foreach (string include in includes.Select(Path.GetFullPath).Where(include => IsUnder(include, root) && !IsUnder(include, output) &&
+                !include.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Contains("ThirdParty", StringComparer.OrdinalIgnoreCase)))
+            {
+                if (ReflectionHeaderScan.Discover(include, [include], []) is { Count: > 0 } stray)
+                {
+                    throw new ArgumentException($"RMC2100: Module '{module.Name}' has reflection header '{stray[0].Path}' but no ModuleDirectory " +
+                        "(the identity manifest location); set ModuleDirectory in its rules (Docs/Design/ReflectionFoundations.ko.md section 1.10).");
+                }
+            }
+
+            return [];
+        }
+
+        string directory = InsideRoot(context, module.ModuleDirectory, $"Module '{module.Name}' ModuleDirectory");
+        IReadOnlyList<string> nested = [.. moduleDirectories.Where(other => !PathComparer.Equals(other, directory) && IsUnder(other, directory))];
+        IReadOnlyList<string> outside = ReflectionHeaderScan.MarkedOutside(directory, includes, nested);
+        if (outside.Count != 0)
+        {
+            throw new ArgumentException($"RMC2003: Module '{module.Name}': reflection header '{outside[0]}' is not under the module's include " +
+                "directories, so the build does not scan it and its generated header could not include it; move it to Public/ " +
+                "(Docs/Design/ReflectionFoundations.ko.md section 1.10).");
+        }
+
+        return ReflectionHeaderScan.Discover(directory, module.PublicIncludeDirectories, module.PrivateIncludeDirectories);
+    }
+
+    // path가 directory 자신이거나 그 아래인가다.
+    private static bool IsUnder(string path, string directory)
+    {
+        string prefix = directory.EndsWith(Path.DirectorySeparatorChar) ? directory : directory + Path.DirectorySeparatorChar;
+        return PathComparer.Equals(path, directory) || path.StartsWith(prefix, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+    }
+
+    // 찾은 헤더의 정규 경로(symlink 해석)가 프로젝트 루트 안인지 확인한다.
+    private static MetadataHeader ResolveHeader(BuildContext context, NativeModuleInput module, ReflectionHeader found)
+    {
+        string canonical = Canonical(found.Path);
+        string fromRoot = Path.GetRelativePath(Canonical(context.RootDirectory), canonical);
+        if (Path.IsPathRooted(fromRoot) || fromRoot.Split('/', '\\').Any(part => part == ".."))
+        {
+            throw new ArgumentException($"Module '{module.Name}' Metadata '{found.Include}': source must resolve inside the project root.");
+        }
+
+        return new(canonical, found.Include, found.Private);
     }
 
     // 명세 경로 규칙: 루트 안, 제외 디렉터리 밖, symlink 아님, 출력 디렉터리 밖. history 검사는 접미사로 찾는다.
@@ -369,7 +414,7 @@ public static class MetadataLayout
             .Any(entry => !entry.TryGetProperty("retired", out JsonElement retired) || retired.ValueKind != JsonValueKind.True);
         if (active)
         {
-            throw new ArgumentException($"RMC2102: Module '{module.Name}' has no Metadata but its identity manifest '{manifest}' has active entries. Add the reflected headers to Metadata or retire/move the entries (ids retire, ids move).");
+            throw new ArgumentException($"RMC2102: Module '{module.Name}' has no reflection headers (no ROCKS_CLASS/ROCKS_STRUCT/ROCKS_ENUM markup in its include directories) but its identity manifest '{manifest}' has active entries. Restore the reflected declarations or retire/move the entries (ids retire, ids move).");
         }
 
         return manifest;

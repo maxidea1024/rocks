@@ -302,9 +302,8 @@ MetaCompiler는 클래스·struct `GeneratedType<T>`마다 필드 방문 함수 
 
 native 클래스 안에는 `ROCKS_PROPERTY`·`ROCKS_NATIVE`를 쓰지 않는다. MetaCompiler가 보지 않으므로 attribute로만 남고 GC가 추적하지도 저장하지도 않는 필드가 된다. Policy(`Rocks.ToolTests policy`·self `Policy.RepositoryReflectionAnnotations`)가 엔진 저장소(템플릿 포함)의 소유 native 소스(.h·.c·.cpp·.mm — 시험·Developer 포함)에서 다음을 거부한다.
 
-- `reflection-annotation-native-type`: `ROCKS_NATIVE_TYPE`을 직접 담은 클래스 본문 안의 두 annotation(중첩 클래스의 멤버는 그 중첩 클래스로 판정). Metadata 헤더 안이면 MetaCompiler도 거부하므로 이 규칙의 실익은 .cpp 안 native 클래스에 구체적인 메시지를 주는 데 있다.
-- `reflection-annotation-unlisted`: 어느 모듈 규칙의 `Metadata` 목록에도 없는 파일의 두 annotation. 목록은 `*.Build.cs`의 `Metadata => [...]`·`Metadata = [...]`·`Metadata { get; } = [...]` 문자열 리터럴이고(목록 안 주석은 항목이 아니다), 파일이 그 규칙 파일이 있는 모듈 폴더 아래에 있으면서 경로가 `/철자`로 끝나면 목록에 있다고 보는 lexical 근사다.
-- `reflection-metadata-not-literal`: 리터럴 목록이 아닌 `Metadata` 정의(식별자·`new[] { }`·도우미 호출·spread·보간 문자열·접근자 본문). 목록을 읽을 수 없으므로 규칙 파일의 그 줄에 보고하고 그 모듈 폴더의 파일에는 unlisted를 보고하지 않는다 — 모듈 규칙의 `Metadata`는 리터럴 목록으로만 쓴다(`Build/Rules/SourceModuleRules.cs`).
+- `reflection-annotation-native-type`: `ROCKS_NATIVE_TYPE`을 직접 담은 클래스 본문 안의 두 annotation(중첩 클래스의 멤버는 그 중첩 클래스로 판정). 리플렉션 헤더 안이면 MetaCompiler도 거부하므로 이 규칙의 실익은 .cpp 안 native 클래스에 구체적인 메시지를 주는 데 있다.
+- `reflection-annotation-unscanned`: 빌드가 리플렉션 헤더로 찾지 않는 파일의 두 annotation — 표지(`ROCKS_CLASS(`·`ROCKS_STRUCT(`·`ROCKS_ENUM(` 줄 첫머리)가 없는 파일, `.h`가 아닌 파일, 모듈 시험(`Tests/`), 모듈 소스 폴더(`Private/`). 표지 판정은 빌드와 같은 `ReflectionHeaderScan.HasMarkup`이고 위치는 경로 성분으로 보는 lexical 근사다.
 
 주석·문자열과 전처리 지시문 줄(매크로 정의)은 보지 않고, 한 위치는 native-type을 먼저 보고한다. 알려진 lexical 한계: 매크로로 감싼 annotation(정의 줄은 보지 않고 사용 위치에는 이름이 없다), `u8`·`L` 접두 문자 리터럴 안의 중괄호, 줄 끝 역슬래시 앞에 블록 주석이 있는 `#define` 이어짐 줄, `#if`로 갈린 두 클래스 머리(중괄호 짝이 어긋난다)는 판정이 틀릴 수 있고, `.hpp`·`.inl` 같은 다른 확장자는 검사하지 않는다.
 
@@ -407,7 +406,7 @@ C++ 구문은 원문 정규식이 아닌 실제 Clang JSON AST에서 읽는다. 
 
 생성 형식은 `ROCKS_CLANG_FORMAT` 환경변수를 우선 사용하고 clang-format 21.1.6을 요구한다. 같은 입력·타깃 문맥이면 같은 UTF-8/LF 바이트를 생성한다. 생성물은 출력 루트 옆의 고유 임시 디렉터리(`.rocks-meta-validation-*`)에 두고, 생성 헤더와 모듈 생성 헤더마다 따로 실제 Clang으로 검사한 뒤 게시한다(생성 소스는 `--verify-sources`를 준 경우에만 여기서 검사한다. 검사는 `--jobs` 수만큼 함께 돈다). 정상 종료와 관리된 실패에서 임시 디렉터리를 정리한다. 기존 출력과 같으면 다시 쓰지 않아 timestamp를 보존한다. 변경된 결과는 같은 디렉터리의 고유 임시 파일에 완성한 뒤 교체한다. 단독 실행은 입력에서 빠진 헤더의 이전 생성물을 지우지 않는다(지우기는 빌드의 게시 트랜잭션이 맡는다). `--check`는 모든 생성 헤더·모듈 생성 헤더·생성 소스·descriptor를 기존 출력과 비교하고 생성 루트(`Public`·`Private`·`Source`)에 남은 잉여 파일도 stale로 거부하며, 출력을 수정하지 않는다. 서로 다른 생성 설정이 같은 출력을 공유하는 빌드 그래프는 금지하며, 고유 임시 파일 사용이 그런 논리 충돌을 해결하는 것은 아니다.
 
-C# 빌드 도구는 타깃에서 도달하는 모듈 가운데 `Metadata`가 있는 모듈을 의존 순서로 하나씩 생성한다. 생성 디렉터리 `<out>/Generated/<M>/Public`·`Private`는 각각 그 모듈의 public·private include 디렉터리가 되어 의존 모듈로 전파된다. `<out>/Generated/<M>/Source`의 생성 소스는 include 루트가 아니고 그 모듈의 번역 단위로 컴파일된다. 생성은 `<out>/.metadata-stage/`에 하고, 의존 모듈은 stage의 descriptor와 생성 루트를 본다(이전 빌드의 게시본을 보지 않는다). 모든 모듈의 생성·`ids verify`·`ids verify-set`이 성공하면 생성 헤더·생성 소스·descriptor(`<out>/Metadata/<M>.rocksmeta.json`)와 입력에서 빠진 헤더의 이전 생성물 삭제를 한 트랜잭션으로 게시한다. 게시 중 실패하면 교체와 삭제를 모두 되돌리며, 실행 동안 명세가 바뀌었으면 게시하지 않는다. Core-only 구성은 이 생성 작업을 요구하지 않는다. 생성 헤더는 public include 헤더 검사에서 일반 엔진 헤더와 같은 경고 오류 기준으로 단독 컴파일된다.
+C# 빌드 도구는 타깃에서 도달하는 모듈 가운데 리플렉션 헤더(아래 "모듈 메타데이터"의 표지 헤더)가 있는 모듈을 의존 순서로 하나씩 생성한다. 생성 디렉터리 `<out>/Generated/<M>/Public`·`Private`는 각각 그 모듈의 public·private include 디렉터리가 되어 의존 모듈로 전파된다. `<out>/Generated/<M>/Source`의 생성 소스는 include 루트가 아니고 그 모듈의 번역 단위로 컴파일된다. 생성은 `<out>/.metadata-stage/`에 하고, 의존 모듈은 stage의 descriptor와 생성 루트를 본다(이전 빌드의 게시본을 보지 않는다). 모든 모듈의 생성·`ids verify`·`ids verify-set`이 성공하면 생성 헤더·생성 소스·descriptor(`<out>/Metadata/<M>.rocksmeta.json`)와 입력에서 빠진 헤더의 이전 생성물 삭제를 한 트랜잭션으로 게시한다. 게시 중 실패하면 교체와 삭제를 모두 되돌리며, 실행 동안 명세가 바뀌었으면 게시하지 않는다. Core-only 구성은 이 생성 작업을 요구하지 않는다. 생성 헤더는 public include 헤더 검사에서 일반 엔진 헤더와 같은 경고 오류 기준으로 단독 컴파일된다.
 
 ## 진단과 수정
 
@@ -431,7 +430,7 @@ C# 하네스는 실제 Clang을 호출하여 자동 ID, 잘못된 명세·중복
 
 ## 모듈 메타데이터
 
-리플렉션 헤더는 그 헤더를 소유한 모듈의 규칙이 `Metadata`로 선언한다. 철자는 모듈의 public 또는 private include 디렉터리 기준이다. public 헤더의 타입은 의존 모듈이 쓸 수 있고, private 헤더의 타입은 그 모듈 안에서만 쓴다.
+리플렉션 헤더는 모듈 규칙에 적지 않는다. 빌드(`MetadataLayout` — `ReflectionHeaderScan`)가 모듈 폴더(`ModuleDirectory`) 안의 public·private include 디렉터리에서 `*.h`를 훑어, 주석·문자열을 지운 줄이 `ROCKS_CLASS(`·`ROCKS_STRUCT(`·`ROCKS_ENUM(`으로 시작하는 헤더를 리플렉션 헤더로 삼는다(UE UBT의 `UCLASS` 줄 첫머리 표지와 같다 — [설계](../Design/ReflectionFoundations.ko.md) 1.10절). 철자는 찾은 include 디렉터리 기준이고 목록은 철자 순서다. public 헤더의 타입은 의존 모듈이 쓸 수 있고, private include 디렉터리 헤더의 타입은 그 모듈 안에서만 쓴다. 모듈 폴더 밖 include 디렉터리(서드파티)와 모듈 시험(`Tests/`)은 훑지 않는다.
 
 ```csharp
 public sealed class ReflectionTestFixtures : CoreModuleRules
@@ -443,12 +442,10 @@ public sealed class ReflectionTestFixtures : CoreModuleRules
     protected override string[] PublicDependencies => ["ObjectRuntime"];
 
     protected override bool HasSources => false;
-
-    protected override IReadOnlyList<string> Metadata =>
-        ["ReflectionTestFixtures/ReflectionFixture.h", "ReflectionTestFixtures/AutoIdentityFixture.h"];
 }
+// Public/ReflectionTestFixtures/ReflectionFixture.h 등 표지가 있는 헤더를 빌드가 찾는다.
 ```
 
-생성 헤더는 원본 철자의 `.h`를 `.generated.h`로 바꿔 include한다(`#include <ReflectionTestFixtures/ReflectionFixture.generated.h>`). 명세는 모듈 폴더의 `ReflectionTestFixtures.rocksids.json`이다. `ModuleRules`를 직접 상속하는 게임 모듈은 `NativeModuleInput`에 `Metadata`와 함께 명세가 있는 폴더 `ModuleDirectory`(프로젝트 상대 경로)를 적는다(`Templates/Game/Foundation/FoundationTemplate.Build.cs`).
+생성 헤더는 원본 철자의 `.h`를 `.generated.h`로 바꿔 include한다(`#include <ReflectionTestFixtures/ReflectionFixture.generated.h>`). 명세는 모듈 폴더의 `ReflectionTestFixtures.rocksids.json`이다. `ModuleRules`를 직접 상속하는 게임 모듈은 `NativeModuleInput`에 명세가 있는 폴더 `ModuleDirectory`(프로젝트 상대 경로)를 적는다(`Templates/Game/Foundation/FoundationTemplate.Build.cs`).
 
-빌드는 다음을 거부한다: `Metadata`가 있는데 명세가 없는 모듈(RMC2100), `Metadata`가 없는데 활성 항목이 있는 명세(RMC2102 — 은퇴 항목만 남은 명세는 ID 예약이므로 허용), 한 헤더를 두 모듈이나 한 모듈에서 두 번 선언, 모듈 include 디렉터리 밖이거나 없는 헤더, 대소문자만 다른 생성 철자(RMC2005). 등록하지 않은 헤더의 `ROCKS_CLASS` 선언은 일반 C++ 컴파일만으로 누락이 탐지된다고 보장하지 않는다. 컴파일 단위와 생성 선언의 coverage를 강제하는 기능은 후속 구현 항목이다.
+빌드는 다음을 거부한다: 모듈 규칙의 `Metadata` 목록(빌드가 찾으므로 적지 않는다), 리플렉션 헤더가 있는데 명세가 없는 모듈(RMC2100), 리플렉션 헤더가 없는데 활성 항목이 있는 명세(RMC2102 — 은퇴 항목만 남은 명세는 ID 예약이므로 허용), 모듈 소스 폴더 `Private/`(include 디렉터리가 아님)의 표지 헤더(RMC2003), 한 헤더를 두 모듈이 찾음, 대소문자만 다른 생성 철자·생성 헤더 접미사(RMC2005). 등록하지 않은 헤더의 `ROCKS_CLASS` 선언은 일반 C++ 컴파일만으로 누락이 탐지된다고 보장하지 않는다. 컴파일 단위와 생성 선언의 coverage를 강제하는 기능은 후속 구현 항목이다.

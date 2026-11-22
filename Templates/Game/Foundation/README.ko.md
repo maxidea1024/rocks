@@ -8,7 +8,7 @@
 
 - `FoundationTemplate.rocksproject`는 프로젝트 기술자다(UE .uproject 대응). 엔진 버전·모듈(`FoundationTemplate`)·대상 플랫폼을 적는다. 형식은 [저장소 구성](../../../Docs/Guides/RepositoryLayout.ko.md)의 기술자 절을 따른다.
 - `FoundationTemplate.Build.cs`는 `FoundationTemplate` 실행 모듈과 `ObjectRuntime`·`Launch` 의존성을 선언한다.
-- `FoundationTemplate.Target.cs`는 `FoundationTemplate` 타깃이 빌드할 모듈(`FoundationTemplate`)을 고른다. 게임 빌드는 `--target`이 없으면 `.rocksproject` 이름의 타깃을 빌드한다. 리플렉션 헤더는 모듈이 소유한다: `FoundationTemplate.Build.cs`의 `Metadata = ["GameObject.h"]`가 메타컴파일러가 처리할 헤더이고, 생성 헤더는 `<GameObject.generated.h>`로 include한다.
+- `FoundationTemplate.Target.cs`는 `FoundationTemplate` 타깃이 빌드할 모듈(`FoundationTemplate`)을 고른다. 게임 빌드는 `--target`이 없으면 `.rocksproject` 이름의 타깃을 빌드한다. 리플렉션 헤더는 모듈이 소유한다: 빌드가 모듈의 include 디렉터리(`Source`)에서 `ROCKS_CLASS` 표지가 있는 헤더(`GameObject.h`)를 찾아 메타컴파일러에 넘기고(규칙에 목록을 적지 않는다 — [설계](../../../Docs/Design/ReflectionFoundations.ko.md) 1.10절), 생성 헤더는 `<GameObject.generated.h>`로 include한다.
 - `FoundationTemplate.rocksids.json`(모듈 이름 + `.rocksids.json`, `ModuleDirectory` = 프로젝트 루트)은 이 모듈의 타입·필드 식별자를 보관한다. 소스의 매크로에는 식별자를 적지 않는다. `new-project`가 새 ID로 다시 발급한다(`ids reissue`).
 - `Source/GameObject.h`는 namespace `foundationtemplate`의 `rocks::Object` 기반 클래스와 `ROCKS_CLASS`, 읽기 전용 `ROCKS_PROPERTY`를 선언한다.
 - `Source/FoundationTemplateModule.cpp`는 모듈 진입점 `ROCKS_IMPLEMENT_MODULE(rocks::DefaultModuleImplementation, FoundationTemplate)`을 정의한다. 모든 C++ 모듈은 진입점이 하나 있어야 하며, 빌드가 실행 파일마다 만드는 모듈 표가 이를 참조하므로 빠지면 링크 오류다([모듈 로더](../../../Docs/Design/ModuleLoader.ko.md) 3.2절). 시작·종료 때 할 일이 생기면 `rocks::ModuleImplementation` 파생 클래스로 바꾼다. 모듈 진입점은 프로세스 진입점이 아니다.

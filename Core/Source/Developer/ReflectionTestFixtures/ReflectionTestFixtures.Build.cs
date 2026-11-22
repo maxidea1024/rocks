@@ -16,18 +16,4 @@ public sealed class ReflectionTestFixtures : CoreModuleRules
     // CoreTypeBindings: the Core value type field fixture (CoreValueFixture.h) imports that module's Binds mirrors.
     // Localization: rocks::Text fields (TextFieldFixture.h).
     protected override string[] PublicDependencies => ["ObjectRuntime", "CoreTypeBindings", "Localization"];
-
-    protected override IReadOnlyList<string> Metadata =>
-        ["ReflectionTestFixtures/ReflectionFixture.h", "ReflectionTestFixtures/AutoIdentityFixture.h", "ReflectionTestFixtures/StructFixture.h",
-            "ReflectionTestFixtures/CoreValueFixture.h", "ReflectionTestFixtures/ArrayFixture.h", "ReflectionTestFixtures/PathFixture.h",
-            "ReflectionTestFixtures/IntegerWidthFixture.h", "ReflectionTestFixtures/NameFieldFixture.h",
-            "ReflectionTestFixtures/WeakObjectRefFixture.h", "ReflectionTestFixtures/ClassRefFixture.h",
-            "ReflectionTestFixtures/OptionalFixture.h", "ReflectionTestFixtures/MapFixture.h",
-            "ReflectionTestFixtures/ObjectRefMapFixture.h", "ReflectionTestFixtures/StaticArrayFixture.h",
-            "ReflectionTestFixtures/FieldFlagFixture.h",
-            "ReflectionTestFixtures/ClassFlagFixture.h", "ReflectionTestFixtures/TextFixture.h",
-            "ReflectionTestFixtures/AssignFixture.h", "ReflectionTestFixtures/InstancedStructFixture.h",
-            "ReflectionTestFixtures/StructInheritanceFixture.h", "ReflectionTestFixtures/TextFieldFixture.h",
-            "ReflectionTestFixtures/BitfieldFixture.h", "ReflectionTestFixtures/ValidateFixture.h",
-            "ReflectionTestFixtures/BytesFixture.h"];
 }

@@ -19,6 +19,4 @@ public sealed class Mesh : EngineModuleRules
     protected override UnityMode Unity => UnityMode.On;
 
     protected override string[] PublicDependencies => ["ObjectRuntime", "CoreTypeBindings", "AssetRuntime"];
-
-    protected override IReadOnlyList<string> Metadata => ["Mesh/MeshBuildSettings.h", "Mesh/SimpleCollision.h"];
 }

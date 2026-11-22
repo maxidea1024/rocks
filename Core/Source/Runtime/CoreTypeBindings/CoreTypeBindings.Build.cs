@@ -15,6 +15,4 @@ public sealed class CoreTypeBindings : CoreModuleRules
     protected override string[] PublicDependencies => ["ObjectRuntime"];
 
     protected override bool HasSources => false;
-
-    protected override IReadOnlyList<string> Metadata => ["CoreTypeBindings/CoreValueTypes.h", "CoreTypeBindings/InterpCurveTypes.h"];
 }

@@ -17,6 +17,4 @@ public sealed class ConfigTestFixtures : CoreModuleRules
     protected override string[] PublicDependencies => ["ObjectRuntime", "CoreTypeBindings"];
 
     protected override bool HasSources => false;
-
-    protected override IReadOnlyList<string> Metadata => ["ConfigTestFixtures/SettingsFixture.h"];
 }

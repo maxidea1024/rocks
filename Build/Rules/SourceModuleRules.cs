@@ -147,19 +147,6 @@ public abstract class SourceModuleRules : ModuleRules
     protected string ModuleEntrySource(BuildContext context) => context.PathInRoot($"{ModuleDirectory}/Private/{ModuleName}Module.cpp");
 
     /// <summary>
-    /// Include spellings of reflection metadata headers (ROCKS_CLASS declarations), relative to Public/ or Private/. When not empty,
-    /// the module folder must contain the identity manifest <c>&lt;ModuleName&gt;.rocksids.json</c>. Example:
-    /// <code>
-    /// protected override IReadOnlyList&lt;string&gt; Metadata =&gt; ["ReflectionTestFixtures/ReflectionFixture.h"];
-    /// </code>
-    /// The generated header is included as <c>&lt;ReflectionTestFixtures/ReflectionFixture.generated.h&gt;</c>.
-    /// Write it as a list of string literals only (no identifiers, <c>new[] { }</c>, helper calls, spreads or interpolated strings). The policy check
-    /// reads this list verbatim and rejects ROCKS_PROPERTY and ROCKS_NATIVE in files outside it, so anything other than literals is
-    /// reported as <c>reflection-metadata-not-literal</c>.
-    /// </summary>
-    protected virtual IReadOnlyList<string> Metadata => [];
-
-    /// <summary>
     /// Include paths used only by this module's sources (not propagated to dependents). Used by third-party library adapters.
     /// Example: <c>ThirdPartyModuleRules.ConsumerIncludeDirectories(context, "Zstd")</c>.
     /// </summary>
@@ -186,7 +173,6 @@ public abstract class SourceModuleRules : ModuleRules
             PrivatePchHeader = PrivatePchHeader is null ? null : context.PathInRoot($"{ModuleDirectory}/{PrivatePchHeader}"),
             SharedPchHeader = SharedPchHeader,
             Type = ModuleType,
-            Metadata = Metadata,
             ModuleDirectory = ModuleDirectory
         }
         : new()
@@ -198,7 +184,6 @@ public abstract class SourceModuleRules : ModuleRules
             DynamicModules = DynamicModules,
             LoadingPhase = LoadingPhase,
             Type = ModuleType,
-            Metadata = Metadata,
             ModuleDirectory = ModuleDirectory
         };
 }

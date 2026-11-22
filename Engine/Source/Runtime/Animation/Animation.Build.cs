@@ -23,6 +23,4 @@ public sealed class Animation : EngineModuleRules
     protected override UnityMode Unity => UnityMode.On;
 
     protected override string[] PublicDependencies => ["AssetRuntime", "CoreTypeBindings", "Curves"];
-
-    protected override IReadOnlyList<string> Metadata => ["Animation/BoneHierarchy.h", "Animation/Skeleton.h", "Animation/AnimationClip.h"];
 }

@@ -47,7 +47,7 @@ class SceneComponent;
 // 늘 components 안에 있는 강한 참조), enabled이고 모두 ReadOnly다(경로·리플렉션 쓰기가 World 장부 —
 // ActorRecord·hook·Tick 등록 — 를 우회하지 않게). World 포인터·소속 Level·Tick 설정은
 // ROCKS_NATIVE(저장하지 않는 런타임 상태)다. 영속 상태를 더하는 파생은 ROCKS_CLASS(WorldOnly
-// 상속)로 Metadata 헤더에 선언하고, 영속 상태가 없는 런타임 전용 파생은 위처럼
+// 상속)로 리플렉션 헤더에 선언하고, 영속 상태가 없는 런타임 전용 파생은 위처럼
 // ROCKS_NATIVE_TYPE으로 둔다(그 객체가 든 그래프는 저장할 수 없다).
 //
 // 소유: Level이 Actor를, Actor가 자기 Component를 강한 GC 간선 목록(ObjectRefArray)으로 소유한다.
