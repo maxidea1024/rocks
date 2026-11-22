@@ -283,6 +283,39 @@ internal static partial class ModuleMetaTests
             Verify.Contains("#include <Lower/Target.generated.h>", source, "inherited imported class target found by ID");
         });
 
+        // struct·enum의 native 키(Docs/Design/BuildTargets.ko.md 3.8절 BS8d4): 클래스처럼 생성 헤더가 GeneratedType<X>::NativeKey()를
+        // 모듈 API 매크로로 선언하고 생성 소스가 정의한다(Modular에서 공유 라이브러리마다 다른 키가 생기지 않게).
+        suite.Add("Meta.StructsAndEnumsGetGeneratedNativeKeys", async () =>
+        {
+            using Layout layout = new(options, environment);
+            layout.WriteStructModules();
+            Verify.Equal(0, (await layout.RunLowerAsync()).ExitCode, "lower module with structs and an enum");
+            string header = File.ReadAllText(layout.Generated("Lower", "Public/Lower/Parent.generated.h"));
+            string source = File.ReadAllText(layout.Generated("Lower", "Source/Public/Lower/Parent.generated.cpp"));
+            // 타입마다 선언 하나·정의 하나다(class Parent, struct Point·Link·WorldBits·Outer, enum Mode).
+            string[] types = ["::probe::Parent", "::probe::Point", "::probe::Link", "::probe::WorldBits", "::probe::Outer", "::probe::Mode"];
+            Verify.Equal(types.Length, header.Split("static ROCKS_LOWER_API const void* NativeKey() noexcept;").Length - 1,
+                "one native key declaration per class, struct and enum");
+            foreach (string type in types)
+            {
+                Verify.Contains($"const void* GeneratedType<{type}>::NativeKey() noexcept {{", source, "native key definition of " + type);
+            }
+
+            // Binds 미러는 실제 타입의 생성 키를 내고, 실제 타입이 BoundCoreValueV 목록에 있는지 생성 소스가 확인한다.
+            using Layout bindings = new(options, environment);
+            bindings.Write("Lower/Public/Lower/Parent.h", BindsParent);
+            bindings.Manifest("Lower", ["probe::Vec3Binding", "probe::Vec3dBinding"],
+                ["probe::Vec3Binding::x", "probe::Vec3Binding::y", "probe::Vec3Binding::z", "probe::Vec3dBinding::x", "probe::Vec3dBinding::y",
+                    "probe::Vec3dBinding::z"]);
+            Directory.CreateDirectory(bindings.Generated("CoreTypeBindings", "Public"));
+            Directory.CreateDirectory(bindings.Generated("CoreTypeBindings", "Private"));
+            ProcessResult bound = await bindings.RunLowerAsync(module: "CoreTypeBindings");
+            Verify.Equal(0, bound.ExitCode, "bindings module: " + bound.StdErr);
+            string boundSource = File.ReadAllText(bindings.Generated("CoreTypeBindings", "Source/Public/Lower/Parent.generated.cpp"));
+            Verify.Contains("static_assert(::rocks::BoundCoreValueV<::rocks::Vector3<float>>", boundSource, "Binds target list check");
+            Verify.Contains("const void* GeneratedType<::rocks::Vector3<float>>::NativeKey() noexcept {", boundSource, "Binds target native key");
+        });
+
         // 생성물 검증 컴파일은 소비자와 같은 include 순서를 쓴다. 작성자 디렉터리의 낡은 .generated.h가 생성 헤더보다 먼저
         // 풀리면 소비자도 그 파일을 보므로 검증이 실패해야 한다(검증 루트를 맨 앞에 두면 통과해 버린다).
         suite.Add("Meta.ValidationUsesTheConsumerIncludeOrder", async () =>

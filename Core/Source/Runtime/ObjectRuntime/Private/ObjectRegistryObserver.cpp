@@ -163,14 +163,13 @@ Result<void> ObjectRegistry::TallyHandles(const ObjectHandle* handles, usize cou
                                           : Result<void>::Failure(state.error);
 }
 
-Result<void> ObjectRegistry::CollectStructEdges(const detail::StructElementOps& element,
-                                                void* const* blocks, uint32 count,
-                                                Array<ObjectHandle>& out) noexcept {
+Result<void> ObjectRegistry::CollectStructEdges(const void* elementType, void* const* blocks,
+                                                uint32 count, Array<ObjectHandle>& out) noexcept {
     // 떼어 낼 원소만 trace한다(소유자 Trace는 부르지 않는다). trace 칸은 원소 표에 없으므로 등록
     // struct의 실행 정보로 얻는다(StructRefArray.h — 생성 헤더 없는 곳의 인스턴스화 문제). 관찰자
     // 집계와 클러스터 장부가 이 결과를 같이 쓴다(원소마다 trace 한 번 — 13.4절: 소속 소유자의
     // 원소를 지울 때도 원소 Trace가 반드시 있어야 한다).
-    auto lease = types_.AcquireStructByNative(element.nativeType);
+    auto lease = types_.AcquireStructByNative(elementType);
     if (!lease) {
         return Result<void>::Failure(ErrorCode::Unsupported);
     }

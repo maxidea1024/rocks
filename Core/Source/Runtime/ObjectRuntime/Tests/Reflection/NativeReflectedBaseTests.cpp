@@ -898,9 +898,22 @@ TEST(NativeClass_PrivateAndProtectedTraceAreVisited) {
     CHECK(allocator.Stats().liveAllocations == 0);
 }
 
-// 리플렉션 클래스의 NativeTypeKey는 생성 .cpp가 정의한 키(GeneratedType<T>::NativeKey)다. 타입마다
-// 다르고 부를 때마다 같다. 리플렉션 struct·native 파생·리플렉션하지 않는 타입은 inline 표지 주소,
-// Object는 null이다.
+// 키 매크로 쌍을 쓰는 native 타입이다(BS8d4 — 다른 모듈에서도 키로 쓰는 native 등록 타입 자리).
+struct KeyedNativeType {
+    int32 value = 0;
+};
+
+} // namespace native_reflected_base_tests_file
+
+ROCKS_DECLARE_NATIVE_TYPE_KEY(native_reflected_base_tests_file::KeyedNativeType, )
+ROCKS_DEFINE_NATIVE_TYPE_KEY(native_reflected_base_tests_file::KeyedNativeType)
+
+namespace native_reflected_base_tests_file {
+
+// 리플렉션 class·struct·enum과 Binds 미러의 실제 Core 값 타입의 NativeTypeKey는 생성 .cpp가 정의한
+// 키(GeneratedType<T>::NativeKey — BuildTargets 3.8절 BS8b·BS8d4)다. 타입마다 다르고 부를 때마다
+// 같다. native 파생·리플렉션하지 않는 타입은 키 매크로 쌍이 있으면 그 export 키, 없으면 inline 표지
+// 주소, Object는 null이다.
 TEST(NativeReflectedBase_NativeTypeKeyUsesGeneratedKeyForReflectedTypes) {
     const void* world = NativeTypeKey<WorldFixture>();
     const void* scene = NativeTypeKey<SceneFixture>();
@@ -908,15 +921,24 @@ TEST(NativeReflectedBase_NativeTypeKeyUsesGeneratedKeyForReflectedTypes) {
     CHECK(world != nullptr);
     CHECK(world == GeneratedType<WorldFixture>::NativeKey());
     CHECK(scene == GeneratedType<SceneFixture>::NativeKey());
-    // struct 키는 리플렉션 struct도 inline 표지다(BS8b 한계 — StructRefArray 상수 연산표와 같은
-    // 주소).
-    CHECK(leaf == &NativeTypeIdentity<reflection_fixture::StructLeaf>);
+    CHECK(leaf == GeneratedType<reflection_fixture::StructLeaf>::NativeKey());
+    CHECK(leaf != &NativeTypeIdentity<reflection_fixture::StructLeaf>);
+    // Binds 미러의 실제 타입(CoreTypeBindings 생성 키)과 리플렉션 enum.
+    CHECK(NativeTypeKey<Vec3>() == GeneratedType<Vec3>::NativeKey());
+    CHECK(NativeTypeKey<Color>() == GeneratedType<Color>::NativeKey());
+    CHECK(NativeTypeKey<Vec3>() != NativeTypeKey<Color>());
+    CHECK(NativeTypeKey<reflection_fixture::Bias>() ==
+          GeneratedType<reflection_fixture::Bias>::NativeKey());
     CHECK(world == NativeTypeKey<WorldFixture>());
     CHECK(world != scene);
     CHECK(world != leaf);
     CHECK(scene != leaf);
 
     CHECK(NativeTypeKey<NativeWorldActor>() == &NativeTypeIdentity<NativeWorldActor>);
+    // 키 매크로 쌍(ROCKS_DECLARE·DEFINE_NATIVE_TYPE_KEY)이 있는 native 타입은 그 export 키다.
+    CHECK(NativeTypeKey<KeyedNativeType>() == NativeTypeKeyTraits<KeyedNativeType>::Key());
+    CHECK(NativeTypeKey<KeyedNativeType>() != &NativeTypeIdentity<KeyedNativeType>);
+    CHECK(NativeTypeKey<KeyedNativeType>() == NativeTypeKey<KeyedNativeType>());
     CHECK(NativeTypeKey<NativeStructExtension>() == &NativeTypeIdentity<NativeStructExtension>);
     CHECK(NativeTypeKey<NativeWorldActor>() != world);
     CHECK(NativeTypeKey<NativeStructExtension>() != leaf);
@@ -924,10 +946,10 @@ TEST(NativeReflectedBase_NativeTypeKeyUsesGeneratedKeyForReflectedTypes) {
     CHECK(NativeTypeKey<Object>() == nullptr);
 }
 
-// 등록(생성 .cpp가 RuntimeTypeOps·StructElementOps에 넣는 키)과 조회(이 번역 단위의
-// NativeTypeKey)가 같은 키다: 리플렉션 클래스 lease는 자기 키와 base 키 모두에 IsNativeA가 참이고,
-// struct는 native 키로 연 lease가 그 struct다. native 파생은 리플렉션 base 키를 base 사슬로
-// 이어받는다.
+// 등록(생성 .cpp가 RuntimeTypeOps에 넣는 키(StructElementOps는 키를 담지 않는다 — BS8d4))과 조회(이
+// 번역 단위의 NativeTypeKey)가 같은 키다: 리플렉션 클래스 lease는 자기 키와 base 키 모두에
+// IsNativeA가 참이고, struct는 native 키로 연 lease가 그 struct다. native 파생은 리플렉션 base 키를
+// base 사슬로 이어받는다.
 TEST(NativeReflectedBase_RegisteredKeysMatchLookupKeys) {
     SystemAllocator allocator;
     TypeRegistry types(allocator);

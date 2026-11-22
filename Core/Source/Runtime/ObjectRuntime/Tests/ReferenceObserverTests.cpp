@@ -1162,15 +1162,14 @@ TEST(ReferenceObserver_UnregisteredElementStructIsUnsupported) {
 }
 
 // AcquireStructByNative: struct native 키로 등록 struct를 연다(클래스 키·미등록 NotFound, null
-// InvalidArgument, 종료 뒤 ShuttingDown). StructRefArray 원소 표의 nativeType과 같은 키다.
+// InvalidArgument, 종료 뒤 ShuttingDown). 원소를 지우는 호출자가 넘기는 NativeTypeKey<S>()와 같은
+// 키다.
 TEST(TypeRegistry_AcquireStructByNativeFindsTheElementStruct) {
     SystemAllocator allocator;
     {
         TypeRegistry types(allocator);
         REQUIRE(RegisterTypes(types));
-        StructRefArray<EdgeSlot> sample(allocator);
-        const void* key = detail::StructRefArrayAccess::Storage(sample).element->nativeType;
-        CHECK(key == NativeTypeKey<EdgeSlot>());
+        const void* key = NativeTypeKey<EdgeSlot>();
         {
             auto lease = types.AcquireStructByNative(key);
             REQUIRE(lease);

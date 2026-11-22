@@ -106,13 +106,13 @@ Result<void> ObjectRegistry::InsertElementAt(const ObjectAccessContext& access, 
 template <class S>
 Result<void> ObjectRegistry::RemoveElementAt(const ObjectAccessContext& access, ObjectHandle owner,
                                              StructRefArray<S>& array, usize index) noexcept {
-    return RemoveStructElement(access, owner, array.storage_, index);
+    return RemoveStructElement(access, owner, array.storage_, index, NativeTypeKey<S>());
 }
 
 template <class S>
 Result<void> ObjectRegistry::ClearElements(const ObjectAccessContext& access, ObjectHandle owner,
                                            StructRefArray<S>& array) noexcept {
-    return ClearStructElements(access, owner, array.storage_);
+    return ClearStructElements(access, owner, array.storage_, NativeTypeKey<S>());
 }
 
 template <class S, class T>

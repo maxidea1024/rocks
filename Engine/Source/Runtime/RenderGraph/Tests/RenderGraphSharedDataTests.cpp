@@ -49,9 +49,12 @@ auto Draw() noexcept {
 
 } // namespace
 
-ROCKS_GRAPH_SHARED_DATA(ShadowSetup);
-ROCKS_GRAPH_SHARED_DATA(LightSetup);
-ROCKS_GRAPH_SHARED_DATA(SceneTextureTable);
+ROCKS_DECLARE_GRAPH_SHARED_DATA(ShadowSetup, )
+ROCKS_DECLARE_GRAPH_SHARED_DATA(LightSetup, )
+ROCKS_DECLARE_GRAPH_SHARED_DATA(SceneTextureTable, )
+ROCKS_DEFINE_GRAPH_SHARED_DATA(ShadowSetup)
+ROCKS_DEFINE_GRAPH_SHARED_DATA(LightSetup)
+ROCKS_DEFINE_GRAPH_SHARED_DATA(SceneTextureTable)
 
 // 타입마다 값 하나: 만들고 찾고, 그래프가 파괴될 때 소멸한다. 타입 번호는 프로세스 안에서 다르다.
 TEST(RenderGraph_SharedDataHoldsOneValuePerType) {

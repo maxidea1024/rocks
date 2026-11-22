@@ -12,7 +12,7 @@ namespace rocks::render {
 class RenderGraph;
 
 // 그래프 공유 값 타입의 등록이다. 정의가 없는 기본 template이므로 등록하지 않은 타입을
-// GraphSharedData에 쓰면 컴파일 오류다. ROCKS_GRAPH_SHARED_DATA로 특수화한다.
+// GraphSharedData에 쓰면 컴파일 오류다. ROCKS_DECLARE_GRAPH_SHARED_DATA로 특수화한다.
 template <class T>
 struct GraphSharedDataType;
 
@@ -23,23 +23,31 @@ uint32 AllocateGraphSharedDataIndex() noexcept;
 
 } // namespace detail
 
-// 타입을 그래프 공유 값으로 등록한다. 전역 namespace에서 쓴다(타입 정의 뒤, 한 타입에 한 번).
+// 타입을 그래프 공유 값으로 등록한다. 선언(ROCKS_DECLARE_GRAPH_SHARED_DATA — 타입의 헤더, 전역
+// namespace, 타입 정의 뒤)과 정의(ROCKS_DEFINE_GRAPH_SHARED_DATA — 그 모듈의 cpp 하나)로 나눈다.
+// 번호는 정의 쪽 정적 지역 하나라 Modular에서도 프로세스에 하나다(공개 헤더에 정적 지역을 두지
+// 않는다 — Docs/Design/BuildTargets.ko.md 3.8절 BS8c·BS8d4). Api는 그 모듈의 API 매크로다(한 번역
+// 단위 안에서만 쓰는 타입은 빈 값).
 //
 // 사용 예:
 //   struct ShadowSetup { GraphTexture atlas; };
-//   ROCKS_GRAPH_SHARED_DATA(ShadowSetup);
-#define ROCKS_GRAPH_SHARED_DATA(Type)                                                              \
+//   ROCKS_DECLARE_GRAPH_SHARED_DATA(ShadowSetup, ROCKS_RENDERER_API)   // 헤더
+//   ROCKS_DEFINE_GRAPH_SHARED_DATA(ShadowSetup)                        // cpp 하나
+#define ROCKS_DECLARE_GRAPH_SHARED_DATA(Type, Api)                                                 \
     template <>                                                                                    \
     struct rocks::render::GraphSharedDataType<Type> {                                              \
         static const char* Name() noexcept {                                                       \
             return #Type;                                                                          \
         }                                                                                          \
                                                                                                    \
-        static ::rocks::uint32 Index() noexcept {                                                  \
-            static const ::rocks::uint32 index =                                                   \
-                ::rocks::render::detail::AllocateGraphSharedDataIndex();                           \
-            return index;                                                                          \
-        }                                                                                          \
+        Api static ::rocks::uint32 Index() noexcept;                                               \
+    };
+
+#define ROCKS_DEFINE_GRAPH_SHARED_DATA(Type)                                                       \
+    ::rocks::uint32 rocks::render::GraphSharedDataType<Type>::Index() noexcept {                   \
+        static const ::rocks::uint32 index =                                                       \
+            ::rocks::render::detail::AllocateGraphSharedDataIndex();                               \
+        return index;                                                                              \
     }
 
 // 그래프 공유 값이다: 등록 타입마다 값 하나, 그래프 수명이다(값은 그래프의 프레임 arena에 만들고
@@ -170,9 +178,9 @@ private:
 //
 // 사용 예(렌더러):
 //   using SceneTextureTable = GraphViewTable<SceneTextureSet>;
-//   ROCKS_GRAPH_SHARED_DATA(SceneTextureTable);   // 전역 namespace
-//   auto* table = graph.SharedData().Create<SceneTextureTable>(graph, "SceneTextureTable");
-//   table->Add({viewSet, view}, sceneTextures);
+//   ROCKS_DECLARE_GRAPH_SHARED_DATA(SceneTextureTable, ROCKS_RENDERER_API)   // 전역 namespace,
+//   정의는 cpp auto* table = graph.SharedData().Create<SceneTextureTable>(graph,
+//   "SceneTextureTable"); table->Add({viewSet, view}, sceneTextures);
 //   ... pass 구성 함수에서:
 //   const SceneTextureSet* textures =
 //       graph.SharedData().Require<SceneTextureTable>()->Get({viewSet, view});

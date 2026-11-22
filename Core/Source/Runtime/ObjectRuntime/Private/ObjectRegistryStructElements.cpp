@@ -146,7 +146,7 @@ Result<usize> ObjectRegistry::InsertStructElement(const ObjectAccessContext& acc
 Result<void> ObjectRegistry::RemoveStructElement(const ObjectAccessContext& access,
                                                  ObjectHandle owner,
                                                  detail::StructRefArrayStorage& storage,
-                                                 usize index) noexcept {
+                                                 usize index, const void* elementType) noexcept {
     auto valid = CheckAccess(access);
     if (!valid) {
         return valid;
@@ -201,7 +201,7 @@ Result<void> ObjectRegistry::RemoveStructElement(const ObjectAccessContext& acce
         EdgeTally tally(allocator_);
         Array<ObjectHandle> removed(allocator_);
         void* const target = storage.blocks[index];
-        if (auto collected = CollectStructEdges(ops, &target, 1, removed); !collected) {
+        if (auto collected = CollectStructEdges(elementType, &target, 1, removed); !collected) {
             return EndProcessing(Move(collected));
         }
 
@@ -236,7 +236,8 @@ Result<void> ObjectRegistry::RemoveStructElement(const ObjectAccessContext& acce
 
 Result<void> ObjectRegistry::ClearStructElements(const ObjectAccessContext& access,
                                                  ObjectHandle owner,
-                                                 detail::StructRefArrayStorage& storage) noexcept {
+                                                 detail::StructRefArrayStorage& storage,
+                                                 const void* elementType) noexcept {
     auto valid = CheckAccess(access);
     if (!valid) {
         return valid;
@@ -285,7 +286,7 @@ Result<void> ObjectRegistry::ClearStructElements(const ObjectAccessContext& acce
     if (observe || member) {
         EdgeTally tally(allocator_);
         Array<ObjectHandle> removed(allocator_);
-        if (auto collected = CollectStructEdges(ops, storage.blocks, storage.size, removed);
+        if (auto collected = CollectStructEdges(elementType, storage.blocks, storage.size, removed);
             !collected) {
             return EndProcessing(Move(collected));
         }

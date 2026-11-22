@@ -24,7 +24,8 @@ internal static partial class MetaTests
                 "ROCKS_STRUCT(Binds = \"rocks::Vector3<double>\")\nstruct Vec3dBinding {\nROCKS_PROPERTY() double x = 0;\nROCKS_PROPERTY() double y = 0;\nROCKS_PROPERTY() double z = 0;\n};\n" +
                 "struct Pair {\nrocks::Vec3 a;\nrocks::Vec3d b;\n};\n" +
                 "ROCKS_STRUCT(Binds = \"probe::Pair\")\nstruct PairBinding {\nROCKS_PROPERTY() rocks::Vec3 a;\nROCKS_PROPERTY() rocks::Vector3<double> b;\n};\n" +
-                "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() rocks::Vec3 position;\nROCKS_PROPERTY() Pair pair;\n};\n}\n";
+                "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() rocks::Vec3 position;\nROCKS_PROPERTY() Pair pair;\n};\n}\n" +
+                "template <> inline constexpr bool rocks::BoundCoreValueV<probe::Pair> = true;\n";
             await probe.GenerateAsync(source);
             using System.Text.Json.JsonDocument descriptor = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(probe.Descriptor));
             System.Text.Json.JsonElement Type(string name) => descriptor.RootElement.GetProperty("types").EnumerateArray()
@@ -73,7 +74,8 @@ internal static partial class MetaTests
                 "class Keeper {\npublic:\nrocks::int32 Count() const noexcept { return count_; }\nprivate:\ntemplate <class>\nfriend struct ::rocks::GeneratedType;\nrocks::int32 count_ = 0;\nMode mode_ = Mode::A;\n};\n" +
                 "ROCKS_STRUCT(Binds = \"probe::Keeper\")\nstruct KeeperBinding {\nROCKS_PROPERTY(Name = \"count\") rocks::int32 count_ = 0;\nROCKS_PROPERTY() Mode mode_ = Mode::A;\n" +
                 "static rocks::Result<void> Validate(const Keeper& value) noexcept { return value.Count() >= 0 ? rocks::Result<void>::Success() : rocks::Result<void>::Failure(rocks::ErrorCode::InvalidArgument); }\n};\n" +
-                "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() Mode mode = Mode::A;\nROCKS_PROPERTY() Keeper keeper;\n};\n}\n";
+                "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nROCKS_PROPERTY() Mode mode = Mode::A;\nROCKS_PROPERTY() Keeper keeper;\n};\n}\n" +
+                "template <> inline constexpr bool rocks::BoundCoreValueV<probe::Keeper> = true;\n";
             await probe.GenerateAsync(source);
             using System.Text.Json.JsonDocument descriptor = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(probe.Descriptor));
             System.Text.Json.JsonElement Type(string name) => descriptor.RootElement.GetProperty("types").EnumerateArray()

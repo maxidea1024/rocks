@@ -6,8 +6,8 @@
 // 의존할 수 없기 때문이다(진입점 계약 ModuleEntry.h와 같다).
 //
 // 사용 예:
-//   // 서비스 형식의 공개 헤더(전역 namespace에서, 형식 선언 뒤):
-//   ROCKS_DECLARE_HOST_SERVICE(rocks::config::ConfigContext)
+//   // 서비스 형식의 공개 헤더(전역 namespace, 형식 선언 뒤 — 둘째 인자는 그 모듈 API 매크로):
+//   ROCKS_DECLARE_HOST_SERVICE(rocks::config::ConfigContext, ROCKS_CONFIG_API)
 //   // 그 모듈의 cpp 하나(전역 namespace):
 //   ROCKS_DEFINE_HOST_SERVICE(rocks::config::ConfigContext)
 
@@ -28,12 +28,14 @@ struct HostServiceTraits;
 
 } // namespace rocks
 
-// 서비스 형식 Type의 키 조회를 선언한다. Type의 공개 헤더에서 전역 namespace에 한 번 쓴다. 정의는
-// 소유 모듈 cpp의 ROCKS_DEFINE_HOST_SERVICE(Type)다.
-#define ROCKS_DECLARE_HOST_SERVICE(Type)                                                           \
+// 서비스 형식 Type의 키 조회를 선언한다. Type의 공개 헤더에서 전역 namespace에 한 번 쓴다. Api는
+// 소유 모듈의 API 매크로다(Modular에서 다른 모듈이 Key를 링크한다 —
+// Docs/Design/BuildTargets.ko.md 3.8절 BS8d4. 한 번역 단위 안에서만 쓰는 형식은 빈 값). 정의는 소유
+// 모듈 cpp의 ROCKS_DEFINE_HOST_SERVICE(Type)다.
+#define ROCKS_DECLARE_HOST_SERVICE(Type, Api)                                                      \
     template <>                                                                                    \
     struct rocks::HostServiceTraits<Type> {                                                        \
-        static const ::rocks::HostServiceKey& Key() noexcept;                                      \
+        Api static const ::rocks::HostServiceKey& Key() noexcept;                                  \
     };
 
 // 서비스 형식 Type의 키를 정의한다. Type을 가진 모듈의 cpp 하나에서 전역 namespace에 한 번 쓴다. 키

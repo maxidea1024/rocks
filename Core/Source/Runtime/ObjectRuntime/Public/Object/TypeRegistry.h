@@ -119,8 +119,8 @@ public:
     //   }
     Result<TypeLease> AcquireValueType(TypeId, TypeKind kind) noexcept;
 
-    // 리플렉션 struct 레코드를 native 키(NativeTypeKey<S>() — StructRefArray 원소 표의
-    // StructElementOps::nativeType과 같은 주소)로 연다. 등록 규칙이 struct native 키를 유일하게
+    // 리플렉션 struct 레코드를 native 키(NativeTypeKey<S>() — StructRefArray 원소를 지우는 호출자가
+    // 넘기는 키)로 연다. 등록 규칙이 struct native 키를 유일하게
     // 하므로(같은 nativeType의 두 번째 struct는 AlreadyExists) 결과는 하나다. 관찰자 Registry가
     // StructRefArray 원소를 떼어 낼 때 그 원소만 trace하려고 RuntimeStructOps::trace를 얻는 데
     // 쓴다(Docs/Design/ObjectFoundations.ko.md 3절). lease가 있는 동안 그 레코드의 Unregister는
@@ -130,7 +130,7 @@ public:
     // 없으면(클래스· enum의 키 포함) NotFound, lease 계수 포화는 Overflow다.
     //
     // 사용 예:
-    //   auto lease = types.AcquireStructByNative(storage.element->nativeType);
+    //   auto lease = types.AcquireStructByNative(NativeTypeKey<Slot>());
     //   if (lease && lease.Value().StructOps().trace != nullptr) {
     //       lease.Value().StructOps().trace(block, visitor);
     //   }
