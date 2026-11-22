@@ -1,6 +1,6 @@
 # 오디오 시스템 설계
 
-기준일: 2026-11-22, 개정 7(DSP2 리뷰 반영 — 비유한 key, ratio·gain 범위, 큰 블록, FTZ·DAZ 계약). 개정 6: 3.21절 AU1 DSP2 dynamics, DSP2 범위 바로잡음. 개정 5: DSP1 리뷰 반영 — HPF fs/2 clamp, HPF bypass 20 Hz, 리샘플러 비율 범위 UE와 같게. 개정 4: DSP1 구현 반영(리샘플러 고정소수점, 방위각 경계, 오류 코드). 개정 3: 3.20절 AU1 구현 세부 DSP1, 3.13.2절 패닝을 UE 방식으로 고침. 개정 2: 8절 다른 문서 개정 반영. 소리를 재생하는 엔진 기능 전체를 정한다. 범위는 실시간 믹서, 장치 출력, 엔진·World 연결, 사운드 에셋, 임포트, 코덱·쿠킹, 스트리밍, 감쇠·공간화·동시 발음·가상화, 버스·효과·리버브 존, 진단이다. UE 5.8의 AudioMixerCore·AudioMixer·SignalProcessing·Engine 오디오 클래스와 AudioGameplayVolume 플러그인에 해당한다.
+기준일: 2026-11-22, 개정 8(3.22절 AU1 믹서 코어 — 명령 인자 전달로 PR3을 AU2로, 상태 표, Q 불변 ramp, FTZ 실행 함수). DSP2 리뷰 반영 — 비유한 key, ratio·gain 범위, 큰 블록, FTZ·DAZ 계약. 개정 6: 3.21절 AU1 DSP2 dynamics, DSP2 범위 바로잡음. 개정 5: DSP1 리뷰 반영 — HPF fs/2 clamp, HPF bypass 20 Hz, 리샘플러 비율 범위 UE와 같게. 개정 4: DSP1 구현 반영(리샘플러 고정소수점, 방위각 경계, 오류 코드). 개정 3: 3.20절 AU1 구현 세부 DSP1, 3.13.2절 패닝을 UE 방식으로 고침. 개정 2: 8절 다른 문서 개정 반영. 소리를 재생하는 엔진 기능 전체를 정한다. 범위는 실시간 믹서, 장치 출력, 엔진·World 연결, 사운드 에셋, 임포트, 코덱·쿠킹, 스트리밍, 감쇠·공간화·동시 발음·가상화, 버스·효과·리버브 존, 진단이다. UE 5.8의 AudioMixerCore·AudioMixer·SignalProcessing·Engine 오디오 클래스와 AudioGameplayVolume 플러그인에 해당한다.
 
 [엔진 구현 계획](EngineImplementationPlan.ko.md) §18은 AudioRT 무대기 계약(Object·파일 IO·동적 할당·lock·직접 로그 금지), voice handle 세대, stop mailbox, epoch ACK, 48 kHz·256/512 frame, 성능 목표를 이미 정했다. 이 문서는 그 계약을 구현 수준으로 구체화한다. 설계가 애매한 곳은 UE 방식을 따르고, Rocks 원칙(결정적 시험, `Result` 오류, 명시적 소유, 전역 생성자 금지)과 부딪히는 곳만 다르게 정한다(7절).
 
@@ -191,9 +191,9 @@ Inline(결정적) 모드: `OfflineAudioRender`가 AudioRT 스레드 대신 호�
 
 ### 3.6 믹서 블록 처리
 
-UE `FMixerDevice::OnProcessAudioStream`(`Source/Runtime/AudioMixer/Private/AudioMixerDevice.cpp:1666`)의 순서는 명령 큐 소비 → Quartz clock 갱신 → `SourceManager->ComputeNextBlockOfSamples()` → `MainSubmix->ProcessAudio` → endpoint submix → 계량이다. Rocks `AudioMixer::RenderBlock(AudioOutputView out)`도 같은 순서다.
+UE `FMixerDevice::OnProcessAudioStream`(`Source/Runtime/AudioMixer/Private/AudioMixerDevice.cpp:1666`)의 순서는 명령 큐 소비 → Quartz clock 갱신 → `SourceManager->ComputeNextBlockOfSamples()` → `MainSubmix->ProcessAudio` → endpoint submix → 계량이다. Rocks `AudioMixer::RenderBlock(commands, interleavedOut)`도 같은 순서다(명령은 인자로 받는다 — 3.22.1절).
 
-1. 블록 시작: stop mailbox·epoch 관찰, 명령 링 소비(블록에 걸린 것만), plan 교체 확인, 파라미터 최신값 읽기.
+1. 블록 시작: stop mailbox·epoch 관찰, 파라미터 최신값 읽기, 블록에 걸린 명령 적용(호출자가 정렬해 넘긴 것 — 3.22.1절), plan 교체 확인.
 2. voice마다(구간별):
    1. PCM 취득: 상주 PCM은 커서로 바로 읽고, 스트리밍·압축은 voice PCM 링에서 읽는다. 준비되지 않았으면 무음을 넣고 굶음을 센다(기다리지 않는다).
    2. 리샘플·피치: 원본 rate·pitch → mix rate. 소수 커서와 필터 이력을 블록 사이에 보존한다. loop는 `[loopBegin, loopEnd)` 원본 frame 경계에서 이어 붙인다.
@@ -633,9 +633,9 @@ Master
 | 예약 | 예약 offset 0·Q−1·Q·Q+1, 같은 시각 명령, 늦은 명령, 블록 크기 64·256·512 | 첫 비무음 frame 위치, 같은 시각 stop·play 순서, 블록 크기가 달라도 같은 출력 |
 | 리샘플 | 44.1→48 kHz sweep, pitch 0.5·2.0, loop 경계 impulse | aliasing 허용치, loop 이음매 불연속 없음 |
 | click·clipping | 무음→최대 gain, steal·stop, 고레벨 다중 voice | ramp 길이, 불연속 검출, NaN/Inf 0, limiter 동작 |
-| 큐·수명 | 명령 링 용량 1·2, stop storm, slot 재사용, 예약 Play 직전 World 파괴, 늦은 디코드 완료 | 수락/거부/병합 수 일치, 재생당 terminal 1회, 이전 generation 명령 무효 |
+| 큐·수명 | 명령 링 용량 1·2(AU2), stop storm, slot 재사용, 예약 Play 직전 World 파괴, 늦은 디코드 완료 | 수락/거부/병합 수 일치, 재생당 terminal 1회, 이전 generation 명령 무효 |
 | 파라미터 seqlock | 쓰기 도중 읽기(시험 hook으로 순번 홀수 상태 주입) | 찢어진 값 없이 이전 값 유지 |
-| 결정성 | mix frame을 명시한 같은 입력을 Inline·Thread 모드로 | 같은 PCM |
+| 결정성 | mix frame을 명시한 같은 입력을 Inline·Thread 모드로(AU2), Q 64–1024(AU1) | 같은 PCM |
 | 출력 링 | 협상 콜백 크기 256·480·512·1024 × Q 64·256·512(가짜 backend가 콜백 주기를 결정적으로 구동) | 칸 수 공식대로, 정상 주기에서 underrun 0 |
 | 장치 | Null 전환, 장치 없음, 열기 실패, 분리 직후 종료, 링이 차서 대기 중인 AudioRT 종료 | 콜백 종료 뒤 접근 0, join 완료, 자원 반환 |
 | 임포트 | 형식마다 정상·손상·경계(빈 data chunk, 홀수 padding, 잘린 파일, 9채널, rate 범위 밖) | 명시 오류, 손실 원본 frame 수가 delay·padding 제거 뒤 원래 길이와 일치 |
@@ -686,6 +686,7 @@ UE 런타임 리샘플러 `FRuntimeResampler`(`Source/Runtime/SignalProcessing/P
 - `SetFrameRatio(r, interpFrames)`: 비율을 `interpFrames` 출력 frame에 걸쳐 선형으로 옮긴다(UE `SetFrameRatio(InRatio, InNumFramesToInterpolate)`).
 - `InputFramesNeeded(outputFrames)`: 그만큼 내려면 필요한 입력 frame 수(보간 진행 중이면 그 경로를 따라 계산). `Process(input, output) -> 소비한 입력 frame 수`. `Process`는 입력 검사를 위해 `InputFramesNeeded`와 같은 경로를 한 번 더 계산한다(블록당 출력 frame 수만큼의 정수 연산, 성능 문제가 보이면 AU1 믹서에서 합친다). 입력이 모자라면 `InvalidArgument`이고 상태를 바꾸지 않는다.
 - 블록 분할 불변: 같은 입력·비율이면 출력 블록을 어떻게 나눠도 같은 PCM이다(시험). r = 1이고 위치가 정수면 입력을 그대로 낸다.
+- `OutputFramesBefore(inputFrame) -> uint32`(개정 8): 비율 보간 경로를 따라, 출력 위치가 `inputFrame`(소비하지 않은 입력의 첫 frame 기준) 이상이 되기 전까지의 출력 frame 수를 `MaxBlockFrames`까지 센다. 믹서의 끝 판정(3.22.5절)이 쓴다.
 
 #### 3.20.6 패너(`Audio/Panner.h`)
 
@@ -754,7 +755,7 @@ UE의 외부 key(sidechain)·key shelf 필터·key audition은 biquad가 필요�
 - `SetSettings(settings) -> Result<void>`: 검사한 뒤 계수를 다시 계산한다. 할당하지 않는다. lookahead 길이를 바꾸면 읽기 위치만 옮긴다(UE `SetDelayLengthSamples`처럼 링에 남은 이력을 그대로 쓴다). 엔벌로프·평균 제곱 상태는 유지한다.
 - `Process(PlanarView)`: 제자리 처리, `noexcept`, 할당 없음. 채널 수는 생성 때 값과 같아야 한다(assert). frame 수에는 제한이 없고 `MaxBlockFrames`씩 나눠 처리한다(scratch 크기). 기본 생성·이동된 빈 처리기는 아무것도 하지 않는다.
 - 비유한 입력: key 계산에서 비유한 표본은 0으로 본다. UE는 거르지 않아 inf 한 표본이 엔벌로프를 NaN에 영구히 가둔다(`v ≤ s`가 늘 거짓). 출력 쪽 비유한 값은 그대로 지나가고 마스터 끝의 NaN·Inf 정리(3.6절 4단계)가 0으로 바꾼다.
-- denormal: 무음 꼬리에서 엔벌로프·평균 제곱이 비정규 값에 머문다. UE는 렌더 스레드에 `FScopedFTZFloatMode`를 건다(`AudioMixer.cpp:930`). Rocks도 AudioRT·Inline 렌더 진입에서 FTZ·DAZ를 켠다(Inline 믹서 단계 계약, `Platform/FloatingPointEnvironment.h`). DSP 함수 자체는 FTZ를 가정하지 않고 결과만 그 환경에서 같다.
+- denormal: 무음 꼬리에서 엔벌로프·평균 제곱이 비정규 값에 머문다. UE는 렌더 스레드에 `FScopedFTZFloatMode`를 건다(`AudioMixer.cpp:930`). Rocks도 AudioRT·Inline 렌더 진입에서 FTZ를 켠다(3.22.8절 `RunWithRealtimeAudioFloatingPoint`, DAZ는 UE처럼 켜지 않는다). DSP 함수 자체는 FTZ를 가정하지 않고 결과만 그 환경에서 같다.
 - `Reset()`: 엔벌로프·평균 제곱·지연 링을 0으로 지운다.
 - 블록 분할 불변: 상태가 표본 순서로만 진행하므로 블록을 어떻게 나눠도 출력이 bit 단위로 같다(시험).
 - `GainForLevelDb(levelDb)`: 정적 곡선(이득 선형값)이다. 시험·진단용이다.
@@ -770,6 +771,147 @@ UE의 외부 key(sidechain)·key shelf 필터·key audition은 biquad가 필요�
 | link | 스테레오 한쪽만 클 때 Disabled·Average·Peak 이득 |
 | 블록 분할 불변 | 무작위 입력·무작위 블록 크기, `MaxBlockFrames`보다 큰 블록, Reset(RootMeanSquared 상태 포함) |
 | 음성 | 생성 인자, 설정 범위(모든 필드), 할당 실패 N회 |
+
+### 3.22 AU1 구현 세부 — 믹서 코어(개정 8)
+
+AU1의 나머지를 둘로 나눈다. **Mixer1**(이 절)은 한 스레드에서 도는 믹서 코어와 `OfflineAudioRender`다. **Mixer2**는 스레드 경계의 원자값이다(파라미터 seqlock, stop mailbox, scene·device epoch, epoch ACK, terminal 슬롯 원자화). 원자값은 `Platform/Atomics.h`로 만들 수 있고 시험 hook으로 Inline에서 결정적으로 시험할 수 있으므로 Mixer2도 AU1이다. SY7이 필요한 명령 링만 AU2로 옮긴다(3.22.1절).
+
+#### 3.22.1 명령을 인자로 받는 렌더(PR3 조정)
+
+- `AudioMixer::RenderBlock(Span<const AudioRtCommand> commands, Span<float> interleavedOut) -> RenderBlockResult`는 그 블록에 줄 명령을 인자로 받는다. 명령을 큐에서 꺼내고 정렬하는 일은 호출자가 한다. 믹서 코어는 큐 구현과 무관하다. UE `FMixerSourceManager`도 명령 큐 소비(`PumpCommandQueue`)와 source 렌더를 나눠 둔다.
+- `commands`는 (`mixFrame`, `sequence`) 오름차순이어야 한다(어기면 assert). `ImmediateMixFrame`은 정렬 전에 호출자가 현재 블록 시작 frame으로 바꾼다(그대로 오면 assert). 미래 예약 명령 뒤에 Immediate가 갇히지 않게 하기 위해서다.
+- Inline 모드: `OfflineAudioRender`가 자기 대기 목록을 블록마다 정렬해 넘긴다(3.22.9절).
+- 스레드 모드(AU2): SPSC 큐는 FIFO이고 꺼낸 미래 명령을 되돌릴 수 없다. 그래서 AudioRT가 고정 용량 정렬 pending 배열(`AudioRtPendingCapacity` = `AudioRtCommandCapacity`)을 소유하고, 큐에서 꺼낸 명령을 정렬 삽입한 뒤 그 앞부분을 넘긴다. 배열이 차면 큐 소비를 멈추고 센다(제어 쪽은 링 포화와 같게 미룬다).
+- 시각 지정 명령과 Mixer2 경로의 우선순위: stop mailbox(시각 없음, 즉시 fade)는 블록 시작에 명령보다 먼저 본다. 파라미터 seqlock 값은 블록 시작에 읽어 목표값으로 두고, 같은 블록의 시각 지정 `SetParams`가 그 뒤 순서로 덮어쓴다.
+- 결과: PR3(SY7)은 AU1이 아니라 AU2의 선행이다(6.1·6.2절 표 개정).
+
+#### 3.22.2 설정과 생성
+
+`AudioMixerConfig`:
+
+| 필드 | 기본 | 범위(밖이면 `InvalidArgument`) |
+|---|---|---|
+| `sampleRate` | 48000 | `IsValidMixSampleRate` |
+| `layout` | `Stereo` | `Mono`·`Stereo`(AU1). 다채널은 AU9 |
+| `blockFrames`(Q) | `DefaultMixBlockFrames` = 256 | 64·128·256·512·1024 |
+| `maxVoices` | `DefaultMaxVoices` = 128 | 1–`MaxMixerVoices`(= 1024) |
+| `maxClips` | `DefaultMaxClips` = 256 | 1–`MaxMixerClips`(= 65536) |
+| `masterLimiter` | 3.22.7절 프리셋 | `DynamicsSettings` 범위 |
+| `masterLimiterEnabled` | true | |
+
+- `AudioMixer::TryCreate(config, Allocator&)`가 한 번에 만드는 것: voice 표, voice별 DSP 상태(리샘플러·LPF·HPF·gain ramp·fade·채널 이득 ramp), 공용 scratch(입력 `MaxBlockFrames` × 2채널, 출력 Q × 2채널 — voice별이 아니다. 1024 voice별이면 약 32 MB), 마스터 버퍼, 마스터 limiter, clip 표.
+- 실패는 `OutOfMemory`이고, 그때까지 만든 것을 모두 되돌린다.
+- 이후 `RenderBlock`은 할당하지 않는다(시험: 미리 Submit한 `Render`와 `RenderBlock`의 할당 시도 수 0).
+
+#### 3.22.3 clip 표(메모리 PCM)
+
+- `AudioClipDesc`는 소유하지 않는 planar float PCM이다.
+  - 채널 포인터: 1–2채널(AU1).
+  - frame 수: 1 이상.
+  - 원본 rate: [`MinClipSampleRate` = 1000, `MaxClipSampleRate` = 384000].
+  - loop 구간 `[loopBegin, loopEnd)`: 둘 다 0이면 clip 전체(UE와 같다), 아니면 `loopBegin < loopEnd ≤ frameCount`.
+- `RegisterClip(desc) -> Result<AudioClipId>`(제어 쪽):
+  - 비유한 표본이 있으면 `InvalidArgument`다(NaN 하나가 필터 상태를 영구 NaN으로 만들고 마스터 합 전체를 지운다).
+  - 표가 차면 `CapacityExceeded`다.
+  - id는 `{index, generation}`이다.
+- clip 사용 수: `PreparePlay`(3.22.4절)가 voice에 clip을 묶을 때 올리고, 그 voice를 `ReleaseVoice`할 때 내린다.
+- `UnregisterClip(id)`: 사용 수가 0보다 크면 `Busy`, 이전 generation이면 `StaleHandle`이다. 해제가 성공한 뒤에만 호출자가 PCM 메모리를 돌려준다(3.5.5절 4단계의 PCM pin). 그래서 제출된 Play가 해제된 메모리를 읽는 일은 없다.
+
+#### 3.22.4 voice·명령·상태 표
+
+- `AcquireVoice() -> Result<AudioVoiceHandle>`(제어 쪽): 빈 슬롯이 없으면 `CapacityExceeded`다.
+- `PreparePlay(handle, clipId, startFrame, loop, params) -> Result<AudioRtCommand>`(제어 쪽): handle과 clip을 검사하고(이전 generation은 `StaleHandle`), voice에 clip을 묶은 뒤 `Play` 명령을 만든다. 다음은 `InvalidArgument`다.
+  - `startFrame ≥ frameCount`
+  - loop인데 `startFrame ≥ loopEnd`
+  - 이미 Play를 만든 voice
+- `ReleaseVoice(handle)`: 아래 상태 표대로다. 놓을 때 generation을 올리고 clip 사용 수를 내린다. 이전 handle 명령은 무시하고 센다.
+- `AudioRtCommand`(고정 크기 POD, 문자열·소유 포인터 없음): 필드는 `type`, `voice`, `mixFrame`, `sequence`, payload다.
+  - `Play`: 시작 원본 frame, loop, 초기 파라미터. clip은 voice에 묶인 것이다.
+  - `Stop`: `fadeFrames`. 제어 쪽 기본은 `DefaultStopFadeFrames` = 512(UE `au.SourceFadeMin`)이고 0은 그 frame에서 바로 끝이다.
+  - `SetParams`: 파라미터 전부와 `rampFrames`.
+  - `SetMasterGain`: 이득(선형)과 `rampFrames`.
+- 파라미터 `AudioVoiceParams`:
+  - `gain`: 선형 [0, `MaxVoiceGain` = 4].
+  - `pitch`: [`MinPitch` = 0.4, `MaxPitch` = 2]. UE `GlobalMin/MaxPitchScale` 기본값이고 설정 승격은 AU3.
+  - 패닝: `{mode: Direct | Azimuth, azimuthDegrees, nonSpatializedAmount}`.
+  - `lowPassCutoffHz`, `highPassCutoffHz`.
+  - 거리 감쇠·분류 gain은 제어 쪽이 `gain`에 곱해 넣는다.
+  - 범위 검사는 제어 쪽 API(`PreparePlay`·Mixer2·AU3)가 한다. `RenderBlock`은 범위로 자르고 자른 수를 센다(실시간 경로는 실패를 돌려줄 곳이 없다).
+- 리샘플 비율: pitch × clip rate / mix rate를 `LinearResampler` 범위 [0.01, 100]으로 자른다.
+- ramp 길이는 블록·구간 길이와 무관하다. `SetParams`·`SetMasterGain`은 명령의 `rampFrames`를 쓰고, 제어 쪽 기본은 `DefaultParamRampFrames` = 256이다. 필터 계수 보간도 같은 길이다. 출력 채널 이득은 채널마다 `GainRamp`로 두어 구간·블록을 넘어 이어 간다. 그래서 같은 명령이면 Q가 달라도 같은 출력이다. UE는 블록 단위로 보간한다(7절).
+- fade는 파라미터 gain과 따로 곱한다(UE `VolumeFadeSlope` — `AudioMixerSourceManager.cpp:2013–2056`). fade 중 `SetParams`는 fade를 되돌리지 못한다.
+
+상태 표(행 = 슬롯 상태, 열 = 사건):
+
+| 상태 | Play | Stop | SetParams | ReleaseVoice | 자연 끝 |
+|---|---|---|---|---|---|
+| `Reserved`(Play 없음) | — | 무시 | 무시 | 성공 → Idle | — |
+| `Prepared`(Play 만듦, 미적용) | 적용 → Playing, `startMixFrame` 기록 | 즉시 terminal `Stopped`(fade 없음, UE `StopInternal`) → Finished, 이후 Play 무시 | 저장(뒤 sequence가 이김) | `Busy` | — |
+| `Playing` | 무시 | 첫 Stop만 fade 시작(반복은 무시) | 적용 | `Busy` | terminal `NaturalEnd` |
+| `Stopping` | 무시 | 무시 | 적용(fade는 따로 곱함) | `Busy` | terminal `NaturalEnd` |
+| `Finished` | 무시 | 무시 | 무시 | 성공 → Idle(terminal 수거 뒤) | — |
+
+같은 frame의 자연 끝과 fade 끝은 frame 순서로 먼저 온 쪽 하나만 terminal이다. 무시한 명령은 종류별로 센다.
+
+#### 3.22.5 끝 판정(구간 경계와 무관)
+
+- loop 없는 voice의 끝은 리샘플러의 다음 출력 위치가 처음으로 원본 `frameCount` 이상이 되는 출력 frame이다. 그 직전 출력까지는 `x[frameCount…] = 0` 꼬리를 포함해 낸다.
+- `endMixFrame`은 그 frame 번호다. 구간·블록 끝과 무관하다.
+- 리샘플러에 `OutputFramesBefore(inputFrame) -> uint32`를 더한다(3.20.5절 개정). 비율 보간 경로를 따라, 입력 위치가 `inputFrame`(현재 소비 기준 상대값)에 닿기 전까지의 출력 frame 수를 `MaxBlockFrames`까지 센다.
+- fade 끝은 fade 이득이 0에 닿은 출력 frame 다음이다.
+
+#### 3.22.6 블록 처리(3.6절 순서의 AU1 부분)
+
+1. 명령 소비: 블록 `[start, start+Q)`보다 앞선 frame의 명령은 offset 0에서 실행하고 늦은 frame을 센다. 블록 끝 이후 명령에 닿으면 멈춘다. 다른 offset 수가 `MaxBlockSegments`(= 16)를 넘으면 그 명령부터 다음 블록으로 미루고 센다. `RenderBlockResult::consumedCommands`는 앞에서부터 소비한 수다.
+2. 구간마다(명령 offset으로 나눈 `[a, b)`): 그 offset의 명령을 순서대로 적용한 뒤 `Playing`·`Stopping` voice마다 다음을 한다.
+   1. PCM: clip 커서에서 리샘플러가 요구하는 입력을 공용 입력 scratch에 복사한다. loop면 `loopEnd`에서 `loopBegin`으로 이어 붙이고, 끝이면 0을 채운다. 요구량이 scratch를 넘으면 출력을 나눠서 처리한다.
+   2. 리샘플(3.20.5절) → LPF·HPF(3.20.4절) → 파라미터 gain ramp × fade(3.20.3절).
+   3. 채널 이득: `Direct`의 mono는 양쪽 0.5다(UE 기본 `EMonoChannelUpmixMethod::Linear` — `AudioSettings.h:42–51`). 그래서 `Azimuth` + 비공간화 1(1/채널 수 = 0.5)과 이어진다. stereo는 L→L·R→R이고, 출력이 Mono면 0.707씩 더한다(UE `ToMonoMatrix` — `ChannelMap.cpp:14–18`). `Azimuth`(mono clip만)는 3.20.6절 이득이다. 채널 이득 `GainRamp`를 목표값으로 옮기며 공용 출력 scratch → 마스터 버퍼에 더한다.
+   4. 끝 판정(3.22.5절)이면 그 frame까지만 더하고 terminal을 적는다. terminal 기록은 `{reason, endMixFrame}`이다.
+3. 마스터: 마스터 gain ramp → limiter(켜져 있으면) → 비유한 표본을 0으로 바꾸고 센다 → [−1, 1]로 자르고 자른 표본을 센다(UE도 출력에서 자른다 — `AudioMixer.cpp:291`. AU2 int16 변환이 넘치지 않게).
+4. 출력: 마스터 planar → `interleavedOut`(교차 float32, Q × 채널 수. 크기가 다르면 assert).
+5. mix clock += Q.
+
+제어 쪽 조회: `QueryVoice(handle)`로 상태·`startMixFrame`·terminal을 읽고, `CollectFinished(Span<AudioVoiceTerminal>)`로 수거한다. 계수는 `AudioMixerCounters`(늦은 명령·미룬 명령·무시 명령·자른 파라미터·NaN 대체·clipping)다.
+
+#### 3.22.7 마스터 limiter 프리셋
+
+UE 메인 submix에는 기본 dynamics가 없고 출력 clamp만 있다. Rocks는 3.6절대로 마스터 limiter를 두고, 그 뒤에 clamp도 둔다. 기본값은 다음과 같다.
+- `Limiter`, threshold −1 dBFS, knee 0, Peak, link Peak(스테레오 상 유지).
+- attack 0, release 100 ms, lookahead 0 ms(지연을 더하지 않는다), digital 시상수.
+- 임계를 넘는 표본은 그 표본에서 바로 임계로 내려간다. 과도부 순간 왜곡을 받는 대신 지연이 없다. 설정으로 바꾸거나 끌 수 있다.
+
+#### 3.22.8 부동소수 환경(FTZ)
+
+- UE는 렌더 스레드에 `FScopedFTZFloatMode`(`VectorRegister.h:142`)를 건다. 기존 설정에 FTZ만 더한다.
+- Rocks는 compiler가 연산을 제어 레지스터 쓰기 앞뒤로 옮기므로 RAII guard 대신 `RunWithDeterministicFloatingPoint`와 같은 실행 함수 방식을 쓴다. PlatformBase에 `RunWithRealtimeAudioFloatingPoint(function, context)`를 더한다([CoreDataFoundations](CoreDataFoundations.ko.md) 2.1절 개정).
+- 이 함수는 결정적 기준 환경(nearest-even, trap 끔)에 FTZ(x64 MXCSR FTZ, ARM64 FPCR FZ)를 더해 실행하고 되돌린다. DAZ는 켜지 않는다(UE와 같다). ARM64 FZ는 입력 비정규도 0으로 본다. 또 x86은 반올림 뒤에, ARM은 반올림 전에 tininess를 판정하므로 최소 정규 수 경계에서 결과가 다를 수 있다. 목적은 같고 결정성 비교는 같은 아키텍처끼리 한다.
+- `OfflineAudioRender::Render`가 블록 루프를 이 함수 안에서 돈다. `RenderBlock` 진입은 FTZ가 켜져 있음을 assert한다(시험이 환경 밖에서 직접 부르는 실수를 막는다).
+
+#### 3.22.9 `OfflineAudioRender`
+
+- 믹서 하나와 명령 대기 목록(제어 쪽, `Array`, 할당 허용)을 소유한다.
+- `Submit(command)`는 `sequence`를 매긴다.
+- `Render(Span<float> interleaved, blockCount)`는 블록마다 다음을 한다. 이 블록 루프는 3.22.8절 환경 안에서 돈다.
+  - Immediate를 블록 시작 frame으로 바꾼다.
+  - (`mixFrame`, `sequence`)로 정렬해 `RenderBlock`에 넘긴다.
+  - 소비한 만큼 지운다.
+- 제어 쪽 API(`AcquireVoice`·`PreparePlay`·`RegisterClip`·`QueryVoice` 등)는 믹서 것을 그대로 노출한다. Mixer1에서는 모든 호출이 같은 스레드다.
+
+#### 3.22.10 시험(Mixer1)
+
+| 대상 | 확인 |
+|---|---|
+| PCM·채널 | mono Direct 0.5·stereo 직결·stereo→Mono 0.707, 정수 fixture 정확 일치, Azimuth 90°는 오른쪽만 |
+| 예약 | offset 0·Q−1·Q·Q+1, 같은 frame Play·Stop 순서(sequence), 늦은 명령 offset 0과 늦은 frame 수, `MaxBlockSegments` 초과 미룸, Immediate가 미래 명령 뒤에 갇히지 않음 |
+| Q 불변 | 시각을 명시한 명령(Immediate·미룸 제외)이면 Q 64·256·512·1024에서 같은 PCM과 같은 `endMixFrame`(ramp·필터 보간 포함) |
+| 리샘플·loop | 44.1→48 kHz 위치, pitch 0.5·2(잘림 계수), loop 경계 impulse 위치, 0/0 loop = 전체, 끝 판정 frame(r = 0.5 꼬리 포함) |
+| 상태 표 | 표의 모든 칸(Prepared Stop → 즉시 terminal과 뒤 Play 무시, 반복 Stop, fade 중 SetParams가 끝을 막지 못함, Finished 명령 무시) |
+| click | Stop fade 길이와 단조 감소, SetParams ramp 길이 = `rampFrames`, 0 fade 즉시 끝 |
+| 마스터 | 마스터 gain ramp, limiter 상한(−1 dBFS), 끈 limiter에서 clamp ±1과 clipping 계수 |
+| 수명 | voice·clip 용량, Playing 해제 `Busy`, 이전 generation 명령 무시, Prepared voice의 clip 해제 `Busy`, 비유한 PCM 등록 거부, terminal 한 번 |
+| 할당 | 생성 뒤 `RenderBlock`·미리 Submit한 `Render`의 할당 시도 0, 생성 실패 N회 되돌림 |
+| 환경 | 렌더 안에서 FTZ 켜짐, 끝나면 원래 값 |
 
 ## 4. 결정 요약
 
@@ -823,7 +965,7 @@ UE의 외부 key(sidechain)·key shelf 필터·key audition은 biquad가 필요�
 |---|---|---|---|---|
 | PR1 | 이 스펙 | 개정 1 | 교차 검증 반영 | AU1 이상 |
 | PR2 | 스레드 우선순위 | 구현(`Highest`) | 없음. 실시간 등급은 AU9 측정 뒤 PlatformLayer 개정 | — |
-| PR3 | Core 동시 컨테이너 SY7(`BoundedSpscQueue`·`FixedBlockPool`·`IndexedFreeList`) | 설계(선행 SY0·SY1·SY2) | SY0→SY1→SY2→SY7 구현 | AU1 |
+| PR3 | Core 동시 컨테이너 SY7(`BoundedSpscQueue`·`FixedBlockPool`·`IndexedFreeList`) | 설계(선행 SY0·SY1·SY2) | SY0→SY1→SY2→SY7 구현 | AU2(개정 8: 믹서가 명령을 인자로 받아 AU1에서 옮김 — 3.22.1절) |
 | PR21 | 무잠금 깨우기 신호 `RealtimeWakeSignal`(AD26) | 설계(Synchronization 개정 3 9.6절, D34, SY12) | SY0 → SY12 구현 | AU2 |
 | PR4 | `SerialTaskChain`·`WorkerScheduler`·`TaskLane::Audio` | 구현 | 없음 | — |
 | PR5 | ThirdParty 반입 | 절차 구현, 오디오 라이브러리 없음 | miniaudio(AU2), libFLAC·libvorbis·libogg·libopus·libopusfile·minimp3(AU4), 런타임 libopus(AU5) | AU2, AU4, AU5 |
@@ -847,8 +989,8 @@ UE의 외부 key(sidechain)·key shelf 필터·key audition은 biquad가 필요�
 
 | 단계 | 내용 | 선행 | 완료 기준 |
 |---|---|---|---|
-| AU1 | `Audio` 모듈: 형식·채널 레이아웃·PCM 버퍼, voice pool, 명령 링·파라미터 슬롯·stop mailbox·epoch·terminal 슬롯, mix clock·블록 안 예약, 리샘플러, source LPF/HPF, gain ramp, 2D·equal-power 패너, 거리 곡선, 마스터 limiter, `OfflineAudioRender`, 메모리 PCM clip | PR1, PR3 | 3.19절 PCM·예약·리샘플·click·큐·결정성 시험, AudioRT 할당 0 |
-| AU2 | `AudioOutputBackend`, AudioRT 스레드·출력 링(칸 수 계산)·`RealtimeWakeSignal`, `NullAudioOutput`, ThirdParty `Miniaudio`, `AudioMiniaudio`(Windows 먼저)와 `HostServices` 등록 | AU1, PR5, PR6, PR21 | Sandbox 시험음 재생, 협상값·실제 스레드 우선순위·underrun 기록, Q ≠ 콜백 크기에서 underrun 0, 장치 없음·열기 실패·종료 자원 반환. macOS·Android는 실행한 것만 판정 |
+| AU1 | `Audio` 모듈: 형식·채널 레이아웃·PCM 버퍼, voice pool, 명령(인자 전달)·파라미터 슬롯·stop mailbox·epoch·terminal 슬롯(Mixer2), mix clock·블록 안 예약, 리샘플러, source LPF/HPF, gain ramp, 2D·equal-power 패너, 거리 곡선, 마스터 limiter, `OfflineAudioRender`, 메모리 PCM clip | PR1 | 3.19절 PCM·예약·리샘플·click·수명·seqlock 시험(Inline), AudioRT 할당 0 |
+| AU2 | `AudioOutputBackend`, AudioRT 스레드·명령 링(`BoundedSpscQueue`)·정렬 pending 배열(3.22.1절)·출력 링(칸 수 계산)·`RealtimeWakeSignal`, `NullAudioOutput`, ThirdParty `Miniaudio`, `AudioMiniaudio`(Windows 먼저)와 `HostServices` 등록 | AU1, PR3, PR5, PR6, PR21 | Sandbox 시험음 재생, 협상값·실제 스레드 우선순위·underrun 기록, Q ≠ 콜백 크기에서 underrun 0, 장치 없음·열기 실패·종료 자원 반환. macOS·Android는 실행한 것만 판정 |
 | AU3 | `EngineAudio`: `AudioEngineSubsystem`·`AudioWorldSubsystem`·제어 pipe·`AudioDeviceContext`, `SoundSource`·`SoundClip`(메모리 PCM)·`AttenuationSettings`(거리), `AudioComponent`, 재생 API·결과, 리스너, CVar(비활성 창 볼륨 포함), 무음 실행·서버, 종료 drain, Tryout 정리 계약 | AU2, PR7, PR8 | Sandbox에서 키 입력으로 UI음·움직이는 부착 루프, 좌우 방향, 맵 교체·컴포넌트 파괴·GC 뒤 stale voice·lease 0, 서버 빌드에 `AudioMiniaudio` 미링크 |
 | AU3b | Sparks 바인딩 | AU3, PR18 | Sparks 시험: 재생·정지·`LoopHandle` 수명, 서버 `Ignored` |
 | AU4 | `AudioTools`: `SoundClipImporter`, WAV·AIFF 파서, FLAC·Vorbis·Opus·MP3 디코드(SIMD 고정), ThirdParty 디코더, 에디터 재생용 PCM 플랫폼 데이터 변환(AD25) | AU3, PR10, PR5 | 3.19절 임포트 시험, 디코드 SHA 고정값, 재생 중 재임포트 시 새 재생부터 새 revision |
@@ -879,6 +1021,9 @@ UE의 외부 key(sidechain)·key shelf 필터·key audition은 biquad가 필요�
 | Android | OpenSL ES만 | AAudio 우선(miniaudio), 없으면 OpenSL ES | AAudio가 현재 권장 API |
 | 실행 판정 | `FApp::CanEverRenderAudio` 정적 지역 변수 | `RunTraits` 값 | AppInfo 설계(명령줄 고정 시점 명시) |
 | 오류 | `check`·로그 | `Result`, 원래 OS 오류 코드 보존 | Rocks 원칙 |
+| 파라미터 ramp | 블록 단위 보간(블록 크기에 따라 길이가 다름) | 명령의 `rampFrames`(기본 256), 채널 이득도 frame 단위 ramp | Q와 무관한 같은 출력(3.22.4절) |
+| 마스터 출력 | dynamics 없음, 출력 clamp ±1 | limiter(−1 dBFS, 지연 0) + clamp ±1 | 3.6절 limiter, AU2 int16 변환 |
+| 렌더 FP 환경 | 기존 설정 + FTZ(`FScopedFTZFloatMode`) | 결정적 기준(nearest-even·trap 끔) + FTZ, 실행 함수 방식 | compiler 재배치 방지, 결정성 |
 | dynamics 계수·지연 계산 | float(`FMath::Exp`, `CeilToInt(ms·fs/1000.0f)`) | double 계산 뒤 float(계수 ulp 차이, 정수 경계에서 지연 1 frame 차이 가능 — 예: 0.020833334 ms에서 UE 1, Rocks 2) | 결정적 기준값 대조 |
 | dynamics 비유한 key | 거르지 않음(엔벌로프가 NaN에 갇힘) | 0으로 봄, ratio < 1e-8·gain ±96 dB 밖 거부 | 마스터 limiter 무력화 방지 |
 | 런타임 리샘플러 위치 | 16.16 고정소수점(`RuntimeResampler.cpp:17`) | 32.32 고정소수점(3.20.5절) | 비율·위치 정밀도(16.16은 비율 오차 2^-17), 블록 분할과 무관한 bit 동일 출력(결정적 시험) |
@@ -935,3 +1080,4 @@ UE의 외부 key(sidechain)·key shelf 필터·key audition은 biquad가 필요�
 - 개정 5(2026-11-22): DSP1 리뷰 반영. 필수 — HPF fc ≥ fs/2의 a0 = 1(극 −1, 상태 발산)을 UE처럼 fs/2 − 1 Hz clamp로 고쳤다. 권장 — HPF bypass를 UE와 같은 20 Hz(+ KINDA_SMALL)로, 리샘플러 비율 범위를 UE와 같은 [0.01, 100]으로 맞췄다. 7절의 UE 리샘플러 서술(16.16 고정소수점)·방위각 경계 차이(정후면·수직)·5.1 서라운드 쌍 선택을 기록했다. gain ramp 목표 유한 계약, `VoiceCenterChannelVolume`은 AU3, 시험 표를 보강했다.
 - 개정 6(2026-11-22): 3.21절 AU1 DSP2 dynamics 처리기(UE `FDynamicsProcessor` 블록 경로 대응 — 설정·식·실시간 계약·시험)를 더했다. 3.20절의 DSP2 범위를 효과 표(3.14절)에 맞춰 dynamics로 줄였다(biquad EQ·plate 리버브는 AU7).
 - 개정 7(2026-11-22): DSP2 리뷰 반영. 권장 — 비유한 key를 0으로 보고(UE는 엔벌로프가 NaN에 갇힘), ratio 하한 1e-8·input/output gain ±96 dB를 두고, denormal은 AudioRT·Inline 렌더 진입의 FTZ·DAZ로 정했다(Inline 믹서 계약). 참고 — 큰 블록 분할 처리, 빈 처리기 no-op, 링 크기 문구(+1), UE float 계산 차이(7절), 시험(릴리스·평균 제곱 과도·knee clamp·lookahead 늘리기·Reset 평균 제곱·설정 전 필드)을 보강했다.
+- 개정 8(2026-11-22): 3.22절 AU1 믹서 코어(Mixer1·Mixer2 범위, 명령 인자 전달 `RenderBlock`, clip 표·사용 수, voice 상태 표, Q 불변 ramp, 구간과 무관한 끝 판정, 마스터 limiter 프리셋·clamp, FTZ 실행 함수, `OfflineAudioRender`)을 더했다. 초안 교차 검증 1회 반영(필수 6 — Q 불변, 끝 판정, Immediate 정렬, 상태 표, clip 해제 경쟁, 6.2 충돌; 권장 — UE mono 2D 0.5·stereo→mono 0.707, FTZ만(DAZ 아님), 출력 clamp, 공용 scratch, 비유한 PCM 거부, 스레드 모드 pending 배열, Mixer2를 AU1에 남김; 참고 — loop 0/0, pitch [0.4, 2], 할당 시험 대상, 기본 stop fade 512). PR3은 AU2의 선행으로 옮겼다. 3.20.5절에 `OutputFramesBefore`를 더했다.
