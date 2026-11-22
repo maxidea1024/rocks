@@ -180,7 +180,7 @@ public:
         out = ::new (storage) WindowsFileHandle(handle, (access & GENERIC_WRITE) != 0);
         return {};
     }
-    FileStatus Exists(const char* path, usize bytes, bool& exists) noexcept override {
+    FileStatus FileExists(const char* path, usize bytes, bool& exists) noexcept override {
         WidePath native;
         auto valid = native.Initialize(path, bytes);
         if (!valid) {

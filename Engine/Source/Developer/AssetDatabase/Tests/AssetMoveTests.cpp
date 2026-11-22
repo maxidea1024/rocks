@@ -989,10 +989,10 @@ TEST(AssetMove_RealDisk) {
 
     bool movedExists = false;
     bool oldExists = true;
-    REQUIRE(platform::PhysicalFileSystem().Exists(moved.View().Data(), moved.View().ByteCount(),
-                                                  movedExists));
-    REQUIRE(platform::PhysicalFileSystem().Exists(old.View().Data(), old.View().ByteCount(),
-                                                  oldExists));
+    REQUIRE(platform::PhysicalFileSystem().FileExists(moved.View().Data(), moved.View().ByteCount(),
+                                                      movedExists));
+    REQUIRE(platform::PhysicalFileSystem().FileExists(old.View().Data(), old.View().ByteCount(),
+                                                      oldExists));
     CHECK(movedExists && !oldExists);
     // 옛 경로는 별칭으로 열린다.
     Array<EditorWarning> warnings(env.allocator);

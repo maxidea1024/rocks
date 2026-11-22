@@ -83,7 +83,7 @@ public:
         return {};
     }
 
-    platform::FileStatus Exists(const char*, usize, bool& exists) noexcept override {
+    platform::FileStatus FileExists(const char*, usize, bool& exists) noexcept override {
         if (handle.fault == Fault::Exists) {
             return SystemError;
         }

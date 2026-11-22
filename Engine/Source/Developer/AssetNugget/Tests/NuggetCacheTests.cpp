@@ -142,8 +142,8 @@ struct CacheScene {
     bool HasEntry(const Sha256Digest& key) noexcept {
         const String path = Entry(key);
         bool found = false;
-        return platform::PhysicalFileSystem().Exists(path.View().Data(), path.View().ByteCount(),
-                                                     found) &&
+        return platform::PhysicalFileSystem().FileExists(path.View().Data(),
+                                                         path.View().ByteCount(), found) &&
                found;
     }
 

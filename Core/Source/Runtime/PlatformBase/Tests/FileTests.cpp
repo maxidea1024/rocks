@@ -119,7 +119,7 @@ public:
         out = &handle;
         return {};
     }
-    FileStatus Exists(const char*, usize, bool&) noexcept override {
+    FileStatus FileExists(const char*, usize, bool&) noexcept override {
         return {FileCode::Unsupported, 0};
     }
     FileStatus Delete(const char*, usize) noexcept override {
@@ -161,7 +161,7 @@ TEST(PlatformFilePhysicalUnicodeOwnershipAndPartialIo) {
     TemporaryFile temporary;
     REQUIRE(temporary.Create());
     bool exists = false;
-    REQUIRE(PhysicalFileSystem().Exists(temporary.path, temporary.length, exists));
+    REQUIRE(PhysicalFileSystem().FileExists(temporary.path, temporary.length, exists));
     CHECK(exists);
     const uint8 contents[] = {1, 2, 3, 4, 5};
     auto write = temporary.file.WriteAll(contents, sizeof(contents));
@@ -200,7 +200,7 @@ TEST(PlatformFilePhysicalUnicodeOwnershipAndPartialIo) {
     REQUIRE(temporary.file.Close());
     REQUIRE(PhysicalFileSystem().Delete(temporary.path, temporary.length));
     temporary.owned = false;
-    REQUIRE(PhysicalFileSystem().Exists(temporary.path, temporary.length, exists));
+    REQUIRE(PhysicalFileSystem().FileExists(temporary.path, temporary.length, exists));
     CHECK(!exists);
     CHECK(PhysicalFileSystem().Delete(temporary.path, temporary.length).code == FileCode::NotFound);
 }
@@ -210,11 +210,11 @@ TEST(PlatformFileRejectsMalformedPathAndKeepsOutputs) {
     const char embedded[] = {'a', '\0', 'b'};
     const char bad[] = {static_cast<char>(0xed), static_cast<char>(0xa0), static_cast<char>(0x80)};
     bool exists = true;
-    CHECK(system.Exists(embedded, sizeof(embedded), exists).code == FileCode::InvalidArgument);
+    CHECK(system.FileExists(embedded, sizeof(embedded), exists).code == FileCode::InvalidArgument);
     CHECK(exists);
-    CHECK(system.Exists(bad, sizeof(bad), exists).code == FileCode::InvalidArgument);
+    CHECK(system.FileExists(bad, sizeof(bad), exists).code == FileCode::InvalidArgument);
     CHECK(exists);
-    CHECK(system.Exists(nullptr, 0, exists).code == FileCode::InvalidArgument);
+    CHECK(system.FileExists(nullptr, 0, exists).code == FileCode::InvalidArgument);
     File file;
     CHECK(file.Open(system, bad, sizeof(bad), FileOpenMode::ReadExisting).code ==
           FileCode::InvalidArgument);
@@ -323,14 +323,14 @@ TEST(PlatformFileExistsFollowsSymlinkTarget) {
     }
     REQUIRE(outcome == test::FileLinkResult::Created);
     bool exists = false;
-    CHECK(PhysicalFileSystem().Exists(link, static_cast<usize>(count), exists));
+    CHECK(PhysicalFileSystem().FileExists(link, static_cast<usize>(count), exists));
     CHECK(exists);
     const auto removed = PhysicalFileSystem().Delete(temporary.path, temporary.length);
     CHECK(removed);
     if (removed) {
         temporary.owned = false;
         exists = true;
-        CHECK(PhysicalFileSystem().Exists(link, static_cast<usize>(count), exists));
+        CHECK(PhysicalFileSystem().FileExists(link, static_cast<usize>(count), exists));
         CHECK(!exists);
     }
     CHECK(PhysicalFileSystem().Delete(link, static_cast<usize>(count)));

@@ -151,7 +151,8 @@ public:
         return {};
     }
 
-    platform::FileStatus Exists(const char* path, usize pathBytes, bool& exists) noexcept override {
+    platform::FileStatus FileExists(const char* path, usize pathBytes,
+                                    bool& exists) noexcept override {
         exists = Get(StringView(path, pathBytes)) != nullptr;
         return {};
     }
