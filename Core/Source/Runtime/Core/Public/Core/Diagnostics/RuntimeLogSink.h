@@ -29,7 +29,7 @@ namespace rocks {
 // Stop만으로는 부족하다(LogSystem 소멸자가 Stop을 다시 부르며 sink를 flush한다). 지역 변수로 둘
 // 때는 sink를 LogSystem보다 먼저 선언한다(나중에 파괴된다). 등록된 채 파괴되면 소멸자가 Fatal로
 // 알린다 (파괴된 sink를 쓰는 것은 플랫폼마다 다르게 드러나 숨기 쉽다 — 설계 L28).
-class RuntimeLogSink {
+class ROCKS_CORE_API RuntimeLogSink {
 public:
     RuntimeLogSink() noexcept = default;
 
@@ -143,7 +143,7 @@ private:
 // 초기화는 다른 stderr 사용자와의 동기화를 포함하여 호스트가 책임진다.
 // Unix에서 읽는 쪽이 닫힌 pipe는 기본 SIGPIPE 설정이면 프로세스를 종료할 수 있다.
 // 엔진은 전역 signal 처리를 바꾸지 않으며, 오류 반환을 원하면 호스트가 정책을 설정해야 한다.
-class StderrLogSink final : public RuntimeLogSink {
+class ROCKS_CORE_API StderrLogSink final : public RuntimeLogSink {
 public:
     explicit StderrLogSink(const LogLayout& layout = LogLayout::DefaultConsole()) noexcept;
     Result<void> Write(const LogEvent& event) noexcept override;

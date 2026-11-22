@@ -43,6 +43,6 @@ struct CpuFeatures {
 };
 
 // 처음 호출할 때 한 번 조사하고 이후 같은 값을 돌려준다. 여러 스레드에서 동시에 불러도 된다.
-const CpuFeatures& QueryCpuFeatures() noexcept;
+ROCKS_PLATFORMBASE_API const CpuFeatures& QueryCpuFeatures() noexcept;
 
 } // namespace rocks::platform

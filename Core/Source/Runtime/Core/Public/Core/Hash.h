@@ -271,7 +271,7 @@ inline uint64 SipHash24Words(HashSeed seed, const uint64* words, usize count) no
 // 그 뒤로는 같은 값이다(thread-safe). OS 난수를 읽지 못하면 Fatal이다(Windows BCryptGenRandom
 // 실패 — macOS·Android는 실패를 돌려주지 않는다). 재현이 필요한 시험은 SeededHash에 seed를 직접
 // 넘긴다. fork한 자식 프로세스는 같은 seed를 물려받는다.
-HashSeed ProcessHashSeed() noexcept;
+ROCKS_CORE_API HashSeed ProcessHashSeed() noexcept;
 
 // SeededHash 특수화가 같이 쓰는 seed 보관과 생성자다. 기본 생성은 ProcessHashSeed()이고, 시험·
 // 결정적 재현은 seed를 넘긴다. 같은 컨테이너 안에서는 seed가 바뀌면 안 되므로 생성 뒤에는 읽기만

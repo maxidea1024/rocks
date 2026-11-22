@@ -146,7 +146,7 @@ public:
 //       auto parsed = ParseTextValue(context, path.slot, "sRGB", TextSource::Assignment(0),
 //                                    "SourceColorSettings.ColorSpace", value);
 //   }
-class TextCodecContext {
+class ROCKS_REFLECTIONTEXT_API TextCodecContext {
 public:
     TextCodecContext(TypeRegistry& types, const TextCodecOptions& options,
                      TextDiagnostics& diagnostics, Allocator& allocator) noexcept;
@@ -276,14 +276,18 @@ bool SplitTextAssignment(StringView text, StringView& path, StringView& value) n
 // Unresolved(resolver 실패), Unsupported(resolver 없는 non-null Hard·Weak, Name pool 없음, 텍스트로
 // 쓸 수 없는 종류).
 // 오류: 입력 한도 CapacityExceeded, 할당 실패, Name pool의 오류(CapacityExceeded·ShuttingDown 등).
-Result<bool> ParseTextScalar(TextCodecContext& context, const TextScalarType& type, StringView text,
-                             TextSource source, StringView pathText, FieldValue& out) noexcept;
+ROCKS_REFLECTIONTEXT_API Result<bool> ParseTextScalar(TextCodecContext& context,
+                                                      const TextScalarType& type, StringView text,
+                                                      TextSource source, StringView pathText,
+                                                      FieldValue& out) noexcept;
 
 // value(type의 값)의 텍스트를 out 뒤에 붙인다(ParseTextScalar와 왕복한다 — NaN은 `nan` 하나로
 // 쓴다). 오류: 쓸 수 없는 값(이름 없는 enum 값·resolver가 쓰지 못한 Hard·Weak·경로 있는 Soft·Name
 // pool 없음)은 Unsupported, value.kind가 type과 다르면 TypeMismatch, 붙이기 실패.
-Result<void> FormatTextScalar(TextCodecContext& context, const TextScalarType& type,
-                              const FieldValue& value, StringBuilderBase& out) noexcept;
+ROCKS_REFLECTIONTEXT_API Result<void> FormatTextScalar(TextCodecContext& context,
+                                                       const TextScalarType& type,
+                                                       const FieldValue& value,
+                                                       StringBuilderBase& out) noexcept;
 
 // 자리(slot)의 값 텍스트를 out에 읽는다(out은 먼저 Reset한다). 모양: 단일 값 필드·원소·Map 값·
 // Optional<단일 값> → Single, `{}`(struct·Optional<struct>·struct 원소·Map 값 struct) →

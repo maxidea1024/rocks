@@ -18,9 +18,9 @@
 namespace rocks {
 
 // [address, address + bytes)를 ASan 접근 금지로 표시한다. bytes가 0이면 아무 일도 하지 않는다.
-void AsanPoisonMemory(const void* address, usize bytes) noexcept;
+ROCKS_CORE_API void AsanPoisonMemory(const void* address, usize bytes) noexcept;
 
 // AsanPoisonMemory로 막은 범위를 다시 연다.
-void AsanUnpoisonMemory(const void* address, usize bytes) noexcept;
+ROCKS_CORE_API void AsanUnpoisonMemory(const void* address, usize bytes) noexcept;
 
 } // namespace rocks

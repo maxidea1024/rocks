@@ -20,7 +20,7 @@
 //   const Sha256Digest same = Sha256::Hash(bytes);     // 한 번에 계산
 namespace rocks {
 
-struct Sha256Digest {
+struct ROCKS_CORE_API Sha256Digest {
     static constexpr usize Bytes = 32;
     static constexpr usize HexBytes = 64;
 
@@ -37,7 +37,7 @@ struct Sha256Digest {
 
 // 증분 SHA-256 계산기다. 입력을 여러 번에 나눠 Update해도 한 번에 넣은 결과와 같다. 한 객체를 여러
 // 스레드가 동시에 쓰지 않는다.
-class Sha256 {
+class ROCKS_CORE_API Sha256 {
 public:
     Sha256() noexcept {
         Reset();

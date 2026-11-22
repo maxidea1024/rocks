@@ -111,7 +111,7 @@ internal static class ProjectFilesCommand
         }
 
         int checkedValues = model.Projects.Sum(project => project.Sources.Sum(file => file.Choices.Values.Count(choice => choice is not null)));
-        Console.WriteLine($"Project files model: {targets.Count} targets x {Configurations.Length} configurations = {plans.Count} IDE plans " +
+        Console.WriteLine($"Project files model: {targets.Count} targets, {plans.Count} IDE plans (up to {Configurations.Length} configurations each) " +
             $"({planning:F0} ms), {checkedValues} (file, configuration) values checked against their commands, " +
             $"{model.DefinitionCopies.Count} definitions header copies.");
         foreach (IdeProject project in model.Projects)
@@ -174,7 +174,8 @@ internal static class ProjectFilesCommand
         TargetRules[] targets = [.. RuleLoader.LoadAll(rulesPath, listing).Targets.OrderBy(target => target.Name, StringComparer.Ordinal)];
         IReadOnlyDictionary<string, (string Directory, string Name)> definitions = TargetDefinitions.Find(root, targets);
         (TargetRules Target, NativeConfiguration Configuration)[] work =
-            [.. targets.SelectMany(target => Configurations.Select(configuration => (target, configuration)))];
+            [.. targets.SelectMany(target => Configurations.Where(configuration => LinkTypes.SupportsConfiguration(target.LinkType, configuration))
+                .Select(configuration => (target, configuration)))];
         var plans = new IdeTargetPlan[work.Length];
         var executables = new string?[work.Length];
         Parallel.For(0, work.Length, index =>

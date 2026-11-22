@@ -55,16 +55,18 @@ inline void StoreEntry(uint8* table, uint32 index, usize storedSize, uint32 crc)
 }
 
 // 헤더와 블록 표를 쓰고 CRC를 계산한다. out은 IndexBytesFor(count) byte다.
-void WriteIndex(uint8* out, CompressionFormat format, uint32 blockSizeLog2, uint64 rawSize,
-                uint32 count, uint64 payloadSize, const uint8* table,
-                const detail::DictionaryState* dictionary) noexcept;
+ROCKS_COMPRESSION_API void WriteIndex(uint8* out, CompressionFormat format, uint32 blockSizeLog2,
+                                      uint64 rawSize, uint32 count, uint64 payloadSize,
+                                      const uint8* table,
+                                      const detail::DictionaryState* dictionary) noexcept;
 
 // raw 블록 하나를 저장 형식으로 dst(용량 raw.Size())에 쓰고 저장 크기를 반환한다. 압축 결과가
 // 원본보다 작지 않으면(용량 raw − 1에서 CapacityExceeded) raw로 저장한다. compressor는 압축을
 // 시도할 때만 쓰며, 없으면 allocator로 만든다(만들지 못하면 그 오류다).
-Result<usize> EncodeBlock(detail::CompressorState*& compressor, CompressionFormat format,
-                          int32 level, Allocator& allocator, Span<const uint8> raw, Span<uint8> dst,
-                          const SharedPtr<detail::DictionaryState>& dictionary) noexcept;
+ROCKS_COMPRESSION_API Result<usize>
+EncodeBlock(detail::CompressorState*& compressor, CompressionFormat format, int32 level,
+            Allocator& allocator, Span<const uint8> raw, Span<uint8> dst,
+            const SharedPtr<detail::DictionaryState>& dictionary) noexcept;
 
 } // namespace detail::blocks
 

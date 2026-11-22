@@ -64,7 +64,7 @@ struct DeviceProfileSelection {
 };
 
 // arguments에서 마지막 `--device-profile=<이름>`의 이름이다(없으면 빈 view — arguments를 빌린다).
-StringView FindDeviceProfileArgument(Span<const StringView> arguments) noexcept;
+ROCKS_CONFIG_API StringView FindDeviceProfileArgument(Span<const StringView> arguments) noexcept;
 
 // 마지막 Sync 값의 프로필 정의로 프로필을 고르고(선택 순서), 부모 사슬·메모리 등급 값을 펼쳐 기기
 // 프로필 층을 다시 쓴다(Unset(DeviceProfile, DeviceProfileTag) 뒤 AddAssignment 값마다 — 다음
@@ -78,7 +78,9 @@ StringView FindDeviceProfileArgument(Span<const StringView> arguments) noexcept;
 //   DeviceProfileSelection selected(allocator);
 //   ApplyDeviceProfile(context, FindDeviceProfileArgument(arguments), traits, selected);
 //   context.Sync();
-Result<void> ApplyDeviceProfile(ConfigContext& context, StringView commandLineProfile,
-                                const DeviceTraits& traits, DeviceProfileSelection& out) noexcept;
+ROCKS_CONFIG_API Result<void> ApplyDeviceProfile(ConfigContext& context,
+                                                 StringView commandLineProfile,
+                                                 const DeviceTraits& traits,
+                                                 DeviceProfileSelection& out) noexcept;
 
 } // namespace rocks::config

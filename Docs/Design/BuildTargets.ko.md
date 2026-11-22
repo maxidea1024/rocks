@@ -1,6 +1,6 @@
 # 빌드 타깃·모듈 의존·플러그인 조건 설계
 
-기준일: 2026-11-22, 개정 17. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
+기준일: 2026-11-22, 개정 18. Rocks.Build에 없는 UE 5.8 빌드 기능 네 가지를 정한다.
 - **타깃 종류 확장**: Editor·Client·Server 타깃과, 타깃 종류에 따라 코드·데이터를 컴파일에서 빼는 매크로.
 - **모듈 의존 공개 범위**: 의존마다 Public(소비자에게 include·정의를 넘김)과 Private(이 모듈 안에서만 씀)을 나눈다.
 - **플러그인 활성 조건**: 프로젝트가 플러그인을 특정 타깃·플랫폼·구성에서만 켠다.
@@ -352,6 +352,26 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 - 시험: `modular` 묶음 fixture에 가짜 Launch를 더해 실행 파일이 import하는 Rocks 공유 라이브러리가 Launch뿐인지, 호스트 공유 라이브러리·export·`host` 행, 창 subsystem 진입 함수, Launch 없는 거부를 본다. 실제 Launch로 도는 성공 경로는 BS8d5다.
 - Modular FoundationTests(BD31, BS8d5)는 시험 실행 파일 하나만 가진 타깃으로 둔다(실행 파일 둘 이상 거부 — Launch 시험 프로그램과 내장 진입 프로그램은 Monolithic 시험 타깃에만 있다).
 
+**BS8d2 export 매크로 세부(개정 18).**
+- 측정(2026-11-22, Windows Debug): FoundationTests가 링크하는 모듈 폐포를 Modular로 빌드하면 공유 라이브러리 링크마다 다른 모듈의 기호가 풀리지 않는다. 측정에서만 링크에 `/FORCE:UNRESOLVED`를 넣어 모든 라이브러리를 끝까지 링크해 보니 서로 다른 미해결 기호가 735개였다: 클래스 93개의 멤버 524개, 자유 함수 162개, 전역 변수 2개. 대부분 Core가 PlatformBase를, 그 위 모듈이 Core·ObjectRuntime을 부르는 것이다. 시험 소스(호스트 모듈)가 부르는 기호는 호스트가 컴파일되지 않아(정적 모듈 표 시험 — ML4b가 BS8d5로 넘김) 이 수에 없다.
+- 붙이는 규칙(BD27, UE `<MODULE>_API`와 같다):
+  1. 다른 모듈이 멤버를 링크하는 클래스는 클래스 전체에 붙인다(`class ROCKS_CORE_API String`). 클래스 단위가 BD27의 기본이고, 멤버 하나씩 붙이면 다음 사용처가 생길 때마다 링크 오류가 다시 난다.
+  2. 자유 함수·전역 변수는 선언마다 붙인다(`[[noreturn]] ROCKS_PLATFORMBASE_API void Fatal(...)`, `ROCKS_CORE_API extern uint8 logFastMinimum` — 앞의 `[[...]]` 속성 뒤에 둔다). 정의(`.cpp`)에는 붙이지 않는다 — 선언의 속성이 정의에 이어진다.
+  3. 템플릿·inline·`constexpr`에는 붙이지 않는다(BD27). 템플릿 클래스가 out-of-line 비템플릿 함수를 부르면 그 함수에 붙인다.
+  4. 클래스 전체 export가 안 되는 클래스(Windows `dllexport` 클래스는 정의할 수 없는 멤버까지 모두 정의하려 한다 — 예: 복사할 수 없는 멤버를 가진 암시 복사)는 그 이유를 주석에 적고 멤버 단위로 붙인다.
+  5. 공개 헤더(`Public/`)의 선언에만 붙인다. 다른 모듈이 부르는 기호가 비공개 헤더에만 선언돼 있으면 공개 헤더의 inline·템플릿 코드가 비공개 기호를 부르는 것이므로, 그 선언을 공개 헤더로 옮겨 붙인다(비공개 헤더에 API 매크로를 두지 않는다 — 공개 헤더 검사(BD9)가 보는 범위가 공개 API다). 예외는 규칙 파일이 비공개 include 디렉터리로 다른 모듈에 일부러 보여 준 내부 헤더다 — 지금은 Compression의 `CompressionInternal.h`·`CompressedBlocksInternal.h`(AsyncCompression만 쓴다 — 같은 코덱·블록 인코딩을 쓰려고). 그 선언에는 붙인다(UE 5.x 모듈 `Internal` 헤더와 같은 자리).
+  6. 매크로는 그 선언이 있는 모듈의 것만 쓴다. 정책 `module-api-macro`가 막는다: 다른 모듈 이름의 매크로, 비공개 헤더의 매크로(규칙 5 예외 목록 `PolicyChecks.ExportedPrivateHeaders` 밖), 소스(`.cpp`)의 매크로는 오류다.
+  7. 생성 코드: 메타 컴파일러가 모듈 생성 헤더의 public 등록 함수(`RegisterModuleTypes`) 선언과, 클래스·struct `GeneratedType<X>` 특수화의 out-of-line 정적 멤버 선언 전부(본문이 생성 소스에 있는 `static ... ;` — `Schema`·`Ops`·`Register`·`ValidateSelf`·`ValidateTree`·`CopyValue`·`ReferenceLayout`·비트 필드 접근·Binds 검사·`VerifyGenerated` 등, private 리플렉션 타입 포함)에 그 모듈의 매크로를 붙인다(BD28). 멤버 템플릿(`CopyValueImpl` 등)에는 붙이지 않는다. 특수화 전체가 아니라 멤버마다 붙이는 것은 이미 멤버에 붙인 `NativeKey`(BS8b)와 겹치지 않게 하려는 것이다. 매크로를 쓰는 생성 헤더(타입 생성 헤더·모듈 생성 헤더)는 빌드 밖 컴파일을 위해 `#ifndef` 대체 정의(빈 값)를 둔다.
+  8. 같은 헤더의 같은 이름 오버로드와 짝 API(`TryCompressAppend`·`TryDecompressAppend`, `Begin`·`EndTraceTaskExecution` 등)는 하나가 export되면 함께 붙인다 — 다음 사용처가 오버로드 하나만 바꿔 다시 링크 오류가 나지 않게.
+  9. `friend` 재선언: export한 자유 함수를 클래스가 `friend`로 선언하면 그 선언에도 같은 매크로를 붙인다(Windows는 속성이 다른 재선언을 오류로 본다 — `-Wdll-attribute-on-redeclaration`).
+- 빌드 밖 컴파일: 정의 헤더 없이 헤더를 컴파일하는 검사(Rocks.ToolTests의 native 컴파일 시험·생성 헤더 검증)는 `Rocks.Build.Cli`가 타깃의 모든 비서드파티 모듈 `-DROCKS_<M>_API=`(빈 값 — Monolithic)를 넘긴다.
+- 링크 오류를 따라 붙이므로 지금 다른 모듈이 부르지 않는 공개 함수는 export하지 않는다. 다만 모듈 사이 API로 설계된 클래스는 지금 쓰는 곳이 없어도 붙인다(`HostServices` — 엔진 모듈 `Startup`이 서비스를 찾는다). 다음 사용처가 생기면 그 링크가 알린다(Modular 확인 타깃이 체인에 있다). 클래스 단위 export가 이 재작업을 줄인다.
+- 확인 타깃 `ModularCheck`(`Programs/ModularCheck`, Modular Program 타깃): FoundationTests와 같은 런타임·개발 도구·시험 fixture 모듈에 의존하는 작은 실행 파일 하나다(ML4b — 타깃당 실행 파일 하나). 빌드가 모든 모듈 공유 라이브러리를 export 누락 없이 링크하는지 보고, 실행은 ML4b Modular 진입(진입 스텁 → Launch → manifest 로더 → 호스트 앱 기술 → 부트 모듈 시작)으로 끝까지 돌아 0을 돌려준다 — ML4b가 BS8d5로 넘긴 실제 Launch 성공 경로를 여기서 먼저 본다. 본문은 로더 표의 모듈 수와 부트 모듈 시작 여부를 찍는다. CI는 Windows·macOS 두 줄기에서 Debug 빌드·실행한다(`foundation.yml` "Build and run the Modular link check"). Windows Debug에서 dllimport 클래스의 inline 멤버는 DLL export를 부르므로, inline 본문이 숨은 기호를 직접 부르는 누락(macOS `-fvisibility-inlines-hidden`)은 macOS 줄기가 처음 드러낸다. 첫 실행(2026-11-22, Windows): 27개 모듈 공유 라이브러리를 싣고 부트 모듈을 시작해 0으로 끝났다.
+- 프로젝트 파일: IDE 계획은 타깃의 링크 방식이 빌드할 수 있는 구성만 만든다(`LinkTypes.SupportsConfiguration` — 입력 검사와 같은 판정). Modular 타깃은 Debug·Development만 있고 다른 솔루션 구성에서는 빌드하지 않는다.
+- Monolithic: 매크로가 빈 값이라 object가 바뀌지 않는다(기존 Monolithic 체인이 그대로 통과).
+- 한계: 시험 소스가 부르는 모듈 내부 기호와 `Private/` 시험의 모듈 내 링크는 BS8d5다. 모듈별 export 수 진단은 BS8d3이다.
+- 버린 안: 모든 기호 export(Windows `.def` 자동 생성·CMake `WINDOWS_EXPORT_ALL_SYMBOLS` 식 — UE 방식이 아니고 export 수 상한에 닿는다), 공개 헤더의 모든 클래스·함수에 일괄로 붙이기(쓰지 않는 API까지 ABI로 굳힌다), 측정용 `/FORCE:UNRESOLVED`를 빌드에 남기기(실행 중에야 터진다).
+
 **모듈 API 매크로(BD27).**
 - 빌드가 C++ 모듈마다 `ROCKS_<MODULE>_API`(모듈 이름 대문자)를 정의한다. UE `<MODULE>_API`(`UEBuildModule.cs:223, 239`)에 해당하고, 이름은 Rocks 매크로 접두 규칙을 따른다.
 - 값은 UE와 같다(`UEBuildModule.cs:750-770`). `Monolithic`이면 빈 값이다. `Modular`이면 그 모듈 자신의 컴파일에서는 export, 다른 모듈의 컴파일에서는 import다.
@@ -648,3 +668,4 @@ Editor 타깃은 UE와 같이 모듈식으로 링크한다(BD17 — 사용자 �
 | 15 | 2026-11-21 | BS8d1 구현 세부: Modular 빌드 정보 TU를 Core 공유 라이브러리에(`ROCKS_CORE_API`), 모듈 표 TU 대신 manifest(`.modules.json` — 행 배열·크기·`buildId` 재사용), `ROCKS_MODULE_SHARED_LIBRARY`와 export 진입점 `RocksModuleEntry`·강제 참조, Modular 거부를 Launch 기준으로 좁힘 |
 | 16 | 2026-11-22 | ML4b 빌드 쪽 세부: Launch에 닿는 Modular 실행 파일의 모듈은 호스트 공유 라이브러리, 실행 파일은 생성 진입 TU + Launch import만, manifest schema 3·행 키 `host`, Launch 거부를 풀고 Launch 없는 Modular 실행 파일을 거부([모듈 로더](ModuleLoader.ko.md) 3.14절) |
 | 17 | 2026-11-22 | BD5에 빌드 구성 축을 적었다: SDK 변형(매크로 조합 × 링크 방식)과 직교하며, SDK 하나가 여러 구성을 `Configurations/<구성>/`에 싣는다(manifest 14, [Visual Studio 프로젝트 파일](ProjectFiles.ko.md) 10.3절 PJ4) |
+| 18 | 2026-11-22 | BS8d2 세부: Foundation 폐포 Modular 측정(미해결 기호 735 — 클래스 93·자유 함수 162·변수 2), 붙이는 규칙(클래스 단위 우선·선언마다·공개 헤더만·비공개 선언은 공개로 옮김), 링크 오류를 따라 붙임, 확인 타깃 `ModularCheck`(Modular 빌드·실행으로 ML4b Launch 성공 경로 확인) |

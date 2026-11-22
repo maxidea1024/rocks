@@ -165,7 +165,8 @@ enum class CrashReportingStatus : uint8 {
 // id·빌드 식별·모듈(PE CodeView) 정보를 여기서 고정 버퍼에 만든다. Windows는 OS unhandled filter·
 // SIGABRT 처리기·invalid parameter·purecall 처리기(그리고 선택한 힙 손상 VEH)를 걸고, CRT abort
 // 설정에서 메시지·WER 보고를 끈다(제거 때 모두 되돌린다). 실패하면 아무것도 걸지 않는다.
-CrashReportingStatus InstallCrashReporting(const CrashReportingOptions& options) noexcept;
+ROCKS_PLATFORMBASE_API CrashReportingStatus
+InstallCrashReporting(const CrashReportingOptions& options) noexcept;
 
 // InstallCrashReporting이 InvalidArgument로 거절할 옵션인지 미리 본다(이름 문법·문자열 길이·예산
 // 범위). 상태를 바꾸지 않고 설치 여부와 무관하게 부를 수 있다. true여도 폴더 경로를 절대 경로로
@@ -174,7 +175,8 @@ CrashReportingStatus InstallCrashReporting(const CrashReportingOptions& options)
 //
 // 사용 예:
 //   if (!platform::ValidateCrashReportingOptions(next)) { ... 경고, 지금 설치를 유지 ... }
-bool ValidateCrashReportingOptions(const CrashReportingOptions& options) noexcept;
+ROCKS_PLATFORMBASE_API bool
+ValidateCrashReportingOptions(const CrashReportingOptions& options) noexcept;
 
 // 처리기를 떼고 이전 처리기를 되돌린 뒤 크래시 처리 스레드를 끝낸다. 다른 Rocks 스레드가 모두 끝난
 // 종료 단계에서만 부른다. 이미 보고가 진행 중이면 돌아오지 않는다(종료는 크래시한 스레드가 한다).
@@ -182,9 +184,9 @@ bool ValidateCrashReportingOptions(const CrashReportingOptions& options) noexcep
 // 것일 때만 설치 전 filter로 되돌리고, 다른 코드가 바꿔 둔 filter는 그대로 둔다(그 filter가 우리
 // filter로 이어 주면 우리 filter는 설치 전 filter로 계속 넘긴다). 교환으로 확인하므로 두 호출
 // 사이의 아주 짧은 창에서 다른 스레드의 처리되지 않은 예외는 설치 전 filter가 받는다.
-void RemoveCrashReporting() noexcept;
+ROCKS_PLATFORMBASE_API void RemoveCrashReporting() noexcept;
 
-bool IsCrashReportingInstalled() noexcept;
+ROCKS_PLATFORMBASE_API bool IsCrashReportingInstalled() noexcept;
 
 // 크래시 폴더의 뿌리를 바꾼다(UTF-8, 상대 경로는 지금 작업 폴더 기준으로 굳힌다). 설정을 읽은 뒤
 // 엔진 시작 전, 다른 스레드가 크래시를 낼 수 없는 부트 단계에서만 부른다. 설치 전이거나 경로가
@@ -192,7 +194,7 @@ bool IsCrashReportingInstalled() noexcept;
 //
 // 사용 예:
 //   if (!platform::SetCrashOutputDirectory(settings.crashDirectory)) { ... 경고 ... }
-bool SetCrashOutputDirectory(const char* directory) noexcept;
+ROCKS_PLATFORMBASE_API bool SetCrashOutputDirectory(const char* directory) noexcept;
 
 // Windows 처리되지 않은 예외 filter가 아직 수집기 것인지 교환으로 확인한다(설계 8.6절). 다른
 // 코드(드라이버·외부 라이브러리)가 SetUnhandledExceptionFilter로 바꿨으면 그 filter를 그대로
@@ -229,7 +231,8 @@ inline constexpr usize MaxCrashAnnotationBytes = 512;
 // 사용 예(FileLogSink, 파일을 연 출력 스레드):
 //   using platform::CrashAnnotation;
 //   platform::SetCrashAnnotation(CrashAnnotation::LogFile, path.Data(), path.ByteCount());
-bool SetCrashAnnotation(CrashAnnotation slot, const char* text, usize bytes) noexcept;
+ROCKS_PLATFORMBASE_API bool SetCrashAnnotation(CrashAnnotation slot, const char* text,
+                                               usize bytes) noexcept;
 
 // 이 프로세스의 크래시 폴더(설치 때 굳힌 절대 경로, UTF-8)를 buffer에 NUL 종료로 복사하고 길이(NUL
 // 제외)를 돌려준다. 설치 전이거나 buffer가 모자라면 0이다. 폴더는 크래시 때 만들어진다(지금은 없을
@@ -252,7 +255,7 @@ enum class CrashHelperStart : uint8 {
 //
 // 사용 예(Launch, 설정 적용 단계):
 //   if (platform::StartCrashHelper() == platform::CrashHelperStart::Failed) { ... 경고 ... }
-CrashHelperStart StartCrashHelper() noexcept;
+ROCKS_PLATFORMBASE_API CrashHelperStart StartCrashHelper() noexcept;
 
 // 지금 떠 있는 덤프 도우미의 프로세스 id다. 도우미가 없으면(설치 전, InProcess, 시작 실패, 내장,
 // 다른 플랫폼) 0이다. 진단·시험용이다.
@@ -269,17 +272,19 @@ uint32 CrashHelperProcessId() noexcept;
 //       if (platform::RunCrashHelperIfRequested(argc, argv, helperExit)) { return helperExit; }
 //       ...
 //   }
-bool RunCrashHelperIfRequested(int argc, char** argv, int& exitCode) noexcept;
+ROCKS_PLATFORMBASE_API bool RunCrashHelperIfRequested(int argc, char** argv,
+                                                      int& exitCode) noexcept;
 // 넓은 문자 진입점(wmain·wWinMain)용이다. 도우미 인자는 ASCII다. 첫 인자가 도우미 표지가 아니면
 // 다른 인자를 보지 않고 false다. 다른 플랫폼은 늘 false다.
-bool RunCrashHelperIfRequested(int argc, wchar_t** argv, int& exitCode) noexcept;
+ROCKS_PLATFORMBASE_API bool RunCrashHelperIfRequested(int argc, wchar_t** argv,
+                                                      int& exitCode) noexcept;
 
 // 자동 실행(시험·무인 도구)에서 OS·CRT 오류 대화상자를 끈다. 프로세스 설정이며 되돌리지 않는다.
 // Windows: SetErrorMode(FAILCRITICALERRORS|NOGPFAULTERRORBOX|NOOPENFILEERRORBOX, 자식이
 // 물려받는다), CRT abort 메시지·WER 보고 끄기, Debug CRT 보고(_CrtDbgReport)를 stderr로, WER
 // 대화상자 끄기(WerSetFlags NO_UI). 레지스트리·시스템 WER 정책은 바꾸지 않는다. 다른 플랫폼은 할
 // 일이 없다. 크래시를 성공 종료로 바꾸지 않는다(종료 코드는 그대로다).
-void SuppressSystemErrorDialogs() noexcept;
+ROCKS_PLATFORMBASE_API void SuppressSystemErrorDialogs() noexcept;
 
 // 실행 단계다. stageName은 정적 수명 문자열(리터럴)이어야 한다. 크래시 기록이 남긴다.
 enum class RunPhase : uint8 {
@@ -296,7 +301,7 @@ inline constexpr uint32 MaxRunStageNames = 64;
 // 포인터는 같은 칸을 쓴다(문자열 내용은 비교하지 않으므로 같은 상수를 넘긴다). 표가 차면 그 뒤의 새
 // 이름은 이름 없이 phase만 남는다(칸을 덮어쓰지 않는다). 등록한 칸은 풀지 않는다. stageName이
 // nullptr이면 이름 없음이다. 아무 스레드에서 부를 수 있고 할당하지 않는다.
-void SetRunPhase(RunPhase phase, const char* stageName) noexcept;
+ROCKS_PLATFORMBASE_API void SetRunPhase(RunPhase phase, const char* stageName) noexcept;
 
 // 지금 단계와 단계 이름이다(크래시 기록이 남길 값, 진단·시험용). 이름은 SetRunPhase에 넘긴 정적
 // 문자열이고 아직 표시가 없으면 nullptr다. 아무 스레드에서 부를 수 있다.
@@ -307,7 +312,7 @@ const char* CurrentRunStage() noexcept;
 // 보낸다. 다른 플랫폼은 그냥 부른다(신호 처리기가 프로세스 전역이다). body의 반환값을 돌려준다.
 // body는 인라인되지 않는 별도 함수여야 한다(보호 블록 안 명령이 직접 낸 fault는 잡히지 않는다).
 using GuardedBody = int (*)(void* context) noexcept;
-int RunWithCrashGuard(GuardedBody body, void* context) noexcept;
+ROCKS_PLATFORMBASE_API int RunWithCrashGuard(GuardedBody body, void* context) noexcept;
 
 // 처리기용 여유 stack 크기다(Windows SetThreadStackGuarantee, POSIX sigaltstack). Asan 구성은
 // ASan이 넘친 스레드에서 stack overflow 보고(stack trace 수집·기호 해석, 측정 약 29 KiB)를 한 뒤
@@ -377,8 +382,8 @@ struct TerminationCallbackHandle {
 
 // 콜백을 등록한다. 칸이 모자라거나 callback이 nullptr이면 false다. 수집기 설치 전에도 등록할 수
 // 있다. 크래시 때 등록 역순으로 부른다. 수집기를 설치하지 않은 프로세스에서는 부르지 않는다.
-bool RegisterTerminationCallback(TerminationCallback callback, void* user,
-                                 TerminationCallbackHandle& handle) noexcept;
+ROCKS_PLATFORMBASE_API bool RegisterTerminationCallback(TerminationCallback callback, void* user,
+                                                        TerminationCallbackHandle& handle) noexcept;
 
 // 등록을 푼다. 그 콜백이 이미 크래시 처리로 불리고 있으면 돌아오지 않는다(프로세스가 곧 끝난다).
 // 그래서 user가 가리키는 객체를 콜백 도중에 파괴하지 않는다. 이미 풀린 handle은 무시한다.

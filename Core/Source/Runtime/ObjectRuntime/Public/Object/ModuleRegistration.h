@@ -32,7 +32,7 @@ namespace rocks {
 // TypeRegistry::Shutdown은 Busy이므로 모든 기록을 Unregister한 뒤 Shutdown한다. TypeRegistry와
 // allocator는 이 객체보다 오래 살아야 한다. 등록·해제는 TypeRegistry와 같은 생성 스레드에서만 한다.
 // 복사·이동하지 않는다.
-class ModuleRegistration {
+class ROCKS_OBJECTRUNTIME_API ModuleRegistration {
 public:
     ModuleRegistration(TypeRegistry& registry, Allocator& allocator) noexcept;
     ModuleRegistration(const ModuleRegistration&) = delete;

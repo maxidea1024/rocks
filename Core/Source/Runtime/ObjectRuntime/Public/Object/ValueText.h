@@ -29,8 +29,8 @@ namespace rocks {
 // 사용 예:
 //   auto parsed = ParseScalarText(ValueType{ValueKind::UInt32, {}}, nullptr, "42");
 //   if (parsed) { /* parsed.Value().unsignedInteger == 42 */ }
-Result<PathKeyValue> ParseScalarText(const ValueType& type, const EnumSchema* enumSchema,
-                                     StringView text) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<PathKeyValue>
+ParseScalarText(const ValueType& type, const EnumSchema* enumSchema, StringView text) noexcept;
 
 // value(type의 값 — PathKeyValue 칸)의 정규 텍스트를 out 뒤에 붙인다(ParseScalarText와 왕복한다).
 // 오류: 이름 있는 열거자(조합)로 나타낼 수 없는 enum 값·enumSchema 없음·다루지 않는 종류
@@ -44,8 +44,10 @@ Result<PathKeyValue> ParseScalarText(const ValueType& type, const EnumSchema* en
 //   value.signedInteger = -7;
 //   auto written = AppendScalarText(ValueType{ValueKind::Int32, {}}, nullptr, value, text);
 //   // 성공하면 text == "-7"
-Result<void> AppendScalarText(const ValueType& type, const EnumSchema* enumSchema,
-                              const PathKeyValue& value, StringBuilderBase& out) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void> AppendScalarText(const ValueType& type,
+                                                      const EnumSchema* enumSchema,
+                                                      const PathKeyValue& value,
+                                                      StringBuilderBase& out) noexcept;
 
 namespace detail {
 
@@ -56,14 +58,16 @@ inline constexpr usize GuidTextBytes = 36;
 inline constexpr usize DecimalTextBytes = 21;
 
 // value의 10진 표기를 out 끝(오른쪽 정렬)에 쓰고 쓴 범위를 돌려준다(capacity ≥ DecimalTextBytes).
-Span<const char> FormatDecimalText(uint64 value, bool negative, char* out, usize capacity) noexcept;
+ROCKS_OBJECTRUNTIME_API Span<const char> FormatDecimalText(uint64 value, bool negative, char* out,
+                                                           usize capacity) noexcept;
 
 // Guid의 36자 소문자 표기(RFC 9562 — Core Guid "{}"·AssetId 표기와 같다)를 out(GuidTextBytes
 // 이상)에 쓴다.
 Span<const char> FormatGuidText(Guid value, char* out) noexcept;
 
 // value와 같은 값의 열거자다(없으면 nullptr — 별칭은 등록이 막는다).
-const EnumeratorSchema* FindEnumeratorByValue(const EnumSchema& schema, int64 value) noexcept;
+ROCKS_OBJECTRUNTIME_API const EnumeratorSchema* FindEnumeratorByValue(const EnumSchema& schema,
+                                                                      int64 value) noexcept;
 
 // Flags enum 값의 정규 텍스트(선언 순 `A+B`, 0은 빈 값)를 out(없으면 길이만 센다)에 쓰고 byte 수를
 // bytes에 둔다. Out은 TryAppend(StringView) -> Result<void>를 가진 String·StringBuilderBase다. 이름

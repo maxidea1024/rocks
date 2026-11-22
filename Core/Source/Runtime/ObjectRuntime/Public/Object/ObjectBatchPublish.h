@@ -84,7 +84,7 @@ struct BatchEdgeChange {
 //   if (auto assigned = prepared.TryAssign(elements); !assigned) {
 //       return assigned;   // OutOfMemory·Overflow
 //   }
-class PreparedReferenceArray {
+class ROCKS_OBJECTRUNTIME_API PreparedReferenceArray {
 public:
     explicit PreparedReferenceArray(Allocator& allocator) noexcept {
         storage_.allocator = &allocator;
@@ -115,7 +115,7 @@ private:
 // 않은 대상·다른 allocator 같은 계약 위반은 Fatal이다(실패를 돌려주지 않는다 — 실패할 수 있는
 // 검사는 BeginBatchPublish가 끝냈다). 아무것도 게시하지 않고 닫으면 관찰자 기록·표지 증가 없이
 // 나온다.
-class ObjectBatchPublish {
+class ROCKS_OBJECTRUNTIME_API ObjectBatchPublish {
 public:
     ObjectBatchPublish() noexcept = default;
 

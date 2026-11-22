@@ -21,7 +21,7 @@ class CodePointRange;
 // 원본 byte 범위를 빌리는 view다. UTF-8 유효성을 생성 시 자동 검사하지 않으므로
 // 외부 입력은 ValidateUtf8로 검증한다. 원본 파괴·재할당·내용 변경은 caller가 통제한다.
 // 길이는 code point나 grapheme 수가 아닌 byte 수이며 동등 비교도 정규화 없는 byte 비교다.
-class StringView {
+class ROCKS_CORE_API StringView {
 public:
     constexpr StringView() noexcept = default;
 

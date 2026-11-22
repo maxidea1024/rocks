@@ -25,10 +25,10 @@ namespace rocks::platform {
 //   !status) {
 //       return status;
 //   }
-FileStatus ConvertEntryArgument(const wchar_t* argument, char* buffer, usize capacity,
-                                usize& bytes) noexcept;
-FileStatus ConvertEntryArgument(const char* argument, char* buffer, usize capacity,
-                                usize& bytes) noexcept;
+ROCKS_PLATFORMBASE_API FileStatus ConvertEntryArgument(const wchar_t* argument, char* buffer,
+                                                       usize capacity, usize& bytes) noexcept;
+ROCKS_PLATFORMBASE_API FileStatus ConvertEntryArgument(const char* argument, char* buffer,
+                                                       usize capacity, usize& bytes) noexcept;
 
 // Windows GUI 진입점(wWinMain)의 인자다. UCRT가 명령줄을 나눠 둔 __argc·__wargv를 돌려준다(첫 칸은
 // 실행 파일). wWinMain 실행 파일에서 진입 뒤 언제든 같은 값이다. 다른 플랫폼이거나 CRT가 넓은 문자
@@ -38,7 +38,7 @@ FileStatus ConvertEntryArgument(const char* argument, char* buffer, usize capaci
 //   int argc = 0;
 //   wchar_t** argv = nullptr;
 //   if (!GetWindowedEntryArguments(argc, argv)) { ... 실패 ... }
-bool GetWindowedEntryArguments(int& argc, wchar_t**& argv) noexcept;
+ROCKS_PLATFORMBASE_API bool GetWindowedEntryArguments(int& argc, wchar_t**& argv) noexcept;
 
 // 프로세스 종료 요청(Windows 콘솔 Ctrl-C·Ctrl-Break, POSIX SIGINT·SIGTERM)을 받을 함수다. OS 처리
 // 문맥(Windows 콘솔 제어 스레드, POSIX 신호 처리기)에서 불리므로 원자 변수 쓰기만
@@ -56,10 +56,11 @@ using TerminationRequestHandler = void (*)() noexcept;
 //   if (!InstallTerminationRequestHandler(&OnTerminationRequest)) { ... 경고 ... }
 //   ...
 //   RemoveTerminationRequestHandler();
-bool InstallTerminationRequestHandler(TerminationRequestHandler handler) noexcept;
+ROCKS_PLATFORMBASE_API bool
+InstallTerminationRequestHandler(TerminationRequestHandler handler) noexcept;
 
 // 처리기를 떼고 OS 처리를 설치 전으로 되돌린다. 걸려 있지 않으면 아무 일도 하지 않는다. 받은 요청
 // 수도 지운다. 종료 단계에서 부른다.
-void RemoveTerminationRequestHandler() noexcept;
+ROCKS_PLATFORMBASE_API void RemoveTerminationRequestHandler() noexcept;
 
 } // namespace rocks::platform

@@ -91,7 +91,7 @@ struct FileLogSinkConfig {
 //   if (file.Open()) { logs.AddSink(file); }
 //   ... logs.Stop();
 //   file.Close();   // 남은 묶음과 끝 표시를 쓰고 닫는다(소멸자도 부른다)
-class FileLogSink final : public RuntimeLogSink {
+class ROCKS_CORE_API FileLogSink final : public RuntimeLogSink {
 public:
     FileLogSink(Allocator& allocator, const FileLogSinkConfig& config) noexcept;
     ~FileLogSink() noexcept override;

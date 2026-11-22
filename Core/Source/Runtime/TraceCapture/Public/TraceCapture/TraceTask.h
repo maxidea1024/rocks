@@ -9,7 +9,7 @@
 namespace rocks {
 
 // 표준 채널 "task"다. 세션이 Start 때 등록하며 처음에는 꺼져 있다.
-extern TraceChannel TraceTaskChannel;
+ROCKS_TRACECAPTURE_API extern TraceChannel TraceTaskChannel;
 
 // task의 trace 신원이다(Docs/Design/TraceSystem.ko.md 7절). id는 세션마다 1부터 매기는 64비트
 // 카운터이고(task 객체 주소는 쓰지 않는다), serial은 그 세션이다. 만들 때 채널이 꺼져 있었으면 id가
@@ -30,12 +30,14 @@ struct TraceTaskInfo {
 };
 
 namespace detail {
-TraceTaskInfo CreateTraceTask() noexcept;
-void WriteTraceTaskEvent(uint8 kind, const TraceTaskId& task, uint64 related,
-                         ErrorCode error) noexcept;
-uint64 CurrentTraceTask() noexcept;
-void BeginTraceTaskExecution(const TraceTaskId& task, uint64& previousTask) noexcept;
-void EndTraceTaskExecution(const TraceTaskId& task, uint64 previousTask) noexcept;
+ROCKS_TRACECAPTURE_API TraceTaskInfo CreateTraceTask() noexcept;
+ROCKS_TRACECAPTURE_API void WriteTraceTaskEvent(uint8 kind, const TraceTaskId& task, uint64 related,
+                                                ErrorCode error) noexcept;
+ROCKS_TRACECAPTURE_API uint64 CurrentTraceTask() noexcept;
+ROCKS_TRACECAPTURE_API void BeginTraceTaskExecution(const TraceTaskId& task,
+                                                    uint64& previousTask) noexcept;
+ROCKS_TRACECAPTURE_API void EndTraceTaskExecution(const TraceTaskId& task,
+                                                  uint64 previousTask) noexcept;
 TraceScopeName& TraceTaskRunName() noexcept;
 } // namespace detail
 
@@ -112,7 +114,7 @@ inline void TraceTaskWaitEnd(const TraceTaskId& waited) noexcept {
 // 넘겨받은 문맥도 없으면(채널 꺼짐·스택 빔) 생성·소멸이 분기 하나씩으로 끝난다(scheduler가 task마다
 // 거친다, 로깅 L15).
 // 스레드: 실행하는 스레드의 스택 객체로 쓴다.
-class TraceTaskScope {
+class ROCKS_TRACECAPTURE_API TraceTaskScope {
 public:
     explicit TraceTaskScope(const TraceTaskInfo& info) noexcept {
         // 기록 여부와 문맥 유무를 한 판정으로 묶는다.

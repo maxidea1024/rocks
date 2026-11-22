@@ -100,7 +100,7 @@ struct DynamicLibraryError {
 //
 // 후속: 심볼 버전(dlvsym), 다른 라이브러리를 거치지 않는 POSIX 심볼 검색(dlsym은
 // 의존 라이브러리의 심볼도 찾는다. GetProcAddress는 그 DLL의 export만 찾는다).
-class DynamicLibrary final {
+class ROCKS_PLATFORMBASE_API DynamicLibrary final {
 public:
     // OpenSystem 이름의 최대 바이트 수다(대부분 파일 시스템의 파일 이름 한도).
     static constexpr usize MaxSystemNameBytes = 255;
@@ -169,7 +169,7 @@ private:
 // 못하게 한다. 이동만 된다. 빈 lease(기본 생성, 이동한 뒤, Reset 뒤)는 아무것도 보증하지 않는다.
 // 한 lease 객체는 한 번에 한 스레드에서만 쓴다. 서로 다른 lease는 어느 스레드에서든 동시에 풀어도
 // 된다.
-class DynamicLibraryLease final {
+class ROCKS_PLATFORMBASE_API DynamicLibraryLease final {
 public:
     DynamicLibraryLease() noexcept = default;
 

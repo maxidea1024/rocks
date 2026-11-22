@@ -39,7 +39,7 @@ internal static partial class MetaTests
                 ("#include <Object/GeneratedBitfieldAccess.h>", "bitfield function table header"),
                 ("static bool Get_on(const ::probe::Flags& value) noexcept;", "struct getter declaration"),
                 ("bool GeneratedType<::probe::Flags>::Get_on(const ::probe::Flags& value) noexcept { return value.on != 0; }", "struct getter"),
-                ("static void Set_hidden(::probe::Value& value, bool bit) noexcept;", "private class setter declaration"),
+                ("static ROCKS_PROBE_API void Set_hidden(::probe::Value& value, bool bit) noexcept;", "private class setter declaration (exported, BS8d2)"),
                 ("void GeneratedType<::probe::Value>::Set_hidden(::probe::Value& value, bool bit) noexcept {", "private class setter"),
                 ("detail::BitfieldStructFieldOps<::probe::Flags, &GeneratedType<::probe::Flags>::Get_on, &GeneratedType<::probe::Flags>::Set_on>(", "struct member ops"),
                 ("detail::BitfieldFieldOps<::probe::Value, &GeneratedType<::probe::Value>::Get_visible, &GeneratedType<::probe::Value>::Set_visible, false>(", "class field ops"),

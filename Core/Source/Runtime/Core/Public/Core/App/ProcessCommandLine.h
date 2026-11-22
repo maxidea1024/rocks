@@ -25,7 +25,7 @@ namespace rocks {
 // 사용 예(Launch가 캡처한 뒤 아무 스레드에서):
 //   const ProcessCommandLine& commandLine = ProcessCommandLine::Get();
 //   for (const StringView argument : commandLine.Arguments()) { ... }
-class ProcessCommandLine {
+class ROCKS_CORE_API ProcessCommandLine {
 public:
     // 인자 수 상한(실행 파일 제외)과, 인자 UTF-8 byte 합의 상한(각 인자 끝 NUL 포함)이다. Windows
     // 명령줄은 32767 UTF-16 단위라 인자는 최대 16384개(한 글자 인자와 공백)이고 UTF-8로 96 KiB와 끝

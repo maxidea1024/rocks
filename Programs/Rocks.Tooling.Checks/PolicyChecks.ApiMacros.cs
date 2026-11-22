@@ -1,0 +1,96 @@
+using System.Text.RegularExpressions;
+
+namespace Rocks.Tooling.Checks;
+
+public static partial class PolicyChecks
+{
+    private const string ModuleApiMacroRule = "module-api-macro";
+
+    // 주석·리터럴을 지운 텍스트의 모듈 API 매크로 토큰이다(ROCKS_<MODULE>_API).
+    private static readonly Regex ModuleApiMacroToken = new(@"\bROCKS_([A-Z0-9]+)_API\b", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(10));
+
+    /// <summary>
+    /// 비공개 헤더지만 규칙 파일이 비공개 include 디렉터리로 다른 모듈에 일부러 보여 주는 내부 헤더다. 그 선언은 다른 모듈이 링크하므로
+    /// API 매크로를 붙인다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d2 규칙 5 — AsyncCompression이 같은 코덱·블록 인코딩을 쓴다).
+    /// </summary>
+    public static readonly IReadOnlyList<string> ExportedPrivateHeaders =
+    [
+        "Core/Source/Runtime/Compression/Private/CompressionInternal.h",
+        "Core/Source/Runtime/Compression/Private/CompressedBlocksInternal.h"
+    ];
+
+    /// <summary>
+    /// 모듈 API 매크로의 쓰임을 검사한다(Docs/Design/BuildTargets.ko.md 3.8절 BD27·BS8d2, 규칙 <c>module-api-macro</c>). 엔진 소유 모듈
+    /// (<c>&lt;루트&gt;/Source/&lt;그룹&gt;/&lt;모듈&gt;/</c>, 서드파티 제외)과 엔진 플러그인 모듈의 소스·헤더에서:
+    /// <list type="bullet">
+    /// <item>다른 모듈 이름의 매크로(<c>ROCKS_&lt;다른 모듈&gt;_API</c>)를 쓰면 오류다 — 매크로는 그 선언을 정의하는 모듈의 것이어야 한다
+    /// (Modular에서 다른 모듈 매크로는 import가 되어 정의가 export되지 않는다).</item>
+    /// <item>비공개 헤더(<c>Private/</c>)의 매크로는 오류다(공개 API만 export한다). 예외는 <see cref="ExportedPrivateHeaders"/>다.</item>
+    /// <item>소스(<c>.cpp</c>)의 매크로는 오류다 — 선언의 속성이 정의에 이어지므로 정의에는 붙이지 않는다.</item>
+    /// </list>
+    /// 주석·문자열·문자 리터럴은 보지 않는다. 사용 예: <c>PolicyChecks.ModuleApiMacros(root)</c>.
+    /// </summary>
+    public static IReadOnlyList<CheckFailure> ModuleApiMacros(string root, IReadOnlyList<string>? exportedPrivateHeaders = null)
+    {
+        exportedPrivateHeaders ??= ExportedPrivateHeaders;
+        List<CheckFailure> failures = [];
+        foreach (string path in NativeSources(root, OwnedSourceRoots))
+        {
+            string relative = Relative(root, path);
+            if (ModuleFolderOf(relative) is not (string module, string folder))
+            {
+                continue;
+            }
+
+            string code = WithoutCommentsAndLiterals(File.ReadAllText(path, StrictUtf8));
+            bool header = relative.EndsWith(".h", StringComparison.Ordinal);
+            foreach (Match match in ModuleApiMacroToken.Matches(code))
+            {
+                int line = 1 + code.AsSpan(0, match.Index).Count('\n');
+                string owner = module.ToUpperInvariant();
+                if (match.Groups[1].Value != owner)
+                {
+                    failures.Add(new(relative, line, ModuleApiMacroRule,
+                        $"{match.Value} belongs to another module; a declaration of module {module} uses ROCKS_{owner}_API (the macro of the " +
+                        "module that defines it)"));
+                }
+                else if (!header)
+                {
+                    failures.Add(new(relative, line, ModuleApiMacroRule,
+                        $"{match.Value} is not used in a source file; put it on the declaration in the public header (the definition inherits it)"));
+                }
+                else if (folder == "Private" && !exportedPrivateHeaders.Contains(relative, StringComparer.Ordinal))
+                {
+                    failures.Add(new(relative, line, ModuleApiMacroRule,
+                        $"{match.Value} is not used in a private header; only public declarations are exported (move the declaration to Public/)"));
+                }
+            }
+        }
+
+        return failures;
+    }
+
+    // 엔진 소유 모듈 파일의 (모듈 이름, 모듈 아래 첫 폴더)다: <루트>/Source/<그룹>/<모듈>/<폴더>/… (그룹이 ThirdParty면 아니다) 또는 엔진 플러그인
+    // 모듈의 Source/<모듈>/<폴더>/…. 아니면 null이다.
+    private static (string Module, string Folder)? ModuleFolderOf(string relative)
+    {
+        string[] parts = relative.Split('/');
+        if (parts.Length > 5 && parts[1] == "Source" && parts[2] != "ThirdParty")
+        {
+            return (parts[3], parts[4]);
+        }
+
+        if (parts.Length >= 7 && parts[0] == "Engine" && parts[1] == "Plugins")
+        {
+            for (int index = 3; index + 3 < parts.Length; ++index)
+            {
+                if (parts[index] == "Source")
+                {
+                    return (parts[index + 1], parts[index + 2]);
+                }
+            }
+        }
+
+        return null;
+    }
+}

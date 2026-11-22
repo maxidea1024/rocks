@@ -21,17 +21,17 @@ namespace rocks {
 
 // 무작위 UUID v4를 발급한다(122 bit 무작위, version 4·variant 10xx 표시). OS 보안 난수를 쓰며
 // 실패하면 Unsupported다. 같은 값이 다시 나올 확률은 무시할 수 있지만 중복 검사는 하지 않는다.
-[[nodiscard]] Result<Guid> TryNewGuid() noexcept;
+[[nodiscard]] ROCKS_CORE_API Result<Guid> TryNewGuid() noexcept;
 
 // 문자열을 Guid로 읽는다. 받는 형식(16진은 대소문자 무관):
 //   "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"(36자, 서식 출력과 같음)
 //   "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"(32자, 구분자 없음 — UE EGuidFormats::Digits)
 // 그 밖(중괄호·공백·다른 길이)은 InvalidArgument다.
-[[nodiscard]] Result<Guid> TryParseGuid(StringView text) noexcept;
+[[nodiscard]] ROCKS_CORE_API Result<Guid> TryParseGuid(StringView text) noexcept;
 
 // "{}"는 36자 소문자 표준 표기다. spec("{:...}")은 받지 않는다.
 template <>
-struct Formatter<Guid> {
+struct ROCKS_CORE_API Formatter<Guid> {
     static Result<void> Format(StringBuilderBase& out, const Guid& value, StringView spec) noexcept;
 
     static constexpr bool IsValidSpec(StringView spec) noexcept {

@@ -105,7 +105,7 @@ inline constexpr uint32 DefaultMaxTextDiagnostics = 256;
 //   if (diagnostics.Omitted() != 0) {
 //       // "... and N more" 출력
 //   }
-class TextDiagnostics {
+class ROCKS_REFLECTIONTEXT_API TextDiagnostics {
 public:
     // allocator는 진단 텍스트·레코드 버퍼를 할당한다(모음보다 오래 살아야 한다). 한도는
     // DefaultMaxTextDiagnostics로 시작한다.

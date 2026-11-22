@@ -66,7 +66,7 @@ enum class Base64Variant : uint8 {
 
 // variant와 다른 알파벳·패딩, 공백 같은 다른 문자, 잘못된 끝 bit는 InvalidArgument다. 패딩 없는
 // variant에 '='로 끝나는 입력, 패딩 variant에 '='가 셋 이상인 입력은 길이만으로 거부한다(쓰기 전).
-[[nodiscard]] Result<usize> TryFromBase64(StringView text, Base64Variant variant,
-                                          Span<uint8> bytes) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<usize> TryFromBase64(StringView text, Base64Variant variant,
+                                                           Span<uint8> bytes) noexcept;
 
 } // namespace rocks::crypto

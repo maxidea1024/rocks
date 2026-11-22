@@ -31,7 +31,7 @@ namespace rocks {
 // - 내부 동기화가 없다. 등록·해제·조회는 로더 스레드에서 한다.
 // - 서비스를 Startup 뒤에도 쥐는 모듈은 서비스가 등록된 기간 안에 시작·종료하는 묶음이어야 한다.
 //   호스트는 서비스 등록 기간에 그런 모듈을 프로세스 묶음으로 Load하지 않는다(3.12절).
-class HostServices final {
+class ROCKS_MODULELOADER_API HostServices final {
 public:
     // allocator는 표 저장소용이며 이 객체보다 오래 살아야 한다.
     explicit HostServices(Allocator& allocator) noexcept;

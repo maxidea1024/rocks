@@ -86,8 +86,8 @@ enum class JsonSyntax : uint8 {
 // 사용 예:
 //   const JsonError error = document.Parse(text, options);
 //   Report(JsonErrorMessage(error.code, options.syntax));
-const char* JsonErrorMessage(JsonErrorCode code) noexcept;
-const char* JsonErrorMessage(JsonErrorCode code, JsonSyntax syntax) noexcept;
+ROCKS_CORE_API const char* JsonErrorMessage(JsonErrorCode code) noexcept;
+ROCKS_CORE_API const char* JsonErrorMessage(JsonErrorCode code, JsonSyntax syntax) noexcept;
 
 // 입력 위치. line·column은 1부터다. CRLF는 줄바꿈 1개, CR 단독도 줄바꿈이고, column은 code point
 // 단위(tab은 1칸, 건너뛴 BOM은 세지 않는다)다. U+2028·U+2029는 Json5에서도 줄바꿈으로 세지 않는다
@@ -190,7 +190,7 @@ class JsonDocument;
 // 문서 안 값 하나를 가리키는 가벼운 핸들이다. 문서가 살아 있는 동안 쓴다. 문서를 다시 Parse하거나
 // Clear하면 핸들이 무효가 되고(세대 번호로 판별) IsValid()가 false가 된다. 기본 생성 값과 없는 키의
 // Find 결과도 무효다. 무효 값의 Is*는 false, Size()는 0이고 그 밖의 접근자는 Fatal이다.
-class JsonValue {
+class ROCKS_CORE_API JsonValue {
 public:
     JsonValue() noexcept = default;
 
@@ -246,7 +246,7 @@ public:
 
 private:
     friend class JsonDocument;
-    friend bool JsonEquals(JsonValue left, JsonValue right) noexcept;
+    friend ROCKS_CORE_API bool JsonEquals(JsonValue left, JsonValue right) noexcept;
     JsonValue(const JsonDocument* document, uint32 node, uint32 generation) noexcept
         : document_(document), node_(node), generation_(generation) {
     }
@@ -262,10 +262,10 @@ private:
 // 부동소수점 환경과 무관). 숫자는 수치로 비교하므로 정수 1과 double 1.0, 0.0과 −0.0은 같다 — 같아도
 // Canonical 출력 byte가 같다는 뜻은 아니다(1과 1.0). Json5의 ±Infinity·NaN은 비트로 비교한다(NaN은
 // 한 비트 패턴으로 저장되므로 NaN끼리 같다). 깊이와 무관하게 재귀하지 않는다. 무효 값끼리는 같다.
-bool JsonEquals(JsonValue left, JsonValue right) noexcept;
+ROCKS_CORE_API bool JsonEquals(JsonValue left, JsonValue right) noexcept;
 
 // 읽은 JSON 문서다. 노드·문자열을 allocator의 평평한 배열 몇 개에 담는다. 복사·이동하지 않는다.
-class JsonDocument final {
+class ROCKS_CORE_API JsonDocument final {
 public:
     explicit JsonDocument(Allocator& allocator) noexcept;
     JsonDocument(const JsonDocument&) = delete;
@@ -286,7 +286,7 @@ public:
 private:
     friend class JsonValue;
     friend class JsonParser;
-    friend bool JsonEquals(JsonValue left, JsonValue right) noexcept;
+    friend ROCKS_CORE_API bool JsonEquals(JsonValue left, JsonValue right) noexcept;
 
     // 노드는 문서 순서(전위)로 쌓이므로 값 하나의 서브트리는 [자기 위치, end) 연속 구간이다.
     struct Node {
@@ -400,7 +400,7 @@ struct JsonWriterOptions {
 // 실패하면 이후 호출은 모두 그 첫 오류로 실패하고(Finish 포함 — 중간 결과를 보지 않고 Finish만 봐도
 // 첫 오류를 얻는다) builder에는 실패 전까지 쓴 내용이 남는다(그 결과는 버린다).
 // 복사하지 않는다.
-class JsonWriter final {
+class ROCKS_CORE_API JsonWriter final {
 public:
     // maxDepth는 JsonReadOptions::maxDepth와 같은 기본값이다(쓴 결과를 기본 옵션으로 다시 읽을 수
     // 있다).

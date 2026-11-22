@@ -31,7 +31,8 @@ struct VirtualMemoryInfo {
 };
 
 // 실패 시 info는 갱신하지 않는다. reserveGranularity는 예약 주소의 정렬 단위다.
-[[nodiscard]] VirtualMemoryResult QueryVirtualMemoryInfo(VirtualMemoryInfo& info) noexcept;
+[[nodiscard]] ROCKS_PLATFORMBASE_API VirtualMemoryResult
+QueryVirtualMemoryInfo(VirtualMemoryInfo& info) noexcept;
 
 // 기기의 물리 메모리 총량(byte)이다(UE FPlatformMemory::GetConstants().TotalPhysical 대응). 설정
 // 계층의 기기 프로필 메모리 등급 판정 입력이다(Docs/Design/ConfigSystem.ko.md 6.2절). Windows는
@@ -41,7 +42,8 @@ struct VirtualMemoryInfo {
 // 사용 예:
 //   uint64 bytes = 0;
 //   if (platform::QueryPhysicalMemory(bytes)) { /* bytes / (1024 * 1024) MiB */ }
-[[nodiscard]] VirtualMemoryResult QueryPhysicalMemory(uint64& totalBytes) noexcept;
+[[nodiscard]] ROCKS_PLATFORMBASE_API VirtualMemoryResult
+QueryPhysicalMemory(uint64& totalBytes) noexcept;
 
 // 예약한 범위의 접근 방식이다(VirtualMemoryRegion::Reserve의 인자).
 enum class VirtualMemoryAccess : uint8 {
@@ -91,7 +93,7 @@ enum class VirtualMemoryAccess : uint8 {
 //   }
 //   ...
 //   (void)region.Decommit(offset, slabBytes);
-class VirtualMemoryRegion final {
+class ROCKS_PLATFORMBASE_API VirtualMemoryRegion final {
 public:
     VirtualMemoryRegion() noexcept = default;
     ~VirtualMemoryRegion() noexcept;

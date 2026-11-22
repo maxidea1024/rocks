@@ -50,7 +50,7 @@ struct TextPersistentView {
 // Clone은 깊은 복사가 아닌 공유 보존이며 각 allocator는 마지막 노드 반환까지 살아 있어야 한다.
 // 별도 래퍼의 읽기/Clone/Reset은 동시 호출 가능하나 같은 래퍼의 변경은 동기화한다.
 // allocator는 실제 생성·해제 스레드를 지원해야 한다. allocator 콜백에서 같은 래퍼 변경은 금지한다.
-class Text {
+class ROCKS_LOCALIZATION_API Text {
 public:
     Text() noexcept = default;
     Text(Text&&) noexcept;

@@ -47,8 +47,8 @@ enum class ModuleUnloadCode : uint8 {
 
 // 진단용 열거자 이름이다(예: ModuleLoadCode::Cycle → "Cycle"). 모르는 값은 "Unknown"이다. 반환
 // 문자열은 정적 수명이다.
-const char* ModuleLoadCodeName(ModuleLoadCode code) noexcept;
-const char* ModuleUnloadCodeName(ModuleUnloadCode code) noexcept;
+ROCKS_MODULELOADER_API const char* ModuleLoadCodeName(ModuleLoadCode code) noexcept;
+ROCKS_MODULELOADER_API const char* ModuleUnloadCodeName(ModuleUnloadCode code) noexcept;
 
 // 적재 요청 하나의 결과다(3.4절, DeviceCreateReport와 같은 힙 없는 관례). 로더는 report를 돌려줄 뿐
 // 로그를 남기지 않는다. 실패를 확정하는 계층(Launch·엔진 호스트·Rocks Studio)이 영어로 한 번

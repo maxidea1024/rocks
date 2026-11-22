@@ -41,13 +41,13 @@ using GetResult = ConditionalT<IsSameV<T, String>, StringView, T>;
 namespace detail {
 
 // 묶음 없는 읽기다(Fatal — 조용히 최신 값을 읽지 않는다, 7.1절).
-[[noreturn]] void FatalUnbound(const VarDefinition& definition) noexcept;
+[[noreturn]] ROCKS_CONFIG_API void FatalUnbound(const VarDefinition& definition) noexcept;
 
 // 게임 lane에서 등록되지 않은 핸들을 읽었다(Fatal — 5절).
-[[noreturn]] void FatalUnregistered(const VarDefinition& definition) noexcept;
+[[noreturn]] ROCKS_CONFIG_API void FatalUnregistered(const VarDefinition& definition) noexcept;
 
 // 봉인(CompleteStartup) 전에 BootCVar를 읽었다(Debug·Development Fatal — 초기화 순서 버그, 9절).
-[[noreturn]] void FatalUnsealed(const VarDefinition& definition) noexcept;
+[[noreturn]] ROCKS_CONFIG_API void FatalUnsealed(const VarDefinition& definition) noexcept;
 
 // 이 스레드에 묶인 문맥의 쓰기 큐에 (layer, tag)의 값 쓰기를 넣는다(6.2절). value는 범위·Validate로
 // 바로 검사한다(Clamp는 보정한다). 오류: 묶음 없음 NotFound, 출시 빌드 치트 변수 Unsupported, 층·

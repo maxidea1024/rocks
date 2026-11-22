@@ -24,7 +24,7 @@ class PreparedStructElements;
 // Busy는 트랜잭션 상태를 바꾸지 않는다(오류로 고정하지 않는다). Get·DescribeOuter·FindObject 같은
 // 읽기는 된다(Get이 준 포인터로 값을 바꾸는 것은 막지 못한다 — 콜백 계약이 1차 방어다). 표시 중의
 // Rollback·소멸은 검사가 읽는 객체를 없애므로 Fatal이다(계약 위반).
-class ConstructionContext {
+class ROCKS_OBJECTRUNTIME_API ConstructionContext {
 public:
     ConstructionContext(ObjectRegistry&, const ObjectAccessContext&) noexcept;
     ~ConstructionContext();

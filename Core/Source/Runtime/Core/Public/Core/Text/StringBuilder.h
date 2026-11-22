@@ -229,8 +229,8 @@ FormatArg MakeFormatArg(char (&value)[N]) noexcept {
     return MakeFormatArg(static_cast<const char (&)[N]>(value));
 }
 
-Result<void> FormatTo(StringBuilderBase& out, StringView format,
-                      Span<const FormatArg> args) noexcept;
+ROCKS_CORE_API Result<void> FormatTo(StringBuilderBase& out, StringView format,
+                                     Span<const FormatArg> args) noexcept;
 
 // 인자 하나를 spec(원문)으로 서식화해 out에 붙인다. 로그 렌더처럼 자리마다 따로 서식화하는 곳이
 // 쓴다. hasSpec이 거짓이면 기본 서식("{}")이다. 실패하면 out에 일부가 남을 수 있으며 되돌리는 것은
@@ -273,7 +273,7 @@ RefusingAllocator& FixedStringBuilderAllocator() noexcept;
 //   반환한다. StackAllocator처럼 역순 반환만 받는 allocator에서는 TryReserve로 필요한 용량을 먼저
 //   확보한다(Array와 같은 제약). 서식 인자가 이 builder의 내용을 가리키면 별도 임시 builder를
 //   쓰므로 그 경우에도 같은 제약이 있다.
-class StringBuilderBase {
+class ROCKS_CORE_API StringBuilderBase {
 public:
     StringBuilderBase(const StringBuilderBase&) = delete;
     StringBuilderBase& operator=(const StringBuilderBase&) = delete;
@@ -404,8 +404,8 @@ protected:
     }
 
 private:
-    friend Result<void> detail::FormatTo(StringBuilderBase&, StringView,
-                                         Span<const detail::FormatArg>) noexcept;
+    friend ROCKS_CORE_API Result<void> detail::FormatTo(StringBuilderBase&, StringView,
+                                                        Span<const detail::FormatArg>) noexcept;
 
     // 검증 없이 byte를 붙인다. 호출자가 UTF-8 유효성을 보장한다.
     Result<void> AppendRaw(const char* bytes, usize count) noexcept;
@@ -484,7 +484,7 @@ public:
 //   FixedStringBuilder text{Span<char>(storage)};
 //   (void)text.TryAppendFormat("Loaded {} assets from {}", count, path);
 //   if (text.Truncated()) { /* 일부만 담겼다 */ }
-class FixedStringBuilder final : public StringBuilderBase {
+class ROCKS_CORE_API FixedStringBuilder final : public StringBuilderBase {
 public:
     explicit FixedStringBuilder(Span<char> buffer) noexcept;
 

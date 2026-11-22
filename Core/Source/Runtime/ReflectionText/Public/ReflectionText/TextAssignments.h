@@ -67,7 +67,7 @@ bool MakeTextAssignment(StringView text, uint32 sourceIndex, TextAssignment& out
 
 // 대입 묶음의 대상이다. 값 타입이며 가리키는 Registry·트랜잭션·struct 값을 소유하지 않는다 —
 // 그것들은 묶음(PreparedAssignments·PublishedAssignments)보다 오래 살아야 한다.
-class AssignmentTarget {
+class ROCKS_REFLECTIONTEXT_API AssignmentTarget {
 public:
     enum class Kind : uint8 {
         Live,
@@ -137,7 +137,7 @@ private:
 
 // 게시를 마친 묶음이다(PreparedAssignments::Publish의 결과). override 경로와 게시한 단위의 옛 값을
 // 담는다. 옛 값은 이 객체가 소멸할 때 반환한다(해제 콜백이 이 안에서 돈다). 이동만 된다.
-class PublishedAssignments {
+class ROCKS_REFLECTIONTEXT_API PublishedAssignments {
 public:
     PublishedAssignments() noexcept;
     ~PublishedAssignments();
@@ -210,7 +210,7 @@ private:
 //   }
 //
 //   auto published = prepared.Value().Publish();
-class PreparedAssignments {
+class ROCKS_REFLECTIONTEXT_API PreparedAssignments {
 public:
     PreparedAssignments() noexcept;
     ~PreparedAssignments();
@@ -285,9 +285,8 @@ private:
 // 옵션 InvalidArgument·options.names가 대상 Registry의 pool과 다르면 InvalidArgument, 대상의
 // 문맥·수명(AcquireType·MutationStamp — StaleHandle·WrongThread 등), 입력 한도 CapacityExceeded,
 // 할당 OutOfMemory, 경로 연산의 Busy 등. 실패하면 대상은 바뀌지 않는다(Name intern은 남을 수 있다).
-Result<PreparedAssignments> PrepareAssignments(const AssignmentTarget& target,
-                                               Span<const TextAssignment> assignments,
-                                               const TextCodecOptions& options,
-                                               TextDiagnostics& diagnostics) noexcept;
+ROCKS_REFLECTIONTEXT_API Result<PreparedAssignments>
+PrepareAssignments(const AssignmentTarget& target, Span<const TextAssignment> assignments,
+                   const TextCodecOptions& options, TextDiagnostics& diagnostics) noexcept;
 
 } // namespace rocks::reflection_text
