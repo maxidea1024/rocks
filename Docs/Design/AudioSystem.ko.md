@@ -1,6 +1,6 @@
 # 오디오 시스템 설계
 
-기준일: 2026-11-22, 개정 1. 소리를 재생하는 엔진 기능 전체를 정한다. 범위는 실시간 믹서, 장치 출력, 엔진·World 연결, 사운드 에셋, 임포트, 코덱·쿠킹, 스트리밍, 감쇠·공간화·동시 발음·가상화, 버스·효과·리버브 존, 진단이다. UE 5.8의 AudioMixerCore·AudioMixer·SignalProcessing·Engine 오디오 클래스와 AudioGameplayVolume 플러그인에 해당한다.
+기준일: 2026-11-22, 개정 2(8절 다른 문서 개정 반영). 소리를 재생하는 엔진 기능 전체를 정한다. 범위는 실시간 믹서, 장치 출력, 엔진·World 연결, 사운드 에셋, 임포트, 코덱·쿠킹, 스트리밍, 감쇠·공간화·동시 발음·가상화, 버스·효과·리버브 존, 진단이다. UE 5.8의 AudioMixerCore·AudioMixer·SignalProcessing·Engine 오디오 클래스와 AudioGameplayVolume 플러그인에 해당한다.
 
 [엔진 구현 계획](EngineImplementationPlan.ko.md) §18은 AudioRT 무대기 계약(Object·파일 IO·동적 할당·lock·직접 로그 금지), voice handle 세대, stop mailbox, epoch ACK, 48 kHz·256/512 frame, 성능 목표를 이미 정했다. 이 문서는 그 계약을 구현 수준으로 구체화한다. 설계가 애매한 곳은 UE 방식을 따르고, Rocks 원칙(결정적 시험, `Result` 오류, 명시적 소유, 전역 생성자 금지)과 부딪히는 곳만 다르게 정한다(7절).
 
@@ -19,7 +19,7 @@ UE 근거는 UE 5.8.4(`release`, 로컬 클론 `C:\github\UnrealEngine`, commit 
 | 동시 컨테이너 | `BoundedMpscQueue`(구현). `BoundedSpscQueue`·`FixedBlockPool`·`IndexedFreeList`는 [동기화](Synchronization.ko.md) SY7 설계만 | `BoundedMpscQueue`는 생산자가 예약 슬롯을 게시하기 전에 선점되면 소비자 `TryPop`이 실패할 수 있다. AudioRT 입력은 SPSC여야 한다(Synchronization D27) |
 | 깨우기 수단 | `ManualResetEvent`·`Semaphore`는 Signal·Release 안에서 `Mutex`를 잡는다(`Core/Source/Runtime/PlatformBase/Public/Platform/Sync.h:86–108`, `Private/Common/Sync.cpp:61–68`). SY0 `WaiterSignal` 설계는 Windows `WaitOnAddress`, Android futex, macOS `pthread_mutex_t`+`pthread_cond_t`(Synchronization 350행) | 장치 콜백이 AudioRT를 깨울 때 잠금을 공유하면 우선순위 역전이 생긴다. 무잠금 깨우기가 없다(3.2절, PR21) |
 | 엔진 수명 | `EngineSubsystem`의 `Initialize`·`OnFrameBegin`·`OnFrameEnd`·`BeginShutdown`·`CompleteInFlightWork`·`Deinitialize`(`Engine/Source/Runtime/Engine/Public/Engine/Engine.h:46–70`). 종료 2단계 주석에 "audio epoch" 대기 | `CompleteInFlightWork` 실패는 `KeepFirst`로 누적되고 정리가 이어진다. 장치 콜백이 살아 있는 채 소유자가 풀릴 수 있다(3.8.6절) |
-| 명령줄 | `--no-sound`·`--mute-audio` 이름만 예약, 볼륨 배수는 "오디오 모듈 설계 때"로 미룸([AppInfo·명령줄](AppInfoCommandLine.ko.md) 128행, §8.6) | 판정 함수가 없다(3.8.4절) |
+| 명령줄 | AppInfo 개정 4가 `RunTraits::audioOutput`·`audioMuted`와 `--no-sound`·`--mute-audio`를 설계했다(미구현 — AP1) | 판정 값이 아직 코드에 없다(3.8.4절) |
 | 설정 | 콘솔 영역 `"audio"`(`Core/Source/Runtime/Config/Public/Config/ConsoleSettings.h:66`), `audio.master.volume` 시험 사용 | 오디오 CVar가 없다 |
 | 빌드 대상 | [빌드 타깃](BuildTargets.ko.md) 59–63행에 모듈 유형 `ClientOnly`. 69행은 Server의 기능 축소 범위를 네트워크 단계 스펙에 넘긴다 | 빌드 코드에 `ClientOnly`가 없다. 오디오 모듈의 Server 범위는 이 문서가 정한다(AD24) |
 | 에셋 | A1 구현, A2a–A2e 구현, A2f 임포트 프레임워크는 A2f1a 구현(진단 등록·원본 루트·원본 읽기·임포터 표)·A2f1b·A2f2 설계(`AssetImporter`·`AssetImporterTable`, AssetSystem 7.1절 18), A3 AssetNugget·A4 AssetCooker 설계. `ReadyMask { Cpu, Render }`(`Engine/Source/Runtime/AssetRuntime/Public/AssetRuntime/AssetManager.h:36`) | 오디오 재생 구간이 준비됐는지 표현할 수단이 없다(3.12.4절) |
@@ -102,12 +102,12 @@ Rocks도 세 문맥으로 둔다.
 | Game | Game lane | Object(`AudioComponent`·에셋), `AssetLease`, World 등록 표, 사용자 콜백 | 제어 명령(고정 크기 POD, 3.5절)을 제어 pipe 입력 큐로 |
 | 오디오 제어 pipe | `SerialTaskChain` 하나(`AudioControlPipe`). Game의 `OnFrameEnd`가 그 프레임 명령 묶음과 리스너·emitter 스냅샷을 한 task로 제출 | `AudioDeviceContext`: 재생 표·재생층·동시 발음 그룹·가상화·감쇠·우선순위 정렬·버스 plan 작성·PCM pin | AudioRT 명령 링(SPSC), 파라미터 최신값 슬롯, stop mailbox, plan 교체 |
 | AudioRT | 전용 `platform::Thread`(`ThreadPriority::Highest`), 장치마다 하나 | voice 상태·DSP 상태·gain ramp·mix clock·현재 plan·출력 링 쓰기 위치 | terminal 슬롯, 숫자 이벤트 링, epoch ACK |
-| 장치 콜백 | backend 스레드(OS·miniaudio 소유) | 출력 링 읽기 위치 | `AudioWakeSignal` 깨우기, underrun 계수 |
+| 장치 콜백 | backend 스레드(OS·miniaudio 소유) | 출력 링 읽기 위치 | `RealtimeWakeSignal` 깨우기, underrun 계수 |
 | 디코드·IO worker | `WorkerScheduler` | 디코더 인스턴스 상태, 요청 버퍼 | 세대·요청 번호가 붙은 PCM 페이지 |
 
 AudioRT 규칙(계획 §18 그대로): Object 접근, 파일 IO, 동적 할당·해제, mutex·조건 변수, 일반 task 대기, 문자열 로그를 하지 않는다. 기다리는 것은 렌더 깨우기 신호 하나뿐이다(출력 링이 찼을 때). trace는 사전 할당 숫자 링에만 쓴다. 실제 적용된 스레드 우선순위를 장치 열기 로그에 남긴다(`SetThreadPriority` 실패는 지금 무시된다 — `Private/Win64/Concurrency.cpp:237`).
 
-렌더 깨우기 신호(`AudioWakeSignal`, AD26): 장치 콜백이 Signal하고 AudioRT가 Wait하는 단일 대기자 자동 리셋 신호다. Signal은 잠금을 잡지 않는다: Windows `WakeByAddressSingle`(또는 auto-reset event), Android futex wake, macOS Mach `semaphore_signal`. 기존 `ManualResetEvent`·`Semaphore`(내부 Mutex)와 SY0 `WaiterSignal` macOS 구현(pthread 조건 변수)은 쓰지 않는다. 이 신호는 [동기화](Synchronization.ko.md) 개정으로 PlatformBase에 둔다(선행 PR21).
+렌더 깨우기 신호(`RealtimeWakeSignal` — [동기화](Synchronization.ko.md) 9.6절, AD26): 장치 콜백이 Signal하고 AudioRT가 Wait하는 단일 대기자 자동 리셋 신호다. Signal은 잠금을 잡지 않는다: Windows `WakeByAddressSingle`(또는 auto-reset event), Android futex wake, macOS Mach `semaphore_signal`. 기존 `ManualResetEvent`·`Semaphore`(내부 Mutex)와 SY0 `WaiterSignal` macOS 구현(pthread 조건 변수)은 쓰지 않는다. 이 신호는 [동기화](Synchronization.ko.md) 개정으로 PlatformBase에 둔다(선행 PR21).
 
 출력 링: 블록 단위 칸 `bufferCount`개. 장치 열기는 `callbackFrames` = Q를 요청하고(3.7.1절), 협상 결과로 칸 수를 정한다.
 - `bufferCount = max(MinOutputBufferCount, ceil(callbackFrames / Q) + 1, audio.mixer.buffercount)`, `MinOutputBufferCount` = 2(UE와 같다), 상한 `MaxOutputBufferCount` = 16.
@@ -249,7 +249,7 @@ public:
 
 | backend | 모듈 | 플랫폼 | 단계 |
 |---|---|---|---|
-| `NullAudioOutput` | Audio | 모두 | AU2. 장치가 없거나 열기 실패면 이것으로 시간만 진행한다(UE `FMixerNullCallback`과 같다). 자체 타이머 스레드가 블록 기간마다 장치 콜백 역할(링에서 한 블록 소비 + `AudioWakeSignal` 깨우기)을 한다 |
+| `NullAudioOutput` | Audio | 모두 | AU2. 장치가 없거나 열기 실패면 이것으로 시간만 진행한다(UE `FMixerNullCallback`과 같다). 자체 타이머 스레드가 블록 기간마다 장치 콜백 역할(링에서 한 블록 소비 + `RealtimeWakeSignal` 깨우기)을 한다 |
 | `OfflineAudioRender` | Audio | 모두 | AU1. 시험·오프라인 캡처 |
 | `MiniaudioOutput` | AudioMiniaudio | Windows(WASAPI) → macOS(Core Audio) → Android(AAudio, 없으면 OpenSL ES) | AU2. miniaudio 저수준 장치 API만 쓴다. 실제 선택된 backend 이름·협상값을 로그에 남긴다 |
 
@@ -262,7 +262,7 @@ miniaudio의 고수준 engine·resource manager·decoder·node graph는 쓰지 �
 - 열기: 협상 형식 확인 → 출력 링·변환 버퍼 할당 → 초기 무음 → AudioRT 시작 → backend Start.
 - 기본 장치 변경·분리·rate 변경 통지는 제어 pipe로 넘긴다. 순서: backend `Stop`(콜백 종료 확인) → AudioRT를 Null 타이머로 전환(시간 진행 유지) → 새 장치 열기·협상 → rate가 바뀌었으면 clock epoch를 올리고 예약을 초 단위로 다시 맞춤 → 링 재구성 → backend Start → 짧은 fade-in. UE `FAudioMixerPlatformSwappable`과 같은 흐름이다.
 - 재시도는 제어 pipe 타이머(`audio.device.retryms`)로만 한다. 명시적으로 고른 장치는 OS 기본 장치 변경을 따라가지 않는다(사용자 설정).
-- 앱 비활성·백그라운드·통화(모바일)·오디오 포커스는 PlatformLayer 앱 수명 이벤트(선행 PR9)로 받는다. 비활성 동안 `audio.unfocused.volume` 배수를 적용하고, 모바일 백그라운드는 Suspended로 간다.
+- 데스크톱 창 비활성은 PlatformWindow 포커스(`HasFocus`·`FocusLost`)로, 모바일 백그라운드·통화·오디오 포커스는 [플랫폼 계층](PlatformLayer.ko.md) 앱 수명 이벤트(선행 PR9)로 받는다. 비활성 동안 `audio.unfocused.volume` 배수를 적용하고, 모바일 백그라운드는 Suspended로 간다.
 
 ### 3.8 엔진·World 연결
 
@@ -687,7 +687,7 @@ Master
 | AD23 | 오디오 종료 drain 실패 시 소유자 해제로 넘어가지 않는 Engine 종료 재시도 게이트를 요구한다(계약은 EngineRuntime 개정) | 권장안 |
 | AD24 | `Audio`·`EngineAudio`는 서버에도 링크하고 장치 backend(`AudioMiniaudio`)와 디코더(`AudioOpus`)는 ClientOnly. 연결은 `HostServices`·`AudioDecoderTable` 등록으로, 호스트는 ClientOnly 모듈을 직접 참조하지 않는다. 서버 쿠킹은 오디오 payload 제외 | 권장안 |
 | AD25 | 에디터·Tryout은 쿠킹하지 않은 clip을 재생할 때 실행 플랫폼 데이터를 만든다(UE DDC 방식). AU4는 PCM 변환만, AU5부터 AssetNugget 경유 | 권장안 |
-| AD26 | 장치 콜백 → AudioRT 깨우기는 잠금 없는 단일 대기자 신호(`AudioWakeSignal`: Windows `WaitOnAddress`, Android futex, macOS Mach semaphore) | 권장안 |
+| AD26 | 장치 콜백 → AudioRT 깨우기는 잠금 없는 단일 대기자 신호(`RealtimeWakeSignal`: Windows `WaitOnAddress`, Android futex, macOS Mach semaphore) | 권장안 |
 | AD27 | 리버브 bypass·없음으로 전환해도 꼬리 에너지가 임계 아래로 머문 뒤에 끄고 이력을 지운다(UE는 즉시 지움) | 권장안 |
 | AD28 | Opus 청크는 앞 청크 끝 80 ms 패킷을 복제해 독립 디코드, looping clip은 loop 머리 PCM을 미리 디코드해 둔다 | 권장안 |
 
@@ -700,13 +700,13 @@ Master
 | PR1 | 이 스펙 | 개정 1 | 교차 검증 반영 | AU1 이상 |
 | PR2 | 스레드 우선순위 | 구현(`Highest`) | 없음. 실시간 등급은 AU9 측정 뒤 PlatformLayer 개정 | — |
 | PR3 | Core 동시 컨테이너 SY7(`BoundedSpscQueue`·`FixedBlockPool`·`IndexedFreeList`) | 설계(선행 SY0·SY1·SY2) | SY0→SY1→SY2→SY7 구현 | AU1 |
-| PR21 | 무잠금 깨우기 신호 `AudioWakeSignal`(AD26) | 없음(기존 이벤트는 Mutex 사용, SY0 `WaiterSignal` macOS는 조건 변수) | Synchronization 개정: SY0 OS 대기 위에 단일 대기자 자동 리셋 신호, macOS는 Mach semaphore | AU2 |
+| PR21 | 무잠금 깨우기 신호 `RealtimeWakeSignal`(AD26) | 설계(Synchronization 개정 3 9.6절, D34, SY12) | SY0 → SY12 구현 | AU2 |
 | PR4 | `SerialTaskChain`·`WorkerScheduler`·`TaskLane::Audio` | 구현 | 없음 | — |
 | PR5 | ThirdParty 반입 | 절차 구현, 오디오 라이브러리 없음 | miniaudio(AU2), libFLAC·libvorbis·libogg·libopus·libopusfile·minimp3(AU4), 런타임 libopus(AU5) | AU2, AU4, AU5 |
 | PR6 | 모듈 유형 `ClientOnly`, Server 대상 오디오 제외 | 설계 | BuildTargets 구현 | AU2(서버 빌드 확인은 AU3) |
-| PR7 | `RunTraits::audioOutput`·`audioMuted` | 이름만 예약 | AppInfo 구현 또는 AU3 임시 판정 | AU3 |
-| PR8 | Engine 종료 재시도 게이트 | 없음 | EngineRuntime·CrashHandlingAndLaunch 개정과 구현 | AU3 |
-| PR9 | 앱 수명 이벤트(활성·비활성·백그라운드·오디오 포커스) | 없음 | PlatformLayer 개정과 구현 | AU3(비활성 볼륨), AU9 |
+| PR7 | `RunTraits::audioOutput`·`audioMuted` | 설계(AppInfo 개정 4, 10.2절) | AppInfo AP1 구현 또는 AU3 임시 판정 | AU3 |
+| PR8 | Engine 종료 재시도 게이트 | 설계(EngineRuntime 6절, CrashHandlingAndLaunch 개정 13 20절) | 구현(Engine `Shutdown`의 `Busy` 처리·호스트 재시도) | AU3 |
+| PR9 | 앱 수명 이벤트(활성·비활성·백그라운드·오디오 포커스) | 데스크톱 창 포커스는 구현(PlatformWindow), 앱 수준 이벤트는 설계(PlatformLayer "앱 수명 이벤트" 절) | Windows·macOS 활성 이벤트는 AU3과, Android는 AU9와 함께 구현 | AU9 |
 | PR10 | 에셋 A2f 임포트 프레임워크 | A2f1a 구현, A2f1b·A2f2 설계(7.1절 18) | 계획 순서대로 | AU4 |
 | PR11 | 에셋 A3 AssetNugget·A4 AssetCooker | 설계 | 계획 순서대로 | AU5, AU6 |
 | PR12 | 오디오 재생 준비 티켓·sidecar 범위 읽기 | 없음(`ReadyMask`는 Cpu·Render) | AssetSystem 개정 | AU6 |
@@ -724,8 +724,8 @@ Master
 | 단계 | 내용 | 선행 | 완료 기준 |
 |---|---|---|---|
 | AU1 | `Audio` 모듈: 형식·채널 레이아웃·PCM 버퍼, voice pool, 명령 링·파라미터 슬롯·stop mailbox·epoch·terminal 슬롯, mix clock·블록 안 예약, 리샘플러, source LPF/HPF, gain ramp, 2D·equal-power 패너, 거리 곡선, 마스터 limiter, `OfflineAudioRender`, 메모리 PCM clip | PR1, PR3 | 3.19절 PCM·예약·리샘플·click·큐·결정성 시험, AudioRT 할당 0 |
-| AU2 | `AudioOutputBackend`, AudioRT 스레드·출력 링(칸 수 계산)·`AudioWakeSignal`, `NullAudioOutput`, ThirdParty `Miniaudio`, `AudioMiniaudio`(Windows 먼저)와 `HostServices` 등록 | AU1, PR5, PR6, PR21 | Sandbox 시험음 재생, 협상값·실제 스레드 우선순위·underrun 기록, Q ≠ 콜백 크기에서 underrun 0, 장치 없음·열기 실패·종료 자원 반환. macOS·Android는 실행한 것만 판정 |
-| AU3 | `EngineAudio`: `AudioEngineSubsystem`·`AudioWorldSubsystem`·제어 pipe·`AudioDeviceContext`, `SoundSource`·`SoundClip`(메모리 PCM)·`AttenuationSettings`(거리), `AudioComponent`, 재생 API·결과, 리스너, CVar(비활성 창 볼륨 포함), 무음 실행·서버, 종료 drain, Tryout 정리 계약 | AU2, PR7, PR8, PR9 | Sandbox에서 키 입력으로 UI음·움직이는 부착 루프, 좌우 방향, 맵 교체·컴포넌트 파괴·GC 뒤 stale voice·lease 0, 서버 빌드에 `AudioMiniaudio` 미링크 |
+| AU2 | `AudioOutputBackend`, AudioRT 스레드·출력 링(칸 수 계산)·`RealtimeWakeSignal`, `NullAudioOutput`, ThirdParty `Miniaudio`, `AudioMiniaudio`(Windows 먼저)와 `HostServices` 등록 | AU1, PR5, PR6, PR21 | Sandbox 시험음 재생, 협상값·실제 스레드 우선순위·underrun 기록, Q ≠ 콜백 크기에서 underrun 0, 장치 없음·열기 실패·종료 자원 반환. macOS·Android는 실행한 것만 판정 |
+| AU3 | `EngineAudio`: `AudioEngineSubsystem`·`AudioWorldSubsystem`·제어 pipe·`AudioDeviceContext`, `SoundSource`·`SoundClip`(메모리 PCM)·`AttenuationSettings`(거리), `AudioComponent`, 재생 API·결과, 리스너, CVar(비활성 창 볼륨 포함), 무음 실행·서버, 종료 drain, Tryout 정리 계약 | AU2, PR7, PR8 | Sandbox에서 키 입력으로 UI음·움직이는 부착 루프, 좌우 방향, 맵 교체·컴포넌트 파괴·GC 뒤 stale voice·lease 0, 서버 빌드에 `AudioMiniaudio` 미링크 |
 | AU3b | Sparks 바인딩 | AU3, PR18 | Sparks 시험: 재생·정지·`LoopHandle` 수명, 서버 `Ignored` |
 | AU4 | `AudioTools`: `SoundClipImporter`, WAV·AIFF 파서, FLAC·Vorbis·Opus·MP3 디코드(SIMD 고정), ThirdParty 디코더, 에디터 재생용 PCM 플랫폼 데이터 변환(AD25) | AU3, PR10, PR5 | 3.19절 임포트 시험, 디코드 SHA 고정값, 재생 중 재임포트 시 새 재생부터 새 revision |
 | AU5 | `AudioEncoder`·`AudioDecoder`·`AudioDecoderTable`, ADPCM·Opus 인코더·디코더, `AudioOpus`, 플랫폼 데이터·청크 표·플랫폼 재정의, 쿠킹 처리기·AssetNugget 키 | AU4, PR11, PR5 | 같은 입력 같은 byte, 설정 변경 새 키, 디코드 허용오차, 손상 payload 거부 |
@@ -748,7 +748,7 @@ Master
 | 원본 bulk | 16비트 교차 WAV byte(헤더 포함) | 24비트·float 정밀도 유지 planar PCM | 고해상도 원본 보존 |
 | 장치 backend | 플랫폼별 직접 구현 | miniaudio 저수준 장치 IO(같은 인터페이스로 직접 구현 추가 가능) | 초기 구현·검증 비용 |
 | 기본 블록 | 1024 frame, 블록 = 콜백 크기 | 256 frame, 콜백 크기와 다를 수 있고 링 칸 수를 계산 | 계획 §18 지연 목표, backend가 콜백 크기를 정하는 경우 |
-| 렌더 깨우기 | `FEvent` | 잠금 없는 `AudioWakeSignal` | 장치 콜백과 AudioRT의 우선순위 역전 방지 |
+| 렌더 깨우기 | `FEvent` | 잠금 없는 `RealtimeWakeSignal` | 장치 콜백과 AudioRT의 우선순위 역전 방지 |
 | 리버브 bypass 전환 끝 | early·late 이력 즉시 지움(꼬리 잘림) | 꼬리 에너지가 임계 아래로 머문 뒤 지움 | 꼬리 보존 |
 | 블록 안 offset | Quartz 예약만 | 모든 시작·정지 | 결정적 시각과 시험 |
 | 리버브 보간 진행률 | 벽시계(`FApp::GetCurrentTime`), 게임 틱 단위 | mix clock frame, 블록 단위 | 오프라인 렌더 결정성 |
@@ -759,19 +759,20 @@ Master
 
 ## 8. 다른 문서 개정
 
-이번 개정에서는 다른 문서를 고치지 않는다. 각 단계 착수 전에 아래를 고친다(스펙 먼저 원칙).
+개정 2(2026-11-22)에서 아래를 반영했다. 남은 것은 표의 "남음" 칸이다.
 
-| 문서 | 고칠 것 | 시점 |
+| 문서 | 고친 것 | 남음 |
 |---|---|---|
-| [엔진 구현 계획](EngineImplementationPlan.ko.md) §18 | 콜백 직결 → 렌더 스레드 + 출력 링(AD2), 이 문서 링크 | AU1 전 |
-| [AppInfo·명령줄](AppInfoCommandLine.ko.md) 128행·§8.6 | `RunTraits::audioOutput`·`audioMuted`, `--allow-commandlet-audio`, `audio.unfocused.volume` | AU3 전 |
-| [빌드 타깃](BuildTargets.ko.md) 3.7절·69행 | 오디오 모듈 유형(AD24), 서버 쿠킹 payload 제외 | AU2 전 |
-| [에셋 시스템](AssetSystem.ko.md) | 오디오 진단(`IgnoredSourceChunks`), 오디오 쿠킹 처리기, sidecar 청크 게시, 재생 준비 티켓(AD18) | AU4·AU5·AU6 전 |
-| [엔진 런타임](EngineRuntime.ko.md)·[크래시·실행](CrashHandlingAndLaunch.ko.md) | 종료 재시도 게이트(AD23), subsystem 등록 의존 | AU3 전 |
-| [플랫폼 계층](PlatformLayer.ko.md) | 앱 수명 이벤트(PR9) | AU9 전 |
-| [Sparks 엔진 통합](SparksEngineIntegration.ko.md) EI5, `Engine.sparkbind.json` | 바인딩 이름 확정, `World.Audio.Play2D` 추가, `StartLoop` null 의미 | AU3b 전 |
-| [Trace 시스템](TraceSystem.ko.md) | `Audio`·`AudioMixer` 채널 | AU8 전 |
-| [동기화](Synchronization.ko.md) | `AudioWakeSignal`(AD26, PR21). D27(AudioRT SPSC 입력)은 그대로 | AU2 전 |
+| [엔진 구현 계획](EngineImplementationPlan.ko.md) 개정 1.17 | 18절: 전용 AudioRT 스레드 + 출력 링(AD2), 이 문서 링크, 표지 1.17 항목 | — |
+| [동기화](Synchronization.ko.md) 개정 3 | 9.6절 `RealtimeWakeSignal`, D34, 단계 SY12(AD26). D27(AudioRT SPSC 입력)은 그대로 | — |
+| [AppInfo·명령줄](AppInfoCommandLine.ko.md) 개정 4 | `RunTraits::audioOutput`·`audioMuted`, `--no-sound`·`--mute-audio`·`--allow-commandlet-audio`, 8.6절 볼륨 CVar | — |
+| [엔진 런타임](EngineRuntime.ko.md) 6절 | 종료 게이트(`Busy`면 멈춤·이어 부르기, AD23) | — |
+| [크래시 처리·실행](CrashHandlingAndLaunch.ko.md) 개정 13 | 20절 호스트 재시도·Fatal | — |
+| [플랫폼 계층](PlatformLayer.ko.md) | "앱 수명 이벤트" 절(PR9) | — |
+| [빌드 타깃](BuildTargets.ko.md) 개정 20 | 오디오 모듈 유형·Server 쿠킹 payload 제외(AD24) | — |
+| [에셋 시스템](AssetSystem.ko.md) | 진단 `IgnoredSourceChunks`, `ReadyMask`와 오디오 준비 티켓의 관계(AD18) | 오디오 쿠킹 처리기·sidecar 청크 게시 세부는 A4 설계 때(AU5·AU6 전) |
+| [Sparks 엔진 통합](SparksEngineIntegration.ko.md) 개정 2 | SE-G7 오디오 의미 | `Engine.sparkbind.json` 스키마 변경(`Play2D`)은 AU3b 코드와 함께 |
+| [Trace 시스템](TraceSystem.ko.md) | — | `Audio`·`AudioMixer` 채널(AU8 전) |
 
 ## 9. 범위 밖과 채택하지 않은 UE 요소
 
@@ -798,3 +799,4 @@ Master
 - 개정 1(2026-11-22): 초판. UE 5.8.4 대조(AudioMixerCore·AudioMixer·Engine 오디오·AudioGameplayVolume·SoundFactory·리버브 보간), 결정 AD1–AD28, 선행작업 PR1–PR21, 단계 AU1–AU10. 사용자 결정: 손실 원본 허용(AD5). 교차 검증 1회 반영:
   - 필수 9: 내부·장치 채널 순서(3.3절), UE 기본 코덱은 모든 플랫폼 BINKA(3.11.2절), 출력 링 칸 수 공식과 UE 최소 2칸(3.2절), 잠금 없는 깨우기 신호 PR21·AD26, PCM 링 용량 공식과 예산 재계산(3.12.3절), 에디터 재생 경로 AD25, `AudioTools` 의존, 상태 줄의 사용자 결정 수, UE 원본 bulk는 16비트 WAV(AD12·7절).
   - 권장 13: `ERequiredSubmixes`, 로딩 동작 `Inherited`·SeekRestart 실험 표시, A2f 사용 규칙(roles·옵션 이름·loop 필드·`loopOverride`·`normalize` 표현·PCM 상한·8비트·A2f1a 상태), 디코더 SIMD 고정·너겟 키, Inline·Thread 시험 조건, 파라미터 seqlock, AudioRT 종료 깨우기·Null 타이머 join, 선행 관계(PR9→AU3, PR17→AU8b, PR20→AU10, 캐시 기본 상수), AD24 인용·`AudioOpus` ClientOnly·`HostServices` 등록, Opus 48 kHz 결과(rate 표 적용 범위·loop 반올림·채널 매핑·청크 pre-roll 복제·loop 머리 PCM — AD28), 준비 결과 집합(AAA10), bypass 꼬리(AD27), `SpatialIndex` 의존·Sparks 스키마.
+- 개정 2(2026-11-22): 8절 다른 문서 개정을 반영했다(계획 1.17, 동기화 3, AppInfo 4, 엔진 런타임 6절, 크래시·실행 13, 플랫폼 계층 앱 수명 이벤트, 빌드 타깃 20, 에셋 시스템, Sparks 통합 2). 깨우기 신호 이름을 `RealtimeWakeSignal`(동기화 9.6절)로 맞췄다. PR9는 데스크톱 포커스가 PlatformWindow에 있어 AU3이 아니라 AU9만 막는다.

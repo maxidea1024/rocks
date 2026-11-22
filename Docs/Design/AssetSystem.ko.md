@@ -118,7 +118,7 @@ AssetRuntime은 Engine을 모른다. 도구는 Engine을 링크하지 않고 `As
 | `DuplicateAssetId`, `DuplicatePath`, `CaseCollision`, `InvalidPath`, `MissingFile`, `UnregisteredFile` | 식별·경로 |
 | `TypeMismatch`, `MissingDependency`(Hard·Soft), `UnsupportedCycle`, `UnpackagedReference`(패키지에 속하지 않은 객체를 저장 그래프가 참조) | 참조 |
 | `CorruptPackage`, `UnsupportedVersion`, `NewerVersion`, `ExternalModification`, `NotDurable`(경고 — 교체는 됐고 디렉터리 동기화만 실패, 5.5절) | 패키지·저장 |
-| `MissingSource`, `SourceChanged`, `InvalidSource`(원본 해석 실패), `UnsupportedSourceFormat`(지원하지 않는 원본 변형, 예: PSD CMYK), `LossySource`, `NonSrgbSource`, `IgnoredSourceChannels`(경고), `AbsoluteSourcePath` | 원본 |
+| `MissingSource`, `SourceChanged`, `InvalidSource`(원본 해석 실패), `UnsupportedSourceFormat`(지원하지 않는 원본 변형, 예: PSD CMYK), `LossySource`, `NonSrgbSource`, `IgnoredSourceChannels`(경고), `IgnoredSourceChunks`(경고 — 오디오 임포터, [오디오 시스템](AudioSystem.ko.md) 3.10.2절), `AbsoluteSourcePath` | 원본 |
 | `ImporterOutdated`, `InvalidImportOption`, `OrphanedOutput`, `UnknownProperty`(모르는 속성 이름), `UnsupportedSetting`(계약 설정의 기본값이 아닌 값 — MA2a 메시 빌드가 보존 설정에 처음 내며 `AssetDiagnosticCode`에 등록), `InvalidSetting`(모순된 조합·숨김 값·쓸 수 없는 값 — 같이 등록, 메시 `buildScale`의 0·비유한 성분, 스킨 빌드 임계값의 음수·비유한 값과 음수 `boneInfluenceLimit`), `SrgbIgnored`(경고 — 선형 설정·float 출력의 SRGB), `PreserveBorderWithWrap`(경고) | 임포트·설정 |
 | `CorruptEntry`(에셋 너겟 항목·게시 패키지 파일 손상), `IncompatibleCook`(부분 쿠킹 병합 불가·런타임 프로파일 불일치), `NeverCookReferenced` | 에셋 너겟·쿠킹 |
 | `AliasResolved`, `RootLost`(감시 루트 소실) | 그 밖 |
@@ -735,7 +735,7 @@ Result<AssetLease> LoadBlocking(const AssetRequest&);
 ```
 
 - LoadTicket = 요청 관심, AssetLease = 상주 수명(별도 계수). 동시 요청은 합류, caller별 취소는 독립, callback은 caller별 정확히 한 번 terminal. `OnReady` 중복 등록은 `AlreadyRegistered`, 등록 실패 시 callback 미등록·소유권 caller 유지(계획 §9.2).
-- `ReadyMask`: `Cpu` 구현, `Render` 계약(`UnsupportedCapability`).
+- `ReadyMask`: `Cpu` 구현, `Render` 계약(`UnsupportedCapability`). 오디오 재생 구간의 준비는 `ReadyMask`에 비트를 더하지 않고 오디오 모듈의 준비 티켓(`PreparePlayback`)이 맡는다([오디오 시스템](AudioSystem.ko.md) 3.12.4절, AD18 — 같은 clip의 seek 구간 둘을 따로 준비해야 해서다). `Cpu`(객체 공개)는 그 티켓의 전제다.
 - `TaskLane`: `Game` 구현, `Worker`·`Render` 계약(이번 엔진은 Game 스레드 하나라 전달 대상이 없다 — `Unsupported`).
 - `AssetScope`: Tryout·World 수명 범위. `Revoke()`는 그 scope의 신규 접근·발급을 막고 진행 중 callback에 `ScopeClosed`를 한 번 전달, lease를 회수한다(다른 scope의 같은 에셋 lease는 유지).
 - `LoadBlocking`: 도구·테스트·엔진 초기화 전용이다. AssetRuntime은 Engine을 모르므로 `EngineAssets`가 "프레임 실행 중" 판정 함수를 `AssetManager`에 주입하고, 그 구간에서 호출하면 `WrongContext`다(로딩 화면은 프레임 밖 초기화 단계 또는 `RequestAsset`을 쓴다).
