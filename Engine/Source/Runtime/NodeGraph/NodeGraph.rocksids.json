@@ -1,0 +1,460 @@
+{
+  "schema": 1,
+  "entries": [
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::Bookmark::number",
+      "id": "9324a5bf7c054b22b453f46b32486bd8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::Bookmark::viewCenter",
+      "id": "221e4395930745349cb02f3334a8c52a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::Bookmark::zoom",
+      "id": "516546ca632745f68b009f728ffa0d11",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::CommentBox::color",
+      "id": "aac0111ac668401694fb3954c5ef8ee7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::CommentBox::fontSize",
+      "id": "4302199170ca488581d4b15800ba99c8",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::CommentBox::id",
+      "id": "1ec8f0e5262e40f9a84f52692667bb01",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::CommentBox::position",
+      "id": "13d6506771e8474a970755f3b41ecc1e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::CommentBox::size",
+      "id": "5bc8639ba0814d709f7760c30beb904c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::CommentBox::text",
+      "id": "cbb8b761036540d990db73acfec04b85",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::Graph::domainRole",
+      "id": "20ff410ebab44318b5e2bcbb8dac8d37",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::Graph::edges",
+      "id": "d2c85a16d85e4e0ea82b9e0898e7596f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::Graph::id",
+      "id": "8c3587044a144391b8939dec9b67b98e",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::Graph::nodes",
+      "id": "c328cf5405784d37b412df964450f08c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::Graph::role",
+      "id": "f1f06a454abe426e869cfc761909d58a",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::GraphDocument::documentFormatVersion",
+      "id": "e435624500ca4e5ba90c42c904857aa3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::GraphDocument::domain",
+      "id": "7e1953568cc8493286f7816665d4859d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::GraphDocument::graphs",
+      "id": "9f9011e1fc7c4451abcb04f433bc81bd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::GraphDocument::mainGraph",
+      "id": "a4fbb39ddf1d47919716f7e32fa371f7",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::GraphDocumentLayout::graphs",
+      "id": "e807634873484a75a4a881c403b5833c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::GraphEdge::fromNode",
+      "id": "1aca01af71074ed1beffe789679a32fe",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::GraphEdge::fromPin",
+      "id": "a7ce7178e1264d61b166c72308762d45",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::GraphEdge::order",
+      "id": "477a8be3ed304d519aaa23021112760f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::GraphEdge::toNode",
+      "id": "afed8641b8ec415fa01e3e7241ec0bff",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::GraphEdge::toPin",
+      "id": "0e5dbee939f340b0b04f42c815ef88cb",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::GraphLayout::bookmarks",
+      "id": "0aadc1759bb64c2cbf6b4e8520d8548b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::GraphLayout::comments",
+      "id": "6f328ea79d08421a9d2504b900839269",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::GraphLayout::graph",
+      "id": "02531bbbf8554435965b4950ae7bd625",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::GraphLayout::nodes",
+      "id": "3d9382cf24d1448886cbc27a00e7799f",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::GraphLayout::title",
+      "id": "ba91d93b891a493784517d096af4003c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::GraphNode::enableState",
+      "id": "f1903ad21d224244828d32cc2060e4a1",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::GraphNode::id",
+      "id": "5e6438795064427eb1baa9805c7c42ca",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::GraphNode::inputDefaults",
+      "id": "800a480af1f94150bca6a6523d3e6ddc",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::GraphNode::properties",
+      "id": "940a04bbcf974e029e1553231a64d9db",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::GraphNode::retainedPins",
+      "id": "88691ffc0b7f4b5a9230eabb0e564aac",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::GraphNode::type",
+      "id": "3fa527ed7b794a93b4bf4f4c1fbae448",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::GraphNode::typeSchemaVersion",
+      "id": "559b0ff015d84dea96c0f0fee86f15c5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::NodeLayout::bubble",
+      "id": "307e55824bf742e6b510ffda43865edd",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::NodeLayout::bubbleVisible",
+      "id": "c0ad687a40c14d1daed21321d488f2f9",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::NodeLayout::collapsed",
+      "id": "a81e10f7c8d14dea870ef056faa29475",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::NodeLayout::node",
+      "id": "073c25a9eaf2497fb04cc7df9c67e812",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::NodeLayout::position",
+      "id": "9de48d5aa0f44bac9024d492246b3993",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::NodeLayout::showAdvanced",
+      "id": "925f0fc2e49442949fc3f58296cab049",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::NodeLayout::size",
+      "id": "4a0e05597d7f42d5b05eadf993a2cc18",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::PinValueEntry::pin",
+      "id": "76b2df2ae001405cbdf7d344178a5137",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::PinValueEntry::value",
+      "id": "538f212d29a44d46917e236596a819ec",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::PropertyRecord::bytes",
+      "id": "25151df4b9104190a9fb60dce554fb65",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::RetainedPin::direction",
+      "id": "85ff9c212b3d4f2fb7119280e018f10c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::RetainedPin::key",
+      "id": "6e3e749b06314afc8ec6d8f78e50bbf3",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::RetainedPin::lastType",
+      "id": "895bfedbfd7147bb81a474a9cd954173",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "field",
+      "name": "rocks::nodegraph::RetainedPin::value",
+      "id": "42fcb1e64c1c45e2b2901b7cbc8f996c",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::nodegraph::Bookmark",
+      "id": "5db31ba40ed44db693cbad215d61354b",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::nodegraph::CommentBox",
+      "id": "b5d24a61f2984bfa9e752da293896514",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::nodegraph::Graph",
+      "id": "7ac69fb4826b431484032c2ce4ea56da",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::nodegraph::GraphDocument",
+      "id": "2c5294187c9c47059eac37be8cdc1173",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::nodegraph::GraphDocumentLayout",
+      "id": "ca3841e22efd4660aa9af74c72992cab",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::nodegraph::GraphEdge",
+      "id": "91c8f8e800b149c5a3835f5b96b49ec0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::nodegraph::GraphLayout",
+      "id": "84ddce801d3b40c29e239c4c2f2fb2a5",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::nodegraph::GraphNode",
+      "id": "a6e31c9f0e7e4d4b912376d52aafd565",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::nodegraph::GraphRole",
+      "id": "86d04e58417f411e81b2b2e2af529896",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::nodegraph::NodeEnableState",
+      "id": "07bc014da7504bcbb107e4bf98126e5d",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::nodegraph::NodeLayout",
+      "id": "101ebe2c9a584197ac49b3bf193b1d01",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::nodegraph::PinDirection",
+      "id": "3238f1478a174bd28f98ddd7603519c0",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::nodegraph::PinValueEntry",
+      "id": "9a93ecb701184bb49905c1433fed78d6",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::nodegraph::PropertyRecord",
+      "id": "9d4be3d30fb44564ae3629cef1cfdcff",
+      "aliases": [],
+      "retired": false
+    },
+    {
+      "kind": "type",
+      "name": "rocks::nodegraph::RetainedPin",
+      "id": "982f0c748c1945a186af5a6368b2ab4a",
+      "aliases": [],
+      "retired": false
+    }
+  ]
+}

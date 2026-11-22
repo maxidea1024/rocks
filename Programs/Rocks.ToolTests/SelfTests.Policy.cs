@@ -169,6 +169,45 @@ internal static partial class SelfTests
             var actual = failures.Select(failure => (failure.Path, failure.Line)).ToHashSet();
             Verify.That(actual.SetEquals(expected), "process entry point lines: " + string.Join("; ", failures));
         });
+        suite.Add("Policy.NodeGraphBoundary", () =>
+        {
+            NoFailures(PolicyChecks.NodeGraphBoundary(options.Root));
+            using TemporaryDirectory temporary = new();
+            // 양성: 허용 밖 의존(Private 목록 포함), Object 층·도메인 헤더 include, 객체·lease 타입 사용.
+            temporary.Write("Engine/Source/Runtime/NodeGraph/NodeGraph.Build.cs", string.Join('\n',
+                "public sealed class NodeGraph : EngineModuleRules",
+                "{",
+                "    protected override string[] PublicDependencies => [\"ObjectRuntime\", \"MaterialSchema\"];",
+                "    protected override string[] PrivateDependencies => [\"UiFramework\"];",
+                "    // protected override string[] PublicDependencies => [\"World\"];",
+                "    protected override string[] DynamicModules =>",
+                "    [",
+                "        \"ObjectRuntime\",",
+                "        \"MaterialEditor\",",
+                "    ];",
+                "}") + "\n");
+            temporary.Write("Engine/Source/Runtime/NodeGraph/Private/Bad.cpp", string.Join('\n',
+                "#include <Object/InstancedStruct.h>", "#include <Material/MaterialGraph.h>", "TypeLease lease;",
+                "ObjectHandle handle;", "Result<void> Run(ObjectRegistry& registry) noexcept;") + "\n");
+            // 음성: 허용 접두, 주석·문자열 안, 시험 폴더, 따옴표 include, 다른 모듈.
+            temporary.Write("Engine/Source/Runtime/NodeGraph/Public/NodeGraph/Good.h", string.Join('\n',
+                "#include <Core/Result.h>", "#include <NodeGraph/GraphDocument.h>", "#include \"Local.h\"",
+                "// InstancedStruct를 쓰지 않는다 <Object/TypeLease.h>", "const char* text = \"ObjectHandle\";") + "\n");
+            temporary.Write("Engine/Source/Runtime/NodeGraph/Tests/Probe.cpp", "#include <Object/ObjectRegistry.h>\nObjectRegistry* registry;\n");
+            temporary.Write("Engine/Source/Runtime/Other/Private/Other.cpp", "#include <Object/InstancedStruct.h>\n");
+            var failures = PolicyChecks.NodeGraphBoundary(temporary.Root);
+            var expected = new HashSet<(string, int)>
+            {
+                ("Engine/Source/Runtime/NodeGraph/NodeGraph.Build.cs", 3), ("Engine/Source/Runtime/NodeGraph/NodeGraph.Build.cs", 4),
+                ("Engine/Source/Runtime/NodeGraph/NodeGraph.Build.cs", 9),
+                ("Engine/Source/Runtime/NodeGraph/Private/Bad.cpp", 1), ("Engine/Source/Runtime/NodeGraph/Private/Bad.cpp", 2),
+                ("Engine/Source/Runtime/NodeGraph/Private/Bad.cpp", 3), ("Engine/Source/Runtime/NodeGraph/Private/Bad.cpp", 4),
+                ("Engine/Source/Runtime/NodeGraph/Private/Bad.cpp", 5),
+            };
+            var actual = failures.Select(failure => (failure.Path, failure.Line)).ToHashSet();
+            Verify.That(actual.SetEquals(expected), "nodegraph boundary lines: " + string.Join("; ", failures));
+            Verify.Equal(9, failures.Count, "nodegraph boundary failure count (include line 1 also names InstancedStruct)");
+        });
         suite.Add("Policy.DeterministicMathObjectRules", () =>
         {
             // 외부 심볼: 코드 생성 지원 심볼(COFF·ELF·Mach-O 이름)은 허용, CRT 수학·다른 모듈 함수는 거부.
