@@ -1,8 +1,11 @@
 #include "ExchangeTestSupport.h"
 
+#include <Animation/SkeletonMerge.h>
+#include <Animation/Tests/AnimationTestSupport.h>
 #include <AssetRuntime/AssetDiagnostic.h>
 #include <MeshSource/MeshSource.h>
 #include <MeshSource/MeshSourceValidation.h>
+#include <MeshTools/SkinnedMeshBuilder.h>
 #include <MeshTools/StaticMeshBuilder.h>
 #include <TestSupport/Environment.h>
 #include <TestSupport/Test.h>
@@ -17,6 +20,9 @@
 // 범위 밖은 Unsupported, 실패한 저장 단위가 없다. 정적 메시는 LOD마다 source·prepared·baked
 // 기록(5.2절)을 MeshSource로 적재해 ValidateMeshSource를 통과하고 BuildStaticMeshLod(기본 빌드
 // 설정)가 성공해야 한다 (UnrealExchange.ko.md 5.4절 — UX3a 왕복 확인, 임포트 연결은 UX3b).
+// 스켈레톤은 MA4a Skeleton으로 채워 ValidateSkeleton을, 스킨 메시는 메시 계층 검증·스켈레톤 병합
+// 판정(MergeBoneHierarchy)과 LOD 기록의 MeshSource 적재· 검증(본 수)·BuildSkinnedMeshLod를 통과해야
+// 한다(6.3절 — UX7a).
 using namespace rocks;
 using namespace rocks::exchange_test;
 namespace exchange_external_bundle_tests_file {
@@ -48,14 +54,21 @@ const char* SeverityName(ExchangeSeverity severity) noexcept {
 // 교환 MeshSource 기록의 요소·값 타입 이름이다(번호 + 1 = MeshElement·MeshValueType 값, 5.4절).
 constexpr StringView MeshElementNames[] = {"Vertex",  "Corner",   "Edge",
                                            "Polygon", "Triangle", "PolygonGroup"};
-constexpr StringView MeshTypeNames[] = {"Float", "Vec2", "Vec3", "Vec4", "UInt32", "Bool", "Name"};
+constexpr StringView MeshTypeNames[] = {"Float", "Vec2", "Vec3",           "Vec4",      "UInt32",
+                                        "Bool",  "Name", "BoneInfluences", "SparseVec3"};
 // 값 타입별 성분 수다(MeshTypeNames와 같은 순서).
-constexpr usize MeshTypeComponents[] = {1, 2, 3, 4, 1, 1, 1};
+constexpr usize MeshTypeComponents[] = {1, 2, 3, 4, 1, 1, 1, 1, 1};
 // 위상 배열 수(MeshAnimationAssets 9.1절)와 변·삼각형의 원소당 번호 수다.
 constexpr usize MeshTopologyArrays = 7;
 constexpr usize EdgeWords = 2;
 constexpr usize TriangleWords = 3;
 constexpr usize WordBytes = sizeof(uint32);
+// 이동 리타깃 방식 이름(UE EBoneTranslationRetargetingMode 값 이름 = BoneTranslationRetarget
+// 순서)이다.
+constexpr StringView RetargetModeNames[] = {"Animation", "Skeleton", "AnimationScaled",
+                                            "AnimationRelative", "OrientAndScale"};
+// 시험이 만드는 스켈레톤 패키지 id의 시작 값이다.
+constexpr uint64 ExternalSkeletonFirstId = 0x7000;
 
 // printf의 %.*s 인자 길이다.
 int PrintLength(StringView text) noexcept {
@@ -123,6 +136,54 @@ usize NameIndex(Span<const StringView> names, StringView name) noexcept {
 bool FillAttribute(MeshSource& mesh, uint32 attribute, usize type, uint32 channels, uint32 count,
                    const Array<uint8>& bytes) noexcept {
     const MeshValueType valueType = static_cast<MeshValueType>(type + 1);
+    if (valueType == MeshValueType::BoneInfluences) {
+        // 시작 위치 uint32 × (N + 1) + (uint16 본, uint16 가중치) × 마지막 값.
+        const usize table = (static_cast<usize>(count) + 1) * WordBytes;
+        if (bytes.Size() < table) {
+            return false;
+        }
+
+        Array<BoneInfluence> influences(mesh.GetAllocator());
+        for (uint32 vertex = 0; vertex < count; ++vertex) {
+            const uint32 first = Word(bytes, vertex);
+            const uint32 last = Word(bytes, vertex + 1);
+            influences.Clear();
+            for (uint32 at = first; at < last; ++at) {
+                BoneInfluence influence;
+                memcpy(&influence, bytes.Data() + table + at * sizeof(BoneInfluence),
+                       sizeof(BoneInfluence));
+                if (!influences.TryPushBack(influence)) {
+                    return false;
+                }
+            }
+
+            if (!mesh.SetInfluences(attribute, vertex, influences.View())) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    if (valueType == MeshValueType::SparseVec3) {
+        // 개수 K + 번호 uint32 × K + Vec3 × K.
+        const uint32 entries = bytes.Size() >= WordBytes ? Word(bytes, 0) : 0;
+        const usize values = WordBytes * (1 + static_cast<usize>(entries));
+        if (bytes.Size() != values + entries * sizeof(Vec3)) {
+            return false;
+        }
+
+        for (uint32 entry = 0; entry < entries; ++entry) {
+            Vec3 value;
+            memcpy(&value, bytes.Data() + values + entry * sizeof(Vec3), sizeof(Vec3));
+            if (!mesh.SetSparseValue(attribute, Word(bytes, 1 + entry), value)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     if (valueType == MeshValueType::Name) {
         usize offset = 0;
         for (uint32 channel = 0; channel < channels; ++channel) {
@@ -339,6 +400,254 @@ usize CheckStaticMesh(const ExchangeBundle& bundle, uint32 asset, Allocator& all
     return checked;
 }
 
+// 실수 배열 JSON(교환 숫자 — 3.2절)을 읽는다.
+template <usize Count>
+bool ReadNumbers(JsonValue array, double (&out)[Count]) noexcept {
+    if (!array.IsArray() || array.Size() != Count) {
+        return false;
+    }
+
+    for (usize index = 0; index < Count; ++index) {
+        if (!ReadExchangeNumber(array.At(index), out[index])) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// 교환 본 배열(6.3절 1번)을 BoneHierarchy로 만든다. 회전은 저장 전 정규화 규칙(MA4a 3)을 적용한다.
+bool ReadBones(JsonValue bones, NamePool& names, BoneHierarchy& out) noexcept {
+    if (!bones.IsArray()) {
+        return false;
+    }
+
+    for (usize index = 0; index < bones.Size(); ++index) {
+        const JsonValue item = bones.At(index);
+        const JsonValue pose = item.Find("pose");
+        auto name = names.TryIntern(item.Find("name").GetString());
+        auto parent = item.Find("parent").TryGetInt64();
+        double translation[3] = {};
+        double rotation[4] = {};
+        double scale[3] = {};
+        if (!name || !parent || !ReadNumbers(pose.Find("translation"), translation) ||
+            !ReadNumbers(pose.Find("rotation"), rotation) ||
+            !ReadNumbers(pose.Find("scale"), scale)) {
+            return false;
+        }
+
+        BoneInfo bone(out.bones.GetAllocator());
+        bone.name = name.Value();
+        bone.parentIndex = static_cast<int32>(parent.Value());
+        const Transform transform(Quatd(rotation[0], rotation[1], rotation[2], rotation[3]),
+                                  Vec3d(translation[0], translation[1], translation[2]),
+                                  Vec3d(scale[0], scale[1], scale[2]));
+        if (!bone.exportName.TryAssign(item.Find("exportName").GetString()) ||
+            !out.bones.TryPushBack(Move(bone)) || !out.referencePose.TryPushBack(transform)) {
+            return false;
+        }
+    }
+
+    NormalizeBoneReferencePose(out);
+    return true;
+}
+
+// 교환 스켈레톤 data(6.3절 1·2번)로 Skeleton의 계층·리타깃 방식·커브를 채운다. 그 밖의 필드(가상
+// 본·소켓 등)는 settings 덤프에 있고 대응은 UX7b다.
+bool FillExchangeSkeleton(JsonValue data, NamePool& names, Skeleton& skeleton) noexcept {
+    const JsonValue bones = data.Find("bones");
+    if (!ReadBones(bones, names, skeleton.bones)) {
+        return false;
+    }
+
+    for (usize index = 0; index < bones.Size(); ++index) {
+        const usize mode = NameIndex(Span<const StringView>(RetargetModeNames),
+                                     bones.At(index).Find("retargetMode").GetString());
+        if (mode == sizeof(RetargetModeNames) / sizeof(RetargetModeNames[0]) ||
+            !skeleton.retargetModes.TryPushBack(static_cast<BoneTranslationRetarget>(mode))) {
+            return false;
+        }
+    }
+
+    const JsonValue curves = data.Find("curves");
+    for (usize index = 0; curves.IsArray() && index < curves.Size(); ++index) {
+        const JsonValue item = curves.At(index);
+        SkeletonCurveInfo curve(skeleton.bones.bones.GetAllocator());
+        auto name = names.TryIntern(item.Find("name").GetString());
+        auto maxLod = item.Find("maxLod").TryGetUInt64();
+        if (!name || !maxLod) {
+            return false;
+        }
+
+        curve.name = name.Value();
+        curve.isMaterial = item.Find("isMaterial").GetBool();
+        curve.isMorphTarget = item.Find("isMorphTarget").GetBool();
+        curve.maxLod = static_cast<uint8>(maxLod.Value());
+        const JsonValue linked = item.Find("linkedBones");
+        for (usize at = 0; at < linked.Size(); ++at) {
+            auto bone = names.TryIntern(linked.At(at).GetString());
+            if (!bone || !curve.linkedBones.TryPushBack(bone.Value())) {
+                return false;
+            }
+        }
+
+        if (!skeleton.curves.TryPushBack(Move(curve))) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// 묶음 안 스켈레톤 하나다(스킨 메시의 병합 대상).
+struct LoadedSkeleton {
+    StringView objectPath;
+    Skeleton* skeleton = nullptr;
+};
+
+// 스킨 메시 하나: 메시 계층 검증, 스켈레톤 병합 판정(MergeBoneHierarchy), LOD 기록(source·baked)의
+// 적재·검증 (본 수)·스킨 빌드(BuildSkinnedMeshLod). 확인한 기록 수다.
+usize CheckSkeletalMesh(const ExchangeBundle& bundle, uint32 asset,
+                        Span<const LoadedSkeleton> skeletons, asset_test::AssetEnv& env,
+                        ExchangeDiagnostics& diagnostics) {
+    const ExchangeAsset& entry = bundle.Assets()[asset];
+    BoneHierarchy meshBones(env.allocator);
+    SkeletonDiagnostic boneFailure;
+    const bool bonesOk =
+        ReadBones(entry.data.Find("bones"), env.names, meshBones) &&
+        static_cast<bool>(ValidateBoneHierarchy(meshBones, env.allocator, &boneFailure));
+    CHECK(bonesOk);
+    if (!bonesOk) {
+        printf("    mesh bones invalid: %s\n", SkeletonIssueName(boneFailure.issue));
+        return 0;
+    }
+
+    // 묶음 안 스켈레톤 의존(class Skeleton)과 병합 판정한다.
+    usize merges = 0;
+    for (const ExchangeDependency& dependency : entry.dependencies) {
+        for (const LoadedSkeleton& loaded : skeletons) {
+            if (dependency.target == ExchangeNoIndex ||
+                !(bundle.Assets()[dependency.target].objectPath == loaded.objectPath)) {
+                continue;
+            }
+
+            BoneMergeResult merged(env.allocator);
+            SkeletonDiagnostic failure;
+            const bool mergeOk = static_cast<bool>(
+                MergeBoneHierarchy(loaded.skeleton->bones, meshBones, merged, &failure));
+            printf("    merge into %.*s: %d (%zu bones -> %zu) %s\n",
+                   PrintLength(loaded.objectPath), loaded.objectPath.Data(), mergeOk,
+                   meshBones.bones.Size(), merged.bones.bones.Size(),
+                   mergeOk ? "" : SkeletonIssueName(failure.issue));
+            CHECK(mergeOk);
+            ++merges;
+        }
+    }
+
+    CHECK(merges == 1);
+    const JsonValue lods = entry.data.Find("lods");
+    constexpr StringView Kinds[] = {"source", "baked"};
+    usize checked = 0;
+    for (usize lod = 0; lods.IsArray() && lod < lods.Size(); ++lod) {
+        for (const StringView& kind : Kinds) {
+            const JsonValue record = lods.At(lod).Find(kind);
+            if (!record.IsObject()) {
+                continue;
+            }
+
+            MeshSource mesh(env.allocator);
+            const bool loaded =
+                LoadExchangeMesh(bundle, asset, record, env.allocator, mesh, diagnostics);
+            MeshValidateOptions options;
+            options.boneCount = static_cast<uint32>(meshBones.bones.Size());
+            MeshDiagnostic failure;
+            const bool valid =
+                loaded && static_cast<bool>(ValidateMeshSource(mesh, options, &failure));
+            SkinnedMeshBuildInput input;
+            input.source = &mesh;
+            input.bones = &meshBones;
+            SkinnedMeshBuildResult built(env.allocator);
+            const bool buildOk =
+                valid && static_cast<bool>(BuildSkinnedMeshLod(input, built, &failure));
+            printf(
+                "    LOD %zu %.*s: loaded %d, valid %d, built %d (%u vertices, %u triangles -> %u "
+                "render vertices, %u influences/vertex, %zu bone map, %zu morph targets, %zu "
+                "warnings) "
+                "%s\n",
+                lod, PrintLength(kind), kind.Data(), loaded, valid, buildOk,
+                mesh.Count(MeshElement::Vertex), mesh.Count(MeshElement::Triangle),
+                built.mesh.VertexCount(), built.influencesPerVertex, built.boneMap.Size(),
+                built.morphTargets.Size(), built.mesh.warnings.Size(),
+                buildOk ? "" : MeshIssueName(failure.issue));
+            CHECK(loaded && valid && buildOk);
+            ++checked;
+        }
+    }
+
+    return checked;
+}
+
+// 스켈레톤·스킨 메시를 확인한다(6.3절 7번). 둘 다 없으면 아무것도 하지 않는다. 확인한 기록 수다.
+usize CheckSkeletalAssets(const ExchangeBundle& bundle, ExchangeDiagnostics& diagnostics) {
+    bool any = false;
+    for (const ExchangeAsset& asset : bundle.Assets()) {
+        any = any || (asset.state == ExchangeAssetState::Ready &&
+                      (asset.exchangeClass == ExchangeClass::Skeleton ||
+                       asset.exchangeClass == ExchangeClass::SkeletalMesh));
+    }
+
+    if (!any) {
+        return 0;
+    }
+
+    asset_test::AssetEnv env;
+    if (!env.Ready() || !RegisterAnimationTypes(env.modules)) {
+        CHECK(false);
+        return 0;
+    }
+
+    Array<LoadedSkeleton> skeletons(env.allocator);
+    uint64 nextId = ExternalSkeletonFirstId;
+    for (usize index = 0; index < bundle.Assets().Size(); ++index) {
+        const ExchangeAsset& asset = bundle.Assets()[index];
+        if (asset.state != ExchangeAssetState::Ready ||
+            asset.exchangeClass != ExchangeClass::Skeleton) {
+            continue;
+        }
+
+        Skeleton* skeleton =
+            asset_test::Pointer<Skeleton>(*env.source, animation_test::MakeSkeleton(env, nextId++));
+        SkeletonDiagnostic failure;
+        const bool filled =
+            skeleton != nullptr && FillExchangeSkeleton(asset.data, env.names, *skeleton);
+        const bool valid = filled && static_cast<bool>(ValidateSkeleton(*skeleton, env.names,
+                                                                        env.allocator, &failure));
+        printf("  skeleton [%zu] %.*s: filled %d, valid %d (%zu bones, %zu curves) %s\n", index,
+               PrintLength(asset.objectPath), asset.objectPath.Data(), filled, valid,
+               filled ? skeleton->bones.bones.Size() : 0, filled ? skeleton->curves.Size() : 0,
+               valid ? "" : SkeletonIssueName(failure.issue));
+        CHECK(valid);
+        if (valid && !skeletons.TryPushBack(LoadedSkeleton{asset.objectPath, skeleton})) {
+            CHECK(false);
+            return 0;
+        }
+    }
+
+    usize checked = 0;
+    for (usize index = 0; index < bundle.Assets().Size(); ++index) {
+        const ExchangeAsset& asset = bundle.Assets()[index];
+        if (asset.state == ExchangeAssetState::Ready &&
+            asset.exchangeClass == ExchangeClass::SkeletalMesh) {
+            printf("  skinned mesh [%zu] %.*s\n", index, PrintLength(asset.objectPath),
+                   asset.objectPath.Data());
+            checked += CheckSkeletalMesh(bundle, static_cast<uint32>(index), skeletons.View(), env,
+                                         diagnostics);
+        }
+    }
+
+    return checked;
+}
+
 TEST(UnrealExchange_ExternalBundle) {
     SystemAllocator allocator;
     StringBuilder<512> directory(allocator);
@@ -405,6 +714,7 @@ TEST(UnrealExchange_ExternalBundle) {
     }
 
     printf("Mesh records: %zu checked\n", meshRecords);
+    printf("Skinned mesh records: %zu checked\n", CheckSkeletalAssets(bundle, diagnostics));
 }
 
 } // namespace exchange_external_bundle_tests_file

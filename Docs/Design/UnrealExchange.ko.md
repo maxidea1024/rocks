@@ -1,6 +1,6 @@
 # Unreal 교환 형식과 추출 플러그인 설계
 
-기준일: 2026-11-22, 개정 11(UX3a 정적 메시 추출 — 5.4절). 개정 10(UX2·UX3을 추출 UX2a·UX3a와 임포트 UX2b·UX3b로 나눔, UX2a 텍스처 추출 — 4.5절). 개정 9(UX1b UE 플러그인 골격 구현 — 11.7절). 개정 8(UX1b를 UE 플러그인 골격 UX1b와 Rocks 임포트 연결 UX1c로 나눔). 개정 7(UX1a coverage 100% — 10.4절 끝 시험과 coverage 문단). 개정 6(UX1a 리더·경로 대응·임포트 순서 구현 — 10.4절, 3.4·3.5절 정렬·의존 `class`). 개정 5(UX1을 UX1a·UX1b로 나눔). 개정 4(UXR5 경계 정책 검사 구현 — 11.1절). 개정 3(13절 요구를 다른 문서에 반영하고 상태 열을 더함, 태그 키 이름). 개정 2(교차 검증 반영 — 18절). UE 에디터에서 텍스처·정적 메시·스켈레톤·스킨 메시·애니메이션 클립·머티리얼을 꺼내 Rocks 에셋으로 가져오는 경로를 정한다. 경로는 세 부분이다. UE 쪽 추출 플러그인 `RocksExport`, 둘 사이의 교환 형식 **Unreal 교환 묶음**, Rocks 쪽 임포터 플러그인 `UnrealExchange`다.
+기준일: 2026-11-22, 개정 12(UX7을 UX7a·UX7b로 나눔, UX7a 스켈레톤·스킨 메시 추출 — 6.3절). 개정 11(UX3a 정적 메시 추출 — 5.4절). 개정 10(UX2·UX3을 추출 UX2a·UX3a와 임포트 UX2b·UX3b로 나눔, UX2a 텍스처 추출 — 4.5절). 개정 9(UX1b UE 플러그인 골격 구현 — 11.7절). 개정 8(UX1b를 UE 플러그인 골격 UX1b와 Rocks 임포트 연결 UX1c로 나눔). 개정 7(UX1a coverage 100% — 10.4절 끝 시험과 coverage 문단). 개정 6(UX1a 리더·경로 대응·임포트 순서 구현 — 10.4절, 3.4·3.5절 정렬·의존 `class`). 개정 5(UX1을 UX1a·UX1b로 나눔). 개정 4(UXR5 경계 정책 검사 구현 — 11.1절). 개정 3(13절 요구를 다른 문서에 반영하고 상태 열을 더함, 태그 키 이름). 개정 2(교차 검증 반영 — 18절). UE 에디터에서 텍스처·정적 메시·스켈레톤·스킨 메시·애니메이션 클립·머티리얼을 꺼내 Rocks 에셋으로 가져오는 경로를 정한다. 경로는 세 부분이다. UE 쪽 추출 플러그인 `RocksExport`, 둘 사이의 교환 형식 **Unreal 교환 묶음**, Rocks 쪽 임포터 플러그인 `UnrealExchange`다.
 
 - 배경: 사용자 지시(2026-11-19). 엔진 시험을 위해 UE에서 쓰던 콘텐츠를 Rocks로 가져온다. `.uasset`을 직접 해석하는 방식은 어려움이 많으므로 UE 플러그인이 Rocks가 읽을 수 있는 형태로 추출한다.
 - 받는 쪽 자료구조: 텍스처는 [에셋 시스템](AssetSystem.ko.md) 12절, 머티리얼은 [머티리얼 시스템](MaterialSystem.ko.md) 4절, 메시·스켈레톤·애니메이션은 [메시·스켈레톤·애니메이션 에셋](MeshAnimationAssets.ko.md)이 정한다. 이 문서는 추출과 대응만 다룬다.
@@ -226,6 +226,19 @@ UX3a(UE 쪽 정적 메시 추출, `FRocksStaticMeshExtractor`·`FRocksMeshDescri
 - 메시 자체 계층(`GetRefSkeleton()` raw), 스켈레톤 참조, `FSkeletalMeshLODInfo`·`FSkeletalMeshBuildSettings`·`FSkeletalMaterial`·메시 소켓·`SkinWeightProfiles`.
 - **UE 준비 원본 없음.** 스킨 메시 빌더의 공개 API는 `Build(FSkeletalMeshRenderData&, …)` 하나이고(SkeletalMeshBuilder.h:40), 법선·tangent는 MeshDescription이 아니라 `FSkeletalMeshLODModel`에 계산된다(SkeletalMeshBuilder.cpp:295, 586). 그래서 정적 메시식 사본을 만들 수 없다. 스킨 메시는 `rocks` 모드(순수 원본 + UE 빌드 설정)만 지원한다.
 - **자동 생성 LOD**(`GetMeshDescription`이 nullptr — SkeletalMesh.h:533-538): `GetImportedModel()`(E/Classes/Engine/SkinnedAsset.h:299)의 `LODModels[i].Sections[s].SoftVertices`에서 정점·영향(`FSoftSkinVertex::InfluenceBones`·`InfluenceWeights`, uint16 × 12 — SkeletalMeshTypes.h:57-73)을 읽어 `baked`로 쓴다. 본 번호는 섹션 지역 번호라 `Section.BoneMap`으로 메시 본 번호로 바꾼다(SkeletalMeshLODModel.h:61, 75). morph는 `UMorphTarget::GetMorphLODModels()[i]`의 `FMorphTargetDelta`(MorphTarget.h:19-25, 239)에서 읽는다. 정점 색은 8비트라 손실이 있다(`BakedColorQuantized` 정보 진단).
+
+### 6.3 구현에서 정한 점(UX7a)
+
+UX7a(UE 쪽 스켈레톤·스킨 메시 추출, `FRocksSkeletonExtractor`·`FRocksSkeletalMeshExtractor`, `FRocksMeshDescriptionWriter` 확장) 중 6절이 정하지 않았거나 다르게 정한 점이다. 모두 권장안으로 확정했다.
+
+1. **본 배열.** 스켈레톤과 스킨 메시의 `data.bones`는 원본 계층(raw — 가상 본 제외)의 본마다 `{ "name", "exportName", "parent", "pose": { "translation": [x, y, z], "rotation": [x, y, z, w], "scale": [x, y, z] } }`다(pose는 UE `FTransform` double — 11.4절 `%.17g`). 스켈레톤만 본마다 `retargetMode`(UE `EBoneTranslationRetargetingMode` 값 이름 `Animation`·`Skeleton`·`AnimationScaled`·`AnimationRelative`·`OrientAndScale` — Rocks `BoneTranslationRetarget`와 같은 이름·순서)를 더한다. 회전은 UE 값 그대로이며 정규화는 Rocks 쪽(MeshAnimationAssets 6.4절 3 — 저장 전 정규화)이 한다.
+2. **스켈레톤 `data`·`settings`.** `data`는 `{ "bones", "curves" }`이고 `curves`는 `ForEachCurveMetaData`의 커브마다 `{ "name", "isMaterial", "isMorphTarget", "linkedBones": [본 이름], "maxLod" }`(이름 UTF-8 byte 순)다. 가상 본·소켓·슬롯 묶음·리타깃 원본·호환 스켈레톤·blend profile은 `settings`(USkeleton UPROPERTY 덤프 — `VirtualBones`·`Sockets`(하위 객체 펼침)·`SlotGroups`·`AnimRetargetSources`·`CompatibleSkeletons`·`BlendProfiles` 등)에 이름 그대로 있다. 같은 값을 `data`에 다시 쓰지 않는다(Rocks 대응은 UX7b).
+3. **스킨 메시 `data`·`settings`.** `data`는 `{ "bones", "lods" }`이고 LOD 항목은 `hasSource`(`HasMeshDescription`)·`source`(메시 설명 사본의 MeshSource 기록)·`generated`(= 원본 없음)·`baked`다. 스킨 메시에는 UE 준비 원본이 없으므로(6.2절) `prepared` 키를 두지 않는다. `settings`는 USkeletalMesh UPROPERTY 덤프(LOD 정보·빌드 설정·머티리얼 슬롯·스켈레톤·물리 에셋 참조·morph target 객체·가중치 프로필 등)다. **덤프는 LOD를 읽은 뒤에 한다.** UE는 메시 설명을 처음 읽을 때 `SourceModels`의 캐시(삼각형·정점 수, bounds, 가중치 프로필·morph 이름)를 채우므로, 먼저 덤프하면 같은 에셋을 이미 읽었는지(에디터 세션)에 따라 bytes가 달라진다.
+4. **스킨 속성(MeshSource 기록, 5.4절 2·3번에 더함).** 정점 `SkinWeights`·`SkinWeights-<profile>`(UE 이름과 같다)은 `BoneInfluences`(`boneInfluences` 배치 — 시작 표 + (본, 가중치) 쌍)이고 본 번호는 UE 원본 계층 번호, 가중치는 UE 16비트 값(`GetRawWeight`, 합 65535) 그대로, 순서는 UE 저장 순서다. 정점 `Morph-<이름>`(위치 변화량)은 그대로, UE 코너 쪽 `Morph-<이름>`(법선 변화량)은 코너 `MorphNormal-<이름>`(6.2절)이며 둘 다 `SparseVec3`(`sparseVec3` 배치 — 비트 단위 +0.0 셋인 항목은 빼고 번호 오름차순)다. 값 타입 `BoneInfluences`·`SparseVec3`를 기록 `type`에 더했다. UE 메시 설명의 본 요소·원본 부분(source geometry part)은 기록에 넣지 않는다(본은 `data.bones`).
+5. **`baked`(생성 LOD).** `GetImportedModel()->LODModels[i]`(6.2절)의 섹션 `SoftVertices`를 정점 = 코너로, `IndexBuffer`를 섹션별 삼각형으로 옮긴다(정적 메시 5.4절 5번과 같은 변환 — 공용 `FRocksBakedMesh`). 영향은 섹션 `BoneMap`으로 메시 본 번호로 바꾸고 가중치 0 칸은 버린다. morph는 각 `UMorphTarget::GetMorphLODModels()[i]`의 `SourceIdx`(렌더 정점 = baked 정점)·`PositionDelta`·`TangentZDelta`를 `Morph-`·`MorphNormal-`로 쓴다(morph 이름 순). 색은 8비트라 info `BakedColorQuantized`다(6.2절).
+6. **자기 시험.** `RocksExport.SkeletalExtraction`(commandlet `-SelfTest`에도 포함)이 엔진 튜토리얼 스킨 메시·스켈레톤을 내보내 본 수·이름·부모·`retargetMode` 존재, LOD 수, LOD 0 스킨 가중치 영향 수(시작 표 마지막 값)를 원본과 대조하고, 추출 전후 덤프가 같은지 본다(원본 메시 설명을 먼저 읽어 둔 상태 — 3번).
+7. **Rocks 쪽 왕복 확인.** 선택 시험 `UnrealExchange_ExternalBundle`이 스켈레톤을 MA4a `Skeleton`(본·리타깃 방식·커브)으로 채워 `ValidateSkeleton`을, 스킨 메시는 본 계층 `ValidateBoneHierarchy`, 묶음 안 스켈레톤 의존과의 `MergeBoneHierarchy` 판정, LOD 기록(source·baked)의 MeshSource 적재·`ValidateMeshSource`(본 수)·MA5a `BuildSkinnedMeshLod`를 확인한다.
+8. **수동 검증(2026-11-22).** 엔진 `SkeletalCube`·튜토리얼 `TutorialTPP`(본 68개)와 시험 프로젝트 콘텐츠 — 손으로 만든 glTF(관절 둘의 기둥, 섞인 가중치, morph target `Bulge`, 애니메이션)를 Interchange로 임포트한 스킨 메시·스켈레톤, 튜토리얼 메시 사본에 `regenerate_lod`로 만든 생성 LOD 둘 — 을 내보낸 묶음(에셋 14개, 물리 에셋은 범위 밖 Unsupported)을 두 번 내보내 `createdUtc` 말고 bytes가 같고, 리더가 스켈레톤 3개 검증, 스킨 메시 4개 병합 판정, LOD 기록 6개(원본 4·baked 2, morph 1개 포함) 적재·검증·스킨 빌드를 모두 통과했다.
 
 ## 7. 애니메이션 클립
 
@@ -511,7 +524,7 @@ UX1b 구현(`Extras/UnrealExport/RocksExport/` — 플러그인 골격·commandl
 
 ## 14. 단계
 
-ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으며 착수는 사용자가 정한다. 사용자 지시(2026-11-21 "진행 가능한거부터")에 따라 UX1의 Rocks 리더 부분을 UX1a로 떼어 먼저 한다. UE 플러그인은 소스 빌드 없이 Launcher 설치판을 C:에 받아 빌드한다(사용자 결정 2026-11-20). 사용자가 UE 5.8.4 설치판을 받았으므로(2026-11-22) UX1의 UE 쪽을 UX1b로, Rocks 임포트 연결을 UX1c로 나눈다. UX2 이후 단계도 UE 추출 쪽은 Rocks 리더 왕복으로 검증해 Rocks 임포트(에셋 시스템 A2f–A5·MA b 단계)보다 먼저 할 수 있다. 그래서 텍스처·정적 메시는 추출(UX2a·UX3a, UE)과 임포트(UX2b·UX3b, Rocks)로 나눈다(개정 10, 사용자 지시 "진행 가능한거부터").
+ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으며 착수는 사용자가 정한다. 사용자 지시(2026-11-21 "진행 가능한거부터")에 따라 UX1의 Rocks 리더 부분을 UX1a로 떼어 먼저 한다. UE 플러그인은 소스 빌드 없이 Launcher 설치판을 C:에 받아 빌드한다(사용자 결정 2026-11-20). 사용자가 UE 5.8.4 설치판을 받았으므로(2026-11-22) UX1의 UE 쪽을 UX1b로, Rocks 임포트 연결을 UX1c로 나눈다. UX2 이후 단계도 UE 추출 쪽은 Rocks 리더 왕복으로 검증해 Rocks 임포트(에셋 시스템 A2f–A5·MA b 단계)보다 먼저 할 수 있다. 그래서 텍스처·정적 메시는 추출(UX2a·UX3a, UE)과 임포트(UX2b·UX3b, Rocks)로 나눈다(개정 10, 사용자 지시 "진행 가능한거부터"). 스켈레톤·스킨 메시도 같이 UX7a·UX7b로 나눈다(개정 12).
 
 | 단계 | 쪽 | 내용 | 선행 |
 |---|---|---|---|
@@ -525,8 +538,9 @@ ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으�
 | UX4 | 둘 다 | 머티리얼·인스턴스·함수·컬렉션 추출, 옛 출력 핀 그래프 번역 표 1차, 파라미터 병합, 대체 규칙 3번 | UX2b, MaterialSystem MS3·MS6 |
 | UX5 | 둘 다 | Substrate 그래프 번역(8.3절) | UX4 |
 | UX6 | 둘 다 | 굽기 대체(8.4절)와 "구운 표면" 내장 머티리얼, 대체 규칙 2번 | UX4 |
-| UX7 | 둘 다 | 스켈레톤·스킨 메시(6절, 생성 LOD 복원 포함) | UX3b, MA4b–MA5 |
-| UX8 | 둘 다 | 애니메이션 클립(7절) | UX7, MA6 |
+| UX7a | UE | 스켈레톤·스킨 메시 추출(6절 — 본 계층·커브, 스킨 가중치·morph, 생성 LOD 복원). Rocks 리더 왕복과 MA4a 스켈레톤 검증·병합 판정, MA5a 스킨 빌드로 확인한다. **구현**(2026-11-22, 6.3절) | UX3a |
+| UX7b | Rocks | 스켈레톤·스킨 메시 임포트(본 병합 저장, 슬롯·소켓·가중치 프로필 대응) | UX7a, UX3b, MA4b–MA5 |
+| UX8 | 둘 다 | 애니메이션 클립(7절) | UX7a(추출), UX7b·MA6(임포트) |
 
 ## 15. 결정 사항
 
@@ -565,6 +579,7 @@ ID는 이 문서가 부여한다(UX). 고정 구현 순서를 바꾸지 않으�
 - 개정 9(2026-11-22): UX1b를 구현했다(`Extras/UnrealExport/RocksExport/` — Editor 모듈, commandlet `-run=RocksExport`, 메뉴, 묶음 writer, SHA-256, 숫자 서식, UPROPERTY 덤프, 닫힘·redirector, 에셋 JSON 공통부, 자기 시험). 구현에서 정한 점을 11.7절에 적었다: UX1b 의존 목록은 AssetRegistry 패키지 의존(3.5절에 더함), 범위 밖 선택·클래스 대응, 에셋 여럿인 패키지는 내보내지 않음(형식 v1 한계), 원자적 쓰기, 덤프 세부, 플러그인 진단 코드, `engineCommit`은 changelist. 모듈 의존은 쓰는 단계에서 더한다(11.1절). 엔진 콘텐츠(`/Engine/BasicShapes/...`)와 redirector가 있는 시험 콘텐츠를 내보내 Rocks 리더(EngineTests 선택 시험 `UnrealExchange_ExternalBundle`)로 읽었다.
 - 개정 10(2026-11-22): UX2·UX3을 UE 쪽 추출(UX2a·UX3a, 선행 UX1b)과 Rocks 쪽 임포트(UX2b·UX3b)로 나눴다(사용자 지시 "진행 가능한거부터"). UX4·UX7 선행을 임포트 단계로 고쳤다. UX2a(텍스처 추출)를 구현하고 정한 점을 4.5절에 적었다: `data.source` 스키마, mip·층별 blob 배치, `settings` 덤프에서 `Source` 제외, 손실 원본은 표시만, 본문 조각 조립.
 - 개정 11(2026-11-22): UX3a(정적 메시 추출)를 구현하고 정한 점을 5.4절에 적었다: `data.lods`·`collision` 스키마(LOD 설정은 `settings.SourceModels`), MeshSource 기록 형식(위상 blob 7개·속성 배치·요소·타입 이름), UE 속성 대응·보존 규칙(UE 위치 이름 `"Position "`), `prepared` 사본 처리, 생성 LOD `baked` 변환, BodySetup 덤프, 진단, 자기 시험과 Rocks 쪽 MeshSource 적재·검증·빌드 확인.
+- 개정 12(2026-11-22): UX7을 UE 쪽 추출 UX7a(선행 UX3a)와 Rocks 쪽 임포트 UX7b로 나눴다. UX7a(스켈레톤·스킨 메시 추출)를 구현하고 정한 점을 6.3절에 적었다: 본 배열·리타깃 방식·커브 스키마, 스킨 메시 `data`(준비 원본 없음), settings 덤프를 LOD를 읽은 뒤에 하는 이유(UE 캐시), MeshSource 기록의 `BoneInfluences`·`SparseVec3` 속성, LOD 모델 기반 `baked`, 자기 시험과 Rocks 쪽 스켈레톤 검증·병합 판정·스킨 빌드 확인.
 
 ## 18. 교차 검증 기록(개정 2)
 

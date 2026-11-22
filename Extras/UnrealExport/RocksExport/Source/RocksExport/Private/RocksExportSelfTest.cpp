@@ -1,9 +1,12 @@
 #include "RocksExportSelfTest.h"
 
 #include "AssetRegistry/IAssetRegistry.h"
+#include "Animation/Skeleton.h"
+#include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/Texture.h"
 #include "MeshDescription.h"
+#include "SkeletalMeshAttributes.h"
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
@@ -746,6 +749,128 @@ void RocksExportSelfTest::RunStaticMeshExtraction(TArray<FString>& Errors)
 	IFileManager::Get().DeleteDirectory(*Root, false, true);
 }
 
+void RocksExportSelfTest::RunSkeletalExtraction(TArray<FString>& Errors)
+{
+	using namespace RocksExportSelfTestPrivate;
+
+	static const TCHAR* const MeshPath = TEXT("/Engine/Tutorial/SubEditors/TutorialAssets/Character/TutorialTPP.TutorialTPP");
+	static const TCHAR* const SkeletonPath = TEXT("/Engine/Tutorial/SubEditors/TutorialAssets/Character/TutorialTPP_Skeleton.TutorialTPP_Skeleton");
+
+	const auto Dump = [](UObject& Object)
+	{
+		FRocksPropertyDumper Dumper(&Object);
+		FRocksJsonWriter Writer(FRocksJsonWriter::EStyle::Compact);
+		Dumper.DumpObject(&Object, Writer);
+		return Utf8ToString(Writer.Finish());
+	};
+
+	IAssetRegistry::GetChecked().SearchAllAssets(true);
+	USkeletalMesh* Mesh = LoadObject<USkeletalMesh>(nullptr, MeshPath);
+	USkeleton* Skeleton = LoadObject<USkeleton>(nullptr, SkeletonPath);
+	Expect(Errors, Mesh != nullptr && Skeleton != nullptr, TEXT("cannot load the tutorial skeletal mesh"));
+	if (Mesh == nullptr || Skeleton == nullptr)
+	{
+		return;
+	}
+
+	// UE는 메시 설명을 처음 읽을 때 SourceModels 캐시를 채운다(설정 변경이 아니다). 먼저 읽어 둔 상태에서 비교한다.
+	for (int32 Lod = 0; Lod < Mesh->GetLODNum(); ++Lod)
+	{
+		FMeshDescription Warm;
+		Mesh->CloneMeshDescription(Lod, Warm);
+	}
+
+	const FString MeshBefore = Dump(*Mesh);
+	const FString SkeletonBefore = Dump(*Skeleton);
+	const FString Root = SelfTestDirectory() / TEXT("Skeletal");
+	IFileManager::Get().DeleteDirectory(*Root, false, true);
+	const FString Output = Root / TEXT("Skeletal.rxbundle");
+	FRocksExportOptions Options;
+	Options.OutputDirectory = Output;
+	Options.bClosure = false;
+	Options.Selections = {MeshPath, SkeletonPath};
+	FRocksExportResult Result;
+	Expect(Errors, FRocksExporter::Export(Options, Result), FString::Printf(TEXT("skeletal export: %s"), *Result.Error));
+	const auto Difference = [](const FString& Before, const FString& After)
+	{
+		int32 At = 0;
+		while (At < Before.Len() && At < After.Len() && Before[At] == After[At])
+		{
+			++At;
+		}
+
+		return FString::Printf(TEXT("at %d: before '%s' after '%s'"), At, *Before.Mid(FMath::Max(0, At - 120), 240), *After.Mid(FMath::Max(0, At - 120), 240));
+	};
+
+	const FString MeshAfter = Dump(*Mesh);
+	const FString SkeletonAfter = Dump(*Skeleton);
+	Expect(Errors, MeshAfter == MeshBefore, FString::Printf(TEXT("skeletal mesh extraction changed the asset %s"), *Difference(MeshBefore, MeshAfter)));
+	Expect(Errors, SkeletonAfter == SkeletonBefore, FString::Printf(TEXT("skeleton extraction changed the asset %s"), *Difference(SkeletonBefore, SkeletonAfter)));
+
+	TArray<uint8> Json;
+	const TSharedPtr<FJsonObject> SkeletonJson = LoadBytes(Output / FRocksBundleWriter::AssetFileForPackage(FSoftObjectPath(SkeletonPath).GetLongPackageName()), Json) ? ParseJson(Json) : nullptr;
+	const TSharedPtr<FJsonObject> MeshJson = LoadBytes(Output / FRocksBundleWriter::AssetFileForPackage(FSoftObjectPath(MeshPath).GetLongPackageName()), Json) ? ParseJson(Json) : nullptr;
+	Expect(Errors, SkeletonJson.IsValid() && MeshJson.IsValid(), TEXT("skeletal JSON missing"));
+	if (!SkeletonJson.IsValid() || !MeshJson.IsValid())
+	{
+		return;
+	}
+
+	// 본 계층: 수·이름·부모가 원본 계층(raw)과 같고 스켈레톤 본에는 리타깃 방식이 있다.
+	const FReferenceSkeleton& SkeletonBones = Skeleton->GetReferenceSkeleton();
+	const TArray<TSharedPtr<FJsonValue>>& Bones = SkeletonJson->GetObjectField(TEXT("data"))->GetArrayField(TEXT("bones"));
+	bool bBonesMatch = Bones.Num() == SkeletonBones.GetRawBoneNum();
+	for (int32 Bone = 0; bBonesMatch && Bone < Bones.Num(); ++Bone)
+	{
+		const TSharedPtr<FJsonObject> Info = Bones[Bone]->AsObject();
+		bBonesMatch = Info->GetStringField(TEXT("name")) == SkeletonBones.GetRawRefBoneInfo()[Bone].Name.ToString()
+			&& int32(Info->GetNumberField(TEXT("parent"))) == SkeletonBones.GetRawRefBoneInfo()[Bone].ParentIndex && Info->HasField(TEXT("retargetMode"));
+	}
+
+	Expect(Errors, bBonesMatch, TEXT("skeleton bones differ from the reference skeleton"));
+	const TSharedPtr<FJsonObject> MeshData = MeshJson->GetObjectField(TEXT("data"));
+	Expect(Errors, MeshData->GetArrayField(TEXT("bones")).Num() == Mesh->GetRefSkeleton().GetRawBoneNum()
+		&& MeshData->GetArrayField(TEXT("lods")).Num() == Mesh->GetLODNum(), TEXT("mesh bones or LOD count"));
+
+	// LOD 0 원본의 스킨 가중치: 영향 수 합이 메시 설명과 같다(BoneInfluences 시작 표 마지막 값).
+	FMeshDescription Source;
+	const bool bSource = Mesh->CloneMeshDescription(0, Source);
+	int64 Expected = 0;
+	if (bSource)
+	{
+		const FSkeletalMeshAttributesShared Attributes(Source);
+		const FSkinWeightsVertexAttributesConstRef Weights = Attributes.GetVertexSkinWeights();
+		for (const FVertexID Vertex : Source.Vertices().GetElementIDs())
+		{
+			Expected += Weights.Get(Vertex).Num();
+		}
+	}
+
+	int64 Written = -1;
+	const TSharedPtr<FJsonObject> Lod0 = MeshData->GetArrayField(TEXT("lods"))[0]->AsObject()->GetObjectField(TEXT("source"));
+	for (const TSharedPtr<FJsonValue>& Item : Lod0->GetArrayField(TEXT("attributes")))
+	{
+		const TSharedPtr<FJsonObject> Attribute = Item->AsObject();
+		if (Attribute->GetStringField(TEXT("name")) != TEXT("SkinWeights") || Attribute->GetStringField(TEXT("type")) != TEXT("BoneInfluences"))
+		{
+			continue;
+		}
+
+		TArray<uint8> Blob;
+		const TSharedPtr<FJsonObject> Ref = Attribute->GetObjectField(TEXT("data"));
+		const int64 Count = int64(Ref->GetNumberField(TEXT("count")));
+		if (LoadBytes(Output / FRocksBundleWriter::BlobFileForHex(Ref->GetStringField(TEXT("blob"))), Blob) && Blob.Num() >= (Count + 1) * 4)
+		{
+			uint32 Last = 0;
+			FMemory::Memcpy(&Last, Blob.GetData() + Count * 4, sizeof(Last));
+			Written = Last;
+		}
+	}
+
+	Expect(Errors, bSource && Written == Expected, FString::Printf(TEXT("skin weight influences %lld, expected %lld"), Written, Expected));
+	IFileManager::Get().DeleteDirectory(*Root, false, true);
+}
+
 bool RocksExportSelfTest::RunAll(TArray<FString>& Errors)
 {
 	RunSha256(Errors);
@@ -756,5 +881,6 @@ bool RocksExportSelfTest::RunAll(TArray<FString>& Errors)
 	RunExportDeterminism(Errors);
 	RunTextureExtraction(Errors);
 	RunStaticMeshExtraction(Errors);
+	RunSkeletalExtraction(Errors);
 	return Errors.IsEmpty();
 }

@@ -7,6 +7,9 @@
 #include "RocksExportCommon.h"
 #include "RocksJsonWriter.h"
 #include "RocksSha256.h"
+#include "Animation/MorphTarget.h"
+#include "Rendering/SkeletalMeshLODModel.h"
+#include "SkeletalMeshAttributes.h"
 #include "StaticMeshAttributes.h"
 #include "StaticMeshResources.h"
 
@@ -91,6 +94,10 @@ namespace RocksMeshDescriptionWriterPrivate
 			return TEXT("UInt32");
 		case ERocksMeshValueType::Bool:
 			return TEXT("Bool");
+		case ERocksMeshValueType::BoneInfluences:
+			return TEXT("BoneInfluences");
+		case ERocksMeshValueType::SparseVec3:
+			return TEXT("SparseVec3");
 		default:
 			return TEXT("Name");
 		}
@@ -124,6 +131,14 @@ namespace RocksMeshDescriptionWriterPrivate
 		case ERocksMeshValueType::Name:
 			OutComponents = 1;
 			OutLayout = TEXT("names");
+			return;
+		case ERocksMeshValueType::BoneInfluences:
+			OutComponents = 1;
+			OutLayout = TEXT("boneInfluences");
+			return;
+		case ERocksMeshValueType::SparseVec3:
+			OutComponents = 1;
+			OutLayout = TEXT("sparseVec3");
 			return;
 		default:
 			OutComponents = 1;
@@ -250,6 +265,12 @@ namespace RocksMeshDescriptionWriterPrivate
 		Names.Sort([](const FName Left, const FName Right) { return FRocksJsonWriter::CompareUtf8(Left.ToString(), Right.ToString()) < 0; });
 		for (const FName UeName : Names)
 		{
+			// 스킨 가중치·morph는 CollectSkeletalAttributes가 Rocks 배치로 옮긴다.
+			if (FSkeletalMeshAttributesShared::IsSkinWeightAttribute(UeName) || FSkeletalMeshAttributesShared::IsMorphTargetAttribute(UeName))
+			{
+				continue;
+			}
+
 			if (Set.DoesAttributeHaveAnyFlags(UeName, EMeshAttributeFlags::Transient | EMeshAttributeFlags::IndexReference))
 			{
 				continue;
@@ -353,6 +374,131 @@ namespace RocksMeshDescriptionWriterPrivate
 			default:
 				AppendChannels<IDType, FName>(Set, UeName, Count, Channels, Attribute.Bytes);
 				break;
+			}
+		}
+	}
+
+	// 세 성분이 모두 비트 단위 +0.0인가다(희소 저장은 그 밖의 값만 담는다 — MeshAnimationAssets 3.2절).
+	static bool IsZeroBits(const FVector3f& Value)
+	{
+		static const FVector3f Zero(0.0f, 0.0f, 0.0f);
+		return FMemory::Memcmp(&Value, &Zero, sizeof(FVector3f)) == 0;
+	}
+
+	// BoneInfluences 배치: 시작 위치 uint32 × (N + 1) + (uint16 본, uint16 가중치) × 마지막 값(3.4.1절).
+	static void AppendInfluences(TArray64<uint8>& Out, const TArray<TArray<TPair<uint16, uint16>>>& PerVertex)
+	{
+		uint32 Start = 0;
+		AppendU32(Out, Start);
+		for (const TArray<TPair<uint16, uint16>>& Influences : PerVertex)
+		{
+			Start += uint32(Influences.Num());
+			AppendU32(Out, Start);
+		}
+
+		for (const TArray<TPair<uint16, uint16>>& Influences : PerVertex)
+		{
+			for (const TPair<uint16, uint16>& Influence : Influences)
+			{
+				const uint8 Bytes[] = {uint8(Influence.Key), uint8(Influence.Key >> 8), uint8(Influence.Value), uint8(Influence.Value >> 8)};
+				Out.Append(Bytes, UE_ARRAY_COUNT(Bytes));
+			}
+		}
+	}
+
+	// SparseVec3 배치: 개수 K + 번호 uint32 × K(엄격 증가) + Vec3 × K(3.4.1절). 0 비트 값은 넣지 않는다.
+	static void AppendSparse(TArray64<uint8>& Out, const TArray<TPair<uint32, FVector3f>>& Entries)
+	{
+		TArray<TPair<uint32, FVector3f>> NonZero;
+		for (const TPair<uint32, FVector3f>& Entry : Entries)
+		{
+			if (!IsZeroBits(Entry.Value))
+			{
+				NonZero.Add(Entry);
+			}
+		}
+
+		NonZero.Sort([](const TPair<uint32, FVector3f>& Left, const TPair<uint32, FVector3f>& Right) { return Left.Key < Right.Key; });
+		AppendU32(Out, uint32(NonZero.Num()));
+		for (const TPair<uint32, FVector3f>& Entry : NonZero)
+		{
+			AppendU32(Out, Entry.Key);
+		}
+
+		for (const TPair<uint32, FVector3f>& Entry : NonZero)
+		{
+			AppendValue(Out, Entry.Value);
+		}
+	}
+
+	// 스킨 메시 설명의 가중치·morph 속성을 Rocks 배치로 옮긴다(정적 메시 설명에는 없다).
+	static void CollectSkeletalAttributes(const FMeshDescription& Mesh, FRocksMeshSourceRecord& Record)
+	{
+		const FSkeletalMeshAttributesShared Attributes(Mesh);
+		TArray<FName> Names;
+		Mesh.VertexAttributes().GetAttributeNames(Names);
+		Names.Sort([](const FName Left, const FName Right) { return FRocksJsonWriter::CompareUtf8(Left.ToString(), Right.ToString()) < 0; });
+		for (const FName Name : Names)
+		{
+			if (!FSkeletalMeshAttributesShared::IsSkinWeightAttribute(Name))
+			{
+				continue;
+			}
+
+			// UE 이름(SkinWeights, SkinWeights-<profile>)이 Rocks 이름과 같다. 본 번호는 메시 원본 계층 번호다.
+			const FSkinWeightsVertexAttributesConstRef Weights = Attributes.GetVertexSkinWeightsFromAttributeName(Name);
+			TArray<TArray<TPair<uint16, uint16>>> PerVertex;
+			PerVertex.SetNum(int32(Record.VertexCount));
+			for (int32 Vertex = 0; Vertex < int32(Record.VertexCount); ++Vertex)
+			{
+				for (const UE::AnimationCore::FBoneWeight Weight : Weights.Get(FVertexID(Vertex)))
+				{
+					PerVertex[Vertex].Add(TPair<uint16, uint16>(uint16(Weight.GetBoneIndex()), Weight.GetRawWeight()));
+				}
+			}
+
+			FRocksMeshAttribute& Attribute = Record.Attributes.AddDefaulted_GetRef();
+			Attribute.Element = ERocksMeshElement::Vertex;
+			Attribute.Name = Name.ToString();
+			Attribute.Type = ERocksMeshValueType::BoneInfluences;
+			AppendInfluences(Attribute.Bytes, PerVertex);
+		}
+
+		TArray<FName> Morphs = Attributes.GetMorphTargetNames();
+		Morphs.Sort([](const FName Left, const FName Right) { return FRocksJsonWriter::CompareUtf8(Left.ToString(), Right.ToString()) < 0; });
+		for (const FName Morph : Morphs)
+		{
+			if (Attributes.HasMorphTargetPositionsAttribute(Morph))
+			{
+				const TVertexAttributesConstRef<FVector3f> Deltas = Attributes.GetVertexMorphPositionDelta(Morph);
+				TArray<TPair<uint32, FVector3f>> Entries;
+				for (int32 Vertex = 0; Vertex < int32(Record.VertexCount); ++Vertex)
+				{
+					Entries.Add(TPair<uint32, FVector3f>(uint32(Vertex), Deltas.Get(FVertexID(Vertex))));
+				}
+
+				FRocksMeshAttribute& Attribute = Record.Attributes.AddDefaulted_GetRef();
+				Attribute.Element = ERocksMeshElement::Vertex;
+				Attribute.Name = TEXT("Morph-") + Morph.ToString();
+				Attribute.Type = ERocksMeshValueType::SparseVec3;
+				AppendSparse(Attribute.Bytes, Entries);
+			}
+
+			// UE는 코너 쪽 법선 변화량도 Morph-<이름>으로 등록한다. Rocks는 MorphNormal-<이름>이다(6.2절).
+			if (Attributes.HasMorphTargetNormalsAttribute(Morph))
+			{
+				const TVertexInstanceAttributesConstRef<FVector3f> Deltas = Attributes.GetVertexInstanceMorphNormalDelta(Morph);
+				TArray<TPair<uint32, FVector3f>> Entries;
+				for (int32 Corner = 0; Corner < int32(Record.CornerCount); ++Corner)
+				{
+					Entries.Add(TPair<uint32, FVector3f>(uint32(Corner), Deltas.Get(FVertexInstanceID(Corner))));
+				}
+
+				FRocksMeshAttribute& Attribute = Record.Attributes.AddDefaulted_GetRef();
+				Attribute.Element = ERocksMeshElement::Corner;
+				Attribute.Name = TEXT("MorphNormal-") + Morph.ToString();
+				Attribute.Type = ERocksMeshValueType::SparseVec3;
+				AppendSparse(Attribute.Bytes, Entries);
 			}
 		}
 	}
@@ -471,6 +617,7 @@ bool FRocksMeshDescriptionWriter::FromMeshDescription(const FMeshDescription& Me
 	CollectAttributes(Mesh.PolygonAttributes(), ERocksMeshElement::Polygon, int32(Record.PolygonCount), Record, OutDiagnostics);
 	CollectAttributes(Mesh.TriangleAttributes(), ERocksMeshElement::Triangle, int32(Record.TriangleCount), Record, OutDiagnostics);
 	CollectAttributes(Mesh.PolygonGroupAttributes(), ERocksMeshElement::PolygonGroup, int32(Record.PolygonGroupCount), Record, OutDiagnostics);
+	CollectSkeletalAttributes(Mesh, Record);
 	SortAttributes(Record);
 	OutRecord = MoveTemp(Record);
 	return true;
@@ -478,8 +625,6 @@ bool FRocksMeshDescriptionWriter::FromMeshDescription(const FMeshDescription& Me
 
 bool FRocksMeshDescriptionWriter::FromStaticMeshLod(const FStaticMeshLODResources& Lod, TConstArrayView<FName> SectionSlotNames, FRocksMeshSourceRecord& OutRecord, TArray<FRocksExportDiagnostic>& OutDiagnostics, FString& OutError)
 {
-	using namespace RocksMeshDescriptionWriterPrivate;
-
 	const FPositionVertexBuffer& Positions = Lod.VertexBuffers.PositionVertexBuffer;
 	const FStaticMeshVertexBuffer& Vertices = Lod.VertexBuffers.StaticMeshVertexBuffer;
 	const FColorVertexBuffer& Colors = Lod.VertexBuffers.ColorVertexBuffer;
@@ -490,13 +635,119 @@ bool FRocksMeshDescriptionWriter::FromStaticMeshLod(const FStaticMeshLODResource
 		return false;
 	}
 
-	TArray<uint32> Indices;
-	Lod.IndexBuffer.GetCopy(Indices);
+	FRocksBakedMesh Baked;
+	Baked.TexCoordCount = int32(Vertices.GetNumTexCoords());
+	for (uint32 Vertex = 0; Vertex < VertexCount; ++Vertex)
+	{
+		Baked.Positions.Add(Positions.VertexPosition(Vertex));
+		Baked.TangentZ.Add(Vertices.VertexTangentZ(Vertex));
+		const FVector4f TangentX = Vertices.VertexTangentX(Vertex);
+		Baked.TangentX.Add(FVector3f(TangentX.X, TangentX.Y, TangentX.Z));
+	}
 
+	for (int32 Channel = 0; Channel < Baked.TexCoordCount; ++Channel)
+	{
+		for (uint32 Vertex = 0; Vertex < VertexCount; ++Vertex)
+		{
+			Baked.TexCoords.Add(Vertices.GetVertexUV(Vertex, Channel));
+		}
+	}
+
+	if (VertexCount > 0 && Colors.GetNumVertices() == VertexCount && Colors.GetVertexData() != nullptr)
+	{
+		for (uint32 Vertex = 0; Vertex < VertexCount; ++Vertex)
+		{
+			Baked.Colors.Add(Colors.VertexColor(Vertex));
+		}
+	}
+
+	Lod.IndexBuffer.GetCopy(Baked.Indices);
+	for (int32 Section = 0; Section < Lod.Sections.Num(); ++Section)
+	{
+		const FStaticMeshSection& Info = Lod.Sections[Section];
+		Baked.Sections.Add({Info.FirstIndex, Info.NumTriangles, SectionSlotNames.IsValidIndex(Section) ? SectionSlotNames[Section] : FName(NAME_None)});
+	}
+
+	return FromBakedMesh(Baked, OutRecord, OutDiagnostics, OutError);
+}
+
+bool FRocksMeshDescriptionWriter::FromSkeletalLodModel(const FSkeletalMeshLODModel& Model, TConstArrayView<FName> SectionSlotNames, TConstArrayView<const UMorphTarget*> MorphTargets, int32 Lod, FRocksMeshSourceRecord& OutRecord, TArray<FRocksExportDiagnostic>& OutDiagnostics, FString& OutError)
+{
+	using namespace RocksMeshDescriptionWriterPrivate;
+
+	FRocksBakedMesh Baked;
+	Baked.TexCoordCount = FMath::Min(int32(Model.NumTexCoords), MaxTexCoords);
+	TArray<const FSoftSkinVertex*> Vertices;
+	for (const FSkelMeshSection& Section : Model.Sections)
+	{
+		if (Section.BaseVertexIndex != uint32(Vertices.Num()))
+		{
+			OutError = TEXT("skeletal LOD model sections are not contiguous");
+			return false;
+		}
+
+		for (const FSoftSkinVertex& Vertex : Section.SoftVertices)
+		{
+			Vertices.Add(&Vertex);
+			Baked.Positions.Add(Vertex.Position);
+			Baked.TangentZ.Add(Vertex.TangentZ);
+			Baked.TangentX.Add(Vertex.TangentX);
+			Baked.Colors.Add(Vertex.Color);
+
+			// 섹션 지역 본 번호를 BoneMap으로 메시 본 번호로 바꾼다(SkeletalMeshLODModel.h). 가중치 0 칸은 쓰지 않는다.
+			TArray<TPair<uint16, uint16>>& Influences = Baked.Influences.AddDefaulted_GetRef();
+			for (int32 Slot = 0; Slot < MAX_TOTAL_INFLUENCES; ++Slot)
+			{
+				if (Vertex.InfluenceWeights[Slot] != 0 && Section.BoneMap.IsValidIndex(Vertex.InfluenceBones[Slot]))
+				{
+					Influences.Add(TPair<uint16, uint16>(uint16(Section.BoneMap[Vertex.InfluenceBones[Slot]]), Vertex.InfluenceWeights[Slot]));
+				}
+			}
+		}
+
+		const int32 SectionIndex = Baked.Sections.Num();
+		Baked.Sections.Add({Section.BaseIndex, Section.NumTriangles, SectionSlotNames.IsValidIndex(SectionIndex) ? SectionSlotNames[SectionIndex] : FName(NAME_None)});
+	}
+
+	for (int32 Channel = 0; Channel < Baked.TexCoordCount; ++Channel)
+	{
+		for (const FSoftSkinVertex* Vertex : Vertices)
+		{
+			Baked.TexCoords.Add(Vertex->UVs[Channel]);
+		}
+	}
+
+	Baked.Indices = Model.IndexBuffer;
+	for (const UMorphTarget* Target : MorphTargets)
+	{
+		if (Target == nullptr || !Target->GetMorphLODModels().IsValidIndex(Lod))
+		{
+			continue;
+		}
+
+		FRocksBakedMesh::FMorph& Morph = Baked.Morphs.AddDefaulted_GetRef();
+		Morph.Name = Target->GetFName();
+		for (const FMorphTargetDelta& Delta : Target->GetMorphLODModels()[Lod].Vertices)
+		{
+			if (Delta.SourceIdx < uint32(Vertices.Num()))
+			{
+				Morph.Deltas.Add(Delta.SourceIdx, TPair<FVector3f, FVector3f>(Delta.PositionDelta, Delta.TangentZDelta));
+			}
+		}
+	}
+
+	return FromBakedMesh(Baked, OutRecord, OutDiagnostics, OutError);
+}
+
+bool FRocksMeshDescriptionWriter::FromBakedMesh(const FRocksBakedMesh& Mesh, FRocksMeshSourceRecord& OutRecord, TArray<FRocksExportDiagnostic>& OutDiagnostics, FString& OutError)
+{
+	using namespace RocksMeshDescriptionWriterPrivate;
+
+	const uint32 VertexCount = uint32(Mesh.Positions.Num());
 	FRocksMeshSourceRecord Record;
 	Record.VertexCount = VertexCount;
 	Record.CornerCount = VertexCount;
-	Record.PolygonGroupCount = uint32(Lod.Sections.Num());
+	Record.PolygonGroupCount = uint32(Mesh.Sections.Num());
 	for (uint32 Vertex = 0; Vertex < VertexCount; ++Vertex)
 	{
 		Record.CornerVertices.Add(Vertex);
@@ -506,22 +757,22 @@ bool FRocksMeshDescriptionWriter::FromStaticMeshLod(const FStaticMeshLODResource
 	TMap<uint64, uint32> EdgeIndex;
 	uint32 Degenerate = 0;
 	Record.PolygonStarts.Add(0);
-	for (int32 Section = 0; Section < Lod.Sections.Num(); ++Section)
+	for (int32 Section = 0; Section < Mesh.Sections.Num(); ++Section)
 	{
-		const FStaticMeshSection& Info = Lod.Sections[Section];
+		const FRocksBakedMesh::FSection& Info = Mesh.Sections[Section];
 		for (uint32 Triangle = 0; Triangle < Info.NumTriangles; ++Triangle)
 		{
 			const uint32 First = Info.FirstIndex + Triangle * TriangleWords;
-			if (First + TriangleWords > uint32(Indices.Num()))
+			if (First + TriangleWords > uint32(Mesh.Indices.Num()))
 			{
-				OutError = TEXT("render section points past the index buffer");
+				OutError = TEXT("baked section points past the index buffer");
 				return false;
 			}
 
-			const uint32 Corners[] = {Indices[First], Indices[First + 1], Indices[First + 2]};
+			const uint32 Corners[] = {Mesh.Indices[First], Mesh.Indices[First + 1], Mesh.Indices[First + 2]};
 			if (Corners[0] >= VertexCount || Corners[1] >= VertexCount || Corners[2] >= VertexCount)
 			{
-				OutError = TEXT("render index out of range");
+				OutError = TEXT("baked index out of range");
 				return false;
 			}
 
@@ -558,7 +809,7 @@ bool FRocksMeshDescriptionWriter::FromStaticMeshLod(const FStaticMeshLODResource
 	if (Degenerate > 0)
 	{
 		OutDiagnostics.Add({TEXT("BakedDegenerateTriangles"), RocksExport::SeverityInfo,
-			FString::Printf(TEXT("%u render triangles use one vertex twice and were left out of the baked mesh"), Degenerate)});
+			FString::Printf(TEXT("%u baked triangles use one vertex twice and were left out"), Degenerate)});
 	}
 
 	FRocksMeshAttribute& Position = AddAttribute(Record, ERocksMeshElement::Vertex, TEXT("Position"), ERocksMeshValueType::Vec3, 1);
@@ -567,44 +818,68 @@ bool FRocksMeshDescriptionWriter::FromStaticMeshLod(const FStaticMeshLODResource
 	FRocksMeshAttribute& Sign = AddAttribute(Record, ERocksMeshElement::Corner, TEXT("BinormalSign"), ERocksMeshValueType::Float, 1);
 	for (uint32 Vertex = 0; Vertex < VertexCount; ++Vertex)
 	{
-		AppendValue(Position.Bytes, Positions.VertexPosition(Vertex));
-		const FVector4f TangentZ = Vertices.VertexTangentZ(Vertex);
-		const FVector4f TangentX = Vertices.VertexTangentX(Vertex);
+		AppendValue(Position.Bytes, Mesh.Positions[Vertex]);
+		const FVector4f& TangentZ = Mesh.TangentZ[Vertex];
 		AppendValue(Normal.Bytes, FVector3f(TangentZ.X, TangentZ.Y, TangentZ.Z));
-		AppendValue(Tangent.Bytes, FVector3f(TangentX.X, TangentX.Y, TangentX.Z));
+		AppendValue(Tangent.Bytes, Mesh.TangentX[Vertex]);
 		AppendValue(Sign.Bytes, TangentZ.W);
 	}
 
-	const int32 TexCoords = FMath::Min(int32(Vertices.GetNumTexCoords()), MaxTexCoords);
+	const int32 TexCoords = FMath::Min(Mesh.TexCoordCount, MaxTexCoords);
 	if (TexCoords > 0)
 	{
 		FRocksMeshAttribute& Uv = AddAttribute(Record, ERocksMeshElement::Corner, TEXT("TexCoord"), ERocksMeshValueType::Vec2, TexCoords);
-		for (int32 Channel = 0; Channel < TexCoords; ++Channel)
+		for (int32 Index = 0; Index < TexCoords * int32(VertexCount); ++Index)
 		{
-			for (uint32 Vertex = 0; Vertex < VertexCount; ++Vertex)
-			{
-				AppendValue(Uv.Bytes, Vertices.GetVertexUV(Vertex, Channel));
-			}
+			AppendValue(Uv.Bytes, Mesh.TexCoords[Index]);
 		}
 	}
 
-	// 렌더 색은 8비트 sRGB다(UE 빌드 결과). 선형으로 풀어 쓰고 양자화 손실을 알린다.
-	if (VertexCount > 0 && Colors.GetNumVertices() == VertexCount && Colors.GetVertexData() != nullptr)
+	// UE 빌드 결과의 색은 8비트 sRGB다. 선형으로 풀어 쓰고 양자화 손실을 알린다.
+	if (VertexCount > 0 && uint32(Mesh.Colors.Num()) == VertexCount)
 	{
 		FRocksMeshAttribute& Color = AddAttribute(Record, ERocksMeshElement::Corner, TEXT("Color"), ERocksMeshValueType::Vec4, 1);
 		for (uint32 Vertex = 0; Vertex < VertexCount; ++Vertex)
 		{
-			const FLinearColor Linear = FLinearColor::FromSRGBColor(Colors.VertexColor(Vertex));
+			const FLinearColor Linear = FLinearColor::FromSRGBColor(Mesh.Colors[Vertex]);
 			AppendValue(Color.Bytes, FVector4f(Linear.R, Linear.G, Linear.B, Linear.A));
 		}
 
 		OutDiagnostics.Add({TEXT("BakedColorQuantized"), RocksExport::SeverityInfo, TEXT("baked vertex colors come from 8-bit sRGB render data")});
 	}
 
-	FRocksMeshAttribute& Slots = AddAttribute(Record, ERocksMeshElement::PolygonGroup, TEXT("MaterialSlotName"), ERocksMeshValueType::Name, 1);
-	for (int32 Section = 0; Section < Lod.Sections.Num(); ++Section)
+	if (uint32(Mesh.Influences.Num()) == VertexCount && VertexCount > 0)
 	{
-		AppendValue(Slots.Bytes, SectionSlotNames.IsValidIndex(Section) ? SectionSlotNames[Section] : FName(NAME_None));
+		FRocksMeshAttribute& Weights = AddAttribute(Record, ERocksMeshElement::Vertex, TEXT("SkinWeights"), ERocksMeshValueType::BoneInfluences, 1);
+		AppendInfluences(Weights.Bytes, Mesh.Influences);
+	}
+
+	for (const FRocksBakedMesh::FMorph& Morph : Mesh.Morphs)
+	{
+		TArray<TPair<uint32, FVector3f>> Positions;
+		TArray<TPair<uint32, FVector3f>> Normals;
+		for (const TPair<uint32, TPair<FVector3f, FVector3f>>& Delta : Morph.Deltas)
+		{
+			Positions.Add(TPair<uint32, FVector3f>(Delta.Key, Delta.Value.Key));
+			Normals.Add(TPair<uint32, FVector3f>(Delta.Key, Delta.Value.Value));
+		}
+
+		FRocksMeshAttribute& PositionDelta = Record.Attributes.AddDefaulted_GetRef();
+		PositionDelta.Element = ERocksMeshElement::Vertex;
+		PositionDelta.Name = TEXT("Morph-") + Morph.Name.ToString();
+		PositionDelta.Type = ERocksMeshValueType::SparseVec3;
+		AppendSparse(PositionDelta.Bytes, Positions);
+		FRocksMeshAttribute& NormalDelta = Record.Attributes.AddDefaulted_GetRef();
+		NormalDelta.Element = ERocksMeshElement::Corner;
+		NormalDelta.Name = TEXT("MorphNormal-") + Morph.Name.ToString();
+		NormalDelta.Type = ERocksMeshValueType::SparseVec3;
+		AppendSparse(NormalDelta.Bytes, Normals);
+	}
+
+	FRocksMeshAttribute& Slots = AddAttribute(Record, ERocksMeshElement::PolygonGroup, TEXT("MaterialSlotName"), ERocksMeshValueType::Name, 1);
+	for (const FRocksBakedMesh::FSection& Section : Mesh.Sections)
+	{
+		AppendValue(Slots.Bytes, Section.SlotName);
 	}
 
 	SortAttributes(Record);
