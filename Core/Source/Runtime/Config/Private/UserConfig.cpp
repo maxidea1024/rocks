@@ -689,7 +689,7 @@ Result<UserConfigSaveResult> SaveUserConfig(ConfigContext& context,
         if (written.Value() == 0) {
             bool exists = false;
             if (const platform::FileStatus checked =
-                    files.Exists(path.View().Data(), path.View().ByteCount(), exists);
+                    files.FileExists(path.View().Data(), path.View().ByteCount(), exists);
                 !checked) {
                 return Result<UserConfigSaveResult>::Failure(FileErrorCode(checked));
             }

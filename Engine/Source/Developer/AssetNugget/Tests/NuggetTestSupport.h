@@ -43,8 +43,9 @@ public:
         return inner->Open(path, pathBytes, openMode, out);
     }
 
-    platform::FileStatus Exists(const char* path, usize pathBytes, bool& exists) noexcept override {
-        return inner->Exists(path, pathBytes, exists);
+    platform::FileStatus FileExists(const char* path, usize pathBytes,
+                                    bool& exists) noexcept override {
+        return inner->FileExists(path, pathBytes, exists);
     }
 
     platform::FileStatus Delete(const char* path, usize pathBytes) noexcept override {

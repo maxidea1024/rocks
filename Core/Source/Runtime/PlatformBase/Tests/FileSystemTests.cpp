@@ -125,7 +125,7 @@ public:
     FileStatus Open(const char*, usize, FileOpenMode, FileHandle*&) noexcept override {
         return {FileCode::Unsupported, 0};
     }
-    FileStatus Exists(const char*, usize, bool& exists) noexcept override {
+    FileStatus FileExists(const char*, usize, bool& exists) noexcept override {
         exists = false;
         return {};
     }
@@ -195,6 +195,93 @@ TEST(FileSystem_DirectoriesStatAndEnumeration) {
     REQUIRE(system.Delete(a, Length(a)));
     REQUIRE(system.DeleteDirectory(root.path, root.length));
     CHECK(system.Stat(root.path, root.length, info).code == FileCode::NotFound);
+}
+
+namespace {
+
+// Stat만 정해진 결과를 돌려주는 wrapper다(DirectoryExists 기본 구현의 판정).
+class StatOnlyFileSystem final : public FileSystem {
+public:
+    FileStatus Open(const char*, usize, FileOpenMode, FileHandle*&) noexcept override {
+        return {FileCode::Unsupported, 0};
+    }
+
+    FileStatus FileExists(const char*, usize, bool& exists) noexcept override {
+        exists = false;
+        return {};
+    }
+
+    FileStatus Delete(const char*, usize) noexcept override {
+        return {FileCode::Unsupported, 0};
+    }
+
+    FileStatus Stat(const char*, usize, FileInfo& info) noexcept override {
+        if (status) {
+            info.type = type;
+        }
+
+        return status;
+    }
+
+    FileStatus status{};
+    FileType type = FileType::Directory;
+};
+
+} // namespace
+
+// 존재 확인(UE IPlatformFile::FileExists·DirectoryExists): FileExists는 일반 파일만,
+// DirectoryExists는 디렉터리만 참, 없음·파일 너머 경로는 둘 다 거짓, 잘못된 경로는 오류.
+// DirectoryExists 기본 구현은 Stat으로 판정한다(NotFound 거짓·그 밖 오류 그대로·Stat 없는 wrapper
+// Unsupported· Other 종류 거짓).
+TEST(FileSystem_FileAndDirectoryExists) {
+    FileSystem& system = PhysicalFileSystem();
+    Scratch root;
+    REQUIRE(root.Make("exists"));
+    REQUIRE(system.MakeDirectory(root.path, root.length));
+    char file[256];
+    char missing[256];
+    char throughFile[256];
+    root.Child("a.bin", file, sizeof(file));
+    root.Child("missing", missing, sizeof(missing));
+    root.Child("a.bin/x", throughFile, sizeof(throughFile));
+    REQUIRE(WriteFile(file, "hello"));
+    struct Case {
+        const char* path;
+        bool file;
+        bool directory;
+    };
+    const Case cases[] = {{root.path, false, true},
+                          {file, true, false},
+                          {missing, false, false},
+                          {throughFile, false, false}};
+    for (const Case& item : cases) {
+        bool isFile = !item.file;
+        bool isDirectory = !item.directory;
+        CHECK(system.FileExists(item.path, Length(item.path), isFile) && isFile == item.file);
+        CHECK(system.DirectoryExists(item.path, Length(item.path), isDirectory) &&
+              isDirectory == item.directory);
+    }
+
+    bool exists = false;
+    const char embedded[] = {'a', '\0', 'b'};
+    CHECK(system.DirectoryExists(embedded, sizeof(embedded), exists).code ==
+          FileCode::InvalidArgument);
+    CHECK(system.DirectoryExists(nullptr, 0, exists).code == FileCode::InvalidArgument);
+
+    MinimalFileSystem minimal;
+    CHECK(minimal.DirectoryExists("x", 1, exists).code == FileCode::Unsupported);
+    StatOnlyFileSystem fake;
+    exists = false;
+    CHECK(fake.DirectoryExists("x", 1, exists) && exists);
+    fake.type = FileType::Other;
+    CHECK(fake.DirectoryExists("x", 1, exists) && !exists);
+    fake.status = FileStatus{FileCode::NotFound, 2};
+    exists = true;
+    CHECK(fake.DirectoryExists("x", 1, exists) && !exists);
+    fake.status = FileStatus{FileCode::AccessDenied, 5};
+    CHECK(fake.DirectoryExists("x", 1, exists).code == FileCode::AccessDenied);
+    REQUIRE(system.Delete(file, Length(file)));
+    REQUIRE(system.DeleteDirectory(root.path, root.length));
 }
 
 TEST(FileSystem_CopyAndMoveReplaceRules) {

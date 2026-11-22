@@ -137,7 +137,9 @@ public:
     virtual ~FileSystem() = default;
     virtual FileStatus Open(const char* path, usize pathBytes, FileOpenMode mode,
                             FileHandle*& out) noexcept = 0;
-    virtual FileStatus Exists(const char* path, usize pathBytes, bool& exists) noexcept = 0;
+    // link를 따라간 대상이 일반 파일이면 exists = true다(디렉터리·없음·대상 없는 link는 false — UE
+    // IPlatformFile::FileExists). 오류: 잘못된 경로 InvalidArgument·Unsupported, 그 밖 OS 오류.
+    virtual FileStatus FileExists(const char* path, usize pathBytes, bool& exists) noexcept = 0;
     // 파일 또는 link(대상이 아니라 link 자체, 대상이 없어도)를 지운다. 실제 디렉터리는
     // WrongType이다(Windows에서 link가 아닌 reparse point가 붙은 디렉터리 포함).
     virtual FileStatus Delete(const char* path, usize pathBytes) noexcept = 0;
@@ -150,6 +152,14 @@ public:
     // 구분자가 있으면 OS 규칙대로 해석한다("file/"은 실패, "link/"의 isLink는 POSIX false·Windows
     // true). 파일 시각이 0001-01-01–9999-12-31 범위 밖이면 modifiedTicks는 0이다.
     virtual FileStatus Stat(const char* path, usize pathBytes, FileInfo& info) noexcept;
+    // link를 따라간 대상이 디렉터리면 exists = true다(파일·없음은 false — UE
+    // IPlatformFile::DirectoryExists). 기본 구현은 Stat으로 판정한다(Stat의 NotFound는 false, 그 밖
+    // 오류는 그대로 — Stat이 없는 wrapper는 Unsupported).
+    //
+    // 사용 예:
+    //   bool found = false;
+    //   if (files.DirectoryExists(path, pathBytes, found) && found) { ... }
+    virtual FileStatus DirectoryExists(const char* path, usize pathBytes, bool& exists) noexcept;
     // 디렉터리 하나를 만든다(부모는 있어야 한다). 이미 있으면(파일이어도) AlreadyExists다.
     virtual FileStatus MakeDirectory(const char* path, usize pathBytes) noexcept;
     // 빈 디렉터리를 지운다. 비어 있지 않으면 DirectoryNotEmpty, 파일이면 WrongType이다. 디렉터리
@@ -238,8 +248,8 @@ ROCKS_PLATFORMBASE_API FileStatus DeleteDirectoryTree(FileSystem& system, const 
 // 연결된 대상까지 모든 장치를 검출하거나 일반 파일임을 보장하지는 못한다.
 // 파일명 유효성/권한, symbolic link 추적 여부와 공유 모드 등은 운영체제의 의미를 따른다.
 // 보안 경계가 필요한 호출자는 별도 핸들 기반 경로 제약을 사용해야 한다. Windows 장치
-// namespace·확장 경로와 레거시 DOS 장치 이름은 Unsupported다. Exists는 OS가 해석한 링크
-// 대상을 검사하며 결과와 이후 접근 사이의 변경을 막지 않는다. ReadAt/Truncate는 없다.
+// namespace·확장 경로와 레거시 DOS 장치 이름은 Unsupported다. FileExists·DirectoryExists는 OS가
+// 해석한 링크 대상을 검사하며 결과와 이후 접근 사이의 변경을 막지 않는다. ReadAt/Truncate는 없다.
 // Windows는 경로가 MAX_PATH 근처를 넘으면(상대 경로는 현재 디렉터리를 붙인 길이 기준) 확장 경로로
 // 바꿔 긴 경로를 지원한다.
 ROCKS_PLATFORMBASE_API FileSystem& PhysicalFileSystem() noexcept;

@@ -40,7 +40,7 @@ namespace engine_assets_detail {
 Result<void> ReadManifestFile(platform::FileSystem& files, StringView path, uint64 maxBytes,
                               Array<uint8>& out) noexcept {
     bool exists = false;
-    if (auto checked = files.Exists(path.Data(), path.ByteCount(), exists); !checked) {
+    if (auto checked = files.FileExists(path.Data(), path.ByteCount(), exists); !checked) {
         return Result<void>::Failure(FileErrorCode(checked));
     }
 

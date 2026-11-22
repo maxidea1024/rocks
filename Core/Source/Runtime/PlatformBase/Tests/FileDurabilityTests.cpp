@@ -102,7 +102,7 @@ TEST(FileDurability_ReplaceSwapsContentAndTargetMayBeOpen) {
     REQUIRE(ReadText(target, text, sizeof(text)));
     CHECK(strcmp(text, "new") == 0);
     bool exists = true;
-    REQUIRE(PhysicalFileSystem().Exists(temp, strlen(temp), exists));
+    REQUIRE(PhysicalFileSystem().FileExists(temp, strlen(temp), exists));
     CHECK(!exists);
 
     // 대상이 없으면 이름만 바꾼다. 원본이 없으면 NotFound, 디렉터리는 WrongType이다.
@@ -140,7 +140,7 @@ TEST(FileDurability_ReplaceRejectsLinksAndReadOnlyTargets) {
         CHECK(PhysicalFileSystem().Replace(link, strlen(link), target, strlen(target)).code ==
               FileCode::WrongType);
         bool exists = true;
-        REQUIRE(PhysicalFileSystem().Exists(target, strlen(target), exists));
+        REQUIRE(PhysicalFileSystem().FileExists(target, strlen(target), exists));
         CHECK(!exists);
         // 대상이 link면 link를 따라 교체하지 않는다.
         CHECK(PhysicalFileSystem().Replace(other, strlen(other), link, strlen(link)).code ==
