@@ -81,7 +81,7 @@ struct RecordHeader {
 //   }
 //
 //   // header.Value().schema로 담긴 타입을 찾고, 그 버전 범위로 Record를 연다.
-Result<RecordHeader> ReadRecordHeader(Span<const uint8> record) noexcept;
+ROCKS_SERIALIZATION_API Result<RecordHeader> ReadRecordHeader(Span<const uint8> record) noexcept;
 
 // magic 'ROCKSREC'(8), envelopeVersion u32=1, schema Guid(16), schemaVersion u32,
 // fieldCount u32, payloadBytes u64의 44-byte header다. TLV는

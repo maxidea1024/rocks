@@ -52,7 +52,7 @@ struct SecretMemoryStatus {
 };
 
 // 여러 스레드에서 불러도 된다. arena를 새로 만들지는 않는다.
-[[nodiscard]] SecretMemoryStatus GetSecretMemoryStatus() noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API SecretMemoryStatus GetSecretMemoryStatus() noexcept;
 
 // 해제할 때 내용을 지우는 프로세스 전역 버퍼 Allocator다.
 //
@@ -64,14 +64,14 @@ struct SecretMemoryStatus {
 // - Deallocate: 요청 크기 전체를 지우고 돌려준다. 블록 크기는 블록 밖 표에 있으므로, 이 Allocator가
 //   준 살아 있는 주소가 아니면 주소를 역참조하지 않고 NotFound다. nullptr는 아무 일도 하지 않는
 //   성공이다.
-[[nodiscard]] Allocator& GetSecretAllocator() noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Allocator& GetSecretAllocator() noexcept;
 
 // 키와 키 재료(seed·비밀번호에서 얻은 키 등)를 소유하는 move-only 값이다. 복사할 수 없고, 이동하면
 // 원본은 비며, 소멸·Reset 때 지운다. 4 KiB 이하는 키 저장소 슬롯(64 byte 정렬, guard page·잠금
 // 시도), 그보다 크면 버퍼 할당기(소거만)에 둔다. 키는 모두 4 KiB 이하다(가장 큰 ML-KEM-768 비밀키가
 // 2400 byte). 키 저장소는 모든 키가 함께 쓰는 4 MiB 한도가 있으므로, 평문처럼 키가 아닌 비밀
 // 데이터는 SecretBytes 대신 GetSecretAllocator를 쓰는 Array<uint8>에 둔다.
-class SecretBytes {
+class ROCKS_CRYPTO_API SecretBytes {
 public:
     SecretBytes() noexcept = default;
     ~SecretBytes() noexcept;

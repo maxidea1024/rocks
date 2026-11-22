@@ -7,7 +7,7 @@
 // 부르지 않는다.
 namespace rocks {
 
-struct BinnedAllocator::TestHooks {
+struct ROCKS_CORE_API BinnedAllocator::TestHooks {
     // ---- 생성 때의 실패 주입(이 스레드에서 다음에 만드는 인스턴스 하나에만 적용) ----
 
     // FailNextReserveAttempts의 "모든 시도" 값이다(예약 없이 열린다).

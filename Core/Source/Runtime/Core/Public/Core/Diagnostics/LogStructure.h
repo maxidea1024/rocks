@@ -173,7 +173,7 @@ StringView LogStructureTypeTag() noexcept {
 //
 // 스레드: 한 캡처 동안 한 스레드만 쓴다. 힙 할당은 없다.
 // 수명: 캡처가 만든다. 시험은 고정 버퍼로 직접 만들어 인코딩만 확인할 수 있다.
-class LogStructureWriter {
+class ROCKS_CORE_API LogStructureWriter {
 public:
     // buffer에 인코딩한다. buffer는 쓰기가 끝날 때(Finish)까지 살아 있어야 한다.
     explicit LogStructureWriter(Span<uint8> buffer) noexcept;

@@ -28,13 +28,14 @@ namespace rocks::crypto::detail {
 //   빌드되었을 때만 참이다. ARM에서는 HAVE_ARMCRYPTO 빌드 정의를 뜻하고, 이는 AEGIS armcrypto
 //   구현의 컴파일 조건과 같다(ARM의 실행 감지는 빌드 정의와 무관해서 따로 확인해야 한다).
 // 조건이 아니면 libsodium soft 경로로 내려가지 않고 Unsupported다(결정 D3).
-[[nodiscard]] bool HasAesHardware(const platform::CpuFeatures& cpu, const CryptoRuntimeInfo& sodium,
-                                  bool sodiumAesGcmAvailable) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API bool HasAesHardware(const platform::CpuFeatures& cpu,
+                                                   const CryptoRuntimeInfo& sodium,
+                                                   bool sodiumAesGcmAvailable) noexcept;
 
 // 이 프로세스에서 AES 계열(AES-128/256-GCM, AEGIS, hazmat AES 모드, AES-CMAC)을 쓸 수 있는가.
 // libsodium HW 판정(HasAesHardware를 감지 결과로 부른 값)과 AES 경량 계층 커널 표(감지·자가 시험을
 // 거친 GetAesKernels())가 모두 참일 때만 참이다. 둘 중 하나만 되는 기기에서 AES 일부만 쓰이는
 // 상태를 없앤다(6.1절 "HW 조건은 하나다"). 결과는 프로세스 동안 같다.
-[[nodiscard]] bool IsAesAvailable() noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API bool IsAesAvailable() noexcept;
 
 } // namespace rocks::crypto::detail

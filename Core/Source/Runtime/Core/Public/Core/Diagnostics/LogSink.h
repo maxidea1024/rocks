@@ -7,7 +7,7 @@ namespace rocks {
 
 // 힙·백그라운드 스레드·Task 없이 사용할 초기 진단 버퍼다. 생성 스레드가 모든 접근을 소유한다.
 // 내부 동기화가 없으며 Size/Dropped도 소유 스레드에서 읽어야 한다.
-class LogBuffer {
+class ROCKS_CORE_API LogBuffer {
 public:
     static constexpr usize Capacity = 128;
     LogBuffer() noexcept;

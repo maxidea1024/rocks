@@ -133,7 +133,7 @@ struct ResolvedText {
 // 누적한다. output은 각 중간/최종 String의 payload 한도다. budget 초과는 CapacityExceeded, OOM은
 // OutOfMemory다. 실패는 부분 결과를 반환하지 않는다. 입력 래퍼와 allocator는 호출 동안 유효해야
 // 한다.
-Result<ResolvedText> ResolveText(Allocator&, const Text&, const CatalogSnapshot&,
-                                 TextResolveLimits = {}) noexcept;
+ROCKS_LOCALIZATION_API Result<ResolvedText>
+ResolveText(Allocator&, const Text&, const CatalogSnapshot&, TextResolveLimits = {}) noexcept;
 
 } // namespace rocks

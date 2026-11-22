@@ -308,7 +308,7 @@ constexpr bool EqualsIgnoringAsciiCase(StringView left, StringView right) noexce
 // 잘린 sequence를 만나면 범위 밖 읽기 대신 Fatal이다. 반복자는 STL 전방 반복자 연산을 제공한다.
 class CodePointRange {
 public:
-    class Iterator {
+    class ROCKS_CORE_API Iterator {
     public:
         using value_type = char32_t;
         using reference = char32_t;

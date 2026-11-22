@@ -25,7 +25,7 @@ namespace rocks {
 //   if (auto added = curve.TryAddKey(2.0f, 5.0f); !added) { return added.Error(); }
 //   const float value = curve.Evaluate(1.0f);   // 1(Constant)
 ROCKS_STRUCT()
-struct PlainCurve : ScalarCurveBase {
+struct ROCKS_CURVES_API PlainCurve : ScalarCurveBase {
     ROCKS_GENERATED_BODY()
 public:
     // 키 없는 Linear 커브다. allocator는 키 배열이 쓴다.

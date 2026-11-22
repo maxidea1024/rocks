@@ -172,7 +172,7 @@ struct LogSystemAccess;
 //   없으면 Skipped다.
 inline constexpr uint32 TerminationCallbackReserveMilliseconds = 250;
 
-platform::TerminationCallbackResult
+ROCKS_CORE_API platform::TerminationCallbackResult
 FlushInstalledLogForTermination(const platform::TerminationContext& context) noexcept;
 
 // Log::Fatal·assert가 실패 스레드에서 flush를 시도했다는 프로세스 표시다(스레드별 fatalInProgress와
@@ -182,7 +182,7 @@ bool FatalFlushAttempted() noexcept;
 
 // 설치·해제 때마다 하나씩 오르는 전역 세대 값이다(SRCU 세대 뒤집기). 해제가 뒤집기를 마쳤는지
 // 순서를 확인하는 시험·진단용이다.
-uint64 LogInstallGeneration() noexcept;
+ROCKS_CORE_API uint64 LogInstallGeneration() noexcept;
 } // namespace detail
 
 // 로그 기록 경로다. 호스트(main·시험)가 소유하고 LogInstallScope로 전역 대상에 설치한다.

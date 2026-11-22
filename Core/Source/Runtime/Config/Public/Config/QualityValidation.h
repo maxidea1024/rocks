@@ -107,14 +107,16 @@ struct QualityResolutionSet {
 // 요청마다 펼칠 등급을 정한다(위 규칙). 규칙이 없는 묶음은 요청 등급 그대로다. out은 먼저 비운다.
 // 오류: 규칙이 있는 묶음의 요청 등급이 그 요청의 levels에 없거나 같은 묶음 요청이 둘이면
 // InvalidArgument, 할당 실패. 실패하면 out은 비어 있다.
-Result<void> ResolveQualityLevels(Span<const QualityGroupRule> groups,
-                                  Span<const QualityBudgetRule> budgets,
-                                  Span<const QualityRequest> requests, const DeviceTraits* traits,
-                                  QualityResolutionSet& out) noexcept;
+ROCKS_CONFIG_API Result<void> ResolveQualityLevels(Span<const QualityGroupRule> groups,
+                                                   Span<const QualityBudgetRule> budgets,
+                                                   Span<const QualityRequest> requests,
+                                                   const DeviceTraits* traits,
+                                                   QualityResolutionSet& out) noexcept;
 
 // 결과 하나의 표기를 out에 쓴다: 낮추지 않았으면 `quality.shadow@3`, 낮췄으면
 // `quality.shadow@1 (requested 3, lowered: <사유>)`, 맞지 않았으면 `quality.shadow@0 (requested 0,
 // unmet: <사유>)`(CVar 11절 표기). 오류: 할당 실패.
-Result<void> FormatQualityResolution(const QualityResolution& resolution, String& out) noexcept;
+ROCKS_CONFIG_API Result<void> FormatQualityResolution(const QualityResolution& resolution,
+                                                      String& out) noexcept;
 
 } // namespace rocks::config

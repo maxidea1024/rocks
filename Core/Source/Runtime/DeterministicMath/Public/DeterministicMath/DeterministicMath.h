@@ -31,9 +31,9 @@ namespace rocks::deterministic {
 inline constexpr uint32 Version = 1;
 
 // 정수 부분·내림·짝수 반올림이다(±0·±Inf는 그대로, NaN은 고정 NaN).
-double Trunc(double x) noexcept;
-double Floor(double x) noexcept;
-double RoundHalfEven(double x) noexcept;
+ROCKS_DETERMINISTICMATH_API double Trunc(double x) noexcept;
+ROCKS_DETERMINISTICMATH_API double Floor(double x) noexcept;
+ROCKS_DETERMINISTICMATH_API double RoundHalfEven(double x) noexcept;
 
 // 2^x·log2(x)·x^y다.
 // - Exp2: x ≥ 1024이면 +Inf, 결과가 비정규 수 범위면 비정규 수, 너무 작으면 +0.
@@ -42,29 +42,29 @@ double RoundHalfEven(double x) noexcept;
 //   입력과 base < 0(−Inf 포함, 이 모듈은 음수 밑을 다루지 않는다)은 고정 NaN. ±0 밑은 부호를 보지
 //   않는다: Pow(±0, y > 0) = +0, Pow(±0, y < 0) = +Inf. Pow(+Inf, y > 0) = +Inf, Pow(+Inf, y < 0) =
 //   +0. y = ±Inf면 base > 1과 y > 0이 같을 때 +Inf, 다를 때 +0.
-double Exp2(double x) noexcept;
-double Log2(double x) noexcept;
-double Pow(double base, double exponent) noexcept;
+ROCKS_DETERMINISTICMATH_API double Exp2(double x) noexcept;
+ROCKS_DETERMINISTICMATH_API double Log2(double x) noexcept;
+ROCKS_DETERMINISTICMATH_API double Pow(double base, double exponent) noexcept;
 
 // sin(πx)·cos(πx)다. 정수·반정수에서 정확히 0·±1이며 0의 부호는 IEEE 754-2019 권고를 따른다
 // (SinPi(±n) = ±0, CosPi(n + ½) = +0). ±Inf·NaN은 고정 NaN.
-double SinPi(double x) noexcept;
-double CosPi(double x) noexcept;
+ROCKS_DETERMINISTICMATH_API double SinPi(double x) noexcept;
+ROCKS_DETERMINISTICMATH_API double CosPi(double x) noexcept;
 
 // arccos(x)(라디안, [0, π])다. Acos(1) = +0, Acos(−1) = π(가장 가까운 double), |x| > 1·NaN은
 // 고정 NaN. MikkTSpace 패치·가중 법선의 코너 각(MeshAnimationAssets.ko.md 결정 MA-D5)이 쓴다.
-double Acos(double x) noexcept;
+ROCKS_DETERMINISTICMATH_API double Acos(double x) noexcept;
 
 // sinc(x) = sin(πx)/(πx), sinc(0) = 1. Lanczos(x, lobes) = sinc(x)·sinc(x/lobes)(|x| < lobes), 그
 // 밖 0.
-double Sinc(double x) noexcept;
-double Lanczos(double x, int lobes) noexcept;
+ROCKS_DETERMINISTICMATH_API double Sinc(double x) noexcept;
+ROCKS_DETERMINISTICMATH_API double Lanczos(double x, int lobes) noexcept;
 
 // IEC 61966-2-1 sRGB 구간 함수다. 범위 밖 값은 같은 식을 이어서 쓴다(음수는 선형 구간).
-double SrgbToLinear(double encoded) noexcept;
-double LinearToSrgb(double linear) noexcept;
+ROCKS_DETERMINISTICMATH_API double SrgbToLinear(double encoded) noexcept;
+ROCKS_DETERMINISTICMATH_API double LinearToSrgb(double linear) noexcept;
 // x^(11/5)(옛 감마 2.2 해석, UE bUseLegacyGamma — 지수는 정확한 2.2다). 0 이하는 0.
-double Gamma22ToLinear(double encoded) noexcept;
+ROCKS_DETERMINISTICMATH_API double Gamma22ToLinear(double encoded) noexcept;
 
 // 8비트 sRGB → 선형: decode(value/255)를 가장 가까운 float로 반올림한 값(생성 표, 정확).
 ROCKS_DETERMINISTICMATH_API float SrgbByteToLinear(uint8 value) noexcept;

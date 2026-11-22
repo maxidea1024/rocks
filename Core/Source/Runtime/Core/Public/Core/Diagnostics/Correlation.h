@@ -132,7 +132,7 @@ private:
 ROCKS_CORE_API CorrelationToken CaptureCorrelation() noexcept;
 
 // 이 스레드 스택 맨 위의 id를 out에 쓴다. 비어 있으면 false이고 out은 바뀌지 않는다.
-bool CurrentCorrelation(CorrelationIds& out) noexcept;
+ROCKS_CORE_API bool CurrentCorrelation(CorrelationIds& out) noexcept;
 
 // 이 스레드 스택의 깊이다(넘쳐 세기만 한 쌓기는 빼고). 비어 있는지를 분기 하나로 볼 수 있다.
 // 깊이는 Core .cpp의 thread_local이라 호출 하나를 거친다(공개 헤더에 thread_local을 두지 않는다 —
@@ -152,7 +152,7 @@ namespace detail {
 ROCKS_CORE_API CorrelationEntry* TopCorrelationEntry() noexcept;
 
 // 지금 걸린 관찰자다(시험이 잠시 바꿨다가 되돌릴 때).
-const CorrelationObserver* CurrentCorrelationObserver() noexcept;
+ROCKS_CORE_API const CorrelationObserver* CurrentCorrelationObserver() noexcept;
 
 } // namespace detail
 

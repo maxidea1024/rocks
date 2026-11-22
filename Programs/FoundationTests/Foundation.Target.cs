@@ -64,6 +64,24 @@ public sealed class CoreTarget : TargetRules
     public override string TestExecutable => "CoreFoundationTests";
 }
 
+// Modular build of the Foundation tests (Docs/Design/BuildTargets.ko.md section 3.8 BD31, BS8d5): every non-third-party library module is a
+// shared library and the test executable starts through the Modular entry (Docs/Design/ModuleLoader.ko.md section 3.14). One executable only
+// (the Launch test programs and the embedded entry program stay in the Monolithic targets). Tests stay in the FoundationTests host module and the
+// module internals they call are exported.
+public sealed class FoundationModularTarget : TargetRules
+{
+    public override string Name => "FoundationModular";
+
+    // Development tool and test executable (not subject to the Release exclusion policy).
+    public override TargetType Type => TargetType.Program;
+
+    public override Rocks.Build.NativeLinkType LinkType => Rocks.Build.NativeLinkType.Modular;
+
+    public override IReadOnlyList<string> Modules => ["FoundationTests"];
+
+    public override string TestExecutable => "FoundationTests";
+}
+
 // Launch test executables (Programs/LaunchTests). Every test target builds them so the native harness (Native.Launch.*) finds them next to
 // the test executable.
 internal static class LaunchTestPrograms

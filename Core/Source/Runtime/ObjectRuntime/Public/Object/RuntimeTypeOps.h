@@ -169,8 +169,9 @@ struct FieldWriteTarget {
 //   target.actualEnum = lease.FieldEnum(index);   // 원소 enum
 //   target.element = true;
 //   if (auto valid = detail::ValidateFieldWrite(binding, target, value); !valid) { ... }
-Result<void> ValidateFieldWrite(const FieldWriteBinding& binding, const FieldWriteTarget& target,
-                                const FieldValue& value) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void> ValidateFieldWrite(const FieldWriteBinding& binding,
+                                                        const FieldWriteTarget& target,
+                                                        const FieldValue& value) noexcept;
 
 // 컨테이너 필드(Array·Map·Set — Map·Set은 리플렉션 B9f3)의 새 길이를 검사한다(경로 접근의 삽입·
 // 크기 변경 — B6, 저장의 MaxElements와 같은 규칙). field가 Array·Map·Set이 아니면 TypeMismatch,
@@ -179,7 +180,8 @@ Result<void> ValidateFieldWrite(const FieldWriteBinding& binding, const FieldWri
 //
 // 사용 예:
 //   if (auto fits = detail::ValidateArrayLength(field, array.Size() + 1); !fits) { ... }
-Result<void> ValidateArrayLength(const FieldSchema& field, usize newLength) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void> ValidateArrayLength(const FieldSchema& field,
+                                                         usize newLength) noexcept;
 
 // 배열의 구조 변경 종류다(경로 접근의 원소 삽입·삭제·비우기).
 enum class ArrayEdit : uint8 {
@@ -200,7 +202,8 @@ enum class ArrayEdit : uint8 {
 //   target.actual = &field;
 //   target.effectiveFlags = effectiveFlags;
 //   if (auto valid = detail::ValidateArrayEdit(target, detail::ArrayEdit::Clear); !valid) { ... }
-Result<void> ValidateArrayEdit(const FieldWriteTarget& target, ArrayEdit edit) noexcept;
+ROCKS_OBJECTRUNTIME_API Result<void> ValidateArrayEdit(const FieldWriteTarget& target,
+                                                       ArrayEdit edit) noexcept;
 
 // Optional<값 struct> 필드의 기본 값 만들기(EmplaceOptional)·비우기(ResetOptional)의 검증 한
 // 곳이다(리플렉션 B9e — Docs/Design/ReflectionExtensions.ko.md 6절). target.actual이 없거나
@@ -292,7 +295,7 @@ ROCKS_OBJECTRUNTIME_API Result<void> ValidateClassReference(ObjectRegistry& regi
 // callback은 그렇지 않으므로 할당하는 수동 callback은 같은 규칙을 스스로 지킨다. callback 코드
 // 수명은 TypeLease가 보유하는 ModuleLease에 종속되므로 이 값을 lease보다 오래 보관하거나 호출하지
 // 않는다.
-class FieldWriteOperation {
+class ROCKS_OBJECTRUNTIME_API FieldWriteOperation {
 public:
     using Callback = Result<void> (*)(ObjectRegistry&, const ObjectAccessContext&, ObjectHandle,
                                       const FieldValue&) noexcept;

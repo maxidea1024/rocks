@@ -5,6 +5,6 @@
 // 시험 실행기만 끝에서 되돌린다.
 namespace rocks::launch::detail {
 
-void ClearTerminationRequest() noexcept;
+ROCKS_LAUNCH_API void ClearTerminationRequest() noexcept;
 
 } // namespace rocks::launch::detail

@@ -29,7 +29,7 @@
 namespace rocks {
 
 // 표준 채널 "log"다. 세션이 Start 때 등록하며 처음에는 꺼져 있다.
-extern TraceChannel TraceLogChannel;
+ROCKS_TRACECAPTURE_API extern TraceChannel TraceLogChannel;
 
 // Trace.LogMessage에 싣는 렌더된 메시지(와 동봉 템플릿)의 최대 byte 수다.
 inline constexpr usize MaxTraceLogMessageBytes = 1024;
@@ -45,11 +45,11 @@ namespace detail {
 // 않도록 sink 자신도 막는다(두 표시는 지키는 범위가 다르다). 표시는 TraceCapture .cpp의
 // thread_local이다 (공개 헤더에 thread_local을 두지 않는다 — Docs/Design/BuildTargets.ko.md 3.8절
 // BD29).
-bool InTraceLogWrite() noexcept;
+ROCKS_TRACECAPTURE_API bool InTraceLogWrite() noexcept;
 
 // 재진입 표시를 켜고 소멸 때 이전 값으로 되돌린다. Write가 쓰고, 시험이 "Write 안" 상태를 만들 때도
 // 쓴다.
-class TraceLogWriteScope {
+class ROCKS_TRACECAPTURE_API TraceLogWriteScope {
 public:
     TraceLogWriteScope() noexcept;
     ~TraceLogWriteScope() noexcept;
@@ -63,7 +63,7 @@ private:
 
 } // namespace detail
 
-class TraceLogSink final : public RuntimeLogSink {
+class ROCKS_TRACECAPTURE_API TraceLogSink final : public RuntimeLogSink {
 public:
     TraceLogSink() noexcept = default;
     TraceLogSink(const TraceLogSink&) = delete;

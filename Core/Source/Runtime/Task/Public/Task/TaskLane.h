@@ -36,7 +36,7 @@ constexpr bool IsValidTaskLane(TaskLane lane) noexcept {
 
 // 현재 스레드에서 가장 안쪽 TaskLaneScope의 lane이다. 범위 밖이면 None이다. 할당·잠금 없이
 // thread-local 값만 읽는다.
-TaskLane CurrentTaskLane() noexcept;
+ROCKS_TASK_API TaskLane CurrentTaskLane() noexcept;
 
 // 범위 동안 현재 스레드의 lane 표지를 lane으로 바꾸고 소멸 때 들어올 때의 값으로 되돌린다. 실행기
 // (DedicatedLane·WorkerScheduler·SerialTaskChain·ParallelFor)가 작업 실행 구간에 직접 둔다. 게임
@@ -47,7 +47,7 @@ TaskLane CurrentTaskLane() noexcept;
 //   RunGameFrame();   // 안에서 CurrentTaskLane() == TaskLane::Game
 //
 // 같은 스레드에서 생성 역순으로 파괴해야 한다(스택 객체로만 쓴다). 복사·이동은 할 수 없다.
-class TaskLaneScope {
+class ROCKS_TASK_API TaskLaneScope {
 public:
     explicit TaskLaneScope(TaskLane lane) noexcept;
     ~TaskLaneScope() noexcept;

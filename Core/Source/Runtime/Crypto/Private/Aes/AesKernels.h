@@ -100,24 +100,25 @@ struct AesKernels {
 
 // cpu가 AES 경량 계층과 libsodium AES 경로의 공통 HW 조건을 채우는가(6.1절 "HW 조건은 하나다").
 // x64는 AES-NI·PCLMULQDQ·AVX(AVX는 OS의 YMM 상태 확인 포함), arm64는 AES·PMULL이다.
-[[nodiscard]] bool HasAesInstructions(const platform::CpuFeatures& cpu) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API bool HasAesInstructions(const platform::CpuFeatures& cpu) noexcept;
 
 // 이 빌드 대상 아키텍처의 커널 표다(감지·자가 시험 전, 정적 수명). AesX64.cpp 또는 AesArm64.cpp가
 // 정의한다. HasAesInstructions가 참인 CPU에서만 표의 함수를 부를 수 있다.
-[[nodiscard]] const AesKernels& GetNativeAesKernels() noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API const AesKernels& GetNativeAesKernels() noexcept;
 
 // cpu가 HW 조건을 채우면 이 아키텍처의 커널 표, 아니면 빈 표다. 자가 시험은 하지 않는다.
-[[nodiscard]] AesKernels SelectAesKernels(const platform::CpuFeatures& cpu) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API AesKernels
+SelectAesKernels(const platform::CpuFeatures& cpu) noexcept;
 
 // candidate로 자가 시험(GCM 알려진 답 AES-128·AES-256, CBC-MAC 알려진 답)을 돌려 모두 맞으면
 // candidate, 하나라도 다르거나 표가 완전하지 않으면 빈 표다. 로그는 남기지 않는다. candidate의
 // 함수는 이 CPU에서 실행할 수 있어야 한다(SelectAesKernels의 결과나 시험이 만든 표).
-[[nodiscard]] AesKernels CheckAesKernels(const AesKernels& candidate) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API AesKernels CheckAesKernels(const AesKernels& candidate) noexcept;
 
 // 이 프로세스가 쓰는 표다. 첫 호출에 SelectAesKernels(QueryCpuFeatures())로 고르고
 // CheckAesKernels로 자가 시험한다. 자가 시험이 실패하면 빈 표가 되고 stderr에 한 줄을 남긴다. 그 뒤
 // 모든 AES 경량 계층 호출은 Unsupported다. 여러 스레드가 동시에 처음 불러도 된다(함수 안 static
 // 초기화). 결과는 프로세스 끝까지 같다.
-[[nodiscard]] const AesKernels& GetAesKernels() noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API const AesKernels& GetAesKernels() noexcept;
 
 } // namespace rocks::crypto::detail

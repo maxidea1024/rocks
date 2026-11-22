@@ -33,7 +33,7 @@ inline constexpr uint32 MaxCrashBudgetMilliseconds = 10 * 60 * 1000;
 // 포인터를 동시에 처음 등록해도 한 칸만 쓴다(CAS에 진 쪽은 이긴 이름을 보고 같으면 그 칸을 쓴다).
 // 표가 차면 0(이름 없음)이고 칸을 덮어쓰지 않는다. 프로세스 전역 표 하나를 쓰고, 시험은 지역 표로
 // 가득 참·동시 등록을 본다.
-struct RunStageNameTable {
+struct ROCKS_PLATFORMBASE_API RunStageNameTable {
     const char* names[MaxRunStageNames] = {};
 
     // name의 (칸 번호 + 1)이다. name이 nullptr이거나 표가 찼으면 0이다.
@@ -194,13 +194,14 @@ struct CrashRecordSnapshot;
 // CrashInfo.json을 buffer에 서식하고 길이(NUL 제외)를 돌려준다. 할당·lock이 없다(크래시 처리
 // 스레드·도우미가 부른다). 버퍼가 모자라면 문자열 칸을 잘라 incompleteReasons에
 // "metadataTruncated"를 남긴다. 결과는 늘 올바른 JSON이다.
-usize FormatCrashMetadata(char* buffer, usize capacity, const CrashRecordSnapshot& record,
-                          const CrashMetadataInput& input) noexcept;
+ROCKS_PLATFORMBASE_API usize FormatCrashMetadata(char* buffer, usize capacity,
+                                                 const CrashRecordSnapshot& record,
+                                                 const CrashMetadataInput& input) noexcept;
 
 // 고정 버퍼 JSON 쓰기 도구다(할당 없음). 문자열은 escape하고, 잘못된 UTF-8은 U+FFFD로 바꾼다.
 // 문자열이 남은 자리(reserve 제외)를 넘으면 잘라 닫고 Truncated()가 참이 된다. 구조 기호·숫자는
 // reserve 자리에 쓰므로 호출자가 reserve보다 작은 고정 부분만 쓰면 결과가 늘 닫힌다.
-class CrashJsonWriter {
+class ROCKS_PLATFORMBASE_API CrashJsonWriter {
 public:
     CrashJsonWriter(char* buffer, usize capacity, usize reserve) noexcept;
 
@@ -256,7 +257,8 @@ private:
 
 // UtcTicks 값(0001-01-01부터 100ns)을 "YYYY-MM-DDTHH:MM:SSZ"(compact면 "YYYYMMDDTHHMMSSZ")로 쓴다.
 // buffer는 21 byte 이상이어야 한다. 결과 길이를 돌려준다.
-usize FormatUtcTicks(int64 ticks, bool compact, char* buffer, usize capacity) noexcept;
+ROCKS_PLATFORMBASE_API usize FormatUtcTicks(int64 ticks, bool compact, char* buffer,
+                                            usize capacity) noexcept;
 
 // 예외 코드·신호 번호를 고정 버퍼에 서식한다(할당·CRT 없음). 결과 길이를 돌려준다.
 usize FormatCodeMessage(char* buffer, usize capacity, const char* prefix, uint32 value,
@@ -351,19 +353,21 @@ struct PeCodeView {
 
 // 메모리에 올라간 PE32+ 이미지 머리를 headerBytes 안에서 읽어 SizeOfImage를 돌려준다. 머리가
 // 잘못됐거나 범위 밖이면 0이다.
-usize PeImageSize(const uint8* image, usize headerBytes) noexcept;
+ROCKS_PLATFORMBASE_API usize PeImageSize(const uint8* image, usize headerBytes) noexcept;
 
 // 메모리에 올라간 PE32+ 이미지(RVA 배치, available byte)에서 CodeView 정보를 읽는다. 머리·디버그
 // 디렉터리·레코드가 하나라도 available 밖이거나 형식이 틀리면 false다(module을 null로 둔다).
 // CodeView가 없는 올바른 이미지는 true이고 hasCodeView가 거짓이다. 할당이 없다.
-bool ParsePeCodeView(const uint8* image, usize available, PeCodeView& out) noexcept;
+ROCKS_PLATFORMBASE_API bool ParsePeCodeView(const uint8* image, usize available,
+                                            PeCodeView& out) noexcept;
 
 // 플랫폼 모듈 정보(Windows PE CodeView) JSON 객체다. 없으면 nullptr다.
 const char* CrashModuleJson() noexcept;
 
 // 연관 파일 칸을 buffer(MaxCrashAnnotationBytes 이상)로 복사한다. 쓰는 도중이라 몇 번 다시 읽어도
 // 일관되지 않으면 false다. 빈 칸은 true이고 bytes가 0이다.
-bool ReadCrashAnnotation(CrashAnnotation slot, char* buffer, usize capacity, usize& bytes) noexcept;
+ROCKS_PLATFORMBASE_API bool ReadCrashAnnotation(CrashAnnotation slot, char* buffer, usize capacity,
+                                                usize& bytes) noexcept;
 
 // 프로세스 시작 UTC(UtcTicks 표현)다. 플랫폼 구현(Windows는 프로세스 생성 시각, POSIX는 설치
 // 시각)이 채운다. 실패하면 false다.

@@ -87,7 +87,7 @@ inline constexpr usize MaxLogRateLimitsBytes = 1024;
 // log.* 핸들을 등록한다(모듈 등록 함수에서 명시적으로 — 전역 생성자 없음). 이미 들어온 층 입력은
 // 등록 때 적용된다. 오류: ConfigContext::Register의 오류(같은 이름을 다른 핸들이 쓰면
 // AlreadyExists·TypeMismatch). 같은 문맥에 다시 부르면 성공이다(멱등).
-Result<void> RegisterLogSettings(config::ConfigContext& context) noexcept;
+ROCKS_LOGHOST_API Result<void> RegisterLogSettings(config::ConfigContext& context) noexcept;
 
 // 레벨 이름(trace·debug·info·warning·error·fatal, 대소문자 무시)을 읽는다. 모르는 이름이면 false다.
 bool TryParseLogLevel(StringView text, LogLevel& level) noexcept;
@@ -264,12 +264,12 @@ constexpr StringView CheckLogRateLimitsSyntax(StringView text) noexcept {
 }
 
 // log.* 핸들이다(정의는 LogHost.cpp, 등록은 RegisterLogSettings — 위 표).
-extern BootCVar<LogHostMode> LogModeVar;
-extern CVar<LogLevel> LogLevelVar;
-extern CVar<String> LogLevelsVar;
+ROCKS_LOGHOST_API extern BootCVar<LogHostMode> LogModeVar;
+ROCKS_LOGHOST_API extern CVar<LogLevel> LogLevelVar;
+ROCKS_LOGHOST_API extern CVar<String> LogLevelsVar;
 extern CVar<String> LogRateLimitsVar;
 extern BootCVar<String> LogConsoleLayoutVar;
-extern BootCVar<bool> LogFileEnabledVar;
+ROCKS_LOGHOST_API extern BootCVar<bool> LogFileEnabledVar;
 extern BootCVar<String> LogFileDirectoryVar;
 extern BootCVar<LogFileFormat> LogFileFormatVar;
 extern BootCVar<String> LogFileLayoutVar;
@@ -281,7 +281,7 @@ extern BootCVar<bool> LogFileEncryptVar;
 extern BootCVar<String> LogFileRecipientKeyVar;
 
 // 설정으로 만든 LogSystem과 sink 묶음이다. 소유 스레드 하나에서 Start·Watch·Stop을 부른다.
-class LogHost {
+class ROCKS_LOGHOST_API LogHost {
 public:
     explicit LogHost(Allocator& allocator) noexcept;
     ~LogHost() noexcept;

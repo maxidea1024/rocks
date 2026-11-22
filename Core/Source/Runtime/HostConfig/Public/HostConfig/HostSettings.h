@@ -75,7 +75,7 @@ struct HostSettingsOptions {
 };
 
 // 이 실행 파일의 플랫폼 이름이다("Windows"·"Mac"·"Android" — 플랫폼 층 폴더 이름).
-StringView HostPlatformName() noexcept;
+ROCKS_HOSTCONFIG_API StringView HostPlatformName() noexcept;
 
 // 플랫폼 기기 특성(DeviceTraitNames::Platform = platform, SystemMemoryMiB =
 // platform::QueryPhysicalMemory)을 traits에 쓴다. 오류: 메모리 조회 실패 Unsupported(플랫폼 이름은
@@ -86,7 +86,8 @@ Result<void> CollectPlatformDeviceTraits(StringView platform,
 // start 폴더부터 위로 올라가며 프로젝트 기술자(`<이름>.rocksproject` 파일)를 가진 첫 폴더를 찾는다.
 // directory에 그 폴더(구분자 '/'), name에 기술자 이름(확장자 제외)을 쓴다. 기술자가 여럿이면 이름
 // byte 순서로 첫 것이다. 오류: 없으면 NotFound, 파일 시스템 오류(FileErrorCode), 할당 실패.
-Result<void> FindProjectFrom(StringView start, String& directory, String& name) noexcept;
+ROCKS_HOSTCONFIG_API Result<void> FindProjectFrom(StringView start, String& directory,
+                                                  String& name) noexcept;
 
 // 실행 파일 폴더부터 FindProjectFrom을 한다(게임·에디터 실행 파일). 오류: 실행 파일 경로를 얻지
 // 못하면 그 오류, 그 밖은 FindProjectFrom과 같다.
@@ -94,14 +95,14 @@ Result<void> FindProjectDirectory(String& directory, String& name) noexcept;
 
 // 사용자 층 뿌리 폴더(platform::StandardDirectory::UserData — 구분자 '/')를 out에 쓴다. 오류:
 // 조회 실패(FileErrorCode), 할당 실패.
-Result<void> UserDataDirectory(String& out) noexcept;
+ROCKS_HOSTCONFIG_API Result<void> UserDataDirectory(String& out) noexcept;
 
 // 실행 파일 위쪽 폴더에서 `Engine/Config` 폴더를 가진 첫 폴더를 찾아 그 `Engine` 경로를 out에 NUL로
 // 끝내 쓴다(빌드 출력이 저장소·설치 폴더 안에 있다). 반환: 경로 byte 수. 오류: 찾지 못하면
 // NotFound, 실행 파일 경로를 얻지 못하면 그 파일 상태의 오류, out이 작으면 CapacityExceeded.
 Result<usize> FindEngineDirectory(Span<char> out) noexcept;
 
-class HostSettings {
+class ROCKS_HOSTCONFIG_API HostSettings {
 public:
     explicit HostSettings(Allocator& allocator) noexcept;
     ~HostSettings() noexcept;

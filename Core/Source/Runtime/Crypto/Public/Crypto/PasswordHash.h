@@ -67,20 +67,20 @@ inline constexpr usize MaxPasswordSecretBytes = 4096;
 // password·salt·cost에서 bytes(16–4096) 길이의 비밀을 뽑는다. salt는 정확히 16 byte다. 인자가 범위
 // 밖이면 InvalidArgument, cost가 상한을 넘으면 CapacityExceeded, Argon2 작업 메모리를 얻지 못하면
 // OutOfMemory다.
-[[nodiscard]] Result<SecretBytes> TryDerivePasswordSecret(Span<const uint8> password,
-                                                          Span<const uint8> salt, PasswordCost cost,
-                                                          usize bytes) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<SecretBytes>
+TryDerivePasswordSecret(Span<const uint8> password, Span<const uint8> salt, PasswordCost cost,
+                        usize bytes) noexcept;
 
 // 비밀번호에서 KdfKey(32 byte)를 얻는다. 오류는 TryDerivePasswordSecret와 같다.
-[[nodiscard]] Result<KdfKey> TryDeriveKdfKeyFromPassword(Span<const uint8> password,
-                                                         Span<const uint8> salt,
-                                                         PasswordCost cost) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<KdfKey>
+TryDeriveKdfKeyFromPassword(Span<const uint8> password, Span<const uint8> salt,
+                            PasswordCost cost) noexcept;
 
 // 저장용 문자열을 만든다(salt는 OS 난수). text에 NUL로 끝나는 문자열을 쓰고 NUL 앞 길이를 돌려준다.
 // text가 PasswordHashStringBytes보다 작으면 CapacityExceeded다. 나머지 오류는
 // TryDerivePasswordSecret와 같다.
-[[nodiscard]] Result<usize> TryHashPassword(Span<const uint8> password, PasswordCost cost,
-                                            Span<char> text) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<usize>
+TryHashPassword(Span<const uint8> password, PasswordCost cost, Span<char> text) noexcept;
 
 // 저장된 문자열로 비밀번호를 확인한다. 맞으면 성공이다.
 // - 비밀번호가 다르거나 문자열 형식이 틀리면 AuthenticationFailed다(저장소에서 온 byte다).
@@ -88,13 +88,14 @@ inline constexpr usize MaxPasswordSecretBytes = 4096;
 //   libsodium 형식(salt 16·hash 32 byte, 127자 이하)보다 긴 문자열은 Unsupported다.
 // - 문자열의 비용이 상한을 넘으면 계산하지 않고 CapacityExceeded다.
 // - Argon2 작업 메모리를 얻지 못하면 OutOfMemory다(비밀번호 불일치와 구분한다).
-[[nodiscard]] Result<void> TryVerifyPassword(StringView encoded,
-                                             Span<const uint8> password) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void> TryVerifyPassword(StringView encoded,
+                                                              Span<const uint8> password) noexcept;
 
 // 저장된 문자열의 반복·메모리가 cost와 다르면 true다(다음 로그인 때 다시 해시해 저장할 때가
 // 되었다). lane 수와 salt·hash 길이는 비교하지 않는다(libsodium 규칙). cost가 범위 밖이면
 // InvalidArgument, 상한을 넘으면 CapacityExceeded, 문자열 형식이 틀리면 AuthenticationFailed,
 // Argon2id v19가 아니면 Unsupported다.
-[[nodiscard]] Result<bool> TryPasswordNeedsRehash(StringView encoded, PasswordCost cost) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<bool> TryPasswordNeedsRehash(StringView encoded,
+                                                                   PasswordCost cost) noexcept;
 
 } // namespace rocks::crypto

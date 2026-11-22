@@ -40,6 +40,6 @@ struct CryptoRuntimeInfo {
 };
 
 // 처음 호출할 때 암호 모듈을 초기화하고 이후 같은 값을 돌려준다. 여러 스레드에서 불러도 된다.
-const CryptoRuntimeInfo& GetCryptoRuntimeInfo() noexcept;
+ROCKS_CRYPTO_API const CryptoRuntimeInfo& GetCryptoRuntimeInfo() noexcept;
 
 } // namespace rocks::crypto

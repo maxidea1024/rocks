@@ -142,7 +142,7 @@ struct ProcessRunResult;
 // 후속: 환경 변수 지정, 분리 실행, 프로세스 정체((PID, 시작 시각) 또는 handle), 권한 상승
 // 조회·실행, 다른 스레드의 취소, 정상 종료 요청(SIGTERM·CTRL_BREAK), 숨김 GUI 실행, PATH 검색.
 // Android는 아직 지원하지 않는다(Start·RunProcess가 Unsupported).
-class Process final {
+class ROCKS_PLATFORMBASE_API Process final {
 public:
     Process() noexcept = default;
     ~Process() noexcept;
@@ -209,8 +209,8 @@ public:
     struct State;
 
 private:
-    friend ProcessRunResult RunProcess(const ProcessStartInfo& info,
-                                       const ProcessRunOptions& options) noexcept;
+    friend ROCKS_PLATFORMBASE_API ProcessRunResult
+    RunProcess(const ProcessStartInfo& info, const ProcessRunOptions& options) noexcept;
 
     State* state_ = nullptr;
 };
@@ -260,18 +260,18 @@ struct [[nodiscard]] ProcessRunResult {
 //   auto run = platform::RunProcess(info, options);
 //   if (run.status && !run.timedOut && run.exit.kind == platform::ProcessExitKind::Exited &&
 //       run.exit.code == 0) { ... }
-ProcessRunResult RunProcess(const ProcessStartInfo& info,
-                            const ProcessRunOptions& options) noexcept;
+ROCKS_PLATFORMBASE_API ProcessRunResult RunProcess(const ProcessStartInfo& info,
+                                                   const ProcessRunOptions& options) noexcept;
 
 // 현재 프로세스의 OS 프로세스 ID다.
-uint32 CurrentProcessId() noexcept;
+ROCKS_PLATFORMBASE_API uint32 CurrentProcessId() noexcept;
 
 // processId의 프로세스가 아직 있는지 확인한다(UE IsApplicationRunning 대응). 권한이 없어 확인할 수
 // 없는 프로세스도 있다고 본다. 끝난 프로세스의 의미는 플랫폼마다 다르다: Windows는 handle이 열려
 // 있어도 끝났으면 false, POSIX는 끝났지만 회수되지 않은(zombie) 프로세스도 true다. PID는 재사용될
 // 수 있으므로 오래 끝난 프로세스의 PID에 대해서는 다른 프로세스를 보고 true일 수 있다(부모 감시는
 // 수명 계약의 lifeline을 먼저 쓴다). 0은 false다.
-bool IsProcessRunning(uint32 processId) noexcept;
+ROCKS_PLATFORMBASE_API bool IsProcessRunning(uint32 processId) noexcept;
 
 // 현재 실행 파일의 절대 경로를 UTF-8로 buffer에 쓰고 길이를 bytes에 둔다(NUL 포함하지 않음,
 // buffer에는 NUL도 쓴다). macOS·Android는 link를 푼 경로이고 Windows는 로더가 쓴 경로 그대로다.

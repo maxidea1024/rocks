@@ -31,8 +31,12 @@ namespace rocks {
 
 // "{}"는 36자 소문자 표준 표기다. spec("{:...}")은 받지 않는다.
 template <>
-struct ROCKS_CORE_API Formatter<Guid> {
-    static Result<void> Format(StringBuilderBase& out, const Guid& value, StringView spec) noexcept;
+struct Formatter<Guid> {
+    // 클래스 전체가 아니라 Format만 export한다 — dllimport 클래스의 constexpr 멤버(IsValidSpec)는
+    // 상수식에서 쓸 수 없다(로그 spec 검사가 consteval — Docs/Design/BuildTargets.ko.md 3.8절
+    // BS8d5).
+    static ROCKS_CORE_API Result<void> Format(StringBuilderBase& out, const Guid& value,
+                                              StringView spec) noexcept;
 
     static constexpr bool IsValidSpec(StringView spec) noexcept {
         return spec.IsEmpty();

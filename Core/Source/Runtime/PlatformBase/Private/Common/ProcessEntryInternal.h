@@ -14,13 +14,14 @@ enum class TerminationRequestOutcome : uint8 {
 
 // 처리기 칸을 handler로 채운다(비어 있을 때만). 받은 요청 수를 0으로 둔다. 이미 차 있거나 handler가
 // nullptr이면 false다.
-bool AcquireTerminationRequestHandler(TerminationRequestHandler handler) noexcept;
+ROCKS_PLATFORMBASE_API bool
+AcquireTerminationRequestHandler(TerminationRequestHandler handler) noexcept;
 
 // 처리기 칸을 비우고 받은 요청 수를 지운다.
-void ReleaseTerminationRequestHandler() noexcept;
+ROCKS_PLATFORMBASE_API void ReleaseTerminationRequestHandler() noexcept;
 
 // OS 처리 문맥에서 요청 하나를 판정한다. 첫 요청이면 처리기를 부르고 Handled다(원자 연산만 쓰므로
 // async-signal-safe). 시험은 OS 신호 없이 이 판정을 직접 부른다.
-TerminationRequestOutcome DispatchTerminationRequest() noexcept;
+ROCKS_PLATFORMBASE_API TerminationRequestOutcome DispatchTerminationRequest() noexcept;
 
 } // namespace rocks::platform::detail

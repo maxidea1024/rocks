@@ -27,7 +27,7 @@ namespace rocks::config {
 // 설정 CF4의 설정 struct(DeviceProfileSettings)를 문맥에 등록한다(호스트 부트의 설정 등록 단계 —
 // 파일보다 먼저). 리플렉션 타입은 Config 모듈 등록(generated::Config::RegisterModuleTypes)이 한다.
 // 오류: RegisterSettings의 오류.
-Result<void> RegisterDeviceProfileSettings(ConfigContext& context) noexcept;
+ROCKS_CONFIG_API Result<void> RegisterDeviceProfileSettings(ConfigContext& context) noexcept;
 
 // 기기 프로필 층의 태그다.
 inline constexpr StringView DeviceProfileTag = "DeviceProfile";

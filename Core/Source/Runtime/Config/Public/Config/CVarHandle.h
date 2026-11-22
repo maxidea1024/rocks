@@ -53,12 +53,13 @@ namespace detail {
 // 바로 검사한다(Clamp는 보정한다). 오류: 묶음 없음 NotFound, 출시 빌드 치트 변수 Unsupported, 층·
 // 범위·Validate 위반 InvalidArgument, 문맥이 없어졌으면 ShuttingDown, 큐가 가득 차면 Busy, 할당
 // 실패.
-Result<void> SubmitSet(const VarDefinition& definition, ScalarValue value,
-                       const SetOptions& options, SourceLocation where) noexcept;
+ROCKS_CONFIG_API Result<void> SubmitSet(const VarDefinition& definition, ScalarValue value,
+                                        const SetOptions& options, SourceLocation where) noexcept;
 
 // 이 스레드에 묶인 문맥의 쓰기 큐에 (layer, tag)의 값 지우기를 넣는다. 오류: SubmitSet과 같다(값
 // 검사 없음).
-Result<void> SubmitClear(const VarDefinition& definition, const SetOptions& options) noexcept;
+ROCKS_CONFIG_API Result<void> SubmitClear(const VarDefinition& definition,
+                                          const SetOptions& options) noexcept;
 
 // 칸이 없을 때의 값이다(정의의 기본값 — Name은 pool 토큰을 상수로 담을 수 없으므로 None).
 template <class T>

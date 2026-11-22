@@ -20,10 +20,10 @@ namespace rocks::crypto {
 // output을 난수로 채운다. 빈 Span은 성공이다. OS 난수가 실패하면 DependencyFailed이고 output 전체를
 // 0으로 지운다. (libsodium 내부 난수 경로는 실패를 돌려줄 수 없어 Fatal이다. 이 함수는 호출자가
 // 처리할 수 있게 오류로 돌려준다.)
-[[nodiscard]] Result<void> TryFillRandom(Span<uint8> output) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void> TryFillRandom(Span<uint8> output) noexcept;
 
 // [0, upperBound) 균등 분포 정수다(나머지 편향 없음, 거부 표본추출). upperBound가 0이면
 // InvalidArgument다.
-[[nodiscard]] Result<uint32> TryRandomUniform(uint32 upperBound) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<uint32> TryRandomUniform(uint32 upperBound) noexcept;
 
 } // namespace rocks::crypto

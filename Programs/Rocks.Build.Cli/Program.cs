@@ -522,6 +522,16 @@ namespace Rocks.Build.Cli
                         return 1;
                     }
 
+                    // Modular 시험 타깃(Docs/Design/BuildTargets.ko.md 3.8절 BS8d5)은 native 시험 실행 파일만 돈다. host 검사(self·native·meta)는
+                    // 링크 방식과 무관한 도구 검사이거나 Monolithic 시험 프로그램(Launch 시험 프로그램·크래시 probe 모듈 이름)을 보는 하니스라
+                    // Monolithic 시험 타깃이 돈다. Modular 크래시·Launch 하니스는 후속(BS8d6)이다.
+                    if (rules.Target.LinkType == NativeLinkType.Modular)
+                    {
+                        Console.WriteLine("Modular: native tests only; host self, native harness, and meta checks run with the Monolithic test target.");
+                        var modularCompleted = await evidence.FinishAsync();
+                        return modularCompleted.Status == "PASS" ? 0 : 1;
+                    }
+
                     // 모듈 API 매크로(Docs/Design/BuildTargets.ko.md 3.8절 BD27)는 빌드가 정의 헤더로 넣는다. 정의 헤더 없이 헤더를 컴파일하는
                     // 검사(native 컴파일 시험·생성 헤더 검증)는 Monolithic 값(빈 값)을 받는다.
                     string[] apiMacros = [.. modules.Where(module => !module.ThirdParty)

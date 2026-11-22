@@ -54,33 +54,40 @@ using Sha3_256Digest = FixedDigest<Sha3_256Tag, 32>;
 using Sha3_512Digest = FixedDigest<Sha3_512Tag, 64>;
 
 // BLAKE2b다. digest.Size()가 출력 길이다(16–64 byte, 아니면 InvalidArgument).
-[[nodiscard]] Result<void> TryBlake2b(Span<const uint8> input, Span<uint8> digest) noexcept;
-[[nodiscard]] Result<void> TryBlake2b(Span<const Span<const uint8>> pieces,
-                                      Span<uint8> digest) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void> TryBlake2b(Span<const uint8> input,
+                                                       Span<uint8> digest) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void> TryBlake2b(Span<const Span<const uint8>> pieces,
+                                                       Span<uint8> digest) noexcept;
 
-[[nodiscard]] Sha512Digest Sha512(Span<const uint8> input) noexcept;
-[[nodiscard]] Sha512Digest Sha512(Span<const Span<const uint8>> pieces) noexcept;
-[[nodiscard]] Sha3_256Digest Sha3_256(Span<const uint8> input) noexcept;
-[[nodiscard]] Sha3_256Digest Sha3_256(Span<const Span<const uint8>> pieces) noexcept;
-[[nodiscard]] Sha3_512Digest Sha3_512(Span<const uint8> input) noexcept;
-[[nodiscard]] Sha3_512Digest Sha3_512(Span<const Span<const uint8>> pieces) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Sha512Digest Sha512(Span<const uint8> input) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Sha512Digest Sha512(Span<const Span<const uint8>> pieces) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Sha3_256Digest Sha3_256(Span<const uint8> input) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Sha3_256Digest
+Sha3_256(Span<const Span<const uint8>> pieces) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Sha3_512Digest Sha3_512(Span<const uint8> input) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Sha3_512Digest
+Sha3_512(Span<const Span<const uint8>> pieces) noexcept;
 
 // XOF: output.Size()만큼 짜낸다(0이면 아무것도 하지 않는 성공). TurboSHAKE의 domain은
 // 0x01–0x7F다(기본 0x1F, 밖이면 InvalidArgument). 같은 입력에서 짧은 출력은 긴 출력의 앞부분이다.
-[[nodiscard]] Result<void> TryShake128(Span<const uint8> input, Span<uint8> output) noexcept;
-[[nodiscard]] Result<void> TryShake128(Span<const Span<const uint8>> pieces,
-                                       Span<uint8> output) noexcept;
-[[nodiscard]] Result<void> TryShake256(Span<const uint8> input, Span<uint8> output) noexcept;
-[[nodiscard]] Result<void> TryShake256(Span<const Span<const uint8>> pieces,
-                                       Span<uint8> output) noexcept;
-[[nodiscard]] Result<void> TryTurboShake128(Span<const uint8> input, Span<uint8> output,
-                                            uint8 domain = 0x1F) noexcept;
-[[nodiscard]] Result<void> TryTurboShake128(Span<const Span<const uint8>> pieces,
-                                            Span<uint8> output, uint8 domain = 0x1F) noexcept;
-[[nodiscard]] Result<void> TryTurboShake256(Span<const uint8> input, Span<uint8> output,
-                                            uint8 domain = 0x1F) noexcept;
-[[nodiscard]] Result<void> TryTurboShake256(Span<const Span<const uint8>> pieces,
-                                            Span<uint8> output, uint8 domain = 0x1F) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void> TryShake128(Span<const uint8> input,
+                                                        Span<uint8> output) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void> TryShake128(Span<const Span<const uint8>> pieces,
+                                                        Span<uint8> output) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void> TryShake256(Span<const uint8> input,
+                                                        Span<uint8> output) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void> TryShake256(Span<const Span<const uint8>> pieces,
+                                                        Span<uint8> output) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void>
+TryTurboShake128(Span<const uint8> input, Span<uint8> output, uint8 domain = 0x1F) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void> TryTurboShake128(Span<const Span<const uint8>> pieces,
+                                                             Span<uint8> output,
+                                                             uint8 domain = 0x1F) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void>
+TryTurboShake256(Span<const uint8> input, Span<uint8> output, uint8 domain = 0x1F) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void> TryTurboShake256(Span<const Span<const uint8>> pieces,
+                                                             Span<uint8> output,
+                                                             uint8 domain = 0x1F) noexcept;
 
 enum class HashAlgorithm : uint8 {
     Blake2b,
@@ -96,7 +103,7 @@ enum class HashAlgorithm : uint8 {
 // - TryFinish 뒤에는 Reset 전까지 TryUpdate·TryFinish가 InvalidArgument다. 기본 생성한 객체와
 //   이동된 객체는 StaleHandle이다(Algorithm()·DigestBytes()는 이전 값을 그대로 돌려준다).
 // - TryFinish 직후, Reset 전, 소멸 때 상태를 지운다.
-class HashState {
+class ROCKS_CRYPTO_API HashState {
 public:
     HashState() noexcept = default;
     ~HashState() noexcept;
@@ -148,7 +155,7 @@ enum class XofAlgorithm : uint8 {
 
 // 증분 XOF다. 입력을 넣은 뒤 TrySqueeze를 여러 번 불러 이어지는 출력을 얻는다. 첫 TrySqueeze 뒤에는
 // Reset 전까지 TryUpdate가 InvalidArgument다. 상태·수명 규칙은 HashState와 같다.
-class XofState {
+class ROCKS_CRYPTO_API XofState {
 public:
     XofState() noexcept = default;
     ~XofState() noexcept;

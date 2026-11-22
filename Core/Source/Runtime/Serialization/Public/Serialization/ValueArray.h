@@ -53,7 +53,7 @@ namespace rocks {
 //
 // 사용 예:
 //   auto shape = ValueArrayElementShape(WireType::Guid); // {16, true}
-Result<WireValueShape> ValueArrayElementShape(uint32 elementWire) noexcept;
+ROCKS_SERIALIZATION_API Result<WireValueShape> ValueArrayElementShape(uint32 elementWire) noexcept;
 
 inline Result<WireValueShape> ValueArrayElementShape(WireType elementWire) noexcept {
     return ValueArrayElementShape(static_cast<uint32>(elementWire));

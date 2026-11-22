@@ -172,18 +172,18 @@ private:
 // 사용 예: auto result = root / "Content" / "Textures"; if (!result) { ... }
 // 연쇄 중 최초 오류는 유지된다. 양쪽이 String이면 왼쪽 allocator를 쓰고,
 // StringView / String은 오른쪽 allocator를 쓴다. 원본과 allocator는 호출 중 살아 있어야 한다.
-Result<String> operator/(const String& left, StringView right) noexcept;
-Result<String> operator/(const String& left, const String& right) noexcept;
-Result<String> operator/(StringView left, const String& right) noexcept;
-Result<String> operator/(Result<String>&& left, StringView right) noexcept;
-Result<String> operator/(Result<String>&& left, const String& right) noexcept;
+ROCKS_CORE_API Result<String> operator/(const String& left, StringView right) noexcept;
+ROCKS_CORE_API Result<String> operator/(const String& left, const String& right) noexcept;
+ROCKS_CORE_API Result<String> operator/(StringView left, const String& right) noexcept;
+ROCKS_CORE_API Result<String> operator/(Result<String>&& left, StringView right) noexcept;
+ROCKS_CORE_API Result<String> operator/(Result<String>&& left, const String& right) noexcept;
 
 // 실패 시 왼쪽의 내용·버퍼 주소·allocator는 그대로다. 오른쪽이 왼쪽의 view여도 된다.
 // 여유 용량 내에서는 자기 buffer를 빌린 suffix도 할당 없이 처리하고 주소를 보존한다.
 // 새 저장소가 필요한 연산은 기존 String의 allocator 반환 순서 규약을 따른다.
 // 특히 StackAllocator는 버퍼 성장 시 LIFO 반환이 어려우므로 미리 용량을 확보해야 한다.
 // 반환 결과를 확인해야 하며, 객체 수명과 외부 접근 동기화는 String 규약을 따른다.
-Result<void> operator/=(String& left, StringView right) noexcept;
-Result<void> operator/=(String& left, const String& right) noexcept;
+ROCKS_CORE_API Result<void> operator/=(String& left, StringView right) noexcept;
+ROCKS_CORE_API Result<void> operator/=(String& left, const String& right) noexcept;
 
 } // namespace rocks

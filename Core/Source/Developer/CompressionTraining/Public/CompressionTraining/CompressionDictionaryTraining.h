@@ -72,7 +72,7 @@ struct DictionaryTrainingResult {
 // 인자 규칙(어기면 InvalidArgument): 표본 5개 이상·2^32 − 2개 이하, 길이 합 = samples 크기, 8 ≤ 합
 // < 2^32 − 1, capacity·압축 수준·사전 ID·k·d 범위(위 설정 설명), samples·sampleSizes가 output
 // 저장소와 겹치지 않음.
-Result<DictionaryTrainingResult>
+ROCKS_COMPRESSIONTRAINING_API Result<DictionaryTrainingResult>
 TryTrainCompressionDictionary(Span<const uint8> samples, Span<const usize> sampleSizes,
                               const DictionaryTrainingSettings& settings,
                               Array<uint8>& output) noexcept;
@@ -89,10 +89,9 @@ struct DictionaryFinalizeSettings {
 // 쓴다(0개도 된다). 결과는 헤더(최대 256byte) + max(내용, 8)byte이며 내용을 자르지 않는다.
 // 인자 규칙(어기면 InvalidArgument): 내용 ≤ MaxDictionaryBytes − 256, 표본 길이 합 = samples 크기 <
 // 2^32 − 1, 압축 수준·사전 ID 범위, content·samples·sampleSizes가 output 저장소와 겹치지 않음.
-Result<usize> TryFinalizeCompressionDictionary(Span<const uint8> content, Span<const uint8> samples,
-                                               Span<const usize> sampleSizes,
-                                               const DictionaryFinalizeSettings& settings,
-                                               Array<uint8>& output) noexcept;
+ROCKS_COMPRESSIONTRAINING_API Result<usize> TryFinalizeCompressionDictionary(
+    Span<const uint8> content, Span<const uint8> samples, Span<const usize> sampleSizes,
+    const DictionaryFinalizeSettings& settings, Array<uint8>& output) noexcept;
 
 // 형식 사전(학습 결과 등)의 내용은 그대로 두고 다른 압축 수준·사전 ID로 엔트로피 표를 다시 만든다.
 // 한 번 학습한 사전으로 수준별 사전을 만들 때 쓴다(재학습 없이). 같은 내용이면 ID 0(유도)은 같은
@@ -103,10 +102,8 @@ Result<usize> TryFinalizeCompressionDictionary(Span<const uint8> content, Span<c
 //   TryRefinalizeCompressionDictionary(trained.View(), samples.View(), sizes.View(), level19, out);
 // 오류: dictionary가 zstd 형식 사전이 아니거나 손상·MaxDictionaryBytes 초과면 InvalidArgument, 그
 // 밖은 TryFinalizeCompressionDictionary와 같다.
-Result<usize> TryRefinalizeCompressionDictionary(Span<const uint8> dictionary,
-                                                 Span<const uint8> samples,
-                                                 Span<const usize> sampleSizes,
-                                                 const DictionaryFinalizeSettings& settings,
-                                                 Array<uint8>& output) noexcept;
+ROCKS_COMPRESSIONTRAINING_API Result<usize> TryRefinalizeCompressionDictionary(
+    Span<const uint8> dictionary, Span<const uint8> samples, Span<const usize> sampleSizes,
+    const DictionaryFinalizeSettings& settings, Array<uint8>& output) noexcept;
 
 } // namespace rocks

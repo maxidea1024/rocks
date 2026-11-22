@@ -25,7 +25,7 @@ namespace rocks {
 //   if (!pool.Initialize(allocator, 64, 4096)) { ... }
 //   LogBlock block;
 //   if (pool.TryBorrow(block)) { ...; pool.Release(block.index); }
-class LogBlockPool final : public LogBlockProvider {
+class ROCKS_CORE_API LogBlockPool final : public LogBlockProvider {
 public:
     LogBlockPool() noexcept = default;
     LogBlockPool(const LogBlockPool&) = delete;

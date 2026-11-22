@@ -19,6 +19,11 @@ using namespace rocks;
 // 표에 행을 싣지만, 실행 파일 Load는 그 모듈을 시작하지 않고 시험은 그 헤더를 보지 못한다.
 namespace dynamic_module_tests_file {
 
+#if ROCKS_MONOLITHIC
+// 정적 모듈 표(GeneratedModuleTable)로 로더를 하나 더 만드는 시험은 Monolithic에서만 돈다 —
+// Modular에는 그 표가 없고 manifest 로더의 행은 진입 함수가 비어
+// 있다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d5).
+
 constexpr usize RowNone = static_cast<usize>(-1);
 
 usize RowIndex(ModuleTable table, const char* name) noexcept {
@@ -109,5 +114,7 @@ TEST(ModuleLoaderDynamicModuleJoinsTheCurrentGroup) {
     loader->ShutdownGroup(ModuleGroup::Process);
     CHECK(HasState(*loader, name, ModuleState::Stopped));
 }
+
+#endif
 
 } // namespace dynamic_module_tests_file

@@ -58,7 +58,7 @@ struct StreamState;
 // 나누기·출력 창 크기와 무관하게 같은 byte다(frame에 원본 크기를 기록하지 않는다).
 // 메모리: zlib deflate 약 256KiB, zstd는 크기를 모르므로 수준별 표를 최대로 쓴다(수준 19는
 // 약 90MiB), Lz4Frame은 수준 1 약 270KiB·HC 약 580KiB(블록 버퍼 192KiB와 작은 창용 64KiB 포함).
-class CompressStream {
+class ROCKS_COMPRESSION_API CompressStream {
 public:
     CompressStream() noexcept = default;
     ~CompressStream() noexcept;
@@ -151,7 +151,7 @@ struct DecompressStreamLimits {
 //   표(최악 약 2.6MiB)를 쓰고, ring buffer를 늘리는 순간 이전 것과 함께 있어 최고 약 1.5 × window
 //   + 표다. 해제기 상태를 다시 쓸 수 없어 Reset이 이전 상태를 반환하고 새로 만든다(이때
 //   OutOfMemory가 날 수 있다).
-class DecompressStream {
+class ROCKS_COMPRESSION_API DecompressStream {
 public:
     DecompressStream() noexcept = default;
     ~DecompressStream() noexcept;

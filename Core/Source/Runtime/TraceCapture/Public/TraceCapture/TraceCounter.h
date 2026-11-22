@@ -7,7 +7,7 @@
 namespace rocks {
 
 // 표준 채널 "counter"다. 세션이 Start 때 등록하며 처음에는 꺼져 있다.
-extern TraceChannel TraceCounterChannel;
+ROCKS_TRACECAPTURE_API extern TraceChannel TraceCounterChannel;
 
 enum class TraceCounterKind : uint8 {
     Integer = 0,
@@ -51,7 +51,7 @@ void EmitTraceCounter(TraceCounter& counter, uint64 bits) noexcept;
 // - OnChange 방식은 여러 스레드가 동시에 바꾸면 같은 값을 한 번 더 낼 수 있다(빠뜨리지는 않는다).
 // 인자 오류: 정수 카운터에 SetFloat·AddFloat, 실수 카운터에 Set·Add를 부르면 Fatal이다.
 // 수명: 정적 저장소에 두고 이름은 정적 수명 문자열이다(constexpr 생성자, 상수 초기화).
-class TraceCounter {
+class ROCKS_TRACECAPTURE_API TraceCounter {
 public:
     constexpr TraceCounter(const char* name, TraceCounterKind kind,
                            TraceCounterUnit unit = TraceCounterUnit::Count,

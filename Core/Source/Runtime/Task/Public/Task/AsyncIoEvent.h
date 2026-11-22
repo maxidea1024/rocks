@@ -34,12 +34,14 @@
 namespace rocks {
 
 // IO 결과를 이벤트 완료 오류로 바꾼다(None이면 Trigger).
-ErrorCode AsyncIoCompletionError(const platform::AsyncIoResult& result,
-                                 usize expectedBytes) noexcept;
+ROCKS_TASK_API ErrorCode AsyncIoCompletionError(const platform::AsyncIoResult& result,
+                                                usize expectedBytes) noexcept;
 
-Result<void> TrySubmitReadEvent(platform::AsyncReadFile& file, platform::AsyncIoRequest& request,
-                                uint64 offset, void* destination, usize bytes,
-                                WorkerTaskEvent&& event, Allocator& allocator) noexcept;
+ROCKS_TASK_API Result<void> TrySubmitReadEvent(platform::AsyncReadFile& file,
+                                               platform::AsyncIoRequest& request, uint64 offset,
+                                               void* destination, usize bytes,
+                                               WorkerTaskEvent&& event,
+                                               Allocator& allocator) noexcept;
 
 Result<void> TrySubmitWriteEvent(platform::AsyncWriteFile& file, platform::AsyncIoRequest& request,
                                  uint64 offset, const void* source, usize bytes,

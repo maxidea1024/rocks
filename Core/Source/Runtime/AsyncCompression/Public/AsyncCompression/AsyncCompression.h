@@ -52,7 +52,7 @@ namespace rocks {
 // - 같은 객체에 대한 제출·결과 조회·소멸은 한 스레드에서 한다. 다른 스레드는 Handle().Clone()
 //   으로 얻은 handle로 Wait·Status를 한다(재제출이 handle을 바꾸기 때문이다).
 // - terminal 이후 같은 객체로 다시 제출할 수 있다.
-class CompressionTask {
+class ROCKS_ASYNCCOMPRESSION_API CompressionTask {
 public:
     CompressionTask() noexcept = default;
     ~CompressionTask() noexcept;
@@ -99,38 +99,40 @@ private:
 // TryCompressAppend를 worker에서 실행한다. 제출 실패 시 task·output은 바뀌지 않는다.
 // 오류: 동기 검증 오류(겹침·Lz4 한계), 진행 중인 task Busy, 할당 실패, scheduler 거부(ShuttingDown·
 // CapacityExceeded·WrongContext·InvalidArgument·OutOfMemory)를 그대로 돌려준다.
-Result<void> TrySubmitCompress(WorkerScheduler& scheduler, CompressionTask& task,
-                               const CompressionSettings& settings, Span<const uint8> source,
-                               Array<uint8>& output,
-                               Span<const WorkerTaskHandle> dependencies = {}) noexcept;
+ROCKS_ASYNCCOMPRESSION_API Result<void>
+TrySubmitCompress(WorkerScheduler& scheduler, CompressionTask& task,
+                  const CompressionSettings& settings, Span<const uint8> source,
+                  Array<uint8>& output, Span<const WorkerTaskHandle> dependencies = {}) noexcept;
 
 // TryDecompressAppend를 worker에서 실행한다. 계약은 TrySubmitCompress와 같다.
-Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& task,
-                                 CompressionFormat format, Span<const uint8> source,
-                                 usize maxOutputBytes, Array<uint8>& output,
-                                 Span<const WorkerTaskHandle> dependencies = {}) noexcept;
+ROCKS_ASYNCCOMPRESSION_API Result<void>
+TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& task, CompressionFormat format,
+                    Span<const uint8> source, usize maxOutputBytes, Array<uint8>& output,
+                    Span<const WorkerTaskHandle> dependencies = {}) noexcept;
 
 // 크기를 아는 TryDecompress를 worker에서 실행한다. destination과 scratch는 terminal까지 유효해야
 // 한다.
-Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& task,
-                                 CompressionFormat format, Span<const uint8> source,
-                                 Span<uint8> destination, Allocator& scratch,
-                                 Span<const WorkerTaskHandle> dependencies = {}) noexcept;
+ROCKS_ASYNCCOMPRESSION_API Result<void>
+TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& task, CompressionFormat format,
+                    Span<const uint8> source, Span<uint8> destination, Allocator& scratch,
+                    Span<const WorkerTaskHandle> dependencies = {}) noexcept;
 
 // 사전 변형이다. 각각 사전을 쓰는 TryCompressAppend·TryDecompressAppend·TryDecompress를 worker에서
 // 실행한다. 작업이 사전 handle 복사본을 가지므로 제출 뒤 호출자의 handle을 놓아도 된다. 빈 handle은
 // StaleHandle이다.
-Result<void> TrySubmitCompress(WorkerScheduler& scheduler, CompressionTask& task,
-                               const CompressDictionary& dictionary, Span<const uint8> source,
-                               Array<uint8>& output,
-                               Span<const WorkerTaskHandle> dependencies = {}) noexcept;
-Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& task,
-                                 const DecompressDictionary& dictionary, Span<const uint8> source,
-                                 usize maxOutputBytes, Array<uint8>& output,
-                                 Span<const WorkerTaskHandle> dependencies = {}) noexcept;
-Result<void> TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& task,
-                                 const DecompressDictionary& dictionary, Span<const uint8> source,
-                                 Span<uint8> destination, Allocator& scratch,
-                                 Span<const WorkerTaskHandle> dependencies = {}) noexcept;
+ROCKS_ASYNCCOMPRESSION_API Result<void>
+TrySubmitCompress(WorkerScheduler& scheduler, CompressionTask& task,
+                  const CompressDictionary& dictionary, Span<const uint8> source,
+                  Array<uint8>& output, Span<const WorkerTaskHandle> dependencies = {}) noexcept;
+ROCKS_ASYNCCOMPRESSION_API Result<void>
+TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& task,
+                    const DecompressDictionary& dictionary, Span<const uint8> source,
+                    usize maxOutputBytes, Array<uint8>& output,
+                    Span<const WorkerTaskHandle> dependencies = {}) noexcept;
+ROCKS_ASYNCCOMPRESSION_API Result<void>
+TrySubmitDecompress(WorkerScheduler& scheduler, CompressionTask& task,
+                    const DecompressDictionary& dictionary, Span<const uint8> source,
+                    Span<uint8> destination, Allocator& scratch,
+                    Span<const WorkerTaskHandle> dependencies = {}) noexcept;
 
 } // namespace rocks

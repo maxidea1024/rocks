@@ -118,7 +118,7 @@ private:
 //   scheduler 밖(IO 등)의 완료는 기다리지 않는다. 늦은 Trigger는 false다.
 // - 이동 가능하다. 빈 이벤트(기본 생성·이동된 뒤)의 Trigger·Fail은 StaleHandle이다. 완료 함수는
 //   여러 스레드가 동시에 불러도 되지만, 이동·소멸은 같은 객체의 어떤 호출과도 겹치지 않아야 한다.
-class WorkerTaskEvent {
+class ROCKS_TASK_API WorkerTaskEvent {
 public:
     WorkerTaskEvent() noexcept = default;
     WorkerTaskEvent(WorkerTaskEvent&& other) noexcept = default;

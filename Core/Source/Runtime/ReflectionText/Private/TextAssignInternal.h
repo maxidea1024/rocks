@@ -61,7 +61,7 @@ private:
 // 색인해 넣기 한 번이 경로 길이에 비례하고(대입 수에 선형), 해시가 같은 경로끼리만
 // SamePropertyPath로 비교한다. 해시는 SamePropertyPath의 같음과 맞춘다(Name key는 Core Name 비교
 // 규칙 — 대소문자 무시·번호 접미·None 동치).
-class PathSet {
+class ROCKS_REFLECTIONTEXT_API PathSet {
 public:
     explicit PathSet(Allocator& allocator, HashSeed seed = ProcessHashSeed()) noexcept
         : paths_(allocator), heads_(allocator), next_(allocator), seed_(seed) {

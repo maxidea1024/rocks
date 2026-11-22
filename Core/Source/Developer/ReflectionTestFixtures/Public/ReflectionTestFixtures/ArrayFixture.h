@@ -70,7 +70,7 @@ struct ArrayOwner : Object {
 
     // 정의는 Private/FixtureState.cpp다(공개 헤더에 쓰기 가능한 정적 저장소를 두지 않는다 —
     // BuildTargets BD29).
-    static uint32 constructed;
+    ROCKS_REFLECTIONTESTFIXTURES_API static uint32 constructed;
     ROCKS_PROPERTY() Array<bool> flags;
     ROCKS_PROPERTY() Array<uint64> longs;
     ROCKS_PROPERTY() Array<double> doubles;

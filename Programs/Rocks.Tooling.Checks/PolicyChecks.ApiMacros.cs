@@ -10,13 +10,41 @@ public static partial class PolicyChecks
     private static readonly Regex ModuleApiMacroToken = new(@"\bROCKS_([A-Z0-9]+)_API\b", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(10));
 
     /// <summary>
-    /// 비공개 헤더지만 규칙 파일이 비공개 include 디렉터리로 다른 모듈에 일부러 보여 주는 내부 헤더다. 그 선언은 다른 모듈이 링크하므로
-    /// API 매크로를 붙인다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d2 규칙 5 — AsyncCompression이 같은 코덱·블록 인코딩을 쓴다).
+    /// 비공개 헤더지만 선언에 API 매크로를 붙이는 내부 헤더다(Docs/Design/BuildTargets.ko.md 3.8절 BS8d2 규칙 5의 예외). 둘이다:
+    /// <list type="bullet">
+    /// <item>규칙 파일이 비공개 include 디렉터리로 다른 모듈에 일부러 보여 주는 헤더 — 다른 모듈이 링크한다(BS8d2 — AsyncCompression이 같은
+    /// 코덱·블록 인코딩을 쓴다).</item>
+    /// <item>시험이 부르는 내부 선언의 헤더 — Modular에서 시험은 호스트 공유 라이브러리 하나에 있으므로 그 모듈이 export해야 한다(BS8d5 —
+    /// 사용자 결정: 시험용 내부 export). Modular는 개발 구성만이라 출시 게임(Release·Monolithic)에는 나가지 않는다(Editor·SDK 개발 라이브러리에는 실린다 — 한계).</item>
+    /// </list>
+    /// 목록에 없는 비공개 헤더의 매크로는 오류다.
     /// </summary>
     public static readonly IReadOnlyList<string> ExportedPrivateHeaders =
     [
         "Core/Source/Runtime/Compression/Private/CompressionInternal.h",
-        "Core/Source/Runtime/Compression/Private/CompressedBlocksInternal.h"
+        "Core/Source/Runtime/Compression/Private/CompressedBlocksInternal.h",
+        "Core/Source/Runtime/Core/Private/App/CommandLineStorage.h",
+        "Core/Source/Runtime/Core/Private/Diagnostics/LogInternal.h",
+        "Core/Source/Runtime/Core/Private/Memory/AddressLedger.h",
+        "Core/Source/Runtime/Core/Private/Memory/BinnedAllocatorTestHooks.h",
+        "Core/Source/Runtime/Core/Private/Text/DecimalConversion.h",
+        "Core/Source/Runtime/Crypto/Private/AeadInternal.h",
+        "Core/Source/Runtime/Crypto/Private/Aes/AesKernels.h",
+        "Core/Source/Runtime/Crypto/Private/Aes/AesModesInternal.h",
+        "Core/Source/Runtime/Crypto/Private/AsyncCryptoInternal.h",
+        "Core/Source/Runtime/Crypto/Private/ChannelInternal.h",
+        "Core/Source/Runtime/Crypto/Private/SecretArena.h",
+        "Core/Source/Runtime/Crypto/Private/SegmentStreamInternal.h",
+        "Core/Source/Runtime/Launch/Private/BuildIdentity.h",
+        "Core/Source/Runtime/Launch/Private/TerminationRequest.h",
+        "Core/Source/Runtime/ModuleLoader/Private/ModuleManifest.h",
+        "Core/Source/Runtime/PlatformBase/Private/Common/CrashReportingInternal.h",
+        "Core/Source/Runtime/PlatformBase/Private/Common/DirectoryWatchInternal.h",
+        "Core/Source/Runtime/PlatformBase/Private/Common/ProcessEntryInternal.h",
+        "Core/Source/Runtime/PlatformBase/Private/Common/VirtualMemoryBackend.h",
+        "Core/Source/Runtime/PlatformBase/Private/Win64/CrashFiles.h",
+        "Core/Source/Runtime/PlatformBase/Private/Win64/CrashHelper.h",
+        "Core/Source/Runtime/ReflectionText/Private/TextAssignInternal.h"
     ];
 
     /// <summary>

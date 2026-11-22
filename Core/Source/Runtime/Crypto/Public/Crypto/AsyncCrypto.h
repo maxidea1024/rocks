@@ -64,7 +64,7 @@ struct SegmentCryptoOptions {
 // - 같은 객체에 대한 제출·결과 조회·취소·소멸은 한 스레드에서 한다. 다른 스레드는 Handles()의
 //   Clone으로 Wait·Status를 한다.
 // - 결과가 나온 뒤(모든 작업이 terminal) 같은 객체로 다시 제출할 수 있다.
-class SegmentCryptoTask {
+class ROCKS_CRYPTO_API SegmentCryptoTask {
 public:
     SegmentCryptoTask() noexcept = default;
     ~SegmentCryptoTask() noexcept;
@@ -120,7 +120,7 @@ private:
 // Unsupported·평문 상한 초과 CapacityExceeded·비트맵 할당 실패 OutOfMemory
 // (SegmentStreamParallelWriter::TryCreate와 같다) → ciphertext가 작으면 CapacityExceeded →
 // scheduler 거부(ShuttingDown·CapacityExceeded·WrongContext·InvalidArgument).
-[[nodiscard]] Result<void>
+[[nodiscard]] ROCKS_CRYPTO_API Result<void>
 TrySubmitSegmentEncrypt(WorkerScheduler& scheduler, SegmentCryptoTask& task,
                         const SegmentStreamKey& key, const SegmentStreamParams& params,
                         Span<const uint8> associatedData, Span<const uint8> plaintext,
@@ -134,7 +134,7 @@ TrySubmitSegmentEncrypt(WorkerScheduler& scheduler, SegmentCryptoTask& task,
 // 버전·알고리즘·HW 없는 AES Unsupported). plaintext가 평문보다 작으면 결과가 CapacityExceeded다.
 // 제출 오류(task·출력 불변): 진행 중인 task Busy → 빈 키 StaleHandle → 입출력 겹침 InvalidArgument
 // → 할당 실패 OutOfMemory → scheduler 거부.
-[[nodiscard]] Result<void>
+[[nodiscard]] ROCKS_CRYPTO_API Result<void>
 TrySubmitSegmentDecrypt(WorkerScheduler& scheduler, SegmentCryptoTask& task,
                         const SegmentStreamKey& key, Span<const uint8> associatedData,
                         Span<const uint8> ciphertext, Span<uint8> plaintext,

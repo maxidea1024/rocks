@@ -58,7 +58,7 @@ enum class WireSlot : uint8 {
 //
 // 사용 예:
 //   auto shape = WireSlotShape(WireSlot::Key, static_cast<uint32>(WireType::Guid)); // {16, true}
-Result<WireValueShape> WireSlotShape(WireSlot slot, uint32 wire) noexcept;
+ROCKS_SERIALIZATION_API Result<WireValueShape> WireSlotShape(WireSlot slot, uint32 wire) noexcept;
 
 inline Result<WireValueShape> WireSlotShape(WireSlot slot, WireType wire) noexcept {
     return WireSlotShape(slot, static_cast<uint32>(wire));

@@ -19,14 +19,15 @@ namespace rocks::crypto {
 
 // 두 byte 범위가 같으면 true다. 길이가 다르면 false다(길이는 비밀이 아니다). 같은 길이면 내용과
 // 무관하게 같은 시간이 걸린다(sodium_memcmp). 사전순 비교는 하지 않는다.
-[[nodiscard]] bool ConstantTimeEquals(Span<const uint8> left, Span<const uint8> right) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API bool ConstantTimeEquals(Span<const uint8> left,
+                                                       Span<const uint8> right) noexcept;
 
 // 모든 byte가 0이면 true다(상수 시간, sodium_is_zero). 빈 범위는 true다.
-[[nodiscard]] bool IsAllZero(Span<const uint8> bytes) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API bool IsAllZero(Span<const uint8> bytes) noexcept;
 
 // 범위를 0으로 지운다. 최적화로 없어지지 않는 소거다(sodium_memzero). 비밀이 지나간 버퍼를 수명
 // 끝에 지울 때 쓴다.
-void SecureZero(Span<uint8> bytes) noexcept;
+ROCKS_CRYPTO_API void SecureZero(Span<uint8> bytes) noexcept;
 
 // ---- 상수 시간 hex·base64 ----
 // 출력은 호출자가 준 Span이다. text 출력은 문자 뒤에 NUL 하나를 더 쓰므로 필요한 크기는
@@ -47,22 +48,25 @@ enum class Base64Variant : uint8 {
 };
 
 // bytes를 소문자 hex로 쓴 문자 수다(2 * bytes). NUL까지 더한 크기가 넘치면 Overflow다.
-[[nodiscard]] Result<usize> TryGetHexChars(usize bytes) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<usize> TryGetHexChars(usize bytes) noexcept;
 
 // bytes를 base64로 쓴 문자 수다(NUL 제외). NUL까지 더한 크기가 넘치면 Overflow, variant가 열거값이
 // 아니면 InvalidArgument다.
-[[nodiscard]] Result<usize> TryGetBase64Chars(usize bytes, Base64Variant variant) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<usize> TryGetBase64Chars(usize bytes,
+                                                               Base64Variant variant) noexcept;
 
 // bytes를 소문자 hex 문자열과 NUL로 쓴다. 인코딩은 쓰기 시작한 뒤 실패하지 않는다.
-[[nodiscard]] Result<usize> TryToHex(Span<const uint8> bytes, Span<char> text) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<usize> TryToHex(Span<const uint8> bytes,
+                                                      Span<char> text) noexcept;
 
 // hex 문자열(대소문자 무관, 구분자 없음)을 byte로 쓴다. 홀수 길이(쓰기 전)·hex가 아닌 문자(쓰기
 // 중)는 InvalidArgument다.
-[[nodiscard]] Result<usize> TryFromHex(StringView text, Span<uint8> bytes) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<usize> TryFromHex(StringView text,
+                                                        Span<uint8> bytes) noexcept;
 
 // bytes를 variant의 base64 문자열과 NUL로 쓴다.
-[[nodiscard]] Result<usize> TryToBase64(Span<const uint8> bytes, Base64Variant variant,
-                                        Span<char> text) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<usize>
+TryToBase64(Span<const uint8> bytes, Base64Variant variant, Span<char> text) noexcept;
 
 // variant와 다른 알파벳·패딩, 공백 같은 다른 문자, 잘못된 끝 bit는 InvalidArgument다. 패딩 없는
 // variant에 '='로 끝나는 입력, 패딩 variant에 '='가 셋 이상인 입력은 길이만으로 거부한다(쓰기 전).

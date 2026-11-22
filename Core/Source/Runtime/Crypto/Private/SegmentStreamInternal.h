@@ -79,7 +79,7 @@ void SealSegment(const AeadKey& key, uint64 index, bool last, Span<const uint8> 
 // salt를 값으로 받는 생성 경로다. 공개 TryCreate는 OS 난수 salt를 넘기고, 시험은 고정 salt로
 // golden을 재현한다(11절 결정성: 바꿔 둘 수 있는 전역 hook 없이 값을 받는 함수). 인자·오류는 공개
 // TryCreate와 같고 salt는 32 byte여야 한다(아니면 InvalidArgument).
-struct SegmentStreamFactory {
+struct ROCKS_CRYPTO_API SegmentStreamFactory {
     [[nodiscard]] static Result<SegmentStreamEncryptor>
     TryCreateEncryptor(const SegmentStreamKey& key, const SegmentStreamParams& params,
                        Span<const uint8> associatedData, Span<const uint8> salt,

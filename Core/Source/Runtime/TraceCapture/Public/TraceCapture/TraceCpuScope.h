@@ -7,7 +7,7 @@
 namespace rocks {
 
 // 표준 채널 "cpu"다. 세션이 Start 때 등록하며 처음에는 꺼져 있다(켜기: SetChannelEnabled).
-extern TraceChannel TraceCpuChannel;
+ROCKS_TRACECAPTURE_API extern TraceChannel TraceCpuChannel;
 
 namespace detail {
 struct TraceScopeNameAccess;
@@ -48,9 +48,9 @@ uint32 TraceResolveScopeName(TraceScopeName& name) noexcept;
 namespace detail {
 
 // CpuScope의 느린 경로다. 기록하면 세션 serial을, 기록하지 않았으면 0을 돌려준다.
-uint64 BeginCpuScope(TraceScopeName& name) noexcept;
-uint64 BeginCpuScope(StringView name) noexcept;
-void EndCpuScope(uint64 serial) noexcept;
+ROCKS_TRACECAPTURE_API uint64 BeginCpuScope(TraceScopeName& name) noexcept;
+ROCKS_TRACECAPTURE_API uint64 BeginCpuScope(StringView name) noexcept;
+ROCKS_TRACECAPTURE_API void EndCpuScope(uint64 serial) noexcept;
 
 } // namespace detail
 

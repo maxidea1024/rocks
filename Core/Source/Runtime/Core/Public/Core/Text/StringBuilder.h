@@ -248,7 +248,7 @@ public:
 
 // 호출 스레드에서 FixedStringBuilder의 allocator가 거절한 호출 수다(스레드별이라 다른 시험의 할당이
 // 섞이지 않는다). 시험이 할당 시도가 없었음을 확인하는 데 쓴다.
-uint64 FixedStringBuilderAllocationAttempts() noexcept;
+ROCKS_CORE_API uint64 FixedStringBuilderAllocationAttempts() noexcept;
 
 // 모든 FixedStringBuilder가 함께 쓰는 거절 allocator다(상태 없는 정적 객체, 프로그램 수명 동안
 // 유효). FixedStringBuilder의 생성자만 쓴다. 할당을 시도하는 경로가 생기면 그 시도는 실패하고 위

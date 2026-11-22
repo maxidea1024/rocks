@@ -95,7 +95,7 @@ inline constexpr uint32 MaxCompressionCodecs = 16;
 // 쓴다). codec은 해제가 성공할 때까지 살아 있어야 한다.
 // 오류: 이름 규칙·수준 범위 위반 InvalidArgument, 같은 이름(해제 중 포함) AlreadyExists, 표가
 // 가득 찼거나(해제 중 포함) 형식 값을 다 썼으면 CapacityExceeded.
-Result<CompressionFormat>
+ROCKS_COMPRESSION_API Result<CompressionFormat>
 TryRegisterCompressionCodec(const CompressionCodecDescription& description,
                             const CompressionCodec& codec) noexcept;
 
@@ -110,6 +110,6 @@ TryRegisterCompressionCodec(const CompressionCodecDescription& description,
 // - 성공한 뒤에만 codec을 파괴하거나 모듈을 언로드한다. 코덱 안에서 자기 형식을 해제하면
 //   Busy다(그 호출이 사용권을 쥐고 있다).
 // 오류: 내장 형식·등록되지 않은 값 InvalidArgument, 사용 중 Busy.
-Result<void> TryUnregisterCompressionCodec(CompressionFormat format) noexcept;
+ROCKS_COMPRESSION_API Result<void> TryUnregisterCompressionCodec(CompressionFormat format) noexcept;
 
 } // namespace rocks

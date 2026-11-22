@@ -196,7 +196,7 @@ struct TraceModelCaptureStats {
 
 // 파일 하나의 분석 모델이다. 모델의 문자열 view는 모델이 가진 decoder byte를 가리키므로 모델보다
 // 오래 쓰지 않는다. 한 객체는 한 스레드에서 만들고 읽는다.
-class TraceModel {
+class ROCKS_TRACEANALYSIS_API TraceModel {
 public:
     explicit TraceModel(Allocator& allocator) noexcept;
 

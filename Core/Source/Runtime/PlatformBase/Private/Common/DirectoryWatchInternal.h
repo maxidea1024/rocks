@@ -10,7 +10,7 @@ namespace rocks::platform::detail {
 // MaxBytes를 넘거나 할당에 실패하면 모두 버리고 루트 Overflow 하나로 접는다(메모리 상한). 루트
 // Overflow 뒤의 이벤트는 그 재검색에 포함되어 버린다. RootRemoved는 항상 마지막에 남는다. 스레드
 // 안전하지 않다(호출자가 직렬화한다).
-class WatchEventQueue {
+class ROCKS_PLATFORMBASE_API WatchEventQueue {
 public:
     static constexpr usize MaxBytes = 4u * 1024u * 1024u;
 

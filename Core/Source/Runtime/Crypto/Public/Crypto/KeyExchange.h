@@ -52,7 +52,7 @@ inline constexpr usize SealedBoxOverheadBytes = 48;
 
 // kx 공개키다. 32 byte가 아니면 TryFromBytes가 InvalidArgument다. 점이 올바른지(small-order가
 // 아닌지)는 세션 키를 만들 때 본다.
-struct KxPublicKey {
+struct ROCKS_CRYPTO_API KxPublicKey {
     uint8 bytes[X25519PublicKeyBytes] = {};
 
     [[nodiscard]] static Result<KxPublicKey> TryFromBytes(Span<const uint8> bytes) noexcept;
@@ -65,7 +65,7 @@ struct KxPublicKey {
 };
 
 // sealed box 수신자 공개키다. 규칙은 KxPublicKey와 같다.
-struct BoxPublicKey {
+struct ROCKS_CRYPTO_API BoxPublicKey {
     uint8 bytes[X25519PublicKeyBytes] = {};
 
     [[nodiscard]] static Result<BoxPublicKey> TryFromBytes(Span<const uint8> bytes) noexcept;
@@ -78,7 +78,7 @@ struct BoxPublicKey {
 };
 
 // kx X25519 키 쌍이다. move-only이며 생성 뒤 바뀌지 않는다.
-class KxKeyPair {
+class ROCKS_CRYPTO_API KxKeyPair {
 public:
     KxKeyPair() noexcept = default;
 
@@ -108,7 +108,7 @@ private:
 };
 
 // sealed box 수신자 X25519 키 쌍이다. 만들기 규칙은 KxKeyPair와 같다.
-class BoxKeyPair {
+class ROCKS_CRYPTO_API BoxKeyPair {
 public:
     BoxKeyPair() noexcept = default;
 
@@ -148,18 +148,18 @@ struct KxSessionKeys {
 // - 상대 공개키가 small-order 점이면(공유 비밀이 0) AuthenticationFailed다. 그 밖의 32 byte는 RFC
 //   7748대로 받는다(최상위 bit는 무시하고, twist 점과 p 이상인 비정규 u도 계산한다).
 // - 키 저장소가 찼으면 OutOfMemory다.
-[[nodiscard]] Result<KxSessionKeys> TryClientSessionKeys(const KxKeyPair& client,
-                                                         const KxPublicKey& server,
-                                                         AeadAlgorithm algorithm) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<KxSessionKeys>
+TryClientSessionKeys(const KxKeyPair& client, const KxPublicKey& server,
+                     AeadAlgorithm algorithm) noexcept;
 
 // 서버 쪽 세션 키다. 인자와 오류는 TryClientSessionKeys와 같다. 서버 transmit = 클라이언트
 // receive다.
-[[nodiscard]] Result<KxSessionKeys> TryServerSessionKeys(const KxKeyPair& server,
-                                                         const KxPublicKey& client,
-                                                         AeadAlgorithm algorithm) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<KxSessionKeys>
+TryServerSessionKeys(const KxKeyPair& server, const KxPublicKey& client,
+                     AeadAlgorithm algorithm) noexcept;
 
 // sealed box 출력 길이(messageBytes + 48)다. 넘치면 Overflow다.
-[[nodiscard]] Result<usize> TryGetSealedBoxBytes(usize messageBytes) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<usize> TryGetSealedBoxBytes(usize messageBytes) noexcept;
 
 // recipient에게 message를 봉인한다. 쓴 byte 수(message + 48)를 돌려준다.
 // - output이 작거나 message가 상한을 넘으면 CapacityExceeded다.
@@ -168,9 +168,9 @@ struct KxSessionKeys {
 // - recipient가 올바른 점이 아니면(small-order) AuthenticationFailed이고 출력의 임시 공개키 자리를
 //   지운다(평문 자리는 쓰지 않았으므로 제자리 평문은 그대로다).
 // - 임시 키 쌍은 libsodium 난수 경로로 만들며, OS 난수가 실패하면 Fatal이다(11절).
-[[nodiscard]] Result<usize> TrySealToRecipient(const BoxPublicKey& recipient,
-                                               Span<const uint8> message,
-                                               Span<uint8> output) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<usize> TrySealToRecipient(const BoxPublicKey& recipient,
+                                                                Span<const uint8> message,
+                                                                Span<uint8> output) noexcept;
 
 // TrySealToRecipient의 출력을 연다. 평문 byte 수를 돌려준다.
 // - sealed가 48 byte보다 짧거나, 변조되었거나, 다른 수신자의 것이거나, 임시 공개키가 small-order면
@@ -178,15 +178,18 @@ struct KxSessionKeys {
 // - plaintext가 평문 길이보다 작으면 CapacityExceeded다(쓰지 않는다).
 // - 제자리: plaintext.Data() == sealed.Data() + 32일 때만 겹침을 허용하고 겹침은 길이 검사보다 먼저
 //   본다. 빈 키 쌍은 StaleHandle이다.
-[[nodiscard]] Result<usize> TryOpenSealed(const BoxKeyPair& recipient, Span<const uint8> sealed,
-                                          Span<uint8> plaintext) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<usize> TryOpenSealed(const BoxKeyPair& recipient,
+                                                           Span<const uint8> sealed,
+                                                           Span<uint8> plaintext) noexcept;
 
 namespace hazmat {
 
 // X25519 비밀키(32 byte)를 평문으로 output에 복사한다(10.4절). 빈 키 쌍은 StaleHandle,
 // output.Size()가 32가 아니면 InvalidArgument다. output은 호출자가 지운다.
-[[nodiscard]] Result<void> TryExportKey(const KxKeyPair& key, Span<uint8> output) noexcept;
-[[nodiscard]] Result<void> TryExportKey(const BoxKeyPair& key, Span<uint8> output) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void> TryExportKey(const KxKeyPair& key,
+                                                         Span<uint8> output) noexcept;
+[[nodiscard]] ROCKS_CRYPTO_API Result<void> TryExportKey(const BoxKeyPair& key,
+                                                         Span<uint8> output) noexcept;
 
 } // namespace hazmat
 

@@ -83,7 +83,7 @@ struct DecodedStream {
 };
 
 // 파일(또는 출력 콜백이 받은) byte 전체를 머리·덩어리·스트림으로 나눈다.
-class TraceStreamDecoder {
+class ROCKS_TRACEANALYSIS_API TraceStreamDecoder {
 public:
     explicit TraceStreamDecoder(Allocator& allocator) noexcept;
 
@@ -150,7 +150,8 @@ struct DecodedScopeEvent {
 
 // 배치 내용 하나를 사건 열로 풀어 out 뒤에 붙인다(TraceStandardFormat의 varint 형식). 형식이 틀리면
 // false다.
-bool DecodeScopeBatch(Span<const uint8> events, Array<DecodedScopeEvent>& out) noexcept;
+ROCKS_TRACEANALYSIS_API bool DecodeScopeBatch(Span<const uint8> events,
+                                              Array<DecodedScopeEvent>& out) noexcept;
 
 // 짝지은 CPU 구간이다. 끝을 잃은 구간(손실·세션 종료)은 ended가 false이고 길이를 지어내지 않는다
 // (endTick 0).
@@ -164,8 +165,8 @@ struct DecodedScope {
 
 // 한 스레드의 사건 열을 스택으로 짝짓는다. 시작 순서대로 out에 붙인다. 시작을 잃은 끝(손실로 시작
 // 배치가 버려짐)은 orphanEnds로 센다.
-bool BuildScopes(Span<const DecodedScopeEvent> events, Array<DecodedScope>& out,
-                 usize& orphanEnds) noexcept;
+ROCKS_TRACEANALYSIS_API bool BuildScopes(Span<const DecodedScopeEvent> events,
+                                         Array<DecodedScope>& out, usize& orphanEnds) noexcept;
 
 // 고정부 offset의 little-endian 정수를 읽는다(uint16·uint32·uint64).
 template <typename T>

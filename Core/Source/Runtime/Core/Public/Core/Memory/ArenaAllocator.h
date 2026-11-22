@@ -22,7 +22,7 @@ struct ArenaStats {
 // arena.Reset()으로 빈 chunk를 재사용하거나 arena.Trim()으로 상위 allocator에 반환한다.
 // 해제된 allocation의 공간은 Reset 전까지 다시 사용하지 않는다. 한 프레임을 일괄 무효화하는
 // 연산은 제공하지 않는다. 미반환 allocation이 있으면 Reset/Trim은 Busy, 소멸은 Fatal이다.
-class ArenaAllocator final : public Allocator {
+class ROCKS_CORE_API ArenaAllocator final : public Allocator {
 public:
     explicit ArenaAllocator(Allocator& backing, usize chunkBytes = 65536) noexcept;
     ~ArenaAllocator() noexcept override;

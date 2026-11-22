@@ -170,7 +170,7 @@ struct SaveResultAccess;
 //   }
 //
 //   Array<uint8> bytes = saved.Value().TakeBytes(); // CRC·SHA-256은 이 byte로 계산한다
-class ObjectGraphSaveResult {
+class ROCKS_OBJECTSERIALIZATION_API ObjectGraphSaveResult {
 public:
     ObjectGraphSaveResult(ObjectGraphSaveResult&&) noexcept = default;
     ObjectGraphSaveResult& operator=(ObjectGraphSaveResult&&) noexcept = default;
@@ -274,10 +274,9 @@ private:
 //   options.externals = GraphExternalPolicy::Admit;
 //   options.hooks = &writerHooks; // AdmitExternalReference: 다른 패키지면 Import
 //   auto saved = SaveObjectGraphSet(allocator, registry, access, exports.View(), options);
-Result<ObjectGraphSaveResult> SaveObjectGraphSet(Allocator&, ObjectRegistry&,
-                                                 const ObjectAccessContext&,
-                                                 Span<const ObjectHandle> nodes,
-                                                 ObjectGraphSaveOptions = {}) noexcept;
+ROCKS_OBJECTSERIALIZATION_API Result<ObjectGraphSaveResult>
+SaveObjectGraphSet(Allocator&, ObjectRegistry&, const ObjectAccessContext&,
+                   Span<const ObjectHandle> nodes, ObjectGraphSaveOptions = {}) noexcept;
 
 // 편의 저장이다. root에서 영속 강한 참조로 닿는 객체를 발견 순(metadata 필드 순 BFS)으로 모아
 // NodeTable과 함께 쓴다(options의 externals를 Include로, writeNodeTable을 참으로 바꿔
@@ -290,8 +289,9 @@ Result<ObjectGraphSaveResult> SaveObjectGraphSet(Allocator&, ObjectRegistry&,
 //   if (!bytes) {
 //       return Result<void>::Failure(bytes.Error());
 //   }
-Result<Array<uint8>> SaveObjectGraph(Allocator&, ObjectRegistry&, const ObjectAccessContext&,
-                                     ObjectHandle root, ObjectGraphSaveOptions = {}) noexcept;
+ROCKS_OBJECTSERIALIZATION_API Result<Array<uint8>>
+SaveObjectGraph(Allocator&, ObjectRegistry&, const ObjectAccessContext&, ObjectHandle root,
+                ObjectGraphSaveOptions = {}) noexcept;
 
 // 복원 옵션이다. limits·policy·migrate·migrateStruct·migrationUser·hooks는 단계형 복원
 // (ObjectGraphStage)과 편의 복원(LoadObjectGraph)이 같이 쓰고, baseOuter·imports·prepare·
@@ -481,7 +481,7 @@ struct StageAccess;
 //   const ObjectHandle roots[] = {package.Value()};
 //   RootRef<Object> held[1];
 //   return transaction.Commit(roots, held);
-class ObjectGraphStage {
+class ROCKS_OBJECTSERIALIZATION_API ObjectGraphStage {
 public:
     // Registry 정책을 사본으로 두고 options를 보관한다(baseOuter·prepare·prepareUser는 쓰지
     // 않는다). 실패를 돌려줄 수 없으므로 registry와 types가 같은 등록 저장소가 아니면
@@ -698,8 +698,8 @@ private:
 //   if (!root) {
 //       return Result<void>::Failure(root.Error());
 //   }
-Result<RootRef<Object>> LoadObjectGraph(Allocator&, ObjectRegistry&, TypeRegistry&,
-                                        const ObjectAccessContext&, Span<const uint8>,
-                                        ObjectGraphLoadOptions = {}) noexcept;
+ROCKS_OBJECTSERIALIZATION_API Result<RootRef<Object>>
+LoadObjectGraph(Allocator&, ObjectRegistry&, TypeRegistry&, const ObjectAccessContext&,
+                Span<const uint8>, ObjectGraphLoadOptions = {}) noexcept;
 
 } // namespace rocks
