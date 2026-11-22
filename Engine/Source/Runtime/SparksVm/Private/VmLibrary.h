@@ -200,6 +200,10 @@ public:
     // 0.
     static uint64 NewWait(VmLibraryContext& context, uint8 kind, uint8 clock, double seconds,
                           Span<const uint64> children) noexcept;
+    // host 로드를 시작한다(Soft<T>.Load — 요청 handle, host가 없으면 0).
+    static uint64 StartLoad(VmLibraryContext& context, uint64 assetLo, uint64 assetHi) noexcept;
+    // 로드 요청이 끝났는지다(LoadRequest.IsDone).
+    static bool LoadDone(VmLibraryContext& context, uint64 request) noexcept;
     // handle이 살아 있는 객체인지다(host — 6.2절).
     static bool Alive(VmLibraryContext& context, uint64 handle) noexcept;
     // 실행 문맥의 할당자다(임시 서식 builder용).

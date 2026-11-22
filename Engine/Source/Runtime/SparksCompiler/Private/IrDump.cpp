@@ -434,7 +434,7 @@ private:
             break;
         case IrOp::Await:
             Assign(i.a);
-            out_.Append("AWAIT ");
+            out_.Append(i.sub == IrAwaitOwned ? "AWAIT.OWN " : "AWAIT ");
             Register(i.b);
             out_.AppendFormat(" -> L{}", i.c);
             break;

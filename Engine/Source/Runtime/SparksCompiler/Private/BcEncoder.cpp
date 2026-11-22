@@ -1615,7 +1615,9 @@ void BytecodeEncoder::Instruction(const IrInstruction& i, uint32 layoutIndex) no
         const uint32 slots = i.a == NoIrRegister ? 0 : f.registers[TupleFirst(i.a)].slots;
         const uint32 bank = i.a == NoIrRegister ? 0 : BankOf(i.a);
         Word(EncodeABC(Opcode::Await, Phys(i.a), Phys(i.b), 0), span);
-        Word(EncodeAx(Opcode::Extra, (bank << 8) | slots), span);
+        // bit 16: 대기가 요청을 쥔다(지역이 아닌 로드 요청 — LC6d5).
+        const uint32 owned = i.sub == IrAwaitOwned ? 1u << 16 : 0u;
+        Word(EncodeAx(Opcode::Extra, owned | (bank << 8) | slots), span);
 
         // 정지 지점의 선형 위치: 이 명령의 쓰기 위치(2k + 1)까지 살아 있는 것이 보존 대상이다.
         const uint32 block = order_[layoutIndex];

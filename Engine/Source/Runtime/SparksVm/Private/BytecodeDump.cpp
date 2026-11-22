@@ -405,8 +405,12 @@ private:
             if (slots == 0) {
                 out_.Append("-");
             } else {
-                Register(static_cast<OperandBank>((marker >> 8) + 1), a);
+                Register(static_cast<OperandBank>(((marker >> 8) & 0xFF) + 1), a);
                 out_.AppendFormat(" x{}", slots);
+            }
+
+            if (((marker >> 16) & 1) != 0) {
+                out_.Append(" own");
             }
 
             out_.Append(", ");

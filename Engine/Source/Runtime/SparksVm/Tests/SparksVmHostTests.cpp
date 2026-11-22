@@ -82,6 +82,14 @@ public:
     void ReleaseHeld(uint64) noexcept override {
     }
 
+    uint64 StartLoad(uint64, uint64) noexcept override {
+        return 0;
+    }
+
+    LoadState WatchLoad(uint64, bool, uint64&, uint64&) noexcept override {
+        return LoadState::NotRequest;
+    }
+
     VmFaultKind GetContext(VmHostCall& call) noexcept override {
         call.Refs()[0] = Handle(1);
         return VmFaultKind::None;
@@ -273,7 +281,14 @@ TEST(SparksVmHost_LinkBindsAndRejects) {
         auto link = LinkModule(assembler.module, &host, linked, reason);
         REQUIRE(!link);
         CHECK(link.Error() == ErrorCode::InvalidArgument);
-        CHECK(reason.View() == entry.expected);
+        // 모양 불일치 사유는 서술자를 덧붙인다(`… [서술자]`).
+        StringBuilder<256> expected(allocator);
+        expected.Append(entry.expected);
+        if (entry.expected.EndsWith("descriptor shape")) {
+            expected.AppendFormat(" [{}]", entry.descriptor);
+        }
+
+        CHECK(reason.View() == expected.View());
     }
 
     {
@@ -792,6 +807,14 @@ public:
     }
 
     void ReleaseHeld(uint64) noexcept override {
+    }
+
+    uint64 StartLoad(uint64, uint64) noexcept override {
+        return 0;
+    }
+
+    LoadState WatchLoad(uint64, bool, uint64&, uint64&) noexcept override {
+        return LoadState::NotRequest;
     }
 
     VmFaultKind GetContext(VmHostCall&) noexcept override {

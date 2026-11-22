@@ -1040,11 +1040,24 @@ static void AppendDeliveries(StringBuilderBase& actual, const VmSession& session
     }
 }
 
-Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
-                            const Compilation& compilation, uint32 mainModule,
-                            Report& report) noexcept {
+namespace {
+
+// G4 주입 하나다(0이면 보통 실행).
+struct RunInjection {
+    uint32 await = 0;
+    bool cancel = false;
+};
+
+Result<void> RunScriptCase(Allocator& allocator, const CaseInput& input,
+                           const Compilation& compilation, uint32 mainModule, Report& report,
+                           const RunInjection& injection, uint32& awaitsSeen) noexcept {
+    const bool gateOnly = injection.await != 0;
     StringBuilder<MessageInlineBytes> message(allocator);
     auto fail = [&](StringView reason) noexcept -> Result<void> {
+        if (gateOnly) {
+            return Result<void>::Success(); // 주입 실행은 출력·지시 오류를 보지 않는다(누수만)
+        }
+
         if (auto formatted = message.TryAppendFormat("{}: {}", input.name, reason); !formatted) {
             return formatted;
         }
@@ -1111,6 +1124,45 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
         return added;
     }
 
+    session.InjectAwait(injection.await, injection.cancel);
+    // G4: 주입 실행은 어느 출구에서든 CloseSession 뒤 ledger·유지 자원 0을 본다(누수는 실패 기록).
+    struct LeakGate {
+        bool active;
+        const CaseInput& input;
+        const RunInjection& injection;
+        VmSession& session;
+        FakeHost& host;
+        VmExecution& execution;
+        Report& report;
+        uint32& awaitsSeen;
+        Allocator& allocator;
+        ~LeakGate() noexcept {
+            awaitsSeen = session.AwaitCount();
+            if (!active) {
+                return;
+            }
+
+            // 강제 정리(CloseSession) 전에 Detach 뒤 정지 실행·대기·연결이 0인지 본다(리뷰 4).
+            session.DetachAll();
+            const bool lingering = session.SuspendedCount() != 0 || session.WaitCount() != 0 ||
+                                   session.ConnectionCount() != 0;
+            static_cast<void>(session.CloseSession());
+            host.ReleaseAll(execution);
+            if (lingering || !session.InjectionFired() || execution.LiveBuffers() != 0 ||
+                execution.LiveBytes() != 0 || host.HeldLive() != 0 ||
+                host.ReleaseAnomalies() != 0) {
+                StringBuilder<MessageInlineBytes> leak(allocator);
+                leak.AppendFormat("{}: G4 {} after the {} injected at await {}", input.name,
+                                  !session.InjectionFired() ? "injection did not fire"
+                                                            : "leak or over-release",
+                                  injection.cancel ? "cancel" : "fault", injection.await);
+                if (!leak.HasFailed()) {
+                    static_cast<void>(report.TryAddFailure(leak.View()));
+                }
+            }
+        }
+    } leakGate{gateOnly, input, injection, session, host, execution, report, awaitsSeen, allocator};
+
     // host가 필드에 보관한 버퍼는 어느 출구에서도 놓는다(LC5d1 리뷰 B5 — execution이 host보다 먼저
     // 선언돼 이 guard가 사라질 때 아직 살아 있다).
     struct HostGuard {
@@ -1156,8 +1208,8 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
             line.StartsWith("fixed ") || line == "stats" || line.StartsWith("stats ") ||
             line.StartsWith("request ") || line.StartsWith("state ") || line == "apply" ||
             line == "budget" || line.StartsWith("budget ") || line.StartsWith("limits ") ||
-            line.StartsWith("apply ") || line == "endframe" || line.StartsWith("endframe ") ||
-            line == "close" || line.StartsWith("close ")) {
+            line.StartsWith("load ") || line.StartsWith("apply ") || line == "endframe" ||
+            line.StartsWith("endframe ") || line == "close" || line.StartsWith("close ")) {
             usize arrowAt = line.ByteCount();
             for (usize index = 0; index + RunArrow.ByteCount() <= line.ByteCount(); ++index) {
                 if (StringView(line.Data() + index, RunArrow.ByteCount()) == RunArrow) {
@@ -1351,11 +1403,42 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
                 } else {
                     const uint64 handle = host.ObjectArgument(number.Value(), StringView());
                     const uint32 instance = handle == 0 ? NoBytecodeIndex : session.Find(handle);
-                    if (instance == NoBytecodeIndex && verb != "emit") {
+                    if (instance == NoBytecodeIndex && verb != "emit" && verb != "load") {
                         return bad("the object has no instance (use 'new' first)");
                     }
 
-                    if (verb == "state") {
+                    if (verb == "load") {
+                        // `load #요청 #객체` | `load #요청 error <코드>`(SparksRuntime 2.6절 —
+                        // LC6d5): host가 로드 요청을 끝낸다.
+                        uint64 value = 0;
+                        uint64 code = 0;
+                        if (rest.StartsWith("error ")) {
+                            auto parsed =
+                                TryParseUInt32(StringView(rest.Data() + 6, rest.ByteCount() - 6));
+                            if (!parsed || parsed.Value() == 0) {
+                                return bad("'load' needs a non-zero error code");
+                            }
+
+                            code = parsed.Value();
+                        } else {
+                            auto object = rest.StartsWith("#")
+                                              ? TryParseUInt32(StringView(rest.Data() + 1,
+                                                                          rest.ByteCount() - 1))
+                                              : Result<uint32>::Failure(ErrorCode::InvalidArgument);
+                            if (!object || object.Value() == 0) {
+                                return bad("'load' needs '#<object>' or 'error <code>'");
+                            }
+
+                            value = host.ObjectArgument(object.Value(), "DataAsset");
+                        }
+
+                        if (!host.CompleteLoad(handle, value, code)) {
+                            return bad("'load' needs a load request");
+                        }
+
+                        session.CompleteLoad(handle, value, code);
+                        actual.Append("ok");
+                    } else if (verb == "state") {
                         // instance의 fault 처리 상태(SparksRuntime 2.6절 — LC6d3).
                         const VmSession::InstanceState state = session.StateOf(instance);
                         actual.Append(state == VmSession::InstanceState::Isolated ? "isolated"
@@ -1930,17 +2013,36 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
         }
     }
 
+    // Gate G1(SparksRuntime 4절): Detach 뒤 정지 실행·대기·연결이 0이고(강제 정리 전), CloseSession
+    // 뒤 실행 문맥 ledger와 유지 자원이 0이며 과다·이중 해제가 없다.
     session.DetachAll();
+    if (session.SuspendedCount() != 0 || session.WaitCount() != 0 ||
+        session.ConnectionCount() != 0) {
+        return fail(".run: executions, waits or connections remain after detaching everything");
+    }
+
+    if (auto closed = session.CloseSession(); !closed) {
+        return Result<void>::Failure(closed.Error());
+    }
+
+    if (host.ReleaseAnomalies() != 0) {
+        return fail(".run: a held resource was released twice or was not held");
+    }
+
     host.ReleaseAll(execution);
     if (execution.LiveBuffers() != 0 || execution.LiveBytes() != 0) {
         return fail(".run: buffers are still alive after the fake host released its fields");
+    }
+
+    if (host.HeldLive() != 0) {
+        return fail(".run: held resources are still alive after CloseSession");
     }
 
     if (actual.HasFailed()) {
         return Result<void>::Failure(actual.Status().Error());
     }
 
-    if (actual.View() == input.run) {
+    if (gateOnly || actual.View() == input.run) {
         return Result<void>::Success();
     }
 
@@ -1958,6 +2060,43 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
     }
 
     return report.TryAddFailure(message.View());
+}
+
+} // namespace
+
+Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
+                            const Compilation& compilation, uint32 mainModule,
+                            Report& report) noexcept {
+    const usize failures = report.Failures().Size();
+    uint32 awaits = 0;
+    if (auto ran = RunScriptCase(allocator, input, compilation, mainModule, report, RunInjection(),
+                                 awaits);
+        !ran) {
+        return ran;
+    }
+
+    // Gate G4(SparksRuntime 4절): 통과한 사례는 모든 AWAIT에서 fault·취소를 하나씩 주입해 누수를
+    // 본다.
+    if (!input.gateSweep || report.Failures().Size() != failures) {
+        return Result<void>::Success();
+    }
+
+    for (uint32 await = 1; await <= awaits; ++await) {
+        const bool modes[] = {false, true};
+        for (const bool cancel : modes) {
+            RunInjection injection;
+            injection.await = await;
+            injection.cancel = cancel;
+            uint32 seen = 0;
+            if (auto ran = RunScriptCase(allocator, input, compilation, mainModule, report,
+                                         injection, seen);
+                !ran) {
+                return ran;
+            }
+        }
+    }
+
+    return Result<void>::Success();
 }
 
 } // namespace rocks::sparks::conformance::detail

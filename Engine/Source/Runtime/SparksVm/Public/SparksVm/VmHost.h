@@ -138,6 +138,25 @@ public:
     // 유지 자원(binding schema `held` 타입 — SL 7.1절)을 멈춘다(SparksRuntime 2.6절). 사용자 코드를
     // 부르지 않고 할당하지 않으며 실패하지 않는다(SL 9.1절). 이미 멈춘·죽은 handle도 받는다.
     virtual void ReleaseHeld(uint64 handle) noexcept = 0;
+    // 로드 요청(SparksRuntime 2.6절 — LC6d5). StartLoad는 asset id(Soft<T>의 두 slot)의 로드를
+    // 시작해 요청 handle(LoadRequest — 유지 자원: 멈추면 ReleaseHeld로 관심을 반환)을
+    // 돌려준다(생성은 실패하지 않는다 — 등록 실패는 이미 끝난 실패 요청; 0이면 계약 위반).
+    // WatchLoad는 handle이 요청 인지와 끝났으면 결과(value — 객체 handle, error — 0이면 성공,
+    // 아니면 `Error` case + 1)를 알려 준다. 끝나지 않았으면 host가 끝날 때
+    // VmSession::CompleteLoad를 부른다.
+    // WatchLoad는 조회다(사용자 코드·할당 없음). take면 결과를 꺼내는 기다림(`try await req` — SL
+    // 7.3절 요청당 1회)이고 이미 꺼냈으면 Taken이다(All·Race 인자·IsDone은 take가 아니다). host는
+    // 모든 요청을 언젠가 끝내야 한다(성공 값은 0이 아닌 객체). CompleteLoad는 game thread에서,
+    // VmHost 콜백 밖에서 부른다.
+    enum class LoadState : uint8 {
+        NotRequest,
+        Pending,
+        Ready,
+        Taken
+    };
+    virtual uint64 StartLoad(uint64 assetLo, uint64 assetHi) noexcept = 0;
+    virtual LoadState WatchLoad(uint64 request, bool take, uint64& value,
+                                uint64& error) noexcept = 0;
     // 문맥 객체 handle을 call.Refs()[0]에 둔다.
     virtual VmFaultKind GetContext(VmHostCall& call) noexcept = 0;
     // 살아 있는 object의 필드를 창에 둔다(Buf는 PutBuffer로).
