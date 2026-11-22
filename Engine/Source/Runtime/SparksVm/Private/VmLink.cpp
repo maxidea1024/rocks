@@ -38,6 +38,10 @@ Result<void> Reject(StringBuilderBase& reason, const BytecodeModule& module, uin
     const BytecodeRef& entry = module.refs[ref];
     reason.AppendFormat("ref {} ({} {}): {}", ref, BytecodeRefKindName(entry.kind),
                         module.String(entry.name), why);
+    // 서술자가 있으면 함께 보인다(모양 불일치 진단).
+    if (entry.arguments != NoBytecodeIndex && entry.arguments < module.stringOffsets.Size()) {
+        reason.AppendFormat(" [{}]", module.String(entry.arguments));
+    }
     if (reason.HasFailed()) {
         return Result<void>::Failure(reason.Status().Error());
     }

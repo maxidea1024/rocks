@@ -217,6 +217,13 @@ public:
         return skippedExecutions_;
     }
 
+    // ---- 로드 요청(SparksRuntime 2.6절 — LC6d5) ----
+
+    // host가 로드 요청의 끝을 알린다(언제든 — 실행 중이어도): 그 요청을 기다리는 대기를 끝내고
+    // 결과(value 객체 handle, error 0이면 성공·아니면 `Error` case + 1)를 둔다. 재개는 다음 재개
+    // 단계다(SL 5.4절 순서 5). 기다리는 대기가 없으면 할 일이 없다(host가 WatchLoad로 알린다).
+    void CompleteLoad(uint64 request, uint64 value, uint64 error) noexcept;
+
     // `@skipWhileBusy`로 버린 이벤트 수다(디버거 표시 — SL 6.1절 SD11).
     uint64 SkippedWhileBusy() const noexcept {
         return skippedWhileBusy_;
@@ -245,6 +252,8 @@ private:
     uint64 NewEventWait(uint64 publisher, const VmEventKey& key, ErrorCode& error) noexcept;
     // 끝난 하위 대기 handle이다(CALLW 경계 frame이 반환·ENDEXEC로 끝남).
     uint64 NewChildDone(ErrorCode& error) noexcept;
+    // 로드 요청 대기 handle이다(AWAIT의 대기 값이 표지 없는 요청 handle일 때 — 요청이 아니면 0).
+    uint64 NewLoadWait(uint64 request, ErrorCode& error) noexcept;
     // CALLW 경계(frame boundary)부터 맨 위까지를 하위 정지 실행으로 옮기고 하위 대기 handle을
     // child에 둔다(AWAIT가 부른다 — 부르는 쪽 frame은 실행 문맥에 남는다).
     VmFaultKind SuspendChild(usize boundary, uint64 wait, uint32 resultRegister, uint32 resultBank,
@@ -287,7 +296,8 @@ private:
         All,
         Race,
         Event, // 발행자의 이벤트(SparksRuntime 2.5절)
-        Child  // 하위 실행(CALLW)의 끝
+        Child, // 하위 실행(CALLW)의 끝
+        Load   // 로드 요청(publisher = 요청 handle — SparksRuntime 2.6절)
     };
 
     // 대기 하나다(handle = VmWaitTag | 세대 << 32 | 번호 — 돌려받은 번호의 옛 handle은 무효).
@@ -311,7 +321,9 @@ private:
         uint64 connectionOrder = 0;
         uint64 afterSequence = 0;
         uint32 child =
-            NoBytecodeIndex; // Child: 하위 정지 실행 번호(끝났거나 아직 정지 전이면 없음)
+            NoBytecodeIndex;  // Child: 하위 정지 실행 번호(끝났거나 아직 정지 전이면 없음)
+        uint64 loadValue = 0; // Load: 결과 객체 handle
+        uint64 loadError = 0; // Load: 0 성공, 아니면 `Error` case + 1
         bool used = false;
         bool done = false;
         bool cancelled = false;

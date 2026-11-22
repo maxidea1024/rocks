@@ -1,0 +1,27 @@
+class Loader : ScriptableComponent {
+    @edit var Icon: Soft<DataAsset>;
+    @edit var Other: Soft<DataAsset>;
+    var Got: DataAsset?;
+
+    async fn Fetch() {
+        let request = Icon.Load();
+        let data = try await request;
+        Got = data;
+        Log.Info("fetched");
+    }
+
+    async fn Both() {
+        let first = Icon.Load();
+        let second = Other.Load();
+        await All(first, second);
+        let data = try await first;
+        Got = data;
+        Log.Info("both ${second.IsDone}");
+    }
+
+    async fn Abandon() {
+        let request = Icon.Load();
+        let data = try await request;
+        Got = data;
+    }
+}

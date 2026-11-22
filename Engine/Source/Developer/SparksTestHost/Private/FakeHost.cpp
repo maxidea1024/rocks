@@ -585,6 +585,52 @@ void FakeHost::ReleaseHeld(uint64 handle) noexcept {
     }
 }
 
+uint64 FakeHost::StartLoad(uint64 assetLo, uint64 assetHi) noexcept {
+    const uint64 request = NewObject("LoadRequest");
+    FakeLoad load;
+    load.request = request;
+    if (request == 0 || !loads_.TryPushBack(load)) {
+        outOfMemory_ = true;
+        return request;
+    }
+
+    StringBuilder<64> text(*allocator_);
+    text.AppendFormat("load {}:{} -> ", assetLo, assetHi);
+    FormatHandle(text, request);
+    if (text.HasFailed()) {
+        outOfMemory_ = true;
+        return request;
+    }
+
+    Record(text.View());
+    return request;
+}
+
+VmHost::LoadState FakeHost::WatchLoad(uint64 request, uint64& value, uint64& error) noexcept {
+    for (const FakeLoad& load : loads_) {
+        if (load.request == request) {
+            value = load.value;
+            error = load.error;
+            return load.done ? LoadState::Ready : LoadState::Pending;
+        }
+    }
+
+    return LoadState::NotRequest;
+}
+
+bool FakeHost::CompleteLoad(uint64 request, uint64 value, uint64 error) noexcept {
+    for (FakeLoad& load : loads_) {
+        if (load.request == request) {
+            load.done = true;
+            load.value = value;
+            load.error = error;
+            return true;
+        }
+    }
+
+    return false;
+}
+
 uint64 FakeHost::NewObject(StringView type) noexcept {
     FakeObject object{String(*allocator_), 1, true, Array<FakeFieldValue>(*allocator_)};
     if (!object.type.TryAssign(type) || !objects_.TryPushBack(static_cast<FakeObject&&>(object))) {

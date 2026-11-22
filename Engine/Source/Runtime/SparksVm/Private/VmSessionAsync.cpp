@@ -173,11 +173,27 @@ uint64 VmSession::NewWait(WaitKind kind, uint8 clock, double seconds, Span<const
     // 자식(동기로 끝난 하위 실행)은 받는다 — 묶음은 인자를 모두 시작한 뒤 판정한다(SL 6.1절).
     uint32 last = NoBytecodeIndex;
     bool nullChild = false;
-    for (const uint64 child : children) {
+    for (uint64 child : children) {
         // null 인자는 바로 끝난 인자다(`a?.F()`의 a가 null — SL 6.1절, LC6c2 리뷰 B5).
         if (child == 0) {
             nullChild = true;
             continue;
+        }
+
+        // 표지 없는 인자는 지역에 담은 로드 요청이다(SL 6.1절 SD41): 요청 대기로 바꾼다.
+        if ((child & VmWaitTag) == 0) {
+            child = NewLoadWait(child, error);
+            if (child == 0) {
+                for (uint32 at = waits_[index].firstChild; at != NoBytecodeIndex;) {
+                    const uint32 next = waits_[at].nextSibling;
+                    waits_[at].parent = NoBytecodeIndex;
+                    waits_[at].nextSibling = NoBytecodeIndex;
+                    at = next;
+                }
+
+                waits_[index].firstChild = NoBytecodeIndex;
+                return 0;
+            }
         }
 
         uint32 childIndex = NoBytecodeIndex;
@@ -254,6 +270,47 @@ uint64 VmSession::NewChildDone(ErrorCode& error) noexcept {
     }
 
     return handle;
+}
+
+uint64 VmSession::NewLoadWait(uint64 request, ErrorCode& error) noexcept {
+    if (host_ == nullptr || request == 0) {
+        return 0;
+    }
+
+    uint64 value = 0;
+    uint64 failure = 0;
+    const VmHost::LoadState state = host_->WatchLoad(request, value, failure);
+    if (state == VmHost::LoadState::NotRequest) {
+        return 0;
+    }
+
+    const uint64 handle = NewWait(WaitKind::Load, 0, 0.0, Span<const uint64>(), error);
+    uint32 index = NoBytecodeIndex;
+    if (handle == 0 || !DecodeWait(handle, index)) {
+        return 0;
+    }
+
+    waits_[index].publisher = request;
+    if (state == VmHost::LoadState::Ready) {
+        // 이미 끝났어도 정지하고 다음 재개 단계에 재개한다(SL 6.1절 — 항상 정지).
+        waits_[index].done = true;
+        waits_[index].loadValue = failure == 0 ? value : 0;
+        waits_[index].loadError = failure;
+    }
+
+    return handle;
+}
+
+void VmSession::CompleteLoad(uint64 request, uint64 value, uint64 error) noexcept {
+    for (uint32 index = 0; index < waits_.Size(); ++index) {
+        Wait& wait = waits_[index];
+        if (wait.used && wait.kind == WaitKind::Load && wait.publisher == request && !wait.done &&
+            !wait.cancelled) {
+            wait.loadValue = error == 0 ? value : 0;
+            wait.loadError = error;
+            CompleteWait(index);
+        }
+    }
 }
 
 void VmSession::SettleWaits(const Result<VmCallResult>& called) noexcept {
@@ -689,6 +746,40 @@ Result<void> VmSession::ResumeSuspended(uint32 chosen, uint64 wait, uint32 depth
         return Result<void>::Success();
     }
 
+    // 로드 요청 대기의 결과(Result<T> — SparksRuntime 2.6절): Buf 결과면 Result 버퍼를 먼저 만든다
+    // (할당이 실패하면 아무것도 바꾸지 않고 돌아간다).
+    uint32 resultWait = NoBytecodeIndex;
+    const bool loaded =
+        DecodeWait(entry.wait, resultWait) && waits_[resultWait].kind == WaitKind::Load;
+    const uint64 loadValue = loaded ? waits_[resultWait].loadValue : 0;
+    const uint64 loadError = loaded ? waits_[resultWait].loadError : 0;
+    VmBuffer* loadResult = nullptr;
+    if (loaded && entry.resultBank == static_cast<uint32>(BytecodeBank::Buf) &&
+        entry.resultSlots != 0) {
+        const uint64 budget = budgets_.sessionMemory;
+        VmExecution::Allocation made =
+            loadError != 0
+                ? execution_.MakeErrorResult(loadError, budget)
+                : execution_.AllocateBytes(VmBufferKind::Result, 2 * sizeof(uint64), budget);
+        if (made.buffer == nullptr) {
+            if (made.error != ErrorCode::None) {
+                return Result<void>::Failure(made.error);
+            }
+
+            CancelSuspended(chosen); // 예산 초과: 결과를 둘 수 없다 — 실행을 끝낸다
+            return Result<void>::Success();
+        }
+
+        loadResult = made.buffer;
+        if (loadError == 0) {
+            loadResult->count = 2;
+            loadResult->valueBank = static_cast<uint8>(BytecodeBank::Ref);
+            loadResult->valueSlots = 1;
+            reinterpret_cast<uint64*>(loadResult->Bytes())[0] = 0;
+            reinterpret_cast<uint64*>(loadResult->Bytes())[1] = loadValue;
+        }
+    }
+
     // 앞 실행(반환한 조각)이 남긴 frame·레지스터를 비운다(덧붙이면 frame base가 어긋난다).
     execution_.Unwind();
     execution_.scalars_.Clear();
@@ -702,6 +793,7 @@ Result<void> VmSession::ResumeSuspended(uint32 chosen, uint64 wait, uint32 depth
         execution_.scalars_.Clear();
         execution_.refs_.Clear();
         execution_.buffers_.Clear();
+        execution_.Release(loadResult);
         return Result<void>::Failure(ErrorCode::OutOfMemory);
     }
 
@@ -709,21 +801,30 @@ Result<void> VmSession::ResumeSuspended(uint32 chosen, uint64 wait, uint32 depth
         buffer = nullptr;
     }
 
-    // 결과는 없다(기본 대기는 값이 없다 — 0·null로 둔다).
+    // 결과: 기본 대기는 값이 없다(0·null). 로드 요청은 Result<T>(Scalar면 [오류 코드, 값...], Buf면
+    // 위에서 만든 Result 버퍼).
     const VmExecution::Frame& top = entry.frames[entry.frames.Size() - 1];
     for (uint32 slot = 0; slot < entry.resultSlots; ++slot) {
         const usize at = usize(top.base[entry.resultBank]) + entry.resultRegister + slot;
         if (entry.resultBank == 0) {
-            execution_.scalars_[at] = 0;
+            execution_.scalars_[at] = !loaded          ? 0
+                                      : slot == 0      ? loadError
+                                      : loadError == 0 ? loadValue
+                                                       : 0;
         } else if (entry.resultBank == 1) {
             execution_.refs_[at] = 0;
         } else {
             VmBuffer* previous = execution_.buffers_[at];
-            execution_.buffers_[at] = nullptr;
+            execution_.buffers_[at] = slot == 0 ? loadResult : nullptr;
+            if (slot == 0) {
+                loadResult = nullptr; // 참조를 레지스터로 옮겼다
+            }
+
             execution_.Release(previous);
         }
     }
 
+    execution_.Release(loadResult); // 결과 자리가 없었다(손상 — 안전장치)
     const VmExecution::Frame bottom = entry.frames[0];
     const uint32 instance = entry.instance;
     const uint64 childWait = entry.childWait;

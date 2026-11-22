@@ -856,9 +856,22 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
             // 대기 handle B로 정지한다(SparksRuntime 2.4절): frame·레지스터를 session에 옮기고
             // Suspended를 돌려준다. 재개는 EXTRA 다음(재개 블록으로의 JMP)부터다.
             const uint32 resultShape = DecodeAx(words[pc++]);
-            const uint64 wait = r[bb];
-            if (session_ == nullptr || (wait & VmWaitTag) == 0) {
+            uint64 wait = r[bb];
+            if (session_ == nullptr) {
                 return MakeFault(VmFaultKind::ContractViolation, at, steps);
+            }
+
+            // 표지 없는 값은 로드 요청 handle이다(SparksRuntime 2.6절 — LC6d5): 요청 대기를 만든다.
+            if ((wait & VmWaitTag) == 0) {
+                ErrorCode error = ErrorCode::None;
+                wait = session_->NewLoadWait(wait, error);
+                if (error != ErrorCode::None) {
+                    return failed(error);
+                }
+
+                if (wait == 0) {
+                    return MakeFault(VmFaultKind::ContractViolation, at, steps);
+                }
             }
 
             frames_[frames_.Size() - 1].pc = pc;

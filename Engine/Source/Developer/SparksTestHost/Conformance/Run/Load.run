@@ -1,0 +1,39 @@
+# Load requests (SparksRuntime 2.6, LC6d5): `Soft<T>.Load()` starts a host load and returns a held request;
+# `await request` waits until the host completes it and gives `Result<T>`; a request can be awaited again
+# and as an All/Race argument; cancelling stops the request (ReleaseHeld).
+new #1 Loader -> ok (0 steps)
+hook #1 Enable -> ok (0 steps)
+Loader.Fetch(#1) -> suspended (7 steps)
+  host load 0:0 -> #2
+load #2 #3 -> ok
+advance 0 -> ok (0 suspended)
+  host release #2
+  resume #1 Loader.Fetch -> ok (7 steps)
+  log info "fetched"
+fields #1 -> Loader(Icon: ?, Other: ?, Got: #3)
+Loader.Fetch(#1) -> suspended (7 steps)
+  host load 0:0 -> #4
+load #4 error 2 -> ok
+advance 0 -> ok (0 suspended)
+  host release #4
+  resume #1 Loader.Fetch -> ended error(1) (3 steps)
+Loader.Both(#1) -> suspended (17 steps)
+  host load 0:0 -> #5
+  host load 0:0 -> #6
+load #5 #7 -> ok
+advance 0 -> ok (1 suspended)
+load #6 #8 -> ok
+advance 0 -> ok (1 suspended)
+  resume #1 Loader.Both -> suspended (1 steps)
+advance 0 -> ok (0 suspended)
+  host release #6
+  host release #5
+  resume #1 Loader.Both -> ok (15 steps)
+  log info "both true"
+fields #1 -> Loader(Icon: ?, Other: ?, Got: #7)
+Loader.Abandon(#1) -> suspended (7 steps)
+  host load 0:0 -> #9
+hook #1 Disable -> ok (0 steps)
+  host release #9
+stats -> waits 0, suspended 0, skipped 0
+detach #1 -> ok

@@ -82,6 +82,14 @@ public:
     void ReleaseHeld(uint64) noexcept override {
     }
 
+    uint64 StartLoad(uint64, uint64) noexcept override {
+        return 0;
+    }
+
+    LoadState WatchLoad(uint64, uint64&, uint64&) noexcept override {
+        return LoadState::NotRequest;
+    }
+
     VmFaultKind GetContext(VmHostCall& call) noexcept override {
         call.Refs()[0] = Handle(1);
         return VmFaultKind::None;
@@ -792,6 +800,14 @@ public:
     }
 
     void ReleaseHeld(uint64) noexcept override {
+    }
+
+    uint64 StartLoad(uint64, uint64) noexcept override {
+        return 0;
+    }
+
+    LoadState WatchLoad(uint64, uint64&, uint64&) noexcept override {
+        return LoadState::NotRequest;
     }
 
     VmFaultKind GetContext(VmHostCall&) noexcept override {
