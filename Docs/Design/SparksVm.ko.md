@@ -83,7 +83,7 @@
 ### 6.1 링크(LC5d1)
 
 - **링크 단계:** `LinkModule(module, host, out, reason)`가 verifier를 통과한 모듈의 참조 표를 처음부터 끝까지 한 번 묶어 `VmLinkedModule`(모듈 + 참조 번호별 묶음)을 만든다. `VmExecution::Call`은 링크에 성공한 모듈만 받는다(실패했거나 링크하지 않은 `VmLinkedModule`은 InvalidArgument). 못 묶은 참조가 하나라도 있으면 모듈 전체를 거부하고 `VmLinkError`(참조 번호·종류·이름·사유)를 돌려준다(SL §12 "로드" — 실행 중에 처음 부를 때 발견하는 일이 없다). 언어 함수 묶기(§6a)도 여기로 옮긴다(실행 문맥의 첫 호출 묶기 cache는 없앤다 — 모르는 이름·서술자는 실행 중 `ContractViolation`이 아니라 링크 거부다).
-- **묶는 참조:** `LanguageFunction`(VM 구현 표), `NativeFunction`·`Field`·`Context`·`Literal`(host `Bind`), `Function`(같은 모듈 — verifier가 이미 봄), `StructField`·TYPE이 있는 `Type`(TYPE 구역 — 묶을 것 없음). 그 밖(`ImportedFunction`·`VirtualFunction`·TYPE 없는 `Type`·`Event`·`RpcFunction`)은 LC5d2·LC6이 묶을 때까지 묶음 없음으로 두고, 그 명령은 지금처럼 실행 중 `ContractViolation`이다(V5).
+- **묶는 참조:** `LanguageFunction`(VM 구현 표), `NativeFunction`·`Field`·`Context`·`Literal`·`VirtualFunction`(host `Bind`), TYPE 없는 `Type`·`StructField`(host가 있을 때만 — 6.5절), `ImportedFunction`(서술자 모양만 — 대상은 `LinkImports`), `Function`(같은 모듈 — verifier가 이미 봄), TYPE이 있는 `StructField`·`Type`(TYPE 구역). `Event`·`RpcFunction`은 LC6이 묶을 때까지 묶음 없음이고 그 명령은 실행 중 `ContractViolation`이다(V5).
 - **서술자 대조:** 컴파일러는 `NativeFunction` 참조의 `arguments`에 언어 함수와 같은 문법의 피연산자 서술자(§6a — 수신자 먼저, 결과)를, `Field` 참조에는 필드 타입 하나의 서술자(`>v3` — 결과 자리에 필드 타입)를 싣는다. host는 자기 schema의 시그니처를 같은 문법으로 만들어 글자로 비교하고 다르면 묶기를 거부한다(schema와 모듈이 어긋나면 로드에서 막는다 — BC §5의 "native 시그니처 hash"를 대신한다. 글자 비교라 진단이 읽힌다).
 - **필드 명령 대조:** 링크는 함수 명령을 한 번 훑어 `GETF`·`SETF`의 bank·slot 수(C)가 묶은 필드의 배치와 같은지 본다(다르면 거부). 실행 중에는 다시 보지 않는다.
 - **host 묶음:** `VmHost::Bind(const VmBindRequest&)`는 요청(참조 종류, 이름, 서술자, 리터럴 글자·이름 지정 인자 표)을 받아 `VmHostBinding`(host가 정하는 64비트 번호, 필드·리터럴·문맥 결과의 bank·slot 수)을 돌려준다. 실패는 `Result` 오류와 사유 글자다. 같은 host로 링크한 모듈만 그 host로 실행한다(실행 문맥은 링크된 모듈의 host를 쓴다).
@@ -125,6 +125,13 @@ class VmHost {
 - **`CAST A B` + Type:** TYPE이 없는 Type 참조(엔진 타입·Sparks 클래스·interface)는 host가 묶고, 실행 중 `VmHost::IsA(handle, 묶음)`이 참이면 A ← B, 아니면 0이다(죽은 handle은 0).
 - **엔진 struct:** TYPE이 없는 struct Type 참조는 host가 bank별 slot 수를 돌려주고(`VmHostBinding::structSlots`), `NEWS`는 그 배치의 0·null 버퍼를 만든 뒤 `VmHost::InitializeStruct`가 schema 기본값을 채운다(창은 버퍼 안 bank별 구역). 엔진 struct의 `StructField` 참조(보조 번호 없음)는 host가 (bank, slot 수, bank 구역 안 위치)로 묶고 `GETSF`·`SETSF`는 그 위치를 쓴다(링크가 필드 명령의 bank·slot 수를 대조).
 - **이름 표기:** 엔진 enum의 `TOSTR`(TYPE 없는 Type 참조)·`Name`·`Tag`의 `TOSTR`는 `VmHost::AppendName(묶음 또는 0, 값, out)`이 글자를 붙인다(이름 표는 host — Tag는 이름 번호, 엔진 enum은 case 번호).
+- **묶기 범위:** TYPE 없는 Type·StructField 참조는 host가 있을 때만 묶는다(컨테이너 원소 타입처럼 실행 중 host가 필요 없는 Type 참조도 있다 — host 없이 링크하면 그 참조를 쓰는 `NEWS`·`CAST`·`TOSTR`·`GETSF`는 실행 중 `ContractViolation`, `CAST`는 없음). `VirtualFunction`은 host가 없으면 링크 거부다. 엔진 struct의 필드 명령은 링크가 host 필드 배치(bank·slot 수)와 대조한다. 엔진 struct의 Buf 필드는 null로 시작한다(schema 기본값의 Buf 필드는 연동 EI5).
+- **`TagSet()`:** 언어 타입 `TagSet`의 생성은 컴파일러가 `LOADNULL.B`로 낸다(null이 빈 값 — VM이 이름으로 가리지 않는다).
+- **import 집합의 규칙(LC5d2 리뷰):** `LinkImports`의 모듈은 모두 링크에 성공했고 같은 host여야 한다(host마다 handle 공간이 다르다). import는 푼 때의 대상 링크 세대를 기억하고, 대상을 다시 링크하면 그 import를 부르는 `CALL`은 `ContractViolation`이다(다시 `LinkImports`한다). import를 부르는 `CALL`마다 부르는 쪽 창이 대상 매개변수를 담는지는 `LinkImports`가 본다(로드에서 거부). 모양 대조는 bank별 slot 수와 반환 모양이라 같은 모양의 다른 Scalar 종류(`i64`·`f64`)는 가리지 못한다 — 알려진 한계, 함수 표에 서술자를 싣는 것은 형식 v3 이후 검토.
+- **`CALLV` 대상 대조:** host가 준 Sparks 대상은 같은 host로 링크한 모듈이고 함수 모양이 가상 서술자의 모양과 같아야 한다(아니면 `ContractViolation`). host는 `ResolveVirtual`의 창을 바꾸지 않는다(계약).
+- **struct 구역:** struct 버퍼는 Scalar 구역 크기를 머리에 두고(`indexCapacity`) 필드 명령은 Scalar·Ref·Buf 구역을 따로 대조한다(Scalar 값을 Ref handle로 읽지 않는다).
+- **이름 표기 분리:** `AppendName(값)`은 Name·Tag(0은 없음), `AppendEnumName(Type 묶음, 값)`은 엔진 enum이다(묶음 번호 0도 쓸 수 있다). host가 false를 돌려줄 때 글자 붙이기가 할당에 실패했으면 OutOfMemory다.
+- **fault의 모듈:** `VmFault::module`은 fault 위치(함수 번호·원문 위치)가 속한 링크된 모듈이다(다른 모듈 함수 안의 fault).
 - **`TagSet`·`Text`의 0 값:** null 버퍼가 빈 값이다(SL §3.2 "빈 TagSet·빈 Text") — 그 타입의 연산(LC6·EI5 host 함수)이 null을 빈 값으로 받는다. 따로 만들지 않는다.
 
 ### 6.4 결정(LC5d — 권장안 확정)

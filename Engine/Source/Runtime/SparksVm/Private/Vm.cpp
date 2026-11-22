@@ -87,9 +87,11 @@ Result<VmCallResult> VmExecution::Call(const VmLinkedModule& linked, uint32 func
     }
 
     Unwind();
-    logs_.Clear();
-    logText_.Clear();
-    droppedLogs_ = 0;
+    if (!keepLogs_) {
+        logs_.Clear();
+        logText_.Clear();
+        droppedLogs_ = 0;
+    }
     random_.Seed(limits.randomSeed);
     module_ = &module;
     link_ = &linked;
@@ -197,6 +199,7 @@ Result<VmCallResult> VmExecution::MakeFault(VmFaultKind kind, uint32 word, uint6
     result.fault.kind = kind;
     const uint32 function = frames_[frames_.Size() - 1].function;
     result.fault.function = function;
+    result.fault.module = link_;
     result.fault.address = word - module_->functions[function].firstWord;
     if (word < module_->locations.Size()) {
         result.fault.location = module_->locations[word];

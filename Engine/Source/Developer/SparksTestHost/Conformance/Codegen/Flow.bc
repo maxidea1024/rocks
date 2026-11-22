@@ -34,8 +34,15 @@ t20 = "Component.Owner"
 t21 = "Actor.Pushed"
 t22 = "x>void"
 t23 = "LoopHandle.Pause"
-t24 = "sparks 0.4.0"
-t25 = "Main"
+t24 = "Mover.$init"
+t25 = "Mover"
+t26 = "ScriptableComponent"
+t27 = "Cue"
+t28 = "Speed"
+t29 = "Owner"
+t30 = "Damaged"
+t31 = "sparks 0.4.0"
+t32 = "Main"
 ref0 = field Mover.Speed args ">f64"
 ref1 = language NextTick args ">w"
 ref2 = function Mover.Fetch #2
@@ -50,6 +57,10 @@ ref10 = rpc Mover.SetSpeed
 ref11 = field Component.Owner args ">x"
 ref12 = event Actor.Pushed
 ref13 = native LoopHandle.Pause args "x>void"
+class0 = Mover : ScriptableComponent s1 r1 b0 init Mover.$init
+  field Cue r0 x1
+  field Speed s0 x1
+  handler Owner.Damaged Mover.on Owner.Damaged await skipWhileBusy
 
 function Wrap  scalar=8/8 ref=0/0 buf=0/0 params=1/0/0 returns sx4
   body db8b8a03718bc7ebb103f347e4037bf0cfb87c92939a0d9794bfb9146885acdd
@@ -192,3 +203,9 @@ function Mover.on Owner.Damaged  scalar=4/6 ref=4/6 buf=0/0 params=1/1/0 returns
   0048  JMP  0020    ; 47:17
   0049  RELEASE  r1    ; 42:26
   0050  JMP  0001    ; 42:9
+
+function Mover.$init  scalar=1/1 ref=1/1 buf=0/0 params=0/1/0 returns sx0
+  body a3cfeb478d4926d5fc16fd91dbf1fcd1805d14e1e16654957be4d6832b8f983b
+  0000  LOADK  s0, k1    ; 13:5
+  0001  SETF.S  r0, s0, ref0    ; 13:5
+  0003  RET  -    ; 56:1

@@ -28,6 +28,10 @@ public:
     bool Encode(const IrFunction& function, uint32 index, StringView name,
                 uint32 nameNode) noexcept;
 
+    // CLASS 구역(형식 버전 3 — SparksRuntime 2.1절)을 쓴다. bodies는 함수 표 순의 (owner << 32) |
+    // 본문 노드다(handler의 함수 번호). 할당 실패면 false(오류는 binder에).
+    bool EncodeClasses(Span<const uint64> bodies) noexcept;
+
     // 문자열 표에 넣고 번호를 돌려준다(모듈 머리의 이름).
     uint32 String(StringView text) noexcept {
         return AddString(text);

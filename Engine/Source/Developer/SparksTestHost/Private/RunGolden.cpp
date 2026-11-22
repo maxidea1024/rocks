@@ -10,6 +10,8 @@
 #include "ConformanceInternal.h"
 #include "FakeHost.h"
 
+#include <SparksVm/VmSession.h>
+
 // `.run` 실행 golden이다(Docs/Design/SparksVm.ko.md 7절, LC5a). 줄마다 최상위 함수 호출 하나
 // (`<함수>(<인자>, …) -> <결과> (<명령 수> steps)`)이며, 실행기는 `->` 앞만 읽어 `.sparkc` 왕복을
 // 거친 모듈로 실행하고 줄 전체를 실제 결과로 다시 써서 파일과 비교한다. 값 표기는 Compilation의
@@ -1031,6 +1033,10 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
 
     // 가짜 host로 링크한다(SparksVm 6.1절 — 못 묶으면 사례 실패).
     FakeHost host(allocator, compilation);
+    if (host.RanOutOfMemory()) {
+        return Result<void>::Failure(ErrorCode::OutOfMemory);
+    }
+
     VmLinkedModule linked(allocator);
     {
         StringBuilder<MessageInlineBytes> reason(allocator);
@@ -1049,12 +1055,19 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
         }
     }
 
+    host.SetModule(&linked);
     Array<uint64> refArguments(allocator);
     StringBuilder<MessageInlineBytes> problem(allocator);
     RunValues values(compilation, problem, &host);
     StringBuilder<MessageInlineBytes> actual(allocator);
     Array<uint64> arguments(allocator);
-    VmExecution execution(allocator);
+    // 실행 단위는 session 하나다(SparksRuntime 2.2절 — 메서드 호출의 수신자는 session instance).
+    VmSession session(allocator, &host);
+    VmExecution& execution = session.Execution();
+    if (auto added = session.AddModule(linked); !added) {
+        return added;
+    }
+
     // host가 필드에 보관한 버퍼는 어느 출구에서도 놓는다(LC5d1 리뷰 B5 — execution이 host보다 먼저
     // 선언돼 이 guard가 사라질 때 아직 살아 있다).
     struct HostGuard {
@@ -1087,6 +1100,266 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
 
         // 로그 줄은 앞 호출의 기록이다 — 실행기가 다시 쓴다.
         if (line.StartsWith(RunLogPrefix) || line.StartsWith(RunHostPrefix)) {
+            continue;
+        }
+
+        // instance 지시(SparksRuntime 4절 — LC6a): `new #n Class`, `hook #n Kind[(인자)]`,
+        // `fields #n`, `detach #n`. 결과는 `-> ok (N steps)`·fault·필드 표기와 log·host 줄이다.
+        if (line.StartsWith("new ") || line.StartsWith("hook ") || line.StartsWith("fields ") ||
+            line.StartsWith("detach ")) {
+            usize arrowAt = line.ByteCount();
+            for (usize index = 0; index + RunArrow.ByteCount() <= line.ByteCount(); ++index) {
+                if (StringView(line.Data() + index, RunArrow.ByteCount()) == RunArrow) {
+                    arrowAt = index;
+                    break;
+                }
+            }
+
+            const StringView directive = RunValues::Trim(StringView(line.Data(), arrowAt));
+            // 단어 나누기: 지시, 대상 `#n`, 나머지.
+            usize first = 0;
+            while (first < directive.ByteCount() && directive.Data()[first] != ' ') {
+                ++first;
+            }
+
+            usize second = first + 1;
+            while (second < directive.ByteCount() && directive.Data()[second] != ' ') {
+                ++second;
+            }
+
+            const StringView verb(directive.Data(), first);
+            const StringView target =
+                first < directive.ByteCount()
+                    ? StringView(directive.Data() + first + 1,
+                                 (second < directive.ByteCount() ? second : directive.ByteCount()) -
+                                     first - 1)
+                    : StringView();
+            const StringView rest =
+                second < directive.ByteCount()
+                    ? RunValues::Trim(StringView(directive.Data() + second + 1,
+                                                 directive.ByteCount() - second - 1))
+                    : StringView();
+            auto number =
+                target.StartsWith("#")
+                    ? TryParseUInt32(StringView(target.Data() + 1, target.ByteCount() - 1))
+                    : Result<uint32>::Failure(ErrorCode::InvalidArgument);
+            auto bad = [&](StringView why) noexcept -> Result<void> {
+                StringBuilder<MessageInlineBytes> reason(allocator);
+                reason.AppendFormat(".run line {}: {}", lineNumber, why);
+                if (reason.HasFailed()) {
+                    return Result<void>::Failure(reason.Status().Error());
+                }
+
+                return fail(reason.View());
+            };
+            if (!number || number.Value() == 0) {
+                return bad("expected an object '#<number>' after the directive");
+            }
+
+            host.ClearTrace();
+            actual.Append(directive).Append(RunArrow);
+            VmCallResult result;
+            bool ran = false;
+            if (verb == "new") {
+                uint32 classIndex = NoBytecodeIndex;
+                for (uint32 index = 0; index < loaded.classes.Size(); ++index) {
+                    classIndex =
+                        loaded.String(loaded.classes[index].name) == rest ? index : classIndex;
+                }
+
+                if (classIndex == NoBytecodeIndex) {
+                    return bad("'new' needs a class of the module");
+                }
+
+                const uint64 handle = host.ObjectArgument(number.Value(), rest);
+                if (handle == 0) {
+                    return Result<void>::Failure(ErrorCode::OutOfMemory);
+                }
+
+                auto created = session.CreateInstance(handle, linked, classIndex, result);
+                if (!created) {
+                    if (created.Error() != ErrorCode::InvalidArgument) {
+                        return Result<void>::Failure(created.Error());
+                    }
+
+                    return bad("the object already has an instance or is not alive");
+                }
+
+                ran = true;
+            } else {
+                const uint64 handle = host.ObjectArgument(number.Value(), StringView());
+                const uint32 instance = handle == 0 ? NoBytecodeIndex : session.Find(handle);
+                if (instance == NoBytecodeIndex) {
+                    return bad("the object has no instance (use 'new' first)");
+                }
+
+                if (verb == "detach") {
+                    session.Detach(instance);
+                    actual.Append("ok");
+                } else if (verb == "fields") {
+                    // 기반 사슬(기반 먼저)의 필드: `Class(Field: 값, …)`.
+                    const VmLinkedModule* chainModules[64] = {};
+                    uint32 chainClasses[64] = {};
+                    uint32 depth = 0;
+                    uint32 current = session.ClassOf(instance);
+                    while (current != NoBytecodeIndex && depth < 64) {
+                        chainModules[depth] = &linked;
+                        chainClasses[depth++] = current;
+                        current = loaded.classes[current].baseClass;
+                    }
+
+                    const VmSession::FieldView storage = session.Fields(instance);
+                    actual.Append(loaded.String(loaded.classes[session.ClassOf(instance)].name))
+                        .Append("(");
+                    bool firstField = true;
+                    for (uint32 at = depth; at > 0; --at) {
+                        const BytecodeClass& entry = loaded.classes[chainClasses[at - 1]];
+                        uint32 start[BytecodeBankCount] = {};
+                        static_cast<void>(session.RegionStart(*chainModules[at - 1],
+                                                              chainClasses[at - 1], start));
+                        const StringView className = loaded.String(entry.name);
+                        for (uint32 field = entry.firstField;
+                             field < entry.firstField + entry.fieldCount; ++field) {
+                            const BytecodeTypeField& slot = loaded.classFields[field];
+                            const StringView fieldName = loaded.String(slot.name);
+                            const Symbol* symbol = nullptr;
+                            for (const Symbol& candidate : compilation.Symbols()) {
+                                if (candidate.kind == SymbolKind::Field &&
+                                    candidate.module == mainModule && candidate.name == fieldName &&
+                                    candidate.owner != NoSymbol &&
+                                    compilation.Symbols()[candidate.owner].name == className) {
+                                    symbol = &candidate;
+                                }
+                            }
+
+                            actual.Append(firstField ? "" : ", ").Append(fieldName).Append(": ");
+                            firstField = false;
+                            const usize where = usize(start[slot.bank]) + slot.offset;
+                            const RunType type =
+                                symbol == nullptr
+                                    ? RunType()
+                                    : values.TypeOf(values.FieldTypeOf(*symbol), true);
+                            if (values.IsBuffer(type)) {
+                                values.FormatValue(actual, type, storage.buffers[where]);
+                            } else if (type.shape == RunShape::Unsupported) {
+                                actual.Append("?");
+                            } else {
+                                values.Format(
+                                    actual, type,
+                                    Span<const uint64>(
+                                        (slot.bank == 0 ? storage.scalars : storage.refs).Data() +
+                                            where,
+                                        slot.slots));
+                            }
+                        }
+                    }
+
+                    actual.Append(")");
+                } else if (verb == "hook") {
+                    // `Kind` 또는 `Kind(인자, …)` — 인자는 실수(Scalar) 또는 `#n`(Ref).
+                    usize open = 0;
+                    while (open < rest.ByteCount() && rest.Data()[open] != '(') {
+                        ++open;
+                    }
+
+                    const StringView kindName(rest.Data(), open);
+                    uint32 kind = static_cast<uint32>(BytecodeHookKind::Count);
+                    for (uint32 index = 0; index < static_cast<uint32>(BytecodeHookKind::Count);
+                         ++index) {
+                        kind =
+                            kindName == BytecodeHookKindName(static_cast<BytecodeHookKind>(index))
+                                ? index
+                                : kind;
+                    }
+
+                    if (kind == static_cast<uint32>(BytecodeHookKind::Count)) {
+                        return bad("unknown hook kind");
+                    }
+
+                    arguments.Clear();
+                    refArguments.Clear();
+                    bool parsed = true;
+                    if (open < rest.ByteCount()) {
+                        if (!rest.EndsWith(")")) {
+                            return bad("expected ')' after the hook arguments");
+                        }
+
+                        RunValues::ForEachItem(
+                            StringView(rest.Data() + open + 1, rest.ByteCount() - open - 2),
+                            [&](StringView item) noexcept {
+                                item = RunValues::Trim(item);
+                                if (item.StartsWith("#")) {
+                                    auto object = TryParseUInt32(
+                                        StringView(item.Data() + 1, item.ByteCount() - 1));
+                                    const uint64 argument =
+                                        object ? host.ObjectArgument(object.Value(), "Actor") : 0;
+                                    parsed = parsed && argument != 0 &&
+                                             static_cast<bool>(refArguments.TryPushBack(argument));
+                                    return;
+                                }
+
+                                auto real = TryParseDouble(item);
+                                parsed = parsed && real &&
+                                         static_cast<bool>(arguments.TryPushBack(
+                                             platform::BitCast<uint64>(real.Value())));
+                            });
+                    }
+
+                    if (!parsed) {
+                        return bad("cannot read the hook arguments");
+                    }
+
+                    auto hooked = session.RunHook(instance, static_cast<BytecodeHookKind>(kind),
+                                                  arguments.View(), refArguments.View());
+                    if (!hooked) {
+                        if (hooked.Error() != ErrorCode::InvalidArgument) {
+                            return Result<void>::Failure(hooked.Error());
+                        }
+
+                        return bad("the VM rejected the hook arguments");
+                    }
+
+                    result = hooked.Value();
+                    ran = true;
+                } else {
+                    return bad("unknown directive");
+                }
+            }
+
+            if (ran) {
+                switch (result.outcome) {
+                case VmOutcome::Returned:
+                    actual.Append("ok");
+                    break;
+                case VmOutcome::Faulted:
+                    actual.AppendFormat("fault {} at {}:{}", VmFaultKindName(result.fault.kind),
+                                        result.fault.location.line, result.fault.location.column);
+                    break;
+                case VmOutcome::Ended:
+                    actual.AppendFormat("ended error({})", result.errorCode - 1);
+                    break;
+                }
+
+                actual.AppendFormat(" ({} steps)", result.steps);
+            }
+
+            actual.Append("\n");
+            if (execution.DroppedLogs() != 0 || host.RanOutOfMemory()) {
+                return Result<void>::Failure(ErrorCode::OutOfMemory);
+            }
+
+            for (uint32 index = 0; ran && index < execution.LogCount(); ++index) {
+                actual.Append(RunLogPrefix)
+                    .Append(VmLogLevelName(execution.LogLevel(index)))
+                    .Append(" ");
+                RunValues::AppendQuoted(actual, execution.LogMessage(index));
+                actual.Append("\n");
+            }
+
+            for (const String& record : host.Trace()) {
+                actual.Append(RunHostPrefix).Append(record.View()).Append("\n");
+            }
+
             continue;
         }
 
@@ -1249,8 +1522,44 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
         }
 
         host.ClearTrace();
-        auto called = execution.Call(linked, function, arguments.View(), refArguments.View(),
-                                     Span<VmBuffer* const>(buffers.Data(), buffers.Size()));
+        // 메서드는 수신자 instance로 부른다(없으면 만든다 — 기본값 `$init`, SparksRuntime 2.2절).
+        auto invoke = [&]() noexcept -> Result<VmCallResult> {
+            const Span<VmBuffer* const> passed(buffers.Data(), buffers.Size());
+            if (owner.IsEmpty()) {
+                return execution.Call(linked, function, arguments.View(), refArguments.View(),
+                                      passed);
+            }
+
+            uint32 classIndex = NoBytecodeIndex;
+            for (uint32 index = 0; index < loaded.classes.Size(); ++index) {
+                classIndex =
+                    loaded.String(loaded.classes[index].name) == owner ? index : classIndex;
+            }
+
+            uint32 instance = session.Find(refArguments[0]);
+            if (instance == NoBytecodeIndex && classIndex != NoBytecodeIndex) {
+                VmCallResult init;
+                auto created = session.CreateInstance(refArguments[0], linked, classIndex, init);
+                if (!created) {
+                    return Result<VmCallResult>::Failure(created.Error());
+                }
+
+                if (created.Value() == NoBytecodeIndex) {
+                    return Result<VmCallResult>::Success(init); // 초기화 fault
+                }
+
+                instance = created.Value();
+            }
+
+            if (instance == NoBytecodeIndex) {
+                return Result<VmCallResult>::Failure(ErrorCode::InvalidArgument);
+            }
+
+            return session.Call(
+                instance, linked, function, arguments.View(),
+                Span<const uint64>(refArguments.Data() + 1, refArguments.Size() - 1), passed);
+        };
+        auto called = invoke();
         if (!called) {
             if (called.Error() != ErrorCode::InvalidArgument) {
                 return Result<void>::Failure(called.Error());
@@ -1310,9 +1619,12 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
         }
 
         buffers.Clear();
+        // session instance의 필드도 버퍼를 쥔다(SparksRuntime 2.2절): instance가 있으면 줄마다의 0
+        // 검사는 하지 않고 사례 끝에 모두 Detach한 뒤 본다.
         const uint64 held = host.HeldBuffers();
-        if (held == 0 ? execution.LiveBuffers() != 0 || execution.LiveBytes() != 0
-                      : execution.LiveBuffers() < held) {
+        if (session.AttachedCount() == 0 &&
+            (held == 0 ? execution.LiveBuffers() != 0 || execution.LiveBytes() != 0
+                       : execution.LiveBuffers() < held)) {
             StringBuilder<MessageInlineBytes> reason(allocator);
             reason.AppendFormat(
                 ".run line {}: {} buffers ({} bytes) are still alive after the call", lineNumber,
@@ -1325,6 +1637,7 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
         }
     }
 
+    session.DetachAll();
     host.ReleaseAll(execution);
     if (execution.LiveBuffers() != 0 || execution.LiveBytes() != 0) {
         return fail(".run: buffers are still alive after the fake host released its fields");

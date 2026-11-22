@@ -40,6 +40,21 @@ struct VmHostBinding {
     uint64 id = 0;
     uint8 bank = 0;
     uint8 slots = 0;
+    // 엔진 struct 필드(StructField)의 struct payload 안 절대 slot 위치(bank 묶음 Scalar·Ref·Buf 순
+    // — TYPE 필드와 같은 규칙, 6.5절).
+    uint16 offset = 0;
+    // 엔진 struct 타입(Type)의 bank별 slot 수(0이면 struct가 아니다 — 객체·enum 타입).
+    uint16 structSlots[BytecodeBankCount] = {};
+};
+
+class VmLinkedModule;
+
+// 가상 호출의 대상이다(6.5절): Sparks 함수(링크된 모듈과 함수 번호) 또는 native(묶음 번호).
+struct VmVirtualTarget {
+    const VmLinkedModule* module = nullptr; // Sparks 함수면 그 모듈
+    uint32 function = NoBytecodeIndex;
+    bool native = false;
+    uint64 binding = 0; // native면 CallNative에 줄 묶음 번호
 };
 
 // host 호출 하나의 창과 도구다. 창은 bank별 연속 slot이다: CALLN·NEWLIT은 이 frame의 할당 수부터
@@ -116,13 +131,28 @@ public:
     virtual VmFaultKind CallNative(VmHostCall& call) noexcept = 0;
     // 리터럴 값을 결과 bank 창 0번에 만든다(이름 지정 인자는 창에 있다).
     virtual VmFaultKind MakeLiteral(VmHostCall& call) noexcept = 0;
+
+    // ---- LC5d2(6.5절) — 기본 구현은 계약 위반·거짓·0 값이다. ----
+    // CALLV의 살아 있는 수신자 receiver(창 Ref 0번)와 묶음(call.Binding())의 대상을 target에 둔다.
+    virtual VmFaultKind ResolveVirtual(VmHostCall& call, uint64 receiver,
+                                       VmVirtualTarget& target) noexcept;
+    // 살아 있는 handle이 묶은 타입(Type 묶음 번호)인지다(CAST — `as?`).
+    virtual bool IsA(uint64 handle, uint64 type) noexcept;
+    // 새 엔진 struct의 schema 기본값을 채운다(call.Scalars()·Refs()가 그 struct의 Scalar·Ref 구역,
+    // Buf 필드는 null로 남는다 — 엔진 struct의 Buf 필드 기본값은 연동 EI5).
+    virtual VmFaultKind InitializeStruct(VmHostCall& call) noexcept;
+    // Name·Tag 값(이름 번호 — 0은 없음)의 표기를 붙인다. 모르는 값은 false(ContractViolation).
+    virtual bool AppendName(uint64 value, StringBuilderBase& out) noexcept;
+    // 엔진 enum(Type 묶음 type)의 case 이름을 붙인다. 모르는 값은 false(ContractViolation).
+    virtual bool AppendEnumName(uint64 type, uint64 value, StringBuilderBase& out) noexcept;
 };
 
 // 링크된 모듈이다: 모듈과 host, 참조 번호별 묶음. 모듈과 host는 이 객체보다 오래 살아야 한다.
 class VmLinkedModule final {
 public:
     explicit VmLinkedModule(Allocator& allocator) noexcept
-        : hosts_(allocator), languageIndex_(allocator), languages_(allocator), imports_(allocator) {
+        : hosts_(allocator), languageIndex_(allocator), languages_(allocator), imports_(allocator),
+          shapes_(allocator), localFields_(allocator) {
     }
 
     VmLinkedModule(const VmLinkedModule&) = delete;
@@ -153,15 +183,35 @@ public:
 
 private:
     friend class VmExecution;
+    friend class VmSession;
     friend Result<void> LinkModule(const BytecodeModule& module, VmHost* host, VmLinkedModule& out,
                                    StringBuilderBase& reason) noexcept;
     friend Result<void> LinkImports(Span<VmLinkedModule* const> modules,
                                     StringBuilderBase& reason) noexcept;
 
-    // 다른 모듈 함수 참조의 대상이다(참조 번호별 — ImportedFunction이 아니면 비었다).
+    // 다른 모듈 함수 참조의 대상이다(참조 번호별 — ImportedFunction이 아니면 비었다). generation은
+    // 푼 때의 대상 링크 세대다: 대상을 다시 링크하면 세대가 바뀌어 CALL이 ContractViolation이다.
     struct Import {
         const VmLinkedModule* module = nullptr;
         uint32 function = NoBytecodeIndex;
+        uint64 generation = 0;
+    };
+
+    // 같은 모듈 Sparks 클래스 필드 참조의 로컬 묶음이다(SparksRuntime 2.2절 — host에 묻지 않는다).
+    struct LocalField {
+        uint32 classIndex = NoBytecodeIndex; // NoIndex면 로컬 필드가 아니다
+        uint8 bank = 0;
+        uint8 slots = 0;
+        uint32 offset = 0; // 클래스 구역 안 위치
+    };
+
+    // ImportedFunction·VirtualFunction 참조 서술자의 함수 모양(bank별 매개변수 slot 수와 반환 —
+    // 6.5절 모양 대조)이다.
+    struct Shape {
+        uint16 parameters[BytecodeBankCount] = {};
+        uint8 returnBank = 0;
+        uint8 returnSlots = 0;
+        bool valid = false;
     };
 
     const BytecodeModule* module_ = nullptr;
@@ -172,8 +222,11 @@ private:
     Array<uint32> languageIndex_;
     Array<uint64> languages_;
     Array<Import> imports_;
+    Array<Shape> shapes_;
+    Array<LocalField> localFields_;
     bool importsLinked_ = false;
     bool linked_ = false;
+    uint64 generation_ = 0; // LinkModule마다 바뀐다(이 객체를 가리키는 import의 무효화)
 };
 
 // verifier를 통과한 module의 참조를 모두 묶는다(6.1절). host가 nullptr이면 host가 묶어야 하는
@@ -184,9 +237,12 @@ Result<void> LinkModule(const BytecodeModule& module, VmHost* host, VmLinkedModu
                         StringBuilderBase& reason) noexcept;
 
 // 링크된 modules의 다른 모듈 함수 참조(`<import 경로>:Owner.Name`)를 modules 안의 함수로 푼다(6.5절
-// — 순환 import도 된다). 대상의 함수 표 모양(bank별 매개변수 수·반환 bank·slot 수)이 참조 서술자와
-// 같아야 한다. 실패: 대상 모듈·함수가 없거나 모양이 다르면 InvalidArgument(reason에 `ref <번호>
-// (import <이름>): <사유>`), 할당 실패는 OutOfMemory. 모든 module의 ImportsLinked가 참이 된다.
+// —// 모든 module은 링크에 성공했고 같은 host여야 한다. 대상 모듈을 다시 링크하면 그 import는
+// 무효가 되어 부르면 ContractViolation이다 — 다시 LinkImports한다. 모듈들은 실행 동안 살아 있어야
+// 한다. — 순환 import도 된다). 대상의 함수 표 모양(bank별 매개변수 수·반환 bank·slot 수)이 참조
+// 서술자와 같아야 한다. 실패: 대상 모듈·함수가 없거나 모양이 다르면 InvalidArgument(reason에 `ref
+// <번호> (import <이름>): <사유>`), 할당 실패는 OutOfMemory. 모든 module의 ImportsLinked가 참이
+// 된다.
 Result<void> LinkImports(Span<VmLinkedModule* const> modules, StringBuilderBase& reason) noexcept;
 
 } // namespace rocks::sparks

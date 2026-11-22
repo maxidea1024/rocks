@@ -115,6 +115,70 @@ struct BytecodeTypeField {
     uint32 offset = 0;
 };
 
+// 수명·물리 hook 종류다(SL 5.1절 — 클래스당 종류마다 하나).
+enum class BytecodeHookKind : uint8 {
+    Awake,
+    Enable,
+    Start,
+    Tick,
+    FixedTick,
+    LateTick,
+    Disable,
+    Destroy,
+    TriggerEnter,
+    TriggerExit,
+    CollisionEnter,
+    CollisionExit,
+    Validate,
+    Count
+};
+
+const char* BytecodeHookKindName(BytecodeHookKind kind) noexcept;
+
+// handler의 재진입 정책이다(SL 6.1절 — await가 있는 handler만 표시).
+enum class BytecodeReentry : uint8 {
+    None,
+    SkipWhileBusy,
+    Restart
+};
+
+// CLASS 구역(형식 버전 3 — Docs/Design/SparksRuntime.ko.md 2.1절)의 클래스 하나다. 범위는 이
+// 클래스가 선언한 것만이다(기반 사슬은 session이 잇는다).
+struct BytecodeClass {
+    uint32 name = NoBytecodeIndex;
+    uint32 baseClass = NoBytecodeIndex; // 같은 모듈 기반 클래스 번호(앞선 클래스)
+    // 다른 모듈 Sparks 기반(`<경로>:Class`) 또는 엔진 기반 타입 이름의 문자열 번호.
+    uint32 baseName = NoBytecodeIndex;
+    uint32 firstField = 0; // classFields 범위(위치는 자기 bank 구역 안)
+    uint32 fieldCount = 0;
+    uint32 firstHook = 0;
+    uint32 hookCount = 0;
+    uint32 firstHandler = 0;
+    uint32 handlerCount = 0;
+    uint32 firstEvent = 0;
+    uint32 eventCount = 0;
+    uint16 slots[BytecodeBankCount] = {}; // 자기 필드의 bank별 slot 수
+    uint32 initializer = NoBytecodeIndex; // `<Class>.$init` 함수 번호
+};
+
+struct BytecodeHook {
+    BytecodeHookKind kind = BytecodeHookKind::Awake;
+    uint32 function = NoBytecodeIndex;
+};
+
+struct BytecodeHandler {
+    uint32 path = NoBytecodeIndex;  // 경로 글자(빈 글자는 자기 이벤트)
+    uint32 event = NoBytecodeIndex; // 이벤트 이름
+    uint32 function = NoBytecodeIndex;
+    BytecodeReentry reentry = BytecodeReentry::None;
+    uint8 awaits = 0;
+};
+
+struct BytecodeEvent {
+    uint32 name = NoBytecodeIndex;
+    uint32 arguments = NoBytecodeIndex; // 인자 서술자(피연산자 부분), 인자가 없으면 NoIndex
+};
+
 struct BytecodeFunction {
     uint32 name = NoBytecodeIndex; // 표시 이름의 문자열 번호
     uint32 firstWord = 0;
@@ -140,8 +204,9 @@ public:
     explicit BytecodeModule(Allocator& allocator) noexcept
         : scalars(allocator), stringBytes(allocator), stringOffsets(allocator),
           stringLengths(allocator), refs(allocator), types(allocator), typeFields(allocator),
-          functions(allocator), words(allocator), locations(allocator), switches(allocator),
-          cases(allocator), awaits(allocator), liveRanges(allocator) {
+          classes(allocator), classFields(allocator), hooks(allocator), handlers(allocator),
+          events(allocator), functions(allocator), words(allocator), locations(allocator),
+          switches(allocator), cases(allocator), awaits(allocator), liveRanges(allocator) {
     }
 
     BytecodeModule(BytecodeModule&&) noexcept = default;
@@ -168,6 +233,12 @@ public:
     // typeFields 번호다.
     Array<BytecodeType> types;
     Array<BytecodeTypeField> typeFields;
+    // CLASS 구역(형식 버전 3): 클래스 필드의 위치는 자기 bank 구역 안이다.
+    Array<BytecodeClass> classes;
+    Array<BytecodeTypeField> classFields;
+    Array<BytecodeHook> hooks;
+    Array<BytecodeHandler> handlers;
+    Array<BytecodeEvent> events;
     Array<BytecodeFunction> functions;
     Array<uint32> words;               // 모든 함수의 명령 단어(함수는 구간)
     Array<BytecodeLocation> locations; // words와 같은 번호

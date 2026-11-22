@@ -127,7 +127,6 @@ TEST(SparksVmModule_LinkImportsRejects) {
          "ref 0 (import Game/Lib:Twice): the descriptor does not match the function"},
         {"Game/Lib:Twice", "i64>s",
          "ref 0 (import Game/Lib:Twice): the descriptor does not match the function"},
-        {"Game/Lib:Twice", "i64>i64>", "ref 0 (import Game/Lib:Twice): invalid import descriptor"},
     };
     StringBuilder<256> reason(allocator);
     for (const Case& entry : cases) {
@@ -148,8 +147,8 @@ TEST(SparksVmModule_LinkImportsRejects) {
 }
 
 TEST(SparksVmModule_ImportWindowTooSmall) {
-    // 다른 모듈 함수의 매개변수가 부르는 쪽 창에 들어가지 않으면 ContractViolation이다(verifier는
-    // 다른 모듈 함수 표를 모른다).
+    // 다른 모듈 함수의 매개변수가 부르는 쪽 창에 들어가지 않으면 LinkImports가 거부한다(verifier는
+    // 다른 모듈 함수 표를 모른다 — LC5d2 리뷰 S3, 로드에서 막는다).
     SystemAllocator allocator;
     Assembler lib(allocator);
     lib.module.path = lib.String("Game/Lib");
@@ -179,9 +178,86 @@ TEST(SparksVmModule_ImportWindowTooSmall) {
     REQUIRE(LinkModule(lib.module, nullptr, linkedLib, reason));
     REQUIRE(LinkModule(main.module, nullptr, linkedMain, reason));
     VmLinkedModule* const both[] = {&linkedMain, &linkedLib};
+    reason.Clear();
+    CHECK(!LinkImports(Span<VmLinkedModule* const>(both, 2), reason));
+    CHECK(reason.View() == "function Call word 0: the imported call does not fit the call window");
+}
+
+TEST(SparksVmModule_ImportSetRules) {
+    // 링크 안 된 모듈·host가 다른 모듈은 import 집합에 둘 수 없고(LC5d2 리뷰 B1·B2), 잘못된
+    // 서술자는 LinkModule이 거부하며, 대상을 다시 링크하면 그 import는 무효다(부르면
+    // ContractViolation).
+    SystemAllocator allocator;
+    Assembler lib(allocator);
+    lib.module.path = lib.String("Game/Lib");
+    lib.Begin("Id", Unary());
+    lib.Emit(EncodeABC(Opcode::Ret, 0, 1, 0));
+    lib.End();
+    REQUIRE(lib.Verified());
+    Assembler main(allocator);
+    const uint32 id = Import(main, "Game/Lib:Id", "i64>i64");
+    main.Begin("Run", Unary());
+    main.Emit(EncodeABC(Opcode::MovS, 2, 0, 0));
+    main.Emit(EncodeABx(Opcode::Call, 0, id));
+    main.Emit(EncodeABC(Opcode::Ret, 2, 1, 0));
+    main.End();
+    REQUIRE(main.Verified());
+    StringBuilder<256> reason(allocator);
+    VmLinkedModule linkedLib(allocator);
+    VmLinkedModule linkedMain(allocator);
+    REQUIRE(LinkModule(main.module, nullptr, linkedMain, reason));
+    VmLinkedModule* const both[] = {&linkedMain, &linkedLib};
+    reason.Clear();
+    CHECK(!LinkImports(Span<VmLinkedModule* const>(both, 2), reason));
+    CHECK(reason.View() == "a module in the import set is not linked");
+
+    struct NoHost final : public VmHost {
+        Result<VmHostBinding> Bind(const VmBindRequest&, StringBuilderBase&) noexcept override {
+            return Result<VmHostBinding>::Failure(ErrorCode::NotFound);
+        }
+        bool IsAlive(uint64) noexcept override {
+            return false;
+        }
+        VmFaultKind GetContext(VmHostCall&) noexcept override {
+            return VmFaultKind::ContractViolation;
+        }
+        VmFaultKind GetField(VmHostCall&, uint64) noexcept override {
+            return VmFaultKind::ContractViolation;
+        }
+        VmFaultKind SetField(VmHostCall&, uint64) noexcept override {
+            return VmFaultKind::ContractViolation;
+        }
+        VmFaultKind CallNative(VmHostCall&) noexcept override {
+            return VmFaultKind::ContractViolation;
+        }
+        VmFaultKind MakeLiteral(VmHostCall&) noexcept override {
+            return VmFaultKind::ContractViolation;
+        }
+    } other;
+    REQUIRE(LinkModule(lib.module, &other, linkedLib, reason));
+    reason.Clear();
+    CHECK(!LinkImports(Span<VmLinkedModule* const>(both, 2), reason));
+    CHECK(reason.View() == "the modules are linked to different hosts");
+
+    REQUIRE(LinkModule(lib.module, nullptr, linkedLib, reason));
     REQUIRE(LinkImports(Span<VmLinkedModule* const>(both, 2), reason));
     VmExecution execution(allocator);
-    CHECK(Faults(Run(execution, linkedMain, 0, {}), VmFaultKind::ContractViolation));
+    const uint64 seven[] = {7};
+    CHECK(Returns(Run(execution, linkedMain, 0, Span<const uint64>(seven, 1)), 7));
+    // 대상을 다시 링크하면 import가 무효가 된다(세대).
+    REQUIRE(LinkModule(lib.module, nullptr, linkedLib, reason));
+    CHECK(Faults(Run(execution, linkedMain, 0, Span<const uint64>(seven, 1)),
+                 VmFaultKind::ContractViolation));
+    REQUIRE(LinkImports(Span<VmLinkedModule* const>(both, 2), reason));
+    CHECK(Returns(Run(execution, linkedMain, 0, Span<const uint64>(seven, 1)), 7));
+
+    // 잘못된 import 서술자는 LinkModule이 거부한다.
+    Assembler bad(allocator);
+    Import(bad, "Game/Lib:Id", "i64>i64>");
+    VmLinkedModule linkedBad(allocator);
+    reason.Clear();
+    CHECK(!LinkModule(bad.module, nullptr, linkedBad, reason));
+    CHECK(reason.View() == "ref 0 (import Game/Lib:Id): invalid call descriptor");
 }
 
 } // namespace sparks_vm_module_tests_file

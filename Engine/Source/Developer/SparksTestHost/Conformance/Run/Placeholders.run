@@ -1,6 +1,6 @@
-# Language-owned Clock has case names in the TYPE section; engine enums, engine structs and TagSet need the host (LC5d) and fault as placeholders.
+# Language-owned Clock names come from the TYPE section; engine enum names, engine structs (SpawnParams) and TagSet() (the empty null value) go through the fake host (SparksVm 6.5).
 ClockName(Game) -> "Game" (4 steps)
 ClockName(UI) -> "UI" (4 steps)
-ChannelName(Visibility) -> fault ContractViolation at 6:13 (1 steps)
-Tags() -> fault ContractViolation at 10:9 (1 steps)
-Params() -> fault ContractViolation at 15:9 (4 steps)
+ChannelName(Visibility) -> "Visibility" (4 steps)
+Tags() -> 1 (3 steps)
+Params() -> 1 (8 steps)

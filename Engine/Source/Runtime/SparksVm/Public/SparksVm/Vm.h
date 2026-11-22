@@ -76,6 +76,8 @@ enum class VmOutcome : uint8 {
 // 0:0)다.
 struct VmFault {
     VmFaultKind kind = VmFaultKind::None;
+    const VmLinkedModule* module =
+        nullptr; // function·location이 속한 모듈(다른 모듈 함수일 수 있다)
     uint32 function = NoBytecodeIndex;
     uint32 address = NoBytecodeIndex;
     BytecodeLocation location;
@@ -109,6 +111,8 @@ struct VmCallResult {
     uint64 steps =
         0; // 실행한 명령 수(fault를 낸 명령은 세지만 예산 초과로 막힌 명령은 세지 않는다)
 };
+
+class VmSession;
 
 class VmExecution final {
 public:
@@ -204,6 +208,7 @@ public:
 
 private:
     friend class detail::VmLibrary;
+    friend class VmSession;
 
     struct LogEntry {
         VmLogLevel level = VmLogLevel::Info;
@@ -268,12 +273,20 @@ private:
                          ErrorCode& error) noexcept;
     // handle이 0이 아니고 host가 살아 있다고 답하는지다(SL 4.1절).
     bool Alive(uint64 handle) noexcept;
+    // CALLV(6.5절)의 대상을 host에 묻는다. native 대상이면 여기서 부르고 target.native가 참이다.
+    // Sparks 대상이면 부르는 쪽이 frame을 만든다(target.module·function).
+    VmFaultKind ResolveVirtualCall(uint32 ref, const Banks& banks, VmVirtualTarget& target,
+                                   ErrorCode& error) noexcept;
     // 오류 코드 code의 Buf Result(값 없음)를 만든다.
     Allocation MakeErrorResult(uint64 code, uint64 budget) noexcept;
 
     Allocator* allocator_;
     const BytecodeModule* module_ = nullptr;
     const VmLinkedModule* link_ = nullptr;
+    // 이 실행 문맥을 가진 session(없으면 로컬 필드 명령은 ContractViolation — SparksRuntime 2.2절).
+    VmSession* session_ = nullptr;
+    // 참이면 Call이 로그 기록을 지우지 않는다(session의 hook 사슬이 여러 호출의 기록을 모은다).
+    bool keepLogs_ = false;
     // bank별 레지스터 stack이다. Buf slot은 null이 아니면 참조 하나를 가진다.
     Array<uint64> scalars_;
     Array<uint64> refs_;

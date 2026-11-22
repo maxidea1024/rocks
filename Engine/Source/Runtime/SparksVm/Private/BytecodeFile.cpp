@@ -15,6 +15,7 @@ constexpr uint8 ConstantsTag[TagBytes] = {'K', 'C', 'O', 'N'};
 constexpr uint8 ReferencesTag[TagBytes] = {'R', 'E', 'F', 'S'};
 constexpr uint8 TypesTag[TagBytes] = {'T', 'Y', 'P', 'E'};
 constexpr uint8 FunctionsTag[TagBytes] = {'F', 'U', 'N', 'C'};
+constexpr uint8 ClassesTag[TagBytes] = {'C', 'L', 'A', 'S'};
 constexpr uint8 DebugTag[TagBytes] = {'D', 'B', 'U', 'G'};
 
 // 표 원소의 최소 byte 수다(개수를 믿기 전에 남은 byte와 비교한다 — 큰 할당 막기).
@@ -23,6 +24,10 @@ constexpr usize StringHeaderBytes = 4;
 constexpr usize RefBytes = 13;
 constexpr usize TypeBytes = 4 + 1 + 4 + 4 + 2 * BytecodeBankCount;
 constexpr usize TypeFieldBytes = 4 + 1 + 1 + 4;
+constexpr usize ClassBytes = 4 * 11 + 2 * BytecodeBankCount + 4;
+constexpr usize HookBytes = 1 + 4;
+constexpr usize HandlerBytes = 4 + 4 + 4 + 1 + 1;
+constexpr usize EventBytes = 4 + 4;
 constexpr usize FunctionBytes = 4 * 3 + 2 * 3 * BytecodeBankCount + 2 + BytecodeHashBytes + 4 * 4;
 constexpr usize WordBytes = 4;
 constexpr usize SwitchBytes = 12;
@@ -155,6 +160,53 @@ Result<void> WriteBytecodeFile(const BytecodeModule& module, Array<uint8>& out) 
             writer.WriteU32LE(field.offset);
         }
     });
+    WriteSection(writer, ClassesTag, [&]() noexcept {
+        writer.WriteU32LE(static_cast<uint32>(module.classes.Size()));
+        for (const BytecodeClass& entry : module.classes) {
+            const uint32 words[] = {entry.name,       entry.baseClass,    entry.baseName,
+                                    entry.firstField, entry.fieldCount,   entry.firstHook,
+                                    entry.hookCount,  entry.firstHandler, entry.handlerCount,
+                                    entry.firstEvent, entry.eventCount};
+            for (const uint32 word : words) {
+                writer.WriteU32LE(word);
+            }
+
+            for (const uint16 slots : entry.slots) {
+                writer.WriteU16LE(slots);
+            }
+
+            writer.WriteU32LE(entry.initializer);
+        }
+
+        writer.WriteU32LE(static_cast<uint32>(module.classFields.Size()));
+        for (const BytecodeTypeField& field : module.classFields) {
+            writer.WriteU32LE(field.name);
+            writer.WriteU8(field.bank);
+            writer.WriteU8(field.slots);
+            writer.WriteU32LE(field.offset);
+        }
+
+        writer.WriteU32LE(static_cast<uint32>(module.hooks.Size()));
+        for (const BytecodeHook& hook : module.hooks) {
+            writer.WriteU8(static_cast<uint8>(hook.kind));
+            writer.WriteU32LE(hook.function);
+        }
+
+        writer.WriteU32LE(static_cast<uint32>(module.handlers.Size()));
+        for (const BytecodeHandler& handler : module.handlers) {
+            writer.WriteU32LE(handler.path);
+            writer.WriteU32LE(handler.event);
+            writer.WriteU32LE(handler.function);
+            writer.WriteU8(static_cast<uint8>(handler.reentry));
+            writer.WriteU8(handler.awaits);
+        }
+
+        writer.WriteU32LE(static_cast<uint32>(module.events.Size()));
+        for (const BytecodeEvent& event : module.events) {
+            writer.WriteU32LE(event.name);
+            writer.WriteU32LE(event.arguments);
+        }
+    });
     WriteSection(writer, FunctionsTag, [&]() noexcept {
         writer.WriteU32LE(static_cast<uint32>(module.functions.Size()));
         for (const BytecodeFunction& function : module.functions) {
@@ -272,6 +324,10 @@ public:
         }
 
         if (auto read = Section(TypesTag, &FileReader::Types); !read) {
+            return read;
+        }
+
+        if (auto read = Section(ClassesTag, &FileReader::Classes); !read) {
             return read;
         }
 
@@ -435,6 +491,82 @@ private:
             field.bank = reader.ReadU8();
             field.slots = reader.ReadU8();
             field.offset = reader.ReadU32LE();
+        }
+
+        return Result<void>::Success();
+    }
+
+    Result<void> Classes(ByteReader& reader) noexcept {
+        uint32 count = 0;
+        if (!Count(reader, ClassBytes, count) || !Resize(out_.classes, count)) {
+            return Failure();
+        }
+
+        for (BytecodeClass& entry : out_.classes) {
+            uint32* words[] = {&entry.name,       &entry.baseClass,    &entry.baseName,
+                               &entry.firstField, &entry.fieldCount,   &entry.firstHook,
+                               &entry.hookCount,  &entry.firstHandler, &entry.handlerCount,
+                               &entry.firstEvent, &entry.eventCount};
+            for (uint32* word : words) {
+                *word = reader.ReadU32LE();
+            }
+
+            for (uint16& slots : entry.slots) {
+                slots = reader.ReadU16LE();
+            }
+
+            entry.initializer = reader.ReadU32LE();
+        }
+
+        if (!Count(reader, TypeFieldBytes, count) || !Resize(out_.classFields, count)) {
+            return Failure();
+        }
+
+        for (BytecodeTypeField& field : out_.classFields) {
+            field.name = reader.ReadU32LE();
+            field.bank = reader.ReadU8();
+            field.slots = reader.ReadU8();
+            field.offset = reader.ReadU32LE();
+        }
+
+        if (!Count(reader, HookBytes, count) || !Resize(out_.hooks, count)) {
+            return Failure();
+        }
+
+        for (BytecodeHook& hook : out_.hooks) {
+            const uint8 kind = reader.ReadU8();
+            if (kind >= static_cast<uint8>(BytecodeHookKind::Count)) {
+                return Reject(BytecodeLoadError::BadTable);
+            }
+
+            hook.kind = static_cast<BytecodeHookKind>(kind);
+            hook.function = reader.ReadU32LE();
+        }
+
+        if (!Count(reader, HandlerBytes, count) || !Resize(out_.handlers, count)) {
+            return Failure();
+        }
+
+        for (BytecodeHandler& handler : out_.handlers) {
+            handler.path = reader.ReadU32LE();
+            handler.event = reader.ReadU32LE();
+            handler.function = reader.ReadU32LE();
+            const uint8 reentry = reader.ReadU8();
+            if (reentry > static_cast<uint8>(BytecodeReentry::Restart)) {
+                return Reject(BytecodeLoadError::BadTable);
+            }
+
+            handler.reentry = static_cast<BytecodeReentry>(reentry);
+            handler.awaits = reader.ReadU8();
+        }
+
+        if (!Count(reader, EventBytes, count) || !Resize(out_.events, count)) {
+            return Failure();
+        }
+
+        for (BytecodeEvent& event : out_.events) {
+            event.name = reader.ReadU32LE();
+            event.arguments = reader.ReadU32LE();
         }
 
         return Result<void>::Success();
@@ -646,6 +778,74 @@ public:
             if (const BytecodeRejection rejection = Function(module_.functions[index]);
                 rejection.error != BytecodeLoadError::None) {
                 return rejection;
+            }
+        }
+
+        // CLASS 표(형식 버전 3 — 함수 검사 뒤: 함수 표의 사유가 먼저다) — SparksRuntime 2.1절):
+        // 범위, 기반은 앞선 클래스, 필드는 자기 bank 구역 안, hook 종류는 클래스 안에서 하나, 함수
+        // 번호, 초기화 함수는 this(Ref 1) 하나.
+        for (uint32 index = 0; index < module_.classes.Size(); ++index) {
+            const BytecodeClass& entry = module_.classes[index];
+            const bool ranges =
+                usize(entry.firstField) + entry.fieldCount <= module_.classFields.Size() &&
+                usize(entry.firstHook) + entry.hookCount <= module_.hooks.Size() &&
+                usize(entry.firstHandler) + entry.handlerCount <= module_.handlers.Size() &&
+                usize(entry.firstEvent) + entry.eventCount <= module_.events.Size();
+            const bool base =
+                (entry.baseClass == NoBytecodeIndex || entry.baseClass < index) &&
+                (entry.baseName == NoBytecodeIndex || entry.baseName < strings) &&
+                (entry.baseClass == NoBytecodeIndex || entry.baseName == NoBytecodeIndex);
+            if (entry.name >= strings || !ranges || !base) {
+                return Reject(BytecodeLoadError::BadTable);
+            }
+
+            if (entry.initializer != NoBytecodeIndex) {
+                if (entry.initializer >= module_.functions.Size()) {
+                    return Reject(BytecodeLoadError::BadTable);
+                }
+
+                const BytecodeFunction& init = module_.functions[entry.initializer];
+                if (init.parameters[0] != 0 || init.parameters[1] != 1 || init.parameters[2] != 0 ||
+                    init.returnSlots != 0) {
+                    return Reject(BytecodeLoadError::BadTable);
+                }
+            }
+
+            for (uint32 at = entry.firstField; at < entry.firstField + entry.fieldCount; ++at) {
+                const BytecodeTypeField& field = module_.classFields[at];
+                if (field.name >= strings || field.bank >= BytecodeBankCount || field.slots == 0 ||
+                    (field.bank != 0 && field.slots != 1) ||
+                    usize(field.offset) + field.slots > entry.slots[field.bank]) {
+                    return Reject(BytecodeLoadError::BadTable);
+                }
+            }
+
+            uint32 seen = 0;
+            for (uint32 at = entry.firstHook; at < entry.firstHook + entry.hookCount; ++at) {
+                const BytecodeHook& hook = module_.hooks[at];
+                const uint32 bit = 1u << static_cast<uint32>(hook.kind);
+                if (hook.function >= module_.functions.Size() || (seen & bit) != 0) {
+                    return Reject(BytecodeLoadError::BadTable);
+                }
+
+                seen |= bit;
+            }
+
+            for (uint32 at = entry.firstHandler; at < entry.firstHandler + entry.handlerCount;
+                 ++at) {
+                const BytecodeHandler& handler = module_.handlers[at];
+                if (handler.path >= strings || handler.event >= strings ||
+                    handler.function >= module_.functions.Size() || handler.awaits > 1) {
+                    return Reject(BytecodeLoadError::BadTable);
+                }
+            }
+
+            for (uint32 at = entry.firstEvent; at < entry.firstEvent + entry.eventCount; ++at) {
+                const BytecodeEvent& event = module_.events[at];
+                if (event.name >= strings ||
+                    (event.arguments != NoBytecodeIndex && event.arguments >= strings)) {
+                    return Reject(BytecodeLoadError::BadTable);
+                }
             }
         }
 

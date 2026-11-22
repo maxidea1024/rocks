@@ -46,6 +46,13 @@ fn Fill(names: Array<string>, table: Map<string, int>): int {
 }
 
 class Door : ScriptableComponent {
+    var Open = false;
+    event Opened();
+
+    on Enable() {
+        Open = true;
+    }
+
     async fn Fetch(): Result<int> {
         await NextTick();
         return 1;
@@ -346,6 +353,38 @@ TEST(SparksBytecodeFile_VerifierRejections) {
           BytecodeLoadError::BadBranch);
     CHECK(verify([](BytecodeModule& m) noexcept {
               static_cast<void>(m.locations.TryResize(m.locations.Size() - 1));
+          }) == BytecodeLoadError::BadTable);
+
+    // CLASS 구역(형식 버전 3 — SparksRuntime 2.1절): 이름·기반(앞선 클래스)·필드 위치·hook·handler·
+    // 이벤트·초기화 함수.
+    REQUIRE(original.classes.Size() == 1);
+    REQUIRE(original.classes[0].fieldCount == 1);
+    REQUIRE(original.classes[0].hookCount == 1);
+    REQUIRE(original.classes[0].eventCount == 1);
+    CHECK(verify([](BytecodeModule& m) noexcept { m.classes[0].name = 9999; }) ==
+          BytecodeLoadError::BadTable);
+    CHECK(verify([](BytecodeModule& m) noexcept { m.classes[0].baseClass = 0; }) ==
+          BytecodeLoadError::BadTable);
+    CHECK(verify([](BytecodeModule& m) noexcept { m.classes[0].fieldCount = 9; }) ==
+          BytecodeLoadError::BadTable);
+    CHECK(verify([](BytecodeModule& m) noexcept { m.classFields[0].offset = 5; }) ==
+          BytecodeLoadError::BadTable);
+    CHECK(verify([](BytecodeModule& m) noexcept {
+              m.classFields[0].bank = 1;
+              m.classFields[0].slots = 2;
+          }) == BytecodeLoadError::BadTable);
+    CHECK(verify([](BytecodeModule& m) noexcept { m.hooks[0].function = 9999; }) ==
+          BytecodeLoadError::BadTable);
+    CHECK(verify([](BytecodeModule& m) noexcept {
+              static_cast<void>(m.hooks.TryPushBack(m.hooks[0])); // 같은 종류 두 번
+              ++m.classes[0].hookCount;
+          }) == BytecodeLoadError::BadTable);
+    CHECK(verify([](BytecodeModule& m) noexcept { m.events[0].name = 9999; }) ==
+          BytecodeLoadError::BadTable);
+    CHECK(verify([](BytecodeModule& m) noexcept { m.classes[0].initializer = 9999; }) ==
+          BytecodeLoadError::BadTable);
+    CHECK(verify([](BytecodeModule& m) noexcept {
+              m.classes[0].initializer = 0; // 함수 0은 this(Ref 1) 하나의 모양이 아니다
           }) == BytecodeLoadError::BadTable);
 
     // 머리의 profile은 0·1이다.

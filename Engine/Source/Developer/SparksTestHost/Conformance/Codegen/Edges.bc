@@ -34,8 +34,14 @@ t23 = "x>void"
 t24 = "LoopHandle.Pause"
 t25 = "Beacon.Ping"
 t26 = "Actor.Pinged"
-t27 = "sparks 0.4.0"
-t28 = "Main"
+t27 = "Beacon"
+t28 = "Actor"
+t29 = "Cue"
+t30 = "Target"
+t31 = "this"
+t32 = "Pinged"
+t33 = "sparks 0.4.0"
+t34 = "Main"
 ref0 = context World
 ref1 = field World.Audio args ">x"
 ref2 = field Beacon.Cue args ">x"
@@ -45,6 +51,10 @@ ref5 = field Beacon.Target args ">?<x>"
 ref6 = event Actor.Destroyed
 ref7 = native LoopHandle.Pause args "x>void"
 ref8 = event Actor.Pinged
+class0 = Beacon : Actor s0 r2 b0
+  field Cue r0 x1
+  field Target r1 x1
+  handler this.Pinged Beacon.on this.Pinged await skipWhileBusy
 
 function Widths  scalar=8/8 ref=0/0 buf=0/0 params=7/0/0 returns sx1
   body 37cae9a4c071a3e2d18c904112dfc67b024e0e9b344be0fe427ec7d7709b34e0

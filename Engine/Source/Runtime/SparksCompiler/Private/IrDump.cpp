@@ -180,6 +180,8 @@ private:
             }
         } else if (function_.symbol != NoSymbol) {
             out_.Append(c_.symbols_[function_.symbol].name);
+        } else if (tree.Node(function_.node).kind == SyntaxKind::Class) {
+            out_.Append("$init"); // class 초기화 함수(SparksRuntime 2.1절)
         }
 
         out_.Append("(");
@@ -591,6 +593,28 @@ void TypeChecker::LowerModule(uint32 module) noexcept {
             for (const uint32 member : tree.Children(members)) {
                 collect(member, owner);
             }
+
+            // class 초기화 함수 `<Class>.$init`(SparksRuntime 2.1절 — R6): 초기값이 있거나 0 값이
+            // 0·null이 아닌(non-null Buf — 문자열·컨테이너·struct) 필드가 있을 때만.
+            bool initializes = false;
+            for (const uint32 member : tree.Children(members)) {
+                if (kind != SyntaxKind::Class || tree.Node(member).kind != SyntaxKind::Field) {
+                    continue;
+                }
+
+                const uint32 field = c.NodeSymbol(module, tree.Child(member, 2));
+                const uint32 type = field == NoSymbol ? NoType : FieldType(field);
+                const IrLayout layout = IrBuilder::Layout(*this, type);
+                initializes = initializes || tree.Child(member, 4) != NoNode ||
+                              (type != NoType && !IsOptional(type) && layout.bank == IrBank::Buf);
+            }
+
+            if (initializes) {
+                if (auto pushed = bodies.TryPushBack((uint64(owner) << 32) | declaration);
+                    !pushed) {
+                    binder_.error_ = pushed.Error();
+                }
+            }
         }
     }
 
@@ -609,10 +633,12 @@ void TypeChecker::LowerModule(uint32 module) noexcept {
         const uint32 node = static_cast<uint32>(bodies[index]);
         const uint32 owner = static_cast<uint32>(bodies[index] >> 32);
         const bool handler = tree.Node(node).kind == SyntaxKind::Handler;
+        const bool initializer = tree.Node(node).kind == SyntaxKind::Class;
         IrFunction function(allocator_);
         function.module = module;
         function.node = node;
-        function.symbol = handler ? NoSymbol : c.NodeSymbol(module, tree.Child(node, 2));
+        function.symbol =
+            handler || initializer ? NoSymbol : c.NodeSymbol(module, tree.Child(node, 2));
         function.owner = owner;
         IrBuilder builder(*this, function);
         if (!builder.Build()) {
@@ -709,6 +735,10 @@ void TypeChecker::LowerModule(uint32 module) noexcept {
     }
 
     if (!binder_.Succeeded(out)) {
+        return;
+    }
+
+    if (!encoder.EncodeClasses(bodies.View())) {
         return;
     }
 

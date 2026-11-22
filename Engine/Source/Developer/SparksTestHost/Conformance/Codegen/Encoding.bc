@@ -32,8 +32,16 @@ t25 = "Component.Owner"
 t26 = "Probe"
 t27 = "x>?<x>"
 t28 = "Actor.Find<Probe>"
-t29 = "sparks 0.4.0"
-t30 = "Main"
+t29 = "Probe.$init"
+t30 = "DataAsset"
+t31 = "Probe.Data"
+t32 = "Set<string>"
+t33 = "ScriptableComponent"
+t34 = "Data"
+t35 = "Names"
+t36 = "Ready"
+t37 = "sparks 0.4.0"
+t38 = "Main"
 ref0 = literal Soft<DataAsset> "/Game/Data/Rules"
 ref1 = field Probe.Names args ">S<s>"
 ref2 = language Set.Add args "S<s>,s>b"
@@ -45,9 +53,16 @@ ref7 = event Probe.Ready
 ref8 = field Component.Owner args ">x"
 ref9 = type Probe
 ref10 = native Actor.Find<Probe> type ref9 args "x>?<x>"
+ref11 = literal DataAsset "/Game/Data/Rules"
+ref12 = field Probe.Data args ">x"
+ref13 = type Set<string>
 type0 = struct Label s1 r0 b1
   field0 Words b1 x1
   field1 Count s0 x1
+class0 = Probe : ScriptableComponent s0 r1 b1 init Probe.$init
+  field Data r0 x1
+  field Names b0 x1
+  event Ready
 
 function Probe.Order  scalar=2/2 ref=1/1 buf=4/4 params=0/1/2 returns sx1
   body 469c72ae2abf2adaa4db3c8702146865ec531d7388c1bd305d03f60778b67128
@@ -122,3 +137,12 @@ function Probe.Look  scalar=0/0 ref=2/3 buf=0/0 params=0/1/0 returns rx1
   0003  CALLN  ref10    ; 39:16
   0004  MOV.R  r1, r2    ; 39:16
   0005  RET  r1 x1    ; 39:9
+
+function Probe.$init  scalar=0/0 ref=2/2 buf=1/1 params=0/1/0 returns sx0
+  body d70d5a80453356a1eca206b3fb828f0572c84204114547c5d00938efd7f2f1ef
+  0000  LOADSTR  b0, t6    ; 7:5
+  0001  NEWLIT  r1, ref11 args 0    ; 7:5
+  0003  SETF.R  r0, r1, ref12    ; 7:5
+  0005  NEWSET  b0, ref13    ; 8:5
+  0006  SETF.B  r0, b0, ref1    ; 8:5
+  0008  RET  -    ; 41:1

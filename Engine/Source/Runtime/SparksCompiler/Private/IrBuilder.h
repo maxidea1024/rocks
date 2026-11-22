@@ -24,7 +24,7 @@ public:
     // function.module·node·symbol·owner를 채운 함수를 받는다.
     IrBuilder(TypeChecker& checker, IrFunction& function) noexcept;
 
-    // function.node의 본문을 내린다. 할당 실패면 false(오류는 binder에).
+    // function.node의 본문을 내린다(class 노드면 초기화 함수). 할당 실패면 false(오류는 binder에).
     bool Build() noexcept;
 
     // 타입의 slot 배치다.
@@ -36,6 +36,9 @@ public:
 
 private:
     bool Failed() const noexcept;
+    // class 초기화 함수 `<Class>.$init`(SparksRuntime 2.1절): 자기 필드의 초기값(없으면 0·null이
+    // 아닌 0 값)을 선언 순으로 this에 쓴다.
+    bool BuildInitializer() noexcept;
     void Fail(ErrorCode error) noexcept;
 
     // ---- 블록·명령·값(IrBuilder.cpp) ----

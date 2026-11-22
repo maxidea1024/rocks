@@ -15,6 +15,7 @@ constexpr uint8 FakeScalarBank = 0;
 constexpr uint8 FakeRefBank = 1;
 constexpr uint8 FakeBufBank = 2;
 constexpr uint32 FakeMaxSlots = 32;
+constexpr uint32 FakeMaxBaseDepth = 64;
 
 struct FakeLetter {
     StringView name;
@@ -165,6 +166,10 @@ const SchemaType* FakeFindType(const Compilation& compilation, StringView name,
 FakeHost::FakeHost(Allocator& allocator, const Compilation& compilation) noexcept
     : allocator_(&allocator), compilation_(compilation), bindings_(allocator), objects_(allocator),
       names_(allocator), trace_(allocator) {
+    // 묶음 번호 0은 비워 둔다(AppendName의 type 0은 Name·Tag다).
+    if (!bindings_.TryPushBack(FakeBinding(allocator))) {
+        outOfMemory_ = true;
+    }
 }
 
 // schema 타입 표기 text의 서술자를 out에 쓴다(타입 매개변수 이름은 `x`). 모르는 타입은 false.
@@ -382,6 +387,88 @@ Result<VmHostBinding> FakeHost::Bind(const VmBindRequest& request,
         binding.literal = names_.Size();
         break;
     }
+    case BytecodeRefKind::VirtualFunction: {
+        // Sparks open·override·interface 메서드(schema interface 메서드는 같은 규칙의 서술자).
+        expected.Append(request.descriptor);
+        break;
+    }
+    case BytecodeRefKind::Type: {
+        // TYPE 없는 Type: 엔진 타입(struct는 bank별 배치) 또는 Sparks 클래스·interface.
+        const BindingSchema* schema = nullptr;
+        const SchemaType* type = FakeFindType(compilation_, FakeBaseName(request.name), &schema);
+        binding.schema = schema;
+        binding.schemaType = type;
+        if (type != nullptr && type->kind == SchemaTypeKind::Struct) {
+            for (uint32 index = 0; index < type->fieldCount; ++index) {
+                StringBuilder<64> field(*allocator_);
+                const SchemaField& entry = schema->Fields()[type->firstField + index];
+                usize at = 0;
+                uint8 bank = 0;
+                uint8 slots = 0;
+                if (!FakeDescribe(compilation_, schema->Text(entry.type), Span<const StringView>(),
+                                  field) ||
+                    !FakeReadType(field.View(), at, bank, slots)) {
+                    reason.AppendFormat("the engine struct '{}' has a field type the fake host "
+                                        "cannot describe",
+                                        request.name);
+                    return Result<VmHostBinding>::Failure(ErrorCode::Unsupported);
+                }
+
+                binding.structSlots[bank] = static_cast<uint16>(binding.structSlots[bank] + slots);
+            }
+        }
+
+        expected.Append(">x"); // 값 배치는 쓰지 않는다(아래에서 struct 배치를 돌려준다)
+        resultType = request.name;
+        break;
+    }
+    case BytecodeRefKind::StructField: {
+        // 엔진 struct 필드: 선언 순으로 bank 묶음(Scalar·Ref·Buf) 안 위치를 매긴다.
+        const BindingSchema* schema = nullptr;
+        const SchemaType* type = FakeFindType(compilation_, owner, &schema);
+        if (type == nullptr || type->kind != SchemaTypeKind::Struct) {
+            reason.AppendFormat("no engine struct '{}'", owner);
+            return Result<VmHostBinding>::Failure(ErrorCode::NotFound);
+        }
+
+        uint16 groups[BytecodeBankCount] = {};
+        uint16 within[BytecodeBankCount] = {};
+        bool found = false;
+        uint8 fieldBank = 0;
+        for (uint32 index = 0; index < type->fieldCount; ++index) {
+            const SchemaField& entry = schema->Fields()[type->firstField + index];
+            StringBuilder<64> field(*allocator_);
+            usize at = 0;
+            uint8 bank = 0;
+            uint8 slots = 0;
+            if (!FakeDescribe(compilation_, schema->Text(entry.type), Span<const StringView>(),
+                              field) ||
+                !FakeReadType(field.View(), at, bank, slots)) {
+                reason.AppendFormat(
+                    "the engine field '{}' uses a type the fake host cannot describe",
+                    request.name);
+                return Result<VmHostBinding>::Failure(ErrorCode::Unsupported);
+            }
+
+            if (schema->Text(entry.name) == member) {
+                found = true;
+                fieldBank = bank;
+                within[bank] = groups[bank];
+                expected.Append(">").Append(field.View());
+            }
+
+            groups[bank] = static_cast<uint16>(groups[bank] + slots);
+        }
+
+        if (!found) {
+            reason.AppendFormat("no engine field '{}'", request.name);
+            return Result<VmHostBinding>::Failure(ErrorCode::NotFound);
+        }
+
+        binding.offset = static_cast<uint16>(within[fieldBank] + (fieldBank >= 1 ? groups[0] : 0) +
+                                             (fieldBank >= 2 ? groups[1] : 0));
+        break;
+    }
     default:
         reason.Append("the fake host does not bind this kind");
         return Result<VmHostBinding>::Failure(ErrorCode::Unsupported);
@@ -392,7 +479,7 @@ Result<VmHostBinding> FakeHost::Bind(const VmBindRequest& request,
     }
 
     if ((request.kind == BytecodeRefKind::NativeFunction ||
-         request.kind == BytecodeRefKind::Field) &&
+         request.kind == BytecodeRefKind::Field || request.kind == BytecodeRefKind::StructField) &&
         expected.View() != request.descriptor) {
         reason.AppendFormat("descriptor '{}' does not match the engine signature '{}'",
                             request.descriptor, expected.View());
@@ -407,7 +494,8 @@ Result<VmHostBinding> FakeHost::Bind(const VmBindRequest& request,
     }
 
     // native 서술자의 피연산자 사이 `>`는 없다(`>`는 묶음 닫힘과 겹치므로 top-level만 본다).
-    if (request.kind == BytecodeRefKind::NativeFunction) {
+    if (request.kind == BytecodeRefKind::NativeFunction ||
+        request.kind == BytecodeRefKind::VirtualFunction) {
         usize depth = 0;
         for (at = 0; at < text.ByteCount(); ++at) {
             const char c = text.Data()[at];
@@ -450,6 +538,16 @@ Result<VmHostBinding> FakeHost::Bind(const VmBindRequest& request,
     result.id = bindings_.Size() - 1;
     result.bank = bank;
     result.slots = slots;
+    const FakeBinding& stored = bindings_[bindings_.Size() - 1];
+    if (request.kind == BytecodeRefKind::Type) {
+        result.bank = 0;
+        result.slots = 0;
+        for (uint32 group = 0; group < BytecodeBankCount; ++group) {
+            result.structSlots[group] = stored.structSlots[group];
+        }
+    }
+
+    result.offset = stored.offset;
     return Result<VmHostBinding>::Success(result);
 }
 
@@ -801,6 +899,102 @@ VmFaultKind FakeHost::MakeLiteral(VmHostCall& call) noexcept {
 
     call.Refs()[0] = created;
     return VmFaultKind::None;
+}
+
+StringView FakeHost::BaseOf(StringView type) const noexcept {
+    for (const Symbol& symbol : compilation_.Symbols()) {
+        if (symbol.kind == SymbolKind::Class && symbol.name == type && symbol.base != NoSymbol) {
+            return compilation_.Symbols()[symbol.base].name;
+        }
+    }
+
+    const BindingSchema* schema = nullptr;
+    const SchemaType* entry = FakeFindType(compilation_, type, &schema);
+    return entry == nullptr ? StringView() : schema->Text(entry->base);
+}
+
+bool FakeHost::Derives(StringView type, StringView ancestor) const noexcept {
+    // 기반 사슬(첫 기반)과 Sparks 클래스가 구현한 interface(기반 목록)를 본다.
+    // 기반 사슬은 FakeMaxBaseDepth까지만 따라간다(schema base 순환 방어).
+    uint32 depth = 0;
+    for (StringView current = type; !current.IsEmpty() && depth < FakeMaxBaseDepth;
+         current = BaseOf(current), ++depth) {
+        if (current == ancestor) {
+            return true;
+        }
+
+        for (const Symbol& symbol : compilation_.Symbols()) {
+            if (symbol.kind != SymbolKind::Class || symbol.name != current) {
+                continue;
+            }
+
+            for (uint32 index = 0; index < symbol.baseCount; ++index) {
+                const uint32 base = compilation_.SymbolBases()[symbol.firstBase + index];
+                if (compilation_.Symbols()[base].name == ancestor) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
+bool FakeHost::IsA(uint64 handle, uint64 type) noexcept {
+    const FakeObject* object = Find(handle);
+    return object != nullptr && Derives(object->type.View(), bindings_[type].resultType.View());
+}
+
+VmFaultKind FakeHost::ResolveVirtual(VmHostCall& call, uint64 receiver,
+                                     VmVirtualTarget& target) noexcept {
+    // 수신자 타입부터 기반 쪽으로 `<타입>.<메서드>` Sparks 함수를 찾는다(가장 가까운 override).
+    const FakeObject* object = Find(receiver);
+    if (object == nullptr || module_ == nullptr) {
+        return VmFaultKind::ContractViolation;
+    }
+
+    StringView owner;
+    StringView member;
+    FakeSplit(bindings_[call.Binding()].name.View(), owner, member);
+    const BytecodeModule& module = module_->Module();
+    uint32 depth = 0;
+    for (StringView current = object->type.View(); !current.IsEmpty() && depth < FakeMaxBaseDepth;
+         current = BaseOf(current), ++depth) {
+        for (uint32 index = 0; index < module.functions.Size(); ++index) {
+            StringView name = module.String(module.functions[index].name);
+            if (name.ByteCount() == current.ByteCount() + 1 + member.ByteCount() &&
+                name.StartsWith(current) && name.Data()[current.ByteCount()] == '.' &&
+                name.EndsWith(member)) {
+                target.module = module_;
+                target.function = index;
+                return VmFaultKind::None;
+            }
+        }
+    }
+
+    return VmFaultKind::ContractViolation;
+}
+
+bool FakeHost::AppendName(uint64 value, StringBuilderBase& out) noexcept {
+    // Name·Tag: 리터럴 이름 표(번호 + 1), 0은 없음(None — 빈 글자).
+    if (value > names_.Size()) {
+        return false;
+    }
+
+    out.Append(value == 0 ? StringView() : names_[value - 1].View());
+    return true;
+}
+
+bool FakeHost::AppendEnumName(uint64 type, uint64 value, StringBuilderBase& out) noexcept {
+    const FakeBinding& binding = bindings_[type];
+    if (binding.schemaType == nullptr || binding.schemaType->kind != SchemaTypeKind::Enum ||
+        value >= binding.schemaType->caseCount) {
+        return false;
+    }
+
+    out.Append(
+        binding.schema->Text(binding.schema->Cases()[binding.schemaType->firstCase + value].name));
+    return true;
 }
 
 uint64 FakeHost::HeldBuffers() const noexcept {

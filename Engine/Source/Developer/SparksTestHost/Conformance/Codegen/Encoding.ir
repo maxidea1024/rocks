@@ -108,3 +108,16 @@ L0:
     r1 = GETF r0.Component.Owner    ; 39:16
     r2 = CALL Actor.Find<Probe>(r1)    ; 39:16
     RETURN r2    ; 39:9
+
+function Probe.$init()
+  r0 this: Probe
+  b1: string
+  r2: DataAsset
+  b3: Set<string>
+L0:
+    b1 = LOADSTR.PIECE "/Game/Data/Rules"    ; 7:5
+    r2 = NEW.LITERAL Asset(b1)    ; 7:5
+    SETF r0.Probe.Data, r2    ; 7:5
+    b3 = NEW.COLLECTION Set()    ; 8:5
+    SETF r0.Probe.Names, b3    ; 8:5
+    RETURN    ; 41:1

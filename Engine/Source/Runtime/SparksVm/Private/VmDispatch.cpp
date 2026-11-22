@@ -336,16 +336,35 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
                 // enum은 TYPE 구역의 case 이름이다(SparksVm 2.2절).
                 const uint32 typeIndex = module.refs[extra & MaxBx].detail;
                 if (typeIndex == NoBytecodeIndex) {
-                    return MakeFault(VmFaultKind::ContractViolation, at, steps); // 엔진 enum(LC5d)
-                }
+                    // 엔진 enum: host 이름 표(6.5절).
+                    VmHost* host = link_->host_;
+                    if (host == nullptr ||
+                        !host->AppendEnumName(link_->hosts_[extra & MaxBx].id, s[bb], text)) {
+                        if (text.HasFailed()) {
+                            return failed(text.Status().Error()); // 할당 실패는 fault가 아니다
+                        }
 
-                const BytecodeType& type = module.types[typeIndex];
-                if (s[bb] >= type.fieldCount) {
-                    return MakeFault(VmFaultKind::Unreachable, at, steps);
-                }
+                        return MakeFault(VmFaultKind::ContractViolation, at, steps);
+                    }
+                } else {
+                    const BytecodeType& type = module.types[typeIndex];
+                    if (s[bb] >= type.fieldCount) {
+                        return MakeFault(VmFaultKind::Unreachable, at, steps);
+                    }
 
-                text.Append(module.String(
-                    module.typeFields[type.firstField + static_cast<uint32>(s[bb])].name));
+                    text.Append(module.String(
+                        module.typeFields[type.firstField + static_cast<uint32>(s[bb])].name));
+                }
+            } else if ((extra >> 16) == static_cast<uint32>(ScalarKind::Name)) {
+                // Name·Tag: host 이름 표(6.5절).
+                VmHost* host = link_->host_;
+                if (host == nullptr || !host->AppendName(s[bb], text)) {
+                    if (text.HasFailed()) {
+                        return failed(text.Status().Error());
+                    }
+
+                    return MakeFault(VmFaultKind::ContractViolation, at, steps);
+                }
             } else {
                 fault = detail::VmFormatScalars(text, extra >> 16, s + bb, c);
             }
@@ -660,8 +679,17 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
             const VmLinkedModule* target = link_;
             uint32 callee = ref.detail;
             if (ref.kind == BytecodeRefKind::ImportedFunction) {
-                target = link_->imports_[refIndex].module;
-                callee = link_->imports_[refIndex].function;
+                // 대상이 그 뒤 다시 링크됐으면(세대가 다르면) 계약 위반이다(LC5d2 리뷰 B1).
+                const VmLinkedModule::Import& import = link_->imports_[refIndex];
+                if (import.module == nullptr || !import.module->Linked() ||
+                    !import.module->ImportsLinked() ||
+                    import.generation != import.module->generation_ ||
+                    import.function >= import.module->Module().functions.Size()) {
+                    return MakeFault(VmFaultKind::ContractViolation, at, steps);
+                }
+
+                target = import.module;
+                callee = import.function;
             } else if (ref.kind != BytecodeRefKind::Function) {
                 return MakeFault(VmFaultKind::ContractViolation, at, steps);
             }
@@ -690,6 +718,62 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
 
             pc = frames_[frames_.Size() - 1].pc;
             reload();
+            break;
+        }
+        case Opcode::CallV: {
+            // 가상 호출(6.5절): host가 대상을 정한다 — native는 그 자리에서, Sparks 함수는 frame을
+            // 만든다(같은 창 규칙).
+            Banks banks;
+            banks.s = s;
+            banks.r = r;
+            banks.b = b;
+            VmVirtualTarget target;
+            ErrorCode error = ErrorCode::None;
+            fault = ResolveVirtualCall(DecodeBx(word), banks, target, error);
+            if (error != ErrorCode::None) {
+                return failed(error);
+            }
+
+            if (fault != VmFaultKind::None) {
+                return MakeFault(fault, at, steps);
+            }
+
+            if (target.native) {
+                break;
+            }
+
+            if (frames_.Size() >= limits.callDepth) {
+                return MakeFault(VmFaultKind::BudgetExceeded, at, steps);
+            }
+
+            Frame& caller = frames_[frames_.Size() - 1];
+            const BytecodeFunction& current = module.functions[caller.function];
+            const BytecodeFunction& called = target.module->Module().functions[target.function];
+            uint32 base[BytecodeBankCount] = {};
+            for (uint32 bank = 0; bank < BytecodeBankCount; ++bank) {
+                base[bank] = caller.base[bank] + current.registers[bank];
+                if (called.parameters[bank] >
+                    uint32(current.frame[bank]) - current.registers[bank]) {
+                    return MakeFault(VmFaultKind::ContractViolation, at, steps);
+                }
+            }
+
+            caller.pc = pc;
+            if (auto pushed = PushFrame(*target.module, target.function, base); !pushed) {
+                return failed(pushed.Error());
+            }
+
+            pc = frames_[frames_.Size() - 1].pc;
+            reload();
+            break;
+        }
+        case Opcode::Cast: {
+            // `as?`(6.5절): 살아 있고 host가 그 타입이라고 답하면 B, 아니면 null.
+            const uint32 type = DecodeAx(words[pc++]);
+            VmHost* host = link_->host_;
+            r[a] = host != nullptr && Alive(r[bb]) && host->IsA(r[bb], link_->hosts_[type].id)
+                       ? r[bb]
+                       : 0;
             break;
         }
         case Opcode::CallL: {

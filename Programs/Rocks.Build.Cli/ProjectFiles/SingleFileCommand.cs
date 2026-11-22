@@ -60,9 +60,47 @@ internal static class SingleFileCommand
                     found.Add(target.Name);
                 }
             }
-            catch (Exception error) when (error is ArgumentException or InvalidOperationException or IOException)
+            catch (Exception error) when (error is not OperationCanceledException)
             {
-                // 이 구성에서 계획할 수 없는 타깃(플랫폼·플러그인 조건)은 안내에서 뺀다.
+                // 안내 단계다: 이 구성에서 계획할 수 없는 타깃(플랫폼·플러그인 조건 등)은 빼고 원래 오류를 그대로 낸다.
+            }
+        }
+
+        return found;
+    };
+
+    /// <summary>게임에서 같은 구성으로 그 소스를 컴파일하는 다른 게임 타깃 이름이다(엔진과 같은 안내, 실패할 때만 부른다).</summary>
+    internal static Func<string, IReadOnlyList<string>> GameTargets(string project, string sdk, string rulesPath, string current,
+        Descriptors.ProjectDescriptor descriptor, IReadOnlyList<Descriptors.PluginDescriptor> plugins, NativeToolchain toolchain,
+        NativeConfiguration configuration, IReadOnlyList<SdkModule> sdkModules, EngineVersion engineVersion) => source =>
+    {
+        var found = new List<string>();
+        var listing = new BuildContext(project, GameProjectLayout.DefaultOutput(project, current, configuration), toolchain.Platform, toolchain.Architecture,
+            configuration, sdk);
+        foreach (TargetRules target in RuleLoader.LoadAll(rulesPath, listing).Targets.OrderBy(target => target.Name, StringComparer.Ordinal))
+        {
+            if (string.Equals(target.Name, current, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            try
+            {
+                string output = GameProjectLayout.DefaultOutput(project, target.Name, configuration);
+                var context = new BuildContext(project, output, toolchain.Platform, toolchain.Architecture, configuration, sdk);
+                LoadedRules rules = RuleLoader.Load(rulesPath, target.Name, context);
+                GameLayout layout = GamePlanning.Layout(rules, descriptor, plugins, context, toolchain, configuration, sdk, sdkModules, createDirectories: false);
+                IdePlan plan = IdePlanner.Plan(GamePlanning.Request(toolchain, configuration, project, output, layout.Metadata.Modules, layout.Targets, sdk,
+                    engineVersion, 1));
+                if (plan.Compiles.Any(compile => string.Equals(Path.GetFullPath(compile.Source), source,
+                    OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)))
+                {
+                    found.Add(target.Name);
+                }
+            }
+            catch (Exception error) when (error is not OperationCanceledException)
+            {
+                // 안내 단계다: 계획할 수 없는 타깃은 뺀다.
             }
         }
 

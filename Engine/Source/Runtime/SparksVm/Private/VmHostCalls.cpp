@@ -1,6 +1,7 @@
 #include <SparksVm/Opcode.h>
 #include <SparksVm/Vm.h>
 #include <SparksVm/VmHost.h>
+#include <SparksVm/VmSession.h>
 
 // host 명령(GETF·SETF·GETCTX·CALLN·NEWLIT)의 실행이다(Docs/Design/SparksVm.ko.md 6.2절, LC5d1).
 // 창을 VmHostCall로 만들어 링크한 host를 부른다.
@@ -21,6 +22,55 @@ bool VmExecution::Alive(uint64 handle) noexcept {
     // 0이 아니고 host가 살아 있다고 답한 handle만 있음이다(SL 4.1절 — 파괴된 객체는 null).
     VmHost* host = link_->host_;
     return handle != 0 && host != nullptr && host->IsAlive(handle);
+}
+
+VmFaultKind VmExecution::ResolveVirtualCall(uint32 ref, const Banks& banks, VmVirtualTarget& target,
+                                            ErrorCode& error) noexcept {
+    VmHost* host = link_->host_;
+    const BytecodeFunction& current = module_->functions[frames_[frames_.Size() - 1].function];
+    const uint32 refs = uint32(current.frame[1]) - current.registers[1];
+    if (host == nullptr || refs == 0) {
+        return VmFaultKind::ContractViolation;
+    }
+
+    VmHostCall call;
+    call.execution_ = this;
+    call.binding_ = link_->hosts_[ref].id;
+    call.scalars_ = Span<uint64>(banks.s + current.registers[0],
+                                 uint32(current.frame[0]) - current.registers[0]);
+    call.refs_ = Span<uint64>(banks.r + current.registers[1], refs);
+    call.buffers_ = Span<VmBuffer*>(banks.b + current.registers[2],
+                                    uint32(current.frame[2]) - current.registers[2]);
+    const uint64 receiver = call.refs_[0];
+    if (!Alive(receiver)) {
+        return VmFaultKind::ContractViolation; // 꺼낸 참조에만 낸다(6.5절)
+    }
+
+    VmFaultKind fault = host->ResolveVirtual(call, receiver, target);
+    if (fault == VmFaultKind::None && call.error_ == ErrorCode::None && target.native) {
+        call.binding_ = target.binding;
+        fault = host->CallNative(call);
+    } else if (fault == VmFaultKind::None && call.error_ == ErrorCode::None) {
+        // host가 준 Sparks 대상은 같은 host로 링크했고, 함수 모양이 가상 서술자와 같아야 한다
+        // (LC5d2 리뷰 B2·S2).
+        const VmLinkedModule::Shape& shape = link_->shapes_[ref];
+        bool runnable = target.module != nullptr && target.module->Linked() &&
+                        target.module->ImportsLinked() && target.module->host_ == link_->host_ &&
+                        target.function < target.module->Module().functions.Size() && shape.valid;
+        if (runnable) {
+            const BytecodeFunction& called = target.module->Module().functions[target.function];
+            runnable = called.returnSlots == shape.returnSlots &&
+                       (shape.returnSlots == 0 || called.returnBank == shape.returnBank);
+            for (uint32 bank = 0; bank < BytecodeBankCount; ++bank) {
+                runnable = runnable && called.parameters[bank] == shape.parameters[bank];
+            }
+        }
+
+        fault = runnable ? VmFaultKind::None : VmFaultKind::ContractViolation;
+    }
+
+    error = call.error_;
+    return fault;
 }
 
 VmFaultKind VmExecution::CallHost(Opcode op, uint32 word, uint32 extra, const Banks& banks,
@@ -67,6 +117,38 @@ VmFaultKind VmExecution::CallHost(Opcode op, uint32 word, uint32 extra, const Ba
         const uint64 object = get ? banks.r[bb] : banks.r[a];
         if (!Alive(object)) {
             return VmFaultKind::ContractViolation; // 꺼낸 참조에만 낸다(6.2절)
+        }
+
+        // 같은 모듈 Sparks 클래스 필드: session instance 저장소(SparksRuntime 2.2절).
+        const VmLinkedModule::LocalField& local = link_->localFields_[DecodeAx(extra)];
+        if (local.classIndex != NoBytecodeIndex) {
+            uint64* values = nullptr;
+            VmBuffer** buffers = nullptr;
+            if (session_ == nullptr || !session_->FieldSlots(object, *link_, local.classIndex, bank,
+                                                             local.offset, c, values, buffers)) {
+                return VmFaultKind::ContractViolation;
+            }
+
+            const uint32 at = get ? a : bb;
+            for (uint32 slot = 0; slot < c; ++slot) {
+                if (bank == static_cast<uint32>(BytecodeBank::Buf)) {
+                    VmBuffer*& from = get ? buffers[slot] : banks.b[at + slot];
+                    VmBuffer*& to = get ? banks.b[at + slot] : buffers[slot];
+                    Retain(from);
+                    VmBuffer* previous = to;
+                    to = from;
+                    Release(previous);
+                } else {
+                    uint64* registers = bank == 0 ? banks.s : banks.r;
+                    if (get) {
+                        registers[at + slot] = values[slot];
+                    } else {
+                        values[slot] = registers[at + slot];
+                    }
+                }
+            }
+
+            return VmFaultKind::None;
         }
 
         call.binding_ = link_->hosts_[DecodeAx(extra)].id;
