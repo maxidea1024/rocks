@@ -1,6 +1,6 @@
 # 오디오 시스템 설계
 
-기준일: 2026-11-22, 개정 10(3.23절 AU1 Mixer2 스레드 경계 — 소유 분리, seqlock·mailbox·stop-all·시작/terminal·ACK, 반복 Stop 규칙). Mixer1 구현 리뷰 반영 — fade 끝·동점 규칙, 종류별 무시 계수, 마스터 gain 상한, 비유한 정리를 limiter 앞으로. 개정 8: 3.22절 AU1 믹서 코어 — 명령 인자 전달로 PR3을 AU2로, 상태 표, Q 불변 ramp, FTZ 실행 함수. DSP2 리뷰 반영 — 비유한 key, ratio·gain 범위, 큰 블록, FTZ·DAZ 계약. 개정 6: 3.21절 AU1 DSP2 dynamics, DSP2 범위 바로잡음. 개정 5: DSP1 리뷰 반영 — HPF fs/2 clamp, HPF bypass 20 Hz, 리샘플러 비율 범위 UE와 같게. 개정 4: DSP1 구현 반영(리샘플러 고정소수점, 방위각 경계, 오류 코드). 개정 3: 3.20절 AU1 구현 세부 DSP1, 3.13.2절 패닝을 UE 방식으로 고침. 개정 2: 8절 다른 문서 개정 반영. 소리를 재생하는 엔진 기능 전체를 정한다. 범위는 실시간 믹서, 장치 출력, 엔진·World 연결, 사운드 에셋, 임포트, 코덱·쿠킹, 스트리밍, 감쇠·공간화·동시 발음·가상화, 버스·효과·리버브 존, 진단이다. UE 5.8의 AudioMixerCore·AudioMixer·SignalProcessing·Engine 오디오 클래스와 AudioGameplayVolume 플러그인에 해당한다.
+기준일: 2026-11-23, 개정 11(Mixer2 구현 리뷰 반영 — mailbox·stop-all 최소 fade, 시험 강화). 개정 10: 3.23절 AU1 Mixer2 스레드 경계 — 소유 분리, seqlock·mailbox·stop-all·시작/terminal·ACK, 반복 Stop 규칙). 개정 9: Mixer1 구현 리뷰 반영 — fade 끝·동점 규칙, 종류별 무시 계수, 마스터 gain 상한, 비유한 정리를 limiter 앞으로. 개정 8: 3.22절 AU1 믹서 코어 — 명령 인자 전달로 PR3을 AU2로, 상태 표, Q 불변 ramp, FTZ 실행 함수. DSP2 리뷰 반영 — 비유한 key, ratio·gain 범위, 큰 블록, FTZ·DAZ 계약. 개정 6: 3.21절 AU1 DSP2 dynamics, DSP2 범위 바로잡음. 개정 5: DSP1 리뷰 반영 — HPF fs/2 clamp, HPF bypass 20 Hz, 리샘플러 비율 범위 UE와 같게. 개정 4: DSP1 구현 반영(리샘플러 고정소수점, 방위각 경계, 오류 코드). 개정 3: 3.20절 AU1 구현 세부 DSP1, 3.13.2절 패닝을 UE 방식으로 고침. 개정 2: 8절 다른 문서 개정 반영. 소리를 재생하는 엔진 기능 전체를 정한다. 범위는 실시간 믹서, 장치 출력, 엔진·World 연결, 사운드 에셋, 임포트, 코덱·쿠킹, 스트리밍, 감쇠·공간화·동시 발음·가상화, 버스·효과·리버브 존, 진단이다. UE 5.8의 AudioMixerCore·AudioMixer·SignalProcessing·Engine 오디오 클래스와 AudioGameplayVolume 플러그인에 해당한다.
 
 [엔진 구현 계획](EngineImplementationPlan.ko.md) §18은 AudioRT 무대기 계약(Object·파일 IO·동적 할당·lock·직접 로그 금지), voice handle 세대, stop mailbox, epoch ACK, 48 kHz·256/512 frame, 성능 목표를 이미 정했다. 이 문서는 그 계약을 구현 수준으로 구체화한다. 설계가 애매한 곳은 UE 방식을 따르고, Rocks 원칙(결정적 시험, `Result` 오류, 명시적 소유, 전역 생성자 금지)과 부딪히는 곳만 다르게 정한다(7절).
 
@@ -951,7 +951,7 @@ Mixer1(3.22절)은 제어 쪽 API와 `RenderBlock`이 같은 voice 슬롯을 읽
 
 - voice마다 슬롯 하나다.
   - `version`(`uint32` 원자값, 홀수 = 쓰는 중)
-  - 내용(모두 `uint32` 원자값, 실수는 비트 패턴): generation, 제어 순번(하위 32비트), `AudioVoiceParams`
+  - 내용(모두 `uint32` 원자값, 실수는 비트 패턴): generation, 제어 순번(64비트를 하위·상위 두 word로), `AudioVoiceParams`
   - 일반 필드로 두면 동시 읽기·쓰기가 C++ 데이터 경쟁이다.
 - 제어 쓰기 `PublishParams(handle, params)`(쓰는 쪽은 제어 하나):
   - `v = version`(relaxed)
@@ -971,7 +971,7 @@ Mixer1(3.22절)은 제어 쪽 API와 `RenderBlock`이 같은 voice 슬롯을 읽
 #### 3.23.3 stop mailbox
 
 - voice마다 `uint64` 원자값 하나: `{generation:32, fadeFrames:32}`다. 0은 비었다는 뜻이다(generation 0은 무효).
-- 제어 쓰기 `RequestStop(handle, fadeFrames)`: release store다. 마지막 값이 남는다.
+- 제어 쓰기 `RequestStop(handle, fadeFrames)`: 제어는 그 수명에서 낸 fade의 최소값을 기억하고, 그보다 짧은 값일 때만 release store한다. mailbox 값은 줄기만 하므로 RT가 언제 읽어도 가장 이른 끝을 보고, 같은 값이 되돌아오는 ABA도 없다(개정 11 — 마지막 값이 남는 방식이면 `RequestStop(0)` 뒤 `RequestStop(512)`가 steal을 지울 수 있었다).
 - RT 읽기: 블록 시작, 명령보다 먼저 acquire load한다. 값이 RT가 마지막으로 본 값과 다르면 처리한다.
   - generation이 RT 슬롯과 같으면 offset 0의 Stop으로 적용한다.
   - generation이 RT 슬롯보다 새로우면 새 수명이다. Play가 아직 큐·pending에 있는데 stop이 먼저 보인 경우로, Prepared에서 즉시 terminal(`Stopped`)이고 뒤의 Play는 무시된다.
@@ -981,6 +981,8 @@ Mixer1(3.22절)은 제어 쪽 API와 `RenderBlock`이 같은 voice 슬롯을 읽
 #### 3.23.4 장치 stop-all epoch
 
 - `uint64` 원자값 하나: `{epoch:32, fadeFrames:32}`다. 제어 `StopAll(fadeFrames)`가 epoch를 올려 release store한다. 제어는 현재 epoch를 알고 있고, `PreparePlay`가 그 값을 Play에 싣는다.
+- RT는 처리한 epoch를 출판한다(RT → 제어). 제어는 아직 처리되지 않은 epoch가 있으면 그 fade와 새 fade 중 짧은 쪽을 낸다. 그래서 `StopAll(0)` 뒤의 `StopAll(1000)`이 0을 지우지 않는다(개정 11).
+- stop-all이 이미 끝난 voice나 더 긴 fade로 건너뛴 voice는 명령 무시 계수에 넣지 않는다.
 - RT는 블록 시작에 acquire load한다. 마지막으로 처리한 epoch와 다르면 그 시점의 모든 `Playing`·`Stopping` voice에 Stop(fadeFrames)을 적용하고, `Prepared` voice를 즉시 끝낸다(사유 `StoppedAll`).
 - 새 수명의 Play가 실은 epoch가 RT가 처리한 epoch보다 작으면, 그 Play는 StopAll 전에 제출된 것이다. 시작하지 않고 즉시 terminal(`StoppedAll`)로 끝낸다. 그래서 큐·pending에 있던 Play도 놓치지 않는다(UE `StopAllSounds`도 대기 중인 sound를 멈춘다).
 - World별 scene epoch는 voice에 scene 색인이 생기는 AU3(World 연결)에서 같은 방식으로 더한다.
@@ -1029,7 +1031,7 @@ Mixer1(3.22절)은 제어 쪽 API와 `RenderBlock`이 같은 voice 슬롯을 읽
 | 시작·terminal | generation 묶음(이전 수명 값 무시), 수거 한 번, `StartFailed` |
 | ACK | terminal 게시 블록이 끝나기 전 `ReleaseVoice` `Busy`(블록 시작 frame 즉시 terminal 포함), 뒤 성공, clip 해제 순서 |
 | 제어 거부 | Reserved·stale의 Make*·Publish·RequestStop 거부 |
-| 두 스레드(범위 한정) | 경계 상태의 정확성은 Inline 주입 시험이 맡는다. 두 `platform::Thread` 시험은 publish·RequestStop·StopAll만 쓴다(AU1에는 Play를 넘길 큐가 없고, 자체 링은 공용 유틸 중복이라 만들지 않는다). 정해진 반복 수와 원자 gate로 끝나고, RT 스레드는 `RunWithRealtimeAudioFloatingPoint` 안에서 돈다. 단언은 인터리빙과 무관한 불변식만 한다: 적용된 파라미터는 늘 한 출판의 튜플이고, generation마다 terminal은 한 번이다. Windows에는 TSan이 없어 이 시험이 경쟁 부재를 증명하지는 않는다 |
+| 두 스레드(범위 한정) | 경계 상태의 정확성은 Inline 주입 시험이 맡는다. 두 `platform::Thread` 시험은 publish·RequestStop·StopAll만 쓴다. 제어는 RT의 ACK(`CompletedMixFrame`)가 정한 frame에 닿을 때까지 출판해 두 스레드가 실제로 겹치게 하고, RT는 블록마다 terminal word를 관찰해 voice마다 한 번만 바뀌는지와 사유를 단언한다(AU1에는 Play를 넘길 큐가 없고, 자체 링은 공용 유틸 중복이라 만들지 않는다). 정해진 반복 수와 원자 gate로 끝나고, RT 스레드는 `RunWithRealtimeAudioFloatingPoint` 안에서 돈다. 단언은 인터리빙과 무관한 불변식만 한다: 적용된 파라미터는 늘 한 출판의 튜플이고, generation마다 terminal은 한 번이다. Windows에는 TSan이 없어 이 시험이 경쟁 부재를 증명하지는 않는다 |
 
 ## 4. 결정 요약
 
@@ -1202,3 +1204,4 @@ Mixer1(3.22절)은 제어 쪽 API와 `RenderBlock`이 같은 voice 슬롯을 읽
 - 개정 8(2026-11-22): 3.22절 AU1 믹서 코어(Mixer1·Mixer2 범위, 명령 인자 전달 `RenderBlock`, clip 표·사용 수, voice 상태 표, Q 불변 ramp, 구간과 무관한 끝 판정, 마스터 limiter 프리셋·clamp, FTZ 실행 함수, `OfflineAudioRender`)을 더했다. 초안 교차 검증 1회 반영(필수 6 — Q 불변, 끝 판정, Immediate 정렬, 상태 표, clip 해제 경쟁, 6.2 충돌; 권장 — UE mono 2D 0.5·stereo→mono 0.707, FTZ만(DAZ 아님), 출력 clamp, 공용 scratch, 비유한 PCM 거부, 스레드 모드 pending 배열, Mixer2를 AU1에 남김; 참고 — loop 0/0, pitch [0.4, 2], 할당 시험 대상, 기본 stop fade 512). PR3은 AU2의 선행으로 옮겼다. 3.20.5절에 `OutputFramesBefore`를 더했다.
 - 개정 9(2026-11-22): Mixer1 구현 리뷰 반영. fade 끝 = Stop + N과 자연 끝 동점 규칙(3.22.5절), 무시한 명령의 종류별 계수와 Prepared 회수 절차, stereo clip `Azimuth`의 `PreparePlay` 거부, `MaxMasterGain`, 구간 수 문구와 미룸·늦음 이중 계수, 마스터 경로에서 비유한 정리를 limiter 앞으로(3.22.6절).
 - 개정 10(2026-11-22): 3.23절 AU1 Mixer2 스레드 경계(제어·RT 슬롯 소유 분리, 공통 순번, generation 묶은 seqlock, stop mailbox, Play에 실은 stop-all epoch, 시작·terminal 슬롯과 `releaseMixFrame` ACK, 계수 스냅샷, pending 정리, 범위 한정 두 스레드 시험)을 더했다. 초안 교차 검증 1회 반영(필수 5 — 새 수명 seqlock 소실, ACK 한 블록 어긋남, stop-all이 대기 Play를 놓침, pending 막힘, RT 계수 경쟁 읽기). 3.22.4절 상태 표의 Reserved 거부·반복 Stop(더 이른 끝만)·Finished 해제 조건, 3.5.3절 ACK 문구, 7절 UE 명령 경로 비교를 고쳤다.
+- 개정 11(2026-11-23): Mixer2 구현 리뷰 반영. 필수 — mailbox는 마지막 값이 아니라 그 수명의 최소 fade만 쓴다(스케줄링에 따라 steal이 사라지던 문제·ABA), stop-all은 RT가 처리한 epoch를 출판하고 제어가 미처리 epoch의 짧은 fade를 유지한다. 권장 — 두 스레드 시험을 ACK gate·terminal 관찰로 강화, 처리 순서·Stopping·Prepared stop-all·짧은 fade·stale 거부·clip 해제 시험, seqlock·계수 칸 static_assert. 참고 — seqlock 순번 64비트 문구, stop-all 건너뜀은 무시 계수에서 뺀다.
