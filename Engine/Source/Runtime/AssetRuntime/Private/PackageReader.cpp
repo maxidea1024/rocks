@@ -931,6 +931,35 @@ const char* AssetDiagnosticName(AssetDiagnosticCode code) noexcept {
     return "Unknown";
 }
 
+bool AssetDiagnosticIsWarning(AssetDiagnosticCode code) noexcept {
+    switch (code) {
+    case AssetDiagnosticCode::NotDurable:
+    case AssetDiagnosticCode::NonFiniteAttribute:
+    case AssetDiagnosticCode::UvOutOfRange:
+    case AssetDiagnosticCode::NonNormalizedWeights:
+    case AssetDiagnosticCode::MaterialSlotFallback:
+    case AssetDiagnosticCode::NegativeBuildScale:
+    case AssetDiagnosticCode::InfluencesTrimmed:
+    case AssetDiagnosticCode::MissingInfluences:
+    case AssetDiagnosticCode::UnsupportedCollisionShape:
+    case AssetDiagnosticCode::UnsupportedSetting:
+    case AssetDiagnosticCode::UnknownBoneTrack:
+    case AssetDiagnosticCode::EventPropertiesDropped:
+    case AssetDiagnosticCode::UnknownField:
+    case AssetDiagnosticCode::UnsupportedAsset:
+    case AssetDiagnosticCode::UnrealPathRenamed:
+    case AssetDiagnosticCode::MissingUnrealDependency:
+    case AssetDiagnosticCode::AliasResolved:
+    case AssetDiagnosticCode::AliasInUse:
+    case AssetDiagnosticCode::AliasSearchTruncated:
+    case AssetDiagnosticCode::OrphanedOutput:
+    case AssetDiagnosticCode::AbsoluteSourcePath:
+        return true;
+    default:
+        return false;
+    }
+}
+
 Result<PackageHeader> ReadPackageHeader(Span<const uint8> headerBytes, uint64 fileBytes,
                                         AssetDiagnostic* failure) noexcept {
     // 1. 크기·magic·headerCrc·flags — 버전 필드를 믿기 전에 본다.

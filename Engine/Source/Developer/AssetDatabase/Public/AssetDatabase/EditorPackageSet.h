@@ -101,6 +101,9 @@ enum class EditorWarningKind : uint8 {
     // 복제: 원본의 ImportRecord가 다른 임포트의 출력을 가리키는 참조 기록이라 사본에서 버렸다(진단
     // None, asset = 사본 id, related = 그 소유자 — 7.1절 17 A2e3b).
     ImportRecordDropped,
+    // 임포트: 원본·임포터 경고다(진단 = 그 코드 — AbsoluteSourcePath(detail = 원본 번호)·임포터가
+    // Warn으로 남긴 코드, asset = 주 출력 — 7.1절 18 A2f).
+    ImportWarning,
     // ID 수정: 새 id로 바꾼 패키지나 그 형제 출력이 고아가 됐다(진단 OrphanedOutput, asset = 고아,
     // related = 그 owner — 7.1절 17 A2e4b).
     OrphanedOutput
@@ -402,6 +405,24 @@ public:
     // 바뀌지 않는다), 할당 실패.
     Result<void> Close(AssetId id, AssetDiagnostic* failure = nullptr) noexcept;
 
+    // before(id 순 — 어떤 일 전에 열려 있던 id)에 없는 열린 패키지를 모두 닫는다(7.1절 17 A2e4b —
+    // ID 수정·임포트가 연 패키지: 고칠 패키지와 그 의존 닫힘, Hard 순환 상대 포함). 원래 열려 있던
+    // 패키지는 새로 연 패키지를 참조할 수 없으므로(열기는 기존 패키지의 미해결 import를 다시 묶지
+    // 않는다) 끊긴 참조가 남지 않는다. Discard는 id 역순이다. 오류: 할당 실패(아무것도 닫지
+    // 않는다), Discard 실패(그 오류 — 앞서 닫은 것은 닫힌 채, 남은 것은 열린 채이고 닫힌 패키지로의
+    // 참조는 Discard된 객체를 가리킨다(Resolve는 Destroyed) — 같은 before로 다시 부르면 남은 것을
+    // 닫는다). 닫을 것이 없으면 성공이다.
+    Result<void> CloseOpened(Span<const AssetId> before) noexcept;
+    // 사용 예(서비스 — 일 전에 열린 id를 적어 두고 실패하면 그 뒤에 연 것을 닫는다):
+    //   Array<AssetId> before(allocator);   // set.At(i).id를 차례로
+    //   if (!done) { (void)set.CloseOpened(before.View()); }
+
+    // 열린 패키지 id의 ImportRecord를 bytes로, ImportOwner 의존을 owner(null이면 없음 — 소유
+    // 기록)로 바꾸고 dirty로 표시한다(저장이 쓴다 — 7.1절 18 A2f). bytes는 WriteImportRecord가 만든
+    // 것이다 (검증하지 않는다 — 저장의 writer가 쓴다). 오류: Initialize 전 InvalidArgument, 열리지
+    // 않음 NotFound, 할당 실패(바꾸지 않는다).
+    Result<void> SetImportRecord(AssetId id, Span<const uint8> bytes, AssetId owner) noexcept;
+
     // 열린 패키지 수와 id 순 i번째 정보다.
     usize Count() const noexcept {
         return open_.Size();
@@ -429,14 +450,6 @@ private:
     // rootFile이 있으면 루트 패키지(id)는 색인 id 조회 대신 그 파일을 연다(ID 수정 — 같은 id 둘).
     Result<ObjectHandle> OpenEntry(AssetId id, Array<EditorWarning>* warnings,
                                    AssetDiagnostic* failure, StringView rootFile = {}) noexcept;
-    // before(id 순 — 어떤 일 전에 열려 있던 id)에 없는 열린 패키지를 모두 닫는다(7.1절 17 A2e4b —
-    // ID 수정이 연 패키지: 고칠 패키지와 그 의존 닫힘, Hard 순환 상대 포함). 원래 열려 있던
-    // 패키지는 새로 연 패키지를 참조할 수 없으므로(열기는 기존 패키지의 미해결 import를 다시 묶지
-    // 않는다) 끊긴 참조가 남지 않는다. Discard는 id 역순이다. 오류: 할당 실패(아무것도 닫지
-    // 않는다), Discard 실패(그 오류 — 앞서 닫은 것은 닫힌 채, 남은 것은 열린 채이고 닫힌 패키지로의
-    // 참조는 Discard된 객체를 가리킨다(Resolve는 Destroyed) — 같은 before로 다시 부르면 남은 것을
-    // 닫는다). 닫을 것이 없으면 성공이다.
-    Result<void> CloseOpened(Span<const AssetId> before) noexcept;
     // 열린 저장된 패키지의 캐시 핸들 경로(Content/fileName — 저장하지 않은 새 패키지는 빈
     // 문자열)다.
     Result<void> OpenCachePath(const EditorPackageInfo& info, String& out) const noexcept;

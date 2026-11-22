@@ -84,8 +84,10 @@ ScanScheduler::~ScanScheduler() noexcept {
     }
 }
 
-AssetCommandTypes::AssetCommandTypes(Allocator& allocator, ModuleLoader& modules) noexcept
-    : modules_(&modules), types_(allocator), registrations_(types_, allocator), names_(allocator) {
+AssetCommandTypes::AssetCommandTypes(Allocator& allocator, ModuleLoader& modules,
+                                     StringView module) noexcept
+    : modules_(&modules), module_(module.IsEmpty() ? AssetTypeModule : module), types_(allocator),
+      registrations_(types_, allocator), names_(allocator) {
 }
 
 AssetCommandTypes::~AssetCommandTypes() noexcept {
@@ -101,7 +103,7 @@ AssetCommandTypes::~AssetCommandTypes() noexcept {
 }
 
 Result<void> AssetCommandTypes::Start() noexcept {
-    if (auto loaded = modules_->Load(AssetTypeModule); !loaded.IsOk()) {
+    if (auto loaded = modules_->Load(module_); !loaded.IsOk()) {
         return Result<void>::Failure(loaded.error != ErrorCode::None ? loaded.error
                                                                      : ErrorCode::Unsupported);
     }
@@ -165,11 +167,25 @@ bool OpenSession(CommandletOutput& output, Allocator& allocator, StringView comm
             started.Error() == ErrorCode::OutOfMemory
                 ? Result<int32>::Failure(started.Error())
                 : Fail(output, allocator, command, 1, "{}: {}: cannot register the asset types",
-                       ErrorCodeName(started.Error()), AssetTypeModule);
+                       ErrorCodeName(started.Error()), session.types.Module());
         return false;
     }
 
+    const AssetImporterSetup& setup = session.context->importers;
+    if (setup.registerImporters != nullptr) {
+        if (auto registered =
+                setup.registerImporters(setup.state, session.importers, session.importerTokens);
+            !registered) {
+            failure = registered.Error() == ErrorCode::OutOfMemory
+                          ? Result<int32>::Failure(registered.Error())
+                          : Fail(output, allocator, command, 1, "{}: cannot register the importers",
+                                 ErrorCodeName(registered.Error()));
+            return false;
+        }
+    }
+
     AssetServiceConfig config;
+    config.importers = &session.importers;
     config.packages.types = &session.types.Types();
     config.packages.files = &platform::PhysicalFileSystem();
     config.packages.hooks = &session.hooks;

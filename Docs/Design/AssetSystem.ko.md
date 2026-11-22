@@ -609,6 +609,17 @@ A2는 에디터 쪽 에셋 데이터베이스다(4·5.4·5.5·7·8·13·16절). 
       - 명령 `asset-reimport <path> [--source=<파일> | --source.<역할>=<파일>…] [설정…]`: 출력 `asset-reimport: <path> <id>` + 새 출력 줄, 경고 줄.
     - 시험: C++ 서비스 시험이 시험 임포터(AssetTestFixtures — 원본 텍스트 `value=<n>`·`bulk=<hex>`·`outputs=<key>:<type>,…` → TestAsset, 옵션 struct `TestImportOptions{scale, failAt}`, 역할 둘 변형, 기본 확장자 없는 변형)로 모든 흐름·실패·할당 실패를 확인하고, EngineTests가 명령 함수를 프로세스 안에서 부른다(위).
     - A2f1a 상태: **구현** — 대조표 14.1.45절, coverage 14.1.46절. 구현에서 정한 것: 진단 여덟 개는 `OrphanedOutput` 뒤에 더했다. 표 파일·원본 읽기는 별칭 표의 `ReadWhole`을 모듈 공용(`WholeFileRead.cpp`)으로 옮겨 같이 쓴다. 루트 수 상한은 JSON 노드 상한이 막는다(넘으면 TooManyNodes → CapacityExceeded). 성분 수는 정규화한 `/` 경로의 빈 아닌 성분을 센다(드라이브 `C:`도 하나 — 상대 비교만 쓴다). `ReadImportSource`는 byte 상한 인자를 받는다(여러 원본은 남은 합계 예산을 준다). 원본 위치 검사는 `IsValidImportSourceLocation`(ImportRecord와 같은 판정)이다. 임포터 표의 옵션 struct 조회는 `AcquireValueType(…, Struct)`이고 종류 불일치(TypeMismatch)는 InvalidArgument로 돌려준다. 원본 위치 규칙을 고쳤다(빈 루트 = 절대 경로 — 5.7절 ImportRecord 배치 참고). 주 출력 타입의 속성 이름이 예약 이름과 같으면(예: 시험 TestAsset의 `source`) 그 설정은 `asset-import`가 아닌 `asset-set`으로 넣는다(한계 — 예약 이름은 명령 문법이 먼저 쓴다). 리뷰 반영(권장 넷): 루트 이름은 byte 그대로 기록·비교하므로 대소문자만 다른 두 이름(기본 `Project`와 겹치는 `project` 포함)을 InvalidArgument로 거부한다. Windows 장치 이름공간 경로(`\\?\C:\…`·`\\?\UNC\…`·`\\.\…`)는 Core `Path`가 Unsupported로 거부한다(루트 표·기록 위치 — UNC로 잘못 기록하지 않는다, 벗겨 쓰지 않는다: 그 형태는 사용자가 원본 경로로 줄 까닭이 없다). 기록 규칙이 `\`를 금지하므로 POSIX에서 이름에 `\`가 든 원본(`a\b.png`)은 기록할 수 없다(한계 — InvalidArgument). 원본 역할 문자 규칙은 지금 임포터 표(`[A-Za-z0-9_.]`)가 ImportRecord(길이·UTF-8만)보다 좁다 — A2f1b가 `--source.<역할>` 대조(대소문자 구분, byte 일치)를 정할 때 한 곳(ImportRecord 쪽 공개 판정)으로 모은다.
+    - A2f1b 상태: **구현** — 대조표 14.1.47절, coverage 14.1.48절. 구현에서 정한 것:
+      - 옵션 Record: schema = 옵션 struct id, version = 그 struct 버전, 필드 1(Guid{0, 1}) = 옵션 값의 리플렉션 JSON 텍스트(`ExportJson` — 들여쓴 정규 표기). 재임포트(A2f2)는 기본값 struct에 `ImportJson`으로 다시 대입한다(모르는 필드는 진단 → `InvalidImportOption`). 처음 생각한 필드 codec 직접 쓰기(`EncodeStructRecord`)는 버렸다 — 단독 struct decode가 객체 생성 트랜잭션(ConstructionContext)을 요구해 Core를 크게 넓혀야 하고, JSON 표기는 리플렉션 B9가 이미 struct 값 대상으로 시험한 공용 경로다.
+      - 옵션 값은 임포터 표가 쥔 struct lease의 함수표(size·alignment·construct·destroy)로 만든다. 표는 등록 동안 주 출력·옵션 타입 lease를 쥔다(`OutputType`·`OptionsType` — 등록된 임포터의 타입 등록이 풀리지 않는다, 임포트 때 다시 조회하지 않는다).
+      - 출력: `Output`이 그 자리에서 경로를 만들고 별칭 점유를 본 뒤 `EditorPackageSet::Create`(색인·디스크·저장하지 않은 새 패키지 점유 — New와 같다)로 저장하지 않은 패키지를 만들어 그 대표 에셋을 준다(Create는 패키지 핸들을 준다 — 대표 에셋은 이름 빈 자식). 설정 대입은 만든 뒤라 `Live` 대상이다(초안의 `Staged`가 아니다 — Create가 공개까지 하므로).
+      - 실패하면 이번에 연 패키지를 `EditorPackageSet::CloseOpened`(A2e4b의 private 함수를 공개)로 닫는다. 집합 API `SetImportRecord(id, bytes, owner)`가 기록·ImportOwner를 바꾸고 dirty로 표시한다.
+      - 임포터 경고는 새 경고 종류 `EditorWarningKind::ImportWarning`(진단 = 그 코드)이고, 받는 코드는 `AssetDiagnosticIsWarning`(AssetRuntime — 4.6절·MeshAnimationAssets 11절·UnrealExchange 표의 경고·정보 코드)이다. `AssetImportContext::Fail(code, error, detail)`이 임포터 실패의 진단을 남긴다(없으면 진단 None).
+      - 저장 되돌리기: 출력마다 저장 전에 파일 이름 자리(`MaxNativePathBytes`)와 경고 자리(저장 경고 2 + 출력 수)를 잡는다 — 저장 뒤 이름 복사·되돌리기 경고가 실패하지 않는다(처음 구현은 저장 직후 이름 복사의 할당 실패로 그 파일을 되돌리기 목록에 넣지 못해 고아로 남겼다 — 할당 실패 시험이 찾았다).
+      - 명령 세션: `AssetCommandContext`에 에셋 타입 모듈 이름(`typeModule` — 비면 `Animation`)과 임포터 등록 hook(`AssetImporterSetup` — 타입 등록 뒤·서비스 만들기 전, 토큰은 세션이 서비스 뒤에 해제)을 둔다. 제품 Commandlet은 hook이 없다(A5가 텍스처 임포터를 등록한다), EngineTests는 시험 타입 모듈(`AssetTestFixtures`)과 시험 임포터를 준다. 타입 모듈 시작 실패 줄은 그 모듈 이름을 쓴다.
+      - 리뷰 반영(충족 — 권장 다섯): 주 경로의 별칭·색인·저장하지 않은 새 패키지 점유는 원본을 읽기 전에 본다(큰 원본을 헛되이 읽지 않게 — 디스크에만 있는 파일은 Output의 Create가 본다). 되돌리기는 할당하지 않는다 — OS 경로 버퍼(Content 경로 + `MaxNativePathBytes`)와 색인 갱신 이름 표를 저장 전에 잡는다. 되돌리기의 색인 갱신(RefreshPaths)이 실패하면(읽기 오류) 이 서비스의 색인은 다음 갱신·검색까지 지운 파일 항목을 남긴다(같은 경로 다시 임포트는 DuplicatePath — 새 프로세스·`asset-index-rebuild`는 맞춘다). 이번 임포트의 경고(절대 경로·임포터 경고)는 따로 모았다가 성공할 때만 넘긴다(실패한 임포트가 만들지 않은 id의 경고를 남기지 않는다 — 되돌리기의 OrphanNotDeleted와 저장의 NotDurable은 남는다). 남은 시험 임시 디렉터리는 중단된 실행의 잔재였다.
+      - A2f2에 넘기는 것: 옵션 Record는 모든 필드를 적으므로 새 임포터 버전의 옵션 기본값 변경은 재임포트에 반영되지 않는다(16.1절 기존 옵션 유지 — UE와 같다, 바꾸려면 명시 대입).
+      - 명령 문법: `--<경로>=<값>` 설정(첫 이름이 예약 이름이면 사용법 오류 — `--cube` 등은 A5), `--unset=`·`--erase=`, `--source.<역할>=`(같은 역할 둘·빈 역할·빈 파일은 사용법 오류, 위치 인자 원본과 섞지 않는다), `--importer=`. 상대 원본 경로는 작업 디렉터리 기준 절대 경로로 바꾼다(ProjectLayout과 같다).
     - 버린 대안: 임포터가 패키지를 직접 만들고 저장(원자성·점유·기록 규칙이 임포터마다 흩어진다 — 문맥이 출력을 준다), 옵션을 객체(UE ImportUI `UObject`)로(공개 전 객체가 패키지에 들지 않는 일회 값이라 struct 값 대입으로 충분), 옵션 접두사 `--options.<필드>=`(13절 문법이 바뀌고 UE 명령행 관례와 다르다 — 등록 때 이름 충돌을 막는다), 확장자 경합 우선순위(UE `ImportPriority` — 결과가 등록 순서에 달린다), 타입이 바뀐 출력을 같은 id 새 객체로 바꾸기(위), 재임포트가 참조 기록 출력에서 owner를 따라가기(무엇이 바뀌는지 숨긴다 — 명시 거부), 명령 성공 경로 시험을 A5로 미루기(지금 닿는 코드를 미구현 사유로 남긴다 — 교차 검증 필수 4), 시험 전용 Commandlet 실행 파일(타깃이 하나 더 생긴다 — 프로세스 안 호출이 작다).
 
 ## 8. 동시성
@@ -2489,6 +2500,43 @@ A2c3b 상태(2026-11-21): **완료**. 완료 조건: 대조표(14.1.25) C# 항�
 | `ReadWhole` 크기 조회 실패 | 실패 | 열린 핸들의 크기 조회만 실패시킬 수 없다(메모리 파일 시스템에 그 고장 주입이 없다 — 별칭 표 A2e1과 같은 줄을 옮겼다) |
 
 처음 구현의 주 출력 종류 검사(`Kind() != Class`)는 `Acquire`가 클래스만 주므로 닿을 수 없어 지웠다.
+
+#### 14.1.47 요구 대조표(A2f1b — 새 임포트)
+
+시험은 EngineTests `Engine/Source/Developer/AssetDatabase/Tests/AssetImportTests.cpp`(7개 — 시험 임포터 `AssetImportTestSupport.h`), `Engine/Source/Developer/AssetCommandlets/Tests/AssetImportCommandletTests.cpp`(3개 — 명령 함수를 프로세스 안에서), `AssetImporterTable_RegisterAndFind`(타입 lease 조회 더함), C# `Programs/Rocks.Commandlet.Tests/Program.cs`의 "asset-import" 항목 10개(제품 실행 파일 — 임포터 없음)다. 에셋 명령 구현은 동작 불변 이동 커밋(d596e9aa)으로 Developer 모듈 `AssetCommandlets`에 옮겼다.
+
+| 요구(절) | 항목 | 시험 |
+|---|---|---|
+| 리뷰 반영(7.1-18 A2f1b) | 주 경로 점유를 원본 읽기 전에(별칭 — 진단 인자 없이도·색인·저장하지 않은 새 패키지, 디스크에만 있는 파일은 Create), 실패한 임포트는 이번 경고를 남기지 않음, 할당 실패 장면에 저장하지 않은 새 패키지 | `AssetImport_Rejects`·`AssetImport_AllocationFailures` |
+| 원본 하나(7.1-18 A2f1b) | 주 출력 파일·헤더 id, 소유 기록(임포터 id·이름·버전, 원본 역할·루트 Project·상대 경로·SHA-256·byte 수, 옵션 Record schema·version·JSON, 출력 하나), 옵션(scale)·설정(note) 나누기, 값·라벨·bulk, 색인 요약, 임포터 한 번, 경고 없음, 이름으로 고르기(대소문자 무시)·경고 목록 없이·옵션 기본값 | `AssetImport_NewAsset` |
+| 추가 출력·경고(7.1-18 A2f1b) | Output 순서·`<path>_<key>`, 참조 기록(owner)·ImportOwner 의존, 소유 기록 출력 목록(key 순·타입), 출력 사이 Hard 참조, 고아 없음, ImportWarning(임포터 경고 코드·detail·asset), AbsoluteSourcePath(Project를 옮겨 — 절대 경로 기록), 경고 목록 없이도 | `AssetImport_MultipleOutputs` |
+| 역할(7.1-18 A2f1b) | 역할 순 기록·값의 합·옵션 없는 기록, 역할 빠짐·넘침·같은 역할 둘·모르는 역할 InvalidImportOption, 옵션 없는 임포터의 옵션 이름 UnknownProperty(detail) | `AssetImport_Roles` |
+| 거부(7.1-18 A2f1b) | Initialize 전·잠금 아님·원본 없음, 경로 규칙, 별칭(related)·색인 점유, 이름 없음 NotFound, 확장자 모름·없음·섞임(detail)·다른 임포터 둘·경로 해석 오류, 같은 임포터 원본 둘(역할), 모르는 이름(detail·`.`·`[`), 옵션 값 InvalidImportOption(진단), 설정 값(진단 None), 상대 원본·없는 원본 MissingSource(detail)·루트 표 손상, 임포터 실패 셋(Fail 진단·진단 없음·출력 뒤), 주 출력 없음, 출력 규칙(주 출력 타입·key 글자·길이 65·같은 key·추상·에셋 아님·미등록 NotFound·struct·점유·별칭 related·남의 AddBulk·경고 아닌 Warn·출력 1025개), 집합 SetImportRecord(열리지 않음 NotFound·Initialize 전), 임포터 표 없는 서비스 — 모두 파일·색인·열린 패키지 그대로 | `AssetImport_Rejects` |
+| 저장 실패(7.1-18 A2f1b) | 첫 출력 저장 실패(아무것도 안 씀)·주 출력 저장 실패(먼저 쓴 출력 지움·색인에서 뺌), 지우기 실패 OrphanNotDeleted(asset)·고아로 남음(OwnerMissing), 경고 목록 없이도 | `AssetImport_SaveFailures` |
+| 할당 실패(7.1-18 A2f1b) | 추가 출력·옵션·설정·bulk·임포터 경고·절대 경로 경고·열린 패키지가 있는 임포트의 모든 할당 실패 OutOfMemory·파일·색인·열린 패키지 그대로(GC 표 실패는 삼킨 성공) | `AssetImport_AllocationFailures` |
+| 실제 디스크(7.1-18 A2f1b) | 디스크 원본 임포트·다른 서비스로 다시 열어 bulk | `AssetImport_RealDisk` |
+| 명령(13, 7.1-18 A2f1b — 프로세스 안) | 결과 줄·출력 줄·경고 줄·패키지·색인 캐시, 역할 원본(`--source.<역할>=`·`--importer=`), 상대 원본 경로, 실패 줄(MissingSource·옵션 값·설정 대입 진단 줄·임포터 없음·등록 실패·타입 모듈 시작 실패의 모듈 이름·절대 원본·루트 위로 벗어나는 상대 경로 InvalidSource·`--erase` UnknownProperty), 등록 hook 할당 실패와 출력 쓰기 실패(표준 출력·경고 줄)는 실행 오류, 사용법 17가지·도움말 | `AssetImportCommand_*` |
+| 명령(13 — 제품 실행 파일) | 임포터 없음·모르는 이름 UnsupportedSourceFormat, 사용법 여섯·도움말·프로젝트 없음 | C# 10개 |
+| 조합(14 완료 조건 2) | 원본 수(하나·역할 둘) × 고르기(이름·확장자) × 출력(주·추가·참조) × 대입(옵션·설정·둘 다·없음) × 경고(있음·없음·목록 없음) × 결과(성공·거부·임포터 실패·저장 실패·할당 실패) × 실행(서비스·명령 함수·제품 실행 파일) | 위 시험 |
+
+#### 14.1.48 Coverage(A2f1b)
+
+측정(2026-11-22, Windows, `ROCKS_MSVC_TOOLSET=14.44`): `-Target EngineTests -Filter AssetImport -Sources Engine/Source/Developer/AssetDatabase/Private`, `-Filter AssetImportCommand -Sources Engine/Source/Developer/AssetCommandlets/Private`.
+
+| 범위 | 줄 | 분기 |
+|---|---|---|
+| `AssetImporter.cpp`(표 — lease 포함) | 모두 닿음 | 모두 닿음 |
+| `AssetServiceImport.cpp` | 아래 제외 모두 | 같음 |
+| `EditorPackageSet::SetImportRecord` | 모두 닿음 | 모두 닿음 |
+| `RunAssetImportCommand`·`ParseImport`·세션 hook | 아래 제외 모두 | 같음 |
+
+닿지 않은 곳과 근거:
+
+| 위치 | 닿지 않는 것 | 근거 |
+|---|---|---|
+| 주 출력·추가 출력 id 발급 실패 | 실패 | OS 보안 난수 실패(14.1.22와 같다) |
+| 옵션·설정 대입 묶음 `Publish` 실패 | 실패 | Prepare와 Publish 사이에 대상이 바뀌거나 죽을 수 없다(같은 스레드, 사이에 다른 일이 없다) — 값 단위는 무할당으로 맞바꾼다(ReflectionText 10.2절). 검사는 API 계약대로 둔다 |
+| 명령의 인자·경로·줄 서식 할당 실패, 작업 디렉터리 조회 실패 | 실패 | 명령 allocator는 세션 전체(TypeRegistry 등)에 쓰여 그 실패는 서비스·세션 할당 실패 시험이 덮는다(14.1.26과 같은 줄 서식 근거), 작업 디렉터리 조회는 OS 실패 |
 
 ## 15. PNG 디코더 범위
 

@@ -534,6 +534,7 @@ TEST(AssetImporterTable_RegisterAndFind) {
         REQUIRE(registered && registered.Value().IsActive());
         auto other = table.Register(second);
         REQUIRE(other);
+        InfoImporter sameIdUnregistered(ValidInfo());
         // 기본 확장자가 없는 임포터(이름으로만 고른다).
         AssetImporterInfo plainInfo = ValidInfo();
         plainInfo.id = Guid{0x494d50, 9};
@@ -543,6 +544,12 @@ TEST(AssetImporterTable_RegisterAndFind) {
         auto plainRegistered = table.Register(plain);
         REQUIRE(plainRegistered);
         CHECK(table.FindByName("plain") == &plain && table.FindByExtension("dds") == &second);
+        // 등록 동안 쥔 타입 lease(옵션 없는 importer·등록되지 않은 importer는 null).
+        CHECK(table.OutputType(first) != nullptr &&
+              table.OutputType(first)->Id() == IdOf<TestAsset>() &&
+              table.OptionsType(first) != nullptr && table.OptionsType(second) == nullptr &&
+              table.OutputType(sameIdUnregistered) == nullptr &&
+              table.OptionsType(sameIdUnregistered) == nullptr);
         plainRegistered.Value().Release();
         CHECK(table.Count() == 2 && table.FindById(Guid{0x494d50, 1}) == &first &&
               table.FindByName("test_IMPORTER2") == &first &&
