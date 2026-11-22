@@ -114,7 +114,8 @@ struct BytecodeTypeField {
     uint8 slots = 0;
     uint32 offset = 0;
     uint8 flags = 0; // CLASS 필드만(형식 v4): BytecodeFieldHeld
-    // CLASS 필드만(형식 v5 — SparksReload K4): 타입 서술자(언어 함수 서술자와 같은 글자)와
+    // CLASS 필드만(형식 v5 — SparksReload K4): 타입 표기(정규 표시 이름 — 다른 모듈 선언은 타입
+    // 인자까지 `<경로>:` 접두)와
     // `@formerly` 옛 이름의 문자열 번호(없으면 NoIndex). reload의 필드 대응이 쓴다.
     uint32 type = NoBytecodeIndex;
     uint32 formerName = NoBytecodeIndex;

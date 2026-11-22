@@ -1,0 +1,20 @@
+# Hot reload of a Start that waits inside a called async function (SparksReload LC7a): only the
+# callee body changed, the Start frame is unchanged, the whole execution is cancelled (its load
+# request released) and the Start runs again on the new revision. Start cannot wait on
+# sub-executions (S0602), so a cancelled root is always found directly.
+new #1 Door -> ok (0 steps)
+hook #1 Enable -> ok (0 steps)
+hook #1 Start -> suspended (8 steps)
+  host load 0:0 -> #2
+reload v2 -> ok (instances 1, moved 2, defaulted 0, lost 0, removed 0, cancelled 1, restarted 1, previous 0)
+  host release #2
+  host load 0:0 -> #3
+  hook #1 Start -> suspended (8 steps)
+stats -> waits 1, suspended 1, skipped 0
+load #3 #4 -> ok
+advance 0 -> ok (0 suspended)
+  host release #3
+  resume #1 Door.on Start -> ok (10 steps)
+  log info "fetch v2"
+  log info "ready v1"
+fields #1 -> Door(Icon: ?, Got: #4)

@@ -1,0 +1,14 @@
+class Door : ScriptableComponent {
+    @edit var Icon: Soft<DataAsset>;
+    var Got: DataAsset?;
+
+    on Start() {
+        await Fetch();
+        Log.Info("ready v1");
+    }
+
+    async fn Fetch() {
+        Got = try await Icon.Load();
+        Log.Info("fetch v2");
+    }
+}
