@@ -115,6 +115,27 @@ Result<uint32> LinearResampler::InputFramesNeeded(uint32 outputFrames) const noe
     return Result<uint32>::Success(needed > 0 ? static_cast<uint32>(needed) : 0u);
 }
 
+uint32 LinearResampler::OutputFramesBefore(int64 inputFrame) const noexcept {
+    // 위치 상한(2^51)보다 먼 입력은 MaxBlockFrames 안에 닿지 않는다. 시프트가 넘치지 않게 자른다.
+    constexpr int64 FarFrames = int64{1} << 30;
+    const int64 clamped =
+        inputFrame > FarFrames ? FarFrames : (inputFrame < -FarFrames ? -FarFrames : inputFrame);
+    const int64 limit = clamped * FixedOne;
+    int64 position = position_;
+    uint32 done = ratioDone_;
+    uint32 frames = 0;
+    while (frames < MaxBlockFrames && position < limit) {
+        ++frames;
+        if (done < ratioTotal_) {
+            ++done;
+        }
+
+        position += StepAt(done);
+    }
+
+    return frames;
+}
+
 Result<uint32> LinearResampler::Process(const PlanarConstView& input,
                                         const PlanarView& output) noexcept {
     if (input.channelCount != channelCount_ || output.channelCount != channelCount_) {

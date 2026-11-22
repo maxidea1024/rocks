@@ -71,6 +71,17 @@ void GainRamp::Apply(const PlanarView& view) noexcept {
     }
 }
 
+void GainRamp::MixAdd(const float* source, float* destination, uint32 frames) noexcept {
+    uint32 frame = 0;
+    for (; frame < frames && done_ < total_; ++frame, ++done_) {
+        destination[frame] += source[frame] * GainAt(done_);
+    }
+
+    for (; frame < frames; ++frame) {
+        destination[frame] += source[frame] * target_;
+    }
+}
+
 void GainRamp::Advance(uint32 frames) noexcept {
     const uint32 remaining = total_ - done_;
     done_ += frames < remaining ? frames : remaining;
