@@ -177,6 +177,7 @@ private:
         uint64 order = 0;
         RandomStream random{0}; // 실행의 Random stream(재개가 이어 쓴다 — SL 6.3절)
         uint64 childWait = 0;   // 하위 실행이면 부모 묶음 안의 하위 대기 handle
+        uint32 depthOffset = 0; // 바깥 frame 수(재개 때 누적 호출 깊이 — LC6c2 리뷰 B1)
         // 이벤트 handler로 시작된 실행이면 그 발행자·handler(재진입 판정 — SD11).
         uint64 publisher = 0;
         const VmLinkedModule* handlerModule = nullptr;
@@ -235,7 +236,8 @@ private:
     Result<void> ResumeSuspended(uint32 suspended, uint64 wait, uint32 depth, uint64 root,
                                  bool inDrain) noexcept;
     // 하위 실행의 끝(반환·fault)을 부모 묶음에 반영한다.
-    Result<void> FinishChild(uint64 childWait, const VmCallResult& result, bool inDrain) noexcept;
+    Result<void> FinishChild(uint64 childWait, const VmCallResult& result, uint32 depth,
+                             uint64 root, bool inDrain) noexcept;
     // 대기가 완료되지 않은 채 끝났다(발행자 파괴·하위 실행 취소 — SD13): Race는 남은 인자를,
     // All·단독은 실행을 취소한다.
     void FailWait(uint32 wait) noexcept;

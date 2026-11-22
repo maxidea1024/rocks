@@ -23,6 +23,8 @@ using detail::VmDouble;
 // 1(도달하지 않는 경로)과 그 밖은 Unreachable로 본다.
 constexpr uint32 VmFaultHookTryCode = 2;
 constexpr uint32 VmFaultMissingElementCode = 3;
+// 아직 실행 모델이 없는 형태(가상 async 함수의 하위 실행 — SparksRuntime 2.5절).
+constexpr uint32 VmFaultUnsupportedCode = 4;
 
 // 합성 곱 묶음의 slot 수다.
 constexpr uint32 VmQuatSlots = 4;
@@ -737,7 +739,7 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
                 return MakeFault(VmFaultKind::ContractViolation, at, steps);
             }
 
-            if (frames_.Size() >= limits.callDepth) {
+            if (frames_.Size() + depthBase_ >= limits.callDepth) {
                 return MakeFault(VmFaultKind::BudgetExceeded, at, steps);
             }
 
@@ -786,7 +788,7 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
                 break;
             }
 
-            if (frames_.Size() >= limits.callDepth) {
+            if (frames_.Size() + depthBase_ >= limits.callDepth) {
                 return MakeFault(VmFaultKind::BudgetExceeded, at, steps);
             }
 
@@ -932,11 +934,12 @@ Result<VmCallResult> VmExecution::Run(const VmLimits& limits) noexcept {
             break;
         }
         case Opcode::Fault:
-            return MakeFault(DecodeAx(word) == VmFaultHookTryCode ? VmFaultKind::HookTryFailed
-                             : DecodeAx(word) == VmFaultMissingElementCode
-                                 ? VmFaultKind::IndexOutOfRange
-                                 : VmFaultKind::Unreachable,
-                             at, steps);
+            return MakeFault(
+                DecodeAx(word) == VmFaultHookTryCode          ? VmFaultKind::HookTryFailed
+                : DecodeAx(word) == VmFaultMissingElementCode ? VmFaultKind::IndexOutOfRange
+                : DecodeAx(word) == VmFaultUnsupportedCode    ? VmFaultKind::ContractViolation
+                                                              : VmFaultKind::Unreachable,
+                at, steps);
         case Opcode::NewA:
         case Opcode::NewSet:
         case Opcode::NewM:

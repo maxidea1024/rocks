@@ -339,6 +339,11 @@ TEST(SparksBytecodeFile_VerifierRejections) {
     CHECK(patch(Opcode::CallW, [&](uint32) noexcept {
               return EncodeABx(Opcode::CallW, 0, notFunction);
           }) == BytecodeLoadError::BadReference);
+    // CALLW는 Ref 창 0번(하위 대기 handle 자리)이 있어야 한다(LC6c2 리뷰 B4).
+    const uint32 spawning = functionOf(find(Opcode::CallW));
+    CHECK(verify([&](BytecodeModule& m) noexcept {
+              m.functions[spawning].frame[1] = m.functions[spawning].registers[1];
+          }) == BytecodeLoadError::BadRegister);
     // await 표에서 빠진 AWAIT, 같은 주소의 await 항목 둘.
     const uint32 awaiting = functionOf(find(Opcode::Await));
     CHECK(verify([&](BytecodeModule& m) noexcept { m.functions[awaiting].awaitCount = 0; }) ==

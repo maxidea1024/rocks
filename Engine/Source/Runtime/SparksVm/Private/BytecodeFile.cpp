@@ -1282,7 +1282,9 @@ private:
 
             // 수신자·대상이 있는 호출은 Ref 창 0번이 있어야 한다. 같은 모듈 함수는 그 매개변수가
             // 창에 들어가야 한다.
-            if ((info.op == Opcode::Emit || info.op == Opcode::CallV) && !Window(R, 1)) {
+            // CALLW는 하위 대기 handle을 Ref 창 0번에 둔다(LC6c2 리뷰 B4).
+            if ((info.op == Opcode::Emit || info.op == Opcode::CallV || info.op == Opcode::CallW) &&
+                !Window(R, 1)) {
                 return BytecodeLoadError::BadRegister;
             }
 

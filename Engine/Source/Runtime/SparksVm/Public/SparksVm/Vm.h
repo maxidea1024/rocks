@@ -315,6 +315,8 @@ private:
     uint64 liveBytes_ = 0;
     // 언어 함수 묶음(참조 번호별 — VmLibrary가 배치를 정한다)과 그 모듈, Random·로그 상태.
     RandomStream random_{0};
+    // 재개한 하위 실행의 바깥 frame 수(누적 호출 깊이 — SparksRuntime 2.5절, LC6c2 리뷰 B1).
+    uint32 depthBase_ = 0;
     Array<LogEntry> logs_;
     uint32 droppedLogs_ = 0;
     Array<char> logText_;

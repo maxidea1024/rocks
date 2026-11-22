@@ -176,6 +176,87 @@ class Timer : ScriptableComponent {
         await NextTick();
         Log.Info("tick");
     }
+
+    var Peer: Timer?;
+
+    fn SetPeer(other: Timer) {
+        Peer = other;
+    }
+
+    fn Check(text: string): Result<string> {
+        if (text == "") {
+            return Error.InvalidArgument;
+        }
+
+        return text;
+    }
+
+    async fn EmitThenWait() {
+        emit Go(1);
+        await Go;
+        Log.Info("late go");
+    }
+
+    async fn EmitLater() {
+        await NextTick();
+        emit Go(1);
+    }
+
+    async fn HearGo() {
+        await Go;
+        Log.Info("heard");
+    }
+
+    async fn RaceEmit() {
+        await Race(EmitLater(), HearGo());
+        Log.Info("race emit");
+    }
+
+    async fn AllHear() {
+        await All(HearGo(), NextTick());
+        Log.Info("all hear");
+    }
+
+    async fn Slow() {
+        await Delay(5.0, Clock.Game);
+        Log.Info("slow");
+    }
+
+    async fn RaceKids() {
+        await Race(Child(), Slow());
+        Log.Info("race kids");
+    }
+
+    async fn RaceBad() {
+        await Race(Bad(), Slow());
+        Log.Info("unreachable");
+    }
+
+    async fn TryNow() {
+        let n = try Check("");
+        Log.Info("parsed ${n}");
+    }
+
+    async fn TryLater() {
+        await NextTick();
+        let n = try Check("");
+        Log.Info("parsed ${n}");
+    }
+
+    async fn TryGroup() {
+        await All(TryNow(), TryLater());
+        Log.Info("try group");
+    }
+
+    async fn Maybe() {
+        await All(Peer?.Child(), NextTick());
+        Log.Info("maybe");
+    }
+
+    async fn PausedMix() {
+        await All(Delay(0.1, Clock.UI), NextTick());
+        Log.Info("paused mix");
+    }
 }
 
 class Waiter : ScriptableComponent {
@@ -222,5 +303,23 @@ class Crowd : ScriptableComponent {
         let ticks = source.Ticks;
         await Delay(0.25, Clock.Game);
         Log.Info("crowd ${n} ${ticks}");
+    }
+}
+
+class Splitter : ScriptableComponent {
+    var Source: Timer?;
+
+    fn Watch(target: Timer) {
+        Source = target;
+    }
+
+    async fn Hold() {
+        await Delay(0.2, Clock.Game);
+    }
+
+    @restart
+    on Source.Go(n: int) {
+        await All(Hold(), NextTick());
+        Log.Info("split ${n}");
     }
 }

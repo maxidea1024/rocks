@@ -172,7 +172,14 @@ uint64 VmSession::NewWait(WaitKind kind, uint8 clock, double seconds, Span<const
     // 인자는 첫 번째가 부모를 얻으므로 두 번째에서 걸린다 — 언어가 막는다, 안전장치). 이미 끝난
     // 자식(동기로 끝난 하위 실행)은 받는다 — 묶음은 인자를 모두 시작한 뒤 판정한다(SL 6.1절).
     uint32 last = NoBytecodeIndex;
+    bool nullChild = false;
     for (const uint64 child : children) {
+        // null 인자는 바로 끝난 인자다(`a?.F()`의 a가 null — SL 6.1절, LC6c2 리뷰 B5).
+        if (child == 0) {
+            nullChild = true;
+            continue;
+        }
+
         uint32 childIndex = NoBytecodeIndex;
         const bool valid = DecodeWait(child, childIndex) && childIndex != index &&
                            waits_[childIndex].parent == NoBytecodeIndex &&
@@ -203,7 +210,7 @@ uint64 VmSession::NewWait(WaitKind kind, uint8 clock, double seconds, Span<const
     // 이미 끝난 자식으로 판정한다: All은 모두, Race는 첫 끝난 인자(나머지 취소).
     if (kind == WaitKind::All || kind == WaitKind::Race) {
         bool all = true;
-        bool any = false;
+        bool any = nullChild;
         for (uint32 at = waits_[index].firstChild; at != NoBytecodeIndex;
              at = waits_[at].nextSibling) {
             all = all && waits_[at].done;
@@ -348,6 +355,7 @@ VmFaultKind VmSession::Suspend(uint64 wait, uint32 resultRegister, uint32 result
     entry.random = execution_.random_;
     // 재개 중인 하위 실행이 다시 정지하면 부모 묶음의 하위 대기를 이 자리로 잇는다.
     entry.childWait = currentChildWait_;
+    entry.depthOffset = execution_.depthBase_;
     uint32 childIndex = NoBytecodeIndex;
     if (currentChildWait_ != 0 && DecodeWait(currentChildWait_, childIndex)) {
         waits_[childIndex].child = number;
@@ -449,6 +457,7 @@ VmFaultKind VmSession::SuspendChild(usize boundary, uint64 wait, uint32 resultRe
     entry.order = waits_[index].order;
     entry.random = execution_.random_;
     entry.childWait = handle;
+    entry.depthOffset = execution_.depthBase_ + static_cast<uint32>(boundary);
     entry.live = true;
     waits_[index].awaited = true;
     waits_[index].suspension = number;
@@ -697,10 +706,13 @@ Result<void> VmSession::ResumeSuspended(uint32 chosen, uint64 wait, uint32 depth
         waits_[childIndex].child = NoBytecodeIndex; // 실행 중(다시 정지하면 Suspend가 잇는다)
     }
 
+    const uint32 depthOffset = entry.depthOffset;
     currentInstance_ = instance;
     currentDepth_ = depth;
     currentRoot_ = root;
+    execution_.depthBase_ = depthOffset;
     auto continued = execution_.Continue(VmLimits());
+    execution_.depthBase_ = 0;
     currentInstance_ = NoBytecodeIndex;
     currentPublisher_ = 0;
     currentHandlerModule_ = nullptr;
@@ -708,6 +720,12 @@ Result<void> VmSession::ResumeSuspended(uint32 chosen, uint64 wait, uint32 depth
     currentChildWait_ = 0;
     SettleWaits(continued);
     if (!continued) {
+        // 하위 실행이었으면 끝나지 않은 채 끝났다: 부모 묶음에 알린다(LC6c2 리뷰 S2).
+        uint32 lost = NoBytecodeIndex;
+        if (childWait != 0 && DecodeWait(childWait, lost)) {
+            FailWait(lost);
+        }
+
         return Result<void>::Failure(continued.Error());
     }
 
@@ -718,29 +736,37 @@ Result<void> VmSession::ResumeSuspended(uint32 chosen, uint64 wait, uint32 depth
     delivery.result = continued.Value();
     delivery.resumed = true;
     execution_.ReleaseReturned();
+    ErrorCode failure = ErrorCode::None;
     if (!deliveries_.TryPushBack(delivery)) {
-        return Result<void>::Failure(ErrorCode::OutOfMemory);
+        failure = ErrorCode::OutOfMemory;
     }
 
-    // 조각 끝: 전달 순회 안이면 정리만(큐는 바깥이 비운다), 아니면 큐를 비운다.
+    // 조각 끝 정리 → 하위 실행의 끝을 부모 묶음에(곧바로 — 하위 실행이 낸 발행보다 먼저, LC6c2
+    // 리뷰 B2) → 전달 순회 밖이면 큐를 비운다. 앞 단계가 할당에 실패해도 부모 묶음 처리는 한다.
     currentDepth_ = depth;
     currentRoot_ = root;
-    Result<void> settled = inDrain ? EndFragment() : Drain();
+    if (auto ended = EndFragment(); !ended && failure == ErrorCode::None) {
+        failure = ended.Error();
+    }
+
     currentDepth_ = 0;
     currentRoot_ = 0;
-    if (!settled) {
-        return settled;
-    }
-
     if (childWait != 0 && continued.Value().outcome != VmOutcome::Suspended) {
-        return FinishChild(childWait, continued.Value(), inDrain);
+        if (auto finished = FinishChild(childWait, continued.Value(), depth, root, inDrain);
+            !finished && failure == ErrorCode::None) {
+            failure = finished.Error();
+        }
     }
 
-    return Result<void>::Success();
+    if (failure != ErrorCode::None) {
+        return Result<void>::Failure(failure);
+    }
+
+    return inDrain ? Result<void>::Success() : Drain();
 }
 
-Result<void> VmSession::FinishChild(uint64 childWait, const VmCallResult& result,
-                                    bool inDrain) noexcept {
+Result<void> VmSession::FinishChild(uint64 childWait, const VmCallResult& result, uint32 depth,
+                                    uint64 root, bool inDrain) noexcept {
     uint32 node = NoBytecodeIndex;
     if (!DecodeWait(childWait, node)) {
         return Result<void>::Success(); // 부모 묶음이 이미 끝났다(Race 패배·취소)
@@ -749,12 +775,15 @@ Result<void> VmSession::FinishChild(uint64 childWait, const VmCallResult& result
     waits_[node].child = NoBytecodeIndex;
     if (result.outcome == VmOutcome::Faulted) {
         // 하위 작업의 fault는 부모 실행의 fault다(R15): 부모를 그 fault로 끝내고(형제는 묶음과 함께
-        // 취소) 부모가 하위 실행이면 위로 잇는다.
+        // 취소) 부모가 하위 실행이면 위로 잇는다. 기록에 실패해도 취소는 끝까지 한다(LC6c2 리뷰
+        // S2).
+        ErrorCode failure = ErrorCode::None;
         for (;;) {
             const uint32 root = WaitRoot(node);
             const uint32 owner = waits_[root].suspension;
             if (owner == NoBytecodeIndex || owner >= suspended_.Size() || !suspended_[owner].live) {
-                return Result<void>::Success();
+                return failure == ErrorCode::None ? Result<void>::Success()
+                                                  : Result<void>::Failure(failure);
             }
 
             const Suspended& parent = suspended_[owner];
@@ -766,13 +795,14 @@ Result<void> VmSession::FinishChild(uint64 childWait, const VmCallResult& result
             delivery.result = result;
             delivery.resumed = true;
             if (!deliveries_.TryPushBack(delivery)) {
-                return Result<void>::Failure(ErrorCode::OutOfMemory);
+                failure = ErrorCode::OutOfMemory;
             }
 
             const uint64 up = parent.childWait;
             CancelSuspended(owner, false);
             if (up == 0 || !DecodeWait(up, node)) {
-                return Result<void>::Success();
+                return failure == ErrorCode::None ? Result<void>::Success()
+                                                  : Result<void>::Failure(failure);
             }
 
             waits_[node].child = NoBytecodeIndex;
@@ -781,11 +811,12 @@ Result<void> VmSession::FinishChild(uint64 childWait, const VmCallResult& result
 
     // 반환·ENDEXEC: 하위 대기가 완료됐다. 그것으로 부모 묶음이 끝났으면 부모를 곧바로 재개한다.
     CompleteWait(node);
-    const uint32 root = WaitRoot(node);
-    const uint32 owner = waits_[root].suspension;
-    if (waits_[root].done && owner != NoBytecodeIndex && owner < suspended_.Size() &&
+    const uint32 top = WaitRoot(node);
+    const uint32 owner = waits_[top].suspension;
+    if (waits_[top].done && owner != NoBytecodeIndex && owner < suspended_.Size() &&
         suspended_[owner].live) {
-        return ResumeSuspended(owner, suspended_[owner].wait, 0, 0, inDrain);
+        // 부모 재개는 그 하위 실행의 조각과 같은 연쇄 깊이·루트다(LC6c2 리뷰 B3).
+        return ResumeSuspended(owner, suspended_[owner].wait, depth, root, inDrain);
     }
 
     return Result<void>::Success();
@@ -860,7 +891,13 @@ Result<void> VmSession::Advance(double gameDelta, double uiDelta, bool paused) n
         queue_[at].carried = true;
     }
 
-    // 엔진 객체 발행자가 사라졌으면 그 이벤트 대기를 끝낸다(SD13 — 앞 단계의 전달이 먼저였다).
+    // 이월 항목을 먼저 전달하고(같은 단계의 전달이 파괴보다 먼저 — SD13, LC6c2 리뷰 S1) 엔진 객체
+    // 발행자가 사라졌으면 그 이벤트 대기를 끝낸다.
+    if (auto carried = Drain(); !carried) {
+        execution_.keepLogs_ = false;
+        return carried;
+    }
+
     for (uint32 index = 0; host_ != nullptr && index < waits_.Size(); ++index) {
         const Wait& wait = waits_[index];
         if (wait.used && wait.kind == WaitKind::Event && !wait.done && !wait.cancelled &&
@@ -906,6 +943,11 @@ Result<void> VmSession::FixedStep() noexcept {
     deliveredInPhase_ = 0;
     for (usize at = queueHead_; at < queue_.Size(); ++at) {
         queue_[at].carried = true;
+    }
+
+    if (auto carried = Drain(); !carried) {
+        execution_.keepLogs_ = false;
+        return carried;
     }
 
     for (uint32 index = 0; host_ != nullptr && index < waits_.Size(); ++index) {
