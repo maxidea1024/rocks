@@ -1,0 +1,77 @@
+{
+  "formatVersion": 1,
+  "exporter": {
+    "plugin": "RocksExport",
+    "pluginVersion": "1.0.0",
+    "engineVersion": "5.8.4",
+    "engineCommit": "58902052"
+  },
+  "projectSettings": {
+    "substrate": false,
+    "retainJpegFormat": true
+  },
+  "createdUtc": "2026-11-22T05:57:21Z",
+  "assets": [
+    {
+      "objectPath": "/Engine/BasicShapes/Cube.Cube",
+      "class": "StaticMesh",
+      "file": "assets/Engine/BasicShapes/Cube.json"
+    },
+    {
+      "objectPath": "/Engine/EngineMeshes/SkeletalCube.SkeletalCube",
+      "class": "SkeletalMesh",
+      "file": "assets/Engine/EngineMeshes/SkeletalCube.json"
+    },
+    {
+      "objectPath": "/Engine/EngineMeshes/SkeletalCube_Skeleton.SkeletalCube_Skeleton",
+      "class": "Skeleton",
+      "file": "assets/Engine/EngineMeshes/SkeletalCube_Skeleton.json"
+    },
+    {
+      "objectPath": "/Game/RxGolden/MI_Golden.MI_Golden",
+      "class": "MaterialInstanceConstant",
+      "file": "assets/Game/RxGolden/MI_Golden.json"
+    },
+    {
+      "objectPath": "/Game/RxGolden/M_Golden.M_Golden",
+      "class": "Material",
+      "file": "assets/Game/RxGolden/M_Golden.json"
+    },
+    {
+      "objectPath": "/Game/RxGolden/SK_Column/SkeletalMeshes/SK_Column.SK_Column",
+      "class": "SkeletalMesh",
+      "file": "assets/Game/RxGolden/SK_Column/SkeletalMeshes/SK_Column.json"
+    },
+    {
+      "objectPath": "/Game/RxGolden/SK_Column/SkeletalMeshes/SK_Column_Anim.SK_Column_Anim",
+      "class": "AnimSequence",
+      "file": "assets/Game/RxGolden/SK_Column/SkeletalMeshes/SK_Column_Anim.json"
+    },
+    {
+      "objectPath": "/Game/RxGolden/SK_Column/SkeletalMeshes/SK_Column_PhysicsAsset.SK_Column_PhysicsAsset",
+      "class": "PhysicsAsset",
+      "file": "assets/Game/RxGolden/SK_Column/SkeletalMeshes/SK_Column_PhysicsAsset.json"
+    },
+    {
+      "objectPath": "/Game/RxGolden/SK_Column/SkeletalMeshes/SK_Column_Skeleton.SK_Column_Skeleton",
+      "class": "Skeleton",
+      "file": "assets/Game/RxGolden/SK_Column/SkeletalMeshes/SK_Column_Skeleton.json"
+    },
+    {
+      "objectPath": "/Game/RxGolden/SK_SoftTarget.SK_SoftTarget",
+      "class": "SkeletalMesh",
+      "file": "assets/Game/RxGolden/SK_SoftTarget.json"
+    },
+    {
+      "objectPath": "/Game/RxGolden/SM_Degenerate.SM_Degenerate",
+      "class": "StaticMesh",
+      "file": "assets/Game/RxGolden/SM_Degenerate.json"
+    }
+  ],
+  "redirects": [
+    {
+      "from": "/Game/RxGolden/SK_SoftTarget_Old.SK_SoftTarget_Old",
+      "to": "/Game/RxGolden/SK_SoftTarget.SK_SoftTarget"
+    }
+  ]
+}

@@ -1,0 +1,928 @@
+{
+  "objectPath": "/Game/RxGolden/SM_Degenerate.SM_Degenerate",
+  "class": "StaticMesh",
+  "ueClass": "/Script/Engine.StaticMesh",
+  "dependencies": [
+    {
+      "objectPath": "/Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial",
+      "class": "Material",
+      "kind": "hard"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "DegenerateEdgesDropped",
+      "severity": "info",
+      "message": "1 edges join a vertex to itself (degenerate polygons) and were left out"
+    },
+    {
+      "code": "DegenerateEdgesDropped",
+      "severity": "info",
+      "message": "1 edges join a vertex to itself (degenerate polygons) and were left out"
+    }
+  ],
+  "settings": {
+    "SourceModels": [
+      {
+        "StaticMeshDescriptionBulkData": {
+          "subobject": "StaticMeshDescriptionBulkData_0",
+          "class": "/Script/Engine.StaticMeshDescriptionBulkData",
+          "properties": {}
+        },
+        "BuildSettings": {
+          "bUseMikkTSpace": true,
+          "bRecomputeNormals": true,
+          "bRecomputeTangents": true,
+          "bComputeWeightedNormals": true,
+          "bRemoveDegenerates": false,
+          "bBuildReversedIndexBuffer": false,
+          "bUseHighPrecisionTangentBasis": false,
+          "bUseFullPrecisionUVs": false,
+          "bUseBackwardsCompatibleF16TruncUVs": false,
+          "bGenerateLightmapUVs": false,
+          "bGenerateDistanceFieldAsIfTwoSided": false,
+          "bSupportFaceRemap": false,
+          "MinLightmapResolution": 64,
+          "SrcLightmapIndex": 0,
+          "DstLightmapIndex": 1,
+          "BuildScale3D": {
+            "X": 1,
+            "Y": 1,
+            "Z": 1
+          },
+          "DistanceFieldResolutionScale": 1,
+          "DistanceFieldReplacementMesh": null,
+          "MaxLumenMeshCards": 12
+        },
+        "ReductionSettings": {
+          "PercentTriangles": 1,
+          "MaxNumOfTriangles": 4294967295,
+          "PercentVertices": 1,
+          "MaxNumOfVerts": 4294967295,
+          "MaxDeviation": 0,
+          "PixelError": 8,
+          "WeldingThreshold": 0,
+          "HardAngleThreshold": 80,
+          "BaseLODModel": 0,
+          "SilhouetteImportance": "Normal",
+          "TextureImportance": "Normal",
+          "ShadingImportance": "Normal",
+          "bRecalculateNormals": false,
+          "bGenerateUniqueLightmapUVs": false,
+          "bKeepSymmetry": false,
+          "bVisibilityAided": false,
+          "bCullOccluded": false,
+          "TerminationCriterion": "Triangles",
+          "VisibilityAggressiveness": "Lowest",
+          "VertexColorImportance": "Off"
+        },
+        "CacheMeshDescriptionTrianglesCount": 3,
+        "CacheMeshDescriptionVerticesCount": 4,
+        "ScreenSize": {
+          "Default": 0,
+          "PerPlatform": []
+        },
+        "SourceImportFilename": "",
+        "bImportWithBaseMesh": false
+      }
+    ],
+    "HiResSourceModel": {
+      "StaticMeshDescriptionBulkData": {
+        "subobject": "HiResMeshDescription",
+        "class": "/Script/Engine.StaticMeshDescriptionBulkData",
+        "properties": {}
+      },
+      "BuildSettings": {
+        "bUseMikkTSpace": true,
+        "bRecomputeNormals": true,
+        "bRecomputeTangents": true,
+        "bComputeWeightedNormals": false,
+        "bRemoveDegenerates": true,
+        "bBuildReversedIndexBuffer": true,
+        "bUseHighPrecisionTangentBasis": false,
+        "bUseFullPrecisionUVs": false,
+        "bUseBackwardsCompatibleF16TruncUVs": false,
+        "bGenerateLightmapUVs": true,
+        "bGenerateDistanceFieldAsIfTwoSided": false,
+        "bSupportFaceRemap": false,
+        "MinLightmapResolution": 64,
+        "SrcLightmapIndex": 0,
+        "DstLightmapIndex": 1,
+        "BuildScale3D": {
+          "X": 1,
+          "Y": 1,
+          "Z": 1
+        },
+        "DistanceFieldResolutionScale": 1,
+        "DistanceFieldReplacementMesh": null,
+        "MaxLumenMeshCards": 12
+      },
+      "ReductionSettings": {
+        "PercentTriangles": 1,
+        "MaxNumOfTriangles": 4294967295,
+        "PercentVertices": 1,
+        "MaxNumOfVerts": 4294967295,
+        "MaxDeviation": 0,
+        "PixelError": 8,
+        "WeldingThreshold": 0,
+        "HardAngleThreshold": 80,
+        "BaseLODModel": 0,
+        "SilhouetteImportance": "Normal",
+        "TextureImportance": "Normal",
+        "ShadingImportance": "Normal",
+        "bRecalculateNormals": false,
+        "bGenerateUniqueLightmapUVs": false,
+        "bKeepSymmetry": false,
+        "bVisibilityAided": false,
+        "bCullOccluded": false,
+        "TerminationCriterion": "Triangles",
+        "VisibilityAggressiveness": "Lowest",
+        "VertexColorImportance": "Off"
+      },
+      "CacheMeshDescriptionTrianglesCount": 4294967295,
+      "CacheMeshDescriptionVerticesCount": 4294967295,
+      "ScreenSize": {
+        "Default": 0,
+        "PerPlatform": []
+      },
+      "SourceImportFilename": "",
+      "bImportWithBaseMesh": false
+    },
+    "SectionInfoMap": {
+      "Map": [
+        {
+          "key": 0,
+          "value": {
+            "MaterialIndex": 0,
+            "bEnableCollision": true,
+            "bCastShadow": true,
+            "bVisibleInRayTracing": true,
+            "bAffectDistanceFieldLighting": true,
+            "bForceOpaque": false
+          }
+        }
+      ]
+    },
+    "OriginalSectionInfoMap": {
+      "Map": []
+    },
+    "LODGroup": "None",
+    "NumStreamedLODs": {
+      "Default": -1,
+      "PerPlatform": []
+    },
+    "ImportVersion": 0,
+    "MaterialRemapIndexPerImportVersion": [],
+    "bAutoComputeLODScreenSize": true,
+    "NaniteSettings": {
+      "bEnabled": true,
+      "bExplicitTangents": false,
+      "bLerpUVs": true,
+      "bSeparable": false,
+      "bVoxelNDF": true,
+      "bVoxelOpacity": false,
+      "ShapePreservation": "None",
+      "PositionPrecision": -2147483648,
+      "NormalPrecision": -1,
+      "TangentPrecision": -1,
+      "BoneWeightPrecision": -1,
+      "TargetMinimumResidencyInKB": 0,
+      "KeepPercentTriangles": 1,
+      "TrimRelativeError": 0,
+      "GenerateFallback": "PlatformDefault",
+      "FallbackTarget": "Auto",
+      "FallbackPercentTriangles": 1,
+      "FallbackRelativeError": 1,
+      "MaxEdgeLengthFactor": 0,
+      "NumRays": 64,
+      "VoxelLevel": 0,
+      "RayBackUp": 0,
+      "DisplacementUVChannel": 0,
+      "DisplacementMaps": [],
+      "NaniteAssemblyData": {
+        "Parts": [],
+        "Nodes": []
+      }
+    },
+    "LightmapUVVersion": 10,
+    "LODStreaming": "Default",
+    "MinQualityLevelLOD": {
+      "Default": 0,
+      "PerQuality": []
+    },
+    "MinLOD": {
+      "Default": 0,
+      "PerPlatform": []
+    },
+    "ElementToIgnoreForTexFactor": -1,
+    "StaticMaterials": [
+      {
+        "MaterialInterface": {
+          "objectPath": "/Engine/EngineMaterials/WorldGridMaterial.WorldGridMaterial"
+        },
+        "MaterialSlotName": "WorldGridMaterial",
+        "ImportedMaterialSlotName": "WorldGridMaterial",
+        "UVChannelData": {
+          "bInitialized": true,
+          "bOverrideDensities": false,
+          "LocalUVDensities": [
+            100,
+            0,
+            0,
+            0
+          ]
+        },
+        "OverlayMaterialInterface": null
+      }
+    ],
+    "LightmapUVDensity": 100,
+    "LightMapResolution": 4,
+    "LightMapCoordinateIndex": 0,
+    "StaticMeshPaintSupport": "Default",
+    "MeshPaintTextureCoordinateIndex": 0,
+    "MeshPaintTextureResolution": 0,
+    "DistanceFieldSelfShadowBias": 0,
+    "LODForCollision": 0,
+    "bGenerateMeshDistanceField": false,
+    "bHasNavigationData": true,
+    "bSupportUniformlyDistributedSampling": false,
+    "bSupportPhysicalMaterialMasks": false,
+    "bUseLegacyTangentScaling": false,
+    "RayTracingProxySettings": {
+      "bEnabled": false,
+      "FallbackTarget": "Auto",
+      "FallbackPercentTriangles": 1,
+      "FallbackRelativeError": 2,
+      "FoliageOverOcclusionBias": 0
+    },
+    "bSupportRayTracing": true,
+    "bDoFastBuild": false,
+    "bAllowCPUAccess": false,
+    "bSupportGpuUniformlyDistributedSampling": false,
+    "AssetImportData": {
+      "subobject": "InterchangeAssetImportData_0",
+      "class": "/Script/InterchangeEngine.InterchangeAssetImportData",
+      "properties": {
+        "SceneImportAsset": null,
+        "NodeUniqueID": "Factory_\\Actor\\SM_Degenerate",
+        "SourceData": {}
+      }
+    },
+    "ThumbnailInfo": null,
+    "EditorCameraPosition": {
+      "bIsSet": false,
+      "CamOrbitPoint": {
+        "X": 0,
+        "Y": 0,
+        "Z": 0
+      },
+      "CamOrbitZoom": {
+        "X": 0,
+        "Y": 0,
+        "Z": 0
+      },
+      "CamOrbitRotation": {
+        "Pitch": 0,
+        "Yaw": 0,
+        "Roll": 0
+      }
+    },
+    "bCustomizedCollision": true,
+    "Sockets": [],
+    "PositiveBoundsExtension": {
+      "X": 0,
+      "Y": 0,
+      "Z": 0
+    },
+    "NegativeBoundsExtension": {
+      "X": 0,
+      "Y": 0,
+      "Z": 0
+    },
+    "ExtendedBounds": {
+      "Origin": {
+        "X": 50,
+        "Y": -50,
+        "Z": 0
+      },
+      "BoxExtent": {
+        "X": 50,
+        "Y": 50,
+        "Z": 0
+      },
+      "SphereRadius": 70.710678118654755
+    },
+    "AssetUserData": [],
+    "ComplexCollisionMesh": null,
+    "NumCinematicMipLevels": 0,
+    "NoRefStreamingLODBias": {
+      "Default": -1,
+      "PerQuality": []
+    },
+    "NeverStream": false,
+    "bGlobalForceMipLevelsToBeResident": false
+  },
+  "data": {
+    "lods": [
+      {
+        "hasSource": true,
+        "source": {
+          "counts": {
+            "vertices": 4,
+            "corners": 7,
+            "edges": 5,
+            "polygons": 2,
+            "triangles": 3,
+            "polygonGroups": 1
+          },
+          "topology": [
+            {
+              "blob": "6ff4b3c5db68b3e2e0d136666592dead97dfc2df4b1e555764337c213dfe08af",
+              "bytes": 28,
+              "layout": "u32",
+              "components": 1,
+              "count": 7
+            },
+            {
+              "blob": "a28e8100ed2c9c086d052934ef81f329b72d3764823d6e85999beffb12c194b6",
+              "bytes": 40,
+              "layout": "u32",
+              "components": 2,
+              "count": 5
+            },
+            {
+              "blob": "7984d4d48a74d9a116e3506741f2916a0666b781d23a42bd9fe4d751e3a37998",
+              "bytes": 12,
+              "layout": "u32",
+              "components": 1,
+              "count": 3
+            },
+            {
+              "blob": "044ff7496e66070d6e670a30fe81fb18e9632a1c60bfd136aaec3f0f3ec76679",
+              "bytes": 28,
+              "layout": "u32",
+              "components": 1,
+              "count": 7
+            },
+            {
+              "blob": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+              "bytes": 8,
+              "layout": "u32",
+              "components": 1,
+              "count": 2
+            },
+            {
+              "blob": "13e7e26d3594fb019ca520d8fb332a11ecf804766eff882bbd6e1e149ca06a0e",
+              "bytes": 36,
+              "layout": "u32",
+              "components": 3,
+              "count": 3
+            },
+            {
+              "blob": "c3e42245ffdff31c980d63b232de1414ca2461a08c6efccca2af96737ef4d068",
+              "bytes": 12,
+              "layout": "u32",
+              "components": 1,
+              "count": 3
+            }
+          ],
+          "attributes": [
+            {
+              "element": "Vertex",
+              "name": "Position",
+              "type": "Vec3",
+              "channels": 1,
+              "data": {
+                "blob": "8bc29485eaabf1e68540edc811e789dae77f0213960117e54846f1734b5be622",
+                "bytes": 48,
+                "layout": "f32",
+                "components": 3,
+                "count": 4
+              }
+            },
+            {
+              "element": "Corner",
+              "name": "BinormalSign",
+              "type": "Float",
+              "channels": 1,
+              "data": {
+                "blob": "3addfb141cd7c9c4c6543a82191a3707ac29c7a041217782e61d4d91c691aee8",
+                "bytes": 28,
+                "layout": "f32",
+                "components": 1,
+                "count": 7
+              }
+            },
+            {
+              "element": "Corner",
+              "name": "Color",
+              "type": "Vec4",
+              "channels": 1,
+              "data": {
+                "blob": "43469ce897d6b6e412109b858a9f4f6b8d0d91d6fd5292950ec2ddbdba6a8902",
+                "bytes": 112,
+                "layout": "f32",
+                "components": 4,
+                "count": 7
+              }
+            },
+            {
+              "element": "Corner",
+              "name": "Normal",
+              "type": "Vec3",
+              "channels": 1,
+              "data": {
+                "blob": "02e8697c1ad18d0389c149499a78e3c101bf76ddd31b6cd39a2d0ccc57a518b3",
+                "bytes": 84,
+                "layout": "f32",
+                "components": 3,
+                "count": 7
+              }
+            },
+            {
+              "element": "Corner",
+              "name": "Tangent",
+              "type": "Vec3",
+              "channels": 1,
+              "data": {
+                "blob": "4fea5e6a3ec5f5474a26d858bc77b6d7bd3ab864ea02d988683fdc648602b248",
+                "bytes": 84,
+                "layout": "f32",
+                "components": 3,
+                "count": 7
+              }
+            },
+            {
+              "element": "Corner",
+              "name": "TexCoord",
+              "type": "Vec2",
+              "channels": 1,
+              "data": {
+                "blob": "6e1f13c798fe293f66418c7869c4db607ea5099fd21569e36ff67b2073e8c937",
+                "bytes": 56,
+                "layout": "f32",
+                "components": 2,
+                "count": 7
+              }
+            },
+            {
+              "element": "Edge",
+              "name": "IsHard",
+              "type": "Bool",
+              "channels": 1,
+              "data": {
+                "blob": "8855508aade16ec573d21e6a485dfd0a7624085c1a14b5ecdd6485de0c6839a4",
+                "bytes": 5,
+                "layout": "u8",
+                "components": 1,
+                "count": 5
+              }
+            },
+            {
+              "element": "Polygon",
+              "name": "PartName",
+              "type": "Name",
+              "channels": 1,
+              "data": {
+                "blob": "433a91e5090fd16d5727e8051ee9f4df07343e1885c31600f371969a7cd28d47",
+                "bytes": 34,
+                "layout": "names",
+                "components": 1,
+                "count": 2
+              }
+            },
+            {
+              "element": "PolygonGroup",
+              "name": "MaterialSlotName",
+              "type": "Name",
+              "channels": 1,
+              "data": {
+                "blob": "ea8fca3654c248700d61db2bebe0b5b00521ed0870bf68402298d6f2e71f75ed",
+                "bytes": 21,
+                "layout": "names",
+                "components": 1,
+                "count": 1
+              }
+            }
+          ]
+        },
+        "prepared": {
+          "counts": {
+            "vertices": 4,
+            "corners": 7,
+            "edges": 5,
+            "polygons": 2,
+            "triangles": 3,
+            "polygonGroups": 1
+          },
+          "topology": [
+            {
+              "blob": "6ff4b3c5db68b3e2e0d136666592dead97dfc2df4b1e555764337c213dfe08af",
+              "bytes": 28,
+              "layout": "u32",
+              "components": 1,
+              "count": 7
+            },
+            {
+              "blob": "a28e8100ed2c9c086d052934ef81f329b72d3764823d6e85999beffb12c194b6",
+              "bytes": 40,
+              "layout": "u32",
+              "components": 2,
+              "count": 5
+            },
+            {
+              "blob": "7984d4d48a74d9a116e3506741f2916a0666b781d23a42bd9fe4d751e3a37998",
+              "bytes": 12,
+              "layout": "u32",
+              "components": 1,
+              "count": 3
+            },
+            {
+              "blob": "044ff7496e66070d6e670a30fe81fb18e9632a1c60bfd136aaec3f0f3ec76679",
+              "bytes": 28,
+              "layout": "u32",
+              "components": 1,
+              "count": 7
+            },
+            {
+              "blob": "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+              "bytes": 8,
+              "layout": "u32",
+              "components": 1,
+              "count": 2
+            },
+            {
+              "blob": "13e7e26d3594fb019ca520d8fb332a11ecf804766eff882bbd6e1e149ca06a0e",
+              "bytes": 36,
+              "layout": "u32",
+              "components": 3,
+              "count": 3
+            },
+            {
+              "blob": "c3e42245ffdff31c980d63b232de1414ca2461a08c6efccca2af96737ef4d068",
+              "bytes": 12,
+              "layout": "u32",
+              "components": 1,
+              "count": 3
+            }
+          ],
+          "attributes": [
+            {
+              "element": "Vertex",
+              "name": "Position",
+              "type": "Vec3",
+              "channels": 1,
+              "data": {
+                "blob": "8bc29485eaabf1e68540edc811e789dae77f0213960117e54846f1734b5be622",
+                "bytes": 48,
+                "layout": "f32",
+                "components": 3,
+                "count": 4
+              }
+            },
+            {
+              "element": "Corner",
+              "name": "BinormalSign",
+              "type": "Float",
+              "channels": 1,
+              "data": {
+                "blob": "6f3a1a9d59ae648b4f66e10802905ef54f901e2409b9e01e653a05fd7c4ff786",
+                "bytes": 28,
+                "layout": "f32",
+                "components": 1,
+                "count": 7
+              }
+            },
+            {
+              "element": "Corner",
+              "name": "Color",
+              "type": "Vec4",
+              "channels": 1,
+              "data": {
+                "blob": "43469ce897d6b6e412109b858a9f4f6b8d0d91d6fd5292950ec2ddbdba6a8902",
+                "bytes": 112,
+                "layout": "f32",
+                "components": 4,
+                "count": 7
+              }
+            },
+            {
+              "element": "Corner",
+              "name": "Normal",
+              "type": "Vec3",
+              "channels": 1,
+              "data": {
+                "blob": "02e8697c1ad18d0389c149499a78e3c101bf76ddd31b6cd39a2d0ccc57a518b3",
+                "bytes": 84,
+                "layout": "f32",
+                "components": 3,
+                "count": 7
+              }
+            },
+            {
+              "element": "Corner",
+              "name": "Tangent",
+              "type": "Vec3",
+              "channels": 1,
+              "data": {
+                "blob": "77788decff1aedf8146bd21e102ca4990b9734e460c2fcb85bce2e888d04a92f",
+                "bytes": 84,
+                "layout": "f32",
+                "components": 3,
+                "count": 7
+              }
+            },
+            {
+              "element": "Corner",
+              "name": "TexCoord",
+              "type": "Vec2",
+              "channels": 1,
+              "data": {
+                "blob": "6e1f13c798fe293f66418c7869c4db607ea5099fd21569e36ff67b2073e8c937",
+                "bytes": 56,
+                "layout": "f32",
+                "components": 2,
+                "count": 7
+              }
+            },
+            {
+              "element": "Edge",
+              "name": "IsHard",
+              "type": "Bool",
+              "channels": 1,
+              "data": {
+                "blob": "8855508aade16ec573d21e6a485dfd0a7624085c1a14b5ecdd6485de0c6839a4",
+                "bytes": 5,
+                "layout": "u8",
+                "components": 1,
+                "count": 5
+              }
+            },
+            {
+              "element": "Polygon",
+              "name": "PartName",
+              "type": "Name",
+              "channels": 1,
+              "data": {
+                "blob": "433a91e5090fd16d5727e8051ee9f4df07343e1885c31600f371969a7cd28d47",
+                "bytes": 34,
+                "layout": "names",
+                "components": 1,
+                "count": 2
+              }
+            },
+            {
+              "element": "PolygonGroup",
+              "name": "MaterialSlotName",
+              "type": "Name",
+              "channels": 1,
+              "data": {
+                "blob": "ea8fca3654c248700d61db2bebe0b5b00521ed0870bf68402298d6f2e71f75ed",
+                "bytes": 21,
+                "layout": "names",
+                "components": 1,
+                "count": 1
+              }
+            }
+          ]
+        },
+        "preparedBuild": {
+          "SrcLightmapIndex": 0,
+          "DstLightmapIndex": 1
+        },
+        "generated": false,
+        "baked": null
+      }
+    ],
+    "collision": {
+      "AggGeom": {
+        "SphereElems": [],
+        "BoxElems": [],
+        "SphylElems": [],
+        "ConvexElems": [
+          {
+            "VertexData": [
+              {
+                "X": 100.09999999999999,
+                "Y": 0.041421358657622226,
+                "Z": 0.04142135865761145
+              },
+              {
+                "X": 100.09999999999999,
+                "Y": -100.04142135865759,
+                "Z": 0.041421358657626063
+              },
+              {
+                "X": -0.10000000000000142,
+                "Y": 0.041421358657631892,
+                "Z": -0.041421358657631559
+              },
+              {
+                "X": -0.10000000000000142,
+                "Y": -100.0414213586576,
+                "Z": -0.041421358657631559
+              },
+              {
+                "X": -0.041421358657631885,
+                "Y": 0.10000000000000142,
+                "Z": 0.041421358657631538
+              },
+              {
+                "X": 100.04142135865762,
+                "Y": 0.10000000000000142,
+                "Z": -0.041421358657631559
+              },
+              {
+                "X": 100.04142135865759,
+                "Y": -100.09999999999999,
+                "Z": -0.041421358657618465
+              },
+              {
+                "X": -0.041421358657617161,
+                "Y": -100.10000000000001,
+                "Z": 0.04142135865762607
+              }
+            ],
+            "IndexData": [
+              1,
+              0,
+              7,
+              3,
+              2,
+              6,
+              4,
+              2,
+              7,
+              5,
+              2,
+              4,
+              1,
+              6,
+              0,
+              1,
+              7,
+              6,
+              3,
+              7,
+              2,
+              3,
+              6,
+              7,
+              5,
+              4,
+              0,
+              4,
+              7,
+              0,
+              5,
+              6,
+              2,
+              5,
+              0,
+              6
+            ],
+            "ElemBox": {
+              "Min": {
+                "X": -0.10000000000000142,
+                "Y": -100.10000000000001,
+                "Z": -0.041421358657631559
+              },
+              "Max": {
+                "X": 100.09999999999999,
+                "Y": 0.10000000000000142,
+                "Z": 0.041421358657631538
+              },
+              "IsValid": true
+            },
+            "Transform": {
+              "Rotation": {
+                "X": 0,
+                "Y": 0,
+                "Z": 0,
+                "W": 1
+              },
+              "Translation": {
+                "X": 0,
+                "Y": 0,
+                "Z": 0
+              },
+              "Scale3D": {
+                "X": 1,
+                "Y": 1,
+                "Z": 1
+              }
+            },
+            "RestOffset": 0,
+            "bIsGenerated": true,
+            "Name": "None",
+            "bContributeToMass": true,
+            "CollisionEnabled": "QueryAndPhysics"
+          }
+        ],
+        "TaperedCapsuleElems": [],
+        "LevelSetElems": [],
+        "SkinnedLevelSetElems": [],
+        "MLLevelSetElems": [],
+        "SkinnedTriangleMeshElems": []
+      },
+      "bConsiderForBounds": true,
+      "bDoubleSidedGeometry": false,
+      "bGenerateNonMirroredCollision": true,
+      "bSharedCookedData": false,
+      "bGenerateMirroredCollision": true,
+      "bSupportUVsAndFaceRemap": false,
+      "bSupportFaceRemapOnMeshBVH": true,
+      "bSupportVertexRemap": true,
+      "bNeverNeedsCookedCollisionData": false,
+      "PhysMaterial": null,
+      "WalkableSlopeOverride": {
+        "WalkableSlopeBehavior": "WalkableSlope_Default",
+        "WalkableSlopeAngle": 0
+      },
+      "DefaultInstance": {
+        "PositionSolverIterationCount": 8,
+        "VelocitySolverIterationCount": 2,
+        "ProjectionSolverIterationCount": 1,
+        "ObjectType": "ECC_WorldStatic",
+        "CollisionEnabled": "QueryAndPhysics",
+        "SleepFamily": "Normal",
+        "DOFMode": "Default",
+        "bUseCCD": false,
+        "bUseMACD": false,
+        "bAllowPartialIslandSleep": true,
+        "bIgnoreAnalyticCollisions": false,
+        "bNotifyRigidBodyCollision": false,
+        "bSmoothEdgeCollisions": false,
+        "bLockTranslation": true,
+        "bLockRotation": true,
+        "bLockXTranslation": false,
+        "bLockYTranslation": false,
+        "bLockZTranslation": false,
+        "bLockXRotation": false,
+        "bLockYRotation": false,
+        "bLockZRotation": false,
+        "bOverrideMaxAngularVelocity": false,
+        "bOverrideMaxDepenetrationVelocity": false,
+        "bOverrideWalkableSlopeOnInstance": false,
+        "bOverrideIterationCounts": false,
+        "bInterpolateWhenSubStepping": true,
+        "bInertiaConditioning": true,
+        "bOneWayInteraction": false,
+        "bOverrideSolverAsyncDeltaTime": false,
+        "SolverAsyncDeltaTime": 0.0166666675,
+        "CollisionProfileName": "BlockAll",
+        "CollisionResponses": {
+          "ResponseArray": []
+        },
+        "MaxDepenetrationVelocity": 0,
+        "MassInKgOverride": 100,
+        "LinearDamping": 0.00999999978,
+        "AngularDamping": 0,
+        "CustomDOFPlaneNormal": {
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        },
+        "COMNudge": {
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        },
+        "MassScale": 1,
+        "GravityGroupIndex": 0,
+        "InertiaTensorScale": {
+          "X": 1,
+          "Y": 1,
+          "Z": 1
+        },
+        "WalkableSlopeOverride": {
+          "WalkableSlopeBehavior": "WalkableSlope_Default",
+          "WalkableSlopeAngle": 0
+        },
+        "PhysMaterialOverride": null,
+        "MaxAngularVelocity": 3600,
+        "CustomSleepThresholdMultiplier": 1,
+        "StabilizationThresholdMultiplier": 1,
+        "PhysicsBlendWeight": 0,
+        "bSimulatePhysics": false,
+        "bOverrideMass": false,
+        "bEnableGravity": true,
+        "bUpdateKinematicFromSimulation": false,
+        "bGyroscopicTorqueEnabled": false,
+        "bAutoWeld": false,
+        "bStartAwake": true,
+        "bGenerateWakeEvents": false,
+        "bUpdateMassWhenScaleChanges": true
+      },
+      "BuildScale3D": {
+        "X": 1,
+        "Y": 1,
+        "Z": 1
+      },
+      "BoneName": "None",
+      "PhysicsType": "PhysType_Default",
+      "CollisionTraceFlag": "CTF_UseDefault",
+      "CollisionReponse": "BodyCollision_Enabled"
+    }
+  }
+}

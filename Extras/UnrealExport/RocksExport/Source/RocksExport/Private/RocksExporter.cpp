@@ -55,22 +55,26 @@ namespace RocksExporterPrivate
 		return bRetain;
 	}
 
-	// 덤프가 모은 참조를 의존 목록에 합친다(11.7절 4번 — 합집합, 둘 다면 Hard). AssetRegistry가 모르는 객체(에셋이
-	// 아닌 것)와 objectPath 문법을 어기는 경로는 넣지 않는다.
-	static void MergeReferences(FRocksExportAsset& Asset, const TArray<FRocksPropertyDumper::FReference>& References)
+	// 덤프가 모은 참조를 의존 목록에 합친다(11.7절 4번 — 합집합, 둘 다면 Hard). 옛 경로(UE redirector)는 닫힘이 푼
+	// redirect 표로 대상 경로·클래스를 정해 합친다(본문에는 저장된 옛 경로가 그대로 남고 bundle.json redirects가 잇는다
+	// — 11.7절 21번). 표에 없는 redirector는 warning `UnresolvedRedirector`로 알리고 넣지 않는다. AssetRegistry가 모르는
+	// 객체(에셋이 아닌 것)와 objectPath 문법을 어기는 경로는 넣지 않는다.
+	static void MergeReferences(FRocksExportAsset& Asset, const TArray<FRocksPropertyDumper::FReference>& References, const TArray<FRocksExportRedirect>& Redirects)
 	{
 		IAssetRegistry& Registry = IAssetRegistry::GetChecked();
 		bool bAdded = false;
 		for (const FRocksPropertyDumper::FReference& Reference : References)
 		{
-			if (Reference.Path == Asset.ObjectPath)
+			const FRocksExportRedirect* Redirect = Redirects.FindByPredicate([&Reference](const FRocksExportRedirect& Item) { return Item.From == Reference.Path; });
+			const FString Path = Redirect != nullptr ? Redirect->To : Reference.Path;
+			if (Path == Asset.ObjectPath)
 			{
 				continue;
 			}
 
-			FRocksExportDependency* Existing = Asset.Dependencies.FindByPredicate([&Reference](const FRocksExportDependency& Dependency)
+			FRocksExportDependency* Existing = Asset.Dependencies.FindByPredicate([&Path](const FRocksExportDependency& Dependency)
 				{
-					return Dependency.ObjectPath == Reference.Path;
+					return Dependency.ObjectPath == Path;
 				});
 			if (Existing != nullptr)
 			{
@@ -78,14 +82,21 @@ namespace RocksExporterPrivate
 				continue;
 			}
 
-			const FAssetData Target = Registry.GetAssetByObjectPath(FSoftObjectPath(Reference.Path));
-			if (!Target.IsValid() || !RocksIsValidExchangeObjectPath(Reference.Path))
+			const FAssetData Target = Registry.GetAssetByObjectPath(FSoftObjectPath(Path));
+			if (!Target.IsValid() || !RocksIsValidExchangeObjectPath(Path))
 			{
 				continue;
 			}
 
+			if (Target.IsRedirector())
+			{
+				Asset.Diagnostics.Add({TEXT("UnresolvedRedirector"), RocksExport::SeverityWarning,
+					FString::Printf(TEXT("reference %s is a redirector the dependency closure did not resolve and is not recorded"), *Path)});
+				continue;
+			}
+
 			bool bInScope = false;
-			Asset.Dependencies.Add({Reference.Path, RocksExchangeClassNameOfAsset(Target, bInScope), Reference.bHard});
+			Asset.Dependencies.Add({Path, RocksExchangeClassNameOfAsset(Target, bInScope), Reference.bHard});
 			bAdded = true;
 		}
 
@@ -100,7 +111,8 @@ namespace RocksExporterPrivate
 
 	// 범위 안 종류의 본문을 만든다(UX2a 텍스처, UX3a 정적 메시, UX7a 스켈레톤·스킨 메시, UX8a 애니메이션, UX4a 머티리얼 계열). 로드 실패는 에셋 수준
 	// error 진단이다. blob 쓰기 실패만 false다.
-	static bool ExtractBody(FRocksExportAsset& Asset, FRocksBundleWriter& Bundle, FRocksAssetBody& OutBody, FString& OutError)
+	static bool ExtractBody(FRocksExportAsset& Asset, const TArray<FRocksExportRedirect>& Redirects, FRocksBundleWriter& Bundle, FRocksAssetBody& OutBody,
+		FString& OutError)
 	{
 		const bool bTexture = FRocksTextureExtractor::IsTextureClass(Asset.ClassName);
 		const bool bKnown = bTexture || Asset.ClassName == TEXT("StaticMesh") || Asset.ClassName == TEXT("Skeleton") || Asset.ClassName == TEXT("SkeletalMesh")
@@ -147,7 +159,7 @@ namespace RocksExporterPrivate
 			return false;
 		}
 
-		MergeReferences(Asset, OutBody.References);
+		MergeReferences(Asset, OutBody.References, Redirects);
 		Asset.Diagnostics.Append(OutBody.Diagnostics);
 		return true;
 	}
@@ -346,7 +358,7 @@ bool FRocksExporter::Export(const FRocksExportOptions& Options, FRocksExportResu
 	for (FRocksExportAsset& Asset : Assets)
 	{
 		FRocksAssetBody Body;
-		if (!RocksExporterPrivate::ExtractBody(Asset, Bundle, Body, OutResult.Error))
+		if (!RocksExporterPrivate::ExtractBody(Asset, Closure.GetRedirects(), Bundle, Body, OutResult.Error))
 		{
 			return false;
 		}

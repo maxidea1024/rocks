@@ -366,6 +366,10 @@ VmFaultKind VmSession::Suspend(uint64 wait, uint32 resultRegister, uint32 result
     }
 
     entry.live = true;
+    if (entry.instance < instances_.Size()) {
+        ++instances_[entry.instance].suspendedCount;
+    }
+
     waits_[index].awaited = true;
     waits_[index].suspension = number;
     suspension = number;
@@ -467,6 +471,10 @@ VmFaultKind VmSession::SuspendChild(usize boundary, uint64 wait, uint32 resultRe
     entry.childWait = handle;
     entry.depthOffset = execution_.depthBase_ + static_cast<uint32>(boundary);
     entry.live = true;
+    if (entry.instance < instances_.Size()) {
+        ++instances_[entry.instance].suspendedCount;
+    }
+
     waits_[index].awaited = true;
     waits_[index].suspension = number;
     child = handle;
@@ -502,6 +510,11 @@ void VmSession::ReleaseSuspended(Suspended& entry) noexcept {
     entry.refs.Empty();
     entry.buffers.Empty();
     entry.childWait = 0;
+    if (entry.live && entry.instance < instances_.Size() &&
+        instances_[entry.instance].suspendedCount > 0) {
+        --instances_[entry.instance].suspendedCount;
+    }
+
     entry.live = false;
 }
 
@@ -731,6 +744,10 @@ Result<void> VmSession::ResumeSuspended(uint32 chosen, uint64 wait, uint32 depth
     entry.refs.Empty();
     entry.buffers.Empty();
     entry.childWait = 0;
+    if (entry.instance < instances_.Size() && instances_[entry.instance].suspendedCount > 0) {
+        --instances_[entry.instance].suspendedCount;
+    }
+
     entry.live = false;
     uint32 childIndex = NoBytecodeIndex;
     if (childWait != 0 && DecodeWait(childWait, childIndex)) {

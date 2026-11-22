@@ -382,6 +382,37 @@ Result<void> EditorPackageSet::OpenCachePath(const EditorPackageInfo& info,
     return Result<void>::Success();
 }
 
+Result<void> EditorPackageSet::SetImportRecord(AssetId id, Span<const uint8> bytes,
+                                               AssetId owner) noexcept {
+    if (registry_.Get() == nullptr) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    if (Find(id) == nullptr) {
+        return Result<void>::Failure(ErrorCode::NotFound);
+    }
+
+    // 새 값을 먼저 만들고 실패 없이 맞바꾼다.
+    Array<uint8> record(*allocator_);
+    Array<PackageDependencyEntry> importOwner(*allocator_);
+    if (auto appended = record.TryAppend(bytes); !appended) {
+        return appended;
+    }
+
+    if (!owner.IsNull()) {
+        if (auto pushed = importOwner.TryPushBack(
+                PackageDependencyEntry{owner, PackageDependencyKind::ImportOwner, TypeId{}, false});
+            !pushed) {
+            return pushed;
+        }
+    }
+
+    EditorPackageInfo& info = open_[LowerBound(id)];
+    info.importRecord = rocks::Move(record);
+    info.importOwner = rocks::Move(importOwner);
+    return MarkDirty(id);
+}
+
 Result<void> EditorPackageSet::DiscardOpen(usize at, StringView cachePath) noexcept {
     if (auto discarded = registry_->Discard(Access(), open_[at].package); !discarded) {
         return discarded;

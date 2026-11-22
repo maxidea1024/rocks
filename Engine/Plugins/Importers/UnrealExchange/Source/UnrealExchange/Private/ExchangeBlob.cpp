@@ -331,6 +331,14 @@ uint32 ExchangeBlobElementBytes(ExchangeBlobLayout layout) noexcept {
 
 namespace exchange_detail {
 
+platform::FileStatus CheckRegularFile(platform::FileSystem& files, const char* path,
+                                      usize pathBytes, bool& regular) noexcept {
+    platform::FileInfo info;
+    const platform::FileStatus status = files.Stat(path, pathBytes, info);
+    regular = status && info.type == platform::FileType::File && !info.isLink;
+    return status;
+}
+
 Result<void> AppendBundlePath(StringView directory, StringView relative,
                               StringBuilderBase& out) noexcept {
     const usize size = directory.ByteCount();
@@ -359,6 +367,19 @@ Result<bool> CheckBlobFile(platform::FileSystem& files, StringView directory,
     if (auto made = AppendBundlePath(directory, StringView(relative, BlobRelativePathBytes), path);
         !made) {
         return Result<bool>::Failure(made.Error());
+    }
+
+    bool regular = false;
+    if (const platform::FileStatus checked =
+            CheckRegularFile(files, path.CString(), path.ByteCount(), regular);
+        !checked) {
+        return Result<bool>::Success(
+            FailBlobFile(failure, ExchangeIssue::ReadFailed, FileErrorCode(checked)));
+    }
+
+    if (!regular) {
+        return Result<bool>::Success(
+            FailBlobFile(failure, ExchangeIssue::NotRegularFile, ErrorCode::InvalidArgument));
     }
 
     platform::File file;

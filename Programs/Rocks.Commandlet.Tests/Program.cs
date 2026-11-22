@@ -1753,6 +1753,67 @@ finally
     Directory.Delete(fixDirectory, true);
 }
 
+// asset-import(AssetSystem.ko.md 7.1절 18 — A2f1b): 제품 실행 파일은 실제 임포터만 등록하고 이 단계에는 아직 없다(A5 텍스처) — 임포터 없음
+// UnsupportedSourceFormat, 사용법·도움말·프로젝트 없음. 성공·출력·경고 줄은 EngineTests가 시험 임포터로 명령 함수를 부른다.
+string importDirectory = Path.Combine(Path.GetTempPath(), $"rocks-asset-import-{Environment.ProcessId}");
+try
+{
+    string project = Path.Combine(importDirectory, "Importing");
+    Directory.CreateDirectory(project);
+    File.WriteAllText(Path.Combine(project, "Importing.rocksproject"), "{}\n");
+    string projectOption = $"--project={project}";
+    string source = Path.Combine(importDirectory, "Rock.png");
+    File.WriteAllBytes(source, [1, 2, 3]);
+
+    async Task<ProcessResult> RunImport(params string[] arguments) =>
+        await ProcessRunner.RunAsync(new(executable, arguments, workingDirectory, Timeout: TimeSpan.FromSeconds(30)));
+
+    void ReportImport(string label, bool passed, ProcessResult result)
+    {
+        Console.WriteLine($"{label}: {(passed ? "PASS" : "FAIL")}");
+        if (!passed)
+        {
+            ++failures;
+            Console.Error.WriteLine($"  exit={result.ExitCode}; stdout={result.StdOut}; stderr={result.StdErr}");
+        }
+    }
+
+    ProcessResult noImporter = await RunImport("asset-import", "/Game/Rock", source, projectOption);
+    ReportImport("asset-import without an importer", noImporter.ExitCode == 1 &&
+        noImporter.StdErr.Contains("asset-import: UnsupportedSourceFormat: /Game/Rock", StringComparison.Ordinal) &&
+        !File.Exists(Path.Combine(project, "Content", "Rock.rasset")), noImporter);
+    ProcessResult named = await RunImport("asset-import", "/Game/Rock", source, "--importer=Texture", projectOption);
+    ReportImport("asset-import unknown importer name", named.ExitCode == 1 &&
+        named.StdErr.Contains("asset-import: UnsupportedSourceFormat: /Game/Rock", StringComparison.Ordinal), named);
+
+    string[][] importUsage =
+    [
+        ["asset-import", projectOption],
+        ["asset-import", "/Game/A", projectOption],
+        ["asset-import", "/Game/A", "a.png", "b.png", projectOption],
+        ["asset-import", "/Game/A", "a.png", "--source.px=b.png", projectOption],
+        ["asset-import", "/Game/A", "a.png", "--cube=x", projectOption],
+        ["asset-import", "/Game/A", "a.png", "--force", projectOption],
+    ];
+    foreach (string[] arguments in importUsage)
+    {
+        ProcessResult usage = await RunImport(arguments);
+        ReportImport($"asset-import usage: {string.Join(' ', arguments.Skip(1).Where(argument => argument != projectOption))}",
+            usage.ExitCode == 2 && usage.StdErr.StartsWith("usage: asset-import", StringComparison.Ordinal), usage);
+    }
+
+    ProcessResult importHelp = await RunImport("asset-import", "--help");
+    ReportImport("asset-import help", importHelp.ExitCode == 0 &&
+        importHelp.StdOut.StartsWith("usage: asset-import", StringComparison.Ordinal), importHelp);
+    ProcessResult importNoProject = await RunImport("asset-import", "/Game/A", source);
+    ReportImport("asset-import without a project", importNoProject.ExitCode == 1 &&
+        importNoProject.StdErr.Contains("no project found", StringComparison.Ordinal), importNoProject);
+}
+finally
+{
+    Directory.Delete(importDirectory, true);
+}
+
 // asset-orphans-*·verify 경고(AssetSystem.ko.md 7.1절 17 — A2e4a): 고아 출력 fixture(Orphan 2311 — owner 2312 없음, HeroOrphan
 // 2313 — 기록 없는 Hero가 owner)로 목록 줄(경로 키 순, owner 경로·missing), 경고만인 verify는 종료 0, 고아 지우기·고아 아닌 거부,
 // 잠금 Busy, 사용법·도움말·프로젝트 없음.

@@ -1,6 +1,7 @@
 #include "ExchangeInternal.h"
 
 #include <Core/Algorithms.h>
+#include <Core/Containers/HashMap.h>
 #include <Core/FileError.h>
 #include <Platform/Memory.h>
 #include <UnrealExchange/ExchangePaths.h>
@@ -16,6 +17,9 @@ constexpr StringView BundleManifestFile = "bundle.json";
 constexpr StringView AssetFilePrefix = "assets";
 constexpr StringView AssetFileSuffix = ".json";
 constexpr StringView BlobKey = "blob";
+// blob 사슬의 끝 표지(CollectBlobRefs)와 byte의 비트 수다.
+constexpr uint32 NoBlob = NumericLimits<uint32>::Max();
+constexpr usize BitsPerByte = 8;
 
 // 3.2절 비유한값 문자열이 뜻하는 double 비트다(quiet NaN, +Inf, -Inf).
 constexpr uint64 ExchangeQuietNaNBits = 0x7ff8000000000000ull;
@@ -207,12 +211,27 @@ bool IsLess(StringView left, StringView right) noexcept {
     return StringView::CompareBytes(left, right) < 0;
 }
 
-// JSON 파일 하나를 읽어 document에 파싱한다. 루트는 객체여야 한다.
+// JSON 파일 하나를 읽어 document에 파싱한다. 루트는 객체여야 한다. 일반 파일만 읽고, 읽은 크기를
+// jsonBytes(묶음의 JSON 크기 합)에 더해 jsonLimit을 넘으면 거부한다.
 Result<bool> ReadJsonFile(platform::FileSystem& files, StringView directory, StringView relative,
-                          Allocator& allocator, ReadScope& scope, JsonDocument& document) noexcept {
+                          Allocator& allocator, ReadScope& scope, uint64 jsonLimit,
+                          uint64& jsonBytes, JsonDocument& document) noexcept {
     StringBuilder<512> path(allocator);
     if (auto made = exchange_detail::AppendBundlePath(directory, relative, path); !made) {
         return Result<bool>::Failure(made.Error());
+    }
+
+    bool regular = false;
+    if (const platform::FileStatus checked =
+            exchange_detail::CheckRegularFile(files, path.CString(), path.ByteCount(), regular);
+        !checked) {
+        return Reject(scope, AssetDiagnosticCode::CorruptBundle, FileErrorCode(checked),
+                      ExchangeIssue::ReadFailed, {}, relative);
+    }
+
+    if (!regular) {
+        return Reject(scope, AssetDiagnosticCode::CorruptBundle, ErrorCode::InvalidArgument,
+                      ExchangeIssue::NotRegularFile, {}, relative);
     }
 
     platform::File file;
@@ -229,9 +248,12 @@ Result<bool> ReadJsonFile(platform::FileSystem& files, StringView directory, Str
                       ExchangeIssue::ReadFailed, {}, relative);
     }
 
-    if (size > UnrealExchangeMaxJsonBytes) {
+    // jsonBytes는 jsonLimit을 넘지 않는다(넘을 파일은 더하지 않는다).
+    if (size > UnrealExchangeMaxJsonBytes || size > jsonLimit - jsonBytes) {
         return OverLimit(scope, {}, relative);
     }
+
+    jsonBytes += size;
 
     Array<char> text(allocator);
     if (auto resized = text.TryResize(static_cast<usize>(size)); !resized) {
@@ -624,8 +646,22 @@ bool SameBlobUse(const ExchangeBlobRef& left, const ExchangeBlobRef& right) noex
 
 // settings·data 안의 blob 참조를 모은다(깊이 우선, 문서 순서). 같은 hex를 다른 bytes로 적으면
 // BlobConflict다.
+// digest 앞 8 byte(little-endian)다. 같은 digest의 blob 사용을 묶는 해시 키다.
+uint64 DigestKey(const Sha256Digest& digest) noexcept {
+    uint64 key = 0;
+    for (usize index = 0; index < sizeof(key); ++index) {
+        key |= static_cast<uint64>(digest.bytes[index]) << (index * BitsPerByte);
+    }
+
+    return key;
+}
+
+// value 아래 blob 참조를 처음 나온 순서대로 blobs에 모은다(같은 사용은 한 번). 같은 digest를 다른
+// bytes로 적으면 BlobConflict다. 이미 모은 것과의 비교는 digest 앞 8 byte가 같은 것끼리만 한다
+// (키별 사슬 — heads는 키의 마지막 blob 번호, next는 같은 키의 앞 blob 번호, 10.4절 21번).
 Result<bool> CollectBlobRefs(ReadScope& scope, JsonValue root, Allocator& allocator,
-                             Array<ExchangeBlobRef>& blobs) noexcept {
+                             Array<ExchangeBlobRef>& blobs, HashMap<uint64, uint32>& heads,
+                             Array<uint32>& next) noexcept {
     Array<JsonValue> pending(allocator);
     if (auto pushed = pending.TryPushBack(root); !pushed) {
         return Result<bool>::Failure(pushed.Error());
@@ -642,8 +678,11 @@ Result<bool> CollectBlobRefs(ReadScope& scope, JsonValue root, Allocator& alloca
                 return parsed;
             }
 
+            const uint64 key = DigestKey(blob.digest);
+            const uint32* head = heads.Find(key);
             bool seen = false;
-            for (const ExchangeBlobRef& previous : blobs) {
+            for (uint32 at = head != nullptr ? *head : NoBlob; at != NoBlob; at = next[at]) {
+                const ExchangeBlobRef& previous = blobs[at];
                 if (previous.digest == blob.digest && previous.bytes != blob.bytes) {
                     char hex[Sha256Digest::HexBytes + 1];
                     blob.digest.ToHex(hex);
@@ -655,8 +694,17 @@ Result<bool> CollectBlobRefs(ReadScope& scope, JsonValue root, Allocator& alloca
             }
 
             if (!seen) {
+                const auto index = static_cast<uint32>(blobs.Size());
                 if (auto pushed = blobs.TryPushBack(blob); !pushed) {
                     return Result<bool>::Failure(pushed.Error());
+                }
+
+                if (auto linked = next.TryPushBack(head != nullptr ? *head : NoBlob); !linked) {
+                    return Result<bool>::Failure(linked.Error());
+                }
+
+                if (auto inserted = heads.InsertOrAssign(key, index); !inserted) {
+                    return Result<bool>::Failure(inserted.Error());
                 }
             }
 
@@ -792,17 +840,33 @@ Result<bool> ReadExporterDiagnostics(ReadScope& scope, JsonValue root, JsonValue
     return Accept();
 }
 
+// 플러그인이 error 진단을 낸 에셋은 받지 않는다(10.4절 20번): 첫 error 진단의 code로 InvalidSource
+// (ExporterError)를 내고 거부한다. Hard 의존자는 임포트 순서 계산이 FailedDependency로 실패시킨다.
+Result<bool> CheckExporterErrors(ReadScope& scope, JsonValue diagnostics) noexcept {
+    for (usize index = 0; index < diagnostics.Size(); ++index) {
+        const JsonValue item = diagnostics.At(index);
+        if (item.Find("severity").GetString() == ExporterSeverities[0]) {
+            return Reject(scope, AssetDiagnosticCode::InvalidSource, ErrorCode::InvalidArgument,
+                          ExchangeIssue::ExporterError, item.Position(),
+                          item.Find("code").GetString());
+        }
+    }
+
+    return Accept();
+}
+
 // 에셋 JSON 하나를 읽어 asset을 채운다(10.4절 5–9·11번).
 Result<bool> ReadAssetDocument(platform::FileSystem& files, StringView directory,
-                               Allocator& allocator, ReadScope& scope,
-                               ExchangeAsset& asset) noexcept {
+                               Allocator& allocator, ReadScope& scope, uint64 jsonLimit,
+                               uint64& jsonBytes, ExchangeAsset& asset) noexcept {
     auto made = UniquePtr<JsonDocument>::TryMake(allocator, allocator);
     if (!made) {
         return Result<bool>::Failure(made.Error());
     }
 
     JsonDocument& document = *made.Value();
-    auto read = ReadJsonFile(files, directory, asset.file, allocator, scope, document);
+    auto read = ReadJsonFile(files, directory, asset.file, allocator, scope, jsonLimit, jsonBytes,
+                             document);
     if (Stopped(read)) {
         return read;
     }
@@ -860,12 +924,19 @@ Result<bool> ReadAssetDocument(platform::FileSystem& files, StringView directory
         return read;
     }
 
-    read = CollectBlobRefs(scope, asset.settings, allocator, asset.blobs);
+    HashMap<uint64, uint32> heads(allocator);
+    Array<uint32> next(allocator);
+    read = CollectBlobRefs(scope, asset.settings, allocator, asset.blobs, heads, next);
     if (Stopped(read)) {
         return read;
     }
 
-    read = CollectBlobRefs(scope, asset.data, allocator, asset.blobs);
+    read = CollectBlobRefs(scope, asset.data, allocator, asset.blobs, heads, next);
+    if (Stopped(read)) {
+        return read;
+    }
+
+    read = CheckExporterErrors(scope, asset.exporterDiagnostics);
     if (Stopped(read)) {
         return read;
     }
@@ -1162,7 +1233,9 @@ Result<void> ReadExchangeBundle(platform::FileSystem& files, StringView director
     }
 
     JsonDocument& manifest = *made.Value();
-    auto read = ReadJsonFile(files, directory, BundleManifestFile, allocator, scope, manifest);
+    uint64 jsonBytes = 0;
+    auto read = ReadJsonFile(files, directory, BundleManifestFile, allocator, scope,
+                             options.maxBundleJsonBytes, jsonBytes, manifest);
     if (Stopped(read)) {
         return AbortRead(out, read, scope);
     }
@@ -1247,7 +1320,8 @@ Result<void> ReadExchangeBundle(platform::FileSystem& files, StringView director
             continue;
         }
 
-        auto loaded = ReadAssetDocument(files, directory, allocator, assetScope, asset);
+        auto loaded = ReadAssetDocument(files, directory, allocator, assetScope,
+                                        options.maxBundleJsonBytes, jsonBytes, asset);
         if (!loaded) {
             out.Clear();
             return Result<void>::Failure(loaded.Error());

@@ -1014,6 +1014,11 @@ Pulse.Never(#1) -> ok
 Pulse.Swap(#1) -> ok
 Pulse.Swap(#1) -> ok
 Pulse.Hold(#1) -> ok
+limits 4096 2 -> ok
+Pulse.Hold(#1) -> ok
+Pulse.Hold(#1) -> ok
+budget -> ok
+limits 4096 256 -> ok
 advance 0.1 -> ok
 advance 0.1 -> ok
 Pulse.Fire(#1, 1) -> ok

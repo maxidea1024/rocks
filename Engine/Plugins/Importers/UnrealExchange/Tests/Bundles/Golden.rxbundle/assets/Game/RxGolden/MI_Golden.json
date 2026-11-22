@@ -1,0 +1,196 @@
+{
+  "objectPath": "/Game/RxGolden/MI_Golden.MI_Golden",
+  "class": "MaterialInstanceConstant",
+  "ueClass": "/Script/Engine.MaterialInstanceConstant",
+  "dependencies": [
+    {
+      "objectPath": "/Game/RxGolden/M_Golden.M_Golden",
+      "class": "Material",
+      "kind": "hard"
+    }
+  ],
+  "diagnostics": [],
+  "settings": {
+    "ParameterStateId": {
+      "A": 382124714,
+      "B": 1222152401,
+      "C": -408886087,
+      "D": -1165143731
+    },
+    "PhysMaterialMask": null,
+    "PhysMaterial": null,
+    "PhysicalMaterialMap": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    "Parent": {
+      "objectPath": "/Game/RxGolden/M_Golden.M_Golden"
+    },
+    "NaniteOverrideMaterial": {
+      "bEnableOverride": true,
+      "OverrideMaterialEditor": null,
+      "OverrideMaterial": null,
+      "OverrideMaterialRef": null
+    },
+    "SpecularProfileOverride": null,
+    "ToonProfileOverride": null,
+    "bHasStaticPermutationResource": false,
+    "bOverrideSubsurfaceProfile": false,
+    "bOverrideSpecularProfile": false,
+    "bOverrideToonProfile": false,
+    "bOverrideBlendableLocation": false,
+    "bOverrideBlendablePriority": false,
+    "bOverridePhysMaterial": false,
+    "BlendableLocationOverride": "BL_SceneColorAfterTonemapping",
+    "BlendablePriorityOverride": 0,
+    "ScalarParameterValues": [
+      {
+        "AtlasData": {
+          "bIsUsedAsAtlasPosition": false,
+          "Curve": null,
+          "Atlas": null
+        },
+        "ParameterInfo": {
+          "Name": "Roughness",
+          "Association": "GlobalParameter",
+          "Index": -1
+        },
+        "ParameterValue": 0.25,
+        "ExpressionGUID": {
+          "A": 771328588,
+          "B": 1203031128,
+          "C": -685321836,
+          "D": 613332944
+        }
+      }
+    ],
+    "VectorParameterValues": [],
+    "DoubleVectorParameterValues": [],
+    "TextureParameterValues": [],
+    "TextureCollectionParameterValues": [],
+    "ParameterCollectionParameterValues": [],
+    "RuntimeVirtualTextureParameterValues": [],
+    "SparseVolumeTextureParameterValues": [],
+    "FontParameterValues": [],
+    "UserSceneTextureOverrides": [],
+    "EnumerationObjects": [],
+    "BasePropertyOverrides": {
+      "bOverride_OpacityMaskClipValue": false,
+      "bOverride_BlendMode": false,
+      "bOverride_ShadingModel": false,
+      "bOverride_DitheredLODTransition": false,
+      "bOverride_CastDynamicShadowAsMasked": false,
+      "bOverride_TwoSided": false,
+      "bOverride_bIsThinSurface": false,
+      "bOverride_OutputTranslucentVelocity": false,
+      "bOverride_bHasPixelAnimation": false,
+      "bOverride_bEnableTessellation": false,
+      "bOverride_DisplacementScaling": false,
+      "bOverride_bEnableDisplacementFade": false,
+      "bOverride_DisplacementFadeRange": false,
+      "bOverride_MaxWorldPositionOffsetDisplacement": false,
+      "bOverride_CompatibleWithLumenCardSharing": false,
+      "bOverride_UsageFlags": 0,
+      "TwoSided": false,
+      "bIsThinSurface": false,
+      "DitheredLODTransition": false,
+      "bCastDynamicShadowAsMasked": false,
+      "bOutputTranslucentVelocity": false,
+      "bHasPixelAnimation": false,
+      "bEnableTessellation": false,
+      "bEnableDisplacementFade": false,
+      "bCompatibleWithLumenCardSharing": false,
+      "BlendMode": "BLEND_Opaque",
+      "ShadingModel": "MSM_DefaultLit",
+      "OpacityMaskClipValue": 0.333299994,
+      "DisplacementScaling": {
+        "Magnitude": 4,
+        "Center": 0.5
+      },
+      "DisplacementFadeRange": {
+        "StartSizePixels": 4,
+        "EndSizePixels": 1
+      },
+      "MaxWorldPositionOffsetDisplacement": 0,
+      "UsageFlags": 4194304
+    },
+    "StaticParametersRuntime": {
+      "StaticSwitchParameters": [],
+      "MaterialLayers": {
+        "Layers": [],
+        "Blends": []
+      },
+      "bHasMaterialLayers": false
+    },
+    "ReferencedTextureGuids": [],
+    "EditorOnlyData": {
+      "subobject": "MI_GoldenEditorOnlyData",
+      "class": "/Script/Engine.MaterialInstanceEditorOnlyData",
+      "properties": {
+        "StaticParameters": {
+          "StaticComponentMaskParameters": [],
+          "TerrainLayerWeightParameters": [],
+          "MaterialLayers": {
+            "LayerStates": [],
+            "LayerNames": [],
+            "RestrictToLayerRelatives": [],
+            "RestrictToBlendRelatives": [],
+            "LayerGuids": [],
+            "LayerLinkStates": [],
+            "DeletedParentLayerGuids": []
+          }
+        }
+      }
+    },
+    "SubsurfaceProfile": null,
+    "SubsurfaceProfiles": [],
+    "SpecularProfiles": [],
+    "ToonProfiles": [],
+    "NeuralProfile": null,
+    "LightmassSettings": {
+      "EmissiveBoost": 1,
+      "DiffuseBoost": 1,
+      "ExportResolutionScale": 1,
+      "bCastShadowAsMasked": false,
+      "bOverrideCastShadowAsMasked": false,
+      "bOverrideEmissiveBoost": false,
+      "bOverrideDiffuseBoost": false,
+      "bOverrideExportResolutionScale": false
+    },
+    "TextureStreamingDataVersion": 0,
+    "TextureStreamingData": [],
+    "ReferencedDefaultTextures": [],
+    "AssetUserData": [],
+    "bIncludedInBaseGame": false,
+    "PreviewMesh": null,
+    "ThumbnailInfo": null,
+    "LayerParameterExpansion": [],
+    "ParameterOverviewExpansion": [],
+    "AssetImportData": null,
+    "LightingGuid": {
+      "A": 64354395,
+      "B": 1283711782,
+      "C": 2119756421,
+      "D": -1014003464
+    }
+  },
+  "data": {
+    "resolved": [
+      {
+        "parameter": {
+          "Name": "Roughness",
+          "Association": "GlobalParameter",
+          "Index": -1
+        },
+        "type": "Scalar",
+        "value": 0.25
+      }
+    ]
+  }
+}

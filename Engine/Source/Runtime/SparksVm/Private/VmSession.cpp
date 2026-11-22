@@ -477,7 +477,14 @@ Result<VmCallResult> VmSession::RunHook(uint32 instance, BytecodeHookKind kind,
             connection.active = connection.subscriber == instance ? true : connection.active;
         }
 
-        if (auto connected = Connect(instance, nullptr, NoBytecodeIndex); !connected) {
+        // 모든 handler의 낡은 연결을 먼저 지우고 그다음 더한다(상한 판정이 handler 순서를 타지
+        // 않게 — LC6d4 리뷰 B2).
+        auto removed = Connect(instance, nullptr, NoBytecodeIndex, ConnectRemove);
+        if (!removed) {
+            return Result<VmCallResult>::Failure(removed.Error());
+        }
+
+        if (auto connected = Connect(instance, nullptr, NoBytecodeIndex, ConnectAdd); !connected) {
             return Result<VmCallResult>::Failure(connected.Error());
         }
     }
@@ -504,7 +511,18 @@ Result<VmCallResult> VmSession::Call(uint32 instance, const VmLinkedModule& modu
         refArguments[at + 1] = refs[at];
     }
 
-    // 동시 실행 상한: 새 실행을 건너뛴다(fault 아님 — SL 9.3절).
+    // 동시 실행 상한: 새 실행을 건너뛴다(fault 아님 — SL 9.3절). 인자 모양이 틀린 호출은 먼저
+    // 거부한다(상한이 호출 오류를 가리지 않게 — LC6d4 리뷰 R3).
+    if (function >= module.Module().functions.Size()) {
+        return Result<VmCallResult>::Failure(ErrorCode::InvalidArgument);
+    }
+
+    const BytecodeFunction& shape = module.Module().functions[function];
+    if (scalars.Size() != shape.parameters[0] || refs.Size() + 1 != shape.parameters[1] ||
+        buffers.Size() != shape.parameters[2]) {
+        return Result<VmCallResult>::Failure(ErrorCode::InvalidArgument);
+    }
+
     if (ExecutionsFull(instance)) {
         BeginEntry();
         execution_.ReleaseReturned();
@@ -1059,23 +1077,55 @@ VmLimits VmSession::FragmentLimits(bool teardown) const noexcept {
 }
 
 bool VmSession::ExecutionsFull(uint32 instance) const noexcept {
-    uint32 count = 0;
-    for (const Suspended& entry : suspended_) {
-        count += entry.live && entry.instance == instance ? 1 : 0;
+    return instance < instances_.Size() &&
+           instances_[instance].suspendedCount >= budgets_.executionsPerInstance;
+}
+
+Result<void> VmSession::SetBudgets(const VmSessionBudgets& budgets) noexcept {
+    // 0인 상한은 뜻이 항목마다 달라지므로 받지 않는다(LC6d4 리뷰 S3).
+    if (execution_.running_ || budgets.fragmentInstructions == 0 ||
+        budgets.teardownInstructions == 0 || budgets.callDepth == 0 || budgets.sessionMemory == 0 ||
+        budgets.instanceMemory == 0 || budgets.connectionsPerInstance == 0 ||
+        budgets.connectionsPerSession == 0 || budgets.executionsPerInstance == 0) {
+        return Result<void>::Failure(ErrorCode::InvalidArgument);
     }
 
-    return count >= budgets_.executionsPerInstance;
+    budgets_ = budgets;
+    return Result<void>::Success();
 }
+
+namespace {
+
+// 버퍼의 논리 크기(원소 수 × 원소 크기 — SL 9.3절, LC6d4 리뷰 B1): 머리·여유 용량·해시 색인은 세지
+// 않는다. 문자열은 byte 수, 컨테이너는 원소마다 key·값 slot, struct·Result는 slot 수다.
+uint64 VmLogicalBytes(const VmBuffer* buffer) noexcept {
+    if (buffer == nullptr) {
+        return 0;
+    }
+
+    constexpr uint64 SlotBytes = sizeof(uint64);
+    switch (buffer->kind) {
+    case VmBufferKind::String:
+        return buffer->count;
+    case VmBufferKind::Struct:
+    case VmBufferKind::Result:
+        return uint64(buffer->count) * SlotBytes;
+    default:
+        return uint64(buffer->count) * (uint64(buffer->keySlots) + buffer->valueSlots) * SlotBytes;
+    }
+}
+
+} // namespace
 
 bool VmSession::FitsInstanceMemory(uint32 instance, uint32 at,
                                    const VmBuffer* incoming) const noexcept {
     // instance 필드가 직접 쥔 버퍼의 크기 합(원소 버퍼는 바깥 버퍼에 원소 크기로만 든다 — R22
     // 근사).
-    uint64 total = incoming != nullptr ? incoming->bytes : 0;
+    uint64 total = VmLogicalBytes(incoming);
     const Array<VmBuffer*>& buffers = instances_[instance].buffers;
     for (usize slot = 0; slot < buffers.Size(); ++slot) {
-        if (slot != at && buffers[slot] != nullptr) {
-            total += buffers[slot]->bytes;
+        if (slot != at) {
+            total += VmLogicalBytes(buffers[slot]);
         }
     }
 

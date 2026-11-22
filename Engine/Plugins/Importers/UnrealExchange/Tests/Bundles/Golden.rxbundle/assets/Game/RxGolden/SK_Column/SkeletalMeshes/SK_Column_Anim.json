@@ -1,0 +1,339 @@
+{
+  "objectPath": "/Game/RxGolden/SK_Column/SkeletalMeshes/SK_Column_Anim.SK_Column_Anim",
+  "class": "AnimSequence",
+  "ueClass": "/Script/Engine.AnimSequence",
+  "dependencies": [
+    {
+      "objectPath": "/ACLPlugin/ACLAnimBoneCompressionSettings.ACLAnimBoneCompressionSettings",
+      "class": "AnimBoneCompressionSettings",
+      "kind": "hard"
+    },
+    {
+      "objectPath": "/ACLPlugin/ACLAnimCurveCompressionSettings.ACLAnimCurveCompressionSettings",
+      "class": "AnimCurveCompressionSettings",
+      "kind": "hard"
+    },
+    {
+      "objectPath": "/Engine/Animation/DefaultVariableFrameStrippingSettings.DefaultVariableFrameStrippingSettings",
+      "class": "VariableFrameStrippingSettings",
+      "kind": "hard"
+    },
+    {
+      "objectPath": "/Game/RxGolden/SK_Column/SkeletalMeshes/SK_Column_Skeleton.SK_Column_Skeleton",
+      "class": "Skeleton",
+      "kind": "hard"
+    },
+    {
+      "objectPath": "/Game/RxGolden/SK_SoftTarget.SK_SoftTarget",
+      "class": "SkeletalMesh",
+      "kind": "soft"
+    }
+  ],
+  "diagnostics": [],
+  "settings": {
+    "ImportFileFramerate": 30,
+    "ImportResampleFramerate": 30,
+    "NumFrames": 0,
+    "NumberOfKeys": 0,
+    "SamplingFrameRate": {
+      "Numerator": 60000,
+      "Denominator": 1
+    },
+    "RawDataGuid": {
+      "A": 1934120794,
+      "B": -1202186228,
+      "C": 1893251996,
+      "D": -308439132
+    },
+    "AnimationTrackNames": [],
+    "bAllowFrameStripping": true,
+    "CompressionErrorThresholdScale": 1,
+    "BoneCompressionSettings": {
+      "objectPath": "/ACLPlugin/ACLAnimBoneCompressionSettings.ACLAnimBoneCompressionSettings"
+    },
+    "CurveCompressionSettings": {
+      "objectPath": "/ACLPlugin/ACLAnimCurveCompressionSettings.ACLAnimCurveCompressionSettings"
+    },
+    "VariableFrameStrippingSettings": {
+      "objectPath": "/Engine/Animation/DefaultVariableFrameStrippingSettings.DefaultVariableFrameStrippingSettings"
+    },
+    "AdditiveAnimType": "AAT_None",
+    "RefPoseType": "ABPT_None",
+    "RefFrameIndex": 0,
+    "RefPoseSeq": null,
+    "RetargetSource": "None",
+    "RetargetSourceAsset": {
+      "objectPath": "/Game/RxGolden/SK_SoftTarget.SK_SoftTarget"
+    },
+    "RetargetSourceAssetReferencePose": [
+      {
+        "Rotation": {
+          "X": 0,
+          "Y": 0,
+          "Z": 0,
+          "W": 1
+        },
+        "Translation": {
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        },
+        "Scale3D": {
+          "X": 1,
+          "Y": 1,
+          "Z": 1
+        }
+      },
+      {
+        "Rotation": {
+          "X": 0,
+          "Y": 0,
+          "Z": 0,
+          "W": 1
+        },
+        "Translation": {
+          "X": 0,
+          "Y": 0,
+          "Z": 0
+        },
+        "Scale3D": {
+          "X": 1,
+          "Y": 1,
+          "Z": 1
+        }
+      }
+    ],
+    "Interpolation": "Linear",
+    "bEnableRootMotion": false,
+    "RootMotionRootLock": "RefPose",
+    "bForceRootLock": false,
+    "bUseNormalizedRootMotionScale": true,
+    "bRootMotionSettingsCopiedFromMontage": false,
+    "CompressCommandletVersion": 0,
+    "bDoNotOverrideCompression": false,
+    "AssetImportData": {
+      "subobject": "InterchangeAssetImportData_0",
+      "class": "/Script/InterchangeEngine.InterchangeAssetImportData",
+      "properties": {
+        "SceneImportAsset": null,
+        "NodeUniqueID": "\\AnimSequence\\SkeletalAnimation\\\\Scene\\SK_Column_scene_0\\SK_Column_joint_0_0",
+        "SourceData": {}
+      }
+    },
+    "StripAnimDataOnDedicatedServer": "UseProjectSetting",
+    "AuthoredSyncMarkers": [],
+    "PlatformTargetFrameRate": {
+      "Default": {
+        "Numerator": 30,
+        "Denominator": 1
+      },
+      "PerPlatform": []
+    },
+    "TargetFrameRate": {
+      "Numerator": 60000,
+      "Denominator": 1
+    },
+    "PerBoneCustomAttributeData": [],
+    "AttributeCurves": [],
+    "Notifies": [],
+    "SequenceLength": 1,
+    "RawCurveData": {
+      "FloatCurves": [
+        {
+          "FloatCurve": {
+            "Keys": [
+              {
+                "InterpMode": "RCIM_Linear",
+                "TangentMode": "RCTM_Auto",
+                "TangentWeightMode": "RCTWM_WeightedNone",
+                "Time": 0,
+                "Value": 0,
+                "ArriveTangent": 0,
+                "ArriveTangentWeight": 0,
+                "LeaveTangent": 0,
+                "LeaveTangentWeight": 0
+              },
+              {
+                "InterpMode": "RCIM_Linear",
+                "TangentMode": "RCTM_Auto",
+                "TangentWeightMode": "RCTWM_WeightedNone",
+                "Time": 0.5,
+                "Value": 1,
+                "ArriveTangent": 0,
+                "ArriveTangentWeight": 0,
+                "LeaveTangent": -2,
+                "LeaveTangentWeight": 0
+              },
+              {
+                "InterpMode": "RCIM_Linear",
+                "TangentMode": "RCTM_Auto",
+                "TangentWeightMode": "RCTWM_WeightedNone",
+                "Time": 1,
+                "Value": 0,
+                "ArriveTangent": 0,
+                "ArriveTangentWeight": 0,
+                "LeaveTangent": 0,
+                "LeaveTangentWeight": 0
+              }
+            ],
+            "DefaultValue": 3.40282347e+38,
+            "PreInfinityExtrap": "RCCE_Constant",
+            "PostInfinityExtrap": "RCCE_Constant"
+          },
+          "Color": {
+            "R": 0.768627465,
+            "G": 0.731703222,
+            "B": 0.177839279,
+            "A": 1
+          },
+          "Comment": "",
+          "CurveName": "Bulge",
+          "CurveTypeFlags": 4
+        }
+      ],
+      "TransformCurves": []
+    },
+    "RateScale": 1,
+    "bLoop": false,
+    "AnimNotifyTracks": [
+      {
+        "TrackName": "1",
+        "TrackColor": {
+          "R": 1,
+          "G": 1,
+          "B": 1,
+          "A": 1
+        }
+      }
+    ],
+    "Skeleton": {
+      "objectPath": "/Game/RxGolden/SK_Column/SkeletalMeshes/SK_Column_Skeleton.SK_Column_Skeleton"
+    },
+    "MetaData": [],
+    "ParentAsset": null,
+    "AssetMappingTable": null,
+    "AssetUserData": [
+      {
+        "subobject": "AnimationModifiersAssetUserData_0",
+        "class": "/Script/AnimationModifiers.AnimationModifiersAssetUserData",
+        "properties": {
+          "AnimationModifierInstances": [],
+          "AppliedModifiers": []
+        }
+      }
+    ],
+    "ThumbnailInfo": null,
+    "PreviewPoseAsset": null,
+    "PreviewSkeletalMesh": null
+  },
+  "data": {
+    "frameRate": {
+      "numerator": 30,
+      "denominator": 1
+    },
+    "frameCount": 30,
+    "keyCount": 31,
+    "boneTracks": [
+      {
+        "bone": "tip",
+        "translation": {
+          "blob": "8b6c9514d413e2982cd38e388bef4c5fb37504aaff46b32958c7875ecbe1fec2",
+          "bytes": 12,
+          "layout": "f32",
+          "components": 3,
+          "count": 1
+        },
+        "rotation": {
+          "blob": "86c92430121a7512c6d1e3d30d1f44bec13bbb9d9d371ca968d7230bcf1bd989",
+          "bytes": 496,
+          "layout": "f32",
+          "components": 4,
+          "count": 31
+        },
+        "scale": {
+          "blob": "8a31a40ecac0ceb4d87b30bd156ca7a547e8e33dc071454b765fbc777d1c34a1",
+          "bytes": 12,
+          "layout": "f32",
+          "components": 3,
+          "count": 1
+        }
+      },
+      {
+        "bone": "root",
+        "translation": {
+          "blob": "d7a3464fe8d5cf80d5f25b809bd1e2d2337d10f48f1784ffc587d09907ec0c57",
+          "bytes": 372,
+          "layout": "f32",
+          "components": 3,
+          "count": 31
+        },
+        "rotation": {
+          "blob": "8ec24ccab0600ee9d3040143dc427a12bbd7e4297682beefe65ef597eccd262c",
+          "bytes": 16,
+          "layout": "f32",
+          "components": 4,
+          "count": 1
+        },
+        "scale": {
+          "blob": "8a31a40ecac0ceb4d87b30bd156ca7a547e8e33dc071454b765fbc777d1c34a1",
+          "bytes": 12,
+          "layout": "f32",
+          "components": 3,
+          "count": 1
+        }
+      }
+    ],
+    "curves": [
+      {
+        "name": "Bulge",
+        "flags": 4,
+        "curve": {
+          "keys": [
+            {
+              "interpMode": "RCIM_Linear",
+              "tangentMode": "RCTM_Auto",
+              "tangentWeightMode": "RCTWM_WeightedNone",
+              "time": 0,
+              "value": 0,
+              "arriveTangent": 0,
+              "arriveTangentWeight": 0,
+              "leaveTangent": 2,
+              "leaveTangentWeight": 0
+            },
+            {
+              "interpMode": "RCIM_Linear",
+              "tangentMode": "RCTM_Auto",
+              "tangentWeightMode": "RCTWM_WeightedNone",
+              "time": 0.5,
+              "value": 1,
+              "arriveTangent": 0,
+              "arriveTangentWeight": 0,
+              "leaveTangent": -2,
+              "leaveTangentWeight": 0
+            },
+            {
+              "interpMode": "RCIM_Linear",
+              "tangentMode": "RCTM_Auto",
+              "tangentWeightMode": "RCTWM_WeightedNone",
+              "time": 1,
+              "value": 0,
+              "arriveTangent": 0,
+              "arriveTangentWeight": 0,
+              "leaveTangent": 0,
+              "leaveTangentWeight": 0
+            }
+          ],
+          "preInfinityExtrap": "RCCE_Constant",
+          "postInfinityExtrap": "RCCE_Constant",
+          "defaultValue": 3.40282347e+38
+        }
+      }
+    ],
+    "transformCurves": [],
+    "events": [],
+    "eventTracks": [
+      "1"
+    ],
+    "syncMarkers": []
+  }
+}

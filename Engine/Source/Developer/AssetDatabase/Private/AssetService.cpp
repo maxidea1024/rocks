@@ -39,14 +39,6 @@ EditorPackageSetConfig MakeSetConfig(const AssetServiceConfig& config, const Pro
     return packages;
 }
 
-// 대입 codec 옵션이다(Edit 용도, 참조는 resolver, Name은 집합 Registry의 pool).
-TextCodecOptions CodecOptions(EditorPackageSet& set, AssetTextResolver& resolver) noexcept {
-    TextCodecOptions options;
-    options.resolver = &resolver;
-    options.names = set.Registry().Names();
-    return options;
-}
-
 // 공개 전 대표 에셋에 대입을 모두 검증·게시하는 초기화다(asset-new).
 class AssignInitializer final : public EditorAssetInitializer {
 public:
@@ -82,7 +74,8 @@ AssetService::AssetService(Allocator& allocator, const ProjectLayout& layout,
       types_(config.packages.types), files_(config.packages.files),
       cacheFiles_(config.cacheFiles != nullptr ? config.cacheFiles : config.packages.files),
       useCache_(config.useCache), aliases_(allocator, layout), aliasLookup_(*this),
-      clock_(config.clock), aliasDays_(config.aliasDays), aliasSearch_(config.aliasSearch) {
+      clock_(config.clock), aliasDays_(config.aliasDays), aliasSearch_(config.aliasSearch),
+      importers_(config.importers) {
     read_.expectedKind = PackageKind::Editor;
 }
 
@@ -1247,7 +1240,7 @@ Result<AssetId> AssetService::New(const AssetDatabaseLock& lock, StringView type
 
     AssetTextResolver resolver(*allocator_, set_, index_, warnings);
     resolver.SetAliases(&aliasLookup_);
-    const TextCodecOptions options = CodecOptions(set_, resolver);
+    const TextCodecOptions options = asset_database_detail::CodecOptions(set_, resolver);
     AssignInitializer initializer(assignments, options, diagnostics);
     auto created = set_.Create(parsed.Value(), lease.Value().Id(), {}, failure, &initializer);
     if (!created) {
@@ -1287,7 +1280,7 @@ Result<void> AssetService::Set(const AssetDatabaseLock& lock, StringView target,
     AssetTextResolver resolver(*allocator_, set_, index_, warnings);
     resolver.SetAliases(&aliasLookup_);
     resolver.SetWeakScope(id);
-    const TextCodecOptions options = CodecOptions(set_, resolver);
+    const TextCodecOptions options = asset_database_detail::CodecOptions(set_, resolver);
     auto prepared = reflection_text::PrepareAssignments(
         AssignmentTarget::Live(set_.Registry(), set_.Access(), asset.Value()), assignments, options,
         diagnostics);
@@ -1320,7 +1313,7 @@ Result<void> AssetService::Info(StringView target, const AssetInfoOptions& optio
 
     AssetTextResolver resolver(*allocator_, set_, index_, warnings);
     resolver.SetAliases(&aliasLookup_);
-    TextCodecOptions codec = CodecOptions(set_, resolver);
+    TextCodecOptions codec = asset_database_detail::CodecOptions(set_, resolver);
     codec.use = options.all ? TextUse::Report : TextUse::Edit;
     const AssignmentTarget live =
         AssignmentTarget::Live(set_.Registry(), set_.Access(), asset.Value());

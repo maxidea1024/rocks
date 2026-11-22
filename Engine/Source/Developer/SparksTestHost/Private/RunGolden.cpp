@@ -1252,7 +1252,10 @@ Result<void> CheckRunGolden(Allocator& allocator, const CaseInput& input,
                 VmSessionBudgets budgets = session.Budgets();
                 budgets.connectionsPerInstance = connections.Value();
                 budgets.executionsPerInstance = executions.Value();
-                session.SetBudgets(budgets);
+                if (!session.SetBudgets(budgets)) {
+                    return bad("'limits' needs non-zero counts");
+                }
+
                 actual.Append("ok");
             } else if (verb == "stats") {
                 // session의 async 상태(SparksRuntime 2.4절): 대기 표 항목·정지 실행·skip 수.

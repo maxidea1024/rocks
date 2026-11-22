@@ -27,6 +27,9 @@ Result<int32> RunAssetDeleteCommand(void* context, Span<const StringView> args,
                                     CommandletOutput& output) noexcept;
 Result<int32> RunAssetOrphansDeleteCommand(void* context, Span<const StringView> args,
                                            CommandletOutput& output) noexcept;
+// asset-import(7.1절 18 A2f1b — 13절 문법)다.
+Result<int32> RunAssetImportCommand(void* context, Span<const StringView> args,
+                                    CommandletOutput& output) noexcept;
 Result<int32> RunAssetFixDuplicateIdCommand(void* context, Span<const StringView> args,
                                             CommandletOutput& output) noexcept;
 Result<int32> RunAssetDuplicateCommand(void* context, Span<const StringView> args,

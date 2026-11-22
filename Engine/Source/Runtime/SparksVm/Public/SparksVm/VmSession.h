@@ -199,16 +199,16 @@ public:
 
     // ---- 예산(SparksRuntime 2.6절 — LC6d4) ----
 
-    void SetBudgets(const VmSessionBudgets& budgets) noexcept {
-        budgets_ = budgets;
-    }
+    // 예산을 바꾼다(host가 session을 만들 때 — SD34 실행 중 변경 금지). 실패: 실행 중이거나 0인
+    // 상한이 있으면 InvalidArgument.
+    Result<void> SetBudgets(const VmSessionBudgets& budgets) noexcept;
 
     const VmSessionBudgets& Budgets() const noexcept {
         return budgets_;
     }
 
-    // 연결 상한으로 만들지 않은 연결 수, 동시 실행 상한으로 건너뛴 실행(전달·Call) 수다(보고 —
-    // 거부는 fault가 아니다).
+    // 연결 상한으로 거부한 연결 시도 수(원천이 바뀌어 다시 풀 때마다 다시 센다), 동시 실행 상한으로
+    // 건너뛴 실행(전달·Call) 수다(보고 — 거부는 fault가 아니다).
     uint64 DroppedConnections() const noexcept {
         return droppedConnections_;
     }
@@ -409,6 +409,7 @@ private:
         // 첫 쓰기에서 확보한 Changed 자리(SL 5.3절 — 활성 instance, 억제 문맥 밖).
         bool reserved = false;
         usize item = 0;
+        bool changed = false; // 조각 끝 판정: 시작 값과 다르다(원천 연결 다시 풀기)
     };
 
     // EMIT(실행 중)이 부른다: 항목을 넣는다. 반환은 fault 종류.
@@ -429,11 +430,16 @@ private:
     void DropWrites(uint32 instance) noexcept;
     // instance의 field key를 경로 첫 마디로 쓰는 handler 연결을 다시 풀고, `on A.B.Changed`면 한 번
     // 전달할 항목을 넣는다(SL 5.3·5.5절).
-    Result<void> Reconnect(uint32 instance, const VmEventKey& field) noexcept;
+    // phases는 ConnectRemove·ConnectAdd 조합이다(조각 끝은 바뀐 모든 필드를 지우기 전부 → 더하기
+    // 전부로 — 쓰기 순서가 상한 판정을 바꾸지 않게, LC6d4 리뷰 B2).
+    Result<void> Reconnect(uint32 instance, const VmEventKey& field, uint8 phases) noexcept;
+    static constexpr uint8 ConnectRemove = 1;
+    static constexpr uint8 ConnectAdd = 2;
     // 큐를 비운다(단계 전달 상한까지).
     Result<void> Drain() noexcept;
     // instance의 연결을 (다시) 푼다 — handler 하나(handler가 NoIndex면 전부).
-    Result<void> Connect(uint32 instance, const VmLinkedModule* module, uint32 handler) noexcept;
+    Result<void> Connect(uint32 instance, const VmLinkedModule* module, uint32 handler,
+                         uint8 phases = ConnectRemove | ConnectAdd) noexcept;
     // 경로를 풀어 발행자 handle들을 publishers에 둔다(배열이면 fromArray).
     Result<void> ResolvePath(uint32 instance, const VmLinkedModule& module, uint32 firstPath,
                              uint32 pathCount, Array<uint64>& publishers, bool& fromArray) noexcept;
@@ -459,8 +465,9 @@ private:
         bool ticksStopped = false;
         const VmLinkedModule* tickStopModule = nullptr; // Tick fault가 난 모듈
         uint64 tickStopGeneration = 0;                  // 그 모듈의 링크 세대(새로 링크되면 푼다)
-        bool destroyRan = false;  // Destroy hook을 돌렸다(격리 instance는 1회만)
-        bool enabledOnce = false; // 첫 Enable(spawn)이 끝났다 — 뒤 Enable은 재활성화
+        bool destroyRan = false;   // Destroy hook을 돌렸다(격리 instance는 1회만)
+        uint32 suspendedCount = 0; // 이 instance의 정지 실행 수(동시 실행 상한 — O(1))
+        bool enabledOnce = false;  // 첫 Enable(spawn)이 끝났다 — 뒤 Enable은 재활성화
         uint64 faultFrames[IsolationFaults] = {};
         uint32 faultCount = 0;
         Array<uint64> scalars;

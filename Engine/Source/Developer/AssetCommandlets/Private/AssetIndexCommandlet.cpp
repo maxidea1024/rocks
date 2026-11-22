@@ -129,7 +129,7 @@ Result<int32> WriteEntries(CommandletOutput& output, Allocator& allocator,
 Result<int32> ListByType(CommandletOutput& output, const AssetCommandContext& command,
                          const Options& options) noexcept {
     Allocator& allocator = *command.allocator;
-    EditSession session(allocator, *command.modules);
+    EditSession session(command);
     Result<int32> failure = Result<int32>::Success(1);
     if (!OpenSession(output, allocator, ListName, options.project, options.wait, false, session,
                      failure)) {
