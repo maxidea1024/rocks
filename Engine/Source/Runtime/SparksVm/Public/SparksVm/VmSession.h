@@ -168,12 +168,16 @@ public:
 
     InstanceState StateOf(uint32 instance) const noexcept;
 
-    // fault 위치별 기록이다: (모듈, 함수, 주소, 종류)마다 첫 기록과 횟수(SL 8.3절 "보고").
+    // fault 위치별 기록이다: (모듈과 그 링크 세대, 함수, 주소, 종류)마다 첫 상세(원문 위치·instance
+    // handle)와 횟수(SL 8.3절 "보고" — 재링크한 새 revision은 새 위치다). CloseSession이 비운다.
     struct FaultRecord {
         const VmLinkedModule* module = nullptr;
+        uint64 generation = 0;
         uint32 function = NoBytecodeIndex;
         uint32 address = NoBytecodeIndex;
         VmFaultKind kind = VmFaultKind::None;
+        BytecodeLocation location;
+        uint64 instance = 0; // 첫 fault의 instance handle(없으면 0)
         uint64 count = 0;
     };
 
@@ -421,8 +425,10 @@ private:
         // fault 처리(LC6d3).
         bool isolated = false;
         bool ticksStopped = false;
-        uint64 tickStopGeneration = 0; // Tick 중지 때 모듈 링크 세대(바뀌면 푼다)
-        bool enabledOnce = false;      // 첫 Enable(spawn)이 끝났다 — 뒤 Enable은 재활성화
+        const VmLinkedModule* tickStopModule = nullptr; // Tick fault가 난 모듈
+        uint64 tickStopGeneration = 0;                  // 그 모듈의 링크 세대(새로 링크되면 푼다)
+        bool destroyRan = false;  // Destroy hook을 돌렸다(격리 instance는 1회만)
+        bool enabledOnce = false; // 첫 Enable(spawn)이 끝났다 — 뒤 Enable은 재활성화
         uint64 faultFrames[IsolationFaults] = {};
         uint32 faultCount = 0;
         Array<uint64> scalars;
@@ -513,7 +519,7 @@ private:
     uint64 activeFrame_ = 0; // 일시 정지가 아닌 프레임 수(격리 창의 기준)
     // fault를 위치별로 기록하고, counts면 instance의 격리 창에 센다(세 번째면 격리).
     void NoteFault(uint32 instance, const VmCallResult& result, bool counts) noexcept;
-    void RecordFault(const VmFault& fault) noexcept;
+    void RecordFault(const VmFault& fault, uint32 instance) noexcept;
     // 격리(SL 8.3절): Disable hook 없이 실행 취소 → 유지 자원 필드 → 연결·이벤트 대기 폐기. 값
     // 필드는 둔다.
     void Isolate(uint32 instance) noexcept;

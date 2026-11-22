@@ -4,7 +4,7 @@
 new #1 Ticker -> ok (3 steps)
 hook #1 Enable -> ok (8 steps)
 hook #1 Tick(0.1) -> ok (17 steps)
-hook #1 Tick(0.1) -> fault AssertFailed at 12:9 (13 steps)
+hook #1 Tick(0.1) -> fault AssertFailed at 23:9 (13 steps)
   log error "tick"
 state #1 -> ticks stopped
 hook #1 Tick(0.1) -> skipped (0 steps)
@@ -14,16 +14,16 @@ hook #2 Enable -> ok (8 steps)
 Ticker.Watch(#2, #1) -> void (3 steps)
 Ticker.Fire(#1) -> void (3 steps)
   log error "handler"
-  deliver #2 Ticker.on Source.Ping -> fault AssertFailed at 36:9 (5 steps)
+  deliver #2 Ticker.on Source.Ping -> fault AssertFailed at 47:9 (5 steps)
 advance 0.1 -> ok (0 suspended)
 Ticker.Fire(#1) -> void (3 steps)
   log error "handler"
-  deliver #2 Ticker.on Source.Ping -> fault AssertFailed at 36:9 (5 steps)
+  deliver #2 Ticker.on Source.Ping -> fault AssertFailed at 47:9 (5 steps)
 state #2 -> normal
 advance 0.1 -> ok (0 suspended)
 Ticker.Fire(#1) -> void (3 steps)
   log error "handler"
-  deliver #2 Ticker.on Source.Ping -> fault AssertFailed at 36:9 (5 steps)
+  deliver #2 Ticker.on Source.Ping -> fault AssertFailed at 47:9 (5 steps)
 state #2 -> isolated
 Ticker.Fire(#1) -> void (3 steps)
 Ticker.Bump(#2, 7) -> skipped (0 steps)
@@ -37,36 +37,74 @@ endframe -> ok (0 pending)
   log info "destroy 0"
 new #3 Ticker -> ok (3 steps)
 hook #3 Enable -> ok (8 steps)
-Ticker.Fail(#3) -> fault AssertFailed at 20:9 (5 steps)
+Ticker.Fail(#3) -> fault AssertFailed at 31:9 (5 steps)
   log error "call"
 advance 0.1 x300 -> ok (0 suspended)
-Ticker.Fail(#3) -> fault AssertFailed at 20:9 (5 steps)
+Ticker.Fail(#3) -> fault AssertFailed at 31:9 (5 steps)
   log error "call"
 advance 0.1 x301 -> ok (0 suspended)
-Ticker.Fail(#3) -> fault AssertFailed at 20:9 (5 steps)
+Ticker.Fail(#3) -> fault AssertFailed at 31:9 (5 steps)
   log error "call"
 state #3 -> normal
 advance 0.1 0.1 paused x900 -> ok (0 suspended)
-Ticker.Fail(#3) -> fault AssertFailed at 20:9 (5 steps)
+Ticker.Fail(#3) -> fault AssertFailed at 31:9 (5 steps)
   log error "call"
 state #3 -> isolated
 new #4 Ticker -> ok (3 steps)
 hook #4 Enable -> ok (8 steps)
 hook #4 Disable -> ok (0 steps)
 Ticker.Bump(#4, 500) -> void (2 steps)
-hook #4 Enable -> fault AssertFailed at 7:9 (7 steps)
+hook #4 Enable -> fault AssertFailed at 18:9 (7 steps)
   log error "enable"
 state #4 -> isolated
 new #5 Ticker -> ok (3 steps)
 Ticker.Bump(#5, 500) -> void (2 steps)
-hook #5 Enable -> fault AssertFailed at 7:9 (7 steps)
+hook #5 Enable -> fault AssertFailed at 18:9 (7 steps)
   log error "enable"
 state #5 -> normal
 Ticker.Bump(#5, 60) -> void (2 steps)
-hook #5 Start -> fault AssertFailed at 16:9 (7 steps)
+hook #5 Start -> fault AssertFailed at 27:9 (7 steps)
   log error "start"
 state #5 -> isolated
 detach #1 -> ok
 detach #3 -> ok
 detach #4 -> ok
 detach #5 -> ok
+# LC6d3 review: a spawn-path fault drops that entry's emits, a skipped call leaves no stale return value,
+# an Enable fault from the apply loop isolates, the window includes exactly 600 frames, and an isolated
+# instance runs its Destroy hook once.
+new #6 Ticker -> ok (3 steps)
+new #7 Ticker -> ok (3 steps)
+hook #7 Enable -> ok (8 steps)
+Ticker.Watch(#7, #6) -> void (3 steps)
+Ticker.Bump(#6, 77) -> void (2 steps)
+hook #6 Awake -> fault AssertFailed at 9:13 (11 steps)
+  log error "awake"
+state #6 -> normal
+Ticker.Current(#7) -> 0 (2 steps)
+new #8 Ticker -> ok (3 steps)
+hook #8 Enable -> ok (8 steps)
+Ticker.Fail(#8) -> fault AssertFailed at 31:9 (5 steps)
+  log error "call"
+advance 0.1 x300 -> ok (0 suspended)
+Ticker.Fail(#8) -> fault AssertFailed at 31:9 (5 steps)
+  log error "call"
+advance 0.1 x300 -> ok (0 suspended)
+Ticker.Fail(#8) -> fault AssertFailed at 31:9 (5 steps)
+  log error "call"
+state #8 -> isolated
+Ticker.Current(#8) -> skipped (0 steps)
+hook #8 Destroy -> ok (9 steps)
+  log info "destroy 0"
+hook #8 Destroy -> skipped (0 steps)
+new #9 Ticker -> ok (3 steps)
+Ticker.Bump(#9, 500) -> void (2 steps)
+request #9 enable -> ok
+apply -> ok (0 pending)
+  hook #9 Enable -> fault AssertFailed at 18:9 (7 steps)
+  log error "enable"
+state #9 -> isolated
+detach #6 -> ok
+detach #7 -> ok
+detach #8 -> ok
+detach #9 -> ok

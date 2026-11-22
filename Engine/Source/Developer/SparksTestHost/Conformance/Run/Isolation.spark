@@ -3,6 +3,17 @@ class Ticker : ScriptableComponent {
     var Source: Ticker?;
     event Ping();
 
+    on Awake() {
+        if (Count == 77) {
+            emit Ping();
+            Assert(false, "awake");
+        }
+    }
+
+    fn Current(): int {
+        return Count;
+    }
+
     on Enable() {
         Assert(Count < 100, "enable");
     }

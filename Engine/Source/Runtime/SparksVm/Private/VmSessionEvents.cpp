@@ -557,7 +557,10 @@ Result<void> VmSession::Connect(uint32 instance, const VmLinkedModule* only,
                               connection.handler == index && connection.publisher == publisher);
                 }
 
-                if (exists) {
+                // 격리된 instance는 발행자로 다시 연결하지 않는다(사용자 코드를 돌리지 않는다 —
+                // LC6d3 리뷰 위험).
+                const uint32 owner = Find(publisher);
+                if (exists || (owner != NoBytecodeIndex && instances_[owner].isolated)) {
                     continue;
                 }
 

@@ -1000,6 +1000,10 @@ TEST(SparksConformance_RunGoldenAllocationFailureAsync) {
         await NextTick();
         held?.Stop();
     }
+
+    fn Fail() {
+        Assert(false, "fail");
+    }
 }
 )";
     constexpr StringView Golden = R"(new #1 Pulse -> ok
@@ -1014,6 +1018,10 @@ advance 0.1 -> ok
 advance 0.1 -> ok
 Pulse.Fire(#1, 1) -> ok
 fields #1 -> ok
+Pulse.Fail(#1) -> ok
+Pulse.Fail(#1) -> ok
+Pulse.Fail(#1) -> ok
+Pulse.Fire(#1, 2) -> ok
 request #1 disable -> ok
 request #1 destroy -> ok
 apply -> ok

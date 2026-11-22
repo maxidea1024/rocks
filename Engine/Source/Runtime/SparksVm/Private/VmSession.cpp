@@ -305,11 +305,14 @@ Result<VmCallResult> VmSession::RunHook(uint32 instance, BytecodeHookKind kind,
     const bool tickKind = kind == BytecodeHookKind::Tick || kind == BytecodeHookKind::FixedTick ||
                           kind == BytecodeHookKind::LateTick;
     Instance& target = instances_[instance];
-    if (target.ticksStopped && target.module->generation_ != target.tickStopGeneration) {
-        target.ticksStopped = false;
+    if (target.ticksStopped && target.tickStopModule != nullptr &&
+        target.tickStopModule->Linked() &&
+        target.tickStopModule->generation_ != target.tickStopGeneration) {
+        target.ticksStopped = false; // fault가 난 모듈이 새로 링크됐다(새 revision)
     }
 
-    if ((target.isolated && kind != BytecodeHookKind::Destroy) ||
+    // 격리 instance의 Destroy hook은 1회만(SL 8.3절).
+    if ((target.isolated && (kind != BytecodeHookKind::Destroy || target.destroyRan)) ||
         (target.ticksStopped && tickKind)) {
         BeginEntry(); // 앞 진입의 기록을 남기지 않는다
         VmCallResult skipped;
@@ -335,6 +338,10 @@ Result<VmCallResult> VmSession::RunHook(uint32 instance, BytecodeHookKind kind,
 
         current = baseModule;
         currentClass = baseClass;
+    }
+
+    if (kind == BytecodeHookKind::Destroy) {
+        instances_[instance].destroyRan = true;
     }
 
     VmCallResult result;
@@ -411,20 +418,37 @@ Result<VmCallResult> VmSession::RunHook(uint32 instance, BytecodeHookKind kind,
                 // 처리하고, 재활성화 Enable·Start는 격리, Tick 계열은 Tick 중지, 그 밖은 격리 창에
                 // 센다.
                 if (result.outcome == VmOutcome::Faulted) {
+                    // spawn 경로: host가 직접 부른 Awake·첫 Enable(적용 루프의 Enable은 재활성화 —
+                    // LC6d3 리뷰 3).
+                    const bool spawning = kind == BytecodeHookKind::Awake ||
+                                          (kind == BytecodeHookKind::Enable &&
+                                           !instances_[instance].enabledOnce && !nested_);
+                    // Teardown(Disable·Destroy)은 그 hook만 끊고 종료를 잇고, Validate는 편집기
+                    // 경계다(SL 8.3·8.4절) — 기록만 한다.
+                    const bool recordOnly = kind == BytecodeHookKind::Disable ||
+                                            kind == BytecodeHookKind::Destroy ||
+                                            kind == BytecodeHookKind::Validate;
                     if (tickKind) {
-                        RecordFault(result.fault);
+                        RecordFault(result.fault, instance);
                         instances_[instance].ticksStopped = true;
+                        instances_[instance].tickStopModule = result.fault.module;
                         instances_[instance].tickStopGeneration =
-                            instances_[instance].module->generation_;
+                            result.fault.module != nullptr ? result.fault.module->generation_ : 0;
+                    } else if (spawning) {
+                        // spawn 실패(host가 Detach): 이 진입이 낸 발행을 전달하지 않는다(SL 8.3절).
+                        RecordFault(result.fault, instance);
+                        for (usize at = queueHead_; currentRoot_ != 0 && at < queue_.Size(); ++at) {
+                            if (queue_[at].root == currentRoot_) {
+                                ReleaseItem(queue_[at]);
+                                queue_[at].publisher = 0;
+                            }
+                        }
                     } else if (kind == BytecodeHookKind::Start ||
-                               (kind == BytecodeHookKind::Enable &&
-                                instances_[instance].enabledOnce)) {
-                        RecordFault(result.fault);
+                               kind == BytecodeHookKind::Enable) {
+                        RecordFault(result.fault, instance);
                         Isolate(instance);
                     } else {
-                        NoteFault(instance, result,
-                                  kind != BytecodeHookKind::Awake &&
-                                      kind != BytecodeHookKind::Enable);
+                        NoteFault(instance, result, !recordOnly);
                     }
                 }
 
@@ -484,6 +508,8 @@ Result<VmCallResult> VmSession::Call(uint32 instance, const VmLinkedModule& modu
 
     if (instances_[instance].isolated) {
         BeginEntry();
+        execution_.ReleaseReturned(); // 앞 호출의 반환 값을 남기지 않는다(LC6d3 리뷰 1)
+        execution_.returned_.Clear();
         VmCallResult skipped;
         skipped.skipped = true; // 격리: admission 없음(SL 8.3절)
         return Result<VmCallResult>::Success(skipped);
@@ -935,6 +961,7 @@ Result<void> VmSession::CloseSession() noexcept {
     requests_.Clear();
     destroys_.Clear();
     deliveries_.Clear(); // 모듈 포인터를 남기지 않는다(닫은 뒤 모듈을 먼저 놓아도 된다)
+    faults_.Clear();
     execution_.logs_.Clear();
     execution_.logText_.Clear();
     execution_.Unwind();
@@ -948,15 +975,19 @@ VmSession::InstanceState VmSession::StateOf(uint32 instance) const noexcept {
     }
 
     const Instance& entry = instances_[instance];
-    return entry.isolated       ? InstanceState::Isolated
-           : entry.ticksStopped ? InstanceState::TicksStopped
-                                : InstanceState::Normal;
+    const bool released = entry.tickStopModule != nullptr && entry.tickStopModule->Linked() &&
+                          entry.tickStopModule->generation_ != entry.tickStopGeneration;
+    return entry.isolated                    ? InstanceState::Isolated
+           : entry.ticksStopped && !released ? InstanceState::TicksStopped
+                                             : InstanceState::Normal;
 }
 
-void VmSession::RecordFault(const VmFault& fault) noexcept {
+void VmSession::RecordFault(const VmFault& fault, uint32 instance) noexcept {
+    const uint64 generation = fault.module != nullptr ? fault.module->generation_ : 0;
     for (FaultRecord& record : faults_) {
-        if (record.module == fault.module && record.function == fault.function &&
-            record.address == fault.address && record.kind == fault.kind) {
+        if (record.module == fault.module && record.generation == generation &&
+            record.function == fault.function && record.address == fault.address &&
+            record.kind == fault.kind) {
             ++record.count;
             return;
         }
@@ -964,6 +995,9 @@ void VmSession::RecordFault(const VmFault& fault) noexcept {
 
     FaultRecord record;
     record.module = fault.module;
+    record.generation = generation;
+    record.location = fault.location;
+    record.instance = instance < instances_.Size() ? instances_[instance].handle : 0;
     record.function = fault.function;
     record.address = fault.address;
     record.kind = fault.kind;
@@ -972,7 +1006,7 @@ void VmSession::RecordFault(const VmFault& fault) noexcept {
 }
 
 void VmSession::NoteFault(uint32 instance, const VmCallResult& result, bool counts) noexcept {
-    RecordFault(result.fault);
+    RecordFault(result.fault, instance);
     if (!counts || instance >= instances_.Size() || !instances_[instance].attached ||
         instances_[instance].isolated) {
         return;

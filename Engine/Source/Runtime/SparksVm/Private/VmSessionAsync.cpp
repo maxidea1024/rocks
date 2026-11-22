@@ -931,6 +931,8 @@ Result<void> VmSession::Advance(double gameDelta, double uiDelta, bool paused) n
         queue_[at].carried = true;
     }
 
+    // 이 단계의 fault는 새 활성 프레임에 센다(이월 전달 포함 — LC6d3 리뷰).
+    activeFrame_ += paused ? 0 : 1;
     // 이월 항목을 먼저 전달하고(같은 단계의 전달이 파괴보다 먼저 — SD13, LC6c2 리뷰 S1) 엔진 객체
     // 발행자가 사라졌으면 그 이벤트 대기를 끝낸다.
     if (auto carried = Drain(); !carried) {
@@ -947,7 +949,6 @@ Result<void> VmSession::Advance(double gameDelta, double uiDelta, bool paused) n
     }
 
     ++frame_;
-    activeFrame_ += paused ? 0 : 1;
     gameTime_ += gameDelta;
     uiTime_ += uiDelta;
     for (uint32 index = 0; index < waits_.Size(); ++index) {

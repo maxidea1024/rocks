@@ -116,7 +116,8 @@ struct VmCallResult {
         0;           // 실행한 명령 수(fault를 낸 명령은 세지만 예산 초과로 막힌 명령은 세지 않는다)
     uint64 wait = 0; // Suspended일 때: 기다리는 대기 handle
     uint32 suspension = NoBytecodeIndex; // Suspended일 때: session의 정지 실행 번호
-    // 격리·Tick 중지·파괴 대기로 돌리지 않았다(SparksRuntime 2.6절 — outcome은 Returned, 0 steps).
+    // 격리·Tick 중지로 돌리지 않았다(SparksRuntime 2.6절 — outcome은 Returned, 0 steps, 반환 값
+    // 없음).
     bool skipped = false;
 };
 
