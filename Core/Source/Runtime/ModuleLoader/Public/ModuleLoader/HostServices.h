@@ -14,7 +14,7 @@ namespace rocks {
 //
 // 사용 예:
 //   // 서비스 형식의 공개 헤더(전역 namespace에서, 형식 선언 뒤):
-//   ROCKS_DECLARE_HOST_SERVICE(rocks::config::ConfigContext)
+//   ROCKS_DECLARE_HOST_SERVICE(rocks::config::ConfigContext, ROCKS_CONFIG_API)
 //   // 그 모듈의 cpp 하나:
 //   ROCKS_DEFINE_HOST_SERVICE(rocks::config::ConfigContext)
 //   // 호스트: 서비스를 만든 뒤 등록하고, 파괴하기 전에 뗀다.

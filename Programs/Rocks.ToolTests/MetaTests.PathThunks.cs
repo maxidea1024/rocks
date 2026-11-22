@@ -88,7 +88,8 @@ internal static partial class MetaTests
                 "struct Pair {\nrocks::Vec3 a;\nrocks::Vec3d b;\n};\n" +
                 "ROCKS_STRUCT(Binds = \"probe::Pair\")\nstruct PairBinding {\nROCKS_PROPERTY() rocks::Vec3 a;\nROCKS_PROPERTY() rocks::Vector3<double> b;\n};\n" +
                 "ROCKS_CLASS()\nstruct Value : public rocks::Object {\nexplicit Value(rocks::Allocator& allocator) noexcept : points(allocator) {}\n" +
-                "ROCKS_PROPERTY() rocks::Vec3 position;\nROCKS_PROPERTY() Pair pair;\nROCKS_PROPERTY() rocks::Array<rocks::Vec3> points;\n};\n}\n";
+                "ROCKS_PROPERTY() rocks::Vec3 position;\nROCKS_PROPERTY() Pair pair;\nROCKS_PROPERTY() rocks::Array<rocks::Vec3> points;\n};\n}\n" +
+                "template <> inline constexpr bool rocks::BoundCoreValueV<probe::Pair> = true;\n";
             await probe.GenerateAsync(source);
             string generated = Compact(probe.GeneratedText());
             foreach ((string expected, string reason) in new[]

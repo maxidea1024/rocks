@@ -984,10 +984,14 @@ private:
     Result<usize> InsertStructElement(const ObjectAccessContext&, ObjectHandle,
                                       detail::StructRefArrayStorage&, usize index,
                                       bool append) noexcept;
+    // elementType은 원소 struct의 native 키(NativeTypeKey<S>())다 — 지울 원소의 간선을 등록 struct
+    // trace로 훑는다(BuildTargets 3.8절 BS8d4).
     Result<void> RemoveStructElement(const ObjectAccessContext&, ObjectHandle,
-                                     detail::StructRefArrayStorage&, usize index) noexcept;
+                                     detail::StructRefArrayStorage&, usize index,
+                                     const void* elementType) noexcept;
     Result<void> ClearStructElements(const ObjectAccessContext&, ObjectHandle,
-                                     detail::StructRefArrayStorage&) noexcept;
+                                     detail::StructRefArrayStorage&,
+                                     const void* elementType) noexcept;
     Result<void> AssignStructElements(const ObjectAccessContext&, ObjectHandle,
                                       detail::StructRefArrayStorage&, usize count,
                                       uint64 transaction) noexcept;
@@ -1169,8 +1173,8 @@ private:
                               EdgeTally&) noexcept;
     // 잠금 밖·처리 표시 아래: StructRefArray 원소 블록들을 등록 struct trace로 훑어 null이 아닌
     // 간선을 out에 모은다(클러스터 장부). 원소 struct 조회 실패는 Unsupported다.
-    Result<void> CollectStructEdges(const detail::StructElementOps&, void* const* blocks,
-                                    uint32 count, Array<ObjectHandle>& out) noexcept;
+    Result<void> CollectStructEdges(const void* elementType, void* const* blocks, uint32 count,
+                                    Array<ObjectHandle>& out) noexcept;
     // 처리 표시를 내리고 result를 돌려준다.
     Result<void> EndProcessing(Result<void> result) noexcept;
 

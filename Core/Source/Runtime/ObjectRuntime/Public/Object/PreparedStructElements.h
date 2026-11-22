@@ -222,6 +222,9 @@ private:
     // 블록 소멸에 쓰는 배열의 allocator·원소 표다(owner가 사라져도 쓸 수 있게 묶을 때 복사한다).
     Allocator* elementAllocator_ = nullptr;
     const detail::StructElementOps* element_ = nullptr;
+    // 원소 struct의 native 키다(생성 thunk가 넘긴다 — 원소 표는 키를 담지 않는다,
+    // BuildTargets 3.8절 BS8d4).
+    const void* elementKey_ = nullptr;
     // 원소 struct의 등록 lease(trace — 지울 원소의 참조 수집과 게시의 검사합)다.
     TypeLease elementType_;
     ObjectRegistry* registry_ = nullptr;

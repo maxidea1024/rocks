@@ -427,7 +427,7 @@ crash-launch(공통 실행 진입점 Launch) 병합 뒤 단계 실행·묶음·L
 ML1(3.11절)으로 `PostConfigInit`·엔진 단계 모듈이 설정·로그·trace가 생긴 뒤에 시작하므로, 3.10절 끝에 넘긴 "서비스를 쓰는 `Startup` 등록"을 할 수 있게 됐다. 애매한 곳은 UE 5.8을 따랐다.
 
 **서비스 키를 Core로(MD18 보강).**
-- `HostServiceKey`·`HostServiceTraits`와 매크로 `ROCKS_DECLARE_HOST_SERVICE`·`ROCKS_DEFINE_HOST_SERVICE`를 Core `Core/Module/HostServiceKey.h`로 옮긴다. 서비스 표 `HostServices`는 그대로 ModuleLoader 모듈이다.
+- `HostServiceKey`·`HostServiceTraits`와 매크로 `ROCKS_DECLARE_HOST_SERVICE`·`ROCKS_DEFINE_HOST_SERVICE`를 Core `Core/Module/HostServiceKey.h`로 옮긴다. 선언 매크로는 BS8d4([빌드 타깃](BuildTargets.ko.md) 3.8절)부터 소유 모듈의 API 매크로를 둘째 인자로 받는다(`ROCKS_DECLARE_HOST_SERVICE(rocks::config::ConfigContext, ROCKS_CONFIG_API)` — Modular에서 다른 모듈이 `Key()`를 링크한다). 서비스 표 `HostServices`는 그대로 ModuleLoader 모듈이다.
 - 이유: 서비스 형식의 키는 그 형식을 가진 모듈이 선언·정의한다(MD18). 그런데 `LogSystem`은 Core에 있고 Core는 ModuleLoader에 의존할 수 없다(ModuleLoader가 Core에 의존한다). 진입점 계약을 Core에 둔 것(개정 2)과 같은 이유다. 키 헤더는 Core 기본 형식만 쓴다.
 - 버린 안: 키를 ModuleLoader 모듈에 모아 정의(소유 모듈이 아닌 곳이 다른 모듈 형식을 알게 된다), Config·TraceCapture가 ModuleLoader에 의존(키 하나 때문에 의존이 는다).
 

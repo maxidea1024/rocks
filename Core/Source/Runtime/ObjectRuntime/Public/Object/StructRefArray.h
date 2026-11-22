@@ -22,9 +22,9 @@ namespace detail {
 // 인스턴스화되면 생성 헤더가 없는 곳에서 컴파일이 깨진다(Trace는 StructRefArray::Trace가 직접
 // 부른다). 원소를 떼어 낼 때 그 원소만 trace해야 하는 곳(관찰자 Registry의 원소 제거·비우기 —
 // Docs/Design/ObjectFoundations.ko.md 3절)은 nativeType으로 TypeRegistry::AcquireStructByNative의
-// 등록 struct trace를 얻는다. 그래서 등록 struct의 RuntimeStructOps::trace는
-// GeneratedType<S>::Trace와 같은 간선을 방문해야 한다(생성 코드는 trace를 GeneratedType<S>::Trace로
-// 만든다 — 수동 등록이 다르게 주면 관찰자 계수가 어긋난다).
+// 등록 struct trace를 얻는다(키는 원소를 지우는 호출자가 넘긴다 — 아래). 그래서 등록 struct의
+// RuntimeStructOps::trace는 GeneratedType<S>::Trace와 같은 간선을 방문해야 한다(생성 코드는 trace를
+// GeneratedType<S>::Trace로 만든다 — 수동 등록이 다르게 주면 관찰자 계수가 어긋난다).
 struct StructElementOps {
     usize size = 0;
     usize alignment = 0;
@@ -32,10 +32,11 @@ struct StructElementOps {
     // 넘기고 없으면 noexcept S()다.
     void (*construct)(void* memory, Allocator& allocator) noexcept = nullptr;
     void (*destroy)(void* memory) noexcept = nullptr;
-    // 원소 타입의 native 키(&NativeTypeIdentity<S> — NativeTypeKey<S>()와 같은 주소)다.
-    // NativeTypeKey는 constexpr가 아니라 변수 주소를 직접 쓴다. struct 키는 리플렉션 struct도
-    // inline 표지다(생성 .cpp 키는 클래스만 — Docs/Design/BuildTargets.ko.md 3.8절 BS8b 한계).
-    const void* nativeType = nullptr;
+    // 원소 타입의 native 키는 담지 않는다: 키는 생성 .cpp가 정의한
+    // 주소라(Docs/Design/BuildTargets.ko.md 3.8절 BS8d4) 이 표를 인스턴스화하는 손으로 쓴
+    // 헤더(StructRefArray 필드를 가진 클래스의 inline 생성자)가 원소 struct의 생성 헤더를
+    // include해야 하게 된다. 원소를 지우는 호출자(RemoveElementAt· ClearElements — 그 번역 단위가
+    // 생성 헤더를 본다)가 키를 넘긴다.
 };
 
 template <class S>
@@ -57,8 +58,7 @@ struct StructElementOpsOf {
         static_cast<S*>(memory)->~S();
     }
 
-    static constexpr StructElementOps Value{sizeof(S), alignof(S), &Construct, &Destroy,
-                                            &NativeTypeIdentity<S>};
+    static constexpr StructElementOps Value{sizeof(S), alignof(S), &Construct, &Destroy};
 };
 
 // StructRefArray의 타입 없는 저장소다. 원소마다 블록 하나(주소 고정)이고 blocks는 그 포인터

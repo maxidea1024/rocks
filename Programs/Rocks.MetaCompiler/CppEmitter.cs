@@ -265,8 +265,8 @@ internal static class CppEmitter
         Line("#pragma once");
         Line($"#include <{include}>");
         // 모듈 API 매크로는 빌드가 정의 헤더로 넣는다. 빌드 밖에서 이 헤더를 컴파일하는 도구(시험)는 빈 값을 쓴다(Monolithic과 같다).
-        // 클래스(NativeKey)와 struct(out-of-line 정적 멤버 — BS8d2)가 매크로를 쓴다.
-        if (schema.Ordered.Any(type => type.Header == include && !type.IsEnum))
+        // 클래스·struct·enum 모두 매크로를 쓴다(NativeKey·out-of-line 정적 멤버 — BS8d2·BS8d4).
+        if (schema.Ordered.Any(type => type.Header == include))
         {
             Line($"#ifndef {ApiMacro(module)}");
             Line($"#define {ApiMacro(module)}");
@@ -363,7 +363,7 @@ internal static class CppEmitter
             Body(SiteComment(type.Header, type.Site.Line, type.Name));
             if (type.IsEnum)
             {
-                EmitEnum(type, Line, Body);
+                EmitEnum(type, module, Line, Body);
                 continue;
             }
 
@@ -905,9 +905,9 @@ internal static class CppEmitter
         };
     }
 
-    // 리플렉션 클래스의 native 키다(Docs/Design/BuildTargets.ko.md 3.8절 BS8b). 헤더는 모듈 API 매크로로 export한 선언만 두고,
-    // 생성 소스가 const가 아닌 정적 지역 저장소의 주소로 정의한다(소유 모듈에 하나 — 공유 라이브러리 사이에서도 같은 키). struct는
-    // 내지 않는다: struct 키는 헤더 템플릿의 상수 연산표가 쓰는 inline 표지다(BS8b 한계).
+    // 리플렉션 클래스·struct·enum(Binds 미러면 실제 타입)의 native 키다(Docs/Design/BuildTargets.ko.md 3.8절 BS8b·BS8d4). 헤더는 모듈 API
+    // 매크로로 export한 선언만 두고, 생성 소스가 const가 아닌 정적 지역 저장소의 주소로 정의한다(소유 모듈에 하나 — 공유 라이브러리
+    // 사이에서도 같은 키).
     private static void EmitNativeKey(string module, string self, Action<string> Line, Action<string> Body)
     {
         Line($"static {ApiMacro(module)} const void* NativeKey() noexcept;");
@@ -936,6 +936,7 @@ internal static class CppEmitter
         Line($"static constexpr bool ContainsInstancedStruct = {True(ContainsInstancedStruct(schema, type))};");
         Line($"static constexpr bool ContainsRequired = {True(ContainsRequired(schema, type))};");
         Line($"static constexpr uint32 Depth = {type.Depth}u;");
+        EmitNativeKey(module, self, Line, Body);
         checks.Add($"static_assert(Depth <= ::rocks::MaxStructDepth, \"ROCKS_STRUCT {type.Name} nesting depth exceeds MaxStructDepth (RMC2303)\");");
         // struct 상속(리플렉션 B9k): 리플렉션 base는 C++ base여야 하고, 비리플렉션 base는 필드가 없고 다형적이지 않아야 한다.
         if (type.Base.Length != 0)
@@ -952,6 +953,8 @@ internal static class CppEmitter
         if (type.Binds.Length != 0)
         {
             EmitBindsChecks(type, native, Line, Body);
+            // Binds 실제 타입은 ObjectRuntime 목록에 있어야 NativeTypeKey가 생성 헤더 없는 쓰임을 잡는다(BuildTargets 3.8절 BS8d4).
+            checks.Add($"static_assert(::rocks::BoundCoreValueV<{native}>, \"Binds target {type.Binds} must be listed in Object/BoundCoreValues.h (ROCKS_BOUND_CORE_VALUE) so that its key needs this generated header\");");
         }
 
         // 멤버 struct와 원소 struct는 깊이(원소 배열 멤버는 원소 깊이 + 1)와 형질을 포함해야 한다.
@@ -1277,8 +1280,9 @@ internal static class CppEmitter
     // Binds 미러 enum(CurveData CV9 — Core enum)은 실제 enum(NativeName)의 특수화를 내고 열거자 이름·값을 실제 enum과
     // 대조한다(미러가 나열한 열거자만 선언 값이다 — 실제 enum의 다른 열거자는 저장·쓰기에서 거부된다). 스키마 이름은
     // 미러 이름이다. 헤더에는 Id·IsDeclared(둘 다 constexpr로 쓰인다)와 선언만 두고, Schema·Register와 정적 검사는 생성 소스에 둔다.
-    private static void EmitEnum(ClassModel type, Action<string> Line, Action<string> Body)
+    private static void EmitEnum(ClassModel type, string module, Action<string> Line, Action<string> Body)
     {
+        Line = ExportingLine(module, Line);
         string native = "::" + type.NativeName;
         string self = $"GeneratedType<{native}>";
         List<string> checks = [];
@@ -1292,6 +1296,7 @@ internal static class CppEmitter
 
         Line($"static constexpr TypeId Id() noexcept {{ return {GuidValue(type.Id)}; }}");
         Line("static const EnumSchema& Schema() noexcept;");
+        EmitNativeKey(module, self, Line, Body);
         Body($"const EnumSchema& {self}::Schema() noexcept {{");
         Body("static const EnumeratorSchema values[] = {");
         foreach (EnumeratorModel value in type.Enumerators)

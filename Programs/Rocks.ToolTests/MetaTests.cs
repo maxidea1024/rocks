@@ -71,6 +71,7 @@ internal static partial class MetaTests
         GeneratedBodyReviewTests.Register(suite, options, actualEnvironment);
         TypeConvenienceCompilerTests.Register(suite, options, actualEnvironment);
         NativeClassCompilerTests.Register(suite, options, actualEnvironment);
+        NativeTypeKeyCompilerTests.Register(suite, options, actualEnvironment);
         IdentityCompilerTests.Register(suite, options, actualEnvironment);
         IdentityCliReviewTests.Register(suite, options, actualEnvironment);
         ModuleMetaTests.Register(suite, options, actualEnvironment);

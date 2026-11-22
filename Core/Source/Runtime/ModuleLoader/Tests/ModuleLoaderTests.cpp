@@ -95,7 +95,7 @@ bool JournalIs(const char* const (&expected)[Count]) noexcept {
 
 } // namespace module_loader_test
 
-ROCKS_DECLARE_HOST_SERVICE(module_loader_test::ProbeService)
+ROCKS_DECLARE_HOST_SERVICE(module_loader_test::ProbeService, )
 ROCKS_DEFINE_HOST_SERVICE(module_loader_test::ProbeService)
 
 namespace module_loader_test {

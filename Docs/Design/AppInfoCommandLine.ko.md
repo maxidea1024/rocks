@@ -1,6 +1,6 @@
 # 앱 정보와 명령줄 설계
 
-기준일: 2026-11-19, 개정 3(크래시 수집·실행 진입점 반영). 사용자 지시("설계문서만 작성해놔")로 쓴 설계이고 구현하지 않는다. 단, AP1의 일부(`ProcessCommandLine`·대화상자 억제 API·진입점 연결)는 [크래시 처리·실행 진입점](CrashHandlingAndLaunch.ko.md)(LC3·LC4)이 먼저 구현했다(12절·18절). 결정은 권장안으로 확정했다(19절). 범위가 큰 항목은 19절에 따로 표시했다. 바뀐 점은 21절에 있다.
+기준일: 2026-11-22, 개정 4(오디오 실행 성격 `RunTraits::audioOutput`·`audioMuted`와 `--no-sound`·`--mute-audio`·`--allow-commandlet-audio` — [오디오 시스템](AudioSystem.ko.md) 3.8.4절). 개정 3: 크래시 수집·실행 진입점 반영. 사용자 지시("설계문서만 작성해놔")로 쓴 설계이고 구현하지 않는다. 단, AP1의 일부(`ProcessCommandLine`·대화상자 억제 API·진입점 연결)는 [크래시 처리·실행 진입점](CrashHandlingAndLaunch.ko.md)(LC3·LC4)이 먼저 구현했다(12절·18절). 결정은 권장안으로 확정했다(19절). 범위가 큰 항목은 19절에 따로 표시했다. 바뀐 점은 21절에 있다.
 
 **착수 시점.** 고정 구현 순서(Curve → A0-G → A1–A6 → 화면 마일스톤)를 바꾸지 않는다. 이 문서의 단계(AP·CL — 18절)는 그 순서 안에 끼워 넣지 않으며 착수 시점은 사용자가 정한다. AP3(프레임 시간 전달)은 렌더 기반 RB1의 프레임 packet과 CVar 설계의 worker 묶음 장치에 기대므로 그 단계들과 함께 간다.
 
@@ -63,7 +63,7 @@ UE 이름은 6절 대응표와 근거 문장에만 쓴다.
 - UE `FEngineLoop` 구조 자체(PreInit·Init·Tick 순서). Rocks 엔진 루프는 [엔진 런타임](EngineRuntime.ko.md)과 `Engine::RunFrame`이 정한다. 이 문서는 부트 순서에 끼우는 지점만 적는다(8.3절).
 - UE Zen 저장소 프로젝트 ID(`GetZenStoreProjectId`). Rocks 파생 데이터 캐시는 에셋 너겟이고 Zen 대응이 없다.
 - UE 원격 세션 도구의 사용자 허가 목록(`AuthorizeUser`·`DenyUser`). 대응하는 원격 세션 도구가 없다.
-- 오디오 볼륨 배수와 VR 포커스. 오디오 모듈·XR 설계 때 정한다(8.6절).
+- 오디오 볼륨 배수와 VR 포커스. 오디오는 [오디오 시스템](AudioSystem.ko.md)이 정했고(8.6절), XR은 그 설계 때 정한다.
 
 ## 3. UE 5.8 `FApp` 조사
 
@@ -125,7 +125,7 @@ UE는 별도 모듈 `BuildSettings`가 UBT 정의 매크로(`Runtime/BuildSettin
 | `IsGame` (`APP` 176) | 게임처럼 동작 중(에디터의 Tryout 포함) | `GIsEditor`·`GIsPlayInEditorWorld`. Tryout 전환 때 게임 스레드가 바꾼다. 주석이 "worker에서 믿을 수 없다"고 적는다(`APP` 169) | 게임 스레드 | 없음 | AppInfo에 두지 않는다. 에디터·Tryout 구분은 World 종류가 맡는다 |
 | `CanEverRender` (`APP` 400) | 렌더링할 수 있는 프로세스 | `UE_SERVER`, commandlet, `-nullrhi`를 처음 한 번 읽는다 | 아무 스레드(Runtime 91개 파일) | 없음. 헤드리스 실행은 Sandbox `--engine`의 고정 delta(`Programs/Sandbox/Private/EngineHost.cpp:27,42`)뿐이고 Null graphics backend가 없다(`Engine/Source/Runtime/Graphics/Public/Graphics/DeviceTypes.h:19–25`) | `RunTraits::headless`(10절) |
 | `CanEverRenderOrProduceRenderData` (`APP` 419) | 렌더하거나 렌더 데이터를 만든다(쿠커) | 계산 | 아무 스레드 | 없음 | 두지 않는다. 쿠커는 Program 대상이고 렌더 데이터 생성 여부는 쿠커가 안다 |
-| `CanEverRenderAudio` (`APP` 431), `IsAudioMuted` (`APP` 453) | 소리 장치를 쓸지 / 마지막 출력만 끌지 | `-nosound`·`-enablesound`·`-muteaudio`, benchmark·서버·commandlet | 오디오 스레드·게임 스레드 | 오디오 모듈 없음 | 이름만 예약한다(`--no-sound`·`--mute-audio`). 오디오 모듈 설계 때 연다 |
+| `CanEverRenderAudio` (`APP` 431), `IsAudioMuted` (`APP` 453) | 소리 장치를 쓸지 / 마지막 출력만 끌지 | `-nosound`·`-enablesound`·`-muteaudio`, benchmark·서버·commandlet | 오디오 스레드·게임 스레드 | 오디오 모듈 없음 | `RunTraits::audioOutput`·`audioMuted`(8절 struct, 10.2절 — 개정 4) |
 | `IsInstalled` (`APP` 473, `APPC` 212–242), `IsEngineInstalled` (`APP` 485, `APPC` 245–272) | 설치형 실행(설치 폴더에 쓰지 않음) | 출시 데스크톱 기본 + 표지 파일 + `-Installed`·`-NotInstalled` | 아무 스레드 | Config가 "설치 경로 규칙은 패키징 단계에서 정한다"고 적었다([설정 계층](ConfigSystem.ko.md) 5.4절) | 패키징 단계로 미룬다 |
 | `IsUnattended` (`APP` 495, `APPC` 274–280) | 사람이 지켜보지 않음(대화상자 금지) | `-UNATTENDED`를 처음 한 번 읽고, `GIsAutomationTesting`과 OR | 아무 스레드(48개 파일) | 없음. PlatformBase에 대화상자 정책 API도 없다 | `RunTraits::unattended` |
 | `AllowUnattendedInput` (`APP` 505) | 무인 실행이어도 입력 모듈을 켠다 | `-UnattendedInput` | 입력 초기화 | 없음 | `RunTraits::unattendedInput` |
@@ -377,6 +377,8 @@ struct RunTraits {
     bool useFixedTimeStep = false;  // 엔진 프레임 delta를 fixedDeltaSeconds로 고정한다
     double fixedDeltaSeconds = 1.0 / 30.0; // 고정 step 길이(초). UE FixedDeltaTime 기본값과 같다
     bool headless = false;          // 창·그래픽 장치를 만들지 않는다
+    bool audioOutput = true;        // 소리 장치를 만든다. 부트가 Server 대상·commandlet(--allow-commandlet-audio가 없으면)·benchmark·--no-sound면 false로 정한다(UE FApp::CanEverRenderAudio)
+    bool audioMuted = false;        // 장치·믹서는 돌리고 마지막 출력만 끈다(--mute-audio, UE FApp::IsAudioMuted)
 
     // 엔진이 실제로 고정 step을 쓰는지다(UE UpdateTimeAndHandleMaxTickRate와 같은 판정).
     bool UsesFixedTimeStep() const noexcept { return benchmark || useFixedTimeStep; }
@@ -452,7 +454,7 @@ Config 5.4절 부트 순서 앞뒤에 다음을 끼운다.
 | UE 값 | Rocks에서 맡는 곳 | 이유 |
 |---|---|---|
 | 포커스(`HasFocus`) | PlatformWindow 이벤트를 받은 엔진이 프레임 상태로 공개한다: `Engine::IsForeground()`(게임 lane). 다른 lane이 필요하면 프레임 packet에 넣는다. benchmark면 늘 true(UE `APPC` 347–350과 같다) | 실행 중 바뀐다. 원천은 `ui::Platform`·PlatformWindow다 |
-| 볼륨 배수·포커스 잃었을 때 배수 | 오디오 모듈의 `audio.*` CVar | 설정 값이다. UE도 config에서 읽는다(`APPC` 316) |
+| 볼륨 배수·포커스 잃었을 때 배수 | 오디오 모듈의 `audio.*` CVar(`audio.master.volume`·`audio.unfocused.volume` — [오디오 시스템](AudioSystem.ko.md) 3.8.5절) | 설정 값이다. UE도 config에서 읽는다(`APPC` 316) |
 | 그래픽 API 이름 | Graphics 장치 정보 | 장치를 만든 뒤에야 안다 |
 | 게임 중인지(`IsGame`) | World 종류 | World마다 다르다 |
 | 세션 이름 바꾸기 | 없음 | 실행 중 바꿀 이유가 없다 |
@@ -540,18 +542,21 @@ uint64 LatestFrameIndex() noexcept;
 |---|---|---|---|
 | `--unattended` | `unattended = true` | 받는다 | `-UNATTENDED`(`APPC` 278) |
 | `--unattended-input` | `unattendedInput = true` | 받는다 | `-UnattendedInput`(`APPC` 286) |
-| `--benchmark` | `benchmark = true`. 고정 step(`UsesFixedTimeStep`)과 `fixedSeed = true`를 함께 뜻한다. 포커스는 늘 true, 소리는 끈다(오디오 모듈이 생기면) | **받지 않는다** | `-BENCHMARK`(`LEL` 2449–2454, 출시는 false), 고정 step(`UEN` 3005), 시드(`LEL` 2462), 소리(`APP` 437) |
+| `--benchmark` | `benchmark = true`. 고정 step(`UsesFixedTimeStep`)과 `fixedSeed = true`를 함께 뜻한다. 포커스는 늘 true, 소리는 끈다(`audioOutput = false`) | **받지 않는다** | `-BENCHMARK`(`LEL` 2449–2454, 출시는 false), 고정 step(`UEN` 3005), 시드(`LEL` 2462), 소리(`APP` 437) |
 | `--use-fixed-time-step` | `useFixedTimeStep = true` | 받는다 | `-UseFixedTimeStep`(`LEL` 2460) |
 | `--deterministic` | `useFixedTimeStep = true`, `fixedSeed = true`. 길이는 `fixedDeltaSeconds`(기본 1/30) | 받는다 | `-Deterministic`(`LEL` 2456–2462, "-UseFixedTimeStep -FixedSeed"의 줄임) |
 | `--fixed-seed` | `fixedSeed = true` | 받는다 | `-FixedSeed`(`LEL` 2462) |
 | `--fps <rate>` | `fixedDeltaSeconds = 1 / rate`. **고정 step을 켜지 않는다**(길이만 바꾼다). `Range`로 rate는 0보다 크고 유한하다 | 받지 않는다 | `-FPS=`(`LEL` 4724–4731, 비출시) |
 | `--headless` | `headless = true` | 받는다 | `-nullrhi`(뜻이 넓다 — 창·장치를 아예 만들지 않는다) |
+| `--no-sound` | `audioOutput = false` | 받는다 | `-nosound`(`APP` 436, `-enablesound`는 두지 않는다 — 뒤 값이 앞 값을 덮는다) |
+| `--mute-audio` | `audioMuted = true` | 받는다 | `-muteaudio`(`APP` 443–453) |
+| `--allow-commandlet-audio` | commandlet에서도 `audioOutput`을 끄지 않는다 | 받지 않는다 | `IsAllowCommandletAudio()`(`APP` 437) |
 | `--instance-id <guid>` | AppInfo `instanceId` | 받지 않는다 | `-InstanceId=`(`APPC` 182–188) |
 | `--session-id <guid>`·`--session-name <text>` | AppInfo `sessionId`·`sessionName` | 받지 않는다 | `-SessionId=`·`-SessionName=`(`APPC` 191–203). UE도 `InitializeSession`을 비출시에서만 부른다(`LEL` 6880–6886) |
 
 - UE 고정 step 계열(`-UseFixedTimeStep`·`-Deterministic`·`-FixedSeed`)은 `WITH_FIXED_TIME_STEP_SUPPORT` 안에 있고, 이 매크로는 기본 켜짐이라 Shipping에서도 동작한다(3.5절). Rocks도 출시 빌드에서 받는다.
 - 시험 실행기(`HostKind::TestRunner`)는 `unattended`가 기본 true다(UE `GIsAutomationTesting` OR와 같은 뜻).
-- 이름만 예약하고 지금 받지 않는 것: `--no-sound`·`--mute-audio`(오디오 모듈), `--single-thread`(20절).
+- 이름만 예약하고 지금 받지 않는 것: `--single-thread`(20절). `--no-sound`·`--mute-audio`는 개정 4에서 오디오 설계와 함께 열었다(구현은 오디오 AU3 또는 AP1 중 먼저 오는 쪽).
 - 출시 빌드에서 받지 않는 옵션에는 Command 전용 지정자 `NotInRelease`를 붙인다(13.3절). Release 구성의 파서는 이 옵션을 "알 수 없는 옵션"으로 다룬다. 기준은 대상 종류와 무관한 Release 구성이다(UE `!UE_BUILD_SHIPPING`과 같은 뜻).
 
 ## 11. 빌드 정보 주입
@@ -1377,3 +1382,4 @@ System.CommandLine은 토큰을 명령 모델에 맞춰 나누고 값을 변환�
   - 12절·D15: Windows `main(char**)`·`WinMain`의 `GetCommandLineW` 직접 분해를 지웠다(그 설계 D7). Launch 진입점은 늘 `wmain`·`wWinMain`(CRT `__wargv`)이다. 17절의 직접 분해 표 시험도 뺐다.
   - 7.1절 PlatformBase 행, 8.3절 0단계(Launch가 캡처, 실패 종료 코드는 `commandLineFailureExitCode`)를 맞췄다.
   - 18절 AP1: 크래시 처리 설계가 먼저 구현한 부분을 적고, 남은 일(`ApplicationKind` → `HostKind`, `suppressSystemErrorDialogs` ← `RunTraits::unattended`)을 적었다. 크래시 메타데이터에 가린 명령줄(CL2 뒤)·`--crash-*` 호스트 공용 옵션(CL4 뒤)·`BuildDescription`(AP2 뒤)을 더하는 일은 그 설계 21절에 있다.
+- **개정 4(2026-11-22)**: [오디오 시스템](AudioSystem.ko.md) 요구로 오디오 실행 성격을 열었다. `RunTraits::audioOutput`(부트가 Server 대상·commandlet·benchmark·`--no-sound`로 정함)·`audioMuted`(`--mute-audio`), 비출시 `--allow-commandlet-audio`. UE `-enablesound`는 두지 않는다. 볼륨 배수는 오디오 CVar로 넘겼다(8.6절).

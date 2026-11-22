@@ -232,8 +232,10 @@ public:
     // StructRefArray 끝 지점이 부른다: 출력 준비물이 묶이지 않았으면 storage에 묶고(지금 원소
     // 수·변경 계수), 묶였으면 같은 owner·배열(아니면 InvalidArgument(InvalidValue))과 변경
     // 계수(아니면 Busy)를 확인한 뒤 게시된 객체면 지울 원소 안의 참조를 다시 모은다. 할당은 고정
-    // 아래 하고 owner를 다시 확인한다.
-    Result<void> BindStructElements(StructRefArrayStorage& storage) noexcept;
+    // 아래 하고 owner를 다시 확인한다. elementType은 원소 struct의 native 키(NativeTypeKey<S>() —
+    // 생성 thunk가 넘긴다, BuildTargets 3.8절 BS8d4)다.
+    Result<void> BindStructElements(StructRefArrayStorage& storage,
+                                    const void* elementType) noexcept;
 
     // Write·Insert의 입력 값이다(Insert의 struct 원소는 nullptr). 검증을 마친 값이다.
     const FieldValue* Input() const noexcept {

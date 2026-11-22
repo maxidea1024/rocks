@@ -440,6 +440,7 @@ void PreparedStructElements::Reset() noexcept {
     storage_ = nullptr;
     elementAllocator_ = nullptr;
     element_ = nullptr;
+    elementKey_ = nullptr;
     registry_ = nullptr;
     owner_ = {};
     kind_ = PathTarget::Kind::Object;
@@ -450,7 +451,8 @@ void PreparedStructElements::Reset() noexcept {
 
 namespace detail {
 
-Result<void> PathCursor::BindStructElements(StructRefArrayStorage& storage) noexcept {
+Result<void> PathCursor::BindStructElements(StructRefArrayStorage& storage,
+                                            const void* elementType) noexcept {
     PreparedStructElements& out = *elements_;
     if (out.IsReady()) {
         if (out.storage_ != &storage || !(out.owner_ == owner_) || out.kind_ != root_) {
@@ -508,6 +510,7 @@ Result<void> PathCursor::BindStructElements(StructRefArrayStorage& storage) noex
     out.storage_ = &storage;
     out.elementAllocator_ = storage.allocator;
     out.element_ = storage.element;
+    out.elementKey_ = elementType;
     out.registry_ = &registry_;
     out.owner_ = owner_;
     out.kind_ = root_;
@@ -574,7 +577,7 @@ Result<void> PathPrepareStructElements(ObjectRegistry& registry, const ObjectAcc
 
     if (first) {
         // 지울 원소의 trace는 등록 struct의 실행 정보로 얻는다(StructRefArray.h의 원소 표 규칙).
-        auto lease = registry.Types().AcquireStructByNative(out.element_->nativeType);
+        auto lease = registry.Types().AcquireStructByNative(out.elementKey_);
         if (!lease) {
             out.Reset();
             return Result<void>::Failure(ErrorCode::Unsupported);
