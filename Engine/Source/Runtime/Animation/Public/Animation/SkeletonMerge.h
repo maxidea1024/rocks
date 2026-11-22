@@ -54,8 +54,8 @@ struct BoneMergeResult {
 //
 // 전제: 두 계층의 Name은 같은 pool이 발급했다(Name 비교는 pool 안 토큰 비교다).
 // 스레드: 입력을 읽기만 한다.
-Result<void> MergeBoneHierarchy(const BoneHierarchy& skeleton, const BoneHierarchy& mesh,
-                                BoneMergeResult& out,
-                                SkeletonDiagnostic* failure = nullptr) noexcept;
+ROCKS_ANIMATION_API Result<void> MergeBoneHierarchy(const BoneHierarchy& skeleton,
+                                                    const BoneHierarchy& mesh, BoneMergeResult& out,
+                                                    SkeletonDiagnostic* failure = nullptr) noexcept;
 
 } // namespace rocks

@@ -176,8 +176,9 @@ struct OverlappingWedges {
 
 // 겹치는 wedge 표를 만든다(UE FindOverlappingCorners와 같은 키 0.30X + 0.33Y + 0.37Z 정렬 훑기 —
 // 키 차가 임계값을 넘으면 그 뒤는 보지 않고, 같은 키는 wedge 번호 순). 오류: 할당 실패.
-Result<void> FindOverlappingWedges(const MeshSource& mesh, float threshold, Allocator& scratch,
-                                   OverlappingWedges& out) noexcept;
+ROCKS_MESHTOOLS_API Result<void> FindOverlappingWedges(const MeshSource& mesh, float threshold,
+                                                       Allocator& scratch,
+                                                       OverlappingWedges& out) noexcept;
 
 // 코너 법선·tangent 계산 설정이다(UE EComputeNTBsFlags).
 struct CornerBasisOptions {

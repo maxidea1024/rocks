@@ -129,29 +129,29 @@ inline constexpr uint32 SkinnedMeshBuildSettingFieldCount = 23;
 
 // 필드 이름이다(리플렉션 필드 이름과 같다 — 예: GenerateLightmapUVs → "generateLightmapUVs").
 // 모르는 값은 "Unknown"이다. 반환 문자열은 정적 수명이다(진단 줄·로그가 쓴다).
-const char* MeshBuildSettingFieldName(MeshBuildSettingField field) noexcept;
+ROCKS_MESH_API const char* MeshBuildSettingFieldName(MeshBuildSettingField field) noexcept;
 
 // 정적 메시 빌드에서 4.1절 "보존" 필드인지다(빌드가 소비하지 않고 기본값이 아니면
 // UnsupportedSetting). 스킨 필드와 모르는 값은 false다.
-bool IsPreservedMeshBuildSetting(MeshBuildSettingField field) noexcept;
+ROCKS_MESH_API bool IsPreservedMeshBuildSetting(MeshBuildSettingField field) noexcept;
 
 // 스킨 메시 빌드에서 보존 필드인지다: 정적 메시의 보존 필드에 buildScale을 더한다(6.5절 3). 스킨
 // 필드와 모르는 값은 false다.
-bool IsPreservedSkinnedMeshBuildSetting(MeshBuildSettingField field) noexcept;
+ROCKS_MESH_API bool IsPreservedSkinnedMeshBuildSetting(MeshBuildSettingField field) noexcept;
 
 // settings의 field가 기본값(MeshBuildSettings{}의 값)과 다른지다. 실수 필드는 비트 단위로 비교한다
 // (-0.0도 기본값 +0.0과 다르다 — 저장 byte가 다르다). 스킨 필드와 모르는 값은 false다.
-bool IsMeshBuildSettingChanged(const MeshBuildSettings& settings,
-                               MeshBuildSettingField field) noexcept;
+ROCKS_MESH_API bool IsMeshBuildSettingChanged(const MeshBuildSettings& settings,
+                                              MeshBuildSettingField field) noexcept;
 
 // settings의 field가 기본값(SkinnedMeshBuildSettings{}의 값)과 다른지다(공통 필드는 위 함수와
 // 같고 스킨 필드도 본다). 모르는 값은 false다.
-bool IsMeshBuildSettingChanged(const SkinnedMeshBuildSettings& settings,
-                               MeshBuildSettingField field) noexcept;
+ROCKS_MESH_API bool IsMeshBuildSettingChanged(const SkinnedMeshBuildSettings& settings,
+                                              MeshBuildSettingField field) noexcept;
 
 // Mesh 리플렉션 타입(MeshBuildSettings·SkinnedMeshBuildSettings)을 등록한다(생성 집계 함수
 // generated::Mesh::RegisterModuleTypes를 부른다 — 의존 모듈 타입도 함께). 도구·시험은 직접, 엔진은
 // 메시 에셋 모듈이 부른다.
-Result<void> RegisterMeshTypes(ModuleRegistration& registration) noexcept;
+ROCKS_MESH_API Result<void> RegisterMeshTypes(ModuleRegistration& registration) noexcept;
 
 } // namespace rocks

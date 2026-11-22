@@ -116,7 +116,7 @@ struct AdditiveSettings {
 // 사용 예:
 //   const FrameRate rate = clip.targetFrameRate.Resolve(platformName);
 ROCKS_STRUCT()
-struct PlatformFrameRate {
+struct ROCKS_ANIMATION_API PlatformFrameRate {
     ROCKS_GENERATED_BODY()
 
     explicit PlatformFrameRate(Allocator& allocator) noexcept : overrides(allocator) {

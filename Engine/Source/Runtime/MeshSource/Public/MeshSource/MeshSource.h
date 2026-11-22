@@ -71,7 +71,7 @@ struct MeshAttributeInfo {
 // 수명: allocator는 이 객체보다 오래 살아야 한다. 반환 span·view는 같은 종류의 배열을 늘리는 호출
 // (Add*·AddAttribute·Set*·Load)까지 유효하다. 이동 전용이다.
 // 스레드: 동기화하지 않는다. 한 스레드가 고치는 동안 다른 스레드가 읽지 않는다(읽기끼리는 된다).
-class MeshSource {
+class ROCKS_MESHSOURCE_API MeshSource {
 public:
     explicit MeshSource(Allocator& allocator) noexcept;
 
@@ -323,6 +323,7 @@ private:
 // MeshSource 리플렉션 타입(MeshElement·MeshValueType·MeshAttributeRecord·MeshSourceData)을 등록한다
 // (생성 집계 함수 generated::MeshSource::RegisterModuleTypes를 부른다 — 의존 모듈 AssetRuntime
 // 타입도 함께). 도구·시험은 직접, 엔진은 메시 에셋 모듈이 부른다.
-Result<void> RegisterMeshSourceTypes(ModuleRegistration& registration) noexcept;
+ROCKS_MESHSOURCE_API Result<void>
+RegisterMeshSourceTypes(ModuleRegistration& registration) noexcept;
 
 } // namespace rocks

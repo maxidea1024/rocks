@@ -44,7 +44,7 @@ enum class SkeletonIssue : uint8 {
 };
 
 // 세부 규칙 이름이다(예: ParentOrder → "ParentOrder"). 모르는 값은 "Unknown"이다. 정적 수명이다.
-const char* SkeletonIssueName(SkeletonIssue issue) noexcept;
+ROCKS_ANIMATION_API const char* SkeletonIssueName(SkeletonIssue issue) noexcept;
 
 // 진단이 가리키는 계층이다(병합은 두 계층을 본다).
 enum class BoneHierarchyRole : uint8 {
@@ -70,7 +70,8 @@ struct SkeletonDiagnostic {
 
 // diagnostic을 AssetSystem 4.6절 형식으로 옮긴다: code·error는 그대로, asset은 인자, section은 0,
 // detail은 index(SkeletonNoIndex면 0)다.
-AssetDiagnostic ToAssetDiagnostic(const SkeletonDiagnostic& diagnostic, AssetId asset) noexcept;
+ROCKS_ANIMATION_API AssetDiagnostic ToAssetDiagnostic(const SkeletonDiagnostic& diagnostic,
+                                                      AssetId asset) noexcept;
 
 // 클립 진단이 가리키는 세부 규칙이다(7.5절). 값은 저장 형식이 아니다. 경고(UnknownBoneTrack)를 빼면
 // 모두 InvalidClipData(로드 중이면 CorruptPackage) 아래의 규칙이다.
@@ -117,7 +118,7 @@ enum class ClipIssue : uint8 {
 inline constexpr uint32 ClipNoIndex = NumericLimits<uint32>::Max();
 
 // 세부 규칙 이름이다(예: EventOrder → "EventOrder"). 모르는 값은 "Unknown"이다. 정적 수명이다.
-const char* ClipIssueName(ClipIssue issue) noexcept;
+ROCKS_ANIMATION_API const char* ClipIssueName(ClipIssue issue) noexcept;
 
 // 클립 진단 하나다. 실패한 호출이 out 인자로 채우고(성공하면 건드리지 않는다), 경고는 배열로
 // 받는다.
@@ -135,6 +136,7 @@ struct ClipDiagnostic {
 
 // diagnostic을 AssetSystem 4.6절 형식으로 옮긴다: code·error는 그대로, asset은 인자, section은 0,
 // detail은 index(ClipNoIndex면 0)다.
-AssetDiagnostic ToAssetDiagnostic(const ClipDiagnostic& diagnostic, AssetId asset) noexcept;
+ROCKS_ANIMATION_API AssetDiagnostic ToAssetDiagnostic(const ClipDiagnostic& diagnostic,
+                                                      AssetId asset) noexcept;
 
 } // namespace rocks
