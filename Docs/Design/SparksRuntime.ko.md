@@ -3,6 +3,7 @@
 이 문서는 Sparks 언어 코어의 LC6(실행 모델)을 정한다. 언어 의미는 SparksLanguage(SL) §4.3·§5·§6·§7·§8.3·§9가 정본이고, 이 문서는 그 의미를 VM 쪽에서 어떻게 실현하는지(자료 구조·순서·host interface 2차·bytecode 형식 v3·시험)를 정한다. LC5(SparksVm.ko.md)의 링크·host interface 1차 위에 쌓는다.
 
 - 개정 1(2026-11-22): 첫 판. 하위 단계 LC6a–LC6e, 결정 R1–R12.
+- 개정 8(2026-11-22): LC6d 설계(2.6절) — LC6d1 유지 자원(형식 v4 held 레지스터·필드 표지, RELEASE, 해제 경로), LC6d2 지연 적용·CloseSession, LC6d3 fault 위치별 처리·격리, LC6d4 예산, LC6d5 로드 요청. 결정 R18–R25.
 - 개정 7(2026-11-22): LC6c2 리뷰 반영(2.5절).
 - 개정 6(2026-11-22): LC6c2 구현 메모(2.5절 "LC6c2 구현").
 - 개정 5(2026-11-22): LC6c2 설계(2.5절) — `WAITEV`(이벤트 대기 handle, `AWAITEV` 대체)·전달 순회 안 재개·발행자 파괴, `CALLW`(void async 호출의 하위 실행 — child frame 경계 정지·fault 전파), `Advance(…, paused)`. 결정 R13–R17.
@@ -18,7 +19,11 @@
 | LC6b 발행·전달 | `emit`·발행 큐(FIFO)·연결 표(slot·generation)·`on 경로.이벤트` 연결(자기 필드·객체 필드·배열 원천·native 이벤트는 host 2차)·Changed(조각 값 기준)·연쇄 깊이 상한 16·전달 상한·이월 재검증 | 전달 순서 golden, CascadeLimit·BudgetExceeded 시험 |
 | LC6c1 async 실행 | 실행 조각과 정지(`AWAIT` — frame stack 보관), 기본 대기(`Delay`·`NextTick`·`NextFixedTick`·`All`·`Race`), 시계·재개 순서(SL §6.1), 취소(Disable·Detach), 재진입 정책(`@skipWhileBusy`·`@restart`), `await F()`(async 함수) 직접 호출 | `Run/Async` golden(재개 순서·취소·재진입), 할당 실패 전수 |
 | LC6c2 async 나머지 | 이벤트 대기(`AWAITEV` — 전달 순회 안 재개), async 함수 호출을 대기 값으로 쓰기(`All(F(), G())` — 하위 실행·fault 전파), 시계 `paused`, Start 준비 대기, Execution 트리·EndExec | 이벤트 대기·하위 실행 golden |
-| LC6d 자원·지연·격리 | 유지 자원(획득 → 해제 → 저장, 실행·instance 범위 해제), 로드 요청 handle(host 2차), 활성 전환·파괴 지연 큐(적용 루프 64회), fault 위치별 처리와 격리(SL §8.3 표), 예산(instance·session — SL §9.3), CloseSession(ledger 0) | 누수 0 시험, 격리·예산 시험 |
+| LC6d1 유지 자원 | 형식 v4(함수 표의 held 레지스터 구간, CLASS 필드 held 표지), `RELEASE`, 필드 대입 순서(획득 → 이전 해제 → 저장), 실행 끝·fault·취소·Disable·Detach 해제, `VmHost::ReleaseHeld` | `Run/Held` golden(해제 순서·경로), 할당 실패 전수 |
+| LC6d2 지연 적용·CloseSession | 활성 전환·파괴 요청 큐와 적용 루프(64회), 프레임 끝 정리(Disable·Destroy·Detach), `CloseSession`(admission 차단 → Detach → 큐·Changed 폐기 → ledger 0) | `.run` `request`·`apply`·`endframe`·`close` golden, ledger 0 |
+| LC6d3 fault 처리·격리 | SL §8.3 발생 위치별 처리(spawn Enable·재활성화·Start·Tick 계열·그 밖), 600 프레임 안 세 번째 fault 격리, 격리 상태(admission은 Destroy hook만), fault 보고 집계 | 격리 golden |
+| LC6d4 예산 | 실행 조각·Teardown 명령 예산, 호출 깊이, 메모리(session·instance), 구독 연결(instance·session), 동시 실행(instance) — 거부 규칙(SL §9.3) | 예산 시험 |
+| LC6d5 로드 요청 | `LoadRequest<T>` 대기(host 2차 — 시작·완료·결과·취소 반환), `await req`의 `Result<T>`, instance당 진행 중 32 | 가짜 host 로드 golden |
 | LC6e 시나리오·Gate | SL §2 예시 시나리오 전달 순서 golden, Gate G1(누수 0)·G4(fault 격리) | corpus `Scenario/*` 통과 |
 
 ## 2. 구조
@@ -123,6 +128,21 @@
   - **시험:** `Run/Async` 리뷰 절(발행 뒤 같은 조각의 대기, Race에서 끝난 하위 실행이 자기 발행보다 먼저 승리, 전달 순회 안의 하위 완료와 부모 재개, 하위 실행끼리 Race, Race 안 하위 fault, 하위 실행의 `try` 실패(정지 전·뒤), `Peer?.Child()` null·있음, `@restart`·Disable과 하위 실행, 일시 정지 묶음), verifier 음성(`CALLW` Ref 창), 할당 실패 전수 `SparksConformance_RunGoldenAllocationFailureAsync`.
   - **남은 것:** 엔진 객체 발행자 소멸 시험(`.run`에 host 객체 파괴 지시가 없다 — 연동 단계), 깊은 하위 실행 사슬의 깊이 상한 시험(256단계 — 측정 시험과 함께), Drain의 이벤트 대기 찾기와 생존 검사의 선형 탐색(측정 뒤 발행자 색인), import 모듈 async 메서드의 `CALLW`·재링크 사례(다중 모듈 `.run` 뒤).
 - **결정:** R13 대안(`AWAITEV` 유지 + 묶음 인자용 별도 명령)은 대기를 만드는 길이 둘이 되어 발행자 파괴·순서 규칙이 두 번 구현된다. R14 대안(하위 실행을 처음부터 별도 실행 문맥에서 돌림)은 인자 창·반환 규약을 다시 만들어야 하고 같은 조각 안의 동기 구간(첫 await 전)이 다른 문맥이 된다 — 경계 표지는 보통 호출과 같은 경로를 쓰고 정지할 때만 나눈다. R15는 SL §6.1 "하위 작업의 fault는 부모 실행의 fault가 되어 형제를 취소한다" 그대로다. R16 대안(host가 일시 정지 중 Advance를 부르지 않음)은 UI 시계 대기(`Delay(0.0, Clock.UI)`)가 멈춘다. R17: LC6c2 시험은 `Run/Async`에 이벤트 대기·발행자 파괴·하위 실행(반환·정지·fault·취소)·일시 정지 사례를 더하고 할당 실패 전수를 본다.
+
+### 2.6 자원·지연·격리·예산(LC6d)
+
+- **유지 자원 레지스터(R18):** 유지 자원(binding schema `held` 타입 — SL §7.1)을 담는 지역은 컴파일러가 함수마다 Ref bank의 고정 구간 `[heldFirst, heldFirst + heldCount)`에 둔다(레지스터 할당이 그 구간을 다른 값에 다시 쓰지 않는다). 형식 v4는 함수 표에 이 구간을 더한다. 그 레지스터는 언제나 0이거나 유지 자원 handle이므로 VM은 frame만 보고 해제할 것을 안다(pc별 생존 표가 필요 없다). 대안(await·fault 지점마다 생존 held 목록)은 fault가 모든 명령에서 날 수 있어 표가 커지고 encoder·verifier가 복잡하다.
+- **`RELEASE A`:** r[A]가 0이 아니면 `VmHost::ReleaseHeld(handle)`(사용자 코드 없음·할당 없음·실패 없음 — SL §9.1)를 부르고 r[A]를 0으로 둔다. 컴파일러는 블록 끝·`return`·`break`·회차 끝에 선언 역순으로 낸다(LC4에서 이미 IR `Release`를 낸다).
+- **필드 대입(SL §7.1 순서):** held 필드에 쓰는 `SETF.R`는 우변(새 자원 — 이미 획득)이 준비된 뒤 `GETF.R` 이전 값 → `RELEASE` 이전 값 → `SETF.R` 새 값으로 내린다(획득 → 이전 해제 → 저장). CLASS 필드 표에 held 표지를 더한다(형식 v4).
+- **해제 경로:** (1) 실행 끝 — 반환은 컴파일러의 `RELEASE`가, fault·`ENDEXEC`·실행 문맥 정리(`Unwind`)는 VM이 frame 위에서부터 각 frame의 held 구간을 뒤에서부터(선언 역순) 해제한다. (2) 취소 — 정지 실행의 frame 사본도 같은 순서로 해제한다(취소·재링크 취소·session 소멸). (3) Disable hook 반환 뒤와 Detach·격리 — instance의 held 필드를 선언 역순으로 해제하고 null로 둔다(Changed는 내지 않는다 — Disable 문맥). (4) 하위 실행 경계 정지(`SuspendChild`)는 경계 frame부터만 옮기므로 held 구간도 frame과 함께 간다.
+- **지연 적용(LC6d2, R19):** `RequestEnabled(instance, bool)`·`RequestDestroy(instance)`는 실행 중에도 부를 수 있다(큐에 넣기만 — host native `SetEnabled`·`Destroy`가 부른다). `ApplyRequests()`(스크립트 단계 끝 — 발행 큐를 비운 뒤)는 요청 순으로 Enable·Disable hook을 실행하고(그 emit은 같은 큐로 전달) 그동안 새로 생긴 요청을 같은 루프 끝에 이어 처리한다(64회 — 넘으면 남은 요청을 다음 단계로 넘기고 보고). 파괴 요청은 PendingDestroy 표지만 두고(그 instance에는 새 전달·admission 없음), `EndFrame()`(프레임 끝 정리)이 요청 순으로 Disable(활성이면) → Destroy hook → Detach를 한다. Teardown(Disable·Destroy hook) 명령 예산은 100,000이다.
+- **CloseSession(R20):** admission 차단 → 모든 instance Detach(정지 실행 취소 포함) → 큐 항목·Changed 자리 폐기 → 연결 표 해제 → 대기 표 비우기. 그 뒤 실행 문맥 ledger(살아 있는 버퍼·byte)가 0이어야 한다(G1의 VM 몫). 정상 종료 hook(Disable·Destroy)은 host가 그 전에 `RequestDestroy` + `EndFrame`으로 부른다.
+- **fault 위치별 처리(LC6d3, R21 — SL §8.3 표):** session이 instance마다 상태(정상·Tick 중지·격리)와 최근 fault 프레임(세 칸 고리)을 가진다. spawn 경로(초기화·Awake·첫 Enable)의 fault는 결과를 host에 돌려주고 host가 spawn 실패로 Detach한다(VM은 상태를 바꾸지 않는다). 재활성화 Enable·Start의 fault는 격리. Tick 계열(Tick·FixedTick·LateTick)의 fault는 그 instance의 Tick 계열 hook을 중지(재링크로 그 모듈 세대가 바뀌면 푼다 — Disable·Enable로는 풀리지 않는다). 그 밖의 handler·재개·하위 실행의 fault는 그 실행 트리만 끝내고, 같은 instance에서 직전 600 프레임(일시 정지 프레임 제외, 경계 포함) 안의 세 번째면 격리한다(한 실행 트리는 1회).
+- **격리:** Disable hook 없이 모든 실행 취소 → held 필드 해제 → 연결 폐기, 값 필드는 보존. admission은 Destroy hook 1회만(`RunHook(Destroy)`만 받고 나머지 진입·전달·`Call`은 건너뛴다 — 건너뜀은 결과에 표시). `RequestEnabled(true)`는 무시한다. 파괴 경로(`EndFrame`)는 Destroy hook 뒤 Detach.
+- **fault 보고:** (모듈, 함수, 주소, 종류)별 첫 상세 기록과 이후 횟수 집계를 session이 가진다(`Faults()` — host·디버거가 읽는다). 보고 표 할당 실패는 기록만 버린다(실행 결과는 바뀌지 않는다).
+- **예산(LC6d4, R22 — SL §9.3 기본값, `VmSessionBudgets`):** 실행 조각 명령 1,000,000·Teardown 100,000, 호출 깊이 256, 메모리 session 512 MiB(실행 문맥 ledger — 넘기는 할당이 `BudgetExceeded`), instance 16 MiB(그 instance 필드가 직접 쥔 버퍼의 논리 크기 합 — Buf 필드 쓰기에서 검사, 넘으면 그 쓰기의 `BudgetExceeded`; 공유 버퍼는 쥔 instance마다 센다), 구독 연결 instance 4,096·session 1,048,576(넘는 연결은 만들지 않고 보고 — 연결은 조각 밖에서 생기므로 fault가 아니다), 동시 실행 instance 256(넘으면 새 전달·`Call`을 건너뛰고 횟수를 센다 — fault 아님). 유지 자원 종류별 64·Spawn·로드 admission은 host가 거부한다(획득 결과 null·admission 지연).
+- **로드 요청(LC6d5, R23):** `X.Load()`(host native)는 요청 handle(Ref — host 객체)을 돌려준다. `await req`는 `AWAIT`의 대기 값으로 요청 handle을 받는다: session이 `VmHost::WatchLoad(handle)`로 대기 항목(종류 Load)을 만들고, host가 완료를 `CompleteLoad(handle, 결과)`로 알리면 그 대기가 끝나 다음 재개 단계(로드 완료 — SL §5.4 순서 5)에 재개하며 결과(`Result<T>`)를 AWAIT 결과 자리에 쓴다. 실행 취소는 `VmHost::ReleaseLoad(handle)`(관심 반환)이다. instance당 진행 중 32는 host admission이다. 요청 handle은 유지 자원 규칙(지역에만 — LC6d1 held 구간)을 따른다.
+- **결정:** R18 위와 같다. R19 대안(요청을 즉시 적용)은 전달 순회 중 연결·instance가 바뀌어 SL §5.4 순서가 깨진다. R20은 SL §9.1 표 순서 그대로다. R21 대안(모든 fault를 격리)은 일시적 오류 하나로 instance가 영구히 멈춘다 — SL SD42. R22 instance 메모리의 "직접 쥔 버퍼"는 근사다(중첩 컨테이너는 바깥 버퍼의 논리 크기에 원소 크기로만 든다) — 결정적이고 쓰기 지점에서 O(필드 수)다. R23 대안(VM이 로드 상태를 매 단계 묻기)은 host 왕복이 대기 수만큼 든다. R24 LC6d 시험은 하위 단계마다 `.run` golden과 할당 실패 전수를 둔다. R25 하위 단계는 LC6d1 → d2 → d3 → d4 → d5 순서로 커밋하고 각 리뷰어 1명.
 
 ## 3. 순서
 
