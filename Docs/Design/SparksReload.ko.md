@@ -3,6 +3,7 @@
 이 문서는 Sparks 언어 코어의 LC7(핫 리로드)을 정한다. 언어 의미는 SparksLanguage(SL) §12.4가 정본이고, 이 문서는 그 중 언어·VM 쪽(R1 본문 교체, R2 제자리 migration의 Sparks 필드·`on`·const, `ReloadExecutions`, 계획·판정·원자적 적용, 증분 재컴파일)을 VM session에서 어떻게 실현하는지 정한다. R3(instance 재생성)·R4(복제 schema)는 엔진 연동(L2·L3)이고, 사전·widget schema의 R2는 EI5다. 실행 모델은 SparksRuntime(LC6) 위에 쌓는다.
 
 - 개정 1(2026-11-22): 첫 판. 하위 단계 LC7a–LC7c, 결정 K1–K10.
+- 개정 6(2026-11-22): LC7c 하위 단계(6절 — LC7c1 Gate G5, LC7c2 모듈 묶음 reload·증분 재컴파일, LC7c3 측정)와 LC7c1 설계.
 - 개정 5(2026-11-22): LC7b 리뷰 반영(5절 끝 "리뷰 반영"). K4의 필드 대응 범위를 같은 클래스로 바로잡음.
 - 개정 4(2026-11-22): LC7b 구현(5절). K4에 형태 표기(형식 v6 — struct 배치·enum case가 바뀌면 형식 변경), K5 쓰기 bit를 `$init` 밖의 모든 스크립트 쓰기로(Awake·Enable은 reload 뒤 다시 돌지 않는다), K3 적용 순서를 임시 반영 → 연결 다시 풀기 → 확정으로(연결 할당 실패도 되돌린다), 새 `$init` fault는 적용 거부(SL 12.4 기본값 레코드 재합성 실패).
 - 개정 3(2026-11-22): LC7a 리뷰 반영(4절 끝 "리뷰 반영").
@@ -14,7 +15,7 @@
 |---|---|---|
 | LC7a revision·R1 | bytecode 형식 v5(CLAS 필드 타입 서술자·`@formerly` 옛 이름), 새 revision 링크와 `VmSession::PlanReload`·`ApplyReload`(같은 배치 — 본문만 바뀜), instance·연결의 revision 교체, `ReloadExecutions`(Keep·Cancel — 본문이 바뀐 함수를 frame에 가진 실행), 모듈별 살아 있는 revision 8, 취소된 Start 재실행, Tick 중지 해제 | `.run` `reload` golden(R1 행) — 완료(개정 2, 4절) |
 | LC7b R2 migration | 필드 대응(이름·옛 이름·타입 표기·형태 표기 — 형식 v6), 새 기본값은 쓰지 않은 필드에만(필드별 쓰기 bit), 유지 자원·Buf 필드의 보존·해제, 삭제·변경 필드를 참조하는 실행 취소, 구독 연결 재구성(순서 유지 — 새 `on`은 끝), 판정 실패(클래스 삭제·기반 변경 = R3 필요) | `.run` `reload` golden(R2 행), 할당 실패 전수 — 완료(개정 4, 5절) |
-| LC7c Gate·측정 | Gate G5의 R1·R2 행(대기 실행·유지 자원·연결이 있는 상태의 reload와 롤백 주입), 본문 reload 2 s 측정(컴파일 → 링크 → 적용), 증분 재컴파일(바뀐 모듈과 의존 모듈만) | G5 R1·R2 통과, 측정 시험 |
+| LC7c Gate·측정(6절 — LC7c1–LC7c3) | Gate G5의 R1·R2 행(대기 실행·유지 자원·연결이 있는 상태의 reload와 롤백 주입), 본문 reload 2 s 측정(컴파일 → 링크 → 적용), 증분 재컴파일(바뀐 모듈과 의존 모듈만) | G5 R1·R2 통과, 측정 시험 |
 
 ## 2. 구조
 
@@ -86,7 +87,22 @@
   - 한계: 필드 초기값의 component 생성(PF1 뒤 — SL §3.11)은 기본값 레코드를 instance마다 나눌 수 없다(한 component를 모든 instance가 가리킨다). 그 단계에서 component 생성 필드는 instance별로 만들거나 R3로 보낸다. 시험 host가 파일 사례 하나의 모듈만 reload하므로 다른 모듈의 파생·기반 클래스가 섞인 사슬은 연동 단계 host 시험이다.
 - **시험:** `Run/ReloadFields`(같은 모듈 기반 클래스의 필드 추가·삭제(파생 구역이 밀림, 기반 유지 자원), callee를 통한 삭제 필드 참조 취소, 두 reload에 걸쳐 위치가 옮겨진 필드를 쓰는 이전 revision 실행, 비활성 instance, 새 `$init` fault의 적용 거부, 필드 추가·삭제·`@formerly` 이름 변경·형식 변경·기본값 변경(쓴 필드·안 쓴 필드)·struct 형태 변경·enum case 변경, 유지 자원 필드 보존·삭제·형식 변경, Buf 필드, `on` 추가·삭제(연결 순서), 삭제 필드를 참조하는 Keep 실행 취소, 다른 클래스 instance는 그대로), `Run/Reload`(R1 행 — 필드·handler 거부 줄은 R2로 옮겨 없앤다), `SparksConformance_RunGoldenAllocationFailureReloadFields`(R2의 모든 할당 실패 — `OutOfMemory`이면 session 그대로·누수 없음, 연결 다시 풀기 실패의 되돌림 포함), 형식 v6 verifier 음성 시험.
 
-## 6. 시험
+## 6. LC7c(개정 6)
+
+| 단계 | 내용 | 완료 기준 |
+|---|---|---|
+| LC7c1 Gate G5 | reload 롤백 주입 행렬: 통과한 `.run` 사례의 n번째 적용마다 임시 반영 뒤 되돌리기를 주입, 판정 거부·적용 실패 전후 session 상태 대조 | 저장소 corpus의 모든 `reload` 행에서 주입이 일어나고 상태 그대로·누수 0 |
+| LC7c2 모듈 묶음 reload | 바뀐 모듈과 interface가 바뀐 모듈에 의존하는 모듈을 한 계획·한 적용으로(SL 12.4 all-or-nothing), 의존 모듈 import 다시 풀기, 컴파일러 재컴파일 범위(`FindRecompileScope`)로 묶음 결정, `.run` 폴더 사례 reload | 폴더 사례 golden(의존 모듈의 struct 변경·호출 대상 변경), 할당 실패 전수 |
+| LC7c3 측정 | 본문 하나를 바꾼 모듈의 저장 → 컴파일 → 링크 → 적용 시간(목표 2 s — SL SD8) | 측정 시험(시간은 단언하지 않고 보고 — 결정적 시험 원칙), 문서에 Release 측정값 |
+
+- **LC7c1 설계:**
+  - `VmSession::InjectReloadRollback()`(시험 전용 — G4 `InjectAwait`와 같은 자리): 다음 `ApplyReload`가 연결 다시 풀기까지 마친 뒤 연결 실패와 같은 되돌리기 경로를 밟고 `InvalidArgument`를 돌려준다(`InjectionFired`). 되돌리기는 LC7b의 할당 실패 경로와 같은 코드라 주입은 그 경로를 할당자 없이 모든 reload 상태(대기 실행·유지 자원·연결이 있는 상태 — SL G5)에서 밟게 한다.
+  - `.run`은 `PlanReload` 전과 판정 거부·적용 실패 뒤 session 상태(LC7b 리뷰 반영의 대조 — instance별 module·class·필드 값·Buf 포인터, 연결·거부·정지 실행·대기·큐 수)를 비교한다(다르면 사례 실패).
+  - corpus 실행기는 G4 행렬 뒤에 G5 행렬을 돈다: 통과한 사례에서 적용에 성공한 `reload`마다(앞 단계에서 스스로 거부되는 적용 — 새 `$init` fault — 에는 되돌릴 임시 반영이 없다, 사례당 64개까지) 그 적용에 주입해 다시 돌리고, 출력은 비교하지 않고 주입 발생·상태 대조·`CloseSession` 뒤 ledger·유지 자원 0을 본다.
+  - 음성 대조(G3 방식 — 2026-11-22 수동, 코드에 남기지 않음): 되돌리기에서 연결 표 복원을 빼면 `Run/ReloadFields`가 "a refused or failed reload changed the session"으로, 저장소 복원을 빼면 범위 검사로 실패한다.
+  - 범위: R3(instance 재생성) 실패 주입과 counter(엔진 ledger)는 연동 단계 G5다.
+
+## 7. 시험
 
 - `.run` `reload` golden이 R1·R2 행을 덮는다: 본문만 바뀜(Keep·Cancel 각각 — 정지 실행이 있는 상태), 필드 추가·삭제·이름 변경(`@formerly`)·형식 변경·기본값 변경(쓴 필드·안 쓴 필드), `on` 추가·삭제(연결 순서), 유지 자원 필드 보존·삭제, 판정 실패(클래스 삭제 — R3 필요).
 - 할당 실패 전수: 계획·적용의 모든 할당 실패에서 session이 그대로이고 누수가 없다.
