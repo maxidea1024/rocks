@@ -1,6 +1,6 @@
 # 오디오 시스템 설계
 
-기준일: 2026-11-23, 개정 11(Mixer2 구현 리뷰 반영 — mailbox·stop-all 최소 fade, 시험 강화). 개정 10: 3.23절 AU1 Mixer2 스레드 경계 — 소유 분리, seqlock·mailbox·stop-all·시작/terminal·ACK, 반복 Stop 규칙). 개정 9: Mixer1 구현 리뷰 반영 — fade 끝·동점 규칙, 종류별 무시 계수, 마스터 gain 상한, 비유한 정리를 limiter 앞으로. 개정 8: 3.22절 AU1 믹서 코어 — 명령 인자 전달로 PR3을 AU2로, 상태 표, Q 불변 ramp, FTZ 실행 함수. DSP2 리뷰 반영 — 비유한 key, ratio·gain 범위, 큰 블록, FTZ·DAZ 계약. 개정 6: 3.21절 AU1 DSP2 dynamics, DSP2 범위 바로잡음. 개정 5: DSP1 리뷰 반영 — HPF fs/2 clamp, HPF bypass 20 Hz, 리샘플러 비율 범위 UE와 같게. 개정 4: DSP1 구현 반영(리샘플러 고정소수점, 방위각 경계, 오류 코드). 개정 3: 3.20절 AU1 구현 세부 DSP1, 3.13.2절 패닝을 UE 방식으로 고침. 개정 2: 8절 다른 문서 개정 반영. 소리를 재생하는 엔진 기능 전체를 정한다. 범위는 실시간 믹서, 장치 출력, 엔진·World 연결, 사운드 에셋, 임포트, 코덱·쿠킹, 스트리밍, 감쇠·공간화·동시 발음·가상화, 버스·효과·리버브 존, 진단이다. UE 5.8의 AudioMixerCore·AudioMixer·SignalProcessing·Engine 오디오 클래스와 AudioGameplayVolume 플러그인에 해당한다.
+기준일: 2026-11-23, 개정 12(3.24절 ADPCM 블록 코덱 앞당김). 개정 11: Mixer2 구현 리뷰 반영 — mailbox·stop-all 최소 fade, 시험 강화. 개정 10: 3.23절 AU1 Mixer2 스레드 경계 — 소유 분리, seqlock·mailbox·stop-all·시작/terminal·ACK, 반복 Stop 규칙). 개정 9: Mixer1 구현 리뷰 반영 — fade 끝·동점 규칙, 종류별 무시 계수, 마스터 gain 상한, 비유한 정리를 limiter 앞으로. 개정 8: 3.22절 AU1 믹서 코어 — 명령 인자 전달로 PR3을 AU2로, 상태 표, Q 불변 ramp, FTZ 실행 함수. DSP2 리뷰 반영 — 비유한 key, ratio·gain 범위, 큰 블록, FTZ·DAZ 계약. 개정 6: 3.21절 AU1 DSP2 dynamics, DSP2 범위 바로잡음. 개정 5: DSP1 리뷰 반영 — HPF fs/2 clamp, HPF bypass 20 Hz, 리샘플러 비율 범위 UE와 같게. 개정 4: DSP1 구현 반영(리샘플러 고정소수점, 방위각 경계, 오류 코드). 개정 3: 3.20절 AU1 구현 세부 DSP1, 3.13.2절 패닝을 UE 방식으로 고침. 개정 2: 8절 다른 문서 개정 반영. 소리를 재생하는 엔진 기능 전체를 정한다. 범위는 실시간 믹서, 장치 출력, 엔진·World 연결, 사운드 에셋, 임포트, 코덱·쿠킹, 스트리밍, 감쇠·공간화·동시 발음·가상화, 버스·효과·리버브 존, 진단이다. UE 5.8의 AudioMixerCore·AudioMixer·SignalProcessing·Engine 오디오 클래스와 AudioGameplayVolume 플러그인에 해당한다.
 
 [엔진 구현 계획](EngineImplementationPlan.ko.md) §18은 AudioRT 무대기 계약(Object·파일 IO·동적 할당·lock·직접 로그 금지), voice handle 세대, stop mailbox, epoch ACK, 48 kHz·256/512 frame, 성능 목표를 이미 정했다. 이 문서는 그 계약을 구현 수준으로 구체화한다. 설계가 애매한 곳은 UE 방식을 따르고, Rocks 원칙(결정적 시험, `Result` 오류, 명시적 소유, 전역 생성자 금지)과 부딪히는 곳만 다르게 정한다(7절).
 
@@ -426,7 +426,7 @@ UE `ESoundAssetCompressionType`(`Source/Runtime/Engine/Classes/Sound/SoundWave.h
 | 코덱 | 용도 | 비고 |
 |---|---|---|
 | PCM16 | 아주 짧은 SFX, 디코드 비용 0 | |
-| ADPCM | 짧은 SFX, 약 4:1, 디코드 아주 쌈 | 블록 형식은 UE ADPCM 디코더(`Source/Runtime/AdpcmAudioDecoder`)를 AU5에서 확인해 정한다 |
+| ADPCM | 짧은 SFX, 약 4:1, 디코드 아주 쌈 | MS ADPCM 512 byte 블록(UE와 같음), 채널 블록 교차 배치 — 3.24절 |
 | Opus | 음악·대사·긴 환경음 | rate는 48 kHz만 쓴다(Opus 내부 rate). 다른 원본은 쿠킹 때 48 kHz로 리샘플한다. 3채널 이상은 Opus multistream(채널 매핑 family 1, 디코드 뒤 내부 순서로 바꿈 — 3.3절) |
 
 플랫폼 기본(`PlatformDefault`가 고르는 것, 프로젝트 설정으로 바꿀 수 있다): Windows·macOS·Android = Opus, 길이 `ShortClipSeconds`(= 1.0) 미만은 ADPCM. UE 기본(모든 플랫폼 BINKA)과 다르다(7절). iOS는 보류 플랫폼이다.
@@ -1033,6 +1033,60 @@ Mixer1(3.22절)은 제어 쪽 API와 `RenderBlock`이 같은 voice 슬롯을 읽
 | 제어 거부 | Reserved·stale의 Make*·Publish·RequestStop 거부 |
 | 두 스레드(범위 한정) | 경계 상태의 정확성은 Inline 주입 시험이 맡는다. 두 `platform::Thread` 시험은 publish·RequestStop·StopAll만 쓴다. 제어는 RT의 ACK(`CompletedMixFrame`)가 정한 frame에 닿을 때까지 출판해 두 스레드가 실제로 겹치게 하고, RT는 블록마다 terminal word를 관찰해 voice마다 한 번만 바뀌는지와 사유를 단언한다(AU1에는 Play를 넘길 큐가 없고, 자체 링은 공용 유틸 중복이라 만들지 않는다). 정해진 반복 수와 원자 gate로 끝나고, RT 스레드는 `RunWithRealtimeAudioFloatingPoint` 안에서 돈다. 단언은 인터리빙과 무관한 불변식만 한다: 적용된 파라미터는 늘 한 출판의 튜플이고, generation마다 terminal은 한 번이다. Windows에는 TSan이 없어 이 시험이 경쟁 부재를 증명하지는 않는다 |
 
+### 3.24 AU5 앞당김 — ADPCM 블록 코덱(개정 12)
+
+사용자 지시 순서(DSP → 믹서 → 코덱 → 임포터)에 따라, 선행작업(PR6 ClientOnly 모듈 유형, PR11 A3/A4 쿠커)이 필요 없는 코덱 부분을 먼저 만든다. 이번 범위는 ADPCM 블록 코덱이다. 청크 표·플랫폼 데이터 헤더·`AudioDecoder` 인터페이스·`AudioDecoderTable`·AssetNugget 키는 쿠커(PR11)와 함께 AU5에서 한다. Opus(`AudioOpus`, ClientOnly)는 PR6 뒤다.
+
+#### 3.24.1 형식(UE `AdpcmAudioDecoder`·`AudioFormatADPCM`과 같은 MS ADPCM)
+
+- 블록: `AdpcmBlockBytes` = 512 byte, 채널 하나다.
+  - 머리 `AdpcmPreambleBytes` = 7 byte: 계수 색인(uint8, 0–6), 초기 delta(int16 LE), 두 번째 표본(int16 LE), 첫 표본(int16 LE).
+  - 본문은 nibble 쌍이고 상위 nibble이 먼저다.
+  - 블록당 `AdpcmFramesPerBlock` = (512 − 7) × 2 + 2 = 1012 frame이다.
+- 디코드 식(UE `DecodeNibble`):
+  - 예측 = (s1·c1 + s2·c2) / 256이다(C 정수 나눗셈, 0 쪽 버림).
+  - 예측에 부호 확장한 nibble × delta를 더하고 [−32768, 32767]로 자른다.
+  - s2 = s1, s1 = 결과로 둔다.
+  - 다음 delta = max(delta × 적응표[nibble] / 256, 16)이다.
+  - 계수표 c1 = {256, 512, 0, 192, 240, 460, 392}, c2 = {0, −256, 0, 64, 0, −208, −232}다.
+  - 적응표 = {230, 230, 230, 230, 307, 409, 512, 614, 768, 614, 512, 409, 307, 230, 230, 230}이다.
+  - 첫 두 출력은 머리의 첫 표본·두 번째 표본이다.
+- 블록 배치(UE와 다름 — 7절): 블록 묶음 k = [채널 0 블록 k][채널 1 블록 k]…로 채널을 블록 단위로 교차한다.
+  - UE는 채널마다 모든 블록을 이어 붙인다.
+  - Rocks는 청크 경계(3.11.3절)를 블록 묶음 경계에 두어, 청크 하나만으로 모든 채널을 디코드한다.
+- 마지막 블록은 남은 frame만 담는다. 인코더는 남는 nibble을 0 표본 입력으로 채운다. UE의 교차 입력 `Encode`(`AudioFormatADPCM.cpp:308`)와 같다. 채널별 배열 `Encode`(:376)는 채널 버퍼 밖을 읽으므로 따르지 않는다. 유효 frame 수는 헤더(플랫폼 데이터)가 정한다.
+- 표본: int16이다. 런타임은 float으로 바꾼다(÷ 32768).
+
+#### 3.24.2 인코더(`AudioTools`, Developer)
+
+- 입력: planar float(채널 1–`MaxOutputChannels`)이다.
+- int16 변환: round-half-even(×32768, [−32768, 32767]로 자름)이다. 비유한 입력은 `InvalidArgument`다.
+- 블록마다 계수 색인 7개를 모두 시험해 제곱 오차 합이 가장 작은 것을 고른다(동률이면 낮은 색인). 오차는 유효 frame만 센다(마지막 블록의 0 채움 구간은 버려지므로). 초기 delta는 UE처럼 적응표[0] = 230이다.
+  - UE 인코더는 늘 색인 0을 쓴다("Calculate the optimal starting coefficient" TODO — `AudioFormatADPCM.cpp:247`).
+  - 디코더 형식은 같으므로 UE 디코더로도 읽힌다.
+- nibble 식은 UE `EncodeNibble`과 같다: 오차 / delta(0 쪽 버림)를 [−8, 7]로 자른다.
+- 결정성: 같은 입력이면 같은 byte다(부동소수 연산은 int16 변환 한 번뿐이다).
+
+#### 3.24.3 디코더(`Audio`, 런타임)
+
+- `DecodeAdpcmBlock(block, frames, out)`: 블록 하나를 `frames`(1–1012)만큼 float으로 낸다. 할당하지 않는다.
+  - 계수 색인이 6을 넘거나 블록이 7 byte보다 짧으면 `InvalidArgument`다(UE는 로그 뒤 false).
+  - 블록 길이가 `frames`에 필요한 nibble보다 짧아도 `InvalidArgument`다.
+- `DecodeAdpcmFrames(payload, channels, totalFrames, startFrame, out)`: 블록 묶음 배치에서 `[startFrame, startFrame + out.frameCount)`를 디코드한다. 블록마다 독립이라 임의 위치에서 시작한다(seek). 할당하지 않는다(블록 하나 분량 스택 scratch).
+  - 크기 검사는 payload 크기에서 블록 수를 역산해 넘침 없이 한다. 손상된 frame 수가 와도 Fatal이 아니라 `InvalidArgument`다.
+  - 호출마다 블록 처음부터 디코드한다(임의 접근용). 상태를 유지하는 스트림 디코더는 `AudioDecoder`와 함께 AU5에서 둔다.
+- 손상 데이터 방어: 디코드는 64비트로 계산하고 delta를 `AdpcmMaximumDelta` = 2^20으로 자른다. UE는 같은 입력에서 int32 넘침(UB)이 난다. 유효 스트림의 delta는 표본 범위 근처에서 멈추므로 정상 결과는 UE와 같다.
+- 실시간 경로에서 부를 수 있다(무할당·무대기).
+
+#### 3.24.4 시험
+
+| 대상 | 확인 |
+|---|---|
+| 디코드 | 표(계수·적응)를 시험 안 리터럴과 대조, 무작위 블록을 UE 식 참조 구현과 표본 단위 대조, 머리 두 표본 순서, delta 하한 16, 예측 자르기, 부분 frame(1·2·3·1011), 손상 블록(최대 delta + nibble 8 연속)이 넘치지 않음 |
+| 인코드 | 출력 전체를 참조 인코더(리터럴 표·계수 탐색·유효 frame 오차)와 byte 대조(머리·nibble 순서·마지막 블록 채움 포함), 0 아닌 입력의 머리 byte 직접 확인, 사인 왕복 SNR 하한, 계수 선택이 색인 0 고정보다 오차가 작거나 같음, 결정성, 비유한(NaN·Inf) 입력 거부 |
+| 임의 접근 | 서로 다른 0 아닌 스테레오에서 블록 경계·블록 안 시작(블록 1 이상 포함)의 디코드가 처음부터 디코드한 결과의 같은 구간과 같음 |
+| 음성 | 계수 색인 7, 짧은 블록, payload 크기 불일치, 범위 밖 frame(`startFrame > totalFrames` 포함), 넘침 경계의 frame 수 |
+
 ## 4. 결정 요약
 
 - 모듈: `Audio`(믹서·DSP·backend 인터페이스) / `AudioMiniaudio`(장치, ClientOnly) / `AudioOpus` / `EngineAudio`(Object 세계) / `AudioTools`(임포트·쿠킹). 의존은 단방향.
@@ -1142,6 +1196,7 @@ Mixer1(3.22절)은 제어 쪽 API와 `RenderBlock`이 같은 voice 슬롯을 읽
 | 실행 판정 | `FApp::CanEverRenderAudio` 정적 지역 변수 | `RunTraits` 값 | AppInfo 설계(명령줄 고정 시점 명시) |
 | 오류 | `check`·로그 | `Result`, 원래 OS 오류 코드 보존 | Rocks 원칙 |
 | 렌더 명령 경로·슬롯 재사용 | 오디오 스레드 → 렌더 스레드 이중 버퍼(잠금 교체)·MPSC 큐, source id는 FIFO 순서에 기대 바로 재사용 | 정렬 pending 배열 + 잠금 없는 seqlock·mailbox·epoch, generation·ACK로 재사용(3.23절) | 예약 명령 정렬이 FIFO를 깨므로, 대기 금지 |
+| ADPCM 블록 배치·계수 | 채널마다 블록을 끝까지 이어 붙임, 인코더 계수 색인 0 고정 | 블록 묶음마다 채널 교차, 블록마다 7개 계수 중 오차 최소 | 청크 독립 디코드(3.11.3절), 음질 — 디코더 형식은 같다 |
 | 파라미터 ramp | 블록 단위 보간(블록 크기에 따라 길이가 다름) | 명령의 `rampFrames`(기본 256), 채널 이득도 frame 단위 ramp | Q와 무관한 같은 출력(3.22.4절) |
 | 마스터 출력 | dynamics 없음, 출력 clamp ±1 | limiter(−1 dBFS, 지연 0) + clamp ±1 | 3.6절 limiter, AU2 int16 변환 |
 | 렌더 FP 환경 | 기존 설정 + FTZ(`FScopedFTZFloatMode`) | 결정적 기준(nearest-even·trap 끔) + FTZ, 실행 함수 방식 | compiler 재배치 방지, 결정성 |
@@ -1205,3 +1260,4 @@ Mixer1(3.22절)은 제어 쪽 API와 `RenderBlock`이 같은 voice 슬롯을 읽
 - 개정 9(2026-11-22): Mixer1 구현 리뷰 반영. fade 끝 = Stop + N과 자연 끝 동점 규칙(3.22.5절), 무시한 명령의 종류별 계수와 Prepared 회수 절차, stereo clip `Azimuth`의 `PreparePlay` 거부, `MaxMasterGain`, 구간 수 문구와 미룸·늦음 이중 계수, 마스터 경로에서 비유한 정리를 limiter 앞으로(3.22.6절).
 - 개정 10(2026-11-22): 3.23절 AU1 Mixer2 스레드 경계(제어·RT 슬롯 소유 분리, 공통 순번, generation 묶은 seqlock, stop mailbox, Play에 실은 stop-all epoch, 시작·terminal 슬롯과 `releaseMixFrame` ACK, 계수 스냅샷, pending 정리, 범위 한정 두 스레드 시험)을 더했다. 초안 교차 검증 1회 반영(필수 5 — 새 수명 seqlock 소실, ACK 한 블록 어긋남, stop-all이 대기 Play를 놓침, pending 막힘, RT 계수 경쟁 읽기). 3.22.4절 상태 표의 Reserved 거부·반복 Stop(더 이른 끝만)·Finished 해제 조건, 3.5.3절 ACK 문구, 7절 UE 명령 경로 비교를 고쳤다.
 - 개정 11(2026-11-23): Mixer2 구현 리뷰 반영. 필수 — mailbox는 마지막 값이 아니라 그 수명의 최소 fade만 쓴다(스케줄링에 따라 steal이 사라지던 문제·ABA), stop-all은 RT가 처리한 epoch를 출판하고 제어가 미처리 epoch의 짧은 fade를 유지한다. 권장 — 두 스레드 시험을 ACK gate·terminal 관찰로 강화, 처리 순서·Stopping·Prepared stop-all·짧은 fade·stale 거부·clip 해제 시험, seqlock·계수 칸 static_assert. 참고 — seqlock 순번 64비트 문구, stop-all 건너뜀은 무시 계수에서 뺀다.
+- 개정 12(2026-11-23): 3.24절 AU5 앞당김 — ADPCM 블록 코덱(UE MS ADPCM 형식·식, 채널 블록 교차 배치, 계수 탐색 인코더, 임의 접근 디코드). 청크 표·`AudioDecoder` 인터페이스·쿠킹은 PR11 뒤, Opus는 PR6 뒤. 구현 리뷰 반영: 넘침 없는 크기 검사, delta 상한·64비트 디코드, 유효 frame 오차, 리터럴 표·byte 대조 시험.
