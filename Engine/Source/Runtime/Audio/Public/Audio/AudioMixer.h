@@ -29,7 +29,7 @@
 //   ... RunWithRealtimeAudioFloatingPoint 안에서 RenderBlock(Span(&play.Value(), 1), out) ...
 namespace rocks::audio {
 
-class AudioMixer {
+class ROCKS_AUDIO_API AudioMixer {
 public:
     // 믹서를 만든다. 설정이 3.22.2절 범위 밖이면 InvalidArgument, 할당 실패는 OutOfMemory(만든 것을
     // 모두 되돌린다). allocator는 믹서보다 오래 살아야 한다.

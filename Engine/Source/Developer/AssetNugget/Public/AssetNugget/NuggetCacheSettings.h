@@ -76,16 +76,16 @@ struct NuggetSettingsFailure {
 // NuggetDefaultLocalPath·null 세대)이다. 오류: 거부(InvalidArgument — failure에 칸, 상한 초과
 // 파일은 CapacityExceeded·File), 파일 읽기 오류는 그 오류(FileErrorCode), 할당 실패 OutOfMemory.
 // failure는 null이어도 된다.
-Result<NuggetCacheSettings> ReadNuggetCacheSettings(Allocator& allocator,
-                                                    platform::FileSystem& files,
-                                                    StringView projectRoot,
-                                                    NuggetSettingsFailure* failure) noexcept;
+ROCKS_ASSETNUGGET_API Result<NuggetCacheSettings>
+ReadNuggetCacheSettings(Allocator& allocator, platform::FileSystem& files, StringView projectRoot,
+                        NuggetSettingsFailure* failure) noexcept;
 
 // backend 루트 경로를 out에 둔다(localPath가 상대면 projectRoot + "/" + localPath, 루트에 붙은
 // 경로(POSIX 루트·Windows 드라이브 절대·UNC)면 그대로 — Path::Root). 오류: 쓸 수 없는 localPath
 // (Windows 현재 드라이브 루트·드라이브 상대·device namespace — 설정 읽기가 이미 거부한다)
 // InvalidArgument·Unsupported, 할당 실패.
-Result<void> ResolveNuggetLocalPath(const NuggetCacheSettings& settings, StringView projectRoot,
-                                    String& out) noexcept;
+ROCKS_ASSETNUGGET_API Result<void> ResolveNuggetLocalPath(const NuggetCacheSettings& settings,
+                                                          StringView projectRoot,
+                                                          String& out) noexcept;
 
 } // namespace rocks
