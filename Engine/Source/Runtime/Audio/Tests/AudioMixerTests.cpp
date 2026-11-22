@@ -102,23 +102,44 @@ AudioVoiceHandle PlayAt(OfflineAudioRender& rig, AudioClipId clip, uint64 frame,
     return voice.Value();
 }
 
-AudioRtCommand StopAt(AudioVoiceHandle voice, uint64 frame, uint32 fadeFrames) noexcept {
-    AudioRtCommand command;
-    command.type = AudioRtCommandType::Stop;
-    command.voice = voice;
-    command.mixFrame = frame;
-    command.fadeFrames = fadeFrames;
-    return command;
+AudioRtCommand StopAt(OfflineAudioRender& rig, AudioVoiceHandle voice, uint64 frame,
+                      uint32 fadeFrames) noexcept {
+    auto command = rig.Mixer().MakeStop(voice, frame, fadeFrames);
+    if (!command) {
+        platform::Fatal("Audio mixer test stop was rejected");
+    }
+
+    return command.Value();
 }
 
-AudioRtCommand ParamsAt(AudioVoiceHandle voice, uint64 frame, const AudioVoiceParams& params,
+AudioRtCommand ParamsAt(OfflineAudioRender& rig, AudioVoiceHandle voice, uint64 frame,
+                        const AudioVoiceParams& params, uint32 rampFrames) noexcept {
+    auto command = rig.Mixer().MakeSetParams(voice, frame, params, rampFrames);
+    if (!command) {
+        platform::Fatal("Audio mixer test parameters were rejected");
+    }
+
+    return command.Value();
+}
+
+AudioRtCommand MasterAt(OfflineAudioRender& rig, uint64 frame, float gain,
                         uint32 rampFrames) noexcept {
+    auto command = rig.Mixer().MakeSetMasterGain(frame, gain, rampFrames);
+    if (!command) {
+        platform::Fatal("Audio mixer test master gain was rejected");
+    }
+
+    return command.Value();
+}
+
+// 제어 API를 거치지 않은 손 명령(RT의 stale·clamp·무시 경로 시험 전용)이다. 순번을 직접 준다.
+AudioRtCommand RawCommand(AudioRtCommandType type, AudioVoiceHandle voice, uint64 frame,
+                          uint64 sequence) noexcept {
     AudioRtCommand command;
-    command.type = AudioRtCommandType::SetParams;
+    command.type = type;
     command.voice = voice;
     command.mixFrame = frame;
-    command.params = params;
-    command.rampFrames = rampFrames;
+    command.sequence = sequence;
     return command;
 }
 
@@ -262,12 +283,13 @@ TEST(Audio_Mixer_SameFrameOrderAndLateCommands) {
     const AudioVoiceHandle first = mixer.AcquireVoice().Value();
     auto play = mixer.PreparePlay(first, clip, 0, false, AudioVoiceParams{});
     REQUIRE(play);
-    SubmitOrDie(rig, StopAt(first, 20, DefaultStopFadeFrames));
-    play.Value().mixFrame = 20;
+    // 순번은 만든 순서다(Play가 먼저 만들어졌다). 시작 전 Stop은 앞 frame에 둔다.
+    SubmitOrDie(rig, StopAt(rig, first, 20, DefaultStopFadeFrames));
+    play.Value().mixFrame = 21;
     SubmitOrDie(rig, play.Value());
     // 같은 frame: Play 뒤 fade 0 Stop은 시작과 끝이 같은 frame이다.
     const AudioVoiceHandle second = PlayAt(rig, clip, 30);
-    SubmitOrDie(rig, StopAt(second, 30, 0));
+    SubmitOrDie(rig, StopAt(rig, second, 30, 0));
     Array<float> output = RenderBlocks(rig, 1, allocator);
     for (uint32 frame = 0; frame < 256; ++frame) {
         CHECK(Sample(output, 2, frame, 0) == 0.0f);
@@ -357,17 +379,12 @@ TEST(Audio_Mixer_SameOutputForEveryBlockSize) {
         params.gain = 2.5f;
         params.pitch = 1.6f;
         params.lowPassCutoffHz = 900.0f;
-        SubmitOrDie(rig, ParamsAt(first, 1111, params, 700));
+        SubmitOrDie(rig, ParamsAt(rig, first, 1111, params, 700));
         panned.azimuthDegrees = 45.0f;
         panned.gain = 0.5f;
-        SubmitOrDie(rig, ParamsAt(second, 1999, panned, 333));
-        SubmitOrDie(rig, StopAt(second, 3001, 900));
-        AudioRtCommand master;
-        master.type = AudioRtCommandType::SetMasterGain;
-        master.mixFrame = 2500;
-        master.masterGain = 1.5f;
-        master.rampFrames = 600;
-        SubmitOrDie(rig, master);
+        SubmitOrDie(rig, ParamsAt(rig, second, 1999, panned, 333));
+        SubmitOrDie(rig, StopAt(rig, second, 3001, 900));
+        SubmitOrDie(rig, MasterAt(rig, 2500, 1.5f, 600));
 
         const Array<float> output = RenderBlocks(rig, TotalFrames / blockFrames, allocator);
         const uint64 ends[3] = {StatusOf(rig.Mixer(), first).endMixFrame,
@@ -401,7 +418,7 @@ TEST(Audio_Mixer_ResampleLoopAndEndFrame) {
     OfflineAudioRender rig = MakeRig(ConfigOf(256), allocator);
     const AudioClipId slow = RegisterMono(rig.Mixer(), ramp, 2048, 44100);
     const AudioVoiceHandle slowVoice = PlayAt(rig, slow, 0);
-    SubmitOrDie(rig, StopAt(slowVoice, 1024, 0));
+    SubmitOrDie(rig, StopAt(rig, slowVoice, 1024, 0));
     Array<float> output = RenderBlocks(rig, 4, allocator);
     for (uint32 frame = 0; frame < 1024; ++frame) {
         const double expected = 0.5 * static_cast<double>(frame) * 44100.0 / 48000.0 / 1024.0;
@@ -469,17 +486,20 @@ TEST(Audio_Mixer_VoiceStateTable) {
 
     // Reserved: Stop·SetParams는 무시된다.
     const AudioVoiceHandle reserved = mixer.AcquireVoice().Value();
-    SubmitOrDie(rig, StopAt(reserved, 0, 0));
-    SubmitOrDie(rig, ParamsAt(reserved, 0, AudioVoiceParams{}, 0));
+    CHECK(mixer.MakeStop(reserved, 0, 0).Error() == ErrorCode::InvalidArgument);
+    CHECK(mixer.MakeSetParams(reserved, 0, AudioVoiceParams{}, 0).Error() ==
+          ErrorCode::InvalidArgument);
+    CHECK(mixer.PublishParams(reserved, AudioVoiceParams{}).Error() == ErrorCode::InvalidArgument);
+    CHECK(mixer.RequestStop(reserved, 0).Error() == ErrorCode::InvalidArgument);
 
-    // Prepared: 같은 frame이면 sequence 뒤의 Play 파라미터가, Play보다 뒤 sequence의 SetParams면 그
-    // 파라미터가 이긴다.
+    // 순번은 제어 API가 만든 순서다. Play를 만든 뒤 만든 SetParams는 늘 Play보다 뒤 순번이라, 같은
+    // frame이면 시작 뒤에 적용되고(Playing), 앞 frame이면 Prepared에 저장되어 Play 때 이긴다.
     AudioVoiceParams quarter;
     quarter.gain = 0.25f;
     const AudioVoiceHandle playWins = mixer.AcquireVoice().Value();
     auto playWinsCommand = mixer.PreparePlay(playWins, clip, 0, false, AudioVoiceParams{});
     REQUIRE(playWinsCommand);
-    SubmitOrDie(rig, ParamsAt(playWins, 10, quarter, 0));
+    SubmitOrDie(rig, ParamsAt(rig, playWins, 10, quarter, 0));
     playWinsCommand.Value().mixFrame = 10;
     SubmitOrDie(rig, playWinsCommand.Value());
     const AudioVoiceHandle paramsWin = mixer.AcquireVoice().Value();
@@ -487,44 +507,48 @@ TEST(Audio_Mixer_VoiceStateTable) {
     REQUIRE(paramsWinCommand);
     paramsWinCommand.Value().mixFrame = 100;
     SubmitOrDie(rig, paramsWinCommand.Value());
-    SubmitOrDie(rig, ParamsAt(paramsWin, 50, quarter, 0));
+    SubmitOrDie(rig, ParamsAt(rig, paramsWin, 50, quarter, 0));
     Array<float> output = RenderBlocks(rig, 1, allocator);
-    CHECK(Sample(output, 2, 20, 0) == 0.5f);
-    CHECK(Sample(output, 2, 120, 0) == 0.5f + 0.5f * 0.25f);
-    CHECK(Ignored(mixer, AudioRtCommandType::Stop) == 1 &&
-          Ignored(mixer, AudioRtCommandType::SetParams) == 1);
+    CHECK(Sample(output, 2, 20, 0) == 0.125f);
+    CHECK(Sample(output, 2, 120, 0) == 0.25f);
+    CHECK(Ignored(mixer, AudioRtCommandType::Stop) == 0 &&
+          Ignored(mixer, AudioRtCommandType::SetParams) == 0);
 
-    // Playing: Play는 무시, 첫 Stop만 fade(반복 Stop 무시), fade 중 SetParams가 끝을 막지 못한다.
+    // Playing: Play는 무시, 반복 Stop은 더 일찍 끝날 때만(1000은 남은 90보다 길어 무시), fade 중
+    // SetParams가 끝을 막지 못한다.
     SubmitOrDie(rig, paramsWinCommand.Value());
-    SubmitOrDie(rig, StopAt(playWins, 300, 100));
-    SubmitOrDie(rig, StopAt(playWins, 310, 1000));
+    SubmitOrDie(rig, StopAt(rig, playWins, 300, 100));
+    SubmitOrDie(rig, StopAt(rig, playWins, 310, 1000));
     AudioVoiceParams loud;
     loud.gain = 2.0f;
-    SubmitOrDie(rig, ParamsAt(playWins, 320, loud, 10));
+    SubmitOrDie(rig, ParamsAt(rig, playWins, 320, loud, 10));
     output = RenderBlocks(rig, 1, allocator);
     AudioVoiceStatus status = StatusOf(mixer, playWins);
     CHECK(status.state == AudioVoiceState::Finished &&
           status.endReason == AudioVoiceEndReason::Stopped);
     CHECK(status.endMixFrame == 400);
     CHECK(Ignored(mixer, AudioRtCommandType::Play) == 1 &&
-          Ignored(mixer, AudioRtCommandType::Stop) == 2);
+          Ignored(mixer, AudioRtCommandType::Stop) == 1);
 
     // Finished: 모든 명령 무시, terminal은 한 번만 수거된다. 수거 전 해제는 Busy.
     CHECK(mixer.ReleaseVoice(playWins).Error() == ErrorCode::Busy);
-    SubmitOrDie(rig, StopAt(playWins, 600, 0));
-    SubmitOrDie(rig, ParamsAt(playWins, 600, loud, 0));
+    SubmitOrDie(rig, StopAt(rig, playWins, 600, 0));
+    SubmitOrDie(rig, ParamsAt(rig, playWins, 600, loud, 0));
     RenderBlocks(rig, 1, allocator);
-    CHECK(Ignored(mixer, AudioRtCommandType::Stop) == 3 &&
-          Ignored(mixer, AudioRtCommandType::SetParams) == 2);
+    CHECK(Ignored(mixer, AudioRtCommandType::Stop) == 2 &&
+          Ignored(mixer, AudioRtCommandType::SetParams) == 1);
     AudioVoiceTerminal terminals[8];
     const uint32 collected = mixer.CollectFinished(Span<AudioVoiceTerminal>(terminals));
     CHECK(collected == 1 && terminals[0].voice.index == playWins.index &&
           terminals[0].reason == AudioVoiceEndReason::Stopped);
     CHECK(mixer.CollectFinished(Span<AudioVoiceTerminal>(terminals)) == 0);
     CHECK(mixer.ReleaseVoice(playWins));
-    // 놓은 handle은 무효다: 조회·명령 모두.
+    // 놓은 handle은 무효다: 조회·명령 모두(제어 API가 거부하고, 손 명령은 RT가 stale로 센다).
     CHECK(mixer.QueryVoice(playWins).Error() == ErrorCode::StaleHandle);
-    SubmitOrDie(rig, StopAt(playWins, 900, 0));
+    CHECK(mixer.MakeStop(playWins, 900, 0).Error() == ErrorCode::StaleHandle);
+    // RT는 자기가 아는 generation보다 오래된 handle의 손 명령을 stale로 센다.
+    SubmitOrDie(rig, RawCommand(AudioRtCommandType::Stop,
+                                AudioVoiceHandle{playWins.index, playWins.generation - 1}, 900, 0));
     RenderBlocks(rig, 1, allocator);
     CHECK(mixer.Counters().staleCommands == 1);
     CHECK(mixer.ReleaseVoice(reserved));
@@ -543,7 +567,7 @@ TEST(Audio_Mixer_FadeAndParameterRamps) {
     const AudioVoiceHandle ramped = PlayAt(rig, clip, 0);
     AudioVoiceParams silent;
     silent.gain = 0.0f;
-    SubmitOrDie(rig, ParamsAt(ramped, 50, silent, 100));
+    SubmitOrDie(rig, ParamsAt(rig, ramped, 50, silent, 100));
     Array<float> output = RenderBlocks(rig, 1, allocator);
     for (uint32 k = 0; k < 100; ++k) {
         CHECK(test::Near(Sample(output, 2, 50 + k, 0),
@@ -551,11 +575,11 @@ TEST(Audio_Mixer_FadeAndParameterRamps) {
     }
 
     CHECK(Sample(output, 2, 150, 0) == 0.0f);
-    SubmitOrDie(rig, StopAt(ramped, 256, 0));
+    SubmitOrDie(rig, StopAt(rig, ramped, 256, 0));
 
     // Stop fade 512: 단조 감소, 끝 frame = Stop + 512.
     const AudioVoiceHandle faded = PlayAt(rig, clip, 256);
-    SubmitOrDie(rig, StopAt(faded, 300, DefaultStopFadeFrames));
+    SubmitOrDie(rig, StopAt(rig, faded, 300, DefaultStopFadeFrames));
     output = RenderBlocks(rig, 4, allocator);
     CHECK(Sample(output, 2, 43, 0) == 0.5f);
     for (uint32 frame = 45; frame < 44 + 512; ++frame) {
@@ -595,12 +619,7 @@ TEST(Audio_Mixer_MasterGainLimiterAndClamp) {
     // 마스터 gain: 0.5를 즉시.
     OfflineAudioRender master = MakeRig(ConfigOf(256), allocator);
     PlayAt(master, RegisterMono(master.Mixer(), ones, 512), 0);
-    AudioRtCommand gain;
-    gain.type = AudioRtCommandType::SetMasterGain;
-    gain.mixFrame = 128;
-    gain.masterGain = 0.5f;
-    gain.rampFrames = 0;
-    SubmitOrDie(master, gain);
+    SubmitOrDie(master, MasterAt(master, 128, 0.5f, 0));
     output = RenderBlocks(master, 1, allocator);
     CHECK(Sample(output, 2, 127, 0) == 0.5f && Sample(output, 2, 128, 0) == 0.25f);
 }
@@ -746,25 +765,23 @@ TEST(Audio_Mixer_StateTableRemainingCells) {
     const AudioVoiceHandle playing = PlayAt(rig, clip, 0);
     // Stopping 중 자연 끝: fade(1000)보다 clip(150)이 먼저 끝나면 NaturalEnd다.
     const AudioVoiceHandle naturalFirst = PlayAt(rig, shortClip, 0);
-    SubmitOrDie(rig, StopAt(naturalFirst, 50, 1000));
+    SubmitOrDie(rig, StopAt(rig, naturalFirst, 50, 1000));
     // 같은 frame 동점: clip 끝(0 + 150)과 fade 끝(100 + 50)이 같으면 NaturalEnd가 이긴다.
     const AudioVoiceHandle tie = PlayAt(rig, shortClip, 0);
-    SubmitOrDie(rig, StopAt(tie, 100, 50));
+    SubmitOrDie(rig, StopAt(rig, tie, 100, 50));
     // fade가 먼저 끝나면 Stopped다.
     const AudioVoiceHandle fadeFirst = PlayAt(rig, shortClip, 0);
-    SubmitOrDie(rig, StopAt(fadeFirst, 100, 49));
+    SubmitOrDie(rig, StopAt(rig, fadeFirst, 100, 49));
     RenderBlocks(rig, 1, allocator);
     CHECK(mixer.ReleaseVoice(playing).Error() == ErrorCode::Busy);
-    SubmitOrDie(rig, StopAt(playing, 300, 400));
+    SubmitOrDie(rig, StopAt(rig, playing, 300, 400));
     RenderBlocks(rig, 1, allocator);
-    CHECK(StatusOf(mixer, playing).state == AudioVoiceState::Stopping);
+    // 제어 쪽은 RT의 Stopping을 따로 보지 못한다(재생 중 = Playing).
+    CHECK(StatusOf(mixer, playing).state == AudioVoiceState::Playing);
     CHECK(mixer.ReleaseVoice(playing).Error() == ErrorCode::Busy);
     auto replay = mixer.PreparePlay(playing, clip, 0, false, AudioVoiceParams{});
     CHECK(replay.Error() == ErrorCode::InvalidArgument);
-    AudioRtCommand play;
-    play.type = AudioRtCommandType::Play;
-    play.voice = playing;
-    play.mixFrame = 600;
+    AudioRtCommand play = RawCommand(AudioRtCommandType::Play, playing, 600, 0);
     SubmitOrDie(rig, play);
     RenderBlocks(rig, 2, allocator);
     CHECK(Ignored(mixer, AudioRtCommandType::Play) == 1);
@@ -796,8 +813,8 @@ TEST(Audio_Mixer_StateTableRemainingCells) {
     // quiet가 이긴다.
     preparedPlay.Value().mixFrame = 1310;
     SubmitOrDie(rig, preparedPlay.Value());
-    SubmitOrDie(rig, ParamsAt(prepared, 1300, AudioVoiceParams{}, 0));
-    SubmitOrDie(rig, ParamsAt(prepared, 1290, quiet, 0));
+    SubmitOrDie(rig, ParamsAt(rig, prepared, 1300, AudioVoiceParams{}, 0));
+    SubmitOrDie(rig, ParamsAt(rig, prepared, 1290, quiet, 0));
     const Array<float> output = RenderBlocks(rig, 1, allocator);
     CHECK(Ignored(mixer, AudioRtCommandType::SetParams) == 1);
     CHECK(Sample(output, 2, 1310 - 1280 + 5, 0) == 0.25f);
@@ -826,7 +843,12 @@ TEST(Audio_Mixer_ClampedParamsAreCounted) {
     AudioVoiceParams wild;
     wild.gain = 10.0f;
     wild.pitch = PlatformMath::QuietNaN<float>();
-    SubmitOrDie(rig, ParamsAt(voice, 256, wild, 0));
+    CHECK(mixer.MakeSetParams(voice, 256, wild, 0).Error() == ErrorCode::InvalidArgument);
+    // 제어 API가 거르는 값을 손 명령으로 넣어 RT의 자르기 경로를 본다(순번은 Play보다 크게).
+    AudioRtCommand raw = RawCommand(AudioRtCommandType::SetParams, voice, 256, 1000000);
+    raw.params = wild;
+    raw.rampFrames = 0;
+    SubmitOrDie(rig, raw);
     RenderBlocks(rig, 1, allocator);
     CHECK(mixer.Counters().clampedParams == 1 + 2 + 1);
 
